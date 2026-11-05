@@ -601,7 +601,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       // each package's tests/test_*.py, run by the built CLI with the set,
       // compared with its .out (the recorded output) or, for a package with
       // an oracle, with that program's output under CPython (PYTHON_ORACLE,
-      // a python with the oracle installed); known.json lists accepted differences
+      // a python with the oracle installed); known.json lists accepted differences;
+      // test_<name>.limits.json, when present, is that test's --limits file
       const set = opt("--pkgset");
       if (!set) throw new Error("test needs --pkgset DIR/pkgset/<S>.json");
       const cli = join(root, "build", "cli", "pyjs.cjs");
@@ -620,7 +621,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
               return (e.stdout ?? "") + `\n[exit ${e.status}] ` + String(e.stderr ?? "").trim().split("\n").pop();
             }
           };
-          const got = run(["node", cli, "--pkgset", set, t]);
+          // (a test with a test_<name>.limits.json beside it runs under those limits)
+          const limits = t.replace(/\.py$/, ".limits.json");
+          const got = run(["node", cli, ...(existsSync(join(tdir, limits)) ? ["--limits", limits] : []), "--pkgset", set, t]);
           const outFile = join(tdir, t.replace(/\.py$/, ".out"));
           let want = null;
           if (existsSync(outFile)) want = readFileSync(outFile, "utf8");

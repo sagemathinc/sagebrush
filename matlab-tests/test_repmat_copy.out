@@ -1,0 +1,9 @@
+double 2x2 [1 2;3 4]
+double 2x2 [9 2;3 4]
+double 2x2 [1 2;3 4]
+double 2x2 [1 2;3 4]
+double 2x2 [1 2;3 4]
+char 1x2 ['ab']
+char 1x2 ['zb']
+double 1x1 1
+double 1x1 5

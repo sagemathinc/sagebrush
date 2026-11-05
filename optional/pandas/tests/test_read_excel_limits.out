@@ -1,0 +1,130 @@
+== control
+((2, 2), ['a', 'b'])
+== bomb data
+(19130, 3000000)
+== ratio
+!! ValueError: read_excel: the workbook's entry 'xl/worksheets/sheet1.xml' would inflate to 3845130 bytes, past Sagebrush's bound of 3826000
+== ratio 157, not XML
+!! ValueError: read_excel: the workbook's XML has no document element, which Sagebrush doesn't read
+== inflates past
+!! BadZipFile: The workbook's entry 'xl/worksheets/sheet1.xml' inflates past its declared size
+== past 64 MiB
+!! ValueError: read_excel: the workbook's entry 'xl/worksheets/sheet1.xml' would inflate to 67108865 bytes, past Sagebrush's bound of 67108864
+== entries
+!! ValueError: read_excel: the workbook has 2007 entries, more than Sagebrush's 2000
+== entries at the cap
+((2, 2), ['a', 'b'])
+== entries past the cap
+!! ValueError: read_excel: the workbook has 2001 entries, more than Sagebrush's 2000
+== floor
+(100, ((1, 1), ['a']))
+== total under
+!! ValueError: read_excel: the workbook's entries would inflate to more than 2617 bytes in all
+== total at
+((2, 2), ['a', 'b'])
+== crc
+!! BadZipFile: Bad CRC-32 for file 'xl/worksheets/sheet1.xml'
+== truncated
+!! BadZipFile: File is not a zip file
+== not a zip
+!! BadZipFile: File is not a zip file
+== xls
+!! NotImplementedError: pandas: an .xls workbook (only .xlsx and .xlsm are read) is not in Sagebrush's pandas 0.x subset
+== text
+!! ValueError: Excel file format cannot be determined, you must specify an engine manually.
+== bzip2
+!! NotImplementedError: pandas: a zip entry compressed with method 12 is not in Sagebrush's pandas 0.x subset
+== zip64 size
+!! NotImplementedError: pandas: a ZIP64 archive is not in Sagebrush's pandas 0.x subset
+== no workbook
+!! KeyError: "There is no item named 'xl/workbook.xml' in the archive"
+== xml doctype
+!! ValueError: read_excel: the workbook's XML has a DOCTYPE, a CDATA section or another declaration, which Sagebrush doesn't read
+== xml entity
+!! ValueError: read_excel: the workbook's XML has an entity other than the five predefined ones, which Sagebrush doesn't read
+== xml cdata
+!! ValueError: read_excel: the workbook's XML has a DOCTYPE, a CDATA section or another declaration, which Sagebrush doesn't read
+== xml pi
+!! ValueError: read_excel: the workbook's XML has a processing instruction, which Sagebrush doesn't read
+== xml unclosed
+!! ValueError: read_excel: the workbook's XML has an end tag that closes no start tag of its name, which Sagebrush doesn't read
+== xml mismatched
+!! ValueError: read_excel: the workbook's XML has an end tag that closes no start tag of its name, which Sagebrush doesn't read
+== xml outside
+!! ValueError: read_excel: the workbook's XML has text outside the document element, which Sagebrush doesn't read
+== xml char ref
+!! ValueError: read_excel: the workbook's XML has a character reference to no character, which Sagebrush doesn't read
+== xml surrogate D800
+!! ValueError: read_excel: the workbook's XML has a character reference to no character, which Sagebrush doesn't read
+== xml surrogate DFFF
+!! ValueError: read_excel: the workbook's XML has a character reference to no character, which Sagebrush doesn't read
+== xml below surrogates
+((0, 1), ['\ud7ff'])
+== xml a BOM
+((0, 1), [7])
+== xml no element
+!! ValueError: read_excel: the workbook's XML has no document element, which Sagebrush doesn't read
+== xml ends open
+!! ValueError: read_excel: the workbook's XML has an element with no end, which Sagebrush doesn't read
+== xml two roots
+!! ValueError: read_excel: the workbook's XML has a second document element, which Sagebrush doesn't read
+== xml bad attribute
+!! ValueError: read_excel: the workbook's XML has a malformed tag, which Sagebrush doesn't read
+== paths agree
+(True, 201)
+== fast path taken
+True
+== fallback taken
+(True, [['n', 's', 'b', 'e', 'i', 'd', 'f'], [0, 's0', True, nan, 'in0', datetime.datetime(2009, 7, 6, 0, 0), 0]])
+== row past Excel's
+!! ValueError: read_excel: the sheet has a cell past Excel's 1048576 rows and 16384 columns (row 1048577, column 1)
+== column past Excel's
+!! ValueError: read_excel: the sheet has a cell past Excel's 1048576 rows and 16384 columns (row 1, column 16385)
+== row past Excel's, scanner
+!! ValueError: read_excel: the sheet has a cell past Excel's 1048576 rows and 16384 columns (row 1048577, column 1)
+== max dense cells
+134217728
+== XFD1048576
+("MemoryError: read_excel: the sheet's 1048576 x 16384 cells are more than Sagebrush's limit of 134217728 dense cells (pandas._pd_excel.MAX_DENSE_CELLS)", [])
+== dense at the cap
+((9, 10), ['Unnamed: 0', 'Unnamed: 1', 'Unnamed: 2', 'Unnamed: 3', 'Unnamed: 4', 'Unnamed: 5', 'Unnamed: 6', 'Unnamed: 7', 'Unnamed: 8', 'Unnamed: 9'])
+== dense past the cap
+!! MemoryError: read_excel: the sheet's 10 x 10 cells are more than Sagebrush's limit of 99 dense cells (pandas._pd_excel.MAX_DENSE_CELLS)
+== Excel's last column
+(0, 16384)
+== openings, fast path
+None
+== openings, scanner
+!! ValueError: read_excel: the workbook's XML has elements nested more than 64 deep, which Sagebrush doesn't read
+== openings and one close, fast path
+!! ValueError: read_excel: the workbook's XML has an element with no end, which Sagebrush doesn't read
+== max depth
+64
+== depth at
+128
+== depth past
+!! ValueError: read_excel: the workbook's XML has elements nested more than 64 deep, which Sagebrush doesn't read
+== ends open, scanner
+!! ValueError: read_excel: the workbook's XML has an element with no end, which Sagebrush doesn't read
+== ends open, fast path
+!! ValueError: read_excel: the workbook's XML has an element with no end, which Sagebrush doesn't read
+== depth 10000
+!! ValueError: read_excel: the workbook's XML has elements nested more than 64 deep, which Sagebrush doesn't read
+== row entity, fast path
+!! ValueError: read_excel: the workbook's XML has an entity other than the five predefined ones, which Sagebrush doesn't read
+== row entity, scanner
+!! ValueError: read_excel: the workbook's XML has an entity other than the five predefined ones, which Sagebrush doesn't read
+== row entity, fast path falls back
+True
+== cell entity, fast path
+!! ValueError: read_excel: the workbook's XML has an entity other than the five predefined ones, which Sagebrush doesn't read
+== cell entity, scanner
+!! ValueError: read_excel: the workbook's XML has an entity other than the five predefined ones, which Sagebrush doesn't read
+== cell entity, fast path falls back
+True
+== predefined, fast path
+((1, 1), [1])
+== predefined, scanner
+((1, 1), [1])
+== predefined, fast path falls back
+True

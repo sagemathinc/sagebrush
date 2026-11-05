@@ -711,6 +711,226 @@
   "class": "none",
   "owner": "sage"
  },
+ "engine/nd/examples/solve_bench.rs :: main :: let an = (0..n).map(|i| (0..n).map(|j| a0[i + j * n].abs()).sum::<f64>()).fold(0.0, f64::max); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd oracle arithmetic: f64::max as the max function in norms and backward errors (tests, benchmark); refuses nothing"
+ },
+ "engine/nd/examples/solve_bench.rs :: main :: let res = (0..n).map(|i| (b0[i] - (0..n).map(|p| a0[i + p * n] * b[p]).sum::<f64>()).abs()).fold(0.0, f64::max); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd oracle arithmetic: f64::max as the max function in norms and backward errors (tests, benchmark); refuses nothing"
+ },
+ "engine/nd/src/boundary.rs ::  :: pub max_len: u64, #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd Wasm boundary: Rust's slice-length bound (isize::MAX bytes) and its native test value (i32::MAX, wasm32's); a soundness rule for any slice, not a policy cap"
+ },
+ "engine/nd/src/boundary.rs :: check_potrf :: const L: Facts = Facts { mem: 1 << 32, floor: 1 << 20, max_len: i32::MAX as u64, frame: 5 << 20 }; #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd tests: deliberately overflowing sizes (u32::MAX, usize::MAX) that must be refused, and wasm32's limits in a test Facts; refuses no user work"
+ },
+ "engine/nd/src/boundary.rs :: potrf_layouts :: refused(\"n overflowing\", 3, u32::MAX); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd tests: deliberately overflowing sizes (u32::MAX, usize::MAX) that must be refused, and wasm32's limits in a test Facts; refuses no user work"
+ },
+ "engine/nd/src/boundary.rs :: region :: span(start, len, l, l.max_len) #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd Wasm boundary: Rust's slice-length bound (isize::MAX bytes) and its native test value (i32::MAX, wasm32's); a soundness rule for any slice, not a policy cap"
+ },
+ "engine/nd/src/boundary.rs :: solve_layouts :: refused(\"mode u32::MAX\", 12, u32::MAX); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd tests: deliberately overflowing sizes (usize::MAX, 1 << 33) that must be refused, and edge values (f64::MAX) for the square root; refuses no user work"
+ },
+ "engine/nd/src/boundary.rs :: solve_layouts :: refused(\"n overflowing\", 5, u32::MAX); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd tests: deliberately overflowing sizes (u32::MAX, usize::MAX) that must be refused, and wasm32's limits in a test Facts; refuses no user work"
+ },
+ "engine/nd/src/chol.rs :: refusals :: assert!(potrf_work_len(usize::MAX).is_none() && potrs_work_len(usize::MAX, 1).is_none() && potrs_work_len(4, usize::MAX).is_none()); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd tests: deliberately overflowing sizes (usize::MAX, 1 << 33) that must be refused, and edge values (f64::MAX) for the square root; refuses no user work"
+ },
+ "engine/nd/src/chol.rs :: solves_within_the_oracle :: let an = (0..n).map(|i| (0..n).map(|p| a[i + p * n].abs()).sum::<f64>()).fold(0.0, f64::max); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd oracle arithmetic: f64::max as the max function in norms and backward errors (tests); refuses nothing"
+ },
+ "engine/nd/src/chol.rs :: solves_within_the_oracle :: let res = (0..n).map(|i| (bj[i] - (0..n).map(|p| a[i + p * n] * xj[p]).sum::<f64>()).abs()).fold(0.0, f64::max); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd oracle arithmetic: f64::max as the max function in norms and backward errors (tests); refuses nothing"
+ },
+ "engine/nd/src/chol.rs :: the_square_root_is_the_correctly_rounded_one :: for x in [0.0, -0.0, 1.0, 2.0, 3.0, 4.0, 0.25, f64::MIN_POSITIVE, f64::MAX, f64::EPSILON, 5e-324, 1e-310, -1.0, -5e-324, f64::INFINITY, f64::NEG_INFINITY, f64::NAN] { #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd tests: deliberately overflowing sizes (usize::MAX, 1 << 33) that must be refused, and edge values (f64::MAX) for the square root; refuses no user work"
+ },
+ "engine/nd/src/cond.rs ::  :: const ITMAX: usize = 5; #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd cond.rs: dlacn2's iteration count ITMAX = 5 (LAPACK's and the Python _rcond_estimate's; Higham's estimator converges in a few steps): part of the estimate's definition, refuses and limits no user work"
+ },
+ "engine/nd/src/cond.rs :: argmax_abs :: fn argmax_abs(x: &[f64]) -> usize { #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd cond.rs: argmax_abs is the index of the largest |x_i| (numpy's argmax, dlacn2's idamax), not a cap; refuses nothing"
+ },
+ "engine/nd/src/cond.rs :: argmax_and_sign_follow_numpy :: assert_eq!(argmax_abs(&[1.0, -3.0, 3.0]), 1); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd cond.rs: argmax_abs is the index of the largest |x_i| (numpy's argmax, dlacn2's idamax), not a cap; refuses nothing"
+ },
+ "engine/nd/src/cond.rs :: argmax_and_sign_follow_numpy :: assert_eq!(argmax_abs(&[1.0, f64::NAN, 5.0]), 1); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd cond.rs: argmax_abs is the index of the largest |x_i| (numpy's argmax, dlacn2's idamax), not a cap; refuses nothing"
+ },
+ "engine/nd/src/cond.rs :: argmax_and_sign_follow_numpy :: assert_eq!(argmax_abs(&[f64::NAN, 5.0]), 0); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd cond.rs: argmax_abs is the index of the largest |x_i| (numpy's argmax, dlacn2's idamax), not a cap; refuses nothing"
+ },
+ "engine/nd/src/cond.rs :: argmax_and_sign_follow_numpy :: fn argmax_and_sign_follow_numpy() { #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd cond.rs: argmax_abs is the index of the largest |x_i| (numpy's argmax, dlacn2's idamax), not a cap; refuses nothing"
+ },
+ "engine/nd/src/cond.rs :: inv_norm1 :: (0..n).map(|j| asum(&x[j * n..(j + 1) * n])).fold(0.0, f64::max) #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd oracle arithmetic: f64::max as the max function in norms and backward errors (tests); refuses nothing"
+ },
+ "engine/nd/src/cond.rs :: lacn2 :: if x[last] == x[j].abs() || it >= ITMAX { #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd cond.rs: dlacn2's iteration count ITMAX = 5 (LAPACK's and the Python _rcond_estimate's; Higham's estimator converges in a few steps): part of the estimate's definition, refuses and limits no user work"
+ },
+ "engine/nd/src/cond.rs :: lacn2 :: j = argmax_abs(x); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd cond.rs: argmax_abs is the index of the largest |x_i| (numpy's argmax, dlacn2's idamax), not a cap; refuses nothing"
+ },
+ "engine/nd/src/cond.rs :: lacn2 :: let mut j = argmax_abs(x); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd cond.rs: argmax_abs is the index of the largest |x_i| (numpy's argmax, dlacn2's idamax), not a cap; refuses nothing"
+ },
+ "engine/nd/src/cond.rs :: norm1 :: (0..n).map(|j| asum(&a[j * n..(j + 1) * n])).fold(0.0, f64::max) #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd oracle arithmetic: f64::max as the max function in norms and backward errors (tests); refuses nothing"
+ },
+ "engine/nd/src/cond.rs :: the_tie_and_the_starting_vector :: assert_eq!(ITMAX, 5); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd cond.rs: dlacn2's iteration count ITMAX = 5 (LAPACK's and the Python _rcond_estimate's; Higham's estimator converges in a few steps): part of the estimate's definition, refuses and limits no user work"
+ },
+ "engine/nd/src/gemm.rs :: a_tile_larger_than_the_accumulator_is_refused_without_writing :: const MR: usize = usize::MAX / 2; #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd test: a deliberately invalid kernel tile (MR near usize::MAX) that the blocking layer must refuse; refuses no user work"
+ },
+ "engine/nd/src/gemm.rs :: overflow_and_bad_layouts_are_refused_without_writing :: assert!(!gemm_cols(&a, &b, &mut c, usize::MAX, 0, 4, &mut s)); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd: overflow controls in tests (usize::MAX layouts that must be refused) and the host's name-buffer size (truncated to fit); none refuses or limits user work"
+ },
+ "engine/nd/src/gemm.rs :: overflow_and_bad_layouts_are_refused_without_writing :: assert!(Mat::new(&v, 2, usize::MAX, usize::MAX / 2).is_none()); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd: overflow controls in tests (usize::MAX layouts that must be refused) and the host's name-buffer size (truncated to fit); none refuses or limits user work"
+ },
+ "engine/nd/src/gemm.rs :: overflow_and_bad_layouts_are_refused_without_writing :: assert!(Mat::new(&v, usize::MAX, 2, usize::MAX).is_none()); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd: overflow controls in tests (usize::MAX layouts that must be refused) and the host's name-buffer size (truncated to fit); none refuses or limits user work"
+ },
+ "engine/nd/src/gemm.rs :: overflow_and_bad_layouts_are_refused_without_writing :: assert!(span(1, usize::MAX, 2).is_none()); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd: overflow controls in tests (usize::MAX layouts that must be refused) and the host's name-buffer size (truncated to fit); none refuses or limits user work"
+ },
+ "engine/nd/src/gemm.rs :: overflow_and_bad_layouts_are_refused_without_writing :: for &(n, t, id) in &[(usize::MAX, 3, 2), (usize::MAX, usize::MAX, usize::MAX - 1), (10, 4, 4), (10, 4, 99)] { #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd: overflow controls in tests (usize::MAX layouts that must be refused) and the host's name-buffer size (truncated to fit); none refuses or limits user work"
+ },
+ "engine/nd/src/lu.rs :: eta :: .fold(0.0, f64::max) #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd oracle arithmetic: f64::max as the max function in norms and backward errors (tests, benchmark); refuses nothing"
+ },
+ "engine/nd/src/lu.rs :: eta :: let res = (0..n).map(|i| (bj[i] - (0..n).map(|p| a[i + p * n] * xj[p]).sum::<f64>()).abs()).fold(0.0, f64::max); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd oracle arithmetic: f64::max as the max function in norms and backward errors (tests, benchmark); refuses nothing"
+ },
+ "engine/nd/src/lu.rs :: norm_inf :: (0..rows).map(|i| (0..cols).map(|j| m[i + j * ld].abs()).sum::<f64>()).fold(0.0, f64::max) #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd oracle arithmetic: f64::max as the max function in norms and backward errors (tests, benchmark); refuses nothing"
+ },
+ "engine/nd/src/lu.rs :: refusals_write_nothing :: assert!(getrf_work_len(usize::MAX, usize::MAX).is_none() && solve_work_len(usize::MAX / 2, 3).is_none()); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd tests: deliberately overflowing sizes (u32::MAX, usize::MAX) that must be refused, and wasm32's limits in a test Facts; refuses no user work"
+ },
+ "engine/nd/src/lu.rs :: refusals_write_nothing :: assert!(getrs_work_len(1, usize::MAX).is_none() && getrs_work_len(usize::MAX, 2).is_none()); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd tests: deliberately overflowing sizes (u32::MAX, usize::MAX) that must be refused, and wasm32's limits in a test Facts; refuses no user work"
+ },
+ "engine/nd/src/lu.rs :: refusals_write_nothing :: assert_eq!(solve(k, &mut a, usize::MAX / 2, usize::MAX / 2, &mut b, 1, n, &mut ipiv, &mut work), Err(Refused::Layout)); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd tests: deliberately overflowing sizes (u32::MAX, usize::MAX) that must be refused, and wasm32's limits in a test Facts; refuses no user work"
+ },
+ "engine/nd/src/solve.rs :: empty_nonfinite_and_refused :: assert!(solve_work_len(mode, usize::MAX, 1).is_none() && solve_work_len(mode, 1 << 33, 1).is_none() && solve_work_len(mode, 4, usize::MAX).is_none()); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd tests: deliberately overflowing sizes (usize::MAX, 1 << 33) that must be refused, and edge values (f64::MAX) for the square root; refuses no user work"
+ },
+ "engine/nd/src/solve.rs :: eta :: let an = (0..n).map(|i| (0..n).map(|p| a[i + p * n].abs()).sum::<f64>()).fold(0.0, f64::max); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd oracle arithmetic: f64::max as the max function in norms and backward errors (tests); refuses nothing"
+ },
+ "engine/nd/src/solve.rs :: eta :: let res = (0..n).map(|i| (b[i] - (0..n).map(|p| a[i + p * n] * x[p]).sum::<f64>()).abs()).fold(0.0, f64::max); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd oracle arithmetic: f64::max as the max function in norms and backward errors (tests); refuses nothing"
+ },
+ "engine/nd/src/solve.rs :: nearly_singular_on_each_path :: assert!((rep.rcond - d).abs() <= 2.0 * eps * d, \"diagonal rcond is (1 / max |1/d_i|) / max |d_i|: {rep:?}\"); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd oracle arithmetic: f64::max as the max function in norms and backward errors (tests); refuses nothing"
+ },
+ "engine/nd/src/solve.rs :: structure_near_misses :: let want = (0..n).map(|j| (0..n).map(|i| t[i + j * n].abs()).sum::<f64>()).fold(0.0, f64::max); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd oracle arithmetic: f64::max as the max function in norms and backward errors (tests); refuses nothing"
+ },
+ "engine/nd/src/wasm.rs :: nd_gemm_part :: max_len: isize::MAX as u64, #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "refuses nothing itself: passes Rust's slice-length bound (isize::MAX bytes) to the Wasm boundary check (engine/nd/src/boundary.rs); a soundness rule for any slice, not a policy cap"
+ },
+ "engine/nd/src/wasm.rs :: nd_potrf :: max_len: isize::MAX as u64, #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "refuses nothing itself: passes Rust's slice-length bound (isize::MAX bytes) to the Wasm Cholesky's boundary check (check_potrf) (engine/nd/src/boundary.rs); a soundness rule for any slice, not a policy cap"
+ },
+ "engine/nd/src/wasm.rs :: nd_solve :: max_len: isize::MAX as u64, #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "refuses nothing itself: passes Rust's slice-length bound (isize::MAX bytes) to the Wasm solve's boundary check (engine/nd/src/boundary.rs); a soundness rule for any slice, not a policy cap"
+ },
  "engine/poly/examples/transition_bench.rs ::  :: use sagebrush_poly::Budget; #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
@@ -4170,6 +4390,11 @@
   "owner": "curves over QQ (@sagebrush-sage2)",
   "reason": "E.plot()'s x range (xmin/xmax, Sage's ranges), now in lib/_sage_ec_plot.py: matched words, no limit"
  },
+ "lib/_sage_ec_rr.py :: EllipticCurve_real_field.base_extend :: raise NotImplementedError(\"elliptic curves over %s are not available in Sagebrush yet\" % (R,)) #0": {
+  "class": "coverage",
+  "owner": "curves over QQ (@sagebrush-sage2)",
+  "reason": "base_extend of a curve over RR to a ring other than RR: not available yet (Sage has them)"
+ },
  "lib/_sage_expr.py :: _assume_simplify :: \"\"\"The assumptions' simplifications, applied through e (Maxima's simplify #0": {
   "class": "none",
   "owner": "Sage kernel (@sagebrush-sage2)",
@@ -5032,6 +5257,11 @@
   "owner": "matrices over SR (@sagebrush-sage2)",
   "reason": "a symbolic determinant larger than 3 x 3 / adjugate larger than 4 x 4: Sage's division-free path, lane 4b-2"
  },
+ "lib/_sage_modular.py :: EllipticCurvePoint._same_curve :: raise TypeError(\"unsupported operand parent(s) for %s: 'Abelian group of points on %r' and 'Abelian group of points on %r'\" % (op, self._E, other._E)) #0": {
+  "class": "none",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "a TypeError for points on different curves, Sage's comparison message (ECTORS-ENG-2); refuses nothing for size"
+ },
  "lib/_sage_modular.py :: EllipticCurve_rational_field._gens_saturated :: def _gens_saturated(self, r, height_limit=None, max_prime=None, proof=None): #0": {
   "class": "3",
   "owner": "elliptic curves/modular arithmetic",
@@ -5082,10 +5312,10 @@
   "owner": "elliptic curves/modular arithmetic",
   "row": "inv-29"
  },
- "lib/_sage_modular.py :: EllipticCurve_rational_field.base_extend :: NotImplementedError: elliptic curves over Real Field with 53 bits of precision are not available in Sagebrush yet #0": {
+ "lib/_sage_modular.py :: EllipticCurve_rational_field.base_extend :: NotImplementedError: elliptic curves over Complex Field with 53 bits of precision are not available in Sagebrush yet #0": {
   "class": "coverage",
   "owner": "curves over QQ (@sagebrush-sage2)",
-  "reason": "base_extend of a curve over QQ to a ring other than QQ, ZZ, GF(p), Zmod(p): not available yet (Sage has them)"
+  "reason": "base_extend of a curve over QQ or RR to a ring other than QQ, ZZ, GF(p), Zmod(p), RR: not available yet (Sage has them)"
  },
  "lib/_sage_modular.py :: EllipticCurve_rational_field.base_extend :: raise NotImplementedError(\"elliptic curves over %s are not available in Sagebrush yet\" % (R,)) #0": {
   "class": "coverage",
@@ -5614,6 +5844,11 @@
   "owner": "python (@sagebrush-python)",
   "reason": "data replay layer (replay-layer r2, astra 754ff92e): bounded parse/schema caps on an untrusted snapshot.json and _fs.read_nofollow's bounded read; parser protection, refuses only the snapshot, no user computation"
  },
+ "lib/_sbdata_live.py ::  :: ERRORS = (\"no_key\", \"not_in_catalog\", \"rate_limited\", \"unavailable\", \"timeout\", \"interrupted\") #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "live data's error vocabulary (no_key, rate_limited, ...) and yfinance's refusal text, relayed from upstream or the bridge: matched words that bound nothing here"
+ },
  "lib/_scipy_stats_py.py :: DescribeResult :: \"\"\"(nobs, minmax, mean, variance, skewness, kurtosis): SciPy's DescribeResult\"\"\" #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
@@ -6048,6 +6283,16 @@
   "class": "none",
   "owner": "python (@sagebrush-python)",
   "reason": "CPython 3.14's Lib/enum.py, copied unchanged: the census vocabulary matches max_bits (a padding width in enum.bin), \"unsupported operand\" (the TypeError CPython raises for a non-Flag in a Flag) and \"delimited\" (contains limit) in EnumType.__call__'s TypeError; none refuses for size"
+ },
+ "lib/fredapi.py :: _error :: if code == \"rate_limited\": #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "live data's error vocabulary (no_key, rate_limited, ...) and yfinance's refusal text, relayed from upstream or the bridge: matched words that bound nothing here"
+ },
+ "lib/fredapi.py :: _error :: return RuntimeError(\"FRED is rate-limiting; try again in a minute\") #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "live data's error vocabulary (no_key, rate_limited, ...) and yfinance's refusal text, relayed from upstream or the bridge: matched words that bound nothing here"
  },
  "lib/hashlib.py :: new :: raise ValueError(\"unsupported hash type \" + name) #0": {
   "class": "coverage",
@@ -6537,6 +6782,50 @@
   "owner": "sagebrush-python",
   "reason": "plot3d page temporaries' GC (Ctrl-C plan r2 item 2, daybreak2 COST-1): one pass's time budget at a session's start, protecting the start; refuses nothing and stops no computation; the rest is the next pass's, from its cursor, and the pass's log says when it stopped with entries left"
  },
+ "lib/sage_plot3d.py :: _write_page :: except io.UnsupportedOperation: #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "the exception a file object without a descriptor raises (Sagebrush's), which skips the fsync; matched text that bounds nothing"
+ },
+ "lib/ssl.py :: SSLContext.load_cert_chain :: raise NotImplementedError(\"ssl: certificate files are not used by Sagebrush's replay-only network client\") #0": {
+  "class": "coverage",
+  "owner": "python"
+ },
+ "lib/statistics.py :: NormalDist.mode :: function (pdf) takes its maximum value. #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14's Lib/statistics.py as it is: the matched word is its own docstring or comment, a max() call, or its TypeError for a non-numeric input; nothing here caps a computation"
+ },
+ "lib/statistics.py :: _sqrtprod :: scale = 2.0 ** -512 # sqrt(1 / sys.float_info.max) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14's Lib/statistics.py as it is: the matched word is its own docstring or comment, a max() call, or its TypeError for a non-numeric input; nothing here caps a computation"
+ },
+ "lib/statistics.py :: harmonic_mean :: raise TypeError('unsupported type') #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14's Lib/statistics.py as it is: the matched word is its own docstring or comment, a max() call, or its TypeError for a non-numeric input; nothing here caps a computation"
+ },
+ "lib/statistics.py :: median_grouped :: L = x - interval / 2.0 # Lower limit of the median interval #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14's Lib/statistics.py as it is: the matched word is its own docstring or comment, a max() call, or its TypeError for a non-numeric input; nothing here caps a computation"
+ },
+ "lib/statistics.py :: multimode :: maxcount = max(counts.values()) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14's Lib/statistics.py as it is: the matched word is its own docstring or comment, a max() call, or its TypeError for a non-numeric input; nothing here caps a computation"
+ },
+ "lib/statistics.py :: multimode :: return [value for value, count in counts.items() if count == maxcount] #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14's Lib/statistics.py as it is: the matched word is its own docstring or comment, a max() call, or its TypeError for a non-numeric input; nothing here caps a computation"
+ },
+ "lib/statistics.py :: quantiles :: maximum value is treated as the 100th percentile. #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14's Lib/statistics.py as it is: the matched word is its own docstring or comment, a max() call, or its TypeError for a non-numeric input; nothing here caps a computation"
+ },
  "lib/uuid.py ::  :: >>> uuid.MAX #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
@@ -6561,6 +6850,11 @@
   "class": "none",
   "owner": "python (@sagebrush-python)",
   "reason": "CPython 3.14's Lib/uuid.py, copied unchanged: MAX and _UINT_128_MAX are the UUID value domain (the all-ones UUID, 2**128 - 1), and the 0 <= int <= _UINT_128_MAX checks are CPython's ValueError for an integer that isn't a 128-bit UUID; no size, memory or work bound"
+ },
+ "lib/yfinance.py ::  :: _MESSAGE = \"Yahoo Finance data isn't available in Sagebrush: automated Yahoo access is unsupported\" #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "live data's error vocabulary (no_key, rate_limited, ...) and yfinance's refusal text, relayed from upstream or the bridge: matched words that bound nothing here"
  },
  "src/allowance-host.ts ::  :: budget: number; #0": {
   "class": "3",
@@ -7427,7 +7721,7 @@
   "owner": "the LaTeX CLI (@sagebrush-latex)",
   "reason": "sagebrush latex: the largest .tex read (4 MiB) and the most PNG pages of a non-beamer document (60): input and output bounds of a local command"
  },
- "src/latex-cli.ts ::  :: import { basename, dirname, join, resolve, delimiter } from \"path\"; #0": {
+ "src/latex-cli.ts ::  :: import { basename, dirname, join, resolve, relative, delimiter, sep, posix } from \"path\"; #0": {
   "class": "none",
   "owner": "the LaTeX CLI (@sagebrush-latex)",
   "reason": "matched text that refuses nothing: help text (unsupported), path.delimiter, CSS max-width"
@@ -7441,6 +7735,14 @@
   "class": "none",
   "owner": "the LaTeX CLI (@sagebrush-latex)",
   "reason": "matched text that refuses nothing: help text (unsupported), path.delimiter, CSS max-width"
+ },
+ "src/latex-cli.ts :: inputsNow :: else if (statSync(real).size > INPUT_BOUNDS.perFile) k = { why: \"too large\" }; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex: an \\input/\\include file over web/latex/inputs.ts INPUT_BOUNDS.perFile (4 MiB, the editor's EDIT_MAX) is refused before it is read: the same bound the page applies to included files"
  },
  "src/latex-cli.ts :: katexCss :: .sb-standalone .page.beamer { max-width: none; width: ${SLIDE_W}px; margin: 0 auto; padding: 16px; background: transparent; box-shadow: none; box-sizing: content-box; } #0": {
   "class": "none",
@@ -7502,6 +7804,14 @@
   },
   "owner": "the LaTeX CLI (@sagebrush-latex)",
   "reason": "sagebrush latex run: bounds on the results file it writes and reads (32 MiB), a plot's SVG (2 MiB), a \\\\sage result (MAX_RESULT) and a message (4000): output and parser protection of a local command"
+ },
+ "src/latex-cli.ts :: removeTemp :: try { rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); return true; } catch { return false; } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "latex",
+  "reason": "removeTemp retries the scratch folder's removal at most 10 times, 50 ms apart (Node's rmSync maxRetries), so a browser helper still writing can't fail a finished render; then it gives up quietly"
  },
  "src/latex-cli.ts :: resultsPath :: const RESULTS_MAX = 32 * 2 ** 20, SVG_MAX = 2 * 2 ** 20, MSG_MAX = 4000; #0": {
   "class": "1",
@@ -7573,6 +7883,35 @@
   "class": "1",
   "owner": "CLI/runtime configuration",
   "row": "src-16"
+ },
+ "src/live-data.ts ::  :: export const LIVE_ERRORS = [\"no_key\", \"not_in_catalog\", \"rate_limited\", \"unavailable\", \"timeout\", \"interrupted\"] as const; #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "live data's error vocabulary (no_key, rate_limited, ...) and yfinance's refusal text, relayed from upstream or the bridge: matched words that bound nothing here"
+ },
+ "src/live-data.ts :: checkAnswer :: if (dates.length !== values.length || dates.length > LIVE_MAX_POINTS) return { error: \"unavailable\" }; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "the live-data bridge's answer bounds (points and bytes): protect the worker from an oversized relay answer, which becomes the 'unavailable' error; a protocol bound, not a cap on the user's computation"
+ },
+ "src/live-data.ts :: isError :: export const LIVE_MAX_BYTES = 8 << 20; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "the live-data bridge's answer bounds (points and bytes): protect the worker from an oversized relay answer, which becomes the 'unavailable' error; a protocol bound, not a cap on the user's computation"
+ },
+ "src/live-data.ts :: isError :: export const LIVE_MAX_POINTS = 200_000; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "the live-data bridge's answer bounds (points and bytes): protect the worker from an oversized relay answer, which becomes the 'unavailable' error; a protocol bound, not a cap on the user's computation"
  },
  "src/local-gateway.ts ::  :: cellCode: MiB, // one cell's code in a wave (the client's per-cell limit) #0": {
   "class": "1",
@@ -8156,7 +8495,7 @@
   "owner": "notebook/kernel",
   "row": "src-17"
  },
- "src/notebook-session.ts :: notebookSession :: export function notebookSession(post: (m: any) => void, opts: { captureStreams?: boolean; init?: (R: any) => void; runs?: RunHooks; limit?: { item: number; run: number; displays: number }; limits?: LimitsText | Promise<LimitsText>; hooks?: SessionHooks; stdin?: (req: StdinRequest) => StdinAnswer } = {}): Session { #0": {
+ "src/notebook-session.ts :: notebookSession :: export function notebookSession(post: (m: any) => void, opts: { captureStreams?: boolean; init?: (R: any) => void; runs?: RunHooks; limit?: { item: number; run: number; displays: number }; limits?: LimitsText | Promise<LimitsText>; hooks?: SessionHooks; stdin?: (req: StdinRequest) => StdinAnswer; liveData?: (req: LiveRequest) => LiveAnswer | null } = {}): Session { #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -8235,6 +8574,72 @@
   "class": "1",
   "owner": "package runtime",
   "row": "src-19"
+ },
+ "src/reactive-session.ts ::  :: import { sessionLimits } from \"./limits\"; #0": {
+  "class": "none",
+  "owner": "the reactive session (@sagebrush-latex)",
+  "reason": "the session's own limits passed to its worker, not a limit of this file: board-run's reviewed interpreter rules, the same lines registered there (limit-sweep manifest B17)"
+ },
+ "src/reactive-session.ts :: clamp :: send(msg: { cell: string; code: string; opts?: Record<string, unknown> }, on: (m: any) => void, limitMs?: number, absolute?: boolean): Promise<Sent>; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the reactive session (@sagebrush-latex)",
+  "reason": "an item's time limit (the caller's --timeout), interrupted when over it: board-run's reviewed interpreter rules, the same lines registered there (limit-sweep manifest B17)"
+ },
+ "src/reactive-session.ts :: note :: note(await reactive.run([id], { budget: 0 })); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the reactive session (@sagebrush-latex)",
+  "reason": "the autorun budget of one run: 0 for cells asked for, Infinity for run all; the editor's Run admits descendants by its remaining budget (#557)"
+ },
+ "src/reactive-session.ts :: note :: note(await reactive.run(left, o.only ? { budget: 0 } : { budget: Infinity })); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the reactive session (@sagebrush-latex)",
+  "reason": "the autorun budget of one run: 0 for cells asked for, Infinity for run all; the editor's Run admits descendants by its remaining budget (#557)"
+ },
+ "src/reactive-session.ts :: note :: note(o.only ? await reactive.run(o.only, { budget: 0 }) : await reactive.runAll()); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the reactive session (@sagebrush-latex)",
+  "reason": "the autorun budget of one run: 0 for cells asked for, Infinity for run all; the editor's Run admits descendants by its remaining budget (#557)"
+ },
+ "src/reactive-session.ts :: over :: if (limit < Infinity && limit > 0) timer = setTimeout(over, absolute ? clamp(limit) : START_GRACE_MS); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the reactive session (@sagebrush-latex)",
+  "reason": "an item's time limit, and START_GRACE_MS to be begun: board-run's reviewed interpreter rules, the same lines registered there (limit-sweep manifest B17)"
+ },
+ "src/reactive-session.ts :: startInterpreter :: const send: Interpreter[\"send\"] = (msg, on, limit = Infinity, absolute = false) => new Promise<Sent>((resolve) => { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the reactive session (@sagebrush-latex)",
+  "reason": "an item's time limit (the caller's --timeout), interrupted when over it: board-run's reviewed interpreter rules, the same lines registered there (limit-sweep manifest B17)"
+ },
+ "src/reactive-session.ts :: startInterpreter :: const worker = new Worker(o.entry ?? require.main?.filename ?? process.argv[1], { workerData: { sagebrushBoardRun: { dir }, sagebrushLimits: sessionLimits() }, stdout: true, stderr: true }); #0": {
+  "class": "none",
+  "owner": "the reactive session (@sagebrush-latex)",
+  "reason": "the session's limits handed to the interpreter's worker: board-run's reviewed interpreter rules, the same lines registered there (limit-sweep manifest B17)"
+ },
+ "src/reactive-session.ts :: startInterpreter :: if (m.start && limit < Infinity && limit > 0 && !started && !absolute && !timedOut) { started = true; clearTimeout(timer); timer = setTimeout(over, clamp(limit)); } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the reactive session (@sagebrush-latex)",
+  "reason": "an item's time limit, from when the interpreter begins it: board-run's reviewed interpreter rules, the same lines registered there (limit-sweep manifest B17)"
  },
  "src/remote-approval.ts :: beginAction :: beginAction(limits: Partial<Record<BudgetKind, number>> = BUDGET): Budget { #0": {
   "class": "none",
@@ -8965,6 +9370,11 @@
   "class": "none",
   "owner": "python (@sagebrush-python)"
  },
+ "src/runtime/modules.ts :: asLong :: return b < INT64_MIN || b > INT64_MAX ? null : b; #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "math.sumprod's port of CPython's C long fast path (math_sumprod_impl): an item or total outside int64 ends that path and the item goes on through Python's * and +, exact as CPython's; an int too large for a float ends the float path the same way; nothing is refused"
+ },
  "src/runtime/modules.ts :: bigOf :: const LLONG_MAX = 9223372036854775807n; #0": {
   "class": "2+3",
   "owner": "python (@sagebrush-python)",
@@ -9033,6 +9443,11 @@
   "class": "none",
   "owner": "memory guards' message (item D)"
  },
+ "src/runtime/modules.ts :: permCombBig :: const INT64_MIN = -(2n ** 63n), INT64_MAX = 2n ** 63n - 1n; #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "math.sumprod's port of CPython's C long fast path (math_sumprod_impl): an item or total outside int64 ends that path and the item goes on through Python's * and +, exact as CPython's; an int too large for a float ends the float path the same way; nothing is refused"
+ },
  "src/runtime/modules.ts :: permCombBig :: if (comb && kf > 64 && n <= BigInt(COMB_SIEVE_MAX)) return O.normBig(combByPrimes(Number(n), kf)); #0": {
   "class": "2+3",
   "owner": "python (@sagebrush-python)",
@@ -9062,6 +9477,11 @@
   "class": "2+3",
   "owner": "python (@sagebrush-python)",
   "row": "src-7"
+ },
+ "src/runtime/modules.ts :: prodErr :: if (prod >= INT64_MIN && prod <= INT64_MAX && intTotal + prod >= INT64_MIN && intTotal + prod <= INT64_MAX) { #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "math.sumprod's port of CPython's C long fast path (math_sumprod_impl): an item or total outside int64 ends that path and the item goes on through Python's * and +, exact as CPython's; an int too large for a float ends the float path the same way; nothing is refused"
  },
  "src/runtime/modules.ts :: productOf :: const COMB_SIEVE_MAX = 2 ** 25; #0": {
   "class": "2+3",
@@ -9142,6 +9562,11 @@
   "class": "1",
   "owner": "runtime file I/O",
   "row": "src-14"
+ },
+ "src/runtime/modules.ts :: toD :: if (!Number.isFinite(fq)) ok = false; // (an int too large for a float: CPython's OverflowError, cleared) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "math.sumprod's port of CPython's C long fast path (math_sumprod_impl): an item or total outside int64 ends that path and the item goes on through Python's * and +, exact as CPython's; an int too large for a float ends the float path the same way; nothing is refused"
  },
  "src/runtime/modules.ts :: tooBig :: if (bitsAtLeast > MAX_BITS) raise(T.MemoryError); #0": {
   "class": "2+3",
@@ -9238,6 +9663,16 @@
   "owner": "runtime file I/O",
   "row": "src-14"
  },
+ "src/runtime/nd.ts :: sharedMemory :: for (const maximum of [65536, 16384, 4096]) { #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd's WebAssembly.Memory (src/runtime/nd.ts): the declared maximum is wasm32's own 4 GiB bound (the module's import declares it), retried smaller only where that much address space can't be reserved; refuses no user work (a growth past it is the MemoryError cholesky reports)"
+ },
+ "src/runtime/nd.ts :: sharedMemory :: return new WebAssembly.Memory({ initial: 17, maximum, shared: true }); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd's WebAssembly.Memory (src/runtime/nd.ts): the declared maximum is wasm32's own 4 GiB bound (the module's import declares it), retried smaller only where that much address space can't be reserved; refuses no user work (a growth past it is the MemoryError cholesky reports)"
+ },
  "src/runtime/numpy.ts :: admitArray :: if (bytes > 2n ** 63n - 1n) raise(T.ValueError, \"array is too big; `arr.size * arr.dtype.itemsize` is larger than the maximum possible size.\"); #0": {
   "class": "2",
   "owner": "NumPy shim/runtime memory",
@@ -9258,10 +9693,60 @@
   "owner": "NumPy shim/runtime memory",
   "row": "src-10"
  },
+ "src/runtime/numpy.ts :: itemIndex :: if (typeof x === \"bigint\" && (x > I64MAX || x < I64MIN)) raise(T.OverflowError, \"Python int too large to convert to C long\"); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: I64MAX, the int64 range, past which NumPy's item index raises OverflowError (C long)"
+ },
+ "src/runtime/numpy.ts :: minmax :: : isMax ? (x: number, y: number) => (x !== x || y !== y ? NaN : x > y ? x : y) : (x: number, y: number) => (x !== x || y !== y ? NaN : x < y ? x : y); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax picks the max or min fold (firstWins: fmax/fmin's tie rule, for nanmax/nanmin)"
+ },
+ "src/runtime/numpy.ts :: minmax :: ? isMax ? (x: number, y: number) => (x !== x ? y : y !== y ? x : y > x ? y : x) : (x: number, y: number) => (x !== x ? y : y !== y ? x : y < x ? y : x) #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax picks the fmax or fmin fold (firstWins: nanmax/nanmin, NaN skipped, the accumulator wins ties)"
+ },
+ "src/runtime/numpy.ts :: minmax :: const init = initial !== null ? toNum(initial, a.dt) : firstWins ? NaN : isMax ? -Infinity : Infinity; #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax picks the fold's start (-Infinity or +Infinity; NaN for fmax/fmin, so their first element starts), or initial= as NumPy's"
+ },
+ "src/runtime/numpy.ts :: minmax :: function minmax(a: NDArray, axis: any, keepdims: boolean, isMax: boolean, initial: any = null, firstWins = false): any { #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: isMax picks the max/min fold (firstWins: fmax/fmin's tie rule for nanmax/nanmin)"
+ },
+ "src/runtime/numpy.ts :: minmax :: raise(T.ValueError, `zero-size array to reduction operation ${isMax ? \"maximum\" : \"minimum\"} which has no identity`); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: maximum is the reduction's name in NumPy's no-identity ValueError for a max/min over no elements without initial="
+ },
  "src/runtime/numpy.ts :: mulIn :: if (BigInt(w) !== wb) raise(T.NotImplementedError, `${what}: the ${rt.name} product ${wb} is not exactly representable in Sagebrush's ${rt.name} arrays (doubles) yet`); #0": {
   "class": "3",
   "owner": "NumPy shim",
   "row": "src-11"
+ },
+ "src/runtime/numpy.ts :: notIndex :: fn(\"amax\", (a: any, axis: any = null, keepdims: any = false, initial: any = null, first: any = false) => minmax(asarray(a), opt(axis), !!keepdims, true, opt(initial), !!first)); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing of a cap: amax/amin, the max/min reduction's names, registered with initial= and the fmax tie flag"
+ },
+ "src/runtime/numpy.ts :: notIndex :: fn(\"set_printoptions\", (precision: any, threshold: any, edgeitems: any, linewidth: any, suppress: any, sign: any, floatmode: any, nanstr: any, infstr: any, fb: any, fi: any, ff: any, fc: any, fU: any, overrideRepr: any) => { #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing: normAxis's 'max' and set_printoptions's threshold parameter"
+ },
+ "src/runtime/numpy.ts :: notIndex :: if (a instanceof StrArray) return axis === null ? strSort(strReshape(a, [a.size]), 0, false) : strSort(a, normAxis(Number(axis), a.ndim), false); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing: normAxis's 'max' and set_printoptions's threshold parameter"
+ },
+ "src/runtime/numpy.ts :: notIndex :: if (a instanceof StrArray) return axis === null ? strSort(strReshape(a, [a.size]), 0, true) : strSort(a, normAxis(Number(axis), a.ndim), true); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing: normAxis's 'max' and set_printoptions's threshold parameter"
  },
  "src/runtime/numpy.ts :: prod :: export const ARRAY_LIMITS = { elements: 2 ** 32, bytes: 2 ** 32 }; #0": {
   "class": "2",
@@ -9272,6 +9757,16 @@
   "class": "3",
   "owner": "NumPy shim",
   "row": "src-11"
+ },
+ "src/runtime/numpy.ts :: strConcat :: const ax = normAxis(axis, nd); #0": {
+  "class": "none",
+  "owner": "NumPy shim",
+  "reason": "matched text that refuses nothing: normAxis's 'max' and set_printoptions's threshold parameter"
+ },
+ "src/runtime/numpy.ts :: strRefuse :: return raise(T.NotImplementedError, \"this operation on string arrays is not supported by sagebrush's numpy yet (string arrays have creation, astype, shape and indexing, comparisons, sort, unique, where, isin and printing)\"); #0": {
+  "class": "coverage",
+  "owner": "NumPy shim",
+  "reason": "string arrays: an operation v1 doesn't have, refused in words (NotImplementedError); not a cap"
  },
  "src/runtime/numpy.ts :: tooLarge :: const tooLarge = () => raise(T.RuntimeError, \"Float formatting result too large\"); #0": {
   "class": "3",
@@ -9351,43 +9846,247 @@
   "owner": "pyjs containers/runtime memory",
   "row": "src-4"
  },
- "src/runtime/zlib.ts :: compress :: m.MAX_WBITS = 15; #0": {
+ "src/runtime/zlib.ts ::  :: import { ARRAY_LIMITS } from \"./numpy\"; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
+  "owner": "file formats/raster",
+  "row": "src-13"
+ },
+ "src/runtime/zlib.ts :: decode :: const opEnd = limit === Infinity ? Infinity : start + limit - 258; #0": {
   "class": "1+2",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
+  "owner": "file formats/raster",
+  "row": "src-13"
+ },
+ "src/runtime/zlib.ts :: decompressCall :: const ml = maxLength === undefined ? 0 : Number(O.index(maxLength)); #0": {
+  "class": "1+2",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
+  "owner": "file formats/raster",
+  "row": "src-13"
+ },
+ "src/runtime/zlib.ts :: decompressCall :: export function decompressCall(d: PyDecompress, data: any, maxLength: any): PyBytes { #0": {
+  "class": "1+2",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
+  "owner": "file formats/raster",
+  "row": "src-13"
+ },
+ "src/runtime/zlib.ts :: decompressCall :: if (ml < 0) raise(T.ValueError, \"max_length must be non-negative\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
   "owner": "file formats/raster",
   "row": "src-13"
  },
  "src/runtime/zlib.ts :: decompressLimited :: const [out, end] = inflateRaw(data, 2, limit); #0": {
   "class": "1+2",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
   "owner": "file formats/raster",
   "row": "src-13"
  },
  "src/runtime/zlib.ts :: decompressLimited :: export function decompressLimited(data: Uint8Array, limit: number): [Uint8Array, number] { #0": {
   "class": "1+2",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
+  "owner": "file formats/raster",
+  "row": "src-13"
+ },
+ "src/runtime/zlib.ts :: ensure :: if (m > start + limit) m = Math.max(this.bp + n, start + limit); #0": {
+  "class": "1+2",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
+  "owner": "file formats/raster",
+  "row": "src-13"
+ },
+ "src/runtime/zlib.ts :: flushCall :: m.MAX_WBITS = 15; #0": {
+  "class": "1+2",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
+  "owner": "file formats/raster",
+  "row": "src-13"
+ },
+ "src/runtime/zlib.ts :: fn :: Ty.method(D, \"copy\", () => raise(T.NotImplementedError, \"zlib: Decompress.copy() is not in Sagebrush's zlib\")); #0": {
+  "class": "coverage",
+  "owner": "file formats/raster",
+  "row": "src-13"
+ },
+ "src/runtime/zlib.ts :: fn :: Ty.method(D, \"decompress\", (d: PyDecompress, data: any, maxLength: any = undefined) => decompressCall(d, data, maxLength), sig([\"self\", \"data\", \"max_length\"], { posonly: 2 })); #0": {
+  "class": "1+2",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
   "owner": "file formats/raster",
   "row": "src-13"
  },
  "src/runtime/zlib.ts :: fn :: const [out, end] = decompressLimited(bytesOf(data), Number(limit)); #0": {
   "class": "1+2",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
   "owner": "file formats/raster",
   "row": "src-13"
  },
  "src/runtime/zlib.ts :: fn :: fn(\"_decompress_limited\", (data: any, limit: any) => { #0": {
   "class": "1+2",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
   "owner": "file formats/raster",
   "row": "src-13"
  },
- "src/runtime/zlib.ts :: grow :: if (op + n > limit) raise(ZlibError, `Error -5 while decompressing data: more than ${limit} bytes`); #0": {
+ "src/runtime/zlib.ts :: fn :: if (zdict !== undefined && bytesOf(zdict).length) raise(T.NotImplementedError, \"zlib: decompressobj(zdict=) is not in Sagebrush's zlib\"); #0": {
+  "class": "coverage",
+  "owner": "file formats/raster",
+  "row": "src-13"
+ },
+ "src/runtime/zlib.ts :: full :: if (room > cap && over) over(); #0": {
   "class": "1+2",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
+  "owner": "file formats/raster",
+  "row": "src-13"
+ },
+ "src/runtime/zlib.ts :: inflateRaw :: const cap = Math.min(limit, ARRAY_LIMITS.bytes); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
+  "owner": "file formats/raster",
+  "row": "src-13"
+ },
+ "src/runtime/zlib.ts :: inflateRaw :: const out = f.run(Infinity, cap, () => #0": {
+  "class": "1+2",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
   "owner": "file formats/raster",
   "row": "src-13"
  },
  "src/runtime/zlib.ts :: inflateRaw :: function inflateRaw(src: Uint8Array, pos: number, limit = Infinity): [Uint8Array, number] { #0": {
   "class": "1+2",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
   "owner": "file formats/raster",
   "row": "src-13"
  },
- "src/runtime/zlib.ts :: inflateRaw :: let out = new Uint8Array(Math.min(Math.max(1024, src.length * 4), limit + 1)); #0": {
+ "src/runtime/zlib.ts :: inflateRaw :: raise(ZlibError, cap < limit ? `Error -5 while decompressing data: output exceeds Sagebrush's limit of ${cap} bytes` : `Error -5 while decompressing data: more than ${limit} bytes`), #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
+  "owner": "file formats/raster",
+  "row": "src-13"
+ },
+ "src/runtime/zlib.ts :: left :: const left = () => limit - (this.bp - start); #0": {
   "class": "1+2",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
+  "owner": "file formats/raster",
+  "row": "src-13"
+ },
+ "src/runtime/zlib.ts :: run :: const limit = Math.min(room, cap); #0": {
+  "class": "1+2",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
+  "owner": "file formats/raster",
+  "row": "src-13"
+ },
+ "src/runtime/zlib.ts :: run :: run(room: number, cap = Infinity, over?: () => never): Uint8Array { #0": {
+  "class": "1+2",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
+  "owner": "file formats/raster",
+  "row": "src-13"
+ },
+ "src/runtime/zlib.ts :: step :: const cap = ARRAY_LIMITS.bytes; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
+  "owner": "file formats/raster",
+  "row": "src-13"
+ },
+ "src/runtime/zlib.ts :: step :: const o = d.inf.run(room, cap, () => raise(ZlibError, `Error -5 while decompressing data: output exceeds Sagebrush's limit of ${cap} bytes`)); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  },
   "owner": "file formats/raster",
   "row": "src-13"
  },
@@ -9441,6 +10140,112 @@
   },
   "owner": "notebook/board text merge (@sagebrush-sync-client, @sagebrush-board)",
   "reason": "the shared 3-way text merge diff-work bound: past it lineMerge3 returns tagged exhaustion; notebook records a too-large clash, while board refuses the whole merge as work with no partial records; neither guesses nor loses data."
+ },
+ "web/stall-fetch.js ::  :: export const STALL_LIMIT_MS = 20000; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "library chunk fetch",
+  "reason": "A chunk fetch with no data for 20 s is given up (one retry), so a stalled request never holds a run; between pieces of data, not on the whole download (grader's plain-worker investigation)"
+ },
+ "web/stall-fetch.js :: fetchMoving :: export async function fetchMoving(url, init = {}, stallMs = STALL_LIMIT_MS) { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "library chunk fetch",
+  "reason": "A chunk fetch with no data for 20 s is given up (one retry), so a stalled request never holds a run; between pieces of data, not on the whole download (grader's plain-worker investigation)"
+ },
+ "web/workspace/checkpoint.ts ::  :: export const CHECKPOINT_BLOB_MAX = 32 << 20; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "document checkpoints, client (@sagebrush-sync-docs)",
+  "reason": "BH-0 r9's protocol bounds on the client: the blob max (the server's 32 MiB reserve), the tail's 1000 patches and TAIL_ITEM_CAP, checked before anything is decoded; seq/recv at their widest so a split never exceeds a room. A refusal keeps every row; nothing is truncated."
+ },
+ "web/workspace/checkpoint.ts ::  :: export const LOCAL_BYTES_MAX = 16 << 20; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "document checkpoints, client (@sagebrush-sync-docs)",
+  "reason": "BH-0 r9's protocol bounds on the client: the blob max (the server's 32 MiB reserve), the tail's 1000 patches and TAIL_ITEM_CAP, and the device's own rows (the journal's debt bounds), checked before anything is decoded. A refusal keeps every row; nothing is truncated."
+ },
+ "web/workspace/checkpoint.ts ::  :: export const LOCAL_ROWS_MAX = 10000; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "document checkpoints, client (@sagebrush-sync-docs)",
+  "reason": "BH-0 r9's protocol bounds on the client: the blob max (the server's 32 MiB reserve), the tail's 1000 patches and TAIL_ITEM_CAP, and the device's own rows (the journal's debt bounds), checked before anything is decoded. A refusal keeps every row; nothing is truncated."
+ },
+ "web/workspace/checkpoint.ts :: acceptedBatch :: export const SCRATCH_GRAPH = { exactCacheMaxEntries: 1, exactCacheMaxSize: 1, valueCacheMaxEntries: 1, valueCacheMaxSize: 1 } as const; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "document checkpoints, client (@sagebrush-sync-docs)",
+  "reason": "The checkpoint decisions' patchflow graphs keep no cached values (LRU caches of size 1): a decision holds only its current value, charged as V (map r2 G as amended); nothing is refused or truncated by it."
+ },
+ "web/workspace/checkpoint.ts :: itemBytesOf :: const WIDEST = { seq: Number.MAX_SAFE_INTEGER, recv: Number.MAX_SAFE_INTEGER, chain: \"f\".repeat(64) }; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "document checkpoints, client (@sagebrush-sync-docs)",
+  "reason": "BH-0 r9's protocol bounds on the client: the blob max (the server's 32 MiB reserve), the tail's 1000 patches and TAIL_ITEM_CAP, checked before anything is decoded; seq/recv at their widest so a split never exceeds a room. A refusal keeps every row; nothing is truncated."
+ },
+ "web/workspace/checkpoint.ts :: makeCheckpoint :: if (blob.length > CHECKPOINT_BLOB_MAX) throw new Error(\"checkpoint: over the blob's maximum\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "document checkpoints, client (@sagebrush-sync-docs)",
+  "reason": "BH-0 r9's protocol bounds on the client: the blob max (the server's 32 MiB reserve), the tail's 1000 patches and TAIL_ITEM_CAP, checked before anything is decoded; seq/recv at their widest so a split never exceeds a room. A refusal keeps every row; nothing is truncated."
+ },
+ "web/workspace/checkpoint.ts :: no :: if (blob.length !== d.bytes || blob.length > CHECKPOINT_BLOB_MAX || patches > TAIL_PATCHES_CAP || charge > TAIL_ITEM_CAP || local.length > LOCAL_ROWS_MAX) return no(\"bounds\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "document checkpoints, client (@sagebrush-sync-docs)",
+  "reason": "BH-0 r9's protocol bounds on the client: the blob max (the server's 32 MiB reserve), the tail's 1000 patches and TAIL_ITEM_CAP, and the device's own rows (the journal's debt bounds), checked before anything is decoded. A refusal keeps every row; nothing is truncated."
+ },
+ "web/workspace/checkpoint.ts :: no :: if (localTotal > LOCAL_BYTES_MAX) return no(\"bounds\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "document checkpoints, client (@sagebrush-sync-docs)",
+  "reason": "BH-0 r9's protocol bounds on the client: the blob max (the server's 32 MiB reserve), the tail's 1000 patches and TAIL_ITEM_CAP, and the device's own rows (the journal's debt bounds), checked before anything is decoded. A refusal keeps every row; nothing is truncated."
+ },
+ "web/workspace/checkpoint.ts :: patchBytes :: export const RETAINED_MAX_B = 2; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "document checkpoints, client (@sagebrush-sync-docs)",
+  "reason": "The decoded values a checkpoint decision's patchflow graph may hold between calls, at most 2 x B (map r2 G as amended for 0b-2a); past it the install is refused and takes the recovery path. Not a bound on allocation inside a call."
+ },
+ "web/workspace/checkpoint.ts :: settle :: const settle = () => { const v = heldValues(codec, graph, sizes).bytes; ledger.set(\"values\", v); return v <= RETAINED_MAX_B * B; }; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "document checkpoints, client (@sagebrush-sync-docs)",
+  "reason": "The decoded values a checkpoint decision's patchflow graph may hold between calls, at most 2 x B (map r2 G as amended for 0b-2a); past it the install is refused and takes the recovery path. Not a bound on allocation inside a call."
+ },
+ "web/workspace/checkpoint.ts :: sha256Hex :: maxHeld = 0; #0": {
+  "class": "none",
+  "owner": "document checkpoints, client (@sagebrush-sync-docs)",
+  "reason": "A measurement only: the most a checkpoint decision held at the points between calls, for tests; it refuses nothing."
+ },
+ "web/workspace/checkpoint.ts :: sha256Hex :: set(name: string, bytes: number) { this.held.set(name, bytes); this.maxHeld = Math.max(this.maxHeld, this.total()); } #0": {
+  "class": "none",
+  "owner": "document checkpoints, client (@sagebrush-sync-docs)",
+  "reason": "A measurement only: the most a checkpoint decision held at the points between calls, for tests; it refuses nothing."
  },
  "web/workspace/sync-ledger.ts ::  :: export const CODE = { max: 32 }; #0": {
   "class": "1",

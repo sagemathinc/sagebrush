@@ -14,7 +14,7 @@
    "index.ts": 1,
    "interrupt.ts": 2,
    "json.ts": 3,
-   "modules.ts": 7,
+   "modules.ts": 8,
    "numpy.ts": 2,
    "numpy_linalg.ts": 4,
    "ops.ts": 3,
@@ -38,8 +38,8 @@
    }
   },
   "libModules": {
-   "count": 148,
-   "sha": "7a913796cf129429"
+   "count": 156,
+   "sha": "4fa21e9b5cff1891"
   }
  },
  "entries": [
@@ -1421,6 +1421,14 @@
    "exception": "XK",
    "family": "P3f NumPy kernels",
    "owner": "numerics (python)"
+  },
+  {
+   "id": "wasm:nd.ts",
+   "transport": "wasm:nd.ts",
+   "status": "planned",
+   "exception": "XK",
+   "family": "numerics-core engine/nd",
+   "owner": "numerics-core"
   }
  ]
 }

@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { slowSkip } from "./slow-tests";
 import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, copyFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -58,7 +59,8 @@ for (const [mode, sb, py] of [
   ["under Node, the host's zone files", {}, {}],
   ["as a browser, the pinned zone files", BROWSER, { PYTHONTZPATH: PINNED }],
 ] as const)
-  test(`zoneinfo_sweep_cases.py ${mode}: CPython's output for every zone`, async () => {
+  // (68 s and 55 s on master: slow tests, test/slow-tests.ts)
+  test(`zoneinfo_sweep_cases.py ${mode}: CPython's output for every zone`, { skip: slowSkip }, async () => {
     const { execFile } = await import("node:child_process");
     const go = (cmd: string, args: string[], env: Record<string, string>) =>
       new Promise<string>((ok, no) => execFile(cmd, args, { encoding: "utf8", env: { ...process.env, ...env }, maxBuffer: 256 << 20, timeout: 900000 }, (e, out) => (e ? no(e) : ok(out))));

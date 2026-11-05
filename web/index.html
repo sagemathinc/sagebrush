@@ -200,6 +200,8 @@
   #exlist { max-height: 62vh; overflow: auto; }
   #exlist button { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 4px 8px; }
   #exlist button:hover, #exlist button:focus { background: var(--code); outline: none; }
+  #filesbar { margin: 6px 0; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--code); font-size: 14px; }
+  #filesbar[hidden] { display: none; }
   /* the console, docked at the bottom */
   #console { position: fixed; left: 0; right: 0; bottom: 0; height: 38vh; min-height: 120px; display: flex; flex-direction: column; background: var(--code); border-top: 1px solid var(--line); box-shadow: 0 -4px 18px rgba(0,0,0,.12); z-index: 5; }
   #console[hidden] { display: none; }
@@ -388,7 +390,7 @@
     <button id="add" title="Add a code cell at the end (B in command mode adds one below)">+ Code</button>
     <button id="runstale" hidden title="Run the cells that are stale (left by the time limit, or manual)">Run stale</button>
     <span class="sp"></span>
-    <select id="mode" aria-label="Language" title="Sage mode: 2^3 is 8, 2/3 is an exact rational, factor() and friends are built in"><option value="python">Python</option><option value="sage">Sage</option><option value="magma">Magma</option><option value="matlab">MATLAB</option></select>
+    <select id="mode" aria-label="Language" title="Python mode: Python as it is, 2**3 is 8 and 2/3 is 0.666…"><option value="python">Python</option><option value="sage">Sage</option><option value="magma">Magma</option><option value="matlab">MATLAB</option></select>
     <button id="filebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="filemenu" title="New, open, examples, download, upload and share notebooks">File ▾</button>
     <button id="morebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="moremenu" title="Text cells, the interpreter, files, console, TimeTravel, keys" aria-label="More">⋯</button>
   </div>
@@ -403,6 +405,7 @@
     <button id="wsfilesbtn" aria-pressed="false" aria-controls="wssidebar" title="Your notebooks, boards and files (in this browser)" hidden>Files</button>
     <select id="theme" aria-label="Color theme"><option value="system">◐ System</option><option value="light">☀ Light</option><option value="dark">☾ Dark</option></select>
   </div>
+  <div id="filesbar" role="status" hidden>This notebook wants to change files. <button id="filesallow">Allow changes for this notebook</button></div>
   <section id="files" aria-label="Files" hidden>
     <div class="fhead"><b>Files</b><span>kept in this browser; <code>open("name")</code> in Python reads and writes them; drop files here</span><span class="sp"></span><button id="upload">Upload…</button></div>
     <ul id="filelist"></ul>
@@ -535,6 +538,7 @@ import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIM
 import { mountBrowser } from "./workspace/browser.ts";
 // (the LaTeX editor's entry; a build without it takes this line out before bundling: web/build.ts)
 import { latexBoot } from "./latex/boot.ts";
+import { createPermissions, hostMade } from "./notebook/permissions.js";
 import { renderFileMenu, fileMenuKey } from "./workspace/filemenu.ts";
 import { recordOpened, recentOpened, recentLabel, openFilesDialog } from "./workspace/fileopen.ts";
 import { uploadFiles, openableAsFile, blobHead, convertCopy, pauseBoard, carryNotice, takeNotice } from "./workspace/upload.ts";
@@ -545,6 +549,7 @@ import { startAll, startAllSummary, journalStartOf } from "./notebook/start-all.
 import { answerPresence, TAB } from "./shell/presence.ts";
 import { openPreview, startGitpushAuto } from "./workspace/preview.ts";
 import { pageSession } from "./page/session.ts";
+import { preloadSoon, preloadStop, preloadState, latexExtra, importTops, pkgIntent, pkgIndex, preloadBytes, PKG_LIMITS } from "./preload.ts";
 // The page's session functions (TimeTravel's history start, the takeover, DEV's switch: web/page/session.ts), given the
 // page's own variables, read and set through these
 const session = pageSession({
@@ -573,6 +578,15 @@ const MAGMA_EXAMPLES = new Set(MAGMA_TITLES);
 const MATLAB_EXAMPLES = new Set(MATLAB_TITLES);
 const $ = (s) => document.querySelector(s);
 const statusEl = $("#status"), modeEl = $("#mode"), themeEl = $("#theme");
+// (the language menu's tooltip says what the selected language does: sage's n8 walkthrough found the Sage line shown
+// with Python selected)
+const MODE_TITLE = {
+  python: "Python mode: Python as it is, 2**3 is 8 and 2/3 is 0.666…",
+  sage: "Sage mode: 2^3 is 8, 2/3 is an exact rational, factor() and friends are built in",
+  magma: "Magma mode: Magma's language, 2^3 is 8 and statements end with ;",
+  matlab: "MATLAB mode: MATLAB's language, 2^3 is 8 and [1 2; 3 4] is a matrix",
+};
+function showMode(m) { modeEl.value = m; modeEl.title = MODE_TITLE[modeEl.value] ?? ""; }
 const announce = (text) => ($("#announce").textContent = text);
 const newId = () => (crypto.randomUUID?.() ?? Date.now().toString(36) + Math.random().toString(36).slice(2));
 
@@ -628,13 +642,35 @@ let db = null, replaying = false;
 let replayEnded = null, docSwitch = null, docSyncNeedsReload = false;
 const MAX_KERNELS = 4;
 const kernels = new Map(); // notebook id -> {kernel, journal, used, started}
+// (what each document's code may do here: change files, reach the network; the one host record, permissions.js)
+const perms = createPermissions();
+// (a document whose code can't change files never runs in a plain worker, which has this page's network: its interpreter
+// is the sandboxed runner, or none, astra's no-mutation CLEAR; every run then says why, as a runner given up does)
+const NEEDS_RUNNER = window.__TAURI__
+  // (the app has no sandbox: a notebook that may not change files can't run in it at all, @sagebrush's ruling)
+  ? "This notebook can't run in the app while it may not change files: the app has no sandbox to run it in. Allow file changes (File menu) to run it.\n"
+  : "This notebook can't run here: it came from elsewhere, so it runs only in Sagebrush's sandbox, which didn't start in this browser. Allow changes for this notebook (File menu) to run it in this page's own interpreter.\n";
+class RefusingWorker {
+  constructor(text) { this.text = text; this.onmessage = null; this.onerror = null; }
+  postMessage(m) {
+    const say = (d) => setTimeout(() => this.onmessage?.({ data: d }));
+    if (m && m.init !== undefined) return say({ ready: true, version: "" });
+    if (!m || typeof m !== "object" || m.id === undefined) return;
+    if (m.code !== undefined || m.interact !== undefined) { say({ id: m.id, stream: "stderr", text: this.text }); say({ id: m.id, done: true, error: true, ms: 0 }); }
+    else say({ id: m.id, skipped: true });
+  }
+  terminate() {}
+}
 let kernel = null, journal = null; // the current notebook's
-// A notebook's optional package set (plan-modular-packages-r4 §4.4): the one
-// it pins (metadata pkgset), or else the site's latest (pkgset/latest.json,
-// asked once a page), which is then pinned in the notebook and saved before
-// any of its code runs, so it keeps running with the same packages whatever
-// is published later.  Without a published set there is nothing to pin, and
-// nothing changes.  A pin that isn't a set id is refused, never guessed.
+// A notebook's optional package set (plan-modular-packages-r4 §4.4, amended
+// Nov 4): the one it pins (metadata pkgset), or else the site's latest
+// (pkgset/latest.json, asked once a page), given to the interpreter unpinned.
+// The set is pinned at first use of the set, to the same S that import used
+// (pinUsedPkgset, when the interpreter says {pkgsetUsed}), so opening or
+// running a notebook that never imports an optional package never changes it,
+// and one that does keeps running with the same packages whatever is published
+// later.  Without a published set nothing changes.  A pin that isn't a set id
+// is refused, never guessed.
 // (For the notebook `owner`, which must stay shown: one left meanwhile
 // rejects, and its interpreter holds every run until it is shown again.  A
 // pin saved from elsewhere meanwhile that won the merge is the one used:
@@ -644,11 +680,26 @@ let kernel = null, journal = null; // the current notebook's
 // then rechecks the owner and the winning pin; a failed save rejects, and is
 // never taken as success because the metadata holds the pin.)
 let latestPkgset; // undefined: not asked yet; else a promise of the id or null
+// (the site's latest set, asked once per page: a notebook without a pin is given it, and background loading reads the
+// same answer, so the two never name different sets)
+function latestSet() {
+  latestPkgset ??= fetch("pkgset/latest.json", { cache: "no-store", redirect: "error" })
+    .then(async (r) => {
+      const j = r.ok ? await r.json() : null;
+      return j && typeof j.id === "string" && /^[0-9a-f]{64}$/.test(j.id) ? j.id : null;
+    })
+    .catch(() => null);
+  return latestPkgset;
+}
+// (the notebook being attached to `nb`, and when it is: its interpreter starts before its document is there,
+// openNotebook's useKernel, so what reads its metadata waits for it first, never the previous document's)
+let attaching = { id: null, done: Promise.resolve() };
 async function notebookPkgset(owner) {
   const shown = () => {
     if (current.id !== owner) throw new Error("its notebook was left before its package set was pinned");
   };
   for (let round = 0; round < 4; round++) {
+    if (attaching.id === owner) await attaching.done;
     shown();
     const pin = nb.meta.pkgset;
     if (pin !== undefined) {
@@ -662,36 +713,73 @@ async function notebookPkgset(owner) {
       continue; // (another pin won meanwhile: that one, once it is durable)
     }
     if (LOCAL) return null;
-    latestPkgset ??= fetch("pkgset/latest.json", { cache: "no-store", redirect: "error" })
-      .then(async (r) => {
-        const j = r.ok ? await r.json() : null;
-        return j && typeof j.id === "string" && /^[0-9a-f]{64}$/.test(j.id) ? j.id : null;
-      })
-      .catch(() => null);
-    const S = await latestPkgset;
+    const S = await latestSet();
     shown();
     if (!S) return null;
-    if (nb.meta.pkgset === undefined) nb.setMeta({ pkgset: S });
-    // (the next round waits for it to be durable, and returns the winner)
+    // (unpinned: pinned at its first use; a pin that came meanwhile, another tab's, is the next round's to use)
+    if (nb.meta.pkgset === undefined) return S;
   }
   throw new Error("this notebook's package set pin kept changing");
+}
+// The set given unpinned to an interpreter, at its first use there: pinned
+// in the notebook (if nothing else was pinned meanwhile) and durable before
+// the interpreter's later messages, its run's end among them, are delivered
+// (WorkerKernel.holdMessages).  The notebook left meanwhile: nothing is pinned
+// into another; its next start resolves again.
+async function pinUsedPkgset(owner, S) {
+  if (attaching.id === owner) await attaching.done;
+  if (current.id !== owner) return;
+  const pin = nb.meta.pkgset;
+  if (pin === undefined) nb.setMeta({ pkgset: S });
+  else if (pin !== S) {
+    statusEl.textContent = "this notebook's package set was pinned in another tab meanwhile: restart to use it";
+    return;
+  }
+  try {
+    await nb.saved();
+  } catch (e) {
+    statusEl.textContent = `the notebook's package set pin isn't saved yet: ${String(e?.message ?? e).slice(0, 200)}`;
+  }
 }
 function makeKernel(owner) {
   // TimeTravel's execution journal (web/replay-page.js): each interpreter
   // session gets an id and its entropy's seed, in the Worker's name
   let j = null;
+  // (each worker this kernel starts, its generation: a change is this document's to keep only while the worker that
+  // made it is still the document's interpreter and the document may change files, asked again where it is kept)
+  // (its generation is the worker's own, given at its start: a message is judged by the worker that sent it, not by
+  // when it arrives, so an earlier worker's late message is never the current one's, astra's NM-ADMIT-1 r2)
+  let gen = 0;
+  const gens = new WeakMap(); // worker -> its generation
+  const unpinned = new WeakMap(); // worker -> the package set it was given unpinned, until its first use
+  const authority = (w) => { const g = gens.get(w); return () => owner === null || (g !== undefined && perms.may(owner, "files") && kernels.get(owner)?.kernel === k && k.worker === w && gen === g); };
   const k = new WorkerKernel({
     createWorker: () => {
       const name = j?.workerName() ?? "";
-      return LOCAL ? new RemoteWorker() : RUNNER ? new RunnerWorker("runner/", { name, fallback: () => new Worker("sagebrush-worker.js", { type: "module", name }) }) : new Worker("sagebrush-worker.js", { type: "module", name });
+      // (a document whose code can't change files never gets a plain worker: astra's no-mutation CLEAR)
+      const plain = () => (owner !== null && !perms.may(owner, "files") ? new RefusingWorker(NEEDS_RUNNER) : new Worker("sagebrush-worker.js", { type: "module", name }));
+      return LOCAL ? new RemoteWorker() : RUNNER ? new RunnerWorker("runner/", { name, fallback: plain }) : plain();
     },
     // the browser's files (and, in the app, the notebook's folder) for Python's open()
     // (a resumed session: the files it had, from the journal)
     onStart: async (w) => {
-      // the notebook's optional package set, pinned, before any code (plan-modular-packages-r4 §4.4;
-      // the kernel holds every run until this is done); a replayed session's is the one it recorded
+      gens.set(w, ++gen);
+      // (first: whether this document may change files, before its files or any run)
+      // (not under `sagebrush notebook`, whose interpreter is the computer's own Python behind the local server: a
+      // separate question, not this page's to answer)
+      if (!LOCAL) w.postMessage({ fsWritable: owner === null || perms.may(owner, "files") });
+      // (its own folder: the working folder and sys.path[0], as Jupyter runs a notebook, so it opens and imports the
+      // files beside it (Nov 4 ruling); read at each start, so a rename or a move takes effect at the next one)
+      if (!LOCAL && owner !== null && ws) {
+        const at = await ws.pathOf("notebook", owner).catch(() => undefined);
+        if (at) w.postMessage({ startDir: at.slice(0, at.lastIndexOf("/")) || "/" });
+      }
+      // the notebook's optional package set, before any code (plan-modular-packages-r4 §4.4; the kernel holds
+      // every run until this is done): its pin, or the latest unpinned, pinned at its first use (onMessage's
+      // pkgsetUsed); a replayed session's is the one it recorded
       const replayed = j?.replayPkgset();
       const S = replayed !== undefined ? replayed : owner !== null ? await notebookPkgset(owner) : null;
+      if (S && replayed === undefined && owner !== null && current.id === owner && nb.meta.pkgset === undefined) unpinned.set(w, S);
       if (S) w.postMessage({ pkgset: S });
       j?.pkgsetSent(S);
       const old = await j?.replayFiles();
@@ -700,18 +788,42 @@ function makeKernel(owner) {
       const sent = LOCAL ? [] : await sendFiles(w);
       await j?.filesSent([...diskFiles, ...(sent ?? [])]);
     },
-    onMessage: (m) => {
+    onMessage: (m, sender) => {
+      // (the first use of the set this worker was given unpinned: pinned now, that same set, and durable before its
+      // run ends; from another worker, or naming any other set, it pins nothing: the interpreter can only ask for
+      // the set this page chose for it)
+      if (m.pkgsetUsed !== undefined) {
+        const S = unpinned.get(sender);
+        if (sender === k.worker && S !== undefined && m.pkgsetUsed === S) {
+          unpinned.delete(sender);
+          k.holdMessages(pinUsedPkgset(owner, S));
+        }
+        return true;
+      }
+      // (a change the interpreter refused: the bar, for the document shown)
+      if (m.fsRefused !== undefined) { if (owner !== null && owner === current.id) filesBar(true); return true; }
       if (m.fsChanged === undefined) return false;
       if (replaying && k === kernel) return true; // a replay rewrites old files: not into the browser's
+      // (from a worker this kernel no longer runs: kept nowhere, given to no interpreter)
+      if (sender !== k.worker) return true;
+      // (the host's own check, which decides: a change from a document that may not change files is kept nowhere, nor
+      // given to the other interpreters; nor one from an interpreter no longer this document's)
+      if (owner !== null && (!perms.may(owner, "files") || kernels.get(owner)?.kernel !== k)) {
+        if (owner === current.id && !/^\/tmp(\/|$)/.test(m.fsChanged)) filesBar(true);
+        return true;
+      }
       // in the app, a file Python wrote in its top folder goes to the notebook's folder
-      if (diskFile && m.data && /^\/[^/]+$/.test(m.fsChanged)) writeDisk(diskFile.dir + diskFile.sep + m.fsChanged.slice(1), m.data);
-      fileChanged(m.fsChanged, m.data);
+      const may = authority(sender);
+      if (diskFile && m.data && /^\/[^/]+$/.test(m.fsChanged)) writeDisk(diskFile.dir + diskFile.sep + m.fsChanged.slice(1), m.data, may);
+      fileChanged(m.fsChanged, m.data, owner, may);
       // (the other interpreters see the browser's files as they are)
       for (const o of liveKernels()) if (o !== k) o.post({ fsPut: m.fsChanged, data: m.data });
       return true;
     },
   });
   k.on("status", (text) => { if (k === kernel) statusEl.textContent = text; });
+  // (background loading, web/preload.ts: a Run starts no further prefetch; one in flight finishes)
+  k.on("execute", preloadStop);
   if (owner !== null) {
     j = createJournal({
       kernel: k, nb, local: !!LOCAL,
@@ -766,8 +878,10 @@ function useKernel(id) {
 // asynchronous, and the empty file Python creates must not land after what
 // it then writes (it did on Windows).
 const diskWrites = new Map();
-function writeDisk(path, data) {
-  const next = (diskWrites.get(path) ?? Promise.resolve()).then(() => TAURI.fs.writeFile(path, data)).catch((e) => console.warn(e));
+// (`may`: the change's authority, asked again as the write starts: a write queued behind others isn't made once its
+// document can't change files, or its interpreter isn't the document's now)
+function writeDisk(path, data, may = () => true) {
+  const next = (diskWrites.get(path) ?? Promise.resolve()).then(() => (may() ? TAURI.fs.writeFile(path, data) : undefined)).catch((e) => console.warn(e));
   diskWrites.set(path, next);
 }
 // The notebook is reactive (design/reactive-notebook.md).  ?reactive=0 in
@@ -949,9 +1063,9 @@ $("#cells").addEventListener("input", () => askToKeep(), { once: true });
 // a change made in another tab: its name and language too
 nb.on("remote", (d) => {
   if (typeof d.name === "string" && d.name !== nbName.value && document.activeElement !== nbName) showName(d.name);
-  modeEl.value = nb.mode;
+  showMode(nb.mode);
 });
-nb.on("mode", (m) => { modeEl.value = m; try { localStorage.setItem("sagebrush-mode", m); } catch {} });
+nb.on("mode", (m) => { showMode(m); try { localStorage.setItem("sagebrush-mode", m); } catch {} });
 const cells = () => nb.cells();
 // for tests and in-page agents: the notebook and its kernel
 window.sagebrush = {
@@ -959,6 +1073,8 @@ window.sagebrush = {
   lockWait: LOCK_WAIT,
   notebook: nb, kernels, get kernel() { return kernel; }, get history() { return nbHistory; },
   get consoleKernel() { return consoleKernel; },
+  // (what the notebook shown may do, read-only: permissions.js; the tests', and U11's adapter's)
+  permissions: () => (current.id ? perms.record(current.id) : null),
   // (tests: the reactive notebook's analyzer and its worker)
   analyzer, get analyzeWorker() { return analyzeWorker; },
   // (tests: the Share dialog, and its seams)
@@ -1066,6 +1182,10 @@ async function resumeFrom(srcId, at) {
   h.close();
   // the history up to the next version (with the journal of that time)
   const id = newId();
+  // (a copy of the person's own session: its source's permission to change files, as Save a copy's (a source that
+  // can't change files, by its provenance or the person's don't-allow, gives a copy that can't either))
+  perms.provenance(srcId, await provenanceOf(srcId, "browser"));
+  madeAs.set(id, perms.may(srcId, "files") ? "person" : "elsewhere");
   const rows = (await idb(hdb, "history", "readonly", (st) => st.getAll(IDBKeyRange.bound([srcId, ""], [srcId, "\uffff"])))) ?? [];
   await idb(hdb, "history", "readwrite", (st) => {
     let r = null;
@@ -1123,7 +1243,7 @@ $("#ttrevert").onclick = async () => {
   const cells = old.cells.map((c) => { const k = now.get(c.id); return k && c.type !== "markdown" && !k.type && k.code === c.code ? { ...c, outputs: k.outputs, n: k.n } : c; });
   ttShow(false);
   nb.replace({ mode: old.mode, cells });
-  modeEl.value = nb.mode;
+  showMode(nb.mode);
   announce(`Reverted to version ${v.index + 1}`);
   statusEl.textContent = `reverted to version ${v.index + 1} of ${vs.length}`;
   // the reactive notebook: the session at that version is computed again
@@ -1301,7 +1421,7 @@ modeEl.onchange = (e) => {
   const to = modeEl.value, from = nb.mode;
   if (to === from) return;
   if (hasCode() && !confirm(`Change this notebook's language from ${LANG_NAME[from] ?? from} to ${LANG_NAME[to] ?? to}?\n\nIts code is written in ${LANG_NAME[from] ?? from}: it won't run as ${LANG_NAME[to] ?? to} until it is rewritten.`)) {
-    modeEl.value = from;
+    showMode(from);
     return;
   }
   setMode(to);
@@ -1327,7 +1447,8 @@ const exDlg = $("#exdlg");
       b.textContent = k;
       b.onclick = () => {
         exDlg.close();
-        openNew(k, g.toLowerCase(), EXAMPLES[k]);
+        // (Sagebrush's own example: it may change files, as the person's own notebooks may: permissions.js)
+        openHostMade(k, g.toLowerCase(), EXAMPLES[k]);
         history.replaceState(null, "", location.pathname + flagQuery);
       };
       $("#exlist").append(b);
@@ -1354,7 +1475,61 @@ function showName(name) {
   nbName.value = name || "Untitled";
   document.title = `${nbName.value} — Sagebrush`;
 }
-nbName.addEventListener("input", () => { document.title = `${nbName.value} — Sagebrush`; nb.setMeta({ name: docName() }); wsRenameSoon(); });
+nbName.addEventListener("input", () => { document.title = `${nbName.value} — Sagebrush`; nb.setMeta({ name: docName() }); wsRenameSoon(); localRenameSoon(); });
+// `sagebrush notebook DIR`'s file (LOCAL): its title is its file's name, so a rename renames the file (William's B2):
+// to a free name beside it (" (2)", " (3)"... if taken: never over another file, the server refuses that), after the
+// saves before it, and then the page's address and its "saved to" say the new name. A notebook not saved yet only
+// takes the name. The rename is a task of the store's own write queue (astra's LOCAL-RENAME-2): every save before it
+// is written first, every save after it waits for it and goes to the new name; none in between.
+let localStore = null, localRenameTimer = null;
+function localRenameSoon() {
+  if (!LOCAL || !localStore || localStore.failed) return;
+  clearTimeout(localRenameTimer);
+  localRenameTimer = setTimeout(() => {
+    const p = (localStore.queue ?? Promise.resolve()).then(localRename, localRename);
+    localStore.queue = p.catch(() => {});
+  }, 800);
+}
+async function localRename() {
+  // (after a failure (store.failed: a rename "kept", a file not read), nothing more is renamed, nor saved, from this
+  // page until the notebook is opened again: checked here, when the queued task runs, so one queued before the failure
+  // stops too: astra on #531)
+  if (localStore.failed) return;
+  const at = LOCAL.path, i = at.lastIndexOf("/"), folder = i < 0 ? "" : at.slice(0, i + 1);
+  const base = safeName(docName());
+  if (folder + base + ".ipynb" === at) return;
+  for (let k = 1; k <= 50; k++) {
+    const to = folder + base + (k > 1 ? ` (${k})` : "") + ".ipynb";
+    if (to === at) return;
+    let r;
+    try { r = await fetch(`api/rename?path=${encodeURIComponent(at)}&to=${encodeURIComponent(to)}`, { method: "POST" }); } catch (e) { statusEl.textContent = `not renamed: ${e?.message ?? e}`; return; }
+    if (!r.ok) {
+      const why = await r.json().catch(() => ({ code: "failed", message: `${r.status}` }));
+      // (a taken name: the next one; anything else ends here)
+      if (why.code === "exists") continue;
+      if (why.code === "kept") {
+        // (another program made both names meanwhile: the notebook as it was is at its staging name; this page saves
+        // nothing more over either name until it is opened again: astra's LOCAL-RENAME-3 recovery)
+        localStore.failed = `this notebook wasn't renamed: another program changed ${at} and ${to} meanwhile, so the file as it was is kept as ${why.stage}. Nothing more is saved from this page: open the notebook you want again`;
+        statusEl.textContent = localStore.failed;
+        savedEl.textContent = "not saved: see the status";
+        return;
+      }
+      statusEl.textContent = `not renamed: ${why.message ?? why.code}`;
+      return;
+    }
+    const { path } = await r.json();
+    LOCAL.path = path;
+    LOCAL.name = path.slice(path.lastIndexOf("/") + 1);
+    localStore.name = localStore.label = LOCAL.name;
+    history.replaceState(history.state, "", "/nb/" + encodeURIComponent(path).replace(/%2F/g, "/") + "/" + location.search + location.hash);
+    document.title = LOCAL.name + " · Sagebrush";
+    savedEl.textContent = "saved to " + LOCAL.name;
+    saveNow();
+    return;
+  }
+  statusEl.textContent = `not renamed: ${base}.ipynb and 49 more names are taken`;
+}
 
 // A store for a file saved as .ipynb text: the local server's file, or the app's.
 // read() gives null for a file that does not exist yet (a new notebook); a file
@@ -1436,28 +1611,48 @@ async function navLease() {
   if (trashTest.pause) await trashTest.pause("leased");
   return Object.assign(end, { after });
 }
-async function open(store, id, kind = "browser", guard = null) {
+// (the notebook a click is waiting for, still arriving from sync (awaitArrival): another attached here ends the wait;
+// one that fails to attach doesn't.  attachSeq counts the notebooks attached here: an automatic open (`intent`, its
+// count when it was asked for) attaches only if none was since, checked holding the navigation lease before anything
+// is detached, so a notebook the person opened meanwhile always wins: astra's B3-ARRIVAL-1)
+let arrivalWait = null, attachSeq = 0;
+async function open(store, id, kind = "browser", guard = null, intent = null) {
   const endSwitch = await navLease();
   try {
   for (const f of beforeSwitch) await f();
   await shareTest.beforeLeave?.();
   await nb.mayLeave(); // (LIMIT-900-2)
+  // (its permissions' provenance, from the host's own metadata only (this page's madeAs, the workspace entry's made),
+  // never the document's, a file's or a URL's: known before its interpreter starts, so one of the person's own never
+  // starts as one that can't change files and is restarted (permissions.js; the app on Windows, #563))
+  const how = kind === "browser" && madeAs.has(id) ? madeAs.get(id) : await provenanceOf(id, kind);
   // (Move to Trash's own switch (B1): it leaves only the notebook it was asked to; another opened here meanwhile wins,
   // and this switch is dropped before it detaches anything (astra's R2 on #447))
   if (guard) {
     if (trashTest.pause) await trashTest.pause("beforeDetach");
     if (!(current.kind === "browser" && current.id === guard.expect)) throw Object.assign(new Error("another notebook was opened here meanwhile"), { navWon: true });
   }
+  if (intent && intent.attach !== attachSeq) throw Object.assign(new Error("another notebook was opened here meanwhile"), { navWon: true });
   nb.detach();
   docGen++;
   ttShow(false);
   current = { id, kind };
+  perms.provenance(id, how);
+  filesBar(false);
+  filesShown();
   useKernel(id); // (before the document: the outputs its interpreter computed are not stale)
   await shareTest.beforeAttach?.();
-  const doc = await nb.attach(store);
+  const attachP = nb.attach(store);
+  attaching = { id, done: attachP.then(() => {}, () => {}) };
+  const doc = await attachP;
+  attachSeq++;
+  if (arrivalWait && arrivalWait.id !== id) {
+    if (statusEl.textContent === arrivalWait.said) statusEl.textContent = "";
+    arrivalWait = null;
+  }
   showName(doc.name);
   showWriter(store, id);
-  modeEl.value = nb.mode;
+  showMode(nb.mode);
   $("#ttrepro").checked = nb.meta.reproducible !== false;
   // (the reactive notebook: random numbers are reproducible per cell, always)
   $("#ttreprolabel").hidden = REACTIVE;
@@ -1479,15 +1674,64 @@ const asCell = (c) => ({ id: cellId(), ...(typeof c === "string" ? { code: c } :
 // (design/capabilities.md §6): "person" for New, "elsewhere" for an example, a share link or a file
 // opened, a copy's source's for Save a copy; a notebook not made here has none (unknown))
 const madeAs = new Map();
+// (a notebook's provenance as the host keeps it: its workspace entry's `made` (absent: unknown, elsewhere); the local
+// server's, a disk file's, a remote one's: elsewhere)
+async function provenanceOf(id, kind) {
+  // (the app: a notebook file the person opened from their own disk, by the open dialog or a file association, is
+  // their own, as in Jupyter on one's own computer (@sagebrush's ruling on #563, Nov 3); a remote one stays elsewhere)
+  if (kind === "file" && window.__TAURI__ && /^file:/.test(id)) return "person";
+  if (kind !== "browser") return "elsewhere";
+  try {
+    const w = await wsNow(), p = w && (await w.pathOf("notebook", id)), e = p && (await w.stat(p));
+    return e?.made === "person" ? "person" : "elsewhere";
+  } catch { return "elsewhere"; }
+}
+// The files permission of the notebook shown (permissions.js): the bar, shown at a refused change, and ⋯'s item; both
+// set the one record, and only from the person's own (isTrusted) click
+const filesBarEl = $("#filesbar");
+function filesBar(on) { filesBarEl.hidden = !on || !current.id || perms.may(current.id, "files"); }
+function filesShown() {
+  const on = !!current.id && perms.may(current.id, "files");
+  const fp = document.getElementById("filesperm"); // (the File menu's, drawn again with it)
+  if (fp) fp.textContent = on ? "Don't allow file changes" : "Allow file changes";
+  if (on) filesBarEl.hidden = true;
+}
+// (a choice this browser couldn't keep holds in this page, and says so: astra's NM-DENY-2)
+const setFiles = (e, on) => {
+  if (e?.isTrusted !== true || !current.id) return false;
+  if (perms.set(current.id, "files", on)) return true;
+  statusEl.textContent = `${on ? "File changes allowed" : "File changes stopped"} for this notebook in this page only: this browser couldn't keep the choice, so a reload forgets it`;
+  return false;
+};
+$("#filesallow").onclick = (e) => { if (setFiles(e, true)) statusEl.textContent = "Changes allowed for this notebook: run the cell again"; };
+// (a change of it reaches that document's interpreter at once: its next write; one that may no longer change files
+// never keeps a plain worker (a fresh interpreter, in the sandbox, or none); one allowed whose interpreter was the
+// refusing one, a fresh one)
+perms.onChange((doc) => {
+  const e = kernels.get(doc), on = perms.may(doc, "files");
+  if (e) {
+    e.kernel.setWritable?.(on);
+    const w = e.kernel.worker, inner = w?.inner ?? w;
+    if (!on && inner instanceof Worker) e.kernel.restart?.("\nThis notebook can't change files now, so its interpreter was restarted in the sandbox; variables are gone.\n");
+    if (on && inner instanceof RefusingWorker) e.kernel.restart?.();
+  }
+  if (doc === current.id) filesShown();
+});
 async function openDocument(doc, here = false, made = "elsewhere", guard = null) {
   const id = newId();
+  // (Sagebrush's own (the first visit's Welcome, an example): host-made before its interpreter starts, so it never
+  // starts as one that can't change files and is restarted (the app on Windows: still loading at the self-test's check))
+  if (made === "host") { hostMade(id); perms.provenance(id, "host"); made = "elsewhere"; }
   madeAs.set(id, here ? "person" : made);
   const { here: _h, ...rest } = doc;
   return open(await storeFor(id, { ...rest, ...(here ? { here: true } : {}), id, cells: (doc.cells ?? []).map((c) => (c.id ? c : { ...c, id: cellId() })) }), id, "browser", guard);
 }
 // (here: a new notebook, written in this browser; else examples and share links)
 const openNew = (name, mode, codes, here = false, guard = null) => openDocument({ name, mode, cells: codes.map(asCell) }, here, undefined, guard);
-async function openId(id, guard = null) {
+// (one of Sagebrush's own notebooks, made here from its bundled examples: permissions.js's "host")
+const openHostMade = (name, mode, codes) => openDocument({ name, mode, cells: codes.map(asCell) }, false, "host");
+/** `intent`: an automatic open's (awaitArrival), given to open() through either branch. */
+async function openId(id, guard = null, intent = null) {
   const end = await navLease();
   try {
     // (it waited while what it asks for went to Trash: not opened, said, with Restore and open (board's (A), #447 r5c))
@@ -1502,8 +1746,12 @@ async function openId(id, guard = null) {
     // upload) opens by its URL, never loaded unseen under the editor; a build without the editor drops this line)
     if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && globalThis.__sbTexOpen?.(id)) return true;
     const doc = await idb(db, "notebooks", "readonly", (st) => st.get(id));
-    if (!doc) return await openArrived(id);
-    await open(await storeFor(id), id, "browser", guard);
+    // (tests: the read done, the store not made yet)
+    await shareTest.afterRead?.(id);
+    if (!doc) return await openArrived(id, intent);
+    const st = await storeFor(id);
+    // (a switch refused before anything was detached (another opened meanwhile): its store let go, its lock with it)
+    try { await open(st, id, "browser", guard, intent); } catch (e) { if (e?.navWon && st.journaled) try { await st.release(); } catch {} throw e; }
     savedEl.textContent = "opened";
     return true;
   } finally {
@@ -1514,7 +1762,7 @@ async function openId(id, guard = null) {
 // only when this device has its synced history (recover's own "from-server" condition: a start and its rows, sync-docs'
 // answer), whose load makes the record from the history's head.  Otherwise it is still arriving: said, its pull asked,
 // and never opened, as a fresh empty one would fork it.  Not the journal's, or not listed: false, as before)
-async function openArrived(id) {
+async function openArrived(id, intent = null) {
   // (one navigation lease over all of it, its recovery included: #447 r5c, R5-NAV-2 (2))
   const end = await navLease();
   try {
@@ -1528,6 +1776,8 @@ async function openArrived(id) {
   // pull to ask (this page's notebook sync is off), that, as it won't arrive here either: journal.js's arrivingSay)
   const arriving = () => {
     const msg = mod.arrivingSay(id);
+    // (its download asked for: said as such, and opened once it is here, William's B3; nothing to wait for otherwise)
+    if (msg === mod.STILL_ARRIVING) { awaitArrival(id, splitExt(nameOf(at))[0], hdb, mod); return false; }
     statusEl.textContent = msg;
     wsBrowser?.say(msg);
     return false;
@@ -1542,7 +1792,7 @@ async function openArrived(id) {
   // so the window between the check above and the load's own read (a remove's dropped rows) is said here, never a fork)
   const prev = current;
   try {
-    await open(st, id);
+    await open(st, id, "browser", null, intent);
   } catch (e) {
     // (a refused load, still arriving or any other: the store never became the page's (nb.attach installs it only after
     // its load succeeds), so it is let go here, its writer lock with it; else a retry would queue read-only behind it and
@@ -1558,6 +1808,40 @@ async function openArrived(id) {
   } finally {
     end();
   }
+}
+// (a notebook another device made, clicked before its history is here: "Downloading…", its pull asked again every 10
+// s, and opened as soon as its history has arrived, unless another notebook was attached since the click (open ends
+// the wait, and refuses this one's switch: attachSeq); after a minute, said that it hasn't arrived, and the next click
+// waits again: William's B3)
+function awaitArrival(id, name, hdb, mod) {
+  const said = `Downloading ${name}…`;
+  statusEl.textContent = said;
+  wsBrowser?.say(said);
+  if (arrivalWait?.id === id) return;
+  const me = { id, said, attach: attachSeq };
+  arrivalWait = me;
+  let ticks = 0;
+  const tick = async () => {
+    if (arrivalWait !== me) return;
+    const s = hdb ? await readJournal(hdb, id).catch(() => null) : null;
+    if (arrivalWait !== me) return;
+    if (s && s.start !== null && s.jOf?.size > 0) {
+      const ok = await openId(id, null, me).catch(() => false);
+      if (arrivalWait === me) arrivalWait = null;
+      if (ok) { wsTrackCurrent(); wsBrowser?.say(`${name} downloaded`); }
+      return;
+    }
+    if (++ticks >= 120) {
+      arrivalWait = null;
+      const late = `${name} hasn't arrived from sync yet (the device that made it sends it when it is online): click it again to keep waiting`;
+      statusEl.textContent = late;
+      wsBrowser?.say(late);
+      return;
+    }
+    if (ticks % 20 === 0) try { mod.DOC_SYNC.pull?.(id); } catch {}
+    setTimeout(tick, 500);
+  };
+  setTimeout(tick, 500);
 }
 const saveNow = () => nb.flush();
 // A MyST notebook's book: its folder's _toc.yml and chapters, read for the MyST asset through this capability only,
@@ -1599,7 +1883,7 @@ async function openDiskFile(path) {
     const { dir, sep, name } = splitPath(path);
     nb.flush();
     if (/\.ipynb$/i.test(name)) await bindDiskFile(path);
-    else { diskFile = null; await openDocument(fromFile(name, await TAURI.fs.readTextFile(path), nb.mode)); }
+    else { diskFile = null; await openDocument(fromFile(name, await TAURI.fs.readTextFile(path), nb.mode), false, "person"); }
     // the folder's files (not hidden; up to 64 MB each, 256 MB in all) for Python
     diskFiles = [];
     let total = 0;
@@ -1967,6 +2251,39 @@ const shareTest = {
   exports: async () => ({ ipynb: toIpynb({ ...nb.snapshot(), name: docName() }), link: await shareLink() }),
 };
 // One file's bytes, as it is now; if it is no longer the file that was listed (another fid), it changed
+// Share folder… (Files ▸ ⋯ on a folder; book links B2): its dialog in a chunk of its own, loaded when chosen; the
+// folder's share kept in the workspace by its fid, and this device's upload records under "folder:<fid>"
+async function openFolderShare(e) {
+  const w = await wsNow();
+  if (!w || w.closed || !e.fid) return sayNotLeft(new Error("this folder can't be shared from here"));
+  let m;
+  try {
+    m = await import(new URL("sagebrush-share-folder.js", location.href).href);
+  } catch {
+    return sayNotLeft(new Error("Share folder couldn't be loaded; check your connection and try again"));
+  }
+  const key = "folder:" + e.fid;
+  await m.openShareFolder({
+    folder: { path: e.path, fid: e.fid },
+    list: () => w.list(e.path, { recursive: true }),
+    readFile: (f) => storedFileBytes({ path: f.path, fid: f.fid }),
+    // (a notebook's saved record, still the one listed)
+    readNotebook: async (f) => {
+      const now = await w.stat(f.path);
+      if (!now || now.kind !== "notebook" || now.ref !== f.ref) throw new Error(`${f.path.replace(/^\/+/, "")} changed; share the folder again`);
+      const d = await w.contents(now);
+      if (!d || typeof d !== "object") throw new Error(`${f.path.replace(/^\/+/, "")} can't be read`);
+      return d;
+    },
+    notebookText: (doc) => toIpynb(doc),
+    saveOpen: async () => { saveNow(); await nb.saved(); },
+    getShare: () => w.folderShare(e.fid),
+    setShare: (expect, next) => w.setFolderShare(e.fid, expect, next),
+    sent: (account) => ({ get: () => shareSent.get(account, key), put: (a) => shareSent.put(account, key, a), drop: (a) => shareSent.drop(account, key, a) }),
+    sentMax: SHARE_SENT_MAX,
+    fmtSize,
+  });
+}
 async function storedFileBytes(f) {
   await shareTest.onRead?.(f.path);
   const w = await wsNow();
@@ -2248,7 +2565,7 @@ function drawFileMenu() {
   const none = !ws;
   renderFileMenu(fileMenu, {
     attr: "data-f",
-    keys: { newNotebook: "new", newBoard: "whiteboard", newFolder: "newfolder", fromExample: "examples", open: "open", upload: "import", saveCopy: "duplicate", rename: "rename", print: "print", share: "share", delete: "delete" },
+    keys: { newNotebook: "new", newMatlab: "newmatlab", newBoard: "whiteboard", newFolder: "newfolder", fromExample: "examples", open: "open", upload: "import", saveCopy: "duplicate", rename: "rename", print: "print", share: "share", delete: "delete" },
     disabled: { newFolder: none },
     downloads: [
       { key: "ipynb", label: ".ipynb" },
@@ -2260,12 +2577,16 @@ function drawFileMenu() {
     extra: [
       { after: "upload", key: "openfile", label: "Open file…", hidden: true },
       { after: "saveCopy", key: "saveas", label: "Save as…", hidden: true },
+      // (whether this notebook's code may change the person's files: no-mutation's one switch, a document's setting)
+      { after: "share", key: "filesperm", label: "Don't allow file changes", title: "Whether this notebook's code may change your files (a notebook from elsewhere may not, until you allow it)" },
     ],
     recent: ws ? async () => (await recentOpened(ws, current.kind === "browser" ? { kind: "notebook", ref: current.id } : undefined)).map((e) => ({ label: recentLabel(e), title: e.path, open: () => openEntry(e) })) : undefined,
     chosen: () => toggleFileMenu(false),
   });
   // (Share…, as the share tests and the share dialog know it)
   fileMenu.querySelector('[data-item="share"]').id = "sharemenu";
+  fileMenu.querySelector('[data-f="filesperm"]').id = "filesperm";
+  filesShown();
 }
 // (a document opened from the File menu (Recent, Open…): a notebook here, a board on its page)
 function openEntry(e, how = "here") {
@@ -2396,6 +2717,8 @@ fileMenu.addEventListener("click", async (e) => {
   if (!b || b.dataset.group || b.disabled || !b.dataset.f) return;
   toggleFileMenu(false);
   switch (b.dataset.f) {
+    // (the person's own click only: setFiles checks isTrusted)
+    case "filesperm": setFiles(e, !(current.id && perms.may(current.id, "files"))); break;
     case "newfolder": {
       const name = prompt("A new folder, at the top of your files: its name", "New folder");
       if (!name?.trim() || !ws) break;
@@ -2409,6 +2732,8 @@ fileMenu.addEventListener("click", async (e) => {
       exDlg.querySelector("#exlist button")?.focus();
       break;
     case "new": saveNow(); await openNew("Untitled", nb.mode, [""], true); cells()[0].ta.focus(); break;
+    // (a MATLAB notebook, whatever this one's language: sage's n8 walkthrough)
+    case "newmatlab": saveNow(); await openNew("Untitled", "matlab", [""], true); cells()[0].ta.focus(); break;
     // (a new board in the notebook's language, opened in Edit; this notebook stays saved: board/page.ts ?new=)
     case "whiteboard": await toBoard("/board/?new=" + encodeURIComponent(nb.mode)); break;
     // (the file browser as a dialog; without the workspace, the notebooks of this browser as before)
@@ -2549,6 +2874,8 @@ async function openBundle(bytes) {
   return id;
 }
 window.sagebrush.bundle = makeBundle;
+// (what background loading did, web/preload.ts: why it skipped, or the files it fetched)
+window.sagebrush.preload = preloadState;
 window.sagebrush.openBundle = openBundle;
 
 // File > Open
@@ -2618,7 +2945,11 @@ let FILE_QUEUE_MAX = 256 * 2 ** 20;
 const fileQueue = new Map(); // path -> Uint8Array | null (the latest state not yet kept)
 let fileQueueBytes = 0, fileDraining = null, fileQueueRefused = 0;
 const queuedBytes = (d) => (d ? d.length : 0);
-function fileChanged(path, data) {
+// (`doc`: whose interpreter made the change; `may`: its authority (the document's permission, and that interpreter's
+// generation still the document's), asked as the queue takes it and again where it is kept: inside the workspace's
+// locked create, write or remove, before any effect, and in the old store's own transaction (astra's NM-ADMIT-1))
+const fileQueueDoc = new Map(); // path -> { doc, may }
+function fileChanged(path, data, doc = null, may = () => true) {
   const before = fileQueue.has(path) ? queuedBytes(fileQueue.get(path)) : 0;
   if (fileQueueBytes - before + queuedBytes(data) > FILE_QUEUE_MAX) {
     fileQueueRefused++;
@@ -2627,18 +2958,35 @@ function fileChanged(path, data) {
   }
   fileQueue.delete(path); // (re-inserted: a path's place is its latest change)
   fileQueue.set(path, data);
+  fileQueueDoc.set(path, { doc, may });
   fileQueueBytes += queuedBytes(data) - before;
   fileDraining ??= drainFiles();
 }
+// (tests: the queue held before it writes, to change a permission while a change waits: astra's revoked-queued case;
+// and held after its own check, before the change is kept (astra's NM-ADMIT-1): only the admission decides then)
+let fileDrainHold = null, fileAdmitHold = null;
 async function drainFiles() {
   try {
+    if (fileDrainHold) await fileDrainHold;
     while (fileQueue.size) {
       const [path, data] = fileQueue.entries().next().value;
       fileQueue.delete(path);
       fileQueueBytes -= queuedBytes(data);
+      const { doc = null, may = () => true } = fileQueueDoc.get(path) ?? {};
+      fileQueueDoc.delete(path);
+      const refused = () => { if (doc !== null && doc === current.id) filesBar(true); };
+      if (!may()) { refused(); continue; }
       // (in the workspace: a write keeps the old bytes as a version, a delete goes to Trash; as before where it can't be)
       try {
-        if ((await wsFile(path, data, { keepEmpty: false })) === "fallback") await idb(db, "files", "readwrite", (st) => (data === null ? st.delete(path) : st.put(data, path)));
+        const how = await wsFile(path, data, { keepEmpty: false, may });
+        if (how === "denied") refused();
+        if (how === "fallback") {
+          if (fileAdmitHold) await fileAdmitHold;
+          // (the old store: asked in its own transaction, as it writes)
+          let ok = true;
+          await idb(db, "files", "readwrite", (st) => ((ok = may()) ? (data === null ? st.delete(path) : st.put(data, path)) : undefined));
+          if (!ok) refused();
+        }
       } catch (e) { statusEl.textContent = `${path}: ${e?.message ?? e}`; }
     }
   } finally { fileDraining = null; }
@@ -2649,6 +2997,8 @@ window.sagebrush.files = {
   add: (list) => addFiles(list),
   queue: () => ({ paths: fileQueue.size, bytes: fileQueueBytes, draining: !!fileDraining, refused: fileQueueRefused }),
   setQueueMax: (n) => { FILE_QUEUE_MAX = n; },
+  holdDrain: () => { let go; fileDrainHold = new Promise((r) => (go = r)); return () => { fileDrainHold = null; go(); }; },
+  holdAdmit: () => { let go; fileAdmitHold = new Promise((r) => (go = r)); return () => { fileAdmitHold = null; go(); }; },
 };
 const fmtSize = (n) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`);
 async function renderFiles() {
@@ -2976,7 +3326,7 @@ const tools = [
   },
   {
     name: "edit_notebook",
-    description: "Change several cells at once and then run once: set cells' code (by id), insert cells, delete cells. In the reactive notebook every cell affected reruns, in dependency order, and the result says which ran, which are left stale (too slow for the time budget, or manual), which failed, which did not run because a cell they depend on failed, and which have errors (a name defined by two cells, a cycle). Cell ids come from notebook_graph or read_notebook.",
+    description: "Change several cells at once and then run once: set cells' code (by id), insert cells, delete cells. In the reactive notebook every cell affected reruns, in dependency order, and the result says which ran, which are left stale (too slow for the time budget, or manual), which failed, which did not run because a cell they depend on failed, and which have errors (a redefinition the engine could not safely page-scope, or a cycle; an ordinary Python or Sage name defined again in a later cell is not an error: each cell reads the nearest earlier definition, or the first definition if all are later). Cell ids come from notebook_graph or read_notebook.",
     inputSchema: {
       type: "object",
       properties: {
@@ -3313,17 +3663,26 @@ async function wsForgetNotebook(id) {
 }
 // A data file written (bytes) or deleted (null) through the workspace:
 // "kept"; "refused" (a limit, or storage refused it: said, nothing written);
-// "fallback" (no workspace, or a path it doesn't take: the caller keeps it as before)
+// "fallback" (no workspace, or a path it doesn't take: the caller keeps it as before);
+// "denied" (`opts.may`, the change's authority, asked holding the workspace's lock: no longer, nothing changed)
+class NotAdmitted extends Error {}
 async function wsFile(path, data, opts = {}) {
+  const { may, ...put } = opts;
+  const admit = may ? () => { if (!may()) throw new NotAdmitted("this notebook can't change files now"); } : undefined;
   const w = await wsNow();
   if (!w) return "fallback";
   try {
     if (data === null) {
       if (!(await w.stat(path))) return "fallback";
-      await w.remove(path);
-    } else await w.putFile(path, data, opts);
+      if (fileAdmitHold) await fileAdmitHold;
+      await w.remove(path, undefined, undefined, admit ? { admit } : {});
+    } else {
+      if (fileAdmitHold) await fileAdmitHold;
+      await w.putFile(path, data, admit ? { ...put, admit } : put);
+    }
     return "kept";
   } catch (e) {
+    if (e instanceof NotAdmitted) return "denied";
     // (with the workspace, never the old store instead: a file kept beside the index is read from there,
     // so bytes put the old way would be lost unseen; said, and the interpreter still has them)
     statusEl.textContent = `${path} isn't saved in this browser: ${e?.message ?? e}`;
@@ -3366,6 +3725,8 @@ function wsShowFiles(on) {
       close: () => wsShowFiles(false),
       // (the Storage panel's export: its lazy chunk beside this page; the open notebook saved first)
       exportUrl: (f) => new URL(f, location.href).href,
+      // (Share folder…: not under `sagebrush notebook`, which has no sharing)
+      shareFolder: LOCAL ? undefined : (e) => void openFolderShare(e),
       saveOpen: async () => { saveNow(); await nb.saved(); },
       // (the open notebook renamed here: a typed title's rename not yet made
       // is dropped, and its name follows, as if typed)
@@ -3484,7 +3845,7 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   await wsNow();
   // (the LaTeX editor: in a build with it, and on, its hooks are installed, and /?tex=<fid> is its page; a build
   // without it has none of this: web/latex/boot.ts, web/build.ts SAGEBRUSH_LATEX_PREVIEW)
-  if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && (await latexBoot(ws))) return;
+  if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && (await latexBoot(ws, RUNNER ? { WorkerKernel, RunnerWorker } : null))) return;
   let mode = "python";
   try { mode = localStorage.getItem("sagebrush-mode") || mode; } catch {}
   // a shared link opens as a new notebook; else the last one; else the welcome
@@ -3495,7 +3856,7 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   const nbParam = new URLSearchParams(location.search).get("nb");
   if (nbParam && /^[\w-]{1,64}$/.test(nbParam)) { last = nbParam; history.replaceState(null, "", location.pathname + location.hash); }
   // ?open=URL of a notebook (.ipynb, .py, ...) and file=URL (repeatable) of
-  // data it reads: fetched into the browser's files, then opened (&run runs it)
+  // data it reads: fetched into the browser's files, then opened (nothing runs until the person runs it: Run all)
   const qs = new URLSearchParams(location.search), remote = qs.get("open");
   let opened = false, resumed = null;
   // ?resume=notebook&at=version: TimeTravel's Resume from here
@@ -3558,18 +3919,23 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
     } catch (err) { statusEl.textContent = `could not open ${remote}: ${err.message ?? err}`; }
   }
   if (LOCAL) {
-    const url = `api/file?path=${encodeURIComponent(LOCAL.path)}`;
+    // (the file's path follows a rename, localRenameSoon: every read and write after it goes to the new name)
+    const url = () => `api/file?path=${encodeURIComponent(LOCAL.path)}`;
     const store = new TextFileStore(LOCAL.name,
-      async () => { const r = await fetch(url); if (r.status === 204 || r.status === 404) return null; if (!r.ok) throw new Error(`${r.status} ${await r.text()}`); return r.text(); },
-      async (text) => { const r = await fetch(url, { method: "PUT", body: text }); if (!r.ok) throw new Error(await r.text()); },
+      async () => { const r = await fetch(url()); if (r.status === 204 || r.status === 404) return null; if (!r.ok) throw new Error(`${r.status} ${await r.text()}`); return r.text(); },
+      async (text) => { const r = await fetch(url(), { method: "PUT", body: text }); if (!r.ok) throw new Error(await r.text()); },
       LOCAL.name);
+    localStore = store;
     await open(store, "local:" + LOCAL.path, "local");
     document.title = LOCAL.name + " · Sagebrush";
     for (const b of [$("#filesbtn")]) if (b) b.hidden = true;
   }
   else if (opened) {}
   else if (shared) await openNew("Shared notebook", /m=sage/.test(location.hash) ? "sage" : /m=magma/.test(location.hash) ? "magma" : /m=matlab/.test(location.hash) ? "matlab" : "python", shared);
-  else if (!(last && (await openId(last)))) await openNew(mode === "sage" ? "Sage" : "Welcome", mode, mode === "sage" ? EXAMPLES.Sage : EXAMPLES.Welcome);
+  else if (!(last && (await openId(last)))) {
+    // (the first visit's Welcome: Sagebrush's own, which may change files: permissions.js)
+    await openHostMade(mode === "sage" ? "Sage" : "Welcome", mode, mode === "sage" ? EXAMPLES.Sage : EXAMPLES.Welcome);
+  }
   booted();
   // ?openas=PATH&fid=FID: a file opened as a notebook from the board page (a Jupytext MyST .md sent there, which
   // offers it here instead: agents-ui's N-2), through openAs as the file browser's menu does; one replaced
@@ -3603,8 +3969,38 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   await new Promise((resolve) => { requestAnimationFrame(() => setTimeout(resolve, 0)); setTimeout(resolve, 200); });
   kernelsMayStart = true;
   if (current.id) startKernel(kernelFor(current.id));
+  // background loading (web/preload.ts): at the next idle moment, the library files the open notebook's first Run
+  // will fetch (its mode's groups, the groups its import lines name), and the LaTeX editor's two files where the
+  // workspace has a .tex; bytes only, nothing run, and skipped on Save-Data, a slow connection or little storage
+  preloadSoon({
+    table: __SB_PRELOAD__,
+    doc: () => { if (!current.id) return null; const s = nb.snapshot(); return { mode: s.mode ?? nb.mode, codes: s.cells.filter((c) => !c.type).map((c) => c.code ?? "") }; },
+    // the LaTeX editor's two files, where the editor is on here and the workspace has a .tex (latexExtra)
+    extra: () => latexExtra({
+      latex: typeof __SB_LATEX__ !== "undefined" && !!__SB_LATEX__ && !!ws, hosts: typeof __SB_LATEX_HOSTS__ === "undefined" ? [] : __SB_LATEX_HOSTS__, host: location.hostname,
+      hasTex: async () => (await ws.list("/", { recursive: true })).some((e) => /\.tex$/i.test(e.path)), base: location.href,
+    }),
+    // the notebook's optional package set (pandas, plan-modular-packages-r4), after the library's files: the one its
+    // interpreter is given (notebookPkgset: its pin, or else the site's latest, latestSet), its index checked against
+    // its id; the source chunks of the packages its import lines name. Nothing pinned, no pkgUsed: a set given
+    // unpinned is pinned at its first use only, as before (#628)
+    later: async () => {
+      if (!current.id || LOCAL || !(nb.mode === "python" || nb.mode === "sage")) return null;
+      const codes = nb.snapshot().cells.filter((c) => !c.type).map((c) => c.code ?? ""), tops = importTops(codes);
+      // (notebookPkgset's own answer: a pin another tab saved meanwhile is the one, as for the interpreter)
+      const S = tops.length ? await notebookPkgset(current.id).catch(() => null) : null;
+      if (!S) return null;
+      const index = await pkgIndex(await preloadBytes(`pkgset/${S}.json`, PKG_LIMITS.indexBytes), S);
+      // (only through the service worker: it keeps a set's chunks in its own cache, and the interpreter's
+      // request for one is answered from there; fetched before it controls the page, a chunk would only be
+      // downloaded twice. On a first visit it takes control shortly after the page is drawn: waited for, 10 s)
+      const sw = navigator.serviceWorker;
+      if (index === null || !sw || !(sw.controller || (await Promise.race([new Promise((r) => sw.addEventListener("controllerchange", r, { once: true })), new Promise((r) => setTimeout(r, 10000))]), sw.controller))) return null;
+      const p = pkgIntent(index, tops, location.href);
+      return p.urls.length ? p : null;
+    },
+  });
   if (resumed) await replayResumed(resumed);
-  if (qs.has("run")) { await kernel.started; nb.runAll(); }
   // the app: its menu items, files the system hands it, the self-test
   if (TAURI) {
     for (const b of document.querySelectorAll('[data-f="openfile"], [data-f="saveas"]')) b.hidden = false;

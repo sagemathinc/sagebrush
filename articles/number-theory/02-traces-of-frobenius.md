@@ -37,6 +37,9 @@ It is about 600 lines of Rust.
 - The sum of $a_p$ for 11a up to $10^8$ is identical (5,761,454 primes).
 - Sage agrees for $p < 20000$ on 11 curves, covering ranks 0–3, CM curves
   and large coefficients.
+- smalljac uses the same strategy, so its agreement mainly checks this
+  implementation; Sage's values, from a different implementation, and the
+  Sato–Tate moments below check the results by other means.
 - Sato–Tate moments of 11a up to $10^7$ are 1.000, 1.999, 4.998, 13.992
   (theory: 1, 2, 5, 14). For the CM curve 27a3 they follow the CM
   distribution: 0.999, 2.997, 9.988, 34.955.

@@ -1,0 +1,20 @@
+[package]
+name = "sagebrush-nd"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Sagebrush's numerics core (design: numerics-core r4.2): column-major dense kernels with per-target microkernels, the same Rust for browser Wasm, native and the Node CLI"
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+sagebrush-par = { path = "../par", optional = true }
+
+[features]
+# native threads through engine/par (rayon); without it, every entry runs on the calling thread (and in
+# browser Wasm the host drives one worker per thread through `wasm::gemm_part`)
+parallel = ["dep:sagebrush-par", "sagebrush-par/parallel"]
+
+[lints]
+workspace = true

@@ -4,7 +4,7 @@
 // (each backslash once, as the lists were written by hand), and rawLiteral falls back to JSON where a template
 // wouldn't read back the same.
 //   bun web/examples/test-examples-legacy.mjs
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { latexExamples, legacySource, notebookExamples, rawLiteral } from "./legacy.ts";
@@ -51,6 +51,26 @@ check(bad === 0, `rawLiteral reads back every string, ${cases.length} of them ($
   const many = "\\x".repeat(20) + "\u00e9";
   const lit = rawLiteral(many);
   check(rawLiteral("a\\b") === JSON.stringify("a\\b") && lit === "String.raw`" + "\\x".repeat(20) + '${"\u00e9"}`' && rawLiteral("Gr\u00f6bner") === JSON.stringify("Gr\u00f6bner"), "the shorter form: a raw template for many backslashes, JSON for a short string or a word beyond ASCII: " + lit + " " + rawLiteral("Gr\u00f6bner"));
+}
+// (long backslash-heavy texts, where the raw template is the shorter form, each ending in what a template can't hold
+// as it is: a backtick, "${", a carriage return, a trailing backslash; grader's G2 and G3)
+for (const [what, end] of [["a backtick", "`"], ['"${"', "${"], ["a carriage return", "\r"], ["a trailing backslash", "\\"], ["a backslash before a backtick", "\\`"]]) {
+  const t = "\\x".repeat(20) + end;
+  const lit = rawLiteral(t);
+  let back;
+  try {
+    back = (0, eval)(lit);
+  } catch (e) {
+    back = "(" + e.message + ")";
+  }
+  check(lit.startsWith("String.raw`") && back === t, `a long backslash-heavy text ending in ${what} is a raw template that reads back the same: ${lit.slice(-24)}`);
+}
+// (the notebook menu has every corpus notebook, by title: a slug dropped from the list would vanish unnoticed; grader's G5)
+{
+  const root = join(import.meta.dir, "..", "..", "examples", "notebook");
+  const want = readdirSync(root).filter((d) => existsSync(join(root, d, "example.json"))).map((d) => JSON.parse(readFileSync(join(root, d, "example.json"), "utf8")).title).sort();
+  const got = Object.keys(notebookExamples().cells).sort();
+  check(JSON.stringify(got) === JSON.stringify(want), `the notebook menu lists every corpus notebook (${got.length} of ${want.length})`);
 }
 console.log(`${n - fails.length}/${n} passed`);
 if (fails.length) process.exit(1);

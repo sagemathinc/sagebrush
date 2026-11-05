@@ -51,6 +51,8 @@ export type BrowserHost = {
   /** The Storage panel's "Export all current files (.zip)" (export plan E1 r2c): where the lazy export chunk's files
    * are, and this tab's open documents saved first; without exportUrl, not offered. */
   exportUrl?: (file: string) => string;
+  /** Share folder… on a folder's ⋯ (book links B2): the page's dialog; without it, not offered */
+  shareFolder?: (e: Entry) => void;
   saveOpen?: () => Promise<void>;
   /** The document open in the page (e, or inside the folder e) is about to go to Trash: the page saves what it has
    * yet to save, then opens another document in its place. A string: not done, and why (it stays open, nothing is
@@ -602,10 +604,11 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     const as = e.kind === "file" && host.openAs ? openableAsFile(nameOf(e.path), /\.md$/i.test(e.path) ? await fileHead(w, e.path, LIMITS.maxBoardBytes) : null) : null;
     if (as) items.push([as === "notebook" ? "Open as a notebook" : "Open as a board", () => void Promise.resolve(host.openAs!(e, as)).then((m) => { if (m) say(m); }, fail)]);
     if (e.kind === "file") items.push(["Preview and versions", () => preview(e)], "-");
-    if (e.kind === "folder") items.push(["New notebook here", () => make(e.path, "notebook")], ["New board here", () => make(e.path, "board")], ["New folder here", () => make(e.path, "folder")], ["Upload here…", () => pick(e.path)], "-");
+    if (e.kind === "folder") items.push(["New notebook here", () => make(e.path, "notebook")], ["New MATLAB notebook here", () => make(e.path, "notebook", "matlab")], ["New board here", () => make(e.path, "board")], ["New folder here", () => make(e.path, "folder")], ["Upload here…", () => pick(e.path)], "-");
     items.push(["Rename", () => startRename(r, e)]);
     if (e.kind !== "folder") items.push(["Duplicate", () => w.duplicate(e.path).then((x) => say(`Copied as ${nameOf(x.path)}`)).catch(fail).then(refresh)]);
     if (e.kind === "file") items.push(["Download", () => download(e)]);
+    if (e.kind === "folder" && host.shareFolder) items.push(["Share folder…", () => host.shareFolder!(e)]);
     items.push(["Copy path", () => navigator.clipboard?.writeText(e.path).then(() => say("Path copied"), () => say(e.path))]);
     // (only a person deletes old versions, §2.5)
     if (e.kind === "folder" && w.actor === "person") items.push(["Delete older versions in this folder…", () => dropFolderVersions(w, e.path, { say, fail }).then(meter)]);
@@ -693,7 +696,9 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     refresh();
   }
 
-  function startRename(r: HTMLElement, e: Entry) {
+  // (after: called once the name is settled, with the entry as it is then (renamed or not), or null when it was moved,
+  // deleted or not renamed for a conflict meanwhile)
+  function startRename(r: HTMLElement, e: Entry, after?: (now: Entry | null) => void) {
     const nameEl = r.querySelector<HTMLElement>(".n");
     if (!nameEl) return;
     const full = nameOf(e.path);
@@ -703,7 +708,10 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     // extension keeps the old one; a different extension is allowed and said beside the box while it is typed, before
     // Enter (or leaving the box) renames. A folder's name is all name)
     const file = e.kind === "file", fileExt = file ? splitExt(full)[1] : "";
-    const finalName = (v: string) => (file && fileExt && !splitExt(v)[1] ? v + fileExt : v + ext);
+    // (a notebook's or board's name typed with its own extension gets it once, not twice: sage's n8 walkthrough,
+    // "chapter1.ipynb.ipynb"; the extension alone is no name, and leaves the old one)
+    const stem = (v: string) => (ext && v.toLowerCase().endsWith(ext.toLowerCase()) ? v.slice(0, -ext.length).trimEnd() : v);
+    const finalName = (v: string) => (file && fileExt && !splitExt(v)[1] ? v + fileExt : !stem(v) ? full : stem(v) + ext);
     const input = h("input", { value: base });
     input.setAttribute("aria-label", `New name for ${full}`);
     const note = h("span", { className: "extnote" });
@@ -726,6 +734,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
       renamingNow = false;
       note.remove();
       const v = input.value.trim();
+      let now: Entry | null = e;
       if (keep && v && finalName(v) !== full) {
         host.renaming?.(e);
         try {
@@ -734,31 +743,39 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
           // that entry: checked holding the lock, never another put at its
           // path meanwhile, CORR-4B2-1)
           const from = (e.kind === "notebook" || e.kind === "board") && e.ref ? await w.pathOf(e.kind, e.ref) : e.path;
-          if (!from) say(`"${full}" was moved or deleted meanwhile: not renamed`);
-          else host.renamed?.(await w.rename(from, join(parentOf(from), finalName(v)), { retitle: !host.retitles?.(e), expect: { kind: e.kind, ref: e.ref, fid: e.fid, created: e.created } }), from);
+          // (gone, or put in Trash meanwhile (another tab, an agent): either way not renamed, and not opened)
+          if (!from || within(from, TRASH)) { now = null; say(`"${full}" was moved or deleted meanwhile: not renamed`); }
+          else host.renamed?.((now = await w.rename(from, join(parentOf(from), finalName(v)), { retitle: !host.retitles?.(e), expect: { kind: e.kind, ref: e.ref, fid: e.fid, created: e.created } })), from);
         } catch (err) {
+          now = null;
           if (err instanceof WorkspaceError && err.code === "conflict") say(`"${full}" was moved or replaced meanwhile: not renamed`);
           else fail(err);
         }
       }
       refresh();
+      after?.(now);
     };
     input.onkeydown = (ev) => { ev.stopPropagation(); if (ev.key === "Enter") finish(true); else if (ev.key === "Escape") finish(false); };
     input.onblur = () => finish(true);
   }
 
-  async function make(folder: string, kind: "notebook" | "board" | "folder") {
+  // (a new notebook or board is opened once its name is settled (Enter, or Esc keeping "Untitled"), as a click on its
+  // row opens it: sage's n8 walkthrough found the page left on the notebook before, and typing went there; a folder
+  // stays as it is.  mode: a notebook's language, as MATLAB notebook's)
+  async function make(folder: string, kind: "notebook" | "board" | "folder", mode?: string) {
     const taken = new Set(entries.map((x) => x.path));
     const [base, ext] = kind === "notebook" ? ["Untitled", ".ipynb"] : kind === "board" ? ["Untitled board", ".board.json"] : ["New folder", ""];
     const p = freePath(folder, base, ext, (x) => taken.has(x));
     if (!p) return say("No free name here");
     try {
       // (made by the person here, in the file browser's New: provenance "person", design/capabilities.md §6)
-      const e = kind === "folder" ? await w.mkdir(p) : await w.createByPerson(p);
+      const e = kind === "folder" ? await w.mkdir(p) : await w.createByPerson(p, mode ? { mode } : {});
       if (folder !== "/") { open.add(folder); saveOpen(); }
       await refresh();
+      const opens = (now: Entry | null) => { if (now && kind !== "folder") host.open(now, "here"); };
       const r = tree.querySelector<HTMLElement>(`.frow[data-path="${CSS.escape(e.path)}"]`);
-      if (r) startRename(r, e);
+      if (r) startRename(r, e, opens);
+      else opens(e);
     } catch (err) { fail(err); }
   }
 
@@ -872,7 +889,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     else if (moved.length) say(`Moved ${what} to ${where}`, undo);
   }
 
-  newBtn.onclick = () => popup(newBtn, [["Notebook", () => make("/", "notebook")], ["Board", () => make("/", "board")], ["Folder", () => make("/", "folder")]]);
+  newBtn.onclick = () => popup(newBtn, [["Notebook", () => make("/", "notebook")], ["MATLAB notebook", () => make("/", "notebook", "matlab")], ["Board", () => make("/", "board")], ["Folder", () => make("/", "folder")]]);
   upBtn.onclick = () => pick("/");
   moreBtn.onclick = () => popup(moreBtn, [[trashView ? "All files" : "Trash", () => { trashView = !trashView; refresh(); }], ["Storage…", () => storage()]]);
   // (the search drawn once typing pauses: LIMIT-0B0-2)

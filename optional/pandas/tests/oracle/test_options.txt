@@ -1,0 +1,108 @@
+python 3.14.9 x86_64 glibc
+package et_xmlfile 2.0.0
+package numpy 2.5.1
+package openpyxl 3.1.5
+package pandas 3.1.0
+package python-dateutil 3.0.0
+package six 1.17.0
+package tzdata 2026.6
+pyarrow absent
+future.infer_string True
+str dtype <StringDtype(storage='python', na_value=nan)>
+option display.max_rows 60
+option display.min_rows 10
+option display.max_columns 0
+option display.width 80
+option display.precision 6
+option display.max_colwidth 50
+--
+== set.0
+!! ValueError: Value must be a nonnegative integer or None
+== set.1
+!! ValueError: Value must be an instance of <class 'NoneType'>|<class 'int'>
+== set.2
+!! ValueError: Value must be an instance of <class 'NoneType'>|<class 'int'>
+== set.3
+!! OptionError: 'Pattern matched multiple keys'
+== set.4
+!! OptionError: 'Pattern matched multiple keys'
+== set.5
+!! OptionError: "No such keys(s): 'display.foo'"
+== set.6
+3
+== get.max_col
+!! OptionError: 'Pattern matched multiple keys'
+== get.zzz
+!! OptionError: "No such keys(s): 'zzz'"
+== get.dis
+!! OptionError: 'Pattern matched multiple keys'
+== get.display.max_rows
+60
+== get.display.max_columns
+0
+== get.display.width
+80
+== get.display.min_rows
+10
+== get.display.precision
+6
+== get.display.max_colwidth
+50
+== get.display.max_ro
+60
+== reset.short
+!! ValueError: You must specify at least 4 characters when resetting multiple keys, use the special keyword "all" to reset all the options to their default value
+== reset.none
+!! OptionError: "No such keys(s) for pat='zz'"
+== options.set-new
+!! OptionError: 'You can only set the value of existing options'
+== options.get-missing
+!! OptionError: 'No such option'
+== options.get
+60
+== options.set
+7
+== context
+(None, 5, False, 60)
+== context.odd
+!! ValueError: Provide an even amount of arguments as option_context(pat, val, pat, val...).
+== context.dict
+50
+== set.reset-returns
+(None, None, 60)
+== errors.class
+((<class 'AttributeError'>, <class 'KeyError'>), True)
+== rows-6-min-4
+'\n     a     b    c\n0    0   0.0   s0\n1    1   0.5   s1\n..  ..   ...  ...\n98  98  49.0  s98\n99  99  49.5  s99\n\n[100 rows x 3 columns]\n0    0\n1    1\n    ..\n8    8\n9    9\nLength: 10, dtype: int64'
+== rows-none
+'\n0      0\n1      1\n2      2\n3      3\n4      4\n5      5\n6      6\n7      7\n8      8\n9      9\n10    10\n11    11\n12    12\n13    13\n14    14\n15    15\n16    16\n17    17\n18    18\n19    19\n20    20\n21    21\n22    22\n23    23\n24    24\n25    25\n26    26\n27    27\n28    28\n29    29\n30    30\n31    31\n32    32\n33    33\n34    34\n35    35\n36    36\n37    37\n38    38\n39    39\n40    40\n41    41\n42    42\n43    43\n44    44\n45    45\n46    46\n47    47\n48    48\n49    49\n50    50\n51    51\n52    52\n53    53\n54    54\n55    55\n56    56\n57    57\n58    58\n59    59\n60    60\n61    61\n62    62\n63    63\n64    64\ndtype: int64'
+== rows-0
+'\n0      0\n1      1\n2      2\n3      3\n4      4\n5      5\n6      6\n7      7\n8      8\n9      9\n10    10\n11    11\n      ..\n18    18\n19    19\n20    20\n21    21\n22    22\n23    23\n24    24\n25    25\n26    26\n27    27\n28    28\n29    29\nLength: 30, dtype: int64\n     a     b    c\n0    0   0.0   s0\n1    1   0.5   s1\n2    2   1.0   s2\n3    3   1.5   s3\n4    4   2.0   s4\n5    5   2.5   s5\n6    6   3.0   s6\n7    7   3.5   s7\n8    8   4.0   s8\n..  ..   ...  ...\n91  91  45.5  s91\n92  92  46.0  s92\n93  93  46.5  s93\n94  94  47.0  s94\n95  95  47.5  s95\n96  96  48.0  s96\n97  97  48.5  s97\n98  98  49.0  s98\n99  99  49.5  s99\n\n[100 rows x 3 columns]'
+== min-rows-none
+'\n0      0\n1      1\n2      2\n3      3\n4      4\n5      5\n6      6\n7      7\n8      8\n9      9\n10    10\n11    11\n12    12\n13    13\n14    14\n15    15\n16    16\n17    17\n18    18\n19    19\n20    20\n21    21\n22    22\n23    23\n24    24\n25    25\n26    26\n27    27\n28    28\n29    29\n      ..\n40    40\n41    41\n42    42\n43    43\n44    44\n45    45\n46    46\n47    47\n48    48\n49    49\n50    50\n51    51\n52    52\n53    53\n54    54\n55    55\n56    56\n57    57\n58    58\n59    59\n60    60\n61    61\n62    62\n63    63\n64    64\n65    65\n66    66\n67    67\n68    68\n69    69\nLength: 70, dtype: int64'
+== cols-4
+'\n   column_00  column_01  ...  column_28  column_29\n0        0.0        1.0  ...       28.0       29.0\n1        0.0        2.5  ...       70.0       72.5\n2        0.0      100.0  ...     2800.0     2900.0\n\n[3 rows x 30 columns]'
+== cols-none
+'\n   column_00  column_01  column_02  column_03  column_04  column_05  \\\n0        0.0        1.0        2.0        3.0        4.0        5.0   \n1        0.0        2.5        5.0        7.5       10.0       12.5   \n2        0.0      100.0      200.0      300.0      400.0      500.0   \n\n   column_06  column_07  column_08  column_09  column_10  column_11  \\\n0        6.0        7.0        8.0        9.0       10.0       11.0   \n1       15.0       17.5       20.0       22.5       25.0       27.5   \n2      600.0      700.0      800.0      900.0     1000.0     1100.0   \n\n   column_12  column_13  column_14  column_15  column_16  column_17  \\\n0       12.0       13.0       14.0       15.0       16.0       17.0   \n1       30.0       32.5       35.0       37.5       40.0       42.5   \n2     1200.0     1300.0     1400.0     1500.0     1600.0     1700.0   \n\n   column_18  column_19  column_20  column_21  column_22  column_23  \\\n0       18.0       19.0       20.0       21.0       22.0       23.0   \n1       45.0       47.5       50.0       52.5       55.0       57.5   \n2     1800.0     1900.0     2000.0     2100.0     2200.0     2300.0   \n\n   column_24  column_25  column_26  column_27  column_28  column_29  \n0       24.0       25.0       26.0       27.0       28.0       29.0  \n1       60.0       62.5       65.0       67.5       70.0       72.5  \n2     2400.0     2500.0     2600.0     2700.0     2800.0     2900.0  '
+== cols-20
+'\n   column_00  column_01  column_02  column_03  column_04  column_05  \\\n0        0.0        1.0        2.0        3.0        4.0        5.0   \n1        0.0        2.5        5.0        7.5       10.0       12.5   \n2        0.0      100.0      200.0      300.0      400.0      500.0   \n\n   column_06  column_07  column_08  column_09  ...  column_20  column_21  \\\n0        6.0        7.0        8.0        9.0  ...       20.0       21.0   \n1       15.0       17.5       20.0       22.5  ...       50.0       52.5   \n2      600.0      700.0      800.0      900.0  ...     2000.0     2100.0   \n\n   column_22  column_23  column_24  column_25  column_26  column_27  \\\n0       22.0       23.0       24.0       25.0       26.0       27.0   \n1       55.0       57.5       60.0       62.5       65.0       67.5   \n2     2200.0     2300.0     2400.0     2500.0     2600.0     2700.0   \n\n   column_28  column_29  \n0       28.0       29.0  \n1       70.0       72.5  \n2     2800.0     2900.0  \n\n[3 rows x 30 columns]'
+== width-40
+'\n   column_00  column_01  column_02  ...  column_27  column_28  column_29\n0        0.0        1.0        2.0  ...       27.0       28.0       29.0\n1        0.0        2.5        5.0  ...       67.5       70.0       72.5\n2        0.0      100.0      200.0  ...     2700.0     2800.0     2900.0\n\n[3 rows x 30 columns]'
+== width-40-cols-none
+'\n   column_00  column_01  column_02  \\\n0        0.0        1.0        2.0   \n1        0.0        2.5        5.0   \n2        0.0      100.0      200.0   \n\n   column_03  column_04  column_05  \\\n0        3.0        4.0        5.0   \n1        7.5       10.0       12.5   \n2      300.0      400.0      500.0   \n\n   column_06  column_07  column_08  \\\n0        6.0        7.0        8.0   \n1       15.0       17.5       20.0   \n2      600.0      700.0      800.0   \n\n   column_09  column_10  column_11  \\\n0        9.0       10.0       11.0   \n1       22.5       25.0       27.5   \n2      900.0     1000.0     1100.0   \n\n   column_12  column_13  column_14  \\\n0       12.0       13.0       14.0   \n1       30.0       32.5       35.0   \n2     1200.0     1300.0     1400.0   \n\n   column_15  column_16  column_17  \\\n0       15.0       16.0       17.0   \n1       37.5       40.0       42.5   \n2     1500.0     1600.0     1700.0   \n\n   column_18  column_19  column_20  \\\n0       18.0       19.0       20.0   \n1       45.0       47.5       50.0   \n2     1800.0     1900.0     2000.0   \n\n   column_21  column_22  column_23  \\\n0       21.0       22.0       23.0   \n1       52.5       55.0       57.5   \n2     2100.0     2200.0     2300.0   \n\n   column_24  column_25  column_26  \\\n0       24.0       25.0       26.0   \n1       60.0       62.5       65.0   \n2     2400.0     2500.0     2600.0   \n\n   column_27  column_28  column_29  \n0       27.0       28.0       29.0  \n1       67.5       70.0       72.5  \n2     2700.0     2800.0     2900.0  '
+== width-index
+"\nIndex(['item0', 'item1',\n       'item2', 'item3',\n       'item4', 'item5',\n       'item6', 'item7',\n       'item8', 'item9',\n       'item10', 'item11'],\n      dtype='str')"
+== precision-2
+'\n0    1.23\n1    2.50\ndtype: float64\n   a    b   c\n0  0  0.0  s0\n1  1  0.5  s1\n2  2  1.0  s2'
+== precision-0
+'\n0    2\n1    2\ndtype: float64'
+== precision-10
+'\n0    0.3333333333\n1    2.0000000000\ndtype: float64'
+== colwidth-5
+'\n      t\n0  a...\n1    ab'
+== colwidth-2
+'\n   t\n0 ..\n1 ..'
+== colwidth-none
+'\n                                                                        t\n0  yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy'
+== html-cols-4
+'\n<div>\n<style scoped>\n    .dataframe tbody tr th:only-of-type {\n        vertical-align: middle;\n    }\n\n    .dataframe tbody tr th {\n        vertical-align: top;\n    }\n\n    .dataframe thead th {\n        text-align: right;\n    }\n</style>\n<table border="1" class="dataframe">\n  <thead>\n    <tr style="text-align: right;">\n      <th></th>\n      <th>column_00</th>\n      <th>column_01</th>\n      <th>...</th>\n      <th>column_28</th>\n      <th>column_29</th>\n    </tr>\n  </thead>\n  <tbody>\n    <tr>\n      <th>0</th>\n      <td>0.0</td>\n      <td>1.0</td>\n      <td>...</td>\n      <td>28.0</td>\n      <td>29.0</td>\n    </tr>\n    <tr>\n      <th>1</th>\n      <td>0.0</td>\n      <td>2.5</td>\n      <td>...</td>\n      <td>70.0</td>\n      <td>72.5</td>\n    </tr>\n    <tr>\n      <th>2</th>\n      <td>0.0</td>\n      <td>100.0</td>\n      <td>...</td>\n      <td>2800.0</td>\n      <td>2900.0</td>\n    </tr>\n  </tbody>\n</table>\n<p>3 rows × 30 columns</p>\n</div>'

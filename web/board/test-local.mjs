@@ -5,7 +5,8 @@
 // new one if there is none); File > New board and Duplicate make boards of
 // their own, the one shown staying as it is.  The top bar's two menus, File
 // and ⋯, hold what the notebook's do, one open at a time.  An example board
-// (not blank) opens as before, not in Edit.  Serve web/dist first
+// (not blank, not made here) opens in View; a board made here opens in Edit
+// again (web/doc-mode.ts).  Serve web/dist first
 // (python3 web/serve.py 8765), then
 //   node web/board/test-local.mjs
 // (Since the workspace (step 1b), it runs on the fallback: ?workspace=0.)
@@ -62,7 +63,8 @@ try {
   await ev("window.sagebrush.board.edit((d) => { d.title = 'Sage sketch'; d.nodes = [{ id: 'n', title: 'kept' }]; }).then(() => 1)");
   await go("?recent=sage");
   const b = await here();
-  check(b.search === a.search && b.title === "Sage sketch" && b.items === 1 && !b.editing, "?recent=sage: the latest Sage board, as left (not blank: not in Edit): " + JSON.stringify(b));
+  // (made here, and left in Edit: it opens in Edit again, blank or not, web/doc-mode.ts; one not made here, below, in View)
+  check(b.search === a.search && b.title === "Sage sketch" && b.items === 1 && b.editing, "?recent=sage: the latest Sage board, as left, in Edit (made here): " + JSON.stringify(b));
   // ?recent=magma, with no Magma board yet: a new one
   await go("?recent=magma");
   const c = await here();
@@ -77,7 +79,7 @@ try {
   const top = await ev(`[...document.querySelectorAll('[data-sbb=filemenu] > button')].map((b) => b.dataset.group ?? b.dataset.item)`);
   check(JSON.stringify(top) === JSON.stringify(["new", "open", "recent", "upload", "saveCopy", "rename", "download", "print", "share", "delete"]), "File: " + JSON.stringify(top));
   const grp = (g) => ev(`[...document.querySelector('[data-sbb=filemenu] [data-group=${g}]').nextElementSibling.querySelectorAll('button')].map((b) => b.dataset.sbb)`);
-  check(JSON.stringify(await grp("new")) === JSON.stringify(["newnotebook", "newboard", "newfolder", "examples"]) && JSON.stringify(await grp("download")) === JSON.stringify(["download", "html", "canvas", "copyjson"]), "File's New ▸ and Download ▸: " + JSON.stringify([await grp("new"), await grp("download")]));
+  check(JSON.stringify(await grp("new")) === JSON.stringify(["newnotebook", "newmatlab", "newboard", "newfolder", "examples"]) && JSON.stringify(await grp("download")) === JSON.stringify(["download", "html", "canvas", "copyjson"]), "File's New ▸ and Download ▸: " + JSON.stringify([await grp("new"), await grp("download")]));
   check(JSON.stringify(await items("menu")) === JSON.stringify(["addpage", "pageprops", "rmpage", "tidy", "mermaid", "revert", "present", "timetravel", "term", "helpitem"]) && await ev("!!document.querySelector('[data-sbb=menu] [data-sbb=lang]')"), "⋯ (Import Mermaid… and Revert moved here): " + JSON.stringify(await items("menu")));
   await ev("document.querySelector('[data-sbb=menubtn]').click(), document.querySelector('[data-sbb=filebtn]').click(), 1");
   check(await ev("!document.querySelector('[data-sbb=filemenu]').hidden && document.querySelector('[data-sbb=menu]').hidden"), "one menu open at a time");
@@ -208,6 +210,12 @@ try {
   // an example board (not blank) opens as before: not in Edit, Revert there once edited
   await go("?doc=examples/primes.json");
   check(!(await here()).editing, "an example board opens out of Edit");
+  // a host without a notebook to make (grader's MT2 on #704): New ▸ Notebook and MATLAB notebook both disabled
+  await ev(`import('/board/board.js').then((m) => m.mounted.destroy()).then(() => 1)`);
+  await ev(`import('/board/board.js').then((m) => { window.__b = m.mountBoard(document.getElementById("board"), { ...m.host, files: m.host.files ? { ...m.host.files, newNotebook: undefined } : undefined }); return 1; })`);
+  await until("!!document.querySelector('[data-sbb=filemenu] [data-item=newMatlab]')", 20000);
+  const dis = await ev(`["newNotebook", "newMatlab"].map((k) => document.querySelector('[data-sbb=filemenu] [data-item=' + k + ']')?.disabled ?? null)`);
+  check(JSON.stringify(dis) === "[true,true]", "a host with no new notebook: New ▸ Notebook and MATLAB notebook disabled: " + JSON.stringify(dis));
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));

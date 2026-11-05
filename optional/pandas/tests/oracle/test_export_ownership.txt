@@ -1,0 +1,76 @@
+python 3.14.9 x86_64 glibc
+package et_xmlfile 2.0.0
+package numpy 2.5.1
+package openpyxl 3.1.5
+package pandas 3.1.0
+package python-dateutil 3.0.0
+package six 1.17.0
+package tzdata 2026.6
+pyarrow absent
+future.infer_string True
+str dtype <StringDtype(storage='python', na_value=nan)>
+option display.max_rows 60
+option display.min_rows 10
+option display.max_columns 0
+option display.width 80
+option display.precision 6
+option display.max_colwidth 50
+--
+== series-int64.to_numpy
+('ndarray', 'int64', '!! ValueError: assignment destination is read-only', np.int64(1))
+== series-int64.values
+('ndarray', 'int64', '!! ValueError: assignment destination is read-only', np.int64(1))
+== series-int64.to_numpy-copy
+('ndarray', 'int64', 'write ok', np.int64(1))
+== series-int64.asarray
+('ndarray', 'int64', '!! ValueError: assignment destination is read-only', np.int64(1))
+== series-float64.to_numpy
+('ndarray', 'float64', '!! ValueError: assignment destination is read-only', np.float64(1.5))
+== series-float64.values
+('ndarray', 'float64', '!! ValueError: assignment destination is read-only', np.float64(1.5))
+== series-float64.to_numpy-copy
+('ndarray', 'float64', 'write ok', np.float64(1.5))
+== series-float64.asarray
+('ndarray', 'float64', '!! ValueError: assignment destination is read-only', np.float64(1.5))
+== series-bool.to_numpy
+('ndarray', 'bool', '!! ValueError: assignment destination is read-only', np.True_)
+== series-bool.values
+('ndarray', 'bool', '!! ValueError: assignment destination is read-only', np.True_)
+== series-bool.to_numpy-copy
+('ndarray', 'bool', 'write ok', np.True_)
+== series-bool.asarray
+('ndarray', 'bool', '!! ValueError: assignment destination is read-only', np.True_)
+== frame-int64.to_numpy
+('ndarray', 'int64', '!! ValueError: assignment destination is read-only', np.int64(1))
+== frame-int64.values
+('ndarray', 'int64', '!! ValueError: assignment destination is read-only', np.int64(1))
+== frame-int64.to_numpy-copy
+('ndarray', 'int64', 'write ok', np.int64(1))
+== frame-float64.to_numpy
+('ndarray', 'float64', '!! ValueError: assignment destination is read-only', np.float64(1.5))
+== frame-float64.values
+('ndarray', 'float64', '!! ValueError: assignment destination is read-only', np.float64(1.5))
+== frame-float64.to_numpy-copy
+('ndarray', 'float64', 'write ok', np.float64(1.5))
+== frame-bool.to_numpy
+('ndarray', 'bool', '!! ValueError: assignment destination is read-only', np.True_)
+== frame-bool.values
+('ndarray', 'bool', '!! ValueError: assignment destination is read-only', np.True_)
+== frame-bool.to_numpy-copy
+('ndarray', 'bool', 'write ok', np.True_)
+== frame-int-float.to_numpy
+('ndarray', 'float64', 'write ok', np.int64(1))
+== frame-int-float.values
+('ndarray', 'float64', 'write ok', np.int64(1))
+== frame-int-float.to_numpy-copy
+('ndarray', 'float64', 'write ok', np.int64(1))
+== frame-int-float.values-dtype
+'float64'
+== frame.values-shape
+(2, 2)
+== frame.values-tolist
+[[1.0, 1.5], [2.0, 4.0]]
+== ndarray-mutated-after
+[1, 2, 3]
+== ndarray-2d-mutated-after
+np.int64(0)

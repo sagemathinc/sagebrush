@@ -10,8 +10,10 @@ import { join } from "node:path";
 export const KINDS = ["notebook", "board", "latex"];
 export const ID = /^(notebook|board|latex)\/[a-z0-9]+(-[a-z0-9]+)*$/;
 export const SLUG_MAX = 64;
-/** the most examples a shard runs, and the most shards a matrix has (GitHub's job limit) */
-export const SHARD_MAX = 24;
+/** the most examples a shard runs, and the most shards a matrix has (GitHub's job limit): 16, so that a shard's
+ * worst case, every example killed at its 30 s deadline, two at a time, is 4 minutes, and the job with its build
+ * stays inside PR CI's 10 minutes (William, Nov 2 and Nov 4) */
+export const SHARD_MAX = 16;
 export const MATRIX_MAX = 256;
 export const MODES = ["python", "sage", "magma", "matlab"];
 export const LEVELS = ["intro", "course", "research"];
@@ -490,11 +492,15 @@ export function normalizeNotebook(nb, loose = []) {
   });
 }
 
-/** Text an output must never hold (A5): the run's temporary folder, today's date, the host's name. */
-export function leaks(nbNorm, { tmp, date, host }) {
+/** Text an output must never hold (A5): the run's temporary folder, the checkout's path, today's date, the host's name. */
+export function leaks(nbNorm, { tmp, date, host, checkout }) {
   const s = JSON.stringify(nbNorm);
   return [
     tmp && s.includes(tmp) ? `the run's temporary folder (${tmp})` : null,
+    // (the checkout's own path, as a help page's "File:" line printed it: another machine's differs)
+    checkout && checkout.length > 1 && s.includes(JSON.stringify(checkout).slice(1, -1))
+      ? `the checkout's path (${checkout})`
+      : null,
     date && s.includes(date) ? `today's date (${date})` : null,
     host && host.length > 3 && s.includes(host)
       ? `the host name (${host})`

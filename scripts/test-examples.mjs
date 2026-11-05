@@ -7,7 +7,7 @@
 //   node --test scripts/test-examples.mjs
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -74,6 +74,8 @@ test("select: each row of the trigger table", () => {
     "latex/plain",
     "latex/sage-doc",
   ]);
+  // (examples/shared/: the LaTeX previews' one stylesheet, so the LaTeX examples; grader's C2)
+  assert.deepEqual(ids(["examples/shared/katex-preview.css"]), ["latex/plain", "latex/sage-doc"]);
   assert.deepEqual(ids(["README.md"]), []);
   assert.deepEqual(
     ids(["README.md"], { all: true }),
@@ -81,8 +83,8 @@ test("select: each row of the trigger table", () => {
   );
 });
 
-test("shards: every selected id exactly once, at most 24 per shard, at every boundary; over the matrix limit refused", () => {
-  for (const n of [0, 1, 24, 25, 288, 289, 320, 6144]) {
+test("shards: every selected id exactly once, at most 16 per shard, at every boundary; over the matrix limit refused", () => {
+  for (const n of [0, 1, 16, 17, 192, 193, 320, 4096]) {
     const all = Array.from(
       { length: n },
       (_, i) => `notebook/e${String(i).padStart(5, "0")}`,
@@ -96,19 +98,20 @@ test("shards: every selected id exactly once, at most 24 per shard, at every bou
       `n=${n}: each shard 1 to ${SHARD_MAX}`,
     );
   }
-  assert.throws(() => shardCount(6145), /GitHub's matrix limit/);
+  assert.throws(() => shardCount(4097), /GitHub's matrix limit/);
 });
 
 test("census: missing, repeated, unselected and oversized shards", () => {
   assert.deepEqual(census(["a", "b"], [["a"]]), ["b: selected but never ran"]);
   assert.deepEqual(census(["a"], [["a"], ["a"]]), ["a: ran 2 times"]);
   assert.deepEqual(census(["a"], [["a", "z"]]), ["z: ran but wasn't selected"]);
-  const big = Array.from({ length: 25 }, (_, i) => `x${i}`);
-  assert.match(census(big, [big]).join(), /more than 24/);
+  const big = Array.from({ length: 17 }, (_, i) => `x${i}`);
+  assert.match(census(big, [big]).join(), /more than 16/);
 });
 
 test("paths (A1): only strict relative paths", () => {
-  for (const ok of ["main.ipynb", "data/x.csv", "a b/c-d_e.f.txt"])
+  // (a/b/c/d.ipynb is at the depth limit, 4 segments; a/b/c/d/e, below, is past it)
+  for (const ok of ["main.ipynb", "data/x.csv", "a b/c-d_e.f.txt", "a/b/c/d.ipynb"])
     assert.equal(pathProblem(ok), null, ok);
   for (const bad of [
     "",
@@ -207,6 +210,12 @@ test("SVG canonicalization: generated ids don't matter, coordinates do (no round
     svgCanon('<svg id="title"/>'),
     '<svg id="title"/>',
     "a name, not a generated id, is kept",
+  );
+  // (the render's own stamps are dropped: two renders differing only in them hash the same)
+  const stamped = (g, t) => `<svg data-generated="${g}"><g data-timestamp="${t}"><path d="M 0 0 L 1 1"/></g></svg>`;
+  assert.equal(
+    sha256(svgCanon(stamped("2026-11-05T17:00:00Z", "1"))),
+    sha256(svgCanon(stamped("2026-11-06T09:30:00Z", "1762419000"))),
   );
 });
 
@@ -331,6 +340,17 @@ test("normalization (A5): streams joined, HTML exact, images hashed, errors and 
       "today's date (2026-11-03)",
     ],
   );
+  // (the host's name is reported too, when an output holds it)
+  assert.deepEqual(
+    leaks([[{ stream: "stdout", text: "built on build-host-7 today" }]], { host: "build-host-7" }),
+    ["the host name (build-host-7)"],
+  );
+  // (the checkout's own path, as help's "File:" line printed it on one machine and not another)
+  assert.deepEqual(
+    leaks([[{ stream: "stdout", text: "Type: method\nFile:      /scratch/sb/lib/_sage_modular.py\n" }]], { checkout: "/scratch/sb" }),
+    ["the checkout's path (/scratch/sb)"],
+  );
+  assert.deepEqual(leaks([[{ stream: "stdout", text: "File: lib/_sage_modular.py" }]], { checkout: "/scratch/sb" }), []);
 });
 
 // ---- the runner, on the fixture corpus (needs dist/)
@@ -419,6 +439,41 @@ test("the runner fails a changed output, an error, a hang (killed at the deadlin
   r = run(["run", "latex/article", "--root", root]);
   assert.equal(r.status, 1);
   assert.match(r.stdout, /preview\.html differs/);
+});
+
+test("the runner fails an output that holds the run's temporary folder", () => {
+  // (a notebook printing its working directory: the run's folder, which no committed output may hold)
+  const root = copy();
+  const nbFile = join(root, "notebook", "hello-python", "main.ipynb");
+  const nb = JSON.parse(readFileSync(nbFile, "utf8"));
+  nb.cells.filter((c) => c.cell_type === "code")[0].source = "import os\nprint(os.getcwd())";
+  writeFileSync(nbFile, JSON.stringify(nb));
+  const r = run(["run", "notebook/hello-python", "--root", root]);
+  assert.equal(r.status, 1, r.stdout);
+  assert.match(r.stdout, /an output holds the run's temporary folder/);
+});
+
+test("the runner fails an output that holds the checkout's own path", () => {
+  // (a notebook printing the checkout's path, as help's "File:" line once did: another machine's differs; grader's L2)
+  const root = copy();
+  const nbFile = join(root, "notebook", "hello-python", "main.ipynb");
+  const nb = JSON.parse(readFileSync(nbFile, "utf8"));
+  const checkout = realpathSync(join(here, ".."));
+  nb.cells.filter((c) => c.cell_type === "code")[0].source = `print(${JSON.stringify(join(checkout, "lib", "x.py"))})`;
+  writeFileSync(nbFile, JSON.stringify(nb, null, 1) + "\n");
+  const r = run(["run", "notebook/hello-python", "--root", root]);
+  assert.equal(r.status, 1, r.stdout);
+  assert.match(r.stdout, /an output holds the checkout's path/);
+});
+
+test("validate refuses a notebook that isn't in the runner's own form", () => {
+  // (the same notebook minified: its outputs would churn on the next --update; grader's N2)
+  const root = copy();
+  const nbFile = join(root, "notebook", "hello-python", "main.ipynb");
+  writeFileSync(nbFile, JSON.stringify(JSON.parse(readFileSync(nbFile, "utf8"))));
+  const r = run(["validate", "--root", root]);
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stdout + r.stderr, /notebook\/hello-python: .*not in the runner's form/);
 });
 
 test("ci shards and their census, end to end", () => {

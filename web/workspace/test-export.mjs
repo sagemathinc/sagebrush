@@ -444,42 +444,71 @@ try {
     }
   });
 
-  // ---- 5. files not on this device: refused, naming them, nothing written (no partial export: the r2 simplification)
+  // ---- 5. files not on this device: left out, the rest exported, and what is left out named in the panel, in the
+  // archive's not-included.txt and in manifest.json's `omitted` (William's B3)
   await scenario("unavailable", async () => {
-    const before = await lastAt();
-    const refused = async (label, re) => {
-      await hooks();
-      const f = await exportOnce(join(out, "f.zip"));
-      check(!!f.stopped && /aren't on this device yet|isn't on this device yet/.test(f.stopped) && re.test(f.stopped) && !(await ev(`!!window.__exp`)), label + ": refused, naming it, nothing handed over: " + (f.stopped ?? "not stopped").slice(-200));
-    };
+    // (1) a data file in the cloud only, a data file whose bytes aren't here though nothing says so, and a board whose
+    // record isn't here: none of them blocks the export
     await idb("sagebrush-workspace", "entries", `(s) => { const t = Date.now(); return s.put({ path: "/cloud.csv", kind: "file", ref: "/cloud.csv", size: 10, created: t, updated: t, fid: "cloudfid", ident: "cloudfid", sha256: "0".repeat(64), remote: true, fetch: "0".repeat(64) }); }`);
-    await refused("a file in the cloud only", /cloud\.csv \(in the cloud only\)/);
-    await idb("sagebrush-workspace", "entries", `(s) => s.delete("/cloud.csv")`);
-    // (an unflagged data file whose bytes are gone: found by preflight's check, not halfway through)
     await ev(`${W}.create("/gone.bin", { content: new Uint8Array([1, 2, 3]) }).then(() => 1)`);
     const gfid = await ev(`${W}.stat("/gone.bin").then((e) => e.fid)`);
     await idb("sagebrush-workspace", "fileBytes", `(s) => s.delete(${JSON.stringify(gfid)})`);
-    await refused("a data file whose bytes aren't here, though nothing says so", /gone\.bin \(missing\)/);
-    await ev(`${W}.remove("/gone.bin").then(() => 1, () => 0)`);
-    await idb("sagebrush-workspace", "entries", `(s) => s.delete("/gone.bin")`);
-    // (an unflagged document whose record is gone)
     await ev(`${W}.create("/Gone.board.json").then(() => 1)`);
     const gref = await ev(`${W}.stat("/Gone.board.json").then((e) => e.ref)`);
     await idb("sagebrush-workspace", "boards", `(s) => s.delete(${JSON.stringify(gref)})`);
-    await refused("a board whose record isn't here", /Gone\.board\.json \(missing\)/);
-    await ev(`${W}.remove("/Gone.board.json").then(() => 1, () => 0)`);
-    await idb("sagebrush-workspace", "entries", `(s) => s.delete("/Gone.board.json")`);
-    // (a file whose bytes go after preflight: the export stops, and nothing is left out silently)
+    // (2) a board another device made: listed from the server, its content never here (boards' contents don't sync)
+    await idb("sagebrush-workspace", "entries", `(s) => { const t = Date.now(); return s.put({ path: "/scratch.board.json", kind: "board", ref: "elsewhere-board", created: t, updated: t, nkey: "/scratch.board.json", ident: "elsewhere-ident", remote: true }); }`);
+    // (3) a notebook another device made, opened here since (its record is here) but still flagged as listed from the
+    // server, as the Files list shows it: exported, never "in the cloud only" (William's Welcome (2))
+    await ev(`${W}.create("/Welcome (2).ipynb", { content: ${nb("arrived")} }).then(() => 1)`);
+    await idb("sagebrush-workspace", "entries", `(s) => { const q = s.get("/Welcome (2).ipynb"); q.onsuccess = () => s.put({ ...q.result, remote: true }); return q; }`);
+    const flagged = await ev(`${W}.stat("/Welcome (2).ipynb").then((e) => e.remote === true)`);
+    await hooks();
+    const ready = await exportOnce(join(out, "f0.zip"), { refuseAtReady: true });
+    const readyText = ready.readyText ?? ready.stopped ?? "";
+    check(/4 files aren't on this device, so they are left out of the export:/.test(readyText) && /\/cloud\.csv \(in the cloud only\)/.test(readyText) && /\/gone\.bin \(missing\)/.test(readyText) && /\/Gone\.board\.json \(missing\)/.test(readyText) && /\/scratch\.board\.json \(in the cloud only\)/.test(readyText) && !/Welcome \(2\)/.test(readyText), "B3 (1): Ready names what is left out, and why, and offers Save…: " + readyText.slice(-400));
+    await hooks();
+    const f = await exportOnce(join(out, "f.zip"));
+    check(!f.stopped && /left out of the export/.test(f.summary ?? "") && /not-included\.txt lists them too/.test(f.summary ?? ""), "B3 (1): the export is made, its summary naming what is left out: " + (f.stopped ?? f.summary ?? "").slice(-300));
+    const z = f.stopped ? { names: [], entries: [], manifest: {} } : inspect(join(out, "f.zip"));
+    const omitted = JSON.stringify(z.manifest?.omitted ?? null);
+    check(z.bad === null && z.unzip === 0 && z.mismatch?.length === 0 && z.last_central === "manifest.json" && z.names.includes("not-included.txt") && z.names.includes("files/Small.ipynb"), "B3 (1): …a sound archive with the rest, not-included.txt beside the files and manifest.json last: " + JSON.stringify(z.names ?? z.error).slice(0, 300));
+    check(!z.names.some((n) => /cloud\.csv|gone\.bin|Gone\.board|scratch\.board/.test(n)) && omitted === JSON.stringify([
+      { path: "/Gone.board.json", kind: "board", why: "missing" },
+      { path: "/cloud.csv", kind: "file", why: "remote" },
+      { path: "/gone.bin", kind: "file", why: "missing" },
+      { path: "/scratch.board.json", kind: "board", why: "remote" },
+    ].sort((a, b) => (a.path < b.path ? -1 : 1))), "B3 (1, 2): none of them in the archive, all four in manifest.json's omitted, in path order: " + omitted);
+    const note = f.stopped ? "" : member(join(out, "f.zip"), "not-included.txt").toString("utf8");
+    check(/^4 files aren't on this device, so they are left out of the export:\n/.test(note) && note.includes("/scratch.board.json  (in the cloud only)") && note.includes("/cloud.csv  (in the cloud only)") && note.includes("/gone.bin  (missing)") && note.includes("/Gone.board.json  (missing)"), "B3 (1, 2): not-included.txt lists each of them and why: " + JSON.stringify(note.slice(0, 300)));
+    check(flagged && z.names.includes("files/Welcome (2).ipynb") && !omitted.includes("Welcome") && z.entries.some((e) => e.path === "/Welcome (2).ipynb" && e.kind === "notebook"), "B3 (3): a notebook from another device whose content is here (opened since) is exported, though its entry still says it was listed from the server");
+    check(z.manifest?.totals?.files === z.entries.filter((e) => e.kind !== "folder").length, "…the manifest's totals count the workspace's files only, not the note: " + JSON.stringify(z.manifest?.totals));
+    check((await ev(`${LAST}.then((l) => l?.partial === true)`)), "…and \"Last export prepared\" says it was partial");
+    // (the B3 hang, CI's web-export, Nov 3: Cancel at Ready held this tab's export until its records were removed, the
+    // Ready and its Save… still shown; an export begun meanwhile was refused, and the old Save… pressed did nothing.
+    // Now Cancel clears the panel and lets the page go at once: with that removal held, a new export starts and ends)
+    await hooks(`beforeCancelRemove: () => new Promise((r) => { window.__releaseRemove = r; })`);
+    const held = await exportOnce(join(out, "f1.zip"), { refuseAtReady: true });
+    const cleared = await until(`typeof window.__releaseRemove === "function" && ![...(${P}?.querySelectorAll("button") ?? [])].some((b) => /^Save…$/.test(b.textContent))`, 10000);
+    await hooks();
+    const f2 = await exportOnce(join(out, "f2.zip"));
+    check(await ev(`${LOCKS}`) === 1, "…while its records' removal is held, the cancelled export's lock is still held (1): " + (await ev(`${LOCKS}`)));
+    await ev(`(() => { window.__releaseRemove?.(); return 1; })()`);
+    check(!!held.readyText && cleared && !f2.stopped && /left out of the export/.test(f2.summary ?? ""), "B3: Cancel at Ready clears the panel at once (no Save… left), and an export begun while its records are still being removed starts and ends: " + (f2.stopped ?? "").slice(-200));
+    check(await until(`${LOCKS}.then((n) => n === 0)`, 10000), "…and once that removal ends, no export's lock is left");
+    for (const p of ["/cloud.csv", "/scratch.board.json"]) await idb("sagebrush-workspace", "entries", `(s) => s.delete(${JSON.stringify(p)})`);
+    for (const p of ["/gone.bin", "/Gone.board.json", "/Welcome (2).ipynb"]) { await ev(`${W}.remove(${JSON.stringify(p)}).then(() => 1, () => 0)`); await idb("sagebrush-workspace", "entries", `(s) => s.delete(${JSON.stringify(p)})`); }
+    // (a file whose bytes go after preflight: the export stops, so what is left out is always the whole list)
+    const before = await lastAt();
     await ev(`${W}.create("/late.txt", { content: "late" }).then(() => 1)`);
     await hooks(`beforeCapture: async (p) => { if (p === "/late.txt") { const fid = (await window.sagebrush.workspace.stat(p)).fid; await ${IDB}("sagebrush-workspace", "fileBytes", (s) => s.delete(fid)); } }`);
     const late = await exportOnce(join(out, "late.zip"));
     check(!!late.stopped && /late\.txt isn't on this device/.test(late.stopped) && !(await ev(`!!window.__exp`)), "a file evicted after preflight stops the export, nothing handed over: " + (late.stopped ?? "not stopped").slice(-200));
-    check((await lastAt()) === before, "…and the status line is unchanged by any of them");
+    check((await lastAt()) === before, "…and the status line is unchanged by it");
     await ev(`${W}.remove("/late.txt").then(() => 1, () => 0)`);
     await idb("sagebrush-workspace", "entries", `(s) => s.delete("/late.txt")`);
   });
 
-  // ---- 6. the picker's sink: committed only by close(); aborted on every failure, the earliest too; status unchanged
   await scenario("picker", async () => {
     await ev(`(() => { window.__picked = null; window.__aborted = 0; window.showSaveFilePicker = async () => ({ createWritable: async () => { const parts = []; return { write: async (c) => { parts.push(new Uint8Array(c)); }, close: async () => { window.__picked = new Blob(parts); }, abort: async () => { window.__aborted++; } }; } }); return 1; })()`);
     await ev(`(() => { window.__exp = null; window.__SB_EXPORT_TEST__ = { stats: {} }; return 1; })()`);
@@ -988,14 +1017,15 @@ print(json.dumps({"members": len(b), "diffs": diffs[:6], "ndiffs": len(diffs), "
     const clickP = (re) => ev(`(() => { [...(${P}?.querySelectorAll("button") ?? [])].find((b) => ${re}.test(b.textContent))?.click(); return 1; })()`);
     const settled = async () => (await until(`${LOCKS}.then((m) => m === 0)`, 15000)) && (await rowsFiles()).length === 0;
     let before = await lastAt();
-    // (1) the refusal: gone while the panel shows
+    // (1) something left out (William's B3): Ready names it, the records kept while it shows, removed by its Cancel
     await idb("sagebrush-workspace", "entries", `(s) => { const t = Date.now(); return s.put({ path: "/rows-cloud.csv", kind: "file", ref: "/rows-cloud.csv", size: 10, created: t, updated: t, fid: "rcfid", ident: "rcfid", sha256: "0".repeat(64), remote: true, fetch: "0".repeat(64) }); }`);
     await hooks();
     await startFlow();
-    const refusedShown = (await shows(/^Export again$/)) && /isn't on this device yet/.test(await panelText());
-    const duringRefusal = await rowsFiles();
-    await closeFlow();
-    check(refusedShown && duringRefusal.length === 0 && (await settled()), "rows: refusal: the records are removed before the refusal is shown (none while it shows), and nothing is left after it: " + JSON.stringify(duringRefusal));
+    const leftShown = (await shows(/^Save…$/)) && /rows-cloud\.csv \(in the cloud only\)/.test(await panelText());
+    const duringLeft = await rowsFiles();
+    await clickP(/^Cancel$/);
+    await sleep(300);
+    check(leftShown && duringLeft.length > 0 && (await settled()), "rows: left out at Ready: the records kept while Ready shows, and nothing left after its Cancel: " + JSON.stringify(duringLeft));
     await idb("sagebrush-workspace", "entries", `(s) => s.delete("/rows-cloud.csv")`);
     // (2) Cancel in preflight
     await hooks(`preflightMember: (p) => new Promise((r) => { if (window.__pm) return r(); window.__pm = 1; setTimeout(() => { [...document.querySelectorAll(".sbfprev button")].find((x) => x.textContent === "Cancel")?.click(); setTimeout(r, 300); }, 300); })`);
@@ -1149,19 +1179,41 @@ print(json.dumps({"members": len(b), "diffs": diffs[:6], "ndiffs": len(diffs), "
       for (let k = 1; k <= 200; k++) P8.push(folder("/g/" + String(k).padStart(6, "0") + "z".repeat(20), k));
       const bytes = (s) => Buffer.byteLength(s);
       const cap13 = 1761900000000;
-      const need = P8.reduce((n, e) => n + (46 + 12 + bytes(e.path) + 7) + (bytes(JSON.stringify({ path: e.path, kind: "folder", fid: e.fid, created: e.created, modified: e.updated, captured: cap13 })) + 1) + (bytes(JSON.stringify([e.path, "folder", e.ident])) + 1) + rec(e.path.length), 0);
+      // (manifest.json's own central record, 46 + 12 + 13, in the index's bound since #545)
+      const need = 46 + 12 + 13 + P8.reduce((n, e) => n + (46 + 12 + bytes(e.path) + 7) + (bytes(JSON.stringify({ path: e.path, kind: "folder", fid: e.fid, created: e.created, modified: e.updated, captured: cap13 })) + 1) + (bytes(JSON.stringify([e.path, "folder", e.ident])) + 1) + rec(e.path.length), 0);
       await putAll([...saved.filter(keep), ...P8]);
       await reload();
       await only(P8);
+      // (the page writes after its reload, at a time of its own: with no last document to open, it opens and saves its
+      // Welcome notebook (index.html's openHostMade), sometimes after any one only() (master a2fd6363's red, the grader's
+      // repro on #601: /Welcome.ipynb, 13 bytes).  So each P-8 export is checked for entries the test didn't put there
+      // (in its archive, or, for a refused one, in the workspace as it ran) and, with any, named and made again after
+      // only(), at most 3 times; the verdicts are the clean attempt's)
+      const mineP = new Set(P8.map((e) => e.path));
+      const strayKeys = async () => (await idb("sagebrush-workspace", "entries", `(s) => s.getAllKeys()`)).filter((q) => !mineP.has(q) && !keep({ path: q }));
+      const strayed = [];
+      const exportClean = async (file, extra, control = false) => {
+        for (let i = 0; i < 3; i++) {
+          await hooks(extra);
+          await only(P8);
+          // (the control, its first attempt only: a late write as the page's, AFTER only() and before the export)
+          if (control && i === 0) await putAll([...(await idb("sagebrush-workspace", "entries", `(s) => s.getAll()`)), folder("/late00000001", 999)]);
+          const r = await exportOnce(join(out, file));
+          const strays = r.stopped ? await strayKeys() : (inspect(join(out, file)).entries ?? []).map((e) => e.path).filter((q) => !mineP.has(q) && !keep({ path: q }));
+          if (!strays.length) return r;
+          strayed.push(...strays);
+          console.log(`(P-8: ${file}, attempt ${i + 1}: entries the page wrote after only(), named, taken out, exported again: ${JSON.stringify(strays).slice(0, 300)})`);
+        }
+        return null;
+      };
       // (the test's sum against the export's own accounting: its plan's three bounds and its records, with OPFS)
-      await hooks(`onPlan: (plan) => { window.__plan = [plan.cdSpool, plan.manSpool, plan.capSpool]; }`);
-      const pre = await exportOnce(join(out, "p8pre.zip"));
+      const pre = await exportClean("p8pre.zip", `onPlan: (plan) => { window.__plan = [plan.cdSpool, plan.manSpool, plan.capSpool]; }`, true);
+      check(!!pre && strayed.includes("/late00000001"), "P-8: the control's late write (after only(), before the export) was seen as a stray, and the export made again without it: " + JSON.stringify(strayed).slice(0, 300));
       const parts = await ev(`window.__plan`);
-      const mine = [P8.reduce((n, e) => n + 46 + 12 + bytes(e.path) + 7, 0), P8.reduce((n, e) => n + bytes(JSON.stringify({ path: e.path, kind: "folder", fid: e.fid, created: e.created, modified: e.updated, captured: cap13 })) + 1, 0), P8.reduce((n, e) => n + bytes(JSON.stringify([e.path, "folder", e.ident])) + 1, 0), P8.reduce((n, e) => n + rec(e.path.length), 0)];
-      check(!pre.stopped && JSON.stringify([...parts, pre.stats?.rowSize]) === JSON.stringify(mine), "P-8: the threshold the test computes is the export's own: its bounds and records " + JSON.stringify([...(parts ?? []), pre.stats?.rowSize]) + ", computed " + JSON.stringify(mine));
+      const mine = [46 + 12 + 13 + P8.reduce((n, e) => n + 46 + 12 + bytes(e.path) + 7, 0), P8.reduce((n, e) => n + bytes(JSON.stringify({ path: e.path, kind: "folder", fid: e.fid, created: e.created, modified: e.updated, captured: cap13 })) + 1, 0), P8.reduce((n, e) => n + bytes(JSON.stringify([e.path, "folder", e.ident])) + 1, 0), P8.reduce((n, e) => n + rec(e.path.length), 0)];
+      check(!!pre && !pre.stopped && JSON.stringify([...parts, pre?.stats?.rowSize]) === JSON.stringify(mine), "P-8: the threshold the test computes is the export's own: its bounds and records " + JSON.stringify([...(parts ?? []), pre?.stats?.rowSize]) + ", computed " + JSON.stringify(mine));
       for (const [label, cap, ok] of [["at the threshold", need - 1, false], ["one byte below it", need, true]]) {
-        await hooks(`noOpfs: true, caps: { spoolBlob: ${cap} }`);
-        const p = await exportOnce(join(out, "p8.zip"));
+        const p = (await exportClean("p8.zip", `noOpfs: true, caps: { spoolBlob: ${cap} }`)) ?? { stopped: "the page kept writing entries of its own" };
         if (ok) check(!p.stopped, `P-8: without OPFS, ${P8.length} folders needing ${need} bytes of in-memory spools, the records counted, with the cap at ${cap}: exported: ` + (p.stopped ?? p.name));
         else check(!!p.stopped && p.stopped.includes(NO_OPFS) && !(await ev(`!!window.__exp`)), `P-8: without OPFS, the same with the cap at ${cap} (${label}): refused in preflight, in plain words, nothing written: ` + String(p.stopped ?? "not stopped").slice(-200));
       }
@@ -1590,6 +1642,25 @@ print(json.dumps({"members": len(b), "diffs": diffs[:6], "ndiffs": len(diffs), "
     // (the large workspace taken away again)
     await idb("sagebrush-workspace", "entries", `(s) => s.delete(IDBKeyRange.bound("/bulk", "/bulk/\\uffff"))`);
     await ev(`${W}.remove("/zzz/late.csv").then(() => ${W}.remove("/zzz")).then(() => 1, () => 0)`);
+  });
+
+  // ---- a near-empty workspace (agents-ui's finding on #545): the index's spool holds manifest.json's central record,
+  // and not-included.txt's, however few the entries (last: everything else is put in Trash, which isn't exported)
+  await scenario("tiny", async () => {
+    const top = await ev(`${W}.list("/").then((l) => l.map((e) => ({ path: e.path, kind: e.kind })))`);
+    const keep = top.find((e) => e.kind === "notebook")?.path;
+    for (const e of top) if (e.path !== keep && e.path !== "/Trash") await ev(`${W}.remove(${JSON.stringify(e.path)}).then(() => 1, () => 0)`);
+    const left = await ev(`${W}.list("/").then((l) => l.filter((e) => e.path !== "/Trash").map((e) => e.path))`);
+    await hooks();
+    const one = await exportOnce(join(out, "tiny1.zip"));
+    const z1 = one.stopped ? { names: [] } : inspect(join(out, "tiny1.zip"));
+    check(!!keep && JSON.stringify(left) === JSON.stringify([keep]) && !one.stopped && z1.bad === null && JSON.stringify(z1.names) === JSON.stringify(["files" + keep, "manifest.json"]), `tiny: one notebook alone exports (${JSON.stringify({ left, stopped: one.stopped?.slice(-160), names: z1.names })})`);
+    await idb("sagebrush-workspace", "entries", `(s) => { const t = Date.now(); return s.put({ path: "/tiny-cloud.csv", kind: "file", ref: "/tiny-cloud.csv", size: 10, created: t, updated: t, fid: "tcfid", ident: "tcfid", sha256: "0".repeat(64), remote: true, fetch: "0".repeat(64) }); }`);
+    await hooks();
+    const two = await exportOnce(join(out, "tiny2.zip"));
+    const z2 = two.stopped ? { names: [] } : inspect(join(out, "tiny2.zip"));
+    check(!two.stopped && z2.bad === null && JSON.stringify(z2.names) === JSON.stringify(["files" + keep, "not-included.txt", "manifest.json"]), `tiny: …and with a file in the cloud only, left out and listed (${JSON.stringify({ stopped: two.stopped?.slice(-160), names: z2.names })})`);
+    await idb("sagebrush-workspace", "entries", `(s) => s.delete("/tiny-cloud.csv")`);
   });
 
   check(errors.length === 0, "no page errors: " + errors.slice(0, 3).join(" | "));

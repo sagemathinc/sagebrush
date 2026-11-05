@@ -217,6 +217,8 @@ try {
     await key("Escape", 27);
     await sleep(300);
     if (await ev("!!window.board.editing")) { await key("Escape", 27); await sleep(200); }
+    // (an Esc with nothing left to stop goes back to View, web/doc-mode.ts: Edit again for the next tool)
+    await ev(`${B}.editing(true), 1`);
   }
   await ev("document.querySelector('.board-toolbar .tb-more').click(), 1");
   await ev("document.querySelector('.board-toolbar-panel .tb-use[data-tool=sticker]').click(), 1");
