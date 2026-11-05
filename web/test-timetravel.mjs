@@ -169,7 +169,44 @@ try {
   await a.ev("document.querySelector('#ttbtn').click()");
   await a.until(`${versions} === 2`, 5000);
   ok(true, "an edit in the other tab is a version here too");
+  await a.ev("document.querySelector('#ttclose').click()");
+
+  // the language menu's tooltip follows the language however it changes (sage's n8 walkthrough; grader's D5-D7 on
+  // #695): a change made in another tab, a version restored, a notebook opened (a reload)
+  const tip = "document.querySelector('#mode').title";
+  const choose = (t, m) => t.ev(`(() => { window.confirm = () => true; const s = document.querySelector('#mode'); s.value = ${JSON.stringify(m)}; s.dispatchEvent(new Event('change')); return 1; })()`);
+  ok(/^Python mode:/.test(await a.ev(tip)), "(the tooltip is Python's: " + (await a.ev(tip)) + ")");
+  await choose(b, "matlab");
+  await a.until("sagebrush.notebook.mode === 'matlab'", 10000);
+  ok(/^MATLAB mode:/.test(await a.ev(tip)), "the other tab makes it MATLAB: this tab's tooltip is MATLAB's too: " + (await a.ev(tip)));
+  // (a version restored: only with the notebook open here alone)
   b.ws.close();
+  await fetch(`http://127.0.0.1:${cdpPort}/json/close/` + tb.id);
+  await a.send("Page.bringToFront");
+  await a.until("!document.querySelector('#tabs').textContent.includes('another tab')", 10000);
+  // (this tab's own MATLAB first, set through its menu: Python, then MATLAB, so the tooltip is MATLAB's whatever the
+  // other tab's change did; a restore of the Python version just before must then make it Python's)
+  await choose(a, "python");
+  await a.until("sagebrush.notebook.mode === 'python'", 10000);
+  await sleep(900);
+  await choose(a, "matlab");
+  await a.until("sagebrush.notebook.mode === 'matlab'", 10000);
+  await sleep(900);
+  ok(/^MATLAB mode:/.test(await a.ev(tip)), "(this tab's MATLAB, set here: the tooltip is MATLAB's)");
+  await a.ev("document.querySelector('#ttbtn').click()");
+  await a.until(`${versions} >= 3`, 5000);
+  await a.ev("(() => { const s = document.querySelector('#ttslider'); s.value = +s.max - 1; s.dispatchEvent(new Event('input')); return 1; })()");
+  await sleep(300);
+  await a.ev("document.querySelector('#ttrevert').click()");
+  await a.until("document.querySelector('#timetravel').hidden && sagebrush.notebook.mode === 'python'", 10000);
+  ok(/^Python mode:/.test(await a.ev(tip)), "a version in Python restored: the tooltip is Python's again: " + (await a.ev(tip)));
+  // (a notebook opened in MATLAB: a reload of one left in MATLAB)
+  await choose(a, "matlab");
+  await a.until("sagebrush.notebook.mode === 'matlab'", 10000);
+  await sleep(900);
+  await a.send("Page.reload");
+  await a.until("window.sagebrush && document.querySelectorAll('#cells .cell').length > 0 && sagebrush.notebook.mode === 'matlab'", 30000);
+  ok(/^MATLAB mode:/.test(await a.ev(tip)), "a notebook opened in MATLAB (a reload): the tooltip is MATLAB's: " + (await a.ev(tip)));
   a.ws.close();
 } catch (e) {
   console.log("ERROR", e.message);

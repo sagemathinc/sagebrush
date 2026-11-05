@@ -63,6 +63,8 @@ const search = async (q) => {
   return ev(`[...document.querySelectorAll("#docresults li")].map((li) => li.textContent)`);
 };
 const mode = () => ev("window.sagebrush.notebook.mode");
+// (the language menu's tooltip: what the selected language does, sage's n8 walkthrough)
+const tip = () => ev(`document.querySelector("#mode").title`);
 
 try {
   await send("Runtime.enable");
@@ -80,6 +82,7 @@ try {
   answer = false;
   await choose("matlab");
   check(await mode() === "matlab" && dialogs.length === 0, "an empty notebook's language changes without a question");
+  check(/^MATLAB mode:/.test(await tip()), "the menu's tooltip is MATLAB's: " + JSON.stringify(await tip()));
 
   let hits = await search("galois group");
   check(!hits.some((t) => /galois/i.test(t)), "in a MATLAB notebook, the search has no Sage functions: " + JSON.stringify(hits[0]?.slice(0, 80)));
@@ -88,11 +91,13 @@ try {
   check(hits.some((t) => /^(?:\S+ = )?linspace\b/.test(t)), "and finds MATLAB's: " + JSON.stringify(hits[0]?.slice(0, 60)));
 
   await choose("sage");
+  check(/^Sage mode:/.test(await tip()), "the menu's tooltip is Sage's: " + JSON.stringify(await tip()));
   hits = await search("galois group");
   check(hits.some((t) => /galois_group/.test(t)), "in a Sage notebook, it finds Sage's functions");
   check(!(await ev(`[...document.querySelectorAll("#docresults li")].some((li) => li.textContent.startsWith("linspace("))`)), "and no MATLAB ones");
 
   await choose("python");
+  check(/^Python mode:/.test(await tip()) && !/Sage/.test(await tip()), "the menu's tooltip is Python's, with no Sage line: " + JSON.stringify(await tip()));
   hits = await search("galois group");
   check(!hits.some((t) => /galois/i.test(t)), "in a Python notebook, the search has no Sage functions: " + JSON.stringify(hits[0]?.slice(0, 80)));
   hits = await search("linspace");
@@ -124,6 +129,7 @@ try {
   await sleep(300);
   check(dialogs.length === 1 && /from Sage to MATLAB/.test(dialogs[0]), "with code, choosing another language asks first: " + JSON.stringify(dialogs[0]?.slice(0, 70)));
   check(await mode() === "sage" && await ev(`document.querySelector("#mode").value`) === "sage", "No keeps the notebook's language, and the menu shows it");
+  check(/^Sage mode:/.test(await tip()), "…and its tooltip is still Sage's: " + JSON.stringify(await tip()));
 
   // (a Sage function opened in a MATLAB notebook: its examples can't be inserted there)
   answer = true;

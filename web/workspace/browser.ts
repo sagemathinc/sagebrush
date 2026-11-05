@@ -706,7 +706,10 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     // extension keeps the old one; a different extension is allowed and said beside the box while it is typed, before
     // Enter (or leaving the box) renames. A folder's name is all name)
     const file = e.kind === "file", fileExt = file ? splitExt(full)[1] : "";
-    const finalName = (v: string) => (file && fileExt && !splitExt(v)[1] ? v + fileExt : v + ext);
+    // (a notebook's or board's name typed with its own extension gets it once, not twice: sage's n8 walkthrough,
+    // "chapter1.ipynb.ipynb"; the extension alone is no name, and leaves the old one)
+    const stem = (v: string) => (ext && v.toLowerCase().endsWith(ext.toLowerCase()) ? v.slice(0, -ext.length).trimEnd() : v);
+    const finalName = (v: string) => (file && fileExt && !splitExt(v)[1] ? v + fileExt : !stem(v) ? full : stem(v) + ext);
     const input = h("input", { value: base });
     input.setAttribute("aria-label", `New name for ${full}`);
     const note = h("span", { className: "extnote" });
