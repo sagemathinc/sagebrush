@@ -22,7 +22,7 @@ import { Worker, parentPort, workerData } from "worker_threads";
 import { sessionLimits, startLimits } from "./limits";
 import { ZSocket } from "./zmtp";
 import { initParser, R, libDir, packageModuleNames } from "./compile";
-import { needsMore, complete, ipythonSyntax } from "./interactive";
+import { needsMore, completeIn, ipythonSyntax } from "./interactive";
 import { magmaToPython, MagmaSyntaxError } from "./magma";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, matlabIsIncomplete } from "./matlab";
 import { mimeBundle } from "./runtime/index";
@@ -548,7 +548,7 @@ export function kernelWorker(mode: Mode) {
       return;
     }
     if (m.complete !== undefined) {
-      const [matches, prefix] = complete(main, m.complete, () => [...new Set(moduleNames())]);
+      const [matches, prefix] = completeIn(mode, main, m.complete, () => [...new Set(moduleNames())]);
       port.postMessage({ id: m.id, matches, prefix });
       return;
     }

@@ -130,6 +130,13 @@ const tty = (args: string[], input: string) => {
   const r = spawnSync("script", ["-qec", cmd, "/dev/null"], { input, encoding: "utf8", timeout: 60000 });
   return { status: r.status, out: (r.stdout ?? "").replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replace(/\r/g, ""), err: r.error };
 };
+// tty's, with the input typed in steps, a pause after each (so that each arrives as its own keypresses)
+const ttySteps = (args: string[], steps: string[]) => {
+  const cmd = [process.execPath, cli, ...args].map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(" ");
+  const feed = steps.map((s) => `printf '%s' '${s.replace(/'/g, "'\\''")}'; sleep 0.4`).join("; ");
+  const r = spawnSync("sh", ["-c", `(sleep 6; ${feed}) | script -qec "$0" /dev/null`, cmd], { encoding: "utf8", timeout: 60000 });
+  return { status: r.status, out: (r.stdout ?? "").replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replace(/\r/g, ""), err: r.error };
+};
 const hasScript = process.platform === "linux" && spawnSync("script", ["--version"], { encoding: "utf8" }).status === 0;
 
 test("an interactive --magma session: Magma at a > prompt, statements wait for their ;, an error and the session goes on", { skip: !hasScript && "needs util-linux script(1)" }, () => {
@@ -173,4 +180,14 @@ test("an interactive --matlab session: MATLAB at a >> prompt, ... continues a li
   const f = tty(["--matlab"], "function y = f(x)\ndisp(7)\nexit\n");
   assert.equal(f.status, 0, f.out);
   assert.match(f.out, /Function definitions are not supported in this context\. Functions can only be created as local or nested functions in code files\.\n>> disp\(7\)\n     7\n/);
+});
+
+test("Tab completes MATLAB's names at a --matlab prompt: a variable, and rand's family, never Python's", { skip: !hasScript && "needs util-linux script(1)" }, () => {
+  // (one Tab completes a single match; two list several: readline's. Typed a step at a time: readline doesn't
+  // complete a Tab that comes in the same chunk as pasted text)
+  const r = ttySteps(["--matlab"], ["radius = 7;\n", "radi", "\t", "\n", "ran", "\t", "\t", "\n", "exit\n"]);
+  assert.equal(r.status, 0, `${r.err ?? ""}\n${r.out}`);
+  assert.match(r.out, />> radius\n\nradius =\n\n     7\n/);
+  assert.match(r.out, /rand\s+randi\s+randn\s+randperm/);
+  assert.doesNotMatch(r.out, /\braise\b|\brange\b/);
 });

@@ -2,6 +2,7 @@
 // console: whether input is complete, and tab completion.
 import { R } from "./compile";
 import { parse, PySyntaxError } from "./parse";
+import { matlabCompletions } from "./matlab-complete";
 
 // IPython's help syntax (obj?): src/help-syntax.ts
 import { helpSyntax, ipythonSyntax } from "./help-syntax";
@@ -52,4 +53,14 @@ export function complete(main: any, line: string, moduleNames: () => string[]): 
   }
   const hits = [...new Set(names.filter((n) => n.startsWith(word) && !(n.slice(word.length).startsWith("_") && !word.endsWith("_") && n.lastIndexOf("._") > dot - 1 && !word.slice(dot + 1).startsWith("_"))))].sort();
   return [hits, word];
+}
+
+/** Tab completion in the session's language (the notebook, the Jupyter kernel and the CLI prompt all ask here):
+ * MATLAB's names in MATLAB (src/matlab-complete.ts), Magma's in Magma, Python's (complete) in Python and Sage.
+ * [matches, the text they replace]. */
+export function completeIn(mode: string, main: any, line: string, moduleNames: () => string[]): [string[], string] {
+  if (mode === "matlab") return matlabCompletions(main, line);
+  // (Magma's names: src/magma-complete.ts, @sagebrush-magma's, joins here; until then nothing, as before)
+  if (mode === "magma") return [[], ""];
+  return complete(main, line, moduleNames);
 }
