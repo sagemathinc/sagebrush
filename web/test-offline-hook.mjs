@@ -152,10 +152,21 @@ const bound = (c) => {
 };
 
 const url = `http://127.0.0.1:${port}/`;
+// (the page's interpreter pins the package set it uses, its heartbeat (worker-kernel.js's {pkgPin} message to the
+// service worker, r705's base2): at any moment, so between N19's reading of the package cache and its pkgClear too
+// (r705b's G1). This file sets the service worker's pins itself, so the heartbeat is off from the first load: a
+// switch of the test's own, before the page loads, drops every {pkgPin} message the page posts; nothing else changes)
+await send("Page.enable");
+await send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => { const post = ServiceWorker.prototype.postMessage; window.__pkgPinDropped = 0; ServiceWorker.prototype.postMessage = function (m, ...rest) { if (m && typeof m === "object" && "pkgPin" in m) return void window.__pkgPinDropped++; return post.call(this, m, ...rest); }; })();` });
 await send("Page.navigate", { url });
 await until(() => ev("document.querySelector('#status')?.textContent.startsWith('ready')"));
 ok(await until(async () => (await version()) === A, 30000) || (await send("Page.reload"), await until(async () => (await version()) === A)), "the test build's service worker controls the page (its hook answers): " + A);
 await listenStops();
+{
+  // (the switch, checked: a {pkgPin} message posted as the heartbeat posts it is dropped, the page's others go through)
+  const d = await ev(`(() => { const n = window.__pkgPinDropped; navigator.serviceWorker.controller.postMessage({ pkgPin: [] }); return [n, window.__pkgPinDropped]; })()`);
+  ok(Array.isArray(d) && Number.isInteger(d[0]) && d[1] === d[0] + 1, "(setup) the page's package-pin heartbeat is off: a {pkgPin} message is dropped before the service worker sees it: " + J(d));
+}
 
 // N10 [hook]: admission at the exact boundary, then the per-put check with a shrinking estimate
 {
@@ -347,9 +358,9 @@ await listenStops();
   if (pre.keys.error || pre.rows.error || pre.keys.value?.length || pre.rows.value?.length) console.log("  (info) N19: before its setup the package cache holds what it didn't make: " + J(pre));
   // (the counting below depends on that reading: a failed one is a failed check, not an empty cache)
   ok(Array.isArray(pre.keys.value) && Array.isArray(pre.rows.value), "N19 (setup): the package cache and its ledger read before the setup: " + J({ keys: pre.keys.error ?? pre.keys.value?.length, rows: pre.rows.error ?? pre.rows.value?.length }));
-  // (the page's own interpreter may have used the site's package set by now and pinned its index for 10 min, its
-  // heartbeat (worker-kernel.js pkgPin), r705's base2: so N19 counts what was there. An entry pinned before stays, as
-  // N19's own pinned one does; one not pinned is removed, as N19's stale one is)
+  // (the page's heartbeat is off (the test's switch, above), but an earlier step may have left entries: so N19 counts
+  // what was there. An entry pinned before stays, as N19's own pinned one does; one not pinned is removed, as N19's
+  // stale one is)
   const t0 = Date.now(), prePinned = (pre.rows.value ?? []).filter((x) => x.state === "kept" && x.pin > t0).map((x) => x.digest);
   const preOther = (pre.rows.value ?? []).filter((x) => !prePinned.includes(x.digest)).length;
   const prePinnedKeys = (pre.keys.value ?? []).filter((k) => prePinned.some((dg) => k.endsWith("/" + dg + ".json")));
