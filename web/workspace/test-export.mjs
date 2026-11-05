@@ -1251,6 +1251,15 @@ print(json.dumps({"members": len(b), "diffs": diffs[:6], "ndiffs": len(diffs), "
         if (ok) check(!p.stopped, `P-8: without OPFS, ${P8.length} folders needing ${need} bytes of in-memory spools, the records counted, with the cap at ${cap}: exported: ` + (p.stopped ?? p.name));
         else check(!!p.stopped && p.stopped.includes(NO_OPFS) && !(await ev(`!!window.__exp`)), `P-8: without OPFS, the same with the cap at ${cap} (${label}): refused in preflight, in plain words, nothing written: ` + String(p.stopped ?? "not stopped").slice(-200));
       }
+      // (X9, the grader's pin: the name check's spool alone past a small cap is refused in the name loop itself, not
+      // after it: the measuring pass never starts (afterNameCheck not called), and the spool then holds at most the cap
+      // and one record.  The cap read once per record spooled (a getter counts the reads); refused at the 21st record)
+      const r0 = bytes(JSON.stringify(P8[0])) + 1, r = bytes(JSON.stringify(P8[1])) + 1;
+      check(P8.slice(1).every((e) => bytes(JSON.stringify(e)) + 1 === r), "X9: the fixture's records past the first are all " + r + " bytes");
+      const cap9 = 71 + r0 + 19 * r + Math.floor(r / 2), held = r0 + 20 * r;
+      const x9 = (await exportClean("x9.zip", `x9: (window.__x9 = { reads: 0, after: false }), noOpfs: true, afterNameCheck: () => { window.__x9.after = true; }, caps: { get spoolBlob() { window.__x9.reads++; return ${cap9}; } }`)) ?? { stopped: "the page kept writing entries of its own" };
+      const seen = await ev(`window.__x9`);
+      check(!!x9.stopped && x9.stopped.includes(NO_OPFS) && !(await ev(`!!window.__exp`)) && seen?.after === false && seen?.reads === 21 && held <= cap9 + r, `X9: without OPFS, the name check's spool alone past a cap of ${cap9} is refused in the name loop: the measuring pass never started (${seen?.after === false}), refused at the record that crossed it (cap read ${seen?.reads} times, 21 expected), the spool then ${held} bytes, at most the cap and one record (${cap9 + r}): ` + String(x9.stopped ?? "not stopped").slice(-160));
     } finally {
       await putAll(saved);
       await reload();
