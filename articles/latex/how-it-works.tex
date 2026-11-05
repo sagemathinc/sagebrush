@@ -1,0 +1,101 @@
+% How the LaTeX preview works: the article's first chapter as a LaTeX document, to open in Sagebrush's LaTeX editor.
+% Written by Claude Opus 5.5, an AI model made by Anthropic, for the Sagebrush project (SageMath, Inc.).
+% Same license as the rest of articles/. Numbers: bench/latex, November 4, 2026 (see 01-how-it-works.md).
+\documentclass[11pt]{article}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{hyperref}
+
+\newtheorem{principle}{Principle}
+
+\newcommand{\brush}{Sagebrush}
+\newcommand{\dice}{\operatorname{Dice}}
+
+\title{How the \LaTeX{} preview works}
+\author{Claude Opus 5.5, for the \brush{} project}
+\date{November 4, 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Open a \texttt{.tex} file in \brush{} and the document appears beside its source:
+headings, theorems, equations typeset by KaTeX, tables, footnotes and references.
+This document is itself an example: you are reading it in that preview. Edit it,
+and the preview follows.
+\end{abstract}
+
+\tableofcontents
+
+\section{An expander, then a renderer}\label{sec:parts}
+
+\LaTeX{} is a language of macros: \verb|\section{Intro}| means something only after
+the definitions it expands to, and a document can define its own, as this one
+does with \verb|\brush| and \verb|\dice|. So the preview has two parts.
+
+\begin{description}
+  \item[The expander] reads the source as \TeX{} does: category codes, control
+    sequences, groups, registers, conditionals, \verb|\def| and
+    \verb|\newcommand|, with bounds on work, depth and size, so a runaway macro
+    stops instead of hanging the page. Where \TeX{} would typeset, it records an
+    \emph{event}.
+  \item[The renderer] turns the events into HTML: paragraphs, theorems, lists,
+    tables, footnotes,\footnote{Like this one.} the table of contents, labels
+    and references, and mathematics through KaTeX.
+\end{description}
+
+Both run in a Web Worker, so typing never waits for them. The expander is
+incremental: it keeps checkpoints, resumes from the last one before an edit, and
+stops once its state matches the previous run again.
+
+\begin{principle}\label{pr:visible}
+A preview that silently drops part of a document is worse than none. Every gap
+should be visible, in the preview and in \texttt{sagebrush latex check}.
+\end{principle}
+
+\section{Real \TeX{} as the oracle}\label{sec:oracle}
+
+For each document of a public corpus, the benchmark compares the words of
+\TeX{}'s PDF with the words of the preview, as multisets $P$ and $Q$:
+\begin{equation}\label{eq:dice}
+  \dice(P, Q) = \frac{2\,|P \cap Q|}{|P| + |Q|},
+  \qquad
+  \text{recall} = \frac{|P \cap Q|}{|P|},
+  \qquad
+  \text{precision} = \frac{|P \cap Q|}{|Q|}.
+\end{equation}
+Mathematics and pictures differ on both sides, so $\dice = 1$ isn't expected; a
+low value of \eqref{eq:dice} is the signal, and the words missing most say why.
+
+\section{Speed}\label{sec:speed}
+
+Medians of 5 runs on a 16-core virtual machine, with \TeX{} Live 2023 and
+Chrome 155. A typed character to the preview showing it, against
+\texttt{latexmk} remaking the PDF after the same edit:
+
+\begin{center}
+\begin{tabular}{lrrr}
+\hline
+document & \texttt{latexmk} & preview & faster \\
+\hline
+Beamer talk & 3.88 s & 32 ms & 120$\times$ \\
+pgfplots manual, 48 pages & 21 s & 258 ms & 81$\times$ \\
+amsmath user's guide & 657 ms & 74 ms & 8.9$\times$ \\
+arXiv paper, 25 pages & 801 ms & 100 ms & 8.0$\times$ \\
+\hline
+\end{tabular}
+\end{center}
+
+\section{What would have saved time}\label{sec:lessons}
+
+\begin{enumerate}
+  \item Real \TeX{} as the oracle from the first day (Section~\ref{sec:oracle}).
+  \item Measure what the reader sees: a partial paint once made a 3-second
+    preview look like 240 ms.
+  \item Ask \TeX{} instead of guessing.
+  \item Report what you can't show, from the start (Principle~\ref{pr:visible}).
+\end{enumerate}
+
+The whole article, with the gaps and the full tables, is at
+\url{https://sagebrush.space/articles/latex/}.
+
+\end{document}
