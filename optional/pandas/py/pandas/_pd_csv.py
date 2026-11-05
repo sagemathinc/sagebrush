@@ -89,18 +89,19 @@ class _NoBudget(object):
 class _Budget(object):
     """A finite decoded budget: charge() preflights, release() returns."""
 
-    __slots__ = ("limit", "used")
+    __slots__ = ("limit", "used", "who")
     finite = True
 
-    def __init__(self, limit):
+    def __init__(self, limit, who="read_csv"):
         self.limit = limit
         self.used = 0
+        self.who = who
 
     def charge(self, n, what):
         if self.used + n > self.limit:
             raise ValueError(
-                "read_csv: the decoded-memory budget would be exceeded by %s (%d B more, %d B in use, "
-                "limit %d B: Sagebrush's limit %r)" % (what, n, self.used, self.limit, _LIMIT_KEY))
+                "%s: the decoded-memory budget would be exceeded by %s (%d B more, %d B in use, "
+                "limit %d B: Sagebrush's limit %r)" % (self.who, what, n, self.used, self.limit, _LIMIT_KEY))
         self.used += n
 
     def release(self, n):
@@ -130,12 +131,12 @@ def _array_capacity(length, cap):
 _RAW_ENTRY = 100        # (a retained original text's dict entry, as the index map's label)
 
 
-def _make_budget():
+def _make_budget(who="read_csv"):
     import sagebrush
     lim = sagebrush.limit(_LIMIT_KEY)
     if lim == float("inf"):
         return _NoBudget()
-    return _Budget(int(lim))
+    return _Budget(int(lim), who)
 
 
 # --- column builders -------------------------------------------------------
