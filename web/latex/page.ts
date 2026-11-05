@@ -208,11 +208,16 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   if (my !== mounts) return;
   const life = new AbortController(), on = { signal: life.signal };
   const live = () => my === mounts && !life.signal.aborted;
+  // (this mount's own entry in `current`: when `current` is another's, or none, a switch away from this file is under
+  //  way, past its decision; a return to this file then opens it again (astra U8-SWITCH-2, the final barrier))
+  let mine: unknown = null;
+  const backHere = () => { if (current !== mine) openHere(host.fid); };
   const st = history.state && typeof history.state === "object" ? history.state : {};
   if (typeof st.sbTex !== "number" || typeof st.sbTexId !== "string") history.replaceState({ ...st, sbTex: typeof st.sbTex === "number" ? st.sbTex : 0, sbTexId: entryId() }, "");
   noteShown();
   let dispose = () => { life.abort(); };
   current = { dispose: () => dispose(), close: async () => dispose(), dirty: () => false, settle: async () => true, hold: () => {} };
+  mine = current;
   if (!document.getElementById("sb-tex-style")) { const style = el("style"); style.id = "sb-tex-style"; style.textContent = PAGE_CSS + PRINT_CSS; document.head.appendChild(style); }
   if (!document.getElementById("sb-katex")) {
     const link = document.createElement("link"); link.rel = "stylesheet"; link.href = new URL("katex/katex.min.css", location.href).href; document.head.appendChild(link);
@@ -317,8 +322,10 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const openHere = (fid: string) => { void mount(root, { ...host, fid }); };
   g.__sbTex = (e: Entry, tab?: boolean) => {
     if (tab || !/\.tex$/i.test(e.path) || !e.fid) return bootHook(e, tab);
-    // (the file shown, asked for again: a newer intent, so a switch still settling does nothing)
-    if (e.fid === host.fid) { intent(); return true; }
+    // (the file shown, asked for again: a newer intent, so a switch still settling does nothing; and if Back or
+    //  Forward had already moved the history away from it, it is taken back to the entry shown (daybreak3
+    //  DB3-U8-SWITCH-3), so the URL is this file's)
+    if (e.fid === host.fid) { intent(); returnToShown(); backHere(); return true; }
     void leaveOk().then((ok) => {
       if (!ok || !live()) return;
       const q = new URLSearchParams(location.search); q.set("tex", e.fid!);
@@ -332,13 +339,25 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // (the shown entry again, as a new one after this: when going back to it isn't possible or didn't land on it)
   const pushShown = () => { history.pushState({ sbTex: shownAt + 1, sbTexId: entryId() }, "", shownUrl); noteShown(); };
   const isShown = () => history.state?.sbTexId === shownId && location.href === shownUrl;
+  // (back to the entry shown, wherever the history is now: by the Navigation API's key where there is one, else by
+  //  its position; as a new entry when neither lands on it)
+  const returnToShown = () => {
+    if (isShown()) return;
+    const nav = navApi(), st = history.state, to = typeof st?.sbTex === "number" ? st.sbTex : null;
+    if (nav?.traverseTo && shownKey && nav.entries?.().some((x: any) => x.key === shownKey)) {
+      returning = true;
+      const failed = () => { if (returning) { returning = false; pushShown(); } };
+      try { nav.traverseTo(shownKey).finished?.catch(failed); } catch { failed(); }
+    } else if (to !== null && to !== shownAt) { returning = true; history.go(shownAt - to); }
+    else pushShown();
+  };
   window.addEventListener("popstate", (ev) => {
     const t = new URLSearchParams(location.search).get("tex");
     const st = ev.state && typeof ev.state === "object" ? ev.state : null;
     if (returning) { returning = false; if (!isShown()) pushShown(); else noteShown(); return; }
     if (t === host.fid) {
       // (back to the file shown: a newer intent than a switch still settling, which then does nothing)
-      intent();
+      intent(); backHere();
       // (this file's own entries: a fragment's new entry, unnumbered, is the one after the shown one)
       if (typeof st?.sbTex !== "number" || typeof st?.sbTexId !== "string") history.replaceState({ ...(st ?? {}), sbTex: shownAt + 1, sbTexId: entryId() }, "");
       noteShown();
@@ -716,6 +735,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // (held: read-only while a controlled switch settles and closes it; the saver's own read-only, for recovery, kept apart)
   let held = false, roSaver = false;
   current = { dispose: () => { void saver?.dispose(); dispose(); }, close: async () => { await saver?.dispose(); dispose(); }, dirty: () => !!saver?.failed, hold: (on: boolean) => { held = on; src.readOnly = on || roSaver; }, settle: () => saver ? saver.settle() : Promise.resolve(true) };
+  mine = current;
   // (the test build only: the page test tells this workspace an op as sync's view would; elsewhere this folds away)
   if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) { (globalThis as any).__sbTexWs = host.ws; (globalThis as any).__sbTexActor = () => actor; }
 

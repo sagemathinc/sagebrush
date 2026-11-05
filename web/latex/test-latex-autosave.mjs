@@ -179,7 +179,7 @@ function editor(f, drafts, timers, page = fakePage(f)) {
   f.failNext = new Error("storage is full");
   e.type("lost?"); t.fire(); await settle();
   check("failed-shown-and-kept", e.saver.failed && e.saver.state.why === "storage is full" && e.draft()?.text === "lost?" && f.text === "start", { st: e.saver.state });
-  e.type("lost? no"); 
+  e.type("lost? no");
   check("failed-stays-until-written", e.saver.failed && t.q.length === 1, { st: e.saver.state });
   t.fire(); await settle();
   check("failed-then-saved", !e.saver.failed && e.saver.state.k === "saved" && f.text === "lost? no" && !e.draft(), { st: e.saver.state, f: f.text });

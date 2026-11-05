@@ -326,6 +326,46 @@ try {
     await ev(`(window.__sbTexSaveWrite = () => { if (window.__failWrites) throw new Error("test: the write failed"); }, window.__failWrites = false, window.__answer = false, history.back(), true)`);
     await until(`document.querySelector(".tex-preview")?.textContent.includes("File A here.") && new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fa)}`, 20000);
     await sleep(500); await ev(`(window.__asked = 4, true)`);
+    // (a watch on the preview: whether B was ever shown, from now on)
+    const watchB = () => ev(`(() => { window.__sawB = false; window.__obsB?.disconnect(); window.__obsB = new MutationObserver(() => { if (document.querySelector(".tex-preview")?.textContent.includes("File B here.") || document.querySelector(".tex-title")?.textContent === "b.tex") window.__sawB = true; }); window.__obsB.observe(document.body, { childList: true, subtree: true, characterData: true }); return true; })()`);
+    const endState = () => ev(`({ url: new URLSearchParams(location.search).get("tex"), title: document.querySelector(".tex-title")?.textContent, a: !!document.querySelector(".tex-preview")?.textContent.includes("File A here."), ro: document.querySelector(".tex-src")?.readOnly, src: document.querySelector(".tex-src")?.value ?? "", pages: document.querySelectorAll(".tex-page").length, sawB: window.__sawB, kept: window.__noReload === true })`);
+    const aText = () => ev(`${W}.read("/sw/a.tex").then((r) => new TextDecoder().decode(r.content))`);
+    // ---- (astra U8-SWITCH-2, the final barrier) Forward to B decided (A's write failed, its draft durable; accepted),
+    // B's mount waiting on A's final close (its last write held); Back to A meanwhile: once the close ends, A is open
+    // again and editable under its own URL, its edit written; B never shown
+    {
+      await watchB();
+      await ev(`(() => { window.__answer = true; window.__k = 0; window.__hold = new Promise((r) => (window.__rel = r));
+        window.__sbTexSaveWrite = () => { const k = window.__k++; if (k === 0) throw new Error("test: the write failed"); if (k === 1) return window.__hold; }; return true; })()`);
+      await ev(`(() => { const t = document.querySelector(".tex-src"); t.value += "% barrier in A\\n"; t.dispatchEvent(new Event("input")); return true; })()`);
+      await saveStateIs(/^Not saved: test: the write failed/);
+      await ev(`(window.__k = 0, history.forward(), true)`);
+      const heldClose = await until(`window.__k >= 2`, 10000);
+      await ev(`(history.back(), true)`); await sleep(400);
+      await ev(`(window.__rel(), true)`);
+      await until(`!!document.querySelector(".tex-src") && !document.querySelector(".tex-src").readOnly && document.querySelector(".tex-title")?.textContent === "a.tex" && new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fa)}`, 20000); await sleep(1000);
+      const fb1 = await endState(), file1 = await aText();
+      check(heldClose && fb1.url === fa && fb1.title === "a.tex" && fb1.a && fb1.ro === false && fb1.src.includes("% barrier in A") && file1.includes("% barrier in A") && fb1.pages === 1 && !fb1.sawB && fb1.kept,
+        "U8-SWITCH-2 (the final barrier): Back to A while B's mount waits on A's last write: A open again, editable, its URL and its edit; B never shown", { heldClose, fb1: { ...fb1, src: fb1.src.slice(-30) }, file: file1.slice(-30) });
+      await ev(`(window.__sbTexSaveWrite = () => { if (window.__failWrites) throw new Error("test: the write failed"); }, window.__answer = false, true)`);
+    }
+    // ---- (daybreak3 DB3-U8-SWITCH-3) A's write held, Forward to B (the URL B's, the switch settling), then A asked
+    // for from the files (__sbTex): the history taken back to A's entry, A stays shown and editable, its edit
+    // written; B never shown
+    {
+      await watchB();
+      await ev(`(() => { window.__hold = new Promise((r) => (window.__rel = r)); window.__sbTexSaveWrite = () => window.__hold; return true; })()`);
+      await ev(`(() => { const t = document.querySelector(".tex-src"); t.value += "% clicked back to A\\n"; t.dispatchEvent(new Event("input")); return true; })()`);
+      await ev(`(history.forward(), true)`); await sleep(400);
+      const urlB = await ev(`new URLSearchParams(location.search).get("tex")`);
+      await ev(`(window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }), true)`); await sleep(600);
+      await ev(`(window.__rel(), true)`); await sleep(1500);
+      const s3 = await endState(), file3 = await aText();
+      const entry = await ev(`({ at: history.state && history.state.sbTex })`);
+      check(urlB === fb && s3.url === fa && entry.at === 0 && s3.title === "a.tex" && s3.a && s3.ro === false && s3.src.includes("% clicked back to A") && file3.includes("% clicked back to A") && s3.pages === 1 && !s3.sawB && s3.kept,
+        "DB3-U8-SWITCH-3: A asked for from the files after Forward moved the URL to B: the history back on A's entry, A shown, editable, its edit written; B never shown", { urlB, s3: { ...s3, src: s3.src.slice(-30) }, entry, file: file3.slice(-30) });
+      await ev(`(window.__sbTexSaveWrite = () => { if (window.__failWrites) throw new Error("test: the write failed"); }, window.__obsB?.disconnect(), window.__asked = 4, true)`);
+    }
     // ---- (astra B5-R1-A1) the exact entry shown is the one gone back to, a fragment's entry between: A, A#section, B;
     // with unsaved B, Back one step and Back two steps, declined, stay on B (its entry, URL and text); accepted two
     // steps, A; with unsaved A, Forward two steps declined stays on A. With the Navigation API and, hidden, without it
