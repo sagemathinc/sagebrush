@@ -10,7 +10,7 @@
   "baseSwGzip": 43602,
   "topology": "inventory-3span",
   "baseTopology": "legacy-2span",
-  "swRaw": 219988,
-  "swGzip": 54121,
-  "transition": "scipy.optimize (its own lazy chunk mod-scipy-optimize): sw.js raw 219924 measured at this branch's master merge bda299f7b, swRaw = exact + 64 = 219988; normalized gzip-9 54057 measured, swGzip = exact + 64 = 54121 (@sagebrush's ruling: both exact + 64; the gzip row moves with generated chunk-name hash entropy, #628 r6 measured 54012). Follow-up owned by @sagebrush-daybreak3 will normalize authenticated generated chunk hashes while retaining code/path/count sensitivity."
+  "swRaw": 220305,
+  "swGzip": 54189,
+  "transition": "live data 1a (its own lazy chunk mod-live-data): sw.js raw 220241 measured at this branch's merge of master b3b3f7b1 (3e243887), swRaw = exact + 64 = 220305; normalized gzip-9 54125 measured, swGzip = exact + 64 = 54189 (@sagebrush's ruling for 1a: offline exact + 64)"
 }

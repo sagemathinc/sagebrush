@@ -1,0 +1,11 @@
+{
+ "v": 1,
+ "reason": "Live data, step 1a (design-data-access r3.1): the closed _sbdata_live bridge. The worker's live_data host op is a SharedArrayBuffer wait, like stdin, where a Stop wins and a 35 s deadline applies. The runner page admits a call through LiveCalls (index.html +1900: its relay hook and the catalog check), and the notebook kernel's live option and aborts add +943. fredapi, yfinance's refusal and the bridge are their own lazy chunk, mod-live-data (its own budgets row, 7109); the CLI carries them in lib.gen and pyjs. Measured exactly with bun 1.4.4 against master b3b3f7b1 (pyjs marked +64).",
+ "bytes": {
+  "cli/lib.gen.js": 3208,
+  "cli/pyjs.cjs": 6637,
+  "engine/runner/index.html": 1900,
+  "engine/sagebrush-notebook.js": 943,
+  "engine/sagebrush-worker.js": 3432
+ }
+}
