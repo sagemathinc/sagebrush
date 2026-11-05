@@ -1,0 +1,10 @@
+{
+ "v": 1,
+ "reason": "ssl's replay-only context compatibility: lib/ssl.py lets urllib clients configure CPython 3.14-compatible default and unverified contexts without adding TLS or network transport. mod-ssl is a new lazy bundle authorized by its budgets.json entry. Measured with Node 24.21.0 and Bun 1.4.4 at head 5c9305812 against current master 6dfcbe3c5: cli/lib.gen.js +1200, cli/pyjs.cjs +1356, engine/sagebrush-worker.js +186, engine/sagebrush-notebook.js +40; no other existing row moves. Markers are exact except pyjs +64 conventional margin.",
+ "bytes": {
+  "cli/lib.gen.js": 1200,
+  "cli/pyjs.cjs": 1420,
+  "engine/sagebrush-notebook.js": 40,
+  "engine/sagebrush-worker.js": 186
+ }
+}
