@@ -1268,7 +1268,8 @@ newBuiltinModule("_nplinalg", (m) => {
   fn("slogdet", (a: NDArray) => {
     // (as det's)
     const [r0, c0] = dims(a);
-    const nd = r0 >= LU_ND_MIN && r0 === c0 && useNd();
+    if (a.ndim === 2 && r0 !== c0) linalgError("Last 2 dimensions of the array must be square");
+    const nd = r0 >= LU_ND_MIN && useNd();
     work(5 * r0 * c0 + (nd ? ndScratch() : 0), "slogdet");
     const L = detLU(a, r0, nd, "slogdet"), r = r0;
     let sign = L.sign, logdet = 0;
