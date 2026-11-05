@@ -187,6 +187,15 @@ try {
     const again = { listed: await until(`document.querySelectorAll("dialog.sb-tex-examples[open] button[data-example]").length === 10`, 20000), urls: exUrls().slice(r0), alerts: dialogText.length - d0 };
     check(again.listed && again.urls.length === 2 && /sagebrush-latex-examples\.js\?try=2$/.test(again.urls[1]) && again.alerts === 1,
       "…asked again: the list of 10, loaded by a new URL (?try=2), no second alert", again);
+    // (and once loaded, kept: asked a third time, the same 10 with no new request for the chunk; grader #685 E3,
+    //  loadExamples() not memoized would ask by ?try=3)
+    await ev(`(document.querySelector("dialog.sb-tex-examples[open]")?.close(), true)`);
+    await askExamples();
+    const kept = { listed: await until(`document.querySelectorAll("dialog.sb-tex-examples[open] button[data-example]").length === 10`, 20000) };
+    await sleep(300);
+    Object.assign(kept, { urls: exUrls().slice(r0), ids: await ev(`[...document.querySelectorAll("dialog.sb-tex-examples[open] button[data-example]")].map((b) => b.dataset.example).join()`) });
+    check(kept.listed && kept.urls.length === 2 && !kept.urls.some((u) => /\?try=3/.test(u)) && kept.ids.split(",").length === 10,
+      "…asked a third time, once loaded: the same 10, the chunk not fetched again", kept);
     await send("Fetch.disable"); onPaused = null;
     await ev(`(document.querySelector("dialog.sb-tex-examples[open]")?.close(), true)`);
   }
