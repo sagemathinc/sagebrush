@@ -12,6 +12,7 @@ import { NDArray, empty, toDtype, ascontig, copy as npcopy, admitWork } from "./
 import { glibcLog, glibcExp } from "./libm";
 import { gemmBuffers, wasmFusedFMA, wasmKernels, wasmLU, wasmLuSolve, wasmQR, wasmSymEig, wasmGenEig, wasmSVD } from "./kernels";
 import * as FD from "./fdlibm";
+import { useNd, ndCholesky, ndPath, ndScratch } from "./nd";
 import { pollInterrupt } from "./ops";
 
 const { T, raise, tuple } = Obj;
@@ -37,6 +38,11 @@ function out(data: Float64Array | number[], shape: number[]): NDArray {
   r.data.set(data);
   return r;
 }
+// The smallest n at which cholesky runs on engine/nd, where that runs: below it the TypeScript loop is faster
+// (the public call, Node: n = 40 0.026 vs 0.028 ms, n = 48 0.038 vs 0.035; daybreak2's VM1 PERF, n = 16 slower on
+// engine/nd; /scratch/matlab-speed/chol1b-xover). Per input, so a given matrix always takes the same path.
+const CHOL_ND_MIN = 48;
+
 function linalgError(msg: string): never {
   const E = (globalThis as any).__npLinAlgError;
   if (E) throw Obj.markRaised(Obj.callObj(E, [msg]));
@@ -1274,10 +1280,35 @@ newBuiltinModule("_nplinalg", (m) => {
     return tuple([out(Q, [r, qc]), out(R, [complete ? r : Math.min(r, c), c])]);
   });
   fn("cholesky", (a: NDArray, reportFailure = false) => {
+    // (square and 2-D before anything is admitted or the module loaded: np.linalg.cholesky checks this, but this
+    // backend function can be called directly; astra ND657-ADMIT-2)
+    if (a.ndim !== 2) raise(T.ValueError ?? T.TypeError, `${a.ndim}-dimensional array given. Array must be two-dimensional`);
+    if (a.shape[0] !== a.shape[1]) linalgError("Last 2 dimensions of the array must be square");
     const [r0, c0] = dims(a);
-    work(5 * r0 * c0, "cholesky");
-    const [A, n, c] = mat(a);
-    if (n !== c) linalgError("Last 2 dimensions of the array must be square");
+    // engine/nd's blocked Cholesky, where it runs in this session (src/runtime/nd.ts: decided at the first call,
+    // then fixed); else the loop below. Either way 5 n^2 (and on engine/nd its scratch): the loop's are mat's two
+    // copies, L and the output; engine/nd's are A as contiguous float64 (a copy only when it isn't one already),
+    // A and the work in the module's memory, L and the output (astra ND657-ADMIT-1). Below CHOL_ND_MIN rows the
+    // loop is faster than the module's fixed cost, so it runs there, without loading the module.
+    // The status-reporting call needs the completed leading factor on failure,
+    // which engine/nd does not return. Keep that internal call on the loop.
+    const nd = !reportFailure && r0 >= CHOL_ND_MIN && useNd();
+    work(5 * r0 * c0 + (nd ? ndScratch() : 0), "cholesky");
+    if (nd) {
+      if (a.ndim !== 2) raise(T.ValueError ?? T.TypeError, `${a.ndim}-dimensional array given. Array must be two-dimensional`);
+      const n = a.shape[0];
+      const c = ascontig(a.dt.name === "float64" ? a : npcopy(a, F64()));
+      let F: Float64Array | number;
+      try {
+        F = ndCholesky(c.data.subarray(0, n * n), n);
+      } catch (e) {
+        if (e instanceof RangeError) raise(T.MemoryError, `cholesky of a ${n} x ${n} matrix needs more working memory than WebAssembly can have here`);
+        throw e;
+      }
+      if (typeof F === "number") linalgError("Matrix is not positive definite");
+      return out(F, [n, n]);
+    }
+    const [A, n] = mat(a);
     const L = new Float64Array(n * n);
     for (let j = 0; j < n; j++) {
       let s = A[j * n + j];
@@ -1298,6 +1329,11 @@ newBuiltinModule("_nplinalg", (m) => {
     }
     const result = out(L, [n, n]);
     return reportFailure ? tuple([result, 0]) : result;
+  });
+  // which code cholesky runs in this session, and why (src/runtime/nd.ts): (path, kernel, why)
+  fn("_kernels", () => {
+    const p = ndPath();
+    return tuple([p.path, p.kernel, p.why, CHOL_ND_MIN]);
   });
   fn("eigh", (a: NDArray, upper: any) => {
     // (mat's copies, the symmetric copy, the eigenvectors in and out of

@@ -5757,6 +5757,17 @@ def _csort(A, ax):
     return np.moveaxis(out, -1, ax)
 
 
+def _median_middle(lo, hi):
+    # Preserve infinities: inf - inf is NaN, although the mean of two
+    # equal infinities is that infinity. Opposite finite signs use a sum
+    # so their difference cannot overflow; equal signs use a difference.
+    with np.errstate(invalid="ignore", over="ignore"):
+        if lo.dtype.kind == "c":
+            return lo + (hi - lo) / 2
+        same = np.isfinite(lo) & np.isfinite(hi) & (np.signbit(lo) == np.signbit(hi))
+        return np.where(same, lo + (hi - lo) / 2, (lo + hi) / 2)
+
+
 @_bs("median")
 def median_(x, *args):
     if class_(x) == "char":
@@ -5779,12 +5790,12 @@ def median_(x, *args):
             hi = _take_along(S, np.maximum(m // 2, 0), ax)
             lo = _take_along(S, np.maximum((m - 1) // 2, 0), ax)
             with np.errstate(invalid="ignore"):
-                r = np.where(m % 2 == 0, lo + (hi - lo) / 2, lo)
+                r = np.where(m % 2 == 0, _median_middle(lo, hi), lo)
             return np.squeeze(np.where(m == 0, _math.nan, r), axis=ax)
         S = _csort(A, ax) if A.dtype.kind == "c" else np.sort(A, axis=ax)
         lo = np.take(S, (n - 1) // 2, axis=ax)
         hi = np.take(S, n // 2, axis=ax)
-        r = lo + (hi - lo) / 2 if n % 2 == 0 else lo
+        r = _median_middle(lo, hi) if n % 2 == 0 else lo
         return np.where(np.any(np.isnan(A), axis=ax), _math.nan, r)
     # (natively in the class of A, as median's page says: median(int8(1:4)) is int8(3), the mean of
     # the middle two rounded; logical too, where the middle values agree; char gives double)
@@ -6541,11 +6552,33 @@ def _isvec(v):
 
 
 @_bs("cross")
-def cross_(a, b):
-    A = _farr(a).reshape(-1)
-    B = _farr(b).reshape(-1)
+def cross_(a, b, dim=None):
+    """cross(A, B[, dim]): the cross products of A's and B's 3-element vectors, along dim (by default the
+    first dimension of size 3); two 3-element vectors in any orientation give a result shaped as A"""
+    if dim is None and _isvec(a) and _isvec(b) and _numel(a) == 3 and _numel(b) == 3:
+        A = _farr(a).reshape(-1)
+        B = _farr(b).reshape(-1)
+        r = np.array([A[1] * B[2] - A[2] * B[1], A[2] * B[0] - A[0] * B[2], A[0] * B[1] - A[1] * B[0]])
+        return _box(r.reshape(_arr(a).shape))
+    d = _dims(a)
+    if d != _dims(b):
+        raise _err("A and B must be same size.", "MATLAB:cross:InputSizeMismatch")
+    if dim is not None:
+        v = _farr(dim).reshape(-1) if _isnumlike(dim) else np.zeros(0)
+        if v.size != 1 or v.dtype.kind == "c" or not (_math.isfinite(v[0]) and v[0] >= 1 and v[0] == _math.floor(v[0])):
+            raise _err("Dimension argument must be a positive integer scalar within indexing range.", "MATLAB:getdimarg:invalidDim")
+        k = int(v[0]) - 1
+        if (d[k] if k < len(d) else 1) != 3:
+            raise _err("A and B must be of length 3 in the dimension in which the cross product is taken.", "MATLAB:cross:InvalidDimAorBForCrossProd")
+    else:
+        k = next((i for i, s in enumerate(d) if s == 3), -1)
+        if k < 0:
+            raise _err("A and B must have at least one dimension of length 3.", "MATLAB:cross:InvalidDimAorB")
+    # (in MATLAB's axis order, the cross product's axis first)
+    A = np.moveaxis(np.transpose(_farr(a)), k, 0)
+    B = np.moveaxis(np.transpose(_farr(b)), k, 0)
     r = np.array([A[1] * B[2] - A[2] * B[1], A[2] * B[0] - A[0] * B[2], A[0] * B[1] - A[1] * B[0]])
-    return _box(r.reshape(_arr(a).shape))
+    return _box(_contig(np.transpose(np.moveaxis(r, 0, k))))
 
 
 @_bs("dot")

@@ -566,6 +566,8 @@ test("chol returns status and partial factors, and respects its triangle", () =>
     "[L,p] = chol(single([4 1;1 2]),'lower'); disp(class(L)); disp(class(p)); disp(p); disp(norm(L*L'-single([4 1;1 2]),'fro') < 1e-6);",
     "[R,p] = chol([]); disp(mat2str(size(R))); disp(p);",
     "[R,p] = chol(single(zeros(0))); disp(class(R)); disp(class(p));",
+    "A = eye(48); [R,p] = chol(A); disp(p); disp(norm(R-A,'fro'));",
+    "A(48,48) = -1; [R,p] = chol(A); disp(p); disp(mat2str(size(R))); disp(norm(R-eye(47),'fro'));",
     "try, R = chol(0); catch, disp('positive-definite error'); end;",
     "try, [R,p] = chol(ones(2,3)); catch, disp('square error'); end;",
     "try, [R,p] = chol(1,'sideways'); catch, disp('triangle error'); end;",
@@ -574,7 +576,7 @@ test("chol returns status and partial factors, and respects its triangle", () =>
     "[0 0]", "1", "2", "2", "[2 1;0 1]", "3", "2", "2",
     "[1 0;0 1]", "0", "[1 0;0 1]", "0", "[1 0;0 1]", "0",
     "[1 0;0 1]", "[1 0;0 1]", "single", "double", "0", "1",
-    "[0 0]", "0", "single", "double", "positive-definite error", "square error", "triangle error",
+    "[0 0]", "0", "single", "double", "0", "0", "48", "[47 47]", "0", "positive-definite error", "square error", "triangle error",
   ]);
 });
 

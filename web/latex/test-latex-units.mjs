@@ -16,9 +16,9 @@ import { EXAMPLES } from "./examples.ts";
 import { makeAnchor, locate } from "./comments.ts";
 import { Engine, withBeamer, once, declaresBeamer } from "./engine/pipeline.mjs";
 import { coldRun, incremental } from "./engine/incremental-demo.mjs";
-import { setKatex, render, installBeamer } from "./engine/render.mjs";
-import * as beamerCode from "./engine/beamer.mjs";
+import { setKatex, render, installBeamer, BOX_MAX, BOX_KEY, boxCost, fitsBoxes } from "./engine/render.mjs";
 import { itemKey } from "./engine/sagetex.mjs";
+import * as beamerCode from "./engine/beamer.mjs";
 
 const results = [];
 const check = (name, ok, detail) => { results.push([name, !!ok]); if (!ok) console.log("FAIL", name, JSON.stringify(detail)?.slice(0, 600)); };
@@ -221,6 +221,74 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
   installBeamer(beamerCode);
   const after = e.update(beamerDoc);
   check("beamer-chunk-installed", !after.needBeamer && after.stats.mode === "unchanged" && after.frames.length === 1 && after.frames[0].steps === 2 && after.chunks.join("").includes('class="slide'), { need: after.needBeamer, mode: after.stats.mode, frames: after.frames });
+}
+
+// ---- saved boxes (astra4's fidelity digest, gap 3: \sbox, \savebox and \usebox were dropped, with no problem said). The
+//      first is astra4's M14 as is; TeX's text for it: "VisibleText"
+{
+  setKatex((src) => src);
+  const run = (body, pre = "") => new Engine().update("\\documentclass{article}\n" + pre + "\\begin{document}\n" + body + "\n\\end{document}\n");
+  const text = (r) => r.chunks.join("").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  const m14 = run("\\newsavebox{\\saved}\\sbox{\\saved}{VisibleText}\\usebox{\\saved}");
+  check("savebox-m14", text(m14) === "VisibleText" && !m14.problems.length, [text(m14), m14.problems]);
+  // (each \usebox shows it again; saved in the preamble, shown in the body; nothing where it's saved)
+  const twice = run("A \\usebox{\\bx} B \\usebox{\\bx}", "\\newsavebox{\\bx}\\sbox{\\bx}{\\textbf{Kept}}\n");
+  check("savebox-reused-from-preamble", text(twice) === "A Kept B Kept", text(twice));
+  // (\savebox's width and position as \makebox's; lrbox's body; a box never saved: nothing shown, a problem said)
+  const sb = run("\\newsavebox{\\w}\\savebox{\\w}[3cm][r]{Wide}[\\usebox{\\w}]").chunks.join("");
+  const lr = run("\\newsavebox{\\l}\\begin{lrbox}{\\l}Inside \\emph{it}\\end{lrbox}Out: \\usebox{\\l}");
+  const none = run("X \\usebox{\\nothere} Y");
+  check("savebox-width-lrbox-unsaved", /<span class="mkbox" style="width:[^"]*;text-align:right">Wide<\/span>/.test(sb) && /\[<span class="mkbox"/.test(sb) && text(lr) === "Out: Inside it"
+    && text(none) === "X Y" && none.problems.some((p) => p.kind === "box" && p.name.includes("\\nothere")), [sb.slice(0, 300), text(lr), text(none), none.problems]);
+  // (a minipage, and beamer's column (which shares its code), still show their content: lrbox is a case of its own)
+  const mp = text(run("\\begin{minipage}{3cm}InMini\\end{minipage}"));
+  const col = new Engine().update("\\documentclass{beamer}\n\\begin{document}\n\\begin{frame}{F}\\begin{columns}\\begin{column}{0.5\\textwidth}InColumn\\end{column}\\end{columns}\\end{frame}\n\\end{document}\n").chunks.join("");
+  check("savebox-minipage-column-unchanged", mp === "InMini" && /class="minipage[^"]*"[^>]*>[\s\S]*InColumn/.test(col), [mp, col.slice(0, 300)]);
+  // (a box's SageTeX: shown where the box is used, hidden (as before) if it never is)
+  const sageBox = (use) => run("\\newsavebox{\\sb}\\sbox{\\sb}{\\sage{1+1}}" + (use ? "\\usebox{\\sb}" : "Z"), "\\usepackage{sagetex}\n").sageItems.map((x) => x.err ?? "ok");
+  check("savebox-sage", sageBox(true).join() === "ok" && sageBox(false).join() === "hidden", [sageBox(true), sageBox(false)]);
+  // (a box's SageTeX is shown only where the box is: not by a \usebox inside a box never used, nor in a title never
+  //  printed, nor in the preamble (daybreak3 BOX653-SAGE-CAPTURE-1, astra BOX653-HIDDEN-2); controls: used in the body,
+  //  in a printed title)
+  const sageOf = (pre, body) => run(body, "\\usepackage{sagetex}\n\\newsavebox{\\a}\\newsavebox{\\b}\\sbox{\\a}{\\sage{1+1}}\n" + pre).sageItems.map((x) => x.err ?? "ok").join();
+  const capture = { nested: sageOf("", "\\sbox{\\b}{\\usebox{\\a}}Z"), nestedUsed: sageOf("", "\\sbox{\\b}{\\usebox{\\a}}\\usebox{\\b}"),
+    title: sageOf("\\title{\\usebox{\\a}}\n", "Z"), titlePrinted: sageOf("\\title{\\usebox{\\a}}\n", "\\maketitle Z"), preamble: sageOf("\\usebox{\\a}\n", "Z") };
+  // (a box saved again holds its new content, as in TeX, and the old content's SageTeX isn't shown by its use (grader
+  //  X7); the name as written, spaces around it aside (X3))
+  const redef = run("\\newsavebox{\\s}\\sbox{\\s}{\\sage{1+1}A}\\sbox{\\s}{B}\\usebox{\\s}", "\\usepackage{sagetex}\n");
+  const trim = text(run("\\newsavebox{\\saved}\\sbox{\\saved}{T}\\usebox{ \\saved }"));
+  const body = (r) => r.chunks.filter((c) => !c.includes('class="sagestate"')).join("").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  check("savebox-redefined-and-trimmed", body(redef) === "B" && redef.sageItems.map((x) => x.err).join() === "hidden" && trim === "T", [body(redef), redef.sageItems.map((x) => x.err), trim]);
+  check("savebox-sage-where-shown", capture.nested === "hidden" && capture.nestedUsed === "ok" && capture.title === "hidden" && capture.titlePrinted === "ok" && capture.preamble === "hidden", capture);
+  // (the copies' budget (astra BOX653-EXPAND-1): exactly BOX_MAX fits, one over doesn't; a box doubled into itself 12
+  //  times (16.8M characters before) stops within it, said once; repeated uses count too)
+  check("savebox-budget-edge", fitsBoxes(BOX_MAX - 10, 10) && !fitsBoxes(BOX_MAX - 10, 11) && fitsBoxes(0, BOX_MAX) && !fitsBoxes(0, BOX_MAX + 1));
+  const dbl = run("\\newsavebox{\\s}\\sbox{\\s}{" + "x".repeat(4096) + "}" + "\\sbox{\\s}{\\usebox{\\s}\\usebox{\\s}}".repeat(12) + "\\usebox{\\s}");
+  const many = run("\\newsavebox{\\s}\\sbox{\\s}{" + "y".repeat(4096) + "}" + "\\usebox{\\s} ".repeat(300) + "End.");
+  const dblH = dbl.chunks.join(""), manyH = many.chunks.join(""), over = (r) => r.problems.filter((p) => p.kind === "box" && /over the budget/.test(p.name)).length;
+  check("savebox-budget-copies", dbl.stats.outcome === "ok" && dblH.length < 2 * 2 ** 20 && over(dbl) === 1 && manyH.length < 2 * 2 ** 20 && over(many) === 1 && manyH.includes("End.") && (manyH.match(/y{4096}/g) || []).length === Math.floor(BOX_MAX / 4096),
+    { dbl: dblH.length, many: manyH.length, copies: (manyH.match(/y{4096}/g) || []).length, overs: [over(dbl), over(many)] });
+  // (a box's SageTeX items count too, each once in the box (astra, BOX653-EXPAND-1's residual): a box with no HTML, a
+  //  completed sagesilent in an lrbox, doubled into itself 18 times held 262,144 keys before, and now holds 1. A key
+  //  costs BOX_KEY: 256 completed items in a box, no HTML, cost exactly 4,096, so 256 uses fit BOX_MAX exactly and a 257th
+  //  is left out, said once)
+  check("savebox-key-cost", BOX_KEY === 16 && boxCost({ h: "ab", keys: [1, 2, 3] }) === 2 + 3 * BOX_KEY && boxCost({ h: "", keys: [] }) === 0);
+  const sdoc = (body) => "\\documentclass{article}\n\\usepackage{sagetex}\n\\newsavebox{\\kb}\n\\begin{document}\n" + body + "\n\\end{document}\n";
+  // (the items run, as a Run leaves them: their states from the box used once, before any copies)
+  const okRun = (box, uses) => {
+    const d = sdoc(box + uses), states = new Engine().update(sdoc(box + "\\usebox{\\kb}Z")).sageItems.map((it) => ({ s: "ok", key: itemKey(it) })), kept = [], set = Map.prototype.set;
+    // (each box as saved, seen as the renderer's map stores it: its HTML and its keys' count)
+    Map.prototype.set = function (k, v) { if (v && typeof v.h === "string" && Array.isArray(v.keys)) kept.push([v.h.length, v.keys.length]); return set.call(this, k, v); };
+    try { return { r: new Engine({ sage: { states } }).update(d), kept }; } finally { Map.prototype.set = set; }
+  };
+  const silent = (i) => "\\begin{sagesilent}\nx" + i + " = " + i + "\n\\end{sagesilent}\n";
+  const zero = okRun("\\begin{lrbox}{\\kb}" + silent(0) + "\\end{lrbox}", "\\sbox{\\kb}{\\usebox{\\kb}\\usebox{\\kb}}".repeat(18) + "\\usebox{\\kb}Z");
+  const keysAt = (n) => okRun("\\begin{lrbox}{\\kb}" + Array.from({ length: 256 }, (_, i) => silent(i)).join("") + "\\end{lrbox}", "\\usebox{\\kb}".repeat(n) + "Z");
+  const fit = keysAt(256), past = keysAt(257);
+  check("savebox-keys-zero-html-doubling", zero.r.stats.outcome === "ok" && zero.kept.length === 19 && zero.kept.every(([h, k]) => h === 0 && k === 1)
+    && zero.r.sageItems.every((x) => !x.err) && over(zero.r) === 0, { kept: zero.kept.slice(-3), n: zero.kept.length, items: zero.r.sageItems.map((x) => x.err), overs: over(zero.r) });
+  check("savebox-keys-budget-edge", fit.kept.length === 1 && fit.kept[0][0] === 0 && fit.kept[0][1] === 256 && over(fit.r) === 0 && over(past.r) === 1
+    && fit.r.sageItems.length === 256 && fit.r.sageItems.every((x) => !x.err), { kept: [fit.kept, past.kept], overs: [over(fit.r), over(past.r)], errs: [...new Set(fit.r.sageItems.map((x) => x.err))] });
 }
 
 // ---- beamer's furniture (engine/beamer.mjs): what each theme draws around a frame, against TeX Live's beamer. The
