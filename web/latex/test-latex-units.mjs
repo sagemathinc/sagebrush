@@ -529,6 +529,11 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
     const t0 = performance.now(), d20 = refDoc("", dbl(20, "", "")), ms = performance.now() - t0;
     check("ref-nameref-empty-titles-once", ms < 1500 && refText(d20).endsWith("X Y"), { ms: Math.round(ms), tail: refText(d20).slice(-20) });
     const deep = refDoc("", fwd(100)), within = refDoc("", fwd(63));
+    // (the boundary (grader #682 R7): the first heading works its title out from the next label down, so a chain of 64
+    //  below it is 64 titles deep, resolved, nothing said; 65 is one past the cut, refused there and said once)
+    const at64 = refDoc("", fwd(64)), at65 = refDoc("", fwd(65));
+    check("ref-nameref-depth-boundary", !at64.problems.length && refText(at64).endsWith("X End Y") && said(at65, /titles naming titles past 64 deep/) === 1 && !within.problems.length,
+      [at64.problems.map((p) => p.name), at65.problems.map((p) => p.name)]);
     // (the cut is met, and said once, where the first heading works its title out from the top; the body's \nameref{f0},
     //  worked out after the headings below it have their titles whole, is "End", as TeX gives it: a title cut by depth
     //  is never kept for a shallower use (#682 r3, daybreak3))
@@ -548,6 +553,10 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
     check("ref-nameref-literal-cut-shown", litA.length === NAME_MAX + 1 && litA.endsWith("\u2026") && said(lit, /a title past 4096 characters, cut/) === 1, { len: litA.length, problems: lit.problems.map((p) => p.name) });
     check("ref-nameref-total-bounded", manyH.length < NAME_TOTAL + 64 * 1024 && said(many, /past 1048576 characters of titles in all/) === 1, { len: manyH.length, problems: many.problems.map((p) => p.name) });
   }
+  // (a title naming another that has markup: the outer one's text is the inner's text, its markup stripped, never its
+  //  HTML escaped as text (grader #682 R13))
+  { const h = refDoc("", "\\section{An \\emph{Em} title}\\label{a}\\section{Cf.\\ \\nameref{a}}\\label{b}Z \\nameref{b} Q").chunks.join("");
+    check("ref-nameref-nested-markup-stripped", /Z <a class="ref" href="#[^"]+">Cf\. An Em title<\/a> Q/.test(h) && !/&lt;span/.test(h), h.match(/Z .{0,120}/)); }
   // (and a title with no references in it keeps its markup in \nameref's link, as hyperref keeps it: \emph's italic)
   { const h = refDoc("", "\\section{An \\emph{Em} title}\\label{e}X \\nameref{e} Y").chunks.join("");
     check("ref-nameref-keeps-markup", /<a class="ref" href="#[^"]+">An <span class="it">Em<\/span> title<\/a>/.test(h), h.match(/X .{0,120}/)); }
