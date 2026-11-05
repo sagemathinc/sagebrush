@@ -1709,7 +1709,10 @@ def tile(A, reps):
     A = A.reshape((1,) * (nd - A.ndim) + A.shape)
     reps = (1,) * (nd - len(reps)) + reps
     for ax, r in enumerate(reps):
-        if r != 1:
+        if r == 0:
+            # (no copies: the axis is empty, as NumPy's tile gives)
+            A = A[(slice(None),) * ax + (slice(0, 0),)]
+        elif r != 1:
             A = concatenate([A] * r, axis=ax)
     return A
 

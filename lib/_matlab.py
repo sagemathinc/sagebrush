@@ -6913,7 +6913,10 @@ def ndgrid_(nargout, *vs):
     if not vs:
         raise _err("Not enough input arguments.")
     if len(vs) == 1:
-        vs = vs * max(2, nargout)
+        if nargout <= 1:
+            # (one grid vector and one output: a 1-D grid, numel(x1)-by-1)
+            return _unmat(_farr(vs[0]).reshape((-1, 1)))
+        vs = vs * nargout
     vecs = [_farr(v).reshape(-1) for v in vs]
     if len(vecs) == 2:
         xv, yv = vecs
@@ -7339,11 +7342,29 @@ def qr_(nargout, x, *args):
 
 @_bi("chol")
 def chol_(nargout, x, *args):
-    L = np.linalg.cholesky(_mat(x))
-    if args and _istext(args[0]) and _text(args[0]) == "lower":
-        return _unmat(L)
-    R = np.conj(L.T)
-    return _unmat(R) if nargout <= 1 else [_unmat(R), 0.0]
+    if nargout > 2:
+        raise _err("chol: permutation outputs are not supported in Sagebrush.")
+    if len(args) > 1 or (args and (not _istext(args[0]) or _text(args[0]) not in ("lower", "upper"))):
+        raise _err("chol: triangle must be 'upper' or 'lower'.")
+    lower = bool(args and _text(args[0]) == "lower")
+    M = _mat(x)
+    if M.shape[0] != M.shape[1]:
+        raise _err("chol: input matrix must be square.")
+    # The kernel reads the lower triangle. Default MATLAB chol reads the
+    # upper triangle, even when the unused half is nonsymmetric.
+    if not lower:
+        M = np.conj(M.T)
+    if nargout <= 1:
+        L = np.linalg.cholesky(M)
+        return _unmat(L if lower else np.conj(L.T))
+    if M.dtype.kind == "c":
+        raise _err("chol: complex matrices are not supported in Sagebrush.")
+    import _nplinalg
+    L, flag = _nplinalg.cholesky(M, True)
+    if flag:
+        q = int(flag) - 1
+        L = L[:q, :q]
+    return [_unmat(L if lower else np.conj(L.T)), float(flag)]
 
 
 @_bs("null")
@@ -8481,7 +8502,12 @@ def str2double_(x):
 @_bi("str2num")
 def str2num_(nargout, s):
     """str2num for numbers and matrices of numbers ([1 2; 3 4]) -- not general code"""
-    t = _text(s).strip()
+    # MATLAB rejects separately bracketed rows, but accepts brackets spanning rows.
+    lines = s.rows() if type(s) is Char else [_text(s)]
+    if len(lines) > 1 and all(r.strip().startswith("[") and r.strip().endswith("]") for r in lines):
+        out = np.zeros((0, 0))
+        return out if nargout <= 1 else [out, False]
+    t = "\n".join(lines).strip()
     if t.startswith("[") and t.endswith("]"):
         t = t[1:-1]
     rows = [r for r in _re.split(r"[;\n]", t) if r.strip()]

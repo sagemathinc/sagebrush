@@ -2733,6 +2733,30 @@ test("nthroot preserves zero roots, infinities and single class (MCF-13)", () =>
   ]);
 });
 
+test("str2num preserves character-array rows (MCF-30)", () => {
+  const { execFileSync } = require("node:child_process");
+  // MATLAB R2026b Update 1, frozen /scratch/matlab-tmp/mcf30/transcript.txt:
+  // SHA256 f3eee5c037f55905b2a6374da7d752da7e428afcf8abb461af6a4eb2669d22c0.
+  // Pin dimensions as well as values: flattening used to turn case 1 into 1234.
+  // Extra bracket cases: MATLAB differs from Octave; /scratch/matlab-tmp/mcf32b/transcript.txt,
+  // SHA256 c5b40ef5bd08fe2532d2bb98962d26398157a6519f10a1cedef5ff888a99e701.
+  const inputs = ["['12';'34']", "['1 2';'3 4']", "['1 ';' 2']", "['[1 2';'3 4]']", "['1 2';'3  ']",
+    "['[1 2]';'[3 4]']", "'[1 2;3 4]'", "['[1 2]';'[3  ]']"];
+  const code = inputs.map((s) => `[X,ok]=str2num(${s}); disp(mat2str(size(X))); disp(class(X)); disp(mat2str(X)); disp(class(ok)); disp(mat2str(ok));`).join("\n");
+  const lines = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8", timeout: 10000 }).trim().split("\n").map((s: string) => s.trim());
+  assert.deepEqual(lines, [
+    "[2 1]", "double", "[12;34]", "logical", "true",
+    "[2 2]", "double", "[1 2;3 4]", "logical", "true",
+    "[2 1]", "double", "[1;2]", "logical", "true",
+    "[2 2]", "double", "[1 2;3 4]", "logical", "true",
+    "[0 0]", "double", "[]", "logical", "false",
+    "[0 0]", "double", "[]", "logical", "false",
+    "[2 2]", "double", "[1 2;3 4]", "logical", "true",
+    "[0 0]", "double", "[]", "logical", "false",
+  ]);
+});
+
 test("histc counts along the requested dimension (MCF-32)", () => {
   const { execFileSync } = require("node:child_process");
   // Real MATLAB R2026b Update 1, frozen /scratch/matlab-tmp/mcf32/transcript.txt:
