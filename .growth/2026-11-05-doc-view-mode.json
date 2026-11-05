@@ -1,7 +1,7 @@
 {
  "v": 1,
- "reason": "Documents open in View mode, step 1 (William, Nov 4): web/doc-mode.ts (the documents left in Edit, kept in this browser; the one shortcut, E and Esc) and the board wired to it (web/board/mount.ts: the opening mode, the person's toggles kept, E/Esc, the Edit control's title; web/board/page.ts: this browser's boards' kept mode). The board page grows +1373 B (+552 B gzip). Measured with bun 1.4.4 on a merge of head 05902d10 onto master c51f8bd1: cli/pyjs.cjs +780 (the embedded board page); no other row moves. Marker: +32 B of margin.",
+ "reason": "Documents open in View mode, step 1 (William, Nov 4), with the board's write barrier (@sagebrush's ruling on #658): web/doc-mode.ts (the documents left in Edit, kept in this browser, a malformed store read as none; the one shortcut, E and Esc), the board wired to it (web/board/mount.ts: the opening mode, the person's toggles kept, E/Esc, the Edit control's title, a menu's edit in Edit first) and its writes in View refused but the page's own, an answer's (bounded by web/board/answer-only.ts) and what was typed in Edit (web/board/edit.ts). Measured with bun 1.4.4 on a merge of head bfab097d onto master 3264180f: cli/pyjs.cjs +1464 (the embedded board page); no other row moves. Marker: +32 B of margin.",
  "bytes": {
-  "cli/pyjs.cjs": 812
+  "cli/pyjs.cjs": 1496
  }
 }
