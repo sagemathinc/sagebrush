@@ -6767,6 +6767,10 @@
   "owner": "sagebrush-python",
   "reason": "plot3d page temporaries' GC (Ctrl-C plan r2 item 2, daybreak2 COST-1): one pass's time budget at a session's start, protecting the start; refuses nothing and stops no computation; the rest is the next pass's, from its cursor, and the pass's log says when it stopped with entries left"
  },
+ "lib/ssl.py :: SSLContext.load_cert_chain :: raise NotImplementedError(\"ssl: certificate files are not used by Sagebrush's replay-only network client\") #0": {
+  "class": "coverage",
+  "owner": "python"
+ },
  "lib/uuid.py ::  :: >>> uuid.MAX #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
