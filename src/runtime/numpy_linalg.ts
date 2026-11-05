@@ -1273,15 +1273,21 @@ newBuiltinModule("_nplinalg", (m) => {
     const [Q, R, qc] = qr(A, r, c, !!complete);
     return tuple([out(Q, [r, qc]), out(R, [complete ? r : Math.min(r, c), c])]);
   });
-  fn("cholesky", (a: NDArray) => {
+  fn("cholesky", (a: NDArray, reportFailure = false) => {
     const [r0, c0] = dims(a);
     work(5 * r0 * c0, "cholesky");
-    const [A, n] = mat(a);
+    const [A, n, c] = mat(a);
+    if (n !== c) linalgError("Last 2 dimensions of the array must be square");
     const L = new Float64Array(n * n);
     for (let j = 0; j < n; j++) {
       let s = A[j * n + j];
       for (let k = 0; k < j; k++) s -= L[j * n + k] * L[j * n + k];
-      if (!(s > 0)) linalgError("Matrix is not positive definite");
+      if (!(s > 0)) {
+        // MATLAB's two-output chol needs the completed leading block and the
+        // first failed pivot. NumPy's ordinary call retains its exception.
+        if (reportFailure) return tuple([out(L, [n, n]), j + 1]);
+        linalgError("Matrix is not positive definite");
+      }
       const d = Math.sqrt(s);
       L[j * n + j] = d;
       for (let i = j + 1; i < n; i++) {
@@ -1290,7 +1296,8 @@ newBuiltinModule("_nplinalg", (m) => {
         L[i * n + j] = t / d;
       }
     }
-    return out(L, [n, n]);
+    const result = out(L, [n, n]);
+    return reportFailure ? tuple([result, 0]) : result;
   });
   fn("eigh", (a: NDArray, upper: any) => {
     // (mat's copies, the symmetric copy, the eigenvectors in and out of
