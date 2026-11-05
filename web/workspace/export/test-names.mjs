@@ -3,6 +3,7 @@
 // renamed, by bytes and by string alike; what it can hold is left alone.
 //   bun web/workspace/export/test-names.mjs
 import { unsafeMember, unsafeMemberBytes, unsafeNamesWhy } from "./names.ts";
+import { ExportStopped, ZipWriter } from "./zip.ts";
 
 let fails = 0;
 const ok = (c, msg) => { console.log((c ? "ok   " : "FAIL ") + msg); if (!c) fails++; };
@@ -44,6 +45,19 @@ for (const [name, folder] of allowed) {
   ok(unsafeMemberBytes(buf, n, false) === null, "the bytes route reads only the name's length");
 }
 ok(/2 files' names .*\.\.\\x, b:c\. Rename them/.test(unsafeNamesWhy(["/..\\x", "/b:c"], 2)) && /and 3 more/.test(unsafeNamesWhy(["/a:"], 4)), "the words name the files, and count the rest: " + unsafeNamesWhy(["/..\\x", "/b:c"], 2));
+
+// (the writer's own check, behind preflight's: a member's string name and a folder's record bytes alike, refused before
+// anything is written to the sink)
+{
+  let wrote = 0;
+  const sink = { write: async (b) => { wrote++; return b; }, close: async () => {}, abort: async () => {} };
+  const z = new ZipWriter(sink, { put: () => { wrote++; } }, { signal: new AbortController().signal, crc: { ask: async () => 0 }, progress: () => {} });
+  let a = null, f = null;
+  try { await z.member("files/..\\..\\outside.txt", [enc.encode("x")], false, Date.now(), 1 << 20, "cap"); } catch (e) { a = e; }
+  const rec = enc.encode("files/bad:dir/");
+  try { await z.folderAt(rec, 0, rec.length, 0, 0); } catch (e) { f = e; }
+  ok(a instanceof ExportStopped && /can't go safely into a \.zip/.test(a.why) && f instanceof ExportStopped && /a : in a name/.test(f.why) && wrote === 0 && z.members === 0, "the writer refuses an unsafe name itself, by string and by a folder's record, writing nothing: " + J([a?.why, f?.why, wrote]));
+}
 
 if (fails) { console.log(`${fails} failed`); process.exit(1); }
 console.log("all passed");
