@@ -97,6 +97,30 @@ mkdirSync(join(here, "dist", "lib", "tzdata"), { recursive: true });
 for (const [f, bytes] of tz.files) writeFileSync(join(here, "dist", f), bytes);
 console.log(`zone data: tzdata ${tz.ref.version}, ${tz.files.size - 1} zone files (${([...tz.files.values()].reduce((n, b) => n + b.length, 0) / 1e3).toFixed(0)} kB), index ${(tz.ref.size / 1e3).toFixed(0)} kB`);
 const LIB_CHUNKS = [...libChunkFiles.keys(), ...tz.files.keys()];
+// (background loading's table, web/preload.ts: each library group's chunk files and bytes, each mode's groups, and the
+// group of each top-level module's entry file (`a/__init__.py` or `a.py`), from this manifest, so the page fetches
+// exactly the files the worker would)
+const PRELOAD = (() => {
+  // (a group: [its bytes, its src chunk's name hash, its pre chunk's], the files being lib/<group>.<kind>.<hash>.json)
+  const groups: Record<string, [number, string, string?]> = {};
+  const hash = (g: string, k: string, f: string) => {
+    const h = f.slice(`lib/${g}.${k}.`.length, -".json".length);
+    if (!f.startsWith(`lib/${g}.${k}.`) || !f.endsWith(".json") || !/^[0-9a-f]{16}$/.test(h)) throw new Error(`background loading's table: ${f} isn't lib/${g}.${k}.<hash>.json`);
+    return h;
+  };
+  for (const [g, c] of Object.entries(libManifest.chunks)) groups[g] = [c.src.size + (c.pre?.size ?? 0), hash(g, "src", c.src.file), ...(c.pre ? [hash(g, "pre", c.pre.file)] : [])] as [number, string, string?];
+  const tops: Record<string, string> = {};
+  for (const [p, g] of Object.entries(libManifest.files)) {
+    const m = /^([A-Za-z_]\w*)(?:\/__init__\.py|\.py)$/.exec(p);
+    // (a private module (`_name`) is the library's own, never a notebook's import)
+    if (m && !m[1].startsWith("_") && !(m[1] in tops)) tops[m[1]] = g;
+  }
+  // (only the groups a mode or a module names: no other is ever prefetched)
+  const used = new Set([...Object.values(libManifest.modes).flat(), ...Object.values(tops)]);
+  for (const g of Object.keys(groups)) if (!used.has(g)) delete groups[g];
+  return { groups, modes: libManifest.modes, tops };
+})();
+console.log(`background loading's table: ${Object.keys(PRELOAD.groups).length} groups, ${Object.keys(PRELOAD.tops).length} modules, ${JSON.stringify(PRELOAD).length} B`);
 console.log(`library: ${LIB_CHUNKS.length} chunks; ` + Object.entries(libManifest.chunks).map(([g, c]) => `${g} ${(c.src.size / 1e3).toFixed(0)}+${((c.pre?.size ?? 0) / 1e3).toFixed(0)} kB`).join(", "));
 // What the runner's broker may fetch for its interpreter, exactly (G-10, web/runner-fetch.mts): every bundle is
 // built with it as __SB_RUNNER_FETCH__ (the one that uses it is web/notebook/runner-worker.js), and a bundle
@@ -232,7 +256,7 @@ for (const r of [result, consoleResult, mathResult, mystResult, graphResult, not
   writeFileSync(tmp, (LATEX ? m[1] : m[1].replace(LATEX_IMPORT, "")) + "\nexport {};\n"); // an ES module: Bun would wrap a script in an uncalled CommonJS shim
   // (SAGEBRUSH_MEASURE_IDS=keep: the size gate's identifier-stable measuring variant, never shipped: identifiers kept,
   //  so the DEV page's script is PROD's with the DEV-only code inserted; scripts/line3-measure.mjs)
-  const app = await Bun.build(<any>{ metafile: true, entrypoints: [tmp], target: "browser", format: "iife", minify: process.env.SAGEBRUSH_MEASURE_IDS === "keep" ? { whitespace: true, syntax: true, identifiers: false } : true, define: LATEX_DEFINE });
+  const app = await Bun.build(<any>{ metafile: true, entrypoints: [tmp], target: "browser", format: "iife", minify: process.env.SAGEBRUSH_MEASURE_IDS === "keep" ? { whitespace: true, syntax: true, identifiers: false } : true, define: { ...LATEX_DEFINE, __SB_PRELOAD__: JSON.stringify(PRELOAD) } });
   builds.push(["the notebook page", app]);
   if (!app.success) {
     for (const l of app.logs) console.error(l);

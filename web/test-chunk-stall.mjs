@@ -71,6 +71,9 @@ try {
   await send("Network.enable");
   await send("Network.setCacheDisabled", { cacheDisabled: true });
   await send("Network.setBypassServiceWorker", { bypass: true });
+  // (background loading off, web/preload.ts: the stall is the Run's own requests, counted as such)
+  await send("Page.enable");
+  await send("Page.addScriptToEvaluateOnNewDocument", { source: "window.__sbPreloadOff = true;" });
   await send("Fetch.enable", { patterns: [{ urlPattern: "*/lib/sage.src.*", requestStage: "Request" }] });
   await send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: true, flatten: true });
   // (one page: its Sage sources held, a run, then let through, the same cell again)
