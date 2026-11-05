@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "numpy dtype.names and dtype.fields (None for every plain dtype, as NumPy 2.5.1), src/runtime/numpy.ts. Re-measured with bun 1.4.4 (size-record.sh) on master 91a5d9ea vs head 9706732b: cli/pyjs.cjs +25, engine/sagebrush-worker.js +49; no other row moves. Markers: exact, except cli/pyjs.cjs 57 (+25 measured, plus 32 B of margin, as it moves with master).",
+ "bytes": {
+  "cli/pyjs.cjs": 57,
+  "engine/sagebrush-worker.js": 49
+ }
+}
