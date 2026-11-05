@@ -2692,3 +2692,21 @@ test("complex .^ recomputes at most _RESCUE_MAX out-of-range elements, counted b
     "power with 4 complex results past the floating-point range is not supported in Sagebrush (at most 3 are recomputed): too much work.",
     "[(inf, -inf), (inf, -inf), (inf, -inf)]"]);
 });
+
+
+test("histc counts along the requested dimension (MCF-32)", () => {
+  const { execFileSync } = require("node:child_process");
+  // Real MATLAB R2026b Update 1, frozen /scratch/matlab-tmp/mcf32/transcript.txt:
+  // SHA256 aed0a2b033a35fe955410f4f89f944091af6e7888d0ea4fab44ff456b2f05422.
+  const calls = ["[0 1;2 3],[0 1 2],2", "0,[0 1],1", "[0 1;2 3],[0 1],2", "[0 1;2 3],[0 1 2],1", "[0 1;2 3],[0 1 2]"];
+  const code = calls.map((s) => `[n,b]=histc(${s}); disp(mat2str(size(n))); disp(mat2str(n)); disp(mat2str(size(b))); disp(mat2str(b));`).join("\n");
+  const lines = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8", timeout: 10000 }).trim().split("\n").map((s: string) => s.trim());
+  assert.deepEqual(lines, [
+    "[2 3]", "[1 1 0;0 0 1]", "[2 2]", "[1 2;3 0]",
+    "[2 1]", "[1;0]", "[1 1]", "1",
+    "[2 2]", "[1 1;0 0]", "[2 2]", "[1 2;0 0]",
+    "[3 2]", "[1 0;0 1;1 0]", "[2 2]", "[1 2;3 0]",
+    "[3 2]", "[1 0;0 1;1 0]", "[2 2]", "[1 2;3 0]",
+  ]);
+});
