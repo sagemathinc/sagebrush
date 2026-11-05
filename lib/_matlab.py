@@ -6940,9 +6940,13 @@ def _svd_finite(M, name):
 @_bs("pinv")
 def pinv_(x):
     M = _mat(x)
-    # (real MATLAB: a NaN or Inf gives NaN throughout, of the transposed shape and M's precision)
+    # (real MATLAB: a NaN or Inf gives NaN throughout, of the transposed shape and M's precision; complex stays
+    # complex, NaN + 0i)
     if not np.all(np.isfinite(M)):
-        return _unmat(np.full(M.shape[::-1], np.nan, dtype=M.real.dtype))
+        # (made single here when x is: _keep_single's conversion would drop the zero imaginary part)
+        dt = M.dtype if class_(x) != "single" else np.complex64 if M.dtype.kind == "c" else np.float32
+        P = np.full(M.shape[::-1], np.nan, dtype=dt)
+        return _canon(_contig(P.T)) if P.dtype.kind == "c" else _unmat(P)
     return _unmat(np.linalg.pinv(M))
 
 
