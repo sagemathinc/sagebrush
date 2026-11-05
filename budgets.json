@@ -724,8 +724,8 @@
  },
  "epoch": {
   "sizes": {
-   "cli/lib.gen.js": 2978417,
-   "cli/pyjs.cjs": 25971937,
+   "cli/lib.gen.js": 3004166,
+   "cli/pyjs.cjs": 26004526,
    "engine/lib/core.pre": 1818321,
    "engine/lib/core.src": 423165,
    "engine/lib/magma-more.src": 146512,
@@ -772,7 +772,7 @@
    "engine/lib/mod-pydatetime.src": 105793,
    "engine/lib/mod-pyjs-digest.src": 2672,
    "engine/lib/mod-pyjs-doctest.src": 14117,
-   "engine/lib/mod-pyjs-help.src": 8050,
+   "engine/lib/mod-pyjs-help.src": 8771,
    "engine/lib/mod-pyjs-magic.src": 24213,
    "engine/lib/mod-pyjs-open.src": 8589,
    "engine/lib/mod-pyjs-pretty.src": 24565,
@@ -789,6 +789,7 @@
    "engine/lib/mod-scipy.src": 82824,
    "engine/lib/mod-special-ibeta.src": 25081,
    "engine/lib/mod-ssl.src": 3915,
+   "engine/lib/mod-statistics.src": 64953,
    "engine/lib/mod-string.src": 19182,
    "engine/lib/mod-strptime.src": 573,
    "engine/lib/mod-tempfile.src": 2347,
@@ -808,8 +809,8 @@
    "engine/lib/sage-more.src": 395935,
    "engine/lib/sage.pre": 13662741,
    "engine/lib/sage.src": 2888811,
-   "engine/lib/sci.pre": 2028911,
-   "engine/lib/sci.src": 399112,
+   "engine/lib/sci.pre": 2029167,
+   "engine/lib/sci.src": 399276,
    "engine/lib/tzdata": 257239,
    "engine/runner/index.html": 8924,
    "engine/sagebrush-analyze.js": 357310,
@@ -817,18 +818,24 @@
    "engine/sagebrush-graphview.js": 14996,
    "engine/sagebrush-myst.js": 21251,
    "engine/sagebrush-nd.wasm": 71106,
-   "engine/sagebrush-notebook.js": 239348,
+   "engine/sagebrush-notebook.js": 239395,
    "engine/sagebrush-raster.wasm": 825569,
    "engine/sagebrush-viewer3d.js": 88151,
-   "engine/sagebrush-worker.js": 1630465,
-   "engine/lib/mod-statistics.src": 64953
+   "engine/sagebrush-worker.js": 1635087,
+   "examples/corpus": 2229527,
+   "examples/index.json": 19514,
+   "site/examples": 7555884
   },
   "reset": {
-   "reason": "epoch reset after v0.6.5 (released Nov 5 2026): the 256-marker cap of size-measure.mjs LIMITS was reached at master de697544. @sagebrush's ruling (Nov 5): reset the epoch per design/size-gate.md rather than raise the cap; ceilings unchanged. epoch.sizes = master de697544 measured with bun 1.4.4 / node 24.21.0; no growth.",
-   "prev": "97b4a0388fc4ba13e85ba6650fa6633b12ceb057d272bf119d2bfb8235b98fda",
+   "reason": "U7 PR 3 (#548): the examples gallery's three size rows (plan-examples-gallery section 5; daybreak2's ruling): examples/corpus, site/examples and examples/index.json, measured by scripts/size-measure.mjs's examplesFiles, a measurement move (its sha256 is in the key). Added by this reset, seeded at the merge's sizes; no existing row's measurement changes. Redone on master 0d651c65 (after #543 and the #729 epoch): every shared row of the merge equals the base's record, so growth is empty; the markers it removes are absorbed by the merge's sizes.",
+   "prev": "1999dc022d7678b8cea2f13eb9a2b4273afd8c6bdae22a12021aabed9c345efe",
    "growth": {},
    "map": [],
-   "added": [],
+   "added": [
+    "examples/corpus",
+    "examples/index.json",
+    "site/examples"
+   ],
    "removed": []
   }
  }
