@@ -2169,12 +2169,16 @@ function combineComplex(r: any, i: any, dt: DType): any {
 // initial: the fold's start, a value of a's dtype (lib/numpy's amax converts it as NumPy does), so it takes part
 // (a NaN propagates) and is the result of a reduction over no elements. Without it there is no identity: NumPy
 // refuses any reduction over no elements, even one whose result is empty too, as max(zeros((0, 0)), axis=0)
-function minmax(a: NDArray, axis: any, keepdims: boolean, isMax: boolean, initial: any = null): any {
+function minmax(a: NDArray, axis: any, keepdims: boolean, isMax: boolean, initial: any = null, firstWins = false): any {
   const axes = axesArg(axis, a.ndim);
   if (initial === null && (axes === null ? a.size : prod([...new Set(axes)].map((i) => a.shape[i]))) === 0)
     raise(T.ValueError, `zero-size array to reduction operation ${isMax ? "maximum" : "minimum"} which has no identity`);
   const init = initial === null ? (isMax ? -Infinity : Infinity) : toNum(initial, a.dt);
-  const fold = isMax ? (x: number, y: number) => (x !== x || y !== y ? NaN : x > y ? x : y) : (x: number, y: number) => (x !== x || y !== y ? NaN : x < y ? x : y);
+  // (a tie, as of +0 and -0: maximum/minimum keep the later operand, fmax/fmin (nanmax/nanmin, firstWins) the
+  // accumulator, as NumPy's element loops)
+  const fold = firstWins
+    ? isMax ? (x: number, y: number) => (x !== x || y !== y ? NaN : y > x ? y : x) : (x: number, y: number) => (x !== x || y !== y ? NaN : y < x ? y : x)
+    : isMax ? (x: number, y: number) => (x !== x || y !== y ? NaN : x > y ? x : y) : (x: number, y: number) => (x !== x || y !== y ? NaN : x < y ? x : y);
   return finish(reduceAxes(a, axes, keepdims, a.dt, init, fold), axis, keepdims);
 }
 
@@ -4149,8 +4153,8 @@ newBuiltinModule("_numpy", (m) => {
     const init = initial === null ? 1 : rt.isInt ? toNum(initial, rt) : castNum(rt, toNum(initial));
     return finish(prodReduce(x, axesArg(axis, x.ndim), !!keepdims, rt, init, initial !== null), axis, !!keepdims);
   });
-  fn("amax", (a: any, axis: any = null, keepdims: any = false, initial: any = null) => minmax(asarray(a), opt(axis), !!keepdims, true, opt(initial)));
-  fn("amin", (a: any, axis: any = null, keepdims: any = false, initial: any = null) => minmax(asarray(a), opt(axis), !!keepdims, false, opt(initial)));
+  fn("amax", (a: any, axis: any = null, keepdims: any = false, initial: any = null, first: any = false) => minmax(asarray(a), opt(axis), !!keepdims, true, opt(initial), !!first));
+  fn("amin", (a: any, axis: any = null, keepdims: any = false, initial: any = null, first: any = false) => minmax(asarray(a), opt(axis), !!keepdims, false, opt(initial), !!first));
   fn("argmax", (a: any, axis: any = null) => argminmax(asarray(a), opt(axis), true));
   fn("argmin", (a: any, axis: any = null) => argminmax(asarray(a), opt(axis), false));
   fn("all", (a: any, axis: any = null, keepdims: any = false) => {

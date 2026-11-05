@@ -99,3 +99,29 @@ show("int64 max where initial", lambda: np.max(np.array([-4, 9, 2]), where=np.ar
 show("bool max where initial", lambda: np.max(np.array([False, True]), where=np.array([True, False]), initial=False))
 show("int64 max initial big", lambda: np.max(np.array([1, 2]), initial=2 ** 62))
 show("float32 min initial", lambda: np.min(np.array([1.5, 2.5], np.float32), initial=0.1))
+# signed-zero ties (daybreak3 NP654-WHEREZERO-2): a masked element takes no part; maximum/minimum keep the later
+# operand of a tie, fmax/fmin (nanmax/nanmin) the accumulator. (Long contiguous or strided nanmax/nanmin are not
+# pinned: NumPy's own SIMD loops give either zero there, by length and CPU.)
+def sgn(x):
+    x = np.asarray(x)
+    return "".join("-" if v else "+" for v in np.signbit(x).ravel()) if x.size else "."
+P0, N0 = 0.0, -0.0
+for f in ("max", "min", "nanmax", "nanmin"):
+    big = 9.0 if f.endswith("max") else -9.0
+    for z in (P0, N0):
+        for ini in (P0, N0):
+            for arr, m in (([z, big], [True, False]), ([big, z], [False, True])):
+                print("signbit %s %s where=%s initial=%s -> %s" % (f, sgn(arr), "".join("T" if b else "F" for b in m), sgn(ini),
+                      sgn(getattr(np, f)(np.array(arr), where=np.array(m), initial=ini))))
+    for arr in ([N0, P0], [P0, N0], [N0, N0, P0], [P0, P0, N0], [N0, P0, P0, P0], [P0, N0, N0, N0]):
+        print("signbit %s %s -> %s" % (f, sgn(arr), sgn(getattr(np, f)(np.array(arr)))))
+        for ini in (P0, N0):
+            if f.startswith("nan") and len(arr) + 1 > 4:
+                continue  # (initial plus 4 elements: NumPy's SIMD fmax/fmin loop, unpinned as above)
+            print("signbit %s %s initial=%s -> %s" % (f, sgn(arr), sgn(ini), sgn(getattr(np, f)(np.array(arr), initial=ini))))
+    A = np.array([[N0, P0], [P0, N0], [N0, N0]])
+    print("signbit %s 3x2 axis=0 -> %s; axis=1 -> %s" % (f, sgn(getattr(np, f)(A, axis=0)), sgn(getattr(np, f)(A, axis=1))))
+for f in ("max", "min"):
+    for n in (5, 16, 33, 100):
+        a = np.array([N0] + [P0] * (n - 1)); b = np.array([P0] + [N0] * (n - 1))
+        print("signbit %s long n=%d -> %s %s %s" % (f, n, sgn(getattr(np, f)(a)), sgn(getattr(np, f)(b)), sgn(getattr(np, f)(a[::-1][::2]))))

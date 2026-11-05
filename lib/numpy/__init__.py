@@ -1267,15 +1267,16 @@ def std(a, axis=None, dtype=None, out=None, ddof=0, keepdims=False, *, where=Tru
     return _out(sqrt(var(a, axis, dtype, None, ddof, keepdims, correction=correction)), out)
 
 
-def _minmax(a, axis, keepdims, initial, mask, is_max):
-    # NumPy's maximum/minimum reduction: initial (in a's dtype, converted as NumPy converts it) takes part, and is
-    # the result of a reduction over no elements, which without it has no identity; a where mask needs it
+def _minmax(a, axis, keepdims, initial, mask, is_max, first=False):
+    # NumPy's maximum/minimum reduction (first: fmax/fmin's, for nanmax/nanmin: a tie keeps the accumulator):
+    # initial (in a's dtype, converted as NumPy converts it) takes part, and is the result of a reduction over no
+    # elements, which without it has no identity; a where mask needs it, and its masked elements take no part
     a = asarray(a)
     if initial is None:
         if mask is not True:
             raise ValueError("reduction operation '%s' does not have an identity, so to use a where mask one has to "
                              "specify 'initial'" % ("maximum" if is_max else "minimum"))
-        return (_np.amax if is_max else _np.amin)(a, axis, keepdims)
+        return (_np.amax if is_max else _np.amin)(a, axis, keepdims, None, first)
     # (a scalar, converted as NumPy converts it: by float() into a float dtype, so its messages are float()'s; a
     # plain float into float64 needs no array; the runtime's fold starts from it)
     if type(initial) is float and a.dtype.name == "float64":
@@ -1285,8 +1286,12 @@ def _minmax(a, axis, keepdims, initial, mask, is_max):
             raise ValueError("setting an array element with a sequence.")
         ini = array(float(initial) if a.dtype.kind == "f" else initial, dtype=a.dtype).item()
     if mask is not True:
-        a = _np.where3(mask, a, array(ini, dtype=a.dtype))  # (an element masked out counts as initial; a's dtype)
-    return (_np.amax if is_max else _np.amin)(a, axis, keepdims, ini)
+        # (a masked element takes no part: a float one is filled with -inf for max, +inf for min, which loses to
+        # any element or initial and ties only itself, so it cannot settle a tie such as +0 against -0; an integer
+        # or bool one with initial, which then changes nothing, as its ties carry no sign)
+        fill = (-inf if is_max else inf) if a.dtype.kind == "f" else ini
+        a = _np.where3(mask, a, array(fill, dtype=a.dtype))
+    return (_np.amax if is_max else _np.amin)(a, axis, keepdims, ini, first)
 
 
 def amax(a, axis=None, out=None, keepdims=False, initial=None, where=True):
@@ -1368,8 +1373,8 @@ def _nan_minmax(a, axis, out, keepdims, initial, where, is_max):
         a = asarray(a)
         if a.size == 0 and _count(a, axis) == 0:
             raise ValueError("zero-size array to reduction operation %s which has no identity" % name)
-        return _out((_np.amax if is_max else _np.amin)(_nanfill(a, -inf if is_max else inf), axis, keepdims), out)
-    return (amax if is_max else amin)(_nanfill(a, -inf if is_max else inf), axis, out, keepdims, initial, where)
+        return _out((_np.amax if is_max else _np.amin)(_nanfill(a, -inf if is_max else inf), axis, keepdims, None, True), out)
+    return _out(_minmax(_nanfill(a, -inf if is_max else inf), axis, keepdims, initial, where, is_max, True), out)
 
 
 def nanmax(a, axis=None, out=None, keepdims=False, initial=None, where=True):
