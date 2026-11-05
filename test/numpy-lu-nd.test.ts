@@ -212,8 +212,9 @@ test("a module memory that can't grow is a MemoryError with its message, and the
 test("the backend functions refuse a non-square matrix before admitting or loading anything (a fresh session stays undecided)", () => {
   const code = [
     "import numpy as np, _nplinalg as _L",
-    "for f in (_L.det, _L.inv, lambda x: _L.solve(x, np.ones((len(x), 1)))):",
-    "    for x in (np.zeros((1024, 1)), np.zeros((1, 1024)), np.zeros((1024, 1000))):",
+    // (slogdet too: it had no check of its own, so a 3 x 4 matrix gave a log-determinant; grader's r684d probe)
+    "for f in (_L.det, _L.slogdet, _L.inv, lambda x: _L.solve(x, np.ones((len(x), 1)))):",
+    "    for x in (np.zeros((1024, 1)), np.zeros((1, 1024)), np.zeros((1024, 1000)), np.arange(1.0, 13).reshape(3, 4), np.eye(256, 257), np.eye(257, 256)):",
     "        try:",
     "            f(x)",
     "            print('ran')",
@@ -221,7 +222,7 @@ test("the backend functions refuse a non-square matrix before admitting or loadi
     "            print(e)",
     "print(np.linalg._kernels()['solve']['path'])",
   ].join("\n");
-  assert.deepEqual(run(code), [...Array(9).fill("Last 2 dimensions of the array must be square"), "undecided"]);
+  assert.deepEqual(run(code), [...Array(24).fill("Last 2 dimensions of the array must be square"), "undecided"]);
 });
 
 test("each engine/nd call admits its exact work, the module's scratch and solve's B included: refused one byte under, run at it (grader L12)", async () => {
