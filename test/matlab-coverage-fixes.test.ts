@@ -394,6 +394,8 @@ test("NaN and Inf as real MATLAB treats them: svd and pinv give NaN, rank, null 
     "A = complex([1 NaN; 2 3], [4 5; 6 7]); [U, S, V] = svd(A); P = pinv(A); Q = pinv(single(A));",
     "fprintf('%d %d %d %d %d %d %s %d %s\\n', isreal(U), isreal(S), isreal(V), isreal(P), all(isnan(real(P(:)))), all(imag(P(:)) == 0), class(P), isreal(Q), class(Q));",
     "[U1, S1, V1] = svd(single(A)); fprintf('%d %d %d %s %s %s\\n', isreal(U1), isreal(S1), isreal(V1), class(U1), class(S1), class(V1));",
+    // (a non-square complex one: the transposed shape, as for real input; grader C5)
+    "P1 = pinv(complex([NaN 1 2], [0 1 0])); P2 = pinv(single(complex([NaN; 1], [0; 1]))); fprintf('%s %d %s %d %s\\n', mat2str(size(P1)), isreal(P1), mat2str(size(P2)), isreal(P2), class(P2));",
     "fprintf('%g %g %g %g\\n', rank(magic(4)), svd([3 0; 0 4]), pinv(2));",
   ].join("\n")));
   assert.deepEqual(out, [
@@ -408,6 +410,7 @@ test("NaN and Inf as real MATLAB treats them: svd and pinv give NaN, rank, null 
     "NaN NaN NaN single single",
     "1 1 1 0 1 1 double 0 single",
     "1 1 1 single single single",
+    "[3 1] 0 [1 2] 0 single",
     "3 4 3 0.5",
   ]);
 });
