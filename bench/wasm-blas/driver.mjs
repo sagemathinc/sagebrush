@@ -72,19 +72,16 @@ const WATCHDOG = [
   '"$N" "$S" --kill-naming "$U" $$',
   'rm -rf -- "$U"',
 ].join("\n");
-const chrome = spawn("sh", ["-c", WATCHDOG, "sh", String(process.pid), udd, process.execPath, fileURLToPath(import.meta.url), CHROME,
-  "--headless=new", `--user-data-dir=${udd}`, "--remote-debugging-port=0", "--no-first-run",
-  "--no-default-browser-check", "--disable-extensions",
-  "--disable-sync", "--disable-default-apps", "--mute-audio",
-  // (no --disable-component-update / --disable-background-networking: with them the first request waits about
-  // 25 s in FIRST_PARTY_SETS_METADATA for component data that never comes; net-log, Nov 4)
-  "--no-proxy-server", ...(process.env.SBWR_NETLOG ? [`--log-net-log=${process.env.SBWR_NETLOG}`] : []), ...(process.env.SBWR_FEAT ? [`--disable-features=${process.env.SBWR_FEAT}`] : []), "about:blank"], { detached: true, stdio: "ignore" });
-// the watchdog is G's leader: -chrome.pid is all of G (watchdog, Chrome and every Chrome child)
+// (the exit and signal handlers come first, before the spawn: a signal from then on runs cleanup and exits
+// 128+n, never the default action; Nov 5, master CI: a SIGTERM that landed between the spawn and the handlers
+// killed the driver unhandled, the watchdog cleaning up)
+let chrome;
 let cleaned = false;
 const cleanup = () => {
   if (cleaned) return;
   cleaned = true;
-  try { process.kill(-chrome.pid, "SIGKILL"); } catch {}
+  // (the watchdog is G's leader: -chrome.pid is all of G (watchdog, Chrome and every Chrome child); none before the spawn)
+  if (chrome) try { process.kill(-chrome.pid, "SIGKILL"); } catch {}
   killNamingProfile(udd);
   // (synchronous, so signal handlers get it too: give the killed processes 300 ms to be gone, then remove the
   // profile; once before as well, in case the wait is cut short)
@@ -94,6 +91,16 @@ const cleanup = () => {
 };
 process.on("exit", cleanup);
 for (const [sig, n] of [["SIGINT", 2], ["SIGTERM", 15], ["SIGHUP", 1]]) process.on(sig, () => { cleanup(); process.exit(128 + n); });
+chrome = spawn("sh", ["-c", WATCHDOG, "sh", String(process.pid), udd, process.execPath, fileURLToPath(import.meta.url), CHROME,
+  "--headless=new", `--user-data-dir=${udd}`, "--remote-debugging-port=0", "--no-first-run",
+  "--no-default-browser-check", "--disable-extensions",
+  "--disable-sync", "--disable-default-apps", "--mute-audio",
+  // (no --disable-component-update / --disable-background-networking: with them the first request waits about
+  // 25 s in FIRST_PARTY_SETS_METADATA for component data that never comes; net-log, Nov 4)
+  "--no-proxy-server", ...(process.env.SBWR_NETLOG ? [`--log-net-log=${process.env.SBWR_NETLOG}`] : []), ...(process.env.SBWR_FEAT ? [`--disable-features=${process.env.SBWR_FEAT}`] : []), "about:blank"], { detached: true, stdio: "ignore" });
+// (test hook: hold the driver here, just after the spawn, so test/wasm-blas-driver.test.ts can signal it in what
+// was the unhandled window; with the handlers already in place the signal is handled once the hold ends)
+if (process.env.SBWR_TEST_HOLD_MS) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(process.env.SBWR_TEST_HOLD_MS));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const cdpLog = out + ".cdp.jsonl";
 writeFileSync(cdpLog, "");
