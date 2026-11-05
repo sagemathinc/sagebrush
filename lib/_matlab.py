@@ -7150,7 +7150,7 @@ def eig_(nargout, x, *args):
         L = None
         if np.array_equal(A, A.T) and np.array_equal(B, B.T):
             try:
-                L = np.linalg.cholesky(B)
+                L = np.linalg._chol(B, False, False)
             except Exception:
                 L = None
         if algo == "chol" and L is None:
@@ -7355,7 +7355,7 @@ def chol_(nargout, x, *args):
     if not lower:
         M = np.conj(M.T)
     if nargout <= 1:
-        L = np.linalg.cholesky(M)
+        L = np.linalg._chol(M, False, False)
         return _unmat(L if lower else np.conj(L.T))
     if M.dtype.kind == "c":
         raise _err("chol: complex matrices are not supported in Sagebrush.")
