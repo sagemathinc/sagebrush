@@ -52,6 +52,7 @@ jobs:
       web_lookalike: ${{ steps.paths.outputs.web_lookalike }}
       census: ${{ steps.paths.outputs.census }}
       unsafe_sweep: ${{ steps.paths.outputs.unsafe_sweep }}
+      slow_tests: ${{ steps.paths.outputs.slow_tests }}
       size_inputs: ${{ steps.paths.outputs.size_inputs }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -149,6 +150,9 @@ jobs:
       - name: Node tests, shard ${{ matrix.shard }}/8
         env:
           SAGEBRUSH_TIME_SCALE: "2"
+          # (the slow tests, test/slow-tests.ts: for the full-ci label and the paths they test, scripts/ci-paths.mjs
+          # slow_tests; the schedule and a dispatch run them anyway. Not in engine-node)
+          SAGEBRUSH_SLOW_TESTS: ${{ needs.changes.outputs.slow_tests == 'true' && '1' || '' }}
           NPY_DISABLE_CPU_FEATURES: "X86_V4 AVX512_ICL AVX512_SPR"
         run: |
           mapfile -d '' files < <(find dist/test target -maxdepth 1 -type f -name '*.test.js' ! -name 'magma.test.js' ! -name 'matlab.test.js' -print0 | sort -z)
