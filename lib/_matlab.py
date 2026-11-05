@@ -6907,17 +6907,27 @@ def inv_(x):
     return _unmat(Mi)
 
 
-def _svd_finite(M):
-    """M for an SVD (svd, rank, pinv, null, orth): one with a NaN or Inf is refused, with MATLAB's message,
-    rather than given a plausible-looking answer"""
+def _svd_finite(M, name):
+    """M for rank, null or orth (`name`): one with a NaN or Inf is refused, with MATLAB's identifier and message,
+    rather than given a plausible-looking answer (real MATLAB, Nov 4: MATLAB:rank:matrixWithNaNInf, likewise null
+    and orth)"""
     if not np.all(np.isfinite(M)):
-        raise _err("Input to SVD must not contain NaN or Inf.", "MATLAB:svd:matrixWithNaNInf")
+        raise _err("Input matrix must not contain NaN or Inf values.", "MATLAB:%s:matrixWithNaNInf" % name)
     return M
+
+
+def _nan_like(M, shape):
+    """NaN of `shape`, in M's precision (single stays single): what svd and pinv give for an M with a NaN or Inf"""
+    return np.full(shape, np.nan, dtype=np.float32 if M.dtype in (np.float32, np.complex64) else np.float64)
 
 
 @_bs("pinv")
 def pinv_(x):
-    return _unmat(np.linalg.pinv(_svd_finite(_mat(x))))
+    M = _mat(x)
+    # (real MATLAB: pinv(NaN) and pinv([1 Inf; 2 3]) are all NaN, of the transposed shape)
+    if not np.all(np.isfinite(M)):
+        return _unmat(_nan_like(M, (M.shape[1], M.shape[0])))
+    return _unmat(np.linalg.pinv(M))
 
 
 @_bs("det")
@@ -6952,7 +6962,7 @@ def det_(x):
 
 @_bs("rank")
 def rank_(x, tol=None):
-    M = _svd_finite(_mat(x))
+    M = _svd_finite(_mat(x), "rank")
     if M.size == 0:
         return 0.0
     s = np.linalg.svd(M, compute_uv=False)
@@ -7149,7 +7159,19 @@ def _left_vectors(A, B, w, balance=True):
 
 @_bi("svd")
 def svd_(nargout, x, *args):
-    M = _svd_finite(_mat(x))
+    M = _mat(x)
+    if not np.all(np.isfinite(M)):
+        # (real MATLAB: a NaN or Inf anywhere makes every singular value NaN, and U and V all NaN; S is NaN on
+        # its diagonal and 0 elsewhere; full or economy sizes as for a finite M)
+        m, n = M.shape
+        k = min(m, n)
+        if nargout <= 1:
+            return _unmat(_nan_like(M, (k, 1)))
+        econ = bool(args)
+        S = np.zeros((k, k) if econ else (m, n), dtype=_nan_like(M, (0,)).dtype)
+        for i in range(k):
+            S[i, i] = np.nan
+        return [_unmat(_nan_like(M, (m, k) if econ else (m, m))), _unmat(S), _unmat(_nan_like(M, (n, k) if econ else (n, n)))]
     if nargout <= 1:
         return _unmat(np.linalg.svd(M, compute_uv=False).reshape((-1, 1)))
     econ = bool(args)
@@ -7279,7 +7301,7 @@ def chol_(nargout, x, *args):
 
 @_bs("null")
 def null_(x):
-    M = _svd_finite(_mat(x))
+    M = _svd_finite(_mat(x), "null")
     U, s, Vh = np.linalg.svd(M)
     tol = max(M.shape) * (s[0] if s.size else 0) * 2.220446049250313e-16
     r = int(np.sum(s > tol))
