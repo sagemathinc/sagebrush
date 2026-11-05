@@ -6090,7 +6090,15 @@ class _Latex:
         # its bare str as math
         if v is None or isinstance(v, bool):
             return _charged("\\mathrm{%s}" % v)
-        if isinstance(v, (int, float)):
+        if isinstance(v, float):
+            # (as Sage: RDF's specials, an exponent as a power of ten)
+            import _sage_real
+            if v != v:
+                return _charged("NaN")
+            if v in (float("inf"), float("-inf")):
+                return _charged("+infinity" if v > 0 else "-infinity")
+            return _charged(_sage_real._sci_latex(repr(v)))
+        if isinstance(v, int):
             return _charged(str(v))
         if _plain_repr_base(v) is not None:
             # (a subclass keeping list's, tuple's or dict's repr: that text,
