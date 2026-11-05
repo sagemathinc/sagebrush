@@ -189,3 +189,8 @@ def ml1(s):
 err("far ml1", lambda: ml1(fa))
 for p in (1, 2):
     err("far pieces %d" % p, lambda p=p: [zlib.decompressobj(-15).decompress(fa[i:i + p]) for i in range(0, len(fa), p)] and 0)
+# (grader's r687e W2: CINFO 8 asks for a 64 KiB window, past any zlib's: refused even where wbits takes the header's own)
+w64 = bytes([0x88, 0x1C]) + z[2:]
+for wb in (0, 32):
+    err("w64 wbits %d oneshot" % wb, lambda wb=wb: h(zlib.decompress(w64, wb)))
+    err("w64 wbits %d obj" % wb, lambda wb=wb: h(zlib.decompressobj(wb).decompress(w64)))
