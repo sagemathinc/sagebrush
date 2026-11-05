@@ -651,6 +651,28 @@ def triu(m, k=0):
     return where(tri(m.shape[-2], m.shape[-1], k - 1, dtype=bool_), zeros(1, m.dtype), m)
 
 
+def tril_indices(n, k=0, m=None):
+    # (as NumPy's: the row and column indices of tri(n, m, k), in row-major order)
+    return nonzero(tri(n, m, k, dtype=bool_))
+
+
+def triu_indices(n, k=0, m=None):
+    return nonzero(~tri(n, m, k - 1, dtype=bool_))
+
+
+def tril_indices_from(arr, k=0):
+    # (arr as given, as NumPy's: a list has no ndim)
+    if arr.ndim != 2:
+        raise ValueError("input array must be 2-d")
+    return tril_indices(arr.shape[-2], k, arr.shape[-1])
+
+
+def triu_indices_from(arr, k=0):
+    if arr.ndim != 2:
+        raise ValueError("input array must be 2-d")
+    return triu_indices(arr.shape[-2], k, arr.shape[-1])
+
+
 def meshgrid(*xi, indexing="xy", sparse=False, copy=True):
     xs = [asarray(x).ravel() for x in xi]
     n = len(xs)
