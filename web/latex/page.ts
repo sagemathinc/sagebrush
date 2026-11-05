@@ -159,13 +159,24 @@ export async function newTex(ws: Workspace, open: (e: Entry) => unknown): Promis
 
 // the page mounted now: another .tex is opened in place (no reload: William's B2, the notebook no longer flashing by),
 // so the one shown is disposed of first (its worker, image blobs and listeners)
-let current: { dispose(): void; close(): Promise<unknown>; dirty(): boolean } | null = null;
+let current: { dispose(): void; close(): Promise<unknown>; dirty(): boolean; settle(): Promise<boolean> } | null = null;
 // each mount's number: a mount whose number is no longer the last one's was replaced while it waited (a read, a path
 // lookup), and stops at its next step, before it sets the title, makes an editor or becomes current
 let mounts = 0;
 // (every editor closed goes through this one barrier, in order: a mount waits for all those closed before it, its
 //  number taken before it waits, and only the newest mount goes on (astra U8-SWITCH-1))
 let closing: Promise<unknown> = Promise.resolve();
+// (a controlled switch waits for the editor shown to settle first (astra U8-DURABLE-CLOSE-1): its latest edit written,
+//  or durable in its draft; only the newest switch asked for meanwhile goes on)
+let leaving = 0;
+const leaveOk = async (): Promise<boolean | null> => {
+  const n = ++leaving;
+  const settled = await (current?.settle() ?? Promise.resolve(true));
+  // (null: a newer switch was asked for meanwhile, so this one does nothing)
+  if (n !== leaving) return null;
+  // (asked only when a write failed or the edit is in neither the file nor a durable draft: U8, never otherwise)
+  return (settled && !current?.dirty()) || confirm(LEAVE);
+};
 // the history entry shown, so a declined Back or Forward goes back to exactly it: its id (history.state.sbTexId), URL
 // and Navigation API key where there is one (traverseTo); else its position (history.state.sbTex: every entry this
 // page sees is numbered, from 0 at the first file, a fragment's entry too). Whether that return is under way: where it
@@ -192,7 +203,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   if (typeof st.sbTex !== "number" || typeof st.sbTexId !== "string") history.replaceState({ ...st, sbTex: typeof st.sbTex === "number" ? st.sbTex : 0, sbTexId: entryId() }, "");
   noteShown();
   let dispose = () => { life.abort(); };
-  current = { dispose: () => dispose(), close: async () => dispose(), dirty: () => false };
+  current = { dispose: () => dispose(), close: async () => dispose(), dirty: () => false, settle: async () => true };
   if (!document.getElementById("sb-tex-style")) { const style = el("style"); style.id = "sb-tex-style"; style.textContent = PAGE_CSS + PRINT_CSS; document.head.appendChild(style); }
   if (!document.getElementById("sb-katex")) {
     const link = document.createElement("link"); link.rel = "stylesheet"; link.href = new URL("katex/katex.min.css", location.href).href; document.head.appendChild(link);
@@ -298,10 +309,12 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   g.__sbTex = (e: Entry, tab?: boolean) => {
     if (tab || !/\.tex$/i.test(e.path) || !e.fid) return bootHook(e, tab);
     if (e.fid === host.fid) return true;
-    if (current?.dirty() && !confirm(LEAVE)) return true;
-    const q = new URLSearchParams(location.search); q.set("tex", e.fid);
-    history.pushState({ sbTex: shownAt + 1, sbTexId: entryId() }, "", "/?" + q.toString());
-    openHere(e.fid);
+    void leaveOk().then((ok) => {
+      if (!ok || !live()) return;
+      const q = new URLSearchParams(location.search); q.set("tex", e.fid!);
+      history.pushState({ sbTex: shownAt + 1, sbTexId: entryId() }, "", "/?" + q.toString());
+      openHere(e.fid!);
+    });
     return true;
   };
   // Back and Forward among those entries: the same question first; declined, the history is taken back to the entry
@@ -319,7 +332,9 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       noteShown();
       return;
     }
-    if (current?.dirty() && !confirm(LEAVE)) {
+    void leaveOk().then((ok) => {
+    if (ok === null || !live()) return;
+    if (!ok) {
       const nav = navApi(), to = typeof st?.sbTex === "number" ? st.sbTex : null;
       if (nav?.traverseTo && shownKey && nav.entries?.().some((e: any) => e.key === shownKey)) {
         returning = true;
@@ -331,6 +346,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       return;
     }
     if (t) openHere(t); else { current?.dispose(); location.reload(); }
+    });
   }, on);
   const gone = (t: string) => { main.textContent = ""; const m = el("div", "tex-gone", t); main.appendChild(m); saveState.hidden = true; toggle.hidden = true; tools.hidden = true; };
 
@@ -685,7 +701,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   sb.latex = handle;
   dispose = () => { life.abort(); E.destroy(); dropImages(); cm?.destroy(); if (sb.latex === handle) delete sb.latex; };
   // (closing for another file: what is pending written first, then the editor disposed of)
-  current = { dispose: () => { void saver?.dispose(); dispose(); }, close: async () => { await saver?.dispose(); dispose(); }, dirty: () => !!saver?.failed };
+  current = { dispose: () => { void saver?.dispose(); dispose(); }, close: async () => { await saver?.dispose(); dispose(); }, dirty: () => !!saver?.failed, settle: () => saver ? saver.settle() : Promise.resolve(true) };
   // (the test build only: the page test tells this workspace an op as sync's view would; elsewhere this folds away)
   if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) { (globalThis as any).__sbTexWs = host.ws; (globalThis as any).__sbTexActor = () => actor; }
 

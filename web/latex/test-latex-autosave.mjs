@@ -1,4 +1,5 @@
-// ci: none (new with U8, #551: a wiring candidate for the web-latex follow-up, runner=bun, no browser, about 1 s)
+// ci: checks.3 order=108 runner=bun
+// (no browser, about 1 s: autosave.ts alone, with fakes; in CI through the registry, as test-latex-run and -units are)
 // The LaTeX editor's autosave (autosave.ts; plan U8 r6, on top of #599), without a browser: a fake file (revisions,
 // writes that can be held or made to fail), a fake page modelling page.ts's writeText (#599: compare-and-swap on the
 // revision its saved text came from; a change made elsewhere opens its bar, and nothing is written while it asks),
@@ -20,9 +21,10 @@ function fakeFile(text = "start") {
 }
 // (the page's side, as page.ts: its baseline (savedText, docRev), its bar (conflict) and a choice under way (acting))
 function fakePage(f) {
-  const p = { savedText: f.text, docRev: f.rev, conflict: false, acting: false, bars: 0 };
+  const p = { savedText: f.text, docRev: f.rev, conflict: false, acting: false, readonly: false, bars: 0 };
   p.io = {
     async write(text) {
+      if (p.readonly) return "readonly";
       if (p.conflict || p.acting) return "blocked";
       const base = p.docRev;
       f.inFlight++; f.maxInFlight = Math.max(f.maxInFlight, f.inFlight);
@@ -197,6 +199,16 @@ function editor(f, drafts, timers, page = fakePage(f)) {
   check("draft-large-put-fails-failed", e.saver.failed && /idb aborted/.test(e.saver.state.why), e.saver.state);
 }
 
+// ---- 9b. a file that can't be saved here (the page's write says "readonly", grader #551 A2): nothing written, not
+// Saved, the draft kept (the edits aren't lost), and no failed state (no leave prompt)
+{
+  const f = fakeFile(), d = fakeDrafts(), t = fakeTimers(), e = editor(f, d, t);
+  e.page.readonly = true;
+  e.type("mixed endings edit");
+  const ok = await e.saver.flush();
+  check("readonly-write-keeps-draft", !ok && e.saver.state.k === "readonly" && !e.saver.failed && e.draft()?.text === "mixed endings edit" && f.writes === 0, { ok, st: e.saver.state, d: e.draft() });
+}
+
 // ---- 10. two editors of one file (two tabs): each its own draft, never replacing the other's
 {
   const f = fakeFile(), d = fakeDrafts(), t = fakeTimers(), a = editor(f, d, t), b = editor(f, d, t);
@@ -224,6 +236,19 @@ function editor(f, drafts, timers, page = fakePage(f)) {
   const r = await e.saver.recover(e.page.savedText);
   t.fire(); await settle();
   check("recover-stale-bar-first", r.recovered === 1 && e.stale === 1 && e.text === "old edits" && f.text === "changed since" && f.writes === 0 && e.draft()?.text === "old edits" && e.saver.state.k === "blocked", { r, st: e.saver.state, f: f.text });
+}
+// (one writer's two records, as while a draft moves between drafts.ts's two stores: its newest gen is the one
+//  recovered, never the older text; grader #551 A5)
+{
+  const f = fakeFile(), d = fakeDrafts(), t = fakeTimers();
+  const W = "f".repeat(32), rec = (gen, text) => ({ fid: "F", writerId: W, gen, path: "/a.tex", baseRev: 1, text, t: 0 });
+  d.all = async () => [rec(2, "new"), rec(1, "old")];
+  const e = editor(f, d, t);
+  const r = await e.saver.recover(e.page.savedText);
+  d.all = async () => [rec(1, "old"), rec(2, "new")];
+  const e2 = editor(f, d, t);
+  const r2 = await e2.saver.recover(e2.page.savedText);
+  check("recover-newest-gen-of-a-writer", r.recovered === 1 && e.text === "new" && r2.recovered === 1 && e2.text === "new", { r, t: e.text, r2, t2: e2.text });
 }
 // (several: each kept as a version, none chosen; equal to the file: dropped)
 {
@@ -278,7 +303,55 @@ function editor(f, drafts, timers, page = fakePage(f)) {
   const f = fakeFile(), d = fakeDrafts(), t = fakeTimers(), e = editor(f, d, t);
   e.type("mine"); f.outside("theirs"); t.fire(); await settle();
   const ok = await e.saver.dispose();
-  check("dispose-blocked-writes-nothing-draft-kept", !ok && f.text === "theirs" && e.draft()?.text === "mine", { ok, f: f.text });
+  // (settled: nothing written over theirs, and the edit durable in its draft, so the close is released)
+  check("dispose-blocked-writes-nothing-draft-kept", ok && f.text === "theirs" && e.draft()?.text === "mine", { ok, f: f.text });
+}
+
+// ---- 13. a controlled close waits until the latest edit is written or durable (astra U8-DURABLE-CLOSE-1): with the
+// write not done (blocked, refused, read-only) and the draft a large one whose put is held, dispose resolves only
+// when that put lands (true), or false when it fails; an edit made while it waits is waited for too
+{
+  const setups = {
+    blocked: (e) => { e.page.conflict = true; },
+    failed: (e, f) => { f.failNext = new Error("workspace unavailable"); },
+    readonly: (e) => { e.page.readonly = true; },
+  };
+  for (const [kind, setup] of Object.entries(setups)) {
+    for (const outcome of ["lands", "fails"]) {
+      const f = fakeFile(), d = fakeDrafts(), t = fakeTimers(), e = editor(f, d, t);
+      setup(e, f);
+      let land, fail; d.putAsync = new Promise((res, rej) => { land = res; fail = rej; }); d.putAsync.catch(() => {});
+      e.type("LATEST");
+      let closed = null; const p = e.saver.dispose().then((v) => (closed = v));
+      await settle();
+      const waited = closed === null;
+      if (outcome === "lands") land(); else fail(new Error("idb aborted"));
+      await p; await settle();
+      check(`close-waits-durable-${kind}-${outcome}`, waited && closed === (outcome === "lands") && f.writes === 0, { waited, closed, st: e.saver.state });
+    }
+  }
+  // (a newer edit while the close waits: its own put waited for, the older one's landing isn't enough)
+  {
+    const f = fakeFile(), d = fakeDrafts(), t = fakeTimers(), e = editor(f, d, t);
+    e.page.readonly = true;
+    let land1; d.putAsync = new Promise((res) => (land1 = res));
+    e.type("one");
+    let closed = null; const p = e.saver.settle().then((v) => (closed = v));
+    await settle();
+    let land2; d.putAsync = new Promise((res) => (land2 = res));
+    e.type("one two");
+    land1(); await settle();
+    const stillWaiting = closed === null;
+    land2(); await p;
+    check("close-waits-for-a-newer-edit", stillWaiting && closed === true, { stillWaiting, closed });
+  }
+  // (nothing pending, or written: settled at once)
+  {
+    const f = fakeFile(), d = fakeDrafts(), t = fakeTimers(), e = editor(f, d, t);
+    const clean = await e.saver.settle();
+    e.type("written"); const wrote = await e.saver.settle();
+    check("settle-clean-or-written", clean && wrote && f.text === "written", { clean, wrote, f: f.text });
+  }
 }
 
 const failed = results.filter(([, ok]) => !ok);

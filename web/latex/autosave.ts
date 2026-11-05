@@ -171,9 +171,24 @@ export class AutoSaver {
     } finally { if (!this.disposed) this.ui.readOnly(false); }
   }
 
-  /** The editor is closing: what is pending is written (the drafts keep it if that fails); no UI change after. */
+  /** Before a controlled close or switch is released (astra U8-DURABLE-CLOSE-1): the latest edit either written (an
+   * acknowledged save, nothing pending) or durable as a draft of the current gen, the latest put waited for (a large
+   * draft's IndexedDB write). A newer edit made meanwhile is settled too. False when neither: the write didn't happen
+   * (blocked, read-only, refused) and the draft's put failed, so the edit lives only in the editor. */
+  async settle(): Promise<boolean> {
+    for (;;) {
+      const g = this.gen;
+      if (this.ui.dirty() && !this.ui.blocked()) await this.flush();
+      if (this.gen !== g) continue;
+      if (!this.ui.dirty()) return true;
+      const durable = await this.putting;
+      if (this.gen !== g) continue;
+      return durable;
+    }
+  }
+
+  /** The editor is closing: settled first (written, or durable in its draft); no UI change after. */
   async dispose(): Promise<boolean> {
-    const p = this.ui.dirty() && !this.ui.blocked() ? this.flush() : Promise.resolve(!this.ui.dirty());
-    try { return await p; } finally { this.disposed = true; }
+    try { return await this.settle(); } finally { this.disposed = true; }
   }
 }
