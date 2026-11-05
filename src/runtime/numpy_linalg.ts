@@ -1279,7 +1279,7 @@ newBuiltinModule("_nplinalg", (m) => {
     const [Q, R, qc] = qr(A, r, c, !!complete);
     return tuple([out(Q, [r, qc]), out(R, [complete ? r : Math.min(r, c), c])]);
   });
-  fn("cholesky", (a: NDArray) => {
+  fn("cholesky", (a: NDArray, reportFailure = false) => {
     // (square and 2-D before anything is admitted or the module loaded: np.linalg.cholesky checks this, but this
     // backend function can be called directly; astra ND657-ADMIT-2)
     if (a.ndim !== 2) raise(T.ValueError ?? T.TypeError, `${a.ndim}-dimensional array given. Array must be two-dimensional`);
@@ -1290,7 +1290,9 @@ newBuiltinModule("_nplinalg", (m) => {
     // copies, L and the output; engine/nd's are A as contiguous float64 (a copy only when it isn't one already),
     // A and the work in the module's memory, L and the output (astra ND657-ADMIT-1). Below CHOL_ND_MIN rows the
     // loop is faster than the module's fixed cost, so it runs there, without loading the module.
-    const nd = r0 >= CHOL_ND_MIN && useNd();
+    // The status-reporting call needs the completed leading factor on failure,
+    // which engine/nd does not return. Keep that internal call on the loop.
+    const nd = !reportFailure && r0 >= CHOL_ND_MIN && useNd();
     work(5 * r0 * c0 + (nd ? ndScratch() : 0), "cholesky");
     if (nd) {
       if (a.ndim !== 2) raise(T.ValueError ?? T.TypeError, `${a.ndim}-dimensional array given. Array must be two-dimensional`);
@@ -1311,7 +1313,12 @@ newBuiltinModule("_nplinalg", (m) => {
     for (let j = 0; j < n; j++) {
       let s = A[j * n + j];
       for (let k = 0; k < j; k++) s -= L[j * n + k] * L[j * n + k];
-      if (!(s > 0)) linalgError("Matrix is not positive definite");
+      if (!(s > 0)) {
+        // MATLAB's two-output chol needs the completed leading block and the
+        // first failed pivot. NumPy's ordinary call retains its exception.
+        if (reportFailure) return tuple([out(L, [n, n]), j + 1]);
+        linalgError("Matrix is not positive definite");
+      }
       const d = Math.sqrt(s);
       L[j * n + j] = d;
       for (let i = j + 1; i < n; i++) {
@@ -1320,7 +1327,8 @@ newBuiltinModule("_nplinalg", (m) => {
         L[i * n + j] = t / d;
       }
     }
-    return out(L, [n, n]);
+    const result = out(L, [n, n]);
+    return reportFailure ? tuple([result, 0]) : result;
   });
   // which code cholesky runs in this session, and why (src/runtime/nd.ts): (path, kernel, why)
   fn("_kernels", () => {

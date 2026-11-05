@@ -423,6 +423,13 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/mod-scipy-optimize.src": {
+   "exact": false,
+   "ceiling": 95774,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/mod-scipy-special.src": {
    "exact": false,
    "ceiling": 46064,
@@ -635,7 +642,7 @@
   },
   "engine/sagebrush-notebook.js": {
    "exact": false,
-   "ceiling": 237670,
+   "ceiling": 237760,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -734,6 +741,7 @@
    "engine/lib/mod-special-ibeta.src": 25081,
    "engine/lib/mod-sbx.src": 48044,
    "engine/lib/mod-scipy.src": 82824,
+   "engine/lib/mod-scipy-optimize.src": 87068,
    "engine/lib/mod-scipy-special.src": 41877,
    "engine/lib/mod-scipy-stats.src": 38144,
    "engine/lib/mod-scipy-stats-py.src": 23101,

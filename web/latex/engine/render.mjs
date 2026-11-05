@@ -9,7 +9,7 @@
 // KaTeX's renderToString is given by the host (setKatex): on the site, the shared sagebrush-math.js's copy
 let renderToString = null;
 export function setKatex(f) { renderToString = f; }
-import { CAT, isCs, catOf, codeOf } from "./demo-machine.mjs";
+import { CAT, isCs, catOf, codeOf, depthOf } from "./demo-machine.mjs";
 import { TEXT_SYMBOLS, ACCENTS, SIZES, COLORS } from "./symbols.mjs";
 import { itemOf, isCodeEnv, UNSUPPORTED_ENVS, stateOf, savedStates, mathPart, inlineHtml, blockHtml, mathFailHtml, whyRejected } from "./sagetex.mjs";
 
@@ -18,7 +18,8 @@ const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39
 // eslint-disable-next-line no-control-regex
 export const esc = (s) => String(s).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "").replace(/[&<>"']/g, (c) => ESC[c]);
 const safeUrl = (u) => { const s = String(u).trim(); return /^(https?:\/\/|mailto:)[^\s"'<>\\]*$/i.test(s) && s.length < 2048 ? s : null; };
-const roman = (n) => { if (n <= 0 || n > 4999) return String(n); const v = [[1000, "m"], [900, "cm"], [500, "d"], [400, "cd"], [100, "c"], [90, "xc"], [50, "l"], [40, "xl"], [10, "x"], [9, "ix"], [5, "v"], [4, "iv"], [1, "i"]]; let s = ""; for (const [k, r] of v) while (n >= k) { s += r; n -= k; } return s; };
+// (\roman of 0 or less: nothing, as TeX's \romannumeral; past 4999, the number in digits, a bound on the text)
+const roman = (n) => { if (n <= 0) return ""; if (n > 4999) return String(n); const v = [[1000, "m"], [900, "cm"], [500, "d"], [400, "cd"], [100, "c"], [90, "xc"], [50, "l"], [40, "xl"], [10, "x"], [9, "ix"], [5, "v"], [4, "iv"], [1, "i"]]; let s = ""; for (const [k, r] of v) while (n >= k) { s += r; n -= k; } return s; };
 const alph = (n) => (n >= 1 && n <= 26 ? String.fromCharCode(96 + n) : String(n));
 const Alph = (n) => alph(n).toUpperCase();
 // a TeX dimension -> CSS (fixed units only), or null; rel = the length of 1\textwidth in CSS (a percentage)
@@ -62,6 +63,7 @@ export function buildTree(events, items = []) {
       case "sec": { const n = { t: "s", cmd: e.cmd, star: !!e.star, short: e.short, kids: [] }; top().kids.push(n); st.push(n); break; }
       case "eot": { let i = st.length - 1; while (i > 0 && st[i].t !== "s") i--; if (i > 0) st.length = i; break; }
       case "verb": top().kids.push({ t: "v", text: e.text }); break;
+      case "ctr": top().kids.push({ t: "C", name: e.name, v: e.v }); break;
       case "verbenv": {
         const v = { t: "V", env: e.env, text: e.text };
         if (isCodeEnv(e.env)) { v.n = items.length; v.it = itemOf(e); v.it.at = last; items.push(v.it); }
@@ -175,6 +177,8 @@ const KATEX_ENVS = new Set(["array", "darray", "matrix", "pmatrix", "bmatrix", "
 const MATH_ENVS = new Set(["equation", "equation*", "align", "align*", "gather", "gather*", "multline", "multline*", "eqnarray", "eqnarray*",
   "displaymath", "flalign", "flalign*", "alignat", "alignat*", "math"]);
 const LIST_ENVS = new Set(["itemize", "enumerate", "description", "list", "compactitem", "compactenum", "inparaenum", "asparaenum"]);
+// (a counter stepped as TeX's \advance by 1 does it, on a 32-bit register: 2147483647 steps to -2147483648)
+const step = (v) => (v + 1) | 0;
 const SEC_LEVEL = { part: -1, chapter: 0, section: 1, subsection: 2, subsubsection: 3, paragraph: 4, subparagraph: 5 };
 const NOOP = new Set(["relax", "protect", "makeatletter", "makeatother", "sloppy", "fussy", "nobreak", "allowbreak", "frenchspacing", "nonfrenchspacing",
   "ignorespaces", "leavevmode", "null", "vfill", "vfil", "clearpage", "cleardoublepage", "newpage", "pagebreak", "nopagebreak", "nolinebreak", "indent",
@@ -341,6 +345,16 @@ class Renderer {
           break;
         case "s": this.sec(n, ctx, flow); break;
         case "v": flow.html('<code class="verb">' + esc(n.text) + "</code>", ctx.st); break;
+        // (a counter set or added to (\setcounter, \addtocounter): the renderer's own numbering follows it; enumi..enumiv,
+        //  the enclosing enumerate of that depth)
+        case "C": {
+          if (Object.hasOwn(this.ctr, n.name)) this.ctr[n.name] = n.v;
+          // (secnumdepth: which levels are numbered, as in LaTeX: 0 none below chapter, 4 and 5 \paragraph and \subparagraph)
+          if (n.name === "secnumdepth") this.secnumdepth = n.v;
+          const d = { enumi: 1, enumii: 2, enumiii: 3, enumiv: 4 }[n.name], L = d && this.lists.filter((x) => x.kind === "enum")[d - 1];
+          if (L) L.n = n.v;
+          break;
+        }
         case "V":
           if (n.it) { this.sageSeen(n.n); flow.block(blockHtml(stateOf(this.sageStates, n.n, n.it), n.it, esc, n.n + 1)); break; }
           if (UNSUPPORTED_ENVS.has(n.env)) { flow.block('<pre class="verbatim code">' + esc(n.text) + '</pre><div class="sagestate"><span class="sagechip s-notrun">' + esc(n.env) + " is not supported in this preview: not run</span></div>"); break; }
@@ -361,7 +375,7 @@ class Renderer {
           this.problem(n.code === "runaway" ? "runaway" : "redefined", n.name);
           if (n.code === "runaway") { const tx = String(n.text || "").replace(/\s+$/, ""); flow.html('<span class="unk errchip" title="LaTeX: Paragraph ended before \\' + esc(n.name) + ' was complete">\\' + esc(n.name) + esc(tx.length > 40 ? tx.slice(0, 40) + "…" : tx) + " not finished</span>", ctx.st); break; }
           flow.html('<span class="unk errchip" title="LaTeX would stop here">\\newcommand: \\' + esc(n.name) + " is already defined</span>", ctx.st); break;
-        case "cls": this.cls = n.cls; this.clsOpt = typeof n.opt === "string" ? n.opt : ""; this.book = /^(book|report|memoir|scrbook|scrreprt)$/.test(n.cls); this.secnumdepth = this.book ? 2 : 3; break;
+        case "cls": this.cls = n.cls; this.clsOpt = typeof n.opt === "string" ? n.opt : ""; this.book = /^(book|report|memoir|scrbook|scrreprt)$/.test(n.cls); this.secnumdepth = depthOf(n.cls); break;
         default: break;
       }
     }
@@ -440,7 +454,7 @@ class Renderer {
     void ctx;
   }
   eqNumber() {
-    this.ctr.equation++;
+    this.ctr.equation = step(this.ctr.equation);
     const pre = this.eqWithin === "section" ? this.secNum(1) + "." : this.book ? this.chapNum() + "." : "";
     return pre + this.ctr.equation;
   }
@@ -463,9 +477,9 @@ class Renderer {
     const level = SEC_LEVEL[n.cmd];
     const names = ["chapter", "section", "subsection", "subsubsection", "paragraph", "subparagraph"];
     let num = "";
-    if (n.cmd === "part") { if (!n.star) { this.ctr.part++; num = roman(this.ctr.part).toUpperCase(); } }
+    if (n.cmd === "part") { if (!n.star) { this.ctr.part = step(this.ctr.part); num = roman(this.ctr.part).toUpperCase(); } }
     else if (!n.star) {
-      this.ctr[n.cmd]++;
+      this.ctr[n.cmd] = step(this.ctr[n.cmd]);
       for (let l = level + 1; l < names.length; l++) this.ctr[names[l]] = 0;
       if (n.cmd === "chapter") { this.ctr.equation = 0; this.ctr.figure = 0; this.ctr.table = 0; this.ctr.footnote = 0; }
       if (n.cmd === "section" && this.eqWithin === "section") this.ctr.equation = 0;
@@ -476,7 +490,8 @@ class Renderer {
     const id = this.nid("sec");
     this.setTarget(num, id, n.cmd);
     const title = this.inline(n.kids, ctx);
-    if (n.cmd === "part") flow.block('<h1 class="part" id="' + id + '">' + (num ? '<div class="partnum">Part ' + num + "</div>" : "") + title + "</h1>");
+    // (an unstarred part says "Part" with its numeral, which TeX leaves empty at 0 or less)
+    if (n.cmd === "part") flow.block('<h1 class="part" id="' + id + '">' + (!n.star ? '<div class="partnum">Part ' + num + "</div>" : "") + title + "</h1>");
     else if (n.cmd === "chapter") flow.block('<h1 class="chapter" id="' + id + '">' + (num ? '<div class="chapnum">' + (this.appendix ? "Appendix " : "Chapter ") + esc(num) + "</div>" : "") + title + "</h1>");
     else if (level >= 4) { flow.par(); flow.html('<span class="runin" id="' + id + '">' + (num ? esc(num) + " " : "") + title + "</span> ", ctx.st); }
     else flow.block("<h" + (level + 1) + ' id="' + id + '">' + (num ? '<span class="secnum">' + esc(num) + "</span>" : "") + title + "</h" + (level + 1) + ">");
@@ -484,7 +499,11 @@ class Renderer {
     flow.noindent = true;
   }
   footnote(n, ctx, flow) {
-    const k = ++this.ctr.footnote, id = this.nid("fn");
+    // (\footnote[n]: that number, signed, within TeX's limit, the counter not stepped, as in LaTeX; anything else (TeX
+    //  would read its leading number and set the rest as text, \footnote[2a] as 2 and a stray "a") the counter, and said)
+    const opt = n.short ?? "", num = /^\s*[+-]?\d+\s*$/.test(opt);
+    if (!num && opt.trim()) this.problem("footnote", "\\footnote[" + opt.trim().slice(0, 40) + "]: not a number; TeX would read its leading digits and set the rest as text");
+    const k = num ? Math.max(-2147483647, Math.min(2147483647, +opt)) : (this.ctr.footnote = step(this.ctr.footnote)), id = this.nid("fn");
     const save = this.target;
     this.setTarget(String(k), id, "footnote");
     const f = new Flow(false);
@@ -500,7 +519,7 @@ class Renderer {
   }
   caption(n, ctx, flow) {
     const fl = this.floatKind || "figure";
-    this.ctr[fl]++;
+    this.ctr[fl] = step(this.ctr[fl]);
     const num = (this.book ? this.chapNum() + "." : "") + this.ctr[fl];
     const id = this.nid(fl);
     this.setTarget(num, id, fl);
@@ -670,7 +689,7 @@ class Renderer {
       let lbl;
       if (o) lbl = this.inline(o, ctx);
       else if (kind === "enum") {
-        L.n++;
+        L.n = step(L.n);
         const nums = this.lists.filter((x) => x.kind === "enum").map((x) => x.n);
         const d = depth;
         lbl = d === 1 ? nums[0] + "." : d === 2 ? "(" + alph(nums[1]) + ")" : d === 3 ? roman(nums[2]) + "." : Alph(nums[3]) + ".";
