@@ -30,6 +30,13 @@ const b64 = (s) => {
 export function driver(items) {
   return `import json as _sbtx_json, io as _sbtx_io, sys as _sbtx_sys, traceback as _sbtx_tb, base64 as _sbtx_b64
 from sagebrush.preparse import preparse as _sbtx_pp
+# (each item compiled as Sage source by the runtime itself, so its code object keeps Sage's semantics when it
+#  runs: 1/3 exact, as in a .sage file; plain exec of preparsed text is Python's, 1/3 a float (#706). Given the
+#  raw item: that compile preparses it, and preparsing twice would make ^^ a power. CPython: preparsed, exec'd)
+try:
+    _sbtx_cs = __pyjs_compile_sage__
+except NameError:
+    _sbtx_cs = None
 _sbtx_g = globals()
 try:
     _sbtx_base
@@ -43,7 +50,8 @@ for _sbtx_it in _sbtx_json.loads(_sbtx_b64.b64decode("${b64(JSON.stringify(items
     _sbtx_old = _sbtx_sys.stdout
     _sbtx_sys.stdout = _sbtx_buf
     try:
-        _sbtx_code = _sbtx_pp(_sbtx_it["code"])
+        _sbtx_ev = _sbtx_it["mode"] in ("sage", "plot")
+        _sbtx_code = _sbtx_cs(_sbtx_it["code"].strip() if _sbtx_ev else _sbtx_it["code"], "<sagetex>", "eval" if _sbtx_ev else "exec") if _sbtx_cs else _sbtx_pp(_sbtx_it["code"])
         if _sbtx_it["mode"] == "sage":
             _sbtx_r = {"s": "ok", "latex": str(latex(eval(_sbtx_code, _sbtx_g)))}
         elif _sbtx_it["mode"] == "plot":
@@ -77,7 +85,7 @@ export function parseOutput(out) {
 }
 
 // (a traceback without the session script's own frames, those whose line is the script's (its names: _sbtx_); the
-// item's code is the "<string>" one)
+// item's code is the "<sagetex>" one)
 export function msgOf(msg) {
   const lines = String(msg ?? "").split("\n"), out = [];
   for (let i = 0; i < lines.length; i++) {

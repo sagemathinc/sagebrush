@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "WRONG-ANSWER fix (#706): SageTeX items are compiled as Sage source by the runtime's own __pyjs_compile_sage__, so 1/3 is exact in latex run and the editor's Run, as in a .sage file; plain exec of preparsed text was Python's, 1/3 a float. The CLI's session driver (src/latex-cli.ts, bundled into the CLI) gains that compile, its CPython fallback and a comment. Measured by daybreak2 with Node 24 and bun 1.4.4 at the exact landing onto master 7776848d: pyjs +84; marked with a 64-byte margin for master's drift.",
+ "bytes": {
+  "cli/pyjs.cjs": 148
+ }
+}

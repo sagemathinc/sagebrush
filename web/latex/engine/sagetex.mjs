@@ -6,7 +6,8 @@
 // a result's LaTeX reaches only KaTeX (trust: false, through the renderer's math()); a plot only as an <img> whose
 // src must be a base64 SVG data URL (checked here, again); results never enter the TeX expander.
 
-export const WRAPPER_VERSION = "sbtx-wrapper-1";
+// (2: each item compiled as Sage source, so 1/3 is exact (#706); results saved by wrapper 1 are run again)
+export const WRAPPER_VERSION = "sbtx-wrapper-2";
 export const MAX_CODE = 65536;            // bytes (UTF-8) of code per item (plan r4 section 8)
 export const MAX_RESULT = 16384;          // bytes (UTF-8) of one \sage result
 // a string's UTF-8 length, the one byte measure of every cap here and in the executor (astra C2, astra3 S1-A3-3);

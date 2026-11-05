@@ -301,7 +301,7 @@ $\sage{1/0}$ then $\sage{2+2}$.
   check("run: the error's traceback is the item's, not the session script's", /ZeroDivisionError/.test(res.items[4].msg) && !/driver\.sage/.test(res.items[4].msg), res.items[4].msg);
   const after = await run(dir, "check", "sage.tex", "--json");
   check("check after run: the states, the failure at its line", after.code === 1 && after.json.code.map((x) => x.state.split(":")[0]).join(",") === "ok,ok,ok,ok,error,blocked"
-    && after.json.problems.some((x) => x.kind === "code" && x.severity === "error" && x.line === lineOf(SAGE, "$\\sage{1/0}") && /ZeroDivisionError: division by zero/.test(x.message)), after.json?.problems);
+    && after.json.problems.some((x) => x.kind === "code" && x.severity === "error" && x.line === lineOf(SAGE, "$\\sage{1/0}") && /ZeroDivisionError: rational division by zero/.test(x.message)), after.json?.problems); // (Sage's own message for 1/0: the item is Sage, #706)
   await run(dir, "render", "sage.tex", "-o", "sage.html");
   const sh = readFileSync(join(dir, "sage.html"), "utf8");
   check("render after run: the plot and the results drawn", /<img class="sageplot" alt="a plot" src="data:image\/svg\+xml;base64,/.test(sh) && sh.includes("274177") && !sh.includes("Sage item 2: not run"), null);
@@ -309,6 +309,20 @@ $\sage{1/0}$ then $\sage{2+2}$.
   writeFileSync(join(dir, "sage.tex"), SAGE.replace("factor(2^64+1)", "factor(2^32+1)"));
   const edited = await run(dir, "check", "sage.tex", "--json");
   check("an edit: the results before it kept, those from it on not run", edited.json.code.map((x) => x.state).join(",") === "ok,ok,not run,not run,not run,not run", edited.json?.code);
+  // (#706, a wrong answer: Sage's arithmetic in every item, as in a .sage file: the issue's document, the values Sage
+  //  gives (sage -c on the same lines; latex() as Sage writes it); and results saved by the old wrapper, whose 1/3 was
+  //  a float, aren't shown: those items are run again)
+  const EXACT = "\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n\\begin{sageblock}\na = 1/3\nb = 2^3\nc = 5^^3\nR.<t> = QQ[]\nL = sum(1/10^factorial(j) for j in range(1, 5))\n\\end{sageblock}\n$\\sage{a}$, $\\sage{b}$, $\\sage{c}$, $\\sage{L}$, $\\sage{ 1/2 + 1/3 }$, $\\sage{(t+1)^2}$.\n\\end{document}\n";
+  writeFileSync(join(dir, "exact.tex"), EXACT);
+  const ex = await run(dir, "run", "exact.tex", "--json");
+  const exr = JSON.parse(readFileSync(join(dir, "exact.tex.results.json"), "utf8"));
+  check("exact: latex run is Sage's arithmetic: 1/3, 2^3, 5^^3 (xor), the sum with its 10^-24 term, 1/2 + 1/3, (t+1)^2 over QQ",
+    ex.code === 0 && JSON.stringify(exr.items.map((x) => x.latex ?? null)) === JSON.stringify([null, "\\frac{1}{3}", "8", "6", "\\frac{110001000000000000000001}{1000000000000000000000000}", "\\frac{5}{6}", "t^{2} + 2 t + 1"]), { code: ex.code, items: exr.items.map((x) => [x.s, x.latex ?? (x.msg ?? "").slice(-160)]) });
+  // (the same results as the old wrapper saved them, its version in the file and in each item's key, \sage{a} its
+  //  float: not shown, every item not run until it is run again)
+  writeFileSync(join(dir, "exact.tex.results.json"), readFileSync(join(dir, "exact.tex.results.json"), "utf8").replace(/sbtx-wrapper-\d+/g, "sbtx-wrapper-1").replace('"latex":"\\\\frac{1}{3}"', '"latex":"0.3333333333333333"'));
+  const stale = await run(dir, "check", "exact.tex", "--json");
+  check("exact: results saved by the old wrapper (1/3 a float) aren't shown: not run", stale.json?.code?.length === 7 && stale.json.code.every((x) => x.state === "not run") && readFileSync(join(dir, "exact.tex.results.json"), "utf8").includes("0.3333333333333333"), stale.json?.code);
   // (a timeout: what ran before it is kept)
   writeFileSync(join(dir, "slow.tex"), "\\documentclass{article}\n\\begin{document}\n$\\sage{2+3}$\n\\begin{sagesilent}\nwhile True:\n    pass\n\\end{sagesilent}\n$\\sage{7}$\n\\end{document}\n");
   const slow = await run(dir, "run", "slow.tex", "--timeout", "8", "--json");
