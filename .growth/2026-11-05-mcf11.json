@@ -1,10 +1,10 @@
 {
   "v": 1,
-  "reason": "MCF11: scalar NaN for flagged empty mean, median, std and var. TIGHT measured against master 8488b767 with Node 24.21.0 / Bun 1.4.4: matlab.pre +417, matlab.src +69, lib.gen +8, pyjs +8 with the conventional 64-byte packaging margin. No dependencies or new chunks.",
+  "reason": "MCF11: scalar NaN for flagged empty mean, median, std and var. TIGHT measured merge 7b4844c59 against master 3264180f with Node 24.21.0 / Bun 1.4.4: matlab.pre +417, matlab.src +69, lib.gen +8, pyjs +12 with the conventional 64-byte packaging margin. No dependencies or new chunks.",
   "bytes": {
     "engine/lib/matlab.pre": 417,
     "engine/lib/matlab.src": 69,
     "cli/lib.gen.js": 8,
-    "cli/pyjs.cjs": 72
+    "cli/pyjs.cjs": 76
   }
 }
