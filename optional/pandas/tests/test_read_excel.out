@@ -171,6 +171,14 @@ d
 0 NaN         NaN NaN
 1 NaN         NaN NaN
 2 NaN         2.0 NaN)
+== cell in another row
+([('a', 'object'), ('b', 'int64')], [['1', "'x'"], ['2', '3']],    a  b
+0  1  2
+1  x  3)
+== cell in another row, scanner
+([('a', 'object'), ('b', 'int64')], [['1', "'x'"], ['2', '3']],    a  b
+0  1  2
+1  x  3)
 == bytes
 !! TypeError: Expected file path name or file-like object, got <class 'bytes'> type
 == not a file

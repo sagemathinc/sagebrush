@@ -107,6 +107,13 @@ gaps = ('<worksheet xmlns="%s"><sheetData><row r="1"><c r="A1" t="inlineStr"><is
 case("row and column gaps", lambda: show(pd.read_excel(B([("S", gaps)]))))
 # (the same sheet read by the scanner: "<sheetData >" isn't the fast path's form)
 case("row and column gaps, scanner", lambda: show(pd.read_excel(B([("S", gaps.replace("<sheetData>", "<sheetData >"))]))))
+# a cell whose reference names another row than its row element: a plain cell, and one in the form the fast
+# path's general pattern reads (t before r); both paths read them as openpyxl does
+moved = ('<worksheet xmlns="%s"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>a</t></is></c><c r="B1" t="inlineStr"><is><t>b</t></is></c></row>'
+         '<row r="2"><c r="A2"><v>1</v></c><c r="B4"><v>2</v></c></row><row r="3"><c t="inlineStr" r="A5"><is><t>x</t></is></c><c r="B3"><v>3</v></c></row>'
+         '</sheetData></worksheet>') % MAIN
+case("cell in another row", lambda: show(pd.read_excel(B([("S", moved)]))))
+case("cell in another row, scanner", lambda: show(pd.read_excel(B([("S", moved.replace("<sheetData>", "<sheetData >"))]))))
 
 # what isn't a workbook: pandas' errors
 case("bytes", lambda: pd.read_excel(workbook([("S", [["a"]])])))
