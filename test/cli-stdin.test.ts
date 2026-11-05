@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -130,12 +130,54 @@ const tty = (args: string[], input: string) => {
   const r = spawnSync("script", ["-qec", cmd, "/dev/null"], { input, encoding: "utf8", timeout: 60000 });
   return { status: r.status, out: (r.stdout ?? "").replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replace(/\r/g, ""), err: r.error };
 };
-// tty's, with the input typed in steps, a pause after each (so that each arrives as its own keypresses)
-const ttySteps = (args: string[], steps: string[]) => {
+// tty's, with the input typed in steps, each sent only once the session is ready for it (no fixed sleeps: a
+// key typed before readline's raw mode is on, or in the same chunk as other text, reaches the program literally):
+// the first step after the prompt, a line's next step after the next prompt, a Tab after the text before it
+// has been echoed, and the step after a Tab once readline has answered it (its completion, its list, or nothing
+// for a Tab that has neither, so then only a short pause). A stalled step gives up after 15 s, and the
+// assertions then see the transcript.
+const ttySteps = (args: string[], steps: string[], prompt: string): Promise<{ status: number | null; out: string; err?: Error }> => {
   const cmd = [process.execPath, cli, ...args].map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(" ");
-  const feed = steps.map((s) => `printf '%s' '${s.replace(/'/g, "'\\''")}'; sleep 0.4`).join("; ");
-  const r = spawnSync("sh", ["-c", `(sleep 6; ${feed}) | script -qec "$0" /dev/null`, cmd], { encoding: "utf8", timeout: 60000 });
-  return { status: r.status, out: (r.stdout ?? "").replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replace(/\r/g, ""), err: r.error };
+  const child = spawn("script", ["-qec", cmd, "/dev/null"], { stdio: ["pipe", "pipe", "pipe"] });
+  const clean = (t: string) => t.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replace(/\r/g, "");
+  let raw = "";
+  let wake: (() => void) | null = null;
+  child.stdout.setEncoding("utf8");
+  child.stdout.on("data", (d: string) => {
+    raw += d;
+    wake?.();
+  });
+  const closed = new Promise<number | null>((resolve) => child.on("close", (code) => resolve(code)));
+  // until(done, ms): resolves once done(the output since `from`) holds, or after ms
+  const until = (from: number, done: (since: string) => boolean, ms: number) =>
+    new Promise<void>((resolve) => {
+      const timer = setTimeout(finish, ms);
+      function finish() {
+        clearTimeout(timer);
+        wake = null;
+        resolve();
+      }
+      wake = () => done(clean(raw.slice(from))) && finish();
+      wake();
+    });
+  const atPrompt = (since: string) => since.endsWith(prompt);
+  return (async () => {
+    await until(0, atPrompt, 15000);
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i], from = raw.length;
+      child.stdin.write(step);
+      if (i === steps.length - 1) break;
+      if (step.endsWith("\n")) await until(from, atPrompt, 15000);
+      else if (step === "\t") await until(from, (since) => since.length > 0, steps[i + 1] === "\t" ? 1000 : 15000);
+      else await until(from, (since) => since.includes(step), 15000);
+    }
+    child.stdin.end();
+    // (a session that doesn't end within 30 s is killed; the timer is cleared once it ends, so it holds nothing open)
+    const kill = setTimeout(() => child.kill(), 30000);
+    const status = await closed;
+    clearTimeout(kill);
+    return { status, out: clean(raw) };
+  })();
 };
 const hasScript = process.platform === "linux" && spawnSync("script", ["--version"], { encoding: "utf8" }).status === 0;
 
@@ -182,19 +224,19 @@ test("an interactive --matlab session: MATLAB at a >> prompt, ... continues a li
   assert.match(f.out, /Function definitions are not supported in this context\. Functions can only be created as local or nested functions in code files\.\n>> disp\(7\)\n     7\n/);
 });
 
-test("Tab completes MATLAB's names at a --matlab prompt: a variable, and rand's family, never Python's", { skip: !hasScript && "needs util-linux script(1)" }, () => {
+test("Tab completes MATLAB's names at a --matlab prompt: a variable, and rand's family, never Python's", { skip: !hasScript && "needs util-linux script(1)" }, async () => {
   // (one Tab completes a single match; two list several: readline's. Typed a step at a time: readline doesn't
   // complete a Tab that comes in the same chunk as pasted text)
-  const r = ttySteps(["--matlab"], ["radius = 7;\n", "radi", "\t", "\n", "ran", "\t", "\t", "\n", "exit\n"]);
+  const r = await ttySteps(["--matlab"], ["radius = 7;\n", "radi", "\t", "\n", "ran", "\t", "\t", "\n", "exit\n"], ">> ");
   assert.equal(r.status, 0, `${r.err ?? ""}\n${r.out}`);
   assert.match(r.out, />> radius\n\nradius =\n\n     7\n/);
   assert.match(r.out, /rand\s+randi\s+randn\s+randperm/);
   assert.doesNotMatch(r.out, /\braise\b|\brange\b/);
 });
 
-test("Tab completes Magma's names at a --magma prompt: a variable, an intrinsic, a list of intrinsics, never Python's", { skip: !hasScript && "needs util-linux script(1)" }, () => {
+test("Tab completes Magma's names at a --magma prompt: a variable, an intrinsic, a list of intrinsics, never Python's", { skip: !hasScript && "needs util-linux script(1)" }, async () => {
   // (typed a step at a time, as for MATLAB above: one Tab completes a single match, two list several)
-  const r = ttySteps(["--magma"], ["my_total := 5;\n", "my_t", "\t", ";\n", "Factoriz", "\t", "(2026);\n", "Prim", "\t", "\t", ";\n", "quit;\n"]);
+  const r = await ttySteps(["--magma"], ["my_total := 5;\n", "my_t", "\t", ";\n", "Factoriz", "\t", "(2026);\n", "Prim", "\t", "\t", ";\n", "quit;\n"], "> ");
   assert.equal(r.status, 0, `${r.err ?? ""}\n${r.out}`);
   assert.match(r.out, /> my_total;\n5\n/);
   assert.match(r.out, /> Factorization\(2026\);\n\[ <2, 1>, <1013, 1> \]\n/);
