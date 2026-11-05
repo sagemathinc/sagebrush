@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "Tab completion in the session's language (William, Nov 4: 'ra<Tab>' in a MATLAB notebook offered Python's raise and range): one entry point, completeIn in src/interactive.ts, used by the notebook (src/notebook-session.ts), the Jupyter kernel (src/kernel.ts) and the CLI prompt (src/cli.ts, now in every mode); MATLAB's names from src/matlab-complete.ts, Magma's from src/magma-complete.ts (@sagebrush-magma). No name lists ship: the built-ins are read at run time from the language library already loaded (_matlab._B, _magma.__all__), so the growth is the code only: worker +1,884, pyjs +2,553 (marked +64 for build-specific bytes). CI-order size records (bun 1.4.4), probe 2f08ce15 = head b5a8e66e on master 8d46ee32.",
+ "bytes": {
+  "engine/sagebrush-worker.js": 1884,
+  "cli/pyjs.cjs": 2617
+ }
+}
