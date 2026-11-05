@@ -60,6 +60,10 @@ def events(text):
     """The scanner's events over a decoded document (see the module's note)."""
     stack = []
     pos = 0
+    # (XML's end-of-line handling, before anything is read: CR LF and a lone CR are LF; a character
+    # reference &#13; is decoded later, so it stays a CR)
+    if "\r" in text:
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
     if text.startswith("﻿"):
         pos = 1
     if text.startswith("<?xml", pos):

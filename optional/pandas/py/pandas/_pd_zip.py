@@ -36,6 +36,14 @@ def _u32(b, i):
     return b[i] | (b[i + 1] << 8) | (b[i + 2] << 16) | (b[i + 3] << 24)
 
 
+# (zip's names without the UTF-8 flag are code page 437, as zipfile reads them; its upper half)
+_CP437_HIGH = 'ÇüéâäàåçêëèïîìÄÅÉæÆôöòûùÿÖÜ¢£¥₧ƒáíóúñÑªº¿⌐¬½¼¡«»░▒▓│┤╡╢╖╕╣║╗╝╜╛┐└┴┬├─┼╞╟╚╔╩╦╠═╬╧╨╤╥╙╘╒╓╫╪┘┌█▄▌▐▀αßΓπΣσµτΦΘΩδ∞φε∩≡±≥≤⌠⌡÷≈°∙·√ⁿ²■\xa0'
+
+
+def _cp437(raw):
+    return "".join(chr(b) if b < 128 else _CP437_HIGH[b - 128] for b in raw)
+
+
 def _subset(what):
     return NotImplementedError("pandas: %s is not in Sagebrush's pandas 0.x subset" % what)
 
@@ -88,7 +96,7 @@ class ZipArchive(object):
             nlen, xlen, clen = _u16(d, p + 28), _u16(d, p + 30), _u16(d, p + 32)
             ent.offset = _u32(d, p + 42)
             raw = d[p + 46:p + 46 + nlen]
-            ent.name = raw.decode("utf-8" if ent.flags & 0x800 else "cp437", "replace")
+            ent.name = raw.decode("utf-8", "replace") if ent.flags & 0x800 else _cp437(raw)
             if ent.csize == 0xFFFFFFFF or ent.usize == 0xFFFFFFFF or ent.offset == 0xFFFFFFFF:
                 raise _subset("a ZIP64 archive")
             p += 46 + nlen + xlen + clen
