@@ -331,10 +331,12 @@ $\sage{1/0}$ then $\sage{2+2}$.
   //  document's folder: "The answer is 49."); the run is started from another folder, the document's own counts)
   mkdirSync(join(dir, "helped"));
   writeFileSync(join(dir, "helped", "helper.py"), "def square(n):\n    return n * n\n");
+  // (and a sagebrush.py beside it doesn't shadow the session script's own `sagebrush` import: @sagebrush-latex's review)
+  writeFileSync(join(dir, "helped", "sagebrush.py"), "raise ImportError('shadowed')\n");
   writeFileSync(join(dir, "helped", "doc.tex"), "\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n\\begin{sagesilent}\nfrom helper import square\nx = square(7)\n\\end{sagesilent}\nThe answer is $\\sage{x}$, and $\\sage{1/3}$.\n\\end{document}\n");
   const helped = await run(dir, "run", "helped/doc.tex", "--json");
   const hr = existsSync(join(dir, "helped", "doc.tex.results.json")) ? JSON.parse(readFileSync(join(dir, "helped", "doc.tex.results.json"), "utf8")) : null;
-  check("run: a helper.py beside the .tex is imported (the document's folder on sys.path, as in SageTeX)",
+  check("run: a helper.py beside the .tex is imported (the document's folder on sys.path, as in SageTeX); a sagebrush.py there doesn't break the session",
     helped.code === 0 && JSON.stringify(hr?.items?.map((x) => [x.s, x.latex ?? null])) === JSON.stringify([["ok", null], ["ok", "49"], ["ok", "\\frac{1}{3}"]]), { code: helped.code, items: helped.json?.items, saved: hr?.items });
   // (William's L1, Nov 3: \title{$\sage{factor(2026)}$} "doesn't work": an item in a title field is shown where
   //  \maketitle prints it, so it runs and its result is in the title block; with no \maketitle it is still hidden)
