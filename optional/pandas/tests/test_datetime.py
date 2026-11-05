@@ -164,5 +164,7 @@ case("frame.set_index-inplace", set_index_inplace)
 # int32 fields in reductions (daybreak3's DT680-ENGINE-1) and exact (DT680-ENGINE-2)
 y = pd.to_datetime(pd.Series(["2020-01-01", "2021-01-01"])).dt.year
 case("int32.reduce", lambda: [y.sum(), y.mean(), y.min(), y.max(), y.count()])
-case("int32.big-sum", lambda: pd.to_datetime(pd.Series(["2255-01-01"] * 1000)).dt.year.sum())
+# (past int32's range: three of 2**31 - 1 sum to 6442450941, in int64)
+big = pd.Series(np.full(3, 2 ** 31 - 1, dtype=np.int32))
+case("int32.big-sum", lambda: [big.dtype, big.sum(), big.mean(), big.max()])
 case("to.exact-false-no-format", lambda: pd.to_datetime(["2020-01-01"], exact=False))
