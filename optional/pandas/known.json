@@ -505,6 +505,16 @@
       "case": "dt.all-nat-text",
       "message": "pandas: to_datetime of strings that are all NaT (pandas makes datetime64[s] of them) is not in Sagebrush's pandas 0.x subset",
       "reason": "pandas 3.1 makes datetime64[s] of a list of strings that are all NaT; only datetime64[us] is kept here"
+    },
+    {
+      "case": "dt.exact-false-format",
+      "message": "pandas: to_datetime's exact=False with a format is not in Sagebrush's pandas 0.x subset",
+      "reason": "with a format, exact=False matches the format anywhere in the string and pandas 3.1 makes datetime64[ns]; only whole-string matches and datetime64[us] are kept here (exact=False without a format changes nothing, and is accepted)"
+    },
+    {
+      "case": "dt.far-december",
+      "message": "pandas: a time outside the years 1685 to 2255 is not in Sagebrush's pandas 0.x subset",
+      "reason": "a time is kept as int64 microseconds, which Sagebrush's int64 holds exactly only to 2**53, the years 1685 to 2255; outside them it refuses before any other check rather than round or leak another error"
     }
   ]
 }

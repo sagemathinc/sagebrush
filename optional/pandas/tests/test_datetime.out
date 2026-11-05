@@ -376,3 +376,9 @@ dtype: float64]
 [None,             x
 d            
 2020-01-01  1]
+== int32.reduce
+[np.int64(4041), np.float64(2020.5), np.int32(2020), np.int32(2021), np.int64(2)]
+== int32.big-sum
+np.int64(2255000)
+== to.exact-false-no-format
+DatetimeIndex(['2020-01-01'], dtype='datetime64[us]', freq=None)

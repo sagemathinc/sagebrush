@@ -32,6 +32,10 @@
 !! NotImplementedError: pandas: to_datetime of a list with a fractional number (a datetime64[ns] result) is not in Sagebrush's pandas 0.x subset
 == dt.all-nat-text
 !! NotImplementedError: pandas: to_datetime of strings that are all NaT (pandas makes datetime64[s] of them) is not in Sagebrush's pandas 0.x subset
+== dt.exact-false-format
+!! NotImplementedError: pandas: to_datetime's exact=False with a format is not in Sagebrush's pandas 0.x subset
+== dt.far-december
+!! NotImplementedError: pandas: a time outside the years 1685 to 2255 is not in Sagebrush's pandas 0.x subset
 == c3.series-str-to_numpy-object
 !! NotImplementedError: pandas.Series.to_numpy(dtype=, na_value=) is not in Sagebrush's pandas 0.x subset
 == c3.series-object-to_numpy

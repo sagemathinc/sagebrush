@@ -288,6 +288,9 @@ def _shape_of(t):
 
 
 def _checked(t, y, mo, d, h=0, mi=0, sec=0, us=0):
+    # (outside the years whose microseconds are exact here: refused before anything else, as Timestamp() and as_us do)
+    if not 1685 <= y <= 2255:
+        raise _subset("a time outside the years 1685 to 2255")
     if not 1 <= mo <= 12:
         raise DateParseError("month must be in 1..12, not %d: %s" % (mo, t))
     last = (date(y + (mo == 12), mo % 12 + 1, 1) - timedelta(days=1)).day
@@ -440,6 +443,9 @@ def to_datetime(arg, errors="raise", dayfirst=False, yearfirst=False, utc=False,
         raise _subset("to_datetime's unit=%r" % (unit,))
     if format is not None and (not isinstance(format, str) or format in ("ISO8601", "mixed")):
         raise _subset("to_datetime's format=%r" % (format,))
+    if exact is not True and format is not None:
+        # (without a format exact changes nothing in pandas 3.1; with one, a match anywhere in the string, and datetime64[ns])
+        raise _subset("to_datetime's exact=False with a format")
     has_origin = origin != "unix"
     if not has_origin:
         origin_us = 0
