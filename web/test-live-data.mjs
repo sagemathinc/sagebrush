@@ -196,6 +196,71 @@ const ask = (id, key, extra = {}) => ({ id, target: null, liveData: { op: "fred.
   }
 }
 
+// grader's r691 pins
+// R4: the highest count advances with each key: t.1, t.2, then t.2 again, the third refused (no fetch, no answer)
+{
+  const ad = adapter();
+  const { run, deliver } = kernel(ad);
+  const id = run();
+  await tick();
+  const qs = ["t.1", "t.2", "t.2"].map((key) => ask(id, key));
+  for (const q of qs) {
+    deliver(q);
+    await tick(10);
+  }
+  ok(answerOf(qs[0].buffer)?.ok && answerOf(qs[1].buffer)?.ok && answerOf(qs[2].buffer) === null && ad.calls.length === 2, "t.1, t.2, t.2: the third refused, no fetch");
+}
+// K1/A5: a replaced worker's message naming the current run (its id pending): never admitted, the adapter never called
+{
+  const ad = adapter();
+  const t = kernel(ad);
+  t.run();
+  await tick();
+  const old = t.k.worker;
+  t.k.restart();
+  await tick();
+  const id = t.run();
+  await tick();
+  ok(old !== t.k.worker && t.k.pending.has(id), "a run in flight on the new worker");
+  const q = ask(id, "abc.1");
+  t.deliver(q, old);
+  await tick(10);
+  // (its own buffer is told unavailable, which carries nothing)
+  const a = answerOf(q.buffer);
+  ok(ad.calls.length === 0 && (a === null || a.error === "unavailable"), `the old worker's request for it: the adapter never called (${JSON.stringify(a)})`);
+}
+// A6: a second request of the same run aborts the first's fetch, at once
+{
+  let release;
+  const gate = new Promise((r) => (release = r));
+  const ad = adapter({ kind: "late", gate });
+  const { run, deliver } = kernel(ad);
+  const id = run();
+  await tick();
+  const q1 = ask(id, "abc.1"), q2 = ask(id, "abc.2");
+  deliver(q1);
+  await tick();
+  deliver(q2);
+  await tick();
+  const first = ad.calls[0]?.aborted, second = ad.calls[1]?.aborted;
+  release();
+  await tick(10);
+  ok(first === true && second === false && answerOf(q1.buffer) === null && answerOf(q2.buffer)?.ok, "one id twice: the first's fetch aborted, never answered; the second answered");
+}
+// P7: a piece that isn't a Uint8Array (an array of numbers) is unavailable
+{
+  // (the bytes of a good answer, as a plain array: refused for its type alone)
+  const good = [...new TextEncoder().encode(JSON.stringify({ dates: ["2020-01-01"], values: [1] }))];
+  const ad = adapter({ kind: "pieces", chunks: function* () { yield good; } });
+  const t = kernel(ad);
+  const i = t.run();
+  await tick();
+  const q = ask(i, "abc.1");
+  t.deliver(q);
+  await tick(10);
+  ok(answerOf(q.buffer)?.error === "unavailable", "a piece that isn't bytes: unavailable");
+}
+
 // astra's LIVE691-PARTS-1: the pieces a stream gives are bounded too, empty ones counted: a stream of empty or tiny
 // pieces is cut, its fetch aborted, as one over the bytes is; the same answer in at most maxPieces pieces passes
 {
@@ -256,9 +321,11 @@ for (const [name, act] of [["Stop", (t) => t.k.interrupt()], ["Forget", (t) => t
   t.deliver(m);
   await tick();
   act(t, id);
+  // (aborted by the act itself, before the adapter would answer: a call finished by its answer is aborted too)
+  const at = ad.calls[0].aborted;
   release();
   await tick(10);
-  ok(ad.calls[0].aborted && answerOf(m.buffer) === null, `${name}: the fetch aborted, and its late answer written nowhere`);
+  ok(at && answerOf(m.buffer) === null, `${name}: the fetch aborted at once, and its late answer written nowhere`);
 }
 {
   const ad = adapter({ kind: "hang" });

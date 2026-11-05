@@ -72,6 +72,7 @@ test("fredapi, yfinance and the live-data bridge against a synthetic page", asyn
   const liveData = (req: any) => {
     page.requests.push(JSON.parse(JSON.stringify(req)));
     page.all.push(JSON.parse(JSON.stringify(req)));
+    if (typeof page.answer === "function") return page.answer(req);
     if (page.answer) return page.answer;
     if (page.key === null) return { error: "no_key" };
     if (!CATALOG.has(req.params.series_id)) return { error: "not_in_catalog" };
@@ -215,6 +216,33 @@ test("fredapi, yfinance and the live-data bridge against a synthetic page", asyn
     Atomics.and(R.INTR, 0, ~8);
   }
   assert.equal(page.requests.length, 0);
+
+  // grader's r691 pins.  N3 and Y1: a Stop while live_data waits is a KeyboardInterrupt in Python, and it is that
+  // one, consumed: the next statements run, no Ctrl-C left pending
+  reset();
+  page.answer = () => {
+    Atomics.or(R.INTR, 0, 1);
+    return { error: "interrupted" };
+  };
+  assert.equal(
+    await run(`import _sbdata_live\ntry:\n    _sbdata_live.fred_series_observations({'series_id': 'SYN_A'})\nexcept KeyboardInterrupt:\n    print('KeyboardInterrupt')\nn = 0\nfor i in range(100000):\n    n += 1\nprint('next', n)`),
+    "KeyboardInterrupt\nnext 100000\n",
+  );
+  assert.equal(Atomics.load(R.INTR as Int32Array, 0) & 1, 0, "no Ctrl-C left pending");
+  // N2: the parameters' text is bounded, 4096 characters asked, 4097 refused before the page is asked
+  reset();
+  assert.equal(
+    await run(`import json\nhead = '{"series_id": "SYN_ONE"'\nfor n in (4096, 4097):\n    p = head + ' ' * (n - len(head) - 1) + '}'\n    a = json.loads(__pyjs_host__('live_data', 'fred.series_observations', p))\n    print(len(p), sorted(a))`),
+    "4096 ['ok']\n4097 ['error']\n",
+  );
+  assert.equal(page.requests.length, 1);
+  // Y2 and Y3: an unknown code from the page is unavailable in Python too; parameters that aren't a dict, a TypeError
+  reset();
+  page.answer = { error: "teapot" };
+  assert.equal(
+    await run(`import _sbdata_live\ntry:\n    _sbdata_live.fred_series_observations({'series_id': 'SYN_A'})\nexcept _sbdata_live.LiveDataError as e:\n    print(e.code)\ntry:\n    _sbdata_live.fred_series_observations('SYN_A')\nexcept TypeError as e:\n    print(e)`),
+    "unavailable\nfred_series_observations: the parameters must be a dict\n",
+  );
 
   // C1: the canary given as the book's api_key reached nothing: no request, no output, no message posted; the scan's
   // positive control: printed on purpose, it is found

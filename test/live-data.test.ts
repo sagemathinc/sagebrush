@@ -78,3 +78,15 @@ test("the wait: an answer, its deadline by an injected clock, a Stop winning, a 
   Atomics.store(jc, 0, 1);
   assert.deepEqual(waitForAnswer(junk, intr(), 1000), { error: "unavailable" });
 });
+
+test("grader's r691 pins: the Gregorian leap rule; an answer too big for its buffer written as unavailable", () => {
+  // (C4: a century is a leap year only every 400 years)
+  for (const [d, ok] of [["1900-02-29", false], ["2000-02-29", true], ["2100-02-29", false], ["2024-02-29", true], ["2023-02-29", false]] as [string, boolean][])
+    assert.equal("params" in checkParams("fred.series_observations", { series_id: "GDP", observation_start: d }), ok, d);
+  // (C12: past the buffer, the answer written is unavailable, never a partial one nor an error thrown)
+  const small = new SharedArrayBuffer(8 + 30);
+  const big = { ok: { dates: Array(5).fill("2020-01-01"), values: Array(5).fill(1) } } as const;
+  assert.ok(JSON.stringify(big).length > 30);
+  assert.ok(writeAnswer(small, big as any));
+  assert.deepEqual(waitForAnswer(small, intr(), 1000), { error: "unavailable" });
+});
