@@ -717,6 +717,17 @@ def _huge(m, e):
 # Checked against CPython's Decimal on 60000 random specs.
 import re as _re
 
+# A printed number's exponent as LaTeX writes it, as Sage's latex() does for
+# every real and complex type and for Python floats: 2.5e-7 is
+# 2.5 \times 10^{-7}, 1.5e+20 is 1.5 \times 10^{20} (a "+" dropped, the
+# digits as printed: RDF's 2.5e-07 keeps its 07); NaN and infinity have none
+_SCI_EXP = _re.compile(r"(\d)e([+-]?)(\d+)")
+
+
+def _sci_latex(s):
+    return _SCI_EXP.sub(lambda m: "%s \\times 10^{%s%s}" % (m.group(1), "-" if m.group(2) == "-" else "", m.group(3)), s)
+
+
 _SPEC = _re.compile(r"\A(?:(?P<fill>.)?(?P<align>[<>=^]))?(?P<sign>[-+ ])?(?P<alt>#)?(?P<zero>0)?(?P<width>\d+)?(?P<grouping>[,_])?(?:\.(?P<precision>\d+))?(?P<type>[eEfFgG%])?\Z", _re.S)
 
 
@@ -1727,7 +1738,14 @@ class RealNumberMP:
         return ("-" if self._neg else "") + _format(self._q(), D, no_sci)
 
     def _latex_(self):
-        return repr(self)
+        """The printed digits, an exponent as a power of ten (Sage's latex()).
+
+        EXAMPLES::
+
+            sage: latex(RR(2.5e-7)), latex(RR(-1.5e20)), latex(RR(0.001)), latex(RR(oo))
+            (2.50000000000000 \\times 10^{-7}, -1.50000000000000 \\times 10^{20}, 0.00100000000000000, +infinity)
+        """
+        return _sci_latex(repr(self))
 
     def __format__(self, spec):
         """format(x, spec): Sage's printed digits formatted as a Decimal.
@@ -3948,15 +3966,17 @@ class ComplexNumberMP:
         re, im = self._re, self._im
         if im.is_zero():
             return repr(re)
-        si = repr(abs(im)) + "*I"
         if re.is_zero():
-            return ("-" if im._m < 0 else "") + si
+            # (the imaginary part as it prints, its sign with it: -infinity*I, as Sage)
+            return repr(im) + "*I"
+        si = repr(abs(im)) + "*I"
         return "%r %s %s" % (re, "-" if im._m < 0 else "+", si)
 
     __str__ = __repr__
 
     def _latex_(self):
-        return repr(self).replace("*I", "i")
+        # (as Sage's ComplexField: its infinities are \infty, unlike RealField's and CDF's +infinity)
+        return _sci_latex(repr(self).replace("*I", "i")).replace("infinity", "\\infty")
 
     def __float__(self):
         # (as Sage: NaN for a NaN real part, the real part for a zero
