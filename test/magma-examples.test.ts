@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { slowSkip } from "./slow-tests";
 
 // The examples of the Magma index (lib/_magma_docsearch.py EXAMPLES): each
 // runs in a fresh Magma session of Sagebrush and must print exactly what the
@@ -74,7 +75,8 @@ async function sagebrush(lines: string[]): Promise<string> {
   return r.transcript ?? `(no transcript) ${r.how}`;
 }
 
-test("every Magma index example prints what it shows, in a fresh session", async () => {
+// (429 s on master: a slow test, test/slow-tests.ts)
+test("every Magma index example prints what it shows, in a fresh session", { skip: slowSkip }, async () => {
   const names = Object.keys(examples).sort();
   assert.ok(names.length >= 158, `${names.length} examples`);
   const bad: string[] = [];

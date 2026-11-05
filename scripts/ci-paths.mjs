@@ -305,6 +305,9 @@ const slowTestPaths = [
   // the two zoneinfo sweeps over every zone (test/stdlib-zoneinfo.test.ts)
   /^lib\/zoneinfo\//, /^lib\/_zoneinfo\.py$/, /^lib\/_tzrules\.py$/, /^lib\/tzdata\//, /^tzdata\//,
   /^test\/zoneinfo_sweep_cases\.py$/, /^test\/stdlib-zoneinfo\.test\.ts$/,
+  // every Magma index example in a fresh session (test/magma-examples.test.ts): Magma mode, its index and examples,
+  // and the table of Magma's own output
+  /^lib\/_magma[^/]*\.py$/, /^src\/magma[^/]*\.ts$/, /^test\/magma-examples[^/]*$/, /^scripts\/magma-examples-table\.py$/,
   // and the list itself
   /^test\/slow-tests\.ts$/,
 ];
