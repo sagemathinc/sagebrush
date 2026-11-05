@@ -375,3 +375,156 @@ test("mode keeps a logical class in M and C; intmax/intmin 'like' a 64-bit integ
     "127 0",
   ]);
 });
+
+test("NaN and Inf as real MATLAB treats them: svd and pinv give NaN, rank, null and orth refuse (astra3 batch 1: MCF-01; William's MATLAB session, Nov 4)", () => {
+  // (before: pinv(NaN) and rank(NaN) were 0, null(NaN) was 1, orth(NaN) empty; svd of a 2x2 with a NaN failed to
+  // converge. Real MATLAB, /scratch/matlab-speed/matlab-nan-oracle: svd's values and U, S, V are NaN, S's
+  // off-diagonal 0; pinv is NaN of the transposed shape; rank, null and orth refuse with their own identifiers; a
+  // NaN or Inf imaginary part counts too)
+  const out = lines(run([
+    "c = {@() rank(NaN), @() rank([1 2; 3 Inf]), @() rank(complex(0, Inf)), @() null(NaN), @() null([1 NaN; 2 3]), @() orth([NaN 1]), @() orth([1 NaN; 2 3])};",
+    "for k = 1:numel(c), try, y = c{k}(); disp('no error'), catch e, fprintf('%s | %s\\n', e.identifier, e.message); end, end",
+    "fprintf('%s %s %s %s %s\\n', mat2str(svd(NaN)), mat2str(svd([1 NaN; 2 3])), mat2str(svd([1 Inf; 2 3])), mat2str(svd(NaN(2))), mat2str(svd([1 complex(1, NaN)])));",
+    "fprintf('%s %s %s %s\\n', mat2str(pinv(NaN)), mat2str(pinv(Inf)), mat2str(pinv([1 NaN; 2 3])), mat2str(pinv([NaN 1])));",
+    "[U, S, V] = svd([1 NaN; 2 3]); fprintf('%s %s %s\\n', mat2str(U), mat2str(S), mat2str(V));",
+    "[U, S, V] = svd([1 NaN; 2 3; 4 5]); fprintf('%s %s %s\\n', mat2str(size(U)), mat2str(S), mat2str(size(V)));",
+    "[U, S, V] = svd([1 NaN; 2 3; 4 5], 'econ'); fprintf('%s %s %s\\n', mat2str(size(U)), mat2str(S), mat2str(size(V)));",
+    "[U, S, V] = svd(NaN); fprintf('%s %s %s %s %s\\n', mat2str(U), mat2str(S), mat2str(V), class(svd(single(NaN))), class(pinv(single([NaN 1]))));",
+    // (complex: svd's U, S and V are real NaN; pinv stays complex, NaN + 0i; single stays single: real MATLAB)
+    "A = complex([1 NaN; 2 3], [4 5; 6 7]); [U, S, V] = svd(A); P = pinv(A); Q = pinv(single(A));",
+    "fprintf('%d %d %d %d %d %d %s %d %s\\n', isreal(U), isreal(S), isreal(V), isreal(P), all(isnan(real(P(:)))), all(imag(P(:)) == 0), class(P), isreal(Q), class(Q));",
+    "[U1, S1, V1] = svd(single(A)); fprintf('%d %d %d %s %s %s\\n', isreal(U1), isreal(S1), isreal(V1), class(U1), class(S1), class(V1));",
+    // (a non-square complex one: the transposed shape, as for real input; grader C5)
+    "P1 = pinv(complex([NaN 1 2], [0 1 0])); P2 = pinv(single(complex([NaN; 1], [0; 1]))); fprintf('%s %d %s %d %s\\n', mat2str(size(P1)), isreal(P1), mat2str(size(P2)), isreal(P2), class(P2));",
+    "fprintf('%g %g %g %g\\n', rank(magic(4)), svd([3 0; 0 4]), pinv(2));",
+  ].join("\n")));
+  assert.deepEqual(out, [
+    ...Array(3).fill("MATLAB:rank:matrixWithNaNInf | Input matrix must not contain NaN or Inf values."),
+    ...Array(2).fill("MATLAB:null:matrixWithNaNInf | Input matrix must not contain NaN or Inf values."),
+    ...Array(2).fill("MATLAB:orth:matrixWithNaNInf | Input matrix must not contain NaN or Inf values."),
+    "NaN [NaN;NaN] [NaN;NaN] [NaN;NaN] NaN",
+    "NaN NaN [NaN NaN;NaN NaN] [NaN;NaN]",
+    "[NaN NaN;NaN NaN] [NaN 0;0 NaN] [NaN NaN;NaN NaN]",
+    "[3 3] [NaN 0;0 NaN;0 0] [2 2]",
+    "[3 2] [NaN 0;0 NaN] [2 2]",
+    "NaN NaN NaN single single",
+    "1 1 1 0 1 1 double 0 single",
+    "1 1 1 single single single",
+    "[3 1] 0 [1 2] 0 single",
+    "3 4 3 0.5",
+  ]);
+});
+
+
+test("rref, nextpow2, cumtrapz, unwrap, deg2rad, rad2deg, cart2pol and pol2cart: the pages' forms, Octave 11.1's values (astra3 batch 1: missing functions)", () => {
+  const out = lines(run([
+    "[R, p] = rref([1 2 1; 2 4 0; 3 6 1]); fprintf('%s %s\\n', mat2str(R), mat2str(p));",
+    "fprintf('%s %s\\n', mat2str(rref([1 2 3; 4 5 6; 7 8 10])), mat2str(rref([1 1e-20; 1e-20 1e-40], 1e-30)));",
+    "[R, p] = rref(zeros(2)); fprintf('%s %s %s\\n', mat2str(R), mat2str(size(p)), class(rref(single([2 4]))));",
+    "fprintf('%s %s %s %d\\n', mat2str(nextpow2([0 1 2 3 4 5 0.3 -5 Inf NaN 1024 1025])), class(nextpow2(int8(5))), class(nextpow2(single(5))), nextpow2(uint8(200)));",
+    "fprintf('%s %s %s\\n', mat2str(cumtrapz([1 2 3 4])), mat2str(cumtrapz([1; 2; 3])), mat2str(cumtrapz([0 1 3], [1 2 3])));",
+    "fprintf('%s %s %s %s\\n', mat2str(cumtrapz(0.5, [1 2 3])), mat2str(cumtrapz([1 2; 3 4])), mat2str(cumtrapz([1 2; 3 4], 2)), mat2str(size(cumtrapz([]))));",
+    "fprintf('%s %s %s\\n', mat2str(unwrap([0 3.5 7]), 6), mat2str(unwrap([0 pi 0]), 6), mat2str(unwrap([0 -pi 0]), 6));",
+    "fprintf('%s %s %s\\n', mat2str(unwrap([0 4 8], 2), 6), mat2str(unwrap([0 4; 0 4], [], 2), 6), mat2str(unwrap([0 NaN 7]), 6));",
+    "fprintf('%g %g %s %s\\n', deg2rad(180), rad2deg(pi/2), class(deg2rad(single(90))), class(rad2deg(single(1))));",
+    "[t, r] = cart2pol([1 0 -1], [0 1 0]); [t3, r3, z3] = cart2pol(1, 1, 5); fprintf('%s %s %.4f %.4f %d\\n', mat2str(t, 5), mat2str(r), t3, r3, z3);",
+    "[x, y] = pol2cart(pi/2, 2); [x2, y2, z2] = pol2cart([0 pi], [1 2], [3 4]); fprintf('%.4g %g %s %s\\n', x, y, mat2str(x2), mat2str(z2));",
+    "try, deg2rad(int8(90)), catch e, disp(e.message), end",
+    "try, cart2pol([1 1; 0 2]), catch e, disp(e.message), end",
+  ].join("\n")));
+  assert.deepEqual(out, [
+    "[1 2 0;0 0 1;0 0 0] [1 3]",
+    "[1 0 0;0 1 0;0 0 1] [1 1e-20;0 0]",
+    "[0 0;0 0] [1 0] single",
+    "[0 0 1 2 2 3 -1 3 Inf NaN 10 11] int8 single 8",
+    "[0 1.5 4 7.5] [0;1.5;4] [0 1.5 6.5]",
+    "[0 0.75 2] [0 0;2 3] [0 1.5;0 3.5] [0 0]",
+    "[0 -2.78319 -5.56637] [0 3.14159 0] [0 -3.14159 0]",
+    "[0 -2.28319 -4.56637] [0 -2.28319;0 -2.28319] [0 NaN 0.716815]",
+    "3.14159 90 single single",
+    "[0 1.5708 3.1416] [1 1 1] 0.7854 1.4142 5",
+    "1.225e-16 2 [1 -2] [3 4]",
+    "deg2rad: the input must be double or single, not int8.",
+    "Not enough input arguments.",
+  ]);
+});
+
+test("each of the eight runs as the first call of a fresh session (their lazy stubs, grader S1 on #650); nextpow2's up-correction, unwrap's tolerance, rref's row swap and three refusals (R4, R17, R18, R26, R3, R16, R21)", () => {
+  const first: [string, string][] = [
+    ["disp(mat2str(rref([0 1; 1 0])))", "[1 0;0 1]"],
+    ["disp(nextpow2(5))", "3"],
+    ["disp(mat2str(cumtrapz([1 2 3])))", "[0 1.5 4]"],
+    ["disp(mat2str(unwrap([0 4 8]), 6))", "[0 -2.28319 -4.56637]"],
+    ["fprintf('%g\\n', deg2rad(180))", "3.14159"],
+    ["disp(rad2deg(pi))", "180"],
+    ["[t, r] = cart2pol(0, 1); disp(r)", "1"],
+    ["[x, y] = pol2cart(0, 2); disp(x)", "2"],
+  ];
+  for (const [code, want] of first) assert.deepEqual(lines(run(code)).map((x) => x.trim()), [want], code);
+  const out = lines(run([
+    // (log2(1024 * (1 + eps)) rounds to exactly 10: the exact correction must still give 11)
+    "fprintf('%d %d\\n', nextpow2(1024*(1+eps)), log2(1024*(1+eps)) == 10);",
+    "fprintf('%s %s\\n', mat2str(unwrap([0 4 8], 5)), mat2str(unwrap([0 3], 2)));",
+    "disp(mat2str(rref([0 1; 1 0])));",
+    "try, rad2deg(int8(1)), catch e, disp(e.message), end",
+    "try, cumtrapz([1 2], [1 2 3]), catch e, disp(e.message), end",
+    "try, unwrap([1i 2]), catch e, disp(e.message), end",
+  ].join("\n")));
+  assert.deepEqual(out, [
+    "11 1",
+    "[0 4 8] [0 3]",
+    "[1 0;0 1]",
+    "rad2deg: the input must be double or single, not int8.",
+    "Point spacing must be a scalar specifying uniform spacing or a vector of x-coordinates with length equal to the size of Y along the integration dimension.",
+    "unwrap: the angles must be real.",
+  ]);
+});
+
+test("cart2pol and pol2cart's z output is a value of its own: changing it, or the input z, leaves the other unchanged (astra CART650-Z-ALIAS)", () => {
+  const out = lines(run([
+    "z = [1 2; 3 4]; [t, r, q] = cart2pol(1, 2, z); q(1) = 99; fprintf('%g %g\\n', z(1), q(1));",
+    "z = [1 2; 3 4]; [t, r, q] = cart2pol(1, 2, z); z(1) = 99; fprintf('%g %g\\n', z(1), q(1));",
+    "z = [1 2; 3 4]; [x, y, q] = pol2cart(1, 2, z); q(1) = 99; fprintf('%g %g\\n', z(1), q(1));",
+    "z = [1 2; 3 4]; [x, y, q] = pol2cart(1, 2, z); z(1) = 99; fprintf('%g %g\\n', z(1), q(1));",
+  ].join("\n")));
+  assert.deepEqual(out, ["1 99", "99 1", "1 99", "99 1"]);
+});
+
+test("tril, triu, diag and sortrows refuse a 3-D array: 'Arguments must be 2-D.' (grader's C9 on #646)", () => {
+  const out = lines(run([
+    "c = {@() tril(ones(2, 2, 2)), @() triu(ones(2, 2, 2)), @() diag(ones(2, 2, 2)), @() sortrows(ones(2, 2, 2))};",
+    "for k = 1:numel(c), try, y = c{k}(); disp('no error'), catch e, disp(e.message); end, end",
+  ].join("\n")));
+  assert.deepEqual(out, Array(4).fill("Arguments must be 2-D."));
+});
+
+test("tril, triu, diag and sortrows keep every class; real, imag and conj keep integers and single; sortrows([]) is [] (astra3 batch 1: MCF-03, MCF-04)", () => {
+  // The pages list single, the integers, logical and char among each function's input types; Octave 11.1 keeps
+  // the class in all of these (real, imag and conj give double for logical and char).
+  const out = lines(run([
+    "xs = {single([1 2;3 4]), int8([1 2;3 4]), uint16([1 2;3 4]), true(2), 'ab'};",
+    "fs = {'tril','triu','diag','sortrows','real','imag','conj'};",
+    "for i = 1:numel(fs), s = fs{i}; for j = 1:4, s = [s ' ' class(feval(fs{i}, xs{j}))]; end, if i <= 4, s = [s ' ' class(feval(fs{i}, xs{5}))]; end, disp(s), end",
+    "disp(class(real(true))), disp(class(imag('a'))), disp(class(conj(true)))",
+    "y = imag(int8([1 -2])); fprintf('%s %d %d\\n', class(y), y);",
+    "t = tril(int8([1 2; 3 4]), -1); fprintf('%s %s\\n', class(t), mat2str(t));",
+    "d = diag(true(1, 2)); fprintf('%s %s\\n', class(d), mat2str(d));",
+    "[b, i] = sortrows([]); fprintf('%s %s %s\\n', mat2str(size(b)), mat2str(size(i)), class(b));",
+    "[b, i] = sortrows(int8([3 1; 1 2; 2 0])); fprintf('%s %s %s\\n', class(b), mat2str(b), mat2str(i'));",
+  ].join("\n")));
+  assert.deepEqual(out, [
+    "tril single int8 uint16 logical char",
+    "triu single int8 uint16 logical char",
+    "diag single int8 uint16 logical char",
+    "sortrows single int8 uint16 logical char",
+    "real single int8 uint16 double",
+    "imag single int8 uint16 double",
+    "conj single int8 uint16 double",
+    "double", "double", "double",
+    "int8 0 0",
+    "int8 [0 0;3 0]",
+    "logical [true false;false true]",
+    "[0 0] [0 1] double",
+    "int8 [1 2;2 0;3 1] [2 3 1]",
+  ]);
+});
