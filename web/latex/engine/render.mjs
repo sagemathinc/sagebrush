@@ -17,6 +17,9 @@ import { itemOf, isCodeEnv, UNSUPPORTED_ENVS, stateOf, savedStates, mathPart, in
 const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" };
 // eslint-disable-next-line no-control-regex
 export const esc = (s) => String(s).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "").replace(/[&<>"']/g, (c) => ESC[c]);
+// (esc's inverse, for HTML made here turned back into text)
+const UNESC = Object.fromEntries(Object.entries(ESC).map(([c, e]) => [e, c]));
+const unesc = (s) => s.replace(/&(?:amp|lt|gt|quot|#39|#x27|apos);/g, (e) => UNESC[e] ?? e);
 const safeUrl = (u) => { const s = String(u).trim(); return /^(https?:\/\/|mailto:)[^\s"'<>\\]*$/i.test(s) && s.length < 2048 ? s : null; };
 // (\roman of 0 or less: nothing, as TeX's \romannumeral; past 4999, the number in digits, a bound on the text)
 const roman = (n) => { if (n <= 0) return ""; if (n > 4999) return String(n); const v = [[1000, "m"], [900, "cm"], [500, "d"], [400, "cd"], [100, "c"], [90, "xc"], [50, "l"], [40, "xl"], [10, "x"], [9, "ix"], [5, "v"], [4, "iv"], [1, "i"]]; let s = ""; for (const [k, r] of v) while (n >= k) { s += r; n -= k; } return s; };
@@ -826,8 +829,12 @@ class Renderer {
     if (r.cmd === "cref" || r.cmd === "Cref") return this.cref(r, plain);
     const L = this.labels.get(r.key);
     if (!L) return plain ? "??" : '<span class="missing" title="' + esc(r.key) + '">??</span>';
-    // (\nameref: the title the label was under, a section's or a caption's)
-    if (r.cmd === "nameref") return plain ? L.name.replace(/<[^>]*>/g, "") : L.id ? '<a class="ref" href="#' + L.id + '">' + L.name + "</a>" : L.name;
+    // (\nameref: the title the label was under, a section's or a caption's; one that names itself, "??", as hyperref ends)
+    if (r.cmd === "nameref") {
+      const nm = this.nameText(r.key, plain);
+      if (nm === null) return plain ? "??" : '<span class="missing" title="' + esc(r.key) + '">??</span>';
+      return plain ? nm : L.id ? '<a class="ref" href="#' + L.id + '">' + nm + "</a>" : nm;
+    }
     let txt = L.text || "??";
     if (r.cmd === "eqref") txt = "(" + txt + ")";
     if (r.cmd === "pageref") txt = "↑";
@@ -838,6 +845,25 @@ class Renderer {
     }
     if (plain) return txt;
     return L.id ? '<a class="ref" href="#' + L.id + '">' + esc(txt) + "</a>" : esc(txt);
+  }
+  // (a label's \nameref text: its title with the references in it resolved, as text (no link inside the link): the final
+  //  pass replaces each placeholder once, so one \nameref brings in is resolved here (daybreak3, #682); null if the title
+  //  names itself, directly or through others (TeX: "??"))
+  nameText(key, plain, seen = new Set()) {
+    const L = this.labels.get(key);
+    // (only a \nameref inside a title can name a missing label here, and it asks for text)
+    if (!L) return "??";
+    if (seen.has(key)) return null;
+    seen.add(key);
+    let cycle = false;
+    const s = L.name.replace(/\u0001R(\d+)\u0002/g, (_, k) => {
+      const q = this.refs[+k], t = q.cmd === "nameref" ? this.nameText(q.key, true, seen) : this.resolveRef(q, true);
+      if (t === null) { cycle = true; return ""; }
+      return plain ? t : esc(t);
+    });
+    seen.delete(key);
+    // (as text: the title's tags taken off and the entities esc() made turned back, so it's escaped once where it lands)
+    return cycle ? null : plain ? unesc(s.replace(/<[^>]*>/g, "")) : s;
   }
   // cleveref's \cref and \Cref, with its defaults (TeX Live's; astra4's digest, gap 2): each kind named ("section 1",
   // "eq. (1)", "fig. 1"), the keys of one kind together, the kinds in the order they first come, each kind's sorted,
@@ -864,7 +890,8 @@ class Renderer {
       const th = this.thms[kind]?.title.toLowerCase(), nm = CREF[kind] ?? (th ? [th, th + "s"] : null);
       let name = nm ? nm[Ls.length > 1 ? 1 : 0] : "";
       if (name && r.cmd === "Cref" && g === 0) name = CREF_CAP[name] ?? name[0].toUpperCase() + name.slice(1);
-      return (name ? name + " " : "") + and(items, false);
+      // (a theorem's name is the document's own text: escaped in HTML (astra, REF682-HTML-1))
+      return (name ? (plain ? name : esc(name)) + " " : "") + and(items, false);
     });
     return and(parts, true);
   }

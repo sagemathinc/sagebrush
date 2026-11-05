@@ -502,6 +502,25 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
   check("ref-starred-link", /<h2 id="(sec-\d+)">[\s\S]*<a class="ref" href="#\1">1<\/a>/.test(link), link.slice(0, 400));
   // (a reference in math: KaTeX stubbed, so its source, \\text{..})
   for (const [k, [src, want]] of Object.entries(tex)) { const t = text(src).replace(/\\text\{([^}]*)\}/g, "$1"); check("ref-as-tex-" + k, t.slice(t.indexOf("A[")) === want, t.slice(t.indexOf("A["))); }
+  // (#682 r2, each against TeX Live 2025 with hyperref and cleveref: daybreak3, a heading with a \ref in it, named by
+  //  \nameref: its reference resolved ("See 1"), no placeholder left; a nested \nameref ("Cf. Beta"); a title that names
+  //  itself is "??" (TeX: the heading "Loop ??", the \nameref "??"))
+  const refDoc = (pre, body) => new Engine().update("\\documentclass{article}\n\\usepackage{hyperref}\n\\usepackage{cleveref}\n" + pre + "\n\\begin{document}\n" + body + "\n\\end{document}\n");
+  const refText = (r) => r.chunks.join("").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  for (const [name, body, want] of [
+    ["ref-nameref-with-ref", "\\section{Alpha}\\label{a}\\section{See \\ref{a}}\\label{b}X \\nameref{b} Y", "1 Alpha 2 See 1 X See 1 Y"],
+    ["ref-nameref-nested", "\\section{Beta}\\label{a}\\section{Cf.\\ \\nameref{a}}\\label{b}X \\nameref{b} Y", "1 Beta 2 Cf. Beta X Cf. Beta Y"],
+    ["ref-nameref-cycle", "\\section{Loop \\nameref{c}}\\label{c}X \\nameref{c} Y", "1 Loop ?? X ?? Y"],
+  ]) { const r = refDoc("", body), h = r.chunks.join(""); check(name, refText(r) === want && !/[\u0001\u0002]/.test(h), [refText(r), want, /[\u0001\u0002]/.test(h)]); }
+  // (and the text a \nameref brings in is escaped as the rest: "A \& B" named through another title)
+  { const r = refDoc("", "\\section{A \\& B}\\label{a}\\section{Cf.\\ \\nameref{a}}\\label{b}X \\nameref{b} Y"), h = r.chunks.join("");
+    check("ref-nameref-nested-escaped", refText(r).replace(/&amp;/g, "&") === "1 A & B 2 Cf. A & B X Cf. A & B Y" && !/A & B/.test(h), [refText(r), h.match(/Cf\.[^<]{0,20}/g)]); }
+  // (astra REF682-HTML-1: a theorem's name is the document's own text, escaped wherever \cref and \Cref name it, singular
+  //  and plural; and a plain one named as TeX names it ("lemma 1", "Lemma 1", "lemmas 1 and 2", "Lemmas 1 and 2"))
+  const evil = refDoc("\\newtheorem{evil}{<img src=x onerror=alert(1)>}", "\\begin{evil}\\label{x}A\\end{evil}\\begin{evil}\\label{y}B\\end{evil}P \\cref{x} Q \\Cref{x} R \\cref{x,y} S \\Cref{x,y}").chunks.join("");
+  const lem = refText(refDoc("\\newtheorem{lemma}{Lemma}", "\\begin{lemma}\\label{l}A\\end{lemma}\\begin{lemma}\\label{m}B\\end{lemma}P \\cref{l} Q \\Cref{l} R \\cref{l,m} S \\Cref{l,m}"));
+  check("ref-cref-theorem-name-escaped", !/<img/i.test(evil) && (evil.match(/&lt;img src=x onerror=alert\(1\)&gt;/g) || []).length >= 4, (evil.match(/&lt;img[^&]*/g) || []).length);
+  check("ref-cref-theorem-name-plain", lem.endsWith("P lemma 1 Q Lemma 1 R lemmas 1 and 2 S Lemmas 1 and 2"), lem);
 }
 
 // ---- render.mjs: an unclosed formula ends at a blank line (KaTeX stubbed: each formula drawn as its source)
