@@ -5,6 +5,9 @@
 
 import { T, PyBytes, raise, objectType, tuple, typeName, withExport } from "./object";
 import { newBuiltinModule } from "./modules";
+import { ARRAY_LIMITS } from "./numpy";
+import * as Ty from "./types";
+import { sig, builtin } from "./object";
 import * as O from "./ops";
 
 let ZlibError: any;
@@ -70,110 +73,388 @@ function fixed(): [Huff, Huff] {
   return [FIXED_L, FIXED_D!];
 }
 
-/** Inflate a raw deflate stream starting at `pos`; returns the data and
- *  the position after the final block. */
-function inflateRaw(src: Uint8Array, pos: number, limit = Infinity): [Uint8Array, number] {
-  let out = new Uint8Array(Math.min(Math.max(1024, src.length * 4), limit + 1));
-  let op = 0;
-  let bitbuf = 0, bitcnt = 0;
-  const need = (n: number) => {
-    while (bitcnt < n) {
-      if (pos >= src.length) raise(ZlibError, "Error -5 while decompressing data: incomplete or truncated stream");
-      bitbuf |= src[pos++] << bitcnt;
-      bitcnt += 8;
-    }
-  };
-  const bits = (n: number) => {
-    need(n);
-    const v = bitbuf & ((1 << n) - 1);
-    bitbuf >>>= n;
-    bitcnt -= n;
-    return v;
-  };
-  const decode = (h: Huff) => {
-    // fill as many bits as available up to h.bits
-    while (bitcnt < h.bits && pos < src.length) {
-      bitbuf |= src[pos++] << bitcnt;
-      bitcnt += 8;
-    }
-    const e = h.table[bitbuf & ((1 << h.bits) - 1)];
-    if (e < 0 || (e & 15) > bitcnt) raise(ZlibError, "Error -3 while decompressing data: invalid code");
-    bitbuf >>>= e & 15;
-    bitcnt -= e & 15;
-    return e >> 4;
-  };
-  const grow = (n: number) => {
-    // (a caller's limit on the output: a small stream can expand without bound)
-    if (op + n > limit) raise(ZlibError, `Error -5 while decompressing data: more than ${limit} bytes`);
-    if (op + n <= out.length) return;
-    let m = out.length * 2;
-    while (m < op + n) m *= 2;
-    const o2 = new Uint8Array(m);
-    o2.set(out.subarray(0, op));
-    out = o2;
-  };
-  let final = 0;
-  while (!final) {
-    final = bits(1);
-    const type = bits(2);
-    if (type === 0) {
-      bitbuf = 0;
-      bitcnt = 0;
-      if (pos + 4 > src.length) raise(ZlibError, "Error -5 while decompressing data: incomplete or truncated stream");
-      const len = src[pos] | (src[pos + 1] << 8);
-      pos += 4;
-      grow(len);
-      out.set(src.subarray(pos, pos + len), op);
-      op += len;
-      pos += len;
-      continue;
-    }
-    let lit: Huff, dist: Huff;
-    if (type === 1) [lit, dist] = fixed();
-    else if (type === 2) {
-      const hlit = bits(5) + 257, hdist = bits(5) + 1, hclen = bits(4) + 4;
-      const cl = new Uint8Array(19);
-      for (let i = 0; i < hclen; i++) cl[CLORDER[i]] = bits(3);
-      const clh = huffman(cl, 19);
-      const lens = new Uint8Array(hlit + hdist);
-      let i = 0;
-      while (i < hlit + hdist) {
-        const sym = decode(clh);
-        if (sym < 16) lens[i++] = sym;
-        else {
-          let rep = 0, val = 0;
-          if (sym === 16) {
-            if (i === 0) raise(ZlibError, "Error -3 while decompressing data: invalid bit length repeat");
-            val = lens[i - 1];
-            rep = 3 + bits(2);
-          } else if (sym === 17) rep = 3 + bits(3);
-          else rep = 11 + bits(7);
-          while (rep--) lens[i++] = val;
-        }
-      }
-      lit = huffman(lens.subarray(0, hlit), hlit);
-      dist = huffman(lens.subarray(hlit), hdist);
-    } else raise(ZlibError, "Error -3 while decompressing data: invalid block type");
-    for (;;) {
-      const sym = decode(lit);
-      if (sym < 256) {
-        grow(1);
-        out[op++] = sym;
-      } else if (sym === 256) break;
-      else {
-        const li = sym - 257;
-        const len = LBASE[li] + bits(LEXT[li]);
-        const di = decode(dist);
-        const d = DBASE[di] + bits(DEXT[di]);
-        if (d > op) raise(ZlibError, "Error -3 while decompressing data: invalid distance too far back");
-        grow(len);
-        for (let k = 0; k < len; k++, op++) out[op] = out[op - d];
-      }
-    }
+// The inflater, resumable (design note-zlib-decompressobj r2): a state
+// machine over input given in pieces and output taken in pieces.  It decodes
+// in units, a block header, a dynamic block's whole code table, one literal
+// or one match; before each it saves its place, and if the input runs out
+// inside a unit it goes back there and waits for more, keeping that input.
+// Output goes to `buf` after the last 32 KiB it made (all a back-reference
+// can reach), and a call never makes more than the room it is given: a match
+// or stored block that doesn't fit is kept, and finished by the next call.
+// zlib.decompress, gzip and _decompress_limited use it with all their input
+// at once; zlib.decompressobj with the input and room each call gives.
+const WSIZE = 32768;
+const NEED = { need: true };
+const PH_HEADER = 0, PH_STORED = 1, PH_CODES = 2, PH_DONE = 3;
+
+export class Inflater {
+  inp: Uint8Array = new Uint8Array(0);
+  pos = 0;
+  bitbuf = 0;
+  bitcnt = 0;
+  phase = PH_HEADER;
+  final = 0;
+  stored = 0;
+  lit: Huff | null = null;
+  dist: Huff | null = null;
+  // a match the room ran out in: its bytes left and its distance
+  mlen = 0;
+  mdist = 0;
+  // the window and the output: buf[0, bp), its last WSIZE bytes the window
+  buf: Uint8Array = new Uint8Array(1024);
+  bp = 0;
+  // every byte ever made (a distance can't reach before the first)
+  total = 0;
+
+  get done(): boolean {
+    return this.phase === PH_DONE;
   }
-  // (decode reads ahead: whole unread bytes in the bit buffer are not the
-  // stream's)
-  return [out.subarray(0, op), pos - (bitcnt >> 3)];
+
+  /** Append input (what wasn't read of the earlier input stays first);
+   *  `own`: the input is the inflater's to keep as it is (no copy). */
+  feed(data: Uint8Array, own = false): void {
+    if (!data.length) return;
+    if (own && this.pos >= this.inp.length && this.bitcnt < 8) {
+      this.inp = data;
+      this.pos = 0;
+      return;
+    }
+    // (the whole bytes in the bit buffer were read ahead, from inp: kept)
+    const keep = this.pos - (this.bitcnt >> 3);
+    const rest = this.inp.subarray(keep);
+    const n = new Uint8Array(rest.length + data.length);
+    n.set(rest);
+    n.set(data, rest.length);
+    this.inp = n;
+    this.pos -= keep;
+  }
+
+  /** Between calls (its output copied out): keep only the window, and give
+   *  back a buffer grown for a large call, so a paused stream holds at most
+   *  the window and its unread input (astra's ZLIB687-WINDOW-1). */
+  compact(): void {
+    const keep = Math.min(this.bp, WSIZE);
+    if (this.buf.length <= Math.max(2 * WSIZE, 1024) && this.bp <= WSIZE) return;
+    const b = new Uint8Array(Math.max(keep, 1024));
+    b.set(this.buf.subarray(this.bp - keep, this.bp));
+    this.buf = b;
+    this.bp = keep;
+  }
+
+  /** The whole input bytes not yet read (the bit buffer's partial byte stays
+   *  in it), removed from the input: CPython's unconsumed_tail. */
+  takeUnread(): Uint8Array {
+    const whole = this.bitcnt >> 3;
+    const from = this.pos - whole;
+    this.bitbuf &= (1 << (this.bitcnt & 7)) - 1;
+    this.bitcnt &= 7;
+    const t = this.inp.slice(from);
+    this.inp = new Uint8Array(0);
+    this.pos = 0;
+    return t;
+  }
+
+  /** The input after the stream's end (its trailer comes from here). */
+  rest(): Uint8Array {
+    return this.inp.subarray(this.pos - (this.bitcnt >> 3));
+  }
+
+  /** Make at most `room` bytes of output; returns them (fewer when the
+   *  input runs out or the stream ends).  `over`: the error past `cap`, a
+   *  hard bound on one call's room given with room = Infinity. */
+  run(room: number, cap = Infinity, over?: () => never): Uint8Array {
+    // (the window: only its last WSIZE bytes are kept before this call's output)
+    if (this.bp > WSIZE) {
+      this.buf.copyWithin(0, this.bp - WSIZE, this.bp);
+      this.bp = WSIZE;
+    }
+    const start = this.bp;
+    const limit = Math.min(room, cap);
+    const left = () => limit - (this.bp - start);
+    const ensure = (n: number) => {
+      if (this.bp + n <= this.buf.length) return;
+      let m = this.buf.length * 2;
+      while (m < this.bp + n) m *= 2;
+      // (never a buffer past what this call may make: the window and its room)
+      if (m > start + limit) m = Math.max(this.bp + n, start + limit);
+      const b = new Uint8Array(m);
+      b.set(this.buf.subarray(0, this.bp));
+      this.buf = b;
+    };
+    const full = () => {
+      if (left() > 0) return false;
+      // (room = Infinity with a cap: past the cap is an error, never more output)
+      if (room > cap && over) over();
+      return true;
+    };
+    const src = () => this.inp;
+    const need = (n: number) => {
+      while (this.bitcnt < n) {
+        if (this.pos >= this.inp.length) throw NEED;
+        this.bitbuf |= this.inp[this.pos++] << this.bitcnt;
+        this.bitcnt += 8;
+      }
+    };
+    const bits = (n: number) => {
+      need(n);
+      const v = this.bitbuf & ((1 << n) - 1);
+      this.bitbuf >>>= n;
+      this.bitcnt -= n;
+      return v;
+    };
+    const decode = (h: Huff) => {
+      const inp = src();
+      while (this.bitcnt < h.bits && this.pos < inp.length) {
+        this.bitbuf |= inp[this.pos++] << this.bitcnt;
+        this.bitcnt += 8;
+      }
+      const e = h.table[this.bitbuf & ((1 << h.bits) - 1)];
+      if (e < 0 || (e & 15) > this.bitcnt) {
+        // (too few bits for a code yet: wait for more input, else it is invalid)
+        if (this.bitcnt < h.bits) throw NEED;
+        raise(ZlibError, "Error -3 while decompressing data: invalid code");
+      }
+      this.bitbuf >>>= e & 15;
+      this.bitcnt -= e & 15;
+      return e >> 4;
+    };
+    for (;;) {
+      if (this.mlen > 0) {
+        const n = Math.min(this.mlen, left());
+        if (n > 0) {
+          ensure(n);
+          const b = this.buf, d = this.mdist;
+          for (let k = 0; k < n; k++, this.bp++) b[this.bp] = b[this.bp - d];
+          this.mlen -= n;
+          this.total += n;
+        }
+        if (this.mlen > 0 && full()) break;
+      }
+      if (this.phase === PH_DONE) break;
+      if (this.phase === PH_STORED) {
+        if (this.stored > 0) {
+          const inp = this.inp;
+          const n = Math.min(this.stored, left(), inp.length - this.pos);
+          if (n > 0) {
+            ensure(n);
+            this.buf.set(inp.subarray(this.pos, this.pos + n), this.bp);
+            this.bp += n;
+            this.pos += n;
+            this.stored -= n;
+            this.total += n;
+          }
+          if (this.stored > 0) {
+            if (full()) break;
+            break; // (waiting for input)
+          }
+        }
+        this.phase = this.final ? PH_DONE : PH_HEADER;
+        continue;
+      }
+      // a unit: saved first, so input that runs out inside it is waited for
+      const sp = this.pos, sb = this.bitbuf, sc = this.bitcnt;
+      try {
+        if (this.phase === PH_HEADER) {
+          const fin = bits(1);
+          const type = bits(2);
+          if (type === 0) {
+            // (to a byte boundary; whole bytes read ahead are the block's)
+            this.bitbuf >>>= this.bitcnt & 7;
+            this.bitcnt -= this.bitcnt & 7;
+            const len = bits(16), nlen = bits(16);
+            if ((len ^ 0xffff) !== nlen) raise(ZlibError, "Error -3 while decompressing data: invalid stored block lengths");
+            // (the bit buffer is empty now: 32 bits read from a byte boundary)
+            this.final = fin;
+            this.stored = len;
+            this.phase = PH_STORED;
+            continue;
+          }
+          let lit: Huff, dist: Huff;
+          if (type === 1) [lit, dist] = fixed();
+          else if (type === 2) {
+            const hlit = bits(5) + 257, hdist = bits(5) + 1, hclen = bits(4) + 4;
+            const cl = new Uint8Array(19);
+            for (let i = 0; i < hclen; i++) cl[CLORDER[i]] = bits(3);
+            const clh = huffman(cl, 19);
+            const lens = new Uint8Array(hlit + hdist);
+            let i = 0;
+            while (i < hlit + hdist) {
+              const sym = decode(clh);
+              if (sym < 16) lens[i++] = sym;
+              else {
+                let rep = 0, val = 0;
+                if (sym === 16) {
+                  if (i === 0) raise(ZlibError, "Error -3 while decompressing data: invalid bit length repeat");
+                  val = lens[i - 1];
+                  rep = 3 + bits(2);
+                } else if (sym === 17) rep = 3 + bits(3);
+                else rep = 11 + bits(7);
+                if (i + rep > hlit + hdist) raise(ZlibError, "Error -3 while decompressing data: invalid bit length repeat");
+                while (rep--) lens[i++] = val;
+              }
+            }
+            lit = huffman(lens.subarray(0, hlit), hlit);
+            dist = huffman(lens.subarray(hlit), hdist);
+          } else raise(ZlibError, "Error -3 while decompressing data: invalid block type");
+          this.final = fin;
+          this.lit = lit;
+          this.dist = dist;
+          this.phase = PH_CODES;
+          continue;
+        }
+        // PH_CODES: literals and matches until the room is full or the block ends
+        const lit = this.lit!, dist = this.dist!;
+        // (the fast path, as zlib's inflate_fast: with 8 bytes of input and 258 of room left no unit can run out
+        // of either, so it decodes in locals with no saves; the careful loop below does the last units)
+        if (this.mlen === 0) {
+          const inp = this.inp, end = inp.length - 8;
+          const lt = lit.table, lmask = (1 << lit.bits) - 1, lbits = lit.bits;
+          const dt = dist.table, dmask = (1 << dist.bits) - 1, dbits = dist.bits;
+          const opEnd = limit === Infinity ? Infinity : start + limit - 258;
+          let p = this.pos, bb = this.bitbuf, bc = this.bitcnt, op = this.bp, buf = this.buf;
+          const op0 = op, total0 = this.total;
+          while (p < end && op <= opEnd) {
+            if (op + 258 > buf.length) {
+              this.bp = op;
+              ensure(258);
+              buf = this.buf;
+            }
+            while (bc < lbits) {
+              bb |= inp[p++] << bc;
+              bc += 8;
+            }
+            let e = lt[bb & lmask];
+            if (e < 0) raise(ZlibError, "Error -3 while decompressing data: invalid code");
+            bb >>>= e & 15;
+            bc -= e & 15;
+            const sym = e >> 4;
+            if (sym < 256) {
+              buf[op++] = sym;
+              continue;
+            }
+            if (sym === 256) {
+              this.phase = this.final ? PH_DONE : PH_HEADER;
+              break;
+            }
+            const li = sym - 257;
+            if (li >= 29) raise(ZlibError, "Error -3 while decompressing data: invalid literal/length code");
+            let ext = LEXT[li];
+            while (bc < ext) {
+              bb |= inp[p++] << bc;
+              bc += 8;
+            }
+            const len = LBASE[li] + (bb & ((1 << ext) - 1));
+            bb >>>= ext;
+            bc -= ext;
+            while (bc < dbits) {
+              bb |= inp[p++] << bc;
+              bc += 8;
+            }
+            e = dt[bb & dmask];
+            if (e < 0) raise(ZlibError, "Error -3 while decompressing data: invalid code");
+            bb >>>= e & 15;
+            bc -= e & 15;
+            const di = e >> 4;
+            if (di >= 30) raise(ZlibError, "Error -3 while decompressing data: invalid distance code");
+            ext = DEXT[di];
+            while (bc < ext) {
+              bb |= inp[p++] << bc;
+              bc += 8;
+            }
+            const d = DBASE[di] + (bb & ((1 << ext) - 1));
+            bb >>>= ext;
+            bc -= ext;
+            if (d > total0 + (op - op0)) raise(ZlibError, "Error -3 while decompressing data: invalid distance too far back");
+            for (let k = 0; k < len; k++, op++) buf[op] = buf[op - d];
+          }
+          this.pos = p;
+          this.bitbuf = bb;
+          this.bitcnt = bc;
+          this.bp = op;
+          this.total += op - op0;
+          if (this.phase !== PH_CODES) continue;
+        }
+        let stop = false;
+        for (;;) {
+          const s0 = this.pos, b0 = this.bitbuf, c0 = this.bitcnt;
+          let sym: number, len = 0, d = 0;
+          try {
+            sym = decode(lit);
+            if (sym > 256) {
+              const li = sym - 257;
+              if (li >= 29) raise(ZlibError, "Error -3 while decompressing data: invalid literal/length code");
+              len = LBASE[li] + bits(LEXT[li]);
+              const di = decode(dist);
+              if (di >= 30) raise(ZlibError, "Error -3 while decompressing data: invalid distance code");
+              d = DBASE[di] + bits(DEXT[di]);
+            }
+          } catch (e) {
+            if (e === NEED) {
+              this.pos = s0;
+              this.bitbuf = b0;
+              this.bitcnt = c0;
+            }
+            throw e;
+          }
+          if (sym !== 256 && left() <= 0) {
+            // (a byte to make and no room: the symbol is decoded again next call)
+            this.pos = s0;
+            this.bitbuf = b0;
+            this.bitcnt = c0;
+            stop = true;
+            break;
+          }
+          if (sym < 256) {
+            ensure(1);
+            this.buf[this.bp++] = sym;
+            this.total++;
+          } else if (sym === 256) {
+            this.phase = this.final ? PH_DONE : PH_HEADER;
+            break;
+          } else {
+            if (d > this.total) raise(ZlibError, "Error -3 while decompressing data: invalid distance too far back");
+            this.mlen = len;
+            this.mdist = d;
+            const n = Math.min(len, left());
+            ensure(n);
+            const b = this.buf;
+            for (let k = 0; k < n; k++, this.bp++) b[this.bp] = b[this.bp - d];
+            this.mlen -= n;
+            this.total += n;
+            if (this.mlen > 0) {
+              stop = true;
+              break;
+            }
+          }
+        }
+        if (stop && full()) break;
+      } catch (e) {
+        if (e !== NEED) throw e;
+        if (this.phase !== PH_CODES) {
+          this.pos = sp;
+          this.bitbuf = sb;
+          this.bitcnt = sc;
+        }
+        break;
+      }
+    }
+    return this.buf.subarray(start, this.bp);
+  }
+}
+
+/** Inflate a raw deflate stream starting at `pos`, all its input given;
+ *  returns the data and the position after the final block (the one-shot
+ *  users: zlib.decompress, gzip, _decompress_limited). */
+function inflateRaw(src: Uint8Array, pos: number, limit = Infinity): [Uint8Array, number] {
+  const f = new Inflater();
+  f.feed(src.subarray(pos), true);
+  // (zlib.decompress and gzip with no limit of their own: the array limit, as decompressobj's calls (astra's ZLIB687-CAP-1))
+  const cap = Math.min(limit, ARRAY_LIMITS.bytes);
+  const out = f.run(Infinity, cap, () =>
+    raise(ZlibError, cap < limit ? `Error -5 while decompressing data: output exceeds Sagebrush's limit of ${cap} bytes` : `Error -5 while decompressing data: more than ${limit} bytes`),
+  );
+  if (!f.done) raise(ZlibError, "Error -5 while decompressing data: incomplete or truncated stream");
+  return [out, pos + (f.pos - (f.bitcnt >> 3))];
 }
 
 function adler32(a: Uint8Array, start = 1): number {
@@ -211,14 +492,24 @@ const TRUNCATED = "Error -5 while decompressing data: incomplete or truncated st
  *  CRC-32 and length (as zlib checks them: corrupt or truncated files were
  *  accepted, the systematic review's R2-DOC-F6), and the position after it. */
 export function gunzipMember(data: Uint8Array, start: number): [Uint8Array, number] {
-  if (data[start] !== 0x1f || data[start + 1] !== 0x8b || data[start + 2] !== 8) raise(ZlibError, "Error -3 while decompressing data: incorrect header check");
-  if (start + 10 > data.length) raise(ZlibError, TRUNCATED);
+  // (each check as its byte comes, as zlib's: a short header is truncated only past the bytes it has)
+  const n = data.length - start;
+  if (n < 2) raise(ZlibError, TRUNCATED);
+  if (data[start] !== 0x1f || data[start + 1] !== 0x8b) raise(ZlibError, "Error -3 while decompressing data: incorrect header check");
+  if (n < 4) raise(ZlibError, TRUNCATED);
+  if (data[start + 2] !== 8) raise(ZlibError, "Error -3 while decompressing data: unknown compression method");
   const flg = data[start + 3];
+  if (flg & 0xe0) raise(ZlibError, "Error -3 while decompressing data: unknown header flags set");
+  if (n < 10) raise(ZlibError, TRUNCATED);
   let p = start + 10;
   if (flg & 4) p += 2 + (data[p] | (data[p + 1] << 8));
   if (flg & 8) while (p < data.length && data[p++]) {}
   if (flg & 16) while (p < data.length && data[p++]) {}
-  if (flg & 2) p += 2;
+  if (flg & 2) {
+    if (p + 2 > data.length) raise(ZlibError, TRUNCATED);
+    if ((crc32(data.subarray(start, p)) & 0xffff) !== (data[p] | (data[p + 1] << 8))) raise(ZlibError, "Error -3 while decompressing data: header crc mismatch");
+    p += 2;
+  }
   const [out, end] = inflateRaw(data, p);
   if (end + 8 > data.length) raise(ZlibError, TRUNCATED);
   const le = (i: number) => (data[i] | (data[i + 1] << 8) | (data[i + 2] << 16) | (data[i + 3] << 24)) >>> 0;
@@ -227,13 +518,28 @@ export function gunzipMember(data: Uint8Array, start: number): [Uint8Array, numb
   return [out, end + 8];
 }
 
-/** zlib (wbits 9..15), raw deflate (wbits < 0) or gzip (wbits >= 16 + 9):
- *  the first stream, as CPython's zlib.decompress. */
+/** zlib's windowBits: the kind of stream and the largest window a zlib
+ *  header may ask for (0: the header's own), or null when zlib refuses it. */
+function wbitsKind(wbits: number): [string, number] | null {
+  if (wbits >= -15 && wbits <= -8) return ["raw", 0];
+  if (wbits === 0 || (wbits >= 8 && wbits <= 15)) return ["zlib", wbits];
+  if (wbits === 16 || (wbits >= 24 && wbits <= 31)) return ["gzip", 0];
+  if (wbits === 32 || (wbits >= 40 && wbits <= 47)) return ["auto", wbits - 32];
+  return null;
+}
+
+/** zlib (wbits 0, 8..15), raw deflate (-15..-8), gzip (16, 24..31) or
+ *  either (32, 40..47): the first stream, as CPython's zlib.decompress. */
 export function decompress(data: Uint8Array, wbits = 15): Uint8Array {
-  if (wbits < 0) return inflateRaw(data, 0)[0];
-  const magic = data[0] === 0x1f && data[1] === 0x8b;
-  if ((wbits >= 24 && wbits < 32) || (wbits >= 40 && magic)) return gunzipMember(data, 0)[0];
-  if (data.length < 2 || ((data[0] << 8) | data[1]) % 31 !== 0 || (data[0] & 15) !== 8) raise(ZlibError, "Error -3 while decompressing data: incorrect header check");
+  const k = wbitsKind(wbits);
+  if (!k) raise(ZlibError, "Error -2 while preparing to decompress data: inconsistent stream state");
+  const [kind, w] = k;
+  if (kind === "raw") return inflateRaw(data, 0)[0];
+  if (kind === "gzip" || (kind === "auto" && data[0] === 0x1f && data[1] === 0x8b)) return gunzipMember(data, 0)[0];
+  if (data.length < 2) raise(ZlibError, TRUNCATED);
+  zlibHeader(data, w);
+  // (a preset dictionary, which needs zdict: once its id is there, as zlib)
+  if (data[1] & 0x20) raise(ZlibError, data.length < 6 ? TRUNCATED : "Error 2 while decompressing data");
   const [out, end] = inflateRaw(data, 2);
   // the Adler-32 trailer (a corrupted one was accepted: R2-DOC-F6)
   if (end + 4 > data.length) raise(ZlibError, TRUNCATED);
@@ -278,6 +584,178 @@ export function compress(data: Uint8Array): Uint8Array {
   return out.subarray(0, op);
 }
 
+// zlib.decompressobj's objects (design note-zlib-decompressobj r3.1): a
+// stream's header, its deflate data through the resumable Inflater, and its
+// trailer, each read as its bytes arrive.  decompress(data, max_length) never
+// makes more than max_length bytes: it stops, keeps its place, and gives the
+// input it didn't read back as unconsumed_tail (whose bytes it then no longer
+// holds), as CPython does; with max_length 0 a call's output is bounded by
+// the array limit, past which it is zlib.error.
+export class PyDecompress {
+  inf = new Inflater();
+  // "zlib", "raw", "gzip", or "auto" (zlib or gzip, by the header)
+  kind: string;
+  phase = 0; // 0 the header, 1 the deflate data, 2 the trailer, 3 the end
+  pre: Uint8Array = new Uint8Array(0); // the header's or the trailer's bytes so far
+  check = 0;
+  size = 0;
+  eof = false;
+  unused: Uint8Array = new Uint8Array(0);
+  tail: Uint8Array = new Uint8Array(0);
+  // the largest window a zlib header may ask for (0: the header's own)
+  wbits: number;
+  constructor(wbits: number) {
+    const k = wbitsKind(wbits);
+    if (!k) raise(T.ValueError, "Invalid initialization option");
+    [this.kind, this.wbits] = k;
+    if (this.kind === "raw") this.phase = 1;
+    this.check = this.kind === "zlib" ? 1 : 0;
+  }
+}
+
+const cat = (a: Uint8Array, b: Uint8Array) => {
+  if (!a.length) return b;
+  const n = new Uint8Array(a.length + b.length);
+  n.set(a);
+  n.set(b, a.length);
+  return n;
+};
+
+/** A zlib header's checks, in zlib's order: the check bits, the method, and
+ *  a window no larger than `wbits` allows (0: the header's own). */
+function zlibHeader(h: Uint8Array, wbits: number): void {
+  if (((h[0] << 8) | h[1]) % 31 !== 0) raise(ZlibError, "Error -3 while decompressing data: incorrect header check");
+  if ((h[0] & 15) !== 8) raise(ZlibError, "Error -3 while decompressing data: unknown compression method");
+  const w = (h[0] >> 4) + 8;
+  if (w > 15 || (wbits !== 0 && w > wbits)) raise(ZlibError, "Error -3 while decompressing data: invalid window size");
+}
+
+/** The header's length if `h` holds all of it (0: not yet), checking it. */
+function headerLength(d: PyDecompress, h: Uint8Array): number {
+  if (d.kind === "auto") {
+    if (h.length < 2) return 0;
+    d.kind = h[0] === 0x1f && h[1] === 0x8b ? "gzip" : "zlib";
+    d.check = d.kind === "zlib" ? 1 : 0;
+  }
+  if (d.kind === "zlib") {
+    if (h.length < 2) return 0;
+    zlibHeader(h, d.wbits);
+    if (!(h[1] & 0x20)) return 2;
+    // (a preset dictionary, which needs zdict: not here; zlib asks for it once the dictionary's id has come)
+    if (h.length < 6) return 0;
+    raise(ZlibError, "Error 2 while decompressing data");
+  }
+  // (each of the gzip header's checks as soon as its byte comes, as zlib's)
+  if (h.length < 2) return 0;
+  if (h[0] !== 0x1f || h[1] !== 0x8b) raise(ZlibError, "Error -3 while decompressing data: incorrect header check");
+  // (the method and the flags come as one 16-bit read)
+  if (h.length < 4) return 0;
+  if (h[2] !== 8) raise(ZlibError, "Error -3 while decompressing data: unknown compression method");
+  const flg = h[3];
+  // (as zlib: reserved flags refused, and the header's CRC-16 checked when FHCRC says it is there; daybreak3's ZLIB687-GZIPHDR-1)
+  if (flg & 0xe0) raise(ZlibError, "Error -3 while decompressing data: unknown header flags set");
+  if (h.length < 10) return 0;
+  let p = 10;
+  if (flg & 4) {
+    if (h.length < p + 2) return 0;
+    p += 2 + (h[p] | (h[p + 1] << 8));
+  }
+  for (const f of [8, 16]) {
+    if (!(flg & f)) continue;
+    while (p < h.length && h[p]) p++;
+    if (p >= h.length) return 0;
+    p++;
+  }
+  if (flg & 2) {
+    if (h.length < p + 2) return 0;
+    if ((crc32(h.subarray(0, p)) & 0xffff) !== (h[p] | (h[p + 1] << 8))) raise(ZlibError, "Error -3 while decompressing data: header crc mismatch");
+    p += 2;
+  }
+  return h.length >= p ? p : 0;
+}
+
+/** The output of one call: inflate up to `room` (Infinity: the array limit),
+ *  then the trailer if the stream ended; returns the bytes made. */
+function step(d: PyDecompress, room: number): Uint8Array {
+  let out: Uint8Array = new Uint8Array(0);
+  if (d.phase === 1) {
+    const cap = ARRAY_LIMITS.bytes;
+    const o = d.inf.run(room, cap, () => raise(ZlibError, `Error -5 while decompressing data: output exceeds Sagebrush's limit of ${cap} bytes`));
+    out = o.slice();
+    d.inf.compact();
+    if (d.kind === "zlib") d.check = adler32(out, d.check);
+    else if (d.kind === "gzip") {
+      d.check = crc32(out, d.check);
+      d.size = (d.size + out.length) >>> 0;
+    }
+    if (d.inf.done) {
+      d.phase = 2;
+      d.pre = d.inf.rest().slice();
+      d.inf = new Inflater();
+    }
+  }
+  if (d.phase === 2) {
+    const need = d.kind === "raw" ? 0 : d.kind === "zlib" ? 4 : 8;
+    if (d.pre.length >= need) {
+      const t = d.pre;
+      if (d.kind === "zlib") {
+        const a = ((t[0] << 24) | (t[1] << 16) | (t[2] << 8) | t[3]) >>> 0;
+        if (a !== d.check) raise(ZlibError, "Error -3 while decompressing data: incorrect data check");
+      } else if (d.kind === "gzip") {
+        const le = (i: number) => (t[i] | (t[i + 1] << 8) | (t[i + 2] << 16) | (t[i + 3] << 24)) >>> 0;
+        if (le(0) !== d.check) raise(ZlibError, "Error -3 while decompressing data: incorrect data check");
+        if (le(4) !== d.size) raise(ZlibError, "Error -3 while decompressing data: incorrect length check");
+      }
+      d.unused = cat(d.unused, t.slice(need));
+      d.pre = new Uint8Array(0);
+      d.phase = 3;
+      d.eof = true;
+    }
+  }
+  return out;
+}
+
+export function decompressCall(d: PyDecompress, data: any, maxLength: any): PyBytes {
+  const input = bytesOf(data);
+  const ml = maxLength === undefined ? 0 : Number(O.index(maxLength));
+  if (ml < 0) raise(T.ValueError, "max_length must be non-negative");
+  d.tail = new Uint8Array(0);
+  if (d.phase === 3) {
+    d.unused = cat(d.unused, input.slice());
+    return new PyBytes(new Uint8Array(0));
+  }
+  if (d.phase === 0) {
+    d.pre = cat(d.pre, input.slice());
+    const n = headerLength(d, d.pre);
+    if (!n) return new PyBytes(new Uint8Array(0));
+    d.inf.feed(d.pre.subarray(n));
+    d.pre = new Uint8Array(0);
+    d.phase = 1;
+  } else if (d.phase === 1) d.inf.feed(input);
+  else d.pre = cat(d.pre, input.slice());
+  const out = step(d, ml || Infinity);
+  // (stopped by max_length: the input it didn't read is the caller's again)
+  if (ml && out.length === ml && d.phase === 1) d.tail = d.inf.takeUnread();
+  return new PyBytes(out);
+}
+
+function flushCall(d: PyDecompress): PyBytes {
+  if (d.phase === 3) return new PyBytes(new Uint8Array(0));
+  // (CPython's flush reads the unconsumed tail too, and has no output bound: length is only a buffer size)
+  const t = d.tail;
+  d.tail = new Uint8Array(0);
+  if (d.phase === 0) {
+    d.pre = cat(d.pre, t);
+    const n = headerLength(d, d.pre);
+    if (!n) return new PyBytes(new Uint8Array(0));
+    d.inf.feed(d.pre.subarray(n));
+    d.pre = new Uint8Array(0);
+    d.phase = 1;
+  } else if (d.phase === 1) d.inf.feed(t);
+  else d.pre = cat(d.pre, t);
+  return new PyBytes(step(d, Infinity));
+}
+
 newBuiltinModule("zlib", (m) => {
   ZlibError = objectType("error", [T.Exception], new Map(), "zlib");
   m.error = ZlibError;
@@ -305,6 +783,25 @@ newBuiltinModule("zlib", (m) => {
   });
   fn("crc32", (data: any, start: any = 0) => crc32(bytesOf(data), Number(start)));
   fn("adler32", (data: any, start: any = 1) => adler32(bytesOf(data), Number(start)));
+  // zlib.decompressobj (CPython's; zdict and copy() are not here)
+  const D = Ty.builtinTypeFor("Decompress", PyDecompress, "zlib", () => raise(T.TypeError, "cannot create 'zlib.Decompress' instances"));
+  Ty.method(D, "decompress", (d: PyDecompress, data: any, maxLength: any = undefined) => decompressCall(d, data, maxLength), sig(["self", "data", "max_length"], { posonly: 2 }));
+  Ty.method(D, "flush", (d: PyDecompress, length: any = undefined) => {
+    if (length !== undefined && Number(O.index(length)) <= 0) raise(T.ValueError, "length must be greater than zero");
+    return flushCall(d);
+  });
+  Ty.method(D, "copy", () => raise(T.NotImplementedError, "zlib: Decompress.copy() is not in Sagebrush's zlib"));
+  Ty.getset(D, "unused_data", (d: PyDecompress) => new PyBytes(d.unused.slice()));
+  Ty.getset(D, "unconsumed_tail", (d: PyDecompress) => new PyBytes(d.tail.slice()));
+  Ty.getset(D, "eof", (d: PyDecompress) => d.eof);
+  m.decompressobj = builtin(
+    (wbits: any = 15, zdict: any = undefined) => {
+      if (zdict !== undefined && bytesOf(zdict).length) raise(T.NotImplementedError, "zlib: decompressobj(zdict=) is not in Sagebrush's zlib");
+      return new PyDecompress(Number(O.index(wbits === undefined ? 15 : wbits)));
+    },
+    "decompressobj",
+    sig(["wbits", "zdict"]),
+  );
 });
 
 // ------------------------------------------------------------------ binascii
