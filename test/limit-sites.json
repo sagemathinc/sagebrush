@@ -726,7 +726,12 @@
   "owner": "sagebrush-matlab",
   "reason": "engine/nd Wasm boundary: Rust's slice-length bound (isize::MAX bytes) and its native test value (i32::MAX, wasm32's); a soundness rule for any slice, not a policy cap"
  },
- "engine/nd/src/boundary.rs :: check_solve :: const L: Facts = Facts { mem: 1 << 32, floor: 1 << 20, max_len: i32::MAX as u64, frame: 5 << 20 }; #0": {
+ "engine/nd/src/boundary.rs :: check_potrf :: const L: Facts = Facts { mem: 1 << 32, floor: 1 << 20, max_len: i32::MAX as u64, frame: 5 << 20 }; #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd tests: deliberately overflowing sizes (u32::MAX, usize::MAX) that must be refused, and wasm32's limits in a test Facts; refuses no user work"
+ },
+ "engine/nd/src/boundary.rs :: potrf_layouts :: refused(\"n overflowing\", 3, u32::MAX); #0": {
   "class": "none",
   "owner": "sagebrush-matlab",
   "reason": "engine/nd tests: deliberately overflowing sizes (u32::MAX, usize::MAX) that must be refused, and wasm32's limits in a test Facts; refuses no user work"
@@ -915,6 +920,11 @@
   "class": "none",
   "owner": "sagebrush-matlab",
   "reason": "refuses nothing itself: passes Rust's slice-length bound (isize::MAX bytes) to the Wasm boundary check (engine/nd/src/boundary.rs); a soundness rule for any slice, not a policy cap"
+ },
+ "engine/nd/src/wasm.rs :: nd_potrf :: max_len: isize::MAX as u64, #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "refuses nothing itself: passes Rust's slice-length bound (isize::MAX bytes) to the Wasm Cholesky's boundary check (check_potrf) (engine/nd/src/boundary.rs); a soundness rule for any slice, not a policy cap"
  },
  "engine/nd/src/wasm.rs :: nd_solve :: max_len: isize::MAX as u64, #0": {
   "class": "none",
@@ -9531,6 +9541,16 @@
   "class": "1",
   "owner": "runtime file I/O",
   "row": "src-14"
+ },
+ "src/runtime/nd.ts :: sharedMemory :: for (const maximum of [65536, 16384, 4096]) { #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd's WebAssembly.Memory (src/runtime/nd.ts): the declared maximum is wasm32's own 4 GiB bound (the module's import declares it), retried smaller only where that much address space can't be reserved; refuses no user work (a growth past it is the MemoryError cholesky reports)"
+ },
+ "src/runtime/nd.ts :: sharedMemory :: return new WebAssembly.Memory({ initial: 17, maximum, shared: true }); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd's WebAssembly.Memory (src/runtime/nd.ts): the declared maximum is wasm32's own 4 GiB bound (the module's import declares it), retried smaller only where that much address space can't be reserved; refuses no user work (a growth past it is the MemoryError cholesky reports)"
  },
  "src/runtime/numpy.ts :: admitArray :: if (bytes > 2n ** 63n - 1n) raise(T.ValueError, \"array is too big; `arr.size * arr.dtype.itemsize` is larger than the maximum possible size.\"); #0": {
   "class": "2",
