@@ -144,7 +144,10 @@ export const preloadState: { outcome: null | "off" | "stopped" | "save-data" | "
 /** At the browser's next idle moment (at most `wait` ms later), once per page: the open document's intent, fetched.
  * `base`: where the library files are (the page's own address by default, the notebook page's; a shared
  * collection's page, /s/<id>, gives the site's root, where its runner asks for them) */
-export function preloadSoon(o: { table: PreloadTable; doc: () => { mode: string; codes: string[] } | null; extra?: () => Promise<{ urls: string[]; bytes: number } | null>; wait?: number; base?: string }) {
+/** `later`: files planned only after the first files are fetched (or found to be none), fetched after them, with the
+ * same skips and stop (the package set's chunks: their plan waits for the service worker, which the library's files
+ * mustn't wait for, test-pwa's install check) */
+export function preloadSoon(o: { table: PreloadTable; doc: () => { mode: string; codes: string[] } | null; extra?: () => Promise<{ urls: string[]; bytes: number } | null>; later?: () => Promise<{ urls: string[]; bytes: number } | null>; wait?: number; base?: string }) {
   const go = async () => {
     // (a test turns it off before the page loads: window.__sbPreloadOff, set by nothing else)
     if ((globalThis as any).__sbPreloadOff === true) return void (preloadState.outcome = "off");
@@ -156,12 +159,105 @@ export function preloadSoon(o: { table: PreloadTable; doc: () => { mode: string;
     const x = await o.extra?.().catch(() => null);
     if (x) for (const u of x.urls) if (!urls.includes(u)) (urls.push(u), (bytes += x.bytes / x.urls.length));
     preloadState.urls = urls;
-    if (!urls.length) return void (preloadState.outcome = "nothing");
-    if (!(await preloadRoom(bytes))) return void (preloadState.outcome = "no-room");
-    preloadState.fetched = await preloadFetch(urls);
-    preloadState.outcome = "fetched";
+    if (urls.length) {
+      if (!(await preloadRoom(bytes))) return void (preloadState.outcome = "no-room");
+      preloadState.fetched = await preloadFetch(urls);
+      preloadState.outcome = "fetched";
+    }
+    // (the second phase: planned now, after the first; nothing more once a Run has stopped it, or blocked)
+    const y = o.later && !stopped && !preloadBlocked() ? await o.later().catch(() => null) : null;
+    const more = (y?.urls ?? []).filter((u) => !urls.includes(u));
+    if (more.length && !stopped && (await preloadRoom(y!.bytes))) {
+      preloadState.urls = [...urls, ...more];
+      preloadState.fetched = [...preloadState.fetched, ...(await preloadFetch(more))];
+      preloadState.outcome = "fetched";
+    }
+    if (preloadState.outcome === null) preloadState.outcome = "nothing";
   };
   const idle = (globalThis as any).requestIdleCallback as ((f: () => void, o: { timeout: number }) => void) | undefined;
   if (idle) idle(() => void go(), { timeout: o.wait ?? 2000 });
   else setTimeout(() => void go(), o.wait ?? 2000);
+}
+
+/** The package-set index's limits background loading holds to: src/pkgset.ts PKGSET_LIMITS's (indexBytes, packages,
+ * modules, requiresEdges), copied so the page doesn't take that module in; web/test-preload.mjs checks they are equal.
+ * An index past any of them is one the interpreter would refuse: it contributes nothing. */
+export const PKG_LIMITS = Object.freeze({ indexBytes: 256 * 1024, packages: 32, modules: 1024, requiresEdges: 64 });
+
+/** An optional package set's files a document's imports need (web/pkgset-browser.ts fetches the same ones at the
+ * import): each package one of whose modules' top-level names `tops` has, with the packages it requires, by its
+ * source chunk, pkg/<sha256>.json (a set's precompiled chunks are per core build, and the notebooks' set has none),
+ * and their bytes. Anything that isn't an index's shape, or is over PKG_LIMITS (counted before anything else, so the
+ * work is bounded by them: PKGPRE678-QUEUE-1), contributes nothing. */
+export function pkgIntent(index: unknown, tops: readonly string[], base: string): { urls: string[]; bytes: number } {
+  const none = { urls: [], bytes: 0 };
+  const pk = (index as any)?.packages;
+  if (!pk || typeof pk !== "object" || Array.isArray(pk) || !tops.length) return none;
+  const ids = Object.keys(pk);
+  if (ids.length > PKG_LIMITS.packages) return none;
+  let modules = 0, edges = 0;
+  for (const id of ids) {
+    const p = pk[id];
+    if (!p || typeof p !== "object" || !Array.isArray(p.modules) || (p.requires !== undefined && !Array.isArray(p.requires))) return none;
+    if ((modules += p.modules.length) > PKG_LIMITS.modules || (edges += p.requires?.length ?? 0) > PKG_LIMITS.requiresEdges) return none;
+  }
+  // (each package queued once, when first named: at most `packages` in the queue, `requiresEdges` edges looked at)
+  const named = new Set(tops), queued = new Set<string>(), queue: string[] = [];
+  const enqueue = (id: unknown) => { if (typeof id === "string" && Object.hasOwn(pk, id) && !queued.has(id)) (queued.add(id), queue.push(id)); };
+  for (const id of ids) if (pk[id].modules.some((m: unknown) => typeof m === "string" && named.has(m.split(".")[0]))) enqueue(id);
+  for (let i = 0; i < queue.length; i++) for (const r of pk[queue[i]].requires ?? []) enqueue(r);
+  const urls: string[] = [];
+  let bytes = 0;
+  for (const id of queue) {
+    const s = pk[id].src;
+    if (typeof s?.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(s.sha256)) continue;
+    urls.push(new URL(`pkg/${s.sha256}.json`, base).href);
+    bytes += Number.isSafeInteger(s.size) && s.size > 0 ? s.size : 0;
+  }
+  return { urls, bytes };
+}
+
+/** A package set's index from its bytes: parsed only if they have the SHA-256 its id `S` is, and are JSON; otherwise
+ * null (an index with other bytes than its name's is never read) */
+export async function pkgIndex(bytes: Uint8Array | null, S: string): Promise<unknown | null> {
+  if (!bytes || !/^[0-9a-f]{64}$/.test(S)) return null;
+  const hex = [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes as BufferSource))].map((x) => x.toString(16).padStart(2, "0")).join("");
+  if (hex !== S) return null;
+  try {
+    return JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    return null;
+  }
+}
+
+/** One file's bytes, in the broker's request shape (as preloadFetch's), at most `max` of them: an advertised length
+ * over it is refused before reading, and a body that grows past it is cancelled; a body that sends nothing for
+ * `stallMs` is abandoned (PKGPRE678-INDEX-1). Null when refused, failed or abandoned. */
+export async function preloadBytes(url: string, max: number, stallMs = 30_000): Promise<Uint8Array | null> {
+  const ac = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const arm = () => { clearTimeout(timer); timer = setTimeout(() => ac.abort(), stallMs); };
+  try {
+    arm();
+    const r = await fetch(url, { priority: "low", credentials: "omit", referrerPolicy: "no-referrer", redirect: "error", signal: ac.signal } as RequestInit);
+    if (!r.ok || !r.body) return null;
+    if (Number(r.headers?.get?.("content-length") ?? 0) > max) return void ac.abort(), null;
+    const reader = r.body.getReader(), parts: Uint8Array[] = [];
+    let n = 0;
+    for (;;) {
+      arm();
+      const { done, value } = await reader.read();
+      if (done) break;
+      if ((n += value.length) > max) return void ac.abort(), null;
+      parts.push(value);
+    }
+    const out = new Uint8Array(n);
+    let at = 0;
+    for (const p of parts) (out.set(p, at), (at += p.length));
+    return out;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
 }
