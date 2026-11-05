@@ -33,7 +33,7 @@ check(LATEX_CAPS.raw === 237568 && LATEX_CAPS.gzip === 79872, "the caps are 232 
 
 // (and each lazy chunk's, as ruled: comments 16/6, comments-doc 40/16, agent 44/15.5 (@sagebrush, 2026-11-04), tools
 //  16/6, present 16/6, in KiB)
-const lazyPinned = { COMMENTS: [16384, 6144], COMMENTS_DOC: [40960, 16384], AGENT: [45056, 15872], TOOLS: [16384, 6144], PRESENT: [16384, 6144], BEAMER: [8192, 3072] };
+const lazyPinned = { COMMENTS: [16384, 6144], COMMENTS_DOC: [40960, 16384], AGENT: [45056, 15872], TOOLS: [16384, 6144], PRESENT: [16384, 6144], DOC: [3584, 1792], BEAMER: [8192, 3584] };
 check(JSON.stringify(Object.fromEntries(Object.entries(LATEX_LAZY_CAPS).map(([k, c]) => [k, [c.raw, c.gzip]]))) === JSON.stringify(lazyPinned), "each lazy chunk's cap as ruled", LATEX_LAZY_CAPS);
 
 // ---- the measure, on synthetic trees
@@ -75,13 +75,13 @@ try {
   };
   const tAt = lazyTree("tools-at", zeros(LATEX_LAZY_CAPS.TOOLS.raw)), tOver = lazyTree("tools-over", zeros(LATEX_LAZY_CAPS.TOOLS.raw + 1)), tNone = lazyTree("tools-none", null);
   check(tAt.ok && !tOver.ok && tOver.raw === LATEX_LAZY_CAPS.TOOLS.raw + 1 && !tNone.present && !tNone.ok, "a lazy chunk at its cap passes, one byte over fails, a missing one is not a pass", { at: tAt.raw, over: tOver.raw, missing: tNone.present });
-  // (each chunk measured from its own file: all six at distinct sizes, each row's name and raw its own)
+  // (each chunk measured from its own file: all seven at distinct sizes, each row's name and raw its own)
   const sizes = Object.fromEntries(Object.keys(LATEX_LAZY).map((k, i) => [k, 1000 + 111 * i]));
   const allWeb = join(tmp, "lazy-all");
   mkdirSync(join(allWeb, "dist"), { recursive: true });
   for (const [k, n] of Object.entries(sizes)) writeFileSync(join(allWeb, LATEX_LAZY[k]), zeros(n));
   const rows = latexLazy(files(allWeb));
-  check(rows.length === 6 && rows.every((r) => r.present && r.name === LATEX_LAZY[r.key] && r.raw === sizes[r.key] && r.ok), "each lazy chunk is measured from its own file (six at distinct sizes)", rows.map((r) => [r.key, r.name, r.raw]));
+  check(rows.length === 7 && rows.every((r) => r.present && r.name === LATEX_LAZY[r.key] && r.raw === sizes[r.key] && r.ok), "each lazy chunk is measured from its own file (seven at distinct sizes)", rows.map((r) => [r.key, r.name, r.raw]));
   // (over its gzip cap with raw well within its own: random bytes just past the gzip cap)
   const tGz = lazyTree("tools-gzip", randomBytes(LATEX_LAZY_CAPS.TOOLS.gzip + 64));
   check(!tGz.ok && tGz.gzip > LATEX_LAZY_CAPS.TOOLS.gzip && tGz.raw < LATEX_LAZY_CAPS.TOOLS.raw, "a lazy chunk over its gzip cap (raw within its own) fails", { raw: tGz.raw, gzip: tGz.gzip });

@@ -120,3 +120,84 @@ test("a program on stdin past 8 MiB is refused before it is kept, in each mode, 
   const r = spawnSync(process.execPath, ["--max-old-space-size=192", cli, "--matlab"], { input: "x = 1;\n".repeat(2000) + "disp(x)\n", encoding: "utf8", timeout: 60000 });
   assert.deepEqual([r.status, r.stdout], [0, "     1\n"], `signal ${r.signal}; ${r.stderr.slice(0, 300)}`);
 });
+
+// An interactive terminal (#648): `sagebrush --magma` and `sagebrush --matlab` at a prompt speak Magma and MATLAB,
+// as the kernel's cells do, and an error is reported while the session goes on.  Run under a pseudo-terminal with
+// util-linux script(1), so stdin is a TTY; the typed lines are echoed, and the output is read without the
+// terminal's control sequences.
+const tty = (args: string[], input: string) => {
+  const cmd = [process.execPath, cli, ...args].map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(" ");
+  const r = spawnSync("script", ["-qec", cmd, "/dev/null"], { input, encoding: "utf8", timeout: 60000 });
+  return { status: r.status, out: (r.stdout ?? "").replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replace(/\r/g, ""), err: r.error };
+};
+// tty's, with the input typed in steps, a pause after each (so that each arrives as its own keypresses)
+const ttySteps = (args: string[], steps: string[]) => {
+  const cmd = [process.execPath, cli, ...args].map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(" ");
+  const feed = steps.map((s) => `printf '%s' '${s.replace(/'/g, "'\\''")}'; sleep 0.4`).join("; ");
+  const r = spawnSync("sh", ["-c", `(sleep 6; ${feed}) | script -qec "$0" /dev/null`, cmd], { encoding: "utf8", timeout: 60000 });
+  return { status: r.status, out: (r.stdout ?? "").replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replace(/\r/g, ""), err: r.error };
+};
+const hasScript = process.platform === "linux" && spawnSync("script", ["--version"], { encoding: "utf8" }).status === 0;
+
+test("an interactive --magma session: Magma at a > prompt, statements wait for their ;, an error and the session goes on", { skip: !hasScript && "needs util-linux script(1)" }, () => {
+  const r = tty(["--magma"], "Factorization(2026);\nx := Foo(3);\ny := 2\n+ 3;\ny;\nfor i in [1..2] do\n  print i;\nend for;\nquit;\n");
+  assert.equal(r.status, 0, `${r.err ?? ""}\n${r.out}`);
+  assert.match(r.out, /\(Magma\)\n/);
+  assert.match(r.out, /> Factorization\(2026\);\n\[ <2, 1>, <1013, 1> \]\n/);
+  // (an undeclared identifier, reported as Magma reports it; the next input runs)
+  assert.match(r.out, /User error: Identifier 'Foo' has not been declared or assigned\n> y := 2\n/);
+  // (a statement without its ; waits for the next line: y is 2 + 3)
+  assert.match(r.out, /> y;\n5\n/);
+  assert.match(r.out, /end for;\n1\n2\n> quit;/);
+  assert.doesNotMatch(r.out, /NameError|Traceback/);
+  // (no continuation prompt: the continued line follows bare, as at Magma's prompt; readline's empty prompt may leave a space)
+  assert.match(r.out, /> y := 2\n ?\+ 3;\n/);
+  // (a syntax error inside a statement is reported at once, not waited on; a comment-only line runs nothing;
+  // the session goes on)
+  const s = tty(["--magma"], "x := ;\n// note\nprint 5;\nquit;\n");
+  assert.equal(s.status, 0, s.out);
+  assert.match(s.out, /> x := ;\n[\s\S]*User error: bad syntax[\s\S]*\n> \/\/ note\n> print 5;\n5\n> quit;/);
+});
+
+test("an interactive --matlab session: MATLAB at a >> prompt, ... continues a line, an error and the session goes on, exit(n)", { skip: !hasScript && "needs util-linux script(1)" }, () => {
+  const r = tty(["--matlab"], "x = rand(2);\nsize(x)\nundefined_thing + 1\ny = [1 2 ...\n3]\nexit(3)\n");
+  assert.equal(r.status, 3, `${r.err ?? ""}\n${r.out}`);
+  assert.match(r.out, /\(MATLAB\)\n/);
+  assert.match(r.out, />> size\(x\)\n\nans =\n\n     2     2\n\n/);
+  assert.match(r.out, /Unrecognized function or variable 'undefined_thing'\.\n>> y = \[1 2 \.\.\.\n/);
+  assert.match(r.out, /\ny =\n\n     1     2     3\n\n>> exit\(3\)/);
+  assert.doesNotMatch(r.out, /NameError|Traceback/);
+  // (no continuation prompt: the continued line follows bare, as in MATLAB's command window; readline's empty prompt may leave a space)
+  assert.match(r.out, /\.\.\.\n ?3\]\n\ny =/);
+  // (a syntax error at the prompt, one with a single reading (an unclosed [ may continue), is reported with its caret
+  // and the session goes on)
+  const e = tty(["--matlab"], "x = )\ndisp(5)\nexit\n");
+  assert.equal(e.status, 0, e.out);
+  assert.match(e.out, />> x = \)\nline 1\nunexpected '\)'\n\nx = \)\n    \^\n>> disp\(5\)\n     5\n/);
+  // (exit and quit, with or without a status, a semicolon or a comment, end it)
+  for (const q of ["exit", "quit;", "quit(0)", "exit % bye"]) assert.equal(tty(["--matlab"], `disp(1)\n${q}\n`).status, 0, q);
+  // (a function definition at the prompt is refused with MATLAB's command-window error, and the session goes on)
+  const f = tty(["--matlab"], "function y = f(x)\ndisp(7)\nexit\n");
+  assert.equal(f.status, 0, f.out);
+  assert.match(f.out, /Function definitions are not supported in this context\. Functions can only be created as local or nested functions in code files\.\n>> disp\(7\)\n     7\n/);
+});
+
+test("Tab completes MATLAB's names at a --matlab prompt: a variable, and rand's family, never Python's", { skip: !hasScript && "needs util-linux script(1)" }, () => {
+  // (one Tab completes a single match; two list several: readline's. Typed a step at a time: readline doesn't
+  // complete a Tab that comes in the same chunk as pasted text)
+  const r = ttySteps(["--matlab"], ["radius = 7;\n", "radi", "\t", "\n", "ran", "\t", "\t", "\n", "exit\n"]);
+  assert.equal(r.status, 0, `${r.err ?? ""}\n${r.out}`);
+  assert.match(r.out, />> radius\n\nradius =\n\n     7\n/);
+  assert.match(r.out, /rand\s+randi\s+randn\s+randperm/);
+  assert.doesNotMatch(r.out, /\braise\b|\brange\b/);
+});
+
+test("Tab completes Magma's names at a --magma prompt: a variable, an intrinsic, a list of intrinsics, never Python's", { skip: !hasScript && "needs util-linux script(1)" }, () => {
+  // (typed a step at a time, as for MATLAB above: one Tab completes a single match, two list several)
+  const r = ttySteps(["--magma"], ["my_total := 5;\n", "my_t", "\t", ";\n", "Factoriz", "\t", "(2026);\n", "Prim", "\t", "\t", ";\n", "quit;\n"]);
+  assert.equal(r.status, 0, `${r.err ?? ""}\n${r.out}`);
+  assert.match(r.out, /> my_total;\n5\n/);
+  assert.match(r.out, /> Factorization\(2026\);\n\[ <2, 1>, <1013, 1> \]\n/);
+  assert.match(r.out, /PrimeDivisors\s+PrimeField\s+PrimesInInterval\s+PrimesUpTo\s+PrimitiveElement/);
+  assert.doesNotMatch(r.out, /\braise\b|\brange\b|MagmaError|NameError|Traceback/);
+});
