@@ -1,10 +1,10 @@
 {
  "v": 1,
- "reason": "MATLAB's svd, rank, pinv, null and orth refuse NaN and Inf with MATLAB's message (astra3 batch 1 MCF-01): one helper, _svd_finite, in lib/_matlab.py, called from the five functions (orth via lib/_matlab_numeric.py). Growth is the MATLAB mode's lib and the CLI's embedded lib. Figures: a CI-order size record (scripts/size-measure.mjs --record after pnpm build, build-cli, bun web/build.ts, build-cli; bun 1.4.4) of head dcc90de7 merged onto master 4e43dee0 with bun 1.4.4: matlab.pre +2170, matlab.src +411, lib.gen +224, pyjs +304; each marker is that figure exactly.",
+ "reason": "MATLAB's svd, pinv, rank, null and orth on NaN and Inf as real MATLAB treats them (William's MATLAB session, Nov 4; astra3 batch 1 MCF-01): svd and pinv give NaN of their usual shapes (svd from a zero matrix's shapes, filled with NaN); rank, null and orth refuse with MATLAB:<name>:matrixWithNaNInf, 'Input matrix must not contain NaN or Inf values.' (_svd_finite in lib/_matlab.py; orth via lib/_matlab_numeric.py). Growth is the MATLAB mode's lib and the CLI's embedded lib. Figures: CI-order size records (bun 1.4.4) of probe 180d7900 (head 8dfe251d merged onto master b09d0c24): matlab.pre +4059, matlab.src +1062, lib.gen +480, pyjs +368; markers exact, except pyjs +64 for build-specific bytes.",
  "bytes": {
-  "engine/lib/matlab.pre": 2170,
-  "engine/lib/matlab.src": 411,
-  "cli/lib.gen.js": 224,
-  "cli/pyjs.cjs": 304
+  "engine/lib/matlab.pre": 4059,
+  "engine/lib/matlab.src": 1062,
+  "cli/lib.gen.js": 480,
+  "cli/pyjs.cjs": 432
  }
 }
