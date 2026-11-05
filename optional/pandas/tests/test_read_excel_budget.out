@@ -10,6 +10,8 @@
 (0, 500)
 == J10
 (9, 10)
+== entry past the budget
+('refused', True, True, "read_excel: the decoded-memory budget would be exceeded by a workbook entry (1200151 B more, 2129 B in use, limit 1048576 B: Sagebrush's limit 'pandas.decoded_bytes')")
 == SF500 past nrows
 (1, 2)
 == SF500 without nrows

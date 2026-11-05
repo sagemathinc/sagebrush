@@ -12,6 +12,12 @@
 !! ValueError: read_excel: the workbook's entry 'xl/worksheets/sheet1.xml' would inflate to 67108865 bytes, past Sagebrush's bound of 67108864
 == entries
 !! ValueError: read_excel: the workbook has 2007 entries, more than Sagebrush's 2000
+== entries at the cap
+((2, 2), ['a', 'b'])
+== entries past the cap
+!! ValueError: read_excel: the workbook has 2001 entries, more than Sagebrush's 2000
+== floor
+(100, ((1, 1), ['a']))
 == total under
 !! ValueError: read_excel: the workbook's entries would inflate to more than 2617 bytes in all
 == total at
@@ -48,6 +54,14 @@
 !! ValueError: read_excel: the workbook's XML has text outside the document element, which Sagebrush doesn't read
 == xml char ref
 !! ValueError: read_excel: the workbook's XML has a character reference to no character, which Sagebrush doesn't read
+== xml surrogate D800
+!! ValueError: read_excel: the workbook's XML has a character reference to no character, which Sagebrush doesn't read
+== xml surrogate DFFF
+!! ValueError: read_excel: the workbook's XML has a character reference to no character, which Sagebrush doesn't read
+== xml below surrogates
+((0, 1), ['\ud7ff'])
+== xml a BOM
+((0, 1), [7])
 == xml no element
 !! ValueError: read_excel: the workbook's XML has no document element, which Sagebrush doesn't read
 == xml two roots

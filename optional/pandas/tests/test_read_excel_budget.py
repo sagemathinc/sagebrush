@@ -36,5 +36,8 @@ case("A1048576", lambda: read(one_cell("A1048576", 1048576)))
 case("SF1", lambda: read(one_cell("SF1", 1)))
 case("J10", lambda: read(one_cell("J10", 10)))
 near = '<row r="1"><c r="A1"><v>1</v></c><c r="B1"><v>2</v></c></row><row r="2"><c r="A2"><v>3</v></c></row>'
+# an entry's declared size is charged before it is inflated: a stored sheet of 1,200,000 bytes is refused
+big_xml = (" " * 1200000 + '<worksheet xmlns="%s"><sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData></worksheet>' % MAIN).encode()
+case("entry past the budget", lambda: read(workbook([("S", [["a"]])], extra=[("xl/worksheets/sheet1.xml", big_xml, {"method": 0, "comp": big_xml})])))
 case("SF500 past nrows", lambda: read(one_cell("SF500", 500, near), nrows=1))
 case("SF500 without nrows", lambda: read(one_cell("SF500", 500, near)))

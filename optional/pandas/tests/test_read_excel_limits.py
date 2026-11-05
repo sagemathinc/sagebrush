@@ -40,6 +40,24 @@ case("ratio 157, not XML", lambda: read(with_sheet(b"", {"comp": bomb, "usize": 
 case("inflates past", lambda: read(with_sheet(b"", {"comp": bomb, "usize": 1000, "crc": 0})))
 case("past 64 MiB", lambda: read(with_sheet(b"", {"comp": b"\0" * 400_000, "usize": (64 << 20) + 1, "crc": 0})))
 case("entries", lambda: read(workbook([("S", ok_sheet)], extra=[("pad/%d" % i, b"") for i in range(2000)])))
+# at the cap: exactly MAX_ENTRIES entries, the workbook's own parts included, read; one more is refused
+base_entries = workbook([("S", ok_sheet)]).count(b"PK\x01\x02")
+case("entries at the cap", lambda: read(workbook([("S", ok_sheet)], extra=[("pad/%d" % i, b"") for i in range(Z.MAX_ENTRIES - base_entries)])))
+case("entries past the cap", lambda: read(workbook([("S", ok_sheet)], extra=[("pad/%d" % i, b"") for i in range(Z.MAX_ENTRIES - base_entries + 1)])))
+# the 1 MiB floor: with the ratio bound lowered to 50 for the test, a sheet of 100,000 spaces and its cells
+# (ratio about 100, under 1 MiB) reads by the floor
+padded_xml = ('<worksheet xmlns="%s"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>a</t></is></c></row>'
+              '<row r="2"><c r="A2"><v>1</v></c></row></sheetData></worksheet>' % MAIN).encode()
+padded = b" " * 100000 + padded_xml
+padded_comp = deflate_runs(32, 100000, padded_xml)
+def floor(ratio):
+    saved = Z.MAX_RATIO
+    Z.MAX_RATIO = ratio
+    try:
+        return (len(padded) // len(padded_comp), read(with_sheet(b"", {"comp": padded_comp, "usize": len(padded), "crc": zlib.crc32(padded) & 0xFFFFFFFF})))
+    finally:
+        Z.MAX_RATIO = saved
+case("floor", lambda: floor(50))
 # the total: with the bound lowered for the test (the workbook's own parts, then its sheet)
 def total(bound):
     saved = Z.MAX_TOTAL
@@ -72,6 +90,10 @@ for name, xml in [
     ("mismatched", '<worksheet xmlns="%s"><sheetData><row r="1"><c r="A1"><v>1</c></v></row></sheetData></worksheet>' % MAIN),
     ("outside", '<worksheet xmlns="%s"><sheetData/></worksheet>trailing' % MAIN),
     ("char ref", '<worksheet xmlns="%s"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>&#0;</t></is></c></row></sheetData></worksheet>' % MAIN),
+    ("surrogate D800", '<worksheet xmlns="%s"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>&#xD800;</t></is></c></row></sheetData></worksheet>' % MAIN),
+    ("surrogate DFFF", '<worksheet xmlns="%s"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>&#57343;</t></is></c></row></sheetData></worksheet>' % MAIN),
+    ("below surrogates", '<worksheet xmlns="%s"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>&#xD7FF;</t></is></c></row></sheetData></worksheet>' % MAIN),
+    ("a BOM", '\ufeff<?xml version="1.0"?><worksheet xmlns="%s"><sheetData><row r="1"><c r="A1"><v>7</v></c></row></sheetData></worksheet>' % MAIN),
     ("no element", "   "),
     ("two roots", '<worksheet xmlns="%s"><sheetData/></worksheet><worksheet/>' % MAIN),
     ("bad attribute", '<worksheet xmlns="%s"><sheetData><row r="1"><c r=A1><v>1</v></c></row></sheetData></worksheet>' % MAIN),

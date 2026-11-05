@@ -157,9 +157,10 @@ def zip_bytes(files, method=8):
     return bytes(out + central + end)
 
 
-def deflate_runs(byte, n):
-    """Raw deflate (fixed Huffman) of `byte` repeated n times, as matches of 258: a zip bomb's shape, written
-    here bit by bit so that both sides make the same bytes (Sagebrush's zlib.compress stores, never matches)."""
+def deflate_runs(byte, n, tail=b""):
+    """Raw deflate (fixed Huffman) of `byte` repeated n times, as matches of 258, then `tail`'s bytes as
+    literals: a zip bomb's shape, written here bit by bit so that both sides make the same bytes (Sagebrush's
+    zlib.compress stores, never matches)."""
     bits = []
     put = lambda v, k: bits.extend((v >> i) & 1 for i in range(k))
     code = lambda c, k: bits.extend((c >> i) & 1 for i in range(k - 1, -1, -1))
@@ -173,6 +174,8 @@ def deflate_runs(byte, n):
         left -= 258
     for _ in range(left):
         lit(byte)
+    for x in tail:
+        lit(x)
     code(0, 7)
     bits += [0] * (-len(bits) % 8)
     return bytes(sum(bits[i + j] << j for j in range(8)) for i in range(0, len(bits), 8))
