@@ -366,6 +366,32 @@ try {
         "DB3-U8-SWITCH-3: A asked for from the files after Forward moved the URL to B: the history back on A's entry, A shown, editable, its edit written; B never shown", { urlB, s3: { ...s3, src: s3.src.slice(-30) }, entry, file: file3.slice(-30) });
       await ev(`(window.__sbTexSaveWrite = () => { if (window.__failWrites) throw new Error("test: the write failed"); }, window.__obsB?.disconnect(), window.__asked = 4, true)`);
     }
+    // ---- (daybreak3 DB3-U8-SWITCH-4, astra) a fast close and a late history: Forward to B decided (A's write failed, its
+    // draft durable; accepted), B's mount waiting on A's close (its last write held); then, in one go, A asked for from
+    // the files (__sbTex) and the close released: no sleep between. A must open again only once the history is back
+    // on A's entry, so the new A takes A's URL for its own: with the Navigation API (its traverseTo made late) and
+    // without it (history.go). A shown, editable, its URL, entry and edit; B never shown
+    for (const withNav of [true, false]) {
+      await watchB();
+      await ev(`(() => { window.__answer = true; window.__k = 0; window.__hold = new Promise((r) => (window.__rel = r));
+        window.__sbTexSaveWrite = () => { const k = window.__k++; if (k === 0) throw new Error("test: the write failed"); if (k === 1) return window.__hold; }; return true; })()`);
+      await ev(`(() => { const t = document.querySelector(".tex-src"); t.value += "% late history ${withNav ? "nav" : "go"}\\n"; t.dispatchEvent(new Event("input")); return true; })()`);
+      await saveStateIs(/^Not saved: test: the write failed/);
+      await ev(`(window.__k = 0, history.forward(), true)`);
+      const held = await until(`window.__k >= 2`, 10000);
+      const nav = await ev(`(() => {
+        if (${withNav}) { const n = window.navigation; if (!n?.traverseTo) return false; const orig = n.traverseTo.bind(n);
+          n.traverseTo = (k, o) => { const late = new Promise((r) => setTimeout(r, 300)); return { committed: late, finished: late.then(() => orig(k, o).finished) }; }; window.__navRestore = () => { delete n.traverseTo; }; }
+        else { const was = window.navigation; Object.defineProperty(window, "navigation", { configurable: true, get: () => undefined }); window.__navRestore = () => { Object.defineProperty(window, "navigation", { configurable: true, get: () => was }); }; }
+        window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }); window.__rel(); return true; })()`);
+      await until(`!!document.querySelector(".tex-src") && !document.querySelector(".tex-src").readOnly && document.querySelector(".tex-title")?.textContent === "a.tex" && new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fa)}`, 20000);
+      await sleep(1500);
+      const s4 = await endState(), f4 = await aText(), at4 = await ev(`history.state && history.state.sbTex`);
+      await ev(`(window.__navRestore?.(), delete window.__navRestore, window.__sbTexSaveWrite = () => { if (window.__failWrites) throw new Error("test: the write failed"); }, window.__answer = false, window.__obsB?.disconnect(), window.__asked = 4, true)`);
+      const mark = `% late history ${withNav ? "nav" : "go"}`;
+      check(held && nav !== false && s4.url === fa && at4 === 0 && s4.title === "a.tex" && s4.a && s4.ro === false && s4.src.includes(mark) && f4.includes(mark) && s4.pages === 1 && !s4.sawB && s4.kept,
+        `DB3-U8-SWITCH-4 (${withNav ? "Navigation API, its traverse late" : "no Navigation API: history.go"}): A asked for and A's close released at once: A open again only on A's entry, editable, its URL and edit; B never shown`, { held, nav, s4: { ...s4, src: s4.src.slice(-30) }, at4, file: f4.slice(-30) });
+    }
     // ---- (astra B5-R1-A1) the exact entry shown is the one gone back to, a fragment's entry between: A, A#section, B;
     // with unsaved B, Back one step and Back two steps, declined, stay on B (its entry, URL and text); accepted two
     // steps, A; with unsaved A, Forward two steps declined stays on A. With the Navigation API and, hidden, without it

@@ -325,7 +325,14 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     // (the file shown, asked for again: a newer intent, so a switch still settling does nothing; and if Back or
     //  Forward had already moved the history away from it, it is taken back to the entry shown (daybreak3
     //  DB3-U8-SWITCH-3), so the URL is this file's)
-    if (e.fid === host.fid) { intent(); returnToShown(); backHere(); return true; }
+    if (e.fid === host.fid) {
+      intent();
+      // (a switch past its decision: its mount superseded now; this file opened again only once the history is back
+      //  on its entry (DB3-U8-SWITCH-4): a mount started while the URL is still the other file's would take that
+      //  for its own)
+      if (current !== mine) { mounts++; returnToShown(() => openHere(host.fid)); } else returnToShown();
+      return true;
+    }
     void leaveOk().then((ok) => {
       if (!ok || !live()) return;
       const q = new URLSearchParams(location.search); q.set("tex", e.fid!);
@@ -339,22 +346,36 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // (the shown entry again, as a new one after this: when going back to it isn't possible or didn't land on it)
   const pushShown = () => { history.pushState({ sbTex: shownAt + 1, sbTexId: entryId() }, "", shownUrl); noteShown(); };
   const isShown = () => history.state?.sbTexId === shownId && location.href === shownUrl;
+  // (what waits for a return to the entry shown to land: one at a time, the newest)
+  let afterReturn: (() => void) | null = null, landOff: (() => void) | null = null;
+  const landed = () => { landOff?.(); landOff = null; const f = afterReturn; afterReturn = null; f?.(); };
   // (back to the entry shown, wherever the history is now: by the Navigation API's key where there is one, else by
   //  its position; as a new entry when neither lands on it)
-  const returnToShown = () => {
-    if (isShown()) return;
+  // `then`: run once the history is on that entry: at once if it is already, else when the return's popstate lands (or
+  // its fallback has pushed the entry again)
+  const returnToShown = (then?: () => void) => {
+    if (isShown()) { then?.(); return; }
+    afterReturn = then ?? null;
+    // (a listener of its own for the landing, not this editor's: a fast close can dispose of this editor, and its
+    //  listeners, before the history lands; whichever sees the landing first runs `then`, once)
+    if (then) {
+      landOff?.();
+      const onLand = () => { if (returning) { returning = false; if (!isShown()) pushShown(); else noteShown(); } landed(); };
+      window.addEventListener("popstate", onLand, { once: true });
+      landOff = () => window.removeEventListener("popstate", onLand);
+    }
     const nav = navApi(), st = history.state, to = typeof st?.sbTex === "number" ? st.sbTex : null;
     if (nav?.traverseTo && shownKey && nav.entries?.().some((x: any) => x.key === shownKey)) {
       returning = true;
-      const failed = () => { if (returning) { returning = false; pushShown(); } };
+      const failed = () => { if (returning) { returning = false; pushShown(); landed(); } };
       try { nav.traverseTo(shownKey).finished?.catch(failed); } catch { failed(); }
     } else if (to !== null && to !== shownAt) { returning = true; history.go(shownAt - to); }
-    else pushShown();
+    else { pushShown(); landed(); }
   };
   window.addEventListener("popstate", (ev) => {
     const t = new URLSearchParams(location.search).get("tex");
     const st = ev.state && typeof ev.state === "object" ? ev.state : null;
-    if (returning) { returning = false; if (!isShown()) pushShown(); else noteShown(); return; }
+    if (returning) { returning = false; if (!isShown()) pushShown(); else noteShown(); landed(); return; }
     if (t === host.fid) {
       // (back to the file shown: a newer intent than a switch still settling, which then does nothing)
       intent(); backHere();
