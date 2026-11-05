@@ -141,15 +141,17 @@ export async function preloadFetch(urls: readonly string[], blocked: () => strin
  * notebook page shows it as window.sagebrush.preload, for its tests and an agent's look) */
 export const preloadState: { outcome: null | "off" | "stopped" | "save-data" | "slow" | "offline" | "hidden" | "nothing" | "no-room" | "fetched"; urls: string[]; fetched: string[] } = { outcome: null, urls: [], fetched: [] };
 
-/** At the browser's next idle moment (at most `wait` ms later), once per page: the open document's intent, fetched */
-export function preloadSoon(o: { table: PreloadTable; doc: () => { mode: string; codes: string[] } | null; extra?: () => Promise<{ urls: string[]; bytes: number } | null>; wait?: number }) {
+/** At the browser's next idle moment (at most `wait` ms later), once per page: the open document's intent, fetched.
+ * `base`: where the library files are (the page's own address by default, the notebook page's; a shared
+ * collection's page, /s/<id>, gives the site's root, where its runner asks for them) */
+export function preloadSoon(o: { table: PreloadTable; doc: () => { mode: string; codes: string[] } | null; extra?: () => Promise<{ urls: string[]; bytes: number } | null>; wait?: number; base?: string }) {
   const go = async () => {
     // (a test turns it off before the page loads: window.__sbPreloadOff, set by nothing else)
     if ((globalThis as any).__sbPreloadOff === true) return void (preloadState.outcome = "off");
     const why = stopped ? "stopped" : preloadBlocked();
     if (why) return void (preloadState.outcome = why as typeof preloadState.outcome);
     const d = o.doc(), groups = d ? intentGroups(o.table, d.mode, d.codes) : [];
-    const urls = intentUrls(o.table, groups, location.href);
+    const urls = intentUrls(o.table, groups, o.base ?? location.href);
     let bytes = groups.reduce((n, g) => n + o.table.groups[g][0], 0);
     const x = await o.extra?.().catch(() => null);
     if (x) for (const u of x.urls) if (!urls.includes(u)) (urls.push(u), (bytes += x.bytes / x.urls.length));

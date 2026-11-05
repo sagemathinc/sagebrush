@@ -10,9 +10,17 @@
 // the notebook, and the collection's data files beside it, into the reader's own files in this browser (no sign-in);
 // every later edit is saved there, and a later visit opens it, with "Back to the book's version".  The copy is made
 // as anything brought in from elsewhere is (its code runs without file changes until the reader allows them).
+//
+// Background loading (web/preload.ts, as on the notebook page): at idle, the library files the open notebook's first
+// Run will fetch, by the page, in the runner broker's request shape (the same cache the runner's requests are answered
+// from; no frame made for it, nothing run); never the collection's data files. The copy's chunk on intent: at the
+// first focus of a cell's editor (an edit makes the copy), never by a run.
+import { preloadBlocked, preloadSoon, preloadState, preloadStop, type PreloadTable } from "../preload";
 import { createNotebook, fromFile, MemoryStore, RunnerWorker, toIpynb, WorkerKernel } from "../notebook/index.js";
 // (the workspace is web/share-client/copy.ts, a chunk fetched on the first need: types only here)
 import type { Workspace } from "../workspace/api";
+
+declare const __SB_PRELOAD__: PreloadTable;
 
 interface File { path: string; sha256: string; size: number }
 interface Shared {
@@ -83,6 +91,8 @@ async function main() {
     createWorker: () => new RunnerWorker("/runner/"),
     onStart: (w: Worker) => w.postMessage({ mount }),
   });
+  // (a Run stops background loading starting another file; one in flight finishes)
+  kernel.on("execute", preloadStop);
   let nb: any = null;
   let current: File | null = null;
   // (the reader's own files, opened on the first need; null where this browser can't keep them)
@@ -222,8 +232,21 @@ async function main() {
   const asked = want !== null ? c.manifest.files.find((f) => f.path === want && OPENABLE.test(f.path)) : undefined;
   const first = asked ?? c.manifest.files.find((f) => /\.ipynb$/i.test(f.path)) ?? c.manifest.files.find((f) => OPENABLE.test(f.path));
   if (first) await open(first);
+  // background loading: the open notebook's library files at idle (its mode's groups, the groups its import lines name)
+  preloadSoon({ table: __SB_PRELOAD__, base: new URL("/", location.href).href, doc: () => { if (!nb) return null; const d = nb.snapshot(); return { mode: d.mode ?? nb.mode, codes: d.cells.filter((x: any) => !x.type).map((x: any) => x.code ?? "") }; } });
+  // (the copy's chunk, on the first focus of a cell's editor: once, with the same skips; a Run doesn't stop it, an
+  // edit after a run being exactly its intent. Asked as the module import later asks for it, same-origin credentials
+  // (fetch's own default): Chromium doesn't answer that import from a credential-less fetch's cached copy, measured
+  // by web/share/test-share-preload.mjs)
+  const copyChunk = new URL("/sagebrush-share-copy.js", location.href).href;
+  let copyAsked = false;
+  $("#nb").addEventListener("focusin", (e) => {
+    if (copyAsked || !(e.target instanceof HTMLTextAreaElement) || (globalThis as any).__sbPreloadOff === true || preloadBlocked() || wsP) return;
+    copyAsked = true;
+    void fetch(copyChunk, { priority: "low", redirect: "error" } as RequestInit).then((r) => r.arrayBuffer()).catch(() => {});
+  });
   if (want !== null && !asked) $("#status").textContent = `This collection has no notebook ${JSON.stringify(want.slice(0, 200))}: ${first ? `opened ${first.path} instead` : "nothing to open"}.`;
-  (window as any).shared = { c, kernel, get nb() { return nb; } }; // for tests
+  (window as any).shared = { c, kernel, get nb() { return nb; }, preload: preloadState, get copyPrefetched() { return copyAsked; } }; // for tests
 }
 
 function fail(text: string) {
