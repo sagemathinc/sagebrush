@@ -50,6 +50,13 @@ function adapter(mode = { kind: "ok" }) {
         }
         return;
       }
+      if (m.kind === "pieces") {
+        for (const c of m.chunks()) {
+          call.pulled++;
+          yield c;
+        }
+        return;
+      }
       const body = m.body ?? JSON.stringify({ dates: ["2020-01-01"], values: [1.5] });
       call.pulled++;
       yield new TextEncoder().encode(body);
@@ -189,6 +196,53 @@ const ask = (id, key, extra = {}) => ({ id, target: null, liveData: { op: "fred.
   }
 }
 
+// astra's LIVE691-PARTS-1: the pieces a stream gives are bounded too, empty ones counted: a stream of empty or tiny
+// pieces is cut, its fetch aborted, as one over the bytes is; the same answer in at most maxPieces pieces passes
+{
+  const dates = Array.from({ length: 12 }, (_, m) => `2020-${String(m + 1).padStart(2, "0")}-01`);
+  const body = new TextEncoder().encode(JSON.stringify({ dates, values: dates.map((_, m) => (m % 3 ? m / 4 : null)) }));
+  // (exactly n pieces, none empty while n <= the body's length)
+  const split = (n) => function* () {
+    for (let k = 0; k < n; k++) yield body.subarray(Math.floor((k * body.length) / n), Math.floor(((k + 1) * body.length) / n));
+  };
+  const cases = [
+    ["100,000 empty pieces, then the answer", function* () { for (let i = 0; i < 100_000; i++) yield new Uint8Array(0); yield body; }, "unavailable"],
+    ["the answer in 1-byte pieces, more than the bound", split(body.length), "unavailable"],
+    ["the answer in exactly the bound's pieces", split(64), "ok"],
+  ];
+  ok([...split(64)()].length === 64 && [...split(64)()].every((c) => c.length) && body.length > 65, `the control's split is exactly 64 pieces of a ${body.length}-byte answer`);
+  for (const [name, chunks, want] of cases) {
+    const ad = adapter({ kind: "pieces", chunks });
+    const t = kernel(ad, { maxPieces: 64 });
+    const i = t.run();
+    await tick();
+    const q = ask(i, "abc.1");
+    t.deliver(q);
+    await tick(20);
+    const a = answerOf(q.buffer);
+    ok(want === "ok" ? a?.ok?.dates?.length === 12 : a?.error === want && ad.calls[0].aborted && ad.calls[0].pulled <= 65, `${name}: ${want} (${ad.calls[0].pulled} pieces read)`);
+  }
+}
+
+// astra's LIVE691-SEEN-1: a worker's replay state is its tag and highest count, a fixed size however many keys it
+// sends (refused ones, with no adapter, too); past them, an old count or another tag is refused, a higher count asked
+{
+  const t = kernel(null);
+  const i = t.run();
+  await tick();
+  // (a runner's requests, with no buffer: ask()'s 8 MiB buffer each would be 800 GB)
+  const req = (key, op = "fred.series_observations") => ({ id: i, target: null, liveData: { op, params: { series_id: "SYN_A" }, key }, buffer: null });
+  for (let n = 1; n <= 100_000; n++) t.deliver(req("abc." + n, n % 2 ? "fred.series" : "fred.series_observations"));
+  const st = t.k.live.seen.get(t.k.worker);
+  ok(st && Object.keys(st).sort().join() === "high,tag" && st.high === 100_000 && st.tag === "abc", `100,000 keys: one {tag, high} (${JSON.stringify(st)})`);
+  const before = t.k.worker.sent.length;
+  for (const key of ["abc.5", "abc.100000", "xyz.100001"]) t.deliver(req(key));
+  ok(t.k.worker.sent.length === before, "an old count, the highest again, or another tag: nothing answered");
+  t.deliver(req("abc.100001"));
+  const last = t.k.worker.sent.at(-1);
+  ok(t.k.worker.sent.length === before + 1 && last.key === "abc.100001" && last.answer?.error === "unavailable", "the next count: asked (unavailable, with no adapter)");
+}
+
 // B5 and B6: Stop, the deadline, Forget, a restart and close each abort the fetch; an aborted call is never answered
 for (const [name, act] of [["Stop", (t) => t.k.interrupt()], ["Forget", (t) => t.k.forgetLiveData()], ["restart", (t) => t.k.restart()], ["close", (t) => t.k.close()], ["the run's end", (t, id) => t.deliver({ id, done: true, ms: 1 })]]) {
   let release;
@@ -263,6 +317,41 @@ for (const [name, act] of [["Stop", (t) => t.k.interrupt()], ["Forget", (t) => t
   port.onmessage({ data: { runnerInterrupt: 4 } });
   port.onmessage({ data: { runnerLive: 4, key: "abc.3", answer: { error: "no_key" } } });
   ok(answerOf(m2.buffer) === null, "after a Stop: none written");
+}
+
+// astra's LIVE691-REPLAY-1: a request whose key is already open in the frame changes nothing there and isn't
+// forwarded, so the first request's answer, late, still goes to the first buffer and never to the duplicate's; a
+// new key of the same run is forwarded (and replaces the run's earlier one), and the run's end retires it
+{
+  const html = readFileSync(new URL("./runner/index.html", import.meta.url), "utf8");
+  const script = html.slice(html.indexOf("<script>") + 8, html.lastIndexOf("</script>"));
+  let listener, worker;
+  const port = { sent: [], postMessage(m) { port.sent.push(m); } };
+  const env = {
+    addEventListener: (_, f) => (listener = f),
+    parent: {},
+    URL: { createObjectURL: () => "blob:x" },
+    Blob: class {},
+    Worker: class {
+      constructor() { worker = this; this.sent = []; }
+      postMessage(m) { this.sent.push(m); }
+    },
+    SharedArrayBuffer, Int32Array, Uint8Array, TextEncoder, Atomics, JSON, Math, Map, String, Number,
+  };
+  new Function(...Object.keys(env), script)(...Object.values(env));
+  listener({ source: env.parent, data: { sagebrushRunner: 1, script: "", base: "x" }, ports: [port] });
+  const A = ask(4, "abc.1"), B = ask(4, "abc.1");
+  worker.onmessage({ data: A });
+  worker.onmessage({ data: B });
+  ok(port.sent.filter((d) => d.liveData).length === 1, "the duplicate is not forwarded");
+  port.onmessage({ data: { runnerLive: 4, key: "abc.1", answer: { ok: { dates: ["2020-01-01"], values: [123] } } } });
+  ok(answerOf(A.buffer)?.ok?.values[0] === 123 && answerOf(B.buffer) === null, "the first answer, late: in the first buffer, the duplicate's untouched");
+  const C = ask(4, "abc.2");
+  worker.onmessage({ data: C });
+  ok(port.sent.filter((d) => d.liveData).length === 2, "a new key of the run: forwarded");
+  worker.onmessage({ data: { id: 4, done: true, ms: 1 } });
+  port.onmessage({ data: { runnerLive: 4, key: "abc.2", answer: { error: "no_key" } } });
+  ok(answerOf(C.buffer) === null, "after the run's end: none written");
 }
 
 // B8: the reader's key, which only the adapter holds, reaches no worker: not in anything posted, nor in any buffer

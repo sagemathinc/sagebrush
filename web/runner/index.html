@@ -105,8 +105,11 @@ buffer staying here, and the page's answer is written to it.
       w.onmessage = (m) => {
         let d = m.data;
         if (d && d.liveData && d.buffer instanceof SharedArrayBuffer && d.buffer.byteLength === LIVE_BYTES) {
+          // (a key already open keeps its destination: the duplicate changes nothing here and goes no further,
+          // so an answer is written only where its own request waits; astra's LIVE691-REPLAY-1)
+          if (typeof d.liveData.key !== "string" || lives.has(d.liveData.key)) return;
           retireLive(d.id);
-          if (typeof d.liveData.key === "string") lives.set(d.liveData.key, { id: d.id, buffer: d.buffer });
+          lives.set(d.liveData.key, { id: d.id, buffer: d.buffer });
           d = { ...d, buffer: null };
         }
         if (d && d.input && d.buffer instanceof SharedArrayBuffer && d.buffer.byteLength >= 8) {

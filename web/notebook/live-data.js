@@ -6,8 +6,10 @@
 // operation and parameters, src/live-data.ts), bound to the worker, its
 // interpreter's generation, the run and the call that asked, and answered
 // only while all of those still hold.  The key a worker gives (its tag and a
-// count) correlates its answer; it authorizes nothing, and a key seen before
-// is refused.
+// count) correlates its answer; it authorizes nothing.  A worker keeps one tag
+// and counts up, so its state here is that tag and the highest count seen (a
+// fixed size, however many calls): a key of another tag, or a count not above
+// the highest, is refused, never answered (astra's LIVE691-SEEN-1).
 //
 // The adapter does the fetching: it holds the reader's FRED key (page memory
 // only, design §3.9) and attaches it on the way out, so the key never goes
@@ -17,7 +19,9 @@
 // and relay exist, step 4): every request is `unavailable`.
 //
 // Each call is bounded: at most LIVE_MAX_BYTES read (the stream is cut, and
-// the call aborted, past it), and LIVE_DEADLINE_MS long.  It is aborted (its
+// the call aborted, past it), in at most LIVE_MAX_PIECES pieces, empty ones
+// counted too (astra's LIVE691-PARTS-1), copied as they come into one buffer
+// that never grows past the bytes read, and LIVE_DEADLINE_MS long.  It is aborted (its
 // signal) on Stop, on the deadline, on Forget or sign-out, and when the
 // interpreter is replaced or closed; an aborted call's late result is
 // dropped, never written.
@@ -27,19 +31,23 @@ import { checkParams, checkAnswer, LIVE_ERRORS, LIVE_MAX_BYTES, LIVE_DEADLINE_MS
 const KEY = /^[a-z0-9]{1,16}\.[1-9][0-9]{0,8}$/;
 const plain = (o) => o !== null && typeof o === "object" && !Array.isArray(o) && Object.getPrototypeOf(o) === Object.prototype;
 const UNAVAILABLE = { error: "unavailable" };
+// (the stream's pieces a call reads, empty ones too: past this it is unavailable, so a stream of tiny or empty
+// pieces is bounded in work as its bytes are)
+export const LIVE_MAX_PIECES = 4096;
 
 export class LiveCalls {
   /**
    * @param {{fetch(op: string, params: object, signal: AbortSignal): Promise<AsyncIterable<Uint8Array>>} | null} adapter
    * @param {{deadlineMs?: number, maxBytes?: number}} [o]
    */
-  constructor(adapter, { deadlineMs = LIVE_DEADLINE_MS, maxBytes = LIVE_MAX_BYTES } = {}) {
+  constructor(adapter, { deadlineMs = LIVE_DEADLINE_MS, maxBytes = LIVE_MAX_BYTES, maxPieces = LIVE_MAX_PIECES } = {}) {
     this.adapter = adapter ?? null;
     this.deadlineMs = deadlineMs;
     this.maxBytes = maxBytes;
+    this.maxPieces = maxPieces;
     // calls in flight: {worker, gen, id, key, ctrl, timer, done}
     this.calls = new Set();
-    // keys seen, per worker (a key is answered once)
+    // per worker, its keys' tag and the highest count seen: {tag, high} (a key is answered at most once)
     this.seen = new WeakMap();
   }
 
@@ -55,10 +63,13 @@ export class LiveCalls {
     if (plainWorker && m.buffer.byteLength !== 8 + LIVE_MAX_BYTES) return;
     if (!plainWorker && m.buffer != null) return;
     if (!Number.isInteger(m.id) || !plain(d) || Object.keys(d).length !== 3 || typeof d.key !== "string" || !KEY.test(d.key)) return send(UNAVAILABLE);
-    let seen = this.seen.get(w);
-    if (!seen) this.seen.set(w, (seen = new Set()));
-    if (seen.has(d.key)) return; // (a key answered or asked before: nothing, and never its earlier answer)
-    seen.add(d.key);
+    const [tag, count] = [d.key.slice(0, d.key.indexOf(".")), Number(d.key.slice(d.key.indexOf(".") + 1))];
+    const seen = this.seen.get(w);
+    // (another tag, or a count not above the highest: a key asked before, or never this worker's: nothing, and
+    // never an earlier answer)
+    if (seen && (seen.tag !== tag || count <= seen.high)) return;
+    if (seen) seen.high = count;
+    else this.seen.set(w, { tag, high: count });
     const c = checkParams(d.op, d.params);
     if ("refused" in c || !active()) return send(UNAVAILABLE);
     if (!this.adapter) return send(UNAVAILABLE);
@@ -77,25 +88,29 @@ export class LiveCalls {
 
   async run(op, params, call) {
     const body = await this.adapter.fetch(op, params, call.ctrl.signal);
-    const parts = [];
-    let n = 0;
+    // (each piece copied into one buffer as it comes, none kept: the buffer at most doubles past the bytes read,
+    // and never past maxBytes)
+    let buf = new Uint8Array(0);
+    let n = 0, pieces = 0;
     for await (const chunk of body) {
       if (call.done) throw { code: "unavailable" };
       if (!(chunk instanceof Uint8Array)) throw { code: "unavailable" };
-      n += chunk.length;
-      // (cut as soon as it is over: no more of it is read or kept)
-      if (n > this.maxBytes) {
+      // (cut as soon as it is over, in bytes or in pieces: no more of it is read or kept)
+      if (++pieces > this.maxPieces || n + chunk.length > this.maxBytes) {
         call.ctrl.abort();
         throw { code: "unavailable" };
       }
-      parts.push(chunk);
+      if (n + chunk.length > buf.length) {
+        const b = new Uint8Array(Math.min(this.maxBytes, Math.max(n + chunk.length, 2 * buf.length, 4096)));
+        b.set(buf.subarray(0, n));
+        buf = b;
+      }
+      buf.set(chunk, n);
+      n += chunk.length;
     }
-    const all = new Uint8Array(n);
-    let at = 0;
-    for (const p of parts) all.set(p, (at += p.length) - p.length);
     let ok;
     try {
-      ok = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(all));
+      ok = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(buf.subarray(0, n)));
     } catch {
       throw { code: "unavailable" };
     }
