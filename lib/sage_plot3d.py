@@ -738,33 +738,65 @@ def jupyter_bundle(scene_json, svg, title, page):
 # of writers that died are _gc_temps()'s, once per session start.
 
 def _host():
+    import os
     import re
-    import socket
-    return re.sub(r"[^A-Za-z0-9_.-]", "_", socket.gethostname()) or "host"
+    # (the host's name: socket's under CPython; Sagebrush has no socket module, and its os.uname's nodename is the
+    # same name; CPython on Windows has no os.uname)
+    try:
+        import socket
+        name = socket.gethostname()
+    except ImportError:
+        try:
+            name = os.uname().nodename
+        except AttributeError:
+            name = ""
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", name) or "host"
 
 
 def _temp_for(root):
     import os
-    import threading
-    return os.path.join(root, ".plot3d-tmp", _host(), "%d-%d" % (os.getpid(), threading.get_ident()))
+    # (_thread, not threading: Sagebrush has no threading module; _thread.get_ident is the function threading
+    # re-exports)
+    import _thread
+    return os.path.join(root, ".plot3d-tmp", _host(), "%d-%d" % (os.getpid(), _thread.get_ident()))
 
 
 def _write_page(path, text):
     """text to path, atomically: its writer's temporary written whole and
     closed, then renamed over path (same directory tree, so one filesystem).
     A failure removes that temporary (by name) and raises."""
+    import io
     import os
     tmp = _temp_for(os.path.dirname(path) or ".")
-    os.makedirs(os.path.dirname(tmp), exist_ok=True)
     # (a file object, not a bare fd: if an interrupt skips the close, the
-    # object's finalizer still closes it as the frame unwinds)
-    f = open(tmp, "w", encoding="utf-8", opener=lambda p, fl: os.open(p, fl | getattr(os, "O_NOFOLLOW", 0), 0o666))
+    # object's finalizer still closes it as the frame unwinds; its directory
+    # made again if another writer removed it, empty, in between, a few times)
+    for attempt in range(8):
+        os.makedirs(os.path.dirname(tmp), exist_ok=True)
+        try:
+            f = open(tmp, "w", encoding="utf-8", opener=lambda p, fl: os.open(p, fl | getattr(os, "O_NOFOLLOW", 0), 0o666))
+            break
+        except FileNotFoundError:
+            if attempt == 7:
+                raise
     try:
         f.write(text)
         f.flush()
-        os.fsync(f.fileno())
+        # (to disk before the rename, where the file has a descriptor: Sagebrush's file objects have none)
+        try:
+            fd = f.fileno()
+        except io.UnsupportedOperation:
+            fd = None
+        if fd is not None:
+            os.fsync(fd)
         f.close()
         os.replace(tmp, path)
+        # (the temporary's directories, if empty: .sagebrush holds only the pages; never another writer's file)
+        for d in (os.path.dirname(tmp), os.path.dirname(os.path.dirname(tmp))):
+            try:
+                os.rmdir(d)
+            except OSError:
+                break
     except OSError:
         f.close()
         try:
