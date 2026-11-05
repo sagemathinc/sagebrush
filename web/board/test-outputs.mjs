@@ -52,6 +52,8 @@ const ran = () => until("window.sagebrush.board.outputs().then((os) => os.length
 const open = async (doc) => {
   await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.json")}` });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
+  // (in Edit: slow code keeps its preview in the board in Edit only; View writes nothing, web/doc-mode.ts)
+  await ev("window.sagebrush.board.editing(true), 1");
   await ev(`window.sagebrush.board.load(${JSON.stringify(doc)}).then(() => 1)`);
   check(await ran(), "the board's code items ran: " + JSON.stringify(await outputs().catch(() => null)).slice(0, 300));
   return (await outputs()).p.output.trim();
@@ -76,6 +78,8 @@ try {
   const n1 = await open(board(null)), n2 = await open(board(null));
   check(n1 === n2 && n1 !== a1, `a board without a seed: ${n1} ${n2}`);
   // an item named __proto__: its own entry, and the result's prototype untouched (SEC-781-1)
+  // (in Edit: slow code keeps its preview in the board in Edit only; View writes nothing, web/doc-mode.ts)
+  await ev("window.sagebrush.board.editing(true), 1");
   await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "ids", nodes: [{ id: "__proto__", code: "a = 1" }, { id: "q", code: "b = a" }] })}).then(() => 1)`);
   await until("window.sagebrush.board.outputs().then((os) => os.length === 2 && os.every((o) => o.state === ''))", 30000);
   const special = await ev("window.sagebrush.board.outputKeys().then((k) => ({ own: Object.hasOwn(k, '__proto__'), keys: Object.keys(k).sort(), proto: Object.getPrototypeOf(k) === Object.prototype, inherited: k.key === undefined }))");
@@ -118,6 +122,8 @@ try {
   const doneAll = (ms = 120000) => until("window.sagebrush.board.outputs().then((os) => os.length === 5 && os.every((o) => o.state === ''))", ms);
   const nodesOf = async () => Object.fromEntries(JSON.parse(await ev("window.sagebrush.board.json()")).nodes.map((n) => [n.id, n]));
   await ev("window.sagebrush.board.setPreviewThreshold(1000), 1");
+  // (in Edit: slow code keeps its preview in the board in Edit only; View writes nothing, web/doc-mode.ts)
+  await ev("window.sagebrush.board.editing(true), 1");
   await ev(`window.sagebrush.board.load(${JSON.stringify(pboard(slow()))}).then(() => 1)`);
   check(await doneAll(), "the board with a slow item ran: " + JSON.stringify(await outputs()).slice(0, 300));
   check(await until("window.sagebrush.board.json().then((t) => ['s', 'd', 'big', 'p'].every((id) => JSON.parse(t).nodes.find((n) => n.id === id).preview))", 20000), "the items slow from root have previews");
@@ -140,6 +146,8 @@ try {
   // (without the cache of step 3, whose full outputs would show instead)
   await ev("new Promise((res) => { const r = indexedDB.deleteDatabase('sagebrush-outputs'); r.onsuccess = r.onerror = r.onblocked = () => res(1); })");
   const t0 = Date.now();
+  // (in Edit: slow code keeps its preview in the board in Edit only; View writes nothing, web/doc-mode.ts)
+  await ev("window.sagebrush.board.editing(true), 1");
   await ev(`window.sagebrush.board.load(${JSON.stringify(JSON.parse(file1))}).then(() => 1)`);
   check(await until("window.sagebrush.board.outputs().then((os) => os.find((o) => o.id === 'f')?.state === '' && /fast/.test(os.find((o) => o.id === 'f').output))", 60000), "the fast item ran");
   const o2 = await outputs();
@@ -169,6 +177,8 @@ try {
   const setG = (code) => ev(`window.sagebrush.board.edit((d) => { d.nodes.find((x) => x.id === "g").code = ${JSON.stringify(code)}; }).then(() => 1)`);
   const gPreview = () => ev("window.sagebrush.board.json().then((t) => JSON.stringify(JSON.parse(t).nodes.find((n) => n.id === 'g').preview ?? null))");
   await ev("window.__holding = false, 1");
+  // (in Edit: slow code keeps its preview in the board in Edit only; View writes nothing, web/doc-mode.ts)
+  await ev("window.sagebrush.board.editing(true), 1");
   await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "race", seed: SEED_A, nodes: [{ id: "g", code: "print('start')" }] })}).then(() => 1)`);
   await until("window.sagebrush.board.outputs().then((os) => os[0]?.state === '')", 30000);
   await ev("window.sagebrush.board.setPreviewThreshold(1000), window.__holding = true, 1");
@@ -206,6 +216,8 @@ try {
   await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.json")}` });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
   const n0 = await cacheCount();
+  // (in Edit: slow code keeps its preview in the board in Edit only; View writes nothing, web/doc-mode.ts)
+  await ev("window.sagebrush.board.editing(true), 1");
   await ev(`window.sagebrush.board.load(${JSON.stringify(cboard(slowStamp))}).then(() => 1)`);
   check(await until("window.sagebrush.board.outputs().then((os) => os.length === 3 && os.every((o) => o.state === ''))", 60000), "the board ran");
   const first = await outputs();
@@ -247,6 +259,8 @@ try {
   await sleep(1500);
   // another document loaded in its place (an empty one, as New board makes
   // in a host without boards of their own): a new name, and the old board's entries gone (SEC-B88-3)
+  // (in Edit: slow code keeps its preview in the board in Edit only; View writes nothing, web/doc-mode.ts)
+  await ev("window.sagebrush.board.editing(true), 1");
   await ev(`window.sagebrush.board.load({ title: "Untitled board", nodes: [] }).then(() => 1)`);
   await sleep(500);
   const id2b = await ev(`localStorage.getItem(${JSON.stringify(idKey)})`);
@@ -255,6 +269,8 @@ try {
   // board's), opened in a clean page where its items are new: its own
   // cache, so nothing of another's (SEC-B88-1).  First, a board whose
   // outputs are kept; then its copy.
+  // (in Edit: slow code keeps its preview in the board in Edit only; View writes nothing, web/doc-mode.ts)
+  await ev("window.sagebrush.board.editing(true), 1");
   await ev(`window.sagebrush.board.load(${JSON.stringify(cboard(slowStamp))}).then(() => 1)`);
   check(await until("window.sagebrush.board.outputs().then((os) => os.length === 3 && os.every((o) => o.state === ''))", 60000), "a board runs");
   const orig = await outputs();
@@ -265,11 +281,15 @@ try {
   await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.json")}` });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
   await until("window.sagebrush.board.outputs().then((os) => os.length > 0 && os.every((o) => o.state === ''))", 60000);
+  // (in Edit: slow code keeps its preview in the board in Edit only; View writes nothing, web/doc-mode.ts)
+  await ev("window.sagebrush.board.editing(true), 1");
   await ev(`window.sagebrush.board.load(${JSON.stringify(cboard(slowStamp))}).then(() => 1)`);
   check(await until("window.sagebrush.board.outputs().then((os) => os.length === 3 && os.every((o) => o.state === ''))", 60000), "a copy of it runs");
   const copy = await outputs();
   check(copy.s.output !== orig.s.output && !(await ev("!!document.querySelector('[data-cached]')")), "...its own outputs, none from the other's cache: " + JSON.stringify([orig.s.output, copy.s.output]));
   // what reads a file, or reads what read one, is not kept (its key doesn't say the file's bytes: SEC-B88-2)
+  // (in Edit: slow code keeps its preview in the board in Edit only; View writes nothing, web/doc-mode.ts)
+  await ev("window.sagebrush.board.editing(true), 1");
   await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "files", seed: SEED_C, nodes: [
     { id: "a", code: "import os, time\nopen('cache-test.bin', 'wb').write(os.urandom(8))\nt0 = time.time()\nwhile time.time() - t0 < 2.2:\n    pass\nsecret = open('cache-test.bin', 'rb').read().hex()" },
     { id: "b", code: "print('B', secret)" },
@@ -288,11 +308,15 @@ try {
     { id: "t1", code: "import time\nt0 = time.time()\nwhile time.time() - t0 < 2.1:\n    pass\nprint('t1')" },
     { id: "t2", code: "import time\nt0 = time.time()\nwhile time.time() - t0 < 2.1:\n    pass\nprint('t2')" },
   ] };
+  // (in Edit: slow code keeps its preview in the board in Edit only; View writes nothing, web/doc-mode.ts)
+  await ev("window.sagebrush.board.editing(true), 1");
   await ev(`window.sagebrush.board.load(${JSON.stringify(twoSlow)}).then(() => 1)`);
   const idHeld = await ev(`localStorage.getItem(${JSON.stringify(idKey)})`);
   await ev("window.__holdPut = 1, 1");
   check(await until("window.sagebrush.board.outputs().then((os) => os.length === 2 && os.every((o) => o.state === ''))", 60000), "two slow items ran");
   check(await until("window.__holdPut === 2 && window.__released.length === 1", 10000), "the first write is held");
+  // (in Edit: slow code keeps its preview in the board in Edit only; View writes nothing, web/doc-mode.ts)
+  await ev("window.sagebrush.board.editing(true), 1");
   await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "next", nodes: [{ id: "x", code: "print('x')" }] })}).then(() => 1)`);
   await ev("window.__released.splice(0).forEach((f) => f()), 1");
   await sleep(1500);
@@ -304,6 +328,8 @@ try {
     { id: "t2", code: "import time, os\nt0 = time.time()\nwhile time.time() - t0 < 2.1:\n    pass\nprint('t2', os.urandom(8).hex())" },
   ] };
   await ev("window.__holdPut = 0, window.__released = [], 1");
+  // (in Edit: slow code keeps its preview in the board in Edit only; View writes nothing, web/doc-mode.ts)
+  await ev("window.sagebrush.board.editing(true), 1");
   await ev(`window.sagebrush.board.load(${JSON.stringify(twoStamps)}).then(() => 1)`);
   const idTwo = await ev(`localStorage.getItem(${JSON.stringify(idKey)})`);
   await ev("window.__holdPut = 1, 1");
@@ -328,6 +354,8 @@ try {
     { id: "t1", code: "import time\nt0 = time.time()\nwhile time.time() - t0 < 2.1:\n    pass\nprint('t1 swept')" },
     { id: "t2", code: "import time, os\nt0 = time.time()\nwhile time.time() - t0 < 2.1:\n    pass\nprint('t2 swept', os.urandom(8).hex())" },
   ] };
+  // (in Edit: slow code keeps its preview in the board in Edit only; View writes nothing, web/doc-mode.ts)
+  await ev("window.sagebrush.board.editing(true), 1");
   await ev(`window.sagebrush.board.load(${JSON.stringify(swept)}).then(() => 1)`);
   const idSwept = await ev(`localStorage.getItem(${JSON.stringify(idKey)})`);
   await ev(`new Promise((res) => { const r = indexedDB.open('sagebrush-outputs'); r.onsuccess = () => { const db = r.result, t = db.transaction(['entries', 'docs'], 'readwrite'); for (let i = 0; i < 5; i++) t.objectStore('entries').put({ doc: ${JSON.stringify(idSwept)}, key: 'big-' + i, outputs: [], at: '2026-10-14T00:00:00.000Z', ms: 1, total: 1, bytes: 16000000, used: Date.now() + 1e9 }); t.objectStore('docs').put({ doc: ${JSON.stringify(idSwept)}, bytes: 80000000, used: Date.now() }); t.oncomplete = () => { db.close(); res(1); }; }; })`);
@@ -348,6 +376,8 @@ try {
   await ev(`(() => { window.__holdDigest = 0; const digest = crypto.subtle.digest.bind(crypto.subtle); crypto.subtle.digest = (...a) => { const p = digest(...a); if (window.__holdDigest !== 1) return p; window.__holdDigest = 2; return new Promise((res, rej) => { window.__digestHeld = () => p.then(res, rej); }); }; const put = IDBObjectStore.prototype.put; IDBObjectStore.prototype.put = function (value, key) { const r = put.call(this, value, key); if (window.__digestAfterPut && this.name === "entries" && value && Array.isArray(value.outputs)) { window.__digestAfterPut = false; this.transaction.addEventListener("complete", () => { window.__holdDigest = 1; }); } return r; }; })(), 1`);
   await ev("window.__holdPut = 0, window.__released = [], 1");
   const marked = { title: "marked", seed: SEED_C, nodes: [{ id: "m", code: "import time, os\nt0 = time.time()\nwhile time.time() - t0 < 2.1:\n    pass\nprint('m', os.urandom(8).hex())" }] };
+  // (in Edit: slow code keeps its preview in the board in Edit only; View writes nothing, web/doc-mode.ts)
+  await ev("window.sagebrush.board.editing(true), 1");
   await ev(`window.sagebrush.board.load(${JSON.stringify(marked)}).then(() => 1)`);
   const idMarked = await ev(`localStorage.getItem(${JSON.stringify(idKey)})`);
   await ev(`new Promise((res) => { const r = indexedDB.open('sagebrush-outputs'); r.onsuccess = () => { const db = r.result, t = db.transaction(['entries', 'docs'], 'readwrite'); for (let i = 0; i < 5; i++) t.objectStore('entries').put({ doc: ${JSON.stringify(idMarked)}, key: 'big-' + i, outputs: [], at: '2026-10-14T00:00:00.000Z', ms: 1, total: 1, bytes: 16000000, used: Date.now() + 1e9 }); t.objectStore('docs').put({ doc: ${JSON.stringify(idMarked)}, bytes: 80000000, used: Date.now() }); t.oncomplete = () => { db.close(); res(1); }; }; })`);
