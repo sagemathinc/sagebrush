@@ -180,6 +180,41 @@ try {
     await until(`${W}.stat("/N8 folder").then((e) => e?.kind === "folder")`);
     await sleep(500);
     check((await ev(`document.querySelector("#nbname").value`)) === "N8 matlab", "N8: a new folder opens nothing");
+    // (grader's B2-B5 on #704: what is opened when naming goes otherwise)
+    const nbname = () => ev(`document.querySelector("#nbname").value`);
+    const toastText = () => ev(`document.querySelector("#wssidebar .ftoast")?.textContent ?? ""`);
+    const newRowPath = () => ev(`document.querySelector("#wssidebar .frow input")?.closest(".frow")?.dataset.path ?? null`);
+    // B5: a search shown that the new item doesn't match: it has no row to name, and is opened at once
+    await ev(`(() => { const i = document.querySelector("#wssidebar .fsearch"); i.value = "zzq-no-such"; i.dispatchEvent(new Event("input")); return 1; })()`);
+    await sleep(400);
+    let before = await nbname();
+    await click("#wssidebar .fh button[aria-label=New]");
+    await menu("Notebook");
+    check(await until(`/^Untitled/.test(document.querySelector("#nbname").value)`, 30000) && !(await ev(`!!document.querySelector("#wssidebar .frow input")`)), "N8 (B5): a new notebook with no row to name it in (a search shown): opened at once (before " + JSON.stringify(before) + ")");
+    await ev(`(() => { const i = document.querySelector("#wssidebar .fsearch"); i.value = ""; i.dispatchEvent(new Event("input")); return 1; })()`);
+    await sleep(400);
+    // B3 (and B2): put in Trash while being named (another tab, an agent): said, and nothing opened
+    before = await nbname();
+    await click("#wssidebar .fh button[aria-label=New]");
+    await menu("Notebook");
+    await until(`!!document.querySelector("#wssidebar .frow input")`);
+    const goneAt = await newRowPath();
+    // (moved to Trash meanwhile, as another tab or an agent would: found by its ref, but in Trash)
+    const deletedProbe = await ev(`${W}.remove(${JSON.stringify(goneAt)}).then((e) => e.path)`);
+    await typeInto("N8 gone");
+    const saidGone = await until(`/was moved or deleted meanwhile: not renamed/.test(document.querySelector("#wssidebar .ftoast")?.textContent ?? "")`, 10000);
+    await sleep(1000);
+    check(saidGone && (await nbname()) === before && !(await ev(`${W}.stat("/Trash/N8 gone.ipynb").then((x) => !!x)`)), "N8 (B3): put in Trash while being named: said not renamed, nothing renamed in Trash, and nothing opened: " + JSON.stringify({ goneAt, saidGone, now: await nbname(), before, toast: await toastText(), goneStat: await ev(`${W}.stat(${JSON.stringify(goneAt)}).then((x) => !!x)`), renamed: await ev(`${W}.stat("/N8 gone.ipynb").then((x) => !!x)`), inTrash: await ev(`${W}.list("/Trash").then((l) => l.map((e) => e.path))`), boxOpen: await ev(`!!document.querySelector("#wssidebar .frow input")`), deletedProbe }));
+    // B4 (and B2): the name typed taken meanwhile: not renamed, and nothing opened
+    before = await nbname();
+    await click("#wssidebar .fh button[aria-label=New]");
+    await menu("Notebook");
+    await until(`!!document.querySelector("#wssidebar .frow input")`);
+    const keptAt = await newRowPath();
+    await ev(`${W}.create("/N8 taken.ipynb", { mode: "python" }).then(() => 1)`);
+    await typeInto("N8 taken");
+    await sleep(1500);
+    check((await nbname()) === before && (await ev(`${W}.stat(${JSON.stringify(keptAt)}).then((x) => !!x)`)), "N8 (B4): the name typed taken meanwhile: not renamed, and nothing opened: " + JSON.stringify({ keptAt, now: await nbname(), before, toast: await toastText() }));
   }
   // a folder, and files dropped on it
   await click("#wssidebar .fh button[aria-label=New]");

@@ -210,6 +210,12 @@ try {
   // an example board (not blank) opens as before: not in Edit, Revert there once edited
   await go("?doc=examples/primes.json");
   check(!(await here()).editing, "an example board opens out of Edit");
+  // a host without a notebook to make (grader's MT2 on #704): New ▸ Notebook and MATLAB notebook both disabled
+  await ev(`import('/board/board.js').then((m) => m.mounted.destroy()).then(() => 1)`);
+  await ev(`import('/board/board.js').then((m) => { window.__b = m.mountBoard(document.getElementById("board"), { ...m.host, files: m.host.files ? { ...m.host.files, newNotebook: undefined } : undefined }); return 1; })`);
+  await until("!!document.querySelector('[data-sbb=filemenu] [data-item=newMatlab]')", 20000);
+  const dis = await ev(`["newNotebook", "newMatlab"].map((k) => document.querySelector('[data-sbb=filemenu] [data-item=' + k + ']')?.disabled ?? null)`);
+  check(JSON.stringify(dis) === "[true,true]", "a host with no new notebook: New ▸ Notebook and MATLAB notebook disabled: " + JSON.stringify(dis));
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));

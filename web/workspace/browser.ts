@@ -743,7 +743,8 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
           // that entry: checked holding the lock, never another put at its
           // path meanwhile, CORR-4B2-1)
           const from = (e.kind === "notebook" || e.kind === "board") && e.ref ? await w.pathOf(e.kind, e.ref) : e.path;
-          if (!from) { now = null; say(`"${full}" was moved or deleted meanwhile: not renamed`); }
+          // (gone, or put in Trash meanwhile (another tab, an agent): either way not renamed, and not opened)
+          if (!from || within(from, TRASH)) { now = null; say(`"${full}" was moved or deleted meanwhile: not renamed`); }
           else host.renamed?.((now = await w.rename(from, join(parentOf(from), finalName(v)), { retitle: !host.retitles?.(e), expect: { kind: e.kind, ref: e.ref, fid: e.fid, created: e.created } })), from);
         } catch (err) {
           now = null;
