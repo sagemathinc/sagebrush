@@ -2702,6 +2702,9 @@ test("histc counts along the requested dimension (MCF-32)", () => {
   // Vector/default/singleton-axis controls: /scratch/matlab-tmp/mcf32b/transcript.txt,
   // SHA256 c5b40ef5bd08fe2532d2bb98962d26398157a6519f10a1cedef5ff888a99e701.
   calls.push("[0 1 2],[0 1 2]", "[0;1;2],[0 1 2]", "0,[0 1]");
+  // Empty axes differ from Octave: frozen /scratch/matlab-tmp/o1/transcript.txt,
+  // SHA256 71d71687659ad5b07e16cad8101c3c026963d1447a8e05be2527542962167f4d.
+  calls.push("[],[0 1]", "zeros(0,3),[0 1]", "zeros(1,0),[0 1]");
   const code = calls.map((s) => `[n,b]=histc(${s}); disp(mat2str(size(n))); disp(mat2str(n)); disp(mat2str(size(b))); disp(mat2str(b));`).join("\n") +
     "\n[n,b]=histc([0 1;2 3],[0 1],3); disp(mat2str(size(n))); disp(mat2str(n(:,:,1))); disp(mat2str(n(:,:,2))); disp(mat2str(size(b))); disp(mat2str(b));";
   const lines = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
@@ -2715,6 +2718,9 @@ test("histc counts along the requested dimension (MCF-32)", () => {
     "[1 3]", "[1 1 1]", "[1 3]", "[1 2 3]",
     "[3 1]", "[1;1;1]", "[3 1]", "[1;2;3]",
     "[1 2]", "[1 0]", "[1 1]", "1",
+    "[2 0]", "zeros(2,0)", "[0 0]", "[]",
+    "[2 3]", "[0 0 0;0 0 0]", "[0 3]", "zeros(0,3)",
+    "[1 2]", "[0 0]", "[1 0]", "zeros(1,0)",
     "[2 2 2]", "[1 0;0 0]", "[0 1;0 0]", "[2 2]", "[1 2;0 0]",
   ]);
 });
