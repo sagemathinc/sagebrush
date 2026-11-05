@@ -642,9 +642,10 @@ check("test-hosts-only-in-list", latexOn("127.0.0.1", [...SITE, "127.0.0.1"]) &&
   // (16 chunks of 1 MiB with no Content-Length, against 4 MiB: stopped at the 5th, cancelled, the rest never pulled)
   const chunked = await at(16, 2 ** 20, 4 * 2 ** 20);
   check("doc-read-capped-chunked-no-length", chunked.n === null && chunked.pulled === 5 && chunked.cancelled, chunked);
-  // (a header that understates the body: counted, not trusted; one that overstates the cap: refused before any pull)
-  const lies = await at(16, 2 ** 20, 4 * 2 ** 20, 1000), says = await at(16, 2 ** 20, 4 * 2 ** 20, 16 * 2 ** 20);
-  check("doc-read-capped-false-and-oversize-header", lies.n === null && lies.pulled === 5 && lies.cancelled && says.n === null && says.pulled === 0 && says.cancelled, { lies, says });
+  // (a header that understates the body: counted, not trusted; one over the cap: refused before any pull; one exactly at
+  //  it: read (grader C5))
+  const lies = await at(16, 2 ** 20, 4 * 2 ** 20, 1000), says = await at(16, 2 ** 20, 4 * 2 ** 20, 16 * 2 ** 20), atCap = await at(4, 256, 1024, 1024);
+  check("doc-read-capped-false-and-oversize-header", lies.n === null && lies.pulled === 5 && lies.cancelled && says.n === null && says.pulled === 0 && says.cancelled && atCap.n === 1024 && !atCap.cancelled, { lies, says, atCap });
   // (the bytes kept, in order, across chunks; an empty body)
   const two = await readCapped(new Response(new ReadableStream({ start(c) { c.enqueue(new Uint8Array([1, 2])); c.enqueue(new Uint8Array([3])); c.close(); } })), 3), none = await readCapped(new Response(null), 3);
   check("doc-read-capped-bytes", JSON.stringify(Array.from(two ?? [])) === "[1,2,3]" && none?.length === 0, [two, none]);

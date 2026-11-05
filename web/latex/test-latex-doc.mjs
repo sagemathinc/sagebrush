@@ -100,11 +100,12 @@ try {
   check(c1?.text === DOC && s1 === "?tex=" + c1.fid && c2?.fid && s2 === "?tex=" + c2.fid, "Edit a copy: /LaTeX articles/doc.tex with its bytes, opened; then doc (2).tex", { s1, s2, c1, c2 });
 
   // ---- refused: not fetched at all, or (a redirect, a 404) fetched and said why
-  for (const bad of ["/index.html", "/articles/../index.html", "/articles/tst/x.tex?y=1", "//evil.example/articles/a/b.tex", "https://evil.example/articles/a/b.tex", "/articles/Tst/doc.tex"]) {
+  // (grader P1, P11: a "." in a segment ("..", "..tex") and another extension are refused too)
+  for (const bad of ["/index.html", "/articles/../index.html", "/articles/../evil.tex", "/articles/tst/..tex", "/articles/tst/doc.html", "/articles/tst/x.tex?y=1", "//evil.example/articles/a/b.tex", "https://evil.example/articles/a/b.tex", "/articles/Tst/doc.tex"]) {
     const before = requests.length;
     await shown(bad);
     await until(`!!document.querySelector(".tex-doc .tex-gone")`);
-    const t = await gone(), asked = requests.slice(before).filter((u) => /evil\.example|\/index\.html$|x\.tex|Tst/.test(u) && !/[?&]tex-doc=/.test(u));
+    const t = await gone(), asked = requests.slice(before).filter((u) => { const x = new URL(u); return x.hostname === "evil.example" || x.pathname.startsWith("/articles/") || x.pathname === "/index.html"; });
     check(t === "This link isn't to a document this site publishes." && asked.length === 0, "refused, never fetched: " + bad, { t, asked });
   }
   await shown("/articles/tst/moved.tex");
