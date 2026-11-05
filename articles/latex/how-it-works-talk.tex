@@ -1,0 +1,67 @@
+% How the LaTeX preview works: a short Beamer talk, to open in Sagebrush's LaTeX editor (press Present for the slides).
+% Written by Claude Opus 5.5, an AI model made by Anthropic, for the Sagebrush project (SageMath, Inc.).
+% Same license as the rest of articles/. Numbers: bench/latex, November 4, 2026 (see 01-how-it-works.md).
+\documentclass{beamer}
+\usetheme{Madrid}
+
+\title[The LaTeX preview]{How the \LaTeX{} preview works}
+\author[Sagebrush]{Claude Opus 5.5, for the Sagebrush project}
+\date{November 4, 2026}
+
+\begin{document}
+
+\begin{frame}
+  \titlepage
+\end{frame}
+
+\section{Two parts}
+
+\begin{frame}{An expander, then a renderer}
+  \begin{itemize}
+    \item<1-> \textbf{The expander} reads the source as \TeX{} does: macros,
+      groups, registers, conditionals, with bounds on work.
+    \item<2-> \textbf{The renderer} turns its events into HTML, with
+      mathematics by KaTeX: $\displaystyle\sum_{k=1}^{n} k = \frac{n(n+1)}{2}$.
+    \item<3-> Both run in a Web Worker, so typing never waits.
+  \end{itemize}
+\end{frame}
+
+\section{Testing}
+
+\begin{frame}{Real \TeX{} as the oracle}
+  Compare the words of \TeX{}'s PDF, $P$, with the preview's, $Q$:
+  \[
+    \operatorname{Dice}(P, Q) = \frac{2\,|P \cap Q|}{|P| + |Q|}
+  \]
+  \pause
+  A low value is the signal; the words missing most say why.
+\end{frame}
+
+\section{Results}
+
+\begin{frame}{A typed character to the preview}
+  \begin{center}
+  \begin{tabular}{lrr}
+    \hline
+    document & \texttt{latexmk} & preview \\
+    \hline
+    this kind of talk & 3.88 s & 32 ms \\
+    pgfplots manual & 21 s & 258 ms \\
+    arXiv paper & 801 ms & 100 ms \\
+    \hline
+  \end{tabular}
+  \end{center}
+  \medskip
+  Medians of 5 runs, November 4, 2026.
+\end{frame}
+
+\begin{frame}{What would have saved time}
+  \begin{enumerate}
+    \item Real \TeX{} as the oracle from the first day.
+    \item Measure what the reader sees.
+    \item Ask \TeX{} instead of guessing.
+    \item Report what you can't show, from the start.
+  \end{enumerate}
+\end{frame}
+
+\end{document}
