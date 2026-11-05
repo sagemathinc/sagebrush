@@ -74,6 +74,9 @@ def _stacked(f, a, *rest, empty=None):
 
 
 def _square(a):
+    # (an array of fewer than 2 dimensions first, with NumPy's error, before its shape[-2] is read)
+    if a.ndim < 2:
+        raise LinAlgError("%d-dimensional array given. Array must be at least two-dimensional" % a.ndim)
     if a.shape[-1] != a.shape[-2]:
         raise LinAlgError("Last 2 dimensions of the array must be square")
 
@@ -156,6 +159,10 @@ def matrix_power(a, n):
 def cholesky(a, *, upper=False):
     a = _float(a)
     _square(a)
+    # (upper=True reads the upper triangle, as NumPy's (LAPACK uplo='U'): the lower kernel factors the transpose,
+    # whose lower triangle it is, and its factor transposed is the upper one; the lower triangle is not read)
+    if upper:
+        a = _np.swapaxes(a, -1, -2)
     L = _stacked(_L.cholesky, a, empty=lambda m, n, dt: ((n, n), dt))
     return _np.swapaxes(L, -1, -2) if upper else L
 

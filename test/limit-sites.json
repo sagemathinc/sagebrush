@@ -6767,6 +6767,10 @@
   "owner": "sagebrush-python",
   "reason": "plot3d page temporaries' GC (Ctrl-C plan r2 item 2, daybreak2 COST-1): one pass's time budget at a session's start, protecting the start; refuses nothing and stops no computation; the rest is the next pass's, from its cursor, and the pass's log says when it stopped with entries left"
  },
+ "lib/ssl.py :: SSLContext.load_cert_chain :: raise NotImplementedError(\"ssl: certificate files are not used by Sagebrush's replay-only network client\") #0": {
+  "class": "coverage",
+  "owner": "python"
+ },
  "lib/uuid.py ::  :: >>> uuid.MAX #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
@@ -9733,45 +9737,249 @@
   "owner": "pyjs containers/runtime memory",
   "row": "src-4"
  },
- "src/runtime/zlib.ts :: compress :: m.MAX_WBITS = 15; #0": {
+ "src/runtime/zlib.ts ::  :: import { ARRAY_LIMITS } from \"./numpy\"; #0": {
+  "class": "2",
+  "owner": "file formats/raster",
+  "row": "src-13",
+  "disposition": {
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  }
+ },
+ "src/runtime/zlib.ts :: decode :: const opEnd = limit === Infinity ? Infinity : start + limit - 258; #0": {
   "class": "1+2",
   "owner": "file formats/raster",
-  "row": "src-13"
+  "row": "src-13",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  }
+ },
+ "src/runtime/zlib.ts :: decompressCall :: const ml = maxLength === undefined ? 0 : Number(O.index(maxLength)); #0": {
+  "class": "1+2",
+  "owner": "file formats/raster",
+  "row": "src-13",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  }
+ },
+ "src/runtime/zlib.ts :: decompressCall :: export function decompressCall(d: PyDecompress, data: any, maxLength: any): PyBytes { #0": {
+  "class": "1+2",
+  "owner": "file formats/raster",
+  "row": "src-13",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  }
+ },
+ "src/runtime/zlib.ts :: decompressCall :: if (ml < 0) raise(T.ValueError, \"max_length must be non-negative\"); #0": {
+  "class": "1",
+  "owner": "file formats/raster",
+  "row": "src-13",
+  "disposition": {
+   "1": "shared"
+  }
  },
  "src/runtime/zlib.ts :: decompressLimited :: const [out, end] = inflateRaw(data, 2, limit); #0": {
   "class": "1+2",
   "owner": "file formats/raster",
-  "row": "src-13"
+  "row": "src-13",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  }
  },
  "src/runtime/zlib.ts :: decompressLimited :: export function decompressLimited(data: Uint8Array, limit: number): [Uint8Array, number] { #0": {
   "class": "1+2",
   "owner": "file formats/raster",
+  "row": "src-13",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  }
+ },
+ "src/runtime/zlib.ts :: ensure :: if (m > start + limit) m = Math.max(this.bp + n, start + limit); #0": {
+  "class": "1+2",
+  "owner": "file formats/raster",
+  "row": "src-13",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  }
+ },
+ "src/runtime/zlib.ts :: flushCall :: m.MAX_WBITS = 15; #0": {
+  "class": "1+2",
+  "owner": "file formats/raster",
+  "row": "src-13",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  }
+ },
+ "src/runtime/zlib.ts :: fn :: Ty.method(D, \"copy\", () => raise(T.NotImplementedError, \"zlib: Decompress.copy() is not in Sagebrush's zlib\")); #0": {
+  "class": "coverage",
+  "owner": "file formats/raster",
   "row": "src-13"
+ },
+ "src/runtime/zlib.ts :: fn :: Ty.method(D, \"decompress\", (d: PyDecompress, data: any, maxLength: any = undefined) => decompressCall(d, data, maxLength), sig([\"self\", \"data\", \"max_length\"], { posonly: 2 })); #0": {
+  "class": "1+2",
+  "owner": "file formats/raster",
+  "row": "src-13",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  }
  },
  "src/runtime/zlib.ts :: fn :: const [out, end] = decompressLimited(bytesOf(data), Number(limit)); #0": {
   "class": "1+2",
   "owner": "file formats/raster",
-  "row": "src-13"
+  "row": "src-13",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  }
  },
  "src/runtime/zlib.ts :: fn :: fn(\"_decompress_limited\", (data: any, limit: any) => { #0": {
   "class": "1+2",
   "owner": "file formats/raster",
-  "row": "src-13"
+  "row": "src-13",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  }
  },
- "src/runtime/zlib.ts :: grow :: if (op + n > limit) raise(ZlibError, `Error -5 while decompressing data: more than ${limit} bytes`); #0": {
-  "class": "1+2",
+ "src/runtime/zlib.ts :: fn :: if (zdict !== undefined && bytesOf(zdict).length) raise(T.NotImplementedError, \"zlib: decompressobj(zdict=) is not in Sagebrush's zlib\"); #0": {
+  "class": "coverage",
   "owner": "file formats/raster",
   "row": "src-13"
+ },
+ "src/runtime/zlib.ts :: full :: if (room > cap && over) over(); #0": {
+  "class": "1+2",
+  "owner": "file formats/raster",
+  "row": "src-13",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  }
+ },
+ "src/runtime/zlib.ts :: inflateRaw :: const cap = Math.min(limit, ARRAY_LIMITS.bytes); #0": {
+  "class": "2",
+  "owner": "file formats/raster",
+  "row": "src-13",
+  "disposition": {
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  }
+ },
+ "src/runtime/zlib.ts :: inflateRaw :: const out = f.run(Infinity, cap, () => #0": {
+  "class": "1+2",
+  "owner": "file formats/raster",
+  "row": "src-13",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  }
  },
  "src/runtime/zlib.ts :: inflateRaw :: function inflateRaw(src: Uint8Array, pos: number, limit = Infinity): [Uint8Array, number] { #0": {
   "class": "1+2",
   "owner": "file formats/raster",
-  "row": "src-13"
+  "row": "src-13",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  }
  },
- "src/runtime/zlib.ts :: inflateRaw :: let out = new Uint8Array(Math.min(Math.max(1024, src.length * 4), limit + 1)); #0": {
+ "src/runtime/zlib.ts :: inflateRaw :: raise(ZlibError, cap < limit ? `Error -5 while decompressing data: output exceeds Sagebrush's limit of ${cap} bytes` : `Error -5 while decompressing data: more than ${limit} bytes`), #0": {
+  "class": "2",
+  "owner": "file formats/raster",
+  "row": "src-13",
+  "disposition": {
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  }
+ },
+ "src/runtime/zlib.ts :: left :: const left = () => limit - (this.bp - start); #0": {
   "class": "1+2",
   "owner": "file formats/raster",
-  "row": "src-13"
+  "row": "src-13",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  }
+ },
+ "src/runtime/zlib.ts :: run :: const limit = Math.min(room, cap); #0": {
+  "class": "1+2",
+  "owner": "file formats/raster",
+  "row": "src-13",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  }
+ },
+ "src/runtime/zlib.ts :: run :: run(room: number, cap = Infinity, over?: () => never): Uint8Array { #0": {
+  "class": "1+2",
+  "owner": "file formats/raster",
+  "row": "src-13",
+  "disposition": {
+   "1": "shared",
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  }
+ },
+ "src/runtime/zlib.ts :: step :: const cap = ARRAY_LIMITS.bytes; #0": {
+  "class": "2",
+  "owner": "file formats/raster",
+  "row": "src-13",
+  "disposition": {
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  }
+ },
+ "src/runtime/zlib.ts :: step :: const o = d.inf.run(room, cap, () => raise(ZlibError, `Error -5 while decompressing data: output exceeds Sagebrush's limit of ${cap} bytes`)); #0": {
+  "class": "2",
+  "owner": "file formats/raster",
+  "row": "src-13",
+  "disposition": {
+   "2": {
+    "route": "zlib-inflater-cap"
+   }
+  }
  },
  "src/stdin-wait.ts :: stopped :: const max = buffer.byteLength - 8; #0": {
   "class": "none",
