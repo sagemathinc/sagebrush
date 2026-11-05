@@ -863,8 +863,9 @@ print(json.dumps({"members": len(b), "diffs": diffs[:6], "ndiffs": len(diffs), "
       f("/p1", { fid: "p1fid", ident: "p1fid" });
       for (const [n, c, u] of [["nan", NaN, NaN], ["pinf", Infinity, Infinity], ["ninf", -Infinity, -Infinity], ["negz", -0, -0], ["frac", 1.5, 1.5], ["big", 1e21, 1e21], ["small", -1e-7, 1e21]]) f("/p1/" + n, { created: c, updated: u, fid: "p1" + n, ident: "p1" + n });
       f("/p3", { fid: "p3fid", ident: "p3fid" }); f("/p3/nofid", {}); f("/p3/withmode", { fid: "p3m", ident: "p3m", mode: "python" }); f("/p3/fidonly", { fid: "p3f" }); return null; }`);
-    // (P-2: hard names through the workspace's own API: made, or refused, each)
-    const names = ["q\"uote", "back\\slash", "ctl\u0001", "ls ", "ps ", "lone\ud800"];
+    // (P-2: hard names through the workspace's own API: made, or refused, each.  None a .zip can't hold safely (a quote,
+    // a backslash, a trailing space): the export refuses those (EXPORT-ZIPNAME-1, the zipnames scenario))
+    const names = ["ctl\u0001", "lone\ud800"];
     const made = await ev(`(async () => { const out = []; await ${W}.mkdir("/p2").catch(() => {}); for (const n of ${JSON.stringify(names)}) { try { await ${W}.mkdir("/p2/" + n); out.push([n, "made"]); } catch (e) { out.push([n, "refused: " + String(e?.message ?? e).slice(0, 80)]); } } return out; })()`);
     check(made.length === names.length && made.every(([, r]) => r === "made" || /^refused: ./.test(r)), "identity P-2: each hard folder name is made, or refused by the workspace with a reason: " + JSON.stringify(made));
     await ev(`(async () => { const b = new Uint8Array(3 * 2 ** 20 + 12345); for (let i = 0; i < b.length; i += 65536) crypto.getRandomValues(b.subarray(i, Math.min(b.length, i + 65536))); await ${W}.mkdir("/p4").catch(() => {}); await ${W}.create("/p4/big.zip", { content: b }); return 1; })()`);
