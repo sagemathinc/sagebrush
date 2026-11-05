@@ -1,0 +1,10 @@
+{
+ "v": 1,
+ "reason": "sage_plot3d's big-scene page written in Sagebrush's runtime again (the v0.6.5 release failure, cb691b82's path): _temp_for's _thread.get_ident, _host's os.uname fallback, the fsync skipped without a descriptor, the writer's emptied temporaries removed, the open's retry. lib/sage_plot3d.py is in the CLI's lib.gen (and so pyjs) and in Sage mode's lib chunk, source and precompiled. Measured exactly with bun 1.4.4 against master 318b4cd9 (pyjs marked +64).",
+ "bytes": {
+  "cli/lib.gen.js": 480,
+  "cli/pyjs.cjs": 540,
+  "engine/lib/sage.pre": 4967,
+  "engine/lib/sage.src": 1286
+ }
+}
