@@ -3058,13 +3058,13 @@ def _cat(vals, dim, narrow=True):
                 return r
             break
     cls = _cat_class(vals)
-    # empty values do not take part (but count for the class)
+    # Empty values mixed with nonempty values are omitted (but count for class).
     parts = [v for v in vals if _numel(v) != 0]
     if not parts:
-        v = vals[0]
-        if cls == "char":
-            return Char("") if type(v) is not Char else v
-        return v if cls != "cell" else Cell([], (0, 0))
+        # All-empty inputs still concatenate their dimensions. A 0-by-0 [] is
+        # omitted when another empty shape is present; all [] inputs must stay
+        # to retain, for example, cat(3, [], [])'s 0-by-0-by-2 result.
+        parts = [v for v in vals if _dims(v) != (0, 0)] or list(vals)
     if cls == "handle":
         items = [v if type(v) is HandleArr else HandleArr([v], (1, 1)) for v in parts]
         r = _cat_containers(items, dim, Cell)
