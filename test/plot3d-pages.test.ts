@@ -38,7 +38,7 @@ test("a big scene's fresh page: written whole by jupyter_bundle, and .sagebrush 
   }
 });
 
-test("_temp_for names its writer's temporary by host, process and thread; _write_page leaves no temporary", () => {
+test("_temp_for names a new temporary each time, by host, process, thread and 64 random bits; _write_page leaves no temporary", () => {
   const dir = mkdtempSync(join(tmpdir(), "sb-plot3d-"));
   try {
     const out = py(
@@ -46,7 +46,8 @@ test("_temp_for names its writer's temporary by host, process and thread; _write
         "import os, sage_plot3d as p3",
         "t = p3._temp_for('d')",
         "host = os.path.basename(os.path.dirname(t))",
-        "print(os.path.dirname(os.path.dirname(t)) == os.path.join('d', '.plot3d-tmp'), os.path.basename(t) == '%d-%d' % (os.getpid(), 1), host == p3._host() == os.uname().nodename.replace('/', '_'))",
+        "import re",
+        "print(os.path.dirname(os.path.dirname(t)) == os.path.join('d', '.plot3d-tmp'), re.fullmatch('%d-1-[0-9a-f]{16}' % os.getpid(), os.path.basename(t)) is not None and t != p3._temp_for('d'), host == p3._host() == os.uname().nodename.replace('/', '_'))",
         "os.makedirs('d')",
         "p3._write_page(os.path.join('d', 'a.html'), 'one')",
         "p3._write_page(os.path.join('d', 'a.html'), 'two')",
@@ -109,6 +110,47 @@ test("_write_page's guards: another writer's removal is retried, never swallowed
       dir,
     );
     assert.equal(out, "raced ['a.html']\nFileNotFoundError False\nOSError True False\n['.plot3d-tmp', 'a.html'] []\n");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// (astra's PLOT694-WRITER-1: Sagebrush's Node workers share one pid, and _thread.get_ident() is always 1, so two
+// writers in one folder differ in nothing but their random part.  Their schedule, deterministic: writer A is paused
+// right after its open, writer B writes its page whole and renames it, then A goes on.  Both pages must be whole and
+// each its own, with the draws distinct, and with B's first draw A's own (the exclusive open then draws again))
+test("two writers of one pid and thread, overlapping: both pages whole, neither cross-written", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sb-plot3d-"));
+  try {
+    const out = py(
+      [
+        "import builtins, os, sage_plot3d as p3",
+        "os.makedirs('d')",
+        "real_open, real_urandom = builtins.open, os.urandom",
+        "def overlap(draws):",
+        "    seq = list(draws)",
+        "    os.urandom = lambda n: seq.pop(0) if seq else real_urandom(n)",
+        "    paused = [True]",
+        "    def opening(*a, **k):",
+        "        f = real_open(*a, **k)",
+        "        if paused[0] and a and '.plot3d-tmp' in str(a[0]):",
+        "            paused[0] = False",
+        "            p3._write_page(os.path.join('d', 'B.html'), 'BBBB')",  // (B, whole, while A holds its open temporary)
+        "        return f",
+        "    builtins.open = opening",
+        "    try:",
+        "        p3._write_page(os.path.join('d', 'A.html'), 'AAAA')",
+        "    finally:",
+        "        builtins.open, os.urandom = real_open, real_urandom",
+        "    pages = [open(os.path.join('d', n)).read() for n in ('A.html', 'B.html')]",
+        "    os.unlink(os.path.join('d', 'A.html')); os.unlink(os.path.join('d', 'B.html'))",
+        "    return pages, sorted(os.listdir('d'))",
+        "print(overlap([b'\\x11' * 8, b'\\x22' * 8]))",
+        "print(overlap([b'\\x33' * 8, b'\\x33' * 8, b'\\x44' * 8]))",
+      ].join("\n"),
+      dir,
+    );
+    assert.equal(out, "(['AAAA', 'BBBB'], [])\n(['AAAA', 'BBBB'], [])\n");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

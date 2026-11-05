@@ -730,12 +730,14 @@ def jupyter_bundle(scene_json, svg, title, page):
 
 
 # ------------------------------------------------------------------ pages on disk
-# A page is written to its writer's own temporary, named directly (one per
-# host, process and thread: .sagebrush/.plot3d-tmp/<host>/<pid>-<tid>), closed,
-# then renamed over its name.  Whatever an interrupted write of the same
-# writer left is overwritten, never searched for: the write touches its
-# temporary and its name, whatever else the directory holds.  The temporaries
-# of writers that died are _gc_temps()'s, once per session start.
+# A page is written to a temporary of its own, closed, then renamed over its
+# name.  Each write makes its temporary exclusively (mode "x"), named by host,
+# process, thread and 64 random bits (.sagebrush/.plot3d-tmp/<host>/<pid>-<tid>-<hex>):
+# Sagebrush's Node workers share one pid and one thread id, so the random part
+# keeps two writers' temporaries apart, and the exclusive open makes sure of it
+# (a name drawn twice is drawn again).  A write touches only the temporary it
+# made and its page's name; a failure removes that temporary only.  The
+# temporaries of writers that died are _gc_temps()'s, once per session start.
 
 def _host():
     import os
@@ -754,11 +756,12 @@ def _host():
 
 
 def _temp_for(root):
+    """A new name for a temporary under root, one per call (made exclusively by _write_page)."""
     import os
     # (_thread, not threading: Sagebrush has no threading module; _thread.get_ident is the function threading
-    # re-exports)
+    # re-exports.  The pid and thread id are not unique in Sagebrush: the random part is what is)
     import _thread
-    return os.path.join(root, ".plot3d-tmp", _host(), "%d-%d" % (os.getpid(), _thread.get_ident()))
+    return os.path.join(root, ".plot3d-tmp", _host(), "%d-%d-%s" % (os.getpid(), _thread.get_ident(), os.urandom(8).hex()))
 
 
 def _write_page(path, text):
@@ -767,18 +770,21 @@ def _write_page(path, text):
     A failure removes that temporary (by name) and raises."""
     import io
     import os
-    tmp = _temp_for(os.path.dirname(path) or ".")
+    root = os.path.dirname(path) or "."
     # (a file object, not a bare fd: if an interrupt skips the close, the
-    # object's finalizer still closes it as the frame unwinds; its directory
-    # made again if another writer removed it, empty, in between, a few times)
+    # object's finalizer still closes it as the frame unwinds.  Made
+    # exclusively: a name another writer holds is drawn again, and a directory
+    # another writer removed, empty, in between is made again; a few times)
     for attempt in range(8):
+        tmp = _temp_for(root)
         os.makedirs(os.path.dirname(tmp), exist_ok=True)
         try:
-            f = open(tmp, "w", encoding="utf-8", opener=lambda p, fl: os.open(p, fl | getattr(os, "O_NOFOLLOW", 0), 0o666))
+            f = open(tmp, "x", encoding="utf-8", opener=lambda p, fl: os.open(p, fl | getattr(os, "O_NOFOLLOW", 0), 0o666))
             break
-        except FileNotFoundError:
+        except (FileExistsError, FileNotFoundError):
             if attempt == 7:
                 raise
+    # (from here tmp is this write's own: the only temporary it removes)
     try:
         f.write(text)
         f.flush()
@@ -797,7 +803,7 @@ def _write_page(path, text):
                 os.rmdir(d)
             except OSError:
                 break
-    except OSError:
+    except BaseException:
         f.close()
         try:
             os.unlink(tmp)
@@ -878,7 +884,8 @@ def _gc_temps(root=".sagebrush", budget_s=_GC_BUDGET_S, clock=None, alive=None):
             # before it instead of only reading them)
             restart = seeking and e.name == cursor
             seeking = False
-            m = re.fullmatch(r"(\d+)-(\d+)", e.name)
+            # (<pid>-<tid>-<hex>, and the <pid>-<tid> of writers before the random part)
+            m = re.fullmatch(r"(\d+)-(\d+)(?:-[0-9a-f]{16})?", e.name)
             removed = False
             if m and int(m.group(1)) != me and not alive(int(m.group(1))):
                 try:
