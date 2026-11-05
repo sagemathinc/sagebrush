@@ -138,7 +138,13 @@ const tty = (args: string[], input: string) => {
 // assertions then see the transcript.
 const ttySteps = (args: string[], steps: string[], prompt: string): Promise<{ status: number | null; out: string; err?: Error }> => {
   const cmd = [process.execPath, cli, ...args].map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(" ");
-  const child = spawn("script", ["-qec", cmd, "/dev/null"], { stdio: ["pipe", "pipe", "pipe"] });
+  const child = spawn("script", ["-qec", cmd, "/dev/null"], {
+    stdio: ["pipe", "pipe", "pipe"],
+    // A real interactive terminal provides a terminal type.  The noninteractive
+    // test runner commonly exports TERM=dumb, under which readline accepts a Tab
+    // literally instead of asking the completer.
+    env: { ...process.env, TERM: "xterm" },
+  });
   const clean = (t: string) => t.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replace(/\r/g, "");
   let raw = "";
   let wake: (() => void) | null = null;
