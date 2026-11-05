@@ -223,3 +223,38 @@ test("the backend functions refuse a non-square matrix before admitting or loadi
   ].join("\n");
   assert.deepEqual(run(code), [...Array(9).fill("Last 2 dimensions of the array must be square"), "undecided"]);
 });
+
+test("each engine/nd call admits its exact work, the module's scratch and solve's B included: refused one byte under, run at it (grader L12)", async () => {
+  const { notebookSession } = require("../src/notebook-session");
+  const Obj = require("../src/runtime/object");
+  const np = require("../src/runtime/numpy");
+  const nd = require("../src/runtime/nd");
+  const s = notebookSession(() => {}, { captureStreams: true });
+  await s.ready;
+  const n = N;
+  await s.handle({ id: 1, code: `import numpy as np, _nplinalg as L\nA = np.random.default_rng(3).standard_normal((${n}, ${n})) + ${n} * np.eye(${n})\nb = np.ones(${n}); B = np.ones((${n}, 3))\nL.det(A)` });
+  assert.equal(nd.ndPath().path, "engine/nd");
+  const main = Obj.getattr(require("../src/runtime").R.importModule("__main__"), "__dict__");
+  const g = (name: string) => Obj.callObj(Obj.getattr(main, "__getitem__"), [name]);
+  const call = (fname: string, args: any[]) => () => Obj.callObj(Obj.getattr(g("L"), fname), args);
+  const sc = nd.ndScratch(), nn = n * n;
+  // (each one's admission in float64s, as numpy_linalg.ts states it: the older LU's figure plus engine/nd's terms)
+  const CASES: [string, () => any, number][] = [
+    ["solve vector", call("solve", [g("A"), g("b")]), 5 * nn + 6 * n + sc + n],
+    ["solve matrix", call("solve", [g("A"), g("B")]), 5 * nn + 6 * 3 * n + sc + 3 * n],
+    ["det", call("det", [g("A")]), 5 * nn + sc],
+    ["slogdet", call("slogdet", [g("A")]), 5 * nn + sc],
+    ["inv", call("inv", [g("A")]), 10 * nn + sc],
+  ];
+  const saved = np.ARRAY_LIMITS.bytes;
+  try {
+    for (const [name, f, units] of CASES) {
+      np.ARRAY_LIMITS.bytes = 8 * units - 1;
+      assert.throws(f, (e: any) => Obj.isinstance(e, Obj.T.MemoryError), `${name}: not refused one byte under its ${8 * units}`);
+      np.ARRAY_LIMITS.bytes = 8 * units;
+      f();
+    }
+  } finally {
+    np.ARRAY_LIMITS.bytes = saved;
+  }
+});
