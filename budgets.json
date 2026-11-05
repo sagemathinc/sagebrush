@@ -725,7 +725,7 @@
  "epoch": {
   "sizes": {
    "cli/lib.gen.js": 3004166,
-   "cli/pyjs.cjs": 26004526,
+   "cli/pyjs.cjs": 26008102,
    "engine/lib/core.pre": 1818321,
    "engine/lib/core.src": 423165,
    "engine/lib/magma-more.src": 146512,
@@ -822,12 +822,12 @@
    "engine/sagebrush-raster.wasm": 825569,
    "engine/sagebrush-viewer3d.js": 88151,
    "engine/sagebrush-worker.js": 1635087,
-   "examples/corpus": 2229527,
-   "examples/index.json": 19514,
-   "site/examples": 7555884
+   "examples/corpus": 2238299,
+   "examples/index.json": 20636,
+   "site/examples": 7593571
   },
   "reset": {
-   "reason": "U7 PR 3 (#548): the examples gallery's three size rows (plan-examples-gallery section 5; daybreak2's ruling): examples/corpus, site/examples and examples/index.json, measured by scripts/size-measure.mjs's examplesFiles, a measurement move (its sha256 is in the key). Added by this reset, seeded at the merge's sizes; no existing row's measurement changes. Redone on master 0d651c65 (after #543 and the #729 epoch): every shared row of the merge equals the base's record, so growth is empty; the markers it removes are absorbed by the merge's sizes.",
+   "reason": "U7 PR 3 (#548): the examples gallery's three size rows (plan-examples-gallery section 5; daybreak2's ruling): examples/corpus, site/examples and examples/index.json, measured by scripts/size-measure.mjs's examplesFiles, a measurement move (its sha256 is in the key). Added by this reset, seeded at the merge's sizes; no existing row's measurement changes. Redone on master 04240a6f (after #732): every shared row of the merge equals the base's record, so growth is empty; the markers it removes are absorbed by the merge's sizes.",
    "prev": "1999dc022d7678b8cea2f13eb9a2b4273afd8c6bdae22a12021aabed9c345efe",
    "growth": {},
    "map": [],
