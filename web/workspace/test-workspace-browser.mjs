@@ -134,6 +134,53 @@ try {
   check(await until(`!!document.querySelector("#wssidebar .frow input")`), "New board: named in place");
   await typeInto("Course plan");
   check(await until(`${W}.stat("/Course plan.board.json").then((e) => !!e)`), "…as Course plan.board.json");
+  // (…and opened once named, as a click on its row opens it: sage's n8 walkthrough; then back to the notebook page)
+  check(await until(`location.pathname.startsWith("/board/") && /Course plan/.test(document.title)`, 30000), "…and opened once named: " + JSON.stringify(await ev("location.pathname + ' ' + document.title").catch(() => null)));
+  await go(base);
+  await until(`!!${W}`, 60000);
+  if (await ev(`${S}.hidden`)) await click("#wsfilesbtn");
+  await until(`!!document.querySelector(${JSON.stringify(rowSel("/Algebra"))})`);
+  // N8 (sage's n8 walkthrough): a new notebook is opened once named (Enter, or Esc keeping Untitled), from the
+  // top New and from a folder's menu; MATLAB notebook makes one in MATLAB; what is typed then goes into it, never into
+  // the notebook that was open
+  {
+    const was = await ev(`document.querySelector("#nbname").value`);
+    await click("#wssidebar .fh button[aria-label=New]");
+    await menu("Notebook");
+    await until(`!!document.querySelector("#wssidebar .frow input")`);
+    await typeInto("N8 fresh");
+    const opened = await until(`document.querySelector("#nbname").value === "N8 fresh"`, 30000);
+    check(opened, "N8: New ▸ Notebook, named: opened once named (was " + JSON.stringify(was) + ")");
+    await until(`window.sagebrush.notebook.cells().length > 0`);
+    await ev(`(window.sagebrush.notebook.cells()[0].ta.focus(), 1)`);
+    await send("Input.insertText", { text: "n8_typed = 1" });
+    await ev(`window.sagebrush.notebook.saved?.()`);
+    const into = await until(`${W}.read("/N8 fresh.ipynb").then((r) => JSON.stringify(r.content).includes("n8_typed = 1")).catch(() => false)`, 15000);
+    check(into, "N8: what is typed then goes into the new notebook");
+    check(!(await ev(`${W}.list("/").then(async (l) => { for (const e of l) if (e.kind === "notebook" && e.path !== "/N8 fresh.ipynb") { const r = await ${W}.read(e.path).catch(() => null); if (r && JSON.stringify(r.content).includes("n8_typed")) return e.path; } return false; })`)), "N8: …and into no other notebook (not the one that was open)");
+    // (a folder's menu, MATLAB notebook, Esc keeping Untitled)
+    await until(`!!document.querySelector(${JSON.stringify(rowSel("/Algebra"))})`);
+    await click(rowSel("/Algebra") + " .more");
+    await menu("New MATLAB notebook here");
+    await until(`!!document.querySelector("#wssidebar .frow input")`);
+    await ev(`(() => { const i = document.querySelector("#wssidebar .frow input"); i.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); return 1; })()`);
+    const m = await until(`document.querySelector("#nbname").value === "Untitled" && window.sagebrush.notebook.mode === "matlab"`, 30000);
+    check(m && (await ev(`${W}.stat("/Algebra/Untitled.ipynb").then((e) => !!e)`)), "N8: a folder's New MATLAB notebook here, Esc: Untitled, in MATLAB, opened: " + JSON.stringify(await ev(`[document.querySelector("#nbname").value, window.sagebrush.notebook.mode]`)));
+    // (the top New's MATLAB notebook)
+    await click("#wssidebar .fh button[aria-label=New]");
+    await menu("MATLAB notebook");
+    await until(`!!document.querySelector("#wssidebar .frow input")`);
+    await typeInto("N8 matlab");
+    check(await until(`document.querySelector("#nbname").value === "N8 matlab" && window.sagebrush.notebook.mode === "matlab"`, 30000), "N8: New ▸ MATLAB notebook, named: opened, in MATLAB");
+    // (a folder: made and named, nothing opened)
+    await click("#wssidebar .fh button[aria-label=New]");
+    await menu("Folder");
+    await until(`!!document.querySelector("#wssidebar .frow input")`);
+    await typeInto("N8 folder");
+    await until(`${W}.stat("/N8 folder").then((e) => e?.kind === "folder")`);
+    await sleep(500);
+    check((await ev(`document.querySelector("#nbname").value`)) === "N8 matlab", "N8: a new folder opens nothing");
+  }
   // a folder, and files dropped on it
   await click("#wssidebar .fh button[aria-label=New]");
   await menu("Folder");

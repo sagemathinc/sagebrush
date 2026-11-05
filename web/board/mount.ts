@@ -316,9 +316,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // drawn by filemenu.ts with this board's keys; what isn't here, disabled
   renderFileMenu($("filemenu"), {
     attr: "data-sbb",
-    keys: { newNotebook: "newnotebook", newBoard: "newboard", newFolder: "newfolder", fromExample: "examples", open: "openfiles", upload: "open", saveCopy: "duplicate", rename: "rename", print: "print", share: "share", delete: "deleteboard" },
+    keys: { newNotebook: "newnotebook", newMatlab: "newmatlab", newBoard: "newboard", newFolder: "newfolder", fromExample: "examples", open: "openfiles", upload: "open", saveCopy: "duplicate", rename: "rename", print: "print", share: "share", delete: "deleteboard" },
     disabled: {
-      newNotebook: !host.files?.newNotebook, newFolder: !host.files?.newFolder, fromExample: !host.examples, open: !host.files?.open,
+      newNotebook: !host.files?.newNotebook, newMatlab: !host.files?.newNotebook, newFolder: !host.files?.newFolder, fromExample: !host.examples, open: !host.files?.open,
       saveCopy: !host.duplicate, share: true, delete: !host.files?.delete,
     },
     downloads: [
@@ -1780,6 +1780,10 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   $("newnotebook").onclick = async () => {
     await editor.keepWriting();
     elsewhereNot("No new notebook made", () => host.files!.newNotebook!(doc?.mode ?? "python"));
+  };
+  $("newmatlab").onclick = async () => {
+    await editor.keepWriting();
+    elsewhereNot("No new notebook made", () => host.files!.newNotebook!("matlab"));
   };
   $("newfolder").onclick = () => elsewhereNot("No folder made", () => host.files!.newFolder!());
   $("openfiles").onclick = () => host.files?.open?.();
