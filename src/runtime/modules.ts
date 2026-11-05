@@ -1371,6 +1371,118 @@ newBuiltinModule("math", (m) => {
     }
     return O.mkfloat(hi);
   });
+  // math.sumprod(p, q) as CPython 3.14's math_sumprod_impl (Modules/mathmodule.c, ported: NOTICE.md): p and q
+  // iterated in lockstep (unequal lengths a ValueError); an exact int fast path while the items, their products and
+  // the running total fit a C long, then a float path summing float*float and float*int products in triple-length
+  // arithmetic (Ogita, Rump and Oishi, "Accurate Sum and Dot Product", 2005, Algorithm 5.10 with SumKVert, K = 3),
+  // and each item after either path ends through Python's * and +. Each path ends for good at the first item it
+  // can't take (or a C long overflow, or a non-finite triple-length total), as CPython's does: the order in which
+  // the partial totals join the result is CPython's, so is the result.
+  const INT64_MIN = -(2n ** 63n), INT64_MAX = 2n ** 63n - 1n;
+  const asLong = (x: any): bigint | null => {
+    const b = BigInt(x);
+    return b < INT64_MIN || b > INT64_MAX ? null : b;
+  };
+  const exactInt = (x: any) => typeof x === "bigint" || (typeof x === "number" && Number.isInteger(x));
+  const exactFloat = (x: any) => (typeof x === "number" && !Number.isInteger(x)) || (x instanceof FloatBox && x.constructor === FloatBox);
+  // (dl_sum: the error-free sum)
+  const dlSum = (a: number, b: number): [number, number] => {
+    const x = a + b, z = x - a;
+    return [x, a - (x - z) + (b - z)];
+  };
+  // (dl_mul: the product and its rounding error, which CPython takes from fma(x, y, -x*y). Dekker's split, with
+  // both factors brought into [2^-250, 2^250] by powers of two so that it neither overflows nor loses bits, then
+  // the error scaled back, one rounding as fma's; a subnormal or zero product's error rounds to 0, as fma's does)
+  const prodErr = (a: number, b: number, p: number): number => {
+    if (!Number.isFinite(p) || p === 0 || Math.abs(p) < 2 ** -1022) return 0;
+    let k = 0;
+    while (Math.abs(a) > 2 ** 250) (a *= 2 ** -250), (k += 250);
+    while (Math.abs(a) < 2 ** -250) (a *= 2 ** 250), (k -= 250);
+    while (Math.abs(b) > 2 ** 250) (b *= 2 ** -250), (k += 250);
+    while (Math.abs(b) < 2 ** -250) (b *= 2 ** 250), (k -= 250);
+    const q = a * b;
+    const ca = 134217729 * a, ah = ca - (ca - a), al = a - ah;
+    const cb = 134217729 * b, bh = cb - (cb - b), bl = b - bh;
+    let e = ah * bh - q + ah * bl + al * bh + al * bl;
+    while (k > 0) (e *= 2 ** Math.min(k, 1000)), (k -= Math.min(k, 1000));
+    if (k < -1000) (e *= 2 ** (k + 1000)), (k = -1000);
+    return e * 2 ** k;
+  };
+  fn(m, "sumprod", (p: any, q: any) => {
+    const pIt = O.iter(p), qIt = O.iter(q);
+    const STOP = {};
+    let total: any = 0;
+    let intPath = true, intInUse = false, intTotal = 0n;
+    let fltPath = true, fltInUse = false, hi = 0.0, lo = 0.0, tiny = 0.0;
+    for (let count = 1; ; count++) {
+      if ((count & 1023) === 0) O.pollInterrupt();
+      const pi = O.next(pIt, STOP), qi = O.next(qIt, STOP);
+      const pStop = pi === STOP, qStop = qi === STOP;
+      if (pStop !== qStop) raise(T.ValueError, "Inputs are not the same length");
+      const finished = pStop;
+      if (intPath) {
+        if (!finished && exactInt(pi) && exactInt(qi)) {
+          const ip = asLong(pi), iq = asLong(qi);
+          if (ip !== null && iq !== null) {
+            const prod = ip * iq;
+            if (prod >= INT64_MIN && prod <= INT64_MAX && intTotal + prod >= INT64_MIN && intTotal + prod <= INT64_MAX) {
+              intTotal += prod;
+              intInUse = true;
+              continue;
+            }
+          }
+        }
+        // (finished, overflowed, or not two ints)
+        intPath = false;
+        if (intInUse) {
+          total = O.add(total, O.normBig(intTotal));
+          intTotal = 0n;
+          intInUse = false;
+        }
+      }
+      if (fltPath) {
+        if (!finished) {
+          let fp = NaN, fq = NaN, ok = true;
+          const toD = (x: any): number => (typeof x === "boolean" ? +x : Number(x));
+          if (exactFloat(pi) && exactFloat(qi)) (fp = F(pi)), (fq = F(qi));
+          else if (exactFloat(pi) && (exactInt(qi) || typeof qi === "boolean")) {
+            fp = F(pi);
+            fq = toD(qi);
+            if (!Number.isFinite(fq)) ok = false; // (an int too large for a float: CPython's OverflowError, cleared)
+          } else if (exactFloat(qi) && (exactInt(pi) || typeof pi === "boolean")) {
+            fq = F(qi);
+            fp = toD(pi);
+            if (!Number.isFinite(fp)) ok = false;
+          } else ok = false;
+          if (ok) {
+            // (tl_fma: Algorithm 5.10 with SumKVert for K = 3)
+            const z = fp * fq, zz = prodErr(fp, fq, z);
+            const [smHi, smLo] = dlSum(hi, z);
+            const [r1Hi, r1Lo] = dlSum(lo, zz);
+            const [r2Hi, r2Lo] = dlSum(r1Hi, smLo);
+            if (Number.isFinite(smHi)) {
+              hi = smHi;
+              lo = r2Hi;
+              tiny = tiny + r1Lo + r2Lo;
+              fltInUse = true;
+              continue;
+            }
+          }
+        }
+        // (finished, overflowed, not a float pair, or a non-finite value)
+        fltPath = false;
+        if (fltInUse) {
+          // (tl_to_d)
+          const [lastHi, lastLo] = dlSum(lo, hi);
+          total = O.add(total, O.mkfloat(tiny + lastLo + lastHi));
+          hi = lo = tiny = 0.0;
+          fltInUse = false;
+        }
+      }
+      if (finished) return total;
+      total = O.add(total, O.mul(pi, qi));
+    }
+  });
   // math.prod(iterable, /, *, start=1) as CPython's math_prod_impl: left
   // to right, each item's __mul__ called in turn; while the product and
   // the items are exact ints (bools among the items), CPython's int fast
