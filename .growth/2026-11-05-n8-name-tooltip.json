@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "Two fixes from sage's DEV n8 walkthrough (@sagebrush's order, Nov 5). The file browser's rename (web/workspace/browser.ts): a notebook's or board's name typed with its own extension gets it once, not twice (chapter1.ipynb.ipynb), and the extension alone keeps the old name. The notebook page's language menu (web/index.html): its tooltip says what the selected language does (a line per language, MODE_TITLE, set by showMode wherever the page sets the language), where it always said Sage's. Measured on master 567c0ee9 with bun 1.4.4: cli/pyjs.cjs +636 B, the page's inlined script; no other row moves.",
- "bytes": {
-  "cli/pyjs.cjs": 660
- }
-}
