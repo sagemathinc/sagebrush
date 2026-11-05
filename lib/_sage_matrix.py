@@ -3986,6 +3986,17 @@ class ComplexNumber(complex):
         (-3.00000000000000 + 4.00000000000000*I, 2.23606797749979, 1.00000000000000, 2.00000000000000)
     """
 
+    def _latex_(self):
+        """As Sage's latex() of an element of CC: i for I, an exponent as a power of ten.
+
+        EXAMPLES::
+
+            sage: latex(CC(1e20, 2e-7)), latex(CC(2, 0))
+            (1.00000000000000 \\times 10^{20} + 2.00000000000000 \\times 10^{-7}i, 2.00000000000000)
+        """
+        import _sage_real
+        return _sage_real._sci_latex(repr(self).replace("*I", "i"))
+
     def conjugate(self):
         """The complex conjugate, an element of CC (complex's own gave a
         Python complex).
