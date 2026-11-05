@@ -195,6 +195,34 @@ import helper
   ok(r.complete, "complete");
 }
 
+// ---- \include always adds .tex; \bibliography{x.bib} as written; \subfile read and followed; an already-aborted
+// signal: complete false (TESTS, #731 a2af0f87: D1, D4, D14, D13)
+{
+  const r = await run({ "/i/main.tex": "\\include{notes}\n", "/i/notes": "x" }, "/i/main.tex", "tex");
+  eq(r.rows, [["/i/notes.tex", "include", false, false, null, "\\include in main.tex (not found)"]], "\\include{notes} with only an extensionless notes: notes.tex, not found");
+}
+{
+  const r = await run({ "/b/main.tex": "\\bibliography{refs.bib}\n", "/b/refs.bib": "@book{}", "/b/refs.bib.bib": "@book{}" }, "/b/main.tex", "tex");
+  eq(r.paths, ["/b/refs.bib"], "\\bibliography{refs.bib}: refs.bib as written, never refs.bib.bib");
+}
+{
+  const files = { "/s/main.tex": "\\subfile{sec/a}\n", "/s/sec/a.tex": "\\input{sec/b}\n", "/s/sec/b.tex": "" };
+  const r = await run(files, "/s/main.tex", "tex");
+  eq(r.rows, [
+    ["/s/sec/a.tex", "input", true, true, null, "\\subfile in main.tex"],
+    ["/s/sec/b.tex", "input", true, true, "/s/sec/a.tex", "\\input in sec/a.tex"],
+  ], "\\subfile: listed via input, read and followed");
+}
+{
+  const c = new AbortController();
+  c.abort();
+  const tex = await run({ "/a/main.tex": "\\input{x}\n", "/a/x.tex": "" }, "/a/main.tex", "tex", { signal: c.signal });
+  const book = await run({ "/a/nb.ipynb": nb(["import helper\n"]), "/a/helper.py": "" }, "/a/nb.ipynb", "ipynb", { signal: c.signal });
+  // (a notebook with no cells reaches neither fileDeps nor the LaTeX walk: only the final check sees the signal)
+  const empty = await run({ "/a/e.ipynb": nb([]) }, "/a/e.ipynb", "ipynb", { signal: c.signal });
+  ok(!tex.complete && !book.complete && !empty.complete, "an already-aborted signal: complete false (LaTeX, a notebook, an empty notebook)");
+}
+
 // ---- an \input file that can't be read: listed, and complete false
 {
   const files = { "/u/main.tex": "\\input{a}\n", "/u/a.tex": null };
