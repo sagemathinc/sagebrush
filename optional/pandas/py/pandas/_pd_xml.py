@@ -3,7 +3,8 @@ timeseries r1, PR B): elements, attributes, text, the five predefined
 entities and numeric character references, comments, and the XML
 declaration.  A DOCTYPE, an entity of any other name, CDATA and any other
 processing instruction are refused (ValueError), so there is no external
-entity and no entity expansion.  It holds no tree: `events(text)` yields
+entity and no entity expansion.  Elements nest at most MAX_DEPTH (64) deep;
+a workbook's parts nest under ten.  It holds no tree: `events(text)` yields
 ("start", name, attrs), ("end", name) and ("text", str) in order, an empty
 element giving its start and end.  Names keep their prefix ("x:c"); `local`
 drops it.
@@ -11,7 +12,9 @@ drops it.
 
 import re
 
-__all__ = ["events", "local"]
+__all__ = ["events", "local", "MAX_DEPTH"]
+
+MAX_DEPTH = 64
 
 # (a tag, its quoted attribute values allowed to hold ">", as XML lets them; text; or a stray "<")
 _TOKEN = re.compile(r"<(?:[^<>\"']|\"[^\"]*\"|'[^']*')*>|[^<]+|<")
@@ -117,6 +120,8 @@ def events(text):
         if s.group(3):
             yield ("end", s.group(1))
         else:
+            if len(stack) >= MAX_DEPTH:
+                raise _bad("elements nested more than %d deep" % MAX_DEPTH)
             stack.append(s.group(1))
     if stack:
         raise _bad("an element with no end")

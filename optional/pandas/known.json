@@ -607,6 +607,26 @@
       "reason": "only the default NA strings and decimal point are read here"
     },
     {
+      "case": "xl.usecols-negative",
+      "message": "pandas: read_excel(usecols=) with a negative position is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas reads a negative position as no column and gives an empty frame with no rows; refused rather than read nothing silently"
+    },
+    {
+      "case": "xl.usecols-none",
+      "message": "pandas: read_excel(usecols=) selecting no column is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas gives an empty frame with no rows for a usecols that selects no column; refused rather than read nothing silently"
+    },
+    {
+      "case": "xl.usecols-none-letters",
+      "message": "pandas: read_excel(usecols=) selecting no column is not in Sagebrush's pandas 0.x subset",
+      "reason": "a letter range such as \"A:\" selects no column (pandas' _range2cols reads its empty end as -1); refused as an empty usecols is"
+    },
+    {
+      "case": "xl.nrows-negative-float",
+      "message": "pandas: read_excel(nrows=) a negative float is not in Sagebrush's pandas 0.x subset",
+      "reason": "pandas' validate_integer takes an integral float without checking its sign, so nrows=-1.0 gives an empty frame where nrows=-1 is a ValueError; refused here"
+    },
+    {
       "case": "xl.xls",
       "message": "pandas: an .xls workbook (only .xlsx and .xlsm are read) is not in Sagebrush's pandas 0.x subset",
       "reason": "the binary .xls format (pandas reads it with xlrd or calamine) is not read: only the zip-based .xlsx"

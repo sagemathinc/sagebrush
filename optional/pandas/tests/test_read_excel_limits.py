@@ -1,13 +1,17 @@
 # read_excel's bounds and refusals, Sagebrush's own (the oracle has none of
 # them, so this test's .out is Sagebrush's): the zip archive's (_pd_zip.py,
-# checked before anything is inflated), the XML scanner's closed grammar
-# (_pd_xml.py), and the sheet's fast path agreeing with the scanner.
+# checked before anything is inflated), the XML scanner's closed grammar and
+# depth (_pd_xml.py), Excel's rows and columns, and the sheet's fast path
+# agreeing with the scanner, its work linear and its attributes the scanner's.
+# (The decoded budget's charge for a sheet's cells: test_read_excel_budget.py.)
 import io
 import zlib
 
 import pandas as pd
 from pandas import _pd_excel as X
+from pandas import _pd_xml as XML
 from pandas import _pd_zip as Z
+from pandas._pd_csv import _NoBudget
 from _cases import case
 from _xlsx import workbook, zip_bytes, deflate_runs, MAIN
 
@@ -86,4 +90,39 @@ text = X._xml(z, sheets[0][1])
 case("paths agree", lambda: (repr(sorted(X._fast_rows(text, strings, xfs, d1904).items())) == repr(sorted(X._scan_rows(text, strings, xfs, d1904).items())), len(X._scan_rows(text, strings, xfs, d1904))))
 case("fast path taken", lambda: X._fast_rows(text, strings, xfs, d1904) is not None)
 prefixed = text.replace("<sheetData>", "<sheetData >")
-case("fallback taken", lambda: (X._fast_rows(prefixed, strings, xfs, d1904) is None, X._sheet_rows(z, sheets[0][1], strings, xfs, d1904)[:2]))
+case("fallback taken", lambda: (X._fast_rows(prefixed, strings, xfs, d1904) is None, X._sheet_rows(z, sheets[0][1], strings, xfs, d1904, _NoBudget(), None)[:2]))
+
+
+def sheet(rows_xml, open_tag="<sheetData>"):
+    return '<worksheet xmlns="%s">%s%s</sheetData></worksheet>' % (MAIN, open_tag, rows_xml)
+
+
+# Excel's rows and columns: a cell past either is refused before any row is made, whatever the budget
+case("row past Excel's", lambda: read(with_sheet(sheet('<row r="1048577"><c r="A1048577"><v>1</v></c></row>'))))
+case("column past Excel's", lambda: read(with_sheet(sheet('<row r="1"><c r="XFE1"><v>1</v></c></row>'))))
+case("row past Excel's, scanner", lambda: read(with_sheet(sheet('<row r="1048577"><c r="A1048577"><v>1</v></c></row>', "<sheetData >"))))
+
+# the fast path's work: sheetData found by find and rfind, so 200,000 openings and no close take one pass
+# (a quadratic search would take minutes here), and the scanner then refuses the nesting
+opens = '<worksheet xmlns="%s">' % MAIN + "<sheetData>" * 200000
+case("openings, fast path", lambda: X._fast_rows(opens, strings, xfs, d1904))
+case("openings, scanner", lambda: X._scan_rows(opens, strings, xfs, d1904))
+closed = opens + "</sheetData>"
+case("openings and one close, fast path", lambda: X._fast_rows(closed, strings, xfs, d1904))
+
+# the scanner's depth: MAX_DEPTH elements nest, one more is refused, as are 10,000
+nest = lambda n: "<a>" * n + "</a>" * n
+case("max depth", lambda: XML.MAX_DEPTH)
+case("depth at", lambda: len(list(XML.events(nest(XML.MAX_DEPTH)))))
+case("depth past", lambda: len(list(XML.events(nest(XML.MAX_DEPTH + 1)))))
+case("depth 10000", lambda: len(list(XML.events(nest(10000)))))
+
+# the attributes: a reference in a row's or a cell's attribute, even one read nowhere, is decided by the
+# scanner's grammar on both paths; the predefined and numeric ones read
+ext_row = '<row r="1" ignored="&external;"><c r="A1"><v>1</v></c></row><row r="2"><c r="A2"><v>2</v></c></row>'
+ext_cell = '<row r="1"><c r="A1" ignored="&external;"><v>1</v></c></row><row r="2"><c r="A2"><v>2</v></c></row>'
+ok_row = '<row r="1" ignored="&amp;&#65;"><c r="A1"><v>1</v></c></row><row r="2"><c r="A2" ignored="&lt;&#x42;"><v>2</v></c></row>'
+for name, rows_xml in [("row entity", ext_row), ("cell entity", ext_cell), ("predefined", ok_row)]:
+    case(name + ", fast path", lambda rows_xml=rows_xml: read(with_sheet(sheet(rows_xml))))
+    case(name + ", scanner", lambda rows_xml=rows_xml: read(with_sheet(sheet(rows_xml, "<sheetData >"))))
+    case(name + ", fast path falls back", lambda rows_xml=rows_xml: X._fast_rows(sheet(rows_xml), strings, xfs, d1904) is None)

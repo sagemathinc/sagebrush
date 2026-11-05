@@ -24,6 +24,7 @@ from datetime import datetime, time, timedelta
 
 import numpy as np
 
+from .errors import ParserError
 from ._pd_zip import ZipArchive
 from ._pd_xml import events, local
 
@@ -163,8 +164,11 @@ def _col_index(letters):
 # write; the rest of the document is checked by the scanner (events), sheetData left out.  Anything else, a
 # prefix, a gap, an attribute in another form, falls back to the scanner for the whole sheet, so a malformed
 # part is refused exactly as there.  A cell holding more than one <v>, or a formula, an inline string or a
-# reference, is read by the scanner too.
-_SHEET_DATA = re.compile(r"<sheetData>(.*)</sheetData>", re.S)
+# reference, is read by the scanner too, and so is the sheet when a row's or a cell's attribute holds a
+# reference ("&"), which only the scanner's grammar decides.  sheetData is found by find and rfind (the first
+# opening tag, the last closing one), linear in the text.
+_SD_OPEN, _SD_CLOSE = "<sheetData>", "</sheetData>"
+_HAS_R = re.compile(r"\sr\s*=")
 _ATTRS = r'((?:\s+[A-Za-z_][\w.\-]*="[^"<]*")*)\s*'
 _ROW_CELL = re.compile(r"\s*(?:<row" + _ATTRS + r"(/?)>|</row>|<c" + _ATTRS + r"(?:/>|>(.*?)</c>))", re.S)
 # (the common cell, as Excel writes it: r, then s and t if any, then one plain <v>; its groups read directly)
@@ -177,12 +181,15 @@ _ATTR_S = re.compile(r'\ss="([0-9]+)"')
 
 def _fast_rows(text, strings, xfs, d1904):
     """The sheet's cells as {row: {col: value}}, or None (the scanner reads it)."""
-    m = _SHEET_DATA.search(text)
-    if m is None:
+    start = text.find(_SD_OPEN)
+    if start < 0:
         return None
-    body = m.group(1)
+    end = text.rfind(_SD_CLOSE)
+    if end < start + len(_SD_OPEN):
+        return None
+    body = text[start + len(_SD_OPEN):end]
     # (the document's structure, sheetData's content left out, by the scanner: it refuses what it refuses)
-    for _ in events(text[:m.start()] + "<sheetData/>" + text[m.end():]):
+    for _ in events(text[:start] + "<sheetData/>" + text[end + len(_SD_CLOSE):]):
         pass
     rows = {}
     pos, n = 0, len(body)
@@ -238,7 +245,12 @@ def _fast_rows(text, strings, xfs, d1904):
         if tok.startswith("<row"):
             if open_row:
                 return None
-            r = _ATTR_RR.search(t.group(1) or "")
+            ra = t.group(1) or ""
+            if "&" in ra:
+                return None
+            r = _ATTR_RR.search(ra)
+            if r is None and _HAS_R.search(ra):
+                return None
             row_i = int(r.group(1)) - 1 if r else row_i + 1
             col = -1
             row = None
@@ -256,12 +268,14 @@ def _fast_rows(text, strings, xfs, d1904):
         if not open_row:
             return None
         attrs, inner = t.group(3), t.group(4)
+        if "&" in attrs:
+            return None
         ref = _ATTR_R.search(attrs)
         if ref:
             if int(ref.group(2)) - 1 != row_i:
                 return None
             col = _col_index(ref.group(1))
-        elif ' r="' in attrs:
+        elif _HAS_R.search(attrs):
             return None
         else:
             col += 1
@@ -298,18 +312,38 @@ def _fast_rows(text, strings, xfs, d1904):
     return rows
 
 
-def _sheet_rows(z, path, strings, xfs, d1904):
+# (Excel's sheet: 1,048,576 rows of 16,384 columns; a cell past them is refused, whatever the budget)
+_MAX_ROWS = 1048576
+_MAX_COLS = 16384
+# (the dense rows' charge, per row: its list (and its padded copy's); per cell, at the peak: its slot in the
+# sheet's row, in _frame's padded row and in its column's values)
+_ROW_BYTES = 128
+_CELL_BYTES = 24
+
+
+def _sheet_rows(z, path, strings, xfs, d1904, budget, file_rows):
     """The sheet's values as rows of Python values ("" for an empty cell, as
-    pandas' openpyxl reader has them), trailing empties dropped."""
+    pandas' openpyxl reader has them), trailing empties dropped; with
+    file_rows, only the sheet's first file_rows rows (at least one), as
+    pandas asks openpyxl for them."""
     text = _xml(z, path)
     if "\r" in text:
         text = text.replace("\r\n", "\n").replace("\r", "\n")
     rows = _fast_rows(text, strings, xfs, d1904)
     if rows is None:
         rows = _scan_rows(text, strings, xfs, d1904)
+    if file_rows is not None:
+        cut = max(file_rows, 1)
+        rows = {i: r for i, r in rows.items() if i < cut}
     if not rows:
         return []
+    # (the dense size, from the highest row and column: bounded, then charged, before any row is made)
     last = max(rows)
+    width = max(max(r) for r in rows.values()) + 1
+    if last >= _MAX_ROWS or width > _MAX_COLS:
+        raise ValueError("read_excel: the sheet has a cell past Excel's %d rows and %d columns (row %d, column %d)"
+                         % (_MAX_ROWS, _MAX_COLS, last + 1, width))
+    budget.charge((last + 1) * (_ROW_BYTES + _CELL_BYTES * width), "the sheet's %d x %d cells" % (last + 1, width))
     out = []
     for i in range(last + 1):
         r = rows.get(i, {})
@@ -391,16 +425,34 @@ def _cell_value(c, strings, xfs, d1904):
 
 # --- pandas' Python parser, for typed values ---------------------------------
 
-def _col_letters_range(spec):
-    out = []
-    for part in spec.split(","):
-        part = part.strip()
-        if ":" in part:
-            a, b = part.split(":")
-            out.extend(range(_col_index(a.strip().upper()), _col_index(b.strip().upper()) + 1))
+def _excel2num(x):
+    # (pandas' _excel2num: letters only, any case; "" is -1)
+    index = 0
+    for c in x.upper().strip():
+        cp = ord(c)
+        if cp < 65 or cp > 90:
+            raise ValueError("Invalid column name: %s" % x)
+        index = index * 26 + cp - 64
+    return index - 1
+
+
+def _range2cols(areas):
+    # (pandas' _range2cols: "A,C,Z:AB" as positions)
+    cols = []
+    for rng in areas.split(","):
+        if ":" in rng:
+            rngs = rng.split(":")
+            cols.extend(range(_excel2num(rngs[0]), _excel2num(rngs[1]) + 1))
         else:
-            out.append(_col_index(part.upper()))
-    return out
+            cols.append(_excel2num(rng))
+    return cols
+
+
+def _is_int(v):
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+_USECOLS_MSG = "'usecols' must either be list-like of all strings, all unicode, all integers or a callable."
 
 
 # (pandas' parser on read_excel's values: its default NA strings, its true and false strings, and the numbers
@@ -488,33 +540,32 @@ def _frame(rows, header, skiprows, nrows, usecols, index_col):
     # (a sheet with no rows at all: pandas' read_excel gives DataFrame() for it, before its parser)
     if not rows:
         return DataFrame()
-    if nrows is not None:
-        # (pandas asks the sheet for only the rows it needs, the header (one row with header=None too) and nrows
-        # past the rows skipped (_calc_rows): the width is theirs)
-        need = (1 if header is None else int(header) + 1) + int(nrows)
-        if isinstance(skiprows, int) and not isinstance(skiprows, bool):
-            rows = rows[:skiprows + need]
-        elif skiprows is not None:
-            # (its parser's read-ahead past the header then decides which rows count: not followed here)
-            raise _subset("read_excel(skiprows=<a list>, nrows=)")
-        else:
-            rows = rows[:need]
+    if nrows is not None and skiprows is not None and not _is_int(skiprows):
+        # (pandas' read-ahead past the header then decides which rows count: not followed here; the sheet's
+        # rows were already cut to what pandas asks openpyxl for, _file_rows)
+        raise _subset("read_excel(skiprows=<a list>, nrows=)")
     width = max((len(r) for r in rows), default=0)
     rows = [r + [""] * (width - len(r)) for r in rows]
     if skiprows is not None:
-        if isinstance(skiprows, int) and not isinstance(skiprows, bool):
-            rows = rows[skiprows:]
+        if _is_int(skiprows):
+            # (a negative count skips nothing, as range(skiprows) is empty)
+            rows = rows[max(skiprows, 0):]
         elif isinstance(skiprows, (list, tuple, range, set)):
             drop = set(skiprows)
             rows = [r for i, r in enumerate(rows) if i not in drop]
-        else:
+        elif callable(skiprows):
             raise _subset("read_excel(skiprows=%s)" % type(skiprows).__name__)
+        else:
+            raise TypeError("'%s' object is not iterable" % type(skiprows).__name__)
+    if not rows:
+        # (every row skipped: pandas' parser finds no data, and read_excel gives DataFrame())
+        return DataFrame()
     if header is None:
         names = list(range(width))
         body = rows
-    elif isinstance(header, int) and not isinstance(header, bool):
+    elif _is_int(header):
         if header >= len(rows):
-            raise ValueError("Passed header=%d, len of %d, but only %d lines in file" % (header, len(rows), len(rows)))
+            raise ValueError("Passed header=[%d], len of 1, but only %d lines in file" % (header, len(rows)))
         head = rows[header]
         body = rows[header + 1:]
         names = ["Unnamed: %d" % j if h == "" else h for j, h in enumerate(head)]
@@ -537,22 +588,36 @@ def _frame(rows, header, skiprows, nrows, usecols, index_col):
         body = body[:int(nrows)]
     js = list(range(width))
     if usecols is not None:
-        if isinstance(usecols, str):
-            want = _col_letters_range(usecols)
-            js = [j for j in js if j in set(want)]
-        elif isinstance(usecols, (list, tuple)):
-            if all(isinstance(u, int) and not isinstance(u, bool) for u in usecols):
-                js = [j for j in js if j in set(usecols)]
-            else:
-                js = [j for j in js if names[j] in set(usecols)]
-        else:
+        # (a letter range is positions by now, _range2cols; then pandas' parser: all positions or all names)
+        if callable(usecols):
             raise _subset("read_excel(usecols=%s)" % type(usecols).__name__)
+        if not isinstance(usecols, (list, tuple, set, range)):
+            raise ValueError(_USECOLS_MSG)
+        want = set(usecols)
+        if not want:
+            raise _subset("read_excel(usecols=) selecting no column")
+        if all(_is_int(u) for u in want):
+            missing = sorted(u for u in want if u >= width)
+            if missing:
+                raise ParserError("Defining usecols with out-of-bounds indices is not allowed. %s are out-of-bounds." % missing)
+            if min(want) < 0:
+                raise _subset("read_excel(usecols=) with a negative position")
+            js = [j for j in js if j in want]
+        elif all(isinstance(u, str) for u in want):
+            missing = [u for u in usecols if u not in names]
+            if missing:
+                raise ValueError("Usecols do not match columns, columns expected but not found: %r" % (missing,))
+            js = [j for j in js if names[j] in want]
+        else:
+            raise ValueError(_USECOLS_MSG)
     nan = float("nan")
     cols = [_infer_column([nan if r[j] == "" else r[j] for r in body]) for j in js]
     labels = [names[j] for j in js]
     index = RangeIndex(len(body))
     if index_col is not None:
-        if not isinstance(index_col, int) or isinstance(index_col, bool):
+        if isinstance(index_col, bool):
+            raise ValueError("The value of index_col couldn't be '%s'" % (index_col,))
+        if not _is_int(index_col):
             raise _subset("read_excel(index_col=%r)" % (index_col,))
         index = Index(cols[index_col], name=labels[index_col])
         del cols[index_col], labels[index_col]
@@ -584,30 +649,98 @@ def read_excel(io, sheet_name=0, *, header=0, names=None, index_col=None, usecol
             raise _subset("an .xls workbook (only .xlsx and .xlsm are read)")
         raise ValueError("Excel file format cannot be determined, you must specify an engine manually.")
     from ._pd_csv import _make_budget
-    budget = _make_budget()
+    budget = _make_budget("read_excel")
     z = ZipArchive(data, budget if budget.finite else None)
     sheets, d1904 = _workbook(z)
     strings = _shared_strings(z)
     xfs = _styles(z)
+    # (pandas' ExcelFile.parse: header and nrows checked first)
+    _check_header(header)
+    nrows = _check_nrows(nrows)
+    file_rows = _file_rows(header, skiprows, nrows)
+    if isinstance(usecols, str):
+        usecols = _range2cols(usecols)
+    elif _is_int(usecols):
+        raise ValueError("Passing an integer for `usecols` is no longer supported.  "
+                         "Please pass in a list of int from 0 to `usecols` inclusive instead.")
 
     def one(key):
-        if isinstance(key, int) and not isinstance(key, bool):
-            if not 0 <= key < len(sheets):
-                raise ValueError("Worksheet index %d is invalid, %d worksheets found" % (key, len(sheets)))
-            name, path = sheets[key]
-        else:
+        # (a str is a name; anything else an index into the sheets, as a list's: -1 the last)
+        if isinstance(key, str):
             hit = [s for s in sheets if s[0] == key]
             if not hit:
                 raise ValueError("Worksheet named '%s' not found" % key)
             name, path = hit[0]
-        rows = _sheet_rows(z, path, strings, xfs, d1904)
-        return _frame(rows, header, skiprows, nrows, usecols, index_col)
+        else:
+            if key >= len(sheets):
+                raise ValueError("Worksheet index %d is invalid, %d worksheets found" % (key, len(sheets)))
+            name, path = sheets[key]
+        rows = _sheet_rows(z, path, strings, xfs, d1904, budget, file_rows)
+        try:
+            return _frame(rows, header, skiprows, nrows, usecols, index_col)
+        except NotImplementedError:
+            raise
+        except Exception as err:
+            # (pandas' _parse_sheet names the sheet in its parser's errors)
+            if err.args:
+                err.args = ("%s (sheet: %s)" % (err.args[0], key),) + tuple(err.args[1:])
+            raise
 
     if sheet_name is None:
-        return {s[0]: one(i) for i, s in enumerate(sheets)}
+        return {s[0]: one(s[0]) for s in sheets}
     if isinstance(sheet_name, list):
-        return {k: one(k) for k in sheet_name}
+        keys = list(dict.fromkeys(sheet_name))
+        if not keys:
+            raise ValueError("Sheet name is an empty list")
+        return {k: one(k) for k in keys}
     return one(sheet_name)
+
+
+def _check_header(header):
+    # (pandas' validate_header_arg)
+    if header is None:
+        return
+    if _is_int(header):
+        if header < 0:
+            raise ValueError("Passing negative integer to header is invalid. For no header, use header=None instead")
+        return
+    if isinstance(header, (list, tuple)):
+        if not all(_is_int(h) for h in header):
+            raise ValueError("header must be integer or list of integers")
+        return
+    if isinstance(header, bool):
+        raise TypeError("Passing a bool to header is invalid. Use header=None for no header or header=int or "
+                        "list-like of ints to specify the row(s) making up the column names")
+    raise ValueError("header must be integer or list of integers")
+
+
+def _check_nrows(nrows):
+    # (pandas' validate_integer("nrows", nrows): an integral float is its int)
+    if nrows is None:
+        return None
+    msg = "'nrows' must be an integer >=0"
+    if isinstance(nrows, float):
+        if int(nrows) != nrows:
+            raise ValueError(msg)
+        nrows = int(nrows)
+        if nrows < 0:
+            raise _subset("read_excel(nrows=) a negative float")
+    elif not (_is_int(nrows) and nrows >= 0):
+        raise ValueError(msg)
+    return nrows
+
+
+def _file_rows(header, skiprows, nrows):
+    # (pandas' _calc_rows: the rows it asks openpyxl for, with nrows; None for all of them, as with a list or a
+    # function of skiprows, which _frame refuses with nrows)
+    if nrows is None or not (header is None or _is_int(header)):
+        return None
+    header_rows = 1 if header is None else 1 + header
+    if skiprows is None:
+        return header_rows + nrows
+    if _is_int(skiprows):
+        return header_rows + nrows + skiprows
+    return None
 
 
 def _read_bytes(io):

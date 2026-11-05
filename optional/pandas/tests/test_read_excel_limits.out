@@ -60,3 +60,41 @@
 True
 == fallback taken
 (True, [['n', 's', 'b', 'e', 'i', 'd', 'f'], [0, 's0', True, nan, 'in0', datetime.datetime(2009, 7, 6, 0, 0), 0]])
+== row past Excel's
+!! ValueError: read_excel: the sheet has a cell past Excel's 1048576 rows and 16384 columns (row 1048577, column 1)
+== column past Excel's
+!! ValueError: read_excel: the sheet has a cell past Excel's 1048576 rows and 16384 columns (row 1, column 16385)
+== row past Excel's, scanner
+!! ValueError: read_excel: the sheet has a cell past Excel's 1048576 rows and 16384 columns (row 1048577, column 1)
+== openings, fast path
+None
+== openings, scanner
+!! ValueError: read_excel: the workbook's XML has elements nested more than 64 deep, which Sagebrush doesn't read
+== openings and one close, fast path
+!! ValueError: read_excel: the workbook's XML has an element with no end, which Sagebrush doesn't read
+== max depth
+64
+== depth at
+128
+== depth past
+!! ValueError: read_excel: the workbook's XML has elements nested more than 64 deep, which Sagebrush doesn't read
+== depth 10000
+!! ValueError: read_excel: the workbook's XML has elements nested more than 64 deep, which Sagebrush doesn't read
+== row entity, fast path
+!! ValueError: read_excel: the workbook's XML has an entity other than the five predefined ones, which Sagebrush doesn't read
+== row entity, scanner
+!! ValueError: read_excel: the workbook's XML has an entity other than the five predefined ones, which Sagebrush doesn't read
+== row entity, fast path falls back
+True
+== cell entity, fast path
+!! ValueError: read_excel: the workbook's XML has an entity other than the five predefined ones, which Sagebrush doesn't read
+== cell entity, scanner
+!! ValueError: read_excel: the workbook's XML has an entity other than the five predefined ones, which Sagebrush doesn't read
+== cell entity, fast path falls back
+True
+== predefined, fast path
+((1, 1), [1])
+== predefined, scanner
+((1, 1), [1])
+== predefined, fast path falls back
+True
