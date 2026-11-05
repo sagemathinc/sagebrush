@@ -183,8 +183,10 @@ const NOOP = new Set(["relax", "protect", "makeatletter", "makeatother", "sloppy
   "thicklines@", "listoffigures", "listoftables", "FloatBarrier", "vss", "smallskipamount", "ifhmode", "fi", "else",
   ]);
 // commands whose arguments are consumed silently: name -> [optional count, mandatory count]
-// (saved boxes: their copies' HTML, all \usebox's together, at most BOX_MAX characters)
-export const BOX_MAX = 1 << 20;
+// (saved boxes: their copies, all \usebox's together, at most BOX_MAX: each copy's HTML characters, and BOX_KEY for each
+//  of its SageTeX items, which a box with no HTML still copies (astra, BOX653-EXPAND-1's residual))
+export const BOX_MAX = 1 << 20, BOX_KEY = 16;
+export const boxCost = (b) => b.h.length + BOX_KEY * b.keys.length;
 export const fitsBoxes = (used, add) => used + add <= BOX_MAX;
 const GOBBLE = { index: [0, 1], glossary: [0, 1], addcontentsline: [0, 3], markboth: [0, 2], markright: [0, 1], pagestyle: [0, 1], thispagestyle: [0, 1],
   pagenumbering: [0, 1], hypersetup: [0, 1], lstset: [0, 1], bibliographystyle: [0, 1], nocite: [0, 1], addtolength: [0, 2], settowidth: [0, 2],
@@ -816,7 +818,7 @@ class Renderer {
   // a saved box: its HTML and SageTeX items, by the box's name as written (\saved); shown by \usebox, its items then
   // shown too (a box never used is never shown, as in TeX)
   boxName(a) { return this.str(a).trim(); }
-  saveBox(a, fn) { const [h, keys] = this.captured(fn); this.boxes.set(this.boxName(a), { h, keys }); }
+  saveBox(a, fn) { const [h, keys] = this.captured(fn); this.boxes.set(this.boxName(a), { h, keys: [...new Set(keys)] }); }
   captured(fn) { const prev = this.sageField; this.sageField = []; try { return [fn(), this.sageField]; } finally { this.sageField = prev; } }
   titleHtml() {
     const m = this.meta;
@@ -937,9 +939,11 @@ const CMDS = {
     const [a, j] = this.arg(nodes, i), b = this.boxes.get(this.boxName(a));
     if (!b) { this.problem("box", "\\usebox of a box not saved: " + this.boxName(a)); return j; }
     // (every copy within one budget, BOX_MAX, checked before it's made: a box copied into a box, again and again, would
-    //  double each time (astra, BOX653-EXPAND-1); past it, left out, said once)
-    if (!fitsBoxes(this.boxUsed, b.h.length)) { if (!this.boxOver) { this.boxOver = true; this.problems.push({ kind: "box", name: "saved boxes left out from here on: over the budget for their copies", at: this.lastPos }); } return j; }
-    this.boxUsed += b.h.length;
+    //  double each time (astra, BOX653-EXPAND-1); its SageTeX items too, each once in the box (a box doubled into itself
+    //  with no HTML still doubled them, BOX653-EXPAND-1's residual); past it, left out, said once)
+    const cost = boxCost(b);
+    if (!fitsBoxes(this.boxUsed, cost)) { if (!this.boxOver) { this.boxOver = true; this.problems.push({ kind: "box", name: "saved boxes left out from here on: over the budget for their copies", at: this.lastPos }); } return j; }
+    this.boxUsed += cost;
     // (its SageTeX seen as where it's used is: shown in the body, held in a field or another box until those are, never
     //  in the preamble (daybreak3, BOX653-SAGE-CAPTURE-1))
     for (const k of b.keys) this.sageSeen(k);

@@ -16,7 +16,8 @@ import { EXAMPLES } from "./examples.ts";
 import { makeAnchor, locate } from "./comments.ts";
 import { Engine, withBeamer, once, declaresBeamer } from "./engine/pipeline.mjs";
 import { coldRun, incremental } from "./engine/incremental-demo.mjs";
-import { setKatex, render, installBeamer, BOX_MAX, fitsBoxes } from "./engine/render.mjs";
+import { setKatex, render, installBeamer, BOX_MAX, BOX_KEY, boxCost, fitsBoxes } from "./engine/render.mjs";
+import { itemKey } from "./engine/sagetex.mjs";
 import * as beamerCode from "./engine/beamer.mjs";
 
 const results = [];
@@ -267,6 +268,27 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
   const dblH = dbl.chunks.join(""), manyH = many.chunks.join(""), over = (r) => r.problems.filter((p) => p.kind === "box" && /over the budget/.test(p.name)).length;
   check("savebox-budget-copies", dbl.stats.outcome === "ok" && dblH.length < 2 * 2 ** 20 && over(dbl) === 1 && manyH.length < 2 * 2 ** 20 && over(many) === 1 && manyH.includes("End.") && (manyH.match(/y{4096}/g) || []).length === Math.floor(BOX_MAX / 4096),
     { dbl: dblH.length, many: manyH.length, copies: (manyH.match(/y{4096}/g) || []).length, overs: [over(dbl), over(many)] });
+  // (a box's SageTeX items count too, each once in the box (astra, BOX653-EXPAND-1's residual): a box with no HTML, a
+  //  completed sagesilent in an lrbox, doubled into itself 18 times held 262,144 keys before, and now holds 1. A key
+  //  costs BOX_KEY: 256 completed items in a box, no HTML, cost exactly 4,096, so 256 uses fit BOX_MAX exactly and a 257th
+  //  is left out, said once)
+  check("savebox-key-cost", BOX_KEY === 16 && boxCost({ h: "ab", keys: [1, 2, 3] }) === 2 + 3 * BOX_KEY && boxCost({ h: "", keys: [] }) === 0);
+  const sdoc = (body) => "\\documentclass{article}\n\\usepackage{sagetex}\n\\newsavebox{\\kb}\n\\begin{document}\n" + body + "\n\\end{document}\n";
+  // (the items run, as a Run leaves them: their states from the box used once, before any copies)
+  const okRun = (box, uses) => {
+    const d = sdoc(box + uses), states = new Engine().update(sdoc(box + "\\usebox{\\kb}Z")).sageItems.map((it) => ({ s: "ok", key: itemKey(it) })), kept = [], set = Map.prototype.set;
+    // (each box as saved, seen as the renderer's map stores it: its HTML and its keys' count)
+    Map.prototype.set = function (k, v) { if (v && typeof v.h === "string" && Array.isArray(v.keys)) kept.push([v.h.length, v.keys.length]); return set.call(this, k, v); };
+    try { return { r: new Engine({ sage: { states } }).update(d), kept }; } finally { Map.prototype.set = set; }
+  };
+  const silent = (i) => "\\begin{sagesilent}\nx" + i + " = " + i + "\n\\end{sagesilent}\n";
+  const zero = okRun("\\begin{lrbox}{\\kb}" + silent(0) + "\\end{lrbox}", "\\sbox{\\kb}{\\usebox{\\kb}\\usebox{\\kb}}".repeat(18) + "\\usebox{\\kb}Z");
+  const keysAt = (n) => okRun("\\begin{lrbox}{\\kb}" + Array.from({ length: 256 }, (_, i) => silent(i)).join("") + "\\end{lrbox}", "\\usebox{\\kb}".repeat(n) + "Z");
+  const fit = keysAt(256), past = keysAt(257);
+  check("savebox-keys-zero-html-doubling", zero.r.stats.outcome === "ok" && zero.kept.length === 19 && zero.kept.every(([h, k]) => h === 0 && k === 1)
+    && zero.r.sageItems.every((x) => !x.err) && over(zero.r) === 0, { kept: zero.kept.slice(-3), n: zero.kept.length, items: zero.r.sageItems.map((x) => x.err), overs: over(zero.r) });
+  check("savebox-keys-budget-edge", fit.kept.length === 1 && fit.kept[0][0] === 0 && fit.kept[0][1] === 256 && over(fit.r) === 0 && over(past.r) === 1
+    && fit.r.sageItems.length === 256 && fit.r.sageItems.every((x) => !x.err), { kept: [fit.kept, past.kept], overs: [over(fit.r), over(past.r)], errs: [...new Set(fit.r.sageItems.map((x) => x.err))] });
 }
 
 // ---- render.mjs: an unclosed formula ends at a blank line (KaTeX stubbed: each formula drawn as its source)
