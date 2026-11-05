@@ -6937,17 +6937,12 @@ def _svd_finite(M, name):
     return M
 
 
-def _nan_like(M, shape):
-    """NaN of `shape`, in M's precision (single stays single): what svd and pinv give for an M with a NaN or Inf"""
-    return np.full(shape, np.nan, dtype=np.float32 if M.dtype in (np.float32, np.complex64) else np.float64)
-
-
 @_bs("pinv")
 def pinv_(x):
     M = _mat(x)
-    # (real MATLAB: pinv(NaN) and pinv([1 Inf; 2 3]) are all NaN, of the transposed shape)
+    # (real MATLAB: a NaN or Inf gives NaN throughout, of the transposed shape and M's precision)
     if not np.all(np.isfinite(M)):
-        return _unmat(_nan_like(M, (M.shape[1], M.shape[0])))
+        return _unmat(np.full(M.shape[::-1], np.nan, dtype=M.real.dtype))
     return _unmat(np.linalg.pinv(M))
 
 
@@ -7181,22 +7176,16 @@ def _left_vectors(A, B, w, balance=True):
 @_bi("svd")
 def svd_(nargout, x, *args):
     M = _mat(x)
+    # (real MATLAB: a NaN or Inf anywhere makes the singular values, U and V all NaN, S 0 off its diagonal: a
+    # zero matrix's shapes, filled with NaN)
+    nan = 0.0
     if not np.all(np.isfinite(M)):
-        # (real MATLAB: a NaN or Inf anywhere makes every singular value NaN, and U and V all NaN; S is NaN on
-        # its diagonal and 0 elsewhere; full or economy sizes as for a finite M)
-        m, n = M.shape
-        k = min(m, n)
-        if nargout <= 1:
-            return _unmat(_nan_like(M, (k, 1)))
-        econ = bool(args)
-        S = np.zeros((k, k) if econ else (m, n), dtype=_nan_like(M, (0,)).dtype)
-        for i in range(k):
-            S[i, i] = np.nan
-        return [_unmat(_nan_like(M, (m, k) if econ else (m, m))), _unmat(S), _unmat(_nan_like(M, (n, k) if econ else (n, n)))]
+        M, nan = np.zeros(M.shape, dtype=M.real.dtype), np.nan
     if nargout <= 1:
-        return _unmat(np.linalg.svd(M, compute_uv=False).reshape((-1, 1)))
+        return _unmat(np.linalg.svd(M, compute_uv=False).reshape((-1, 1)) + nan)
     econ = bool(args)
     U, s, Vh = np.linalg.svd(M, full_matrices=not econ)
+    U, s, Vh = U + nan, s + nan, Vh + nan
     S = np.zeros((U.shape[1], Vh.shape[0]))
     for k in range(s.size):
         S[k, k] = s[k]
