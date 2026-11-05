@@ -1,8 +1,10 @@
 {
  "v": 1,
- "reason": "Sage latex() of reals and complexes in scientific notation as Sage writes it, the exponent as a power of ten (#707, from the explainer pilot's run 017): one shared helper in _sage_real used by RR/RealField, ComplexField, CC, RDF, CDF and Python floats in latex(), plus their examples. Sage library source in the sage group's .src/.pre; measured exactly with bun 1.4.4 and node 24.21.0 against master 8ac67182: sage.pre +5399, sage.src +1775.",
+ "reason": "Sage latex() of reals and complexes in scientific notation as Sage writes it, the exponent as a power of ten (#707, from the explainer pilot's run 017): one shared helper in _sage_real used by RR/RealField, ComplexField, CC, RDF, CDF and Python floats in latex(), plus their examples; CC's and ComplexField's infinities as \\infty and a purely imaginary number's sign (daybreak3's r2). Sage library source, in lib.gen and the sage group; measured exactly with bun 1.4.4 and node 24.21.0, merged with master fe16a2eb: lib.gen +1028, pyjs +1024 (marked +64), sage.pre +6036, sage.src +2175.",
  "bytes": {
-  "engine/lib/sage.pre": 5399,
-  "engine/lib/sage.src": 1775
+  "cli/lib.gen.js": 1028,
+  "cli/pyjs.cjs": 1088,
+  "engine/lib/sage.pre": 6036,
+  "engine/lib/sage.src": 2175
  }
 }
