@@ -92,6 +92,21 @@ badg = bytearray(S["gzip"]); badg[-5] ^= 1
 err("bad crc", lambda: zlib.decompressobj(31).decompress(bytes(badg)))
 badl = bytearray(S["gzip"]); badl[-1] ^= 1
 err("bad length", lambda: zlib.decompressobj(31).decompress(bytes(badl)))
+# gzip headers: reserved flags, FHCRC right and wrong, with FEXTRA, FNAME and FCOMMENT (daybreak3's ZLIB687-GZIPHDR-1)
+g = S["gzip"]
+def withflags(flg, extra=b"", name=b"", comment=b"", hcrc=None, flip=False):
+    h = g[:3] + bytes([flg]) + g[4:10] + extra + name + comment
+    if flg & 2:
+        c = zlib.crc32(h) & 0xffff if hcrc is None else hcrc
+        if flip:
+            c ^= 1
+        h += bytes([c & 255, c >> 8])
+    return h + g[10:]
+for label, s in [("reserved 0x20", withflags(0x20)), ("reserved 0x80", withflags(0x80)), ("fhcrc", withflags(2)), ("fhcrc flipped", withflags(2, flip=True)),
+                 ("all fields", withflags(2 | 4 | 8 | 16, extra=b"\x04\x00ab\x01\x00"[:2] + b"abcd", name=b"n.txt\0", comment=b"c\0")),
+                 ("all fields flipped", withflags(2 | 4 | 8 | 16, extra=b"\x04\x00abcd", name=b"n.txt\0", comment=b"c\0", flip=True))]:
+    err("gzip " + label + " obj", lambda s=s: zlib.decompressobj(31).decompress(s))
+    err("gzip " + label + " oneshot", lambda s=s: zlib.decompress(s, 31))
 err("negative max_length", lambda: zlib.decompressobj().decompress(S["zlib6"], -1))
 err("flush 0", lambda: zlib.decompressobj().flush(0))
 err("wbits 99", lambda: zlib.decompressobj(99))

@@ -129,6 +129,18 @@ export class Inflater {
     this.pos -= keep;
   }
 
+  /** Between calls (its output copied out): keep only the window, and give
+   *  back a buffer grown for a large call, so a paused stream holds at most
+   *  the window and its unread input (astra's ZLIB687-WINDOW-1). */
+  compact(): void {
+    const keep = Math.min(this.bp, WSIZE);
+    if (this.buf.length <= Math.max(2 * WSIZE, 1024) && this.bp <= WSIZE) return;
+    const b = new Uint8Array(Math.max(keep, 1024));
+    b.set(this.buf.subarray(this.bp - keep, this.bp));
+    this.buf = b;
+    this.bp = keep;
+  }
+
   /** The whole input bytes not yet read (the bit buffer's partial byte stays
    *  in it), removed from the input: CPython's unconsumed_tail. */
   takeUnread(): Uint8Array {
@@ -436,7 +448,11 @@ export class Inflater {
 function inflateRaw(src: Uint8Array, pos: number, limit = Infinity): [Uint8Array, number] {
   const f = new Inflater();
   f.feed(src.subarray(pos), true);
-  const out = f.run(Infinity, limit, () => raise(ZlibError, `Error -5 while decompressing data: more than ${limit} bytes`));
+  // (zlib.decompress and gzip with no limit of their own: the array limit, as decompressobj's calls (astra's ZLIB687-CAP-1))
+  const cap = Math.min(limit, ARRAY_LIMITS.bytes);
+  const out = f.run(Infinity, cap, () =>
+    raise(ZlibError, cap < limit ? `Error -5 while decompressing data: output exceeds Sagebrush's limit of ${cap} bytes` : `Error -5 while decompressing data: more than ${limit} bytes`),
+  );
   if (!f.done) raise(ZlibError, "Error -5 while decompressing data: incomplete or truncated stream");
   return [out, pos + (f.pos - (f.bitcnt >> 3))];
 }
@@ -479,11 +495,16 @@ export function gunzipMember(data: Uint8Array, start: number): [Uint8Array, numb
   if (data[start] !== 0x1f || data[start + 1] !== 0x8b || data[start + 2] !== 8) raise(ZlibError, "Error -3 while decompressing data: incorrect header check");
   if (start + 10 > data.length) raise(ZlibError, TRUNCATED);
   const flg = data[start + 3];
+  if (flg & 0xe0) raise(ZlibError, "Error -3 while decompressing data: unknown header flags set");
   let p = start + 10;
   if (flg & 4) p += 2 + (data[p] | (data[p + 1] << 8));
   if (flg & 8) while (p < data.length && data[p++]) {}
   if (flg & 16) while (p < data.length && data[p++]) {}
-  if (flg & 2) p += 2;
+  if (flg & 2) {
+    if (p + 2 > data.length) raise(ZlibError, TRUNCATED);
+    if ((crc32(data.subarray(start, p)) & 0xffff) !== (data[p] | (data[p + 1] << 8))) raise(ZlibError, "Error -3 while decompressing data: header crc mismatch");
+    p += 2;
+  }
   const [out, end] = inflateRaw(data, p);
   if (end + 8 > data.length) raise(ZlibError, TRUNCATED);
   const le = (i: number) => (data[i] | (data[i + 1] << 8) | (data[i + 2] << 16) | (data[i + 3] << 24)) >>> 0;
@@ -597,6 +618,8 @@ function headerLength(d: PyDecompress, h: Uint8Array): number {
   if (h.length < 10) return 0;
   if (h[0] !== 0x1f || h[1] !== 0x8b || h[2] !== 8) raise(ZlibError, "Error -3 while decompressing data: incorrect header check");
   const flg = h[3];
+  // (as zlib: reserved flags refused, and the header's CRC-16 checked when FHCRC says it is there; daybreak3's ZLIB687-GZIPHDR-1)
+  if (flg & 0xe0) raise(ZlibError, "Error -3 while decompressing data: unknown header flags set");
   let p = 10;
   if (flg & 4) {
     if (h.length < p + 2) return 0;
@@ -608,7 +631,11 @@ function headerLength(d: PyDecompress, h: Uint8Array): number {
     if (p >= h.length) return 0;
     p++;
   }
-  if (flg & 2) p += 2;
+  if (flg & 2) {
+    if (h.length < p + 2) return 0;
+    if ((crc32(h.subarray(0, p)) & 0xffff) !== (h[p] | (h[p + 1] << 8))) raise(ZlibError, "Error -3 while decompressing data: header crc mismatch");
+    p += 2;
+  }
   return h.length >= p ? p : 0;
 }
 
@@ -620,6 +647,7 @@ function step(d: PyDecompress, room: number): Uint8Array {
     const cap = ARRAY_LIMITS.bytes;
     const o = d.inf.run(room, cap, () => raise(ZlibError, `Error -5 while decompressing data: output exceeds Sagebrush's limit of ${cap} bytes`));
     out = o.slice();
+    d.inf.compact();
     if (d.kind === "zlib") d.check = adler32(out, d.check);
     else if (d.kind === "gzip") {
       d.check = crc32(out, d.check);
