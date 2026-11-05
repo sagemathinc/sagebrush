@@ -10,7 +10,7 @@
   "baseSwGzip": 43602,
   "topology": "inventory-3span",
   "baseTopology": "legacy-2span",
-  "swRaw": 219600,
-  "swGzip": 54076,
-  "transition": "TRANSITION: web/sw.js source and sw.js raw are unchanged; the r6 core build rotates generated 16-hex chunk names, moving normalized gzip-9 through hash entropy rather than service-worker code growth. swGzip 54,076 is r6's exact 54,012 measurement plus 64 B tight headroom. Follow-up owned by @sagebrush-daybreak3 will normalize authenticated generated chunk hashes while retaining code/path/count sensitivity."
+  "swRaw": 220936,
+  "swGzip": 54356,
+  "transition": "live data step 1 (its own lazy chunk mod-live-data): measured at this branch's merge of master 2f50b30f: sw.js raw 220872, within 220936 (kept); normalized gzip-9 54292, over master's 54283, so swGzip = exact + 64 = 54356 (@sagebrush: a ceiling is renewed only when over)"
 }

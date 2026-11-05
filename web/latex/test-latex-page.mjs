@@ -49,11 +49,16 @@ for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
 await new Promise((r) => (ws.onopen = r));
 let n = 0; const waiting = new Map(); const errors = [], requests = [], dialogs = [], sizes = new Map(), reqUrl = new Map();
+// (each request by its id, in order: its URL, whether it was answered from the cache, its bytes over the network)
+const byId = [], idInfo = new Map();
 ws.onmessage = (ev) => {
   const m = JSON.parse(ev.data);
   if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
   if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails));
-  if (m.method === "Network.requestWillBeSent") { requests.push(m.params.request.url); reqUrl.set(m.params.requestId, m.params.request.url); }
+  if (m.method === "Network.requestWillBeSent") { requests.push(m.params.request.url); reqUrl.set(m.params.requestId, m.params.request.url); if (!idInfo.has(m.params.requestId)) { const x = { url: m.params.request.url, cached: false, bytes: null, status: null }; idInfo.set(m.params.requestId, x); byId.push(x); } }
+  if (m.method === "Network.requestServedFromCache" && idInfo.has(m.params.requestId)) idInfo.get(m.params.requestId).cached = true;
+  if (m.method === "Network.responseReceived" && idInfo.has(m.params.requestId)) { const x = idInfo.get(m.params.requestId); x.status = m.params.response.status; if (m.params.response.fromDiskCache || m.params.response.fromPrefetchCache) x.cached = true; }
+  if (m.method === "Network.loadingFinished" && idInfo.has(m.params.requestId)) idInfo.get(m.params.requestId).bytes = m.params.encodedDataLength;
   if (m.method === "Network.loadingFinished") sizes.set(reqUrl.get(m.params.requestId) ?? m.params.requestId, m.params.encodedDataLength);
   if (m.method === "Page.javascriptDialogOpening") { dialogs.push(m.params.type); send("Page.handleJavaScriptDialog", { accept: true }); }
 };
@@ -758,6 +763,9 @@ try {
   // case before leaves the editor open, and its worker's script could still be asked for after the list was cleared and
   // before the next navigation, counted against the new page; at about:blank the editor's document and worker are gone
   const fromBlank = async () => { await send("Page.navigate", { url: "about:blank" }); await until(`location.href === "about:blank"`, 10000); await sleep(200); requests.length = 0; };
+  // (background loading, web/preload.ts, prefetches the editor's two files at idle where the workspace has a .tex: off
+  // here, by the tests' switch, so this counts the page's own fetches; the case after the control has it on)
+  const preloadOff = await send("Page.addScriptToEvaluateOnNewDocument", { source: `window.__sbPreloadOff = true;` });
   await fromBlank();
   await go(base + "?latex=1"); await until(`!!${W}`, 60000); await sleep(1000);
   check(latexFetches().length === 0, "flag on: nothing fetched before a .tex is opened (zero eager fetch)", latexFetches());
@@ -769,6 +777,43 @@ try {
     const seen = latexFetches();
     await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: eager.identifier });
     check(seen.length > 0, "…its control: a page that fetches a LaTeX file eagerly is caught by the same count", seen);
+  }
+  await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: preloadOff.identifier });
+  // background loading on (@sagebrush's ruling and @sagebrush-latex's pins, Nov 5): before a .tex is opened, at idle,
+  // exactly the editor's two files, each once, and none of its lazy chunks (each fetched on its own use only, with its
+  // own budget line); nothing executed (no editor, no LaTeX worker constructed: Worker counted from before the page's
+  // own script); and used: opening a .tex then downloads neither again (from the cache, or a revalidation's few bytes).
+  // (No .tex in the workspace, no LaTeX prefetch: web/test-preload-page.mjs, a plain notebook's outcome "nothing".)
+  {
+    // (from an empty HTTP cache: the cases before opened the editor, so its files would otherwise be cached already,
+    // and the prefetch itself a cache answer rather than the download it is on a first visit)
+    await send("Network.clearBrowserCache");
+    const counter = await send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => { window.__latexWorkers = 0; const W0 = window.Worker; window.Worker = function (u, o) { if (String(u).includes("sagebrush-latex") || o?.name === "sagebrush-latex") window.__latexWorkers++; return new W0(u, o); }; window.Worker.prototype = W0.prototype; })();` });
+    await fromBlank();
+    await go(base + "?latex=1"); await until(`!!${W}`, 60000);
+    await until(`window.sagebrush?.preload?.outcome !== null && window.sagebrush?.preload?.outcome !== undefined`, 20000);
+    await sleep(1500);
+    const seen = latexFetches().map((u) => new URL(u).pathname), outcome = await ev(`window.sagebrush.preload.outcome`);
+    const editor = await ev(`!!document.querySelector(".tex-page")`), workers = await ev(`window.__latexWorkers`);
+    const lazy = seen.filter((p) => /sagebrush-latex-(beamer|comments|comments-doc|agent|tools|present|doc)\.js$/.test(p));
+    check(JSON.stringify([...seen].sort()) === JSON.stringify(["/sagebrush-latex-worker.js", "/sagebrush-latex.js"]) && lazy.length === 0 && outcome === "fetched" && !editor && workers === 0,
+      "background loading: before a .tex is opened, only the editor's two files, each once, at idle (none of its lazy chunks); nothing executed (no editor, no LaTeX worker)", { seen, lazy, outcome, editor, workers });
+    // (then a .tex is opened, in this tab: neither file downloaded again)
+    const two = latexFetches().filter((u) => /\/sagebrush-latex(-worker)?\.js$/.test(u));
+    const full = Object.fromEntries(two.map((u) => [new URL(u).pathname, sizes.get(u)]));
+    const n0 = requests.length, i0 = byId.length;
+    const pf = await mk("/preload-used.tex", enc("\\documentclass{article}\n\\begin{document}\nused\n\\end{document}\n"));
+    const opened = await open(pf);
+    await sleep(1500);
+    const again = requests.slice(n0).filter((u) => /\/sagebrush-latex(-worker)?\.js$/.test(u));
+    // (the editor's page, asked again: answered from the cache, or with only a revalidation's few bytes. Its worker's
+    // script is asked by the worker, whose answer this page's session never sees (no response, no finish), so it isn't
+    // judged here: a follow-up for @sagebrush-latex, by the worker's own target)
+    const againIds = byId.slice(i0).filter((x) => /\/sagebrush-latex(-worker)?\.js$/.test(x.url)).map((x) => ({ path: new URL(x.url).pathname, cached: x.cached, bytes: x.bytes, status: x.status }));
+    const page = againIds.filter((x) => x.path === "/sagebrush-latex.js");
+    check(opened && Object.values(full).every((b) => b > 10_000) && page.length >= 1 && page.every((x) => x.cached || (x.bytes !== null && x.bytes < 2048) || x.status === 304),
+      "background loading: …and used: opening a .tex then downloads the editor's page no more (from the cache, or a revalidation)", { opened, full, again: againIds });
+    await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: counter.identifier });
   }
   // (a control of the navigation helper itself: the page navigates by itself 1.5 s after the mark. The old check (a
   // workspace present) passes at once on the outgoing document, which is the race; fresh() must not: it returns only on
@@ -1751,8 +1796,10 @@ try {
     check(followed, "M0: the name at the top follows a rename elsewhere (the file panel's)", await ev(`[${T}.textContent, document.title]`));
     await mk("/m0/moved.tex.results.json", enc("{}"));
     await mk("/m0/taken.tex", enc("x"));
+    // (the status cleared first: a rename is done, its results and comments files moved along, only once it says
+    //  "Renamed…"; the name at the top follows the .tex as soon as it moves, before them (grader, #658's red))
     const retitle = async (typed, key = "Enter") => {
-      await ev(`(${T}.click(), 1)`);
+      await ev(`(document.querySelector(".tex-status").textContent = "", ${T}.click(), 1)`);
       const opened = await until(`!!document.querySelector(".tex-head .tex-titlein")`, 3000);
       if (!opened) return false;
       await ev(`(() => { const i = document.querySelector(".tex-head .tex-titlein"); i.value = ${JSON.stringify(typed)}; i.dispatchEvent(new KeyboardEvent("keydown", { key: ${JSON.stringify(key)}, bubbles: true })); return true; })()`);
@@ -1769,7 +1816,7 @@ try {
     check(saidTaken && (await stat("/m0/moved.tex")) && (await ev(`${T}.textContent`)) === "moved.tex", "M0: a name already taken: said, nothing renamed", await ev(`document.querySelector(".tex-status")?.textContent`));
     // (renamed: the .tex and its results file, the extension added when typed without it)
     await retitle("final");
-    const renamed = await until(`${T}.textContent === "final.tex"`, 5000);
+    const renamed = await until(`${T}.textContent === "final.tex" && /^Renamed/.test(document.querySelector(".tex-status").textContent)`, 5000);
     const files = { tex: await stat("/m0/final.tex"), old: await stat("/m0/moved.tex"), results: await stat("/m0/final.tex.results.json"), oldResults: await stat("/m0/moved.tex.results.json") };
     check(renamed && files.tex && !files.old && files.results && !files.oldResults && (await ev(`document.title`)).startsWith("final.tex"), "M0: a name typed and Enter: the file renamed (.tex added), its results file moved along", files);
     // (astra LATEX-RENAME-1: the old name, freed by the rename, reused at once by another document that makes its own
@@ -1779,13 +1826,13 @@ try {
     const read = (p) => ev(`${W}.stat(${JSON.stringify(p)}).then((e) => e && !e.trashed ? ${W}.read(${JSON.stringify(p)}).then((r) => new TextDecoder().decode(r.content)) : null)`);
     await reuse([".comments.json"]);
     await retitle("again");
-    await until(`${T}.textContent === "again.tex"`, 5000);
+    await until(`${T}.textContent === "again.tex" && /^Renamed/.test(document.querySelector(".tex-status").textContent)`, 5000);
     const r1 = { hook: await ev(`window.__reuse`), ourResults: await read("/m0/again.tex.results.json"), otherComments: await read("/m0/final.tex.comments.json"), takenComments: await read("/m0/again.tex.comments.json") };
     check(r1.hook === 1 && r1.ourResults === "{}" && r1.otherComments === "OTHER" && r1.takenComments === null, "M0: another document's comments file made at the freed name stays; only this file's results move", r1);
     await ev(`${W}.remove("/m0/again.tex.results.json").then(() => 1)`);
     await reuse([".results.json"]);
     await retitle("last");
-    await until(`${T}.textContent === "last.tex"`, 5000);
+    await until(`${T}.textContent === "last.tex" && /^Renamed/.test(document.querySelector(".tex-status").textContent)`, 5000);
     const r2 = { hook: await ev(`window.__reuse`), otherResults: await read("/m0/again.tex.results.json"), takenResults: await read("/m0/last.tex.results.json") };
     check(r2.hook === 1 && r2.otherResults === "OTHER" && r2.takenResults === null, "M0: another document's results file made at the freed name stays where it is", r2);
     await ev(`(window.__sbTexRenamed = undefined, 1)`);
