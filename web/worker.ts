@@ -46,6 +46,13 @@ const FILES: Record<string, string> | undefined = (globalThis as any).__SB_FILES
 declare const __SB_RASTER_HASH__: string;
 (globalThis as any).__SAGEBRUSH_RASTER_URL__ = FILES ? FILES["sagebrush-raster.wasm"] : new URL("sagebrush-raster.wasm?h=" + __SB_RASTER_HASH__.slice(0, 16), BASE).href;
 (globalThis as any).__SAGEBRUSH_RASTER_SHA256__ = __SB_RASTER_HASH__;
+// engine/nd's numerics module likewise, the first time np.linalg.cholesky runs
+// (src/runtime/nd.ts; the runner's broker may fetch it, web/runner-fetch.mts);
+// not one of the files a downloaded file's runner carries (files mode), where
+// the TypeScript code then runs for the session
+declare const __SB_ND_HASH__: string;
+(globalThis as any).__SAGEBRUSH_ND_URL__ = FILES ? FILES["sagebrush-nd.wasm"] : new URL("sagebrush-nd.wasm?h=" + __SB_ND_HASH__.slice(0, 16), BASE).href;
+(globalThis as any).__SAGEBRUSH_ND_SHA256__ = __SB_ND_HASH__;
 // (the build's id, version and notices; the library itself is fetched in
 // chunks, web/lib-lazy.ts, which must come before src/compile)
 import "../build/cli/lib-meta.gen.js";

@@ -95,9 +95,9 @@ for tr in ("engineCall", "symCall", "mpCall"):
         add(tr, n)
 for m in T["wasmModules"]:
     if not m["reads_interrupt"] and f"wasm:{m['module']}" not in covered:
-        entries.append(dict(id=f"wasm:{m['module']}", transport=f"wasm:{m['module']}", status="planned", exception="XK",
-                            family="P3f NumPy kernels" if m["module"] == "kernels.ts" else "E13g raster",
-                            owner="numerics (python)" if m["module"] == "kernels.ts" else "board/plot"))
+        # (engine/nd's module, src/runtime/nd.ts: cholesky's blocked kernel (CHOL-1), one call per matrix, no poll yet)
+        fam, owner = {"kernels.ts": ("P3f NumPy kernels", "numerics (python)"), "nd.ts": ("numerics-core engine/nd", "numerics-core")}.get(m["module"], ("E13g raster", "board/plot"))
+        entries.append(dict(id=f"wasm:{m['module']}", transport=f"wasm:{m['module']}", status="planned", exception="XK", family=fam, owner=owner))
 out = dict(
     comment="plan-interrupt-harness r5: one entry per census name; regenerate with web/interrupt-matrix-gen.py",
     fingerprints=census["fingerprints"],

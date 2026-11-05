@@ -5,10 +5,10 @@
 //!
 //! The boundary is checked before any pointer is read or slice made ([`crate::boundary`], safe code: the
 //! memory model, what is enforced and what the host must guarantee). A job that fails a check returns 0
-//! having written nothing. `nd_gemm_part` and `nd_solve` (single-threaded, numerics-core P2b-1) are the only
-//! exports that write memory.
+//! having written nothing. `nd_gemm_part`, `nd_solve` (single-threaded, numerics-core P2b-1) and `nd_potrf`
+//! (single-threaded, CHOL-1) are the only exports that write memory.
 
-use crate::boundary::{check, check_solve, desc_region, desc_region_of, Facts, DESC_WORDS, REPORT_WORDS, SOLVE_DESC_WORDS};
+use crate::boundary::{check, check_potrf, check_solve, desc_region, desc_region_of, Facts, DESC_WORDS, POTRF_DESC_WORDS, POTRF_REPORT_WORDS, REPORT_WORDS, SOLVE_DESC_WORDS};
 use crate::gemm::{gemm_cols, partition, scratch_len, Kernel, Mat};
 use core::arch::wasm32::memory_size;
 use core::ptr::{addr_of, with_exposed_provenance, with_exposed_provenance_mut};
@@ -160,6 +160,47 @@ pub unsafe extern "C" fn nd_solve(desc: u32) -> u32 {
     };
     let bits = rep.rcond.to_bits();
     report.copy_from_slice(&[code, col, kern.name().as_ptr() as usize as u32, kern.name().len() as u32, shape, bits as u32, (bits >> 32) as u32]);
+    1
+}
+
+/// A = R'R on one thread ([`crate::chol::potrf`], numerics-core CHOL-1): R overwrites A's upper triangle (A's
+/// strictly lower part is not meaningful afterwards), work is used, and the report is written as [status, column, kernel
+/// name address, kernel name length]: status 1 factored, 2 not positive definite at the 1-based column (A then
+/// holds a partial factorization). Returns 1, or 0 if the job was refused, having written nothing.
+///
+/// Checked here, before any pointer is read or slice made ([`check_potrf`]): as [`nd_solve`]'s rules, for the
+/// three regions A, work and report; lda >= max(n, 1); work holds `potrf_work_len(n)`.
+///
+/// # Safety
+/// [`nd_solve`]'s host preconditions, for this call's A, work and report.
+#[no_mangle]
+#[allow(unsafe_code)]
+pub unsafe extern "C" fn nd_potrf(desc: u32) -> u32 {
+    let probe = 0u8;
+    let facts = Facts {
+        mem: memory_bytes(),
+        floor: addr_of!(__heap_base) as usize as u64,
+        max_len: isize::MAX as u64,
+        frame: core::hint::black_box(addr_of!(probe)) as usize as u64,
+    };
+    if desc_region_of(u64::from(desc), POTRF_DESC_WORDS, &facts).is_none() {
+        return 0;
+    }
+    // SAFETY: the descriptor's words lie in the host's part of memory, 4-aligned (checked above)
+    let d = with_exposed_provenance::<[u32; POTRF_DESC_WORDS]>(desc as usize).read();
+    let Some(j) = check_potrf(u64::from(desc), &d, &facts) else { return 0 };
+    let kern = Kernel::selected();
+    // SAFETY: as nd_solve's, for A, work and the report
+    let a_len = crate::gemm::span(j.n, j.n, j.lda).unwrap_or(0);
+    let a: &mut [f64] = if a_len == 0 { &mut [] } else { core::slice::from_raw_parts_mut(with_exposed_provenance_mut(j.a), a_len) };
+    let work: &mut [f64] = if j.work_len == 0 { &mut [] } else { core::slice::from_raw_parts_mut(with_exposed_provenance_mut(j.work), j.work_len) };
+    let report: &mut [u32] = core::slice::from_raw_parts_mut(with_exposed_provenance_mut(j.report), POTRF_REPORT_WORDS);
+    let Ok(info) = crate::chol::potrf(kern, a, j.n, j.lda, work) else { return 0 };
+    let (code, col) = match info {
+        None => (1, 0),
+        Some(k) => (2, k as u32 + 1),
+    };
+    report.copy_from_slice(&[code, col, kern.name().as_ptr() as usize as u32, kern.name().len() as u32]);
     1
 }
 

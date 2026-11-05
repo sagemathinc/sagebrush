@@ -1421,6 +1421,14 @@
    "exception": "XK",
    "family": "P3f NumPy kernels",
    "owner": "numerics (python)"
+  },
+  {
+   "id": "wasm:nd.ts",
+   "transport": "wasm:nd.ts",
+   "status": "planned",
+   "exception": "XK",
+   "family": "numerics-core engine/nd",
+   "owner": "numerics-core"
   }
  ]
 }

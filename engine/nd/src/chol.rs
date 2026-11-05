@@ -496,6 +496,37 @@ pub(crate) mod tests {
     pub(crate) const CHOL_FNV: u64 = 0xd82e438477f0a236;
     pub(crate) const CHOL_FNV_FMA: u64 = 0x5a64157952db4998;
 
+    /// The per-family bit pins of the factor alone (R's upper triangle, column by column): the same seeded
+    /// 120 x 120 and 131 x 131 SPD matrices (CHOL-1: `nd_potrf`'s, and so the public cholesky's, bits).
+    pub(crate) const POTRF_FNV: u64 = 0x3c1e8bf25e29f991;
+    pub(crate) const POTRF_FNV_FMA: u64 = 0xb831631bef7d2f43;
+
+    /// R's upper triangle of the seeded 120 and 131 SPD matrices, column by column, on kernel `k`.
+    pub(crate) fn potrf_bits(k: Kernel) -> u64 {
+        let mut all = Vec::new();
+        for n in [120usize, 131] {
+            let a = spd(n, 2029);
+            let (f, info) = factor(k, &a, n, n);
+            assert_eq!(info, None);
+            for j in 0..n {
+                all.extend_from_slice(&f[j * n..j * n + j + 1]);
+            }
+        }
+        fnv(&all)
+    }
+
+    #[test]
+    fn factor_bits_per_family() {
+        assert_eq!(potrf_bits(Kernel::Scalar), POTRF_FNV, "no-FMA family: {:#018x}", potrf_bits(Kernel::Scalar));
+        assert_eq!(potrf_bits(Kernel::ScalarFma), POTRF_FNV_FMA, "FMA family: {:#018x}", potrf_bits(Kernel::ScalarFma));
+        #[cfg(target_arch = "x86_64")]
+        if let Some(k) = crate::micro::Avx2Fma::detect() {
+            assert_eq!(potrf_bits(Kernel::Avx2Fma(k)), POTRF_FNV_FMA, "AVX2+FMA");
+        }
+        #[cfg(target_arch = "aarch64")]
+        assert_eq!(potrf_bits(Kernel::Neon), POTRF_FNV_FMA, "NEON");
+    }
+
     #[test]
     fn cholesky_bits_per_family() {
         let r = 3;
