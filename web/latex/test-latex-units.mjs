@@ -16,7 +16,7 @@ import { EXAMPLES } from "./examples.ts";
 import { makeAnchor, locate } from "./comments.ts";
 import { Engine, withBeamer, once, declaresBeamer } from "./engine/pipeline.mjs";
 import { coldRun, incremental } from "./engine/incremental-demo.mjs";
-import { setKatex, render, installBeamer, BOX_MAX, BOX_KEY, boxCost, fitsBoxes } from "./engine/render.mjs";
+import { setKatex, render, installBeamer, BOX_MAX, BOX_KEY, boxCost, fitsBoxes, NAME_MAX, NAME_TOTAL } from "./engine/render.mjs";
 import { itemKey } from "./engine/sagetex.mjs";
 import * as beamerCode from "./engine/beamer.mjs";
 
@@ -515,6 +515,28 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
   // (and the text a \nameref brings in is escaped as the rest: "A \& B" named through another title)
   { const r = refDoc("", "\\section{A \\& B}\\label{a}\\section{Cf.\\ \\nameref{a}}\\label{b}X \\nameref{b} Y"), h = r.chunks.join("");
     check("ref-nameref-nested-escaped", refText(r).replace(/&amp;/g, "&") === "1 A & B 2 Cf. A & B X Cf. A & B Y" && !/A & B/.test(h), [refText(r), h.match(/Cf\.[^<]{0,20}/g)]); }
+  // (astra REF682-EXPAND-1: \nameref's titles within bounds. Titles naming the one before twice each would double per level
+  //  (depth 18: 3.1 MB before): each title at most NAME_MAX, cut and said once; titles that stay empty are worked out
+  //  once each (depth 20: about 4 s without that, milliseconds with it); a chain of titles naming titles deeper than
+  //  NAME_DEPTH is refused by name, and one within it resolves; all of a document's \nameref's together at most
+  //  NAME_TOTAL characters, said once)
+  {
+    const dbl = (n, leaf, sep) => { let b = "\\section{" + leaf + "}\\label{s0}"; for (let k = 1; k <= n; k++) b += "\\section{\\nameref{s" + (k - 1) + "}" + sep + "\\nameref{s" + (k - 1) + "}}\\label{s" + k + "}"; return b + "X \\nameref{s" + n + "} Y"; };
+    const fwd = (n) => { let b = ""; for (let k = 0; k < n; k++) b += "\\section{\\nameref{f" + (k + 1) + "}}\\label{f" + k + "}"; return b + "\\section{End}\\label{f" + n + "}X \\nameref{f0} Y"; };
+    const said = (r, re) => r.problems.filter((p) => p.kind === "expansion" && re.test(p.name)).length;
+    const d18 = refDoc("", dbl(18, "Leaf", " and ")), d18h = d18.chunks.join("");
+    check("ref-nameref-doubling-bounded", d18.stats.outcome === "ok" && d18h.length < 25 * (NAME_MAX + 200) && said(d18, /a title past 4096 characters, cut/) === 1, { len: d18h.length, problems: d18.problems.map((p) => p.name) });
+    const t0 = performance.now(), d20 = refDoc("", dbl(20, "", "")), ms = performance.now() - t0;
+    check("ref-nameref-empty-titles-once", ms < 1500 && refText(d20).endsWith("X Y"), { ms: Math.round(ms), tail: refText(d20).slice(-20) });
+    const deep = refDoc("", fwd(100)), within = refDoc("", fwd(63));
+    check("ref-nameref-deep-refused", refText(deep).endsWith("X ?? Y") && said(deep, /titles naming titles past 64 deep/) === 1 && refText(within).endsWith("X End Y") && !within.problems.length,
+      [refText(deep).slice(-12), deep.problems.map((p) => p.name), refText(within).slice(-12), within.problems]);
+    const many = refDoc("", "\\section{" + "W ".repeat(3000) + "}\\label{w}" + "\\nameref{w} ".repeat(400)), manyH = many.chunks.join("");
+    check("ref-nameref-total-bounded", manyH.length < NAME_TOTAL + 64 * 1024 && said(many, /past 1048576 characters of titles in all/) === 1, { len: manyH.length, problems: many.problems.map((p) => p.name) });
+  }
+  // (and a title with no references in it keeps its markup in \nameref's link, as hyperref keeps it: \emph's italic)
+  { const h = refDoc("", "\\section{An \\emph{Em} title}\\label{e}X \\nameref{e} Y").chunks.join("");
+    check("ref-nameref-keeps-markup", /<a class="ref" href="#[^"]+">An <span class="it">Em<\/span> title<\/a>/.test(h), h.match(/X .{0,120}/)); }
   // (astra REF682-HTML-1: a theorem's name is the document's own text, escaped wherever \cref and \Cref name it, singular
   //  and plural; and a plain one named as TeX names it ("lemma 1", "Lemma 1", "lemmas 1 and 2", "Lemmas 1 and 2"))
   const evil = refDoc("\\newtheorem{evil}{<img src=x onerror=alert(1)>}", "\\begin{evil}\\label{x}A\\end{evil}\\begin{evil}\\label{y}B\\end{evil}P \\cref{x} Q \\Cref{x} R \\cref{x,y} S \\Cref{x,y}").chunks.join("");

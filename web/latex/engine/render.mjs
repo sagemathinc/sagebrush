@@ -192,6 +192,9 @@ const NOOP = new Set(["relax", "protect", "makeatletter", "makeatother", "sloppy
 // commands whose arguments are consumed silently: name -> [optional count, mandatory count]
 // (saved boxes: their copies, all \usebox's together, at most BOX_MAX: each copy's HTML characters, and BOX_KEY for each
 //  of its SageTeX items, which a box with no HTML still copies (astra, BOX653-EXPAND-1's residual))
+// (a \nameref's title as text: at most NAME_MAX characters each, NAME_TOTAL for all the \nameref's of a document
+//  together, and titles naming titles at most NAME_DEPTH deep (astra, REF682-EXPAND-1))
+export const NAME_MAX = 4096, NAME_TOTAL = 1 << 20, NAME_DEPTH = 64;
 export const BOX_MAX = 1 << 20, BOX_KEY = 16;
 export const boxCost = (b) => b.h.length + BOX_KEY * b.keys.length;
 export const fitsBoxes = (used, add) => used + add <= BOX_MAX;
@@ -833,6 +836,8 @@ class Renderer {
     if (r.cmd === "nameref") {
       const nm = this.nameText(r.key, plain);
       if (nm === null) return plain ? "??" : '<span class="missing" title="' + esc(r.key) + '">??</span>';
+      // (all of a document's \nameref's together: at most NAME_TOTAL characters of titles, counted before each is shown)
+      if ((this.nameOut = (this.nameOut ?? 0) + nm.length) > NAME_TOTAL) { this.nameSaid("past " + NAME_TOTAL + " characters of titles in all: the rest left out"); return "\u2026"; }
       return plain ? nm : L.id ? '<a class="ref" href="#' + L.id + '">' + nm + "</a>" : nm;
     }
     let txt = L.text || "??";
@@ -854,17 +859,31 @@ class Renderer {
     // (only a \nameref inside a title can name a missing label here, and it asks for text)
     if (!L) return "??";
     if (seen.has(key)) return null;
-    seen.add(key);
-    let cycle = false;
-    const s = L.name.replace(/\u0001R(\d+)\u0002/g, (_, k) => {
-      const q = this.refs[+k], t = q.cmd === "nameref" ? this.nameText(q.key, true, seen) : this.resolveRef(q, true);
-      if (t === null) { cycle = true; return ""; }
-      return plain ? t : esc(t);
-    });
-    seen.delete(key);
-    // (as text: the title's tags taken off and the entities esc() made turned back, so it's escaped once where it lands)
-    return cycle ? null : plain ? unesc(s.replace(/<[^>]*>/g, "")) : s;
+    if (seen.size >= NAME_DEPTH) { this.nameSaid("titles naming titles past " + NAME_DEPTH + " deep: the rest left out"); return "??"; }
+    // (each label's title as text, worked out once (a label reached through many titles isn't worked out again: whether it
+    //  reaches a cycle doesn't depend on where it's reached from), at most NAME_MAX characters, checked before each piece
+    //  is added (titles naming others twice each doubled per level: astra, REF682-EXPAND-1); past it, cut and said once)
+    const memo = (this.nameMemo ??= new Map());
+    let m = memo.get(key);
+    if (m === undefined) {
+      seen.add(key);
+      let text = "", cycle = false, cut = false;
+      for (const part of L.name.replace(/<[^>]*>/g, "").split(/(\u0001R\d+\u0002)/)) {
+        const k = /^\u0001R(\d+)\u0002$/.exec(part), q = k && this.refs[+k[1]];
+        const t = !q ? unesc(part) : q.cmd === "nameref" ? this.nameText(q.key, true, seen) : this.resolveRef(q, true);
+        if (t === null) { cycle = true; break; }
+        if (text.length + t.length > NAME_MAX) { text += t.slice(0, NAME_MAX - text.length) + "\u2026"; cut = true; break; }
+        text += t;
+      }
+      seen.delete(key);
+      if (cut) this.nameSaid("a title past " + NAME_MAX + " characters, cut");
+      memo.set(key, (m = cycle ? null : text));
+    }
+    // (in HTML: the title as made, its markup kept; one with references in it, as its text, escaped once)
+    return m === null ? null : plain ? m : /\u0001R/.test(L.name) ? esc(m) : L.name;
   }
+  // (each kind of cut said once, as a problem)
+  nameSaid(why) { (this.nameWhy ??= new Set()).has(why) || (this.nameWhy.add(why), this.problem("expansion", "\\nameref: " + why)); }
   // cleveref's \cref and \Cref, with its defaults (TeX Live's; astra4's digest, gap 2): each kind named ("section 1",
   // "eq. (1)", "fig. 1"), the keys of one kind together, the kinds in the order they first come, each kind's sorted,
   // runs of three or more as "a to c"; "and" between two, commas and a last "and" between more (between kinds, ", and");
