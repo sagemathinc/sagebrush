@@ -15,31 +15,33 @@ export const EDIT_TITLE = "Edit (E)";
 export const EDITING_TITLE = "Editing: Esc for View";
 
 export const modeKey = (kind: string, id: string) => `${kind}:${id}`;
-/** key -> when it was left in Edit (ms) */
+/** key -> when it was left in Edit (ms): only entries that are a finite time are taken, into a record of its own (no
+ * prototype); anything else in the store, or a store that can't be read, is none (View: the safe side). */
 function kept(): Record<string, number> {
+  const k: Record<string, number> = Object.create(null);
   try {
     const v = JSON.parse(localStorage.getItem(STORE) ?? "{}");
-    return v && typeof v === "object" && !Array.isArray(v) ? v : {};
-  } catch {
-    return {};
-  }
+    if (v && typeof v === "object" && !Array.isArray(v)) for (const [key, t] of Object.entries(v)) if (typeof t === "number" && Number.isFinite(t)) k[key] = t;
+  } catch {}
+  return k;
 }
 
 /** The mode `key` opens in: Edit if the person last left it in Edit (or made it) here, else View. */
 export function modeOf(key: string): DocMode {
-  return Number.isFinite(kept()[key]) ? "edit" : "view";
+  return Object.hasOwn(kept(), key) ? "edit" : "view";
 }
 
-/** The person left `key` in `mode` (their own toggle, or made it: Edit). */
+/** The person left `key` in `mode` (their own toggle, or made it: Edit). What the store held that isn't a kept
+ * time is dropped as it is written; nothing here throws (a store that can't be written keeps what it had). */
 export function rememberMode(key: string, mode: DocMode): void {
-  const k = kept();
-  delete k[key];
-  if (mode === "edit") {
-    k[key] = Date.now();
-    const keys = Object.keys(k);
-    if (keys.length > MAX) for (const x of keys.sort((a, b) => (k[a] || 0) - (k[b] || 0)).slice(0, keys.length - MAX)) delete k[x];
-  }
   try {
+    const k = kept();
+    delete k[key];
+    if (mode === "edit") {
+      k[key] = Date.now();
+      const keys = Object.keys(k);
+      if (keys.length > MAX) for (const x of keys.sort((a, b) => k[a] - k[b]).slice(0, keys.length - MAX)) delete k[x];
+    }
     localStorage.setItem(STORE, JSON.stringify(k));
   } catch {}
 }

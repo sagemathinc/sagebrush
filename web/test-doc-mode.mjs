@@ -47,8 +47,28 @@ store.set("sagebrush-doc-modes", "{not json");
 ok(modeOf(K) === "view", "storage that can't be read: View");
 store.set("sagebrush-doc-modes", JSON.stringify([1, 2]));
 ok(modeOf(K) === "view", "…nor storage of another shape");
+let threwArr = null;
+try { rememberMode(modeKey("board", "arr1"), "edit"); } catch (e) { threwArr = e; }
+ok(threwArr === null && modeOf(modeKey("board", "arr1")) === "edit" && !Array.isArray(JSON.parse(store.get("sagebrush-doc-modes"))), `…an Array store: keeping over it doesn't throw, and writes a record (grader's V7) (${threwArr})`);
 store.set("sagebrush-doc-modes", JSON.stringify({ [K]: "yes" }));
 ok(modeOf(K) === "view", "…nor a value that isn't a time");
+// (astra's MODE658-SHAPE-1: more than 1000 entries that aren't times, objects among them, in a store written by
+// another page: View, nothing thrown, and they go as the store is written)
+const bad = {};
+for (let i = 0; i < 1001; i++) bad["board:x" + i] = i % 3 === 0 ? { valueOf: null, toString: null, extra: "payload" } : i % 3 === 1 ? "12" : null;
+bad["board:inf"] = 1e999; // (JSON: null)
+// (and a "__proto__" key in the text itself, as JSON.parse makes it an own key)
+store.set("sagebrush-doc-modes", JSON.stringify(bad).replace(/^\{/, '{"__proto__":5,'));
+ok(modeOf("board:x0") === "view" && modeOf("board:x1") === "view", "a store of entries that aren't times: View");
+let threw2 = null;
+try { rememberMode(modeKey("board", "new1"), "edit"); } catch (e) { threw2 = e; }
+ok(threw2 === null && modeOf(modeKey("board", "new1")) === "edit", `…over 1000 of them: keeping a new one doesn't throw, and keeps it (${threw2})`);
+const after = JSON.parse(store.get("sagebrush-doc-modes"));
+ok(JSON.stringify(Object.keys(after)) === JSON.stringify(["__proto__", "board:new1"]) && Object.values(after).every((t) => typeof t === "number"), `…and only times are written back: what wasn't one goes (${JSON.stringify(Object.keys(after)).slice(0, 80)})`);
+try { rememberMode(modeKey("board", "new1"), "view"); } catch (e) { threw2 = e; }
+ok(threw2 === null && !JSON.stringify(JSON.parse(store.get("sagebrush-doc-modes"))).includes("payload"), "…a View written back carries none of the payload either");
+store.set("sagebrush-doc-modes", JSON.stringify({ toString: 7, hasOwnProperty: 9, valueOf: 3 }));
+ok(modeOf("toString") === "edit" && modeOf("constructor") === "view" && modeOf("hasOwnProperty") === "edit", "keys named like Object's own are plain keys (a record of its own: no prototype)");
 throwing = true;
 let threw = false;
 try { rememberMode(K, "edit"); ok(modeOf(K) === "view", "storage refused: View, and nothing thrown"); } catch { threw = true; }

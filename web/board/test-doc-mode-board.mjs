@@ -105,9 +105,68 @@ try {
   await go("?doc=examples/sagebrush.json");
   ok(!(await editing()), "…and an example's mode isn't kept (only this browser's own boards are)");
 
+  // ---- View writes nothing (@sagebrush's ruling on #658): undo and redo, a menu's edit, slow code's previews
+  await go("?new=python");
+  await until("document.querySelector('[data-sbb=edit]').getAttribute('aria-pressed') === 'true'", 10000);
+  const nodes = () => ev("JSON.stringify((window.sagebrush.board.snapshot().doc.nodes ?? []).map((n) => n.id))");
+  // (an edit in Edit, through the page's API: a step to undo)
+  await ev("window.sagebrush.board.edit((d) => { (d.nodes ??= []).push({ id: 'u1', title: 'one', x: 0, y: 0 }); }).then(() => 1)");
+  ok((await nodes()) === JSON.stringify(["u1"]), "(an edit in Edit)");
+  await ev("document.activeElement?.blur?.(), 1");
+  await press("Escape");
+  ok(!(await editing()), "(back to View)");
+  for (const type of ["keyDown", "keyUp"]) await send("Input.dispatchKeyEvent", { type, key: "z", code: "KeyZ", modifiers: 2, windowsVirtualKeyCode: 90 });
+  await sleep(400);
+  ok((await nodes()) === JSON.stringify(["u1"]), "Ctrl+Z in View: nothing undone (View writes nothing)");
+  await press("e");
+  for (const type of ["keyDown", "keyUp"]) await send("Input.dispatchKeyEvent", { type, key: "z", code: "KeyZ", modifiers: 2, windowsVirtualKeyCode: 90 });
+  await until(`(${JSON.stringify("[]")}) === JSON.stringify((window.sagebrush.board.snapshot().doc.nodes ?? []).map((n) => n.id))`, 5000);
+  ok((await nodes()) === "[]", "…in Edit, Ctrl+Z undoes it");
+  // (the page's API writes in View too: an agent's edit, under its own grants, ruling 3)
+  await press("Escape");
+  await ev("window.sagebrush.board.edit((d) => { (d.nodes ??= []).push({ id: 'a1', title: 'by an agent', x: 0, y: 0 }); }).then(() => 1)");
+  ok(!(await editing()) && (await nodes()) === JSON.stringify(["a1"]), "an edit through the page's API (an agent's) is made in View: its own grants");
+  // (a menu's edit in View: the board goes to Edit first, and the change is made there)
+  const pagesBefore = await ev("window.sagebrush.board.snapshot().pages");
+  await ev("document.querySelector('[data-sbb=addpage]').click(), 1");
+  await until(`window.sagebrush.board.snapshot().pages === ${pagesBefore + 1}`, 5000);
+  ok((await editing()) && (await ev("window.sagebrush.board.snapshot().pages")) === pagesBefore + 1, "Add page chosen in View: Edit first, then the page added");
+  await ev("window.sagebrush.board.page(0)").catch(() => {});
+  // (slow code's output: shown in View, its preview not kept in the document; in Edit, kept: a board of its own)
+  await go("?new=python");
+  await until("document.querySelector('[data-sbb=edit]').getAttribute('aria-pressed') === 'true'", 10000);
+  await ev("document.activeElement?.blur?.(), 1");
+  await press("Escape");
+  ok(!(await editing()), "(a new board, in View)");
+  await ev("window.sagebrush.board.edit((d) => { d.nodes = [{ id: 'c1', title: 'code', code: 'print(6*7)', x: 0, y: 0, w: 300 }]; }).then(() => 1)");
+  await ev("window.sagebrush.board.setPreviewThreshold(0), 1");
+  const ran = await ev("window.sagebrush.board.run().then((os) => JSON.stringify(os.map((o) => [o.id, o.output])))");
+  await sleep(1500);
+  ok(/"c1","42\\n"/.test(ran) && !(await ev("!!window.sagebrush.board.snapshot().doc.nodes[0].preview")), `code run in View: its output shown (${ran}), its preview not kept in the document`);
+  await press("e");
+  await ev("window.sagebrush.board.run().then(() => 1)");
+  ok(await until("!!window.sagebrush.board.snapshot().doc.nodes[0].preview", 10000), "…run in Edit: its preview kept (as before)");
+
   // ---- what is kept: this browser's, by kind and id
   const keptKeys = await ev("Object.keys(JSON.parse(localStorage.getItem('sagebrush-doc-modes') ?? '{}'))");
   ok(!keptKeys.includes("board:" + made.slice(11)) && keptKeys.every((k) => /^(board|notebook):[\w-]+$/.test(k)), `what is kept: boards left in Edit, by id (${JSON.stringify(keptKeys).slice(0, 200)})`);
+
+  // ---- a host that doesn't let edit (grader's B3, B5): a remembered Edit, E, the control and the page's API all
+  // leave it in View, and nothing is kept
+  await go("?doc=examples/sagebrush.json");
+  await ev("import('/board/board.js').then((m) => m.mounted.destroy()).then(() => 1)");
+  await ev(`import('/board/board.js').then((m) => { window.__kept = []; const store = { ...m.host.store, editing: (f) => { f({ allowed: false, why: "Not here" }); return () => {}; } }; window.__b = m.mountBoard(document.getElementById("board"), { ...m.host, store, mode: { start: true, toggled: (on) => window.__kept.push(on) } }); return 1; })`);
+  await until("!!window.__b?.agent && !!document.querySelector('[data-sbb=edit]')", 20000);
+  await sleep(500);
+  ok(!(await editing()) && (await ev("document.querySelector('[data-sbb=edit]').hasAttribute('disabled')")), "a board remembered in Edit, on a host that doesn't let edit: it opens in View, Edit disabled");
+  await ev("document.activeElement?.blur?.(), 1");
+  await press("e");
+  ok(!(await editing()), "…E: still View");
+  await ev("document.querySelector('[data-sbb=edit]').onclick(), 1");
+  ok(!(await editing()), "…the control's own handler: still View");
+  await ev("window.__b.agent.editing(true), 1");
+  ok(!(await editing()), "…the page's API asking for Edit: still View (the host's say)");
+  ok((await ev("JSON.stringify(window.__kept)")) === "[]", `…and nothing kept (${await ev("JSON.stringify(window.__kept)")})`);
 } catch (e) {
   ok(false, "the test ran: " + String(e?.stack ?? e).slice(0, 500));
 } finally {
