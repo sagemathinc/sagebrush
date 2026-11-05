@@ -1,0 +1,7 @@
+chol: refused
+eig: refused, needs QZ
+eig chol: refused
+eigs largestimag: returned
+double 1x2 [2 1]
+eigs IsSymmetricDefinite: returned
+double 1x2 [2 1]

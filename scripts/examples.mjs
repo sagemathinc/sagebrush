@@ -16,7 +16,7 @@
 //       CI's shard: the selected ids (EXAMPLES_IDS, a JSON list) at positions i mod N == K - 1, run 2 at a
 //       time, each killed at 30 s; the ids it ran written to FILE
 //   node scripts/examples.mjs census --ran-dir DIR
-//       every selected id (EXAMPLES_IDS) ran exactly once across the shards' FILEs, at most 24 each
+//       every selected id (EXAMPLES_IDS) ran exactly once across the shards' FILEs, at most SHARD_MAX (16) each
 //
 // Needs `pnpm run build` (dist/) first; boards and LaTeX run through dist/src/cli.js.
 import { spawn } from "node:child_process";

@@ -81,8 +81,8 @@ test("select: each row of the trigger table", () => {
   );
 });
 
-test("shards: every selected id exactly once, at most 24 per shard, at every boundary; over the matrix limit refused", () => {
-  for (const n of [0, 1, 24, 25, 288, 289, 320, 6144]) {
+test("shards: every selected id exactly once, at most 16 per shard, at every boundary; over the matrix limit refused", () => {
+  for (const n of [0, 1, 16, 17, 192, 193, 320, 4096]) {
     const all = Array.from(
       { length: n },
       (_, i) => `notebook/e${String(i).padStart(5, "0")}`,
@@ -96,15 +96,15 @@ test("shards: every selected id exactly once, at most 24 per shard, at every bou
       `n=${n}: each shard 1 to ${SHARD_MAX}`,
     );
   }
-  assert.throws(() => shardCount(6145), /GitHub's matrix limit/);
+  assert.throws(() => shardCount(4097), /GitHub's matrix limit/);
 });
 
 test("census: missing, repeated, unselected and oversized shards", () => {
   assert.deepEqual(census(["a", "b"], [["a"]]), ["b: selected but never ran"]);
   assert.deepEqual(census(["a"], [["a"], ["a"]]), ["a: ran 2 times"]);
   assert.deepEqual(census(["a"], [["a", "z"]]), ["z: ran but wasn't selected"]);
-  const big = Array.from({ length: 25 }, (_, i) => `x${i}`);
-  assert.match(census(big, [big]).join(), /more than 24/);
+  const big = Array.from({ length: 17 }, (_, i) => `x${i}`);
+  assert.match(census(big, [big]).join(), /more than 16/);
 });
 
 test("paths (A1): only strict relative paths", () => {

@@ -2110,15 +2110,16 @@ test("64-bit values beyond 2^53 and complex of integers refused; regexprep's dyn
     // (regexprep: dynamic expressions and options it doesn't have refused, not ignored)
     tryIt("regexprep('here. there', '(^|\\.)\\s*.', '${upper($0)}')"), tryIt("regexprep('May', 'M(\\w+)y', 'April', 'preservecase')"),
     "disp(regexprep('aBa', 'b', 'x', 'ignorecase'))",
-    // (primes takes a scalar; str2num reads numbers and true/false, logical when all are)
+    // (primes takes a scalar; str2num reads numbers and true/false, logical when all are, and evaluates other
+    // text as MATLAB does: its own test below)
     tryIt("primes(1:10)"), "disp(mat2str(primes(10)))",
     "X = str2num('false true true false'); disp(class(X)); disp(mat2str(X)); disp(class(str2num('1 2')))",
-    tryIt("str2num('2+3')"),
+    "disp(mat2str(str2num('2+3')))",
   ].join("\n")), ["refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused",
     "-9223372036854775808 -9223372036854775808 4503599627370496 9007199254740991",
     "127 255 32767 65535 2147483647 4294967295", "refused", "single",
     "[1 1 0 1 4]", "refused", "refused", "   300", "refused", "refused", "     2", "refused", "20000", "refused", "month,day,year", "01 11 02 20 2020", "aaaa",
-    "refused", "refused", "axa", "refused", "[2 3 5 7]", "logical", "[false true true false]", "double", "refused"]);
+    "refused", "refused", "axa", "refused", "[2 3 5 7]", "logical", "[false true true false]", "double", "5"]);
 });
 
 test("abs of an integer class's minimum saturates, as MATLAB's; int64's is refused (CORR-D265-ABS-1)", () => {
@@ -2769,6 +2770,31 @@ test("str2num preserves character-array rows (MCF-30)", () => {
     "[0 0]", "double", "[]", "logical", "false",
     "[2 2]", "double", "[1 2;3 4]", "logical", "true",
     "[0 0]", "double", "[]", "logical", "false",
+  ]);
+});
+
+test("str2num evaluates [text] as MATLAB does, in a workspace of its own: [] and false where that errors", () => {
+  const { execFileSync } = require("node:child_process");
+  // MATLAB R2026b Update 1, frozen /scratch/matlab-tmp/o19 (results.md, rows 7-15; SHA256SUMS sha256
+  // d1c4de9f74f1403763c4149cb0d213b480c3e1a80f68f2b97aeac3520f92527e): unknown names and syntax errors give
+  // [] and false, expressions evaluate, and the caller's variable xv is not seen
+  const pinned = ["'hello world'", "'abc'", "'pi*2'", "'sin(1)'", "'1+'", "'[1 2] hello'", "'2*xq_undefined'", "'xv'"];
+  // (and, Sagebrush's own: a matrix and an expression; a dimension mismatch, an error, [] and false; a char
+  // result; text that would run statements of its own is refused, never run; a MATLAB function Sagebrush lacks
+  // (catalog/matlab/absent.json) is refused with its alternative, not given as [])
+  const local = ["'[1 2; 3 4]'", "'2+3'", "'[1 2; 3]'", "'''abc'''", "'1]; disp(99); [2'", "'assignin(1, 2, 3)'"];
+  const code = ["xv = 5;"].concat([...pinned, ...local].map((s) =>
+    `try, [X,ok]=str2num(${s}); disp([mat2str(size(X)) ' ' class(X) ' ' mat2str(X, 17) ' ' mat2str(ok)]); catch e, disp(['refused: ' e.message]); end`)).join("\n");
+  const lines = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8", timeout: 20000 }).trim().split("\n").map((s: string) => s.trim());
+  assert.deepEqual(lines, [
+    "[0 0] double [] false", "[0 0] double [] false",
+    "[1 1] double 6.2831853071795862 true", "[1 1] double 0.8414709848078965 true",
+    "[0 0] double [] false", "[0 0] double [] false", "[0 0] double [] false",
+    "[0 0] double [] false",
+    "[2 2] double [1 2;3 4] true", "[1 1] double 5 true", "[0 0] double [] false", "[1 3] char 'abc' true",
+    "refused: str2num of '1]; disp(99); [2' is not supported in Sagebrush: only one expression is evaluated.",
+    "refused: Unrecognized function or variable 'assignin'. assignin is not in Sagebrush; instead: Return the value as an output, or keep named values in a struct.",
   ]);
 });
 
