@@ -1796,8 +1796,10 @@ try {
     check(followed, "M0: the name at the top follows a rename elsewhere (the file panel's)", await ev(`[${T}.textContent, document.title]`));
     await mk("/m0/moved.tex.results.json", enc("{}"));
     await mk("/m0/taken.tex", enc("x"));
+    // (the status cleared first: a rename is done, its results and comments files moved along, only once it says
+    //  "Renamed…"; the name at the top follows the .tex as soon as it moves, before them (grader, #658's red))
     const retitle = async (typed, key = "Enter") => {
-      await ev(`(${T}.click(), 1)`);
+      await ev(`(document.querySelector(".tex-status").textContent = "", ${T}.click(), 1)`);
       const opened = await until(`!!document.querySelector(".tex-head .tex-titlein")`, 3000);
       if (!opened) return false;
       await ev(`(() => { const i = document.querySelector(".tex-head .tex-titlein"); i.value = ${JSON.stringify(typed)}; i.dispatchEvent(new KeyboardEvent("keydown", { key: ${JSON.stringify(key)}, bubbles: true })); return true; })()`);
@@ -1814,7 +1816,7 @@ try {
     check(saidTaken && (await stat("/m0/moved.tex")) && (await ev(`${T}.textContent`)) === "moved.tex", "M0: a name already taken: said, nothing renamed", await ev(`document.querySelector(".tex-status")?.textContent`));
     // (renamed: the .tex and its results file, the extension added when typed without it)
     await retitle("final");
-    const renamed = await until(`${T}.textContent === "final.tex"`, 5000);
+    const renamed = await until(`${T}.textContent === "final.tex" && /^Renamed/.test(document.querySelector(".tex-status").textContent)`, 5000);
     const files = { tex: await stat("/m0/final.tex"), old: await stat("/m0/moved.tex"), results: await stat("/m0/final.tex.results.json"), oldResults: await stat("/m0/moved.tex.results.json") };
     check(renamed && files.tex && !files.old && files.results && !files.oldResults && (await ev(`document.title`)).startsWith("final.tex"), "M0: a name typed and Enter: the file renamed (.tex added), its results file moved along", files);
     // (astra LATEX-RENAME-1: the old name, freed by the rename, reused at once by another document that makes its own
@@ -1824,13 +1826,13 @@ try {
     const read = (p) => ev(`${W}.stat(${JSON.stringify(p)}).then((e) => e && !e.trashed ? ${W}.read(${JSON.stringify(p)}).then((r) => new TextDecoder().decode(r.content)) : null)`);
     await reuse([".comments.json"]);
     await retitle("again");
-    await until(`${T}.textContent === "again.tex"`, 5000);
+    await until(`${T}.textContent === "again.tex" && /^Renamed/.test(document.querySelector(".tex-status").textContent)`, 5000);
     const r1 = { hook: await ev(`window.__reuse`), ourResults: await read("/m0/again.tex.results.json"), otherComments: await read("/m0/final.tex.comments.json"), takenComments: await read("/m0/again.tex.comments.json") };
     check(r1.hook === 1 && r1.ourResults === "{}" && r1.otherComments === "OTHER" && r1.takenComments === null, "M0: another document's comments file made at the freed name stays; only this file's results move", r1);
     await ev(`${W}.remove("/m0/again.tex.results.json").then(() => 1)`);
     await reuse([".results.json"]);
     await retitle("last");
-    await until(`${T}.textContent === "last.tex"`, 5000);
+    await until(`${T}.textContent === "last.tex" && /^Renamed/.test(document.querySelector(".tex-status").textContent)`, 5000);
     const r2 = { hook: await ev(`window.__reuse`), otherResults: await read("/m0/again.tex.results.json"), takenResults: await read("/m0/last.tex.results.json") };
     check(r2.hook === 1 && r2.otherResults === "OTHER" && r2.takenResults === null, "M0: another document's results file made at the freed name stays where it is", r2);
     await ev(`(window.__sbTexRenamed = undefined, 1)`);
