@@ -347,7 +347,7 @@ const body = (chunks, hang = false, signal) => ({ getReader: () => { let i = 0; 
   const started = [], finished = [];
   let release;
   globalThis.fetch = async (u, init) => {
-    started.push([u, init.priority, init.credentials, init.referrerPolicy]);
+    started.push([u, init.priority, init.credentials, init.referrerPolicy, init.headers?.["X-Sb-Preload"]]);
     if (u === "u2") await new Promise((r) => (release = r));
     finished.push(u);
     return { ok: true, body: body(2) };
@@ -357,7 +357,7 @@ const body = (chunks, hang = false, signal) => ({ getReader: () => { let i = 0; 
   preloadStop(); // (a Run while u2 is in flight)
   release();
   const done = await p;
-  ok(J(started.map((s) => s[0])) === '["u1","u2"]' && started.every((s) => s[1] === "low" && s[2] === "omit" && s[3] === "no-referrer"), "low priority, the broker's shape (no cookie, no referrer), one at a time; a Run while u2 is in flight: u3 never starts: " + J(started));
+  ok(J(started.map((s) => s[0])) === '["u1","u2"]' && started.every((s) => s[1] === "low" && s[2] === "omit" && s[3] === "no-referrer" && s[4] === "1"), "low priority, the broker's shape (no cookie, no referrer), marked as a background fetch (the service worker keeps nothing), one at a time; a Run while u2 is in flight: u3 never starts: " + J(started));
   ok(J(done) === '["u1","u2"]' && J(finished) === '["u1","u2"]', "...and u2, in flight, finishes (read to its end): " + J(done));
   ok(J(await preloadFetch(["u4"], () => null)) === "[]", "after a stop, nothing more starts");
 }
