@@ -18,6 +18,7 @@ from collections import namedtuple
 import numpy as np
 from numpy import asarray
 from numpy.linalg import LinAlgError, cholesky
+import _numpy
 
 __all__ = ["minimize", "minimize_scalar", "OptimizeResult", "OptimizeWarning", "approx_fprime", "line_search",
            "brent", "golden", "bracket", "fminbound", "fmin", "fmin_bfgs", "fmin_cg", "rosen", "rosen_der",
@@ -26,6 +27,12 @@ __all__ = ["minimize", "minimize_scalar", "OptimizeResult", "OptimizeWarning", "
 
 def _unsupported(what):
     raise NotImplementedError("scipy.optimize: %s is not in Sagebrush's scipy subset" % what)
+
+
+def _admit(nbytes, what):
+    # (the working memory a step keeps at once, admitted against the array limit before its first array is made:
+    # each array's own check alone would let several, each under the limit, together exceed it; MemoryError if not)
+    _numpy._admit_work(nbytes, what)
 
 
 class HessianUpdateStrategy:
@@ -109,6 +116,7 @@ def rosen_der(x):
 
 def rosen_hess(x):
     x = np.atleast_1d(x)
+    _admit(max(8, x.dtype.itemsize) * 4 * len(x) * len(x), "rosen_hess")
     H = np.diag(-400 * x[:-1], 1) - np.diag(400 * x[:-1], -1)
     diagonal = np.zeros(len(x), dtype=x.dtype)
     diagonal[0] = 1200 * x[0] ** 2 - 400 * x[1] + 2
@@ -180,6 +188,74 @@ def approx_derivative(fun, x0, method='3-point', rel_step=None, abs_step=None, f
         return (J, info_dict)
     else:
         return J
+
+
+def _dense_difference(fun, x0, f0, h, use_one_sided, method, workers):
+    # (SciPy's, each difference written into the Jacobian as it is made rather than all of them kept in lists first:
+    # the same arithmetic, so the same values, with one n x m array the peak, admitted with its vectors)
+    m = f0.size
+    n = x0.size
+    nfev = 0
+    result_type = np.result_type(x0, f0, 1.0)
+    _admit(np.dtype(result_type).itemsize * n * m + 16 * (2 * n + 4 * m), "approx_derivative")
+    J_transposed = np.empty((n, m), dtype=result_type)
+    if method == '2-point':
+
+        def x_generator2(x0, h):
+            for i in range(n):
+                x1 = np.copy(x0)
+                x1[i] = x0[i] + h[i]
+                yield x1
+        k = 0
+        for i, f_eval in enumerate(workers(fun, x_generator2(x0, h))):
+            J_transposed[i] = (f_eval - f0) / (x0[i] + h[i] - x0[i])
+            k += 1
+        nfev += k
+    elif method == '3-point':
+
+        def x_generator3(x0, h, use_one_sided):
+            for i, one_sided in enumerate(use_one_sided):
+                x1 = np.copy(x0)
+                x2 = np.copy(x0)
+                if one_sided:
+                    x1[i] = x0[i] + h[i]
+                    x2[i] = x0[i] + 2 * h[i]
+                else:
+                    x1[i] = x0[i] - h[i]
+                    x2[i] = x0[i] + h[i]
+                yield x1
+                yield x2
+        f_evals = iter(workers(fun, x_generator3(x0, h, use_one_sided)))
+        gen = x_generator3(x0, h, use_one_sided)
+        k = 0
+        for i, one_sided in enumerate(use_one_sided):
+            l = next(gen)
+            u = next(gen)
+            f1 = next(f_evals)
+            f2 = next(f_evals)
+            if one_sided:
+                J_transposed[i] = (-3.0 * f0 + 4 * f1 - f2) / (u[i] - x0[i])
+            else:
+                J_transposed[i] = (f2 - f1) / (u[i] - l[i])
+            k += 1
+        nfev += 2 * k
+    elif method == 'cs':
+
+        def x_generator_cs(x0, h):
+            for i in range(n):
+                xc = x0.astype(complex, copy=True)
+                xc[i] += h[i] * 1j
+                yield xc
+        k = 0
+        for i, (f1, hi) in enumerate(zip(workers(fun, x_generator_cs(x0, h)), h)):
+            J_transposed[i] = f1.imag / hi
+            k += 1
+        nfev += k
+    else:
+        raise RuntimeError('Never be here.')
+    if m == 1:
+        J_transposed = np.ravel(J_transposed)
+    return (J_transposed.T, nfev)
 
 
 class _RichResult(dict):
@@ -459,6 +535,7 @@ def _minimize_neldermead(func, x0, args=(), callback=None, maxiter=None, maxfev=
             warnings.warn('Initial guess is not within the specified bounds', OptimizeWarning, stacklevel=3)
     if bounds is not None:
         x0 = np.clip(x0, lower_bound, upper_bound)
+    _admit(max(8, x0.dtype.itemsize) * 5 * (len(x0) + 1) * len(x0), "Nelder-Mead's simplex")
     if initial_simplex is None:
         N = len(x0)
         sim = np.empty((N + 1, N), dtype=x0.dtype)
@@ -647,6 +724,7 @@ def _minimize_bfgs(fun, x0, args=(), jac=None, callback=None, gtol=1e-05, norm=n
     x0 = asarray(x0).flatten()
     if x0.ndim == 0:
         x0 = x0.reshape((1,))
+    _admit(8 * 8 * len(x0) * len(x0), "BFGS's inverse Hessian")
     if maxiter is None:
         maxiter = len(x0) * 200
     sf = _prepare_scalar_function(fun, x0, jac, args=args, epsilon=eps, finite_diff_rel_step=finite_diff_rel_step, workers=workers)
@@ -2226,76 +2304,6 @@ def _prepare_bounds(bounds, x0):
     if ub.ndim == 0:
         ub = np.resize(ub, x0.shape)
     return (lb, ub)
-
-
-
-
-def _dense_difference(fun, x0, f0, h, use_one_sided, method, workers):
-    m = f0.size
-    n = x0.size
-    nfev = 0
-    result_type = np.result_type(x0, f0, 1.0)
-    J_transposed = np.empty((n, m), dtype=result_type)
-    if method == '2-point':
-
-        def x_generator2(x0, h):
-            for i in range(n):
-                x1 = np.copy(x0)
-                x1[i] = x0[i] + h[i]
-                yield x1
-        f_evals = workers(fun, x_generator2(x0, h))
-        dx = [x0[i] + h[i] - x0[i] for i in range(n)]
-        df = [f_eval - f0 for f_eval in f_evals]
-        df_dx = [delf / delx for delf, delx in zip(df, dx)]
-        nfev += len(df_dx)
-    elif method == '3-point':
-
-        def x_generator3(x0, h, use_one_sided):
-            for i, one_sided in enumerate(use_one_sided):
-                x1 = np.copy(x0)
-                x2 = np.copy(x0)
-                if one_sided:
-                    x1[i] = x0[i] + h[i]
-                    x2[i] = x0[i] + 2 * h[i]
-                else:
-                    x1[i] = x0[i] - h[i]
-                    x2[i] = x0[i] + h[i]
-                yield x1
-                yield x2
-        f_evals = iter(workers(fun, x_generator3(x0, h, use_one_sided)))
-        gen = x_generator3(x0, h, use_one_sided)
-        dx = list()
-        df = list()
-        for i, one_sided in enumerate(use_one_sided):
-            l = next(gen)
-            u = next(gen)
-            f1 = next(f_evals)
-            f2 = next(f_evals)
-            if one_sided:
-                dx.append(u[i] - x0[i])
-                df.append(-3.0 * f0 + 4 * f1 - f2)
-            else:
-                dx.append(u[i] - l[i])
-                df.append(f2 - f1)
-        df_dx = [delf / delx for delf, delx in zip(df, dx)]
-        nfev += 2 * len(df_dx)
-    elif method == 'cs':
-
-        def x_generator_cs(x0, h):
-            for i in range(n):
-                xc = x0.astype(complex, copy=True)
-                xc[i] += h[i] * 1j
-                yield xc
-        f_evals = iter(workers(fun, x_generator_cs(x0, h)))
-        df_dx = [f1.imag / hi for f1, hi in zip(f_evals, h)]
-        nfev += len(df_dx)
-    else:
-        raise RuntimeError('Never be here.')
-    for i, v in enumerate(df_dx):
-        J_transposed[i] = v
-    if m == 1:
-        J_transposed = np.ravel(J_transposed)
-    return (J_transposed.T, nfev)
 
 
 

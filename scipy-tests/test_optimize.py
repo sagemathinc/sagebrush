@@ -42,6 +42,7 @@ show_bfgs("bfgs args", minimize(lambda x, a, b: (x[0] - a) ** 2 + (x[1] - b) ** 
 show_bfgs("bfgs tol", minimize(quad, [3.0, 3.0], jac=quad_grad, tol=1e-10))
 show_bfgs("bfgs maxiter", minimize(rosen, [-1.2, 1.0], options={"maxiter": 5}))
 show_bfgs("bfgs 3-point", minimize(quad, [0.0, 0.0], jac="3-point"))
+show_bfgs("bfgs cs", minimize(quad, [0.0, 0.0], jac="cs"))
 show("bfgs scalar x0", minimize(lambda x: (x[0] - 3.0) ** 2, 1.0))
 # CG
 show("cg quad", minimize(quad, [0.0, 0.0], method="CG"))

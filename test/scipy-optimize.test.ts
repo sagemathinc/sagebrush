@@ -63,3 +63,75 @@ print(sorted(set(got)))
 `);
   assert.equal(out, "[('call', 'OptimizeResult'), ('classic', 'ndarray'), ('def', 'OptimizeResult'), ('method', 'OptimizeResult'), ('varargs', 'ndarray')]\n");
 });
+
+// OPT671-WORK-1 (astra): what an optimizer step keeps at once is admitted
+// together against the array limit, before its first array (_numpy's
+// _admit_work, admitWork's message). Each pair: one byte under the step's
+// admission it is refused, with the function never called; at the admission
+// it runs (the control). The Jacobian's differences are written into it as
+// they are made, so one n x m array is its peak: astra's 32 x 32 case at a
+// 16384-byte limit is admitted, needing 8192 + 3072.
+test("scipy.optimize: each step's working memory is admitted at once, refused one byte under it", async () => {
+  const { notebookSession } = require("../src/notebook-session");
+  const np = require("../src/runtime/numpy");
+  const Obj = require("../src/runtime/object");
+  const F = require("../src/runtime/format");
+  const s = notebookSession(() => {}, { captureStreams: true });
+  await s.ready;
+  await s.handle({
+    id: 1,
+    code: [
+      "import numpy as np",
+      "from scipy.optimize import approx_fprime, minimize, rosen, rosen_hess",
+      "from scipy.optimize import _dense_difference",
+      "calls = [0]",
+      "def sq(x):",
+      "    calls[0] += 1",
+      "    return x * x",
+      "def ros(x):",
+      "    calls[0] += 1",
+      "    return rosen(x)",
+      "X32 = np.ones(32); F32 = np.ones(32); H32 = np.full(32, 1e-6); X16 = np.zeros(16); ONE = np.zeros(32, bool)",
+      "CASES = {",
+      "    '2-point': lambda: _dense_difference(sq, X32, F32, H32, ONE, '2-point', map),",
+      "    '3-point': lambda: _dense_difference(sq, X32, F32, H32, ONE, '3-point', map),",
+      "    'cs': lambda: _dense_difference(sq, X32, F32, H32, ONE, 'cs', map),",
+      "    'BFGS': lambda: minimize(ros, X16, method='BFGS', options={'maxiter': 2}),",
+      "    'Nelder-Mead': lambda: minimize(ros, X16, method='Nelder-Mead', options={'maxiter': 2}),",
+      "    'rosen_hess': lambda: rosen_hess(X16),",
+      "}",
+      "def attempt(name):",
+      "    calls[0] = 0",
+      "    try:",
+      "        CASES[name]()",
+      "        return 'ok %d' % calls[0]",
+      "    except MemoryError as e:",
+      "        return 'MemoryError %d %s' % (calls[0], e)",
+    ].join("\n"),
+  });
+  const main = Obj.getattr(require("../src/runtime").R.importModule("__main__"), "__dict__");
+  const attempt = Obj.callObj(Obj.getattr(main, "__getitem__"), ["attempt"]);
+  // (each step's admission: lib/scipy/optimize.py's _admit calls)
+  const NEED: [string, number, string][] = [
+    ["2-point", 8 * 32 * 32 + 16 * (2 * 32 + 4 * 32), "approx_derivative"],
+    ["3-point", 8 * 32 * 32 + 16 * (2 * 32 + 4 * 32), "approx_derivative"],
+    ["cs", 8 * 32 * 32 + 16 * (2 * 32 + 4 * 32), "approx_derivative"],
+    ["BFGS", 8 * 8 * 16 * 16, "BFGS's inverse Hessian"],
+    ["Nelder-Mead", 8 * 5 * 17 * 16, "Nelder-Mead's simplex"],
+    ["rosen_hess", 8 * 4 * 16 * 16, "rosen_hess"],
+  ];
+  const saved = { ...np.ARRAY_LIMITS };
+  try {
+    for (const [name, need, what] of NEED) {
+      np.ARRAY_LIMITS.bytes = need - 1;
+      const under = F.str(Obj.callObj(attempt, [name]));
+      assert.match(under, new RegExp(`^MemoryError 0 ${what} needs .* of working memory, more than Sagebrush's limit of`), `${name} one byte under ${need}`);
+      np.ARRAY_LIMITS.bytes = need;
+      assert.match(F.str(Obj.callObj(attempt, [name])), name === "rosen_hess" ? /^ok 0$/ : /^ok [1-9]/, `${name} at ${need}`);
+    }
+    np.ARRAY_LIMITS.bytes = 16384;
+    assert.match(F.str(Obj.callObj(attempt, ["2-point"])), /^ok 32$/, "astra's 32 x 32 case at 16384");
+  } finally {
+    Object.assign(np.ARRAY_LIMITS, saved);
+  }
+});
