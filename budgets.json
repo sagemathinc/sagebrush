@@ -15,7 +15,7 @@
   },
   "cli/packages.gen.js": {
    "exact": true,
-   "max": 278556
+   "max": 347715
   },
   "cli/pyjs.cjs": {
    "exact": false,
@@ -451,6 +451,13 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/mod-ssl.src": {
+   "exact": false,
+   "ceiling": 4306,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/mod-string.src": {
    "exact": false,
    "ceiling": 21100,
@@ -538,6 +545,13 @@
   "engine/lib/pkg-pypi-sortedcontainers.src": {
    "exact": false,
    "ceiling": 139004,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/pkg-pypi-tabulate.src": {
+   "exact": false,
+   "ceiling": 75776,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -635,7 +649,7 @@
   },
   "engine/sagebrush-notebook.js": {
    "exact": false,
-   "ceiling": 237760,
+   "ceiling": 237850,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -670,7 +684,7 @@
   },
   "registry/packages": {
    "exact": true,
-   "max": 3
+   "max": 4
   }
  },
  "epoch": {
@@ -738,6 +752,7 @@
    "engine/lib/mod-scipy-special.src": 41877,
    "engine/lib/mod-scipy-stats.src": 38144,
    "engine/lib/mod-scipy-stats-py.src": 23101,
+   "engine/lib/mod-ssl.src": 3915,
    "engine/lib/mod-string.src": 19182,
    "engine/lib/mod-strptime.src": 573,
    "engine/lib/mod-tempfile.src": 2347,
@@ -751,6 +766,7 @@
    "engine/lib/mod-zoneinfo.src": 84951,
    "engine/lib/pkg-cremona-small.src": 137656,
    "engine/lib/pkg-pypi-sortedcontainers.src": 126368,
+   "engine/lib/pkg-pypi-tabulate.src": 68887,
    "engine/lib/pkg-scipy-io.pre": 61203,
    "engine/lib/pkg-scipy-io.src": 12835,
    "engine/lib/sage-more.src": 326946,
