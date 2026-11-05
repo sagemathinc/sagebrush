@@ -236,3 +236,18 @@ test("the backend function refuses a non-square or non-2-D matrix before admitti
   ]);
   assert.equal(nd.ndMemoryBytes(), w0, "the module's memory grew for a refused matrix");
 });
+
+test("in a fresh session a tall or wide matrix given to the backend is refused before the module loads (daybreak3 ND657-ADMIT-2)", () => {
+  const code = [
+    "import numpy as np, _nplinalg as _L",
+    "for x in (np.zeros((1024, 1)), np.zeros((1, 1024)), np.zeros((1024, 1000))):",
+    "    try:",
+    "        _L.cholesky(x)",
+    "        print('ran')",
+    "    except np.linalg.LinAlgError as e:",
+    "        print(e)",
+    "print(np.linalg._kernels()['cholesky']['path'])",
+  ].join("\n");
+  const out = execFileSync(process.execPath, [CLI, "-c", code], { encoding: "utf8" }).trim().split("\n");
+  assert.deepEqual(out, [...Array(3).fill("Last 2 dimensions of the array must be square"), "undecided"]);
+});

@@ -1,12 +1,12 @@
 {
  "v": 1,
- "reason": "CHOL-1 step 2 (@sagebrush's rulings R1/R2): np.linalg.cholesky runs engine/nd's blocked Cholesky (5.9x at n=1000 in Node, 7.0x on m1), loaded on first use. The module ships as its own file, engine/sagebrush-nd.wasm (71,106 B, a new bundle with its budgets.json entry), fetched by the worker only at the first cholesky of n >= 48; nothing else loads it. The worker grows by the loader (src/runtime/nd.ts) and its URL/hash (+3,576); the notebook bundle by the runner broker's one new URL (+39); sci by np.linalg._kernels(), which says which path runs (+1,190 pre, +524 src); lib.gen +284. The CLI embeds the module as base64, as it does the PNG module (pyjs +99,100, marked +64 for build-specific bytes).",
+ "reason": "CHOL-1 step 2 (@sagebrush's rulings R1/R2): np.linalg.cholesky runs engine/nd's blocked Cholesky (5.9x at n=1000 in Node, 7.0x on m1), loaded on first use. The module ships as its own file, engine/sagebrush-nd.wasm (71,106 B, a new bundle with its budgets.json entry), fetched by the worker only at the first cholesky of n >= 48; nothing else loads it. The worker grows by the loader (src/runtime/nd.ts) and its URL/hash (+3,768); the notebook bundle by the runner broker's one new URL (+39); sci by np.linalg._kernels(), which says which path runs (+1,190 pre, +524 src); lib.gen +256. The CLI embeds the module as base64, as it does the PNG module (pyjs +99,269, marked +64 for build-specific bytes).",
  "bytes": {
-  "cli/pyjs.cjs": 99164,
-  "cli/lib.gen.js": 284,
+  "cli/pyjs.cjs": 99333,
+  "cli/lib.gen.js": 256,
   "engine/lib/sci.pre": 1190,
   "engine/lib/sci.src": 524,
   "engine/sagebrush-notebook.js": 39,
-  "engine/sagebrush-worker.js": 3576
+  "engine/sagebrush-worker.js": 3768
  }
 }
