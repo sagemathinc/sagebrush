@@ -2110,15 +2110,16 @@ test("64-bit values beyond 2^53 and complex of integers refused; regexprep's dyn
     // (regexprep: dynamic expressions and options it doesn't have refused, not ignored)
     tryIt("regexprep('here. there', '(^|\\.)\\s*.', '${upper($0)}')"), tryIt("regexprep('May', 'M(\\w+)y', 'April', 'preservecase')"),
     "disp(regexprep('aBa', 'b', 'x', 'ignorecase'))",
-    // (primes takes a scalar; str2num reads numbers and true/false, logical when all are)
+    // (primes takes a scalar; str2num reads numbers and true/false, logical when all are, and evaluates other
+    // text as MATLAB does: its own test below)
     tryIt("primes(1:10)"), "disp(mat2str(primes(10)))",
     "X = str2num('false true true false'); disp(class(X)); disp(mat2str(X)); disp(class(str2num('1 2')))",
-    tryIt("str2num('2+3')"),
+    "disp(mat2str(str2num('2+3')))",
   ].join("\n")), ["refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused",
     "-9223372036854775808 -9223372036854775808 4503599627370496 9007199254740991",
     "127 255 32767 65535 2147483647 4294967295", "refused", "single",
     "[1 1 0 1 4]", "refused", "refused", "   300", "refused", "refused", "     2", "refused", "20000", "refused", "month,day,year", "01 11 02 20 2020", "aaaa",
-    "refused", "refused", "axa", "refused", "[2 3 5 7]", "logical", "[false true true false]", "double", "refused"]);
+    "refused", "refused", "axa", "refused", "[2 3 5 7]", "logical", "[false true true false]", "double", "5"]);
 });
 
 test("abs of an integer class's minimum saturates, as MATLAB's; int64's is refused (CORR-D265-ABS-1)", () => {
@@ -2694,6 +2695,21 @@ test("complex .^ recomputes at most _RESCUE_MAX out-of-range elements, counted b
 });
 
 
+test("empty mean median std and var retain NaN with missing-value flags (MCF-11)", () => {
+  const { execFileSync } = require("node:child_process");
+  // Real MATLAB R2026b Update 1: /scratch/matlab-tmp/mcf11/transcript.txt.
+  // SHA256 c3b4b49ad0e9cd05239f1c6cf1c2e59a781ca267fddafb101a9d2f182e47a2ff.
+  const expressions = [
+    "mean([],'omitnan')", "median([],'omitnan')", "std([],'omitnan')", "var([],'omitnan')",
+    "mean([],'includenan')", "median([],'includenan')", "std([],'includenan')", "var([],'includenan')",
+  ];
+  const code = expressions.map((s) => `y=${s}; disp(mat2str(size(y))); disp(class(y)); disp(mat2str(y,17));`).join("\n")
+    + "\ndisp(sum([])); disp(prod([]));";
+  const lines = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8", timeout: 10000 }).trim().split("\n").map((s: string) => s.trim());
+  assert.deepEqual(lines, [...expressions.flatMap(() => ["[1 1]", "double", "NaN"]), "0", "1"]);
+});
+
 test("median and movmedian preserve infinite middle values without finite overflow (MCF-09)", () => {
   const { execFileSync } = require("node:child_process");
   // Real MATLAB R2026b Update 1: /scratch/matlab-tmp/mcf09/transcript.txt.
@@ -2730,5 +2746,85 @@ test("nthroot preserves zero roots, infinities and single class (MCF-13)", () =>
     "[1 1]|double|Inf", "[1 3]|double|[Inf Inf 0]", "[1 2]|double|[-2 2]",
     "[1 1]|double|0", "[1 1]|single|Inf", "MATLAB:nthroot:NegXNotOddIntegerN",
     "If X is negative, N must be an odd integer.",
+  ]);
+});
+
+test("str2num preserves character-array rows (MCF-30)", () => {
+  const { execFileSync } = require("node:child_process");
+  // MATLAB R2026b Update 1, frozen /scratch/matlab-tmp/mcf30/transcript.txt:
+  // SHA256 f3eee5c037f55905b2a6374da7d752da7e428afcf8abb461af6a4eb2669d22c0.
+  // Pin dimensions as well as values: flattening used to turn case 1 into 1234.
+  // Extra bracket cases: MATLAB differs from Octave; /scratch/matlab-tmp/mcf32b/transcript.txt,
+  // SHA256 c5b40ef5bd08fe2532d2bb98962d26398157a6519f10a1cedef5ff888a99e701.
+  const inputs = ["['12';'34']", "['1 2';'3 4']", "['1 ';' 2']", "['[1 2';'3 4]']", "['1 2';'3  ']",
+    "['[1 2]';'[3 4]']", "'[1 2;3 4]'", "['[1 2]';'[3  ]']"];
+  const code = inputs.map((s) => `[X,ok]=str2num(${s}); disp(mat2str(size(X))); disp(class(X)); disp(mat2str(X)); disp(class(ok)); disp(mat2str(ok));`).join("\n");
+  const lines = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8", timeout: 10000 }).trim().split("\n").map((s: string) => s.trim());
+  assert.deepEqual(lines, [
+    "[2 1]", "double", "[12;34]", "logical", "true",
+    "[2 2]", "double", "[1 2;3 4]", "logical", "true",
+    "[2 1]", "double", "[1;2]", "logical", "true",
+    "[2 2]", "double", "[1 2;3 4]", "logical", "true",
+    "[0 0]", "double", "[]", "logical", "false",
+    "[0 0]", "double", "[]", "logical", "false",
+    "[2 2]", "double", "[1 2;3 4]", "logical", "true",
+    "[0 0]", "double", "[]", "logical", "false",
+  ]);
+});
+
+test("str2num evaluates [text] as MATLAB does, in a workspace of its own: [] and false where that errors", () => {
+  const { execFileSync } = require("node:child_process");
+  // MATLAB R2026b Update 1, frozen /scratch/matlab-tmp/o19 (results.md, rows 7-15; SHA256SUMS sha256
+  // d1c4de9f74f1403763c4149cb0d213b480c3e1a80f68f2b97aeac3520f92527e): unknown names and syntax errors give
+  // [] and false, expressions evaluate, and the caller's variable xv is not seen
+  const pinned = ["'hello world'", "'abc'", "'pi*2'", "'sin(1)'", "'1+'", "'[1 2] hello'", "'2*xq_undefined'", "'xv'"];
+  // (and, Sagebrush's own: a matrix and an expression; a dimension mismatch, an error, [] and false; a char
+  // result; text that would run statements of its own is refused, never run; a MATLAB function Sagebrush lacks
+  // (catalog/matlab/absent.json) is refused with its alternative, not given as [])
+  const local = ["'[1 2; 3 4]'", "'2+3'", "'[1 2; 3]'", "'''abc'''", "'1]; disp(99); [2'", "'assignin(1, 2, 3)'"];
+  const code = ["xv = 5;"].concat([...pinned, ...local].map((s) =>
+    `try, [X,ok]=str2num(${s}); disp([mat2str(size(X)) ' ' class(X) ' ' mat2str(X, 17) ' ' mat2str(ok)]); catch e, disp(['refused: ' e.message]); end`)).join("\n");
+  const lines = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8", timeout: 20000 }).trim().split("\n").map((s: string) => s.trim());
+  assert.deepEqual(lines, [
+    "[0 0] double [] false", "[0 0] double [] false",
+    "[1 1] double 6.2831853071795862 true", "[1 1] double 0.8414709848078965 true",
+    "[0 0] double [] false", "[0 0] double [] false", "[0 0] double [] false",
+    "[0 0] double [] false",
+    "[2 2] double [1 2;3 4] true", "[1 1] double 5 true", "[0 0] double [] false", "[1 3] char 'abc' true",
+    "refused: str2num of '1]; disp(99); [2' is not supported in Sagebrush: only one expression is evaluated.",
+    "refused: Unrecognized function or variable 'assignin'. assignin is not in Sagebrush; instead: Return the value as an output, or keep named values in a struct.",
+  ]);
+});
+
+test("histc counts along the requested dimension (MCF-32)", () => {
+  const { execFileSync } = require("node:child_process");
+  // Real MATLAB R2026b Update 1, frozen /scratch/matlab-tmp/mcf32/transcript.txt:
+  // SHA256 aed0a2b033a35fe955410f4f89f944091af6e7888d0ea4fab44ff456b2f05422.
+  const calls = ["[0 1;2 3],[0 1 2],2", "0,[0 1],1", "[0 1;2 3],[0 1],2", "[0 1;2 3],[0 1 2],1", "[0 1;2 3],[0 1 2]"];
+  // Vector/default/singleton-axis controls: /scratch/matlab-tmp/mcf32b/transcript.txt,
+  // SHA256 c5b40ef5bd08fe2532d2bb98962d26398157a6519f10a1cedef5ff888a99e701.
+  calls.push("[0 1 2],[0 1 2]", "[0;1;2],[0 1 2]", "0,[0 1]");
+  // Empty axes differ from Octave: frozen /scratch/matlab-tmp/o1/transcript.txt,
+  // SHA256 71d71687659ad5b07e16cad8101c3c026963d1447a8e05be2527542962167f4d.
+  calls.push("[],[0 1]", "zeros(0,3),[0 1]", "zeros(1,0),[0 1]");
+  const code = calls.map((s) => `[n,b]=histc(${s}); disp(mat2str(size(n))); disp(mat2str(n)); disp(mat2str(size(b))); disp(mat2str(b));`).join("\n") +
+    "\n[n,b]=histc([0 1;2 3],[0 1],3); disp(mat2str(size(n))); disp(mat2str(n(:,:,1))); disp(mat2str(n(:,:,2))); disp(mat2str(size(b))); disp(mat2str(b));";
+  const lines = execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8", timeout: 10000 }).trim().split("\n").map((s: string) => s.trim());
+  assert.deepEqual(lines, [
+    "[2 3]", "[1 1 0;0 0 1]", "[2 2]", "[1 2;3 0]",
+    "[2 1]", "[1;0]", "[1 1]", "1",
+    "[2 2]", "[1 1;0 0]", "[2 2]", "[1 2;0 0]",
+    "[3 2]", "[1 0;0 1;1 0]", "[2 2]", "[1 2;3 0]",
+    "[3 2]", "[1 0;0 1;1 0]", "[2 2]", "[1 2;3 0]",
+    "[1 3]", "[1 1 1]", "[1 3]", "[1 2 3]",
+    "[3 1]", "[1;1;1]", "[3 1]", "[1;2;3]",
+    "[1 2]", "[1 0]", "[1 1]", "1",
+    "[2 0]", "zeros(2,0)", "[0 0]", "[]",
+    "[2 3]", "[0 0 0;0 0 0]", "[0 3]", "zeros(0,3)",
+    "[1 2]", "[0 0]", "[1 0]", "zeros(1,0)",
+    "[2 2 2]", "[1 0;0 0]", "[0 1;0 0]", "[2 2]", "[1 2;0 0]",
   ]);
 });

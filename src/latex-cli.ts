@@ -236,6 +236,13 @@ function readResults(file: string): State[] {
 // session stopped by the timeout keeps what ran before it. The items' own printing is kept apart from the results.
 const DRIVER = `import json, io, sys, traceback
 from sagebrush.preparse import preparse as _sbtx_pp
+# (each item compiled as Sage source by the runtime itself, so its code object keeps Sage's semantics when it
+#  runs: 1/3 exact, as in a .sage file; plain exec of preparsed text is Python's, 1/3 a float (#706). Given the
+#  raw item: that compile preparses it, and preparsing twice would make ^^ a power. CPython: preparsed, exec'd)
+try:
+    _sbtx_cs = __pyjs_compile_sage__
+except NameError:
+    _sbtx_cs = None
 _sbtx_in, _sbtx_outp = sys.argv[1], sys.argv[2]
 with open(_sbtx_in) as _sbtx_f:
     _sbtx_items = json.load(_sbtx_f)
@@ -250,7 +257,8 @@ for _sbtx_it in _sbtx_items:
     _sbtx_old = sys.stdout
     sys.stdout = _sbtx_buf
     try:
-        _sbtx_code = _sbtx_pp(_sbtx_it["code"])
+        _sbtx_ev = _sbtx_it["mode"] in ("sage", "plot")
+        _sbtx_code = _sbtx_cs(_sbtx_it["code"].strip() if _sbtx_ev else _sbtx_it["code"], "<sagetex>", "eval" if _sbtx_ev else "exec") if _sbtx_cs else _sbtx_pp(_sbtx_it["code"])
         if _sbtx_it["mode"] == "sage":
             _sbtx_r = {"s": "ok", "latex": str(latex(eval(_sbtx_code, _sbtx_g)))}
         elif _sbtx_it["mode"] == "plot":
@@ -308,10 +316,10 @@ async function runCommand(file: string, text: string, timeout: number, json: boo
   });
   let got: any[] = [];
   try { got = existsSync(outp) ? JSON.parse(readFileSync(outp, "utf8")) : []; } catch {}
-  rmSync(tmp, { recursive: true, force: true });
+  removeTemp(tmp);
   const states: State[] = [];
   let failed = false;
-  // (a traceback without the session script's own frames: the item's code is the "<string>" one)
+  // (a traceback without the session script's own frames: the item's code is the "<sagetex>" one)
   const msgOf = (x: any) => {
     const lines = String(x?.msg ?? "").split("\n"), out: string[] = [];
     for (let i = 0; i < lines.length; i++) { if (/^\s*File ".*driver\.sage", line \d+/.test(lines[i])) { if (/^\s{4,}\S/.test(lines[i + 1] ?? "") && !/^\s*File /.test(lines[i + 1])) i++; continue; } out.push(lines[i]); }
@@ -464,7 +472,7 @@ async function screenshots(htmlPath: string, dir: string | null, check: CheckRes
       profile = mkdtempSync(join(tmpdir(), "sb-latex-"));
       const r = await launch(browser, profile, extra);
       if ("port" in r) { proc = r.proc; port = r.port; noSandbox = extra.length > 0; break; }
-      rmSync(profile, { recursive: true, force: true }); profile = "";
+      removeTemp(profile); profile = "";
       if (extra.length) throw new Error(r.why);
     }
     const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json() as any[];
@@ -518,8 +526,15 @@ async function screenshots(htmlPath: string, dir: string | null, check: CheckRes
   } finally {
     try { ws?.close(); } catch {}
     if (proc && proc.exitCode === null) { proc.kill(); await new Promise((r) => { proc!.once("exit", r); setTimeout(r, 3000); }); }
-    if (profile) rmSync(profile, { recursive: true, force: true });
+    if (profile) removeTemp(profile);
   }
+}
+
+/** A temporary folder removed, retried a while (Node's maxRetries: ENOTEMPTY, EBUSY, EPERM, ...), and never an error:
+ * the browser's helper processes can still be writing into its profile just after it exits, and a render that worked
+ * must not become a failure because its scratch folder lingered (a CI flake, #672's checks: png_error ENOTEMPTY). */
+export function removeTemp(dir: string, rm: typeof rmSync = rmSync): boolean {
+  try { rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); return true; } catch { return false; }
 }
 
 /** The browser started headless with its DevTools on a port of its choosing, or why it didn't start. */

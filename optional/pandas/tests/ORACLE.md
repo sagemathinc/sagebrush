@@ -17,8 +17,12 @@ Only the comparison oracle uses this venv; Sagebrush itself never does.
 | `python_dateutil-3.0.0-py2.py3-none-any.whl` | `3c79630202e4152c6add678446984236efe4f57e84d8e892aab0637bab82e9fd` |
 | `six-1.17.0-py2.py3-none-any.whl` | `4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274` |
 | `tzdata-2026.6-py2.py3-none-any.whl` | `0a10eec6e13ef16b627fabed9a5f2ba61a62b1c67f327305f4e7e412a70b4aec` |
+| `openpyxl-3.1.5-py2.py3-none-any.whl` | `5282c12b107bffeef825f4617dc029afaf41d0ea60823bbb665ef3079dc79de2` |
+| `et_xmlfile-2.0.0-py3-none-any.whl` | `7a91720bc756843502c3b7504c77b8fe44217c85c537d85037f0f536151b2caa` |
 
-**pip freeze:** numpy==2.5.1, pandas==3.1.0, python-dateutil==3.0.0, six==1.17.0, tzdata==2026.6.
+**pip freeze:** et_xmlfile==2.0.0, numpy==2.5.1, openpyxl==3.1.5, pandas==3.1.0, python-dateutil==3.0.0, six==1.17.0, tzdata==2026.6.
+
+**openpyxl and et_xmlfile** (Nov 5, @sagebrush's approval for read_excel, PR B): installed `--no-index --no-deps` from the wheels above, so that pandas' read_excel has its engine in the oracle. Sagebrush never imports them. The tests' workbooks are written by the test programs themselves (generic data, no committed .xlsx).
 
 **Checked:** pyarrow is absent, and `pd.Series(['a']).dtype` is `StringDtype(storage='python', na_value=nan)`.
 

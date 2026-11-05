@@ -974,6 +974,24 @@ check("test-hosts-only-in-list", latexOn("127.0.0.1", [...SITE, "127.0.0.1"]) &&
   check("doc-read-capped-bytes", JSON.stringify(Array.from(two ?? [])) === "[1,2,3]" && none?.length === 0, [two, none]);
 }
 
+// ---- src/latex-cli.ts's removeTemp: the CLI's scratch folders (the browser's profile, a run's folder) removed, retried, and
+//      never an error, so a render that worked isn't reported failed because a helper process still wrote into its
+//      profile (a CI flake on #672: png_error "ENOTEMPTY, Directory not empty")
+{
+  const { removeTemp } = await import("../../src/latex-cli.ts");
+  const { mkdtempSync, writeFileSync, existsSync, mkdirSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  let opts = null, threw = false, ok;
+  try { ok = removeTemp("/nowhere", (d, o) => { opts = o; const e = new Error("ENOTEMPTY: directory not empty"); e.code = "ENOTEMPTY"; throw e; }); } catch { threw = true; }
+  check("cli-remove-temp-never-throws", !threw && ok === false && opts?.recursive === true && opts?.force === true && opts?.maxRetries > 0, { threw, ok, opts });
+  const d = mkdtempSync(join(tmpdir(), "sb-rt-")); mkdirSync(join(d, "sub")); writeFileSync(join(d, "sub", "f"), "x");
+  check("cli-remove-temp-removes", removeTemp(d) === true && !existsSync(d), existsSync(d));
+  // (and every scratch folder of the CLI goes through it: no direct rmSync of the profile or a run's folder left)
+  const src = (await import("node:fs")).readFileSync(new URL("../../src/latex-cli.ts", import.meta.url), "utf8");
+  check("cli-remove-temp-used", !/rmSync\((tmp|profile)\b/.test(src) && (src.match(/removeTemp\((tmp|profile)\)/g) || []).length === 3, src.match(/rmSync\([a-z]+/g));
+}
+
 const failed = results.filter(([, ok]) => !ok).map(([n]) => n);
 console.log(failed.length ? `FAIL: ${failed.length} of ${results.length}: ${failed.join(", ")}` : `ok: the LaTeX editor's units, ${results.length} checks`);
 process.exit(failed.length ? 1 : 0);

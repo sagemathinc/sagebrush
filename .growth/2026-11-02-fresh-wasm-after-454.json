@@ -1,8 +1,0 @@
-{
- "v": 1,
- "reason": "Master red after #454 (run 41403552644): the committed engine wasm differed from CI's fresh build of engine/. This commits CI's fresh-wasm artifact (#454's PR run 41400239003; the same engine/ tree ea5eda9b as master 1541b411) and the cdn module that embeds it. CI's build is 128 bytes larger than the locally built one #454 committed. Measured with bun 1.4.4 (size-record.sh, key ec7979a4) on master 1541b411 vs this fix's commit b3ac82d6: engine/sagebrush-engine.wasm 7270531 -> 7270659 (+128), cli/pyjs.cjs 25199626 -> 25199810 (+184); no other row moves.",
- "bytes": {
-  "cli/pyjs.cjs": 184,
-  "engine/sagebrush-engine.wasm": 128
- }
-}

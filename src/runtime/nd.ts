@@ -1,6 +1,8 @@
 // engine/nd's WebAssembly module (wasm/sagebrush-nd.wasm, about 70 KB;
 // numerics-core r4.3) for the kernels the runtime hands to it: so far
-// np.linalg.cholesky of a real float64 matrix (CHOL-1), through nd_potrf.
+// np.linalg.cholesky of a real float64 matrix (CHOL-1), through nd_potrf,
+// and solve, det, slogdet and inv (LU with partial pivoting), through
+// nd_solve's gesv mode.
 // The module is compiled the first time one of them is called, from wherever
 // the host keeps it (as the PNG module's, src/runtime/raster.ts):
 //   globalThis.__SAGEBRUSH_ND__      its bytes, as base64 (the CLI bundle)
@@ -15,12 +17,19 @@
 // once, at the first call, and kept for the session, so the same input gives
 // the same bits all session (r4.3 §7: deterministic per backend; @sagebrush's
 // CHOL-1 ruling R1); ndPath() says which, and why (np.linalg._kernels()).
+// In the notebook's worker the module is also compiled ahead, at idle: numpy's
+// import asks for it (ndRequestWarm), and after that run the worker fetches
+// and compiles it off the thread (ndWarm). The first call then only
+// instantiates it. That changes the time and nothing else: the same bytes
+// (their SHA-256 checked), the same decision at the same first call, so the
+// same bits warm or cold.
 
 import { sha256Hex } from "./sha256";
 
 interface Nd {
   nd_info(what: number): number;
   nd_potrf(desc: number): number;
+  nd_solve(desc: number): number;
 }
 
 let decided = false;
@@ -29,6 +38,18 @@ let mem: WebAssembly.Memory | null = null;
 let floor = 0;
 let kernel = "";
 let why = "not used yet";
+// the warm-up: none asked; asked (numpy imported); warming; ready (compiled, for decide()); unused (the decision
+// came first, or the module can't run here); failed (decide() then loads it as without a warm-up)
+let warm: "none" | "asked" | "warming" | "ready" | "unused" | "failed" = "none";
+let compiled: WebAssembly.Module | null = null;
+
+// only the bytes the page was built with run (design/security.md, SEC-522-1): without the hash they are not
+// fetched at all
+function wantSha(): string {
+  const want = (globalThis as any).__SAGEBRUSH_ND_SHA256__;
+  if (typeof want !== "string" || !/^[0-9a-f]{64}$/.test(want)) throw new Error("the numerics module has no SHA-256 to check, so it is not loaded");
+  return want;
+}
 
 // (exported for the tests)
 export function ndBytes(): Uint8Array {
@@ -40,10 +61,7 @@ export function ndBytes(): Uint8Array {
     return b;
   }
   if (g.__SAGEBRUSH_ND_URL__) {
-    // only the bytes the page was built with run (design/security.md,
-    // SEC-522-1): without the hash they are not fetched at all
-    const want = g.__SAGEBRUSH_ND_SHA256__;
-    if (typeof want !== "string" || !/^[0-9a-f]{64}$/.test(want)) throw new Error("the numerics module has no SHA-256 to check, so it is not loaded");
+    const want = wantSha();
     let b: Uint8Array;
     if (typeof g.__SAGEBRUSH_FETCH_SYNC__ === "function") b = g.__SAGEBRUSH_FETCH_SYNC__(String(g.__SAGEBRUSH_ND_URL__));
     else {
@@ -80,10 +98,18 @@ function sharedMemory(): WebAssembly.Memory | null {
   return null;
 }
 
+const wasmOff = () => {
+  const g = globalThis as any;
+  return !!(g.__SAGEBRUSH_NO_WASM__ || g.process?.env?.SAGEBRUSH_NO_WASM || typeof WebAssembly !== "object");
+};
+
 function decide(): void {
   decided = true;
-  const g = globalThis as any;
-  if (g.__SAGEBRUSH_NO_WASM__ || g.process?.env?.SAGEBRUSH_NO_WASM || typeof WebAssembly !== "object") {
+  // (a warm-up still on its way is left to finish unused: this call compiles its own, as without one)
+  const pre = compiled;
+  compiled = null;
+  if (warm === "asked" || warm === "warming") warm = "unused";
+  if (wasmOff()) {
     why = "WebAssembly is off here";
     return;
   }
@@ -93,7 +119,7 @@ function decide(): void {
     return;
   }
   try {
-    const e = new WebAssembly.Instance(new WebAssembly.Module(ndBytes() as any), { env: { memory: m } }).exports as unknown as Nd;
+    const e = new WebAssembly.Instance(pre ?? new WebAssembly.Module(ndBytes() as any), { env: { memory: m } }).exports as unknown as Nd;
     // (the host's part of memory starts at the module's __heap_base; the selected kernel's name)
     floor = e.nd_info(1);
     kernel = new TextDecoder().decode(new Uint8Array(m.buffer, e.nd_info(2), e.nd_info(3)).slice());
@@ -115,6 +141,48 @@ export function useNd(): boolean {
 export function ndPath(): { path: "engine/nd" | "typescript" | "undecided"; kernel: string; why: string } {
   if (!decided) return { path: "undecided", kernel: "", why: "decided at the first call of an nd-backed function" };
   return ex ? { path: "engine/nd", kernel, why: "" } : { path: "typescript", kernel: "", why };
+}
+
+/** numpy's import: compile the module ahead where the host has an idle moment for it (the notebook's worker). */
+export function ndRequestWarm(): void {
+  if (warm === "none" && !decided) warm = "asked";
+}
+
+/** Whether a warm-up is asked for and not yet begun (the worker checks after each run). */
+export function ndWarmAsked(): boolean {
+  return warm === "asked" && !decided;
+}
+
+/** The warm-up's state, for np.linalg._kernels(). */
+export function ndWarmState(): string {
+  return warm;
+}
+
+/** Fetch (by the host's `fetchBytes`, its SHA-256 checked as ndBytes() does) and compile the module off the thread,
+ *  for decide() to instantiate. Once; nothing if the decision came first or the module can't run here. A failure
+ *  is only remembered: decide() then loads the module as without a warm-up, and says why if it can't. */
+export async function ndWarm(fetchBytes?: (url: string) => Promise<ArrayBuffer | Uint8Array>): Promise<void> {
+  if (!ndWarmAsked()) return;
+  if (wasmOff() || typeof SharedArrayBuffer !== "function") {
+    warm = "unused";
+    return;
+  }
+  warm = "warming";
+  try {
+    const g = globalThis as any;
+    let b: Uint8Array;
+    if (typeof g.__SAGEBRUSH_ND__ !== "string" && g.__SAGEBRUSH_ND_URL__ && fetchBytes) {
+      const want = wantSha();
+      b = new Uint8Array(await fetchBytes(String(g.__SAGEBRUSH_ND_URL__)));
+      if (sha256Hex(b) !== want) throw new Error("the numerics module fetched is not the one this page was built with");
+    } else b = ndBytes();
+    const mod = await WebAssembly.compile(b as any);
+    if (decided) return;
+    compiled = mod;
+    warm = "ready";
+  } catch {
+    if (!decided) warm = "failed";
+  }
 }
 
 /** The module's memory in bytes (0 before it is made), for the admission tests. */
@@ -156,4 +224,44 @@ export function ndCholesky(A: Float64Array, n: number): Float64Array | number {
   const L = f64.slice(a / 8, a / 8 + n * n);
   for (let i = 0; i < n; i++) L.fill(0, i * n + i + 1, (i + 1) * n);
   return L;
+}
+
+/** PA = LU of the n x n real A (row-major float64) by nd_solve's gesv mode
+ *  (LAPACK's dgesv, as NumPy calls it), and X = A^-1 B for the n x r B
+ *  (row-major; null: the identity, for inv; r may be 0, for det): U's
+ *  diagonal and P's sign (all det and slogdet need of the factors), X
+ *  (row-major) and
+ *  whether a pivot is exactly zero (X then holds what division by it gives). Null if A or B has an Inf or
+ *  NaN: the module computes nothing then (the caller's LU runs instead). Only
+ *  when useNd(). A RangeError if the module's memory can't hold the work. */
+export function ndLu(A: Float64Array, n: number, B: Float64Array | null, r: number): { diag: Float64Array; sign: number; x: Float64Array; singular: boolean } | null {
+  // nd_solve reads column-major operands: A and B go in transposed (the
+  // identity is its own transpose), X comes out transposed. The layout: the
+  // descriptor at the host's floor, then the arena (A, B, the pivots, the
+  // work, the report), each 64-byte aligned.
+  const SCRATCH = ex!.nd_info(0);
+  const up = (x: number) => Math.ceil(x / 64) * 64;
+  const desc = up(floor), lo = desc + 64;
+  const wl = Math.max(n * n, n * r) + SCRATCH;
+  const a = lo, b = up(a + 8 * n * n), ipiv = up(b + 8 * n * r), work = up(ipiv + 4 * n), report = up(work + 8 * wl), hi = report + 32;
+  reserve(hi);
+  const f64 = new Float64Array(mem!.buffer), u32 = new Uint32Array(mem!.buffer);
+  for (let i = 0, p = a / 8; i < n; i++) for (let j = 0; j < n; j++) f64[p + i + j * n] = A[i * n + j];
+  if (B) for (let i = 0, p = b / 8; i < n; i++) for (let j = 0; j < r; j++) f64[p + i + j * n] = B[i * r + j];
+  else {
+    f64.fill(0, b / 8, b / 8 + n * r);
+    for (let i = 0; i < Math.min(n, r); i++) f64[b / 8 + i + i * n] = 1;
+  }
+  u32.set([a, b, ipiv, work, report, n, r, Math.max(n, 1), Math.max(n, 1), wl, lo, hi, 1], desc / 4);
+  if (ex!.nd_solve(desc) !== 1) throw new Error("the numerics module refused a solve layout");
+  const code = u32[report / 4];
+  if (code === 3) return null;
+  const x = new Float64Array(n * r);
+  for (let i = 0, p = b / 8; i < n; i++) for (let j = 0; j < r; j++) x[i * r + j] = f64[p + i + j * n];
+  const diag = new Float64Array(n);
+  for (let i = 0; i < n; i++) diag[i] = f64[a / 8 + i + i * n];
+  // (the pivots are 0-based: row k was interchanged with row ipiv[k])
+  let sign = 1;
+  for (let k = 0; k < n; k++) if (u32[ipiv / 4 + k] !== k) sign = -sign;
+  return { diag, sign, x, singular: code === 2 };
 }

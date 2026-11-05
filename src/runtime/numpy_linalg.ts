@@ -12,7 +12,7 @@ import { NDArray, empty, toDtype, ascontig, copy as npcopy, admitWork } from "./
 import { glibcLog, glibcExp } from "./libm";
 import { gemmBuffers, wasmFusedFMA, wasmKernels, wasmLU, wasmLuSolve, wasmQR, wasmSymEig, wasmGenEig, wasmSVD } from "./kernels";
 import * as FD from "./fdlibm";
-import { useNd, ndCholesky, ndPath, ndScratch } from "./nd";
+import { useNd, ndCholesky, ndLu, ndPath, ndRequestWarm, ndScratch, ndWarmState } from "./nd";
 import { pollInterrupt } from "./ops";
 
 const { T, raise, tuple } = Obj;
@@ -42,6 +42,42 @@ function out(data: Float64Array | number[], shape: number[]): NDArray {
 // (the public call, Node: n = 40 0.026 vs 0.028 ms, n = 48 0.038 vs 0.035; daybreak2's VM1 PERF, n = 16 slower on
 // engine/nd; /scratch/matlab-speed/chol1b-xover). Per input, so a given matrix always takes the same path.
 const CHOL_ND_MIN = 48;
+// The smallest n at which solve, det, slogdet and inv run on engine/nd's LU, where that runs; below it, and for an
+// A or B with an Inf or NaN (which the module doesn't compute), lu() and luSolve() run, as before. Steady calls win
+// from n = 32 (solve) and 64 (det, slogdet, inv), but a session's first call there also pays the module's loading,
+// about 2 ms: first calls are slower until about n = 256 and clearly faster from 512 (daybreak4's cold PERF on #684;
+// @sagebrush's ruling: one threshold, never slower cold). The notebook worker's compile-ahead (src/runtime/nd.ts
+// ndWarm) removes the compile but not the memory and instance, so first calls there are still slower below 256
+// (daybreak4's PERF on #703): the threshold comes down only after a full idle preparation, in its own PR.
+const LU_ND_MIN = 256;
+
+// A 2-D float64 matrix's elements, row-major: its own data when contiguous float64, else a copy
+function view(a: NDArray): Float64Array {
+  const c = ascontig(a.dt.name === "float64" ? a : npcopy(a, F64()));
+  return c.data.subarray(0, a.shape[0] * a.shape[1]);
+}
+
+// engine/nd's LU of the n x n A and X = A^-1 B (src/runtime/nd.ts ndLu), with a MemoryError where the module's
+// memory can't hold them; null where A or B has an Inf or NaN
+function luNd(A: Float64Array, n: number, B: Float64Array | null, r: number, what: string) {
+  let f;
+  try {
+    f = ndLu(A, n, B, r);
+  } catch (e) {
+    if (e instanceof RangeError) raise(T.MemoryError, `${what} of a ${n} x ${n} matrix needs more working memory than WebAssembly can have here`);
+    throw e;
+  }
+  return f;
+}
+
+// det's and slogdet's factors of the n x n a: P's sign and U's diagonal, every s-th element of d
+function detLU(a: NDArray, n: number, nd: boolean, what: string): { sign: number; d: Float64Array; s: number } {
+  const N = nd ? luNd(view(a), n, null, 0, what) : null;
+  if (N) return { sign: N.sign, d: N.diag, s: 1 };
+  const [A] = mat(a);
+  const L = lu(A, n);
+  return { sign: L.sign, d: L.lu, s: n + 1 };
+}
 
 function linalgError(msg: string): never {
   const E = (globalThis as any).__npLinAlgError;
@@ -1205,21 +1241,24 @@ function svd(A: Float64Array, m: number, n: number): [Float64Array, Float64Array
 // ------------------------------------------------------------------ the module
 
 newBuiltinModule("_nplinalg", (m) => {
+  // (numpy's import: where the host has an idle moment, it compiles engine/nd's module ahead)
+  ndRequestWarm();
   const fn = (name: string, f: any) => (m[name] = Obj.builtin(f, name));
   fn("set_error", (cls: any) => ((globalThis as any).__npLinAlgError = cls, null));
   fn("wasm", () => wasmKernels());
   fn("wasm_fma", () => wasmFusedFMA());
   fn("det", (a: NDArray) => {
-    // (mat's two copies, LU's working copy and WebAssembly's)
+    // (mat's two copies, LU's working copy and WebAssembly's; on engine/nd, A as contiguous float64, A and the
+    // work in the module's memory, and its scratch)
     const [r0, c0] = dims(a);
-    work(5 * r0 * c0, "det");
-    const [A, r, c] = mat(a);
-    if (r !== c) linalgError("Last 2 dimensions of the array must be square");
-    const L = lu(A, r);
+    if (a.ndim === 2 && r0 !== c0) linalgError("Last 2 dimensions of the array must be square");
+    const nd = r0 >= LU_ND_MIN && useNd();
+    work(5 * r0 * c0 + (nd ? ndScratch() : 0), "det");
+    const L = detLU(a, r0, nd, "det"), r = r0;
     // as numpy/linalg/umath_linalg.cpp: sign * exp(sum of log|u_ii|)
     let sign = L.sign, logdet = 0;
     for (let i = 0; i < r; i++) {
-      const v = L.lu[i * r + i];
+      const v = L.d[i * L.s];
       if (v === 0) return 0;
       if (v < 0) sign = -sign;
       logdet += glibcLog(Math.abs(v));
@@ -1227,13 +1266,15 @@ newBuiltinModule("_nplinalg", (m) => {
     return sign * glibcExp(logdet);
   });
   fn("slogdet", (a: NDArray) => {
+    // (as det's)
     const [r0, c0] = dims(a);
-    work(5 * r0 * c0, "slogdet");
-    const [A, r] = mat(a);
-    const L = lu(A, r);
+    if (a.ndim === 2 && r0 !== c0) linalgError("Last 2 dimensions of the array must be square");
+    const nd = r0 >= LU_ND_MIN && useNd();
+    work(5 * r0 * c0 + (nd ? ndScratch() : 0), "slogdet");
+    const L = detLU(a, r0, nd, "slogdet"), r = r0;
     let sign = L.sign, logdet = 0;
     for (let i = 0; i < r; i++) {
-      const v = L.lu[i * r + i];
+      const v = L.d[i * L.s];
       if (v === 0) return tuple([0, -Infinity]);
       if (v < 0) sign = -sign;
       logdet += glibcLog(Math.abs(v));
@@ -1242,16 +1283,25 @@ newBuiltinModule("_nplinalg", (m) => {
   });
   fn("solve", (a: NDArray, b: NDArray) => {
     // (A: mat's copies, LU and WebAssembly's; B: its column copy, mat's
-    // copies, the solution and the output)
+    // copies, the solution and the output; on engine/nd, A and B as contiguous float64, A, B and the work, up to
+    // max(n^2, n r) and the scratch, in the module's memory, and X)
     const [r0, c0] = dims(a);
-    work(5 * r0 * c0 + 6 * b.size, "solve");
-    const [A, n, c] = mat(a);
-    if (n !== c) linalgError("Last 2 dimensions of the array must be square");
+    if (a.ndim === 2 && r0 !== c0) linalgError("Last 2 dimensions of the array must be square");
+    const nd = r0 >= LU_ND_MIN && useNd();
+    work(5 * r0 * c0 + 6 * b.size + (nd ? ndScratch() + b.size : 0), "solve");
     const vec = b.ndim === 1;
     const bb = vec ? empty([b.shape[0], 1], F64()) : null;
     if (bb) for (let i = 0; i < b.shape[0]; i++) bb.data[i] = ascontig(b).data[i];
-    const [B, br, bc] = mat(bb ?? b);
+    const b2 = bb ?? b;
+    if (b2.ndim !== 2) raise(T.ValueError ?? T.TypeError, `${b2.ndim}-dimensional array given. Array must be two-dimensional`);
+    const n = r0, br = b2.shape[0], bc = b2.shape[1];
     if (br !== n) raise(T.ValueError, `solve: Input operand 1 has a mismatch in its core dimension 0, with gufunc signature (m,m),(m,n)->(m,n) (size ${br} is different from ${n})`);
+    const N = nd ? luNd(view(a), n, view(b2), bc, "solve") : null;
+    if (N) {
+      if (N.singular) linalgError("Singular matrix");
+      return out(N.x, vec ? [n] : [n, bc]);
+    }
+    const [A] = mat(a), [B] = mat(b2);
     const L = lu(A, n);
     if (L.singular) linalgError("Singular matrix");
     const X = luSolve(L, n, B, bc);
@@ -1259,10 +1309,18 @@ newBuiltinModule("_nplinalg", (m) => {
   });
   fn("inv", (a: NDArray) => {
     // (as det's, and the identity, the solution and the output)
+    // (on engine/nd, at most as many: A as contiguous float64, A, the identity, the work and its scratch in the
+    // module's memory, X and the output)
     const [r0, c0] = dims(a);
-    work(10 * r0 * c0, "inv");
-    const [A, n, c] = mat(a);
-    if (n !== c) linalgError("Last 2 dimensions of the array must be square");
+    if (a.ndim === 2 && r0 !== c0) linalgError("Last 2 dimensions of the array must be square");
+    const nd = r0 >= LU_ND_MIN && useNd();
+    work(10 * r0 * c0 + (nd ? ndScratch() : 0), "inv");
+    const N = nd ? luNd(view(a), r0, null, r0, "inv") : null;
+    if (N) {
+      if (N.singular) linalgError("Singular matrix");
+      return out(N.x, [r0, r0]);
+    }
+    const [A, n] = mat(a);
     const L = lu(A, n);
     if (L.singular) linalgError("Singular matrix");
     const I = new Float64Array(n * n);
@@ -1279,7 +1337,10 @@ newBuiltinModule("_nplinalg", (m) => {
     const [Q, R, qc] = qr(A, r, c, !!complete);
     return tuple([out(Q, [r, qc]), out(R, [complete ? r : Math.min(r, c), c])]);
   });
-  fn("cholesky", (a: NDArray) => {
+  // nanPivots: NumPy's rule (OpenBLAS potrf), refusing a pivot only when it is <= 0, so a NaN pivot passes and the
+  // rest of the factor fills with NaN; without it, MATLAB's (and reference LAPACK's), refusing any pivot that is not
+  // > 0, NaN included (real MATLAB R2026b: chol of a NaN pivot is MATLAB:posdef, an Inf pivot passes)
+  fn("cholesky", (a: NDArray, reportFailure = false, nanPivots = false) => {
     // (square and 2-D before anything is admitted or the module loaded: np.linalg.cholesky checks this, but this
     // backend function can be called directly; astra ND657-ADMIT-2)
     if (a.ndim !== 2) raise(T.ValueError ?? T.TypeError, `${a.ndim}-dimensional array given. Array must be two-dimensional`);
@@ -1290,7 +1351,9 @@ newBuiltinModule("_nplinalg", (m) => {
     // copies, L and the output; engine/nd's are A as contiguous float64 (a copy only when it isn't one already),
     // A and the work in the module's memory, L and the output (astra ND657-ADMIT-1). Below CHOL_ND_MIN rows the
     // loop is faster than the module's fixed cost, so it runs there, without loading the module.
-    const nd = r0 >= CHOL_ND_MIN && useNd();
+    // The status-reporting call needs the completed leading factor on failure,
+    // which engine/nd does not return. Keep that internal call on the loop.
+    const nd = !reportFailure && r0 >= CHOL_ND_MIN && useNd();
     work(5 * r0 * c0 + (nd ? ndScratch() : 0), "cholesky");
     if (nd) {
       if (a.ndim !== 2) raise(T.ValueError ?? T.TypeError, `${a.ndim}-dimensional array given. Array must be two-dimensional`);
@@ -1303,15 +1366,25 @@ newBuiltinModule("_nplinalg", (m) => {
         if (e instanceof RangeError) raise(T.MemoryError, `cholesky of a ${n} x ${n} matrix needs more working memory than WebAssembly can have here`);
         throw e;
       }
-      if (typeof F === "number") linalgError("Matrix is not positive definite");
-      return out(F, [n, n]);
+      if (typeof F !== "number") return out(F, [n, n]);
+      // (engine/nd refuses a NaN pivot; NumPy's rule passes it: the loop below then gives OpenBLAS's NaN pattern, the
+      // trailing triangle from that pivot. Only a refused matrix with a NaN in it takes this path. An indexed loop,
+      // not .some: a callback per element costs about 10x on this refusal path, daybreak4 PERF-P1)
+      let nan = false;
+      if (nanPivots) for (let i = 0, d = c.data, m = n * n; i < m; i++) if (d[i] !== d[i]) { nan = true; break; }
+      if (!nan) linalgError("Matrix is not positive definite");
     }
     const [A, n] = mat(a);
     const L = new Float64Array(n * n);
     for (let j = 0; j < n; j++) {
       let s = A[j * n + j];
       for (let k = 0; k < j; k++) s -= L[j * n + k] * L[j * n + k];
-      if (!(s > 0)) linalgError("Matrix is not positive definite");
+      if (nanPivots ? s <= 0 : !(s > 0)) {
+        // MATLAB's two-output chol needs the completed leading block and the
+        // first failed pivot. NumPy's ordinary call retains its exception.
+        if (reportFailure) return tuple([out(L, [n, n]), j + 1]);
+        linalgError("Matrix is not positive definite");
+      }
       const d = Math.sqrt(s);
       L[j * n + j] = d;
       for (let i = j + 1; i < n; i++) {
@@ -1320,12 +1393,14 @@ newBuiltinModule("_nplinalg", (m) => {
         L[i * n + j] = t / d;
       }
     }
-    return out(L, [n, n]);
+    const result = out(L, [n, n]);
+    return reportFailure ? tuple([result, 0]) : result;
   });
-  // which code cholesky runs in this session, and why (src/runtime/nd.ts): (path, kernel, why)
+  // which code the nd-backed functions run in this session, and why (src/runtime/nd.ts): (path, kernel, why, the
+  // smallest n of cholesky and of the LU's four, the warm-up's state)
   fn("_kernels", () => {
     const p = ndPath();
-    return tuple([p.path, p.kernel, p.why, CHOL_ND_MIN]);
+    return tuple([p.path, p.kernel, p.why, CHOL_ND_MIN, LU_ND_MIN, ndWarmState()]);
   });
   fn("eigh", (a: NDArray, upper: any) => {
     // (mat's copies, the symmetric copy, the eigenvectors in and out of

@@ -15,7 +15,7 @@
   },
   "cli/packages.gen.js": {
    "exact": true,
-   "max": 278556
+   "max": 347715
   },
   "cli/pyjs.cjs": {
    "exact": false,
@@ -423,6 +423,20 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/mod-live-data.src": {
+   "exact": false,
+   "ceiling": 7240,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-scipy-optimize.src": {
+   "exact": false,
+   "ceiling": 95774,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/mod-scipy-special.src": {
    "exact": false,
    "ceiling": 46064,
@@ -440,6 +454,13 @@
   "engine/lib/mod-scipy-stats-py.src": {
    "exact": false,
    "ceiling": 25411,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-ssl.src": {
+   "exact": false,
+   "ceiling": 4306,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -535,6 +556,13 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/pkg-pypi-tabulate.src": {
+   "exact": false,
+   "ceiling": 75776,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/pkg-scipy-io.pre": {
    "exact": false,
    "ceiling": 67239,
@@ -593,7 +621,7 @@
   },
   "engine/runner/index.html": {
    "exact": false,
-   "ceiling": 6800,
+   "ceiling": 8988,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -628,7 +656,7 @@
   },
   "engine/sagebrush-notebook.js": {
    "exact": false,
-   "ceiling": 237670,
+   "ceiling": 239412,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -663,24 +691,24 @@
   },
   "registry/packages": {
    "exact": true,
-   "max": 3
+   "max": 4
   }
  },
  "epoch": {
   "sizes": {
-   "cli/lib.gen.js": 7200191,
-   "cli/pyjs.cjs": 28780108,
-   "engine/lib/core.pre": 1803195,
-   "engine/lib/core.src": 419078,
+   "cli/lib.gen.js": 2978417,
+   "cli/pyjs.cjs": 25971937,
+   "engine/lib/core.pre": 1818321,
+   "engine/lib/core.src": 423165,
    "engine/lib/magma-more.src": 146512,
-   "engine/lib/magma.pre": 2889506,
-   "engine/lib/magma.src": 553791,
-   "engine/lib/matlab-lu.src": 47600,
-   "engine/lib/matlab-more.src": 262337,
-   "engine/lib/matlab.pre": 5400429,
-   "engine/lib/matlab.src": 1069005,
+   "engine/lib/magma.pre": 2892030,
+   "engine/lib/magma.src": 555695,
+   "engine/lib/matlab-lu.src": 64827,
+   "engine/lib/matlab-more.src": 274445,
+   "engine/lib/matlab.pre": 5481396,
+   "engine/lib/matlab.src": 1092592,
    "engine/lib/mod-bisect.src": 1699,
-   "engine/lib/mod-board-checks.src": 35237,
+   "engine/lib/mod-board-checks.src": 36567,
    "engine/lib/mod-calendar.src": 31555,
    "engine/lib/mod-capability-map.src": 15413,
    "engine/lib/mod-catalog.src": 24270,
@@ -701,13 +729,14 @@
    "engine/lib/mod-hmac.src": 10123,
    "engine/lib/mod-html.src": 85615,
    "engine/lib/mod-importlib.src": 3604,
-   "engine/lib/mod-io.src": 13519,
+   "engine/lib/mod-io.src": 14908,
    "engine/lib/mod-ipaddress.src": 84439,
    "engine/lib/mod-ipython.src": 6801,
    "engine/lib/mod-json.src": 4930,
+   "engine/lib/mod-live-data.src": 6582,
    "engine/lib/mod-locale.src": 85045,
    "engine/lib/mod-marimo.src": 6464,
-   "engine/lib/mod-matplotlib.src": 24036,
+   "engine/lib/mod-matplotlib.src": 30314,
    "engine/lib/mod-pickle.src": 73650,
    "engine/lib/mod-platform.src": 571,
    "engine/lib/mod-png.src": 5970,
@@ -716,20 +745,22 @@
    "engine/lib/mod-pyjs-digest.src": 2672,
    "engine/lib/mod-pyjs-doctest.src": 14117,
    "engine/lib/mod-pyjs-help.src": 8050,
-   "engine/lib/mod-pyjs-magic.src": 21074,
-   "engine/lib/mod-pyjs-open.src": 8323,
+   "engine/lib/mod-pyjs-magic.src": 24213,
+   "engine/lib/mod-pyjs-open.src": 8589,
    "engine/lib/mod-pyjs-pretty.src": 24565,
    "engine/lib/mod-python-docsearch.src": 11218,
    "engine/lib/mod-python-examples.src": 27977,
    "engine/lib/mod-sage-ec-ff.src": 23918,
    "engine/lib/mod-sb-check.src": 4356,
    "engine/lib/mod-sbdata.src": 20193,
-   "engine/lib/mod-special-ibeta.src": 25081,
    "engine/lib/mod-sbx.src": 48044,
-   "engine/lib/mod-scipy.src": 82824,
-   "engine/lib/mod-scipy-special.src": 41877,
-   "engine/lib/mod-scipy-stats.src": 38144,
+   "engine/lib/mod-scipy-optimize.src": 87068,
+   "engine/lib/mod-scipy-special.src": 42857,
    "engine/lib/mod-scipy-stats-py.src": 23101,
+   "engine/lib/mod-scipy-stats.src": 39216,
+   "engine/lib/mod-scipy.src": 82824,
+   "engine/lib/mod-special-ibeta.src": 25081,
+   "engine/lib/mod-ssl.src": 3915,
    "engine/lib/mod-string.src": 19182,
    "engine/lib/mod-strptime.src": 573,
    "engine/lib/mod-tempfile.src": 2347,
@@ -743,28 +774,29 @@
    "engine/lib/mod-zoneinfo.src": 84951,
    "engine/lib/pkg-cremona-small.src": 137656,
    "engine/lib/pkg-pypi-sortedcontainers.src": 126368,
-   "engine/lib/pkg-scipy-io.pre": 61203,
-   "engine/lib/pkg-scipy-io.src": 12835,
-   "engine/lib/sage-more.src": 326946,
-   "engine/lib/sage.pre": 13033596,
-   "engine/lib/sage.src": 2754406,
-   "engine/lib/sci.pre": 1897948,
-   "engine/lib/sci.src": 366319,
+   "engine/lib/pkg-pypi-tabulate.src": 68887,
+   "engine/lib/pkg-scipy-io.pre": 61258,
+   "engine/lib/pkg-scipy-io.src": 12963,
+   "engine/lib/sage-more.src": 395935,
+   "engine/lib/sage.pre": 13662741,
+   "engine/lib/sage.src": 2888811,
+   "engine/lib/sci.pre": 2028911,
+   "engine/lib/sci.src": 399112,
    "engine/lib/tzdata": 257239,
-   "engine/runner/index.html": 4634,
-   "engine/sagebrush-analyze.js": 356439,
-   "engine/sagebrush-engine.wasm": 7172791,
-   "engine/sagebrush-graphview.js": 14111,
-   "engine/sagebrush-myst.js": 10788,
-   "engine/sagebrush-notebook.js": 208117,
-   "engine/sagebrush-raster.wasm": 825569,
+   "engine/runner/index.html": 8924,
+   "engine/sagebrush-analyze.js": 357310,
+   "engine/sagebrush-engine.wasm": 7286948,
+   "engine/sagebrush-graphview.js": 14996,
+   "engine/sagebrush-myst.js": 21251,
    "engine/sagebrush-nd.wasm": 71106,
+   "engine/sagebrush-notebook.js": 239348,
+   "engine/sagebrush-raster.wasm": 825569,
    "engine/sagebrush-viewer3d.js": 88151,
-   "engine/sagebrush-worker.js": 1545037
+   "engine/sagebrush-worker.js": 1630465
   },
   "reset": {
-   "reason": "#184 (the size gate checks a dispatch's markers, plan-size-gate-dispatch-range r2) changes scripts/size-measure.mjs, which is in the measurement key, so the epoch is reset under the new key. The new epoch also absorbs merge train 2c's growth (dbb4a0e1..0ce1121e), whose rule-6 attribution by PR is @sagebrush's ruling of Oct 26 with magma's evidence, rule6-attribution-dbb4a0e1-0ce1121e-20261026.tar (sha256 310d3b1e4ed2afdf563f1826e589ed5b6f447866304c99595335c8ec859052a7): #178 covered by its marker; #171 pyjs.cjs +368 and #164 wasm +6592, worker +547, lib.gen.js +18, pyjs.cjs +9554 unmarked, none over 1%.",
-   "prev": "ca3a16505dba37447ed5798295558df48ff38596ecfe4840ebaf4c167ecffad4",
+   "reason": "epoch reset after v0.6.5 (released Nov 5 2026): the 256-marker cap of size-measure.mjs LIMITS was reached at master de697544. @sagebrush's ruling (Nov 5): reset the epoch per design/size-gate.md rather than raise the cap; ceilings unchanged. epoch.sizes = master de697544 measured with bun 1.4.4 / node 24.21.0; no growth.",
+   "prev": "97b4a0388fc4ba13e85ba6650fa6633b12ceb057d272bf119d2bfb8235b98fda",
    "growth": {},
    "map": [],
    "added": [],

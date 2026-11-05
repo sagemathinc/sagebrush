@@ -81,7 +81,9 @@ export async function startDev({ sitePort = 8790, filesPort = 8791, limits } = {
     if (existsSync(file) && statSync(file).isDirectory()) file = join(file, "index.html");
     if (!existsSync(file)) return res.writeHead(404).end("not found");
     const h = { "content-type": MIME[extname(file)] ?? "application/octet-stream", "cache-control": "no-store" };
-    for (const [pattern, hs] of rules) if (path === pattern || (pattern.endsWith("*") && path.startsWith(pattern.slice(0, -1)))) for (const [k, v] of hs) h[k] = v;
+    // (a rule's header replaces the default, as Cloudflare's _headers does: names in lower case, so "Cache-Control"
+    // isn't sent beside "cache-control: no-store", which a browser joins into one no-store header)
+    for (const [pattern, hs] of rules) if (path === pattern || (pattern.endsWith("*") && path.startsWith(pattern.slice(0, -1)))) for (const [k, v] of hs) h[k.toLowerCase()] = v;
     res.writeHead(200, h);
     res.end(readFileSync(file));
   });
