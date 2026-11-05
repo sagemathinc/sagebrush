@@ -466,6 +466,36 @@ test("the runner fails an output that holds the checkout's own path", () => {
   assert.match(r.stdout, /an output holds the checkout's path/);
 });
 
+test("run --update keeps each cell's own metadata: Jupyter's source_hidden and outputs_hidden, and the rest", () => {
+  // (a notebook's hidden setup and hidden output are its cells' metadata; --update rewrites outputs only; grader's C1/C2)
+  const root = copy();
+  const nbFile = join(root, "notebook", "hello-python", "main.ipynb");
+  const nb = JSON.parse(readFileSync(nbFile, "utf8"));
+  const code = nb.cells.filter((c) => c.cell_type === "code");
+  const metas = [{ jupyter: { source_hidden: true }, tags: ["setup"] }, { jupyter: { outputs_hidden: true } }];
+  code[0].metadata = metas[0];
+  code[1].metadata = metas[1];
+  for (const c of code) c.outputs = [];
+  writeFileSync(nbFile, JSON.stringify(nb, null, 1) + "\n");
+  const r = run(["run", "notebook/hello-python", "--root", root, "--update"]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const after = JSON.parse(readFileSync(nbFile, "utf8")).cells.filter((c) => c.cell_type === "code");
+  assert.deepEqual(after.slice(0, 2).map((c) => c.metadata), metas);
+  assert.ok(after.every((c) => c.outputs.length > 0), "the outputs were rewritten");
+});
+
+test("the corpus's hidden-setup keeps its flags: the setup cell's code hidden, the long check's output hidden", () => {
+  // (the example's point, and what the Examples panel honours (work order 1); grader's C1/C2)
+  const nb = JSON.parse(readFileSync(join(here, "..", "examples", "notebook", "hidden-setup", "main.ipynb"), "utf8"));
+  const code = nb.cells.filter((c) => c.cell_type === "code");
+  assert.deepEqual(
+    code.map((c) => c.metadata?.jupyter ?? null),
+    [{ source_hidden: true }, null, null, { outputs_hidden: true }],
+  );
+  assert.ok(code.every((c) => c.source.length > 0 && c.outputs !== undefined), "every cell still has its code");
+  assert.ok(code[3].outputs.length > 0, "the hidden output is still committed");
+});
+
 test("validate refuses a notebook that isn't in the runner's own form", () => {
   // (the same notebook minified: its outputs would churn on the next --update; grader's N2)
   const root = copy();
