@@ -103,7 +103,7 @@ console.log(`library: ${LIB_CHUNKS.length} chunks; ` + Object.entries(libManifes
 // containing runner-worker.js without it fails the build; the list is also dist/runner-fetch.json
 {
   const { runnerFetchList, checkRunnerDefine } = await import("./runner-fetch.mts");
-  const list = runnerFetchList(engineSha256, rasterSha256, libChunkFiles.keys(), tz.ref);
+  const list = runnerFetchList(engineSha256, rasterSha256, ndSha256, libChunkFiles.keys(), tz.ref);
   writeFileSync(join(here, "dist", "runner-fetch.json"), JSON.stringify(list) + "\n");
   const build0 = Bun.build.bind(Bun);
   (Bun as any).build = async (o: any) => {
