@@ -393,6 +393,7 @@ test("NaN and Inf as real MATLAB treats them: svd and pinv give NaN, rank, null 
     // (complex: svd's U, S and V are real NaN; pinv stays complex, NaN + 0i; single stays single: real MATLAB)
     "A = complex([1 NaN; 2 3], [4 5; 6 7]); [U, S, V] = svd(A); P = pinv(A); Q = pinv(single(A));",
     "fprintf('%d %d %d %d %d %d %s %d %s\\n', isreal(U), isreal(S), isreal(V), isreal(P), all(isnan(real(P(:)))), all(imag(P(:)) == 0), class(P), isreal(Q), class(Q));",
+    "[U1, S1, V1] = svd(single(A)); fprintf('%d %d %d %s %s %s\\n', isreal(U1), isreal(S1), isreal(V1), class(U1), class(S1), class(V1));",
     "fprintf('%g %g %g %g\\n', rank(magic(4)), svd([3 0; 0 4]), pinv(2));",
   ].join("\n")));
   assert.deepEqual(out, [
@@ -406,6 +407,7 @@ test("NaN and Inf as real MATLAB treats them: svd and pinv give NaN, rank, null 
     "[3 2] [NaN 0;0 NaN] [2 2]",
     "NaN NaN NaN single single",
     "1 1 1 0 1 1 double 0 single",
+    "1 1 1 single single single",
     "3 4 3 0.5",
   ]);
 });
