@@ -89,6 +89,9 @@ ok((await preloadRoom(1000, {})) === true, "no storage estimate: room");
   ok(J(importTops(["import csv", "x".repeat(10) + "\nimport numpy"])) === '["csv","numpy"]', "scan: (control) a small document: every cell scanned");
   ok(J(importTops(["import csv, nosuch, numpy", "from constructor import x", "import __proto__"], (n) => Object.hasOwn(T.tops, n))) === '["csv","numpy"]', "scan: `known`: only the names it accepts (the table's, never an object's own properties)");
   ok(J(intentGroups(T, "python", ["import constructor, toString, __proto__, hasOwnProperty"])) === "[]", "scan: names that are an object's properties, not the table's: no group");
+  // (the grader's five, on 0c39a707: a tab separates, CRLF lines, the name characters, a module's text, each name once)
+  for (const [code, want] of [["import\tnumpy", '["numpy"]'], ["import numpy\r\nx = 1", '["numpy"]'], ["import numpy.x!", "[]"], ["from numpy.a-b import c", "[]"], ["import a\nimport a", '["a"]']])
+    ok(J(importTops([code])) === want, `scan: ${J(code)}: ${want} (${J(importTops([code]))})`);
   ok(J(importTops(["import a.b as c, d", "from e.f import g", "from . import h", "from .i import j", "import k l", "import m;", "xfrom n import o", "importp"])) === '["a","d","e"]', "scan: the forms it takes, and those it doesn't (relative, malformed, not a statement start)");
 }
 
