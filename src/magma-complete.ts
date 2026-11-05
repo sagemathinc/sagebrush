@@ -10,12 +10,12 @@ import { KEYWORDS, PYKW, PY_BUILTINS } from "./magma";
  * Magma name that is a Python keyword or builtin (abs -> abs_). */
 const magmaSpelling = (py: string) => (py.endsWith("_") && (PYKW.has(py.slice(0, -1)) || PY_BUILTINS.has(py.slice(0, -1))) ? py.slice(0, -1) : py);
 
-// (the library's exports that are Magma names: a function, or a name Magma's Handbook documents
-// (lib/_magma_names.py); not its own classes such as MagmaError or MSeq; worked out once)
+// (the library's exports, which of them are classes, and the names Magma's Handbook documents
+// (lib/_magma_names.py); worked out once)
 const INTRINSICS_PY = `import _magma, _magma_names
-_h = set(_magma_names.NAMES.split())
 _all = list(_magma.__all__)
-_names = [n for n in _all if n.rstrip("_") in _h or not isinstance(getattr(_magma, n), type)]
+_cls = [n for n in _all if isinstance(getattr(_magma, n), type)]
+_hb = _magma_names.NAMES.split()
 `;
 let cached: string[] | null = null;
 // (every name the library exports: in a session's __main__ by its `from _magma import *`, so no variable)
@@ -28,8 +28,13 @@ function intrinsics(): string[] {
     const ns = R.newModule("__magma_complete__");
     ns.__builtins__ = R.builtins;
     R.loader.exec(INTRINSICS_PY, ns, "exec", "<magma-complete>");
-    cached = (R.toArray(ns._names) as string[]).map(magmaSpelling);
-    exported = new Set(R.toArray(ns._all) as string[]);
+    const all = R.toArray(ns._all) as string[];
+    const classes = new Set(R.toArray(ns._cls) as string[]);
+    const handbook = new Set(R.toArray(ns._hb) as string[]);
+    // (a Magma name: a function, or a class whose Magma spelling, exactly, is a Handbook name, as RealField's is;
+    // not the library's own classes, MagmaError, MSeq or RealField_, whose spelling keeps its "_")
+    cached = all.map(magmaSpelling).filter((s, i) => !classes.has(all[i]) || handbook.has(s));
+    exported = new Set(all);
     return cached;
   } catch {
     return [];

@@ -26,10 +26,13 @@ test("Magma completion: intrinsics, keywords and the session's variables, never 
   for (const p of ["ra", "ran", "im", "No", "Tr", "pri", "le"]) {
     for (const py of ["raise", "range", "import", "None", "True", "len", "print_function"]) assert.ok(!names(p).includes(py), `${p}: ${py}`);
   }
-  assert.ok(!names("").some((n) => n.startsWith("_")), "no _ names");
+  // (no _ names: the runtime's own, which only a word starting with _ could reach)
+  assert.deepEqual(names("_"), []);
   // the library's own classes are no Magma names: MagmaError, MSeq
   assert.ok(!names("Ma").includes("MagmaError") && names("Ma").includes("Matrix"), String(names("Ma")));
   assert.ok(!names("MS").includes("MSeq"), String(names("MS")));
+  // (a class the library also has under a "_" name is offered only as Magma's: RealField, not RealField_)
+  assert.deepEqual(names("RealF"), ["RealField"]);
   // nothing to complete after a non-identifier character
   assert.deepEqual(magmaCompletions(main, "x := 3 + "), [[], ""]);
 });
