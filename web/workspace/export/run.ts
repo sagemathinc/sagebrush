@@ -12,6 +12,7 @@ import type { Entry, Op, Workspace } from "../api";
 import type { BoardDoc } from "../../board/doc";
 import { Images } from "../../board/images";
 import { BlobSink, counts, cutShort, ExportStopped, ExportWorker, OpfsSink, PickerSink, resetCounts, SLICE, Spool, ZipWriter, type Sink } from "./zip";
+import { unsafeMember, unsafeNamesWhy } from "./names";
 import { jsonLen, numLen as jsonNumLen, utf8Len } from "./bytes";
 import { captureFolder, captureLine, CAPTURED, DATE, IDENT, KIND, KINDS, manifestFolder, manifestLine, NAME, PATH, putRow, R, readRow, TIME } from "./rows";
 import { boardBytes, boardSlices, Counter, notebookBytes, notebookSlices, sizes, type BoardKit, type Pace } from "./stream";
@@ -366,6 +367,17 @@ export async function preflight(w: Workspace, signal: AbortSignal, progress: (p:
   if (T().failRowsAfter && rows.wk) await rows.wk.ask("failAfter", { n: T().failRowsAfter, re: "-rows$" });
   let lastPre = 0;
   const here: { ids?: Promise<Set<string> | null> } = {};
+  // (every member's name first, from the entries' metadata alone, files' and folders' (EXPORT-ZIPNAME-1, astra): one
+  // unsafe name refuses the export before any body is read, the last entry's too; a few kept to say, the rest counted)
+  {
+    const bad: string[] = [];
+    let count = 0;
+    for await (const page of entries(w)) for (const e of page) {
+      stopIf(signal);
+      if (unsafeMember(zipName(e), e.kind === "folder") && ++count <= 5) bad.push(e.path);
+    }
+    if (count) throw new ExportStopped(unsafeNamesWhy(bad, count), true);
+  }
   for await (const page of entries(w)) {
     for (const e of page) {
       stopIf(signal);

@@ -509,6 +509,27 @@ try {
     await idb("sagebrush-workspace", "entries", `(s) => s.delete("/late.txt")`);
   });
 
+  await scenario("zipnames", async () => {
+    // (EXPORT-ZIPNAME-1, astra's evidence: workspace names a .zip can't hold safely, a file's backslash-parent name
+    // last in path order and a folder's colon; the export refuses as a whole, naming them, before any body is read
+    // (preflight's capture and the writer's alike), and hands nothing over)
+    await ev(`(async () => { await ${W}.create("/zz/..\\\\..\\\\outside.txt", { content: "SEC probe" }); await ${W}.mkdir("/bad:dir"); return 1; })()`);
+    const listed = await ev(`Promise.all([${W}.stat("/zz/..\\\\..\\\\outside.txt"), ${W}.stat("/bad:dir")]).then((a) => a.every(Boolean))`);
+    await hooks(`preflightMember: () => { window.__bodyReads = (window.__bodyReads ?? 0) + 1; }, beforeCapture: () => { window.__bodyReads = (window.__bodyReads ?? 0) + 1; }`);
+    await ev(`(() => { window.__bodyReads = 0; delete window.__exp; return 1; })()`);
+    const r = await exportOnce(join(out, "zipnames.zip"));
+    const reads = await ev(`window.__bodyReads`);
+    check(listed && !!r.stopped && /2 files' names can't go safely into a \.zip/.test(r.stopped) && r.stopped.includes("bad:dir") && r.stopped.includes("zz/..\\..\\outside.txt") && /Rename them, then export again/.test(r.stopped), "unsafe names (a backslash parent, last in path order; a folder's colon): the export refuses, naming both: " + (r.stopped ?? "not stopped").slice(-400));
+    check(reads === 0 && !(await ev(`!!window.__exp`)), "…before any body is read (" + reads + " reads), and nothing is handed over");
+    // (renamed, the same workspace exports, the nested names as they are)
+    await ev(`(async () => { await ${W}.rename("/zz/..\\\\..\\\\outside.txt", "/zz/outside.txt"); await ${W}.rename("/bad:dir", "/bad-dir"); return 1; })()`);
+    await hooks();
+    const ok2 = await exportOnce(join(out, "zipnames-ok.zip"));
+    const z = ok2.stopped ? { names: [] } : inspect(join(out, "zipnames-ok.zip"));
+    check(!ok2.stopped && z.bad === null && z.unzip === 0 && z.names.includes("files/zz/outside.txt") && z.names.includes("files/bad-dir/") && !z.names.some((n) => /\\|:/.test(n)), "…renamed, the export is made, its names as the workspace's: " + (ok2.stopped ?? JSON.stringify(z.names.filter((n) => /zz|bad/.test(n)))).slice(-300));
+    for (const p of ["/zz", "/bad-dir"]) await ev(`${W}.remove(${JSON.stringify(p)}).then(() => 1, () => 0)`);
+  });
+
   await scenario("picker", async () => {
     await ev(`(() => { window.__picked = null; window.__aborted = 0; window.showSaveFilePicker = async () => ({ createWritable: async () => { const parts = []; return { write: async (c) => { parts.push(new Uint8Array(c)); }, close: async () => { window.__picked = new Blob(parts); }, abort: async () => { window.__aborted++; } }; } }); return 1; })()`);
     await ev(`(() => { window.__exp = null; window.__SB_EXPORT_TEST__ = { stats: {} }; return 1; })()`);
