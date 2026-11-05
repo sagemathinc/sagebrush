@@ -1,0 +1,11 @@
+{
+ "v": 1,
+ "reason": "NumPy's linalg on empty matrices (astra3 batch 1 MCF-02, sage2/daybreak3 NP647): svd's empty early return in src/runtime/numpy_linalg.ts; lib/numpy/linalg.py's _stacked with per-operation shape rules for empty stacks, and empty norm 2/-2, cond and pinv as NumPy 2.5.1. Growth: the sci group's lib (numpy), the worker (numpy_linalg.ts) and the CLI. Figures: a CI-order size record (pnpm build, build-cli, bun web/build.ts, build-cli; bun 1.4.4) of head bd25a3e4 merged onto master 4e43dee0: sci.pre +11615, sci.src +2518, worker +265, lib.gen +896 pyjs +1215 (marked 1363: +64 for the CLI's build-specific bytes, which moved 60 B between two probes of one tree). Re-measured on master b81a0b9c (probe d27e58e9): lib.gen +896, pyjs +1215 (marked +1279).",
+ "bytes": {
+  "engine/lib/sci.pre": 11615,
+  "engine/lib/sci.src": 2518,
+  "engine/sagebrush-worker.js": 265,
+  "cli/lib.gen.js": 896,
+  "cli/pyjs.cjs": 1279
+ }
+}

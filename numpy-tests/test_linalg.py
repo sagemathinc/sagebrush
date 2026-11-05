@@ -57,3 +57,46 @@ for _s in [1e-320, 1e308]:
     _x = np.linalg.lstsq(_a, np.array([0.0, _s]), rcond=None)
     print(round(float(abs(_r[0, 0]) / _s), 3), round(float(np.linalg.svd(_a, compute_uv=False)[0] / _s), 3), round(float(_x[0][0]), 12), _x[2], int(np.linalg.matrix_rank(_a)), round(float(np.linalg.cond(_a)), 12))
 print(np.round(np.abs(np.linalg.qr(np.array([[1e-320], [1e-320]]))[0]), 6).tolist())
+# empty matrices: no singular values; U and V^T the identity of their full sizes, or empty when reduced
+for shp in [(0, 0), (0, 3), (2, 0)]:
+    Z = np.zeros(shp)
+    u, s, vh = np.linalg.svd(Z)
+    print("svd empty", shp, u.shape, s.shape, vh.shape, u.tolist(), vh.tolist())
+    u, s, vh = np.linalg.svd(Z, full_matrices=False)
+    print("svd empty econ", shp, u.shape, s.shape, vh.shape)
+    print("svdvals/pinv/rank empty", shp, np.linalg.svd(Z, compute_uv=False).shape, np.linalg.pinv(Z).shape, int(np.linalg.matrix_rank(Z)))
+# stacks of empty matrices, and empty stacks (daybreak3 on #647)
+for shp in [(2, 0, 3), (2, 2, 0), (0, 2, 3), (0, 0, 0)]:
+    Z = np.zeros(shp)
+    u, s, vh = np.linalg.svd(Z)
+    print("svd stack", shp, u.shape, s.shape, vh.shape, u.tolist(), vh.tolist())
+    u, s, vh = np.linalg.svd(Z, full_matrices=False)
+    print("svd stack econ", shp, u.shape, s.shape, vh.shape)
+    print("svdvals/pinv/rank stack", shp, np.linalg.svd(Z, compute_uv=False).shape, np.linalg.pinv(Z).shape, np.linalg.matrix_rank(Z).tolist())
+for shp in [(0, 2, 2), (3, 0, 0)]:
+    Z = np.zeros(shp)
+    print("square stack", shp, np.linalg.det(Z).shape, np.linalg.inv(Z).shape, [x.shape for x in np.linalg.qr(np.zeros(shp))])
+# a large empty stack: shapes only, no work or memory proportional to the matrix size (daybreak3 on #647 r2)
+Z = np.zeros((0, 10000, 10000))
+print("big empty stack", [x.shape for x in np.linalg.svd(Z)], np.linalg.svd(Z, compute_uv=False).shape, np.linalg.det(Z).shape, np.linalg.inv(Z).shape, [x.shape for x in np.linalg.qr(Z)], np.linalg.pinv(Z).shape, np.linalg.matrix_rank(Z).shape)
+for shp in [(0, 3, 3), (2, 0, 0)]:
+    Z = np.zeros(shp)
+    print("eig/eigh/slogdet/cholesky stack", shp, [x.shape for x in np.linalg.eig(Z)], [x.dtype.kind for x in np.linalg.eig(Z)], [x.shape for x in np.linalg.eigh(Z)], [x.shape for x in np.linalg.slogdet(Z)], np.linalg.cholesky(Z).shape)
+# empty matrices in norm, cond and pinv's dtype (sage2 on #647: NORM-1, COND-2, PINV-3)
+def err(f):
+    try:
+        r = f()
+        return repr(r) + " " + str(getattr(r, "dtype", ""))
+    except Exception as e:
+        return type(e).__name__ + ": " + str(e)
+for shp in [(0, 3), (3, 0), (0, 0), (2, 0, 3)]:
+    Z = np.zeros(shp)
+    ax = (-2, -1)
+    print("norm 2/-2/nuc/fro", shp, err(lambda: np.linalg.norm(Z, 2, axis=ax)), err(lambda: np.linalg.norm(Z, -2, axis=ax)), err(lambda: np.linalg.norm(Z, "nuc", axis=ax)), err(lambda: np.linalg.norm(Z, "fro", axis=ax)))
+    print("cond", shp, err(lambda: np.linalg.cond(Z)), err(lambda: np.linalg.cond(Z, "fro")), err(lambda: np.linalg.cond(Z, -2)))
+for dt in (np.int64, bool, np.float32, np.float64):
+    print("pinv empty dtype", dt.__name__ if hasattr(dt, "__name__") else dt, np.linalg.pinv(np.zeros((0, 3), dtype=dt)).dtype, np.linalg.pinv(np.zeros((2, 2, 0), dtype=dt)).dtype)
+# pinv's dtype on an empty stack of nonempty matrices: float64, as NumPy's ordinary path (sage2/daybreak3 PINV-3b)
+for dt in (np.int64, bool):
+    Z = np.zeros((0, 2, 2), dtype=dt)
+    print("pinv empty stack dtype", np.linalg.pinv(Z).dtype, np.linalg.pinv(Z, rcond=1e-10).dtype, np.linalg.pinv(Z, hermitian=True).dtype, np.linalg.pinv(np.zeros((0, 0, 0), dtype=dt)).dtype, np.linalg.pinv(Z).shape)
