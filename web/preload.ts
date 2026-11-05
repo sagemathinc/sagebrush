@@ -142,7 +142,10 @@ export async function preloadFetch(urls: readonly string[], blocked: () => strin
 export const preloadState: { outcome: null | "off" | "stopped" | "save-data" | "slow" | "offline" | "hidden" | "nothing" | "no-room" | "fetched"; urls: string[]; fetched: string[] } = { outcome: null, urls: [], fetched: [] };
 
 /** At the browser's next idle moment (at most `wait` ms later), once per page: the open document's intent, fetched */
-export function preloadSoon(o: { table: PreloadTable; doc: () => { mode: string; codes: string[] } | null; extra?: () => Promise<{ urls: string[]; bytes: number } | null>; wait?: number }) {
+/** `later`: files planned only after the first files are fetched (or found to be none), fetched after them, with the
+ * same skips and stop (the package set's chunks: their plan waits for the service worker, which the library's files
+ * mustn't wait for, test-pwa's install check) */
+export function preloadSoon(o: { table: PreloadTable; doc: () => { mode: string; codes: string[] } | null; extra?: () => Promise<{ urls: string[]; bytes: number } | null>; later?: () => Promise<{ urls: string[]; bytes: number } | null>; wait?: number }) {
   const go = async () => {
     // (a test turns it off before the page loads: window.__sbPreloadOff, set by nothing else)
     if ((globalThis as any).__sbPreloadOff === true) return void (preloadState.outcome = "off");
@@ -154,10 +157,20 @@ export function preloadSoon(o: { table: PreloadTable; doc: () => { mode: string;
     const x = await o.extra?.().catch(() => null);
     if (x) for (const u of x.urls) if (!urls.includes(u)) (urls.push(u), (bytes += x.bytes / x.urls.length));
     preloadState.urls = urls;
-    if (!urls.length) return void (preloadState.outcome = "nothing");
-    if (!(await preloadRoom(bytes))) return void (preloadState.outcome = "no-room");
-    preloadState.fetched = await preloadFetch(urls);
-    preloadState.outcome = "fetched";
+    if (urls.length) {
+      if (!(await preloadRoom(bytes))) return void (preloadState.outcome = "no-room");
+      preloadState.fetched = await preloadFetch(urls);
+      preloadState.outcome = "fetched";
+    }
+    // (the second phase: planned now, after the first; nothing more once a Run has stopped it, or blocked)
+    const y = o.later && !stopped && !preloadBlocked() ? await o.later().catch(() => null) : null;
+    const more = (y?.urls ?? []).filter((u) => !urls.includes(u));
+    if (more.length && !stopped && (await preloadRoom(y!.bytes))) {
+      preloadState.urls = [...urls, ...more];
+      preloadState.fetched = [...preloadState.fetched, ...(await preloadFetch(more))];
+      preloadState.outcome = "fetched";
+    }
+    if (preloadState.outcome === null) preloadState.outcome = "nothing";
   };
   const idle = (globalThis as any).requestIdleCallback as ((f: () => void, o: { timeout: number }) => void) | undefined;
   if (idle) idle(() => void go(), { timeout: o.wait ?? 2000 });

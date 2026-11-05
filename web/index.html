@@ -4098,38 +4098,29 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   preloadSoon({
     table: __SB_PRELOAD__,
     doc: () => { if (!current.id) return null; const s = nb.snapshot(); return { mode: s.mode ?? nb.mode, codes: s.cells.filter((c) => !c.type).map((c) => c.code ?? "") }; },
-    extra: async () => {
-      const urls = [];
-      let bytes = 0;
-      // the notebook's optional package set (pandas, plan-modular-packages-r4): the one its interpreter is given
-      // (notebookPkgset: its pin, or else the site's latest, latestSet), its index checked against its id; the source
-      // chunks of the packages its import lines name. Nothing pinned, no pkgUsed: a set given unpinned is pinned at
-      // its first use only, as before (#628)
-      if (current.id && !LOCAL && (nb.mode === "python" || nb.mode === "sage")) {
-        const codes = nb.snapshot().cells.filter((c) => !c.type).map((c) => c.code ?? ""), tops = importTops(codes);
-        // (notebookPkgset's own answer: a pin another tab saved meanwhile is the one, as for the interpreter)
-        const S = tops.length ? await notebookPkgset(current.id).catch(() => null) : null;
-        if (S) {
-          const b = await preloadBytes(`pkgset/${S}.json`, PKG_LIMITS.indexBytes);
-          const index = await pkgIndex(b, S);
-          // (only through the service worker: it keeps a set's chunks in its own cache, and the interpreter's
-          // request for one is answered from there; fetched before it controls the page, a chunk would only be
-          // downloaded twice. On a first visit it takes control shortly after the page is drawn: waited for, 10 s)
-          const sw = navigator.serviceWorker;
-          if (index !== null && sw && (sw.controller || (await Promise.race([new Promise((r) => sw.addEventListener("controllerchange", r, { once: true })), new Promise((r) => setTimeout(r, 10000))]), sw.controller))) {
-            const p = pkgIntent(index, tops, location.href);
-            urls.push(...p.urls);
-            bytes += p.bytes;
-          }
-        }
-      }
-      // the LaTeX editor's two files, where the editor is on here and the workspace has a .tex (latexExtra)
-      const tex = await latexExtra({
-        latex: typeof __SB_LATEX__ !== "undefined" && !!__SB_LATEX__ && !!ws, hosts: typeof __SB_LATEX_HOSTS__ === "undefined" ? [] : __SB_LATEX_HOSTS__, host: location.hostname,
-        hasTex: async () => (await ws.list("/", { recursive: true })).some((e) => /\.tex$/i.test(e.path)), base: location.href,
-      });
-      if (tex) (urls.push(...tex.urls), (bytes += tex.bytes));
-      return urls.length ? { urls, bytes } : null;
+    // the LaTeX editor's two files, where the editor is on here and the workspace has a .tex (latexExtra)
+    extra: () => latexExtra({
+      latex: typeof __SB_LATEX__ !== "undefined" && !!__SB_LATEX__ && !!ws, hosts: typeof __SB_LATEX_HOSTS__ === "undefined" ? [] : __SB_LATEX_HOSTS__, host: location.hostname,
+      hasTex: async () => (await ws.list("/", { recursive: true })).some((e) => /\.tex$/i.test(e.path)), base: location.href,
+    }),
+    // the notebook's optional package set (pandas, plan-modular-packages-r4), after the library's files: the one its
+    // interpreter is given (notebookPkgset: its pin, or else the site's latest, latestSet), its index checked against
+    // its id; the source chunks of the packages its import lines name. Nothing pinned, no pkgUsed: a set given
+    // unpinned is pinned at its first use only, as before (#628)
+    later: async () => {
+      if (!current.id || LOCAL || !(nb.mode === "python" || nb.mode === "sage")) return null;
+      const codes = nb.snapshot().cells.filter((c) => !c.type).map((c) => c.code ?? ""), tops = importTops(codes);
+      // (notebookPkgset's own answer: a pin another tab saved meanwhile is the one, as for the interpreter)
+      const S = tops.length ? await notebookPkgset(current.id).catch(() => null) : null;
+      if (!S) return null;
+      const index = await pkgIndex(await preloadBytes(`pkgset/${S}.json`, PKG_LIMITS.indexBytes), S);
+      // (only through the service worker: it keeps a set's chunks in its own cache, and the interpreter's
+      // request for one is answered from there; fetched before it controls the page, a chunk would only be
+      // downloaded twice. On a first visit it takes control shortly after the page is drawn: waited for, 10 s)
+      const sw = navigator.serviceWorker;
+      if (index === null || !sw || !(sw.controller || (await Promise.race([new Promise((r) => sw.addEventListener("controllerchange", r, { once: true })), new Promise((r) => setTimeout(r, 10000))]), sw.controller))) return null;
+      const p = pkgIntent(index, tops, location.href);
+      return p.urls.length ? p : null;
     },
   });
   if (resumed) await replayResumed(resumed);

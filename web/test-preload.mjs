@@ -307,6 +307,21 @@ const body = (chunks, hang = false, signal) => ({ getReader: () => { let i = 0; 
   ok(out === "no-room" && J(asked) === "[]", "preloadSoon: too little storage: no-room, nothing fetched: " + J([out, asked]));
   [out, asked] = await run({ doc: () => ({ mode: "python", codes: ["import numpy"] }) }, { quota: 10_000, usage: 2_000 });
   ok(out === "fetched" && J(asked) === J(sci), "preloadSoon: (control) just enough storage: fetched: " + J([out, asked]));
+  // (`later`: planned only once the first files are fetched, then fetched after them; the package set's chunks, whose
+  // plan waits for the service worker, which the library's files mustn't wait for: test-pwa's install check)
+  {
+    const events = [];
+    const later = async () => { events.push("plan-later"); return { urls: ["https://sagebrush.space/pkg/" + "e".repeat(64) + ".json"], bytes: 10 }; };
+    const realF = globalThis.fetch;
+    [out, asked] = await run({ doc: () => ({ mode: "python", codes: ["import numpy"] }), later }, { quota: 1e9, usage: 0 });
+    ok(out === "fetched" && J(asked) === J([...sci, "https://sagebrush.space/pkg/" + "e".repeat(64) + ".json"]), "preloadSoon: `later`'s files after the first's: " + J(asked));
+    ok(events.length === 1, "…planned once");
+    [out, asked] = await run({ doc: () => ({ mode: "python", codes: [] }), later }, { quota: 1e9, usage: 0 });
+    ok(out === "fetched" && J(asked) === J(["https://sagebrush.space/pkg/" + "e".repeat(64) + ".json"]), "preloadSoon: no first files, `later`'s alone: " + J([out, asked]));
+    [out, asked] = await run({ doc: () => ({ mode: "python", codes: [] }), later: async () => null }, { quota: 1e9, usage: 0 });
+    ok(out === "nothing" && J(asked) === "[]", "preloadSoon: neither: nothing: " + J([out, asked]));
+    globalThis.fetch = realF;
+  }
   if (nav) Object.defineProperty(globalThis, "navigator", nav);
 }
 {
