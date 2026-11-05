@@ -6,7 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 // np.linalg.solve, det, slogdet and inv on engine/nd's LU (nd_solve's gesv mode, src/runtime/nd.ts ndLu): where
-// the module runs, from n = 256, the public calls give the module's bits (engine/nd/src/lu.rs
+// the module runs, from n = 256, the public calls give the module's bits, compiled ahead at idle (the notebook's
+// worker, ndWarm) or at the first call alike (engine/nd/src/lu.rs
 // SOLVE_FNV, the no-FMA family: Wasm SIMD128); below those sizes, where it can't run (SAGEBRUSH_NO_WASM here) and
 // for an A or B with an Inf or NaN (which the module doesn't compute), the older LU runs, as before. Both meet the
 // oracle and give NumPy's errors.
@@ -105,7 +106,8 @@ test("np.linalg.solve from n = 256 on engine/nd: the loader's bits, the oracle; 
   assert.equal(fnv(X), fnv(loaderX(N)), "the public solve's bits differ from the loader's");
   assert.ok(eta(X) <= 10 * N * U);
   assert.equal(inv, "True True");
-  const k = (from_n: number) => ({ path: "engine/nd", kernel: "wasm-simd128-4x4", why: "", from_n });
+  // (the CLI asks for the warm-up at numpy's import but has no idle moment for it: the first call compiles)
+  const k = (from_n: number) => ({ path: "engine/nd", kernel: "wasm-simd128-4x4", why: "", from_n, warm: "unused" });
   assert.deepEqual(kernels, { cholesky: k(48), solve: k(256), det: k(256), slogdet: k(256), inv: k(256) });
   // det is slogdet's sign times exp of its log (NumPy's own formula), and agrees with the older LU's
   const ts = seededCalls({ SAGEBRUSH_NO_WASM: "1" }).det;
@@ -119,8 +121,8 @@ test("without WebAssembly: the older LU, within the oracle, and _kernels() sayin
   const { X, inv, kernels } = seededCalls({ SAGEBRUSH_NO_WASM: "1" });
   assert.ok(eta(X) <= 10 * N * U);
   assert.equal(inv, "True True");
-  assert.deepEqual(kernels.solve, { path: "typescript", kernel: "", why: "WebAssembly is off here", from_n: 256 });
-  assert.deepEqual(kernels.inv, { path: "typescript", kernel: "", why: "WebAssembly is off here", from_n: 256 });
+  assert.deepEqual(kernels.solve, { path: "typescript", kernel: "", why: "WebAssembly is off here", from_n: 256, warm: "unused" });
+  assert.deepEqual(kernels.inv, { path: "typescript", kernel: "", why: "WebAssembly is off here", from_n: 256, warm: "unused" });
 });
 
 test("both paths: a singular matrix is NumPy's LinAlgError for solve and inv, det 0 and slogdet (0, -inf); P's sign", () => {
@@ -172,6 +174,79 @@ test("below n = 256 the older LU runs, without loading the module: a session of 
   assert.deepEqual(run(code), ["undecided"]);
   const at = (call: string) => run(`import numpy as np\nM = np.random.default_rng(2).standard_normal((N, N)) + 64 * np.eye(N)\n${call}\nprint(np.linalg._kernels()['solve']['path'])`.replace(/N/g, "256"))[0];
   for (const call of ["np.linalg.solve(M, np.ones(len(M)))", "np.linalg.det(M)", "np.linalg.slogdet(M)", "np.linalg.inv(M)"]) assert.equal(at(call), "engine/nd", call);
+});
+
+// The same calls warm (the module compiled ahead by ndWarm, as the notebook's worker does at idle) and cold (compiled
+// at the first call): the same bits (@sagebrush's R1: the warm-up changes the time, never the result). Each in a
+// fresh process, the module's state being per process.
+const WARM_CALLS = [
+  "import hashlib, numpy as np",
+  "H = []",
+  "for n in (32, 64, 256):",
+  "    rng = np.random.default_rng(n)",
+  "    M = rng.standard_normal((n, n)); b = rng.standard_normal(n); B = rng.standard_normal((n, 3))",
+  "    for x in (np.linalg.solve(M, b), np.linalg.solve(M, B), np.linalg.inv(M), np.linalg.det(M), np.linalg.slogdet(M)[1], np.linalg.cholesky(M @ M.T + n * np.eye(n))):",
+  "        H.append(hashlib.sha256(np.asarray(x).tobytes()).hexdigest()[:16])",
+  "print(' '.join(H), np.linalg._kernels()['solve']['path'], np.linalg._kernels()['solve']['warm'])",
+].join("\n");
+// a notebook session in a fresh process: numpy imported (asking for the warm-up), then `before` (the warm-up, or
+// nothing), then the calls; it prints their output
+const sessionRun = (before: string, env: Record<string, string> = {}) =>
+  execFileSync(process.execPath, ["-e", `
+    const { notebookSession } = require(${JSON.stringify(join(__dirname, "..", "src", "notebook-session"))});
+    const nd = require(${JSON.stringify(join(__dirname, "..", "src", "runtime", "nd"))});
+    let out = "";
+    const s = notebookSession((m) => { if (m.stream) out += m.text; }, { captureStreams: true });
+    (async () => {
+      await s.ready;
+      await s.handle({ id: 1, code: "import numpy" });
+      const asked = nd.ndWarmAsked();
+      ${before}
+      out = "";
+      await s.handle({ id: 2, code: ${JSON.stringify(WARM_CALLS)} });
+      process.stdout.write(asked + " " + out);
+    })();`], { encoding: "utf8", env: { ...process.env, ...env } }).trim();
+
+test("R1: warm or cold, the same bits: solve, inv, det, slogdet and cholesky at n = 32, 64 and 256", async () => {
+  const cold = sessionRun("");
+  const warm = sessionRun("await nd.ndWarm(); if (nd.ndWarmState() !== 'ready') throw new Error(nd.ndWarmState());");
+  // (whether numpy asked for the warm-up, the 18 results' hashes, the path, the warm-up's state)
+  const parts = (out: string) => { const w = out.split(" "); return { asked: w[0], H: w.slice(1, -2), tail: w.slice(-2) }; };
+  const c = parts(cold), w = parts(warm);
+  assert.deepEqual([c.asked, ...c.tail], ["true", "engine/nd", "unused"]);
+  assert.deepEqual([w.asked, ...w.tail], ["true", "engine/nd", "ready"]);
+  assert.equal(c.H.length, 18);
+  assert.deepEqual(w.H, c.H, "the warm session's bits differ from the cold one's");
+  // (and the CLI's, which never warms up)
+  assert.deepEqual(run(WARM_CALLS)[0].split(" ").slice(0, 18), c.H);
+});
+
+test("the warm-up: once, after numpy's import only; a fetch that fails or bytes whose SHA-256 differ are only remembered", () => {
+  // (no numpy, no warm-up asked; a warm-up after the decision does nothing)
+  const probe = (code: string) => execFileSync(process.execPath, ["-e", `
+    const nd = require(${JSON.stringify(join(__dirname, "..", "src", "runtime", "nd"))});
+    (async () => { ${code} })();`], { encoding: "utf8" }).trim();
+  assert.equal(probe("await nd.ndWarm(); process.stdout.write(nd.ndWarmAsked() + ' ' + nd.ndWarmState())"), "false none");
+  assert.equal(probe("nd.ndRequestWarm(); nd.useNd(); await nd.ndWarm(); process.stdout.write(nd.ndWarmState() + ' ' + nd.ndPath().path)"), "unused engine/nd");
+  // (the first call while the compile is on its way: it compiles its own, and the warm-up's, arriving after, is unused)
+  assert.equal(probe("nd.ndRequestWarm(); const p = nd.ndWarm(); nd.useNd(); await p; process.stdout.write(nd.ndWarmState() + ' ' + nd.ndPath().path)"), "unused engine/nd");
+  // (the worker's way: the URL and its SHA-256, the host's fetch. Ready: the first call instantiates the compiled
+  // module, with the URL still set, which Node can't fetch synchronously, so only that module can run. It fails, or
+  // its bytes aren't the page's: "failed", and the first call loads the module as without a warm-up, from its file
+  // here, the same module)
+  const viaUrl = (fetch: string, keepUrl = false) => probe(`
+    const bytes = nd.ndBytes(), sha = require("node:crypto").createHash("sha256").update(bytes).digest("hex");
+    globalThis.__SAGEBRUSH_ND_URL__ = "https://example.invalid/sagebrush-nd.wasm"; globalThis.__SAGEBRUSH_ND_SHA256__ = sha;
+    nd.ndRequestWarm();
+    await nd.ndWarm(${fetch});
+    const state = nd.ndWarmState();
+    if (!${keepUrl}) delete globalThis.__SAGEBRUSH_ND_URL__;
+    process.stdout.write(state + " " + nd.useNd() + " " + nd.ndPath().path);`);
+  assert.equal(viaUrl("async () => bytes", true), "ready true engine/nd");
+  assert.equal(viaUrl("async () => { throw new Error('offline'); }"), "failed true engine/nd");
+  assert.equal(viaUrl("async () => { const b = bytes.slice(); b[b.length - 1] ^= 1; return b; }"), "failed true engine/nd");
+  // (where the module can't run, no fetch at all)
+  assert.equal(probe("globalThis.__SAGEBRUSH_NO_WASM__ = true; nd.ndRequestWarm(); let fetched = false; await nd.ndWarm(async () => { fetched = true; return new Uint8Array(); }); process.stdout.write(nd.ndWarmState() + ' ' + fetched)"), "unused false");
 });
 
 test("a non-contiguous view or an integer matrix gives its contiguous float64 copy's bits", () => {

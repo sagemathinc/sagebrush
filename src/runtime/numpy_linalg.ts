@@ -12,7 +12,7 @@ import { NDArray, empty, toDtype, ascontig, copy as npcopy, admitWork } from "./
 import { glibcLog, glibcExp } from "./libm";
 import { gemmBuffers, wasmFusedFMA, wasmKernels, wasmLU, wasmLuSolve, wasmQR, wasmSymEig, wasmGenEig, wasmSVD } from "./kernels";
 import * as FD from "./fdlibm";
-import { useNd, ndCholesky, ndLu, ndPath, ndScratch } from "./nd";
+import { useNd, ndCholesky, ndLu, ndPath, ndRequestWarm, ndScratch, ndWarmState } from "./nd";
 import { pollInterrupt } from "./ops";
 
 const { T, raise, tuple } = Obj;
@@ -44,9 +44,11 @@ function out(data: Float64Array | number[], shape: number[]): NDArray {
 const CHOL_ND_MIN = 48;
 // The smallest n at which solve, det, slogdet and inv run on engine/nd's LU, where that runs; below it, and for an
 // A or B with an Inf or NaN (which the module doesn't compute), lu() and luSolve() run, as before. Steady calls win
-// from n = 32 (solve) and 64 (det, slogdet, inv), but a session's first call there also pays the module's
-// instantiation, about 2 ms: first calls are slower until about n = 256 and clearly faster from 512 (daybreak4's
-// cold PERF on #684; @sagebrush's ruling: one threshold, never slower cold). A preload at idle would let it come down.
+// from n = 32 (solve) and 64 (det, slogdet, inv), but a session's first call there also pays the module's loading,
+// about 2 ms: first calls are slower until about n = 256 and clearly faster from 512 (daybreak4's cold PERF on #684;
+// @sagebrush's ruling: one threshold, never slower cold). The notebook worker's compile-ahead (src/runtime/nd.ts
+// ndWarm) removes the compile but not the memory and instance, so first calls there are still slower below 256
+// (daybreak4's PERF on #703): the threshold comes down only after a full idle preparation, in its own PR.
 const LU_ND_MIN = 256;
 
 // A 2-D float64 matrix's elements, row-major: its own data when contiguous float64, else a copy
@@ -1239,6 +1241,8 @@ function svd(A: Float64Array, m: number, n: number): [Float64Array, Float64Array
 // ------------------------------------------------------------------ the module
 
 newBuiltinModule("_nplinalg", (m) => {
+  // (numpy's import: where the host has an idle moment, it compiles engine/nd's module ahead)
+  ndRequestWarm();
   const fn = (name: string, f: any) => (m[name] = Obj.builtin(f, name));
   fn("set_error", (cls: any) => ((globalThis as any).__npLinAlgError = cls, null));
   fn("wasm", () => wasmKernels());
@@ -1392,10 +1396,11 @@ newBuiltinModule("_nplinalg", (m) => {
     const result = out(L, [n, n]);
     return reportFailure ? tuple([result, 0]) : result;
   });
-  // which code cholesky runs in this session, and why (src/runtime/nd.ts): (path, kernel, why)
+  // which code the nd-backed functions run in this session, and why (src/runtime/nd.ts): (path, kernel, why, the
+  // smallest n of cholesky and of the LU's four, the warm-up's state)
   fn("_kernels", () => {
     const p = ndPath();
-    return tuple([p.path, p.kernel, p.why, CHOL_ND_MIN, LU_ND_MIN]);
+    return tuple([p.path, p.kernel, p.why, CHOL_ND_MIN, LU_ND_MIN, ndWarmState()]);
   });
   fn("eigh", (a: NDArray, upper: any) => {
     // (mat's copies, the symmetric copy, the eigenvectors in and out of

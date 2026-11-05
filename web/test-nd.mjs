@@ -1,8 +1,10 @@
 // ci: web-browser/notebook order=131
 // engine/nd's numerics module in the notebook page (headless Chrome; the test
 // server is cross-origin isolated, as the site is): sagebrush-nd.wasm is
-// fetched only when np.linalg.cholesky first runs, by its content hash, and
-// cholesky then runs on it (np.linalg._kernels() says so); a copy of the
+// fetched once, by its content hash: at idle after the run that imports numpy
+// (the warm-up, src/runtime/nd.ts ndWarm; that run itself decides nothing), or
+// at cholesky's first call if that comes in the same run; cholesky then runs on
+// it (np.linalg._kernels() says so); a copy of the
 // module that is not the one the page was built with is refused (its SHA-256,
 // src/runtime/nd.ts), and that session runs the TypeScript code instead,
 // saying why (CHOL-1 step 2; @sagebrush's ruling R1: one path per session).
@@ -65,10 +67,15 @@ await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-nd.wasm*" }] }
 await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
 ok(await ready(), "the notebook is ready");
 let out = await runCode(`import numpy as np\n${A}\nprint(np.linalg.solve(A, np.ones(60)).shape, np.linalg.cholesky(S).tolist(), np.linalg._kernels()['cholesky']['path'])`);
-ok(out.includes("(60,) [[2.0, 0.0], [1.0, 2.0]] undecided") && !fetched(), "NumPy, and cholesky of a small matrix, run without fetching the numerics module: " + JSON.stringify(out));
+ok(out.includes("(60,) [[2.0, 0.0], [1.0, 2.0]] undecided"), "NumPy, and cholesky of a small matrix, run without deciding the module's use: " + JSON.stringify(out));
+// (after that run, the worker idle, the warm-up fetches and compiles the module: wait for it, so the next call's
+// fetch count doesn't depend on timing)
+let warm = "";
+for (let i = 0; i < 100 && warm !== "ready"; i++) { await sleep(100); warm = (await runCode("print(np.linalg._kernels()['cholesky']['warm'])")).trim(); }
+ok(warm === "ready" && fetched() && requests.length === 1, "...the module fetched at idle, once, by its content hash: " + JSON.stringify([warm, requests.length]));
 out = await runCode("L = np.linalg.cholesky(A)\nk = np.linalg._kernels()['cholesky']\nprint(k['path'], k['kernel'], k['from_n'], np.abs(L @ L.T - A).max() / (60 * np.abs(A).sum(axis=1).max()) < 1e-15, np.all(np.triu(L, 1) == 0))");
 ok(out.includes("engine/nd wasm-simd128-4x4 48 True True"), "cholesky runs on engine/nd: " + JSON.stringify(out));
-ok(fetched() && requests.length === 1, "...the module fetched then, once, by its content hash");
+ok(requests.length === 1, "...with no second fetch");
 
 // a module other than the one the page was built with: refused, and the session runs the TypeScript code
 tamper = true;

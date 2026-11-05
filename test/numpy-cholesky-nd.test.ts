@@ -81,7 +81,8 @@ function factors(env: Record<string, string> = {}) {
 
 test("np.linalg.cholesky on engine/nd: the module's bits (POTRF_FNV, R = L^T), the oracle, and _kernels() saying so", () => {
   const { kernels, L } = factors();
-  assert.deepEqual(kernels, { path: "engine/nd", kernel: "wasm-simd128-4x4", why: "", from_n: 48 });
+  // (the CLI asks for the warm-up at numpy's import but has no idle moment for it: the first call compiles)
+  assert.deepEqual(kernels, { path: "engine/nd", kernel: "wasm-simd128-4x4", why: "", from_n: 48, warm: "unused" });
   const r: number[] = [];
   for (const [n, F] of L) {
     // L's strict upper part is 0; R's upper triangle, column by column, is L's lower one, row by row
@@ -95,7 +96,7 @@ test("np.linalg.cholesky on engine/nd: the module's bits (POTRF_FNV, R = L^T), t
 
 test("np.linalg.cholesky without WebAssembly: the TypeScript loop, within the oracle, and _kernels() saying why", () => {
   const { kernels, L } = factors({ SAGEBRUSH_NO_WASM: "1" });
-  assert.deepEqual(kernels, { path: "typescript", kernel: "", why: "WebAssembly is off here", from_n: 48 });
+  assert.deepEqual(kernels, { path: "typescript", kernel: "", why: "WebAssembly is off here", from_n: 48, warm: "unused" });
   for (const [n, F] of L) assert.ok(residual(spd(n, 2029), F, n) <= 10 * U, `n=${n}`);
 });
 

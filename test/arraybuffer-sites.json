@@ -53,6 +53,7 @@
   "lib:lib.dom.d.ts :: Memory.grow": {"class":"wasm-domain","reason":"grows a WebAssembly.Memory: the wasm domain","returns":"no-store"},
   "lib:lib.dom.d.ts :: MessageEvent.data (read)": {"class":"reserved","reason":"a message's data: r5 1.5's inbound route (adoption), reserved and validated there","returns":"existing-store-possible"},
   "lib:lib.dom.d.ts :: Module.new": {"class":"no-new-store","reason":"compiles a WebAssembly module from existing bytes; a module is not a store","returns":"no-store"},
+  "lib:lib.dom.d.ts :: compile": {"class":"no-new-store","reason":"compiles a WebAssembly module from existing bytes, off the thread (WebAssembly.compile, the notebook worker's warm-up); a module is not a store","returns":"no-store"},
   "lib:lib.dom.d.ts :: Performance.now": {"class":"no-new-store","reason":"every call's result type is store-free and opaque-free, and it takes no function: it makes no new JS store this realm can see (reviewed member by member)","returns":"no-store"},
   "lib:lib.dom.d.ts :: ReadableStream.getReader": {"class":"no-new-store","reason":"a reader object; its chunks are made by read (its own entry)","returns":"existing-store-possible"},
   "lib:lib.dom.d.ts :: ReadableStreamDefaultReader.read": {"class":"allocates","reason":"each chunk is a new Uint8Array"},
@@ -389,9 +390,9 @@
   "web/shims/fs.ts :: fetchRemote :: read x . response #0": {"decl":"187bac34b1f7cbc7","class":"allocates","reason":"x.response after x.responseType = \"arraybuffer\" in the same function: a new ArrayBuffer"},
   "src/runtime/index.ts :: engineVerified :: new Function ( \"capture\" , '\"use strict\"; function $probeInner$$() { const s = capture(); return s; } function $probeOuter$$() { return $probeInner$$(); } retur… 7635c19f #0": {"producer":"dcabc87f0d9ac063","class":"unproved-generated","reason":"sys._getframe's engine probe, a fixed text: two strict functions, one returning a call to the other, made once"},
   "src/runtime/index.ts :: engineVerified :: probe ( ( ) => withSites ( ( s ) => ( isCallSites ( s ) ? s . map ( ( cs ) => String ( cs . getFunctionName ( ) ?? \"\" ) ) : null ) , false ) ) #0": {"producer":"dcabc87f0d9ac063","class":"unproved-generated","reason":"calls the engine probe just generated: runs its text"},
-  "src/runtime/nd.ts :: ndBytes :: new Uint8Array ( fs . readFileSync ( f ) ) #0": {"decl":"8ef7c066705d1553","class":"allocates","reason":"new Uint8Array(Buffer from fs.readFileSync): a copy, a new backing store"},
-  "src/runtime/nd.ts :: ndBytes :: new Uint8Array ( x . response ) #0": {"decl":"8ef7c066705d1553","class":"view","reason":"new Uint8Array(ArrayBuffer): the same function sets x.responseType = \"arraybuffer\" before send: a view of the response's store"},
-  "src/runtime/nd.ts :: ndBytes :: read x . response #0": {"decl":"8ef7c066705d1553","class":"allocates","reason":"x.response after x.responseType = \"arraybuffer\" in the same function: a new ArrayBuffer"}
+  "src/runtime/nd.ts :: ndBytes :: new Uint8Array ( fs . readFileSync ( f ) ) #0": {"decl":"ea3e1fbc6183f858","class":"allocates","reason":"new Uint8Array(Buffer from fs.readFileSync): a copy, a new backing store"},
+  "src/runtime/nd.ts :: ndBytes :: new Uint8Array ( x . response ) #0": {"decl":"ea3e1fbc6183f858","class":"view","reason":"new Uint8Array(ArrayBuffer): the same function sets x.responseType = \"arraybuffer\" before send: a view of the response's store"},
+  "src/runtime/nd.ts :: ndBytes :: read x . response #0": {"decl":"ea3e1fbc6183f858","class":"allocates","reason":"x.response after x.responseType = \"arraybuffer\" in the same function: a new ArrayBuffer"}
  },
 "deltas": [
   {"key":"src/runtime/zlib.ts :: inflateRaw :: fixed ( ) #0","before":"store","after":"moved","to":"src/runtime/zlib.ts :: Inflater.run :: fixed ( ) #0","reason":"the inflater rewritten as a resumable state machine (zlib.decompressobj, note-zlib-decompressobj r3.1): a dynamic block's code tables, built as before, now in Inflater.run"},
@@ -1434,7 +1435,7 @@
   "b2b91e22ed731039": {"decl":"src/runtime/modules.ts :: permCombBig","class":"allocates","via":"web/lib-lazy.ts :: get"},
   "2ac65639e0bc6183": {"decl":"src/runtime/modules.ts :: prod","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
   "ba200f2940574a44": {"decl":"src/runtime/modules.ts :: sameRef","class":"allocates","via":"src/runtime/ops.ts :: eqBool"},
-  "8ef7c066705d1553": {"decl":"src/runtime/nd.ts :: ndBytes","class":"allocates","via":"lib:lib.es5.d.ts :: Uint8ArrayConstructor.new(source)"},
+  "ea3e1fbc6183f858": {"decl":"src/runtime/nd.ts :: ndBytes","class":"allocates","via":"lib:lib.es5.d.ts :: Uint8ArrayConstructor.new(source)"},
   "972bcdcb7bc23e92": {"decl":"src/runtime/nd.ts :: ndCholesky","class":"allocates","via":"lib:lib.es5.d.ts :: Float64Array.slice"},
   "42e9dd7f55bf9e6e": {"decl":"src/runtime/nd.ts :: ndLu","class":"allocates","via":"lib:lib.es5.d.ts :: Float64ArrayConstructor.new(source)"},
   "6458fef39ef9d532": {"decl":"src/runtime/nd.ts :: sharedMemory","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
