@@ -529,9 +529,23 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
     const t0 = performance.now(), d20 = refDoc("", dbl(20, "", "")), ms = performance.now() - t0;
     check("ref-nameref-empty-titles-once", ms < 1500 && refText(d20).endsWith("X Y"), { ms: Math.round(ms), tail: refText(d20).slice(-20) });
     const deep = refDoc("", fwd(100)), within = refDoc("", fwd(63));
-    check("ref-nameref-deep-refused", refText(deep).endsWith("X ?? Y") && said(deep, /titles naming titles past 64 deep/) === 1 && refText(within).endsWith("X End Y") && !within.problems.length,
+    // (the cut is met, and said once, where the first heading works its title out from the top; the body's \nameref{f0},
+    //  worked out after the headings below it have their titles whole, is "End", as TeX gives it: a title cut by depth
+    //  is never kept for a shallower use (#682 r3, daybreak3))
+    check("ref-nameref-deep-refused", refText(deep).endsWith("X End Y") && said(deep, /titles naming titles past 64 deep/) === 1 && refText(within).endsWith("X End Y") && !within.problems.length,
       [refText(deep).slice(-12), deep.problems.map((p) => p.name), refText(within).slice(-12), within.problems]);
+    // (daybreak3, #682 r3: a title worked out where the depth cut met it is kept only for that depth: the first heading's
+    //  chain reaches x with one level left and cuts x's own \nameref{y} (??); x named directly afterwards is only two
+    //  titles deep, so it is x's whole title, "End", as TeX gives it (with the cut kept for every depth: "P ?? Q");
+    //  the other order too)
+    const chain = (first) => { let b = ""; for (let k = 0; k < 64; k++) b += "\\section{\\nameref{" + (k < 63 ? "c" + (k + 1) : "x") + "}}\\label{c" + k + "}";
+      b += "\\section{\\nameref{y}}\\label{x}\\section{End}\\label{y}"; const deepRef = "D \\nameref{c0} E", direct = "P \\nameref{x} Q"; return b + (first === "deep" ? deepRef + " " + direct : direct + " " + deepRef); };
+    const dFirst = refText(refDoc("", chain("deep"))), sFirst = refText(refDoc("", chain("direct")));
+    check("ref-nameref-depth-cut-not-kept", /D End E P End Q$/.test(dFirst) && /P End Q D End E$/.test(sFirst), [dFirst.slice(-24), sFirst.slice(-24)]);
     const many = refDoc("", "\\section{" + "W ".repeat(3000) + "}\\label{w}" + "\\nameref{w} ".repeat(400)), manyH = many.chunks.join("");
+    // (a literal title past NAME_MAX, no reference in it: shown cut, as said (astra, #682 r3))
+    const lit = refDoc("", "\\section{" + "L".repeat(6000) + "}\\label{l}X \\nameref{l} Y"), litA = (lit.chunks.join("").match(/<a class="ref"[^>]*>([^<]*)<\/a>/) || [])[1] ?? "";
+    check("ref-nameref-literal-cut-shown", litA.length === NAME_MAX + 1 && litA.endsWith("\u2026") && said(lit, /a title past 4096 characters, cut/) === 1, { len: litA.length, problems: lit.problems.map((p) => p.name) });
     check("ref-nameref-total-bounded", manyH.length < NAME_TOTAL + 64 * 1024 && said(many, /past 1048576 characters of titles in all/) === 1, { len: manyH.length, problems: many.problems.map((p) => p.name) });
   }
   // (and a title with no references in it keeps its markup in \nameref's link, as hyperref keeps it: \emph's italic)

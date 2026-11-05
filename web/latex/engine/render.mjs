@@ -859,13 +859,22 @@ class Renderer {
     // (only a \nameref inside a title can name a missing label here, and it asks for text)
     if (!L) return "??";
     if (seen.has(key)) return null;
-    if (seen.size >= NAME_DEPTH) { this.nameSaid("titles naming titles past " + NAME_DEPTH + " deep: the rest left out"); return "??"; }
+    if (seen.size >= NAME_DEPTH) { this.nameSaid("titles naming titles past " + NAME_DEPTH + " deep: the rest left out"); this.nameTaint = (this.nameTaint ?? 0) + 1; return "??"; }
     // (each label's title as text, worked out once (a label reached through many titles isn't worked out again: whether it
     //  reaches a cycle doesn't depend on where it's reached from), at most NAME_MAX characters, checked before each piece
-    //  is added (titles naming others twice each doubled per level: astra, REF682-EXPAND-1); past it, cut and said once)
-    const memo = (this.nameMemo ??= new Map());
+    //  is added (titles naming others twice each doubled per level: astra, REF682-EXPAND-1); past it, cut and said once.
+    //  A title whose working out met the depth cut depends on how deep it was reached: kept only for that depth left
+    //  (nameMemoAt), so the same label named directly, or less deep, is worked out again and gets its whole title
+    //  (daybreak3, #682 r3); at most NAME_DEPTH of those per label, so the work stays bounded)
+    const memo = (this.nameMemo ??= new Map()), memoAt = (this.nameMemoAt ??= new Map()), left = NAME_DEPTH - seen.size;
     let m = memo.get(key);
     if (m === undefined) {
+      m = memoAt.get(key)?.get(left);
+      // (a result cut by depth, reused: whoever uses it is cut by depth too)
+      if (m !== undefined) this.nameTaint = (this.nameTaint ?? 0) + 1;
+    }
+    if (m === undefined) {
+      const t0 = this.nameTaint ?? 0;
       seen.add(key);
       let text = "", cycle = false, cut = false;
       for (const part of L.name.replace(/<[^>]*>/g, "").split(/(\u0001R\d+\u0002)/)) {
@@ -877,10 +886,14 @@ class Renderer {
       }
       seen.delete(key);
       if (cut) this.nameSaid("a title past " + NAME_MAX + " characters, cut");
-      memo.set(key, (m = cycle ? null : text));
+      m = cycle ? null : text;
+      if ((this.nameTaint ?? 0) === t0) memo.set(key, m);
+      else { let at = memoAt.get(key); if (!at) memoAt.set(key, (at = new Map())); at.set(left, m); }
     }
     // (in HTML: the title as made, its markup kept; one with references in it, as its text, escaped once)
-    return m === null ? null : plain ? m : /\u0001R/.test(L.name) ? esc(m) : L.name;
+    //  (and a title cut at NAME_MAX, references in it or not, as the text it was cut to: what is shown is what was said,
+    //  astra's #682 r3 note)
+    return m === null ? null : plain ? m : /\u0001R/.test(L.name) || m.length > NAME_MAX ? esc(m) : L.name;
   }
   // (each kind of cut said once, as a problem)
   nameSaid(why) { (this.nameWhy ??= new Set()).has(why) || (this.nameWhy.add(why), this.problem("expansion", "\\nameref: " + why)); }
