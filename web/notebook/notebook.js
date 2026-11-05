@@ -1237,6 +1237,7 @@ export function createNotebook(root, opts = {}) {
   // the caret and filtered as you type: ↑/↓ choose, Tab/Enter accept, Esc closes.
   let comp = null; // { cell, start, matches, sel }
   const LANG_NAME = { python: "Python", sage: "Sage", magma: "Magma", matlab: "MATLAB" };
+  let tabAsked = 0; // the latest Tab's number: only its answer takes the loading note away
   function closeCompleter() {
     comp = null;
     completer.hidden = true;
@@ -1287,6 +1288,7 @@ export function createNotebook(root, opts = {}) {
     if (!kernel || ta.selectionEnd !== pos || !/[\w.]$/.test(before)) return false; // indent instead
     // (the first Tab in a language may wait for its environment to load, a few seconds on a cold start: after
     // 300 ms that wait is shown at the caret, in the list's place, until the answer replaces it)
+    const asked = ++tabAsked;
     const waiting = setTimeout(() => {
       if (comp || ta.value !== value || ta.selectionStart !== pos || document.activeElement !== ta) return;
       completer.innerHTML = `<li class="sbnb-comp-wait" aria-disabled="true">loading ${esc(LANG_NAME[mode] ?? mode)}…</li>`;
@@ -1297,6 +1299,8 @@ export function createNotebook(root, opts = {}) {
     }, 300);
     const m = await kernel.ask({ complete: before }, mode, {});
     clearTimeout(waiting);
+    // (a later Tab's question is its own: this older answer leaves that one's note alone)
+    if (asked !== tabAsked) return true;
     if (!comp) closeCompleter();
     if (ta.value !== value || ta.selectionStart !== pos || document.activeElement !== ta) return true; // stale
     const matches = m.matches ?? [], prefix = m.prefix ?? "";

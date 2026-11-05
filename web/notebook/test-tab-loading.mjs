@@ -4,7 +4,8 @@
 // is shown at the caret, "loading <language>…", in the completion list's
 // place, and the answer then replaces it; a quick answer shows no note; a key
 // pressed meanwhile takes the note away, and a stale answer then shows
-// nothing; an answer with no names takes it away too.  On the embed page (web/embed), its kernel's questions delayed
+// nothing; an answer with no names takes it away too; an older Tab's answer
+// leaves a newer Tab's note alone.  On the embed page (web/embed), its kernel's questions delayed
 // here.  Serve web/dist first (python3 web/serve.py 8765), then
 //   node web/notebook/test-tab-loading.mjs
 import { spawn } from "node:child_process";
@@ -46,7 +47,7 @@ try {
   await send("Page.navigate", { url: new URL("embed/", base).href });
   check(await until("window.demo?.kernel?.ready === true", 60000), "the embed page's kernel starts");
   // (each question answered after window.__delay ms, as a cold start's first Tab is)
-  await ev(`(() => { const k = window.demo.kernel, ask = k.ask.bind(k); window.__delay = 0; k.ask = (...a) => new Promise((r) => setTimeout(r, window.__delay)).then(() => ask(...a)); return true; })()`);
+  await ev(`(() => { const k = window.demo.kernel, ask = k.ask.bind(k); window.__delay = 0; window.__delays = []; k.ask = (...a) => new Promise((r) => setTimeout(r, window.__delays.shift() ?? window.__delay)).then(() => ask(...a)); return true; })()`);
 
   // a slow answer: the note after 300 ms, then the answer's list in its place
   await ev("window.__delay = 1500");
@@ -88,6 +89,23 @@ try {
   check((await shown()) === null, "a key takes the note away");
   await sleep(1600);
   check((await shown()) === null, "the stale answer shows nothing");
+
+  // two Tabs overlapping (daybreak3's TAB689-RACE-1): an older answer, stale, arriving while a newer Tab waits,
+  // leaves the newer one's note alone; the newer answer then shows its list
+  await key("Escape", 27);
+  await fresh("pri");
+  await ev("window.__delays = [1200, 2500]");
+  await key("Tab", 9);
+  await sleep(400);
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "n", code: "KeyN", text: "n", windowsVirtualKeyCode: 78 });
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key: "n", code: "KeyN", windowsVirtualKeyCode: 78 });
+  await key("Tab", 9);
+  await sleep(500);
+  check((await shown())?.[0]?.[1] === true, "the newer Tab's note shows");
+  await sleep(900);
+  check((await shown())?.[0]?.[1] === true, "...and stays when the older, stale answer arrives");
+  // (prin has one name: the answer completes it in the cell rather than listing it)
+  check(await until(`(() => { const c = document.querySelector(".sbnb-completer"), ta = [...document.querySelectorAll("#nb .cell textarea")].at(-1); return !c.querySelector(".sbnb-comp-wait") && (ta.value === "print" || [...c.children].some((li) => li.textContent === "print")); })()`, 5000), "...until its own answer replaces it");
   check(errors.length === 0, `no page exceptions: ${errors.slice(0, 2).join(" | ")}`);
 } catch (e) {
   fails.push("threw: " + (e?.stack ?? e));
