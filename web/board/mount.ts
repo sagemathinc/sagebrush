@@ -60,6 +60,7 @@ import { IMAGE_TYPES, prepare, type ImageStore } from "./images";
 import { COLORS } from "./colors";
 import type { Version } from "./history";
 import { track, active } from "./focus";
+import { shortcutMode, EDIT_TITLE, EDITING_TITLE } from "../doc-mode";
 import css from "./board.css" with { type: "text" };
 
 /** Where a board's document comes from, and where its edits go. */
@@ -100,6 +101,9 @@ export interface BoardTimeTravel {
 }
 export interface BoardHost {
   store?: BoardStore;
+  /** View or Edit as the board opens, and the person's own toggles, to keep (web/doc-mode.ts: documents open in View,
+   * except one made here or last left in Edit); none: View, nothing kept */
+  mode?: { start: boolean; toggled(on: boolean): void };
   /** where pictures' bytes are kept (images.ts: Images, this browser's IndexedDB) */
   images: ImageStore;
   /** a CoCalc icon by its name (a converted board's stickers), as the host draws it; none: an emoji close to it (stickers.ts) */
@@ -1203,6 +1207,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (editor.on && e.key === " ") return;
     if (e.key === "ArrowRight" || e.key === " ") go(onward);
     else if (e.key === "ArrowLeft") go(back);
+    // (E for Edit; Esc, with nothing of the editor's to stop, back to View: web/doc-mode.ts, the same in every editor)
+    else if (shortcutMode(e) === "edit" && !editor.on) { e.preventDefault(); toggle(true); }
+    else if (shortcutMode(e) === "view" && editor.on && !editor.escapes) { e.preventDefault(); toggle(false); }
     // (Esc stopping a tool, or a selection, in Edit is the editor's: the camera stays)
     else if (e.key === "Escape" && !editor.escapes) go(() => step(-1));
     // (0, as the button that says so: everything, out of the tour; Esc, the board as it opens)
@@ -1321,7 +1328,15 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   editor.docs = host.docs ?? null;
   editor.images = images;
   const editBtn = $("edit");
-  editBtn.onclick = () => { closeTimeTravel(); editor.setOn(!editor.on); };
+  // (the person's own toggle, by the button or the shortcut: kept by the host; Present, TimeTravel and a dropped
+  // picture change the mode for their own reasons, and aren't kept)
+  const toggle = (on: boolean) => {
+    if (on && (editBtn.hidden || editBtn.hasAttribute("disabled"))) return;
+    if (on) closeTimeTravel();
+    editor.setOn(on);
+    host.mode?.toggled(on);
+  };
+  editBtn.onclick = () => toggle(!editor.on);
   // (a CoCalc board, converted: said in the caption, with what was left out,
   // until the next edit; and a notice, there until the next edit too: declared
   // before the store's editing hook, which may say why at once)
@@ -1331,13 +1346,16 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   const offEditing = host.store?.editing?.((s) => {
     editBtn.hidden = !!s.hidden;
     editBtn.toggleAttribute("disabled", !s.allowed);
-    editBtn.title = s.allowed ? "" : s.why ?? "";
+    editBtn.title = s.allowed ? (editor.on ? EDITING_TITLE : EDIT_TITLE) : s.why ?? "";
     if (!s.allowed && editor.on) editor.setOn(false);
     if (s.why) say(s.why.startsWith("**") ? s.why : `**${s.why}**`);
   });
   if (offEditing) offs.push(offEditing);
+  // (opening in Edit, where the host says the person made this board here or last left it in Edit, and Edit is allowed)
+  if (host.mode?.start && !editBtn.hidden && !editBtn.hasAttribute("disabled")) editor.setOn(true);
   offs.push(effect(() => {
     editBtn.setAttribute("aria-pressed", String(editor.editing.value));
+    if (!editBtn.hasAttribute("disabled")) editBtn.title = editor.editing.value ? EDITING_TITLE : EDIT_TITLE;
     root.classList.toggle("sbb-editing", editor.editing.value);
     // (Find's bar under the Edit toolbar, once it is shown or gone)
     requestAnimationFrame(placeFind);
