@@ -294,8 +294,13 @@ try {
   await yes();
   await note2("API words to undo");
   await until(() => frame(`document.querySelector('[data-ask="q2"] details textarea').value === "API words to undo"`), 5000);
+  // (undo: in Edit only, answers included, and this frame's host doesn't let edit: Ctrl+Z takes nothing back, the
+  // verdict stays gone (@sagebrush's ruling on #658); the words then put back as the reader would, for what follows)
   await frame(`document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true })), 1`);
-  check(!!(await until(() => frame(`document.querySelector('[data-ask="q2"] details textarea').value === ${JSON.stringify(words0)} && !${fb}.textContent.includes("You chose")`), 5000)), "...the words changed, then Undo: still gone: " + await frame(`[document.querySelector('[data-ask="q2"] details textarea').value, ${fb}.textContent.slice(0, 120)].join(" | ")`));
+  await sleep(500);
+  check(await frame(`document.querySelector('[data-ask="q2"] details textarea').value === "API words to undo" && !${fb}.textContent.includes("You chose")`), "...the words changed, then Ctrl+Z (View): nothing taken back, the verdict still gone");
+  await note2(words0);
+  await until(() => frame(`document.querySelector('[data-ask="q2"] details textarea').value === ${JSON.stringify(words0)}`), 5000);
   // (Something else stands as the words change, the API's too)
   await frame(`${fb}.querySelector('button').click()`);
   await until(() => frame(`!!${fb}?.querySelector('.board-ask-no')`));

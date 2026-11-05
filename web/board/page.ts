@@ -82,6 +82,7 @@ declare const __SB_NO_SYNC__: boolean | undefined;
 const NO_SYNC = typeof __SB_NO_SYNC__ !== "undefined" && __SB_NO_SYNC__;
 import { within } from "./idb-open";
 import { latexOn } from "../latex/boot";
+import { modeOf, modeKey, rememberMode } from "../doc-mode";
 // (this build's boards work under an active journal (plan-sync-slice2-client r4 §2, option (ii) of Oct 27): a
 // board's value is still saved as before, through Workspace.write, and its TimeTravel by a store that follows the
 // fence's phase ({followPhase}), so the journal's activation doesn't stop them; a board page from before this build
@@ -1126,6 +1127,8 @@ async function openAsHere(w: Workspace, e: Entry, as: DocKind, mode: string): Pr
   } catch (err) { return String((err as Error)?.message ?? err); }
 }
 const host: BoardHost = {
+  // (this browser's boards open in View, except one made here or last left in Edit: web/doc-mode.ts)
+  mode: local ? { start: modeOf(modeKey("board", source.slice(6))) === "edit", toggled: (on) => rememberMode(modeKey("board", source.slice(6)), on ? "edit" : "view") } : undefined,
   // (Sagebrush's board page: the one File menu as the notebook's, what it can't do here disabled)
   fullFileMenu: true,
   // (a board brought in from a file, opened here: its code waits for the person, until they run it)

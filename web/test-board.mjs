@@ -693,7 +693,9 @@ try {
       await sleep(300);
       const selected = () => ev("[...document.querySelectorAll('.board-item.selected')].length");
       const shiftClick = async (id) => { const p = await center(id); await mouse("mousePressed", p.x, p.y, { modifiers: 8 }); await mouse("mouseReleased", p.x, p.y, { modifiers: 8 }); await sleep(150); };
+      // (Esc with nothing selected now goes back to View, web/doc-mode.ts: Edit again for what follows)
       await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
+      await ev("window.sagebrush.board.editing(true)");
       await shiftClick("b");
       await shiftClick("c");
       check((await selected()) === 2, `shift-click selects two (${await selected()})`);

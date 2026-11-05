@@ -118,8 +118,13 @@ try {
   await type("neither, really: plan C");
   await click(1200, 760); await sleep(300);
   check((await note("q1")) === "neither, really: plan C" && (await answer("q1")) === "b", "own words kept beside the answer: " + JSON.stringify(await note("q1")));
+  // (undo: in Edit only, View writes nothing; in View, Ctrl+Z takes nothing back)
   await undoKey();
-  check((await note("q1")) === undefined && (await answer("q1")) === "b", "undo takes back the note, one step");
+  check((await note("q1")) === "neither, really: plan C", "in View, undo takes nothing back (View writes nothing)");
+  await ev("window.sagebrush.board.editing(true), 1");
+  await undoKey();
+  check((await note("q1")) === undefined && (await answer("q1")) === "b", "undo (in Edit) takes back the note, one step");
+  await ev("window.sagebrush.board.editing(false), 1");
   // "Clear the answer"
   await ev("(document.querySelector('input[name^=\"sbq-q1-\"]').closest('.board-ask').querySelector('.board-ask-clear').id = 'clear-q1', 1)");
   await press("#clear-q1");
@@ -206,6 +211,8 @@ try {
   await sleep(500);
   check(await ev("[...document.querySelectorAll('.board-ask[data-ask=\"w\"] input')].every((x) => !x.disabled)"), "TimeTravel closed: the controls answer again");
   // ---- checks, hints and next (stream 5): run in the board's interpreter, with the board's names
+  // (in View: a reader answers and checks without Edit, the answers and attempts kept; @sagebrush's ruling on #658)
+  await ev(`${B}.editing(false), 1`);
   await ev(`${B}.load(${JSON.stringify({ title: "Checked", layout: "grid", columns: 3, nodes: [
     { id: "c0", code: "G = 12" },
     { id: "k", kind: "ask", input: "number", text: "A divisor of $G$ other than 1",
@@ -234,7 +241,7 @@ try {
   const cardShows = (re) => until(`${re}.test(${q$(K(), "?.textContent")} ?? "")`, 10000);
   await cardShows(/Not yet/);
   let q = await node("k");
-  check(q.answer === 5 && q.result === "wrong" && q.attempts === 1, "a wrong answer: kept, counted, wrong: " + JSON.stringify(q));
+  check(q.answer === 5 && q.result === "wrong" && q.attempts === 1 && (await ev("document.querySelector('[data-sbb=edit]').getAttribute('aria-pressed')")) === "false", "a wrong answer, checked in View: kept, counted, wrong: " + JSON.stringify(q));
   const kText = () => ev(q$(K(), ".textContent"));
   let t = await kText();
   check(/Not yet/.test(t) && /5 leaves 2/.test(t) && /Try a small one/.test(t) && !/Hint 2/.test(t), "wrong: the verdict, the check's words, one hint: " + t.slice(0, 300));
@@ -503,6 +510,8 @@ try {
   await ev(`${B}.edit((d) => { const n = d.nodes.find((x) => x.id === "d"); n.text = "Is the REPLACEMENT statement correct?"; n.decide[0].about = "Replacement answer NEVER selected"; }).then(() => 1)`);
   const edited = await until(`${q$('.board-ask[data-ask="d"]', ".textContent")}.includes("REPLACEMENT") && !${q$(D, ".textContent")}.includes("You chose") && [...${q$(D)}.querySelectorAll('.board-ask-choice')].some((c) => c.textContent.includes("Replacement answer NEVER selected"))`, 5000);
   check(edited, "the question and its option changed after a choice: the choice is gone, the new options offered: " + await ev(`${q$(D, ".textContent")}`));
+  // (undo: in Edit only)
+  await ev(`${B}.editing(true), 1`);
   await undoKey();
   const undone = await until(`${q$('.board-ask[data-ask="d"]', ".textContent")}.includes("What is an orbit?") && !${q$(D, ".textContent")}.includes("You chose") && ${q$(D)}.querySelectorAll('.board-ask-choice').length === 3`, 5000);
   check(undone, "...and after an undo, the old question back: no choice either, the options offered: " + await ev(`${q$('.board-ask[data-ask="d"]', ".textContent")}`));

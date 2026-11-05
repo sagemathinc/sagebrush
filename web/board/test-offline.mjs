@@ -194,10 +194,18 @@ try {
   // the latest: another engine, if its api is the file's; else its own
   await send("Page.navigate", { url: `${site}board/?runner=0&doc=${encodeURIComponent("examples/live.json")}` });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
+  // (in View, the choice is this download's only: the board is left as it is, View writes nothing, web/doc-mode.ts)
   await ev("document.querySelector('[data-sbb=html]').click(), 1");
   await until("document.querySelector('[data-sbb=htmldlg]').open", 3000);
   await ev("document.querySelector('[data-sbb=htmlform] input[name=engine][value=latest]').click(), document.querySelector('[data-sbb=html-go]').click(), 1");
-  check(await until("window.sagebrush.board.snapshot().doc.engine === 'latest'", 3000), "choosing the latest keeps it in the board");
+  await sleep(500);
+  check(await ev("window.sagebrush.board.snapshot().doc.engine === undefined"), "in View, choosing the latest for a download leaves the board as it is");
+  // (in Edit, the choice is kept with the board)
+  await ev("window.sagebrush.board.editing(true), 1");
+  await ev("document.querySelector('[data-sbb=html]').click(), 1");
+  await until("document.querySelector('[data-sbb=htmldlg]').open", 3000);
+  await ev("document.querySelector('[data-sbb=htmlform] input[name=engine][value=latest]').click(), document.querySelector('[data-sbb=html-go]').click(), 1");
+  check(await until("window.sagebrush.board.snapshot().doc.engine === 'latest'", 3000), "in Edit, choosing the latest keeps it in the board");
   const latestHtml = await ev("window.sagebrush.board.exportHtml()");
   const fl = join(dir, "latest.html");
   writeFileSync(fl, latestHtml);

@@ -5,7 +5,8 @@
 // new one if there is none); File > New board and Duplicate make boards of
 // their own, the one shown staying as it is.  The top bar's two menus, File
 // and ⋯, hold what the notebook's do, one open at a time.  An example board
-// (not blank) opens as before, not in Edit.  Serve web/dist first
+// (not blank, not made here) opens in View; a board made here opens in Edit
+// again (web/doc-mode.ts).  Serve web/dist first
 // (python3 web/serve.py 8765), then
 //   node web/board/test-local.mjs
 // (Since the workspace (step 1b), it runs on the fallback: ?workspace=0.)
@@ -62,7 +63,8 @@ try {
   await ev("window.sagebrush.board.edit((d) => { d.title = 'Sage sketch'; d.nodes = [{ id: 'n', title: 'kept' }]; }).then(() => 1)");
   await go("?recent=sage");
   const b = await here();
-  check(b.search === a.search && b.title === "Sage sketch" && b.items === 1 && !b.editing, "?recent=sage: the latest Sage board, as left (not blank: not in Edit): " + JSON.stringify(b));
+  // (made here, and left in Edit: it opens in Edit again, blank or not, web/doc-mode.ts; one not made here, below, in View)
+  check(b.search === a.search && b.title === "Sage sketch" && b.items === 1 && b.editing, "?recent=sage: the latest Sage board, as left, in Edit (made here): " + JSON.stringify(b));
   // ?recent=magma, with no Magma board yet: a new one
   await go("?recent=magma");
   const c = await here();
