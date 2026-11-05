@@ -452,6 +452,23 @@ def _unmat(m):
     return _box(_contig(m.T))
 
 
+def _mat_kept(v):
+    """a 2-D value as a numpy matrix in MATLAB's orientation (a copy) in its own dtype: integers, single,
+    logical and char codes as they are, for the functions that only move elements (tril, diag, sortrows)"""
+    a = _arr(v)
+    if a.ndim > 2:
+        raise _err("Arguments must be 2-D.")
+    return np.array(a.T)
+
+
+def _unmat_like(m, v):
+    """_unmat for a result of _mat_kept(v): v's class (char stays char)"""
+    m = np.asarray(m)
+    if m.ndim == 1:
+        m = m.reshape((-1, 1))
+    return Char(_contig(m.T)) if type(v) is Char else _box(_contig(m.T))
+
+
 def _int_round(r, cls):
     """MATLAB's conversion to an integer class: round half away from zero, saturate, NaN is 0."""
     dt, lo, hi = _INTS[cls]
@@ -5037,11 +5054,17 @@ def abs_(nargout, x):
     return _finish(np.abs(A).astype(np.float64), "single" if cls == "single" else "double")
 
 
+def _numeric_kept(x):
+    """x's array for real, imag and conj: integers and single in their class, logical and char as double"""
+    A = _arr(x)
+    return A.astype(np.float64) if type(x) is Char or A.dtype.kind == "b" else A
+
+
 @_bs("real")
 def real_(x):
     if type(x) is complex:
         return x.real
-    A = _farr(x)
+    A = _numeric_kept(x)
     return _box(_contig(A.real) if A.dtype.kind == "c" else A.copy())
 
 
@@ -5049,15 +5072,15 @@ def real_(x):
 def imag_(x):
     if type(x) is complex:
         return x.imag
-    A = _farr(x)
-    return _box(_contig(A.imag) if A.dtype.kind == "c" else np.zeros(A.shape))
+    A = _numeric_kept(x)
+    return _box(_contig(A.imag) if A.dtype.kind == "c" else np.zeros(A.shape, dtype=A.dtype))
 
 
 @_bs("conj")
 def conj_(x):
     if type(x) is complex:
         return x.conjugate()
-    A = _farr(x)
+    A = _numeric_kept(x)
     return _box(np.conj(A) if A.dtype.kind == "c" else A.copy())
 
 
@@ -6457,15 +6480,14 @@ def sort_(nargout, x, *args):
 
 @_bi("sortrows")
 def sortrows_(nargout, x, col=None):
-    M = _mat(x)
+    M = _mat_kept(x)
     cols = [int(c) for c in _arr(col).reshape(-1)] if col is not None else list(range(1, M.shape[1] + 1))
     idx = list(range(M.shape[0]))
     for c in reversed(cols):
         j = abs(c) - 1
         idx.sort(key=lambda r: M[r, j], reverse=c < 0)
-    out = _unmat(M[idx])
-    if type(x) is Char:
-        out = Char(_arr(out))
+    # (an integer index array: an empty idx would otherwise index as floats; the class is kept)
+    out = _unmat_like(M[np.array(idx, dtype=np.intp)], x)
     if nargout <= 1:
         return out
     return [out, np.array([float(i + 1) for i in idx]).reshape((1, -1))]
@@ -6809,9 +6831,8 @@ def circshift_(x, k, dim=None):
 @_bs("diag")
 def diag_(x, k=0.0):
     k = _int_arg(k)
-    M = _mat(x)
-    cls = class_(x)
-    oc = cls if cls not in ("logical", "char") else "double"
+    # (every class keeps its class, logical and char included: diag only moves elements)
+    M = _mat_kept(x)
     if M.shape[0] == 1 or M.shape[1] == 1:
         v = M.reshape(-1)
         n = v.size + abs(k)
@@ -6821,20 +6842,20 @@ def diag_(x, k=0.0):
                 out[i, i + k] = v[i]
             else:
                 out[i - k, i] = v[i]
-        return _finish(_contig(out.T), oc)
+        return _unmat_like(out, x)
     rows, cols = M.shape
     vals = [M[i, i + k] for i in range(rows) if 0 <= i + k < cols]
-    return _finish(np.array(vals, dtype=M.dtype).reshape((1, len(vals))), oc)
+    return _unmat_like(np.array(vals, dtype=M.dtype).reshape((len(vals), 1)), x)
 
 
 @_bs("triu")
 def triu_(x, k=0.0):
-    return _unmat(np.triu(_mat(x), _int_arg(k)))
+    return _unmat_like(np.triu(_mat_kept(x), _int_arg(k)), x)
 
 
 @_bs("tril")
 def tril_(x, k=0.0):
-    return _unmat(np.tril(_mat(x), _int_arg(k)))
+    return _unmat_like(np.tril(_mat_kept(x), _int_arg(k)), x)
 
 
 @_bs("trace")

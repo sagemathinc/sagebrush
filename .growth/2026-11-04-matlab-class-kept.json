@@ -1,0 +1,10 @@
+{
+ "v": 1,
+ "reason": "MATLAB's tril, triu, diag and sortrows keep the input class (single, integers, logical, char), and real, imag and conj keep integers (astra3 batch 1 MCF-03); sortrows([]) is [] (MCF-04). lib/_matlab.py only (helpers _mat_kept, _unmat_like, _numeric_kept). Growth is the MATLAB mode's lib and the CLI's embedded lib. Figures: a CI-order size record (scripts/size-measure.mjs --record after pnpm build, build-cli, bun web/build.ts, build-cli; bun 1.4.4) of head fe147c49 merged onto master 4e43dee0 with bun 1.4.4: matlab.pre +4415, matlab.src +1004, lib.gen +460, pyjs +476; each marker is that figure exactly.",
+ "bytes": {
+  "engine/lib/matlab.pre": 4415,
+  "engine/lib/matlab.src": 1004,
+  "cli/lib.gen.js": 460,
+  "cli/pyjs.cjs": 476
+ }
+}

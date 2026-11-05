@@ -375,3 +375,34 @@ test("mode keeps a logical class in M and C; intmax/intmin 'like' a 64-bit integ
     "127 0",
   ]);
 });
+
+test("tril, triu, diag and sortrows keep every class; real, imag and conj keep integers and single; sortrows([]) is [] (astra3 batch 1: MCF-03, MCF-04)", () => {
+  // The pages list single, the integers, logical and char among each function's input types; Octave 11.1 keeps
+  // the class in all of these (real, imag and conj give double for logical and char).
+  const out = lines(run([
+    "xs = {single([1 2;3 4]), int8([1 2;3 4]), uint16([1 2;3 4]), true(2), 'ab'};",
+    "fs = {'tril','triu','diag','sortrows','real','imag','conj'};",
+    "for i = 1:numel(fs), s = fs{i}; for j = 1:4, s = [s ' ' class(feval(fs{i}, xs{j}))]; end, if i <= 4, s = [s ' ' class(feval(fs{i}, xs{5}))]; end, disp(s), end",
+    "disp(class(real(true))), disp(class(imag('a'))), disp(class(conj(true)))",
+    "y = imag(int8([1 -2])); fprintf('%s %d %d\\n', class(y), y);",
+    "t = tril(int8([1 2; 3 4]), -1); fprintf('%s %s\\n', class(t), mat2str(t));",
+    "d = diag(true(1, 2)); fprintf('%s %s\\n', class(d), mat2str(d));",
+    "[b, i] = sortrows([]); fprintf('%s %s %s\\n', mat2str(size(b)), mat2str(size(i)), class(b));",
+    "[b, i] = sortrows(int8([3 1; 1 2; 2 0])); fprintf('%s %s %s\\n', class(b), mat2str(b), mat2str(i'));",
+  ].join("\n")));
+  assert.deepEqual(out, [
+    "tril single int8 uint16 logical char",
+    "triu single int8 uint16 logical char",
+    "diag single int8 uint16 logical char",
+    "sortrows single int8 uint16 logical char",
+    "real single int8 uint16 double",
+    "imag single int8 uint16 double",
+    "conj single int8 uint16 double",
+    "double", "double", "double",
+    "int8 0 0",
+    "int8 [0 0;3 0]",
+    "logical [true false;false true]",
+    "[0 0] [0 1] double",
+    "int8 [1 2;2 0;3 1] [2 3 1]",
+  ]);
+});
