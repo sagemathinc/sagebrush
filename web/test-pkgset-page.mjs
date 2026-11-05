@@ -4,8 +4,9 @@
 // CORR-PR68-3), in headless Chromium against web/dist (web/serve.py) behind a
 // proxy that serves optional/hello's sets and holds pkgset/latest.json until
 // told:
-// - while latest is held, nothing runs; once it is answered, the pin is saved
-//   before the run, so a reload right after keeps it, whatever latest says then;
+// - while latest is held, nothing runs; once it is answered, the run's import
+//   pins it, durably before the run ends, so a reload right after keeps it,
+//   whatever latest says then (pinned at first use, §4.4 as amended Nov 4);
 // - a page closed while latest is held pinned nothing and ran nothing;
 // - a notebook left while its latest is held: its run never happens, and the
 //   pin goes into no other notebook;
@@ -226,6 +227,88 @@ const fetched = (s, S) => s.asked.includes(`/pkgset/${S}.json`);
     s.answer(S2); // (the second tab's: another set)
     ok(await t2.done(k2) && (await t2.out(k2)).includes("hello, world"), "the second tab runs");
     ok(!fetched(s, S2), "with the first tab's pin, not the set its own latest said");
+  } finally { await c.close(); await s.stop(); }
+}
+
+// 5. pinned at first use (§4.4 as amended Nov 4): opening or running a notebook that imports no optional
+// package never changes it; the first import pins the set it used, once; a pinned notebook keeps its pin
+{
+  const s = await site(), c = await chromium();
+  try {
+    s.setAuto(S1);
+    const t = await c.tab();
+    await t.open(s.url + "?runner=0");
+    // (what the notebook saves, each save's document, and every metadata write that names a set: seen from now on)
+    const watch = `(() => { const n = sagebrush.notebook; window.__saves = []; window.__pins = []; n.on("change", (d) => __saves.push(JSON.stringify(d)));
+      const set = n.setMeta; n.setMeta = (p) => { if (p && "pkgset" in p) __pins.push(p.pkgset); return set.call(n, p); }; return 1; })()`;
+    await t.ev(watch);
+    // (opened, its interpreter started with the latest set: nothing saved at all)
+    await sleep(2000);
+    ok((await t.ev("__saves.length")) === 0 && (await t.ev("__pins.length")) === 0 && (await t.ev("sagebrush.notebook.meta.pkgset")) === undefined, "opening a notebook saves nothing and pins nothing");
+    const k0 = await t.startRun("x = 6 * 7");
+    ok(await t.done(k0), "a run that imports no optional package");
+    await sleep(1500);
+    const saves0 = await t.ev("__saves");
+    const meta1 = await t.ev("JSON.stringify(sagebrush.notebook.meta)");
+    // (the run's own saves, its cell and the session's seed, as before #628: none names a set)
+    ok(!("pkgset" in JSON.parse(meta1)) && (await t.ev("__pins.length")) === 0 && saves0.every((d) => !("pkgset" in JSON.parse(d))), `...pins nothing: no set in the metadata or in any of its ${saves0.length} saves (${meta1})`);
+    const k1 = await t.startRun(HELLO);
+    ok(await t.done(k1) && (await t.out(k1)).includes("hello, world") && fetched(s, S1), "the first import uses the latest set");
+    ok((await t.ev("sagebrush.notebook.meta.pkgset")) === S1 && JSON.stringify(await t.ev("__pins")) === JSON.stringify([S1]), "...and pins it, once, to the set it used, before the run ends");
+    const k2 = await t.startRun("import hello.sub\nprint(hello.greet())");
+    ok(await t.done(k2) && (await t.ev("__pins.length")) === 1, "a later import writes no second pin");
+    // (a pinned notebook, latest now another set: it keeps its pin, never rewritten)
+    s.setAuto(S2);
+    await t.reload();
+    await sleep(1500);
+    await t.until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000);
+    await t.ev(watch);
+    const k3 = await t.startRun(HELLO);
+    ok(await t.done(k3) && (await t.out(k3)).includes("hello, world") && !fetched(s, S2), "a pinned notebook uses its pin, not the new latest");
+    ok((await t.ev("sagebrush.notebook.meta.pkgset")) === S1 && (await t.ev("__pins.length")) === 0, "...and its pin is not rewritten");
+    ok(!t.errors.length, "no exceptions on the page: " + JSON.stringify(t.errors));
+  } finally { await c.close(); await s.stop(); }
+}
+
+// 6. the run whose import pins the set ends only once that pin is durable: its save held, the run waits
+{
+  const s = await site(), c = await chromium();
+  try {
+    s.setAuto(S1);
+    const t = await c.tab();
+    await t.open(s.url + "?runner=0");
+    await t.ev(`(() => { const n = sagebrush.notebook, saved = n.saved; window.__held = 0; window.__release = null;
+      n.saved = () => { __held++; return new Promise((r) => { window.__release = () => r(saved.call(n)); }); }; return 1; })()`);
+    const k = await t.startRun(HELLO);
+    ok(await t.until("window.__held > 0 && !!window.__release", 60000), "the import's pin waits on the notebook's save");
+    await sleep(2000);
+    ok(!(await t.ran(k)), "while that save is held, the run has not ended");
+    await t.ev("(window.__release(), 1)");
+    ok(await t.done(k) && (await t.out(k)).includes("hello, world") && (await t.ev("sagebrush.notebook.meta.pkgset")) === S1, "released, the run ends, pinned to the set it used");
+  } finally { await c.close(); await s.stop(); }
+}
+
+// 7. a new notebook opened after a pinned one: its interpreter starts before its document is attached, and
+// its start never takes the previous document's pin; its own first import pins it (each of several in turn)
+{
+  const s = await site(), c = await chromium();
+  try {
+    s.setAuto(S1);
+    const t = await c.tab();
+    await t.open(s.url + "?runner=0");
+    const pinned = [];
+    for (let i = 0; i < 4; i++) {
+      if (i > 0) {
+        const before = await t.ev("localStorage.getItem('sagebrush-current')");
+        await t.ev("document.querySelector('#filemenu [data-f=new]').click()");
+        await t.until(`localStorage.getItem('sagebrush-current') !== ${JSON.stringify(before)}`, 10000);
+        await t.until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000);
+      }
+      const k = await t.startRun(HELLO);
+      await t.done(k);
+      pinned.push((await t.ev("sagebrush.notebook.meta.pkgset")) === S1);
+    }
+    ok(pinned.every(Boolean), `each new notebook is pinned by its own first import (${JSON.stringify(pinned)})`);
   } finally { await c.close(); await s.stop(); }
 }
 
