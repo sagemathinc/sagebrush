@@ -1,6 +1,6 @@
 {
  "v": 1,
- "reason": "QRPM tabulate compatibility: ship the official pure-Python tabulate 0.8.9 package as a lazy first-import chunk, pinned until dataclasses and regex conditional groups permit 0.10. Paired measurement against current master 3264180f with Node v24.21.0 and Bun 1.4.4: lib.gen +1534; pyjs +73560 with 64 B packaging margin; notebook +50; worker +2097. The new lazy chunk is authorized once in budgets.json at epoch 68887 / ceiling 75776; exact package registry outputs are raised to their measured maxima.",
+  "reason": "QRPM tabulate compatibility: ship the official pure-Python tabulate 0.8.9 package as a lazy first-import chunk, pinned until dataclasses and regex conditional groups permit 0.10. Paired measurement at exact merged head 998be6fc6 against current master 32f186824 with Node v24.21.0 and Bun 1.4.4: lib.gen +1534; pyjs +73420 with 204 B packaging margin; notebook +50; worker +2097. The new lazy chunk is authorized once in budgets.json at epoch 68887 / ceiling 75776; exact package registry outputs are raised to their measured maxima. The absolute notebook artifact is 237786, with ceiling 237850 = exact + 64.",
  "bytes": {
   "cli/lib.gen.js": 1534,
   "cli/pyjs.cjs": 73624,
