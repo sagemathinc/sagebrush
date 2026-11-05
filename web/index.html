@@ -4101,19 +4101,23 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
     extra: async () => {
       const urls = [];
       let bytes = 0;
-      // the notebook's optional package set (pandas, plan-modular-packages-r4): the one its interpreter is given, its
-      // pin or else the site's latest (latestSet, the same answer notebookPkgset reads), its index checked against
-      // its id; the source chunks of the packages its import lines name. Nothing pinned, no pkgUsed: a set given
-      // unpinned is pinned at its first use only, as before (#628)
+      // the notebook's optional package set (pandas, plan-modular-packages-r4): the one its interpreter is given
+      // (notebookPkgset: its pin, or else the site's latest, latestSet), its index checked against its id; the source
+      // chunks of the packages its import lines name. Nothing pinned, no pkgUsed: a set given unpinned is pinned at
+      // its first use only, as before (#628)
       if (current.id && !LOCAL && (nb.mode === "python" || nb.mode === "sage")) {
         const codes = nb.snapshot().cells.filter((c) => !c.type).map((c) => c.code ?? ""), tops = importTops(codes);
-        const pin = nb.meta.pkgset;
-        const S = tops.length ? (pin === undefined ? await latestSet() : typeof pin === "string" && /^[0-9a-f]{64}$/.test(pin) ? pin : null) : null;
+        // (notebookPkgset's own answer: a pin another tab saved meanwhile is the one, as for the interpreter)
+        const S = tops.length ? await notebookPkgset(current.id).catch(() => null) : null;
         if (S) {
           const r = await fetch(`pkgset/${S}.json`, { redirect: "error", credentials: "omit", referrerPolicy: "no-referrer" }).catch(() => null);
           const b = r?.ok ? new Uint8Array(await r.arrayBuffer()) : null;
           const hex = b && [...new Uint8Array(await crypto.subtle.digest("SHA-256", b))].map((x) => x.toString(16).padStart(2, "0")).join("");
-          if (hex === S) {
+          // (only through the service worker: it keeps a set's chunks in its own cache, and the interpreter's
+          // request for one is answered from there; fetched before it controls the page, a chunk would only be
+          // downloaded twice. On a first visit it takes control shortly after the page is drawn: waited for, 10 s)
+          const sw = navigator.serviceWorker;
+          if (hex === S && sw && (sw.controller || (await Promise.race([new Promise((r) => sw.addEventListener("controllerchange", r, { once: true })), new Promise((r) => setTimeout(r, 10000))]), sw.controller))) {
             const p = pkgIntent(JSON.parse(new TextDecoder().decode(b)), tops, location.href);
             urls.push(...p.urls);
             bytes += p.bytes;

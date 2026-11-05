@@ -163,12 +163,14 @@ export function preloadSoon(o: { table: PreloadTable; doc: () => { mode: string;
 export function pkgIntent(index: unknown, tops: readonly string[], base: string): { urls: string[]; bytes: number } {
   const pk = (index as any)?.packages;
   if (!pk || typeof pk !== "object" || !tops.length) return { urls: [], bytes: 0 };
-  const want: string[] = [], queue: string[] = [];
-  for (const [id, p] of Object.entries<any>(pk)) if (Array.isArray(p?.modules) && p.modules.some((m: unknown) => typeof m === "string" && tops.includes(m.split(".")[0]))) queue.push(id);
+  const want: string[] = [], queue: string[] = [], named = new Set(tops);
+  for (const [id, p] of Object.entries<any>(pk)) if (Array.isArray(p?.modules) && p.modules.some((m: unknown) => typeof m === "string" && named.has(m.split(".")[0]))) queue.push(id);
   // (the packages they require, at most 64 in all)
+  const seen = new Set<string>();
   while (queue.length && want.length < 64) {
     const id = queue.shift()!;
-    if (want.includes(id) || !pk[id]) continue;
+    if (seen.has(id) || !Object.hasOwn(pk, id)) continue;
+    seen.add(id);
     want.push(id);
     for (const r of Array.isArray(pk[id].requires) ? pk[id].requires : []) if (typeof r === "string") queue.push(r);
   }
