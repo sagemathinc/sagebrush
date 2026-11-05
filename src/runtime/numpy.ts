@@ -4270,6 +4270,14 @@ newBuiltinModule("_numpy", (m) => {
     a.base = null;
     return a;
   });
+  // (a library's own combined admission, admitWork's, for what a Python step
+  // keeps at once: lib/scipy/optimize.py's differences and scratch)
+  fn("_admit_work", (nbytes: any, what: any) => {
+    const b = typeof nbytes === "bigint" ? Number(nbytes) : nbytes;
+    if (typeof b !== "number" || typeof what !== "string") raise(T.TypeError, "_admit_work: a byte count and a name are required");
+    admitWork(b, what);
+    return null;
+  });
   fn("where3", (c: any, x: any, y: any) => {
     if (strArg(x) || strArg(y)) return strWhere(asarray(c), x, y);
     const C = asarray(c), X = operand(x), Y = operand(y);
