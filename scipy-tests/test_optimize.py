@@ -66,7 +66,22 @@ def stop(intermediate_result):
         raise StopIteration
 
 
-show_bfgs("bfgs callback stop", minimize(rosen, [-1.2, 1.0], callback=stop))
+r = minimize(rosen, [-1.2, 1.0], callback=stop)
+show_bfgs("bfgs callback stop", r)
+print("bfgs callback stop status", r.status)
+# (grader's pins on #671: each changes under the mutant it names)
+r = minimize(lambda x: (x[0] - 3.0) ** 4, 1.0, tol=1e-10)  # B4: tol passed on as gtol
+print("pin B4", r.nit, r.nfev, r.x)
+r = minimize(lambda x: np.cos(x[0]) + 0.1 * x[0] ** 3, 0.5, jac="3-point")  # D1: the 3-point step
+print("pin D1", r.nit, r.nfev, r.x, r.fun)
+r = minimize(lambda x: 1e6 * ((x[0] - 1.5) ** 2 + 3 * (x[1] + 0.5) ** 2), [0.0, 0.0], method="Nelder-Mead", tol=1e-3)  # N7
+print("pin N7", r.nit, r.nfev)
+r = minimize(lambda x: float(np.floor(abs(x[0]) + abs(x[1]))), [3.0, 2.0], method="Nelder-Mead")  # N6, N3
+print("pin N6 N3", r.nit, r.nfev, r.x)
+with warnings.catch_warnings(record=True) as w:  # R1: unknown options warned of
+    warnings.simplefilter("always")
+    minimize(lambda x: float(x[0] ** 2), [1.0], options={"bogus": 1})
+print("pin R1", [(c.category.__name__, str(c.message)) for c in w])
 # minimize_scalar
 f3 = lambda x: (x - 2) * x * (x + 2) ** 2
 show("brent", minimize_scalar(f3))
