@@ -9,6 +9,7 @@ Sagebrush's pandas 0.x (plan-pandas r7, M1): a subset of pandas 3.1.0's API, in 
 - **Reading CSV:** `read_csv`, with sep, header, names, index_col, usecols, na_values, keep_default_na, dtype, nrows, skiprows, quotechar and parse_dates (False only).
 - **Display:** text and HTML reprs, and six display options.
 - **Reductions:** sum, mean, min, max and count, plus the comparisons that make masks.
+- **Times (PR A of the xlsx/time-series design):** naive `datetime64[us]` columns and `DatetimeIndex`, `Timestamp`, `NaT` and `to_datetime` (ISO dates and times, M/D/YYYY, YYYYMMDD, a `format` of `%Y %m %d %H %M %S %y %f`, numbers with a `unit` and `origin`; a list's format inferred from its first string, as pandas 3.1). Also `.dt.year/.month/.day/.hour/.minute/.second/.strftime`, an index's `.year/.month/.day/.strftime`, `Series/DataFrame.diff(periods)`, `dropna(how, thresh, subset, inplace)`, and `DataFrame.set_index(label)`. Sagebrush's numpy has no `datetime64` yet, so a datetime column is int64 microseconds inside the package: its `.values`/`.to_numpy()` raise NotImplementedError rather than give another type, as do `Timedelta`, timezones, nanosecond results, and times outside the years 1685–2255 (where those microseconds stop being exact).
 
 Everything outside the subset raises `NotImplementedError("... is not in Sagebrush's pandas 0.x subset")` before doing any work. `tests/test_unsupported.py` lists each such form, and `known.json` gives the reason for each one.
 

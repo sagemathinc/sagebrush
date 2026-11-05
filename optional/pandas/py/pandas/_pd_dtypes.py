@@ -59,14 +59,19 @@ STR = StringDtype()
 
 
 def is_missing(v):
-    """None, a float NaN or numpy's NaN: pandas' missing values for M1."""
-    if v is None:
+    """None, a float NaN, numpy's NaN or NaT: pandas' missing values."""
+    if v is None or v is _NaT():
         return True
     if isinstance(v, float):
         return v != v
     if isinstance(v, np.floating):
         return bool(v != v)
     return False
+
+
+def _NaT():
+    from ._pd_datetime import NaT
+    return NaT
 
 
 def _is_bool(v):
@@ -83,13 +88,17 @@ def _is_float(v):
 
 def infer(values):
     """The dtype pandas 3.1 infers for a list of Python values: 'int64',
-    'float64', 'bool', STR or 'object'.  An int outside int64 raises
+    'float64', 'bool', STR, datetime64[us] (datetimes and Timestamps, with
+    missing values; not bare dates) or 'object'.  An int outside int64 raises
     NotImplementedError (pandas makes it uint64 or object)."""
     if not values:
         return "object"
-    has_missing = has_bool = has_int = has_float = has_str = has_other = False
+    from ._pd_datetime import DT, NaT, is_time
+    has_missing = has_bool = has_int = has_float = has_str = has_other = has_time = has_nat = False
     for v in values:
-        if v is None:
+        if v is NaT:
+            has_nat = True
+        elif v is None:
             has_missing = True
         elif _is_bool(v):
             has_bool = True
@@ -103,8 +112,13 @@ def infer(values):
             has_float = True
         elif isinstance(v, str):
             has_str = True
+        elif is_time(v):
+            has_time = True
         else:
             has_other = True
+    if has_time or has_nat:
+        # (times with missing values -- None, NaN, NaT -- are datetime64; with anything else, object)
+        return DT if not (has_other or has_str or has_bool or has_int or (has_float and not _all_nan_floats(values))) and has_time else "object"
     if has_other:
         return "object"
     if has_str:
@@ -130,6 +144,9 @@ def resolve_dtype(dtype):
         return None
     if dtype is STR or isinstance(dtype, StringDtype):
         return STR
+    from ._pd_datetime import DT
+    if dtype is DT or (isinstance(dtype, str) and dtype in ("datetime64[us]", "M8[us]", "<M8[us]")):
+        return DT
     if isinstance(dtype, str):
         if dtype == "str":
             return STR
