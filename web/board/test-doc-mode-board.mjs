@@ -151,6 +151,41 @@ try {
   const keptKeys = await ev("Object.keys(JSON.parse(localStorage.getItem('sagebrush-doc-modes') ?? '{}'))");
   ok(!keptKeys.includes("board:" + made.slice(11)) && keptKeys.every((k) => /^(board|notebook):[\w-]+$/.test(k)), `what is kept: boards left in Edit, by id (${JSON.stringify(keptKeys).slice(0, 200)})`);
 
+  // ---- undo started in Edit while a note is being written, the board left for View as it waits (astra's
+  // MODE658-UNDO-1): the note's words are kept (typed in Edit), and nothing is undone
+  await go("?new=python");
+  await until("document.querySelector('[data-sbb=edit]').getAttribute('aria-pressed') === 'true'", 10000);
+  await ev("window.sagebrush.board.edit((d) => { (d.nodes ??= []).push({ id: 'w1', title: 'first', x: 0, y: 0, w: 300 }); }).then(() => 1)");
+  await ev("window.sagebrush.board.edit((d) => { d.nodes.push({ id: 'w2', title: 'second', x: 0, y: 200, w: 300 }); }).then(() => 1)");
+  await ev("window.board.focus(['w1'], true), window.board.render(), 1");
+  await sleep(300);
+  await ev("(() => { const r = window.board.clientRect('w1'); const x = r.left + 30, y = r.top + 12; document.elementFromPoint(x, y).dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX: x, clientY: y })); return 1; })()");
+  ok(await until("!!document.querySelector('.ip-bar')", 3000), "(a note is being written, in Edit)");
+  await send("Input.insertText", { text: " typed" });
+  await sleep(200);
+  await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true })), window.sagebrush.board.editing(false), 1");
+  await sleep(1200);
+  const after = await ev("JSON.stringify(window.sagebrush.board.snapshot().doc.nodes.map((n) => [n.id, n.title ?? '', n.text ?? '']))");
+  ok(!(await editing()) && /"w1"/.test(after) && /"w2"/.test(after) && /typed/.test(after), `Ctrl+Z, then View while the note's words were being kept: kept, nothing undone (${after})`);
+  // (redo the same way: a step undone in Edit, a note open (unchanged: a change would clear the redo step), Ctrl+Shift+Z,
+  // then View as it waits: nothing redone)
+  await press("e");
+  ok(await editing(), "(Edit again)");
+  await ev("document.activeElement?.blur?.(), 1");
+  for (const type of ["keyDown", "keyUp"]) await send("Input.dispatchKeyEvent", { type, key: "z", code: "KeyZ", modifiers: 2, windowsVirtualKeyCode: 90 });
+  await sleep(600);
+  const undone = await ev("JSON.stringify(window.sagebrush.board.snapshot().doc.nodes.map((n) => [n.id, n.title ?? '']))");
+  ok(!/typed/.test(undone), `(a step undone in Edit: ${undone})`);
+  await ev("window.board.focus(['w1'], true), window.board.render(), 1");
+  await sleep(300);
+  await ev("(() => { const r = window.board.clientRect('w1'); const x = r.left + 30, y = r.top + 12; document.elementFromPoint(x, y).dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX: x, clientY: y })); return 1; })()");
+  ok(await until("!!document.querySelector('.ip-bar')", 3000), "(a note is being written, in Edit)");
+  await sleep(200);
+  await ev("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, shiftKey: true, bubbles: true })), window.sagebrush.board.editing(false), 1");
+  await sleep(1200);
+  const after2 = await ev("JSON.stringify(window.sagebrush.board.snapshot().doc.nodes.map((n) => [n.id, n.title ?? '']))");
+  ok(!(await editing()) && !/typed/.test(after2), `Ctrl+Shift+Z, then View while the note was being closed: nothing redone (${after2})`);
+
   // ---- a host that doesn't let edit (grader's B3, B5): a remembered Edit, E, the control and the page's API all
   // leave it in View, and nothing is kept
   await go("?doc=examples/sagebrush.json");

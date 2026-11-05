@@ -248,9 +248,10 @@ export class Editor {
   async undo() {
     // (not while the page is leaving: astra's CORR-59D-1; nor in View, which writes nothing)
     if (this.leaving || !this.on) return;
-    // (what is being written is kept first: it is what undo takes back)
+    // (what is being written is kept first: it is what undo takes back; and View again after that wait, if the board
+    // left Edit meanwhile: astra's MODE658-UNDO-1)
     await this.inplace?.end();
-    if (this.leaving) return;
+    if (this.leaving || !this.on) return;
     const cur = this.doc(), prev = this.undos.pop();
     if (!cur || !prev) return;
     this.redos.push(JSON.stringify(cur));
@@ -261,7 +262,7 @@ export class Editor {
   async redo() {
     if (this.leaving || !this.on) return;
     await this.inplace?.end();
-    if (this.leaving) return;
+    if (this.leaving || !this.on) return;
     const cur = this.doc(), next = this.redos.pop();
     if (!cur || !next) return;
     this.undos.push(JSON.stringify(cur));
