@@ -284,7 +284,21 @@ Got:
 343  512   729
 
 test_input.test_numpy_2d_firstrow: ok
-test_input.test_numpy_2d_keys: excluded
+Expected:
+    0      1      2
+-----  -----  -----
+  0.5    4     13.5
+ 32     62.5  108
+171.5  256    364.5
+
+Got:
+    0      1      2
+-----  -----  -----
+  0.5    4     13.5
+ 32     62.5  108
+171.5  256    364.5
+
+test_input.test_numpy_2d_keys: ok
 test_input.test_numpy_record_array: excluded
 test_input.test_numpy_record_array_headers: excluded
 test_input.test_numpy_record_array_keys: excluded
