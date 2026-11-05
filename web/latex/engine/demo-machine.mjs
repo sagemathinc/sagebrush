@@ -37,6 +37,8 @@ class RunawayArg extends Error { constructor(text) { super("runaway argument"); 
 //   \newcommand{\cs}[n][default]{body}: \new@command#1 and \@newcommand#1[#2] are short, \@xargdef's [#3] long
 //   (\newenvironment{name}[n][default]{begin}{end}: name, [n] and [default] short (\@newenvb), so not listed)
 const L = true, S = false;
+// (secnumdepth and tocdepth by class, as TeX Live 2025's classes set them)
+export const depthOf = (cls) => (/^(book|report|scrbook|scrreprt)$/.test(cls) ? 2 : cls === "memoir" ? 1 : 3);
 const ARG_MODES = new Map([["footnote", [S, L]], ["caption", [L, L]], ["thanks", [L, L]],
   ...["newcommand", "renewcommand", "providecommand", "DeclareRobustCommand"].map((n) => [n, [S, S, L]])]);
 function guardRunaway(name, fn) {
@@ -283,6 +285,9 @@ export class Machine extends CoreMachine {
     P.prim("documentclass", function (t) {
       const opt = this.readOptRaw(); const cls = this.readArgString();
       this.mark({ k: "cls", cls, opt: opt ? this.toks2str(opt) : "" }); this.setS("sb:cls", cls, true);
+      // (the class's secnumdepth and tocdepth, as TeX Live's classes set them: book, report and KOMA's two 2, memoir 1, the
+      //  rest (article) 3; so an \addtocounter on them starts from the class's value)
+      { const d = depthOf(cls); for (const c of ["secnumdepth", "tocdepth"]) { const r = this.counterReg(c); if (r >= 0) this.regSet(r, d, true); } }
       this.pushArg(cls);
       coreClass.call(this, t);
     });

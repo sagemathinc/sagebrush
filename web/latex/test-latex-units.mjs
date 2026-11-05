@@ -451,6 +451,27 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
     ["ctr-number-too-big-negative", "\\setcounter{section}{-99999999999}\\section{BigNeg}", "-2147483646 BigNeg"],
   ];
   for (const [name, body, want] of texCases) { const t = text(body); check(name, t === want, [t, want]); }
+  // (#673 r3, against TeX Live 2025: daybreak3 CTR673-CLASS-DEPTH-2, secnumdepth from the class (book, report 2, memoir
+  //  1), so \addtocounter on it starts there; CTR673-PART-STEP-2, \part's step wraps as TeX's, and a part numbered 0 or
+  //  less says "Part" with no numeral)
+  const clsText = (cls, body) => new Engine().update("\\documentclass{" + cls + "}\n\\begin{document}\n" + body + "\n\\end{document}\n").chunks.join("").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  const clsCases = [
+    ["ctr-class-depth-book-add", "book", "\\addtocounter{secnumdepth}{-1}\\chapter{C}\\section{S}\\subsection{T}", "Chapter 1 C 1.1 S T"],
+    ["ctr-class-depth-report-add", "report", "\\addtocounter{secnumdepth}{-1}\\chapter{C}\\section{S}\\subsection{T}", "Chapter 1 C 1.1 S T"],
+    ["ctr-class-depth-book", "book", "\\chapter{C}\\section{S}\\subsection{T}\\subsubsection{U}", "Chapter 1 C 1.1 S 1.1.1 T U"],
+    ["ctr-class-depth-memoir", "memoir", "\\chapter{C}\\section{S}\\subsection{T}", "Chapter 1 C 1.1 S T"],
+    ["ctr-part-wrap", "article", "\\setcounter{part}{2147483647}\\part{P}", "Part P"],
+    ["ctr-part-negative", "article", "\\setcounter{part}{-1}\\part{Q}", "Part Q"],
+    ["ctr-part-too-big", "article", "\\setcounter{part}{99999999999}\\part{R}", "Part R"],
+    ["ctr-part-starred", "article", "\\part{One}\\part*{Star}", "Part I One Star"],
+  ];
+  for (const [name, cls, body, want] of clsCases) { const t = clsText(cls, body); check(name, t === want, [t, want]); }
+  // (grader's r2 pins: \footnote[n] past TeX's limit is "Number too big", clamped both ways, as TeX Live 2025 sets it; and a
+  //  fragment with no \documentclass starts from article's secnumdepth, 3)
+  check("ctr-footnote-too-big", text("A\\footnote[99999999999]{Big.}") === "A 2147483647 2147483647 Big.", text("A\\footnote[99999999999]{Big.}"));
+  check("ctr-footnote-too-big-negative", text("A\\footnote[-99999999999]{Neg.}") === "A -2147483647 -2147483647 Neg.", text("A\\footnote[-99999999999]{Neg.}"));
+  const frag = new Engine().update("\\addtocounter{secnumdepth}{-2}\\section{A}\\subsection{B}\n").chunks.join("").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  check("ctr-secnumdepth-no-class", frag === "1 A B", frag);
   // (grader's R6: an optional argument that isn't a whole signed number is the counter, as before, and check says so; TeX
   //  would read its leading digits, \footnote[2a] as 2, and set the "a" as text)
   const notNum = new Engine().update("\\documentclass{article}\n\\begin{document}\nA\\footnote[2a]{X}B\n\\end{document}\n");
