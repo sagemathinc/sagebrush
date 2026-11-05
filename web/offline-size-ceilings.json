@@ -10,7 +10,7 @@
   "baseSwGzip": 43602,
   "topology": "inventory-3span",
   "baseTopology": "legacy-2span",
-  "swRaw": 220936,
-  "swGzip": 54356,
-  "transition": "live data step 1 (its own lazy chunk mod-live-data): measured at this branch's merge of master 2f50b30f: sw.js raw 220872, within 220936 (kept); normalized gzip-9 54292, over master's 54283, so swGzip = exact + 64 = 54356 (@sagebrush: a ceiling is renewed only when over)"
+  "swRaw": 221319,
+  "swGzip": 54444,
+  "transition": "the statistics module (#709, its own lazy chunk mod-statistics): measured at this branch's merge of master fd4aae52 with bun 1.4.4 and node v24.21.0: sw.js raw 221255, over 220936, so swRaw = exact + 64 = 221319; normalized gzip-9 54380, over 54356, so swGzip = exact + 64 = 54444 (@sagebrush: a ceiling is renewed only when over)"
 }
