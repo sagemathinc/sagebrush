@@ -75,9 +75,10 @@ def test_page_atomic_and_v2():
         assert open(os.path.join(".sagebrush", page[0])).read() == "<html>whole</html>"
         assert _temps(".sagebrush") == [], _temps(".sagebrush")  # (renamed: no temporary left)
         assert "plot3d-v2-" in b["text/plain"]
-        # (an interruption between the write and the rename: its writer's own
-        # temporary is left, the name never holds part of a page; the next page
-        # of the same writer overwrites that temporary, so there is never a second)
+        # (an interruption between the write and the rename: the name never holds
+        # part of a page, and the write removes the temporary it made (each write
+        # makes its own, exclusively: PLOT694-WRITER-1); one an interrupt kept from
+        # its cleanup is _gc_temps()'s once its process has died)
         path = os.path.join(".sagebrush", "plot3d-v2-int.html")
         real = os.fsync
 
@@ -92,7 +93,7 @@ def test_page_atomic_and_v2():
         finally:
             os.fsync = real
         assert not os.path.exists(path)
-        assert len(_temps(".sagebrush")) == 1
+        assert _temps(".sagebrush") == [], _temps(".sagebrush")
         P3._write_page(path, "whole")
         assert open(path).read() == "whole" and _temps(".sagebrush") == []
         # (a failure: the temporary removed, by name, and the error raised)
@@ -267,6 +268,22 @@ def test_gc():
     assert not os.path.exists(os.path.join(host, "%d-1" % p.pid)) or P3._pid_alive(p.pid)  # (unless the pid was reused already)
     assert os.path.exists(os.path.join(host, "%d-1" % os.getppid()))
     print("gc: live, own and foreign kept; dead removed; the cursor progresses; one log backup: ok")
+
+
+def test_gc_random_names():
+    """PLOT694-WRITER-1's names, <pid>-<tid>-<16 hex>, collected as the older <pid>-<tid> are: a dead writer's
+    removed, a live one's kept, anything else never touched."""
+    d = tempfile.mkdtemp(prefix="sb-p3r-")
+    root = os.path.join(d, ".sagebrush")
+    host = os.path.join(root, ".plot3d-tmp", P3._host())
+    os.makedirs(host)
+    names = ["800001-1-" + "0a" * 8, "800002-1", "800003-7-" + "ff" * 8, "800004-1-short", "notes.txt"]
+    for n in names:
+        open(os.path.join(host, n), "w").close()
+    rec = P3._gc_temps(root, alive=lambda pid: pid == 800003)
+    assert sorted(os.listdir(host)) == ["800003-7-" + "ff" * 8, "800004-1-short", "notes.txt"], os.listdir(host)
+    assert rec["removed"] == 2, rec
+    print("gc, random names: the dead removed, the live and the foreign kept: ok")
 
 
 def test_gc_mixed_prefix():
@@ -659,6 +676,7 @@ if __name__ == "__main__":
     test_page_nested_callback()
     test_page_no_listing_with_stale_temps()
     test_gc()
+    test_gc_random_names()
     test_gc_mixed_prefix()
     test_gc_wall_time()
     test_gc_wall_time_smoke()
