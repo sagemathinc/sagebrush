@@ -1,9 +1,9 @@
 {
  "v": 1,
- "reason": "ND-WARM: in the notebook's worker, numpy's import has engine/nd's module fetched (its SHA-256 checked) and compiled off the thread once the run is over (src/runtime/nd.ts ndWarm, web/worker.ts), so the first call that uses it (cholesky from n = 48, solve, det, slogdet and inv from 256, thresholds unchanged) skips the compile; the same bits warm or cold (R1). Lower LU thresholds wait for a full idle preparation, in their own PR (daybreak4's PERF on #703, @sagebrush's ruling); the CLI has no idle moment and is unchanged. The worker grows by the warm-up and the worker's hook (+797); sci by np.linalg._kernels() reporting the warm-up's state (+256 pre, +164 src); lib.gen +112; the CLI bundle carries the runtime's part (pyjs +480).",
+ "reason": "ND-WARM: in the notebook's worker, numpy's import has engine/nd's module fetched (its SHA-256 checked) and compiled off the thread once the run is over (src/runtime/nd.ts ndWarm, web/worker.ts), so the first call that uses it (cholesky from n = 48, solve, det, slogdet and inv from 256, thresholds unchanged) skips the compile; the same bits warm or cold (R1). Lower LU thresholds wait for a full idle preparation, in their own PR (daybreak4's PERF on #703, @sagebrush's ruling); the CLI has no idle moment and is unchanged. The worker grows by the warm-up and the worker's hook (+797); sci by np.linalg._kernels() reporting the warm-up's state (+256 pre, +164 src); lib.gen +96; the CLI bundle carries the runtime's part (pyjs +428).",
  "bytes": {
-  "cli/lib.gen.js": 112,
-  "cli/pyjs.cjs": 480,
+  "cli/lib.gen.js": 96,
+  "cli/pyjs.cjs": 428,
   "engine/lib/sci.pre": 256,
   "engine/lib/sci.src": 164,
   "engine/sagebrush-worker.js": 797
