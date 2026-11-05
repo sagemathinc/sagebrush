@@ -93,7 +93,7 @@ def record_counts(out, test_names):
     """Count exactly one harness record for every pinned upstream test."""
     counts = {"ok": 0, "skipped": 0, "excluded": 0, "FAIL": 0}
     seen = set()
-    record = re.compile(r"^([A-Za-z_][A-Za-z0-9_.]*): (ok|skipped|excluded|FAIL(?: |$))")
+    record = re.compile(r"^([A-Za-z_][A-Za-z0-9_.]*): (ok|skipped|excluded|FAIL(?: .*)?)$")
     for line in out.splitlines():
         hit = record.match(line)
         if hit and hit.group(1) in test_names:
@@ -101,7 +101,7 @@ def record_counts(out, test_names):
             if name in seen:
                 raise ValueError("duplicate harness record for %s" % name)
             seen.add(name)
-            counts["FAIL" if status == "FAIL" else status] += 1
+            counts["FAIL" if status.startswith("FAIL") else status] += 1
     missing = sorted(test_names - seen)
     if missing:
         raise ValueError("missing harness records for %s" % ", ".join(missing))

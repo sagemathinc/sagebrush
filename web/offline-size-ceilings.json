@@ -11,6 +11,6 @@
   "topology": "inventory-3span",
   "baseTopology": "legacy-2span",
   "swRaw": 219922,
-  "swGzip": 54142,
-  "transition": "TRANSITION: #681 adds the pinned lazy tabulate package to the offline inventory. Measured against master 388201305 with Node v24.21.0, Bun 1.4.4 and zlib 1.3.2.1-motley-8002e91: sw.js raw is exactly 219,922 B; normalized gzip-9 is 54,078 B and swGzip is that exact measurement plus 64 B tight headroom."
+  "swGzip": 54131,
+  "transition": "TRANSITION: #681 adds the pinned lazy tabulate package to the offline inventory. Measured against master 388201305 with Node v24.21.0, Bun 1.4.4 and zlib 1.3.2.1-motley-8002e91: sw.js raw is exactly 219,922 B; normalized gzip-9 is 54,067 B and swGzip is that exact measurement plus 64 B tight headroom."
 }
