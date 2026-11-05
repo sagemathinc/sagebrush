@@ -1368,8 +1368,11 @@ newBuiltinModule("_nplinalg", (m) => {
       }
       if (typeof F !== "number") return out(F, [n, n]);
       // (engine/nd refuses a NaN pivot; NumPy's rule passes it: the loop below then gives OpenBLAS's NaN pattern, the
-      // trailing triangle from that pivot. Only a refused matrix with a NaN in it takes this path)
-      if (!(nanPivots && c.data.subarray(0, n * n).some((v) => v !== v))) linalgError("Matrix is not positive definite");
+      // trailing triangle from that pivot. Only a refused matrix with a NaN in it takes this path. An indexed loop,
+      // not .some: a callback per element costs about 10x on this refusal path, daybreak4 PERF-P1)
+      let nan = false;
+      if (nanPivots) for (let i = 0, d = c.data, m = n * n; i < m; i++) if (d[i] !== d[i]) { nan = true; break; }
+      if (!nan) linalgError("Matrix is not positive definite");
     }
     const [A, n] = mat(a);
     const L = new Float64Array(n * n);

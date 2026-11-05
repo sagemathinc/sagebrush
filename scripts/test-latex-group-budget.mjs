@@ -33,7 +33,7 @@ check(LATEX_CAPS.raw === 240640 && LATEX_CAPS.gzip === 81408, "the caps are 235 
 
 // (and each lazy chunk's, as ruled: comments 16/6, comments-doc 40/16, agent 44/15.5 (@sagebrush, 2026-11-04), tools
 //  16/6, present 16/6, in KiB)
-const lazyPinned = { COMMENTS: [16384, 6144], COMMENTS_DOC: [40960, 16384], AGENT: [45056, 15872], TOOLS: [16384, 6144], PRESENT: [16384, 6144], DOC: [3584, 1792], BEAMER: [8192, 3584] };
+const lazyPinned = { COMMENTS: [16384, 6144], COMMENTS_DOC: [40960, 16384], AGENT: [45056, 15872], TOOLS: [16384, 6144], PRESENT: [16384, 6144], DOC: [3584, 1792], EXAMPLES: [13312, 6144], BEAMER: [8192, 3584] };
 check(JSON.stringify(Object.fromEntries(Object.entries(LATEX_LAZY_CAPS).map(([k, c]) => [k, [c.raw, c.gzip]]))) === JSON.stringify(lazyPinned), "each lazy chunk's cap as ruled", LATEX_LAZY_CAPS);
 
 // ---- the measure, on synthetic trees
@@ -75,13 +75,13 @@ try {
   };
   const tAt = lazyTree("tools-at", zeros(LATEX_LAZY_CAPS.TOOLS.raw)), tOver = lazyTree("tools-over", zeros(LATEX_LAZY_CAPS.TOOLS.raw + 1)), tNone = lazyTree("tools-none", null);
   check(tAt.ok && !tOver.ok && tOver.raw === LATEX_LAZY_CAPS.TOOLS.raw + 1 && !tNone.present && !tNone.ok, "a lazy chunk at its cap passes, one byte over fails, a missing one is not a pass", { at: tAt.raw, over: tOver.raw, missing: tNone.present });
-  // (each chunk measured from its own file: all seven at distinct sizes, each row's name and raw its own)
+  // (each chunk measured from its own file: all eight at distinct sizes, each row's name and raw its own)
   const sizes = Object.fromEntries(Object.keys(LATEX_LAZY).map((k, i) => [k, 1000 + 111 * i]));
   const allWeb = join(tmp, "lazy-all");
   mkdirSync(join(allWeb, "dist"), { recursive: true });
   for (const [k, n] of Object.entries(sizes)) writeFileSync(join(allWeb, LATEX_LAZY[k]), zeros(n));
   const rows = latexLazy(files(allWeb));
-  check(rows.length === 7 && rows.every((r) => r.present && r.name === LATEX_LAZY[r.key] && r.raw === sizes[r.key] && r.ok), "each lazy chunk is measured from its own file (seven at distinct sizes)", rows.map((r) => [r.key, r.name, r.raw]));
+  check(rows.length === 8 && rows.every((r) => r.present && r.name === LATEX_LAZY[r.key] && r.raw === sizes[r.key] && r.ok), "each lazy chunk is measured from its own file (eight at distinct sizes)", rows.map((r) => [r.key, r.name, r.raw]));
   // (over its gzip cap with raw well within its own: random bytes just past the gzip cap)
   const tGz = lazyTree("tools-gzip", randomBytes(LATEX_LAZY_CAPS.TOOLS.gzip + 64));
   check(!tGz.ok && tGz.gzip > LATEX_LAZY_CAPS.TOOLS.gzip && tGz.raw < LATEX_LAZY_CAPS.TOOLS.raw, "a lazy chunk over its gzip cap (raw within its own) fails", { raw: tGz.raw, gzip: tGz.gzip });
@@ -97,6 +97,16 @@ else {
   for (const c of latexLazy(files(web))) check(c.present && c.ok, `this build's ${c.label} within ${c.cap.raw} B raw and ${c.cap.gzip} B gzip`, c.present ? { raw: c.raw, gzip: c.gzip, room: { raw: c.cap.raw - c.raw, gzip: c.cap.gzip - c.gzip } } : { missing: c.name });
   check(g.ok, `this build's LaTeX group within ${LATEX_CAPS.raw} B raw and ${LATEX_CAPS.gzip} B gzip (scripts/latex-group.mjs)`,
     { files: g.js, raw: g.raw, gzip: g.gzip, room: { raw: LATEX_CAPS.raw - g.raw, gzip: LATEX_CAPS.gzip - g.gzip }, node: process.version, zlib: process.versions.zlib });
+  // (the site serves every one of them: web/build.ts copies the LaTeX editor's files to web/site/public by name, and
+  //  one left off that list is a 404 on sagebrush.space only, grader #685 E6; as web/site-dir.mts decides the site)
+  const site = join(web, "site", "public");
+  if (process.env.SAGEBRUSH_NO_SITE === "1" || !existsSync(join(web, "site"))) console.log("skip the site's copies: this build has no web/site (SAGEBRUSH_NO_SITE=1, or no web/site)");
+  else {
+    const ours = [...g.js, ...Object.values(LATEX_LAZY)].map((n) => n.slice("dist/".length));
+    const bad = ours.filter((f) => !existsSync(join(site, f)) || !readFileSync(join(site, f)).equals(readFileSync(join(web, "dist", f))));
+    const stale = readdirSync(site).filter((f) => f.startsWith("sagebrush-latex") && !existsSync(join(web, "dist", f)));
+    check(ours.length === g.js.length + 8 && bad.length === 0 && stale.length === 0, `the site serves each of this build's ${ours.length} LaTeX editor files: web/site/public's copy is web/dist's, byte for byte, and none stale`, { bad, stale });
+  }
 }
 
 // ---- every input of the LaTeX editor's bundles selects the full tier on a pull request (scripts/ci-paths.mjs fullTierPaths), so

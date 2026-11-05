@@ -1,8 +1,0 @@
-{
- "v": 1,
- "reason": "A notebook runs in its own folder (#634, C1): at each interpreter start the page sends the notebook's folder ({startDir}, web/index.html), the worker checks it (web/start-dir.ts) and makes it the working folder and sys.path[0] (web/worker.ts, web/shims/fs.ts startIn), so open() and import find the files beside the notebook. Measured with bun 1.4.4 on a merge of head 054ee8fe onto master 4ad208a9, the same figures as the size gate's run 41907226328 on 6d34a214: cli/pyjs.cjs +192 (the embedded index.html), engine/sagebrush-worker.js +485; no other row moves. Markers: +32 B of margin each, as they move with master.",
- "bytes": {
-  "cli/pyjs.cjs": 224,
-  "engine/sagebrush-worker.js": 517
- }
-}

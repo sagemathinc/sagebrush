@@ -94,6 +94,18 @@ const sage = (code) => new Promise((res) => {
   check("sage: the plot is an SVG data URL", st[8].s === "ok" && /^data:image\/svg\+xml;base64,/.test(st[8].src ?? ""), { ...st[8], src: String(st[8].src).slice(0, 80) });
   check("sage: every state is shown by the renderer's rule (keys match, in order)", savedStates(reals, st).length === its.length, null);
   check("sage: the renderer shows 1024 for item 2", show(1).s === "ok" && show(1).latex === "1024", show(1));
+  // Sage's arithmetic in every item (#706, a wrong answer: each item was exec'd as Python, 1/3 a float, an exact sum
+  // short of its 10^-24 term): the values Sage gives (sage -c on the same lines; latex() as Sage writes it)
+  {
+    const ex = await sage(driver([
+      { mode: "block", code: "a = 1/3\nb = 2^3\nc = 5^^3\nR.<t> = QQ[]\nL = sum(1/10^factorial(j) for j in range(1, 5))" },
+      { mode: "sage", code: "a" }, { mode: "sage", code: "b" }, { mode: "sage", code: "c" }, { mode: "sage", code: "L" },
+      { mode: "sage", code: " 1/2 + 1/3 " }, { mode: "sage", code: "(t+1)^2" },
+    ]));
+    const v = parseOutput(ex.out).map((g) => g.s === "ok" ? g.latex ?? "" : "error: " + String(g.msg).slice(-120));
+    check("sage: exact as Sage: 1/3, 2^3, 5^^3 (xor), the sum with its 10^-24 term, 1/2 + 1/3, (t+1)^2 over QQ",
+      JSON.stringify(v) === JSON.stringify(["", "\\frac{1}{3}", "8", "6", "\\frac{110001000000000000000001}{1000000000000000000000000}", "\\frac{5}{6}", "t^{2} + 2 t + 1"]), v);
+  }
   // a second Run in the same session starts from the session's first globals: a name of the first Run is gone
   const two = await sage(driver([{ mode: "silent", code: "z = 5" }]) + driver([{ mode: "sage", code: "z" }]));
   const g2 = parseOutput(two.out);
