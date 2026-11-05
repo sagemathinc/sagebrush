@@ -32,5 +32,29 @@
     "tags": [
       "signal processing"
     ]
+  },
+  {
+    "name": "unwrap",
+    "kind": "function",
+    "signature": "Q = unwrap(P)\nQ = unwrap(P, tol)\nQ = unwrap(P, [], dim)",
+    "summary": "Phase angles made continuous: each jump of at least pi between neighbours is removed by adding a multiple of 2*pi.",
+    "doc": "Along the first non-singleton dimension, or `dim`. A `tol` below pi acts as pi. NaN elements are skipped: the elements on either side of them are unwrapped against each other, as GNU Octave 11.1 does.",
+    "examples": [
+      {
+        "code": "unwrap([0 3.5 7])",
+        "expected": "\nans =\n\n         0   -2.7832   -5.5664\n\n"
+      }
+    ],
+    "differs": [
+      "Arrays of more than 2 dimensions are refused; complex angles are refused."
+    ],
+    "status": "full",
+    "see_also": [
+      "angle",
+      "mod"
+    ],
+    "tags": [
+      "signal processing"
+    ]
   }
 ]
