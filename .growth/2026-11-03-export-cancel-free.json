@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "The web-export B3 hang (2nd sighting, #584's CI): Cancel at Ready waited for the export's records to be removed before clearing the panel, so a slow removal left Ready and its Save… shown and the next export without an answer. Now the panel clears and the flow ends at once, and the records' removal runs after (the export's `after`), with a test seam to hold it. In web/workspace/export/entry.ts, which the CLI embeds. Measured with node 24.21.0 and bun 1.4.4 at the exact probe merge onto master a2f0df4c (pyjs +100).",
- "bytes": {
-  "cli/pyjs.cjs": 150
- }
-}

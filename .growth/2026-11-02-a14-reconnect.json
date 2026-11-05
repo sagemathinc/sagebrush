@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "A14 (agents panel: reconnect, pairing journal and the a14 cases): web/agents/page.ts and index.html, web/workspace/agent-pair.ts, agent-ui.ts and db.ts are in the CLI's embedded site, so cli/pyjs.cjs grows. Measured LOCALLY with bun 1.4.4 + node 24.21.0 (size-record.sh, key ec7979a4) on CURRENT master 5b18c032 against the two-parent merge probe f20fe937 of the rebased head 40b45be2: cli/pyjs.cjs +2808; no other row moves. Marker = growth + 128 B (as #447).",
- "bytes": {
-  "cli/pyjs.cjs": 2936
- }
-}
