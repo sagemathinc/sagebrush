@@ -1,0 +1,10 @@
+{
+ "v": 1,
+ "reason": "MCF-03: preserve single empty FFT results, input classes of empty min/max values (indices stay double), and logical sparse nonzeros values. Real MATLAB R2026b Update 1 pins in o6. Paired exact builds of candidate 0cb42c154 vs master 7c378715 with Node 24.21.0 and Bun 1.4.4, equal-length paths: lib.gen +20, pyjs +88 (+64 metadata allowance gives 152), matlab.pre +922, matlab.src +103. No dependencies or new chunks.",
+ "bytes": {
+  "cli/lib.gen.js": 20,
+  "cli/pyjs.cjs": 152,
+  "engine/lib/matlab.pre": 922,
+  "engine/lib/matlab.src": 103
+ }
+}
