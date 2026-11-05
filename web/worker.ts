@@ -17,6 +17,8 @@
 //           {fsRefused: path, what}  a change refused, the files permission off (ready's `writable`: its shared word)
 //           {id, target, input: {prompt, max, key}, buffer}  input() waits for a line
 //                                       (stdin below: the page answers in `buffer`)
+//           {id, target, liveData: {op, params, key}, buffer}  live data asked for
+//                                       (liveData below: the page answers in `buffer`)
 //           {initFailed: message}      the limits are invalid: this worker is done
 //                                       (each run then answers with the message)
 //           {ready, version, interrupt, progress, seeded, startup}  started (interrupt: the
@@ -63,6 +65,8 @@ import { startDirOf } from "./start-dir";
 import { R, onOptionalUse } from "../src/compile";
 import { notebookSession } from "../src/notebook-session";
 import { waitForLine } from "../src/stdin-wait";
+import { LIVE_DEADLINE_MS, LIVE_MAX_BYTES, waitForAnswer, type LiveAnswer } from "../src/live-data";
+import type { LiveRequest } from "../src/notebook-session";
 import { LIMITS_MAX_BYTES, utf8Bytes, type LimitsText } from "../src/limits";
 import { useSet, prefetchFor, onPkgUse, SetUnfetched } from "./pkgset-browser";
 
@@ -99,8 +103,24 @@ function stdin(req: { id: number; target: number | null; prompt: string }) {
   // (a Stop wins over an answer, even one landing during the same wait: src/stdin-wait.ts)
   return waitForLine(buffer, R.INTR);
 }
+// Live data (src/live-data.ts): lib/_sbdata_live.py's one closed operation,
+// asked of the page as input() asks for a line: {id, target, liveData: {op,
+// params, key}, buffer}, the run waiting on its own buffer (a Stop wins; past
+// LIVE_DEADLINE_MS it is a timeout).  The key correlates the answer, nothing
+// more; the page checks the message again (web/notebook/live-data.js), and the
+// reader's FRED key never comes here.  No shared memory: unavailable.
+const LIVE_TAG = Math.random().toString(36).slice(2, 10);
+let liveCount = 0;
+function liveData(req: LiveRequest): LiveAnswer | null {
+  if (typeof SharedArrayBuffer !== "function" || !(R.INTR.buffer instanceof SharedArrayBuffer) || !(globalThis as any).crossOriginIsolated) return null;
+  const buffer = new SharedArrayBuffer(8 + LIVE_MAX_BYTES);
+  const key = `${LIVE_TAG}.${++liveCount}`;
+  postMessage({ id: req.id, target: req.target, liveData: { op: req.op, params: req.params, key }, buffer });
+  return waitForAnswer(buffer, R.INTR, LIVE_DEADLINE_MS);
+}
 const session = notebookSession((m) => postMessage(m), {
   stdin,
+  liveData,
   limits,
   runs: {
     begin: (m) => {

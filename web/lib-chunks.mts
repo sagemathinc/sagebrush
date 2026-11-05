@@ -20,7 +20,8 @@
 // is matlab-lu) or are a group of their own (mod-<name>: a
 // top-level module or package, its name in lowercase letters, digits and
 // "-"; scipy.special, scipy.stats and scipy.optimize are mod-scipy-special,
-// mod-scipy-stats and mod-scipy-optimize, apart from scipy's other submodules).  Each package (packages/<name>/, scripts/packages.mjs) is a group too,
+// mod-scipy-stats and mod-scipy-optimize, apart from scipy's other submodules;
+// fredapi, yfinance and _sbdata_live together are mod-live-data).  Each package (packages/<name>/, scripts/packages.mjs) is a group too,
 // pkg-<name>, its files by "<name>/<path>", with its compiled code too if a
 // mode's start imports it (recorded as "pkg:<name>/<path>"), and in that
 // mode's start then; the manifest carries the packages' registry
@@ -50,6 +51,9 @@ export type Packages = { registry: { packages: Record<string, { dir: string }> }
 
 export const START_ORDER = ["core", "sci", "sage", "matlab", "magma"] as const;
 
+// (the mod- groups groupOf gives several top-level names on purpose, which the clash check below lets through)
+const SHARED_MOD_GROUPS = new Set(["mod-live-data"]);
+
 export function groupOf(path: string, sets: Record<string, Set<string>>): string {
   if (sets.py?.has(path) || (sets.sci?.has(path) && sets.sage?.has(path))) return "core";
   for (const g of ["sci", "sage", "matlab", "magma"]) if (sets[g]?.has(path)) return g;
@@ -58,6 +62,9 @@ export function groupOf(path: string, sets: Record<string, Set<string>>): string
   // finite field: its own group, so sage-more's users don't fetch it)
   if (top === "_sage_ec_ff") return "mod-sage-ec-ff";
   if (/^_?sage/.test(top)) return "sage-more";
+  // (live data's small modules, imported together: fredapi and its bridge, and yfinance's refusal; one group,
+  // design-data-access r3.1)
+  if (top === "fredapi" || top === "yfinance" || top === "_sbdata_live") return "mod-live-data";
   // (MATLAB mode's sparse LU, imported only by a measured sparse solve: its
   // own group, so the other MATLAB extras' users don't fetch it)
   if (/^_matlab_(lu|colamd)$/.test(top)) return "matlab-lu";
@@ -89,7 +96,7 @@ export function libChunks(lib: Record<string, string>, recordings: Record<string
     // merged, but for a private module and its public twin, _string and
     // string, which are imported together)
     const top = path.split("/")[0].replace(/\.py$/, "").replace(/^_(?!_)/, "");
-    if (g.startsWith("mod-") && (tops.get(g) ?? top) !== top) throw new Error(`library chunks: ${tops.get(g)} and ${top} would both be ${g}`);
+    if (g.startsWith("mod-") && !SHARED_MOD_GROUPS.has(g) && (tops.get(g) ?? top) !== top) throw new Error(`library chunks: ${tops.get(g)} and ${top} would both be ${g}`);
     tops.set(g, top);
     files[path] = g;
     (src.get(g) ?? src.set(g, {}).get(g)!)[path] = lib[path];

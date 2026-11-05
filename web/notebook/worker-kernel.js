@@ -118,6 +118,25 @@ function pinPackages() {
   } else if (pkgPins.size && !pinTimer) pinTimer = setInterval(pinPackages, 2 * 60 * 1000);
 }
 
+// Live data's answer where a plain worker waits (src/live-data.ts's layout:
+// Int32 [0] the state, [1] the length, then UTF-8 JSON), once, in a buffer of
+// exactly the size the worker makes; the answers come checked
+// (web/notebook/live-data.js), and the worker checks them again.
+const LIVE_BUFFER = 8 + (8 << 20);
+function writeLive(buffer, a) {
+  if (!(typeof SharedArrayBuffer === "function" && buffer instanceof SharedArrayBuffer) || buffer.byteLength !== LIVE_BUFFER) return;
+  const ctl = new Int32Array(buffer, 0, 2);
+  if (Atomics.load(ctl, 0) !== 0) return;
+  let bytes = new TextEncoder().encode(JSON.stringify(a));
+  if (bytes.length > LIVE_BUFFER - 8) bytes = new TextEncoder().encode('{"error":"unavailable"}');
+  new Uint8Array(buffer, 8, bytes.length).set(bytes);
+  Atomics.store(ctl, 1, bytes.length);
+  Atomics.store(ctl, 0, 1);
+  Atomics.notify(ctl, 0);
+}
+// (no admission given, as until the key broker exists: every request is unavailable, nothing fetched)
+const NO_LIVE_DATA = { admit: (m, w, gen, active, send) => active() && send({ error: "unavailable" }), abort() {} };
+
 export class WorkerKernel {
   static count = 0;
   /**
@@ -131,8 +150,10 @@ export class WorkerKernel {
    *   starts, restarts too, is given the same value first ({init}), and runs nothing before it is valid;
    *   anything else supplied (an object, a number...) is passed on as it is, for the worker to refuse:
    *   settings given wrongly are never the defaults (astra CORR-FF93-1)
+   * @param {{admit: Function, abort: Function}} [o.live] live data's admission (web/notebook/live-data.js's
+   *   LiveCalls, with the adapter that holds the reader's key); none: every live-data request is unavailable
    */
-  constructor({ createWorker, onStart, onMessage, limits = null }) {
+  constructor({ createWorker, onStart, onMessage, limits = null, live = null }) {
     this.uid = ++WorkerKernel.count; // (one of several: a page may run one per notebook)
     this.createWorker = createWorker;
     this.limits = limits === undefined ? null : limits;
@@ -166,6 +187,8 @@ export class WorkerKernel {
     this.readyInfo = null; // the worker's ready message (seeded, startup clock)
     // input() questions shown and not yet answered: reply -> its run's id
     this.inputs = new Map();
+    // live data's admission (web/notebook/live-data.js): one for every worker this kernel starts
+    this.live = live ?? NO_LIVE_DATA;
     // where output addressed to an @interact goes (set by the notebook)
     this.targetSink = () => null;
   }
@@ -275,6 +298,14 @@ export class WorkerKernel {
       }
       const p = this.pending.get(m.id);
       if (!p) return;
+      // live data (web/worker.ts's liveData): admitted, checked again and bound to this worker, its generation and
+      // this run, here, for a plain worker (its buffer) and a runner's (its frame writes the answer) alike
+      if (m.liveData !== undefined) {
+        const gen = this.generation;
+        const send = (a) => (m.buffer ? writeLive(m.buffer, a) : w.postMessage({ runnerLive: m.id, key: m.liveData?.key, answer: a }));
+        this.live.admit(m, w, gen, () => w === this.worker && gen === this.generation && this.pending.get(m.id) === p, send);
+        return;
+      }
       // (a request's one terminal message settles the language entry it was sent with)
       if (p.reply || m.skipped || m.done) this.settleMode(m.id, m.modeReady === true);
       if (p.reply) { this.pending.delete(m.id); return p.reply(m); }
@@ -310,6 +341,7 @@ export class WorkerKernel {
       }
       if (m.done) {
         this.retireInputs(m.id);
+        this.live.abort((c) => c.id === m.id);
         this.pending.delete(m.id);
         // (Stop: it ended with the KeyboardInterrupt it was sent)
         const interrupted = this.interrupted.has(m.id) && !!m.error;
@@ -374,6 +406,7 @@ export class WorkerKernel {
   // a worker whose start failed is replaced before anything more is asked of it
   retryStart() {
     if (!this.startError) return;
+    this.live.abort();
     this.worker?.terminate();
     this.start();
   }
@@ -521,6 +554,8 @@ export class WorkerKernel {
     // (a question shown before the Stop is over, answered or not: what the
     // program asks after catching the KeyboardInterrupt is a new one)
     this.retireInputs();
+    // (live data asked for before the Stop: aborted, never answered)
+    this.live.abort();
     if ((!this.interruptFlag && !this.worker.interrupt) || this.pending.size === 0) return this.restart(message);
     const waiting = [...this.pending.keys()];
     for (const id of waiting) if (this.runs.has(id)) this.interrupted.add(id); // (the journal: not exactly replayable)
@@ -547,8 +582,14 @@ export class WorkerKernel {
     }
   }
 
+  /** Forget or sign-out (the key broker): every live-data call in flight is aborted, none answered. */
+  forgetLiveData() {
+    this.live.abort();
+  }
+
   /** A fresh interpreter; what was running or queued is told `message`. */
   restart(message = "\nInterpreter restarted.\n") {
+    this.live.abort();
     this.worker?.terminate();
     this.retireInputs();
     const pending = [...this.pending.values()];
@@ -562,6 +603,7 @@ export class WorkerKernel {
 
   /** Stop for good: what was running or queued is told `message`. */
   close(message = "\nThe interpreter was stopped.\n") {
+    this.live.abort();
     this.worker?.terminate();
     this.worker = null;
     this.retireInputs();

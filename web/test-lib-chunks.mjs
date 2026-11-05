@@ -64,6 +64,13 @@ ok(lu.manifest.chunks["matlab-lu"]?.src && !lu.manifest.chunks["matlab-lu"].pre 
 ok(JSON.stringify(Object.keys(JSON.parse(lu.chunks.get(lu.manifest.chunks["matlab-lu"].src.file).toString()).files).sort()) === JSON.stringify(["_matlab_colamd.py", "_matlab_lu.py"]), "its chunk holds exactly those two files");
 const luRec = libChunks({ "core.py": "", "_matlab.py": "", "_matlab_lu.py": "" }, { py: rec({}), matlab: rec({ "py|_matlab": mod("_matlab.py"), "py|_matlab_lu": mod("_matlab_lu.py") }) }, "b");
 ok(luRec.manifest.files["_matlab_lu.py"] === "matlab", "a start that compiled _matlab_lu keeps it in its own group (the recordings first)");
+// (live data, fredapi, yfinance and their bridge _sbdata_live, is one group, mod-live-data: three top-level
+// names, let through the clash check on purpose; a name that only starts alike stays in its own mod- group)
+const ld = libChunks({ "core.py": "", "fredapi.py": "F = 1\n", "yfinance.py": "Y = 1\n", "_sbdata_live.py": "S = 1\n", "fredapi_extra.py": "" }, { py: rec({ "py|core": mod("core.py") }) }, "b");
+const fd = ld.manifest.files;
+ok(["fredapi.py", "yfinance.py", "_sbdata_live.py"].every((f) => fd[f] === "mod-live-data") && fd["fredapi_extra.py"] === "mod-fredapi-extra", "fredapi, yfinance and _sbdata_live: mod-live-data; fredapi_extra its own: " + JSON.stringify(fd));
+ok(ld.manifest.chunks["mod-live-data"]?.src && !ld.manifest.chunks["mod-live-data"].pre && Object.values(ld.manifest.modes).every((g) => !g.includes("mod-live-data")), "mod-live-data: sources only, and no mode's start fetches it");
+ok(JSON.stringify(Object.keys(JSON.parse(ld.chunks.get(ld.manifest.chunks["mod-live-data"].src.file).toString()).files).sort()) === JSON.stringify(["_sbdata_live.py", "fredapi.py", "yfinance.py"]), "its chunk holds exactly those three files");
 // (elliptic curves over GF(p), _sage_ec_ff, is its own group, mod-sage-ec-ff;
 // the other Sage extras, _sage_ec among them, stay in sage-more)
 const ec = libChunks({ "core.py": "", "sage_all.py": "", "_sage_ec_ff.py": "E = 1\n", "_sage_ec.py": "", "_sage_ec_cubic.py": "", "_sage_lazy.py": "" },
