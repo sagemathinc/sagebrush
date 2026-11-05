@@ -175,9 +175,9 @@ def _kernels():
     which is faster there), and whether the module was compiled ahead
     ("warm": "ready" once compiled; it changes the time of the first call,
     never its result)."""
-    path, kernel, why, chol, solve, lu, warm = _L._kernels()
+    path, kernel, why, chol, lu, warm = _L._kernels()
     k = lambda n: {"path": path, "kernel": kernel, "why": why, "from_n": n, "warm": warm}
-    return {"cholesky": k(chol), "solve": k(solve), "det": k(lu), "slogdet": k(lu), "inv": k(lu)}
+    return {"cholesky": k(chol), "solve": k(lu), "det": k(lu), "slogdet": k(lu), "inv": k(lu)}
 
 
 class _Result(tuple):

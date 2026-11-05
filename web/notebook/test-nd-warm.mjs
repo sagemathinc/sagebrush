@@ -48,9 +48,9 @@ try {
   let s = "";
   for (let i = 0; i < 100 && s !== "ready undecided"; i++) { await sleep(100); s = await cell(state); }
   check(s === "ready undecided", `after that run, idle: ${s}`);
-  // (the first call from n = 32: engine/nd, instantiating the compiled module)
-  const used = await cell(`x = np.linalg.solve(np.eye(32) * 2, np.ones(32))\nprint(float(x[0]), float(x[31]))\n${state}`);
-  check(used === "0.5 0.5\nready engine/nd", `the first solve at n = 32: ${JSON.stringify(used)}`);
+  // (the first call that could use it, a solve at n = 256: engine/nd, instantiating the compiled module)
+  const used = await cell(`x = np.linalg.solve(np.eye(256) * 2, np.ones(256))\nprint(float(x[0]), float(x[255]))\n${state}`);
+  check(used === "0.5 0.5\nready engine/nd", `the first solve at n = 256: ${JSON.stringify(used)}`);
   check(errors.length === 0, `no page exceptions: ${errors.slice(0, 2).join(" | ")}`);
 } catch (e) {
   fails.push("threw: " + (e?.stack ?? e));

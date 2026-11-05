@@ -6,8 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 // np.linalg.solve, det, slogdet and inv on engine/nd's LU (nd_solve's gesv mode, src/runtime/nd.ts ndLu): where
-// the module runs, from n = 32 (solve) and 64 (det, slogdet, inv), the public calls give the module's bits, compiled
-// ahead at idle (the notebook's worker, ndWarm) or at the first call alike (engine/nd/src/lu.rs
+// the module runs, from n = 256, the public calls give the module's bits, compiled ahead at idle (the notebook's
+// worker, ndWarm) or at the first call alike (engine/nd/src/lu.rs
 // SOLVE_FNV, the no-FMA family: Wasm SIMD128); below those sizes, where it can't run (SAGEBRUSH_NO_WASM here) and
 // for an A or B with an Inf or NaN (which the module doesn't compute), the older LU runs, as before. Both meet the
 // oracle and give NumPy's errors.
@@ -108,7 +108,7 @@ test("np.linalg.solve from n = 256 on engine/nd: the loader's bits, the oracle; 
   assert.equal(inv, "True True");
   // (the CLI asks for the warm-up at numpy's import but has no idle moment for it: the first call compiles)
   const k = (from_n: number) => ({ path: "engine/nd", kernel: "wasm-simd128-4x4", why: "", from_n, warm: "unused" });
-  assert.deepEqual(kernels, { cholesky: k(48), solve: k(32), det: k(64), slogdet: k(64), inv: k(64) });
+  assert.deepEqual(kernels, { cholesky: k(48), solve: k(256), det: k(256), slogdet: k(256), inv: k(256) });
   // det is slogdet's sign times exp of its log (NumPy's own formula), and agrees with the older LU's
   const ts = seededCalls({ SAGEBRUSH_NO_WASM: "1" }).det;
   assert.equal(Math.abs(det[0]), 1);
@@ -121,8 +121,8 @@ test("without WebAssembly: the older LU, within the oracle, and _kernels() sayin
   const { X, inv, kernels } = seededCalls({ SAGEBRUSH_NO_WASM: "1" });
   assert.ok(eta(X) <= 10 * N * U);
   assert.equal(inv, "True True");
-  assert.deepEqual(kernels.solve, { path: "typescript", kernel: "", why: "WebAssembly is off here", from_n: 32, warm: "unused" });
-  assert.deepEqual(kernels.inv, { path: "typescript", kernel: "", why: "WebAssembly is off here", from_n: 64, warm: "unused" });
+  assert.deepEqual(kernels.solve, { path: "typescript", kernel: "", why: "WebAssembly is off here", from_n: 256, warm: "unused" });
+  assert.deepEqual(kernels.inv, { path: "typescript", kernel: "", why: "WebAssembly is off here", from_n: 256, warm: "unused" });
 });
 
 test("both paths: a singular matrix is NumPy's LinAlgError for solve and inv, det 0 and slogdet (0, -inf); P's sign", () => {
@@ -163,20 +163,17 @@ test("an Inf or NaN in A or B: the module computes nothing, so the older LU runs
   assert.deepEqual(run(code), ["True True True True", "True False", "engine/nd True"]);
 });
 
-test("below n = 32 (solve) and 64 (det, slogdet, inv) the older LU runs, without loading the module: a session of smaller matrices stays undecided", () => {
+test("below n = 256 the older LU runs, without loading the module: a session of smaller matrices stays undecided", () => {
   const code = [
     "import numpy as np",
     "rng = np.random.default_rng(5)",
-    "for n in (1, 2, 12, 31):",
-    "    M = rng.standard_normal((n, n)) + n * np.eye(n); np.linalg.solve(M, np.ones(n))",
-    "for n in (1, 2, 12, 32, 63):",
-    "    M = rng.standard_normal((n, n)) + n * np.eye(n); np.linalg.det(M); np.linalg.slogdet(M); np.linalg.inv(M)",
+    "for n in (1, 2, 12, 32, 64, 255):",
+    "    M = rng.standard_normal((n, n)) + n * np.eye(n); np.linalg.solve(M, np.ones(n)); np.linalg.det(M); np.linalg.slogdet(M); np.linalg.inv(M)",
     "print(np.linalg._kernels()['solve']['path'])",
   ].join("\n");
   assert.deepEqual(run(code), ["undecided"]);
-  const at = (n: number, call: string) => run(`import numpy as np\nM = np.random.default_rng(2).standard_normal((${n}, ${n})) + 64 * np.eye(${n})\n${call}\nprint(np.linalg._kernels()['solve']['path'])`)[0];
-  assert.equal(at(32, "np.linalg.solve(M, np.ones(len(M)))"), "engine/nd", "solve at 32");
-  for (const call of ["np.linalg.det(M)", "np.linalg.slogdet(M)", "np.linalg.inv(M)"]) assert.equal(at(64, call), "engine/nd", `${call} at 64`);
+  const at = (call: string) => run(`import numpy as np\nM = np.random.default_rng(2).standard_normal((N, N)) + 64 * np.eye(N)\n${call}\nprint(np.linalg._kernels()['solve']['path'])`.replace(/N/g, "256"))[0];
+  for (const call of ["np.linalg.solve(M, np.ones(len(M)))", "np.linalg.det(M)", "np.linalg.slogdet(M)", "np.linalg.inv(M)"]) assert.equal(at(call), "engine/nd", call);
 });
 
 // The same calls warm (the module compiled ahead by ndWarm, as the notebook's worker does at idle) and cold (compiled

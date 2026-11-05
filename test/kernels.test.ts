@@ -37,17 +37,11 @@ for a in mats:
     rec(w.real, w.imag, v.real, v.imag)
     rec(*np.linalg.svd(a))
     rec(*np.linalg.qr(a))
-    rec(a @ a.T)
-    # (the LU's kernels below engine/nd's sizes: from n = 32 for solve and 64 for det, slogdet and inv, engine/nd's
-    # LU runs where WebAssembly does, its own backend, whose bits test/numpy-lu-nd.test.ts pins)
-    if len(a) < 64:
-        rec(np.linalg.det(a), np.linalg.slogdet(a))
-        try:
-            rec(np.linalg.inv(a))
-            if len(a) < 32:
-                rec(np.linalg.solve(a, np.arange(len(a) * 1.0)))
-        except np.linalg.LinAlgError as e:
-            print(e)
+    rec(a @ a.T, np.linalg.det(a), np.linalg.slogdet(a))
+    try:
+        rec(np.linalg.inv(a), np.linalg.solve(a, np.arange(len(a) * 1.0)))
+    except np.linalg.LinAlgError as e:
+        print(e)
 for shape in [(40, 9), (9, 40), (300, 8), (17, 12)]:
     a = np.random.randn(*shape)
     rec(*np.linalg.svd(a, full_matrices=False))
