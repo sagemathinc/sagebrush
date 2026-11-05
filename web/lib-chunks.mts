@@ -51,6 +51,9 @@ export type Packages = { registry: { packages: Record<string, { dir: string }> }
 
 export const START_ORDER = ["core", "sci", "sage", "matlab", "magma"] as const;
 
+// (the mod- groups groupOf gives several top-level names on purpose, which the clash check below lets through)
+const SHARED_MOD_GROUPS = new Set(["mod-live-data"]);
+
 export function groupOf(path: string, sets: Record<string, Set<string>>): string {
   if (sets.py?.has(path) || (sets.sci?.has(path) && sets.sage?.has(path))) return "core";
   for (const g of ["sci", "sage", "matlab", "magma"]) if (sets[g]?.has(path)) return g;
@@ -93,7 +96,7 @@ export function libChunks(lib: Record<string, string>, recordings: Record<string
     // merged, but for a private module and its public twin, _string and
     // string, which are imported together)
     const top = path.split("/")[0].replace(/\.py$/, "").replace(/^_(?!_)/, "");
-    if (g.startsWith("mod-") && (tops.get(g) ?? top) !== top) throw new Error(`library chunks: ${tops.get(g)} and ${top} would both be ${g}`);
+    if (g.startsWith("mod-") && !SHARED_MOD_GROUPS.has(g) && (tops.get(g) ?? top) !== top) throw new Error(`library chunks: ${tops.get(g)} and ${top} would both be ${g}`);
     tops.set(g, top);
     files[path] = g;
     (src.get(g) ?? src.set(g, {}).get(g)!)[path] = lib[path];
