@@ -52,7 +52,7 @@
 // `target` is null for the cell's own output, or the id of the @interact
 // whose function is running, whose output area should receive it.
 import { initParser, R, libDir, packageModuleNames, optionalModuleNames } from "./compile";
-import { needsMore, complete, ipythonSyntax } from "./interactive";
+import { needsMore, completeIn, ipythonSyntax } from "./interactive";
 import { MAGIC_PRE, MAGIC_POST, GET_IPYTHON, magicTransform } from "./magic-syntax";
 import { magmaToPython, MagmaSyntaxError } from "./magma";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, matlabIsIncomplete } from "./matlab";
@@ -446,7 +446,7 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
         // Magma's console runs each line as it is entered; MATLAB's waits for the end of an open block
         return post({ id, more: m.magma ? false : m.matlab ? matlabIsIncomplete(m.check) : needsMore(m.check, { sage: !!m.sage }), mode, modeReady: true });
       }
-      const [matches, prefix] = complete(main, m.complete, () => [...new Set(moduleNames())]);
+      const [matches, prefix] = completeIn(mode, main, m.complete, () => [...new Set(moduleNames())]);
       return post({ id, matches, prefix, mode, modeReady: true });
     }
     if (m.importInfo !== undefined) {
