@@ -3058,13 +3058,13 @@ def _cat(vals, dim, narrow=True):
                 return r
             break
     cls = _cat_class(vals)
-    # empty values do not take part (but count for the class)
+    # Empty values mixed with nonempty values are omitted (but count for class).
     parts = [v for v in vals if _numel(v) != 0]
     if not parts:
-        v = vals[0]
-        if cls == "char":
-            return Char("") if type(v) is not Char else v
-        return v if cls != "cell" else Cell([], (0, 0))
+        # All-empty inputs still concatenate their dimensions. A 0-by-0 [] is
+        # omitted when another empty shape is present; all [] inputs must stay
+        # to retain, for example, cat(3, [], [])'s 0-by-0-by-2 result.
+        parts = [v for v in vals if _dims(v) != (0, 0)] or list(vals)
     if cls == "handle":
         items = [v if type(v) is HandleArr else HandleArr([v], (1, 1)) for v in parts]
         r = _cat_containers(items, dim, Cell)
@@ -5737,7 +5737,7 @@ def mean_(x, *args):
             ok = ~np.isnan(A)
             return np.sum(np.where(ok, A, 0), axis=ax) / np.sum(ok, axis=ax)
         return np.sum(A, axis=ax) / A.shape[ax]
-    return _reduce(x, args, m, "mean", out_cls="single" if cls == "single" else "double")
+    return _reduce(x, args, m, "mean", empty_value=_math.nan, out_cls="single" if cls == "single" else "double")
 
 
 def _csort(A, ax):
@@ -5800,7 +5800,7 @@ def median_(x, *args):
     # (natively in the class of A, as median's page says: median(int8(1:4)) is int8(3), the mean of
     # the middle two rounded; logical too, where the middle values agree; char gives double)
     cls = class_(x)
-    r = _reduce(x, args, med, "median", out_cls=cls if cls in _INTS or cls == "single" else "double")
+    r = _reduce(x, args, med, "median", empty_value=_math.nan, out_cls=cls if cls in _INTS or cls == "single" else "double")
     if cls == "logical":
         R = _arr(r)
         if not np.all((R == 0) | (R == 1)):
@@ -5902,7 +5902,7 @@ def _var_impl(x, args, sq):
         den = n - 1 if (w == 0 and n > 1) else n
         r = np.sum(dev, axis=ax) / den
         return np.sqrt(r) if sq else r
-    return _reduce(x, rest, v, "var", out_cls="double")
+    return _reduce(x, rest, v, "var", empty_value=_math.nan, out_cls="double")
 
 
 @_bs("var")
@@ -6016,7 +6016,7 @@ def _fft_call(x, args, inverse, name):
     if length == 0:
         shape = list(A.shape)
         shape[ax] = 0
-        return _canon(np.zeros(tuple(shape)))
+        return _finish(np.zeros(tuple(shape)), "single" if class_(x) == "single" else "double")
     if inverse and not symmetric and A.dtype.kind == "c" and A.shape[ax] == length:
         # (MATLAB's ifft is real when X is exactly conjugate-symmetric along dim)
         B = np.moveaxis(A, ax, -1)
@@ -6313,11 +6313,12 @@ def _minmax(nargout, args, which):
             raise _err("%s: the dimension must be a positive integer or a vector of them." % which)
         dim = sorted(set(int(k) for k in v.reshape(-1))) if v.size > 1 else _int_arg(dv)
     cls = class_(x)
+    oc = "double" if cls == "char" else cls
     A = _farr(x, which)
     if dim is None:
         if d == (0, 0):
             e = np.zeros((0, 0))
-            return e if nargout <= 1 else [e, e.copy()]
+            return _finish(e, oc) if nargout <= 1 else [_finish(e, oc), e.copy()]
         dim = _default_dim(d)
     full = A
     if dim == "all":
@@ -6340,7 +6341,7 @@ def _minmax(nargout, args, which):
         shp = list(A2.shape)
         shp[ax] = 0
         e = np.zeros(tuple(shp))
-        return e if nargout <= 1 else [e, e.copy()]
+        return _finish(e, oc) if nargout <= 1 else [_finish(e, oc), e.copy()]
     key = np.abs(A2) if A2.dtype.kind == "c" else A2
     nan = np.isnan(key)
     filled = np.where(nan, -np.inf if big else np.inf, key)
@@ -6362,7 +6363,6 @@ def _minmax(nargout, args, which):
     vals = _take_along(A2, np.expand_dims(idx, ax), ax)
     vals = _canon(_contig(vals.reshape(shape)))
     # (logical stays logical, as in MATLAB; char gives double)
-    oc = "double" if cls == "char" else cls
     m = _finish(vals, oc)
     if nargout <= 1:
         return m
@@ -6913,7 +6913,10 @@ def ndgrid_(nargout, *vs):
     if not vs:
         raise _err("Not enough input arguments.")
     if len(vs) == 1:
-        vs = vs * max(2, nargout)
+        if nargout <= 1:
+            # (one grid vector and one output: a 1-D grid, numel(x1)-by-1)
+            return _unmat(_farr(vs[0]).reshape((-1, 1)))
+        vs = vs * nargout
     vecs = [_farr(v).reshape(-1) for v in vs]
     if len(vecs) == 2:
         xv, yv = vecs
@@ -7339,11 +7342,29 @@ def qr_(nargout, x, *args):
 
 @_bi("chol")
 def chol_(nargout, x, *args):
-    L = np.linalg.cholesky(_mat(x))
-    if args and _istext(args[0]) and _text(args[0]) == "lower":
-        return _unmat(L)
-    R = np.conj(L.T)
-    return _unmat(R) if nargout <= 1 else [_unmat(R), 0.0]
+    if nargout > 2:
+        raise _err("chol: permutation outputs are not supported in Sagebrush.")
+    if len(args) > 1 or (args and (not _istext(args[0]) or _text(args[0]) not in ("lower", "upper"))):
+        raise _err("chol: triangle must be 'upper' or 'lower'.")
+    lower = bool(args and _text(args[0]) == "lower")
+    M = _mat(x)
+    if M.shape[0] != M.shape[1]:
+        raise _err("chol: input matrix must be square.")
+    # The kernel reads the lower triangle. Default MATLAB chol reads the
+    # upper triangle, even when the unused half is nonsymmetric.
+    if not lower:
+        M = np.conj(M.T)
+    if nargout <= 1:
+        L = np.linalg.cholesky(M)
+        return _unmat(L if lower else np.conj(L.T))
+    if M.dtype.kind == "c":
+        raise _err("chol: complex matrices are not supported in Sagebrush.")
+    import _nplinalg
+    L, flag = _nplinalg.cholesky(M, True)
+    if flag:
+        q = int(flag) - 1
+        L = L[:q, :q]
+    return [_unmat(L if lower else np.conj(L.T)), float(flag)]
 
 
 @_bs("null")
@@ -8481,7 +8502,12 @@ def str2double_(x):
 @_bi("str2num")
 def str2num_(nargout, s):
     """str2num for numbers and matrices of numbers ([1 2; 3 4]) -- not general code"""
-    t = _text(s).strip()
+    # MATLAB rejects separately bracketed rows, but accepts brackets spanning rows.
+    lines = s.rows() if type(s) is Char else [_text(s)]
+    if len(lines) > 1 and all(r.strip().startswith("[") and r.strip().endswith("]") for r in lines):
+        out = np.zeros((0, 0))
+        return out if nargout <= 1 else [out, False]
+    t = "\n".join(lines).strip()
     if t.startswith("[") and t.endswith("]"):
         t = t[1:-1]
     rows = [r for r in _re.split(r"[;\n]", t) if r.strip()]
@@ -10692,33 +10718,32 @@ def gcd_n(nargout, a, b):
 
 @_bi("histc")
 def histc_n(nargout, x, edges, *rest):
-    X = _farr(x).reshape(-1)
+    A = _farr(x)
     E = _farr(edges).reshape(-1)
-    n = np.zeros(E.size)
-    ind = np.zeros(X.size)
-    for i, v in enumerate(X):
-        k = int(np.searchsorted(E, v, side="right")) - 1
-        if 0 <= k < E.size and (k < E.size - 1 or v == E[-1]):
-            n[k] += 1
-            ind[i] = k + 1
     d = _dims(x)
-    if len(d) == 2 and d[0] > 1 and d[1] > 1:
-        # (a matrix: each column's counts, length(edges)-by-columns, and each element's bin)
-        M = _mat(x)
-        C = np.zeros((E.size, M.shape[1]))
-        I = np.zeros(M.shape)
-        for j in range(M.shape[1]):
-            for i, v in enumerate(M[:, j]):
-                k = int(np.searchsorted(E, v, side="right")) - 1
-                if 0 <= k < E.size and (k < E.size - 1 or v == E[-1]):
-                    C[k, j] += 1
-                    I[i, j] = k + 1
-        return _unmat(C) if nargout <= 1 else [_unmat(C), _unmat(I)]
-    # (a vector x: the counts in x's orientation, a column for a column x, as the histc page shows)
-    counts = _box(n.reshape((n.size, 1)) if d[0] == 1 else n.reshape((1, n.size)))
+    if len(rest) > 1:
+        raise _err("histc: too many input arguments.")
+    dim = _int_arg(rest[0], "dimension") if rest else (2 if d[0] == 1 else _default_dim(d))
+    if dim < 1:
+        raise _err("histc: the dimension must be a positive integer.")
+    # Stored axes reverse MATLAB's dimensions. Each row below is one histogram.
+    A = A.reshape((1,) * max(0, dim - A.ndim) + A.shape)
+    axis = A.ndim - dim
+    B = np.moveaxis(A, axis, -1)
+    rows = B.reshape((_prod(B.shape[:-1]), B.shape[-1]))
+    C = np.zeros((rows.shape[0], E.size))
+    I = np.zeros(rows.shape)
+    for j, row in enumerate(rows):
+        for i, v in enumerate(row):
+            k = int(np.searchsorted(E, v, side="right")) - 1
+            if 0 <= k < E.size and (k < E.size - 1 or v == E[-1]):
+                C[j, k] += 1
+                I[j, i] = k + 1
+    counts = _box(_contig(np.moveaxis(C.reshape(B.shape[:-1] + (E.size,)), -1, axis)))
     if nargout <= 1:
         return counts
-    return [counts, _box(ind.reshape(_arr(x).shape))]
+    ind = np.moveaxis(I.reshape(B.shape), -1, axis).reshape(_arr(x).shape)
+    return [counts, _box(_contig(ind))]
 
 
 @_bi("meshgrid")

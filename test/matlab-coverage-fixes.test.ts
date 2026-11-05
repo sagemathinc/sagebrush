@@ -548,3 +548,108 @@ test("tril, triu, diag and sortrows keep every class; real, imag and conj keep i
     "int8 [1 2;2 0;3 1] [2 3 1]",
   ]);
 });
+
+// Oracle pins: MATLAB R2026b Update 1 (26.2.0.3433840), 2026-11-05.
+// MathWorks cat and Empty Arrays pages: compatible empty arrays retain the
+// concatenated dimension; mixed empty/nonempty arrays omit the empty inputs.
+// https://www.mathworks.com/help/matlab/ref/double.cat.html
+// https://www.mathworks.com/help/matlab/math/empty-arrays.html
+test("compatible empty numeric concatenations retain their dimensions and class", () => {
+  const out = run([
+    "A = zeros(0,5); disp(mat2str(size([A A]))); disp(mat2str(size([A; A])));",
+    "disp(mat2str(size(cat(2,zeros(0,1),zeros(0,2)))));",
+    "disp(mat2str(size(cat(1,zeros(1,0),zeros(2,0)))));",
+    "disp(mat2str(size(cat(3,zeros(0,2),zeros(0,2)))));",
+    "disp(mat2str(size(cat(4,zeros(2,0,3),zeros(2,0,3)))));",
+    "A = cat(2,single(zeros(0,1)),zeros(0,2)); disp(class(A)); disp(mat2str(size(A)));",
+    "A = cat(1,int8(zeros(1,0)),int8(zeros(2,0))); disp(class(A)); disp(mat2str(size(A)));",
+    "A = cat(2,false(0,1),false(0,2)); disp(class(A)); disp(mat2str(size(A)));",
+    "disp(mat2str([zeros(0,3) 7])); disp(mat2str([8; zeros(4,0)]));",
+    "disp(mat2str(size(cat(1,[],zeros(0,2)))));",
+    "A = cat(2,cell(0,1),cell(0,2)); disp(class(A)); disp(mat2str(size(A)));",
+    "try, A = cat(1,zeros(0,1),zeros(0,2)); catch e, disp(e.identifier); end;",
+    "try, A = cat(2,zeros(1,0),zeros(2,0)); catch e, disp(e.identifier); end;",
+    "disp(mat2str(size(cat(3,[],[])))); disp(mat2str(size(cat(2,[],[]))));",
+  ].join("\n"));
+  assert.deepEqual(lines(out), [
+    "[0 10]", "[0 5]", "[0 3]", "[3 0]", "[0 2 2]", "[2 0 3 2]",
+    "single", "[0 3]", "int8", "[3 0]", "logical", "[0 3]", "7", "8", "[0 2]", "cell", "[0 3]", "MATLAB:catenate:dimensionMismatch", "MATLAB:catenate:dimensionMismatch", "[0 0 2]", "[0 0]",
+  ]);
+});
+
+// Oracle pins: MATLAB R2026b Update 1 (26.2.0.3433840), 2026-11-05.
+// MathWorks chol: two outputs return a failed pivot plus the completed leading
+// factor, and each triangle option reads only that half of the input matrix.
+// https://www.mathworks.com/help/matlab/ref/chol.html
+test("chol returns status and partial factors, and respects its triangle", () => {
+  const out = run([
+    "[R,p] = chol(0); disp(mat2str(size(R))); disp(p);",
+    "[R,p] = chol([4 0;0 -1]); disp(mat2str(R)); disp(p);",
+    "[R,p] = chol([4 2 0;2 2 0;0 0 0]); disp(mat2str(R)); disp(p);",
+    "[L,p] = chol([4 0;0 -1],'lower'); disp(mat2str(L)); disp(p);",
+    "[R,p] = chol([1 0;9 1]); disp(mat2str(R)); disp(p);",
+    "[L,p] = chol([1 9;0 1],'lower'); disp(mat2str(L)); disp(p);",
+    "[R,p] = chol([1 0;9 1],'upper'); disp(mat2str(R)); disp(p);",
+    "disp(mat2str(chol([1 0;9 1]))); disp(mat2str(chol([1 9;0 1],'lower')));",
+    "[L,p] = chol(single([4 1;1 2]),'lower'); disp(class(L)); disp(class(p)); disp(p); disp(norm(L*L'-single([4 1;1 2]),'fro') < 1e-6);",
+    "[R,p] = chol([]); disp(mat2str(size(R))); disp(p);",
+    "[R,p] = chol(single(zeros(0))); disp(class(R)); disp(class(p));",
+    "A = eye(48); [R,p] = chol(A); disp(p); disp(norm(R-A,'fro'));",
+    "A(48,48) = -1; [R,p] = chol(A); disp(p); disp(mat2str(size(R))); disp(norm(R-eye(47),'fro'));",
+    "try, R = chol(0); catch, disp('positive-definite error'); end;",
+    "try, [R,p] = chol(ones(2,3)); catch, disp('square error'); end;",
+    "try, [R,p] = chol(1,'sideways'); catch, disp('triangle error'); end;",
+  ].join("\n"));
+  assert.deepEqual(lines(out).map((s) => s.trim()), [
+    "[0 0]", "1", "2", "2", "[2 1;0 1]", "3", "2", "2",
+    "[1 0;0 1]", "0", "[1 0;0 1]", "0", "[1 0;0 1]", "0",
+    "[1 0;0 1]", "[1 0;0 1]", "single", "double", "0", "1",
+    "[0 0]", "0", "single", "double", "0", "0", "48", "[47 47]", "0", "positive-definite error", "square error", "triangle error",
+  ]);
+});
+
+test("NumPy cholesky still raises for an indefinite matrix", () => {
+  const out = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", [
+    "import numpy as np",
+    "print(np.linalg.cholesky([[4.,2.],[2.,2.]]).tolist())",
+    "try: np.linalg.cholesky([[4.,0.],[0.,-1.]])",
+    "except np.linalg.LinAlgError: print('positive-definite error')",
+  ].join("\n")], { encoding: "utf8" });
+  assert.deepEqual(lines(out), ["[[2.0, 0.0], [1.0, 1.0]]", "positive-definite error"]);
+});
+
+// MATLAB R2026b Update 1 (26.2.0.3433840), November 5: single fft([]),
+// min(single([]),[],1), and max(int8([]),[],1) keep their input classes.
+test("empty FFT and extrema retain value classes and double index outputs", () => {
+  const out = run([
+    "A = fft(single([])); disp(class(A)); disp(mat2str(size(A)));",
+    "A = fft(single(ones(2)),0,2); disp(class(A)); disp(mat2str(size(A)));",
+    "A = ifft(single([])); disp(class(A)); disp(mat2str(size(A)));",
+    "[v,i] = min(single([]),[],1); disp(class(v)); disp(class(i)); disp(mat2str(size(v)));",
+    "[v,i] = max(int8([]),[],1); disp(class(v)); disp(class(i)); disp(mat2str(size(v)));",
+    "v = min(single([])); disp(class(v)); v = max(int8([])); disp(class(v));",
+    "[v,i] = min(single(zeros(0,3)),[],1); disp(class(v)); disp(class(i)); disp(mat2str(size(v)));",
+    "[v,i] = max(false(2,0),[],2); disp(class(v)); disp(class(i)); disp(mat2str(size(v)));",
+    "disp(class(fft([]))); disp(class(min([]))); disp(class(max([])));",
+  ].join("\n"));
+  assert.deepEqual(lines(out), [
+    "single", "[0 0]", "single", "[2 0]", "single", "[0 0]",
+    "single", "double", "[0 0]", "int8", "double", "[0 0]", "single", "int8",
+    "single", "double", "[0 3]", "logical", "double", "[2 0]", "double", "double", "double",
+  ]);
+});
+
+// Real MATLAB R2026b Update 1, frozen run o6: nonzeros(sparse(true))
+// returns a full logical column, rather than converting its values to double.
+test("nonzeros retains sparse logical values in a full independent column", () => {
+  const out = run([
+    "S = sparse([true false;false true]); v = nonzeros(S); disp(class(v)); disp(mat2str(size(v))); disp(mat2str(double(v))); disp(issparse(v));",
+    "v(1) = false; disp(nnz(S));",
+    "v = nonzeros(sparse(true)); disp(class(v)); disp(mat2str(double(v)));",
+    "v = nonzeros(sparse([0 2;3 0])); disp(class(v)); disp(mat2str(v));",
+    "v = nonzeros([true false true]); disp(class(v)); disp(mat2str(double(v)));",
+  ].join("\n"));
+  assert.deepEqual(lines(out).map((s) => s.trim()), [
+    "logical", "[2 1]", "[1;1]", "0", "2", "logical", "1", "double", "[3;2]", "logical", "[1;1]",
+  ]);
+});
