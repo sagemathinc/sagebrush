@@ -17,21 +17,46 @@
  * lib/<group>.<kind>.<hash>.json), each mode's groups, and the group each top-level module's entry file is in */
 export type PreloadTable = { groups: Record<string, [number, string, string?]>; modes: Record<string, string[]>; tops: Record<string, string> };
 
+/** The top-level module names a document's import lines name, each once, in order. Python's import lines, by text
+ * only, anywhere in a cell (inside a function too): `import a, b.c as d` and `from a.b import c`; a string or a comment
+ * that looks like one costs a prefetch, never a run. A linear scan, line by line, with no regular expression that
+ * could backtrack (PRELOAD674-SCAN-1: the notebook's text is anyone's, and this runs on the page before a Run); a
+ * line longer than SCAN_LINE characters is skipped (no import line is that long) */
+export const SCAN_LINE = 1000;
+export function importTops(codes: readonly string[]): string[] {
+  const out: string[] = [];
+  const add = (n: string) => { const t = n.split(".")[0]; if (/^[A-Za-z_]\w*$/.test(t) && !out.includes(t)) out.push(t); };
+  const sp = (c: string) => c === " " || c === "\t";
+  // (the words of `s` split at spaces and tabs)
+  const words = (s: string) => s.split(" ").flatMap((w) => w.split("\t")).filter((w) => w !== "");
+  for (const code of codes)
+    for (const raw of code.split("\n")) {
+      if (raw.length > SCAN_LINE) continue;
+      let i = 0;
+      while (i < raw.length && sp(raw[i])) i++;
+      const line = raw.slice(i).replace(/\r$/, "");
+      if (line.startsWith("import") && sp(line[6] ?? "")) {
+        const h = line.indexOf("#"), rest = h < 0 ? line.slice(7) : line.slice(7, h);
+        if (/[^\w. \t,]/.test(rest)) continue; // (only names, dots, commas and spaces: `import a, b.c as d`)
+        for (const part of rest.split(",")) {
+          const w = words(part);
+          if (w.length === 1 || (w.length === 3 && w[1] === "as")) add(w[0]);
+        }
+      } else if (line.startsWith("from") && sp(line[4] ?? "")) {
+        const w = words(line.slice(5));
+        if (w.length >= 2 && w[1] === "import" && /^[\w.]+$/.test(w[0])) add(w[0]);
+      }
+    }
+  return out;
+}
+
 /** The groups a document's first Run will fetch, in order: its mode's, then those its import lines name (at most one
  * mode's groups: a document has one mode) */
 export function intentGroups(t: PreloadTable, mode: string, codes: readonly string[]): string[] {
   const out: string[] = [];
   const add = (g: string | undefined) => { if (g && t.groups[g] && !out.includes(g)) out.push(g); };
   for (const g of t.modes[mode] ?? []) add(g);
-  // (Python's import lines, by text only, anywhere in a cell (inside a function too): `import a, b.c as d` and
-  // `from a.b import c`; a string or a comment that looks like one costs a prefetch, never a run)
-  const re = /^[ \t]*(?:import[ \t]+([\w. \t,]+?)[ \t]*(?:#.*)?$|from[ \t]+([\w.]+)[ \t]+import\b)/gm;
-  if (mode === "python" || mode === "sage")
-    for (const code of codes)
-      for (const m of code.matchAll(re)) {
-        const names = m[1] !== undefined ? m[1].split(",").map((s) => s.trim().split(/[ \t]+as[ \t]+/)[0]) : [m[2]];
-        for (const n of names) add(t.tops[n.split(".")[0]]);
-      }
+  if (mode === "python" || mode === "sage") for (const n of importTops(codes)) add(t.tops[n]);
   return out;
 }
 
@@ -66,8 +91,8 @@ export function preloadStop() {
 
 /** Fetch `urls` one at a time at low priority, reading each to its end (so it is cached); stops before the next file
  * once stopped or blocked, or after a failure. A file that sends nothing for `stallMs` is abandoned, and the loop ends.
- * Each request has the runner broker's shape (no cookie, no referrer: web/notebook/runner-worker.js), so it is the
- * same request the worker's own will be. Resolves to the URLs fetched. */
+ * Each request has the runner broker's shape (no cookie, no referrer, no redirect followed: a redirect is a failure,
+ * PRELOAD674-REDIRECT-1; web/notebook/runner-worker.js), so it is the same request the worker's own will be. Resolves to the URLs fetched. */
 export async function preloadFetch(urls: readonly string[], blocked: () => string | null = () => preloadBlocked(), stallMs = 30_000): Promise<string[]> {
   const done: string[] = [];
   for (const u of urls) {
@@ -77,7 +102,7 @@ export async function preloadFetch(urls: readonly string[], blocked: () => strin
     const arm = () => { clearTimeout(timer); timer = setTimeout(() => ac.abort(), stallMs); };
     try {
       arm();
-      const r = await fetch(u, { priority: "low", credentials: "omit", referrerPolicy: "no-referrer", signal: ac.signal } as RequestInit);
+      const r = await fetch(u, { priority: "low", credentials: "omit", referrerPolicy: "no-referrer", redirect: "error", signal: ac.signal } as RequestInit);
       if (!r.ok || !r.body) break;
       const reader = r.body.getReader();
       for (;;) {
