@@ -228,6 +228,17 @@ import helper
   eq(r.paths, ["/t/part.tex", "/t/figs/b.png"], "the second \\input{part} sets figs/ again: figs/b.png, never other/b.png");
 }
 {
+  // (the same file read under two \graphicspath states: walked under each, so its picture resolves under each;
+  // TESTS, #731 60f691ce: R1, a memo by file alone)
+  const main = "\\graphicspath{{a/}}\n\\input{part}\n\\graphicspath{{b/}}\n\\input{part}\n";
+  const r = await run({ "/t/main.tex": main, "/t/part.tex": "\\includegraphics{x}\n", "/t/a/x.png": "x", "/t/b/x.png": "x" }, "/t/main.tex", "tex");
+  eq(r.rows, [
+    ["/t/part.tex", "input", true, true, null, "\\input in main.tex"],
+    ["/t/a/x.png", "graphic", true, true, "/t/part.tex", "\\includegraphics in part.tex"],
+    ["/t/b/x.png", "graphic", true, true, "/t/part.tex", "\\includegraphics in part.tex"],
+  ], "a file read again under another \\graphicspath: its picture under each");
+}
+{
   // (the second \input{part} starts from the same \graphicspath as the first, so it isn't walked again: what it
   // leaves, figs/, is set all the same)
   const main = "\\input{part}\n\\graphicspath{}\n\\input{part}\n\\includegraphics{c}\n";
