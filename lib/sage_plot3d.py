@@ -797,12 +797,6 @@ def _write_page(path, text):
             os.fsync(fd)
         f.close()
         os.replace(tmp, path)
-        # (the temporary's directories, if empty: .sagebrush holds only the pages; never another writer's file)
-        for d in (os.path.dirname(tmp), os.path.dirname(os.path.dirname(tmp))):
-            try:
-                os.rmdir(d)
-            except OSError:
-                break
     except BaseException:
         f.close()
         try:
@@ -810,6 +804,15 @@ def _write_page(path, text):
         except OSError:
             pass
         raise
+    # (published: tmp's name is free, and another writer may have it already, so
+    # nothing from here removes it (astra's PLOT694-OWNERSHIP-2).  The
+    # temporary's directories, if empty: .sagebrush holds only the pages; an
+    # rmdir of a directory another writer uses fails)
+    for d in (os.path.dirname(tmp), os.path.dirname(os.path.dirname(tmp))):
+        try:
+            os.rmdir(d)
+        except OSError:
+            break
 
 
 _GC_BUDGET_S = 0.05      # (a pass's work, at most; the next pass goes on from its cursor)

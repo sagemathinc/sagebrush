@@ -186,3 +186,40 @@ test("an interrupt in the middle of a write: no page, and the write's own tempor
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// (astra's PLOT694-OWNERSHIP-2: once the page is published, the temporary's name is free and another writer may take
+// it; an interrupt in the directory cleanup after that must not remove that writer's file)
+test("after the rename, an interrupt in the cleanup removes nothing of another writer's", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sb-plot3d-"));
+  try {
+    const out = py(
+      [
+        "import os, sage_plot3d as p3",
+        "os.makedirs('d')",
+        "real_replace, real_rmdir = os.replace, os.rmdir",
+        "seen = []",
+        "def replace(a, b):",
+        "    seen.append(a)",
+        "    return real_replace(a, b)",
+        "def rmdir(d):",
+        // (another writer takes the vacated name, exclusively, then the cleanup is interrupted)
+        "    with open(seen[0], 'x') as other:",
+        "        other.write('OTHER')",
+        "    raise KeyboardInterrupt",
+        "os.replace, os.rmdir = replace, rmdir",
+        "try:",
+        "    p3._write_page(os.path.join('d', 'a.html'), 'PAGE')",
+        "    print('no interrupt')",
+        "except KeyboardInterrupt:",
+        "    print('KeyboardInterrupt')",
+        "finally:",
+        "    os.replace, os.rmdir = real_replace, real_rmdir",
+        "print(open(os.path.join('d', 'a.html')).read(), open(seen[0]).read())",
+      ].join("\n"),
+      dir,
+    );
+    assert.equal(out, "KeyboardInterrupt\nPAGE OTHER\n");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
