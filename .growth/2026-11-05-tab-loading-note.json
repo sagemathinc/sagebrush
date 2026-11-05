@@ -1,8 +1,8 @@
 {
  "v": 1,
- "reason": "Tab feedback: the first Tab in a language can wait 2-3 s on a cold start while its environment loads (sage's DEV n8 walkthrough), with nothing shown. Now, after 300 ms, \"loading <language>…\" shows at the caret in the completion list's place until the answer replaces it; a key pressed meanwhile takes it away, and an older Tab's answer leaves a newer Tab's note alone. The notebook component grows by the timer, the note and its CSS (+614); the CLI bundle carries the same component (pyjs +828). Its absolute ceiling (budgets.json rule 4) goes from 237,850 to 238,464, the exact 238,400 of the merge with master 2934f762 + 64.",
+ "reason": "Tab feedback: the first Tab in a language can wait 2-3 s on a cold start while its environment loads (sage's DEV n8 walkthrough), with nothing shown. Now, after 300 ms, \"loading <language>…\" shows at the caret in the completion list's place until the answer replaces it; a key pressed meanwhile takes it away, and an older Tab's answer or timer leaves a newer Tab's note or list alone. The notebook component grows by the timer, the note and its CSS (+619); the CLI bundle carries the same component (pyjs +864). Its absolute ceiling (budgets.json rule 4) goes from 237,850 to 238,469, the exact 238,405 of the merge with master 567c0ee9 + 64.",
  "bytes": {
-  "cli/pyjs.cjs": 828,
-  "engine/sagebrush-notebook.js": 614
+  "cli/pyjs.cjs": 864,
+  "engine/sagebrush-notebook.js": 619
  }
 }
