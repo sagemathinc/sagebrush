@@ -428,11 +428,34 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
     ["ctr-m05-section", "\\setcounter{section}{4}\\section{HeadingText}", (t) => t === "5 HeadingText"],
     ["ctr-m06-enumerate", "\\begin{enumerate}\\setcounter{enumi}{3}\\item EntryText.\\end{enumerate}", (t) => t === "4. EntryText."],
     ["ctr-addtocounter", "\\section{A}\\addtocounter{section}{2}\\section{B}", (t) => t === "1 A 4 B"],
-    ["ctr-enumii", "\\begin{enumerate}\\item P\\begin{enumerate}\\setcounter{enumii}{2}\\item Q\\end{enumerate}\\end{enumerate}", (t) => /^1\. P .*c\. Q|^1\. P .*3\. Q|^1\. P .*\(c\) Q/.test(t)],
+    ["ctr-enumii", "\\begin{enumerate}\\item P\\begin{enumerate}\\setcounter{enumii}{2}\\item Q\\end{enumerate}\\end{enumerate}", (t) => t === "1. P (c) Q"],
     ["ctr-enumi-from-inner", "\\begin{enumerate}\\item P\\begin{enumerate}\\item Q\\setcounter{enumi}{5}\\end{enumerate}\\item R\\end{enumerate}", (t) => /^1\. P .*Q .*6\. R$/.test(t) && !/2\. Q/.test(t)],
     ["ctr-footnote-after-optional", "A\\footnote[7]{N7.}B\\footnote{N1.}", (t) => /A 7 B 1 .*7 N7\. .*1 N1\./.test(t)],
   ];
   for (const [name, body, ok] of cases) { const t = text(body); check(name, ok(t), t); }
+  // (#673 r2, each against TeX Live 2025's text for it: daybreak3 CTR673-FOOTNOTE-SIGNED-1, a signed \footnote[n] and the
+  //  ordinary one after it, not stepped by it; CTR673-SECNUMDEPTH-1, secnumdepth both ways; grader's R7, enumi from an
+  //  enumerate inside an itemize; enumiii and enumiv; TeX's limit: 99999999999 is "Number too big", 2147483647, and the
+  //  \section's step after it wraps as TeX's does)
+  const texCases = [
+    ["ctr-footnote-signed", "A\\footnote[-2]{Neg}B\\footnote{Next}", "A -2 B 1 -2 Neg 1 Next"],
+    ["ctr-secnumdepth-0", "\\setcounter{secnumdepth}{0}\\section{Sec}\\subsection{Sub}", "Sec Sub"],
+    ["ctr-secnumdepth-4", "\\setcounter{secnumdepth}{4}\\section{Sec}\\subsection{Sub}\\subsubsection{SubSub}\\paragraph{Para} text", "1 Sec 1.1 Sub 1.1.1 SubSub 1.1.1.1 Para text"],
+    ["ctr-secnumdepth-5", "\\setcounter{secnumdepth}{5}\\section{S}\\subsection{T}\\subsubsection{U}\\paragraph{P} x \\subparagraph{Q} y", "1 S 1.1 T 1.1.1 U 1.1.1.1 P x 1.1.1.1.1 Q y"],
+    ["ctr-secnumdepth-default", "\\section{A}\\paragraph{P} x", "1 A P x"],
+    ["ctr-secnumdepth-add", "\\addtocounter{secnumdepth}{-2}\\section{A}\\subsection{B}", "1 A B"],
+    ["ctr-enumi-in-itemize", "\\begin{itemize}\\item A\\begin{enumerate}\\setcounter{enumi}{3}\\item B\\end{enumerate}\\end{itemize}", "\u2022 A 4. B"],
+    ["ctr-enumiii", "\\begin{enumerate}\\item P\\begin{enumerate}\\item Q\\begin{enumerate}\\setcounter{enumiii}{3}\\item R\\end{enumerate}\\end{enumerate}\\end{enumerate}", "1. P (a) Q iv. R"],
+    ["ctr-enumiv", "\\begin{enumerate}\\item P\\begin{enumerate}\\item Q\\begin{enumerate}\\item R\\begin{enumerate}\\setcounter{enumiv}{1}\\item S\\end{enumerate}\\end{enumerate}\\end{enumerate}\\end{enumerate}", "1. P (a) Q i. R B. S"],
+    ["ctr-number-too-big", "\\setcounter{section}{99999999999}\\section{Big}", "-2147483648 Big"],
+    ["ctr-number-too-big-negative", "\\setcounter{section}{-99999999999}\\section{BigNeg}", "-2147483646 BigNeg"],
+  ];
+  for (const [name, body, want] of texCases) { const t = text(body); check(name, t === want, [t, want]); }
+  // (grader's R6: an optional argument that isn't a whole signed number is the counter, as before, and check says so; TeX
+  //  would read its leading digits, \footnote[2a] as 2, and set the "a" as text)
+  const notNum = new Engine().update("\\documentclass{article}\n\\begin{document}\nA\\footnote[2a]{X}B\n\\end{document}\n");
+  const notNumT = notNum.chunks.join("").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  check("ctr-footnote-not-a-number", notNumT === "A 1 B 1 X" && notNum.problems.filter((p) => p.kind === "footnote" && /\\footnote\[2a\]: not a number/.test(p.name)).length === 1, [notNumT, notNum.problems]);
 }
 
 // ---- render.mjs: an unclosed formula ends at a blank line (KaTeX stubbed: each formula drawn as its source)

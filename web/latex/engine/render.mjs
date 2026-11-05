@@ -176,6 +176,8 @@ const KATEX_ENVS = new Set(["array", "darray", "matrix", "pmatrix", "bmatrix", "
 const MATH_ENVS = new Set(["equation", "equation*", "align", "align*", "gather", "gather*", "multline", "multline*", "eqnarray", "eqnarray*",
   "displaymath", "flalign", "flalign*", "alignat", "alignat*", "math"]);
 const LIST_ENVS = new Set(["itemize", "enumerate", "description", "list", "compactitem", "compactenum", "inparaenum", "asparaenum"]);
+// (a counter stepped as TeX's \advance by 1 does it, on a 32-bit register: 2147483647 steps to -2147483648)
+const step = (v) => (v + 1) | 0;
 const SEC_LEVEL = { part: -1, chapter: 0, section: 1, subsection: 2, subsubsection: 3, paragraph: 4, subparagraph: 5 };
 const NOOP = new Set(["relax", "protect", "makeatletter", "makeatother", "sloppy", "fussy", "nobreak", "allowbreak", "frenchspacing", "nonfrenchspacing",
   "ignorespaces", "leavevmode", "null", "vfill", "vfil", "clearpage", "cleardoublepage", "newpage", "pagebreak", "nopagebreak", "nolinebreak", "indent",
@@ -346,6 +348,8 @@ class Renderer {
         //  the enclosing enumerate of that depth)
         case "C": {
           if (Object.hasOwn(this.ctr, n.name)) this.ctr[n.name] = n.v;
+          // (secnumdepth: which levels are numbered, as in LaTeX: 0 none below chapter, 4 and 5 \paragraph and \subparagraph)
+          if (n.name === "secnumdepth") this.secnumdepth = n.v;
           const d = { enumi: 1, enumii: 2, enumiii: 3, enumiv: 4 }[n.name], L = d && this.lists.filter((x) => x.kind === "enum")[d - 1];
           if (L) L.n = n.v;
           break;
@@ -449,7 +453,7 @@ class Renderer {
     void ctx;
   }
   eqNumber() {
-    this.ctr.equation++;
+    this.ctr.equation = step(this.ctr.equation);
     const pre = this.eqWithin === "section" ? this.secNum(1) + "." : this.book ? this.chapNum() + "." : "";
     return pre + this.ctr.equation;
   }
@@ -474,7 +478,7 @@ class Renderer {
     let num = "";
     if (n.cmd === "part") { if (!n.star) { this.ctr.part++; num = roman(this.ctr.part).toUpperCase(); } }
     else if (!n.star) {
-      this.ctr[n.cmd]++;
+      this.ctr[n.cmd] = step(this.ctr[n.cmd]);
       for (let l = level + 1; l < names.length; l++) this.ctr[names[l]] = 0;
       if (n.cmd === "chapter") { this.ctr.equation = 0; this.ctr.figure = 0; this.ctr.table = 0; this.ctr.footnote = 0; }
       if (n.cmd === "section" && this.eqWithin === "section") this.ctr.equation = 0;
@@ -493,8 +497,11 @@ class Renderer {
     flow.noindent = true;
   }
   footnote(n, ctx, flow) {
-    // (\footnote[n]: that number, the counter not stepped, as in LaTeX)
-    const k = /^\s*\d+\s*$/.test(n.short ?? "") ? +n.short : ++this.ctr.footnote, id = this.nid("fn");
+    // (\footnote[n]: that number, signed, within TeX's limit, the counter not stepped, as in LaTeX; anything else (TeX
+    //  would read its leading number and set the rest as text, \footnote[2a] as 2 and a stray "a") the counter, and said)
+    const opt = n.short ?? "", num = /^\s*[+-]?\d+\s*$/.test(opt);
+    if (!num && opt.trim()) this.problem("footnote", "\\footnote[" + opt.trim().slice(0, 40) + "]: not a number; TeX would read its leading digits and set the rest as text");
+    const k = num ? Math.max(-2147483647, Math.min(2147483647, +opt)) : (this.ctr.footnote = step(this.ctr.footnote)), id = this.nid("fn");
     const save = this.target;
     this.setTarget(String(k), id, "footnote");
     const f = new Flow(false);
@@ -510,7 +517,7 @@ class Renderer {
   }
   caption(n, ctx, flow) {
     const fl = this.floatKind || "figure";
-    this.ctr[fl]++;
+    this.ctr[fl] = step(this.ctr[fl]);
     const num = (this.book ? this.chapNum() + "." : "") + this.ctr[fl];
     const id = this.nid(fl);
     this.setTarget(num, id, fl);
@@ -680,7 +687,7 @@ class Renderer {
       let lbl;
       if (o) lbl = this.inline(o, ctx);
       else if (kind === "enum") {
-        L.n++;
+        L.n = step(L.n);
         const nums = this.lists.filter((x) => x.kind === "enum").map((x) => x.n);
         const d = depth;
         lbl = d === 1 ? nums[0] + "." : d === 2 ? "(" + alph(nums[1]) + ")" : d === 3 ? roman(nums[2]) + "." : Alph(nums[3]) + ".";
