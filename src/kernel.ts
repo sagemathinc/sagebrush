@@ -387,7 +387,8 @@ export async function runKernel(connectionFile: string, mode: Mode): Promise<voi
         const pos: number = msg.content.cursor_pos ?? code.length;
         // the line up to the cursor
         const start = code.lastIndexOf("\n", pos - 1) + 1;
-        const r = mode === "magma" || mode === "matlab" ? { matches: [], prefix: "" } : await ask({ complete: code.slice(start, pos) });
+        // (in every mode: the worker completes in the kernel's language, src/interactive.ts completeIn)
+        const r = await ask({ complete: code.slice(start, pos) });
         send(sock, "complete_reply", { status: "ok", matches: r.matches, cursor_start: pos - r.prefix.length, cursor_end: pos, metadata: {} }, msg, msg.idents);
       } else if (t === "is_complete_request") {
         const r = mode === "magma" ? { more: false } : mode === "matlab" ? { more: matlabIsIncomplete(msg.content.code ?? "") } : await ask({ check: msg.content.code ?? "" });
