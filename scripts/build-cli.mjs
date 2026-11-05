@@ -72,9 +72,12 @@ if (JSON.stringify(packages.registry, null, 2) + "\n" !== readFileSync(join(root
 writeFileSync(join(out, "packages.gen.js"), `globalThis.__SAGEBRUSH_PACKAGES__ = ${JSON.stringify(packages)};\n`);
 // The engines (wasm/sagebrush-engine.wasm), embedded: the bundle stays one file.
 // (and the PNG module, wasm/sagebrush-raster.wasm, decoded when a PNG is
-// first written or read: src/runtime/raster.ts)
+// first written or read: src/runtime/raster.ts; and engine/nd's numerics
+// module, wasm/sagebrush-nd.wasm, at np.linalg.cholesky's first call:
+// src/runtime/nd.ts)
 writeFileSync(join(out, "engine.gen.js"), `globalThis.__SAGEBRUSH_ENGINE__ = ${JSON.stringify(readFileSync(join(root, "wasm", "sagebrush-engine.wasm")).toString("base64"))};\n` +
-  `globalThis.__SAGEBRUSH_RASTER__ = ${JSON.stringify(readFileSync(join(root, "wasm", "sagebrush-raster.wasm")).toString("base64"))};\n`);
+  `globalThis.__SAGEBRUSH_RASTER__ = ${JSON.stringify(readFileSync(join(root, "wasm", "sagebrush-raster.wasm")).toString("base64"))};\n` +
+  `globalThis.__SAGEBRUSH_ND__ = ${JSON.stringify(readFileSync(join(root, "wasm", "sagebrush-nd.wasm")).toString("base64"))};\n`);
 // The notebook page for `sagebrush notebook` (src/notebook.ts), from web/dist
 // (`bun web/build.ts`, which needs lib.gen.js: so on a fresh checkout run this
 // script, the web build, then this script again).  Python runs natively

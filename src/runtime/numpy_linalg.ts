@@ -12,6 +12,7 @@ import { NDArray, empty, toDtype, ascontig, copy as npcopy, admitWork } from "./
 import { glibcLog, glibcExp } from "./libm";
 import { gemmBuffers, wasmFusedFMA, wasmKernels, wasmLU, wasmLuSolve, wasmQR, wasmSymEig, wasmGenEig, wasmSVD } from "./kernels";
 import * as FD from "./fdlibm";
+import { useNd, ndCholesky, ndPath, ndScratch } from "./nd";
 import { pollInterrupt } from "./ops";
 
 const { T, raise, tuple } = Obj;
@@ -1275,8 +1276,23 @@ newBuiltinModule("_nplinalg", (m) => {
   });
   fn("cholesky", (a: NDArray) => {
     const [r0, c0] = dims(a);
-    work(5 * r0 * c0, "cholesky");
+    // engine/nd's blocked Cholesky, where it runs in this session (src/runtime/nd.ts: decided at the first call,
+    // then fixed); else the loop below. (mat's copy, L and the output: 3 n^2; in the module's memory, A and the
+    // work: 2 n^2 and its scratch)
+    const nd = useNd();
+    work(5 * r0 * c0 + (nd ? ndScratch() : 0), "cholesky");
     const [A, n] = mat(a);
+    if (nd) {
+      let F: Float64Array | number;
+      try {
+        F = ndCholesky(A, n);
+      } catch (e) {
+        if (e instanceof RangeError) raise(T.MemoryError, `cholesky of a ${n} x ${n} matrix needs more working memory than WebAssembly can have here`);
+        throw e;
+      }
+      if (typeof F === "number") linalgError("Matrix is not positive definite");
+      return out(F, [n, n]);
+    }
     const L = new Float64Array(n * n);
     for (let j = 0; j < n; j++) {
       let s = A[j * n + j];
@@ -1291,6 +1307,11 @@ newBuiltinModule("_nplinalg", (m) => {
       }
     }
     return out(L, [n, n]);
+  });
+  // which code cholesky runs in this session, and why (src/runtime/nd.ts): (path, kernel, why)
+  fn("_kernels", () => {
+    const p = ndPath();
+    return tuple([p.path, p.kernel, p.why]);
   });
   fn("eigh", (a: NDArray, upper: any) => {
     // (mat's copies, the symmetric copy, the eigenvectors in and out of

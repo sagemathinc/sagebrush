@@ -51,6 +51,9 @@ test("each widening operation is refused one byte under the typed buffers it all
       "C2 = rng.standard_normal((50, 40)) + 1j * rng.standard_normal((50, 40))",
       "S = rng.standard_normal((40, 40)); SPD = S @ S.T + 40 * np.eye(40); V = rng.standard_normal(40); BM = rng.standard_normal((40, 5))",
       "TALL = rng.standard_normal((90, 12)); WIDE = TALL.T.copy(); ROT = np.array([[0.0, -1.0], [1.0, 0.0]])",
+      // (cholesky's engine/nd module is loaded once, at the session's first call (src/runtime/nd.ts), as the PNG
+      // module is: that load is not the operation's work)
+      "L.cholesky(SPD)",
     ].join("\n"),
   });
   const main = Obj.getattr(require("../src/runtime").R.importModule("__main__"), "__dict__");

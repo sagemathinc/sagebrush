@@ -149,6 +149,14 @@ def cholesky(a, *, upper=False):
     return _np.swapaxes(L, -1, -2) if upper else L
 
 
+def _kernels():
+    """Which code Sagebrush's linear algebra runs in this session: for each
+    function backed by engine/nd, its path ("engine/nd", "typescript", or
+    "undecided" before its first call), the kernel, and why not engine/nd."""
+    path, kernel, why = _L._kernels()
+    return {"cholesky": {"path": path, "kernel": kernel, "why": why}}
+
+
 class _Result(tuple):
     _fields = ()
 

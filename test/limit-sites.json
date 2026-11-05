@@ -9542,6 +9542,16 @@
   "owner": "runtime file I/O",
   "row": "src-14"
  },
+ "src/runtime/nd.ts :: sharedMemory :: for (const maximum of [65536, 16384, 4096]) { #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd's WebAssembly.Memory (src/runtime/nd.ts): the declared maximum is wasm32's own 4 GiB bound (the module's import declares it), retried smaller only where that much address space can't be reserved; refuses no user work (a growth past it is the MemoryError cholesky reports)"
+ },
+ "src/runtime/nd.ts :: sharedMemory :: return new WebAssembly.Memory({ initial: 17, maximum, shared: true }); #0": {
+  "class": "none",
+  "owner": "sagebrush-matlab",
+  "reason": "engine/nd's WebAssembly.Memory (src/runtime/nd.ts): the declared maximum is wasm32's own 4 GiB bound (the module's import declares it), retried smaller only where that much address space can't be reserved; refuses no user work (a growth past it is the MemoryError cholesky reports)"
+ },
  "src/runtime/numpy.ts :: admitArray :: if (bytes > 2n ** 63n - 1n) raise(T.ValueError, \"array is too big; `arr.size * arr.dtype.itemsize` is larger than the maximum possible size.\"); #0": {
   "class": "2",
   "owner": "NumPy shim/runtime memory",

@@ -45,6 +45,7 @@ const engineHash = engineSha256.slice(0, 16);
 // and the PNG module's (src/runtime/raster.ts), fetched the same way, the
 // first time a PNG is written or read
 const rasterSha256 = new Bun.CryptoHasher("sha256").update(readFileSync(join(here, "..", "wasm", "sagebrush-raster.wasm"))).digest("hex");
+const ndSha256 = new Bun.CryptoHasher("sha256").update(readFileSync(join(here, "..", "wasm", "sagebrush-nd.wasm"))).digest("hex");
 // The bundled compiler and library (build/cli, scripts/build-cli.mjs) must be
 // the current sources': the library's chunks below hold that library, and
 // its modules compiled ahead by that bundle.
@@ -125,7 +126,7 @@ const result = await Bun.build(<any>{
   // engine worker, and so its hash, the engine id and sw.js, depend on where the checkout is.  The worker's
   // only use is a Node-only fallback that looks for wasm/ beside the source (src/runtime/engine.ts, raster.ts),
   // unreachable in a browser; undefined sends it to process.cwd(), as when __dirname doesn't exist)
-  define: { __SB_ENGINE_HASH__: JSON.stringify(engineSha256), __SB_RASTER_HASH__: JSON.stringify(rasterSha256), __SB_LIB__: JSON.stringify(libManifest), __dirname: "undefined" },
+  define: { __SB_ENGINE_HASH__: JSON.stringify(engineSha256), __SB_RASTER_HASH__: JSON.stringify(rasterSha256), __SB_ND_HASH__: JSON.stringify(ndSha256), __SB_LIB__: JSON.stringify(libManifest), __dirname: "undefined" },
   entrypoints: [join(here, "worker.ts")],
   outdir: join(here, "dist"),
   naming: "sagebrush-worker.js",
@@ -285,6 +286,9 @@ copyFileSync(join(here, "..", "wasm", "sagebrush-engine.wasm"), join(here, "dist
 // the PNG module (savefig's PNG, imread), fetched by the worker on first use;
 // not in the service worker's shell, which every visitor downloads
 copyFileSync(join(here, "..", "wasm", "sagebrush-raster.wasm"), join(here, "dist", "sagebrush-raster.wasm"));
+// engine/nd's numerics module (np.linalg.cholesky, CHOL-1), fetched by the worker
+// on first use; likewise not in the shell
+copyFileSync(join(here, "..", "wasm", "sagebrush-nd.wasm"), join(here, "dist", "sagebrush-nd.wasm"));
 // The documentation indexes for the page's search box, one per language that
 // has one: Sage's library (lib/_pyjs_docsearch.py), Python's numpy, scipy and
 // standard library (lib/_python_docsearch.py), MATLAB's built-ins
@@ -339,7 +343,7 @@ const MIME: Record<string, string> = { tzif: "application/octet-stream", html: "
 // (3: the Python library in chunks, lib/..., web/lib-chunks.mts)
 const ENGINE_API = 3;
 let ENGINE: { id: string; api: number; files: Record<string, string> } = { id: "", api: ENGINE_API, files: {} };
-const ENGINE_FILES = ["sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush-raster.wasm", "sagebrush-notebook.js", "sagebrush-analyze.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-myst.js", "runner/index.html", ...LIB_CHUNKS];
+const ENGINE_FILES = ["sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush-raster.wasm", "sagebrush-nd.wasm", "sagebrush-notebook.js", "sagebrush-analyze.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-myst.js", "runner/index.html", ...LIB_CHUNKS];
 // (each one's name as the site's Worker serves engine files: web/engines.ts)
 for (const f of ENGINE_FILES) if (!/^[a-z0-9][a-z0-9./-]*$/.test(f)) throw new Error(`engine file ${f}: not a name web/engines.ts serves`);
 {
@@ -659,7 +663,7 @@ if (hasSite) mkdirSync(join(siteDir, "public", "s"), { recursive: true });
 // The site's files from web/dist (the cloud overlay deploys web/site/public). Every top-level bundle is one of them,
 // or named as not for the site: a lazy chunk left off this list is a 404 on sagebrush.space (the zip export and
 // the GitHub push were, until Nov 2).
-const SITE_FILES = ["version.json", "index.html", "alpha-banner.js", "THIRD-PARTY-NOTICES.txt", "llms.txt", "board-format.md", "board-host-protocol.md", "board-format.schema.json", "capabilities.md", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-myst.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-share.js", "sagebrush-share-copy.js", "s/index.html", "sagebrush-share-deps.js", "sagebrush-share-folder.js", "sagebrush-remote.js", "s/og.png", "runner/index.html", "embed/index.html", "sagebrush-engine.wasm", "sw.js", "manifest.webmanifest", "offline-inventory.json", "sagebrush-raster.wasm", "sagebrush-export.js", "sagebrush-export-worker.js", "sagebrush-gitpush-panel.js", "sagebrush-gitpush-worker.js"];
+const SITE_FILES = ["version.json", "index.html", "alpha-banner.js", "THIRD-PARTY-NOTICES.txt", "llms.txt", "board-format.md", "board-host-protocol.md", "board-format.schema.json", "capabilities.md", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-myst.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-share.js", "sagebrush-share-copy.js", "s/index.html", "sagebrush-share-deps.js", "sagebrush-share-folder.js", "sagebrush-remote.js", "s/og.png", "runner/index.html", "embed/index.html", "sagebrush-engine.wasm", "sw.js", "manifest.webmanifest", "offline-inventory.json", "sagebrush-raster.wasm", "sagebrush-nd.wasm", "sagebrush-export.js", "sagebrush-export-worker.js", "sagebrush-gitpush-panel.js", "sagebrush-gitpush-worker.js"];
 /** web/dist's top-level bundles the site doesn't serve: the desktop app's self-test (app/build-frontend.mjs). */
 const NOT_ON_SITE = ["sagebrush-selftest.js"]; // (and the LaTeX editor's, sagebrush-latex*, copied below in a LaTeX build)
 {
