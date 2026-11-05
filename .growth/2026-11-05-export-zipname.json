@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "EXPORT-ZIPNAME-1, a security fix (astra; @sagebrush's priority, Nov 5): Export all (.zip) refuses a member name a .zip can't hold safely (a backslash, colon, < > \" | ? *, control character, Windows device name, a part ending in a dot or space, an empty, . or .. part, a leading or stray /), never renaming it: a metadata-only pass at preflight's start, before any body is read, and the writer's own check where it encodes each name (web/workspace/export/names.ts). The CLI carries the export chunk, so its growth is the chunk's: measured +3576 B on cli/pyjs.cjs at master b418745c (the name check, and the measuring pass reading the checked entries from a spool of their own, TOCTOU-1), marked 3636.",
+ "bytes": {
+  "cli/pyjs.cjs": 3636
+ }
+}
