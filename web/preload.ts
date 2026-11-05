@@ -110,6 +110,11 @@ export function preloadStop() {
  * once stopped or blocked, or after a failure. A file that sends nothing for `stallMs` is abandoned, and the loop ends.
  * Each request has the runner broker's shape (no cookie, no referrer, no redirect followed: a redirect is a failure,
  * PRELOAD674-REDIRECT-1; web/notebook/runner-worker.js), so it is the same request the worker's own will be. Resolves to the URLs fetched. */
+/** The request header that marks a background fetch. web/sw.js leaves such a request to the network and the HTTP cache
+ * and keeps nothing (its line is bare: sw.js's size ceiling), so a library chunk is kept for offline use only when a
+ * page asks for it itself, at a Run, as without background loading. A package set's chunks go through the service
+ * worker either way (its check comes first), kept by their own bounded ledger */
+export const PRELOAD_HEADER = "X-Sb-Preload";
 export async function preloadFetch(urls: readonly string[], blocked: () => string | null = () => preloadBlocked(), stallMs = 30_000): Promise<string[]> {
   const done: string[] = [];
   for (const u of urls) {
@@ -119,7 +124,9 @@ export async function preloadFetch(urls: readonly string[], blocked: () => strin
     const arm = () => { clearTimeout(timer); timer = setTimeout(() => ac.abort(), stallMs); };
     try {
       arm();
-      const r = await fetch(u, { priority: "low", credentials: "omit", referrerPolicy: "no-referrer", redirect: "error", signal: ac.signal } as RequestInit);
+      // (PRELOAD_HEADER: the service worker leaves the request to the network and the HTTP cache, so a file is kept
+      // offline only once a page really asks for it, as without background loading)
+      const r = await fetch(u, { priority: "low", credentials: "omit", referrerPolicy: "no-referrer", redirect: "error", headers: { [PRELOAD_HEADER]: "1" }, signal: ac.signal } as RequestInit);
       if (!r.ok || !r.body) break;
       const reader = r.body.getReader();
       for (;;) {

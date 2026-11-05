@@ -212,6 +212,7 @@ self.addEventListener("fetch", (ev) => {
     ev.respondWith(pkgResponse(url, pm[1], ev));
     return;
   }
+  if (req.headers.has("x-sb-preload")) return; // (preload.ts)
   // the page itself (with any ?open=... or #share link): the cached "./" when offline
   const page = req.mode === "navigate" && (url.pathname === scope.pathname || url.pathname === scope.pathname + "index.html");
   if (!page && !shellPaths.has(url.pathname)) return;
