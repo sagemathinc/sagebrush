@@ -10,9 +10,17 @@
 // the notebook, and the collection's data files beside it, into the reader's own files in this browser (no sign-in);
 // every later edit is saved there, and a later visit opens it, with "Back to the book's version".  The copy is made
 // as anything brought in from elsewhere is (its code runs without file changes until the reader allows them).
+//
+// Background loading (web/preload.ts, as on the notebook page): at idle, the library files the open notebook's first
+// Run will fetch, by the page, in the runner broker's request shape (the same cache the runner's requests are answered
+// from; no frame made for it, nothing run); never the collection's data files, nor the copy's chunk (it isn't
+// named by its content, so the site can't let a browser keep it: fetched ahead, it would be fetched again, daybreak2).
+import { preloadSoon, preloadState, preloadStop, type PreloadTable } from "../preload";
 import { createNotebook, fromFile, MemoryStore, RunnerWorker, toIpynb, WorkerKernel } from "../notebook/index.js";
 // (the workspace is web/share-client/copy.ts, a chunk fetched on the first need: types only here)
 import type { Workspace } from "../workspace/api";
+
+declare const __SB_PRELOAD__: PreloadTable;
 
 interface File { path: string; sha256: string; size: number }
 interface Shared {
@@ -83,6 +91,8 @@ async function main() {
     createWorker: () => new RunnerWorker("/runner/"),
     onStart: (w: Worker) => w.postMessage({ mount }),
   });
+  // (a Run stops background loading starting another file; one in flight finishes)
+  kernel.on("execute", preloadStop);
   let nb: any = null;
   let current: File | null = null;
   // (the reader's own files, opened on the first need; null where this browser can't keep them)
@@ -222,8 +232,10 @@ async function main() {
   const asked = want !== null ? c.manifest.files.find((f) => f.path === want && OPENABLE.test(f.path)) : undefined;
   const first = asked ?? c.manifest.files.find((f) => /\.ipynb$/i.test(f.path)) ?? c.manifest.files.find((f) => OPENABLE.test(f.path));
   if (first) await open(first);
+  // background loading: the open notebook's library files at idle (its mode's groups, the groups its import lines name)
+  preloadSoon({ table: __SB_PRELOAD__, base: new URL("/", location.href).href, doc: () => { if (!nb) return null; const d = nb.snapshot(); return { mode: d.mode ?? nb.mode, codes: d.cells.filter((x: any) => !x.type).map((x: any) => x.code ?? "") }; } });
   if (want !== null && !asked) $("#status").textContent = `This collection has no notebook ${JSON.stringify(want.slice(0, 200))}: ${first ? `opened ${first.path} instead` : "nothing to open"}.`;
-  (window as any).shared = { c, kernel, get nb() { return nb; } }; // for tests
+  (window as any).shared = { c, kernel, get nb() { return nb; }, preload: preloadState }; // for tests
 }
 
 function fail(text: string) {
