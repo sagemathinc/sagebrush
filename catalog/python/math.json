@@ -949,5 +949,24 @@
     ],
     "status": "partial",
     "upstream_version": "Python 3.14"
+  },
+  {
+    "name": "math.sumprod",
+    "kind": "function",
+    "signature": "(p, q, /)",
+    "summary": "The sum of products of values from two iterables, in extended precision for floats.",
+    "examples": [
+      {
+        "code": "math.sumprod([1, 2, 3], [4, 5, 6])",
+        "expected": "32\n"
+      },
+      {
+        "code": "math.sumprod([0.1] * 10, [0.1] * 10)",
+        "expected": "0.1\n"
+      }
+    ],
+    "differs": [],
+    "status": "full",
+    "upstream_version": "Python 3.14"
   }
 ]

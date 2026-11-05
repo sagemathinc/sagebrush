@@ -6791,6 +6791,41 @@
   "class": "coverage",
   "owner": "python"
  },
+ "lib/statistics.py :: NormalDist.mode :: function (pdf) takes its maximum value. #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14's Lib/statistics.py as it is: the matched word is its own docstring or comment, a max() call, or its TypeError for a non-numeric input; nothing here caps a computation"
+ },
+ "lib/statistics.py :: _sqrtprod :: scale = 2.0 ** -512 # sqrt(1 / sys.float_info.max) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14's Lib/statistics.py as it is: the matched word is its own docstring or comment, a max() call, or its TypeError for a non-numeric input; nothing here caps a computation"
+ },
+ "lib/statistics.py :: harmonic_mean :: raise TypeError('unsupported type') #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14's Lib/statistics.py as it is: the matched word is its own docstring or comment, a max() call, or its TypeError for a non-numeric input; nothing here caps a computation"
+ },
+ "lib/statistics.py :: median_grouped :: L = x - interval / 2.0 # Lower limit of the median interval #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14's Lib/statistics.py as it is: the matched word is its own docstring or comment, a max() call, or its TypeError for a non-numeric input; nothing here caps a computation"
+ },
+ "lib/statistics.py :: multimode :: maxcount = max(counts.values()) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14's Lib/statistics.py as it is: the matched word is its own docstring or comment, a max() call, or its TypeError for a non-numeric input; nothing here caps a computation"
+ },
+ "lib/statistics.py :: multimode :: return [value for value, count in counts.items() if count == maxcount] #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14's Lib/statistics.py as it is: the matched word is its own docstring or comment, a max() call, or its TypeError for a non-numeric input; nothing here caps a computation"
+ },
+ "lib/statistics.py :: quantiles :: maximum value is treated as the 100th percentile. #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14's Lib/statistics.py as it is: the matched word is its own docstring or comment, a max() call, or its TypeError for a non-numeric input; nothing here caps a computation"
+ },
  "lib/uuid.py ::  :: >>> uuid.MAX #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
@@ -9335,6 +9370,11 @@
   "class": "none",
   "owner": "python (@sagebrush-python)"
  },
+ "src/runtime/modules.ts :: asLong :: return b < INT64_MIN || b > INT64_MAX ? null : b; #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "math.sumprod's port of CPython's C long fast path (math_sumprod_impl): an item or total outside int64 ends that path and the item goes on through Python's * and +, exact as CPython's; an int too large for a float ends the float path the same way; nothing is refused"
+ },
  "src/runtime/modules.ts :: bigOf :: const LLONG_MAX = 9223372036854775807n; #0": {
   "class": "2+3",
   "owner": "python (@sagebrush-python)",
@@ -9403,6 +9443,11 @@
   "class": "none",
   "owner": "memory guards' message (item D)"
  },
+ "src/runtime/modules.ts :: permCombBig :: const INT64_MIN = -(2n ** 63n), INT64_MAX = 2n ** 63n - 1n; #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "math.sumprod's port of CPython's C long fast path (math_sumprod_impl): an item or total outside int64 ends that path and the item goes on through Python's * and +, exact as CPython's; an int too large for a float ends the float path the same way; nothing is refused"
+ },
  "src/runtime/modules.ts :: permCombBig :: if (comb && kf > 64 && n <= BigInt(COMB_SIEVE_MAX)) return O.normBig(combByPrimes(Number(n), kf)); #0": {
   "class": "2+3",
   "owner": "python (@sagebrush-python)",
@@ -9432,6 +9477,11 @@
   "class": "2+3",
   "owner": "python (@sagebrush-python)",
   "row": "src-7"
+ },
+ "src/runtime/modules.ts :: prodErr :: if (prod >= INT64_MIN && prod <= INT64_MAX && intTotal + prod >= INT64_MIN && intTotal + prod <= INT64_MAX) { #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "math.sumprod's port of CPython's C long fast path (math_sumprod_impl): an item or total outside int64 ends that path and the item goes on through Python's * and +, exact as CPython's; an int too large for a float ends the float path the same way; nothing is refused"
  },
  "src/runtime/modules.ts :: productOf :: const COMB_SIEVE_MAX = 2 ** 25; #0": {
   "class": "2+3",
@@ -9512,6 +9562,11 @@
   "class": "1",
   "owner": "runtime file I/O",
   "row": "src-14"
+ },
+ "src/runtime/modules.ts :: toD :: if (!Number.isFinite(fq)) ok = false; // (an int too large for a float: CPython's OverflowError, cleared) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "math.sumprod's port of CPython's C long fast path (math_sumprod_impl): an item or total outside int64 ends that path and the item goes on through Python's * and +, exact as CPython's; an int too large for a float ends the float path the same way; nothing is refused"
  },
  "src/runtime/modules.ts :: tooBig :: if (bitsAtLeast > MAX_BITS) raise(T.MemoryError); #0": {
   "class": "2+3",

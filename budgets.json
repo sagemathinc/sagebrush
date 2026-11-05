@@ -692,6 +692,13 @@
   "registry/packages": {
    "exact": true,
    "max": 4
+  },
+  "engine/lib/mod-statistics.src": {
+   "exact": false,
+   "ceiling": 71448,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
   }
  },
  "epoch": {
@@ -792,7 +799,8 @@
    "engine/sagebrush-notebook.js": 239348,
    "engine/sagebrush-raster.wasm": 825569,
    "engine/sagebrush-viewer3d.js": 88151,
-   "engine/sagebrush-worker.js": 1630465
+   "engine/sagebrush-worker.js": 1630465,
+   "engine/lib/mod-statistics.src": 64953
   },
   "reset": {
    "reason": "epoch reset after v0.6.5 (released Nov 5 2026): the 256-marker cap of size-measure.mjs LIMITS was reached at master de697544. @sagebrush's ruling (Nov 5): reset the epoch per design/size-gate.md rather than raise the cap; ceilings unchanged. epoch.sizes = master de697544 measured with bun 1.4.4 / node 24.21.0; no growth.",
