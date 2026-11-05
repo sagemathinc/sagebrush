@@ -1,0 +1,13 @@
+double 3x3 [0 0 0;0 0 0;0 0 0]
+double 3x3 [0 -9 7;4 0 -6;-3 1 0]
+double 3x2 [-6 3;12 -6;-6 3]
+double 3x4 [0 0 0 0;0 0 0 0;0 0 0 0]
+double 2x3 [0 0 0;0 0 0]
+double 3x3 [0 6 -1;-7 0 3;9 -4 0]
+double 1x3 [0 0 1]
+single 1x3 [0 0 1]
+double 3x2x2 [-13 -13 -13 -13;26 26 26 26;-13 -13 -13 -13]
+MATLAB:cross:InvalidDimAorB | A and B must have at least one dimension of length 3.
+MATLAB:cross:InputSizeMismatch | A and B must be same size.
+MATLAB:cross:InvalidDimAorBForCrossProd | A and B must be of length 3 in the dimension in which the cross product is taken.
+refused

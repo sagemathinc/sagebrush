@@ -6552,11 +6552,33 @@ def _isvec(v):
 
 
 @_bs("cross")
-def cross_(a, b):
-    A = _farr(a).reshape(-1)
-    B = _farr(b).reshape(-1)
+def cross_(a, b, dim=None):
+    """cross(A, B[, dim]): the cross products of A's and B's 3-element vectors, along dim (by default the
+    first dimension of size 3); two 3-element vectors in any orientation give a result shaped as A"""
+    if dim is None and _isvec(a) and _isvec(b) and _numel(a) == 3 and _numel(b) == 3:
+        A = _farr(a).reshape(-1)
+        B = _farr(b).reshape(-1)
+        r = np.array([A[1] * B[2] - A[2] * B[1], A[2] * B[0] - A[0] * B[2], A[0] * B[1] - A[1] * B[0]])
+        return _box(r.reshape(_arr(a).shape))
+    d = _dims(a)
+    if d != _dims(b):
+        raise _err("A and B must be same size.", "MATLAB:cross:InputSizeMismatch")
+    if dim is not None:
+        v = _farr(dim).reshape(-1) if _isnumlike(dim) else np.zeros(0)
+        if v.size != 1 or v.dtype.kind == "c" or not (_math.isfinite(v[0]) and v[0] >= 1 and v[0] == _math.floor(v[0])):
+            raise _err("Dimension argument must be a positive integer scalar within indexing range.", "MATLAB:getdimarg:invalidDim")
+        k = int(v[0]) - 1
+        if (d[k] if k < len(d) else 1) != 3:
+            raise _err("A and B must be of length 3 in the dimension in which the cross product is taken.", "MATLAB:cross:InvalidDimAorBForCrossProd")
+    else:
+        k = next((i for i, s in enumerate(d) if s == 3), -1)
+        if k < 0:
+            raise _err("A and B must have at least one dimension of length 3.", "MATLAB:cross:InvalidDimAorB")
+    # (in MATLAB's axis order, the cross product's axis first)
+    A = np.moveaxis(np.transpose(_farr(a)), k, 0)
+    B = np.moveaxis(np.transpose(_farr(b)), k, 0)
     r = np.array([A[1] * B[2] - A[2] * B[1], A[2] * B[0] - A[0] * B[2], A[0] * B[1] - A[1] * B[0]])
-    return _box(r.reshape(_arr(a).shape))
+    return _box(_contig(np.transpose(np.moveaxis(r, 0, k))))
 
 
 @_bs("dot")
