@@ -70,6 +70,20 @@ Each board, notebook or command uses ONE language. Each language is a SUBSET of 
 - `npx sagebrush@0.6.5 board check FILE` checks a `.board.json` before anyone opens it (the format, ids, edges, pictures, questions) and runs its code items, reporting every problem at once; `board render FILE -o board.svg` draws it.
 - `npx sagebrush@0.6.5 board open FILE` shows a board in the browser on this computer, as /board/ does, read only, and shows it again in place each time FILE changes (a version that isn't a board leaves the last good one shown, with what is wrong). It listens on 127.0.0.1 only, and nothing of the board is uploaded.
 
+## MCP server (for AI agents)
+
+- `sagebrush-mcp` is a local Model Context Protocol server over stdio, for any agent that speaks MCP (Claude Code, Codex, Cursor, ...). It needs no account and no login. It comes with the Python package: `pip install sagebrush` (Python 3.10+) installs it, or `uvx sagebrush-mcp` runs it without installing.
+- The npm `sagebrush` command line has no `mcp` command; the MCP server is the Python package's `sagebrush-mcp`.
+- Claude Code: `claude mcp add sagebrush -- sagebrush-mcp`. Codex: `codex mcp add sagebrush -- sagebrush-mcp`, which writes `[mcp_servers.sagebrush]` with `command = "sagebrush-mcp"` to `~/.codex/config.toml`. Other clients: `{"mcpServers": {"sagebrush": {"command": "sagebrush-mcp"}}}`.
+- Its tools:
+  - `sage`: Sage code in a persistent session (`2^10` a power, `1/3` exact); returns printed output, the last value and SVG plots. `python`: plain Python in the same session. `reset`: a fresh session.
+  - `guide`: what Sagebrush implements, with examples. `search_docs`: the Sage library's documentation (signatures, docstrings).
+  - `factor`, `number_field`, `newforms`: integer factorization, number field invariants, and the Galois orbits of newforms of level N and weight k.
+  - `run_status`, `run_result`, `run_cancel`, `run_list`, `run_keep`: long computations as runs, waited for, cancelled and kept.
+  - `workspace_connect` pairs the agent with the person's open Sagebrush page (a one-time link they click); then `workspace_list`, `workspace_stat`, `workspace_read`, `workspace_write`, `workspace_create`, `workspace_mkdir`, `workspace_rename`, `workspace_duplicate`, `workspace_remove` (to Trash), `workspace_restore`, `workspace_history` and `workspace_version` act on their workspace.
+  - `chat_next`, `chat_reply`: the page's chat panel. `latex_comments_list`, `_show`, `_add`, `_reply`, `_resolve`, `_reattach`: comment threads on a `.tex` in the workspace.
+- The in-page WebMCP tools above (`search_docs`, `run_python`, `add_markdown`, ...) are a different thing: they are offered by the open page to an agent driving that browser.
+
 ## Elsewhere
 
 - [Sagebrush Atlas](/atlas/): Galois orbits of newforms (weight 2, level <= 1000; weights 4-12 with N k^2 <= 4000) proven by the Sagebrush engines, LMFDB labels, every page also JSON, other spaces computed in the browser; formats in [atlas/llms.txt](/atlas/llms.txt).
