@@ -7351,8 +7351,12 @@ def qr_(nargout, x, *args):
         qc = min(m, n) if econ else m
         if (M.dtype == np.float64 and Bm.dtype == np.float64 and M.ndim == 2 and Bm.ndim == 2
                 and m > 0 and n > 0 and Bm.shape[0] == m and Bm.shape[1] < qc):
-            C, R = np.linalg._qr_qtb(M, Bm, not econ)
-            return [_unmat(C), _unmat(R)]
+            import _nplinalg
+            from numpy.linalg import _ldexp, _scaled
+            # (scaled as np.linalg.qr scales: by a power of 2, which leaves the reflectors and Q unchanged; R back)
+            Ms, e = _scaled(M)
+            C, R = _nplinalg.qr_qtb(Ms, Bm, not econ)
+            return [_unmat(C), _unmat(_ldexp(R, -e))]
     Q, R = np.linalg.qr(M, mode="reduced" if econ else "complete")
     if B is not None:
         Bm = _mat(B)
