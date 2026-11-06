@@ -10,7 +10,8 @@
 // first: idle(), invalidate()).  While uploading, the dialog can't be closed:
 // a close that gets through (a second Esc, a programmatic close) shows it again,
 // and opening Share again only shows it (UI-4, UI-B1).
-import { Selection, reasonText, type Bounds } from "./selection";
+import { Selection, type Bounds } from "./selection";
+import { createFileList } from "./list-view";
 import { startDeps, type WorkerLike } from "../deps/deps-client";
 import type { CellKind, Unfollowed } from "../deps/file-deps";
 import type { LazyFile } from "./upload";
@@ -42,21 +43,12 @@ export interface ShareDialogHost {
   fmtSize: (n: number) => string;
 }
 
-const ROW_H = 40;
-const OVERSCAN = 8;
 const $ = (root: ParentNode, sel: string) => root.querySelector(sel) as HTMLElement;
 const num = (n: number) => n.toLocaleString("en-US");
 const nth = (n: number) => {
   const k = n + 1, s = k % 100 >= 11 && k % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][k % 10] ?? "th";
   return `${k}${s}`;
 };
-/** A long path shortened in the middle (UI-5); the full path is the title. */
-export function middle(s: string, max = 52): string {
-  if (s.length <= max) return s;
-  const keep = max - 1, head = Math.ceil(keep / 2);
-  return s.slice(0, head) + "…" + s.slice(s.length - (keep - head));
-}
-
 export function createShareDialog(h: ShareDialogHost) {
   const d = h.dlg;
   const list = $(d, "#sharelist"), inner = $(d, "#sharelistinner"), summary = $(d, "#sharesummary"), status = $(d, "#sharestatus");
@@ -73,60 +65,8 @@ export function createShareDialog(h: ShareDialogHost) {
   let unparsed: string[] = [];
   let idleWaiters: (() => void)[] = [];
 
-  const draw = () => {
-    if (!sel) return;
-    inner.style.height = `${sel.rows.length * ROW_H}px`;
-    const first = Math.max(0, Math.floor(list.scrollTop / ROW_H) - OVERSCAN);
-    const last = Math.min(sel.rows.length, Math.ceil((list.scrollTop + (list.clientHeight || 300)) / ROW_H) + OVERSCAN);
-    const keep = new Set<number>();
-    for (let i = first; i < last; i++) keep.add(i);
-    for (const el of [...inner.children] as HTMLElement[]) if (!keep.has(Number(el.dataset.i))) el.remove();
-    const have = new Set([...inner.children].map((el) => Number((el as HTMLElement).dataset.i)));
-    for (const i of keep) if (!have.has(i)) inner.append(rowEl(i));
-    for (const el of [...inner.children] as HTMLElement[]) fill(el);
-    const s = sel.summary(h.bounds());
-    summary.textContent = `${num(s.files)} of ${num(s.of)} files${s.sizesKnown ? `, ${h.fmtSize(s.bytes)}` : ""}${s.over ? ` — ${s.over}` : ""}`;
-    btn.disabled = busy || !!s.over;
-  };
-  const rowEl = (i: number) => {
-    const el = document.createElement("div");
-    el.className = "sharerow";
-    el.dataset.i = String(i);
-    el.style.top = `${i * ROW_H}px`;
-    el.innerHTML = `<label><input type="checkbox"><span class="name"></span><span class="size"></span></label><div class="why"></div>`;
-    const box = el.querySelector("input") as HTMLInputElement;
-    box.addEventListener("click", (e) => {
-      if (!sel || busy) return e.preventDefault();
-      sel.toggle(i, e.shiftKey);
-      queueMicrotask(draw);
-    });
-    box.addEventListener("keydown", (e) => {
-      if (e.key !== " " || !sel) return;
-      // (Space and Shift+Space: the range from the keyboard, UI-8; the native
-      // toggle, on keyup, is cancelled too)
-      e.preventDefault();
-      if (busy || e.repeat) return;
-      sel.toggle(i, e.shiftKey);
-      draw();
-    });
-    box.addEventListener("keyup", (e) => {
-      if (e.key === " ") e.preventDefault();
-    });
-    return el;
-  };
-  const fill = (el: HTMLElement) => {
-    const r = sel!.rows[Number(el.dataset.i)];
-    const box = el.querySelector("input") as HTMLInputElement;
-    box.checked = r.checked;
-    box.disabled = !!r.notebook || busy;
-    const name = el.querySelector(".name") as HTMLElement, size = el.querySelector(".size") as HTMLElement, why = el.querySelector(".why") as HTMLElement;
-    const shown = r.path.replace(/^\/+/, "");
-    name.textContent = " " + middle(shown);
-    name.title = shown;
-    size.textContent = r.notebook ? "this notebook" : r.size === undefined ? "size unknown" : h.fmtSize(r.size);
-    why.textContent = r.reason ? reasonText(r.reason) : r.notebook || r.checked ? "" : sel!.state === "analyzing" ? "still analyzing" : sel!.state === "not-analyzed" ? "not analyzed" : "";
-  };
-  list.addEventListener("scroll", () => draw(), { passive: true });
+  const view = createFileList({ list, inner, summary, selection: () => sel, busy: () => busy, bounds: h.bounds, fmtSize: h.fmtSize, drawn: (s) => (btn.disabled = busy || !!s.over) });
+  const draw = view.draw;
 
   const setBusy = (b: boolean) => {
     busy = b;
