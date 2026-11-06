@@ -78,51 +78,53 @@ def _hash_form(s):
     parent (f RR, d RDF, g CC, h CDF) is not part of the value, so sin(x + RR(1.5))
     and sin(x + RDF(1.5)), which are equal, hash alike, as in Sage.  -0.0 is 0.0,
     and a complex float with imaginary part 0 is the real one (x + RR(1.5) ==
-    x + CC(1.5)).  Names (s, F, D) are skipped by their length."""
-    out, i, n, expect = [], 0, len(s), True
+    x + CC(1.5)).  Names (s, F, D) are skipped by their length, which the engine
+    writes in UTF-8 bytes: the walk is over bytes (a 3-byte name such as var('\\u53d8')
+    was misread, the daybreak3 HASH-2)."""
+    b = s.encode("utf-8")
+    out, i, n, expect = [], 0, len(b), True
 
     def bits(t):
-        return "0" if t == "8000000000000000" else t
+        return b"0" if t == b"8000000000000000" else t
 
     while i < n:
-        c = s[i]
+        c = b[i:i + 1]
         if not expect:
             out.append(c)
-            expect = c == "{"
+            expect = c == b"{"
             i += 1
             continue
         expect = False
-        if c in "fdgh":
-            j = s.index(";", i)
-            parts = s[i + 1:j].split(",")
-            if len(parts) == 2 and bits(parts[1]) != "0":
-                out.append("g%s,%s;" % (bits(parts[0]), parts[1]))
+        if c in (b"f", b"d", b"g", b"h"):
+            j = b.index(b";", i)
+            parts = b[i + 1:j].split(b",")
+            if len(parts) == 2 and bits(parts[1]) != b"0":
+                out.append(b"g" + bits(parts[0]) + b"," + parts[1] + b";")
             else:
-                out.append("f%s;" % bits(parts[0]))
+                out.append(b"f" + bits(parts[0]) + b";")
             i = j + 1
-        elif c == "n":
-            j = s.index(";", i) + 1
-            out.append(s[i:j])
+        elif c == b"n":
+            j = b.index(b";", i) + 1
+            out.append(b[i:j])
             i = j
-        elif c == "z":
-            j = s.index(";", s.index(";", i) + 1) + 1
-            out.append(s[i:j])
+        elif c == b"z":
+            j = b.index(b";", b.index(b";", i) + 1) + 1
+            out.append(b[i:j])
             i = j
-        elif c in "sFD":
-            k = s.index(":", i)
-            j = k + 1 + int(s[i + 1:k])
-            out.append(s[i:j])
+        elif c in (b"s", b"F", b"D"):
+            k = b.index(b":", i)
+            j = k + 1 + int(b[i + 1:k])
+            out.append(b[i:j])
             i = j
-        elif c in "cR":
-            out.append(s[i:i + 2])
+        elif c in (b"c", b"R"):
+            out.append(b[i:i + 2])
             i += 2
             expect = False
         else:
             # A or M and their count, or P: what follows is copied up to '{'
             out.append(c)
             i += 1
-    return "".join(out)
-
+    return b"".join(out)
 
 # The largest integer an expression may hold (the engine's MAX_INT_BITS):
 # expressions cross into the engine as decimal text, so a larger one is

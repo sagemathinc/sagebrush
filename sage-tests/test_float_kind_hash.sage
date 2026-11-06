@@ -24,6 +24,12 @@ pairs = [('RR/RDF', sin(x + RR(1.5)), sin(x + RDF(1.5))),
          ('RR/exact', x + RR(1.5), x + 3/2)]
 for n, a, b in pairs:
     print(n, '|', bool(a == b), hash(a) == hash(b), len({a, b}), {a: 1}.get(b), b in {a})
+# Names of 3, 2 and 1 bytes in UTF-8 (the engine writes name lengths in bytes: daybreak3's HASH-2)
+for vn in ['\u53d8', '\u03b1', 'w']:
+    v = var(vn)
+    for n, a, b in [('direct', v + RR(1.5), v + RDF(1.5)), ('nested', sin(v*RR(2.5)) + cos(v), sin(v*RDF(2.5)) + cos(v)),
+                    ('complex', exp(v + CC(1, 2)), exp(v + CDF(1, 2))), ('name and float', v^2*RDF(0.5) + SR.var('fd'), v^2*RR(0.5) + SR.var('fd'))]:
+        print(len(vn.encode('utf-8')), n, '|', bool(a == b), hash(a) == hash(b), len({a, b}), {a: 1}.get(b), b in {a})
 M = -2^63
 for n, e in [('MIN', M), ('MIN+1', M + 1), ('-1', -1), ('0', 0), ('MAX', -M - 1), ('-2^64', -2^64)]:
     for bn, b in [('2', RDF(2)), ('0.5', RDF(0.5)), ('-1', RDF(-1)), ('1', RDF(1))]:

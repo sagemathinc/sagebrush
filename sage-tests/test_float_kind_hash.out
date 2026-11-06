@@ -13,6 +13,18 @@ nested c | True True 1 1 True
 names | True True 1 1 True
 rel | True True 1 1 True
 RR/exact | True False 2 None False
+3 direct | True True 1 1 True
+3 nested | True True 1 1 True
+3 complex | True True 1 1 True
+3 name and float | True True 1 1 True
+2 direct | True True 1 1 True
+2 nested | True True 1 1 True
+2 complex | True True 1 1 True
+2 name and float | True True 1 1 True
+1 direct | True True 1 1 True
+1 nested | True True 1 1 True
+1 complex | True True 1 1 True
+1 name and float | True True 1 1 True
 RDF(2)^MIN | 0.0
 RDF(0.5)^MIN | +infinity
 RDF(-1)^MIN | 1.0
