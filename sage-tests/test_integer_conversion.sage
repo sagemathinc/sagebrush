@@ -46,3 +46,17 @@ for k, b in [("bytearray", bytearray(b"2")), ("memoryview", memoryview(b"2")), (
             print(n, k, "->", repr(f("10", b)))
         except Exception as e:
             print(n, k, "!!", type(e).__name__, e)
+# a base object is converted through __int__; one with only __index__ is refused
+class IndexOnly:
+    def __index__(self): return int(2)
+class IntOnly:
+    def __int__(self): return int(2)
+class Both:
+    def __int__(self): return int(2)
+    def __index__(self): return int(3)
+for k, b in [("IndexOnly", IndexOnly()), ("IntOnly", IntOnly()), ("Both", Both())]:
+    for f, n in ((Integer, "I"), (ZZ, "Z")):
+        try:
+            print(n, k, "->", repr(f("10", b)))
+        except Exception as e:
+            print(n, k, "!!", type(e).__name__, e)
