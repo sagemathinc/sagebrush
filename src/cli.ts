@@ -81,6 +81,8 @@ const USAGE = `usage: sagebrush [-c cmd | -m mod | file | -] [args]
            check a .tex file as Sagebrush's LaTeX editor shows it, run its
            SageTeX code, and see it: an HTML file, and a PNG per beamer frame
            (sagebrush latex --help)
+
+Examples: https://sagebrush.space/examples/ (in the page: File > Examples…)
 `;
 
 // A SystemExit's status as the process's exit code, by CPython's rule
