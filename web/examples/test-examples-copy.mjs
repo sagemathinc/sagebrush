@@ -44,10 +44,10 @@ function example(id, title, files, o = {}) {
   const main = o.main ?? files[0][0];
   const list = files.map(([path, bytes]) => ({ path, bytes: bytes.length, sha256: sha(bytes), encoding: "utf-8" }));
   if (o.badHash) list[o.badHash].sha256 = "0".repeat(64);
-  const fj = Buffer.from(JSON.stringify({ id, main, files: list }, null, 1) + "\n");
+  const fj = Buffer.from(JSON.stringify({ id: o.fjId ?? id, main, files: list, ...(o.pad ? { pad: "x".repeat(o.pad) } : {}) }, null, 1) + "\n");
   const members = files.map(([name, bytes], i) => ({ name: o.renameMember === i ? name + "x" : name, bytes }));
   const slug = id.split("/")[1];
-  routes.set(`/examples/${id}/files.json`, o.redirect ? { redirect: "https://example.com/files.json" } : fj);
+  routes.set(`/examples/${id}/files.json`, o.redirect ? { redirect: "https://example.com/files.json" } : o.stream ? { stream: fj } : fj);
   routes.set(`/examples/${id}/${slug}.zip`, zip(members));
   catalog.examples.push({ id, kind: id.split("/")[0], title, summary: "a test", tags: ["basics"], level: "intro", mode: "python", main, files: files.length, bytes: 0, files_sha256: o.badCatalog ? "f".repeat(64) : sha(fj), url: `/examples/${id}/` });
 }
@@ -68,6 +68,16 @@ example("notebook/main-kind", "Main kind", [["a.txt", t("a")]]);
 example("notebook/too-big", "Too big", [["main.ipynb", nb("13")], ["big.bin", Buffer.alloc(2 * 1024 * 1024 + 1)]]);
 example("notebook/not-ipynb", "Not ipynb", [["main.ipynb", t("{}")]]);
 example("notebook/redirect", "Redirect", [["main.ipynb", nb("14")]], { redirect: true });
+// (grader's r549 guards, one case each: deeper than 4, a dotfile, an escape, a file that is also a folder, 41 files,
+// files.json naming another id, a files.json over its cap with no content-length (streamed), an id the ID rule refuses)
+example("notebook/deep5", "Deep5", [["main.ipynb", nb("15")], ["a/b/c/d/e.txt", t("e")]]);
+example("notebook/dotfile", "Dotfile", [["main.ipynb", nb("16")], [".env", t("x")]]);
+example("notebook/escape-pct", "Escape pct", [["main.ipynb", nb("17")], ["a%41.txt", t("x")]]);
+example("notebook/file-folder", "File folder", [["main.ipynb", nb("18")], ["a", t("x")], ["a/b.txt", t("y")]]);
+example("notebook/too-many", "Too many", [["main.ipynb", nb("19")], ...Array.from({ length: 40 }, (_, i) => [`f${i}.txt`, t(String(i))])]);
+example("notebook/wrong-id", "Wrong id", [["main.ipynb", nb("20")]], { fjId: "notebook/pair" });
+example("notebook/streamed-big", "Streamed big", [["main.ipynb", nb("21")]], { stream: true, pad: 70 * 1024 });
+example("notebook/Bad_Id", "Bad id", [["main.ipynb", nb("22")]]);
 // (a title that would close a script or open a tag, for the panel: A4 in its actual embedding)
 catalog.examples.push({ id: "notebook/evil-title", kind: "notebook", title: '</script><img src=x onerror="window.pwned=1"><b>bold</b>', summary: "<script>window.pwned=2</script>", tags: ["<i>x</i>"], level: "intro", mode: "python", main: "main.ipynb", files: 1, bytes: 0, files_sha256: "0".repeat(64), url: "/examples/notebook/evil-title/" });
 routes.set("/examples/index.json", Buffer.from(JSON.stringify(catalog)));
@@ -78,6 +88,8 @@ const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req) => {
   const r = routes.get(p);
   if (!r) return new Response("not found", { status: 404 });
   if (r.redirect) return new Response(null, { status: 302, headers: { location: r.redirect } });
+  // (a body with no content-length: the copy path's own byte count must stop it)
+  if (r.stream) return new Response(new ReadableStream({ start(c) { for (let i = 0; i < r.stream.length; i += 8192) c.enqueue(r.stream.subarray(i, i + 8192)); c.close(); } }), { headers: { "content-type": "application/json" } });
   return new Response(r, { headers: { "content-type": p.endsWith(".json") ? "application/json" : "application/octet-stream" } });
 } });
 

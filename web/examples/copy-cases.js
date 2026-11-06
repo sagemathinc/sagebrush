@@ -21,7 +21,7 @@ export async function run() {
     await walk(under);
     return all.sort();
   };
-  const refused = async (id, code, what, o = {}) => {
+  const refused = async (id, code, what, why = null, o = {}) => {
     const before = JSON.stringify(await paths("/"));
     let err = null;
     try {
@@ -29,7 +29,7 @@ export async function run() {
     } catch (e) {
       err = e;
     }
-    check(err instanceof C.ExampleError && err.code === code, `${what}: refused, ${code} (${err?.code}: ${err?.message})`);
+    check(err instanceof C.ExampleError && err.code === code && (!why || why.test(err.message)), `${what}: refused, ${code}${why ? " " + why : ""} (${err?.code}: ${err?.message})`);
     check(JSON.stringify(await paths("/")) === before, `${what}: the workspace is unchanged`);
   };
 
@@ -54,19 +54,27 @@ export async function run() {
   await refused("notebook/nope", "unknown", "an id the catalog doesn't name");
   await refused("notebook/..%2f..", "unknown", "an encoded ..");
   await refused("../notebook/hello-python", "unknown", "a relative id");
-  await refused("notebook/bad-hash", "invalid", "a file whose bytes aren't files.json's sha256");
-  await refused("notebook/bad-catalog", "invalid", "a files.json that isn't the one the catalog names");
-  await refused("notebook/bad-member", "invalid", "a ZIP member named other than files.json says");
-  await refused("notebook/dotdot", "invalid", "a .. path");
-  await refused("notebook/absolute", "invalid", "an absolute path");
-  await refused("notebook/backslash", "invalid", "a backslash path");
-  await refused("notebook/collide", "invalid", "two paths the same but for case");
-  await refused("notebook/nfc", "invalid", "a path not in NFC");
-  await refused("notebook/main-missing", "invalid", "main not among the files");
-  await refused("notebook/main-kind", "invalid", "main not of the example's kind");
-  await refused("notebook/too-big", "invalid", "more than 2 MiB");
+  await refused("notebook/bad-hash", "invalid", "a file whose bytes aren't files.json's sha256", /not the bytes files\.json names/);
+  await refused("notebook/bad-catalog", "invalid", "a files.json that isn't the one the catalog names", /isn't the one the catalog names/);
+  await refused("notebook/bad-member", "invalid", "a ZIP member named other than files.json says", /members aren't files\.json's files/);
+  await refused("notebook/dotdot", "invalid", "a .. path", /segment "\.\."/);
+  await refused("notebook/absolute", "invalid", "an absolute path", /absolute, a backslash or an escape/);
+  await refused("notebook/backslash", "invalid", "a backslash path", /absolute, a backslash or an escape/);
+  await refused("notebook/collide", "invalid", "two paths the same but for case", /the same as another, by case or Unicode/);
+  await refused("notebook/nfc", "invalid", "a path not in NFC", /not NFC/);
+  await refused("notebook/main-missing", "invalid", "main not among the files", /main isn't one of its files/);
+  await refused("notebook/main-kind", "invalid", "main not of the example's kind", /main isn't a notebook's file/);
+  await refused("notebook/too-big", "invalid", "more than 2 MiB", /\d+ bytes, more than 2097152/);
   await refused("notebook/not-ipynb", "invalid", "an .ipynb that isn't a notebook");
   await refused("notebook/redirect", "fetch", "a files.json that redirects (to another origin)");
+  await refused("notebook/deep5", "invalid", "a path deeper than 4", /deeper than 4/);
+  await refused("notebook/dotfile", "invalid", "a dotfile", /segment "\.env"/);
+  await refused("notebook/escape-pct", "invalid", "a %-escape in a path", /absolute, a backslash or an escape/);
+  await refused("notebook/file-folder", "invalid", "a path both a file and a folder", /both a file and a folder/);
+  await refused("notebook/too-many", "invalid", "41 files", /1 to 40 files/);
+  await refused("notebook/wrong-id", "invalid", "a files.json naming another example", /files\.json is "notebook\/pair"'s, not notebook\/wrong-id's/);
+  await refused("notebook/streamed-big", "invalid", "a files.json over 64 KiB with no content-length", /: more than 65536 bytes/);
+  await refused("notebook/Bad_Id", "unknown", "an id the catalog has but the ID rule refuses");
   const esc = await C.copyExample(ws, "notebook/escape-title", { catalog });
   check(/^\/Examples\/[^/]+$/.test(esc.root) && !esc.root.split("/").includes("..") && esc.made.every((e) => e.path.startsWith(esc.root)), "a title with slashes and dots: one folder under /Examples, everything inside it: " + esc.root);
 
