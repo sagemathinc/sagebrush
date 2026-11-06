@@ -121,6 +121,7 @@ try {
     await until(`!!document.querySelector('.sbfiles .frow[data-path="/Welcome.ipynb"]')`, 20000);
     await ev(`${W}.remove("/Welcome.ipynb").then(() => true)`);
     const listed = await until(`[...document.querySelectorAll(".sbfiles .fempty button")].some((b) => b.textContent === "New LaTeX document")`, 20000);
+    check(listed && await ev(`[...document.querySelectorAll(".sbfiles .fempty button")].some((b) => b.textContent === "From an example…")`), "phone: the empty file list offers From an example… too (U0)");
     const er = listed ? await reach(".sbfiles .fempty button", "New LaTeX document") : await ev(`({ files: !!document.querySelector(".sbfiles"), hidden: document.getElementById("wssidebar")?.hidden, rows: [...document.querySelectorAll(".sbfiles .frow")].map((r) => r.dataset.path).slice(0, 8), empty: [...document.querySelectorAll(".sbfiles .fempty")].map((x) => x.textContent.slice(0, 60)) })`);
     check(listed && er.found && er.inView && er.top && er.w === 390, "phone: the empty file list offers New LaTeX document, in view and not covered", er);
     if (listed) { await mark(); await ev(`([...document.querySelectorAll(".sbfiles .fempty button")].find((b) => b.textContent === "New LaTeX document").click(), true)`); }
@@ -1006,7 +1007,9 @@ try {
     const spy = () => ev(`(() => { const t = document.querySelector(".tex-src"), d = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value"); window.__vals = [];
       Object.defineProperty(t, "value", { configurable: true, get() { return d.get.call(this); }, set(v) { window.__vals.push(v); d.set.call(this, v); } }); return true; })()`);
     const LONG = DOC.replace("\\end{document}", Array.from({ length: 220 }, (_, i) => `Line ${i} of filler text.`).join("\n") + "\n\\end{document}");
-    const opened = async (name, bytes = enc(DOC)) => { const f = await mk(name, bytes); await open(f); await until(`!!document.querySelector(".tex-src")`, 20000); await sleep(500); return f; };
+    // (the page's workspace first, and the agents' handle, set late in the editor's mount: waited for, so neither is used
+    // before it is there, under load)
+    const opened = async (name, bytes = enc(DOC)) => { await until(`!!${W}`, 20000); const f = await mk(name, bytes); await open(f); await until(`!!document.querySelector(".tex-src") && !!window.__sbTexWs`, 20000); await sleep(500); return f; };
     // (a dirty editor and the agent's change: the bar up)
     const conflicted = async (name) => { await opened(name); await typeInto(DOC + "% mine\n"); await agentWrite(name, DOC + "% theirs\n"); return barShows(); };
 
@@ -1541,6 +1544,59 @@ try {
   const boardTex = await fresh(`location.pathname === "/" && /[?&]tex=/.test(location.search) && !!document.querySelector(".tex-page .tex-src") && !!${W}`, 60000).catch(() => false);
   const texAfter = boardTex ? await ev(untitled) : [], opened = await ev(`new URLSearchParams(location.search).get("tex")`);
   check(boardTex && texAfter.length === texBefore.length + 1 && texAfter.includes(opened) && !texBefore.includes(opened), "U0: the board's New ▸ LaTeX document: a new Untitled .tex made at the top of the files and opened in the editor", { texBefore, texAfter, opened });
+  // ---- U0's entry points, each pinned (grader's r764): New LaTeX document in a folder (a folder's ⋯ menu, browser.ts;
+  // the notebook page's hook; the page module's newTex), File ▸ New ▸ LaTeX document saving the notebook first, the
+  // board's file panel From an example…, and the editor's File ▸ Open… and its Ctrl+O
+  {
+    // (a folder's ⋯: New LaTeX document here, made in that folder and opened in the editor)
+    await ev(`localStorage.setItem("sagebrush-files-sidebar", "1"); true`);
+    await go(base + "?latex=1"); await until(`!!${W}`, 60000);
+    await ev(`${W}.mkdir("/u0sub").then(() => true, () => true)`);
+    const subRow = '.sbfiles .frow[data-path="/u0sub"]';
+    await until(`!!document.querySelector(${JSON.stringify(subRow)})`, 20000);
+    await ev(`(document.querySelector(${JSON.stringify(subRow)}).querySelector("button.more").click(), true)`);
+    const here = await until(`[...document.querySelectorAll(".sbfmenu button")].some((b) => b.textContent === "New LaTeX document here")`, 5000);
+    check(here, "U0: a folder's ⋯ menu offers New LaTeX document here", await ev(`[...document.querySelectorAll(".sbfmenu button")].map((b) => b.textContent)`));
+    if (here) { await mark(); await ev(`([...document.querySelectorAll(".sbfmenu button")].find((b) => b.textContent === "New LaTeX document here").click(), true)`); }
+    const inSub = here && (await fresh(`!!document.querySelector(".tex-page .tex-src") && !!${W}`, 20000).catch(() => false)) && await ev(`${W}.stat("/u0sub/Untitled.tex").then((e) => !!e?.fid && new URLSearchParams(location.search).get("tex") === e.fid)`);
+    check(inSub, "U0: New LaTeX document here: /u0sub/Untitled.tex, made in that folder and opened", { at: await ev("location.search"), sub: await ev(`${W}.list("/u0sub").then((l) => l.map((e) => e.path))`) });
+    // (File ▸ New ▸ LaTeX document from a notebook with an edit not yet saved: saved first, and nobody asked to leave)
+    await go(base + "?latex=1"); await until(`!!${W} && !!document.querySelector(".cell textarea")`, 60000);
+    const edit = "u0_saved_first = " + Date.now(), d0 = dialogs.length;
+    await mark();
+    await ev(`(() => { const ta = document.querySelector(".cell textarea"); ta.value = ${JSON.stringify(edit)}; ta.dispatchEvent(new Event("input", { bubbles: true })); document.querySelector('#filemenu [data-f="newlatex"]').click(); return true; })()`);
+    const left = await fresh(`!!document.querySelector(".tex-page .tex-src") && !!${W}`, 20000).catch(() => false);
+    const asked = dialogs.slice(d0);
+    // (the notebook opened again, as a person going back would: the edit is in its cell)
+    if (left) { await go(base + "?latex=1"); await until(`!!${W} && !!document.querySelector(".cell textarea")`, 60000); }
+    const kept = left && await until(`[...document.querySelectorAll(".cell textarea")].some((t) => t.value.includes(${JSON.stringify(edit)}))`, 10000);
+    check(left && kept && !asked.includes("beforeunload"), "U0: File ▸ New ▸ LaTeX document saves the notebook first: its edit kept, nobody asked to leave", { left, kept, dialogs: asked, cells: await ev(`[...document.querySelectorAll(".cell textarea")].map((t) => t.value.slice(0, 60))`) });
+    // (the board's file panel: its New offers From an example…, as the File menu has it)
+    await mark(); await send("Page.navigate", { url: base + "board/?new=python" });
+    await fresh(`!!window.sagebrush?.board?.snapshot && window.sagebrush.board.snapshot().doc !== null && !!document.querySelector('.sbfiles .fh button[aria-label="New"]')`, 60000);
+    const boardPanelNew = await ev(`(async () => { document.querySelector('.sbfiles .fh button[aria-label="New"]').click(); await new Promise((r) => setTimeout(r, 0)); return [...document.querySelectorAll(".sbfmenu button")].map((b) => b.textContent); })()`);
+    check(boardPanelNew.includes("From an example…"), "U0: the board's file panel New offers From an example…", boardPanelNew);
+    await ev(`(document.querySelectorAll(".sbfmenu").forEach((m) => m.remove()), true)`);
+    // (the editor's File ▸ Open…: the files dialog; and Ctrl+O, its shortcut, the same)
+    const subFid = await ev(`${W}.stat("/u0sub/Untitled.tex").then((e) => e?.fid ?? null)`);
+    // (one dialog each time: the notebook page under the editor answers no File-menu key of its own)
+    const inEditor = !!subFid && await open(subFid);
+    if (inEditor) await ev(`(document.querySelector(".tex-filebtn").click(), document.querySelector('.tex-filemenu [data-item="open"]').click(), true)`);
+    check(inEditor && await until(`document.querySelectorAll(".sbfopen").length === 1`, 5000), "U0: the editor's File ▸ Open… shows the files dialog", { subFid, n: await ev(`document.querySelectorAll(".sbfopen").length`) });
+    await ev(`(document.querySelectorAll(".sbfopen").forEach((d) => d.remove()), true)`);
+    if (inEditor) await send("Input.dispatchKeyEvent", { type: "keyDown", key: "o", code: "KeyO", modifiers: 2, windowsVirtualKeyCode: 79 });
+    const ctrlO = inEditor && await until(`document.querySelectorAll(".sbfopen").length > 0`, 5000) && (await sleep(300), await ev(`document.querySelectorAll(".sbfopen").length`));
+    check(ctrlO === 1, "U0: in the editor, Ctrl+O (File ▸ Open…'s shortcut) shows the files dialog, once", { ctrlO });
+    await ev(`(document.querySelectorAll(".sbfopen").forEach((d) => d.remove()), true)`);
+    // (Ctrl+Alt+N, New ▸ Notebook's shortcut: one notebook made, and opened)
+    const nbs = `${W}.list("/").then((l) => l.filter((e) => e.kind === "notebook").map((e) => e.path).sort())`;
+    const nbBefore = inEditor ? await ev(nbs) : [];
+    if (inEditor) { await mark(); await send("Input.dispatchKeyEvent", { type: "keyDown", key: "n", code: "KeyN", modifiers: 3, windowsVirtualKeyCode: 78 }); }
+    const nbOpened = inEditor && await fresh(`!!${W} && !!document.querySelector(".cell textarea") && !document.querySelector(".tex-page")`, 20000).catch(() => false);
+    if (nbOpened) await sleep(1000);
+    const nbAfter = inEditor ? await ev(`(async () => { for (let i = 0; i < 50 && !window.sagebrush?.workspace; i++) await new Promise((r) => setTimeout(r, 100)); return ${nbs}; })()`).catch(() => []) : [];
+    check(nbOpened && nbAfter.length === nbBefore.length + 1, "U0: in the editor, Ctrl+Alt+N (New ▸ Notebook's shortcut) makes one notebook and opens it", { nbOpened, at: await ev("location.search").catch(() => null), old: await ev("!!window.__sbOld").catch(() => null), made: nbAfter.filter((p) => !nbBefore.includes(p)), dialogs: dialogText.slice(-3) });
+  }
   // A1, A7: the files shown beside the page, not over it; Files hides and shows them, the document staying open
   const UXDOC = "\\documentclass{article}\n\\begin{document}\n\\section{Hello}\nSome text " + "long words ".repeat(60) + "\n\\end{document}\n";
   const fu = await mk("/t/ux.tex", enc(UXDOC));

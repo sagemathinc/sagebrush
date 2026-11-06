@@ -2650,7 +2650,8 @@ const toggleFileMenu = menuOf(fileBtn, fileMenu);
 // (Ctrl+Alt+N a new notebook, Ctrl+O Open…: the File menu's keys)
 document.addEventListener("keydown", (e) => {
   const it = fileMenuKey(e);
-  if (!it) return;
+  // (the LaTeX editor's page over this one: its own File menu answers them, never both: one notebook a Ctrl+Alt+N)
+  if (!it || document.querySelector(".tex-page")) return;
   e.preventDefault();
   fileMenu.querySelector(`[data-item="${it}"]:not([disabled])`)?.click();
 });
