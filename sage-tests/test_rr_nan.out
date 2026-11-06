@@ -1,0 +1,117 @@
+Real Field with 53 bits of precision | inf*x => (+infinity)*x
+Real Field with 53 bits of precision | x*inf => (+infinity)*x
+Real Field with 53 bits of precision | ninf*x => -infinity*x
+Real Field with 53 bits of precision | nan*x => NaN*x
+Real Field with 53 bits of precision | -inf*x => -infinity*x
+Real Field with 53 bits of precision | -(inf*x) => -infinity*x
+Real Field with 53 bits of precision | inf*x^2 => (+infinity)*x^2
+Real Field with 53 bits of precision | inf*x*y => (+infinity)*x*y
+Real Field with 53 bits of precision | ninf*x*y => -infinity*x*y
+Real Field with 53 bits of precision | inf*x + 1 => (+infinity)*x + 1
+Real Field with 53 bits of precision | ninf*x + y => -infinity*x + y
+Real Field with 53 bits of precision | x + inf => x + +infinity
+Real Field with 53 bits of precision | x + ninf => x - infinity
+Real Field with 53 bits of precision | x - inf => x - infinity
+Real Field with 53 bits of precision | x*y + inf => x*y + +infinity
+Real Field with 53 bits of precision | inf*x - x => (+infinity)*x
+Real Field with 53 bits of precision | inf*inf*x => (+infinity)*x
+Real Field with 53 bits of precision | inf*ninf*x => -infinity*x
+Real Field with 53 bits of precision | inf*x*2 => (+infinity)*x
+Real Field with 53 bits of precision | inf*x/2 => (+infinity)*x
+Real Field with 53 bits of precision | ninf*x*K(-2) => (+infinity)*x
+Real Field with 53 bits of precision | (inf*x).subs(x=2) => +infinity
+Real Field with 53 bits of precision | (inf*x).subs(x=-2) => -infinity
+Real Field with 53 bits of precision | (ninf*x).subs(x=3) => -infinity
+Real Field with 53 bits of precision | (nan*x).subs(x=1) => NaN
+Real Field with 53 bits of precision | (inf*x).coefficient(x) => +infinity
+Real Field with 53 bits of precision | (ninf*x).coefficient(x) => -infinity
+Real Field with 53 bits of precision | (inf*x + 1).subs(x=1) => +infinity
+Real Field with 53 bits of precision | SR(inf) + SR(ninf) => NaN
+Real Field with 53 bits of precision | SR(inf)*0 => 0
+Real Field with 53 bits of precision | SR(inf)*K(0)*x => NaN*x
+Real Field with 53 bits of precision | (x + 1)*inf => (+infinity)*x + +infinity
+Real Field with 53 bits of precision | expand((x + 1)*inf) => (+infinity)*x + +infinity
+Real Field with 53 bits of precision | expand((x + 1)*ninf) => -infinity*x - infinity
+Real Field with 53 bits of precision | SR(inf) => +infinity
+Real Field with 53 bits of precision | SR(ninf) => -infinity
+Real Field with 53 bits of precision | SR(nan) => NaN
+Real Field with 53 bits of precision | -SR(inf) => -infinity
+Real Field with 53 bits of precision | 1/SR(inf) => 0.000000000000000
+Real Field with 53 bits of precision | 1/SR(ninf) => -0.000000000000000
+Real Field with 53 bits of precision | SR(inf)^2 => +infinity
+Real Field with 53 bits of precision | SR(ninf)^3 => -infinity
+Real Field with 53 bits of precision | SR(ninf)^2 => +infinity
+Real Field with 53 bits of precision | inf*x == inf*x => (+infinity)*x == (+infinity)*x
+Real Double Field | inf*x => (+infinity)*x
+Real Double Field | x*inf => (+infinity)*x
+Real Double Field | ninf*x => -infinity*x
+Real Double Field | nan*x => NaN*x
+Real Double Field | -inf*x => -infinity*x
+Real Double Field | -(inf*x) => -infinity*x
+Real Double Field | inf*x^2 => (+infinity)*x^2
+Real Double Field | inf*x*y => (+infinity)*x*y
+Real Double Field | ninf*x*y => -infinity*x*y
+Real Double Field | inf*x + 1 => (+infinity)*x + 1
+Real Double Field | ninf*x + y => -infinity*x + y
+Real Double Field | x + inf => x + +infinity
+Real Double Field | x + ninf => x - infinity
+Real Double Field | x - inf => x - infinity
+Real Double Field | x*y + inf => x*y + +infinity
+Real Double Field | inf*x - x => (+infinity)*x
+Real Double Field | x/nan => NaN*x
+Real Double Field | inf*inf*x => (+infinity)*x
+Real Double Field | inf*ninf*x => -infinity*x
+Real Double Field | inf*x*2 => (+infinity)*x
+Real Double Field | inf*x/2 => (+infinity)*x
+Real Double Field | ninf*x*K(-2) => (+infinity)*x
+Real Double Field | (inf*x).subs(x=2) => +infinity
+Real Double Field | (inf*x).subs(x=-2) => -infinity
+Real Double Field | (ninf*x).subs(x=3) => -infinity
+Real Double Field | (nan*x).subs(x=1) => NaN
+Real Double Field | (inf*x).coefficient(x) => +infinity
+Real Double Field | (ninf*x).coefficient(x) => -infinity
+Real Double Field | (inf*x + 1).subs(x=1) => +infinity
+Real Double Field | SR(inf) + SR(ninf) => NaN
+Real Double Field | SR(inf)*0 => 0
+Real Double Field | SR(inf)*K(0)*x => NaN*x
+Real Double Field | (x + 1)*inf => (+infinity)*x + +infinity
+Real Double Field | expand((x + 1)*inf) => (+infinity)*x + +infinity
+Real Double Field | expand((x + 1)*ninf) => -infinity*x - infinity
+Real Double Field | SR(inf) => +infinity
+Real Double Field | SR(ninf) => -infinity
+Real Double Field | SR(nan) => NaN
+Real Double Field | -SR(inf) => -infinity
+Real Double Field | SR(inf)^2 => +infinity
+Real Double Field | SR(ninf)^3 => -infinity
+Real Double Field | SR(ninf)^2 => +infinity
+Real Double Field | inf*x == inf*x => (+infinity)*x == (+infinity)*x
+SR(RR(1.5))*0 => 0
+SR(RR('inf'))*0 => 0
+SR(RR('nan'))*0 => 0
+0*SR(RR('nan')) => 0
+RR('nan')*x*0 => 0
+x*0*RR('inf') => 0
+RR(1.5)*x*0 => 0
+1/RR('nan')*x => NaN*x
+SR(RR(2))*SR(CC(infinity, 1)) => +infinity + NaN*I
+SR(CC(infinity, 1))*SR(RR(2)) => +infinity + NaN*I
+SR(RR(2))*SR(CC(1, infinity)) => NaN + +infinity*I
+SR(CC(1, infinity))*SR(RR(2)) => NaN + +infinity*I
+SR(RR(-2))*SR(CC(infinity, 1)) => -infinity + NaN*I
+SR(CC(infinity, 1))*SR(RR(-2)) => -infinity + NaN*I
+SR(RR(-2))*SR(CC(1, infinity)) => NaN - +infinity*I
+SR(CC(1, infinity))*SR(RR(-2)) => NaN - +infinity*I
+SR(RR(infinity))*SR(CC(1, 2)) => +infinity + +infinity*I
+SR(CC(1, 2))*SR(RR(infinity)) => +infinity + +infinity*I
+SR(RR(-infinity))*SR(CC(1, 2)) => -infinity - +infinity*I
+SR(RR(infinity))*SR(CC(1, 2))*x => (+infinity + +infinity*I)*x
+SR(RR(2))*SR(CC(infinity, 1))*x => (+infinity + NaN*I)*x
+SR(1 + 2*I)*SR(RR(2)) => 2.00000000000000 + 4.00000000000000*I
+SR(RR(2))*SR(1 + 2*I) => 2.00000000000000 + 4.00000000000000*I
+SR(1 + I)*RR(1.5)*x => (1.50000000000000 + 1.50000000000000*I)*x
+RR(1.5)*x*(1 + I) => (1.50000000000000 + 1.50000000000000*I)*x
+SR(1 + 2*I)*SR(CC(3, 1)) => 1.00000000000000 + 7.00000000000000*I
+SR(CC(infinity, 1))*1 => +infinity + 1.00000000000000*I
+1*SR(CC(infinity, 1)) => +infinity + 1.00000000000000*I
+SR(1)*SR(CC(infinity, 1))*SR(1) => +infinity + 1.00000000000000*I
+SR(CC(infinity, 1))*x*1 => (+infinity + 1.00000000000000*I)*x

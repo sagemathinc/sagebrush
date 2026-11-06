@@ -1,0 +1,28 @@
+\documentclass{article}
+\usepackage{sagetex}
+\title{A paper with its own helper code}
+\author{Sagebrush}
+\date{}
+\begin{document}
+\maketitle
+
+\emph{In this preview:} this document is a folder: \texttt{paper.tex} and, beside it, \texttt{helper.py}, which
+holds its longer code. The SageTeX blocks import it like any Python module, because a document's code runs in the
+document's own folder, as \texttt{sage paper.sagetex.sage} does. Download or share it \emph{with its files}, and
+the helper comes along.
+
+\begin{sagesilent}
+from helper import pell, collatz_steps
+sols = pell(61, 2)
+\end{sagesilent}
+
+\section*{Pell's equation}
+Fermat's challenge: the smallest solution of $x^2 - 61y^2 = 1$ in positive integers is
+$(x, y) = \sage{sols[0]}$, and the next is $\sage{sols[1]}$.
+Check: $x^2 - 61 y^2 = \sage{sols[1][0]^2 - 61*sols[1][1]^2}$.
+
+\section*{Collatz}
+Of the starting values below $1000$, the one taking the most steps to reach $1$ is
+$n = \sage{max(range(1, 1000), key=collatz_steps)}$, after
+$\sage{collatz_steps(max(range(1, 1000), key=collatz_steps))}$ steps.
+\end{document}
