@@ -10,6 +10,7 @@ import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
+import { dispatch } from "../miniflare-dispatch.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const DIST = join(here, "..", "dist");
@@ -60,7 +61,7 @@ export async function startDev({ sitePort = 8790, filesPort = 8791, limits } = {
     for await (const c of req) chunks.push(c);
     const headers = {};
     for (const [k, v] of Object.entries(req.headers)) if (typeof v === "string") headers[k] = v;
-    const r = await mf.dispatchFetch(url, { method: req.method, headers, body: chunks.length && req.method !== "GET" && req.method !== "HEAD" ? Buffer.concat(chunks) : undefined, redirect: "manual" });
+    const r = await dispatch(mf, url, { method: req.method, headers, body: chunks.length && req.method !== "GET" && req.method !== "HEAD" ? Buffer.concat(chunks) : undefined, redirect: "manual" });
     const h = {};
     r.headers.forEach((v, k) => { if (k !== "set-cookie") h[k] = v; });
     const cookies = r.headers.getSetCookie();
@@ -80,7 +81,9 @@ export async function startDev({ sitePort = 8790, filesPort = 8791, limits } = {
     if (existsSync(file) && statSync(file).isDirectory()) file = join(file, "index.html");
     if (!existsSync(file)) return res.writeHead(404).end("not found");
     const h = { "content-type": MIME[extname(file)] ?? "application/octet-stream", "cache-control": "no-store" };
-    for (const [pattern, hs] of rules) if (path === pattern || (pattern.endsWith("*") && path.startsWith(pattern.slice(0, -1)))) for (const [k, v] of hs) h[k] = v;
+    // (a rule's header replaces the default, as Cloudflare's _headers does: names in lower case, so "Cache-Control"
+    // isn't sent beside "cache-control: no-store", which a browser joins into one no-store header)
+    for (const [pattern, hs] of rules) if (path === pattern || (pattern.endsWith("*") && path.startsWith(pattern.slice(0, -1)))) for (const [k, v] of hs) h[k.toLowerCase()] = v;
     res.writeHead(200, h);
     res.end(readFileSync(file));
   });

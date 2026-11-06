@@ -1,0 +1,26 @@
+== limit
+8388608
+== wide-empty-row.cap
+(3330, ((1, 3331), ['float64']))
+== wide-empty-row.cap+1
+"read_csv: the decoded-memory budget would be exceeded by a column (1024 B more, 8387648 B in use, limit 8388608 B: Sagebrush's limit 'pandas.decoded_bytes')"
+== tall-numeric.cap
+(12083, ((12083, 1), ['int64']))
+== tall-numeric.cap+1
+"read_csv: the decoded-memory budget would be exceeded by a numeric column's growth (353984 B more, 8034736 B in use, limit 8388608 B: Sagebrush's limit 'pandas.decoded_bytes')"
+== small-strings.cap
+(10538, ((10538, 1), ['str']))
+== small-strings.cap+1
+"read_csv: the decoded-memory budget would be exceeded by a column's list growth (94896 B more, 8294060 B in use, limit 8388608 B: Sagebrush's limit 'pandas.decoded_bytes')"
+== late-widening.cap
+(9917, ((9918, 1), ['str']))
+== late-widening.cap+1
+"read_csv: the decoded-memory budget would be exceeded by widening a column to str (843080 B more, 7545592 B in use, limit 8388608 B: Sagebrush's limit 'pandas.decoded_bytes')"
+== many-labels.cap
+(1702, ((0, 1702), ['object']))
+== many-labels.cap+1
+"read_csv: the decoded-memory budget would be exceeded by a column (1352 B more, 8387828 B in use, limit 8388608 B: Sagebrush's limit 'pandas.decoded_bytes')"
+== read-then-map.cap
+(3628, (2, 1))
+== read-then-map.cap+1
+"read_csv: the decoded-memory budget would be exceeded by a numeric column's growth (216464 B more, 8172824 B in use, limit 8388608 B: Sagebrush's limit 'pandas.decoded_bytes')"

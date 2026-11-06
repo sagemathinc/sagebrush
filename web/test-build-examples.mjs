@@ -5,13 +5,13 @@
 // images <img>s of data: URLs); a LaTeX preview's stylesheet put back only where its marker names the corpus's one
 // copy (r4.1); the ZIPs readable, the same bytes as the files, the same bytes every build.
 //   bun web/test-build-examples.mjs
-import { mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync, cpSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync, cpSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { inflateRawSync } from "node:zlib";
 import { buildExamplesInto, latexPreview, notebookHtml, outputHtml, zip, esc, handlerIn, SITE_CAPS } from "./build-examples.ts";
-import { sitemapXml } from "./build-sitemap.ts";
+import { sitemapXml, buildSitemap } from "./build-sitemap.ts";
 import { sha256, fontsMark, filesJson } from "../scripts/examples-lib.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -64,24 +64,61 @@ for (const e of cat.examples) {
 check(cat.examples.find((e) => e.id === "notebook/sage-basics").mode === "sage", "a notebook's mode is in the catalog");
 
 // files.json and the ZIP: the same bytes as the files (A6), the same ZIP every build
+// unzip() reads a ZIP as a strict reader does, through its central directory: the end record's counts, size and
+// offset; each central entry's local header at its offset (no gap, no overlap), with the same name, CRC and sizes;
+// each member's CRC-32 (its own table here, not the writer's crc32.ts) over the inflated bytes.
+const CRC = Array.from({ length: 256 }, (_, n) => {
+  let c = n;
+  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  return c >>> 0;
+});
+const crc32 = (b) => {
+  let c = 0xffffffff;
+  for (const x of b) c = CRC[(c ^ x) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+};
 function unzip(buf) {
+  const e = buf.length - 22;
+  if (e < 0 || buf.readUInt32LE(e) !== 0x06054b50) throw new Error("no end record (or a comment after it)");
+  const onDisk = buf.readUInt16LE(e + 8), total = buf.readUInt16LE(e + 10), cdSize = buf.readUInt32LE(e + 12), cdOff = buf.readUInt32LE(e + 16);
+  if (buf.readUInt16LE(e + 4) !== 0 || buf.readUInt16LE(e + 6) !== 0 || onDisk !== total) throw new Error("the end record's disk counts");
+  if (cdOff + cdSize !== e) throw new Error("the central directory doesn't end where the end record starts");
   const out = new Map();
-  let i = 0;
-  while (buf.readUInt32LE(i) === 0x04034b50) {
-    const csize = buf.readUInt32LE(i + 18), usize = buf.readUInt32LE(i + 22), nlen = buf.readUInt16LE(i + 26), xlen = buf.readUInt16LE(i + 28);
-    const name = buf.subarray(i + 30, i + 30 + nlen).toString("utf8");
-    const data = inflateRawSync(buf.subarray(i + 30 + nlen + xlen, i + 30 + nlen + xlen + csize));
-    if (data.length !== usize) throw new Error(name + ": size");
+  let c = cdOff, next = 0;
+  for (let k = 0; k < total; k++) {
+    if (buf.readUInt32LE(c) !== 0x02014b50) throw new Error(`central entry ${k}: no signature`);
+    const method = buf.readUInt16LE(c + 10), crc = buf.readUInt32LE(c + 16), csize = buf.readUInt32LE(c + 20), usize = buf.readUInt32LE(c + 24);
+    const nlen = buf.readUInt16LE(c + 28), xlen = buf.readUInt16LE(c + 30), clen = buf.readUInt16LE(c + 32), at = buf.readUInt32LE(c + 42);
+    const name = buf.subarray(c + 46, c + 46 + nlen).toString("utf8");
+    if (at !== next) throw new Error(`${name}: its local header is at ${at}, not ${next} (a gap or an overlap)`);
+    if (buf.readUInt32LE(at) !== 0x04034b50) throw new Error(`${name}: no local header at its offset`);
+    const lnlen = buf.readUInt16LE(at + 26), lxlen = buf.readUInt16LE(at + 28);
+    if (buf.subarray(at + 30, at + 30 + lnlen).toString("utf8") !== name) throw new Error(`${name}: the local header names another file`);
+    if (buf.readUInt16LE(at + 8) !== method || buf.readUInt32LE(at + 14) !== crc || buf.readUInt32LE(at + 18) !== csize || buf.readUInt32LE(at + 22) !== usize) throw new Error(`${name}: the local header's CRC or sizes differ from the central entry's`);
+    const raw = buf.subarray(at + 30 + lnlen + lxlen, at + 30 + lnlen + lxlen + csize);
+    const data = method === 8 ? inflateRawSync(raw) : method === 0 ? Buffer.from(raw) : null;
+    if (!data) throw new Error(`${name}: method ${method}`);
+    if (data.length !== usize) throw new Error(`${name}: ${data.length} bytes, not ${usize}`);
+    if (crc32(data) !== crc) throw new Error(`${name}: CRC-32 ${crc32(data).toString(16)}, not ${crc.toString(16)}`);
+    if (out.has(name)) throw new Error(`${name} twice`);
     out.set(name, data);
-    i += 30 + nlen + xlen + csize;
+    next = at + 30 + lnlen + lxlen + csize;
+    c += 46 + nlen + xlen + clen;
   }
-  if (buf.readUInt32LE(i) !== 0x02014b50) throw new Error("no central directory after the members");
+  if (next !== cdOff) throw new Error(`the members end at ${next}, not at the central directory (${cdOff})`);
+  if (c !== e) throw new Error(`the central directory holds more than the end record's ${total} entries`);
   return out;
 }
 for (const id of ids) {
   const dir = join(FIX, id);
   const m = JSON.parse(readFileSync(join(dir, "example.json"), "utf8"));
-  const z = unzip(readFileSync(join(out, "examples", id, `${id.split("/")[1]}.zip`)));
+  let z = new Map();
+  try {
+    z = unzip(readFileSync(join(out, "examples", id, `${id.split("/")[1]}.zip`)));
+    check(true, `${id}: its ZIP reads through the central directory, every CRC-32 right`);
+  } catch (e) {
+    check(false, `${id}: its ZIP reads through the central directory, every CRC-32 right: ${e.message}`);
+  }
   check(JSON.stringify([...z.keys()]) === JSON.stringify(m.files), `${id}: the ZIP has the manifest's files, in its order`);
   check(m.files.every((f) => z.get(f)?.equals(readFileSync(join(dir, f)))), `${id}: the ZIP's bytes are the files'`);
   const fj = JSON.parse(readFileSync(join(out, "examples", id, "files.json"), "utf8"));
@@ -179,9 +216,71 @@ for (const [cap, re] of [
 
 // ---- the ZIP writer alone: empty, UTF-8 names, deterministic
 const z1 = zip([{ name: "a/ü.txt", bytes: Buffer.from("hi") }, { name: "b.bin", bytes: Buffer.alloc(0) }]);
-const back = unzip(z1);
+let back = new Map();
+try {
+  back = unzip(z1);
+} catch (e) {
+  check(false, "the writer's ZIP reads strictly: " + e.message);
+}
 check(back.get("a/ü.txt")?.toString() === "hi" && back.get("b.bin")?.length === 0, "a UTF-8 name and an empty file come back");
 check(z1.equals(zip([{ name: "a/ü.txt", bytes: Buffer.from("hi") }, { name: "b.bin", bytes: Buffer.alloc(0) }])), "the same files, the same ZIP");
+// (and unzip() refuses what a strict reader refuses: grader's E19-E22, each one field of z1 zeroed)
+{
+  const cdOff = z1.readUInt32LE(z1.length - 6), second = z1.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]), cdOff + 1);
+  const e = z1.length - 22;
+  for (const [zero, what, re] of [
+    [(b) => b.writeUInt32LE(0, 14), "the first member's local CRC", /local header's CRC or sizes differ/],
+    [(b) => b.writeUInt32LE(0, second + 42), "the second member's local-header offset", /not \d+ \(a gap or an overlap\)/],
+    [(b) => b.writeUInt32LE(0, cdOff + 16), "the first member's central CRC", /local header's CRC or sizes differ/],
+    [(b) => b.writeUInt16LE(0, e + 10), "the end record's total count", /disk counts/],
+    [(b) => (b.writeUInt16LE(0, e + 8), b.writeUInt16LE(0, e + 10)), "both of the end record's counts", /the members end at 0, not at the central directory/],
+  ]) {
+    const bad = Buffer.from(z1);
+    zero(bad);
+    throws(() => unzip(bad), re, `a ZIP with ${what} zeroed is refused`);
+  }
+  const both = Buffer.from(z1);
+  both.writeUInt32LE(0, 14);
+  both.writeUInt32LE(0, cdOff + 16);
+  throws(() => unzip(both), /CRC-32 [0-9a-f]+, not 0/, "a ZIP whose CRCs agree but are wrong is refused by the CRC-32");
+}
+
+// ---- grader's E27: a LaTeX example's main source, escaped in its page (markup in it reaches the page only as text)
+{
+  const c = join(tmp(), "examples");
+  cpSync(FIX, c, { recursive: true });
+  const hostile = "</code></pre><a href=x>link</a><form action=y><iframe src=z></iframe>";
+  writeFileSync(join(c, "latex", "article", "main.tex"), readFileSync(join(c, "latex", "article", "main.tex"), "utf8") + "% " + hostile + "\n");
+  const o = tmp();
+  await buildExamplesInto(o, c);
+  const h = readFileSync(join(o, "examples", "latex", "article", "index.html"), "utf8");
+  check(h.includes(esc(hostile)) && !/<a href=x|<form|<iframe src=z/.test(h), "a LaTeX example's main source is text in its page: its </code></pre>, link, form and iframe escaped");
+}
+
+// ---- grader's S2: the sitemap the build writes lists the gallery (buildSitemap, into a folder of the test's own)
+{
+  const site = tmp();
+  const art = [{ url: "/", date: "2026-11-05" }, { url: "/articles/a/", date: "2026-11-05" }];
+  const got = await buildSitemap({ out: site, articles: () => art, examples: (o) => buildExamplesInto(o, FIX) });
+  const xml = readFileSync(join(site, "sitemap.xml"), "utf8");
+  const locs = [...xml.matchAll(/<loc>https:\/\/sagebrush\.space([^<]*)<\/loc>/g)].map((m) => m[1]).sort();
+  const want = [...art.map((u) => u.url), ...pageUrls].sort();
+  check(JSON.stringify(locs) === JSON.stringify(want), "sitemap.xml lists the articles' pages and every gallery page, /examples/ too: " + locs.join(" "));
+  check(got.length === want.length && /Sitemap: https:\/\/sagebrush\.space\/sitemap\.xml/.test(readFileSync(join(site, "robots.txt"), "utf8")), "buildSitemap returns those URLs and writes robots.txt naming the sitemap");
+}
+
+// ---- grader's E26: a rebuild into the same folder drops an example the corpus no longer has
+{
+  const c = join(tmp(), "examples");
+  cpSync(FIX, c, { recursive: true });
+  const o = tmp();
+  await buildExamplesInto(o, c);
+  check(statSync(join(o, "examples", "notebook", "sage-basics")).isDirectory(), "(the example is built once)");
+  rmSync(join(c, "notebook", "sage-basics"), { recursive: true });
+  await buildExamplesInto(o, c);
+  const left = walk(join(o, "examples"));
+  check(!left.some((f) => f.startsWith(join("notebook", "sage-basics"))) && !readFileSync(join(o, "examples", "index.json"), "utf8").includes("sage-basics"), "a rebuild drops an example removed from the corpus: no page, file or catalog entry is left");
+}
 
 console.log(`${n - fails.length}/${n} passed`);
 if (fails.length) process.exit(1);

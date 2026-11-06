@@ -590,9 +590,13 @@ The service scales by adding objects. Its limits per object, from Cloudflare's p
 - the caps below are checked in preflight and again on the actual output, so a file that grows during an export
   stops it cleanly: unlike the sentence below about never stopping partway, an export can stop at a cap, but it
   never produces a bundle the importer would refuse;
-- nothing is ever left out: when files aren't on this device (in the cloud only, or missing), the export is refused
-  before anything is written, naming them, and a file that stops being on this device while the export is written
-  stops it; so there is no partial export, and `manifest.omitted` is always empty (@sagebrush's rule, Oct 31);
+- what isn't on this device is left out, and the rest exported (William's B3, Nov 2, over the Oct 31 rule of refusing:
+  "so what if some files are missing -- that shouldn't block export?"). Ready and the summary name what is left out
+  (in the cloud only, arrived by sync but not opened here yet, or missing); the archive lists it in `not-included.txt`,
+  a member before `manifest.json`, and in `manifest.omitted` (`{path, kind, why}` each), and "Last export prepared"
+  says "(partial)". A document is left out only when its content isn't here: its entry's `remote` says it was listed
+  from the server, and stays after its content arrives, so it is never the test, as the Files list's isn't. A file that
+  stops being on this device while the export is written still stops it, so the list is the whole of what is missing;
 - one export at a time in a tab: Export while another runs there is refused in words, and closing the Storage panel
   cancels the export it shows.
 

@@ -18,10 +18,13 @@ export function sitemapXml(urls: { url: string; date: string }[]): string {
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map((u) => `  <url><loc>${SITE}${u.url}</loc><lastmod>${u.date}</lastmod></url>`).join("\n")}\n</urlset>\n`;
 }
 
-export async function buildSitemap(): Promise<{ url: string; date: string }[]> {
-  if (!hasSite) throw new Error("build-sitemap: web/site is absent; build.ts imports this only when it is present");
-  const out = join(siteDir, "public");
-  const urls = [...buildArticles(), ...(await buildExamples(out))];
+type Url = { url: string; date: string };
+
+// (the test passes its own folder and builders: web/site/ is the cloud repo's, so a core checkout may not have it)
+export async function buildSitemap(o: { out?: string; articles?: () => Url[]; examples?: (out: string) => Promise<Url[]> } = {}): Promise<Url[]> {
+  if (o.out === undefined && !hasSite) throw new Error("build-sitemap: web/site is absent; build.ts imports this only when it is present");
+  const out = o.out ?? join(siteDir, "public");
+  const urls = [...(o.articles ?? buildArticles)(), ...(await (o.examples ?? buildExamples)(out))];
   writeFileSync(join(out, "sitemap.xml"), sitemapXml(urls));
   writeFileSync(join(out, "robots.txt"), `User-agent: *\nAllow: /\n\nSitemap: ${SITE}/sitemap.xml\n`);
   console.log(`sitemap.xml: ${urls.length} URLs`);

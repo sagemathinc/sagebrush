@@ -12,6 +12,7 @@ import type { Entry, Op, Workspace } from "../api";
 import type { BoardDoc } from "../../board/doc";
 import { Images } from "../../board/images";
 import { BlobSink, counts, cutShort, ExportStopped, ExportWorker, OpfsSink, PickerSink, resetCounts, SLICE, Spool, ZipWriter, type Sink } from "./zip";
+import { unsafeMember, unsafeNamesWhy } from "./names";
 import { jsonLen, numLen as jsonNumLen, utf8Len } from "./bytes";
 import { captureFolder, captureLine, CAPTURED, DATE, IDENT, KIND, KINDS, manifestFolder, manifestLine, NAME, PATH, putRow, R, readRow, TIME } from "./rows";
 import { boardBytes, boardSlices, Counter, notebookBytes, notebookSlices, sizes, type BoardKit, type Pace } from "./stream";
@@ -70,6 +71,8 @@ type TestHooks = {
   onPlan?(plan: Plan): Promise<void> | void;
   /** preflight about to stream a document to measure it; write about to write a member */
   preflightMember?(path: string): Promise<void> | void;
+  /** (tests) after preflight's name check, before its measuring pass: an entry made here is one that appears mid-export */
+  afterNameCheck?(): Promise<void> | void;
   onMember?(path: string): Promise<void> | void;
   /** the tree check, after its first page of ops (a test trims the log there) */
   duringTreeScan?(): Promise<void> | void;
@@ -176,7 +179,10 @@ export async function deflates(path: string, kind: Entry["kind"], bytes: Uint8Ar
 /** zlib's deflateBound: the most a deflated member can take. */
 const deflateBound = (n: number) => n + (n >> 12) + (n >> 14) + (n >> 25) + 13;
 
-export type Unavailable = { path: string; kind: Entry["kind"]; why: "remote" | "missing" };
+/** An entry left out of the export (William's B3): another device's, its content not here ("remote"), a notebook whose
+ * synced history is here but which was never opened on this device ("unopened": its file is made at its first open),
+ * or one whose contents aren't found ("missing"). */
+export type Unavailable = { path: string; kind: Entry["kind"]; why: "remote" | "unopened" | "missing" };
 export type Member = { path: string; kind: Entry["kind"]; ident: string | undefined };
 export type Plan = {
   s0: number;
@@ -191,7 +197,11 @@ export type Plan = {
   cdSpool: number;
   manSpool: number;
   capSpool: number;
+  /** what is left out, in path order: listed in the panel, in manifest.json's `omitted` and in NOTE_NAME */
   unavailable: Unavailable[];
+  /** NOTE_NAME's bytes and manifest.json's `omitted` list, made at the end of preflight (none when nothing is left out) */
+  note?: Uint8Array;
+  omitted?: string;
   /** preflight's elapsed time, ms (r2c's evidence) */
   preflightMs?: number;
 };
@@ -212,7 +222,11 @@ async function* entries(w: Workspace): AsyncGenerator<Entry[]> {
 }
 
 const zipName = (e: Pick<Entry, "path" | "kind">) => "files/" + e.path.slice(1) + (e.kind === "folder" ? "/" : "");
-const unavailableWhy = (e: Entry): Unavailable["why"] | null => (e.remote ? "remote" : e.missing ? "missing" : null);
+// (a data file another device has, its bytes not fetched: flagged on its entry.  A document's `remote` says only that
+// it was listed from the server, and stays once its content has arrived (it is opened, or synced): whether its content
+// is here is its capture's to find, as the Files list's isElsewhere asks it (William's B3 (3): one notebook shown as
+// here, and refused as "in the cloud only"))
+const unavailableWhy = (e: Entry): Unavailable["why"] | null => (e.kind === "file" && e.remote ? "remote" : e.missing ? "missing" : null);
 
 // (a number's length as the manifest writes it, JSON.stringify's: NaN and ±Infinity as null (r2c, P-1; String(n) gave
 // "NaN", a byte short))
@@ -303,11 +317,32 @@ async function measure(e: Entry, content: any, pace: Pace, images: Images, max: 
   throw new ExportStopped(`${e.path}: only a document is measured`);
 }
 
-/** What isn't on this device, said plainly (E1 r2 simplification: the export refuses rather than leaving anything out;
- * @sagebrush's rule, Oct 31). */
+/** What isn't on this device, said plainly: it is left out, and the rest exported (William's B3: "so what if some files
+ * are missing -- that shouldn't block export?", over the r2 rule of refusing, Oct 31). */
 export function unavailableWhyText(u: Unavailable[]): string {
   const n = u.length;
-  return `${n.toLocaleString()} file${n === 1 ? " isn't" : "s aren't"} on this device yet, so nothing can be exported: open ${n === 1 ? "it" : "them"} here, or turn sync on and let ${n === 1 ? "it" : "them"} download, then export again`;
+  return `${n.toLocaleString()} file${n === 1 ? " isn't" : "s aren't"} on this device, so ${n === 1 ? "it is" : "they are"} left out of the export`;
+}
+/** Each left-out entry's reason, in words. */
+export const whyWords = (w: Unavailable["why"]) => (w === "remote" ? "in the cloud only" : w === "unopened" ? "arrived by sync, not opened here yet" : "missing");
+/** The note in the archive beside manifest.json (William's B3): what was left out, and why. */
+export const NOTE_NAME = "not-included.txt";
+export function noteText(u: Unavailable[]): string {
+  return [
+    `${unavailableWhyText(u)}:`,
+    "",
+    ...u.map((x) => `${x.path}  (${whyWords(x.why)})`),
+    "",
+    "To include them: open each on this device (a file in the cloud only downloads when sync is on), then export again.",
+    "",
+  ].join("\n");
+}
+/** Whether a notebook from another device has its synced history here (Workspace.contentIds, read once an export),
+ * though its record isn't (it is made at the notebook's first open). */
+async function arrived(w: Workspace, e: Entry, here: { ids?: Promise<Set<string> | null> }): Promise<boolean> {
+  if (e.kind !== "notebook" || !e.ref) return false;
+  here.ids ??= w.contentIds().then((c) => c.notebook, () => null);
+  return !!(await here.ids)?.has(e.ref);
 }
 
 /** The no-OPFS refusal (E1 r2a heap plan r2c P-8; @sagebrush's condition: the cause in plain words): without the
@@ -319,19 +354,42 @@ export const NO_OPFS_WHY = "This workspace is too large to export in this browse
  * owns (created, and removed on every exit, by openExport: astra's obligations), opened here.  `opfs`: false when the
  * spools are Blob parts, which then count, the records included, toward CAPS.spoolBlob.
  */
-export async function preflight(w: Workspace, signal: AbortSignal, progress: (p: Progress) => void, rows: Spool, opfs: boolean): Promise<Plan> {
+export async function preflight(w: Workspace, signal: AbortSignal, progress: (p: Progress) => void, rows: Spool, opfs: boolean, meta: Spool): Promise<Plan> {
   const t0 = performance.now();
   resetCounts();
   rowStats.rowBytes = 0;
   const s0 = await w.lastSeq();
-  const plan: Plan = { s0, files: 0, folders: 0, bytes: 0, bound: 98, cdSpool: 0, manSpool: 0, capSpool: 0, unavailable: [] };
+  // (cdSpool from manifest.json's own central record, "manifest.json" 13 bytes: uncounted before, so an export of a few
+  // entries stopped at "the export's index grew past …"; counted from the start, so the no-OPFS check below sees it:
+  // agents-ui's finding on #545)
+  const plan: Plan = { s0, files: 0, folders: 0, bytes: 0, bound: 98, cdSpool: 46 + 12 + 13, manSpool: 0, capSpool: 0, unavailable: [] };
   sizesNow();
   const pace = paceOf(signal);
   await rows.open();
   if (T().failRowsAfter && rows.wk) await rows.wk.ask("failAfter", { n: T().failRowsAfter, re: "-rows$" });
   let lastPre = 0;
-  for await (const page of entries(w)) {
-    for (const e of page) {
+  const here: { ids?: Promise<Set<string> | null> } = {};
+  // (every member's name first, from the entries' metadata alone, files' and folders' (EXPORT-ZIPNAME-1, astra): one
+  // unsafe name refuses the export before any body is read, the last entry's too; a few kept to say, the rest counted.
+  // The entries checked are the entries measured (daybreak3's TOCTOU-1): this one enumeration writes each to `meta`, a
+  // spool as bounded as the others, and the pass below reads that spool, never the live workspace again)
+  {
+    const bad: string[] = [];
+    let count = 0;
+    await meta.open(false);
+    for await (const page of entries(w)) for (const e of page) {
+      stopIf(signal);
+      if (unsafeMember(zipName(e), e.kind === "folder") && ++count <= 5) bad.push(e.path);
+      const line = enc.encode(JSON.stringify(e, metaOut) + "\n");
+      if (line.length > SLICE) throw new ExportStopped(`an entry's record is too long to export: ${e.path.slice(0, 80)}…`);
+      { const p = meta.put(line, line.length); if (p) await p; }
+      if (!opfs && blobSpoolsOver(plan, rows, meta.size)) throw new ExportStopped(NO_OPFS_WHY, true);
+    }
+    if (count) throw new ExportStopped(unsafeNamesWhy(bad, count), true);
+  }
+  await T().afterNameCheck?.();
+  for await (const e of metaEntries(meta)) {
+    {
       stopIf(signal);
       { const y = breathe(); if (y) await y; }
       const name = utf8Len(e.path) + 6 + (e.kind === "folder" ? 1 : 0);
@@ -347,10 +405,9 @@ export async function preflight(w: Workspace, signal: AbortSignal, progress: (p:
         // (P-9: a folder's captured is its observation, here)
         const p = putRow(rows, e, Date.now(), rowStats);
         if (p) await p;
-        if (!opfs && blobSpoolsOver(plan, rows)) throw new ExportStopped(NO_OPFS_WHY, true);
+        if (!opfs && blobSpoolsOver(plan, rows, meta.size)) throw new ExportStopped(NO_OPFS_WHY, true);
         continue;
       }
-      plan.files++;
       let size: number;
       if (e.kind === "file") {
         // (its bytes there, checked by key without reading them: an unflagged file without them is refused here, not
@@ -362,25 +419,37 @@ export async function preflight(w: Workspace, signal: AbortSignal, progress: (p:
         await T().preflightMember?.(e.path);
         let c;
         try { c = await timed("capture", () => capture(w, e, signal)); } catch (err) {
-          if (err instanceof Missing) { plan.unavailable.push({ path: e.path, kind: e.kind, why: "missing" }); continue; }
+          if (err instanceof Missing) { plan.unavailable.push({ path: e.path, kind: e.kind, why: e.remote ? ((await arrived(w, e, here)) ? "unopened" : "remote") : "missing" }); continue; }
           throw err;
         }
         const images = new Images();
         try { size = await measure(c.entry, c.content, pace, images, capOf(e.kind), capWhy(e.path, e.kind)); } finally { images.dispose(); }
       }
       if (size > capOf(e.kind)) throw new ExportStopped(capWhy(e.path, e.kind));
+      plan.files++;
       plan.bytes += size;
       plan.bound += deflateBound(size);
       { const p = putRow(rows, e, 0, rowStats); if (p) await p; }
-      if (!opfs && blobSpoolsOver(plan, rows)) throw new ExportStopped(NO_OPFS_WHY, true);
+      if (!opfs && blobSpoolsOver(plan, rows, meta.size)) throw new ExportStopped(NO_OPFS_WHY, true);
       if (performance.now() - lastPre > 100) { lastPre = performance.now(); progress({ phase: "preflight", files: plan.files, of: 0, bytes: plan.bytes, total: 0 }); }
       if (plan.bytes > cap("total")) throw new ExportStopped(`the files come to more than ${cap("total") / 2 ** 30} GiB, more than an import takes`);
     }
   }
+  await meta.remove();
   // (the records written out, every slice back: an append's failure is seen here, in preflight)
   await rows.settle();
   // (the manifest: its entries (manSpool) between its head and tail)
-  const manifest = plan.manSpool + MANIFEST_ENDS;
+  // (what is left out: the note, a member of its own, and the manifest's `omitted`, both bounded here as the rest)
+  if (plan.unavailable.length) {
+    plan.note = enc.encode(noteText(plan.unavailable));
+    plan.omitted = JSON.stringify(plan.unavailable);
+    plan.bytes += plan.note.length;
+    plan.bound += deflateBound(plan.note.length) + 30 + 46 + 16 + 12 + 2 * NOTE_NAME.length;
+    // (its central record too: the index's spool is capped at cdSpool, agents-ui's finding on #545)
+    plan.cdSpool += 46 + 12 + NOTE_NAME.length;
+    if (!opfs && blobSpoolsOver(plan, rows)) throw new ExportStopped(NO_OPFS_WHY, true);
+  }
+  const manifest = plan.manSpool + MANIFEST_ENDS + (plan.omitted ? utf8Len(plan.omitted) : 0);
   if (manifest > cap("manifest")) throw new ExportStopped(`the export's index (manifest.json) would be over ${cap("manifest") / 2 ** 20} MiB: too many files with long names`);
   plan.bytes += manifest;
   plan.bound += deflateBound(manifest) + 30 + 46 + 16 + 12 + 2 * 13;
@@ -391,7 +460,22 @@ export async function preflight(w: Workspace, signal: AbortSignal, progress: (p:
 /** The rows spool's record bytes, counted as they are written (the framing's check: no padding). */
 const rowStats = { rowBytes: 0 };
 /** Without OPFS, every spool is held in memory: the spools' bounds and the records so far, past CAPS.spoolBlob (P-8). */
-const blobSpoolsOver = (plan: Plan, rows: Spool) => plan.cdSpool + plan.manSpool + plan.capSpool + rows.size > cap("spoolBlob");
+const blobSpoolsOver = (plan: Plan, rows: Spool, meta = 0) => plan.cdSpool + plan.manSpool + plan.capSpool + rows.size + meta > cap("spoolBlob");
+/** The entries' metadata as preflight's name check saw them (its `meta` spool, JSON lines): numbers JSON can't hold
+ * (NaN, ±Infinity, -0, which a record's times may be) kept as {"\u0000n": text} and restored, so a record is the same
+ * after the spool as before it */
+const metaOut = (_k: string, v: unknown) => (typeof v === "number" && (!Number.isFinite(v) || Object.is(v, -0)) ? { "\u0000n": Object.is(v, -0) ? "-0" : String(v) } : v);
+const metaIn = (_k: string, v: any) => (v && typeof v === "object" && typeof v["\u0000n"] === "string" && Object.keys(v).length === 1 ? Number(v["\u0000n"]) : v);
+async function* metaEntries(meta: Spool): AsyncGenerator<Entry> {
+  const dec = new TextDecoder();
+  let carry = "";
+  for await (const chunk of meta.replay()) {
+    const lines = (carry + dec.decode(chunk, { stream: true })).split("\n");
+    carry = lines.pop() ?? "";
+    for (const l of lines) if (l) yield JSON.parse(l, metaIn) as Entry;
+  }
+  if (carry + dec.decode()) cutShort();
+}
 /** The manifest's head and tail around its entries, at their widest. */
 const MANIFEST_ENDS = 512;
 
@@ -475,7 +559,7 @@ export async function treeUnchanged(w: Workspace, s0: number, log: CaptureLog, s
   }
 }
 
-export type Result = { name: string; members: number; bytes: number; stampFailed?: string };
+export type Result = { name: string; members: number; bytes: number; stampFailed?: string; omitted: Unavailable[] };
 
 /** The sink, chosen on the plan's bound (§5): the picker (opened by the caller, on a click), else OPFS when it has
  * room, else a Blob only up to 256 MiB, else refused. */
@@ -528,7 +612,6 @@ export async function write(w: Workspace, plan: Plan, opts: { worker: ExportWork
   opts.signal.addEventListener("abort", () => { abortAt = performance.now(); }, { once: true });
   sizesNow();
   try {
-    if (plan.unavailable.length) throw new ExportStopped(unavailableWhyText(plan.unavailable));
     await cd.open();
     await man.open();
     await capSpool.open();
@@ -582,7 +665,8 @@ export async function write(w: Workspace, plan: Plan, opts: { worker: ExportWork
           await T().beforeCapture?.(e.path);
           const c = await timed("capture", () => capture(w, e, opts.signal));
           await T().afterCapture?.(e.path);
-          // (nothing is left out: anything not on this device now, though it was at preflight, stops the export)
+          // (left out only as preflight found it: anything not on this device now, though it was at preflight, stops the
+          // export, so the archive's list of what is left out is the whole of it)
           if (unavailableWhy(c.entry)) throw new ExportStopped(`${e.path} isn't on this device any more`);
           await log.add(e.path, c.entry.kind, c.entry.ident);
           // (the member's cap, or what is left of the total if that is less: both checked on the bytes as they go)
@@ -624,8 +708,11 @@ export async function write(w: Workspace, plan: Plan, opts: { worker: ExportWork
     // (§5a: created right before the manifest is serialized; the manifest is the last member)
     const created = new Date().toISOString();
     const head = enc.encode(JSON.stringify({ format: "sagebrush-workspace-bundle", version: 1, mode: "files", created, site: opts.site, app: opts.app }).slice(0, -1) + ',"entries":[');
-    const tail = enc.encode("]," + JSON.stringify({ omitted: [], totals: { files, folders: plan.folders, bytes: total } }).slice(1));
-    const left = cap("total") - total;
+    const tail = enc.encode(`],"omitted":${plan.omitted ?? "[]"},"totals":${JSON.stringify({ files, folders: plan.folders, bytes: total })}}`);
+    // (the note on what is left out: before the manifest, which is always the last member; not in the totals, which
+    // are the workspace's files)
+    const noted = plan.note ? (await zip.member(NOTE_NAME, [plan.note], true, Date.now(), cap("total") - total, `the export passed ${cap("total") / 2 ** 30} GiB while it was written (files grew meanwhile)`)).usize : 0;
+    const left = cap("total") - total - noted;
     async function* manifest() { yield head; for await (const s of man.replay()) yield s; yield tail; }
     await zip.member("manifest.json", manifest(), true, Date.now(), Math.min(cap("manifest"), left), `the export's index (manifest.json) passed ${cap("manifest") / 2 ** 20} MiB, or the export passed ${cap("total") / 2 ** 30} GiB, while it was written`);
     await zip.finish();
@@ -636,10 +723,10 @@ export async function write(w: Workspace, plan: Plan, opts: { worker: ExportWork
     const closed = await sink.close(name);
     committed = true;
     opts.after(closed?.later ?? Promise.resolve());
-    const r: Result = { name, members: zip.members, bytes: zip.offset };
+    const r: Result = { name, members: zip.members, bytes: zip.offset, omitted: plan.unavailable };
     try {
       if (T().failStamp) throw new Error("this device's storage refused the write (a test)");
-      await w.setLastExport({ at: Date.now(), partial: false, members: r.members, bytes: r.bytes });
+      await w.setLastExport({ at: Date.now(), partial: plan.unavailable.length > 0, members: r.members, bytes: r.bytes });
     } catch (e) { r.stampFailed = String((e as Error)?.message ?? e); }
     const st = T().stats;
     if (st) { st.spoolChunks = cd.chunks + man.chunks + capSpool.chunks; st.members = zip.members; }

@@ -190,6 +190,9 @@ class Graphics:
 
     # --- rendering
     def _panel(self, **extra):
+        for q in self._primitives:
+            if getattr(q, "_sage_ignored", None):
+                _ignoring(q)
         o = dict(self._options)
         o.update(extra)
         p = {}
@@ -573,9 +576,14 @@ def line(points, **options):
 
         sage: line([(0, 0), (1, 2), (2, 0)], color='green')
         Graphics object consisting of 1 graphics primitive
+        sage: line([])
+        Graphics object consisting of 0 graphics primitives
     """
     gopts, p = _split(options)
     pts = list(points)
+    if not pts:
+        # (Sage: no points, no primitive)
+        return Graphics([], **gopts)
     return Graphics([Line([q[0] for q in pts], [q[1] for q in pts], **_line_options(p))], **gopts)
 
 
@@ -632,7 +640,41 @@ def polygon(points, **options):
     o = {"color": _color(p), "alpha": p.pop("alpha", None), "fill": p.pop("fill", True),
          "edgecolor": p.pop("edgecolor", None), "thickness": p.pop("thickness", 1),
          "legend_label": p.pop("legend_label", None)}
-    return Graphics([Polygon([q[0] for q in pts], [q[1] for q in pts], **o)], **gopts)
+    P = Polygon([q[0] for q in pts], [q[1] for q in pts], **o)
+    bad = {k: v for k, v in p.items() if k not in _POLYGON_OPTIONS}
+    if bad:
+        P._sage_ignored = (bad, _POLYGON_OPTIONS)
+    return Graphics([P], **gopts)
+
+
+# (Sage's Polygon._allowed_options, which its warning lists)
+_POLYGON_OPTIONS = {
+    "alpha": "How transparent the figure is.",
+    "edgecolor": "The color for the border of filled polygons.",
+    "fill": "Whether or not to fill the polygon.",
+    "hue": "The color given as a hue.",
+    "legend_color": "The color of the legend text.",
+    "legend_label": "The label for this item in the legend.",
+    "linestyle": "The style of the enclosing line.",
+    "rgbcolor": "The color as an RGB tuple.",
+    "thickness": "How thick the border line is.",
+    "zorder": "The layer level in which to draw",
+}
+
+
+def _ignoring(prim):
+    # (an option the primitive doesn't take is ignored, with Sage's warning
+    # (GraphicPrimitive.options), when it is drawn: three times, as Sage's
+    # options() runs three times as a primitive is drawn)
+    bad, allowed = prim._sage_ignored
+    for _ in range(3):
+        for k in bad:
+            print("verbose 0 (162: primitive.py, options) WARNING: Ignoring option '%s'=%s" % (k, bad[k]))
+        print("verbose 0 (162: primitive.py, options) ")
+        print("The allowed options for %r are:" % (prim,))
+        for name in sorted(allowed):
+            print("    %-15s%-60s" % (name, allowed[name]))
+        print()
 
 
 polygon2d = polygon
@@ -734,37 +776,70 @@ class GraphicsArray:
     def __repr__(self):
         return "Graphics Array of size %d x %d" % (len(self._rows), max(len(r) for r in self._rows))
 
-    def _svg(self):
+    _kw = {}
+
+    def _with(self, figsize=None, **options):
+        # (as Sage's MultiGraphics.matplotlib: figsize is the whole figure's;
+        # every other option is each graphics', but dpi, fig_tight and
+        # transparent, which are the file's)
+        for k in ("dpi", "fig_tight", "transparent"):
+            options.pop(k, None)
+        G = GraphicsArray(self._rows, self._figsize if figsize is None else figsize)
+        G._kw = dict(self._kw, **options)
+        return G
+
+    def _size(self):
         nr = len(self._rows)
         nc = max(len(r) for r in self._rows)
         fs = self._figsize or (min(3.4 * nc, 9.2), 2.8 * nr)
+        if isinstance(fs, (int, float)):
+            fs = (fs, fs * 0.75)
+        return float(fs[0]), float(fs[1])
+
+    def _svg(self):
+        nr = len(self._rows)
+        nc = max(len(r) for r in self._rows)
+        w, h = self._size()
         panels = []
         for i, row in enumerate(self._rows):
             for j, g in enumerate(row):
-                panels.append((g._panel()[0], (j / nc, i / nr, 1 / nc, 1 / nr)))
-        return render_svg(panels, float(fs[0]) * 100, float(fs[1]) * 100)
+                panels.append((g._panel(**self._kw)[0], (j / nc, i / nr, 1 / nc, 1 / nr)))
+        return render_svg(panels, w * 100, h * 100)
 
     def _repr_svg_(self):
         return self._svg()
 
-    def show(self):
-        """Show the grid.
+    def show(self, **kwds):
+        """Show the grid. figsize is the whole grid's; the other options
+        (title, axes_labels, xmin, ...) apply to each graphics, as Sage's.
 
         EXAMPLES::
 
             sage: graphics_array([point((0, 0))]).show()  # random
+            sage: graphics_array([plot(sin(x), (x, 0, 1)), plot(cos(x), (x, 0, 1))]).show(figsize=[8, 3])  # random
         """
-        _show(self, "plots")
+        _show(self._with(**kwds) if kwds else self, "plots")
 
-    def save(self, filename, dpi=None, transparent=False):
+    def save(self, filename, dpi=None, transparent=False, figsize=None, **kwds):
         """Save the grid: SVG for a .svg name, PNG for .png (see
-        Graphics.save).
+        Graphics.save). figsize is the whole grid's; the other options apply
+        to each graphics, as Sage's. (Sage's second positional parameter is
+        figsize; here it stays dpi, as before: give figsize by name.)
 
         EXAMPLES::
 
-            sage: graphics_array([point((0, 0))]).save('/tmp/a.svg')  # not tested
+            sage: import os, tempfile; d = tempfile.mkdtemp()
+            sage: G = graphics_array([plot(sin(x), (x, 0, 1)), plot(cos(x), (x, 0, 1))])
+            sage: G.save(os.path.join(d, 'a.png'), figsize=[8, 3]); open(os.path.join(d, 'a.png'), 'rb').read(4)
+            b'\\x89PNG'
         """
-        save_figure(self._svg(), filename, dpi, transparent)
+        G = self._with(figsize, **kwds)
+        if str(filename).lower().endswith(".png"):
+            # (the size and dpi checked before the picture is drawn at them)
+            import _png
+            w, h = G._size()
+            _png.check_size(w, h, 100 if dpi is None else dpi)
+        save_figure(G._svg(), filename, dpi, transparent)
 
 
 def graphics_array(array, nrows=None, ncols=None, figsize=None):

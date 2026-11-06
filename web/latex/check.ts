@@ -6,7 +6,7 @@ export interface Problem { severity: "error" | "warning"; kind: string; name: st
 export interface ImageReport { name: string; found: boolean; path?: string; why?: string }
 export interface CheckResult {
   file: string; ok: boolean; class: "beamer" | "other"; outcome: string;
-  frames: { n: number; title: string; line: number | null }[];
+  frames: { n: number; title: string; line: number | null; steps: number }[];
   problems: Problem[];
   images: ImageReport[];
   code: { n: number; mode: string; line: number | null; state: string }[];
@@ -15,7 +15,7 @@ export interface CheckResult {
 export interface EngineCheck {
   outcome: string; beamer: boolean;
   problems: { kind: string; name: string; at: number }[];
-  frames: { n: number; title: string; at: number }[];
+  frames: { n: number; title: string; at: number; steps?: number }[];
   /** The code items in order: refused (err), and their state if they were run (s: ok, error, blocked; msg). */
   sage: { mode: string; err?: string | null; at?: number; s?: string; msg?: string }[];
 }
@@ -35,8 +35,9 @@ const MESSAGES: Record<string, (name: string) => string> = {
   math: (n) => `KaTeX can't typeset this math: ${n}`,
   runaway: (n) => `\\${n}: the paragraph ended before its argument was complete (a missing "}"?)`,
   redefined: (n) => `\\newcommand: \\${n} is already defined (LaTeX would stop here; use \\renewcommand)`,
+  toolarge: (n) => `${n}: the preview and Present show a placeholder instead (make it smaller, or split it)`,
 };
-const ERRORS = new Set(["math", "runaway", "redefined", "image", "expansion"]);
+const ERRORS = new Set(["math", "runaway", "redefined", "image", "expansion", "input"]);
 
 /** The first line naming an image (a missing one has no position of its own). */
 function lineFind(text: string, name: string): number | null {
@@ -50,6 +51,8 @@ export function checkResult(file: string, text: string, r: EngineCheck, images: 
   if (r.outcome !== "ok") problems.push({ severity: "error", kind: "expansion", name: String(r.outcome), line: null, message: `expansion stopped (${r.outcome}): the preview shows the document only up to that point` });
   for (const p of r.problems) {
     const m = MESSAGES[p.kind];
+    // (an \input or \include not read: where it was looked for, the renderer's reason)
+    if (p.kind === "input") { problems.push({ severity: "error", kind: "input", name: p.name, line: lineFind(text, p.name) ?? lineOf(text, p.at), message: `\\input{${p.name}}: ${(p as any).why || "not found"}` }); continue; }
     problems.push({ severity: ERRORS.has(p.kind) ? "error" : "warning", kind: p.kind, name: p.name, line: lineOf(text, p.at), message: m ? m(p.name) : `${p.kind}: ${p.name}` });
   }
   for (const im of images) if (!im.found) problems.push({ severity: "error", kind: "image", name: im.name, line: lineFind(text, im.name), message: `\\includegraphics{${im.name}}: ${im.why}` });
@@ -68,7 +71,7 @@ export function checkResult(file: string, text: string, r: EngineCheck, images: 
   problems.sort((a, b) => (a.line ?? 1e9) - (b.line ?? 1e9));
   return {
     file, ok: !problems.some((p) => p.severity === "error"), class: r.beamer ? "beamer" : "other", outcome: String(r.outcome),
-    frames: r.frames.map((f) => ({ n: f.n, title: f.title, line: lineOf(text, f.at) })),
+    frames: r.frames.map((f) => ({ n: f.n, title: f.title, line: lineOf(text, f.at), steps: f.steps ?? 1 })),
     problems, images, code,
   };
 }

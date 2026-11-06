@@ -20,7 +20,7 @@ import { sha256Hex } from "./runtime/sha256";
 
 /** The Core API contract (§6): the major version, and the feature level, which rises with every addition. */
 export const CORE_API = 1;
-export const CORE_API_LEVEL = 25;
+export const CORE_API_LEVEL = 39;
 
 const KiB = 1024, MiB = 1024 * KiB;
 /** Hard limits of set format v1 (§3.4), the same in every host and in the publisher. */
@@ -633,6 +633,18 @@ export function checkJsChunk(plan: SetPlan, id: string, bytes: Uint8Array): JsCh
 // exact build; unknown costs are refused, never borrowed from another build.
 
 export const GRADER_BUDGET = Object.freeze({ cpuMs: 4000, mb: 72, prodFactor: 1.5 });
+// Packages a notebook may use but no grading context may admit, by package
+// name (any version), until their grading gates are measured and enforced
+// (plan-pandas r7 §E: M2's memory gate, LIMIT-PANDAS-M1-1 §E 1b, M1-2;
+// daybreak3, Nov 4): refused by graderAdmission and, while a grading
+// allowance is armed, at import (src/compile.ts mountOptional).
+const GRADING_EXCLUDED: ReadonlyMap<string, string> = new Map([
+  ["@sagebrush/pandas", "not admitted for grading yet: its memory and timing gates are still to be measured"],
+]);
+/** Why package `id` (name@version) may not run in a grading context, or null if it may. */
+export function gradingExcluded(id: string): string | null {
+  return GRADING_EXCLUDED.get(id.slice(0, id.lastIndexOf("@"))) ?? null;
+}
 export interface GraderBaseline {
   cpu_ms: number;
   peak_mb: number;
@@ -644,6 +656,10 @@ export function graderAdmission(plan: SetPlan, roots: string[], build: string, b
     const c = plan.closure.get(r);
     if (!c) return { ok: false, reason: `the set has no package ${r}` };
     for (const x of c) if (!closure.includes(x)) closure.push(x);
+  }
+  for (const id of closure) {
+    const why = gradingExcluded(id);
+    if (why !== null) return { ok: false, reason: `${id} is ${why}` };
   }
   let cpu = base.cpu_ms, mb = base.peak_mb;
   for (const id of closure) {

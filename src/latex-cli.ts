@@ -8,25 +8,33 @@
 // render says so and still writes the HTML.
 // Built as its own file, sagebrush-latex.cjs, beside the CLI's bundle (scripts/build-cli.mjs). src/cli.ts loads it
 // only for `latex`, so other commands don't carry the engine, KaTeX and its fonts.
-import { readFileSync, writeFileSync, existsSync, statSync, mkdirSync, mkdtempSync, rmSync } from "fs";
-import { basename, dirname, join, resolve, delimiter } from "path";
+import { readFileSync, writeFileSync, existsSync, statSync, realpathSync, mkdirSync, mkdtempSync, rmSync } from "fs";
+import { basename, dirname, join, resolve, relative, delimiter, sep, posix } from "path";
 import { tmpdir } from "os";
 import { spawn, type ChildProcess } from "child_process";
 import { pathToFileURL } from "url";
 import katex from "katex";
 import { Engine } from "../web/latex/engine/pipeline.mjs";
-import { setKatex } from "../web/latex/engine/render.mjs";
+import { setKatex, installBeamer } from "../web/latex/engine/render.mjs";
+import * as beamerCode from "../web/latex/engine/beamer.mjs";
 import { itemKey, MAX_RESULT, WRAPPER_VERSION } from "../web/latex/engine/sagetex.mjs";
 import { PAGE_CSS } from "../web/latex/style";
-import { imageCandidates, sniffImage, admitImageBytes } from "../web/latex/images";
+import { imageCandidates, graphicsPathOf, notFoundWhy, sniffImage, admitImageBytes, IMAGE_EXTS } from "../web/latex/images";
+import { engineInputs, admitInput, INPUT_BOUNDS, type Known } from "../web/latex/inputs";
 import { checkResult, checkText, type CheckResult, type ImageReport } from "../web/latex/check";
+import { applyStep } from "../web/latex/overlay";
+import { splitChunk, tooLargeProblem } from "../web/latex/split";
 
 setKatex(katex.renderToString);
+// (beamer's code: in the browser a chunk the worker fetches when a document needs it; here, always)
+installBeamer(beamerCode);
 
 /** The largest .tex read (the editor's own bound on a document is far below it). */
 const TEX_MAX = 4 * 2 ** 20;
 /** The most PNG pages written for a document that isn't beamer's. */
 const PAGES_MAX = 60;
+/** The most PNGs one render writes (--steps: every step of every frame). */
+const SHOTS_MOST = 400;
 /** A beamer slide's width in the HTML and the PNGs, in CSS pixels (its height follows the aspect ratio). */
 const SLIDE_W = 1024;
 
@@ -43,11 +51,13 @@ const HELP = `sagebrush latex: check, run and see a .tex file as Sagebrush's LaT
       environments, math KaTeX can't typeset, missing images, code not run, expansion stopped. Exits 1 if
       there is an error (a warning alone exits 0).
 
-  sagebrush latex render FILE.tex [-o OUT.html] [--png DIR] [--json]
+  sagebrush latex render FILE.tex [-o OUT.html] [--png DIR [--steps]] [--pdf OUT.pdf] [--json]
       The preview as one self-contained HTML file (default: FILE.html beside FILE.tex). With --png DIR, one
       PNG per beamer frame (frame-01.png, ...) or per page of another document, and a report of each frame
       whose content overflows its slide. PNGs need Chrome, Chromium, Edge or Brave on this computer (or
-      CHROME=/path/to/browser); nothing is installed.
+      CHROME=/path/to/browser); nothing is installed. --steps: each frame at each of its overlay steps
+      (\\pause, <2->, \\only, \\uncover), frame-02-1.png, frame-02-2.png, ..., as the editor's Present shows them.
+      --pdf: the preview printed to a PDF by the same browser (a beamer document one page per frame).
 
 Look at the PNGs after every change: they are what the reader sees.
 `;
@@ -58,12 +68,14 @@ export async function latexCommand(argv: string[], opts: { cli?: string } = {}):
   if (cmd === undefined || cmd === "-h" || cmd === "--help" || cmd === "help") { process.stdout.write(HELP); return cmd === undefined ? 2 : 0; }
   if (cmd !== "check" && cmd !== "render" && cmd !== "run") { process.stderr.write(`sagebrush latex: no command ${JSON.stringify(cmd)} (check, run or render)\n\n${HELP}`); return 2; }
   const args = argv.slice(1);
-  let file: string | null = null, out: string | null = null, png: string | null = null, json = false, timeout = 120;
+  let file: string | null = null, out: string | null = null, png: string | null = null, pdf: string | null = null, json = false, timeout = 120, steps = false;
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === "--json") json = true;
     else if ((a === "-o" || a === "--out") && cmd === "render") { out = args[++i] ?? null; if (out === null) return usage(`${a} needs a file name`); }
     else if (a === "--timeout" && cmd === "run") { timeout = Number(args[++i]); if (!(timeout > 0 && timeout <= 3600)) return usage("--timeout needs a number of seconds, at most 3600"); }
+    else if (a === "--steps" && cmd === "render") steps = true;
+    else if (a === "--pdf" && cmd === "render") { pdf = args[++i] ?? null; if (pdf === null) return usage("--pdf needs a file name"); }
     else if (a === "--png" && cmd === "render") { png = args[++i] ?? null; if (png === null) return usage("--png needs a folder"); }
     else if (a.startsWith("-")) return usage(`unknown option ${a}`);
     else if (file === null) file = a;
@@ -88,15 +100,17 @@ export async function latexCommand(argv: string[], opts: { cli?: string } = {}):
   writeFileSync(htmlPath, html);
   const report: any = { html: htmlPath, check: result };
   let code = 0;
-  if (png !== null) {
-    try { report.png = await screenshots(htmlPath, png, result); }
-    catch (e: any) { report.png_error = String(e?.message ?? e); code = 1; }
+  if (png !== null || pdf !== null) {
+    try { const b = await screenshots(htmlPath, png, result, steps, pdf); if (png !== null) report.png = b; if (pdf !== null) report.pdf = b.pdf; }
+    catch (e: any) { report[png !== null ? "png_error" : "pdf_error"] = String(e?.message ?? e); code = 1; }
   }
   if (json) process.stdout.write(JSON.stringify(report, null, 2) + "\n");
   else {
     process.stdout.write(`wrote ${htmlPath}\n`);
     if (report.png) for (const p of report.png.pages) process.stdout.write(`wrote ${p.file}${p.title ? `  (frame ${p.frame}: ${p.title})` : ""}${p.overflow_px ? `  OVERFLOWS its slide by ${p.overflow_px}px` : ""}\n`);
+    if (report.pdf) process.stdout.write(`wrote ${report.pdf.file} (${report.pdf.pages} page${report.pdf.pages === 1 ? "" : "s"})\n`);
     if (report.png_error) process.stderr.write(`sagebrush latex: no PNGs: ${report.png_error}\n`);
+    if (report.pdf_error) process.stderr.write(`sagebrush latex: no PDF: ${report.pdf_error}\n`);
     const n = result.problems.length;
     if (n) process.stdout.write(`${n} problem${n === 1 ? "" : "s"} (sagebrush latex check ${file} lists them)\n`);
   }
@@ -108,38 +122,92 @@ function fail(why: string): number { process.stderr.write(`sagebrush latex: ${wh
 
 /** The preview of a .tex file: what check reports, and the self-contained HTML page. */
 export function renderTex(file: string, text: string): { result: CheckResult; html: string } {
-  // (a first pass finds the images the document names; the second has them, read from the file's own folder
-  //  as the editor reads them from the workspace: imageCandidates, never outside it)
-  const first = new Engine({}).update(text, { cold: true });
+  // (a first pass finds the images the document names; the second has them, read as the editor reads them from the
+  //  workspace and as TeX would: the file's folder, then \graphicspath's, imageCandidates. The workspace is the folder
+  //  the command runs in (its real path): its top is "/", so no name, relative, \graphicspath's or with a leading "/",
+  //  reaches outside it, and a file that is a link (or in a linked folder) is read only if its real path is inside
+  //  too (astra L2-BOUND-1, -2); a .tex outside that folder has no images)
   const images: Record<string, string | { why: string }> = {};
   const imgReport: ImageReport[] = [];
+  const root = realpathSync(process.cwd());
+  const inRoot = (p: string) => p === root || p.startsWith(root.endsWith(sep) ? root : root + sep);
+  let docReal: string | null = null;
+  try { docReal = realpathSync(resolve(file)); } catch {}
+  const toWs = (p: string) => "/" + relative(root, p).split(sep).join("/"), toDisk = (w: string) => join(root, ...w.slice(1).split("/"));
+  const doc = docReal && inRoot(docReal) ? toWs(docReal) : null, dirs = graphicsPathOf(text);
+  // (\input and \include, inputs.ts: the files the document asks for, read from the same folder by the same rules (inside
+  //  it by their real paths), until it asks for no new one; a .tex outside the folder reads none)
+  const known = new Map<string, Known>();
+  let inputBytes = 0;
+  const inputsNow = () => { const ei = engineInputs(doc ?? "/", known, true); return { ei, opt: { files: ei.files, resolve: doc ? ei.resolve : () => ({ why: "the .tex is outside the folder the command runs in" }), version: known.size } }; };
+  let first: any;
+  for (let round = 0; ; round++) {
+    const { ei, opt } = inputsNow();
+    first = new Engine({}).update(text, { cold: true, inputs: opt });
+    const want = doc && round < 64 ? ei.wanted(first.inputRefs as string[]) : [];
+    if (!want.length) break;
+    for (const w of want) {
+      const disk = toDisk(w);
+      let real = "";
+      try { real = realpathSync(disk); } catch {}
+      let k: Known;
+      if (!real) k = { absent: true };
+      else if (!inRoot(real)) k = { why: "a link to outside the folder the command runs in" };
+      else if (!statSync(real).isFile()) k = { absent: true };
+      else if (statSync(real).size > INPUT_BOUNDS.perFile) k = { why: "too large" };
+      else { const b = readFileSync(real); k = admitInput(new Uint8Array(b.buffer, b.byteOffset, b.byteLength), inputBytes, [...known.values()].filter((x) => "text" in x).length); if ("text" in k) inputBytes += b.length; }
+      known.set(w, k);
+    }
+  }
   let kept = 0;
   for (const name of first.imageRefs as string[]) {
-    const c = imageCandidates(name, "/" + basename(file));
+    const c = doc ? imageCandidates(name, doc, dirs) : { ok: false as const, why: "the .tex is outside the folder the command runs in: run it from a folder that holds it" };
     if (!c.ok) { images[name] = { why: c.why }; imgReport.push({ name, found: false, why: c.why }); continue; }
-    let got: { path: string; url: string } | { why: string } = { why: "no such file in this folder" };
-    for (const p of c.paths) {
-      const local = join(dirname(file), p.slice(1));
-      if (!existsSync(local) || !statSync(local).isFile()) continue;
-      const size = statSync(local).size;
+    let got: { path: string; url: string } | { why: string } | null = null;
+    for (const local of c.paths.map(toDisk)) {
+      if (!existsSync(local)) continue;
+      let real: string;
+      try { real = realpathSync(local); } catch { continue; }
+      if (!inRoot(real)) { got = { why: "a link to outside the folder the command runs in" }; break; }
+      if (!statSync(real).isFile()) continue;
+      const size = statSync(real).size;
       const why = admitImageBytes(size, size, kept);
       if (why) { got = { why }; break; }
-      const b = readFileSync(local);
+      const b = readFileSync(real);
+      if (b.length !== size) { got = { why: "changed while it was read" }; break; }
       const s = sniffImage(new Uint8Array(b.buffer, b.byteOffset, b.byteLength));
       if (!s.ok) { got = { why: s.why }; break; }
       kept += size;
-      got = { path: p.slice(1), url: `data:${s.mime};base64,${b.toString("base64")}` };
+      got = { path: relative(dirname(resolve(file)), local).split(sep).join("/"), url: `data:${s.mime};base64,${b.toString("base64")}` };
       break;
+    }
+    // (not found: a file of that name in a folder above, up to the top, named from this one)
+    if (!got) {
+      const leaf = basename(name), up: string[] = [];
+      for (let d = posix.dirname(posix.dirname(doc!)); up.length === 0; d = posix.dirname(d)) {
+        for (const x of /\.[A-Za-z0-9]+$/.test(leaf) ? [leaf] : IMAGE_EXTS.map((e) => leaf + e)) {
+          const w = (d === "/" ? "" : d) + "/" + x, disk = toDisk(w);
+          let real = "";
+          try { real = realpathSync(disk); } catch {}
+          if (real && inRoot(real) && statSync(real).isFile()) { up.push(w); break; }
+        }
+        if (d === "/") break;
+      }
+      got = { why: notFoundWhy(doc!, c.searched, up, true, name) };
     }
     if ("url" in got) { images[name] = got.url; imgReport.push({ name, found: true, path: got.path }); }
     else { images[name] = got; imgReport.push({ name, found: false, why: got.why }); }
   }
   // (the code items' results, from `sagebrush latex run`'s file beside it, for the items still as they were run)
-  const r = new Engine({ images, sage: { saved: readResults(file) } }).update(text, { cold: true });
+  const r = new Engine({ images, sage: { saved: readResults(file) } }).update(text, { cold: true, inputs: inputsNow().opt });
   const states = r.sageStates as State[];
-  const result = checkResult(file, text, { outcome: String(r.stats.outcome), beamer: !!r.beamer, problems: r.problems, frames: r.frames,
+  // (the page as the editor's preview shows it, split once as its worker splits it, web/latex/split.ts: a placeholder
+  //  where the preview has one, and check's warning for it)
+  const tooLarge: { kind: string; name: string; at: number }[] = [];
+  const pieces = (r.chunks as string[]).map((c, g) => splitChunk(c, (why, size) => tooLarge.push(tooLargeProblem(why, size, r.chunkPos?.[g]))).join(""));
+  const result = checkResult(file, text, { outcome: String(r.stats.outcome), beamer: !!r.beamer, problems: r.problems.concat(tooLarge), frames: r.frames,
     sage: (r.sageItems as any[]).map((it, k) => ({ mode: String(it.mode), err: it.err ?? null, at: typeof it.at === "number" ? it.at : -1, ...(states[k] ? { s: states[k].s, msg: states[k].msg } : {}) })) }, imgReport);
-  return { result, html: pageHtml(basename(file), r.chunks.join("\n"), !!r.beamer) };
+  return { result, html: pageHtml(basename(file), pieces.join("\n"), !!r.beamer) };
 }
 
 // ---- running the code: `sagebrush latex run`
@@ -168,6 +236,13 @@ function readResults(file: string): State[] {
 // session stopped by the timeout keeps what ran before it. The items' own printing is kept apart from the results.
 const DRIVER = `import json, io, sys, traceback
 from sagebrush.preparse import preparse as _sbtx_pp
+# (each item compiled as Sage source by the runtime itself, so its code object keeps Sage's semantics when it
+#  runs: 1/3 exact, as in a .sage file; plain exec of preparsed text is Python's, 1/3 a float (#706). Given the
+#  raw item: that compile preparses it, and preparsing twice would make ^^ a power. CPython: preparsed, exec'd)
+try:
+    _sbtx_cs = __pyjs_compile_sage__
+except NameError:
+    _sbtx_cs = None
 _sbtx_in, _sbtx_outp = sys.argv[1], sys.argv[2]
 with open(_sbtx_in) as _sbtx_f:
     _sbtx_items = json.load(_sbtx_f)
@@ -182,7 +257,8 @@ for _sbtx_it in _sbtx_items:
     _sbtx_old = sys.stdout
     sys.stdout = _sbtx_buf
     try:
-        _sbtx_code = _sbtx_pp(_sbtx_it["code"])
+        _sbtx_ev = _sbtx_it["mode"] in ("sage", "plot")
+        _sbtx_code = _sbtx_cs(_sbtx_it["code"].strip() if _sbtx_ev else _sbtx_it["code"], "<sagetex>", "eval" if _sbtx_ev else "exec") if _sbtx_cs else _sbtx_pp(_sbtx_it["code"])
         if _sbtx_it["mode"] == "sage":
             _sbtx_r = {"s": "ok", "latex": str(latex(eval(_sbtx_code, _sbtx_g)))}
         elif _sbtx_it["mode"] == "plot":
@@ -240,10 +316,10 @@ async function runCommand(file: string, text: string, timeout: number, json: boo
   });
   let got: any[] = [];
   try { got = existsSync(outp) ? JSON.parse(readFileSync(outp, "utf8")) : []; } catch {}
-  rmSync(tmp, { recursive: true, force: true });
+  removeTemp(tmp);
   const states: State[] = [];
   let failed = false;
-  // (a traceback without the session script's own frames: the item's code is the "<string>" one)
+  // (a traceback without the session script's own frames: the item's code is the "<sagetex>" one)
   const msgOf = (x: any) => {
     const lines = String(x?.msg ?? "").split("\n"), out: string[] = [];
     for (let i = 0; i < lines.length; i++) { if (/^\s*File ".*driver\.sage", line \d+/.test(lines[i])) { if (/^\s{4,}\S/.test(lines[i + 1] ?? "") && !/^\s*File /.test(lines[i + 1])) i++; continue; } out.push(lines[i]); }
@@ -302,6 +378,12 @@ body { margin: 0; background: #eef0f2; }
 .tex-page.sb-standalone { position: static; display: block; min-height: 100vh; }
 .sb-standalone .page.beamer { max-width: none; width: ${SLIDE_W}px; margin: 0 auto; padding: 16px; background: transparent; box-shadow: none; box-sizing: content-box; }
 .sb-standalone .page.beamer > .slide { margin: 0 0 16px; }
+@media print {
+  body { background: #fff; }
+  .sb-standalone .page.beamer { padding: 0; }
+  .sb-standalone .page.beamer > .slide { margin: 0; border: none; box-shadow: none; break-after: page; break-inside: avoid; }
+  .sb-standalone .page:not(.beamer) { box-shadow: none; margin: 0 auto; }
+}
 `;
 
 function pageHtml(name: string, body: string, beamer: boolean): string {
@@ -319,7 +401,14 @@ function pageHtml(name: string, body: string, beamer: boolean): string {
 
 /** The browser to use: $CHROME (or $SAGEBRUSH_CHROME), else the usual places, else null. */
 export function findBrowser(env = process.env, platform = process.platform): string | null {
-  for (const k of ["SAGEBRUSH_CHROME", "CHROME"]) if (env[k]) return existsSync(env[k]!) ? env[k]! : null;
+  // (CHROME=/path/to/it, or a command's name looked up on PATH as a shell would: CI sets CHROME=google-chrome)
+  for (const k of ["SAGEBRUSH_CHROME", "CHROME"]) if (env[k]) {
+    const v = env[k]!;
+    if (/[\\/]/.test(v)) return existsSync(v) ? v : null;
+    const dirs = (env.PATH ?? env.Path ?? "").split(platform === "win32" ? ";" : ":").filter(Boolean);
+    const names = platform === "win32" && !/\.exe$/i.test(v) ? [v + ".exe", v] : [v];
+    return dirs.flatMap((d) => names.map((n) => join(d, n))).find((p) => existsSync(p) && statSync(p).isFile()) ?? null;
+  }
   const cands: string[] = [];
   if (platform === "darwin") {
     for (const app of ["Google Chrome", "Chromium", "Microsoft Edge", "Brave Browser", "Google Chrome Canary"]) {
@@ -369,11 +458,11 @@ class Cdp {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function screenshots(htmlPath: string, dir: string, check: CheckResult) {
+async function screenshots(htmlPath: string, dir: string | null, check: CheckResult, steps = false, pdf: string | null = null) {
   const browser = findBrowser();
   if (!browser) throw new Error("no Chrome, Chromium, Edge or Brave found (set CHROME=/path/to/it); the HTML is written: open it in a browser");
   if (typeof (globalThis as any).WebSocket !== "function") throw new Error(`this JavaScript runtime has no WebSocket (Node 22 or newer has it)`);
-  mkdirSync(dir, { recursive: true });
+  if (dir !== null) mkdirSync(dir, { recursive: true });
   let proc: ChildProcess | null = null, ws: WebSocket | null = null, profile = "";
   try {
     // (where the browser's own sandbox can't start, as in many containers, once more without it: the page it draws
@@ -383,7 +472,7 @@ async function screenshots(htmlPath: string, dir: string, check: CheckResult) {
       profile = mkdtempSync(join(tmpdir(), "sb-latex-"));
       const r = await launch(browser, profile, extra);
       if ("port" in r) { proc = r.proc; port = r.port; noSandbox = extra.length > 0; break; }
-      rmSync(profile, { recursive: true, force: true }); profile = "";
+      removeTemp(profile); profile = "";
       if (extra.length) throw new Error(r.why);
     }
     const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json() as any[];
@@ -407,36 +496,65 @@ async function screenshots(htmlPath: string, dir: string, check: CheckResult) {
       : `(() => { const r = document.querySelector(".page").getBoundingClientRect(), H = Math.round(r.width * 1.294), out = [];
           for (let y = 0; y < r.height && out.length < ${PAGES_MAX}; y += H) out.push({ x: r.left + scrollX, y: r.top + scrollY + y, w: r.width, h: Math.min(H, r.height - y), over: 0 });
           return out; })()`);
-    const pages: { file: string; frame?: number; title?: string; overflow_px?: number }[] = [];
-    for (let k = 0; k < boxes.length; k++) {
-      const b = boxes[k];
-      const shot = await cdp.send("Page.captureScreenshot", { format: "png", captureBeyondViewport: true, clip: { x: b.x, y: b.y, width: b.w, height: b.h, scale: 1 } });
-      const f = join(dir, `${beamer ? "frame" : "page"}-${String(k + 1).padStart(2, "0")}.png`);
-      writeFileSync(f, Buffer.from(shot.data, "base64"));
-      const fr = beamer ? check.frames[k] : undefined;
-      pages.push({ file: f, ...(fr ? { frame: fr.n, title: fr.title } : {}), ...(b.over ? { overflow_px: b.over } : {}) });
+    // (--pdf: the page printed by the browser, a beamer document one page per frame of the slide's size, others on
+    //  Letter paper; the print rules are STANDALONE_CSS's)
+    let pdfOut: { file: string; pages: number } | undefined;
+    if (pdf !== null) {
+      const sz = beamer && boxes.length ? { paperWidth: boxes[0].w / 96, paperHeight: boxes[0].h / 96, marginTop: 0, marginBottom: 0, marginLeft: 0, marginRight: 0 } : { paperWidth: 8.5, paperHeight: 11, marginTop: 0.4, marginBottom: 0.4, marginLeft: 0.4, marginRight: 0.4 };
+      const r = await cdp.send("Page.printToPDF", { printBackground: true, ...sz });
+      const bytes = Buffer.from(r.data, "base64");
+      writeFileSync(pdf, bytes);
+      pdfOut = { file: pdf, pages: (bytes.toString("latin1").match(/\/Type\s*\/Page[^s]/g) || []).length };
     }
-    return { browser, ...(noSandbox ? { browser_sandbox: false } : {}), pages };
+    const pages: { file: string; frame?: number; step?: number; title?: string; overflow_px?: number }[] = [];
+    // (--steps: each frame at each overlay step, as the presenter shows them: overlay.ts's applyStep, its source sent to
+    //  the page; the frame measured again at each step)
+    const stepFn = applyStep.toString();
+    for (let k = 0; k < (dir === null ? 0 : boxes.length); k++) {
+      const fr = beamer ? check.frames[k] : undefined, n = steps && fr ? fr.steps : 1;
+      for (let s = 1; s <= n && pages.length < SHOTS_MOST; s++) {
+        let b = boxes[k];
+        if (steps && fr) b = await cdp.eval(`(() => { const sl = document.querySelectorAll("section.slide")[${k}]; (${stepFn})(sl, ${s}); const r = sl.getBoundingClientRect(), bd = sl.querySelector(".slide-body");
+          return { x: r.left + scrollX, y: r.top + scrollY, w: r.width, h: r.height, over: bd ? Math.max(0, Math.ceil(bd.scrollHeight - bd.clientHeight), Math.ceil(bd.scrollWidth - bd.clientWidth)) : 0 }; })()`);
+        const shot = await cdp.send("Page.captureScreenshot", { format: "png", captureBeyondViewport: true, clip: { x: b.x, y: b.y, width: b.w, height: b.h, scale: 1 } });
+        const f = join(dir!, `${beamer ? "frame" : "page"}-${String(k + 1).padStart(2, "0")}${steps && fr ? "-" + s : ""}.png`);
+        writeFileSync(f, Buffer.from(shot.data, "base64"));
+        pages.push({ file: f, ...(fr ? { frame: fr.n, ...(steps ? { step: s } : {}), title: fr.title } : {}), ...(b.over ? { overflow_px: b.over } : {}) });
+      }
+    }
+    return { browser, ...(noSandbox ? { browser_sandbox: false } : {}), pages, ...(pdfOut ? { pdf: pdfOut } : {}) };
   } finally {
     try { ws?.close(); } catch {}
     if (proc && proc.exitCode === null) { proc.kill(); await new Promise((r) => { proc!.once("exit", r); setTimeout(r, 3000); }); }
-    if (profile) rmSync(profile, { recursive: true, force: true });
+    if (profile) removeTemp(profile);
   }
+}
+
+/** A temporary folder removed, retried a while (Node's maxRetries: ENOTEMPTY, EBUSY, EPERM, ...), and never an error:
+ * the browser's helper processes can still be writing into its profile just after it exits, and a render that worked
+ * must not become a failure because its scratch folder lingered (a CI flake, #672's checks: png_error ENOTEMPTY). */
+export function removeTemp(dir: string, rm: typeof rmSync = rmSync): boolean {
+  try { rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); return true; } catch { return false; }
 }
 
 /** The browser started headless with its DevTools on a port of its choosing, or why it didn't start. */
 async function launch(browser: string, profile: string, extra: string[]): Promise<{ proc: ChildProcess; port: number } | { why: string }> {
   const proc = spawn(browser, ["--headless=new", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check",
-    "--disable-gpu", "--hide-scrollbars", "--mute-audio", "--disable-extensions", ...extra, "about:blank"], { stdio: "ignore" });
+    "--disable-gpu", "--hide-scrollbars", "--mute-audio", "--disable-extensions", ...extra, "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
+  // (the browser's own last words, its stderr's last 2 KB, kept for every "why" below: a start that fails in CI
+  //  then says what the browser said, not only that it failed; read for its whole life, so it never blocks on a full pipe)
+  let said = "";
+  proc.stderr?.on("data", (d) => { said = (said + d).slice(-2048); });
+  const tail = () => (said.trim() ? `; it said: ${said.trim().slice(-2048)}` : "");
   let exited: string | null = null;
   proc.on("exit", (c, s) => { exited = `the browser (${browser}) exited (${s ?? c}) before it could take the pictures`; });
   proc.on("error", (e) => { exited = `the browser (${browser}) didn't start: ${e.message}`; });
   const portFile = join(profile, "DevToolsActivePort");
   for (let i = 0; i < 300; i++) {
-    if (exited) return { why: exited };
+    if (exited) { await sleep(100); return { why: exited + tail() }; }
     if (existsSync(portFile)) { const port = parseInt(readFileSync(portFile, "utf8").split("\n")[0], 10) || 0; if (port) return { proc, port }; }
     await sleep(100);
   }
   proc.kill();
-  return { why: `the browser (${browser}) didn't open its DevTools port in 30 s` };
+  return { why: `the browser (${browser}) didn't open its DevTools port in 30 s` + tail() };
 }

@@ -1,4 +1,4 @@
-// ci: none (not run by CI before test discovery, Nov 2 2026: a wiring candidate)
+// ci: web-browser/latex order=10 chrome
 // The LaTeX page's agent tools (agent-tools.ts: latex_check, latex_render, registered with navigator.modelContext),
 // in headless Chrome against a web/dist built with SAGEBRUSH_LATEX_PREVIEW=test, served by web/serve.py: what an agent
 // in the browser runs to verify a .tex and see it. A stand-in navigator.modelContext (before the page's scripts)
@@ -119,6 +119,56 @@ try {
   const one = await call("latex_render", { frames: [3] });
   check(JSON.parse(one[0].text).shown.length === 1 && JSON.parse(one[0].text).shown[0].n === 3 && one.length === 2, "latex_render: one chosen frame", JSON.parse(one[0].text));
 
+  // ---- Present (present.ts): the slides full screen, step by step through their overlays; and latex_render's steps
+  const OV = String.raw`\documentclass[aspectratio=169]{beamer}
+\begin{document}
+\begin{frame}{Step by step}
+\begin{itemize}[<+->]
+\item First, the question.
+\item Then, an idea.
+\end{itemize}
+\only<3>{Only on three.}
+\end{frame}
+\begin{frame}{Second}
+Plain.
+\end{frame}
+\end{document}
+`;
+  await send("Page.navigate", { url: base });
+  await until(`!!${W}`, 60000);
+  const ofid = await mk("/ov.tex", OV);
+  await send("Page.navigate", { url: base + "?tex=" + ofid + "&latex=1" });
+  check(await until(`document.querySelectorAll(".tex-preview section.slide").length === 2 && !document.querySelector(".tex-present-btn").hidden`, 30000), "a beamer document: Present offered");
+  const oc = JSON.parse((await call("latex_check"))[0].text);
+  check(oc.frames.map((f) => f.steps).join(",") === "3,1", "latex_check: each frame's overlay steps", oc.frames);
+  await ev(`document.querySelector(".tex-present-btn").click(), 1`);
+  const P = `document.querySelector(".tex-present")`;
+  check(await until(`!!${P} && ${P}.dataset.frame === "1" && ${P}.dataset.step === "1"`, 15000), "Present: the presenter open at frame 1, step 1");
+  const vis = () => ev(`[...${P}.querySelectorAll("li")].map((li) => getComputedStyle(li).visibility).join(",") + "|" + (${P}.querySelector(".tp-stage").textContent.includes("Only on three") && getComputedStyle(${P}.querySelector('[data-ovm="only"]')).display !== "none")`);
+  const v1 = await vis();
+  const key = async (k, code) => { await send("Input.dispatchKeyEvent", { type: "keyDown", key: k, code, windowsVirtualKeyCode: { ArrowRight: 39, ArrowLeft: 37, Escape: 27, End: 35 }[k] }); await send("Input.dispatchKeyEvent", { type: "keyUp", key: k, code }); };
+  await key("ArrowRight", "ArrowRight");
+  const v2 = await vis();
+  await key("ArrowRight", "ArrowRight");
+  const v3 = await vis();
+  check(v1 === "visible,hidden|false" && v2 === "visible,visible|false" && v3 === "visible,visible|true", "Present: Right steps through the overlays (an item at a time, then \\only<3>)", { v1, v2, v3 });
+  await key("ArrowRight", "ArrowRight");
+  check(await until(`${P}.dataset.frame === "2" && ${P}.dataset.step === "1" && ${P}.textContent.includes("2 / 2")`, 5000), "Present: after the last step, the next frame", await ev(`${P}.textContent.slice(-40)`));
+  await key("ArrowLeft", "ArrowLeft");
+  check(await until(`${P}.dataset.frame === "1" && ${P}.dataset.step === "3"`, 5000), "Present: Left goes back to the last step of the frame before");
+  const box = await ev(`(() => { const r = ${P}.querySelector(".tp-stage > .slide").getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height), innerWidth, innerHeight]; })()`);
+  check(Math.abs(box[0] / box[1] - 16 / 9) < 0.02 && (Math.abs(box[0] - box[2]) <= 1 || Math.abs(box[1] - box[3]) <= 1), "Present: the slide as large as the window allows, 16:9", box);
+  // (an edit while presenting: shown at once)
+  await typeInto(OV.replace("Then, an idea.", "Then, a better idea."));
+  check(await until(`${P}.querySelector(".tp-stage").textContent.includes("a better idea")`, 15000), "Present: an edit shows at once");
+  await key("Escape", "Escape");
+  check(await until(`!${P}`, 5000), "Present: Escape stops it");
+  const rs = await call("latex_render", { steps: true });
+  const rsum = JSON.parse(rs[0].text);
+  check(rs.length === 1 + 4 && rsum.shown.map((x) => x.n + "." + x.step).join(",") === "1.1,1.2,1.3,2.1" && rsum.shown.every((x) => png(rs[1 + rsum.shown.indexOf(x)].data)?.[0] === 1024), "latex_render steps: each frame at each step", rsum.shown);
+  check(rs[1].data !== rs[2].data && rs[2].data !== rs[3].data, "latex_render steps: the steps' pictures differ");
+  await typeInto(OV);
+
   // ---- the code's saved results (`sagebrush latex run`'s file beside the .tex): drawn in the page, and in its report
   const SAGE = String.raw`\documentclass{beamer}
 \begin{document}
@@ -155,6 +205,53 @@ $f'(x) = \sage{diff(f(x), x)}$
   await typeInto(SAGE.replace("x^3 - 2*x", "x^3 - 3*x"));
   const se = JSON.parse((await call("latex_check"))[0].text);
   check(se.code.every((x) => x.state === "not run") && se.problems.some((x) => /sagebrush latex run/.test(x.message)), "an edit of the code: its results no longer shown, run asked for", se.code);
+
+  // ---- a frame whose \sageplot is over PIECE_MAX (128 KiB, sim run 8): drawn, in the preview and in Present; a frame
+  //      whose markup alone is over it: a placeholder that is still a slide (the deck keeps its frames), and
+  //      latex_check's warning at that frame's line
+  const BIG = String.raw`\documentclass{beamer}
+\begin{document}
+\begin{frame}{One}
+First.
+\end{frame}
+\begin{frame}{Big plot}
+\sageplot{list_plot([(k, sin(k/50.0)) for k in range(10000)], plotjoined=True)}
+\end{frame}
+\begin{frame}{Long}
+${"many words ".repeat(14000)}
+\end{frame}
+\end{document}
+`;
+  const bdir = mkdtempSync(join(tmpdir(), "sb-latex-tools-big-"));
+  writeFileSync(join(bdir, "big.tex"), BIG);
+  try { execFileSync(process.execPath, [cli, "latex", "run", "big.tex"], { cwd: bdir, stdio: "ignore" }); } catch {}
+  const bigResults = existsSync(join(bdir, "big.tex.results.json")) ? readFileSync(join(bdir, "big.tex.results.json"), "utf8") : "";
+  rmSync(bdir, { recursive: true, force: true });
+  check(/"s":"ok"/.test(bigResults) && bigResults.length > 128 * 1024, "a plot over 128 KiB made by sagebrush latex run", bigResults.length);
+  await send("Page.navigate", { url: base });
+  await until(`!!${W}`, 60000);
+  const bfid = await mk("/big.tex", BIG);
+  await mk("/big.tex.results.json", bigResults);
+  await send("Page.navigate", { url: base + "?tex=" + bfid + "&latex=1" });
+  const S = `document.querySelectorAll(".tex-preview section.slide")`;
+  check(await until(`${S}.length === 3 && !!${S}[1].querySelector("img.sageplot") && !!${S}[2].querySelector(".toolarge")`, 30000),
+    "a frame with a plot over 128 KiB drawn; one too large without one, a placeholder slide: all three frames kept",
+    await ev(`[...${S}].map((s) => s.dataset.frame + ":" + (s.querySelector("img.sageplot") ? "plot" : s.querySelector(".toolarge") ? "placeholder" : "slide")).join(",") + " / " + document.querySelectorAll(".tex-preview .toolarge").length + " placeholders"`));
+  const bc = JSON.parse((await call("latex_check"))[0].text);
+  const big = bc.problems.filter((x) => x.kind === "toolarge");
+  check(big.length === 1 && big[0].severity === "warning" && big[0].line === lineOf(BIG, "\\begin{frame}{Long}") && /slide is too large/.test(big[0].message) && /128 KiB/.test(big[0].message),
+    "latex_check: the frame too large for the preview, a warning at its line (the plot's frame not)", bc.problems);
+  const br = await call("latex_render");
+  check(JSON.parse(br[0].text).frames === 3 && br.length === 4, "latex_render: the three frames", JSON.parse(br[0].text));
+  if (process.env.LATEX_SHOTS) br.slice(1).forEach((x, k) => writeFileSync(join(process.env.LATEX_SHOTS, `big-frame-${k + 1}.png`), Buffer.from(x.data, "base64")));
+  await ev(`document.querySelector(".tex-present-btn").click(), 1`);
+  check(await until(`!!${P} && ${P}.dataset.frame === "1" && ${P}.textContent.includes("1 / 3")`, 15000), "Present: the three frames", await ev(`${P}?.textContent?.slice(-40)`));
+  await key("ArrowRight", "ArrowRight");
+  check(await until(`${P}.dataset.frame === "2" && !!${P}.querySelector(".tp-stage img.sageplot")`, 5000), "Present: the plot's frame, the plot drawn");
+  await key("ArrowRight", "ArrowRight");
+  check(await until(`${P}.dataset.frame === "3" && !!${P}.querySelector(".tp-stage .toolarge")`, 5000), "Present: the frame too large, its placeholder");
+  await key("Escape", "Escape");
+  await until(`!${P}`, 5000);
 
   // ---- an article: pages
   const afid = await mk("/notes.tex", ARTICLE);

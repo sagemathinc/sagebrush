@@ -134,6 +134,88 @@ try {
   check(await until(`!!document.querySelector("#wssidebar .frow input")`), "New board: named in place");
   await typeInto("Course plan");
   check(await until(`${W}.stat("/Course plan.board.json").then((e) => !!e)`), "…as Course plan.board.json");
+  // (…and opened once named, as a click on its row opens it: sage's n8 walkthrough; then back to the notebook page)
+  check(await until(`location.pathname.startsWith("/board/") && /Course plan/.test(document.title)`, 30000), "…and opened once named: " + JSON.stringify(await ev("location.pathname + ' ' + document.title").catch(() => null)));
+  await go(base);
+  await until(`!!${W}`, 60000);
+  if (await ev(`${S}.hidden`)) await click("#wsfilesbtn");
+  await until(`!!document.querySelector(${JSON.stringify(rowSel("/Algebra"))})`);
+  // N8 (sage's n8 walkthrough): a new notebook is opened once named (Enter, or Esc keeping Untitled), from the
+  // top New and from a folder's menu; MATLAB notebook makes one in MATLAB; what is typed then goes into it, never into
+  // the notebook that was open
+  {
+    const was = await ev(`document.querySelector("#nbname").value`);
+    await click("#wssidebar .fh button[aria-label=New]");
+    await menu("Notebook");
+    await until(`!!document.querySelector("#wssidebar .frow input")`);
+    await typeInto("N8 fresh");
+    const opened = await until(`document.querySelector("#nbname").value === "N8 fresh"`, 30000);
+    check(opened, "N8: New ▸ Notebook, named: opened once named (was " + JSON.stringify(was) + ")");
+    await until(`window.sagebrush.notebook.cells().length > 0`);
+    await ev(`(window.sagebrush.notebook.cells()[0].ta.focus(), 1)`);
+    await send("Input.insertText", { text: "n8_typed = 1" });
+    await ev(`window.sagebrush.notebook.saved?.()`);
+    const into = await until(`${W}.read("/N8 fresh.ipynb").then((r) => JSON.stringify(r.content).includes("n8_typed = 1")).catch(() => false)`, 15000);
+    check(into, "N8: what is typed then goes into the new notebook");
+    check(!(await ev(`${W}.list("/").then(async (l) => { for (const e of l) if (e.kind === "notebook" && e.path !== "/N8 fresh.ipynb") { const r = await ${W}.read(e.path).catch(() => null); if (r && JSON.stringify(r.content).includes("n8_typed")) return e.path; } return false; })`)), "N8: …and into no other notebook (not the one that was open)");
+    // (a folder's menu, MATLAB notebook, Esc keeping Untitled)
+    await until(`!!document.querySelector(${JSON.stringify(rowSel("/Algebra"))})`);
+    await click(rowSel("/Algebra") + " .more");
+    await menu("New MATLAB notebook here");
+    await until(`!!document.querySelector("#wssidebar .frow input")`);
+    await ev(`(() => { const i = document.querySelector("#wssidebar .frow input"); i.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); return 1; })()`);
+    const m = await until(`document.querySelector("#nbname").value === "Untitled" && window.sagebrush.notebook.mode === "matlab"`, 30000);
+    check(m && (await ev(`${W}.stat("/Algebra/Untitled.ipynb").then((e) => !!e)`)), "N8: a folder's New MATLAB notebook here, Esc: Untitled, in MATLAB, opened: " + JSON.stringify(await ev(`[document.querySelector("#nbname").value, window.sagebrush.notebook.mode]`)));
+    // (the top New's MATLAB notebook)
+    await click("#wssidebar .fh button[aria-label=New]");
+    await menu("MATLAB notebook");
+    await until(`!!document.querySelector("#wssidebar .frow input")`);
+    await typeInto("N8 matlab");
+    check(await until(`document.querySelector("#nbname").value === "N8 matlab" && window.sagebrush.notebook.mode === "matlab"`, 30000), "N8: New ▸ MATLAB notebook, named: opened, in MATLAB");
+    // (a folder: made and named, nothing opened)
+    await click("#wssidebar .fh button[aria-label=New]");
+    await menu("Folder");
+    await until(`!!document.querySelector("#wssidebar .frow input")`);
+    await typeInto("N8 folder");
+    await until(`${W}.stat("/N8 folder").then((e) => e?.kind === "folder")`);
+    await sleep(500);
+    check((await ev(`document.querySelector("#nbname").value`)) === "N8 matlab", "N8: a new folder opens nothing");
+    // (grader's B2-B5 on #704: what is opened when naming goes otherwise)
+    const nbname = () => ev(`document.querySelector("#nbname").value`);
+    const toastText = () => ev(`document.querySelector("#wssidebar .ftoast")?.textContent ?? ""`);
+    const newRowPath = () => ev(`document.querySelector("#wssidebar .frow input")?.closest(".frow")?.dataset.path ?? null`);
+    // B5: a search shown that the new item doesn't match: it has no row to name, and is opened at once
+    await ev(`(() => { const i = document.querySelector("#wssidebar .fsearch"); i.value = "zzq-no-such"; i.dispatchEvent(new Event("input")); return 1; })()`);
+    await sleep(400);
+    let before = await nbname();
+    await click("#wssidebar .fh button[aria-label=New]");
+    await menu("Notebook");
+    check(await until(`/^Untitled/.test(document.querySelector("#nbname").value)`, 30000) && !(await ev(`!!document.querySelector("#wssidebar .frow input")`)), "N8 (B5): a new notebook with no row to name it in (a search shown): opened at once (before " + JSON.stringify(before) + ")");
+    await ev(`(() => { const i = document.querySelector("#wssidebar .fsearch"); i.value = ""; i.dispatchEvent(new Event("input")); return 1; })()`);
+    await sleep(400);
+    // B3 (and B2): put in Trash while being named (another tab, an agent): said, and nothing opened
+    before = await nbname();
+    await click("#wssidebar .fh button[aria-label=New]");
+    await menu("Notebook");
+    await until(`!!document.querySelector("#wssidebar .frow input")`);
+    const goneAt = await newRowPath();
+    // (moved to Trash meanwhile, as another tab or an agent would: found by its ref, but in Trash)
+    const deletedProbe = await ev(`${W}.remove(${JSON.stringify(goneAt)}).then((e) => e.path)`);
+    await typeInto("N8 gone");
+    const saidGone = await until(`/was moved or deleted meanwhile: not renamed/.test(document.querySelector("#wssidebar .ftoast")?.textContent ?? "")`, 10000);
+    await sleep(1000);
+    check(saidGone && (await nbname()) === before && !(await ev(`${W}.stat("/Trash/N8 gone.ipynb").then((x) => !!x)`)), "N8 (B3): put in Trash while being named: said not renamed, nothing renamed in Trash, and nothing opened: " + JSON.stringify({ goneAt, saidGone, now: await nbname(), before, toast: await toastText(), goneStat: await ev(`${W}.stat(${JSON.stringify(goneAt)}).then((x) => !!x)`), renamed: await ev(`${W}.stat("/N8 gone.ipynb").then((x) => !!x)`), inTrash: await ev(`${W}.list("/Trash").then((l) => l.map((e) => e.path))`), boxOpen: await ev(`!!document.querySelector("#wssidebar .frow input")`), deletedProbe }));
+    // B4 (and B2): the name typed taken meanwhile: not renamed, and nothing opened
+    before = await nbname();
+    await click("#wssidebar .fh button[aria-label=New]");
+    await menu("Notebook");
+    await until(`!!document.querySelector("#wssidebar .frow input")`);
+    const keptAt = await newRowPath();
+    await ev(`${W}.create("/N8 taken.ipynb", { mode: "python" }).then(() => 1)`);
+    await typeInto("N8 taken");
+    await sleep(1500);
+    check((await nbname()) === before && (await ev(`${W}.stat(${JSON.stringify(keptAt)}).then((x) => !!x)`)), "N8 (B4): the name typed taken meanwhile: not renamed, and nothing opened: " + JSON.stringify({ keptAt, now: await nbname(), before, toast: await toastText() }));
+  }
   // a folder, and files dropped on it
   await click("#wssidebar .fh button[aria-label=New]");
   await menu("Folder");
@@ -1208,11 +1290,17 @@ try {
     const box = (p, shift = false) => ev(`(() => { document.querySelector(${JSON.stringify(rowSel(p))} + " .sel").dispatchEvent(new MouseEvent("click", { bubbles: true, shiftKey: ${shift} })); return 1; })()`);
     const ps = await paths();
     const b0 = await bar();
+    // (U2, William: "Selecting a checkbox MUST NOT move the checkbox or row": every drawn row's top and the first row's
+    // checkbox, before and after a selection appears, the bar over the search box, the same height)
+    const layout = () => ev(`(() => { const rs = [...document.querySelectorAll(${JSON.stringify(sel)})], b = document.querySelector("#wssidebar .fsel").getBoundingClientRect(), s = document.querySelector("#wssidebar .fsearch").getBoundingClientRect(); return { tops: rs.map((r) => Math.round(r.getBoundingClientRect().top)), box: Math.round(rs[0].querySelector(".sel").getBoundingClientRect().top), bar: [Math.round(b.top), Math.round(b.height)], search: [Math.round(s.top), Math.round(s.height)] }; })()`);
+    const l0 = await layout();
     // (Recent's rows: those before the "This browser" heading)
     const recent = await ev(`(() => { const out = []; for (const el of document.querySelectorAll("#wssidebar .ftree > *")) { if (el.classList.contains("fgrp") && el.textContent !== "Recent") break; if (el.classList.contains("frow")) out.push(!!el.querySelector(".sel")); } return out; })()`);
     check(ps.length >= 4 && b0.hidden && recent.length > 0 && !recent.some(Boolean), "B2: the tree's rows have checkboxes (Recent's don't), the bar hidden with nothing selected: " + JSON.stringify({ n: ps.length, b0, recent }));
     await box(ps[0]);
-    const b1 = await bar(), p1 = await picked();
+    const b1 = await bar(), p1 = await picked(), l1 = await layout();
+    check(JSON.stringify(l1.tops) === JSON.stringify(l0.tops) && l1.box === l0.box && l1.bar[0] === l1.search[0] && l1.bar[1] === l1.search[1] && JSON.stringify(l1.search) === JSON.stringify(l0.search),
+      "U2: selecting a row moves no row and no checkbox; the bar takes the search box's place, at its size: " + JSON.stringify({ l0, l1 }));
     check(!b1.hidden && b1.text === "1 selected" && b1.some && JSON.stringify(p1) === JSON.stringify([ps[0]]) && (await ev(`document.querySelector(${JSON.stringify(rowSel(ps[0]))} + " .sel").getAttribute("aria-checked")`)) === "true", "B2: a checkbox's click selects its row (not opened), the bar says 1 selected: " + JSON.stringify({ b1, p1 }));
     await box(ps[3], true);
     const p2 = await picked();
@@ -1239,6 +1327,91 @@ try {
     const b4 = await bar();
     check(ps[1] === "/b2 notes.txt" ? b4.text === "1 selected" : b4.hidden, "B2: a row a search hides leaves the selection: " + JSON.stringify({ b4, was: ps[1] }));
     await ev(`(() => { const i = document.querySelector("#wssidebar .fsearch"); i.value = ""; i.dispatchEvent(new Event("input")); [...document.querySelectorAll("#wssidebar .fsel button")].find((x) => x.textContent === "Clear").click(); return 1; })()`);
+  }
+  // U4 (William, Nov 2): rows dragged onto a folder move into it: the selection, as Rename moves one, said, with Undo; a
+  // folder never into itself; a drag from outside still uploads (above)
+  {
+    await ev(`${W}.mkdir("/u4 dest").then(() => ${W}.create("/u4 one.txt", { content: "1" })).then(() => ${W}.create("/u4 two.txt", { content: "2" })).then(() => 1)`);
+    await until(`!!document.querySelector(${JSON.stringify("#wssidebar .frow[data-sel][data-path=\"/u4 two.txt\"]")}) && !!document.querySelector(${JSON.stringify("#wssidebar .frow[data-sel][data-path=\"/u4 dest\"]")})`);
+    // (the tree's row, not Recent's: Recent's rows aren't selectable or draggable, and come first)
+    const treeRow = (p) => `#wssidebar .frow[data-sel][data-path=${JSON.stringify(p)}]`;
+    // (a drag: dragstart on a row, dragover and drop on the target, one DataTransfer carried through, as a real drag does)
+    const drag = (from, to) => ev(`(() => {
+      const f = document.querySelector(${JSON.stringify(treeRow(from))}), t = document.querySelector(${JSON.stringify(treeRow(to))});
+      const dt = new DataTransfer();
+      f.dispatchEvent(new DragEvent("dragstart", { bubbles: true, cancelable: true, dataTransfer: dt }));
+      const over = new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer: dt });
+      t.dispatchEvent(over);
+      // (accepted: the target marked as one (.drop), which the list does only for a drop it takes; a synthetic
+      // DataTransfer keeps no dropEffect)
+      const accepted = over.defaultPrevented && t.classList.contains("drop");
+      t.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt }));
+      f.dispatchEvent(new DragEvent("dragend", { bubbles: true, dataTransfer: dt }));
+      return { accepted, types: [...dt.types] };
+    })()`);
+    const box = (p) => ev(`(() => { document.querySelector(${JSON.stringify(rowSel(p))} + " .sel").click(); return 1; })()`);
+    await box("/u4 one.txt"); await box("/u4 two.txt");
+    const d1 = await drag("/u4 one.txt", "/u4 dest");
+    const moved = await until(`${W}.stat("/u4 dest/u4 one.txt").then((a) => ${W}.stat("/u4 dest/u4 two.txt").then((b) => !!a && !!b))`, 10000);
+    const gone = await ev(`${W}.stat("/u4 one.txt").then((a) => ${W}.stat("/u4 two.txt").then((b) => !a && !b))`);
+    const said = await until(`/Moved 2 items to "u4 dest"/.test(document.querySelector("#wssidebar .ftoast")?.textContent ?? "")`, 5000);
+    check(d1.accepted && moved && gone && said, "U4: the selection dragged onto a folder moves into it, said: " + JSON.stringify({ d1, moved, gone, said }));
+    // (Undo: both back where they were)
+    await ev(`(() => { [...document.querySelectorAll("#wssidebar .ftoast button")].find((b) => b.textContent === "Undo")?.click(); return 1; })()`);
+    const back = await until(`${W}.stat("/u4 one.txt").then((a) => ${W}.stat("/u4 two.txt").then((b) => !!a && !!b))`, 10000);
+    check(back, "U4: Undo moves them back");
+    // (a folder onto itself: refused at the dragover, nothing moved)
+    const d2 = await drag("/u4 dest", "/u4 dest");
+    await new Promise((r) => setTimeout(r, 500));
+    check(!d2.accepted && (await ev(`${W}.stat("/u4 dest").then((x) => !!x && x.kind === "folder")`)), "U4: a folder can't be dropped into itself: " + JSON.stringify(d2));
+    // (one row, not selected, dragged alone)
+    const d3 = await drag("/u4 two.txt", "/u4 dest");
+    check(d3.accepted && (await until(`${W}.stat("/u4 dest/u4 two.txt").then((x) => !!x)`, 10000)), "U4: one row dragged alone moves alone: " + JSON.stringify(d3));
+  }
+  // U9 (William, Nov 2): rename knows a file's extension: the box preselects the base; a name typed without one keeps
+  // the old; another one is allowed, said beside the box as it is typed; a folder's name is all name
+  {
+    const treeRow = (p) => `#wssidebar .frow[data-sel][data-path=${JSON.stringify(p)}]`;
+    // (F2 on the tree's row: the box, its value and what is selected in it)
+    const f2 = (p) => ev(`(() => { const r = document.querySelector(${JSON.stringify(treeRow(p))}); if (!r) return null; r.focus(); r.dispatchEvent(new KeyboardEvent("keydown", { key: "F2", bubbles: true })); const i = r.querySelector("input"); return { value: i.value, sel: [i.selectionStart, i.selectionEnd] }; })()`);
+    // (typed: the input event the box listens to; then what the note beside it says; then Enter)
+    const typeName = (text) => ev(`(() => { const i = document.querySelector("#wssidebar .frow input"); if (!i) return "(no box)"; i.value = ${JSON.stringify(text)}; i.dispatchEvent(new Event("input")); const n = i.parentElement.querySelector(".extnote")?.textContent ?? null; i.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); return n; })()`);
+    const has = (p) => until(`${W}.stat(${JSON.stringify(p)}).then((x) => !!x)`, 10000);
+    await ev(`${W}.create("/u9 a.tex", { content: "x" }).then(() => ${W}.mkdir("/u9 dir")).then(() => 1)`);
+    await until(`!!document.querySelector(${JSON.stringify(treeRow("/u9 a.tex"))}) && !!document.querySelector(${JSON.stringify(treeRow("/u9 dir"))})`);
+    const b1 = await f2("/u9 a.tex");
+    check(b1 && b1.value === "u9 a.tex" && b1.sel[0] === 0 && b1.sel[1] === "u9 a".length, "U9: a file's rename box preselects only its base name: " + JSON.stringify(b1));
+    const n1 = await typeName("u9 b");
+    check((await has("/u9 b.tex")) && !(await ev(`${W}.stat("/u9 b").then((x) => !!x)`)) && !n1, "U9: a name typed without an extension keeps the old one (u9 b -> u9 b.tex), no note: " + JSON.stringify(n1));
+    await until(`!!document.querySelector(${JSON.stringify(treeRow("/u9 b.tex"))})`);
+    await f2("/u9 b.tex");
+    const n2 = await typeName("u9 c.md");
+    check(n2 === "changes the file type: .tex → .md" && (await has("/u9 c.md")), "U9: a different extension is allowed, said beside the box as typed: " + JSON.stringify(n2));
+    const b3 = await f2("/u9 dir");
+    const n3 = await typeName("u9 folder.v2");
+    check(b3 && b3.value === "u9 dir" && b3.sel[1] === "u9 dir".length && !n3 && (await has("/u9 folder.v2")), "U9: a folder's name is all name (all selected, no extension rule): " + JSON.stringify({ b3, n3 }));
+    // (a notebook's or board's name typed with its own extension gets it once: sage's n8 walkthrough,
+    // "chapter1.ipynb.ipynb"; the extension alone leaves the old name)
+    await ev(`${W}.create("/u9 nb.ipynb", { mode: "python" }).then(() => ${W}.create("/u9 brd.board.json")).then(() => 1)`);
+    await until(`!!document.querySelector(${JSON.stringify(treeRow("/u9 nb.ipynb"))}) && !!document.querySelector(${JSON.stringify(treeRow("/u9 brd.board.json"))})`);
+    await f2("/u9 nb.ipynb");
+    await typeName("u9 chapter1.IPYNB");
+    const once = await has("/u9 chapter1.ipynb"), twice = await ev(`${W}.stat("/u9 chapter1.IPYNB.ipynb").then((x) => !!x)`);
+    check(once && !twice, "U9: a notebook named with its extension gets it once (u9 chapter1.IPYNB -> u9 chapter1.ipynb): " + JSON.stringify({ once, twice }));
+    await f2("/u9 brd.board.json");
+    await typeName("u9 plan.board.json");
+    check((await has("/u9 plan.board.json")) && !(await ev(`${W}.stat("/u9 plan.board.json.board.json").then((x) => !!x)`)), "U9: a board named with its extension gets it once");
+    // (a space before the typed extension goes with it: grader's N3)
+    await ev(`${W}.create("/u9 sp.ipynb", { mode: "python" }).then(() => 1)`);
+    await until(`!!document.querySelector(${JSON.stringify(treeRow("/u9 sp.ipynb"))})`);
+    await f2("/u9 sp.ipynb");
+    await typeName("u9 spaced .ipynb");
+    check((await has("/u9 spaced.ipynb")) && !(await ev(`${W}.stat("/u9 spaced .ipynb").then((x) => !!x)`)), "U9: \"u9 spaced .ipynb\" becomes u9 spaced.ipynb (the space before the extension dropped)");
+    await until(`!!document.querySelector(${JSON.stringify(treeRow("/u9 chapter1.ipynb"))})`);
+    await f2("/u9 chapter1.ipynb");
+    await typeName(".ipynb");
+    await new Promise((r) => setTimeout(r, 500));
+    check((await ev(`${W}.stat("/u9 chapter1.ipynb").then((x) => !!x)`)) && !(await ev(`${W}.stat("/.ipynb").then((x) => !!x)`)), "U9: the extension alone is no name: the old one stays");
   }
   // a phone: the sidebar over the page
   await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });

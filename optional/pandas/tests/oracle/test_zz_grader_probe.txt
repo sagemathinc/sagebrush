@@ -1,0 +1,179 @@
+python 3.14.9 x86_64 glibc
+package et_xmlfile 2.0.0
+package numpy 2.5.1
+package openpyxl 3.1.5
+package pandas 3.1.0
+package python-dateutil 3.0.0
+package six 1.17.0
+package tzdata 2026.6
+pyarrow absent
+future.infer_string True
+str dtype <StringDtype(storage='python', na_value=nan)>
+option display.max_rows 60
+option display.min_rows 10
+option display.max_columns 0
+option display.width 80
+option display.precision 6
+option display.max_colwidth 50
+--
+== P5.sum
+np.float64(nan)
+== P5.mean
+np.float64(nan)
+== P5.min
+np.float64(nan)
+== P5.max
+np.float64(nan)
+== P5.df-sum
+
+a    NaN
+b    5.0
+dtype: float64
+== P5.df-mean
+
+a    NaN
+b    2.5
+dtype: float64
+== P11.xor
+
+0    False
+1     True
+2     True
+3    False
+dtype: bool
+== P11.xor-scalar
+
+0    False
+1     True
+2    False
+3     True
+dtype: bool
+== P12.s-iloc-n
+!! IndexError: single positional indexer is out-of-bounds
+== P12.df-iloc-n
+!! IndexError: single positional indexer is out-of-bounds
+== P12.df-iloc-col-n
+!! IndexError: single positional indexer is out-of-bounds
+== P13.s-iloc-neg1
+np.int64(30)
+== P13.s-iloc-negn
+np.int64(10)
+== P13.df-iloc-neg1
+
+x    3
+y    6
+Name: 2, dtype: int64
+== P13.df-iloc-col-neg1
+
+0    4
+1    5
+2    6
+Name: y, dtype: int64
+== P13.df-iloc-both-neg
+np.int64(6)
+== P14.s-iloc-list-neg-n-1
+!! IndexError: positional indexers are out-of-bounds
+== P14.s-iloc-list-n
+!! IndexError: positional indexers are out-of-bounds
+== P14.df-iloc-list-neg-n-1
+!! IndexError: positional indexers are out-of-bounds
+== P14.s-iloc-list-negs
+
+c    30
+a    10
+dtype: int64
+== P17.inc-to-present-dup
+
+1    1
+2    2
+2    3
+dtype: int64
+== P17.inc-from-present-dup
+
+2    2
+2    3
+3    4
+dtype: int64
+== P17.inc-missing
+
+2    2
+2    3
+dtype: int64
+== P17.inc-missing-stop
+
+1    1
+2    2
+2    3
+dtype: int64
+== P31.dec-missing
+
+2    2
+2    3
+dtype: int64
+== P31.dec-missing-start
+
+2    2
+2    3
+1    4
+dtype: int64
+== P32.dec-present-dup
+
+2    2
+2    3
+dtype: int64
+== P32.dec-to-present
+
+3    1
+2    2
+2    3
+dtype: int64
+== P32.dec-from-present
+
+2    2
+2    3
+1    4
+dtype: int64
+== P32.dec-missing-stop
+
+3    1
+2    2
+2    3
+dtype: int64
+== P32.dec-missing-stop2
+
+3    1
+dtype: int64
+== P20.float-index-int-slice
+
+1.0    2
+2.0    3
+dtype: int64
+== P20.float-index-int-slice-df
+
+     v
+1.0  2
+2.0  3
+== P21.nonunique-start
+!! KeyError: "Cannot get left slice bound for non-unique label: 'a'"
+== P21.nonunique-stop
+!! KeyError: "Cannot get right slice bound for non-unique label: 'a'"
+== P21.nonunique-getitem
+!! KeyError: "Cannot get left slice bound for non-unique label: 'a'"
+== P23.na-values-str
+
+   a    b
+0  1  NaN
+1  2  bar
+== P23.na-values-str-num
+
+   a    b
+0  1  NaN
+1  2  8.0
+== P27.copy-set-iloc
+([10, 20, 30], [99, 20, 30])
+== P27.copy-set-label
+([10, 20, 30], [99, 20, 30])
+== P27.copy-set-loc
+([10, 20, 30], [99, 20, 30])
+== P27.df-col-copy
+([1, 2, 3], [99, 2, 3])

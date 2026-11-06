@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "Version history (note r1, PR 1's page side): a synced data file's versions on the server, listed in its preview with Download and Restore (web/workspace/server-versions.ts and preview.ts's rows), in the page the CLI embeds. Measured with bun 1.4.4 at the exact probe merge (pyjs +3480).",
- "bytes": {
-  "cli/pyjs.cjs": 3540
- }
-}

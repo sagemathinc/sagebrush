@@ -1,8 +1,10 @@
 // The editors' old example lists, generated from the corpus in examples/ (plan-examples-gallery §6, PR 2: "the old
-// in-editor lists keep working, generated from examples/ at build time"). The pages import these with
-// { type: "macro" }: Bun runs them while bundling and inlines what they return, so a page carries the same lists it
-// did and no file system code. web/build.ts writes the board page's examples/ from boardMenu() and boardFiles().
-// They go with the old menus (PR 6), once the Examples… panel replaces them.
+// in-editor lists keep working, generated from examples/ at build time"). Run as it is (Bun's tests), these read
+// the corpus. A bundle never carries this file: web/build.ts's plugin (examplesLegacyPlugin) gives every bundle
+// legacySource() instead, the same functions returning the lists as literals, each text a String.raw template, as
+// the lists were written by hand (a macro's strings are printed escaped: every backslash and newline twice, 45 KB more
+// in the CLI's copy of the page for the same lists). web/build.ts writes the board page's examples/ from
+// boardMenu() and boardFiles(). They go with the old menus (PR 6), once the Examples… panel replaces them.
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
@@ -31,6 +33,13 @@ const NOTEBOOKS = [
   "matplotlib",
   "text-and-data",
 ];
+// (corpus notebooks the old menu leaves out, each with why: it carries one notebook's code and Markdown, so an
+// example that is a folder, or that needs its cells' Jupyter metadata, opens from the Examples panel instead (PR 3);
+// the test checks every corpus notebook is in NOTEBOOKS or here)
+export const NOT_IN_OLD_MENU: Record<string, string> = {
+  "helper-code": "its helper files beside it (_code/, data/): the old menu makes a notebook from cells alone",
+  "hidden-setup": "its cells' Jupyter metadata (source_hidden, outputs_hidden): the old menu keeps code and Markdown only",
+};
 const LATEX = ["article", "beamer", "sagetex", "pythontex", "matlab", "figure", "cv", "tikz", "bibliography", "homework"];
 const BOARDS = ["how-sagebrush-is-built", "infinitely-many-primes", "collatz-live", "mermaid-flowcharts", "what-is-transitive"];
 // (written into dist/board/examples by scripts/board-examples.mjs, so not in the corpus)
@@ -87,4 +96,50 @@ export function boardFiles(): [file: string, path: string][] {
     seen.set(m.main, join(root, "board", slug, m.main));
   }
   return [...seen];
+}
+
+/**
+ * A string as JavaScript source, the shorter of JSON and a String.raw template: its text as it is, but for what a raw
+ * template can't hold,
+ * each put in as an interpolation of a JSON string: a run of characters beyond ASCII (Bun writes one inside a raw
+ * template as \uXXXX, which is then those six characters), a backtick, a "$" before "{", a carriage return (which a
+ * template's raw text turns into a line feed), and a backslash at the end or before one of these (it would escape
+ * the "$" that starts it).
+ */
+export function rawLiteral(t: string): string {
+  // (which characters go in interpolations, decided from the end: a backslash does when the one after it does)
+  const put = new Array<boolean>(t.length + 1).fill(false);
+  put[t.length] = true;
+  for (let k = t.length - 1; k >= 0; k--) {
+    const c = t.charCodeAt(k);
+    put[k] = c > 0x7f || c === 0x60 || c === 0x0d || (c === 0x24 && t[k + 1] === "{") || (c === 0x5c && put[k + 1]);
+  }
+  let out = "";
+  for (let k = 0; k < t.length; ) {
+    if (!put[k]) {
+      out += t[k++];
+      continue;
+    }
+    let e = k + 1;
+    while (e < t.length && put[e]) e++;
+    out += "${" + JSON.stringify(t.slice(k, e)) + "}";
+    k = e;
+  }
+  const raw = "String.raw`" + out + "`", json = JSON.stringify(t);
+  // (whichever is shorter: a text with many characters beyond ASCII and few backslashes is shorter as JSON)
+  return json.length < raw.length ? json : raw;
+}
+/** A value as JavaScript source, every string through rawLiteral. */
+function source(v: unknown): string {
+  if (typeof v === "string") return rawLiteral(v);
+  if (Array.isArray(v)) return "[" + v.map(source).join(",") + "]";
+  if (v && typeof v === "object") return "{" + Object.entries(v).map(([k, x]) => JSON.stringify(k) + ":" + source(x)).join(",") + "}";
+  return JSON.stringify(v);
+}
+/** This module as a bundle carries it: the menus' functions, returning the corpus's lists as literals. */
+export function legacySource(): string {
+  return `// (web/examples/legacy.ts, as web/build.ts bundles it: the lists, generated from examples/)
+export function notebookExamples() { return ${source(notebookExamples())}; }
+export function latexExamples() { return ${source(latexExamples())}; }
+`;
 }

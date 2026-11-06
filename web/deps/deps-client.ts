@@ -14,6 +14,7 @@
 // LIMIT-SHAREB-2).  A worker that can't even be started ends the run as failed
 // (CORR-SHAREB-3).
 import type { FileDepsInput, Reason, Unfollowed } from "./file-deps";
+import type { Dep, DocKind, DocUnfollowed } from "./document-deps";
 
 export const FAILSAFE = { silenceMs: 30_000, sourceBytes: 256 * 1024 * 1024 };
 
@@ -112,6 +113,69 @@ export function startDeps(o: {
     },
     get running() {
       return running;
+    },
+  };
+}
+
+/** A document's dependencies (document-deps.ts, in the worker), as one promise: the "Uses N helper files" line,
+ * Download and Share. Each Dep also goes to onDep as it is found; `complete` is false when something couldn't be
+ * read or parsed, or a fail-safe stopped the run (`stopped` then says which). Only `certain` deps are pre-ticked or
+ * counted. `stop()` ends it early, resolving with what was found and complete false. */
+export function documentDeps(o: {
+  path: string;
+  text: string;
+  kind: DocKind;
+  files: [string, { size?: number }][];
+  /** sys.path (fileDeps'); default: the document's folder */
+  importPath?: { dir: string; workspace: boolean }[];
+  builtinModules?: string[];
+  externalModules?: string[];
+  packageModules?: string[];
+  readBytes: (path: string) => Promise<Uint8Array>;
+  createWorker: () => WorkerLike;
+  onDep?: (d: Dep) => void;
+  failsafe?: { silenceMs: number; sourceBytes: number };
+  setTimer?: (f: () => void, ms: number) => unknown;
+  clearTimer?: (t: unknown) => void;
+}): { done: Promise<{ deps: Dep[]; unfollowed: DocUnfollowed[]; complete: boolean; stopped?: "failsafe" | "failed" | "stopped" }>; stop(): void } {
+  const folder = o.path.slice(0, o.path.lastIndexOf("/")) || "/";
+  const deps: Dep[] = [], unfollowed: DocUnfollowed[] = [];
+  let resolve!: (r: { deps: Dep[]; unfollowed: DocUnfollowed[]; complete: boolean; stopped?: "failsafe" | "failed" | "stopped" }) => void;
+  const done = new Promise<{ deps: Dep[]; unfollowed: DocUnfollowed[]; complete: boolean; stopped?: "failsafe" | "failed" | "stopped" }>((ok) => (resolve = ok));
+  const run = startDeps({
+    gen: 1,
+    input: {
+      doc: { path: o.path, text: o.text, kind: o.kind },
+      cells: [],
+      cwd: folder,
+      importPath: o.importPath ?? [{ dir: folder, workspace: true }],
+      files: o.files,
+      builtinModules: o.builtinModules ?? [],
+      externalModules: o.externalModules ?? [],
+      packageModules: o.packageModules ?? [],
+    } as DepsInput,
+    readBytes: o.readBytes,
+    createWorker: o.createWorker,
+    failsafe: o.failsafe,
+    setTimer: o.setTimer,
+    clearTimer: o.clearTimer,
+    handlers: {
+      onDep: (_path, reason) => {
+        const d = reason as unknown as Dep;
+        deps.push(d);
+        o.onDep?.(d);
+      },
+      onUnfollowed: (u) => unfollowed.push(u as unknown as DocUnfollowed),
+      onProgress: () => {},
+      onDone: (r) => resolve({ deps, unfollowed, complete: r.complete, ...(r.stopped ? { stopped: r.stopped } : {}) }),
+    },
+  });
+  return {
+    done,
+    stop: () => {
+      if (!run.running) return;
+      run.stop();
+      resolve({ deps, unfollowed, complete: false, stopped: "stopped" });
     },
   };
 }

@@ -1,0 +1,36 @@
+{
+  "tests": [
+    {
+      "test": "test_input.test_numpy_record_array",
+      "reason": "Sagebrush NumPy does not yet implement dictionary-specified structured dtypes and record arrays"
+    },
+    {
+      "test": "test_input.test_numpy_record_array_headers",
+      "reason": "Sagebrush NumPy does not yet implement dictionary-specified structured dtypes and record arrays"
+    },
+    {
+      "test": "test_input.test_numpy_record_array_keys",
+      "reason": "Sagebrush NumPy does not yet implement dictionary-specified structured dtypes and record arrays"
+    },
+    {
+      "test": "test_input.test_sqlite3",
+      "reason": "Sagebrush does not provide the sqlite3 standard-library module, so cursor input is outside this package's supported surface"
+    },
+    {
+      "test": "test_input.test_sqlite3_keys",
+      "reason": "Sagebrush does not provide the sqlite3 standard-library module, so cursor input is outside this package's supported surface"
+    },
+    {
+      "test": "test_output.test_grid_wide_characters",
+      "reason": "The optional wcwidth package is not in Sagebrush's curated package set, so display-width adjustment is unavailable"
+    },
+    {
+      "test": "test_regression.test_mix_normal_and_wide_characters",
+      "reason": "The optional wcwidth package is not in Sagebrush's curated package set, so display-width adjustment is unavailable"
+    },
+    {
+      "test": "test_regression.test_multiline_with_wide_characters",
+      "reason": "The optional wcwidth package is not in Sagebrush's curated package set, so display-width adjustment is unavailable"
+    }
+  ]
+}

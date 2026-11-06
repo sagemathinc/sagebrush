@@ -14,7 +14,9 @@ From then on messages go page <-> this frame <-> the worker.  A file the
 worker needs (the engine, a shared collection's file) is fetched by the page
 and copied to the worker through a SharedArrayBuffer while it waits (its
 reads are synchronous).  The interrupt flag stays here: the page asks for
-Stop by message, and input()'s answers too (design/runner.md, How 7).
+Stop by message, and input()'s answers too (design/runner.md, How 7), and
+live data's (src/live-data.ts): the operation goes to the page unchanged, its
+buffer staying here, and the page's answer is written to it.
 -->
 <script>
 (() => {
@@ -53,7 +55,7 @@ Stop by message, and input()'s answers too (design/runner.md, How 7).
         Atomics.store(ctrl, 0, 1);
         Atomics.notify(ctrl, 0);
       };
-      let flag = null;
+      let flag = null, writable = null;
       // input() (design/runner.md, How 7): open requests by key, {id: the run,
       // buffer}; an answer writes only to the one its key and run name.  A
       // request is over at its answer, its run's next question or end, a Stop.
@@ -76,14 +78,46 @@ Stop by message, and input()'s answers too (design/runner.md, How 7).
         }
         Atomics.notify(ctl, 0);
       };
+      // live data (src/live-data.ts): open requests by key, {id: the run, buffer};
+      // the page's answer is written once, to the one its key and run name,
+      // and a request is over at its answer, its run's end or a Stop
+      const LIVE_BYTES = 8 + (8 << 20);
+      const lives = new Map();
+      const retireLive = (id) => {
+        for (const [key, e] of lives) if (id === undefined || e.id === id) lives.delete(key);
+      };
+      const giveLive = (buffer, answer) => {
+        const ctl = new Int32Array(buffer, 0, 2);
+        if (Atomics.load(ctl, 0) !== 0) return;
+        let bytes;
+        try {
+          bytes = new TextEncoder().encode(JSON.stringify(answer));
+        } catch {
+          bytes = null;
+        }
+        // (the worker checks the answer again: anything it doesn't take is unavailable)
+        if (!bytes || bytes.length > buffer.byteLength - 8) bytes = new TextEncoder().encode('{"error":"unavailable"}');
+        new Uint8Array(buffer, 8, bytes.length).set(bytes);
+        Atomics.store(ctl, 1, bytes.length);
+        Atomics.store(ctl, 0, 1);
+        Atomics.notify(ctl, 0);
+      };
       w.onmessage = (m) => {
         let d = m.data;
+        if (d && d.liveData && d.buffer instanceof SharedArrayBuffer && d.buffer.byteLength === LIVE_BYTES) {
+          // (a key already open keeps its destination: the duplicate changes nothing here and goes no further,
+          // so an answer is written only where its own request waits; astra's LIVE691-REPLAY-1)
+          if (typeof d.liveData.key !== "string" || lives.has(d.liveData.key)) return;
+          retireLive(d.id);
+          lives.set(d.liveData.key, { id: d.id, buffer: d.buffer });
+          d = { ...d, buffer: null };
+        }
         if (d && d.input && d.buffer instanceof SharedArrayBuffer && d.buffer.byteLength >= 8) {
           retire(d.id);
           if (typeof d.input.key === "string") inputs.set(d.input.key, { id: d.id, buffer: d.buffer });
           d = { ...d, buffer: null };
         }
-        if (d && (d.done || d.skipped)) retire(d.id);
+        if (d && (d.done || d.skipped)) { retire(d.id); retireLive(d.id); }
         if (d && typeof d.brokerFetch === "string") {
           const off = Number(d.offset) || 0;
           const have = files.get(d.brokerFetch);
@@ -97,6 +131,8 @@ Stop by message, and input()'s answers too (design/runner.md, How 7).
           flag = new Int32Array(d.interrupt);
           d = { ...d, interrupt: null, interruptible: true };
         }
+        // (may it change files: the page's {fsWritable})
+        if (d && d.ready && d.writable) { writable = new Int32Array(d.writable); d = { ...d, writable: null }; }
         // (the shared progress slots stay here too: a SharedArrayBuffer can't
         // cross to the page, and this frame doesn't relay them)
         if (d && d.ready && d.progress) d = { ...d, progress: null };
@@ -107,6 +143,7 @@ Stop by message, and input()'s answers too (design/runner.md, How 7).
         const d = m.data;
         if (d && typeof d.runnerInterrupt === "number") {
           retire(); // (every open input() request is over)
+          retireLive();
           if (flag) {
             Atomics.store(flag, 1, d.runnerInterrupt);
             // (bit 0, and the word notified: a time.sleep waits on it, src/runtime/interrupt.ts requestCtrlC)
@@ -115,11 +152,20 @@ Stop by message, and input()'s answers too (design/runner.md, How 7).
           }
           return;
         }
+        if (d && typeof d.fsWritable === "boolean" && writable) Atomics.store(writable, 0, d.fsWritable ? 1 : 0);
         if (d && typeof d.runnerInput === "number") {
           const e = typeof d.key === "string" ? inputs.get(d.key) : undefined;
           if (e && e.id === d.runnerInput) {
             inputs.delete(d.key);
             giveInput(e.buffer, d.text);
+          }
+          return;
+        }
+        if (d && typeof d.runnerLive === "number") {
+          const e = typeof d.key === "string" ? lives.get(d.key) : undefined;
+          if (e && e.id === d.runnerLive) {
+            lives.delete(d.key);
+            giveLive(e.buffer, d.answer);
           }
           return;
         }

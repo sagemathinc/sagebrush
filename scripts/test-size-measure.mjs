@@ -9,7 +9,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  budgetsProblems, countAssignments, epochHash, evaluate, gateInputs, jcs, measureFiles, overCap, parseMarker, recordProblems, resetGroups, safeSum, strictParse, testedTransition, LIMITS, MAX_DEPTH, NEUTRAL_WIDTH,
+  budgetsProblems, countAssignments, epochHash, evaluate, examplesFiles, gateInputs, jcs, measureFiles, overCap, parseMarker, recordProblems, resetGroups, safeSum, strictParse, testedTransition, LIMITS, MAX_DEPTH, NEUTRAL_WIDTH,
 } from "./size-measure.mjs";
 
 let passed = 0, failures = 0;
@@ -281,6 +281,32 @@ fails("a range containing a reset, even when the final tree passes", range({ n: 
 fails("a range that changes the key", range({ n: S(100000), m: S(100000), markers: [], key: KEY2 }), /key/);
 check("a range is flagged", range({ n: S(1), m: S(1), markers: [] }).notes.some((x) => /outside the single-writer/.test(x)));
 // ---- the absolute checks (schedule, dispatch)
+// ---- the examples gallery's three bundles (U7, daybreak2's ruling on #548): an absent tree isn't measured (a rebuilt
+// base from before the gallery), and a merge missing any of the three rows' bundles fails the measured-bundles check
+{
+  const t = mkdtempSync(join(tmpdir(), "size-examples-"));
+  mkdirSync(join(t, "examples", "notebook", "a"), { recursive: true });
+  writeFileSync(join(t, "examples", "notebook", "a", "main.ipynb"), "{}");
+  writeFileSync(join(t, "examples", "tags.json"), "[]");
+  check("examples: a base with the corpus but no site measures examples/corpus alone", JSON.stringify(Object.keys(examplesFiles(t))) === JSON.stringify(["examples/corpus"]), JSON.stringify(examplesFiles(t)));
+  check("examples: the corpus's files, sorted", JSON.stringify(examplesFiles(t)["examples/corpus"].map((f) => f.slice(t.length))) === JSON.stringify(["/examples/notebook/a/main.ipynb", "/examples/tags.json"]));
+  mkdirSync(join(t, "web", "site", "public", "examples", "notebook", "a"), { recursive: true });
+  writeFileSync(join(t, "web", "site", "public", "examples", "notebook", "a", "index.html"), "<p>");
+  check("examples: a site tree without its catalog isn't measured", JSON.stringify(Object.keys(examplesFiles(t))) === JSON.stringify(["examples/corpus"]));
+  writeFileSync(join(t, "web", "site", "public", "examples", "index.json"), "{}");
+  const f = examplesFiles(t);
+  check("examples: with the site's tree, all three", JSON.stringify(Object.keys(f).sort()) === JSON.stringify(["examples/corpus", "examples/index.json", "site/examples"]) && f["site/examples"].length === 2 && f["examples/index.json"].length === 1, JSON.stringify(Object.keys(f)));
+  check("examples: an empty tree measures nothing", JSON.stringify(examplesFiles(mkdtempSync(join(tmpdir(), "size-none-")))) === "{}");
+  rmSync(t, { recursive: true, force: true });
+  const three = { "examples/corpus": 2000, "site/examples": 7000, "examples/index.json": 200 };
+  const B3 = budgets({ sizes: { "cli/pyjs.cjs": 100000, "engine/w.js": 5000, ...three } });
+  passes("examples: a merge measuring all three rows", evaluate({ mode: "absolute", merge: { record: rec(MERGE, { ...S(100000), ...three }), budgets: B3, markers: [] }, declaredNode: "24.21.0" }));
+  for (const k of Object.keys(three)) {
+    const m = { ...S(100000), ...three };
+    delete m[k];
+    fails(`examples: a merge missing ${k}`, evaluate({ mode: "absolute", merge: { record: rec(MERGE, m), budgets: B3, markers: [] }, declaredNode: "24.21.0" }), new RegExp(`measured bundles differ.*listed but not measured: ${k.replace(/[./]/g, "\\$&")}`));
+  }
+}
 passes("absolute: within", evaluate({ mode: "absolute", merge: { record: rec(MERGE, S(100000)), budgets: budgets(), markers: [] }, declaredNode: "24.21.0" }));
 fails("absolute: over the ledger", evaluate({ mode: "absolute", merge: { record: rec(MERGE, S(100001)), budgets: budgets(), markers: [] }, declaredNode: "24.21.0" }), /rule 3/);
 // ---- docs-only inputs (r5 §1.5)

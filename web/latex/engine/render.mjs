@@ -9,7 +9,7 @@
 // KaTeX's renderToString is given by the host (setKatex): on the site, the shared sagebrush-math.js's copy
 let renderToString = null;
 export function setKatex(f) { renderToString = f; }
-import { CAT, isCs, catOf, codeOf } from "./demo-machine.mjs";
+import { CAT, isCs, catOf, codeOf, depthOf } from "./demo-machine.mjs";
 import { TEXT_SYMBOLS, ACCENTS, SIZES, COLORS } from "./symbols.mjs";
 import { itemOf, isCodeEnv, UNSUPPORTED_ENVS, stateOf, savedStates, mathPart, inlineHtml, blockHtml, mathFailHtml, whyRejected } from "./sagetex.mjs";
 
@@ -18,18 +18,18 @@ const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39
 // eslint-disable-next-line no-control-regex
 export const esc = (s) => String(s).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "").replace(/[&<>"']/g, (c) => ESC[c]);
 const safeUrl = (u) => { const s = String(u).trim(); return /^(https?:\/\/|mailto:)[^\s"'<>\\]*$/i.test(s) && s.length < 2048 ? s : null; };
-const roman = (n) => { if (n <= 0 || n > 4999) return String(n); const v = [[1000, "m"], [900, "cm"], [500, "d"], [400, "cd"], [100, "c"], [90, "xc"], [50, "l"], [40, "xl"], [10, "x"], [9, "ix"], [5, "v"], [4, "iv"], [1, "i"]]; let s = ""; for (const [k, r] of v) while (n >= k) { s += r; n -= k; } return s; };
+// (\roman of 0 or less: nothing, as TeX's \romannumeral; past 4999, the number in digits, a bound on the text)
+const roman = (n) => { if (n <= 0) return ""; if (n > 4999) return String(n); const v = [[1000, "m"], [900, "cm"], [500, "d"], [400, "cd"], [100, "c"], [90, "xc"], [50, "l"], [40, "xl"], [10, "x"], [9, "ix"], [5, "v"], [4, "iv"], [1, "i"]]; let s = ""; for (const [k, r] of v) while (n >= k) { s += r; n -= k; } return s; };
 const alph = (n) => (n >= 1 && n <= 26 ? String.fromCharCode(96 + n) : String(n));
 const Alph = (n) => alph(n).toUpperCase();
 // a TeX dimension -> CSS (fixed units only), or null; rel = the length of 1\textwidth in CSS (a percentage)
-// a beamer slide's box (style.ts .slide): the class's aspectratio (beamer's paper sizes, in mm) and its type size as a share
-// of the slide's width (--sfs, in cqw: the slide is a size container); 11pt and 4:3 (128 x 96 mm) unless given
-const ASPECTS = { "1610": [160, 100], "169": [160, 90], "149": [140, 90], "141": [148.5, 105], "54": [125, 100], "43": [128, 96], "32": [135, 90] };
-function slideStyle(opt) {
-  const m = /aspectratio\s*=\s*(\d+)/.exec(opt || ""), [w, h] = ASPECTS[m && Object.hasOwn(ASPECTS, m[1]) ? m[1] : "43"];
-  const pt = /(^|,)\s*(8|9|10|11|12|14|17|20)pt\s*(,|$)/.exec(opt || ""), size = pt ? +pt[2] : 11;
-  return "aspect-ratio:" + w + "/" + h + ";--sfs:" + (size * 0.3528 / w * 100).toFixed(3);
-}
+const OV_STEPS_MAX = 100;   // (a frame's steps, at most)
+// beamer's frames, blocks and overlay commands are engine/beamer.mjs, installed by the host (installBeamer): the worker
+// when a render says it needs them (needBeamer: the class beamer, or an overlay command met), and then renders again;
+// the CLI and the tests at once. Until then they render as an unknown environment or command would
+const BEAMER_CMDS = new Set(["only", "uncover", "visible", "invisible", "pause", "onslide", "alt"]);
+let beamer = false;
+export function installBeamer(m) { m.install(Renderer.prototype, CMDS, { esc, OV_STEPS_MAX }); beamer = true; }
 function cssDim(s) {
   const m = /^\s*(-?(?:\d+\.?\d*|\.\d+))\s*(pt|mm|cm|in|em|ex|bp|pc|px|sp|\\textwidth|\\linewidth|\\columnwidth|\\hsize|\\textheight)?/.exec(String(s));
   if (!m) return null;
@@ -60,9 +60,10 @@ export function buildTree(events, items = []) {
       case "c": if (st.length > 1 && top().t === "g") st.pop(); break;
       case "be": { const n = { t: "e", env: e.env, user: !!e.user, kids: [] }; top().kids.push(n); st.push(n); break; }
       case "ee": { let i = st.length - 1; while (i > 0 && !(st[i].t === "e" && st[i].env === e.env)) i--; if (i > 0) st.length = i; break; }
-      case "sec": { const n = { t: "s", cmd: e.cmd, star: !!e.star, kids: [] }; top().kids.push(n); st.push(n); break; }
+      case "sec": { const n = { t: "s", cmd: e.cmd, star: !!e.star, short: e.short, kids: [] }; top().kids.push(n); st.push(n); break; }
       case "eot": { let i = st.length - 1; while (i > 0 && st[i].t !== "s") i--; if (i > 0) st.length = i; break; }
       case "verb": top().kids.push({ t: "v", text: e.text }); break;
+      case "ctr": top().kids.push({ t: "C", name: e.name, v: e.v }); break;
       case "verbenv": {
         const v = { t: "V", env: e.env, text: e.text };
         if (isCodeEnv(e.env)) { v.n = items.length; v.it = itemOf(e); v.it.at = last; items.push(v.it); }
@@ -176,20 +177,27 @@ const KATEX_ENVS = new Set(["array", "darray", "matrix", "pmatrix", "bmatrix", "
 const MATH_ENVS = new Set(["equation", "equation*", "align", "align*", "gather", "gather*", "multline", "multline*", "eqnarray", "eqnarray*",
   "displaymath", "flalign", "flalign*", "alignat", "alignat*", "math"]);
 const LIST_ENVS = new Set(["itemize", "enumerate", "description", "list", "compactitem", "compactenum", "inparaenum", "asparaenum"]);
+// (a counter stepped as TeX's \advance by 1 does it, on a 32-bit register: 2147483647 steps to -2147483648)
+const step = (v) => (v + 1) | 0;
 const SEC_LEVEL = { part: -1, chapter: 0, section: 1, subsection: 2, subsubsection: 3, paragraph: 4, subparagraph: 5 };
 const NOOP = new Set(["relax", "protect", "makeatletter", "makeatother", "sloppy", "fussy", "nobreak", "allowbreak", "frenchspacing", "nonfrenchspacing",
   "ignorespaces", "leavevmode", "null", "vfill", "vfil", "clearpage", "cleardoublepage", "newpage", "pagebreak", "nopagebreak", "nolinebreak", "indent",
   "makeindex", "makeglossary", "maketitle@", "frontmatter", "mainmatter", "backmatter", "normalsize", "selectfont", "onecolumn", "twocolumn",
   "flushbottom", "raggedbottom", "strut", "unskip", "hss", "hfilneg", "break", "filbreak", "goodbreak", "noindent@", "centerline@", "displaystyle", "textstyle", "boldmath", "unboldmath",
   "thicklines@", "listoffigures", "listoftables", "FloatBarrier", "vss", "smallskipamount", "ifhmode", "fi", "else",
-  "pause"]);   // (beamer's \pause: every step of a slide is shown at once)
+  ]);
 // commands whose arguments are consumed silently: name -> [optional count, mandatory count]
+// (saved boxes: their copies, all \usebox's together, at most BOX_MAX: each copy's HTML characters, and BOX_KEY for each
+//  of its SageTeX items, which a box with no HTML still copies (astra, BOX653-EXPAND-1's residual))
+export const BOX_MAX = 1 << 20, BOX_KEY = 16;
+export const boxCost = (b) => b.h.length + BOX_KEY * b.keys.length;
+export const fitsBoxes = (used, add) => used + add <= BOX_MAX;
 const GOBBLE = { index: [0, 1], glossary: [0, 1], addcontentsline: [0, 3], markboth: [0, 2], markright: [0, 1], pagestyle: [0, 1], thispagestyle: [0, 1],
   pagenumbering: [0, 1], hypersetup: [0, 1], lstset: [0, 1], bibliographystyle: [0, 1], nocite: [0, 1], addtolength: [0, 2], settowidth: [0, 2],
   settoheight: [0, 2], settodepth: [0, 2], newlength: [0, 1], hyphenation: [0, 1], graphicspath: [0, 1], DeclareGraphicsExtensions: [0, 1],
   DeclareGraphicsRule: [0, 4], lstdefinelanguage: [1, 1], lstdefinestyle: [0, 2], geometry: [0, 1], usetikzlibrary: [0, 1], tikzset: [0, 1], pgfplotsset: [0, 1],
   sisetup: [0, 1], captionsetup: [1, 1], setlist: [1, 1], newgeometry: [0, 1], titleformat: [1, 5], titlespacing: [0, 4], fancyhead: [1, 1], fancyfoot: [1, 1],
-  fancyhf: [0, 1], linespread: [0, 1], setstretch: [0, 1], enlargethispage: [0, 1], includeonly: [0, 1], newsavebox: [0, 1], savebox: [1, 2], sbox: [0, 2], usebox: [0, 1], allowdisplaybreaks: [1, 0], restylefloat: [0, 1],
+  fancyhf: [0, 1], linespread: [0, 1], setstretch: [0, 1], enlargethispage: [0, 1], includeonly: [0, 1], newsavebox: [0, 1], allowdisplaybreaks: [1, 0], restylefloat: [0, 1],
   floatstyle: [0, 1], newfloat: [1, 3], floatname: [0, 2], DeclareUnicodeCharacter: [0, 2], colorlet: [0, 2], pdfbookmark: [1, 2],
   bookmark: [1, 1], urlstyle: [0, 1], newtheoremstyle: [0, 9], crefname: [0, 3], Crefname: [0, 3], includepdf: [1, 1], printbibliography: [1, 0], addbibresource: [1, 1],
   usetheme: [1, 1], usecolortheme: [1, 1], usefonttheme: [1, 1], useinnertheme: [1, 1], useoutertheme: [1, 1], setbeamertemplate: [0, 2],
@@ -199,18 +207,21 @@ const GOBBLE = { index: [0, 1], glossary: [0, 1], addcontentsline: [0, 3], markb
 class Renderer {
   constructor(opts) {
     this.opts = opts || {};
-    this.images = this.opts.images || {}; this.imageRefs = new Set();
+    this.images = this.opts.images || {}; this.imageRefs = new Set(); this.inputMisses = [];
     this.cls = "article"; this.book = false; this.clsOpt = "";
     // (frames: a beamer document's frames, in order {n, title, at}; problems: what the preview can't show or found wrong,
     //  each {kind, name, at} with at the source offset of the nearest node before it, or -1: `sagebrush latex check`)
-    this.frameList = []; this.problems = []; this.lastPos = -1;
+    this.frameList = []; this.problems = []; this.lastPos = -1; this.ov = null;
     this.ctr = { part: 0, chapter: 0, section: 0, subsection: 0, subsubsection: 0, paragraph: 0, subparagraph: 0, equation: 0, figure: 0, table: 0, footnote: 0 };
     this.appendix = false;
     this.thmCtr = {}; this.thms = {}; this.thmStyle = "plain"; this.eqWithin = null;
     this.labels = new Map(); this.target = { text: "", id: "", kind: "" };
     this.refs = []; this.toc = []; this.fnotes = []; this.bib = new Map(); this.bibN = 0;
     this.meta = { title: null, author: null, date: null, thanks: [] };
+    // (the SageTeX items in each title field, shown where \\maketitle or \\titlepage prints it: run, sageField)
+    this.metaSage = { title: [], author: [], date: [], institute: [], thanks: [] }; this.sageField = null;
     this.macros = { "\\varheartsuit": "\\heartsuit", "\\vardiamondsuit": "\\diamondsuit" }; this.macroSig = ""; this.colors = {};
+    this.boxes = new Map(); this.boxUsed = 0;   // (saved boxes: \sbox, \savebox, lrbox; shown by \usebox, BOX_MAX for the copies)
     this.unknown = new Map(); this.stats = { katexErrors: 0, katexErrorSamples: [], katexWarnings: 0, unknownCommands: 0 };
     this.idn = 0; this.lists = []; this.unitlength = 1; // pt
     this.secnumdepth = 3;
@@ -220,6 +231,7 @@ class Renderer {
   label(key) { if (!this.labels.has(key)) this.labels.set(key, Object.assign({}, this.target)); }
   refPh(n) { this.refs.push(n); return "\u0001R" + (this.refs.length - 1) + "\u0002"; }
   unk(name, flow, st) {
+    if (BEAMER_CMDS.has(name)) this.needBeamer = true;
     if (this.inPreamble) return;
     this.stats.unknownCommands++; this.unknown.set(name, (this.unknown.get(name) || 0) + 1);
     this.problem("command", name);
@@ -302,7 +314,7 @@ class Renderer {
         case "R": { const ref = this.resolveRef(n, true); s += "\\text{" + ref.replace(/[\\{}$&#^_%~]/g, "") + "}"; break; }
         case "S": {
           const st = stateOf(this.sageStates, n.n, n.it);
-          if (!this.inPreamble) this.sageShown.add(n.n);
+          this.sageSeen(n.n);
           if (st.s === "error" || st.s === "blocked") this.mathFails.push({ st, n: n.n + 1 });
           s += mathPart(st, n.it); break;
         }
@@ -333,20 +345,37 @@ class Renderer {
           break;
         case "s": this.sec(n, ctx, flow); break;
         case "v": flow.html('<code class="verb">' + esc(n.text) + "</code>", ctx.st); break;
+        // (a counter set or added to (\setcounter, \addtocounter): the renderer's own numbering follows it; enumi..enumiv,
+        //  the enclosing enumerate of that depth)
+        case "C": {
+          if (Object.hasOwn(this.ctr, n.name)) this.ctr[n.name] = n.v;
+          // (secnumdepth: which levels are numbered, as in LaTeX: 0 none below chapter, 4 and 5 \paragraph and \subparagraph)
+          if (n.name === "secnumdepth") this.secnumdepth = n.v;
+          const d = { enumi: 1, enumii: 2, enumiii: 3, enumiv: 4 }[n.name], L = d && this.lists.filter((x) => x.kind === "enum")[d - 1];
+          if (L) L.n = n.v;
+          break;
+        }
         case "V":
-          if (n.it) { if (!this.inPreamble) this.sageShown.add(n.n); flow.block(blockHtml(stateOf(this.sageStates, n.n, n.it), n.it, esc, n.n + 1)); break; }
+          if (n.it) { this.sageSeen(n.n); flow.block(blockHtml(stateOf(this.sageStates, n.n, n.it), n.it, esc, n.n + 1)); break; }
           if (UNSUPPORTED_ENVS.has(n.env)) { flow.block('<pre class="verbatim code">' + esc(n.text) + '</pre><div class="sagestate"><span class="sagechip s-notrun">' + esc(n.env) + " is not supported in this preview: not run</span></div>"); break; }
           if (n.env !== "comment" && !n.env.startsWith("filecontents")) flow.block('<pre class="verbatim' + (n.env === "lstlisting" || n.env === "minted" ? " code" : "") + '">' + esc(n.text) + "</pre>"); break;
         case "L": this.label(n.key); break;
         case "R": flow.html(this.refPh(n), ctx.st); break;
-        case "S": if (!this.inPreamble) this.sageShown.add(n.n); flow.html(inlineHtml(stateOf(this.sageStates, n.n, n.it), n.it, esc, (l) => this.math(l, false), n.n + 1), ctx.st); break;
+        case "S": this.sageSeen(n.n); flow.html(inlineHtml(stateOf(this.sageStates, n.n, n.it), n.it, esc, (l) => this.math(l, false), n.n + 1), ctx.st); break;
         case "U": flow.html('<span class="sagechip s-notrun">\\' + esc(n.name) + " is not supported in this preview: not run</span>", ctx.st); break;
         case "err":
+          // (an \input or \include not read: its name and why, never silent; in the preamble too, listed for the page's note)
+          if (n.code === "input") {
+            if (this.problems.length < 500) this.problems.push({ kind: "input", name: String(n.name), at: this.lastPos, why: String(n.text || "") });
+            if (this.inPreamble) { if (this.inputMisses.length < 50) this.inputMisses.push({ name: String(n.name), why: String(n.text || "") }); }
+            else flow.html('<span class="unk errchip" title="\\input or \\include: the file is not in the preview">[input: ' + esc(n.name) + ": " + esc(n.text || "not found") + "]</span>", ctx.st);
+            break;
+          }
           // (a half-typed argument: what was read, then a note; LaTeX would say "Paragraph ended before \x was complete")
           this.problem(n.code === "runaway" ? "runaway" : "redefined", n.name);
           if (n.code === "runaway") { const tx = String(n.text || "").replace(/\s+$/, ""); flow.html('<span class="unk errchip" title="LaTeX: Paragraph ended before \\' + esc(n.name) + ' was complete">\\' + esc(n.name) + esc(tx.length > 40 ? tx.slice(0, 40) + "…" : tx) + " not finished</span>", ctx.st); break; }
           flow.html('<span class="unk errchip" title="LaTeX would stop here">\\newcommand: \\' + esc(n.name) + " is already defined</span>", ctx.st); break;
-        case "cls": this.cls = n.cls; this.clsOpt = typeof n.opt === "string" ? n.opt : ""; this.book = /^(book|report|memoir|scrbook|scrreprt)$/.test(n.cls); this.secnumdepth = this.book ? 2 : 3; break;
+        case "cls": this.cls = n.cls; this.clsOpt = typeof n.opt === "string" ? n.opt : ""; this.book = /^(book|report|memoir|scrbook|scrreprt)$/.test(n.cls); this.secnumdepth = depthOf(n.cls); break;
         default: break;
       }
     }
@@ -425,7 +454,7 @@ class Renderer {
     void ctx;
   }
   eqNumber() {
-    this.ctr.equation++;
+    this.ctr.equation = step(this.ctr.equation);
     const pre = this.eqWithin === "section" ? this.secNum(1) + "." : this.book ? this.chapNum() + "." : "";
     return pre + this.ctr.equation;
   }
@@ -444,13 +473,13 @@ class Renderer {
   sec(n, ctx, flow) {
     if (n.cmd === "footnote") return this.footnote(n, ctx, flow);
     if (n.cmd === "caption") return this.caption(n, ctx, flow);
-    if (n.cmd === "thanks") { this.meta.thanks.push(this.inline(n.kids, ctx)); flow.html("<sup>*</sup>", ctx.st); return; }
+    if (n.cmd === "thanks") { const [h, ks] = this.captured(() => this.inline(n.kids, ctx)); this.meta.thanks.push(h); this.metaSage.thanks.push(...ks); flow.html("<sup>*</sup>", ctx.st); return; }
     const level = SEC_LEVEL[n.cmd];
     const names = ["chapter", "section", "subsection", "subsubsection", "paragraph", "subparagraph"];
     let num = "";
-    if (n.cmd === "part") { if (!n.star) { this.ctr.part++; num = roman(this.ctr.part).toUpperCase(); } }
+    if (n.cmd === "part") { if (!n.star) { this.ctr.part = step(this.ctr.part); num = roman(this.ctr.part).toUpperCase(); } }
     else if (!n.star) {
-      this.ctr[n.cmd]++;
+      this.ctr[n.cmd] = step(this.ctr[n.cmd]);
       for (let l = level + 1; l < names.length; l++) this.ctr[names[l]] = 0;
       if (n.cmd === "chapter") { this.ctr.equation = 0; this.ctr.figure = 0; this.ctr.table = 0; this.ctr.footnote = 0; }
       if (n.cmd === "section" && this.eqWithin === "section") this.ctr.equation = 0;
@@ -461,7 +490,8 @@ class Renderer {
     const id = this.nid("sec");
     this.setTarget(num, id, n.cmd);
     const title = this.inline(n.kids, ctx);
-    if (n.cmd === "part") flow.block('<h1 class="part" id="' + id + '">' + (num ? '<div class="partnum">Part ' + num + "</div>" : "") + title + "</h1>");
+    // (an unstarred part says "Part" with its numeral, which TeX leaves empty at 0 or less)
+    if (n.cmd === "part") flow.block('<h1 class="part" id="' + id + '">' + (!n.star ? '<div class="partnum">Part ' + num + "</div>" : "") + title + "</h1>");
     else if (n.cmd === "chapter") flow.block('<h1 class="chapter" id="' + id + '">' + (num ? '<div class="chapnum">' + (this.appendix ? "Appendix " : "Chapter ") + esc(num) + "</div>" : "") + title + "</h1>");
     else if (level >= 4) { flow.par(); flow.html('<span class="runin" id="' + id + '">' + (num ? esc(num) + " " : "") + title + "</span> ", ctx.st); }
     else flow.block("<h" + (level + 1) + ' id="' + id + '">' + (num ? '<span class="secnum">' + esc(num) + "</span>" : "") + title + "</h" + (level + 1) + ">");
@@ -469,7 +499,11 @@ class Renderer {
     flow.noindent = true;
   }
   footnote(n, ctx, flow) {
-    const k = ++this.ctr.footnote, id = this.nid("fn");
+    // (\footnote[n]: that number, signed, within TeX's limit, the counter not stepped, as in LaTeX; anything else (TeX
+    //  would read its leading number and set the rest as text, \footnote[2a] as 2 and a stray "a") the counter, and said)
+    const opt = n.short ?? "", num = /^\s*[+-]?\d+\s*$/.test(opt);
+    if (!num && opt.trim()) this.problem("footnote", "\\footnote[" + opt.trim().slice(0, 40) + "]: not a number; TeX would read its leading digits and set the rest as text");
+    const k = num ? Math.max(-2147483647, Math.min(2147483647, +opt)) : (this.ctr.footnote = step(this.ctr.footnote)), id = this.nid("fn");
     const save = this.target;
     this.setTarget(String(k), id, "footnote");
     const f = new Flow(false);
@@ -485,7 +519,7 @@ class Renderer {
   }
   caption(n, ctx, flow) {
     const fl = this.floatKind || "figure";
-    this.ctr[fl]++;
+    this.ctr[fl] = step(this.ctr[fl]);
     const num = (this.book ? this.chapNum() + "." : "") + this.ctr[fl];
     const id = this.nid(fl);
     this.setTarget(num, id, fl);
@@ -524,6 +558,7 @@ class Renderer {
       }
       // (beamer: columns side by side, each a minipage of its width)
       case "columns": { const b = flow.open("div", ' class="bcols" style="display:flex;gap:1em;align-items:flex-start"'); this.walk(n.kids, c2, flow); flow.close(b); return; }
+      case "lrbox": { const [a, j] = this.arg(n.kids, -1); this.saveBox(a, () => this.inline(n.kids.slice(j + 1), c2)); return; }
       case "column":
       case "minipage": {
         let j = -1; let pos = "c"; let o;
@@ -555,10 +590,10 @@ class Renderer {
       }
       // (beamer: its blocks, and each frame a slide; in another class, unknown environments as before)
       case "block": case "alertblock": case "exampleblock":
-        if (this.cls === "beamer") return this.bblock(n, c2, flow);
+        if (this.cls === "beamer" && beamer) return this.bblock(n, c2, flow);
       // falls through
       case "frame":
-        if (this.cls === "beamer" && env === "frame") return this.frame(n.kids, c2, flow);
+        if (this.cls === "beamer" && beamer && env === "frame") return this.frame(n.kids, c2, flow);
       // falls through
       default:
         if (n.user) { this.walk(n.kids, c2, flow); return; }
@@ -567,47 +602,28 @@ class Renderer {
         { const b = flow.open("div", ' class="env-unknown" title="' + esc(env) + '"'); this.walk(n.kids, c2, flow); flow.close(b); }
     }
   }
-  // a beamer frame as a slide: \begin{frame}<spec>[options]<spec>{title}{subtitle}, or \frametitle / \framesubtitle
-  // at its top level. Its overlays are all shown (every step at once). The slide's size is the class's aspectratio
-  // (4:3 unless given); its type scales with its width (style.ts)
-  frame(kids, ctx, flow) {
-    let j = this.spec(kids, -1), o;
-    [o, j] = this.opt(kids, j); const fopts = o ? this.str(o) : "";
-    j = this.spec(kids, j);
-    const grp = (i) => { let k = i + 1; while (k < kids.length && this.isSp(kids[k])) k++; return kids[k] && kids[k].t === "g" ? k : -1; };
-    let title = null, sub = null, g = grp(j);
-    if (g >= 0) { title = kids[g].kids; j = g; g = grp(j); if (g >= 0) { sub = kids[g].kids; j = g; } }
-    const body = [], rest = kids.slice(j + 1);
-    for (let i = 0; i < rest.length; i++) {
-      const nm = this.csName(rest[i]);
-      if (nm === "frametitle" || nm === "framesubtitle") {
-        const k0 = this.spec(rest, i); const [, k1] = this.opt(rest, k0); const [a, k2] = this.arg(rest, k1);
-        if (nm === "frametitle") title = a; else sub = a;
-        i = k2; continue;
-      }
-      body.push(rest[i]);
+  // a beamer overlay specification <..> right after i: [its last index, its text normalized (step numbers, "+" and "." resolved
+  // with the frame's counter: "2-", "1,3-4", "-3"), or null]; outside a frame, the text as written
+  ovSpec(nodes, i) {
+    const k = this.spec(nodes, i);
+    if (k === i) return [i, null];
+    let j = i + 1; while (j < nodes.length && this.isSp(nodes[j])) j++;
+    let t = ""; for (let q = j + 1; q < k; q++) if (nodes[q].t === "x" && !isCs(nodes[q].v)) t += String.fromCodePoint(codeOf(nodes[q].v));
+    return [k, this.ovNorm(t)];
+  }
+  ovNorm(t) {
+    const ov = this.ov; if (!ov) return null;
+    const parts = [];
+    for (let p of String(t).replace(/\s+/g, "").replace(/^[a-z]+@/i, "").split(",")) {
+      // (+ and . : the frame's counter, + advancing it first; +(d) and .(d) offset it)
+      p = p.replace(/([+.])(?:\((-?\d+)\))?/g, (_, c, d) => { if (c === "+") ov.plus++; return String(Math.max(1, Math.max(1, ov.plus) + (d ? +d : 0))); });
+      const m = /^(\d*)(-?)(\d*)$/.exec(p);
+      if (!m || (!m[1] && !m[3])) continue;
+      const a = m[1] ? Math.min(+m[1], OV_STEPS_MAX) : 1, z = m[2] ? (m[3] ? Math.min(+m[3], OV_STEPS_MAX) : null) : a;
+      ov.max = Math.max(ov.max, a, z || 0);
+      parts.push(m[2] ? a + "-" + (z ?? "") : String(a));
     }
-    const n = this.frameList.length + 1;
-    this.frameList.push({ n, title: title ? this.str(title).replace(/\s+/g, " ").trim() : "", at: this.lastPos });
-    const head = title && !/\bplain\b/.test(fopts) ? '<header class="slide-title">' + this.inline(title, ctx) + (sub ? '<div class="slide-subtitle">' + this.inline(sub, ctx) + "</div>" : "") + "</header>" : "";
-    const va = /(^|,)\s*t\s*(,|$)/.test(fopts) ? " va-t" : /(^|,)\s*b\s*(,|$)/.test(fopts) ? " va-b" : "";
-    const b = flow.open("section", ' class="slide' + va + '" data-frame="' + n + '" id="frame-' + n + '" style="' + slideStyle(this.clsOpt) + '"', head);
-    const inner = flow.open("div", ' class="slide-body"');
-    this.walk(body, Object.assign({}, ctx, { st: Object.assign({}, ctx.st) }), flow);
-    flow.close(inner); flow.close(b);
-  }
-  // an overlay command's argument (after its <spec>): shown, as every step is; \invisible's takes its room, unseen
-  overlayArg(nodes, i, ctx, flow, hidden) {
-    const j0 = this.spec(nodes, i); const [a, j] = this.arg(nodes, j0);
-    if (hidden) flow.html('<span class="invisible">' + this.inline(a, ctx) + "</span>", ctx.st); else this.walk(a, ctx, flow);
-    return j;
-  }
-  // beamer's block, alertblock and exampleblock: {title}, then the body
-  bblock(n, ctx, flow) {
-    const j0 = this.spec(n.kids, -1); const [t, j] = this.arg(n.kids, j0);
-    const b = flow.open("div", ' class="bblock ' + n.env + '"', '<div class="bblock-title">' + this.inline(t, ctx) + "</div>");
-    const inner = flow.open("div", ' class="bblock-body"');
-    this.walk(n.kids.slice(j + 1), ctx, flow); flow.close(inner); flow.close(b);
+    return parts.length ? parts.join(",") : null;
   }
   mathEnv(n, ctx, flow) {
     const env = n.env, base = env.replace(/\*$/, ""), numbered = !env.endsWith("*") && env !== "displaymath" && env !== "math";
@@ -659,16 +675,21 @@ class Renderer {
     // anything before the first \item renders as plain content
     const walkUntilItem = (from) => { let j = from; for (; j < kids.length; j++) if (this.csName(kids[j]) === "item") break; return j; };
     const first = walkUntilItem(0);
-    this.walk(kids.slice(0, first), ctx, flow);
+    // (beamer: itemize[<+->] gives every item that spec, an item's own <..> instead)
+    let lead = kids.slice(0, first), dflt = null;
+    if (this.ov) { const [o, oj] = this.opt(lead, -1); if (o && this.isChar(o[0], 60)) { dflt = this.str(o).trim().replace(/^<|>$/g, ""); lead = lead.slice(oj + 1); } }
+    this.walk(lead, ctx, flow);
     i = first;
     while (i < kids.length) {
       // \item[label] (and beamer's \item<2->[label])
-      const [o, j] = this.opt(kids, this.spec(kids, i));
+      const [si, ispec] = this.ovSpec(kids, i);
+      const spec = ispec ?? (dflt !== null ? this.ovNorm(dflt) : null);
+      const [o, j] = this.opt(kids, si);
       if (L.li) flow.close(L.li);
       let lbl;
       if (o) lbl = this.inline(o, ctx);
       else if (kind === "enum") {
-        L.n++;
+        L.n = step(L.n);
         const nums = this.lists.filter((x) => x.kind === "enum").map((x) => x.n);
         const d = depth;
         lbl = d === 1 ? nums[0] + "." : d === 2 ? "(" + alph(nums[1]) + ")" : d === 3 ? roman(nums[2]) + "." : Alph(nums[3]) + ".";
@@ -678,7 +699,7 @@ class Renderer {
       } else if (kind === "item") lbl = ["•", "–", "∗", "·"][Math.min(depth, 4) - 1];
       else lbl = "";
       const id = this.nid("it"); if (kind === "enum" && !o) this.target.id = id;
-      L.li = flow.open("li", ' id="' + id + '"', kind === "desc" ? (lbl ? '<span class="dlabel">' + lbl + "</span> " : "") : '<span class="lbl">' + lbl + "</span>");
+      L.li = flow.open("li", ' id="' + id + '"' + (spec ? ' class="ov" data-ov="' + esc(spec) + '" data-ovm="uncover"' : ""), kind === "desc" ? (lbl ? '<span class="dlabel">' + lbl + "</span> " : "") : '<span class="lbl">' + lbl + "</span>");
       const next = walkUntilItem(j + 1);
       this.walk(kids.slice(j + 1, next), ctx, flow);
       i = next;
@@ -809,6 +830,15 @@ class Renderer {
     if (!this.toc.length) return "";
     return '<div class="toc"><h2>Contents</h2>' + this.toc.map((t) => '<div class="toc' + t.level + '"><a href="#' + t.id + '">' + (t.num ? '<span class="tocnum">' + esc(t.num) + "</span>" : "") + t.title.replace(/<a [^>]*>|<\/a>/g, "") + "</a></div>").join("") + "</div>";
   }
+  // an item rendered: shown, unless in the preamble; inside a title field (\title, \author, \date, \institute, \thanks),
+  // kept with that field instead, and shown only if \maketitle or \titlepage prints it (run)
+  sageSeen(k) { if (this.sageField) this.sageField.push(k); else if (!this.inPreamble) this.sageShown.add(k); }
+  /** fn's result, and the SageTeX items it rendered (a title field's) */
+  // a saved box: its HTML and SageTeX items, by the box's name as written (\saved); shown by \usebox, its items then
+  // shown too (a box never used is never shown, as in TeX)
+  boxName(a) { return this.str(a).trim(); }
+  saveBox(a, fn) { const [h, keys] = this.captured(fn); this.boxes.set(this.boxName(a), { h, keys: [...new Set(keys)] }); }
+  captured(fn) { const prev = this.sageField; this.sageField = []; try { return [fn(), this.sageField]; } finally { this.sageField = prev; } }
   titleHtml() {
     const m = this.meta;
     if (!m.title && !m.author) return "";
@@ -839,6 +869,15 @@ class Renderer {
     this.chunkPos = chunks.map((_, k) => flow.rootPos[k] ?? -1);
     // SageTeX S1 (astra4 S1E01-A3): an item the preview never showed (in an argument the renderer drops, the
     // preamble, ...) is never run: it becomes an error (so every later item is blocked), said once at the top
+    // (a title field's items are shown if the title block is printed (a \maketitle or \titlepage chunk) and has that
+    //  field, as titleHtml writes it)
+    // eslint-disable-next-line no-control-regex
+    if (chunks.some((c) => c.includes("\u0001TITLE\u0002")) && (this.meta.title || this.meta.author)) {
+      const m = this.meta, printed = { title: !!m.title, author: !!m.author, institute: !!m.institute, date: m.date === null || !!m.date, thanks: m.thanks.length > 0 };
+      for (const f of Object.keys(printed)) if (printed[f]) for (const k of this.metaSage[f]) this.sageShown.add(k);
+    }
+    // (and those beamer's furniture shows: engine/beamer.mjs)
+    if (this.furnishShown) this.furnishShown();
     const hidden = this.sageItems.filter((it, k) => !this.sageShown.has(k));
     for (const it of hidden) if (!it.err) it.err = "hidden";
     if (hidden.length) this.chunkPos.unshift(-1);
@@ -846,7 +885,9 @@ class Renderer {
     // resolve references, the table of contents and the title block
     const toc = this.tocHtml(), title = this.titleHtml();
     // eslint-disable-next-line no-control-regex
-    chunks = chunks.map((c) => c.replace(/\u0001TOC\u0002/g, () => toc).replace(/\u0001TITLE\u0002/g, () => title).replace(/\u0001R(\d+)\u0002/g, (_, k) => this.resolveRef(this.refs[+k], false)));
+    chunks = chunks.map((c) => c.replace(/\u0001TOC\u0002/g, () => toc).replace(/\u0001TITLE\u0002/g, () => title).replace(/\u0001R(\d+)\u0002/g, (_, k) => this.resolveRef(this.refs[+k], false))
+      // (beamer's headline (h), footline (f) or sidebar (s) of frame k: engine/beamer.mjs, once every section is known)
+      .replace(/\u0001B([hfs])(\d+)\u0002/g, (_, w, k) => this.furnish(w, +k)));
     return chunks;
   }
 }
@@ -883,26 +924,19 @@ const CMDS = {
   LaTeXe: function (nodes, i, ctx, flow) { flow.html('<span class="latex">L<span class="a">a</span>T<span class="e">e</span>X&thinsp;2<sub>&epsilon;</sub></span>', ctx.st); return i; },
   TeX: function (nodes, i, ctx, flow) { flow.html('<span class="latex">T<span class="e">e</span>X</span>', ctx.st); return i; },
   BibTeX: function (nodes, i, ctx, flow) { flow.html('<span class="sc">Bib</span><span class="latex">T<span class="e">e</span>X</span>', ctx.st); return i; },
-  title: function (nodes, i, ctx) { const [a, j] = this.arg(nodes, i); this.meta.title = this.inline(a, ctx); return j; },
+  title: function (nodes, i, ctx) { const [a, j] = this.arg(nodes, i); [this.meta.title, this.metaSage.title] = this.captured(() => this.inline(a, ctx)); return j; },
   author: function (nodes, i, ctx) {
     const [a, j] = this.arg(nodes, i);
     const parts = [[]]; for (const x of a) { if (this.csName(x) === "and") parts.push([]); else parts[parts.length - 1].push(x); }
-    this.meta.author = parts.map((p) => '<span class="auth">' + this.inline(p, ctx) + "</span>").join(""); return j;
+    [this.meta.author, this.metaSage.author] = this.captured(() => parts.map((p) => '<span class="auth">' + this.inline(p, ctx) + "</span>").join("")); return j;
   },
-  date: function (nodes, i, ctx) { const [a, j] = this.arg(nodes, i); this.meta.date = this.inline(a, ctx); return j; },
+  date: function (nodes, i, ctx) { const [a, j] = this.arg(nodes, i); [this.meta.date, this.metaSage.date] = this.captured(() => this.inline(a, ctx)); return j; },
   maketitle: function (nodes, i, ctx, flow) { flow.block("\u0001TITLE\u0002"); return i; },
   titlepage: function (nodes, i, ctx, flow) { flow.block("\u0001TITLE\u0002"); return i; },   // (beamer's title frame)
-  // (beamer's overlays: every step is shown, so \only, \uncover, \visible and \onslide show their content; \alt its first)
-  only: function (nodes, i, ctx, flow) { return this.overlayArg(nodes, i, ctx, flow, false); },
-  uncover: function (nodes, i, ctx, flow) { return this.overlayArg(nodes, i, ctx, flow, false); },
-  visible: function (nodes, i, ctx, flow) { return this.overlayArg(nodes, i, ctx, flow, false); },
-  invisible: function (nodes, i, ctx, flow) { return this.overlayArg(nodes, i, ctx, flow, true); },
-  onslide: function (nodes, i) { return this.spec(nodes, i); },
-  alt: function (nodes, i, ctx, flow) { const j0 = this.spec(nodes, i); const [a, j] = this.arg(nodes, j0); const [, j2] = this.arg(nodes, j); this.walk(a, ctx, flow); return j2; },
   alert: function (nodes, i, ctx, flow) { const j0 = this.spec(nodes, i); const [a, j] = this.arg(nodes, j0); flow.html('<span class="alert">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
   structure: function (nodes, i, ctx, flow) { const j0 = this.spec(nodes, i); const [a, j] = this.arg(nodes, j0); flow.html('<span class="structure">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
   note: function (nodes, i) { const j0 = this.spec(nodes, i); const [, j1] = this.opt(nodes, j0); const [, j] = this.arg(nodes, j1); return j; },
-  institute: function (nodes, i, ctx) { const [, j0] = this.opt(nodes, i); const [a, j] = this.arg(nodes, j0); this.meta.institute = this.inline(a, ctx); return j; },
+  institute: function (nodes, i, ctx) { const [, j0] = this.opt(nodes, i); const [a, j] = this.arg(nodes, j0); [this.meta.institute, this.metaSage.institute] = this.captured(() => this.inline(a, ctx)); return j; },
   tableofcontents: function (nodes, i, ctx, flow) { flow.block("\u0001TOC\u0002"); return i; },
   appendix: function (nodes, i) { this.appendix = true; if (this.book) this.ctr.chapter = 0; else this.ctr.section = 0; return i; },
   url: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); const u = this.str(a).replace(/\\([#%&_~$])/g, "$1"); const s = safeUrl(u); flow.html(s ? '<a class="url" href="' + esc(s) + '" target="_blank" rel="noopener noreferrer">' + esc(u) + "</a>" : '<span class="url">' + esc(u) + "</span>", ctx.st); return j; },
@@ -911,14 +945,33 @@ const CMDS = {
   hyperref: function (nodes, i, ctx, flow) { const [, j] = this.opt(nodes, i); const [b, j2] = this.arg(nodes, j); flow.html(this.inline(b, ctx), ctx.st); return j2; },
   texorpdfstring: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); const [, j2] = this.arg(nodes, j); this.walk(a, ctx, flow); return j2; },
   ensuremath: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html(this.math(this.mathStr(a), false), ctx.st); return j; },
-  fbox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="fbox">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
+  fbox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="tex-fbox">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
   frame: function (nodes, i, ctx, flow) {
-    if (this.cls === "beamer") { const [a, j] = this.arg(nodes, this.opt(nodes, this.spec(nodes, i))[1]); this.frame(a, ctx, flow); return j; } const [a, j] = this.arg(nodes, i); flow.html('<span class="fbox frame">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
-  shadowbox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="fbox shadow">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
-  doublebox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="fbox double">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
-  ovalbox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="fbox oval">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
-  Ovalbox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="fbox oval">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
+    if (this.cls === "beamer" && beamer) { const [a, j] = this.arg(nodes, this.opt(nodes, this.spec(nodes, i))[1]); this.frame(a, ctx, flow); return j; } const [a, j] = this.arg(nodes, i); flow.html('<span class="tex-fbox frame">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
+  shadowbox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="tex-fbox shadow">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
+  doublebox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="tex-fbox double">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
+  ovalbox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="tex-fbox oval">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
+  Ovalbox: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="tex-fbox oval">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
   makebox: box(function (nodes, i, ctx, flow) { return this.makebox(nodes, i, ctx, flow, false); }),
+  // saved boxes (astra4's digest, gap 3: they were dropped, silently): \sbox{\name}{text}, \savebox{\name}[width][pos]{text}
+  // (as \makebox), and lrbox (the environments) kept, and \usebox{\name} shows the box; one never saved shows nothing,
+  // as TeX's empty box, and check says so
+  sbox: function (nodes, i, ctx) { const [a, j0] = this.arg(nodes, i), [b, j] = this.arg(nodes, j0); this.saveBox(a, () => this.inline(b, ctx)); return j; },
+  savebox: function (nodes, i, ctx) { const [a, j0] = this.arg(nodes, i); let j = j0; this.saveBox(a, () => { const f = new Flow(true); j = this.makebox(nodes, j0, ctx, f, false); return f.inlineHtml(); }); return j; },
+  usebox: function (nodes, i, ctx, flow) {
+    const [a, j] = this.arg(nodes, i), b = this.boxes.get(this.boxName(a));
+    if (!b) { this.problem("box", "\\usebox of a box not saved: " + this.boxName(a)); return j; }
+    // (every copy within one budget, BOX_MAX, checked before it's made: a box copied into a box, again and again, would
+    //  double each time (astra, BOX653-EXPAND-1); its SageTeX items too, each once in the box (a box doubled into itself
+    //  with no HTML still doubled them, BOX653-EXPAND-1's residual); past it, left out, said once)
+    const cost = boxCost(b);
+    if (!fitsBoxes(this.boxUsed, cost)) { if (!this.boxOver) { this.boxOver = true; this.problems.push({ kind: "box", name: "saved boxes left out from here on: over the budget for their copies", at: this.lastPos }); } return j; }
+    this.boxUsed += cost;
+    // (its SageTeX seen as where it's used is: shown in the body, held in a field or another box until those are, never
+    //  in the preamble (daybreak3, BOX653-SAGE-CAPTURE-1))
+    for (const k of b.keys) this.sageSeen(k);
+    flow.html(b.h, ctx.st); return j;
+  },
   framebox: box(function (nodes, i, ctx, flow) { return this.makebox(nodes, i, ctx, flow, true); }),
   parbox: function (nodes, i, ctx, flow) {
     let j = i, o, pos = "c", h = null, ipos = null;
@@ -938,8 +991,8 @@ const CMDS = {
   hphantom: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="phantom hph">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
   vphantom: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="phantom vph">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
   smash: function (nodes, i, ctx, flow) { const [, j0] = this.opt(nodes, i); const [a, j] = this.arg(nodes, j0); flow.html('<span class="smash">' + this.inline(a, ctx) + "</span>", ctx.st); return j; },
-  llap: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="llap"><span>' + this.inline(a, ctx) + "</span></span>", ctx.st); return j; },
-  rlap: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="rlap"><span>' + this.inline(a, ctx) + "</span></span>", ctx.st); return j; },
+  llap: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="tex-llap"><span>' + this.inline(a, ctx) + "</span></span>", ctx.st); return j; },
+  rlap: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.html('<span class="tex-rlap"><span>' + this.inline(a, ctx) + "</span></span>", ctx.st); return j; },
   marginpar: function (nodes, i, ctx, flow) { const [, j0] = this.opt(nodes, i); const [a, j] = this.arg(nodes, j0); flow.html('<span class="marginpar">' + this.inline(a, Object.assign({}, ctx, { st: { al: "" } })) + "</span>", ctx.st); return j; },
   todo: function (nodes, i, ctx, flow) { const [, j0] = this.opt(nodes, i); const [a, j] = this.arg(nodes, j0); flow.html('<span class="marginpar todo">' + this.inline(a, Object.assign({}, ctx, { st: { al: "" } })) + "</span>", ctx.st); return j; },
   hspace: function (nodes, i, ctx, flow) { const [, j0] = this.star(nodes, i); const [a, j] = this.arg(nodes, j0); const w = cssDim(this.str(a)); flow.html('<span class="hsp" style="width:' + (w || "0") + '"></span>', ctx.st); return j; },
@@ -1009,7 +1062,7 @@ Renderer.prototype.makebox = function (nodes, i, ctx, flow, framed) {
   if (o) { const [p, j2] = this.opt(nodes, j); if (p) { pos = this.str(p).trim()[0] || "c"; j = j2; } }
   const [a, j3] = this.arg(nodes, j);
   const al = pos === "l" ? "left" : pos === "r" ? "right" : pos === "s" ? "justify" : "center";
-  flow.html('<span class="' + (framed ? "fbox mkbox" : "mkbox") + '" style="' + (w ? "width:" + w + ";" : "") + "text-align:" + al + '">' + this.inline(a, ctx) + "</span>", ctx.st);
+  flow.html('<span class="' + (framed ? "tex-fbox mkbox" : "mkbox") + '" style="' + (w ? "width:" + w + ";" : "") + "text-align:" + al + '">' + this.inline(a, ctx) + "</span>", ctx.st);
   return j3;
 };
 Renderer.prototype.dimen = function (nodes, i) {   // a TeX <dimen> written as characters: "1.5em plus 1pt minus .5pt"
@@ -1154,5 +1207,5 @@ export function render(events, intern, opts) {
   const R = new Renderer(opts);
   const chunks = R.run(events, intern);
   const unknown = [...R.unknown].sort((a, b) => b[1] - a[1]).slice(0, 40);
-  return { chunks, chunkPos: R.chunkPos, sageItems: R.sageItems, sageStates: R.sageStates, imageRefs: [...R.imageRefs], frames: R.frameList, problems: R.problems, beamer: R.cls === "beamer", stats: Object.assign({}, R.stats, { unknown, labels: R.labels.size, refs: R.refs.length, toc: R.toc.length, sageItems: R.sageItems.length }) };
+  return { chunks, chunkPos: R.chunkPos, sageItems: R.sageItems, sageStates: R.sageStates, imageRefs: [...R.imageRefs], inputMisses: R.inputMisses, frames: R.frameList, problems: R.problems, beamer: R.cls === "beamer", needBeamer: !beamer && (R.cls === "beamer" || !!R.needBeamer), stats: Object.assign({}, R.stats, { unknown, labels: R.labels.size, refs: R.refs.length, toc: R.toc.length, sageItems: R.sageItems.length }) };
 }

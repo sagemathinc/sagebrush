@@ -16,7 +16,7 @@
 //       CI's shard: the selected ids (EXAMPLES_IDS, a JSON list) at positions i mod N == K - 1, run 2 at a
 //       time, each killed at 30 s; the ids it ran written to FILE
 //   node scripts/examples.mjs census --ran-dir DIR
-//       every selected id (EXAMPLES_IDS) ran exactly once across the shards' FILEs, at most 24 each
+//       every selected id (EXAMPLES_IDS) ran exactly once across the shards' FILEs, at most SHARD_MAX (16) each
 //
 // Needs `pnpm run build` (dist/) first; boards and LaTeX run through dist/src/cli.js.
 import { spawn } from "node:child_process";
@@ -208,7 +208,7 @@ export async function runExample(root, id, { update = false } = {}) {
         const fn = normalizeNotebook(freshNb, m.loose ?? []);
         for (const [i, c] of fn.entries())
           if (c.error) problems.push(`cell ${i + 1} raised ${c.error}`);
-        for (const l of leaks(fn, { tmp, date, host: hostname() }))
+        for (const l of leaks(fn, { tmp, date, host: hostname(), checkout: realpathSync(repo) }))
           problems.push(`an output holds ${l}`);
         for (const [cell, want] of Object.entries(m.expect ?? {})) {
           const got = JSON.stringify(fn[Number(cell)] ?? []);
@@ -222,15 +222,17 @@ export async function runExample(root, id, { update = false } = {}) {
             join(e.dir, m.main),
             JSON.stringify(freshNb, null, 1) + "\n",
           );
-        else if (
-          JSON.stringify(fn) !==
-          JSON.stringify(normalizeNotebook(committed, m.loose ?? []))
-        )
-          problems.push(
-            "the outputs differ from the committed ones (node scripts/examples.mjs run " +
-              id +
-              " --update rewrites them)",
-          );
+        else {
+          // (which code cell first differs, and how: a CI log says what changed, not only that something did)
+          const cn = normalizeNotebook(committed, m.loose ?? []);
+          const at = fn.findIndex((c, i) => JSON.stringify(c) !== JSON.stringify(cn[i]));
+          if (at >= 0 || fn.length !== cn.length)
+            problems.push(
+              `the outputs differ from the committed ones, first at code cell ${at >= 0 ? at + 1 : fn.length + 1}: ` +
+                `now ${JSON.stringify(fn[at] ?? null).slice(0, 300)}, committed ${JSON.stringify(cn[at] ?? null).slice(0, 300)} ` +
+                `(node scripts/examples.mjs run ${id} --update rewrites them)`,
+            );
+        }
       }
     } else if (e.kind === "board") {
       // (a board in the current format: `board check`, which runs its code items and checks the rest; an older
@@ -421,6 +423,7 @@ async function main(argv) {
     }
     console.log(`shard ${k} of ${n}: ${ids.length} examples`);
     const results = await runMany(root, ids, {});
+    mkdirSync(dirname(arg(argv, "--ran")), { recursive: true });
     writeFileSync(
       arg(argv, "--ran"),
       JSON.stringify(results.map((r) => r.id)) + "\n",
