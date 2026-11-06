@@ -85,7 +85,7 @@ def wave_run_result(o):
     """A run entry's terminal outcome as the scheduler's result."""
     o = o or {}
     ms = o.get("ms")
-    ms = ms if isinstance(ms, (int, float)) and not isinstance(ms, bool) and math.isfinite(ms) else 0
+    ms = ms if _is_num(ms) else 0
     if o.get("status") == "ok":
         return {"ok": True, "ms": ms}
     if o.get("status") == "error":
@@ -97,8 +97,17 @@ def _is_int(v):
     return isinstance(v, int) and not isinstance(v, bool)
 
 
+_SAFE = 2**53 - 1
+
+
 def _is_num(v):
-    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+    """A finite JSON number, total over every JSON value: an int beyond 2^53 - 1 in magnitude is refused before any
+    float conversion (math.isfinite(10**1000) raises OverflowError: astra's R762-INPUT-3)."""
+    if isinstance(v, bool):
+        return False
+    if isinstance(v, int):
+        return -_SAFE <= v <= _SAFE
+    return isinstance(v, float) and math.isfinite(v)
 
 
 def wave_invalid(entries):
