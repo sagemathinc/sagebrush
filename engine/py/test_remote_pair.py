@@ -731,6 +731,22 @@ async def test_drain_groups():
         assert not G._group_members(p.pid) and p.pid not in G.ENDING_GROUPS, (script, left)
         assert (1.5 < took < 3.5) if slow else took < 1.0, (script, took)
         await p.wait()
+    # (the 2 s SIGKILL firing just before a drain, in the same tick: the drain still waits for the group to be empty;
+    # it isn't taken out of ENDING_GROUPS by the kill, only by the drain once empty)
+    loop = asyncio.get_running_loop()
+    real_later, timers = loop.call_later, []
+    loop.call_later = lambda delay, fn, *a: (timers.append(fn), real_later(delay, fn, *a))[1]
+    try:
+        p = await asyncio.create_subprocess_exec("sh", "-c", "trap '' TERM; sleep 30 & wait", start_new_session=True)
+        await asyncio.sleep(0.2)
+        G._kill_tree(p.pid)
+    finally:
+        loop.call_later = real_later
+    timers[-1]()  # (the tree's own SIGKILL, now)
+    assert p.pid in G.ENDING_GROUPS, "the kill took the group out before it was empty"
+    assert await G.drain_groups(3.0) == []
+    assert not G._group_members(p.pid) and p.pid not in G.ENDING_GROUPS
+    await p.wait()
     # (G1) a group still alive at drain's deadline, before the tree's own SIGKILL at 2 s, is SIGKILLed by drain
     p = await asyncio.create_subprocess_exec("sh", "-c", "trap '' TERM; sleep 30 & wait", start_new_session=True)
     await asyncio.sleep(0.2)

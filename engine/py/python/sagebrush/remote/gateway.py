@@ -275,7 +275,8 @@ def _kill_tree(pgid):
     loop = asyncio.get_running_loop()
 
     def kill():
-        ENDING_GROUPS.discard(pgid)
+        # (the group stays in ENDING_GROUPS: SIGKILL is sent, not yet done, and a drain_groups running now must still
+        # wait for it to be empty; drain_groups alone takes a group out, once it is)
         try:
             os.killpg(pgid, signal.SIGKILL)
         except (ProcessLookupError, PermissionError):
