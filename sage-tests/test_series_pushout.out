@@ -1,0 +1,869 @@
+Power ZZ['x'] QQ[x].gen o*t | x*x | [0, x] | Power Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Power ZZ['x'] QQ[x].gen t*o | x*x | [0, x] | Power Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Power ZZ['x'] QQ[x].gen o+t | x + x | [x, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Power ZZ['x'] QQ[x].gen t-o | -x + x | [-x, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Power ZZ['x'] QQ[x].gen t/o | ERR RuntimeError
+Power ZZ['x'] QQ[x].gen (o*t)/o | x | [0, 1] | Power Series Ring in x over Fraction Field of Univariate Polynomial Ring in x over Rational Field
+Power ZZ['x'] ZZ[x].gen o*t | x*x | [0, x] | Power Series Ring in x over Univariate Polynomial Ring in x over Integer Ring
+Power ZZ['x'] ZZ[x].gen t*o | x*x | [0, x] | Power Series Ring in x over Univariate Polynomial Ring in x over Integer Ring
+Power ZZ['x'] ZZ[x].gen o+t | x + x | [x, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Integer Ring
+Power ZZ['x'] ZZ[x].gen t-o | -x + x | [-x, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Integer Ring
+Power ZZ['x'] ZZ[x].gen t/o | 1/x*x | [0, 1/x] | Power Series Ring in x over Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+Power ZZ['x'] ZZ[x].gen (o*t)/o | x | [0, 1] | Power Series Ring in x over Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+Power ZZ['x'] GF5[x].gen o*t | x*x | [0, x] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power ZZ['x'] GF5[x].gen t*o | x*x | [0, x] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power ZZ['x'] GF5[x].gen o+t | x + x | [x, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power ZZ['x'] GF5[x].gen t-o | 4*x + x | [4*x, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power ZZ['x'] GF5[x].gen t/o | ERR RuntimeError
+Power ZZ['x'] GF5[x].gen (o*t)/o | x | [0, 1] | Power Series Ring in x over Fraction Field of Univariate Polynomial Ring in x over Finite Field of size 5
+Power ZZ['x'] QQ[a].gen o*t | ERR TypeError
+Power ZZ['x'] QQ[a].gen t*o | ERR TypeError
+Power ZZ['x'] QQ[a].gen o+t | ERR TypeError
+Power ZZ['x'] QQ[a].gen t-o | ERR TypeError
+Power ZZ['x'] QQ[a].gen t/o | ERR TypeError
+Power ZZ['x'] QQ[a].gen (o*t)/o | ERR TypeError
+Power ZZ['x'] ZZ[a].gen o*t | ERR TypeError
+Power ZZ['x'] ZZ[a].gen t*o | ERR TypeError
+Power ZZ['x'] ZZ[a].gen o+t | ERR TypeError
+Power ZZ['x'] ZZ[a].gen t-o | ERR TypeError
+Power ZZ['x'] ZZ[a].gen t/o | ERR TypeError
+Power ZZ['x'] ZZ[a].gen (o*t)/o | ERR TypeError
+Power ZZ['x'] 1/2 o*t | 1/2*x | [0, 1/2] | Power Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Power ZZ['x'] 1/2 t*o | 1/2*x | [0, 1/2] | Power Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Power ZZ['x'] 1/2 o+t | 1/2 + x | [1/2, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Power ZZ['x'] 1/2 t-o | -1/2 + x | [-1/2, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Power ZZ['x'] 1/2 t/o | 2*x | [0, 2] | Power Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Power ZZ['x'] 1/2 (o*t)/o | x | [0, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Power ZZ['x'] 2 o*t | 2*x | [0, 2] | Power Series Ring in x over Univariate Polynomial Ring in x over Integer Ring
+Power ZZ['x'] 2 t*o | 2*x | [0, 2] | Power Series Ring in x over Univariate Polynomial Ring in x over Integer Ring
+Power ZZ['x'] 2 o+t | 2 + x | [2, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Integer Ring
+Power ZZ['x'] 2 t-o | -2 + x | [-2, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Integer Ring
+Power ZZ['x'] 2 t/o | 1/2*x | [0, 1/2] | Power Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Power ZZ['x'] 2 (o*t)/o | x | [0, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Power ZZ['x'] GF5(2) o*t | 2*x | [0, 2] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power ZZ['x'] GF5(2) t*o | 2*x | [0, 2] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power ZZ['x'] GF5(2) o+t | 2 + x | [2, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power ZZ['x'] GF5(2) t-o | 3 + x | [3, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power ZZ['x'] GF5(2) t/o | 3*x | [0, 3] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power ZZ['x'] GF5(2) (o*t)/o | x | [0, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power QQ['x'] QQ[x].gen o*t | x*x | [0, x] | Power Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Power QQ['x'] QQ[x].gen t*o | x*x | [0, x] | Power Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Power QQ['x'] QQ[x].gen o+t | x + x | [x, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Power QQ['x'] QQ[x].gen t-o | -x + x | [-x, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Power QQ['x'] QQ[x].gen t/o | 1/x*x | [0, 1/x] | Power Series Ring in x over Fraction Field of Univariate Polynomial Ring in x over Rational Field
+Power QQ['x'] QQ[x].gen (o*t)/o | x | [0, 1] | Power Series Ring in x over Fraction Field of Univariate Polynomial Ring in x over Rational Field
+Power QQ['x'] ZZ[x].gen o*t | x*x | [0, x] | Power Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Power QQ['x'] ZZ[x].gen t*o | x*x | [0, x] | Power Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Power QQ['x'] ZZ[x].gen o+t | x + x | [x, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Power QQ['x'] ZZ[x].gen t-o | -x + x | [-x, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Power QQ['x'] ZZ[x].gen t/o | 1/x*x | [0, 1/x] | Power Series Ring in x over Fraction Field of Univariate Polynomial Ring in x over Rational Field
+Power QQ['x'] ZZ[x].gen (o*t)/o | x | [0, 1] | Power Series Ring in x over Fraction Field of Univariate Polynomial Ring in x over Rational Field
+Power QQ['x'] GF5[x].gen o*t | x*x | [0, x] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power QQ['x'] GF5[x].gen t*o | x*x | [0, x] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power QQ['x'] GF5[x].gen o+t | ERR TypeError
+Power QQ['x'] GF5[x].gen t-o | ERR TypeError
+Power QQ['x'] GF5[x].gen t/o | ERR RuntimeError
+Power QQ['x'] GF5[x].gen (o*t)/o | x | [0, 1] | Power Series Ring in x over Fraction Field of Univariate Polynomial Ring in x over Finite Field of size 5
+Power QQ['x'] QQ[a].gen o*t | ERR TypeError
+Power QQ['x'] QQ[a].gen t*o | ERR TypeError
+Power QQ['x'] QQ[a].gen o+t | ERR TypeError
+Power QQ['x'] QQ[a].gen t-o | ERR TypeError
+Power QQ['x'] QQ[a].gen t/o | ERR TypeError
+Power QQ['x'] QQ[a].gen (o*t)/o | ERR TypeError
+Power QQ['x'] ZZ[a].gen o*t | ERR TypeError
+Power QQ['x'] ZZ[a].gen t*o | ERR TypeError
+Power QQ['x'] ZZ[a].gen o+t | ERR TypeError
+Power QQ['x'] ZZ[a].gen t-o | ERR TypeError
+Power QQ['x'] ZZ[a].gen t/o | ERR TypeError
+Power QQ['x'] ZZ[a].gen (o*t)/o | ERR TypeError
+Power QQ['x'] 1/2 o*t | 1/2*x | [0, 1/2] | Power Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Power QQ['x'] 1/2 t*o | 1/2*x | [0, 1/2] | Power Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Power QQ['x'] 1/2 o+t | 1/2 + x | [1/2, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Power QQ['x'] 1/2 t-o | -1/2 + x | [-1/2, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Power QQ['x'] 1/2 t/o | 2*x | [0, 2] | Power Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Power QQ['x'] 1/2 (o*t)/o | x | [0, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Power QQ['x'] 2 o*t | 2*x | [0, 2] | Power Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Power QQ['x'] 2 t*o | 2*x | [0, 2] | Power Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Power QQ['x'] 2 o+t | 2 + x | [2, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Power QQ['x'] 2 t-o | -2 + x | [-2, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Power QQ['x'] 2 t/o | 1/2*x | [0, 1/2] | Power Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Power QQ['x'] 2 (o*t)/o | x | [0, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Power QQ['x'] GF5(2) o*t | 2*x | [0, 2] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power QQ['x'] GF5(2) t*o | 2*x | [0, 2] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power QQ['x'] GF5(2) o+t | ERR TypeError
+Power QQ['x'] GF5(2) t-o | ERR TypeError
+Power QQ['x'] GF5(2) t/o | 3*x | [0, 3] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power QQ['x'] GF5(2) (o*t)/o | x | [0, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power GF(5)['x'] QQ[x].gen o*t | ERR TypeError
+Power GF(5)['x'] QQ[x].gen t*o | ERR TypeError
+Power GF(5)['x'] QQ[x].gen o+t | ERR TypeError
+Power GF(5)['x'] QQ[x].gen t-o | ERR TypeError
+Power GF(5)['x'] QQ[x].gen t/o | ERR TypeError
+Power GF(5)['x'] QQ[x].gen (o*t)/o | ERR TypeError
+Power GF(5)['x'] ZZ[x].gen o*t | x*x | [0, x] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power GF(5)['x'] ZZ[x].gen t*o | x*x | [0, x] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power GF(5)['x'] ZZ[x].gen o+t | x + x | [x, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power GF(5)['x'] ZZ[x].gen t-o | 4*x + x | [4*x, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power GF(5)['x'] ZZ[x].gen t/o | 1/x*x | [0, 1/x] | Power Series Ring in x over Fraction Field of Univariate Polynomial Ring in x over Finite Field of size 5
+Power GF(5)['x'] ZZ[x].gen (o*t)/o | x | [0, 1] | Power Series Ring in x over Fraction Field of Univariate Polynomial Ring in x over Finite Field of size 5
+Power GF(5)['x'] GF5[x].gen o*t | x*x | [0, x] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power GF(5)['x'] GF5[x].gen t*o | x*x | [0, x] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power GF(5)['x'] GF5[x].gen o+t | x + x | [x, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power GF(5)['x'] GF5[x].gen t-o | 4*x + x | [4*x, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power GF(5)['x'] GF5[x].gen t/o | 1/x*x | [0, 1/x] | Power Series Ring in x over Fraction Field of Univariate Polynomial Ring in x over Finite Field of size 5
+Power GF(5)['x'] GF5[x].gen (o*t)/o | x | [0, 1] | Power Series Ring in x over Fraction Field of Univariate Polynomial Ring in x over Finite Field of size 5
+Power GF(5)['x'] QQ[a].gen o*t | ERR TypeError
+Power GF(5)['x'] QQ[a].gen t*o | ERR TypeError
+Power GF(5)['x'] QQ[a].gen o+t | ERR TypeError
+Power GF(5)['x'] QQ[a].gen t-o | ERR TypeError
+Power GF(5)['x'] QQ[a].gen t/o | ERR TypeError
+Power GF(5)['x'] QQ[a].gen (o*t)/o | ERR TypeError
+Power GF(5)['x'] ZZ[a].gen o*t | ERR TypeError
+Power GF(5)['x'] ZZ[a].gen t*o | ERR TypeError
+Power GF(5)['x'] ZZ[a].gen o+t | ERR TypeError
+Power GF(5)['x'] ZZ[a].gen t-o | ERR TypeError
+Power GF(5)['x'] ZZ[a].gen t/o | ERR TypeError
+Power GF(5)['x'] ZZ[a].gen (o*t)/o | ERR TypeError
+Power GF(5)['x'] 1/2 o*t | ERR TypeError
+Power GF(5)['x'] 1/2 t*o | ERR TypeError
+Power GF(5)['x'] 1/2 o+t | ERR TypeError
+Power GF(5)['x'] 1/2 t-o | ERR TypeError
+Power GF(5)['x'] 1/2 t/o | ERR TypeError
+Power GF(5)['x'] 1/2 (o*t)/o | ERR TypeError
+Power GF(5)['x'] 2 o*t | 2*x | [0, 2] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power GF(5)['x'] 2 t*o | 2*x | [0, 2] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power GF(5)['x'] 2 o+t | 2 + x | [2, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power GF(5)['x'] 2 t-o | 3 + x | [3, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power GF(5)['x'] 2 t/o | 3*x | [0, 3] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power GF(5)['x'] 2 (o*t)/o | x | [0, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power GF(5)['x'] GF5(2) o*t | 2*x | [0, 2] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power GF(5)['x'] GF5(2) t*o | 2*x | [0, 2] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power GF(5)['x'] GF5(2) o+t | 2 + x | [2, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power GF(5)['x'] GF5(2) t-o | 3 + x | [3, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power GF(5)['x'] GF5(2) t/o | 3*x | [0, 3] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power GF(5)['x'] GF5(2) (o*t)/o | x | [0, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power ZZ['a'] QQ[x].gen o*t | x^2 | [0, 0, 1] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power ZZ['a'] QQ[x].gen t*o | x^2 | [0, 0, 1] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power ZZ['a'] QQ[x].gen o+t | 2*x | [0, 2] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power ZZ['a'] QQ[x].gen t-o | 0 | [] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power ZZ['a'] QQ[x].gen t/o | 1 | [1] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power ZZ['a'] QQ[x].gen (o*t)/o | x | [0, 1] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power ZZ['a'] ZZ[x].gen o*t | x^2 | [0, 0, 1] | Power Series Ring in x over Univariate Polynomial Ring in a over Integer Ring
+Power ZZ['a'] ZZ[x].gen t*o | x^2 | [0, 0, 1] | Power Series Ring in x over Univariate Polynomial Ring in a over Integer Ring
+Power ZZ['a'] ZZ[x].gen o+t | 2*x | [0, 2] | Power Series Ring in x over Univariate Polynomial Ring in a over Integer Ring
+Power ZZ['a'] ZZ[x].gen t-o | 0 | [] | Power Series Ring in x over Univariate Polynomial Ring in a over Integer Ring
+Power ZZ['a'] ZZ[x].gen t/o | 1 | [1] | Power Series Ring in x over Univariate Polynomial Ring in a over Integer Ring
+Power ZZ['a'] ZZ[x].gen (o*t)/o | x | [0, 1] | Power Series Ring in x over Univariate Polynomial Ring in a over Integer Ring
+Power ZZ['a'] GF5[x].gen o*t | x^2 | [0, 0, 1] | Power Series Ring in x over Univariate Polynomial Ring in a over Finite Field of size 5
+Power ZZ['a'] GF5[x].gen t*o | x^2 | [0, 0, 1] | Power Series Ring in x over Univariate Polynomial Ring in a over Finite Field of size 5
+Power ZZ['a'] GF5[x].gen o+t | 2*x | [0, 2] | Power Series Ring in x over Univariate Polynomial Ring in a over Finite Field of size 5
+Power ZZ['a'] GF5[x].gen t-o | 0 | [] | Power Series Ring in x over Univariate Polynomial Ring in a over Finite Field of size 5
+Power ZZ['a'] GF5[x].gen t/o | 1 | [1] | Power Series Ring in x over Univariate Polynomial Ring in a over Finite Field of size 5
+Power ZZ['a'] GF5[x].gen (o*t)/o | x | [0, 1] | Power Series Ring in x over Univariate Polynomial Ring in a over Finite Field of size 5
+Power ZZ['a'] QQ[a].gen o*t | a*x | [0, a] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power ZZ['a'] QQ[a].gen t*o | a*x | [0, a] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power ZZ['a'] QQ[a].gen o+t | a + x | [a, 1] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power ZZ['a'] QQ[a].gen t-o | -a + x | [-a, 1] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power ZZ['a'] QQ[a].gen t/o | ERR RuntimeError
+Power ZZ['a'] QQ[a].gen (o*t)/o | x | [0, 1] | Power Series Ring in x over Fraction Field of Univariate Polynomial Ring in a over Rational Field
+Power ZZ['a'] ZZ[a].gen o*t | a*x | [0, a] | Power Series Ring in x over Univariate Polynomial Ring in a over Integer Ring
+Power ZZ['a'] ZZ[a].gen t*o | a*x | [0, a] | Power Series Ring in x over Univariate Polynomial Ring in a over Integer Ring
+Power ZZ['a'] ZZ[a].gen o+t | a + x | [a, 1] | Power Series Ring in x over Univariate Polynomial Ring in a over Integer Ring
+Power ZZ['a'] ZZ[a].gen t-o | -a + x | [-a, 1] | Power Series Ring in x over Univariate Polynomial Ring in a over Integer Ring
+Power ZZ['a'] ZZ[a].gen t/o | 1/a*x | [0, 1/a] | Power Series Ring in x over Fraction Field of Univariate Polynomial Ring in a over Integer Ring
+Power ZZ['a'] ZZ[a].gen (o*t)/o | x | [0, 1] | Power Series Ring in x over Fraction Field of Univariate Polynomial Ring in a over Integer Ring
+Power ZZ['a'] 1/2 o*t | 1/2*x | [0, 1/2] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power ZZ['a'] 1/2 t*o | 1/2*x | [0, 1/2] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power ZZ['a'] 1/2 o+t | 1/2 + x | [1/2, 1] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power ZZ['a'] 1/2 t-o | -1/2 + x | [-1/2, 1] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power ZZ['a'] 1/2 t/o | 2*x | [0, 2] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power ZZ['a'] 1/2 (o*t)/o | x | [0, 1] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power ZZ['a'] 2 o*t | 2*x | [0, 2] | Power Series Ring in x over Univariate Polynomial Ring in a over Integer Ring
+Power ZZ['a'] 2 t*o | 2*x | [0, 2] | Power Series Ring in x over Univariate Polynomial Ring in a over Integer Ring
+Power ZZ['a'] 2 o+t | 2 + x | [2, 1] | Power Series Ring in x over Univariate Polynomial Ring in a over Integer Ring
+Power ZZ['a'] 2 t-o | -2 + x | [-2, 1] | Power Series Ring in x over Univariate Polynomial Ring in a over Integer Ring
+Power ZZ['a'] 2 t/o | 1/2*x | [0, 1/2] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power ZZ['a'] 2 (o*t)/o | x | [0, 1] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power ZZ['a'] GF5(2) o*t | 2*x | [0, 2] | Power Series Ring in x over Univariate Polynomial Ring in a over Finite Field of size 5
+Power ZZ['a'] GF5(2) t*o | 2*x | [0, 2] | Power Series Ring in x over Univariate Polynomial Ring in a over Finite Field of size 5
+Power ZZ['a'] GF5(2) o+t | 2 + x | [2, 1] | Power Series Ring in x over Univariate Polynomial Ring in a over Finite Field of size 5
+Power ZZ['a'] GF5(2) t-o | 3 + x | [3, 1] | Power Series Ring in x over Univariate Polynomial Ring in a over Finite Field of size 5
+Power ZZ['a'] GF5(2) t/o | 3*x | [0, 3] | Power Series Ring in x over Univariate Polynomial Ring in a over Finite Field of size 5
+Power ZZ['a'] GF5(2) (o*t)/o | x | [0, 1] | Power Series Ring in x over Univariate Polynomial Ring in a over Finite Field of size 5
+Power QQ['a'] QQ[x].gen o*t | x^2 | [0, 0, 1] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power QQ['a'] QQ[x].gen t*o | x^2 | [0, 0, 1] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power QQ['a'] QQ[x].gen o+t | 2*x | [0, 2] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power QQ['a'] QQ[x].gen t-o | 0 | [] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power QQ['a'] QQ[x].gen t/o | 1 | [1] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power QQ['a'] QQ[x].gen (o*t)/o | x | [0, 1] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power QQ['a'] ZZ[x].gen o*t | x^2 | [0, 0, 1] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power QQ['a'] ZZ[x].gen t*o | x^2 | [0, 0, 1] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power QQ['a'] ZZ[x].gen o+t | 2*x | [0, 2] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power QQ['a'] ZZ[x].gen t-o | 0 | [] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power QQ['a'] ZZ[x].gen t/o | 1 | [1] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power QQ['a'] ZZ[x].gen (o*t)/o | x | [0, 1] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power QQ['a'] GF5[x].gen o*t | ERR TypeError
+Power QQ['a'] GF5[x].gen t*o | ERR TypeError
+Power QQ['a'] GF5[x].gen o+t | ERR TypeError
+Power QQ['a'] GF5[x].gen t-o | ERR TypeError
+Power QQ['a'] GF5[x].gen t/o | ERR TypeError
+Power QQ['a'] GF5[x].gen (o*t)/o | ERR TypeError
+Power QQ['a'] QQ[a].gen o*t | a*x | [0, a] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power QQ['a'] QQ[a].gen t*o | a*x | [0, a] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power QQ['a'] QQ[a].gen o+t | a + x | [a, 1] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power QQ['a'] QQ[a].gen t-o | -a + x | [-a, 1] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power QQ['a'] QQ[a].gen t/o | 1/a*x | [0, 1/a] | Power Series Ring in x over Fraction Field of Univariate Polynomial Ring in a over Rational Field
+Power QQ['a'] QQ[a].gen (o*t)/o | x | [0, 1] | Power Series Ring in x over Fraction Field of Univariate Polynomial Ring in a over Rational Field
+Power QQ['a'] ZZ[a].gen o*t | a*x | [0, a] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power QQ['a'] ZZ[a].gen t*o | a*x | [0, a] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power QQ['a'] ZZ[a].gen o+t | a + x | [a, 1] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power QQ['a'] ZZ[a].gen t-o | -a + x | [-a, 1] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power QQ['a'] ZZ[a].gen t/o | 1/a*x | [0, 1/a] | Power Series Ring in x over Fraction Field of Univariate Polynomial Ring in a over Rational Field
+Power QQ['a'] ZZ[a].gen (o*t)/o | x | [0, 1] | Power Series Ring in x over Fraction Field of Univariate Polynomial Ring in a over Rational Field
+Power QQ['a'] 1/2 o*t | 1/2*x | [0, 1/2] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power QQ['a'] 1/2 t*o | 1/2*x | [0, 1/2] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power QQ['a'] 1/2 o+t | 1/2 + x | [1/2, 1] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power QQ['a'] 1/2 t-o | -1/2 + x | [-1/2, 1] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power QQ['a'] 1/2 t/o | 2*x | [0, 2] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power QQ['a'] 1/2 (o*t)/o | x | [0, 1] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power QQ['a'] 2 o*t | 2*x | [0, 2] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power QQ['a'] 2 t*o | 2*x | [0, 2] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power QQ['a'] 2 o+t | 2 + x | [2, 1] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power QQ['a'] 2 t-o | -2 + x | [-2, 1] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power QQ['a'] 2 t/o | 1/2*x | [0, 1/2] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power QQ['a'] 2 (o*t)/o | x | [0, 1] | Power Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Power QQ['a'] GF5(2) o*t | 2*x | [0, 2] | Power Series Ring in x over Univariate Polynomial Ring in a over Finite Field of size 5
+Power QQ['a'] GF5(2) t*o | 2*x | [0, 2] | Power Series Ring in x over Univariate Polynomial Ring in a over Finite Field of size 5
+Power QQ['a'] GF5(2) o+t | ERR TypeError
+Power QQ['a'] GF5(2) t-o | ERR TypeError
+Power QQ['a'] GF5(2) t/o | 3*x | [0, 3] | Power Series Ring in x over Univariate Polynomial Ring in a over Finite Field of size 5
+Power QQ['a'] GF5(2) (o*t)/o | x | [0, 1] | Power Series Ring in x over Univariate Polynomial Ring in a over Finite Field of size 5
+Laurent ZZ['x'] QQ[x].gen o*t | x*x | [x] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Laurent ZZ['x'] QQ[x].gen t*o | x*x | [x] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Laurent ZZ['x'] QQ[x].gen o+t | x + x | [x, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Laurent ZZ['x'] QQ[x].gen t-o | -x + x | [-x, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Laurent ZZ['x'] QQ[x].gen t/o | ERR RuntimeError
+Laurent ZZ['x'] QQ[x].gen (o*t)/o | x | [1] | Laurent Series Ring in x over Fraction Field of Univariate Polynomial Ring in x over Rational Field
+Laurent ZZ['x'] ZZ[x].gen o*t | x*x | [x] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Integer Ring
+Laurent ZZ['x'] ZZ[x].gen t*o | x*x | [x] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Integer Ring
+Laurent ZZ['x'] ZZ[x].gen o+t | x + x | [x, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Integer Ring
+Laurent ZZ['x'] ZZ[x].gen t-o | -x + x | [-x, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Integer Ring
+Laurent ZZ['x'] ZZ[x].gen t/o | 1/x*x | [1/x] | Laurent Series Ring in x over Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+Laurent ZZ['x'] ZZ[x].gen (o*t)/o | x | [1] | Laurent Series Ring in x over Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+Laurent ZZ['x'] GF5[x].gen o*t | x*x | [x] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent ZZ['x'] GF5[x].gen t*o | x*x | [x] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent ZZ['x'] GF5[x].gen o+t | x + x | [x, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent ZZ['x'] GF5[x].gen t-o | 4*x + x | [4*x, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent ZZ['x'] GF5[x].gen t/o | ERR RuntimeError
+Laurent ZZ['x'] GF5[x].gen (o*t)/o | x | [1] | Laurent Series Ring in x over Fraction Field of Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent ZZ['x'] QQ[a].gen o*t | ERR TypeError
+Laurent ZZ['x'] QQ[a].gen t*o | ERR TypeError
+Laurent ZZ['x'] QQ[a].gen o+t | ERR TypeError
+Laurent ZZ['x'] QQ[a].gen t-o | ERR TypeError
+Laurent ZZ['x'] QQ[a].gen t/o | ERR TypeError
+Laurent ZZ['x'] QQ[a].gen (o*t)/o | ERR TypeError
+Laurent ZZ['x'] ZZ[a].gen o*t | ERR TypeError
+Laurent ZZ['x'] ZZ[a].gen t*o | ERR TypeError
+Laurent ZZ['x'] ZZ[a].gen o+t | ERR TypeError
+Laurent ZZ['x'] ZZ[a].gen t-o | ERR TypeError
+Laurent ZZ['x'] ZZ[a].gen t/o | ERR TypeError
+Laurent ZZ['x'] ZZ[a].gen (o*t)/o | ERR TypeError
+Laurent ZZ['x'] 1/2 o*t | 1/2*x | [1/2] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Laurent ZZ['x'] 1/2 t*o | 1/2*x | [1/2] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Laurent ZZ['x'] 1/2 o+t | 1/2 + x | [1/2, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Laurent ZZ['x'] 1/2 t-o | -1/2 + x | [-1/2, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Laurent ZZ['x'] 1/2 t/o | 2*x | [2] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Laurent ZZ['x'] 1/2 (o*t)/o | x | [1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Laurent ZZ['x'] 2 o*t | 2*x | [2] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Integer Ring
+Laurent ZZ['x'] 2 t*o | 2*x | [2] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Integer Ring
+Laurent ZZ['x'] 2 o+t | 2 + x | [2, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Integer Ring
+Laurent ZZ['x'] 2 t-o | -2 + x | [-2, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Integer Ring
+Laurent ZZ['x'] 2 t/o | 1/2*x | [1/2] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Laurent ZZ['x'] 2 (o*t)/o | x | [1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Laurent ZZ['x'] GF5(2) o*t | 2*x | [2] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent ZZ['x'] GF5(2) t*o | 2*x | [2] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent ZZ['x'] GF5(2) o+t | 2 + x | [2, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent ZZ['x'] GF5(2) t-o | 3 + x | [3, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent ZZ['x'] GF5(2) t/o | 3*x | [3] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent ZZ['x'] GF5(2) (o*t)/o | x | [1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent QQ['x'] QQ[x].gen o*t | x*x | [x] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Laurent QQ['x'] QQ[x].gen t*o | x*x | [x] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Laurent QQ['x'] QQ[x].gen o+t | x + x | [x, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Laurent QQ['x'] QQ[x].gen t-o | -x + x | [-x, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Laurent QQ['x'] QQ[x].gen t/o | 1/x*x | [1/x] | Laurent Series Ring in x over Fraction Field of Univariate Polynomial Ring in x over Rational Field
+Laurent QQ['x'] QQ[x].gen (o*t)/o | x | [1] | Laurent Series Ring in x over Fraction Field of Univariate Polynomial Ring in x over Rational Field
+Laurent QQ['x'] ZZ[x].gen o*t | x*x | [x] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Laurent QQ['x'] ZZ[x].gen t*o | x*x | [x] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Laurent QQ['x'] ZZ[x].gen o+t | x + x | [x, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Laurent QQ['x'] ZZ[x].gen t-o | -x + x | [-x, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Laurent QQ['x'] ZZ[x].gen t/o | 1/x*x | [1/x] | Laurent Series Ring in x over Fraction Field of Univariate Polynomial Ring in x over Rational Field
+Laurent QQ['x'] ZZ[x].gen (o*t)/o | x | [1] | Laurent Series Ring in x over Fraction Field of Univariate Polynomial Ring in x over Rational Field
+Laurent QQ['x'] GF5[x].gen o*t | x*x | [x] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent QQ['x'] GF5[x].gen t*o | x*x | [x] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent QQ['x'] GF5[x].gen o+t | ERR TypeError
+Laurent QQ['x'] GF5[x].gen t-o | ERR TypeError
+Laurent QQ['x'] GF5[x].gen t/o | ERR RuntimeError
+Laurent QQ['x'] GF5[x].gen (o*t)/o | x | [1] | Laurent Series Ring in x over Fraction Field of Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent QQ['x'] QQ[a].gen o*t | ERR TypeError
+Laurent QQ['x'] QQ[a].gen t*o | ERR TypeError
+Laurent QQ['x'] QQ[a].gen o+t | ERR TypeError
+Laurent QQ['x'] QQ[a].gen t-o | ERR TypeError
+Laurent QQ['x'] QQ[a].gen t/o | ERR TypeError
+Laurent QQ['x'] QQ[a].gen (o*t)/o | ERR TypeError
+Laurent QQ['x'] ZZ[a].gen o*t | ERR TypeError
+Laurent QQ['x'] ZZ[a].gen t*o | ERR TypeError
+Laurent QQ['x'] ZZ[a].gen o+t | ERR TypeError
+Laurent QQ['x'] ZZ[a].gen t-o | ERR TypeError
+Laurent QQ['x'] ZZ[a].gen t/o | ERR TypeError
+Laurent QQ['x'] ZZ[a].gen (o*t)/o | ERR TypeError
+Laurent QQ['x'] 1/2 o*t | 1/2*x | [1/2] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Laurent QQ['x'] 1/2 t*o | 1/2*x | [1/2] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Laurent QQ['x'] 1/2 o+t | 1/2 + x | [1/2, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Laurent QQ['x'] 1/2 t-o | -1/2 + x | [-1/2, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Laurent QQ['x'] 1/2 t/o | 2*x | [2] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Laurent QQ['x'] 1/2 (o*t)/o | x | [1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Laurent QQ['x'] 2 o*t | 2*x | [2] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Laurent QQ['x'] 2 t*o | 2*x | [2] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Laurent QQ['x'] 2 o+t | 2 + x | [2, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Laurent QQ['x'] 2 t-o | -2 + x | [-2, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Laurent QQ['x'] 2 t/o | 1/2*x | [1/2] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Laurent QQ['x'] 2 (o*t)/o | x | [1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Laurent QQ['x'] GF5(2) o*t | 2*x | [2] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent QQ['x'] GF5(2) t*o | 2*x | [2] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent QQ['x'] GF5(2) o+t | ERR TypeError
+Laurent QQ['x'] GF5(2) t-o | ERR TypeError
+Laurent QQ['x'] GF5(2) t/o | 3*x | [3] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent QQ['x'] GF5(2) (o*t)/o | x | [1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent GF(5)['x'] QQ[x].gen o*t | ERR TypeError
+Laurent GF(5)['x'] QQ[x].gen t*o | ERR TypeError
+Laurent GF(5)['x'] QQ[x].gen o+t | ERR TypeError
+Laurent GF(5)['x'] QQ[x].gen t-o | ERR TypeError
+Laurent GF(5)['x'] QQ[x].gen t/o | ERR TypeError
+Laurent GF(5)['x'] QQ[x].gen (o*t)/o | ERR TypeError
+Laurent GF(5)['x'] ZZ[x].gen o*t | x*x | [x] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent GF(5)['x'] ZZ[x].gen t*o | x*x | [x] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent GF(5)['x'] ZZ[x].gen o+t | x + x | [x, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent GF(5)['x'] ZZ[x].gen t-o | 4*x + x | [4*x, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent GF(5)['x'] ZZ[x].gen t/o | 1/x*x | [1/x] | Laurent Series Ring in x over Fraction Field of Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent GF(5)['x'] ZZ[x].gen (o*t)/o | x | [1] | Laurent Series Ring in x over Fraction Field of Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent GF(5)['x'] GF5[x].gen o*t | x*x | [x] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent GF(5)['x'] GF5[x].gen t*o | x*x | [x] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent GF(5)['x'] GF5[x].gen o+t | x + x | [x, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent GF(5)['x'] GF5[x].gen t-o | 4*x + x | [4*x, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent GF(5)['x'] GF5[x].gen t/o | 1/x*x | [1/x] | Laurent Series Ring in x over Fraction Field of Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent GF(5)['x'] GF5[x].gen (o*t)/o | x | [1] | Laurent Series Ring in x over Fraction Field of Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent GF(5)['x'] QQ[a].gen o*t | ERR TypeError
+Laurent GF(5)['x'] QQ[a].gen t*o | ERR TypeError
+Laurent GF(5)['x'] QQ[a].gen o+t | ERR TypeError
+Laurent GF(5)['x'] QQ[a].gen t-o | ERR TypeError
+Laurent GF(5)['x'] QQ[a].gen t/o | ERR TypeError
+Laurent GF(5)['x'] QQ[a].gen (o*t)/o | ERR TypeError
+Laurent GF(5)['x'] ZZ[a].gen o*t | ERR TypeError
+Laurent GF(5)['x'] ZZ[a].gen t*o | ERR TypeError
+Laurent GF(5)['x'] ZZ[a].gen o+t | ERR TypeError
+Laurent GF(5)['x'] ZZ[a].gen t-o | ERR TypeError
+Laurent GF(5)['x'] ZZ[a].gen t/o | ERR TypeError
+Laurent GF(5)['x'] ZZ[a].gen (o*t)/o | ERR TypeError
+Laurent GF(5)['x'] 1/2 o*t | ERR TypeError
+Laurent GF(5)['x'] 1/2 t*o | ERR TypeError
+Laurent GF(5)['x'] 1/2 o+t | ERR TypeError
+Laurent GF(5)['x'] 1/2 t-o | ERR TypeError
+Laurent GF(5)['x'] 1/2 t/o | ERR TypeError
+Laurent GF(5)['x'] 1/2 (o*t)/o | ERR TypeError
+Laurent GF(5)['x'] 2 o*t | 2*x | [2] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent GF(5)['x'] 2 t*o | 2*x | [2] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent GF(5)['x'] 2 o+t | 2 + x | [2, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent GF(5)['x'] 2 t-o | 3 + x | [3, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent GF(5)['x'] 2 t/o | 3*x | [3] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent GF(5)['x'] 2 (o*t)/o | x | [1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent GF(5)['x'] GF5(2) o*t | 2*x | [2] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent GF(5)['x'] GF5(2) t*o | 2*x | [2] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent GF(5)['x'] GF5(2) o+t | 2 + x | [2, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent GF(5)['x'] GF5(2) t-o | 3 + x | [3, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent GF(5)['x'] GF5(2) t/o | 3*x | [3] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent GF(5)['x'] GF5(2) (o*t)/o | x | [1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent ZZ['a'] QQ[x].gen o*t | ERR TypeError
+Laurent ZZ['a'] QQ[x].gen t*o | ERR TypeError
+Laurent ZZ['a'] QQ[x].gen o+t | ERR TypeError
+Laurent ZZ['a'] QQ[x].gen t-o | ERR TypeError
+Laurent ZZ['a'] QQ[x].gen t/o | ERR TypeError
+Laurent ZZ['a'] QQ[x].gen (o*t)/o | ERR TypeError
+Laurent ZZ['a'] ZZ[x].gen o*t | x^2 | [1] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Integer Ring
+Laurent ZZ['a'] ZZ[x].gen t*o | x^2 | [1] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Integer Ring
+Laurent ZZ['a'] ZZ[x].gen o+t | 2*x | [2] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Integer Ring
+Laurent ZZ['a'] ZZ[x].gen t-o | 0 | [] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Integer Ring
+Laurent ZZ['a'] ZZ[x].gen t/o | 1 | [1] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Integer Ring
+Laurent ZZ['a'] ZZ[x].gen (o*t)/o | x | [1] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Integer Ring
+Laurent ZZ['a'] GF5[x].gen o*t | ERR TypeError
+Laurent ZZ['a'] GF5[x].gen t*o | ERR TypeError
+Laurent ZZ['a'] GF5[x].gen o+t | ERR TypeError
+Laurent ZZ['a'] GF5[x].gen t-o | ERR TypeError
+Laurent ZZ['a'] GF5[x].gen t/o | ERR TypeError
+Laurent ZZ['a'] GF5[x].gen (o*t)/o | ERR TypeError
+Laurent ZZ['a'] QQ[a].gen o*t | a*x | [a] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent ZZ['a'] QQ[a].gen t*o | a*x | [a] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent ZZ['a'] QQ[a].gen o+t | a + x | [a, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent ZZ['a'] QQ[a].gen t-o | -a + x | [-a, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent ZZ['a'] QQ[a].gen t/o | ERR RuntimeError
+Laurent ZZ['a'] QQ[a].gen (o*t)/o | x | [1] | Laurent Series Ring in x over Fraction Field of Univariate Polynomial Ring in a over Rational Field
+Laurent ZZ['a'] ZZ[a].gen o*t | a*x | [a] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Integer Ring
+Laurent ZZ['a'] ZZ[a].gen t*o | a*x | [a] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Integer Ring
+Laurent ZZ['a'] ZZ[a].gen o+t | a + x | [a, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Integer Ring
+Laurent ZZ['a'] ZZ[a].gen t-o | -a + x | [-a, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Integer Ring
+Laurent ZZ['a'] ZZ[a].gen t/o | 1/a*x | [1/a] | Laurent Series Ring in x over Fraction Field of Univariate Polynomial Ring in a over Integer Ring
+Laurent ZZ['a'] ZZ[a].gen (o*t)/o | x | [1] | Laurent Series Ring in x over Fraction Field of Univariate Polynomial Ring in a over Integer Ring
+Laurent ZZ['a'] 1/2 o*t | 1/2*x | [1/2] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent ZZ['a'] 1/2 t*o | 1/2*x | [1/2] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent ZZ['a'] 1/2 o+t | 1/2 + x | [1/2, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent ZZ['a'] 1/2 t-o | -1/2 + x | [-1/2, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent ZZ['a'] 1/2 t/o | 2*x | [2] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent ZZ['a'] 1/2 (o*t)/o | x | [1] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent ZZ['a'] 2 o*t | 2*x | [2] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Integer Ring
+Laurent ZZ['a'] 2 t*o | 2*x | [2] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Integer Ring
+Laurent ZZ['a'] 2 o+t | 2 + x | [2, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Integer Ring
+Laurent ZZ['a'] 2 t-o | -2 + x | [-2, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Integer Ring
+Laurent ZZ['a'] 2 t/o | 1/2*x | [1/2] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent ZZ['a'] 2 (o*t)/o | x | [1] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent ZZ['a'] GF5(2) o*t | 2*x | [2] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Finite Field of size 5
+Laurent ZZ['a'] GF5(2) t*o | 2*x | [2] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Finite Field of size 5
+Laurent ZZ['a'] GF5(2) o+t | 2 + x | [2, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Finite Field of size 5
+Laurent ZZ['a'] GF5(2) t-o | 3 + x | [3, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Finite Field of size 5
+Laurent ZZ['a'] GF5(2) t/o | 3*x | [3] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Finite Field of size 5
+Laurent ZZ['a'] GF5(2) (o*t)/o | x | [1] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Finite Field of size 5
+Laurent QQ['a'] QQ[x].gen o*t | x^2 | [1] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent QQ['a'] QQ[x].gen t*o | x^2 | [1] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent QQ['a'] QQ[x].gen o+t | 2*x | [2] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent QQ['a'] QQ[x].gen t-o | 0 | [] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent QQ['a'] QQ[x].gen t/o | 1 | [1] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent QQ['a'] QQ[x].gen (o*t)/o | x | [1] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent QQ['a'] ZZ[x].gen o*t | x^2 | [1] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent QQ['a'] ZZ[x].gen t*o | x^2 | [1] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent QQ['a'] ZZ[x].gen o+t | 2*x | [2] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent QQ['a'] ZZ[x].gen t-o | 0 | [] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent QQ['a'] ZZ[x].gen t/o | 1 | [1] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent QQ['a'] ZZ[x].gen (o*t)/o | x | [1] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent QQ['a'] GF5[x].gen o*t | ERR TypeError
+Laurent QQ['a'] GF5[x].gen t*o | ERR TypeError
+Laurent QQ['a'] GF5[x].gen o+t | ERR TypeError
+Laurent QQ['a'] GF5[x].gen t-o | ERR TypeError
+Laurent QQ['a'] GF5[x].gen t/o | ERR TypeError
+Laurent QQ['a'] GF5[x].gen (o*t)/o | ERR TypeError
+Laurent QQ['a'] QQ[a].gen o*t | a*x | [a] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent QQ['a'] QQ[a].gen t*o | a*x | [a] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent QQ['a'] QQ[a].gen o+t | a + x | [a, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent QQ['a'] QQ[a].gen t-o | -a + x | [-a, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent QQ['a'] QQ[a].gen t/o | 1/a*x | [1/a] | Laurent Series Ring in x over Fraction Field of Univariate Polynomial Ring in a over Rational Field
+Laurent QQ['a'] QQ[a].gen (o*t)/o | x | [1] | Laurent Series Ring in x over Fraction Field of Univariate Polynomial Ring in a over Rational Field
+Laurent QQ['a'] ZZ[a].gen o*t | a*x | [a] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent QQ['a'] ZZ[a].gen t*o | a*x | [a] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent QQ['a'] ZZ[a].gen o+t | a + x | [a, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent QQ['a'] ZZ[a].gen t-o | -a + x | [-a, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent QQ['a'] ZZ[a].gen t/o | 1/a*x | [1/a] | Laurent Series Ring in x over Fraction Field of Univariate Polynomial Ring in a over Rational Field
+Laurent QQ['a'] ZZ[a].gen (o*t)/o | x | [1] | Laurent Series Ring in x over Fraction Field of Univariate Polynomial Ring in a over Rational Field
+Laurent QQ['a'] 1/2 o*t | 1/2*x | [1/2] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent QQ['a'] 1/2 t*o | 1/2*x | [1/2] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent QQ['a'] 1/2 o+t | 1/2 + x | [1/2, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent QQ['a'] 1/2 t-o | -1/2 + x | [-1/2, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent QQ['a'] 1/2 t/o | 2*x | [2] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent QQ['a'] 1/2 (o*t)/o | x | [1] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent QQ['a'] 2 o*t | 2*x | [2] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent QQ['a'] 2 t*o | 2*x | [2] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent QQ['a'] 2 o+t | 2 + x | [2, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent QQ['a'] 2 t-o | -2 + x | [-2, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent QQ['a'] 2 t/o | 1/2*x | [1/2] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent QQ['a'] 2 (o*t)/o | x | [1] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Rational Field
+Laurent QQ['a'] GF5(2) o*t | 2*x | [2] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Finite Field of size 5
+Laurent QQ['a'] GF5(2) t*o | 2*x | [2] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Finite Field of size 5
+Laurent QQ['a'] GF5(2) o+t | ERR TypeError
+Laurent QQ['a'] GF5(2) t-o | ERR TypeError
+Laurent QQ['a'] GF5(2) t/o | 3*x | [3] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Finite Field of size 5
+Laurent QQ['a'] GF5(2) (o*t)/o | x | [1] | Laurent Series Ring in x over Univariate Polynomial Ring in a over Finite Field of size 5
+Power ZZ['y'] QQ[y].gen o^2*t | y^2*x | [0, y^2] | Power Series Ring in x over Univariate Polynomial Ring in y over Rational Field
+Power ZZ['y'] QQ[y].gen t^2 + o | y + x^2 | [y, 0, 1] | Power Series Ring in x over Univariate Polynomial Ring in y over Rational Field
+Power ZZ['y'] QQ[y].gen o - t^3 | y - x^3 | [y, 0, 0, -1] | Power Series Ring in x over Univariate Polynomial Ring in y over Rational Field
+Power ZZ['y'] QQ[y].gen (t + o)*t | y*x + x^2 | [0, y, 1] | Power Series Ring in x over Univariate Polynomial Ring in y over Rational Field
+Power ZZ['y'] QQ[y].gen t/(2*o) | ERR RuntimeError
+Power ZZ['y'] QQ[x,y].gen0 o^2*t | ERR TypeError
+Power ZZ['y'] QQ[x,y].gen0 t^2 + o | ERR TypeError
+Power ZZ['y'] QQ[x,y].gen0 o - t^3 | ERR TypeError
+Power ZZ['y'] QQ[x,y].gen0 (t + o)*t | ERR TypeError
+Power ZZ['y'] QQ[x,y].gen0 t/(2*o) | ERR TypeError
+Power ZZ['y'] GF7[x].gen o^2*t | x^3 | [0, 0, 0, 1] | Power Series Ring in x over Univariate Polynomial Ring in y over Finite Field of size 7
+Power ZZ['y'] GF7[x].gen t^2 + o | x + x^2 | [0, 1, 1] | Power Series Ring in x over Univariate Polynomial Ring in y over Finite Field of size 7
+Power ZZ['y'] GF7[x].gen o - t^3 | x + 6*x^3 | [0, 1, 0, 6] | Power Series Ring in x over Univariate Polynomial Ring in y over Finite Field of size 7
+Power ZZ['y'] GF7[x].gen (t + o)*t | 2*x^2 | [0, 0, 2] | Power Series Ring in x over Univariate Polynomial Ring in y over Finite Field of size 7
+Power ZZ['y'] GF7[x].gen t/(2*o) | 4 | [4] | Power Series Ring in x over Univariate Polynomial Ring in y over Finite Field of size 7
+Power ZZ['y'] 3/4 o^2*t | 9/16*x | [0, 9/16] | Power Series Ring in x over Univariate Polynomial Ring in y over Rational Field
+Power ZZ['y'] 3/4 t^2 + o | 3/4 + x^2 | [3/4, 0, 1] | Power Series Ring in x over Univariate Polynomial Ring in y over Rational Field
+Power ZZ['y'] 3/4 o - t^3 | 3/4 - x^3 | [3/4, 0, 0, -1] | Power Series Ring in x over Univariate Polynomial Ring in y over Rational Field
+Power ZZ['y'] 3/4 (t + o)*t | 3/4*x + x^2 | [0, 3/4, 1] | Power Series Ring in x over Univariate Polynomial Ring in y over Rational Field
+Power ZZ['y'] 3/4 t/(2*o) | 2/3*x | [0, 2/3] | Power Series Ring in x over Univariate Polynomial Ring in y over Rational Field
+Power ZZ['y'] GF7(3) o^2*t | 2*x | [0, 2] | Power Series Ring in x over Univariate Polynomial Ring in y over Finite Field of size 7
+Power ZZ['y'] GF7(3) t^2 + o | 3 + x^2 | [3, 0, 1] | Power Series Ring in x over Univariate Polynomial Ring in y over Finite Field of size 7
+Power ZZ['y'] GF7(3) o - t^3 | 3 + 6*x^3 | [3, 0, 0, 6] | Power Series Ring in x over Univariate Polynomial Ring in y over Finite Field of size 7
+Power ZZ['y'] GF7(3) (t + o)*t | 3*x + x^2 | [0, 3, 1] | Power Series Ring in x over Univariate Polynomial Ring in y over Finite Field of size 7
+Power ZZ['y'] GF7(3) t/(2*o) | 6*x | [0, 6] | Power Series Ring in x over Univariate Polynomial Ring in y over Finite Field of size 7
+Power ZZ['y'] ZZ[y].gen^2+1 o^2*t | (y^4 + 2*y^2 + 1)*x | [0, y^4 + 2*y^2 + 1] | Power Series Ring in x over Univariate Polynomial Ring in y over Integer Ring
+Power ZZ['y'] ZZ[y].gen^2+1 t^2 + o | y^2 + 1 + x^2 | [y^2 + 1, 0, 1] | Power Series Ring in x over Univariate Polynomial Ring in y over Integer Ring
+Power ZZ['y'] ZZ[y].gen^2+1 o - t^3 | y^2 + 1 - x^3 | [y^2 + 1, 0, 0, -1] | Power Series Ring in x over Univariate Polynomial Ring in y over Integer Ring
+Power ZZ['y'] ZZ[y].gen^2+1 (t + o)*t | (y^2 + 1)*x + x^2 | [0, y^2 + 1, 1] | Power Series Ring in x over Univariate Polynomial Ring in y over Integer Ring
+Power ZZ['y'] QQ[x].(x^2+3) o^2*t | 9*x + 6*x^3 + x^5 | [0, 9, 0, 6, 0, 1] | Power Series Ring in x over Univariate Polynomial Ring in y over Rational Field
+Power ZZ['y'] QQ[x].(x^2+3) t^2 + o | 3 + 2*x^2 | [3, 0, 2] | Power Series Ring in x over Univariate Polynomial Ring in y over Rational Field
+Power ZZ['y'] QQ[x].(x^2+3) o - t^3 | 3 + x^2 - x^3 | [3, 0, 1, -1] | Power Series Ring in x over Univariate Polynomial Ring in y over Rational Field
+Power ZZ['y'] QQ[x].(x^2+3) (t + o)*t | 3*x + x^2 + x^3 | [0, 3, 1, 1] | Power Series Ring in x over Univariate Polynomial Ring in y over Rational Field
+Power ZZ['y'] QQ[x].(x^2+3) t/(2*o) | 1/6*x - 1/18*x^3 + O(x^4) | [0, 1/6, 0, -1/18] | Power Series Ring in x over Univariate Polynomial Ring in y over Rational Field
+Power ZZ['y'] GF5[x].gen o^2*t | x^3 | [0, 0, 0, 1] | Power Series Ring in x over Univariate Polynomial Ring in y over Finite Field of size 5
+Power ZZ['y'] GF5[x].gen t^2 + o | x + x^2 | [0, 1, 1] | Power Series Ring in x over Univariate Polynomial Ring in y over Finite Field of size 5
+Power ZZ['y'] GF5[x].gen o - t^3 | x + 4*x^3 | [0, 1, 0, 4] | Power Series Ring in x over Univariate Polynomial Ring in y over Finite Field of size 5
+Power ZZ['y'] GF5[x].gen (t + o)*t | 2*x^2 | [0, 0, 2] | Power Series Ring in x over Univariate Polynomial Ring in y over Finite Field of size 5
+Power ZZ['y'] GF5[x].gen t/(2*o) | 3 | [3] | Power Series Ring in x over Univariate Polynomial Ring in y over Finite Field of size 5
+Power ZZ['y'] ZZ[b].gen o^2*t | ERR TypeError
+Power ZZ['y'] ZZ[b].gen t^2 + o | ERR TypeError
+Power ZZ['y'] ZZ[b].gen o - t^3 | ERR TypeError
+Power ZZ['y'] ZZ[b].gen (t + o)*t | ERR TypeError
+Power ZZ['y'] ZZ[b].gen t/(2*o) | ERR TypeError
+Power ZZ['y'] GF5(3) o^2*t | 4*x | [0, 4] | Power Series Ring in x over Univariate Polynomial Ring in y over Finite Field of size 5
+Power ZZ['y'] GF5(3) t^2 + o | 3 + x^2 | [3, 0, 1] | Power Series Ring in x over Univariate Polynomial Ring in y over Finite Field of size 5
+Power ZZ['y'] GF5(3) o - t^3 | 3 + 4*x^3 | [3, 0, 0, 4] | Power Series Ring in x over Univariate Polynomial Ring in y over Finite Field of size 5
+Power ZZ['y'] GF5(3) (t + o)*t | 3*x + x^2 | [0, 3, 1] | Power Series Ring in x over Univariate Polynomial Ring in y over Finite Field of size 5
+Power ZZ['y'] GF5(3) t/(2*o) | x | [0, 1] | Power Series Ring in x over Univariate Polynomial Ring in y over Finite Field of size 5
+Power QQ['x,y'] QQ[y].gen o^2*t | y^2*x | [0, y^2] | Power Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Power QQ['x,y'] QQ[y].gen t^2 + o | y + x^2 | [y, 0, 1] | Power Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Power QQ['x,y'] QQ[y].gen o - t^3 | y - x^3 | [y, 0, 0, -1] | Power Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Power QQ['x,y'] QQ[y].gen (t + o)*t | y*x + x^2 | [0, y, 1] | Power Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Power QQ['x,y'] QQ[x,y].gen0 o^2*t | x^2*x | [0, x^2] | Power Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Power QQ['x,y'] QQ[x,y].gen0 t^2 + o | x + x^2 | [x, 0, 1] | Power Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Power QQ['x,y'] QQ[x,y].gen0 o - t^3 | x - x^3 | [x, 0, 0, -1] | Power Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Power QQ['x,y'] QQ[x,y].gen0 (t + o)*t | x*x + x^2 | [0, x, 1] | Power Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Power QQ['x,y'] GF7[x].gen o^2*t | x^2*x | [0, x^2] | Power Series Ring in x over Multivariate Polynomial Ring in x, y over Finite Field of size 7
+Power QQ['x,y'] GF7[x].gen t^2 + o | ERR TypeError
+Power QQ['x,y'] GF7[x].gen o - t^3 | ERR TypeError
+Power QQ['x,y'] GF7[x].gen (t + o)*t | ERR TypeError
+Power QQ['x,y'] GF7[x].gen t/(2*o) | ERR RuntimeError
+Power QQ['x,y'] 3/4 o^2*t | 9/16*x | [0, 9/16] | Power Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Power QQ['x,y'] 3/4 t^2 + o | 3/4 + x^2 | [3/4, 0, 1] | Power Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Power QQ['x,y'] 3/4 o - t^3 | 3/4 - x^3 | [3/4, 0, 0, -1] | Power Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Power QQ['x,y'] 3/4 (t + o)*t | 3/4*x + x^2 | [0, 3/4, 1] | Power Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Power QQ['x,y'] 3/4 t/(2*o) | 2/3*x | [0, 2/3] | Power Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Power QQ['x,y'] GF7(3) o^2*t | 2*x | [0, 2] | Power Series Ring in x over Multivariate Polynomial Ring in x, y over Finite Field of size 7
+Power QQ['x,y'] GF7(3) t^2 + o | ERR TypeError
+Power QQ['x,y'] GF7(3) o - t^3 | ERR TypeError
+Power QQ['x,y'] GF7(3) (t + o)*t | ERR TypeError
+Power QQ['x,y'] GF7(3) t/(2*o) | -x | [0, -1] | Power Series Ring in x over Multivariate Polynomial Ring in x, y over Finite Field of size 7
+Power QQ['x,y'] ZZ[y].gen^2+1 o^2*t | (y^4 + 2*y^2 + 1)*x | [0, y^4 + 2*y^2 + 1] | Power Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Power QQ['x,y'] ZZ[y].gen^2+1 t^2 + o | y^2 + 1 + x^2 | [y^2 + 1, 0, 1] | Power Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Power QQ['x,y'] ZZ[y].gen^2+1 o - t^3 | y^2 + 1 - x^3 | [y^2 + 1, 0, 0, -1] | Power Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Power QQ['x,y'] ZZ[y].gen^2+1 (t + o)*t | (y^2 + 1)*x + x^2 | [0, y^2 + 1, 1] | Power Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Power QQ['x,y'] QQ[x].(x^2+3) o^2*t | (x^4 + 6*x^2 + 9)*x | [0, x^4 + 6*x^2 + 9] | Power Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Power QQ['x,y'] QQ[x].(x^2+3) t^2 + o | x^2 + 3 + x^2 | [x^2 + 3, 0, 1] | Power Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Power QQ['x,y'] QQ[x].(x^2+3) o - t^3 | x^2 + 3 - x^3 | [x^2 + 3, 0, 0, -1] | Power Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Power QQ['x,y'] QQ[x].(x^2+3) (t + o)*t | (x^2 + 3)*x + x^2 | [0, x^2 + 3, 1] | Power Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Power QQ['x,y'] GF5[x].gen o^2*t | x^2*x | [0, x^2] | Power Series Ring in x over Multivariate Polynomial Ring in x, y over Finite Field of size 5
+Power QQ['x,y'] GF5[x].gen t^2 + o | ERR TypeError
+Power QQ['x,y'] GF5[x].gen o - t^3 | ERR TypeError
+Power QQ['x,y'] GF5[x].gen (t + o)*t | ERR TypeError
+Power QQ['x,y'] GF5[x].gen t/(2*o) | ERR RuntimeError
+Power QQ['x,y'] ZZ[b].gen o^2*t | ERR TypeError
+Power QQ['x,y'] ZZ[b].gen t^2 + o | ERR TypeError
+Power QQ['x,y'] ZZ[b].gen o - t^3 | ERR TypeError
+Power QQ['x,y'] ZZ[b].gen (t + o)*t | ERR TypeError
+Power QQ['x,y'] ZZ[b].gen t/(2*o) | ERR TypeError
+Power QQ['x,y'] GF5(3) o^2*t | -x | [0, -1] | Power Series Ring in x over Multivariate Polynomial Ring in x, y over Finite Field of size 5
+Power QQ['x,y'] GF5(3) t^2 + o | ERR TypeError
+Power QQ['x,y'] GF5(3) o - t^3 | ERR TypeError
+Power QQ['x,y'] GF5(3) (t + o)*t | ERR TypeError
+Power QQ['x,y'] GF5(3) t/(2*o) | x | [0, 1] | Power Series Ring in x over Multivariate Polynomial Ring in x, y over Finite Field of size 5
+Power GF(7)['x'] QQ[y].gen o^2*t | ERR TypeError
+Power GF(7)['x'] QQ[y].gen t^2 + o | ERR TypeError
+Power GF(7)['x'] QQ[y].gen o - t^3 | ERR TypeError
+Power GF(7)['x'] QQ[y].gen (t + o)*t | ERR TypeError
+Power GF(7)['x'] QQ[y].gen t/(2*o) | ERR TypeError
+Power GF(7)['x'] QQ[x,y].gen0 o^2*t | ERR TypeError
+Power GF(7)['x'] QQ[x,y].gen0 t^2 + o | ERR TypeError
+Power GF(7)['x'] QQ[x,y].gen0 o - t^3 | ERR TypeError
+Power GF(7)['x'] QQ[x,y].gen0 (t + o)*t | ERR TypeError
+Power GF(7)['x'] QQ[x,y].gen0 t/(2*o) | ERR TypeError
+Power GF(7)['x'] GF7[x].gen o^2*t | x^2*x | [0, x^2] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 7
+Power GF(7)['x'] GF7[x].gen t^2 + o | x + x^2 | [x, 0, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 7
+Power GF(7)['x'] GF7[x].gen o - t^3 | x + 6*x^3 | [x, 0, 0, 6] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 7
+Power GF(7)['x'] GF7[x].gen (t + o)*t | x*x + x^2 | [0, x, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 7
+Power GF(7)['x'] GF7[x].gen t/(2*o) | 4/x*x | [0, 4/x] | Power Series Ring in x over Fraction Field of Univariate Polynomial Ring in x over Finite Field of size 7
+Power GF(7)['x'] 3/4 o^2*t | ERR TypeError
+Power GF(7)['x'] 3/4 t^2 + o | ERR TypeError
+Power GF(7)['x'] 3/4 o - t^3 | ERR TypeError
+Power GF(7)['x'] 3/4 (t + o)*t | ERR TypeError
+Power GF(7)['x'] 3/4 t/(2*o) | ERR TypeError
+Power GF(7)['x'] GF7(3) o^2*t | 2*x | [0, 2] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 7
+Power GF(7)['x'] GF7(3) t^2 + o | 3 + x^2 | [3, 0, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 7
+Power GF(7)['x'] GF7(3) o - t^3 | 3 + 6*x^3 | [3, 0, 0, 6] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 7
+Power GF(7)['x'] GF7(3) (t + o)*t | 3*x + x^2 | [0, 3, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 7
+Power GF(7)['x'] GF7(3) t/(2*o) | 6*x | [0, 6] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 7
+Power GF(7)['x'] ZZ[y].gen^2+1 o^2*t | ERR TypeError
+Power GF(7)['x'] ZZ[y].gen^2+1 t^2 + o | ERR TypeError
+Power GF(7)['x'] ZZ[y].gen^2+1 o - t^3 | ERR TypeError
+Power GF(7)['x'] ZZ[y].gen^2+1 (t + o)*t | ERR TypeError
+Power GF(7)['x'] ZZ[y].gen^2+1 t/(2*o) | ERR TypeError
+Power GF(7)['x'] QQ[x].(x^2+3) o^2*t | ERR TypeError
+Power GF(7)['x'] QQ[x].(x^2+3) t^2 + o | ERR TypeError
+Power GF(7)['x'] QQ[x].(x^2+3) o - t^3 | ERR TypeError
+Power GF(7)['x'] QQ[x].(x^2+3) (t + o)*t | ERR TypeError
+Power GF(7)['x'] QQ[x].(x^2+3) t/(2*o) | ERR TypeError
+Power GF(7)['x'] GF5[x].gen o^2*t | ERR TypeError
+Power GF(7)['x'] GF5[x].gen t^2 + o | ERR TypeError
+Power GF(7)['x'] GF5[x].gen o - t^3 | ERR TypeError
+Power GF(7)['x'] GF5[x].gen (t + o)*t | ERR TypeError
+Power GF(7)['x'] GF5[x].gen t/(2*o) | ERR TypeError
+Power GF(7)['x'] ZZ[b].gen o^2*t | ERR TypeError
+Power GF(7)['x'] ZZ[b].gen t^2 + o | ERR TypeError
+Power GF(7)['x'] ZZ[b].gen o - t^3 | ERR TypeError
+Power GF(7)['x'] ZZ[b].gen (t + o)*t | ERR TypeError
+Power GF(7)['x'] ZZ[b].gen t/(2*o) | ERR TypeError
+Power GF(7)['x'] GF5(3) o^2*t | ERR TypeError
+Power GF(7)['x'] GF5(3) t^2 + o | ERR TypeError
+Power GF(7)['x'] GF5(3) o - t^3 | ERR TypeError
+Power GF(7)['x'] GF5(3) (t + o)*t | ERR TypeError
+Power GF(7)['x'] GF5(3) t/(2*o) | ERR TypeError
+Power ZZ['x'] QQ[y].gen o^2*t | ERR TypeError
+Power ZZ['x'] QQ[y].gen t^2 + o | ERR TypeError
+Power ZZ['x'] QQ[y].gen o - t^3 | ERR TypeError
+Power ZZ['x'] QQ[y].gen (t + o)*t | ERR TypeError
+Power ZZ['x'] QQ[y].gen t/(2*o) | ERR TypeError
+Power ZZ['x'] QQ[x,y].gen0 o^2*t | ERR TypeError
+Power ZZ['x'] QQ[x,y].gen0 t^2 + o | ERR TypeError
+Power ZZ['x'] QQ[x,y].gen0 o - t^3 | ERR TypeError
+Power ZZ['x'] QQ[x,y].gen0 (t + o)*t | ERR TypeError
+Power ZZ['x'] QQ[x,y].gen0 t/(2*o) | ERR TypeError
+Power ZZ['x'] GF7[x].gen o^2*t | x^2*x | [0, x^2] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 7
+Power ZZ['x'] GF7[x].gen t^2 + o | x + x^2 | [x, 0, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 7
+Power ZZ['x'] GF7[x].gen o - t^3 | x + 6*x^3 | [x, 0, 0, 6] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 7
+Power ZZ['x'] GF7[x].gen (t + o)*t | x*x + x^2 | [0, x, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 7
+Power ZZ['x'] GF7[x].gen t/(2*o) | ERR RuntimeError
+Power ZZ['x'] 3/4 o^2*t | 9/16*x | [0, 9/16] | Power Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Power ZZ['x'] 3/4 t^2 + o | 3/4 + x^2 | [3/4, 0, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Power ZZ['x'] 3/4 o - t^3 | 3/4 - x^3 | [3/4, 0, 0, -1] | Power Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Power ZZ['x'] 3/4 (t + o)*t | 3/4*x + x^2 | [0, 3/4, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Power ZZ['x'] 3/4 t/(2*o) | 2/3*x | [0, 2/3] | Power Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Power ZZ['x'] GF7(3) o^2*t | 2*x | [0, 2] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 7
+Power ZZ['x'] GF7(3) t^2 + o | 3 + x^2 | [3, 0, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 7
+Power ZZ['x'] GF7(3) o - t^3 | 3 + 6*x^3 | [3, 0, 0, 6] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 7
+Power ZZ['x'] GF7(3) (t + o)*t | 3*x + x^2 | [0, 3, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 7
+Power ZZ['x'] GF7(3) t/(2*o) | 6*x | [0, 6] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 7
+Power ZZ['x'] ZZ[y].gen^2+1 o^2*t | ERR TypeError
+Power ZZ['x'] ZZ[y].gen^2+1 t^2 + o | ERR TypeError
+Power ZZ['x'] ZZ[y].gen^2+1 o - t^3 | ERR TypeError
+Power ZZ['x'] ZZ[y].gen^2+1 (t + o)*t | ERR TypeError
+Power ZZ['x'] ZZ[y].gen^2+1 t/(2*o) | ERR TypeError
+Power ZZ['x'] QQ[x].(x^2+3) o^2*t | (x^4 + 6*x^2 + 9)*x | [0, x^4 + 6*x^2 + 9] | Power Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Power ZZ['x'] QQ[x].(x^2+3) t^2 + o | x^2 + 3 + x^2 | [x^2 + 3, 0, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Power ZZ['x'] QQ[x].(x^2+3) o - t^3 | x^2 + 3 - x^3 | [x^2 + 3, 0, 0, -1] | Power Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Power ZZ['x'] QQ[x].(x^2+3) (t + o)*t | (x^2 + 3)*x + x^2 | [0, x^2 + 3, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Power ZZ['x'] QQ[x].(x^2+3) t/(2*o) | ERR RuntimeError
+Power ZZ['x'] GF5[x].gen o^2*t | x^2*x | [0, x^2] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power ZZ['x'] GF5[x].gen t^2 + o | x + x^2 | [x, 0, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power ZZ['x'] GF5[x].gen o - t^3 | x + 4*x^3 | [x, 0, 0, 4] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power ZZ['x'] GF5[x].gen (t + o)*t | x*x + x^2 | [0, x, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power ZZ['x'] GF5[x].gen t/(2*o) | ERR RuntimeError
+Power ZZ['x'] ZZ[b].gen o^2*t | ERR TypeError
+Power ZZ['x'] ZZ[b].gen t^2 + o | ERR TypeError
+Power ZZ['x'] ZZ[b].gen o - t^3 | ERR TypeError
+Power ZZ['x'] ZZ[b].gen (t + o)*t | ERR TypeError
+Power ZZ['x'] ZZ[b].gen t/(2*o) | ERR TypeError
+Power ZZ['x'] GF5(3) o^2*t | 4*x | [0, 4] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power ZZ['x'] GF5(3) t^2 + o | 3 + x^2 | [3, 0, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power ZZ['x'] GF5(3) o - t^3 | 3 + 4*x^3 | [3, 0, 0, 4] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power ZZ['x'] GF5(3) (t + o)*t | 3*x + x^2 | [0, 3, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Power ZZ['x'] GF5(3) t/(2*o) | x | [0, 1] | Power Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent ZZ['y'] QQ[y].gen o^2*t | y^2*x | [y^2] | Laurent Series Ring in x over Univariate Polynomial Ring in y over Rational Field
+Laurent ZZ['y'] QQ[y].gen t^2 + o | y + x^2 | [y, 0, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in y over Rational Field
+Laurent ZZ['y'] QQ[y].gen o - t^3 | y - x^3 | [y, 0, 0, -1] | Laurent Series Ring in x over Univariate Polynomial Ring in y over Rational Field
+Laurent ZZ['y'] QQ[y].gen (t + o)*t | y*x + x^2 | [y, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in y over Rational Field
+Laurent ZZ['y'] QQ[y].gen t/(2*o) | ERR RuntimeError
+Laurent ZZ['y'] QQ[x,y].gen0 o^2*t | x^2*x | [x^2] | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Laurent ZZ['y'] QQ[x,y].gen0 t^2 + o | x + x^2 | [x, 0, 1] | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Laurent ZZ['y'] QQ[x,y].gen0 o - t^3 | x - x^3 | [x, 0, 0, -1] | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Laurent ZZ['y'] QQ[x,y].gen0 (t + o)*t | x*x + x^2 | [x, 1] | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Laurent ZZ['y'] GF7[x].gen o^2*t | ERR TypeError
+Laurent ZZ['y'] GF7[x].gen t^2 + o | ERR TypeError
+Laurent ZZ['y'] GF7[x].gen o - t^3 | ERR TypeError
+Laurent ZZ['y'] GF7[x].gen (t + o)*t | ERR TypeError
+Laurent ZZ['y'] GF7[x].gen t/(2*o) | ERR TypeError
+Laurent ZZ['y'] 3/4 o^2*t | 9/16*x | [9/16] | Laurent Series Ring in x over Univariate Polynomial Ring in y over Rational Field
+Laurent ZZ['y'] 3/4 t^2 + o | 3/4 + x^2 | [3/4, 0, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in y over Rational Field
+Laurent ZZ['y'] 3/4 o - t^3 | 3/4 - x^3 | [3/4, 0, 0, -1] | Laurent Series Ring in x over Univariate Polynomial Ring in y over Rational Field
+Laurent ZZ['y'] 3/4 (t + o)*t | 3/4*x + x^2 | [3/4, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in y over Rational Field
+Laurent ZZ['y'] 3/4 t/(2*o) | 2/3*x | [2/3] | Laurent Series Ring in x over Univariate Polynomial Ring in y over Rational Field
+Laurent ZZ['y'] GF7(3) o^2*t | 2*x | [2] | Laurent Series Ring in x over Univariate Polynomial Ring in y over Finite Field of size 7
+Laurent ZZ['y'] GF7(3) t^2 + o | 3 + x^2 | [3, 0, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in y over Finite Field of size 7
+Laurent ZZ['y'] GF7(3) o - t^3 | 3 + 6*x^3 | [3, 0, 0, 6] | Laurent Series Ring in x over Univariate Polynomial Ring in y over Finite Field of size 7
+Laurent ZZ['y'] GF7(3) (t + o)*t | 3*x + x^2 | [3, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in y over Finite Field of size 7
+Laurent ZZ['y'] GF7(3) t/(2*o) | 6*x | [6] | Laurent Series Ring in x over Univariate Polynomial Ring in y over Finite Field of size 7
+Laurent ZZ['y'] ZZ[y].gen^2+1 o^2*t | (y^4 + 2*y^2 + 1)*x | [y^4 + 2*y^2 + 1] | Laurent Series Ring in x over Univariate Polynomial Ring in y over Integer Ring
+Laurent ZZ['y'] ZZ[y].gen^2+1 t^2 + o | (y^2 + 1) + x^2 | [y^2 + 1, 0, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in y over Integer Ring
+Laurent ZZ['y'] ZZ[y].gen^2+1 o - t^3 | (y^2 + 1) - x^3 | [y^2 + 1, 0, 0, -1] | Laurent Series Ring in x over Univariate Polynomial Ring in y over Integer Ring
+Laurent ZZ['y'] ZZ[y].gen^2+1 (t + o)*t | (y^2 + 1)*x + x^2 | [y^2 + 1, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in y over Integer Ring
+Laurent ZZ['y'] QQ[x].(x^2+3) o^2*t | ERR TypeError
+Laurent ZZ['y'] QQ[x].(x^2+3) t^2 + o | ERR TypeError
+Laurent ZZ['y'] QQ[x].(x^2+3) o - t^3 | ERR TypeError
+Laurent ZZ['y'] QQ[x].(x^2+3) (t + o)*t | ERR TypeError
+Laurent ZZ['y'] QQ[x].(x^2+3) t/(2*o) | ERR TypeError
+Laurent ZZ['y'] GF5[x].gen o^2*t | ERR TypeError
+Laurent ZZ['y'] GF5[x].gen t^2 + o | ERR TypeError
+Laurent ZZ['y'] GF5[x].gen o - t^3 | ERR TypeError
+Laurent ZZ['y'] GF5[x].gen (t + o)*t | ERR TypeError
+Laurent ZZ['y'] GF5[x].gen t/(2*o) | ERR TypeError
+Laurent ZZ['y'] ZZ[b].gen o^2*t | ERR TypeError
+Laurent ZZ['y'] ZZ[b].gen t^2 + o | ERR TypeError
+Laurent ZZ['y'] ZZ[b].gen o - t^3 | ERR TypeError
+Laurent ZZ['y'] ZZ[b].gen (t + o)*t | ERR TypeError
+Laurent ZZ['y'] ZZ[b].gen t/(2*o) | ERR TypeError
+Laurent ZZ['y'] GF5(3) o^2*t | 4*x | [4] | Laurent Series Ring in x over Univariate Polynomial Ring in y over Finite Field of size 5
+Laurent ZZ['y'] GF5(3) t^2 + o | 3 + x^2 | [3, 0, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in y over Finite Field of size 5
+Laurent ZZ['y'] GF5(3) o - t^3 | 3 + 4*x^3 | [3, 0, 0, 4] | Laurent Series Ring in x over Univariate Polynomial Ring in y over Finite Field of size 5
+Laurent ZZ['y'] GF5(3) (t + o)*t | 3*x + x^2 | [3, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in y over Finite Field of size 5
+Laurent ZZ['y'] GF5(3) t/(2*o) | x | [1] | Laurent Series Ring in x over Univariate Polynomial Ring in y over Finite Field of size 5
+Laurent QQ['x,y'] QQ[y].gen o^2*t | y^2*x | [y^2] | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Laurent QQ['x,y'] QQ[y].gen t^2 + o | y + x^2 | [y, 0, 1] | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Laurent QQ['x,y'] QQ[y].gen o - t^3 | y - x^3 | [y, 0, 0, -1] | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Laurent QQ['x,y'] QQ[y].gen (t + o)*t | y*x + x^2 | [y, 1] | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Laurent QQ['x,y'] QQ[x,y].gen0 o^2*t | x^2*x | [x^2] | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Laurent QQ['x,y'] QQ[x,y].gen0 t^2 + o | x + x^2 | [x, 0, 1] | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Laurent QQ['x,y'] QQ[x,y].gen0 o - t^3 | x - x^3 | [x, 0, 0, -1] | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Laurent QQ['x,y'] QQ[x,y].gen0 (t + o)*t | x*x + x^2 | [x, 1] | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Laurent QQ['x,y'] GF7[x].gen o^2*t | x^2*x | [x^2] | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Finite Field of size 7
+Laurent QQ['x,y'] GF7[x].gen t^2 + o | ERR TypeError
+Laurent QQ['x,y'] GF7[x].gen o - t^3 | ERR TypeError
+Laurent QQ['x,y'] GF7[x].gen (t + o)*t | ERR TypeError
+Laurent QQ['x,y'] GF7[x].gen t/(2*o) | ERR RuntimeError
+Laurent QQ['x,y'] 3/4 o^2*t | 9/16*x | [9/16] | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Laurent QQ['x,y'] 3/4 t^2 + o | 3/4 + x^2 | [3/4, 0, 1] | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Laurent QQ['x,y'] 3/4 o - t^3 | 3/4 - x^3 | [3/4, 0, 0, -1] | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Laurent QQ['x,y'] 3/4 (t + o)*t | 3/4*x + x^2 | [3/4, 1] | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Laurent QQ['x,y'] 3/4 t/(2*o) | 2/3*x | [2/3] | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Laurent QQ['x,y'] GF7(3) o^2*t | 2*x | [2] | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Finite Field of size 7
+Laurent QQ['x,y'] GF7(3) t^2 + o | ERR TypeError
+Laurent QQ['x,y'] GF7(3) o - t^3 | ERR TypeError
+Laurent QQ['x,y'] GF7(3) (t + o)*t | ERR TypeError
+Laurent QQ['x,y'] GF7(3) t/(2*o) | -x | [-1] | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Finite Field of size 7
+Laurent QQ['x,y'] ZZ[y].gen^2+1 o^2*t | (y^4 + 2*y^2 + 1)*x | [y^4 + 2*y^2 + 1] | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Laurent QQ['x,y'] ZZ[y].gen^2+1 t^2 + o | (y^2 + 1) + x^2 | [y^2 + 1, 0, 1] | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Laurent QQ['x,y'] ZZ[y].gen^2+1 o - t^3 | (y^2 + 1) - x^3 | [y^2 + 1, 0, 0, -1] | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Laurent QQ['x,y'] ZZ[y].gen^2+1 (t + o)*t | (y^2 + 1)*x + x^2 | [y^2 + 1, 1] | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Laurent QQ['x,y'] QQ[x].(x^2+3) o^2*t | (x^4 + 6*x^2 + 9)*x | [x^4 + 6*x^2 + 9] | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Laurent QQ['x,y'] QQ[x].(x^2+3) t^2 + o | (x^2 + 3) + x^2 | [x^2 + 3, 0, 1] | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Laurent QQ['x,y'] QQ[x].(x^2+3) o - t^3 | (x^2 + 3) - x^3 | [x^2 + 3, 0, 0, -1] | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Laurent QQ['x,y'] QQ[x].(x^2+3) (t + o)*t | (x^2 + 3)*x + x^2 | [x^2 + 3, 1] | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+Laurent QQ['x,y'] GF5[x].gen o^2*t | x^2*x | [x^2] | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Finite Field of size 5
+Laurent QQ['x,y'] GF5[x].gen t^2 + o | ERR TypeError
+Laurent QQ['x,y'] GF5[x].gen o - t^3 | ERR TypeError
+Laurent QQ['x,y'] GF5[x].gen (t + o)*t | ERR TypeError
+Laurent QQ['x,y'] GF5[x].gen t/(2*o) | ERR RuntimeError
+Laurent QQ['x,y'] ZZ[b].gen o^2*t | ERR TypeError
+Laurent QQ['x,y'] ZZ[b].gen t^2 + o | ERR TypeError
+Laurent QQ['x,y'] ZZ[b].gen o - t^3 | ERR TypeError
+Laurent QQ['x,y'] ZZ[b].gen (t + o)*t | ERR TypeError
+Laurent QQ['x,y'] ZZ[b].gen t/(2*o) | ERR TypeError
+Laurent QQ['x,y'] GF5(3) o^2*t | -x | [-1] | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Finite Field of size 5
+Laurent QQ['x,y'] GF5(3) t^2 + o | ERR TypeError
+Laurent QQ['x,y'] GF5(3) o - t^3 | ERR TypeError
+Laurent QQ['x,y'] GF5(3) (t + o)*t | ERR TypeError
+Laurent QQ['x,y'] GF5(3) t/(2*o) | x | [1] | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Finite Field of size 5
+Laurent GF(7)['x'] QQ[y].gen o^2*t | ERR TypeError
+Laurent GF(7)['x'] QQ[y].gen t^2 + o | ERR TypeError
+Laurent GF(7)['x'] QQ[y].gen o - t^3 | ERR TypeError
+Laurent GF(7)['x'] QQ[y].gen (t + o)*t | ERR TypeError
+Laurent GF(7)['x'] QQ[y].gen t/(2*o) | ERR TypeError
+Laurent GF(7)['x'] QQ[x,y].gen0 o^2*t | ERR TypeError
+Laurent GF(7)['x'] QQ[x,y].gen0 t^2 + o | ERR TypeError
+Laurent GF(7)['x'] QQ[x,y].gen0 o - t^3 | ERR TypeError
+Laurent GF(7)['x'] QQ[x,y].gen0 (t + o)*t | ERR TypeError
+Laurent GF(7)['x'] QQ[x,y].gen0 t/(2*o) | ERR TypeError
+Laurent GF(7)['x'] GF7[x].gen o^2*t | x^2*x | [x^2] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 7
+Laurent GF(7)['x'] GF7[x].gen t^2 + o | x + x^2 | [x, 0, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 7
+Laurent GF(7)['x'] GF7[x].gen o - t^3 | x + 6*x^3 | [x, 0, 0, 6] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 7
+Laurent GF(7)['x'] GF7[x].gen (t + o)*t | x*x + x^2 | [x, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 7
+Laurent GF(7)['x'] GF7[x].gen t/(2*o) | 4/x*x | [4/x] | Laurent Series Ring in x over Fraction Field of Univariate Polynomial Ring in x over Finite Field of size 7
+Laurent GF(7)['x'] 3/4 o^2*t | ERR TypeError
+Laurent GF(7)['x'] 3/4 t^2 + o | ERR TypeError
+Laurent GF(7)['x'] 3/4 o - t^3 | ERR TypeError
+Laurent GF(7)['x'] 3/4 (t + o)*t | ERR TypeError
+Laurent GF(7)['x'] 3/4 t/(2*o) | ERR TypeError
+Laurent GF(7)['x'] GF7(3) o^2*t | 2*x | [2] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 7
+Laurent GF(7)['x'] GF7(3) t^2 + o | 3 + x^2 | [3, 0, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 7
+Laurent GF(7)['x'] GF7(3) o - t^3 | 3 + 6*x^3 | [3, 0, 0, 6] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 7
+Laurent GF(7)['x'] GF7(3) (t + o)*t | 3*x + x^2 | [3, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 7
+Laurent GF(7)['x'] GF7(3) t/(2*o) | 6*x | [6] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 7
+Laurent GF(7)['x'] ZZ[y].gen^2+1 o^2*t | ERR TypeError
+Laurent GF(7)['x'] ZZ[y].gen^2+1 t^2 + o | ERR TypeError
+Laurent GF(7)['x'] ZZ[y].gen^2+1 o - t^3 | ERR TypeError
+Laurent GF(7)['x'] ZZ[y].gen^2+1 (t + o)*t | ERR TypeError
+Laurent GF(7)['x'] ZZ[y].gen^2+1 t/(2*o) | ERR TypeError
+Laurent GF(7)['x'] QQ[x].(x^2+3) o^2*t | ERR TypeError
+Laurent GF(7)['x'] QQ[x].(x^2+3) t^2 + o | ERR TypeError
+Laurent GF(7)['x'] QQ[x].(x^2+3) o - t^3 | ERR TypeError
+Laurent GF(7)['x'] QQ[x].(x^2+3) (t + o)*t | ERR TypeError
+Laurent GF(7)['x'] QQ[x].(x^2+3) t/(2*o) | ERR TypeError
+Laurent GF(7)['x'] GF5[x].gen o^2*t | ERR TypeError
+Laurent GF(7)['x'] GF5[x].gen t^2 + o | ERR TypeError
+Laurent GF(7)['x'] GF5[x].gen o - t^3 | ERR TypeError
+Laurent GF(7)['x'] GF5[x].gen (t + o)*t | ERR TypeError
+Laurent GF(7)['x'] GF5[x].gen t/(2*o) | ERR TypeError
+Laurent GF(7)['x'] ZZ[b].gen o^2*t | ERR TypeError
+Laurent GF(7)['x'] ZZ[b].gen t^2 + o | ERR TypeError
+Laurent GF(7)['x'] ZZ[b].gen o - t^3 | ERR TypeError
+Laurent GF(7)['x'] ZZ[b].gen (t + o)*t | ERR TypeError
+Laurent GF(7)['x'] ZZ[b].gen t/(2*o) | ERR TypeError
+Laurent GF(7)['x'] GF5(3) o^2*t | ERR TypeError
+Laurent GF(7)['x'] GF5(3) t^2 + o | ERR TypeError
+Laurent GF(7)['x'] GF5(3) o - t^3 | ERR TypeError
+Laurent GF(7)['x'] GF5(3) (t + o)*t | ERR TypeError
+Laurent GF(7)['x'] GF5(3) t/(2*o) | ERR TypeError
+Laurent ZZ['x'] QQ[y].gen o^2*t | ERR TypeError
+Laurent ZZ['x'] QQ[y].gen t^2 + o | ERR TypeError
+Laurent ZZ['x'] QQ[y].gen o - t^3 | ERR TypeError
+Laurent ZZ['x'] QQ[y].gen (t + o)*t | ERR TypeError
+Laurent ZZ['x'] QQ[y].gen t/(2*o) | ERR TypeError
+Laurent ZZ['x'] QQ[x,y].gen0 o^2*t | ERR TypeError
+Laurent ZZ['x'] QQ[x,y].gen0 t^2 + o | ERR TypeError
+Laurent ZZ['x'] QQ[x,y].gen0 o - t^3 | ERR TypeError
+Laurent ZZ['x'] QQ[x,y].gen0 (t + o)*t | ERR TypeError
+Laurent ZZ['x'] QQ[x,y].gen0 t/(2*o) | ERR TypeError
+Laurent ZZ['x'] GF7[x].gen o^2*t | x^2*x | [x^2] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 7
+Laurent ZZ['x'] GF7[x].gen t^2 + o | x + x^2 | [x, 0, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 7
+Laurent ZZ['x'] GF7[x].gen o - t^3 | x + 6*x^3 | [x, 0, 0, 6] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 7
+Laurent ZZ['x'] GF7[x].gen (t + o)*t | x*x + x^2 | [x, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 7
+Laurent ZZ['x'] GF7[x].gen t/(2*o) | ERR RuntimeError
+Laurent ZZ['x'] 3/4 o^2*t | 9/16*x | [9/16] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Laurent ZZ['x'] 3/4 t^2 + o | 3/4 + x^2 | [3/4, 0, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Laurent ZZ['x'] 3/4 o - t^3 | 3/4 - x^3 | [3/4, 0, 0, -1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Laurent ZZ['x'] 3/4 (t + o)*t | 3/4*x + x^2 | [3/4, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Laurent ZZ['x'] 3/4 t/(2*o) | 2/3*x | [2/3] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Laurent ZZ['x'] GF7(3) o^2*t | 2*x | [2] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 7
+Laurent ZZ['x'] GF7(3) t^2 + o | 3 + x^2 | [3, 0, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 7
+Laurent ZZ['x'] GF7(3) o - t^3 | 3 + 6*x^3 | [3, 0, 0, 6] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 7
+Laurent ZZ['x'] GF7(3) (t + o)*t | 3*x + x^2 | [3, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 7
+Laurent ZZ['x'] GF7(3) t/(2*o) | 6*x | [6] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 7
+Laurent ZZ['x'] ZZ[y].gen^2+1 o^2*t | ERR TypeError
+Laurent ZZ['x'] ZZ[y].gen^2+1 t^2 + o | ERR TypeError
+Laurent ZZ['x'] ZZ[y].gen^2+1 o - t^3 | ERR TypeError
+Laurent ZZ['x'] ZZ[y].gen^2+1 (t + o)*t | ERR TypeError
+Laurent ZZ['x'] ZZ[y].gen^2+1 t/(2*o) | ERR TypeError
+Laurent ZZ['x'] QQ[x].(x^2+3) o^2*t | (x^4 + 6*x^2 + 9)*x | [x^4 + 6*x^2 + 9] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Laurent ZZ['x'] QQ[x].(x^2+3) t^2 + o | (x^2 + 3) + x^2 | [x^2 + 3, 0, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Laurent ZZ['x'] QQ[x].(x^2+3) o - t^3 | (x^2 + 3) - x^3 | [x^2 + 3, 0, 0, -1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Laurent ZZ['x'] QQ[x].(x^2+3) (t + o)*t | (x^2 + 3)*x + x^2 | [x^2 + 3, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Rational Field
+Laurent ZZ['x'] QQ[x].(x^2+3) t/(2*o) | ERR RuntimeError
+Laurent ZZ['x'] GF5[x].gen o^2*t | x^2*x | [x^2] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent ZZ['x'] GF5[x].gen t^2 + o | x + x^2 | [x, 0, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent ZZ['x'] GF5[x].gen o - t^3 | x + 4*x^3 | [x, 0, 0, 4] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent ZZ['x'] GF5[x].gen (t + o)*t | x*x + x^2 | [x, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent ZZ['x'] GF5[x].gen t/(2*o) | ERR RuntimeError
+Laurent ZZ['x'] ZZ[b].gen o^2*t | ERR TypeError
+Laurent ZZ['x'] ZZ[b].gen t^2 + o | ERR TypeError
+Laurent ZZ['x'] ZZ[b].gen o - t^3 | ERR TypeError
+Laurent ZZ['x'] ZZ[b].gen (t + o)*t | ERR TypeError
+Laurent ZZ['x'] ZZ[b].gen t/(2*o) | ERR TypeError
+Laurent ZZ['x'] GF5(3) o^2*t | 4*x | [4] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent ZZ['x'] GF5(3) t^2 + o | 3 + x^2 | [3, 0, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent ZZ['x'] GF5(3) o - t^3 | 3 + 4*x^3 | [3, 0, 0, 4] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent ZZ['x'] GF5(3) (t + o)*t | 3*x + x^2 | [3, 1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
+Laurent ZZ['x'] GF5(3) t/(2*o) | x | [1] | Laurent Series Ring in x over Univariate Polynomial Ring in x over Finite Field of size 5
