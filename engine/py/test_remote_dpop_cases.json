@@ -1,0 +1,808 @@
+{
+ "generator": "gen_remote_dpop_cases.mjs",
+ "node": "v24.21.0",
+ "now_ms": 1793977200000,
+ "token": "Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+ "jkt": "sHmvklw-R5fZJpKR2SjwOn1IyEUONTcnfSCR4eWyGDY",
+ "nonce": "f3CyyAZt2InPnHddgGExsA",
+ "cases": [
+  {
+   "name": "L1 a good g.bind proof",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJqdGktMDAwMC1FSEhXcUpiMmNDRDJSYVpDIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOjE3OTM5NzcyMDAsImF0aCI6IkFZdXVHZU04UjNGeUp4X1didFBrVXYwVjk1SlpaeG8tbUpLMFVDTzJoZjAiLCJub25jZSI6ImYzQ3l5QVp0MkluUG5IZGRnR0V4c0EifQ.B_QWkaqyhabBnzNgp1rGEK5207m84wrfMdJS1XJtIH0wKBB3QsB2mTWDTyvRRqBdv4OjVgt7UoUWBuWfA8ow_w",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": null
+  },
+  {
+   "name": "L1 a good g.events proof (GET)",
+   "method": "GET",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings/b1/runs/r1/events",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJqdGktMDAwMS0zMEFBUlNxSHhxRy12YjdTIiwiaHRtIjoiR0VUIiwiaHR1IjoiaHR0cHM6Ly9sb2NhbC5zYWdlYnJ1c2guaW52YWxpZC9hcGkvY29tcHV0ZS92MS9iaW5kaW5ncy9iMS9ydW5zL3IxL2V2ZW50cyIsImlhdCI6MTc5Mzk3NzIwMCwiYXRoIjoiQVl1dUdlTThSM0Z5SnhfV2J0UGtVdjBWOTVKWlp4by1tSkswVUNPMmhmMCIsIm5vbmNlIjoiZjNDeXlBWnQySW5QbkhkZGdHRXhzQSJ9.SNMeWSK4RjlTPkOmylkyo6LqqbXZHotXvj2XSsiTgkom5fD95apAjyjgxpxSockAKrN0qGnad8w_lBpt0T3aVA",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": null
+  },
+  {
+   "name": "L2 another token",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP K_jdH-mtrfWIJba2UNVWNQ1RCXWM6t9HO1qMNeqPBhI",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJqdGktMDAwMi0weERpMVVIY2dReFJYSGppIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOjE3OTM5NzcyMDAsImF0aCI6IkFZdXVHZU04UjNGeUp4X1didFBrVXYwVjk1SlpaeG8tbUpLMFVDTzJoZjAiLCJub25jZSI6ImYzQ3l5QVp0MkluUG5IZGRnR0V4c0EifQ.xgEf-SL_GqatM_Q4CUapIZcs8Oow11WFIe7l1_Kdcle8LtZrWvoeU_H9ViCwYsTJ4B7Fw5f9SZi4jLpR8kyUGg",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_token",
+    "token"
+   ]
+  },
+  {
+   "name": "L2 Bearer, not DPoP",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "Bearer Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJqdGktMDAwMy0zMVBBOWJ3a2s5bkJYTHhkIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOjE3OTM5NzcyMDAsImF0aCI6IkFZdXVHZU04UjNGeUp4X1didFBrVXYwVjk1SlpaeG8tbUpLMFVDTzJoZjAiLCJub25jZSI6ImYzQ3l5QVp0MkluUG5IZGRnR0V4c0EifQ.MojuZslQyHTSPGMKRGjYDxaX8CfsWxpz-3dyRsv1BRRCZMhyCl90cQ18rDrGt7s4-qriSR5GKoAirLG6HRKUIw",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_token",
+    "token"
+   ]
+  },
+  {
+   "name": "L3a typ missing",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJhbGciOiJFUzI1NiIsImp3ayI6eyJrdHkiOiJFQyIsImNydiI6IlAtMjU2IiwieCI6ImN6NXVhYmVCcE9IUlZ1d1N0YkVBdVB6OU10NEVOUmJ0SmlYOW10cV9sc28iLCJ5IjoiMnh1WmRESzY3OU9XUEZqUlRMWWlPOUR1V2xCc3FQV0dERzI1d0F4UXQtNCJ9fQ.eyJqdGkiOiJqdGktMDAwNC00eVoxam9BUnZvTmxGV2p6IiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOjE3OTM5NzcyMDAsImF0aCI6IkFZdXVHZU04UjNGeUp4X1didFBrVXYwVjk1SlpaeG8tbUpLMFVDTzJoZjAiLCJub25jZSI6ImYzQ3l5QVp0MkluUG5IZGRnR0V4c0EifQ.pwD3tddQ_mEiww2Zogipfs3SDQPeWeQTq2LBvD1FvLj1af_3-uK6bEAbHpyvb64XWNxk7xmrLcx7uTO2ODvZVA",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "typ-missing"
+   ]
+  },
+  {
+   "name": "L3b typ jwt",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJqd3QiLCJhbGciOiJFUzI1NiIsImp3ayI6eyJrdHkiOiJFQyIsImNydiI6IlAtMjU2IiwieCI6ImN6NXVhYmVCcE9IUlZ1d1N0YkVBdVB6OU10NEVOUmJ0SmlYOW10cV9sc28iLCJ5IjoiMnh1WmRESzY3OU9XUEZqUlRMWWlPOUR1V2xCc3FQV0dERzI1d0F4UXQtNCJ9fQ.eyJqdGkiOiJqdGktMDAwNS1WcllSa1hhRk1EMmJEcTJjIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOjE3OTM5NzcyMDAsImF0aCI6IkFZdXVHZU04UjNGeUp4X1didFBrVXYwVjk1SlpaeG8tbUpLMFVDTzJoZjAiLCJub25jZSI6ImYzQ3l5QVp0MkluUG5IZGRnR0V4c0EifQ.iaxAd358jWziMNPw2zMvC0xtp4_9SLxN5D_lkClitmyvXB5jyAACr0GkWuvNHcxdZurcrBWneExIeb19CMWl_A",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "typ"
+   ]
+  },
+  {
+   "name": "L3c alg none",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6Im5vbmUiLCJqd2siOnsia3R5IjoiRUMiLCJjcnYiOiJQLTI1NiIsIngiOiJjejV1YWJlQnBPSFJWdXdTdGJFQXVQejlNdDRFTlJidEppWDltdHFfbHNvIiwieSI6IjJ4dVpkREs2NzlPV1BGalJUTFlpTzlEdVdsQnNxUFdHREcyNXdBeFF0LTQifX0.eyJqdGkiOiJqdGktMDAwNi1CVGJCbUIwSnhNX1RaQnNNIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOjE3OTM5NzcyMDAsImF0aCI6IkFZdXVHZU04UjNGeUp4X1didFBrVXYwVjk1SlpaeG8tbUpLMFVDTzJoZjAiLCJub25jZSI6ImYzQ3l5QVp0MkluUG5IZGRnR0V4c0EifQ.H7ei7eOUArbxJO4RtU_aGm7KUxySzRaP3DG3661wvLAbgRPj5oVkWI8bH5FvDPfqY3LU7SNtV0XvnXHf6xSMCg",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "alg"
+   ]
+  },
+  {
+   "name": "L3c alg RS256",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IlJTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJqdGktMDAwNy1WVldVMWZuU2FPOXZrOFpKIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOjE3OTM5NzcyMDAsImF0aCI6IkFZdXVHZU04UjNGeUp4X1didFBrVXYwVjk1SlpaeG8tbUpLMFVDTzJoZjAiLCJub25jZSI6ImYzQ3l5QVp0MkluUG5IZGRnR0V4c0EifQ.CycNK6Ry6b1nRtQvPft5sF3spS6IQd1e8d6S2yk-PWbU_ZDAIVjb1Z28gdO-vC27lCzkSumBEQrujYMGR3zzsA",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "alg"
+   ]
+  },
+  {
+   "name": "L3d no jwk",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2In0.eyJqdGkiOiJqdGktMDAwOC03X2JwaTRQcTZnUU9tQm55IiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOjE3OTM5NzcyMDAsImF0aCI6IkFZdXVHZU04UjNGeUp4X1didFBrVXYwVjk1SlpaeG8tbUpLMFVDTzJoZjAiLCJub25jZSI6ImYzQ3l5QVp0MkluUG5IZGRnR0V4c0EifQ.wzYmZBUFeoPiXTfGpJBVzT5qbOGFs8-erFBrT_0ZPNgXnfB1vEpeO84P2JYhI9BNjifDvcLxwzjbHtGgzOaO4g",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "jwk-members"
+   ]
+  },
+  {
+   "name": "L3e a private d in the jwk",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00IiwiZCI6ImNQYkxpR1NxM0RuaHhyZjR5YVRCY09FZXVIc3pONkh1dnFuS1ZrZTFJb1kifX0.eyJqdGkiOiJqdGktMDAwOS15cFVXY0ZlV3BvMC1TYTRYIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOjE3OTM5NzcyMDAsImF0aCI6IkFZdXVHZU04UjNGeUp4X1didFBrVXYwVjk1SlpaeG8tbUpLMFVDTzJoZjAiLCJub25jZSI6ImYzQ3l5QVp0MkluUG5IZGRnR0V4c0EifQ.Ivx43sM6As38MGMqfkcTUY1zxcdzl35Hmr-NTgI2ffWk5OpRGBAl5MBvI-JOlaxvnL0u6AkJgiKtfn8aClaZsw",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "jwk-private"
+   ]
+  },
+  {
+   "name": "L3f an extra kid",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00Iiwia2lkIjoiazEifX0.eyJqdGkiOiJqdGktMDAxMC1EYUpnUUlKZ0tUcWloNU04IiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOjE3OTM5NzcyMDAsImF0aCI6IkFZdXVHZU04UjNGeUp4X1didFBrVXYwVjk1SlpaeG8tbUpLMFVDTzJoZjAiLCJub25jZSI6ImYzQ3l5QVp0MkluUG5IZGRnR0V4c0EifQ.B8coXGDeSofcVoJbAGMeMmbWXE8yz4_UKXY7QvrbI4MjIejtwZgDHFsmcPf-USNsRUnV2_0XYtbHgaw6ZVHhDA",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "jwk-extra"
+   ]
+  },
+  {
+   "name": "L3g no y",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyJ9fQ.eyJqdGkiOiJqdGktMDAxMS1qTTRaZlJDZ19HNGx2cktlIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOjE3OTM5NzcyMDAsImF0aCI6IkFZdXVHZU04UjNGeUp4X1didFBrVXYwVjk1SlpaeG8tbUpLMFVDTzJoZjAiLCJub25jZSI6ImYzQ3l5QVp0MkluUG5IZGRnR0V4c0EifQ.dBCZbRJTW4CIK6EcuNwmuIC8yA_pjU0-CVrvCq5x6naSw_1RXC16VnSa1S2hDKw3Om3IL2leJZS1ZeM8G7uMyA",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "jwk-members"
+   ]
+  },
+  {
+   "name": "L3h kty RSA",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IlJTQSIsImNydiI6IlAtMjU2IiwieCI6ImN6NXVhYmVCcE9IUlZ1d1N0YkVBdVB6OU10NEVOUmJ0SmlYOW10cV9sc28iLCJ5IjoiMnh1WmRESzY3OU9XUEZqUlRMWWlPOUR1V2xCc3FQV0dERzI1d0F4UXQtNCJ9fQ.eyJqdGkiOiJqdGktMDAxMi1Qdi1ZOFE4Z09JN3Q4V0laIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOjE3OTM5NzcyMDAsImF0aCI6IkFZdXVHZU04UjNGeUp4X1didFBrVXYwVjk1SlpaeG8tbUpLMFVDTzJoZjAiLCJub25jZSI6ImYzQ3l5QVp0MkluUG5IZGRnR0V4c0EifQ.laaiGRLhCKdtE1ZvOwRE_o2pBjH1NxiluLBR-yi0BrdgPc6xRVoaTT56II0BRUa6q_xMt7jRMT18ELBE2qtRNg",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "kty"
+   ]
+  },
+  {
+   "name": "L3i crv P-384",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0zODQiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJqdGktMDAxMy1TZGZsOWJaZTktcjE3VHVUIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOjE3OTM5NzcyMDAsImF0aCI6IkFZdXVHZU04UjNGeUp4X1didFBrVXYwVjk1SlpaeG8tbUpLMFVDTzJoZjAiLCJub25jZSI6ImYzQ3l5QVp0MkluUG5IZGRnR0V4c0EifQ.xyqw3hM1QkTUjecATHWM6_utGUEwhrm4C_H_B4Sa7e0Aqs_b4_L2r91H4ztntMVtSWyZ3Mv6DynYaxaJin2zvw",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "crv"
+   ]
+  },
+  {
+   "name": "L3j a point off the curve",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzcyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJqdGktMDAxNC05ME1ueWxOTS15bHpTMnZkIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOjE3OTM5NzcyMDAsImF0aCI6IkFZdXVHZU04UjNGeUp4X1didFBrVXYwVjk1SlpaeG8tbUpLMFVDTzJoZjAiLCJub25jZSI6ImYzQ3l5QVp0MkluUG5IZGRnR0V4c0EifQ.s4iscjzuQqeom-pdDcw2yVdfLChA_eVFo3EsrcgJJqklYKok8O37oyW9y1aGuOVnzWNbqdjAHiK4qurYNQCAWg",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "curve"
+   ]
+  },
+  {
+   "name": "L3k a 31-byte x",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiZUY1d0p0YmllVmM2ZHRfcEdjelpvZ3p1S0RNd1FrbzZZSFBZRkROcEF3IiwieSI6IjJ4dVpkREs2NzlPV1BGalJUTFlpTzlEdVdsQnNxUFdHREcyNXdBeFF0LTQifX0.eyJqdGkiOiJqdGktMDAxNS02cjJyQkxrVFE5WU4zRktrIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOjE3OTM5NzcyMDAsImF0aCI6IkFZdXVHZU04UjNGeUp4X1didFBrVXYwVjk1SlpaeG8tbUpLMFVDTzJoZjAiLCJub25jZSI6ImYzQ3l5QVp0MkluUG5IZGRnR0V4c0EifQ.pRoGZHSxgkVGyzLo-7_sycGC3n7Wvi5pHJqp8-5eLnD-vlvTyurSLReeB0OIxGY6FYocz16JVb7lo59mp5zhsA",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "coords"
+   ]
+  },
+  {
+   "name": "L3l another key (its thumbprint isn't the socket's)",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiXzBING95a0gydXgtZmxfSzZYLXg2WllHZXlWREtrWTRrQUhCSGI1eUpiSSIsInkiOiJYTGFTcWZUMHpYNDh5YWdRRHRwQUpYTlRKSGQzRHA2dkVvcU1tZUVqTTA0In19.eyJqdGkiOiJqdGktMDAxNi0wTzRXMzc4V0xyTGhJaWdRIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOjE3OTM5NzcyMDAsImF0aCI6IkFZdXVHZU04UjNGeUp4X1didFBrVXYwVjk1SlpaeG8tbUpLMFVDTzJoZjAiLCJub25jZSI6ImYzQ3l5QVp0MkluUG5IZGRnR0V4c0EifQ.AfGSoAUb1Y8LubssKhkGwMvzsSb3hbZY-z4IUF6Q1yf248z5Jy7zbpF1bCFcoyhMyN1d81HDNmgRzW2s6FTQgQ",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "thumbprint"
+   ]
+  },
+  {
+   "name": "L3m the right header, signed by another key",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJqdGktMDAxNy1CYUpYT1p6U3haSENVREFwIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOjE3OTM5NzcyMDAsImF0aCI6IkFZdXVHZU04UjNGeUp4X1didFBrVXYwVjk1SlpaeG8tbUpLMFVDTzJoZjAiLCJub25jZSI6ImYzQ3l5QVp0MkluUG5IZGRnR0V4c0EifQ.cpv1FU-lSV9goxm21lRzDXzhf8cD78kOt4Ikt4VCQ4cubXci_nmc8pTeDJfrUaGWJChkJaBT-3H97mnXbC8U1g",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "signature"
+   ]
+  },
+  {
+   "name": "L4a a flipped signature bit",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJqdGktMDAxOC11NkQwVFZKNjllVkY4SktDIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOjE3OTM5NzcyMDAsImF0aCI6IkFZdXVHZU04UjNGeUp4X1didFBrVXYwVjk1SlpaeG8tbUpLMFVDTzJoZjAiLCJub25jZSI6ImYzQ3l5QVp0MkluUG5IZGRnR0V4c0EifQ.tuM0UNtLuFE8g7vvY55OiQhV7ntVNqL_Q3ofQvcuej_0G1aBvKyrxtiUPM3dz2FoVi6vZSvZZQfeyTLlyU4ASw",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "signature"
+   ]
+  },
+  {
+   "name": "L4b a 63-byte signature",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJqdGktMDAxOC11NkQwVFZKNjllVkY4SktDIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOjE3OTM5NzcyMDAsImF0aCI6IkFZdXVHZU04UjNGeUp4X1didFBrVXYwVjk1SlpaeG8tbUpLMFVDTzJoZjAiLCJub25jZSI6ImYzQ3l5QVp0MkluUG5IZGRnR0V4c0EifQ.f9WEWsHm5BVsW1c5qrC0JrERGi8mV2pWet7FZUBg5ttIAIIsZp58u4jXK9lCtCHwreQTKK8O8_R_NBrcDQhF",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "sig-length"
+   ]
+  },
+  {
+   "name": "L4c two segments",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJqdGktMDAxOC11NkQwVFZKNjllVkY4SktDIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOjE3OTM5NzcyMDAsImF0aCI6IkFZdXVHZU04UjNGeUp4X1didFBrVXYwVjk1SlpaeG8tbUpLMFVDTzJoZjAiLCJub25jZSI6ImYzQ3l5QVp0MkluUG5IZGRnR0V4c0EifQ",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "parse"
+   ]
+  },
+  {
+   "name": "L4c four segments",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJqdGktMDAxOC11NkQwVFZKNjllVkY4SktDIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOjE3OTM5NzcyMDAsImF0aCI6IkFZdXVHZU04UjNGeUp4X1didFBrVXYwVjk1SlpaeG8tbUpLMFVDTzJoZjAiLCJub25jZSI6ImYzQ3l5QVp0MkluUG5IZGRnR0V4c0EifQ.tuM0UNtKuFE8g7vvY55OiQhV7ntVNqL_Q3ofQvcuej_0G1aBvKyrxtiUPM3dz2FoVi6vZSvZZQfeyTLlyU4ASw.tuM0UNtKuFE8g7vvY55OiQhV7ntVNqL_Q3ofQvcuej_0G1aBvKyrxtiUPM3dz2FoVi6vZSvZZQfeyTLlyU4ASw",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "parse"
+   ]
+  },
+  {
+   "name": "L4c not base64url",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJqdGktMDAxOC11NkQwVFZKNjllVkY4SktDIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOjE3OTM5NzcyMDAsImF0aCI6IkFZdXVHZU04UjNGeUp4X1didFBrVXYwVjk1SlpaeG8tbUpLMFVDTzJoZjAiLCJub25jZSI6ImYzQ3l5QVp0MkluUG5IZGRnR0V4c0EifQ+.tuM0UNtKuFE8g7vvY55OiQhV7ntVNqL_Q3ofQvcuej_0G1aBvKyrxtiUPM3dz2FoVi6vZSvZZQfeyTLlyU4ASw",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "parse"
+   ]
+  },
+  {
+   "name": "L4c a header that isn't JSON",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "e25vcGU.eyJqdGkiOiJqdGktMDAxOC11NkQwVFZKNjllVkY4SktDIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOjE3OTM5NzcyMDAsImF0aCI6IkFZdXVHZU04UjNGeUp4X1didFBrVXYwVjk1SlpaeG8tbUpLMFVDTzJoZjAiLCJub25jZSI6ImYzQ3l5QVp0MkluUG5IZGRnR0V4c0EifQ.tuM0UNtKuFE8g7vvY55OiQhV7ntVNqL_Q3ofQvcuej_0G1aBvKyrxtiUPM3dz2FoVi6vZSvZZQfeyTLlyU4ASw",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "parse"
+   ]
+  },
+  {
+   "name": "L4c claims that are an array",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.WzEsMl0.tuM0UNtKuFE8g7vvY55OiQhV7ntVNqL_Q3ofQvcuej_0G1aBvKyrxtiUPM3dz2FoVi6vZSvZZQfeyTLlyU4ASw",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "parse"
+   ]
+  },
+  {
+   "name": "L4d a proof over 4096 bytes",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "proof-size"
+   ]
+  },
+  {
+   "name": "L4e claims over 1024 bytes",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJqdGktMDAxOS1pb3FZTWxfRXJtVlVZc0dGIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOjE3OTM5NzcyMDAsImF0aCI6IkFZdXVHZU04UjNGeUp4X1didFBrVXYwVjk1SlpaeG8tbUpLMFVDTzJoZjAiLCJub25jZSI6ImYzQ3l5QVp0MkluUG5IZGRnR0V4c0EiLCJwYWQiOiJ4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eCJ9.52eDOGh-1y26vSw3c6PNtA_HAYaDS9qG0gZbOWnd9hGyaXN48d92zv0tIY25dXdwqNj9v2kyTsNcHMm8SysShA",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "segment-size"
+   ]
+  },
+  {
+   "name": "L5 htm GET for a POST",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJqdGktMDAyMC13RnA3b2ZuM2NUcVJSOHlDIiwiaHRtIjoiR0VUIiwiaHR1IjoiaHR0cHM6Ly9sb2NhbC5zYWdlYnJ1c2guaW52YWxpZC9hcGkvY29tcHV0ZS92MS9iaW5kaW5ncyIsImlhdCI6MTc5Mzk3NzIwMCwiYXRoIjoiQVl1dUdlTThSM0Z5SnhfV2J0UGtVdjBWOTVKWlp4by1tSkswVUNPMmhmMCIsIm5vbmNlIjoiZjNDeXlBWnQySW5QbkhkZGdHRXhzQSJ9.LRN77wayCjzSsdn_aDNqYeEutI533jqM4rqUaeF-XAz5QoovkUXyN2nnnZzGCRBP6W2DYUZ1Fi2X5d6USRNzqg",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "htm"
+   ]
+  },
+  {
+   "name": "L6 htu another path",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJqdGktMDAyMS1xZFR4VDIyZGpKZTZKNjNyIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvc29tZXdoZXJlL2Vsc2UiLCJpYXQiOjE3OTM5NzcyMDAsImF0aCI6IkFZdXVHZU04UjNGeUp4X1didFBrVXYwVjk1SlpaeG8tbUpLMFVDTzJoZjAiLCJub25jZSI6ImYzQ3l5QVp0MkluUG5IZGRnR0V4c0EifQ.z2fq7Zlg4RjexMpz9QZP_MjLNiLilnqlZR8Ep2f9GkS97rUbhr8URARXYwfKmXqCqCOZ7TQm8s2hBe8QLbZtMQ",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "htu"
+   ]
+  },
+  {
+   "name": "L6 htu with a query",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJqdGktMDAyMi14S0p1VWFQa0tQX2V2VTRMIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3M_eD0xIiwiaWF0IjoxNzkzOTc3MjAwLCJhdGgiOiJBWXV1R2VNOFIzRnlKeF9XYnRQa1V2MFY5NUpaWnhvLW1KSzBVQ08yaGYwIiwibm9uY2UiOiJmM0N5eUFadDJJblBuSGRkZ0dFeHNBIn0.lXMoNYIKJVj0eULR4HGM5hy9Mao5l4Pq6M4zjzx6-YCT38vN9VWbRmqp-DGfgkT_ZboOBt3QB9JMHmKRom1Kmw",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "htu"
+   ]
+  },
+  {
+   "name": "L7 ath of another token",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJqdGktMDAyMy1QUUIxUGc0ZUdnSnR5YlhLIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOjE3OTM5NzcyMDAsImF0aCI6IndqNG1fRHJoaXNacGQxZ1g3bjZxNHFFUm1MVlczS2JrVTEwMEFHQTBkcG8iLCJub25jZSI6ImYzQ3l5QVp0MkluUG5IZGRnR0V4c0EifQ.bz8hc48dfpnpZ9q1xXQ1GxwDLZDmc7coCmj3yyTicx68Yyf93C8fSpINY2zFup-dw5-uMlra_KgP2YraNT8Cjw",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "ath"
+   ]
+  },
+  {
+   "name": "L7 claim types: htm a number",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJqdGktMDAyNC0weEJpbFJuUU9KakRkd0ljIiwiaHRtIjo1LCJodHUiOiJodHRwczovL2xvY2FsLnNhZ2VicnVzaC5pbnZhbGlkL2FwaS9jb21wdXRlL3YxL2JpbmRpbmdzIiwiaWF0IjoxNzkzOTc3MjAwLCJhdGgiOiJBWXV1R2VNOFIzRnlKeF9XYnRQa1V2MFY5NUpaWnhvLW1KSzBVQ08yaGYwIiwibm9uY2UiOiJmM0N5eUFadDJJblBuSGRkZ0dFeHNBIn0.3R0x0Im4H3i9Naf52y1P5usLy6ULbXOZR4Ny0C69AETsZl9q2HXT13m-I0T_utvMdeZk5gBMeLYXwDzhcFkh_A",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "claim-types"
+   ]
+  },
+  {
+   "name": "L7 claim types: nonce null",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJqdGktMDAyNS1XSUtzWDgwWVFHQ1M2YjhxIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOjE3OTM5NzcyMDAsImF0aCI6IkFZdXVHZU04UjNGeUp4X1didFBrVXYwVjk1SlpaeG8tbUpLMFVDTzJoZjAiLCJub25jZSI6bnVsbH0.Z_4GASjC7oiucDKOxGCaQX2FFu7s_8MVwk3G42qMPj7iLhz8lU_bQHS-49H4A_erNTx2hQLPwm7JHUeoDQnFxA",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "claim-types"
+   ]
+  },
+  {
+   "name": "L8a iat 61 s old",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJqdGktMDAyNi04MzlLY1dxTWFDcHdkUy04IiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOjE3OTM5NzcxMzksImF0aCI6IkFZdXVHZU04UjNGeUp4X1didFBrVXYwVjk1SlpaeG8tbUpLMFVDTzJoZjAiLCJub25jZSI6ImYzQ3l5QVp0MkluUG5IZGRnR0V4c0EifQ.ycfS4QBNvNDZbe5qj1PQve804YRlB8uTXCEDPNHOQCXOxIqo2C64P8VWf_iOIo2UsvVqGhp-IKu86rRTv8lOww",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "iat-past"
+   ]
+  },
+  {
+   "name": "L8a+ iat exactly 60 s old passes",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJqdGktMDAyNy1IV2tLVmNLZGk0a0hRSndmIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOjE3OTM5NzcxNDAsImF0aCI6IkFZdXVHZU04UjNGeUp4X1didFBrVXYwVjk1SlpaeG8tbUpLMFVDTzJoZjAiLCJub25jZSI6ImYzQ3l5QVp0MkluUG5IZGRnR0V4c0EifQ.GcOgp1oiTftOVofafS7mFoxOjwvFUEJ3xVILV8ochKPKGss0wHLV-YqOz3C0qWJe5EZtTuWu94IXSyA2KRLQNw",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": null
+  },
+  {
+   "name": "L8b iat 6 s ahead",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJqdGktMDAyOC03Z1lXYkZFMFZITWQ3Wk9vIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOjE3OTM5NzcyMDYsImF0aCI6IkFZdXVHZU04UjNGeUp4X1didFBrVXYwVjk1SlpaeG8tbUpLMFVDTzJoZjAiLCJub25jZSI6ImYzQ3l5QVp0MkluUG5IZGRnR0V4c0EifQ.fC_vdthdlETLSGtC-QCDo5dmzxWS9TvlKVpFhwhjd9k1sEA-o5zp8rf43mTTe5jxqgQpYO4VexNN7rr48XmlTA",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "iat-future"
+   ]
+  },
+  {
+   "name": "L8b+ iat exactly 5 s ahead passes",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJqdGktMDAyOS1YR293aUJKY1ZsNTFHVHBVIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOjE3OTM5NzcyMDUsImF0aCI6IkFZdXVHZU04UjNGeUp4X1didFBrVXYwVjk1SlpaeG8tbUpLMFVDTzJoZjAiLCJub25jZSI6ImYzQ3l5QVp0MkluUG5IZGRnR0V4c0EifQ.1Gxi6m41DjVbWDV1jqbwuZhipH1PMSklJMU0oqnw-1lyHz1icGqABk25eCCNvtGmiBs4Mh7WjXWD2_4qIJZAQA",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": null
+  },
+  {
+   "name": "L8c iat missing",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJqdGktMDAzMC0xMUcwQTE5YUhPYUpiZUtkIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJhdGgiOiJBWXV1R2VNOFIzRnlKeF9XYnRQa1V2MFY5NUpaWnhvLW1KSzBVQ08yaGYwIiwibm9uY2UiOiJmM0N5eUFadDJJblBuSGRkZ0dFeHNBIn0._EEwLH-tVBlL_rhLB6jg5rWCIGEhlwO4RlCkFcybTq6mB55LRKXBNRptdk3oETQS_jFViu6kZhCX_OWr4PLTNQ",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "iat-type"
+   ]
+  },
+  {
+   "name": "L8c iat a string",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJqdGktMDAzMS1ZeFgwMnVKM2JfOUlwNEhuIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOiIxNzkzOTc3MjAwIiwiYXRoIjoiQVl1dUdlTThSM0Z5SnhfV2J0UGtVdjBWOTVKWlp4by1tSkswVUNPMmhmMCIsIm5vbmNlIjoiZjNDeXlBWnQySW5QbkhkZGdHRXhzQSJ9.ootYp0k_oopR3pc1_kaYhYm98xROTjz_n2xmmnrANQsPU7PZ-1ivf7UozQ0R2v_8d-AV6VL5QEXmFlWXiIby6g",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "iat-type"
+   ]
+  },
+  {
+   "name": "L8c iat null",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJqdGktMDAzMi1jaGtfeWZXVWNSd05jeDVmIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOm51bGwsImF0aCI6IkFZdXVHZU04UjNGeUp4X1didFBrVXYwVjk1SlpaeG8tbUpLMFVDTzJoZjAiLCJub25jZSI6ImYzQ3l5QVp0MkluUG5IZGRnR0V4c0EifQ.faYIYmiBbDFjydhiEbQnkXeJnU4UXs_lOjpAS9CwId56trOnLhf-YDno5LzmeMBDGGZMOVzKbawbtcqBwBDGrg",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "iat-type"
+   ]
+  },
+  {
+   "name": "L8c iat true",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJqdGktMDAzMy1XYXg0bzRVN3dOeXR1VmFyIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOnRydWUsImF0aCI6IkFZdXVHZU04UjNGeUp4X1didFBrVXYwVjk1SlpaeG8tbUpLMFVDTzJoZjAiLCJub25jZSI6ImYzQ3l5QVp0MkluUG5IZGRnR0V4c0EifQ.TvAdW60IFNDQpoK3UHG9YvBrz0Trc9Hrzl25PFHqiBHABVdgwHa_2My87ACKZx8Ojjzdpj_TeA5IB6qKmDVXDQ",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "iat-type"
+   ]
+  },
+  {
+   "name": "L8c iat 1.5",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJqdGktMDAzNC1hTl9rM2Y1YzB4T0xwYzR4IiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOjEuNSwiYXRoIjoiQVl1dUdlTThSM0Z5SnhfV2J0UGtVdjBWOTVKWlp4by1tSkswVUNPMmhmMCIsIm5vbmNlIjoiZjNDeXlBWnQySW5QbkhkZGdHRXhzQSJ9.IKL7wTW74-8ajg2GPLE_tQajr48mW9kSws4stsRm-zr1HpeaN10csCFoYVDhcpJMIiG4V4NHplwIsvJC8QhHjw",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "iat-type"
+   ]
+  },
+  {
+   "name": "L8c iat 2^53",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJqdGktMDAzNS0ySzFSTlBRa2NaUnNPU3ZRIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOjkwMDcxOTkyNTQ3NDA5OTIsImF0aCI6IkFZdXVHZU04UjNGeUp4X1didFBrVXYwVjk1SlpaeG8tbUpLMFVDTzJoZjAiLCJub25jZSI6ImYzQ3l5QVp0MkluUG5IZGRnR0V4c0EifQ.QWuEH3zUqw2TpT7UqZ5ykrB9HAnesOcOPZkl2OwPYVLQHUvmcfysrUTL4M2uYtuhKE7jUOu6frDPx44enOb-kg",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "iat-type"
+   ]
+  },
+  {
+   "name": "L8c iat 1e999",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJqdGktMDAzNi1RZlRybW9wVzJIT21FSHZBIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOjFlOTk5LCJhdGgiOiJBWXV1R2VNOFIzRnlKeF9XYnRQa1V2MFY5NUpaWnhvLW1KSzBVQ08yaGYwIiwibm9uY2UiOiJmM0N5eUFadDJJblBuSGRkZ0dFeHNBIn0.hziuW5ZUqt4bOneD9RvyDhZdHxfXYH831GS-TjVNv5DpNvSp66PiY9Vn3rz6liO3KSBdUY-rvILduB2e0kqZtg",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "iat-type"
+   ]
+  },
+  {
+   "name": "L9a a jti seen 120 s ago (exactly)",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJyZXVzZWQtcWpXVEFhS1VuZmV6Z2Z3Vl9JRGl4USIsImh0bSI6IlBPU1QiLCJodHUiOiJodHRwczovL2xvY2FsLnNhZ2VicnVzaC5pbnZhbGlkL2FwaS9jb21wdXRlL3YxL2JpbmRpbmdzIiwiaWF0IjoxNzkzOTc3MjAwLCJhdGgiOiJBWXV1R2VNOFIzRnlKeF9XYnRQa1V2MFY5NUpaWnhvLW1KSzBVQ08yaGYwIiwibm9uY2UiOiJmM0N5eUFadDJJblBuSGRkZ0dFeHNBIn0.WkXgqFu3EHoFBMNEV6thOaOf9c6rOGUUFYvRZZCQDaXrmoVd64WwF3LBI60fCXixpsRlx-81u050NmnbjzUPkw",
+   "jtis": {
+    "reused-qjWTAaKUnfezgfwV_IDixQ": 1793977080000
+   },
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "jti-reused"
+   ]
+  },
+  {
+   "name": "L9a+ the same jti seen 120.001 s ago passes",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJyZXVzZWQtcWpXVEFhS1VuZmV6Z2Z3Vl9JRGl4USIsImh0bSI6IlBPU1QiLCJodHUiOiJodHRwczovL2xvY2FsLnNhZ2VicnVzaC5pbnZhbGlkL2FwaS9jb21wdXRlL3YxL2JpbmRpbmdzIiwiaWF0IjoxNzkzOTc3MjAwLCJhdGgiOiJBWXV1R2VNOFIzRnlKeF9XYnRQa1V2MFY5NUpaWnhvLW1KSzBVQ08yaGYwIiwibm9uY2UiOiJmM0N5eUFadDJJblBuSGRkZ0dFeHNBIn0.dMojh3kn95VsK5LZEWBVG-ga9SgLrlOY63q_GPgkcbkwg-bY_RjY0rdxH45Z5kqU76MtQeqh7HQiHdiMeCRYmA",
+   "jtis": {
+    "reused-qjWTAaKUnfezgfwV_IDixQ": 1793977079999
+   },
+   "jtisFill": 0,
+   "expect": null
+  },
+  {
+   "name": "L9b jti 21 characters",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJhYWFhYWFhYWFhYWFhYWFhYWFhYWEiLCJodG0iOiJQT1NUIiwiaHR1IjoiaHR0cHM6Ly9sb2NhbC5zYWdlYnJ1c2guaW52YWxpZC9hcGkvY29tcHV0ZS92MS9iaW5kaW5ncyIsImlhdCI6MTc5Mzk3NzIwMCwiYXRoIjoiQVl1dUdlTThSM0Z5SnhfV2J0UGtVdjBWOTVKWlp4by1tSkswVUNPMmhmMCIsIm5vbmNlIjoiZjNDeXlBWnQySW5QbkhkZGdHRXhzQSJ9.IJA3EybRdAMxKU-lhLIiod3VCkpIfkqelHbmT4z0Ai-rNJvuoqrKOWtTxld9Xo5VkyYAZoDzUpVB25-X5hUTpQ",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "jti-min"
+   ]
+  },
+  {
+   "name": "L9b+ jti 22 characters passes",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOjE3OTM5NzcyMDAsImF0aCI6IkFZdXVHZU04UjNGeUp4X1didFBrVXYwVjk1SlpaeG8tbUpLMFVDTzJoZjAiLCJub25jZSI6ImYzQ3l5QVp0MkluUG5IZGRnR0V4c0EifQ.bx2OME1n_J0TVvw9hFvBJpMoqv4Zq489n2sRLyfyqhCnKOFXbWVZvdCMqjc98g97eX0W5VTMB0ZavilxS85Iow",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": null
+  },
+  {
+   "name": "L9c jti 65 characters",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjYyIsImh0bSI6IlBPU1QiLCJodHUiOiJodHRwczovL2xvY2FsLnNhZ2VicnVzaC5pbnZhbGlkL2FwaS9jb21wdXRlL3YxL2JpbmRpbmdzIiwiaWF0IjoxNzkzOTc3MjAwLCJhdGgiOiJBWXV1R2VNOFIzRnlKeF9XYnRQa1V2MFY5NUpaWnhvLW1KSzBVQ08yaGYwIiwibm9uY2UiOiJmM0N5eUFadDJJblBuSGRkZ0dFeHNBIn0.tq7tnaoM3uhWo1CC6D1kLFG3KP62pb8riuIIrYOiWOnzICseJABtnhBTZnfz7fNcalitTr72qehskROsfbn8cg",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "jti-max"
+   ]
+  },
+  {
+   "name": "L9c+ jti 64 characters passes",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOjE3OTM5NzcyMDAsImF0aCI6IkFZdXVHZU04UjNGeUp4X1didFBrVXYwVjk1SlpaeG8tbUpLMFVDTzJoZjAiLCJub25jZSI6ImYzQ3l5QVp0MkluUG5IZGRnR0V4c0EifQ.1DWIVqeJgubbl2dMDfuMnnhdJmXkCiZ7zoag_EBFEfjNOm595zIF0JeFGdo487M3bDoi6OpAAYZs7bC2c2-mlw",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": null
+  },
+  {
+   "name": "L9c jti charset",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJlZWVlZWVlZWVlZWVlZWVlZWVlZWUrIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOjE3OTM5NzcyMDAsImF0aCI6IkFZdXVHZU04UjNGeUp4X1didFBrVXYwVjk1SlpaeG8tbUpLMFVDTzJoZjAiLCJub25jZSI6ImYzQ3l5QVp0MkluUG5IZGRnR0V4c0EifQ.s3iWUehSdj0vVtNgMceRrF-kXu2I0eDK-izi_4WePwhi6IWejrmglU3ZJQrCblyo2ltZABErBe3aVp3mVZo6ZA",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "jti-charset"
+   ]
+  },
+  {
+   "name": "L9d jti missing",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJodG0iOiJQT1NUIiwiaHR1IjoiaHR0cHM6Ly9sb2NhbC5zYWdlYnJ1c2guaW52YWxpZC9hcGkvY29tcHV0ZS92MS9iaW5kaW5ncyIsImlhdCI6MTc5Mzk3NzIwMCwiYXRoIjoiQVl1dUdlTThSM0Z5SnhfV2J0UGtVdjBWOTVKWlp4by1tSkswVUNPMmhmMCIsIm5vbmNlIjoiZjNDeXlBWnQySW5QbkhkZGdHRXhzQSJ9.-Dhs4322U0TYK64aowFf89LqTsk81RraOiF97IcPzEfoYlosKkJGD9V3dGZg0v__1lvSLsff9plIJ1g2dE4hAA",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "jti-type"
+   ]
+  },
+  {
+   "name": "L9d jti 123",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOjEyMywiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOjE3OTM5NzcyMDAsImF0aCI6IkFZdXVHZU04UjNGeUp4X1didFBrVXYwVjk1SlpaeG8tbUpLMFVDTzJoZjAiLCJub25jZSI6ImYzQ3l5QVp0MkluUG5IZGRnR0V4c0EifQ.6YMauEgzeERwhYg2h7xRHPCpHxNiKbq82bnPcbBLRYGBUWri1AzZpsyocAtFfSSFU5hdEaR_ZfOKeTuOJoviNA",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "jti-type"
+   ]
+  },
+  {
+   "name": "L9d jti null",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOm51bGwsImh0bSI6IlBPU1QiLCJodHUiOiJodHRwczovL2xvY2FsLnNhZ2VicnVzaC5pbnZhbGlkL2FwaS9jb21wdXRlL3YxL2JpbmRpbmdzIiwiaWF0IjoxNzkzOTc3MjAwLCJhdGgiOiJBWXV1R2VNOFIzRnlKeF9XYnRQa1V2MFY5NUpaWnhvLW1KSzBVQ08yaGYwIiwibm9uY2UiOiJmM0N5eUFadDJJblBuSGRkZ0dFeHNBIn0.vfSWFmsCK1M8s__I5U2tIaQvEn-8REpvfBSgnjX-5jHVL5No-sAE1sZUOOWSw7Uz4ntp_PA2ArUXbrhoiHUpmA",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "jti-type"
+   ]
+  },
+  {
+   "name": "L9d jti an array",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOlsiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSJdLCJodG0iOiJQT1NUIiwiaHR1IjoiaHR0cHM6Ly9sb2NhbC5zYWdlYnJ1c2guaW52YWxpZC9hcGkvY29tcHV0ZS92MS9iaW5kaW5ncyIsImlhdCI6MTc5Mzk3NzIwMCwiYXRoIjoiQVl1dUdlTThSM0Z5SnhfV2J0UGtVdjBWOTVKWlp4by1tSkswVUNPMmhmMCIsIm5vbmNlIjoiZjNDeXlBWnQySW5QbkhkZGdHRXhzQSJ9.5PiaABOeOTheyQAao4mk2tVKEPAA3D9mELHsutSwzbzABqCpkHs1rK4cJyU-vaTXQXNVB5g59NJxEvAdQ_Hx9g",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "invalid_dpop_proof",
+    "jti-type"
+   ]
+  },
+  {
+   "name": "L10a a stale nonce",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJqdGktMDA0OS12eVgxSGsyaUJWVU9BcDdfIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOjE3OTM5NzcyMDAsImF0aCI6IkFZdXVHZU04UjNGeUp4X1didFBrVXYwVjk1SlpaeG8tbUpLMFVDTzJoZjAiLCJub25jZSI6IndxVC0ySUZ4QzhVM1pGdU04dUF1SVEifQ.dFKviWiEVpfZUPlfYpH00IJXNxbykz5tIESZ1k36OoCZEgYT3YlCh9ZUD4JSzsiPyTKPKb4Las9EDMpswuATiQ",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "use_dpop_nonce",
+    "nonce"
+   ]
+  },
+  {
+   "name": "L10a no nonce",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJqdGktMDA1MC1PRUNyT2VoaHdLRTd6cHpqIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOjE3OTM5NzcyMDAsImF0aCI6IkFZdXVHZU04UjNGeUp4X1didFBrVXYwVjk1SlpaeG8tbUpLMFVDTzJoZjAifQ.HydBcz7eHuVMc1xkoa-gAowepU68JdeKLQYARSHcr-Cj56BoqN_8ckrik_MLNqZBD9_ZbvceqANG6BJyQj5gHw",
+   "jtis": {},
+   "jtisFill": 0,
+   "expect": [
+    401,
+    "use_dpop_nonce",
+    "nonce"
+   ]
+  },
+  {
+   "name": "the jti store full (4096)",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJqdGktMDA1MS1FemN4LTBJTGJHWkhpZ05OIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOjE3OTM5NzcyMDAsImF0aCI6IkFZdXVHZU04UjNGeUp4X1didFBrVXYwVjk1SlpaeG8tbUpLMFVDTzJoZjAiLCJub25jZSI6ImYzQ3l5QVp0MkluUG5IZGRnR0V4c0EifQ.OqDxYGEFERpOoI80p7wnWp3-1l2LextDKFAQ1N7RbV3kfpmUNZj_u-4Y4dC6cdDCXN1pruLBSrdXiH6dxjHHWQ",
+   "jtis": {},
+   "jtisFill": 4096,
+   "expect": [
+    503,
+    "limit",
+    "jti-store"
+   ]
+  },
+  {
+   "name": "the jti store at 4095 passes",
+   "method": "POST",
+   "htu": "https://local.sagebrush.invalid/api/compute/v1/bindings",
+   "auth": "DPoP Ammf2hNn3OWCELEAXjWPoG3uMKQtwJScf3FfisTfM1Q",
+   "dpop": "eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2IiwiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiY3o1dWFiZUJwT0hSVnV3U3RiRUF1UHo5TXQ0RU5SYnRKaVg5bXRxX2xzbyIsInkiOiIyeHVaZERLNjc5T1dQRmpSVExZaU85RHVXbEJzcVBXR0RHMjV3QXhRdC00In19.eyJqdGkiOiJqdGktMDA1Mi1QbHlBMFFGUmZROXhWRlZuIiwiaHRtIjoiUE9TVCIsImh0dSI6Imh0dHBzOi8vbG9jYWwuc2FnZWJydXNoLmludmFsaWQvYXBpL2NvbXB1dGUvdjEvYmluZGluZ3MiLCJpYXQiOjE3OTM5NzcyMDAsImF0aCI6IkFZdXVHZU04UjNGeUp4X1didFBrVXYwVjk1SlpaeG8tbUpLMFVDTzJoZjAiLCJub25jZSI6ImYzQ3l5QVp0MkluUG5IZGRnR0V4c0EifQ.CKXGiFXftPA372qBknW4uh-QaykDa8KIL7mB4ZeWME2hwQpQVrtCeXOfxLh9VoUwVnBcouDCvRVY6V4zcbbIbw",
+   "jtis": {},
+   "jtisFill": 4095,
+   "expect": null
+  }
+ ]
+}
