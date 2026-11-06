@@ -228,13 +228,13 @@ I object !! TypeError an integer is required
 Z object !! TypeError an integer is required
 I complex !! TypeError an integer is required
 Z complex !! TypeError an integer is required
-I ComplexNumber !! TypeError can't convert complex to int; use int(abs(z))
-Z ComplexNumber !! TypeError can't convert complex to int; use int(abs(z))
+I CC !! TypeError can't convert complex to int; use int(abs(z))
+Z CC !! TypeError can't convert complex to int; use int(abs(z))
 I bytes !! TypeError an integer is required
 Z bytes !! TypeError an integer is required
-I IntegerMod_int -> 2
-Z IntegerMod_int -> 2
-I IntegerMod_int -> 2
-Z IntegerMod_int -> 2
-I Expression -> 2
-Z Expression -> 2
+I Mod -> 2
+Z Mod -> 2
+I GF -> 2
+Z GF -> 2
+I SR -> 2
+Z SR -> 2
