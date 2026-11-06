@@ -127,6 +127,23 @@ try {
   await ev(`(() => { [...document.querySelectorAll(".code-page .code-bar button")].find((b) => b.textContent === "Save mine as a copy").click(); return 1; })()`);
   check(await until(`${text("/demo (copy).py")}.then((s) => s === "mine\\n").catch(() => false)`, 10000), "…Save mine as a copy: a new file beside it, with the text from here");
 
+  // following a change made elsewhere, in Edit with nothing unsaved: followed (the control), and an edit typed while
+  // that change is read keeps the draft and stops following (astra on #773: the read's bytes were installed over it)
+  check(await openCode("/demo.py"), "(the page again)");
+  await ev(`${C}.setMode("edit").then(() => 1)`);
+  await until(`!!document.querySelector(".code-page .code-edit textarea") && !${C}.stopped()`);
+  await ev(`${W}.write("/demo.py", "external one\\n").then(() => 1)`);
+  check(await until(`${TA}.value === "external one\\n" && !${C}.stopped()`, 10000), "Edit, nothing unsaved: a change made elsewhere is followed, saving still on");
+  await ev(`(() => { let first = true; window.__sbCodeBeforeRead = () => { if (first) { first = false; return new Promise((r) => setTimeout(r, 1200)); } }; return 1; })()`);
+  await ev(`${W}.write("/demo.py", "external two\\n").then(() => 1)`);
+  await sleep(300);
+  await ev(`(() => { const t = ${TA}; t.value += "draft\\n"; t.dispatchEvent(new Event("input")); return 1; })()`);
+  check(await until(`${C}.stopped() && !document.querySelector(".code-page .code-bar").hidden`, 10000), "an edit typed while a change made elsewhere is being read: following stops, the bar says so");
+  await sleep(1500);
+  check(await ev(`${TA}.value === "external one\\ndraft\\n"`), "…the draft kept in the editor: " + JSON.stringify(await ev(`${TA}.value`)));
+  check(await ev(text("/demo.py")) === "external two\n", "…and their change kept in the file");
+  await ev(`(() => { delete window.__sbCodeBeforeRead; return 1; })()`);
+
   // MATLAB: the notebook's MATLAB colors
   check(await openCode("/fn.m"), "a .m file opens");
   check(await ev(`!!document.querySelector(".code-page .code-src .hc") && !!document.querySelector(".code-page .code-src .hs") && document.querySelector(".code-page .code-lang").textContent === "MATLAB"`), "…highlighted as MATLAB (a comment, a string)");

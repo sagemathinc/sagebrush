@@ -224,7 +224,17 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     if (r.path !== path) { path = r.path; showName(); }
     if ((r.entry.rev ?? 0) === rev) return;
     if (dirty()) { stop("This file was changed elsewhere while you were editing it here."); return; }
+    // (what this page has before the read: if any of it changed while the read waited (an edit typed, a save of this
+    //  page's own), the read's bytes aren't installed: an edit stops following with the draft kept, anything else
+    //  checks again; astra on #773)
+    const before = { live: live(), saved, rev, stopped, mode };
+    await (globalThis as any).__sbCodeBeforeRead?.();
     const fresh = await ws.readUpTo(r.path, CODE.openBytes).catch(() => null);
+    if (life.signal.aborted || stopped) return;
+    if (live() !== before.live || saved !== before.saved || rev !== before.rev || mode !== before.mode || saving) {
+      if (dirty()) { stop("This file was changed elsewhere while you were editing it here."); return; }
+      clearTimeout(checkTimer); checkTimer = setTimeout(() => void check(), 50); return;
+    }
     const fo = fresh && fresh.entry.fid === host.fid ? openBytes(fresh.content) : null;
     if (!fresh || !fo || fo.kind !== "text") { stop("This file was changed elsewhere and can't be shown here now."); return; }
     text = saved = fo.text; eol = fo.eol; rev = fresh.entry.rev ?? 0; entry = fresh.entry;
