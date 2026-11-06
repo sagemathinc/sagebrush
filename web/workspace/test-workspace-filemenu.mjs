@@ -54,9 +54,10 @@ const NB = "#filemenu", BD = "[data-sbb=filemenu]";
 const shape = (menu) => ev(`[...document.querySelector(${JSON.stringify(menu)}).children].map((x) => x.tagName === "HR" ? "-" : x.dataset.group ? x.dataset.group + "▸[" + [...x.nextElementSibling.querySelectorAll("button")].map((b) => b.dataset.item ?? b.textContent).join(",") + "]" : x.dataset.item ?? "").filter(Boolean)`);
 // (File ▸ Examples…, sim run 12: the gallery's catalog as a site with the gallery serves it (this test's server has
 // none): one notebook and one board, as each page's panel opens on its own kind)
-const STUB_CATALOG = `(() => { const f0 = window.__sbFetch0 ??= window.fetch; window.fetch = (u, o) => /\\/examples\\/index\\.json$/.test(String(u?.url ?? u)) ? Promise.resolve(new Response(JSON.stringify({ examples: [{ id: "notebook/stub", kind: "notebook", title: "Stub example", summary: "" }, { id: "board/stub", kind: "board", title: "Stub example", summary: "" }] }), { headers: { "content-type": "application/json" } })) : f0(u, o); return 1; })()`;
+const STUB_CATALOG = `(() => { const f0 = window.__sbFetch0 ??= window.fetch; window.fetch = (u, o) => new URL(String(u?.url ?? u), location.href).pathname === "/examples/index.json" ? Promise.resolve(new Response(JSON.stringify({ examples: [{ id: "notebook/stub", kind: "notebook", title: "Stub notebook", summary: "" }, { id: "board/stub", kind: "board", title: "Stub board", summary: "" }] }), { headers: { "content-type": "application/json" } })) : f0(u, o); return 1; })()`;
 const UNSTUB = `(() => { if (window.__sbFetch0) window.fetch = window.__sbFetch0; return 1; })()`;
-const galleryShown = `!!document.querySelector("dialog.sb-examples[open]") && [...document.querySelectorAll("dialog.sb-examples [role=option]")].some((b) => b.textContent.includes("Stub example"))`;
+// (the panel open on this page's own kind first: its example listed, the other kind's not)
+const galleryShown = (own, other) => `!!document.querySelector("dialog.sb-examples[open]") && (() => { const t = [...document.querySelectorAll("dialog.sb-examples [role=option]")].map((b) => b.textContent); return t.some((x) => x.includes(${JSON.stringify(own)})) && !t.some((x) => x.includes(${JSON.stringify(other)})); })()`;
 const closeGallery = `(() => { [...document.querySelectorAll("dialog.sb-examples button")].find((b) => b.textContent === "Close")?.click(); return 1; })()`;
 const labels = (menu) => ev(`[...document.querySelector(${JSON.stringify(menu)}).querySelectorAll("button")].map((b) => b.dataset.group ? b.textContent.replace(/ [▸▾]$/, "") : b.dataset.item ? b.firstChild.textContent : null).filter(Boolean)`);
 const pick = (menu, item) => ev(`(() => { const b = document.querySelector(${JSON.stringify(menu)} + " [data-item=${item}]"); if (!b) throw new Error("no ${item}"); b.click(); return !b.disabled; })()`);
@@ -90,11 +91,11 @@ try {
   // (a site with the gallery: its panel, for Examples… and From an example… alike)
   await ev(STUB_CATALOG);
   await ev(`(() => { document.querySelector("#filemenu [data-item=examples]").click(); return 1; })()`);
-  check(await until(galleryShown), "File ▸ Examples…: the gallery's panel, its catalog listed");
+  check(await until(galleryShown("Stub notebook", "Stub board")), "File ▸ Examples…: the gallery's panel, on notebooks first");
   await ev(closeGallery);
   await until(`!document.querySelector("dialog.sb-examples")`);
   await ev(`(() => { document.querySelector("#filemenu [data-item=fromExample]").click(); return 1; })()`);
-  check(await until(galleryShown) && !(await ev(`!!document.querySelector("#exdlg[open]")`)), "New ▸ From an example…: the same panel, not the old list");
+  check(await until(galleryShown("Stub notebook", "Stub board")) && !(await ev(`!!document.querySelector("#exdlg[open]")`)), "New ▸ From an example…: the same panel, not the old list");
   await ev(closeGallery);
   await ev(UNSTUB);
   await ev(`(() => { document.querySelector("#filebtn").click(); return 1; })()`);
@@ -226,7 +227,7 @@ try {
   await ev(`(() => { document.querySelector("[data-sbb=exdlg]").close(); return 1; })()`);
   await ev(STUB_CATALOG);
   await ev(`(() => { document.querySelector("[data-sbb=filemenu] [data-item=examples]").click(); return 1; })()`);
-  check(await until(galleryShown) && !(await ev(`!!document.querySelector("[data-sbb=exdlg][open]")`)), "the board page's File ▸ Examples…: the gallery's panel");
+  check(await until(galleryShown("Stub board", "Stub notebook")) && !(await ev(`!!document.querySelector("[data-sbb=exdlg][open]")`)), "the board page's File ▸ Examples…: the gallery's panel, on boards first");
   await ev(closeGallery);
   await ev(UNSTUB);
   check(await ev(`!!document.querySelector("[data-sbb=menu] [data-sbb=mermaid]") && !!document.querySelector("[data-sbb=menu] [data-sbb=revert]")`), "Import Mermaid… and Revert are in the board's ⋯");
@@ -265,6 +266,13 @@ try {
   await until(`!!window.sagebrush?.board?.snapshot() && !!document.querySelector("[data-sbb=filemenu] [data-item=newMatlab]:not([disabled])")`, 60000);
   await pick(BD, "newMatlab");
   check(await until(`location.pathname === "/" && !!window.sagebrush?.notebook?.store?.id && window.sagebrush.notebook.mode === "matlab"`, 60000), "New ▸ MATLAB notebook from a Python board: a new notebook in MATLAB");
+  // File ▸ Examples… on a page with no workspace (?workspace=0, a localhost-only switch): the gallery would have
+  // nowhere to copy into, so even where the site has it, the page's own list opens
+  await go(base + "board/?workspace=0");
+  await until(`!!window.sagebrush?.board?.snapshot() && !!document.querySelector("[data-sbb=filemenu] [data-item=examples]:not([disabled])")`, 60000);
+  await ev(STUB_CATALOG);
+  await ev(`(() => { document.querySelector("[data-sbb=filemenu] [data-item=examples]").click(); return 1; })()`);
+  check(await until(`!!document.querySelector("[data-sbb=exdlg][open]")`) && !(await ev(`!!document.querySelector("dialog.sb-examples")`)), "a page with no workspace: File ▸ Examples… opens its own list, not the gallery (nowhere to copy into)");
 } catch (e) {
   fails.push("threw: " + (e?.stack ?? e));
 } finally {
