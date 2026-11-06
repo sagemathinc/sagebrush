@@ -552,6 +552,7 @@ import { latexBoot } from "./latex/boot.ts";
 import { createPermissions, hostMade } from "./notebook/permissions.js";
 import { renderFileMenu, fileMenuKey } from "./workspace/filemenu.ts";
 import { recordOpened, recentOpened, recentLabel, openFilesDialog } from "./workspace/fileopen.ts";
+import { openGallery } from "./examples/open.ts";
 import { uploadFiles, openableAsFile, blobHead, convertCopy, pauseBoard, carryNotice, takeNotice } from "./workspace/upload.ts";
 import { BUNDLE, readBundle, keepBundle, bundleContents } from "./notebook/bundle.js";
 import { startAll, startAllSummary, journalStartOf } from "./notebook/start-all.js";
@@ -2775,6 +2776,8 @@ fileMenu.addEventListener("click", async (e) => {
     }
     case "rename": nbName.focus(); nbName.select(); break;
     case "examples":
+      // (the gallery's panel where this site has it (U7, #549); else this page's own list, as before)
+      if (await openGallery(ws, (e) => openEntry(e), "notebook")) break;
       exDlg.showModal();
       exDlg.querySelector("#exlist button")?.focus();
       break;
