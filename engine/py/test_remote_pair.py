@@ -747,6 +747,19 @@ async def test_drain_groups():
     assert await G.drain_groups(3.0) == []
     assert not G._group_members(p.pid) and p.pid not in G.ENDING_GROUPS
     await p.wait()
+    # (no drain at all: the killed group is still taken out of ENDING_GROUPS promptly, once empty, so no stale pgid
+    # stays for the runner's lifetime (daybreak3); a second kill of it is harmless)
+    p = await asyncio.create_subprocess_exec("sh", "-c", "trap '' TERM; sleep 30 & wait", start_new_session=True)
+    await asyncio.sleep(0.2)
+    G._kill_tree(p.pid)
+    assert p.pid in G.ENDING_GROUPS
+    end = time.monotonic() + 3.5  # (the 2 s SIGKILL, then a 50 ms check: a bound on this wait, not a timeout raised)
+    while p.pid in G.ENDING_GROUPS:
+        assert time.monotonic() < end, "a killed group stayed in ENDING_GROUPS"
+        await asyncio.sleep(0.05)
+    assert not G._group_members(p.pid)
+    G._forget_when_empty(p.pid, asyncio.get_running_loop())  # (idempotent: already out)
+    await p.wait()
     # (G1) a group still alive at drain's deadline, before the tree's own SIGKILL at 2 s, is SIGKILLed by drain
     p = await asyncio.create_subprocess_exec("sh", "-c", "trap '' TERM; sleep 30 & wait", start_new_session=True)
     await asyncio.sleep(0.2)
