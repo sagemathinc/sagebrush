@@ -556,6 +556,100 @@ try {
         // (back on A, entry 0: two entries back)
         await ev(`(history.go(-2), true)`); await shownIs(fa); await until(`history.state && history.state.sbTex === 0 && location.hash === ""`, 20000); await sleep(500);
       }
+      // (7) (grader L8, K6) a switch to B decided (A's close held), then Back to A, then A asked for again, the history
+      // already on A's entry: A opens again, editable, on its entry, and stays; B never shown; A's edit written
+      {
+        const mark = "% back then A again";
+        await watchX(fb); await holdClose(mark);
+        await ev(`(window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} }), true)`);
+        const held = await until(`window.__k >= 2`, 10000);
+        await ev(`(history.back(), true)`);
+        const back = await until(`new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fa)}`, 10000);
+        await ev(`(window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }), window.__rel(), true)`);
+        await shownIs(fa); await sleep(1500);
+        const s = await stateOf(fa), fA = await textOf(fa);
+        await ev(`(window.__obsB?.disconnect(), true)`); await writesWork();
+        check(held && back && s.url === fa && s.at === 0 && s.shows && s.ro === false && s.pages === 1 && !s.saw && s.kept && fA.includes(mark),
+          "U8-RETURN (grader L8): a decided switch, Back to the file shown, then that file asked for again: it opens again, editable, on its entry; the other file never shown; its edit written", { held, back, s: { ...s, src: s.src.slice(-30) }, fileA: fA.slice(-30) });
+      }
+      // (8) (grader L7) the return's traversal refused (the Navigation API's finished rejected): the entry shown is pushed
+      // again and what waits for the return runs: A asked for again while the switch to B waits on A's close opens A
+      {
+        const mark = "% the traverse refused";
+        await watchX(fb); await holdClose(mark);
+        await ev(`(window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} }), true)`);
+        const held = await until(`window.__k >= 2`, 10000);
+        const nav = await ev(`(() => { const v = window.navigation; if (!v?.traverseTo) return false;
+          v.traverseTo = () => { window.__refused = (window.__refused ?? 0) + 1; const f = Promise.reject(new Error("test: the traverse refused")); f.catch(() => {}); return { committed: f, finished: f }; };
+          window.__navRestore = () => { delete v.traverseTo; }; window.__refused = 0; return true; })()`);
+        await ev(`(window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }), window.__rel(), true)`);
+        await shownIs(fa); await sleep(1500);
+        const s = await stateOf(fa), fA = await textOf(fa), refused = await ev(`window.__refused`);
+        await ev(`(window.__navRestore?.(), delete window.__navRestore, window.__obsB?.disconnect(), true)`); await writesWork();
+        check(nav && held && refused >= 1 && s.url === fa && s.at === 1 && s.shows && s.ro === false && s.pages === 1 && !s.saw && s.kept && fA.includes(mark),
+          "U8-RETURN (grader L7): the return's traversal refused: the file shown's entry pushed again and the file opened again there, editable; the other file never shown; its edit written", { nav, held, refused, s: { ...s, src: s.src.slice(-30) }, fileA: fA.slice(-30) });
+        // (back on A, entry 0: two entries back, B's and A's pushed again)
+        await ev(`(history.go(-2), true)`); await until(`history.state && history.state.sbTex === 0`, 20000); await shownIs(fa); await sleep(500);
+      }
+      // (9) (grader K6) no switch, no Navigation API: the file shown asked for again changes nothing: no entry pushed,
+      // the same entry, the editor as it was
+      {
+        const r = await ev(`(async () => {
+          const was = window.navigation; Object.defineProperty(window, "navigation", { configurable: true, get: () => undefined });
+          const len = history.length, id = history.state && history.state.sbTexId, at = history.state && history.state.sbTex;
+          window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} });
+          await new Promise((res) => setTimeout(res, 400));
+          const out = { len0: len, len: history.length, same: history.state && history.state.sbTexId === id, at0: at, at: history.state && history.state.sbTex, ro: document.querySelector(".tex-src")?.readOnly };
+          Object.defineProperty(window, "navigation", { configurable: true, get: () => was });
+          return out; })()`);
+        check(r && r.len === r.len0 && r.same && r.at === r.at0 && r.ro === false,
+          "U8-RETURN (grader K6): the file shown asked for again, no switch and no Navigation API: no entry pushed, the same entry, the editor editable", r);
+      }
+      // (10) (grader H2, H4, H7) two leaves at once: A's write held, a switch to B asked for, then to C (the newer
+      // leave); the write fails: the older leave, superseded, lets go of nothing (the newer one's hold kept), and the
+      // newer asks while the editor is still frozen (read-only); declined, the editor is editable again, on A's entry,
+      // its text kept. Asked LEAVE when the edit is durable in its draft, LEAVE_LOST when the draft couldn't be kept
+      for (const lost of [false, true]) {
+        const mark = `% two leaves${lost ? ", the draft lost" : ""}`;
+        await watchX(fb);
+        await ev(`(() => { window.__asks = []; window.confirm = (m) => { window.__asks.push({ m, ro: document.querySelector(".tex-src")?.readOnly }); return false; };
+          window.__failP = new Promise((_, rej) => (window.__failNow = () => rej(new Error("test: the write failed")))); window.__failP.catch(() => {});
+          window.__sbTexSaveWrite = () => window.__failP;
+          if (${lost}) { window.__lsSet = localStorage.setItem; localStorage.setItem = function (k, v) { if (String(k).startsWith("sb-tex-draft:")) throw new Error("test: storage full"); return window.__lsSet.call(localStorage, k, v); }; }
+          const t = document.querySelector(".tex-src"); t.value += ${JSON.stringify(mark + "\n")}; t.dispatchEvent(new Event("input")); return true; })()`);
+        await sleep(1200);
+        await ev(`(window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} }), true)`); await sleep(100);
+        await ev(`(window.__sbTex({ path: "/sw/c.tex", fid: ${JSON.stringify(fc)} }), true)`); await sleep(100);
+        const frozen = await ev(`document.querySelector(".tex-src")?.readOnly === true`);
+        await ev(`(window.__failNow(), true)`);
+        await until(`window.__asks.length >= 1`, 10000); await sleep(800);
+        const r = await ev(`({ asks: window.__asks.map((a) => ({ lost: /couldn't keep a copy/.test(a.m), ro: a.ro })), ro: document.querySelector(".tex-src")?.readOnly, url: new URLSearchParams(location.search).get("tex"), at: history.state && history.state.sbTex, src: document.querySelector(".tex-src")?.value.slice(-60), saw: window.__sawX })`);
+        await ev(`(() => { if (window.__lsSet) { localStorage.setItem = window.__lsSet; delete window.__lsSet; } window.__obsB?.disconnect(); return true; })()`);
+        await writesWork();
+        await ev(`(() => { window.confirm = () => { window.__asked++; return window.__answer; }; const t = document.querySelector(".tex-src"); t.dispatchEvent(new Event("input")); return true; })()`); await saveStateIs(/^Saved/);
+        check(frozen && r.asks.length === 1 && r.asks[0].ro === true && r.asks[0].lost === lost && r.ro === false && r.url === fa && r.at === 0 && r.src.includes(mark) && !r.saw,
+          `U8-HOLD (grader H2, H4${lost ? ", H7" : ""}): two leaves at once, the write failing${lost ? " and the draft not kept" : ""}: asked once, ${lost ? "LEAVE_LOST" : "LEAVE"}, the editor still frozen while asked; declined, editable again on the file's entry, its text kept`, { frozen, r });
+      }
+      // (11) (grader L6) no Navigation API, the history on an entry of another script's (unnumbered, as a pushState of
+      // its own leaves it) while the switch to B waits on A's close: A asked for again is pushed as a new entry, and
+      // what waits for that runs at once: A opens there, editable; B never shown; A's edit written
+      {
+        const mark = "% a foreign entry";
+        await watchX(fb); await holdClose(mark);
+        await ev(`(window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} }), true)`);
+        const held = await until(`window.__k >= 2`, 10000);
+        const went = await ev(`(() => { const was = window.navigation; Object.defineProperty(window, "navigation", { configurable: true, get: () => undefined });
+          window.__navRestore = () => { Object.defineProperty(window, "navigation", { configurable: true, get: () => was }); };
+          history.pushState({ other: 1 }, "", location.href);
+          window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }); window.__rel(); return true; })()`);
+        await shownIs(fa); await sleep(1500);
+        const s = await stateOf(fa), fA = await textOf(fa);
+        await ev(`(window.__navRestore?.(), delete window.__navRestore, window.__obsB?.disconnect(), true)`); await writesWork();
+        check(went && held && s.url === fa && s.at === 1 && s.shows && s.ro === false && s.pages === 1 && !s.saw && s.kept && fA.includes(mark),
+          "U8-RETURN (grader L6): no Navigation API, the history on another script's entry: the file shown asked for again is pushed as a new entry and opens there, editable; the other file never shown; its edit written", { went, held, s: { ...s, src: s.src.slice(-30) }, fileA: fA.slice(-30) });
+        // (back on A, entry 0: three entries back)
+        await ev(`(history.go(-3), true)`); await until(`history.state && history.state.sbTex === 0`, 20000); await shownIs(fa); await sleep(500);
+      }
     }
     // ---- (astra B5-R1-A1) the exact entry shown is the one gone back to, a fragment's entry between: A, A#section, B;
     // with unsaved B, Back one step and Back two steps, declined, stay on B (its entry, URL and text); accepted two
