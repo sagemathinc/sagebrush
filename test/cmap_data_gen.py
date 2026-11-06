@@ -86,9 +86,10 @@ for n, s in listed_hex.items():
 lines += ["}", "# listed colors given in full", "_FULL = {"]
 for n, s in listed_full.items():
     lines.append("    %r: %r," % (n, s))
-lines += ["}", "# segment data: per channel, rows (x, value from the left, value to the right)", "_SEG = {"]
+lines += ["}", "# segment data, as text (parsed when the map is used): per channel, separated",
+          "# by \"|\", rows (x, value from the left, value to the right) separated by \";\"", "_SEG = {"]
 for n, t in seg.items():
-    lines.append("    %r: %r," % (n, t))
+    lines.append("    %r: %r," % (n, "|".join(";".join(" ".join(repr(v) for v in row) for row in ch) for ch in t)))
 lines += ["}", ""]
 lines += r'''
 _pi = math.pi
@@ -224,6 +225,11 @@ def _clip(v):
     return 0.0 if v < 0.0 else 1.0 if v > 1.0 else v
 
 
+def _rows(name):
+    # (a map's segment data from its text: per channel, its rows of floats)
+    return [[tuple(float(v) for v in row.split()) for row in ch.split(";")] for ch in _SEG[name].split("|")]
+
+
 def _segment(rows, n):
     # (matplotlib's table: the x's and the grid scaled by n - 1; an entry on
     # a row's x takes the value from its left; the ends the outer values)
@@ -276,7 +282,7 @@ def table(name):
         return t
     if name.endswith("_r") and name[:-2] in _SEG:
         # (reversed as matplotlib reverses one: its segment data, x to 1 - x)
-        r, g, b = (_segment([(1 - x, y1, y0) for x, y0, y1 in rows[::-1]], 256) for rows in _SEG[name[:-2]])
+        r, g, b = (_segment([(1 - x, y1, y0) for x, y0, y1 in rows[::-1]], 256) for rows in _rows(name[:-2]))
         t = list(zip(r, g, b))
     elif name.endswith("_r") and name[:-2] in _FORMULA:
         g = _grid(256)
@@ -302,7 +308,7 @@ def table(name):
         vals = [float(v) for v in _FULL[name].split()]
         t = [tuple(vals[i:i + 3]) for i in range(0, len(vals), 3)]
     elif name in _SEG:
-        r, g, b = (_segment(rows, 256) for rows in _SEG[name])
+        r, g, b = (_segment(rows, 256) for rows in _rows(name))
         t = list(zip(r, g, b))
     elif name in _FORMULA:
         g = _grid(256)
