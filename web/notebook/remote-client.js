@@ -27,6 +27,8 @@
 //   const r = await client.request("POST", "/bindings", { notebook, kernel, path }, { signal });
 //   for await (const ev of client.events(`/bindings/${b}/runs/${rq}/events`, 0, signal)) ...
 
+import { TunnelNotSent } from "./pair-tunnel.js";
+
 // (an event's JSON is at most 897 KiB: one 896 KiB message and its envelope;
 // its SSE framing, "id: <seq>\ndata: ", at most 64 bytes more)
 export const EVENT_DATA_MAX = 897 * 1024;
@@ -255,6 +257,8 @@ export class RemoteClient {
         // (raced with the signal: a fetch that ignored its abort can't hold the request past its deadline)
         res = await raceAbort(this.fetch(url, { method, headers, redirect: "error", credentials: "omit", cache: "no-store", signal, ...(text !== undefined ? { body: text } : {}) }), signal);
       } catch (e) {
+        // (the paired tunnel's own refusal, thrown in this turn before its send: never sent (local-kernel plan r3 D5))
+        if (e instanceof TunnelNotSent) throw new NotSentError(e.message);
         throw new AmbiguousError(signal?.aborted ? "aborted after it was sent" : `the request failed: ${String(e?.message ?? e).slice(0, 200)}`, { aborted: !!signal?.aborted });
       }
       const fresh = res.headers.get("DPoP-Nonce");

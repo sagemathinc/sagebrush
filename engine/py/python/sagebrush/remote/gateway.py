@@ -948,6 +948,11 @@ class Gateway:
 
     def _subscribe(self, req, run, after):
         c = req.conn
+        if req.cancelled:
+            # (cancelled before its stream began: nothing streams, and `retired` is still its last frame (r3.1 R3-1))
+            self._state(c).open.pop(req.id, None)
+            req.answered = True
+            return self._send_control(c, {"id": req.id, "retired": True})
         if after + 1 < run.first_seq and not (after == 0 and run.first_seq == 1):
             return self._answer(req, 410, {"error": "expired-cursor"})
         s = self._state(c)
