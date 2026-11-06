@@ -1,10 +1,10 @@
 {
  "v": 1,
- "reason": "A series meeting an inexact number (RR, RDF, CC, CDF, RealField(p), ComplexField(p)): over the number's field, as Sage (lib/_sage_series.py _inexact_parent in _target_base; an inexact field divides by multiplying with the inverse; lib/_sage_matrix.py _cc_or_none: ComplexNumber dunders return NotImplemented) Re-measured with bun 1.4.4 (size-record.sh) on master 48d4df01 vs head 258c8277: cli/lib.gen.js +568, cli/pyjs.cjs +572, engine/lib/sage.pre +8675, engine/lib/sage.src +2365; no other row moves. Markers: exact, except cli/pyjs.cjs 604 (+572 measured, plus 32 B of margin, as it moves with master).",
+ "reason": "A series meeting an inexact number (RR, RDF, CC, CDF, RealField(p), ComplexField(p)): over the number's field, as Sage (lib/_sage_series.py _inexact_parent in _target_base; an inexact field divides by multiplying with the inverse; lib/_sage_matrix.py _cc_or_none: ComplexNumber dunders return NotImplemented) Re-measured with bun 1.4.4 (size-record.sh) on master 48d4df01 vs head 101a0fe2: cli/lib.gen.js +1052, cli/pyjs.cjs +1088, engine/lib/sage.pre +12621, engine/lib/sage.src +3416; no other row moves. Markers: exact, except cli/pyjs.cjs 1120 (+1088 measured, plus 32 B of margin, as it moves with master).",
  "bytes": {
-  "cli/lib.gen.js": 568,
-  "cli/pyjs.cjs": 604,
-  "engine/lib/sage.pre": 8675,
-  "engine/lib/sage.src": 2365
+  "cli/lib.gen.js": 1052,
+  "cli/pyjs.cjs": 1120,
+  "engine/lib/sage.pre": 12621,
+  "engine/lib/sage.src": 3416
  }
 }
