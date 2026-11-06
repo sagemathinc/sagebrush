@@ -266,7 +266,7 @@ class SeriesRing_:
         # polynomial in the series variable gives its coefficients, one in another variable is
         # converted by the base
         if self._var_poly(x):
-            r = Series(self, 0, [self._base(c) for c in x.list()], None)
+            r = Series(self, 0, [self._coefficient(c) for c in x.list()], None)
             return r.add_bigoh(prec) if prec is not None else r
         if type(x).__name__ == "FractionFieldElement":
             num, den = self(x.numerator()), self(x.denominator())
@@ -276,9 +276,23 @@ class SeriesRing_:
         r = Series(self, 0, [c], None)
         return r.add_bigoh(prec) if prec is not None else r
 
+    def _coefficient(self, c):
+        """c in the base; an element of GF(p) that the base does not take, by its integer lift
+        (Sage's S(GF(5)['x'].gen()) over K['x'] is the series x)."""
+        try:
+            return self._base(c)
+        except (TypeError, ValueError):
+            if type(c).__name__ == "IntegerMod_int" and hasattr(c, "lift"):
+                return self._base(c.lift())
+            raise
+
     def _var_poly(self, x):
         """Whether x is a polynomial in the series variable that is not an element of the base
         (nor of a ring that coerces into it): it converts by its coefficients, not as a scalar."""
+        if _poly_elt(x):
+            # (a polynomial that does not coerce into the base gives its coefficients, whatever its
+            # variable: Sage's S(QQ['y'].gen()) over K['x'] is the series x)
+            return not _coerces_into(x, self._base)
         return (hasattr(x, "list") and hasattr(x, "degree") and hasattr(x, "parent") and not isinstance(x, (int, _F))
                 and not _coerces_into(x, self._base) and _variable_of(x) in (None, self._name))
 
@@ -307,7 +321,7 @@ def _coerces_into(x, B):
         k, K = P.base_ring(), B.base_ring()
     except Exception:
         return False
-    return k is K or k == K or k is _sa().ZZ
+    return _coef_coerces(k, K)
 
 
 def _inexact_parent(o):
@@ -327,14 +341,26 @@ def _names(R):
     return tuple(R.variable_names()) if hasattr(R, "variable_names") else (R.variable_name(),)
 
 
+def _number_field(K):
+    """Whether K is a number field (QuadraticField(2), CyclotomicField(3) ...)."""
+    return type(K).__name__.startswith("NumberField")
+
+
+def _coef_coerces(k, K):
+    """Whether the coefficient ring k coerces into K: the same ring, ZZ into any, QQ into a
+    number field (QQ['x'] into K['x']). The one rule both _coerces_into and _coef_pushout use."""
+    return k is K or k == K or k is _sa().ZZ or (k is _sa().QQ and _number_field(K))
+
+
 def _coef_pushout(k, S):
     """The common coefficient ring of k and S in a series over k[V] meeting S, as Sage finds
-    it (ZZ with QQ is QQ; ZZ or QQ with GF(p) is GF(p)); None when there is none (GF(p) with
-    QQ)."""
+    it: whichever of the two the other coerces into (_coef_coerces: ZZ with QQ is QQ, QQ with a
+    number field K is K), and QQ with GF(p) is GF(p) (Sage's action, for * and / only); None
+    when there is none (GF(p) with QQ)."""
     sa = _sa()
-    if k is S or k == S or S is sa.ZZ:
+    if _coef_coerces(S, k):
         return k
-    if k is sa.ZZ:
+    if _coef_coerces(k, S):
         return S
     if k is sa.QQ and getattr(S, "is_prime_field", lambda: False)():
         return S
@@ -362,7 +388,9 @@ def _frac(B):
     if _is_padic(B) and not B._field:
         return B.fraction_field()
     if _poly_base(B):
-        return B.fraction_field()
+        # (a ring without one, as polynomials over a number field here: itself; its units
+        # divide in it, and a non-unit is refused as before)
+        return B.fraction_field() if hasattr(B, "fraction_field") else B
     return B
 
 
@@ -875,7 +903,7 @@ class Series:
             S, poly, in_var = sa.ZZ, False, False
         elif isinstance(o, _F):
             S, poly, in_var = sa.QQ, False, False
-        elif type(o).__name__ == "IntegerMod_int" and hasattr(o, "parent"):
+        elif type(o).__name__ in ("IntegerMod_int", "NumberFieldElement") and hasattr(o, "parent"):
             S, poly, in_var = o.parent(), False, False
         else:
             return B
@@ -889,7 +917,7 @@ class Series:
         # (* and /, not + or -); a polynomial in the series variable over other coefficients
         # meets a Laurent series not at all, nor QQ with GF(p); a division by a polynomial in
         # the base's variables over other coefficients fails (a RuntimeError in Sage)
-        qq_gf = k0 is sa.QQ
+        qq_gf = k0 is sa.QQ and getattr(k, "is_prime_field", lambda: False)() and getattr(k, "characteristic", lambda: 0)() != 0
         if (qq_gf and op in ("+", "-")) or (in_var and (self._R._laurent or qq_gf)):
             raise TypeError("unsupported operand parent(s): '%r' and '%r'" % (self._R, S))
         if op == "/" and poly and not in_var:
