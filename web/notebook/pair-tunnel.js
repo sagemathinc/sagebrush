@@ -54,10 +54,12 @@ const VERSION_RE = /^(?:dev|(\d{1,6}(?:\.\d{1,6}){0,3})((?:a|b|rc)\d{1,6})?(\.po
  * version (0.9.0.post1, 0.9.0+x) is not.
  */
 export function versionAtLeast(v, need) {
+  // (a malformed minimum never passes, not even for "dev" (daybreak3's VERSION-3); then the whole version, before
+  // any ordering)
+  if (typeof need !== "string" || !/^\d{1,6}(\.\d{1,6}){0,3}$/.test(need)) return false;
   if (v === "dev") return true;
   const m = typeof v === "string" ? VERSION_RE.exec(v) : null;
-  // (a malformed version, or minimum, never passes: the whole version is checked first)
-  if (!m || !m[1] || typeof need !== "string" || !/^\d{1,6}(\.\d{1,6}){0,3}$/.test(need)) return false;
+  if (!m || !m[1]) return false;
   const a = m[1].split(".").map(Number), b = need.split(".").map(Number);
   for (let i = 0; i < Math.max(a.length, b.length); i++) {
     const x = a[i] ?? 0, y = b[i] ?? 0;

@@ -451,6 +451,11 @@ for (const [what, m, code] of [
   }
   a = await answer({ ...RESULT, version: "0.9.0rc1" }, "0.9.0");
   check(a.r.e?.kind === "old", "a pre-release of the minimum is too old");
+  // (daybreak3's VERSION-3: a page whose own minimum is malformed accepts no runner, a checkout's "dev" included)
+  for (const badMin of ["0.9.0rc1", "0.9.0\n", "v1"]) {
+    const z = await answer({ ...RESULT, version: "dev" }, badMin);
+    check(z.r.e?.kind === "old", `a malformed minimum (${JSON.stringify(badMin)}) pairs with nothing, not even dev (${z.r.e?.kind})`);
+  }
   a = await answer({ ...RESULT, version: "dev" });
   check(a.r.v instanceof Tunnel && !("needs" in a.hello.params), "with no minimum, no needs is sent, and dev pairs");
   const { pairedStarter, PAIRED, PAIR_SHEET } = await import("./remote-ui.js");

@@ -87,11 +87,13 @@ def version_at_least(v, need):
     """Is version v at least need (a release's numbers, e.g. "0.9.0")?  A release gate, as PEP 440 orders it: "dev" (a
     checkout) always is; a pre-release (0.9.0rc1, 0.9.0a2, 0.9.0.dev3) is below its release; a post-release or a local
     version (0.9.0.post1, 0.9.0+x) is not."""
+    if not isinstance(need, str) or not _NEED.fullmatch(need):
+        return False  # (a malformed minimum never passes, not even for "dev" (daybreak3's VERSION-3))
     if v == "dev":
         return True
     m = _VERSION.fullmatch(v) if isinstance(v, str) else None
-    if not m or not isinstance(need, str) or not _NEED.fullmatch(need):
-        return False  # (a malformed version, or minimum, never passes: the whole version is checked first)
+    if not m:
+        return False  # (a malformed version never passes: the whole version is checked before any ordering)
     a, b = [int(x) for x in m.group(1).split(".")], [int(x) for x in need.split(".")]
     n = max(len(a), len(b))
     a, b = a + [0] * (n - len(a)), b + [0] * (n - len(b))
