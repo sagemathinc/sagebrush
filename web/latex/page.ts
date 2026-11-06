@@ -199,22 +199,29 @@ const noteShown = () => { const st = history.state; shownAt = st.sbTex; shownId 
 //  (astra U8-SWITCH-6))
 const landsHere = (st: any) => history.state?.sbTexId === shownId && location.href === shownUrl
   || returnBy === "go" && (typeof st?.sbTex !== "number" || st.sbTex === shownAt);
-// (a return superseded by a newer Back or Forward: the entry it was going to, fenced, so its traversal, if it lands
-//  after all, is taken back to the entry shown instead of opening that file again. For the next popstate only, and
-//  lifted when the traversal is given up (the Navigation API's finished, rejected))
-let fenced: string | null = null, fenceHooked = false;
+// (a return superseded by a newer Back or Forward: its traversal, if it lands after all, is taken back to the entry
+//  shown instead of opening that file again. Known by the traversal itself, not by where it lands (astra U8-SWITCH-7:
+//  a Back or Forward of the person's own to that same entry goes on as asked): each return by key carries a token in
+//  its navigation's info, which the Navigation API's navigate event, fired before that traversal's popstate, hands
+//  back; a superseded return's token is stale. A return by position needs none: its history.go was queued before the
+//  Back or Forward that superseded it, so it has landed already. A traversal given up never lands: its token goes)
+let retTok = 0, retPending = 0, staleTok = 0, staleLanding = false, fenceHooked = false;
+// (back to the entry shown by its key, the traversal tagged)
+const traverseShown = (nav: any, failed: () => void) => {
+  const tok = ++retTok; retPending = tok;
+  const gone = () => { if (staleTok === tok) staleTok = 0; if (retPending === tok) retPending = 0; };
+  try { nav.traverseTo(shownKey, { info: { sbTexReturn: tok } }).finished?.catch(() => { gone(); failed(); }); } catch { gone(); failed(); }
+};
+const onNavigate = (e: any) => { if (e.navigationType === "traverse") staleLanding = !!staleTok && e.info?.sbTexReturn === staleTok; };
 const fenceStale = (ev: PopStateEvent) => {
-  const f = fenced; if (!f) return;
-  fenced = null;
-  if (ev.state?.sbTexId !== f || f === shownId) return;
+  if (!staleLanding) return;
+  staleLanding = false; staleTok = 0;
   ev.stopImmediatePropagation();
-  const nav = navApi(), at = ev.state?.sbTex;
-  returning = true;
+  const nav = navApi();
+  returning = true; returnBy = "key";
   if (nav?.traverseTo && shownKey && nav.entries?.().some((x: any) => x.key === shownKey)) {
-    returnBy = "key";
-    try { nav.traverseTo(shownKey).finished?.catch(() => { if (returning) { returning = false; history.pushState({ sbTex: shownAt + 1, sbTexId: entryId() }, "", shownUrl); noteShown(); } }); } catch { returning = false; }
-  } else if (typeof at === "number" && at !== shownAt) { returnBy = "go"; history.go(shownAt - at); }
-  else { returning = false; history.pushState({ sbTex: shownAt + 1, sbTexId: entryId() }, "", shownUrl); noteShown(); }
+    traverseShown(nav, () => { if (returning) { returning = false; history.pushState({ sbTex: shownAt + 1, sbTexId: entryId() }, "", shownUrl); noteShown(); } });
+  } else { returning = false; history.pushState({ sbTex: shownAt + 1, sbTexId: entryId() }, "", shownUrl); noteShown(); }
 };
 // (asked only when a write has actually failed: William, Nov 2, U8: never otherwise; the edits are kept in this
 // browser's drafts either way, and offered when the file is opened again)
@@ -227,7 +234,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // (the editor shown is closed first: its pending edits written, or durable in its drafts, before this file is read)
   const my = ++mounts;
   // (the fence's listener: once, before any mount's own, so a stale landing it takes never reaches them)
-  if (!fenceHooked) { fenceHooked = true; window.addEventListener("popstate", fenceStale); }
+  if (!fenceHooked) { fenceHooked = true; window.addEventListener("popstate", fenceStale); navApi()?.addEventListener?.("navigate", onNavigate); }
   const prev = current; current = null;
   closing = closing.then(() => prev?.close()).catch(() => {});
   await closing;
@@ -391,8 +398,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // (a listener of its own for the landing, not this editor's: a fast close can dispose of this editor, and its
   //  listeners, before the history lands; whichever sees the landing first runs what waits, once)
   // (a newer Back or Forward than the return under way: the return given up, what waited for it dropped, and its
-  //  target fenced (astra U8-SWITCH-6))
-  const supersede = () => { returning = false; fenced = shownId; landOff?.(); landOff = null; afterReturn = null; intent(); };
+  //  traversal, if it went by key, marked stale (astra U8-SWITCH-6, -7))
+  const supersede = () => { if (returnBy === "key" && retPending) staleTok = retPending; retPending = 0; returning = false; landOff?.(); landOff = null; afterReturn = null; intent(); };
   const listenLand = () => {
     landOff?.();
     const onLand = (ev: PopStateEvent) => {
@@ -416,10 +423,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     if (nav?.traverseTo && shownKey && nav.entries?.().some((x: any) => x.key === shownKey)) {
       returning = true; returnBy = "key";
       const failed = () => { if (returning) { returning = false; pushShown(); landed(); } };
-      // (its traversal given up (a newer navigation aborts it): it never lands, so a fence on its target, if a newer
-      //  Back put one, is lifted. Not when it finished: that can settle before its popstate comes)
-      const id = shownId, over = () => { if (fenced === id) fenced = null; };
-      try { nav.traverseTo(shownKey).finished?.catch(() => { over(); failed(); }); } catch { failed(); }
+      traverseShown(nav, failed);
     } else if (to !== null && to !== shownAt) { returning = true; returnBy = "go"; history.go(shownAt - to); }
     else { pushShown(); landed(); }
   };
@@ -449,8 +453,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
         returning = true; returnBy = "key";
         // (traverseTo's own failure: the entry pushed again, if the return didn't happen)
         const failed = () => { if (returning) { returning = false; pushShown(); } };
-        const id = shownId, over = () => { if (fenced === id) fenced = null; };
-        try { nav.traverseTo(shownKey).finished?.catch(() => { over(); failed(); }); } catch { failed(); }
+        traverseShown(nav, failed);
       } else if (to !== null && to !== shownAt) { returning = true; returnBy = "go"; history.go(shownAt - to); }
       else pushShown();
       return;

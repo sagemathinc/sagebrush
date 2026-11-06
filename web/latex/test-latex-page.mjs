@@ -495,6 +495,67 @@ try {
         // (back on A, entry 0)
         await ev(`(history.back(), true)`); await shownIs(fa); await sleep(500);
       }
+      // (5) (astra U8-SWITCH-7) ...as (4), then the person's own Forward, back to A: before the late return lands (at
+      // 100 ms) and after it (at 900 ms). Either way A opens, editable, on its entry, and stays: only the superseded
+      // return's own traversal is taken back, never a Back or Forward to the same entry. A's edit written
+      for (const fwdAt of [100, 900]) {
+        const mark = `% forward to A at ${fwdAt}`;
+        await ev(`(window.__sbTex({ path: "/sw/c.tex", fid: ${JSON.stringify(fc)} }), true)`); await shownIs(fc); await sleep(300);
+        await ev(`(window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }), true)`); await shownIs(fa); await sleep(300);
+        await watchX(fb); await holdClose(mark);
+        const nav = await ev(`(() => { const v = window.navigation; if (!v?.traverseTo) return false; const orig = v.traverseTo.bind(v);
+          v.traverseTo = (k, o) => { window.__late = (window.__late ?? 0) + 1; const late = new Promise((r) => setTimeout(r, 300)); return { committed: late, finished: late.then(() => orig(k, o).finished) }; };
+          window.__navRestore = () => { delete v.traverseTo; }; window.__late = 0; return true; })()`);
+        await ev(`(window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} }), true)`);
+        const held = await until(`window.__k >= 2`, 10000);
+        const went = await ev(`(async () => {
+          window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }); window.__rel();
+          await new Promise((r) => setTimeout(r, 50));
+          const pending = new URLSearchParams(location.search).get("tex") !== ${JSON.stringify(fa)};
+          history.go(-2);
+          await new Promise((r) => setTimeout(r, ${fwdAt - 50}));
+          const onC = new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fc)};
+          history.forward();
+          return { pending, onC }; })()`);
+        await shownIs(fa); await sleep(1800);
+        const s = await stateOf(fa), fA = await textOf(fa), late = await ev(`window.__late`);
+        await ev(`(window.__navRestore?.(), delete window.__navRestore, window.__obsB?.disconnect(), true)`); await writesWork();
+        check(nav && held && went && went.pending && went.onC && late >= 1 && s.url === fa && s.at === 2 && s.title === "a.tex" && s.shows && s.ro === false && s.pages === 1 && !s.saw && s.kept && fA.includes(mark),
+          `U8-SWITCH-7 (Navigation API, the return late; Back to C at 50 ms, then Forward to A at ${fwdAt} ms${fwdAt < 300 ? ", before the late return lands" : ", after it"}): A opens, editable, on its entry, and stays; B never shown; A's edit written`, { nav, held, went, late, s: { ...s, src: s.src.slice(-30) }, fileA: fA.slice(-30) });
+        // (back on A, entry 0: two entries back)
+        await ev(`(history.go(-2), true)`); await until(`new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fa)} && history.state && history.state.sbTex === 0`, 20000); await shownIs(fa); await sleep(500);
+      }
+      // (6) (daybreak3 DB3-U8-SWITCH-7) ...as (4), with an unrelated pop before the late return lands: A 0, C 1, C#f 2,
+      // A 3, B 4; Back three entries to C at 50 ms, then Forward to C#f (C's own fragment entry) at 100 ms; the late
+      // return, landing on A at 300 ms, is still taken back: C stays, on C#f, its entry
+      {
+        const mark = "% an unrelated pop first";
+        await ev(`(window.__sbTex({ path: "/sw/c.tex", fid: ${JSON.stringify(fc)} }), true)`); await shownIs(fc); await sleep(300);
+        await ev(`(location.hash = "#f", true)`); await until(`location.hash === "#f" && history.state && history.state.sbTex === 2`, 10000);
+        await ev(`(window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }), true)`); await shownIs(fa); await sleep(300);
+        await watchX(fb); await holdClose(mark);
+        const nav = await ev(`(() => { const v = window.navigation; if (!v?.traverseTo) return false; const orig = v.traverseTo.bind(v);
+          v.traverseTo = (k, o) => { window.__late = (window.__late ?? 0) + 1; const late = new Promise((r) => setTimeout(r, 300)); return { committed: late, finished: late.then(() => orig(k, o).finished) }; };
+          window.__navRestore = () => { delete v.traverseTo; }; window.__late = 0; return true; })()`);
+        await ev(`(window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} }), true)`);
+        const held = await until(`window.__k >= 2`, 10000);
+        const went = await ev(`(async () => {
+          const at = history.state && history.state.sbTex;
+          window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }); window.__rel();
+          await new Promise((r) => setTimeout(r, 50));
+          history.go(-3);
+          await new Promise((r) => setTimeout(r, 50));
+          const onC = new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fc)} && location.hash === "";
+          history.forward();
+          return { at, onC }; })()`);
+        await shownIs(fc); await sleep(1800);
+        const s = await stateOf(fc), fA = await textOf(fa), late = await ev(`window.__late`), hash = await ev(`location.hash`);
+        await ev(`(window.__navRestore?.(), delete window.__navRestore, window.__obsB?.disconnect(), true)`); await writesWork();
+        check(nav && held && went && went.at === 4 && went.onC && late >= 2 && s.url === fc && hash === "#f" && s.at === 2 && s.title === "c.tex" && s.shows && s.ro === false && s.pages === 1 && !s.saw && s.kept && fA.includes(mark),
+          "U8-SWITCH-7 (an unrelated pop first: Back to C, then Forward to C's own fragment entry, before the late return lands): the late return is still taken back; C stays, on C#f, its entry; A not reopened; B never shown; A's edit written", { nav, held, went, late, hash, s: { ...s, src: s.src.slice(-30) }, fileA: fA.slice(-30) });
+        // (back on A, entry 0: two entries back)
+        await ev(`(history.go(-2), true)`); await shownIs(fa); await until(`history.state && history.state.sbTex === 0 && location.hash === ""`, 20000); await sleep(500);
+      }
     }
     // ---- (astra B5-R1-A1) the exact entry shown is the one gone back to, a fragment's entry between: A, A#section, B;
     // with unsaved B, Back one step and Back two steps, declined, stay on B (its entry, URL and text); accepted two
