@@ -25,7 +25,7 @@ export function picksWhy(names: string[]): string | null {
     if (seen.has(n)) again ||= n;
     seen.add(n);
   }
-  if (count) return `${count === 1 ? "A file's name" : `${count} files' names`} can't go safely into a .zip (a character such as \\ or :, a device name such as NUL, or a name ending in a dot or space): ${bad.join(", ")}${count > bad.length ? ` and ${count - bad.length} more` : ""}. Rename ${count === 1 ? "it" : "them"}, or untick ${count === 1 ? "it" : "them"}, then download again.`;
+  if (count) return `${bad.join(", ")}${count > bad.length ? ` and ${count - bad.length} more` : ""}: can't go safely into a .zip (a \\ or :, a name like NUL, or one ending in . or a space). Rename or uncheck, then download again.`;
   if (again) return `Two files would have the same name in the .zip: ${again}.`;
   return null;
 }
@@ -57,8 +57,8 @@ export async function zipPicks(o: { workerUrl: string; picks: Pick[]; name: stri
       stop();
       const bytes = await p.read();
       stop();
-      if (bytes.length > o.caps.file) throw new ExportStopped(`${p.name} is larger than ${mib(o.caps.file)}, the most one file can be in a download.`, true);
-      if ((total += bytes.length) > o.caps.total) throw new ExportStopped(`These files are more than ${mib(o.caps.total)} in all, the most one download can hold.`, true);
+      if (bytes.length > o.caps.file) throw new ExportStopped(`${p.name} is over ${mib(o.caps.file)}, a download's limit for one file.`, true);
+      if ((total += bytes.length) > o.caps.total) throw new ExportStopped(`These files are over ${mib(o.caps.total)} in all, a download's limit.`, true);
       await zip.member(p.name, [bytes], await deflates(p.name, "file", bytes), Date.now(), o.caps.file, `${p.name} grew past ${mib(o.caps.file)}`);
       o.progress?.(++done, o.picks.length);
     }

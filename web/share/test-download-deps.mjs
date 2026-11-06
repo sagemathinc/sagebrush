@@ -159,7 +159,7 @@ try {
     ok(!(await ev("document.querySelector('#dldepsgo').disabled")), "(under the cap as listed, Download .zip is enabled)");
     await put("/data/points.csv", POINTS + "9,9\n".repeat(2000));
     const r = await download();
-    ok(!r.zip && /larger than/.test(r.line) && /Nothing was downloaded/.test(r.line), `a file grown past the cap after it was listed stops the download, nothing handed over: ${r.line}`);
+    ok(!r.zip && /is over/.test(r.line) && /Nothing was downloaded/.test(r.line), `a file grown past the cap after it was listed stops the download, nothing handed over: ${r.line}`);
     await put("/data/points.csv", POINTS);
     await ev("window.sagebrush.downloadTest.caps = null");
   }

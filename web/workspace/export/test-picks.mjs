@@ -15,7 +15,7 @@ for (const [name, what] of [["..\\outside.txt", "parent traversal with \\"], ["C
 }
 {
   const why = picksWhy(["nb.ipynb", ...Array.from({ length: 7 }, (_, i) => `bad${i}\\x`)]);
-  ok(why?.startsWith("7 files' names") && why.includes("and 2 more"), `many unsafe names: counted, the first 5 said: ${why?.slice(0, 60)}`);
+  ok(why?.startsWith("bad0\\x, bad1") && why.includes("bad4\\x and 2 more:"), `many unsafe names: the first 5 said, the rest counted: ${why?.slice(0, 60)}`);
 }
 ok(/the same name/.test(picksWhy(["nb.ipynb", "a.csv", "a.csv"]) ?? ""), "a name twice refused");
 
