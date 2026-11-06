@@ -1,10 +1,10 @@
 {
  "v": 1,
- "reason": "The common parent of a series over a polynomial base and an element of another ring, as Sage finds it (lib/_sage_series.py: _poly_target, _coef_pushout; the pushout of the coefficients, subsets and supersets of the variables, and Sage's refusals) Re-measured with bun 1.4.4 (size-record.sh) on master d6b593e9 vs head fd8474e9: cli/lib.gen.js +1584, cli/pyjs.cjs +1632, engine/lib/sage.pre +15799, engine/lib/sage.src +4293; no other row moves. Markers: exact, except cli/pyjs.cjs 1664 (+1632 measured, plus 32 B of margin, as it moves with master).",
+ "reason": "The common parent of a series over a polynomial base and an element of another ring, as Sage finds it (lib/_sage_series.py: _poly_target, _coef_pushout; the pushout of the coefficients, subsets and supersets of the variables, and Sage's refusals) Re-measured with bun 1.4.4 (size-record.sh) on master f49d4e4b vs head 9ac0743d: cli/lib.gen.js +1844, cli/pyjs.cjs +1832, engine/lib/sage.pre +18889, engine/lib/sage.src +4994; no other row moves. Markers: exact, except cli/pyjs.cjs 1864 (+1832 measured, plus 32 B of margin, as it moves with master).",
  "bytes": {
-  "cli/lib.gen.js": 1584,
-  "cli/pyjs.cjs": 1664,
-  "engine/lib/sage.pre": 15799,
-  "engine/lib/sage.src": 4293
+  "cli/lib.gen.js": 1844,
+  "cli/pyjs.cjs": 1864,
+  "engine/lib/sage.pre": 18889,
+  "engine/lib/sage.src": 4994
  }
 }
