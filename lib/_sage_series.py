@@ -334,7 +334,8 @@ def _is_zero(c):
 
 def _latex_number(c):
     """c's latex when it is a plain number (an integer, a rational, an
-    element of a prime field): 3, -\\frac{1}{2}; else None."""
+    element of a prime field, which prints as its digits): 3, -\\frac{1}{2};
+    else None."""
     import re
     if isinstance(c, bool):
         return None
@@ -343,10 +344,7 @@ def _latex_number(c):
             return str(c.numerator)
         return "%s\\frac{%d}{%d}" % ("-" if c < 0 else "", abs(c.numerator), c.denominator)
     s = repr(c)
-    if re.fullmatch(r"-?\d+", s):
-        return s
-    m = re.fullmatch(r"(-?)(\d+)/(\d+)", s)
-    return "%s\\frac{%s}{%s}" % m.groups() if m else None
+    return s if re.fullmatch(r"-?\d+", s) else None
 
 
 def _latex_from_repr(s):
@@ -626,6 +624,14 @@ class Series:
             (1 +  x + \\frac{1}{2} x^{2} + O(x^{4}), -\\frac{1}{3} x + O(x^{2}))
             sage: latex(2 - x + O(x^3)), latex(O(x^3)), latex(R(0)), latex(3 + O(x))
             (2 -  x + O(x^{3}), 0 + \\cdots, 0, 3 + O(x))
+
+        Coefficients that are not plain numbers keep the earlier form (here
+        as Sage writes it), and so do Laurent series::
+
+            sage: S.<y> = PowerSeriesRing(RR); latex(RR(1/3) + 2*y + O(y^3))
+            0.333333333333333 + 2.00000000000000 y + O(y^{3})
+            sage: L.<z> = LaurentSeriesRing(QQ); latex(z^-2 + 1 + O(z))  # sagebrush only (Sage: \\frac{1}{z^{2}} + 1 + O(z))
+            z^{-2} + 1 + O(z)
         """
         if self._R._laurent:
             return _latex_from_repr(self)
