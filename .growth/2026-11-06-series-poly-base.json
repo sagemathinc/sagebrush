@@ -1,0 +1,10 @@
+{
+ "v": 1,
+ "reason": "Series over a polynomial base as Sage (lib/_sage_series.py): a base element is a constant, not the series variable (a*x was x^2); quotients by non-units land in the fraction field; Laurent list() from the valuation Re-measured with bun 1.4.4 (size-record.sh) on master 1a45eba2 vs head d9dfb831: cli/lib.gen.js +1036, cli/pyjs.cjs +1016, engine/lib/sage.pre +15001, engine/lib/sage.src +3215; no other row moves. Markers: exact, except cli/pyjs.cjs 1048 (+1016 measured, plus 32 B of margin, as it moves with master).",
+ "bytes": {
+  "cli/lib.gen.js": 1036,
+  "cli/pyjs.cjs": 1048,
+  "engine/lib/sage.pre": 15001,
+  "engine/lib/sage.src": 3215
+ }
+}
