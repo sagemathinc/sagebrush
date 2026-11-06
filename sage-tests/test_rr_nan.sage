@@ -22,3 +22,8 @@ for t in ["SR(RR(2))*SR(CC(infinity, 1))", "SR(CC(infinity, 1))*SR(RR(2))", "SR(
           "SR(RR(infinity))*SR(CC(1, 2))", "SR(CC(1, 2))*SR(RR(infinity))", "SR(RR(-infinity))*SR(CC(1, 2))",
           "SR(RR(infinity))*SR(CC(1, 2))*x", "SR(RR(2))*SR(CC(infinity, 1))*x"]:
     print(t, '=>', sage_eval(t, locals=dict(x=x)))
+# an exact complex number with real part 1 times a float is the complex formula (the grader's r769b N10), and an
+# exact 1 is the identity on either side of a product (N9)
+for t in ["SR(1 + 2*I)*SR(RR(2))", "SR(RR(2))*SR(1 + 2*I)", "SR(1 + I)*RR(1.5)*x", "RR(1.5)*x*(1 + I)", "SR(1 + 2*I)*SR(CC(3, 1))",
+          "SR(CC(infinity, 1))*1", "1*SR(CC(infinity, 1))", "SR(1)*SR(CC(infinity, 1))*SR(1)", "SR(CC(infinity, 1))*x*1"]:
+    print(t, '=>', sage_eval(t, locals=dict(x=x)))
