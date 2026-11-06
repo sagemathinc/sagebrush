@@ -1,7 +1,7 @@
 {
  "v": 1,
- "reason": "Your computer: install, version check, upgrade (the PR after #778): pair-tunnel.js's RUNNER_MIN and version compare, the sheet's two commands, the too-old refusal's words, served by the CLI with the page. Measured with scripts/build-cli.mjs after bun web/build.ts (CI's order), base remote-page-pair 67a59056 vs head: cli/pyjs.cjs +2646 (r2) (daybreak2's bun 1.4.4 bind of #778 r3 matched this machine's measurement exactly). No other row moves. Marker: cli/pyjs.cjs 2678 (+2646, plus 32 B of margin, as it moves with master).",
+ "reason": "Your computer: install, version check, upgrade (the PR after #778): pair-tunnel.js's RUNNER_MIN and version compare, the sheet's two commands, the too-old refusal's words, served by the CLI with the page. Measured with scripts/build-cli.mjs after bun web/build.ts (CI's order), base remote-page-pair 67a59056 vs head: cli/pyjs.cjs +2798 (r3) (daybreak2's bun 1.4.4 bind of #778 r3 matched this machine's measurement exactly). No other row moves. Marker: cli/pyjs.cjs 2830 (+2798, plus 32 B of margin, as it moves with master).",
  "bytes": {
-  "cli/pyjs.cjs": 2678
+  "cli/pyjs.cjs": 2830
  }
 }

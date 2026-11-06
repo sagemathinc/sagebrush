@@ -443,6 +443,14 @@ for (const [what, m, code] of [
     `a too-old runner: refused, said, the socket closed; the hello said what it needs (${a.r.e?.message})`);
   a = await answer({ ...RESULT, version: "0.9.0" }, "0.9.0");
   check(a.r.v instanceof Tunnel, "a new-enough runner pairs");
+  // (astra's VERSION-2: a version outside the whole grammar is never paired with, minimum or not)
+  for (const bad of ["0.9.0+", "0.9.0.post1junk", "0.9.1-old", "0.9.0RC1", "v1.0"]) {
+    const x = await answer({ ...RESULT, version: bad }, "0.9.0");
+    const y = await answer({ ...RESULT, version: bad });
+    check(x.r.e?.kind === "protocol" && y.r.e?.kind === "protocol" && x.sock.closedWith === 1000, `a malformed version (${JSON.stringify(bad)}) is refused, with a minimum and without (${x.r.e?.kind}, ${y.r.e?.kind})`);
+  }
+  a = await answer({ ...RESULT, version: "0.9.0rc1" }, "0.9.0");
+  check(a.r.e?.kind === "old", "a pre-release of the minimum is too old");
   a = await answer({ ...RESULT, version: "dev" });
   check(a.r.v instanceof Tunnel && !("needs" in a.hello.params), "with no minimum, no needs is sent, and dev pairs");
   const { pairedStarter, PAIRED, PAIR_SHEET } = await import("./remote-ui.js");

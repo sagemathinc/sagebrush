@@ -427,7 +427,7 @@ export const PAIR_SHEET = {
   getUv: "No uv? Its installer is at docs.astral.sh/uv.",
   command: "uvx sagebrush@latest remote --loopback",
   ownLabel: "In your own Python environment (your venv or conda env), with your packages:",
-  ownNote: "If pip says the environment is externally managed, activate your venv or conda env first (or make one: python3 -m venv .venv).",
+  ownNote: "If pip says the environment is externally managed, activate your venv or conda env first (or make one: python3 -m venv .venv, then source .venv/bin/activate).",
   ownCommand: "python -m pip install -U sagebrush && python -m sagebrush remote --loopback",
   windows: "On Windows, run these in WSL (Windows Subsystem for Linux); this browser pairs with it as usual.",
   paste: "The link (or its pairing code and port)",

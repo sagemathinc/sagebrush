@@ -44,7 +44,9 @@ const NULL_BODY = new Set([204, 205, 304]);
 // The oldest runner this page pairs with: the one place it is set, at the release that first ships `sagebrush remote`
 // (William's call).  null until then: any runner that reports a version (a source checkout reports "dev").
 export const RUNNER_MIN = null;
-const VERSION_RE = /^(dev|\d{1,6}(\.\d{1,6}){0,3}[0-9A-Za-z.+-]{0,24})$/;
+// (a runner's version: this subset of PEP 440's canonical form, whole, or "dev" (astra's VERSION-2): numbers, then
+// optionally a pre-release (aN, bN, rcN), a post-release (.postN), a dev release (.devN) and a local part (+x.y))
+const VERSION_RE = /^(?:dev|(\d{1,6}(?:\.\d{1,6}){0,3})((?:a|b|rc)\d{1,6})?(\.post\d{1,6})?(\.dev\d{1,6})?(\+[A-Za-z0-9]{1,16}(?:\.[A-Za-z0-9]{1,16}){0,3})?)$/;
 
 /**
  * Is version v at least need (a release's numbers, "0.9.0")?  A release gate, as PEP 440 orders versions: "dev" (a
@@ -53,14 +55,16 @@ const VERSION_RE = /^(dev|\d{1,6}(\.\d{1,6}){0,3}[0-9A-Za-z.+-]{0,24})$/;
  */
 export function versionAtLeast(v, need) {
   if (v === "dev") return true;
-  const m = /^(\d+(?:\.\d+)*)(.*)$/.exec(String(v));
-  if (!m || !/^\d{1,6}(\.\d{1,6}){0,3}$/.test(String(need))) return false;
-  const a = m[1].split(".").map(Number), b = String(need).split(".").map(Number);
+  const m = typeof v === "string" ? VERSION_RE.exec(v) : null;
+  // (a malformed version, or minimum, never passes: the whole version is checked first)
+  if (!m || !m[1] || typeof need !== "string" || !/^\d{1,6}(\.\d{1,6}){0,3}$/.test(need)) return false;
+  const a = m[1].split(".").map(Number), b = need.split(".").map(Number);
   for (let i = 0; i < Math.max(a.length, b.length); i++) {
     const x = a[i] ?? 0, y = b[i] ?? 0;
     if (x !== y) return x > y;
   }
-  return m[2] === "" || /^(\.?post\d*|\+)/.test(m[2]);
+  // (the release's own numbers: below it if a pre-release or a dev release; a post or local version is not)
+  return m[2] === undefined && m[4] === undefined;
 } // (fetch's null-body statuses at or above 200)
 // (method, path pattern, rpc, the ref's members in path order)
 const ROUTES = [

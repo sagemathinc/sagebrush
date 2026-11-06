@@ -880,7 +880,18 @@ async def test_version_in_the_hello_and_needs():
     with open(os.path.join(HERE, "..", "..", "web", "notebook", "version-cases.json")) as f:
         cases = json.load(f)["cases"]
     wrong = [(v, n) for v, n, want in cases if P.version_at_least(v, n) != want]
-    assert len(cases) > 15 and not wrong, wrong
+    assert len(cases) > 30 and not wrong, wrong
+    try:  # (where packaging is installed: whatever the gate accepts, PEP 440's own parser parses and orders the same)
+        from packaging.version import InvalidVersion, Version
+    except ImportError:
+        Version = None
+    if Version is not None:
+        for v, n, want in cases:
+            if want and v != "dev":
+                try:
+                    assert Version(v) >= Version(n), (v, n)
+                except InvalidVersion:
+                    raise AssertionError("the gate accepted %r, which PEP 440 doesn't" % v)
     assert re.fullmatch(r"dev|\d+(\.\d+)*\S*", P.VERSION), P.VERSION
     sg = await Signer().start()
     real = P.VERSION

@@ -78,6 +78,9 @@ def runner_version():
 
 
 _NEED = re.compile(r"\d{1,6}(\.\d{1,6}){0,3}")  # (a minimum: a release's numbers, nothing else)
+# (a runner's version: this subset of PEP 440's canonical form, whole, or "dev" (astra's VERSION-2): numbers, then
+# optionally a pre-release (aN, bN, rcN), a post-release (.postN), a dev release (.devN) and a local part (+x.y))
+_VERSION = re.compile(r"(\d{1,6}(?:\.\d{1,6}){0,3})((?:a|b|rc)\d{1,6})?(\.post\d{1,6})?(\.dev\d{1,6})?(\+[A-Za-z0-9]{1,16}(?:\.[A-Za-z0-9]{1,16}){0,3})?")
 
 
 def version_at_least(v, need):
@@ -86,16 +89,16 @@ def version_at_least(v, need):
     version (0.9.0.post1, 0.9.0+x) is not."""
     if v == "dev":
         return True
-    m = re.match(r"^(\d+(?:\.\d+)*)(.*)$", v)
-    if not m or not _NEED.fullmatch(need):
-        return False
+    m = _VERSION.fullmatch(v) if isinstance(v, str) else None
+    if not m or not isinstance(need, str) or not _NEED.fullmatch(need):
+        return False  # (a malformed version, or minimum, never passes: the whole version is checked first)
     a, b = [int(x) for x in m.group(1).split(".")], [int(x) for x in need.split(".")]
     n = max(len(a), len(b))
     a, b = a + [0] * (n - len(a)), b + [0] * (n - len(b))
     if a != b:
         return a > b
-    suffix = m.group(2)
-    return suffix == "" or bool(re.match(r"^(\.?post\d*|\+.*)", suffix))
+    # (the release's own numbers: below it if a pre-release or a dev release; a post or local version is not)
+    return m.group(2) is None and m.group(4) is None
 
 
 VERSION = runner_version()
