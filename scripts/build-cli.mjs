@@ -76,7 +76,7 @@ writeFileSync(join(out, "packages.gen.js"), `globalThis.__SAGEBRUSH_PACKAGES__ =
 // module, wasm/sagebrush-nd.wasm, at np.linalg.cholesky's first call:
 // src/runtime/nd.ts)
 // (and nd's thread-pool helper, src/runtime/nd-helper.ts: the code each helper thread of nd.ts's pool runs, as a
-// worker_threads Worker; one copy, the script the browser serves as sagebrush-nd-helper.js, web/build.ts)
+// worker_threads Worker; one copy)
 const ndHelper = execFileSync("bun", ["build", join(root, "src", "runtime", "nd-helper.ts"), "--target=node", "--format=esm", "--minify"], { cwd: root, encoding: "utf8" });
 writeFileSync(join(out, "engine.gen.js"), `globalThis.__SAGEBRUSH_ENGINE__ = ${JSON.stringify(readFileSync(join(root, "wasm", "sagebrush-engine.wasm")).toString("base64"))};\n` +
   `globalThis.__SAGEBRUSH_RASTER__ = ${JSON.stringify(readFileSync(join(root, "wasm", "sagebrush-raster.wasm")).toString("base64"))};\n` +

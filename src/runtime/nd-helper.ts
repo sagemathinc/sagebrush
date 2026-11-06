@@ -1,6 +1,6 @@
-// engine/nd's pool helper (threads r2): the one script every helper thread of the pool in nd.ts runs, in the
-// browser (a dedicated Worker of the notebook's worker, from the fixed same-origin sagebrush-nd-helper.js) and in
-// Node (a worker_threads Worker). It takes exactly one bootstrap from the pool that made it, {module, memory, id,
+// engine/nd's pool helper (threads r2): the one script every helper thread of the pool in nd.ts runs: in Node, a
+// worker_threads Worker (the CLI carries it once, scripts/build-cli.mjs); written for a browser Worker too, for the
+// notebook's step to come (PR 1b). It takes exactly one bootstrap from the pool that made it, {module, memory, id,
 // stackTop, ctl, desc}: the SHA-256-checked module nd.ts compiled, the pool's shared memory, its participant id,
 // the top of its stack slot, and the addresses of the control words and the job descriptor. It instantiates the
 // module on that stack, counts itself ready, and then runs only nd_gemm_part(desc, id), once per job.

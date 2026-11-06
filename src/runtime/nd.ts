@@ -286,9 +286,9 @@ export function ndLu(A: Float64Array, n: number, B: Float64Array | null, r: numb
 // (numerics-core r4.2 §7: every element summed in the same order whatever the thread count). So whether a product
 // gets threads changes its time only: products are routed to engine/nd by their size alone (ND_MATMUL_MIN), and a
 // product that comes before the pool is ready runs on one thread.
-// - Where: only where the calling thread may block and threads can be made: a Node thread (the CLI), or the
-//   notebook's worker (a dedicated Worker, starting the fixed same-origin helper script sagebrush-nd-helper.js,
-//   src/runtime/nd-helper.ts); never a page's main thread. Elsewhere, and with 2 cores or fewer, one thread.
+// - Where: only where the calling thread may block and threads can be made: a Node thread (the CLI), its helpers
+//   running src/runtime/nd-helper.ts; never a page's main thread. Elsewhere (the browser's notebook worker, for
+//   now), and with 2 cores or fewer, one thread.
 // - When: lazily, at the first product that is large enough; never at load. Its helpers then start in the
 //   background, each instantiating the module on its own stack, and count themselves ready in the control words.
 // - The memory, from the module's floor: the control words (64 bytes), the GEMM descriptor (64), one stack slot
@@ -352,16 +352,11 @@ function helperCount(): number {
   return hw <= 2 ? 0 : Math.min(hw - 1, MAX_HELPERS);
 }
 
-// How this host makes a helper, or null if it can't here: in the notebook's worker, a module Worker of the helper
-// script's fixed URL (web/worker.ts sets it); in Node, a worker_threads Worker of the helper's code (the CLI bundle
-// carries it, scripts/build-cli.mjs) or of nd-helper.js beside this module.
+// How this host makes a helper, or null if it can't here: in Node, a worker_threads Worker of the helper's code
+// (the CLI bundle carries it, scripts/build-cli.mjs) or of nd-helper.js beside this module. (The browser's notebook
+// worker runs in the runner's opaque origin, where the helper comes in a later step: one thread there for now.)
 function helperMaker(): (() => WorkerLike) | null {
   const g = globalThis as any;
-  if (typeof g.__SAGEBRUSH_ND_HELPER_URL__ === "string") {
-    if (typeof g.Worker !== "function" || typeof g.document !== "undefined") return null;
-    const url = g.__SAGEBRUSH_ND_HELPER_URL__;
-    return () => new g.Worker(url, { type: "module" });
-  }
   const wt = g.process?.getBuiltinModule?.("worker_threads"), fs = g.process?.getBuiltinModule?.("fs");
   let src = "", code = false;
   if (typeof g.__SAGEBRUSH_ND_HELPER__ === "string") [src, code] = [g.__SAGEBRUSH_ND_HELPER__, true];
