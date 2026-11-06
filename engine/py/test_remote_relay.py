@@ -1218,6 +1218,22 @@ async def test_stop_as_the_leg_opens():
         await t.end()
 
 
+
+def test_page_fits_counts_its_prefix():
+    """grader's #774 H1: a page's message leaves with its channel prefix ("<gen>\\n"), and fits() counts it: a payload
+    that fits alone but not with the prefix is held back; one byte smaller fits."""
+    lim = R.RELAY_LIMITS["outData"]
+    leg = R.Leg(None, FakeWriter(), lambda t: None, lambda c, r: None)
+    page = R.RelayPage(None, leg, "c1", 12345)
+    n = 1000
+    head = 8  # (a client frame's header for 126..65535 bytes: 4, and its 4-byte mask)
+    leg.w.buffered = lim - (n + len(page.prefix) + head)
+    assert page.fits(n, "data") and leg.fits(n + len(page.prefix), "data")
+    leg.w.buffered += 1
+    assert not page.fits(n, "data") and leg.fits(n, "data"), "the payload alone fits; with its prefix it doesn't"
+    assert page.fits(n - 1, "data")
+
+
 if __name__ == "__main__":
     for name, f in list(globals().items()):
         if name.startswith("test_") and callable(f):
