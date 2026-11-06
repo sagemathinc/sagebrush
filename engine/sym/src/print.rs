@@ -171,7 +171,7 @@ pub fn sum_order(a: &Expr, b: &Expr) -> Ordering {
     // pure symbolic terms: Sage's print order (P1-P4; Greater = printed first)
     {
         let (ra, rb) = (split_coeff(a).1, split_coeff(b).1);
-        if !ra.is_one() && !rb.is_one() && p_pure(&ra) && p_pure(&rb) {
+        if !ra.is_one() && !rb.is_one() && p_order(&ra) && p_order(&rb) {
             let c = pcmp(&rb, &ra);
             if c != Ordering::Equal {
                 return c;
@@ -323,7 +323,7 @@ fn lead_symbol(e: &Expr) -> Option<String> {
 /// The order of the factors of a product (Less: a is printed first).
 pub fn mul_order(a: &Expr, b: &Expr) -> Ordering {
     // pure symbolic factors: Sage's factor order (P5; Greater = printed first)
-    if p_pure(a) && p_pure(b) {
+    if p_order(a) && p_order(b) {
         let c = pmul_cmp(b, a);
         if c != Ordering::Equal {
             return c;
@@ -433,9 +433,80 @@ fn p_pure(e: &Expr) -> bool {
         Kind::Num(_) => false,
         Kind::Add(v) => v.iter().all(|t| { let r = split_coeff(t).1; r.is_one() || p_pure(&r) }),
         Kind::Mul(v) => v.iter().all(|f| f.is_num() || p_pure(f)),
+        Kind::Pow(..) if p_kernel(e) => true,
         Kind::Pow(b, x) => x.as_i64().is_some() && p_pure(b),
+        Kind::Fun(..) => p_kernel(e),
         _ => false,
     }
+}
+
+/// A function of P-pure arguments (or numbers), or e^u for such a non-numeric
+/// u: a kernel, which Sage orders like a variable (C0's probes, order2-4):
+/// below the symbols, by its name, then its arguments; a lone kernel as a term
+/// of a sum comes after every other term.  Derivatives are left out.
+fn p_kernel(e: &Expr) -> bool {
+    let arg_ok = |a: &Expr| a.as_num().map_or(false, |n| n.is_exact() && n.is_real()) || p_pure(a);
+    match &e.kind {
+        Kind::Fun(f, args) => !matches!(f, Fun::Deriv(..)) && !args.is_empty() && args.iter().all(arg_ok),
+        Kind::Pow(b, u) => b.is_const(Const::E) && !u.is_num() && arg_ok(u),
+        _ => false,
+    }
+}
+
+/// P-pure, without a sum of kernels among its factors (or as itself), nor a
+/// sum and a kernel as factors: those keep the older rule, a kernel-led sum
+/// before the functions in a product (-(psi(x + y) - psi(x))*beta(x, y),
+/// (cos(x) + 1)*sin(x))
+fn p_order(e: &Expr) -> bool {
+    fn kernel_sum(f: &Expr) -> bool {
+        let b = match &f.kind { Kind::Pow(b, _) => b, _ => f };
+        matches!(&b.kind, Kind::Add(v) if v.iter().any(has_function))
+    }
+    // (and a product of a sum and a kernel: (x + 1)*sin(x) + x^2 keeps the older rule)
+    let sum_and_kernel = matches!(&e.kind, Kind::Mul(v) if v.iter().any(|f| matches!(&f.kind, Kind::Add(_)) || matches!(&f.kind, Kind::Pow(b, _) if matches!(b.kind, Kind::Add(_))))
+        && v.iter().any(|f| p_kernel(f) || matches!(&f.kind, Kind::Pow(b, _) if p_kernel(b))));
+    p_pure(e) && !kernel_sum(e) && !sum_and_kernel && !matches!(&e.kind, Kind::Mul(v) if v.iter().any(kernel_sum))
+}
+
+/// a kernel's name and arguments (e^u: exp, [u])
+fn p_kernel_parts(e: &Expr) -> (String, Vec<Expr>) {
+    match &e.kind {
+        Kind::Fun(f, args) => (f.name(), args.clone()),
+        Kind::Pow(_, u) => ("exp".to_string(), vec![u.clone()]),
+        _ => (String::new(), vec![]),
+    }
+}
+
+/// Two kernels (greater = printed first): the alphabetically earlier name,
+/// then argument by argument: a number before the rest, the larger number
+/// first; then the arguments' own order, then the larger coefficient
+/// (sin(2) + sin(1), cos(1)*cos(x), sin(3*x) + sin(2*x) + sin(x)).
+fn p_kernel_cmp(a: &Expr, b: &Expr) -> Ordering {
+    let ((na, xa), (nb, xb)) = (p_kernel_parts(a), p_kernel_parts(b));
+    let c = nb.cmp(&na);
+    if c != Ordering::Equal { return c; }
+    for (u, v) in xa.iter().zip(&xb) {
+        let c = match (u.as_num(), v.as_num()) {
+            (Some(m), Some(n)) => m.cmp(n),
+            (Some(_), None) => Ordering::Greater,
+            (None, Some(_)) => Ordering::Less,
+            _ => {
+                let ((cu, ru), (cv, rv)) = (split_coeff(u), split_coeff(v));
+                let c = pcmp(&ru, &rv);
+                // one rest: a multiple before the bare one, then the larger
+                // coefficient (e^(2*x) + e^(-x) + e^x, sin(2*x) + sin(x))
+                if c != Ordering::Equal {
+                    c
+                } else if cu.is_one() != cv.is_one() {
+                    if cu.is_one() { Ordering::Less } else { Ordering::Greater }
+                } else {
+                    cu.cmp(&cv)
+                }
+            }
+        };
+        if c != Ordering::Equal { return c; }
+    }
+    xa.len().cmp(&xb.len())
 }
 
 /// a sum compared in its sign-normalized form: led by a positive term (Sage stores -(x + y), not -x - y)
@@ -451,6 +522,7 @@ fn p_norm(e: &Expr) -> Expr {
 
 fn p_be(f: &Expr) -> (Expr, i64) {
     match &f.kind {
+        Kind::Pow(..) if p_kernel(f) => (f.clone(), 1),
         Kind::Pow(b, x) => (p_norm(b), x.as_i64().unwrap_or(1)),
         _ => (p_norm(f), 1),
     }
@@ -461,6 +533,8 @@ fn p_deg(e: &Expr) -> i64 {
     match &e.kind {
         Kind::Sym(_) => 1,
         Kind::Add(_) => 1,
+        Kind::Fun(..) => 1,
+        Kind::Pow(..) if p_kernel(e) => 1,
         Kind::Pow(_, x) => x.as_i64().unwrap_or(1),
         Kind::Mul(v) => v.iter().filter(|f| !f.is_num()).map(p_deg).sum(),
         _ => 0,
@@ -481,6 +555,13 @@ fn p_factors_up(e: &Expr) -> Vec<Expr> {
 
 fn pcmp(a: &Expr, b: &Expr) -> Ordering {
     let (a, b) = (&p_norm(a), &p_norm(b));
+    // a lone kernel is below everything else; two by p_kernel_cmp
+    match (p_kernel(a), p_kernel(b)) {
+        (true, true) => return p_kernel_cmp(a, b),
+        (true, false) => return Ordering::Less,
+        (false, true) => return Ordering::Greater,
+        _ => {}
+    }
     match (&a.kind, &b.kind) {
         (Kind::Add(_), Kind::Add(_)) => p_add_add(a, b),
         (Kind::Add(_), _) => p_add_x(a, b),
