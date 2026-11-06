@@ -3845,9 +3845,11 @@ class Newform:
             sage: latex(f.q_expansion(4))
             q - 2 q^{2} -  q^{3} + O(q^{4})
         """
-        from _sage_poly import QQ
+        from sage_all import QQ, ZZ
         from _sage_series import PowerSeriesRing, Series
-        prec = _nonneg(prec)
+        prec = int(ZZ(prec))  # (as Sage: True is 1, "3" and 2.0 are 3 and 2; 2.5 and 1/2 are refused)
+        if prec < 0:
+            raise ValueError("prec (= %d) must be nonnegative" % prec)
         n = max(prec - 1, 0)
         coeffs = self._o._known(n)
         if n > len(coeffs):

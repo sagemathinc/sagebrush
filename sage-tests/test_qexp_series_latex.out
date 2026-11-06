@@ -34,3 +34,11 @@ x
 1 + 2 u^{2}
 1 - 24 u + 252 u^{2} + O(u^{3})
 - u + O(u^{2})
+-1 ValueError prec (= -1) must be nonnegative
+True O(q^1) 1
+False O(q^0) 0
+2.00000000000000 q + O(q^2) 2
+2.50000000000000 TypeError Attempt to coerce non-integral RealNumber to Integer
+1/2 TypeError no conversion of this rational to integer
+'3' q - 2*q^2 + O(q^3) 3
+4 q - 2*q^2 - q^3 + O(q^4) 4

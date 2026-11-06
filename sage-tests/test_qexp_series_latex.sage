@@ -29,3 +29,10 @@ print(latex(-1 - u + O(u^2)))
 print(latex(1 + 2*u^2))
 print(latex(1 - 24*u + 252*u^2 + O(u^3)))
 print(latex(-u + O(u^2)))
+# prec as Sage converts it (Integer(prec)): Booleans, strings and integral reals pass; a negative one is refused
+for p in [-1, True, False, 2.0, 2.5, 1/2, "3", int(4)]:
+    try:
+        t = f.q_expansion(p)
+        print(repr(p), t, t.prec())
+    except Exception as e:
+        print(repr(p), type(e).__name__, e)
