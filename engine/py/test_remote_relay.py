@@ -60,7 +60,8 @@ def hello(signer, **over):
 
 def test_control_grammar():
     r22 = "A" * 22
-    good = ['{"relay":"page-open","conn":"c1","kind":"runner","gen":1}', '{"relay":"page-close","conn":"c1","gen":1}',
+    good = ['{"relay":"page-open","conn":"c1","kind":"runner","chan":"kernel","gen":1}',
+            '{"relay":"page-open","conn":"c1","kind":"runner","chan":"terminal","gen":2}', '{"relay":"page-close","conn":"c1","gen":1}',
             '{"relay":"receipt","r":"%s","upto":1048576}' % r22, '{"relay":"revoked"}',
             '{"relay":"dropped","gen":3,"bytes":10}', '{"relay":"pong"}']
     for t in good:
@@ -69,12 +70,14 @@ def test_control_grammar():
     bad = [
         '{"relay":"pong" }', '{"relay":"pong","x":1}', '{"relay":"page-close","gen":1,"conn":"c1"}',
         '{"relay":"page-open","conn":"c1","kind":"runner"}', '{"relay":"pong","relay":"pong"}',
+        '{"relay":"page-open","conn":"c1","kind":"runner","gen":1}', '{"relay":"page-open","conn":"c1","kind":"runner","chan":"box","gen":1}',
+        '{"relay":"page-open","conn":"c1","kind":"runner","gen":1,"chan":"kernel"}',
         '{"relay":"p\\u006fng"}', '{"relay":"page-close","conn":"c1","gen":1.0}', '{"relay":"page-close","conn":"c1","gen":true}',
         '{"relay":"page-close","conn":"c1","gen":0}', '{"relay":"page-close","conn":"c1","gen":9007199254740992}',
         '{"relay":"page-close","conn":"c1","gen":1e2}', '{"relay":"page-close","conn":"c 1","gen":1}',
-        '{"relay":"page-open","conn":"c1","kind":"box","gen":1}', '{"relay":"receipt","r":"short","upto":1}',
+        '{"relay":"page-open","conn":"c1","kind":"box","chan":"kernel","gen":1}', '{"relay":"receipt","r":"short","upto":1}',
         '{"relay":"receipt","r":"%s","upto":-1}' % r22, '{"relay":"ping"}', '{"relay":"ack","r":"%s"}' % r22,
-        '{"relay":"nope"}', '{"relay":"pong"}x', '{"relay":"page-open","conn":"%s","kind":"runner","gen":1}' % ("c" * 300),
+        '{"relay":"nope"}', '{"relay":"pong"}x', '{"relay":"page-open","conn":"%s","kind":"runner","chan":"kernel","gen":1}' % ("c" * 300),
         '{"relay":"page-close","conn":"c1","gen":NaN}', '{"relay":"page-close","conn":"c1","gen":[1]}',
         '{"relay":"page-close","conn":{"a":1},"gen":1}', '{"relay":5}',
     ]
@@ -85,6 +88,20 @@ def test_control_grammar():
         except R.ControlError:
             pass
     assert R.ping_text() == '{"relay":"ping"}' and R.ack_text(r22) == '{"relay":"ack","r":"%s"}' % r22
+
+
+def test_generation_prefix():
+    """T1.4 §T2: `[1-9][0-9]{0,15}\n` then the exact payload; everything else refused."""
+    assert R.split_prefix('7\n{"id":"x"}') == (7, '{"id":"x"}')
+    assert R.split_prefix("9007199254740991\n") == (2 ** 53 - 1, "")
+    assert R.split_prefix("1\n\n{}") == (1, "\n{}")  # (the payload's own bytes, a newline included, untouched)
+    for bad in ('0\n{}', '07\n{}', '9007199254740992\n{}', '12345678901234567\n{}', '7{}', '7 \n{}', ' 7\n{}',
+                '+7\n{}', '-7\n{}', '7\r\n{}', '{"id":"x"}', '', '\n{}', '٧\n{}'):
+        try:
+            R.split_prefix(bad)
+            raise AssertionError("accepted: %r" % bad)
+        except R.ControlError:
+            pass
 
 
 def test_backoff():
@@ -116,6 +133,8 @@ class RelaySide:
         self.auto_pong = True
         self.window = relay.window  # (bytes the runner may send a page that never acks: over it, 1013 (design §5))
         self.sent_to_page = 0
+        self.gen = 0  # (the page this side plays: its messages carry `<gen>\n` on the peer leg (T1.4 §T2))
+        self.got_gens = []  # (the generation prefix of each application message the runner sent)
         self.closed_code = None
         self.task = asyncio.ensure_future(self._read())
 
@@ -138,7 +157,10 @@ class RelaySide:
                                 # (as b2 will: the page's leg closed, and its page-close to the runner)
                                 self.send_text('{"relay":"page-close","conn":"c%d","gen":%d}' % (c["gen"], c["gen"]))
                             continue
-                        self.sent_to_page += len(payload)
+                        head, _, t = t.partition("\n")
+                        assert head.isdigit() and not head.startswith("0"), "an application message without its prefix: %r" % t[:40]
+                        self.got_gens.append(int(head))
+                        self.sent_to_page += len(t.encode())
                         if self.window is not None and self.sent_to_page > self.window:
                             self.close(1013, "the page isn't reading")
                             await self.inbox.put(("window", self.sent_to_page))
@@ -191,11 +213,14 @@ class RelaySide:
     def send_text(self, t):
         self.raw(0x1, t.encode("utf-8"))
 
-    def send(self, obj):
-        self.send_text(json.dumps(obj))
+    def send(self, obj, gen=None):
+        self.send_text("%d\n%s" % (self.gen if gen is None else gen, json.dumps(obj)))
 
     def control(self, **kw):
         op = kw.pop("relay")
+        if op == "page-open":
+            kw = {"conn": kw["conn"], "kind": kw["kind"], "chan": kw.get("chan", "kernel"), "gen": kw["gen"]}
+            self.gen = kw["gen"]
         self.send_text(json.dumps({"relay": op, **kw}, separators=(",", ":")))
 
     def close(self, code, reason=""):
@@ -427,6 +452,57 @@ async def test_forged_controls_never_act():
         assert (await leg.closed_with()) == 1008 and t.runner.page is None
         leg = await t.relay.leg()
         leg.control(relay="page-open", conn="c1", kind="agent", gen=1)  # (a page for another kind)
+        assert (await leg.closed_with()) == 1008
+    finally:
+        await t.end()
+        sg.close()
+
+
+@aio
+async def test_channels_and_page_map():
+    """T1.4 §T2 at the runner (b3c): a terminal page is ended at once with close {gen} (terminals are b5), the leg
+    kept; every answer carries its page's generation; a newer kernel page replaces the older, whose late messages do
+    nothing and whose page-close is accepted; a message for a page the runner never held, or without its prefix, is
+    refused (1008)."""
+    if NODE is None:
+        print("  (no node) SKIPPED")
+        return
+    sg = await Signer().start()
+    t = await Run().start()
+    try:
+        leg = await t.relay.leg()
+        leg.control(relay="page-open", conn="c1", kind="runner", chan="terminal", gen=1)
+        await asyncio.sleep(0.2)
+        assert {"relay": "close", "gen": 1} in leg.controls and 1 not in t.runner.pages and not t.runner.leg.closed
+        assert t.runner.page is None
+        # (a kernel page: every answer prefixed with its gen)
+        p2, _ = await paired(leg, sg, gen=2)
+        st, b = await p2.answer(await p2.request("g.bind", {}, {}))
+        assert st == 200 and set(leg.got_gens) == {2}, leg.got_gens
+        # (a newer kernel page replaces it: the older one's late request does nothing; its page-close is accepted)
+        p3, _ = await paired(leg, sg, gen=3)
+        n = len(leg.got_gens)
+        leg.send({"id": "late", "rpc": "g.record", "ref": {"b": "b1", "r": "r1"}}, gen=2)
+        await asyncio.sleep(0.2)
+        assert len(leg.got_gens) == n and not t.runner.leg.closed and t.runner.page.gen == 3
+        leg.control(relay="page-close", conn="c2", gen=2)
+        await asyncio.sleep(0.1)
+        assert 2 not in t.runner.pages and not t.runner.leg.closed and t.runner.stats["violations"] == 0
+        st, b = await p3.answer(await p3.request("g.bind", {}, {}))
+        assert set(leg.got_gens[n:]) == {3}, (st, b, leg.got_gens)  # (routing: answered on gen 3 (the binding itself says in-use: takeover is the gateway's))
+        # (a message for gen 2, now released: refused)
+        leg.send({"id": "x"}, gen=2)
+        assert (await leg.closed_with()) == 1008
+        # (a message for a gen never opened, and one without its prefix: refused)
+        for bad in ('99\n{"id":"x"}', '{"id":"x"}'):
+            leg = await t.relay.leg()
+            await paired(leg, sg, gen=1)
+            leg.send_text(bad)
+            assert (await leg.closed_with()) == 1008, bad
+        # (a page-close naming the right gen but another connection: refused)
+        leg = await t.relay.leg()
+        await paired(leg, sg, gen=1)
+        leg.control(relay="page-close", conn="cX", gen=1)
         assert (await leg.closed_with()) == 1008
     finally:
         await t.end()
