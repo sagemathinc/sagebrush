@@ -927,5 +927,6 @@ if __name__ == "__main__":
     # runs a fixed list of test files and this is the pairing's successor.  (A ci.yml line of their own is the
     # cleanup: /scratch/sagebrush-reviews/remote-compute/ci-remote-tests/.)
     import runpy
-    for remote_test in ("test_remote_es256.py", "test_remote_dpop.py"):
+    for remote_test in ("test_remote_es256.py", "test_remote_dpop.py", "test_remote_mangle.py", "test_remote_child.py",
+                        "test_remote_gateway.py"):
         runpy.run_path(os.path.join(HERE, remote_test), run_name="__main__")
