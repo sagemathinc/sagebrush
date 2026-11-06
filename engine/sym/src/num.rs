@@ -293,6 +293,9 @@ impl Num {
             // an exact zero absorbs a float, even an infinite or NaN one (Sage: SR(RR('inf'))*0
             // and SR(RR(1.5))*0 are 0)
             (Num::Exact(a, b), _) | (_, Num::Exact(a, b)) if a.is_zero() && b.is_zero() => Num::Exact(Q::zero(), Q::zero()),
+            // an exact one is the identity: 1 + 0*I times inf + I in the complex formula has
+            // 0*inf = NaN (a product's coefficient starts from 1)
+            (Num::Exact(a, b), o) | (o, Num::Exact(a, b)) if a.is_one() && b.is_zero() => o.clone(),
             _ => {
                 let ((a, b), (c, d)) = (self.to_c64(), o.to_c64());
                 let k = self.fk_with(o);
@@ -301,10 +304,6 @@ impl Num {
                 // RR('inf')*x became (NaN - NaN*I)*x (Sage: (+infinity)*x)
                 if b == 0.0 && d == 0.0 {
                     Num::fl(a * c, 0.0, k)
-                } else if b == 0.0 {
-                    Num::fl(a * c, a * d, k)
-                } else if d == 0.0 {
-                    Num::fl(a * c, b * c, k)
                 } else {
                     Num::fl(a * c - b * d, a * d + b * c, k)
                 }
@@ -550,7 +549,8 @@ impl Num {
                 if *a == 0.0 {
                     return im;
                 }
-                if b.is_sign_negative() {
+                // (a NaN imaginary part is + NaN*I whatever its sign bit, as Sage)
+                if b.is_sign_negative() && !b.is_nan() {
                     format!("{} - {}*I", f(*a), f(-b))
                 } else {
                     format!("{} + {}", f(*a), im)
@@ -596,7 +596,7 @@ impl Num {
                 let im = format!("{}i", f(*b));
                 if *a == 0.0 {
                     im
-                } else if b.is_sign_negative() {
+                } else if b.is_sign_negative() && !b.is_nan() {
                     format!("{} - {}i", f(*a), f(-b))
                 } else {
                     format!("{} + {}", f(*a), im)
@@ -854,8 +854,13 @@ mod tests {
         }
         let p = nan.mul(&Num::float(2.0));
         assert!(real(p.clone()) && p.to_c64().0.is_nan());
-        // a real times a complex: each part on its own (inf*(1 + 2*I) is inf + inf*I)
+        // a real times a complex: the complex formula (inf*(1 + 2*I) is inf + inf*I, and
+        // 2*(inf + I) is inf + NaN*I, as Sage's SR(RR(2))*SR(CC(infinity, 1)))
         assert_eq!(inf.mul(&Num::Float(1.0, 2.0, Fk::CC)).to_c64(), (f64::INFINITY, f64::INFINITY));
+        let p = Num::float(2.0).mul(&Num::Float(f64::INFINITY, 1.0, Fk::CC));
+        assert!(p.to_c64().0 == f64::INFINITY && p.to_c64().1.is_nan());
+        let p = Num::Float(1.0, f64::INFINITY, Fk::CC).mul(&Num::float(-2.0));
+        assert!(p.to_c64().0.is_nan() && p.to_c64().1 == f64::NEG_INFINITY);
         for x in [&inf, &nan, &Num::float(1.5)] {
             assert_eq!(Num::zero().mul(x), Num::zero());
             assert_eq!(x.mul(&Num::zero()), Num::zero());
