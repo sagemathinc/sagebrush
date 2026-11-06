@@ -234,7 +234,7 @@ function readResults(file: string): State[] {
 // the session's script (Sage mode): each item preparsed, then exec'd (sagesilent, sageblock) or eval'd (\sage: its
 // latex(); \sageplot: its SVG), in one namespace, in order, until one fails; each result written at once, so a
 // session stopped by the timeout keeps what ran before it. The items' own printing is kept apart from the results.
-const DRIVER = `import json, io, sys, traceback
+const DRIVER = `import json, io, os, sys, traceback
 from sagebrush.preparse import preparse as _sbtx_pp
 # (each item compiled as Sage source by the runtime itself, so its code object keeps Sage's semantics when it
 #  runs: 1/3 exact, as in a .sage file; plain exec of preparsed text is Python's, 1/3 a float (#706). Given the
@@ -243,6 +243,12 @@ try:
     _sbtx_cs = __pyjs_compile_sage__
 except NameError:
     _sbtx_cs = None
+# (the document's folder on sys.path, last, as real SageTeX has it: \`sage doc.sagetex.sage\`, run in the document's
+#  folder, imports a helper.py beside the .tex, and its sys.path ends with that folder, so a statistics.py there
+#  doesn't replace the standard library's (Sage 10.9's sage command, checked Nov 5). This session runs there too,
+#  but its script is in a temporary folder. After the script's own imports: a sagebrush.py beside the .tex is the
+#  items' to import, never the script's)
+sys.path.append(os.getcwd())
 _sbtx_in, _sbtx_outp = sys.argv[1], sys.argv[2]
 with open(_sbtx_in) as _sbtx_f:
     _sbtx_items = json.load(_sbtx_f)
