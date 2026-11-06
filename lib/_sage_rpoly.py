@@ -197,9 +197,23 @@ class PolynomialRingInexact:
         return _sa().PolynomialRing(R, self._name)
 
     def variable_name(self):
+        """The name of the variable.
+
+        EXAMPLES::
+
+            sage: RR['t'].variable_name()
+            't'
+        """
         return self._name
 
     def variable_names(self):
+        """The names of the variables (a 1-tuple).
+
+        EXAMPLES::
+
+            sage: RDF['t'].variable_names()
+            ('t',)
+        """
         return (self._name,)
 
     def gen(self, i=0):
@@ -215,21 +229,56 @@ class PolynomialRingInexact:
         return PolynomialInexact(self, [self._base(0), self._base(1)])
 
     def gens(self):
+        """The variables (a 1-tuple).
+
+        EXAMPLES::
+
+            sage: CC['t'].gens()
+            (t,)
+        """
         return (self.gen(),)
 
     def ngens(self):
+        """The number of variables: 1.
+
+        EXAMPLES::
+
+            sage: CDF['t'].ngens()
+            1
+        """
         return 1
 
     def _first_ngens(self, n):
         return self.gens()[:n]
 
     def is_field(self):
+        """False: a polynomial ring is not a field.
+
+        EXAMPLES::
+
+            sage: RR['t'].is_field()
+            False
+        """
         return False
 
     def is_exact(self):
+        """False: the coefficients are inexact.
+
+        EXAMPLES::
+
+            sage: RDF['t'].is_exact()
+            False
+        """
         return False
 
     def characteristic(self):
+        """The characteristic: 0.
+
+        EXAMPLES::
+
+            sage: RR['t'].characteristic()
+            0
+        """
         return 0
 
     def __call__(self, x=0):
@@ -303,6 +352,14 @@ class PolynomialInexact:
 
     # ---- data
     def parent(self):
+        """The polynomial ring.
+
+        EXAMPLES::
+
+            sage: R.<t> = RDF[]
+            sage: (t + 1).parent()
+            Univariate Polynomial Ring in t over Real Double Field
+        """
         return self._ring
 
     def base_ring(self):
@@ -312,6 +369,14 @@ class PolynomialInexact:
         return self._ring._name
 
     def variables(self):
+        """The variable, if the polynomial is not constant.
+
+        EXAMPLES::
+
+            sage: R.<t> = RR[]
+            sage: (t^2).variables()
+            (t,)
+        """
         return (self._ring.gen(),) if len(self._c) > 1 else ()
 
     def degree(self):
@@ -337,20 +402,60 @@ class PolynomialInexact:
         return list(self._c)
 
     def coefficients(self, sparse=True):
+        """The nonzero coefficients (sparse=False: all of them), constant term first.
+
+        EXAMPLES::
+
+            sage: R.<t> = RR[]
+            sage: (1.5*t^3 + 1).coefficients()
+            [1.00000000000000, 1.50000000000000]
+        """
         return [c for c in self._c if _nonzero(c)] if sparse else self.list()
 
     def dict(self):
+        """The nonzero coefficients by exponent.
+
+        EXAMPLES::
+
+            sage: R.<t> = RDF[]
+            sage: (1.5*t^3 + 1).dict()
+            {0: 1.0, 3: 1.5}
+        """
         return {i: c for i, c in enumerate(self._c) if _nonzero(c)}
 
     def exponents(self):
+        """The exponents of the nonzero terms.
+
+        EXAMPLES::
+
+            sage: R.<t> = RDF[]
+            sage: (1.5*t^3 + 1).exponents()
+            [0, 3]
+        """
         return [i for i, c in enumerate(self._c) if _nonzero(c)]
 
     def leading_coefficient(self):
+        """The leading coefficient.
+
+        EXAMPLES::
+
+            sage: R.<t> = RR[]
+            sage: (1.5*t^3 + 1).leading_coefficient()
+            1.50000000000000
+        """
         return self._c[-1] if self._c else self._ring._base(0)
 
     lc = leading_coefficient
 
     def constant_coefficient(self):
+        """The constant term.
+
+        EXAMPLES::
+
+            sage: R.<t> = RDF[]
+            sage: (t^2 + 1).constant_coefficient()
+            1.0
+        """
         return self._c[0] if self._c else self._ring._base(0)
 
     def __getitem__(self, i):
@@ -360,15 +465,39 @@ class PolynomialInexact:
         return iter(self.list())
 
     def is_zero(self):
+        """Whether the polynomial is 0.
+
+        EXAMPLES::
+
+            sage: R.<t> = RR[]
+            sage: R(0.0).is_zero(), (t - t).is_zero(), t.is_zero()
+            (True, True, False)
+        """
         return not self._c
 
     def __bool__(self):
         return bool(self._c)
 
     def is_monic(self):
+        """Whether the leading coefficient is 1.
+
+        EXAMPLES::
+
+            sage: R.<t> = RR[]
+            sage: (t^2).is_monic()
+            True
+        """
         return bool(self._c) and self._c[-1] == 1
 
     def is_constant(self):
+        """Whether the degree is at most 0.
+
+        EXAMPLES::
+
+            sage: R.<t> = RR[]
+            sage: R(3).is_constant(), t.is_constant()
+            (True, False)
+        """
         return len(self._c) <= 1
 
     def __hash__(self):
@@ -647,6 +776,14 @@ class PolynomialInexact:
         return r
 
     def subs(self, *args, **kwds):
+        """The value at a point: f.subs(t=3) is f(3).
+
+        EXAMPLES::
+
+            sage: R.<t> = RR[]
+            sage: (t^2 + 1).subs(t=3)
+            10.0000000000000
+        """
         return self(*args, **kwds)
 
     def derivative(self, *args):
@@ -698,15 +835,39 @@ class PolynomialInexact:
         return P([R(c) for c in self._c])
 
     def truncate(self, n):
+        """The terms of degree below n.
+
+        EXAMPLES::
+
+            sage: R.<t> = RR[]
+            sage: (t^3 + 2*t + 1).truncate(2)
+            2.00000000000000*t + 1.00000000000000
+        """
         return PolynomialInexact(self._ring, self._c[:max(int(n), 0)])
 
     def shift(self, n):
+        """self times t^n (n < 0: the terms of degree n and up, divided by t^n).
+
+        EXAMPLES::
+
+            sage: R.<t> = RR[]
+            sage: (t^3 + 2*t + 1).shift(1)
+            t^4 + 2.00000000000000*t^2 + t
+        """
         n = int(n)
         if n >= 0:
             return PolynomialInexact(self._ring, [self._ring._base(0)] * n + self._c if self._c else [])
         return PolynomialInexact(self._ring, self._c[-n:])
 
     def reverse(self):
+        """The coefficients in reverse order.
+
+        EXAMPLES::
+
+            sage: R.<t> = RR[]
+            sage: (t^3 + 2*t).reverse()
+            2.00000000000000*t^2 + 1.00000000000000
+        """
         return PolynomialInexact(self._ring, self._c[::-1])
 
     def _symbolic_(self, R=None):
