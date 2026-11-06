@@ -1,4 +1,4 @@
-min: N = 10^100: refused SagebrushMemoryError: At the least, the Frob; step 1: True; under 10 ms: True
+min: N = 10^100: refused SagebrushMemoryError: At the least, the Frob; step 1: True; before the modulus and setup: True
 min: at most the bytes of P, p in (5, 97, 1009), N <= 30: True
 min: real bound 7 < heap 2335 < J figure 4664
 min: real: not impossible
