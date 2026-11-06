@@ -593,7 +593,7 @@ _Y = SR.var("y"); _t = SR.var("t")
 assert str(solve(sqrt(_Y) == _Y - 2, _Y)) == "[y == 4]" and str(solve(sqrt(_Y + 1) - sqrt(_Y) == 1, _Y)) == "[y == 0]"
 assert str(solve([sqrt(_xs) == 1, _xs == _Y], _xs, _Y)) == "[[x == 1, y == 1]]" and len(solve(_xs * _Y == 0, [_xs, _Y])) == 2
 assert len(solve([_xs**2 + _Y**2 == 1, _Y == _xs], _xs, _Y)) == 2 and str(solve([_xs**2 == 4, _xs > 0], _xs)) == "[[x == 2]]"
-assert str(solve(tan(_xs) == 1, _xs)) == "[x == pi*n1 + 1/4*pi for integer n1]"
+assert str(solve(tan(_xs) == 1, _xs)) == "[x == 1/4*pi + pi*n1 for integer n1]"
 assert len(solve(diff(exp(_xs * _t) * (_xs - 1)**2, _xs) == 0, _xs)) == 2
 print("solve complaints ok")
 # Astra's review of b644b68 (SOLVE2-F1..F4)
@@ -617,10 +617,10 @@ _zs = list(SR.var(" ".join("z%d" % i for i in range(14))))  # F7: a long chain i
 assert all(str(e.rhs()) == "1" for e in solve([sqrt(_zs[i]) == _zs[i + 1] for i in range(13)] + [_zs[-1] == 1], *_zs)[0])
 print("solve review ok")
 # trigonometric equations (sage-support: sin(x) == cos(x), cos(2 x) == cos(x) unsolved or principal only)
-assert str(solve(sin(_xs) == cos(_xs), _xs)) == "[x == pi*n1 + 1/4*pi for integer n1]"
+assert str(solve(sin(_xs) == cos(_xs), _xs)) == "[x == 1/4*pi + pi*n1 for integer n1]"
 assert str(solve(cos(2 * _xs) == cos(_xs), _xs)) == "[x == 2/3*pi*n1 for integer n1]"
-assert str(solve(sin(_xs) * cos(_xs) == QQ(1) / 4, _xs)) == "[x == pi*n1 + 1/12*pi for integer n1, x == pi*n2 + 5/12*pi for integer n2]"
-assert str(solve(sin(_xs)**2 == QQ(1) / 4, _xs)) == "[x == pi*n1 - 1/6*pi for integer n1, x == pi*n2 + 1/6*pi for integer n2]"
+assert str(solve(sin(_xs) * cos(_xs) == QQ(1) / 4, _xs)) == "[x == 1/12*pi + pi*n1 for integer n1, x == 5/12*pi + pi*n2 for integer n2]"
+assert str(solve(sin(_xs)**2 == QQ(1) / 4, _xs)) == "[x == -1/6*pi + pi*n1 for integer n1, x == 1/6*pi + pi*n2 for integer n2]"
 assert str(solve(tan(_xs) == sin(_xs), _xs)) == "[x == pi*n1 for integer n1]" and len(solve(sin(_xs) + sin(2 * _xs) + sin(3 * _xs) == 0, _xs)) == 3
 assert str(solve(log(_xs)**2 == 2, _xs)) == "[x == e^(-sqrt(2)), x == e^sqrt(2)]"
 print("solve trig ok")
@@ -642,7 +642,7 @@ assume(_xs, "real")
 for _f in (abs(_xs + I) == 1, abs(I*_xs) == 1, abs(sqrt(_xs)) == 1, abs(var("a")*_xs) == 1):
     assert str(solve(_f, _xs)) == "[0 == %s]" % (_f.lhs() - _f.rhs()), _f
 _ss = solve(abs(_xs) == _xs + exp(_xs) - exp(1) - 2, _xs)
-assert str(_ss[-1]) == "0 == -2*x - e^x + e + 2 if x < 0", _ss
+assert str(_ss[-1]) == "0 == -2*x + e - e^x + 2 if x < 0", _ss
 assert str(solve(abs(_xs**2 - 2) == _xs, _xs)) == "[x == 2, x == 1]"
 forget()
 # an inequality mentioning x makes x real only through a side c*x + d

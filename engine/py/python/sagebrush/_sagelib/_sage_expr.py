@@ -833,7 +833,7 @@ class Expression:
         EXAMPLES::
 
             sage: exp(x).taylor(x, 0, 4), sin(x).taylor(x, pi, 3)
-            (1/24*x^4 + 1/6*x^3 + 1/2*x^2 + x + 1, 1/6*(x - pi)^3 - x + pi)
+            (1/24*x^4 + 1/6*x^3 + 1/2*x^2 + x + 1, pi - 1/6*(pi - x)^3 - x)
         """
         if len(args) == 3:
             v, a, n = args
@@ -3154,7 +3154,7 @@ _FUNCTION_DOCS = {
         sage: arcsec(2)
         arcsec(2)
         sage: arcsec(x).diff(x)  # sagebrush only (Sage's 1/(sqrt(x^2 - 1)*x) has the wrong sign for x < -1)
-        1/(sqrt(-1/x^2 + 1)*x^2)""",
+        1/(x^2*sqrt(-1/x^2 + 1))""",
     'arccsc': """The inverse cosecant (also acsc).
 
     EXAMPLES::
@@ -3162,7 +3162,7 @@ _FUNCTION_DOCS = {
         sage: arccsc(2)
         arccsc(2)
         sage: arccsc(x).diff(x)  # sagebrush only (Sage's -1/(sqrt(x^2 - 1)*x) has the wrong sign for x < -1)
-        -1/(sqrt(-1/x^2 + 1)*x^2)""",
+        -1/(x^2*sqrt(-1/x^2 + 1))""",
     'arctan2': """arctan2(y, x): the angle of the point (x, y) (also atan2).
 
     EXAMPLES::
@@ -4527,7 +4527,7 @@ def solve(f, *args, **kw):
         sage: solve([x^2 == 4, x > 0], x)  # sagebrush only
         [[x == 2]]
         sage: solve(sin(x) == cos(x), x)  # sagebrush only
-        [x == pi*n1 + 1/4*pi for integer n1]
+        [x == 1/4*pi + pi*n1 for integer n1]
         sage: solve(cos(2*x) == cos(x), x)  # sagebrush only
         [x == 2/3*pi*n1 for integer n1]
         sage: solve(x^3 - 3*x + 1 == 0, x)  # sagebrush only
@@ -4764,7 +4764,7 @@ def _solve_abs(eq, u, x):
     solve(abs(x) == 2, x) is [x == -2, x == 2] for every x, though |x| = 2 is
     a circle in the complex plane; Sagebrush gives that answer where x is
     assumed real).  A branch's unresolved equation keeps the branch's
-    condition (0 == -2*x - e^x + e + 2 came from abs(x) = -x and holds at
+    condition (0 == -2*x + e - e^x + 2 came from abs(x) = -x and holds at
     x = 1, no solution: ABS-F2)."""
     v = Expression(_sym_s(x))
     # (built, not parsed from its printed form: names of any script)
