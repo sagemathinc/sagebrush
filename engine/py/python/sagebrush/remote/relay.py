@@ -19,6 +19,9 @@ unmasked, text only, no extensions), over `ssl` (and an HTTP CONNECT proxy from 
   - the runner closes one page with {"relay":"close","gen":n} (r1.9): a refused hello, an unpair, an answer the page
     isn't reading (1013) end that page only, never the leg; the relay answers with that page's page-close;
   - generations only go up, across page-close too: a page-open whose gen isn't above every gen seen is refused;
+  - (T1.4 §T2) page-open names the page's channel, and every application message on the leg carries its page's
+    generation as a prefix, `<gen>\n`, both ways; the runner keeps its pages by generation (one kernel page at a
+    time; a terminal page is answered with close {gen} until b5), and a message for no page it holds is refused;
   - the output gate counts this leg's own transport buffer only; the relay's per-page window (8 MiB, receipts from
     the page) is the authority on a page that doesn't read (r1.9: the runner never sees those receipts);
   - a lost leg leaves the bindings and their kernels running (R1); dialing again backs off 1, 2, 4 ... 60 s, +-20%;
@@ -64,11 +67,13 @@ RELAY_LIMITS = {
     "outTotal": PAIR_LIMITS["outTotal"],
 }
 _SAFE = 2 ** 53 - 1
+CHANNELS = ("kernel", "terminal")  # (terminal addendum T1.4 §T2; this runner serves kernel pages, terminals are b5)
+_GEN_PREFIX = re.compile(r"([1-9][0-9]{0,15})\n")
 _CONN = re.compile(r"[A-Za-z0-9_-]{1,64}")
 _TOKEN = re.compile(r"[A-Za-z0-9_-]{22}")
 # (relay -> peer: each op's keys after "relay", in order, and each value's check)
 _IN_OPS = {
-    "page-open": ("conn", "kind", "gen"),
+    "page-open": ("conn", "kind", "chan", "gen"),
     "page-close": ("conn", "gen"),
     "receipt": ("r", "upto"),
     "revoked": (),
@@ -78,6 +83,7 @@ _IN_OPS = {
 _CHECK = {
     "conn": lambda v: isinstance(v, str) and bool(_CONN.fullmatch(v)),
     "kind": lambda v: v in ("runner", "agent"),
+    "chan": lambda v: v in CHANNELS,
     "gen": lambda v: type(v) is int and 1 <= v <= _SAFE,
     "r": lambda v: isinstance(v, str) and bool(_TOKEN.fullmatch(v)),
     "upto": lambda v: type(v) is int and 0 <= v <= _SAFE,
@@ -129,6 +135,18 @@ def parse_control(text):
     if json.dumps(d, separators=(",", ":"), ensure_ascii=False) != text:
         raise ControlError("not the one serialization")
     return d
+
+
+def split_prefix(text):
+    """(gen, payload) of an application message on the peer leg: `<gen>\n` then the exact bytes (T1.4 §T2: closed,
+    canonical: no zero, no leading zero, at most 2^53 - 1, the newline required), or ControlError."""
+    m = _GEN_PREFIX.match(text)
+    if m is None:
+        raise ControlError("an application message without its generation prefix")
+    gen = int(m.group(1))
+    if gen > _SAFE:
+        raise ControlError("a generation over 2^53 - 1")
+    return gen, text[m.end():]
 
 
 def ping_text():
@@ -518,8 +536,9 @@ async def open_leg(origin, key, on_text, on_end, post=_post, connect_ms=None):
 class RelayPage:
     """A page, from page-open to page-close (or its replacement): what the gateway sees as a socket."""
 
-    def __init__(self, runner, leg, conn, gen):
-        self.runner, self.leg, self.conn, self.gen = runner, leg, conn, gen
+    def __init__(self, runner, leg, conn, gen, chan="kernel"):
+        self.runner, self.leg, self.conn, self.gen, self.chan = runner, leg, conn, gen, chan
+        self.prefix = "%d\n" % gen
         self.closed = False
         self.paired = False
         self.token = None
@@ -527,12 +546,12 @@ class RelayPage:
         self.hello_timer = None
 
     def fits(self, n, kind):
-        return not self.closed and self.leg.fits(n, kind)
+        return not self.closed and self.leg.fits(n + len(self.prefix), kind)
 
     def send_text(self, text, kind):
         if self.closed:
             return False
-        data = text.encode("utf-8", "surrogatepass")
+        data = (self.prefix + text).encode("utf-8", "surrogatepass")
         if not self.leg.fits(len(data), kind):
             # (this page's answers aren't leaving: this page ends, 1013; the leg and any next page go on)
             self.close(1013, "the page isn't reading its answers")
@@ -548,7 +567,6 @@ class RelayPage:
         if self.closed:
             return
         self.runner.page_gone(self)
-        self.runner.closed_by_us = self.gen
         self.runner.stats["pageCloses"] += 1
         self.leg.send_text(close_text(self.gen), "control")
 
@@ -564,7 +582,8 @@ class RelayRunner:
         self.post, self.rnd, self.sleep = post, rnd, sleep
         self.incarnation = os.urandom(8).hex()
         self.paired_conn = None
-        self.page = None
+        self.page = None   # (the kernel page, if one is open)
+        self.pages = {}    # (every page this leg has open or owes a page-close for, by generation)
         self.leg = None
         self.leg_ended = None
         self.end_code = None
@@ -573,7 +592,6 @@ class RelayRunner:
         self.stopping = False
         self.stats = {"legs": 0, "acks": 0, "pings": 0, "violations": 0, "thumbprints": 0, "pageCloses": 0}
         self.last_gen = 0      # (the highest page generation seen on this leg: they only go up (R768-GEN-1))
-        self.closed_by_us = None  # (the gen this runner closed, whose page-close the relay owes)
         self.delays = []  # (each wait before dialing again, ms: the backoff as it went)
         self.gateway = Gateway(self, port=port, cwd=cwd)
 
@@ -585,11 +603,15 @@ class RelayRunner:
             except ControlError as e:
                 return self.violation("a malformed relay control (%s)" % e)
             return self.control(c)
-        page = self.page
+        try:
+            gen, text = split_prefix(text)
+        except ControlError as e:
+            return self.violation(str(e))
+        page = self.pages.get(gen)
         if page is None:
-            return self.violation("a page's message with no page open")
+            return self.violation("a page's message for no page this runner holds")
         if page.closed:
-            return
+            return  # (a page this runner ended (close {gen}) or replaced, whose page-close is still to come)
         if not page.paired and len(text.encode("utf-8", "surrogatepass")) > PAIR_LIMITS["preHello"]:
             return page.close(1009, "message too big")
         try:
@@ -615,17 +637,16 @@ class RelayRunner:
             if c["gen"] <= self.last_gen:
                 return self.violation("a page's generation went back")
             self.last_gen = c["gen"]
-            if self.page is not None and not self.page.closed:
-                self.page_gone(self.page)
-            self.open_page(c["conn"], c["gen"])
+            self.open_page(c["conn"], c["gen"], c["chan"])
         elif op == "page-close":
-            p = self.page
-            # (the open page, or the one this runner closed, whose page-close is the relay's answer)
-            if p is None or p.conn != c["conn"] or p.gen != c["gen"] or (p.closed and self.closed_by_us != p.gen):
-                return self.violation("a page-close for no open page")
+            p = self.pages.get(c["gen"])
+            # (a page this runner holds: open, or ended or replaced here and owed its page-close)
+            if p is None or p.conn != c["conn"]:
+                return self.violation("a page-close for no page this runner holds")
             self.page_gone(p)
-            self.page = None  # (the relay forwards nothing more for it: a message now is a violation)
-            self.closed_by_us = None
+            del self.pages[c["gen"]]  # (the relay forwards nothing more for it: a message now is a violation)
+            if self.page is p:
+                self.page = None
         elif op == "revoked":
             self.fatal = Fatal("this computer's enrollment was revoked: it no longer runs code for the account", 3)
             self.leg.close(1000, "revoked")
@@ -639,8 +660,14 @@ class RelayRunner:
             self.leg.close(1008, why[:100])
 
     # ---- pages
-    def open_page(self, conn, gen):
-        p = RelayPage(self, self.leg, conn, gen)
+    def open_page(self, conn, gen, chan="kernel"):
+        p = RelayPage(self, self.leg, conn, gen, chan)
+        self.pages[gen] = p
+        if chan != "kernel":
+            # (terminals are b5: until then this runner offers kernels only, and ends any other page at once)
+            return p.close(1008, "this runner doesn't offer %s pages" % chan)
+        if self.page is not None and not self.page.closed:
+            self.page_gone(self.page)  # (one kernel page at a time: the newer one replaces it)
         self.page = p
 
         def no_hello():
@@ -710,8 +737,10 @@ class RelayRunner:
 
     # ---- the leg's life
     def on_end(self, code, reason):
-        if self.page is not None:
-            self.page_gone(self.page)
+        for p in list(self.pages.values()):
+            self.page_gone(p)
+        self.pages.clear()
+        self.page = None
         self.end_code = code
         if code == 4403 and self.fatal is None:
             self.fatal = Fatal("this computer's enrollment was revoked: it no longer runs code for the account", 3)
@@ -742,7 +771,7 @@ class RelayRunner:
             try:
                 self.leg_ended = asyncio.get_running_loop().create_future()
                 self.pings_unanswered = 0
-                self.last_gen, self.closed_by_us, self.page = 0, None, None  # (generations are the leg's)
+                self.last_gen, self.page, self.pages = 0, None, {}  # (generations are the leg's)
                 # (Stop while connecting returns at once: the challenge or the dial in its thread is let go, and a
                 # socket it makes later is closed (_in_thread))
                 opening = asyncio.ensure_future(open_leg(self.origin, self.key, self.on_text, self.on_end, post=self.post))
