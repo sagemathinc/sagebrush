@@ -11,6 +11,6 @@
   "topology": "inventory-3span",
   "baseTopology": "legacy-2span",
   "swRaw": 221638,
-  "swGzip": 54444,
-  "transition": "the exact colormap tables (B2, its own lazy chunk mod-cmap-data): measured at its head c6b398a2 (stacked on #750 b6d32dc6) with bun 1.4.4 and node v24.21.0: sw.js raw 221574, over 221319, so swRaw = exact + 64 = 221638; normalized gzip-9 54437, under 54444, unchanged (@sagebrush: a ceiling is renewed only when over)"
+  "swGzip": 54525,
+  "transition": "the exact colormap tables (B2, its own lazy chunk mod-cmap-data): measured at its head e5012cdf (stacked on #750 b6d32dc6) with bun 1.4.4 and node v24.21.0: sw.js raw 221574, over 221319, so swRaw = exact + 64 = 221638; normalized gzip-9 54461, over 54444, so swGzip = exact + 64 = 54525 (@sagebrush: a ceiling is renewed only when over)"
 }
