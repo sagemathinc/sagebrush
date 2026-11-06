@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 // The WebAssembly kernels (kernels/src: linear algebra, FFT, exp/log, sin/cos, sort, random) must give
 // exactly the bits of the JavaScript code they replace.
@@ -37,6 +40,8 @@ for a in mats:
     rec(w.real, w.imag, v.real, v.imag)
     rec(*np.linalg.svd(a))
     rec(*np.linalg.qr(a))
+    # (Q^T B without forming Q: B from cos so the random stream the later lines read is unchanged)
+    rec(*np.linalg._qr_qtb(a, np.cos(np.arange(len(a) * 3.0)).reshape(-1, 3), False))
     rec(a @ a.T, np.linalg.det(a), np.linalg.slogdet(a))
     try:
         rec(np.linalg.inv(a), np.linalg.solve(a, np.arange(len(a) * 1.0)))
@@ -46,6 +51,7 @@ for shape in [(40, 9), (9, 40), (300, 8), (17, 12)]:
     a = np.random.randn(*shape)
     rec(*np.linalg.svd(a, full_matrices=False))
     rec(*np.linalg.qr(a, mode="complete"))
+    rec(*np.linalg._qr_qtb(a, np.sin(np.arange(shape[0] * 2.0)).reshape(-1, 2), True))
     rec(np.linalg.pinv(a), np.linalg.lstsq(a, np.arange(shape[0] * 1.0), rcond=None)[0])
 x = np.linspace(0, 1, 1000)
 rec(np.polyfit(x, np.sin(x), 9), np.roots(np.arange(1.0, 15.0)))
@@ -107,3 +113,46 @@ test("WebAssembly kernels: bit-identical to the JavaScript fallback", () => {
     assert.equal(wl[i], jl[i], `relaxed SIMD, line ${i + 2}`);
   }
 });
+
+// Q^T B without forming Q (QR PR 1, the reflectors applied to B: np.linalg._qr_qtb and MATLAB's [C, R] = qr(S, B)):
+// the same R as qr's, bit for bit; C equal to the explicit Q^T B to rounding (relative 1e-13), with qr's shapes,
+// complete and reduced, square, tall, wide, rank-deficient (a zero column: a reflector with beta 0), a 1 x 1, and
+// a matrix scaled to 1e-300 (qr's power-of-2 scaling); with and without WebAssembly
+const qtbProgram = `
+import numpy as np
+rng = np.random.default_rng(11)
+cases = [rng.standard_normal((m, n)) for (m, n) in [(1, 1), (5, 3), (3, 5), (40, 40), (120, 30), (64, 64), (25, 60)]]
+z = rng.standard_normal((30, 8)); z[:, 2] = 0.0; cases.append(z)
+cases.append(rng.standard_normal((50, 20)) * 1e-300)
+for a in cases:
+    m, n = a.shape
+    for nb in (1, 4):
+        b = rng.standard_normal((m, nb))
+        for complete in (True, False):
+            c, r = np.linalg._qr_qtb(a, b, complete)
+            q, r2 = np.linalg.qr(a, mode="complete" if complete else "reduced")
+            ref = q.T @ b
+            err = float(np.max(np.abs(c - ref))) / max(1.0, float(np.max(np.abs(ref))))
+            print(m, n, nb, complete, c.shape == ref.shape, bool(np.array_equal(r, r2)), err < 1e-13)
+`;
+const matlabProgram = `
+rng(3); A = rand(30, 12); b = rand(30, 2); S = rand(9, 9); s = rand(9, 1);
+[C, R] = qr(A, b); [Q, R2] = qr(A); fprintf('%d %d %d %d\\n', size(C), isequal(R, R2), max(max(abs(C - Q' * b))) < 1e-13);
+[C, R] = qr(A, b, 'econ'); [Q, R2] = qr(A, 'econ'); fprintf('%d %d %d %d\\n', size(C), isequal(R, R2), max(max(abs(C - Q' * b))) < 1e-13);
+[C, R] = qr(S, s, 0); x = R \\ C; fprintf('%d\\n', norm(S * x - s) < 1e-12);
+[C, R] = qr(A, rand(30, 40)); fprintf('%d %d\\n', size(C));
+`;
+for (const noWasm of ["", "1"]) {
+  test(`Q^T B without forming Q: qr's R, explicit Q^T B to rounding, qr's shapes${noWasm ? " (no WebAssembly)" : ""}`, () => {
+    const env = { ...process.env, SAGEBRUSH_NO_WASM: noWasm, SAGEBRUSH_NO_RELAXED: "" };
+    const lines = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", qtbProgram], { encoding: "utf8", env }).trim().split("\n");
+    assert.equal(lines.length, 9 * 2 * 2);
+    for (const l of lines) assert.match(l, / True True True$/, l);
+    const dir = mkdtempSync(join(process.env.TMPDIR || tmpdir(), "qtb-"));
+    writeFileSync(join(dir, "q.m"), matlabProgram);
+    const out = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "--matlab", join(dir, "q.m")], { encoding: "utf8", env });
+    rmSync(dir, { recursive: true, force: true });
+    // (complete: C is 30 x 2; econ: 12 x 2; then the least-squares solve; then 40 columns, more than Q's 30: formed Q)
+    assert.equal(out, "30 2 1 1\n12 2 1 1\n1\n30 40\n");
+  });
+}

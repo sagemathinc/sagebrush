@@ -295,6 +295,16 @@ def qr(a, mode="reduced"):
     return QRResult(q, r)
 
 
+def _qr_qtb(a, b, complete):
+    """(C, R) with C = Q^T b for qr(a)'s Q, without forming Q (Sagebrush's own, not NumPy's: MATLAB's
+    [C, R] = qr(S, B)): a and b 2-D float64 with the same number of rows; C and R have a's row count
+    when complete, else min(m, n). a is scaled as qr scales it (by a power of 2, which leaves the
+    reflectors, and so Q, unchanged), and R scaled back."""
+    m, k = _scaled(a)
+    c, r = _L.qr_qtb(m, b, complete)
+    return c, _ldexp(r, -k)
+
+
 def pinv(a, rcond=None, hermitian=False, *, rtol=None):
     a0 = _np.asarray(a)
     a = _float(a)
