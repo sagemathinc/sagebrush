@@ -297,6 +297,42 @@ impl Ord for CanonK {
     }
 }
 
+/// a real number where Sage compares it as a double (a term's degree, a numeric exponent, a
+/// numeric base): the value rounded to double, then a double above an exact number at a tie,
+/// then the exact value (Sage: x^9.00719925474099e15 + x^9007199254740993, the exact
+/// exponent 2^53 + 1 rounds to the double 2^53; x^9007199254740994 + x^9.00719925474099e15)
+/// Rounding is monotone, so this differs from Num::cmp only at such a tie.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct NearK(NumK, bool, NumK);
+
+fn near_k(n: Num) -> NearK {
+    let (a, b) = n.to_c64();
+    let float = !n.is_exact();
+    NearK(NumK(Num::Float(a, b)), float, NumK(n))
+}
+
+/// an exponent or a degree as NearK (from p_numq, which gives a double as the exact rational
+/// it is): float tells whether it came from a double
+fn near_q(q: Q, float: bool) -> NearK {
+    near_k(if float { Num::float(Num::rat(q).to_c64().0) } else { Num::rat(q) })
+}
+
+/// a term's degree as Sage compares it: as a double, a double above an exact number at a tie,
+/// and no further (two exact degrees rounding to one double go to the factors: Sage's
+/// x^9007199254740992 + x^9007199254740993)
+fn p_degk(e: &Expr) -> (NumK, bool) {
+    let k = near_q(p_deg(e), p_deg_float(e));
+    (k.0, k.1)
+}
+
+fn p_deg_float(e: &Expr) -> bool {
+    match &e.kind {
+        Kind::Pow(_, x) if !p_kernel(e) => matches!(x.as_num(), Some(Num::Float(..))),
+        Kind::Mul(v) => v.iter().any(|f| !f.is_num() && p_deg_float(f)),
+        _ => false,
+    }
+}
+
 /// a sum as a key: its terms as printed (the greatest first), each a term key and a coefficient
 type SKey = Vec<(TKey, NumK)>;
 
@@ -313,7 +349,7 @@ enum TKey {
     Kernel(KKey),
     /// a product of powers: its degree, then its factors from the smallest (factor order), each by
     /// its base and then its exponent, the smaller exponent greater; then the longer greater
-    Prod(Q, Vec<(BKey, EKey)>),
+    Prod((NumK, bool), Vec<(BKey, EKey)>),
     /// a lone pi or euler_gamma (euler_gamma first): before every other term
     BareConst(u8),
 }
@@ -387,14 +423,14 @@ enum BKey {
 enum AtomV {
     Unit,
     Name(Reverse<String>),
-    Num(NumK),
+    Num(NearK),
 }
 
 impl BKey {
     fn as_sum(&self) -> SKey {
         match self {
             BKey::Sum(s) => s.clone(),
-            _ => vec![(TKey::Prod(q1(), vec![(self.clone(), EKey::Num(Reverse(q1())))]), NumK(Num::one()))],
+            _ => vec![(TKey::Prod({ let k = near_q(q1(), false); (k.0, k.1) }, vec![(self.clone(), EKey::Num(Reverse(q1())))]), NumK(Num::one()))],
         }
     }
 }
@@ -431,7 +467,7 @@ fn q1() -> Q {
 /// an atom's rank and value, if e is one
 fn atom_key(e: &Expr) -> Option<(u8, AtomV)> {
     match &e.kind {
-        Kind::Num(n) => Some((3, AtomV::Num(NumK(n.clone())))),
+        Kind::Num(n) => Some((3, AtomV::Num(near_k(n.clone())))),
         Kind::Const(Const::EulerGamma) => Some((2, AtomV::Unit)),
         Kind::Const(Const::Pi) => Some((1, AtomV::Unit)),
         Kind::Sym(s) => Some((0, AtomV::Name(Reverse(s.to_string())))),
@@ -464,7 +500,7 @@ fn tkey_p(e: &Expr) -> TKey {
         return TKey::Kernel(kkey(e));
     }
     let f = p_factors_up(e);
-    TKey::Prod(p_deg(e), f.iter().map(|x| {
+    TKey::Prod(p_degk(e), f.iter().map(|x| {
         let (b, k) = p_be(x);
         (bkey(&p_norm(&b)), ekey(&k))
     }).collect())
@@ -1338,6 +1374,56 @@ mod print_order_tests {
         assert_eq!(sum_order(&mul2(&nan, &x), &mul2(&fl(3.0, 0.0), &x)), Ordering::Less);
         assert_eq!(fl(f64::NAN, 0.0).as_num().unwrap().cmp(fl(f64::INFINITY, 0.0).as_num().unwrap()), Ordering::Greater);
         assert_eq!(fl(-0.0, 0.0).as_num().unwrap().cmp(fl(0.0, 0.0).as_num().unwrap()), Ordering::Equal);
+    }
+
+    /// R754-NEARTIE-1 (daybreak3, @sagebrush's ruling): a degree, a numeric exponent and a numeric
+    /// base compare as doubles, the double first at a tie (Sage 10.9, the same on every run:
+    /// x^9.00719925474099e15 + x^9007199254740993, 9.00719925474099e15^x + 9007199254740993^x,
+    /// x^9007199254740994 + x^9.00719925474099e15, x^9.00719925474099e15 + x^9007199254740991);
+    /// a kernel's argument compares exactly (Sage's order there differs from run to run). At a
+    /// tie Sage's own order follows no value (x^9007199254740995 + x^9.00719925474100e15 but
+    /// x^9.00719925474100e15 + x^9007199254740997): the double first is master's order, a known gap
+    #[test]
+    fn near_ties_compare_as_doubles_in_exponents_and_bases() {
+        let x = parse("x");
+        let d = num(Num::float(9007199254740992.0));
+        let n = |k: i64| parse(&(9007199254740992i64 + k).to_string());
+        let first = |a: &Expr, b: &Expr| {
+            assert_eq!(sum_order(a, b), Ordering::Less, "{} before {}", to_string(a), to_string(b));
+            assert_eq!(sum_order(b, a), Ordering::Greater);
+        };
+        first(&pow(&x, &d), &pow(&x, &n(1)));
+        first(&pow(&x, &n(2)), &pow(&x, &d));
+        first(&pow(&x, &n(4)), &pow(&x, &d));
+        first(&pow(&x, &d), &pow(&x, &n(-1)));
+        first(&pow(&x, &d), &pow(&x, &n(-2)));
+        first(&pow(&d, &x), &pow(&n(1), &x));
+        // two exact exponents rounding to one double: no degree between them, the factors decide
+        // (Sage: x^9007199254740992 + x^9007199254740993)
+        first(&pow(&x, &n(0)), &pow(&x, &n(1)));
+        // in a product (Sage: x^9007199254740993*y + x^9.00719925474099e15*y,
+        // x^9007199254740993*y^9.00719925474099e15 + x^9.00719925474099e15*y^9007199254740993)
+        let y = parse("y");
+        first(&mul2(&pow(&x, &n(1)), &y), &mul2(&pow(&x, &d), &y));
+        first(&mul2(&pow(&x, &n(1)), &pow(&y, &d)), &mul2(&pow(&x, &d), &pow(&y, &n(1))));
+        // a kernel's argument: exactly
+        first(&fun(Fun::Sin, vec![mul2(&n(1), &x)]), &fun(Fun::Sin, vec![mul2(&d, &x)]));
+        // every comparator law on every permutation of each set (inconsistency: at most 6), and no
+        // cycle among all of them
+        let sets: Vec<Vec<Expr>> = vec![
+            vec![pow(&x, &n(-1)), pow(&x, &n(0)), pow(&x, &d), pow(&x, &n(1)), pow(&x, &n(2)), pow(&x, &n(3))],
+            vec![pow(&d, &x), pow(&n(1), &x), pow(&n(0), &x), pow(&n(2), &x), pow(&x, &d), pow(&x, &n(1))],
+            vec![mul2(&pow(&x, &d), &y), mul2(&pow(&x, &n(1)), &y), mul2(&pow(&x, &n(1)), &pow(&y, &d)), mul2(&pow(&x, &d), &pow(&y, &n(1))), pow(&x, &n(2)), mul2(&pow(&x, &n(0)), &y)],
+            vec![fun(Fun::Sin, vec![mul2(&n(1), &x)]), fun(Fun::Sin, vec![mul2(&d, &x)]), mul2(&n(1), &pow(&x, &d)), mul2(&d, &pow(&x, &n(1))), pow(&x, &d), pow(&x, &n(1))],
+        ];
+        for set in &sets {
+            assert_eq!(inconsistency(sum_order, set), None, "sum_order on {:?}", set.iter().map(to_string).collect::<Vec<_>>());
+            assert_eq!(inconsistency(mul_order, set), None, "mul_order on {:?}", set.iter().map(to_string).collect::<Vec<_>>());
+        }
+        let all: Vec<Expr> = sets.concat();
+        for cmp in [sum_order as Cmp, mul_order as Cmp] {
+            assert_eq!(triple_cycles(cmp, &all).0, 0);
+        }
     }
 
     #[test]
