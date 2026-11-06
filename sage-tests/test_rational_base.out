@@ -90,3 +90,33 @@
 ('٣',) !! TypeError unable to convert '٣' to a rational
 ('1e2', 16) -> 482 Rational Field
 17636684144620811271604938270 7/2 -3/2
+('12', 2147483648) !! TypeError unable to convert '12' to a rational
+('12', 2147483647) !! TypeError unable to convert '12' to a rational
+('12', 4294967296) !! OverflowError value too large to convert to unsigned int
+('12', 4294967295) !! TypeError unable to convert '12' to a rational
+('12', 8589934592) !! OverflowError value too large to convert to unsigned int
+('12', 8589934591) !! OverflowError value too large to convert to unsigned int
+('12', 9223372036854775808) !! OverflowError value too large to convert to unsigned int
+('12', 9223372036854775807) !! OverflowError value too large to convert to unsigned int
+('12', 18446744073709551616) !! OverflowError Python int too large to convert to C unsigned long
+('12', 18446744073709551615) !! OverflowError value too large to convert to unsigned int
+('12', 36893488147419103232) !! OverflowError Python int too large to convert to C unsigned long
+('12', 36893488147419103231) !! OverflowError Python int too large to convert to C unsigned long
+('12', 1180591620717411303424) !! OverflowError Python int too large to convert to C unsigned long
+('12', 1180591620717411303423) !! OverflowError Python int too large to convert to C unsigned long
+('12', -1180591620717411303424) !! OverflowError can't convert negative value to unsigned int
+('1\xa02',) !! TypeError unable to convert '1\xa02' to a rational
+('1\u20032',) !! TypeError unable to convert '1\u20032' to a rational
+('1\t2',) -> 12 Rational Field
+('1\n2',) -> 12 Rational Field
+('1\r2',) -> 12 Rational Field
+('1\x0b2',) -> 12 Rational Field
+('1\x0c2',) -> 12 Rational Field
+('\xa012',) !! TypeError unable to convert '\xa012' to a rational
+('1\x1c2',) !! TypeError unable to convert '1\x1c2' to a rational
+('1\x852',) !! TypeError unable to convert '1\x852' to a rational
+('1\u30002',) !! TypeError unable to convert '1\u30002' to a rational
+(b'\xff',) !! TypeError unable to convert b'\xff' to a rational
+(b'12\xff',) !! TypeError unable to convert b'12\xff' to a rational
+(b'\xe9',) !! TypeError unable to convert b'\xe9' to a rational
+(b'1\xc2\xa02',) !! TypeError unable to convert b'1\xc2\xa02' to a rational

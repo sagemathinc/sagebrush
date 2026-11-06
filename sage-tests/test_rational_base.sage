@@ -22,3 +22,13 @@ for a in [("010",), ("0o17",), ("0b101",), ("08",), ("010/3",), (" 1 / 2 ",), ("
           ("1e2", 16)]:
     T(*a)
 print(Rational("123456789012345678901234567890/7"), Rational(3) + Rational("1/2"), Rational((6, -4)))
+# the base is a C unsigned int (OverflowError beyond it), only ASCII whitespace is ignored, and bytes that do not
+# decode, or do not parse, are refused by their repr
+for k in [31, 32, 33, 63, 64, 65, 70]:
+    T("12", 2^k)
+    T("12", 2^k - 1)
+T("12", -2^70)
+for s in ["1 2", "1 2", "1\t2", "1\n2", "1\r2", "1\x0b2", "1\x0c2", " 12", "1\x1c2", "1\x852", "1　2"]:
+    T(s)
+for b in [b"\xff", b"12\xff", "é".encode("latin-1"), "1 2".encode()]:
+    T(b)
