@@ -333,7 +333,15 @@ def _eigen(a):
     if n != a.ncols():
         raise ValueError("matrix must be square")
     SR = _sa().SR
-    t = SR.var("sbEigenT")
+    # the characteristic polynomial's variable: a name no entry uses (a
+    # fixed sbEigenT aliased an entry's own sbEigenT: diag(2*t, 2) gave
+    # [0, 2], the review's EIGEN-1)
+    used = {str(v) for r in a._rows for x in r for v in _sr(x).variables()}
+    name, i = "sbEigenT", 0
+    while name in used:
+        i += 1
+        name = "sbEigenT%d" % i
+    t = SR.var(name)
     rows = [[_sage_matrix._sr_rational(x) for x in r] for r in a._rows]
     out = []
     if all(isinstance(x, int) or type(x).__name__ == "Rational" for r in rows for x in r):

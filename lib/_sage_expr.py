@@ -3910,6 +3910,10 @@ def symbolic_sum(f, v, a, b, algorithm=None, hold=False):
         Traceback (most recent call last):
         ...
         ValueError: Sum is divergent.
+        sage: symbolic_sum(1/(k + 10^12)^2, k, 1, oo)  # sagebrush only
+        sum(1/(k + 1000000000000)^2, k, 1, +Infinity)
+        sage: symbolic_sum((-1)^k/k^2, k, 10^12, oo)  # sagebrush only
+        sum((-1)^k/k^2, k, 1000000000000, +Infinity)
     """
     import sage_all as _sa
     f, v = _expr(f), _expr(v)
@@ -4146,12 +4150,22 @@ def _sum_signed_rational(f, v, a):
             return None
         terms.append((A / cv ** m, g + a, m))
     half = _sa.QQ(1) / 2
-    total, divergent = _expr(0), []
+    # the shifts n (each sum is its base sum less its first n terms), all
+    # admitted before any term is built: their total within the bound of a
+    # direct finite sum (symbolic_sum's 2000), or the sum stays unevaluated
+    # (a shift or a lower end of 10^12 reached range(10^12): the review's
+    # SUM-2)
+    shifts = []
     for A, g, m in terms:
         delta = 1 if g.is_integer() else half
         n = int(g - delta)
         if n < 0:
             return None  # a pole at a summed v
+        shifts.append((A, delta, n, m))
+    if sum(n for _, _, n, _ in shifts) > 2000:
+        return None
+    total, divergent = _expr(0), []
+    for A, delta, n, m in shifts:
         head = sum(_expr(s) ** i / (i + delta) ** m for i in range(n))
         if s == 1 and m == 1:
             divergent.append((A, delta, head))

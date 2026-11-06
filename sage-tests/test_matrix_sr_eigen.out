@@ -19,8 +19,15 @@ its parent: Vector space of dimension 2 over Symbolic Ring
 QQ matrix, symbolic: (1/2*a + 1/2*b, 1/2*a - 1/2*b)
 QQ matrix, SR halves: (1/4, 1/4)
 QQ matrix times SR vector: (5, 11)
-diagonal order: [3, 2, 1]
-symbolic diagonal order: [a, b]
-cubic order: [-1/2*I*sqrt(3)*2^(1/3) - 1/2*2^(1/3), 1/2*I*sqrt(3)*2^(1/3) - 1/2*2^(1/3), 2^(1/3)]
-rotation: [cos(x) - 1/2*sqrt(-4*sin(x)^2), cos(x) + 1/2*sqrt(-4*sin(x)^2)]
-charpoly: NotImplementedError polynomial rings over Symbolic Ring are not available in sagebrush yet
+1x1: [2*sbEigenT]
+scalar: [sbEigenT, sbEigenT]
+scalar vectors: [(sbEigenT, [(1, 0), (0, 1)], 2)]
+Jordan right: [(sbEigenT, [(1, 0)], 2)]
+Jordan left: [(sbEigenT, [(0, 1)], 2)]
+1x1: [2*u]
+scalar: [u, u]
+scalar vectors: [(u, [(1, 0), (0, 1)], 2)]
+Jordan right: [(u, [(1, 0)], 2)]
+Jordan left: [(u, [(0, 1)], 2)]
+colliding symmetric: [sbEigenT - 1, sbEigenT + 1]
+colliding symmetric vectors: [(sbEigenT - 1, [(1, -1)], 1), (sbEigenT + 1, [(1, 1)], 1)]

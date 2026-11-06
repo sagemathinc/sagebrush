@@ -31,8 +31,15 @@ show("its parent:", lambda: matrix(QQ, [[1, 1], [1, -1]]).solve_right(vector(SR,
 show("QQ matrix, symbolic:", lambda: matrix(QQ, [[1, 1], [1, -1]]).solve_right(vector(SR, [a, b])))
 show("QQ matrix, SR halves:", lambda: matrix(QQ, [[2, 0], [0, 4]]).solve_right(vector([SR(1)/2, SR(1)])))
 show("QQ matrix times SR vector:", lambda: matrix(QQ, [[1, 2], [3, 4]]) * vector(SR, [SR(1), SR(2)]))
-show("diagonal order:", lambda: matrix(SR, [[1, 1, 0], [0, 2, 0], [0, 0, 3]]).eigenvalues())
-show("symbolic diagonal order:", lambda: matrix(SR, [[a, 0], [0, b]]).eigenvalues())
-show("cubic order:", lambda: matrix(SR, [[0, 1, 0], [0, 0, 1], [2, 0, 0]]).eigenvalues())
-show("rotation:", lambda: matrix(SR, [[cos(x), -sin(x)], [sin(x), cos(x)]]).eigenvalues())
-show("charpoly:", lambda: M.charpoly())
+# The characteristic polynomial's variable is a fresh name: an entry's own
+# sbEigenT (the internal name before the review's EIGEN-1) and a renamed
+# control (cases whose order is not in question)
+sbEigenT = var('sbEigenT'); u = var('u')
+for s in (sbEigenT, u):
+    show("1x1:", lambda: matrix(SR, [[2*s]]).eigenvalues())
+    show("scalar:", lambda: matrix(SR, [[s, 0], [0, s]]).eigenvalues())
+    show("scalar vectors:", lambda: matrix(SR, [[s, 0], [0, s]]).eigenvectors_right())
+    show("Jordan right:", lambda: matrix(SR, [[s, 1], [0, s]]).eigenvectors_right())
+    show("Jordan left:", lambda: matrix(SR, [[s, 1], [0, s]]).eigenvectors_left())
+show("colliding symmetric:", lambda: matrix(SR, [[sbEigenT, 1], [1, sbEigenT]]).eigenvalues())
+show("colliding symmetric vectors:", lambda: matrix(SR, [[sbEigenT, 1], [1, sbEigenT]]).eigenvectors_right())
