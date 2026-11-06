@@ -1,4 +1,4 @@
-# Power and Laurent series over a polynomial base ring (QQ['a'], QQ['b'], ZZ['a'], GF(5)['a'], QQ['a,b']) and
+# Power and Laurent series over a polynomial base ring (QQ['a'], QQ['b'], ZZ['a'], GF(5)['a'], QQ['a,b'], and QQ['x'] with the series in x) and
 # over number fields and GF(q): a base element is a constant, never the series variable (a*x is a*x, not x^2),
 # a quotient by a non-unit of the base lands in its fraction field, and a Laurent series lists from its
 # valuation. One line per case: the value, its list(), its parent (or the error's type).
@@ -56,3 +56,21 @@ for name, B, h in [('NF', K, c), ('GF4', F, z), ('GF25', G, w), ('CyclotomicFiel
 L.<x> = LaurentSeriesRing(QQ)
 for f in [x, 3*x^2 + x^5, x^-2 + 1, 1 + x, x + O(x^4), L(0), x^-3*(1 + x)]:
     print(f, '|', f.list(), '|', f.valuation())
+# The base ring's variable named as the series variable (daybreak3's review of #757): an element of the
+# base, or of a ring that coerces into it, is a constant (x*x, not x^2); one that does not coerce is
+# read as a polynomial in the series variable.
+for kind in ['Power', 'Laurent']:
+    for bname in ["QQ['x']", "ZZ['x']", "GF(5)['x']"]:
+        B = sage_eval(bname); b = B.gen()
+        S = (PowerSeriesRing if kind == 'Power' else LaurentSeriesRing)(B, 'x', default_prec=5); t = S.gen()
+        tag = kind + ' ' + bname
+        show(tag + ' S(b)', lambda: S(b))
+        show(tag + ' b*t', lambda: b*t)
+        show(tag + ' t*b', lambda: t*b)
+        show(tag + ' b+t', lambda: b + t)
+        show(tag + ' (b*t)/b', lambda: (b*t)/b)
+        show(tag + ' S(QQ[x] gen)', lambda: S(QQ['x'].gen()))
+        show(tag + ' S(ZZ[x] gen)', lambda: S(ZZ['x'].gen()))
+        show(tag + ' S([b, 1])', lambda: S([b, 1]))
+        show(tag + ' S(b^2 + 1)', lambda: S(b^2 + 1))
+        show(tag + ' t - b', lambda: t - b)
