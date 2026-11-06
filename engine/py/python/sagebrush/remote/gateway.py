@@ -275,13 +275,27 @@ def _kill_tree(pgid):
     loop = asyncio.get_running_loop()
 
     def kill():
-        # (the group stays in ENDING_GROUPS: SIGKILL is sent, not yet done, and a drain_groups running now must still
-        # wait for it to be empty; drain_groups alone takes a group out, once it is)
+        # (the group stays in ENDING_GROUPS until it is seen empty: SIGKILL is sent, not yet done, so a drain_groups
+        # running now still waits for it; then it is taken out promptly, so no stale pgid is kept for the runner's
+        # lifetime, where a reused one could be mistaken for a later, unrelated group (daybreak3))
         try:
             os.killpg(pgid, signal.SIGKILL)
         except (ProcessLookupError, PermissionError):
             pass
+        _forget_when_empty(pgid, loop)
     loop.call_later(2.0, kill)
+
+
+def _forget_when_empty(pgid, loop, tries=100):
+    """Take pgid out of ENDING_GROUPS once it has no members: checked now, then every 50 ms, at most `tries` times
+    (5 s).  A group still not empty then stays, for drain_groups to report and SIGKILL at the runner's exit.
+    Idempotent: a group already taken out (by drain_groups, or an earlier check) is left alone."""
+    if pgid not in ENDING_GROUPS:
+        return
+    if not _group_members(pgid):
+        ENDING_GROUPS.discard(pgid)
+    elif tries > 0:
+        loop.call_later(0.05, _forget_when_empty, pgid, loop, tries - 1)
 
 
 async def drain_groups(timeout=3.0):
