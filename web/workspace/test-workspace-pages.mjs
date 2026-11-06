@@ -547,7 +547,9 @@ try {
 
   // ---------------------------------------------------------------- the notebook page
   await go(base);
-  check(await until(`!!window.sagebrush?.notebook && !!${W}`, 60000), "the notebook page opens its workspace");
+  // (and its notebook open: the page opens the workspace first and only then its notebook, so until it has, there is
+  // no current notebook to read (web-runner, twice: 5 of 103, every check below reading a null id))
+  check(await until(`!!window.sagebrush?.notebook && !!${W} && !!localStorage.getItem("sagebrush-current") && sagebrush.notebook.store?.id === localStorage.getItem("sagebrush-current")`, 60000), "the notebook page opens its workspace, then its notebook");
   const nbId = await ev(`localStorage.getItem("sagebrush-current")`);
   check(await until(`${W}.list("/").then((l) => l.some((e) => e.kind === "notebook" && e.ref === ${JSON.stringify(nbId)}))`), "the open notebook is listed");
   // provenance: the Welcome notebook isn't the person's; File > New is; Save a copy keeps it

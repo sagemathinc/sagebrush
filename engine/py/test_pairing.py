@@ -774,16 +774,21 @@ def test_origin_refused_close():
     with contextlib.redirect_stderr(io.StringIO()):
         p, port, code = new()
         site = "https://dev.sagebrush.space"
-        # (the upgrade, then the close at once, then EOF: a hello sent after it is never read)
+        # (the upgrade, then the close at once, then EOF: a hello sent after it is never read.  The close is read
+        # before the hello is sent: a hello arriving at a socket the server has closed may draw a TCP RST, which can
+        # discard the close frame still unread here (a ConnectionResetError, grader's flake log, Nov 6))
         c = Client(port, origin=site)
         assert c.status == 101
+        m = c.recv()
+        assert m == ("close", P.ORIGIN_REFUSED, "origin not allowed"), m
         try:
             c.send({"jsonrpc": "2.0", "id": "h", "method": "hello", "params": {"protocol": 1, "code": code}})
         except OSError:
             pass
-        m = c.recv()
-        assert m == ("close", P.ORIGIN_REFUSED, "origin not allowed"), m
-        assert c.recv() is None
+        try:
+            assert c.recv() is None
+        except ConnectionResetError:
+            pass  # (the RST for the hello: still nothing after the close)
         c.close()
         # (any other site, and a Sagebrush site with anything else wrong, gets the 403: Host is checked before the origin)
         assert refusal(port, origin="https://evil.example") == "403"
