@@ -731,6 +731,62 @@ async def test_drain_groups():
         assert not G._group_members(p.pid) and p.pid not in G.ENDING_GROUPS, (script, left)
         assert (1.5 < took < 3.5) if slow else took < 1.0, (script, took)
         await p.wait()
+    # (the 2 s SIGKILL firing just before a drain, in the same tick: the drain still waits for the group to be empty;
+    # it isn't taken out of ENDING_GROUPS by the kill, only by the drain once empty)
+    loop = asyncio.get_running_loop()
+    real_later, timers = loop.call_later, []
+    loop.call_later = lambda delay, fn, *a: (timers.append(fn), real_later(delay, fn, *a))[1]
+    try:
+        p = await asyncio.create_subprocess_exec("sh", "-c", "trap '' TERM; sleep 30 & wait", start_new_session=True)
+        await asyncio.sleep(0.2)
+        G._kill_tree(p.pid)
+    finally:
+        loop.call_later = real_later
+    # (the tree's own SIGKILL, now, while the group's membership still reports alive: the kill must not take it out)
+    real_members = G._group_members
+    G._group_members = lambda g: [g] if g == p.pid else real_members(g)
+    try:
+        timers[-1]()
+        assert p.pid in G.ENDING_GROUPS, "the kill took the group out before it was empty"
+    finally:
+        G._group_members = real_members
+    assert await G.drain_groups(3.0) == []
+    assert not G._group_members(p.pid) and p.pid not in G.ENDING_GROUPS
+    await p.wait()
+    # (no drain at all: the killed group is still taken out of ENDING_GROUPS promptly, once empty, so no stale pgid
+    # stays for the runner's lifetime (daybreak3); a second kill of it is harmless)
+    p = await asyncio.create_subprocess_exec("sh", "-c", "trap '' TERM; sleep 30 & wait", start_new_session=True)
+    await asyncio.sleep(0.2)
+    G._kill_tree(p.pid)
+    assert p.pid in G.ENDING_GROUPS
+    end = time.monotonic() + 3.5  # (the 2 s SIGKILL, then a 50 ms check: a bound on this wait, not a timeout raised)
+    while p.pid in G.ENDING_GROUPS:
+        assert time.monotonic() < end, "a killed group stayed in ENDING_GROUPS"
+        await asyncio.sleep(0.05)
+    assert not G._group_members(p.pid)
+    G._forget_when_empty(p.pid, asyncio.get_running_loop())  # (idempotent: already out)
+    await p.wait()
+    # (daybreak3's KILL-1: a group is ended once, and the delayed SIGKILL never signals a pgid no longer ending)
+    sent = []
+    real_killpg = os.killpg
+    os.killpg = lambda g, sig: (sent.append((g, sig)), real_killpg(g, sig))[1]
+    real_later, timers = loop.call_later, []
+    try:
+        p = await asyncio.create_subprocess_exec("sh", "-c", "trap '' TERM; sleep 30 & wait", start_new_session=True)
+        await asyncio.sleep(0.2)
+        loop.call_later = lambda delay, fn, *a: (timers.append(fn), real_later(delay, fn, *a))[1]
+        G._kill_tree(p.pid)
+        G._kill_tree(p.pid)  # (terminate() and the run's exit both end it)
+        loop.call_later = real_later
+        assert sent == [(p.pid, signal.SIGTERM)] and len(timers) == 1, (sent, timers)
+        assert await G.drain_groups(0.3) == [p.pid] and p.pid not in G.ENDING_GROUPS  # (SIGKILLed at the deadline, out)
+        sent.clear()
+        timers[0]()  # (the 2 s timer, after the drain took the group out: possibly a reused pgid by now)
+        assert sent == [], sent
+    finally:
+        os.killpg = real_killpg
+        loop.call_later = real_later
+    await p.wait()
     # (G1) a group still alive at drain's deadline, before the tree's own SIGKILL at 2 s, is SIGKILLed by drain
     p = await asyncio.create_subprocess_exec("sh", "-c", "trap '' TERM; sleep 30 & wait", start_new_session=True)
     await asyncio.sleep(0.2)
@@ -742,6 +798,42 @@ async def test_drain_groups():
         await asyncio.sleep(0.02)
     await p.wait()
 
+
+def test_forget_when_empty_rechecks():
+    """grader's #783 D4/D5/D7/D8: a killed group is checked at once, then every 50 ms while it still has members, and
+    taken out on the first check that finds it empty; at most 100 rechecks (5 s), after which it stays for the exit's
+    drain.  Driven with a stub membership and a loop that only records its timers."""
+    from sagebrush.remote import gateway as G
+
+    class Loop:
+        def __init__(self):
+            self.timers = []
+
+        def call_later(self, delay, fn, *a):
+            self.timers.append((delay, fn, a))
+
+    def run(alive_checks):
+        pgid = 2 ** 30 + 7  # (no such group: only the stub answers for it)
+        checks = []
+        real = G._group_members
+        G._group_members = lambda g: (checks.append(g), [g] if len(checks) <= alive_checks else [])[1] if g == pgid else real(g)
+        loop = Loop()
+        G.ENDING_GROUPS.add(pgid)
+        try:
+            G._forget_when_empty(pgid, loop)
+            while loop.timers:
+                delay, fn, a = loop.timers.pop(0)
+                assert delay == 0.05, delay
+                fn(*a)
+            return len(checks), pgid in G.ENDING_GROUPS
+        finally:
+            G._group_members = real
+            G.ENDING_GROUPS.discard(pgid)
+    for k in (0, 1, 3):
+        n, kept = run(k)
+        assert (n, kept) == (k + 1, False), (k, n, kept)  # (taken out on check k + 1, after k timers of 50 ms)
+    n, kept = run(10 ** 6)
+    assert (n, kept) == (101, True), (n, kept)  # (the first check, then 100 rechecks: then left for the drain)
 
 # ================= end to end: the runner as a process, real DPoP
 

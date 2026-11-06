@@ -266,7 +266,10 @@ ENDING_GROUPS = set()  # (kernel process groups sent SIGTERM whose SIGKILL is st
 
 
 def _kill_tree(pgid):
-    """The tree rule: SIGTERM to the child's process group, SIGKILL to it 2 s later (whatever is left)."""
+    """The tree rule: SIGTERM to the child's process group, SIGKILL to it 2 s later (whatever is left).  Once per
+    group: a group already ending (terminate() and then the run's exit both end it) gets no second SIGTERM or timer."""
+    if pgid in ENDING_GROUPS:
+        return
     try:
         os.killpg(pgid, signal.SIGTERM)
     except (ProcessLookupError, PermissionError):
@@ -275,12 +278,31 @@ def _kill_tree(pgid):
     loop = asyncio.get_running_loop()
 
     def kill():
-        ENDING_GROUPS.discard(pgid)
+        # (only a group still ending: one drain_groups already SIGKILLed and took out, or one seen empty, may since be
+        # a reused pgid of an unrelated group, and is never signalled (daybreak3's KILL-1))
+        if pgid not in ENDING_GROUPS:
+            return
+        # (the group stays in ENDING_GROUPS until it is seen empty: SIGKILL is sent, not yet done, so a drain_groups
+        # running now still waits for it; then it is taken out promptly, so no stale pgid is kept for the runner's
+        # lifetime, where a reused one could be mistaken for a later, unrelated group (daybreak3))
         try:
             os.killpg(pgid, signal.SIGKILL)
         except (ProcessLookupError, PermissionError):
             pass
+        _forget_when_empty(pgid, loop)
     loop.call_later(2.0, kill)
+
+
+def _forget_when_empty(pgid, loop, tries=100):
+    """Take pgid out of ENDING_GROUPS once it has no members: checked now, then every 50 ms, at most `tries` times
+    (5 s).  A group still not empty then stays, for drain_groups to report and SIGKILL at the runner's exit.
+    Idempotent: a group already taken out (by drain_groups, or an earlier check) is left alone."""
+    if pgid not in ENDING_GROUPS:
+        return
+    if not _group_members(pgid):
+        ENDING_GROUPS.discard(pgid)
+    elif tries > 0:
+        loop.call_later(0.05, _forget_when_empty, pgid, loop, tries - 1)
 
 
 async def drain_groups(timeout=3.0):
