@@ -308,31 +308,66 @@ class Conn:
 
 
 class _Protocol(asyncio.Protocol):
-    """One TCP connection: the upgrade request's head, then the WebSocket's bytes to its Conn."""
+    """One TCP connection: the upgrade request's head, then the WebSocket's bytes to its Conn.
+
+    It counts among the unpaired from its TCP admission, not from its upgrade (astra's R763-HTTP-1): a connection
+    over the cap is refused at once (503), and one whose head isn't complete within helloMs is closed; at the upgrade
+    the reservation passes to the Conn (counted once), and every other end (a refusal, EOF, a lost connection,
+    shutdown) releases it."""
 
     def __init__(self, server):
         self.server = server
         self.transport = None
         self.head = bytearray()
         self.conn = None
+        self.reserved = False
+        self.timer = None
 
     def connection_made(self, transport):
         self.transport = transport
+        if self.server.unpaired_count >= PAIR_LIMITS["unpaired"]:
+            return self.server._refuse_http(transport, 503, "Service Unavailable")
+        self.server.unpaired_count += 1
+        self.reserved = True
+        self.server.pending.add(self)
+
+        def too_slow():
+            self.timer = None
+            if self.conn is None:
+                self.release()
+                transport.abort()
+        self.timer = self.server.timers.set_timeout(too_slow, PAIR_LIMITS["helloMs"])
+
+    def release(self):
+        """The reservation given back (a connection that never became a Conn)."""
+        self.server.timers.clear_timeout(self.timer)
+        self.timer = None
+        self.server.pending.discard(self)
+        if self.reserved:
+            self.reserved = False
+            self.server.unpaired_count -= 1
 
     def data_received(self, data):
         if self.conn is not None:
             return self.conn.feed(data)
+        if not self.reserved:
+            return  # (refused already)
         self.head += data
         end = self.head.find(b"\r\n\r\n")
+        # (the head's own length bounds it, wherever its end falls in what arrived (astra's R763-HEAD-2): at most
+        # httpHead bytes before the blank line, and no more than httpHead + 3 retained while looking for it)
+        if (end < 0 and len(self.head) > PAIR_LIMITS["httpHead"] + 3) or end > PAIR_LIMITS["httpHead"]:
+            self.head = bytearray()
+            self.release()
+            return self.server._refuse_http(self.transport, 431, "Request Header Fields Too Large")
         if end < 0:
-            if len(self.head) > PAIR_LIMITS["httpHead"]:
-                self.server._refuse_http(self.transport, 431, "Request Header Fields Too Large")
             return
         rest = bytes(self.head[end + 4:])
         head = bytes(self.head[:end])
         self.head = bytearray()
-        c = self.server._upgrade(self.transport, head)
+        c = self.server._upgrade(self.transport, head, self)
         if c is None:
+            self.release()
             return
         self.conn = c
         if rest:
@@ -340,13 +375,17 @@ class _Protocol(asyncio.Protocol):
 
     def eof_received(self):
         c = self.conn
-        if c is not None and not c.closed:
+        if c is None:
+            self.release()
+            return False
+        if not c.closed:
             c.ended()
         return False
 
     def connection_lost(self, exc):
         c = self.conn
         if c is None:
+            self.release()
             return
         if not c.closed:
             c.closed = True
@@ -374,6 +413,7 @@ class PairServer:
         self.unpaired_count = 0
         self.conns = set()
         self.closing = set()
+        self.pending = set()  # (TCP connections before their upgrade, each holding an unpaired place)
         self.stats = {"maxBuffered": 0, "overflows": 0, "thumbprints": 0, "destroyedAtCap": 0}
         self.gateway = Gateway(self, port=port, cwd=cwd)
         self.server = None
@@ -395,6 +435,9 @@ class PairServer:
             c.closed = True
             c.release()
             c.transport.abort()
+        for p in list(self.pending):
+            p.release()
+            p.transport.abort()
         self.conns.clear()
         self.closing.clear()
         if self.server is not None:
@@ -404,7 +447,7 @@ class PairServer:
         transport.write(("HTTP/1.1 %d %s\r\nConnection: close\r\nContent-Length: 0\r\n\r\n" % (status, text)).encode("ascii"))
         transport.close()
 
-    def _upgrade(self, transport, head):
+    def _upgrade(self, transport, head, proto=None):
         try:
             text = head.decode("latin-1")
         except UnicodeDecodeError:
@@ -435,17 +478,23 @@ class PairServer:
         key_ok = bool(_WSKEY.fullmatch(key)) and len(base64.b64decode(key)) == 16
         if method != "GET" or not key_ok or headers.get("sec-websocket-version") != "13" or headers.get("upgrade", "").lower() != "websocket":
             return self._refuse_http(transport, 403, "Forbidden")
-        if self.unpaired_count >= PAIR_LIMITS["unpaired"]:
-            return self._refuse_http(transport, 503, "Service Unavailable")
         accept = base64.b64encode(hashlib.sha1((key + GUID).encode("ascii")).digest()).decode("ascii")
         transport.write(("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
                          "Sec-WebSocket-Accept: %s\r\n\r\n" % accept).encode("ascii"))
-        return self.attach(transport)
+        return self.attach(transport, proto)
 
-    def attach(self, transport):
+    def attach(self, transport, proto=None):
+        """An upgraded socket's Conn.  Its unpaired place is the TCP connection's reservation, passed on (counted once);
+        attached without one (tests), it takes its own."""
         c = Conn(transport, self)
         self.conns.add(c)
-        self.unpaired_count += 1
+        if proto is not None and proto.reserved:
+            self.timers.clear_timeout(proto.timer)
+            proto.timer = None
+            proto.reserved = False
+            self.pending.discard(proto)
+        else:
+            self.unpaired_count += 1
 
         def no_hello():
             if not c.paired:
@@ -641,11 +690,13 @@ def main(argv):
             sys.stderr.write("sagebrush remote: unknown argument %s\n" % a)
             return 2
         i += 1
+    # (an ordinary check, never assert: python -O removes asserts (daybreak3's R763-CLI-1))
     try:
         port = int(port)
-        assert 0 <= port <= 65535
-    except (ValueError, AssertionError):
-        sys.stderr.write("sagebrush remote: --port takes a port number\n")
+    except ValueError:
+        port = -1
+    if not 0 <= port <= 65535:
+        sys.stderr.write("sagebrush remote: --port takes a port number (0 to 65535)\n")
         return 2
     if not loopback:
         sys.stderr.write("usage: sagebrush remote --loopback [--port N]\n"

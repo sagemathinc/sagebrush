@@ -188,6 +188,126 @@ async def test_upgrade_refusals():
         s.close()
 
 
+@aio
+async def test_tcp_admission():
+    """astra's R763-HTTP-1: a TCP connection counts among the unpaired from its admission, not its upgrade: 8 that
+    never finish their head hold every place (a 9th, even a valid upgrade, gets 503); one whose head doesn't finish
+    within the handshake deadline is closed and its place given back; a closed one gives its place back."""
+    s = await server()
+    try:
+        idle = []
+        for _ in range(8):
+            r, w = await asyncio.open_connection("127.0.0.1", s.port)
+            w.write(b"GET /sagebrush-kernel HTTP/1.1\r\nHost: x")  # (never finished)
+            idle.append((r, w))
+        await asyncio.sleep(0.1)
+        assert s.unpaired_count == 8 and len(s.pending) == 8, (s.unpaired_count, len(s.pending))
+        assert (await WS.open(s.port)).status == 503
+        for r, w in idle[:3]:
+            w.close()
+        await asyncio.sleep(0.1)
+        assert s.unpaired_count == 5 and len(s.pending) == 5, s.unpaired_count
+        ok = await WS.open(s.port)  # (an upgrade: its place passes to the Conn, counted once)
+        assert ok.status == 101 and s.unpaired_count == 6 and len(s.pending) == 5 and len(s.conns) == 1
+        for _ in range(4):  # (refusals give their places back)
+            assert (await WS.open(s.port, path="/nope")).status == 400
+        await asyncio.sleep(0.1)
+        assert s.unpaired_count == 6 and len(s.pending) == 5
+        s.close()  # (shutdown closes the partial heads too)
+        for r, w in idle[3:]:
+            assert await asyncio.wait_for(r.read(), 5) == b""
+        assert not s.pending
+    finally:
+        s.close()
+    old = P.PAIR_LIMITS["helloMs"]
+    P.PAIR_LIMITS["helloMs"] = 300
+    try:
+        s = await server()
+        r, w = await asyncio.open_connection("127.0.0.1", s.port)
+        w.write(b"GET /sagebrush-kernel HTTP/1.1\r\n")
+        await asyncio.sleep(0.1)
+        assert s.unpaired_count == 1
+        assert await asyncio.wait_for(r.read(), 5) == b""  # (closed at the deadline)
+        assert s.unpaired_count == 0 and not s.pending
+        s.close()
+    finally:
+        P.PAIR_LIMITS["helloMs"] = old
+
+
+@aio
+async def test_head_bound():
+    """astra's R763-HEAD-2: the head's own length bounds it, wherever its end falls in what arrived: exactly httpHead
+    bytes before the blank line pass; one more, in a single write with its end, is 431; and so is one with no end."""
+    s = await server()
+    try:
+        async def raw_upgrade(pad, split=False):
+            r, w = await asyncio.open_connection("127.0.0.1", s.port)
+            key = base64.b64encode(secrets.token_bytes(16)).decode()
+            head = ("GET %s HTTP/1.1\r\nHost: 127.0.0.1:%d\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+                    "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\nOrigin: %s\r\nX-Pad: " % (P.PAIR_PATH, s.port, key, P.PAGE_ORIGIN))
+            head += "a" * (pad - len(head))
+            whole = head.encode() + b"\r\n\r\n"
+            if split:  # (two writes, the blank line straddling them)
+                w.write(whole[:-2])
+                await w.drain()
+                await asyncio.sleep(0.05)
+                w.write(whole[-2:])
+            else:
+                w.write(whole)  # (one write, end included)
+            status = int((await asyncio.wait_for(r.readuntil(b"\r\n\r\n"), 10)).split(b" ")[1])
+            w.close()
+            return status
+        assert await raw_upgrade(P.PAIR_LIMITS["httpHead"]) == 101
+        assert await raw_upgrade(P.PAIR_LIMITS["httpHead"] + 1) == 431
+        assert await raw_upgrade(9212) == 431
+        # (split delivery, the end straddling two writes: the same bounds)
+        assert await raw_upgrade(P.PAIR_LIMITS["httpHead"], split=True) == 101
+        assert await raw_upgrade(P.PAIR_LIMITS["httpHead"] + 1, split=True) == 431
+        # (a short head with the first frame in the same write: the frame isn't charged to the head, and is read)
+        r, w = await asyncio.open_connection("127.0.0.1", s.port)
+        key = base64.b64encode(secrets.token_bytes(16)).decode()
+        head = ("GET %s HTTP/1.1\r\nHost: 127.0.0.1:%d\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %s\r\n"
+                "Sec-WebSocket-Version: 13\r\nOrigin: %s\r\n\r\n" % (P.PAIR_PATH, s.port, key, P.PAGE_ORIGIN)).encode()
+        msg = json.dumps({"jsonrpc": "2.0", "id": "p1", "method": "nothello", "params": {}, "pad": "x" * 9000}).encode()
+        mask = secrets.token_bytes(4)
+        frame = bytes([0x81, 0x80 | 126]) + struct.pack(">H", len(msg)) + mask + bytes(b ^ mask[i & 3] for i, b in enumerate(msg))
+        assert len(msg) > P.PAIR_LIMITS["preHello"]  # (over the pre-hello cap: 1009, not a head refusal)
+        w.write(head + frame)
+        assert b" 101 " in await asyncio.wait_for(r.readuntil(b"\r\n\r\n"), 10)
+        h2 = await asyncio.wait_for(r.readexactly(2), 10)
+        body = await r.readexactly(h2[1] & 0x7F)
+        assert h2[0] == 0x88 and int.from_bytes(body[:2], "big") == 1009, (h2, body)
+        w.close()
+        r, w = await asyncio.open_connection("127.0.0.1", s.port)
+        small = json.dumps({"jsonrpc": "2.0", "id": "p1", "method": "nothello", "params": {}}).encode()
+        w.write(head.replace(key.encode(), base64.b64encode(secrets.token_bytes(16))) + bytes([0x81, 0x80 | len(small)]) + mask + bytes(b ^ mask[i & 3] for i, b in enumerate(small)))
+        assert b" 101 " in await asyncio.wait_for(r.readuntil(b"\r\n\r\n"), 10)
+        h2 = await asyncio.wait_for(r.readexactly(2), 10)
+        n = h2[1] & 0x7F
+        if n == 126:
+            n = struct.unpack(">H", await r.readexactly(2))[0]
+        reply = json.loads(await r.readexactly(n))
+        assert reply["error"]["data"]["code"] == "protocol", reply  # (the coalesced first frame was read)
+        w.close()
+        r, w = await asyncio.open_connection("127.0.0.1", s.port)
+        w.write(b"GET / HTTP/1.1\r\nX: " + b"a" * 9000)  # (no end)
+        assert b" 431 " in await asyncio.wait_for(r.readuntil(b"\r\n\r\n"), 10)
+        await asyncio.sleep(0.1)
+        assert not s.pending
+    finally:
+        s.close()
+
+
+def test_port_check_under_O():
+    """daybreak3's R763-CLI-1: --port is checked by an ordinary condition, so `python -O` (which drops asserts) refuses
+    99999 as plain python does: exit 2 and the message, no traceback."""
+    import subprocess
+    for flags in ([], ["-O"]):
+        r = subprocess.run([sys.executable, *flags, "-m", "sagebrush.cli", "remote", "--loopback", "--port", "99999"],
+                           capture_output=True, text=True, timeout=60)
+        assert r.returncode == 2 and "--port takes a port number" in r.stderr and "Traceback" not in r.stderr, (flags, r.returncode, r.stderr)
+
+
 # ================= the hello
 
 @aio
