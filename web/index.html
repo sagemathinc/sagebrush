@@ -2572,6 +2572,7 @@ function drawFileMenu() {
       { key: "py", label: ".py" },
       { key: "marimo", label: "marimo (.py)", title: "A marimo notebook (one function per cell), which marimo opens" },
       { key: "bundle", label: "with history (.sbreplay)", title: "The notebook with its TimeTravel history and the files its sessions read: open it in another browser and resume any version" },
+      { key: "allzip", label: "Everything (.zip)…", title: "All your current files, folders, notebooks and boards in one .zip", disabled: none },
     ],
     // (the desktop app's own: disk files, under Upload… and Save a copy…)
     extra: [
@@ -2748,6 +2749,8 @@ fileMenu.addEventListener("click", async (e) => {
       await openDocument({ ...d, share_id: undefined, share_attempt: undefined, name: name.trim(), cells: d.cells.map((c) => ({ ...c, id: cellId() })) }, false, src?.made);
       break;
     }
+    // (the whole workspace as one .zip: the Files sidebar's export, the sidebar shown (sim run 11, X05))
+    case "allzip": if (!wsBrowser) wsShowFiles(true); wsBrowser?.exportAll(); break;
     case "ipynb": download(fileBase() + ".ipynb", notebookFileText({ ...nb.snapshot(), name: docName() })); break;
     case "py": download(fileBase() + (isSage() ? ".sage" : isMagma() || isMatlab() ? ".m" : ".py"), toScript(nb.snapshot()), isMagma() || isMatlab() ? "text/plain" : "text/x-python"); break;
     case "marimo": {

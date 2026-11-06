@@ -207,7 +207,8 @@ function popup(at: HTMLElement, items: ([string, () => void, string?] | "-")[]) 
   return menu;
 }
 
-export type Browser = { el: HTMLElement; refresh(): Promise<void>; destroy(): void; /** A message in the file browser's toast; `sticky`: kept until closed (✕), as an upload's refusals are. */ say(text: string, sticky?: boolean): void };
+export type Browser = { el: HTMLElement; refresh(): Promise<void>; destroy(): void; /** A message in the file browser's toast; `sticky`: kept until closed (✕), as an upload's refusals are. */ say(text: string, sticky?: boolean): void;
+  /** "Export all current files (.zip)": the Storage panel, its export started (File ▸ Download ▸ Everything) */ exportAll(): void };
 
 export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser {
   style();
@@ -489,10 +490,17 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   selDownload.onclick = async () => {
     const files = entries.filter((e) => selected.has(e.path) && e.kind === "file");
     const skipped = selected.size - files.length;
-    if (!files.length) { say("Only files download: no file is selected"); return; }
+    if (!files.length) {
+      if (host.exportUrl) say("Only files download: no file is selected", () => storage(true), false, false, "Export all (.zip)");
+      else say("Only files download: no file is selected");
+      return;
+    }
     // (one after another: a browser asks once before a page downloads several files)
     for (const e of files) await download(e);
-    say(`${files.length} file${files.length === 1 ? "" : "s"} downloaded` + (skipped ? ` (${skipped} not a file: folders, notebooks and boards have their own export)` : ""));
+    // (what isn't a file: offered the whole workspace as one .zip, which holds folders, notebooks and boards)
+    const text = `${files.length} file${files.length === 1 ? "" : "s"} downloaded` + (skipped ? ` (${skipped} not a file: folders, notebooks and boards have their own export)` : "");
+    if (skipped && host.exportUrl) say(text, () => storage(true), false, false, "Export all (.zip)");
+    else say(text);
   };
 
   function toggle(p: string) {
@@ -581,7 +589,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     meterEl.textContent = est ? `${fmtBytes(est.usage)} of ${fmtBytes(est.quota)}` : "Storage";
   }
   const preview = (e: Entry) => openPreview(w, e, { say, fail }).then(() => meter());
-  const storage = () => openStorage(w, { say, fail, showTrash: () => { trashView = true; refresh(); }, emptyTrash: emptyAll, exportUrl: host.exportUrl, saveOpen: host.saveOpen }).then(() => meter());
+  const storage = (startExport = false) => openStorage(w, { say, fail, showTrash: () => { trashView = true; refresh(); }, emptyTrash: emptyAll, exportUrl: host.exportUrl, saveOpen: host.saveOpen, startExport }).then(() => meter());
   const ancestors = (p: string) => { const out: string[] = []; for (let a = parentOf(p); a !== "/"; a = parentOf(a)) out.push(a); return out; };
 
   async function rowMenu(at: HTMLElement, e: Entry) {
@@ -891,7 +899,8 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
 
   newBtn.onclick = () => popup(newBtn, [["Notebook", () => make("/", "notebook")], ["MATLAB notebook", () => make("/", "notebook", "matlab")], ["Board", () => make("/", "board")], ["Folder", () => make("/", "folder")]]);
   upBtn.onclick = () => pick("/");
-  moreBtn.onclick = () => popup(moreBtn, [[trashView ? "All files" : "Trash", () => { trashView = !trashView; refresh(); }], ["Storage…", () => storage()]]);
+  // (Download everything: the Storage panel's export, offered here too, where a person looks for it)
+  moreBtn.onclick = () => popup(moreBtn, [[trashView ? "All files" : "Trash", () => { trashView = !trashView; refresh(); }], ["Storage…", () => storage()], ...(host.exportUrl ? [["Download everything (.zip)…", () => storage(true)] as [string, () => unknown]] : [])]);
   // (the search drawn once typing pauses: LIMIT-0B0-2)
   let searchTimer: ReturnType<typeof setTimeout> | null = null;
   search.oninput = () => {
@@ -917,5 +926,6 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     refresh,
     destroy() { unwatch(); unowner(); if (iconTimer) clearTimeout(iconTimer); root.remove(); },
     say: (text: string, sticky?: boolean) => say(text, undefined, !!sticky),
+    exportAll: () => { if (host.exportUrl) void storage(true); else say("Export all isn't offered here"); },
   };
 }
