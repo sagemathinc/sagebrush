@@ -718,8 +718,8 @@ if (hasSite && LATEX) for (const f of ["sagebrush-latex.js", "sagebrush-latex-ex
 // (the library's chunks)
 if (hasSite) rmSync(join(siteDir, "public", "lib"), { recursive: true, force: true });
 if (hasSite) cpSync(join(here, "dist", "lib"), join(siteDir, "public", "lib"), { recursive: true });
-// the articles (articles/ in the repository) as static pages, sitemap.xml
-if (hasSite) await import("./build-articles.ts");
+// (the articles and the examples gallery, and the sitemap of both: web/build-sitemap.ts)
+if (hasSite) await (await import("./build-sitemap.ts")).buildSitemap();
 // (the service worker's test hook is in no deployable directory: web/sw-hook.mts)
 {
   const { assertNoHookIn } = await import("./sw-hook.mts");

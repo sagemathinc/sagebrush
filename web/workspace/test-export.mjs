@@ -509,6 +509,37 @@ try {
     await idb("sagebrush-workspace", "entries", `(s) => s.delete("/late.txt")`);
   });
 
+  await scenario("zipnames", async () => {
+    // (EXPORT-ZIPNAME-1, astra's evidence: workspace names a .zip can't hold safely, a file's backslash-parent name
+    // last in path order and a folder's colon; the export refuses as a whole, naming them, before any body is read
+    // (preflight's capture and the writer's alike), and hands nothing over)
+    await ev(`(async () => { await ${W}.create("/zz/..\\\\..\\\\outside.txt", { content: "SEC probe" }); await ${W}.mkdir("/bad:dir"); return 1; })()`);
+    const listed = await ev(`Promise.all([${W}.stat("/zz/..\\\\..\\\\outside.txt"), ${W}.stat("/bad:dir")]).then((a) => a.every(Boolean))`);
+    await hooks(`preflightMember: () => { window.__bodyReads = (window.__bodyReads ?? 0) + 1; }, beforeCapture: () => { window.__bodyReads = (window.__bodyReads ?? 0) + 1; }`);
+    await ev(`(() => { window.__bodyReads = 0; delete window.__exp; return 1; })()`);
+    const r = await exportOnce(join(out, "zipnames.zip"));
+    const reads = await ev(`window.__bodyReads`);
+    check(listed && !!r.stopped && /2 files' names can't go safely into a \.zip/.test(r.stopped) && r.stopped.includes("bad:dir") && r.stopped.includes("zz/..\\..\\outside.txt") && /Rename them, then export again/.test(r.stopped), "unsafe names (a backslash parent, last in path order; a folder's colon): the export refuses, naming both: " + (r.stopped ?? "not stopped").slice(-400));
+    check(reads === 0 && !(await ev(`!!window.__exp`)), "…before any body is read (" + reads + " reads), and nothing is handed over");
+    // (daybreak3's and astra's TOCTOU-1: an entry made after preflight's name check, as a sync or another tab could, an
+    // unsafe notebook last in path order: the measuring pass reads the checked entries' spool, never the live workspace,
+    // so it is never measured; the tree check at the end stops the export, and nothing is handed over)
+    await ev(`(async () => { await ${W}.rename("/zz/..\\\\..\\\\outside.txt", "/zz/early.txt"); await ${W}.rename("/bad:dir", "/bad-early"); return 1; })()`);
+    await hooks(`afterNameCheck: async () => { await window.sagebrush.workspace.create("/zzz/late:nb.ipynb", { content: ${nb("late")} }); }, preflightMember: (p) => { if (p === "/zzz/late:nb.ipynb") window.__lateMeasured = 1; }, beforeCapture: (p) => { if (p === "/zzz/late:nb.ipynb") window.__lateMeasured = 1; }`);
+    await ev(`(() => { delete window.__exp; delete window.__lateMeasured; return 1; })()`);
+    const late = await exportOnce(join(out, "zipnames-late.zip"));
+    const lateMeasured = await ev(`!!window.__lateMeasured`);
+    check(!!late.stopped && /zzz: \"mkdir\" while exporting/.test(late.stopped) && !lateMeasured && !(await ev(`!!window.__exp`)), "an unsafe entry made after the name check (TOCTOU-1): never measured or read, the export stopped by the tree check, nothing handed over: " + JSON.stringify({ lateMeasured }) + " " + (late.stopped ?? "not stopped").slice(-300));
+    await ev(`(async () => { await ${W}.remove("/zzz/late:nb.ipynb").catch(() => {}); await ${W}.rename("/zz/early.txt", "/zz/..\\\\..\\\\outside.txt"); await ${W}.rename("/bad-early", "/bad:dir"); return 1; })()`);
+    // (renamed, the same workspace exports, the nested names as they are)
+    await ev(`(async () => { await ${W}.rename("/zz/..\\\\..\\\\outside.txt", "/zz/outside.txt"); await ${W}.rename("/bad:dir", "/bad-dir"); return 1; })()`);
+    await hooks();
+    const ok2 = await exportOnce(join(out, "zipnames-ok.zip"));
+    const z = ok2.stopped ? { names: [] } : inspect(join(out, "zipnames-ok.zip"));
+    check(!ok2.stopped && z.bad === null && z.unzip === 0 && z.names.includes("files/zz/outside.txt") && z.names.includes("files/bad-dir/") && !z.names.some((n) => /\\|:/.test(n)), "…renamed, the export is made, its names as the workspace's: " + (ok2.stopped ?? JSON.stringify(z.names.filter((n) => /zz|bad/.test(n)))).slice(-300));
+    for (const p of ["/zz", "/bad-dir"]) await ev(`${W}.remove(${JSON.stringify(p)}).then(() => 1, () => 0)`);
+  });
+
   await scenario("picker", async () => {
     await ev(`(() => { window.__picked = null; window.__aborted = 0; window.showSaveFilePicker = async () => ({ createWritable: async () => { const parts = []; return { write: async (c) => { parts.push(new Uint8Array(c)); }, close: async () => { window.__picked = new Blob(parts); }, abort: async () => { window.__aborted++; } }; } }); return 1; })()`);
     await ev(`(() => { window.__exp = null; window.__SB_EXPORT_TEST__ = { stats: {} }; return 1; })()`);
@@ -842,8 +873,9 @@ print(json.dumps({"members": len(b), "diffs": diffs[:6], "ndiffs": len(diffs), "
       f("/p1", { fid: "p1fid", ident: "p1fid" });
       for (const [n, c, u] of [["nan", NaN, NaN], ["pinf", Infinity, Infinity], ["ninf", -Infinity, -Infinity], ["negz", -0, -0], ["frac", 1.5, 1.5], ["big", 1e21, 1e21], ["small", -1e-7, 1e21]]) f("/p1/" + n, { created: c, updated: u, fid: "p1" + n, ident: "p1" + n });
       f("/p3", { fid: "p3fid", ident: "p3fid" }); f("/p3/nofid", {}); f("/p3/withmode", { fid: "p3m", ident: "p3m", mode: "python" }); f("/p3/fidonly", { fid: "p3f" }); return null; }`);
-    // (P-2: hard names through the workspace's own API: made, or refused, each)
-    const names = ["q\"uote", "back\\slash", "ctl\u0001", "ls ", "ps ", "lone\ud800"];
+    // (P-2: hard names through the workspace's own API: made, or refused, each.  None a .zip can't hold safely (a quote,
+    // a backslash, a trailing space): the export refuses those (EXPORT-ZIPNAME-1, the zipnames scenario))
+    const names = ["ctl\u0001", "lone\ud800"];
     const made = await ev(`(async () => { const out = []; await ${W}.mkdir("/p2").catch(() => {}); for (const n of ${JSON.stringify(names)}) { try { await ${W}.mkdir("/p2/" + n); out.push([n, "made"]); } catch (e) { out.push([n, "refused: " + String(e?.message ?? e).slice(0, 80)]); } } return out; })()`);
     check(made.length === names.length && made.every(([, r]) => r === "made" || /^refused: ./.test(r)), "identity P-2: each hard folder name is made, or refused by the workspace with a reason: " + JSON.stringify(made));
     await ev(`(async () => { const b = new Uint8Array(3 * 2 ** 20 + 12345); for (let i = 0; i < b.length; i += 65536) crypto.getRandomValues(b.subarray(i, Math.min(b.length, i + 65536))); await ${W}.mkdir("/p4").catch(() => {}); await ${W}.create("/p4/big.zip", { content: b }); return 1; })()`);
@@ -1180,7 +1212,9 @@ print(json.dumps({"members": len(b), "diffs": diffs[:6], "ndiffs": len(diffs), "
       const bytes = (s) => Buffer.byteLength(s);
       const cap13 = 1761900000000;
       // (manifest.json's own central record, 46 + 12 + 13, in the index's bound since #545)
-      const need = 46 + 12 + 13 + P8.reduce((n, e) => n + (46 + 12 + bytes(e.path) + 7) + (bytes(JSON.stringify({ path: e.path, kind: "folder", fid: e.fid, created: e.created, modified: e.updated, captured: cap13 })) + 1) + (bytes(JSON.stringify([e.path, "folder", e.ident])) + 1) + rec(e.path.length), 0);
+      // (and preflight's spool of the entries its name check saw, held until its measuring pass ends: each entry's record
+      // as JSON and a newline, EXPORT-ZIPNAME-1's TOCTOU-1)
+      const need = 46 + 12 + 13 + P8.reduce((n, e) => n + (46 + 12 + bytes(e.path) + 7) + (bytes(JSON.stringify({ path: e.path, kind: "folder", fid: e.fid, created: e.created, modified: e.updated, captured: cap13 })) + 1) + (bytes(JSON.stringify([e.path, "folder", e.ident])) + 1) + rec(e.path.length) + bytes(JSON.stringify(e)) + 1, 0);
       await putAll([...saved.filter(keep), ...P8]);
       await reload();
       await only(P8);
@@ -1217,6 +1251,15 @@ print(json.dumps({"members": len(b), "diffs": diffs[:6], "ndiffs": len(diffs), "
         if (ok) check(!p.stopped, `P-8: without OPFS, ${P8.length} folders needing ${need} bytes of in-memory spools, the records counted, with the cap at ${cap}: exported: ` + (p.stopped ?? p.name));
         else check(!!p.stopped && p.stopped.includes(NO_OPFS) && !(await ev(`!!window.__exp`)), `P-8: without OPFS, the same with the cap at ${cap} (${label}): refused in preflight, in plain words, nothing written: ` + String(p.stopped ?? "not stopped").slice(-200));
       }
+      // (X9, the grader's pin: the name check's spool alone past a small cap is refused in the name loop itself, not
+      // after it: the measuring pass never starts (afterNameCheck not called), and the spool then holds at most the cap
+      // and one record.  The cap read once per record spooled (a getter counts the reads); refused at the 21st record)
+      const r0 = bytes(JSON.stringify(P8[0])) + 1, r = bytes(JSON.stringify(P8[1])) + 1;
+      check(P8.slice(1).every((e) => bytes(JSON.stringify(e)) + 1 === r), "X9: the fixture's records past the first are all " + r + " bytes");
+      const cap9 = 71 + r0 + 19 * r + Math.floor(r / 2), held = r0 + 20 * r;
+      const x9 = (await exportClean("x9.zip", `x9: (window.__x9 = { reads: 0, after: false }), noOpfs: true, afterNameCheck: () => { window.__x9.after = true; }, caps: { get spoolBlob() { window.__x9.reads++; return ${cap9}; } }`)) ?? { stopped: "the page kept writing entries of its own" };
+      const seen = await ev(`window.__x9`);
+      check(!!x9.stopped && x9.stopped.includes(NO_OPFS) && !(await ev(`!!window.__exp`)) && seen?.after === false && seen?.reads === 21 && held <= cap9 + r, `X9: without OPFS, the name check's spool alone past a cap of ${cap9} is refused in the name loop: the measuring pass never started (${seen?.after === false}), refused at the record that crossed it (cap read ${seen?.reads} times, 21 expected), the spool then ${held} bytes, at most the cap and one record (${cap9 + r}): ` + String(x9.stopped ?? "not stopped").slice(-160));
     } finally {
       await putAll(saved);
       await reload();
