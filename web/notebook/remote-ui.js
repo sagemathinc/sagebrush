@@ -319,6 +319,7 @@ export const PAIRED = {
   label: "Your computer",
   ready: "Your computer · ready",
   sessionGone: "the runner restarted, so this page needs its new link: choose Your computer again and paste it",
+  blocked: "If you blocked this site's access to apps on this device, allow it in the site settings (the icon left of the address), then Retry.",
 };
 
 /** The status line's text for a paired kernel's status. */
@@ -333,7 +334,7 @@ export function pairedStatusText(text) {
  * once); without one (Retry, Reconnect), it pairs again by the remembered session.  Resolves as startPreview does:
  * {kernel, failed, retry(), close()}; `onLost(why)` is told when the socket goes.  `WebSocket`: tests.
  */
-export function pairedStarter({ WebSocket } = {}) {
+export function pairedStarter({ WebSocket, helloMs } = {}) {
   let remembered = null; // {port, session, incarnation}
   return async function startPaired({ notebook, answer, onStatus = () => {}, onLost = () => {} }) {
     let tunnel = null;
@@ -359,13 +360,15 @@ export function pairedStarter({ WebSocket } = {}) {
       const how = pending ? { code: pending.code, remember: true } : remembered ? { session: remembered.session } : null;
       const port = pending?.port ?? remembered?.port;
       if (!how) return PAIRED.sessionGone;
+      r.hint = null;
       try {
-        tunnel = await pairTunnel({ port, jwk: client.jwk, jkt: client.jkt, WebSocket, ...how, onClose: (w) => { tunnel = null; if (!closed) onLost(w); } });
+        tunnel = await pairTunnel({ port, jwk: client.jwk, jkt: client.jkt, WebSocket, timeoutMs: helloMs, ...how, onClose: (w) => { tunnel = null; if (!closed) onLost(w); } });
         pending = null; // (a code pairs once)
       } catch (e) {
-        // (a code the runner saw is spent or counted; one that never reached it (nothing listening, or blocked) is kept
-        // for Retry)
-        if (e?.kind !== "unreachable" && e?.kind !== "timeout") pending = null;
+        // (a code that may have reached the runner is never sent again (astra's RETRY-2): only one whose hello was
+        // never handed to a socket (nothing listening, blocked, or no answer before it opened) is kept for Retry)
+        if (e?.sent !== false) pending = null;
+        r.hint = e?.kind === "unreachable" ? PAIRED.blocked : null;
         if (how.session && e?.kind === "refused") remembered = null; // (the runner forgot it: a new code is needed)
         return how.session && e?.kind === "refused" ? PAIRED.sessionGone : e?.message ?? String(e);
       }
@@ -396,6 +399,7 @@ export function pairedStarter({ WebSocket } = {}) {
       kernel,
       gateway: null,
       failed: null,
+      hint: null, // (a way forward said after the failure, outside its parentheses)
       retry: bind,
       get tunnel() { return tunnel; },
       close() {
@@ -445,7 +449,9 @@ export function pairSheet(doc = document, prefill = null, userAgent = globalThis
   const cmd = el("code", PAIR_SHEET.command);
   const copy = el("button", PAIR_SHEET.copy, { type: "button" });
   copy.addEventListener("click", () => {
-    Promise.resolve(globalThis.navigator?.clipboard?.writeText(PAIR_SHEET.command)).then(() => { said.textContent = PAIR_SHEET.copied; }, () => {});
+    const cb = globalThis.navigator?.clipboard;
+    if (typeof cb?.writeText !== "function") return; // (no clipboard here: nothing is said to have been copied)
+    cb.writeText(PAIR_SHEET.command).then(() => { said.textContent = PAIR_SHEET.copied; }, () => {});
   });
   const cmdRow = el("p", null, { className: "cap" });
   cmdRow.append(cmd, copy);
@@ -580,7 +586,7 @@ export function remoteSwitch(page, deps = {}) {
         if (!live()) return; // (stale meanwhile: changes nothing)
         if (ok) clearActions();
         else {
-          page.status(`${label}: couldn't connect (${owner.r.failed}).`);
+          page.status(`${label}: couldn't connect (${owner.r.failed}).${owner.r.hint ? " " + owner.r.hint : ""}`);
           offer(owner, ["retry", "switch"]);
         }
       }),
@@ -672,7 +678,7 @@ export function remoteSwitch(page, deps = {}) {
       // (another tab took this notebook's kernel: Reconnect, or This browser)
       r.kernel.on?.("lifecycle", (_old, lc) => { if (lc.phase === "moved") offer(owner, ["reconnect", "switch"]); });
       if (r.failed) {
-        page.status(`${label}: couldn't connect (${r.failed}).`);
+        page.status(`${label}: couldn't connect (${r.failed}).${r.hint ? " " + r.hint : ""}`);
         offer(owner, ["retry", "switch"]);
       } else if (skipSheet) {
         page.status(`${deps.readyText ?? statusText("ready (remote)", network())} · a fresh kernel: earlier variables are gone`);
