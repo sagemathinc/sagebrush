@@ -1,10 +1,10 @@
 {
  "v": 1,
- "reason": "series latex follow-up to #741: two doctest examples for the earlier-form fallbacks (RR coefficients, Laurent series) and the unreachable a/b branch of _latex_number dropped (lib/_sage_series.py) Re-measured with bun 1.4.4 (size-record.sh) on master e3e884a7 vs head 0db71875: cli/lib.gen.js +144, cli/pyjs.cjs +180, engine/lib/sage.pre +257, engine/lib/sage.src +359; no other row moves. Markers: exact, except cli/pyjs.cjs 212 (+180 measured, plus 32 B of margin, as it moves with master).",
+ "reason": "series latex follow-up to #741: a Laurent series typeset as Sage does (\\\\frac{c}{z^{k}} for a negative power, no space before a monomial, O(1)), a doctest pin for the RR-coefficient fallback, the unreachable a/b branch of _latex_number dropped (lib/_sage_series.py). Re-measured with bun 1.4.4 (size-record.sh) on master e3e884a7 vs head d45cb143: cli/lib.gen.js +376, cli/pyjs.cjs +292, engine/lib/sage.pre +494, engine/lib/sage.src +800; no other row moves. Markers: exact, except cli/pyjs.cjs 324 (+292 measured, plus 32 B of margin, as it moves with master).",
  "bytes": {
-  "cli/lib.gen.js": 144,
-  "cli/pyjs.cjs": 212,
-  "engine/lib/sage.pre": 257,
-  "engine/lib/sage.src": 359
+  "cli/lib.gen.js": 376,
+  "cli/pyjs.cjs": 324,
+  "engine/lib/sage.pre": 494,
+  "engine/lib/sage.src": 800
  }
 }
