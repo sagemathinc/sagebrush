@@ -650,6 +650,65 @@ try {
         // (back on A, entry 0: three entries back)
         await ev(`(history.go(-3), true)`); await until(`history.state && history.state.sbTex === 0`, 20000); await shownIs(fa); await sleep(500);
       }
+      // (12) (grader H9) a recovery ending while a leave holds the editor: A opened with another writer's draft (its
+      // edit, never written), the recovery's last step (the adopted draft's IndexedDB drop) held; meanwhile a switch
+      // to B asked for, its write held: when the recovery ends, the editor stays frozen (the leave's hold, not the
+      // recovery's read-only alone); released, B opens and A's file has the recovered edit
+      {
+        const mark = "% recovered while leaving";
+        const own = await ev(`(async () => {
+          window.__sbTexSaveWrite = () => { throw new Error("test: the write failed"); };
+          const t = document.querySelector(".tex-src"); t.value += ${JSON.stringify(mark + "\n")}; t.dispatchEvent(new Event("input"));
+          await new Promise((r) => setTimeout(r, 1500));
+          const k = Object.keys(localStorage).find((k) => k.startsWith("sb-tex-draft:" + ${JSON.stringify(fa)} + ":"));
+          if (!k) return null; const d = JSON.parse(localStorage.getItem(k)); d.writerId = "0123456789abcdef0123456789abcdef"; window.__foreign = d; return { key: k, text: d.text.slice(-30) }; })()`);
+        await ev(`(window.__answer = true, window.__sbTex({ path: "/sw/c.tex", fid: ${JSON.stringify(fc)} }), true)`); await shownIs(fc); await sleep(300);
+        const seeded = await ev(`(() => { Object.keys(localStorage).filter((k) => k.startsWith("sb-tex-draft:" + ${JSON.stringify(fa)} + ":")).forEach((k) => localStorage.removeItem(k));
+          const d = window.__foreign; localStorage.setItem("sb-tex-draft:" + d.fid + ":" + d.writerId, JSON.stringify(d));
+          window.__idbHold = new Promise((r) => (window.__idbRel = r)); const orig = IDBDatabase.prototype.transaction; window.__idbOrig = orig;
+          IDBDatabase.prototype.transaction = function (names, mode, ...rest) { const t = orig.call(this, names, mode, ...rest); if (mode !== "readwrite" || this.name !== "sagebrush-tex-drafts") return t;
+            let f = null; t.addEventListener("complete", (e) => { const h = window.__idbHold; (h ? h : Promise.resolve()).then(() => f && f.call(t, e)); });
+            Object.defineProperty(t, "oncomplete", { configurable: true, get: () => f, set: (v) => { f = v; } }); return t; };
+          window.__hold = new Promise((r) => (window.__rel = r)); window.__sbTexSaveWrite = () => window.__hold; window.__answer = false; return true; })()`);
+        await watchX(fb);
+        await ev(`(window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }), true)`);
+        const adopted = await until(`!!document.querySelector(".tex-src") && document.querySelector(".tex-title")?.textContent === "a.tex" && document.querySelector(".tex-src").value.includes(${JSON.stringify(mark)}) && document.querySelector(".tex-src").readOnly === true`, 15000);
+        await ev(`(window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} }), true)`); await sleep(300);
+        await ev(`(window.__idbRel(), true)`); await sleep(600);
+        const frozen = await ev(`({ ro: document.querySelector(".tex-src")?.readOnly, title: document.querySelector(".tex-title")?.textContent })`);
+        await ev(`(window.__rel(), true)`);
+        await shownIs(fb); await sleep(1000);
+        const fA = await textOf(fa), s = await stateOf(fb);
+        await ev(`(IDBDatabase.prototype.transaction = window.__idbOrig, delete window.__idbOrig, delete window.__idbHold, window.__obsB?.disconnect(), true)`); await writesWork();
+        check(own && seeded && adopted && frozen.ro === true && frozen.title === "a.tex" && s.url === fb && s.ro === false && fA.includes(mark),
+          "U8-HOLD (grader H9): a recovery ending while a leave holds the editor: the editor stays frozen (the hold kept); released, the other file opens and the recovered edit is written", { own, seeded, adopted, frozen, s: { ...s, src: s.src.slice(-30) }, fileA: fA.slice(-30) });
+        // (back on A, entry 0: three entries back, B to A)
+        await ev(`(window.__answer = true, history.go(-3), true)`); await until(`history.state && history.state.sbTex === 0`, 20000); await shownIs(fa); await sleep(500); await ev(`(window.__answer = false, true)`);
+      }
+      // (13) (astra, grader H10) a switch asked for while the file's editor is being made: A opened afresh, its read
+      // held; the read released and B asked for in the same task, so A's editor replaces its placeholder (the
+      // editor shown changing under the leave without a newer request): the request isn't lost: B opens
+      {
+        await ev(`(window.__sbTex({ path: "/sw/c.tex", fid: ${JSON.stringify(fc)} }), true)`); await shownIs(fc); await sleep(300);
+        const armed = await ev(`(() => { const ws = window.__sbTexWs; if (!ws) return false; const orig = ws.readUpTo; window.__readOrig = orig;
+          ws.readUpTo = function (p, n) { if (p !== "/sw/a.tex" || !window.__deferA) return orig.call(this, p, n); window.__deferA = false;
+            let res, rej; const out = new Promise((a, b) => { res = a; rej = b; });
+            orig.call(this, p, n).then((v) => { window.__readRel = () => res(v); }, (e) => { window.__readRel = () => rej(e); });
+            return out; };
+          window.__deferA = true; delete window.__readRel; return true; })()`);
+        await watchX(fb);
+        await ev(`(window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }), true)`);
+        const readHeld = await until(`typeof window.__readRel === "function"`, 15000);
+        const asked = await ev(`(() => { window.__readRel(); return window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} }); })()`);
+        const opened = await until(`document.querySelector(".tex-title")?.textContent === "b.tex" && new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fb)}`, 15000);
+        await sleep(800);
+        const s = await stateOf(fb);
+        await ev(`(window.__sbTexWs.readUpTo = window.__readOrig, delete window.__readOrig, window.__obsB?.disconnect(), true)`);
+        check(armed && readHeld && asked === true && opened && s.url === fb && s.title === "b.tex" && s.ro === false && s.pages === 1,
+          "U8-HOLD (astra, grader H10): a switch asked for as the file's editor replaces its placeholder: the request isn't lost, the other file opens", { armed, readHeld, asked, opened, s: { ...s, src: s.src.slice(-30) } });
+        // (back on A, entry 0)
+        await ev(`(history.go(-(history.state && history.state.sbTex || 0)), true)`); await until(`history.state && history.state.sbTex === 0`, 20000); await shownIs(fa); await sleep(500);
+      }
     }
     // ---- (astra B5-R1-A1) the exact entry shown is the one gone back to, a fragment's entry between: A, A#section, B;
     // with unsaved B, Back one step and Back two steps, declined, stay on B (its entry, URL and text); accepted two
