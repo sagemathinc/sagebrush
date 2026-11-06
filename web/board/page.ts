@@ -69,6 +69,7 @@ onHistoryRefused((m: string) => showHistoryNotice(m, HISTORY_STOPPED));
 import { uploadFiles, openableAsFile, blobHead, convertCopy, MystNotebookError, pauseBoard, isPaused, unpause, carryNotice, takeNotice, type DocKind } from "../workspace/upload";
 import { readBundle, keepBundle } from "../notebook/bundle.js";
 import { openFilesDialog, recentOpened, recentLabel, recordOpened } from "../workspace/fileopen";
+import { openGallery } from "../examples/open";
 import { mountBrowser } from "../workspace/browser";
 import { mountAgentPairing, floatingButton } from "../workspace/agent-ui";
 import { pairLink } from "../workspace/pair-link";
@@ -1126,6 +1127,8 @@ async function openAsHere(w: Workspace, e: Entry, as: DocKind, mode: string): Pr
     return null;
   } catch (err) { return String((err as Error)?.message ?? err); }
 }
+// (Download ▸ Everything (.zip)…: set by the Files sidebar below, which owns the file browser that exports)
+let exportAllHere: (() => void) | null = null;
 const host: BoardHost = {
   // (this browser's boards open in View, except one made here or last left in Edit: web/doc-mode.ts)
   mode: local ? { start: modeOf(modeKey("board", source.slice(6))) === "edit", toggled: (on) => rememberMode(modeKey("board", source.slice(6)), on ? "edit" : "view") } : undefined,
@@ -1387,6 +1390,8 @@ const host: BoardHost = {
       const ex = (await (await fetch(new URL("examples/index.json", location.href))).json()) as { file: string; title: string; about: string }[];
       return ex.map((e) => ({ title: e.title, about: e.about, href: `?doc=${encodeURIComponent("examples/" + e.file)}`, current: source === "examples/" + e.file }));
     },
+    // (the gallery's panel, boards first: a copy opens as any document from the File menu)
+    panel: () => openGallery(ws, (e) => openEntry(e, "here"), "board"),
   },
   // (which Sagebrush: the site's /version.json, each field checked, as data;
   // an exported file, or a site without it, the engine that ran its code
@@ -1440,6 +1445,8 @@ const host: BoardHost = {
     open: () => openFilesDialog(ws!, openEntry, () => (local ? { kind: "board", ref: source.slice(6) } : undefined)),
     recent: async () => (await recentOpened(ws!, local ? { kind: "board", ref: source.slice(6) } : undefined)).map((e) => ({ label: recentLabel(e), title: e.path, open: () => openEntry(e, "here") })),
     upload: (files: File[], mode: string) => uploadToWorkspace(ws!, files, mode),
+    // (Download ▸ Everything: the Files sidebar's export, the sidebar shown; set once the sidebar is made, below)
+    exportAll: local ? () => exportAllHere?.() : undefined,
     // (this board, by its identity, to Trash; then the latest other board, or a new one)
     delete: local ? async () => {
       const id = source.slice(6), p = await ws!.pathOf("board", id), e = p ? await ws!.stat(p) : undefined;
@@ -1580,6 +1587,7 @@ if (ws && local) {
   document.querySelector('[data-sbb="top"] [data-sbb="home"]')?.after(btn);
   const boardEl = document.getElementById("board")!;
   let browser: ReturnType<typeof mountBrowser> | null = null;
+  exportAllHere = () => { show(true); browser?.exportAll(); };
   const phone = () => matchMedia("(max-width: 640px)").matches;
   const show = (on: boolean) => {
     side.hidden = !on;

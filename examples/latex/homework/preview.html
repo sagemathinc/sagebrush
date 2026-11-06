@@ -130,6 +130,7 @@ body.wsfiles .tex-page { left: 272px; }
 .tex-page ul.desc .dlabel { font-weight: 700; }
 .tex-page ul.desc li .p { text-indent: 0; display: inline; }
 .tex-page .dmath { margin: .7em 0; overflow-x: auto; overflow-y: hidden; }
+.tex-page .dmath > .katex-display { margin: 0; }
 .tex-page .katex { font-size: 1.08em; }
 .tex-page .katex-error { color: #b00; }
 .tex-page .thm { margin: .8em 0; }
@@ -207,6 +208,8 @@ body.wsfiles .tex-page { left: 272px; }
 .tex-page .slide > .slide-title { font-size: calc(var(--sfs) * 1.44cqw); color: #2d2da0; padding: .5em .75em .2em; line-height: 1.2; }
 .tex-page .slide-subtitle { font-size: .72em; }
 .tex-page .slide-body { flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: safe center; padding: .3em 1.1em .7em; }
+.tex-page .slide-body > * { flex-shrink: 0; }
+.tex-page .slide-body > .dmath { margin: .4em 0; }
 .tex-page .slide.va-t .slide-body { justify-content: flex-start; }
 .tex-page .slide.va-b .slide-body { justify-content: safe flex-end; }
 .tex-page .slide .p { text-indent: 0; text-align: left; hyphens: manual; margin: .3em 0; }

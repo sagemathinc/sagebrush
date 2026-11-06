@@ -124,7 +124,11 @@ export interface BoardHost {
   /** where "Sagebrush" in the top bar goes */
   home?: string;
   /** the example boards (Examples…) */
-  examples?: { list(): Promise<{ title: string; about: string; href: string; current?: boolean }[]> };
+  examples?: {
+    list(): Promise<{ title: string; about: string; href: string; current?: boolean }[]>;
+    /** the gallery's panel (web/examples/open.ts), where the site has it: whether it opened (else the list above) */
+    panel?(): Promise<boolean>;
+  };
   /** which Sagebrush runs this board's code: the site's version, its build (as
    * `sagebrush --version` says it) and its engine; or only the engine (round 0's 17) */
   version?: () => Promise<BoardVersion | null>;
@@ -168,6 +172,8 @@ export interface BoardHost {
     /** Upload… and files dropped on the board (not pictures), in `mode` (the board's): the rule of
      * design §3 (workspace/upload.ts); what to say, if anything.  None: a file opens in this board, as before. */
     upload?(files: File[], mode: string): Promise<string | void>;
+    /** File ▸ Download ▸ Everything (.zip)…: the whole workspace as one .zip (the Storage panel's export) */
+    exportAll?(): void;
   };
   /** whether a board with nothing in it opens in Edit (default); false: as any other (an exported file, a frame's) */
   editBlank?: boolean;
@@ -325,11 +331,14 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       newNotebook: !host.files?.newNotebook, newMatlab: !host.files?.newNotebook, newFolder: !host.files?.newFolder, fromExample: !host.examples, open: !host.files?.open,
       saveCopy: !host.duplicate, share: true, delete: !host.files?.delete,
     },
+    // (a board has no share link yet (design/board-sharing.md): what to do instead, where the disabled item is)
+    why: { share: "Sharing a board isn't available yet: File ▸ Download ▸ HTML (one file) makes a page anyone can open" },
     downloads: [
       { key: "download", label: ".board.json" },
       { key: "html", label: "HTML (one file)", disabled: !host.exportHtml },
       { key: "canvas", label: "JSON Canvas" },
       { key: "copyjson", label: "Copy JSON" },
+      { key: "allzip", label: "Everything (.zip)…", title: "All your current files, folders, notebooks and boards in one .zip", disabled: !host.files?.exportAll },
     ],
     recent: host.files?.recent,
     // (Sagebrush's board page shows what it can't do here disabled; a board
@@ -1441,6 +1450,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   closeOnBackdrop($("helpdlg") as HTMLDialogElement);
   closeOnBackdrop($("exdlg") as HTMLDialogElement);
   $("examples").onclick = async () => {
+    if (await host.examples?.panel?.()) return;
     const list = $("exlist");
     try {
       const ex = await host.examples!.list();
@@ -1680,6 +1690,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       fail(e);
     }
   }
+  $("allzip").onclick = () => host.files?.exportAll?.();
   $("copyjson").onclick = async () => navigator.clipboard?.writeText(canonical(await images.inline(doc!)));
   async function openText(text: string, name?: string) {
     const d = boardFromText(text, name, (md) => { converted = md; });

@@ -52,10 +52,26 @@ const W = "window.sagebrush?.workspace";
 // (the notebook page's menu: #filemenu; the board page's: [data-sbb=filemenu])
 const NB = "#filemenu", BD = "[data-sbb=filemenu]";
 const shape = (menu) => ev(`[...document.querySelector(${JSON.stringify(menu)}).children].map((x) => x.tagName === "HR" ? "-" : x.dataset.group ? x.dataset.group + "▸[" + [...x.nextElementSibling.querySelectorAll("button")].map((b) => b.dataset.item ?? b.textContent).join(",") + "]" : x.dataset.item ?? "").filter(Boolean)`);
+// (File ▸ Examples…, sim run 12: the gallery's catalog as a site with the gallery serves it (this test's server has
+// none): one notebook and one board, as each page's panel opens on its own kind)
+const STUB_CATALOG = `(() => { const f0 = window.__sbFetch0 ??= window.fetch; window.fetch = (u, o) => new URL(String(u?.url ?? u), location.href).pathname === "/examples/index.json" ? Promise.resolve(new Response(JSON.stringify({ examples: [{ id: "notebook/stub", kind: "notebook", title: "Stub notebook", summary: "" }, { id: "board/stub", kind: "board", title: "Stub board", summary: "" }] }), { headers: { "content-type": "application/json" } })) : f0(u, o); return 1; })()`;
+const UNSTUB = `(() => { if (window.__sbFetch0) window.fetch = window.__sbFetch0; return 1; })()`;
+// (the panel open on this page's own kind first: its example listed, the other kind's not)
+const galleryShown = (own, other) => `!!document.querySelector("dialog.sb-examples[open]") && (() => { const t = [...document.querySelectorAll("dialog.sb-examples [role=option]")].map((b) => b.textContent); return t.some((x) => x.includes(${JSON.stringify(own)})) && !t.some((x) => x.includes(${JSON.stringify(other)})); })()`;
+const closeGallery = `(() => { [...document.querySelectorAll("dialog.sb-examples button")].find((b) => b.textContent === "Close")?.click(); return 1; })()`;
 const labels = (menu) => ev(`[...document.querySelector(${JSON.stringify(menu)}).querySelectorAll("button")].map((b) => b.dataset.group ? b.textContent.replace(/ [▸▾]$/, "") : b.dataset.item ? b.firstChild.textContent : null).filter(Boolean)`);
 const pick = (menu, item) => ev(`(() => { const b = document.querySelector(${JSON.stringify(menu)} + " [data-item=${item}]"); if (!b) throw new Error("no ${item}"); b.click(); return !b.disabled; })()`);
 const key = (k, mods) => ev(`(() => { document.dispatchEvent(new KeyboardEvent("keydown", { key: ${JSON.stringify(k)}, ctrlKey: true, altKey: ${!!mods?.alt}, bubbles: true, cancelable: true })); return 1; })()`);
 const nbRef = () => ev(`sagebrush.notebook.store?.id ?? null`);
+// (Export all started from somewhere: the Storage panel open, its export going or ready (no save picker: the export's
+// test hook); then stopped and the panel closed, so that nothing holds the export's lock afterwards)
+const exportStarted = () => until(`!!document.querySelector(".sbfprev") && [...document.querySelectorAll(".sbfprev button")].some((b) => /^(Cancel|Save…|Export again)$/.test(b.textContent))`, 30000);
+const closeStorage = async () => {
+  for (let i = 0; i < 20 && (await ev(`!!document.querySelector(".sbfprev")`)); i++) {
+    await ev(`(() => { const bs = [...document.querySelectorAll(".sbfprev button")]; (bs.find((b) => b.textContent === "Cancel") ?? bs.find((b) => b.textContent === "Close") ?? bs.find((b) => b.getAttribute("aria-label") === "Close"))?.click(); return 1; })()`);
+    await sleep(300);
+  }
+};
 
 try {
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
@@ -63,11 +79,25 @@ try {
   await until(`!!${W} && !!document.querySelector("#filemenu [data-item=open]:not([disabled])")`, 60000);
   // the same items in the same order, on both pages
   const nbShape = await shape(NB), nbLabels = await labels(NB);
-  check(JSON.stringify(nbShape) === JSON.stringify(["new▸[newNotebook,newMatlab,newBoard,newFolder,fromExample]", "open", "recent▸[]", "upload", "-", "saveCopy", "rename", "download▸[.ipynb,.py,marimo (.py),with history (.sbreplay)]", "print", "share", "-", "delete"]), "the notebook page's File menu: " + JSON.stringify(nbShape));
+  check(JSON.stringify(nbShape) === JSON.stringify(["new▸[newNotebook,newMatlab,newBoard,newFolder,fromExample]", "open", "examples", "recent▸[]", "upload", "-", "saveCopy", "rename", "download▸[.ipynb,.py,marimo (.py),with its files (.zip),with history (.sbreplay),Everything (.zip)…]", "print", "share", "-", "delete"]), "the notebook page's File menu: " + JSON.stringify(nbShape));
   await ev(`(() => { document.querySelector("#filebtn").click(); document.querySelector("#filemenu [data-group=new]").click(); return 1; })()`);
   check(await ev(`!document.querySelector("#filemenu").hidden && !document.querySelector("#filemenu [data-group=new]").nextElementSibling.hidden`), "New ▸ opens in place, the menu staying open");
   check(await ev(`document.querySelector("#filemenu [data-group=download]").nextElementSibling.getBoundingClientRect().height === 0`), "…a group not opened shows nothing");
   await shot("notebook-file-menu");
+  // File ▸ Examples…: New ▸ From an example…, at the top. A site without the gallery: this page's own list, as before
+  await ev(`(() => { document.querySelector("#filemenu [data-item=examples]").click(); return 1; })()`);
+  check(await until(`!!document.querySelector("#exdlg[open]")`), "File ▸ Examples… on a site without the gallery: the page's own list");
+  await ev(`(() => { document.querySelector("#exdlg").close(); return 1; })()`);
+  // (a site with the gallery: its panel, for Examples… and From an example… alike)
+  await ev(STUB_CATALOG);
+  await ev(`(() => { document.querySelector("#filemenu [data-item=examples]").click(); return 1; })()`);
+  check(await until(galleryShown("Stub notebook", "Stub board")), "File ▸ Examples…: the gallery's panel, on notebooks first");
+  await ev(closeGallery);
+  await until(`!document.querySelector("dialog.sb-examples")`);
+  await ev(`(() => { document.querySelector("#filemenu [data-item=fromExample]").click(); return 1; })()`);
+  check(await until(galleryShown("Stub notebook", "Stub board")) && !(await ev(`!!document.querySelector("#exdlg[open]")`)), "New ▸ From an example…: the same panel, not the old list");
+  await ev(closeGallery);
+  await ev(UNSTUB);
   await ev(`(() => { document.querySelector("#filebtn").click(); return 1; })()`);
   // Ctrl+Alt+N: a new notebook
   const first = await nbRef();
@@ -106,6 +136,35 @@ try {
   await until(`!!document.querySelector(".sbfopen")`);
   await ev(`(() => { document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); return 1; })()`);
   check(await until(`!document.querySelector(".sbfopen")`), "…Esc closes it");
+  // (Export all where a person looks for it: sim run 11, X05's agent never found the Storage panel's button, and
+  // zipped the files itself)
+  {
+    await ev(`(() => { window.__SB_EXPORT_TEST__ = { noPicker: true }; return 1; })()`);
+    await ev(`(() => { document.querySelector("#filebtn").click(); document.querySelector("#filemenu [data-group=download]").click(); document.querySelector('#filemenu [data-f="allzip"]')?.click(); return 1; })()`);
+    check(await exportStarted(), "File ▸ Download ▸ Everything (.zip)…: the Storage panel, its export started");
+    await closeStorage();
+    await ev(`(() => { document.querySelector("#wssidebar button[title='Trash, Storage']").click(); [...document.querySelectorAll(".sbfmenu button")].find((b) => b.textContent === "Download everything (.zip)…")?.click(); return 1; })()`);
+    check(await exportStarted(), "the Files ⋯ ▸ Download everything (.zip)…: the same");
+    await closeStorage();
+    // (a selection with no file in it: its Download offers the whole workspace instead)
+    await until(`!!document.querySelector('#wssidebar .frow[data-sel][data-path="/From the menu"] .sel')`);
+    await ev(`(() => { document.querySelector('#wssidebar .frow[data-sel][data-path="/From the menu"] .sel').click(); [...document.querySelectorAll("#wssidebar .fsel button")].find((b) => b.textContent === "Download")?.click(); return 1; })()`);
+    const offered = await until(`[...document.querySelectorAll("#wssidebar .ftoast button")].some((b) => b.textContent === "Export all (.zip)")`, 5000);
+    await ev(`(() => { [...document.querySelectorAll("#wssidebar .ftoast button")].find((b) => b.textContent === "Export all (.zip)")?.click(); return 1; })()`);
+    check(offered && (await exportStarted()), "a selection's Download with a folder in it: its toast offers Export all (.zip), which starts it");
+    await closeStorage();
+    await ev(`(() => { [...document.querySelectorAll("#wssidebar .fsel button")].find((b) => b.textContent === "Clear")?.click(); return 1; })()`);
+    // (a file and a folder: the file downloads, and the toast offers the whole workspace for what was skipped)
+    await ev(`${W}.create("/dl one.txt", { content: "1" }).then(() => 1)`);
+    const selRow = (p) => `#wssidebar .frow[data-sel][data-path=${JSON.stringify(p)}] .sel`;
+    await until(`!!document.querySelector(${JSON.stringify(selRow("/dl one.txt"))}) && !!document.querySelector(${JSON.stringify(selRow("/From the menu"))})`);
+    await ev(`(() => { document.querySelector(${JSON.stringify(selRow("/dl one.txt"))}).click(); document.querySelector(${JSON.stringify(selRow("/From the menu"))}).click(); [...document.querySelectorAll("#wssidebar .fsel button")].find((b) => b.textContent === "Download")?.click(); return 1; })()`);
+    const mixed = await until(`[...document.querySelectorAll("#wssidebar .ftoast")].some((t) => /1 file downloaded \\(1 not a file/.test(t.textContent) && [...t.querySelectorAll("button")].some((b) => b.textContent === "Export all (.zip)"))`, 10000);
+    await ev(`(() => { [...document.querySelectorAll("#wssidebar .ftoast button")].find((b) => b.textContent === "Export all (.zip)")?.click(); return 1; })()`);
+    check(mixed && (await exportStarted()), "a selection's Download with a file and a folder: the file downloaded, the toast offers Export all (.zip), which starts it");
+    await closeStorage();
+    await ev(`(() => { [...document.querySelectorAll("#wssidebar .fsel button")].find((b) => b.textContent === "Clear")?.click(); return 1; })()`);
+  }
   // (sim run 11, X05: a rename, and a move's Undo, in Open… happen: its host has no `renamed`, and an optional call
   // made with the rename as its argument never made the rename)
   {
@@ -159,12 +218,27 @@ try {
   await until(`!!window.sagebrush?.board?.snapshot() && !!document.querySelector("[data-sbb=filemenu] [data-item=open]:not([disabled])")`, 60000);
   const bdLabels = await labels(BD), bdShape = await shape(BD);
   check(JSON.stringify(bdLabels) === JSON.stringify(nbLabels.filter((l) => l)), "the board page's File menu: the same items, in the same order: " + JSON.stringify([bdLabels, nbLabels]));
-  check(bdShape[7]?.startsWith("download▸[.board.json,HTML (one file),JSON Canvas,Copy JSON]") && (await ev(`(() => { const b = document.querySelector("[data-sbb=filemenu] [data-item=share]"); return b.disabled && !b.hidden; })()`)), "…its own downloads; Share… shown, disabled (Sagebrush's board page: disabled, not hidden, design §3): " + JSON.stringify(bdShape));
+  check(bdShape[8]?.startsWith("download▸[.board.json,HTML (one file),JSON Canvas,Copy JSON,Everything (.zip)…]") && (await ev(`(() => { const b = document.querySelector("[data-sbb=filemenu] [data-item=share]"); return b.disabled && !b.hidden; })()`)), "…its own downloads; Share… shown, disabled (Sagebrush's board page: disabled, not hidden, design §3): " + JSON.stringify(bdShape));
+  // (why Share… is disabled, said where it is: run 12, X01 clicked it and got nothing)
+  check(await ev(`/isn't available yet.*HTML \\(one file\\)/.test(document.querySelector("[data-sbb=filemenu] [data-item=share]").title)`), "…its disabled Share… says why, and what to do instead (Download ▸ HTML)");
+  // File ▸ Examples… on the board page: the page's own list here; the gallery's panel where the site has it
+  await ev(`(() => { document.querySelector("[data-sbb=filemenu] [data-item=examples]").click(); return 1; })()`);
+  check(await until(`!!document.querySelector("[data-sbb=exdlg][open]")`), "the board page's File ▸ Examples… on a site without the gallery: its own list");
+  await ev(`(() => { document.querySelector("[data-sbb=exdlg]").close(); return 1; })()`);
+  await ev(STUB_CATALOG);
+  await ev(`(() => { document.querySelector("[data-sbb=filemenu] [data-item=examples]").click(); return 1; })()`);
+  check(await until(galleryShown("Stub board", "Stub notebook")) && !(await ev(`!!document.querySelector("[data-sbb=exdlg][open]")`)), "the board page's File ▸ Examples…: the gallery's panel, on boards first");
+  await ev(closeGallery);
+  await ev(UNSTUB);
   check(await ev(`!!document.querySelector("[data-sbb=menu] [data-sbb=mermaid]") && !!document.querySelector("[data-sbb=menu] [data-sbb=revert]")`), "Import Mermaid… and Revert are in the board's ⋯");
   await ev(`(() => { document.querySelector("[data-sbb=filebtn]").click(); document.querySelector("[data-sbb=filemenu] [data-group=new]").click(); return 1; })()`);
   check(await ev(`document.querySelector("[data-sbb=filemenu] [data-group=download]").nextElementSibling.getBoundingClientRect().height === 0 && document.querySelector("[data-sbb=filemenu] [data-item=newBoard]").getBoundingClientRect().top > document.querySelector("[data-sbb=filemenu] [data-item=newNotebook]").getBoundingClientRect().bottom - 1`), "the board page: a group not opened shows nothing; an open group's items one per line");
   await shot("board-file-menu");
   await ev(`(() => { document.querySelector("[data-sbb=filebtn]").click(); return 1; })()`);
+  // (Download ▸ Everything (.zip)… on the board page: the Files sidebar's export, the sidebar shown)
+  await ev(`(() => { window.__SB_EXPORT_TEST__ = { noPicker: true }; document.querySelector("[data-sbb=filebtn]").click(); document.querySelector("[data-sbb=filemenu] [data-group=download]").click(); document.querySelector("[data-sbb=filemenu] [data-sbb=allzip]")?.click(); return 1; })()`);
+  check(await exportStarted(), "the board page's File ▸ Download ▸ Everything (.zip)…: the Storage panel, its export started");
+  await closeStorage();
   // Recent ▸ on the board page has the notebooks too
   await ev(`(() => { document.querySelector("[data-sbb=filebtn]").click(); document.querySelector("[data-sbb=filemenu] [data-group=recent]").click(); return 1; })()`);
   check(await until(`[...document.querySelectorAll("[data-sbb=filemenu] [data-recent]")].some((b) => b.dataset.recent.endsWith(".ipynb"))`), "the board page's Recent ▸ lists notebooks too");
@@ -192,6 +266,13 @@ try {
   await until(`!!window.sagebrush?.board?.snapshot() && !!document.querySelector("[data-sbb=filemenu] [data-item=newMatlab]:not([disabled])")`, 60000);
   await pick(BD, "newMatlab");
   check(await until(`location.pathname === "/" && !!window.sagebrush?.notebook?.store?.id && window.sagebrush.notebook.mode === "matlab"`, 60000), "New ▸ MATLAB notebook from a Python board: a new notebook in MATLAB");
+  // File ▸ Examples… on a page with no workspace (?workspace=0, a localhost-only switch): the gallery would have
+  // nowhere to copy into, so even where the site has it, the page's own list opens
+  await go(base + "board/?workspace=0");
+  await until(`!!window.sagebrush?.board?.snapshot() && !!document.querySelector("[data-sbb=filemenu] [data-item=examples]:not([disabled])")`, 60000);
+  await ev(STUB_CATALOG);
+  await ev(`(() => { document.querySelector("[data-sbb=filemenu] [data-item=examples]").click(); return 1; })()`);
+  check(await until(`!!document.querySelector("[data-sbb=exdlg][open]")`) && !(await ev(`!!document.querySelector("dialog.sb-examples")`)), "a page with no workspace: File ▸ Examples… opens its own list, not the gallery (nowhere to copy into)");
 } catch (e) {
   fails.push("threw: " + (e?.stack ?? e));
 } finally {
