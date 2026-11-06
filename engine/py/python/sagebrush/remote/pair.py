@@ -63,6 +63,40 @@ _B64URL43 = re.compile(r"[A-Za-z0-9_-]{43}")
 _WSKEY = re.compile(r"[A-Za-z0-9+/]{22}==")
 
 
+def runner_version():
+    """This runner's sagebrush version, as the hello reports it: the installed distribution's, or "dev" when this code
+    isn't that distribution's (a source checkout, whatever else is installed)."""
+    try:
+        from importlib import metadata
+        dist = metadata.distribution("sagebrush")
+        here = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "__init__.py"))
+        if os.path.realpath(str(dist.locate_file("sagebrush/__init__.py"))) != here:
+            return "dev"
+        return dist.version
+    except Exception:
+        return "dev"
+
+
+def version_at_least(v, need):
+    """Is version v (dotted numbers, maybe a suffix) at least need?  "dev" always is."""
+    if v == "dev":
+        return True
+
+    def nums(s):
+        m = re.match(r"^(\d+(?:\.\d+)*)", s)
+        return [int(x) for x in m.group(1).split(".")] if m else None
+    a, b = nums(v), nums(need)
+    if a is None or b is None:
+        return False
+    n = max(len(a), len(b))
+    return a + [0] * (n - len(a)) >= b + [0] * (n - len(b))
+
+
+VERSION = runner_version()
+UPGRADE = ("uvx sagebrush@latest remote --loopback (Sagebrush's own Python), or in your own Python: "
+           "python -m pip install -U sagebrush")
+
+
 def b64url(b):
     return base64.urlsafe_b64encode(b).rstrip(b"=").decode("ascii")
 
@@ -571,6 +605,10 @@ class PairServer:
         p = msg["params"]
         if p.get("protocol") != 1 or isinstance(p.get("protocol"), bool):
             return self._refuse(c, rid, "protocol", "protocol 1 only")
+        needs = p.get("needs")
+        if isinstance(needs, str) and len(needs) <= 32 and not version_at_least(VERSION, needs):
+            # (the page will refuse this runner; say why here too, where the person is looking)
+            self.err("This page needs sagebrush %s or newer; this is %s.  Upgrade: %s\n" % (needs, VERSION, UPGRADE))
         has_code, has_session = isinstance(p.get("code"), str), isinstance(p.get("session"), str)
         if has_code == has_session:
             return self._refuse(c, rid, "refused", "a hello carries exactly one of code and session")
@@ -641,7 +679,7 @@ class PairServer:
         self.gateway.socket_paired(c)
         self.err("A page is paired.\n")
         result = {"protocol": 1, "purpose": "kernel", "token": c.token, "nonce": self.gateway.current_nonce(),
-                  "limits": {"frame": PAIR_LIMITS["frame"]}, "incarnation": self.incarnation}
+                  "limits": {"frame": PAIR_LIMITS["frame"]}, "incarnation": self.incarnation, "version": VERSION}
         if session:
             result["session"] = session
         c.send({"jsonrpc": "2.0", "id": rid, "result": result})
@@ -654,6 +692,7 @@ async def run_loopback(port=0, dev_origin=None, out=None, err=None, cwd=None):
     err = err or (lambda s: (sys.stderr.write(s), sys.stderr.flush()))
     server = PairServer(dev_origin=dev_origin, err=err, cwd=cwd)
     await server.listen(port)
+    err("sagebrush %s (Python %s at %s)\n" % (VERSION, sys.version.split()[0], sys.executable))
     out(server.link() + "\n")
     err("The link above is for a sagebrush.space page that pairs with this computer (that page is not released yet).\n"
         "Pairing code: %s (single use, for 5 minutes). Code you run there will run on this computer, in this Python "
@@ -698,6 +737,11 @@ def main(argv):
             sys.stderr.write("sagebrush remote: unknown argument %s\n" % a)
             return 2
         i += 1
+    if os.name == "nt":
+        # (Stop and the kernel's tree end use POSIX process groups, which Windows doesn't have)
+        sys.stderr.write("sagebrush remote: not on Windows yet; run it in WSL (Windows Subsystem for Linux), where it works as "
+                         "on Linux, and pair this browser with it as usual\n")
+        return 2
     # (an ordinary check, never assert: python -O removes asserts (daybreak3's R763-CLI-1))
     try:
         port = int(port)

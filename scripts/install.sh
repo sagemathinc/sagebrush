@@ -1,65 +1,43 @@
 #!/bin/sh
-# Install the sagebrush command (one self-contained executable).
+# Sagebrush's runner for "Your computer (paired)", for people without uv:
 #
-#   curl -fsSL https://get.sagebrush.space/install.sh | sh
+#   curl -fsSL https://sagebrush.space/install.sh | sh          (not hosted yet: William's call, with the release)
+#   sh scripts/install.sh [--port N]                            (from a checkout)
 #
-# Environment:
-#   SAGEBRUSH_VERSION      a release tag such as v0.1.1 (default: latest)
-#   SAGEBRUSH_INSTALL_DIR  where to put the binary (default: ~/.local/bin,
-#                          or /usr/local/bin when run as root)
+# It installs uv (https://docs.astral.sh/uv/, with uv's own installer) if neither uvx nor uv is on PATH, then runs the
+# latest released sagebrush in uv's own Python: `uvx sagebrush@latest remote --loopback`.  No binaries of ours, no
+# sudo, nothing written but uv's own install (~/.local/bin) and its cache.  For the person's own Python and packages,
+# the sheet's other command is the one: python -m pip install -U sagebrush && python -m sagebrush remote --loopback.
 set -eu
 
-base="https://get.sagebrush.space"
-fail() {
-  echo "sagebrush installer: $*" >&2
+case "$(uname -s 2>/dev/null || echo unknown)" in
+  MINGW* | MSYS* | CYGWIN* | Windows_NT)
+    echo "sagebrush remote: not on Windows yet; run this in WSL (Windows Subsystem for Linux), where it works as on Linux." >&2
+    exit 2
+    ;;
+esac
+
+run() {
+  if command -v uvx >/dev/null 2>&1; then
+    exec uvx --refresh-package sagebrush sagebrush@latest remote --loopback "$@"
+  fi
+  if command -v uv >/dev/null 2>&1; then
+    exec uv tool run --refresh-package sagebrush sagebrush@latest remote --loopback "$@"
+  fi
+  return 1
+}
+
+run "$@" || true
+if ! command -v curl >/dev/null 2>&1; then
+  echo "This needs curl to install uv (https://docs.astral.sh/uv/getting-started/installation/), or install uv yourself and run it again." >&2
+  exit 1
+fi
+echo "Installing uv (https://docs.astral.sh/uv/), which runs Sagebrush in its own Python..." >&2
+curl -LsSf https://astral.sh/uv/install.sh | sh
+# (uv's installer puts uv and uvx in ~/.local/bin, or $XDG_BIN_HOME, or $UV_INSTALL_DIR; this shell's PATH may not have it yet)
+PATH="${UV_INSTALL_DIR:-${XDG_BIN_HOME:-$HOME/.local/bin}}:$HOME/.local/bin:$PATH"
+export PATH
+run "$@" || {
+  echo "uv was installed, but uvx isn't on PATH: open a new terminal and run: uvx sagebrush@latest remote --loopback" >&2
   exit 1
 }
-command -v curl >/dev/null 2>&1 || fail "curl is required"
-command -v xz >/dev/null 2>&1 || fail "xz is required (e.g. apt install xz-utils, brew install xz)"
-
-case "$(uname -s):$(uname -m)" in
-  Linux:x86_64 | Linux:amd64) target=x86_64-unknown-linux-gnu ;;
-  Linux:aarch64 | Linux:arm64) target=aarch64-unknown-linux-gnu ;;
-  Darwin:arm64 | Darwin:aarch64) target=aarch64-apple-darwin ;;
-  Darwin:x86_64) target=x86_64-apple-darwin ;;
-  *) fail "unsupported platform $(uname -s)/$(uname -m) (Windows: download from https://github.com/sagemathinc/sagebrush/releases)" ;;
-esac
-
-version="${SAGEBRUSH_VERSION:-}"
-if [ -z "$version" ]; then
-  version=$(curl -fsSL "$base/latest" | tr -d '[:space:]') || fail "could not determine the latest version"
-fi
-case "$version" in v*) ;; *) version="v$version" ;; esac
-
-if [ -n "${SAGEBRUSH_INSTALL_DIR:-}" ]; then
-  dir="$SAGEBRUSH_INSTALL_DIR"
-elif [ "$(id -u)" -eq 0 ]; then
-  dir=/usr/local/bin
-else
-  [ -n "${HOME:-}" ] || fail "HOME is not set; set SAGEBRUSH_INSTALL_DIR"
-  dir="$HOME/.local/bin"
-fi
-
-tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT INT TERM
-file="sagebrush-$target.xz"
-echo "Downloading sagebrush $version for $target ..."
-curl -fSL --progress-bar "$base/releases/$version/$file" -o "$tmp/$file" || fail "download failed"
-curl -fsSL "$base/releases/$version/SHA256SUMS" -o "$tmp/SHA256SUMS" || fail "could not download checksums"
-want=$(grep " $file\$" "$tmp/SHA256SUMS" | cut -d' ' -f1)
-[ -n "$want" ] || fail "no checksum for $file"
-if command -v sha256sum >/dev/null 2>&1; then
-  got=$(sha256sum "$tmp/$file" | cut -d' ' -f1)
-else
-  got=$(shasum -a 256 "$tmp/$file" | cut -d' ' -f1)
-fi
-[ "$got" = "$want" ] || fail "checksum mismatch for $file"
-xz -d "$tmp/$file"
-mkdir -p "$dir"
-chmod +x "$tmp/sagebrush-$target"
-mv "$tmp/sagebrush-$target" "$dir/sagebrush"
-echo "Installed $dir/sagebrush ($("$dir/sagebrush" -V 2>/dev/null || echo "$version"))"
-case ":$PATH:" in
-  *":$dir:"*) ;;
-  *) echo "Add $dir to your PATH, e.g.:  export PATH=\"$dir:\$PATH\"" ;;
-esac

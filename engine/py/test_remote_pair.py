@@ -869,6 +869,109 @@ def test_page_tunnel_end_to_end():
     assert r.returncode == 0 and "all passed" in r.stdout, (r.returncode, r.stdout[-2000:], r.stderr[-1000:])
 
 
+
+# ================= the version, the platform, the commands (install and upgrade)
+
+@aio
+async def test_version_in_the_hello_and_needs():
+    """The hello's result says this runner's version ("dev" from a checkout); a page that needs a newer one is told so
+    on the runner's own stderr too, with the upgrade commands."""
+    assert P.version_at_least("0.9.0", "0.9.0") and P.version_at_least("0.10.0", "0.9.0") and not P.version_at_least("0.8.2", "0.9.0")
+    assert P.version_at_least("dev", "99") and not P.version_at_least("x", "0.1") and P.version_at_least("1.0", "0.9.9")
+    assert re.fullmatch(r"dev|\d+(\.\d+)*\S*", P.VERSION), P.VERSION
+    sg = await Signer().start()
+    real = P.VERSION
+    P.VERSION = "0.8.2"  # (a released runner's, as the installed wheel reports it; a checkout says "dev", always enough)
+    said = []
+    s = P.PairServer(err=said.append)
+    await s.listen(0)
+    try:
+        w = await WS.open(s.port)
+        w.send(hello(sg, code=s.code, needs="0.9.0"))
+        r = (await w.json())["result"]
+        assert r["version"] == "0.8.2", r
+        assert any("needs sagebrush 0.9.0 or newer; this is 0.8.2" in m and "uvx sagebrush@latest" in m and "pip install -U sagebrush" in m for m in said), said
+        s.close()
+        said.clear()
+        s = P.PairServer(err=said.append)
+        await s.listen(0)
+        w = await WS.open(s.port)
+        w.send(hello(sg, code=s.code, needs="0.8.2"))
+        assert (await w.json())["result"]["version"] == "0.8.2" and not any("needs" in m for m in said), said
+    finally:
+        P.VERSION = real
+        s.close()
+        sg.close()
+
+
+def test_windows_refusal_and_python_m():
+    """On Windows the runner refuses at once, pointing to WSL (its Stop and tree end are POSIX process groups);
+    `python -m sagebrush remote ...` is the runner in that very Python."""
+    import io
+    import subprocess
+    old_name, old_err = os.name, sys.stderr
+    os.name, sys.stderr = "nt", io.StringIO()
+    try:
+        assert P.main(["--loopback"]) == 2 and "WSL (Windows Subsystem for Linux)" in sys.stderr.getvalue()
+    finally:
+        os.name = old_name
+        sys.stderr = old_err
+    r = subprocess.run([sys.executable, "-m", "sagebrush", "remote", "--loopback", "--port", "99999"], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 2 and "--port takes a port number" in r.stderr and "Traceback" not in r.stderr, (r.returncode, r.stderr)
+
+
+def test_install_script():
+    """scripts/install.sh (the future https://sagebrush.space/install.sh), offline with stubs: with uvx it runs the
+    latest sagebrush's runner, passing its arguments; with only uv, `uv tool run`; with neither, it installs uv with
+    uv's own installer, then runs it; and on Windows shells it refuses, pointing to WSL."""
+    import subprocess
+    import tempfile
+    script = os.path.join(HERE, "..", "..", "scripts", "install.sh")
+    if shutil.which("shellcheck"):
+        r = subprocess.run(["shellcheck", script], capture_output=True, text=True)
+        assert r.returncode == 0, r.stdout
+    assert subprocess.run(["sh", "-n", script]).returncode == 0
+    base = "/usr/bin:/bin"
+
+    def stub(d, name, body):
+        path = os.path.join(d, name)
+        with open(path, "w") as f:
+            f.write("#!/bin/sh\n" + body + "\n")
+        os.chmod(path, 0o755)
+
+    def run(stubs, home=None):
+        d = tempfile.mkdtemp(prefix="sb-install-")
+        try:
+            for name, body in stubs.items():
+                stub(d, name, body)
+            env = {"PATH": d + ":" + base, "HOME": home or d, "LOG": os.path.join(d, "log")}
+            r = subprocess.run(["sh", script, "--port", "5"], env=env, capture_output=True, text=True, timeout=60)
+            log = open(env["LOG"]).read() if os.path.exists(env["LOG"]) else ""
+            return r, log
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+    r, log = run({"uvx": 'echo "uvx $*" >> "$LOG"'})
+    assert r.returncode == 0 and log == "uvx --refresh-package sagebrush sagebrush@latest remote --loopback --port 5\n", (r.stderr, log)
+    r, log = run({"uv": 'echo "uv $*" >> "$LOG"'})
+    assert log == "uv tool run --refresh-package sagebrush sagebrush@latest remote --loopback --port 5\n", (r.stderr, log)
+    # (neither: curl fetches uv's installer, which here puts a uvx stub in ~/.local/bin; then that runs)
+    home = tempfile.mkdtemp(prefix="sb-home-")
+    try:
+        payload = os.path.join(home, "payload-uvx")
+        with open(payload, "w") as f:
+            f.write('#!/bin/sh\necho "uvx $*" >> "$LOG"\n')
+        os.chmod(payload, 0o755)
+        installer = 'mkdir -p "$HOME/.local/bin" && cp %s "$HOME/.local/bin/uvx"' % payload
+        r, log = run({"curl": 'echo "curl $*" >> "$LOG"; cat <<\'EOF\'\n' + installer + '\nEOF'}, home=home)
+        assert r.returncode == 0 and log.splitlines() == ["curl -LsSf https://astral.sh/uv/install.sh",
+                                                          "uvx --refresh-package sagebrush sagebrush@latest remote --loopback --port 5"], (r.stderr, log)
+        assert "Installing uv" in r.stderr
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
+    r, log = run({"uname": "echo MINGW64_NT-10.0", "uvx": 'echo "uvx $*" >> "$LOG"'})
+    assert r.returncode == 2 and "WSL" in r.stderr and log == "", (r.returncode, r.stderr, log)
+
+
 if __name__ == "__main__":
     for name, f in list(globals().items()):
         if name.startswith("test_") and callable(f):

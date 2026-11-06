@@ -7,7 +7,7 @@
 // The real runner end to end: test-pair-runner.mjs.
 //   bun web/notebook/test-pair-tunnel.mjs
 import { RemoteClient, NotSentError, AmbiguousError, StreamError } from "./remote-client.js";
-import { Tunnel, pairTunnel, route, TunnelNotSent, PairError, SYNTHETIC_BASE, TUNNEL_LIMITS, parsePairLink } from "./pair-tunnel.js";
+import { Tunnel, pairTunnel, route, TunnelNotSent, PairError, SYNTHETIC_BASE, TUNNEL_LIMITS, parsePairLink, versionAtLeast, RUNNER_MIN } from "./pair-tunnel.js";
 
 setTimeout(() => { console.log("FAIL the tests did not finish within 120 s"); process.exit(1); }, 120_000).unref?.();
 let fails = 0;
@@ -37,7 +37,7 @@ class FakeSocket {
   deliver(m) { this.onmessage?.({ data: typeof m === "string" ? m : JSON.stringify(m) }); }
   requests() { return this.sent.filter((f) => f.rpc); }
 }
-const RESULT = { protocol: 1, purpose: "kernel", token: "T".repeat(43), nonce: "n1", incarnation: "0123456789abcdef", limits: { frame: 4 * 1024 * 1024 } };
+const RESULT = { protocol: 1, purpose: "kernel", token: "T".repeat(43), nonce: "n1", incarnation: "0123456789abcdef", limits: { frame: 4 * 1024 * 1024 }, version: "dev" };
 
 async function setup() {
   const ws = new FakeSocket("ws://127.0.0.1:1/sagebrush-kernel");
@@ -414,6 +414,43 @@ for (const [what, m, code] of [
     check(hellos.length === 1, "a close after the hello: Retry sends no second hello");
     r.close();
   }
+}
+
+// ================= the runner's version: reported, compared, a too-old runner refused before anything is bound
+{
+  const table = [["0.9.0", "0.9.0", true], ["0.9.1", "0.9.0", true], ["0.10.0", "0.9.0", true], ["0.8.2", "0.9.0", false],
+    ["1.0", "0.9.9", true], ["0.9", "0.9.0", true], ["0.9.0rc1", "0.9.0", true], ["dev", "99.0", true], ["x", "0.1", false]];
+  check(table.every(([v, n, want]) => versionAtLeast(v, n) === want), `the version compare (${table.filter(([v, n, w]) => versionAtLeast(v, n) !== w).map(([v, n]) => v + " vs " + n).join(", ") || "all as expected"})`);
+  check(RUNNER_MIN === null, "no minimum yet: it is set at the release that first ships sagebrush remote (William's call)");
+  const made = [];
+  class S extends FakeSocket { constructor(u) { super(u); made.push(this); setTimeout(() => this.open(), 1); } }
+  const jwk = { kty: "EC", crv: "P-256", x: "X".repeat(43), y: "Y".repeat(43) };
+  const answer = async (result, min) => {
+    const p = pairTunnel({ port: 4321, code: "x", jwk, jkt: "J".repeat(43), WebSocket: S, ...(min ? { min } : {}) });
+    await tick(10);
+    const sock = made.at(-1);
+    sock.deliver({ jsonrpc: "2.0", id: "h1", result });
+    return { r: await within(p), hello: sock.sent[0], sock };
+  };
+  let a = await answer({ ...RESULT, version: undefined });
+  check(a.r.e?.kind === "protocol", "a runner that reports no version isn't paired with");
+  a = await answer({ ...RESULT, version: "0.8.2" }, "0.9.0");
+  check(a.r.e?.kind === "old" && a.r.e.message === "your computer's sagebrush is 0.8.2; this page needs 0.9.0 or newer" && a.sock.closedWith === 1000 && a.hello.params.needs === "0.9.0",
+    `a too-old runner: refused, said, the socket closed; the hello said what it needs (${a.r.e?.message})`);
+  a = await answer({ ...RESULT, version: "0.9.0" }, "0.9.0");
+  check(a.r.v instanceof Tunnel, "a new-enough runner pairs");
+  a = await answer({ ...RESULT, version: "dev" });
+  check(a.r.v instanceof Tunnel && !("needs" in a.hello.params), "with no minimum, no needs is sent, and dev pairs");
+  const { pairedStarter, PAIRED, PAIR_SHEET } = await import("./remote-ui.js");
+  class Old extends FakeSocket {
+    constructor(u) { super(u); setTimeout(() => this.open(), 1); }
+    send(t) { super.send(t); if (JSON.parse(t).method === "hello") this.deliver({ jsonrpc: "2.0", id: "h1", result: { ...RESULT, version: "0.8.2" } }); }
+  }
+  const r = await pairedStarter({ WebSocket: Old, min: "0.9.0" })({ notebook: "nb", answer: { code: "ABCDEFGHIJKLMNOPQRSTUVWXYZ", port: 4321 } });
+  check(/is 0\.8\.2; this page needs 0\.9\.0/.test(r.failed) && r.hint === PAIRED.upgrade && /uvx sagebrush@latest/.test(r.hint) && /pip install -U sagebrush/.test(r.hint) && !r.kernel.ready,
+    `the too-old runner's words: the reason, then both upgrade commands; nothing bound (${r.failed} / ${r.hint})`);
+  r.close();
+  check(PAIR_SHEET.command === "uvx sagebrush@latest remote --loopback" && PAIR_SHEET.ownCommand === "python -m pip install -U sagebrush && python -m sagebrush remote --loopback", "the sheet's two commands");
 }
 
 // ================= the runner's link
