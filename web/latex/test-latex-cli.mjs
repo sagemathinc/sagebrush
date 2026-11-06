@@ -272,8 +272,9 @@ ${"many words ".repeat(14000)}
     check("png-overflow-reported", pages[3]?.overflow_px > 0 && pages.filter((x) => x.overflow_px).length === 1 && pages[1].title === "Overlays", pages);
     // (sim run 11 X01, run 12 BL01: displays squeezed and clipped while their frame read as fitting. Against TeX Live
     //  2025, beamer at aspectratio=169: X01's frame fits; with k copies of its nested-root display, each after a full
-    //  line, TeX fits k <= 3 and is overfull from k = 4 (by 38, 98, 158 pt). Here: X01's frame and k <= 2 fit, and
-    //  every over-full frame, k >= 4, is reported, none squeezed to fit (k = 3, 22 pt short of full in TeX, either way))
+    //  line, TeX fits k <= 3 and is overfull from k = 4 (by 38, 98, 158 pt); k = 3 and 1, 2, 3 more lines: fits, overfull
+    //  by 7 and 21 pt. Here the same, each over-full frame reported, none squeezed to fit; k = 3 and one more line, a few
+    //  points short of full in TeX, either way (this preview is within a line of TeX there))
     const DISP = String.raw`\[b=\frac{\sqrt5-1}{2},\qquad a=\pm\sqrt{\frac{\sqrt5-1}{2}}.\]`, LINE = "The notebook checks that both of the original equations reduce to zero, as they should here.";
     const X01 = String.raw`\begin{frame}{1. Exact algebra: a circle meets a parabola}
 Intersect $a^2+b^2=1$ with $b=a^2$. A lexicographic Gr\"obner basis is
@@ -285,12 +286,13 @@ The eliminated quartic is irreducible over $\mathbb Q$, but over $\mathbb F_5$:
 \[w^4+w^2-1=(w^2+3)^2.\]
 \end{frame}
 `;
-    const ks = [1, 2, 3, 4, 5, 6];
-    writeFileSync(join(dir, "clip.tex"), "\\documentclass[aspectratio=169]{beamer}\n\\begin{document}\n" + X01 + ks.map((k) => `\\begin{frame}{Displays ${k}}\n${LINE}\n${Array.from({ length: k }, () => DISP + "\n" + LINE).join("\n")}\n\\end{frame}\n`).join("") + "\\end{document}\n");
+    // (a frame: a full line, then k times a display and a full line, then `more` full lines)
+    const fr = (k, more = 0) => [`\\begin{frame}{Displays ${k}${more ? ` and ${more} lines` : ""}}`, LINE, ...Array.from({ length: k }, () => DISP + "\n" + LINE), ...Array(more).fill(LINE), "\\end{frame}\n"].join("\n");
+    writeFileSync(join(dir, "clip.tex"), "\\documentclass[aspectratio=169]{beamer}\n\\begin{document}\n" + X01 + [1, 2, 3, 4, 5, 6].map((k) => fr(k)).join("") + [1, 2, 3].map((n) => fr(3, n)).join("") + "\\end{document}\n");
     const cl = await new Promise((res) => { const q = spawn(process.execPath, [CLI, "latex", "render", "clip.tex", "--png", "clippng", "--json"], { cwd: dir, env: { ...process.env, CHROME: browser } }); let o = ""; q.stdout.on("data", (x) => (o += x)); q.on("close", (code) => { let json = null; try { json = JSON.parse(o); } catch {} res({ code, json }); }); });
     const over = (cl.json?.png?.pages ?? []).map((p) => p.overflow_px ?? 0);
-    check("png: displays never squeezed to fit their frame (sim X01, BL01): X01's frame and k <= 2 nested-root displays fit, as in TeX Live; every frame TeX finds over-full (k >= 4) reported",
-      cl.code === 0 && over.length === 7 && over[0] === 0 && over[1] === 0 && over[2] === 0 && over.slice(4).every((x) => x > 0), { code: cl.code, over });
+    check("png: displays never squeezed to fit their frame (sim X01, BL01): X01's frame and k <= 3 nested-root displays fit, as in TeX Live; every frame TeX finds over-full (k >= 4; k = 3 and 2 or 3 more lines) reported",
+      cl.code === 0 && over.length === 10 && over.slice(0, 4).every((x) => x === 0) && over.slice(4, 7).every((x) => x > 0) && over[8] > 0 && over[9] > 0, { code: cl.code, over });
   }
 
   // ---- run: the SageTeX code, in order, in one session; its results beside the file, shown by check and render
