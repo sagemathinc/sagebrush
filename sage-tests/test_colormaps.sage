@@ -25,3 +25,10 @@ for cm in ['viridis', 'gray', 'RdBu_r', 'foo', 'Viridis']:
     t("density_plot %s drawn" % cm, lambda: density_plot(x*y, (x, -1, 1), (y, -1, 1), cmap=cm).save(os.path.join(d, 'd.svg')))
     t("contour_plot %s drawn" % cm, lambda: contour_plot(x*y, (x, -1, 1), (y, -1, 1), cmap=cm).save(os.path.join(d, 'c.svg')))
 t("contour_plot lines foo drawn", lambda: contour_plot(x*y, (x, -1, 1), (y, -1, 1), cmap='foo', fill=False).save(os.path.join(d, 'c.svg')))
+# the colors themselves, exactly matplotlib's
+t("magma(0.5)", lambda: colormaps['magma'](0.5))
+t("twilight", lambda: (colormaps['twilight'].N, colormaps['twilight'](0.25)))
+t("cubehelix_r(0.3)", lambda: colormaps['cubehelix_r'](0.3))
+t("gnuplot(1/7)", lambda: colormaps.gnuplot(float(1/7)))
+t("tab10[3]", lambda: colormaps['tab10'](3))
+t("RdBu bytes", lambda: colormaps['RdBu'](0.62, bytes=True))

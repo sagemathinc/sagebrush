@@ -8,9 +8,23 @@ from _graphics import to_color, colormap as _colormap, TAB10 as _TAB10
 class Colormap:
     def __init__(self, name="custom", N=256):
         self.name, self.N = name, N
+        tab = self._exact()
+        if tab is not None:
+            self.N = len(tab)
+
+    def _exact(self):
+        """matplotlib's own table of this colormap, if it is one of its by
+        name (exact, _cmap_data), else None"""
+        if type(self) is not Colormap or not isinstance(self.name, str):
+            return None
+        from _graphics import cmap_table
+        return cmap_table(self.name)
 
     def __call__(self, x, alpha=None, bytes=False):
         import numpy as np
+        tab = self._exact()
+        if tab is not None:
+            return _lookup(tab, x, alpha, bytes)
         scalar = isinstance(x, (int, float))
         xs = [float(x)] if scalar else [float(v) for v in np.asarray(x).ravel().tolist()]
         out = []
@@ -22,6 +36,29 @@ class Colormap:
 
     def _color(self, t):
         return _colormap(t, self.name)
+
+
+def _lookup(tab, x, alpha, bytes):
+    """matplotlib's lookup in a table of N colors: an integer is an index, a
+    float t the entry floor(N t); below the range the first, above it the
+    last, NaN (0, 0, 0, 0); alpha (clipped to [0, 1]) for all but NaN;
+    bytes: each value times 255, truncated, as uint8"""
+    import numpy as np
+    n = len(tab)
+    lut = np.zeros((n + 1, 4))
+    lut[:n, :3] = np.array(tab, dtype=float)
+    lut[:n, 3] = 1.0 if alpha is None else min(1.0, max(0.0, float(alpha)))
+    arr = np.asarray(x)
+    if arr.dtype.kind in "iub":
+        idx = np.clip(arr.astype(np.int64), 0, n - 1)
+    else:
+        f = arr.astype(float)
+        nan = np.isnan(f)
+        idx = np.where(nan, n, np.floor(np.clip(np.where(nan, 0.0, f) * n, 0, n - 1))).astype(np.int64)
+    if bytes:
+        lut = (lut * 255).astype(np.uint8)
+    res = lut[idx]
+    return tuple(res) if arr.ndim == 0 else res
 
 
 class ListedColormap(Colormap):

@@ -1,36 +1,7 @@
-"""matplotlib._cmaps: colormap names as matplotlib 3.11.1 has them, which Sagebrush draws, and
-matplotlib's message for a name it lacks.  Imported when a colormap is
-looked up or given by name (matplotlib.cm, pyplot's cmap=, Sage's
-colormaps and plots), not when matplotlib or Sage starts."""
-from _graphics import _CMAPS, _GRAYS
-
-# matplotlib 3.11.1's colormaps, in its registry's order; each is there
-# reversed too, as name + "_r", after all of these (NAMES_ALL)
-NAMES = (
-    'magma', 'inferno', 'plasma', 'viridis', 'cividis', 'twilight', 'twilight_shifted', 'turbo',
-    'berlin', 'managua', 'vanimo', 'Blues', 'BrBG', 'BuGn', 'BuPu', 'CMRmap', 'GnBu', 'Greens',
-    'Greys', 'OrRd', 'Oranges', 'PRGn', 'PiYG', 'PuBu', 'PuBuGn', 'PuOr', 'PuRd', 'Purples',
-    'RdBu', 'RdGy', 'RdPu', 'RdYlBu', 'RdYlGn', 'Reds', 'Spectral', 'Wistia', 'YlGn', 'YlGnBu',
-    'YlOrBr', 'YlOrRd', 'afmhot', 'autumn', 'binary', 'bone', 'brg', 'bwr', 'cool', 'coolwarm',
-    'copper', 'cubehelix', 'flag', 'gist_earth', 'gist_gray', 'gist_heat', 'gist_ncar',
-    'gist_rainbow', 'gist_stern', 'gist_yarg', 'gnuplot', 'gnuplot2', 'gray', 'hot', 'hsv', 'jet',
-    'nipy_spectral', 'ocean', 'pink', 'prism', 'rainbow', 'seismic', 'spring', 'summer', 'terrain',
-    'winter', 'Accent', 'okabe_ito', 'Dark2', 'Paired', 'Pastel1', 'Pastel2', 'Set1', 'Set2',
-    'Set3', 'tab10', 'tab20', 'tab20b', 'tab20c', 'grey', 'gist_grey', 'gist_yerg', 'Grays')
-NAMES_ALL = NAMES + tuple(n + "_r" for n in NAMES)
-KNOWN = frozenset(NAMES_ALL)
-
-
-def drawn(name):
-    """Whether Sagebrush draws the colormap of this name (one of NAMES_ALL);
-    the others are missing()'s error."""
-    base = name[:-2] if name.endswith("_r") else name
-    return base in _CMAPS or base in _GRAYS
-
-
-def missing(name):
-    return NotImplementedError("matplotlib's colormap %r is not in Sagebrush yet (the colormaps here: %s,"
-                               " each also reversed, as name_r)" % (name, ", ".join(sorted(list(_CMAPS) + list(_GRAYS)))))
+"""matplotlib._cmaps: matplotlib's message for a colormap name it lacks
+(its closest names, difflib's rule).  The names themselves are
+_cmap_data's.  Imported only when a name is refused."""
+from _cmap_data import NAMES_ALL
 
 
 def _ratio(a, b):
@@ -88,6 +59,3 @@ def invalid(value, what, names=NAMES_ALL):
     if close:
         return msg + " Did you mean one of: %s?" % ", ".join(repr(n) for r, n in close)
     return msg
-
-
-SAGE_UNKNOWN = 'Color map %s not known (type "import matplotlib; list(matplotlib.colormaps.keys())" for valid names)'

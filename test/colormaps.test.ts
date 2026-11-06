@@ -126,18 +126,269 @@ t("contourf ok", lambda: plt.contourf(np.arange(9.0).reshape(3, 3), cmap="Spectr
   ]);
 });
 
-test("colormaps: one matplotlib has that Sagebrush does not draw yet is an error, not another colormap", () => {
+test("colormaps: matplotlib 3.11.1's lookup, exactly: indices, floats, the ends, NaN, alpha, bytes", () => {
   const out = run(`
-import matplotlib.pyplot as plt
+import numpy as np
 from matplotlib import colormaps
-for f in [lambda: colormaps["magma"], lambda: plt.imshow([[1, 2]], cmap="inferno_r")]:
-    try:
-        f()
-    except NotImplementedError as e:
-        print(str(e).split(" (")[0])
+m=colormaps['viridis']
+for x in [0, 1, 3, 255, 256, -1, 0.0, 1.0, 0.5, 0.999, 1.5, -0.2, float('nan'), True, np.int64(7), np.float32(0.5), [0.0, 0.5], np.array([0, 300]), 0.00390625, 255/256]:
+    print(repr(x), '->', repr(m(x))[:150])
+print(repr(m(0.5, alpha=0.3)), repr(m(0.5, bytes=True)), repr(m([0.2,0.7], bytes=True)), repr(m(0.5, alpha=0.3, bytes=True)))
+print(repr(m(np.nan, alpha=0.5)), repr(m(np.nan, alpha=0.5, bytes=True)))
+t=colormaps['twilight']; print(t.N, repr(t(0.5)))
+print(repr(colormaps['magma_r'](0.25)), repr(colormaps['cubehelix'](0.3)), repr(colormaps['tab10'](3)))
 `);
   assert.deepEqual(out.trim().split("\n"), [
-    "matplotlib's colormap 'magma' is not in Sagebrush yet",
-    "matplotlib's colormap 'inferno_r' is not in Sagebrush yet",
+    "0 -> (np.float64(0.267004), np.float64(0.004874), np.float64(0.329415), np.float64(1.0))",
+    "1 -> (np.float64(0.26851), np.float64(0.009605), np.float64(0.335427), np.float64(1.0))",
+    "3 -> (np.float64(0.271305), np.float64(0.019942), np.float64(0.347269), np.float64(1.0))",
+    "255 -> (np.float64(0.993248), np.float64(0.906157), np.float64(0.143936), np.float64(1.0))",
+    "256 -> (np.float64(0.993248), np.float64(0.906157), np.float64(0.143936), np.float64(1.0))",
+    "-1 -> (np.float64(0.267004), np.float64(0.004874), np.float64(0.329415), np.float64(1.0))",
+    "0.0 -> (np.float64(0.267004), np.float64(0.004874), np.float64(0.329415), np.float64(1.0))",
+    "1.0 -> (np.float64(0.993248), np.float64(0.906157), np.float64(0.143936), np.float64(1.0))",
+    "0.5 -> (np.float64(0.127568), np.float64(0.566949), np.float64(0.550556), np.float64(1.0))",
+    "0.999 -> (np.float64(0.993248), np.float64(0.906157), np.float64(0.143936), np.float64(1.0))",
+    "1.5 -> (np.float64(0.993248), np.float64(0.906157), np.float64(0.143936), np.float64(1.0))",
+    "-0.2 -> (np.float64(0.267004), np.float64(0.004874), np.float64(0.329415), np.float64(1.0))",
+    "nan -> (np.float64(0.0), np.float64(0.0), np.float64(0.0), np.float64(0.0))",
+    "True -> (np.float64(0.26851), np.float64(0.009605), np.float64(0.335427), np.float64(1.0))",
+    "np.int64(7) -> (np.float64(0.276022), np.float64(0.044167), np.float64(0.370164), np.float64(1.0))",
+    "np.float32(0.5) -> (np.float64(0.127568), np.float64(0.566949), np.float64(0.550556), np.float64(1.0))",
+    "[0.0, 0.5] -> array([[0.267004, 0.004874, 0.329415, 1.      ],",
+    "       [0.127568, 0.566949, 0.550556, 1.      ]])",
+    "array([  0, 300]) -> array([[0.267004, 0.004874, 0.329415, 1.      ],",
+    "       [0.993248, 0.906157, 0.143936, 1.      ]])",
+    "0.00390625 -> (np.float64(0.26851), np.float64(0.009605), np.float64(0.335427), np.float64(1.0))",
+    "0.99609375 -> (np.float64(0.993248), np.float64(0.906157), np.float64(0.143936), np.float64(1.0))",
+    "(np.float64(0.127568), np.float64(0.566949), np.float64(0.550556), np.float64(0.3)) (np.uint8(32), np.uint8(144), np.uint8(140), np.uint8(255)) array([[ 64,  67, 135, 255],",
+    "       [ 68, 190, 112, 255]], dtype=uint8) (np.uint8(32), np.uint8(144), np.uint8(140), np.uint8(76))",
+    "(np.float64(0.0), np.float64(0.0), np.float64(0.0), np.float64(0.0)) (np.uint8(0), np.uint8(0), np.uint8(0), np.uint8(0))",
+    "510 (np.float64(0.18488035509396164), np.float64(0.07942573027972388), np.float64(0.21307651648984993), np.float64(1.0))",
+    "(np.float64(0.985693), np.float64(0.528148), np.float64(0.379371), np.float64(1.0)) (np.float64(0.11789134778719829), np.float64(0.39694259707734425), np.float64(0.2588678372388254), np.float64(1.0)) (np.float64(0.8392156862745098), np.float64(0.15294117647058825), np.float64(0.1568627450980392), np.float64(1.0))",
   ]);
+});
+
+test("colormaps: every one of matplotlib 3.11.1's 182 tables, exactly (a CRC of its N colors and 11 lookups)", () => {
+  const out = run(`
+import zlib
+import numpy as np
+from matplotlib import colormaps
+ts = [0.0, 0.1, 0.2, 0.25, 0.3, 0.5, 0.7, 0.75, 0.9, 0.999, 1.0]
+for name in colormaps:
+    m = colormaps[name]
+    h = "%08x" % zlib.crc32((repr(m(np.arange(m.N)).tolist()) + repr(m(ts).tolist())).encode())
+    print(name, m.N, h)
+`);
+  assert.deepEqual(out.trim().split("\n"), [
+    "magma 256 f85a3c85",
+    "inferno 256 7f7c13ed",
+    "plasma 256 5cc14219",
+    "viridis 256 688eb018",
+    "cividis 256 72a4601c",
+    "twilight 510 8ac093e8",
+    "twilight_shifted 510 fb0af335",
+    "turbo 256 c4dc2961",
+    "berlin 256 cbe80a41",
+    "managua 256 bfa42d63",
+    "vanimo 256 ceeaa37c",
+    "Blues 256 3a1d1bcb",
+    "BrBG 256 4980c4e7",
+    "BuGn 256 9d10328b",
+    "BuPu 256 0f3fe876",
+    "CMRmap 256 d6f9428d",
+    "GnBu 256 9e3f413a",
+    "Greens 256 1a06a0d5",
+    "Greys 256 ea9416ce",
+    "OrRd 256 fbb55c31",
+    "Oranges 256 19061056",
+    "PRGn 256 176b6b80",
+    "PiYG 256 e39a1f10",
+    "PuBu 256 63a64265",
+    "PuBuGn 256 20353cc4",
+    "PuOr 256 8283057f",
+    "PuRd 256 07a0edfe",
+    "Purples 256 a213ded4",
+    "RdBu 256 201770f3",
+    "RdGy 256 273d6d4c",
+    "RdPu 256 4573a6b6",
+    "RdYlBu 256 ef5b472b",
+    "RdYlGn 256 aafe97f1",
+    "Reds 256 b2345c44",
+    "Spectral 256 2e8c00a9",
+    "Wistia 256 d88735dd",
+    "YlGn 256 481f0f19",
+    "YlGnBu 256 0ab8c66a",
+    "YlOrBr 256 6a8dda6c",
+    "YlOrRd 256 a98a08e1",
+    "afmhot 256 e9dd1224",
+    "autumn 256 fbb4f61e",
+    "binary 256 849a2081",
+    "bone 256 88fb6482",
+    "brg 256 1ba27f1f",
+    "bwr 256 61908ce1",
+    "cool 256 77323125",
+    "coolwarm 256 7dbcbc76",
+    "copper 256 81cad051",
+    "cubehelix 256 e95f0bd0",
+    "flag 256 e8ac85c2",
+    "gist_earth 256 309aeabf",
+    "gist_gray 256 b6a568c1",
+    "gist_heat 256 7db4b1d8",
+    "gist_ncar 256 9e1200f8",
+    "gist_rainbow 256 a0c9cfb0",
+    "gist_stern 256 0456796f",
+    "gist_yarg 256 849a2081",
+    "gnuplot 256 905d4c41",
+    "gnuplot2 256 33668ce0",
+    "gray 256 b6a568c1",
+    "hot 256 f82366ac",
+    "hsv 256 70df6b1c",
+    "jet 256 2886aadd",
+    "nipy_spectral 256 0ebda9dd",
+    "ocean 256 2080e8e3",
+    "pink 256 8c1a0049",
+    "prism 256 9f191e9d",
+    "rainbow 256 f6886931",
+    "seismic 256 24016b67",
+    "spring 256 12b17dae",
+    "summer 256 773708f4",
+    "terrain 256 603cba52",
+    "winter 256 5c812df9",
+    "Accent 8 ab8bfb63",
+    "okabe_ito 8 c5d4211a",
+    "Dark2 8 0f7fdb9e",
+    "Paired 12 85b377b9",
+    "Pastel1 9 a72f66d0",
+    "Pastel2 8 29944cd4",
+    "Set1 9 2ccb5d91",
+    "Set2 8 295dfb97",
+    "Set3 12 cadaa294",
+    "tab10 10 440d7165",
+    "tab20 20 d61091f5",
+    "tab20b 20 902614d1",
+    "tab20c 20 5a8e657d",
+    "grey 256 b6a568c1",
+    "gist_grey 256 b6a568c1",
+    "gist_yerg 256 849a2081",
+    "Grays 256 ea9416ce",
+    "magma_r 256 60d77b2c",
+    "inferno_r 256 ded30cf6",
+    "plasma_r 256 26bf1c16",
+    "viridis_r 256 8365475c",
+    "cividis_r 256 f2072045",
+    "twilight_r 510 a3a4e782",
+    "twilight_shifted_r 510 b55b829b",
+    "turbo_r 256 069c17bd",
+    "berlin_r 256 31cf1726",
+    "managua_r 256 fdd09866",
+    "vanimo_r 256 24fc07a1",
+    "Blues_r 256 04cd85c0",
+    "BrBG_r 256 f5462abe",
+    "BuGn_r 256 a272e144",
+    "BuPu_r 256 cec44948",
+    "CMRmap_r 256 a80a189a",
+    "GnBu_r 256 4c4331f5",
+    "Greens_r 256 1d9e7ab6",
+    "Greys_r 256 782b7062",
+    "OrRd_r 256 c1fe279f",
+    "Oranges_r 256 dc54c19b",
+    "PRGn_r 256 6917524c",
+    "PiYG_r 256 7b509fc0",
+    "PuBu_r 256 29a6b7dd",
+    "PuBuGn_r 256 ca323229",
+    "PuOr_r 256 beff925e",
+    "PuRd_r 256 2bc8500a",
+    "Purples_r 256 96ab7cfc",
+    "RdBu_r 256 e971cf33",
+    "RdGy_r 256 83408672",
+    "RdPu_r 256 7ad923dd",
+    "RdYlBu_r 256 823ac71c",
+    "RdYlGn_r 256 198caba5",
+    "Reds_r 256 90e67f7e",
+    "Spectral_r 256 18078984",
+    "Wistia_r 256 e8b04679",
+    "YlGn_r 256 dda8da2a",
+    "YlGnBu_r 256 3d76116f",
+    "YlOrBr_r 256 102f4e9b",
+    "YlOrRd_r 256 c69d14ae",
+    "afmhot_r 256 5c53aa38",
+    "autumn_r 256 dd90e47c",
+    "binary_r 256 b6a568c1",
+    "bone_r 256 ae7b94e2",
+    "brg_r 256 0f1c22e6",
+    "bwr_r 256 b3d2d1cb",
+    "cool_r 256 ef497bfa",
+    "coolwarm_r 256 6ce15809",
+    "copper_r 256 71880a05",
+    "cubehelix_r 256 6d1d5514",
+    "flag_r 256 27d359de",
+    "gist_earth_r 256 64dda6a2",
+    "gist_gray_r 256 849a2081",
+    "gist_heat_r 256 8b5538ca",
+    "gist_ncar_r 256 e942b549",
+    "gist_rainbow_r 256 03656509",
+    "gist_stern_r 256 508ce963",
+    "gist_yarg_r 256 b62f3cfb",
+    "gnuplot_r 256 d054e3cf",
+    "gnuplot2_r 256 4d6972fd",
+    "gray_r 256 849a2081",
+    "hot_r 256 fa2d0ed3",
+    "hsv_r 256 1a02405f",
+    "jet_r 256 177ec2a2",
+    "nipy_spectral_r 256 2cc9a73a",
+    "ocean_r 256 52a5d38b",
+    "pink_r 256 13c74db9",
+    "prism_r 256 5803f298",
+    "rainbow_r 256 ccbf4208",
+    "seismic_r 256 d6c7bfe4",
+    "spring_r 256 d5100656",
+    "summer_r 256 e5746a6b",
+    "terrain_r 256 2cf4e1d8",
+    "winter_r 256 1412c271",
+    "Accent_r 8 c29d236f",
+    "okabe_ito_r 8 092ac19c",
+    "Dark2_r 8 63d09e38",
+    "Paired_r 12 437076eb",
+    "Pastel1_r 9 ac07409a",
+    "Pastel2_r 8 c0ae792f",
+    "Set1_r 9 5d4e4555",
+    "Set2_r 8 739dd088",
+    "Set3_r 12 921787d1",
+    "tab10_r 10 9594ea9c",
+    "tab20_r 20 07c82722",
+    "tab20b_r 20 4385f4a0",
+    "tab20c_r 20 9eac02c9",
+    "grey_r 256 849a2081",
+    "gist_grey_r 256 849a2081",
+    "gist_yerg_r 256 b62f3cfb",
+    "Grays_r 256 782b7062",
+  ]);
+});
+
+test("colormaps: the tables (_cmap_data) are imported by the first colormapped drawing, not at start", () => {
+  const py = run(`
+import io, sys
+import matplotlib.pyplot as plt
+print("start", "_cmap_data" in sys.modules)
+plt.plot([1, 2], [3, 4])
+plt.savefig(io.BytesIO(), format="svg")
+print("line plot", "_cmap_data" in sys.modules)
+plt.figure()
+plt.imshow([[1, 2], [3, 4]])
+plt.savefig(io.BytesIO(), format="svg")
+print("imshow", "_cmap_data" in sys.modules)
+`);
+  assert.deepEqual(py.trim().split("\n"), ["start False", "line plot False", "imshow True"]);
+  const sage = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "--sage", "-c", `
+import os, sys, tempfile
+d = tempfile.mkdtemp()
+print("start", "_cmap_data" in sys.modules)
+var('x y')
+plot(x^2, (x, 0, 1)).save(os.path.join(d, 'p.svg'))
+print("plot", "_cmap_data" in sys.modules)
+density_plot(x*y, (x, -1, 1), (y, -1, 1), cmap='gray_r').save(os.path.join(d, 'd.svg'))
+print("density_plot", "_cmap_data" in sys.modules)
+`], { encoding: "utf8" });
+  assert.deepEqual(sage.trim().split("\n"), ["start False", "plot False", "density_plot True"]);
 });

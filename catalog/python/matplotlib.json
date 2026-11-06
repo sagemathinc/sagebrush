@@ -339,7 +339,6 @@
       }
     ],
     "differs": [
-      "Sagebrush draws viridis, gray, coolwarm, jet, hot, rainbow, plasma, Blues, Spectral and RdBu (and Greys, binary, grey, each also _r), with colors close to matplotlib's but not exactly its values; another of matplotlib's names is a NotImplementedError saying it is not in Sagebrush yet.",
       "lut (a colormap resampled to lut colors) is not accepted: a NotImplementedError."
     ],
     "status": "partial",
@@ -357,7 +356,6 @@
       }
     ],
     "differs": [
-      "Every name of matplotlib 3.11.1 is there, but Sagebrush draws only viridis, gray, coolwarm, jet, hot, rainbow, plasma, Blues, Spectral and RdBu (and Greys, binary, grey, each also _r); looking up another is a NotImplementedError saying it is not in Sagebrush yet.",
       "register and unregister are not accepted."
     ],
     "status": "partial",
