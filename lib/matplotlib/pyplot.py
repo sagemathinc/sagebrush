@@ -20,7 +20,7 @@ import math
 import os
 from _graphics import (Panel, Line, Points, Polygon, Rects, Text, Arrow, AxLine, Image, render_svg, render_frame,
                        show as _show, save_svg, TAB10, to_color as _css, colormap, describe_svg, mpl_ticks, DASHES)
-from matplotlib.colors import to_rgba as _to_rgba, CSS4_COLORS as _CSS4_COLORS
+from matplotlib.colors import to_rgba as _to_rgba, CSS4_COLORS as _CSS4_COLORS, Colormap as _Colormap
 # (one rcParams: matplotlib's, with its defaults and its key checks)
 from matplotlib import rcParams, rcParamsDefault, rcParamsOrig, rc, rcdefaults, rc_context
 from matplotlib import style
@@ -435,6 +435,7 @@ class Axes:
         if c is not None and not isinstance(c, str) and not (isinstance(c, tuple) and len(c) in (3, 4)):
             cl = list(c.tolist() if hasattr(c, "tolist") else c)
             if cl and isinstance(cl[0], (int, float)):
+                cmap = _cmap(cmap)
                 lo = min(cl) if vmin is None else vmin
                 hi = max(cl) if vmax is None else vmax
                 colors = [colormap((v - lo) / (hi - lo) if hi > lo else 0.5, cmap or "viridis") for v in cl]
@@ -793,6 +794,7 @@ class Axes:
         [0, 1] or integers in [0, 255].  One PNG, its cells sharp unless an
         interpolation is asked for."""
         import numpy as np
+        cmap = _cmap(cmap)
         A = np.asarray(X)
         if A.ndim not in (2, 3) or (A.ndim == 3 and A.shape[2] not in (3, 4)):
             raise TypeError("Invalid shape %s for image data" % (tuple(A.shape),))
@@ -826,14 +828,24 @@ class Axes:
             lo = float(vmin) if vmin is not None else (float(finite.min()) if finite.size else 0.0)
             hi = float(vmax) if vmax is not None else (float(finite.max()) if finite.size else 1.0)
             name = cmap or "viridis"
-            lut = np.zeros((257, 4), dtype=np.uint8)
-            for i in builtin_range(256):
-                r, g, b = _rgb(colormap(i / 255, name))
-                lut[i] = (r, g, b, 255)
-            # (matplotlib: index floor(256 t), t clipped to [0, 1]; NaN, the "bad" color, transparent)
+            from _graphics import cmap_table
+            tab = cmap_table(name) if isinstance(name, str) else None
+            if tab is not None:
+                # (matplotlib's table of N colors, each value times 255 truncated to a byte, as it renders)
+                n = len(tab)
+                lut = np.zeros((n + 1, 4), dtype=np.uint8)
+                for i in builtin_range(n):
+                    lut[i] = tuple(int(v * 255) for v in tab[i]) + (255,)
+            else:
+                n = 256
+                lut = np.zeros((257, 4), dtype=np.uint8)
+                for i in builtin_range(256):
+                    r, g, b = _rgb(colormap(i / 255, name))
+                    lut[i] = (r, g, b, 255)
+            # (matplotlib: index floor(N t), t clipped to [0, 1]; NaN, the "bad" color, transparent)
             t = (F - lo) / (hi - lo) if hi > lo else np.zeros(F.shape) + 0.5
-            idx = np.clip(np.floor(np.where(np.isfinite(t), t, 0.0) * 256), 0, 255).astype(int)
-            idx = np.where(np.isnan(F), 256, idx)
+            idx = np.clip(np.floor(np.where(np.isfinite(t), t, 0.0) * n), 0, n - 1).astype(int)
+            idx = np.where(np.isnan(F), n, idx)
             px = lut[idx]
         if alpha is not None:
             px[:, :, 3] = (px[:, :, 3].astype(float) * float(alpha)).astype(np.uint8)
@@ -889,6 +901,9 @@ class Axes:
         """Filled contours of Z (on its index grid, or over X, Y): drawn as
         one picture of the bands, as matplotlib's rasterized output looks."""
         import numpy as np
+        if colors is not None and cmap is not None:
+            raise ValueError("Either colors or cmap must be None")
+        cmap = _cmap(cmap)
         if len(args) >= 3:
             X, Y, Z = args[0], args[1], args[2]
             if len(args) > 3 and levels is None:
@@ -1707,6 +1722,29 @@ def colorbar(mappable=None, cax=None, ax=None, **kw):
     return _colorbar(gcf(), mappable, cax, ax, **kw)
 
 
+def _cmap(cmap):
+    """A cmap= argument checked as matplotlib checks it (matplotlib.cm,
+    imported only when one is given)"""
+    if cmap is None:
+        return None
+    from matplotlib.cm import _cmap as check
+    return check(cmap)
+
+
+def get_cmap(name=None, lut=None):
+    """A colormap by name (rcParams['image.cmap'] by default), or the one given."""
+    from matplotlib.cm import _colormaps, _invalid, _NAMES_ALL
+    if name is None:
+        name = rcParams["image.cmap"]
+    if isinstance(name, _Colormap):
+        return name
+    if not isinstance(name, str) or name not in _colormaps:
+        raise ValueError(_invalid(name, "name", sorted(_NAMES_ALL)))
+    if lut is not None:
+        raise NotImplementedError("get_cmap(name, lut): a colormap resampled to lut colors is not in Sagebrush yet")
+    return _colormaps[name]
+
+
 def contourf(*args, **kw):
     r = gca().contourf(*args, **kw)
     sci(r)
@@ -1903,3 +1941,12 @@ def _colorbar(fig, mappable, cax, ax, **kw):
 
 # (a name of matplotlib.pyplot's that Sagebrush lacks: its AttributeError says so)
 __sagebrush_missing__ = _missing("pyplot")
+
+
+def __getattr__(name):
+    # (pyplot.colormaps, matplotlib.colormaps itself, which called is the
+    # list of its names: matplotlib.cm imported when it is first used)
+    if name == "colormaps":
+        from matplotlib.cm import _colormaps
+        return _colormaps
+    raise AttributeError("module 'matplotlib.pyplot' has no attribute %r%s" % (name, __sagebrush_missing__(name) or ""))
