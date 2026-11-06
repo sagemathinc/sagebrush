@@ -209,9 +209,23 @@ impl Num {
                     Num::Exact(a * c - b * d, a * d + b * c)
                 }
             }
+            // an exact zero absorbs a float, even an infinite or NaN one (Sage: SR(RR('inf'))*0
+            // and SR(RR(1.5))*0 are 0)
+            (Num::Exact(a, b), _) | (_, Num::Exact(a, b)) if a.is_zero() && b.is_zero() => Num::Exact(Q::zero(), Q::zero()),
             _ => {
                 let ((a, b), (c, d)) = (self.to_c64(), o.to_c64());
-                Num::Float(a * c - b * d, a * d + b * c)
+                // a real factor multiplies each part on its own: the complex formula's products
+                // with its zero imaginary part are NaN for an infinite or NaN number (inf*0), and
+                // RR('inf')*x became (NaN - NaN*I)*x (Sage: (+infinity)*x)
+                if b == 0.0 && d == 0.0 {
+                    Num::Float(a * c, 0.0)
+                } else if b == 0.0 {
+                    Num::Float(a * c, a * d)
+                } else if d == 0.0 {
+                    Num::Float(a * c, b * c)
+                } else {
+                    Num::Float(a * c - b * d, a * d + b * c)
+                }
             }
         }
     }
@@ -227,6 +241,8 @@ impl Num {
                 let n = a * a + b * b;
                 Num::Exact(a / &n, -b / &n)
             }
+            // a real one as a real (1/inf is 0, not inf/inf = NaN)
+            Num::Float(a, b) if *b == 0.0 => Num::Float(1.0 / a, 0.0),
             Num::Float(a, b) => {
                 let n = a * a + b * b;
                 Num::Float(a / n, -b / n)
@@ -648,6 +664,30 @@ pub fn gcd(a: &BigInt, b: &BigInt) -> BigInt {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// rrnan: a real float stays real through * and inverse (no inf*0 = NaN imaginary part), and an
+    /// exact zero absorbs any float (Sage: RR('inf')*x is (+infinity)*x, SR(RR('nan'))*0 is 0)
+    #[test]
+    fn real_specials_stay_real() {
+        let (inf, nan) = (Num::float(f64::INFINITY), Num::float(f64::NAN));
+        let real = |n: Num| match n {
+            Num::Float(_, b) => b == 0.0,
+            Num::Exact(_, b) => b.is_zero(),
+        };
+        for (n, v) in [(inf.mul(&Num::one()), f64::INFINITY), (inf.mul(&Num::float(-2.0)), f64::NEG_INFINITY), (inf.inv(), 0.0)] {
+            assert!(real(n.clone()), "{:?}", n);
+            assert_eq!(n.to_c64().0, v);
+        }
+        let p = nan.mul(&Num::float(2.0));
+        assert!(real(p.clone()) && p.to_c64().0.is_nan());
+        // a real times a complex: each part on its own (inf*(1 + 2*I) is inf + inf*I)
+        assert_eq!(inf.mul(&Num::Float(1.0, 2.0)).to_c64(), (f64::INFINITY, f64::INFINITY));
+        for x in [&inf, &nan, &Num::float(1.5)] {
+            assert_eq!(Num::zero().mul(x), Num::zero());
+            assert_eq!(x.mul(&Num::zero()), Num::zero());
+        }
+        assert_eq!(Num::float(-2.0).inv().to_c64(), (-0.5, 0.0));
+    }
 
     #[test]
     fn printing() {
