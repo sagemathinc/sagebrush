@@ -7342,6 +7342,21 @@ def qr_(nargout, x, *args):
     if nargout >= 3:
         raise _err("qr: the column permutation P is not supported in Sagebrush.")
     M = _mat(x)
+    if B is not None and nargout >= 2:
+        # (C = Q'*B by applying qr's reflectors to B's columns, never forming Q, when that is less work
+        # than forming Q: B with fewer columns than Q would have. The same factorization; C agrees with
+        # Q'*B to rounding. Real double S and B only, of matching rows; anything else as before)
+        Bm = _mat(B)
+        m, n = M.shape
+        qc = min(m, n) if econ else m
+        if (M.dtype == np.float64 and Bm.dtype == np.float64 and M.ndim == 2 and Bm.ndim == 2
+                and m > 0 and n > 0 and Bm.shape[0] == m and Bm.shape[1] < qc):
+            import _nplinalg
+            from numpy.linalg import _ldexp, _scaled
+            # (scaled as np.linalg.qr scales: by a power of 2, which leaves the reflectors and Q unchanged; R back)
+            Ms, e = _scaled(M)
+            C, R = _nplinalg.qr_qtb(Ms, Bm, not econ)
+            return [_unmat(C), _unmat(_ldexp(R, -e))]
     Q, R = np.linalg.qr(M, mode="reduced" if econ else "complete")
     if B is not None:
         Bm = _mat(B)

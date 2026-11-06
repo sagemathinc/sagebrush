@@ -25,6 +25,12 @@
 /s/og.png
   Cross-Origin-Resource-Policy: cross-origin
   Cache-Control: public, max-age=86400
+# File > Examples… shows an example's page in an <iframe sandbox>, an opaque origin: what that page loads from
+# here (KaTeX, the banner) is cross-origin to it, so needs CORP (all static, public)
+/katex/*
+  Cross-Origin-Resource-Policy: cross-origin
+/alpha-banner.js
+  Cross-Origin-Resource-Policy: cross-origin
 /lib/*
   Access-Control-Allow-Origin: *
   Cache-Control: public, max-age=31536000, immutable
