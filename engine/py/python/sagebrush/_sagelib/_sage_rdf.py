@@ -794,13 +794,27 @@ def _logabs(x, y):
     return math.log(mx) + 0.5 * math.log1p(u * u)
 
 
+def _cs(b):
+    """GSL's s = 1/|b| in IEEE arithmetic: +infinity for b = 0 (Python's 1.0/0.0 raises)."""
+    h = math.hypot(b.real, b.imag)
+    return 1.0 / h if h else math.inf
+
+
 def _cdiv(a, b):
-    """a/b for complex doubles, b nonzero, as Sage's CDF computes it (GSL's gsl_complex_div:
-    s = 1/|b|, then ((a.x b.x s + a.y b.y s) s, (a.y b.x s - a.x b.y s) s)), not Python's complex
-    division; 1/b is GSL's gsl_complex_inverse ((b.x s) s, (-b.y s) s)."""
-    s = 1.0 / math.hypot(b.real, b.imag)
+    """a/b for complex doubles as Sage's CDF computes it (GSL's gsl_complex_div: s = 1/|b|, then
+    ((a.x b.x s + a.y b.y s) s, (a.y b.x s - a.x b.y s) s)), not Python's complex division: a
+    division by 0 is NaN + NaN*I, and CDF(infinity, 1)/2 is +infinity + NaN*I, as Sage."""
+    s = _cs(b)
     sbr, sbi = s * b.real, s * b.imag
     return complex((a.real * sbr + a.imag * sbi) * s, (a.imag * sbr - a.real * sbi) * s)
+
+
+def _cinv(b):
+    """~b as Sage's CDF computes it (GSL's gsl_complex_inverse: ((b.x s) s, (-b.y s) s)), not
+    1/b's division: ~CDF(infinity, 1) is NaN with imaginary part -0.0, ~CDF(1e-310) is
+    +infinity + NaN*I, ~CDF(0) is NaN + NaN*I."""
+    s = _cs(b)
+    return complex((b.real * s) * s, (-b.imag * s) * s)
 
 
 class ComplexDoubleElement:
@@ -891,25 +905,23 @@ class ComplexDoubleElement:
         v = self._c(o)
         if v is None:
             return NotImplemented
-        return ComplexDoubleElement._of(_cdiv(self._z, v) if v else self._z / v)
+        return ComplexDoubleElement._of(_cdiv(self._z, v))
 
     def __rtruediv__(self, o):
         v = self._c(o)
         if v is None:
             return NotImplemented
-        return ComplexDoubleElement._of(_cdiv(v, self._z) if self._z else v / self._z)
+        return ComplexDoubleElement._of(_cdiv(v, self._z))
 
     def __invert__(self):
         """1/self, as Sage's CDF computes it.
 
         EXAMPLES::
 
-            sage: ~CDF(49), ~CDF(1, 2)
-            (0.020408163265306117, 0.19999999999999998 - 0.39999999999999997*I)
+            sage: ~CDF(49), ~CDF(1, 2), ~CDF(0)
+            (0.020408163265306117, 0.19999999999999998 - 0.39999999999999997*I, NaN + NaN*I)
         """
-        if not self._z:
-            raise ZeroDivisionError("complex division by zero")
-        return ComplexDoubleElement._of(_cdiv(1.0, self._z))
+        return ComplexDoubleElement._of(_cinv(self._z))
 
     def __neg__(self):
         return ComplexDoubleElement._of(-self._z)
