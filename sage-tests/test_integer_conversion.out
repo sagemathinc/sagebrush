@@ -238,3 +238,9 @@ I GF -> 2
 Z GF -> 2
 I SR -> 2
 Z SR -> 2
+I IndexOnly !! TypeError an integer is required
+Z IndexOnly !! TypeError an integer is required
+I IntOnly -> 2
+Z IntOnly -> 2
+I Both -> 2
+Z Both -> 2
