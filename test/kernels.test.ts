@@ -154,6 +154,9 @@ rng(3); A = rand(30, 12); b = rand(30, 2); S = rand(9, 9); s = rand(9, 1);
 T = A * 1e-300;
 [C, R] = qr(T, b); [Q, R2] = qr(T); fprintf('%d %d %d %d\\n', size(C), isequal(R, R2), max(max(abs(C - Q' * b))) < 1e-13);
 [C, R] = qr(T, b, 'econ'); [Q, R2] = qr(T, 'econ'); fprintf('%d %d %d %d\\n', size(C), isequal(R, R2), max(max(abs(C - Q' * b))) < 1e-13);
+u = b * 1e-300;
+[C, R] = qr(A, u); [Q, R2] = qr(A); fprintf('%d %d %d %d\\n', size(C), isequal(R, R2), max(max(abs(C - Q' * u))) < 1e-13 * max(max(abs(Q' * u))));
+[C, R] = qr(A, u, 'econ'); [Q, R2] = qr(A, 'econ'); fprintf('%d %d %d %d\\n', size(C), isequal(R, R2), max(max(abs(C - Q' * u))) < 1e-13 * max(max(abs(Q' * u))));
 [C, R] = qr(single(S), single(s)); [Q, R2] = qr(single(S)); fprintf('%s %s %d %d\\n', class(C), class(R), isequal(R, R2), max(abs(C - Q' * single(s))) < 1e-5);
 w = s + 1i * rand(9, 1); [C, R] = qr(S, w); [Q, R2] = qr(S); fprintf('%d %d %d\\n', isreal(C), isequal(R, R2), max(abs(C - Q' * w)) < 1e-13);
 Z = S + 1i * rand(9, 9);
@@ -172,8 +175,9 @@ for (const noWasm of ["", "1"]) {
     const out = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "--matlab", join(dir, "q.m")], { encoding: "utf8", env });
     rmSync(dir, { recursive: true, force: true });
     // (complete: C is 30 x 2; econ: 12 x 2; then the least-squares solve; then 40 columns, more than Q's 30: formed Q;
-    // then A scaled to 1e-300, so qr's power-of-2 scaling is nonzero: R unscaled, C not; then single stays single;
+    // then A scaled to 1e-300, so qr's power-of-2 scaling is nonzero: R unscaled, C not; then b scaled to 1e-300
+    // (b is never scaled: C relative to Q'b); then single stays single;
     // a complex b takes the general path; a complex S fails exactly as qr(S) does)
-    assert.equal(out, "30 2 1 1\n12 2 1 1\n1\n30 40\n30 2 1 1\n12 2 1 1\nsingle single 1 1\n0 1 1\n1\n");
+    assert.equal(out, "30 2 1 1\n12 2 1 1\n1\n30 40\n30 2 1 1\n12 2 1 1\n30 2 1 1\n12 2 1 1\nsingle single 1 1\n0 1 1\n1\n");
   });
 }
