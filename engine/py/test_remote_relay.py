@@ -230,6 +230,8 @@ class FakeRelay:
         self.upgrade_status = 101
         self.extension = False
         self.connection = "Upgrade"
+        self.accept = None  # (grader's U1: a wrong Sec-WebSocket-Accept, when set)
+        self.extra_head = ""  # (grader's U5: more header lines, a repeated one)
         self.window = None
         self.legs = asyncio.Queue()
         self.upgrades = []
@@ -294,7 +296,7 @@ class FakeRelay:
         accept = base64.b64encode(hashlib.sha1((h["sec-websocket-key"] + GUID).encode()).digest()).decode()
         ext = "Sec-WebSocket-Extensions: permessage-deflate\r\n" if self.extension else ""
         writer.write(("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: %s\r\n"
-                      "Sec-WebSocket-Accept: %s\r\n%s\r\n" % (self.connection, accept, ext)).encode())
+                      "Sec-WebSocket-Accept: %s\r\n%s%s\r\n" % (self.connection, self.accept or accept, ext, self.extra_head)).encode())
         await self.legs.put(RelaySide(self, reader, writer, rest))
 
     async def leg(self, timeout=30):
@@ -886,6 +888,258 @@ async def test_cli_ctrl_c():
         relay.stop()
         sg.close()
         shutil.rmtree(home, ignore_errors=True)
+
+
+
+# ================= grader's #768 pins (r768 at 3c75e0af)
+
+def test_control_refusal_reasons():
+    """C1-C3: each refusal says its own reason (the runner's log says it: "a malformed relay control (<reason>)"), and
+    an oversized control is refused before it is parsed at all."""
+    for t, why in [('{"relay":"pong","relay":"pong"}', "a key twice"),
+                   ('{"relay":"page-close","conn":"c1","gen":1.0}', "a number not an integer"),
+                   ('{"relay":"page-close","conn":"c1","gen":1e2}', "a number not an integer"),
+                   ('{"relay":"pong","x":"%s"}' % ("a" * 300), "over 256 bytes")]:
+        try:
+            R.parse_control(t)
+            raise AssertionError("accepted: " + t[:60])
+        except R.ControlError as e:
+            assert why in str(e), (t[:60], str(e))
+    real, calls = R.json, []
+
+    class Spy:
+        dumps = staticmethod(real.dumps)
+
+        @staticmethod
+        def loads(*a, **k):
+            calls.append(1)
+            return real.loads(*a, **k)
+    R.json = Spy
+    try:
+        try:
+            R.parse_control('{"relay":"pong","pad":"%s"}' % ("a" * 10000))
+            raise AssertionError("accepted")
+        except R.ControlError:
+            pass
+        assert not calls, "an oversized control was parsed"
+        R.parse_control('{"relay":"pong"}')
+        assert calls == [1]  # (the spy itself works)
+    finally:
+        R.json = real
+
+
+class FakeWriter:
+    """The Leg's writer, for its gate: a buffer size the test sets, the frames written."""
+
+    def __init__(self):
+        self.buffered, self.out, self.closed = 0, [], False
+        self.transport = self
+
+    def get_write_buffer_size(self):
+        return self.buffered
+
+    def write(self, b):
+        self.out.append(bytes(b))
+
+    def close(self):
+        self.closed = True
+
+    def abort(self):
+        self.closed = True
+
+
+def test_send_gate_boundaries():
+    """G1-G3: a frame exactly at the data limit is written; what is already buffered counts (a frame that fits alone
+    but not on top of it is held back: the leg closes 1013); fits() counts the frame's header (6, 8 or 14 bytes)."""
+    lim = R.RELAY_LIMITS["outData"]
+
+    def leg():
+        ends = []
+        return R.Leg(None, FakeWriter(), lambda t: None, lambda c, r: ends.append(c)), ends
+    frame = b"x" * 100
+    L, ends = leg()
+    L.w.buffered = lim - len(frame)
+    assert L.write(frame, "data") and L.w.out == [frame] and not ends  # (G1: at the limit)
+    L, ends = leg()
+    L.w.buffered = lim - len(frame) + 1
+    assert L.write(frame, "data") is False and ends == [1013] and frame not in L.w.out  # (G2: buffered counted)
+    for n, head in ((100, 6), (1000, 8), (70000, 14)):
+        L, _ = leg()
+        L.w.buffered = lim - n - head
+        assert L.fits(n, "data"), n
+        L.w.buffered += 1
+        assert not L.fits(n, "data"), n  # (G3: the header counted)
+
+
+@aio
+async def test_fragment_count():
+    """F10: a message in 1025 frames (one and 1024 continuations, all empty) is refused, 1009."""
+    t = await Run().start()
+    try:
+        leg = await t.relay.leg()
+        leg.raw(0x1, b"", fin=False)
+        for _ in range(R.RELAY_LIMITS["fragments"]):
+            leg.raw(0x0, b"", fin=False)
+        assert (await leg.closed_with(10)) == 1009
+    finally:
+        await t.end()
+
+
+@aio
+async def test_upgrade_answer_and_challenge_refusals():
+    """U1: a wrong Sec-WebSocket-Accept; U5: a header twice; U8: a challenge with a space, a control or DEL. Each is
+    a Retry for its own reason, before any leg."""
+    relay = await FakeRelay(None).start()
+    key = enrolled(relay.origin)
+    relay.key = key
+
+    async def refusal(**kw):
+        try:
+            leg = await R.open_leg(relay.origin, key, lambda t: None, lambda c, r: None, **kw)
+            leg.abort("test")
+            raise AssertionError("upgraded")
+        except R.Retry as e:
+            return str(e)
+    try:
+        relay.accept = "AAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        assert "isn't a plain WebSocket" in await refusal()
+        relay.accept = None
+        relay.extra_head = "Upgrade: websocket\r\n"
+        assert "repeated the header upgrade" in await refusal()
+        relay.extra_head = ""
+        for c in ("a b", "a\x1fb", "a\x7fb"):
+            async_post = (lambda c: (lambda origin, path, body, timeout=30.0: (200, {"challenge": c})))(c)
+            assert "the challenge was refused" in await refusal(post=async_post), repr(c)
+        leg = await R.open_leg(relay.origin, key, lambda t: None, lambda c, r: None)  # (the control: all well)
+        leg.abort("test")
+    finally:
+        relay.stop()
+
+
+@aio
+async def test_proxy_answer_head_bound():
+    """U10: a proxy whose answer head passes RELAY_LIMITS["head"] without ending is refused at once for its length,
+    not waited on to the deadline."""
+    async def chatty(reader, writer):
+        await reader.readuntil(b"\r\n\r\n")
+        writer.write(b"HTTP/1.1 200 OK\r\nX: " + b"a" * (R.RELAY_LIMITS["head"] + 100))
+        await writer.drain()
+        await asyncio.sleep(30)
+    ps = await asyncio.start_server(chatty, "127.0.0.1", 0)
+    try:
+        t0 = time.monotonic()
+        try:
+            s = await asyncio.to_thread(R._dial, "127.0.0.1", 9, t0 + 5, "http://127.0.0.1:%d" % ps.sockets[0].getsockname()[1])
+            s.close()
+            raise AssertionError("dialed")
+        except R.Retry as e:
+            assert "too long" in str(e) and time.monotonic() - t0 < 2.5, (str(e), time.monotonic() - t0)
+    finally:
+        ps.close()
+
+
+def test_proxy_connect_takes_what_is_left():
+    """D8: the proxy's own TCP connect gets only what is left of the dial's deadline, never a fixed 30 s."""
+    seen = []
+    real = R.socket.create_connection
+
+    def spy(addr, timeout=None, *a, **k):
+        seen.append(timeout)
+        raise OSError("no")
+    R.socket.create_connection = spy
+    try:
+        try:
+            R._dial("example.invalid", 443, time.monotonic() + 2, "http://127.0.0.1:9")
+        except OSError:
+            pass
+    finally:
+        R.socket.create_connection = real
+    assert len(seen) == 1 and 0 < seen[0] <= 2, seen
+
+
+@aio
+async def test_page_generation_and_close_matching():
+    """P1: a page-open with the same generation as the last is refused (the leg ends 1008); P5: a page-close for
+    another conn, or another gen, is refused and leaves the page open."""
+    t = await Run().start()
+    try:
+        leg = await t.relay.leg()
+        leg.control(relay="page-open", conn="c1", kind="runner", gen=1)
+        await asyncio.sleep(0.1)
+        assert t.runner.page is not None and t.runner.stats["violations"] == 0
+        leg.control(relay="page-open", conn="c1", kind="runner", gen=1)
+        assert (await leg.closed_with(10)) == 1008 and t.runner.stats["violations"] == 1
+        for conn, gen in (("c2", 1), ("c1", 2)):
+            leg = await t.relay.leg()
+            leg.control(relay="page-open", conn="c1", kind="runner", gen=1)
+            await asyncio.sleep(0.1)
+            page = t.runner.page
+            n = t.runner.stats["violations"]
+            leg.control(relay="page-close", conn=conn, gen=gen)
+            assert (await leg.closed_with(10)) == 1008 and t.runner.stats["violations"] == n + 1, (conn, gen)
+            assert page is not None  # (the page-close named no open page: refused as a violation, not acted on)
+    finally:
+        await t.end()
+
+
+@aio
+async def test_page_prehello_bounds():
+    """P13: an unpaired page's message over PAIR_LIMITS["preHello"] closes that page, unread (no answer to it);
+    P14: a page that never says hello is closed at helloMs."""
+    t = await Run().start()
+    old = R.PAIR_LIMITS["helloMs"]
+    try:
+        leg = await t.relay.leg()
+        leg.control(relay="page-open", conn="c1", kind="runner", gen=1)
+        leg.send({"jsonrpc": "2.0", "id": "p1", "method": "nothello", "params": {}, "pad": "x" * (R.PAIR_LIMITS["preHello"] + 1)})
+        await asyncio.sleep(0.3)
+        assert {"relay": "close", "gen": 1} in leg.controls and leg.inbox.empty(), (leg.controls, leg.inbox.qsize())
+        R.PAIR_LIMITS["helloMs"] = 300
+        leg.control(relay="page-open", conn="c2", kind="runner", gen=2)
+        await asyncio.sleep(0.15)
+        assert {"relay": "close", "gen": 2} not in leg.controls
+        await asyncio.sleep(0.45)
+        assert {"relay": "close", "gen": 2} in leg.controls, leg.controls
+    finally:
+        R.PAIR_LIMITS["helloMs"] = old
+        await t.end()
+
+
+@aio
+async def test_exactly_missed_pongs():
+    """L2: exactly missedPongs pings unanswered end the leg (no ping more)."""
+    old = R.RELAY_LIMITS["pingMs"]
+    R.RELAY_LIMITS["pingMs"] = 60
+    t = await Run().start()
+    try:
+        leg = await t.relay.leg()
+        leg.auto_pong = False
+        await leg.closed_with(5)
+        pings = [c for c in leg.controls if c == {"relay": "ping"}]
+        assert len(pings) == R.RELAY_LIMITS["missedPongs"], len(pings)
+    finally:
+        R.RELAY_LIMITS["pingMs"] = old
+        await t.end()
+
+
+@aio
+async def test_stop_as_the_leg_opens():
+    """D7: Stop set while the leg was opening: the run ends there; the leg is never started (no "Connected")."""
+    real = R.open_leg
+    t = Run()
+
+    async def opening(*a, **k):
+        leg = await real(*a, **k)
+        t.stop.set()
+        return leg
+    R.open_leg = opening
+    try:
+        await t.start()
+        code = await asyncio.wait_for(t.task, 10)
+        assert code == 0 and t.runner.stats["legs"] == 0 and not any("Connected" in s for s in t.said), (code, t.runner.stats, t.said)
+    finally:
+        R.open_leg = real
+        await t.end()
 
 
 if __name__ == "__main__":
