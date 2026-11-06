@@ -90,6 +90,14 @@ if (m) {
   }
 }
 
+// `sagebrush --help` (src/cli.ts), where an agent starts: it names the examples gallery and File > Examples… (sim run 12:
+// an agent never met the word), and each sagebrush.space link in it names what the site serves
+{
+  const help = execFileSync("node", [join(here, "..", "build", "cli", "pyjs.cjs"), "--help"], { encoding: "utf8" });
+  check(/^Examples: https:\/\/sagebrush\.space\/examples\/ \(in the page: File > Examples…\)$/m.test(help), "sagebrush --help names the examples gallery and File > Examples…");
+  if (hasSite) for (const m of help.matchAll(/https:\/\/sagebrush\.space(\/[^\s)`"'<>]*)/g)) check(served(m[1].replace(/[.,;:]+$/, "")), `sagebrush --help: ${m[1]}`);
+}
+
 if (failed) {
   console.log(`${failed} failed`);
   process.exit(1);
