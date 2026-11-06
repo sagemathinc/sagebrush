@@ -153,6 +153,47 @@ def test_key_file_roundtrip():
             assert stat.S_IMODE(os.stat(path).st_mode) == 0o600 and keys.load()._d == k2._d
 
 
+def test_key_file_short_writes():
+    """astra's R765-WRITE-1: os.write may write fewer bytes than asked.  Repeated short writes still save the whole
+    key; a short write then an error, or a write making no progress, fails the save and leaves the old key as it was,
+    with no temporary file."""
+    real_write = os.write
+    with TmpHome():
+        old = enrolled()
+        path = keys.save(old)
+        before = open(path, "rb").read()
+
+        def run(script):
+            calls = []
+
+            def fake(fd, data):
+                step = script[min(len(calls), len(script) - 1)]
+                calls.append(len(data))
+                if isinstance(step, BaseException):
+                    raise step
+                return real_write(fd, bytes(data[:step])) if step else 0
+            os.write = fake
+            try:
+                new = enrolled()
+                try:
+                    keys.save(new)
+                    return new, calls, None
+                except OSError as e:
+                    return new, calls, e
+            finally:
+                os.write = real_write
+
+        # (17 bytes at a time: the whole key, in many writes)
+        new, calls, e = run([17])
+        assert e is None and len(calls) > 3 and keys.load()._d == new._d, (calls, e)
+        before = open(path, "rb").read()
+        for script in ([17, OSError(28, "No space left on device")], [0], [17, 0]):
+            new, calls, e = run(script)
+            assert isinstance(e, OSError), (script, e)
+            assert open(path, "rb").read() == before and keys.load()._d != new._d, script
+            assert os.listdir(os.path.dirname(path)) == ["key.json"], script
+
+
 def test_key_file_refusals():
     with TmpHome() as h:
         path = keys.save(enrolled())
