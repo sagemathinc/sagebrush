@@ -1805,10 +1805,15 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   // (fail closed: the give-back can't reach D1, so the refusal stands)
   const r3b = await acctT3.reserve({ account: T3, sha256: sha(Buffer.from("t3 slack 2")), size: 4900 });
   await acctT3.abandon({ id: r3b.ok.id });
+  // (the raise left more than 2 chunks of slack, which the alarm gives back 300 ms later: settled first, so no alarm
+  // is pending to write the give-back below for it; the chunk in tests is account.ts's chunk(): L / 64, 64 at least)
+  const C3 = Math.max(64, Math.floor(L / 64));
+  ok(await until(async () => { const b = await acctT3.budget(); return !b.dirty && b.claim <= 2 * C3 && (await claimOf(T3)) === b.claim; }), "(T3: the alarm has given back the slack beyond 2 chunks, in D1 too)");
   const held3 = await claimOf(T3);
   await acctT3.setFailClaim({ on: true });
   const sh3b = await sharePut(st3, Buffer.alloc(4900, 32));
-  ok(sh3b.status === 413 && (await claimOf(T3)) === held3, "if sync's give-back can't reach D1, sharing's refusal stands: never fail open (" + sh3b.status + ", claim " + held3 + ")");
+  const after3 = await claimOf(T3);
+  ok(sh3b.status === 413 && after3 === held3, "if sync's give-back can't reach D1, sharing's refusal stands: never fail open (" + sh3b.status + ", D1's claim " + held3 + " before, " + after3 + " after)");
   await acctT3.setFailClaim({ on: false });
   ok(await until(async () => (await acctT3.budget()).dirty === false && (await claimOf(T3)) === (await acctT3.budget()).claim), "(the alarm writes the give-back D1 missed)");
   ok((await claimOf(T3)) + (await sharingOf(T3)) <= L, "and sharing + claim is within storage_bytes throughout");

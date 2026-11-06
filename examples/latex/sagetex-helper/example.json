@@ -1,0 +1,20 @@
+{
+ "title": "A paper with its own helper code",
+ "summary": "SageTeX whose code imports helper.py beside the .tex: Pell's equation for 61 and the longest Collatz run below 1000. A document is a folder.",
+ "tags": [
+  "writing",
+  "number theory",
+  "sagebrush"
+ ],
+ "level": "course",
+ "main": "paper.tex",
+ "files": [
+  "paper.tex",
+  "helper.py"
+ ],
+ "features": [
+  "sagetex"
+ ],
+ "author": "Sagebrush",
+ "license": "MIT"
+}
