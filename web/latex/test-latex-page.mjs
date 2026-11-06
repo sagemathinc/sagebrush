@@ -464,6 +464,37 @@ try {
         check(held3 && s3.url === fa && s3.at === 0 && s3.shows && s3.ro === false && s3.pages === 1 && !s3.saw && s3.kept && fC.includes("% left C for A"),
           "U8-SWITCH-5 (Back past a decided switch to a third file): Back to B decided (C's close held), Back again to A: A opens, editable, on its entry; B never shown; C's edit written", { held3, s3: { ...s3, src: s3.src.slice(-30) }, fileC: fC.slice(-30) });
       }
+      // (4) (astra U8-SWITCH-6) ...a newer Back while a return is already under way: C, A, B on the history after A's
+      // entry 0 (C 1, A 2, B 3), A shown; the switch to B decided (A's close held), A asked for again (its traverse
+      // late), A's close released at once, and 50 ms later Back two entries, to C, before that return lands: C opens,
+      // editable, on its entry, and stays (the late return to A, when it lands, is taken back: its target fenced); A
+      // never opened again; B never shown; A's edit written
+      {
+        const mark = "% back to C during the return";
+        await ev(`(window.__sbTex({ path: "/sw/c.tex", fid: ${JSON.stringify(fc)} }), true)`); await shownIs(fc); await sleep(300);
+        await ev(`(window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }), true)`); await shownIs(fa); await sleep(300);
+        await watchX(fb); await holdClose(mark);
+        const nav = await ev(`(() => { const v = window.navigation; if (!v?.traverseTo) return false; const orig = v.traverseTo.bind(v);
+          v.traverseTo = (k, o) => { window.__late = (window.__late ?? 0) + 1; const late = new Promise((r) => setTimeout(r, 300)); return { committed: late, finished: late.then(() => orig(k, o).finished) }; };
+          window.__navRestore = () => { delete v.traverseTo; }; window.__late = 0; return true; })()`);
+        await ev(`(window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} }), true)`);
+        const held = await until(`window.__k >= 2`, 10000);
+        const went = await ev(`(async () => {
+          const url = new URLSearchParams(location.search).get("tex"), at = history.state && history.state.sbTex;
+          window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }); window.__rel();
+          await new Promise((r) => setTimeout(r, 50));
+          // (the return still under way when Back is taken: not back on A's entry yet)
+          const pending = new URLSearchParams(location.search).get("tex") !== ${JSON.stringify(fa)};
+          history.go(-2);
+          return { url, at, pending }; })()`);
+        await shownIs(fc); await sleep(1800);
+        const s = await stateOf(fc), fA = await textOf(fa), late = await ev(`window.__late`);
+        await ev(`(window.__navRestore?.(), delete window.__navRestore, window.__obsB?.disconnect(), true)`); await writesWork();
+        check(nav && held && went && went.url === fb && went.at === 3 && went.pending && late >= 1 && s.url === fc && s.at === 1 && s.title === "c.tex" && s.shows && s.ro === false && s.pages === 1 && !s.saw && s.kept && fA.includes(mark),
+          "U8-SWITCH-6 (Navigation API, the return late): Back to C while the return to A is under way: C opens, editable, on its entry, and stays; A not reopened; B never shown; A's edit written", { nav, held, went, late, s: { ...s, src: s.src.slice(-30) }, fileA: fA.slice(-30) });
+        // (back on A, entry 0)
+        await ev(`(history.back(), true)`); await shownIs(fa); await sleep(500);
+      }
     }
     // ---- (astra B5-R1-A1) the exact entry shown is the one gone back to, a fragment's entry between: A, A#section, B;
     // with unsaved B, Back one step and Back two steps, declined, stay on B (its entry, URL and text); accepted two

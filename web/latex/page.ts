@@ -189,9 +189,33 @@ const leaveOk = async (): Promise<boolean | null> => {
 // page sees is numbered, from 0 at the first file, a fragment's entry too). Whether that return is under way: where it
 // lands is checked, and anywhere else the shown entry is pushed again, so the URL is always the file shown.
 let shownAt = 0, shownId = "", shownUrl = "", shownKey: string | undefined, returning = false;
+// (how the return under way goes: by the entry's key, which lands only on that entry, or by its position, which can
+//  land on another entry numbered the same, or on an unnumbered one, and is then pushed again)
+let returnBy: "key" | "go" = "key";
 const navApi = (): any => (globalThis as any).navigation;
 const entryId = () => Math.random().toString(36).slice(2, 12);
 const noteShown = () => { const st = history.state; shownAt = st.sbTex; shownId = st.sbTexId; shownUrl = location.href; shownKey = navApi()?.currentEntry?.key; };
+// (a popstate while a return is under way: that return's landing, or a newer Back or Forward that goes on in its place
+//  (astra U8-SWITCH-6))
+const landsHere = (st: any) => history.state?.sbTexId === shownId && location.href === shownUrl
+  || returnBy === "go" && (typeof st?.sbTex !== "number" || st.sbTex === shownAt);
+// (a return superseded by a newer Back or Forward: the entry it was going to, fenced, so its traversal, if it lands
+//  after all, is taken back to the entry shown instead of opening that file again. For the next popstate only, and
+//  lifted when the traversal is given up (the Navigation API's finished, rejected))
+let fenced: string | null = null, fenceHooked = false;
+const fenceStale = (ev: PopStateEvent) => {
+  const f = fenced; if (!f) return;
+  fenced = null;
+  if (ev.state?.sbTexId !== f || f === shownId) return;
+  ev.stopImmediatePropagation();
+  const nav = navApi(), at = ev.state?.sbTex;
+  returning = true;
+  if (nav?.traverseTo && shownKey && nav.entries?.().some((x: any) => x.key === shownKey)) {
+    returnBy = "key";
+    try { nav.traverseTo(shownKey).finished?.catch(() => { if (returning) { returning = false; history.pushState({ sbTex: shownAt + 1, sbTexId: entryId() }, "", shownUrl); noteShown(); } }); } catch { returning = false; }
+  } else if (typeof at === "number" && at !== shownAt) { returnBy = "go"; history.go(shownAt - at); }
+  else { returning = false; history.pushState({ sbTex: shownAt + 1, sbTexId: entryId() }, "", shownUrl); noteShown(); }
+};
 // (asked only when a write has actually failed: William, Nov 2, U8: never otherwise; the edits are kept in this
 // browser's drafts either way, and offered when the file is opened again)
 const LEAVE = "Your last changes couldn't be saved. Leave this file anyway? They're kept in this browser and offered when you open it again.";
@@ -202,6 +226,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   mark("tex-mount", {});
   // (the editor shown is closed first: its pending edits written, or durable in its drafts, before this file is read)
   const my = ++mounts;
+  // (the fence's listener: once, before any mount's own, so a stale landing it takes never reaches them)
+  if (!fenceHooked) { fenceHooked = true; window.addEventListener("popstate", fenceStale); }
   const prev = current; current = null;
   closing = closing.then(() => prev?.close()).catch(() => {});
   await closing;
@@ -364,9 +390,17 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // its fallback has pushed the entry again)
   // (a listener of its own for the landing, not this editor's: a fast close can dispose of this editor, and its
   //  listeners, before the history lands; whichever sees the landing first runs what waits, once)
+  // (a newer Back or Forward than the return under way: the return given up, what waited for it dropped, and its
+  //  target fenced (astra U8-SWITCH-6))
+  const supersede = () => { returning = false; fenced = shownId; landOff?.(); landOff = null; afterReturn = null; intent(); };
   const listenLand = () => {
     landOff?.();
-    const onLand = () => { if (returning) { returning = false; if (!isShown()) pushShown(); else noteShown(); } landed(); };
+    const onLand = (ev: PopStateEvent) => {
+      // (no editor of this mount left to take it (a fast close): the newer entry's file opened here)
+      if (returning && !landsHere(ev.state)) { supersede(); const t = new URLSearchParams(location.search).get("tex"); if (t) openHere(t); else location.reload(); return; }
+      if (returning) { returning = false; if (!isShown()) pushShown(); else noteShown(); }
+      landed();
+    };
     window.addEventListener("popstate", onLand, { once: true });
     landOff = () => window.removeEventListener("popstate", onLand);
   };
@@ -380,16 +414,23 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     if (then) listenLand();
     const nav = navApi(), st = history.state, to = typeof st?.sbTex === "number" ? st.sbTex : null;
     if (nav?.traverseTo && shownKey && nav.entries?.().some((x: any) => x.key === shownKey)) {
-      returning = true;
+      returning = true; returnBy = "key";
       const failed = () => { if (returning) { returning = false; pushShown(); landed(); } };
-      try { nav.traverseTo(shownKey).finished?.catch(failed); } catch { failed(); }
-    } else if (to !== null && to !== shownAt) { returning = true; history.go(shownAt - to); }
+      // (its traversal given up (a newer navigation aborts it): it never lands, so a fence on its target, if a newer
+      //  Back put one, is lifted. Not when it finished: that can settle before its popstate comes)
+      const id = shownId, over = () => { if (fenced === id) fenced = null; };
+      try { nav.traverseTo(shownKey).finished?.catch(() => { over(); failed(); }); } catch { failed(); }
+    } else if (to !== null && to !== shownAt) { returning = true; returnBy = "go"; history.go(shownAt - to); }
     else { pushShown(); landed(); }
   };
   window.addEventListener("popstate", (ev) => {
     const t = new URLSearchParams(location.search).get("tex");
     const st = ev.state && typeof ev.state === "object" ? ev.state : null;
-    if (returning) { returning = false; if (!isShown()) pushShown(); else noteShown(); landed(); return; }
+    // (a return under way: its landing; or a newer Back or Forward, which goes on below in its place)
+    if (returning) {
+      if (landsHere(st)) { returning = false; if (!isShown()) pushShown(); else noteShown(); landed(); return; }
+      supersede();
+    }
     if (t === host.fid) {
       // (back to the file shown: a newer intent than a switch still settling, which then does nothing)
       intent(); backHere();
@@ -405,11 +446,12 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     if (!ok) {
       const nav = navApi(), to = typeof st?.sbTex === "number" ? st.sbTex : null;
       if (nav?.traverseTo && shownKey && nav.entries?.().some((e: any) => e.key === shownKey)) {
-        returning = true;
+        returning = true; returnBy = "key";
         // (traverseTo's own failure: the entry pushed again, if the return didn't happen)
         const failed = () => { if (returning) { returning = false; pushShown(); } };
-        try { nav.traverseTo(shownKey).finished?.catch(failed); } catch { failed(); }
-      } else if (to !== null && to !== shownAt) { returning = true; history.go(shownAt - to); }
+        const id = shownId, over = () => { if (fenced === id) fenced = null; };
+        try { nav.traverseTo(shownKey).finished?.catch(() => { over(); failed(); }); } catch { failed(); }
+      } else if (to !== null && to !== shownAt) { returning = true; returnBy = "go"; history.go(shownAt - to); }
       else pushShown();
       return;
     }
