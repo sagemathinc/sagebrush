@@ -124,7 +124,7 @@
   },
   "engine/lib/mod-cmap-data.src": {
    "exact": false,
-   "ceiling": 134562,
+   "ceiling": 127118,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -747,7 +747,7 @@
    "engine/lib/mod-calendar.src": 31555,
    "engine/lib/mod-capability-map.src": 15413,
    "engine/lib/mod-catalog.src": 24270,
-   "engine/lib/mod-cmap-data.src": 134498,
+   "engine/lib/mod-cmap-data.src": 127054,
    "engine/lib/mod-colorsys.src": 4437,
    "engine/lib/mod-compat-pickle.src": 9296,
    "engine/lib/mod-contextlib.src": 29725,
