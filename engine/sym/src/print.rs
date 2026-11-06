@@ -144,16 +144,7 @@ fn p_numq(e: &Expr) -> Option<Q> {
 
 /// a finite double as the exact rational it is
 fn f64_q(a: f64) -> Option<Q> {
-    use sagebrush_bigint::BigInt;
-    if !a.is_finite() {
-        return None;
-    }
-    let bits = a.to_bits();
-    let e = ((bits >> 52) & 0x7ff) as i64;
-    let m = if e == 0 { (bits & 0xf_ffff_ffff_ffff) << 1 } else { (bits & 0xf_ffff_ffff_ffff) | 0x10_0000_0000_0000 };
-    let m = if bits >> 63 == 1 { -BigInt::from(m) } else { BigInt::from(m) };
-    let e = e - 1075;
-    Some(if e >= 0 { Q::from_integer(m << e as usize) } else { Q::new(m, BigInt::from(1) << (-e) as usize) })
+    a.is_finite().then(|| crate::num::f64_to_q(a))
 }
 
 /// P-pure: what the P order covers, for the terms of a sum and the factors of a
@@ -568,14 +559,25 @@ fn fkey(f: &Expr) -> (FBase, FExp) {
 /// number terms last without a key, and no key at all for a lone term besides them
 fn sort_terms(v: &mut Vec<Expr>) {
     let (mut rest, nums): (Vec<Expr>, Vec<Expr>) = v.drain(..).partition(|t| !split_coeff(t).1.is_one());
+    // (a NaN number term first, the others last: Sage's NaN + x, x + 1)
+    let (nan, nums): (Vec<Expr>, Vec<Expr>) = nums.into_iter().partition(nan_num);
     if rest.len() > 1 {
         rest.sort_by_cached_key(|t| {
             let (c, r) = split_coeff(t);
             (Reverse(tkey_term(&r)), Reverse(NumK(c)), CanonK(t.clone()))
         });
     }
+    v.extend(nan);
     v.extend(rest);
     v.extend(nums);
+}
+
+/// a number term that is NaN (or has a NaN part): Sage prints it first (NaN + x)
+fn nan_num(t: &Expr) -> bool {
+    t.as_num().map_or(false, |n| {
+        let (a, b) = n.to_c64();
+        a.is_nan() || b.is_nan()
+    })
 }
 
 /// the factors of a product in print order, each key computed once (the order of mul_order)
@@ -588,8 +590,14 @@ fn sort_factors(v: &mut Vec<Expr>) {
 /// the order of the terms of a sum by the keys (Less: a is printed first)
 pub fn sum_order_key(a: &Expr, b: &Expr) -> Ordering {
     let ((ca, ra), (cb, rb)) = (split_coeff(a), split_coeff(b));
-    // a number term is TKey::One, below every other key: decided without the other's key (whose
-    // computation walks the whole term: sqrt(sqrt(... + 1) + 1) nested 2000 deep)
+    // a number term is TKey::One, below every other key, a NaN one above them (sort_terms'
+    // order): decided without the other's key (whose computation walks the whole term:
+    // sqrt(sqrt(... + 1) + 1) nested 2000 deep)
+    match (nan_num(a), nan_num(b)) {
+        (true, false) => return Ordering::Less,
+        (false, true) => return Ordering::Greater,
+        _ => {}
+    }
     match (ra.is_one(), rb.is_one()) {
         (true, false) => return Ordering::Greater,
         (false, true) => return Ordering::Less,
@@ -1279,7 +1287,17 @@ mod print_order_tests {
             "sin(1.5*x)", "x^I", "sin(I)", "2^x", "pi^x", "abs(x)", "(sin(x) + x)"];
         const EXPS: &[&str] = &["1", "1", "1", "2", "3", "-1", "-2", "1/2", "3/2", "-1/2", "pi", "y", "x", "1.5", "(y + 1)", "-x"];
         const COEFS: &[&str] = &["1", "1", "2", "-3", "1/2", "-2/3", "1.5", "I"];
-        let mut out = vec![];
+        // terms with NaN, infinities and signed zeros (#754's review: Num::cmp is total)
+        let x = parse("x");
+        let y = parse("y");
+        let fl = |a: f64, b: f64| num(Num::Float(a, b));
+        let mut out = vec![
+            fl(f64::NAN, 0.0), fl(f64::NAN, 1.0), fl(3.0, 0.0), fl(f64::INFINITY, 0.0),
+            mul2(&fl(f64::NAN, 0.0), &x), mul2(&fl(3.0, 0.0), &x), mul2(&fl(2.0, 0.0), &x), mul2(&fl(f64::INFINITY, 0.0), &x),
+            mul2(&fl(f64::NEG_INFINITY, 0.0), &x), mul2(&fl(-0.0, 0.0), &y), mul2(&fl(0.0, 0.0), &y), mul2(&fl(f64::NAN, 1.0), &y),
+            fun(Fun::Sin, vec![mul2(&fl(f64::NAN, 0.0), &x)]), fun(Fun::Sin, vec![mul2(&fl(2.0, 0.0), &x)]), fun(Fun::Sin, vec![fl(f64::NAN, 0.0)]),
+            pow(&x, &fl(f64::NAN, 0.0)), pow(&x, &fl(2.0, 0.0)), pow(&fl(f64::NAN, 0.0), &x), pow(&fl(2.0, 0.0), &x),
+        ];
         while out.len() < n {
             let k = 1 + next(3);
             let mut t = COEFS[next(COEFS.len())].to_string();
@@ -1292,6 +1310,34 @@ mod print_order_tests {
             }
         }
         out
+    }
+
+    /// NaN, infinities and signed zeros (#754's review: Num::cmp mapped unordered doubles to
+    /// Equal): as coefficients (NumK), kernel arguments, exponents and bases, and in the fallback
+    /// class (Other, canon_cmp), every comparator law holds on every permutation
+    #[test]
+    fn nan_and_infinities_compare_totally() {
+        let (x, y) = (parse("x"), parse("y"));
+        let fl = |a: f64, b: f64| num(Num::Float(a, b));
+        let nan = fl(f64::NAN, 0.0);
+        let sets: Vec<Vec<Expr>> = vec![
+            // coefficients of one rest (NumK): NaN, 3.0, 2.0 (daybreak3's triple), and the ordered rest
+            vec![mul2(&nan, &x), mul2(&fl(3.0, 0.0), &x), mul2(&fl(2.0, 0.0), &x), mul2(&fl(f64::INFINITY, 0.0), &x), mul2(&fl(f64::NEG_INFINITY, 0.0), &x)],
+            // number terms: NaN, finite, infinite, signed zeros, exact
+            vec![nan.clone(), fl(3.0, 0.0), fl(f64::INFINITY, 0.0), fl(-0.0, 0.0), fl(0.0, 0.0), parse("3")],
+            // kernel arguments and exponents
+            vec![fun(Fun::Sin, vec![mul2(&nan, &x)]), fun(Fun::Sin, vec![mul2(&fl(2.0, 0.0), &x)]), fun(Fun::Sin, vec![x.clone()]), pow(&x, &nan), pow(&x, &fl(2.0, 0.0)), pow(&nan, &x)],
+            // the fallback class (complex arguments) holding NaN
+            vec![fun(Fun::Sin, vec![fl(f64::NAN, 1.0)]), fun(Fun::Sin, vec![fl(3.0, 1.0)]), fun(Fun::Sin, vec![fl(2.0, 1.0)]), mul2(&fl(f64::NAN, 1.0), &y), mul2(&fl(1.0, 1.0), &y)],
+        ];
+        for set in &sets {
+            assert_eq!(inconsistency(sum_order, set), None, "sum_order on {:?}", set.iter().map(to_string).collect::<Vec<_>>());
+            assert_eq!(inconsistency(mul_order, set), None, "mul_order on {:?}", set.iter().map(to_string).collect::<Vec<_>>());
+        }
+        // NaN above the numbers, as Sage orders its coefficients and arguments
+        assert_eq!(sum_order(&mul2(&nan, &x), &mul2(&fl(3.0, 0.0), &x)), Ordering::Less);
+        assert_eq!(fl(f64::NAN, 0.0).as_num().unwrap().cmp(fl(f64::INFINITY, 0.0).as_num().unwrap()), Ordering::Greater);
+        assert_eq!(fl(-0.0, 0.0).as_num().unwrap().cmp(fl(0.0, 0.0).as_num().unwrap()), Ordering::Equal);
     }
 
     #[test]

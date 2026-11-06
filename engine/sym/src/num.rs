@@ -65,6 +65,43 @@ pub enum Num {
     Float(f64, f64),
 }
 
+/// A real part in Num's total order (see Num::cmp).
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum RealKey {
+    NegInf,
+    Fin(Q),
+    PosInf,
+    NaN,
+}
+
+impl RealKey {
+    fn of(a: f64) -> RealKey {
+        if a.is_nan() {
+            RealKey::NaN
+        } else if a == f64::INFINITY {
+            RealKey::PosInf
+        } else if a == f64::NEG_INFINITY {
+            RealKey::NegInf
+        } else {
+            RealKey::Fin(f64_to_q(a))
+        }
+    }
+}
+
+/// A finite double as the exact rational it is.
+pub fn f64_to_q(a: f64) -> Q {
+    let bits = a.to_bits();
+    let e = ((bits >> 52) & 0x7ff) as i64;
+    let m = if e == 0 { (bits & 0xf_ffff_ffff_ffff) << 1 } else { (bits & 0xf_ffff_ffff_ffff) | 0x10_0000_0000_0000 };
+    let m = if bits >> 63 == 1 { -BigInt::from(m) } else { BigInt::from(m) };
+    let e = e - 1075;
+    if e >= 0 {
+        Q::from_integer(m << e as usize)
+    } else {
+        Q::new(m, BigInt::from(1) << (-e) as usize)
+    }
+}
+
 pub fn q(n: i64) -> Q {
     Q::from_integer(BigInt::from(n))
 }
@@ -293,13 +330,32 @@ impl Num {
 
     /// Order of real numbers (for canonical sorting; complex numbers by
     /// real then imaginary part).
+    /// A total order: by the real part, then the imaginary part, each as -infinity < the exact
+    /// value (a double as the rational it is) < +infinity < NaN. Exact numbers compare as before;
+    /// doubles as before but for NaN, which was Equal to everything (not transitive: #754's
+    /// review), and an exact number against a double by their exact values.
     pub fn cmp(&self, o: &Num) -> Ordering {
         match (self, o) {
             (Num::Exact(a, b), Num::Exact(c, d)) => a.cmp(c).then(b.cmp(d)),
             _ => {
-                let ((a, b), (c, d)) = (self.to_c64(), o.to_c64());
-                a.partial_cmp(&c).unwrap_or(Ordering::Equal).then(b.partial_cmp(&d).unwrap_or(Ordering::Equal))
+                let ((a, b), (c, d)) = (self.parts_key(), o.parts_key());
+                a.cmp(&c).then(b.cmp(&d))
             }
+        }
+    }
+
+    /// two doubles by their bits (a last tie-break for numbers equal in Num::cmp)
+    pub fn bits_cmp(&self, o: &Num) -> Ordering {
+        match (self, o) {
+            (Num::Float(a, b), Num::Float(c, d)) => a.to_bits().cmp(&c.to_bits()).then(b.to_bits().cmp(&d.to_bits())),
+            _ => Ordering::Equal,
+        }
+    }
+
+    fn parts_key(&self) -> (RealKey, RealKey) {
+        match self {
+            Num::Exact(a, b) => (RealKey::Fin(a.clone()), RealKey::Fin(b.clone())),
+            Num::Float(a, b) => (RealKey::of(*a), RealKey::of(*b)),
         }
     }
 

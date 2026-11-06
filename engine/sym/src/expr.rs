@@ -354,7 +354,9 @@ pub fn canon_cmp(a: &Expr, b: &Expr) -> Ordering {
         return ra.cmp(&rb);
     }
     match (&a.kind, &b.kind) {
-        (Kind::Num(x), Kind::Num(y)) => x.cmp(y).then((x.is_exact() as u8).cmp(&(y.is_exact() as u8))),
+        // (then the doubles' bits: -0.0 and 0.0, or NaNs, are equal numbers but different
+        // expressions, so the order of distinct expressions has no ties)
+        (Kind::Num(x), Kind::Num(y)) => x.cmp(y).then((x.is_exact() as u8).cmp(&(y.is_exact() as u8))).then_with(|| x.bits_cmp(y)),
         (Kind::Const(x), Kind::Const(y)) => x.cmp(y),
         (Kind::Sym(x), Kind::Sym(y)) => x.cmp(y),
         (Kind::Pow(x, y), Kind::Pow(u, v)) => canon_cmp(x, u).then_with(|| canon_cmp(y, v)),
