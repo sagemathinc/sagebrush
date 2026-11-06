@@ -1,0 +1,11 @@
+b/s | a + r2 + (-a - r2)*t + (a + r2)*t^2 + (-a - r2)*t^3 + O(t^4) | Power Series Ring in t over Univariate Polynomial Ring in a over Number Field in r2 with defining polynomial x^2 - 2 with r2 = 1.414213562373095?
+s/b | ERR RuntimeError
+b*s | a + r2 + (a + r2)*t | Power Series Ring in t over Univariate Polynomial Ring in a over Number Field in r2 with defining polynomial x^2 - 2 with r2 = 1.414213562373095?
+b/(1+t+t^2) | a + r2 + (-a - r2)*t + (a + r2)*t^3 + O(t^4) | Power Series Ring in t over Univariate Polynomial Ring in a over Number Field in r2 with defining polynomial x^2 - 2 with r2 = 1.414213562373095?
+b/(2+a*t) | 1/2*a + 1/2*r2 + (-1/4*a^2 - 1/4*r2*a)*t + (1/8*a^3 + 1/8*r2*a^2)*t^2 + (-1/16*a^4 - 1/16*r2*a^3)*t^3 + O(t^4) | Power Series Ring in t over Univariate Polynomial Ring in a over Number Field in r2 with defining polynomial x^2 - 2 with r2 = 1.414213562373095?
+b/(a+t) | ERR ValueError
+c/(1+u) | 1/2*a + 1 + (-1/2*a - 1)*u + (1/2*a + 1)*u^2 + (-1/2*a - 1)*u^3 + O(u^4) | Power Series Ring in u over Univariate Polynomial Ring in a over Rational Field
+(1+u)/c | ERR RuntimeError
+b/(1+w) | (a + r2) + (-a - r2)*w + (a + r2)*w^2 + (-a - r2)*w^3 + O(w^4) | Laurent Series Ring in w over Univariate Polynomial Ring in a over Number Field in r2 with defining polynomial x^2 - 2 with r2 = 1.414213562373095?
+b/w | (a + r2)*w^-1 | Laurent Series Ring in w over Univariate Polynomial Ring in a over Number Field in r2 with defining polynomial x^2 - 2 with r2 = 1.414213562373095?
+(1+w)/b | ERR RuntimeError
