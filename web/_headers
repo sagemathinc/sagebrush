@@ -24,6 +24,12 @@
 # services, cross-origin; a redesign gets a new name, as crawlers keep cards for days
 /s/og.png
   Cross-Origin-Resource-Policy: cross-origin
+# File > Examples… shows an example's page in an <iframe sandbox>, an opaque origin: what that page loads from
+# here (KaTeX, the banner) is cross-origin to it, so needs CORP (all static, public)
+/katex/*
+  Cross-Origin-Resource-Policy: cross-origin
+/alpha-banner.js
+  Cross-Origin-Resource-Policy: cross-origin
   Cache-Control: public, max-age=86400
 /lib/*
   Access-Control-Allow-Origin: *
