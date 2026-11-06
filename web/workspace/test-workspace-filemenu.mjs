@@ -133,6 +133,16 @@ try {
     check(offered && (await exportStarted()), "a selection's Download with a folder in it: its toast offers Export all (.zip), which starts it");
     await closeStorage();
     await ev(`(() => { [...document.querySelectorAll("#wssidebar .fsel button")].find((b) => b.textContent === "Clear")?.click(); return 1; })()`);
+    // (a file and a folder: the file downloads, and the toast offers the whole workspace for what was skipped)
+    await ev(`${W}.create("/dl one.txt", { content: "1" }).then(() => 1)`);
+    const selRow = (p) => `#wssidebar .frow[data-sel][data-path=${JSON.stringify(p)}] .sel`;
+    await until(`!!document.querySelector(${JSON.stringify(selRow("/dl one.txt"))}) && !!document.querySelector(${JSON.stringify(selRow("/From the menu"))})`);
+    await ev(`(() => { document.querySelector(${JSON.stringify(selRow("/dl one.txt"))}).click(); document.querySelector(${JSON.stringify(selRow("/From the menu"))}).click(); [...document.querySelectorAll("#wssidebar .fsel button")].find((b) => b.textContent === "Download")?.click(); return 1; })()`);
+    const mixed = await until(`[...document.querySelectorAll("#wssidebar .ftoast")].some((t) => /1 file downloaded \\(1 not a file/.test(t.textContent) && [...t.querySelectorAll("button")].some((b) => b.textContent === "Export all (.zip)"))`, 10000);
+    await ev(`(() => { [...document.querySelectorAll("#wssidebar .ftoast button")].find((b) => b.textContent === "Export all (.zip)")?.click(); return 1; })()`);
+    check(mixed && (await exportStarted()), "a selection's Download with a file and a folder: the file downloaded, the toast offers Export all (.zip), which starts it");
+    await closeStorage();
+    await ev(`(() => { [...document.querySelectorAll("#wssidebar .fsel button")].find((b) => b.textContent === "Clear")?.click(); return 1; })()`);
   }
   // (sim run 11, X05: a rename, and a move's Undo, in Open… happen: its host has no `renamed`, and an optional call
   // made with the rename as its argument never made the rename)
