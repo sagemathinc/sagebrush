@@ -1680,6 +1680,9 @@ def _int_base(base):
     long is an OverflowError."""
     if base is None or type(base) is complex or isinstance(base, (str, bytes, bytearray, memoryview, list, tuple, dict, set, frozenset)):
         raise TypeError("an integer is required")
+    if not hasattr(type(base), "__int__"):
+        # (an object int() reads only through __index__ is refused, as Sage)
+        raise TypeError("an integer is required")
     try:
         b = int(base)
     except TypeError:
