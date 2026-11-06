@@ -1,0 +1,104 @@
+# arithmetic and exact numbers
+1/3 + 1/6
+2^100
+(1 + I)^2
+Sqrt[8]
+N[Pi, 20]
+N[Sqrt[2]]
+10!
+Expand[(x + 1)^3]
+Expand[(x + y)^2]
+Factor[x^2 - 1]
+Factor[x^3 - 6 x^2 + 11 x - 6]
+Simplify[Sin[x]^2 + Cos[x]^2]
+Simplify[(x^2 - 1)/(x - 1)]
+Together[1/x + 1/y]
+Apart[1/(x^2 - 1)]
+# calculus
+D[Sin[x]^2, x]
+D[x^3 y^2, x, y]
+D[Exp[2 x], {x, 3}]
+D[ArcTan[x], x]
+Integrate[x Exp[x], x]
+Integrate[Sin[x], {x, 0, Pi}]
+Integrate[1/(1 + x^2), x]
+Integrate[x^2 Sin[x], x]
+Integrate[Log[x], x]
+Integrate[Exp[-x^2], {x, -Infinity, Infinity}]
+Integrate[Sqrt[1 - x^2], {x, -1, 1}]
+Limit[Sin[x]/x, x -> 0]
+Limit[(1 + 1/n)^n, n -> Infinity]
+Limit[(x^2 - 4)/(x - 2), x -> 2]
+Series[Exp[x], {x, 0, 4}]
+Series[Sin[x], {x, 0, 7}]
+Normal[Series[Cos[x], {x, 0, 4}]]
+Sum[1/k^2, {k, 1, Infinity}]
+Sum[k^2, {k, 1, 10}]
+Sum[k, {k, 1, n}]
+Product[k, {k, 1, 6}]
+NIntegrate[Exp[-x^2], {x, 0, 1}]
+# equations
+Solve[x^2 - 3 x + 2 == 0, x]
+Solve[{x + y == 3, x - y == 1}, {x, y}]
+Solve[x^2 + 1 == 0, x]
+FindRoot[Cos[x] == x, {x, 1}]
+DSolve[y'[x] == y[x], y[x], x]
+# lists and functional programming
+Table[i^2, {i, 5}]
+Table[i + j, {i, 2}, {j, 3}]
+Range[2, 10, 3]
+Map[#^2 &, {1, 2, 3}]
+f /@ {a, b}
+Apply[Plus, {1, 2, 3}]
+Total[{1, 2, 3, 4}]
+Length[{a, b, c}]
+{a, b, c}[[2]]
+Select[Range[10], EvenQ]
+Sort[{3, 1, 2}]
+Flatten[{{1, 2}, {3, {4}}}]
+# rules, patterns, definitions
+{1, 2, 3} /. 2 -> b
+x^2 + 1 /. x -> 3
+g[x_] := x^2 + 1
+g[3]
+g[a + b]
+fib[0] = 0; fib[1] = 1; fib[n_] := fib[n - 1] + fib[n - 2]
+fib[15]
+h[x_?NumberQ] := 2 x
+{h[2], h[z]}
+x /. Solve[x^2 == 4, x]
+D[g[t], t]
+g'[t]
+# linear algebra
+m = {{1, 2}, {3, 4}}
+Det[m]
+Inverse[m]
+Transpose[m]
+m . m
+{1, 2, 3} . {4, 5, 6}
+Eigenvalues[{{2, 1}, {1, 2}}]
+Eigenvectors[{{2, 1}, {1, 2}}]
+RowReduce[{{1, 2, 3}, {4, 5, 6}}]
+MatrixRank[{{1, 2}, {2, 4}}]
+LinearSolve[{{1, 1}, {1, -1}}, {3, 1}]
+IdentityMatrix[3]
+Cross[{1, 0, 0}, {0, 1, 0}]
+Det[{{a, b}, {c, d}}]
+NullSpace[{{1, 2}, {2, 4}}]
+# number theory
+Prime[10]
+PrimeQ[97]
+FactorInteger[360]
+GCD[12, 18]
+Mod[17, 5]
+Binomial[10, 3]
+Divisors[12]
+# plotting
+Plot[Sin[x], {x, 0, 2 Pi}]
+Plot3D[Sin[x y], {x, -2, 2}, {y, -2, 2}]
+ParametricPlot[{Cos[t], Sin[t]}, {t, 0, 2 Pi}]
+# misc
+If[3 > 2, yes, no]
+Module[{s = 0}, Do[s += i, {i, 10}]; s]
+Head[{1, 2}]
+ToString[TeXForm[x^2/Sqrt[y]]]

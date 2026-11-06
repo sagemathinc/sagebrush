@@ -1,0 +1,96 @@
+verdict	input	sprig	mathics3
+EXACT	1/3 + 1/6	1/2	1/2
+EXACT	2^100	1267650600228229401496703205376	1267650600228229401496703205376
+EXACT	(1 + I)^2	2*I	2*I
+EXACT	Sqrt[8]	2*Sqrt[2]	2*Sqrt[2]
+SAME	N[Pi, 20]	3.1415926535897932385	3.14159265358979323846`20.
+SAME	N[Sqrt[2]]	1.4142135623730951	1.414213562373095
+EXACT	10!	3628800	3628800
+EXACT	Expand[(x + 1)^3]	1 + 3*x + 3*x^2 + x^3	1 + 3*x + 3*x^2 + x^3
+EXACT	Expand[(x + y)^2]	x^2 + 2*x*y + y^2	x^2 + 2*x*y + y^2
+EXACT	Factor[x^2 - 1]	(-1 + x)*(1 + x)	(-1 + x)*(1 + x)
+SAME	Factor[x^3 - 6 x^2 + 11 x - 6]	(-1 + x)*(-2 + x)*(-3 + x)	(-3 + x)*(-2 + x)*(-1 + x)
+EXACT	Simplify[Sin[x]^2 + Cos[x]^2]	1	1
+EXACT	Simplify[(x^2 - 1)/(x - 1)]	1 + x	1 + x
+EXACT	Together[1/x + 1/y]	(x + y)/(x*y)	(x + y)/(x*y)
+SAME	Apart[1/(x^2 - 1)]	1/(2*(-1 + x)) - 1/(2*(1 + x))	-1/(2*(1 + x)) + 1/(2*(-1 + x))
+EXACT	D[Sin[x]^2, x]	2*Cos[x]*Sin[x]	2*Cos[x]*Sin[x]
+EXACT	D[x^3 y^2, x, y]	6*x^2*y	6*x^2*y
+EXACT	D[Exp[2 x], {x, 3}]	8*E^(2*x)	8*E^(2*x)
+EXACT	D[ArcTan[x], x]	1/(1 + x^2)	1/(1 + x^2)
+SAME	Integrate[x Exp[x], x]	E^x*(-1 + x)	(-1 + x)*E^x
+EXACT	Integrate[Sin[x], {x, 0, Pi}]	2	2
+EXACT	Integrate[1/(1 + x^2), x]	ArcTan[x]	ArcTan[x]
+SAME	Integrate[x^2 Sin[x], x]	Cos[x]*(2 - x^2) + 2*x*Sin[x]	2*x*Sin[x] - x^2*Cos[x] + 2*Cos[x]
+SAME	Integrate[Log[x], x]	-x + x*Log[x]	x*(-1 + Log[x])
+EXACT	Integrate[Exp[-x^2], {x, -Infinity, Infinity}]	Sqrt[Pi]	Sqrt[Pi]
+EXACT	Integrate[Sqrt[1 - x^2], {x, -1, 1}]	Pi/2	Pi/2
+EXACT	Limit[Sin[x]/x, x -> 0]	1	1
+EXACT	Limit[(1 + 1/n)^n, n -> Infinity]	E	E
+EXACT	Limit[(x^2 - 4)/(x - 2), x -> 2]	4	4
+SAME	Series[Exp[x], {x, 0, 4}]	1 + x + x^2/2 + x^3/6 + x^4/24 + O[x]^5	SeriesData[x, 0, {1, 1, 1/2, 1/6, 1/24}, 0, 5, 1]
+SAME	Series[Sin[x], {x, 0, 7}]	x - x^3/6 + x^5/120 - x^7/5040 + O[x]^8	SeriesData[x, 0, {1, 0, -1/6, 0, 1/120, 0, -1/5040}, 1, 8, 1]
+EXACT	Normal[Series[Cos[x], {x, 0, 4}]]	1 - x^2/2 + x^4/24	1 - x^2/2 + x^4/24
+EXACT	Sum[1/k^2, {k, 1, Infinity}]	Pi^2/6	Pi^2/6
+EXACT	Sum[k^2, {k, 1, 10}]	385	385
+SAME	Sum[k, {k, 1, n}]	n/2 + n^2/2	n*(1 + n)/2
+EXACT	Product[k, {k, 1, 6}]	720	720
+SAME	NIntegrate[Exp[-x^2], {x, 0, 1}]	0.746824132812427	0.7468241328124271
+EXACT	Solve[x^2 - 3 x + 2 == 0, x]	{{x -> 1}, {x -> 2}}	{{x -> 1}, {x -> 2}}
+EXACT	Solve[{x + y == 3, x - y == 1}, {x, y}]	{{x -> 2, y -> 1}}	{{x -> 2, y -> 1}}
+EXACT	Solve[x^2 + 1 == 0, x]	{{x -> -I}, {x -> I}}	{{x -> -I}, {x -> I}}
+EXACT	FindRoot[Cos[x] == x, {x, 1}]	{x -> 0.7390851332151607}	{x -> 0.7390851332151607}
+SAME	DSolve[y'[x] == y[x], y[x], x]	{{y[x] -> E^x*C[1]}}	{{y[x] -> C[1]*E^x}}
+EXACT	Table[i^2, {i, 5}]	{1, 4, 9, 16, 25}	{1, 4, 9, 16, 25}
+EXACT	Table[i + j, {i, 2}, {j, 3}]	{{2, 3, 4}, {3, 4, 5}}	{{2, 3, 4}, {3, 4, 5}}
+EXACT	Range[2, 10, 3]	{2, 5, 8}	{2, 5, 8}
+EXACT	Map[#^2 &, {1, 2, 3}]	{1, 4, 9}	{1, 4, 9}
+EXACT	f /@ {a, b}	{f[a], f[b]}	{f[a], f[b]}
+EXACT	Apply[Plus, {1, 2, 3}]	6	6
+EXACT	Total[{1, 2, 3, 4}]	10	10
+EXACT	Length[{a, b, c}]	3	3
+EXACT	{a, b, c}[[2]]	b	b
+EXACT	Select[Range[10], EvenQ]	{2, 4, 6, 8, 10}	{2, 4, 6, 8, 10}
+EXACT	Sort[{3, 1, 2}]	{1, 2, 3}	{1, 2, 3}
+EXACT	Flatten[{{1, 2}, {3, {4}}}]	{1, 2, 3, 4}	{1, 2, 3, 4}
+EXACT	{1, 2, 3} /. 2 -> b	{1, b, 3}	{1, b, 3}
+EXACT	x^2 + 1 /. x -> 3	10	10
+EXACT	g[x_] := x^2 + 1	Null	Null
+EXACT	g[3]	10	10
+EXACT	g[a + b]	1 + (a + b)^2	1 + (a + b)^2
+EXACT	fib[0] = 0; fib[1] = 1; fib[n_] := fib[n - 1] + fib[n - 2]	Null	Null
+EXACT	fib[15]	610	610
+EXACT	h[x_?NumberQ] := 2 x	Null	Null
+EXACT	{h[2], h[z]}	{4, h[z]}	{4, h[z]}
+EXACT	x /. Solve[x^2 == 4, x]	{-2, 2}	{-2, 2}
+EXACT	D[g[t], t]	2*t	2*t
+EXACT	g'[t]	2*t	2*t
+EXACT	m = {{1, 2}, {3, 4}}	{{1, 2}, {3, 4}}	{{1, 2}, {3, 4}}
+EXACT	Det[m]	-2	-2
+EXACT	Inverse[m]	{{-2, 1}, {3/2, -1/2}}	{{-2, 1}, {3/2, -1/2}}
+EXACT	Transpose[m]	{{1, 3}, {2, 4}}	{{1, 3}, {2, 4}}
+EXACT	m . m	{{7, 10}, {15, 22}}	{{7, 10}, {15, 22}}
+EXACT	{1, 2, 3} . {4, 5, 6}	32	32
+EXACT	Eigenvalues[{{2, 1}, {1, 2}}]	{3, 1}	{3, 1}
+EXACT	Eigenvectors[{{2, 1}, {1, 2}}]	{{1, 1}, {-1, 1}}	{{1, 1}, {-1, 1}}
+EXACT	RowReduce[{{1, 2, 3}, {4, 5, 6}}]	{{1, 0, -1}, {0, 1, 2}}	{{1, 0, -1}, {0, 1, 2}}
+EXACT	MatrixRank[{{1, 2}, {2, 4}}]	1	1
+EXACT	LinearSolve[{{1, 1}, {1, -1}}, {3, 1}]	{2, 1}	{2, 1}
+EXACT	IdentityMatrix[3]	{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}	{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}
+EXACT	Cross[{1, 0, 0}, {0, 1, 0}]	{0, 0, 1}	{0, 0, 1}
+SAME	Det[{{a, b}, {c, d}}]	-b*c + a*d	a*d - b*c
+EXACT	NullSpace[{{1, 2}, {2, 4}}]	{{-2, 1}}	{{-2, 1}}
+EXACT	Prime[10]	29	29
+EXACT	PrimeQ[97]	True	True
+EXACT	FactorInteger[360]	{{2, 3}, {3, 2}, {5, 1}}	{{2, 3}, {3, 2}, {5, 1}}
+EXACT	GCD[12, 18]	6	6
+EXACT	Mod[17, 5]	2	2
+EXACT	Binomial[10, 3]	120	120
+EXACT	Divisors[12]	{1, 2, 3, 4, 6, 12}	{1, 2, 3, 4, 6, 12}
+SAME	Plot[Sin[x], {x, 0, 2 Pi}]	-Graphics-	Graphics[{Hue[0.67, 0.6, 0.6], Line[{{{0., 0.}, {0.1121997376282069, 0.1119644761033079}, {0.2243994752564138, 0.2225209339563144}, {0.3365992128846207, 0.3302790619551671}, {0.4487989505128276, 0.433...
+SAME	Plot3D[Sin[x y], {x, -2, 2}, {y, -2, 2}]	-Graphics3D-	Graphics3D[{Polygon[{{-2., -2., -0.7568024953079282}, {-2., -1.428571428571429, 0.2806293995143568}, {-1.428571428571429, -2., 0.2806293995143568}}], Polygon[{{-2., -0.2857142857142858, 0.540834213358...
+SAME	ParametricPlot[{Cos[t], Sin[t]}, {t, 0, 2 Pi}]	-Graphics-	Graphics[{Hue[0.67, 0.6, 0.6], Line[{{{1., 0.}, {0.999901651759575, 0.01402450742356241}, {0.9996066263830529, 0.02804625627586896}, {0.9991149819008869, 0.04206248852826502}, {0.9987954562051724, 0.0...
+EXACT	If[3 > 2, yes, no]	yes	yes
+EXACT	Module[{s = 0}, Do[s += i, {i, 10}]; s]	55	55
+EXACT	Head[{1, 2}]	List	List
+DIFF	ToString[TeXForm[x^2/Sqrt[y]]]	"\\frac{x^{2}}{\\sqrt{y}}"	"\\frac{x^2}{\\sqrt{y}}"

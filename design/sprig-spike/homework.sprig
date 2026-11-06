@@ -1,0 +1,10 @@
+(* a calculus homework problem: the critical points of f and the area under it *)
+f[x_] := x^3 - 3 x
+crit = Solve[f'[x] == 0, x]
+f[x] /. crit
+Integrate[f[x], {x, 0, 2}]
+Series[Sin[x]/x, {x, 0, 6}]
+Limit[(1 + a/n)^n, n -> Infinity]
+m = {{2, 1}, {1, 2}}; Eigenvalues[m]
+Table[Prime[k], {k, 8}]
+DSolve[y''[x] + y[x] == 0, y[x], x]

@@ -37,6 +37,8 @@ const USAGE = `usage: sagebrush [-c cmd | -m mod | file | -] [args]
   --magma  Magma: the program is Magma, translated to Python (src/magma.ts)
            and run on lib/_magma.py; implied for .mag files, and for .m files
            that assign with :=
+  --sprig  Sprig (a spike): the program is bracket-notation symbolic code,
+           run by lib/_sprig.py on Sage's symbolic layer; implied for .sprig files
   --matlab MATLAB: the program is MATLAB, translated to Python (src/matlab.ts)
            and run on lib/_matlab.py; implied for other .m files
   -q       no banner on the interactive prompt
@@ -321,6 +323,11 @@ R.host = {
 let sage = false;
 let magma = false;
 let matlab = false;
+// --sprig: the bracket-notation symbolic language (a feasibility spike: lib/_sprig.py)
+let sprig = false;
+const isSprig = (f: string | null) => sprig || (f !== null && /\.sprig$/.test(f));
+/** A Sprig program as Python: lib/_sprig.py parses and evaluates it (a JSON string is a Python string). */
+const sprigSource = (src: string) => `import _sprig\n_sprig.run(${JSON.stringify(src)})\n`;
 // .m is both Magma's and MATLAB's: looksLikeMagma decides (src/matlab.ts)
 const mFileIsMagma = (f: string) => {
   try {
@@ -622,6 +629,7 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
     else if (a === "--sage") sage = true;
     else if (a === "--magma") magma = true;
     else if (a === "--matlab") matlab = true;
+    else if (a === "--sprig") sprig = true;
     else if (a === "--pkgset") {
       // (an optional package set for this run: src/pkgcache.ts)
       argv.shift();
@@ -743,7 +751,15 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
   let code: number | null = null;
   let main: any = null;
   const interactive = (file === null && cmd === null && mod === null && process.stdin.isTTY) || inspect;
-  if (cmd !== null && isMatlab(null)) {
+  if (cmd !== null && isSprig(null)) {
+    main = mainModule("<string>");
+    code = guarded(() => R.loader.exec(sprigSource(cmd!), main, "exec", "<string>", opts()));
+  } else if (file !== null && file !== "-" && isSprig(file)) {
+    const py = sprigSource(readFileSync(file, "utf8"));
+    code = guarded(() => {
+      main = execModule(py, file!, "__main__", false, false);
+    });
+  } else if (cmd !== null && isMatlab(null)) {
     main = mainModule("<string>");
     const py = matlabSource(cmd, "<string>");
     // (a syntax error, reported: exit status 1)

@@ -1,0 +1,10 @@
+x, k, a, b = var('x k a b')
+def tr(l, f):
+    try: print(l, "=>", f())
+    except Exception as e: print(l, "!!", type(e).__name__, str(e)[:120])
+tr("G1 improper", lambda: integrate(1/x^2, x, 1, oo))
+tr("G2 leibniz", lambda: sum((-1)^k/(2*k+1), k, 0, oo))
+tr("G3a SR eigvec", lambda: matrix(SR,[[2,1],[1,2]]).eigenvectors_right())
+tr("G3b sym eig", lambda: matrix(SR,[[a,b],[b,a]]).eigenvalues())
+tr("G4 QQ solve SR vec", lambda: matrix(QQ,[[1,1],[1,-1]]).solve_right(vector(SR,[3,1])))
+tr("G5 SR(mp)", lambda: SR(pi.n(digits=30)) + 1)
