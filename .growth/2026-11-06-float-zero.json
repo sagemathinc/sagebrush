@@ -1,6 +1,6 @@
 {
  "v": 1,
- "reason": "Float zeros in symbolic expressions as Sage (engine/sym/src/expr.rs: a zero coefficient is the product, a term whose coefficient became zero drops out, numbers add left to right with a zero leaving the other as it is); Laurent series without padded_list (lib/_sage_series.py) Re-measured with bun 1.4.4 (size-record.sh) on master 12e53f51 vs head b725885a: cli/lib.gen.js +96, cli/pyjs.cjs +1368, engine/lib/sage.pre +891, engine/lib/sage.src +243, engine/sagebrush-engine.wasm +686; no other row moves. Markers: exact, except cli/pyjs.cjs 1400 (+1368 measured, plus 32 B of margin, as it moves with master).",
+ "reason": "Float zeros in symbolic expressions as Sage (engine/sym/src/expr.rs: a zero coefficient is the product, a term whose coefficient became zero drops out, numbers add left to right with a zero leaving the other as it is); Laurent series without padded_list (lib/_sage_series.py) Re-measured with bun 1.4.4 (size-record.sh) on the rrnan head 12e53f51 (this PR's base) vs head b725885a: cli/lib.gen.js +96, cli/pyjs.cjs +1368, engine/lib/sage.pre +891, engine/lib/sage.src +243, engine/sagebrush-engine.wasm +686; no other row moves. Markers: exact, except cli/pyjs.cjs 1400 (+1368 measured, plus 32 B of margin, as it moves with master).",
  "bytes": {
   "cli/lib.gen.js": 96,
   "cli/pyjs.cjs": 1400,
