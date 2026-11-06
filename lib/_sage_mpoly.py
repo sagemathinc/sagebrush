@@ -2670,6 +2670,16 @@ class MPolyFactorization(list):
         """
         return self._unit
 
+    def prod(self):
+        """The product of the factorization: value() (as Sage's prod(F)).
+
+        EXAMPLES::
+
+            sage: R.<x,y> = QQ[]; f = 2*x*y - 2*x; f.factor().prod(), prod(f.factor())
+            (2*x*y - 2*x, 2*x*y - 2*x)
+        """
+        return self.value()
+
     def value(self):
         """The product.
 

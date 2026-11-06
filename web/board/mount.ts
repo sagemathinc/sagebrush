@@ -172,6 +172,8 @@ export interface BoardHost {
     /** Upload… and files dropped on the board (not pictures), in `mode` (the board's): the rule of
      * design §3 (workspace/upload.ts); what to say, if anything.  None: a file opens in this board, as before. */
     upload?(files: File[], mode: string): Promise<string | void>;
+    /** File ▸ Download ▸ Everything (.zip)…: the whole workspace as one .zip (the Storage panel's export) */
+    exportAll?(): void;
   };
   /** whether a board with nothing in it opens in Edit (default); false: as any other (an exported file, a frame's) */
   editBlank?: boolean;
@@ -336,6 +338,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       { key: "html", label: "HTML (one file)", disabled: !host.exportHtml },
       { key: "canvas", label: "JSON Canvas" },
       { key: "copyjson", label: "Copy JSON" },
+      { key: "allzip", label: "Everything (.zip)…", title: "All your current files, folders, notebooks and boards in one .zip", disabled: !host.files?.exportAll },
     ],
     recent: host.files?.recent,
     // (Sagebrush's board page shows what it can't do here disabled; a board
@@ -1687,6 +1690,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       fail(e);
     }
   }
+  $("allzip").onclick = () => host.files?.exportAll?.();
   $("copyjson").onclick = async () => navigator.clipboard?.writeText(canonical(await images.inline(doc!)));
   async function openText(text: string, name?: string) {
     const d = boardFromText(text, name, (md) => { converted = md; });
