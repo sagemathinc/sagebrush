@@ -16,7 +16,7 @@ import { EXAMPLES } from "./examples.ts";
 import { makeAnchor, locate } from "./comments.ts";
 import { Engine, withBeamer, once, declaresBeamer } from "./engine/pipeline.mjs";
 import { coldRun, incremental } from "./engine/incremental-demo.mjs";
-import { setKatex, render, installBeamer, BOX_MAX, BOX_KEY, boxCost, fitsBoxes } from "./engine/render.mjs";
+import { setKatex, render, installBeamer, BOX_MAX, BOX_KEY, boxCost, fitsBoxes, NAME_MAX, NAME_TOTAL } from "./engine/render.mjs";
 import { itemKey } from "./engine/sagetex.mjs";
 import * as beamerCode from "./engine/beamer.mjs";
 
@@ -480,6 +480,102 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
   const notNum = new Engine().update("\\documentclass{article}\n\\begin{document}\nA\\footnote[2a]{X}B\n\\end{document}\n");
   const notNumT = notNum.chunks.join("").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
   check("ctr-footnote-not-a-number", notNumT === "A 1 B 1 X" && notNum.problems.filter((p) => p.kind === "footnote" && /\\footnote\[2a\]: not a number/.test(p.name)).length === 1, [notNumT, notNum.problems]);
+}
+
+// ---- references (astra4's fidelity digest, gap 2: \\nameref gave a number, \\cref{a,b} and a \\label after \\section* gave ??,
+//      silently). astra4's M07..M09, then two documents' every reference against TeX Live 2025's text for them (hyperref,
+//      cleveref with its defaults; pdftotext, 2026-11-04)
+{
+  setKatex((src) => src);
+  const text = (src) => new Engine().update(src).chunks.join("").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+  const art = (body, pre = "") => "\\documentclass{article}\n" + pre + "\\begin{document}\n" + body + "\n\\end{document}\n";
+  const spaced = (src) => new Engine().update(src).chunks.join("").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  const m07 = spaced(art("\\section{HeadingText}\\label{s}\\nameref{s}")), m08 = spaced(art("\\section{Alpha}\\label{a}\\section{Beta}\\label{b}\\cref{a,b}")), m09 = spaced(art("\\section{Alpha}\\section*{Beta}\\label{b}\\ref{b}"));
+  check("ref-m07-m08-m09", m07 === "1 HeadingText HeadingText" && m08 === "1 Alpha 2 Beta sections 1 and 2" && m09 === "1 Alpha Beta 1", [m07, m08, m09]);
+  const tex = { // (each document, then TeX's text from its "A[" on)
+    c: ["\\documentclass{article}\n\\usepackage{hyperref}\n\\usepackage{cleveref}\n\\pagestyle{empty}\n\\begin{document}\n\\section{Alpha}\\label{s1}\n\\begin{equation}x\\label{e1}\\end{equation}\n\\begin{equation}y\\label{e2}\\end{equation}\n\\begin{figure}\\caption{Cap}\\label{f1}\\end{figure}\n\\section{Beta}\\label{s2}\n\\section{Gamma}\\label{s3}\n\\section*{Starred}\\label{st}\n\\subsection{Sub}\\label{ss}\nA[\\cref{s1}] B[\\cref{e1}] C[\\cref{f1}] D[\\cref{s1,s2}] E[\\cref{s1,s2,s3}] F[\\cref{e1,e2}] G[\\cref{s1,f1}] H[\\Cref{e1}] I[\\Cref{s1,s3}] J[\\cref{ss}] K[\\nameref{st}] L[\\ref{st}] M[\\nameref{e1}] N[\\nameref{f1}] O[\\cref{s3,s1}] P[\\cref{s1,nokey}]\n\\end{document}\n", "A[section 1] B[eq. (1)] C[fig. 1] D[sections 1 and 2] E[sections 1 to 3] F[eqs. (1) and (2)] G[section 1 and fig. 1] H[Equation (1)] I[Sections 1 and 3] J[section 3.1] K[Starred] L[3] M[Alpha] N[Cap] O[sections 1 and 3] P[section 1 and ??]"],
+    d: ["\\documentclass{article}\n\\usepackage{hyperref}\n\\usepackage{cleveref}\n\\pagestyle{empty}\n\\begin{document}\n\\section{Alpha}\\label{s1}\n\\begin{equation}x\\label{e1}\\end{equation}\n\\begin{equation}y\\label{e2}\\end{equation}\n\\begin{equation}z\\label{e3}\\end{equation}\n\\begin{table}\\caption{T}\\label{t1}\\end{table}\n\\begin{figure}\\caption{Cap}\\label{f1}\\end{figure}\n\\section{Beta}\\label{s2}\n\\begin{enumerate}\\item a\\label{i1}\\item b\\label{i2}\\end{enumerate}\nA[\\Cref{s1,f1}] B[\\cref{e1,e2,e3}] C[\\cref{t1}] D[\\cref{s1,e2,s2}] E[\\cref{i1,i2}] F[\\Cref{t1,f1,s2}] G[\\cref{nokey}] H[\\cref{e3,e1}]\n\\end{document}\n", "A[Section 1 and fig. 1] B[eqs. (1) to (3)] C[table 1] D[sections 1 and 2 and eq. (2)] E[items 1 and 2] F[Table 1, fig. 1, and section 2] G[??] H[eqs. (1) and (3)]"],
+  };
+  tex.e = ["\\documentclass{article}\n\\usepackage{hyperref}\n\\usepackage{cleveref}\n\\pagestyle{empty}\n\\begin{document}\n\\section{S1}\\label{s1}\\subsection{A}\\subsection{B}\\label{ss12}\\subsubsection{C}\\paragraph{D}\\label{p}\n\\section{S2}\\label{s2}\\subsection{E}\\subsection{F}\\subsection{G}\\label{ss23}\\subsection{H}\\label{ss24}\n\\section{S3}\\label{s3}\\section{S4}\\section{S5}\\label{s5}\nA[\\cref{s1,s3,s5}] B[\\cref{nokey,nokey2}] C[\\ref{p}] D[\\cref{ss12,ss23,ss24}] E[$\\cref{zz}$]\n\\end{document}\n", "A[sections 1, 3 and 5] B[????] C[1.2.1] D[sections 1.2, 2.3 and 2.4] E[??]"];
+  // (and a \\ref's link goes to the numbered heading it names, not to a starred one after it)
+  const link = new Engine().update(art("\\section{Alpha}\\section*{Beta}\\label{b}\\ref{b}")).chunks.join("");
+  check("ref-starred-link", /<h2 id="(sec-\d+)">[\s\S]*<a class="ref" href="#\1">1<\/a>/.test(link), link.slice(0, 400));
+  // (a reference in math: KaTeX stubbed, so its source, \\text{..})
+  for (const [k, [src, want]] of Object.entries(tex)) { const t = text(src).replace(/\\text\{([^}]*)\}/g, "$1"); check("ref-as-tex-" + k, t.slice(t.indexOf("A[")) === want, t.slice(t.indexOf("A["))); }
+  // (#682 r2, each against TeX Live 2025 with hyperref and cleveref: daybreak3, a heading with a \ref in it, named by
+  //  \nameref: its reference resolved ("See 1"), no placeholder left; a nested \nameref ("Cf. Beta"); a title that names
+  //  itself is "??" (TeX: the heading "Loop ??", the \nameref "??"))
+  const refDoc = (pre, body) => new Engine().update("\\documentclass{article}\n\\usepackage{hyperref}\n\\usepackage{cleveref}\n" + pre + "\n\\begin{document}\n" + body + "\n\\end{document}\n");
+  const refText = (r) => r.chunks.join("").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  for (const [name, body, want] of [
+    ["ref-nameref-with-ref", "\\section{Alpha}\\label{a}\\section{See \\ref{a}}\\label{b}X \\nameref{b} Y", "1 Alpha 2 See 1 X See 1 Y"],
+    ["ref-nameref-nested", "\\section{Beta}\\label{a}\\section{Cf.\\ \\nameref{a}}\\label{b}X \\nameref{b} Y", "1 Beta 2 Cf. Beta X Cf. Beta Y"],
+    ["ref-nameref-cycle", "\\section{Loop \\nameref{c}}\\label{c}X \\nameref{c} Y", "1 Loop ?? X ?? Y"],
+  ]) { const r = refDoc("", body), h = r.chunks.join(""); check(name, refText(r) === want && !/[\u0001\u0002]/.test(h), [refText(r), want, /[\u0001\u0002]/.test(h)]); }
+  // (and the text a \nameref brings in is escaped as the rest: "A \& B" named through another title)
+  { const r = refDoc("", "\\section{A \\& B}\\label{a}\\section{Cf.\\ \\nameref{a}}\\label{b}X \\nameref{b} Y"), h = r.chunks.join("");
+    check("ref-nameref-nested-escaped", refText(r).replace(/&amp;/g, "&") === "1 A & B 2 Cf. A & B X Cf. A & B Y" && !/A & B/.test(h), [refText(r), h.match(/Cf\.[^<]{0,20}/g)]); }
+  // (astra REF682-EXPAND-1: \nameref's titles within bounds. Titles naming the one before twice each would double per level
+  //  (depth 18: 3.1 MB before): each title at most NAME_MAX, cut and said once; titles that stay empty are worked out
+  //  once each (depth 20: about 4 s without that, milliseconds with it); a chain of titles naming titles deeper than
+  //  NAME_DEPTH is refused by name, and one within it resolves; all of a document's \nameref's together at most
+  //  NAME_TOTAL characters, said once)
+  {
+    const dbl = (n, leaf, sep) => { let b = "\\section{" + leaf + "}\\label{s0}"; for (let k = 1; k <= n; k++) b += "\\section{\\nameref{s" + (k - 1) + "}" + sep + "\\nameref{s" + (k - 1) + "}}\\label{s" + k + "}"; return b + "X \\nameref{s" + n + "} Y"; };
+    const fwd = (n) => { let b = ""; for (let k = 0; k < n; k++) b += "\\section{\\nameref{f" + (k + 1) + "}}\\label{f" + k + "}"; return b + "\\section{End}\\label{f" + n + "}X \\nameref{f0} Y"; };
+    const said = (r, re) => r.problems.filter((p) => p.kind === "expansion" && re.test(p.name)).length;
+    const d18 = refDoc("", dbl(18, "Leaf", " and ")), d18h = d18.chunks.join("");
+    check("ref-nameref-doubling-bounded", d18.stats.outcome === "ok" && d18h.length < 25 * (NAME_MAX + 200) && said(d18, /a title past 4096 characters, cut/) === 1, { len: d18h.length, problems: d18.problems.map((p) => p.name) });
+    const t0 = performance.now(), d20 = refDoc("", dbl(20, "", "")), ms = performance.now() - t0;
+    check("ref-nameref-empty-titles-once", ms < 1500 && refText(d20).endsWith("X Y"), { ms: Math.round(ms), tail: refText(d20).slice(-20) });
+    const deep = refDoc("", fwd(100)), within = refDoc("", fwd(63));
+    // (the boundary (grader #682 R7): the first heading works its title out from the next label down, so a chain of 64
+    //  below it is 64 titles deep, resolved, nothing said; 65 is one past the cut, refused there and said once)
+    const at64 = refDoc("", fwd(64)), at65 = refDoc("", fwd(65));
+    check("ref-nameref-depth-boundary", !at64.problems.length && refText(at64).endsWith("X End Y") && said(at65, /titles naming titles past 64 deep/) === 1 && !within.problems.length,
+      [at64.problems.map((p) => p.name), at65.problems.map((p) => p.name)]);
+    // (the cut is met, and said once, where the first heading works its title out from the top; the body's \nameref{f0},
+    //  worked out after the headings below it have their titles whole, is "End", as TeX gives it: a title cut by depth
+    //  is never kept for a shallower use (#682 r3, daybreak3))
+    check("ref-nameref-deep-refused", refText(deep).endsWith("X End Y") && said(deep, /titles naming titles past 64 deep/) === 1 && refText(within).endsWith("X End Y") && !within.problems.length,
+      [refText(deep).slice(-12), deep.problems.map((p) => p.name), refText(within).slice(-12), within.problems]);
+    // (daybreak3, #682 r3: a title worked out where the depth cut met it is kept only for that depth: the first heading's
+    //  chain reaches x with one level left and cuts x's own \nameref{y} (??); x named directly afterwards is only two
+    //  titles deep, so it is x's whole title, "End", as TeX gives it (with the cut kept for every depth: "P ?? Q");
+    //  the other order too)
+    const chain = (first) => { let b = ""; for (let k = 0; k < 64; k++) b += "\\section{\\nameref{" + (k < 63 ? "c" + (k + 1) : "x") + "}}\\label{c" + k + "}";
+      b += "\\section{\\nameref{y}}\\label{x}\\section{End}\\label{y}"; const deepRef = "D \\nameref{c0} E", direct = "P \\nameref{x} Q"; return b + (first === "deep" ? deepRef + " " + direct : direct + " " + deepRef); };
+    const dFirst = refText(refDoc("", chain("deep"))), sFirst = refText(refDoc("", chain("direct")));
+    check("ref-nameref-depth-cut-not-kept", /D End E P End Q$/.test(dFirst) && /P End Q D End E$/.test(sFirst), [dFirst.slice(-24), sFirst.slice(-24)]);
+    // (daybreak3 R29, #682 r4: a hit on a title kept for its depth is depth-bound for the title that used it too. p0,
+    //  the first heading, reaches x with one level left, its \nameref{y} cut, x kept for that depth; the q chain's
+    //  heading, next, reaches x through b at that same depth and hits it, so b's title is kept for that depth only, not
+    //  as b's whole title; b named directly is "End" (b kept as clean: "Q ?? R"). The lengths are exact: p0..p63 to x,
+    //  q0..q62 to b, so both chains meet x with one level left)
+    const r29 = (() => { const p = (k) => "\\section{\\nameref{" + (k < 63 ? "p" + (k + 1) : "x") + "}}\\label{p" + k + "}"; let b = p(0);
+      for (let k = 0; k < 63; k++) b += "\\section{\\nameref{" + (k < 62 ? "q" + (k + 1) : "b") + "}}\\label{q" + k + "}";
+      for (let k = 1; k < 64; k++) b += p(k);
+      return refDoc("", b + "\\section{\\nameref{y}}\\label{x}\\section{End}\\label{y}\\section{\\nameref{x}}\\label{b}Q \\nameref{b} R"); })();
+    check("ref-nameref-depth-hit-taints-caller", refText(r29).endsWith("Q End R") && said(r29, /titles naming titles past 64 deep/) === 1, [refText(r29).slice(-12), r29.problems.map((p) => p.name)]);
+    const many = refDoc("", "\\section{" + "W ".repeat(3000) + "}\\label{w}" + "\\nameref{w} ".repeat(400)), manyH = many.chunks.join("");
+    // (a literal title past NAME_MAX, no reference in it: shown cut, as said (astra, #682 r3))
+    const lit = refDoc("", "\\section{" + "L".repeat(6000) + "}\\label{l}X \\nameref{l} Y"), litA = (lit.chunks.join("").match(/<a class="ref"[^>]*>([^<]*)<\/a>/) || [])[1] ?? "";
+    check("ref-nameref-literal-cut-shown", litA.length === NAME_MAX + 1 && litA.endsWith("\u2026") && said(lit, /a title past 4096 characters, cut/) === 1, { len: litA.length, problems: lit.problems.map((p) => p.name) });
+    check("ref-nameref-total-bounded", manyH.length < NAME_TOTAL + 64 * 1024 && said(many, /past 1048576 characters of titles in all/) === 1, { len: manyH.length, problems: many.problems.map((p) => p.name) });
+  }
+  // (a title naming another that has markup: the outer one's text is the inner's text, its markup stripped, never its
+  //  HTML escaped as text (grader #682 R13))
+  { const h = refDoc("", "\\section{An \\emph{Em} title}\\label{a}\\section{Cf.\\ \\nameref{a}}\\label{b}Z \\nameref{b} Q").chunks.join("");
+    check("ref-nameref-nested-markup-stripped", /Z <a class="ref" href="#[^"]+">Cf\. An Em title<\/a> Q/.test(h) && !/&lt;span/.test(h), h.match(/Z .{0,120}/)); }
+  // (and a title with no references in it keeps its markup in \nameref's link, as hyperref keeps it: \emph's italic)
+  { const h = refDoc("", "\\section{An \\emph{Em} title}\\label{e}X \\nameref{e} Y").chunks.join("");
+    check("ref-nameref-keeps-markup", /<a class="ref" href="#[^"]+">An <span class="it">Em<\/span> title<\/a>/.test(h), h.match(/X .{0,120}/)); }
+  // (astra REF682-HTML-1: a theorem's name is the document's own text, escaped wherever \cref and \Cref name it, singular
+  //  and plural; and a plain one named as TeX names it ("lemma 1", "Lemma 1", "lemmas 1 and 2", "Lemmas 1 and 2"))
+  const evil = refDoc("\\newtheorem{evil}{<img src=x onerror=alert(1)>}", "\\begin{evil}\\label{x}A\\end{evil}\\begin{evil}\\label{y}B\\end{evil}P \\cref{x} Q \\Cref{x} R \\cref{x,y} S \\Cref{x,y}").chunks.join("");
+  const lem = refText(refDoc("\\newtheorem{lemma}{Lemma}", "\\begin{lemma}\\label{l}A\\end{lemma}\\begin{lemma}\\label{m}B\\end{lemma}P \\cref{l} Q \\Cref{l} R \\cref{l,m} S \\Cref{l,m}"));
+  check("ref-cref-theorem-name-escaped", !/<img/i.test(evil) && (evil.match(/&lt;img src=x onerror=alert\(1\)&gt;/g) || []).length >= 4, (evil.match(/&lt;img[^&]*/g) || []).length);
+  check("ref-cref-theorem-name-plain", lem.endsWith("P lemma 1 Q Lemma 1 R lemmas 1 and 2 S Lemmas 1 and 2"), lem);
 }
 
 // ---- render.mjs: an unclosed formula ends at a blank line (KaTeX stubbed: each formula drawn as its source)

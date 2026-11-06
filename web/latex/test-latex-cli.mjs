@@ -327,6 +327,29 @@ $\sage{1/0}$ then $\sage{2+2}$.
   writeFileSync(join(dir, "slow.tex"), "\\documentclass{article}\n\\begin{document}\n$\\sage{2+3}$\n\\begin{sagesilent}\nwhile True:\n    pass\n\\end{sagesilent}\n$\\sage{7}$\n\\end{document}\n");
   const slow = await run(dir, "run", "slow.tex", "--timeout", "8", "--json");
   check("run --timeout: stopped, earlier results kept", slow.code === 1 && slow.json.items.map((x) => x.state).join(",") === "ok,error,blocked" && /timeout/.test(slow.json.items[1].message), slow.json?.items ?? slow.err);
+  // (a helper beside the .tex: its code imports it, as real SageTeX's does (SageTeX 3.6.1 on Sage 10.9, run in the
+  //  document's folder: "The answer is 49."); the run is started from another folder, the document's own counts)
+  mkdirSync(join(dir, "helped"));
+  writeFileSync(join(dir, "helped", "helper.py"), "def square(n):\n    return n * n\n");
+  // (and a sagebrush.py beside it doesn't shadow the session script's own `sagebrush` import: @sagebrush-latex's review)
+  writeFileSync(join(dir, "helped", "sagebrush.py"), "raise ImportError('shadowed')\n");
+  writeFileSync(join(dir, "helped", "doc.tex"), "\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n\\begin{sagesilent}\nfrom helper import square\nx = square(7)\n\\end{sagesilent}\nThe answer is $\\sage{x}$, and $\\sage{1/3}$.\n\\end{document}\n");
+  const helped = await run(dir, "run", "helped/doc.tex", "--json");
+  const hr = existsSync(join(dir, "helped", "doc.tex.results.json")) ? JSON.parse(readFileSync(join(dir, "helped", "doc.tex.results.json"), "utf8")) : null;
+  check("run: a helper.py beside the .tex is imported (the document's folder on sys.path, as in SageTeX); a sagebrush.py there doesn't break the session",
+    helped.code === 0 && JSON.stringify(hr?.items?.map((x) => [x.s, x.latex ?? null])) === JSON.stringify([["ok", null], ["ok", "49"], ["ok", "\\frac{1}{3}"]]), { code: helped.code, items: helped.json?.items, saved: hr?.items });
+  // (the document's folder LAST on sys.path, as Sage 10.9's `sage doc.sagetex.sage` has it (its sys.path printed: the
+  //  bin folder, the standard library, site-packages, then the document's folder): a statistics.py beside the .tex
+  //  doesn't replace the standard library's (the stdlib's has NormalDist; the document's one only a mean returning 42).
+  //  statistics isn't imported when the session starts (checked in the item), so this is the search order, not a
+  //  cached module; grader's Y2, @sagebrush's (A))
+  mkdirSync(join(dir, "shadowing"));
+  writeFileSync(join(dir, "shadowing", "statistics.py"), "def mean(xs):\n    return 42\n");
+  writeFileSync(join(dir, "shadowing", "doc.tex"), "\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n\\begin{sagesilent}\nimport sys\nfresh = 'statistics' not in sys.modules\nimport statistics\n\\end{sagesilent}\n$\\sage{fresh}$ $\\sage{hasattr(statistics, 'NormalDist')}$\n\\end{document}\n");
+  const shadowing = await run(dir, "run", "shadowing/doc.tex", "--json");
+  const sr = existsSync(join(dir, "shadowing", "doc.tex.results.json")) ? JSON.parse(readFileSync(join(dir, "shadowing", "doc.tex.results.json"), "utf8")) : null;
+  check("run: the document's folder is LAST on sys.path, as Sage's: its statistics.py doesn't replace the standard library's",
+    shadowing.code === 0 && JSON.stringify(sr?.items?.map((x) => [x.s, x.latex ?? null])) === JSON.stringify([["ok", null], ["ok", "\\mathrm{True}"], ["ok", "\\mathrm{True}"]]), { code: shadowing.code, items: shadowing.json?.items, saved: sr?.items });
   // (William's L1, Nov 3: \title{$\sage{factor(2026)}$} "doesn't work": an item in a title field is shown where
   //  \maketitle prints it, so it runs and its result is in the title block; with no \maketitle it is still hidden)
   const TITLED = "\\documentclass{article}\n\\usepackage{sagetex}\n\\title{$\\sage{factor(2026)}$}\n\\author{A $\\sage{2+3}$\\thanks{t $\\sage{6*7}$}}\n\\date{$\\sage{2025+1}$}\n\\begin{document}\n\\maketitle\nBody $\\sage{1+1}$.\n\\end{document}\n";
