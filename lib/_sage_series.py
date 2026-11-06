@@ -261,7 +261,11 @@ class SeriesRing_:
         if isinstance(x, (list, tuple)):
             r = Series(self, 0, [self._base(c) for c in x], None)
             return r.add_bigoh(prec) if prec is not None else r
-        if hasattr(x, "list") and hasattr(x, "degree") and hasattr(x, "parent") and not isinstance(x, (int, _F)):
+        # an element of the base (or of a ring that coerces into it) is a constant, whatever its
+        # variable is called (a in QQ['a'][[x]], and x in QQ['x'][[x]]: Sage's a*x, x*x); another
+        # polynomial in the series variable gives its coefficients, one in another variable is
+        # converted by the base
+        if self._var_poly(x):
             r = Series(self, 0, [self._base(c) for c in x.list()], None)
             return r.add_bigoh(prec) if prec is not None else r
         if type(x).__name__ == "FractionFieldElement":
@@ -272,12 +276,46 @@ class SeriesRing_:
         r = Series(self, 0, [c], None)
         return r.add_bigoh(prec) if prec is not None else r
 
+    def _var_poly(self, x):
+        """Whether x is a polynomial in the series variable that is not an element of the base
+        (nor of a ring that coerces into it): it converts by its coefficients, not as a scalar."""
+        return (hasattr(x, "list") and hasattr(x, "degree") and hasattr(x, "parent") and not isinstance(x, (int, _F))
+                and not _coerces_into(x, self._base) and _variable_of(x) in (None, self._name))
+
     def __contains__(self, x):
         try:
             self(x)
             return True
         except (TypeError, ValueError):
             return False
+
+
+def _coerces_into(x, B):
+    """Whether x's parent is B or a polynomial ring that coerces into B (the same variables,
+    over a ring that coerces into B's: ZZ['x'] into QQ['x'] or GF(5)['x'], not QQ['x'] into
+    ZZ['x'])."""
+    try:
+        P = x.parent()
+    except Exception:
+        return False
+    if P is B or P == B:
+        return True
+    try:
+        names = lambda R: tuple(R.variable_names()) if hasattr(R, "variable_names") else (R.variable_name(),)
+        if names(P) != names(B):
+            return False
+        k, K = P.base_ring(), B.base_ring()
+    except Exception:
+        return False
+    return k is K or k == K or k is _sa().ZZ
+
+
+def _variable_of(x):
+    """The variable name of x's parent (a polynomial ring's), else None."""
+    try:
+        return x.parent().variable_name()
+    except Exception:
+        return None
 
 
 def _is_padic(B):
@@ -292,7 +330,29 @@ def _frac(B):
         return sa.QQ
     if _is_padic(B) and not B._field:
         return B.fraction_field()
+    if _poly_base(B):
+        return B.fraction_field()
     return B
+
+
+def _poly_base(B):
+    """Whether B is a polynomial ring (QQ['a'], ZZ['a'], GF(5)['a'], QQ['a,b']): not a
+    field, so a quotient by a non-unit lands in its fraction field, as in Sage."""
+    return type(B).__name__ in ("PolynomialRing_", "MPolynomialRing_", "PolynomialRing_ff_", "PolynomialRing_nf_")
+
+
+def _poly_unit(c, B):
+    """Whether c is a unit of the polynomial ring B: a constant unit of its coefficient ring."""
+    try:
+        if c.degree() > 0:
+            return False
+        k = B.base_ring()
+        c0 = k(c.constant_coefficient() if hasattr(c, "constant_coefficient") else c.list()[0])
+    except Exception:
+        return False
+    if _is_zero(c0):
+        return False
+    return c0 in (1, -1) if k is _sa().ZZ else True
 
 
 def _is_unit(c, B):
@@ -301,6 +361,8 @@ def _is_unit(c, B):
         return c == 1 or c == -1
     if _is_padic(B):
         return not c.is_zero() and (B._field or c.valuation() == 0)
+    if _poly_base(B):
+        return _poly_unit(c, B)
     return not _is_zero(c)
 
 
@@ -314,6 +376,12 @@ def _exact_quo(x, c, B):
         if x.valuation() < c.valuation():
             return None
         return B(x / c)
+    if _poly_base(B):
+        try:
+            q, r = x.quo_rem(c)
+        except Exception:
+            return None
+        return q if _is_zero(r) else None
     return x / c
 
 
@@ -495,7 +563,8 @@ class Series:
             # (no coefficients known, as in O(t^3): [] as Sage gives, but
             # [0] over Qp and Zp, whose series list like their polynomials)
             return [_out(self._R._zero())] if _is_padic(self._R._base) else []
-        if self._v >= 0:
+        # (a Laurent series lists from its valuation, as Sage: x.list() is [1])
+        if self._v >= 0 and not self._R._laurent:
             return [_out(c) for c in [self._R._zero()] * self._v + self._c]
         return [_out(c) for c in self._c]
 
@@ -508,6 +577,9 @@ class Series:
             [1, 1, 0, 0, 0]
         """
         L = self.list()
+        if self._R._laurent and self._c and self._v > 0:
+            # (from x^0, as before: a sagebrush addition, Sage's Laurent series has no padded_list)
+            L = [_out(self._R._zero())] * self._v + L
         if n is None:
             n = self._prec if self._prec is not None else len(L)
         return (L + [_out(self._R._zero())] * n)[:n]
@@ -856,7 +928,9 @@ class Series:
     def __truediv__(self, o):
         self._check_var(o, "/")
         B = self._R._base
-        if _is_padic(B) and not isinstance(o, Series):
+        # (a polynomial in the series variable divides as a series, not as a scalar)
+        scalar = not isinstance(o, Series) and not self._R._var_poly(o)
+        if _is_padic(B) and scalar:
             # by a scalar: over the fraction field (Sage: T/2 and T/Zp(5)(2)
             # are over Qp; the review's CORR-D9E-2), joined with the
             # scalar's own fraction field
@@ -870,7 +944,11 @@ class Series:
                 raise ZeroDivisionError("division by zero")
             return Series(s._R, s._v, [x / c for x in s._c], s._prec)
         F = _frac(B)
-        if F is not B and not isinstance(o, Series):
+        if _poly_base(B) and scalar:
+            s = self._poly_scalar_div(o)
+            if s is not None:
+                return s
+        if F is not B and scalar:
             # by a scalar: over the fraction field (Sage: z/2 and z/1 are in
             # QQ[[z]])
             s = self._over(F)
@@ -899,6 +977,29 @@ class Series:
             # exact division by a constant stays exact
             return Series(self._R, self._v, [self._R._div(c, o2._c[0]) for c in self._c], None)
         return self * o2.inverse()
+
+    def _poly_scalar_div(self, o):
+        """self / o over a polynomial base B when o is a unit of B (x/2 over QQ['a']), or a
+        number that is a unit of B over the fraction field of B's coefficients (x/2 over
+        ZZ['a'] lands in QQ['a'][[x]]), as Sage; else None (the fraction field of B)."""
+        B = self._R._base
+        try:
+            c = B(o)
+        except (TypeError, ValueError, ArithmeticError):
+            c = None
+        if c is not None and _poly_unit(c, B):
+            inv = B(B.base_ring()(1) / B.base_ring()(c.constant_coefficient() if hasattr(c, "constant_coefficient") else c.list()[0]))
+            return Series(self._R, self._v, [x * inv for x in self._c], self._prec)
+        k = B.base_ring()
+        if k is _sa().ZZ:
+            try:
+                q = _sa().QQ(o)
+            except (TypeError, ValueError, ArithmeticError):
+                return None
+            if q == 0:
+                raise ZeroDivisionError("division by zero")
+            return self._over(B.change_ring(_sa().QQ)) / q
+        return None
 
     def _ring_div(self, g):
         """self / g over a base that is not a field (ZZ, Zp), as Sage (whose
@@ -929,6 +1030,8 @@ class Series:
                 # (Sage's refusals: over ZZ, and over Zp)
                 if _is_padic(B):
                     raise ValueError("negative valuation")
+                if type(B).__name__ == "PolynomialRing_ff_":
+                    raise ValueError("not integral")  # (Sage, over GF(p)[a])
                 raise ArithmeticError("division not defined")
         else:
             c0 = g._c[0]

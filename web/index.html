@@ -170,21 +170,21 @@
   /* an open panel: checked */
   .menu button[aria-pressed="true"]::after { content: "✓"; color: var(--accent); }
   .menu kbd { font-size: 11px; color: var(--muted); }
-  #sharedlg { border: 1px solid var(--line); border-radius: 10px; background: var(--cell); color: var(--fg); padding: 14px 16px; width: min(560px, 92vw); }
-  #sharedlg::backdrop { background: rgba(0,0,0,.35); }
-  #sharedlg h4 { margin: 12px 0 2px; font-size: 14px; }
-  #sharedlg .note { color: var(--muted); font-size: 13px; margin: 2px 0 8px; }
-  #sharedlg label { display: flex; gap: 8px; align-items: center; margin: 6px 0; font-size: 13px; }
-  #sharedlg label input[type=text] { flex: 1; }
+  .pick { border: 1px solid var(--line); border-radius: 10px; background: var(--cell); color: var(--fg); padding: 14px 16px; width: min(560px, 92vw); }
+  .pick::backdrop { background: rgba(0,0,0,.35); }
+  .pick h4 { margin: 12px 0 2px; font-size: 14px; }
+  .pick .note { color: var(--muted); font-size: 13px; margin: 2px 0 8px; }
+  .pick label { display: flex; gap: 8px; align-items: center; margin: 6px 0; font-size: 13px; }
+  .pick label input[type=text] { flex: 1; }
   /* the file list: virtualized rows of two lines (web/share-client/dialog.ts), in one stable order */
-  #sharedlg #sharelist { position: relative; height: 30vh; min-height: 160px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; margin: 6px 0; }
-  #sharedlg #sharelistinner { position: relative; }
-  #sharedlg .sharerow { position: absolute; left: 0; right: 0; height: 40px; padding: 2px 8px; box-sizing: border-box; font-size: 13px; }
-  #sharedlg .sharerow label { margin: 0; white-space: nowrap; }
-  #sharedlg .sharerow .name { overflow: hidden; }
-  #sharedlg .sharerow .size { color: var(--muted); margin-left: auto; padding-left: 8px; }
-  #sharedlg .sharerow .why { color: var(--muted); font-size: 12px; padding-left: 24px; height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  #sharedlg .sharebar button { font-size: 12px; }
+  .pick .plist { position: relative; height: 30vh; min-height: 160px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; margin: 6px 0; }
+  .pick .plist > div { position: relative; }
+  .pick .sharerow { position: absolute; left: 0; right: 0; height: 40px; padding: 2px 8px; box-sizing: border-box; font-size: 13px; }
+  .pick .sharerow label { margin: 0; white-space: nowrap; }
+  .pick .sharerow .name { overflow: hidden; }
+  .pick .sharerow .size { color: var(--muted); margin-left: auto; padding-left: 8px; }
+  .pick .sharerow .why { color: var(--muted); font-size: 12px; padding-left: 24px; height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pick .sharebar button { font-size: 12px; }
   #shareupload.busy::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 6px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: sbspin .8s linear infinite; vertical-align: -1px; }
   @keyframes sbspin { to { transform: rotate(360deg); } }
   /* (an always-present live region: "Checking…" once the dialog is open, then the check's outcome, which the
@@ -192,7 +192,7 @@
   #sharechecking:empty { margin: 0; }
   #sharechecking[data-state="done"] { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   @media (prefers-reduced-motion: reduce) { #shareupload.busy::before { animation: none; border: 0; border-radius: 0; width: auto; height: auto; content: "…"; } }
-  #sharedlg .result { overflow-wrap: anywhere; font-size: 13px; }
+  .pick .result { overflow-wrap: anywhere; font-size: 13px; }
   #exdlg { border: 1px solid var(--line); border-radius: 10px; background: var(--cell); color: var(--fg); padding: 14px 16px; width: min(560px, 92vw); }
   #exdlg::backdrop { background: rgba(0,0,0,.35); }
   #exdlg .exnote { color: var(--muted); font-size: 13px; margin: 4px 0 8px; }
@@ -460,7 +460,7 @@
   <p class="exnote">Each opens as a new notebook; yours stays saved.</p>
   <div id="exlist"></div>
 </dialog>
-<dialog id="sharedlg" aria-labelledby="sharetitle">
+<dialog id="sharedlg" class="pick" aria-labelledby="sharetitle">
   <form method="dialog" style="display:flex;justify-content:space-between;align-items:center"><b id="sharetitle">Share</b><button aria-label="Close">✕</button></form>
   <h4>A link with the notebook in it</h4>
   <p class="note">No account needed. The link holds the cells' code and text, not outputs or files, and is never sent to a server.</p>
@@ -474,7 +474,7 @@
     <label>Title <input type="text" id="sharetitlein" maxlength="200"></label>
     <label>License <select id="sharelicense"><option value="CC-BY-4.0">CC BY 4.0</option><option value="CC0-1.0">CC0 (public domain)</option><option value="MIT">MIT</option><option value="Apache-2.0">Apache 2.0</option><option value="">None given</option></select></label>
     <div class="sharebar"><button type="button" id="shareall">Select all</button> <button type="button" id="sharenone">Select none</button></div>
-    <div id="sharelist" role="group" aria-label="Files to include"><div id="sharelistinner"></div></div>
+    <div id="sharelist" class="plist" role="group" aria-label="Files to include"><div id="sharelistinner"></div></div>
     <p class="note" id="sharestatus" aria-live="polite"></p>
     <p class="note" id="sharesummary"></p>
     <button class="primary" id="shareupload">Upload</button> <span id="shareprogress" class="note"></span>
@@ -483,6 +483,16 @@
   </div>
   <!-- (outside #shareup, which a site without sharing hides: its outcome is announced too) -->
   <p class="note" id="sharechecking" aria-live="polite"></p>
+</dialog>
+<dialog id="dldepsdlg" class="pick" aria-labelledby="dldepstitle">
+  <form method="dialog" style="display:flex;justify-content:space-between;align-items:center"><b id="dldepstitle">Download with its files</b><button aria-label="Close">✕</button></form>
+  <p class="note">This notebook and the files you check, as one .zip.</p>
+  <div class="sharebar"><button type="button" id="dldepsall">Select all</button> <button type="button" id="dldepsnone">Select none</button></div>
+  <div id="dldepslist" class="plist" role="group" aria-label="Files to include"><div id="dldepslistinner"></div></div>
+  <p class="note" id="dldepsstatus" aria-live="polite"></p>
+  <p class="note" id="dldepssummary"></p>
+  <button class="primary" id="dldepsgo">Download .zip</button> <span id="dldepsprogress" class="note"></span>
+  <p class="result" id="dldepsresult" aria-live="polite"></p>
 </dialog>
 <input id="importinput" type="file" accept=".ipynb,.py,.sage,.m,.mag,.sbreplay" hidden>
 <dialog id="docdlg" aria-labelledby="doctitle">
@@ -534,6 +544,7 @@ import { notebookFileText } from "./workspace/file-bytes.ts";
 import { toMarimo } from "./notebook/marimo.js";
 import { shareStatus, signInUrl, uploadCollection, AttemptError } from "./share-client/upload.ts";
 import { createShareDialog } from "./share-client/dialog.ts";
+import { createDownloadDialog } from "./share-client/download.ts";
 import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, SyncOwner, registerJournalWriter, DocSync, readJournal, docSyncOrigin, docSyncAllowed, enableDocSync, docSyncChannel, DOC_SYNC_RELOAD } from "./workspace/index.ts";
 import { mountBrowser } from "./workspace/browser.ts";
 // (the LaTeX editor's entry; a build without it takes this line out before bundling: web/build.ts)
@@ -1079,6 +1090,8 @@ window.sagebrush = {
   analyzer, get analyzeWorker() { return analyzeWorker; },
   // (tests: the Share dialog, and its seams)
   get share() { return shareDialog; }, get shareTest() { return shareTest; },
+  // (tests: Download "with its files", and its caps)
+  get download() { return downloadDialog; }, get downloadTest() { return downloadTest; },
   // (tests: Move to Trash's pauses, B1)
   get trashTest() { return trashTest; },
   /** Open a notebook of this browser by id (switching to its interpreter). */
@@ -2284,25 +2297,25 @@ async function openFolderShare(e) {
     fmtSize,
   });
 }
-async function storedFileBytes(f) {
+async function storedFileBytes(f, again = "upload again") {
   await shareTest.onRead?.(f.path);
   const w = await wsNow();
   const shown = f.path.replace(/^\/+/, "");
   if (w && !w.closed) {
     const e = await w.stat(f.path);
-    if (!e || e.kind !== "file" || (f.fid && e.fid !== f.fid)) throw new Error(`${shown} changed; check the list and upload again`);
+    if (!e || e.kind !== "file" || (f.fid && e.fid !== f.fid)) throw new Error(`${shown} changed; check the list and ${again}`);
     const b = await w.contents(e);
     if (!(b instanceof Uint8Array)) throw new Error(`${shown} can't be read`);
     return b;
   }
   db ??= await dbReady;
   const v = db && ((await idb(db, "files", "readonly", (st) => st.get(f.path))) ?? (await idb(db, "files", "readonly", (st) => st.get(shown))));
-  if (!(v instanceof Uint8Array)) throw new Error(`${shown} changed; check the list and upload again`);
+  if (!(v instanceof Uint8Array)) throw new Error(`${shown} changed; check the list and ${again}`);
   return v;
 }
-const shareDialog = createShareDialog({
-  dlg: shareDlg,
-  notebook: () => ({ path: fileBase() + ".ipynb", data: new TextEncoder().encode(toIpynb({ ...nb.snapshot(), name: docName() })) }),
+// (what Share and Download's "with its files" pick from: the notebook's identity, the workspace's files and the
+// analysis's inputs, the same for both, picker.ts)
+const pickHost = {
   notebookId: () => (switched ? null : (shareTest.notebookId?.() ?? String(current.id))),
   listFiles: () => shareTest.listFiles?.() ?? storedFileMeta(),
   readFile: storedFileBytes,
@@ -2325,6 +2338,12 @@ const shareDialog = createShareDialog({
   },
   createWorker: () => shareTest.createWorker?.() ?? new Worker("/sagebrush-share-deps.js"),
   failsafe: () => shareTest.failsafe,
+  fmtSize: (n) => fmtSize(n),
+};
+const shareDialog = createShareDialog({
+  ...pickHost,
+  dlg: shareDlg,
+  notebook: () => ({ path: fileBase() + ".ipynb", data: new TextEncoder().encode(toIpynb({ ...nb.snapshot(), name: docName() })) }),
   bounds: () => ({ maxFiles: 10000, maxFileBytes: sharing.me?.limits?.max_file_bytes, bytesLeft: sharing.me?.limits ? sharing.me.limits.storage_bytes - sharing.me.usage : undefined }),
   upload: async ({ files, title, license }, progress) => {
     // (the notebook's share and pending attempt as its store holds them now; null only where this page has no
@@ -2474,12 +2493,38 @@ const shareDialog = createShareDialog({
     }
     return { url: r.url, again: !!prev };
   },
-  fmtSize: (n) => fmtSize(n),
 });
 beforeSwitch.push(async () => {
   await shareDialog.idle();
   shareDialog.invalidate();
 });
+// File > Download "with its files (.zip)" (dependencies 2b): Share's picker; the .zip written by the export's lazy
+// chunk, loaded on the click (web/share-client/download.ts, web/workspace/export/selected.ts).  The notebook's own
+// workspace path, read when the dialog opens, so its folder can be the .zip's root.
+const DL_CAPS = { files: 10000, file: LIMITS.maxFileBytes, total: 240 * 2 ** 20 };
+// (tests: lower caps, read at each use)
+const downloadTest = { caps: null, afterPath: null };
+const dlCaps = () => downloadTest.caps ?? DL_CAPS;
+const downloadDialog = createDownloadDialog({
+  ...pickHost,
+  dlg: $("#dldepsdlg"),
+  notebook: () => ({ path: fileBase() + ".ipynb", data: new TextEncoder().encode(notebookFileText({ ...nb.snapshot(), name: docName() })) }),
+  readFile: (f) => storedFileBytes(f, "download again"),
+  // (at the click: the download checks the notebook after it, so a path can't outlive a rename or a switch)
+  notebookPath: async () => {
+    const w = ws, id = current.id;
+    const p = w && id ? await w.pathOf("notebook", id).catch(() => null) : null;
+    await downloadTest.afterPath?.();
+    if (ws !== w) throw new Error("the workspace changed");
+    return p?.replace(/^\/+/, "") ?? null;
+  },
+  bounds: () => { const c = dlCaps(); return { maxFiles: c.files, maxFileBytes: c.file, bytesLeft: c.total, download: true }; },
+  zip: async (o) => {
+    const m = await import(new URL("sagebrush-export.js", location.href).href);
+    await m.zipPicks({ ...o, workerUrl: new URL("sagebrush-export-worker.js", location.href).href, caps: dlCaps() });
+  },
+});
+beforeSwitch.push(async () => downloadDialog.invalidate());
 
 async function fromLink(hash) {
   const z = /z=([\w-]+)/.exec(hash), c = /c=([\w-]+)/.exec(hash);
@@ -2571,7 +2616,9 @@ function drawFileMenu() {
       { key: "ipynb", label: ".ipynb" },
       { key: "py", label: ".py" },
       { key: "marimo", label: "marimo (.py)", title: "A marimo notebook (one function per cell), which marimo opens" },
+      { key: "withfiles", label: "with its files (.zip)", title: "The notebook and the files it uses (its helpers, its data), chosen in a list, as one .zip" },
       { key: "bundle", label: "with history (.sbreplay)", title: "The notebook with its TimeTravel history and the files its sessions read: open it in another browser and resume any version" },
+      { key: "allzip", label: "Everything (.zip)…", title: "All your current files, folders, notebooks and boards in one .zip", disabled: none },
     ],
     // (the desktop app's own: disk files, under Upload… and Save a copy…)
     extra: [
@@ -2748,6 +2795,8 @@ fileMenu.addEventListener("click", async (e) => {
       await openDocument({ ...d, share_id: undefined, share_attempt: undefined, name: name.trim(), cells: d.cells.map((c) => ({ ...c, id: cellId() })) }, false, src?.made);
       break;
     }
+    // (the whole workspace as one .zip: the Files sidebar's export, the sidebar shown (sim run 11, X05))
+    case "allzip": if (!wsBrowser) wsShowFiles(true); wsBrowser?.exportAll(); break;
     case "ipynb": download(fileBase() + ".ipynb", notebookFileText({ ...nb.snapshot(), name: docName() })); break;
     case "py": download(fileBase() + (isSage() ? ".sage" : isMagma() || isMatlab() ? ".m" : ".py"), toScript(nb.snapshot()), isMagma() || isMatlab() ? "text/plain" : "text/x-python"); break;
     case "marimo": {
@@ -2756,6 +2805,11 @@ fileMenu.addEventListener("click", async (e) => {
       const r = nb.reactive, ids = r?.graph.ids ?? [];
       const g = new Map(await Promise.all(ids.map(async (id) => [r.submitted(id), await r.writtenAnalysis(id)])));
       download(fileBase() + ".py", toMarimo(nb.snapshot(), (code) => g.get(code) ?? null), "text/x-python");
+      break;
+    }
+    case "withfiles": {
+      saveNow();
+      await downloadDialog.open();
       break;
     }
     case "bundle": saveNow(); download(fileBase() + ".sbreplay", await makeBundle(), "application/gzip"); break;

@@ -9,6 +9,8 @@ import { ExportStopped, LOCK_PREFIX, localDate, NOTE_NAME, preflight, setKit, Sp
 export { capsInEffect } from "./run";
 // (tests only: the direct writer against JSON.stringify, in the page, E1 r2c)
 export { writerCheck } from "./run";
+// (File > Download "with its files (.zip)": the chosen files, written by this chunk's writer)
+export { zipPicks } from "./selected";
 
 export type ExportHost = {
   say(m: string): void;
