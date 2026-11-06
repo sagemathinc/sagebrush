@@ -230,6 +230,22 @@ async def test_tcp_admission():
         assert await asyncio.wait_for(r.read(), 5) == b""  # (closed at the deadline)
         assert s.unpaired_count == 0 and not s.pending
         s.close()
+        # (one deadline from the TCP admission: an upgrade late in it, then no hello, is closed at the connection's
+        # deadline, not a fresh helloMs after the upgrade)
+        s = await server()
+        t0 = time.monotonic()
+        r, w = await asyncio.open_connection("127.0.0.1", s.port)
+        w.write(b"GET /sagebrush-kernel HTTP/1.1\r\n")
+        await asyncio.sleep(0.2)
+        key = base64.b64encode(secrets.token_bytes(16)).decode()
+        w.write(("Host: 127.0.0.1:%d\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %s\r\n"
+                 "Sec-WebSocket-Version: 13\r\nOrigin: %s\r\n\r\n" % (s.port, key, P.PAGE_ORIGIN)).encode())
+        assert b" 101 " in await asyncio.wait_for(r.readuntil(b"\r\n\r\n"), 5)
+        h = await asyncio.wait_for(r.readexactly(2), 5)  # (the close for "no hello in time")
+        body = await r.readexactly(h[1] & 0x7F)
+        took = time.monotonic() - t0
+        assert h[0] == 0x88 and int.from_bytes(body[:2], "big") == 1008 and took < 0.45, (h, body, took)
+        s.close()
     finally:
         P.PAIR_LIMITS["helloMs"] = old
 
