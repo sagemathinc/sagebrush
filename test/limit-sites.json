@@ -1970,6 +1970,11 @@
   "class": "2",
   "owner": "raster/image I/O"
  },
+ "engine/sym/src/definite.rs :: endpoints :: .or_else(|_| crate::limit::try_limit(&crate::rewrite::simplify_log(big_f), x, pt, dir)) #0": {
+  "class": "none",
+  "owner": "symbolic calculus (@sagebrush-matlab)",
+  "reason": "try_limit is the name of the limit function: this line asks for a one-sided limit and refuses nothing"
+ },
  "engine/sym/src/num.rs ::  :: pub const MAX_INT_BITS: u64 = 1 << 21; #0": {
   "class": "2+3",
   "owner": "symbolic engine",
@@ -5101,6 +5106,11 @@
   },
   "owner": "matrices over SR (@sagebrush-sage2)",
   "reason": "lane 4b's symbolic workspace and expression-size guards (plan r3 R1/T5), raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _eigen :: raise NotImplementedError(\"the eigenvalues of this symbolic matrix are not available in sagebrush yet\") #0": {
+  "class": "coverage",
+  "owner": "symbolic linear algebra (@sagebrush-matlab)",
+  "reason": "an unsupported case (roots of the characteristic polynomial not found by solve), not a cap"
  },
  "lib/_sage_matrix_sr.py :: _memory_error :: def _memory_error(what, need, limit): #0": {
   "class": "2",
