@@ -2,7 +2,7 @@
 it spans), the colormaps by name (cm.viridis) and their registry
 (matplotlib.colormaps), with matplotlib 3.11.1's names and errors."""
 from collections.abc import Mapping as _Mapping
-from _cmaps import NAMES_ALL as _NAMES_ALL, KNOWN as _KNOWN, drawn as _drawn, missing as _missing, invalid as _invalid
+from matplotlib._cmaps import NAMES_ALL as _NAMES_ALL, KNOWN as _KNOWN, drawn as _drawn, missing as _missing, invalid as _invalid
 from matplotlib.colors import Colormap, Normalize
 
 _SEE = ("\nSee `matplotlib.bivar_colormaps()` and `matplotlib.multivar_colormaps()` for bivariate and"

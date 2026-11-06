@@ -1,4 +1,4 @@
-"""Colormap names as matplotlib 3.11.1 has them, which Sagebrush draws, and
+"""matplotlib._cmaps: colormap names as matplotlib 3.11.1 has them, which Sagebrush draws, and
 matplotlib's message for a name it lacks.  Imported when a colormap is
 looked up or given by name (matplotlib.cm, pyplot's cmap=, Sage's
 colormaps and plots), not when matplotlib or Sage starts."""
