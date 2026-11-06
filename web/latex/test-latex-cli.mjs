@@ -270,6 +270,41 @@ ${"many words ".repeat(14000)}
     const mb = /\/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)\s*\]/.exec(pdfBytes.toString("latin1"));
     check("pdf: one page per frame, 16:9", pd.code === 0 && pdfBytes.subarray(0, 5).toString() === "%PDF-" && pd.json?.pdf?.pages === 5 && mb && Math.abs(+mb[1] / +mb[2] - 16 / 9) < 0.01, { code: pd.code, pdf_error: pd.json?.pdf_error, pdf: pd.json?.pdf, mb: mb && mb.slice(1) });
     check("png-overflow-reported", pages[3]?.overflow_px > 0 && pages.filter((x) => x.overflow_px).length === 1 && pages[1].title === "Overlays", pages);
+    // (sim run 11 X01, run 12 BL01: displays squeezed and clipped while their frame read as fitting. Against TeX Live
+    //  2025, beamer at aspectratio=169: X01's frame fits; with k copies of its nested-root display, each after a line
+    //  (72% of the width in TeX, so its normal display skips, and one line in any sans font: a wrapped line would make
+    //  this depend on the fonts installed), TeX fits k <= 3; k = 4 is overfull by 6.6 pt, 5 and 6 by 62 and 117 pt;
+    //  k = 3 and 1 to 5 more sentences: fits, fits, fits, 6.0 and 20.2 pt over. Here: X01's frame and k <= 3 fit, and
+    //  every frame TeX finds clearly over-full (k = 5, 6; k = 3 and 5 more) is reported, none squeezed to fit; the
+    //  frames within a few points of full in TeX either way (this preview is within about a line of TeX there))
+    const DISP = String.raw`\[b=\frac{\sqrt5-1}{2},\qquad a=\pm\sqrt{\frac{\sqrt5-1}{2}}.\]`, LINE = "The notebook checks that both original equations reduce to zero.";
+    const X01 = String.raw`\begin{frame}{1. Exact algebra: a circle meets a parabola}
+Intersect $a^2+b^2=1$ with $b=a^2$. A lexicographic Gr\"obner basis is
+\[\left[a^{2} - b, b^{2} + b - 1\right].\]
+Thus $b^2+b-1=0$. Only the positive root can equal $a^2$:
+` + DISP + String.raw`
+The notebook checks both original equations reduce to zero.
+The eliminated quartic is irreducible over $\mathbb Q$, but over $\mathbb F_5$:
+\[w^4+w^2-1=(w^2+3)^2.\]
+\end{frame}
+`;
+    // (a frame: a full line, then k times a display and a full line, then `more` full lines)
+    const fr = (k, more = 0) => [`\\begin{frame}{Displays ${k}${more ? ` and ${more} lines` : ""}}`, LINE, ...Array.from({ length: k }, () => DISP + "\n" + LINE), ...Array(more).fill(LINE), "\\end{frame}\n"].join("\n");
+    writeFileSync(join(dir, "clip.tex"), "\\documentclass[aspectratio=169]{beamer}\n\\begin{document}\n" + X01 + [1, 2, 3, 4, 5, 6].map((k) => fr(k)).join("") + [1, 2, 3, 4, 5].map((n) => fr(3, n)).join("") + "\\end{document}\n");
+    const cl = await new Promise((res) => { const q = spawn(process.execPath, [CLI, "latex", "render", "clip.tex", "--png", "clippng", "--json"], { cwd: dir, env: { ...process.env, CHROME: browser } }); let o = ""; q.stdout.on("data", (x) => (o += x)); q.on("close", (code) => { let json = null; try { json = JSON.parse(o); } catch {} res({ code, json }); }); });
+    const over = (cl.json?.png?.pages ?? []).map((p) => p.overflow_px ?? 0);
+    check("png: displays never squeezed to fit their frame (sim X01, BL01): X01's frame and k <= 3 nested-root displays fit, as in TeX Live; every frame TeX finds clearly over-full (k = 5, 6; k = 3 and 5 more lines) reported",
+      cl.code === 0 && over.length === 12 && over.slice(0, 4).every((x) => x === 0) && over[5] > 0 && over[6] > 0 && over[11] > 0, { code: cl.code, over });
+    // (grader Y4: a block is a frame's block too, and its box (.bblock) hides its overflow, as a display's does: never
+    //  shrunk to fit either. TeX Live, the same line, a block of n one-line paragraphs between two more: n <= 13 fits,
+    //  n = 20 is overfull by 91.5 pt. Here a block of 6 fits and one of 20 is reported (blocks run taller here than in
+    //  TeX: from n = 10, a spacing difference, not this))
+    const blk = (n) => `\\begin{frame}{Block ${n}}\n${LINE}\n\\begin{block}{A block}\n${Array(n).fill(LINE).join("\n\n")}\n\\end{block}\n${LINE}\n\\end{frame}\n`;
+    writeFileSync(join(dir, "clipb.tex"), "\\documentclass[aspectratio=169]{beamer}\n\\begin{document}\n" + blk(6) + blk(20) + "\\end{document}\n");
+    const cb = await new Promise((res) => { const q = spawn(process.execPath, [CLI, "latex", "render", "clipb.tex", "--png", "clipbpng", "--json"], { cwd: dir, env: { ...process.env, CHROME: browser } }); let o = ""; q.stdout.on("data", (x) => (o += x)); q.on("close", (code) => { let json = null; try { json = JSON.parse(o); } catch {} res({ code, json }); }); });
+    const overB = (cb.json?.png?.pages ?? []).map((p) => p.overflow_px ?? 0);
+    check("png: a block never squeezed to fit its frame (grader Y4): a block of 6 lines fits, as in TeX Live; a block of 20, overfull in TeX, reported",
+      cb.code === 0 && overB.length === 2 && overB[0] === 0 && overB[1] > 0, { code: cb.code, overB });
   }
 
   // ---- run: the SageTeX code, in order, in one session; its results beside the file, shown by check and render
