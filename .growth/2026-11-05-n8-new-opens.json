@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "Items 2 and 3 of sage's DEV n8 walkthrough (@sagebrush's order, Nov 5). The file browser (web/workspace/browser.ts): a new notebook or board is opened once its name is settled (Enter, or Esc keeping Untitled), as a click on its row opens it, where it was left unopened and typing went into the notebook already open; folders unchanged. New MATLAB notebook: in the file browser's New and a folder's menu, and in the one File menu's New (web/workspace/filemenu.ts newMatlab; web/index.html's \"newmatlab\"; web/board/mount.ts's, through host.files.newNotebook). Re-measured after the #729 epoch reset, on master b418745c with bun 1.4.4 and node 24.21.0: cli/pyjs.cjs +748 B; no other row moves.",
- "bytes": {
-  "cli/pyjs.cjs": 764
- }
-}

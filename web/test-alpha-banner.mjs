@@ -121,6 +121,7 @@ console.log(JSON.stringify({ tag: ALPHA_BANNER_TAG, siteHas: has(site), once: ha
 const atlas = read(join(here, "atlas", "render.ts"));
 ok(atlas.includes(TAG), "the atlas's pages (rendered by its Worker) load the notice");
 ok(read(join(here, "build-articles.ts")).includes(TAG), "the articles' pages load the notice");
+ok(read(join(here, "build-examples.ts")).includes(`const ALPHA_BANNER = '${TAG}';`), "the examples gallery's pages load the notice");
 const gen = read(join(root, "build", "cli", "web.gen.js"));
 if (gen) {
   const web = new Function(`const globalThis = {}; ${gen}; return globalThis.__SAGEBRUSH_WEB__;`)();
