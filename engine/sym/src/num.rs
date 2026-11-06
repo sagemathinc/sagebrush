@@ -335,9 +335,16 @@ impl Num {
         self.mul(&o.inv())
     }
     pub fn pow_int(&self, e: i64) -> Num {
+        // (by the exponent's magnitude: -e overflows at i64::MIN, the review's
+        // RDF(2)^(-2^63))
         if e < 0 {
-            return self.inv().pow_int(-e);
+            return self.inv().pow_uint(e.unsigned_abs());
         }
+        self.pow_uint(e as u64)
+    }
+
+    /// self^e by binary powering.
+    pub fn pow_uint(&self, e: u64) -> Num {
         match self {
             Num::Exact(a, b) if b.is_zero() => {
                 // r and base are powers of the reduced a, so a product has
@@ -345,7 +352,7 @@ impl Num {
                 // computing one past MAX_INT_BITS
                 let mut r = Q::one();
                 let mut base = a.clone();
-                let mut e = e as u64;
+                let mut e = e;
                 while e > 0 {
                     if e & 1 == 1 {
                         check_int_bits_at_least((q_bits(&r) + q_bits(&base)).saturating_sub(1));
@@ -372,7 +379,7 @@ impl Num {
                 if !exact {
                     r = Num::fl(1.0, 0.0, self.fk().unwrap_or(Fk::RR).to_real());
                 }
-                let mut e = e as u64;
+                let mut e = e;
                 while e > 0 {
                     if e & 1 == 1 {
                         r = r.mul(&base);
@@ -881,6 +888,23 @@ mod tests {
         assert_eq!(real_str(0.5), "0.500000000000000");
         assert_eq!(Num::Exact(q(1), q(1)).pow_int(2).sage_str(), "2*I");
         assert_eq!(Num::i().pow_int(3).sage_str(), "-I");
+    }
+
+    #[test]
+    fn pow_int_exponent_bounds() {
+        // (i64::MIN has no negation: by its magnitude, as Sage's RDF(2)^(-2^63) == 0.0)
+        let d = |v: f64| Num::fl(v, 0.0, Fk::RDF);
+        let re = |n: Num| n.to_c64().0;
+        assert_eq!(re(d(2.0).pow_int(i64::MIN)), 0.0);
+        assert_eq!(re(d(2.0).pow_int(i64::MIN + 1)), 0.0);
+        assert_eq!(re(d(0.5).pow_int(i64::MIN)), f64::INFINITY);
+        assert_eq!(re(d(-1.0).pow_int(i64::MIN)), 1.0);
+        assert_eq!(re(d(-1.0).pow_int(i64::MIN + 1)), -1.0);
+        assert_eq!(re(d(2.0).pow_int(-1)), 0.5);
+        assert_eq!(re(d(2.0).pow_int(0)), 1.0);
+        assert_eq!(re(d(2.0).pow_int(i64::MAX)), f64::INFINITY);
+        assert_eq!(Num::one().pow_int(i64::MIN).sage_str(), "1");
+        assert_eq!(Num::i().pow_int(i64::MIN).sage_str(), "1");
     }
 
     #[test]

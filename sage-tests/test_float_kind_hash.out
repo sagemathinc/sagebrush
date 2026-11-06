@@ -1,0 +1,41 @@
+RR/RDF | True True 1 1 True
+CC/CDF | True True 1 1 True
+RR/CC | True True 1 1 True
+RDF/CDF | True True 1 1 True
+direct | True True 1 1 True
+direct c | True True 1 1 True
+prod | True True 1 1 True
+sum | True True 1 1 True
+sum c | True True 1 1 True
+pow | True True 1 1 True
+nested | True True 1 1 True
+nested c | True True 1 1 True
+names | True True 1 1 True
+rel | True True 1 1 True
+RR/exact | True False 2 None False
+RDF(2)^MIN | 0.0
+RDF(0.5)^MIN | +infinity
+RDF(-1)^MIN | 1.0
+RDF(1)^MIN | 1.0
+RDF(2)^MIN+1 | 0.0
+RDF(0.5)^MIN+1 | +infinity
+RDF(-1)^MIN+1 | -1.0
+RDF(1)^MIN+1 | 1.0
+RDF(2)^-1 | 0.5
+RDF(0.5)^-1 | 2.0
+RDF(-1)^-1 | -1.0
+RDF(1)^-1 | 1.0
+RDF(2)^0 | 1
+RDF(0.5)^0 | 1
+RDF(-1)^0 | 1
+RDF(1)^0 | 1
+RDF(2)^MAX | +infinity
+RDF(0.5)^MAX | 0.0
+RDF(-1)^MAX | -1.0
+RDF(1)^MAX | 1.0
+RDF(2)^-2^64 | 0.0
+RDF(0.5)^-2^64 | +infinity
+RDF(-1)^-2^64 | 1.0
+RDF(1)^-2^64 | 1.0
+(x*RDF(2))^MIN | 0.0
+SR(1)^MIN | 1 | -1 | 1

@@ -73,6 +73,57 @@ def _double_s(v):
     return "h%s,%s;" % (_bits(z.real), _bits(z.imag))
 
 
+def _hash_form(s):
+    """The serialization s with each float as its value only, for hashing: the
+    parent (f RR, d RDF, g CC, h CDF) is not part of the value, so sin(x + RR(1.5))
+    and sin(x + RDF(1.5)), which are equal, hash alike, as in Sage.  -0.0 is 0.0,
+    and a complex float with imaginary part 0 is the real one (x + RR(1.5) ==
+    x + CC(1.5)).  Names (s, F, D) are skipped by their length."""
+    out, i, n, expect = [], 0, len(s), True
+
+    def bits(t):
+        return "0" if t == "8000000000000000" else t
+
+    while i < n:
+        c = s[i]
+        if not expect:
+            out.append(c)
+            expect = c == "{"
+            i += 1
+            continue
+        expect = False
+        if c in "fdgh":
+            j = s.index(";", i)
+            parts = s[i + 1:j].split(",")
+            if len(parts) == 2 and bits(parts[1]) != "0":
+                out.append("g%s,%s;" % (bits(parts[0]), parts[1]))
+            else:
+                out.append("f%s;" % bits(parts[0]))
+            i = j + 1
+        elif c == "n":
+            j = s.index(";", i) + 1
+            out.append(s[i:j])
+            i = j
+        elif c == "z":
+            j = s.index(";", s.index(";", i) + 1) + 1
+            out.append(s[i:j])
+            i = j
+        elif c in "sFD":
+            k = s.index(":", i)
+            j = k + 1 + int(s[i + 1:k])
+            out.append(s[i:j])
+            i = j
+        elif c in "cR":
+            out.append(s[i:i + 2])
+            i += 2
+            expect = False
+        else:
+            # A or M and their count, or P: what follows is copied up to '{'
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
 # The largest integer an expression may hold (the engine's MAX_INT_BITS):
 # expressions cross into the engine as decimal text, so a larger one is
 # refused before it is formatted, as CPython refuses int-to-str past its
@@ -317,7 +368,7 @@ class Expression:
                 from _sage_poly import poly_hash
                 h = poly_hash(terms)
         if h is None:
-            h = hash(s)
+            h = hash(_hash_form(s))
         self._h = h
         return h
 
