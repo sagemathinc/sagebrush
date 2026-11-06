@@ -270,6 +270,27 @@ ${"many words ".repeat(14000)}
     const mb = /\/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)\s*\]/.exec(pdfBytes.toString("latin1"));
     check("pdf: one page per frame, 16:9", pd.code === 0 && pdfBytes.subarray(0, 5).toString() === "%PDF-" && pd.json?.pdf?.pages === 5 && mb && Math.abs(+mb[1] / +mb[2] - 16 / 9) < 0.01, { code: pd.code, pdf_error: pd.json?.pdf_error, pdf: pd.json?.pdf, mb: mb && mb.slice(1) });
     check("png-overflow-reported", pages[3]?.overflow_px > 0 && pages.filter((x) => x.overflow_px).length === 1 && pages[1].title === "Overlays", pages);
+    // (sim run 11 X01, run 12 BL01: displays squeezed and clipped while their frame read as fitting. Against TeX Live
+    //  2025, beamer at aspectratio=169: X01's frame fits; with k copies of its nested-root display, each after a full
+    //  line, TeX fits k <= 3 and is overfull from k = 4 (by 38, 98, 158 pt). Here: X01's frame and k <= 2 fit, and
+    //  every over-full frame, k >= 4, is reported, none squeezed to fit (k = 3, 22 pt short of full in TeX, either way))
+    const DISP = String.raw`\[b=\frac{\sqrt5-1}{2},\qquad a=\pm\sqrt{\frac{\sqrt5-1}{2}}.\]`, LINE = "The notebook checks that both of the original equations reduce to zero, as they should here.";
+    const X01 = String.raw`\begin{frame}{1. Exact algebra: a circle meets a parabola}
+Intersect $a^2+b^2=1$ with $b=a^2$. A lexicographic Gr\"obner basis is
+\[\left[a^{2} - b, b^{2} + b - 1\right].\]
+Thus $b^2+b-1=0$. Only the positive root can equal $a^2$:
+` + DISP + String.raw`
+The notebook checks both original equations reduce to zero.
+The eliminated quartic is irreducible over $\mathbb Q$, but over $\mathbb F_5$:
+\[w^4+w^2-1=(w^2+3)^2.\]
+\end{frame}
+`;
+    const ks = [1, 2, 3, 4, 5, 6];
+    writeFileSync(join(dir, "clip.tex"), "\\documentclass[aspectratio=169]{beamer}\n\\begin{document}\n" + X01 + ks.map((k) => `\\begin{frame}{Displays ${k}}\n${LINE}\n${Array.from({ length: k }, () => DISP + "\n" + LINE).join("\n")}\n\\end{frame}\n`).join("") + "\\end{document}\n");
+    const cl = await new Promise((res) => { const q = spawn(process.execPath, [CLI, "latex", "render", "clip.tex", "--png", "clippng", "--json"], { cwd: dir, env: { ...process.env, CHROME: browser } }); let o = ""; q.stdout.on("data", (x) => (o += x)); q.on("close", (code) => { let json = null; try { json = JSON.parse(o); } catch {} res({ code, json }); }); });
+    const over = (cl.json?.png?.pages ?? []).map((p) => p.overflow_px ?? 0);
+    check("png: displays never squeezed to fit their frame (sim X01, BL01): X01's frame and k <= 2 nested-root displays fit, as in TeX Live; every frame TeX finds over-full (k >= 4) reported",
+      cl.code === 0 && over.length === 7 && over[0] === 0 && over[1] === 0 && over[2] === 0 && over.slice(4).every((x) => x > 0), { code: cl.code, over });
   }
 
   // ---- run: the SageTeX code, in order, in one session; its results beside the file, shown by check and render
