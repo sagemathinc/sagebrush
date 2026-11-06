@@ -139,6 +139,29 @@ pub unsafe extern "C" fn dgeqr(c: *mut f64, m: usize, n: usize, v: *mut f64, bet
     }
 }
 
+/// Q^T B from dgeqr's reflectors, without forming Q: v (k columns of length
+/// m) and beta (k scalars) as dgeqr leaves them; B (m x nb, by columns) is
+/// overwritten by H_{k-1} ... H_1 H_0 B, the reflectors applied in
+/// increasing order.  As qrQtb() in the TS.
+#[no_mangle]
+pub unsafe extern "C" fn dqtb(v: *const f64, beta: *const f64, m: usize, k: usize, b: *mut f64, nb: usize) {
+    for j in 0..k {
+        let (vj, bj) = (v.add(j * m), *beta.add(j));
+        if bj == 0.0 {
+            continue;
+        }
+        for col in 0..nb {
+            let bb = b.add(col * m);
+            let mut sum = dot4(vj.add(j), bb.add(j), m - j);
+            if sum == 0.0 {
+                continue;
+            }
+            sum *= bj;
+            axpy_neg(bb.add(j), vj.add(j), sum, m - j);
+        }
+    }
+}
+
 // ------------------------------------------------------------------ symmetric eigenproblem
 
 /// tred2 + tql2.  w (n x n): on entry the transpose of the symmetric

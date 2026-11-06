@@ -417,13 +417,20 @@ pub fn add(terms: Vec<Expr>) -> Expr {
             _ => flat.push(t),
         }
     }
-    let mut numsum = Num::zero();
+    // the numbers as Sage adds them, left to right: a zero (exact or float) leaves the other
+    // number as it is (SR(0) + RR(0) is 0, RR(0) + SR(0) is 0.000000000000000, RR(0)*x + 1 is 1)
+    let mut numsum: Option<Num> = None;
     let mut infinities: Vec<Const> = vec![];
     let mut order: Vec<Expr> = vec![];
     let mut coeffs: HashMap<Expr, Num> = HashMap::new();
     for t in flat {
         if let Kind::Num(n) = &t.kind {
-            numsum = numsum.add(n);
+            numsum = Some(match numsum {
+                None => n.clone(),
+                Some(s) if n.is_zero() => s,
+                Some(s) if s.is_zero() => n.clone(),
+                Some(s) => s.add(n),
+            });
             continue;
         }
         if let Kind::Const(c @ (Const::Infinity | Const::MinusInfinity | Const::UnsignedInfinity | Const::Undefined)) = t.kind {
@@ -450,16 +457,14 @@ pub fn add(terms: Vec<Expr>) -> Expr {
     let mut out: Vec<Expr> = vec![];
     for r in order {
         let c = coeffs.remove(&r).unwrap();
-        if c.is_zero() && c.is_exact() {
-            continue;
-        }
+        // a term whose coefficient became zero, exact or float, drops out (Sage: RR(2)*x - RR(2)*x
+        // is 0)
         if c.is_zero() {
-            // 0.0*x: Sage keeps a float zero only as a number
-            numsum = numsum.add(&Num::float(0.0));
             continue;
         }
         out.push(scale_term(&c, &r));
     }
+    let numsum = numsum.unwrap_or_else(Num::zero);
     let keep_num = !numsum.is_zero() || (!numsum.is_exact() && out.is_empty());
     if out.is_empty() {
         return num(numsum);
@@ -571,8 +576,10 @@ pub fn mul(factors: Vec<Expr>) -> Expr {
             (c, _) => constant(c),
         };
     }
-    if coeff.is_zero() && coeff.is_exact() {
-        return zero();
+    // a zero coefficient is the product: exact 0, or the float zero itself (Sage: RR(0)*x is
+    // 0.000000000000000, -RR(0)*x is -0.000000000000000)
+    if coeff.is_zero() {
+        return if coeff.is_exact() { zero() } else { num(coeff) };
     }
     let mut out: Vec<Expr> = vec![];
     for b in order {
@@ -597,8 +604,8 @@ pub fn mul(factors: Vec<Expr>) -> Expr {
             _ => out.push(p),
         }
     }
-    if coeff.is_zero() && coeff.is_exact() {
-        return zero();
+    if coeff.is_zero() {
+        return if coeff.is_exact() { zero() } else { num(coeff) };
     }
     // merge factors that became equal bases again (sqrt(2)*sqrt(2) from 8^(1/2)*sqrt(2))
     if out.len() > 1 {
@@ -1061,5 +1068,45 @@ pub fn int_exponent(x: &Expr) -> Option<i64> {
 pub fn value_check(cond: bool, msg: &str) {
     if !cond {
         value_error(msg.to_string());
+    }
+}
+
+#[cfg(test)]
+mod float_zero_tests {
+    use super::*;
+
+    fn f(v: f64) -> Expr {
+        num(Num::float(v))
+    }
+    fn bits(e: &Expr) -> Option<u64> {
+        match &e.kind {
+            Kind::Num(Num::Float(a, b)) if *b == 0.0 => Some(a.to_bits()),
+            _ => None,
+        }
+    }
+
+    /// float zeros as Sage 10.9 has them (sage-tests/test_float_zero): a zero coefficient is the
+    /// product, a term whose coefficient became zero drops out, and numbers add left to right with
+    /// a zero leaving the other as it is
+    #[test]
+    fn float_zeros_as_sage() {
+        let (x, y) = (sym("x"), sym("y"));
+        // RR(0)*x is 0.0, x*RR(0) too, -RR(0)*x is -0.0
+        assert_eq!(bits(&mul2(&f(0.0), &x)), Some(0.0f64.to_bits()));
+        assert_eq!(bits(&mul2(&x, &f(0.0))), Some(0.0f64.to_bits()));
+        assert_eq!(bits(&neg(&mul2(&f(0.0), &x))), Some((-0.0f64).to_bits()));
+        assert_eq!(bits(&mul(vec![f(-0.0), x.clone(), f(-1.0)])), Some(0.0f64.to_bits()));
+        // RR(2)*x - RR(2)*x is the exact 0; RR(0)*x + 1 is the exact 1
+        assert!(sub(&mul2(&f(2.0), &x), &mul2(&f(2.0), &x)).is_zero() && sub(&mul2(&f(2.0), &x), &mul2(&f(2.0), &x)).as_num().map_or(false, |n| n.is_exact()));
+        assert_eq!(add2(&mul2(&f(0.0), &x), &int(1)), int(1));
+        // SR(0) + RR(0) is 0, RR(0) + SR(0) is 0.0, SR(RR(-0.0)) + 0 is -0.0
+        assert_eq!(add2(&int(0), &f(0.0)), int(0));
+        assert_eq!(bits(&add2(&f(0.0), &int(0))), Some(0.0f64.to_bits()));
+        assert_eq!(bits(&add2(&f(-0.0), &int(0))), Some((-0.0f64).to_bits()));
+        // x + RR(1.5) - RR(1.5) is x; RR(0)*x + y is y
+        assert_eq!(sub(&add2(&x, &f(1.5)), &f(1.5)), x);
+        assert_eq!(add2(&mul2(&f(0.0), &x), &y), y);
+        // an exact zero still absorbs (SR(RR(1.5))*0 is 0)
+        assert_eq!(mul2(&f(1.5), &int(0)), int(0));
     }
 }
