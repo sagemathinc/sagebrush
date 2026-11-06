@@ -6699,6 +6699,22 @@
   "owner": "sage2",
   "reason": "Integer(s, base): a base beyond a C long is Sage's OverflowError (parser protection, as Sage refuses it; not a user work limit)"
  },
+ "lib/sage_all.py :: _rational_from_str :: raise OverflowError(\"Python int too large to convert to C unsigned long\") #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sage2",
+  "reason": "Rational(s, base): a base beyond a C unsigned int is Sage's OverflowError (parser protection, as Sage refuses it; not a user work limit)"
+ },
+ "lib/sage_all.py :: _rational_from_str :: raise OverflowError(\"value too large to convert to unsigned int\") #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sage2",
+  "reason": "Rational(s, base): a base beyond a C unsigned int is Sage's OverflowError (parser protection, as Sage refuses it; not a user work limit)"
+ },
  "lib/sage_all.py :: _simplest_rational :: if p > _SIMPLEST_MAX_PREC: #0": {
   "class": "3",
   "owner": "real/rational arithmetic",
