@@ -163,8 +163,12 @@ pub fn eval(f: Fun, args: Vec<Expr>) -> Expr {
     let numeric = args.iter().all(|a| a.is_num());
     if numeric && args.iter().any(|a| a.is_float()) && !matches!(f, Fun::Gamma | Fun::Erf) {
         let v: Vec<(f64, f64)> = args.iter().map(|a| a.as_num().unwrap().to_c64()).collect();
+        // the arguments' parent (Sage: sin(SR(RDF(0.5))) is over RDF)
+        let k = args.iter().filter_map(|a| a.as_num().and_then(|n| n.fk())).reduce(|a, b| a.meet(b)).unwrap_or(crate::num::Fk::RR);
+        // (a real-valued function is over the real parent: abs(SR(CDF(3, 4))) is RDF's 5.0)
+        let k = if matches!(f, Fun::Abs | Fun::RealPart | Fun::ImagPart | Fun::Arg) { k.to_real() } else { k };
         if let Some((re, im)) = float_eval(&f, &v) {
-            return num(if im == 0.0 { Num::float(re) } else { Num::Float(re, im) });
+            return num(Num::fl(re, im, k));
         }
     }
     if let Some(v) = exact(&f, &args) {
@@ -415,7 +419,8 @@ fn exact(f: &Fun, a: &[Expr]) -> Option<Expr> {
                 return Some(match n {
                     Num::Exact(a, b) if b.is_zero() => qnum(a.abs()),
                     Num::Exact(a, b) => sqrt(&qnum(a * a + b * b)),
-                    Num::Float(a, b) => float((a * a + b * b).sqrt()),
+                    // (over the real parent: abs(SR(CDF(3, 4))) is RDF's 5.0)
+                    Num::Float(a, b, k) => num(Num::Float((a * a + b * b).sqrt(), 0.0, k.to_real())),
                 });
             }
             if let Kind::Fun(Fun::Abs, _) = &x.kind {
@@ -570,21 +575,21 @@ fn exact(f: &Fun, a: &[Expr]) -> Option<Expr> {
             let n = x.as_num()?;
             Some(num(match n {
                 Num::Exact(a, b) => Num::Exact(a.clone(), -b.clone()),
-                Num::Float(a, b) => Num::Float(*a, -b),
+                Num::Float(a, b, k) => Num::Float(*a, -b, *k),
             }))
         }
         Fun::RealPart => {
             let n = x.as_num()?;
             Some(num(match n {
                 Num::Exact(a, _) => Num::rat(a.clone()),
-                Num::Float(a, _) => Num::float(*a),
+                Num::Float(a, _, k) => Num::Float(*a, 0.0, k.to_real()),
             }))
         }
         Fun::ImagPart => {
             let n = x.as_num()?;
             Some(num(match n {
                 Num::Exact(_, b) => Num::rat(b.clone()),
-                Num::Float(_, b) => Num::float(*b),
+                Num::Float(_, b, k) => Num::Float(*b, 0.0, k.to_real()),
             }))
         }
         Fun::Arg => {

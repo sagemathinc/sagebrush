@@ -61,8 +61,53 @@ fn q_bits(x: &Q) -> u64 {
 pub enum Num {
     /// re + im*I, exact
     Exact(Q, Q),
-    /// re + im*I, 53-bit floats
-    Float(f64, f64),
+    /// re + im*I, 53-bit floats, of a parent (Fk; a real one has im 0)
+    Float(f64, f64, Fk),
+}
+
+/// The parent a symbolic float keeps, as Sage keeps it (1d-i): RR or CC (printed with 15 digits,
+/// 1.50000000000000) or RDF or CDF (printed shortest, 1.5). CC and CDF are complex even when
+/// the imaginary part is 0; a real kind always holds an imaginary part 0.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Fk {
+    RR,
+    CC,
+    RDF,
+    CDF,
+}
+
+impl Fk {
+    /// RDF or CDF: printed as Python prints a double
+    pub fn double(self) -> bool {
+        matches!(self, Fk::RDF | Fk::CDF)
+    }
+    pub fn complex(self) -> bool {
+        matches!(self, Fk::CC | Fk::CDF)
+    }
+    pub fn to_complex(self) -> Fk {
+        if self.double() {
+            Fk::CDF
+        } else {
+            Fk::CC
+        }
+    }
+    pub fn to_real(self) -> Fk {
+        if self.double() {
+            Fk::RDF
+        } else {
+            Fk::RR
+        }
+    }
+    /// The parent of a result of two floats, as Sage meets them on symbolic numbers: in one
+    /// domain the first one's (RDF + RR is RDF, RR + RDF is RR), across domains the complex one's
+    /// (RR + CDF is CDF, CC + RDF is CC)
+    pub fn meet(self, o: Fk) -> Fk {
+        if self.complex() == o.complex() || self.complex() {
+            self
+        } else {
+            o
+        }
+    }
 }
 
 pub fn q(n: i64) -> Q {
@@ -99,7 +144,38 @@ impl Num {
         Num::Exact(x, Q::zero())
     }
     pub fn float(x: f64) -> Num {
-        Num::Float(x, 0.0)
+        Num::Float(x, 0.0, Fk::RR)
+    }
+    /// re + im*I of parent k, a real kind made complex by a nonzero imaginary part (Sage:
+    /// RR(1.5)*I is over CC)
+    pub fn fl(re: f64, im: f64, k: Fk) -> Num {
+        Num::Float(re, im, if im != 0.0 && !k.complex() { k.to_complex() } else { k })
+    }
+    /// The parent of a float (None for an exact number)
+    pub fn fk(&self) -> Option<Fk> {
+        match self {
+            Num::Float(_, _, k) => Some(*k),
+            Num::Exact(..) => None,
+        }
+    }
+    /// The parent of a result of self and o: a float's, or the meet of two
+    pub fn fk_with(&self, o: &Num) -> Fk {
+        match (self.fk(), o.fk()) {
+            (Some(a), Some(b)) => a.meet(b),
+            (Some(a), None) | (None, Some(a)) => a,
+            (None, None) => Fk::RR,
+        }
+    }
+    /// self as a float of parent k's family when it is exact (an exact number meeting a float
+    /// takes its parent), self when it is a float
+    pub fn with_fk(&self, k: Fk) -> Num {
+        match self {
+            Num::Exact(..) => {
+                let (a, b) = self.to_c64();
+                Num::fl(a, b, if b != 0.0 { k.to_complex() } else { k })
+            }
+            _ => self.clone(),
+        }
     }
     pub fn i() -> Num {
         Num::Exact(Q::zero(), Q::one())
@@ -117,7 +193,7 @@ impl Num {
     pub fn is_zero(&self) -> bool {
         match self {
             Num::Exact(a, b) => a.is_zero() && b.is_zero(),
-            Num::Float(a, b) => *a == 0.0 && *b == 0.0,
+            Num::Float(a, b, _) => *a == 0.0 && *b == 0.0,
         }
     }
     pub fn is_one(&self) -> bool {
@@ -129,7 +205,7 @@ impl Num {
     pub fn is_real(&self) -> bool {
         match self {
             Num::Exact(_, b) => b.is_zero(),
-            Num::Float(_, b) => *b == 0.0,
+            Num::Float(_, b, _) => *b == 0.0,
         }
     }
     /// An exact rational (real).
@@ -152,13 +228,13 @@ impl Num {
     pub fn is_negative(&self) -> bool {
         match self {
             Num::Exact(a, b) => b.is_zero() && a.is_negative(),
-            Num::Float(a, b) => *b == 0.0 && *a < 0.0,
+            Num::Float(a, b, _) => *b == 0.0 && *a < 0.0,
         }
     }
     pub fn is_positive(&self) -> bool {
         match self {
             Num::Exact(a, b) => b.is_zero() && a.is_positive(),
-            Num::Float(a, b) => *b == 0.0 && *a > 0.0,
+            Num::Float(a, b, _) => *b == 0.0 && *a > 0.0,
         }
     }
     /// For printing a term with " - ": the real part (or, if 0, the
@@ -167,25 +243,30 @@ impl Num {
         match self {
             // as printed, the imaginary part first (-2*I + 1): Sage's sign
             Num::Exact(a, b) => b.is_negative() || (b.is_zero() && a.is_negative()),
-            Num::Float(a, b) => *a < 0.0 || (*a == 0.0 && *b < 0.0),
+            Num::Float(a, b, _) => *a < 0.0 || (*a == 0.0 && *b < 0.0),
         }
     }
 
     pub fn to_c64(&self) -> (f64, f64) {
         match self {
             Num::Exact(a, b) => (q_to_f64(a), q_to_f64(b)),
-            Num::Float(a, b) => (*a, *b),
+            Num::Float(a, b, _) => (*a, *b),
         }
     }
     pub fn to_float(&self) -> Num {
-        let (a, b) = self.to_c64();
-        Num::Float(a, b)
+        match self {
+            Num::Float(..) => self.clone(),
+            _ => {
+                let (a, b) = self.to_c64();
+                Num::fl(a, b, Fk::RR)
+            }
+        }
     }
 
     pub fn neg(&self) -> Num {
         match self {
             Num::Exact(a, b) => Num::Exact(-a.clone(), -b.clone()),
-            Num::Float(a, b) => Num::Float(-a, -b),
+            Num::Float(a, b, k) => Num::Float(-a, -b, *k),
         }
     }
     pub fn add(&self, o: &Num) -> Num {
@@ -193,7 +274,7 @@ impl Num {
             (Num::Exact(a, b), Num::Exact(c, d)) => Num::Exact(a + c, b + d),
             _ => {
                 let ((a, b), (c, d)) = (self.to_c64(), o.to_c64());
-                Num::Float(a + c, b + d)
+                Num::fl(a + c, b + d, self.fk_with(o))
             }
         }
     }
@@ -214,17 +295,18 @@ impl Num {
             (Num::Exact(a, b), _) | (_, Num::Exact(a, b)) if a.is_zero() && b.is_zero() => Num::Exact(Q::zero(), Q::zero()),
             _ => {
                 let ((a, b), (c, d)) = (self.to_c64(), o.to_c64());
+                let k = self.fk_with(o);
                 // a real factor multiplies each part on its own: the complex formula's products
                 // with its zero imaginary part are NaN for an infinite or NaN number (inf*0), and
                 // RR('inf')*x became (NaN - NaN*I)*x (Sage: (+infinity)*x)
                 if b == 0.0 && d == 0.0 {
-                    Num::Float(a * c, 0.0)
+                    Num::fl(a * c, 0.0, k)
                 } else if b == 0.0 {
-                    Num::Float(a * c, a * d)
+                    Num::fl(a * c, a * d, k)
                 } else if d == 0.0 {
-                    Num::Float(a * c, b * c)
+                    Num::fl(a * c, b * c, k)
                 } else {
-                    Num::Float(a * c - b * d, a * d + b * c)
+                    Num::fl(a * c - b * d, a * d + b * c, k)
                 }
             }
         }
@@ -242,10 +324,10 @@ impl Num {
                 Num::Exact(a / &n, -b / &n)
             }
             // a real one as a real (1/inf is 0, not inf/inf = NaN)
-            Num::Float(a, b) if *b == 0.0 => Num::Float(1.0 / a, 0.0),
-            Num::Float(a, b) => {
+            Num::Float(a, b, k) if *b == 0.0 => Num::Float(1.0 / a, 0.0, *k),
+            Num::Float(a, b, k) => {
                 let n = a * a + b * b;
-                Num::Float(a / n, -b / n)
+                Num::Float(a / n, -b / n, *k)
             }
         }
     }
@@ -288,7 +370,7 @@ impl Num {
                 let mut r = Num::one();
                 let mut base = self.clone();
                 if !exact {
-                    r = Num::float(1.0);
+                    r = Num::fl(1.0, 0.0, self.fk().unwrap_or(Fk::RR).to_real());
                 }
                 let mut e = e as u64;
                 while e > 0 {
@@ -329,7 +411,8 @@ impl PartialEq for Num {
     fn eq(&self, o: &Num) -> bool {
         match (self, o) {
             (Num::Exact(a, b), Num::Exact(c, d)) => a == c && b == d,
-            (Num::Float(a, b), Num::Float(c, d)) => a.to_bits() == c.to_bits() && b.to_bits() == d.to_bits(),
+            // (the parent is not part of the value: Sage merges (x + RDF(1))*(x + RR(1)) into a square)
+            (Num::Float(a, b, _), Num::Float(c, d, _)) => a.to_bits() == c.to_bits() && b.to_bits() == d.to_bits(),
             _ => false,
         }
     }
@@ -346,7 +429,7 @@ impl Hash for Num {
                 b.numer().to_string().hash(h);
                 b.denom().to_string().hash(h);
             }
-            Num::Float(a, b) => {
+            Num::Float(a, b, _) => {
                 1u8.hash(h);
                 a.to_bits().hash(h);
                 b.to_bits().hash(h);
@@ -383,6 +466,48 @@ pub fn real_str(x: f64) -> String {
     format!("{}{}.{}e{}", sign, &digits[..1], &digits[1..], e)
 }
 
+/// A double as Sage prints elements of RDF: as Python's repr, the shortest digits that read back
+/// (1.5, 0.3333333333333333, 1000000000000000.0, 1e+16, 1e-05), and RR's NaN and infinities.
+pub fn double_str(x: f64) -> String {
+    if x.is_nan() {
+        return "NaN".into();
+    }
+    if x.is_infinite() {
+        return if x > 0.0 { "+infinity".into() } else { "-infinity".into() };
+    }
+    if x == 0.0 {
+        return if x.is_sign_negative() { "-0.0".into() } else { "0.0".into() };
+    }
+    let sign = if x < 0.0 { "-" } else { "" };
+    // Rust's {:e} gives the shortest round-trip digits, as Python's repr
+    let s = format!("{:e}", x.abs());
+    let (mant, e) = s.split_once('e').unwrap();
+    let digits: String = mant.chars().filter(|c| *c != '.').collect();
+    let e: i32 = e.parse().unwrap();
+    let n = digits.len() as i32;
+    if (-4..16).contains(&e) {
+        if e < 0 {
+            return format!("{}0.{}{}", sign, "0".repeat((-e - 1) as usize), digits);
+        }
+        if n <= e + 1 {
+            return format!("{}{}{}.0", sign, digits, "0".repeat((e + 1 - n) as usize));
+        }
+        let k = (e + 1) as usize;
+        return format!("{}{}.{}", sign, &digits[..k], &digits[k..]);
+    }
+    let m = if n == 1 { digits.clone() } else { format!("{}.{}", &digits[..1], &digits[1..]) };
+    format!("{}{}e{}{:02}", sign, m, if e < 0 { "-" } else { "+" }, e.abs())
+}
+
+/// a float's latex as Sage writes it: 1.5, 1 \times 10^{20} (RDF), 1.00000000000000 \times
+/// 10^{20} (RR)
+fn sci_latex(s: String) -> String {
+    match s.split_once('e') {
+        Some((m, e)) => format!("{} \\times 10^{{{}}}", m, e.trim_start_matches('+').trim_start_matches('0').replace("-0", "-")),
+        None => s,
+    }
+}
+
 fn rat_str(x: &Q) -> String {
     if x.is_integer() {
         x.numer().to_string()
@@ -416,18 +541,19 @@ impl Num {
                     format!("{} + {}", im, rat_str(a))
                 }
             }
-            Num::Float(a, b) => {
+            Num::Float(a, b, k) => {
+                let f = if k.double() { double_str } else { real_str };
                 if *b == 0.0 {
-                    return real_str(*a);
+                    return f(*a);
                 }
-                let im = format!("{}*I", real_str(*b));
+                let im = format!("{}*I", f(*b));
                 if *a == 0.0 {
                     return im;
                 }
                 if b.is_sign_negative() {
-                    format!("{} - {}*I", real_str(*a), real_str(-b))
+                    format!("{} - {}*I", f(*a), f(-b))
                 } else {
-                    format!("{} + {}", real_str(*a), im)
+                    format!("{} + {}", f(*a), im)
                 }
             }
         }
@@ -461,7 +587,21 @@ impl Num {
                 }
             }
             // (2.00000000000000 - 3.00000000000000i, as Sage)
-            Num::Float(..) => self.sage_str().replace("*I", "i"),
+            // (as Sage: 1 \times 10^{20}, 1.0 + 2.0i, 2.00000000000000 - 3.00000000000000i)
+            Num::Float(a, b, k) => {
+                let f = |x: f64| sci_latex(if k.double() { double_str(x) } else { real_str(x) });
+                if *b == 0.0 {
+                    return f(*a);
+                }
+                let im = format!("{}i", f(*b));
+                if *a == 0.0 {
+                    im
+                } else if b.is_sign_negative() {
+                    format!("{} - {}i", f(*a), f(-b))
+                } else {
+                    format!("{} + {}", f(*a), im)
+                }
+            }
         }
     }
 }
@@ -665,13 +805,47 @@ pub fn gcd(a: &BigInt, b: &BigInt) -> BigInt {
 mod tests {
     use super::*;
 
+    /// 1d-i: a float keeps its parent; RDF and CDF print as Python's repr, and two parents meet
+    /// as Sage meets them (sym1d/kinds.oracle, Sage 10.9)
+    #[test]
+    fn float_parents_as_sage() {
+        for (x, s) in [(1.5, "1.5"), (3.0, "3.0"), (-2.0, "-2.0"), (1e20, "1e+20"), (1e16, "1e+16"), (1e15, "1000000000000000.0"), (1e-20, "1e-20"),
+                       (0.0001, "0.0001"), (0.00001, "1e-05"), (1.0 / 3.0, "0.3333333333333333"), (123456789.123, "123456789.123"), (0.1, "0.1"), (0.0, "0.0"), (-0.0, "-0.0")] {
+            assert_eq!(double_str(x), s, "{}", x);
+        }
+        let (rdf, rr) = (Num::Float(1.5, 0.0, Fk::RDF), Num::Float(2.5, 0.0, Fk::RR));
+        let (cdf, cc) = (Num::Float(1.0, 2.0, Fk::CDF), Num::Float(1.0, 1.0, Fk::CC));
+        // in one domain the first's parent, across domains the complex one's
+        assert_eq!(rdf.add(&rr).fk(), Some(Fk::RDF));
+        assert_eq!(rr.add(&rdf).fk(), Some(Fk::RR));
+        assert_eq!(rr.mul(&cdf).fk(), Some(Fk::CDF));
+        assert_eq!(rdf.add(&cc).fk(), Some(Fk::CC));
+        assert_eq!(cdf.add(&cc).fk(), Some(Fk::CDF));
+        assert_eq!(cc.add(&cdf).fk(), Some(Fk::CC));
+        assert_eq!(Num::int(2).add(&rdf).fk(), Some(Fk::RDF));
+        // a real parent made complex by an imaginary part (RR(1.5)*I is over CC)
+        assert_eq!(rr.mul(&Num::i()).fk(), Some(Fk::CC));
+        assert_eq!(Num::Float(1.5, 0.0, Fk::RDF).mul(&Num::i()).fk(), Some(Fk::CDF));
+        // printing: RDF 4.0, CDF 2.5 + 2.0*I, CC 2.50000000000000 + 1.00000000000000*I
+        assert_eq!(rdf.add(&rr).sage_str(), "4.0");
+        assert_eq!(rdf.add(&cdf).sage_str(), "2.5 + 2.0*I");
+        assert_eq!(rdf.add(&cc).sage_str(), "2.50000000000000 + 1.00000000000000*I");
+        assert_eq!(Num::Float(0.0, 2.0, Fk::CDF).sage_str(), "2.0*I");
+        assert_eq!(Num::Float(1.0, -2.0, Fk::CDF).latex(), "1.0 - 2.0i");
+        assert_eq!(Num::Float(1e20, 0.0, Fk::RDF).latex(), "1 \\times 10^{20}");
+        assert_eq!(Num::Float(1e-20, 0.0, Fk::RDF).latex(), "1 \\times 10^{-20}");
+        assert_eq!(Num::Float(1e20, 0.0, Fk::RR).latex(), "1.00000000000000 \\times 10^{20}");
+        // the parent is not part of the value (Sage merges (x + RDF(1))*(x + RR(1)))
+        assert_eq!(Num::Float(1.0, 0.0, Fk::RDF), Num::Float(1.0, 0.0, Fk::RR));
+    }
+
     /// rrnan: a real float stays real through * and inverse (no inf*0 = NaN imaginary part), and an
     /// exact zero absorbs any float (Sage: RR('inf')*x is (+infinity)*x, SR(RR('nan'))*0 is 0)
     #[test]
     fn real_specials_stay_real() {
         let (inf, nan) = (Num::float(f64::INFINITY), Num::float(f64::NAN));
         let real = |n: Num| match n {
-            Num::Float(_, b) => b == 0.0,
+            Num::Float(_, b, _) => b == 0.0,
             Num::Exact(_, b) => b.is_zero(),
         };
         for (n, v) in [(inf.mul(&Num::one()), f64::INFINITY), (inf.mul(&Num::float(-2.0)), f64::NEG_INFINITY), (inf.inv(), 0.0)] {
@@ -681,7 +855,7 @@ mod tests {
         let p = nan.mul(&Num::float(2.0));
         assert!(real(p.clone()) && p.to_c64().0.is_nan());
         // a real times a complex: each part on its own (inf*(1 + 2*I) is inf + inf*I)
-        assert_eq!(inf.mul(&Num::Float(1.0, 2.0)).to_c64(), (f64::INFINITY, f64::INFINITY));
+        assert_eq!(inf.mul(&Num::Float(1.0, 2.0, Fk::CC)).to_c64(), (f64::INFINITY, f64::INFINITY));
         for x in [&inf, &nan, &Num::float(1.5)] {
             assert_eq!(Num::zero().mul(x), Num::zero());
             assert_eq!(x.mul(&Num::zero()), Num::zero());
