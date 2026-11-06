@@ -9251,6 +9251,11 @@
   "class": "3",
   "owner": "python (@sagebrush-python)"
  },
+ "src/runtime/format.ts :: formatInt :: if (!Number.isFinite(x)) raise(T.OverflowError, \"int too large to convert to float\"); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython's own semantics, not a Sagebrush cap: an int under a float presentation type is converted as float(v) (format_long_internal -> PyLong_AsDouble), and past the largest double CPython raises this same OverflowError; no size, memory or work bound (astra2's int-format finding)"
+ },
  "src/runtime/format.ts :: grown :: raise(T.MemoryError, `displaying this value takes more than Sagebrush's limit of ${REPR_GROWTH.steps} steps or ${REPR_GROWTH.chars} characters (a __repr__ may be changing it as it is shown)`); #0": {
   "class": "1",
   "owner": "pyjs display/runtime",
