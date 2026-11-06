@@ -680,7 +680,10 @@ async def run_loopback(port=0, dev_origin=None, out=None, err=None, cwd=None):
 
 
 def main(argv):
-    """`sagebrush remote --loopback [--port N]`."""
+    """`sagebrush remote --loopback [--port N]`, or `sagebrush remote login ...`."""
+    if argv[:1] == ["login"]:
+        from sagebrush.remote.enroll import main as login_main
+        return login_main(argv[1:])
     port, loopback = 0, False
     i = 0
     while i < len(argv):
@@ -706,7 +709,8 @@ def main(argv):
         return 2
     if not loopback:
         sys.stderr.write("usage: sagebrush remote --loopback [--port N]\n"
-                         "  (this computer as the sagebrush.space page's \"Your computer (paired)\" runner, in this Python;\n"
-                         "   the cloud relay, for a remote box, comes next)\n")
+                         "       sagebrush remote login [--origin URL] [--name NAME] [--force]\n"
+                         "  (--loopback: this computer as the sagebrush.space page's \"Your computer (paired)\" runner, in this\n"
+                         "   Python; login: enroll this computer with your account, for the cloud relay)\n")
         return 2
     return asyncio.run(run_loopback(port, dev_origin=os.environ.get("SAGEBRUSH_KERNEL_DEV_ORIGIN") or None))
