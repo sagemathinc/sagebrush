@@ -2,12 +2,14 @@
 
     sagebrush bench [...]     the benchmarks behind the performance claims
                               (sagebrush bench --help)
+    sagebrush remote          this computer as a runner for your
+                              sagebrush.space notebooks, in this Python,
+                              through the cloud relay (enrolling it first)
+    sagebrush remote login [--origin URL] [--name NAME] [--force]
+                              enroll this computer with your account
     sagebrush remote --loopback [--port N]
                               this computer as a paired page's runner,
                               over 127.0.0.1, in this Python
-    sagebrush remote login [--origin URL] [--name NAME] [--force]
-                              enroll this computer with your account
-                              (for the cloud relay)
 
 Sage files run with python -m sagebrush FILE.sage; the MCP server is
 sagebrush-mcp."""
