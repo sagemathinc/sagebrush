@@ -1,8 +1,8 @@
 {
  "v": 1,
- "reason": "The print order of sums and products with function kernels as Sage prints them (engine/sym/src/print.rs: kernels in the P0-P5 order, p_kernel, p_kernel_cmp, p_order; C0 of the simplify_trig work). Measured with bun 1.4.4 (size-record.sh) on master 5b10a4e1 vs this PR's head 4b657aac (CI's fresh engine committed): cli/pyjs.cjs +3524, engine/sagebrush-engine.wasm +2646; no other row grows.",
+ "reason": "The print order of sums and products with function kernels as Sage prints them, one total order over every kind of term (engine/sym/src/print.rs: kernels in the P0-P5 order, the extended P model for sum terms p_pure_x/p_order_sum/p_atom_cmp with rational exponents, the sign rule for powers of sums; C0 of the simplify_trig work, after the review of daybreak3). Measured with bun 1.4.4 (size-record.sh) on master 1a45eba2 vs this PR's head 11bb5a8c (CI's fresh engine committed): cli/pyjs.cjs +7452, engine/sagebrush-engine.wasm +5607; no other row grows.",
  "bytes": {
-  "cli/pyjs.cjs": 3524,
-  "engine/sagebrush-engine.wasm": 2646
+  "cli/pyjs.cjs": 7452,
+  "engine/sagebrush-engine.wasm": 5607
  }
 }
