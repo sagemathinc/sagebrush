@@ -265,7 +265,7 @@ class SeriesRing_:
         # variable is called (a in QQ['a'][[x]], and x in QQ['x'][[x]]: Sage's a*x, x*x); another
         # polynomial in the series variable gives its coefficients, one in another variable is
         # converted by the base
-        if hasattr(x, "list") and hasattr(x, "degree") and hasattr(x, "parent") and not isinstance(x, (int, _F)) and not _coerces_into(x, self._base) and _variable_of(x) in (None, self._name):
+        if self._var_poly(x):
             r = Series(self, 0, [self._base(c) for c in x.list()], None)
             return r.add_bigoh(prec) if prec is not None else r
         if type(x).__name__ == "FractionFieldElement":
@@ -275,6 +275,12 @@ class SeriesRing_:
         c = self._base(x)
         r = Series(self, 0, [c], None)
         return r.add_bigoh(prec) if prec is not None else r
+
+    def _var_poly(self, x):
+        """Whether x is a polynomial in the series variable that is not an element of the base
+        (nor of a ring that coerces into it): it converts by its coefficients, not as a scalar."""
+        return (hasattr(x, "list") and hasattr(x, "degree") and hasattr(x, "parent") and not isinstance(x, (int, _F))
+                and not _coerces_into(x, self._base) and _variable_of(x) in (None, self._name))
 
     def __contains__(self, x):
         try:
@@ -893,7 +899,9 @@ class Series:
     def __truediv__(self, o):
         self._check_var(o, "/")
         B = self._R._base
-        if _is_padic(B) and not isinstance(o, Series):
+        # (a polynomial in the series variable divides as a series, not as a scalar)
+        scalar = not isinstance(o, Series) and not self._R._var_poly(o)
+        if _is_padic(B) and scalar:
             # by a scalar: over the fraction field (Sage: T/2 and T/Zp(5)(2)
             # are over Qp; the review's CORR-D9E-2), joined with the
             # scalar's own fraction field
@@ -907,11 +915,11 @@ class Series:
                 raise ZeroDivisionError("division by zero")
             return Series(s._R, s._v, [x / c for x in s._c], s._prec)
         F = _frac(B)
-        if _poly_base(B) and not isinstance(o, Series):
+        if _poly_base(B) and scalar:
             s = self._poly_scalar_div(o)
             if s is not None:
                 return s
-        if F is not B and not isinstance(o, Series):
+        if F is not B and scalar:
             # by a scalar: over the fraction field (Sage: z/2 and z/1 are in
             # QQ[[z]])
             s = self._over(F)
