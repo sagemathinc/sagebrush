@@ -68,7 +68,7 @@ __all__ = [
     "cylindrical_plot3d", "revolution_plot3d", "sphere", "point3d", "line3d", "text3d", "arrow3d",
     "polygon3d", "plot_vector_field3d", "tetrahedron", "cube", "octahedron",
     "dodecahedron", "icosahedron", "contour_plot", "density_plot", "implicit_plot",
-    "region_plot", "plot_vector_field", "plot_slope_field",
+    "region_plot", "plot_vector_field", "plot_slope_field", "colormaps",
     # interact
     "search_doc", "interact", "slider", "range_slider", "selector", "checkbox", "input_box", "color_selector",
     "text_control",
@@ -97,7 +97,7 @@ from sage_plot3d import (Graphics3d, plot3d, parametric_plot3d, implicit_plot3d,
                          dodecahedron, icosahedron, point3d, line3d, text3d,
                          arrow3d, polygon3d, plot_vector_field3d)
 from sage_plot_fields import (contour_plot, density_plot, implicit_plot, region_plot,
-                              plot_vector_field, plot_slope_field)
+                              plot_vector_field, plot_slope_field, colormaps)
 
 
 def show(obj, *more, **options):

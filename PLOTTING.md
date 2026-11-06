@@ -89,6 +89,9 @@ plot_slope_field(x - y, (x, -3, 3), (y, -3, 3))                  # for y' = x - 
 - Options: `plot_points`, `contours` (a count or a list of levels),
   `fill`, `cmap` (viridis, gray, coolwarm, jet, hot, rainbow, plasma, Blues,
   Spectral and RdBu, plus `_r` for reversed), `incol`/`outcol`, `color`.
+  A name matplotlib lacks is Sage's RuntimeError when the plot is drawn;
+  another of matplotlib's names is an error saying it is not in Sagebrush
+  yet. `colormaps` is Sage's: `colormaps['viridis']`, `colormaps.viridis`.
 - The plot area takes the shape of the ranges (`aspect_ratio=1`), framed,
   as in Sage.
 
@@ -168,6 +171,13 @@ Supported:
   `histtype='step'`), `fill_between`, `errorbar`, `step`, `stem`, `pie`,
   `imshow` (viridis/gray), `axhline`/`axvline` (`xmin`/`xmax`, a label in
   the legend), `text` and `annotate`.
+- Colormaps by name: `matplotlib.colormaps` (all of matplotlib 3.11.1's
+  names), `plt.get_cmap`, `plt.colormaps()`, `cm.viridis`, and `cmap=` in
+  `imshow`, `scatter`, `contourf` and `ScalarMappable`. A name matplotlib
+  lacks is matplotlib's error (with its "Did you mean"); Sagebrush draws
+  viridis, gray, coolwarm, jet, hot, rainbow, plasma, Blues, Spectral and
+  RdBu (and Greys, binary, grey, each also `_r`), and any other of
+  matplotlib's names is an error saying it is not in Sagebrush yet.
 - Titles, labels, limits, `xscale`/`yscale('log')`, ticks and tick labels,
   `grid`, `legend` (`loc`; labels, handles, or the labelled artists as
   matplotlib lists them), `axis('equal'|'off')` and `suptitle`.
