@@ -1,7 +1,7 @@
 {
  "v": 1,
- "reason": "1a, documents as folders (William, Nov 5: \"users can easily browse these .py (etc) files\"; plan approved by @sagebrush Nov 6): a .py, .sage, .m, .mag, .js, .json or .txt file opens on its own page, /?code=<fid>: highlighted View, autosaved Edit, the one File menu. The page is a lazy chunk (sagebrush-code.js, 23 KB, fetched only at /?code=) that the CLI's `sagebrush notebook` serves too, so cli/pyjs.cjs carries it; the notebook page's own script gains only the boot hook (~3 KB). Measured +33059 B on master b960770f, marked 33100.",
+ "reason": "1a, documents as folders (William, Nov 5: \"users can easily browse these .py (etc) files\"; plan approved by @sagebrush Nov 6): a .py, .sage, .m, .mag, .js, .json or .txt file opens on its own page, /?code=<fid>: highlighted View, autosaved Edit, the one File menu. The page is a lazy chunk (sagebrush-code.js, 23 KB, fetched only at /?code=) that the CLI's `sagebrush notebook` serves too, so cli/pyjs.cjs carries it; the notebook page's own script gains only the boot hook (~3 KB). Measured +33263 B on master b960770f (with the save loop: an edit made during a write is written after it), marked 33300.",
  "bytes": {
-  "cli/pyjs.cjs": 33100
+  "cli/pyjs.cjs": 33300
  }
 }
