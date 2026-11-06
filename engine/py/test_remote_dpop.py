@@ -88,6 +88,25 @@ def test_controls():
         assert got is not None and got[2] == reason, (over, got)
 
 
+def test_size_boundary_and_exact_htm():
+    """grader's D2 and D19 on #761: a proof of exactly proofMax bytes isn't refused for its size (whatever else is
+    wrong with it), and proofMax + 1 is; and htm is compared exactly (RFC 9449 §4.3): a proof whose htm is "GET",
+    validly signed, doesn't pass for a request whose method is "get"."""
+    data = load()
+    c = data["cases"][0]
+    m = dpop.LIMITS["proofMax"]
+    for n, size_refused in ((m, False), (m + 1, True)):
+        p = c["dpop"] + "A" * (n - len(c["dpop"]))
+        assert len(p) == n
+        got, before, after = run(data, dict(c, dpop=p))
+        assert got is not None and (got[2] == "proof-size") == size_refused, (n, got)
+        assert after == before, n
+    g = next(x for x in data["cases"] if x["name"] == "L1 a good g.events proof (GET)")
+    assert run(data, g)[0] is None  # (the control: as it is, it passes)
+    got, _, after = run(data, g, method="get")
+    assert got is not None and got[2] == "htm", got
+
+
 def _remade(c, header=None, claims=None):
     """The case's proof with its header or claims changed (the signature left as it was: these refusals come first)."""
     h, cl, sig = c["dpop"].split(".")
