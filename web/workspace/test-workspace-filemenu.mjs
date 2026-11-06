@@ -72,7 +72,7 @@ try {
   await until(`!!${W} && !!document.querySelector("#filemenu [data-item=open]:not([disabled])")`, 60000);
   // the same items in the same order, on both pages
   const nbShape = await shape(NB), nbLabels = await labels(NB);
-  check(JSON.stringify(nbShape) === JSON.stringify(["new▸[newNotebook,newMatlab,newBoard,newFolder,fromExample]", "open", "recent▸[]", "upload", "-", "saveCopy", "rename", "download▸[.ipynb,.py,marimo (.py),with history (.sbreplay),Everything (.zip)…]", "print", "share", "-", "delete"]), "the notebook page's File menu: " + JSON.stringify(nbShape));
+  check(JSON.stringify(nbShape) === JSON.stringify(["new▸[newNotebook,newMatlab,newBoard,newFolder,fromExample]", "open", "recent▸[]", "upload", "-", "saveCopy", "rename", "download▸[.ipynb,.py,marimo (.py),with its files (.zip),with history (.sbreplay),Everything (.zip)…]", "print", "share", "-", "delete"]), "the notebook page's File menu: " + JSON.stringify(nbShape));
   await ev(`(() => { document.querySelector("#filebtn").click(); document.querySelector("#filemenu [data-group=new]").click(); return 1; })()`);
   check(await ev(`!document.querySelector("#filemenu").hidden && !document.querySelector("#filemenu [data-group=new]").nextElementSibling.hidden`), "New ▸ opens in place, the menu staying open");
   check(await ev(`document.querySelector("#filemenu [data-group=download]").nextElementSibling.getBoundingClientRect().height === 0`), "…a group not opened shows nothing");

@@ -1,0 +1,246 @@
+(1/2,) !! TypeError no conversion of this rational to integer
+ZZ (1/2,) !! TypeError no conversion of this rational to integer
+(7/3,) !! TypeError no conversion of this rational to integer
+ZZ (7/3,) !! TypeError no conversion of this rational to integer
+(-1/2,) !! TypeError no conversion of this rational to integer
+ZZ (-1/2,) !! TypeError no conversion of this rational to integer
+(2,) -> 2
+ZZ (2,) -> 2
+(2,) -> 2
+ZZ (2,) -> 2
+(-2,) -> -2
+ZZ (-2,) -> -2
+(2.50000000000000,) !! TypeError Attempt to coerce non-integral RealNumber to Integer
+ZZ (2.50000000000000,) !! TypeError Attempt to coerce non-integral RealNumber to Integer
+(2.00000000000000,) -> 2
+ZZ (2.00000000000000,) -> 2
+(3.70000000000000,) !! TypeError Attempt to coerce non-integral RealNumber to Integer
+ZZ (3.70000000000000,) !! TypeError Attempt to coerce non-integral RealNumber to Integer
+(1.50000000000000e20,) -> 150000000000000000000
+ZZ (1.50000000000000e20,) -> 150000000000000000000
+(2.5,) !! TypeError cannot convert non-integral float to integer
+ZZ (2.5,) !! TypeError cannot convert non-integral float to integer
+(nan,) !! ValueError cannot convert float NaN to integer
+ZZ (nan,) !! ValueError cannot convert float NaN to integer
+(inf,) !! OverflowError cannot convert float infinity to integer
+ZZ (inf,) !! OverflowError cannot convert float infinity to integer
+(5,) -> 5
+ZZ (5,) -> 5
+(True,) -> 1
+ZZ (True,) -> 1
+(False,) -> 0
+ZZ (False,) -> 0
+(3,) -> 3
+ZZ (3,) -> 3
+(3,) -> 3
+ZZ (3,) -> 3
+(3,) -> 3
+ZZ (3,) -> 3
+((2+0j),) !! TypeError unable to coerce <class 'complex'> to an integer
+ZZ ((2+0j),) !! TypeError unable to coerce <class 'complex'> to an integer
+(2.00000000000000,) !! TypeError unable to coerce <class 'sage.rings.complex_mpfr.ComplexNumber'> to an integer
+ZZ (2.00000000000000,) !! TypeError unable to coerce <class 'sage.rings.complex_mpfr.ComplexNumber'> to an integer
+(2.50000000000000,) !! TypeError unable to coerce <class 'sage.rings.complex_mpfr.ComplexNumber'> to an integer
+ZZ (2.50000000000000,) !! TypeError unable to coerce <class 'sage.rings.complex_mpfr.ComplexNumber'> to an integer
+(None,) -> 0
+ZZ (None,) -> 0
+('12',) -> 12
+ZZ ('12',) -> 12
+('0x1f',) -> 31
+ZZ ('0x1f',) -> 31
+('1/2',) !! TypeError unable to convert '1/2' to an integer
+ZZ ('1/2',) !! TypeError unable to convert '1/2' to an integer
+('abc',) !! TypeError unable to convert 'abc' to an integer
+ZZ ('abc',) !! TypeError unable to convert 'abc' to an integer
+('010',) -> 10
+ZZ ('010',) -> 10
+('0b101',) -> 5
+ZZ ('0b101',) -> 5
+('0o17',) -> 15
+ZZ ('0o17',) -> 15
+('-0x1f',) -> -31
+ZZ ('-0x1f',) -> -31
+(' 12 ',) -> 12
+ZZ (' 12 ',) -> 12
+('1_000',) -> 1000
+ZZ ('1_000',) -> 1000
+('+5',) -> 5
+ZZ ('+5',) -> 5
+('',) !! TypeError unable to convert '' to an integer
+ZZ ('',) !! TypeError unable to convert '' to an integer
+('12.0',) !! TypeError unable to convert '12.0' to an integer
+ZZ ('12.0',) !! TypeError unable to convert '12.0' to an integer
+('1e3',) !! TypeError unable to convert '1e3' to an integer
+ZZ ('1e3',) !! TypeError unable to convert '1e3' to an integer
+('0X1F',) -> 31
+ZZ ('0X1F',) -> 31
+('0B11',) -> 3
+ZZ ('0B11',) -> 3
+('08',) -> 8
+ZZ ('08',) -> 8
+('00',) -> 0
+ZZ ('00',) -> 0
+('-0',) -> 0
+ZZ ('-0',) -> 0
+('٣',) !! TypeError unable to convert '٣' to an integer
+ZZ ('٣',) !! TypeError unable to convert '٣' to an integer
+('ff', 16) -> 255
+ZZ ('ff', 16) -> 255
+('FF', 16) -> 255
+ZZ ('FF', 16) -> 255
+('0xff', 16) !! TypeError unable to convert '0xff' to an integer
+ZZ ('0xff', 16) !! TypeError unable to convert '0xff' to an integer
+('0o17', 8) !! TypeError unable to convert '0o17' to an integer
+ZZ ('0o17', 8) !! TypeError unable to convert '0o17' to an integer
+('0b11', 2) !! TypeError unable to convert '0b11' to an integer
+ZZ ('0b11', 2) !! TypeError unable to convert '0b11' to an integer
+('0b11', 16) -> 2833
+ZZ ('0b11', 16) -> 2833
+('12', 0) -> 12
+ZZ ('12', 0) -> 12
+('12', 1) !! ValueError base (=1) must be 0 or between 2 and 36
+ZZ ('12', 1) !! ValueError base (=1) must be 0 or between 2 and 36
+('12', 37) !! ValueError base (=37) must be 0 or between 2 and 36
+ZZ ('12', 37) !! ValueError base (=37) must be 0 or between 2 and 36
+(5, 16) -> 5
+ZZ (5, 16) -> 5
+('z', 36) -> 35
+ZZ ('z', 36) -> 35
+('-101', 2) -> -5
+ZZ ('-101', 2) -> -5
+('12', 2) !! TypeError unable to convert '12' to an integer
+ZZ ('12', 2) !! TypeError unable to convert '12' to an integer
+() -> 0
+1267650600228229401496703205377 123456789012345678901234567890 -5/2
+('0x_ff',) -> 255
+ZZ ('0x_ff',) -> 255
+('1__0',) -> 10
+ZZ ('1__0',) -> 10
+('_10',) -> 10
+ZZ ('_10',) -> 10
+('10_',) -> 10
+ZZ ('10_',) -> 10
+('+_10',) -> 10
+ZZ ('+_10',) -> 10
+('_',) !! TypeError unable to convert '' to an integer
+ZZ ('_',) !! TypeError unable to convert '' to an integer
+('__',) !! TypeError unable to convert '' to an integer
+ZZ ('__',) !! TypeError unable to convert '' to an integer
+('0_x1f',) -> 31
+ZZ ('0_x1f',) -> 31
+('-_1',) -> -1
+ZZ ('-_1',) -> -1
+(' 1_0 ',) -> 10
+ZZ (' 1_0 ',) -> 10
+('1_ 0',) -> 10
+ZZ ('1_ 0',) -> 10
+('1 0',) -> 10
+ZZ ('1 0',) -> 10
+('f_f', 16) -> 255
+ZZ ('f_f', 16) -> 255
+('0x_ff', 16) !! TypeError unable to convert '0xff' to an integer
+ZZ ('0x_ff', 16) !! TypeError unable to convert '0xff' to an integer
+('_0x1f',) -> 31
+ZZ ('_0x1f',) -> 31
+('0b_1',) -> 1
+ZZ ('0b_1',) -> 1
+('0_10',) -> 10
+ZZ ('0_10',) -> 10
+('_-1',) -> -1
+ZZ ('_-1',) -> -1
+(' ',) !! TypeError unable to convert ' ' to an integer
+ZZ (' ',) !! TypeError unable to convert ' ' to an integer
+('\t-12\n',) -> -12
+ZZ ('\t-12\n',) -> -12
+('10', '2') !! TypeError an integer is required
+ZZ ('10', '2') !! TypeError an integer is required
+('10', 2.00000000000000) -> 2
+ZZ ('10', 2.00000000000000) -> 2
+('10', True) !! ValueError base (=1) must be 0 or between 2 and 36
+ZZ ('10', True) !! ValueError base (=1) must be 0 or between 2 and 36
+(5, '2') -> 5
+ZZ (5, '2') -> 5
+('10', None) !! TypeError an integer is required
+ZZ ('10', None) !! TypeError an integer is required
+('10', -1) !! ValueError base (=-1) must be 0 or between 2 and 36
+ZZ ('10', -1) !! ValueError base (=-1) must be 0 or between 2 and 36
+('10', 1180591620717411303424) !! OverflowError Python int too large to convert to C long
+ZZ ('10', 1180591620717411303424) !! OverflowError Python int too large to convert to C long
+('10', 2) -> 2
+ZZ ('10', 2) -> 2
+(b'12',) -> 12
+ZZ (b'12',) -> 12
+(b'0x1f',) -> 31
+ZZ (b'0x1f',) -> 31
+(b'12', 16) -> 18
+ZZ (b'12', 16) -> 18
+(bytearray(b'12'),) !! TypeError unable to coerce <class 'bytearray'> to an integer
+ZZ (bytearray(b'12'),) !! TypeError unable to coerce <class 'bytearray'> to an integer
+([1],) !! TypeError unable to coerce <class 'list'> to an integer
+ZZ ([1],) !! TypeError unable to coerce <class 'list'> to an integer
+((1, 2),) !! TypeError unable to coerce <class 'tuple'> to an integer
+ZZ ((1, 2),) !! TypeError unable to coerce <class 'tuple'> to an integer
+({},) !! TypeError unable to coerce <class 'dict'> to an integer
+ZZ ({},) !! TypeError unable to coerce <class 'dict'> to an integer
+(set(),) !! TypeError unable to coerce <class 'set'> to an integer
+ZZ (set(),) !! TypeError unable to coerce <class 'set'> to an integer
+('10', 2.50000000000000) -> 2
+ZZ ('10', 2.50000000000000) -> 2
+('10', 7/3) -> 2
+ZZ ('10', 7/3) -> 2
+('10', 1/2) -> 10
+ZZ ('10', 1/2) -> 10
+('10', -1/2) -> 10
+ZZ ('10', -1/2) -> 10
+('10', -2.50000000000000) !! ValueError base (=-2) must be 0 or between 2 and 36
+ZZ ('10', -2.50000000000000) !! ValueError base (=-2) must be 0 or between 2 and 36
+('10', 2.50000000000000) -> 2
+ZZ ('10', 2.50000000000000) -> 2
+('10', 2.5) -> 2
+ZZ ('10', 2.5) -> 2
+('10', 2.90000000000000) -> 2
+ZZ ('10', 2.90000000000000) -> 2
+('10', 36.9000000000000) -> 36
+ZZ ('10', 36.9000000000000) -> 36
+('10', 37) !! ValueError base (=37) must be 0 or between 2 and 36
+ZZ ('10', 37) !! ValueError base (=37) must be 0 or between 2 and 36
+('10', -0.500000000000000) -> 10
+ZZ ('10', -0.500000000000000) -> 10
+('10', 16.7) -> 16
+ZZ ('10', 16.7) -> 16
+('10', 33/2) -> 16
+ZZ ('10', 33/2) -> 16
+I bytearray !! TypeError an integer is required
+Z bytearray !! TypeError an integer is required
+I memoryview !! TypeError an integer is required
+Z memoryview !! TypeError an integer is required
+I list !! TypeError an integer is required
+Z list !! TypeError an integer is required
+I tuple !! TypeError an integer is required
+Z tuple !! TypeError an integer is required
+I dict !! TypeError an integer is required
+Z dict !! TypeError an integer is required
+I set !! TypeError an integer is required
+Z set !! TypeError an integer is required
+I frozenset !! TypeError an integer is required
+Z frozenset !! TypeError an integer is required
+I object !! TypeError an integer is required
+Z object !! TypeError an integer is required
+I complex !! TypeError an integer is required
+Z complex !! TypeError an integer is required
+I CC !! TypeError can't convert complex to int; use int(abs(z))
+Z CC !! TypeError can't convert complex to int; use int(abs(z))
+I bytes !! TypeError an integer is required
+Z bytes !! TypeError an integer is required
+I Mod -> 2
+Z Mod -> 2
+I GF -> 2
+Z GF -> 2
+I SR -> 2
+Z SR -> 2
+I IndexOnly !! TypeError an integer is required
+Z IndexOnly !! TypeError an integer is required
+I IntOnly -> 2
+Z IntOnly -> 2
+I Both -> 2
+Z Both -> 2
