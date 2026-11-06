@@ -239,6 +239,26 @@ export function measureFiles(files, rootDir, values, extra = {}, expected = EXPE
 // engine's files by group (the hash in the name dropped; the zone data as one),
 // the CLI bundle and its generated library and packages, and the registry's
 // package count.
+// The examples gallery's bundles (plan-examples-gallery §5, daybreak2's ruling): the corpus (every file under
+// examples/), what the site serves of it (every file web/build.ts writes under web/site/public/examples: the pages, the
+// LaTeX previews, files.json, the ZIPs, the catalog) and the catalog on its own. Read after the build, never built
+// here. A tree that isn't there isn't measured: a base from before the gallery has no site tree (an epoch reset
+// measures the rebuilt base under this file too; a key the reset adds is one its old budgets.json didn't list, and the
+// rebuilt base may have it or not: examples/corpus, say, on a base that already has the corpus). The merge is held to
+// every budgets.json row: a merge whose measured bundles aren't exactly budgets.json's fails (r5 §1.2, "the measured
+// bundles differ"), so a missing tree there fails the gate.
+export function examplesFiles(rootDir) {
+  const walk = (dir) => readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)).flatMap((e) => (e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)]));
+  const files = {};
+  const site = join(rootDir, "web", "site", "public", "examples");
+  if (existsSync(join(rootDir, "examples"))) files["examples/corpus"] = walk(join(rootDir, "examples"));
+  if (existsSync(join(site, "index.json"))) {
+    files["site/examples"] = walk(site);
+    files["examples/index.json"] = [join(site, "index.json")];
+  }
+  return files;
+}
+
 export function buildFiles(rootDir) {
   const files = {};
   const dist = join(rootDir, "web", "dist");
@@ -252,6 +272,7 @@ export function buildFiles(rootDir) {
     (files[key] ??= []).push(existsSync(file) ? file : f.size);
   }
   for (const f of ["pyjs.cjs", "lib.gen.js", "packages.gen.js"]) files[`cli/${f}`] = [join(rootDir, "build", "cli", f)];
+  Object.assign(files, examplesFiles(rootDir));
   const reg = JSON.parse(readFileSync(join(rootDir, "packages", "registry.json"), "utf8"));
   return { files, extra: { "registry/packages": Object.keys(reg.packages).length } };
 }

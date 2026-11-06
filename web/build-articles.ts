@@ -2,11 +2,12 @@
 // sagebrush.space: /articles/ lists the series, /articles/<series>/ is a
 // series' README, /articles/<series>/<name> each article.  Rendered here
 // (marked, with the math typeset by KaTeX at build time), so a page is
-// plain HTML: readable without JavaScript and indexable.  Also writes
-// sitemap.xml and robots.txt.  Run by web/build.ts (or `bun
+// plain HTML: readable without JavaScript and indexable.  Returns its URLs
+// for sitemap.xml, which web/build-sitemap.ts writes (the one sitemap owner,
+// plan-examples-gallery §3).  Run by web/build-sitemap.ts (or `bun
 // web/build-articles.ts`); writes into web/site/public.
 import { Marked, type Tokens } from "marked";
-import katex from "katex";
+import { mathExtensions } from "./markdown-math";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync, existsSync, copyFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -22,7 +23,6 @@ if (!hasSite) throw new Error("build-articles: web/site is absent; build.ts impo
 const out = join(siteDir, "public");
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-const tex = (s: string, displayMode: boolean) => katex.renderToString(s, { displayMode, throwOnError: false, output: "html" });
 
 function renderer(): Marked {
   const m = new Marked({ gfm: true });
@@ -47,30 +47,7 @@ function renderer(): Marked {
           return `<aside class="disclaimer" role="note">\n${this.parser.parse(t.tokens)}</aside>\n`;
         },
       },
-      {
-        name: "mathBlock",
-        level: "block",
-        start: (src: string) => src.match(/^\$\$/m)?.index,
-        tokenizer(src: string) {
-          const r = /^\$\$([\s\S]+?)\$\$[ \t]*(?:\n|$)/.exec(src);
-          if (r) return { type: "mathBlock", raw: r[0], text: r[1] };
-        },
-        renderer: (t: any) => `<div class="math-display">${tex(t.text.trim(), true)}</div>\n`,
-      },
-      {
-        name: "mathInline",
-        level: "inline",
-        start: (src: string) => src.indexOf("$") < 0 ? undefined : src.indexOf("$"),
-        tokenizer(src: string) {
-          const d = /^\$\$([\s\S]+?)\$\$/.exec(src);
-          if (d) return { type: "mathInline", raw: d[0], text: d[1], display: true };
-          // (a single line break may fall inside: source lines are wrapped;
-          // without it "$\prod\ng_i$, each $g_i$" paired the wrong dollars)
-          const r = /^\$((?:\\.|[^\\$\n]|\n(?![ \t]*\n))+?)\$/.exec(src);
-          if (r) return { type: "mathInline", raw: r[0], text: r[1], display: false };
-        },
-        renderer: (t: any) => tex(t.text.trim(), t.display),
-      },
+      ...mathExtensions,
     ],
     renderer: {
       // links between articles: name.md -> name, README.md -> the series
@@ -206,6 +183,8 @@ ${nav}
 `;
 }
 
+/** The articles' pages, written into the site; their URLs (for the sitemap). */
+export function buildArticles(): { url: string; date: string }[] {
 const md = renderer();
 const urls: { url: string; date: string }[] = [{ url: "/", date: new Date().toISOString().slice(0, 10) }, { url: "/atlas/", date: new Date().toISOString().slice(0, 10) }, { url: "/demo/jfm/", date: new Date().toISOString().slice(0, 10) }, { url: "/board/", date: new Date().toISOString().slice(0, 10) }];
 const seriesList: { slug: string; title: string; description: string; count: number }[] = [];
@@ -268,6 +247,8 @@ writeFileSync(join(out, "articles", "index.html"), page({
   html: `<h1>Articles</h1>\n<p>How Sagebrush's mathematics engines are implemented, algorithm by algorithm, top to bottom: what worked, what did not and why, and what would have saved time. The engines are written from the literature and are open source under the permissive MIT and Apache-2.0 licenses, unlike the GPL or closed systems they are measured against.</p>\n${list}\n${INDEPENDENT}`,
 }));
 urls.push({ url: "/articles/", date: new Date().toISOString().slice(0, 10) });
-writeFileSync(join(out, "sitemap.xml"), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map((u) => `  <url><loc>${SITE}${u.url}</loc><lastmod>${u.date}</lastmod></url>`).join("\n")}\n</urlset>\n`);
-writeFileSync(join(out, "robots.txt"), `User-agent: *\nAllow: /\n\nSitemap: ${SITE}/sitemap.xml\n`);
-console.log(`articles: ${urls.length - 4} pages in ${seriesList.length} series, sitemap.xml`);
+console.log(`articles: ${urls.length - 4} pages in ${seriesList.length} series`);
+return urls;
+}
+
+if (import.meta.main) buildArticles();
