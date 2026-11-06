@@ -58,6 +58,21 @@ def _float_s(v):
     return _call("float", repr(float(v)))[0]
 
 
+def _bits(v):
+    """The IEEE bits of the double v, in hex (the engine's float serialization)."""
+    import struct
+    return "%x" % struct.unpack("<Q", struct.pack("<d", float(v)))[0]
+
+
+def _double_s(v):
+    """An element of RDF (d) or CDF (h) as an engine number of that parent: Sage keeps it,
+    printed as RDF prints (1.5*x, not RR's 1.50000000000000*x)."""
+    if isinstance(v, float):
+        return "d%s;" % _bits(v)
+    z = complex(v)
+    return "h%s,%s;" % (_bits(z.real), _bits(z.imag))
+
+
 # The largest integer an expression may hold (the engine's MAX_INT_BITS):
 # expressions cross into the engine as decimal text, so a larger one is
 # refused before it is formatted, as CPython refuses int-to-str past its
@@ -84,15 +99,16 @@ def _to_s(v):
     if isinstance(v, _Fraction):
         # exact ints first: formatting an int subclass must not round it
         return _rat_s(int(v.numerator), int(v.denominator))
+    if type(v).__name__ in ("RealDoubleElement", "ComplexDoubleElement"):
+        return _double_s(v)
     if isinstance(v, float):
         if _rr_args((v,)) == 2:
             # (the engine's real numbers are doubles)
             raise NotImplementedError("%s, an element of RR past the double range, has no symbolic form in sagebrush yet" % (v,))
         return _float_s(v)
     if isinstance(v, complex):
-        if v.imag == 0:
-            return _float_s(v.real)
-        return _call("complex", repr(v.real), repr(v.imag))[0]
+        # (an element of CC stays one with imaginary part 0: it meets RDF as CC)
+        return "g%s,%s;" % (_bits(v.real), _bits(v.imag))
     if _is_poly(v):
         t, r = Expression(_sym_s(v.variable_name())), Expression("n0/1;")
         for i, c in enumerate(v._c):
@@ -136,7 +152,10 @@ def _py_number(s):
         p, q = r[1].split("/")
         import sage_all as sa
         return sa._intdiv(int(p), int(q)) if q != "1" else sa.Integer(int(p))
-    if r[0] == "f" and float(r[2]) == 0:
+    if r[0] == "f" and r[3:4] == ["RDF"]:
+        import _sage_rdf
+        return _sage_rdf.RDF(float(r[1]))
+    if r[0] == "f" and r[3:4] in (["RR"], []):
         from _sage_lang import RealNumber
         return RealNumber(float(r[1]))
     return None
@@ -473,7 +492,7 @@ class Expression:
             sage: SR(2/3).is_numeric(), pi.is_numeric()
             (True, False)
         """
-        return self._s[0] in "nzfg"
+        return self._s[0] in "nzfgdh"
 
     def is_constant(self):
         """Whether the expression has no variables.
@@ -733,6 +752,11 @@ class Expression:
         """
         v = _py_number(self._s)
         if v is None:
+            r = _call("number", self._s)
+            if r[0] == "f" and r[3:4] in (["CC"], ["CDF"]):
+                # (a complex float as an element of its parent, as Sage)
+                import sage_all as sa
+                return (sa.CDF if r[3] == "CDF" else sa.CC)(float(r[1]), float(r[2]))
             raise TypeError("self must be a numeric expression")
         return v
 
@@ -1509,6 +1533,9 @@ def _real_imag(e, k):
         return e if k == 0 else Expression("n0/1;")
     if r[0] == "z":
         return Expression("n%s;" % r[1 + k])
+    if r[0] == "f" and r[3:4] in (["RDF"], ["CDF"]):
+        # (a part of an element of RDF or CDF is one of RDF: SR(CDF(1, 2)).real_part() is 1.0)
+        return Expression("d%s;" % _bits(float(r[1 + k])))
     c = complex(e)
     return _expr(c.imag if k else c.real)
 
