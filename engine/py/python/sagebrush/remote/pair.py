@@ -101,6 +101,31 @@ def strict_json(text):
     return json.loads(text, object_pairs_hook=pairs, parse_constant=const)
 
 
+def page_key_error(p, stats=None):
+    """Why the hello's DPoP key (params jwk and jkt) is refused, or None: lengths first, then the shape, canonical
+    base64url, a point on P-256, and only then the thumbprint (the one costly step, counted in stats)."""
+    jwk = p.get("jwk")
+    jx = jwk.get("x") if isinstance(jwk, dict) else None
+    jy = jwk.get("y") if isinstance(jwk, dict) else None
+
+    def too_long(v):
+        return isinstance(v, str) and len(v) > PAIR_LIMITS["keyChars"]
+    if too_long(p.get("jkt")) or too_long(jx) or too_long(jy):
+        return "the page's key is too long"
+    if not (isinstance(jwk, dict) and sorted(jwk) == ["crv", "kty", "x", "y"] and jwk["kty"] == "EC" and jwk["crv"] == "P-256"
+            and isinstance(jx, str) and isinstance(jy, str)):
+        return "the page's key must be an EC P-256 public key"
+    if not (isinstance(p.get("jkt"), str) and _B64URL43.fullmatch(p["jkt"]) and _canonical32(jx) and _canonical32(jy)):
+        return "the page's key is not canonical base64url"
+    if not _es256.es256_key_ok(base64.urlsafe_b64decode(jx + "="), base64.urlsafe_b64decode(jy + "=")):
+        return "the page's key isn't a point on P-256"
+    if stats is not None:
+        stats["thumbprints"] += 1
+    if p["jkt"] != jwk_thumbprint(jwk):
+        return "the key's thumbprint doesn't match"
+    return None
+
+
 def _close_status_ok(s):
     """A Close status a peer may send (RFC 6455 §7.4)."""
     return (1000 <= s <= 1014 and s not in (1004, 1005, 1006)) or 3000 <= s <= 4999
@@ -572,24 +597,9 @@ class PairServer:
         has_code, has_session = isinstance(p.get("code"), str), isinstance(p.get("session"), str)
         if has_code == has_session:
             return self._refuse(c, rid, "refused", "a hello carries exactly one of code and session")
-        jwk = p.get("jwk")
-        jx = jwk.get("x") if isinstance(jwk, dict) else None
-        jy = jwk.get("y") if isinstance(jwk, dict) else None
-
-        def too_long(v):
-            return isinstance(v, str) and len(v) > PAIR_LIMITS["keyChars"]
-        if too_long(p.get("jkt")) or too_long(jx) or too_long(jy):
-            return self._refuse(c, rid, "refused", "the page's key is too long")
-        if not (isinstance(jwk, dict) and sorted(jwk) == ["crv", "kty", "x", "y"] and jwk["kty"] == "EC" and jwk["crv"] == "P-256"
-                and isinstance(jx, str) and isinstance(jy, str)):
-            return self._refuse(c, rid, "refused", "the page's key must be an EC P-256 public key")
-        if not (isinstance(p.get("jkt"), str) and _B64URL43.fullmatch(p["jkt"]) and _canonical32(jx) and _canonical32(jy)):
-            return self._refuse(c, rid, "refused", "the page's key is not canonical base64url")
-        if not _es256.es256_key_ok(base64.urlsafe_b64decode(jx + "="), base64.urlsafe_b64decode(jy + "=")):
-            return self._refuse(c, rid, "refused", "the page's key isn't a point on P-256")
-        self.stats["thumbprints"] += 1
-        if p["jkt"] != jwk_thumbprint(jwk):
-            return self._refuse(c, rid, "refused", "the key's thumbprint doesn't match")
+        bad = page_key_error(p, self.stats)
+        if bad:
+            return self._refuse(c, rid, "refused", bad)
         if has_code:
             if self.code_used:
                 return self._refuse(c, rid, "refused", "this code was used: run the command again for a new one")
@@ -680,10 +690,13 @@ async def run_loopback(port=0, dev_origin=None, out=None, err=None, cwd=None):
 
 
 def main(argv):
-    """`sagebrush remote --loopback [--port N]`, or `sagebrush remote login ...`."""
+    """`sagebrush remote` (the relay), `sagebrush remote login ...`, or `sagebrush remote --loopback [--port N]`."""
     if argv[:1] == ["login"]:
         from sagebrush.remote.enroll import main as login_main
         return login_main(argv[1:])
+    if not argv:
+        from sagebrush.remote.relay import main as relay_main
+        return relay_main([])
     port, loopback = 0, False
     i = 0
     while i < len(argv):
@@ -708,9 +721,11 @@ def main(argv):
         sys.stderr.write("sagebrush remote: --port takes a port number (0 to 65535)\n")
         return 2
     if not loopback:
-        sys.stderr.write("usage: sagebrush remote --loopback [--port N]\n"
+        sys.stderr.write("usage: sagebrush remote\n"
                          "       sagebrush remote login [--origin URL] [--name NAME] [--force]\n"
-                         "  (--loopback: this computer as the sagebrush.space page's \"Your computer (paired)\" runner, in this\n"
-                         "   Python; login: enroll this computer with your account, for the cloud relay)\n")
+                         "       sagebrush remote --loopback [--port N]\n"
+                         "  (this computer as a runner for your sagebrush.space notebooks, in this Python: through the\n"
+                         "   cloud relay, enrolling it first if needed; login: enroll it again; --loopback: paired with a\n"
+                         "   page on this computer, \"Your computer (paired)\")\n")
         return 2
     return asyncio.run(run_loopback(port, dev_origin=os.environ.get("SAGEBRUSH_KERNEL_DEV_ORIGIN") or None))
