@@ -299,9 +299,10 @@ impl Num {
             _ => {
                 let ((a, b), (c, d)) = (self.to_c64(), o.to_c64());
                 let k = self.fk_with(o);
-                // a real factor multiplies each part on its own: the complex formula's products
-                // with its zero imaginary part are NaN for an infinite or NaN number (inf*0), and
-                // RR('inf')*x became (NaN - NaN*I)*x (Sage: (+infinity)*x)
+                // two reals multiply as reals: the complex formula's products with their zero
+                // imaginary parts are NaN for an infinite or NaN number (inf*0), and RR('inf')*x
+                // became (NaN - NaN*I)*x (Sage: (+infinity)*x). A real times a complex is the
+                // complex formula, as Sage (SR(RR(2))*SR(CC(infinity, 1)) is +infinity + NaN*I)
                 if b == 0.0 && d == 0.0 {
                     Num::fl(a * c, 0.0, k)
                 } else {

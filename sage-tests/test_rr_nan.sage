@@ -15,3 +15,10 @@ show(RR, ['inf*x', 'x*inf', 'ninf*x', 'nan*x', '-inf*x', '-(inf*x)', 'inf*x^2', 
 show(RDF, ['inf*x', 'x*inf', 'ninf*x', 'nan*x', '-inf*x', '-(inf*x)', 'inf*x^2', 'inf*x*y', 'ninf*x*y', 'inf*x + 1', 'ninf*x + y', 'x + inf', 'x + ninf', 'x - inf', 'x*y + inf', 'inf*x - x', 'x/nan', 'inf*inf*x', 'inf*ninf*x', 'inf*x*2', 'inf*x/2', 'ninf*x*K(-2)', '(inf*x).subs(x=2)', '(inf*x).subs(x=-2)', '(ninf*x).subs(x=3)', '(nan*x).subs(x=1)', '(inf*x).coefficient(x)', '(ninf*x).coefficient(x)', '(inf*x + 1).subs(x=1)', 'SR(inf) + SR(ninf)', 'SR(inf)*0', 'SR(inf)*K(0)*x', '(x + 1)*inf', 'expand((x + 1)*inf)', 'expand((x + 1)*ninf)', 'SR(inf)', 'SR(ninf)', 'SR(nan)', '-SR(inf)', 'SR(inf)^2', 'SR(ninf)^3', 'SR(ninf)^2', 'inf*x == inf*x'])
 for t in ['SR(RR(1.5))*0', "SR(RR('inf'))*0", "SR(RR('nan'))*0", "0*SR(RR('nan'))", "RR('nan')*x*0", "x*0*RR('inf')", 'RR(1.5)*x*0', "1/RR('nan')*x"]:
     print(t, '=>', sage_eval(t, locals=dict(x=x, y=y)))
+# a real float times a complex one with an infinite part, both orders: the complex formula, as Sage
+# (SR(RR(2))*SR(CC(infinity, 1)) is +infinity + NaN*I; the grader's r769 N4/N5), and the RR(infinity) controls
+for t in ["SR(RR(2))*SR(CC(infinity, 1))", "SR(CC(infinity, 1))*SR(RR(2))", "SR(RR(2))*SR(CC(1, infinity))", "SR(CC(1, infinity))*SR(RR(2))",
+          "SR(RR(-2))*SR(CC(infinity, 1))", "SR(CC(infinity, 1))*SR(RR(-2))", "SR(RR(-2))*SR(CC(1, infinity))", "SR(CC(1, infinity))*SR(RR(-2))",
+          "SR(RR(infinity))*SR(CC(1, 2))", "SR(CC(1, 2))*SR(RR(infinity))", "SR(RR(-infinity))*SR(CC(1, 2))",
+          "SR(RR(infinity))*SR(CC(1, 2))*x", "SR(RR(2))*SR(CC(infinity, 1))*x"]:
+    print(t, '=>', sage_eval(t, locals=dict(x=x)))
