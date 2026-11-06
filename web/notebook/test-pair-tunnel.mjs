@@ -429,6 +429,14 @@ for (const [what, m, code] of [
   const made = [];
   class S extends FakeSocket { constructor(u) { super(u); made.push(this); setTimeout(() => this.open(), 1); } }
   const jwk = { kty: "EC", crv: "P-256", x: "X".repeat(43), y: "Y".repeat(43) };
+  // (a minimum passed exactly as given, falsy ones included)
+  const answerMin = async (result, min) => {
+    const p = pairTunnel({ port: 4321, code: "x", jwk, jkt: "J".repeat(43), WebSocket: S, min });
+    await tick(10);
+    const sock = made.at(-1);
+    sock.deliver({ jsonrpc: "2.0", id: "h1", result });
+    return { r: await within(p), hello: sock.sent[0], sock };
+  };
   const answer = async (result, min) => {
     const p = pairTunnel({ port: 4321, code: "x", jwk, jkt: "J".repeat(43), WebSocket: S, ...(min ? { min } : {}) });
     await tick(10);
@@ -452,9 +460,14 @@ for (const [what, m, code] of [
   a = await answer({ ...RESULT, version: "0.9.0rc1" }, "0.9.0");
   check(a.r.e?.kind === "old", "a pre-release of the minimum is too old");
   // (daybreak3's VERSION-3: a page whose own minimum is malformed accepts no runner, a checkout's "dev" included)
-  for (const badMin of ["0.9.0rc1", "0.9.0\n", "v1"]) {
-    const z = await answer({ ...RESULT, version: "dev" }, badMin);
-    check(z.r.e?.kind === "old", `a malformed minimum (${JSON.stringify(badMin)}) pairs with nothing, not even dev (${z.r.e?.kind})`);
+  // (VERSION-4: every configured minimum is checked, the empty one and other types included; only null is "none")
+  for (const badMin of ["0.9.0rc1", "0.9.0\n", "v1", "", false, 0, 9, {}]) {
+    const z = await answerMin({ ...RESULT, version: "dev" }, badMin);
+    check(z.r.e?.kind === "config" && z.sock.closedWith === 1000, `a malformed minimum (${JSON.stringify(badMin)}) pairs with nothing, not even dev (${z.r.e?.kind})`);
+  }
+  for (const none of [null, undefined]) {
+    const z = await answerMin({ ...RESULT, version: "dev" }, none);
+    check(z.r.v instanceof Tunnel && !("needs" in z.hello.params), `no minimum (${String(none)}): dev pairs, and no needs is sent`);
   }
   a = await answer({ ...RESULT, version: "dev" });
   check(a.r.v instanceof Tunnel && !("needs" in a.hello.params), "with no minimum, no needs is sent, and dev pairs");

@@ -46,6 +46,7 @@ const NULL_BODY = new Set([204, 205, 304]);
 export const RUNNER_MIN = null;
 // (a runner's version: this subset of PEP 440's canonical form, whole, or "dev" (astra's VERSION-2): numbers, then
 // optionally a pre-release (aN, bN, rcN), a post-release (.postN), a dev release (.devN) and a local part (+x.y))
+const NEED_RE = /^\d{1,6}(\.\d{1,6}){0,3}$/; // (a minimum: a release's numbers, nothing else)
 const VERSION_RE = /^(?:dev|(\d{1,6}(?:\.\d{1,6}){0,3})((?:a|b|rc)\d{1,6})?(\.post\d{1,6})?(\.dev\d{1,6})?(\+[A-Za-z0-9]{1,16}(?:\.[A-Za-z0-9]{1,16}){0,3})?)$/;
 
 /**
@@ -56,7 +57,7 @@ const VERSION_RE = /^(?:dev|(\d{1,6}(?:\.\d{1,6}){0,3})((?:a|b|rc)\d{1,6})?(\.po
 export function versionAtLeast(v, need) {
   // (a malformed minimum never passes, not even for "dev" (daybreak3's VERSION-3); then the whole version, before
   // any ordering)
-  if (typeof need !== "string" || !/^\d{1,6}(\.\d{1,6}){0,3}$/.test(need)) return false;
+  if (typeof need !== "string" || !NEED_RE.test(need)) return false;
   if (v === "dev") return true;
   const m = typeof v === "string" ? VERSION_RE.exec(v) : null;
   if (!m || !m[1]) return false;
@@ -93,7 +94,7 @@ export class PairError extends Error {
   constructor(message, { kind = "refused", sent = true } = {}) {
     super(message);
     this.name = "PairError";
-    this.kind = kind; // "refused" | "protocol" | "closed" | "timeout" | "unreachable" | "port" | "old"
+    this.kind = kind; // "refused" | "protocol" | "closed" | "timeout" | "unreachable" | "port" | "old" | "config"
     // (whether the hello, and with it the code, may have reached the runner: only a failure before it was handed to
     // the socket is false, and only then may the same code be tried again (astra's RETRY-2))
     this.sent = sent;
@@ -345,7 +346,10 @@ export function pairTunnel({ port, code, session, remember = false, jwk, jkt, We
   if (!Number.isInteger(n) || n < 1 || n > 65535) return Promise.reject(new PairError("the port is a number from 1 to 65535", { kind: "port", sent: false }));
   if ((typeof code === "string") === (typeof session === "string")) return Promise.reject(new PairError("a pairing needs its code (or a remembered session)", { sent: false }));
   const params = { protocol: 1, purpose: "kernel", jwk: { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y }, jkt };
-  if (min) params.needs = min; // (so a runner too old for this page says so on its own side too)
+  // (null is the one "no minimum configured"; any other value is a configured minimum, checked, never skipped
+  // (daybreak3's and astra's VERSION-4))
+  if (min === undefined) min = RUNNER_MIN;
+  if (min !== null) params.needs = min; // (so a runner too old for this page says so on its own side too)
   if (typeof code === "string") {
     params.code = code.trim().toUpperCase();
     if (remember) params.remember = true;
@@ -394,7 +398,8 @@ export function pairTunnel({ port, code, session, remember = false, jwk, jkt, We
         && typeof r.version === "string" && VERSION_RE.test(r.version);
       if (!ok) return finish(new PairError("your computer's answer wasn't a pairing answer", { kind: "protocol" }));
       // (a runner older than this page needs: refused before anything is bound; the code was seen, so a new link)
-      if (min && !versionAtLeast(r.version, min)) return finish(new PairError(`your computer's sagebrush is ${r.version}; this page needs ${min} or newer`, { kind: "old" }));
+      if (min !== null && !(typeof min === "string" && NEED_RE.test(min))) return finish(new PairError("this page's required sagebrush version isn't valid, so it pairs with no runner", { kind: "config" }));
+      if (min !== null && !versionAtLeast(r.version, min)) return finish(new PairError(`your computer's sagebrush is ${r.version}; this page needs ${min} or newer`, { kind: "old" }));
       const t = new Tunnel(ws, r, { onClose });
       t.session = r.session ?? null;
       finish(null, t);
