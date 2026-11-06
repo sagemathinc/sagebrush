@@ -368,7 +368,7 @@ export function pairTunnel({ port, code, session, remember = false, jwk, jkt, We
       } else resolve(tunnel);
     };
     let sent = false; // (set as the hello is handed to the socket: from then on it may have arrived)
-    const timer = setTimeout(() => finish(new PairError(sent ? "your computer didn't answer the pairing: run sagebrush remote --loopback again for a new link" : "your computer didn't answer", { kind: "timeout", sent })), timeoutMs);
+    const timer = setTimeout(() => finish(new PairError(sent ? "your computer didn't answer the pairing: run uvx sagebrush@latest remote --loopback again for a new link" : "your computer didn't answer", { kind: "timeout", sent })), timeoutMs);
     try {
       ws = new WS(`ws://127.0.0.1:${n}${PAIR_PATH}`);
     } catch (e) {
@@ -381,7 +381,7 @@ export function pairTunnel({ port, code, session, remember = false, jwk, jkt, We
       ws.send(JSON.stringify({ jsonrpc: "2.0", id: "h1", method: "hello", params }));
     };
     ws.onerror = () => {};
-    ws.onclose = (e) => finish(new PairError(opened ? `your computer closed the connection (${e?.code ?? "?"})` : "nothing answered on that port: is sagebrush remote --loopback running?", { kind: opened ? "closed" : "unreachable", sent }));
+    ws.onclose = (e) => finish(new PairError(opened ? `your computer closed the connection (${e?.code ?? "?"})` : "nothing answered on that port: is uvx sagebrush@latest remote --loopback running?", { kind: opened ? "closed" : "unreachable", sent }));
     ws.onmessage = (e) => {
       let m;
       try {

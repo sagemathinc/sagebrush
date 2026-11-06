@@ -362,7 +362,7 @@ for (const [what, m, code] of [
   await r.retry();
   check(hellos.length === 1 && hellos[0].code === "ABCDEFGHIJKLMNOPQRSTUVWXYZ" && r.tunnel && r.kernel.ready && r.failed === null, "Retry pairs with the code that never reached the runner, and binds");
   r.close();
-  check(PAIRED.sessionGone === "this page needs a new link from your computer: run sagebrush remote --loopback again, then choose Your computer and paste it", "the session-gone words: neutral, since a post-send timeout ends there too (board's R3-a)");
+  check(PAIRED.sessionGone === "this page needs a new link from your computer: run uvx sagebrush@latest remote --loopback again, then choose Your computer and paste it", "the session-gone words: neutral, since a post-send timeout ends there too (board's R3-a)");
   // (board's R3-b: a bad port isn't a Block, so no Block hint; its code was never sent, so Retry keeps it)
   const rp = await pairedStarter({ WebSocket: class extends FakeSocket {} })({ notebook: "nb", answer: { code: "ABCDEFGHIJKLMNOPQRSTUVWXYZ", port: 70000 } });
   check(/port is a number/.test(rp.failed) && rp.hint === null, `a bad port: said, and no Block hint (${rp.failed} / ${rp.hint})`);
@@ -489,6 +489,15 @@ for (const [what, m, code] of [
   check(rc.failed === "this page has a broken version setting (a Sagebrush problem, not your computer)" && rc.hint === PAIRED.config && rc.noRetry === true,
     `a broken minimum: the words, the hint, no Retry (${rc.failed} / ${rc.hint})`);
   rc.close();
+}
+
+// (board's #782 B-1: uvx installs no `sagebrush` command, so every string the page shows that names the command names
+// the uvx one: checked over the two modules' string literals)
+{
+  const src = (await Bun.file(new URL("./remote-ui.js", import.meta.url)).text()) + (await Bun.file(new URL("./pair-tunnel.js", import.meta.url)).text());
+  const strings = [...src.matchAll(/"(?:[^"\\\n]|\\.)*"|`(?:[^`\\]|\\.)*`/g)].map((m) => m[0]).filter((t) => /remote --loopback/.test(t));
+  const bare = strings.filter((t) => t.split("remote --loopback").length - 1 !== t.split("uvx sagebrush@latest remote --loopback").length - 1);
+  check(strings.length >= 5 && bare.length === 0, `every message naming the command says uvx sagebrush@latest remote --loopback (${strings.length} strings; bare: ${JSON.stringify(bare)})`);
 }
 
 // ================= grader's #778 pins (r778 at 67a59056)

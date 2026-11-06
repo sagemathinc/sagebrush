@@ -318,9 +318,9 @@ export function statusText(text, network = NO_NETWORK) {
 export const PAIRED = {
   label: "Your computer",
   ready: "Your computer · ready",
-  sessionGone: "this page needs a new link from your computer: run sagebrush remote --loopback again, then choose Your computer and paste it",
+  sessionGone: "this page needs a new link from your computer: run uvx sagebrush@latest remote --loopback again, then choose Your computer and paste it",
   upgrade: "Run the newest version: uvx sagebrush@latest remote --loopback (it always fetches the latest).",
-  config: "Use This browser for now, and please report it.",
+  config: "Use This browser for now, and please let us know.",
   blocked: "If you blocked this site's access to apps on this device, allow it in the site settings (the icon left of the address), then Retry.",
 };
 
@@ -424,17 +424,17 @@ export const PAIR_SHEET = {
   title: "Run on your computer",
   consent: "Code you run will run on your computer, with your files and permissions.",
   how: "Run this in a terminal on this computer. It prints a link: open it, or paste it here.",
-  // (two ways to run the runner, each with Copy: uvx's isolated Python is always current but lacks the person's own
-  // packages, so their own environment gets pip; python -m makes the kernel's Python the one they're in)
+  // (one way to run the runner: uvx, which always fetches the newest; every message that names the command names this
+  // one, since uvx installs no `sagebrush` command (board's #782 B-1))
   // (one command, uvx: William, Nov 6)
-  quickLabel: "It fetches the newest Sagebrush and runs it in its own Python:",
+  quickLabel: "This fetches the newest Sagebrush and runs it in its own Python:",
   getUv: "No uv? Install it first: curl -LsSf https://astral.sh/uv/install.sh | sh (or see docs.astral.sh/uv).",
   command: "uvx sagebrush@latest remote --loopback",
-  windows: "On Windows, run these in WSL (Windows Subsystem for Linux); this browser pairs with it as usual.",
+  windows: "On Windows, run it in WSL (Windows Subsystem for Linux); this browser pairs with it as usual.",
   paste: "The link (or its pairing code and port)",
   lna: "Your browser may ask to let this site access apps on this device: click Allow.",
   safari: "Safari doesn't let a website connect to programs on your computer. On a Mac, open this page in Chrome, Edge or Firefox. (On an iPhone or iPad every browser is Safari underneath, and running on your computer needs a Mac or PC.)",
-  bad: "That isn't the link sagebrush remote --loopback printed.",
+  bad: "That isn't the link uvx sagebrush@latest remote --loopback printed.",
   copied: "Copied",
   copy: "Copy",
   allow: "Connect",
