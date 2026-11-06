@@ -1,0 +1,12 @@
+{
+ "v": 1,
+ "reason": "Sage layer gaps the bracket-notation spike found: improper integrals of powers on half-lines (engine/sym definite.rs, its root scan and joined logarithms), alternating, telescoping and trig series sums and the divergent 1/k, k^2 (lib/_sage_expr.py symbolic_sum), eigenvalues and eigenvectors over SR and QQ solves with SR right-hand sides (lib/_sage_matrix_sr.py, _sage_matrix.py). Re-measured with bun 1.4.4 (size-record.sh) on master 2c575a0a vs this branch rebased on it (0958a410), the same deltas as on e3b23a0a: cli/lib.gen.js +4352, cli/pyjs.cjs +6632, engine/lib/sage-more.src +3566, engine/lib/sage.pre +32539, engine/lib/sage.src +8665, engine/sagebrush-engine.wasm +958; no other row moves. Markers: exact, except cli/pyjs.cjs 6664 (+6632 measured, plus 32 B of margin, as it moves with master).",
+ "bytes": {
+  "cli/lib.gen.js": 4352,
+  "cli/pyjs.cjs": 6664,
+  "engine/lib/sage-more.src": 3566,
+  "engine/lib/sage.pre": 32539,
+  "engine/lib/sage.src": 8665,
+  "engine/sagebrush-engine.wasm": 958
+ }
+}

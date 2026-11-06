@@ -318,6 +318,88 @@ def right_kernel(a):
     return FreeModule_(SR, n, [r for r in B if any(_nonzero(x) for x in r)])
 
 
+def _eigen(a):
+    """[(eigenvalue, multiplicity)] of a square matrix over SR.
+
+    Exact rational entries: the QQ matrix's factors of the characteristic
+    polynomial, in Sage's order, a factor of degree 2 or more by its roots
+    in solve's order (radicals, as Sage gives them over SR, where QQ gives
+    QQbar numbers).  Otherwise the roots of det(a - t I) (n <= 3), with
+    their multiplicities, in solve's order.  (Sage's own order is its
+    symbolic backend's solve order; where the two differ, the values and
+    multiplicities still agree: sage-tests/test_matrix_sr_eigen.deviations.md.)"""
+    import _sage_matrix
+    n = a.nrows()
+    if n != a.ncols():
+        raise ValueError("matrix must be square")
+    SR = _sa().SR
+    t = SR.var("sbEigenT")
+    rows = [[_sage_matrix._sr_rational(x) for x in r] for r in a._rows]
+    out = []
+    if all(isinstance(x, int) or type(x).__name__ == "Rational" for r in rows for x in r):
+        q = Matrix(_sa().QQ, rows, n)
+        for g, e in q._eigen_factors():
+            if len(g) == 2:
+                out.append((_sr(g[0]) * -1 / g[1], e))
+            else:
+                p = sum(_sr(c) * t ** i for i, c in enumerate(g))
+                out.extend((s.rhs(), e) for s in _sa().solve(p == 0, t))
+        return out
+    _sr_guard(n, n)
+    cp = det(_sr_matrix([[_sr(x) - (t if i == j else 0) for j, x in enumerate(r)] for i, r in enumerate(a._rows)], n)).expand()
+    sols, mults = _sa().solve(cp == 0, t, multiplicities=True)
+    out = [(s.rhs(), int(m)) for s, m in zip(sols, mults)]
+    if sum(m for _, m in out) != n or any(t in s.variables() for s, _ in out):
+        raise NotImplementedError("the eigenvalues of this symbolic matrix are not available in sagebrush yet")
+    return out
+
+
+def eigenvalues(a):
+    """The eigenvalues with multiplicity (_eigen).
+
+    EXAMPLES::
+
+        sage: var('a b')
+        (a, b)
+        sage: matrix(SR, [[a, b], [b, a]]).eigenvalues()
+        [a - b, a + b]
+        sage: matrix(SR, [[1, 2], [3, 4]]).eigenvalues()
+        [-1/2*sqrt(33) + 5/2, 1/2*sqrt(33) + 5/2]
+        sage: matrix(SR, [[SR(2), SR(1)], [SR(1), SR(2)]]).eigenvalues()
+        [3, 1]
+    """
+    return [v for v, m in _eigen(a) for _ in range(m)]
+
+
+def eigenvectors(a, side):
+    """[(eigenvalue, [eigenvectors], multiplicity)]: each eigenspace's echelon
+    basis (right_kernel of a - lambda I, or of its transpose for the left).
+
+    EXAMPLES::
+
+        sage: var('a b')
+        (a, b)
+        sage: matrix(SR, [[a, b], [b, a]]).eigenvectors_right()
+        [(a - b, [(1, -1)], 1), (a + b, [(1, 1)], 1)]
+        sage: matrix(SR, [[1, 2], [3, 4]]).eigenvectors_right()
+        [(-1/2*sqrt(33) + 5/2, [(1, -1/4*sqrt(33) + 3/4)], 1), (1/2*sqrt(33) + 5/2, [(1, 1/4*sqrt(33) + 3/4)], 1)]
+    """
+    n = a.nrows()
+    rows = a._rows if side == "right" else a._raw_columns()
+    out = []
+    for lam, m in _eigen(a):
+        shifted = _sr_matrix([[_norm(_sr(x) - lam) if i == j else x for j, x in enumerate(r)] for i, r in enumerate(rows)], n)
+        basis = []
+        for r in right_kernel(shifted)._basis:
+            # (a quotient of radicals the elimination left, 2*(1/4*sqrt(33) -
+            # 3/4)/(1/2*sqrt(33) - 3/2), as the 1 it is: Sage's entries)
+            v = Vector(_sr(x).simplify_rational() if _sr(x)._op()[0] in ("mul", "pow") else _sr(x) for x in r)
+            v._ring = _sa().SR
+            basis.append(v)
+        out.append((lam, basis, m))
+    return out
+
+
 def left_kernel(a):
     """{v : v a = 0} (kernel() is this, as in Sage)."""
     m, n = a.nrows(), a.ncols()
