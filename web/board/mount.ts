@@ -124,7 +124,11 @@ export interface BoardHost {
   /** where "Sagebrush" in the top bar goes */
   home?: string;
   /** the example boards (Examples…) */
-  examples?: { list(): Promise<{ title: string; about: string; href: string; current?: boolean }[]> };
+  examples?: {
+    list(): Promise<{ title: string; about: string; href: string; current?: boolean }[]>;
+    /** the gallery's panel (web/examples/open.ts), where the site has it: whether it opened (else the list above) */
+    panel?(): Promise<boolean>;
+  };
   /** which Sagebrush runs this board's code: the site's version, its build (as
    * `sagebrush --version` says it) and its engine; or only the engine (round 0's 17) */
   version?: () => Promise<BoardVersion | null>;
@@ -327,6 +331,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       newNotebook: !host.files?.newNotebook, newMatlab: !host.files?.newNotebook, newFolder: !host.files?.newFolder, fromExample: !host.examples, open: !host.files?.open,
       saveCopy: !host.duplicate, share: true, delete: !host.files?.delete,
     },
+    // (a board has no share link yet (design/board-sharing.md): what to do instead, where the disabled item is)
+    why: { share: "Sharing a board isn't available yet: File ▸ Download ▸ HTML (one file) makes a page anyone can open" },
     downloads: [
       { key: "download", label: ".board.json" },
       { key: "html", label: "HTML (one file)", disabled: !host.exportHtml },
@@ -1444,6 +1450,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   closeOnBackdrop($("helpdlg") as HTMLDialogElement);
   closeOnBackdrop($("exdlg") as HTMLDialogElement);
   $("examples").onclick = async () => {
+    if (await host.examples?.panel?.()) return;
     const list = $("exlist");
     try {
       const ex = await host.examples!.list();
