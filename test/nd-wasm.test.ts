@@ -14,14 +14,20 @@ import { Worker } from "node:worker_threads";
 const root = join(__dirname, "..", "..");
 const PAGE = 65536;
 // the memory map (engine/nd/src/boundary.rs): the module's own data and stack below its floor; the descriptor at
-// BASE; thread stacks (1 MiB each) from STACKS; the writable arena from ARENA
-const BASE = 8 << 20, STACKS = BASE + PAGE, STACK = 1 << 20, ARENA = 16 << 20;
+// BASE, the pool's control words after it (CTL); thread stacks (SLOT each, the pool's, recorded by nd_pool_init:
+// a job on more than one thread runs only within it, each participant on its own slot) from STACKS; the writable
+// arena from ARENA
+const BASE = 8 << 20, CTL = BASE + 64, STACKS = BASE + PAGE, SLOT = 256 << 10, ARENA = 16 << 20;
+const top = (id: number) => STACKS + (id + 1) * SLOT;
 // (engine/nd/src/gemm.rs CROSS_KERNEL_FNV: the kernels without FMA, the SIMD128 one among them)
 const CROSS_KERNEL_FNV = 0x364c3cb66df0cabbn;
 // the module: file, the microkernel it must report, and its bits (a list, so more modules can be added)
 const MODULES = [{ file: "sagebrush-nd.wasm", kernel: "wasm-simd128-4x4", pins: [CROSS_KERNEL_FNV] }];
 
-type Exports = { __stack_pointer: WebAssembly.Global; nd_gemm_part(desc: number, id: number): number; nd_info(what: number): number };
+type Exports = {
+  __stack_pointer: WebAssembly.Global; nd_gemm_part(desc: number, id: number): number; nd_info(what: number): number;
+  nd_pool_init(ctl: number, stacks: number, slot: number, participants: number): number;
+};
 
 for (const MOD of MODULES) {
   const bytes = readFileSync(join(root, "wasm", MOD.file));
@@ -83,12 +89,20 @@ for (const MOD of MODULES) {
       ref[j * m + i] = s;
     }
     const bound = 10 * k * 2.220446049250313e-16 * (k / 4);
+    assert.equal(ex.nd_pool_init(CTL, STACKS, SLOT, 8), 1);
+    assert.equal(ex.nd_pool_init(CTL, STACKS, SLOT, 8), 0, "a second pool record");
+    const sp = ex.__stack_pointer.value;
     let first: Float64Array | null = null;
     for (const t of [1, 3, 8]) {
       f64.fill(Number.NaN, L.c / 8, L.c / 8 + m * n);
       u32.set(L.words(t), L.desc / 4);
-      // (each thread's share, called in turn: the partition, not the scheduling, is what is tested here)
-      for (let id = 0; id < 8; id++) assert.equal(ex.nd_gemm_part(L.desc, id), 1, `t=${t} id=${id} refused`);
+      // (each thread's share, called in turn, each on its own stack slot: the partition, not the scheduling, is what
+      // is tested here)
+      for (let id = 0; id < 8; id++) {
+        ex.__stack_pointer.value = top(id);
+        assert.equal(ex.nd_gemm_part(L.desc, id), 1, `t=${t} id=${id} refused`);
+      }
+      ex.__stack_pointer.value = sp;
       const c = f64.slice(L.c / 8, L.c / 8 + m * n);
       let worst = 0;
       for (let i = 0; i < m * n; i++) worst = Math.max(worst, Math.abs(c[i] - ref[i]));
@@ -102,8 +116,19 @@ for (const MOD of MODULES) {
   test(`${MOD.file}: the committed nd module's entry point refuses every bad job before writing anything (numerics-core M0, E1/ND-M1)`, () => {
     const [m, k, n] = [8, 8, 8];
     const L = layout(m, k, n, 2, undefined, 4 << 20); // (4 MiB of free arena after the scratch)
-    const pages = Math.ceil((L.end + STACK) / PAGE) + 1;
+    const pages = Math.ceil((L.end + SLOT) / PAGE) + 1;
     const { memory, ex } = instance(pages);
+    // (a pool of 3: participant id's calls run on its slot, `on`; the jobs here are on 2 threads)
+    assert.equal(ex.nd_pool_init(CTL, STACKS, SLOT, 3), 1);
+    const sp = ex.__stack_pointer.value;
+    const on = (desc: number, id: number) => {
+      ex.__stack_pointer.value = top(Math.min(id, 2));
+      try {
+        return ex.nd_gemm_part(desc, id);
+      } finally {
+        ex.__stack_pointer.value = sp;
+      }
+    };
     const mem = pages * PAGE;
     const f64 = new Float64Array(memory.buffer), u32 = new Uint32Array(memory.buffer), u8 = new Uint8Array(memory.buffer);
     const st = { s: 99 };
@@ -113,22 +138,21 @@ for (const MOD of MODULES) {
     const put = (at: number, d: number[]) => u8.set(new Uint8Array(new Uint32Array(d.map((x) => x >>> 0)).buffer), at);
     // (the control: the good job runs; its C is the reference for the reordered layouts below)
     put(L.desc, good);
-    assert.equal(ex.nd_gemm_part(L.desc, 0), 1);
-    assert.equal(ex.nd_gemm_part(L.desc, 1), 1);
+    assert.equal(on(L.desc, 0), 1);
+    assert.equal(on(L.desc, 1), 1);
     const goodC = f64.slice(L.c / 8, L.c / 8 + m * n);
     // a refused job: 0, and not one byte of memory changed (the module's part, the descriptor, the arena)
-    // (from the module's floor: below it is the module's own stack, which every call uses; `frame`, a caller's
-    // stack placed in the arena, is excluded likewise)
+    // (from the module's floor: below it is the module's own stack; the pool's stack slots, which the calls use,
+    // and `frame`, a caller's stack placed in the arena, are excluded likewise)
     const floor = ex.nd_info(1);
-    const unchanged = (before: Uint8Array, frame?: [number, number]) => {
+    const unchanged = (before: Uint8Array, frame: [number, number] = [STACKS, top(2)]) => {
       const now = u8.subarray(floor, L.end), was = before.subarray(0, L.end - floor);
-      if (!frame) return Buffer.compare(Buffer.from(was), Buffer.from(now)) === 0;
-      return now.every((x, i) => x === was[i] || (floor + i >= frame[0] && floor + i < frame[1]));
+      return now.every((x, i) => x === was[i] || (floor + i >= STACKS && floor + i < top(2)) || (floor + i >= frame[0] && floor + i < frame[1]));
     };
     const refused = (name: string, d: number[], descAt = L.desc, id = 0, at = L.desc, frame?: [number, number]) => {
       put(at, d);
       const before = u8.slice(floor, L.end);
-      assert.equal(ex.nd_gemm_part(descAt, id), 0, `${name}: not refused`);
+      assert.equal(frame ? ex.nd_gemm_part(descAt, id) : on(descAt, id), 0, `${name}: not refused`);
       assert.ok(unchanged(before, frame), `${name}: memory was written`);
     };
     const with_ = (i: number, v: number) => good.map((x, j) => (j === i ? v : x));
@@ -183,22 +207,30 @@ for (const MOD of MODULES) {
       d[7] = r === "a" ? R.a : R.b;
       refused(`the scratch overlapping only ${r.toUpperCase()}`, d);
     }
-    // (the calling thread's frame must lie below the arena: in it, or above it, refused)
-    const sp = ex.__stack_pointer.value;
-    for (const [what, top] of [["in", L.hi - PAGE], ["above", L.end + STACK]] as const) {
-      ex.__stack_pointer.value = top;
-      refused(`the caller's stack ${what} the arena`, good, L.desc, 0, L.desc, [top - PAGE, top]);
+    // (a one-thread job's calling frame must lie below the arena: in it, or above it, refused; a threaded job's in
+    // its own slot of the pool: another participant's slot, or the module's own stack, refused)
+    for (const [what, t] of [["in", L.hi - PAGE], ["above", L.end + SLOT]] as const) {
+      ex.__stack_pointer.value = t;
+      refused(`the caller's stack ${what} the arena`, with_(6, 1), L.desc, 0, L.desc, [t - PAGE, t]);
       ex.__stack_pointer.value = sp;
     }
-    // ids at or beyond the job's thread count: nothing to do (1), nothing written
+    for (const [what, t] of [["participant 1's slot", top(1)], ["the module's own stack", sp]] as const) {
+      ex.__stack_pointer.value = t;
+      refused(`participant 0 on ${what}`, good, L.desc, 0, L.desc, [t - PAGE, t]);
+      ex.__stack_pointer.value = sp;
+    }
+    refused("3 threads on a pool of 3, participant 0 on the module's own stack", with_(6, 3), L.desc, 0, L.desc, [sp - PAGE, sp]);
+    // ids at or beyond the job's thread count, within the pool: nothing to do (1), nothing written; beyond the pool:
+    // refused (0), nothing written
     put(L.desc, good);
     const before = u8.slice(floor, L.end);
-    assert.equal(ex.nd_gemm_part(L.desc, 2), 1);
-    assert.equal(ex.nd_gemm_part(L.desc, 0xffffffff), 1);
+    assert.equal(on(L.desc, 2), 1);
+    assert.equal(on(L.desc, 3), 0);
+    assert.equal(on(L.desc, 0xffffffff), 0);
     assert.ok(unchanged(before), "an id beyond the threads wrote memory");
     // (grader R3: thread 1 of 2 uses its own scratch: thread 0's stays as it was)
     f64.fill(7, L.s0 / 8, L.s0 / 8 + 2 * SCRATCH_LEN);
-    assert.equal(ex.nd_gemm_part(L.desc, 1), 1);
+    assert.equal(on(L.desc, 1), 1);
     assert.ok(f64.subarray(L.s0 / 8, L.s0 / 8 + SCRATCH_LEN).every((x) => x === 7), "thread 1 wrote thread 0's scratch");
     assert.ok(!f64.subarray(L.s0 / 8 + SCRATCH_LEN, L.s0 / 8 + 2 * SCRATCH_LEN).every((x) => x === 7), "thread 1 left its own scratch alone");
     // (the partition is in blocks of the kernel's NR, 4 in both modules: thread 1 of 2 on n = 8 computes
@@ -207,7 +239,7 @@ for (const MOD of MODULES) {
       const P = layout(8, 8, 8, 2, undefined, 4 << 20);
       put(P.desc, P.words());
       f64.fill(7, P.c / 8, P.c / 8 + 64);
-      assert.equal(ex.nd_gemm_part(P.desc, 1), 1);
+      assert.equal(on(P.desc, 1), 1);
       assert.ok(f64.subarray(P.c / 8, P.c / 8 + 32).every((x) => x === 7), "thread 1 wrote columns 0..4");
       assert.ok(f64.subarray(P.c / 8 + 32, P.c / 8 + 64).every((x) => x !== 7), "thread 1 left columns 4..8");
       put(L.desc, good);
@@ -215,7 +247,7 @@ for (const MOD of MODULES) {
     // zero dimensions: nothing to compute, accepted
     for (const [i, what] of [[3, "m"], [4, "n"], [5, "k"]] as const) {
       put(L.desc, with_(i, 0));
-      assert.equal(ex.nd_gemm_part(L.desc, 0), 1, `${what} = 0`);
+      assert.equal(on(L.desc, 0), 1, `${what} = 0`);
     }
     // (grader advisory: valid layouts in other orders, C before A and B, run and give the same C)
     for (const order of [["c", "a", "b", "s"], ["s", "c", "b", "a"]]) {
@@ -227,8 +259,8 @@ for (const MOD of MODULES) {
       f64.set(ins.subarray(0, m * k), R.a / 8);
       f64.set(ins.subarray(m * k), R.b / 8);
       put(R.desc, R.words());
-      assert.equal(ex.nd_gemm_part(R.desc, 0), 1, `order ${order}`);
-      assert.equal(ex.nd_gemm_part(R.desc, 1), 1, `order ${order}`);
+      assert.equal(on(R.desc, 0), 1, `order ${order}`);
+      assert.equal(on(R.desc, 1), 1, `order ${order}`);
       assert.ok(f64.subarray(R.c / 8, R.c / 8 + m * n).every((x, i) => Object.is(x, goodC[i])), `order ${order}: a different C`);
       f64.set(ins.subarray(0, m * k), L.a / 8);
       f64.set(ins.subarray(m * k), L.b / 8);
@@ -252,7 +284,7 @@ for (const MOD of MODULES) {
 
   test(`${MOD.file}: the committed nd module on real worker threads sharing its memory: 3 threads give the 1-thread bits; a thread whose stack is in the arena refuses`, async () => {
     const [m, k, n] = [64, 300, 100];
-    const L = layout(m, k, n, 3, undefined, 2 * STACK);
+    const L = layout(m, k, n, 3, undefined, 2 * SLOT);
     const { memory, ex } = instance(Math.ceil(L.end / PAGE) + 1);
     const f64 = new Float64Array(memory.buffer), u32 = new Uint32Array(memory.buffer);
     const st = { s: 7 };
@@ -263,14 +295,19 @@ for (const MOD of MODULES) {
     const one = f64.slice(L.c / 8, L.c / 8 + m * n);
     f64.fill(Number.NaN, L.c / 8, L.c / 8 + m * n);
     u32.set(L.words(3), L.desc / 4);
-    // (the stacks below the arena, as the page lays them out)
-    const runs = [1, 2].map((id) => onWorker(memory, L.desc, id, STACKS + (id + 1) * STACK));
+    // (the pool's stacks below the arena, as the page lays them out; the caller on slot 0)
+    assert.equal(ex.nd_pool_init(CTL, STACKS, SLOT, 3), 1);
+    const runs = [1, 2].map((id) => onWorker(memory, L.desc, id, top(id)));
+    const sp = ex.__stack_pointer.value;
+    ex.__stack_pointer.value = top(0);
     assert.equal(ex.nd_gemm_part(L.desc, 0), 1);
+    ex.__stack_pointer.value = sp;
     assert.deepEqual(await Promise.all(runs), [1, 1]);
     const three = f64.slice(L.c / 8, L.c / 8 + m * n);
     assert.ok(three.every((x, i) => Object.is(x, one[i])), "3 worker threads' bits differ from 1 thread's");
-    // a worker given a stack in the arena's free end: refused, C as it was
+    // a worker given a stack in the arena's free end, or another participant's slot: refused, C as it was
     assert.equal(await onWorker(memory, L.desc, 1, (L.end - PAGE) & ~15), 0);
+    assert.equal(await onWorker(memory, L.desc, 1, top(2)), 0);
     assert.ok(f64.slice(L.c / 8, L.c / 8 + m * n).every((x, i) => Object.is(x, one[i])), "a refused worker wrote C");
   });
 

@@ -25,17 +25,24 @@
 // same bits warm or cold.
 
 import { sha256Hex } from "./sha256";
+import { Crew, type WorkerLike } from "./nd-crew";
 
 interface Nd {
   nd_info(what: number): number;
   nd_potrf(desc: number): number;
   nd_solve(desc: number): number;
+  nd_gemm_part(desc: number, id: number): number;
+  nd_pool_init(ctl: number, stacks: number, slot: number, participants: number): number;
+  __stack_pointer: WebAssembly.Global;
 }
 
 let decided = false;
 let ex: Nd | null = null;
 let mem: WebAssembly.Memory | null = null;
+let ndModule: WebAssembly.Module | null = null;
 let floor = 0;
+// (where each call's descriptor and arena start: the floor, 64-aligned, or above the thread pool's region)
+let base = 0;
 let kernel = "";
 let why = "not used yet";
 // the warm-up: none asked; asked (numpy imported); warming; ready (compiled, for decide()); unused (the decision
@@ -119,16 +126,22 @@ function decide(): void {
     return;
   }
   try {
-    const e = new WebAssembly.Instance(pre ?? new WebAssembly.Module(ndBytes() as any), { env: { memory: m } }).exports as unknown as Nd;
-    // (the host's part of memory starts at the module's __heap_base; the selected kernel's name)
-    floor = e.nd_info(1);
-    kernel = new TextDecoder().decode(new Uint8Array(m.buffer, e.nd_info(2), e.nd_info(3)).slice());
-    ex = e;
-    mem = m;
+    instantiate(pre ?? new WebAssembly.Module(ndBytes() as any), m);
     why = "";
   } catch (err: any) {
     why = `the numerics module could not be loaded (${err?.message ?? err})`;
   }
+}
+
+function instantiate(mod: WebAssembly.Module, m: WebAssembly.Memory): void {
+  const e = new WebAssembly.Instance(mod, { env: { memory: m } }).exports as unknown as Nd;
+  // (the host's part of memory starts at the module's __heap_base; the selected kernel's name)
+  floor = e.nd_info(1);
+  base = Math.ceil(floor / 64) * 64;
+  kernel = new TextDecoder().decode(new Uint8Array(m.buffer, e.nd_info(2), e.nd_info(3)).slice());
+  ex = e;
+  mem = m;
+  ndModule = mod;
 }
 
 /** Whether engine/nd's kernels run in this session (decided at the first call, then fixed). */
@@ -209,11 +222,12 @@ function reserve(bytes: number): void {
 export function ndCholesky(A: Float64Array, n: number): Float64Array | number {
   // A's row-major lower triangle is the column-major upper triangle that
   // nd_potrf reads, and the R it writes there (A = R'R) read row-major is L =
-  // R'. The layout: the descriptor at the host's floor, then the arena (A,
+  // R'. The layout: the descriptor at the base (the host's floor, or above the thread pool), then the arena (A,
   // the work, the report), each 64-byte aligned.
+  live();
   const SCRATCH = ex!.nd_info(0);
   const up = (x: number) => Math.ceil(x / 64) * 64;
-  const desc = up(floor), lo = desc + 64;
+  const desc = base, lo = desc + 64;
   const a = lo, wl = n * n + SCRATCH, work = up(a + 8 * n * n), report = up(work + 8 * wl), hi = report + 16;
   reserve(hi);
   const f64 = new Float64Array(mem!.buffer), u32 = new Uint32Array(mem!.buffer);
@@ -237,11 +251,12 @@ export function ndCholesky(A: Float64Array, n: number): Float64Array | number {
 export function ndLu(A: Float64Array, n: number, B: Float64Array | null, r: number): { diag: Float64Array; sign: number; x: Float64Array; singular: boolean } | null {
   // nd_solve reads column-major operands: A and B go in transposed (the
   // identity is its own transpose), X comes out transposed. The layout: the
-  // descriptor at the host's floor, then the arena (A, B, the pivots, the
+  // descriptor at the base (the host's floor, or above the thread pool), then the arena (A, B, the pivots, the
   // work, the report), each 64-byte aligned.
+  live();
   const SCRATCH = ex!.nd_info(0);
   const up = (x: number) => Math.ceil(x / 64) * 64;
-  const desc = up(floor), lo = desc + 64;
+  const desc = base, lo = desc + 64;
   const wl = Math.max(n * n, n * r) + SCRATCH;
   const a = lo, b = up(a + 8 * n * n), ipiv = up(b + 8 * n * r), work = up(ipiv + 4 * n), report = up(work + 8 * wl), hi = report + 32;
   reserve(hi);
@@ -264,4 +279,247 @@ export function ndLu(A: Float64Array, n: number, B: Float64Array | null, r: numb
   let sign = 1;
   for (let k = 0; k < n; k++) if (u32[ipiv / 4 + k] !== k) sign = -sign;
   return { diag, sign, x, singular: code === 2 };
+}
+
+// The thread pool (threads r2, PR (1)): large matrix products (ndMatmul) run on engine/nd's GEMM, its columns
+// dealt out to the calling thread and up to min(cores - 1, 8) helper threads, with the same bits as on one thread
+// (numerics-core r4.2 §7: every element summed in the same order whatever the thread count). So whether a product
+// gets threads changes its time only: products are routed to engine/nd by their size alone (ND_MATMUL_MIN), and a
+// product that comes before the pool is ready runs on one thread.
+// - Where: only where the calling thread may block and threads can be made: a Node thread (the CLI), or the
+//   notebook's worker (a dedicated Worker, starting the fixed same-origin helper script sagebrush-nd-helper.js,
+//   src/runtime/nd-helper.ts); never a page's main thread. Elsewhere, and with 2 cores or fewer, one thread.
+// - When: lazily, at the first product that is large enough; never at load. Its helpers then start in the
+//   background, each instantiating the module on its own stack, and count themselves ready in the control words.
+// - The memory, from the module's floor: the control words (64 bytes), the GEMM descriptor (64), one stack slot
+//   of SLOT bytes per participant (the caller is participant 0), recorded once in the module (nd_pool_init),
+//   which checks every threaded job against it (engine/nd/src/boundary.rs check_part); then each call's arena.
+// - A job: the caller writes the descriptor, starts the generation, runs its own share, then waits in bounded
+//   slices for every helper to count in; no helper finishing for STALL_MS fails the job.
+// - Failure (a stall, a helper's error or refusal, a refused job, a pool that did not start within STARTUP_MS):
+//   the generation goes terminal, every helper is terminated, and the whole memory is abandoned: never read or
+//   reused, since a late helper could still write it. The module runs on in a fresh memory and instance on one
+//   thread for the rest of the session, and the product in hand is computed again there from its operands. If
+//   no fresh memory can be made, that call and every later one fail with a clear error.
+const SLOT = 256 * 1024;
+const STALL_MS = 15000;
+const STARTUP_MS = 20000;
+const MAX_HELPERS = 8;
+/** A matrix product runs on engine/nd when each of its three dimensions is at least this. */
+export const ND_MATMUL_MIN = 256;
+// the control words (Int32), as src/runtime/nd-helper.ts has them
+const GEN = 0, DONE = 1, FAIL = 2, READY = 3, BROKEN = 4;
+
+type Pool = { crew: Crew; c: Int32Array; helpers: number; desc: number; t0: number; ready: boolean; failed: string | null };
+let pool: Pool | null = null;
+// none: not tried yet; on: a pool, starting or ready; off: one thread for the rest of the session (threadsWhy)
+let threads: "none" | "on" | "off" = "none";
+let threadsWhy = "";
+// (set when no fresh memory could be made after a failure: every later call fails with it)
+let dead: string | null = null;
+
+/** The tests' hooks into the pool, set only through ndTest (which no production code calls): the helper count;
+ *  a fault in helper 1 (src/runtime/nd-helper.ts), and how long a "late" one sleeps; shorter stall and startup
+ *  bounds; helpers left unterminated on failure (as a helper that can't be stopped in time); a fresh memory that
+ *  can't be made; a second bootstrap, or a malformed first one, sent to helper 1. */
+export type NdTestHooks = {
+  helpers?: number; fault?: "exit" | "throw" | "late"; lateMs?: number; stallMs?: number; startupMs?: number;
+  noTerminate?: boolean; memoryFault?: boolean; rebootstrap?: boolean; malformed?: boolean;
+};
+const tst = { hooks: null as NdTestHooks | null, made: 0, terminated: 0, products: 0, teams: 0, failovers: 0, abandoned: [] as WebAssembly.Memory[], unstopped: [] as Crew[] };
+
+/** For the tests only: set the hooks (null: none), and see the counters (workers made and terminated, products,
+ *  threaded jobs started, failovers) and the memories abandoned. */
+export function ndTest(hooks?: NdTestHooks | null): typeof tst {
+  if (hooks !== undefined) tst.hooks = hooks;
+  return tst;
+}
+
+/** The pool's state, for np.linalg._kernels() and the tests: the threads a large product gets now, and why not more. */
+export function ndThreads(): { threads: number; state: string; why: string } {
+  const p = pool;
+  if (p && !p.ready && p.failed === null && Atomics.load(p.c, READY) >= p.helpers && !Atomics.load(p.c, BROKEN)) p.ready = true;
+  const state = threads === "on" ? (p?.ready ? "ready" : "starting") : threads;
+  return { threads: p?.ready ? p.helpers + 1 : 1, state, why: dead ?? threadsWhy };
+}
+
+const now = () => performance.now();
+
+function helperCount(): number {
+  if (tst.hooks?.helpers !== undefined) return tst.hooks.helpers;
+  const g = globalThis as any;
+  const hw = Number(g.navigator?.hardwareConcurrency ?? g.process?.getBuiltinModule?.("os")?.availableParallelism?.() ?? 1);
+  return hw <= 2 ? 0 : Math.min(hw - 1, MAX_HELPERS);
+}
+
+// How this host makes a helper, or null if it can't here: in the notebook's worker, a module Worker of the helper
+// script's fixed URL (web/worker.ts sets it); in Node, a worker_threads Worker of the helper's code (the CLI bundle
+// carries it, scripts/build-cli.mjs) or of nd-helper.js beside this module.
+function helperMaker(): (() => WorkerLike) | null {
+  const g = globalThis as any;
+  if (typeof g.__SAGEBRUSH_ND_HELPER_URL__ === "string") {
+    if (typeof g.Worker !== "function" || typeof g.document !== "undefined") return null;
+    const url = g.__SAGEBRUSH_ND_HELPER_URL__;
+    return () => new g.Worker(url, { type: "module" });
+  }
+  const wt = g.process?.getBuiltinModule?.("worker_threads"), fs = g.process?.getBuiltinModule?.("fs");
+  let src = "", code = false;
+  if (typeof g.__SAGEBRUSH_ND_HELPER__ === "string") [src, code] = [g.__SAGEBRUSH_ND_HELPER__, true];
+  else if (typeof __dirname === "string" && fs?.existsSync(__dirname + "/nd-helper.js")) src = __dirname + "/nd-helper.js";
+  if (!wt || !src) return null;
+  return () => {
+    const w = new wt.Worker(src, { eval: code });
+    const like: WorkerLike = { postMessage: (m) => w.postMessage(m), terminate: () => void w.terminate(), onerror: null, onmessageerror: null, onmessage: null };
+    w.on("error", (e: Error) => like.onerror?.(e));
+    w.on("messageerror", () => like.onmessageerror?.(null));
+    w.on("message", (data: unknown) => like.onmessage?.({ data }));
+    w.on("exit", (code: number) => like.onerror?.({ message: `stopped (exit code ${code})` }));
+    // (after the listeners, which would hold it again: the pool never keeps the process alive)
+    w.unref();
+    return like;
+  };
+}
+
+// Start the pool, if this host can have one: its region reserved and recorded, the caller moved onto stack slot 0,
+// and the helpers made and sent their bootstraps (they start in the background).
+function startPool(): void {
+  const make = helperMaker(), helpers = helperCount();
+  if (!make || helpers < 1) {
+    threads = "off";
+    threadsWhy = make ? "2 cores or fewer" : "no worker threads here";
+    return;
+  }
+  const ctl = base, desc = ctl + 64, stacks = desc + 64, top = stacks + (helpers + 1) * SLOT;
+  reserve(top + 64);
+  if (ex!.nd_pool_init(ctl, stacks, SLOT, helpers + 1) !== 1) {
+    threads = "off";
+    threadsWhy = "the numerics module refused the pool's layout";
+    return;
+  }
+  ex!.__stack_pointer.value = stacks + SLOT;
+  base = top;
+  const h = tst.hooks;
+  const p: Pool = { crew: null as any, c: new Int32Array(mem!.buffer, ctl, 16), helpers, desc, t0: now(), ready: false, failed: null };
+  p.crew = new Crew(() => {
+    const w = make();
+    tst.made++;
+    const end = w.terminate.bind(w);
+    w.terminate = () => {
+      tst.terminated++;
+      end();
+    };
+    return w;
+  }, (why) => (p.failed ??= why));
+  pool = p;
+  threads = "on";
+  try {
+    for (let id = 1; id <= helpers; id++) {
+      const boot: any = { module: ndModule, memory: mem, id, stackTop: stacks + (id + 1) * SLOT, ctl, desc };
+      if (id === 1 && h?.fault) Object.assign(boot, { fault: h.fault, lateMs: h.lateMs });
+      if (id === 1 && h?.malformed) boot.id = 0;
+      p.crew.add(`helper ${id}`, boot);
+      if (id === 1 && h?.rebootstrap) p.crew.workers[0].postMessage(boot);
+    }
+  } catch (e: any) {
+    failover(`the thread pool could not start (${e?.message ?? e})`);
+  }
+}
+
+// Before any call into the module: a failed or overdue pool is dropped (failover); a pool all of whose helpers
+// counted in becomes ready; and after a failure with no fresh memory, every call fails.
+function live(): void {
+  const p = pool;
+  if (p) {
+    if (p.failed !== null || Atomics.load(p.c, BROKEN)) failover(p.failed ?? "a helper refused a message");
+    else if (!p.ready) {
+      if (Atomics.load(p.c, READY) >= p.helpers) p.ready = true;
+      else if (now() - p.t0 > (tst.hooks?.startupMs ?? STARTUP_MS)) failover("the thread pool did not start in time");
+    }
+  }
+  if (dead !== null) throw new Error(dead);
+}
+
+// Drop the pool and its whole memory (never read or reused again), and go on in a fresh memory and instance on one
+// thread; an Error if none can be made (then every later call fails too).
+function failover(why: string): void {
+  const p = pool!;
+  pool = null;
+  threads = "off";
+  threadsWhy = why;
+  tst.failovers++;
+  Atomics.store(p.c, GEN, -1);
+  Atomics.notify(p.c, GEN);
+  if (tst.hooks?.noTerminate) tst.unstopped.push(p.crew);
+  else p.crew.end();
+  tst.abandoned.push(mem!);
+  ex = null;
+  mem = null;
+  const m = tst.hooks?.memoryFault ? null : sharedMemory();
+  if (m !== null) {
+    try {
+      instantiate(ndModule!, m);
+      return;
+    } catch {}
+  }
+  dead = `the numerics module's thread pool failed (${why}), and no new memory could be made for the module`;
+  throw new Error(dead);
+}
+
+/** C = A B for the row-major n x m A and m x p B (float64): C row-major, n x p. On the thread pool when it is ready,
+ *  else on one thread, the same bits either way. Only when useNd(). A RangeError if the module's memory can't
+ *  hold the operands. */
+export function ndMatmul(A: Float64Array, B: Float64Array, n: number, m: number, p: number): Float64Array {
+  tst.products++;
+  live();
+  if (threads === "none") startPool();
+  const P = pool?.ready ? pool : null;
+  const t = gemmOn(A, B, n, m, p, P);
+  if (typeof t !== "string") return t;
+  failover(t);
+  const one = gemmOn(A, B, n, m, p, null);
+  if (typeof one === "string") throw new Error(one);
+  return one;
+}
+
+// The product on the pool P (null: on this thread alone), or why it failed. nd_gemm_part reads column-major
+// operands: row-major A (n x m) is column-major A^T, so C^T = B^T A^T (p x n, column-major) is C row-major, and
+// the module's A is B's buffer, its B A's buffer, with its m, n, k = p, n, m.
+function gemmOn(A: Float64Array, B: Float64Array, n: number, m: number, p: number, P: Pool | null): Float64Array | string {
+  const T = P ? P.helpers + 1 : 1;
+  const up = (x: number) => Math.ceil(x / 64) * 64;
+  const desc = P ? P.desc : base, lo = P ? base : base + 64;
+  const stride = up(ex!.nd_info(0) * 8);
+  const a = lo, b = up(a + 8 * m * p), c = up(b + 8 * n * m), scratch = up(c + 8 * n * p), hi = scratch + T * stride;
+  reserve(hi);
+  const f64 = new Float64Array(mem!.buffer), u32 = new Uint32Array(mem!.buffer);
+  f64.set(B.subarray(0, m * p), a / 8);
+  f64.set(A.subarray(0, n * m), b / 8);
+  u32.set([a, b, c, p, n, m, T, scratch, stride, lo, hi], desc / 4);
+  if (!P) {
+    if (ex!.nd_gemm_part(desc, 0) !== 1) return "the numerics module refused a matrix product";
+    return f64.slice(c / 8, c / 8 + n * p);
+  }
+  const w = P.c, stall = tst.hooks?.stallMs ?? STALL_MS;
+  Atomics.store(w, DONE, 0);
+  Atomics.store(w, FAIL, 0);
+  Atomics.add(w, GEN, 1);
+  Atomics.notify(w, GEN);
+  tst.teams++;
+  let ok = false;
+  try {
+    ok = ex!.nd_gemm_part(desc, 0) === 1;
+  } catch {}
+  // (bounded: no helper finishing for `stall` ms fails the job; a clock that isn't finite or goes back fails it too)
+  let last = now(), seen = -1;
+  for (let d; (d = Atomics.load(w, DONE)) < P.helpers; ) {
+    const t = now();
+    if (P.failed !== null || Atomics.load(w, BROKEN)) return P.failed ?? "a helper refused a message";
+    if (!Number.isFinite(t) || t < last) return "the clock failed";
+    if (d !== seen) [seen, last] = [d, t];
+    else if (t - last > stall) return `a helper stopped responding (${d} of ${P.helpers} finished)`;
+    Atomics.wait(w, DONE, d, 50);
+  }
+  if (!ok) return "the numerics module refused a threaded matrix product";
+  if (Atomics.load(w, FAIL)) return `${Atomics.load(w, FAIL)} helper(s) failed a matrix product`;
+  return f64.slice(c / 8, c / 8 + n * p);
 }

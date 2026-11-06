@@ -75,9 +75,13 @@ writeFileSync(join(out, "packages.gen.js"), `globalThis.__SAGEBRUSH_PACKAGES__ =
 // first written or read: src/runtime/raster.ts; and engine/nd's numerics
 // module, wasm/sagebrush-nd.wasm, at np.linalg.cholesky's first call:
 // src/runtime/nd.ts)
+// (and nd's thread-pool helper, src/runtime/nd-helper.ts: the code each helper thread of nd.ts's pool runs, as a
+// worker_threads Worker; one copy, the script the browser serves as sagebrush-nd-helper.js, web/build.ts)
+const ndHelper = execFileSync("bun", ["build", join(root, "src", "runtime", "nd-helper.ts"), "--target=node", "--format=esm", "--minify"], { cwd: root, encoding: "utf8" });
 writeFileSync(join(out, "engine.gen.js"), `globalThis.__SAGEBRUSH_ENGINE__ = ${JSON.stringify(readFileSync(join(root, "wasm", "sagebrush-engine.wasm")).toString("base64"))};\n` +
   `globalThis.__SAGEBRUSH_RASTER__ = ${JSON.stringify(readFileSync(join(root, "wasm", "sagebrush-raster.wasm")).toString("base64"))};\n` +
-  `globalThis.__SAGEBRUSH_ND__ = ${JSON.stringify(readFileSync(join(root, "wasm", "sagebrush-nd.wasm")).toString("base64"))};\n`);
+  `globalThis.__SAGEBRUSH_ND__ = ${JSON.stringify(readFileSync(join(root, "wasm", "sagebrush-nd.wasm")).toString("base64"))};\n` +
+  `globalThis.__SAGEBRUSH_ND_HELPER__ = ${JSON.stringify(ndHelper)};\n`);
 // The notebook page for `sagebrush notebook` (src/notebook.ts), from web/dist
 // (`bun web/build.ts`, which needs lib.gen.js: so on a fresh checkout run this
 // script, the web build, then this script again).  Python runs natively

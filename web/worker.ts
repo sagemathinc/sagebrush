@@ -55,6 +55,10 @@ declare const __SB_RASTER_HASH__: string;
 declare const __SB_ND_HASH__: string;
 (globalThis as any).__SAGEBRUSH_ND_URL__ = FILES ? FILES["sagebrush-nd.wasm"] : new URL("sagebrush-nd.wasm?h=" + __SB_ND_HASH__.slice(0, 16), BASE).href;
 (globalThis as any).__SAGEBRUSH_ND_SHA256__ = __SB_ND_HASH__;
+// and the script its thread pool's helpers run (src/runtime/nd-helper.ts), from the same place; none in files
+// mode, where the module runs on one thread
+declare const __SB_ND_HELPER_HASH__: string;
+if (!FILES) (globalThis as any).__SAGEBRUSH_ND_HELPER_URL__ = new URL("sagebrush-nd-helper.js?h=" + __SB_ND_HELPER_HASH__.slice(0, 16), BASE).href;
 // (the build's id, version and notices; the library itself is fetched in
 // chunks, web/lib-lazy.ts, which must come before src/compile)
 import "../build/cli/lib-meta.gen.js";
