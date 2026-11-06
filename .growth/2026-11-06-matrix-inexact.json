@@ -1,9 +1,9 @@
 {
  "v": 1,
- "reason": "A matrix or vector meeting an inexact number (RR, RDF, CC, CDF, RealField(p), ComplexField(p)): over the number's field, as Sage (lib/_sage_matrix.py: Matrix and Vector _inexact_lift, Matrix.__truediv__, a vector divided by an inexact number multiplies by its inverse) Re-measured with bun 1.4.4 (size-record.sh) on the 1a head c7959f5b (this PR's base) vs head fdc8f96a: cli/lib.gen.js +776, cli/pyjs.cjs +728, engine/lib/sage.pre +8873, engine/lib/sage.src +2485; no other row moves. Markers: exact, except cli/pyjs.cjs 760 (+728 measured, plus 32 B of margin, as it moves with master).",
+ "reason": "A matrix or vector meeting an inexact number (RR, RDF, CC, CDF, RealField(p), ComplexField(p)): over the number's field, as Sage (lib/_sage_matrix.py: Matrix and Vector _inexact_lift, Matrix.__truediv__, a vector divided by an inexact number multiplies by its inverse) Re-measured with bun 1.4.4 (size-record.sh) on master 166e0000 vs head e155351c: cli/lib.gen.js +736, cli/pyjs.cjs +792, engine/lib/sage.pre +8873, engine/lib/sage.src +2485; no other row moves. Markers: exact, except cli/pyjs.cjs 824 (+792 measured, plus 32 B of margin, as it moves with master).",
  "bytes": {
-  "cli/lib.gen.js": 776,
-  "cli/pyjs.cjs": 760,
+  "cli/lib.gen.js": 736,
+  "cli/pyjs.cjs": 824,
   "engine/lib/sage.pre": 8873,
   "engine/lib/sage.src": 2485
  }
