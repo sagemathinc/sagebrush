@@ -415,6 +415,58 @@ async def test_hello():
         sg.close()
 
 
+@aio
+async def test_hello_key_and_purpose():
+    """grader's #763 group A: each refusal of the hello by itself (a fresh code each case, so a refusal is never
+    a used or retired code): the curve, the canonical encoding, the length cap before any other check, protocol
+    `true`, a session hello's purpose; and a wrong purpose with the right code counts as a wrong attempt."""
+    sg = await Signer().start()
+
+    def keyed(x, y, **over):
+        jwk = {"kty": "EC", "crv": "P-256", "x": x, "y": y}
+        return dict(over, jwk=jwk, jkt=P.jwk_thumbprint(jwk))
+
+    async def answer(s, msg):
+        w = await WS.open(s.port)
+        w.send(msg)
+        a = await w.json()
+        w.close()
+        return a
+    try:
+        zero = b64u(bytes(32))  # (canonical, and (0, 0) is not on P-256: H7)
+        x = sg.jwk["x"]
+        i = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_".index(x[-1])
+        loose = x[:-1] + "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"[i ^ 1]  # (an unused bit set: H8)
+        assert base64.urlsafe_b64decode(loose + "=") == base64.urlsafe_b64decode(x + "=") and loose != x
+        long = "A" * (P.PAIR_LIMITS["keyChars"] + 1)
+        for over, why in [
+            (keyed(zero, zero), "the page's key isn't a point on P-256"),
+            (keyed(loose, sg.jwk["y"]), "the page's key is not canonical base64url"),
+            ({"jkt": long}, "the page's key is too long"),  # (H15: the cap, before the shape's checks)
+            (keyed(long, sg.jwk["y"]), "the page's key is too long"),
+            (keyed(x, long), "the page's key is too long"),
+            ({"protocol": True}, "protocol 1 only"),  # (H16: true == 1 in Python)
+        ]:
+            s = await server()
+            a = await answer(s, hello(sg, code=s.code, **over))
+            assert a.get("error", {}).get("message") == why, (why, a)
+            s.close()
+        # (H10) a session hello's purpose is checked before its session
+        s = await server()
+        a = await answer(s, hello(sg, session="x" * 43, purpose="agent"))
+        assert a["error"]["message"] == "this is a kernel's pairing (purpose \"kernel\")", a
+        s.close()
+        # (H18) 5 wrong purposes with the right code retire it, as 5 wrong codes do
+        s = await server()
+        for _ in range(5):
+            assert "purpose" in (await answer(s, hello(sg, code=s.code, purpose="agent")))["error"]["message"]
+        assert "too many wrong attempts" in (await answer(s, hello(sg, code=s.code)))["error"]["message"]
+        s.close()
+    finally:
+        sg.close()
+
+
+
 # ================= framing
 
 @aio
@@ -455,6 +507,38 @@ async def test_framing():
         assert (await w.closed_with()) == 1009
     finally:
         s.close()
+
+
+@aio
+async def test_framing_strict():
+    """grader's #763 group B: each protocol error is the first thing the page hears, before a ping it sent after
+    (so a reader that let the error through would answer the ping with a pong first)."""
+    s = await server()
+
+    def raw(w, b0, length, payload):  # (a masked frame with the length field as given)
+        mask = secrets.token_bytes(4)
+        w.w.write(bytes([b0]) + length + mask + bytes(b ^ mask[i & 3] for i, b in enumerate(payload)))
+    try:
+        for name, send, code in [
+            ("F2 reserved bits on a ping", lambda w: w.frame(0x9, b"hi", rsv=0x40), 1002),
+            ("F3 a 16-bit length of 2", lambda w: raw(w, 0x89, bytes([0x80 | 126]) + struct.pack(">H", 2), b"hi"), 1002),
+            ("F4 a 64-bit length of 2", lambda w: raw(w, 0x89, bytes([0x80 | 127]) + struct.pack(">Q", 2), b"hi"), 1002),
+            ("F6 a fragmented ping", lambda w: w.frame(0x9, b"hi", fin=False), 1002),
+            ("F11 an orphan continuation, unfinished", lambda w: w.frame(0x0, b"", fin=False), 1002),
+            ("F12 a text frame inside a fragmented message", lambda w: (w.frame(0x1, b"", fin=False), w.frame(0x1, b"", fin=False)), 1002),
+            ("F7 two fragments under the pre-hello cap, together over it",
+             lambda w: (w.frame(0x1, b"x" * 5000, fin=False), w.frame(0x0, b"x" * 5000)), 1009),
+            ("F18 a close reason not UTF-8", lambda w: w.frame(0x8, (1000).to_bytes(2, "big") + b"\xff"), 1007),
+        ]:
+            w = await WS.open(s.port)
+            send(w)
+            w.frame(0x9, b"after")
+            op, data = await w.recv(10)
+            assert (op, int.from_bytes(data[:2], "big") if op == 0x8 else data) == (0x8, code), (name, op, data)
+            w.close()
+    finally:
+        s.close()
+
 
 
 # ================= the output gate (L22-L24): exact bytes
@@ -506,6 +590,131 @@ def test_gate():
     assert c2.write(ctl, "control") is False and c2.transport.aborted and c2.closed  # L24b: destroyed, nothing appended
 
 
+class FakeTimers:
+    def __init__(self):
+        self.t, self.set = 0, []
+
+    def now(self):
+        return self.t
+
+    def set_timeout(self, fn, ms):
+        h = {"fn": fn, "ms": ms, "cancelled": False}
+        self.set.append(h)
+        return h
+
+    def clear_timeout(self, h):
+        if h is not None:
+            h["cancelled"] = True
+
+
+class ClosingTransport(FakeTransport):
+    closed = False
+
+    def close(self):
+        self.closed = True
+
+
+def test_admission_released_on_each_path():
+    """grader's #763 group C (T3, T5-T8, T10, B5, R2): each way a TCP connection ends before it is a Conn gives its
+    unpaired place back at once, by itself (not only through asyncio's later connection_lost); an upgrade takes the
+    place over and its handshake timer with it; a late upgrade's hello deadline is what is left, never below 0."""
+    def fresh():
+        s = P.PairServer(err=lambda m: None, timers=FakeTimers())
+        s.port = 4321
+        t = ClosingTransport()
+        proto = P._Protocol(s)
+        proto.connection_made(t)
+        assert s.unpaired_count == 1 and proto in s.pending
+        return s, t, proto
+
+    def head(path=P.PAIR_PATH):
+        key = base64.b64encode(secrets.token_bytes(16)).decode()
+        return ("GET %s HTTP/1.1\r\nHost: 127.0.0.1:4321\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %s\r\n"
+                "Sec-WebSocket-Version: 13\r\nOrigin: %s\r\n\r\n" % (path, key, P.PAGE_ORIGIN)).encode()
+
+    def released(s):
+        return s.unpaired_count == 0 and not s.pending
+    s, t, proto = fresh()  # T3: too slow
+    s.timers.set[0]["fn"]()
+    assert released(s) and t.aborted
+    s, t, proto = fresh()  # B5: 431
+    proto.data_received(b"GET / HTTP/1.1\r\nX: " + b"a" * 9000)
+    assert released(s) and b" 431 " in t.written[0]
+    proto.data_received(head())  # T10: what arrives after the refusal is ignored, never an upgrade
+    assert released(s) and len(t.written) == 1 and not s.conns
+    s, t, proto = fresh()  # T6: a refused upgrade
+    proto.data_received(head("/nope"))
+    assert released(s) and b" 400 " in t.written[0]
+    s, t, proto = fresh()  # T7: EOF
+    proto.eof_received()
+    assert released(s)
+    s, t, proto = fresh()  # T8: lost
+    proto.connection_lost(None)
+    assert released(s)
+    s, t, proto = fresh()  # T5: an upgrade takes the place (counted once) and ends the handshake timer
+    timer = proto.timer
+    proto.data_received(head())
+    assert s.unpaired_count == 1 and not s.pending and len(s.conns) == 1 and proto.timer is None and timer["cancelled"]
+    s, t, proto = fresh()  # R2: an upgrade after the connection's deadline: the hello timer at 0, not negative
+    s.timers.t = P.PAIR_LIMITS["helloMs"] + 5000
+    proto.data_received(head())
+    assert s.timers.set[-1]["ms"] == 0, s.timers.set[-1]
+
+
+def test_closing_cap():
+    """grader's #763 O6: at most 8 sockets closing at once; the 9th is aborted at once."""
+    s = P.PairServer(err=lambda m: None, timers=FakeTimers())
+    ts = []
+    for _ in range(P.PAIR_LIMITS["closing"] + 1):
+        c = P.Conn(FakeTransport(), s)
+        s.conns.add(c)
+        s.unpaired_count += 1
+        c.close(1000)
+        ts.append(c.transport)
+    assert len(s.closing) == P.PAIR_LIMITS["closing"] and s.stats["destroyedAtCap"] == 1
+    assert [t.aborted for t in ts] == [False] * P.PAIR_LIMITS["closing"] + [True]
+
+
+@aio
+async def test_pairing_bookkeeping():
+    """grader's #763 D1-D4, D6: pairing ends the hello timer and gives the unpaired place back (8 more may connect);
+    unpairing stops the kernel (the gateway's shutdown); a paired socket that goes tells the gateway and drops its
+    token."""
+    sg = await Signer().start()
+    s = await server()
+    calls = []
+    lost, shut = s.gateway.socket_lost, s.gateway.shutdown
+    s.gateway.socket_lost = lambda c: (calls.append("lost"), lost(c))
+    s.gateway.shutdown = lambda: (calls.append("shutdown"), shut())
+    try:
+        w = await WS.open(s.port)
+        w.send(hello(sg, code=s.code, remember=True))
+        sess = (await w.json())["result"]["session"]
+        c = s.paired_conn
+        assert c.hello_timer.cancelled() and s.unpaired_count == 0  # (D6, D3)
+        more = [await WS.open(s.port) for _ in range(P.PAIR_LIMITS["unpaired"])]
+        assert all(m.status == 101 for m in more)
+        for m in more:
+            m.close()
+        await asyncio.sleep(0.1)
+        w.send({"unpair": True})
+        assert (await w.closed_with()) == 1000
+        assert calls == ["shutdown", "lost"] and c.token is None, calls  # (D4, D2, D1)
+        s.session = hashlib.sha256(sess.encode()).digest()  # (pair again by session: a socket that just goes)
+        calls.clear()
+        w = await WS.open(s.port)
+        w.send(hello(sg, session=sess))
+        assert "result" in await w.json()
+        c = s.paired_conn
+        w.close()
+        await asyncio.sleep(0.2)
+        assert calls == ["lost"] and c.token is None and s.paired_conn is None, calls
+    finally:
+        s.close()
+        sg.close()
+
+
+
 @aio
 async def test_drain_groups():
     """The runner's exit awaits the escalation (astra's a3 note): a group that ignores SIGTERM is empty once
@@ -522,6 +731,16 @@ async def test_drain_groups():
         assert not G._group_members(p.pid) and p.pid not in G.ENDING_GROUPS, (script, left)
         assert (1.5 < took < 3.5) if slow else took < 1.0, (script, took)
         await p.wait()
+    # (G1) a group still alive at drain's deadline, before the tree's own SIGKILL at 2 s, is SIGKILLed by drain
+    p = await asyncio.create_subprocess_exec("sh", "-c", "trap '' TERM; sleep 30 & wait", start_new_session=True)
+    await asyncio.sleep(0.2)
+    G._kill_tree(p.pid)
+    assert await G.drain_groups(0.3) == [p.pid]
+    end = time.monotonic() + 0.5
+    while G._group_members(p.pid):
+        assert time.monotonic() < end, "drain left the group alive"
+        await asyncio.sleep(0.02)
+    await p.wait()
 
 
 # ================= end to end: the runner as a process, real DPoP
@@ -578,6 +797,7 @@ async def test_end_to_end_and_ctrl_c():
         return
     sg = await Signer().start()
     p, code, port = await start_runner()
+    grandchild, ok = None, False
     try:
         ws = await WS.open(port)
         ws.send(hello(sg, code=code))
@@ -598,7 +818,9 @@ async def test_end_to_end_and_ctrl_c():
         st, a = await page.answer("t%d" % page.n)
         assert st == 401 and a == {"error": "invalid_dpop_proof"}, (st, a)
         # a run with a grandchild, then Ctrl-C on the runner (R8): close 1001, exit 0, the process group gone
-        code2 = "import subprocess, time\ng = subprocess.Popen(['sleep', '300'])\nprint(g.pid, flush=True)\nwhile True: time.sleep(0.01)"
+        # (the kernel and its grandchild ignore SIGTERM: only the escalation the runner awaits at its exit ends them (G3))
+        code2 = ("import signal, subprocess, time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                 "g = subprocess.Popen(['sleep', '300'])\nprint(g.pid, flush=True)\nwhile True: time.sleep(0.01)")
         await page.answer(await page.request("g.run", {"b": "b1"}, {"request": "r2", "epoch": 1, "payload": {"code": code2, "mode": "python"}}))
         rid = await page.request("g.events", {"b": "b1", "r": "r2", "after": 0})
         grandchild = None
@@ -622,9 +844,15 @@ async def test_end_to_end_and_ctrl_c():
         while not gone(grandchild):
             assert time.monotonic() < end, "the kernel's grandchild outlived Ctrl-C"
             await asyncio.sleep(0.05)
+        ok = True
     finally:
         if p.returncode is None:
             p.kill()
+        if grandchild is not None and not ok:  # (only a failed run's: a passing one saw it gone)
+            try:
+                os.kill(grandchild, signal.SIGKILL)
+            except OSError:
+                pass
         sg.close()
 
 

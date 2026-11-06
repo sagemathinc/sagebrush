@@ -613,6 +613,254 @@ async def test_auth_refused_has_no_effect():
     assert p.answer(rid)[0] == 401 and not gw.binding.runs and gw.stats["queuedPayloadBytes"] == 0
 
 
+# ---- grader's #762 TESTS group A: the real verification path (the GW fake above replaces _verify), the dedupe key,
+# the event seq
+
+class RealGW(G.Gateway):
+    """The gateway as shipped: _verify is its own, calling dpop.check (replaced per test, restored after)."""
+
+
+def real_setup(port=None):
+    s = Server()
+    c = Conn()
+    s.paired_conn = c
+    gw = RealGW(s, port=port if port is not None else Scripted())
+    return s, c, gw, Page(gw, c)
+
+
+class CheckStub:
+    """dpop.check, scripted: raise, refuse or accept; it records the nonce each call was given."""
+
+    def __init__(self):
+        self.mode, self.nonces, self.real = "accept", [], G.dpop.check
+
+    def __call__(self, auth, proof, **kw):
+        self.nonces.append(kw["nonce"])
+        if self.mode == "raise":
+            raise RuntimeError("a verifier fault")
+        return None if self.mode == "accept" else (401, "invalid_dpop_proof", "signature", {})
+
+    def __enter__(self):
+        G.dpop.check = self
+        return self
+
+    def __exit__(self, *a):
+        G.dpop.check = self.real
+
+
+@aio
+async def test_verification_raising_is_refused():
+    """G18: a verification that raises (dpop.check, or the auth hold) is a 401 invalid_dpop_proof: nothing dispatched,
+    no effect, its slot released; the same request verified (the control) then goes through."""
+    port = Scripted()
+    s, c, gw, p = real_setup(port)
+    with CheckStub() as chk:
+        chk.mode = "raise"
+        rid = p.frame("g.bind", {}, {})
+        await settle()
+        assert p.answer(rid) == (401, {"error": "invalid_dpop_proof"}) and gw.binding is None
+        chk.mode = "accept"
+        rid = p.frame("g.bind", {}, {})
+        await settle()
+        assert p.answer(rid)[0] == 200 and gw.binding is not None
+        chk.mode = "raise"
+        rid = p.frame("g.run", {"b": "b1"}, run_body("r1"))
+        await settle()
+        assert p.answer(rid) == (401, {"error": "invalid_dpop_proof"})
+        posted = [m for h in port.handles for m in h.posts if "code" in m]
+        assert not gw.binding.runs and gw.run_slot is None and gw.stats["queuedPayloadBytes"] == 0 and not posted, (
+            gw.binding.runs, gw.run_slot, gw.stats["queuedPayloadBytes"], posted)
+        chk.mode = "accept"
+        rid = p.frame("g.run", {"b": "b1"}, run_body("r1"))
+        await settle()
+        assert p.answer(rid) == (202, {"request": "r1", "state": "admitted"}), p.answers(rid)
+    # (an auth hold that raises: the same refusal)
+
+    async def bad_hold(rid, conn):
+        raise RuntimeError("a hold fault")
+    s, c, gw, p = real_setup()
+    gw.auth_hold = bad_hold
+    with CheckStub():
+        rid = p.frame("g.bind", {}, {})
+        await settle()
+        assert p.answer(rid) == (401, {"error": "invalid_dpop_proof"}) and gw.binding is None
+
+
+@aio
+async def test_verification_sees_the_rotated_nonce():
+    """G16: the nonce rotates (after nonceMs) before a proof is checked, so a proof is checked against the current
+    nonce, never one that has just expired; the answer carries the new one."""
+    s, c, gw, p = real_setup()
+    with CheckStub() as chk:
+        rid = p.frame("g.bind", {}, {})
+        await settle()
+        n0 = gw.nonce
+        assert chk.nonces == [n0]
+        s.timers.advance(G.dpop.LIMITS["nonceMs"] + 1)
+        rid = p.frame("g.record", {"b": "b1", "r": "r1"})
+        await settle()
+        assert chk.nonces[-1] != n0 and chk.nonces[-1] == gw.nonce, (n0, chk.nonces)
+        assert [f for f in p.answers(rid) if "headers" in f][0]["headers"]["dpop-nonce"] == gw.nonce
+
+
+@aio
+async def test_dedupe_key_is_the_payload():
+    """G22: at-most-once is keyed by (request, the payload's digest): the same run sent again with its envelope's keys
+    in another order is the same admission (never a 409, never a second execution)."""
+    port = Scripted(auto=False)
+    s, c, gw, p = await bound(port)
+    body = run_body("r1", code="x = 1")
+    rid = p.frame("g.run", {"b": "b1"}, body)
+    await settle()
+    assert p.answer(rid) == (202, {"request": "r1", "state": "admitted"})
+    again = json.dumps({"payload": body["payload"], "epoch": body["epoch"], "request": "r1"})
+    rid = p.frame("g.run", {"b": "b1"}, again)
+    await settle()
+    assert p.answer(rid) == (202, {"request": "r1", "state": "running"}), p.answers(rid)
+    assert len([m for m in port.h.posts if "code" in m]) == 1
+
+
+@aio
+async def test_event_seq_increases():
+    """G19: a run's events carry seq 1, 2, 3 ... (the page's events?after= cursor depends on it)."""
+    port = Scripted(auto=False)
+    s, c, gw, p = await bound(port)
+    rid = p.frame("g.run", {"b": "b1"}, run_body("r1"))
+    await settle()
+    h = port.h
+    mid = h.posts[-1]["id"]
+    h.on_message({"id": mid, "start": True})
+    for i in range(3):
+        h.on_message({"id": mid, "out": "line %d\n" % i, "stream": "stdout"})
+    h.on_message({"id": mid, "done": True, "ms": 1})
+    seqs = [e["seq"] for e in events_of(gw, "r1")]
+    assert len(seqs) >= 4 and seqs == list(range(1, len(seqs) + 1)), seqs
+
+
+# ---- grader's #762 TESTS groups B-D, the observable ones (the rest: equivalence, in the PR body)
+
+def gate_hold(ids):
+    """An auth hold that holds the given request ids until the gate opens."""
+    gate = asyncio.Event()
+
+    async def hold(rid, conn):
+        if rid in ids:
+            await gate.wait()
+    return gate, hold
+
+
+@aio
+async def test_exit_fences_held_requests():
+    """X2b: the kernel exiting by itself bumps the binding's generation, so a request admitted to the gateway before
+    it and handled after it is stale (409), never run in the new kernel; G15: refusal wins over stale."""
+    gate, hold = gate_hold({"t50", "t51"})
+    port = Scripted()
+    s, c, gw, p = await bound(port, hold)
+    rid = p.frame("g.run", {"b": "b1"}, run_body("r1"))
+    await settle()
+    assert p.answer(rid)[0] == 202
+    held = p.frame("g.run", {"b": "b1"}, run_body("r2"), n=50)
+    refused = p.frame("g.run", {"b": "b1"}, run_body("r3"), n=51, auth="refuse")
+    await settle()
+    port.h.on_exit("crashed")
+    gate.set()
+    await settle()
+    assert p.answer(held) == (409, {"error": "stale"}), p.answers(held)
+    assert p.answer(refused)[0] == 401, p.answers(refused)  # (G15: refusal before stale)
+    assert "r2" not in gw.binding.runs and "r3" not in gw.binding.runs
+
+
+@aio
+async def test_exit_tombstones_and_complete_restarts_kernel():
+    """X4: after the kernel exits, its runs' events are dropped (the namespace they described is gone): a cursor into
+    them is expired (410); X6: completion starts a kernel again (lazily) rather than answering unavailable."""
+    port = Scripted()
+    s, c, gw, p = await bound(port)
+    rid = p.frame("g.run", {"b": "b1"}, run_body("r1"))
+    await settle()
+    assert p.answer(rid)[0] == 202 and gw.binding.runs["r1"].outcome
+    port.h.on_exit("crashed")
+    rid = p.frame("g.events", {"b": "b1", "r": "r1", "after": 0})
+    await settle()
+    assert p.answer(rid) == (410, {"error": "expired-cursor"}), p.answers(rid)
+    n = len(port.handles)
+    rid = p.frame("g.complete", {"b": "b1"}, {"epoch": 1, "code": "x", "mode": "python"})
+    await settle()
+    st, a = p.answer(rid)
+    assert st == 200 and a["matches"] == ["xa", "xb"] and len(port.handles) == n + 1, (st, a)
+
+
+@aio
+async def test_second_stop_keeps_the_first_deadline():
+    """G11: a second Stop doesn't push the fallback back: it fires fallbackMs after the first."""
+    port = Scripted(auto=False)
+    s, c, gw, p = await bound(port)
+    p.frame("g.run", {"b": "b1"}, run_body("r1"))
+    await settle()
+    p.frame("g.interrupt", {"b": "b1"}, {"epoch": 1})
+    await settle()
+    s.timers.advance(1500)
+    p.frame("g.interrupt", {"b": "b1"}, {"epoch": 1})
+    await settle()
+    s.timers.advance(501)
+    assert gw.stats["fallbacks"] == 1
+
+
+@aio
+async def test_a_runs_end_clears_its_fallback():
+    """G13: a stopped run that ends in time clears its fallback timer, so the next run's Stop arms its own."""
+    port = Scripted(auto=False)
+    s, c, gw, p = await bound(port)
+    p.frame("g.run", {"b": "b1"}, run_body("r1"))
+    await settle()
+    p.frame("g.interrupt", {"b": "b1"}, {"epoch": 1})
+    await settle()
+    s.timers.advance(100)
+    port.h.on_message({"id": port.h.posts[-1]["id"], "done": True, "error": True, "ename": "KeyboardInterrupt", "ms": 100})
+    await settle()
+    assert gw.binding.runs["r1"].outcome
+    p.frame("g.run", {"b": "b1"}, run_body("r2"))
+    await settle()
+    p.frame("g.interrupt", {"b": "b1"}, {"epoch": 1})
+    await settle()
+    s.timers.advance(2001)
+    assert gw.stats["fallbacks"] == 1 and gw.binding.runs["r2"].outcome == {"status": "stopped", "reason": "fallback"}
+
+
+@aio
+async def test_wave_stop_latch():
+    """G28: a Stop between a wave's entries (none running) is latched: the next entry doesn't run, the wave stops there;
+    G29: a Stop while an entry runs is sent to the kernel."""
+    port = Scripted(auto=False)
+    s, c, gw, p = await bound(port)
+    p.frame("g.run", {"b": "b1"}, {"request": "w", "epoch": 1, "kind": "wave", "payload": wave([entry("a", "A"), entry("b", "B")])})
+    p.frame("g.interrupt", {"b": "b1"}, {"epoch": 1})  # (handled before the wave's task starts its first entry)
+    await settle()
+    run = gw.binding.runs["w"]
+    assert not [m for m in port.h.posts if m.get("code")] and any(e["type"] == "stop" for e in run.events), run.events
+    port2 = Scripted(auto=False)
+    s, c, gw, p = await bound(port2)
+    p.frame("g.run", {"b": "b1"}, {"request": "w", "epoch": 1, "kind": "wave", "payload": wave([entry("a", "A"), entry("b", "B")])})
+    await settle()
+    assert [m["code"] for m in port2.h.posts if m.get("code")] == ["A"]
+    p.frame("g.interrupt", {"b": "b1"}, {"epoch": 1})
+    await settle()
+    assert port2.h.interrupts, port2.h.interrupts
+
+
+def test_wave_bounds():
+    """W7: an entry can't list itself (d == k) as its own descendant; I6: a run outcome's ms is a finite JSON number
+    within 2^53 - 1, anything else 0."""
+    from sagebrush.remote import wave_policy as WP
+    e = {"cell": "a", "auto": True, "est": 0, "code": "1", "parents": [], "desc": [0]}
+    assert WP.wave_invalid([e]) == "a descendant not after its entry"
+    e2 = dict(e, cell="b", desc=[])
+    assert WP.wave_invalid([dict(e, desc=[1]), e2]) is None  # (the control: a later entry)
+    for bad in (float("inf"), float("-inf"), float("nan"), 2 ** 60, -(2 ** 60), True, "5", None):
+        assert WP.wave_run_result({"status": "ok", "ms": bad})["ms"] == 0, bad
+    assert WP.wave_run_result({"status": "ok", "ms": 2 ** 53 - 1})["ms"] == 2 ** 53 - 1
+
+
 @aio
 async def test_mode_unsupported():
     for mode in ("matlab", "magma"):
@@ -847,6 +1095,69 @@ async def test_real_stop_ends_what_ignored_the_sigint():
         assert gw.stats["descendantsKilled"] >= 1
         await until(lambda: _gone(child), 10)
         assert gw.worker.proc.pid == kernel
+    finally:
+        gw.shutdown()
+
+
+@aio
+async def test_real_restart_kills_what_ignores_sigterm():
+    """grader's G8 and G7b: a restart kills the kernel's whole process group, SIGTERM then SIGKILL after 2 s, to the
+    group (killpg): a process in it ignoring SIGTERM and SIGINT is gone within the bound."""
+    s, c, gw, p = await real()
+    try:
+        code = ("import subprocess, time\np = subprocess.Popen(['sh', '-c', 'trap \"\" TERM INT; sleep 60'])\n"
+                "print(p.pid, flush=True)\ntime.sleep(60)")
+        p.frame("g.run", {"b": "b1"}, run_body("r1", code=code))
+        await until(lambda: any(e["type"] == "stream" for e in events_of(gw, "r1")))
+        child = int(next(e["text"] for e in events_of(gw, "r1") if e["type"] == "stream").split()[0])
+        await asyncio.sleep(0.2)
+        p.frame("g.restart", {"b": "b1"}, {"epoch": 1})
+        await until(lambda: _gone(child), 6)
+    finally:
+        gw.shutdown()
+
+
+@aio
+async def test_real_stop_ends_an_orphan_that_ignores_everything():
+    """grader's S5 and S6: a stopped run's leftover, an orphan (its parent gone, reparented away from the kernel) still
+    in the kernel's process group, ignoring SIGINT and SIGTERM: found by its process group (not its parent) and
+    SIGKILLed 2 s after the SIGTERM, before any next run."""
+    s, c, gw, p = await real()
+    try:
+        code = ("import subprocess, time\n"
+                "o = subprocess.run(['sh', '-c', '(trap \"\" INT TERM; exec sleep 60) > /dev/null 2>&1 & echo $!'],"
+                " capture_output=True, text=True).stdout\n"
+                "print(o.strip(), flush=True)\ntime.sleep(60)")
+        p.frame("g.run", {"b": "b1"}, run_body("r1", code=code))
+        await until(lambda: any(e["type"] == "stream" for e in events_of(gw, "r1")))
+        orphan = int(next(e["text"] for e in events_of(gw, "r1") if e["type"] == "stream").split()[0])
+        with open("/proc/%d/stat" % orphan) as f:
+            ppid = int(f.read().split(")")[-1].split()[1])
+        assert ppid != gw.worker.proc.pid, "(the orphan's parent should no longer be the kernel)"
+        await asyncio.sleep(0.2)
+        p.frame("g.interrupt", {"b": "b1"}, {"epoch": 1})
+        await until(lambda: gw.binding.runs["r1"].outcome, 10)
+        await until(lambda: _gone(orphan), 6)
+    finally:
+        gw.shutdown()
+
+
+@aio
+async def test_real_zombies_are_not_descendants():
+    """grader's S4: an exited, unreaped child (a zombie) in the group isn't counted, or signalled, as a live descendant
+    when a stopped run ends."""
+    s, c, gw, p = await real()
+    try:
+        code = ("import subprocess, time\nz = subprocess.Popen(['true'])\ntime.sleep(0.5)\n"
+                "print(z.pid, flush=True)\ntime.sleep(60)")
+        p.frame("g.run", {"b": "b1"}, run_body("r1", code=code))
+        await until(lambda: any(e["type"] == "stream" for e in events_of(gw, "r1")))
+        z = int(next(e["text"] for e in events_of(gw, "r1") if e["type"] == "stream").split()[0])
+        with open("/proc/%d/stat" % z) as f:
+            assert f.read().split(")")[-1].split()[0] == "Z"
+        p.frame("g.interrupt", {"b": "b1"}, {"epoch": 1})
+        await until(lambda: gw.binding.runs["r1"].outcome, 10)
+        assert gw.stats["descendantsKilled"] == 0, gw.stats["descendantsKilled"]
     finally:
         gw.shutdown()
 
