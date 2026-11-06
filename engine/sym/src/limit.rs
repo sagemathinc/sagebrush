@@ -820,7 +820,7 @@ mod sign_tests {
             }
         }
         assert_eq!(lim("log(-1 + I*x)", "0", Dir::Minus), "-I*pi");
-        assert_eq!(lim("log(-2 + I*x)", "0", Dir::Plus), "log(2) + I*pi");
+        assert_eq!(lim("log(-2 + I*x)", "0", Dir::Plus), "I*pi + log(2)");
         assert_eq!(lim("log(-1 + I*x)", "0", Dir::Both), "not found");
         // off the cuts, or along them for a real argument: values
         assert_eq!(lim("atan(x + 1)", "0", Dir::Both), "1/4*pi");

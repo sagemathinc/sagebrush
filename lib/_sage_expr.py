@@ -3154,7 +3154,7 @@ _FUNCTION_DOCS = {
         sage: arcsec(2)
         arcsec(2)
         sage: arcsec(x).diff(x)  # sagebrush only (Sage's 1/(sqrt(x^2 - 1)*x) has the wrong sign for x < -1)
-        1/(sqrt(-1/x^2 + 1)*x^2)""",
+        1/(x^2*sqrt(-1/x^2 + 1))""",
     'arccsc': """The inverse cosecant (also acsc).
 
     EXAMPLES::
@@ -3162,7 +3162,7 @@ _FUNCTION_DOCS = {
         sage: arccsc(2)
         arccsc(2)
         sage: arccsc(x).diff(x)  # sagebrush only (Sage's -1/(sqrt(x^2 - 1)*x) has the wrong sign for x < -1)
-        -1/(sqrt(-1/x^2 + 1)*x^2)""",
+        -1/(x^2*sqrt(-1/x^2 + 1))""",
     'arctan2': """arctan2(y, x): the angle of the point (x, y) (also atan2).
 
     EXAMPLES::
