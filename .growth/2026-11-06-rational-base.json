@@ -1,10 +1,10 @@
 {
  "v": 1,
- "reason": "Rational(x, base) as Sage: the second argument is a base, for a string only; strings read as GMP reads a rational; a numerator and a denominator are a tuple; copy/deepcopy/pickle built explicitly (lib/sage_all.py Rational, _rational_from_str, _gmp_int; stacked on #743, measured against its head f290739a) Re-measured with bun 1.4.4 (size-record.sh) on master f290739a vs head d8af4b7c: cli/lib.gen.js +1672, cli/pyjs.cjs +1952, engine/lib/sage.pre +14843, engine/lib/sage.src +3702; no other row moves. Markers: exact, except cli/pyjs.cjs 1984 (+1952 measured, plus 32 B of margin, as it moves with master).",
+ "reason": "Rational(x, base) as Sage: the second argument is a base, for a string only; strings read as GMP reads a rational; a numerator and a denominator are a tuple; copy/deepcopy/pickle built explicitly (lib/sage_all.py Rational, _rational_from_str, _gmp_int; stacked on #743, measured against its head f290739a) Re-measured with bun 1.4.4 (size-record.sh) on master f290739a vs head 8a21f233: cli/lib.gen.js +1888, cli/pyjs.cjs +2128, engine/lib/sage.pre +16772, engine/lib/sage.src +4283; no other row moves. Markers: exact, except cli/pyjs.cjs 2160 (+2128 measured, plus 32 B of margin, as it moves with master).",
  "bytes": {
-  "cli/lib.gen.js": 1672,
-  "cli/pyjs.cjs": 1984,
-  "engine/lib/sage.pre": 14843,
-  "engine/lib/sage.src": 3702
+  "cli/lib.gen.js": 1888,
+  "cli/pyjs.cjs": 2160,
+  "engine/lib/sage.pre": 16772,
+  "engine/lib/sage.src": 4283
  }
 }
