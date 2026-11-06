@@ -90,6 +90,19 @@ try {
   check(await until(`${text("/demo.py")}.then((s) => s.endsWith("y = 7\\n"))`, 10000), "…saved as you type: the file has the edit");
   check(await until(`${W}.history("/demo.py").then((h) => h.length > ${versions0})`, 10000), "…and the bytes it replaced kept as a version");
   check(await until(`/Saved/.test(document.querySelector(".code-page .code-status").textContent)`), "…said: Saved");
+  // (an edit made while a save is being written: the first write held 1.2 s, the second edit's 600 ms timer firing into
+  //  it; the second edit must be written too, after it, and Saved said only then: daybreak3 on #773)
+  const TA = `document.querySelector(".code-page .code-edit textarea")`, STATUS = `document.querySelector(".code-page .code-status").textContent`;
+  await ev(`(() => { window.__sbWrites = 0; let first = true; window.__sbCodeBeforeWrite = () => { window.__sbWrites++; if (first) { first = false; return new Promise((r) => setTimeout(r, 1200)); } }; return 1; })()`);
+  await ev(`(() => { const t = ${TA}; t.value += "first\\n"; t.dispatchEvent(new Event("input")); void ${C}.flush(); return 1; })()`);
+  await sleep(100);
+  await ev(`(() => { const t = ${TA}; t.value += "second\\n"; t.dispatchEvent(new Event("input")); return 1; })()`);
+  await sleep(700);
+  const during = await ev(STATUS);
+  check(await until(`${text("/demo.py")}.then((s) => s.endsWith("first\\nsecond\\n"))`, 10000), "an edit made while a save is being written is written too, after it: " + (await ev(text("/demo.py"))).slice(-20));
+  check(await ev(`window.__sbWrites >= 2`), "…in a second write: " + (await ev(`window.__sbWrites`)));
+  check(during !== "Saved" && (await until(`${STATUS} === "Saved"`, 10000)), "…Saved said only once the latest text is written (during the first write: " + JSON.stringify(during) + ")");
+  await ev(`(() => { delete window.__sbCodeBeforeWrite; return 1; })()`);
   await go(base + "?code=" + (await ev(page("/demo.py"))));
   check(await until(`!!${C} && ${C}.mode() === "edit"`, 30000), "…Edit remembered: the file opens in Edit again here");
   await ev(`${C}.setMode("view").then(() => 1)`);

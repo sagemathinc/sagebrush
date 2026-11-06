@@ -158,8 +158,11 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     if (ev.key === "Tab" && !ev.shiftKey && !ev.ctrlKey && !ev.altKey) { ev.preventDefault(); document.execCommand?.("insertText", false, lg === "python" || lg === "sage" ? "    " : "\t") || ta.setRangeText("    ", ta.selectionStart, ta.selectionEnd, "end"); ta.dispatchEvent(new Event("input")); }
   });
 
-  // ---- saving as you type: over the revision read or saved, never over another's change
+  // ---- saving as you type: over the revision read or saved, never over another's change. One write at a time, in a
+  // loop: after each write the text is checked again, and an edit made while it was written (its timer fired into the
+  // write in flight) is written next, so the latest text always reaches the file (daybreak3, #773: it was dropped)
   let saveTimer: any = null, saving: Promise<void> | null = null, stopped = false;
+  const live = () => (mode === "edit" ? ta.value : text);
   const dirty = () => (mode === "edit" ? ta.value : text) !== saved;
   ta.addEventListener("input", () => {
     clearTimeout(hlTimer); hlTimer = setTimeout(drawEditHl, ta.value.length > 64 * 1024 ? 120 : 0);
@@ -167,26 +170,38 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     say("Editing…");
     clearTimeout(saveTimer); saveTimer = setTimeout(() => void flush(), CODE.saveMs);
   });
-  async function save(): Promise<void> {
-    if (stopped || !editable) return;
-    const t = mode === "edit" ? ta.value : text;
-    if (t === saved) { say("Saved"); return; }
+  // (one write of the text as it is now; true if it wrote)
+  async function save(): Promise<boolean> {
+    if (stopped || !editable) return false;
+    const t = live();
+    if (t === saved) return false;
     const bytes = encodeText(t, eol);
-    if (bytes.length > CODE.editBytes) { say(`Not saved: over ${fmtSize(CODE.editBytes)}`); return; }
+    if (bytes.length > CODE.editBytes) { say(`Not saved: over ${fmtSize(CODE.editBytes)}`); return false; }
     say("Saving…");
     try {
       const at = await ws.pathOfFile(host.fid);
-      if (!at.ok) { stop("This file isn't here any more: your text is still here. Save it as a copy?"); return; }
+      if (!at.ok) { stop("This file isn't here any more: your text is still here. Save it as a copy?"); return false; }
+      // (a test's seam: the page test holds a write here to edit during it; nothing sets it otherwise)
+      await (globalThis as any).__sbCodeBeforeWrite?.();
       const w = await ws.write(at.path, bytes, { fid: host.fid, base: rev });
       saved = t; rev = w.rev; entry = w.entry;
       if (at.path !== path) { path = at.path; showName(); }
-      say("Saved");
+      return true;
     } catch (err) {
       if ((err as any)?.code === "conflict") stop("This file was changed elsewhere, so your edits here weren't saved over it.");
       else say("Not saved: " + String((err as Error)?.message ?? err).slice(0, 200));
+      return false;
     }
   }
-  const flush = () => { clearTimeout(saveTimer); return (saving ??= save().finally(() => { saving = null; })); };
+  // (the save loop: while the text differs from what was saved, write it again; "Saved" only when they are the same.
+  //  A flush while it runs waits for the same loop, which then writes the newer text too)
+  const flush = (): Promise<void> => {
+    clearTimeout(saveTimer);
+    return (saving ??= (async () => {
+      for (let n = 0; !stopped && editable && live() !== saved && n < 100; n++) if (!(await save())) break;
+      if (!stopped && live() === saved) say("Saved");
+    })().finally(() => { saving = null; }));
+  };
   // (saving stopped: the bar asks; nothing is written until the person chooses)
   function stop(why: string) {
     stopped = true; clearTimeout(saveTimer);
