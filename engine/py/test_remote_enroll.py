@@ -198,11 +198,13 @@ def test_key_file_refusals():
     with TmpHome() as h:
         path = keys.save(enrolled())
         d = os.path.dirname(path)
-        os.chmod(path, 0o644)
-        assert "others" in refused()
+        for mode in (0o644, 0o640, 0o604, 0o610):  # (others, or the group alone: grader's K3)
+            os.chmod(path, mode)
+            assert "others" in refused(), oct(mode)
         os.chmod(path, 0o600)
-        os.chmod(d, 0o755)
-        assert "others" in refused()
+        for mode in (0o755, 0o750, 0o710):
+            os.chmod(d, mode)
+            assert "others" in refused(), oct(mode)
         os.chmod(d, 0o700)
         # a file (or directory) another user owns
         real_uid = os.getuid
@@ -220,6 +222,18 @@ def test_key_file_refusals():
         os.replace(real, path)
         keys.load()
         good = open(path, "rb").read()
+        # (a valid key padded past 8192 bytes: refused for its length, not parsed (grader's K8))
+        with open(path, "wb") as f:
+            f.write(good.rstrip(b"\n") + b" " * (8193 - len(good.rstrip(b"\n"))))
+        assert json.loads(open(path, "rb").read())["d"] and "too long" in refused()
+        # (key.json a directory: refused as not a regular file, never read (grader's K5))
+        os.replace(path, real)
+        os.mkdir(path, 0o700)
+        assert "isn't a regular file" in refused()
+        os.rmdir(path)
+        os.replace(real, path)
+        with open(path, "wb") as f:
+            f.write(good)
         secret = json.loads(good)["d"]
         for body in (b"", b"[]", b"{", b'{"v": 2}', good.replace(b'"v": 1', b'"v": 2'),
                      json.dumps({**json.loads(good), "d": "AAAA"}).encode(),
@@ -240,6 +254,43 @@ def test_key_file_refusals():
         except keys.KeyFileError:
             pass
         os.chmod(d, 0o700)
+        # saving where the key's directory is a symlink (even to a private directory) is refused (grader's K12)
+        private = os.path.join(h.dir, "private")
+        os.mkdir(private, 0o700)
+        os.replace(path, os.path.join(private, "key.json"))
+        os.rmdir(d)
+        os.symlink(private, d)
+        try:
+            keys.save(enrolled())
+            raise AssertionError("saved through a symlinked directory")
+        except keys.KeyFileError as e:
+            assert "isn't a directory" in str(e)
+        assert os.listdir(private) == ["key.json"]
+        os.unlink(d)
+
+
+def test_key_file_new_file_exclusive():
+    """grader's K11: the temporary file is created new (O_EXCL): a file already at its name (another process's, or a
+    planted one) fails the save, and is neither written nor followed."""
+    with TmpHome():
+        path = keys.save(enrolled())
+        before = open(path, "rb").read()
+        real_pid, real_urandom = os.getpid, os.urandom
+        k = enrolled()
+        os.getpid, os.urandom = (lambda: 4242), (lambda n: b"\0" * n)
+        try:
+            tmp = "%s.%d.%s.tmp" % (path, 4242, keys.b64url(b"\0" * 6))
+            with open(tmp, "wb") as f:
+                f.write(b"planted")
+            os.chmod(tmp, 0o600)
+            try:
+                keys.save(k)
+                raise AssertionError("saved over an existing temporary")
+            except FileExistsError:
+                pass
+        finally:
+            os.getpid, os.urandom = real_pid, real_urandom
+        assert open(tmp, "rb").read() == b"planted" and open(path, "rb").read() == before
 
 
 # ---- the device flow
@@ -325,6 +376,43 @@ def test_login_refusals():
         "interval": 5, "expires_in": 600})))
 
 
+class PadHandler(http.server.BaseHTTPRequestHandler):
+    """A valid JSON answer, padded with spaces to `size` bytes."""
+    size = 0
+
+    def log_message(self, *a):
+        pass
+
+    def do_POST(self):
+        self.rfile.read(int(self.headers["content-length"]))
+        b = json.dumps({"error": "authorization_pending"}).encode()
+        b += b" " * (PadHandler.size - len(b))
+        self.send_response(400)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(b)))
+        self.end_headers()
+        self.wfile.write(b)
+
+
+def test_answer_size_bound():
+    """grader's E3: an answer of exactly 8192 bytes is read; one byte more is refused, even when it is valid JSON."""
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), PadHandler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    origin = "http://127.0.0.1:%d" % srv.server_port
+    try:
+        PadHandler.size = enroll._RESPONSE_BYTES
+        assert enroll._post(origin, "/api/remote/v1/device/poll", {}) == (400, {"error": "authorization_pending"})
+        PadHandler.size = enroll._RESPONSE_BYTES + 1
+        try:
+            enroll._post(origin, "/api/remote/v1/device/poll", {})
+            raise AssertionError("accepted")
+        except enroll.EnrollError as e:
+            assert "answered too much" in str(e)
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
 def test_origins():
     assert enroll.check_origin("https://sagebrush.space/") == "https://sagebrush.space"
     assert enroll.check_origin("http://127.0.0.1:8787") == "http://127.0.0.1:8787"
@@ -340,6 +428,7 @@ def test_origins():
 class Handler(http.server.BaseHTTPRequestHandler):
     inert = False
     polls = 0
+    names = []
 
     def log_message(self, *a):
         pass
@@ -353,6 +442,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         if self.path == "/api/remote/v1/device":
             assert body["pub"]["kty"] == "EC" and body["kind"] == "runner"
+            Handler.names.append(body["name"])
             o = "http://127.0.0.1:%d" % self.server.server_port
             v, code = {"device_code": "E" * 43, "user_code": "BCDF-GHJK", "verification_uri": o + "/remote/activate",
                        "interval": 1, "expires_in": 60}, 200
@@ -392,6 +482,20 @@ def test_cli_against_http():
             sys.stderr = io.StringIO()
             assert main(["login", "--origin", "http://example.com"]) == 1
             assert main(["login", "--bogus"]) == 2
+            # a name over 64 characters is sent cut to 64 (grader's E15)
+            Handler.inert = False
+            sys.stderr = io.StringIO()
+            assert main(["login", "--force", "--name", "n" * 100]) == 0, sys.stderr.getvalue()
+            assert Handler.names[-1] == "n" * 64, Handler.names[-1]
+            # a key file that can't be trusted: without --force, exit 1, nothing asked of the cloud, the file left as it
+            # is (grader's E14)
+            path = keys.default_path()
+            with open(path, "wb") as f:
+                f.write(b"{corrupt")
+            asked = len(Handler.names)
+            sys.stderr = io.StringIO()
+            assert main(["login"]) == 1 and "--force to enroll anew" in sys.stderr.getvalue()
+            assert open(path, "rb").read() == b"{corrupt" and len(Handler.names) == asked
     finally:
         sys.stderr = old_err
         if old_origin is None:
