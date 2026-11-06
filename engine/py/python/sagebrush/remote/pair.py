@@ -77,24 +77,30 @@ def runner_version():
         return "dev"
 
 
+_NEED = re.compile(r"\d{1,6}(\.\d{1,6}){0,3}")  # (a minimum: a release's numbers, nothing else)
+
+
 def version_at_least(v, need):
-    """Is version v (dotted numbers, maybe a suffix) at least need?  "dev" always is."""
+    """Is version v at least need (a release's numbers, e.g. "0.9.0")?  A release gate, as PEP 440 orders it: "dev" (a
+    checkout) always is; a pre-release (0.9.0rc1, 0.9.0a2, 0.9.0.dev3) is below its release; a post-release or a local
+    version (0.9.0.post1, 0.9.0+x) is not."""
     if v == "dev":
         return True
-
-    def nums(s):
-        m = re.match(r"^(\d+(?:\.\d+)*)", s)
-        return [int(x) for x in m.group(1).split(".")] if m else None
-    a, b = nums(v), nums(need)
-    if a is None or b is None:
+    m = re.match(r"^(\d+(?:\.\d+)*)(.*)$", v)
+    if not m or not _NEED.fullmatch(need):
         return False
+    a, b = [int(x) for x in m.group(1).split(".")], [int(x) for x in need.split(".")]
     n = max(len(a), len(b))
-    return a + [0] * (n - len(a)) >= b + [0] * (n - len(b))
+    a, b = a + [0] * (n - len(a)), b + [0] * (n - len(b))
+    if a != b:
+        return a > b
+    suffix = m.group(2)
+    return suffix == "" or bool(re.match(r"^(\.?post\d*|\+.*)", suffix))
 
 
 VERSION = runner_version()
-UPGRADE = ("uvx sagebrush@latest remote --loopback (Sagebrush's own Python), or in your own Python: "
-           "python -m pip install -U sagebrush")
+UPGRADE = ("Run the newest: uvx sagebrush@latest remote --loopback. Or, in your own Python environment: "
+           "python -m pip install -U sagebrush, then python -m sagebrush remote --loopback again.")
 
 
 def b64url(b):
@@ -605,10 +611,6 @@ class PairServer:
         p = msg["params"]
         if p.get("protocol") != 1 or isinstance(p.get("protocol"), bool):
             return self._refuse(c, rid, "protocol", "protocol 1 only")
-        needs = p.get("needs")
-        if isinstance(needs, str) and len(needs) <= 32 and not version_at_least(VERSION, needs):
-            # (the page will refuse this runner; say why here too, where the person is looking)
-            self.err("This page needs sagebrush %s or newer; this is %s.  Upgrade: %s\n" % (needs, VERSION, UPGRADE))
         has_code, has_session = isinstance(p.get("code"), str), isinstance(p.get("session"), str)
         if has_code == has_session:
             return self._refuse(c, rid, "refused", "a hello carries exactly one of code and session")
@@ -655,7 +657,7 @@ class PairServer:
                 session = b64url(secrets.token_bytes(32))
                 self.session = hashlib.sha256(session.encode("ascii")).digest()
                 self.session_wrong = 0
-            return self._paired(c, rid, p["jkt"], session)
+            return self._paired(c, rid, p["jkt"], session, p.get("needs"))
         if p.get("purpose") != "kernel":
             return self._refuse(c, rid, "refused", "this is a kernel's pairing (purpose \"kernel\")")
         if self.session is None:
@@ -667,10 +669,14 @@ class PairServer:
             return self._refuse(c, rid, "refused", "wrong session")
         if self.paired_conn is not None:
             return self._refuse(c, rid, "refused", "another page is paired with this computer")
-        return self._paired(c, rid, p["jkt"], None)
+        return self._paired(c, rid, p["jkt"], None, p.get("needs"))
 
-    def _paired(self, c, rid, jkt, session):
+    def _paired(self, c, rid, jkt, session, needs=None):
         self.timers.clear_timeout(c.hello_timer)
+        # (astra's NEEDS-1: only an authenticated hello's minimum is said, and only one of a release's numbers, so no
+        # page text reaches this terminal; the page will refuse this runner, and the person is looking here too)
+        if isinstance(needs, str) and _NEED.fullmatch(needs) and not version_at_least(VERSION, needs):
+            self.err("This page needs sagebrush %s or newer; this is %s. %s\n" % (needs, VERSION, UPGRADE))
         c.paired = True
         c.jkt = jkt
         c.token = b64url(secrets.token_bytes(32))  # (this socket's and this key's; never written anywhere)

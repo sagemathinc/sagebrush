@@ -46,17 +46,21 @@ const NULL_BODY = new Set([204, 205, 304]);
 export const RUNNER_MIN = null;
 const VERSION_RE = /^(dev|\d{1,6}(\.\d{1,6}){0,3}[0-9A-Za-z.+-]{0,24})$/;
 
-/** Is version v ("1.2.3", maybe a suffix, or "dev") at least need?  Numbers compared part by part; "dev" always is. */
+/**
+ * Is version v at least need (a release's numbers, "0.9.0")?  A release gate, as PEP 440 orders versions: "dev" (a
+ * checkout) always is; a pre-release (0.9.0rc1, 0.9.0a2, 0.9.0.dev3) is below its release; a post-release or a local
+ * version (0.9.0.post1, 0.9.0+x) is not.
+ */
 export function versionAtLeast(v, need) {
   if (v === "dev") return true;
-  const nums = (s) => /^\d+(\.\d+)*/.exec(String(s))?.[0].split(".").map(Number) ?? null;
-  const a = nums(v), b = nums(need);
-  if (!a || !b) return false;
+  const m = /^(\d+(?:\.\d+)*)(.*)$/.exec(String(v));
+  if (!m || !/^\d{1,6}(\.\d{1,6}){0,3}$/.test(String(need))) return false;
+  const a = m[1].split(".").map(Number), b = String(need).split(".").map(Number);
   for (let i = 0; i < Math.max(a.length, b.length); i++) {
     const x = a[i] ?? 0, y = b[i] ?? 0;
     if (x !== y) return x > y;
   }
-  return true;
+  return m[2] === "" || /^(\.?post\d*|\+)/.test(m[2]);
 } // (fetch's null-body statuses at or above 200)
 // (method, path pattern, rpc, the ref's members in path order)
 const ROUTES = [
@@ -83,7 +87,7 @@ export class PairError extends Error {
   constructor(message, { kind = "refused", sent = true } = {}) {
     super(message);
     this.name = "PairError";
-    this.kind = kind; // "refused" | "protocol" | "closed" | "timeout" | "unreachable" | "old"
+    this.kind = kind; // "refused" | "protocol" | "closed" | "timeout" | "unreachable" | "port" | "old"
     // (whether the hello, and with it the code, may have reached the runner: only a failure before it was handed to
     // the socket is false, and only then may the same code be tried again (astra's RETRY-2))
     this.sent = sent;
@@ -332,7 +336,7 @@ export class Tunnel {
  */
 export function pairTunnel({ port, code, session, remember = false, jwk, jkt, WebSocket: WS = globalThis.WebSocket, onClose, timeoutMs = TUNNEL_LIMITS.helloMs, min = RUNNER_MIN }) {
   const n = Number(port);
-  if (!Number.isInteger(n) || n < 1 || n > 65535) return Promise.reject(new PairError("the port is a number from 1 to 65535", { kind: "unreachable", sent: false }));
+  if (!Number.isInteger(n) || n < 1 || n > 65535) return Promise.reject(new PairError("the port is a number from 1 to 65535", { kind: "port", sent: false }));
   if ((typeof code === "string") === (typeof session === "string")) return Promise.reject(new PairError("a pairing needs its code (or a remembered session)", { sent: false }));
   const params = { protocol: 1, purpose: "kernel", jwk: { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y }, jkt };
   if (min) params.needs = min; // (so a runner too old for this page says so on its own side too)

@@ -360,7 +360,11 @@ for (const [what, m, code] of [
   await r.retry();
   check(hellos.length === 1 && hellos[0].code === "ABCDEFGHIJKLMNOPQRSTUVWXYZ" && r.tunnel && r.kernel.ready && r.failed === null, "Retry pairs with the code that never reached the runner, and binds");
   r.close();
-  check(PAIRED.sessionGone === "the runner restarted, so this page needs its new link: choose Your computer again and paste it", "the session-gone words");
+  check(PAIRED.sessionGone === "this page needs a new link from your computer: run sagebrush remote --loopback again, then choose Your computer and paste it", "the session-gone words: neutral, since a post-send timeout ends there too (board's R3-a)");
+  // (board's R3-b: a bad port isn't a Block, so no Block hint; its code was never sent, so Retry keeps it)
+  const rp = await pairedStarter({ WebSocket: class extends FakeSocket {} })({ notebook: "nb", answer: { code: "ABCDEFGHIJKLMNOPQRSTUVWXYZ", port: 70000 } });
+  check(/port is a number/.test(rp.failed) && rp.hint === null, `a bad port: said, and no Block hint (${rp.failed} / ${rp.hint})`);
+  rp.close();
 }
 
 // ================= astra's RETRY-2: a code that may have reached the runner is never sent again
@@ -418,9 +422,9 @@ for (const [what, m, code] of [
 
 // ================= the runner's version: reported, compared, a too-old runner refused before anything is bound
 {
-  const table = [["0.9.0", "0.9.0", true], ["0.9.1", "0.9.0", true], ["0.10.0", "0.9.0", true], ["0.8.2", "0.9.0", false],
-    ["1.0", "0.9.9", true], ["0.9", "0.9.0", true], ["0.9.0rc1", "0.9.0", true], ["dev", "99.0", true], ["x", "0.1", false]];
-  check(table.every(([v, n, want]) => versionAtLeast(v, n) === want), `the version compare (${table.filter(([v, n, w]) => versionAtLeast(v, n) !== w).map(([v, n]) => v + " vs " + n).join(", ") || "all as expected"})`);
+  // (one table for both sides: test_remote_pair.py reads the same file (daybreak3's VERSION-1 parity))
+  const table = JSON.parse(await Bun.file(new URL("./version-cases.json", import.meta.url)).text()).cases;
+  check(table.length > 15 && table.every(([v, n, want]) => versionAtLeast(v, n) === want), `the version compare, a release gate (${table.filter(([v, n, w]) => versionAtLeast(v, n) !== w).map(([v, n]) => JSON.stringify(v) + " vs " + JSON.stringify(n)).join(", ") || "all as expected"})`);
   check(RUNNER_MIN === null, "no minimum yet: it is set at the release that first ships sagebrush remote (William's call)");
   const made = [];
   class S extends FakeSocket { constructor(u) { super(u); made.push(this); setTimeout(() => this.open(), 1); } }

@@ -876,8 +876,11 @@ def test_page_tunnel_end_to_end():
 async def test_version_in_the_hello_and_needs():
     """The hello's result says this runner's version ("dev" from a checkout); a page that needs a newer one is told so
     on the runner's own stderr too, with the upgrade commands."""
-    assert P.version_at_least("0.9.0", "0.9.0") and P.version_at_least("0.10.0", "0.9.0") and not P.version_at_least("0.8.2", "0.9.0")
-    assert P.version_at_least("dev", "99") and not P.version_at_least("x", "0.1") and P.version_at_least("1.0", "0.9.9")
+    # (one table for both sides: test-pair-tunnel.mjs reads the same file (daybreak3's VERSION-1 parity))
+    with open(os.path.join(HERE, "..", "..", "web", "notebook", "version-cases.json")) as f:
+        cases = json.load(f)["cases"]
+    wrong = [(v, n) for v, n, want in cases if P.version_at_least(v, n) != want]
+    assert len(cases) > 15 and not wrong, wrong
     assert re.fullmatch(r"dev|\d+(\.\d+)*\S*", P.VERSION), P.VERSION
     sg = await Signer().start()
     real = P.VERSION
@@ -886,11 +889,27 @@ async def test_version_in_the_hello_and_needs():
     s = P.PairServer(err=said.append)
     await s.listen(0)
     try:
+        # (astra's NEEDS-1: nothing from an unauthenticated hello reaches the terminal, and a malformed minimum never
+        # does, so no page text (a newline, an escape sequence) is written there)
+        for needs in ("0.9.0", "0.9.0\nfake line", "\x1b[31m9.9", "9" * 40):
+            w = await WS.open(s.port)
+            w.send(hello(sg, code="WRONG", needs=needs))
+            await w.json()
+        w = await WS.open(s.port)
+        w.send(hello(sg, code=s.code, needs="9.9\n\x1b[2J"))
+        assert "result" in await w.json()
+        assert said == ["A page is paired.\n"], said
+        s.close()
+        said.clear()
+        s = P.PairServer(err=said.append)
+        await s.listen(0)
         w = await WS.open(s.port)
         w.send(hello(sg, code=s.code, needs="0.9.0"))
         r = (await w.json())["result"]
         assert r["version"] == "0.8.2", r
-        assert any("needs sagebrush 0.9.0 or newer; this is 0.8.2" in m and "uvx sagebrush@latest" in m and "pip install -U sagebrush" in m for m in said), said
+        warn = [m for m in said if "needs sagebrush" in m]
+        assert len(warn) == 1 and "needs sagebrush 0.9.0 or newer; this is 0.8.2. Run the newest: uvx sagebrush@latest" in warn[0], said
+        assert "pip install -U sagebrush" in warn[0] and "  " not in warn[0] and warn[0].count("\n") == 1, warn
         s.close()
         said.clear()
         s = P.PairServer(err=said.append)

@@ -318,8 +318,8 @@ export function statusText(text, network = NO_NETWORK) {
 export const PAIRED = {
   label: "Your computer",
   ready: "Your computer · ready",
-  sessionGone: "the runner restarted, so this page needs its new link: choose Your computer again and paste it",
-  upgrade: "Upgrade, then run it again: uvx sagebrush@latest remote --loopback, or in your own Python: python -m pip install -U sagebrush.",
+  sessionGone: "this page needs a new link from your computer: run sagebrush remote --loopback again, then choose Your computer and paste it",
+  upgrade: "Run the newest version: uvx sagebrush@latest remote --loopback. Or, in your own Python environment: python -m pip install -U sagebrush, then python -m sagebrush remote --loopback again.",
   blocked: "If you blocked this site's access to apps on this device, allow it in the site settings (the icon left of the address), then Retry.",
 };
 
@@ -423,9 +423,11 @@ export const PAIR_SHEET = {
   how: "Run one of these in a terminal on this computer. It prints a link: open it, or paste it here.",
   // (two ways to run the runner, each with Copy: uvx's isolated Python is always current but lacks the person's own
   // packages, so their own environment gets pip; python -m makes the kernel's Python the one they're in)
-  quickLabel: "Sagebrush's own Python, nothing to install (needs uv):",
+  quickLabel: "Quickest, if you have uv (Sagebrush's own Python):",
+  getUv: "No uv? Its installer is at docs.astral.sh/uv.",
   command: "uvx sagebrush@latest remote --loopback",
-  ownLabel: "Your own Python, with your packages:",
+  ownLabel: "In your own Python environment (your venv or conda env), with your packages:",
+  ownNote: "If pip says the environment is externally managed, activate your venv or conda env first (or make one: python3 -m venv .venv).",
   ownCommand: "python -m pip install -U sagebrush && python -m sagebrush remote --loopback",
   windows: "On Windows, run these in WSL (Windows Subsystem for Linux); this browser pairs with it as usual.",
   paste: "The link (or its pairing code and port)",
@@ -453,8 +455,9 @@ export function pairSheet(doc = document, prefill = null, userAgent = globalThis
   const el = (tag, text, props = {}) => Object.assign(doc.createElement(tag), text == null ? {} : { textContent: text }, props);
   const dlg = el("dialog", null, { id: "remotedlg" });
   dlg.setAttribute("aria-labelledby", "pairtitle");
-  const row = (label, command) => {
+  const row = (label, command, copyLabel, note) => {
     const copy = el("button", PAIR_SHEET.copy, { type: "button" });
+    copy.setAttribute("aria-label", copyLabel);
     copy.addEventListener("click", () => {
       const cb = globalThis.navigator?.clipboard;
       if (typeof cb?.writeText !== "function") return; // (no clipboard here: nothing is said to have been copied)
@@ -464,6 +467,7 @@ export function pairSheet(doc = document, prefill = null, userAgent = globalThis
     p.append(el("code", command), copy);
     const box = el("div", null, { className: "cmd" });
     box.append(el("div", label, { className: "note" }), p);
+    if (note) box.append(el("div", note, { className: "note" }));
     return box;
   };
   const windows = /Windows/.test(userAgent);
@@ -479,7 +483,8 @@ export function pairSheet(doc = document, prefill = null, userAgent = globalThis
   const acts = el("div", null, { className: "acts" });
   acts.append(no, ok);
   dlg.append(el("h2", PAIR_SHEET.title, { id: "pairtitle" }), el("p", PAIR_SHEET.consent, { className: "preview" }), el("p", PAIR_SHEET.how),
-    row(PAIR_SHEET.quickLabel, PAIR_SHEET.command), row(PAIR_SHEET.ownLabel, PAIR_SHEET.ownCommand),
+    row(PAIR_SHEET.quickLabel, PAIR_SHEET.command, "Copy the uvx command", PAIR_SHEET.getUv),
+    row(PAIR_SHEET.ownLabel, PAIR_SHEET.ownCommand, "Copy the pip command", PAIR_SHEET.ownNote),
     ...(windows ? [el("p", PAIR_SHEET.windows, { className: "note" })] : []), field,
     el("p", safari ? PAIR_SHEET.safari : PAIR_SHEET.lna, { className: "note" }), said, acts);
   doc.body.append(dlg);
@@ -719,7 +724,8 @@ const CSS = `
 #remotedlg #pairlink { width: 100%; box-sizing: border-box; font: inherit; margin: 4px 0; }
 #remotedlg .cmd { margin: 4px 0 6px; }
 #remotedlg .cmd .note { margin: 0; }
-#remotedlg .cmd code { overflow-wrap: anywhere; }
+#remotedlg .cmd .cap { align-items: flex-start; }
+#remotedlg .cmd code { white-space: pre; overflow-x: auto; min-width: 0; flex: 1; padding-bottom: 2px; }
 `;
 
 /** The Connect sheet's text (the plan's §5 consent copy and §9.1 cap field, marked as a preview). */
