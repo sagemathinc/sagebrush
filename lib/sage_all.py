@@ -2279,6 +2279,16 @@ class Factorization(list):
         return _latex_factorization([(str(latex(p)), e) for p, e in self],
                                     "-1" if self.unit == -1 else None, bare_unit=True)
 
+    def prod(self):
+        """The product of the factorization: value() (as Sage's prod(F)).
+
+        EXAMPLES::
+
+            sage: factor(-360).prod(), prod(factor(-360)), factor(-9/20).prod()
+            (-360, -360, -9/20)
+        """
+        return self.value()
+
     def value(self):
         """The product of the factorization.
 
