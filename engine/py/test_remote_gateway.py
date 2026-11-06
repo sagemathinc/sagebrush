@@ -889,6 +889,107 @@ async def test_no_stuck_tasks():
 
 
 @aio
+async def test_fence_every_handoff():
+    """astra's R762-FENCE-1: a wave with an initial forget, then a restart in the same turn: the wave was stopped by
+    the restart, and nothing of it (its forget included) reaches the new kernel.  The positive: without the restart
+    the forget goes to the kernel it was admitted under."""
+    port = Scripted(auto=False)
+    s, c, gw, p = await bound(port)
+    w = wave([entry("a", "print(42)")])
+    w["forget"] = ["victim"]
+    p.frame("g.run", {"b": "b1"}, {"request": "stale", "epoch": 1, "kind": "wave", "payload": w})
+    p.frame("g.restart", {"b": "b1"}, {"epoch": 1})
+    await settle()
+    assert port.handles[0].terminated and port.h is not port.handles[0]
+    assert port.h.posts == [], port.h.posts
+    assert gw.binding.runs["stale"].outcome == {"status": "stopped", "reason": "kernel restarted"}
+    assert not [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+    port = Scripted(auto=False)
+    s, c, gw, p = await bound(port)
+    p.frame("g.run", {"b": "b1"}, {"request": "ok", "epoch": 1, "kind": "wave", "payload": w})
+    await settle()
+    assert port.h.posts[0]["forget"] == ["victim"] and port.h.posts[0]["code"] == "", port.h.posts
+
+
+@aio
+async def test_total_numbers_and_parse():
+    """astra's R762-INPUT-3: JSON numbers no float holds (10**1000 as a budget or an est) and a nesting deeper than
+    the parser's stack are refused, 400 malformed, with no effect: the slot and its bytes released, no kernel post,
+    and a valid run admitted next."""
+    for bad in ({"budget": 10**1000}, {"est": 10**1000}, {"est": -(10**400)}, {"budget": 2**53}):
+        port = Scripted()
+        s, c, gw, p = await bound(port)
+        w = wave([entry("a", "print(42)")])
+        if "budget" in bad:
+            w["policy"]["budget"] = bad["budget"]
+        else:
+            w["entries"][0]["est"] = bad["est"]
+        rid = p.frame("g.run", {"b": "b1"}, {"request": "bad", "epoch": 1, "kind": "wave", "payload": w})
+        await settle()
+        st, a = p.answer(rid)
+        assert st == 400 and a["error"] == "malformed", (bad, st, a)
+        assert gw.run_slot is None and gw.stats["queuedPayloadBytes"] == 0 and port.h.posts == [], bad
+        rid = p.frame("g.run", {"b": "b1"}, run_body("good"))
+        await settle()
+        assert p.answer(rid)[0] == 202
+    port = Scripted()
+    s, c, gw, p = await bound(port)
+    rid = p.frame("g.run", {"b": "b1"}, "[" * 100_000 + "0" + "]" * 100_000)
+    await settle()
+    assert p.answer(rid) == (400, {"error": "malformed"}) and gw.run_slot is None and gw.stats["queuedPayloadBytes"] == 0
+
+
+@aio
+async def test_route_failure_releases():
+    """Any exception in a route: answered 500 internal, its slot and bytes released, its id closed; the next run admitted."""
+    class Boom(GW):
+        def _post_run(self, req, b, body):
+            if body.get("request") == "boom":
+                raise RuntimeError("boom")
+            return super()._post_run(req, b, body)
+    s = Server()
+    c = Conn()
+    s.paired_conn = c
+    gw = Boom(s, port=Scripted())
+    p = Page(gw, c)
+    p.frame("g.bind", {}, {})
+    await settle()
+    rid = p.frame("g.run", {"b": "b1"}, run_body("boom"))
+    await settle()
+    assert p.answer(rid) == (500, {"error": "internal", "detail": "RuntimeError"})
+    assert gw.run_slot is None and gw.stats["queuedPayloadBytes"] == 0 and not gw._state(c).open
+    rid = p.frame("g.run", {"b": "b1"}, run_body("next"))
+    await settle()
+    assert p.answer(rid)[0] == 202
+
+
+@aio
+async def test_real_kernel_exit_kills_its_group():
+    """astra's R762-TREE-2: a kernel that exits by itself (os._exit) with a grandchild in its group: the group is
+    killed then, not only at an explicit restart or shutdown; the binding gets a new incarnation (its namespace is
+    gone, §7 R4), and the next run starts a new kernel."""
+    import tempfile
+    s, c, gw, p = await real()
+    pidfile = os.path.join(tempfile.mkdtemp(), "grandchild.pid")  # (os._exit loses the output buffer: a file instead)
+    try:
+        code = ("import subprocess, os\ng = subprocess.Popen(['sleep', '30'])\n"
+                "open(%r, 'w').write(str(g.pid))\nos._exit(7)" % pidfile)
+        p.frame("g.run", {"b": "b1"}, run_body("crash", code=code))
+        await until(lambda: gw.binding.runs["crash"].outcome, 15)
+        o = gw.binding.runs["crash"].outcome
+        assert o["status"] == "stopped" and o["reason"] == "kernel exited", o
+        with open(pidfile) as f:
+            grandchild = int(f.read())
+        await until(lambda: _gone(grandchild), 10)
+        assert gw.worker is None and gw.binding.incarnation == 2
+        p.frame("g.run", {"b": "b1"}, run_body("after", code="1 + 1"))
+        await until(lambda: gw.binding.runs["after"].outcome, 30)
+        assert "".join(e.get("text", "") for e in events_of(gw, "after")) == "2\n"
+    finally:
+        gw.shutdown()
+
+
+@aio
 async def test_ename_carried():
     port = Scripted(auto=False)
     s, c, gw, p = await bound(port)

@@ -166,6 +166,10 @@ class _ChildHandle:
             self._exit("error: %s" % str(e)[:200])
 
     def _exit(self, why):
+        # (whatever way the kernel ended, by itself, a pipe error or a spawn failure: its process group is killed,
+        # since a descendant outlives its leader in it (astra's R762-TREE-2); the group is the kernel's pid)
+        if self.proc is not None:
+            _kill_tree(self.proc.pid)
         if not self.gone:
             self.gone = True
             self.on_exit(why)
@@ -292,6 +296,7 @@ class Run:
         self.current = -1
         self.stop_latched = False
         self.stop_requested = False  # (a Stop reached it: at its end, what it left in the kernel's group is ended)
+        self.worker_gen = 0  # (the kernel generation it was admitted under: no handoff to any other, astra's R762-FENCE-1)
         self.stop = None
         self.record_bytes = 0
 
@@ -435,7 +440,7 @@ class Gateway:
                 return c.close(1002, "a body over its limit")
             try:
                 req.body = json.loads(raw)
-            except ValueError:
+            except (ValueError, RecursionError):  # (a nesting deeper than the parser's stack: malformed, not a crash)
                 req.body = None
             del raw
             if rpc == "g.run" and isinstance(req.body, dict):
@@ -515,7 +520,14 @@ class Gateway:
             return self._answer(req, 409, {"error": "stale"})
         if req.busy:
             return self._answer(req, 409, {"error": "busy"})
-        self._dispatch(req)
+        try:
+            self._dispatch(req)
+        except Exception as e:  # (any validation or route failure: no effect kept, the slot and the id released)
+            self.stats["internalErrors"] = self.stats.get("internalErrors", 0) + 1
+            if self.run_slot is req or self.complete_slot is req:
+                self._unreserve(req)
+            if not req.answered:
+                self._answer(req, 500, {"error": "internal", "detail": type(e).__name__})
 
     def _forget(self, req):
         s = self.sockets.get(id(req.conn))
@@ -652,7 +664,9 @@ class Gateway:
         if not modes <= set(MODES):
             self._unreserve(req)
             return self._answer(req, 400, {"error": "mode-unsupported", "modes": list(MODES)})
+        self._ensure_worker()  # (a kernel that exited is replaced lazily, at the next run, with a new incarnation)
         run = Run(request, req.digest, p if is_wave else None, None if is_wave else p, req.bytes)
+        run.worker_gen = self.worker_gen
         # (the request's reservation becomes the run's: the same slot, the same charge)
         self.run_slot = run
         req.slot, req.body = None, None
@@ -702,10 +716,21 @@ class Gateway:
             h[0](m)
 
     def _worker_gone(self, gen, why):
+        """The kernel exited by itself (or its pipe broke): the fence first (a new kernel generation, and a new
+        binding generation and incarnation, since its namespace is gone: the page sees it, §7 R4), then its runs
+        ended; its process group was killed by the handle (_ChildHandle._exit).  A new kernel starts at the next run."""
         if gen != self.worker_gen:
             return
         self.worker = None
+        self.worker_gen += 1
+        b = self.binding
+        if b is not None:
+            b.gen += 1
+            b.incarnation += 1
         self._end_all_runs({"status": "stopped", "reason": "kernel exited", "detail": why[:120]})
+        if b is not None:
+            for r in list(b.runs.values()):
+                self._tombstone(b, r)
 
     def _drop_execution(self, wid):
         """An execution the kernel will never finish (it was replaced, it exited, or its run ended): its waiter is
@@ -732,8 +757,10 @@ class Gateway:
         loop = asyncio.get_running_loop()
         fut = loop.create_future()
         w = self.worker
-        if w is None:
-            fut.set_result({"status": "stopped", "reason": "kernel exited"})
+        if run.outcome or w is None or self.worker_gen != run.worker_gen:
+            # (the fence for every handoff, a wave's initial and final forget included: a run that ended, or whose
+            # kernel was replaced since its admission, sends nothing to any kernel)
+            fut.set_result(None)
             return fut
         wid = self.next_worker_id
         self.next_worker_id += 1
@@ -999,6 +1026,7 @@ class Gateway:
         self._answer(req, 200, ans)
 
     def _complete(self, req, body):
+        self._ensure_worker()
         w = self.worker
         code = body.get("code") if isinstance(body.get("code"), str) else ""
         if w is None:
