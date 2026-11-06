@@ -384,13 +384,19 @@ try {
           n.traverseTo = (k, o) => { const late = new Promise((r) => setTimeout(r, 300)); return { committed: late, finished: late.then(() => orig(k, o).finished) }; }; window.__navRestore = () => { delete n.traverseTo; }; }
         else { const was = window.navigation; Object.defineProperty(window, "navigation", { configurable: true, get: () => undefined }); window.__navRestore = () => { Object.defineProperty(window, "navigation", { configurable: true, get: () => was }); }; }
         window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }); window.__rel(); return true; })()`);
-      await until(`!!document.querySelector(".tex-src") && !document.querySelector(".tex-src").readOnly && document.querySelector(".tex-title")?.textContent === "a.tex" && new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fa)}`, 20000);
+      // (A opens again once its close has written its edit: under heavy storage load that write has taken over 20 s
+      //  (the base3 recurrences, r16), the edit durable in its draft meanwhile and written in the end; so up to 60 s,
+      //  its time reported, and past that whether the edit reached the file late or not at all)
+      const t4 = Date.now();
+      const reopened = await until(`!!document.querySelector(".tex-src") && !document.querySelector(".tex-src").readOnly && document.querySelector(".tex-title")?.textContent === "a.tex" && new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fa)}`, 60000);
+      const reopenMs = Date.now() - t4;
       await sleep(1500);
       const s4 = await endState(), f4 = await aText(), at4 = await ev(`history.state && history.state.sbTex`);
+      const lateWrite = reopened ? null : await until(`${W}.read("/sw/a.tex").then((r) => new TextDecoder().decode(r.content).includes(${JSON.stringify(`% late history ${withNav ? "nav" : "go"}`)}))`, 60000);
       await ev(`(window.__navRestore?.(), delete window.__navRestore, window.__sbTexSaveWrite = () => { if (window.__failWrites) throw new Error("test: the write failed"); }, window.__answer = false, window.__obsB?.disconnect(), window.__asked = 4, true)`);
       const mark = `% late history ${withNav ? "nav" : "go"}`;
-      check(held && nav !== false && s4.url === fa && at4 === 0 && s4.title === "a.tex" && s4.a && s4.ro === false && s4.src.includes(mark) && f4.includes(mark) && s4.pages === 1 && !s4.sawB && s4.kept,
-        `DB3-U8-SWITCH-4 (${withNav ? "Navigation API, its traverse late" : "no Navigation API: history.go"}): A asked for and A's close released at once: A open again only on A's entry, editable, its URL and edit; B never shown`, { held, nav, s4: { ...s4, src: s4.src.slice(-30) }, at4, file: f4.slice(-30) });
+      check(held && nav !== false && reopened && s4.url === fa && at4 === 0 && s4.title === "a.tex" && s4.a && s4.ro === false && s4.src.includes(mark) && f4.includes(mark) && s4.pages === 1 && !s4.sawB && s4.kept,
+        `DB3-U8-SWITCH-4 (${withNav ? "Navigation API, its traverse late" : "no Navigation API: history.go"}): A asked for and A's close released at once: A open again only on A's entry, editable, its URL and edit; B never shown`, { held, nav, reopened, reopenMs, lateWrite, s4: { ...s4, src: s4.src.slice(-30) }, at4, file: f4.slice(-30) });
     }
     // ---- (astra U8-SWITCH-5) the newest file asked for wins over a switch past its decision and a return still under
     // way: the file shown's close held (its write failed, then its last write held), a switch to X decided, then...
@@ -790,56 +796,80 @@ try {
         // (back on A, entry 0: two entries back)
         await ev(`(window.__answer = true, history.go(-2), true)`); await until(`history.state && history.state.sbTex === 0`, 20000); await shownIs(fa); await sleep(500); await ev(`(window.__answer = false, true)`);
       }
-      // (16) (grader W8) the fence's take-back during a decided switch: A 0, B 1, C 2, A 3, A shown, its write failing;
-      // every traversal 300 ms late. Back to C declined; Back again, to B, accepted: that return superseded, B's mount
-      // waiting on A's close (its last write held). The stale return lands on A 3 and the fence takes the history back
-      // to B 1, where the person went. While it does: with C asked for and A's close released, C opens, editable, its
-      // URL, on the entry after B's; B's mount, superseded, never sets the title. Without C: B opens on its entry, its
-      // URL (never under A's), and the return is over: C asked for afterwards opens. And A asked for again once the
-      // take-back has landed on B 1, before B's mount goes on, or while it is still under way (the history on A 3 for
-      // now): either way A opens on its own entry, A 3, its URL (B 1 isn't A's, and A 3 then only a stale landing)
-      for (const then of ["C", "none", "A", "A mid"]) {
-        const againA = then.startsWith("A");
-        const withC = then === "C";
+      // (16) (grader W8; astra R16-FENCE-1, -2) the fence's take-back during a decided switch: A 0, B 1, C 2, A 3, A
+      // shown, its write failing; every traversal 300 ms late. Back to C declined; Back again, to B, accepted: that
+      // return superseded, B's mount waiting on A's close (its last write held). The stale return lands on A 3 and
+      // the fence takes the history back to B 1, where the person went. Then, by variant:
+      // - C: C asked for during the take-back, A's close released: C opens on the entry after B's; B never shown;
+      // - none: B opens on B 1, its URL (never under A's); the return over, C asked for then opens;
+      // - A, A mid: A asked for again once the take-back has landed, or while it is under way: A opens on A 3;
+      // - refused, missing: the take-back refused, or its entry gone: B's entry pushed again (B 4, B's URL), B opens there;
+      // - refused then A: that, then A asked for again before B's mount goes on: A opens on A 3 (B 4 isn't A's entry);
+      // - back after, back before: the person's own Back, to C 2, during the take-back, A's close released before it
+      //   or after: C opens on C 2; B never shown; the take-back, landing after all, taken back to C 2;
+      // - refused after back: as back after, the take-back then refused: nothing more: C stays on C 2, no entry pushed;
+      // - C then back: C asked for during the take-back, then the person's Back: C 2's C opens, and what waited for the
+      //   return (C asked for) is gone: a Back from there opens B on B 1, nothing else
+      const W8 = {
+        C: { shown: fc, at: 2, ask: "C" }, none: { shown: fb, at: 1, after: true }, A: { shown: fa, at: 3, ask: "A", landed: true },
+        "A mid": { shown: fa, at: 3, ask: "A" }, refused: { shown: fb, at: 4, after: true, refuse: true }, missing: { shown: fb, at: 4, after: true, missing: true },
+        "refused then A": { shown: fa, at: 3, ask: "A", refuse: true, fallback: true },
+        "back after": { shown: fc, at: 2, back: "after" }, "back before": { shown: fc, at: 2, back: "before" }, "refused after back": { shown: fc, at: 2, back: "after", refuse: true },
+        "C then back": { shown: fc, at: 2, ask: "C", back: "after", probe: true },
+      };
+      for (const [then, v] of Object.entries(W8)) {
         const mark = `% the fence during a decided switch, then ${then}`;
         await ev(`(window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} }), true)`); await shownIs(fb); await sleep(300);
         await ev(`(window.__sbTex({ path: "/sw/c.tex", fid: ${JSON.stringify(fc)} }), true)`); await shownIs(fc); await sleep(300);
         await ev(`(window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }), true)`); await shownIs(fa); await sleep(300);
         await askInTurn([false, true]);
         const failed = await editFails(mark);
-        if (withC) await watchX(fb);
+        await watchX(v.shown === fb ? fc : fb);
         // (once the leave is accepted, the close's last write held; every title and entry the page shows, logged)
         await ev(`(() => { window.__hold = new Promise((r) => (window.__rel = r)); window.__k = 0;
           window.__sbTexSaveWrite = () => { if (window.__asks.length >= 2) { window.__k++; return window.__hold; } throw new Error("test: the write failed"); };
           window.__log = []; let last = ""; window.__logT = setInterval(() => { const t = document.title + " @" + new URLSearchParams(location.search).get("tex") + "/" + (history.state && history.state.sbTex); if (t !== last) window.__log.push(last = t); }, 5); return true; })()`);
-        const late = await ev(`(() => { const v = window.navigation; if (!v?.traverseTo) return false; const orig = v.traverseTo.bind(v); window.__late = 0;
-          v.traverseTo = (k, o) => { window.__late++; const late = new Promise((r) => setTimeout(r, 300)); return { committed: late, finished: late.then(() => orig(k, o).finished) }; };
-          window.__navRestore = () => { delete v.traverseTo; }; return true; })()`);
+        // (every traversal late; the fence's own, the second, refused if asked; the entries hidden if asked, from the
+        //  second Back on, so the take-back finds its entry gone)
+        const late = await ev(`(() => { const v = window.navigation; if (!v?.traverseTo) return false; const orig = v.traverseTo.bind(v), entries = v.entries.bind(v); window.__late = 0; window.__noEntries = false;
+          v.traverseTo = (k, o) => { window.__late++;
+            if (${!!v.refuse} && window.__late === 2) { const f = new Promise((_, rej) => setTimeout(() => rej(new Error("test: the traverse refused")), 300)); f.catch(() => {}); return { committed: f, finished: f }; }
+            const late = new Promise((r) => setTimeout(r, 300)); return { committed: late, finished: late.then(() => orig(k, o).finished) }; };
+          v.entries = () => window.__noEntries ? [] : entries();
+          window.__navRestore = () => { delete v.traverseTo; delete v.entries; }; return true; })()`);
         await ev(`(history.back(), true)`);
         const asked1 = await until(`window.__asks.length >= 1`, 10000);
-        await ev(`(history.back(), true)`);
+        await ev(`(window.__noEntries = ${!!v.missing}, history.back(), true)`);
         const held = await until(`window.__k >= 1`, 10000);
-        // (the stale return landed on A 3 and the fence's take-back started: its traversal the second)
-        const fenced = await until(`window.__late >= 2`, 5000);
-        const onB = then === "A" ? await until(`new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fb)}`, 5000) : true;
-        const mid = await ev(`(() => { const out = { url: new URLSearchParams(location.search).get("tex"), at: history.state && history.state.sbTex };
-          if (${withC}) out.accepted = window.__sbTex({ path: "/sw/c.tex", fid: ${JSON.stringify(fc)} });
-          if (${againA}) out.accepted = window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} });
-          window.__rel(); return out; })()`);
-        const shown = { C: fc, none: fb, A: fa, "A mid": fa }[then];
-        const opened = await shownIs(shown); await sleep(1500);
-        const s = await stateOf(shown), asks = await ev(`window.__asks`), log = await ev(`(clearInterval(window.__logT), window.__log)`);
+        // (the stale return landed on A 3 and the take-back started: its traversal the second; the entry gone: none)
+        const fenced = v.missing || v.fallback ? await until(`new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fb)} && history.state && history.state.sbTex === 4`, 5000) : await until(`window.__late >= 2`, 5000);
+        const onB = v.landed ? await until(`new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fb)}`, 5000) : true;
+        const mid = await ev(`(async () => { const out = { url: new URLSearchParams(location.search).get("tex"), at: history.state && history.state.sbTex };
+          if (${JSON.stringify(v.ask ?? "")} === "C") out.accepted = window.__sbTex({ path: "/sw/c.tex", fid: ${JSON.stringify(fc)} });
+          if (${JSON.stringify(v.ask ?? "")} === "A") out.accepted = window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} });
+          if (${JSON.stringify(v.back ?? "")} === "before") { history.back(); await new Promise((r) => setTimeout(r, 150)); }
+          window.__rel();
+          if (${JSON.stringify(v.back ?? "")} === "after") { await new Promise((r) => setTimeout(r, 50)); history.back(); }
+          out.len = history.length; return out; })()`);
+        const opened = await shownIs(v.shown); await sleep(1500);
+        const s = await stateOf(v.shown), asks = await ev(`window.__asks`), len = await ev(`history.length`), log = await ev(`(clearInterval(window.__logT), window.__log)`);
         await ev(`(window.__navRestore?.(), delete window.__navRestore, window.__obsB?.disconnect(), true)`);
-        // (without C: the return over, so C asked for now opens)
-        const after = then !== "none" ? null : await ev(`(window.__sbTex({ path: "/sw/c.tex", fid: ${JSON.stringify(fc)} }), true)`).then(() => shownIs(fc)).then(async (ok) => ({ ok, ...(await stateOf(fc)) }));
-        const saved = then !== "none" ? await saveAgain() : await ev(`(() => { window.confirm = () => { window.__asked++; return window.__answer; }; window.__sbTexSaveWrite = () => { if (window.__failWrites) throw new Error("test: the write failed"); }; window.__answer = false; window.__asked = 4; return true; })()`);
+        const probe = !v.probe ? null : await ev(`(history.back(), true)`).then(() => shownIs(fb)).then(async (ok) => { await sleep(800); return { ok, ...(await stateOf(fb)), len: await ev(`history.length`) }; });
+        // (the return over: C asked for now opens, on the entry after)
+        const after = !v.after ? null : await ev(`(window.__sbTex({ path: "/sw/c.tex", fid: ${JSON.stringify(fc)} }), true)`).then(() => shownIs(fc)).then(async (ok) => ({ ok, ...(await stateOf(fc)) }));
+        const saved = !v.after ? await saveAgain() : await ev(`(() => { window.confirm = () => { window.__asked++; return window.__answer; }; window.__sbTexSaveWrite = () => { if (window.__failWrites) throw new Error("test: the write failed"); }; window.__answer = false; window.__asked = 4; return true; })()`);
         const fA = await textOf(fa);
-        const underA = log.filter((t) => t.startsWith("b.tex") && t.includes("@" + fa + "/"));
-        check(failed && late && asked1 && held && fenced && onB && (then === "A" ? mid.url === fb && mid.at === 1 : mid.url === fa && mid.at === 3) && (then === "none" || mid.accepted === true) && asks.length === 2 && opened && s.ro === false && s.pages === 1 && s.kept && s.shows && underA.length === 0 && saved === true && fA.includes(mark)
-          && (againA ? s.url === fa && s.at === 3 && s.title === "a.tex" && s.src.includes(mark) && !log.some((t) => t.startsWith("b.tex"))
-            : withC ? mid.accepted === true && s.url === fc && s.at === 2 && s.title === "c.tex" && !s.saw && !log.some((t) => t.startsWith("b.tex"))
-            : s.url === fb && s.at === 1 && s.title === "b.tex" && after.ok && after.url === fc && after.at === 2 && after.title === "c.tex"),
-          `U8-RETURN (grader W8; Navigation API, its traversals late): the fence's take-back during a decided switch ${againA ? (then === "A" ? "landed" : "still under way") + ", then the file shown asked for again: it opens on its own entry, its URL; B's mount never sets the title" : withC ? "and another file asked for: it opens, editable, its URL, on the entry after B's; B's mount never sets the title" : "alone: B opens on its entry, its URL (never under A's), and the return ends: a file asked for then opens"}; A's edit written`, { then, failed, late, asked1, held, fenced, onB, mid, opened, asks, log, underA, after, s: { ...s, src: s.src.slice(-30) }, saved, fileA: fA.slice(-30) });
+        const name = { [fa]: "a.tex", [fb]: "b.tex", [fc]: "c.tex" };
+        // (B, the decided switch's file, never under another file's URL (astra R16-FENCE-1); a superseded take-back's
+        //  own landing can show the file shown under its entry until the fence takes it back, as in U8-SWITCH-6)
+        const wrongUrl = log.filter((t) => t.startsWith("b.tex") && !t.includes("@" + fb + "/"));
+        check(failed && late && asked1 && held && fenced && onB && (v.ask ? mid.accepted === true : true) && asks.length === 2 && opened
+          && s.url === v.shown && s.at === v.at && s.title === name[v.shown] && s.ro === false && s.pages === 1 && s.kept && s.shows && wrongUrl.length === 0
+          && (v.shown !== fb ? !s.saw && !log.some((t) => t.startsWith("b.tex")) : true) && (then === "refused after back" ? len === mid.len : true)
+          && (v.probe ? probe.ok && probe.url === fb && probe.at === 1 && probe.title === "b.tex" && probe.len === len : true)
+          && (v.after ? after.ok && after.url === fc && after.at === v.at + 1 && after.title === "c.tex" : true) && saved === true && fA.includes(mark),
+          `U8-RETURN (grader W8, astra R16-FENCE; Navigation API, its traversals late): the fence's take-back during a decided switch, then ${then}: ${name[v.shown]} opens, editable, on entry ${v.at}, its URL; no file under another's URL${v.after ? "; the return over, a file asked for then opens" : ""}; A's edit written`,
+          { then, s: { ...s, src: s.src.slice(-30) }, wrongUrl, after, probe, saved, fileA: fA.slice(-30), failed, late, asked1, held, fenced, onB, mid, len, opened, asks, log });
         // (back on A, entry 0)
         await ev(`(history.go(-(history.state && history.state.sbTex || 0)), true)`); await until(`history.state && history.state.sbTex === 0`, 20000); await shownIs(fa); await sleep(500);
       }
@@ -883,6 +913,8 @@ try {
         await ev(`(history.go(-(history.state && history.state.sbTex || 0)), true)`); await until(`history.state && history.state.sbTex === 0`, 20000); await shownIs(fa); await sleep(500);
       }
     }
+    // (SB_STOP_U8: the run ends here, after the switch and return cases: for mutant runs of those)
+    if (process.env.SB_STOP_U8) throw new Error("stopped after the U8 block (SB_STOP_U8)");
     // ---- (astra B5-R1-A1) the exact entry shown is the one gone back to, a fragment's entry between: A, A#section, B;
     // with unsaved B, Back one step and Back two steps, declined, stay on B (its entry, URL and text); accepted two
     // steps, A; with unsaved A, Forward two steps declined stays on A. With the Navigation API and, hidden, without it

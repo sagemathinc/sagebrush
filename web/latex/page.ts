@@ -197,8 +197,12 @@ let retTok = 0, retPending = 0, staleTok = 0, staleLanding = false, fenceHooked 
 //  entry shown, so taking it back there would go nowhere, and no landing would ever come). Its landing is the fence's:
 //  it ends the return and runs what waited for it, nothing pushed or noted; until then a mount waits before it takes
 //  the entry the history is on for its own)
-let fenceTok = 0, fenceLanding = false, staleFrom: string | undefined, fencing = false;
+let fenceTok = 0, fenceLanding = false, staleFrom: string | undefined, staleFromUrl: string | undefined, fencing = false;
 let fenceEnd = () => {}, fenceSettled: Promise<void> = Promise.resolve(), fenceWake: (() => void) | null = null;
+// (what waits for a return, dropped: set with fenceWake by the mount listening for the landing)
+let fenceOff: (() => void) | null = null;
+// (a file opened in place, as the latest mount opens one: for the navigation owner below)
+let openFile: ((fid: string) => void) | null = null;
 // (back to the entry shown by its key, or to `key`, the traversal tagged: its token)
 const traverseShown = (nav: any, failed: () => void, key = shownKey) => {
   const tok = ++retTok; retPending = tok;
@@ -212,7 +216,7 @@ const onNavigate = (e: any) => {
   const tok = e.info?.sbTexReturn;
   staleLanding = !!staleTok && tok === staleTok;
   fenceLanding = !staleLanding && !!fenceTok && tok === fenceTok;
-  if (staleLanding) staleFrom = navApi()?.currentEntry?.key;
+  if (staleLanding) { const c = navApi()?.currentEntry; staleFrom = c?.key; staleFromUrl = c?.url ?? undefined; }
 };
 const fenceDone = () => { fenceTok = 0; if (fencing) { fencing = false; fenceEnd(); } };
 const fenceStale = (ev: PopStateEvent) => {
@@ -220,19 +224,38 @@ const fenceStale = (ev: PopStateEvent) => {
     fenceLanding = false;
     ev.stopImmediatePropagation();
     returning = false; fenceDone();
-    const w = fenceWake; fenceWake = null; w?.();
+    const w = fenceWake; fenceWake = fenceOff = null; w?.();
     return;
   }
-  if (!staleLanding) return;
+  if (!staleLanding) {
+    // (the navigation owner, for the window past a switch's decision: no editor current, the next mount waiting on
+    //  the close or a take-back, no return landing but the fence's. Every untagged Back or Forward there is the
+    //  person's latest intent, taken here and by nothing else (astra R16-FENCE-2): a take-back under way given up
+    //  (marked stale: landing after all, it is taken back to this entry; refused, it does nothing), what waited for a
+    //  return dropped, the waiting mount superseded, and this entry's file opened, nothing asked)
+    if (current !== null || returning && !fencing) return;
+    ev.stopImmediatePropagation();
+    if (fenceTok) staleTok = fenceTok;
+    fenceTok = 0; retPending = 0; returning = false;
+    const off = fenceOff; fenceWake = fenceOff = null; off?.();
+    fenceDone(); intent();
+    const t = new URLSearchParams(location.search).get("tex");
+    if (t && openFile) openFile(t); else location.reload();
+    return;
+  }
   staleLanding = false; staleTok = 0;
   ev.stopImmediatePropagation();
-  const nav = navApi(), to = staleFrom ?? shownKey; staleFrom = undefined;
+  const nav = navApi(), to = staleFrom ?? shownKey, toUrl = staleFrom && staleFromUrl ? staleFromUrl : shownUrl; staleFrom = staleFromUrl = undefined;
   returning = true; returnBy = "key";
   if (!fencing) { fencing = true; fenceSettled = new Promise<void>((r) => (fenceEnd = r)); }
-  // (the take-back impossible, or refused: the entry shown pushed again, and what waited for the return runs)
+  // (the take-back impossible, or refused: the entry it went to pushed again, its URL: the entry shown, noted, or a
+  //  decided switch's, which its mount takes once the fence is done (astra, r16); then what waited for the return runs)
   const fallback = () => {
-    if (returning) { returning = false; history.pushState({ sbTex: shownAt + 1, sbTexId: entryId() }, "", shownUrl); noteShown(); fenceDone(); const w = fenceWake; fenceWake = null; w?.(); }
-    else fenceDone();
+    if (returning) {
+      returning = false; history.pushState({ sbTex: shownAt + 1, sbTexId: entryId() }, "", toUrl);
+      if (toUrl === shownUrl) noteShown();
+      fenceDone(); const w = fenceWake; fenceWake = fenceOff = null; w?.();
+    } else fenceDone();
   };
   // (a traversal to the current entry goes nowhere and never lands: never one)
   if (nav?.traverseTo && to && to !== nav.currentEntry?.key && nav.entries?.().some((x: any) => x.key === to)) {
@@ -261,9 +284,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const life = new AbortController(), on = { signal: life.signal };
   const live = () => my === mounts && !life.signal.aborted;
   // (this mount's own entry in `current`: when `current` is another's, or none, a switch away from this file is under
-  //  way, past its decision; a return to this file then opens it again (astra U8-SWITCH-2, the final barrier))
+  //  way, past its decision; a Back or Forward then is the navigation owner's (above))
   let mine: unknown = null;
-  const backHere = () => { if (current !== mine) openHere(host.fid); };
   const st = history.state && typeof history.state === "object" ? history.state : {};
   if (typeof st.sbTex !== "number" || typeof st.sbTexId !== "string") history.replaceState({ ...st, sbTex: typeof st.sbTex === "number" ? st.sbTex : 0, sbTexId: entryId() }, "");
   noteShown();
@@ -372,6 +394,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // as before (boot.ts's hook); unsaved changes asked about first
   const g: any = globalThis, bootHook = (g.__sbTexBoot ??= g.__sbTex);
   const openHere = (fid: string) => { void mount(root, { ...host, fid }); };
+  openFile = openHere;
   g.__sbTex = (e: Entry, tab?: boolean) => {
     if (tab || !/\.tex$/i.test(e.path) || !e.fid) return bootHook(e, tab);
     // (the file shown, asked for again: a newer intent, so a switch still settling does nothing; and if Back or
@@ -428,9 +451,9 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       landed();
     };
     // (or the fence's own take-back landing, which the fence takes: it wakes this instead)
-    const wake = () => landed();
-    window.addEventListener("popstate", onLand, { once: true }); fenceWake = wake;
-    landOff = () => { window.removeEventListener("popstate", onLand); if (fenceWake === wake) fenceWake = null; };
+    const wake = () => landed(), drop = () => { landOff?.(); landOff = null; afterReturn = null; };
+    window.addEventListener("popstate", onLand, { once: true }); fenceWake = wake; fenceOff = drop;
+    landOff = () => { window.removeEventListener("popstate", onLand); if (fenceWake === wake) fenceWake = fenceOff = null; };
   };
   // (`go` once the history is back on the entry shown: at once when no return is under way, else when it lands, in
   //  place of whatever waited for it: a newer intent replaces an older one (astra U8-SWITCH-5))
@@ -460,14 +483,12 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     }
     if (t === host.fid) {
       // (back to the file shown: a newer intent than a switch still settling, which then does nothing)
-      intent(); backHere();
+      intent();
       // (this file's own entries: a fragment's new entry, unnumbered, is the one after the shown one)
       if (typeof st?.sbTex !== "number" || typeof st?.sbTexId !== "string") history.replaceState({ ...(st ?? {}), sbTex: shownAt + 1, sbTexId: entryId() }, "");
       noteShown();
       return;
     }
-    // (another file's entry while a switch is past its decision: the newest goes on, as for a file asked for)
-    if (current !== mine) { intent(); if (t) openHere(t); else location.reload(); return; }
     void leaveOk().then((ok) => {
     if (ok === null || !live()) return;
     if (!ok) {
