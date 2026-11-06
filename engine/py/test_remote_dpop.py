@@ -88,6 +88,37 @@ def test_controls():
         assert got is not None and got[2] == reason, (over, got)
 
 
+def _remade(c, header=None, claims=None):
+    """The case's proof with its header or claims changed (the signature left as it was: these refusals come first)."""
+    h, cl, sig = c["dpop"].split(".")
+    hj, cj = json.loads(dpop.unb64url(h)), json.loads(dpop.unb64url(cl))
+    if header:
+        header(hj)
+    if claims:
+        claims(cj)
+    return "%s.%s.%s" % (dpop.b64url(json.dumps(hj).encode()), dpop.b64url(json.dumps(cj).encode()), sig)
+
+
+def test_trailing_newlines():
+    """astra's R761-PARSE-1: Python's `$` matches before a final LF, so every closed alphabet is fullmatched and every
+    decode guarded.  A key coordinate, a jti or a proof segment ending in LF is refused for its own reason, with no
+    exception and no jti recorded; the unchanged proof (the positive control) still passes."""
+    data = load()
+    c = data["cases"][0]
+    for name, proof, reason in [
+        ("x + LF", _remade(c, header=lambda h: h["jwk"].update(x=h["jwk"]["x"] + "\n")), "coords"),
+        ("y + LF", _remade(c, header=lambda h: h["jwk"].update(y=h["jwk"]["y"] + "\n")), "coords"),
+        ("jti + LF", _remade(c, claims=lambda cl: cl.update(jti=cl["jti"] + "\n")), "jti-charset"),
+        ("the proof + LF", c["dpop"] + "\n", "parse"),
+        ("a segment + LF", c["dpop"].replace(".", "\n.", 1), "parse"),
+    ]:
+        got, before, after = run(data, dict(c, dpop=proof))
+        assert got is not None and got[2] == reason, (name, got)
+        assert after == before, name  # (no jti recorded)
+    got, _, after = run(data, c)
+    assert got is None and len(after) == 1, got
+
+
 if __name__ == "__main__":
     for name, f in list(globals().items()):
         if name.startswith("test_") and callable(f):

@@ -4,8 +4,14 @@ crypto, the key's thumbprint the socket's, then the signature, then the
 claims' values.  `check` returns None for a good proof, else (status, error,
 reason, headers).
 
-The replay store (jti -> when seen) and the nonce belong to the caller; this
-function only reads them, and the caller records the jti after a None.
+The replay store (jti -> when seen, a dict) and the nonce belong to the
+caller, who passes them in; this function prunes the store's entries older
+than 120 s and, for a good proof only, records its jti.  A refused proof
+records nothing.
+
+Every closed alphabet is checked with fullmatch (Python's `$` would also match
+before a final newline), and every base64url decode is guarded: a malformed
+input is a refusal for its own reason, never an exception.
 """
 
 import base64
@@ -76,7 +82,7 @@ def check(auth, proof, *, token, jkt, method, htu, now_ms, jtis, nonce):
         return _refused("proof-size")
     parts = proof.split(".")
     # 2. three base64url segments, the first two JSON objects
-    if len(parts) != 3 or not all(_B64URL.match(p) for p in parts):
+    if len(parts) != 3 or not all(_B64URL.fullmatch(p) for p in parts):
         return _refused("parse")
     try:
         hb, cb, sig = unb64url(parts[0]), unb64url(parts[1]), unb64url(parts[2])
@@ -110,9 +116,12 @@ def check(auth, proof, *, token, jkt, method, htu, now_ms, jtis, nonce):
     if jwk["crv"] != "P-256":
         return _refused("crv")
     x, y = jwk["x"], jwk["y"]
-    if not (isinstance(x, str) and isinstance(y, str) and _B64URL43.match(x) and _B64URL43.match(y)):
+    if not (isinstance(x, str) and isinstance(y, str) and _B64URL43.fullmatch(x) and _B64URL43.fullmatch(y)):
         return _refused("coords")
-    xb, yb = unb64url(x), unb64url(y)
+    try:
+        xb, yb = unb64url(x), unb64url(y)
+    except ValueError:  # (binascii.Error included; fullmatch above leaves none, this is the guard)
+        return _refused("coords")
     if len(xb) != 32 or len(yb) != 32:
         return _refused("coords")
     # 4. the claims, by type, no coercion
@@ -121,7 +130,7 @@ def check(auth, proof, *, token, jkt, method, htu, now_ms, jtis, nonce):
     jti = claims.get("jti")
     if not isinstance(jti, str):
         return _refused("jti-type")
-    if not _JTI.match(jti):
+    if not _JTI.fullmatch(jti):
         return _refused("jti-charset")
     if len(jti) < LIMITS["jtiMin"]:
         return _refused("jti-min")
