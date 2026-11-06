@@ -415,6 +415,8 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
       if (trashView) return;
       // (a .tex file: the LaTeX editor, in a build with it and when it is on; web/latex/boot.ts)
       if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && e.kind === "file" && (globalThis as any).__sbTex?.(e, ev.ctrlKey || ev.metaKey || ev.button === 1)) return;
+      // (a code or text file: the code page, where the notebook page has installed it; web/code/boot.ts)
+      if (e.kind === "file" && (globalThis as any).__sbCode?.(e, ev.ctrlKey || ev.metaKey || ev.button === 1)) return;
       // (U1: a page with an editor of its own for the file, the board page's .tex)
       if (e.kind === "file" && host.openFile?.(e, ev.ctrlKey || ev.metaKey || ev.button === 1)) return;
       if (e.kind === "file") { preview(e); return; }
@@ -423,7 +425,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     r.onauxclick = (ev) => {
       // (a middle-click on a .tex file: the editor in a new tab when it takes the file; any other file, nothing, as before)
       if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && ev.button === 1 && e.kind === "file") { if (!trashView) (globalThis as any).__sbTex?.(e, true); return; }
-      if (ev.button === 1 && e.kind === "file") { if (!trashView) host.openFile?.(e, true); return; }
+      if (ev.button === 1 && e.kind === "file") { if (!trashView && !(globalThis as any).__sbCode?.(e, true)) host.openFile?.(e, true); return; }
       if (ev.button === 1 && e.kind !== "folder" && e.kind !== "file") host.open(e, "tab");
     };
     r.onkeydown = (ev) => {

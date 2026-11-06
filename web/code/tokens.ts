@@ -6,18 +6,10 @@
 // The classes are the notebook's: hc comment, hs string, hn number, hk keyword, hb builtin, hf a name being defined.
 import { highlight } from "../notebook/highlight.js";
 import { highlightMatlab } from "../notebook/highlight-matlab.js";
-import { nameOf, splitExt } from "../workspace/paths";
+import type { Lang } from "./langs";
+export { CODE_LANGS, langOf, type Lang } from "./langs";
 
-export type Lang = "python" | "sage" | "matlab" | "magma" | "js" | "json" | "text";
 export type Tok = [cls: string, text: string];
-
-/** The files the code page opens, by extension (1a: William, Nov 5, "so users can easily browse these .py (etc) files"). */
-export const CODE_LANGS: Record<string, Lang> = { ".py": "python", ".sage": "sage", ".m": "matlab", ".mag": "magma", ".js": "js", ".json": "json", ".txt": "text" };
-
-/** A file's language by its name, or null if the code page doesn't open it. */
-export function langOf(path: string): Lang | null {
-  return CODE_LANGS[splitExt(nameOf(path))[1].toLowerCase()] ?? null;
-}
 
 // (the one shape of the notebook highlighters' HTML: & and < escaped, nothing else)
 const SHAPE = /<span class="(h[a-z])">([^<]*)<\/span>|([^<]+)/y;
