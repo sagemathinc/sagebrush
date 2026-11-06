@@ -14,8 +14,8 @@ boundary lines agree exactly.
 
 import math
 
-from collections.abc import Mapping
-from _graphics import Line, Patches, Segments, colormap, nice_ticks, to_color, CMAP_NAMES_ALL, cmap_drawn, cmap_missing
+from collections.abc import Mapping as _Mapping
+from _graphics import Line, Patches, Segments, colormap, nice_ticks, to_color
 from sage_plot import Graphics, _split
 
 __all__ = ["contour_plot", "density_plot", "implicit_plot", "region_plot", "plot_vector_field",
@@ -368,7 +368,7 @@ class Layers(Patches):
         return "<g%s>%s</g>" % (' opacity="%s"' % _fmt(a) if a is not None else "", "".join(out))
 
 
-class Colormaps(Mapping):
+class Colormaps(_Mapping):
     """Sage's colormaps: matplotlib's colormaps by name (colormaps['viridis'],
     colormaps.viridis)."""
 
@@ -377,10 +377,11 @@ class Colormaps(Mapping):
 
     def __getitem__(self, name):
         if name not in self._made:
-            if name not in CMAP_NAMES_ALL:
+            import _cmaps
+            if name not in _cmaps.KNOWN:
                 raise KeyError("no colormap with name '%s'" % (name,))
-            if not cmap_drawn(name):
-                raise cmap_missing(name)
+            if not _cmaps.drawn(name):
+                raise _cmaps.missing(name)
             from matplotlib.colors import Colormap
             self._made[name] = Colormap(name)
         return self._made[name]
@@ -394,13 +395,16 @@ class Colormaps(Mapping):
             raise AttributeError("'Colormaps' has no attribute or colormap %s" % name) from None
 
     def __contains__(self, name):
-        return name in CMAP_NAMES_ALL
+        import _cmaps
+        return name in _cmaps.KNOWN
 
     def __iter__(self):
-        return iter(CMAP_NAMES_ALL)
+        import _cmaps
+        return iter(_cmaps.NAMES_ALL)
 
     def __len__(self):
-        return len(CMAP_NAMES_ALL)
+        import _cmaps
+        return len(_cmaps.NAMES_ALL)
 
 
 colormaps = Colormaps()
@@ -415,8 +419,8 @@ class _Unknown(Patches):
         self.cmap = cmap
 
     def svg(self, P):
-        raise RuntimeError('Color map %s not known (type "import matplotlib; list(matplotlib.colormaps.keys())"'
-                           ' for valid names)' % self.cmap)
+        import _cmaps
+        raise RuntimeError(_cmaps.SAGE_UNKNOWN % self.cmap)
 
 
 def _unknown(cmap, box, gopts):
@@ -424,10 +428,11 @@ def _unknown(cmap, box, gopts):
     drawn for a name matplotlib lacks; one Sagebrush lacks is an error now"""
     if not isinstance(cmap, str):
         return None
-    if cmap not in CMAP_NAMES_ALL:
+    import _cmaps
+    if cmap not in _cmaps.KNOWN:
         return Graphics([_Unknown(cmap, box)], **_frame_opts(gopts, box))
-    if not cmap_drawn(cmap):
-        raise cmap_missing(cmap)
+    if not _cmaps.drawn(cmap):
+        raise _cmaps.missing(cmap)
     return None
 
 

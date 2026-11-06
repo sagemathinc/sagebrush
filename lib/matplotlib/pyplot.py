@@ -21,7 +21,6 @@ import os
 from _graphics import (Panel, Line, Points, Polygon, Rects, Text, Arrow, AxLine, Image, render_svg, render_frame,
                        show as _show, save_svg, TAB10, to_color as _css, colormap, describe_svg, mpl_ticks, DASHES)
 from matplotlib.colors import to_rgba as _to_rgba, CSS4_COLORS as _CSS4_COLORS, Colormap as _Colormap
-from matplotlib.cm import _cmap, _colormaps, _invalid as _cmap_invalid
 # (one rcParams: matplotlib's, with its defaults and its key checks)
 from matplotlib import rcParams, rcParamsDefault, rcParamsOrig, rc, rcdefaults, rc_context
 from matplotlib import style
@@ -1713,21 +1712,27 @@ def colorbar(mappable=None, cax=None, ax=None, **kw):
     return _colorbar(gcf(), mappable, cax, ax, **kw)
 
 
+def _cmap(cmap):
+    """A cmap= argument checked as matplotlib checks it (matplotlib.cm,
+    imported only when one is given)"""
+    if cmap is None:
+        return None
+    from matplotlib.cm import _cmap as check
+    return check(cmap)
+
+
 def get_cmap(name=None, lut=None):
     """A colormap by name (rcParams['image.cmap'] by default), or the one given."""
+    from matplotlib.cm import _colormaps, _invalid, _NAMES_ALL
     if name is None:
         name = rcParams["image.cmap"]
     if isinstance(name, _Colormap):
         return name
     if not isinstance(name, str) or name not in _colormaps:
-        raise ValueError(_cmap_invalid(name, "name", sorted(_colormaps)))
+        raise ValueError(_invalid(name, "name", sorted(_NAMES_ALL)))
     if lut is not None:
         raise NotImplementedError("get_cmap(name, lut): a colormap resampled to lut colors is not in Sagebrush yet")
     return _colormaps[name]
-
-
-# (matplotlib.colormaps itself; called, the list of its names)
-colormaps = _colormaps
 
 
 def contourf(*args, **kw):
@@ -1926,3 +1931,12 @@ def _colorbar(fig, mappable, cax, ax, **kw):
 
 # (a name of matplotlib.pyplot's that Sagebrush lacks: its AttributeError says so)
 __sagebrush_missing__ = _missing("pyplot")
+
+
+def __getattr__(name):
+    # (pyplot.colormaps, matplotlib.colormaps itself, which called is the
+    # list of its names: matplotlib.cm imported when it is first used)
+    if name == "colormaps":
+        from matplotlib.cm import _colormaps
+        return _colormaps
+    raise AttributeError("module 'matplotlib.pyplot' has no attribute %r%s" % (name, __sagebrush_missing__(name) or ""))
