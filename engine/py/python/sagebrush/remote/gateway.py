@@ -796,7 +796,15 @@ class Gateway:
         w.post(msg)
         return fut
 
+    def _admission_stale(self, run):
+        """A scheduled run task's first check, before any effect (a payload read, an event, a handoff): a restart (or
+        any end) in the same turn as its admission already ended or fenced it (astra's R762-FENCE-1, r3 follow-up)."""
+        return run.outcome is not None or run.worker_gen != self.worker_gen or self.worker is None
+
     async def _run_single(self, b, run):
+        if self._admission_stale(run):
+            run.payload = None
+            return
         p, run.payload = run.payload, None  # (handed to the kernel: the gateway keeps no reference)
         run.owner = "worker"
         self._emit(b, run, {"type": "start"})
@@ -805,6 +813,8 @@ class Gateway:
             self._terminal(b, run, outcome)
 
     async def _run_wave(self, b, run):
+        if self._admission_stale(run):
+            return
         w = run.wave
         if w["forget"]:
             await self._execute(run, "", {"mode": w["mode"], "forget": w["forget"]}, lambda ev: None)
