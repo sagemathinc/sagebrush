@@ -33,7 +33,7 @@ class FakeSocket {
   }
   open() { this.readyState = 1; this.onopen?.({}); }
   send(t) { if (this.readyState !== 1) throw new Error("not open"); this.sent.push(JSON.parse(t)); }
-  close(code) { if (this.readyState === 3) return; this.closedWith = code; this.readyState = 3; queueMicrotask(() => this.onclose?.({ code })); }
+  close(code, reason) { if (this.readyState === 3) return; this.closedWith = code; this.closedFor = reason; this.readyState = 3; queueMicrotask(() => this.onclose?.({ code })); }
   deliver(m) { this.onmessage?.({ data: typeof m === "string" ? m : JSON.stringify(m) }); }
   requests() { return this.sent.filter((f) => f.rpc); }
 }
@@ -165,7 +165,9 @@ const json = (id, status, body, headers = {}) => ({ id, status, headers: { "cont
   check(ws.requests().length === 8, "8 requests open");
   const ninth = await within(client.request("POST", "/bindings/b1/complete", { epoch: 1, op_id: "o9", code: "x", cursor_pos: 1 }));
   check(ninth.e instanceof NotSentError && ws.requests().length === 8, "a 9th is NotSent, at once");
-  ws.deliver(json("t1", 200, { matches: [] }));
+  // (o0's own frame, whatever order the 8 reached the socket in (grader's :179 flake): the rest stay in flight)
+  const f0 = ws.requests().find((f) => JSON.parse(f.body).op_id === "o0");
+  ws.deliver(json(f0.id, 200, { matches: [] }));
   await tick(20);
   check(ws.requests().length === 8, "credit returning doesn't send it later");
   // (a raw fetch past the frame cap)
@@ -414,6 +416,100 @@ for (const [what, m, code] of [
     check(hellos.length === 1, "a close after the hello: Retry sends no second hello");
     r.close();
   }
+}
+
+
+// ================= grader's #778 pins (r778 at 67a59056)
+{
+  const B = SYNTHETIC_BASE;
+  const H = { Authorization: "DPoP x", DPoP: "y" };
+  const notSent = (t, url, init) => { try { t.fetch(url, init); return false; } catch (e) { return e instanceof TunnelNotSent; } };
+  // T5: an after= past 2^53 - 1
+  let threw = null;
+  try { route("GET", `${B}/bindings/b1/runs/r1/events?after=9007199254740992`); } catch (e) { threw = e; }
+  check(threw instanceof TunnelNotSent && route("GET", `${B}/bindings/b1/runs/r1/events?after=9007199254740991`).ref.after === 9007199254740991, "T5: after= is at most 2^53 - 1");
+  // T12, T13, T15: no DPoP header; a body on a GET; an already-aborted signal: each refused unsent, nothing on the socket
+  {
+    const { ws, t } = await setup();
+    const ac = new AbortController();
+    ac.abort();
+    check(notSent(t, `${B}/bindings`, { method: "POST", headers: { Authorization: "DPoP x" }, body: "{}" })
+      && notSent(t, `${B}/bindings/b1/runs/r1`, { method: "GET", headers: H, body: "{}" })
+      && notSent(t, `${B}/bindings`, { method: "POST", headers: H, body: "{}", signal: ac.signal })
+      && ws.sent.length === 0, "T12, T13, T15: no proof, a GET's body, an aborted signal: refused unsent, nothing sent");
+  }
+  // T8: a cancelled request still counts at the runner until its answer: 1 retired + 7 open = 8, the 9th refused
+  {
+    const { ws, t } = await setup();
+    const ac = new AbortController();
+    t.fetch(`${B}/bindings`, { method: "POST", headers: H, body: "{}", signal: ac.signal }).catch(() => {});
+    ac.abort();
+    for (let i = 0; i < 7; i++) t.fetch(`${B}/bindings`, { method: "POST", headers: H, body: "{}" }).catch(() => {});
+    check(t.retired.get("t1") === true && t.pending.size === 7 && notSent(t, `${B}/bindings`, { method: "POST", headers: H, body: "{}" }), "T8: a retired request counts toward the 8");
+  }
+  // T19, T20, T21, T24, T26: frames that close the socket (or don't retire)
+  // (each closes 4002 for its own reason, the one the runner is told)
+  for (const [what, frame, why] of [
+    ["T19: id t0", { id: "t0", status: 200, headers: {}, body: "{}" }, "a malformed frame"],
+    ["T19: id t01", { id: "t01", status: 200, headers: {}, body: "{}" }, "a malformed frame"],
+    ["T19: an id of 16 digits", { id: "t1000000000000000", status: 200, headers: {}, body: "{}" }, "a malformed frame"],
+    ["T20: the next id, never sent", { id: "t2", status: 200, headers: {}, body: "{}" }, "a frame for an id never sent"],
+    ["T24: a 1xx answer", { id: "t1", status: 101, headers: {}, body: "{}" }, "an answer's status"],
+  ]) {
+    const { ws, t } = await setup();
+    t.fetch(`${B}/bindings`, { method: "POST", headers: H, body: "{}" }).catch(() => {});
+    ws.deliver(frame);
+    check(ws.closedWith === 4002 && ws.closedFor === why && t.closed, `${what}: closed 4002, "${why}" (${ws.closedFor})`);
+  }
+  {
+    const { ws, t } = await setup();
+    const p = t.fetch(`${B}/bindings/b1/runs/r1/events?after=0`, { method: "GET", headers: H });
+    p.catch(() => {});
+    ws.deliver({ id: "t1", status: 200, headers: {}, body: "x" });
+    check(ws.closedWith === 4002, "T26: an event stream's head with a body closes 4002");
+  }
+  {
+    const { ws, t } = await setup();
+    const ac = new AbortController();
+    t.fetch(`${B}/bindings`, { method: "POST", headers: H, body: "{}", signal: ac.signal }).catch(() => {});
+    ac.abort();
+    ws.deliver({ id: "t1", retired: true, extra: 1 });
+    check(t.retired.has("t1") && t.stats.late === 1 && !ws.closedWith, "T21: a retired frame with another member doesn't retire (ignored, counted)");
+  }
+  // T29: an end closes the stream: its reader sees done
+  {
+    const { ws, t } = await setup();
+    const p = t.fetch(`${B}/bindings/b1/runs/r1/events?after=0`, { method: "GET", headers: H });
+    ws.deliver({ id: "t1", status: 200, headers: {} });
+    const reader = (await p).body.getReader();
+    ws.deliver({ id: "t1", chunk: "id: 1\ndata: {}\n\n" });
+    ws.deliver({ id: "t1", end: true });
+    const first = await reader.read();
+    const second = await within(reader.read(), 1000);
+    check(first.done === false && second.v?.done === true, `T29: after end, the reader sees done (${JSON.stringify(second.v ?? second)})`);
+  }
+  // P2, P7, P8, P9: the hello's own checks
+  {
+    const made = [];
+    class S extends FakeSocket { constructor(u) { super(u); made.push(this); setTimeout(() => this.open(), 1); } }
+    const jwk = { kty: "EC", crv: "P-256", x: "X".repeat(43), y: "Y".repeat(43) };
+    const both = await within(pairTunnel({ port: 4321, code: "c", session: "s", jwk, jkt: "J".repeat(43), WebSocket: S }));
+    check(both.e instanceof PairError && both.e.sent === false && made.length === 0, "P2: a code and a session together: refused, no socket made");
+    const reply = async (m, raw) => {
+      const p = pairTunnel({ port: 4321, code: "c", jwk, jkt: "J".repeat(43), WebSocket: S });
+      await tick(10);
+      made.at(-1).deliver(raw ?? m);
+      return (await within(p)).e?.kind;
+    };
+    check(await reply({ jsonrpc: "2.0", id: "h1", result: { ...RESULT, incarnation: "0".repeat(15) } }) === "protocol"
+      && await reply({ jsonrpc: "2.0", id: "h1", result: { ...RESULT, incarnation: "0".repeat(17) } }) === "protocol", "P7: an incarnation of 15 or 17 hex digits is a protocol error");
+    check(await reply({ jsonrpc: "2.0", id: "h2", result: RESULT }) === "protocol", "P8: an answer for another id is a protocol error");
+    const big = JSON.stringify({ jsonrpc: "2.0", id: "h1", result: { ...RESULT, pad: "x".repeat(64 * 1024) } });
+    check(big.length > 64 * 1024 && await reply(null, big) === "protocol", "P9: a hello answer over 64 KiB is refused unparsed");
+  }
+  // L1: a link's code is base32 (A-Z, 2-7)
+  check(["0", "1", "8", "9"].every((d) => parsePairLink(`?kpair=${d}BCDEFGHIJKLMNOPQRSTUVWXYZ&kport=5`) === null) && parsePairLink("?kpair=ABCDEFGHIJKLMNOPQRSTUVWXY2&kport=5") !== null,
+    "L1: a code with 0, 1, 8 or 9 isn't a pairing link");
 }
 
 // ================= the runner's link
