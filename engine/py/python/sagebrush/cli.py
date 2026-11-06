@@ -2,6 +2,9 @@
 
     sagebrush bench [...]     the benchmarks behind the performance claims
                               (sagebrush bench --help)
+    sagebrush remote --loopback [--port N]
+                              this computer as a paired page's runner,
+                              over 127.0.0.1, in this Python
 
 Sage files run with python -m sagebrush FILE.sage; the MCP server is
 sagebrush-mcp."""
@@ -15,6 +18,10 @@ def main(argv=None):
         from .bench import main as bench
 
         return bench(argv[1:])
+    if argv and argv[0] == "remote":
+        from .remote.pair import main as remote
+
+        return remote(argv[1:])
     print(__doc__.strip())
     return 0 if argv and argv[0] in ("-h", "--help") else 2
 
