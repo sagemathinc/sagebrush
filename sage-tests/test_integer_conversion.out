@@ -112,3 +112,75 @@ ZZ ('-101', 2) -> -5
 ZZ ('12', 2) !! TypeError unable to convert '12' to an integer
 () -> 0
 1267650600228229401496703205377 123456789012345678901234567890 -5/2
+('0x_ff',) -> 255
+ZZ ('0x_ff',) -> 255
+('1__0',) -> 10
+ZZ ('1__0',) -> 10
+('_10',) -> 10
+ZZ ('_10',) -> 10
+('10_',) -> 10
+ZZ ('10_',) -> 10
+('+_10',) -> 10
+ZZ ('+_10',) -> 10
+('_',) !! TypeError unable to convert '' to an integer
+ZZ ('_',) !! TypeError unable to convert '' to an integer
+('__',) !! TypeError unable to convert '' to an integer
+ZZ ('__',) !! TypeError unable to convert '' to an integer
+('0_x1f',) -> 31
+ZZ ('0_x1f',) -> 31
+('-_1',) -> -1
+ZZ ('-_1',) -> -1
+(' 1_0 ',) -> 10
+ZZ (' 1_0 ',) -> 10
+('1_ 0',) -> 10
+ZZ ('1_ 0',) -> 10
+('1 0',) -> 10
+ZZ ('1 0',) -> 10
+('f_f', 16) -> 255
+ZZ ('f_f', 16) -> 255
+('0x_ff', 16) !! TypeError unable to convert '0xff' to an integer
+ZZ ('0x_ff', 16) !! TypeError unable to convert '0xff' to an integer
+('_0x1f',) -> 31
+ZZ ('_0x1f',) -> 31
+('0b_1',) -> 1
+ZZ ('0b_1',) -> 1
+('0_10',) -> 10
+ZZ ('0_10',) -> 10
+('_-1',) -> -1
+ZZ ('_-1',) -> -1
+(' ',) !! TypeError unable to convert ' ' to an integer
+ZZ (' ',) !! TypeError unable to convert ' ' to an integer
+('\t-12\n',) -> -12
+ZZ ('\t-12\n',) -> -12
+('10', '2') !! TypeError an integer is required
+ZZ ('10', '2') !! TypeError an integer is required
+('10', 2.00000000000000) -> 2
+ZZ ('10', 2.00000000000000) -> 2
+('10', True) !! ValueError base (=1) must be 0 or between 2 and 36
+ZZ ('10', True) !! ValueError base (=1) must be 0 or between 2 and 36
+(5, '2') -> 5
+ZZ (5, '2') -> 5
+('10', None) !! TypeError an integer is required
+ZZ ('10', None) !! TypeError an integer is required
+('10', -1) !! ValueError base (=-1) must be 0 or between 2 and 36
+ZZ ('10', -1) !! ValueError base (=-1) must be 0 or between 2 and 36
+('10', 1180591620717411303424) !! OverflowError Python int too large to convert to C long
+ZZ ('10', 1180591620717411303424) !! OverflowError Python int too large to convert to C long
+('10', 2) -> 2
+ZZ ('10', 2) -> 2
+(b'12',) -> 12
+ZZ (b'12',) -> 12
+(b'0x1f',) -> 31
+ZZ (b'0x1f',) -> 31
+(b'12', 16) -> 18
+ZZ (b'12', 16) -> 18
+(bytearray(b'12'),) !! TypeError unable to coerce <class 'bytearray'> to an integer
+ZZ (bytearray(b'12'),) !! TypeError unable to coerce <class 'bytearray'> to an integer
+([1],) !! TypeError unable to coerce <class 'list'> to an integer
+ZZ ([1],) !! TypeError unable to coerce <class 'list'> to an integer
+((1, 2),) !! TypeError unable to coerce <class 'tuple'> to an integer
+ZZ ((1, 2),) !! TypeError unable to coerce <class 'tuple'> to an integer
+({},) !! TypeError unable to coerce <class 'dict'> to an integer
+ZZ ({},) !! TypeError unable to coerce <class 'dict'> to an integer
+(set(),) !! TypeError unable to coerce <class 'set'> to an integer
+ZZ (set(),) !! TypeError unable to coerce <class 'set'> to an integer

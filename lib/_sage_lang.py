@@ -2005,7 +2005,7 @@ def _integer_class(sa, methods):
     class Integer(int):
         __slots__ = ()
 
-        def __new__(cls, x=0, base=None):
+        def __new__(cls, x=0, base=0):
             # (Sage's conversion: int() truncated 3.5 and 1/2, and refused '0x1f')
             return int.__new__(cls, sa._int_value(x, base))
 

@@ -25,3 +25,11 @@ for a in [("ff", 16), ("FF", 16), ("0xff", 16), ("0o17", 8), ("0b11", 2), ("0b11
     Z(*a)
 T()
 print(Integer(2^100 + 1), ZZ("123456789012345678901234567890"), Integer(-3) + 1/2)
+# underscores are removed before parsing (then spaces anywhere are ignored), a base must be an integer, bytes are read
+# like strings, and what int() would take but Sage refuses (bytearray, memoryview, containers) is a TypeError
+for a in [("0x_ff",), ("1__0",), ("_10",), ("10_",), ("+_10",), ("_",), ("__",), ("0_x1f",), ("-_1",), (" 1_0 ",),
+          ("1_ 0",), ("1 0",), ("f_f", 16), ("0x_ff", 16), ("_0x1f",), ("0b_1",), ("0_10",), ("_-1",), (" ",),
+          ("\t-12\n",), ("10", "2"), ("10", 2.0), ("10", True), (5, "2"), ("10", None), ("10", -1), ("10", 2^70),
+          ("10", QQ(2)), (b"12",), (b"0x1f",), (b"12", 16), (bytearray(b"12"),), ([1],), ((1, 2),), ({},), (set(),)]:
+    T(*a)
+    Z(*a)
