@@ -124,7 +124,11 @@ export interface BoardHost {
   /** where "Sagebrush" in the top bar goes */
   home?: string;
   /** the example boards (Examples…) */
-  examples?: { list(): Promise<{ title: string; about: string; href: string; current?: boolean }[]> };
+  examples?: {
+    list(): Promise<{ title: string; about: string; href: string; current?: boolean }[]>;
+    /** the gallery's panel (web/examples/open.ts), where the site has it: whether it opened (else the list above) */
+    panel?(): Promise<boolean>;
+  };
   /** which Sagebrush runs this board's code: the site's version, its build (as
    * `sagebrush --version` says it) and its engine; or only the engine (round 0's 17) */
   version?: () => Promise<BoardVersion | null>;
@@ -1443,6 +1447,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   closeOnBackdrop($("helpdlg") as HTMLDialogElement);
   closeOnBackdrop($("exdlg") as HTMLDialogElement);
   $("examples").onclick = async () => {
+    if (await host.examples?.panel?.()) return;
     const list = $("exlist");
     try {
       const ex = await host.examples!.list();

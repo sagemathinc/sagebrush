@@ -52,6 +52,12 @@ const W = "window.sagebrush?.workspace";
 // (the notebook page's menu: #filemenu; the board page's: [data-sbb=filemenu])
 const NB = "#filemenu", BD = "[data-sbb=filemenu]";
 const shape = (menu) => ev(`[...document.querySelector(${JSON.stringify(menu)}).children].map((x) => x.tagName === "HR" ? "-" : x.dataset.group ? x.dataset.group + "▸[" + [...x.nextElementSibling.querySelectorAll("button")].map((b) => b.dataset.item ?? b.textContent).join(",") + "]" : x.dataset.item ?? "").filter(Boolean)`);
+// (File ▸ Examples…, sim run 12: the gallery's catalog as a site with the gallery serves it (this test's server has
+// none): one notebook and one board, as each page's panel opens on its own kind)
+const STUB_CATALOG = `(() => { const f0 = window.__sbFetch0 ??= window.fetch; window.fetch = (u, o) => /\\/examples\\/index\\.json$/.test(String(u?.url ?? u)) ? Promise.resolve(new Response(JSON.stringify({ examples: [{ id: "notebook/stub", kind: "notebook", title: "Stub example", summary: "" }, { id: "board/stub", kind: "board", title: "Stub example", summary: "" }] }), { headers: { "content-type": "application/json" } })) : f0(u, o); return 1; })()`;
+const UNSTUB = `(() => { if (window.__sbFetch0) window.fetch = window.__sbFetch0; return 1; })()`;
+const galleryShown = `!!document.querySelector("dialog.sb-examples[open]") && [...document.querySelectorAll("dialog.sb-examples [role=option]")].some((b) => b.textContent.includes("Stub example"))`;
+const closeGallery = `(() => { [...document.querySelectorAll("dialog.sb-examples button")].find((b) => b.textContent === "Close")?.click(); return 1; })()`;
 const labels = (menu) => ev(`[...document.querySelector(${JSON.stringify(menu)}).querySelectorAll("button")].map((b) => b.dataset.group ? b.textContent.replace(/ [▸▾]$/, "") : b.dataset.item ? b.firstChild.textContent : null).filter(Boolean)`);
 const pick = (menu, item) => ev(`(() => { const b = document.querySelector(${JSON.stringify(menu)} + " [data-item=${item}]"); if (!b) throw new Error("no ${item}"); b.click(); return !b.disabled; })()`);
 const key = (k, mods) => ev(`(() => { document.dispatchEvent(new KeyboardEvent("keydown", { key: ${JSON.stringify(k)}, ctrlKey: true, altKey: ${!!mods?.alt}, bubbles: true, cancelable: true })); return 1; })()`);
@@ -63,11 +69,25 @@ try {
   await until(`!!${W} && !!document.querySelector("#filemenu [data-item=open]:not([disabled])")`, 60000);
   // the same items in the same order, on both pages
   const nbShape = await shape(NB), nbLabels = await labels(NB);
-  check(JSON.stringify(nbShape) === JSON.stringify(["new▸[newNotebook,newMatlab,newBoard,newFolder,fromExample]", "open", "recent▸[]", "upload", "-", "saveCopy", "rename", "download▸[.ipynb,.py,marimo (.py),with history (.sbreplay)]", "print", "share", "-", "delete"]), "the notebook page's File menu: " + JSON.stringify(nbShape));
+  check(JSON.stringify(nbShape) === JSON.stringify(["new▸[newNotebook,newMatlab,newBoard,newFolder,fromExample]", "open", "examples", "recent▸[]", "upload", "-", "saveCopy", "rename", "download▸[.ipynb,.py,marimo (.py),with history (.sbreplay)]", "print", "share", "-", "delete"]), "the notebook page's File menu: " + JSON.stringify(nbShape));
   await ev(`(() => { document.querySelector("#filebtn").click(); document.querySelector("#filemenu [data-group=new]").click(); return 1; })()`);
   check(await ev(`!document.querySelector("#filemenu").hidden && !document.querySelector("#filemenu [data-group=new]").nextElementSibling.hidden`), "New ▸ opens in place, the menu staying open");
   check(await ev(`document.querySelector("#filemenu [data-group=download]").nextElementSibling.getBoundingClientRect().height === 0`), "…a group not opened shows nothing");
   await shot("notebook-file-menu");
+  // File ▸ Examples…: New ▸ From an example…, at the top. A site without the gallery: this page's own list, as before
+  await ev(`(() => { document.querySelector("#filemenu [data-item=examples]").click(); return 1; })()`);
+  check(await until(`!!document.querySelector("#exdlg[open]")`), "File ▸ Examples… on a site without the gallery: the page's own list");
+  await ev(`(() => { document.querySelector("#exdlg").close(); return 1; })()`);
+  // (a site with the gallery: its panel, for Examples… and From an example… alike)
+  await ev(STUB_CATALOG);
+  await ev(`(() => { document.querySelector("#filemenu [data-item=examples]").click(); return 1; })()`);
+  check(await until(galleryShown), "File ▸ Examples…: the gallery's panel, its catalog listed");
+  await ev(closeGallery);
+  await until(`!document.querySelector("dialog.sb-examples")`);
+  await ev(`(() => { document.querySelector("#filemenu [data-item=fromExample]").click(); return 1; })()`);
+  check(await until(galleryShown) && !(await ev(`!!document.querySelector("#exdlg[open]")`)), "New ▸ From an example…: the same panel, not the old list");
+  await ev(closeGallery);
+  await ev(UNSTUB);
   await ev(`(() => { document.querySelector("#filebtn").click(); return 1; })()`);
   // Ctrl+Alt+N: a new notebook
   const first = await nbRef();
@@ -159,7 +179,18 @@ try {
   await until(`!!window.sagebrush?.board?.snapshot() && !!document.querySelector("[data-sbb=filemenu] [data-item=open]:not([disabled])")`, 60000);
   const bdLabels = await labels(BD), bdShape = await shape(BD);
   check(JSON.stringify(bdLabels) === JSON.stringify(nbLabels.filter((l) => l)), "the board page's File menu: the same items, in the same order: " + JSON.stringify([bdLabels, nbLabels]));
-  check(bdShape[7]?.startsWith("download▸[.board.json,HTML (one file),JSON Canvas,Copy JSON]") && (await ev(`(() => { const b = document.querySelector("[data-sbb=filemenu] [data-item=share]"); return b.disabled && !b.hidden; })()`)), "…its own downloads; Share… shown, disabled (Sagebrush's board page: disabled, not hidden, design §3): " + JSON.stringify(bdShape));
+  check(bdShape[8]?.startsWith("download▸[.board.json,HTML (one file),JSON Canvas,Copy JSON]") && (await ev(`(() => { const b = document.querySelector("[data-sbb=filemenu] [data-item=share]"); return b.disabled && !b.hidden; })()`)), "…its own downloads; Share… shown, disabled (Sagebrush's board page: disabled, not hidden, design §3): " + JSON.stringify(bdShape));
+  // (why Share… is disabled, said where it is: run 12, X01 clicked it and got nothing)
+  check(await ev(`/isn't available yet.*HTML \\(one file\\)/.test(document.querySelector("[data-sbb=filemenu] [data-item=share]").title)`), "…its disabled Share… says why, and what to do instead (Download ▸ HTML)");
+  // File ▸ Examples… on the board page: the page's own list here; the gallery's panel where the site has it
+  await ev(`(() => { document.querySelector("[data-sbb=filemenu] [data-item=examples]").click(); return 1; })()`);
+  check(await until(`!!document.querySelector("[data-sbb=exdlg][open]")`), "the board page's File ▸ Examples… on a site without the gallery: its own list");
+  await ev(`(() => { document.querySelector("[data-sbb=exdlg]").close(); return 1; })()`);
+  await ev(STUB_CATALOG);
+  await ev(`(() => { document.querySelector("[data-sbb=filemenu] [data-item=examples]").click(); return 1; })()`);
+  check(await until(galleryShown) && !(await ev(`!!document.querySelector("[data-sbb=exdlg][open]")`)), "the board page's File ▸ Examples…: the gallery's panel");
+  await ev(closeGallery);
+  await ev(UNSTUB);
   check(await ev(`!!document.querySelector("[data-sbb=menu] [data-sbb=mermaid]") && !!document.querySelector("[data-sbb=menu] [data-sbb=revert]")`), "Import Mermaid… and Revert are in the board's ⋯");
   await ev(`(() => { document.querySelector("[data-sbb=filebtn]").click(); document.querySelector("[data-sbb=filemenu] [data-group=new]").click(); return 1; })()`);
   check(await ev(`document.querySelector("[data-sbb=filemenu] [data-group=download]").nextElementSibling.getBoundingClientRect().height === 0 && document.querySelector("[data-sbb=filemenu] [data-item=newBoard]").getBoundingClientRect().top > document.querySelector("[data-sbb=filemenu] [data-item=newNotebook]").getBoundingClientRect().bottom - 1`), "the board page: a group not opened shows nothing; an open group's items one per line");
