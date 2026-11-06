@@ -322,6 +322,7 @@ class _Protocol(asyncio.Protocol):
         self.conn = None
         self.reserved = False
         self.timer = None
+        self.deadline = None  # (ms: the handshake and the hello must both be done by then, from the TCP admission)
 
     def connection_made(self, transport):
         self.transport = transport
@@ -336,6 +337,7 @@ class _Protocol(asyncio.Protocol):
             if self.conn is None:
                 self.release()
                 transport.abort()
+        self.deadline = self.server.timers.now() + PAIR_LIMITS["helloMs"]
         self.timer = self.server.timers.set_timeout(too_slow, PAIR_LIMITS["helloMs"])
 
     def release(self):
@@ -488,18 +490,22 @@ class PairServer:
         attached without one (tests), it takes its own."""
         c = Conn(transport, self)
         self.conns.add(c)
+        # (the hello's deadline is the connection's, from its TCP admission (astra's #763 r2 note): an upgrade passes
+        # on what is left of it, never a fresh helloMs)
+        left = PAIR_LIMITS["helloMs"]
         if proto is not None and proto.reserved:
             self.timers.clear_timeout(proto.timer)
             proto.timer = None
             proto.reserved = False
             self.pending.discard(proto)
+            left = max(0, proto.deadline - self.timers.now())
         else:
             self.unpaired_count += 1
 
         def no_hello():
             if not c.paired:
                 c.close(1008, "no hello in time")
-        c.hello_timer = self.timers.set_timeout(no_hello, PAIR_LIMITS["helloMs"])
+        c.hello_timer = self.timers.set_timeout(no_hello, left)
         return c
 
     def dropped(self, c):
