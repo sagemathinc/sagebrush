@@ -34,6 +34,27 @@ def text(r):
     return "\n".join(c["text"] for c in r["result"]["content"] if c["type"] == "text")
 
 
+def listed(names):
+    """web/llms.txt's "MCP server" section names every tool, and only tools: each backquoted name on its "Its tools"
+    lines is one tools/list gives, and every tool tools/list gives is on them (so the list can't go stale).  Skipped,
+    said, where the checkout's web/ isn't beside this file (a wheel tested on its own)."""
+    import re
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "web", "llms.txt")
+    if not os.path.exists(path):
+        print("skip: web/llms.txt isn't here, so its MCP tool list wasn't compared")
+        return
+    lines = open(path, encoding="utf-8").read().split("\n")
+    start = next(i for i, l in enumerate(lines) if l.startswith("## MCP server"))
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+    tools = next(i for i in range(start, end) if lines[i].startswith("- Its tools"))
+    said = set()
+    for l in lines[tools + 1:end]:
+        if not l.startswith("  - "):
+            break
+        said |= set(re.findall(r"`([a-z][a-z0-9_]*)`", l))
+    assert said == set(names), ("llms.txt's MCP tools differ from tools/list", sorted(said - set(names)), sorted(set(names) - said))
+
+
 def raw():
     p = start()
     r = rpc(p, 1, "initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "test", "version": "0"}})
@@ -41,6 +62,7 @@ def raw():
     p.stdin.write(json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}) + "\n")
     names = [t["name"] for t in rpc(p, 2, "tools/list")["result"]["tools"]]
     assert {"sage", "python", "search_docs", "reset", "guide", "factor", "number_field", "newforms"} <= set(names), names
+    listed(names)
     call = lambda rid, name, args: rpc(p, rid, "tools/call", {"name": name, "arguments": args})
     assert text(call(3, "sage", {"code": "R.<x> = QQ[]\nf = x^4 - 1\nf.factor()"})) == "(x - 1) * (x + 1) * (x^2 + 1)"
     assert text(call(4, "sage", {"code": "f.degree()"})) == "4"  # the session persists
