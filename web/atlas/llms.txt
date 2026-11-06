@@ -32,3 +32,4 @@
 - Before computing: the engine predicts time and peak memory (WebAssembly, one thread) with estimate_newforms: in Sage mode `from sagebrush import mf; mf.estimate(N, k, bound)`, in a page the WebMCP tool atlas_estimate; /atlas/about#cost shows its accuracy.
 - Rust: in engine/ of https://github.com/sagemathinc/sagebrush, `cargo run --release -p sagebrush-web --example atlas -- N:k 1000` prints the newspace as one JSON line (the atlas's input).
 - In a browser with WebMCP, atlas pages offer tools atlas_lookup(label), atlas_search(filters), atlas_estimate(level, weight, bound) and atlas_compute(level, weight).
+- From an AI agent, without a browser: the MCP server `sagebrush-mcp` (`pip install sagebrush`, or `uvx sagebrush-mcp`; see /llms.txt, "MCP server") has the tool `newforms` (the Galois orbits of level N and weight k) and `sage` (Sage mode, as above).
