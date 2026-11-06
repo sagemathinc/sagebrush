@@ -635,8 +635,9 @@ fn num_str(n: &Num) -> (String, u8) {
                 P_ATOM
             }
         }
-        Num::Float(_, b) => {
-            if *b != 0.0 {
+        Num::Float(a, b) => {
+            // (+infinity is grouped as a factor, as Sage: (+infinity)*x)
+            if *b != 0.0 || *a == f64::INFINITY {
                 P_ADD
             } else if s.starts_with('-') {
                 P_NEG
@@ -813,7 +814,11 @@ fn print_mul(v: &[Expr]) -> (String, u8) {
     if neg_sign {
         s.push('-');
     }
-    let cstr = num_str(&c);
+    let mut cstr = num_str(&c);
+    if neg_sign && matches!(c, Num::Float(a, b) if a == f64::INFINITY && b == 0.0) {
+        // the sign pulled out of -infinity leaves no "+": Sage's -infinity*x
+        cstr = ("infinity".to_string(), P_ATOM);
+    }
     if !c.is_one() {
         if numer.is_empty() && denom.is_empty() {
             s.push_str(&cstr.0);
