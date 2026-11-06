@@ -1,3 +1,4 @@
+// ci: checks.3 order=107 runner=bun
 // web/code/tokens.ts (1a): a code file's tokens join to its text exactly, in every language, whatever the text (HTML
 // in it, entities, unclosed strings and comments, random characters); Python, Sage and MATLAB are the notebook's own
 // colors; anything a highlighter can't give back exactly is one plain token. No browser needed.
