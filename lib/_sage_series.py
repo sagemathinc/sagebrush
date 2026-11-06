@@ -349,6 +349,13 @@ def _latex_number(c):
     return "%s\\frac{%s}{%s}" % m.groups() if m else None
 
 
+def _latex_from_repr(s):
+    """The printed series with ^{} exponents (Laurent series, and
+    coefficients that are not plain numbers)."""
+    import re
+    return re.sub(r"\^(-?\d+)", r"^{\1}", repr(s).replace("*", " "))
+
+
 class Series:
     """A power series or Laurent series.
 
@@ -620,19 +627,21 @@ class Series:
             sage: latex(2 - x + O(x^3)), latex(O(x^3)), latex(R(0)), latex(3 + O(x))
             (2 -  x + O(x^{3}), 0 + \\cdots, 0, 3 + O(x))
         """
+        if self._R._laurent:
+            return _latex_from_repr(self)
         name = self._R._name
-        coefs = [] if self.is_zero() else [(self._v + i, c) for i, c in enumerate(self._c) if not _is_zero(c)]
-        lat = [_latex_number(c) for _, c in coefs]
-        if self._R._laurent or None in lat:
-            import re
-            return re.sub(r"\^(-?\d+)", r"^{\1}", repr(self).replace("*", " "))
         terms = []
-        for (e, _), lc in zip(coefs, lat):
-            if e == 0:
-                terms.append(lc)
+        e = self._v - 1
+        for c in ([] if self.is_zero() else self._c):
+            e += 1
+            if _is_zero(c):
                 continue
-            mono = name if e == 1 else "%s^{%d}" % (name, e)
-            terms.append({"1": "", "-1": "-"}.get(lc, lc) + " " + mono)
+            lc = _latex_number(c)
+            if lc is None:
+                return _latex_from_repr(self)
+            if e:
+                lc = ("" if lc == "1" else "-" if lc == "-1" else lc) + " " + (name if e == 1 else "%s^{%d}" % (name, e))
+            terms.append(lc)
         if self._prec is not None:
             if not terms:
                 return "0 + \\cdots"
