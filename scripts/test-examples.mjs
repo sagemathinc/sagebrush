@@ -496,6 +496,23 @@ test("the corpus's hidden-setup keeps its flags: the setup cell's code hidden, t
   assert.ok(code[3].outputs.length > 0, "the hidden output is still committed");
 });
 
+test("every LaTeX example and fixture with \\maketitle sets \\date: a committed preview never holds today's date", () => {
+  // (no \date prints \today, so the committed preview.html stops matching its render at midnight UTC: master went red
+  // on Nov 6 at 00:00Z from test/fixtures/examples/latex/article; @sagebrush-agents-ui's diagnosis)
+  const roots = [FIX, join(here, "..", "examples")];
+  const tex = [];
+  for (const r of roots)
+    for (const e of listExamples(r))
+      if (e.kind === "latex" && e.manifest)
+        for (const f of e.manifest.files) if (f.endsWith(".tex")) tex.push(join(e.dir, f));
+  assert.ok(tex.length > 10, `found the LaTeX sources (${tex.length})`);
+  const bare = tex.filter((f) => {
+    const t = readFileSync(f, "utf8").replace(/(^|[^\\])%.*$/gm, "$1");
+    return /\\maketitle\b/.test(t) && !/\\date\s*\{/.test(t);
+  });
+  assert.deepEqual(bare, []);
+});
+
 test("validate refuses a notebook that isn't in the runner's own form", () => {
   // (the same notebook minified: its outputs would churn on the next --update; grader's N2)
   const root = copy();
