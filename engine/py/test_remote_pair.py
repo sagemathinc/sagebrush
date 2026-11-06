@@ -856,6 +856,19 @@ async def test_end_to_end_and_ctrl_c():
         sg.close()
 
 
+def test_page_tunnel_end_to_end():
+    """The page's own RemoteKernel and RemoteClient through web/notebook/pair-tunnel.js to this runner (bun runs the
+    page's modules; without bun, said and skipped)."""
+    import subprocess
+    bun = shutil.which("bun")
+    script = os.path.join(HERE, "..", "..", "web", "notebook", "test-pair-runner.mjs")
+    if bun is None or not os.path.exists(script):
+        print("  (no bun or no web/: the page tunnel's end-to-end case) SKIPPED")
+        return
+    r = subprocess.run([bun, script], env={**os.environ, "PYTHON": sys.executable}, capture_output=True, text=True, timeout=180)
+    assert r.returncode == 0 and "all passed" in r.stdout, (r.returncode, r.stdout[-2000:], r.stderr[-1000:])
+
+
 if __name__ == "__main__":
     for name, f in list(globals().items()):
         if name.startswith("test_") and callable(f):
