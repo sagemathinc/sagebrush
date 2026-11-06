@@ -1,0 +1,10 @@
+{
+ "v": 1,
+ "reason": "A series meeting an inexact number (RR, RDF, CC, CDF, RealField(p), ComplexField(p)): over the number's field, as Sage (lib/_sage_series.py _inexact_parent in _target_base; an inexact field divides by multiplying with the inverse; lib/_sage_matrix.py _cc_or_none: ComplexNumber dunders return NotImplemented) Re-measured with bun 1.4.4 (size-record.sh) on the pushout head 1960ed1f (this PR's base) vs head fa39f23d: cli/lib.gen.js +560, cli/pyjs.cjs +676, engine/lib/sage.pre +8689, engine/lib/sage.src +2365; no other row moves. Markers: exact, except cli/pyjs.cjs 708 (+676 measured, plus 32 B of margin, as it moves with master).",
+ "bytes": {
+  "cli/lib.gen.js": 560,
+  "cli/pyjs.cjs": 708,
+  "engine/lib/sage.pre": 8689,
+  "engine/lib/sage.src": 2365
+ }
+}
