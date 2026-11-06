@@ -223,6 +223,14 @@ export async function run() {
     search.dispatchEvent(new Event("input"));
     dlg.querySelector('button[data-id="board/hello"]').click();
     check(frame.getAttribute("src") === "/examples/board/hello/" && dlg.querySelector(".acts a").getAttribute("href") === "/examples/board/hello/hello.zip", "choosing one shows its page and its ZIP");
+    // Expand (William, Nov 6): the preview across the whole window, the list hidden; again, back as it was
+    const big = dlg.querySelector('button[data-act="expand"]');
+    const w0 = frame.getBoundingClientRect().width;
+    big?.click();
+    const w1 = frame.getBoundingClientRect().width;
+    check(big && dlg.classList.contains("big") && big.getAttribute("aria-pressed") === "true" && w1 > w0 + 100 && Math.abs(dlg.getBoundingClientRect().width - innerWidth) < 2 && getComputedStyle(dlg.querySelector("ul")).display === "none", "Expand: the preview across the whole window, the list hidden: " + JSON.stringify({ w0, w1, win: innerWidth }));
+    big?.click();
+    check(!dlg.classList.contains("big") && big.getAttribute("aria-pressed") === "false" && Math.abs(frame.getBoundingClientRect().width - w0) < 2 && getComputedStyle(dlg.querySelector("ul")).display !== "none" && frame.getAttribute("src") === "/examples/board/hello/", "…and again: back as it was, the same example shown");
     dlg.querySelector(".acts button").click();
     await closed;
     check(opened?.kind === "board" && /^\/Examples\/Hello, board/.test(opened.path) && !document.querySelector("dialog.sb-examples"), "Open a copy: copied, the panel closed, the host told to open its main: " + opened?.path);
