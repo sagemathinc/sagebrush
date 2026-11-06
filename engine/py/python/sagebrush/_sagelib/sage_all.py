@@ -606,6 +606,71 @@ def _poly_var_name(var):
     return name
 
 
+def _rational_from_str(s, base):
+    """(numerator, denominator) of a string as Sage reads a rational (GMP's
+    rule): 'a' or 'a/b', spaces anywhere ignored, each part with an optional
+    '-'; in base 0 each part's 0x or 0b prefix (or a leading 0: octal) sets
+    its base, else decimal; an explicit base from 2 to 62 (to 36 either case,
+    beyond it A-Z are 10-35 and a-z 36-61).  Anything else, a zero
+    denominator included, is a TypeError."""
+    if base is None or isinstance(base, (str, bytes)):
+        raise TypeError("an integer is required")
+    b = _int_value(base)
+    if b < 0:
+        raise OverflowError("can't convert negative value to unsigned int")
+    parts = "".join(s.split()).split("/")
+    vals = []
+    if (b == 0 or 2 <= b <= 62) and len(parts) <= 2:
+        for part in parts:
+            v = _gmp_int(part, b)
+            if v is None:
+                break
+            vals.append(v)
+    if len(vals) != len(parts) or (len(vals) == 2 and vals[1] == 0):
+        raise TypeError("unable to convert %r to a rational" % s)
+    return vals[0], (vals[1] if len(vals) == 2 else 1)
+
+
+def _gmp_int(t, base):
+    """An integer as GMP reads one (no spaces left in t): an optional '-',
+    then digits; in base 0 a 0x/0X or 0b/0B prefix, or a leading 0 for
+    octal.  None if t is not one."""
+    neg = t.startswith("-")
+    if neg:
+        t = t[1:]
+    if base == 0:
+        if t[:2] in ("0x", "0X"):
+            t, base = t[2:], 16
+        elif t[:2] in ("0b", "0B"):
+            t, base = t[2:], 2
+        elif t[:1] == "0" and len(t) > 1:
+            t, base = t[1:], 8
+        else:
+            base = 10
+    if not t:
+        return None
+    v = 0
+    for ch in t:
+        o = ord(ch)
+        if 48 <= o <= 57:
+            k = o - 48
+        elif 65 <= o <= 90:
+            k = o - 55
+        elif 97 <= o <= 122:
+            k = o - 87 if base <= 36 else o - 61
+        else:
+            return None
+        if k >= base:
+            return None
+        v = v * base + k
+    return -v if neg else v
+
+
+def _rational_from_pair(numerator, denominator):
+    """The Rational numerator/denominator of a coprime pair (unpickling)."""
+    return Rational._from_coprime_ints(numerator, denominator)
+
+
 class Rational(_Fraction):
     """An exact rational number, such as ``2/3`` in Sage mode.
 
@@ -617,16 +682,39 @@ class Rational(_Fraction):
         'Rational'
         sage: a + 1/3, a * 3/4, a^2, a.numerator(), a.denominator()
         (1, 1/2, 4/9, 2, 3)
+
+    As in Sage, Rational(x, base) reads a string in that base, and a
+    numerator and a denominator are a tuple::
+
+        sage: Rational('1/ff', 16), Rational('-0x1f'), Rational((6, -4)), Rational(1, 3)
+        (1/255, -31, -3/2, 1)
     """
 
     __slots__ = ()
 
-    def __new__(cls, numerator=0, denominator=None):
-        # (a real number as QQ converts it: the simplest rational that
-        # rounds to it, Rational(0.1) is 1/10, not the double's exact value)
-        if denominator is None and not isinstance(numerator, (int, _Fraction, str)) and _real_kind(numerator) is not None:
-            return _simplest_rational(numerator, "Rational of a real number", literal=True)
-        return _Fraction.__new__(cls, numerator, denominator)
+    def __new__(cls, x=0, base=0):
+        # (as Sage: the second argument is a base, for a string only:
+        # Rational(1, 3) is 1, Rational('12', 3) is 5; a numerator and a
+        # denominator are a tuple, Rational((1, 3)); a real number as QQ
+        # converts it, the simplest rational that rounds to it: Rational(0.1)
+        # is 1/10, not the double's exact value)
+        if isinstance(x, bytes):
+            x = x.decode()
+        if isinstance(x, str):
+            n, d = _rational_from_str(x, base)
+            return _Fraction.__new__(cls, n, d)
+        if x is None:
+            return _Fraction.__new__(cls, 0)
+        if isinstance(x, tuple) and len(x) == 2:
+            n, d = _int_value(x[0]), _int_value(x[1])
+            if d == 0:
+                raise ValueError("denominator must not be 0")
+            return _Fraction.__new__(cls, n, d)
+        if not isinstance(x, (int, _Fraction)) and _real_kind(x) is not None:
+            return _simplest_rational(x, "Rational of a real number", literal=True)
+        if isinstance(x, (tuple, list, complex)):
+            raise TypeError("unable to convert %r to a rational" % (x,))
+        return _Fraction.__new__(cls, x)
 
     def __repr__(self):
         if self._denominator == 1:
@@ -665,6 +753,18 @@ class Rational(_Fraction):
         if isinstance(b, (int, _Fraction)) and not isinstance(b, bool) and self._denominator != 1:
             return _rational_power(_Fraction(b), self)
         return Rational._rpow(self, b)
+
+    # (copy, deepcopy and pickle as Fraction does them call the class with
+    # (numerator, denominator); Rational(a, b) is Sage's, b a base: these
+    # build the value explicitly)
+    def __copy__(self):
+        return self
+
+    def __deepcopy__(self, memo):
+        return self
+
+    def __reduce__(self):
+        return (_rational_from_pair, (self._numerator, self._denominator))
 
     def __neg__(self):
         return Rational._from_coprime_ints(-self._numerator, self._denominator)
