@@ -774,16 +774,21 @@ def test_origin_refused_close():
     with contextlib.redirect_stderr(io.StringIO()):
         p, port, code = new()
         site = "https://dev.sagebrush.space"
-        # (the upgrade, then the close at once, then EOF: a hello sent after it is never read)
+        # (the upgrade, then the close at once, then EOF: a hello sent after it is never read.  The close is read
+        # before the hello is sent: a hello arriving at a socket the server has closed may draw a TCP RST, which can
+        # discard the close frame still unread here (a ConnectionResetError, grader's flake log, Nov 6))
         c = Client(port, origin=site)
         assert c.status == 101
+        m = c.recv()
+        assert m == ("close", P.ORIGIN_REFUSED, "origin not allowed"), m
         try:
             c.send({"jsonrpc": "2.0", "id": "h", "method": "hello", "params": {"protocol": 1, "code": code}})
         except OSError:
             pass
-        m = c.recv()
-        assert m == ("close", P.ORIGIN_REFUSED, "origin not allowed"), m
-        assert c.recv() is None
+        try:
+            assert c.recv() is None
+        except ConnectionResetError:
+            pass  # (the RST for the hello: still nothing after the close)
         c.close()
         # (any other site, and a Sagebrush site with anything else wrong, gets the 403: Host is checked before the origin)
         assert refusal(port, origin="https://evil.example") == "403"
@@ -918,3 +923,11 @@ if __name__ == "__main__":
             f()
             print("ok", name)
     print("all pairing tests passed")
+    # The remote runner's tests (design remote-v1, build step (a)) run here too, because CI's engine-cpython job
+    # runs a fixed list of test files and this is the pairing's successor.  (A ci.yml line of their own is the
+    # cleanup: /scratch/sagebrush-reviews/remote-compute/ci-remote-tests/.)
+    import runpy
+    for remote_test in ("test_remote_es256.py", "test_remote_dpop.py", "test_remote_mangle.py", "test_remote_child.py",
+                        "test_remote_gateway.py", "test_remote_pair.py", "test_remote_enroll.py",
+                        "test_remote_relay.py"):
+        runpy.run_path(os.path.join(HERE, remote_test), run_name="__main__")
