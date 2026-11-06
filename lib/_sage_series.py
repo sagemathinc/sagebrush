@@ -261,9 +261,11 @@ class SeriesRing_:
         if isinstance(x, (list, tuple)):
             r = Series(self, 0, [self._base(c) for c in x], None)
             return r.add_bigoh(prec) if prec is not None else r
-        # a polynomial in the series variable: its coefficients; one in another variable is an
-        # element of the base (a in QQ['a'][[x]] is the constant a, not x; Sage: a*x)
-        if hasattr(x, "list") and hasattr(x, "degree") and hasattr(x, "parent") and not isinstance(x, (int, _F)) and _variable_of(x) in (None, self._name):
+        # an element of the base (or of a ring that coerces into it) is a constant, whatever its
+        # variable is called (a in QQ['a'][[x]], and x in QQ['x'][[x]]: Sage's a*x, x*x); another
+        # polynomial in the series variable gives its coefficients, one in another variable is
+        # converted by the base
+        if hasattr(x, "list") and hasattr(x, "degree") and hasattr(x, "parent") and not isinstance(x, (int, _F)) and not _coerces_into(x, self._base) and _variable_of(x) in (None, self._name):
             r = Series(self, 0, [self._base(c) for c in x.list()], None)
             return r.add_bigoh(prec) if prec is not None else r
         if type(x).__name__ == "FractionFieldElement":
@@ -280,6 +282,26 @@ class SeriesRing_:
             return True
         except (TypeError, ValueError):
             return False
+
+
+def _coerces_into(x, B):
+    """Whether x's parent is B or a polynomial ring that coerces into B (the same variables,
+    over a ring that coerces into B's: ZZ['x'] into QQ['x'] or GF(5)['x'], not QQ['x'] into
+    ZZ['x'])."""
+    try:
+        P = x.parent()
+    except Exception:
+        return False
+    if P is B or P == B:
+        return True
+    try:
+        names = lambda R: tuple(R.variable_names()) if hasattr(R, "variable_names") else (R.variable_name(),)
+        if names(P) != names(B):
+            return False
+        k, K = P.base_ring(), B.base_ring()
+    except Exception:
+        return False
+    return k is K or k == K or k is _sa().ZZ
 
 
 def _variable_of(x):
