@@ -64,6 +64,34 @@ _CMAPS = {
     "Spectral": ["#9e0142", "#d53e4f", "#f46d43", "#fdae61", "#fee08b", "#ffffbf", "#e6f598", "#abdda4", "#66c2a5", "#3288bd", "#5e4fa2"],
     "RdBu": ["#67001f", "#b2182b", "#d6604d", "#f4a582", "#fddbc7", "#d1e5f0", "#92c5de", "#4393c3", "#2166ac", "#053061"],
 }
+_GRAYS = ("gray", "grey", "Greys", "binary")
+
+# matplotlib 3.11.1's colormaps, in its registry's order; each is there
+# reversed too, as name + "_r", after all of these (CMAP_NAMES_ALL)
+CMAP_NAMES = (
+    'magma', 'inferno', 'plasma', 'viridis', 'cividis', 'twilight', 'twilight_shifted', 'turbo',
+    'berlin', 'managua', 'vanimo', 'Blues', 'BrBG', 'BuGn', 'BuPu', 'CMRmap', 'GnBu', 'Greens',
+    'Greys', 'OrRd', 'Oranges', 'PRGn', 'PiYG', 'PuBu', 'PuBuGn', 'PuOr', 'PuRd', 'Purples',
+    'RdBu', 'RdGy', 'RdPu', 'RdYlBu', 'RdYlGn', 'Reds', 'Spectral', 'Wistia', 'YlGn', 'YlGnBu',
+    'YlOrBr', 'YlOrRd', 'afmhot', 'autumn', 'binary', 'bone', 'brg', 'bwr', 'cool', 'coolwarm',
+    'copper', 'cubehelix', 'flag', 'gist_earth', 'gist_gray', 'gist_heat', 'gist_ncar',
+    'gist_rainbow', 'gist_stern', 'gist_yarg', 'gnuplot', 'gnuplot2', 'gray', 'hot', 'hsv', 'jet',
+    'nipy_spectral', 'ocean', 'pink', 'prism', 'rainbow', 'seismic', 'spring', 'summer', 'terrain',
+    'winter', 'Accent', 'okabe_ito', 'Dark2', 'Paired', 'Pastel1', 'Pastel2', 'Set1', 'Set2',
+    'Set3', 'tab10', 'tab20', 'tab20b', 'tab20c', 'grey', 'gist_grey', 'gist_yerg', 'Grays')
+CMAP_NAMES_ALL = CMAP_NAMES + tuple(n + "_r" for n in CMAP_NAMES)
+
+
+def cmap_drawn(name):
+    """Whether Sagebrush draws the colormap of this name (one of
+    CMAP_NAMES_ALL); the others raise cmap_missing's error."""
+    base = name[:-2] if name.endswith("_r") else name
+    return base in _CMAPS or base in _GRAYS
+
+
+def cmap_missing(name):
+    return NotImplementedError("matplotlib's colormap %r is not in Sagebrush yet (the colormaps here: %s,"
+                               " each also reversed, as name_r)" % (name, ", ".join(sorted(list(_CMAPS) + list(_GRAYS)))))
 
 
 def colormap(t, name="viridis"):

@@ -20,7 +20,8 @@ import math
 import os
 from _graphics import (Panel, Line, Points, Polygon, Rects, Text, Arrow, AxLine, Image, render_svg, render_frame,
                        show as _show, save_svg, TAB10, to_color as _css, colormap, describe_svg, mpl_ticks, DASHES)
-from matplotlib.colors import to_rgba as _to_rgba, CSS4_COLORS as _CSS4_COLORS
+from matplotlib.colors import to_rgba as _to_rgba, CSS4_COLORS as _CSS4_COLORS, Colormap as _Colormap
+from matplotlib.cm import _cmap, _colormaps, _invalid as _cmap_invalid
 # (one rcParams: matplotlib's, with its defaults and its key checks)
 from matplotlib import rcParams, rcParamsDefault, rcParamsOrig, rc, rcdefaults, rc_context
 from matplotlib import style
@@ -435,6 +436,7 @@ class Axes:
         if c is not None and not isinstance(c, str) and not (isinstance(c, tuple) and len(c) in (3, 4)):
             cl = list(c.tolist() if hasattr(c, "tolist") else c)
             if cl and isinstance(cl[0], (int, float)):
+                cmap = _cmap(cmap)
                 lo = min(cl) if vmin is None else vmin
                 hi = max(cl) if vmax is None else vmax
                 colors = [colormap((v - lo) / (hi - lo) if hi > lo else 0.5, cmap or "viridis") for v in cl]
@@ -793,6 +795,7 @@ class Axes:
         [0, 1] or integers in [0, 255].  One PNG, its cells sharp unless an
         interpolation is asked for."""
         import numpy as np
+        cmap = _cmap(cmap)
         A = np.asarray(X)
         if A.ndim not in (2, 3) or (A.ndim == 3 and A.shape[2] not in (3, 4)):
             raise TypeError("Invalid shape %s for image data" % (tuple(A.shape),))
@@ -889,6 +892,9 @@ class Axes:
         """Filled contours of Z (on its index grid, or over X, Y): drawn as
         one picture of the bands, as matplotlib's rasterized output looks."""
         import numpy as np
+        if colors is not None and cmap is not None:
+            raise ValueError("Either colors or cmap must be None")
+        cmap = _cmap(cmap)
         if len(args) >= 3:
             X, Y, Z = args[0], args[1], args[2]
             if len(args) > 3 and levels is None:
@@ -1705,6 +1711,23 @@ def yticks(ticks=None, labels=None, **kw):
 
 def colorbar(mappable=None, cax=None, ax=None, **kw):
     return _colorbar(gcf(), mappable, cax, ax, **kw)
+
+
+def get_cmap(name=None, lut=None):
+    """A colormap by name (rcParams['image.cmap'] by default), or the one given."""
+    if name is None:
+        name = rcParams["image.cmap"]
+    if isinstance(name, _Colormap):
+        return name
+    if not isinstance(name, str) or name not in _colormaps:
+        raise ValueError(_cmap_invalid(name, "name", sorted(_colormaps)))
+    if lut is not None:
+        raise NotImplementedError("get_cmap(name, lut): a colormap resampled to lut colors is not in Sagebrush yet")
+    return _colormaps[name]
+
+
+# (matplotlib.colormaps itself; called, the list of its names)
+colormaps = _colormaps
 
 
 def contourf(*args, **kw):

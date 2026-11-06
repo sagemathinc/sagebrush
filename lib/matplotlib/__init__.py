@@ -366,3 +366,12 @@ def rc_context(rc=None, fname=None):
     if fname is not None:
         raise NotImplementedError("rc_context(fname=...): Sagebrush reads no matplotlibrc files")
     return _RcContext(rc)
+
+
+def __getattr__(name):
+    # (matplotlib.colormaps, the registry of colormaps by name, made when
+    # first used)
+    if name == "colormaps":
+        from matplotlib.cm import _colormaps
+        return _colormaps
+    raise AttributeError("module 'matplotlib' has no attribute %r" % name)
