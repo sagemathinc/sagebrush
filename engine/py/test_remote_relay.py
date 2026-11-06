@@ -65,6 +65,7 @@ def test_control_grammar():
             '{"relay":"dropped","gen":3,"bytes":10}', '{"relay":"pong"}']
     for t in good:
         assert R.parse_control(t)["relay"] == json.loads(t)["relay"], t
+    assert R.close_text(7) == '{"relay":"close","gen":7}' 
     bad = [
         '{"relay":"pong" }', '{"relay":"pong","x":1}', '{"relay":"page-close","gen":1,"conn":"c1"}',
         '{"relay":"page-open","conn":"c1","kind":"runner"}', '{"relay":"pong","relay":"pong"}',
@@ -113,6 +114,8 @@ class RelaySide:
         self.inbox = asyncio.Queue()
         self.controls = []
         self.auto_pong = True
+        self.window = relay.window  # (bytes the runner may send a page that never acks: over it, 1013 (design §5))
+        self.sent_to_page = 0
         self.closed_code = None
         self.task = asyncio.ensure_future(self._read())
 
@@ -131,6 +134,14 @@ class RelaySide:
                             self.controls.append(c)
                             if c["relay"] == "ping" and self.auto_pong:
                                 self.send_text('{"relay":"pong"}')
+                            if c["relay"] == "close":
+                                # (as b2 will: the page's leg closed, and its page-close to the runner)
+                                self.send_text('{"relay":"page-close","conn":"c%d","gen":%d}' % (c["gen"], c["gen"]))
+                            continue
+                        self.sent_to_page += len(payload)
+                        if self.window is not None and self.sent_to_page > self.window:
+                            self.close(1013, "the page isn't reading")
+                            await self.inbox.put(("window", self.sent_to_page))
                             continue
                         await self.inbox.put(("text", t))
                     elif op == 0x8:
@@ -218,6 +229,8 @@ class FakeRelay:
         self.challenge_status = 200
         self.upgrade_status = 101
         self.extension = False
+        self.connection = "Upgrade"
+        self.window = None
         self.legs = asyncio.Queue()
         self.upgrades = []
         self.server = None
@@ -280,8 +293,8 @@ class FakeRelay:
             return
         accept = base64.b64encode(hashlib.sha1((h["sec-websocket-key"] + GUID).encode()).digest()).decode()
         ext = "Sec-WebSocket-Extensions: permessage-deflate\r\n" if self.extension else ""
-        writer.write(("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
-                      "Sec-WebSocket-Accept: %s\r\n%s\r\n" % (accept, ext)).encode())
+        writer.write(("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: %s\r\n"
+                      "Sec-WebSocket-Accept: %s\r\n%s\r\n" % (self.connection, accept, ext)).encode())
         await self.legs.put(RelaySide(self, reader, writer, rest))
 
     async def leg(self, timeout=30):
@@ -338,21 +351,18 @@ async def test_page_over_the_relay():
     try:
         leg = await t.relay.leg()
         assert t.relay.upgrades[-1]["ok"]
-        # a code or session hello is refused on the relay (the transport picks the trust mode), and ends the leg
-        leg.control(relay="page-open", conn="c1", kind="runner", gen=1)
-        leg.send(hello(sg, code="ABC"))
-        r = await leg.json()
-        assert r["error"]["data"]["code"] == "refused" and "relay" in r["error"]["message"], r
-        assert (await leg.closed_with()) == 1000
-        leg = await t.relay.leg()
-        assert len(t.relay.upgrades) == 2 and t.relay.upgrades[0]["challenge"] != t.relay.upgrades[1]["challenge"]
-        for over in ({"session": "x"}, {"via": "loopback"}, {"purpose": "agent"}, {"jkt": "A" * 43}):
-            leg.control(relay="page-open", conn="c1", kind="runner", gen=1)
+        # a code or session hello is refused on the relay (the transport picks the trust mode): that page closed with
+        # {"relay":"close","gen":n} (r1.9), the leg kept
+        for gen, over in enumerate(({"code": "ABC"}, {"session": "x"}, {"via": "loopback"}, {"purpose": "agent"}, {"jkt": "A" * 43}), 1):
+            leg.control(relay="page-open", conn="c%d" % gen, kind="runner", gen=gen)
             leg.send(hello(sg, **over))
             r = await leg.json()
             assert r["error"]["data"]["code"] == "refused", (over, r)
-            leg = await t.relay.leg()
-        page, res = await paired(leg, sg)
+            await asyncio.sleep(0.05)
+            assert {"relay": "close", "gen": gen} in leg.controls, (over, leg.controls)
+        await asyncio.sleep(0.1)
+        assert len(t.relay.upgrades) == 1 and t.runner.stats["pageCloses"] == 5 and not t.runner.leg.closed
+        page, res = await paired(leg, sg, gen=6)
         assert res["via"] == "relay" and res["incarnation"] == t.runner.incarnation
         st, b = await page.answer(await page.request("g.bind", {}, {}))
         assert st == 200 and b["binding"] == "b1", (st, b)
@@ -368,7 +378,7 @@ async def test_page_over_the_relay():
         await page.answer(await page.request("g.record", {"b": "b1", "r": "r1"}))
         assert {"relay": "ack", "r": r22} in leg.controls, leg.controls
         # page-close ends the page; a frame after it (none open) is a violation: the leg closes 1008
-        leg.control(relay="page-close", conn="c1", gen=1)
+        leg.control(relay="page-close", conn="c6", gen=6)
         await asyncio.sleep(0.1)
         assert t.runner.paired_conn is None
         leg.send({"id": "x"})
@@ -409,9 +419,89 @@ async def test_forged_controls_never_act():
         assert r1["token"] != r2["token"] and t.runner.paired_conn.gen == 2
         leg.control(relay="page-open", conn="c1", kind="runner", gen=1)  # (a generation going back)
         assert (await leg.closed_with()) == 1008
+        # (R768-GEN-1: and with no page open: gen 2 opened and closed, then gen 1)
+        leg = await t.relay.leg()
+        await paired(leg, sg, gen=2)
+        leg.control(relay="page-close", conn="c2", gen=2)
+        leg.control(relay="page-open", conn="c1", kind="runner", gen=1)
+        assert (await leg.closed_with()) == 1008 and t.runner.page is None
         leg = await t.relay.leg()
         leg.control(relay="page-open", conn="c1", kind="agent", gen=1)  # (a page for another kind)
         assert (await leg.closed_with()) == 1008
+    finally:
+        await t.end()
+        sg.close()
+
+
+@aio
+async def test_one_page_closed_not_the_leg():
+    """r1.9: the runner ends one page with {"relay":"close","gen":n}: an answer the page isn't reading (1013), and
+    an unpair, close that page only; the leg stays up (no new upgrade), and the next page pairs and reads the same
+    binding's run, which went on."""
+    if NODE is None:
+        print("  (no node) SKIPPED")
+        return
+    sg = await Signer().start()
+    t = await Run().start()
+    try:
+        leg = await t.relay.leg()
+        page, _ = await paired(leg, sg, gen=1)
+        await page.answer(await page.request("g.bind", {}, {}))
+        code = "import time\nfor i in range(4):\n    print('tick', i, flush=True)\n    time.sleep(0.3)\n'done'"
+        await page.answer(await page.request("g.run", {"b": "b1"}, {"request": "r1", "epoch": 1, "payload": {"code": code, "mode": "python"}}))
+        # (the leg's buffer as if full: the page's next answer can't leave, so that page ends, 1013)
+        real = t.runner.leg._buffered
+        t.runner.leg._buffered = lambda: R.RELAY_LIMITS["outData"]
+        await page.request("g.record", {"b": "b1", "r": "r1"})
+        await asyncio.sleep(0.2)
+        t.runner.leg._buffered = real
+        assert {"relay": "close", "gen": 1} in leg.controls and t.runner.paired_conn is None, leg.controls
+        assert not t.runner.leg.closed and len(t.relay.upgrades) == 1
+        page, _ = await paired(leg, sg, gen=2)
+        ev = await page.events(await page.request("g.events", {"b": "b1", "r": "r1", "after": 0}))
+        assert ev[-1]["type"] == "terminal" and "tick 3" in "".join(e.get("text", "") for e in ev), ev
+        # unpair: that page only
+        leg.send({"unpair": True})
+        await asyncio.sleep(0.2)
+        assert {"relay": "close", "gen": 2} in leg.controls and not t.runner.leg.closed and len(t.relay.upgrades) == 1
+        page, _ = await paired(leg, sg, gen=3)
+        st, b = await page.answer(await page.request("g.bind", {}, {}))
+        assert st == 200, (st, b)
+    finally:
+        await t.end()
+        sg.close()
+
+
+@aio
+async def test_relay_window_stops_a_page_that_never_reads():
+    """r1.9: the runner's gate is its own transport buffer; a page that never reads is stopped by the relay's
+    window (the fake relay's, as b2's: the runner's leg closed 1013 once a page's unacknowledged bytes pass it), and
+    the runner dials again with its binding kept."""
+    if NODE is None:
+        print("  (no node) SKIPPED")
+        return
+    sg = await Signer().start()
+    t = await Run().start()
+    t.relay.window = 64 * 1024
+    try:
+        leg = await t.relay.leg()
+        page, r1 = await paired(leg, sg, gen=1)
+        await page.answer(await page.request("g.bind", {}, {}))
+        code = "for i in range(3000):\n    print('x' * 60, flush=True)"
+        await page.answer(await page.request("g.run", {"b": "b1"}, {"request": "r1", "epoch": 1, "payload": {"code": code, "mode": "python"}}))
+        await page.request("g.events", {"b": "b1", "r": "r1", "after": 0})
+        while True:
+            kind, v = await leg.next(30)
+            if kind == "window":
+                break
+        assert (await leg.closed_with()) == 1013
+        t.relay.window = None
+        leg = await t.relay.leg(10)
+        page, r2 = await paired(leg, sg, gen=1)
+        assert r2["incarnation"] == r1["incarnation"]
+        ev = await page.events(await page.request("g.events", {"b": "b1", "r": "r1", "after": 0}))
+        text = "".join(e.get("text", "") for e in ev if e["type"] == "stream")
+        assert ev[-1]["type"] == "terminal" and text.count("x" * 60) == 3000, (ev[-1:], text.count("x" * 60))
     finally:
         await t.end()
         sg.close()
@@ -426,7 +516,12 @@ async def test_framing():
                  (lambda L: L.raw(0x0, b"x"), 1002), (lambda L: L.raw(0x3, b""), 1002),
                  (lambda L: L.w.write(bytes([0x81, 126, 0, 5]) + b"hello"), 1002),
                  (lambda L: L.raw(0x1, b"\xff\xfe"), 1007),
-                 (lambda L: L.w.write(bytes([0x81, 127]) + (R.RELAY_LIMITS["inbound"] + 1).to_bytes(8, "big")), 1009)]
+                 (lambda L: L.w.write(bytes([0x81, 127]) + (R.RELAY_LIMITS["inbound"] + 1).to_bytes(8, "big")), 1009),
+                 # (R768-WS-2: malformed closes, as pair.py refuses a client's)
+                 (lambda L: L.raw(0x8, b"\x03"), 1002), (lambda L: L.raw(0x8, (1006).to_bytes(2, "big")), 1002),
+                 (lambda L: L.raw(0x8, (1005).to_bytes(2, "big")), 1002), (lambda L: L.raw(0x8, (999).to_bytes(2, "big")), 1002),
+                 (lambda L: L.raw(0x8, (5000).to_bytes(2, "big")), 1002),
+                 (lambda L: L.raw(0x8, (1000).to_bytes(2, "big") + b"\xff"), 1007)]
         for i, (act, want) in enumerate(cases):
             leg = await t.relay.leg()
             act(leg)
@@ -444,9 +539,12 @@ async def test_framing():
         assert kind == "pong"
         await asyncio.sleep(0.1)
         assert t.runner.stats["violations"] == 0 and not t.runner.leg.closed
-        # the relay's close is answered and ends the leg; the runner dials again
+        # the relay's close is answered and ends the leg; the runner dials again (an empty close: answered empty)
         leg.close(1001, "bye")
         assert (await leg.closed_with()) == 1001
+        leg = await t.relay.leg()
+        leg.raw(0x8, b"")
+        assert (await leg.closed_with()) == 1005
         await t.relay.leg()
     finally:
         await t.end()
@@ -467,8 +565,18 @@ async def test_upgrade_checks():
         t.relay.extension = True
         await asyncio.sleep(1.0)
         assert any("isn't a plain WebSocket" in s for s in t.said), t.said
+        t.relay.connection = "notupgrade"  # (R768-UPGRADE-3: the token, not a substring)
+        n0 = len([s for s in t.said if "isn't a plain WebSocket" in s])
         t.relay.extension = False
-        await t.relay.leg(10)
+        await asyncio.sleep(1.0)
+        n = len([s for s in t.said if "isn't a plain WebSocket" in s])
+        # (the runner's own count of legs it accepted: the fake queues every 101 it answered, refused ones too)
+        assert n > n0 and t.runner.stats["legs"] == 1, (n0, n, t.runner.stats["legs"])
+        t.relay.connection = "keep-alive, Upgrade"
+        end = time.monotonic() + 10
+        while t.runner.stats["legs"] < 2:
+            assert time.monotonic() < end, "a token list with Upgrade was refused"
+            await asyncio.sleep(0.05)
     finally:
         await t.end()
     # a challenge refused as unknown (revoked, or never enrolled there): the runner stops
