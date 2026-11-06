@@ -606,19 +606,34 @@ def _poly_var_name(var):
     return name
 
 
+_C_SPACE = {9: None, 10: None, 11: None, 12: None, 13: None, 32: None}
+
+
 def _rational_from_str(s, base):
     """(numerator, denominator) of a string as Sage reads a rational (GMP's
-    rule): 'a' or 'a/b', spaces anywhere ignored, each part with an optional
-    '-'; in base 0 each part's 0x or 0b prefix (or a leading 0: octal) sets
-    its base, else decimal; an explicit base from 2 to 62 (to 36 either case,
+    rule; s a string or bytes): 'a' or 'a/b', ASCII spaces anywhere ignored,
+    each part with an optional '-'; in base 0 each part's 0x or 0b prefix
+    (or a leading 0: octal) sets its base, else decimal; an explicit base from 2 to 62 (to 36 either case,
     beyond it A-Z are 10-35 and a-z 36-61).  Anything else, a zero
     denominator included, is a TypeError."""
     if base is None or isinstance(base, (str, bytes)):
         raise TypeError("an integer is required")
     b = _int_value(base)
+    # (the base is a C unsigned int, as in Sage)
     if b < 0:
         raise OverflowError("can't convert negative value to unsigned int")
-    parts = "".join(s.split()).split("/")
+    if b >= 2 ** 64:
+        raise OverflowError("Python int too large to convert to C unsigned long")
+    if b >= 2 ** 32:
+        raise OverflowError("value too large to convert to unsigned int")
+    t = s
+    if isinstance(s, bytes):
+        try:
+            t = s.decode()
+        except UnicodeDecodeError:
+            raise TypeError("unable to convert %r to a rational" % (s,)) from None
+    # (only C's whitespace is ignored: a no-break space is refused)
+    parts = t.translate(_C_SPACE).split("/")
     vals = []
     if (b == 0 or 2 <= b <= 62) and len(parts) <= 2:
         for part in parts:
@@ -698,9 +713,7 @@ class Rational(_Fraction):
         # denominator are a tuple, Rational((1, 3)); a real number as QQ
         # converts it, the simplest rational that rounds to it: Rational(0.1)
         # is 1/10, not the double's exact value)
-        if isinstance(x, bytes):
-            x = x.decode()
-        if isinstance(x, str):
+        if isinstance(x, (bytes, str)):
             n, d = _rational_from_str(x, base)
             return _Fraction.__new__(cls, n, d)
         if x is None:
