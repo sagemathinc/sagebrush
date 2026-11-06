@@ -116,6 +116,19 @@ def _conv(F, x):
         return F(z.real, z.imag) if _info(F)[1] else F(z.real)
 
 
+def _admit(n, what):
+    """Refuse, before any coefficient list is built, a dense polynomial of more than the
+    exact polynomials' _MAX_DENSE_COEFFS coefficients (the memory guard's error, at 8 bytes a
+    coefficient, a lower bound), as _sage_poly refuses converting one (examples: the
+    ring's __call__).
+    """
+    import _sage_poly
+    cap = _sage_poly._MAX_DENSE_COEFFS
+    if n > cap:
+        import _memguard
+        raise _memguard.memory_guard(what, n * 8, cap * 8, "one polynomial", fixed=True)
+
+
 def _one(B):
     return B(1)
 
@@ -290,6 +303,34 @@ class PolynomialRingInexact:
             sage: R.<t> = RR[]
             sage: R([1, 1/3, 2]), R(QQ['t']([1, 1/3])), R(SR.var('t')^2 + 1/3), R('t^2 + 1')
             (2.00000000000000*t^2 + 0.333333333333333*t + 1.00000000000000, 0.333333333333333*t + 1.00000000000000, t^2 + 0.333333333333333, t^2 + 1.00000000000000)
+
+        A polynomial is admitted before its coefficients are built, as _sage_poly's
+        conversion (a fixed limit of 2^20 coefficients)::
+
+            sage: R.<t> = RR[]
+            sage: try:  # sagebrush only
+            ....:     R(SR.var('t')^1048577)
+            ....: except MemoryError as e:
+            ....:     print(str(e).splitlines()[1])
+            Converting an expression of degree 1048577 to a dense polynomial needs about 8.4 MB, but Sagebrush has a fixed limit of about 8.3 MB for one polynomial.
+            sage: R(SR.var('t')^2 + 1)
+            t^2 + 1.00000000000000
+
+        Growing operations are admitted before their coefficients are built: a shift and a power
+        past the bound, and (with the bound lowered to 11 for the example) a product and a square::
+
+            sage: def refused(f):  # sagebrush only
+            ....:     try:
+            ....:         f()
+            ....:     except MemoryError as e:
+            ....:         return str(e).splitlines()[1].split(" needs")[0]
+            sage: refused(lambda: t.shift(2^20)), refused(lambda: (t + 1)^(2^20))  # sagebrush only
+            ('Shifting a polynomial of degree 1 by 1048576', 'A power of degree 1048576 of a polynomial')
+            sage: import _sage_poly; cap = _sage_poly._MAX_DENSE_COEFFS; _sage_poly._MAX_DENSE_COEFFS = 11  # sagebrush only
+            sage: f, g = t^5 + 1, t^6 + 1  # sagebrush only
+            sage: refused(lambda: f*g), refused(lambda: g*g), f*f  # sagebrush only
+            ('A product of polynomials of degrees 5 and 6', 'A square of a polynomial of degree 6', t^10 + 2.00000000000000*t^5 + 1.00000000000000)
+            sage: _sage_poly._MAX_DENSE_COEFFS = cap  # sagebrush only
         """
         B = self._base
         if isinstance(x, PolynomialInexact):
@@ -305,6 +346,7 @@ class PolynomialRingInexact:
             if set(map(str, x.variables())) - {self._name}:
                 raise TypeError("%s is not a polynomial in %s" % (x, self._name))
             d = int(x.degree(v))
+            _admit(d + 1, "Converting an expression of degree %d to a dense polynomial" % d)
             return PolynomialInexact(self, [B(_num(x.coefficient(v, i))) for i in range(d + 1)])
         if type(x).__name__ == "Expression":
             x = _num(x)
@@ -688,6 +730,7 @@ class PolynomialInexact:
             return self
         if len(self._c) <= 1:
             return PolynomialInexact(R, [self._c[0] ** n] if self._c else [])
+        _admit((len(self._c) - 1) * n + 1, "A power of degree %d of a polynomial" % ((len(self._c) - 1) * n))
         r, b = None, self
         while n:
             if n & 1:
@@ -861,6 +904,8 @@ class PolynomialInexact:
         """
         n = int(n)
         if n >= 0:
+            if self._c:
+                _admit(len(self._c) + n, "Shifting a polynomial of degree %d by %d" % (len(self._c) - 1, n))
             return PolynomialInexact(self._ring, [self._ring._base(0)] * n + self._c if self._c else [])
         return PolynomialInexact(self._ring, self._c[-n:])
 
@@ -929,6 +974,7 @@ def _mul(a, b):
     if not x or not y:
         return PolynomialInexact(a._ring, [])
     n, m = len(x), len(y)
+    _admit(n + m - 1, "A product of polynomials of degrees %d and %d" % (n - 1, m - 1))
     r = []
     for k in range(n + m - 1):
         s = None
@@ -947,9 +993,10 @@ def _square(a):
     d, cplx, _ = _info(a._ring._base)
     if not x:
         return a
+    n = len(x)
+    _admit(2 * n - 1, "A square of a polynomial of degree %d" % (n - 1))
     if not d and not cplx:
         return _mul(a, a)
-    n = len(x)
     z = a._ring._base(0)
     r = [z] * (2 * n - 1)
     for i in range(n - 1, -1, -1):

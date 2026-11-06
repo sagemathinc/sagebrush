@@ -5807,6 +5807,67 @@
   "owner": "polynomials over inexact fields (@sagebrush-sage2)",
   "reason": "a TypeError for polynomials in different variables or t/complex over a real field, Sage's coercion refusal; refuses nothing for size"
  },
+ "lib/_sage_rpoly.py :: PolynomialRingInexact.__call__ :: Converting an expression of degree 1048577 to a dense polynomial needs about 8.4 MB, but Sagebrush has a fixed limit of about 8.3 MB for one polynomial. #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "docstring text and examples of the dense coefficient bound; refuses nothing"
+ },
+ "lib/_sage_rpoly.py :: PolynomialRingInexact.__call__ :: conversion (a fixed limit of 2^20 coefficients):: #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "docstring text and examples of the dense coefficient bound; refuses nothing"
+ },
+ "lib/_sage_rpoly.py :: PolynomialRingInexact.__call__ :: sage: _sage_poly._MAX_DENSE_COEFFS = cap # sagebrush only #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "docstring text and examples of the dense coefficient bound; refuses nothing"
+ },
+ "lib/_sage_rpoly.py :: PolynomialRingInexact.__call__ :: sage: import _sage_poly; cap = _sage_poly._MAX_DENSE_COEFFS; _sage_poly._MAX_DENSE_COEFFS = 11 # sagebrush only #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "docstring text and examples of the dense coefficient bound; refuses nothing"
+ },
+ "lib/_sage_rpoly.py :: _admit :: cap = _sage_poly._MAX_DENSE_COEFFS #0": {
+  "class": "2",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "the dense coefficient bound of the exact polynomials (_sage_poly._MAX_DENSE_COEFFS, 2^20), admitted before a polynomial over an inexact field is built: SR conversion, product, square, power, shift (astra's RPOLY-ALLOC-1)",
+  "explained": true,
+  "row": "inv-13",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  }
+ },
+ "lib/_sage_rpoly.py :: _admit :: exact polynomials' _MAX_DENSE_COEFFS coefficients (the memory guard's error, at 8 bytes a #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "docstring text and examples of the dense coefficient bound; refuses nothing"
+ },
+ "lib/_sage_rpoly.py :: _admit :: if n > cap: #0": {
+  "class": "2",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "the dense coefficient bound of the exact polynomials (_sage_poly._MAX_DENSE_COEFFS, 2^20), admitted before a polynomial over an inexact field is built: SR conversion, product, square, power, shift (astra's RPOLY-ALLOC-1)",
+  "explained": true,
+  "row": "inv-13",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  }
+ },
+ "lib/_sage_rpoly.py :: _admit :: raise _memguard.memory_guard(what, n * 8, cap * 8, \"one polynomial\", fixed=True) #0": {
+  "class": "2",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "the dense coefficient bound of the exact polynomials (_sage_poly._MAX_DENSE_COEFFS, 2^20), admitted before a polynomial over an inexact field is built: SR conversion, product, square, power, shift (astra's RPOLY-ALLOC-1)",
+  "explained": true,
+  "row": "inv-13",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  }
+ },
  "lib/_sage_series.py :: Series._poly_target :: raise TypeError(\"unsupported operand parent(s): '%r' and '%r'\" % (self._R, P)) #0": {
   "class": "none",
   "owner": "sage kernel (@sagebrush-sage2)",
