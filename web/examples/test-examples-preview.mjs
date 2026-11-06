@@ -45,6 +45,13 @@ for (const line of headersFor(out).split("\n")) {
   if (!/^\s/.test(line)) rules.push([line.trim(), []]);
   else if (rules.length) { const i = line.indexOf(":"); rules.at(-1)[1].push([line.slice(0, i).trim(), line.slice(i + 1).trim()]); }
 }
+// (the two rules this fix adds are just those: each CORP alone, and the rule before them, /s/og.png's, unchanged (astra,
+// #777: inserted inside it, they took its Cache-Control))
+{
+  const block = (pat) => rules.filter(([q]) => q === pat).flatMap(([, h]) => h.map(([k, v]) => `${k}: ${v}`));
+  const want = { "/s/og.png": ["Cross-Origin-Resource-Policy: cross-origin", "Cache-Control: public, max-age=86400"], "/katex/*": ["Cross-Origin-Resource-Policy: cross-origin"], "/alpha-banner.js": ["Cross-Origin-Resource-Policy: cross-origin"] };
+  for (const [pat, h] of Object.entries(want)) if (JSON.stringify(block(pat)) !== JSON.stringify(h)) { console.error(`FAIL: _headers' ${pat} rule is ${JSON.stringify(block(pat))}, not ${JSON.stringify(h)}`); process.exit(1); }
+}
 const headersOf = (p) => Object.fromEntries(rules.filter(([pat]) => p === pat || (pat.endsWith("*") && p.startsWith(pat.slice(0, -1)))).flatMap(([, h]) => h));
 const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".png": "image/png", ".woff2": "font/woff2", ".zip": "application/zip" };
 const COI = { "cross-origin-opener-policy": "same-origin", "cross-origin-embedder-policy": "require-corp" };
