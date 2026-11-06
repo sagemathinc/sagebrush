@@ -1,0 +1,152 @@
+QQ QQ s o + => y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+QQ QQ o s + => y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+QQ QQ s o - => -y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+QQ QQ o s - => y - y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+QQ QQ s o * => y^2*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+QQ QQ o s * => y^2*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+QQ QQ s o / => ERR RuntimeError
+QQ QQ o s / => ERR ValueError
+QQ ZZ s o + => y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+QQ ZZ o s + => y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+QQ ZZ s o - => -y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+QQ ZZ o s - => y - y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+QQ ZZ s o * => y^2*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+QQ ZZ o s * => y^2*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+QQ ZZ s o / => ERR RuntimeError
+QQ ZZ o s / => ERR ValueError
+QQ GF5 s o + => ERR TypeError
+QQ GF5 o s + => ERR TypeError
+QQ GF5 s o - => ERR TypeError
+QQ GF5 o s - => ERR TypeError
+QQ GF5 s o * => y^2*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Finite Field of size 5
+QQ GF5 o s * => y^2*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Finite Field of size 5
+QQ GF5 s o / => ERR RuntimeError
+QQ GF5 o s / => ERR TypeError
+QQ K2 s o + => y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QQ K2 o s + => y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QQ K2 s o - => -y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QQ K2 o s - => y - y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QQ K2 s o * => y^2*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QQ K2 o s * => y^2*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QQ K2 s o / => ERR RuntimeError
+QQ K2 o s / => ERR ValueError
+QQ K3 s o + => y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Cyclotomic Field of order 3 and degree 2
+QQ K3 o s + => y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Cyclotomic Field of order 3 and degree 2
+QQ K3 s o - => -y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Cyclotomic Field of order 3 and degree 2
+QQ K3 o s - => y - y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Cyclotomic Field of order 3 and degree 2
+QQ K3 s o * => y^2*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Cyclotomic Field of order 3 and degree 2
+QQ K3 o s * => y^2*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Cyclotomic Field of order 3 and degree 2
+QQ K3 s o / => ERR RuntimeError
+QQ K3 o s / => ERR ValueError
+ZZ QQ s o + => y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+ZZ QQ o s + => y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+ZZ QQ s o - => -y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+ZZ QQ o s - => y - y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+ZZ QQ s o * => y^2*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+ZZ QQ o s * => y^2*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Rational Field
+ZZ QQ s o / => ERR RuntimeError
+ZZ QQ o s / => ERR ValueError
+ZZ ZZ s o + => y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Integer Ring
+ZZ ZZ o s + => y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Integer Ring
+ZZ ZZ s o - => -y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Integer Ring
+ZZ ZZ o s - => y - y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Integer Ring
+ZZ ZZ s o * => y^2*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Integer Ring
+ZZ ZZ o s * => y^2*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Integer Ring
+ZZ ZZ s o / => ERR RuntimeError
+ZZ ZZ o s / => ERR ValueError
+ZZ GF5 s o + => y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Finite Field of size 5
+ZZ GF5 o s + => y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Finite Field of size 5
+ZZ GF5 s o - => -y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Finite Field of size 5
+ZZ GF5 o s - => y - y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Finite Field of size 5
+ZZ GF5 s o * => y^2*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Finite Field of size 5
+ZZ GF5 o s * => y^2*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Finite Field of size 5
+ZZ GF5 s o / => ERR RuntimeError
+ZZ GF5 o s / => ERR ValueError
+ZZ K2 s o + => y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+ZZ K2 o s + => y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+ZZ K2 s o - => -y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+ZZ K2 o s - => y - y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+ZZ K2 s o * => y^2*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+ZZ K2 o s * => y^2*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+ZZ K2 s o / => ERR RuntimeError
+ZZ K2 o s / => ERR ValueError
+ZZ K3 s o + => y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Cyclotomic Field of order 3 and degree 2
+ZZ K3 o s + => y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Cyclotomic Field of order 3 and degree 2
+ZZ K3 s o - => -y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Cyclotomic Field of order 3 and degree 2
+ZZ K3 o s - => y - y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Cyclotomic Field of order 3 and degree 2
+ZZ K3 s o * => y^2*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Cyclotomic Field of order 3 and degree 2
+ZZ K3 o s * => y^2*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Cyclotomic Field of order 3 and degree 2
+ZZ K3 s o / => ERR RuntimeError
+ZZ K3 o s / => ERR ValueError
+GF5 QQ s o + => ERR TypeError
+GF5 QQ o s + => ERR TypeError
+GF5 QQ s o - => ERR TypeError
+GF5 QQ o s - => ERR TypeError
+GF5 QQ s o * => ERR TypeError
+GF5 QQ o s * => ERR TypeError
+GF5 QQ s o / => ERR TypeError
+GF5 QQ o s / => ERR TypeError
+GF5 ZZ s o + => y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Finite Field of size 5
+GF5 ZZ o s + => y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Finite Field of size 5
+GF5 ZZ s o - => -y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Finite Field of size 5
+GF5 ZZ o s - => y - y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Finite Field of size 5
+GF5 ZZ s o * => y^2*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Finite Field of size 5
+GF5 ZZ o s * => y^2*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Finite Field of size 5
+GF5 ZZ s o / => ERR RuntimeError
+GF5 ZZ o s / => ERR ValueError
+GF5 GF5 s o + => y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Finite Field of size 5
+GF5 GF5 o s + => y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Finite Field of size 5
+GF5 GF5 s o - => -y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Finite Field of size 5
+GF5 GF5 o s - => y - y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Finite Field of size 5
+GF5 GF5 s o * => y^2*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Finite Field of size 5
+GF5 GF5 o s * => y^2*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Finite Field of size 5
+GF5 GF5 s o / => ERR RuntimeError
+GF5 GF5 o s / => ERR ValueError
+GF5 K2 s o + => ERR TypeError
+GF5 K2 o s + => ERR TypeError
+GF5 K2 s o - => ERR TypeError
+GF5 K2 o s - => ERR TypeError
+GF5 K2 s o * => ERR TypeError
+GF5 K2 o s * => ERR TypeError
+GF5 K2 s o / => ERR TypeError
+GF5 K2 o s / => ERR TypeError
+GF5 K3 s o + => ERR TypeError
+GF5 K3 o s + => ERR TypeError
+GF5 K3 s o - => ERR TypeError
+GF5 K3 o s - => ERR TypeError
+GF5 K3 s o * => ERR TypeError
+GF5 K3 o s * => ERR TypeError
+GF5 K3 s o / => ERR TypeError
+GF5 K3 o s / => ERR TypeError
+K2 QQ s o + => y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+K2 QQ o s + => y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+K2 QQ s o - => -y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+K2 QQ o s - => y - y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+K2 QQ s o * => y^2*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+K2 QQ o s * => y^2*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+K2 QQ s o / => ERR RuntimeError
+K2 QQ o s / => ERR ValueError
+K2 ZZ s o + => y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+K2 ZZ o s + => y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+K2 ZZ s o - => -y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+K2 ZZ o s - => y - y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+K2 ZZ s o * => y^2*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+K2 ZZ o s * => y^2*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+K2 ZZ s o / => ERR RuntimeError
+K2 ZZ o s / => ERR ValueError
+K2 K2 s o + => y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+K2 K2 o s + => y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+K2 K2 s o - => -y + y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+K2 K2 o s - => y - y*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+K2 K2 s o * => y^2*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+K2 K2 o s * => y^2*x + O(x^3) | Laurent Series Ring in x over Multivariate Polynomial Ring in x, y over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+K2 K2 s o / => ERR RuntimeError
+K2 K2 o s / => ERR ValueError
+K2 K3 s o + => ERR TypeError
+K2 K3 o s + => ERR TypeError
+K2 K3 s o - => ERR TypeError
+K2 K3 o s - => ERR TypeError
+K2 K3 s o * => ERR TypeError
+K2 K3 o s * => ERR TypeError
+K2 K3 s o / => ERR TypeError
+K2 K3 o s / => ERR TypeError
