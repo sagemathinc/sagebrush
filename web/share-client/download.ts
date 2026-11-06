@@ -5,14 +5,18 @@
 //
 // Names in the .zip: the notebook's folder is the .zip's root when every checked file is inside it (a helper imported
 // as _code/helpers.py lands there, and the notebook runs where it is unpacked); else every file has its workspace path.
-// The selection and the notebook's bytes are frozen at the click; the notebook is checked again before every read, and
-// each file's read refuses one that is no longer the file listed (its fid).  Closing the dialog stops the download.
+// The selection, the notebook's bytes and its path are taken at the click, the path looked up then and the notebook
+// checked after it (a rename or a switch before the click can't leave a stale path: astra's DEP2B-OPEN-ID-1,
+// daybreak3's A->B->A); the notebook is checked again before every read, and each file's read refuses one that is no
+// longer the file listed (its fid).  Closing the dialog, or a switch of notebooks, stops the download.
 import { createPicker, type PickerHost } from "./picker";
 
 export interface DownloadDialogHost extends Omit<PickerHost, "notebook"> {
   dlg: HTMLDialogElement;
-  /** the notebook: its workspace path (else its file name), and its Download bytes */
+  /** the notebook: its file name, and its Download bytes */
   notebook: () => { path: string; data: Uint8Array };
+  /** its workspace path now, without the leading /, or null (not in the workspace): looked up at the click */
+  notebookPath: () => Promise<string | null>;
   /** one file's bytes; throws if it is no longer the file listed (fid) */
   readFile: (f: { path: string; fid?: string }) => Promise<Uint8Array>;
   /** the .zip written and handed to the browser (the export chunk's zipPicks); throws to say why it wasn't */
@@ -49,10 +53,13 @@ export function createDownloadDialog(h: DownloadDialogHost) {
     const ac = new AbortController();
     setBusy(ac);
     out.textContent = "";
-    const notebookPath = "/" + nb.path, folder = notebookPath.slice(0, notebookPath.lastIndexOf("/") + 1);
-    const inside = folder !== "/" && snap.every((r) => r.path.startsWith(folder));
-    const nameOf = (p: string) => p.slice(inside ? folder.length : 1);
     try {
+      const where = await h.notebookPath();
+      if (ac.signal.aborted) throw new Error("cancelled");
+      if (h.notebookId() !== nbId) throw new Error("the notebook changed");
+      const notebookPath = "/" + (where ?? nb.path), folder = notebookPath.slice(0, notebookPath.lastIndexOf("/") + 1);
+      const inside = folder !== "/" && snap.every((r) => r.notebook || r.path.startsWith(folder));
+      const nameOf = (p: string) => p.slice(inside ? folder.length : 1);
       await h.zip({
         picks: snap.map((r) => ({
           name: nameOf(r.notebook ? notebookPath : r.path),

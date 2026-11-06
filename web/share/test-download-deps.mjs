@@ -224,37 +224,41 @@ try {
     ok(r.zip && JSON.stringify(Object.keys(r.zip).sort()) === JSON.stringify(["data/points.csv", "proj/Untitled.ipynb", "proj/_code/h.py"]), `a file outside it: every file at its workspace path: ${JSON.stringify(Object.keys(r.zip ?? {}))}`);
   }
 
-  // ---- astra's DEP2B-OPEN-ID-1: the notebook's path is looked up when the dialog opens; an answer that comes after a
-  // switch of notebooks, or after a newer open, is dropped: never another notebook's path with this one's bytes
+  // ---- astra's DEP2B-OPEN-ID-1, daybreak3's A->B->A: the notebook's path is looked up at the click, with its bytes,
+  // and the notebook checked after the lookup: a rename before the click is followed, a switch during the lookup stops it
   const HOLDPATH = "(() => { let go; const p = new Promise((r) => (go = r)); window.__pathGo = go; window.__pathHeld = false; window.sagebrush.downloadTest.afterPath = async () => { window.sagebrush.downloadTest.afterPath = null; window.__pathHeld = true; await p; }; return 1; })()";
+  const renameNb = (from, to) => ev(`(async () => { const w = await ${W}; await w.rename(${JSON.stringify(from)}, ${JSON.stringify(to)}); return 1; })()`);
   {
-    await ev("document.querySelector('#dldepsdlg').open && document.querySelector('#dldepsdlg').close()");
-    await ev(HOLDPATH);
-    await ev("document.querySelector('#filemenu [data-f=withfiles]').click()");
-    ok(await until("window.__pathHeld === true"), "(the lookup of the notebook's path, in /proj, is held)");
-    const cellsBefore = await ev("document.querySelector('.cell textarea').value");
-    await ev("document.querySelector('#filemenu [data-f=new]').click()");
-    ok(await until(`document.querySelectorAll('.cell').length === 1 && document.querySelector('.cell textarea').value !== ${JSON.stringify(cellsBefore)}`), "(another notebook is open meanwhile)");
-    await sleep(500);
-    await ev("window.__pathGo()");
-    await sleep(800);
-    ok(!(await ev("document.querySelector('#dldepsdlg').open")), "a path looked up for the notebook switched away from is dropped: no dialog opens with it");
+    // (the dialog opened with the notebook in /proj, then the notebook moved: the .zip's names are where it is now)
     await openDialog();
+    await ev("document.querySelector('#dldepsnone').click()");
+    await toggle("proj/_code/h.py");
+    await mkdir("/other");
+    await renameNb("/proj/Untitled.ipynb", "/other/Untitled.ipynb");
     const r = await download();
-    ok(r.zip && Object.keys(r.zip).length === 1 && !Object.keys(r.zip)[0].startsWith("proj/") && Object.keys(r.zip)[0].endsWith(".ipynb"), `the new notebook's own open: its own name, nothing of /proj: ${JSON.stringify(Object.keys(r.zip ?? {}))}`);
+    ok(r.zip && JSON.stringify(Object.keys(r.zip).sort()) === JSON.stringify(["other/Untitled.ipynb", "proj/_code/h.py"]), `the notebook moved after the dialog opened: the .zip has it where it is now: ${JSON.stringify(Object.keys(r.zip ?? {}))}`);
+    await renameNb("/other/Untitled.ipynb", "/proj/Untitled.ipynb");
   }
-  {
-    await ev("document.querySelector('#dldepsdlg').close()");
+  const refA = await ev(`(async () => { const w = await ${W}; return (await w.stat('/proj/Untitled.ipynb'))?.ref ?? null; })()`);
+  for (const back of [false, true]) {
+    // (the lookup held at the click; another notebook opened; and (A->B->A) the first renamed and opened again)
+    await ev(`window.sagebrush.open(${JSON.stringify(refA)})`);
+    ok(await until("/from _code import h/.test(document.querySelector('.cell textarea').value)"), "(the notebook in /proj is the one open)");
+    await openDialog();
     await ev(HOLDPATH);
-    await ev("document.querySelector('#filemenu [data-f=withfiles]').click()");
-    await until("window.__pathHeld === true");
-    const g0 = await ev(`${D}.generation`);
-    await ev("document.querySelector('#filemenu [data-f=withfiles]').click()");
-    ok(await until(`${D}.generation > ${g0} && document.querySelector('#dldepsdlg').open`), "a second open while the first's lookup is held: the dialog opens");
-    const g1 = await ev(`${D}.generation`);
+    await download({ wait: false });
+    ok(await until("window.__pathHeld === true"), "(the lookup of the notebook's path, at the click, is held)");
+    const before = await ev("document.querySelector('.cell textarea').value");
+    await ev("document.querySelector('#filemenu [data-f=new]').click()");
+    ok(await until(`document.querySelectorAll('.cell').length === 1 && document.querySelector('.cell textarea').value !== ${JSON.stringify(before)}`), "(another notebook is open meanwhile)");
+    if (back) {
+      await renameNb("/proj/Untitled.ipynb", "/moved-A.ipynb");
+      await ev(`window.sagebrush.open(${JSON.stringify(refA)})`);
+      ok(await until(`document.querySelector('.cell textarea').value === ${JSON.stringify(before)}`), "(the first notebook, renamed, is open again)");
+    }
     await ev("window.__pathGo()");
     await sleep(800);
-    ok((await ev(`${D}.generation`)) === g1, "the first open's late answer is dropped: the dialog isn't opened again over the second");
+    ok(!(await ev("window.__zip")), `${back ? "A->B->A, A renamed" : "a switch"} while the path is looked up: nothing handed over (${await result()})`);
   }
 
   // ---- the notebook switched while a read waits: stopped, nothing handed over
