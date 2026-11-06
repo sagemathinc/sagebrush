@@ -74,6 +74,7 @@ example("notebook/deep5", "Deep5", [["main.ipynb", nb("15")], ["a/b/c/d/e.txt", 
 example("notebook/dotfile", "Dotfile", [["main.ipynb", nb("16")], [".env", t("x")]]);
 example("notebook/escape-pct", "Escape pct", [["main.ipynb", nb("17")], ["a%41.txt", t("x")]]);
 example("notebook/file-folder", "File folder", [["main.ipynb", nb("18")], ["a", t("x")], ["a/b.txt", t("y")]]);
+example("notebook/file-folder-case", "File folder case", [["main.ipynb", nb("18")], ["A.txt", t("x")], ["a.txt/b.txt", t("y")]]);
 example("notebook/too-many", "Too many", [["main.ipynb", nb("19")], ...Array.from({ length: 40 }, (_, i) => [`f${i}.txt`, t(String(i))])]);
 example("notebook/wrong-id", "Wrong id", [["main.ipynb", nb("20")]], { fjId: "notebook/pair" });
 example("notebook/streamed-big", "Streamed big", [["main.ipynb", nb("21")]], { stream: true, pad: 70 * 1024 });

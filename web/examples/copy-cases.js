@@ -71,6 +71,7 @@ export async function run() {
   await refused("notebook/dotfile", "invalid", "a dotfile", /segment "\.env"/);
   await refused("notebook/escape-pct", "invalid", "a %-escape in a path", /absolute, a backslash or an escape/);
   await refused("notebook/file-folder", "invalid", "a path both a file and a folder", /both a file and a folder/);
+  await refused("notebook/file-folder-case", "invalid", "a file that is also a folder but for case", /both a file and a folder/);
   await refused("notebook/too-many", "invalid", "41 files", /1 to 40 files/);
   await refused("notebook/wrong-id", "invalid", "a files.json naming another example", /files\.json is "notebook\/pair"'s, not notebook\/wrong-id's/);
   await refused("notebook/streamed-big", "invalid", "a files.json over 64 KiB with no content-length", /: more than 65536 bytes/);
@@ -159,6 +160,26 @@ export async function run() {
     }
     check(err?.code === "stopped" && /data\/more was moved or replaced/.test(err.message), "a nested folder replaced: stopped: " + err?.message);
     check(JSON.stringify(await paths("/Examples/Deep (2)/data/more")) === "[]", "nothing written into the nested replacement");
+  }
+  // (grader's C21: someone else's folder appears in the new root before the copy makes its own: never adopted)
+  {
+    let err = null, root = null;
+    const w = new Proxy(ws, { get(t, k) {
+      if (k !== "mkdir") { const v = t[k]; return typeof v === "function" ? v.bind(t) : v; }
+      return async (p, o) => {
+        const e = await t.mkdir(p, o);
+        if (!root) { root = e.path; await t.mkdir(root + "/data"); await t.create(root + "/data/theirs.txt", { content: enc.encode("theirs") }); }
+        return e;
+      };
+    } });
+    try {
+      await C.copyExample(w, "notebook/deep", { catalog });
+    } catch (e) {
+      err = e;
+    }
+    check(err?.code === "stopped" && /\/data is there already/.test(err.message), "a folder of someone else's in the new root before ours: stopped, never adopted: " + err?.message);
+    check(JSON.stringify(await paths(root + "/data")) === JSON.stringify([root + "/data/theirs.txt"]) && new TextDecoder().decode((await ws.readUpTo(root + "/data/theirs.txt", 100)).content) === "theirs", "nothing written into it, and their file as it was");
+    check(JSON.stringify(err?.copied?.made) === JSON.stringify([root]), "the error lists only what the copy made: " + JSON.stringify(err?.copied?.made));
   }
   // (a failure on the second file: something there already; the first stays, the other is untouched)
   {
