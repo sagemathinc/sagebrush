@@ -3,8 +3,8 @@
     sagebrush bench [...]     the benchmarks behind the performance claims
                               (sagebrush bench --help)
     sagebrush remote --loopback [--port N]
-                              this computer as a sagebrush.space page's
-                              "Your computer (paired)" runner, in this Python
+                              this computer as a paired page's runner,
+                              over 127.0.0.1, in this Python
 
 Sage files run with python -m sagebrush FILE.sage; the MCP server is
 sagebrush-mcp."""

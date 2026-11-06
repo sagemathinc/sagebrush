@@ -1,8 +1,10 @@
 """`sagebrush remote --loopback`: the native runner on this computer's
 loopback address, paired with a sagebrush.space page exactly as `sagebrush
 notebook --pair` is (src/notebook-pair.ts, whose contract this ports; design
-remote-v1 §11 (a)).  The page's "Your computer (paired)" runner connects here
-unchanged; the code runs in this computer's own CPython (gateway.py, child.py).
+remote-v1 §11 (a)).  A page that speaks that contract connects here unchanged;
+the code runs in this computer's own CPython (gateway.py, child.py).  (The
+sagebrush.space page's side of the pairing is not built yet: the tests, and
+a terminal client, play the page.)
 
 The contract (the agent pairing's, design/workspace-agent-protocol.md §2, at its own path):
   - a WebSocket on 127.0.0.1 only, at GET /sagebrush-kernel (any other path: 400, before any WebSocket);
@@ -653,7 +655,7 @@ async def run_loopback(port=0, dev_origin=None, out=None, err=None, cwd=None):
     server = PairServer(dev_origin=dev_origin, err=err, cwd=cwd)
     await server.listen(port)
     out(server.link() + "\n")
-    err("Open the link above in Chrome, Edge or Firefox, or paste it in the page's \"Your computer (paired)\" dialog.\n"
+    err("The link above is for a sagebrush.space page that pairs with this computer (that page is not released yet).\n"
         "Pairing code: %s (single use, for 5 minutes). Code you run there will run on this computer, in this Python "
         "(%s), with your files and permissions.\n" % (server.code, sys.executable))
     stop = asyncio.Event()
@@ -706,7 +708,7 @@ def main(argv):
         return 2
     if not loopback:
         sys.stderr.write("usage: sagebrush remote --loopback [--port N]\n"
-                         "  (this computer as the sagebrush.space page's \"Your computer (paired)\" runner, in this Python;\n"
+                         "  (this computer as a paired page's runner, over 127.0.0.1, in this Python;\n"
                          "   the cloud relay, for a remote box, comes next)\n")
         return 2
     return asyncio.run(run_loopback(port, dev_origin=os.environ.get("SAGEBRUSH_KERNEL_DEV_ORIGIN") or None))
