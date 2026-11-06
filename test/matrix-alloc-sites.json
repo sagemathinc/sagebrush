@@ -572,6 +572,7 @@
  "lib/_sage_matrix.py: Vector.__repr__ :: comprehension :: self": 1,
  "lib/_sage_matrix.py: Vector.__rmul__ :: comprehension :: self": 1,
  "lib/_sage_matrix.py: Vector.__truediv__ :: comprehension :: self": 2,
+ "lib/_sage_matrix.py: Vector._inexact_lift :: call :: list(self)": 1,
  "lib/_sage_matrix.py: Vector._is_symbolic :: call :: any(isinstance(a, Expression) for a in self)": 1,
  "lib/_sage_matrix.py: Vector._is_symbolic :: comprehension :: self": 1,
  "lib/_sage_matrix.py: Vector._rational_norm :: call :: all(isinstance(a, int) or type(a).__name__ == \"Rational\" for a in self)": 1,
