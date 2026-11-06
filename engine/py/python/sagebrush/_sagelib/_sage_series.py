@@ -556,18 +556,25 @@ class Series:
             return [_out(c) for c in [self._R._zero()] * self._v + self._c]
         return [_out(c) for c in self._c]
 
-    def padded_list(self, n=None):
-        """The first n coefficients (zeros beyond the known ones).
+    @property
+    def padded_list(self):
+        """The first n coefficients (zeros beyond the known ones), of a power series: a Laurent
+        series has no padded_list, as in Sage (AttributeError).
 
         EXAMPLES::
 
             sage: R.<t> = QQ[[]]; (1 + t + O(t^3)).padded_list(5)
             [1, 1, 0, 0, 0]
+            sage: L.<z> = LaurentSeriesRing(QQ); hasattr(z^2 + O(z^5), "padded_list")
+            False
         """
+        if self._R._laurent:
+            raise AttributeError("'LaurentSeries' object has no attribute 'padded_list'")
+        return self._padded_list
+
+    def _padded_list(self, n=None):
+        """padded_list of a power series."""
         L = self.list()
-        if self._R._laurent and self._c and self._v > 0:
-            # (from x^0, as before: a sagebrush addition, Sage's Laurent series has no padded_list)
-            L = [_out(self._R._zero())] * self._v + L
         if n is None:
             n = self._prec if self._prec is not None else len(L)
         return (L + [_out(self._R._zero())] * n)[:n]
