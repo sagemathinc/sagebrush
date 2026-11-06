@@ -295,6 +295,16 @@ The eliminated quartic is irreducible over $\mathbb Q$, but over $\mathbb F_5$:
     const over = (cl.json?.png?.pages ?? []).map((p) => p.overflow_px ?? 0);
     check("png: displays never squeezed to fit their frame (sim X01, BL01): X01's frame and k <= 3 nested-root displays fit, as in TeX Live; every frame TeX finds clearly over-full (k = 5, 6; k = 3 and 5 more lines) reported",
       cl.code === 0 && over.length === 12 && over.slice(0, 4).every((x) => x === 0) && over[5] > 0 && over[6] > 0 && over[11] > 0, { code: cl.code, over });
+    // (grader Y4: a block is a frame's block too, and its box (.bblock) hides its overflow, as a display's does: never
+    //  shrunk to fit either. TeX Live, the same line, a block of n one-line paragraphs between two more: n <= 13 fits,
+    //  n = 20 is overfull by 91.5 pt. Here a block of 6 fits and one of 20 is reported (blocks run taller here than in
+    //  TeX: from n = 10, a spacing difference, not this))
+    const blk = (n) => `\\begin{frame}{Block ${n}}\n${LINE}\n\\begin{block}{A block}\n${Array(n).fill(LINE).join("\n\n")}\n\\end{block}\n${LINE}\n\\end{frame}\n`;
+    writeFileSync(join(dir, "clipb.tex"), "\\documentclass[aspectratio=169]{beamer}\n\\begin{document}\n" + blk(6) + blk(20) + "\\end{document}\n");
+    const cb = await new Promise((res) => { const q = spawn(process.execPath, [CLI, "latex", "render", "clipb.tex", "--png", "clipbpng", "--json"], { cwd: dir, env: { ...process.env, CHROME: browser } }); let o = ""; q.stdout.on("data", (x) => (o += x)); q.on("close", (code) => { let json = null; try { json = JSON.parse(o); } catch {} res({ code, json }); }); });
+    const overB = (cb.json?.png?.pages ?? []).map((p) => p.overflow_px ?? 0);
+    check("png: a block never squeezed to fit its frame (grader Y4): a block of 6 lines fits, as in TeX Live; a block of 20, overfull in TeX, reported",
+      cb.code === 0 && overB.length === 2 && overB[0] === 0 && overB[1] > 0, { code: cb.code, overB });
   }
 
   // ---- run: the SageTeX code, in order, in one session; its results beside the file, shown by check and render
