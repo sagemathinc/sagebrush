@@ -199,7 +199,8 @@ try {
     await openDialog();
     await hold("/data/points.csv");
     await download({ wait: false });
-    await until("window.__held === '/data/points.csv'");
+    ok(await until("window.__held === '/data/points.csv'"), "(the read of data/points.csv is held)");
+    ok(await ev(`${D}.busy`), "(the download is running when the dialog is closed)");
     await ev("document.querySelector('#dldepsdlg').close()");
     await ev("window.__go()");
     await until(`!${D}.busy`);
@@ -267,7 +268,7 @@ try {
     await ev("document.querySelector('#dldepsall').click()");
     await hold("/data/points.csv");
     await download({ wait: false });
-    await until("window.__held === '/data/points.csv'");
+    ok(await until("window.__held === '/data/points.csv'"), "(the read of data/points.csv is held)");
     await ev("document.querySelector('#filemenu [data-f=new]').click()");
     await sleep(500);
     await ev("window.__go()");
