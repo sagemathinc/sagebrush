@@ -672,6 +672,9 @@ def PolynomialRing(base, *args, **kwds):
     if type(base).__name__ in ("pAdicRingCappedRelative", "pAdicFieldCappedRelative"):
         import _sage_padic_ext
         return _sage_padic_ext.PolynomialRing_padic(base, names)
+    import _sage_rpoly
+    if _sage_rpoly.is_inexact_field(base):
+        return _sage_rpoly.PolynomialRing_inexact(base, names)
     if base is not ZZ and base is not QQ:
         raise NotImplementedError("polynomial rings over %r are not available in sagebrush yet" % (base,))
     key = (base._name, names)
@@ -955,14 +958,26 @@ class Polynomial:
             ring = other._ring
         return Polynomial(ring, coeffs)
 
+    def _inexact(self, other):
+        # (an inexact number moves the polynomial to its field: QQ[t] times RR(1.5) is
+        # over RR, as Sage)
+        import _sage_rpoly
+        return _sage_rpoly.lift(self, other)
+
     def __add__(self, other):
         o = self._coerce(other)
         if o is None:
-            return NotImplemented
+            L = self._inexact(other)
+            return NotImplemented if L is None else L + other
         n = max(len(self._c), len(o._c))
         return self._make([self[i] + o[i] for i in range(n)], o)
 
-    __radd__ = __add__
+    def __radd__(self, other):
+        o = self._coerce(other)
+        if o is None:
+            L = self._inexact(other)
+            return NotImplemented if L is None else other + L
+        return self.__add__(other)
 
     def __neg__(self):
         return Polynomial(self._ring, [-a for a in self._c])
@@ -973,19 +988,22 @@ class Polynomial:
     def __sub__(self, other):
         o = self._coerce(other)
         if o is None:
-            return NotImplemented
+            L = self._inexact(other)
+            return NotImplemented if L is None else L - other
         return self + (-o)
 
     def __rsub__(self, other):
         o = self._coerce(other)
         if o is None:
-            return NotImplemented
+            L = self._inexact(other)
+            return NotImplemented if L is None else other - L
         return o + (-self)
 
     def __mul__(self, other):
         o = self._coerce(other)
         if o is None:
-            return NotImplemented
+            L = self._inexact(other)
+            return NotImplemented if L is None else L * other
         if not self._c or not o._c:
             return self._make([], o)
         if len(self._c) * len(o._c) > 2500:
@@ -1003,7 +1021,12 @@ class Polynomial:
                     r[i + j] += a * b
         return self._make(r, o)
 
-    __rmul__ = __mul__
+    def __rmul__(self, other):
+        o = self._coerce(other)
+        if o is None:
+            L = self._inexact(other)
+            return NotImplemented if L is None else other * L
+        return self.__mul__(other)
 
     def __xor__(self, other):
         # plain Python (sagebrush.sage under CPython): ^ is xor, with the
@@ -1082,7 +1105,8 @@ class Polynomial:
     def __truediv__(self, other):
         o = self._coerce(other)
         if o is None:
-            return NotImplemented
+            L = self._inexact(other)
+            return NotImplemented if L is None else L / other
         if o.degree() <= 0:
             if not o._c:
                 raise ZeroDivisionError("division by zero")
