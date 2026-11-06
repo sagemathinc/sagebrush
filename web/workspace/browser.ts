@@ -16,6 +16,7 @@ import { SyncOwner } from "./sync-owner";
 import { readNotebooks, sidebarLine, type Notebooks, type ReadUnacked } from "./sync-panel";
 import { rowIcons, ROWICON } from "./sync-rows";
 import { fileRowMeta, fmtSize, isElsewhere } from "./row-meta";
+import { fileLabel, NEW_ITEMS } from "./filemenu";
 // (built with __SB_NO_SYNC__ (the board frame and exports, web/build.ts): no sync owner, panel or client is in that
 // copy; elsewhere the define is absent or false, and everything is as before)
 declare const __SB_NO_SYNC__: boolean | undefined;
@@ -34,6 +35,10 @@ export type BrowserHost = {
    * LaTeX editor, on the notebook page's /?tex=); true if it took the file. (The notebook page's own hook, __sbTex,
    * is web/latex/boot.ts's.) */
   openFile?(e: Entry, tab: boolean): boolean;
+  /** New ▸ LaTeX document, in `folder` (the page's LaTeX editor: web/latex/boot.ts); none: not offered (U0). */
+  newLatex?(folder: string): void;
+  /** New ▸ From an example… (the page's examples); none: not offered (U0). */
+  fromExample?(): void;
   /** A data file of a kind the page recognises opened as a document: a converted copy beside it (upload.ts, design §3); none: not offered. */
   openAs?(e: Entry, as: DocKind): void | Promise<void | string>;
   /** Upload files into a folder (the notebook page tells Python); else the browser writes them itself. */
@@ -177,7 +182,8 @@ function h<K extends keyof HTMLElementTagNameMap>(tag: K, props: Record<string, 
 }
 
 /** A popup menu at an element: [label, action] pairs, "-" a rule; closes on a choice, Esc or a click elsewhere. */
-function popup(at: HTMLElement, items: ([string, () => void, string?] | "-")[]) {
+type Item = [string, () => void, string?] | "-";
+function popup(at: HTMLElement, items: Item[]) {
   document.querySelectorAll(".sbfmenu").forEach((m) => m.remove());
   const menu = h("div", { className: "sbfmenu", role: "menu" });
   for (const it of items) {
@@ -555,7 +561,13 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
       walk("/", 0);
       tree.append(frag);
       if (more) tree.append(h("div", { className: "fempty", textContent: `${more} more not shown${q ? ": search for more of the name" : ": close some folders, or search"}` }));
-      if (!entries.length) tree.append(h("div", { className: "fempty", textContent: "Nothing here yet: New makes a notebook or a board, Upload (or a drop) brings files." }));
+      if (!entries.length) {
+        const empty = h("div", { className: "fempty", textContent: "Nothing here yet: New makes a notebook or a board, Upload (or a drop) brings files." });
+        // (on a phone, where the panel's own buttons may be out of reach: a LaTeX document and the examples here too)
+        if (host.newLatex) empty.append(" ", h("button", { textContent: "New " + fileLabel("newLatex"), onclick: () => host.newLatex!("/") }));
+        if (host.fromExample) empty.append(" ", h("button", { textContent: fileLabel("fromExample"), onclick: () => host.fromExample!() }));
+        tree.append(empty);
+      }
     }
     foot.replaceChildren();
     const trashLink = h("button", { className: "ib", textContent: trashView ? "← All files" : "Trash", style: "font-size:12px" });
@@ -612,7 +624,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     const as = e.kind === "file" && host.openAs ? openableAsFile(nameOf(e.path), /\.md$/i.test(e.path) ? await fileHead(w, e.path, LIMITS.maxBoardBytes) : null) : null;
     if (as) items.push([as === "notebook" ? "Open as a notebook" : "Open as a board", () => void Promise.resolve(host.openAs!(e, as)).then((m) => { if (m) say(m); }, fail)]);
     if (e.kind === "file") items.push(["Preview and versions", () => preview(e)], "-");
-    if (e.kind === "folder") items.push(["New notebook here", () => make(e.path, "notebook")], ["New MATLAB notebook here", () => make(e.path, "notebook", "matlab")], ["New board here", () => make(e.path, "board")], ["New folder here", () => make(e.path, "folder")], ["Upload here…", () => pick(e.path)], "-");
+    if (e.kind === "folder") items.push(["New notebook here", () => make(e.path, "notebook")], ["New MATLAB notebook here", () => make(e.path, "notebook", "matlab")], ["New board here", () => make(e.path, "board")], ...(host.newLatex ? [["New LaTeX document here", () => host.newLatex!(e.path)] as Item] : []), ["New folder here", () => make(e.path, "folder")], ["Upload here…", () => pick(e.path)], "-");
     items.push(["Rename", () => startRename(r, e)]);
     if (e.kind !== "folder") items.push(["Duplicate", () => w.duplicate(e.path).then((x) => say(`Copied as ${nameOf(x.path)}`)).catch(fail).then(refresh)]);
     if (e.kind === "file") items.push(["Download", () => download(e)]);
@@ -903,7 +915,11 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     else if (moved.length) say(`Moved ${what} to ${where}`, undo);
   }
 
-  newBtn.onclick = () => popup(newBtn, [["Notebook", () => make("/", "notebook")], ["MATLAB notebook", () => make("/", "notebook", "matlab")], ["Board", () => make("/", "board")], ["Folder", () => make("/", "folder")]]);
+  // (New, in File ▸ New's order and words: filemenu.ts NEW_ITEMS, U0)
+  newBtn.onclick = () => popup(newBtn, NEW_ITEMS.flatMap((id): Item[] => {
+    const go = id === "newNotebook" ? () => make("/", "notebook") : id === "newMatlab" ? () => make("/", "notebook", "matlab") : id === "newBoard" ? () => make("/", "board") : id === "newFolder" ? () => make("/", "folder") : id === "newLatex" ? host.newLatex && (() => host.newLatex!("/")) : host.fromExample;
+    return go ? [[fileLabel(id), go]] : [];
+  }));
   upBtn.onclick = () => pick("/");
   // (Download everything: the Storage panel's export, offered here too, where a person looks for it)
   moreBtn.onclick = () => popup(moreBtn, [[trashView ? "All files" : "Trash", () => { trashView = !trashView; refresh(); }], ["Storage…", () => storage()], ...(host.exportUrl ? [["Download everything (.zip)…", () => storage(true)] as [string, () => unknown]] : [])]);

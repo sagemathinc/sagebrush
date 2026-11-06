@@ -165,6 +165,8 @@ export interface BoardHost {
   fullFileMenu?: boolean;
   files?: {
     newNotebook?(mode: string): void | Promise<void>;
+    /** New ▸ LaTeX document (the site's LaTeX editor, where it is on: U0); none: not drawn */
+    newLatex?(): void | Promise<void>;
     newFolder?(): void | Promise<void>;
     open?(): void;
     recent?(): Promise<{ label: string; title?: string; open: () => void }[]>;
@@ -326,7 +328,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // drawn by filemenu.ts with this board's keys; what isn't here, disabled
   renderFileMenu($("filemenu"), {
     attr: "data-sbb",
-    keys: { newNotebook: "newnotebook", newMatlab: "newmatlab", newBoard: "newboard", newFolder: "newfolder", fromExample: "examples", open: "openfiles", upload: "open", saveCopy: "duplicate", rename: "rename", print: "print", share: "share", delete: "deleteboard" },
+    latex: !!host.files?.newLatex,
+    keys: { newNotebook: "newnotebook", newMatlab: "newmatlab", newBoard: "newboard", newLatex: "newlatex", newFolder: "newfolder", fromExample: "examples", open: "openfiles", upload: "open", saveCopy: "duplicate", rename: "rename", print: "print", share: "share", delete: "deleteboard" },
     disabled: {
       newNotebook: !host.files?.newNotebook, newMatlab: !host.files?.newNotebook, newFolder: !host.files?.newFolder, fromExample: !host.examples, open: !host.files?.open,
       saveCopy: !host.duplicate, share: true, delete: !host.files?.delete,
@@ -1825,6 +1828,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     elsewhereNot("No new notebook made", () => host.files!.newNotebook!("matlab"));
   };
   $("newfolder").onclick = () => elsewhereNot("No folder made", () => host.files!.newFolder!());
+  const newLatex = root.querySelector<HTMLElement>('[data-sbb="newlatex"]');
+  if (newLatex) newLatex.onclick = async () => { await editor.keepWriting(); elsewhereNot("No LaTeX document made", () => host.files!.newLatex!()); };
   $("openfiles").onclick = () => host.files?.open?.();
   $("deleteboard").onclick = async () => {
     await editor.keepWriting();
