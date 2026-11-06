@@ -262,20 +262,49 @@ def _group_members(pgid):
     return out
 
 
+ENDING_GROUPS = set()  # (kernel process groups sent SIGTERM whose SIGKILL is still due: drain_groups waits for them)
+
+
 def _kill_tree(pgid):
     """The tree rule: SIGTERM to the child's process group, SIGKILL to it 2 s later (whatever is left)."""
     try:
         os.killpg(pgid, signal.SIGTERM)
     except (ProcessLookupError, PermissionError):
         return
+    ENDING_GROUPS.add(pgid)
     loop = asyncio.get_running_loop()
 
     def kill():
+        ENDING_GROUPS.discard(pgid)
         try:
             os.killpg(pgid, signal.SIGKILL)
         except (ProcessLookupError, PermissionError):
             pass
     loop.call_later(2.0, kill)
+
+
+async def drain_groups(timeout=3.0):
+    """At the runner's exit: wait until every kernel process group it ended is empty, at most `timeout` seconds,
+    then SIGKILL what is left, so no descendant outlives `sagebrush remote` (design §7 R8; astra's a3 note).
+    Returns the pgids that still had members at the deadline."""
+    loop = asyncio.get_running_loop()
+    end = loop.time() + timeout
+    while True:
+        alive = [g for g in list(ENDING_GROUPS) if _group_members(g)]
+        for g in list(ENDING_GROUPS):
+            if g not in alive:
+                ENDING_GROUPS.discard(g)
+        if not alive:
+            return []
+        if loop.time() >= end:
+            for g in alive:
+                try:
+                    os.killpg(g, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
+                ENDING_GROUPS.discard(g)
+            return alive
+        await asyncio.sleep(0.05)
 
 
 # ---- records, runs and the binding
