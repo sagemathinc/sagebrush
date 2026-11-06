@@ -24,8 +24,6 @@ _BASE = {"b": "#0000ff", "g": "#008000", "r": "#ff0000", "c": "#00bfbf",
          "m": "#bf00bf", "y": "#bfbf00", "k": "#000000", "w": "#ffffff"}
 _TAB = {"tab:" + n: c for n, c in zip(
     ["blue", "orange", "green", "red", "purple", "brown", "pink", "gray", "olive", "cyan"], TAB10)}
-_VIRIDIS = ["#440154", "#482878", "#3e4989", "#31688e", "#26828e",
-            "#1f9e89", "#35b779", "#6ece58", "#b5de2b", "#fde725"]
 
 
 def to_color(c, default=None):
@@ -53,41 +51,33 @@ def to_color(c, default=None):
     return str(c)
 
 
-_CMAPS = {
-    "viridis": _VIRIDIS,
-    "coolwarm": ["#3b4cc0", "#6788ee", "#9abbff", "#c9d7f0", "#edd1c2", "#f7a889", "#e26952", "#b40426"],
-    "jet": ["#00007f", "#0000ff", "#007fff", "#00ffff", "#7fff7f", "#ffff00", "#ff7f00", "#ff0000", "#7f0000"],
-    "hot": ["#0b0000", "#4c0000", "#8f0000", "#d10000", "#ff1500", "#ff5800", "#ff9b00", "#ffdd00", "#ffff3f", "#ffffff"],
-    "rainbow": ["#7f00ff", "#3f61fa", "#00b4eb", "#40ecd3", "#80feb3", "#c0eb8d", "#ffb360", "#ff6130", "#ff0000"],
-    "plasma": ["#0d0887", "#46039f", "#7201a8", "#9c179e", "#bd3786", "#d8576b", "#ed7953", "#fb9f3a", "#fdca26", "#f0f921"],
-    "Blues": ["#f7fbff", "#deebf7", "#c6dbef", "#9ecae1", "#6baed6", "#4292c6", "#2171b5", "#08519c", "#08306b"],
-    "Spectral": ["#9e0142", "#d53e4f", "#f46d43", "#fdae61", "#fee08b", "#ffffbf", "#e6f598", "#abdda4", "#66c2a5", "#3288bd", "#5e4fa2"],
-    "RdBu": ["#67001f", "#b2182b", "#d6604d", "#f4a582", "#fddbc7", "#d1e5f0", "#92c5de", "#4393c3", "#2166ac", "#053061"],
-}
+def cmap_table(name):
+    """A colormap's table of N (r, g, b) floats, exactly matplotlib 3.11.1's
+    (a "_r" suffix reverses), or None for a name matplotlib lacks.  The
+    tables (_cmap_data) are imported the first time one is used."""
+    from _cmap_data import KNOWN, table
+    return table(name) if name in KNOWN else None
+
+
+def cmap_size(name):
+    """A colormap's number of colors N, exactly matplotlib's, without making
+    its table; None for a name matplotlib lacks."""
+    from _cmap_data import KNOWN, size
+    return size(name) if name in KNOWN else None
 
 
 def colormap(t, name="viridis"):
-    """The color at t in [0, 1] of a colormap: viridis, gray, coolwarm, jet,
-    hot, rainbow, plasma, Blues, Spectral, RdBu (a "_r" suffix reverses)."""
-    t = 0.0 if t != t else max(0.0, min(1.0, t))
+    """The color at t of a colormap: its entry floor(N t) of its N colors, as
+    matplotlib indexes it (the first for t <= 0 or NaN, the last for t >= 1),
+    as a CSS color (each channel rounded to a byte, as matplotlib's to_hex).
+    A name matplotlib lacks is viridis here: its callers check the names."""
     if not isinstance(name, str) and hasattr(name, "_color"):  # a matplotlib.colors colormap
-        return name._color(t)
-    name = name if isinstance(name, str) else "viridis"
-    if name.endswith("_r"):
-        name, t = name[:-2], 1 - t
-    if name in ("gray", "grey", "Greys_r", "binary_r"):
-        g = round(t * 255)
-        return "#%02x%02x%02x" % (g, g, g)
-    if name in ("Greys", "binary"):
-        g = round((1 - t) * 255)
-        return "#%02x%02x%02x" % (g, g, g)
-    stops = _CMAPS.get(name, _VIRIDIS)
-    x = t * (len(stops) - 1)
-    i = min(int(x), len(stops) - 2)
-    f = x - i
-    a, b = stops[i], stops[i + 1]
-    mix = [round(int(a[k:k + 2], 16) * (1 - f) + int(b[k:k + 2], 16) * f) for k in (1, 3, 5)]
-    return "#%02x%02x%02x" % tuple(mix)
+        return name._color(0.0 if t != t else max(0.0, min(1.0, t)))
+    tab = cmap_table(name if isinstance(name, str) else "viridis") or cmap_table("viridis")
+    n = len(tab)
+    i = 0 if t != t or t <= 0 else n - 1 if t >= 1 else min(n - 1, int(t * n))
+    r, g, b = tab[i]
+    return "#%02x%02x%02x" % (round(r * 255), round(g * 255), round(b * 255))
 
 
 DASHES = {"-": None, "solid": None, "--": "6,4", "dashed": "6,4", ":": "1.5,3",

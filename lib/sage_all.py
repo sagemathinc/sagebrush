@@ -68,7 +68,7 @@ __all__ = [
     "cylindrical_plot3d", "revolution_plot3d", "sphere", "point3d", "line3d", "text3d", "arrow3d",
     "polygon3d", "plot_vector_field3d", "tetrahedron", "cube", "octahedron",
     "dodecahedron", "icosahedron", "contour_plot", "density_plot", "implicit_plot",
-    "region_plot", "plot_vector_field", "plot_slope_field",
+    "region_plot", "plot_vector_field", "plot_slope_field", "colormaps",
     # interact
     "search_doc", "interact", "slider", "range_slider", "selector", "checkbox", "input_box", "color_selector",
     "text_control",
@@ -97,7 +97,7 @@ from sage_plot3d import (Graphics3d, plot3d, parametric_plot3d, implicit_plot3d,
                          dodecahedron, icosahedron, point3d, line3d, text3d,
                          arrow3d, polygon3d, plot_vector_field3d)
 from sage_plot_fields import (contour_plot, density_plot, implicit_plot, region_plot,
-                              plot_vector_field, plot_slope_field)
+                              plot_vector_field, plot_slope_field, colormaps)
 
 
 def show(obj, *more, **options):
@@ -606,6 +606,86 @@ def _poly_var_name(var):
     return name
 
 
+_C_SPACE = {9: None, 10: None, 11: None, 12: None, 13: None, 32: None}
+
+
+def _rational_from_str(s, base):
+    """(numerator, denominator) of a string as Sage reads a rational (GMP's
+    rule; s a string or bytes): 'a' or 'a/b', ASCII spaces anywhere ignored,
+    each part with an optional '-'; in base 0 each part's 0x or 0b prefix
+    (or a leading 0: octal) sets its base, else decimal; an explicit base from 2 to 62 (to 36 either case,
+    beyond it A-Z are 10-35 and a-z 36-61).  Anything else, a zero
+    denominator included, is a TypeError."""
+    if base is None or isinstance(base, (str, bytes)):
+        raise TypeError("an integer is required")
+    b = _int_value(base)
+    # (the base is a C unsigned int, as in Sage)
+    if b < 0:
+        raise OverflowError("can't convert negative value to unsigned int")
+    if b >= 2 ** 64:
+        raise OverflowError("Python int too large to convert to C unsigned long")
+    if b >= 2 ** 32:
+        raise OverflowError("value too large to convert to unsigned int")
+    t = s
+    if isinstance(s, bytes):
+        try:
+            t = s.decode()
+        except UnicodeDecodeError:
+            raise TypeError("unable to convert %r to a rational" % (s,)) from None
+    # (only C's whitespace is ignored: a no-break space is refused)
+    parts = t.translate(_C_SPACE).split("/")
+    vals = []
+    if (b == 0 or 2 <= b <= 62) and len(parts) <= 2:
+        for part in parts:
+            v = _gmp_int(part, b)
+            if v is None:
+                break
+            vals.append(v)
+    if len(vals) != len(parts) or (len(vals) == 2 and vals[1] == 0):
+        raise TypeError("unable to convert %r to a rational" % s)
+    return vals[0], (vals[1] if len(vals) == 2 else 1)
+
+
+def _gmp_int(t, base):
+    """An integer as GMP reads one (no spaces left in t): an optional '-',
+    then digits; in base 0 a 0x/0X or 0b/0B prefix, or a leading 0 for
+    octal.  None if t is not one."""
+    neg = t.startswith("-")
+    if neg:
+        t = t[1:]
+    if base == 0:
+        if t[:2] in ("0x", "0X"):
+            t, base = t[2:], 16
+        elif t[:2] in ("0b", "0B"):
+            t, base = t[2:], 2
+        elif t[:1] == "0" and len(t) > 1:
+            t, base = t[1:], 8
+        else:
+            base = 10
+    if not t:
+        return None
+    v = 0
+    for ch in t:
+        o = ord(ch)
+        if 48 <= o <= 57:
+            k = o - 48
+        elif 65 <= o <= 90:
+            k = o - 55
+        elif 97 <= o <= 122:
+            k = o - 87 if base <= 36 else o - 61
+        else:
+            return None
+        if k >= base:
+            return None
+        v = v * base + k
+    return -v if neg else v
+
+
+def _rational_from_pair(numerator, denominator):
+    """The Rational numerator/denominator of a coprime pair (unpickling)."""
+    return Rational._from_coprime_ints(numerator, denominator)
+
+
 class Rational(_Fraction):
     """An exact rational number, such as ``2/3`` in Sage mode.
 
@@ -617,16 +697,37 @@ class Rational(_Fraction):
         'Rational'
         sage: a + 1/3, a * 3/4, a^2, a.numerator(), a.denominator()
         (1, 1/2, 4/9, 2, 3)
+
+    As in Sage, Rational(x, base) reads a string in that base, and a
+    numerator and a denominator are a tuple::
+
+        sage: Rational('1/ff', 16), Rational('-0x1f'), Rational((6, -4)), Rational(1, 3)
+        (1/255, -31, -3/2, 1)
     """
 
     __slots__ = ()
 
-    def __new__(cls, numerator=0, denominator=None):
-        # (a real number as QQ converts it: the simplest rational that
-        # rounds to it, Rational(0.1) is 1/10, not the double's exact value)
-        if denominator is None and not isinstance(numerator, (int, _Fraction, str)) and _real_kind(numerator) is not None:
-            return _simplest_rational(numerator, "Rational of a real number", literal=True)
-        return _Fraction.__new__(cls, numerator, denominator)
+    def __new__(cls, x=0, base=0):
+        # (as Sage: the second argument is a base, for a string only:
+        # Rational(1, 3) is 1, Rational('12', 3) is 5; a numerator and a
+        # denominator are a tuple, Rational((1, 3)); a real number as QQ
+        # converts it, the simplest rational that rounds to it: Rational(0.1)
+        # is 1/10, not the double's exact value)
+        if isinstance(x, (bytes, str)):
+            n, d = _rational_from_str(x, base)
+            return _Fraction.__new__(cls, n, d)
+        if x is None:
+            return _Fraction.__new__(cls, 0)
+        if isinstance(x, tuple) and len(x) == 2:
+            n, d = _int_value(x[0]), _int_value(x[1])
+            if d == 0:
+                raise ValueError("denominator must not be 0")
+            return _Fraction.__new__(cls, n, d)
+        if not isinstance(x, (int, _Fraction)) and _real_kind(x) is not None:
+            return _simplest_rational(x, "Rational of a real number", literal=True)
+        if isinstance(x, (tuple, list, complex)):
+            raise TypeError("unable to convert %r to a rational" % (x,))
+        return _Fraction.__new__(cls, x)
 
     def __repr__(self):
         if self._denominator == 1:
@@ -665,6 +766,18 @@ class Rational(_Fraction):
         if isinstance(b, (int, _Fraction)) and not isinstance(b, bool) and self._denominator != 1:
             return _rational_power(_Fraction(b), self)
         return Rational._rpow(self, b)
+
+    # (copy, deepcopy and pickle as Fraction does them call the class with
+    # (numerator, denominator); Rational(a, b) is Sage's, b a base: these
+    # build the value explicitly)
+    def __copy__(self):
+        return self
+
+    def __deepcopy__(self, memo):
+        return self
+
+    def __reduce__(self):
+        return (_rational_from_pair, (self._numerator, self._denominator))
 
     def __neg__(self):
         return Rational._from_coprime_ints(-self._numerator, self._denominator)
@@ -1619,22 +1732,104 @@ def _intdiv(a, b):
     return Rational._from_coprime_ints(a, b)
 
 
-def Integer(x):
-    """The integer x.  A real number must be integral: Integer(3.0) is 3,
-    and Integer(3.5) is a TypeError (int() would truncate it).
+def Integer(x=0, base=0):
+    """The integer x, converted as Sage converts it.  A real number must be
+    integral and a rational a whole number (Integer(3.5) and Integer(1/2)
+    are TypeErrors: int() would truncate them); a string (or bytes) is read
+    as Sage reads it, underscores and spaces ignored, in base 0 (a 0x, 0o or
+    0b prefix, else decimal) or a base from 2 to 36; None is 0.
 
     EXAMPLES::
 
         sage: Integer(7), Integer('123456789012345678901234567890'), Integer(2.0^70)
         (7, 123456789012345678901234567890, 1180591620717411303424)
+        sage: Integer('-0x1f'), Integer('ff', 16), Integer('1_000'), Integer(4/2), Integer(None)
+        (-31, 255, 1000, 2, 0)
         sage: Integer(3.5)
         Traceback (most recent call last):
         ...
         TypeError: Attempt to coerce non-integral RealNumber to Integer
+        sage: Integer(1/2)
+        Traceback (most recent call last):
+        ...
+        TypeError: no conversion of this rational to integer
     """
-    if not isinstance(x, int) and _real_kind(x) is not None:
+    return _int_value(x, base)
+
+
+def _int_value(x=0, base=0):
+    """Integer(x, base) as a Python int (also CPython's Integer class's)."""
+    if isinstance(x, bytes):
+        x = x.decode()
+    if isinstance(x, str):
+        return _integer_from_str(x, _int_base(base))
+    if x is None:
+        return 0
+    if isinstance(x, bool):
+        return int(x)
+    if isinstance(x, int):
+        return x
+    if _real_kind(x) is not None:
         return _integral_real(x)
-    return int(x)
+    if isinstance(x, _Fraction):
+        if x.denominator != 1:
+            raise TypeError("no conversion of this rational to integer")
+        return int(x.numerator)
+    if isinstance(x, complex):
+        # (Sage's own names for the classes it refuses)
+        cls = "<class 'complex'>" if type(x) is complex else "<class 'sage.rings.complex_mpfr.ComplexNumber'>"
+        raise TypeError("unable to coerce %s to an integer" % cls)
+    if not isinstance(x, (bytearray, memoryview)):  # (int() reads those; Sage refuses them)
+        try:
+            return int(x)
+        except TypeError:
+            pass
+    raise TypeError("unable to coerce %s to an integer" % type(x))
+
+
+def _int_base(base):
+    """A base as Sage takes it: a number truncated toward zero (2.5 and 7/3
+    are 2, 1/2 is 0), else a TypeError (a string, None); one beyond a C
+    long is an OverflowError."""
+    if base is None or type(base) is complex or isinstance(base, (str, bytes, bytearray, memoryview, list, tuple, dict, set, frozenset)):
+        raise TypeError("an integer is required")
+    if not hasattr(type(base), "__int__"):
+        # (an object int() reads only through __index__ is refused, as Sage)
+        raise TypeError("an integer is required")
+    try:
+        b = int(base)
+    except TypeError:
+        if isinstance(base, complex):
+            raise  # (CC's own: can't convert complex to int)
+        raise TypeError("an integer is required") from None
+    if not -2 ** 63 <= b < 2 ** 63:
+        raise OverflowError("Python int too large to convert to C long")
+    if b != 0 and not 2 <= b <= 36:
+        raise ValueError("base (=%d) must be 0 or between 2 and 36" % b)
+    return b
+
+
+def _integer_from_str(s, base):
+    """A string as Sage reads an integer: its underscores removed first, then
+    spaces anywhere ignored, ASCII digits only, one sign; in base 0 a 0x, 0o
+    or 0b prefix sets the base (else decimal, leading zeros included: '010'
+    is 10); in an explicit base no prefix."""
+    import re
+    s = s.replace("_", "")
+    t = "".join(s.split())
+    m = re.fullmatch(r"([+-]?)0([xXoObB])(.*)", t) if base in (0, 2, 8, 16) else None
+    if m is not None:
+        b = {"x": 16, "o": 8, "b": 2}[m.group(2).lower()]
+        if base == 0:
+            t, base = m.group(1) + m.group(3), b
+        elif base == b:
+            t = None  # (Integer('0xff', 16) is refused: int() would accept it)
+    if t is not None and t.isascii() and re.fullmatch(r"[+-]?[0-9A-Za-z]+", t):
+        try:
+            return int(t, base or 10)
+        except ValueError:
+            pass
+    raise TypeError("unable to convert %r to an integer" % s)
 
 
 def _integral_real(x):
@@ -2196,6 +2391,16 @@ class Factorization(list):
             return str(latex(self.unit))
         return _latex_factorization([(str(latex(p)), e) for p, e in self],
                                     "-1" if self.unit == -1 else None, bare_unit=True)
+
+    def prod(self):
+        """The product of the factorization: value() (as Sage's prod(F)).
+
+        EXAMPLES::
+
+            sage: factor(-360).prod(), prod(factor(-360)), factor(-9/20).prod()
+            (-360, -360, -9/20)
+        """
+        return self.value()
 
     def value(self):
         """The product of the factorization.

@@ -1,8 +1,8 @@
 {
   "v": 1,
-  "reason": "EXPORT-ZIPNAME-1 (astra, a security fix, @sagebrush's priority, Nov 5): every member's name checked before any body is read (names.ts: a backslash, colon, < > \" | ? *, control character, device name, dot/space ending, empty/./.. part, or a leading or stray /, refused, never renamed) in a metadata-only pass at preflight's start, and again where the writer encodes each name. 68865 bytes in bun 1.4.4's build at master b418745c + the fix (master's: 66183, +2682), ceiling measured + 64; the worker unchanged. The +819 of it: the measuring pass reads the checked entries from a spool of their own (daybreak3's and astra's TOCTOU-1), not the live workspace. Before: The web-export B3 hang fix (Cancel at Ready clears the panel at once, its records removed after): 66183 bytes in CI's build order at master a2f0df4c + the fix (+9 over the ceiling), ceiling measured + 64 (@sagebrush, Nov 3). Before: B3 (William's Nov 2 DEV report): what isn't on this device is left ",
+  "reason": "Dependencies 2b, File > Download \"with its files (.zip)\" (@sagebrush's ruling, Nov 6: accept, light trim): the Download dialog's lazy zip path, export/selected.ts zipPicks: every name checked before any read (astra's DEP2B-ZIPNAME-1, names.ts), caps on the actual bytes, this chunk's own ZipWriter, BlobSink and worker reused, nothing duplicated. 70689 bytes in bun 1.4.4's build at master 30ca1462 + 2b (master's: 68865, +1824), ceiling measured + 64; the worker unchanged. Before: EXPORT-ZIPNAME-1 (astra, Nov 5): every member's name checked before any body is read, in preflight and in the writer; 68865 bytes (+2682), ceiling measured + 64.",
   "bytes": {
-    "sagebrush-export.js": 68929,
+    "sagebrush-export.js": 70753,
     "sagebrush-export-worker.js": 5709
   }
 }
