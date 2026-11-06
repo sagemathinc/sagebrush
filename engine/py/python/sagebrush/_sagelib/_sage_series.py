@@ -415,11 +415,25 @@ def _latex_number(c):
     return s if re.fullmatch(r"-?\d+", s) else None
 
 
-def _latex_from_repr(s):
-    """The printed series with ^{} exponents (coefficients that are not
-    plain numbers)."""
-    import re
-    return re.sub(r"\^(-?\d+)", r"^{\1}", repr(s).replace("*", " "))
+def _latex_coeff(c):
+    """(latex, unit, atomic) of a coefficient as Sage typesets it in a series:
+    its own latex; unit 1 or -1 for an exact one or minus one (left out before a
+    monomial), else 0; atomic when it is no sum (else \\left(...\\right) before a
+    monomial: \\left(a + 1\\right) y, but -a y)."""
+    lc = _latex_number(c)
+    exact = lc is not None or type(c).__name__ in ("Polynomial", "NumberFieldElement", "AlgebraicNumber", "FiniteFieldElement", "MPolynomial")
+    if lc is None:
+        lc = str(_sa().latex(c))
+    r = repr(c)
+    body = r[1:] if r.startswith("-") else r
+    atomic = " + " not in body and " - " not in body
+    unit = 0
+    if exact:
+        if r == "1":
+            unit = 1
+        elif r == "-1":
+            unit = -1
+    return lc, unit, atomic
 
 
 class Series:
@@ -720,23 +734,24 @@ class Series:
             0.333333333333333 + 2.00000000000000 y + O(y^{3})
         """
         name = self._R._name
+        lau = self._R._laurent
         terms = []
         e = self._v - 1
         for c in ([] if self.is_zero() else self._c):
             e += 1
             if _is_zero(c):
                 continue
-            lc = _latex_number(c)
-            if lc is None:
-                return _latex_from_repr(self)
-            if self._R._laurent and e < 0:
-                # (Sage: \\frac{c}{z^{k}}, the coefficient's sign inside)
+            lc, unit, atomic = _latex_coeff(c)
+            if lau and e < 0:
+                # (Sage: \\frac{c}{z^{k}}, the coefficient's own latex, its sign inside)
                 lc = "\\frac{%s}{%s}" % (lc, name if e == -1 else "%s^{%d}" % (name, -e))
             elif e:
                 # (Sage: a space between coefficient and monomial in a power
-                # series, "2 x", none in a Laurent series, "2z")
-                sep = "" if self._R._laurent else " "
-                lc = ("" if lc == "1" else "-" if lc == "-1" else lc) + sep + (name if e == 1 else "%s^{%d}" % (name, e))
+                # series, "2 x", none in a Laurent series, "2z"; a unit left out,
+                # a sum in \\left(...\\right))
+                sep = "" if lau else " "
+                pre = "" if unit == 1 else "-" if unit == -1 else lc if atomic else "\\left(%s\\right)" % lc
+                lc = pre + sep + (name if e == 1 else "%s^{%d}" % (name, e))
             terms.append(lc)
         if self._prec is not None:
             if not terms:
