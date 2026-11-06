@@ -285,7 +285,7 @@
   },
   "engine/lib/mod-matplotlib.src": {
    "exact": false,
-   "ceiling": 30378,
+   "ceiling": 37575,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024

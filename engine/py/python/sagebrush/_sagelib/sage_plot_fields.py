@@ -14,11 +14,12 @@ boundary lines agree exactly.
 
 import math
 
-from _graphics import Line, Patches, Segments, colormap, nice_ticks, to_color
+from collections.abc import Mapping as _Mapping
+from _graphics import Line, Patches, Segments, colormap, nice_ticks, to_color, _CMAPS, _GRAYS
 from sage_plot import Graphics, _split
 
 __all__ = ["contour_plot", "density_plot", "implicit_plot", "region_plot", "plot_vector_field",
-           "plot_slope_field"]
+           "plot_slope_field", "colormaps"]
 
 
 def _fn(f, names):
@@ -367,6 +368,75 @@ class Layers(Patches):
         return "<g%s>%s</g>" % (' opacity="%s"' % _fmt(a) if a is not None else "", "".join(out))
 
 
+class Colormaps(_Mapping):
+    """Sage's colormaps: matplotlib's colormaps by name (colormaps['viridis'],
+    colormaps.viridis)."""
+
+    def __init__(self):
+        self._made = {}
+
+    def __getitem__(self, name):
+        if name not in self._made:
+            from matplotlib import _cmaps
+            if name not in _cmaps.KNOWN:
+                raise KeyError("no colormap with name '%s'" % (name,))
+            if not _cmaps.drawn(name):
+                raise _cmaps.missing(name)
+            from matplotlib.colors import Colormap
+            self._made[name] = Colormap(name)
+        return self._made[name]
+
+    def __getattr__(self, name):
+        if name.startswith("_"):
+            raise AttributeError(name)
+        try:
+            return self[name]
+        except KeyError:
+            raise AttributeError("'Colormaps' has no attribute or colormap %s" % name) from None
+
+    def __contains__(self, name):
+        from matplotlib import _cmaps
+        return name in _cmaps.KNOWN
+
+    def __iter__(self):
+        from matplotlib import _cmaps
+        return iter(_cmaps.NAMES_ALL)
+
+    def __len__(self):
+        from matplotlib import _cmaps
+        return len(_cmaps.NAMES_ALL)
+
+
+colormaps = Colormaps()
+_DRAWN = set(_CMAPS) | set(_GRAYS)  # (the colormaps drawn: no name list to import for these)
+
+
+class _Unknown(Patches):
+    """A plot whose colormap's name matplotlib lacks: Sage's error when it is
+    drawn (not when it is made)."""
+
+    def __init__(self, cmap, bbox):
+        super().__init__([], [], bbox=bbox)
+        self.cmap = cmap
+
+    def svg(self, P):
+        from matplotlib import _cmaps
+        raise RuntimeError(_cmaps.SAGE_UNKNOWN % self.cmap)
+
+
+def _unknown(cmap, box, gopts):
+    """None for a colormap Sage draws, or the plot that is Sage's error when
+    drawn for a name matplotlib lacks; one Sagebrush lacks is an error now"""
+    if not isinstance(cmap, str) or (cmap[:-2] if cmap.endswith("_r") else cmap) in _DRAWN:
+        return None
+    from matplotlib import _cmaps
+    if cmap not in _cmaps.KNOWN:
+        return Graphics([_Unknown(cmap, box)], **_frame_opts(gopts, box))
+    if not _cmaps.drawn(cmap):
+        raise _cmaps.missing(cmap)
+    return None
+
+
 def contour_plot(f, xrange, yrange, plot_points=100, fill=True, contours=None, cmap="gray",
                  linewidths=None, linestyles=None, labels=False, colorbar=False, **options):
     """Level curves of f(x, y), filled between levels by default (Sage's
@@ -374,6 +444,9 @@ def contour_plot(f, xrange, yrange, plot_points=100, fill=True, contours=None, c
     gopts, p = _split(options)
     xn, xa, xb = _rng(xrange, "x")
     yn, ya, yb = _rng(yrange, "y")
+    bad = _unknown(cmap, (xa, xb, ya, yb), gopts)
+    if bad is not None:
+        return bad
     F = _fn(f, [xn, yn])
     p.pop("plot_points", None)
     n = int(plot_points if not isinstance(plot_points, (list, tuple)) else plot_points[0])
@@ -410,6 +483,9 @@ def density_plot(f, xrange, yrange, plot_points=25, cmap="gray", **options):
     gopts, p = _split(options)
     xn, xa, xb = _rng(xrange, "x")
     yn, ya, yb = _rng(yrange, "y")
+    bad = _unknown(cmap, (xa, xb, ya, yb), gopts)
+    if bad is not None:
+        return bad
     F = _fn(f, [xn, yn])
     n = max(2, int(plot_points if not isinstance(plot_points, (list, tuple)) else plot_points[0]))
     dx, dy = (xb - xa) / n, (yb - ya) / n

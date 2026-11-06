@@ -326,5 +326,41 @@
     ],
     "status": "partial",
     "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.pyplot.get_cmap",
+    "kind": "function",
+    "signature": "(name=None, lut=None)",
+    "summary": "A colormap by name (rcParams['image.cmap'] by default) or the one given; an unknown name is matplotlib's ValueError.",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nprint(plt.get_cmap('jet').name)\nprint(plt.get_cmap().name)\ntry:\n    plt.get_cmap('Jet')\nexcept ValueError as e:\n    print(e)",
+        "expected": "jet\nviridis\n'Jet' is not a valid value for name. Did you mean one of: 'jet', 'Set3', 'Set2'?\n"
+      }
+    ],
+    "differs": [
+      "Sagebrush draws viridis, gray, coolwarm, jet, hot, rainbow, plasma, Blues, Spectral and RdBu (and Greys, binary, grey, each also _r), with colors close to matplotlib's but not exactly its values; another of matplotlib's names is a NotImplementedError saying it is not in Sagebrush yet.",
+      "lut (a colormap resampled to lut colors) is not accepted: a NotImplementedError."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.pyplot.colormaps",
+    "kind": "constant",
+    "signature": "",
+    "summary": "matplotlib.colormaps, the colormaps by name: colormaps['viridis'], list(colormaps); colormaps() lists the names.",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nnames = plt.colormaps()\nprint(len(names), names[:4])\nprint(plt.colormaps['viridis'].name)",
+        "expected": "182 ['magma', 'inferno', 'plasma', 'viridis']\nviridis\n"
+      }
+    ],
+    "differs": [
+      "Every name of matplotlib 3.11.1 is there, but Sagebrush draws only viridis, gray, coolwarm, jet, hot, rainbow, plasma, Blues, Spectral and RdBu (and Greys, binary, grey, each also _r); looking up another is a NotImplementedError saying it is not in Sagebrush yet.",
+      "register and unregister are not accepted."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
   }
 ]

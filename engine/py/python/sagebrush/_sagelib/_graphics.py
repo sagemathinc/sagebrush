@@ -64,6 +64,7 @@ _CMAPS = {
     "Spectral": ["#9e0142", "#d53e4f", "#f46d43", "#fdae61", "#fee08b", "#ffffbf", "#e6f598", "#abdda4", "#66c2a5", "#3288bd", "#5e4fa2"],
     "RdBu": ["#67001f", "#b2182b", "#d6604d", "#f4a582", "#fddbc7", "#d1e5f0", "#92c5de", "#4393c3", "#2166ac", "#053061"],
 }
+_GRAYS = ("gray", "grey", "Greys", "binary")
 
 
 def colormap(t, name="viridis"):

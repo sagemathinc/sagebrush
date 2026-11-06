@@ -1,0 +1,26 @@
+len 182
+first ['magma', 'inferno', 'plasma', 'viridis', 'cividis', 'twilight']
+in (True, True, False)
+name ('viridis', 'jet_r', 'coolwarm')
+same True
+[foo] KeyError "no colormap with name 'foo'"
+[Viridis] KeyError "no colormap with name 'Viridis'"
+[3] KeyError "no colormap with name '3'"
+.foo AttributeError 'Colormaps' has no attribute or colormap foo
+.get None
+density_plot viridis made 'Graphics'
+density_plot viridis drawn None
+contour_plot viridis drawn None
+density_plot gray made 'Graphics'
+density_plot gray drawn None
+contour_plot gray drawn None
+density_plot RdBu_r made 'Graphics'
+density_plot RdBu_r drawn None
+contour_plot RdBu_r drawn None
+density_plot foo made 'Graphics'
+density_plot foo drawn RuntimeError Color map foo not known (type "import matplotlib; list(matplotlib.colormaps.keys())" for valid names)
+contour_plot foo drawn RuntimeError Color map foo not known (type "import matplotlib; list(matplotlib.colormaps.keys())" for valid names)
+density_plot Viridis made 'Graphics'
+density_plot Viridis drawn RuntimeError Color map Viridis not known (type "import matplotlib; list(matplotlib.colormaps.keys())" for valid names)
+contour_plot Viridis drawn RuntimeError Color map Viridis not known (type "import matplotlib; list(matplotlib.colormaps.keys())" for valid names)
+contour_plot lines foo drawn RuntimeError Color map foo not known (type "import matplotlib; list(matplotlib.colormaps.keys())" for valid names)
