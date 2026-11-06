@@ -288,7 +288,7 @@ export function ndLu(A: Float64Array, n: number, B: Float64Array | null, r: numb
 // product that comes before the pool is ready runs on one thread.
 // - Where: only where the calling thread may block and threads can be made: a Node thread (the CLI), its helpers
 //   running src/runtime/nd-helper.ts; never a page's main thread. Elsewhere (the browser's notebook worker, for
-//   now), and with 2 cores or fewer, one thread.
+//   now), and with one core, one thread. (2 cores get one helper: faster than one thread there, PERF #775)
 // - When: lazily, at the first product that is large enough; never at load. Its helpers then start in the
 //   background, each instantiating the module on its own stack, and count themselves ready in the control words.
 // - The memory, from the module's floor: the control words (64 bytes), the GEMM descriptor (64), one stack slot
@@ -349,7 +349,7 @@ function helperCount(): number {
   if (tst.hooks?.helpers !== undefined) return tst.hooks.helpers;
   const g = globalThis as any;
   const hw = Number(g.navigator?.hardwareConcurrency ?? g.process?.getBuiltinModule?.("os")?.availableParallelism?.() ?? 1);
-  return hw <= 2 ? 0 : Math.min(hw - 1, MAX_HELPERS);
+  return hw <= 1 ? 0 : Math.min(hw - 1, MAX_HELPERS);
 }
 
 // How this host makes a helper, or null if it can't here: in Node, a worker_threads Worker of the helper's code
@@ -381,7 +381,7 @@ function startPool(): void {
   const make = helperMaker(), helpers = helperCount();
   if (!make || helpers < 1) {
     threads = "off";
-    threadsWhy = make ? "2 cores or fewer" : "no worker threads here";
+    threadsWhy = make ? "one core" : "no worker threads here";
     return;
   }
   const ctl = base, desc = ctl + 64, stacks = desc + 64, top = stacks + (helpers + 1) * SLOT;

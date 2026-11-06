@@ -58,7 +58,7 @@ test("one thread: no pool, no worker; the product within rounding of a plain sum
   const r: any = oneThread();
   assert.equal(r.error, undefined);
   assert.ok(r.err < 1e-13, `error ${r.err}`);
-  assert.deepEqual(r.threads, { threads: 1, state: "off", why: "2 cores or fewer" });
+  assert.deepEqual(r.threads, { threads: 1, state: "off", why: "one core" });
   assert.equal(r.made, 0);
 });
 

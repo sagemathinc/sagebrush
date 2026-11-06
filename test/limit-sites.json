@@ -9718,7 +9718,7 @@
   "owner": "runtime file I/O",
   "row": "src-14"
  },
- "src/runtime/nd.ts :: helperCount :: return hw <= 2 ? 0 : Math.min(hw - 1, MAX_HELPERS); #0": {
+ "src/runtime/nd.ts :: helperCount :: return hw <= 1 ? 0 : Math.min(hw - 1, MAX_HELPERS); #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
