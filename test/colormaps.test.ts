@@ -392,3 +392,24 @@ print("density_plot", "_cmap_data" in sys.modules)
 `], { encoding: "utf8" });
   assert.deepEqual(sage.trim().split("\n"), ["start False", "plot False", "density_plot True"]);
 });
+
+test("colormaps: a table is made when its colormap is used, not before (cm's 182 colormaps decode nothing)", () => {
+  const out = run(`
+import matplotlib.cm as cm
+import _cmap_data as d
+print("after import cm", len(d._made), cm.twilight.N, cm.tab10.N, cm.viridis_r.N)
+from matplotlib import colormaps
+m = colormaps["magma"]
+print("after lookup", sorted(d._made))
+m(0.5)
+print("after magma(0.5)", sorted(d._made))
+colormaps["twilight_shifted"](0.1)
+print("after twilight_shifted", sorted(d._made))
+`);
+  assert.deepEqual(out.trim().split("\n"), [
+    "after import cm 0 510 10 256",
+    "after lookup []",
+    "after magma(0.5) ['magma']",
+    "after twilight_shifted ['magma', 'twilight', 'twilight_shifted']",
+  ]);
+});

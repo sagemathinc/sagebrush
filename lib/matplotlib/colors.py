@@ -8,9 +8,12 @@ from _graphics import to_color, colormap as _colormap, TAB10 as _TAB10
 class Colormap:
     def __init__(self, name="custom", N=256):
         self.name, self.N = name, N
-        tab = self._exact()
-        if tab is not None:
-            self.N = len(tab)
+        if type(self) is Colormap and isinstance(name, str):
+            # (matplotlib's own colormap by name: its N, its table made only when used)
+            from _graphics import cmap_size
+            n = cmap_size(name)
+            if n is not None:
+                self.N = n
 
     def _exact(self):
         """matplotlib's own table of this colormap, if it is one of its by

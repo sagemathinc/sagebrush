@@ -59,6 +59,13 @@ def cmap_table(name):
     return table(name) if name in KNOWN else None
 
 
+def cmap_size(name):
+    """A colormap's number of colors N, exactly matplotlib's, without making
+    its table; None for a name matplotlib lacks."""
+    from _cmap_data import KNOWN, size
+    return size(name) if name in KNOWN else None
+
+
 def colormap(t, name="viridis"):
     """The color at t of a colormap: its entry floor(N t) of its N colors, as
     matplotlib indexes it (the first for t <= 0 or NaN, the last for t >= 1),

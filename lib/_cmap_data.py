@@ -266,6 +266,20 @@ def _fixed(name, t):
 _made = {}
 
 
+def size(name):
+    """The number of colors N of the colormap's table, without making it."""
+    base = name[:-2] if name.endswith("_r") else name
+    if base in _HEX:
+        return _HEX[base].count(" ") + 1
+    if base in _DEC:
+        return (_DEC[base][1].count(" ") + 1) // 3
+    if base in _FULL:
+        return (_FULL[base].count(" ") + 1) // 3
+    if base == "twilight_shifted":
+        return size("twilight")
+    return 256
+
+
 def table(name):
     """The colormap's N colors, (r, g, b) floats, for a name of matplotlib's
     (a "_r" suffix reverses); made the first time it is asked for."""
