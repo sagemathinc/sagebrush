@@ -828,14 +828,24 @@ class Axes:
             lo = float(vmin) if vmin is not None else (float(finite.min()) if finite.size else 0.0)
             hi = float(vmax) if vmax is not None else (float(finite.max()) if finite.size else 1.0)
             name = cmap or "viridis"
-            lut = np.zeros((257, 4), dtype=np.uint8)
-            for i in builtin_range(256):
-                r, g, b = _rgb(colormap(i / 255, name))
-                lut[i] = (r, g, b, 255)
-            # (matplotlib: index floor(256 t), t clipped to [0, 1]; NaN, the "bad" color, transparent)
+            from _graphics import cmap_table
+            tab = cmap_table(name) if isinstance(name, str) else None
+            if tab is not None:
+                # (matplotlib's table of N colors, each value times 255 truncated to a byte, as it renders)
+                n = len(tab)
+                lut = np.zeros((n + 1, 4), dtype=np.uint8)
+                for i in builtin_range(n):
+                    lut[i] = tuple(int(v * 255) for v in tab[i]) + (255,)
+            else:
+                n = 256
+                lut = np.zeros((257, 4), dtype=np.uint8)
+                for i in builtin_range(256):
+                    r, g, b = _rgb(colormap(i / 255, name))
+                    lut[i] = (r, g, b, 255)
+            # (matplotlib: index floor(N t), t clipped to [0, 1]; NaN, the "bad" color, transparent)
             t = (F - lo) / (hi - lo) if hi > lo else np.zeros(F.shape) + 0.5
-            idx = np.clip(np.floor(np.where(np.isfinite(t), t, 0.0) * 256), 0, 255).astype(int)
-            idx = np.where(np.isnan(F), 256, idx)
+            idx = np.clip(np.floor(np.where(np.isfinite(t), t, 0.0) * n), 0, n - 1).astype(int)
+            idx = np.where(np.isnan(F), n, idx)
             px = lut[idx]
         if alpha is not None:
             px[:, :, 3] = (px[:, :, 3].astype(float) * float(alpha)).astype(np.uint8)

@@ -2,17 +2,17 @@
 it spans), the colormaps by name (cm.viridis) and their registry
 (matplotlib.colormaps), with matplotlib 3.11.1's names and errors."""
 from collections.abc import Mapping as _Mapping
-from matplotlib._cmaps import NAMES_ALL as _NAMES_ALL, KNOWN as _KNOWN, drawn as _drawn, missing as _missing, invalid as _invalid
+from _cmap_data import NAMES_ALL as _NAMES_ALL, KNOWN as _KNOWN
 from matplotlib.colors import Colormap, Normalize
 
 _SEE = ("\nSee `matplotlib.bivar_colormaps()` and `matplotlib.multivar_colormaps()` for bivariate and"
         " multivariate colormaps")
 
 
-def _colormap(name):
-    if not _drawn(name):
-        raise _missing(name)
-    return Colormap(name)
+def _invalid(value, what, names=_NAMES_ALL):
+    # (the message, with its closest names: matplotlib._cmaps, imported for an error only)
+    from matplotlib._cmaps import invalid
+    return invalid(value, what, names)
 
 
 def _cmap(cmap):
@@ -22,8 +22,6 @@ def _cmap(cmap):
         return cmap
     if not isinstance(cmap, str) or cmap not in _KNOWN:
         raise ValueError(_invalid(cmap, "cmap") + _SEE)
-    if not _drawn(cmap):
-        raise _missing(cmap)
     return cmap
 
 
@@ -33,7 +31,7 @@ class ColormapRegistry(_Mapping):
     def __getitem__(self, item):
         if item not in _KNOWN:
             raise KeyError(_invalid(item, "colormap"))
-        return _colormap(item)
+        return Colormap(item)
 
     def __iter__(self):
         return iter(_NAMES_ALL)
@@ -126,11 +124,8 @@ def get_cmap(name=None, lut=None):
 
 # the colormaps by name: cm.viridis, cm.gray, ... (and their reverses, cm.viridis_r)
 for _n in _NAMES_ALL:
-    if _drawn(_n):
-        globals()[_n] = Colormap(_n)
+    globals()[_n] = Colormap(_n)
 
 
 def __getattr__(name):
-    if name in _KNOWN:
-        raise _missing(name)
     raise AttributeError("module 'matplotlib.cm' has no attribute %r" % name)
