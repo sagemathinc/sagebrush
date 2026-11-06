@@ -68,7 +68,7 @@ __all__ = [
     "cylindrical_plot3d", "revolution_plot3d", "sphere", "point3d", "line3d", "text3d", "arrow3d",
     "polygon3d", "plot_vector_field3d", "tetrahedron", "cube", "octahedron",
     "dodecahedron", "icosahedron", "contour_plot", "density_plot", "implicit_plot",
-    "region_plot", "plot_vector_field", "plot_slope_field",
+    "region_plot", "plot_vector_field", "plot_slope_field", "colormaps",
     # interact
     "search_doc", "interact", "slider", "range_slider", "selector", "checkbox", "input_box", "color_selector",
     "text_control",
@@ -97,7 +97,7 @@ from sage_plot3d import (Graphics3d, plot3d, parametric_plot3d, implicit_plot3d,
                          dodecahedron, icosahedron, point3d, line3d, text3d,
                          arrow3d, polygon3d, plot_vector_field3d)
 from sage_plot_fields import (contour_plot, density_plot, implicit_plot, region_plot,
-                              plot_vector_field, plot_slope_field)
+                              plot_vector_field, plot_slope_field, colormaps)
 
 
 def show(obj, *more, **options):
@@ -1619,22 +1619,104 @@ def _intdiv(a, b):
     return Rational._from_coprime_ints(a, b)
 
 
-def Integer(x):
-    """The integer x.  A real number must be integral: Integer(3.0) is 3,
-    and Integer(3.5) is a TypeError (int() would truncate it).
+def Integer(x=0, base=0):
+    """The integer x, converted as Sage converts it.  A real number must be
+    integral and a rational a whole number (Integer(3.5) and Integer(1/2)
+    are TypeErrors: int() would truncate them); a string (or bytes) is read
+    as Sage reads it, underscores and spaces ignored, in base 0 (a 0x, 0o or
+    0b prefix, else decimal) or a base from 2 to 36; None is 0.
 
     EXAMPLES::
 
         sage: Integer(7), Integer('123456789012345678901234567890'), Integer(2.0^70)
         (7, 123456789012345678901234567890, 1180591620717411303424)
+        sage: Integer('-0x1f'), Integer('ff', 16), Integer('1_000'), Integer(4/2), Integer(None)
+        (-31, 255, 1000, 2, 0)
         sage: Integer(3.5)
         Traceback (most recent call last):
         ...
         TypeError: Attempt to coerce non-integral RealNumber to Integer
+        sage: Integer(1/2)
+        Traceback (most recent call last):
+        ...
+        TypeError: no conversion of this rational to integer
     """
-    if not isinstance(x, int) and _real_kind(x) is not None:
+    return _int_value(x, base)
+
+
+def _int_value(x=0, base=0):
+    """Integer(x, base) as a Python int (also CPython's Integer class's)."""
+    if isinstance(x, bytes):
+        x = x.decode()
+    if isinstance(x, str):
+        return _integer_from_str(x, _int_base(base))
+    if x is None:
+        return 0
+    if isinstance(x, bool):
+        return int(x)
+    if isinstance(x, int):
+        return x
+    if _real_kind(x) is not None:
         return _integral_real(x)
-    return int(x)
+    if isinstance(x, _Fraction):
+        if x.denominator != 1:
+            raise TypeError("no conversion of this rational to integer")
+        return int(x.numerator)
+    if isinstance(x, complex):
+        # (Sage's own names for the classes it refuses)
+        cls = "<class 'complex'>" if type(x) is complex else "<class 'sage.rings.complex_mpfr.ComplexNumber'>"
+        raise TypeError("unable to coerce %s to an integer" % cls)
+    if not isinstance(x, (bytearray, memoryview)):  # (int() reads those; Sage refuses them)
+        try:
+            return int(x)
+        except TypeError:
+            pass
+    raise TypeError("unable to coerce %s to an integer" % type(x))
+
+
+def _int_base(base):
+    """A base as Sage takes it: a number truncated toward zero (2.5 and 7/3
+    are 2, 1/2 is 0), else a TypeError (a string, None); one beyond a C
+    long is an OverflowError."""
+    if base is None or type(base) is complex or isinstance(base, (str, bytes, bytearray, memoryview, list, tuple, dict, set, frozenset)):
+        raise TypeError("an integer is required")
+    if not hasattr(type(base), "__int__"):
+        # (an object int() reads only through __index__ is refused, as Sage)
+        raise TypeError("an integer is required")
+    try:
+        b = int(base)
+    except TypeError:
+        if isinstance(base, complex):
+            raise  # (CC's own: can't convert complex to int)
+        raise TypeError("an integer is required") from None
+    if not -2 ** 63 <= b < 2 ** 63:
+        raise OverflowError("Python int too large to convert to C long")
+    if b != 0 and not 2 <= b <= 36:
+        raise ValueError("base (=%d) must be 0 or between 2 and 36" % b)
+    return b
+
+
+def _integer_from_str(s, base):
+    """A string as Sage reads an integer: its underscores removed first, then
+    spaces anywhere ignored, ASCII digits only, one sign; in base 0 a 0x, 0o
+    or 0b prefix sets the base (else decimal, leading zeros included: '010'
+    is 10); in an explicit base no prefix."""
+    import re
+    s = s.replace("_", "")
+    t = "".join(s.split())
+    m = re.fullmatch(r"([+-]?)0([xXoObB])(.*)", t) if base in (0, 2, 8, 16) else None
+    if m is not None:
+        b = {"x": 16, "o": 8, "b": 2}[m.group(2).lower()]
+        if base == 0:
+            t, base = m.group(1) + m.group(3), b
+        elif base == b:
+            t = None  # (Integer('0xff', 16) is refused: int() would accept it)
+    if t is not None and t.isascii() and re.fullmatch(r"[+-]?[0-9A-Za-z]+", t):
+        try:
+            return int(t, base or 10)
+        except ValueError:
+            pass
+    raise TypeError("unable to convert %r to an integer" % s)
 
 
 def _integral_real(x):
@@ -2196,6 +2278,16 @@ class Factorization(list):
             return str(latex(self.unit))
         return _latex_factorization([(str(latex(p)), e) for p, e in self],
                                     "-1" if self.unit == -1 else None, bare_unit=True)
+
+    def prod(self):
+        """The product of the factorization: value() (as Sage's prod(F)).
+
+        EXAMPLES::
+
+            sage: factor(-360).prod(), prod(factor(-360)), factor(-9/20).prod()
+            (-360, -360, -9/20)
+        """
+        return self.value()
 
     def value(self):
         """The product of the factorization.
