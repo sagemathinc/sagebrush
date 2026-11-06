@@ -4108,6 +4108,12 @@ def _sign_power(f, v, other_powers=False):
     return s, c, r
 
 
+# the closed forms of _sum_signed_rational take at most this many prefix
+# terms (their shifts) in all, symbolic_sum's direct-sum bound: past it the
+# exact sum stays unevaluated (a strategy's reach, not an error)
+_SUM_SHIFT_LIMIT = 2000  # work limit of the shifted closed forms
+
+
 def _sum_signed_rational(f, v, a):
     """sum_{v >= a} s^v r(v), s = 1 or -1 and r a rational function whose
     poles are at integers or half-integers (as Sage 10.10 gives them).
@@ -4162,7 +4168,7 @@ def _sum_signed_rational(f, v, a):
         if n < 0:
             return None  # a pole at a summed v
         shifts.append((A, delta, n, m))
-    if sum(n for _, _, n, _ in shifts) > 2000:
+    if sum(n for _, _, n, _ in shifts) > _SUM_SHIFT_LIMIT:  # past the work limit: unevaluated
         return None
     total, divergent = _expr(0), []
     for A, delta, n, m in shifts:
