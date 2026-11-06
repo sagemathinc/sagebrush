@@ -1,0 +1,200 @@
+Power QQ['x'] K[x].gen o*t | x*t | [0, x] | Power Series Ring in t over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Power QQ['x'] K[x].gen t*o | x*t | [0, x] | Power Series Ring in t over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Power QQ['x'] K[x].gen o+t | x + t | [x, 1] | Power Series Ring in t over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Power QQ['x'] K[x].gen t+o | x + t | [x, 1] | Power Series Ring in t over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Power QQ['x'] K[x].gen t/o | ERR RuntimeError
+Power QQ['x'] K.gen o*t | r*t | [0, r] | Power Series Ring in t over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Power QQ['x'] K.gen t*o | r*t | [0, r] | Power Series Ring in t over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Power QQ['x'] K.gen o+t | r + t | [r, 1] | Power Series Ring in t over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Power QQ['x'] K.gen t+o | r + t | [r, 1] | Power Series Ring in t over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Power QQ['x'] K.gen t/o | 1/2*r*t | [0, 1/2*r] | Power Series Ring in t over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Power QQ['x'] K[a].gen o*t | ERR TypeError
+Power QQ['x'] K[a].gen t*o | ERR TypeError
+Power QQ['x'] K[a].gen o+t | ERR TypeError
+Power QQ['x'] K[a].gen t+o | ERR TypeError
+Power QQ['x'] K[a].gen t/o | ERR TypeError
+Power QQ['x'] Z3.gen o*t | zeta3*t | [0, zeta3] | Power Series Ring in t over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+Power QQ['x'] Z3.gen t*o | zeta3*t | [0, zeta3] | Power Series Ring in t over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+Power QQ['x'] Z3.gen o+t | zeta3 + t | [zeta3, 1] | Power Series Ring in t over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+Power QQ['x'] Z3.gen t+o | zeta3 + t | [zeta3, 1] | Power Series Ring in t over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+Power QQ['x'] Z3.gen t/o | (-zeta3 - 1)*t | [0, -zeta3 - 1] | Power Series Ring in t over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+Power QQ['x'] Z3[x].gen o*t | x*t | [0, x] | Power Series Ring in t over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+Power QQ['x'] Z3[x].gen t*o | x*t | [0, x] | Power Series Ring in t over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+Power QQ['x'] Z3[x].gen o+t | x + t | [x, 1] | Power Series Ring in t over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+Power QQ['x'] Z3[x].gen t+o | x + t | [x, 1] | Power Series Ring in t over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+Power QQ['x'] Z3[x].gen t/o | ERR RuntimeError
+Power ZZ['x'] K[x].gen o*t | x*t | [0, x] | Power Series Ring in t over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Power ZZ['x'] K[x].gen t*o | x*t | [0, x] | Power Series Ring in t over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Power ZZ['x'] K[x].gen o+t | x + t | [x, 1] | Power Series Ring in t over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Power ZZ['x'] K[x].gen t+o | x + t | [x, 1] | Power Series Ring in t over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Power ZZ['x'] K[x].gen t/o | ERR RuntimeError
+Power ZZ['x'] K.gen o*t | r*t | [0, r] | Power Series Ring in t over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Power ZZ['x'] K.gen t*o | r*t | [0, r] | Power Series Ring in t over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Power ZZ['x'] K.gen o+t | r + t | [r, 1] | Power Series Ring in t over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Power ZZ['x'] K.gen t+o | r + t | [r, 1] | Power Series Ring in t over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Power ZZ['x'] K.gen t/o | 1/2*r*t | [0, 1/2*r] | Power Series Ring in t over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Power ZZ['x'] K[a].gen o*t | ERR TypeError
+Power ZZ['x'] K[a].gen t*o | ERR TypeError
+Power ZZ['x'] K[a].gen o+t | ERR TypeError
+Power ZZ['x'] K[a].gen t+o | ERR TypeError
+Power ZZ['x'] K[a].gen t/o | ERR TypeError
+Power ZZ['x'] Z3.gen o*t | zeta3*t | [0, zeta3] | Power Series Ring in t over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+Power ZZ['x'] Z3.gen t*o | zeta3*t | [0, zeta3] | Power Series Ring in t over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+Power ZZ['x'] Z3.gen o+t | zeta3 + t | [zeta3, 1] | Power Series Ring in t over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+Power ZZ['x'] Z3.gen t+o | zeta3 + t | [zeta3, 1] | Power Series Ring in t over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+Power ZZ['x'] Z3.gen t/o | (-zeta3 - 1)*t | [0, -zeta3 - 1] | Power Series Ring in t over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+Power ZZ['x'] Z3[x].gen o*t | x*t | [0, x] | Power Series Ring in t over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+Power ZZ['x'] Z3[x].gen t*o | x*t | [0, x] | Power Series Ring in t over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+Power ZZ['x'] Z3[x].gen o+t | x + t | [x, 1] | Power Series Ring in t over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+Power ZZ['x'] Z3[x].gen t+o | x + t | [x, 1] | Power Series Ring in t over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+Power ZZ['x'] Z3[x].gen t/o | ERR RuntimeError
+Power QQ['a'] K[x].gen o*t | ERR TypeError
+Power QQ['a'] K[x].gen t*o | ERR TypeError
+Power QQ['a'] K[x].gen o+t | ERR TypeError
+Power QQ['a'] K[x].gen t+o | ERR TypeError
+Power QQ['a'] K[x].gen t/o | ERR TypeError
+Power QQ['a'] K.gen o*t | r*t | [0, r] | Power Series Ring in t over Univariate Polynomial Ring in a over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Power QQ['a'] K.gen t*o | r*t | [0, r] | Power Series Ring in t over Univariate Polynomial Ring in a over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Power QQ['a'] K.gen o+t | r + t | [r, 1] | Power Series Ring in t over Univariate Polynomial Ring in a over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Power QQ['a'] K.gen t+o | r + t | [r, 1] | Power Series Ring in t over Univariate Polynomial Ring in a over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Power QQ['a'] K.gen t/o | 1/2*r*t | [0, 1/2*r] | Power Series Ring in t over Univariate Polynomial Ring in a over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Power QQ['a'] K[a].gen o*t | a*t | [0, a] | Power Series Ring in t over Univariate Polynomial Ring in a over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Power QQ['a'] K[a].gen t*o | a*t | [0, a] | Power Series Ring in t over Univariate Polynomial Ring in a over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Power QQ['a'] K[a].gen o+t | a + t | [a, 1] | Power Series Ring in t over Univariate Polynomial Ring in a over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Power QQ['a'] K[a].gen t+o | a + t | [a, 1] | Power Series Ring in t over Univariate Polynomial Ring in a over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Power QQ['a'] K[a].gen t/o | ERR RuntimeError
+Power QQ['a'] Z3.gen o*t | zeta3*t | [0, zeta3] | Power Series Ring in t over Univariate Polynomial Ring in a over Cyclotomic Field of order 3 and degree 2
+Power QQ['a'] Z3.gen t*o | zeta3*t | [0, zeta3] | Power Series Ring in t over Univariate Polynomial Ring in a over Cyclotomic Field of order 3 and degree 2
+Power QQ['a'] Z3.gen o+t | zeta3 + t | [zeta3, 1] | Power Series Ring in t over Univariate Polynomial Ring in a over Cyclotomic Field of order 3 and degree 2
+Power QQ['a'] Z3.gen t+o | zeta3 + t | [zeta3, 1] | Power Series Ring in t over Univariate Polynomial Ring in a over Cyclotomic Field of order 3 and degree 2
+Power QQ['a'] Z3.gen t/o | (-zeta3 - 1)*t | [0, -zeta3 - 1] | Power Series Ring in t over Univariate Polynomial Ring in a over Cyclotomic Field of order 3 and degree 2
+Power QQ['a'] Z3[x].gen o*t | ERR TypeError
+Power QQ['a'] Z3[x].gen t*o | ERR TypeError
+Power QQ['a'] Z3[x].gen o+t | ERR TypeError
+Power QQ['a'] Z3[x].gen t+o | ERR TypeError
+Power QQ['a'] Z3[x].gen t/o | ERR TypeError
+Power GF(5)['x'] K[x].gen o*t | ERR TypeError
+Power GF(5)['x'] K[x].gen t*o | ERR TypeError
+Power GF(5)['x'] K[x].gen o+t | ERR TypeError
+Power GF(5)['x'] K[x].gen t+o | ERR TypeError
+Power GF(5)['x'] K[x].gen t/o | ERR TypeError
+Power GF(5)['x'] K.gen o*t | ERR TypeError
+Power GF(5)['x'] K.gen t*o | ERR TypeError
+Power GF(5)['x'] K.gen o+t | ERR TypeError
+Power GF(5)['x'] K.gen t+o | ERR TypeError
+Power GF(5)['x'] K.gen t/o | ERR TypeError
+Power GF(5)['x'] K[a].gen o*t | ERR TypeError
+Power GF(5)['x'] K[a].gen t*o | ERR TypeError
+Power GF(5)['x'] K[a].gen o+t | ERR TypeError
+Power GF(5)['x'] K[a].gen t+o | ERR TypeError
+Power GF(5)['x'] K[a].gen t/o | ERR TypeError
+Power GF(5)['x'] Z3.gen o*t | ERR TypeError
+Power GF(5)['x'] Z3.gen t*o | ERR TypeError
+Power GF(5)['x'] Z3.gen o+t | ERR TypeError
+Power GF(5)['x'] Z3.gen t+o | ERR TypeError
+Power GF(5)['x'] Z3.gen t/o | ERR TypeError
+Power GF(5)['x'] Z3[x].gen o*t | ERR TypeError
+Power GF(5)['x'] Z3[x].gen t*o | ERR TypeError
+Power GF(5)['x'] Z3[x].gen o+t | ERR TypeError
+Power GF(5)['x'] Z3[x].gen t+o | ERR TypeError
+Power GF(5)['x'] Z3[x].gen t/o | ERR TypeError
+Laurent QQ['x'] K[x].gen o*t | x*t | [x] | Laurent Series Ring in t over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Laurent QQ['x'] K[x].gen t*o | x*t | [x] | Laurent Series Ring in t over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Laurent QQ['x'] K[x].gen o+t | x + t | [x, 1] | Laurent Series Ring in t over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Laurent QQ['x'] K[x].gen t+o | x + t | [x, 1] | Laurent Series Ring in t over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Laurent QQ['x'] K[x].gen t/o | ERR RuntimeError
+Laurent QQ['x'] K.gen o*t | r*t | [r] | Laurent Series Ring in t over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Laurent QQ['x'] K.gen t*o | r*t | [r] | Laurent Series Ring in t over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Laurent QQ['x'] K.gen o+t | r + t | [r, 1] | Laurent Series Ring in t over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Laurent QQ['x'] K.gen t+o | r + t | [r, 1] | Laurent Series Ring in t over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Laurent QQ['x'] K.gen t/o | 1/2*r*t | [1/2*r] | Laurent Series Ring in t over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Laurent QQ['x'] K[a].gen o*t | ERR TypeError
+Laurent QQ['x'] K[a].gen t*o | ERR TypeError
+Laurent QQ['x'] K[a].gen o+t | ERR TypeError
+Laurent QQ['x'] K[a].gen t+o | ERR TypeError
+Laurent QQ['x'] K[a].gen t/o | ERR TypeError
+Laurent QQ['x'] Z3.gen o*t | zeta3*t | [zeta3] | Laurent Series Ring in t over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+Laurent QQ['x'] Z3.gen t*o | zeta3*t | [zeta3] | Laurent Series Ring in t over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+Laurent QQ['x'] Z3.gen o+t | zeta3 + t | [zeta3, 1] | Laurent Series Ring in t over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+Laurent QQ['x'] Z3.gen t+o | zeta3 + t | [zeta3, 1] | Laurent Series Ring in t over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+Laurent QQ['x'] Z3.gen t/o | (-zeta3 - 1)*t | [-zeta3 - 1] | Laurent Series Ring in t over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+Laurent QQ['x'] Z3[x].gen o*t | x*t | [x] | Laurent Series Ring in t over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+Laurent QQ['x'] Z3[x].gen t*o | x*t | [x] | Laurent Series Ring in t over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+Laurent QQ['x'] Z3[x].gen o+t | x + t | [x, 1] | Laurent Series Ring in t over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+Laurent QQ['x'] Z3[x].gen t+o | x + t | [x, 1] | Laurent Series Ring in t over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+Laurent QQ['x'] Z3[x].gen t/o | ERR RuntimeError
+Laurent ZZ['x'] K[x].gen o*t | x*t | [x] | Laurent Series Ring in t over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Laurent ZZ['x'] K[x].gen t*o | x*t | [x] | Laurent Series Ring in t over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Laurent ZZ['x'] K[x].gen o+t | x + t | [x, 1] | Laurent Series Ring in t over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Laurent ZZ['x'] K[x].gen t+o | x + t | [x, 1] | Laurent Series Ring in t over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Laurent ZZ['x'] K[x].gen t/o | ERR RuntimeError
+Laurent ZZ['x'] K.gen o*t | r*t | [r] | Laurent Series Ring in t over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Laurent ZZ['x'] K.gen t*o | r*t | [r] | Laurent Series Ring in t over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Laurent ZZ['x'] K.gen o+t | r + t | [r, 1] | Laurent Series Ring in t over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Laurent ZZ['x'] K.gen t+o | r + t | [r, 1] | Laurent Series Ring in t over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Laurent ZZ['x'] K.gen t/o | 1/2*r*t | [1/2*r] | Laurent Series Ring in t over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Laurent ZZ['x'] K[a].gen o*t | ERR TypeError
+Laurent ZZ['x'] K[a].gen t*o | ERR TypeError
+Laurent ZZ['x'] K[a].gen o+t | ERR TypeError
+Laurent ZZ['x'] K[a].gen t+o | ERR TypeError
+Laurent ZZ['x'] K[a].gen t/o | ERR TypeError
+Laurent ZZ['x'] Z3.gen o*t | zeta3*t | [zeta3] | Laurent Series Ring in t over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+Laurent ZZ['x'] Z3.gen t*o | zeta3*t | [zeta3] | Laurent Series Ring in t over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+Laurent ZZ['x'] Z3.gen o+t | zeta3 + t | [zeta3, 1] | Laurent Series Ring in t over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+Laurent ZZ['x'] Z3.gen t+o | zeta3 + t | [zeta3, 1] | Laurent Series Ring in t over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+Laurent ZZ['x'] Z3.gen t/o | (-zeta3 - 1)*t | [-zeta3 - 1] | Laurent Series Ring in t over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+Laurent ZZ['x'] Z3[x].gen o*t | x*t | [x] | Laurent Series Ring in t over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+Laurent ZZ['x'] Z3[x].gen t*o | x*t | [x] | Laurent Series Ring in t over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+Laurent ZZ['x'] Z3[x].gen o+t | x + t | [x, 1] | Laurent Series Ring in t over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+Laurent ZZ['x'] Z3[x].gen t+o | x + t | [x, 1] | Laurent Series Ring in t over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+Laurent ZZ['x'] Z3[x].gen t/o | ERR RuntimeError
+Laurent QQ['a'] K[x].gen o*t | ERR TypeError
+Laurent QQ['a'] K[x].gen t*o | ERR TypeError
+Laurent QQ['a'] K[x].gen o+t | ERR TypeError
+Laurent QQ['a'] K[x].gen t+o | ERR TypeError
+Laurent QQ['a'] K[x].gen t/o | ERR TypeError
+Laurent QQ['a'] K.gen o*t | r*t | [r] | Laurent Series Ring in t over Univariate Polynomial Ring in a over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Laurent QQ['a'] K.gen t*o | r*t | [r] | Laurent Series Ring in t over Univariate Polynomial Ring in a over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Laurent QQ['a'] K.gen o+t | r + t | [r, 1] | Laurent Series Ring in t over Univariate Polynomial Ring in a over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Laurent QQ['a'] K.gen t+o | r + t | [r, 1] | Laurent Series Ring in t over Univariate Polynomial Ring in a over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Laurent QQ['a'] K.gen t/o | 1/2*r*t | [1/2*r] | Laurent Series Ring in t over Univariate Polynomial Ring in a over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Laurent QQ['a'] K[a].gen o*t | a*t | [a] | Laurent Series Ring in t over Univariate Polynomial Ring in a over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Laurent QQ['a'] K[a].gen t*o | a*t | [a] | Laurent Series Ring in t over Univariate Polynomial Ring in a over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Laurent QQ['a'] K[a].gen o+t | a + t | [a, 1] | Laurent Series Ring in t over Univariate Polynomial Ring in a over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Laurent QQ['a'] K[a].gen t+o | a + t | [a, 1] | Laurent Series Ring in t over Univariate Polynomial Ring in a over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+Laurent QQ['a'] K[a].gen t/o | ERR RuntimeError
+Laurent QQ['a'] Z3.gen o*t | zeta3*t | [zeta3] | Laurent Series Ring in t over Univariate Polynomial Ring in a over Cyclotomic Field of order 3 and degree 2
+Laurent QQ['a'] Z3.gen t*o | zeta3*t | [zeta3] | Laurent Series Ring in t over Univariate Polynomial Ring in a over Cyclotomic Field of order 3 and degree 2
+Laurent QQ['a'] Z3.gen o+t | zeta3 + t | [zeta3, 1] | Laurent Series Ring in t over Univariate Polynomial Ring in a over Cyclotomic Field of order 3 and degree 2
+Laurent QQ['a'] Z3.gen t+o | zeta3 + t | [zeta3, 1] | Laurent Series Ring in t over Univariate Polynomial Ring in a over Cyclotomic Field of order 3 and degree 2
+Laurent QQ['a'] Z3.gen t/o | (-zeta3 - 1)*t | [-zeta3 - 1] | Laurent Series Ring in t over Univariate Polynomial Ring in a over Cyclotomic Field of order 3 and degree 2
+Laurent QQ['a'] Z3[x].gen o*t | ERR TypeError
+Laurent QQ['a'] Z3[x].gen t*o | ERR TypeError
+Laurent QQ['a'] Z3[x].gen o+t | ERR TypeError
+Laurent QQ['a'] Z3[x].gen t+o | ERR TypeError
+Laurent QQ['a'] Z3[x].gen t/o | ERR TypeError
+Laurent GF(5)['x'] K[x].gen o*t | ERR TypeError
+Laurent GF(5)['x'] K[x].gen t*o | ERR TypeError
+Laurent GF(5)['x'] K[x].gen o+t | ERR TypeError
+Laurent GF(5)['x'] K[x].gen t+o | ERR TypeError
+Laurent GF(5)['x'] K[x].gen t/o | ERR TypeError
+Laurent GF(5)['x'] K.gen o*t | ERR TypeError
+Laurent GF(5)['x'] K.gen t*o | ERR TypeError
+Laurent GF(5)['x'] K.gen o+t | ERR TypeError
+Laurent GF(5)['x'] K.gen t+o | ERR TypeError
+Laurent GF(5)['x'] K.gen t/o | ERR TypeError
+Laurent GF(5)['x'] K[a].gen o*t | ERR TypeError
+Laurent GF(5)['x'] K[a].gen t*o | ERR TypeError
+Laurent GF(5)['x'] K[a].gen o+t | ERR TypeError
+Laurent GF(5)['x'] K[a].gen t+o | ERR TypeError
+Laurent GF(5)['x'] K[a].gen t/o | ERR TypeError
+Laurent GF(5)['x'] Z3.gen o*t | ERR TypeError
+Laurent GF(5)['x'] Z3.gen t*o | ERR TypeError
+Laurent GF(5)['x'] Z3.gen o+t | ERR TypeError
+Laurent GF(5)['x'] Z3.gen t+o | ERR TypeError
+Laurent GF(5)['x'] Z3.gen t/o | ERR TypeError
+Laurent GF(5)['x'] Z3[x].gen o*t | ERR TypeError
+Laurent GF(5)['x'] Z3[x].gen t*o | ERR TypeError
+Laurent GF(5)['x'] Z3[x].gen o+t | ERR TypeError
+Laurent GF(5)['x'] Z3[x].gen t+o | ERR TypeError
+Laurent GF(5)['x'] Z3[x].gen t/o | ERR TypeError
