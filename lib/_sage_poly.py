@@ -1570,6 +1570,17 @@ class PolyFactorization(list):
         """
         return self._unit
 
+    def prod(self):
+        """The product of the factorization: value() (as Sage's prod(F)).
+
+        EXAMPLES::
+
+            sage: R.<x> = ZZ[]
+            sage: f = -3*x^2 + 3; f.factor().prod(), prod(f.factor())
+            (-3*x^2 + 3, -3*x^2 + 3)
+        """
+        return self.value()
+
     def value(self):
         """The product of the factorization.
 

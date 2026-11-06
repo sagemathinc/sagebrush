@@ -4386,6 +4386,16 @@ class _FFFactorization(list):
         return _latex_factorization([(str(latex(g)), e) for g, e in self],
                                     None if self._unit.is_one() else str(latex(self._unit)))
 
+    def prod(self):
+        """The product of the factorization: value() (as Sage's prod(F)).
+
+        EXAMPLES::
+
+            sage: R.<x> = GF(7)[]; f = 3*x^2 + 6; f.factor().prod(), prod(f.factor())
+            (3*x^2 + 6, 3*x^2 + 6)
+        """
+        return self.value()
+
     def value(self):
         """The product.
 

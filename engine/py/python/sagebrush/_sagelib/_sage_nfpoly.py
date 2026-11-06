@@ -1186,6 +1186,18 @@ class NFFactorization(list):
             out = "\\left(%s\\right) \\cdot %s" % (u, out) if parts else u
         return out
 
+    def prod(self):
+        """The product of the factorization: value() (as Sage's prod(F)).
+
+        EXAMPLES::
+
+            sage: x = polygen(QQ, 'x')
+            sage: K.<a> = NumberField(x^2 - 5)
+            sage: R.<y> = K[]; f = a*y^2 - 5*a; f.factor().prod() == f, prod(f.factor()) == f
+            (True, True)
+        """
+        return self.value()
+
     def value(self):
         """The product.
 
