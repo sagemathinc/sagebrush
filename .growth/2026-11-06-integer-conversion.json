@@ -1,10 +1,10 @@
 {
  "v": 1,
- "reason": "Integer() and ZZ() convert as Sage does: a rational must be a whole number (Integer(1/2) was silently 0), strings with a sign, 0x/0o/0b prefix, underscores or a base, None as 0, Sage's TypeErrors (lib/sage_all.py _int_value, lib/_sage_poly.py ZZ, lib/_sage_lang.py CPython Integer) Re-measured with bun 1.4.4 (size-record.sh) on master 30ca1462 vs head 4d8746cc: cli/lib.gen.js +1216, cli/pyjs.cjs +2296, engine/lib/sage.pre +10987, engine/lib/sage.src +2891; no other row moves. Markers: exact, except cli/pyjs.cjs 2328 (+2296 measured, plus 32 B of margin, as it moves with master).",
+ "reason": "Integer() and ZZ() convert as Sage does: a rational must be a whole number (Integer(1/2) was silently 0), strings with a sign, 0x/0o/0b prefix, underscores or a base, None as 0, Sage's TypeErrors (lib/sage_all.py _int_value, lib/_sage_poly.py ZZ, lib/_sage_lang.py CPython Integer) Re-measured with bun 1.4.4 (size-record.sh) on master 30ca1462 vs head 7040dd4b: cli/lib.gen.js +1228, cli/pyjs.cjs +2288, engine/lib/sage.pre +11042, engine/lib/sage.src +2917; no other row moves. Markers: exact, except cli/pyjs.cjs 2320 (+2288 measured, plus 32 B of margin, as it moves with master).",
  "bytes": {
-  "cli/lib.gen.js": 1216,
-  "cli/pyjs.cjs": 2328,
-  "engine/lib/sage.pre": 10987,
-  "engine/lib/sage.src": 2891
+  "cli/lib.gen.js": 1228,
+  "cli/pyjs.cjs": 2320,
+  "engine/lib/sage.pre": 11042,
+  "engine/lib/sage.src": 2917
  }
 }
