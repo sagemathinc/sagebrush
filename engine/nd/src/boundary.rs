@@ -478,6 +478,8 @@ mod tests {
         accepted("control words just after the stacks", Pool { ctl: POOL.stacks + 4 * SLOT, ..POOL });
         // (overflow: slot * participants past u64; the largest stacks ending exactly at the memory's end, and 16 bytes more)
         refused("slot * participants overflowing", Pool { slot: (u64::MAX / 2) & !15, ..POOL });
+        // (grader B7: 2^62 x 4 is 2^64, which a wrapping product would make 0, an empty and so acceptable region)
+        refused("slot * participants wrapping to 0", Pool { slot: 1 << 62, ..POOL });
         let last = (L.mem - POOL.stacks) / 4 / 16 * 16;
         let top = Pool { stacks: L.mem - 4 * last, slot: last, ..POOL };
         accepted("stacks ending at the memory's end", top);

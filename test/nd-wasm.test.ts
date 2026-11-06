@@ -89,6 +89,9 @@ for (const MOD of MODULES) {
       ref[j * m + i] = s;
     }
     const bound = 10 * k * 2.220446049250313e-16 * (k / 4);
+    // (a bad layout is refused and records nothing: 1 participant, the control words on the stacks; grader W2)
+    assert.equal(ex.nd_pool_init(CTL, STACKS, SLOT, 1), 0, "a 1-participant pool");
+    assert.equal(ex.nd_pool_init(STACKS + SLOT, STACKS, SLOT, 8), 0, "the control words on the stacks");
     assert.equal(ex.nd_pool_init(CTL, STACKS, SLOT, 8), 1);
     assert.equal(ex.nd_pool_init(CTL, STACKS, SLOT, 8), 0, "a second pool record");
     const sp = ex.__stack_pointer.value;

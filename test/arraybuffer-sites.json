@@ -1444,7 +1444,7 @@
   "5cf2aa341dba788a": {"decl":"src/runtime/nd-crew.ts :: Crew.class","class":"no-new-store"},
   "39b6b1b0e463c3ea": {"decl":"src/runtime/nd-helper.ts :: post","class":"allocates","via":"web/lib-lazy.ts :: get"},
   "60c3f67dc9b4dc93": {"decl":"src/runtime/nd-helper.ts :: stop","class":"allocates","via":"web/lib-lazy.ts :: get"},
-  "60eb6f0babedc2b4": {"decl":"src/runtime/nd.ts :: gemmOn","class":"allocates","via":"lib:lib.es5.d.ts :: Float64Array.slice"},
+  "fc1b36eefa9d200f": {"decl":"src/runtime/nd.ts :: gemmOn","class":"allocates","via":"lib:lib.es5.d.ts :: Float64Array.slice"},
   "ea3e1fbc6183f858": {"decl":"src/runtime/nd.ts :: ndBytes","class":"allocates","via":"lib:lib.es5.d.ts :: Uint8ArrayConstructor.new(source)"},
   "823a90394afaeb85": {"decl":"src/runtime/nd.ts :: ndCholesky","class":"allocates","via":"lib:lib.es5.d.ts :: Float64Array.slice"},
   "e67be997ebfb527f": {"decl":"src/runtime/nd.ts :: ndLu","class":"allocates","via":"lib:lib.es5.d.ts :: Float64ArrayConstructor.new(source)"},

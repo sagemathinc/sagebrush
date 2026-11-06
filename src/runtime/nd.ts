@@ -321,14 +321,17 @@ let dead: string | null = null;
 /** The tests' hooks into the pool, set only through ndTest (which no production code calls): the helper count;
  *  a fault in helper 1 (src/runtime/nd-helper.ts), and how long a "late" one sleeps; shorter stall and startup
  *  bounds; helpers left unterminated on failure (as a helper that can't be stopped in time); a fresh memory that
- *  can't be made; a second bootstrap, or a malformed first one, sent to helper 1. */
+ *  can't be made; a second bootstrap sent to helper 1, or to helper 2 during a job; a malformed first one sent to
+ *  helper 1 (true: id 0; or which field is wrong); helper 1 started on another participant's stack slot. */
 export type NdTestHooks = {
-  helpers?: number; fault?: "exit" | "throw" | "late"; lateMs?: number; stallMs?: number; startupMs?: number;
-  noTerminate?: boolean; memoryFault?: boolean; rebootstrap?: boolean; malformed?: boolean;
+  helpers?: number; fault?: "exit" | "throw" | "late" | "silent"; lateMs?: number; stallMs?: number; startupMs?: number;
+  noTerminate?: boolean; memoryFault?: boolean; rebootstrap?: boolean; rebootstrapMidJob?: boolean;
+  malformed?: true | "id16" | "ctl32" | "ctlEnd" | "unshared" | "fault"; badStack?: boolean;
 };
-const tst = { hooks: null as NdTestHooks | null, made: 0, terminated: 0, products: 0, teams: 0, failovers: 0, abandoned: [] as WebAssembly.Memory[], unstopped: [] as Crew[] };
+const tst = { hooks: null as NdTestHooks | null, made: 0, terminated: 0, exited: 0, products: 0, teams: 0, failovers: 0, abandoned: [] as WebAssembly.Memory[], unstopped: [] as Crew[] };
 
-/** For the tests only: set the hooks (null: none), and see the counters (workers made and terminated, products,
+/** For the tests only: set the hooks (null: none), and see the counters (workers made, terminated and exited,
+ *  products,
  *  threaded jobs started, failovers) and the memories abandoned. */
 export function ndTest(hooks?: NdTestHooks | null): typeof tst {
   if (hooks !== undefined) tst.hooks = hooks;
@@ -368,7 +371,10 @@ function helperMaker(): (() => WorkerLike) | null {
     w.on("error", (e: Error) => like.onerror?.(e));
     w.on("messageerror", () => like.onmessageerror?.(null));
     w.on("message", (data: unknown) => like.onmessage?.({ data }));
-    w.on("exit", (code: number) => like.onerror?.({ message: `stopped (exit code ${code})` }));
+    w.on("exit", (code: number) => {
+      tst.exited++;
+      like.onerror?.({ message: `stopped (exit code ${code})` });
+    });
     // (after the listeners, which would hold it again: the pool never keeps the process alive)
     w.unref();
     return like;
@@ -418,13 +424,24 @@ function startPool(): void {
     for (let id = 1; id <= helpers; id++) {
       const boot: any = { module: ndModule, memory: mem, id, stackTop: stacks + (id + 1) * SLOT, ctl, desc };
       if (id === 1 && h?.fault) Object.assign(boot, { fault: h.fault, lateMs: h.lateMs });
-      if (id === 1 && h?.malformed) boot.id = 0;
+      if (id === 1 && h?.malformed) malform(boot, h.malformed);
+      if (id === 1 && h?.badStack) boot.stackTop = stacks + (id + 2) * SLOT;
       p.crew.add(`helper ${id}`, boot);
       if (id === 1 && h?.rebootstrap) p.crew.workers[0].postMessage(boot);
     }
   } catch (e: any) {
     failover(`the thread pool could not start (${e?.message ?? e})`);
   }
+}
+
+// (the tests' malformed bootstraps: each breaks one of the helper's checks)
+function malform(boot: any, how: NonNullable<NdTestHooks["malformed"]>): void {
+  if (how === true) boot.id = 0;
+  else if (how === "id16") boot.id = 16;
+  else if (how === "ctl32") boot.ctl = 32;
+  else if (how === "ctlEnd") boot.ctl = 2 ** 32 - 64; // (past the memory's end, however far it has grown)
+  else if (how === "unshared") boot.memory = new WebAssembly.Memory({ initial: 1 });
+  else boot.fault = "x";
 }
 
 // Before any call into the module: a failed or overdue pool is dropped (failover); a pool all of whose helpers
@@ -507,6 +524,7 @@ function gemmOn(A: Float64Array, B: Float64Array, n: number, m: number, p: numbe
   Atomics.add(w, GEN, 1);
   Atomics.notify(w, GEN);
   tst.teams++;
+  if (tst.hooks?.rebootstrapMidJob) P.crew.workers[1]?.postMessage({});
   let ok = false;
   try {
     ok = ex!.nd_gemm_part(desc, 0) === 1;

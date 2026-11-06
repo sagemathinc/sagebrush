@@ -110,8 +110,12 @@ out.after = nd.ndThreads();
 out.teams = T.teams;
 out.again = [];
 for (let i = 0; i < 5; i++) out.again.push(fnv(product()));
-out.counts = [T.teams, T.failovers, T.made, T.terminated, T.abandoned.length];`);
+out.counts = [T.teams, T.failovers, T.made, T.terminated, T.abandoned.length];
+// (the helpers really end: each Worker's exit event, not only the count of terminate calls; grader D3)
+for (let i = 0; i < 500 && T.exited < T.made; i++) await sleep(10);
+out.exited = T.exited;`);
   assert.equal(r.error, undefined);
+  assert.equal(r.exited, 3, "every helper's thread exited");
   assert.equal(r.ready.threads, 4);
   assert.equal(r.lost, oneThread().hashes[1]);
   assert.ok(r.ms < 1000 + 5000, `${r.ms} ms`);
@@ -160,8 +164,11 @@ out.ready = await ready();
 out.failed = fnv(product());
 out.next = fnv(product());
 out.after = nd.ndThreads();
-out.counts = [T.teams, T.failovers, T.made, T.terminated, T.abandoned.length];`);
+out.counts = [T.teams, T.failovers, T.made, T.terminated, T.abandoned.length];
+for (let i = 0; i < 500 && T.exited < T.made; i++) await sleep(10);
+out.exited = T.exited;`);
   assert.equal(r.error, undefined);
+  assert.equal(r.exited, 2, "every helper's thread exited");
   assert.equal(r.ready.threads, 3);
   assert.equal(r.failed, oneThread().hashes[1]);
   assert.equal(r.next, oneThread().hashes[1]);
@@ -233,6 +240,141 @@ out.counts = [T.teams, T.failovers, T.made, T.terminated];`);
     assert.deepEqual(r.counts, [0, 1, 2, 2]);
   });
 }
+
+// (grader r775 A, N7: production never asks ndThreads(), which also marks a pool ready; products alone must reach threads)
+test("the pool becomes ready through products alone, never asking ndThreads(): a later product runs threaded, with the one-thread bytes (grader N7)", { timeout: 60000 }, () => {
+  const r = scenario(`
+nd.ndTest({ helpers: 2 });
+let C = null;
+for (let i = 0; i < 300 && T.teams === 0; i++) { C = product(); await sleep(20); }
+out.teams = T.teams;
+out.bytes = fnv(C);
+out.again = fnv(product());`);
+  assert.equal(r.error, undefined);
+  assert.ok(r.teams >= 1, `teams ${r.teams}`);
+  assert.equal(r.again, oneThread().hashes[1]);
+  assert.equal(r.bytes, oneThread().hashes[1]);
+});
+
+// (grader r775 B: the host's count, with no helpers hook: min(cores - 1, 8) helpers, one core none; N22, N23, N23b)
+for (const [cores, want] of [[1, 0], [2, 1], [3, 2], [9, 8], [16, 8]]) {
+  test(`${cores} core${cores > 1 ? "s" : ""}: ${want} helper${want === 1 ? "" : "s"} (the host's count, no hook)`, { timeout: 60000 }, () => {
+    const r = scenario(`
+Object.defineProperty(globalThis.navigator, "hardwareConcurrency", { value: ${cores}, configurable: true });
+out.first = fnv(product());
+out.made = T.made;
+out.threads = nd.ndThreads();`);
+    assert.equal(r.error, undefined);
+    assert.equal(r.made, want);
+    assert.equal(r.first, oneThread().hashes[1]);
+    if (want === 0) assert.deepEqual(r.threads, { threads: 1, state: "off", why: "one core" });
+    else assert.notEqual(r.threads.state, "off");
+  });
+}
+
+// (grader r775 C: a helper refusing a message while the caller waits in the job: the wait ends on the BROKEN word, well
+// inside the stall bound; helper 1 is asleep in the job, so only BROKEN can end it early; N5, N15, P7)
+test("a helper refusing a second bootstrap during a job: the caller's wait ends on BROKEN, inside the stall bound, with the one-thread bytes", { timeout: 60000 }, () => {
+  const r = scenario(`
+nd.ndTest({ helpers: 2, fault: "late", lateMs: 8000, stallMs: 5000, rebootstrapMidJob: true });
+product();
+out.ready = await ready();
+const t0 = performance.now();
+out.result = fnv(product());
+out.ms = performance.now() - t0;
+out.after = nd.ndThreads();`);
+  assert.equal(r.error, undefined);
+  assert.equal(r.ready.threads, 3);
+  assert.equal(r.result, oneThread().hashes[1]);
+  assert.ok(r.ms < 3000, `${r.ms} ms`);
+  assert.equal(r.after.state, "off");
+  assert.match(r.after.why, /^a helper refused a message$|^the pool's helper takes one bootstrap only$/);
+});
+
+// (grader r775 D, astra's case: a step back from the sample before that stays above the last progress; N14c, N14d.
+// Helper 2's progress comes in the first samples, so the step comes late: samples 0, 1000, 1100, ..., 2900 (20
+// samples, 100 apart), then 2850; helper 1 is dead, so without the check the job runs on to the stall bound)
+test("the clock: a sample going back from the one before, though not from the last progress, fails the job at once", { timeout: 60000 }, () => {
+  const r = scenario(`
+nd.ndTest({ helpers: 2, fault: "exit", stallMs: 3000 });
+product();
+out.ready = await ready();
+const real = performance.now.bind(performance);
+const at = (k) => (k === 0 ? 0 : k <= 20 ? 1000 + 100 * (k - 1) : k === 21 ? 2850 : 3000 + 100 * (k - 22));
+let k = -1;
+performance.now = () => (k < 0 ? real() : at(k++));
+const t0 = real();
+k = 0;
+out.result = fnv(product());
+k = -1;
+out.ms = real() - t0;
+out.after = nd.ndThreads();`);
+  assert.equal(r.error, undefined);
+  assert.equal(r.result, oneThread().hashes[1]);
+  assert.deepEqual(r.after, { threads: 1, state: "off", why: "the clock failed" });
+});
+
+// (grader r775 E, N6: a helper that never counts in: past startupMs, the next product fails over, one-thread bytes)
+test("a pool that never becomes ready: past its startup bound the next product fails over, with the one-thread bytes", { timeout: 60000 }, () => {
+  const r = scenario(`
+nd.ndTest({ helpers: 2, fault: "silent", startupMs: 300 });
+out.first = fnv(product());
+await sleep(600);
+out.next = fnv(product());
+out.after = nd.ndThreads();
+out.counts = [T.teams, T.failovers, T.made, T.terminated];`);
+  assert.equal(r.error, undefined);
+  assert.equal(r.first, oneThread().hashes[1]);
+  assert.equal(r.next, oneThread().hashes[1]);
+  assert.deepEqual(r.after, { threads: 1, state: "off", why: "the thread pool did not start in time" });
+  assert.deepEqual(r.counts, [0, 1, 2, 2]);
+});
+
+// (grader r775 F: each of the helper's bootstrap checks refuses, and the pool fails over cleanly; P3-P6, P11)
+for (const how of ["id16", "ctl32", "ctlEnd", "unshared", "fault"]) {
+  test(`a malformed bootstrap (${how}) is refused: the pool is torn down, the next product fails over cleanly`, { timeout: 60000 }, () => {
+    const r = scenario(`
+nd.ndTest({ helpers: 2, malformed: "${how}" });
+product();
+await sleep(500);
+out.next = fnv(product());
+out.after = nd.ndThreads();
+out.counts = [T.teams, T.failovers, T.made, T.terminated];`);
+    assert.equal(r.error, undefined);
+    assert.equal(r.next, oneThread().hashes[1]);
+    assert.equal(r.after.state, "off");
+    // (an unshared memory can't even be posted in Node: the pool fails as it starts, before the helper's own check)
+    const refused = how === "unshared" ? /^the thread pool could not start \(.*could not be cloned.*\)$/ : /^the pool's helper was sent a malformed bootstrap$|^helper 1 failed: stopped \(exit code 0\)$/;
+    assert.match(r.after.why, refused);
+    assert.deepEqual(r.counts, [0, 1, how === "unshared" ? 1 : 2, how === "unshared" ? 1 : 2]);
+  });
+}
+
+// (grader r775 F, P9: a helper on another participant's stack: the module refuses its part, the job fails over)
+test("a helper on another participant's stack slot: the module refuses its part, and the product fails over with the one-thread bytes", { timeout: 60000 }, () => {
+  const r = scenario(`
+nd.ndTest({ helpers: 2, badStack: true });
+product();
+out.ready = await ready();
+out.result = fnv(product());
+out.after = nd.ndThreads();`);
+  assert.equal(r.error, undefined);
+  assert.equal(r.ready.threads, 3);
+  assert.equal(r.result, oneThread().hashes[1]);
+  assert.deepEqual(r.after, { threads: 1, state: "off", why: "1 helper(s) failed a matrix product" });
+});
+
+// (grader r775 G, Y4: a batched product on engine/nd, each batch its own product's bytes)
+test("a batched product on engine/nd: each batch is that batch's own product, to the byte", () => {
+  const code = [
+    "import numpy as np",
+    "rng = np.random.default_rng(4); A = rng.standard_normal((2, 256, 260)); B = rng.standard_normal((2, 260, 257))",
+    "C = A @ B",
+    "print(C.shape, [C[i].tobytes() == (A[i] @ B[i]).tobytes() for i in range(2)], bool((C[1] != 0).any()))",
+  ].join("\n");
+  const out = execFileSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "-c", code], { encoding: "utf8" }).trim();
+  assert.equal(out, "(2, 256, 257) [True, True] True");
+});
 
 test("the public product's cutoff: every dimension at least ND_MATMUL_MIN goes to engine/nd, one below it doesn't (pin 6)", async () => {
   const r = scenario(`

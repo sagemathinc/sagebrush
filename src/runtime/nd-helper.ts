@@ -14,8 +14,9 @@ export {};
 
 const GEN = 0, DONE = 1, FAIL = 2, READY = 3, BROKEN = 4;
 // (test faults, from nd.ts's test hooks only: "exit" stops during the first job without counting in; "throw"
-// fails each job; "late" sleeps `lateMs` in the first job, then writes a sentinel over C and its scratch slot)
-const FAULTS = ["exit", "throw", "late"];
+// fails each job; "late" sleeps `lateMs` in the first job, then writes a sentinel over C and its scratch slot;
+// "silent" never counts itself ready)
+const FAULTS = ["exit", "throw", "late", "silent"];
 // (what a "late" helper writes: a value no test product can have)
 const SENTINEL = -12345.25;
 
@@ -64,8 +65,10 @@ function start(m: Boot) {
     return refuse(`the pool's helper could not start: ${String((e as Error)?.message ?? e)}`);
   }
   let seen = Atomics.load(c, GEN);
-  Atomics.add(c, READY, 1);
-  Atomics.notify(c, READY);
+  if (m.fault !== "silent") {
+    Atomics.add(c, READY, 1);
+    Atomics.notify(c, READY);
+  }
   let jobs = 0;
   const job = () => {
     seen = Atomics.load(c, GEN);
