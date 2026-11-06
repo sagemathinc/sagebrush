@@ -9,6 +9,11 @@ import { join } from "node:path";
 // exactly the bits of the JavaScript code they replace.
 const program = `
 import numpy as np, _nplinalg
+from numpy.linalg import _ldexp, _scaled
+def _qtb(a, b, complete):
+    m, e = _scaled(a)
+    c, r = _nplinalg.qr_qtb(m, b, complete)
+    return c, _ldexp(r, -e)
 np.random.seed(7)
 print("wasm", _nplinalg.wasm())
 def rec(*xs):
@@ -41,7 +46,7 @@ for a in mats:
     rec(*np.linalg.svd(a))
     rec(*np.linalg.qr(a))
     # (Q^T B without forming Q: B from cos so the random stream the later lines read is unchanged)
-    rec(*np.linalg._qr_qtb(a, np.cos(np.arange(len(a) * 3.0)).reshape(-1, 3), False))
+    rec(*_qtb(a, np.cos(np.arange(len(a) * 3.0)).reshape(-1, 3), False))
     rec(a @ a.T, np.linalg.det(a), np.linalg.slogdet(a))
     try:
         rec(np.linalg.inv(a), np.linalg.solve(a, np.arange(len(a) * 1.0)))
@@ -51,7 +56,7 @@ for shape in [(40, 9), (9, 40), (300, 8), (17, 12)]:
     a = np.random.randn(*shape)
     rec(*np.linalg.svd(a, full_matrices=False))
     rec(*np.linalg.qr(a, mode="complete"))
-    rec(*np.linalg._qr_qtb(a, np.sin(np.arange(shape[0] * 2.0)).reshape(-1, 2), True))
+    rec(*_qtb(a, np.sin(np.arange(shape[0] * 2.0)).reshape(-1, 2), True))
     rec(np.linalg.pinv(a), np.linalg.lstsq(a, np.arange(shape[0] * 1.0), rcond=None)[0])
 x = np.linspace(0, 1, 1000)
 rec(np.polyfit(x, np.sin(x), 9), np.roots(np.arange(1.0, 15.0)))
@@ -114,12 +119,17 @@ test("WebAssembly kernels: bit-identical to the JavaScript fallback", () => {
   }
 });
 
-// Q^T B without forming Q (QR PR 1, the reflectors applied to B: np.linalg._qr_qtb and MATLAB's [C, R] = qr(S, B)):
+// Q^T B without forming Q (QR PR 1, the reflectors applied to B: _nplinalg.qr_qtb with qr's scaling, and MATLAB's [C, R] = qr(S, B)):
 // the same R as qr's, bit for bit; C equal to the explicit Q^T B to rounding (relative 1e-13), with qr's shapes,
 // complete and reduced, square, tall, wide, rank-deficient (a zero column: a reflector with beta 0), a 1 x 1, and
 // a matrix scaled to 1e-300 (qr's power-of-2 scaling); with and without WebAssembly
 const qtbProgram = `
-import numpy as np
+import numpy as np, _nplinalg
+from numpy.linalg import _ldexp, _scaled
+def _qtb(a, b, complete):
+    m, e = _scaled(a)
+    c, r = _nplinalg.qr_qtb(m, b, complete)
+    return c, _ldexp(r, -e)
 rng = np.random.default_rng(11)
 cases = [rng.standard_normal((m, n)) for (m, n) in [(1, 1), (5, 3), (3, 5), (40, 40), (120, 30), (64, 64), (25, 60)]]
 z = rng.standard_normal((30, 8)); z[:, 2] = 0.0; cases.append(z)
@@ -129,7 +139,7 @@ for a in cases:
     for nb in (1, 4):
         b = rng.standard_normal((m, nb))
         for complete in (True, False):
-            c, r = np.linalg._qr_qtb(a, b, complete)
+            c, r = _qtb(a, b, complete)
             q, r2 = np.linalg.qr(a, mode="complete" if complete else "reduced")
             ref = q.T @ b
             err = float(np.max(np.abs(c - ref))) / max(1.0, float(np.max(np.abs(ref))))
