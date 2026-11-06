@@ -229,7 +229,11 @@ export async function run() {
     big?.click();
     const w1 = frame.getBoundingClientRect().width;
     check(big && dlg.classList.contains("big") && big.getAttribute("aria-pressed") === "true" && w1 > w0 + 100 && Math.abs(dlg.getBoundingClientRect().width - innerWidth) < 2 && getComputedStyle(dlg.querySelector("ul")).display === "none", "Expand: the preview across the whole window, the list hidden: " + JSON.stringify({ w0, w1, win: innerWidth }));
+    const r = dlg.getBoundingClientRect();
+    check(Math.abs(r.left) < 2 && Math.abs(r.top) < 2 && Math.abs(r.width - innerWidth) < 2 && Math.abs(r.height - innerHeight) < 2, "…the dialog is the whole window, at its top left: " + JSON.stringify({ x: r.left, y: r.top, w: r.width, h: r.height, win: [innerWidth, innerHeight] }));
+    check(big.textContent === "Show the list" && /Back to the list/.test(big.title), "…its button now says Show the list: " + JSON.stringify([big.textContent, big.title]));
     big?.click();
+    check(big.textContent === "Expand" && /whole window/.test(big.title), "…and Expand again, once back: " + JSON.stringify([big.textContent, big.title]));
     check(!dlg.classList.contains("big") && big.getAttribute("aria-pressed") === "false" && Math.abs(frame.getBoundingClientRect().width - w0) < 2 && getComputedStyle(dlg.querySelector("ul")).display !== "none" && frame.getAttribute("src") === "/examples/board/hello/", "…and again: back as it was, the same example shown");
     dlg.querySelector(".acts button").click();
     await closed;
