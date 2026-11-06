@@ -318,7 +318,7 @@ export function statusText(text, network = NO_NETWORK) {
 export const PAIRED = {
   label: "Your computer",
   ready: "Your computer · ready",
-  sessionGone: "your computer doesn't remember this page (the runner restarted?): choose Your computer again, with its new link",
+  sessionGone: "the runner restarted, so this page needs its new link: choose Your computer again and paste it",
 };
 
 /** The status line's text for a paired kernel's status. */
@@ -358,11 +358,14 @@ export function pairedStarter({ WebSocket } = {}) {
     const pair = async () => {
       const how = pending ? { code: pending.code, remember: true } : remembered ? { session: remembered.session } : null;
       const port = pending?.port ?? remembered?.port;
-      pending = null; // (a code pairs once)
       if (!how) return PAIRED.sessionGone;
       try {
         tunnel = await pairTunnel({ port, jwk: client.jwk, jkt: client.jkt, WebSocket, ...how, onClose: (w) => { tunnel = null; if (!closed) onLost(w); } });
+        pending = null; // (a code pairs once)
       } catch (e) {
+        // (a code the runner saw is spent or counted; one that never reached it (nothing listening, or blocked) is kept
+        // for Retry)
+        if (e?.kind !== "unreachable" && e?.kind !== "timeout") pending = null;
         if (how.session && e?.kind === "refused") remembered = null; // (the runner forgot it: a new code is needed)
         return how.session && e?.kind === "refused" ? PAIRED.sessionGone : e?.message ?? String(e);
       }
@@ -416,8 +419,9 @@ export const PAIR_SHEET = {
   how: "Run this in a terminal on this computer. It prints a link: open it, or paste it here.",
   paste: "The link (or its pairing code and port)",
   lna: "Your browser may ask to let this site access apps on this device: click Allow.",
-  safari: "Safari doesn't let a website connect to programs on your computer. To run on your computer, open this page in Chrome, Edge or Firefox.",
-  bad: "That isn't the link `sagebrush remote --loopback` printed.",
+  safari: "Safari doesn't let a website connect to programs on your computer. On a Mac, open this page in Chrome, Edge or Firefox. (On an iPhone or iPad every browser is Safari underneath, and running on your computer needs a Mac or PC.)",
+  bad: "That isn't the link sagebrush remote --loopback printed.",
+  copied: "Copied",
   copy: "Copy",
   allow: "Connect",
   cancel: "Cancel",
@@ -440,7 +444,9 @@ export function pairSheet(doc = document, prefill = null, userAgent = globalThis
   dlg.setAttribute("aria-labelledby", "pairtitle");
   const cmd = el("code", PAIR_SHEET.command);
   const copy = el("button", PAIR_SHEET.copy, { type: "button" });
-  copy.addEventListener("click", () => globalThis.navigator?.clipboard?.writeText(PAIR_SHEET.command).catch(() => {}));
+  copy.addEventListener("click", () => {
+    Promise.resolve(globalThis.navigator?.clipboard?.writeText(PAIR_SHEET.command)).then(() => { said.textContent = PAIR_SHEET.copied; }, () => {});
+  });
   const cmdRow = el("p", null, { className: "cap" });
   cmdRow.append(cmd, copy);
   const field = el("input", null, { type: "text", id: "pairlink", autocomplete: "off", spellcheck: false });

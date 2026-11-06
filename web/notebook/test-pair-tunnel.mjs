@@ -197,6 +197,12 @@ for (const [what, m, code] of [
   ["an answer with an extra member", { id: "t1", status: 200, headers: {}, body: "{}", x: 1 }, 4002],
   ["a status out of range", { id: "t1", status: 700, headers: {}, body: "{}" }, 4002],
   ["a header not a string", { id: "t1", status: 200, headers: { a: 1 }, body: "{}" }, 4002],
+  // (astra's PROTO-1: answers fetch's Response refuses, each closing rather than leaving the request unsettled)
+  ["a 204 with a body", { id: "t1", status: 204, headers: {}, body: "x" }, 4002],
+  ["a 205 with a body", { id: "t1", status: 205, headers: {}, body: "x" }, 4002],
+  ["a 304 with a body", { id: "t1", status: 304, headers: {}, body: "x" }, 4002],
+  ["an invalid header name", { id: "t1", status: 200, headers: { "bad header": "x" }, body: "{}" }, 4002],
+  ["an invalid header value", { id: "t1", status: 200, headers: { a: "x\r\ny: z" }, body: "{}" }, 4002],
   ["a frame over its limit", JSON.stringify({ id: "t1", pad: "x".repeat(TUNNEL_LIMITS.frameIn) }), 4009],
 ]) {
   const { ws, t, client } = await setup();
@@ -218,6 +224,22 @@ for (const [what, m, code] of [
   const { ws: ws2, t: t2 } = await setup();
   ws2.onmessage({ data: new Uint8Array(3) });
   check(ws2.closedWith === 4003 && t2.closed, "a binary frame closes the socket");
+}
+
+{
+  // (the stream head too: an invalid header on an events head closes, the stream never handed out)
+  const { ws, t } = await setup();
+  const p = t.fetch(`${SYNTHETIC_BASE}/bindings/b1/runs/r1/events?after=0`, { method: "GET", headers: { Authorization: "a", DPoP: "d" } });
+  p.catch(() => {});
+  ws.deliver({ id: "t1", status: 200, headers: { "bad header": "x" } });
+  const r = await within(p);
+  check(ws.closedWith === 4002 && r.e instanceof TypeError, "an events head fetch refuses: closed, the request ambiguous");
+  // (and the healthy control: a 204 without a body, an ordinary header, resolve)
+  const { ws: w2, t: t2 } = await setup();
+  const q = t2.fetch(`${SYNTHETIC_BASE}/bindings/b1/interrupt`, { method: "POST", headers: { Authorization: "a", DPoP: "d" }, body: "{}" });
+  w2.deliver({ id: "t1", status: 204, headers: { "x-ok": "1" } });
+  const ok204 = await within(q);
+  check(ok204.v?.status === 204 && ok204.v.headers.get("x-ok") === "1" && !w2.closedWith, "the control: a 204 without a body resolves");
 }
 
 // ================= bounds: 256 retired rotate; a stream the page doesn't read; 16 MiB across streams
@@ -302,6 +324,43 @@ for (const [what, m, code] of [
   check((await within(slow)).e?.kind === "timeout", "no answer: a timeout");
   const shut = pairTunnel({ port: 4321, code: "x", jwk, jkt: "j", WebSocket: class extends FakeSocket { constructor(u) { super(u); setTimeout(() => this.onclose?.({ code: 1006 }), 1); } } });
   check((await within(shut)).e?.kind === "unreachable", "nothing listening: unreachable, said plainly");
+}
+
+// ================= the words a person sees for a lost socket; the paired start keeps a code that never reached the runner
+{
+  const { ws, t, closes } = await setup();
+  ws.onerror();
+  check(closes[0] === "the connection dropped" && t.closed, "a socket error: \"the connection dropped\" (no raw codes)");
+  const { ws: w2, closes: c2 } = await setup();
+  w2.onclose({ code: 1006 });
+  const { ws: w3, closes: c3 } = await setup();
+  w3.onclose({ code: 1001 });
+  check(c2[0] === "the connection dropped" && c3[0] === "the runner on your computer stopped", "1006: dropped; 1001: the runner stopped");
+  const { pairedStarter, PAIRED } = await import("./remote-ui.js");
+  const hellos = [];
+  let n = 0;
+  class S extends FakeSocket {
+    constructor(u) {
+      super(u);
+      const first = n++ === 0;
+      setTimeout(() => (first ? this.onclose?.({ code: 1006 }) : this.open()), 1);
+    }
+    send(t) {
+      super.send(t);
+      const m = JSON.parse(t);
+      if (m.method === "hello") {
+        hellos.push(m.params);
+        this.deliver({ jsonrpc: "2.0", id: "h1", result: { ...RESULT, session: "s".repeat(43) } });
+      } else if (m.rpc === "g.bind") queueMicrotask(() => this.deliver(json(m.id, 200, { binding: "b1", epoch: 1, incarnation: 1, state: "ready" })));
+    }
+  }
+  const start = pairedStarter({ WebSocket: S });
+  const r = await start({ notebook: "nb", answer: { code: "ABCDEFGHIJKLMNOPQRSTUVWXYZ", port: 4321 } });
+  check(/site settings/.test(r.failed) && /Retry/.test(r.failed) && !/`/.test(r.failed), `nothing listening (or blocked): says how to undo a Block (${r.failed})`);
+  await r.retry();
+  check(hellos.length === 1 && hellos[0].code === "ABCDEFGHIJKLMNOPQRSTUVWXYZ" && r.tunnel && r.kernel.ready && r.failed === null, "Retry pairs with the code that never reached the runner, and binds");
+  r.close();
+  check(PAIRED.sessionGone === "the runner restarted, so this page needs its new link: choose Your computer again and paste it", "the session-gone words");
 }
 
 // ================= the runner's link
