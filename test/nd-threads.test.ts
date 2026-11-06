@@ -123,6 +123,35 @@ out.counts = [T.teams, T.failovers, T.made, T.terminated, T.abandoned.length];`)
   assert.deepEqual(r.counts, [1, 1, 3, 3, 1]);
 });
 
+// (the clock: the job's first sample, or a later one, not finite or going back, fails the job at once, not at the
+// stall bound: helper 1 never finishes, so only the clock check can end the wait early; daybreak3 E1)
+for (const [what, clock] of [
+  ["a first sample that isn't finite", "(k, t) => (k === 0 ? NaN : t)"],
+  ["a later sample that isn't finite", "(k, t) => (k === 1 ? Infinity : t)"],
+  ["a sample going back", "(k, t) => (k === 1 ? t - 1000 : t)"],
+] as const) {
+  test(`the clock: ${what} fails the job at once, with the one-thread bytes (ENGINE contract 3)`, { timeout: 60000 }, () => {
+    const r = scenario(`
+nd.ndTest({ helpers: 2, fault: "exit", stallMs: 3000 });
+product();
+out.ready = await ready();
+const real = performance.now.bind(performance), f = ${clock};
+let k = -1;
+performance.now = () => (k < 0 ? real() : f(k++, real()));
+const t0 = real();
+k = 0;
+out.result = fnv(product());
+k = -1;
+out.ms = real() - t0;
+out.after = nd.ndThreads();`);
+    assert.equal(r.error, undefined);
+    assert.equal(r.ready.threads, 3);
+    assert.equal(r.result, oneThread().hashes[1]);
+    assert.ok(r.ms < 2000, `${r.ms} ms`);
+    assert.deepEqual(r.after, { threads: 1, state: "off", why: "the clock failed" });
+  });
+}
+
 test("a helper that fails its job: the one-thread bytes from a fresh memory, then one thread (r2.1 pin 3)", () => {
   const r = scenario(`
 nd.ndTest({ helpers: 2, fault: "throw" });

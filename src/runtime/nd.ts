@@ -504,12 +504,15 @@ function gemmOn(A: Float64Array, B: Float64Array, n: number, m: number, p: numbe
   try {
     ok = ex!.nd_gemm_part(desc, 0) === 1;
   } catch {}
-  // (bounded: no helper finishing for `stall` ms fails the job; a clock that isn't finite or goes back fails it too)
-  let last = now(), seen = -1;
+  // (bounded: no helper finishing for `stall` ms fails the job; a clock sample that isn't finite, the first one
+  // included, or that goes back from the one before fails it too)
+  let last = now(), prev = last, seen = -1;
+  if (!Number.isFinite(last)) return "the clock failed";
   for (let d; (d = Atomics.load(w, DONE)) < P.helpers; ) {
     const t = now();
     if (P.failed !== null || Atomics.load(w, BROKEN)) return P.failed ?? "a helper refused a message";
-    if (!Number.isFinite(t) || t < last) return "the clock failed";
+    if (!Number.isFinite(t) || t < prev) return "the clock failed";
+    prev = t;
     if (d !== seen) [seen, last] = [d, t];
     else if (t - last > stall) return `a helper stopped responding (${d} of ${P.helpers} finished)`;
     Atomics.wait(w, DONE, d, 50);
