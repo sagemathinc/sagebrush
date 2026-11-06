@@ -40,6 +40,7 @@ export const TUNNEL_LIMITS = Object.freeze({
 const ID = "[A-Za-z0-9._~-]{1,64}";
 const ID_RE = new RegExp(`^${ID}$`);
 const FRAME_ID_RE = /^t[1-9]\d{0,14}$/;
+const NULL_BODY = new Set([204, 205, 304]); // (fetch's null-body statuses at or above 200)
 // (method, path pattern, rpc, the ref's members in path order)
 const ROUTES = [
   ["POST", /^\/bindings$/, "g.bind", []],
@@ -126,8 +127,8 @@ export class Tunnel {
     this.fetch = (url, init) => this.send(url, init ?? {});
     this.tokenSource = () => (this.closed ? Promise.reject(new Error("your computer isn't connected")) : this.token);
     ws.onmessage = (e) => this.receive(e.data);
-    ws.onclose = (e) => this.gone(e?.code === 1001 ? "the runner on your computer stopped" : e?.code === 1000 ? "your computer closed the connection" : `closed${e?.code ? " " + e.code : ""}`);
-    ws.onerror = () => this.gone("a socket error");
+    ws.onclose = (e) => this.gone(e?.code === 1001 ? "the runner on your computer stopped" : e?.code === 1000 ? "your computer closed the connection" : "the connection dropped");
+    ws.onerror = () => this.gone("the connection dropped");
   }
 
   /** Ids open at the runner: its own count (gateway.py s.open), which it caps at 8. */
@@ -244,11 +245,13 @@ export class Tunnel {
     if (!e) return this.fail(4002, "a second answer, or an unsolicited retirement");
     const keys = Object.keys(m).sort().join(",");
     if (e.state === "head") {
-      if (keys !== "body,headers,id,status" && !(e.events && keys === "headers,id,status")) return this.fail(4002, "a malformed answer");
+      if (keys !== "body,headers,id,status" && keys !== "headers,id,status") return this.fail(4002, "a malformed answer");
       const { status, headers, body } = m;
       if (!Number.isInteger(status) || status < 200 || status > 599) return this.fail(4002, "an answer's status");
       if (!headers || typeof headers !== "object" || Array.isArray(headers) || !Object.values(headers).every((v) => typeof v === "string")) return this.fail(4002, "an answer's headers");
       if (body !== undefined && typeof body !== "string") return this.fail(4002, "an answer's body");
+      // (a status that can't carry a body, checked here and not left to the runtime's Response, which differs)
+      if (body !== undefined && NULL_BODY.has(status)) return this.fail(4002, "a body on an answer that can't have one");
       if (e.events && status === 200) {
         if (body !== undefined) return this.fail(4002, "an event stream's head has no body");
         let ctl;
@@ -256,13 +259,27 @@ export class Tunnel {
           { start: (c) => { ctl = c; }, cancel: () => this.cancel(id, "the reader stopped") },
           { highWaterMark: TUNNEL_LIMITS.subBytes, size: (chunk) => chunk.byteLength },
         );
+        let res;
+        try {
+          res = new Response(stream, { status, headers });
+        } catch {
+          return this.fail(4002, "an answer that isn't a valid response"); // (the entry still pending: ambiguous)
+        }
         e.ctl = ctl;
         e.state = "stream";
-        return e.resolve(new Response(stream, { status, headers }));
+        return e.resolve(res);
+      }
+      // (a status that can't have a body, a header name or value fetch refuses: the socket closes, the request with
+      // every other in flight ambiguous, astra's PROTO-1; never a request left unsettled)
+      let res;
+      try {
+        res = new Response(body ?? null, { status, headers });
+      } catch {
+        return this.fail(4002, "an answer that isn't a valid response");
       }
       this.pending.delete(id);
       e.off?.();
-      return e.resolve(new Response(body ?? null, { status, headers }));
+      return e.resolve(res);
     }
     // a stream's frames
     if (keys === "chunk,id" && typeof m.chunk === "string") {
@@ -327,7 +344,7 @@ export function pairTunnel({ port, code, session, remember = false, jwk, jkt, We
       ws.send(JSON.stringify({ jsonrpc: "2.0", id: "h1", method: "hello", params }));
     };
     ws.onerror = () => {};
-    ws.onclose = (e) => finish(new PairError(opened ? `your computer closed the connection (${e?.code ?? "?"})` : "nothing answered on that port: is `sagebrush remote --loopback` running?", { kind: opened ? "closed" : "unreachable" }));
+    ws.onclose = (e) => finish(new PairError(opened ? `your computer closed the connection (${e?.code ?? "?"})` : "nothing answered on that port: is sagebrush remote --loopback running? If you blocked this site's access to apps on this device, allow it in the site settings (the icon left of the address), then Retry", { kind: opened ? "closed" : "unreachable" }));
     ws.onmessage = (e) => {
       let m;
       try {
