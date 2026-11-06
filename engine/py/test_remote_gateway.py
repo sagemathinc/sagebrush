@@ -904,6 +904,19 @@ async def test_fence_every_handoff():
     assert port.h.posts == [], port.h.posts
     assert gw.binding.runs["stale"].outcome == {"status": "stopped", "reason": "kernel restarted"}
     assert not [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+    # the same for a single run (astra's r3 follow-up): no start event after its stop, no payload read, no post
+    port = Scripted(auto=False)
+    s, c, gw, p = await bound(port)
+    errors = []
+    asyncio.get_running_loop().set_exception_handler(lambda loop, ctx: errors.append(ctx))
+    p.frame("g.run", {"b": "b1"}, run_body("single"))
+    p.frame("g.restart", {"b": "b1"}, {"epoch": 1})
+    await settle()
+    run = gw.binding.runs["single"]
+    assert run.outcome == {"status": "stopped", "reason": "kernel restarted"} and port.h.posts == [] and not errors, (run.outcome, port.h.posts, errors)
+    assert [e["type"] for e in run.events] == [] and run.tomb and run.payload is None  # (tombstoned; no event after it)
+    assert not [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+    asyncio.get_running_loop().set_exception_handler(None)
     port = Scripted(auto=False)
     s, c, gw, p = await bound(port)
     p.frame("g.run", {"b": "b1"}, {"request": "ok", "epoch": 1, "kind": "wave", "payload": w})
