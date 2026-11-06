@@ -424,7 +424,8 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     };
     r.onauxclick = (ev) => {
       // (a middle-click on a .tex file: the editor in a new tab when it takes the file; any other file, nothing, as before)
-      if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && ev.button === 1 && e.kind === "file") { if (!trashView) (globalThis as any).__sbTex?.(e, true); return; }
+      // (and on a code or text file, the code page in a new tab, where the notebook page has installed it)
+      if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && ev.button === 1 && e.kind === "file") { if (!trashView && !(globalThis as any).__sbTex?.(e, true)) (globalThis as any).__sbCode?.(e, true); return; }
       if (ev.button === 1 && e.kind === "file") { if (!trashView && !(globalThis as any).__sbCode?.(e, true)) host.openFile?.(e, true); return; }
       if (ev.button === 1 && e.kind !== "folder" && e.kind !== "file") host.open(e, "tab");
     };

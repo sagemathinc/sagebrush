@@ -62,6 +62,17 @@ try {
   // Files: a code file opens its page, not the preview
   await ev(`(() => { if (document.querySelector("#wssidebar")?.hidden !== false) document.querySelector("#wsfilesbtn").click(); return 1; })()`);
   await until(`!!document.querySelector('#wssidebar .frow[data-path="/demo.py"]')`, 20000);
+  // (a middle-click: its page in a new tab, this page left as it is; in a build with the LaTeX editor too, whose
+  // middle-click comes first and takes only a .tex)
+  const mid = await ev(`(async () => {
+    const opened = [], own = window.open, before = location.href;
+    window.open = (u) => { opened.push(String(u)); return null; };
+    document.querySelector('#wssidebar .frow[data-path="/demo.py"]').dispatchEvent(new MouseEvent("auxclick", { button: 1, bubbles: true, cancelable: true }));
+    await new Promise((s) => setTimeout(s, 500));
+    window.open = own;
+    return { opened, here: location.href === before, preview: !!document.querySelector(".sbfprev") };
+  })()`);
+  check(mid.opened.length === 1 && /\/\?code=[\w-]+$/.test(mid.opened[0]) && mid.here && !mid.preview, "Files: a middle-click on a .py file opens its page in a new tab, this page kept: " + JSON.stringify(mid));
   await ev(`(() => { document.querySelector('#wssidebar .frow[data-path="/demo.py"]').click(); return 1; })()`);
   check(await until(`/[?&]code=[\\w-]+/.test(location.search) && !!${C} && ${C}.path === "/demo.py"`, 30000), "Files: a .py file opens its own page (/?code=<fid>), not the preview");
   check(!(await ev(`!!document.querySelector(".sbfprev")`)), "…no data-file preview over it");
