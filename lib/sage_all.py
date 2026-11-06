@@ -606,6 +606,11 @@ def _poly_var_name(var):
     return name
 
 
+def _rational_from_pair(numerator, denominator):
+    """The Rational numerator/denominator of a coprime pair (unpickling)."""
+    return Rational._from_coprime_ints(numerator, denominator)
+
+
 class Rational(_Fraction):
     """An exact rational number, such as ``2/3`` in Sage mode.
 
@@ -665,6 +670,18 @@ class Rational(_Fraction):
         if isinstance(b, (int, _Fraction)) and not isinstance(b, bool) and self._denominator != 1:
             return _rational_power(_Fraction(b), self)
         return Rational._rpow(self, b)
+
+    # (copy, deepcopy and pickle as Fraction does them call the class with
+    # (numerator, denominator); Rational(a, b) is Sage's, b a base: these
+    # build the value explicitly)
+    def __copy__(self):
+        return self
+
+    def __deepcopy__(self, memo):
+        return self
+
+    def __reduce__(self):
+        return (_rational_from_pair, (self._numerator, self._denominator))
 
     def __neg__(self):
         return Rational._from_coprime_ints(-self._numerator, self._denominator)
