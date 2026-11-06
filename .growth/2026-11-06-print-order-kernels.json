@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "The print order of sums and products with function kernels as Sage prints them (engine/sym/src/print.rs: kernels in the P0-P5 order, p_kernel, p_kernel_cmp, p_order; C0 of the simplify_trig work). Measured with bun 1.4.4 (size-record.sh) on master 5b10a4e1 vs this PR's head 4b657aac (CI's fresh engine committed): cli/pyjs.cjs +3524, engine/sagebrush-engine.wasm +2646; no other row grows.",
+ "bytes": {
+  "cli/pyjs.cjs": 3524,
+  "engine/sagebrush-engine.wasm": 2646
+ }
+}
