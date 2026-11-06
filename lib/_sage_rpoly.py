@@ -751,7 +751,8 @@ class PolynomialInexact:
             for i, c in enumerate(self._c):
                 if _nonzero(c):
                     r = r + c * x ** i
-            return r if self._c else _sa().SR(0)
+            # (the zero polynomial at x is the field's zero in SR, as Sage)
+            return r if self._c else _sa().SR(self._ring._base(0))
         s = _scalar(x)
         if s is not None and s != "I":
             # (the field of a value is as for two polynomials, the coefficients' on the
@@ -762,7 +763,11 @@ class PolynomialInexact:
         else:
             cs = self._c
         if not cs:
-            return (F if s is not None and s != "I" else self._ring._base)(0)
+            if s is None:
+                # (a matrix or a polynomial: the zero of its codomain, times x^0 as Sage's,
+                # the zero matrix, or 0 in CDF['u'], not a number; the daybreak3 EVAL-1)
+                return self._ring._base(0) * x ** 0
+            return (F if s != "I" else self._ring._base)(0)
         if s is None and hasattr(x, "nrows"):
             # (a matrix: the coefficients times its identity, as Sage)
             one = x ** 0
