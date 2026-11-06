@@ -1,0 +1,96 @@
+CC(1,2) M c*o | [1.00000000000000 + 2.00000000000000*I 2.00000000000000 + 4.00000000000000*I] ; [3.00000000000000 + 6.00000000000000*I 4.00000000000000 + 8.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CC(1,2) M o*c | [1.00000000000000 + 2.00000000000000*I 2.00000000000000 + 4.00000000000000*I] ; [3.00000000000000 + 6.00000000000000*I 4.00000000000000 + 8.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CC(1,2) M c+o | [2.00000000000000 + 2.00000000000000*I                      2.00000000000000] ; [                     3.00000000000000 5.00000000000000 + 2.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CC(1,2) M o+c | [2.00000000000000 + 2.00000000000000*I                      2.00000000000000] ; [                     3.00000000000000 5.00000000000000 + 2.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CC(1,2) M c-o | [                    2.00000000000000*I                      -2.00000000000000] ; [                     -3.00000000000000 -3.00000000000000 + 2.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CC(1,2) M o-c | [                  -2.00000000000000*I                      2.00000000000000] ; [                     3.00000000000000 3.00000000000000 - 2.00000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CC(1,2) M o/c | [0.200000000000000 - 0.400000000000000*I 0.400000000000000 - 0.800000000000000*I] ; [ 0.600000000000000 - 1.20000000000000*I  0.800000000000000 - 1.60000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CC(1,2) v c*o | (1.00000000000000 + 2.00000000000000*I, 2.00000000000000 + 4.00000000000000*I) | Vector space of dimension 2 over Complex Field with 53 bits of precision
+CC(1,2) v o*c | (1.00000000000000 + 2.00000000000000*I, 2.00000000000000 + 4.00000000000000*I) | Vector space of dimension 2 over Complex Field with 53 bits of precision
+CC(1,2) v c+o | ERR TypeError
+CC(1,2) v o+c | ERR TypeError
+CC(1,2) v c-o | ERR TypeError
+CC(1,2) v o-c | ERR TypeError
+CC(1,2) v o/c | (0.200000000000000 - 0.400000000000000*I, 0.400000000000000 - 0.800000000000000*I) | Vector space of dimension 2 over Complex Field with 53 bits of precision
+RR(1.5) M c*o | [1.50000000000000 3.00000000000000] ; [4.50000000000000 6.00000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision
+RR(1.5) M o*c | [1.50000000000000 3.00000000000000] ; [4.50000000000000 6.00000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision
+RR(1.5) M c+o | [2.50000000000000 2.00000000000000] ; [3.00000000000000 5.50000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision
+RR(1.5) M o+c | [2.50000000000000 2.00000000000000] ; [3.00000000000000 5.50000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision
+RR(1.5) M c-o | [0.500000000000000 -2.00000000000000] ; [-3.00000000000000 -2.50000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision
+RR(1.5) M o-c | [-0.500000000000000   2.00000000000000] ; [  3.00000000000000   2.50000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision
+RR(1.5) M o/c | [0.666666666666667  1.33333333333333] ; [ 2.00000000000000  2.66666666666667] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision
+RR(1.5) v c*o | (1.50000000000000, 3.00000000000000) | Vector space of dimension 2 over Real Field with 53 bits of precision
+RR(1.5) v o*c | (1.50000000000000, 3.00000000000000) | Vector space of dimension 2 over Real Field with 53 bits of precision
+RR(1.5) v c+o | ERR TypeError
+RR(1.5) v o+c | ERR TypeError
+RR(1.5) v c-o | ERR TypeError
+RR(1.5) v o-c | ERR TypeError
+RR(1.5) v o/c | (0.666666666666667, 1.33333333333333) | Vector space of dimension 2 over Real Field with 53 bits of precision
+RDF(1.5) M c*o | [1.5 3.0] ; [4.5 6.0] | Full MatrixSpace of 2 by 2 dense matrices over Real Double Field
+RDF(1.5) M o*c | [1.5 3.0] ; [4.5 6.0] | Full MatrixSpace of 2 by 2 dense matrices over Real Double Field
+RDF(1.5) M c+o | [2.5 2.0] ; [3.0 5.5] | Full MatrixSpace of 2 by 2 dense matrices over Real Double Field
+RDF(1.5) M o+c | [2.5 2.0] ; [3.0 5.5] | Full MatrixSpace of 2 by 2 dense matrices over Real Double Field
+RDF(1.5) M c-o | [ 0.5 -2.0] ; [-3.0 -2.5] | Full MatrixSpace of 2 by 2 dense matrices over Real Double Field
+RDF(1.5) M o-c | [-0.5  2.0] ; [ 3.0  2.5] | Full MatrixSpace of 2 by 2 dense matrices over Real Double Field
+RDF(1.5) M o/c | [0.6666666666666666 1.3333333333333333] ; [               2.0 2.6666666666666665] | Full MatrixSpace of 2 by 2 dense matrices over Real Double Field
+RDF(1.5) v c*o | (1.5, 3.0) | Vector space of dimension 2 over Real Double Field
+RDF(1.5) v o*c | (1.5, 3.0) | Vector space of dimension 2 over Real Double Field
+RDF(1.5) v c+o | ERR TypeError
+RDF(1.5) v o+c | ERR TypeError
+RDF(1.5) v c-o | ERR TypeError
+RDF(1.5) v o-c | ERR TypeError
+RDF(1.5) v o/c | (0.6666666666666666, 1.3333333333333333) | Vector space of dimension 2 over Real Double Field
+CDF(1,2) M c*o | [1.0 + 2.0*I 2.0 + 4.0*I] ; [3.0 + 6.0*I 4.0 + 8.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+CDF(1,2) M o*c | [1.0 + 2.0*I 2.0 + 4.0*I] ; [3.0 + 6.0*I 4.0 + 8.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+CDF(1,2) M c+o | [2.0 + 2.0*I         2.0] ; [        3.0 5.0 + 2.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+CDF(1,2) M o+c | [2.0 + 2.0*I         2.0] ; [        3.0 5.0 + 2.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+CDF(1,2) M c-o | [       2.0*I         -2.0] ; [        -3.0 -3.0 + 2.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+CDF(1,2) M o-c | [     -2.0*I         2.0] ; [        3.0 3.0 - 2.0*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+CDF(1,2) v c*o | (1.0 + 2.0*I, 2.0 + 4.0*I) | Vector space of dimension 2 over Complex Double Field
+CDF(1,2) v o*c | (1.0 + 2.0*I, 2.0 + 4.0*I) | Vector space of dimension 2 over Complex Double Field
+CDF(1,2) v c+o | ERR TypeError
+CDF(1,2) v o+c | ERR TypeError
+CDF(1,2) v c-o | ERR TypeError
+CDF(1,2) v o-c | ERR TypeError
+R100(1.5) M c*o | [1.5000000000000000000000000000 3.0000000000000000000000000000] ; [4.5000000000000000000000000000 6.0000000000000000000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 100 bits of precision
+R100(1.5) M o*c | [1.5000000000000000000000000000 3.0000000000000000000000000000] ; [4.5000000000000000000000000000 6.0000000000000000000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 100 bits of precision
+R100(1.5) M c+o | [2.5000000000000000000000000000 2.0000000000000000000000000000] ; [3.0000000000000000000000000000 5.5000000000000000000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 100 bits of precision
+R100(1.5) M o+c | [2.5000000000000000000000000000 2.0000000000000000000000000000] ; [3.0000000000000000000000000000 5.5000000000000000000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 100 bits of precision
+R100(1.5) M c-o | [0.50000000000000000000000000000 -2.0000000000000000000000000000] ; [-3.0000000000000000000000000000 -2.5000000000000000000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 100 bits of precision
+R100(1.5) M o-c | [-0.50000000000000000000000000000   2.0000000000000000000000000000] ; [  3.0000000000000000000000000000   2.5000000000000000000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 100 bits of precision
+R100(1.5) M o/c | [0.66666666666666666666666666667  1.3333333333333333333333333333] ; [ 2.0000000000000000000000000000  2.6666666666666666666666666667] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 100 bits of precision
+R100(1.5) v c*o | (1.5000000000000000000000000000, 3.0000000000000000000000000000) | Vector space of dimension 2 over Real Field with 100 bits of precision
+R100(1.5) v o*c | (1.5000000000000000000000000000, 3.0000000000000000000000000000) | Vector space of dimension 2 over Real Field with 100 bits of precision
+R100(1.5) v c+o | ERR TypeError
+R100(1.5) v o+c | ERR TypeError
+R100(1.5) v c-o | ERR TypeError
+R100(1.5) v o-c | ERR TypeError
+R100(1.5) v o/c | (0.66666666666666666666666666667, 1.3333333333333333333333333333) | Vector space of dimension 2 over Real Field with 100 bits of precision
+C100(1,2) M c*o | [1.0000000000000000000000000000 + 2.0000000000000000000000000000*I 2.0000000000000000000000000000 + 4.0000000000000000000000000000*I] ; [3.0000000000000000000000000000 + 6.0000000000000000000000000000*I 4.0000000000000000000000000000 + 8.0000000000000000000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 100 bits of precision
+C100(1,2) M o*c | [1.0000000000000000000000000000 + 2.0000000000000000000000000000*I 2.0000000000000000000000000000 + 4.0000000000000000000000000000*I] ; [3.0000000000000000000000000000 + 6.0000000000000000000000000000*I 4.0000000000000000000000000000 + 8.0000000000000000000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 100 bits of precision
+C100(1,2) M c+o | [2.0000000000000000000000000000 + 2.0000000000000000000000000000*I                                    2.0000000000000000000000000000] ; [                                   3.0000000000000000000000000000 5.0000000000000000000000000000 + 2.0000000000000000000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 100 bits of precision
+C100(1,2) M o+c | [2.0000000000000000000000000000 + 2.0000000000000000000000000000*I                                    2.0000000000000000000000000000] ; [                                   3.0000000000000000000000000000 5.0000000000000000000000000000 + 2.0000000000000000000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 100 bits of precision
+C100(1,2) M c-o | [                                  2.0000000000000000000000000000*I                                    -2.0000000000000000000000000000] ; [                                   -3.0000000000000000000000000000 -3.0000000000000000000000000000 + 2.0000000000000000000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 100 bits of precision
+C100(1,2) M o-c | [                                -2.0000000000000000000000000000*I                                    2.0000000000000000000000000000] ; [                                   3.0000000000000000000000000000 3.0000000000000000000000000000 - 2.0000000000000000000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 100 bits of precision
+C100(1,2) M o/c | [0.20000000000000000000000000000 - 0.40000000000000000000000000000*I 0.40000000000000000000000000000 - 0.80000000000000000000000000000*I] ; [ 0.60000000000000000000000000000 - 1.2000000000000000000000000000*I  0.80000000000000000000000000000 - 1.6000000000000000000000000000*I] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 100 bits of precision
+C100(1,2) v c*o | (1.0000000000000000000000000000 + 2.0000000000000000000000000000*I, 2.0000000000000000000000000000 + 4.0000000000000000000000000000*I) | Vector space of dimension 2 over Complex Field with 100 bits of precision
+C100(1,2) v o*c | (1.0000000000000000000000000000 + 2.0000000000000000000000000000*I, 2.0000000000000000000000000000 + 4.0000000000000000000000000000*I) | Vector space of dimension 2 over Complex Field with 100 bits of precision
+C100(1,2) v c+o | ERR TypeError
+C100(1,2) v o+c | ERR TypeError
+C100(1,2) v c-o | ERR TypeError
+C100(1,2) v o-c | ERR TypeError
+C100(1,2) v o/c | (0.20000000000000000000000000000 - 0.40000000000000000000000000000*I, 0.40000000000000000000000000000 - 0.80000000000000000000000000000*I) | Vector space of dimension 2 over Complex Field with 100 bits of precision
+1.5 M c*o | [1.50000000000000 3.00000000000000] ; [4.50000000000000 6.00000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision
+1.5 M o*c | [1.50000000000000 3.00000000000000] ; [4.50000000000000 6.00000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision
+1.5 M c+o | [2.50000000000000 2.00000000000000] ; [3.00000000000000 5.50000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision
+1.5 M o+c | [2.50000000000000 2.00000000000000] ; [3.00000000000000 5.50000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision
+1.5 M c-o | [0.500000000000000 -2.00000000000000] ; [-3.00000000000000 -2.50000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision
+1.5 M o-c | [-0.500000000000000   2.00000000000000] ; [  3.00000000000000   2.50000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision
+1.5 M o/c | [0.666666666666667  1.33333333333333] ; [ 2.00000000000000  2.66666666666667] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision
+1.5 v c*o | (1.50000000000000, 3.00000000000000) | Vector space of dimension 2 over Real Field with 53 bits of precision
+1.5 v o*c | (1.50000000000000, 3.00000000000000) | Vector space of dimension 2 over Real Field with 53 bits of precision
+1.5 v c+o | ERR TypeError
+1.5 v o+c | ERR TypeError
+1.5 v c-o | ERR TypeError
+1.5 v o-c | ERR TypeError
+1.5 v o/c | (0.666666666666667, 1.33333333333333) | Vector space of dimension 2 over Real Field with 53 bits of precision

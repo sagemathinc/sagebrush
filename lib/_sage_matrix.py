@@ -51,6 +51,19 @@ def _raw_entries(v):
     return [_norm(x) for x in list.__iter__(v)]
 
 
+def _inexact_parent(o):
+    """The field of o when o is an inexact real or complex number (RR, RDF, CC, CDF, RealField(p),
+    ComplexField(p), a float literal), else None: a matrix or vector over ZZ or QQ meeting one
+    moves to that field, as in Sage (RR(1.5)*M is over RR, not the exact 3/2 over QQ)."""
+    if isinstance(o, bool) or not hasattr(o, "parent"):
+        return None
+    try:
+        P = o.parent()
+    except Exception:
+        return None
+    return P if type(P).__name__ in ("_RealField", "RealField_", "RealDoubleField_", "ComplexField_", "ComplexDoubleField_") else None
+
+
 class Vector(list):
     """A row of a matrix, printed as Sage prints vectors: (1, 2, 3).
 
@@ -158,7 +171,17 @@ class Vector(list):
     def __neg__(self):
         return _over_qq(Vector(-a for a in self), self)
 
+    def _inexact_lift(self, other):
+        """self over other's field when other is an inexact number and self is over ZZ or QQ."""
+        F = _inexact_parent(other)
+        if F is None or self.base_ring() not in (_sa().ZZ, _sa().QQ):
+            return None
+        return _sa().vector(F, list(self))
+
     def __mul__(self, other):
+        L = self._inexact_lift(other)
+        if L is not None:
+            return L * other
         if _is_ffvector(other):
             return _ffmat()._vector_op(self, other, "*")
         if getattr(other, "_is_ffmatrix", False):
@@ -184,9 +207,16 @@ class Vector(list):
         return _over_qq(Vector(_norm(a * other) for a in self), self, other)
 
     def __rmul__(self, other):
+        L = self._inexact_lift(other)
+        if L is not None:
+            return other * L
         return _over_qq(Vector(_norm(other * a) for a in self), self, other)
 
     def __truediv__(self, other):
+        L = self._inexact_lift(other)
+        if L is not None:
+            # (by the inverse, as Sage: v/CDF(1, 2) is v times 1/CDF(1, 2))
+            return L * (other.parent()(1) / other)
         try:
             w = Vector(_norm(_F(a) / _F(other)) for a in self)
         except (TypeError, ValueError):
@@ -1408,6 +1438,20 @@ class Matrix:
             return _sage_ffmat.FFMatrix(base, self._rows, self.ncols())
         return None
 
+    def _inexact_lift(self, other):
+        """self over other's field when other is an inexact number and self is over ZZ or QQ."""
+        F = _inexact_parent(other)
+        if F is None or self._base not in (_sa().ZZ, _sa().QQ):
+            return None
+        return self.change_ring(F)
+
+    def __truediv__(self, other):
+        # by an inexact number: over its field, times the inverse (Sage's M/RR(1.5))
+        L = self._inexact_lift(other)
+        if L is not None:
+            return L * (other.parent()(1) / other)
+        return NotImplemented
+
     def _scalar_matrix(self, c, op):
         """c times the identity, for M + c, c - M and the like (Sage reads
         a scalar as that multiple of the identity of a square matrix; 0 is
@@ -1433,6 +1477,9 @@ class Matrix:
             sage: Z = matrix(QQ, 0, 3, []); (Z + 0).dimensions(), (0 - Z).dimensions(), (-Z).dimensions()
             ((0, 3), (0, 3), (0, 3))
         """
+        L = self._inexact_lift(other)
+        if L is not None:
+            return L + other
         g = self._generic(other)
         if g is not None:
             return g + other
@@ -1443,11 +1490,17 @@ class Matrix:
         return Matrix(self._same(other), [[a + b for a, b in zip(r, s)] for r, s in zip(self._rows, other._rows)], self.ncols())
 
     def __radd__(self, other):
+        L = self._inexact_lift(other)
+        if L is not None:
+            return other + L
         if isinstance(other, (int, _F)) or _is_sr_scalar(other):
             return self._scalar_matrix(int(other) if isinstance(other, bool) else other, "+") + self
         return NotImplemented
 
     def __sub__(self, other):
+        L = self._inexact_lift(other)
+        if L is not None:
+            return L - other
         g = self._generic(other)
         if g is not None:
             return g - other
@@ -1458,6 +1511,9 @@ class Matrix:
         return Matrix(self._same(other), [[a - b for a, b in zip(r, s)] for r, s in zip(self._rows, other._rows)], self.ncols())
 
     def __rsub__(self, other):
+        L = self._inexact_lift(other)
+        if L is not None:
+            return other - L
         if isinstance(other, (int, _F)) or _is_sr_scalar(other):
             return self._scalar_matrix(int(other) if isinstance(other, bool) else other, "-") - self
         return NotImplemented
@@ -1466,6 +1522,9 @@ class Matrix:
         return Matrix(self._base, [[-a for a in r] for r in self._rows], self.ncols())
 
     def __mul__(self, other):
+        L = self._inexact_lift(other)
+        if L is not None:
+            return L * other
         g = self._generic(other)
         if g is not None:
             return g * other
@@ -1500,6 +1559,9 @@ class Matrix:
         return Matrix(base, [[a * other for a in r] for r in self._rows], self.ncols())
 
     def __rmul__(self, other):
+        L = self._inexact_lift(other)
+        if L is not None:
+            return other * L
         if isinstance(other, (list, tuple)):
             return [sum((other[i] * self._rows[i][j] for i in range(self.nrows())), 0) for j in range(self.ncols())]
         base = self._base if isinstance(other, int) else _sa().SR if self._base is _sa().SR or hasattr(other, "_s") else _sa().QQ
