@@ -14,6 +14,8 @@ unless its auth is "refuse".
 import asyncio
 import json
 import os
+import shutil
+import tempfile
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -804,20 +806,26 @@ async def test_real_stop_while_waiting_on_a_child():
 
 @aio
 async def test_real_stop_reaches_the_child_itself():
-    """The SIGINT goes to the whole group, so the child gets it itself (its exit status -2), not only the kernel."""
+    """The SIGINT goes to the whole group, so the child gets it itself, not only the kernel.  (The child, a shell,
+    records its own SIGINT in a file: the kernel printing the child's exit status raced its own KeyboardInterrupt,
+    which can land after the try once the child is already reaped (seen on CI, Python 3.14).)"""
     s, c, gw, p = await real()
+    d = tempfile.mkdtemp(prefix="sb-stop-")
+    mark = os.path.join(d, "got-int")
     try:
-        code = ("import subprocess\np = subprocess.Popen(['sleep', '60'])\nprint('started', flush=True)\n"
-                "try:\n    p.wait()\nexcept KeyboardInterrupt:\n    print('child exit', p.wait(), flush=True)")
+        code = ("import subprocess\np = subprocess.Popen(['sh', '-c', 'trap \"echo got-int > %s; exit 3\" INT; "
+                "sleep 60 & wait'])\nprint('started', flush=True)\np.wait()" % mark)
         p.frame("g.run", {"b": "b1"}, run_body("r1", code=code))
         await until(lambda: any(e["type"] == "stream" for e in events_of(gw, "r1")))
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(0.3)
         p.frame("g.interrupt", {"b": "b1"}, {"epoch": 1})
         await until(lambda: gw.binding.runs["r1"].outcome, 10)
-        text = "".join(e.get("text", "") for e in events_of(gw, "r1"))
-        assert "child exit -2" in text, text
+        await until(lambda: os.path.exists(mark), 10)
+        with open(mark) as f:
+            assert f.read().strip() == "got-int"
     finally:
         gw.shutdown()
+        shutil.rmtree(d, ignore_errors=True)
 
 
 @aio
