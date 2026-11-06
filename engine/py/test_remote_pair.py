@@ -799,6 +799,42 @@ async def test_drain_groups():
     await p.wait()
 
 
+def test_forget_when_empty_rechecks():
+    """grader's #783 D4/D5/D7/D8: a killed group is checked at once, then every 50 ms while it still has members, and
+    taken out on the first check that finds it empty; at most 100 rechecks (5 s), after which it stays for the exit's
+    drain.  Driven with a stub membership and a loop that only records its timers."""
+    from sagebrush.remote import gateway as G
+
+    class Loop:
+        def __init__(self):
+            self.timers = []
+
+        def call_later(self, delay, fn, *a):
+            self.timers.append((delay, fn, a))
+
+    def run(alive_checks):
+        pgid = 2 ** 30 + 7  # (no such group: only the stub answers for it)
+        checks = []
+        real = G._group_members
+        G._group_members = lambda g: (checks.append(g), [g] if len(checks) <= alive_checks else [])[1] if g == pgid else real(g)
+        loop = Loop()
+        G.ENDING_GROUPS.add(pgid)
+        try:
+            G._forget_when_empty(pgid, loop)
+            while loop.timers:
+                delay, fn, a = loop.timers.pop(0)
+                assert delay == 0.05, delay
+                fn(*a)
+            return len(checks), pgid in G.ENDING_GROUPS
+        finally:
+            G._group_members = real
+            G.ENDING_GROUPS.discard(pgid)
+    for k in (0, 1, 3):
+        n, kept = run(k)
+        assert (n, kept) == (k + 1, False), (k, n, kept)  # (taken out on check k + 1, after k timers of 50 ms)
+    n, kept = run(10 ** 6)
+    assert (n, kept) == (101, True), (n, kept)  # (the first check, then 100 rechecks: then left for the drain)
+
 # ================= end to end: the runner as a process, real DPoP
 
 async def start_runner():
