@@ -794,6 +794,15 @@ def _logabs(x, y):
     return math.log(mx) + 0.5 * math.log1p(u * u)
 
 
+def _cdiv(a, b):
+    """a/b for complex doubles, b nonzero, as Sage's CDF computes it (GSL's gsl_complex_div:
+    s = 1/|b|, then ((a.x b.x s + a.y b.y s) s, (a.y b.x s - a.x b.y s) s)), not Python's complex
+    division; 1/b is GSL's gsl_complex_inverse ((b.x s) s, (-b.y s) s)."""
+    s = 1.0 / math.hypot(b.real, b.imag)
+    sbr, sbi = s * b.real, s * b.imag
+    return complex((a.real * sbr + a.imag * sbi) * s, (a.imag * sbr - a.real * sbi) * s)
+
+
 class ComplexDoubleElement:
     """An element of CDF.
 
@@ -878,12 +887,29 @@ class ComplexDoubleElement:
     __rmul__ = __mul__
 
     def __truediv__(self, o):
+        # GSL's division, as Sage's CDF (1/CDF(49) is 0.020408163265306117)
         v = self._c(o)
-        return NotImplemented if v is None else ComplexDoubleElement._of(self._z / v)
+        if v is None:
+            return NotImplemented
+        return ComplexDoubleElement._of(_cdiv(self._z, v) if v else self._z / v)
 
     def __rtruediv__(self, o):
         v = self._c(o)
-        return NotImplemented if v is None else ComplexDoubleElement._of(v / self._z)
+        if v is None:
+            return NotImplemented
+        return ComplexDoubleElement._of(_cdiv(v, self._z) if self._z else v / self._z)
+
+    def __invert__(self):
+        """1/self, as Sage's CDF computes it.
+
+        EXAMPLES::
+
+            sage: ~CDF(49), ~CDF(1, 2)
+            (0.020408163265306117, 0.19999999999999998 - 0.39999999999999997*I)
+        """
+        if not self._z:
+            raise ZeroDivisionError("complex division by zero")
+        return ComplexDoubleElement._of(_cdiv(1.0, self._z))
 
     def __neg__(self):
         return ComplexDoubleElement._of(-self._z)
