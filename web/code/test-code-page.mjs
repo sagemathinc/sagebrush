@@ -134,9 +134,9 @@ try {
   await until(`!!document.querySelector(".code-page .code-edit textarea") && !${C}.stopped()`);
   await ev(`${W}.write("/demo.py", "external one\\n").then(() => 1)`);
   check(await until(`${TA}.value === "external one\\n" && !${C}.stopped()`, 10000), "Edit, nothing unsaved: a change made elsewhere is followed, saving still on");
-  await ev(`(() => { let first = true; window.__sbCodeBeforeRead = () => { if (first) { first = false; return new Promise((r) => setTimeout(r, 1200)); } }; return 1; })()`);
+  await ev(`(() => { let first = true; window.__sbCodeBeforeRead = () => { if (first) { first = false; return new Promise((r) => setTimeout(r, 400)); } }; return 1; })()`);
   await ev(`${W}.write("/demo.py", "external two\\n").then(() => 1)`);
-  await sleep(300);
+  await sleep(150);
   await ev(`(() => { const t = ${TA}; t.value += "draft\\n"; t.dispatchEvent(new Event("input")); return 1; })()`);
   check(await until(`${C}.stopped() && !document.querySelector(".code-page .code-bar").hidden`, 10000), "an edit typed while a change made elsewhere is being read: following stops, the bar says so");
   await sleep(1500);
@@ -181,3 +181,5 @@ if (fails.length) {
 }
 console.log(`ok: the code page, ${checks} checks`);
 process.exit(0);
+  // (the read held 400 ms, the draft typed at ~150 ms: the read comes back before the draft's own save (600 ms) could
+  //  stop anything, so only the recheck after the read keeps the draft)
