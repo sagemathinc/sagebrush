@@ -170,21 +170,21 @@
   /* an open panel: checked */
   .menu button[aria-pressed="true"]::after { content: "✓"; color: var(--accent); }
   .menu kbd { font-size: 11px; color: var(--muted); }
-  :is(#sharedlg, #dldepsdlg) { border: 1px solid var(--line); border-radius: 10px; background: var(--cell); color: var(--fg); padding: 14px 16px; width: min(560px, 92vw); }
-  :is(#sharedlg, #dldepsdlg)::backdrop { background: rgba(0,0,0,.35); }
-  :is(#sharedlg, #dldepsdlg) h4 { margin: 12px 0 2px; font-size: 14px; }
-  :is(#sharedlg, #dldepsdlg) .note { color: var(--muted); font-size: 13px; margin: 2px 0 8px; }
-  :is(#sharedlg, #dldepsdlg) label { display: flex; gap: 8px; align-items: center; margin: 6px 0; font-size: 13px; }
-  :is(#sharedlg, #dldepsdlg) label input[type=text] { flex: 1; }
+  .pick { border: 1px solid var(--line); border-radius: 10px; background: var(--cell); color: var(--fg); padding: 14px 16px; width: min(560px, 92vw); }
+  .pick::backdrop { background: rgba(0,0,0,.35); }
+  .pick h4 { margin: 12px 0 2px; font-size: 14px; }
+  .pick .note { color: var(--muted); font-size: 13px; margin: 2px 0 8px; }
+  .pick label { display: flex; gap: 8px; align-items: center; margin: 6px 0; font-size: 13px; }
+  .pick label input[type=text] { flex: 1; }
   /* the file list: virtualized rows of two lines (web/share-client/dialog.ts), in one stable order */
-  :is(#sharedlg #sharelist, #dldepslist) { position: relative; height: 30vh; min-height: 160px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; margin: 6px 0; }
-  :is(#sharedlg #sharelistinner, #dldepslistinner) { position: relative; }
-  :is(#sharedlg, #dldepsdlg) .sharerow { position: absolute; left: 0; right: 0; height: 40px; padding: 2px 8px; box-sizing: border-box; font-size: 13px; }
-  :is(#sharedlg, #dldepsdlg) .sharerow label { margin: 0; white-space: nowrap; }
-  :is(#sharedlg, #dldepsdlg) .sharerow .name { overflow: hidden; }
-  :is(#sharedlg, #dldepsdlg) .sharerow .size { color: var(--muted); margin-left: auto; padding-left: 8px; }
-  :is(#sharedlg, #dldepsdlg) .sharerow .why { color: var(--muted); font-size: 12px; padding-left: 24px; height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  :is(#sharedlg, #dldepsdlg) .sharebar button { font-size: 12px; }
+  .pick .plist { position: relative; height: 30vh; min-height: 160px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; margin: 6px 0; }
+  .pick .plist > div { position: relative; }
+  .pick .sharerow { position: absolute; left: 0; right: 0; height: 40px; padding: 2px 8px; box-sizing: border-box; font-size: 13px; }
+  .pick .sharerow label { margin: 0; white-space: nowrap; }
+  .pick .sharerow .name { overflow: hidden; }
+  .pick .sharerow .size { color: var(--muted); margin-left: auto; padding-left: 8px; }
+  .pick .sharerow .why { color: var(--muted); font-size: 12px; padding-left: 24px; height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pick .sharebar button { font-size: 12px; }
   #shareupload.busy::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 6px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: sbspin .8s linear infinite; vertical-align: -1px; }
   @keyframes sbspin { to { transform: rotate(360deg); } }
   /* (an always-present live region: "Checking…" once the dialog is open, then the check's outcome, which the
@@ -192,7 +192,7 @@
   #sharechecking:empty { margin: 0; }
   #sharechecking[data-state="done"] { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   @media (prefers-reduced-motion: reduce) { #shareupload.busy::before { animation: none; border: 0; border-radius: 0; width: auto; height: auto; content: "…"; } }
-  :is(#sharedlg, #dldepsdlg) .result { overflow-wrap: anywhere; font-size: 13px; }
+  .pick .result { overflow-wrap: anywhere; font-size: 13px; }
   #exdlg { border: 1px solid var(--line); border-radius: 10px; background: var(--cell); color: var(--fg); padding: 14px 16px; width: min(560px, 92vw); }
   #exdlg::backdrop { background: rgba(0,0,0,.35); }
   #exdlg .exnote { color: var(--muted); font-size: 13px; margin: 4px 0 8px; }
@@ -460,7 +460,7 @@
   <p class="exnote">Each opens as a new notebook; yours stays saved.</p>
   <div id="exlist"></div>
 </dialog>
-<dialog id="sharedlg" aria-labelledby="sharetitle">
+<dialog id="sharedlg" class="pick" aria-labelledby="sharetitle">
   <form method="dialog" style="display:flex;justify-content:space-between;align-items:center"><b id="sharetitle">Share</b><button aria-label="Close">✕</button></form>
   <h4>A link with the notebook in it</h4>
   <p class="note">No account needed. The link holds the cells' code and text, not outputs or files, and is never sent to a server.</p>
@@ -474,7 +474,7 @@
     <label>Title <input type="text" id="sharetitlein" maxlength="200"></label>
     <label>License <select id="sharelicense"><option value="CC-BY-4.0">CC BY 4.0</option><option value="CC0-1.0">CC0 (public domain)</option><option value="MIT">MIT</option><option value="Apache-2.0">Apache 2.0</option><option value="">None given</option></select></label>
     <div class="sharebar"><button type="button" id="shareall">Select all</button> <button type="button" id="sharenone">Select none</button></div>
-    <div id="sharelist" role="group" aria-label="Files to include"><div id="sharelistinner"></div></div>
+    <div id="sharelist" class="plist" role="group" aria-label="Files to include"><div id="sharelistinner"></div></div>
     <p class="note" id="sharestatus" aria-live="polite"></p>
     <p class="note" id="sharesummary"></p>
     <button class="primary" id="shareupload">Upload</button> <span id="shareprogress" class="note"></span>
@@ -484,11 +484,11 @@
   <!-- (outside #shareup, which a site without sharing hides: its outcome is announced too) -->
   <p class="note" id="sharechecking" aria-live="polite"></p>
 </dialog>
-<dialog id="dldepsdlg" aria-labelledby="dldepstitle">
+<dialog id="dldepsdlg" class="pick" aria-labelledby="dldepstitle">
   <form method="dialog" style="display:flex;justify-content:space-between;align-items:center"><b id="dldepstitle">Download with its files</b><button aria-label="Close">✕</button></form>
-  <p class="note">This notebook and the files you choose, as one .zip. The files it uses are checked; check or uncheck any.</p>
+  <p class="note">This notebook and the files you check, as one .zip.</p>
   <div class="sharebar"><button type="button" id="dldepsall">Select all</button> <button type="button" id="dldepsnone">Select none</button></div>
-  <div id="dldepslist" class="sharelist" role="group" aria-label="Files to include"><div id="dldepslistinner"></div></div>
+  <div id="dldepslist" class="plist" role="group" aria-label="Files to include"><div id="dldepslistinner"></div></div>
   <p class="note" id="dldepsstatus" aria-live="polite"></p>
   <p class="note" id="dldepssummary"></p>
   <button class="primary" id="dldepsgo">Download .zip</button> <span id="dldepsprogress" class="note"></span>
