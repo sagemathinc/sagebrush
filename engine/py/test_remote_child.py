@@ -161,6 +161,28 @@ def test_seed():
     assert a == b != c, (a, b, c)
 
 
+def test_python_semantics():
+    """grader's #762 group E, each against CPython's own behaviour: `_` is the last value (C8); a traceback names a
+    cell's private name as written, not mangled (C9); a run without a seed after a seeded one isn't deterministic
+    (C7); a method doesn't see its class body's names (M2)."""
+    k = kernel()
+    out, _, _, _ = k.run("1 + 1")
+    out, err, _, _ = k.run("_ * 10")
+    assert out == "20\n", (out, err)
+    _, err, _, done = k.run("_nope_q + 1", mangle="c9")
+    assert done.get("error") and "NameError" in err and "_nope_q" in err and "_cell_" not in err, err
+    # (a seed holds for its run only: the engine's seed hook is set for it, and cleared for the next unseeded run)
+    out, _, _, _ = k.run("__import__('builtins').__pyjs_seed__ is not None", seed="12" * 32)
+    assert out == "True\n", out
+    out, _, _, _ = k.run("__import__('builtins').__pyjs_seed__ is None")
+    assert out == "True\n", out
+    code = "_a = 1\nclass K:\n    _a = 2\n    def f(self):\n        return _a\nK().f()"
+    want = {}
+    exec(compile(code.rsplit("\n", 1)[0], "x", "exec"), want)
+    out, err, _, _ = k.run(code, mangle="m2")
+    assert out == "%r\n" % want["K"]().f() == "1\n", (out, err)
+
+
 def test_interrupt():
     k = kernel()
     k.n += 1
