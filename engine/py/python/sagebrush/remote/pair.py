@@ -104,8 +104,7 @@ def version_at_least(v, need):
 
 
 VERSION = runner_version()
-UPGRADE = ("Run the newest: uvx sagebrush@latest remote --loopback. Or, in your own Python environment: "
-           "python -m pip install -U sagebrush, then python -m sagebrush remote --loopback again.")
+UPGRADE = "Run the newest version: uvx sagebrush@latest remote --loopback (it always fetches the latest)."
 
 
 def b64url(b):

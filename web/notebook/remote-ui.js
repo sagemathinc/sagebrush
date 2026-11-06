@@ -319,7 +319,8 @@ export const PAIRED = {
   label: "Your computer",
   ready: "Your computer · ready",
   sessionGone: "this page needs a new link from your computer: run sagebrush remote --loopback again, then choose Your computer and paste it",
-  upgrade: "Run the newest version: uvx sagebrush@latest remote --loopback. Or, in your own Python environment: python -m pip install -U sagebrush, then python -m sagebrush remote --loopback again.",
+  upgrade: "Run the newest version: uvx sagebrush@latest remote --loopback (it always fetches the latest).",
+  config: "Use This browser for now, and please report it.",
   blocked: "If you blocked this site's access to apps on this device, allow it in the site settings (the icon left of the address), then Retry.",
 };
 
@@ -369,7 +370,8 @@ export function pairedStarter({ WebSocket, helloMs, min } = {}) {
         // (a code that may have reached the runner is never sent again (astra's RETRY-2): only one whose hello was
         // never handed to a socket (nothing listening, blocked, or no answer before it opened) is kept for Retry)
         if (e?.sent !== false) pending = null;
-        r.hint = e?.kind === "unreachable" ? PAIRED.blocked : e?.kind === "old" ? PAIRED.upgrade : null;
+        r.hint = e?.kind === "unreachable" ? PAIRED.blocked : e?.kind === "old" ? PAIRED.upgrade : e?.kind === "config" ? PAIRED.config : null;
+        r.noRetry = e?.kind === "config"; // (board's V-1: nothing the person can retry; This browser only)
         if (how.session && e?.kind === "refused") remembered = null; // (the runner forgot it: a new code is needed)
         return how.session && e?.kind === "refused" ? PAIRED.sessionGone : e?.message ?? String(e);
       }
@@ -401,6 +403,7 @@ export function pairedStarter({ WebSocket, helloMs, min } = {}) {
       gateway: null,
       failed: null,
       hint: null, // (a way forward said after the failure, outside its parentheses)
+      noRetry: false,
       retry: bind,
       get tunnel() { return tunnel; },
       close() {
@@ -420,15 +423,12 @@ export function pairedStarter({ WebSocket, helloMs, min } = {}) {
 export const PAIR_SHEET = {
   title: "Run on your computer",
   consent: "Code you run will run on your computer, with your files and permissions.",
-  how: "Run one of these in a terminal on this computer. It prints a link: open it, or paste it here.",
+  how: "Run this in a terminal on this computer. It prints a link: open it, or paste it here.",
   // (two ways to run the runner, each with Copy: uvx's isolated Python is always current but lacks the person's own
   // packages, so their own environment gets pip; python -m makes the kernel's Python the one they're in)
-  quickLabel: "Quickest, if you have uv (Sagebrush's own Python):",
-  getUv: "No uv? Its installer is at docs.astral.sh/uv.",
+  quickLabel: "It fetches the newest Sagebrush and runs it in its own Python (William, Nov 6: one command, uvx):",
+  getUv: "No uv? Install it first: curl -LsSf https://astral.sh/uv/install.sh | sh (or see docs.astral.sh/uv).",
   command: "uvx sagebrush@latest remote --loopback",
-  ownLabel: "In your own Python environment (your venv or conda env), with your packages:",
-  ownNote: "If pip says the environment is externally managed, activate your venv or conda env first (or make one: python3 -m venv .venv, then source .venv/bin/activate).",
-  ownCommand: "python -m pip install -U sagebrush && python -m sagebrush remote --loopback",
   windows: "On Windows, run these in WSL (Windows Subsystem for Linux); this browser pairs with it as usual.",
   paste: "The link (or its pairing code and port)",
   lna: "Your browser may ask to let this site access apps on this device: click Allow.",
@@ -483,8 +483,7 @@ export function pairSheet(doc = document, prefill = null, userAgent = globalThis
   const acts = el("div", null, { className: "acts" });
   acts.append(no, ok);
   dlg.append(el("h2", PAIR_SHEET.title, { id: "pairtitle" }), el("p", PAIR_SHEET.consent, { className: "preview" }), el("p", PAIR_SHEET.how),
-    row(PAIR_SHEET.quickLabel, PAIR_SHEET.command, "Copy the uvx command", PAIR_SHEET.getUv),
-    row(PAIR_SHEET.ownLabel, PAIR_SHEET.ownCommand, "Copy the pip command", PAIR_SHEET.ownNote),
+    row(PAIR_SHEET.quickLabel, PAIR_SHEET.command, "Copy the command", PAIR_SHEET.getUv),
     ...(windows ? [el("p", PAIR_SHEET.windows, { className: "note" })] : []), field,
     el("p", safari ? PAIR_SHEET.safari : PAIR_SHEET.lna, { className: "note" }), said, acts);
   doc.body.append(dlg);
@@ -606,7 +605,7 @@ export function remoteSwitch(page, deps = {}) {
         if (ok) clearActions();
         else {
           page.status(`${label}: couldn't connect (${owner.r.failed}).${owner.r.hint ? " " + owner.r.hint : ""}`);
-          offer(owner, ["retry", "switch"]);
+          offer(owner, owner.r.noRetry ? ["switch"] : ["retry", "switch"]);
         }
       }),
       reconnect: () => act("Reconnect (a fresh kernel: its variables are lost)", async () => {
@@ -698,7 +697,7 @@ export function remoteSwitch(page, deps = {}) {
       r.kernel.on?.("lifecycle", (_old, lc) => { if (lc.phase === "moved") offer(owner, ["reconnect", "switch"]); });
       if (r.failed) {
         page.status(`${label}: couldn't connect (${r.failed}).${r.hint ? " " + r.hint : ""}`);
-        offer(owner, ["retry", "switch"]);
+        offer(owner, r.noRetry ? ["switch"] : ["retry", "switch"]);
       } else if (skipSheet) {
         page.status(`${deps.readyText ?? statusText("ready (remote)", network())} · a fresh kernel: earlier variables are gone`);
       }

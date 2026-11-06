@@ -479,10 +479,16 @@ for (const [what, m, code] of [
     send(t) { super.send(t); if (JSON.parse(t).method === "hello") this.deliver({ jsonrpc: "2.0", id: "h1", result: { ...RESULT, version: "0.8.2" } }); }
   }
   const r = await pairedStarter({ WebSocket: Old, min: "0.9.0" })({ notebook: "nb", answer: { code: "ABCDEFGHIJKLMNOPQRSTUVWXYZ", port: 4321 } });
-  check(/is 0\.8\.2; this page needs 0\.9\.0/.test(r.failed) && r.hint === PAIRED.upgrade && /uvx sagebrush@latest/.test(r.hint) && /pip install -U sagebrush/.test(r.hint) && !r.kernel.ready,
-    `the too-old runner's words: the reason, then both upgrade commands; nothing bound (${r.failed} / ${r.hint})`);
+  check(/is 0\.8\.2; this page needs 0\.9\.0/.test(r.failed) && r.hint === PAIRED.upgrade && /uvx sagebrush@latest/.test(r.hint) && !/pip/.test(r.hint) && !r.kernel.ready && !r.noRetry,
+    `the too-old runner's words: the reason, then the uvx command; nothing bound (${r.failed} / ${r.hint})`);
   r.close();
-  check(PAIR_SHEET.command === "uvx sagebrush@latest remote --loopback" && PAIR_SHEET.ownCommand === "python -m pip install -U sagebrush && python -m sagebrush remote --loopback", "the sheet's two commands");
+  check(PAIR_SHEET.command === "uvx sagebrush@latest remote --loopback" && !("ownCommand" in PAIR_SHEET) && !Object.values(PAIR_SHEET).some((v) => /pip/.test(v)),
+    "the sheet: one command, uvx, and no pip (William, Nov 6: uvx only)");
+  // (board's V-1: a broken minimum is ours, not the person's: said so, This browser offered, no Retry)
+  const rc = await pairedStarter({ WebSocket: Old, min: "" })({ notebook: "nb", answer: { code: "ABCDEFGHIJKLMNOPQRSTUVWXYZ", port: 4321 } });
+  check(rc.failed === "this page has a broken version setting (a Sagebrush problem, not your computer)" && rc.hint === PAIRED.config && rc.noRetry === true,
+    `a broken minimum: the words, the hint, no Retry (${rc.failed} / ${rc.hint})`);
+  rc.close();
 }
 
 // ================= grader's #778 pins (r778 at 67a59056)

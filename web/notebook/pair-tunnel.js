@@ -398,7 +398,7 @@ export function pairTunnel({ port, code, session, remember = false, jwk, jkt, We
         && typeof r.version === "string" && VERSION_RE.test(r.version);
       if (!ok) return finish(new PairError("your computer's answer wasn't a pairing answer", { kind: "protocol" }));
       // (a runner older than this page needs: refused before anything is bound; the code was seen, so a new link)
-      if (min !== null && !(typeof min === "string" && NEED_RE.test(min))) return finish(new PairError("this page's required sagebrush version isn't valid, so it pairs with no runner", { kind: "config" }));
+      if (min !== null && !(typeof min === "string" && NEED_RE.test(min))) return finish(new PairError("this page has a broken version setting (a Sagebrush problem, not your computer)", { kind: "config" }));
       if (min !== null && !versionAtLeast(r.version, min)) return finish(new PairError(`your computer's sagebrush is ${r.version}; this page needs ${min} or newer`, { kind: "old" }));
       const t = new Tunnel(ws, r, { onClose });
       t.session = r.session ?? null;

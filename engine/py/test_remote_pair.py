@@ -919,8 +919,8 @@ async def test_version_in_the_hello_and_needs():
         r = (await w.json())["result"]
         assert r["version"] == "0.8.2", r
         warn = [m for m in said if "needs sagebrush" in m]
-        assert len(warn) == 1 and "needs sagebrush 0.9.0 or newer; this is 0.8.2. Run the newest: uvx sagebrush@latest" in warn[0], said
-        assert "pip install -U sagebrush" in warn[0] and "  " not in warn[0] and warn[0].count("\n") == 1, warn
+        assert len(warn) == 1 and "needs sagebrush 0.9.0 or newer; this is 0.8.2. Run the newest version: uvx sagebrush@latest" in warn[0], said
+        assert "pip" not in warn[0] and "  " not in warn[0] and warn[0].count("\n") == 1, warn
         s.close()
         said.clear()
         s = P.PairServer(err=said.append)
