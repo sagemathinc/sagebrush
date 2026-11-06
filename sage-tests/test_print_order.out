@@ -121,7 +121,7 @@ S120 a^2*(b + c)*d^3 || a^{2} {\left(b + c\right)} d^{3}
 S121 ((a + b)*c + d)*l || {\left({\left(a + b\right)} c + d\right)} l
 S122 (1/2*x + 1/2)*y || {\left(\frac{1}{2} \, x + \frac{1}{2}\right)} y
 S123 3/4*a*b + (2/3*a + 2/3*b)*c || \frac{3}{4} \, a b + {\left(\frac{2}{3} \, a + \frac{2}{3} \, b\right)} c
-S124 (x + 1)*sin(x) + x^2 || {\left(x + 1\right)} \sin\left(x\right) + x^{2}
+S124 x^2 + (x + 1)*sin(x) || x^{2} + {\left(x + 1\right)} \sin\left(x\right)
 S125 (y - 1)*e^y || {\left(y - 1\right)} e^{y}
 S126 sqrt(2)*(a + b) || \sqrt{2} {\left(a + b\right)}
 S127 (x + 1)*y + x*sqrt(y) || {\left(x + 1\right)} y + x \sqrt{y}

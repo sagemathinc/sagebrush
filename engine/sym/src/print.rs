@@ -7,7 +7,7 @@
 //! negative powers as a denominator (1/2*x^2/y, 1/2/x, (x + 1)/(x - 1)).
 
 use crate::expr::*;
-use crate::num::Num;
+use crate::num::{Num, Q};
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -144,6 +144,22 @@ fn term_factors_sorted(e: &Expr) -> Vec<Expr> {
 
 /// The order of the terms of a sum (Less: a is printed first).
 pub fn sum_order(a: &Expr, b: &Expr) -> Ordering {
+    // terms the extended P model covers: that order alone (one total order)
+    {
+        let (ra, rb) = (split_coeff(a).1, split_coeff(b).1);
+        if !ra.is_one() && !rb.is_one() && p_order_sum(&ra) && p_order_sum(&rb) {
+            let c = match (p_bare_const(&ra), p_bare_const(&rb)) {
+                (true, true) => p_atom_cmp(&rb, &ra).unwrap(),
+                (true, false) => Ordering::Less,
+                (false, true) => Ordering::Greater,
+                _ => pcmp(&rb, &ra),
+            };
+            if c != Ordering::Equal {
+                return c;
+            }
+            return split_coeff(b).0.cmp(&split_coeff(a).0).then_with(|| canon_cmp(a, b));
+        }
+    }
     let class = |e: &Expr| -> u8 {
         if e.is_num() {
             3
@@ -167,16 +183,6 @@ pub fn sum_order(a: &Expr, b: &Expr) -> Ordering {
     let (ma, mb) = (fun_times_symbols(a), fun_times_symbols(b));
     if ma != mb && (ma && lone_fun(b) || mb && lone_fun(a)) {
         return if ma { Ordering::Less } else { Ordering::Greater };
-    }
-    // pure symbolic terms: Sage's print order (P1-P4; Greater = printed first)
-    {
-        let (ra, rb) = (split_coeff(a).1, split_coeff(b).1);
-        if !ra.is_one() && !rb.is_one() && p_order(&ra) && p_order(&rb) {
-            let c = pcmp(&rb, &ra);
-            if c != Ordering::Equal {
-                return c;
-            }
-        }
     }
     let (da, db) = (degree(a), degree(b));
     if da != db {
@@ -428,14 +434,28 @@ fn sorted_terms(e: &Expr) -> Vec<Expr> {
 // Ordering::Greater = printed first.
 
 fn p_pure(e: &Expr) -> bool {
+    p_pure_x(e, false)
+}
+
+/// an exact rational number
+fn p_rat(e: &Expr) -> Option<Q> {
+    e.as_num().filter(|n| n.is_exact() && n.is_real()).and_then(|n| n.as_rat().cloned())
+}
+
+/// P-pure; with ext (the terms of a sum) also rational powers, pi and
+/// euler_gamma, numbers to a fractional power (sqrt(2)), e and e^n
+fn p_pure_x(e: &Expr, ext: bool) -> bool {
     match &e.kind {
         Kind::Sym(_) => true,
         Kind::Num(_) => false,
-        Kind::Add(v) => v.iter().all(|t| { let r = split_coeff(t).1; r.is_one() || p_pure(&r) }),
-        Kind::Mul(v) => v.iter().all(|f| f.is_num() || p_pure(f)),
-        Kind::Pow(..) if p_kernel(e) => true,
-        Kind::Pow(b, x) => x.as_i64().is_some() && p_pure(b),
-        Kind::Fun(..) => p_kernel(e),
+        Kind::Const(Const::Pi | Const::EulerGamma) => ext,
+        Kind::Const(Const::E) => ext,
+        Kind::Add(v) => v.iter().all(|t| { let r = split_coeff(t).1; r.is_one() || p_pure_x(&r, ext) }),
+        Kind::Mul(v) => v.iter().all(|f| f.is_num() || p_pure_x(f, ext)),
+        Kind::Pow(..) if p_kernel_x(e, ext) => true,
+        Kind::Pow(b, x) if x.as_i64().is_some() => p_pure_x(b, ext),
+        Kind::Pow(b, x) => ext && p_rat(x).is_some() && (p_rat(b).map_or(false, |r| r > Q::from_integer(0.into())) || p_pure_x(b, ext)),
+        Kind::Fun(..) => p_kernel_x(e, ext),
         _ => false,
     }
 }
@@ -445,12 +465,52 @@ fn p_pure(e: &Expr) -> bool {
 /// below the symbols, by its name, then its arguments; a lone kernel as a term
 /// of a sum comes after every other term.  Derivatives are left out.
 fn p_kernel(e: &Expr) -> bool {
-    let arg_ok = |a: &Expr| a.as_num().map_or(false, |n| n.is_exact() && n.is_real()) || p_pure(a);
+    p_kernel_x(e, true)
+}
+
+/// (with ext, e = exp(1) and e^n for a number n are kernels too, as in Sage)
+fn p_kernel_x(e: &Expr, ext: bool) -> bool {
+    let arg_ok = |a: &Expr| a.as_num().map_or(false, |n| n.is_exact() && n.is_real()) || p_pure_x(a, ext);
     match &e.kind {
         Kind::Fun(f, args) => !matches!(f, Fun::Deriv(..)) && !args.is_empty() && args.iter().all(arg_ok),
-        Kind::Pow(b, u) => b.is_const(Const::E) && !u.is_num() && arg_ok(u),
+        Kind::Pow(b, u) => b.is_const(Const::E) && (ext || !u.is_num()) && arg_ok(u),
+        Kind::Const(Const::E) => ext,
         _ => false,
     }
+}
+
+/// the terms of a sum in the P order (C0's boundary: every term the extended
+/// P model covers, so that the order of those terms is one total order)
+fn p_order_sum(e: &Expr) -> bool {
+    p_pure_x(e, true)
+}
+
+/// a lone pi or euler_gamma: Sage prints it before the other terms (pi + x^2)
+fn p_bare_const(e: &Expr) -> bool {
+    matches!(e.kind, Kind::Const(Const::Pi | Const::EulerGamma))
+}
+
+/// two atoms as bases (greater first): a number (the larger first), then
+/// euler_gamma, pi, then the symbols (the alphabetically earlier first)
+fn p_atom_cmp(a: &Expr, b: &Expr) -> Option<Ordering> {
+    let rank = |e: &Expr| -> Option<u8> {
+        match &e.kind {
+            Kind::Num(_) => Some(3),
+            Kind::Const(Const::EulerGamma) => Some(2),
+            Kind::Const(Const::Pi) => Some(1),
+            Kind::Sym(_) => Some(0),
+            _ => None,
+        }
+    };
+    let (ra, rb) = (rank(a)?, rank(b)?);
+    if ra != rb {
+        return Some(ra.cmp(&rb));
+    }
+    Some(match (&a.kind, &b.kind) {
+        (Kind::Num(m), Kind::Num(n)) => m.cmp(n),
+        (Kind::Sym(s), Kind::Sym(t)) => t.cmp(s),
+        _ => Ordering::Equal,
+    })
 }
 
 /// P-pure, without a sum of kernels among its factors (or as itself), nor a
@@ -473,6 +533,7 @@ fn p_kernel_parts(e: &Expr) -> (String, Vec<Expr>) {
     match &e.kind {
         Kind::Fun(f, args) => (f.name(), args.clone()),
         Kind::Pow(_, u) => ("exp".to_string(), vec![u.clone()]),
+        Kind::Const(Const::E) => ("exp".to_string(), vec![one()]),
         _ => (String::new(), vec![]),
     }
 }
@@ -520,24 +581,24 @@ fn p_norm(e: &Expr) -> Expr {
     e.clone()
 }
 
-fn p_be(f: &Expr) -> (Expr, i64) {
+fn p_be(f: &Expr) -> (Expr, Q) {
+    let one_q = || Q::from_integer(1.into());
     match &f.kind {
-        Kind::Pow(..) if p_kernel(f) => (f.clone(), 1),
-        Kind::Pow(b, x) => (p_norm(b), x.as_i64().unwrap_or(1)),
-        _ => (p_norm(f), 1),
+        Kind::Pow(..) if p_kernel(f) => (f.clone(), one_q()),
+        Kind::Pow(b, x) => (p_norm(b), p_rat(x).unwrap_or_else(one_q)),
+        _ => (p_norm(f), one_q()),
     }
 }
 
 /// P1: the degree; a sum factor counts its exponent (1), not its own degree
-fn p_deg(e: &Expr) -> i64 {
+fn p_deg(e: &Expr) -> Q {
+    let n = |k: i64| Q::from_integer(k.into());
     match &e.kind {
-        Kind::Sym(_) => 1,
-        Kind::Add(_) => 1,
-        Kind::Fun(..) => 1,
-        Kind::Pow(..) if p_kernel(e) => 1,
-        Kind::Pow(_, x) => x.as_i64().unwrap_or(1),
-        Kind::Mul(v) => v.iter().filter(|f| !f.is_num()).map(p_deg).sum(),
-        _ => 0,
+        Kind::Sym(_) | Kind::Add(_) | Kind::Fun(..) | Kind::Const(_) => n(1),
+        Kind::Pow(..) if p_kernel(e) => n(1),
+        Kind::Pow(_, x) => p_rat(x).unwrap_or_else(|| n(1)),
+        Kind::Mul(v) => v.iter().filter(|f| !f.is_num()).map(p_deg).fold(n(0), |a, b| a + b),
+        _ => n(0),
     }
 }
 
@@ -639,9 +700,9 @@ fn pmul_cmp(a: &Expr, b: &Expr) -> Ordering {
         (_, Kind::Add(_)) => p_add_base(&b, &a).reverse(),
         _ => {
             let ((ba, xa), (bb, xb)) = (p_be(&a), p_be(&b));
-            let c = match (&ba.kind, &bb.kind) {
-                (Kind::Sym(s), Kind::Sym(t)) => t.cmp(s),
-                _ => pcmp(&ba, &bb),
+            let c = match p_atom_cmp(&ba, &bb) {
+                Some(c) => c,
+                None => pcmp(&ba, &bb),
             };
             if c != Ordering::Equal { return c; }
             xa.cmp(&xb)
@@ -665,10 +726,8 @@ fn p_add_base(s: &Expr, x: &Expr) -> Ordering {
 fn p_pow_pow(a: &Expr, b: &Expr) -> Ordering {
     let ((ba, xa), (bb, xb)) = (p_be(a), p_be(b));
     if xa != xb { return xa.cmp(&xb); }
-    match (&ba.kind, &bb.kind) {
-        (Kind::Sym(s), Kind::Sym(t)) => t.cmp(s),
-        _ => pcmp(&ba, &bb),
-    }
+    if let Some(c) = p_atom_cmp(&ba, &bb) { return c; }
+    pcmp(&ba, &bb)
 }
 
 // ------------------------------------------------------------------ Sage strings
@@ -794,6 +853,8 @@ fn sage(e: &Expr) -> (String, u8) {
             (s, P_ADD)
         }
         Kind::Mul(v) => print_mul(v),
+        Kind::Pow(b, x) if neg_led_power(b, x) == Some(true) => print_mul(&[e.clone()]),
+        Kind::Pow(b, x) if neg_led_power(b, x) == Some(false) => print_pow(&neg(b), x, true),
         Kind::Pow(b, x) => print_pow(b, x, true),
         Kind::Fun(f, a) => (print_fun(f, a), P_ATOM),
         Kind::Rel(r, a, b) => {
@@ -850,6 +911,18 @@ fn print_pow(b: &Expr, x: &Expr, alone: bool) -> (String, u8) {
     (format!("{}^{}", base, ex), P_POW)
 }
 
+/// a sum whose first printed term is negative (Sage prints it negated, the sign pulled out)
+fn neg_led_sum(e: &Expr) -> bool {
+    matches!(e.kind, Kind::Add(_)) && split_coeff(&sorted_terms(e)[0]).0.looks_negative()
+}
+
+/// an integer power of such a sum: Sage prints it of the negated sum, an odd power as a product
+/// with the sign pulled out (-(pi - x)^3, -1/(pi - x)^3), an even one as a power ((pi - x)^(-2))
+fn neg_led_power(b: &Expr, x: &Expr) -> Option<bool> {
+    let k = x.as_i64()?;
+    neg_led_sum(b).then_some(k % 2 != 0)
+}
+
 /// A product: coefficient, numerator factors, then "/" and the denominator.
 fn print_mul(v: &[Expr]) -> (String, u8) {
     let mut coeff = Num::one();
@@ -871,11 +944,16 @@ fn print_mul(v: &[Expr]) -> (String, u8) {
     // a sum factor led by a negative term prints negated, its sign pulled out
     // (Sage: -(x - 1)/y, -(2/x - 3)/(y - 1/x); render only, the expression is unchanged)
     for f in numer.iter_mut().chain(denom.iter_mut()) {
-        if matches!(f.kind, Kind::Add(_)) {
-            let lead = sorted_terms(f)[0].clone();
-            if split_coeff(&lead).0.looks_negative() {
-                *f = neg(f);
-                coeff = coeff.neg();
+        if neg_led_sum(f) {
+            *f = neg(f);
+            coeff = coeff.neg();
+        } else if let Kind::Pow(b, x) = &f.kind {
+            // and an integer power of one: (x - pi)^3 prints -(pi - x)^3, (x - pi)^2 as (pi - x)^2
+            if let (true, Some(k)) = (neg_led_sum(b), x.as_i64()) {
+                if k % 2 != 0 {
+                    coeff = coeff.neg();
+                }
+                *f = pow(&neg(b), x);
             }
         }
     }
@@ -1006,6 +1084,8 @@ fn latex(e: &Expr) -> (String, u8) {
             (s, P_ADD)
         }
         Kind::Mul(v) => latex_mul(v),
+        Kind::Pow(b, x) if neg_led_power(b, x) == Some(true) => latex_mul(&[e.clone()]),
+        Kind::Pow(b, x) if neg_led_power(b, x) == Some(false) => latex_pow(&neg(b), x, true),
         Kind::Pow(b, x) => latex_pow(b, x, true),
         Kind::Fun(Fun::Abs, a) => (format!("{{\\left| {} \\right|}}", latex(&a[0]).0), P_ATOM),
         Kind::Fun(f, a) => {
@@ -1091,11 +1171,16 @@ fn latex_mul(v: &[Expr]) -> (String, u8) {
     // a sum factor led by a negative term prints negated, its sign pulled out
     // (Sage: -(x - 1)/y, -(2/x - 3)/(y - 1/x); render only, the expression is unchanged)
     for f in numer.iter_mut().chain(denom.iter_mut()) {
-        if matches!(f.kind, Kind::Add(_)) {
-            let lead = sorted_terms(f)[0].clone();
-            if split_coeff(&lead).0.looks_negative() {
-                *f = neg(f);
-                coeff = coeff.neg();
+        if neg_led_sum(f) {
+            *f = neg(f);
+            coeff = coeff.neg();
+        } else if let Kind::Pow(b, x) = &f.kind {
+            // and an integer power of one: (x - pi)^3 prints -(pi - x)^3, (x - pi)^2 as (pi - x)^2
+            if let (true, Some(k)) = (neg_led_sum(b), x.as_i64()) {
+                if k % 2 != 0 {
+                    coeff = coeff.neg();
+                }
+                *f = pow(&neg(b), x);
             }
         }
     }
@@ -1227,7 +1312,12 @@ mod print_order_tests {
         cyclic(mul_order, a, b)
     }
 
-    const TERM_SETS: [&[&str]; 6] = [
+    const TERM_SETS: [&[&str]; 10] = [
+        // daybreak3's review of #754 (a cycle before C0's boundary covered every kind of term)
+        &["sin(x)^2", "(x + 1)*sin(x)", "x^2"],
+        &["x^2", "cos(x)^2", "(cos(x) + 1)*sin(x)", "x*e^x", "sqrt(2)*x", "pi"],
+        &["sqrt(x)", "sqrt(sin(x))", "x^(3/2)", "sin(x)/x", "1/x", "e"],
+        &["pi*x", "a*x", "y*cos(x)", "(y - 1)*cos(x)", "x/(x + 1)", "sin(1)"],
         &["a^2*b", "a^2*x", "2*a*b*x", "2*a*x^2", "b*x^2", "x^3"],
         &["(x + y)*x", "x^2", "x*y", "y^2", "(x - 1)*x"],
         &["a*b", "(a + b)*c", "a*c", "c*d", "(a - b)*c"],
@@ -1254,6 +1344,45 @@ mod print_order_tests {
             caught += r.is_some() as usize;
         }
         assert!(caught > 0, "the check accepts a non-transitive mutant of sum_order");
+    }
+
+    /// a pool of every kind of term (symbols, kernels, products and sums with kernels, e, pi,
+    /// radicals, rational powers, quotients): sum_order has no cycle on any triple
+    const POOL: &[&str] = &[
+        "x", "y", "x^2", "x*y", "y^2", "x^3", "2*x", "a", "a*x",
+        "sin(x)", "sin(x)^2", "cos(x)", "cos(x)^2", "sin(2*x)", "e^x", "e^(2*x)", "log(x)", "f(x)", "sin(y)",
+        "x*sin(x)", "x^2*sin(x)", "sin(x)*cos(x)", "x*e^x", "y*cos(x)", "sin(1)", "cos(x)^3",
+        "(x + 1)*sin(x)", "(cos(x) + 1)*sin(x)", "(x + 1)*e^x", "(x + 1)^2*sin(x)", "(y - 1)*cos(x)", "(sin(x) + 1)*x",
+        "sqrt(x)", "x^(3/2)", "1/x", "sin(x)/x", "x/(x + 1)", "sqrt(2)*x", "pi*x", "sin(x)^(1/2)",
+        "e", "pi", "euler_gamma", "sqrt(2)", "2^(1/3)", "pi^2", "sqrt(2)*pi", "e*x", "e^2",
+    ];
+
+    fn triple_cycles(cmp: Cmp, xs: &[Expr]) -> (usize, Option<String>) {
+        let mut n = 0;
+        let mut first = None;
+        for a in xs {
+            for b in xs {
+                if cmp(a, b) == Ordering::Greater {
+                    continue;
+                }
+                for c in xs {
+                    if cmp(b, c) != Ordering::Greater && cmp(a, c) == Ordering::Greater {
+                        n += 1;
+                        first.get_or_insert_with(|| format!("{} <= {} <= {}", to_string(a), to_string(b), to_string(c)));
+                    }
+                }
+            }
+        }
+        (n, first)
+    }
+
+    #[test]
+    fn term_order_is_total_on_the_pool() {
+        let xs = exprs(POOL);
+        let (n, first) = triple_cycles(sum_order, &xs);
+        assert_eq!(n, 0, "sum_order cycles on the pool, first: {:?}", first);
+        let (m, _) = triple_cycles(sum_order_mutant, &xs);
+        assert!(m > 0, "the pool check accepts a non-transitive mutant of sum_order");
     }
 
     #[test]
