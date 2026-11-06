@@ -902,7 +902,8 @@ mod tests {
         assert_eq!(re(d(-1.0).pow_int(i64::MIN + 1)), -1.0);
         assert_eq!(re(d(2.0).pow_int(-1)), 0.5);
         assert_eq!(re(d(2.0).pow_int(0)), 1.0);
-        assert_eq!(re(d(2.0).pow_int(i64::MAX)), f64::INFINITY);
+        // (the largest exponent, -(i64::MIN + 1))
+        assert_eq!(re(d(2.0).pow_int(-(i64::MIN + 1))), f64::INFINITY);
         assert_eq!(Num::one().pow_int(i64::MIN).sage_str(), "1");
         assert_eq!(Num::i().pow_int(i64::MIN).sage_str(), "1");
     }
