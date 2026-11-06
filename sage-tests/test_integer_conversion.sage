@@ -33,3 +33,7 @@ for a in [("0x_ff",), ("1__0",), ("_10",), ("10_",), ("+_10",), ("_",), ("__",),
           ("10", QQ(2)), (b"12",), (b"0x1f",), (b"12", 16), (bytearray(b"12"),), ([1],), ((1, 2),), ({},), (set(),)]:
     T(*a)
     Z(*a)
+# a numeric base is truncated toward zero before its range is checked (2.5 and 7/3 are 2, 1/2 is 0, -2.5 is -2)
+for b in [2.5, 7/3, 1/2, -1/2, -2.5, RR(2.5), RDF(2.5), 2.9, 36.9, 37/1, -0.5, float(16.7), QQ(33)/2]:
+    T("10", b)
+    Z("10", b)

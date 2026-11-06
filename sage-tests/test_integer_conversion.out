@@ -184,3 +184,29 @@ ZZ ((1, 2),) !! TypeError unable to coerce <class 'tuple'> to an integer
 ZZ ({},) !! TypeError unable to coerce <class 'dict'> to an integer
 (set(),) !! TypeError unable to coerce <class 'set'> to an integer
 ZZ (set(),) !! TypeError unable to coerce <class 'set'> to an integer
+('10', 2.50000000000000) -> 2
+ZZ ('10', 2.50000000000000) -> 2
+('10', 7/3) -> 2
+ZZ ('10', 7/3) -> 2
+('10', 1/2) -> 10
+ZZ ('10', 1/2) -> 10
+('10', -1/2) -> 10
+ZZ ('10', -1/2) -> 10
+('10', -2.50000000000000) !! ValueError base (=-2) must be 0 or between 2 and 36
+ZZ ('10', -2.50000000000000) !! ValueError base (=-2) must be 0 or between 2 and 36
+('10', 2.50000000000000) -> 2
+ZZ ('10', 2.50000000000000) -> 2
+('10', 2.5) -> 2
+ZZ ('10', 2.5) -> 2
+('10', 2.90000000000000) -> 2
+ZZ ('10', 2.90000000000000) -> 2
+('10', 36.9000000000000) -> 36
+ZZ ('10', 36.9000000000000) -> 36
+('10', 37) !! ValueError base (=37) must be 0 or between 2 and 36
+ZZ ('10', 37) !! ValueError base (=37) must be 0 or between 2 and 36
+('10', -0.500000000000000) -> 10
+ZZ ('10', -0.500000000000000) -> 10
+('10', 16.7) -> 16
+ZZ ('10', 16.7) -> 16
+('10', 33/2) -> 16
+ZZ ('10', 33/2) -> 16
