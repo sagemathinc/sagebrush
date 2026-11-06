@@ -1619,22 +1619,76 @@ def _intdiv(a, b):
     return Rational._from_coprime_ints(a, b)
 
 
-def Integer(x):
-    """The integer x.  A real number must be integral: Integer(3.0) is 3,
-    and Integer(3.5) is a TypeError (int() would truncate it).
+def Integer(x=0, base=None):
+    """The integer x, converted as Sage converts it.  A real number must be
+    integral and a rational a whole number (Integer(3.5) and Integer(1/2)
+    are TypeErrors: int() would truncate them); a string may carry a sign,
+    a 0x, 0o or 0b prefix and underscores, or be read in base (2 to 36);
+    None is 0.
 
     EXAMPLES::
 
         sage: Integer(7), Integer('123456789012345678901234567890'), Integer(2.0^70)
         (7, 123456789012345678901234567890, 1180591620717411303424)
+        sage: Integer('-0x1f'), Integer('ff', 16), Integer(4/2), Integer(None)
+        (-31, 255, 2, 0)
         sage: Integer(3.5)
         Traceback (most recent call last):
         ...
         TypeError: Attempt to coerce non-integral RealNumber to Integer
+        sage: Integer(1/2)
+        Traceback (most recent call last):
+        ...
+        TypeError: no conversion of this rational to integer
     """
-    if not isinstance(x, int) and _real_kind(x) is not None:
+    return _int_value(x, base)
+
+
+def _int_value(x=0, base=None):
+    """Integer(x, base) as a Python int (also CPython's Integer class's)."""
+    if isinstance(x, str):
+        return _integer_from_str(x, 0 if base is None else int(base))
+    if x is None:
+        return 0
+    if isinstance(x, bool):
+        return int(x)
+    if isinstance(x, int):
+        return x
+    if _real_kind(x) is not None:
         return _integral_real(x)
+    if isinstance(x, _Fraction):
+        if x.denominator != 1:
+            raise TypeError("no conversion of this rational to integer")
+        return int(x.numerator)
+    if isinstance(x, complex):
+        # (Sage's own names for the classes it refuses)
+        cls = "<class 'complex'>" if type(x) is complex else "<class 'sage.rings.complex_mpfr.ComplexNumber'>"
+        raise TypeError("unable to coerce %s to an integer" % cls)
     return int(x)
+
+
+def _integer_from_str(s, base):
+    """A string as Sage reads an integer: ASCII digits only, surrounding
+    spaces, a sign and underscores allowed; in base 0 a 0x, 0o or 0b prefix
+    sets the base (else decimal, leading zeros included: '010' is 10); in an
+    explicit base no prefix."""
+    import re
+    if base != 0 and not 2 <= base <= 36:
+        raise ValueError("base (=%d) must be 0 or between 2 and 36" % base)
+    t = s.strip()
+    m = re.fullmatch(r"([+-]?)0([xXoObB])(.*)", t) if base in (0, 2, 8, 16) else None
+    if m is not None:
+        b = {"x": 16, "o": 8, "b": 2}[m.group(2).lower()]
+        if base == 0:
+            t, base = m.group(1) + m.group(3), b
+        elif base == b:
+            t = None  # (Integer('0xff', 16) is refused: int() would accept it)
+    if t is not None and s.isascii() and re.fullmatch(r"[+-]?[0-9A-Za-z]+(_[0-9A-Za-z]+)*", t):
+        try:
+            return int(t, base or 10)
+        except ValueError:
+            pass
+    raise TypeError("unable to convert %r to an integer" % s)
 
 
 def _integral_real(x):

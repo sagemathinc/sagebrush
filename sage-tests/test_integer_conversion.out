@@ -1,0 +1,114 @@
+(1/2,) !! TypeError no conversion of this rational to integer
+ZZ (1/2,) !! TypeError no conversion of this rational to integer
+(7/3,) !! TypeError no conversion of this rational to integer
+ZZ (7/3,) !! TypeError no conversion of this rational to integer
+(-1/2,) !! TypeError no conversion of this rational to integer
+ZZ (-1/2,) !! TypeError no conversion of this rational to integer
+(2,) -> 2
+ZZ (2,) -> 2
+(2,) -> 2
+ZZ (2,) -> 2
+(-2,) -> -2
+ZZ (-2,) -> -2
+(2.50000000000000,) !! TypeError Attempt to coerce non-integral RealNumber to Integer
+ZZ (2.50000000000000,) !! TypeError Attempt to coerce non-integral RealNumber to Integer
+(2.00000000000000,) -> 2
+ZZ (2.00000000000000,) -> 2
+(3.70000000000000,) !! TypeError Attempt to coerce non-integral RealNumber to Integer
+ZZ (3.70000000000000,) !! TypeError Attempt to coerce non-integral RealNumber to Integer
+(1.50000000000000e20,) -> 150000000000000000000
+ZZ (1.50000000000000e20,) -> 150000000000000000000
+(2.5,) !! TypeError cannot convert non-integral float to integer
+ZZ (2.5,) !! TypeError cannot convert non-integral float to integer
+(nan,) !! ValueError cannot convert float NaN to integer
+ZZ (nan,) !! ValueError cannot convert float NaN to integer
+(inf,) !! OverflowError cannot convert float infinity to integer
+ZZ (inf,) !! OverflowError cannot convert float infinity to integer
+(5,) -> 5
+ZZ (5,) -> 5
+(True,) -> 1
+ZZ (True,) -> 1
+(False,) -> 0
+ZZ (False,) -> 0
+(3,) -> 3
+ZZ (3,) -> 3
+(3,) -> 3
+ZZ (3,) -> 3
+(3,) -> 3
+ZZ (3,) -> 3
+((2+0j),) !! TypeError unable to coerce <class 'complex'> to an integer
+ZZ ((2+0j),) !! TypeError unable to coerce <class 'complex'> to an integer
+(2.00000000000000,) !! TypeError unable to coerce <class 'sage.rings.complex_mpfr.ComplexNumber'> to an integer
+ZZ (2.00000000000000,) !! TypeError unable to coerce <class 'sage.rings.complex_mpfr.ComplexNumber'> to an integer
+(2.50000000000000,) !! TypeError unable to coerce <class 'sage.rings.complex_mpfr.ComplexNumber'> to an integer
+ZZ (2.50000000000000,) !! TypeError unable to coerce <class 'sage.rings.complex_mpfr.ComplexNumber'> to an integer
+(None,) -> 0
+ZZ (None,) -> 0
+('12',) -> 12
+ZZ ('12',) -> 12
+('0x1f',) -> 31
+ZZ ('0x1f',) -> 31
+('1/2',) !! TypeError unable to convert '1/2' to an integer
+ZZ ('1/2',) !! TypeError unable to convert '1/2' to an integer
+('abc',) !! TypeError unable to convert 'abc' to an integer
+ZZ ('abc',) !! TypeError unable to convert 'abc' to an integer
+('010',) -> 10
+ZZ ('010',) -> 10
+('0b101',) -> 5
+ZZ ('0b101',) -> 5
+('0o17',) -> 15
+ZZ ('0o17',) -> 15
+('-0x1f',) -> -31
+ZZ ('-0x1f',) -> -31
+(' 12 ',) -> 12
+ZZ (' 12 ',) -> 12
+('1_000',) -> 1000
+ZZ ('1_000',) -> 1000
+('+5',) -> 5
+ZZ ('+5',) -> 5
+('',) !! TypeError unable to convert '' to an integer
+ZZ ('',) !! TypeError unable to convert '' to an integer
+('12.0',) !! TypeError unable to convert '12.0' to an integer
+ZZ ('12.0',) !! TypeError unable to convert '12.0' to an integer
+('1e3',) !! TypeError unable to convert '1e3' to an integer
+ZZ ('1e3',) !! TypeError unable to convert '1e3' to an integer
+('0X1F',) -> 31
+ZZ ('0X1F',) -> 31
+('0B11',) -> 3
+ZZ ('0B11',) -> 3
+('08',) -> 8
+ZZ ('08',) -> 8
+('00',) -> 0
+ZZ ('00',) -> 0
+('-0',) -> 0
+ZZ ('-0',) -> 0
+('٣',) !! TypeError unable to convert '٣' to an integer
+ZZ ('٣',) !! TypeError unable to convert '٣' to an integer
+('ff', 16) -> 255
+ZZ ('ff', 16) -> 255
+('FF', 16) -> 255
+ZZ ('FF', 16) -> 255
+('0xff', 16) !! TypeError unable to convert '0xff' to an integer
+ZZ ('0xff', 16) !! TypeError unable to convert '0xff' to an integer
+('0o17', 8) !! TypeError unable to convert '0o17' to an integer
+ZZ ('0o17', 8) !! TypeError unable to convert '0o17' to an integer
+('0b11', 2) !! TypeError unable to convert '0b11' to an integer
+ZZ ('0b11', 2) !! TypeError unable to convert '0b11' to an integer
+('0b11', 16) -> 2833
+ZZ ('0b11', 16) -> 2833
+('12', 0) -> 12
+ZZ ('12', 0) -> 12
+('12', 1) !! ValueError base (=1) must be 0 or between 2 and 36
+ZZ ('12', 1) !! ValueError base (=1) must be 0 or between 2 and 36
+('12', 37) !! ValueError base (=37) must be 0 or between 2 and 36
+ZZ ('12', 37) !! ValueError base (=37) must be 0 or between 2 and 36
+(5, 16) -> 5
+ZZ (5, 16) -> 5
+('z', 36) -> 35
+ZZ ('z', 36) -> 35
+('-101', 2) -> -5
+ZZ ('-101', 2) -> -5
+('12', 2) !! TypeError unable to convert '12' to an integer
+ZZ ('12', 2) !! TypeError unable to convert '12' to an integer
+() -> 0
+1267650600228229401496703205377 123456789012345678901234567890 -5/2
