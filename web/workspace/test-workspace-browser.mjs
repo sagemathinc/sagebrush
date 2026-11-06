@@ -243,6 +243,51 @@ try {
   await click("#wssidebar .ffoot button:last-child");
   check(await until(`${W}.list("/Trash").then((l) => l.length === 0)`), "Empty Trash (confirmed) empties it");
   await click("#wssidebar .ffoot button");
+  // (an Escape pressed on what `sel` finds)
+  const esc = (sel) => ev(`(() => { const t = ${sel}; t.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); return 1; })()`);
+  // (U10, William Nov 2: Trash shows its way back where it is, "← All files" beside its title, and Escape goes back;
+  // an Escape that closes a menu opened in Trash only closes it)
+  {
+    const inTrash = `!!document.querySelector("#wssidebar .fgrp .fback")`;
+    const allFiles = `!document.querySelector("#wssidebar .fgrp .fback") && !!document.querySelector(${JSON.stringify(rowSel("/Sylow theorems.board.json"))})`;
+    await until(allFiles);
+    await click('#wssidebar button[title="Trash, Storage"]');
+    await menu("Trash");
+    check(await until(inTrash) && (await ev(`document.querySelector("#wssidebar .fgrp .fback").textContent`)) === "← All files" && /Trash/.test(await ev(`document.querySelector("#wssidebar .fgrp").textContent`)),
+      "U10: Trash (from ⋯) shows \"← All files\" beside its title");
+    await shot("u10-trash-back");
+    await click("#wssidebar .fgrp .fback");
+    check(await until(allFiles) && (await until(`document.activeElement?.classList.contains("frow")`)), "U10: \"← All files\" shows the files again, the focus on the first of them");
+    await click('#wssidebar button[title="Trash, Storage"]');
+    await menu("Trash");
+    await until(inTrash);
+    await click('#wssidebar button[title="Trash, Storage"]');
+    await until(`!!document.querySelector(".sbfmenu")`);
+    await esc(`document.activeElement`);
+    check(await until(`!document.querySelector(".sbfmenu")`) && (await ev(inTrash)), "U10: Escape with a menu open in Trash closes the menu only");
+    await esc(`document.querySelector("#wssidebar .ftree")`);
+    check(await until(allFiles), "U10: Escape in Trash goes back to all files");
+    await esc(`document.querySelector("#wssidebar .ftree")`);
+    // (a moment for a move that would come late: grader's advisory)
+    await sleep(300);
+    check(await ev(allFiles), "U10: Escape in all files stays there");
+  }
+  // (U12, William Nov 2: ⋯ > Rename edits the row whose ⋯ was clicked: a file in Recent is drawn twice, and the tree's
+  // row was renamed in Recent's place; each way, and Escape leaves the name as it was)
+  {
+    const P = "/Sylow theorems.board.json";
+    const recentSel = `${rowSel(P)}:not([data-sel])`, treeSel = `${rowSel(P)}[data-sel]`;
+    check(await until(`!!document.querySelector(${JSON.stringify(recentSel)}) && !!document.querySelector(${JSON.stringify(treeSel)})`), "U12: the file is drawn both in Recent and in the tree");
+    for (const [where, sel, other] of [["the tree's", treeSel, recentSel], ["Recent's", recentSel, treeSel]]) {
+      await click(sel + " .more");
+      await menu("Rename");
+      await until(`!!document.querySelector("#wssidebar .frow input")`);
+      const at = await ev(`(() => { const i = document.querySelector("#wssidebar .frow input"); return { mine: !!i?.closest(${JSON.stringify(sel)}), other: !!document.querySelector(${JSON.stringify(other + " input")}), focused: document.activeElement === i }; })()`);
+      check(at.mine && !at.other && at.focused, `U12: ⋯ > Rename on ${where} row edits that row: ` + JSON.stringify(at));
+      await esc(`document.querySelector("#wssidebar .frow input")`);
+      check(await until(`!document.querySelector("#wssidebar .frow input")`) && (await ev(`${W}.stat(${JSON.stringify(P)}).then((e) => !!e)`)), `U12: …and Escape leaves it named as it was (${where})`);
+    }
+  }
   // a file kept by an older version, too large to move beside the index (capabilities 1a): Trash can't take
   // it, so Delete asks, and deletes it for good, never reading it
   await ev(`(async () => {
