@@ -356,11 +356,64 @@ for (const [what, m, code] of [
   }
   const start = pairedStarter({ WebSocket: S });
   const r = await start({ notebook: "nb", answer: { code: "ABCDEFGHIJKLMNOPQRSTUVWXYZ", port: 4321 } });
-  check(/site settings/.test(r.failed) && /Retry/.test(r.failed) && !/`/.test(r.failed), `nothing listening (or blocked): says how to undo a Block (${r.failed})`);
+  check(/nothing answered on that port/.test(r.failed) && /site settings/.test(r.hint) && /Retry/.test(r.hint) && !/`/.test(r.failed + r.hint), `nothing listening (or blocked): says how to undo a Block, after the reason (${r.failed} / ${r.hint})`);
   await r.retry();
   check(hellos.length === 1 && hellos[0].code === "ABCDEFGHIJKLMNOPQRSTUVWXYZ" && r.tunnel && r.kernel.ready && r.failed === null, "Retry pairs with the code that never reached the runner, and binds");
   r.close();
   check(PAIRED.sessionGone === "the runner restarted, so this page needs its new link: choose Your computer again and paste it", "the session-gone words");
+}
+
+// ================= astra's RETRY-2: a code that may have reached the runner is never sent again
+{
+  const { pairedStarter } = await import("./remote-ui.js");
+  const CODE = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  // (a socket that never opens within the hello's time: the hello was never handed to it; Retry may use the code)
+  {
+    const hellos = [];
+    let n = 0;
+    class S extends FakeSocket {
+      constructor(u) {
+        super(u);
+        if (n++ > 0) setTimeout(() => this.open(), 1); // (the first never opens)
+      }
+      send(t) {
+        super.send(t);
+        const m = JSON.parse(t);
+        if (m.method === "hello") { hellos.push(m.params.code); this.deliver({ jsonrpc: "2.0", id: "h1", result: { ...RESULT, session: "s".repeat(43) } }); }
+        else if (m.rpc === "g.bind") queueMicrotask(() => this.deliver(json(m.id, 200, { binding: "b1", epoch: 1, incarnation: 1, state: "ready" })));
+      }
+    }
+    const r = await pairedStarter({ WebSocket: S, helloMs: 30 })({ notebook: "nb", answer: { code: CODE, port: 4321 } });
+    check(r.failed === "your computer didn't answer" && hellos.length === 0, `a pre-open timeout: no hello was sent (${r.failed})`);
+    await r.retry();
+    check(hellos.length === 1 && hellos[0] === CODE && r.kernel.ready, "and Retry pairs with the same code");
+    r.close();
+  }
+  // (a hello sent and never answered: the code may have arrived; Retry sends no second hello and asks for a new link)
+  {
+    const hellos = [];
+    class S extends FakeSocket {
+      constructor(u) { super(u); setTimeout(() => this.open(), 1); }
+      send(t) { super.send(t); const m = JSON.parse(t); if (m.method === "hello") hellos.push(m.params.code); } // (never answered)
+    }
+    const r = await pairedStarter({ WebSocket: S, helloMs: 30 })({ notebook: "nb", answer: { code: CODE, port: 4321 } });
+    check(hellos.length === 1 && /new link/.test(r.failed), `a post-send timeout: the hello went once, and a new link is asked for (${r.failed})`);
+    const again = await r.retry();
+    check(!again && hellos.length === 1, "Retry sends no second hello with that code");
+    r.close();
+  }
+  // (a hello the socket closed on, after it was sent: likewise never sent again)
+  {
+    const hellos = [];
+    class S extends FakeSocket {
+      constructor(u) { super(u); setTimeout(() => this.open(), 1); }
+      send(t) { super.send(t); const m = JSON.parse(t); if (m.method === "hello") { hellos.push(m.params.code); this.close(1006); } }
+    }
+    const r = await pairedStarter({ WebSocket: S, helloMs: 1000 })({ notebook: "nb", answer: { code: CODE, port: 4321 } });
+    await r.retry();
+    check(hellos.length === 1, "a close after the hello: Retry sends no second hello");
+    r.close();
+  }
 }
 
 // ================= the runner's link

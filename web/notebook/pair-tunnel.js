@@ -63,10 +63,13 @@ export class TunnelNotSent extends Error {
 
 /** The runner refused the hello (its message, as it said it), or the pairing could not be made. */
 export class PairError extends Error {
-  constructor(message, { kind = "refused" } = {}) {
+  constructor(message, { kind = "refused", sent = true } = {}) {
     super(message);
     this.name = "PairError";
     this.kind = kind; // "refused" | "protocol" | "closed" | "timeout" | "unreachable"
+    // (whether the hello, and with it the code, may have reached the runner: only a failure before it was handed to
+    // the socket is false, and only then may the same code be tried again (astra's RETRY-2))
+    this.sent = sent;
   }
 }
 
@@ -312,8 +315,8 @@ export class Tunnel {
  */
 export function pairTunnel({ port, code, session, remember = false, jwk, jkt, WebSocket: WS = globalThis.WebSocket, onClose, timeoutMs = TUNNEL_LIMITS.helloMs }) {
   const n = Number(port);
-  if (!Number.isInteger(n) || n < 1 || n > 65535) return Promise.reject(new PairError("the port is a number from 1 to 65535", { kind: "unreachable" }));
-  if ((typeof code === "string") === (typeof session === "string")) return Promise.reject(new PairError("a pairing needs its code (or a remembered session)"));
+  if (!Number.isInteger(n) || n < 1 || n > 65535) return Promise.reject(new PairError("the port is a number from 1 to 65535", { kind: "unreachable", sent: false }));
+  if ((typeof code === "string") === (typeof session === "string")) return Promise.reject(new PairError("a pairing needs its code (or a remembered session)", { sent: false }));
   const params = { protocol: 1, purpose: "kernel", jwk: { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y }, jkt };
   if (typeof code === "string") {
     params.code = code.trim().toUpperCase();
@@ -332,19 +335,21 @@ export function pairTunnel({ port, code, session, remember = false, jwk, jkt, We
         reject(err);
       } else resolve(tunnel);
     };
-    const timer = setTimeout(() => finish(new PairError("your computer didn't answer", { kind: "timeout" })), timeoutMs);
+    let sent = false; // (set as the hello is handed to the socket: from then on it may have arrived)
+    const timer = setTimeout(() => finish(new PairError(sent ? "your computer didn't answer the pairing: run sagebrush remote --loopback again for a new link" : "your computer didn't answer", { kind: "timeout", sent })), timeoutMs);
     try {
       ws = new WS(`ws://127.0.0.1:${n}${PAIR_PATH}`);
     } catch (e) {
-      return finish(new PairError(`couldn't connect: ${e?.message ?? e}`, { kind: "unreachable" }));
+      return finish(new PairError(`couldn't connect: ${e?.message ?? e}`, { kind: "unreachable", sent: false }));
     }
     let opened = false;
     ws.onopen = () => {
       opened = true;
+      sent = true;
       ws.send(JSON.stringify({ jsonrpc: "2.0", id: "h1", method: "hello", params }));
     };
     ws.onerror = () => {};
-    ws.onclose = (e) => finish(new PairError(opened ? `your computer closed the connection (${e?.code ?? "?"})` : "nothing answered on that port: is sagebrush remote --loopback running? If you blocked this site's access to apps on this device, allow it in the site settings (the icon left of the address), then Retry", { kind: opened ? "closed" : "unreachable" }));
+    ws.onclose = (e) => finish(new PairError(opened ? `your computer closed the connection (${e?.code ?? "?"})` : "nothing answered on that port: is sagebrush remote --loopback running?", { kind: opened ? "closed" : "unreachable", sent }));
     ws.onmessage = (e) => {
       let m;
       try {
