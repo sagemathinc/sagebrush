@@ -333,11 +333,20 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       if (current !== mine) { mounts++; returnToShown(() => openHere(host.fid)); } else returnToShown();
       return true;
     }
+    // (its entry after the one the history is on: numbered by position, so a return by history.go finds it)
+    const go = () => {
+      const q = new URLSearchParams(location.search); q.set("tex", e.fid!);
+      const at = typeof history.state?.sbTex === "number" ? history.state.sbTex : shownAt;
+      history.pushState({ sbTex: at + 1, sbTexId: entryId() }, "", "/?" + q.toString());
+      openHere(e.fid!);
+    };
+    // (a switch past its decision, its mount waiting on this editor's close: nothing of this mount is left to settle,
+    //  so the newest file asked for goes on, the waiting mount superseded, and a return still under way waits for it
+    //  instead of the stale one (astra U8-SWITCH-5): the file opened is the last one asked for)
+    if (current !== mine) { intent(); mounts++; whenBack(go); return true; }
     void leaveOk().then((ok) => {
       if (!ok || !live()) return;
-      const q = new URLSearchParams(location.search); q.set("tex", e.fid!);
-      history.pushState({ sbTex: shownAt + 1, sbTexId: entryId() }, "", "/?" + q.toString());
-      openHere(e.fid!);
+      whenBack(go);
     });
     return true;
   };
@@ -353,17 +362,22 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   //  its position; as a new entry when neither lands on it)
   // `then`: run once the history is on that entry: at once if it is already, else when the return's popstate lands (or
   // its fallback has pushed the entry again)
+  // (a listener of its own for the landing, not this editor's: a fast close can dispose of this editor, and its
+  //  listeners, before the history lands; whichever sees the landing first runs what waits, once)
+  const listenLand = () => {
+    landOff?.();
+    const onLand = () => { if (returning) { returning = false; if (!isShown()) pushShown(); else noteShown(); } landed(); };
+    window.addEventListener("popstate", onLand, { once: true });
+    landOff = () => window.removeEventListener("popstate", onLand);
+  };
+  // (`go` once the history is back on the entry shown: at once when no return is under way, else when it lands, in
+  //  place of whatever waited for it: a newer intent replaces an older one (astra U8-SWITCH-5))
+  const whenBack = (go: () => void) => { if (!returning) { go(); return; } afterReturn = go; listenLand(); };
   const returnToShown = (then?: () => void) => {
-    if (isShown()) { then?.(); return; }
+    // (whatever waited for an earlier return is stale now: this is the newest intent)
+    if (isShown()) { landOff?.(); landOff = null; afterReturn = null; then?.(); return; }
     afterReturn = then ?? null;
-    // (a listener of its own for the landing, not this editor's: a fast close can dispose of this editor, and its
-    //  listeners, before the history lands; whichever sees the landing first runs `then`, once)
-    if (then) {
-      landOff?.();
-      const onLand = () => { if (returning) { returning = false; if (!isShown()) pushShown(); else noteShown(); } landed(); };
-      window.addEventListener("popstate", onLand, { once: true });
-      landOff = () => window.removeEventListener("popstate", onLand);
-    }
+    if (then) listenLand();
     const nav = navApi(), st = history.state, to = typeof st?.sbTex === "number" ? st.sbTex : null;
     if (nav?.traverseTo && shownKey && nav.entries?.().some((x: any) => x.key === shownKey)) {
       returning = true;
@@ -384,6 +398,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       noteShown();
       return;
     }
+    // (another file's entry while a switch is past its decision: the newest goes on, as for a file asked for)
+    if (current !== mine) { intent(); if (t) openHere(t); else location.reload(); return; }
     void leaveOk().then((ok) => {
     if (ok === null || !live()) return;
     if (!ok) {

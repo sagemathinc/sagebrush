@@ -392,6 +392,79 @@ try {
       check(held && nav !== false && s4.url === fa && at4 === 0 && s4.title === "a.tex" && s4.a && s4.ro === false && s4.src.includes(mark) && f4.includes(mark) && s4.pages === 1 && !s4.sawB && s4.kept,
         `DB3-U8-SWITCH-4 (${withNav ? "Navigation API, its traverse late" : "no Navigation API: history.go"}): A asked for and A's close released at once: A open again only on A's entry, editable, its URL and edit; B never shown`, { held, nav, s4: { ...s4, src: s4.src.slice(-30) }, at4, file: f4.slice(-30) });
     }
+    // ---- (astra U8-SWITCH-5) the newest file asked for wins over a switch past its decision and a return still under
+    // way: the file shown's close held (its write failed, then its last write held), a switch to X decided, then...
+    {
+      const names = { [fa]: "A", [fb]: "B", [fc]: "C" };
+      // (a watch: whether X, the file never to be shown, ever was)
+      const watchX = (x) => ev(`(() => { window.__sawX = false; window.__obsB?.disconnect(); window.__obsB = new MutationObserver(() => { if (document.querySelector(".tex-preview")?.textContent.includes("File ${names[x]} here.") || document.querySelector(".tex-title")?.textContent === ${JSON.stringify(names[x].toLowerCase() + ".tex")}) window.__sawX = true; }); window.__obsB.observe(document.body, { childList: true, subtree: true, characterData: true }); return true; })()`);
+      const stateOf = (f) => ev(`({ url: new URLSearchParams(location.search).get("tex"), at: history.state && history.state.sbTex, title: document.querySelector(".tex-title")?.textContent, shows: !!document.querySelector(".tex-preview")?.textContent.includes("File ${names[f]} here."), ro: document.querySelector(".tex-src")?.readOnly, src: document.querySelector(".tex-src")?.value ?? "", pages: document.querySelectorAll(".tex-page").length, saw: window.__sawX, kept: window.__noReload === true })`);
+      const textOf = (f) => ev(`${W}.read(${JSON.stringify("/sw/" + names[f].toLowerCase() + ".tex")}).then((r) => new TextDecoder().decode(r.content))`);
+      // (the file shown: an edit whose write fails, then the close's last write held)
+      const holdClose = async (mark) => {
+        await ev(`(() => { window.__answer = true; window.__k = 0; window.__hold = new Promise((r) => (window.__rel = r));
+          window.__sbTexSaveWrite = () => { const k = window.__k++; if (k === 0) throw new Error("test: the write failed"); if (k === 1) return window.__hold; }; return true; })()`);
+        await ev(`(() => { const t = document.querySelector(".tex-src"); t.value += ${JSON.stringify(mark + "\n")}; t.dispatchEvent(new Event("input")); return true; })()`);
+        await saveStateIs(/^Not saved: test: the write failed/);
+        await ev(`(window.__k = 0, true)`);
+      };
+      const shownIs = (f) => until(`!!document.querySelector(".tex-src") && !document.querySelector(".tex-src").readOnly && document.querySelector(".tex-title")?.textContent === ${JSON.stringify(names[f].toLowerCase() + ".tex")} && new URLSearchParams(location.search).get("tex") === ${JSON.stringify(f)}`, 20000);
+      const writesWork = () => ev(`(window.__sbTexSaveWrite = () => { if (window.__failWrites) throw new Error("test: the write failed"); }, window.__answer = false, window.__asked = 4, true)`);
+      // (1) ...A asked for again (the history going back to A's entry, its traverse late, or by history.go) and A's
+      // close released at once, then a newer file N asked for while that return is under way: N opens, on the entry
+      // after A's, and A's stale reopening never runs; X never shown. A is at entry 0, X the one after it. (history.go
+      // first: A was last opened with the Navigation API hidden, so it has no entry key, and only a reopening with the
+      // API there gives the second run the key its traverse needs; that run checks its late traverse was the one used)
+      for (const withNav of [false, true]) {
+        const x = withNav ? fc : fb, n = withNav ? fb : fc, mark = `% newest wins ${withNav ? "nav" : "go"}`;
+        await watchX(x); await holdClose(mark);
+        await ev(`(history.forward(), true)`);
+        const held = await until(`window.__k >= 2`, 10000);
+        const went = await ev(`(async () => {
+          const url = new URLSearchParams(location.search).get("tex");
+          if (${withNav}) { const v = window.navigation; if (!v?.traverseTo) return false; const orig = v.traverseTo.bind(v);
+            v.traverseTo = (k, o) => { window.__late = true; const late = new Promise((r) => setTimeout(r, 300)); return { committed: late, finished: late.then(() => orig(k, o).finished) }; }; window.__navRestore = () => { delete v.traverseTo; }; }
+          else { const was = window.navigation; Object.defineProperty(window, "navigation", { configurable: true, get: () => undefined }); window.__navRestore = () => { Object.defineProperty(window, "navigation", { configurable: true, get: () => was }); }; }
+          window.__late = false;
+          window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }); window.__rel();
+          if (${withNav}) await new Promise((r) => setTimeout(r, 50));
+          // (the return still under way when the newer file is asked for: not back on A's entry yet)
+          const pending = new URLSearchParams(location.search).get("tex") !== ${JSON.stringify(fa)};
+          const accepted = window.__sbTex({ path: ${JSON.stringify("/sw/" + names[n].toLowerCase() + ".tex")}, fid: ${JSON.stringify(n)} });
+          return { url, accepted, pending, late: window.__late }; })()`);
+        await shownIs(n); await sleep(1500);
+        const s = await stateOf(n), fA = await textOf(fa);
+        await ev(`(window.__navRestore?.(), delete window.__navRestore, window.__obsB?.disconnect(), true)`); await writesWork();
+        check(held && went && went.url === x && went.accepted === true && went.pending && went.late === withNav && s.url === n && s.at === 1 && s.title === names[n].toLowerCase() + ".tex" && s.shows && s.ro === false && s.pages === 1 && !s.saw && s.kept && fA.includes(mark),
+          `U8-SWITCH-5 (${withNav ? "Navigation API, its traverse late; the newer file 50 ms after" : "no Navigation API: history.go; the newer file at once"}): A asked for while the switch to ${names[x]} waits on A's close, then ${names[n]}: ${names[n]} opens, editable, on the entry after A's; A not reopened; ${names[x]} never shown; A's edit written`, { held, went, s: { ...s, src: s.src.slice(-30) }, fileA: fA.slice(-30) });
+        // (back on A, entry 0: N, its edit-free text, left)
+        await ev(`(history.back(), true)`); await shownIs(fa); await sleep(500);
+      }
+      // (2) ...then a newer file asked for while X's mount waits, no return under way: it opens on the entry after
+      // X's; X never shown. Then (3), from there, Back to X decided (its close held) and Back again to A at once: A
+      // opens on its entry; X never shown; the left file's edit written
+      {
+        await watchX(fb); await holdClose("% newer while B waits");
+        await ev(`(history.forward(), true)`);
+        const held = await until(`window.__k >= 2`, 10000);
+        const accepted = await ev(`(() => { const r = window.__sbTex({ path: "/sw/c.tex", fid: ${JSON.stringify(fc)} }); window.__rel(); return r; })()`);
+        await shownIs(fc); await sleep(1500);
+        const s = await stateOf(fc), fA = await textOf(fa);
+        await ev(`(window.__obsB?.disconnect(), true)`); await writesWork();
+        check(held && accepted === true && s.url === fc && s.at === 2 && s.shows && s.ro === false && s.pages === 1 && !s.saw && s.kept && fA.includes("% newer while B waits"),
+          "U8-SWITCH-5 (a newer file while the switch's mount waits, no return under way): C opens, editable, on the entry after B's; B never shown; A's edit written", { held, accepted, s: { ...s, src: s.src.slice(-30) }, fileA: fA.slice(-30) });
+        await watchX(fb); await holdClose("% left C for A");
+        await ev(`(history.back(), true)`);
+        const held3 = await until(`window.__k >= 2`, 10000);
+        await ev(`(history.back(), true)`); await sleep(400);
+        await ev(`(window.__rel(), true)`);
+        await shownIs(fa); await sleep(1500);
+        const s3 = await stateOf(fa), fC = await textOf(fc);
+        await ev(`(window.__obsB?.disconnect(), true)`); await writesWork();
+        check(held3 && s3.url === fa && s3.at === 0 && s3.shows && s3.ro === false && s3.pages === 1 && !s3.saw && s3.kept && fC.includes("% left C for A"),
+          "U8-SWITCH-5 (Back past a decided switch to a third file): Back to B decided (C's close held), Back again to A: A opens, editable, on its entry; B never shown; C's edit written", { held3, s3: { ...s3, src: s3.src.slice(-30) }, fileC: fC.slice(-30) });
+      }
+    }
     // ---- (astra B5-R1-A1) the exact entry shown is the one gone back to, a fragment's entry between: A, A#section, B;
     // with unsaved B, Back one step and Back two steps, declined, stay on B (its entry, URL and text); accepted two
     // steps, A; with unsaved A, Forward two steps declined stays on A. With the Navigation API and, hidden, without it
