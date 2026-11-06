@@ -325,6 +325,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       newNotebook: !host.files?.newNotebook, newMatlab: !host.files?.newNotebook, newFolder: !host.files?.newFolder, fromExample: !host.examples, open: !host.files?.open,
       saveCopy: !host.duplicate, share: true, delete: !host.files?.delete,
     },
+    // (a board has no share link yet (design/board-sharing.md): what to do instead, where the disabled item is)
+    why: { share: "Sharing a board isn't available yet: File ▸ Download ▸ HTML (one file) makes a page anyone can open" },
     downloads: [
       { key: "download", label: ".board.json" },
       { key: "html", label: "HTML (one file)", disabled: !host.exportHtml },
