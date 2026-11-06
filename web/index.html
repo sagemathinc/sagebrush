@@ -2501,15 +2501,16 @@ beforeSwitch.push(async () => {
 // File > Download "with its files (.zip)" (dependencies 2b): Share's picker; the .zip written by the export's lazy
 // chunk, loaded on the click (web/share-client/download.ts, web/workspace/export/selected.ts).  The notebook's own
 // workspace path, read when the dialog opens, so its folder can be the .zip's root.
-let dlNotebookPath = null;
+// (the notebook's path, for the notebook it was looked up for only (astra's DEP2B-OPEN-ID-1); each open's number)
+let dlNotebook = null, dlOpens = 0;
 const DL_CAPS = { files: 10000, file: LIMITS.maxFileBytes, total: 240 * 2 ** 20 };
 // (tests: lower caps, read at each use)
-const downloadTest = { caps: null };
+const downloadTest = { caps: null, afterPath: null };
 const dlCaps = () => downloadTest.caps ?? DL_CAPS;
 const downloadDialog = createDownloadDialog({
   ...pickHost,
   dlg: $("#dldepsdlg"),
-  notebook: () => ({ path: dlNotebookPath ?? fileBase() + ".ipynb", data: new TextEncoder().encode(notebookFileText({ ...nb.snapshot(), name: docName() })) }),
+  notebook: () => ({ path: (dlNotebook?.id === pickHost.notebookId() ? dlNotebook.path : null) ?? fileBase() + ".ipynb", data: new TextEncoder().encode(notebookFileText({ ...nb.snapshot(), name: docName() })) }),
   readFile: (f) => storedFileBytes(f, "download again"),
   bounds: () => { const c = dlCaps(); return { maxFiles: c.files, maxFileBytes: c.file, bytesLeft: c.total, download: true }; },
   zip: async (o) => {
@@ -2799,7 +2800,14 @@ fileMenu.addEventListener("click", async (e) => {
     }
     case "withfiles": {
       saveNow();
-      dlNotebookPath = ws && current.id ? ((await ws.pathOf("notebook", current.id).catch(() => null))?.replace(/^\/+/, "") ?? null) : null;
+      // (the notebook and this open, taken before the lookup: an answer that comes after a switch or a newer open is
+      // dropped, never paired with another notebook's bytes, astra's DEP2B-OPEN-ID-1)
+      const id = pickHost.notebookId(), mine = ++dlOpens, w = ws;
+      if (id === null) break;
+      const p = w && current.id ? await w.pathOf("notebook", current.id).catch(() => null) : null;
+      await downloadTest.afterPath?.();
+      if (mine !== dlOpens || pickHost.notebookId() !== id || ws !== w) break;
+      dlNotebook = { id, path: p?.replace(/^\/+/, "") ?? null };
       await downloadDialog.open();
       break;
     }

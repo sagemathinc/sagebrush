@@ -224,6 +224,39 @@ try {
     ok(r.zip && JSON.stringify(Object.keys(r.zip).sort()) === JSON.stringify(["data/points.csv", "proj/Untitled.ipynb", "proj/_code/h.py"]), `a file outside it: every file at its workspace path: ${JSON.stringify(Object.keys(r.zip ?? {}))}`);
   }
 
+  // ---- astra's DEP2B-OPEN-ID-1: the notebook's path is looked up when the dialog opens; an answer that comes after a
+  // switch of notebooks, or after a newer open, is dropped: never another notebook's path with this one's bytes
+  const HOLDPATH = "(() => { let go; const p = new Promise((r) => (go = r)); window.__pathGo = go; window.__pathHeld = false; window.sagebrush.downloadTest.afterPath = async () => { window.sagebrush.downloadTest.afterPath = null; window.__pathHeld = true; await p; }; return 1; })()";
+  {
+    await ev("document.querySelector('#dldepsdlg').open && document.querySelector('#dldepsdlg').close()");
+    await ev(HOLDPATH);
+    await ev("document.querySelector('#filemenu [data-f=withfiles]').click()");
+    ok(await until("window.__pathHeld === true"), "(the lookup of the notebook's path, in /proj, is held)");
+    const cellsBefore = await ev("document.querySelector('.cell textarea').value");
+    await ev("document.querySelector('#filemenu [data-f=new]').click()");
+    ok(await until(`document.querySelectorAll('.cell').length === 1 && document.querySelector('.cell textarea').value !== ${JSON.stringify(cellsBefore)}`), "(another notebook is open meanwhile)");
+    await sleep(500);
+    await ev("window.__pathGo()");
+    await sleep(800);
+    ok(!(await ev("document.querySelector('#dldepsdlg').open")), "a path looked up for the notebook switched away from is dropped: no dialog opens with it");
+    await openDialog();
+    const r = await download();
+    ok(r.zip && Object.keys(r.zip).length === 1 && !Object.keys(r.zip)[0].startsWith("proj/") && Object.keys(r.zip)[0].endsWith(".ipynb"), `the new notebook's own open: its own name, nothing of /proj: ${JSON.stringify(Object.keys(r.zip ?? {}))}`);
+  }
+  {
+    await ev("document.querySelector('#dldepsdlg').close()");
+    await ev(HOLDPATH);
+    await ev("document.querySelector('#filemenu [data-f=withfiles]').click()");
+    await until("window.__pathHeld === true");
+    const g0 = await ev(`${D}.generation`);
+    await ev("document.querySelector('#filemenu [data-f=withfiles]').click()");
+    ok(await until(`${D}.generation > ${g0} && document.querySelector('#dldepsdlg').open`), "a second open while the first's lookup is held: the dialog opens");
+    const g1 = await ev(`${D}.generation`);
+    await ev("window.__pathGo()");
+    await sleep(800);
+    ok((await ev(`${D}.generation`)) === g1, "the first open's late answer is dropped: the dialog isn't opened again over the second");
+  }
+
   // ---- the notebook switched while a read waits: stopped, nothing handed over
   {
     await openDialog();
