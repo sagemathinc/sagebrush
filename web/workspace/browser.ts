@@ -753,7 +753,12 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
           const from = (e.kind === "notebook" || e.kind === "board") && e.ref ? await w.pathOf(e.kind, e.ref) : e.path;
           // (gone, or put in Trash meanwhile (another tab, an agent): either way not renamed, and not opened)
           if (!from || within(from, TRASH)) { now = null; say(`"${full}" was moved or deleted meanwhile: not renamed`); }
-          else host.renamed?.((now = await w.rename(from, join(parentOf(from), finalName(v)), { retitle: !host.retitles?.(e), expect: { kind: e.kind, ref: e.ref, fid: e.fid, created: e.created } })), from);
+          else {
+            // (the rename first, then the host told: an optional call evaluates nothing, its arguments included, when the
+            // host has no `renamed`, as File ▸ Open…'s hasn't (sim run 11, X05: every rename there was silently dropped))
+            now = await w.rename(from, join(parentOf(from), finalName(v)), { retitle: !host.retitles?.(e), expect: { kind: e.kind, ref: e.ref, fid: e.fid, created: e.created } });
+            host.renamed?.(now, from);
+          }
         } catch (err) {
           now = null;
           if (err instanceof WorkspaceError && err.code === "conflict") say(`"${full}" was moved or replaced meanwhile: not renamed`);
@@ -887,7 +892,8 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     paintSel();
     const undo = async () => {
       for (const m of [...moved].reverse()) {
-        try { host.renaming?.(m.e); host.renamed?.(await w.rename(m.to, m.from, { retitle: !host.retitles?.(m.e), expect: expect(m.e) }), m.to); }
+        // (as in a rename: the move back made whether or not the host has `renamed`)
+        try { host.renaming?.(m.e); const back = await w.rename(m.to, m.from, { retitle: !host.retitles?.(m.e), expect: expect(m.e) }); host.renamed?.(back, m.to); }
         catch (err) { fail(err); break; }
       }
       await refresh();

@@ -134,6 +134,39 @@ try {
     await closeStorage();
     await ev(`(() => { [...document.querySelectorAll("#wssidebar .fsel button")].find((b) => b.textContent === "Clear")?.click(); return 1; })()`);
   }
+  // (sim run 11, X05: a rename, and a move's Undo, in Open… happen: its host has no `renamed`, and an optional call
+  // made with the rename as its argument never made the rename)
+  {
+    await ev(`${W}.create("/om one.txt", { content: "1" }).then(() => 1)`);
+    await key("o");
+    const row = (p) => `.sbfopen .frow[data-sel][data-path=${JSON.stringify(p)}]`;
+    await until(`!!document.querySelector(${JSON.stringify(row("/From the menu"))}) && !!document.querySelector(${JSON.stringify(row("/om one.txt"))})`);
+    await ev(`(() => { document.querySelector(${JSON.stringify(row("/From the menu"))} + " button[aria-label^='More']").click(); [...document.querySelectorAll(".sbfmenu button")].find((b) => b.textContent === "Rename").click(); return 1; })()`);
+    await until(`!!document.querySelector(".sbfopen .frow input")`);
+    await ev(`(() => { const i = document.querySelector(".sbfopen .frow input"); i.value = "Renamed in Open"; i.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); return 1; })()`);
+    const renamed = await until(`${W}.stat("/Renamed in Open").then((a) => ${W}.stat("/From the menu").then((b) => a?.kind === "folder" && !b))`, 10000);
+    check(renamed, "Open…: a folder renamed in the dialog is renamed, its old name gone");
+    await until(`!!document.querySelector(${JSON.stringify(row("/Renamed in Open"))})`);
+    // (a move by drag, then its Undo: both happen in the dialog too)
+    const drag = await ev(`(() => {
+      const f = document.querySelector(${JSON.stringify(row("/om one.txt"))}), t = document.querySelector(${JSON.stringify(row("/Renamed in Open"))});
+      if (!f || !t) return false; // (no folder to drag onto: the rename above failed, and its check says so)
+      const dt = new DataTransfer();
+      f.dispatchEvent(new DragEvent("dragstart", { bubbles: true, cancelable: true, dataTransfer: dt }));
+      const over = new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer: dt });
+      t.dispatchEvent(over);
+      t.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt }));
+      f.dispatchEvent(new DragEvent("dragend", { bubbles: true, dataTransfer: dt }));
+      return over.defaultPrevented;
+    })()`);
+    const moved = await until(`${W}.stat("/Renamed in Open/om one.txt").then((e) => !!e)`, 10000);
+    await until(`[...document.querySelectorAll(".sbfopen .ftoast button")].some((b) => b.textContent === "Undo")`, 5000);
+    await ev(`(() => { [...document.querySelectorAll(".sbfopen .ftoast button")].find((b) => b.textContent === "Undo")?.click(); return 1; })()`);
+    const back = await until(`${W}.stat("/om one.txt").then((a) => ${W}.stat("/Renamed in Open/om one.txt").then((b) => !!a && !b))`, 10000);
+    check(drag && moved && back, "Open…: a file dragged into a folder there moves, and its Undo moves it back: " + JSON.stringify({ drag, moved, back }));
+    await ev(`(() => { document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); return 1; })()`);
+    await until(`!document.querySelector(".sbfopen")`);
+  }
   // Delete: to Trash, after asking; another notebook opened
   const doomed = await nbRef();
   await pick(NB, "delete");
