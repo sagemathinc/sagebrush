@@ -426,7 +426,8 @@ export const PAIR_SHEET = {
   how: "Run this in a terminal on this computer. It prints a link: open it, or paste it here.",
   // (two ways to run the runner, each with Copy: uvx's isolated Python is always current but lacks the person's own
   // packages, so their own environment gets pip; python -m makes the kernel's Python the one they're in)
-  quickLabel: "It fetches the newest Sagebrush and runs it in its own Python (William, Nov 6: one command, uvx):",
+  // (one command, uvx: William, Nov 6)
+  quickLabel: "It fetches the newest Sagebrush and runs it in its own Python:",
   getUv: "No uv? Install it first: curl -LsSf https://astral.sh/uv/install.sh | sh (or see docs.astral.sh/uv).",
   command: "uvx sagebrush@latest remote --loopback",
   windows: "On Windows, run these in WSL (Windows Subsystem for Linux); this browser pairs with it as usual.",
