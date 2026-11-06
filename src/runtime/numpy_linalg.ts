@@ -10,7 +10,7 @@ import * as Obj from "./object";
 import { newBuiltinModule } from "./modules";
 import { NDArray, empty, toDtype, ascontig, copy as npcopy, admitWork } from "./numpy";
 import { glibcLog, glibcExp } from "./libm";
-import { gemmBuffers, wasmFusedFMA, wasmKernels, wasmLU, wasmLuSolve, wasmQR, wasmSymEig, wasmGenEig, wasmSVD } from "./kernels";
+import { gemmBuffers, wasmFusedFMA, wasmKernels, wasmLU, wasmLuSolve, wasmQR, wasmQRQtb, wasmSymEig, wasmGenEig, wasmSVD } from "./kernels";
 import * as FD from "./fdlibm";
 import { useNd, ndCholesky, ndLu, ndPath, ndRequestWarm, ndScratch, ndWarmState } from "./nd";
 import { pollInterrupt } from "./ops";
@@ -209,6 +209,75 @@ function luSolve(L: { lu: Float64Array; piv: number[] }, n: number, B: Float64Ar
 function qr(A: Float64Array, m: number, n: number, complete: boolean): [Float64Array, Float64Array, number] {
   const w = wasmQR(A, m, n, complete);
   if (w) return w;
+  const { cols, vs, betas, k } = qrFactor(A, m, n);
+  const qc = complete ? m : k;
+  const Qcols: Float64Array[] = [];
+  for (let c = 0; c < qc; c++) {
+    const q = new Float64Array(m);
+    if (c < m) q[c] = 1;
+    Qcols.push(q);
+  }
+  for (let j = k - 1; j >= 0; j--) {
+    const v = vs[j], beta = betas[j];
+    if (beta === 0) continue;
+    for (let c = 0; c < qc; c++) {
+      const q = Qcols[c];
+      let sum = dot4(v, j, q, j, m - j);
+      if (sum === 0) continue;
+      sum *= beta;
+      for (let i = j; i < m; i++) q[i] -= sum * v[i];
+    }
+  }
+  const Q = new Float64Array(m * qc);
+  for (let c = 0; c < qc; c++) {
+    const q = Qcols[c];
+    for (let i = 0; i < m; i++) Q[i * qc + c] = q[i];
+  }
+  return [Q, qrR(cols, m, n, complete ? m : k), qc];
+}
+
+// Q^T B for the m x n matrix A and the m x nb matrix B (both row-major), without forming Q: the
+// factorization of qr(), then its reflectors applied to B's columns in increasing order, so
+// H_{k-1} ... H_0 B. [C (rr x nb), R (rr x n)], rr = m when complete, else min(m, n): C is Q^T B
+// (complete) or its first min(m, n) rows (reduced), as Q^T B with qr()'s Q. The same operations in
+// the same order as the WebAssembly kernel (dqtb).
+function qrQtb(A: Float64Array, m: number, n: number, B: Float64Array, nb: number, complete: boolean): [Float64Array, Float64Array] {
+  const w = wasmQRQtb(A, m, n, B, nb, complete);
+  if (w) return w;
+  const { cols, vs, betas, k } = qrFactor(A, m, n);
+  const rr = complete ? m : k;
+  const bcols: Float64Array[] = [];
+  for (let c = 0; c < nb; c++) {
+    const b = new Float64Array(m);
+    for (let i = 0; i < m; i++) b[i] = B[i * nb + c];
+    bcols.push(b);
+  }
+  for (let j = 0; j < k; j++) {
+    const v = vs[j], beta = betas[j];
+    if (beta === 0) continue;
+    for (let c = 0; c < nb; c++) {
+      const b = bcols[c];
+      let sum = dot4(v, j, b, j, m - j);
+      if (sum === 0) continue;
+      sum *= beta;
+      for (let i = j; i < m; i++) b[i] -= sum * v[i];
+    }
+  }
+  const C = new Float64Array(rr * nb);
+  for (let i = 0; i < rr; i++) for (let c = 0; c < nb; c++) C[i * nb + c] = bcols[c][i];
+  return [C, qrR(cols, m, n, rr)];
+}
+
+// R (rr x n, row-major) from qrFactor()'s columns
+function qrR(cols: Float64Array[], m: number, n: number, rr: number): Float64Array {
+  const R = new Float64Array(rr * n);
+  for (let i = 0; i < Math.min(rr, m); i++) for (let c = i; c < n; c++) R[i * n + c] = cols[c][i];
+  return R;
+}
+
+// qr()'s Householder factorization of the m x n matrix A (row-major): cols, A by columns with R on and above the
+// diagonal; vs and betas, the k = min(m, n) reflectors I - beta v v^T
+function qrFactor(A: Float64Array, m: number, n: number): { cols: Float64Array[]; vs: Float64Array[]; betas: number[]; k: number } {
   // columns stored contiguously: every Householder step works down columns
   const cols: Float64Array[] = [];
   for (let j = 0; j < n; j++) {
@@ -247,33 +316,7 @@ function qr(A: Float64Array, m: number, n: number, complete: boolean): [Float64A
     vs.push(v);
     betas.push(beta);
   }
-  const qc = complete ? m : k;
-  const Qcols: Float64Array[] = [];
-  for (let c = 0; c < qc; c++) {
-    const q = new Float64Array(m);
-    if (c < m) q[c] = 1;
-    Qcols.push(q);
-  }
-  for (let j = k - 1; j >= 0; j--) {
-    const v = vs[j], beta = betas[j];
-    if (beta === 0) continue;
-    for (let c = 0; c < qc; c++) {
-      const q = Qcols[c];
-      let sum = dot4(v, j, q, j, m - j);
-      if (sum === 0) continue;
-      sum *= beta;
-      for (let i = j; i < m; i++) q[i] -= sum * v[i];
-    }
-  }
-  const Q = new Float64Array(m * qc);
-  for (let c = 0; c < qc; c++) {
-    const q = Qcols[c];
-    for (let i = 0; i < m; i++) Q[i * qc + c] = q[i];
-  }
-  const rr = complete ? m : k;
-  const R = new Float64Array(rr * n);
-  for (let i = 0; i < Math.min(rr, m); i++) for (let c = i; c < n; c++) R[i * n + c] = cols[c][i];
-  return [Q, R, qc];
+  return { cols, vs, betas, k };
 }
 
 // ------------------------------------------------------------------ symmetric eigenproblem (tred2 + tql2)
@@ -1336,6 +1379,18 @@ newBuiltinModule("_nplinalg", (m) => {
     const [A, r, c] = mat(a);
     const [Q, R, qc] = qr(A, r, c, !!complete);
     return tuple([out(Q, [r, qc]), out(R, [complete ? r : Math.min(r, c), c])]);
+  });
+  // Q^T B without forming Q (MATLAB's [C, R] = qr(S, B)): (C, R), C with m rows when complete, else min(m, n)
+  fn("qr_qtb", (sa: NDArray, sb: NDArray, complete: any) => {
+    const [r0, c0] = dims(sa), [br, bc] = dims(sb);
+    if (br !== r0) raise(T.ValueError, "qr_qtb: A and B must have the same number of rows");
+    const rr = complete ? r0 : Math.min(r0, c0);
+    // (mat's copies of A and B, R and C, WebAssembly's buffers and copies of both, and the outputs)
+    work(4 * r0 * c0 + 4 * r0 * bc + 3 * rr * (c0 + bc), "qr");
+    const [A, r, c] = mat(sa);
+    const [B, , nb] = mat(sb);
+    const [C, R] = qrQtb(A, r, c, B, nb, !!complete);
+    return tuple([out(C, [rr, nb]), out(R, [rr, c])]);
   });
   // nanPivots: NumPy's rule (OpenBLAS potrf), refusing a pivot only when it is <= 0, so a NaN pivot passes and the
   // rest of the factor fills with NaN; without it, MATLAB's (and reference LAPACK's), refusing any pivot that is not

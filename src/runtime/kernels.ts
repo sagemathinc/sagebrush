@@ -16,6 +16,7 @@ interface Exports {
   dgetrf(a: number, n: number, piv: number): number;
   dgetrs(lu: number, n: number, x: number, m: number): void;
   dgeqr(c: number, m: number, n: number, v: number, beta: number, q: number, qc: number): void;
+  dqtb(v: number, beta: number, m: number, k: number, b: number, nb: number): void;
   dsyev(w: number, n: number, d: number, e: number): number;
   dgeev(h: number, n: number, w: number, d: number, e: number, ort: number, tmp: number): number;
   dgesvd(a: number, m: number, n: number, u: number, v: number, s: number, e: number, work: number): number;
@@ -155,6 +156,28 @@ export function wasmQR(A: Float64Array, m: number, n: number, complete: boolean)
   const rr = complete ? m : k, R = new Float64Array(rr * n);
   for (let i = 0; i < Math.min(rr, m); i++) for (let col = i; col < n; col++) R[i * n + col] = C[col * m + i];
   return [Q, R, qc];
+}
+
+// Q^T B of the m x n matrix A (row-major) without forming Q, as qrQtb() in
+// numpy_linalg.ts: B is m x nb (row-major); [C (rr x nb), R (rr x n)], rr = m
+// when complete, else min(m, n): dgeqr's factorization, then its reflectors
+// applied to B's columns in increasing order (dqtb).
+export function wasmQRQtb(A: Float64Array, m: number, n: number, B: Float64Array, nb: number, complete: boolean): [Float64Array, Float64Array] | null {
+  if (m * n * Math.min(m, n) < WORK_MIN || !kernels()) return null;
+  const k = Math.min(m, n), rr = complete ? m : k;
+  const [a, c, v, beta, bs, b] = layout(m * n, m * n, k * m, k, m * nb, m * nb);
+  view(a, m * n).set(A);
+  K!.transpose(a, m, n, c);
+  const C = view(c, m * n);
+  K!.dgeqr(c, m, n, v, beta, 0, 0);
+  view(bs, m * nb).set(B);
+  K!.transpose(bs, m, nb, b);
+  K!.dqtb(v, beta, m, k, b, nb);
+  const Bc = view(b, m * nb), out = new Float64Array(rr * nb);
+  for (let i = 0; i < rr; i++) for (let col = 0; col < nb; col++) out[i * nb + col] = Bc[col * m + i];
+  const R = new Float64Array(rr * n);
+  for (let i = 0; i < Math.min(rr, m); i++) for (let col = i; col < n; col++) R[i * n + col] = C[col * m + i];
+  return [out, R];
 }
 
 // Symmetric eigenproblem: eigenvalues d (unsorted) and the eigenvector of
