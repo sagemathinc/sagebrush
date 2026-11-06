@@ -231,7 +231,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     const [base, ext] = splitExt(nameOf(path));
     const p = await free(parentOf(path), base + " (copy)", ext);
     if (!p) { say("No free name for a copy"); return null; }
-    try { await ws.write(p, encodeText(t, eol)); const e = await ws.stat(p); say("Copied to " + nameOf(p)); return e ?? null; }
+    try { const e = await ws.create(p, { content: encodeText(t, eol) }); say("Copied to " + nameOf(p)); return e; }
     catch (err) { say("Not copied: " + String((err as Error)?.message ?? err).slice(0, 200)); return null; }
   }
   const actions: Record<string, () => unknown> = {

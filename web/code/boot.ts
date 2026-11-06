@@ -4,13 +4,12 @@
 // /?code=<fid>, fetches the page module (dist/sagebrush-code.js, a lazy chunk) and mounts it.
 import type { Workspace, Entry } from "../workspace/api";
 import { langOf } from "./langs";
+import { codeUrl } from "./url";
 import { openFilesDialog } from "../workspace/fileopen";
 import { openGallery } from "../examples/open";
 import { renderFileMenu } from "../workspace/filemenu";
 
 const isCode = (e: Entry) => e.kind === "file" && langOf(e.path) !== null;
-/** The page for a file, by its stable id (hex: nothing to encode). */
-export const codeUrl = (fid: string) => "/?code=" + fid;
 
 /** Called once by the notebook page; true if the code page took the page over. `open`: the page's own way to open a
  * notebook, a board or a file chosen from the code page (Open…, a copy). */
