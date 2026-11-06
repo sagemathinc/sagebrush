@@ -115,8 +115,20 @@ def load(path=None):
         raise KeyFileError("%s holds no valid key (enroll again: sagebrush remote login)" % path)
 
 
+def _write_all(fd, data):
+    """Every byte, or OSError: os.write may write fewer than asked (astra's R765-WRITE-1), so advance by what it
+    wrote, and refuse a write that makes no progress rather than loop."""
+    view = memoryview(data)
+    while view:
+        n = os.write(fd, view)
+        if not isinstance(n, int) or n <= 0 or n > len(view):
+            raise OSError("the key file's write made no progress")
+        view = view[n:]
+
+
 def save(key, path=None):
-    """Write the key atomically: a new 0600 file beside it (O_EXCL, never through a symlink), then rename."""
+    """Write the key atomically: a new 0600 file beside it (O_EXCL, never through a symlink), written whole and
+    synced, then renamed over the old one; any failure before the rename removes the new file and leaves the old."""
     path = path or default_path()
     d = os.path.dirname(path)
     os.makedirs(d, mode=0o700, exist_ok=True)
@@ -132,7 +144,7 @@ def save(key, path=None):
     try:
         try:
             os.fchmod(fd, 0o600)  # (whatever the umask)
-            os.write(fd, body)
+            _write_all(fd, body)
             os.fsync(fd)
         finally:
             os.close(fd)
