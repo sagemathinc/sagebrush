@@ -1,14 +1,17 @@
 {
  "v": 1,
- "reason": "Colormaps by name as matplotlib 3.11.1 and Sage: matplotlib.colormaps (its 182 names, KeyError, get_cmap), plt.get_cmap, matplotlib's ValueError with its closest names for a cmap= it lacks (a close-match scorer, as Sagebrush has no difflib), Sage's colormaps and its RuntimeError when drawn; a name was silently viridis before (lib/matplotlib/cm.py, pyplot.py, lib/sage_plot_fields.py, lib/_graphics.py) Re-measured with bun 1.4.4 (size-record.sh) on master b60d0977 vs head 3c0ac51b: cli/lib.gen.js +4804, cli/pyjs.cjs +6506, engine/lib/core.pre +5141, engine/lib/core.src +1779, engine/lib/sage.pre +13606, engine/lib/sage.src +2337, engine/lib/sci.pre +42617, engine/lib/sci.src +8175; no other row moves. Markers: exact, except cli/pyjs.cjs 6538 (+6506 measured, plus 32 B of margin, as it moves with master).",
+ "reason": "Colormaps by name as matplotlib 3.11.1 and Sage: matplotlib.colormaps (its 182 names, KeyError, get_cmap), plt.get_cmap, matplotlib's ValueError with its closest names for a cmap= it lacks (a close-match scorer, as Sagebrush has no difflib), Sage's colormaps and its RuntimeError when drawn; a name was silently viridis before (lib/_cmaps.py, imported only when a colormap is named; lib/matplotlib/cm.py, pyplot.py, lib/sage_plot_fields.py) Re-measured with bun 1.4.4 (size-record.sh) on master 5b10a4e1 vs head 2e5e0e6f: cli/lib.gen.js +5040, cli/pyjs.cjs +7058, engine/lib/core.pre +103, engine/lib/core.src +54, engine/lib/mod-matplotlib.src +2485, engine/lib/sage.pre +13036, engine/lib/sage.src +2336, engine/lib/sci.pre +7242, engine/lib/sci.src +1825, engine/sagebrush-notebook.js +42, engine/sagebrush-worker.js +197; no other row moves. Markers: exact, except cli/pyjs.cjs 7090 (+7058 measured, plus 32 B of margin, as it moves with master).",
  "bytes": {
-  "cli/lib.gen.js": 4804,
-  "cli/pyjs.cjs": 6538,
-  "engine/lib/core.pre": 5141,
-  "engine/lib/core.src": 1779,
-  "engine/lib/sage.pre": 13606,
-  "engine/lib/sage.src": 2337,
-  "engine/lib/sci.pre": 42617,
-  "engine/lib/sci.src": 8175
+  "cli/lib.gen.js": 5040,
+  "cli/pyjs.cjs": 7090,
+  "engine/lib/core.pre": 103,
+  "engine/lib/core.src": 54,
+  "engine/lib/mod-matplotlib.src": 2485,
+  "engine/lib/sage.pre": 13036,
+  "engine/lib/sage.src": 2336,
+  "engine/lib/sci.pre": 7242,
+  "engine/lib/sci.src": 1825,
+  "engine/sagebrush-notebook.js": 42,
+  "engine/sagebrush-worker.js": 197
  }
 }
