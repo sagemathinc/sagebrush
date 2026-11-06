@@ -17,6 +17,9 @@ import { itemOf, isCodeEnv, UNSUPPORTED_ENVS, stateOf, savedStates, mathPart, in
 const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" };
 // eslint-disable-next-line no-control-regex
 export const esc = (s) => String(s).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "").replace(/[&<>"']/g, (c) => ESC[c]);
+// (esc's inverse, for HTML made here turned back into text)
+const UNESC = Object.fromEntries(Object.entries(ESC).map(([c, e]) => [e, c]));
+const unesc = (s) => s.replace(/&(?:amp|lt|gt|quot|#39|#x27|apos);/g, (e) => UNESC[e] ?? e);
 const safeUrl = (u) => { const s = String(u).trim(); return /^(https?:\/\/|mailto:)[^\s"'<>\\]*$/i.test(s) && s.length < 2048 ? s : null; };
 // (\roman of 0 or less: nothing, as TeX's \romannumeral; past 4999, the number in digits, a bound on the text)
 const roman = (n) => { if (n <= 0) return ""; if (n > 4999) return String(n); const v = [[1000, "m"], [900, "cm"], [500, "d"], [400, "cd"], [100, "c"], [90, "xc"], [50, "l"], [40, "xl"], [10, "x"], [9, "ix"], [5, "v"], [4, "iv"], [1, "i"]]; let s = ""; for (const [k, r] of v) while (n >= k) { s += r; n -= k; } return s; };
@@ -189,9 +192,16 @@ const NOOP = new Set(["relax", "protect", "makeatletter", "makeatother", "sloppy
 // commands whose arguments are consumed silently: name -> [optional count, mandatory count]
 // (saved boxes: their copies, all \usebox's together, at most BOX_MAX: each copy's HTML characters, and BOX_KEY for each
 //  of its SageTeX items, which a box with no HTML still copies (astra, BOX653-EXPAND-1's residual))
+// (a \nameref's title as text: at most NAME_MAX characters each, NAME_TOTAL for all the \nameref's of a document
+//  together, and titles naming titles at most NAME_DEPTH deep (astra, REF682-EXPAND-1))
+export const NAME_MAX = 4096, NAME_TOTAL = 1 << 20, NAME_DEPTH = 64;
 export const BOX_MAX = 1 << 20, BOX_KEY = 16;
 export const boxCost = (b) => b.h.length + BOX_KEY * b.keys.length;
 export const fitsBoxes = (used, add) => used + add <= BOX_MAX;
+// (cleveref's names, singular and plural, and \Cref's for its abbreviated ones)
+const CREF = { section: ["section", "sections"], subsection: ["section", "sections"], subsubsection: ["section", "sections"], chapter: ["chapter", "chapters"],
+  equation: ["eq.", "eqs."], figure: ["fig.", "figs."], table: ["table", "tables"], item: ["item", "items"], footnote: ["footnote", "footnotes"] };
+const CREF_CAP = { "eq.": "Equation", "eqs.": "Equations", "fig.": "Figure", "figs.": "Figures" };
 const GOBBLE = { index: [0, 1], glossary: [0, 1], addcontentsline: [0, 3], markboth: [0, 2], markright: [0, 1], pagestyle: [0, 1], thispagestyle: [0, 1],
   pagenumbering: [0, 1], hypersetup: [0, 1], lstset: [0, 1], bibliographystyle: [0, 1], nocite: [0, 1], addtolength: [0, 2], settowidth: [0, 2],
   settoheight: [0, 2], settodepth: [0, 2], newlength: [0, 1], hyphenation: [0, 1], graphicspath: [0, 1], DeclareGraphicsExtensions: [0, 1],
@@ -228,7 +238,8 @@ class Renderer {
   }
   nid(p) { return p + "-" + (++this.idn); }
   setTarget(text, id, kind) { this.target = { text: String(text), id, kind }; }
-  label(key) { if (!this.labels.has(key)) this.labels.set(key, Object.assign({}, this.target)); }
+  // (a label: the current target, and the current label name, \nameref's: the last section's or caption's title)
+  label(key) { if (!this.labels.has(key)) this.labels.set(key, Object.assign({ name: this.labelName ?? "" }, this.target)); }
   refPh(n) { this.refs.push(n); return "\u0001R" + (this.refs.length - 1) + "\u0002"; }
   unk(name, flow, st) {
     if (BEAMER_CMDS.has(name)) this.needBeamer = true;
@@ -488,8 +499,11 @@ class Renderer {
     }
     if (n.cmd === "chapter" && this.book) this.flushFootnotes(flow);
     const id = this.nid("sec");
-    this.setTarget(num, id, n.cmd);
+    // (only a numbered heading is a label's target: a \label after a starred one, or one past secnumdepth, is the last
+    //  numbered one's, as in TeX)
+    if (num) this.setTarget(num, id, n.cmd);
     const title = this.inline(n.kids, ctx);
+    this.labelName = title;
     // (an unstarred part says "Part" with its numeral, which TeX leaves empty at 0 or less)
     if (n.cmd === "part") flow.block('<h1 class="part" id="' + id + '">' + (!n.star ? '<div class="partnum">Part ' + num + "</div>" : "") + title + "</h1>");
     else if (n.cmd === "chapter") flow.block('<h1 class="chapter" id="' + id + '">' + (num ? '<div class="chapnum">' + (this.appendix ? "Appendix " : "Chapter ") + esc(num) + "</div>" : "") + title + "</h1>");
@@ -523,7 +537,9 @@ class Renderer {
     const num = (this.book ? this.chapNum() + "." : "") + this.ctr[fl];
     const id = this.nid(fl);
     this.setTarget(num, id, fl);
-    flow.block('<div class="caption" id="' + id + '"><span class="capnum">' + (fl === "table" ? "Table " : "Figure ") + esc(num) + ":</span> " + this.inline(n.kids, ctx) + "</div>");
+    const text = this.inline(n.kids, ctx);
+    this.labelName = text;
+    flow.block('<div class="caption" id="' + id + '"><span class="capnum">' + (fl === "table" ? "Table " : "Figure ") + esc(num) + ":</span> " + text + "</div>");
   }
 
   // ---- environments
@@ -813,18 +829,103 @@ class Renderer {
       const parts = r.key.split(",").map((k) => k.trim()).filter(Boolean).map((k) => { const b = this.bib.get(k); return b ? (plain ? b.lab : '<a href="#' + b.id + '">' + b.lab + "</a>") : (plain ? "?" : '<span class="missing">' + esc(k) + "</span>"); });
       return "[" + parts.join(", ") + (r.opt ? ", " + esc(r.opt) : "") + "]";
     }
+    if (r.cmd === "cref" || r.cmd === "Cref") return this.cref(r, plain);
     const L = this.labels.get(r.key);
     if (!L) return plain ? "??" : '<span class="missing" title="' + esc(r.key) + '">??</span>';
+    // (\nameref: the title the label was under, a section's or a caption's; one that names itself, "??", as hyperref ends)
+    if (r.cmd === "nameref") {
+      const nm = this.nameText(r.key, plain);
+      if (nm === null) return plain ? "??" : '<span class="missing" title="' + esc(r.key) + '">??</span>';
+      // (all of a document's \nameref's together: at most NAME_TOTAL characters of titles, counted before each is shown)
+      if ((this.nameOut = (this.nameOut ?? 0) + nm.length) > NAME_TOTAL) { this.nameSaid("past " + NAME_TOTAL + " characters of titles in all: the rest left out"); return "\u2026"; }
+      return plain ? nm : L.id ? '<a class="ref" href="#' + L.id + '">' + nm + "</a>" : nm;
+    }
     let txt = L.text || "??";
     if (r.cmd === "eqref") txt = "(" + txt + ")";
     if (r.cmd === "pageref") txt = "↑";
-    if (r.cmd === "cref" || r.cmd === "Cref" || r.cmd === "autoref") {
+    if (r.cmd === "autoref") {
       const nm = { section: "Section", subsection: "Section", subsubsection: "Section", chapter: "Chapter", equation: "Equation", figure: "Figure", table: "Table", item: "Item", footnote: "Footnote" }[L.kind]
         || (this.thms[L.kind] ? this.thms[L.kind].title : "");
       txt = (nm ? (r.cmd === "cref" ? nm.toLowerCase() : nm) + " " : "") + txt;
     }
     if (plain) return txt;
     return L.id ? '<a class="ref" href="#' + L.id + '">' + esc(txt) + "</a>" : esc(txt);
+  }
+  // (a label's \nameref text: its title with the references in it resolved, as text (no link inside the link): the final
+  //  pass replaces each placeholder once, so one \nameref brings in is resolved here (daybreak3, #682); null if the title
+  //  names itself, directly or through others (TeX: "??"))
+  nameText(key, plain, seen = new Set()) {
+    const L = this.labels.get(key);
+    // (only a \nameref inside a title can name a missing label here, and it asks for text)
+    if (!L) return "??";
+    if (seen.has(key)) return null;
+    if (seen.size >= NAME_DEPTH) { this.nameSaid("titles naming titles past " + NAME_DEPTH + " deep: the rest left out"); this.nameTaint = (this.nameTaint ?? 0) + 1; return "??"; }
+    // (each label's title as text, worked out once (a label reached through many titles isn't worked out again: whether it
+    //  reaches a cycle doesn't depend on where it's reached from), at most NAME_MAX characters, checked before each piece
+    //  is added (titles naming others twice each doubled per level: astra, REF682-EXPAND-1); past it, cut and said once.
+    //  A title whose working out met the depth cut depends on how deep it was reached: kept only for that depth left
+    //  (nameMemoAt), so the same label named directly, or less deep, is worked out again and gets its whole title
+    //  (daybreak3, #682 r3); at most NAME_DEPTH of those per label, so the work stays bounded)
+    const memo = (this.nameMemo ??= new Map()), memoAt = (this.nameMemoAt ??= new Map()), left = NAME_DEPTH - seen.size;
+    let m = memo.get(key);
+    if (m === undefined) {
+      m = memoAt.get(key)?.get(left);
+      // (a result cut by depth, reused: whoever uses it is cut by depth too)
+      if (m !== undefined) this.nameTaint = (this.nameTaint ?? 0) + 1;
+    }
+    if (m === undefined) {
+      const t0 = this.nameTaint ?? 0;
+      seen.add(key);
+      let text = "", cycle = false, cut = false;
+      for (const part of L.name.replace(/<[^>]*>/g, "").split(/(\u0001R\d+\u0002)/)) {
+        const k = /^\u0001R(\d+)\u0002$/.exec(part), q = k && this.refs[+k[1]];
+        const t = !q ? unesc(part) : q.cmd === "nameref" ? this.nameText(q.key, true, seen) : this.resolveRef(q, true);
+        if (t === null) { cycle = true; break; }
+        if (text.length + t.length > NAME_MAX) { text += t.slice(0, NAME_MAX - text.length) + "\u2026"; cut = true; break; }
+        text += t;
+      }
+      seen.delete(key);
+      if (cut) this.nameSaid("a title past " + NAME_MAX + " characters, cut");
+      m = cycle ? null : text;
+      if ((this.nameTaint ?? 0) === t0) memo.set(key, m);
+      else { let at = memoAt.get(key); if (!at) memoAt.set(key, (at = new Map())); at.set(left, m); }
+    }
+    // (in HTML: the title as made, its markup kept; one with references in it, as its text, escaped once)
+    //  (and a title cut at NAME_MAX, references in it or not, as the text it was cut to: what is shown is what was said,
+    //  astra's #682 r3 note)
+    return m === null ? null : plain ? m : /\u0001R/.test(L.name) || m.length > NAME_MAX ? esc(m) : L.name;
+  }
+  // (each kind of cut said once, as a problem)
+  nameSaid(why) { (this.nameWhy ??= new Set()).has(why) || (this.nameWhy.add(why), this.problem("expansion", "\\nameref: " + why)); }
+  // cleveref's \cref and \Cref, with its defaults (TeX Live's; astra4's digest, gap 2): each kind named ("section 1",
+  // "eq. (1)", "fig. 1"), the keys of one kind together, the kinds in the order they first come, each kind's sorted,
+  // runs of three or more as "a to c"; "and" between two, commas and a last "and" between more (between kinds, ", and");
+  // \Cref names the first kind capitalized; keys with no label, "??" each
+  cref(r, plain) {
+    const groups = new Map();
+    for (const key of r.key.split(",").map((k) => k.trim()).filter(Boolean)) {
+      const L = this.labels.get(key), kind = L ? L.kind : "\u0000";
+      if (!groups.has(kind)) groups.set(kind, []);
+      groups.get(kind).push(L ?? { missing: key });
+    }
+    const num = (L) => String(L.text).split(".").map(Number);
+    const cmp = (a, b) => { const x = num(a), y = num(b); for (let i = 0; i < Math.max(x.length, y.length); i++) if ((x[i] ?? -1) !== (y[i] ?? -1)) return (x[i] ?? -1) - (y[i] ?? -1); return 0; };
+    const next = (a, b) => { const x = num(a), y = num(b); return x.length === y.length && x.slice(0, -1).join() === y.slice(0, -1).join() && y.at(-1) === x.at(-1) + 1; };
+    const and = (xs, oxford) => xs.length < 3 ? xs.join(" and ") : xs.slice(0, -1).join(", ") + (oxford ? ", and " : " and ") + xs.at(-1);
+    const parts = [...groups].map(([kind, Ls], g) => {
+      // (keys with no label: "??" each, together, as cleveref prints them: "????" for two)
+      if (kind === "\u0000") return Ls.map((x) => plain ? "??" : '<span class="missing" title="' + esc(x.missing) + '">??</span>').join("");
+      Ls.sort(cmp);
+      const show = (L) => { const t = kind === "equation" ? "(" + L.text + ")" : L.text; return plain ? t : L.id ? '<a class="ref" href="#' + L.id + '">' + esc(t) + "</a>" : esc(t); };
+      const items = [];
+      for (let i = 0; i < Ls.length; ) { let j = i; while (j + 1 < Ls.length && next(Ls[j], Ls[j + 1])) j++; if (j - i >= 2) items.push(show(Ls[i]) + " to " + show(Ls[j])); else for (let k = i; k <= j; k++) items.push(show(Ls[k])); i = j + 1; }
+      const th = this.thms[kind]?.title.toLowerCase(), nm = CREF[kind] ?? (th ? [th, th + "s"] : null);
+      let name = nm ? nm[Ls.length > 1 ? 1 : 0] : "";
+      if (name && r.cmd === "Cref" && g === 0) name = CREF_CAP[name] ?? name[0].toUpperCase() + name.slice(1);
+      // (a theorem's name is the document's own text: escaped in HTML (astra, REF682-HTML-1))
+      return (name ? (plain ? name : esc(name)) + " " : "") + and(items, false);
+    });
+    return and(parts, true);
   }
   tocHtml() {
     if (!this.toc.length) return "";
