@@ -198,14 +198,24 @@ def _proxy_for(host, scheme):
     return p
 
 
-def _dial(host, port, timeout, proxy=None):
-    """A connected blocking socket to host:port, directly or through an HTTP CONNECT proxy (run in a thread)."""
+def _left(deadline):
+    """Seconds left before deadline (time.monotonic()), or Retry if none: one absolute deadline for the whole dial."""
+    t = deadline - time.monotonic()
+    if t <= 0:
+        raise Retry("the connection to the relay timed out")
+    return t
+
+
+def _dial(host, port, deadline, proxy=None):
+    """A connected blocking socket to host:port, directly or through an HTTP CONNECT proxy (run in a thread), by the
+    absolute deadline: the connect and every read of the proxy's answer get only what is left of it (astra's #768
+    first look: a per-read timeout restarted with each byte, so a slow proxy could hold the dial far past it)."""
     if not proxy:
-        return socket.create_connection((host, port), timeout=timeout)
+        return socket.create_connection((host, port), timeout=_left(deadline))
     u = urllib.parse.urlsplit(proxy if "://" in proxy else "http://" + proxy)
     if u.scheme not in ("http", ""):
         raise Retry("only an http:// proxy is supported (HTTPS_PROXY=%s)" % u.scheme)
-    s = socket.create_connection((u.hostname, u.port or 80), timeout=timeout)
+    s = socket.create_connection((u.hostname, u.port or 80), timeout=_left(deadline))
     try:
         auth = ""
         if u.username:
@@ -214,6 +224,7 @@ def _dial(host, port, timeout, proxy=None):
         s.sendall(("CONNECT %s:%d HTTP/1.1\r\nHost: %s:%d\r\n%s\r\n" % (host, port, host, port, auth)).encode("ascii"))
         head = b""
         while b"\r\n\r\n" not in head:
+            s.settimeout(_left(deadline))
             chunk = s.recv(1)  # (byte by byte: nothing past the head may be consumed; it's the TLS server's)
             if not chunk:
                 raise Retry("the proxy closed the connection")
@@ -298,6 +309,10 @@ class Leg:
             self.on_end(code, reason)
 
     # ---- reading: the relay's frames, as a client must read a server's
+    def start(self):
+        self.task = asyncio.ensure_future(self.run(getattr(self, "first", b"")))
+        return self
+
     async def run(self, first=b""):
         try:
             if first:
@@ -404,11 +419,30 @@ class Leg:
             self.on_text(text)
 
 
+async def _in_thread(fn, *args, cleanup=None):
+    """fn(*args) in a thread, awaited so that cancelling the await returns at once (Stop): the thread runs to its own
+    end (bounded by its deadline), and what it then returns goes to cleanup (a socket: closed), never leaked."""
+    fut = asyncio.ensure_future(asyncio.to_thread(fn, *args))
+    try:
+        return await asyncio.shield(fut)
+    except asyncio.CancelledError:
+        if cleanup is not None:
+            fut.add_done_callback(lambda f: None if f.cancelled() or f.exception() is not None else cleanup(f.result()))
+        raise
+
+
+def _close_quietly(sock):
+    try:
+        sock.close()
+    except OSError:
+        pass
+
+
 async def open_leg(origin, key, on_text, on_end, post=_post, connect_ms=None):
     """A fresh challenge, signed; the connection (proxy, TLS); the upgrade.  A Leg, running, or Retry / Fatal."""
     connect_ms = connect_ms or RELAY_LIMITS["connectMs"]
     try:
-        status, d = await asyncio.to_thread(post, origin, "/api/remote/v1/challenge", {"remote_id": key.remote_id})
+        status, d = await _in_thread(post, origin, "/api/remote/v1/challenge", {"remote_id": key.remote_id})
     except EnrollError as e:
         raise Retry(str(e))
     if status == 404:
@@ -428,7 +462,7 @@ async def open_leg(origin, key, on_text, on_end, post=_post, connect_ms=None):
     def left():
         return max(0.001, deadline - time.monotonic())
     try:
-        sock = await asyncio.to_thread(_dial, host, port, left(), _proxy_for(host, u.scheme))
+        sock = await _in_thread(_dial, host, port, deadline, _proxy_for(host, u.scheme), cleanup=_close_quietly)
         sock.setblocking(False)
         ctx = ssl.create_default_context() if tls else None
         reader, writer = await asyncio.wait_for(
@@ -477,7 +511,7 @@ async def open_leg(origin, key, on_text, on_end, post=_post, connect_ms=None):
         writer.transport.abort()
         raise
     leg = Leg(reader, writer, on_text, on_end)
-    leg.task = asyncio.ensure_future(leg.run(rest))
+    leg.first = rest  # (read by start(): the caller starts the leg once it holds it, so no message comes before)
     return leg
 
 
@@ -709,7 +743,23 @@ class RelayRunner:
                 self.leg_ended = asyncio.get_running_loop().create_future()
                 self.pings_unanswered = 0
                 self.last_gen, self.closed_by_us, self.page = 0, None, None  # (generations are the leg's)
-                self.leg = await open_leg(self.origin, self.key, self.on_text, self.on_end, post=self.post)
+                # (Stop while connecting returns at once: the challenge or the dial in its thread is let go, and a
+                # socket it makes later is closed (_in_thread))
+                opening = asyncio.ensure_future(open_leg(self.origin, self.key, self.on_text, self.on_end, post=self.post))
+                stopped = asyncio.ensure_future(stop.wait())
+                await asyncio.wait([opening, stopped], return_when=asyncio.FIRST_COMPLETED)
+                stopped.cancel()
+                if not opening.done():
+                    opening.cancel()
+                    try:
+                        await opening
+                    except BaseException:
+                        pass
+                    break
+                self.leg = opening.result()
+                if stop.is_set():
+                    break
+                self.leg.start()
                 self.stats["legs"] += 1
                 up_at = time.monotonic()
                 self.err("Connected to %s as %s. Pick it in a notebook's \"Run on\" menu.\n" % (self.origin, self.key.name)

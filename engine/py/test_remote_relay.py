@@ -65,7 +65,7 @@ def test_control_grammar():
             '{"relay":"dropped","gen":3,"bytes":10}', '{"relay":"pong"}']
     for t in good:
         assert R.parse_control(t)["relay"] == json.loads(t)["relay"], t
-    assert R.close_text(7) == '{"relay":"close","gen":7}' 
+    assert R.close_text(7) == '{"relay":"close","gen":7}'
     bad = [
         '{"relay":"pong" }', '{"relay":"pong","x":1}', '{"relay":"page-close","gen":1,"conn":"c1"}',
         '{"relay":"page-open","conn":"c1","kind":"runner"}', '{"relay":"pong","relay":"pong"}',
@@ -720,7 +720,7 @@ async def test_proxy_connect():
     ts = await asyncio.start_server(target, "127.0.0.1", 0)
     pport, tport = ps.sockets[0].getsockname()[1], ts.sockets[0].getsockname()[1]
     try:
-        s = await asyncio.to_thread(R._dial, "127.0.0.1", tport, 5, "http://u:p%%20w@127.0.0.1:%d" % pport)
+        s = await asyncio.to_thread(R._dial, "127.0.0.1", tport, time.monotonic() + 5, "http://u:p%%20w@127.0.0.1:%d" % pport)
         def read6():
             got = b""
             s.settimeout(5)
@@ -734,7 +734,7 @@ async def test_proxy_connect():
         got = await asyncio.to_thread(read6)  # (blocking reads off the loop the proxy runs on)
         assert got == b"Xhello" and "CONNECT 127.0.0.1:%d HTTP/1.1" % tport in seen[0], (got, seen)
         try:
-            await asyncio.to_thread(R._dial, "127.0.0.1", tport, 5, "http://127.0.0.1:%d" % pport)
+            await asyncio.to_thread(R._dial, "127.0.0.1", tport, time.monotonic() + 5, "http://127.0.0.1:%d" % pport)
             raise AssertionError("no auth accepted")
         except R.Retry as e:
             assert "407" in str(e)
@@ -756,6 +756,74 @@ async def test_proxy_connect():
                 os.environ.pop(k, None)
             else:
                 os.environ[k] = v
+
+
+@aio
+async def test_dial_deadline_is_absolute():
+    """astra's #768 first look: a CONNECT proxy answering one byte every 40 ms must not hold the dial past its
+    deadline (a per-read timeout restarted with each byte); the dial gives up at the deadline, whatever the pace."""
+    async def slow(reader, writer):
+        await reader.readuntil(b"\r\n\r\n")
+        try:
+            for b in b"HTTP/1.1 200 Connection established\r\n\r\n":
+                writer.write(bytes([b]))
+                await writer.drain()
+                await asyncio.sleep(0.04)
+        except ConnectionError:
+            pass
+    ps = await asyncio.start_server(slow, "127.0.0.1", 0)
+    pport = ps.sockets[0].getsockname()[1]
+    try:
+        t0 = time.monotonic()
+        try:
+            s = await asyncio.to_thread(R._dial, "127.0.0.1", 9, t0 + 0.1, "http://127.0.0.1:%d" % pport)
+            s.close()
+            raise AssertionError("a slow proxy's answer passed")
+        except (R.Retry, OSError):
+            pass
+        took = time.monotonic() - t0
+        assert took < 0.35, took  # (the whole answer takes ~1.5 s; per-read timeouts would wait it out)
+        # (a deadline already past: refused before connecting at all, whatever the proxy would do)
+        t0 = time.monotonic()
+        try:
+            s = await asyncio.to_thread(R._dial, "127.0.0.1", 9, t0 - 1, "http://127.0.0.1:%d" % pport)
+            s.close()
+            raise AssertionError("dialed after the deadline")
+        except R.Retry:
+            pass
+        assert time.monotonic() - t0 < 0.1
+    finally:
+        ps.close()
+
+
+@aio
+async def test_stop_while_dialing():
+    """Stop while the dial is in its thread (a connection that hasn't answered): run() returns at once, and the
+    socket the dial makes afterwards is closed, not leaked."""
+    made = []
+    real = R._dial
+
+    def stuck(host, port, deadline, proxy=None):
+        time.sleep(1.0)  # (a slow network: the thread can't be interrupted)
+        a, b = __import__("socket").socketpair()
+        made.extend([a, b])
+        return a
+    R._dial = stuck
+    t = await Run().start()
+    try:
+        await asyncio.sleep(0.3)  # (the challenge done, the dial in its thread)
+        t0 = time.monotonic()
+        t.stop.set()
+        code = await asyncio.wait_for(t.task, 5)
+        assert code == 0 and time.monotonic() - t0 < 0.5, time.monotonic() - t0
+        await asyncio.sleep(1.2)
+        assert made and made[0].fileno() == -1, made  # (closed once the thread returned it)
+        assert t.runner.stats["legs"] == 0
+    finally:
+        R._dial = real
+        for x in made[1:]:
+            x.close()
+        await t.end()
 
 
 @aio
