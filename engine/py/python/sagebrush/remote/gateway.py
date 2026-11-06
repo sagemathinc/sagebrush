@@ -266,7 +266,10 @@ ENDING_GROUPS = set()  # (kernel process groups sent SIGTERM whose SIGKILL is st
 
 
 def _kill_tree(pgid):
-    """The tree rule: SIGTERM to the child's process group, SIGKILL to it 2 s later (whatever is left)."""
+    """The tree rule: SIGTERM to the child's process group, SIGKILL to it 2 s later (whatever is left).  Once per
+    group: a group already ending (terminate() and then the run's exit both end it) gets no second SIGTERM or timer."""
+    if pgid in ENDING_GROUPS:
+        return
     try:
         os.killpg(pgid, signal.SIGTERM)
     except (ProcessLookupError, PermissionError):
@@ -275,6 +278,10 @@ def _kill_tree(pgid):
     loop = asyncio.get_running_loop()
 
     def kill():
+        # (only a group still ending: one drain_groups already SIGKILLed and took out, or one seen empty, may since be
+        # a reused pgid of an unrelated group, and is never signalled (daybreak3's KILL-1))
+        if pgid not in ENDING_GROUPS:
+            return
         # (the group stays in ENDING_GROUPS until it is seen empty: SIGKILL is sent, not yet done, so a drain_groups
         # running now still waits for it; then it is taken out promptly, so no stale pgid is kept for the runner's
         # lifetime, where a reused one could be mistaken for a later, unrelated group (daybreak3))

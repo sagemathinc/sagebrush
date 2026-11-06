@@ -766,6 +766,27 @@ async def test_drain_groups():
     assert not G._group_members(p.pid)
     G._forget_when_empty(p.pid, asyncio.get_running_loop())  # (idempotent: already out)
     await p.wait()
+    # (daybreak3's KILL-1: a group is ended once, and the delayed SIGKILL never signals a pgid no longer ending)
+    sent = []
+    real_killpg = os.killpg
+    os.killpg = lambda g, sig: (sent.append((g, sig)), real_killpg(g, sig))[1]
+    real_later, timers = loop.call_later, []
+    try:
+        p = await asyncio.create_subprocess_exec("sh", "-c", "trap '' TERM; sleep 30 & wait", start_new_session=True)
+        await asyncio.sleep(0.2)
+        loop.call_later = lambda delay, fn, *a: (timers.append(fn), real_later(delay, fn, *a))[1]
+        G._kill_tree(p.pid)
+        G._kill_tree(p.pid)  # (terminate() and the run's exit both end it)
+        loop.call_later = real_later
+        assert sent == [(p.pid, signal.SIGTERM)] and len(timers) == 1, (sent, timers)
+        assert await G.drain_groups(0.3) == [p.pid] and p.pid not in G.ENDING_GROUPS  # (SIGKILLed at the deadline, out)
+        sent.clear()
+        timers[0]()  # (the 2 s timer, after the drain took the group out: possibly a reused pgid by now)
+        assert sent == [], sent
+    finally:
+        os.killpg = real_killpg
+        loop.call_later = real_later
+    await p.wait()
     # (G1) a group still alive at drain's deadline, before the tree's own SIGKILL at 2 s, is SIGKILLed by drain
     p = await asyncio.create_subprocess_exec("sh", "-c", "trap '' TERM; sleep 30 & wait", start_new_session=True)
     await asyncio.sleep(0.2)
