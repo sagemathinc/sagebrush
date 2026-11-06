@@ -1208,7 +1208,11 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   /** Sharing, refused for space: give back every byte of the claim sync doesn't use (§6.1). */
   async releaseClaim(a: { account: string }): Promise<{ released: number }> {
     if (!this.exists() || this.get("account_id") !== a.account) return { released: 0 };
-    return { released: await this.releaseSlack(0) };
+    const released = await this.releaseSlack(0);
+    // (D1 missed it: the alarm writes it, armed here, as nothing else may be pending; the alarm's own give-back
+    // re-arms when it ends, after its backoff is set)
+    if (Number(this.get("claim_dirty") ?? 0) === 1) this.arm();
+    return { released };
   }
   /** What sync holds, for the account's usage breakdown (display only). */
   async usage(a: { account: string }): Promise<{ files: number; documents: number; claim: number; retention: { state: string; readonly_since: number | null; purge_after: number | null } } | null> {
