@@ -16,8 +16,11 @@ unmasked, text only, no extensions), over `ssl` (and an HTTP CONNECT proxy from 
     key and no code (the relay authenticated the page's session; a code or session hello is refused here, as a
     codeless one is on loopback); page-close ends it; a receipt is acked at once, after every byte before it was read;
     pings every 15 s, and a leg with 2 pings unanswered is dead;
-  - the runner can't close a page by itself (the peer's only controls are ping and ack): refusing or closing a page
-    closes the whole leg, and the runner dials again; the page reconnects and reconciles (its existing recovery);
+  - the runner closes one page with {"relay":"close","gen":n} (r1.9): a refused hello, an unpair, an answer the page
+    isn't reading (1013) end that page only, never the leg; the relay answers with that page's page-close;
+  - generations only go up, across page-close too: a page-open whose gen isn't above every gen seen is refused;
+  - the output gate counts this leg's own transport buffer only; the relay's per-page window (8 MiB, receipts from
+    the page) is the authority on a page that doesn't read (r1.9: the runner never sees those receipts);
   - a lost leg leaves the bindings and their kernels running (R1); dialing again backs off 1, 2, 4 ... 60 s, +-20%;
   - revoked ({"relay":"revoked"} or close 4403), or replaced by another runner with this key (4009): every kernel
     stopped by the tree rule, and the command ends.  4429 (the account's day budget): back off the longest.
@@ -40,7 +43,7 @@ import urllib.request
 from sagebrush.remote import keys as _keys
 from sagebrush.remote.enroll import EnrollError, _post, check_origin
 from sagebrush.remote.gateway import Gateway
-from sagebrush.remote.pair import GUID, PAIR_LIMITS, RealTimers, b64url, page_key_error, strict_json
+from sagebrush.remote.pair import GUID, PAIR_LIMITS, RealTimers, _close_status_ok, b64url, page_key_error, strict_json
 
 RELAY_PATH = "/api/remote/v1/runner"
 CHAL_TAG = "sb-remote-chal/1\n"
@@ -134,6 +137,10 @@ def ping_text():
 
 def ack_text(r):
     return '{"relay":"ack","r":"%s"}' % r
+
+
+def close_text(gen):
+    return '{"relay":"close","gen":%d}' % gen
 
 
 class Fatal(Exception):
@@ -343,8 +350,16 @@ class Leg:
             payload = bytes(self.buf[at:at + n])
             del self.buf[:at + n]
             if op == 0x8:
+                # (as pair.py reads a client's: RFC 6455 §5.5.1, §7.4)
+                if len(payload) == 1:
+                    return self.close(1002, "a close status is two bytes")
+                if len(payload) >= 2 and not _close_status_ok(int.from_bytes(payload[:2], "big")):
+                    return self.close(1002, "a close status a peer may not send")
+                try:
+                    reason = payload[2:].decode("utf-8")
+                except UnicodeDecodeError:
+                    return self.close(1007, "a close reason not UTF-8")
                 code = int.from_bytes(payload[:2], "big") if len(payload) >= 2 else 1005
-                reason = payload[2:].decode("utf-8", "replace")
                 if not self.closed:
                     # (answer the close, then end: the relay's code is what on_end reports)
                     echo = payload[:2] if len(payload) >= 2 else b""
@@ -454,7 +469,8 @@ async def open_leg(origin, key, on_text, on_end, post=_post, connect_ms=None):
                 raise Retry("the relay repeated the header %s" % k)
             h[k] = v.strip()
         accept = base64.b64encode(hashlib.sha1((wskey + GUID).encode("ascii")).digest()).decode("ascii")
-        if (h.get("upgrade", "").lower() != "websocket" or "upgrade" not in h.get("connection", "").lower()
+        tokens = [t.strip().lower() for t in h.get("connection", "").split(",")]
+        if (h.get("upgrade", "").lower() != "websocket" or "upgrade" not in tokens
                 or h.get("sec-websocket-accept") != accept or "sec-websocket-extensions" in h or "sec-websocket-protocol" in h):
             raise Retry("the relay's upgrade answer isn't a plain WebSocket")
     except BaseException:
@@ -482,18 +498,25 @@ class RelayPage:
     def send_text(self, text, kind):
         if self.closed:
             return False
-        return self.leg.send_text(text, kind)
+        data = text.encode("utf-8", "surrogatepass")
+        if not self.leg.fits(len(data), kind):
+            # (this page's answers aren't leaving: this page ends, 1013; the leg and any next page go on)
+            self.close(1013, "the page isn't reading its answers")
+            return False
+        return self.leg.write(client_frame(0x1, data), kind)
 
     def send(self, obj):
         return self.send_text(json.dumps(obj, separators=(",", ":")), "data")
 
     def close(self, code, reason=""):
-        """The runner can't close one page on the relay (its controls are ping and ack): it ends the page here, then
-        the whole leg, and dials again."""
+        """This page only: ended here, and {"relay":"close","gen":n} to the relay, which closes the page's leg and
+        answers with its page-close (r1.9).  (code and reason are the runner's own log; the page sees its leg end.)"""
         if self.closed:
             return
         self.runner.page_gone(self)
-        self.runner.restart_leg(code, reason)
+        self.runner.closed_by_us = self.gen
+        self.runner.stats["pageCloses"] += 1
+        self.leg.send_text(close_text(self.gen), "control")
 
 
 class RelayRunner:
@@ -514,7 +537,9 @@ class RelayRunner:
         self.fatal = None
         self.pings_unanswered = 0
         self.stopping = False
-        self.stats = {"legs": 0, "acks": 0, "pings": 0, "violations": 0, "thumbprints": 0}
+        self.stats = {"legs": 0, "acks": 0, "pings": 0, "violations": 0, "thumbprints": 0, "pageCloses": 0}
+        self.last_gen = 0      # (the highest page generation seen on this leg: they only go up (R768-GEN-1))
+        self.closed_by_us = None  # (the gen this runner closed, whose page-close the relay owes)
         self.delays = []  # (each wait before dialing again, ms: the backoff as it went)
         self.gateway = Gateway(self, port=port, cwd=cwd)
 
@@ -553,17 +578,20 @@ class RelayRunner:
         elif op == "page-open":
             if c["kind"] != "runner":
                 return self.violation("a page for another kind of peer")
-            if self.page is not None and not self.page.closed and c["gen"] <= self.page.gen:
+            if c["gen"] <= self.last_gen:
                 return self.violation("a page's generation went back")
+            self.last_gen = c["gen"]
             if self.page is not None and not self.page.closed:
                 self.page_gone(self.page)
             self.open_page(c["conn"], c["gen"])
         elif op == "page-close":
             p = self.page
-            if p is None or p.closed or p.conn != c["conn"] or p.gen != c["gen"]:
+            # (the open page, or the one this runner closed, whose page-close is the relay's answer)
+            if p is None or p.conn != c["conn"] or p.gen != c["gen"] or (p.closed and self.closed_by_us != p.gen):
                 return self.violation("a page-close for no open page")
             self.page_gone(p)
             self.page = None  # (the relay forwards nothing more for it: a message now is a violation)
+            self.closed_by_us = None
         elif op == "revoked":
             self.fatal = Fatal("this computer's enrollment was revoked: it no longer runs code for the account", 3)
             self.leg.close(1000, "revoked")
@@ -596,10 +624,6 @@ class RelayRunner:
                 self.paired_conn = None
             p.token = None
             self.gateway.socket_lost(p)
-
-    def restart_leg(self, code, reason):
-        if self.leg is not None and not self.leg.closed:
-            self.leg.close(1000, ("the runner closed the page: %d %s" % (code, reason))[:120])
 
     def _refuse(self, p, rid, kind, message):
         p.send({"jsonrpc": "2.0", "id": rid if isinstance(rid, str) else None,
@@ -684,6 +708,7 @@ class RelayRunner:
             try:
                 self.leg_ended = asyncio.get_running_loop().create_future()
                 self.pings_unanswered = 0
+                self.last_gen, self.closed_by_us, self.page = 0, None, None  # (generations are the leg's)
                 self.leg = await open_leg(self.origin, self.key, self.on_text, self.on_end, post=self.post)
                 self.stats["legs"] += 1
                 up_at = time.monotonic()
