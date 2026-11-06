@@ -100,6 +100,7 @@ def test_values_output_errors():
     assert err == "e\n" and "error" not in done
     out, err, _, done = k.run("def f():\n    return 1/0\nf()")
     assert done.get("error") and "ZeroDivisionError" in err and "f()" in err, err
+    assert done.get("ename") == "ZeroDivisionError", done
     out, err, _, done = k.run("raise SystemExit(3)")
     assert done.get("error")
     out, _, _, done = k.run("x * 2")  # (the kernel survived, its namespace kept)
@@ -172,6 +173,7 @@ def test_interrupt():
     assert done.get("error")
     err = "".join(m["out"] for m in k.msgs if m.get("id") == rid and m.get("stream") == "stderr")
     assert "KeyboardInterrupt" in err, err
+    assert done.get("ename") == "KeyboardInterrupt", done
     out, _, _, _ = k.run("1 + 1")
     assert out == "2\n", out
 
