@@ -13,6 +13,7 @@ import { openBytes, encodeText, EDIT_MAX } from "./save";
 import { imageCandidates, graphicsPathOf, notFoundWhy, sniffImage, admitImageBytes, IMAGE_BOUNDS, IMAGE_EXTS } from "./images";
 import { engineInputs, admitInput, type Known } from "./inputs";
 import { AutoSaver, type SaveState } from "./autosave";
+import { leaver } from "./leave";
 import { browserDrafts, newWriterId } from "./drafts";
 import { type Token } from "./gate";
 import { createEditor } from "./editor";
@@ -166,31 +167,9 @@ let mounts = 0;
 // (every editor closed goes through this one barrier, in order: a mount waits for all those closed before it, its
 //  number taken before it waits, and only the newest mount goes on (astra U8-SWITCH-1))
 let closing: Promise<unknown> = Promise.resolve();
-// (a controlled switch waits for the editor shown to settle first (astra U8-DURABLE-CLOSE-1): its latest edit written,
-//  or durable in its draft. The editor is held read-only from the start of the wait, so the edit settled and asked
-//  about is the last one: no newer edit can come between that and the close (a single, frozen close). Only the newest
-//  intent goes on: a switch asked for meanwhile, or a return to the file shown (intent(), astra U8-SWITCH-2), makes
-//  this one do nothing (null), and the hold is let go unless a newer switch holds it)
-// (the editor shown changing under the wait with no newer intent: the mount's placeholder replaced by the file's
-//  editor once its read is done. That editor is the one to settle, so the wait starts again on it; the request isn't
-//  dropped (astra, grader H10))
-let leaving = 0, heldBy = 0;
-const intent = () => ++leaving;
-const leaveOk = async (): Promise<boolean | null> => {
-  const n = intent();
-  for (;;) {
-    const cur = current;
-    heldBy = n; cur?.hold(true);
-    const release = () => { if (heldBy === n) { heldBy = 0; cur?.hold(false); } };
-    const settled = await (cur?.settle() ?? Promise.resolve(true));
-    if (n !== leaving) { release(); return null; }
-    if (cur !== current) { release(); continue; }
-    // (asked only when a write failed or the edit is in neither the file nor a durable draft: U8, never otherwise)
-    const ok = (settled && !cur?.dirty()) || confirm(settled ? LEAVE : LEAVE_LOST);
-    if (!ok) release();
-    return ok;
-  }
-};
+// (a controlled switch waits for the editor shown to settle first, held read-only, and only the newest intent goes on:
+//  leave.ts)
+const { intent, leaveOk } = leaver(() => current, (lost) => confirm(lost ? LEAVE_LOST : LEAVE));
 // the history entry shown, so a declined Back or Forward goes back to exactly it: its id (history.state.sbTexId), URL
 // and Navigation API key where there is one (traverseTo); else its position (history.state.sbTex: every entry this
 // page sees is numbered, from 0 at the first file, a fragment's entry too). Whether that return is under way: where it

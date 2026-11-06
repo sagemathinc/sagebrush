@@ -7,6 +7,7 @@
 // the bar, settling, failures, two writers, recovery, closing.
 //   bun web/latex/test-latex-autosave.mjs
 import { AutoSaver, DEBOUNCE_MS } from "./autosave.ts";
+import { leaver } from "./leave.ts";
 
 const results = [];
 const check = (name, ok, detail) => { results.push([name, !!ok]); if (!ok) console.log("FAIL", name, JSON.stringify(detail)?.slice(0, 600)); };
@@ -351,6 +352,65 @@ function editor(f, drafts, timers, page = fakePage(f)) {
     const clean = await e.saver.settle();
     e.type("written"); const wrote = await e.saver.settle();
     check("settle-clean-or-written", clean && wrote && f.text === "written", { clean, wrote, f: f.text });
+  }
+}
+
+// ---- leaving (leave.ts, page.ts's leaveOk): the editor shown settled, held, and only the newest intent going on.
+// Fake editors: settle() resolved by the test, dirty() set by it, every hold recorded in one log (grader H10b, R2, R3)
+{
+  const log = [];
+  const ed = (name, { dirty = false } = {}) => { const e = { name, dirtyNow: dirty, settles: 0, res: null };
+    e.settle = () => { e.settles++; return new Promise((r) => (e.res = r)); };
+    e.dirty = () => e.dirtyNow;
+    e.hold = (on) => log.push(name + (on ? "+" : "-"));
+    return e; };
+  const run = (cur, asks, answer = true) => leaver(() => cur.v, (lost) => { asks.push(lost); return answer; });
+  // (1) the editor shown replaced under the wait, no newer intent (the mount's placeholder by its file's editor): the
+  //     new one held and settled, the old one let go first, and the answer the new one's (H10b, R1, R2)
+  {
+    log.length = 0; const P = ed("P"), E = ed("E"), cur = { v: P }, asks = [];
+    const { leaveOk } = run(cur, asks);
+    const r = leaveOk(); await tick();
+    cur.v = E; P.res(true); await settle();
+    const settledE = E.settles; E.res?.(true); const out = await r;
+    check("leave: the editor shown replaced under the wait: the new one held and settled, the request kept (H10b, R1)",
+      out === true && settledE === 1 && log.includes("E+") && asks.length === 0, { out, settledE, log: [...log], asks });
+    check("leave: the replaced editor let go before the new one is held (R2)",
+      log.indexOf("P-") !== -1 && log.indexOf("P-") < log.indexOf("E+"), { log: [...log] });
+  }
+  // (1b) the same, the new editor's write failed and its draft not kept: asked (LEAVE_LOST); declined, let go
+  {
+    log.length = 0; const P = ed("P"), E = ed("E", { dirty: true }), cur = { v: P }, asks = [];
+    const { leaveOk } = run(cur, asks, false);
+    const r = leaveOk(); await tick();
+    cur.v = E; P.res(true); await settle(); E.res?.(false); const out = await r;
+    check("leave: the new editor's edit in neither the file nor a draft: asked as lost, declined, the new editor let go",
+      out === false && asks.length === 1 && asks[0] === true && log[log.length - 1] === "E-", { out, asks, log: [...log] });
+  }
+  // (2) a newer intent and the editor replaced, both under the wait: the leave does nothing, and the new editor is never
+  //     held by it (the newer intent comes first: R3)
+  {
+    log.length = 0; const P = ed("P"), E = ed("E"), cur = { v: P }, asks = [];
+    const { leaveOk, intent } = run(cur, asks);
+    const r = leaveOk(); await tick();
+    cur.v = E; intent(); P.res(true); await settle();
+    if (E.res) E.res(true);
+    const out = await r;
+    check("leave: a newer intent and the editor replaced: nothing done, the new editor never held by it (R3)",
+      out === null && !log.includes("E+") && E.settles === 0 && log.includes("P-") && asks.length === 0, { out, log: [...log], settlesE: E.settles, asks });
+  }
+  // (3) two leaves on the same editor: the older, superseded, lets go of nothing the newer holds; the newer asks once
+  {
+    log.length = 0; const A = ed("A", { dirty: true }), cur = { v: A }, asks = [];
+    const { leaveOk } = run(cur, asks, false);
+    const settles = [];
+    const r1 = leaveOk(); await tick(); settles.push(A.res);
+    const r2 = leaveOk(); await tick(); settles.push(A.res);
+    settles[0](true); await settle();
+    const midLog = [...log];
+    settles[1](true); const [o1, o2] = await Promise.all([r1, r2]);
+    check("leave: two leaves: the older superseded lets go of nothing; the newer asks once and, declined, lets go (H4)",
+      o1 === null && o2 === false && !midLog.includes("A-") && asks.length === 1 && log[log.length - 1] === "A-", { o1, o2, midLog, log: [...log], asks });
   }
 }
 
