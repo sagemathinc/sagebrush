@@ -547,6 +547,16 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
       b += "\\section{\\nameref{y}}\\label{x}\\section{End}\\label{y}"; const deepRef = "D \\nameref{c0} E", direct = "P \\nameref{x} Q"; return b + (first === "deep" ? deepRef + " " + direct : direct + " " + deepRef); };
     const dFirst = refText(refDoc("", chain("deep"))), sFirst = refText(refDoc("", chain("direct")));
     check("ref-nameref-depth-cut-not-kept", /D End E P End Q$/.test(dFirst) && /P End Q D End E$/.test(sFirst), [dFirst.slice(-24), sFirst.slice(-24)]);
+    // (daybreak3 R29, #682 r4: a hit on a title kept for its depth is depth-bound for the title that used it too. p0,
+    //  the first heading, reaches x with one level left, its \nameref{y} cut, x kept for that depth; the q chain's
+    //  heading, next, reaches x through b at that same depth and hits it, so b's title is kept for that depth only, not
+    //  as b's whole title; b named directly is "End" (b kept as clean: "Q ?? R"). The lengths are exact: p0..p63 to x,
+    //  q0..q62 to b, so both chains meet x with one level left)
+    const r29 = (() => { const p = (k) => "\\section{\\nameref{" + (k < 63 ? "p" + (k + 1) : "x") + "}}\\label{p" + k + "}"; let b = p(0);
+      for (let k = 0; k < 63; k++) b += "\\section{\\nameref{" + (k < 62 ? "q" + (k + 1) : "b") + "}}\\label{q" + k + "}";
+      for (let k = 1; k < 64; k++) b += p(k);
+      return refDoc("", b + "\\section{\\nameref{y}}\\label{x}\\section{End}\\label{y}\\section{\\nameref{x}}\\label{b}Q \\nameref{b} R"); })();
+    check("ref-nameref-depth-hit-taints-caller", refText(r29).endsWith("Q End R") && said(r29, /titles naming titles past 64 deep/) === 1, [refText(r29).slice(-12), r29.problems.map((p) => p.name)]);
     const many = refDoc("", "\\section{" + "W ".repeat(3000) + "}\\label{w}" + "\\nameref{w} ".repeat(400)), manyH = many.chunks.join("");
     // (a literal title past NAME_MAX, no reference in it: shown cut, as said (astra, #682 r3))
     const lit = refDoc("", "\\section{" + "L".repeat(6000) + "}\\label{l}X \\nameref{l} Y"), litA = (lit.chunks.join("").match(/<a class="ref"[^>]*>([^<]*)<\/a>/) || [])[1] ?? "";
