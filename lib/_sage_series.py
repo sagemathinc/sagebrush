@@ -348,8 +348,8 @@ def _latex_number(c):
 
 
 def _latex_from_repr(s):
-    """The printed series with ^{} exponents (Laurent series, and
-    coefficients that are not plain numbers)."""
+    """The printed series with ^{} exponents (coefficients that are not
+    plain numbers)."""
     import re
     return re.sub(r"\^(-?\d+)", r"^{\1}", repr(s).replace("*", " "))
 
@@ -615,8 +615,8 @@ class Series:
         latex, a space and the monomial, a coefficient 1 (or -1) left out
         (hence "1 +  x"); the terms are joined by " + ", and "+ -" becomes
         "- "; a series with no nonzero term to its precision is
-        "0 + \\cdots".  (Laurent series, and coefficients that are not plain
-        numbers, keep the earlier form.)
+        "0 + \\cdots".  (Coefficients that are not plain numbers keep the
+        earlier form.)
 
         EXAMPLES::
 
@@ -625,16 +625,18 @@ class Series:
             sage: latex(2 - x + O(x^3)), latex(O(x^3)), latex(R(0)), latex(3 + O(x))
             (2 -  x + O(x^{3}), 0 + \\cdots, 0, 3 + O(x))
 
+        A Laurent series as Sage writes one: a negative power as a fraction,
+        no space before the monomial::
+
+            sage: L.<z> = LaurentSeriesRing(QQ); latex(z^-2 + 1/3 + z + O(z^3)), latex(-z^-1 + 2 - z)
+            (\\frac{1}{z^{2}} + \\frac{1}{3} + z + O(z^{3}), \\frac{-1}{z} + 2 - z)
+
         Coefficients that are not plain numbers keep the earlier form (here
-        as Sage writes it), and so do Laurent series::
+        as Sage writes it)::
 
             sage: S.<y> = PowerSeriesRing(RR); latex(RR(1/3) + 2*y + O(y^3))
             0.333333333333333 + 2.00000000000000 y + O(y^{3})
-            sage: L.<z> = LaurentSeriesRing(QQ); latex(z^-2 + 1 + O(z))  # sagebrush only (Sage: \\frac{1}{z^{2}} + 1 + O(z))
-            z^{-2} + 1 + O(z)
         """
-        if self._R._laurent:
-            return _latex_from_repr(self)
         name = self._R._name
         terms = []
         e = self._v - 1
@@ -645,8 +647,14 @@ class Series:
             lc = _latex_number(c)
             if lc is None:
                 return _latex_from_repr(self)
-            if e:
-                lc = ("" if lc == "1" else "-" if lc == "-1" else lc) + " " + (name if e == 1 else "%s^{%d}" % (name, e))
+            if self._R._laurent and e < 0:
+                # (Sage: \\frac{c}{z^{k}}, the coefficient's sign inside)
+                lc = "\\frac{%s}{%s}" % (lc, name if e == -1 else "%s^{%d}" % (name, -e))
+            elif e:
+                # (Sage: a space between coefficient and monomial in a power
+                # series, "2 x", none in a Laurent series, "2z")
+                sep = "" if self._R._laurent else " "
+                lc = ("" if lc == "1" else "-" if lc == "-1" else lc) + sep + (name if e == 1 else "%s^{%d}" % (name, e))
             terms.append(lc)
         if self._prec is not None:
             if not terms:
