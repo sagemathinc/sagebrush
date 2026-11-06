@@ -1,6 +1,7 @@
 // File > Examples… (U7; U0's menu item): the examples gallery in the app, a lazy chunk (sagebrush-examples-panel.js,
 // web/build.ts). The catalog (/examples/index.json) as a list, filtered by kind and by words; the chosen example's
-// preview, its own static page (/examples/<kind>/<slug>/, web/build-examples.ts) in an <iframe sandbox=""> that
+// preview, its own static page (/examples/<kind>/<slug>/, web/build-examples.ts; a LaTeX document, the rendered
+// document that page frames, preview.html) in an <iframe sandbox=""> that
 // allows nothing (A4); "Open a copy" through the one copy path (copy.ts copyExample: A1-A3), then the host opens its
 // main file.  Every catalog string reaches the panel as text (textContent), never as HTML.
 //
@@ -99,7 +100,9 @@ export async function openExamplesPanel(host: ExamplesHost, opts: { kind?: Kind;
       zipLink.removeAttribute("href");
       return;
     }
-    frame.src = `${base}${e.id}/`;
+    // (a LaTeX example: its rendered document, the preview its page frames, not the page. That page is an opaque origin
+    // in this sandbox, which its preview's frame-ancestors 'self' and X-Frame-Options refuse: the preview was blank)
+    frame.src = e.kind === "latex" ? `${base}${e.id}/preview.html` : `${base}${e.id}/`;
     zipLink.href = `${base}${e.id}/${e.id.split("/")[1]}.zip`;
     zipLink.setAttribute("download", "");
   };
