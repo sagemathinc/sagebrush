@@ -16,7 +16,9 @@ import { devtoolsPort, freePort } from "./test-port.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let failures = 0;
-const ok = (cond, name) => { console.log((cond ? "ok   " : "FAIL ") + name); if (!cond) failures++; return cond; };
+// (lastCheck: the latest check's name, for a diagnostic that says what came before it)
+let lastCheck = "";
+const ok = (cond, name) => { console.log((cond ? "ok   " : "FAIL ") + name); if (!cond) failures++; lastCheck = name; return cond; };
 const here = new URL(".", import.meta.url).pathname;
 const testSw = join(here, "dist-test", "sw.test.js");
 if (!existsSync(testSw)) throw new Error("no web/dist-test/sw.test.js: build with SAGEBRUSH_OFFLINE_TEST=1");
@@ -57,6 +59,9 @@ let n = 0; const waiting = new Map();
 ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); } };
 const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
 const ev = async (expression) => (await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true })).result?.value;
+// (the same, with the page's exception kept: { value } or { error }, so a check can fail with it rather than the run
+// throwing later on an undefined value)
+const evx = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); return r.exceptionDetails ? { error: r.exceptionDetails.exception?.description ?? r.exceptionDetails.text ?? "an exception" } : { value: r.result?.value }; };
 const until = async (f, ms = 30000) => { for (let i = 0; i < ms / 100; i++) { if (await f()) return true; await sleep(100); } return false; };
 const J = JSON.stringify;
 
@@ -147,10 +152,21 @@ const bound = (c) => {
 };
 
 const url = `http://127.0.0.1:${port}/`;
+// (the page's interpreter pins the package set it uses, its heartbeat (worker-kernel.js's {pkgPin} message to the
+// service worker, r705's base2): at any moment, so between N19's reading of the package cache and its pkgClear too
+// (r705b's G1). This file sets the service worker's pins itself, so the heartbeat is off from the first load: a
+// switch of the test's own, before the page loads, drops every {pkgPin} message the page posts; nothing else changes)
+await send("Page.enable");
+await send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => { const post = ServiceWorker.prototype.postMessage; window.__pkgPinDropped = 0; ServiceWorker.prototype.postMessage = function (m, ...rest) { if (m && typeof m === "object" && "pkgPin" in m) return void window.__pkgPinDropped++; return post.call(this, m, ...rest); }; })();` });
 await send("Page.navigate", { url });
 await until(() => ev("document.querySelector('#status')?.textContent.startsWith('ready')"));
 ok(await until(async () => (await version()) === A, 30000) || (await send("Page.reload"), await until(async () => (await version()) === A)), "the test build's service worker controls the page (its hook answers): " + A);
 await listenStops();
+{
+  // (the switch, checked: a {pkgPin} message posted as the heartbeat posts it is dropped, the page's others go through)
+  const d = await ev(`(() => { const n = window.__pkgPinDropped; navigator.serviceWorker.controller.postMessage({ pkgPin: [] }); return [n, window.__pkgPinDropped]; })()`);
+  ok(Array.isArray(d) && Number.isInteger(d[0]) && d[1] === d[0] + 1, "(setup) the page's package-pin heartbeat is off: a {pkgPin} message is dropped before the service worker sees it: " + J(d));
+}
 
 // N10 [hook]: admission at the exact boundary, then the per-put check with a shrinking estimate
 {
@@ -334,6 +350,20 @@ await listenStops();
   const body = (s) => J({ pkg: s, pad: "x".repeat(1000) });
   const d = (s) => createHash("sha256").update(body(s)).digest("hex");
   const now = Date.now();
+  // (what the package cache and its ledger hold before this setup: nothing, unless an earlier step left something. Said
+  // in full, with the check before it, so a sighting names its writer; r700's base2 had a non-/pkg/ entry, pinned)
+  const pkgKeys = `(async () => (await (await caches.open("sb-pkg-v1")).keys()).map((k) => new URL(k.url).pathname))()`;
+  const pkgRows = `new Promise((res, rej) => { const o = indexedDB.open("sb-pkg-ledger", 2); o.onupgradeneeded = () => o.result.objectStoreNames.contains("e") || o.result.createObjectStore("e", { keyPath: "digest" }); o.onsuccess = () => { const q = o.result.transaction("e").objectStore("e").getAll(); q.onsuccess = () => (o.result.close(), res(q.result.map((r) => ({ ...r, pinIn: r.pin ? Math.round((r.pin - Date.now()) / 1000) : null })))); }; o.onerror = () => rej(o.error); })`;
+  const pre = { keys: await evx(pkgKeys), rows: await evx(pkgRows), after: lastCheck };
+  if (pre.keys.error || pre.rows.error || pre.keys.value?.length || pre.rows.value?.length) console.log("  (info) N19: before its setup the package cache holds what it didn't make: " + J(pre));
+  // (the counting below depends on that reading: a failed one is a failed check, not an empty cache)
+  ok(Array.isArray(pre.keys.value) && Array.isArray(pre.rows.value), "N19 (setup): the package cache and its ledger read before the setup: " + J({ keys: pre.keys.error ?? pre.keys.value?.length, rows: pre.rows.error ?? pre.rows.value?.length }));
+  // (the page's heartbeat is off (the test's switch, above), but an earlier step may have left entries: so N19 counts
+  // what was there. An entry pinned before stays, as N19's own pinned one does; one not pinned is removed, as N19's
+  // stale one is)
+  const t0 = Date.now(), prePinned = (pre.rows.value ?? []).filter((x) => x.state === "kept" && x.pin > t0).map((x) => x.digest);
+  const preOther = (pre.rows.value ?? []).filter((x) => !prePinned.includes(x.digest)).length;
+  const prePinnedKeys = (pre.keys.value ?? []).filter((k) => prePinned.some((dg) => k.endsWith("/" + dg + ".json")));
   await ev(`(async () => {
     const c = await caches.open("sb-pkg-v1");
     for (const s of ["pinned", "stale"]) {
@@ -353,9 +383,9 @@ await listenStops();
     });
   })()`);
   let r = await api({ offline: "pkgClear", build: A }, 15000);
-  ok(r.last?.removed?.entries === 1 && r.last.keptPinned === 1, "N19: pkgClear removes the entry pinned 11 min ago and keeps the one pinned 5 min ago: " + J(r.last));
-  const left = await ev(`caches.open("sb-pkg-v1").then((c) => c.keys()).then((ks) => ks.map((k) => k.url.split("/pkg/")[1]))`);
-  ok(left.length === 1 && left[0] === d("pinned") + ".json", "N19: the pinned entry is the one left: " + J(left));
+  ok(r.last?.removed?.entries === 1 + preOther && r.last.keptPinned === 1 + prePinned.length, "N19: pkgClear removes the entry pinned 11 min ago and keeps the one pinned 5 min ago" + (prePinned.length + preOther ? ` (and the ${prePinned.length} pinned, ${preOther} not pinned, there before)` : "") + ": " + J(r.last));
+  const left = await evx(pkgKeys);
+  ok(Array.isArray(left.value) && J([...left.value].sort()) === J([...prePinnedKeys, "/pkg/" + d("pinned") + ".json"].sort()), "N19: the pinned entry is the one left (with any pinned before it): " + J(left));
   // (an install held at its put: pkgClear answers only after it is resumed)
   const file = join(tmp, "pkg-new.json");
   writeFileSync(file, body("new"));
@@ -390,8 +420,8 @@ await listenStops();
   const mid = await ledger();
   await stopWorkers();
   r = await api({ offline: "pkgClear", build: A }, 15000);
-  const after = await ledger(), entries = await ev(`caches.open("sb-pkg-v1").then((c) => c.keys()).then((ks) => ks.map((k) => k.url.split("/pkg/")[1].slice(0, 8)))`);
-  ok(mid.includes(d("stale2").slice(0, 8) + ":deleting") && !after.some((x) => x.startsWith(d("stale2").slice(0, 8))) && !entries.includes(d("stale2").slice(0, 8)) && after.length === entries.length, `I1: interrupted at "deleting", the next pkgClear reconciles: rows ${J(after)}, entries ${J(entries)}`);
+  const after = await ledger(), entries = await evx(pkgKeys);
+  ok(Array.isArray(mid) && Array.isArray(after) && Array.isArray(entries.value) && mid.includes(d("stale2").slice(0, 8) + ":deleting") && !after.some((x) => x.startsWith(d("stale2").slice(0, 8))) && !entries.value.includes("/pkg/" + d("stale2") + ".json") && after.length === entries.value.length, `I1: interrupted at "deleting", the next pkgClear reconciles: rows ${J(after)}, entries ${J(entries)}`);
   // (removing an item a notebook has in use still removes it: the docs index the page fetched)
   await ev(`fetch("/docs-index.json").then((r) => r.text()).then(() => 1)`);
   r = await api({ offline: "remove", build: A, items: ["docs"] }, 30000);
