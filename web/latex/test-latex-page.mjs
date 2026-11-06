@@ -709,6 +709,179 @@ try {
         // (back on A, entry 0)
         await ev(`(history.go(-(history.state && history.state.sbTex || 0)), true)`); await until(`history.state && history.state.sbTex === 0`, 20000); await shownIs(fa); await sleep(500);
       }
+      // (the file shown, its writes failing (so leaving it asks), and the questions answered in turn from `answers`,
+      //  each recorded with the file the URL was on when asked)
+      const askInTurn = (answers) => ev(`(() => { window.__asks = []; window.__answers = ${JSON.stringify(answers)};
+        window.confirm = () => { window.__asks.push(new URLSearchParams(location.search).get("tex")); return window.__answers.shift() === true; };
+        window.__sbTexSaveWrite = () => { throw new Error("test: the write failed"); }; return true; })()`);
+      const editFails = async (mark) => {
+        await ev(`(() => { const t = document.querySelector(".tex-src"); t.value += ${JSON.stringify(mark + "\n")}; t.dispatchEvent(new Event("input")); return true; })()`);
+        return saveStateIs(/^Not saved: test: the write failed/);
+      };
+      // (writes working again and the edit saved; the questions as the rest of this test answers them)
+      const saveAgain = async () => {
+        await ev(`(() => { window.confirm = () => { window.__asked++; return window.__answer; }; window.__sbTexSaveWrite = () => { if (window.__failWrites) throw new Error("test: the write failed"); };
+          window.__answer = false; window.__asked = 4; const t = document.querySelector(".tex-src"); t.dispatchEvent(new Event("input")); return true; })()`);
+        // (false, or what the save state says instead)
+        return (await saveStateIs(/^Saved/, 20000)) || await ev(`"save: " + (document.querySelector(".tex-savestate")?.textContent ?? "none") + "; ro: " + document.querySelector(".tex-src")?.readOnly`);
+      };
+      // (the Navigation API's traverseTo, its first call made late (300 ms), the others as they are; or, hidden, the
+      //  same for history.go: a return whose traversal is slow, a newer one after it not)
+      const lateFirst = (withNav) => ev(`(() => { window.__late = 0;
+        if (${withNav}) { const v = window.navigation; if (!v?.traverseTo) return false; const orig = v.traverseTo.bind(v);
+          v.traverseTo = (k, o) => { if (window.__late++) return orig(k, o); const late = new Promise((r) => setTimeout(r, 300)); return { committed: late, finished: late.then(() => orig(k, o).finished) }; };
+          window.__navRestore = () => { delete v.traverseTo; }; return true; }
+        const was = window.navigation; Object.defineProperty(window, "navigation", { configurable: true, get: () => undefined });
+        history.go = (d) => { if (window.__late++) return History.prototype.go.call(history, d); setTimeout(() => History.prototype.go.call(history, d), 300); };
+        window.__navRestore = () => { delete history.go; Object.defineProperty(window, "navigation", { configurable: true, get: () => was }); }; return true; })()`);
+      // (14) (grader V6, V7) a newer Back during a return that a file waits for: A 0, C 1, C#f 2, A 3, A shown, its
+      // write failing. Back to C#f declined (the return's traversal late); B asked for and accepted, so B waits for that
+      // return; then Back again, to C, declined: B, given up by that Back, never opens, and C is asked about (not
+      // opened outright). A stays, editable, on its entry; asked three times, the last about C
+      for (const withNav of [true, false]) {
+        const mark = `% a newer Back while B waits ${withNav ? "nav" : "go"}`;
+        await ev(`(window.__sbTex({ path: "/sw/c.tex", fid: ${JSON.stringify(fc)} }), true)`); await shownIs(fc); await sleep(300);
+        await ev(`(location.hash = "#f", true)`); await until(`location.hash === "#f" && history.state && history.state.sbTex === 2`, 10000);
+        await ev(`(window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }), true)`); await shownIs(fa); await sleep(300);
+        await watchX(fb); await askInTurn([false, true, false]);
+        const failed = await editFails(mark);
+        const late = await lateFirst(withNav);
+        await ev(`(history.back(), true)`);
+        const asked1 = await until(`window.__asks.length >= 1`, 10000);
+        const went = await ev(`(async () => {
+          const pending = new URLSearchParams(location.search).get("tex") !== ${JSON.stringify(fa)};
+          const accepted = window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} });
+          for (let i = 0; i < 50 && window.__asks.length < 2; i++) await new Promise((r) => setTimeout(r, 5));
+          const asked2 = window.__asks.length, stillPending = new URLSearchParams(location.search).get("tex") !== ${JSON.stringify(fa)};
+          history.back();
+          return { pending, accepted, asked2, stillPending }; })()`);
+        await until(`window.__asks.length >= 3`, 10000); await sleep(1500);
+        const s = await stateOf(fa), asks = await ev(`window.__asks`), lates = await ev(`window.__late`);
+        await ev(`(window.__navRestore?.(), delete window.__navRestore, window.__obsB?.disconnect(), true)`);
+        const saved = await saveAgain(), fA = await textOf(fa);
+        check(failed && late && asked1 && went && went.pending && went.accepted === true && went.asked2 === 2 && went.stillPending && lates >= 2
+          && asks.length === 3 && asks[2] === fc && s.url === fa && s.at === 3 && s.title === "a.tex" && s.shows && s.ro === false && s.src.includes(mark) && s.pages === 1 && !s.saw && s.kept && saved === true && fA.includes(mark),
+          `U8-RETURN (grader V6, V7; ${withNav ? "Navigation API" : "no Navigation API: history.go"}, the first return late): B waiting for a return, then a newer Back to C, declined: B never opens, C is asked about, not opened; A stays, editable, on its entry`, { failed, late, asked1, went, lates, asks, s: { ...s, src: s.src.slice(-30) }, saved, fileA: fA.slice(-30) });
+        // (back on A, entry 0: three entries back)
+        await ev(`(history.go(-3), true)`); await until(`history.state && history.state.sbTex === 0 && location.hash === ""`, 20000); await shownIs(fa); await sleep(500);
+      }
+      // (15) (grader V10) no Navigation API, a return by position landing on another script's entry (unnumbered): A 0,
+      // that entry (its URL A's), B 1 shown, B's write failing; Back two steps, to A, declined: history.go(+1) lands on
+      // the unnumbered entry, which is that return's landing, not a newer Back: B stays, no reload, A never opened, and
+      // B's entry is pushed again after it
+      {
+        const mark = "% back past a foreign entry";
+        await watchX(fa);
+        const went = await ev(`(() => { const was = window.navigation; Object.defineProperty(window, "navigation", { configurable: true, get: () => undefined });
+          window.__navRestore = () => { Object.defineProperty(window, "navigation", { configurable: true, get: () => was }); };
+          history.pushState({ other: 1 }, "", location.href);
+          window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} }); return true; })()`);
+        await shownIs(fb); await sleep(300);
+        const at0 = await ev(`history.state && history.state.sbTex`), len0 = await ev(`history.length`);
+        await ev(`(window.__sawX = false, true)`); await askInTurn([false]);
+        const failed = await editFails(mark);
+        await ev(`(history.go(-2), true)`);
+        await until(`window.__asks.length >= 1`, 10000); await sleep(1500);
+        const s = await stateOf(fb), asks = await ev(`window.__asks`), len = await ev(`history.length`);
+        await ev(`(window.__navRestore?.(), delete window.__navRestore, window.__obsB?.disconnect(), true)`);
+        const saved = await saveAgain();
+        check(went && at0 === 1 && failed && asks.length === 1 && s.url === fb && s.at === 2 && len === len0 && s.title === "b.tex" && s.shows && s.ro === false && s.src.includes(mark) && s.pages === 1 && !s.saw && s.kept && saved === true,
+          "U8-RETURN (grader V10; no Navigation API): a return by position landing on another script's unnumbered entry is that return's landing: B stays, editable, no reload, A never opened; B's entry pushed again after it", { went, at0, len0, len, failed, asks, s: { ...s, src: s.src.slice(-30) }, saved });
+        // (back on A, entry 0: two entries back)
+        await ev(`(window.__answer = true, history.go(-2), true)`); await until(`history.state && history.state.sbTex === 0`, 20000); await shownIs(fa); await sleep(500); await ev(`(window.__answer = false, true)`);
+      }
+      // (16) (grader W8) the fence's take-back during a decided switch: A 0, B 1, C 2, A 3, A shown, its write failing;
+      // every traversal 300 ms late. Back to C declined; Back again, to B, accepted: that return superseded, B's mount
+      // waiting on A's close (its last write held). The stale return lands on A 3 and the fence takes the history back
+      // to B 1, where the person went. While it does: with C asked for and A's close released, C opens, editable, its
+      // URL, on the entry after B's; B's mount, superseded, never sets the title. Without C: B opens on its entry, its
+      // URL (never under A's), and the return is over: C asked for afterwards opens. And A asked for again once the
+      // take-back has landed on B 1, before B's mount goes on, or while it is still under way (the history on A 3 for
+      // now): either way A opens on its own entry, A 3, its URL (B 1 isn't A's, and A 3 then only a stale landing)
+      for (const then of ["C", "none", "A", "A mid"]) {
+        const againA = then.startsWith("A");
+        const withC = then === "C";
+        const mark = `% the fence during a decided switch, then ${then}`;
+        await ev(`(window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} }), true)`); await shownIs(fb); await sleep(300);
+        await ev(`(window.__sbTex({ path: "/sw/c.tex", fid: ${JSON.stringify(fc)} }), true)`); await shownIs(fc); await sleep(300);
+        await ev(`(window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }), true)`); await shownIs(fa); await sleep(300);
+        await askInTurn([false, true]);
+        const failed = await editFails(mark);
+        if (withC) await watchX(fb);
+        // (once the leave is accepted, the close's last write held; every title and entry the page shows, logged)
+        await ev(`(() => { window.__hold = new Promise((r) => (window.__rel = r)); window.__k = 0;
+          window.__sbTexSaveWrite = () => { if (window.__asks.length >= 2) { window.__k++; return window.__hold; } throw new Error("test: the write failed"); };
+          window.__log = []; let last = ""; window.__logT = setInterval(() => { const t = document.title + " @" + new URLSearchParams(location.search).get("tex") + "/" + (history.state && history.state.sbTex); if (t !== last) window.__log.push(last = t); }, 5); return true; })()`);
+        const late = await ev(`(() => { const v = window.navigation; if (!v?.traverseTo) return false; const orig = v.traverseTo.bind(v); window.__late = 0;
+          v.traverseTo = (k, o) => { window.__late++; const late = new Promise((r) => setTimeout(r, 300)); return { committed: late, finished: late.then(() => orig(k, o).finished) }; };
+          window.__navRestore = () => { delete v.traverseTo; }; return true; })()`);
+        await ev(`(history.back(), true)`);
+        const asked1 = await until(`window.__asks.length >= 1`, 10000);
+        await ev(`(history.back(), true)`);
+        const held = await until(`window.__k >= 1`, 10000);
+        // (the stale return landed on A 3 and the fence's take-back started: its traversal the second)
+        const fenced = await until(`window.__late >= 2`, 5000);
+        const onB = then === "A" ? await until(`new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fb)}`, 5000) : true;
+        const mid = await ev(`(() => { const out = { url: new URLSearchParams(location.search).get("tex"), at: history.state && history.state.sbTex };
+          if (${withC}) out.accepted = window.__sbTex({ path: "/sw/c.tex", fid: ${JSON.stringify(fc)} });
+          if (${againA}) out.accepted = window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} });
+          window.__rel(); return out; })()`);
+        const shown = { C: fc, none: fb, A: fa, "A mid": fa }[then];
+        const opened = await shownIs(shown); await sleep(1500);
+        const s = await stateOf(shown), asks = await ev(`window.__asks`), log = await ev(`(clearInterval(window.__logT), window.__log)`);
+        await ev(`(window.__navRestore?.(), delete window.__navRestore, window.__obsB?.disconnect(), true)`);
+        // (without C: the return over, so C asked for now opens)
+        const after = then !== "none" ? null : await ev(`(window.__sbTex({ path: "/sw/c.tex", fid: ${JSON.stringify(fc)} }), true)`).then(() => shownIs(fc)).then(async (ok) => ({ ok, ...(await stateOf(fc)) }));
+        const saved = then !== "none" ? await saveAgain() : await ev(`(() => { window.confirm = () => { window.__asked++; return window.__answer; }; window.__sbTexSaveWrite = () => { if (window.__failWrites) throw new Error("test: the write failed"); }; window.__answer = false; window.__asked = 4; return true; })()`);
+        const fA = await textOf(fa);
+        const underA = log.filter((t) => t.startsWith("b.tex") && t.includes("@" + fa + "/"));
+        check(failed && late && asked1 && held && fenced && onB && (then === "A" ? mid.url === fb && mid.at === 1 : mid.url === fa && mid.at === 3) && (then === "none" || mid.accepted === true) && asks.length === 2 && opened && s.ro === false && s.pages === 1 && s.kept && s.shows && underA.length === 0 && saved === true && fA.includes(mark)
+          && (againA ? s.url === fa && s.at === 3 && s.title === "a.tex" && s.src.includes(mark) && !log.some((t) => t.startsWith("b.tex"))
+            : withC ? mid.accepted === true && s.url === fc && s.at === 2 && s.title === "c.tex" && !s.saw && !log.some((t) => t.startsWith("b.tex"))
+            : s.url === fb && s.at === 1 && s.title === "b.tex" && after.ok && after.url === fc && after.at === 2 && after.title === "c.tex"),
+          `U8-RETURN (grader W8; Navigation API, its traversals late): the fence's take-back during a decided switch ${againA ? (then === "A" ? "landed" : "still under way") + ", then the file shown asked for again: it opens on its own entry, its URL; B's mount never sets the title" : withC ? "and another file asked for: it opens, editable, its URL, on the entry after B's; B's mount never sets the title" : "alone: B opens on its entry, its URL (never under A's), and the return ends: a file asked for then opens"}; A's edit written`, { then, failed, late, asked1, held, fenced, onB, mid, opened, asks, log, underA, after, s: { ...s, src: s.src.slice(-30) }, saved, fileA: fA.slice(-30) });
+        // (back on A, entry 0)
+        await ev(`(history.go(-(history.state && history.state.sbTex || 0)), true)`); await until(`history.state && history.state.sbTex === 0`, 20000); await shownIs(fa); await sleep(500);
+      }
+      // (17) (grader H8) the editor read-only for a recovery, and a leave's hold let go: A opened with another writer's
+      // draft (its edit, never written), the recovery's last step (the adopted draft's IndexedDB drop) held; a switch to
+      // B asked for, its write failing, declined: the leave lets go of its hold, but the editor stays read-only (the
+      // recovery's), and the bar as it was; the recovery ended, the editor is editable and the edit written
+      {
+        const mark = "% recovered, a leave declined";
+        const own = await ev(`(async () => {
+          window.__sbTexSaveWrite = () => { throw new Error("test: the write failed"); };
+          const t = document.querySelector(".tex-src"); t.value += ${JSON.stringify(mark + "\n")}; t.dispatchEvent(new Event("input"));
+          await new Promise((r) => setTimeout(r, 1500));
+          const k = Object.keys(localStorage).find((k) => k.startsWith("sb-tex-draft:" + ${JSON.stringify(fa)} + ":"));
+          if (!k) return null; const d = JSON.parse(localStorage.getItem(k)); d.writerId = "0123456789abcdef0123456789abcdef"; window.__foreign = d; return { key: k, text: d.text.slice(-30) }; })()`);
+        await ev(`(window.__answer = true, window.__sbTex({ path: "/sw/c.tex", fid: ${JSON.stringify(fc)} }), true)`); await shownIs(fc); await sleep(300);
+        const seeded = await ev(`(() => { Object.keys(localStorage).filter((k) => k.startsWith("sb-tex-draft:" + ${JSON.stringify(fa)} + ":")).forEach((k) => localStorage.removeItem(k));
+          const d = window.__foreign; localStorage.setItem("sb-tex-draft:" + d.fid + ":" + d.writerId, JSON.stringify(d));
+          window.__idbHold = new Promise((r) => (window.__idbRel = r)); const orig = IDBDatabase.prototype.transaction; window.__idbOrig = orig;
+          IDBDatabase.prototype.transaction = function (names, mode, ...rest) { const t = orig.call(this, names, mode, ...rest); if (mode !== "readwrite" || this.name !== "sagebrush-tex-drafts") return t;
+            let f = null; t.addEventListener("complete", (e) => { const h = window.__idbHold; (h ? h : Promise.resolve()).then(() => f && f.call(t, e)); });
+            Object.defineProperty(t, "oncomplete", { configurable: true, get: () => f, set: (v) => { f = v; } }); return t; };
+          window.__sbTexSaveWrite = () => { throw new Error("test: the write failed"); }; window.__answer = false; return true; })()`);
+        await watchX(fb);
+        await ev(`(window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }), true)`);
+        const adopted = await until(`!!document.querySelector(".tex-src") && document.querySelector(".tex-title")?.textContent === "a.tex" && document.querySelector(".tex-src").value.includes(${JSON.stringify(mark)}) && document.querySelector(".tex-src").readOnly === true`, 15000);
+        const look = `({ ro: document.querySelector(".tex-src")?.readOnly, title: document.querySelector(".tex-title")?.textContent, url: new URLSearchParams(location.search).get("tex"), asked: window.__asked, bar: (() => { const b = document.querySelector(".tex-conflict"); return b && !b.hidden ? b.textContent.slice(0, 80) : ""; })() })`;
+        const before = await ev(look);
+        await ev(`(window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} }), true)`);
+        const asked = await until(`window.__asked > ${before.asked}`, 10000); await sleep(600);
+        const after = await ev(look);
+        await ev(`(window.__idbRel(), IDBDatabase.prototype.transaction = window.__idbOrig, delete window.__idbOrig, delete window.__idbHold, true)`);
+        await writesWork();
+        const editable = await until(`document.querySelector(".tex-src")?.readOnly === false`, 15000);
+        await ev(`(() => { const t = document.querySelector(".tex-src"); t.dispatchEvent(new Event("input")); return true; })()`);
+        const saved = await saveStateIs(/^Saved/), fA = await textOf(fa), saw = await ev(`window.__sawX`);
+        await ev(`(window.__obsB?.disconnect(), true)`);
+        check(own && seeded && adopted && before.ro === true && asked && after.asked === before.asked + 1 && after.ro === true && after.title === "a.tex" && after.url === fa && after.bar === before.bar && !saw && editable && saved === true && fA.includes(mark),
+          "U8-HOLD (grader H8): a leave declined while the editor is read-only for a recovery: its hold let go, the editor stays read-only (the recovery's), the bar as it was; the recovery ended, editable and the edit written", { own, seeded, adopted, before, asked, after, saw, editable, saved, fileA: fA.slice(-30) });
+        // (back on A, entry 0)
+        await ev(`(history.go(-(history.state && history.state.sbTex || 0)), true)`); await until(`history.state && history.state.sbTex === 0`, 20000); await shownIs(fa); await sleep(500);
+      }
     }
     // ---- (astra B5-R1-A1) the exact entry shown is the one gone back to, a fragment's entry between: A, A#section, B;
     // with unsaved B, Back one step and Back two steps, declined, stay on B (its entry, URL and text); accepted two

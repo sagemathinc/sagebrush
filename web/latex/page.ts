@@ -192,22 +192,53 @@ const landsHere = (st: any) => history.state?.sbTexId === shownId && location.hr
 //  back; a superseded return's token is stale. A return by position needs none: its history.go was queued before the
 //  Back or Forward that superseded it, so it has landed already. A traversal given up never lands: its token goes)
 let retTok = 0, retPending = 0, staleTok = 0, staleLanding = false, fenceHooked = false;
-// (back to the entry shown by its key, the traversal tagged)
-const traverseShown = (nav: any, failed: () => void) => {
+// (the fence's own take-back (grader W8): it goes to the entry the stale traversal left, which is where the person
+//  last went: the entry shown, or a decided switch's whose mount hasn't taken it yet (the stale return went to the
+//  entry shown, so taking it back there would go nowhere, and no landing would ever come). Its landing is the fence's:
+//  it ends the return and runs what waited for it, nothing pushed or noted; until then a mount waits before it takes
+//  the entry the history is on for its own)
+let fenceTok = 0, fenceLanding = false, staleFrom: string | undefined, fencing = false;
+let fenceEnd = () => {}, fenceSettled: Promise<void> = Promise.resolve(), fenceWake: (() => void) | null = null;
+// (back to the entry shown by its key, or to `key`, the traversal tagged: its token)
+const traverseShown = (nav: any, failed: () => void, key = shownKey) => {
   const tok = ++retTok; retPending = tok;
   const gone = () => { if (staleTok === tok) staleTok = 0; if (retPending === tok) retPending = 0; };
-  try { nav.traverseTo(shownKey, { info: { sbTexReturn: tok } }).finished?.catch(() => { gone(); failed(); }); } catch { gone(); failed(); }
+  try { nav.traverseTo(key, { info: { sbTexReturn: tok } }).finished?.catch(() => { gone(); failed(); }); } catch { gone(); failed(); }
+  return tok;
 };
-const onNavigate = (e: any) => { if (e.navigationType === "traverse") staleLanding = !!staleTok && e.info?.sbTexReturn === staleTok; };
+// (navigate comes before the traversal commits: the entry it leaves is still the current one)
+const onNavigate = (e: any) => {
+  if (e.navigationType !== "traverse") return;
+  const tok = e.info?.sbTexReturn;
+  staleLanding = !!staleTok && tok === staleTok;
+  fenceLanding = !staleLanding && !!fenceTok && tok === fenceTok;
+  if (staleLanding) staleFrom = navApi()?.currentEntry?.key;
+};
+const fenceDone = () => { fenceTok = 0; if (fencing) { fencing = false; fenceEnd(); } };
 const fenceStale = (ev: PopStateEvent) => {
+  if (fenceLanding) {
+    fenceLanding = false;
+    ev.stopImmediatePropagation();
+    returning = false; fenceDone();
+    const w = fenceWake; fenceWake = null; w?.();
+    return;
+  }
   if (!staleLanding) return;
   staleLanding = false; staleTok = 0;
   ev.stopImmediatePropagation();
-  const nav = navApi();
+  const nav = navApi(), to = staleFrom ?? shownKey; staleFrom = undefined;
   returning = true; returnBy = "key";
-  if (nav?.traverseTo && shownKey && nav.entries?.().some((x: any) => x.key === shownKey)) {
-    traverseShown(nav, () => { if (returning) { returning = false; history.pushState({ sbTex: shownAt + 1, sbTexId: entryId() }, "", shownUrl); noteShown(); } });
-  } else { returning = false; history.pushState({ sbTex: shownAt + 1, sbTexId: entryId() }, "", shownUrl); noteShown(); }
+  if (!fencing) { fencing = true; fenceSettled = new Promise<void>((r) => (fenceEnd = r)); }
+  // (the take-back impossible, or refused: the entry shown pushed again, and what waited for the return runs)
+  const fallback = () => {
+    if (returning) { returning = false; history.pushState({ sbTex: shownAt + 1, sbTexId: entryId() }, "", shownUrl); noteShown(); fenceDone(); const w = fenceWake; fenceWake = null; w?.(); }
+    else fenceDone();
+  };
+  // (a traversal to the current entry goes nowhere and never lands: never one)
+  if (nav?.traverseTo && to && to !== nav.currentEntry?.key && nav.entries?.().some((x: any) => x.key === to)) {
+    const tok = retTok + 1; fenceTok = tok;
+    traverseShown(nav, () => { if (fenceTok === tok) fallback(); }, to);
+  } else fallback();
 };
 // (asked only when a write has actually failed: William, Nov 2, U8: never otherwise; the edits are kept in this
 // browser's drafts either way, and offered when the file is opened again)
@@ -224,6 +255,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const prev = current; current = null;
   closing = closing.then(() => prev?.close()).catch(() => {});
   await closing;
+  // (a fence's take-back under way: the history isn't back where the person went yet (grader W8))
+  while (fencing) await fenceSettled;
   if (my !== mounts) return;
   const life = new AbortController(), on = { signal: life.signal };
   const live = () => my === mounts && !life.signal.aborted;
@@ -394,13 +427,17 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       if (returning) { returning = false; if (!isShown()) pushShown(); else noteShown(); }
       landed();
     };
-    window.addEventListener("popstate", onLand, { once: true });
-    landOff = () => window.removeEventListener("popstate", onLand);
+    // (or the fence's own take-back landing, which the fence takes: it wakes this instead)
+    const wake = () => landed();
+    window.addEventListener("popstate", onLand, { once: true }); fenceWake = wake;
+    landOff = () => { window.removeEventListener("popstate", onLand); if (fenceWake === wake) fenceWake = null; };
   };
   // (`go` once the history is back on the entry shown: at once when no return is under way, else when it lands, in
   //  place of whatever waited for it: a newer intent replaces an older one (astra U8-SWITCH-5))
   const whenBack = (go: () => void) => { if (!returning) { go(); return; } afterReturn = go; listenLand(); };
   const returnToShown = (then?: () => void) => {
+    // (a fence's take-back under way: this return goes once it has landed, from where it lands)
+    if (fencing && returning) { whenBack(() => returnToShown(then)); return; }
     // (whatever waited for an earlier return is stale now: this is the newest intent)
     if (isShown()) { landOff?.(); landOff = null; afterReturn = null; then?.(); return; }
     afterReturn = then ?? null;
