@@ -375,6 +375,20 @@ function helperMaker(): (() => WorkerLike) | null {
   };
 }
 
+// `make`, its workers made and terminated counted for the tests
+function counted(make: () => WorkerLike): () => WorkerLike {
+  return () => {
+    const w = make();
+    tst.made++;
+    const end = w.terminate.bind(w);
+    w.terminate = () => {
+      tst.terminated++;
+      end();
+    };
+    return w;
+  };
+}
+
 // Start the pool, if this host can have one: its region reserved and recorded, the caller moved onto stack slot 0,
 // and the helpers made and sent their bootstraps (they start in the background).
 function startPool(): void {
@@ -395,16 +409,9 @@ function startPool(): void {
   base = top;
   const h = tst.hooks;
   const p: Pool = { crew: null as any, c: new Int32Array(mem!.buffer, ctl, 16), helpers, desc, t0: now(), ready: false, failed: null };
-  p.crew = new Crew(() => {
-    const w = make();
-    tst.made++;
-    const end = w.terminate.bind(w);
-    w.terminate = () => {
-      tst.terminated++;
-      end();
-    };
-    return w;
-  }, (why) => (p.failed ??= why));
+  p.crew = new Crew(counted(make), (why) => {
+    p.failed ??= why;
+  });
   pool = p;
   threads = "on";
   try {

@@ -17,7 +17,8 @@ export interface WorkerLike {
 export class Crew<W extends WorkerLike = WorkerLike> {
   readonly workers: W[] = [];
   dead = false;
-  private readonly ready: Promise<any>[] = [];
+  // (public, so that every type checker sees it: the census's parity, test/arraybuffer-sites-parity.test.ts)
+  readonly ready: Promise<any>[] = [];
 
   /** `make` constructs a worker; `fail` is told of any worker's failure (once the crew is dead, never). */
   constructor(private readonly make: () => W, private readonly fail: (why: string) => void) {}

@@ -608,6 +608,7 @@
   "src/runtime/engine.ts :: engineBytes :: new XMLHttpRequest ( ) #0": {"kind59":"store","tsc7":"too-deep","reason":"tsc 7's own instantiation limit (TS2589) on the compiler's recursive AST unions; TypeScript 5.9's walk keeps a visited set and finished it"},
   "src/runtime/index.ts :: withSites :: read ( hooked && frameState . testSites !== undefined ? frameState . testSites ( sites ) : sites ) #0": {"kind59":"opaque","tsc7":"deferred","reason":"the call returns a type parameter: TypeScript 5.9 takes its constraint (none: opaque, flagged); tsc 7 can't evaluate a conditional type on a generic"},
   "src/runtime/js-engine.ts :: probe :: f ( ) #0": {"kind59":"opaque","tsc7":"deferred","reason":"the call returns a type parameter: TypeScript 5.9 takes its constraint (none: opaque, flagged); tsc 7 can't evaluate a conditional type on a generic"},
+  "src/runtime/nd-crew.ts :: Crew.add :: this . make ( ) #0": {"kind59":"clean","tsc7":"deferred","reason":"the call returns a type parameter: TypeScript 5.9 takes its constraint (none: opaque, flagged); tsc 7 can't evaluate a conditional type on a generic"},
   "src/runtime/numpy_fft.ts :: cached :: make ( ) #0": {"kind59":"opaque","tsc7":"deferred","reason":"the call returns a type parameter: TypeScript 5.9 takes its constraint (none: opaque, flagged); tsc 7 can't evaluate a conditional type on a generic"},
   "src/runtime/object.ts :: withExport :: f ( ) #0": {"kind59":"opaque","tsc7":"deferred","reason":"the call returns a type parameter: TypeScript 5.9 takes its constraint (none: opaque, flagged); tsc 7 can't evaluate a conditional type on a generic"},
   "src/runtime/object.ts :: withExport :: f ( ) #1": {"kind59":"opaque","tsc7":"deferred","reason":"the call returns a type parameter: TypeScript 5.9 takes its constraint (none: opaque, flagged); tsc 7 can't evaluate a conditional type on a generic"},
@@ -634,7 +635,7 @@
   "src/scope.ts :: resolve :: resolveFree ( scope . parent ! , name ) #0": {"kind59":"clean","tsc7":"unresolved","reason":"the type graph is deeper than the type-level walk's depth cap (12 levels): the compiler's recursive AST and scope types; TypeScript 5.9's walk keeps a visited set and finished it"},
   "src/scope.ts :: resolve :: resolveFree ( scope . parent ! , name ) #2": {"kind59":"clean","tsc7":"unresolved","reason":"the type graph is deeper than the type-level walk's depth cap (12 levels): the compiler's recursive AST and scope types; TypeScript 5.9's walk keeps a visited set and finished it"},
   "src/scope.ts :: resolveFree :: findEnclosing ( scope , name ) #0": {"kind59":"clean","tsc7":"unresolved","reason":"the type graph is deeper than the type-level walk's depth cap (12 levels): the compiler's recursive AST and scope types; TypeScript 5.9's walk keeps a visited set and finished it"},
-  "web/lib-lazy.ts :: fetchSync :: new XMLHttpRequest ( ) #0": {"kind59":"store","tsc7":"too-deep","reason":"tsc 7's own instantiation limit (TS2589) on the compiler's recursive AST unions; TypeScript 5.9's walk keeps a visited set and finished it"},
+  "web/pkgset-browser.ts :: syncChunk :: new XMLHttpRequest ( ) #0": {"kind59":"store","tsc7":"too-deep","reason":"tsc 7's own instantiation limit (TS2589) on the compiler's recursive AST unions; TypeScript 5.9's walk keeps a visited set and finished it"},
   "src/runtime/nd.ts :: ndBytes :: new XMLHttpRequest ( ) #0": {"kind59":"store","tsc7":"too-deep","reason":"tsc 7's own instantiation limit (TS2589) on the compiler's recursive AST unions; TypeScript 5.9's walk keeps a visited set and finished it"}
  },
 "derived": {
@@ -1440,7 +1441,7 @@
   "b2b91e22ed731039": {"decl":"src/runtime/modules.ts :: permCombBig","class":"allocates","via":"web/lib-lazy.ts :: get"},
   "2ac65639e0bc6183": {"decl":"src/runtime/modules.ts :: prod","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
   "ba200f2940574a44": {"decl":"src/runtime/modules.ts :: sameRef","class":"allocates","via":"src/runtime/ops.ts :: eqBool"},
-  "c8a8e0b4375b22ca": {"decl":"src/runtime/nd-crew.ts :: Crew.class","class":"no-new-store"},
+  "5cf2aa341dba788a": {"decl":"src/runtime/nd-crew.ts :: Crew.class","class":"no-new-store"},
   "39b6b1b0e463c3ea": {"decl":"src/runtime/nd-helper.ts :: post","class":"allocates","via":"web/lib-lazy.ts :: get"},
   "60c3f67dc9b4dc93": {"decl":"src/runtime/nd-helper.ts :: stop","class":"allocates","via":"web/lib-lazy.ts :: get"},
   "60eb6f0babedc2b4": {"decl":"src/runtime/nd.ts :: gemmOn","class":"allocates","via":"lib:lib.es5.d.ts :: Float64Array.slice"},
