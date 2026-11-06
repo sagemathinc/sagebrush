@@ -34,6 +34,8 @@ export interface Bounds {
   maxFileBytes?: number;
   /** what the account may still store, if known */
   bytesLeft?: number;
+  /** (Download's: one .zip's bounds, said as such) */
+  download?: boolean;
 }
 
 const byPath = (a: Row, b: Row) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
@@ -118,9 +120,10 @@ export class Selection {
       }
     }
     let over: string | null = null;
-    if (files > bounds.maxFiles) over = `at most ${bounds.maxFiles.toLocaleString("en-US")} files can be shared (${(files - bounds.maxFiles).toLocaleString("en-US")} too many)`;
-    else if (bounds.maxFileBytes !== undefined && biggest && (biggest.size ?? 0) > bounds.maxFileBytes) over = `${biggest.path} is larger than your plan's largest file`;
-    else if (bounds.bytesLeft !== undefined && sizesKnown && bytes > bounds.bytesLeft) over = `more than your storage has left`;
+    const dl = bounds.download;
+    if (files > bounds.maxFiles) over = `at most ${bounds.maxFiles.toLocaleString("en-US")} files can be ${dl ? "downloaded together" : "shared"} (${(files - bounds.maxFiles).toLocaleString("en-US")} too many)`;
+    else if (bounds.maxFileBytes !== undefined && biggest && (biggest.size ?? 0) > bounds.maxFileBytes) over = `${biggest.path} is larger than ${dl ? "one file in a download can be" : "your plan's largest file"}`;
+    else if (bounds.bytesLeft !== undefined && sizesKnown && bytes > bounds.bytesLeft) over = dl ? "more than one download can hold" : `more than your storage has left`;
     return { files, of: this.rows.length, bytes, sizesKnown, over };
   }
 
