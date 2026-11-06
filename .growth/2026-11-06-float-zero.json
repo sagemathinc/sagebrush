@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "Float zeros in symbolic expressions as Sage (engine/sym/src/expr.rs: a zero coefficient is the product, a term whose coefficient became zero drops out, numbers add left to right with a zero leaving the other as it is). Measured with bun 1.4.4 (size-record.sh) on master b960770f vs this PR's head 3872b4d1 (CI's fresh engine committed): cli/pyjs.cjs +1776, engine/sagebrush-engine.wasm +1330; no other row grows.",
+ "bytes": {
+  "cli/pyjs.cjs": 1776,
+  "engine/sagebrush-engine.wasm": 1330
+ }
+}
