@@ -362,6 +362,9 @@ export type StorageHost = PreviewHost & {
   exportUrl?: (file: string) => string;
   /** this tab's open documents saved, before an export reads them */
   saveOpen?: () => Promise<void>;
+  /** opened to export: the export starts at once, as its button would (File ▸ Download ▸ Everything, the file
+   * browser's ⋯ and a selection's Download: sim run 11, X05's agent never found the button here) */
+  startExport?: boolean;
 };
 
 /** How long ago `at` was, in words: "just now", "5 min ago", "3 h ago", "yesterday", "9 days ago". */
@@ -509,6 +512,7 @@ export async function openStorage(w: Workspace, host: StorageHost): Promise<void
     const go = button("Export all current files (.zip)", () => void start());
     exportBox.append(go, h("p", { className: "note", textContent: "Includes the current notebooks, boards, data files and folders. TimeTravel, old file versions, Trash, and this device's settings are not included." }), status, flow);
     void stamp();
+    if (host.startExport) void start();
   }
   // ("Push to GitHub", Stage A MVP r1, DEV only: offered only on DEV or a local page, in a browser whose flag
   // (localStorage "sagebrush.gitpush") names the push proxy; its flow is the lazy chunk's, web/gitpush)
