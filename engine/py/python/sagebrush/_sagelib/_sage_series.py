@@ -315,6 +315,11 @@ def _names(R):
     return tuple(R.variable_names()) if hasattr(R, "variable_names") else (R.variable_name(),)
 
 
+def _number_field(K):
+    """Whether K is a number field (QuadraticField(2), CyclotomicField(3) ...)."""
+    return type(K).__name__.startswith("NumberField")
+
+
 def _coef_pushout(k, S):
     """The common coefficient ring of k and S in a series over k[V] meeting S, as Sage finds
     it (ZZ with QQ is QQ; ZZ or QQ with GF(p) is GF(p)); None when there is none (GF(p) with
@@ -324,6 +329,11 @@ def _coef_pushout(k, S):
         return k
     if k is sa.ZZ:
         return S
+    # (a number field contains QQ: QQ['x'][[t]] meets K['x'] and K in K['x'][[t]])
+    if k is sa.QQ and _number_field(S):
+        return S
+    if S is sa.QQ and _number_field(k):
+        return k
     if k is sa.QQ and getattr(S, "is_prime_field", lambda: False)():
         return S
     return None
@@ -350,7 +360,9 @@ def _frac(B):
     if _is_padic(B) and not B._field:
         return B.fraction_field()
     if _poly_base(B):
-        return B.fraction_field()
+        # (a ring without one, as polynomials over a number field here: itself; its units
+        # divide in it, and a non-unit is refused as before)
+        return B.fraction_field() if hasattr(B, "fraction_field") else B
     return B
 
 
@@ -856,7 +868,7 @@ class Series:
             S, poly, in_var = sa.ZZ, False, False
         elif isinstance(o, _F):
             S, poly, in_var = sa.QQ, False, False
-        elif type(o).__name__ == "IntegerMod_int" and hasattr(o, "parent"):
+        elif type(o).__name__ in ("IntegerMod_int", "NumberFieldElement") and hasattr(o, "parent"):
             S, poly, in_var = o.parent(), False, False
         else:
             return B
@@ -870,7 +882,7 @@ class Series:
         # (* and /, not + or -); a polynomial in the series variable over other coefficients
         # meets a Laurent series not at all, nor QQ with GF(p); a division by a polynomial in
         # the base's variables over other coefficients fails (a RuntimeError in Sage)
-        qq_gf = k0 is sa.QQ
+        qq_gf = k0 is sa.QQ and getattr(k, "is_prime_field", lambda: False)() and getattr(k, "characteristic", lambda: 0)() != 0
         if (qq_gf and op in ("+", "-")) or (in_var and (self._R._laurent or qq_gf)):
             raise TypeError("unsupported operand parent(s): '%r' and '%r'" % (self._R, S))
         if op == "/" and poly and not in_var:
