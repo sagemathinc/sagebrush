@@ -742,8 +742,14 @@ async def test_drain_groups():
         G._kill_tree(p.pid)
     finally:
         loop.call_later = real_later
-    timers[-1]()  # (the tree's own SIGKILL, now)
-    assert p.pid in G.ENDING_GROUPS, "the kill took the group out before it was empty"
+    # (the tree's own SIGKILL, now, while the group's membership still reports alive: the kill must not take it out)
+    real_members = G._group_members
+    G._group_members = lambda g: [g] if g == p.pid else real_members(g)
+    try:
+        timers[-1]()
+        assert p.pid in G.ENDING_GROUPS, "the kill took the group out before it was empty"
+    finally:
+        G._group_members = real_members
     assert await G.drain_groups(3.0) == []
     assert not G._group_members(p.pid) and p.pid not in G.ENDING_GROUPS
     await p.wait()
