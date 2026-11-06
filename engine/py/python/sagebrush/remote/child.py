@@ -15,7 +15,7 @@ Out:
     {id, start: true}
     {out: text, stream: "stdout" | "stderr", id}     (session._Capture's chunks, each line <= 64 KiB)
     {id, display: {mime: data}}                     (a value's MIME bundle; each at most DISPLAY_MAX)
-    {id, done: true, ms, error?: true}
+    {id, done: true, ms, error?: true, ename?}     (ename: the exception's type name, KeyboardInterrupt for a Stop)
     {id, matches: [...], prefix}                    (completion)
 SIGINT interrupts the running code (KeyboardInterrupt, the Rust engines too).
 """
@@ -190,6 +190,7 @@ class _Kernel:
         t = threading.Thread(target=flusher, daemon=True)
         t.start()
         error = False
+        ename = None  # (the exception's type name: the page marks a KeyboardInterrupt "interrupted")
         t0 = time.perf_counter()
         import contextlib
         try:
@@ -219,14 +220,14 @@ class _Kernel:
                             self.show_value(v, mode)
                     self.figures()
                 except KeyboardInterrupt:
-                    error = True
+                    error, ename = True, "KeyboardInterrupt"
                     sys.stderr.write("KeyboardInterrupt: the computation was interrupted\n")
                 except BaseException as e:  # (SystemExit too: the kernel survives)
-                    error = True
+                    error, ename = True, type(e).__name__
                     text = _format_exception(e, e.__traceback__)
                     sys.stderr.write(re.sub(r"\b_cell_[A-Za-z0-9]+(?=_\w)", "", text) + "\n")
         except KeyboardInterrupt:
-            error = True
+            error, ename = True, "KeyboardInterrupt"
         finally:
             stop.set()
         # (the end: what is left of the output drained, once, then done; an interrupt now is for nothing)
@@ -239,6 +240,7 @@ class _Kernel:
                     msg = {"id": self.rid, "done": True, "ms": round((time.perf_counter() - t0) * 1000, 3)}
                     if error:
                         msg["error"] = True
+                        msg["ename"] = (ename or "Exception")[:64]
                     self.sender.send(msg, lambda: done.append(True))
             except KeyboardInterrupt:
                 continue

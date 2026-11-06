@@ -36,7 +36,7 @@ authentication and fence.  Tasks run in the order their frames arrived.
 Interfaces (the socket side is a3's pair server; tests pass fakes):
   conn:   .closed, .token, .jkt, .send_text(text, kind) -> None, .fits(nbytes, kind) -> bool, .close(code, reason)
   server: .paired_conn, .timers (.now() ms, .set_timeout(fn, ms) -> handle, .clear_timeout(handle))
-  port:   .start(on_message, on_exit) -> handle with .post(msg), .interrupt(up_to), .terminate()
+  port:   .start(on_message, on_exit) -> handle with .post(msg), .interrupt(up_to), .terminate(), .kill_descendants()
 """
 
 import asyncio
@@ -183,11 +183,42 @@ class _ChildHandle:
             self._write(m)
 
     def interrupt(self, up_to):
+        """A Stop: SIGINT to the kernel's whole process group, as Ctrl-C in a terminal reaches the foreground job, so
+        a subprocess the cell waits on is interrupted too (daybreak3's R762-STOP-1)."""
         if self.proc is not None and self.proc.returncode is None:
             try:
-                os.kill(self.proc.pid, signal.SIGINT)
-            except ProcessLookupError:
+                os.killpg(self.proc.pid, signal.SIGINT)
+            except (ProcessLookupError, PermissionError):
                 pass
+
+    def descendants(self):
+        """The processes left in the kernel's process group besides the kernel itself."""
+        if self.proc is None or self.proc.returncode is not None:
+            return []
+        return [p for p in _group_members(self.proc.pid) if p != self.proc.pid]
+
+    def kill_descendants(self):
+        """What a stopped run left in the group (a process that ignored the SIGINT): SIGTERM now, SIGKILL 2 s later to
+        whatever of them is still in the group.  The kernel itself, and its variables, stay."""
+        pids = self.descendants()
+        for p in pids:
+            try:
+                os.kill(p, signal.SIGTERM)
+            except (ProcessLookupError, PermissionError):
+                pass
+        if not pids:
+            return 0
+        pgid = self.proc.pid
+
+        def kill():
+            for p in _group_members(pgid):
+                if p in pids:
+                    try:
+                        os.kill(p, signal.SIGKILL)
+                    except (ProcessLookupError, PermissionError):
+                        pass
+        asyncio.get_running_loop().call_later(2.0, kill)
+        return len(pids)
 
     def terminate(self):
         self.gone = True
@@ -196,6 +227,35 @@ class _ChildHandle:
             self.task.cancel()
             return
         _kill_tree(p.pid)
+
+
+def _group_members(pgid):
+    """The pids in process group pgid (Linux: /proc; elsewhere: ps)."""
+    out = []
+    if os.path.isdir("/proc/self"):
+        for d in os.listdir("/proc"):
+            if not d.isdigit():
+                continue
+            try:
+                with open("/proc/%s/stat" % d, "rb") as f:
+                    st = f.read()
+            except OSError:
+                continue
+            fields = st[st.rfind(b")") + 2:].split()
+            # (state, ppid, pgrp, ...: a zombie is already gone)
+            if len(fields) > 2 and fields[0] != b"Z" and int(fields[2]) == pgid:
+                out.append(int(d))
+        return out
+    import subprocess
+    try:
+        r = subprocess.run(["ps", "-A", "-o", "pid=,pgid=,stat="], capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return out
+    for line in r.stdout.splitlines():
+        parts = line.split()
+        if len(parts) >= 3 and parts[1] == str(pgid) and not parts[2].startswith("Z"):
+            out.append(int(parts[0]))
+    return out
 
 
 def _kill_tree(pgid):
@@ -231,6 +291,7 @@ class Run:
         self.ends = [None] * len(wave["entries"]) if wave is not None else None
         self.current = -1
         self.stop_latched = False
+        self.stop_requested = False  # (a Stop reached it: at its end, what it left in the kernel's group is ended)
         self.stop = None
         self.record_bytes = 0
 
@@ -291,7 +352,7 @@ class Gateway:
         self.nonce_at = server.timers.now()
         self.sockets = {}
         self.stats = {"queuedPayloadBytes": 0, "maxQueuedPayloadBytes": 0, "recordBytes": 0, "staleOutputs": 0,
-                      "invariantFailures": 0, "workersStarted": 0, "fallbacks": 0, "executions": 0,
+                      "invariantFailures": 0, "workersStarted": 0, "fallbacks": 0, "executions": 0, "descendantsKilled": 0,
                       "fenced": {"closed": 0, "stale": 0}, "authRefusals": {}}
 
     # ---- the frame side (called by the pair server for a paired conn)
@@ -638,7 +699,7 @@ class Gateway:
             return w[1](m)
         h = self.worker_runs.get(m["id"])
         if h is not None:
-            h(m)
+            h[0](m)
 
     def _worker_gone(self, gen, why):
         if gen != self.worker_gen:
@@ -646,9 +707,17 @@ class Gateway:
         self.worker = None
         self._end_all_runs({"status": "stopped", "reason": "kernel exited", "detail": why[:120]})
 
+    def _drop_execution(self, wid):
+        """An execution the kernel will never finish (it was replaced, it exited, or its run ended): its waiter is
+        resolved with None, so _run_single/_run_wave return and keep nothing (daybreak3's R762-TASK-2)."""
+        e = self.worker_runs.pop(wid, None)
+        if e is not None and not e[1].done():
+            e[1].set_result(None)
+
     def _end_all_runs(self, outcome):
         b = self.binding
-        self.worker_runs.clear()
+        for wid in list(self.worker_runs):
+            self._drop_execution(wid)
         if self.complete_waiter is not None:
             w, self.complete_waiter = self.complete_waiter, None
             w[1](None)
@@ -688,14 +757,14 @@ class Gateway:
             if "display" in m:
                 return on_event({"type": "display", "data": m["display"]})
             if m.get("done"):
-                self.worker_runs.pop(wid, None)
+                self.worker_runs.pop(wid, None)  # (resolved just below: not dropped)
                 ms = m.get("ms") if isinstance(m.get("ms"), (int, float)) and not isinstance(m.get("ms"), bool) else 0
                 o = {"status": "error", "ms": ms} if m.get("error") else {"status": "ok", "ms": ms}
                 if m.get("error") and m.get("ename"):
                     o["ename"] = str(m["ename"])[:64]
                 fut.set_result(o)
 
-        self.worker_runs[wid] = handler
+        self.worker_runs[wid] = (handler, fut)
         self.stats["executions"] += 1
         w.post(msg)
         return fut
@@ -770,7 +839,11 @@ class Gateway:
         if run.wave is not None:
             for e in run.wave["entries"]:
                 e.pop("code", None)
-        self.worker_runs.pop(run.worker_id, None)
+        self._drop_execution(run.worker_id)
+        if run.stop_requested and self.worker is not None:  # (None: the kernel was replaced or is gone: its group was killed)
+            # (a stopped run that ended in a live kernel: whatever it left in the group, a process that ignored the
+            # SIGINT, is ended now, before any next run can start, so it can't take a later run's children)
+            self.stats["descendantsKilled"] += self.worker.kill_descendants()
         if self.fallback_timer is not None:
             self.server.timers.clear_timeout(self.fallback_timer)
             self.fallback_timer = None
@@ -858,7 +931,9 @@ class Gateway:
         self._answer(req, 200, {"ok": True})
 
     def _stop_worker(self, b, run):
-        """A Stop: SIGINT to the kernel; if the run hasn't ended in fallbackMs, the kernel's tree is killed and it restarts."""
+        """A Stop: SIGINT to the kernel's process group; if the run hasn't ended in fallbackMs, the whole group is killed
+        and the kernel restarts; if it has, what it left in the group is ended (_terminal)."""
+        run.stop_requested = True
         if self.worker is not None:
             self.worker.interrupt(run.worker_id)
         if self.fallback_timer is not None:

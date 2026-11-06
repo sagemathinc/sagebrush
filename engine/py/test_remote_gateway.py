@@ -98,6 +98,10 @@ class Handle:
     def interrupt(self, up_to):
         self.interrupts.append(up_to)
 
+    def kill_descendants(self):
+        self.port.descendant_kills += 1
+        return 0
+
     def terminate(self):
         self.terminated = True
 
@@ -109,6 +113,7 @@ class Scripted:
         self.auto = auto
         self.handles = []
         self.matches = ["xa", "xb"]
+        self.descendant_kills = 0
 
     def start(self, on_message, on_exit):
         h = Handle(self, on_message, on_exit)
@@ -761,6 +766,137 @@ async def test_real_kernel_fallback_kills_the_tree():
         assert "".join(e.get("text", "") for e in events_of(gw, "r2")) == "2\n"
     finally:
         gw.shutdown()
+
+
+def _gone(pid):
+    try:
+        with open("/proc/%d/stat" % pid) as f:
+            return f.read().split(")")[-1].split()[0] == "Z"
+    except OSError:
+        return True
+
+
+@aio
+async def test_real_stop_while_waiting_on_a_child():
+    """daybreak3's R762-STOP-1: a cell waiting on a subprocess; a Stop interrupts the kernel's whole process group, so
+    the subprocess doesn't outlive the run; the outcome says KeyboardInterrupt (the page marks it interrupted); the
+    kernel and its variables stay."""
+    s, c, gw, p = await real()
+    try:
+        p.frame("g.run", {"b": "b1"}, run_body("r0", code="kept = 5"))
+        await until(lambda: gw.binding.runs["r0"].outcome)
+        kernel = gw.worker.proc.pid
+        p.frame("g.run", {"b": "b1"}, run_body("r1", code="import subprocess\np = subprocess.Popen(['sleep', '60'])\nprint(p.pid, flush=True)\np.wait()"))
+        await until(lambda: any(e["type"] == "stream" for e in events_of(gw, "r1")))
+        child = int(next(e["text"] for e in events_of(gw, "r1") if e["type"] == "stream").split()[0])
+        p.frame("g.interrupt", {"b": "b1"}, {"epoch": 1})
+        await until(lambda: gw.binding.runs["r1"].outcome, 10)
+        o = gw.binding.runs["r1"].outcome
+        assert o["status"] == "error" and o["ename"] == "KeyboardInterrupt", o
+        await until(lambda: _gone(child), 10)
+        assert gw.worker.proc.pid == kernel and gw.stats["fallbacks"] == 0
+        p.frame("g.run", {"b": "b1"}, run_body("r2", code="kept"))
+        await until(lambda: gw.binding.runs["r2"].outcome)
+        assert "".join(e.get("text", "") for e in events_of(gw, "r2")) == "5\n"
+    finally:
+        gw.shutdown()
+
+
+@aio
+async def test_real_stop_reaches_the_child_itself():
+    """The SIGINT goes to the whole group, so the child gets it itself (its exit status -2), not only the kernel."""
+    s, c, gw, p = await real()
+    try:
+        code = ("import subprocess\np = subprocess.Popen(['sleep', '60'])\nprint('started', flush=True)\n"
+                "try:\n    p.wait()\nexcept KeyboardInterrupt:\n    print('child exit', p.wait(), flush=True)")
+        p.frame("g.run", {"b": "b1"}, run_body("r1", code=code))
+        await until(lambda: any(e["type"] == "stream" for e in events_of(gw, "r1")))
+        await asyncio.sleep(0.2)
+        p.frame("g.interrupt", {"b": "b1"}, {"epoch": 1})
+        await until(lambda: gw.binding.runs["r1"].outcome, 10)
+        text = "".join(e.get("text", "") for e in events_of(gw, "r1"))
+        assert "child exit -2" in text, text
+    finally:
+        gw.shutdown()
+
+
+@aio
+async def test_real_stop_ends_what_ignored_the_sigint():
+    """A subprocess that ignores SIGINT, left behind by a stopped run that did end: SIGTERM at the run's end (then
+    SIGKILL), before any next run; the kernel stays."""
+    s, c, gw, p = await real()
+    try:
+        code = ("import subprocess\np = subprocess.Popen(['sh', '-c', 'trap \"\" INT; sleep 60'])\n"
+                "print(p.pid, flush=True)\np.wait()")
+        p.frame("g.run", {"b": "b1"}, run_body("r1", code=code))
+        await until(lambda: any(e["type"] == "stream" for e in events_of(gw, "r1")))
+        child = int(next(e["text"] for e in events_of(gw, "r1") if e["type"] == "stream").split()[0])
+        kernel = gw.worker.proc.pid
+        await asyncio.sleep(0.2)
+        p.frame("g.interrupt", {"b": "b1"}, {"epoch": 1})
+        await until(lambda: gw.binding.runs["r1"].outcome, 10)
+        assert gw.binding.runs["r1"].outcome.get("ename") == "KeyboardInterrupt"
+        assert gw.stats["descendantsKilled"] >= 1
+        await until(lambda: _gone(child), 10)
+        assert gw.worker.proc.pid == kernel
+    finally:
+        gw.shutdown()
+
+
+@aio
+async def test_no_stuck_tasks():
+    """daybreak3's R762-TASK-2: a run's task returns when its kernel is restarted, replaced by the fallback, exits or
+    is shut down: no task is left waiting, nothing keeps its payload."""
+    async def check(action):
+        port = Scripted(auto=False)
+        s, c, gw, p = await bound(port)
+        p.frame("g.run", {"b": "b1"}, run_body("r1"))
+        await settle()
+        assert gw.binding.runs["r1"].owner == "worker"
+        await action(s, gw, p, port)
+        await settle()
+        pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+        assert not pending, (action.__name__, pending)
+        assert not gw.worker_runs and (gw.binding is None or gw.binding.runs["r1"].outcome), action.__name__
+
+    async def restart(s, gw, p, port):
+        p.frame("g.restart", {"b": "b1"}, {"epoch": 1})
+
+    async def fallback(s, gw, p, port):
+        p.frame("g.interrupt", {"b": "b1"}, {"epoch": 1})
+        await settle()
+        s.timers.advance(2000)
+
+    async def exits(s, gw, p, port):
+        port.h.on_exit("exit 1")
+
+    async def shutdown(s, gw, p, port):
+        gw.shutdown()
+
+    async def wave_restart(s, gw, p, port):
+        p.frame("g.restart", {"b": "b1"}, {"epoch": 1})
+    for a in (restart, fallback, exits, shutdown):
+        await check(a)
+    # a wave mid-entry, restarted
+    port = Scripted(auto=False)
+    s, c, gw, p = await bound(port)
+    p.frame("g.run", {"b": "b1"}, {"request": "w", "epoch": 1, "kind": "wave", "payload": wave([entry("a", "A"), entry("b", "B")])})
+    await settle()
+    p.frame("g.restart", {"b": "b1"}, {"epoch": 1})
+    await settle()
+    assert not [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+    assert gw.binding.runs["w"].outcome["reason"] == "kernel restarted"
+
+
+@aio
+async def test_ename_carried():
+    port = Scripted(auto=False)
+    s, c, gw, p = await bound(port)
+    p.frame("g.run", {"b": "b1"}, run_body("r1"))
+    await settle()
+    port.h.on_message({"id": 1, "done": True, "ms": 2, "error": True, "ename": "KeyboardInterrupt"})
+    await settle()
+    assert gw.binding.runs["r1"].outcome == {"status": "error", "ms": 2, "ename": "KeyboardInterrupt"}
 
 
 @aio
