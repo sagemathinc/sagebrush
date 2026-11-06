@@ -104,7 +104,9 @@ try {
   await ev(`${C}.setMode("edit").then(() => 1)`);
   await until(`!!document.querySelector(".code-page .code-edit textarea")`);
   await ev(`(() => { const t = document.querySelector(".code-page .code-edit textarea"); t.value = "mine\\n"; t.dispatchEvent(new Event("input")); return 1; })()`);
-  await ev(`${W}.write("/demo.py", "theirs\\n").then(() => 1)`);
+  // (their write, then this page's save at once, before the page has heard of theirs: the save itself must refuse to
+  //  write over a revision it didn't read)
+  await ev(`${W}.write("/demo.py", "theirs\\n").then(() => ${C}.flush()).then(() => 1)`);
   check(await until(`${C}.stopped() && !document.querySelector(".code-page .code-bar").hidden && /changed elsewhere/.test(document.querySelector(".code-page .code-bar").textContent)`, 10000), "a change made elsewhere while editing: saving stops and the bar says so");
   await sleep(1500);
   check(await ev(`${text("/demo.py")}`) === "theirs\n", "…their change is never written over");
