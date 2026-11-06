@@ -87,8 +87,8 @@ class _Ring:
     def __repr__(self):
         return self._name
 
-    def __call__(self, x=0, d=None):
-        """Convert x into the ring.
+    def __call__(self, x=0, *base):
+        """Convert x into the ring (ZZ(x, base) as Integer(x, base)).
 
         EXAMPLES::
 
@@ -100,17 +100,12 @@ class _Ring:
                 raise TypeError("not a constant polynomial")
             x = x[0]
         if self._field:
-            return _sa()._QQ(x, d)
-        if d is not None:
-            raise TypeError("ZZ takes one argument")
-        if _sa()._real_kind(x) is not None:
-            # (integral, or TypeError: int() truncated ZZ(3.5) to 3)
-            return _sa().Integer(_sa()._integral_real(x))
-        if hasattr(x, "_integer_") and not isinstance(x, (int, _F)):
+            return _sa()._QQ(x, *base)
+        if _sa()._real_kind(x) is None and hasattr(x, "_integer_") and not isinstance(x, (int, _F, str)):
             return x._integer_()
-        if isinstance(x, _F) and x.denominator != 1:
-            raise TypeError("no conversion of this rational to integer")
-        return _sa().Integer(x)
+        # (Sage's conversion: integral reals, whole rationals, strings with a
+        # prefix or in a base, None as 0; TypeError otherwise)
+        return _sa().Integer(x, *base)
 
     def __getitem__(self, names):
         """QQ['x'] (a polynomial ring), QQ[['x']] (power series), and QQ[a]
