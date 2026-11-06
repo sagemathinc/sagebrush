@@ -5,6 +5,9 @@
     sagebrush remote --loopback [--port N]
                               this computer as a sagebrush.space page's
                               "Your computer (paired)" runner, in this Python
+    sagebrush remote login [--origin URL] [--name NAME] [--force]
+                              enroll this computer with your account
+                              (for the cloud relay)
 
 Sage files run with python -m sagebrush FILE.sage; the MCP server is
 sagebrush-mcp."""
