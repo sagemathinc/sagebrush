@@ -393,6 +393,9 @@ def eigenvectors(a, side):
         [(-1/2*sqrt(33) + 5/2, [(1, -1/4*sqrt(33) + 3/4)], 1), (1/2*sqrt(33) + 5/2, [(1, 1/4*sqrt(33) + 3/4)], 1)]
     """
     n = a.nrows()
+    # (each shifted matrix is a symbolic n x n workspace: admitted before
+    # any is built, as right_kernel admits its own)
+    _sr_guard(n, n)
     rows = a._rows if side == "right" else a._raw_columns()
     out = []
     for lam, m in _eigen(a):
