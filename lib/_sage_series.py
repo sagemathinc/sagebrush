@@ -332,6 +332,30 @@ def _is_zero(c):
         return c == 0
 
 
+def _latex_number(c):
+    """c's latex when it is a plain number (an integer, a rational, an
+    element of a prime field): 3, -\\frac{1}{2}; else None."""
+    import re
+    if isinstance(c, bool):
+        return None
+    if isinstance(c, _F):
+        if c.denominator == 1:
+            return str(c.numerator)
+        return "%s\\frac{%d}{%d}" % ("-" if c < 0 else "", abs(c.numerator), c.denominator)
+    s = repr(c)
+    if re.fullmatch(r"-?\d+", s):
+        return s
+    m = re.fullmatch(r"(-?)(\d+)/(\d+)", s)
+    return "%s\\frac{%s}{%s}" % m.groups() if m else None
+
+
+def _latex_from_repr(s):
+    """The printed series with ^{} exponents (Laurent series, and
+    coefficients that are not plain numbers)."""
+    import re
+    return re.sub(r"\^(-?\d+)", r"^{\1}", repr(s).replace("*", " "))
+
+
 class Series:
     """A power series or Laurent series.
 
@@ -589,8 +613,42 @@ class Series:
     __str__ = __repr__
 
     def _latex_(self):
-        import re
-        return re.sub(r"\^(-?\d+)", r"^{\1}", repr(self).replace("*", " "))
+        """As Sage typesets a power series: each term is its coefficient's
+        latex, a space and the monomial, a coefficient 1 (or -1) left out
+        (hence "1 +  x"); the terms are joined by " + ", and "+ -" becomes
+        "- "; a series with no nonzero term to its precision is
+        "0 + \\cdots".  (Laurent series, and coefficients that are not plain
+        numbers, keep the earlier form.)
+
+        EXAMPLES::
+
+            sage: R.<x> = QQ[[]]; latex(1 + x + x^2/2 + O(x^4)), latex(-x/3 + O(x^2))
+            (1 +  x + \\frac{1}{2} x^{2} + O(x^{4}), -\\frac{1}{3} x + O(x^{2}))
+            sage: latex(2 - x + O(x^3)), latex(O(x^3)), latex(R(0)), latex(3 + O(x))
+            (2 -  x + O(x^{3}), 0 + \\cdots, 0, 3 + O(x))
+        """
+        if self._R._laurent:
+            return _latex_from_repr(self)
+        name = self._R._name
+        terms = []
+        e = self._v - 1
+        for c in ([] if self.is_zero() else self._c):
+            e += 1
+            if _is_zero(c):
+                continue
+            lc = _latex_number(c)
+            if lc is None:
+                return _latex_from_repr(self)
+            if e:
+                lc = ("" if lc == "1" else "-" if lc == "-1" else lc) + " " + (name if e == 1 else "%s^{%d}" % (name, e))
+            terms.append(lc)
+        if self._prec is not None:
+            if not terms:
+                return "0 + \\cdots"
+            terms.append("O(%s)" % ("1" if self._prec == 0 else name if self._prec == 1 else "%s^{%d}" % (name, self._prec)))
+        if not terms:
+            return "0"
+        return " + ".join(terms).replace("+ -", "- ").lstrip()
 
     # ---- arithmetic
     def _coerce(self, o):
