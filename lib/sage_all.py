@@ -1678,9 +1678,14 @@ def _int_base(base):
     """A base as Sage takes it: a number truncated toward zero (2.5 and 7/3
     are 2, 1/2 is 0), else a TypeError (a string, None); one beyond a C
     long is an OverflowError."""
-    if base is None or isinstance(base, (str, bytes)):
+    if base is None or type(base) is complex or isinstance(base, (str, bytes, bytearray, memoryview, list, tuple, dict, set, frozenset)):
         raise TypeError("an integer is required")
-    b = int(base)
+    try:
+        b = int(base)
+    except TypeError:
+        if isinstance(base, complex):
+            raise  # (CC's own: can't convert complex to int)
+        raise TypeError("an integer is required") from None
     if not -2 ** 63 <= b < 2 ** 63:
         raise OverflowError("Python int too large to convert to C long")
     if b != 0 and not 2 <= b <= 36:

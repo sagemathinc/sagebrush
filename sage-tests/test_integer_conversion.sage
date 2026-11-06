@@ -37,3 +37,11 @@ for a in [("0x_ff",), ("1__0",), ("_10",), ("10_",), ("+_10",), ("_",), ("__",),
 for b in [2.5, 7/3, 1/2, -1/2, -2.5, RR(2.5), RDF(2.5), 2.9, 36.9, 37/1, -0.5, float(16.7), QQ(33)/2]:
     T("10", b)
     Z("10", b)
+# a base must be a number: containers and buffers are refused (int() would read bytearray(b"2") as 2)
+for b in [bytearray(b"2"), memoryview(b"2"), [2], (2,), {2: 1}, {2}, frozenset([2]), object(), complex(2, 0), CC(2), b"2",
+          Mod(2, 7), GF(7)(2), SR(2)]:
+    for f, n in ((Integer, "I"), (ZZ, "Z")):
+        try:
+            print(n, type(b).__name__, "->", repr(f("10", b)))
+        except Exception as e:
+            print(n, type(b).__name__, "!!", type(e).__name__, e)
