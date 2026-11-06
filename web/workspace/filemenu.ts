@@ -9,8 +9,10 @@
 // (no import of the workspace here: the board library draws this menu in
 // exported files and frames too; the Open… dialog and Recent are fileopen.ts)
 
-/** The items, in order; "-" a rule.  New ▸, Recent ▸ and Download ▸ are groups. */
-export type FileItem = "newNotebook" | "newMatlab" | "newBoard" | "newFolder" | "fromExample" | "open" | "upload" | "saveCopy" | "rename" | "print" | "share" | "delete";
+/** The items, in order; "-" a rule.  New ▸, Recent ▸ and Download ▸ are groups.  Examples… is New ▸ From an
+ * example…, also at the top (sim run 12: an agent read the File menu, never saw the word, and wrote a Beamer deck
+ * from nothing); it has no key of its own: it clicks From an example…, so the page's handler is the one. */
+export type FileItem = "newNotebook" | "newMatlab" | "newBoard" | "newFolder" | "fromExample" | "open" | "examples" | "upload" | "saveCopy" | "rename" | "print" | "share" | "delete";
 const LABELS: Record<FileItem, string> = {
   newNotebook: "Notebook",
   newMatlab: "MATLAB notebook",
@@ -18,6 +20,7 @@ const LABELS: Record<FileItem, string> = {
   newFolder: "Folder",
   fromExample: "From an example…",
   open: "Open…",
+  examples: "Examples…",
   upload: "Upload…",
   saveCopy: "Save a copy…",
   rename: "Rename…",
@@ -28,6 +31,7 @@ const LABELS: Record<FileItem, string> = {
 const TITLES: Partial<Record<FileItem, string>> = {
   newMatlab: "A new notebook in MATLAB's language",
   open: "Your notebooks, boards and files in this browser",
+  examples: "Worked examples (notebooks, boards, LaTeX): open one as your own copy",
   upload: "Files from this computer: notebooks and boards become documents, anything else is kept as a file",
   saveCopy: "A copy of this document, under a name you give",
   delete: "Move this document to Trash (Trash keeps it until you empty it)",
@@ -42,6 +46,8 @@ export type FileMenuOptions = {
   keys: Partial<Record<FileItem, string>>;
   /** Items drawn disabled here (meaning nothing for this document). */
   disabled?: Partial<Record<FileItem, boolean>>;
+  /** Why a disabled item is disabled, as its title (a person's and an agent's only clue: run 12, the board's Share…). */
+  why?: Partial<Record<FileItem, string>>;
   /** Download ▸: this document's kinds, keyed (one the page can't make here, disabled). */
   downloads: { key: string; label: string; title?: string; disabled?: boolean }[];
   /** Hide what is disabled instead (and a group or rule left with nothing): the board library in
@@ -78,7 +84,7 @@ export function renderFileMenu(menu: HTMLElement, o: FileMenuOptions) {
     if (key) b.setAttribute(o.attr, key);
     if (TITLES[id]) b.title = TITLES[id]!;
     if (FILE_KEYS[id]) b.append(el("kbd", { textContent: FILE_KEYS[id] }));
-    if (!key || o.disabled?.[id]) { b.disabled = true; b.setAttribute("aria-disabled", "true"); }
+    if (!key || o.disabled?.[id]) { b.disabled = true; b.setAttribute("aria-disabled", "true"); if (o.why?.[id]) b.title = o.why[id]!; }
     if (id === "delete") b.classList.add("danger");
     parent.append(b);
     for (const x of o.extra ?? []) if (x.after === id) {
@@ -119,6 +125,14 @@ export function renderFileMenu(menu: HTMLElement, o: FileMenuOptions) {
   const nw = group("New", "new", () => {});
   for (const id of ["newNotebook", "newMatlab", "newBoard", "newFolder", "fromExample"] as FileItem[]) item(id, nw);
   item("open", menu);
+  // (Examples…: From an example…, clicked; disabled where it is)
+  const fromExample = nw.querySelector<HTMLButtonElement>("[data-item=fromExample]")!;
+  const ex = el("button", { textContent: LABELS.examples, title: TITLES.examples!, disabled: fromExample.disabled });
+  ex.setAttribute("role", "menuitem");
+  ex.dataset.item = "examples";
+  if (ex.disabled) ex.setAttribute("aria-disabled", "true");
+  ex.onclick = (ev) => { ev.stopPropagation(); fromExample.click(); };
+  menu.append(ex);
   group("Recent", "recent", async (box) => {
     box.replaceChildren();
     const list = (await o.recent?.().catch(() => [])) ?? [];

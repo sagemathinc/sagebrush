@@ -69,6 +69,7 @@ onHistoryRefused((m: string) => showHistoryNotice(m, HISTORY_STOPPED));
 import { uploadFiles, openableAsFile, blobHead, convertCopy, MystNotebookError, pauseBoard, isPaused, unpause, carryNotice, takeNotice, type DocKind } from "../workspace/upload";
 import { readBundle, keepBundle } from "../notebook/bundle.js";
 import { openFilesDialog, recentOpened, recentLabel, recordOpened } from "../workspace/fileopen";
+import { openGallery } from "../examples/open";
 import { mountBrowser } from "../workspace/browser";
 import { mountAgentPairing, floatingButton } from "../workspace/agent-ui";
 import { pairLink } from "../workspace/pair-link";
@@ -1389,6 +1390,8 @@ const host: BoardHost = {
       const ex = (await (await fetch(new URL("examples/index.json", location.href))).json()) as { file: string; title: string; about: string }[];
       return ex.map((e) => ({ title: e.title, about: e.about, href: `?doc=${encodeURIComponent("examples/" + e.file)}`, current: source === "examples/" + e.file }));
     },
+    // (the gallery's panel, boards first: a copy opens as any document from the File menu)
+    panel: () => openGallery(ws, (e) => openEntry(e, "here"), "board"),
   },
   // (which Sagebrush: the site's /version.json, each field checked, as data;
   // an exported file, or a site without it, the engine that ran its code

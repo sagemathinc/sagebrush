@@ -301,13 +301,42 @@ def _coerces_into(x, B):
     if P is B or P == B:
         return True
     try:
-        names = lambda R: tuple(R.variable_names()) if hasattr(R, "variable_names") else (R.variable_name(),)
-        if names(P) != names(B):
+        # (its variables among B's: QQ['y'] into QQ['x,y'])
+        if not set(_names(P)) <= set(_names(B)):
             return False
         k, K = P.base_ring(), B.base_ring()
     except Exception:
         return False
     return k is K or k == K or k is _sa().ZZ
+
+
+def _names(R):
+    """A ring's variable names as a tuple."""
+    return tuple(R.variable_names()) if hasattr(R, "variable_names") else (R.variable_name(),)
+
+
+def _number_field(K):
+    """Whether K is a number field (QuadraticField(2), CyclotomicField(3) ...)."""
+    return type(K).__name__.startswith("NumberField")
+
+
+def _coef_pushout(k, S):
+    """The common coefficient ring of k and S in a series over k[V] meeting S, as Sage finds
+    it (ZZ with QQ is QQ; ZZ or QQ with GF(p) is GF(p)); None when there is none (GF(p) with
+    QQ)."""
+    sa = _sa()
+    if k is S or k == S or S is sa.ZZ:
+        return k
+    if k is sa.ZZ:
+        return S
+    # (a number field contains QQ: QQ['x'][[t]] meets K['x'] and K in K['x'][[t]])
+    if k is sa.QQ and _number_field(S):
+        return S
+    if S is sa.QQ and _number_field(k):
+        return k
+    if k is sa.QQ and getattr(S, "is_prime_field", lambda: False)():
+        return S
+    return None
 
 
 def _variable_of(x):
@@ -331,8 +360,18 @@ def _frac(B):
     if _is_padic(B) and not B._field:
         return B.fraction_field()
     if _poly_base(B):
-        return B.fraction_field()
+        # (a ring without one, as polynomials over a number field here: itself; its units
+        # divide in it, and a non-unit is refused as before)
+        return B.fraction_field() if hasattr(B, "fraction_field") else B
     return B
+
+
+def _poly_elt(o):
+    """Whether o is an element of a polynomial ring (univariate or not)."""
+    try:
+        return not isinstance(o, (int, _F)) and _poly_base(o.parent())
+    except Exception:
+        return False
 
 
 def _poly_base(B):
@@ -738,14 +777,14 @@ class Series:
         except (TypeError, ValueError, ArithmeticError):
             return None
 
-    def _lift_base(self, o):
+    def _lift_base(self, o, op=None):
         """self, moved to the common parent Sage uses with o when that
         differs, else self: the series ring over _target_base(o), and a
         Laurent series ring if either operand is one (QQ[[z]] meets a
         Laurent series over ZZ in QQ((z)), whichever comes first; the
         review's CORR-078-1)."""
         R = self._R
-        base = self._target_base(o)
+        base = self._target_base(o, op)
         laurent = R._laurent or (isinstance(o, Series) and o._R._laurent)
         if base is R._base and laurent == R._laurent:
             return self
@@ -759,7 +798,7 @@ class Series:
             dp = S._dp if (base is S._base and laurent == S._laurent) else max(R._dp, S._dp)
         return self._over(base, laurent=laurent, dp=dp)
 
-    def _target_base(self, o):
+    def _target_base(self, o, op=None):
         """The coefficient ring of self's parent with o.  p-adic bases: an
         element of Y joins a series over X in X if Y coerces into X, else
         over the p-adics with the larger cap, a field if either is
@@ -782,6 +821,8 @@ class Series:
             if isinstance(o, Series) and not _coerces(P, B) and _coerces(B, P):
                 return P
             return _series_pushout(B, P)
+        if _poly_base(B) and not isinstance(o, Series):
+            return self._poly_target(o, op)
         F = _frac(B)
         if F is B:
             return B
@@ -797,6 +838,56 @@ class Series:
         except (TypeError, ValueError, ArithmeticError):
             return B
         return F
+
+    def _poly_target(self, o, op=None):
+        """The base of self's parent with o when the base B is a polynomial ring k[V], as Sage
+        finds it: a polynomial over S in V (or in the series variable), or a number of S,
+        moves the coefficients to the common ring of k and S. ZZ[x][[x]] with an element of
+        QQ[x] is over QQ[x]; with 1/2 or GF(5)(2) over QQ[x] or GF(5)[x]; QQ[x][[x]] with
+        GF(5)[x] over GF(5)[x]. A polynomial in another variable, and GF(p)[x][[x]] with QQ,
+        are refused (TypeError)."""
+        B = self._R._base
+        sa = _sa()
+        if _poly_elt(o):
+            P = o.parent()
+            W, S = _names(P), P.base_ring()
+            V = _names(B)
+            in_var = W == (self._R._name,) and self._R._name not in V
+            poly = True
+            if not in_var and not set(W) <= set(V):
+                # B's variables among o's: a Laurent series meets o's ring (ZZ['y']((x)) and
+                # QQ['x,y'] meet in QQ['x,y']((x))), unless B has the series variable; a power
+                # series is refused (Sage, as probed)
+                if set(V) < set(W) and self._R._name not in V and self._R._laurent:
+                    k = _coef_pushout(B.base_ring(), S)
+                    if k is None or (B.base_ring() is sa.QQ and k is not sa.QQ and op in ("+", "-")):
+                        raise TypeError("unsupported operand parent(s): '%r' and '%r'" % (self._R, P))
+                    return P if k is S else P.change_ring(k)
+                raise TypeError("unsupported operand parent(s): '%r' and '%r'" % (self._R, P))
+        elif isinstance(o, int) and not isinstance(o, bool):
+            S, poly, in_var = sa.ZZ, False, False
+        elif isinstance(o, _F):
+            S, poly, in_var = sa.QQ, False, False
+        elif type(o).__name__ in ("IntegerMod_int", "NumberFieldElement") and hasattr(o, "parent"):
+            S, poly, in_var = o.parent(), False, False
+        else:
+            return B
+        k0 = B.base_ring()
+        k = _coef_pushout(k0, S)
+        if k is None:
+            raise TypeError("unsupported operand parent(s): '%r' and '%r'" % (self._R, S))
+        if k is k0:
+            return B
+        # Sage's refusals (its coercion model, as probed): QQ with GF(p) meets only by an action
+        # (* and /, not + or -); a polynomial in the series variable over other coefficients
+        # meets a Laurent series not at all, nor QQ with GF(p); a division by a polynomial in
+        # the base's variables over other coefficients fails (a RuntimeError in Sage)
+        qq_gf = k0 is sa.QQ and getattr(k, "is_prime_field", lambda: False)() and getattr(k, "characteristic", lambda: 0)() != 0
+        if (qq_gf and op in ("+", "-")) or (in_var and (self._R._laurent or qq_gf)):
+            raise TypeError("unsupported operand parent(s): '%r' and '%r'" % (self._R, S))
+        if op == "/" and poly and not in_var:
+            raise RuntimeError("no common parent of the coefficients for a division")
+        return B.change_ring(k)
 
     def _over(self, base, laurent=None, dp=None):
         """self in the series ring over base (a Laurent series ring if asked;
@@ -815,7 +906,7 @@ class Series:
 
     def __add__(self, o):
         self._check_var(o, "+")
-        lifted = self._lift_base(o)
+        lifted = self._lift_base(o, "+")
         if lifted is not self:
             return lifted.__add__(o)
         o = self._coerce(o)
@@ -845,7 +936,7 @@ class Series:
 
     def __sub__(self, o):
         self._check_var(o, "-")
-        lifted = self._lift_base(o)
+        lifted = self._lift_base(o, "-")
         if lifted is not self:
             return lifted.__sub__(o)
         o = self._coerce(o)
@@ -854,7 +945,7 @@ class Series:
         return self + (-o)
 
     def __rsub__(self, o):
-        lifted = self._lift_base(o)
+        lifted = self._lift_base(o, "-")
         if lifted is not self:
             return lifted.__rsub__(o)
         o = self._coerce(o)
@@ -864,7 +955,7 @@ class Series:
 
     def __mul__(self, o):
         self._check_var(o, "*")
-        lifted = self._lift_base(o)
+        lifted = self._lift_base(o, "*")
         if lifted is not self:
             return lifted.__mul__(o)
         o = self._coerce(o)
@@ -915,6 +1006,12 @@ class Series:
                 raise ZeroDivisionError("division by zero")
             return Series(s._R, s._v, [x / c for x in s._c], s._prec)
         F = _frac(B)
+        if _poly_base(B) and not isinstance(o, Series):
+            # the common parent first (Sage: x/(1/2) over ZZ[x] is in QQ[x][[x]]; a
+            # polynomial in another variable is refused)
+            T = self._poly_target(o, "/")
+            if T is not B:
+                return self._over(T).__truediv__(o)
         if _poly_base(B) and scalar:
             s = self._poly_scalar_div(o)
             if s is not None:
@@ -1017,7 +1114,7 @@ class Series:
         return self._over(F, laurent=True) / g._over(F, laurent=True)
 
     def __rtruediv__(self, o):
-        lifted = self._lift_base(o)
+        lifted = self._lift_base(o, "/")
         if lifted is not self:
             return lifted.__rtruediv__(o)
         o = self._coerce(o)
