@@ -918,3 +918,9 @@ if __name__ == "__main__":
             f()
             print("ok", name)
     print("all pairing tests passed")
+    # The remote runner's tests (design remote-v1, build step (a)) run here too, because CI's engine-cpython job
+    # runs a fixed list of test files and this is the pairing's successor.  (A ci.yml line of their own is the
+    # cleanup: /scratch/sagebrush-reviews/remote-compute/ci-remote-tests/.)
+    import runpy
+    for remote_test in ("test_remote_es256.py", "test_remote_dpop.py"):
+        runpy.run_path(os.path.join(HERE, remote_test), run_name="__main__")
