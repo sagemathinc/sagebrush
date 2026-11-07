@@ -5072,6 +5072,11 @@
   "owner": "Sage kernel (@sagebrush-sage2)",
   "reason": "Sage's own refusal of the generalized eigenproblem over exact rings (same message): an unsupported feature in Sage too, not a cap"
  },
+ "lib/_sage_matrix_more.py :: refuse_generalized_numeric :: ....: except NotImplementedError as e: #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "a doctest line of the RDF/CDF generalized-eigenproblem refusal's pin (grader's r800 R1-R6): it prints the refusal; nothing is capped"
+ },
  "lib/_sage_matrix_more.py :: refuse_generalized_numeric :: raise NotImplementedError(\"the generalized eigenvalue problem (other=B) over RDF and CDF is not available in sagebrush yet\") #0": {
   "class": "coverage",
   "owner": "Sage kernel (@sagebrush-sage2)",
