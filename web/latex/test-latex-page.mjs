@@ -398,6 +398,8 @@ try {
       await saveStateIs(/^Not saved: test: the write failed/);
       await ev(`(window.__k = 0, history.forward(), true)`);
       const held = await until(`window.__k >= 2`, 10000);
+      // (#551's follow-up: the closing editor, its last write held, says so, not its earlier "Not saved")
+      const closingSaid = await ev(`document.querySelector(".tex-savestate")?.textContent ?? ""`);
       const nav = await ev(`(() => {
         if (${withNav}) { const n = window.navigation; if (!n?.traverseTo) return false; const orig = n.traverseTo.bind(n);
           n.traverseTo = (k, o) => { const late = new Promise((r) => setTimeout(r, 300)); return { committed: late, finished: late.then(() => orig(k, o).finished) }; }; window.__navRestore = () => { delete n.traverseTo; }; }
@@ -414,8 +416,8 @@ try {
       const lateWrite = reopened ? null : await until(`${W}.read("/sw/a.tex").then((r) => new TextDecoder().decode(r.content).includes(${JSON.stringify(`% late history ${withNav ? "nav" : "go"}`)}))`, 60000);
       await ev(`(window.__navRestore?.(), delete window.__navRestore, window.__sbTexSaveWrite = () => { if (window.__failWrites) throw new Error("test: the write failed"); }, window.__answer = false, window.__obsB?.disconnect(), window.__asked = 4, true)`);
       const mark = `% late history ${withNav ? "nav" : "go"}`;
-      check(held && nav !== false && reopened && s4.url === fa && at4 === 0 && s4.title === "a.tex" && s4.a && s4.ro === false && s4.src.includes(mark) && f4.includes(mark) && s4.pages === 1 && !s4.sawB && s4.kept,
-        `DB3-U8-SWITCH-4 (${withNav ? "Navigation API, its traverse late" : "no Navigation API: history.go"}): A asked for and A's close released at once: A open again only on A's entry, editable, its URL and edit; B never shown`, { held, nav, reopened, reopenMs, lateWrite, s4: { ...s4, src: s4.src.slice(-30) }, at4, file: f4.slice(-30) });
+      check(held && closingSaid === "Saving before switching…" && nav !== false && reopened && s4.url === fa && at4 === 0 && s4.title === "a.tex" && s4.a && s4.ro === false && s4.src.includes(mark) && f4.includes(mark) && s4.pages === 1 && !s4.sawB && s4.kept,
+        `DB3-U8-SWITCH-4 (${withNav ? "Navigation API, its traverse late" : "no Navigation API: history.go"}): A asked for and A's close released at once: while the close's write is held, "Saving before switching…"; A open again only on A's entry, editable, its URL and edit; B never shown`, { held, closingSaid, nav, reopened, reopenMs, lateWrite, s4: { ...s4, src: s4.src.slice(-30) }, at4, file: f4.slice(-30) });
     }
     // ---- (astra U8-SWITCH-5) the newest file asked for wins over a switch past its decision and a return still under
     // way: the file shown's close held (its write failed, then its last write held), a switch to X decided, then...
