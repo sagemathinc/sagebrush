@@ -1032,9 +1032,29 @@ class FFVector:
             return NotImplemented
         return _vector_op(o, self, "-")
 
+    def _complex_promotion(self, o):
+        """self over the complex field where it meets the complex number o,
+        when self is real, as Sage: CDF for two doubles, else ComplexField of
+        the lower precision (a double counting as 53 bits); None otherwise."""
+        P, B = _sa().parent(o), self._base
+        rp, rb = repr(P), repr(B)
+        if "Complex" not in rp or "Complex" in rb or not ("Real" in rb):
+            return None
+        dbl_b, dbl_p = "Double" in rb, "Double" in rp
+        if dbl_b and dbl_p:
+            K = _sa().CDF
+        else:
+            pb = 53 if dbl_b else int(B.prec())
+            pp = 53 if dbl_p else int(P.prec())
+            K = _sa().ComplexField(min(pb, pp))
+        return FFVector(K, [K(a) for a in self._e])
+
     def __mul__(self, o):
         if _vec_base(o) is not None:
             return _vector_op(self, o, "*")
+        promoted = self._complex_promotion(o)
+        if promoted is not None:
+            return promoted * o
         if isinstance(o, FFMatrix):
             return o._vecmat(self)
         import _sage_matrix
@@ -1067,6 +1087,9 @@ class FFVector:
         """
         if _vec_base(o) is not None:
             return _vector_op(o, self, "*")
+        promoted = self._complex_promotion(o)
+        if promoted is not None:
+            return o * promoted
         c = _admit(self._base, o)
         if c is None:
             if isinstance(o, _F) or type(o).__name__ == "Rational":
@@ -1090,11 +1113,11 @@ class FFVector:
         """
         if isinstance(o, (FFVector, FFMatrix)) or _vec_base(o) is not None:
             return NotImplemented
-        if "Complex" in repr(_sa().parent(o)) and "Complex" not in repr(self._base):
-            # (a real vector times a complex number is over the complex field
-            # in Sage; the product here would stay real: refused, as the
-            # product is)
-            return NotImplemented
+        promoted = self._complex_promotion(o)
+        if promoted is not None:
+            # (a real vector divided by a complex number is over the complex
+            # field, as Sage: vector(RDF, [2, 4])/CDF(2) is over CDF)
+            return promoted / o
         if isinstance(o, int) and not isinstance(o, bool):
             # (1/o in QQ: rational division by zero for 0, as Sage)
             inv = _sa()._QQ(1, o)
