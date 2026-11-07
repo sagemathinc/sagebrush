@@ -15,6 +15,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "./test-port.mjs";
+import { allowFiles } from "./test-allow.mjs";
 
 const site = process.env.SB_URL ?? "http://127.0.0.1:8765/";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -83,6 +84,9 @@ try {
     at = `${where}: the page`;
     await send("Page.navigate", { url });
     ok(await until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000), `${where}: the page's interpreter is ready: ` + (await ev("document.querySelector('#status')?.textContent", 5000)));
+    // (?runner=0, the page's own interpreter: a notebook gets it only once it may change files, which every notebook
+    // starts without (confinement 1b): the person allows it, as a person does)
+    if (url.includes("runner=0")) { await allowFiles(send, ev); await until("sagebrush.kernel.ready", 60000); }
     at = `${where}: Sage, its sources held`;
     await ev("(() => { window.confirm = () => true; const m = document.querySelector('#mode'); m.value = 'sage'; m.dispatchEvent(new Event('change', { bubbles: true })); return 1; })()");
     const t0 = Date.now();
