@@ -4078,7 +4078,7 @@ let unionOf: (a: any, b: any) => any;
   // (a GenericAlias member: equal by value, hashed by value)
   const same = (a: any, b: any) => a === b || (a instanceof PyGenericAlias && O.truth(O.eq(a, b)));
   method(unionType, "__eq__", (u: PyUnion, o: any) => (o instanceof PyUnion ? u.args.length === o.args.length && u.args.every((t) => o.args.some((x) => same(t, x))) : NotImplemented));
-  method(unionType, "__hash__", (u: PyUnion) => u.args.reduce((h, t) => h ^ (t instanceof PyGenericAlias ? O.hashExact(t) : O.id(t)), 0));
+  method(unionType, "__hash__", (u: PyUnion) => O.hashXor(u.args.map((t) => (t instanceof PyGenericAlias ? O.hashExact(t) : O.id(t)))));
   // (each member in order through the whole protocol, stopping at the
   // first that holds, as isinstance() with a tuple: an alias raises only
   // when it is reached)
@@ -4199,7 +4199,7 @@ T.GenericAlias = genericAliasType;
     if (a.starred !== o.starred) return false;
     return O.truth(O.eq(a.origin, o.origin)) && O.truth(O.eq(tuple(a.args), tuple(o.args)));
   });
-  method(ga, "__hash__", (a: PyGenericAlias) => O.hashExact(a.origin) ^ O.hashExact(tuple(a.args)));
+  method(ga, "__hash__", (a: PyGenericAlias) => O.hashXor([O.hashExact(a.origin), O.hashExact(tuple(a.args))]));
   method(ga, "__or__", (a: any, b: any) => unionOf(a, b));
   method(ga, "__ror__", (a: any, b: any) => unionOf(b, a));
   method(ga, "__instancecheck__", (_a: any, _o: any) => raise(T.TypeError, "isinstance() argument 2 cannot be a parameterized generic"));
