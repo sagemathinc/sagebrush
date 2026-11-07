@@ -434,7 +434,7 @@ try {
     RCA.render([{ id: "x", kind: "text", body: "a" }]), RCA.render([{ id: "x", kind: "text", body: "b" }]), RCB.render([{ id: "x", kind: "text", body: "c" }]), RCB.clear(),
     window.RCC = RC.area("rc3", box()), RCC.render([{ id: "x", kind: "text", body: "d" }]), RCC.clear(), 1)`);
   await sleep(200);
-  const rc = await ev(`events.filter((e) => /^rc\d$/.test(e.area) && (e.type === "committed" || e.type === "error")).map((e) => [e.area, e.generation, e.reason])`);
+  const rc = await ev(`events.filter((e) => ["rc1", "rc2", "rc3"].includes(e.area) && (e.type === "committed" || e.type === "error")).map((e) => [e.area, e.generation, e.reason])`);
   ok(JSON.stringify(rc) === '[["rc1",1,"replaced"],["rc2",1,"cleared"],["rc3",1,"cleared"]]', "a newer render ends the pending one as replaced, and a clear as cleared, at once, whether or not the area has a frame yet: " + JSON.stringify(rc));
   await ev("(RC.dispose(), 1)");
 
