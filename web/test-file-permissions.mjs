@@ -124,6 +124,29 @@ const check = (ok, what) => { checks++; console.log((ok ? "ok   " : "FAIL ") + w
   failing = false;
   check(mf.may("h", "files") === false && mf.may("a", "files") === true && store.has("sagebrush-permissions") && !store.has("sagebrush-grants"), "the record can't be written: the old choices hold in this page, and the old key stays");
   check(createPermissions().may("a", "files") === true && !store.has("sagebrush-permissions"), "…and the next load migrates them");
+  // (astra's MIG-RETRY-1: the migration's write fails, storage recovers, the person turns file changes off: that
+  // write carries the pending old choices first, with the mark, so the newer choice wins and a reload keeps it)
+  store.clear();
+  store.set("sagebrush-permissions", JSON.stringify({ r1: { files: true }, r2: { files: true } }));
+  failing = true;
+  const mr = createPermissions();
+  failing = false;
+  check(mr.may("r1", "files") === true && mr.set("r1", "files", false) === true && mr.may("r1", "files") === false, "migration failed, storage back, then \"don't allow\": kept, and in effect");
+  check(rec().migrated === 1 && !store.has("sagebrush-permissions") && rec().docs.r1?.denied?.some((x) => x[0] === "write" && x[1] === "/") && !rec().docs.r1?.write?.includes("/"), "…that write carried the old choices and the mark, and the old key is retired");
+  const mr2 = createPermissions();
+  check(mr2.may("r1", "files") === false && mr2.may("r2", "files") === true, "…a reload keeps the newer \"don't allow\" (the old allow isn't replayed), and the other notebook's old allow");
+  // (astra's MIG-BOUND-2: held in the page, the old choices are bounded as the record is: every "don't allow", and
+  // only the newest docsKept allows; a "don't allow" held over a stored grant still wins)
+  store.clear();
+  store.set("sagebrush-grants", JSON.stringify({ v: 1, seq: 1, docs: { gd: { write: ["/"], t: 1 } } }));
+  const many = [["gd", { files: false }], ["d0", { files: false }], ...Array.from({ length: GRANT_CAPS.docsKept + 500 }, (_, i) => ["ab" + i, { files: true }]), ["d1", { files: false }]];
+  store.set("sagebrush-permissions", JSON.stringify(Object.fromEntries(many)));
+  failing = true;
+  const mh = createPermissions();
+  const allowedHeld = Array.from({ length: GRANT_CAPS.docsKept + 500 }, (_, i) => mh.may("ab" + i, "files")).filter(Boolean).length;
+  failing = false;
+  check(allowedHeld === GRANT_CAPS.docsKept && mh.may("ab0", "files") === false && mh.may("ab" + (GRANT_CAPS.docsKept + 499), "files") === true, "migration failed: the page holds the newest 2,000 old allows, the oldest only off: " + allowedHeld);
+  check(["gd", "d0", "d1"].every((d) => mh.may(d, "files") === false), "…and every old \"don't allow\", one over a stored grant included");
   store.clear();
   store.set("sagebrush-permissions", JSON.stringify(Object.fromEntries(Array.from({ length: GRANT_CAPS.docsKept + 500 }, (_, i) => ["mm" + i, { files: i % 2 === 0 }]))));
   const mb = createPermissions();
@@ -452,7 +475,7 @@ try {
   check(idA && idB && idA !== idB && (await files()) === false, "(two notebooks of the person's: A, then B, which isn't allowed)");
   await setCode("print('B ran')");
   await runAll();
-  check(await until("/can't run here: it may not change your files/.test(document.querySelector('#cells .cell .out')?.textContent ?? '')", 30000), "?runner=0: the person's own notebook not allowed to change files doesn't run in the page's own interpreter, and says why: " + (await out()).slice(0, 140));
+  check(await until("/can't run here: it isn't allowed to change your files/.test(document.querySelector('#cells .cell .out')?.textContent ?? '')", 30000), "?runner=0: the person's own notebook not allowed to change files doesn't run in the page's own interpreter, and says why: " + (await out()).slice(0, 140));
   const { identifier: statusLog } = await send("Page.addScriptToEvaluateOnNewDocument", { source: `window.__statuses = []; new MutationObserver((ms) => { for (const m of ms) if (m.target.id === "status" || m.target.parentElement?.id === "status") for (const n of m.addedNodes) window.__statuses.push(n.textContent); }).observe(document, { childList: true, subtree: true });` });
   await go(base + "?runner=0");
   check((await ev("localStorage.getItem('sagebrush-current')")) === idB, "(reloaded into B; A has no interpreter in this page)");

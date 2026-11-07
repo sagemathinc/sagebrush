@@ -672,8 +672,8 @@ const perms = createPermissions();
 // is the sandboxed runner, or none, astra's no-mutation CLEAR; every run then says why, as a runner given up does)
 const NEEDS_RUNNER = window.__TAURI__
   // (the app has no sandbox: a notebook that may not change files can't run in it at all, @sagebrush's ruling)
-  ? "This notebook can't run in the app while it may not change files: the app has no sandbox to run it in. Allow file changes (File menu) to run it.\n"
-  : "This notebook can't run here: it may not change your files, so it runs only in Sagebrush's sandbox, which didn't start in this browser. Allow changes for this notebook (File > Permissions…) to run it in this page's own interpreter.\n";
+  ? "This notebook can't run in the app while it isn't allowed to change files: the app has no sandbox to run it in. Allow file changes (File > Permissions…) to run it.\n"
+  : "This notebook can't run here: it isn't allowed to change your files, so it runs only in Sagebrush's sandbox, which didn't start in this browser. Allow changes for this notebook (File > Permissions…) to run it in this page's own interpreter.\n";
 class RefusingWorker {
   constructor(text) { this.text = text; this.onmessage = null; this.onerror = null; }
   postMessage(m) {
@@ -2684,7 +2684,7 @@ function drawFileMenu() {
       { after: "upload", key: "openfile", label: "Open file…", hidden: true },
       { after: "saveCopy", key: "saveas", label: "Save as…", hidden: true },
       // (whether this notebook's code may change the person's files: no-mutation's one switch, a document's setting)
-      { after: "share", key: "perms", label: "Permissions…", title: "What this notebook's code may do: change your files (a notebook from elsewhere may not, until you allow it)" },
+      { after: "share", key: "perms", label: "Permissions…", title: "What this notebook's code may do: change your files (no notebook may until you allow it)" },
     ],
     recent: ws ? async () => (await recentOpened(ws, current.kind === "browser" ? { kind: "notebook", ref: current.id } : undefined)).map((e) => ({ label: recentLabel(e), title: e.path, open: () => openEntry(e) })) : undefined,
     chosen: () => toggleFileMenu(false),
@@ -3518,6 +3518,12 @@ async function selftest(path) {
     try { st = await bounded(import(new URL("sagebrush-selftest.js", location.href).href), 15000); infoLines = await st.diagnoseLines(kernel); } catch (e) { console.log("diagnose import: " + e); }
     await openDiskFile(path);
     check("opened the notebook from disk", current.id === "file:" + path && cells().length > 0, statusEl.textContent);
+    // (every notebook starts with file changes off (confinement 1b), and the app has no sandbox, so it runs none that
+    // isn't allowed: the app's own self-test allows its notebook, as the person's click would, and waits for the
+    // page's own interpreter. No check line of its own: the judges' list of checks is closed, and if this fails, "ran
+    // it" fails with the refusal in its output.)
+    perms.set(current.id, "files", true);
+    await until(() => kernel.ready && !((kernel.worker?.inner ?? kernel.worker) instanceof RefusingWorker), 60000);
     await nb.runAll();
     await until(() => !cells().some((c) => /\*/.test(c.n.textContent)), 120000);
     const out = cells().map((c) => c.out.textContent).join("\n");

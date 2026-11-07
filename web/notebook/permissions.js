@@ -113,26 +113,14 @@ export function createPermissions() {
     for (const [d] of left.slice(0, Math.max(0, left.length - GRANT_CAPS.docsKept))) delete r.docs[d];
   };
   // (a change to the stored record, written at once: false if it couldn't be, and then nothing stored changed)
-  const commit = (doc, change) => {
-    const r = stored(), e = (r.docs[doc] ??= {});
-    if (!change(e, r)) { if (empty(e)) delete r.docs[doc]; return true; } // (nothing stored changed)
-    e.t = ++r.seq;
-    trim(r);
-    return write(GRANTS, r);
-  };
   // (phase 1b, @sagebrush's ruling A: the old switch's explicit choices, read ONCE and moved into the scoped record,
   // then the old key retired: an allow becomes a stored write grant of "/", a "don't allow" a stored write denial of
   // "/"; an entry that isn't one of those moves nothing. The record's `migrated` mark keeps a later load (or an old
-  // tab writing the old key again) from reading it twice. If the record can't be written, the old choices hold in
-  // this page only and the next load tries again.)
-  const migrate = () => {
-    const raw = read(GRANTS, null);
-    if (raw && raw.v !== 1) return; // (a record of another version: not this code's to rewrite)
-    const r = stored();
-    if (r.migrated === 1) return;
-    let old = null;
-    try { old = JSON.parse(localStorage.getItem(KEY) ?? "null"); } catch {}
-    const choices = old && typeof old === "object" && !Array.isArray(old) ? Object.entries(old).filter(([d, v]) => d && v && typeof v === "object" && typeof v.files === "boolean") : [];
+  // tab writing the old key again) from reading it twice. If the record can't be written, the old choices are
+  // `pending`: they hold in this page, and the next write of the record carries them first, with the mark, so a choice
+  // the person makes meanwhile is applied after them and wins (astra's MIG-RETRY-1).)
+  let pending = null;
+  const applyOld = (r, choices) => {
     for (const [d, v] of choices) {
       const e = (r.docs[d] ??= {});
       e.write = (e.write ?? []).filter((x) => x !== "/");
@@ -142,9 +130,42 @@ export function createPermissions() {
       e.t = ++r.seq;
     }
     r.migrated = 1;
+  };
+  // (the old choices now in the stored record: the old key retired, and what this page held for them let go)
+  const settled = () => {
+    try { localStorage.removeItem(KEY); } catch {}
+    for (const [d] of pending ?? []) if (unkept.get(d)?.old) unkept.delete(d);
+    pending = null;
+  };
+  // (a change to the stored record, written at once: false if it couldn't be, and then nothing stored changed)
+  const commit = (doc, change) => {
+    const r = stored();
+    if (pending && r.migrated !== 1) applyOld(r, pending); // (the pending old choices first: this change is newer)
+    const e = (r.docs[doc] ??= {});
+    if (!change(e, r)) { if (empty(e)) delete r.docs[doc]; return true; } // (nothing stored changed)
+    e.t = ++r.seq;
     trim(r);
-    if (write(GRANTS, r)) { try { localStorage.removeItem(KEY); } catch {} return; }
-    for (const [d, v] of choices) unkept.set(d, { files: v.files });
+    const ok = write(GRANTS, r);
+    if (ok && pending) settled();
+    return ok;
+  };
+  const migrate = () => {
+    const raw = read(GRANTS, null);
+    if (raw && raw.v !== 1) return; // (a record of another version: not this code's to rewrite)
+    const r = stored();
+    if (r.migrated === 1) return;
+    let old = null;
+    try { old = JSON.parse(localStorage.getItem(KEY) ?? "null"); } catch {}
+    const choices = old && typeof old === "object" && !Array.isArray(old) ? Object.entries(old).filter(([d, v]) => d && v && typeof v === "object" && typeof v.files === "boolean") : [];
+    applyOld(r, choices);
+    trim(r);
+    pending = choices;
+    if (write(GRANTS, r)) { settled(); return; }
+    // (held in this page meanwhile, bounded as the record is: every "don't allow", and only the newest docsKept
+    // allows (an older allow left out is only off, never more) (astra's MIG-BOUND-2))
+    const allows = choices.filter(([, v]) => v.files);
+    const keep = new Set(allows.slice(Math.max(0, allows.length - GRANT_CAPS.docsKept)).map(([d]) => d));
+    for (const [d, v] of choices) if (!v.files || keep.has(d)) unkept.set(d, { files: v.files, old: true });
   };
   migrate();
   const api = {
