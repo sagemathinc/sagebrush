@@ -12,6 +12,7 @@
   "sage_plot": 42,
   "sage_plot3d": 50,
   "_sage_ff": 155,
+  "_sage_ff_inexact": 1,
   "_sage_ffmat": 93,
   "_sage_qqbar": 32,
   "_sage_mpoly": 127,
