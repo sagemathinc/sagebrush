@@ -1,9 +1,10 @@
 // The user-content domain: shared files by hash (web/share/files.ts), from
 // the share API's R2 bucket, never from sagebrush.space itself.
-// `--mode dev` serves the dev bucket on files.cocalcusercontent.dev, and
+// `--mode dev` serves the dev bucket on its configured files host, and
 // sync's files there too: a device's signed URLs (/p/, web/sync/server.ts
 // handleSyncFiles), from its own entry, src/dev.ts.  Production's entry
 // doesn't import sync.
+import { filesHosts } from "../content-domains.mts";
 import { bindings, defineConfig } from "cf/config";
 import * as entrypoint from "./src/index.ts" with { type: "cf-worker" };
 import * as devEntrypoint from "./src/dev.ts" with { type: "cf-worker" };
@@ -16,7 +17,7 @@ export default defineConfig({
       compatibilityDate: "2026-10-01",
       // (the dev entry is the production one with sync on: ./src/dev.ts)
       entrypoint: dev ? devEntrypoint : entrypoint,
-      domains: [dev ? "files.cocalcusercontent.dev" : "files.cocalcusercontent.com"],
+      domains: filesHosts(dev ? "dev" : "prod"),
       env: {
         SHARE_BUCKET: bindings.r2({ name: dev ? "sagebrush-share-dev" : "sagebrush-share" }),
         // (which files each collection may serve)
