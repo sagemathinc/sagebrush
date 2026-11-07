@@ -49,8 +49,17 @@ for (const [file, want] of [["designated_errors.jsonl", '{"error"'], ["designate
   };
   const full = run(inst());
   const total = polls;
-  const ok = full.reply?.startsWith('{"ok":[[2,') && total > 100;
-  if (!ok) { fail++; console.log(`FAIL aplist(2e6) without a Stop: ${total} host polls, ${(full.reply ?? full.trap).slice(0, 80)}`); }
+  // Exact, and deterministic (one thread). It derives from n = 2e6 and SIEVE_BLOCK = 2^16 (engine/ap
+  // primes_up_to, aplist), so a deliberate retune updates both together:
+  //   the sieve's check_coarse calls, each a host poll: 2 (before and after the allocation)
+  //     + one per SIEVE_BLOCK-stride block of each marking pass: 222 odd primes up to 1414, 1 block each,
+  //       and 5 + 3 + 2 + 1 + 1 more for q = 3, 5, 7, 11, 13 = 234
+  //     + one per SIEVE_BLOCK indices of the collection: ceil(999999 / 65536) = 16           = 252;
+  //   aplist's per-prime check polls on every 1024th call, the first included:
+  //     ceil(148933 primes / 1024)                                                           = 146;
+  //   398 in all.  A dropped or thinned check changes it.
+  const ok = full.reply?.startsWith('{"ok":[[2,') && total === 398;
+  if (!ok) { fail++; console.log(`FAIL aplist(2e6) without a Stop: ${total} host polls (398 expected), ${(full.reply ?? full.trap).slice(0, 80)}`); }
   for (const [label, at] of [["in the sieve", 1], ["in the a_p loop", total - 2]]) {
     polls = 0; stopAt = at;
     const r = run(inst());

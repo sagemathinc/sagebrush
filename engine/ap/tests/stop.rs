@@ -79,7 +79,12 @@ fn ap_kernels_stop_everywhere_and_change_nothing_otherwise() {
     let (v, counts, gap, poll) = traced(&["ap.sieve", "ap.aplist"], || aplist(&e, 20_000_000));
     assert_eq!(digest(&v), (1270607, -851781, 4957559860084813400), "aplist(2e7) unchanged");
     eprintln!("aplist(2e7): sieve {} checks, aplist {} checks; longest gap {gap:.2} ms, poll gap {poll:.2} ms", counts[0], counts[1]);
-    assert!(counts[0] >= 100, "the sieve checks throughout");
+    // Exact, and deterministic (the sieve runs on one thread): from n and
+    // SIEVE_BLOCK = 2^16 alone, as engine/web/tests/wasm_designated.mjs derives
+    // its 2e6 count: 2 around the allocation, one per block of each marking pass,
+    // and ceil(half / 2^16) for the collection.  A dropped or thinned check
+    // changes it; a deliberate retune updates it.
+    assert_eq!(counts[0], 957, "the sieve's checks for n = 2e7");
     assert_eq!(counts[1], 1270607, "one check per prime");
     // (wall time, generous for a loaded CI runner: without the checks the whole
     // call, about 0.2 s natively here, went unchecked)
@@ -95,6 +100,7 @@ fn ap_kernels_stop_everywhere_and_change_nothing_otherwise() {
     // early in moments' sieve and one in its loop.
     let (_, counts, gap, poll) = traced(&["ap.sieve"], || primes_up_to(200_000_000));
     eprintln!("primes_up_to(2e8): {} checks; longest gap {gap:.2} ms, poll gap {poll:.2} ms", counts[0]);
+    assert_eq!(counts[0], 5763, "the sieve's checks for n = 2e8 (derived as for 2e7)");
     assert!(gap < 50.0 && poll < 100.0, "sieve(2e8): gap {gap:.2} ms, poll gap {poll:.2} ms");
     let (stopped, at) = stop_at(counts[0] as u64 / 2, || moments(&e, 200_000_000, 4));
     assert!(stopped && at == "ap.sieve", "moments(2e8) stopped in its sieve ({at})");
