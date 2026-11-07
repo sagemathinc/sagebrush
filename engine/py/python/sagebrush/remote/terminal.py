@@ -1,16 +1,18 @@
-"""Terminals on a runner (terminal addendum T1.4, build step T-1): the sessions, their PTYs and lifecycle, and the
-attachment contract (T5).  The output path to the page (credit, coalescing, chunked input: T3) is T-1b, after
-William's answer on the copy list (terminals-T0-copy-list-r1.md); until then `in` and `ack` are refused as not yet
-served, and the runner's hello doesn't list the `terminal` channel (relay.py serves terminal pages only when asked).
+"""Terminals on a runner (terminal addendum T1.4, build steps T-1 and T-1b): the sessions, their PTYs and lifecycle,
+the attachment contract (T5), and each attachment's output and input paths (T3: credit, coalescing, replay, chunked
+input; terminal_output.py).  The runner's hello doesn't list the `terminal` channel yet (relay.py serves terminal
+pages only when asked) until the page's terminal (T-3) lands.
 
 A terminal page (channel `terminal`, its own generation on the peer leg) pairs with a hello like a kernel page's,
 purpose "terminal": its DPoP key, no code.  Then, on that page:
 
   page -> runner   {"t":"open","body":B,"auth":"DPoP <token>","dpop":P}   B: {"rows":r,"cols":c} (a new session) or
                                                                          {"session":id,"rows":r,"cols":c} (reattach)
-                   {"t":"resize","rows":r,"cols":c}    {"t":"kill","session":id}    ({"t":"in"|"ack",...}: T-1b)
-  runner -> page   {"t":"opened","session":id,"nonce":n}   {"t":"exit","code":n|null,"signal":s|null}
-                   {"t":"error","error":e}
+                   {"t":"resize","rows":r,"cols":c}    {"t":"kill","session":id}
+                   {"t":"in","b":"<base64>"}    {"t":"ack","upto":n}
+  runner -> page   {"t":"opened","session":id,"nonce":n}   {"t":"replay"}  {"t":"out","b":"<base64>"}...  {"t":"live"}
+                   {"t":"out","b":"<base64>"}   {"t":"inack","upto":n}
+                   {"t":"exit","code":n|null,"signal":s|null}   {"t":"error","error":e}
 
 The proof (T5): P is a DPoP proof (RFC 9449, dpop.check, as a kernel request's) by the page's key over method POST
 and the URL SYNTHETIC_BASE + "/terminal/open?remote=<remote_id>&gen=<page generation>&body=<b64url sha256 of B's
@@ -26,8 +28,8 @@ page-close, a revoke and the leg's loss end it before any later effect; a late m
 nothing.  Every reattach and every new leg needs a fresh proof.
 
 Sessions (T4): at most 4 running; a PTY with the user's $SHELL (else /bin/sh) as a login shell, in a new session,
-TERM=xterm-256color, the runner's cwd and environment; output read into a 1 MiB ring at most 1 MiB/s (whether a page
-is attached or not, until T-1b's credit); ended sessions' rings kept 10 minutes, the last 8, by an expiry timer of
+TERM=xterm-256color, the runner's cwd and environment; output read into a 1 MiB ring at most 1 MiB/s, and while a page
+is attached only within its credit (terminal_output.py); ended sessions' rings kept 10 minutes, the last 8, by an expiry timer of
 their own (and checked again at a reattach), their ring and any grant released when they go; a detached session with
 no output and no attach for 24 h stopped.  Stopping (kill, exit's leftovers, the runner ending) is the tree rule over
 every process group in the PTY's session: SIGHUP, SIGTERM, then SIGKILL 2 s later, with the session counted again
@@ -52,6 +54,7 @@ import urllib.parse
 
 from sagebrush.remote import dpop
 from sagebrush.remote.gateway import SYNTHETIC_BASE, _kill_tree
+from sagebrush.remote.terminal_output import Attachment, IN_MAX, OUT_MAX, canonical_b64
 
 TERMINAL_LIMITS = {
     "sessions": 4,              # running sessions on this runner
@@ -61,13 +64,14 @@ TERMINAL_LIMITS = {
     "endedMs": 10 * 60_000,     # ... for this long
     "idleMs": 24 * 3600_000,    # a detached session with no output and no attach this long is stopped
     "rate": 1024 * 1024,        # output bytes read per second, at most
-    "read": 49_137,             # one PTY read, at most (T12-CAP-1: the decoded bytes one output frame holds)
+    "read": OUT_MAX,            # one PTY read, at most (T12-CAP-1: the decoded bytes one output frame holds)
     "size": (1, 1000),          # rows and cols
     "killMs": 2000,             # the tree rule's SIGTERM -> SIGKILL (gateway._kill_tree)
     "sweepMs": 50,              # a stopping session's census, again, until its PTY session is empty
     "sweepCapMs": 30_000,       # ... the PTY closed by then regardless; the census goes on every second
     "body": 256,                # an open's body, bytes
-    "message": 8 * 1024,        # any message to the runner but `in` (T-1b), bytes
+    "message": 8 * 1024,        # any message to the runner but `in`, bytes
+    "in": IN_MAX,               # one input frame's decoded bytes
 }
 OPEN_PATH = "/terminal/open"
 _SID_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
@@ -147,12 +151,13 @@ class Ring:
 class Grant:
     """One attachment's authority (T5): its leg, page generation, page key and session."""
 
-    __slots__ = ("incarnation", "leg", "gen", "jkt", "session", "page", "live")
+    __slots__ = ("incarnation", "leg", "gen", "jkt", "session", "page", "live", "att")
 
     def __init__(self, incarnation, page, session):
         self.incarnation, self.gen, self.jkt, self.session = incarnation, page.gen, page.jkt, session
         self.leg = page.leg  # (the peer leg it was made on: meaningless on any other)
         self.page, self.live = page, True
+        self.att = None  # (its output and input paths: terminal_output.Attachment)
 
     def holds(self, page, incarnation, leg):
         return (self.live and self.page is page and self.incarnation == incarnation and self.leg is leg
@@ -172,6 +177,7 @@ class Session:
         self.ended_at = None
         self.last_activity = host.timers.now()
         self.reading = False
+        self.writing = False
         self.rate_at, self.rate_bytes, self.rate_timer = 0, 0, None
         self.pidfd = None
         self.poll_timer = None
@@ -213,7 +219,51 @@ class Session:
         if self.master is not None and self.exit is None:
             self._winsize(self.master, rows, cols)  # (the kernel signals SIGWINCH to the foreground group)
 
-    # ---- output into the ring, at most TERMINAL_LIMITS["rate"] bytes a second (T3's ceiling; T-1b adds credit)
+    # ---- output into the ring, at most TERMINAL_LIMITS["rate"] bytes a second, and to an attached page within its
+    # credit (T3): no credit, no read, so the PTY fills and the program blocks in write()
+    def _att(self):
+        g = self.grant
+        return g.att if g is not None and g.live and g.att is not None else None
+
+    def reading_changed(self):
+        """Read again if nothing holds the reads back: the rate ceiling's pause, or an attached page's credit."""
+        if self.master is None or self.rate_timer is not None:
+            return
+        a = self._att()
+        if a is None or a.room() > 0:
+            self._read_on()
+        else:
+            self._read_off()
+
+    def writing_changed(self):
+        a = self._att()
+        want = a is not None and bool(a.inq) and self.master is not None
+        if want and not self.writing:
+            self.host.loop.add_writer(self.master, self._writable)
+            self.writing = True
+        elif not want and self.writing:
+            self._write_off()
+
+    def _write_off(self):
+        if self.writing:
+            self.host.loop.remove_writer(self.master)
+            self.writing = False
+
+    def _writable(self):
+        a = self._att()
+        if a is None or not a.writable():
+            self._write_off()
+
+    def write_pty(self, b):
+        """Input to the PTY master, non-blocking: how many bytes it took, or None for none now.  After the shell's end
+        (EIO) the bytes are dropped, as a terminal's would be."""
+        try:
+            return os.write(self.master, b)
+        except BlockingIOError:
+            return None
+        except OSError:
+            return len(b)
+
     def _read_on(self):
         if not self.reading and self.master is not None:
             self.host.loop.add_reader(self.master, self._readable)
@@ -231,6 +281,11 @@ class Session:
         room = TERMINAL_LIMITS["rate"] - self.rate_bytes
         if room <= 0:
             return self._pause_until(self.rate_at + 1000 - now)
+        a = self._att()
+        if a is not None:
+            room = min(room, a.room())  # (credit reserved before the read)
+            if room <= 0:
+                return self._read_off()  # (an ack or a flush reads again: reading_changed)
         try:
             b = os.read(self.master, min(TERMINAL_LIMITS["read"], room))
         except BlockingIOError:
@@ -244,6 +299,8 @@ class Session:
             self.ring.append(b)
         self.last_activity = now
         self.host.stats["outBytes"] += len(b)
+        if a is not None:
+            a.feed(b)
 
     def _pause_until(self, ms):
         self._read_off()
@@ -251,8 +308,7 @@ class Session:
 
         def resume():
             self.rate_timer = None
-            if self.exit is None:
-                self._read_on()
+            self.reading_changed()
         self.rate_timer = self.host.timers.set_timeout(resume, max(ms, 1))
 
     # ---- exit
@@ -318,6 +374,7 @@ class Session:
 
     def _release(self):
         self._read_off()
+        self._write_off()
         self.host.timers.clear_timeout(self.rate_timer)
         self.rate_timer = None
         if self.master is not None:
@@ -455,8 +512,19 @@ class Terminals:
             if s.exit is None:
                 s.stop()
             return None
-        if t in ("in", "ack"):
-            return self._error(p, "not_yet")  # (T-1b: the output path, after the copy list's answer)
+        if t == "ack":
+            if set(msg) != {"t", "upto"} or g.att is None or not g.att.ack(msg["upto"]):
+                return p.close(1008, "a bad ack")  # (going back, past what was sent, or malformed: no credit change)
+            return None
+        if t == "in":
+            b = canonical_b64(msg.get("b"), TERMINAL_LIMITS["in"]) if set(msg) == {"t", "b"} else None
+            if b is None:
+                return p.close(1008, "a malformed or oversized input frame")
+            if s.exit is not None:
+                return None  # (the shell has ended: input goes nowhere, as on a terminal)
+            if not g.att.input(b):
+                return p.close(1008, "input past its credit")
+            return None
         return p.close(1002, "not a terminal message")
 
     def open(self, p, msg):
@@ -506,12 +574,15 @@ class Terminals:
                 self._error(old, "elsewhere")
                 old.close(4009, "the session was opened elsewhere")
             s.resize(b["rows"], b["cols"])
-        s.grant = p.grant = Grant(runner.incarnation, p, s)
+        g = s.grant = p.grant = Grant(runner.incarnation, p, s)
+        g.att = Attachment(s, p, s.write_pty)
         s.last_activity = self.timers.now()
         self.stats["opens"] += 1
         p.send({"t": "opened", "session": s.id, "nonce": runner.gateway.current_nonce()})
-        if s.exit is not None:
-            p.send({"t": "exit", "code": s.exit["code"], "signal": s.exit["signal"]})
+        # (every attach replays: a reset, the ring, then live output; an ended session's exit comes after its replay)
+        g.att.exit_after_replay = s.exit is not None
+        g.att.start_replay(s.ring.replay() if s.ring is not None else b"")
+        s.reading_changed()
         self._arm_idle()
         return None
 
@@ -524,9 +595,13 @@ class Terminals:
     def _end_grant(self, g):
         g.live = False
         g.page.grant = None
+        if g.att is not None:
+            g.att.end()  # (its buffered and replay bytes dropped: they are in the ring for the next attach)
         if g.session.grant is g:
             g.session.grant = None
             g.session.last_activity = self.timers.now()
+            g.session.writing_changed()
+            g.session.reading_changed()  # (detached: read into the ring at the rate ceiling only)
 
     def _refuse(self, p, reason):
         self.stats["refused"] += 1
@@ -542,8 +617,13 @@ class Terminals:
         s.ended_at = self.timers.now()
         self.ended_.append(s)
         self._prune_ended()
-        if s.grant is not None and s.grant.live and not s.grant.page.closed:
-            s.grant.page.send({"t": "exit", "code": s.exit["code"], "signal": s.exit["signal"]})
+        g = s.grant
+        if g is not None and g.live and not g.page.closed and g.att is not None:
+            if g.att.replaying:
+                g.att.exit_after_replay = True
+            else:
+                g.att.flush_now()  # (what was read before the exit, then the exit)
+                g.att.send_exit()
 
     def _prune_ended(self):
         """Ended sessions past endedMs, or beyond the last `ended`, are gone: out of the list, their grant ended (so
