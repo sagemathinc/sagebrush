@@ -394,13 +394,17 @@ try {
   ok(evx.max <= 3 && evx.live <= 3 && evx.ports <= 3, "never more live frames than the cap (3), ports alike: " + JSON.stringify([evx.max, evx.live, evx.ports]));
   ok(evx.committed === 12, "every area committed as it was scrolled to: " + evx.committed);
   ok(evx.holders.length >= 9 && evx.holders.every((h) => h !== "120px"), "evicted areas are placeholders holding their committed heights: " + evx.holders.slice(0, 4).join(","));
-  // (the anchor: an area's position before and after a full eviction cycle with nothing changed)
-  const anchor = async () => ev(`(() => { sc.scrollTop = 6 * 340; return EA[6] && document.querySelectorAll("#scroller .area")[6].getBoundingClientRect().top; })()`);
-  const before = await anchor(); await sleep(400);
+  // (the anchor: an area's position in the scroller, before and after a full eviction cycle with nothing changed;
+  // measured against the scroller itself, so nothing above it on the page, still settling, moves it)
+  const at6 = `(document.querySelectorAll("#scroller .area")[6].getBoundingClientRect().top - sc.getBoundingClientRect().top)`;
+  const anchor = async () => ev(`(() => { sc.scrollTop = 6 * 340; return EA[6] && ${at6}; })()`);
+  const top0 = await ev("sc.getBoundingClientRect().top");
+  const sizes = `[...document.querySelectorAll("#scroller .area")].slice(0, 7).map((b) => Math.round(b.getBoundingClientRect().height)).join(",")`;
+  const before = await anchor(), sizes0 = await ev(sizes); await sleep(400);
   for (let y = 0; y <= 12 * 340; y += 680) { await ev(`(sc.scrollTop = ${y}, 1)`); await sleep(150); }
-  const after = await anchor(); await sleep(400);
-  const after2 = await ev(`document.querySelectorAll("#scroller .area")[6].getBoundingClientRect().top`);
-  ok(Math.abs(after2 - before) <= 1, `after eviction cycles the anchor moved at most a pixel: ${before} -> ${after2}`);
+  await anchor(); await sleep(400);
+  const after2 = await ev(at6), top1 = await ev("sc.getBoundingClientRect().top"), sizes1 = await ev(sizes);
+  ok(Math.abs(after2 - before) <= 1, `after eviction cycles the anchor moved at most a pixel in its scroller: ${before} -> ${after2} (the page above it moved ${Math.round(top1 - top0)} px; the areas above it ${sizes0} -> ${sizes1})`);
 
   // ---- 50 and 200 areas: the figures for the cap (printed; the cap's frozen value comes from these)
   for (const count of [50, 200]) {
