@@ -3935,7 +3935,7 @@ def symbolic_sum(f, v, a, b, algorithm=None, hold=False):
         NotImplementedError: the sum of an alternating series with a polynomial part is not available in sagebrush yet
 
     So is an addition whose terms all alternate, with a polynomial part
-    (Sage 10.10: und for both)::
+    (Sage 10.10 answers `und`, undefined, for both)::
 
         sage: symbolic_sum((-1)^k*k + (-1)^k/k, k, 1, oo)  # sagebrush only
         Traceback (most recent call last):
@@ -3946,8 +3946,9 @@ def symbolic_sum(f, v, a, b, algorithm=None, hold=False):
         ...
         NotImplementedError: the sum of an alternating series with a polynomial part is not available in sagebrush yet
 
-    An alternating constant diverges, however written; terms that don't all
-    alternate are not refused::
+    An alternating constant diverges, however it is written; an addition
+    whose terms don't all alternate is summed as usual (divergent here, or
+    left unevaluated)::
 
         sage: symbolic_sum((-1)^k*(k + 1) - (-1)^k*k, k, 1, oo)
         Traceback (most recent call last):
