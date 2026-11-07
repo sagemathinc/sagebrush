@@ -286,7 +286,7 @@ test("the full tier on a pull request: the full-ci label, or a sync, sharing, se
     "web/latex/page.ts", "web/latex/engine/render.mjs", "web/latex/core/machine.mjs", "web/workspace/paths.ts", "scripts/latex-group.mjs",
     // (the lazy chunks' inputs outside web/latex: the agent pairing's modules)
     "web/workspace/agent-ui.ts", "web/workspace/agent-pair.ts", "web/workspace/verbs.ts", "web/workspace/notebook-edit.ts",
-    "web/workspace/pair-link.ts", "web/workspace/agent-grant.ts", "web/workspace/agent-schema.ts",
+    "web/workspace/pair-link.ts", "web/workspace/agent-grant.ts", "web/workspace/agent-schema.ts", "src/modes.ts",
     // (what makes those bundles: the build and its helpers, and the dependencies)
     "web/build.ts", "web/build-articles.ts", "web/build-package-dir.mjs", "package.json", "pnpm-lock.yaml",
     // (the Miniflare dispatch helper: its consumers run only in web-sync.1 and web-sync.2)

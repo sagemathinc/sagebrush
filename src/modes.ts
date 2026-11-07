@@ -45,8 +45,8 @@ export function modeOfFlags(m: { sage?: unknown; magma?: unknown; matlab?: unkno
   return m.sage ? "sage" : m.magma ? "magma" : m.matlab ? "matlab" : null;
 }
 
-/** The modes whose code is translated to Python (src/magma.ts, src/matlab.ts): no IPython syntax, magics or
- * Python-level renames and analysis of the source as written. */
+/** The modes whose code is translated to Python (src/magma.ts, src/matlab.ts). Their source has no IPython syntax
+ * or magics, and Python-level renames and analysis do not apply to it as written. */
 export const TRANSLATED_MODES = ["magma", "matlab"] as const;
 export type TranslatedMode = (typeof TRANSLATED_MODES)[number];
 
