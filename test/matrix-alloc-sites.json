@@ -180,7 +180,6 @@
  "lib/_sage_ffmat.py: FFVector._dot :: loop :: zip(self._e, o)": 1,
  "lib/_sage_ffmat.py: FFVector._inexact_meet :: call :: min(pb, pp)": 1,
  "lib/_sage_ffmat.py: FFVector._inexact_meet :: comprehension :: self._e": 1,
- "lib/_sage_ffmat.py: FFVector._inexact_meet :: loop :: (B, P)": 1,
  "lib/_sage_ffmat.py: FFVector._latex_ :: call :: \", \".join(repr(x) for x in self._e)": 1,
  "lib/_sage_ffmat.py: FFVector._latex_ :: comprehension :: self._e": 1,
  "lib/_sage_ffmat.py: FFVector.hamming_weight :: call :: sum(1 for a in self._e if a)": 1,

@@ -896,6 +896,27 @@ def _real_field(R):
     return _sa().RealField(k[2])
 
 
+def _inexact_kind(F):
+    """(complex, double, precision) of RDF, CDF, RR, CC, RealField(p) or
+    ComplexField(p), by identity and class, never by its name; None for
+    any other parent.
+
+    """
+    S = _sa()
+    if F is S.RDF:
+        return (False, True, 53)
+    if F is S.CDF:
+        return (True, True, 53)
+    import _sage_lang
+    import _sage_matrix
+    import _sage_real
+    if isinstance(F, (_sage_lang._RealField, _sage_real.RealField_)):
+        return (False, False, int(F.prec()))
+    if isinstance(F, (_sage_matrix.ComplexField_, _sage_real.ComplexField_)):
+        return (True, False, int(F.prec()))
+    return None
+
+
 class FFVector:
     """A vector over a finite field.
 
@@ -903,6 +924,19 @@ class FFVector:
 
         sage: v = vector(GF(5), [1, 2, 3]); v, 2*v, v*v
         ((1, 2, 3), (2, 4, 1), 4)
+
+    A vector over a real or complex field meets a number of another such
+    field in the field _inexact_meet gives; the fields are known by
+    identity and class (_inexact_kind), never by their names::
+
+        sage: import _sage_ffmat
+        sage: [_sage_ffmat._inexact_kind(F) for F in (RDF, CDF, RR, CC, RealField(20), ComplexField(100))]  # sagebrush only
+        [(False, True, 53), (True, True, 53), (False, False, 53), (True, False, 53), (False, False, 20), (True, False, 100)]
+        sage: class Named:  # sagebrush only: a parent named like a real field is not one
+        ....:     def __repr__(self): return "Real Field with 53 bits of precision"
+        ....:     def prec(self): return 53
+        sage: _sage_ffmat._inexact_kind(Named()), _sage_ffmat._inexact_kind(QQ), _sage_ffmat._inexact_kind(RealIntervalField(53))  # sagebrush only
+        (None, None, None)
     """
 
     __slots__ = ("_base", "_e", "_space")
@@ -1043,13 +1077,10 @@ class FFVector:
         when either field is not one of these, or K is self's field and o
         already in it."""
         P, B = _sa().parent(o), self._base
-        kinds = []
-        for F in (B, P):
-            r = repr(F)
-            if not (r.startswith("Real") or r.startswith("Complex")) or not ("Double" in r or "bits of precision" in r):
-                return None
-            kinds.append(("Complex" in r, "Double" in r, 53 if "Double" in r else int(F.prec())))
-        (cb, db, pb), (cp, dp, pp) = kinds
+        kb, kp = _inexact_kind(B), _inexact_kind(P)
+        if kb is None or kp is None:
+            return None
+        (cb, db, pb), (cp, dp, pp) = kb, kp
         if pp >= pb and (cb or not cp):
             K = B
         else:
