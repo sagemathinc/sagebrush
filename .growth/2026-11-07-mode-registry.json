@@ -1,8 +1,8 @@
 {
  "v": 1,
- "reason": "Mode registry (design/rill.md 5.1, no behaviour change), measured with bun 1.4.4 (size-gate script, CI build order) on the probe merge of the head onto master 242a41be. src/modes.ts is plain data and three flag helpers: the mode names and each consumer's subset (document, flag, translated, CLI prompt and kernel modes), plus KERNEL_SPECS moved verbatim from src/kernel.ts. cli/pyjs.cjs +768: the module's arrays and helpers, minus the inline copies they replace in kernel, reactive-session, rename, dataflow, board-run, local-gateway and notebook-session, and the embedded web build (index.html, the gzipped board frame, the export and analyze bundles). engine/sagebrush-notebook.js +61: isModeName and MODE_NAMES for the notebook's setMode, in place of its array literal. engine/sagebrush-worker.js -13 and engine/sagebrush-analyze.js -21 shrink; no lazy group or lib bundle changes.",
+ "reason": "Mode registry (design/rill.md 5.1, no behaviour change), measured with bun 1.4.4 (size-gate script, CI build order) on the probe merge of the head onto master 242a41be. src/modes.ts is plain data and three flag helpers: the mode names and each consumer's subset (document, flag, translated, CLI prompt and kernel modes), plus KERNEL_SPECS moved verbatim from src/kernel.ts. cli/pyjs.cjs +517: the module's arrays and helpers, minus the inline copies they replace in kernel, reactive-session, rename, dataflow, board-run, local-gateway and notebook-session, and the embedded web build (index.html, the gzipped board frame, the analyze bundle); web/board/ keeps its own lists (the board package compiles web/ alone). engine/sagebrush-notebook.js +61: isModeName and MODE_NAMES for the notebook's setMode, in place of its array literal. engine/sagebrush-worker.js -13 and engine/sagebrush-analyze.js -21 shrink; no lazy group or lib bundle changes.",
  "bytes": {
-  "cli/pyjs.cjs": 768,
+  "cli/pyjs.cjs": 517,
   "engine/sagebrush-notebook.js": 61
  }
 }
