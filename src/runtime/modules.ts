@@ -72,7 +72,7 @@ function fn(m: any, name: string, f: any) {
 // are the runtime's own, called only by its Python-written modules.
 export const ARITY: Record<string, Record<string, [number, number]>> = {
   // (os's functions are written (...a) to pass their errors through oserr)
-  os: { getcwd: [0, 0], chdir: [1, 1], listdir: [0, 1], mkdir: [1, 2], makedirs: [1, 3], remove: [1, 1], unlink: [1, 1], rmdir: [1, 1], rename: [2, 2], replace: [2, 2], stat: [1, 1], lstat: [1, 1] },
+  os: { getcwd: [0, 0], chdir: [1, 1], listdir: [0, 1], mkdir: [1, 2], makedirs: [1, 3], remove: [1, 1], unlink: [1, 1], rmdir: [1, 1], rename: [2, 2], replace: [2, 2], stat: [1, 1], lstat: [1, 1], open: [2, 3], chmod: [2, 2], utime: [1, 2] },
   sys: { audit: [1, Infinity], getsizeof: [1, 2] },
   gc: { set_threshold: [1, 3] },
 };
