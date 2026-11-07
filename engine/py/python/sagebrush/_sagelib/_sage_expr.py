@@ -488,7 +488,7 @@ class Expression:
         EXAMPLES::
 
             sage: (x^2).operator(), (x + 1).operator()  # sagebrush only
-            (<function pow at 0x...>, <function add at 0x...>)
+            (<built-in function pow>, <built-in function add>)
         """
         import operator as o
         tag = self._op()[0]
