@@ -19,6 +19,7 @@ import { fileDeps, type CellKind } from "./file-deps";
 import { fromFile } from "../notebook/ipynb.js";
 import { LANG, scanItems } from "../latex/cells";
 import { graphicsPathOf, imageCandidates, texCandidates } from "../latex/images";
+import { isFlagMode } from "../../src/modes";
 
 export type DocKind = "ipynb" | "py" | "sage" | "m" | "mag" | "tex" | "md";
 export type Via = "import" | "open" | "named" | "link" | "input" | "include" | "bibliography" | "graphic";
@@ -145,7 +146,7 @@ export async function dependencies(path: string, text: string, kind: DocKind, ct
     } catch {
       return { deps, unfollowed: [{ at: baseOf(path), line: 0, why: "couldn't be read as a notebook" }], complete: false };
     }
-    const mode: CellKind = doc.mode === "sage" || doc.mode === "magma" || doc.mode === "matlab" ? doc.mode : "python";
+    const mode: CellKind = isFlagMode(doc.mode) ? doc.mode : "python";
     const script = kind !== "ipynb";
     doc.cells.forEach((c, i) => {
       if (c.type === "raw") return;

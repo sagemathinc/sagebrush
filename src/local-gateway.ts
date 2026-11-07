@@ -27,6 +27,7 @@ import type { Conn, PairServer } from "./notebook-pair";
 import { waveEnvelopeInvalid, newWaveState, waveDecide, waveRecord, waveRunResult, waveStop } from "./wave-policy";
 import { requestCtrlC } from "./runtime/interrupt";
 import { sessionLimits } from "./limits";
+import { modeFlag } from "./modes";
 
 const MiB = 1024 * 1024;
 /** The client's request body caps (web/notebook/remote-client.js BODY_MAX), by rpc. */
@@ -621,7 +622,7 @@ export class LocalGateway {
     const id = this.nextWorkerId++;
     run.workerId = id;
     const mode = typeof p.mode === "string" ? p.mode : "python";
-    const msg: any = { id, code, ...(mode === "sage" ? { sage: true } : mode === "magma" ? { magma: true } : mode === "matlab" ? { matlab: true } : {}) };
+    const msg: any = { id, code, ...modeFlag(mode) };
     if (Array.isArray(p.forget) && p.forget.length) msg.forget = [...p.forget];
     if (typeof p.mangle === "string") msg.mangle = p.mangle;
     if (typeof p.seed === "string") msg.seed = p.seed;
@@ -835,7 +836,7 @@ export class LocalGateway {
         this.answer(req, 200, { matches: Array.isArray(m.matches) ? m.matches : [], prefix: typeof m.prefix === "string" ? m.prefix : "" });
       },
     };
-    w.post({ id, complete: code, ...(mode === "sage" ? { sage: true } : mode === "magma" ? { magma: true } : mode === "matlab" ? { matlab: true } : {}) });
+    w.post({ id, complete: code, ...modeFlag(mode) });
   }
 
   // ---- lifecycle
