@@ -18,7 +18,7 @@ import { PAGE_CSS } from "./style";
 import { registerLatexTools, setTarget, clearTarget } from "./agent-tools";
 import { mark } from "./marks";
 import type { Example } from "./examples";
-import { sessionOf, sandboxEngine, runIn, runAndSave, NO_SANDBOX } from "./run-core.mjs";
+import { sessionOf, sandboxEngine, runIn, runAndSave, folderFiles, NO_SANDBOX } from "./run-core.mjs";
 // (the embeddable editor, for the questions site: component.ts)
 export { mountEditor, type LatexEditor } from "./component";
 import { viewOf } from "./component";
@@ -549,6 +549,10 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
         items, ws: host.ws, fid: host.fid, current, signal: run.signal, max: RESULTS_MAX, now: () => performance.now(),
         session: async () => { const k = await session(); if (current()) runBtn.textContent = "Running…"; return k; },
         exec: runIn,
+        // (the .tex's folder, as it is now, given to the session: its code imports a helper beside the .tex and reads
+        //  its data, read-only, as real SageTeX run in the document's folder does; nothing else of the workspace)
+        folder: async () => { const at = await host.ws.pathOfFile(host.fid); return at.ok ? folderFiles(host.ws, at.path) : { msg: "Not run: this file isn't here any more" }; },
+        store: session, serial: session.serial,
       });
       if (r.stale || !current()) return;
       if (r.msg) { say(r.msg); return; }
