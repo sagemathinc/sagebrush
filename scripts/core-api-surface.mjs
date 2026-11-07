@@ -325,9 +325,14 @@ export function merge(recorded, gen, newLevel, changes = []) {
     return w.params;
   };
   // (a removed name or member: a problem, unless a reviewed removal names exactly it and its kind)
+  // (applied, it is recorded in the surface's own "removed" section, {name: {kind, level}}, kept from then on: the
+  // ledger the --check compares core-api-changes.json's removal entries with, exactly; @sagebrush's ruling on #830)
+  out.removed = { ...(recorded?.removed ?? {}) };
   const removed = (where, r) => {
-    if (changes.some((c) => c.new === "(absent)" && c.name === where && c.old === `(${r?.kind})`)) added++;
-    else problems.push(`${where}: removed`);
+    if (changes.some((c) => c.new === "(absent)" && c.name === where && c.old === `(${r?.kind})`)) {
+      added++;
+      out.removed[where] = { kind: r.kind, level: newLevel };
+    } else problems.push(`${where}: removed`);
   };
   const mergeEntry = (where, r, g) => {
     const since = sinceOf(r, newLevel);
@@ -356,9 +361,27 @@ export function merge(recorded, gen, newLevel, changes = []) {
 
 // Everything --check reports, for a recorded surface, the generated one, the
 // reviewed changes and src/pkgset.ts's constants (the CLI's --check is this)
+// (the removals ledger: core-api-changes.json's "(absent)" entries are exactly the surface's recorded removals, each
+// with its old kind, and none of them is in the surface now; a wrong name or kind fails, grader's R1/R2 on #830)
+export function ledgerErrors(recorded, changes) {
+  const errs = [];
+  const rec = recorded?.removed ?? {};
+  const entries = changes.filter((c) => c.new === "(absent)");
+  for (const c of entries) {
+    const r = rec[c.name];
+    if (!r) errs.push(`core-api-changes.json: the removal of ${c.name} is not one the surface recorded (its "removed" section has no ${c.name})`);
+    else if (c.old !== `(${r.kind})`) errs.push(`core-api-changes.json: the removal of ${c.name} says ${c.old}, the surface recorded (${r.kind})`);
+  }
+  for (const [name, r] of Object.entries(rec)) {
+    if (!entries.some((c) => c.name === name)) errs.push(`core-api-surface.json: the recorded removal of ${name} (${r.kind}) has no reviewed core-api-changes.json entry`);
+    if (recordedEntry(recorded, name) !== undefined) errs.push(`core-api-surface.json: ${name} is recorded as removed but is in the surface`);
+  }
+  return errs;
+}
+
 export function checkErrors(recorded, gen, changes, consts, fileBytes) {
   const { problems, added } = merge(recorded, gen, recorded.level + 1, changes);
-  const errs = [...problems, ...staleChanges(recorded, changes)];
+  const errs = [...problems, ...staleChanges(recorded, changes), ...ledgerErrors(recorded, changes)];
   if (added) errs.push(`${added} addition(s) or widening(s) of the Core API are not recorded: run node scripts/core-api-surface.mjs --update and set CORE_API_LEVEL`);
   if (consts.api !== recorded.api || consts.level !== recorded.level) errs.push(`src/pkgset.ts has CORE_API ${consts.api} level ${consts.level}; core-api-surface.json has ${recorded.api} level ${recorded.level}`);
   if (fileBytes > LIMITS.bytes || countEntries(recorded) > LIMITS.entries) errs.push("core-api-surface.json is over its caps");

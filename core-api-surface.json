@@ -8214,4 +8214,6 @@
 "ZoneInfoNotFoundError":{"kind":"class","since":1,"members":{"add_note":{"kind":"function","since":1,"params":"opaque"},
 "with_traceback":{"kind":"function","since":1,"params":"opaque"}}},
 "available_timezones":{"kind":"function","since":1,"params":[]},
-"reset_tzpath":{"kind":"function","since":1,"params":[{"default":true,"kind":"pos","name":"to","since":1}]}}}}}
+"reset_tzpath":{"kind":"function","since":1,"params":[{"default":true,"kind":"pos","name":"to","since":1}]}}}},
+"removed":{"pathlib.PureWindowsPath.ntpath":{"kind":"module","level":49},
+"pathlib.WindowsPath.ntpath":{"kind":"module","level":49}}}
