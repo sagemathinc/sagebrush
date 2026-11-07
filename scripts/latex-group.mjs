@@ -64,7 +64,8 @@ export const LATEX_LAZY_CAPS = {
   BEAMER: { label: "the LaTeX beamer chunk", raw: 8 * 1024, gzip: 3.5 * 1024 },
   // (Run's code: web/latex/run-core.mjs, fetched on the first Run (first-use code: the editor opens without it). Out of
   //  the group so save-as-you-type (#551, eager by nature) fits under the group's cap without a raise (daybreak2, Nov 7:
-  //  a lazy split, not a raise). 12 KiB / 5.25 KiB: 11,330 / 4,804 measured at master 59d5ec95, about 8% / 12% room)
+  //  a lazy split, not a raise). 12 KiB / 5.25 KiB: daybreak2's ruling, Nov 7, on 11,330 / 4,804 measured at master
+  //  59d5ec95, about 8% / 12% room; #804's Run growth is its own cap change, from its exact bundle)
   RUN: { label: "the LaTeX Run chunk", raw: 12 * 1024, gzip: 5.25 * 1024 },
 };
 
