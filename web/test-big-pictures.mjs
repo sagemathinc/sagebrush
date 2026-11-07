@@ -110,7 +110,7 @@ try {
   check(await ev(`!!${C("rm")}.el.querySelector(".mdout img") && !${C("rm")}.el.querySelector("button.remote-picture")`), "a notebook written here: its remote picture at once");
 
   // a board's code: each board's pictures counted afresh (CORR-89C-4)
-  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.json")}` });
+  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.board.json")}` });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
   const show30 = (w) => `from IPython.display import Image, display\nimport base64\ndisplay(Image(data=base64.b64decode(${JSON.stringify(png(w, 5000))})))`;
   await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "A", nodes: [{ id: "a1", code: show30(6000) }, { id: "a2", code: show30(6001) }] })}).then(() => 1)`);
@@ -178,7 +178,7 @@ try {
   check(keptScheme.length === 1 && !keptScheme.some(([, v]) => /^data:/i.test(v.src ?? "") && v.w > 8192) && !(await ev("[...document.querySelectorAll('.board-item img')].some((i) => /^data:/i.test(i.getAttribute('src') ?? '') && i.naturalWidth > 8192)")), "a DATA: or Data: picture past the bounds is not taken in, a small one is: " + JSON.stringify(keptScheme.map(([k, v]) => [k, v.w, (v.src ?? "").slice(0, 12)])));
 
   // a board carrying a huge picture doesn't take it in; a small one, it does
-  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.json")}` });
+  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.board.json")}` });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
   const board = { title: "pictures", images: { big: { w: 100, h: 100, src: "data:image/png;base64," + png(20000, 20000) }, small: { w: 1, h: 1, src: "data:image/png;base64," + real.toString("base64") } },
     nodes: [{ id: "a", image: "big", title: "big" }, { id: "b", image: "small", title: "small" }] };

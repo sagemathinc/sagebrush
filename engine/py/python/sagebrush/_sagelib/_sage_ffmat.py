@@ -1165,7 +1165,9 @@ class FFVector:
             try:
                 inv = 1 / o
             except TypeError:
-                return NotImplemented
+                # (Sage's refusal, naming the vector's parent and o's class, whether
+                # or not o's class has its own __rtruediv__: Sage 10.10 never calls it)
+                raise TypeError("unsupported operand parent(s) for /: '%r' and '%r'" % (self.parent(), type(o)))
         return self * inv
 
     def dot_product(self, o):

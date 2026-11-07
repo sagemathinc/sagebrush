@@ -1,10 +1,10 @@
 {
  "v": 1,
- "reason": "A matrix or vector meeting an inexact number (RR, RDF, CC, CDF, RealField(p), ComplexField(p)): over the number's field, as Sage (lib/_sage_matrix.py: Matrix and Vector _inexact_lift, Matrix.__truediv__, a vector divided by an inexact number multiplies by its inverse); a vector over RDF, CDF, GF(q), QQbar or a number field divided by a scalar, as Sage: times the inverse (lib/_sage_ffmat.py FFVector.__truediv__); a real vector meeting a complex number over the complex field (CDF for two doubles, else ComplexField of the lower precision), for * and / Re-measured with bun 1.4.4 (size-record.sh) on master a81c0c34 vs head d1a4af7a: cli/lib.gen.js +2296, cli/pyjs.cjs +2300, engine/lib/sage.pre +23361, engine/lib/sage.src +6373; no other row moves. Markers: exact, except cli/pyjs.cjs 2332 (+2300 measured, plus 32 B of margin, as it moves with master).",
+ "reason": "A matrix or vector meeting an inexact number (RR, RDF, CC, CDF, RealField(p), ComplexField(p)): over the number's field, as Sage (lib/_sage_matrix.py: Matrix and Vector _inexact_lift, Matrix.__truediv__, a vector divided by an inexact number multiplies by its inverse); a vector over RDF, CDF, GF(q), QQbar or a number field divided by a scalar, as Sage: times the inverse (lib/_sage_ffmat.py FFVector.__truediv__); a real vector meeting a complex number over the complex field (CDF for two doubles, else ComplexField of the lower precision), for * and / Re-measured with bun 1.4.4 (size-record.sh) on master cfa6d281 vs head fba32305: cli/lib.gen.js +2140, cli/pyjs.cjs +2164, engine/lib/sage.pre +23818, engine/lib/sage.src +6625; no other row moves. Markers: exact, except cli/pyjs.cjs 2196 (+2164 measured, plus 32 B of margin, as it moves with master). Ceiling (rule 4): engine/lib/sage.src 2946494 -> 2953119, the measured head 2953055 + 64.",
  "bytes": {
-  "cli/lib.gen.js": 2296,
-  "cli/pyjs.cjs": 2332,
-  "engine/lib/sage.pre": 23361,
-  "engine/lib/sage.src": 6373
+  "cli/lib.gen.js": 2140,
+  "cli/pyjs.cjs": 2196,
+  "engine/lib/sage.pre": 23818,
+  "engine/lib/sage.src": 6625
  }
 }

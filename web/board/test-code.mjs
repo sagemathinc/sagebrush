@@ -1,5 +1,5 @@
 // ci: web-browser/board-b order=40
-// Code items on a board (web/board/code.ts): examples/live.json runs, in
+// Code items on a board (web/board/code.ts): examples/live.board.json runs, in
 // reading order, reactively; outputs show in their items, which grow to hold
 // them; editing (the agent API, and the code editor: double-click, then
 // Shift+Enter) reruns what depends on the change; deleting an item removes
@@ -43,7 +43,7 @@ try {
   for (const m of ["Page.enable", "Runtime.enable", "Log.enable"]) await send(m);
   // (SLOW=1: a slow network, as a first visit)
   if (process.env.SLOW) { await send("Network.enable"); await send("Network.setCacheDisabled", { cacheDisabled: true }); await send("Network.emulateNetworkConditions", { offline: false, latency: 300, downloadThroughput: 400000, uploadThroughput: 100000 }); }
-  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.json")}` });
+  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.board.json")}` });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
   await ev("localStorage.clear()");
   // everything runs on load, in reading order
@@ -314,7 +314,7 @@ try {
   // previews of items whose id other pages' items have: neither shown nor kept (their cell, and seed, change as pages come and go: CORR-79B-3)
   {
     // (in a page of its own: nothing of the boards before it, their cells or their runs)
-    await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/primes.json")}&fresh=${Math.random()}` });
+    await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/primes.board.json")}&fresh=${Math.random()}` });
     await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
     // (in Edit: previews are kept, or dropped, in Edit only; View writes nothing, web/doc-mode.ts)
     await ev("window.sagebrush.board.editing(true)");
@@ -329,7 +329,7 @@ try {
   // ...nor taken, the item its own again, by a sync that came before the first's runs dropped it (CORR-BB9-1)
   {
     // (in a page of its own: nothing of the boards before it, their cells or their runs)
-    await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/primes.json")}&fresh=${Math.random()}` });
+    await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/primes.board.json")}&fresh=${Math.random()}` });
     await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
     // (in Edit: previews are kept, or dropped, in Edit only; View writes nothing, web/doc-mode.ts)
     await ev("window.sagebrush.board.editing(true)");
@@ -348,7 +348,7 @@ try {
   // the language changed while an item runs by hand (one held by its preview, so nothing had run): the run first, then a new interpreter (CORR-79B-2)
   {
     // (in a page of its own: nothing of the boards before it, their cells or their runs)
-    await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/primes.json")}&fresh=${Math.random()}` });
+    await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/primes.board.json")}&fresh=${Math.random()}` });
     await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
     const held = { at: "2026-10-14T00:00:00Z", ms: 20000, total: 20000, outputs: [{ output_type: "stream", name: "stdout", text: "held\n" }] };
     await ev(`window.sagebrush.board.load(${JSON.stringify({ title: "Race", mode: "sage", nodes: [{ id: "r", code: "import time\ntime.sleep(2)\nprint(pi)", preview: held, x: 0, y: 0, w: 300 }] })}).then(() => 1)`);
@@ -372,7 +372,7 @@ try {
     const camera = () => ev("JSON.stringify(window.sagebrush.board.snapshot().camera)");
     for (const moved of [false, true]) {
       // (in a page of its own: nothing of the boards before it)
-      await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/primes.json")}&fresh=${Math.random()}` });
+      await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/primes.board.json")}&fresh=${Math.random()}` });
       await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
       await ev(`window.sagebrush.board.load(${JSON.stringify(doc)}).then(() => 1)`);
       // (the reader scrolls before the code has run)
@@ -414,7 +414,7 @@ try {
     })();`;
     // (the refit held where it waits for pictures, until the test lets it go)
     const open = async () => {
-      await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/primes.json")}&fresh=${Math.random()}` });
+      await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/primes.board.json")}&fresh=${Math.random()}` });
       await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
       await ev("(() => { const held = new Promise((r) => (window.__letGo = r)); HTMLImageElement.prototype.decode = function () { return held; }; return 1; })()");
       await ev(`window.sagebrush.board.load(${JSON.stringify(doc)}).then(() => 1)`);
