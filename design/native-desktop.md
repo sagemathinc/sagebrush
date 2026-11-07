@@ -19,7 +19,7 @@ recorded the §7 answers, is part of r12.*
 - **The app has one client for all three.**
 - **Sagebrush Engine becomes its own product** (§4):
   - command line only, without the browser app;
-  - MIT-licensed always;
+  - the engine's own code is MIT, always. Whether a build may include LGPL runtime code (Bun) is William's question (§9);
   - its own releases and upgrades;
   - it runs code and works with LaTeX.
   - One engine serves the desktop app, "Your computer", CI and agents.
@@ -173,7 +173,7 @@ r4's A-vs-B timings stay withdrawn: the PyPI wheel came from a different commit.
   - So a Bun-compiled engine contains LGPL-2 code, with LGPL's relinking obligations.
   - That fails the proposed allow-list unless William accepts it.
   - Node and Deno ship V8 (BSD-3-Clause) and their own permissively licensed parts. Their full inventories are N1 work (§7).
-- **Enforcement:** a script (`scripts/license-check.mjs`) inventories everything that goes into each engine build: the Rust crates, the npm packages bundled, the runtime binary's own parts, and the data. It fails on anything outside the allow-list.
+- **The check (proposed, not yet running):** a script (`scripts/license-check.mjs`) inventories everything that goes into each engine build: the Rust crates, the npm packages bundled, the runtime binary's own parts, and the data. It fails on anything outside the allow-list.
   - It runs in the existing CI `checks` job. Wiring it into a workflow file is done by William or @sagebrush, because agents don't push workflow files.
   - `THIRD-PARTY-NOTICES.txt` is generated from the same inventory.
 
