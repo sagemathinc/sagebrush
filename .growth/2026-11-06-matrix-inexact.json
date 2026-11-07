@@ -1,9 +1,9 @@
 {
  "v": 1,
- "reason": "A matrix or vector meeting an inexact number (RR, RDF, CC, CDF, RealField(p), ComplexField(p)): over the number's field, as Sage (lib/_sage_matrix.py: Matrix and Vector _inexact_lift, Matrix.__truediv__, a vector divided by an inexact number multiplies by its inverse); a vector over RDF, CDF, GF(q), QQbar or a number field divided by a scalar, as Sage: times the inverse (lib/_sage_ffmat.py FFVector.__truediv__); a real vector meeting a complex number over the complex field (CDF for two doubles, else ComplexField of the lower precision), for * and / Re-measured with bun 1.4.4 (size-record.sh) on master 1c64ac7b vs head f761edb0: cli/lib.gen.js +1736, cli/pyjs.cjs +1712, engine/lib/sage.pre +21122, engine/lib/sage.src +5900; no other row moves. Markers: exact, except cli/pyjs.cjs 1744 (+1712 measured, plus 32 B of margin, as it moves with master).",
+ "reason": "A matrix or vector meeting an inexact number (RR, RDF, CC, CDF, RealField(p), ComplexField(p)): over the number's field, as Sage (lib/_sage_matrix.py: Matrix and Vector _inexact_lift, Matrix.__truediv__, a vector divided by an inexact number multiplies by its inverse); a vector over RDF, CDF, GF(q), QQbar or a number field divided by a scalar, as Sage: times the inverse (lib/_sage_ffmat.py FFVector.__truediv__); a real vector meeting a complex number over the complex field (CDF for two doubles, else ComplexField of the lower precision), for * and / Re-measured with bun 1.4.4 (size-record.sh) on master dcd7410f vs head 8b8d53ca: cli/lib.gen.js +2160, cli/pyjs.cjs +2164, engine/lib/sage.pre +21122, engine/lib/sage.src +5900; no other row moves. Markers: exact, except cli/pyjs.cjs 2196 (+2164 measured, plus 32 B of margin, as it moves with master).",
  "bytes": {
-  "cli/lib.gen.js": 1736,
-  "cli/pyjs.cjs": 1744,
+  "cli/lib.gen.js": 2160,
+  "cli/pyjs.cjs": 2196,
   "engine/lib/sage.pre": 21122,
   "engine/lib/sage.src": 5900
  }
