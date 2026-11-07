@@ -427,7 +427,7 @@ for (const [what, m, code] of [
   // (one table for both sides: test_remote_pair.py reads the same file (daybreak3's VERSION-1 parity))
   const table = JSON.parse(await Bun.file(new URL("./version-cases.json", import.meta.url)).text()).cases;
   check(table.length > 15 && table.every(([v, n, want]) => versionAtLeast(v, n) === want), `the version compare, a release gate (${table.filter(([v, n, w]) => versionAtLeast(v, n) !== w).map(([v, n]) => JSON.stringify(v) + " vs " + JSON.stringify(n)).join(", ") || "all as expected"})`);
-  check(RUNNER_MIN === null, "no minimum yet: it is set at the release that first ships sagebrush remote (William's call)");
+  check(RUNNER_MIN === "0.9.0", "the minimum: 0.9.0, the release that first ships sagebrush remote");
   const made = [];
   class S extends FakeSocket { constructor(u) { super(u); made.push(this); setTimeout(() => this.open(), 1); } }
   const jwk = { kty: "EC", crv: "P-256", x: "X".repeat(43), y: "Y".repeat(43) };
@@ -467,12 +467,17 @@ for (const [what, m, code] of [
     const z = await answerMin({ ...RESULT, version: "dev" }, badMin);
     check(z.r.e?.kind === "config" && z.sock.closedWith === 1000, `a malformed minimum (${JSON.stringify(badMin)}) pairs with nothing, not even dev (${z.r.e?.kind})`);
   }
-  for (const none of [null, undefined]) {
-    const z = await answerMin({ ...RESULT, version: "dev" }, none);
-    check(z.r.v instanceof Tunnel && !("needs" in z.hello.params), `no minimum (${String(none)}): dev pairs, and no needs is sent`);
+  // (an explicit null: no minimum; undefined: the page's own, RUNNER_MIN)
+  let z = await answerMin({ ...RESULT, version: "dev" }, null);
+  check(z.r.v instanceof Tunnel && !("needs" in z.hello.params), "no minimum (null): dev pairs, and no needs is sent");
+  z = await answerMin({ ...RESULT, version: "dev" }, undefined);
+  check(z.r.v instanceof Tunnel && z.hello.params.needs === RUNNER_MIN, "the default minimum (undefined): needs is RUNNER_MIN, and dev pairs");
+  // (the release's gate, with the page's own minimum: 0.8.2 refused as old, 0.9.0 and dev paired)
+  for (const [version, pairs] of [["0.8.2", false], ["0.9.0rc1", false], ["0.9.0", true], ["0.9.1", true], ["dev", true]]) {
+    const x = await answer({ ...RESULT, version });
+    check(pairs ? x.r.v instanceof Tunnel : x.r.e?.kind === "old", `with the page's own minimum (${RUNNER_MIN}), a ${version} runner ${pairs ? "pairs" : "is refused as old"} (${x.r.e?.kind ?? "paired"})`);
   }
   a = await answer({ ...RESULT, version: "dev" });
-  check(a.r.v instanceof Tunnel && !("needs" in a.hello.params), "with no minimum, no needs is sent, and dev pairs");
   // (the default is the page's own: a call without `min` sends RUNNER_MIN as needs, none while it is null (grader's
   // r782 J22 note))
   check(RUNNER_MIN === null ? !("needs" in a.hello.params) : a.hello.params.needs === RUNNER_MIN, `a call without min sends RUNNER_MIN (${RUNNER_MIN}) as needs`);
