@@ -151,6 +151,8 @@ const workflowOrBuildPaths = [
 const runtimePaths = [
   /^src\//, /^lib\//, /^test\//, /^target\//, /^conformance\//,
   /^catalog\//, /^scripts\/(?!ci-paths\.mjs$)/, /^wasm\//, /^cdn\//,
+  // (Rill's recorded R outputs and their provenance: read by the node tests, design/rill.md §7.5)
+  /^rill-tests\//,
 ];
 const webPaths = [/^web\//, /^examples\//, /^packages\/sagebrush-board\//];
 const modePaths = [
@@ -239,6 +241,8 @@ const censusPaths = [
   // (the unsafe boundary's check, C-2c-ii scope r4 section 1.3: every build input it scans, from the one
   // list scripts/unsafe-inventory.mjs uses too, and its inventory)
   ...BUILD_INPUT_PATHS, /^test\/unsafe-allow-inventory\.json$/,
+  // (the rich-output sink census, OUT-ISO phase 1: every web source it scans, its registry, tool and suite)
+  /^web\/.*\.(js|mjs|ts|mts|html)$/, /^test\/rich-sinks\.json$/, /^test\/rich_sinks\.py$/, /^scripts\/test-rich-sinks\.mjs$/,
 ];
 const census = full || workflowOrBuild || matches(censusPaths) || fallback;
 // The unsafe boundary's compiler sweep (engine-unsafe-sweep, #234 r2): only inputs that can change what the

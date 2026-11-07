@@ -280,3 +280,12 @@ def fsencode(filename):
     if isinstance(filename, str):
         return filename.encode("utf-8", "surrogateescape")
     return filename
+
+
+def fsdecode(filename):
+    """Decode filename (an os.PathLike, bytes, or str) from the filesystem encoding (UTF-8) with 'surrogateescape';
+    return str unchanged (CPython's os.fsdecode, its POSIX case)."""
+    filename = fspath(filename)
+    if isinstance(filename, bytes):
+        return filename.decode("utf-8", "surrogateescape")
+    return filename
