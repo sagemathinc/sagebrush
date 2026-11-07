@@ -28,7 +28,7 @@ let s = 7;
 const rnd = (len) => Float64Array.from({ length: len }, () => (s = (Math.imul(s, 1103515245) + 12345) >>> 0) / 4294967296 - 0.5);
 const fnv = (c) => { let h = 0xcbf29ce484222325n; for (const x of new Uint8Array(c.buffer, c.byteOffset, c.byteLength)) h = ((h ^ BigInt(x)) * 0x100000001b3n) & 0xffffffffffffffffn; return h.toString(16); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const ready = async () => { for (let i = 0; i < 3000 && nd.ndThreads().state === "starting"; i++) await sleep(10); return nd.ndThreads(); };
+const ready = async () => { for (let i = 0; i < 1000 && nd.ndThreads().state === "starting"; i++) await sleep(10); return nd.ndThreads(); };
 const ops = ${JSON.stringify(SHAPES)}.map(([n, m, p]) => [rnd(n * m), rnd(m * p), n, m, p]);
 const hashes = () => ops.map(([A, B, n, m, p]) => fnv(nd.ndMatmul(A, B, n, m, p)));
 const big = ops[1];
