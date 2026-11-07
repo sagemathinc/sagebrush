@@ -5873,6 +5873,11 @@
   "owner": "real/complex arithmetic",
   "row": "inv-17"
  },
+ "lib/_sage_series.py :: PowerSeriesRing :: raise NotImplementedError(\"multivariate power series rings are not available in sagebrush yet\") #0": {
+  "class": "coverage",
+  "owner": "series rings (@sagebrush-sage2)",
+  "reason": "multivariate power series rings (PowerSeriesRing(QQ, 'x,y'), (QQ, n, 'x')): Sage builds one, not here yet (L32); not a cap"
+ },
  "lib/_sage_series.py :: Series._poly_target :: raise TypeError(\"unsupported operand parent(s): '%r' and '%r'\" % (self._R, P)) #0": {
   "class": "none",
   "owner": "sage kernel (@sagebrush-sage2)",

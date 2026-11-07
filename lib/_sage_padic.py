@@ -389,13 +389,12 @@ class pAdicGeneric_:
             import _sage_series
             return _sage_series._series_ring_from_list(self, names)
         import _sage_poly
-        _sage_poly.ring_names(names)
-        if isinstance(names, tuple):
-            if len(names) != 1:
-                raise NotImplementedError("multivariate polynomial rings over p-adic rings are not available in sagebrush yet")
-            names = names[0]
+        ns = _sage_poly.ring_names(names)
+        if len(ns) != 1:
+            # (Sage: a multivariate polynomial ring, Qp(5)['x,y'] or [('x', 'y')])
+            raise NotImplementedError("multivariate polynomial rings over p-adic rings are not available in sagebrush yet")
         import _sage_padic_ext
-        return _sage_padic_ext.PolynomialRing_padic(self, str(names))
+        return _sage_padic_ext.PolynomialRing_padic(self, ns[0])
 
     def extension(self, modulus, prec=None, names=None, print_mode=None, implementation=None, **kwds):
         """The extension by a root of modulus: totally ramified quadratic

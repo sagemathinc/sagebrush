@@ -21,13 +21,27 @@ _RINGS = {}
 
 def _series_ring_from_list(base, names):
     """K[['x']]: the power series ring in x, each name checked as Sage checks
-    it; several names (K[['x', 'y']]) are a multivariate power series ring,
-    not here yet."""
+    it (an entry 'x,y' is two names); several names (K[['x', 'y']], K[['x,y']])
+    are a multivariate power series ring, not here yet."""
     import _sage_poly
-    names = _sage_poly.ring_names(names) if names else ["x"]
+    flat = []
+    for t in names:
+        flat += [u.strip() for u in str(t).split(",")] if "," in str(t) else [str(t)]
+    names = _sage_poly.ring_names(flat) if flat else ["x"]
     if len(names) > 1:
         raise NotImplementedError("multivariate power series rings are not available in sagebrush yet")
     return PowerSeriesRing(base, names[0])
+
+
+def _series_names(name, default_prec, names):
+    """(names, counted, default_prec): every name a user gives a series ring,
+    checked as Sage checks it before any ring is built: a string ('x' or
+    'x,y'), a tuple, a list, names=..., or a count first (PowerSeriesRing(QQ,
+    2, 'x') is in x0, x1)."""
+    import _sage_poly
+    if isinstance(name, int) and not isinstance(name, bool):
+        return _sage_poly.ring_names(names if names is not None else default_prec, name), True, 20
+    return _sage_poly.ring_names(names if names is not None else (name if name is not None else "x")), False, default_prec
 
 
 def PowerSeriesRing(base, name=None, default_prec=20, names=None, sparse=False, **kwds):
@@ -40,14 +54,11 @@ def PowerSeriesRing(base, name=None, default_prec=20, names=None, sparse=False, 
         sage: f = T + 3*T^2 + T^3 + O(T^4); f^3, 1/f
         (T^3 + 2*T^4 + 2*T^5 + O(T^6), T^-1 + 4 + T + O(T^2))
     """
-    if names is not None:
-        name = names[0] if isinstance(names, (list, tuple)) else names
-    if name is None:
-        name = "x"
-    if isinstance(name, (list, tuple)):
-        name = name[0]
-    import _sage_poly
-    _sage_poly.ring_names(name)
+    ns, counted, default_prec = _series_names(name, default_prec, names)
+    if counted or len(ns) > 1:
+        # (Sage: a multivariate power series ring, PowerSeriesRing(QQ, 'x,y') or (QQ, 1, 'x'))
+        raise NotImplementedError("multivariate power series rings are not available in sagebrush yet")
+    name = ns[0]
     key = ("P", id(base), str(name), int(default_prec))
     if key not in _RINGS:
         _RINGS[key] = SeriesRing_(base, str(name), int(default_prec), False)
@@ -64,14 +75,10 @@ def LaurentSeriesRing(base, name=None, default_prec=20, names=None, sparse=False
         sage: 1/(1 - x) + O(x^10)
         1 + x + x^2 + x^3 + x^4 + x^5 + x^6 + x^7 + x^8 + x^9 + O(x^10)
     """
-    if names is not None:
-        name = names[0] if isinstance(names, (list, tuple)) else names
-    if name is None:
-        name = "x"
-    if isinstance(name, (list, tuple)):
-        name = name[0]
-    import _sage_poly
-    _sage_poly.ring_names(name)
+    # (as Sage: every name is checked, and the ring is in the first one,
+    # LaurentSeriesRing(QQ, 'x,y') in x and (QQ, 2, 'x') in x0)
+    ns, counted, default_prec = _series_names(name, default_prec, names)
+    name = ns[0]
     key = ("L", id(base), str(name), int(default_prec))
     if key not in _RINGS:
         _RINGS[key] = SeriesRing_(base, str(name), int(default_prec), True)
