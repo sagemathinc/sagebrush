@@ -46,6 +46,8 @@ ino = os.stat("t/mv").st_ino
 os.rename("t/mv", "t/mv2")
 print(os.stat("t/mv2").st_ino == ino, os.stat("t/mv2").st_ino != os.stat("t").st_ino, Path("t/mv2").samefile("t/sub"))
 os.rmdir("t/mv2")
+# (os.path.samefile and samestat, genericpath's: through the inode numbers above)
+print(os.path.samefile("t/a.txt", "t/./a.txt"), os.path.samefile("t/a.txt", "t/data.bin"), os.path.samestat(os.stat("t"), os.stat("t/sub/..")), os.path.samestat(os.stat("t"), os.stat("t/sub")))
 (base / "b.py").rename(base / "b2.py")
 print(sorted(x.name for x in base.iterdir()))
 (base / "b2.py").replace(base / "b3.py")
