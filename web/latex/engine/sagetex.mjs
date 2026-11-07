@@ -52,7 +52,7 @@ export async function staleOf(deps, read) {
   return null;
 }
 /** Why a results file's results aren't used: its recorded input `rel` changed or gone ("invalid": the record unreadable). */
-export const staleWhy = (rel) => rel === "invalid" ? "the results file's record of what its run imported can't be read" : `${rel} changed since they were run`;
+export const staleWhy = (rel) => rel === "invalid" ? "the results file's record of what its run imported can't be read" : `${rel} changed or was removed since they were run`;
 
 const SAGE_ENVS = new Set(["sageblock", "sagesilent"]);
 export const UNSUPPORTED_ENVS = new Set(["sagecommandline", "sageexample"]);

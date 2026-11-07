@@ -490,7 +490,7 @@ $\sage{1/0}$ then $\sage{2+2}$.
     writeFileSync(join(w, "h.py"), "v = 2\n");
     const c2 = await run(w, "check", "d.tex", "--json"), rd = await run(w, "render", "d.tex", "-o", "d.html", "--json");
     const html = readFileSync(join(w, "d.html"), "utf8");
-    check("W01: h.py edited: check says the results aren't used (h.py changed), the items not run", c1.json?.code?.every((x) => x.state === "ok") && c2.json?.code?.every((x) => x.state === "not run") && c2.json.problems.some((p) => p.kind === "stale" && /h\.py changed since they were run/.test(p.message)), { c1: c1.json?.code, c2: c2.json?.problems });
+    check("W01: h.py edited: check says the results aren't used (h.py changed), the items not run", c1.json?.code?.every((x) => x.state === "ok") && c2.json?.code?.every((x) => x.state === "not run") && c2.json.problems.some((p) => p.kind === "stale" && /h\.py changed or was removed since they were run/.test(p.message)), { c1: c1.json?.code, c2: c2.json?.problems });
     check("W01: h.py edited: render shows the items not run, never the old value", rd.code === 0 && /s-notrun/.test(html) && !/<span class="katex[^"]*">.*>1<\/mn>/.test(html), { code: rd.code, chips: (html.match(/s-notrun/g) || []).length });
     const r2 = await run(w, "run", "d.tex", "--json"), c3 = await run(w, "check", "d.tex", "--json");
     check("W01: run again: the new value, its new hash, check clean", r2.code === 0 && saved().items[1].latex === "2" && saved().deps[0][1] === createHash("sha256").update("v = 2\n").digest("hex") && c3.json?.code?.every((x) => x.state === "ok") && !c3.json.problems.some((p) => p.kind === "stale"), { r2: r2.code, c3: c3.json?.problems });

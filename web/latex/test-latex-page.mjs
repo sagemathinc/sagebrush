@@ -2057,7 +2057,7 @@ open('made.txt', 'w').write('x')
       // (the helper edited, the page read again (its window back in focus): its results aren't used, said; the items
       //  not run, the old 7 gone from the preview)
       await ev(`(document.querySelector(".tex-status").textContent = "", window.dispatchEvent(new Event("focus")), 1)`);
-      const staleSaid = await statusIs(/The SageTeX results aren't used: helper\.py changed since they were run/, 15000);
+      const staleSaid = await statusIs(/The SageTeX results aren't used: helper\.py changed or was removed since they were run; press Run/, 15000);
       // (inline in math, an item not run shows as "…" where its value was: the old 7 gone, four of them)
       const notRun = await until(`(() => { const t = document.querySelector(".tex-preview")?.textContent ?? ""; return (t.match(/\u2026/g) || []).length >= 4 && !/\b7\b/.test(t); })()`, 15000);
       check(w01deps.includes("helper.py") && w01deps.includes("statistics.py") === false && staleSaid && notRun, "Run (Codex W01): the results record helper.py; it edited, the page doesn't use them: says why, the items not run", { w01deps, staleSaid, notRun, status: await ev(`document.querySelector(".tex-status")?.textContent ?? ""`), preview: await ev(`(document.querySelector(".tex-preview")?.textContent ?? "").slice(0, 200)`) });

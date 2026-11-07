@@ -398,7 +398,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       resultsDeps = nextDeps;
       resultsSeen = await seenOf(e, nextDeps);
       results.wrapper = next.wrapper; results.saved = next.saved;
-      if (stale) say(`The SageTeX results aren't used: ${staleWhy(stale)}: press Run`);
+      if (stale) say(`The SageTeX results aren't used: ${staleWhy(stale)}; press Run`);
       request();
     } catch {}
   };
