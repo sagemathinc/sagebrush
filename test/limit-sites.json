@@ -3618,6 +3618,11 @@
   "owner": "Magma compatibility",
   "row": "inv-25"
  },
+ "lib/_matlab.py :: ws_call :: raise _err(\"Too many output arguments.\", \"MATLAB:TooManyOutputs\" if name == \"clearvars\" else \"MATLAB:maxlhs\") #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the census matches 'max' in the identifier MATLAB:maxlhs. The line raises MATLAB's own error for asking save, clear or clearvars for an output (MathWorks documents none), before the call runs; it is not a limit on a computation"
+ },
  "lib/_matlab_cpow.py ::  :: _RESCUE_MAX = 100000 #0": {
   "class": "3",
   "owner": "MATLAB numeric",
