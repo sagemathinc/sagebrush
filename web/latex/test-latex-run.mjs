@@ -448,9 +448,15 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
 // .tex moved to another folder while its Run waited: nothing runs
 {
   const bytes = (n) => new Uint8Array(n);
-  const mkws = (entries, unreadable = null) => ({
+  // (`grown`: a file's bytes now, larger than when it was listed)
+  const mkws = (entries, unreadable = null, grown = {}) => ({
     list: async () => entries.map(([path, size]) => ({ path, kind: "file", size })),
-    read: async (p) => { if (p === unreadable) throw new Error("gone"); return { content: bytes(entries.find((e) => e[0] === p)[1]) }; },
+    readUpTo: async (p, max) => {
+      if (p === unreadable) throw new Error("gone");
+      const n = grown[p] ?? entries.find((e) => e[0] === p)[1];
+      if (n > max) throw Object.assign(new Error(p + " is larger than " + max + " bytes"), { code: "limit" });
+      return { content: bytes(n) };
+    },
   });
   const ok = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/sub/h.py", 2], ["/Ab/x.py", 1]]), "/A/doc.tex");
   check("folderFiles: the .tex's folder only, a sibling of a like name not in it", ok.dir === "/A" && JSON.stringify(ok.files.map(([p]) => p)) === JSON.stringify(["/A/doc.tex", "/A/sub/h.py"]), ok);
@@ -458,6 +464,9 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
   check("folderFiles: a file that can't be read: nothing runs (no partial folder)", !unread.files && /couldn't be read/.test(unread.msg ?? ""), unread);
   const many = await folderFiles(mkws([["/A/doc.tex", 1], ["/A/a", 1], ["/A/b", 1]]), "/A/doc.tex", { files: 2, bytes: 100 });
   const heavy = await folderFiles(mkws([["/A/doc.tex", 60], ["/A/a", 60]]), "/A/doc.tex", { files: 10, bytes: 100 });
+  const grownWs = mkws([["/A/doc.tex", 10], ["/A/a", 10]], null, { "/A/a": 500 });
+  const grown = await folderFiles(grownWs, "/A/doc.tex", { files: 10, bytes: 100 });
+  check("folderFiles: a file grown past the bound since it was listed: refused by the bounded read, nothing runs", !grown.files && /too large/.test(grown.msg ?? ""), grown);
   check("folderFiles: past the count or the bytes, nothing runs", !many.files && /too large/.test(many.msg ?? "") && !heavy.files && /too large/.test(heavy.msg ?? ""), { many, heavy });
   // (moved while its Run waited for the session: refused, nothing run)
   let moved = false, execd = 0;

@@ -232,7 +232,10 @@ export async function folderFiles(ws, texPath, lim = FOLDER_LIMITS) {
   const files = [];
   for (const e of all) {
     if (bytes + (e.size ?? 0) > lim.bytes) return big;
-    const r = await ws.read(e.path).catch(() => null);
+    // (each read bounded by what is left (daybreak3): a file grown since it was listed is refused, never read whole)
+    let over = false;
+    const r = await ws.readUpTo(e.path, lim.bytes - bytes).catch((err) => { over = err?.code === "limit"; return null; });
+    if (over) return big;
     if (!r) return { msg: `Not run: ${e.path} couldn't be read` };
     bytes += r.content.length;
     if (bytes > lim.bytes) return big;

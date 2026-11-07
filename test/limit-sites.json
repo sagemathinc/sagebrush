@@ -10227,6 +10227,14 @@
   "owner": "the LaTeX editor's Run (@sagebrush-latex)",
   "reason": "the editor's Run: the .tex's folder given to Sage (FOLDER_LIMITS: 500 files, 64 MiB; past either, Run runs nothing), and what a Run's results hold (the results file's size, a result's LaTeX, a plot's SVG, a message: RUN_LIMITS, as the CLI's): bounds protecting the page and its session"
  },
+ "web/latex/run-core.mjs :: inside :: const r = await ws.readUpTo(e.path, lim.bytes - bytes).catch((err) => { over = err?.code === \"limit\"; return null; }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX editor's Run (@sagebrush-latex)",
+  "reason": "the editor's Run: the .tex's folder given to Sage (FOLDER_LIMITS: 500 files, 64 MiB; past either, Run runs nothing), and what a Run's results hold (the results file's size, a result's LaTeX, a plot's SVG, a message: RUN_LIMITS, as the CLI's): bounds protecting the page and its session"
+ },
  "web/latex/run-core.mjs :: msgOf :: return out.join(\"\\n\").trimEnd().slice(-RUN_LIMITS.msg); #0": {
   "class": "1",
   "disposition": {
