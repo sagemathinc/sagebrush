@@ -39,7 +39,7 @@ import type { CellError } from "./notebook-graph";
 import { analyzeCell, ImportStarError } from "./dataflow";
 import { renameRedefinitions } from "./rename";
 import { oneLine, textLines } from "./terminal-text";
-import { CLI_READER, pictureWarning } from "./board-cli";
+import { CLI_READER, pictureWarning, previewsPath } from "./board-cli";
 import { DISPLAY_ENVELOPE, displayCost } from "./output-cost";
 
 const USAGE = `usage: sagebrush board run FILE [--json] [--timeout S] [--figures DIR] [--store-previews [-o OUT] [--preview-ms MS]]
@@ -135,7 +135,7 @@ export async function boardRun(argv: string[]): Promise<number> {
   if (!Number.isFinite(previewMs) || previewMs < 0) { say("--preview-ms takes a number of milliseconds, 0 or more"); return 2; }
   if (out !== null && !store) { say("-o is for --store-previews"); return 2; }
   // (where the board with its previews goes: never over a file that is there, unless named)
-  const target = !store ? null : out ?? (file === "-" ? null : join(dirname(file), basename(file).replace(/(\.board)?\.json$/i, "").replace(/\.[^.]*$/, "") + ".previews.board.json"));
+  const target = !store ? null : out ?? (file === "-" ? null : previewsPath(file));
   if (store && target === null) { say("a board from standard input needs -o OUT for --store-previews"); return 2; }
   // (said early, before anything runs; and the file is made only if it is still not there, HARD-CD6-2)
   if (store && out === null && existsSync(target!)) { say(`${target} is there already: name it with -o to write over it`); return 2; }
@@ -436,7 +436,12 @@ export async function runBoard(doc: BoardDoc, timeout: number, after?: (evaluate
       if (ms !== undefined && reactive.outcome.has(id)) r.ms = Math.round(ms);
       if (errs?.length) { r.status = "error"; r.error = syntax.get(id) ?? errs.map((e) => errorText(e, label, (n) => reactive.written(n))).join("\n"); r.stdout = r.stderr = ""; r.outputs = []; }
       else if (timedOut.has(id)) { r.status = "timeout"; r.error = `ran out of time: stopped after ${timeout} s` + (r.stderr ? "\n" + r.stderr : ""); }
-      else if (reactive.outcome.get(id) === "ok" && !failed.has(id)) r.status = "ok";
+      else if (reactive.outcome.get(id) === "ok" && !failed.has(id)) {
+        r.status = "ok";
+        // (its @interact's function raised when run with its defaults (P11a, Codex's friction): the item fails, saying so)
+        const ie = interactError(list);
+        if (ie !== null) { r.status = "failed"; r.error = ie; }
+      }
       else if (failed.has(id) || reactive.outcome.get(id) === "exception") { r.status = "failed"; r.error = r.stderr.trim() || "raised an error"; }
       else {
         r.status = "not run";
@@ -493,42 +498,99 @@ export const ITEM_OUTPUT_MAX = 4 * 2 ** 20, RUN_OUTPUT_MAX = 32 * 2 ** 20;
 // notebook-session.ts displayCost, HARD-58F-1)
 export const ITEM_DISPLAYS_MAX = 10000;
 const sizes = new WeakMap<any[], { used: number; cut: boolean; displays: number }>();
+// (an @interact's own output area, one per interact (its target): its function's run at its defaults, whose error
+// lib/_interact.py prints there as a traceback rather than raising, as Sage's interact does. What of each is kept is
+// known by identity, its target and what each entry was charged, so a clear_output() there clears that target's only
+// and gives its bytes back; no copy of its text is kept beside the item's capped list (astra's INTERACT-BUFFER-1,
+// daybreak3's INTERACT-COLLECT-1). That a traceback came to a target is a flag of that target's, set as each message
+// passes, kept or not (past the item's caps, it still fails), and cleared with it)
+const interactTarget = new WeakMap<object, unknown>(), interactBytes = new WeakMap<object, number>(), interactDisplays = new WeakSet<object>();
+const interactRaised = new WeakMap<any[], Set<unknown>>(), interactRaisedUntracked = new WeakSet<any[]>();
+const TRACEBACK = "Traceback (most recent call last):";
+// (at most this many interacts' flags an item: past them, one mark of the item's that one raised, kept until the item's
+// own clear (astra's INTERACT-META-1): its error is still said, its interact's clear just can't take it back)
+const INTERACT_FLAGS_MAX = ITEM_DISPLAYS_MAX;
+/** (for the tests: how many interacts' flags the item keeps) */
+export const interactFlags = (list: any[]) => interactRaised.get(list)?.size ?? 0;
+/** The error of an item's @interact runs at their defaults, if one raised: each one's traceback as kept (else said
+ * not kept), and why, last (board check keeps an error's last lines). From each target's kept stderr, and its flag. */
+export function interactError(list: any[]): string | null {
+  const stderr = new Map<unknown, string>();
+  for (const o of list) if (interactTarget.has(o) && o.output_type === "stream" && o.name === "stderr") stderr.set(interactTarget.get(o), (stderr.get(interactTarget.get(o)) ?? "") + o.text);
+  const said: string[] = [];
+  for (const t of new Set([...stderr.keys(), ...(interactRaised.get(list) ?? [])])) {
+    const kept = stderr.get(t) ?? "", tb = kept.indexOf(TRACEBACK);
+    if (tb >= 0) said.push(kept.slice(tb).trim());
+    else if (interactRaised.get(list)?.has(t)) said.push("[its traceback was not kept: past the output limit]");
+  }
+  if (!said.length && interactRaisedUntracked.has(list)) said.push("[its traceback was not kept: past the output limit]");
+  return said.length ? said.join("\n") + "\n(raised by the item's @interact function, run with its default values)" : null;
+}
 
 const CUT_WHY = { item: `${ITEM_OUTPUT_MAX / 2 ** 20} MB for this item`, run: `${RUN_OUTPUT_MAX / 2 ** 20} MB for the whole board`, displays: `${ITEM_DISPLAYS_MAX} displays for this item` };
 const cutNote = (why: keyof typeof CUT_WHY) => ({ output_type: "stream", name: "stderr", text: `\n[output cut: past ${CUT_WHY[why]}; the rest was not kept]\n` });
+// (an item's cut said once: an interact's clear can lift the cut, and its next cut must not add another note, which
+// is charged to nothing (astra's INTERACT-CUT-NOTE-1); the item's own clear empties the list, and the note with it)
+const cutSaid = new WeakSet<any[]>();
+const sayCut = (list: any[], why: keyof typeof CUT_WHY) => { if (cutSaid.has(list)) return; cutSaid.add(list); list.push(cutNote(why)); };
 
 // a run's messages, as the notebook keeps them (Jupyter's outputs): streams
 // joined, displays as display_data, clear_output() as it says
-function collect(list: any[], m: any, kept: { run: number }) {
-  if (m.target != null) return; // (an @interact's own output area: shown when it is moved)
+export function collect(list: any[], m: any, kept: { run: number }) {
   const size = sizes.get(list) ?? { used: 0, cut: false, displays: 0 };
   sizes.set(list, size);
-  if (m.clear) { kept.run -= size.used; size.used = 0; size.cut = false; size.displays = 0; list.length = 0; return; }
+  // (an @interact's own output area: its run at its defaults, kept with the item, after its controls, under the item's
+  // caps; a clear_output() there clears only what was kept of that interact's, its bytes given back, and its flag)
+  const mine = m.target != null;
+  if (mine) {
+    if (m.clear) {
+      let freed = false;
+      for (let i = list.length - 1; i >= 0; i--) if (interactTarget.has(list[i]) && interactTarget.get(list[i]) === m.target) {
+        const b = interactBytes.get(list[i]) ?? 0;
+        size.used -= b; kept.run -= b;
+        if (interactDisplays.has(list[i])) size.displays--;
+        list.splice(i, 1);
+        freed = true;
+      }
+      // (what it gave back can be written again: each message is checked against the caps as it comes)
+      if (freed) size.cut = false;
+      interactRaised.get(list)?.delete(m.target);
+      return;
+    }
+    if (m.stream === "stderr" && String(m.text ?? "").includes(TRACEBACK)) {
+      const r = interactRaised.get(list) ?? new Set();
+      if (r.has(m.target) || r.size < INTERACT_FLAGS_MAX) { r.add(m.target); interactRaised.set(list, r); }
+      else interactRaisedUntracked.add(list);
+    }
+  }
+  if (m.clear) { kept.run -= size.used; size.used = 0; size.cut = false; size.displays = 0; list.length = 0; cutSaid.delete(list); interactRaised.delete(list); interactRaisedUntracked.delete(list); return; }
   // (the worker cut the rest where it was written)
   if (m.cut) {
-    if (!size.cut) list.push(cutNote(m.cut in CUT_WHY ? m.cut : "item"));
+    if (!size.cut) sayCut(list, m.cut in CUT_WHY ? m.cut : "item");
     size.cut = true;
     return;
   }
   const bytes = m.stream ? String(m.text ?? "").length : m.display ? displayCost(m.display) : m.interact ? DISPLAY_ENVELOPE + JSON.stringify(m.interact).length : 0;
   if ((m.display || m.interact) && !size.cut && ++size.displays > ITEM_DISPLAYS_MAX) {
     size.cut = true;
-    list.push(cutNote("displays"));
+    sayCut(list, "displays");
     return;
   }
   if (size.cut) return;
   if (size.used + bytes > ITEM_OUTPUT_MAX || kept.run + bytes > RUN_OUTPUT_MAX) {
     size.cut = true;
-    list.push(cutNote(size.used + bytes > ITEM_OUTPUT_MAX ? "item" : "run"));
+    sayCut(list, size.used + bytes > ITEM_OUTPUT_MAX ? "item" : "run");
     return;
   }
   size.used += bytes;
   kept.run += bytes;
+  const keep = (o: object) => { list.push(o); if (mine) { interactTarget.set(o, m.target); interactBytes.set(o, bytes); } };
   if (m.stream) {
     const last = list[list.length - 1];
-    if (last?.output_type === "stream" && last.name === m.stream) last.text += m.text;
-    else list.push({ output_type: "stream", name: m.stream, text: m.text });
-  } else if (m.display) list.push({ output_type: "display_data", data: m.display, metadata: {} });
+    // (joined only with the same area's: the cell's own, or the same interact's)
+    if (last?.output_type === "stream" && last.name === m.stream && interactTarget.has(last) === mine && (!mine || interactTarget.get(last) === m.target)) { last.text += m.text; if (mine) interactBytes.set(last, (interactBytes.get(last) ?? 0) + bytes); }
+    else keep({ output_type: "stream", name: m.stream, text: m.text });
+  } else if (m.display) { const o = { output_type: "display_data", data: m.display, metadata: {} }; keep(o); if (mine) interactDisplays.add(o); }
   else if (m.interact) list.push({ output_type: "display_data", data: { "text/plain": "[interactive controls]" }, metadata: {} });
 }
 
