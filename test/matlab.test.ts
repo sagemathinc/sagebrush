@@ -2868,10 +2868,12 @@ test("x = save, x = clear and x = clearvars refuse before they run: no matlab.ma
   const { mkdtempSync, readdirSync, rmSync } = require("node:fs");
   const { join } = require("node:path");
   // MathWorks documents no output arguments for save, clear and clearvars, so the
-  // call fails with "Too many output arguments." before it does anything. save and
-  // clear are built-ins, whose identifier for it is MATLAB:maxlhs (MathWorks Answers
-  // 603655; the y = disp(...) case). clearvars' identifier has no source: only its
-  // message is pinned.
+  // call fails with "Too many output arguments." before it does anything. Its
+  // identifier for save and clear, MATLAB:maxlhs, is inferred (they are built-ins)
+  // from two sources about other calls: an answer on MATLAB Answers 603655 catches
+  // MATLAB:maxlhs for this message from an out-of-process MEX host's feval, and
+  // Ohio State's MATLAB course page lists it for y = disp('message'). clearvars'
+  // identifier has no source: only its message is pinned.
   const dir = mkdtempSync(join(require("node:os").tmpdir(), "sb-save-"));
   try {
     const both = "catch err, disp([err.message ' | ' err.identifier]), end";
