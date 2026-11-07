@@ -1146,8 +1146,17 @@ def _eig(np, a):
     return f(a) if f is not None else np.linalg.eig(a)
 
 
+def _no_generalized(args, kwds):
+    # A v = lambda B v (Sage: LAPACK's generalized problem) is refused rather
+    # than B ignored: eigenmatrix_right(B) gave the eigenvalues of A alone
+    other = args[0] if args else kwds.get("other")
+    if other is not None:
+        raise NotImplementedError("the generalized eigenvalue problem (other=B) over RDF and CDF is not available in sagebrush yet")
+
+
 def _eigenvalues(M, *args, **kwds):
     """The eigenvalues, in the order LAPACK gives them."""
+    _no_generalized(args, kwds)
     np = _np()
     w = _eig(np, _array(M))[0]
     out = []
@@ -1163,12 +1172,14 @@ def _eigenvalues(M, *args, **kwds):
 
 def _eigenvectors_right(M, *args, **kwds):
     """[(eigenvalue, [unit eigenvector], 1)], as LAPACK gives them."""
+    _no_generalized(args, kwds)
     np = _np()
     w, v = _eig(np, _array(M))
     return _pairs(M, w, v)
 
 
 def _eigenvectors_left(M, *args, **kwds):
+    _no_generalized(args, kwds)
     np = _np()
     w, v = _eig(np, _array(M).T)
     return _pairs(M, w, v)
@@ -1186,7 +1197,8 @@ def _pairs(M, w, v):
     return out
 
 
-def _eigenmatrix_right(M):
+def _eigenmatrix_right(M, other=None):
+    _no_generalized((other,), {})
     np = _np()
     w, v = _eig(np, _array(M))
     n = len(w.tolist())
