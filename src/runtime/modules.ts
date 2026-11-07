@@ -2285,6 +2285,12 @@ newBuiltinModule("os", (m) => {
     if (i > 2147483647 || i < -2147483648) raise(T.OverflowError, "Python int too large to convert to C int");
     return Number(i);
   };
+  // (a descriptor: a C int, and a negative one EBADF before any host call, as the kernel's)
+  const fdArg = (x: any): number => {
+    const fd = cInt(x);
+    if (fd < 0) throw Object.assign(new Error("EBADF"), { code: "EBADF", errno: -9 });
+    return fd;
+  };
   const cWide = (x: any, c: string): bigint => {
     const i = BigInt(O.index(x));
     if (i > 9223372036854775807n || i < -9223372036854775808n) raise(T.OverflowError, `Python int too large to convert to C ${c}`);
@@ -2310,13 +2316,13 @@ newBuiltinModule("os", (m) => {
   });
   m.open.$sig = { args: ["path", "flags", "mode"], posonly: 0, vararg: null, kwonly: ["dir_fd"], kwarg: null, defaults: [0o777], kwdefaults: { dir_fd: null } };
   fn(m, "close", (fd: any) => fdCall(() => {
-    const n = cInt(fd);
+    const n = fdArg(fd);
     fs.closeSync(n);
     cliPos.delete(n);
     return null;
   }));
   fn(m, "read", (fd: any, n: any) => fdCall(() => {
-    const f = cInt(fd), want = cWide(n, "ssize_t");
+    const want = cWide(n, "ssize_t"), f = fdArg(fd);
     if (want < 0n) throw Object.assign(new Error("EINVAL"), { code: "EINVAL", errno: -22 });
     // (a count more than a bytes object can hold (ops.ts's checked 2**32 - 1): MemoryError, as CPython's allocation
     // of the count fails; the browser's result is exactly the bytes read, the CLI's buffer at most 64 MiB a call, a
@@ -2330,7 +2336,7 @@ newBuiltinModule("os", (m) => {
     return new PyBytes(buf.slice(0, got));
   }));
   fn(m, "write", (fd: any, data: any) => fdCall(() => {
-    const f = cInt(fd);
+    const f = fdArg(fd);
     const b = O.bufferOf(data);
     if (b === undefined || b === null) raise(T.TypeError, `a bytes-like object is required, not '${typeName(data)}'`);
     if (shimFs) {
@@ -2343,7 +2349,7 @@ newBuiltinModule("os", (m) => {
     return n;
   }));
   fn(m, "lseek", (fd: any, pos: any, how: any) => fdCall(() => {
-    const f = cInt(fd), off = Number(cWide(pos, "long")), wh = cInt(how);
+    const f = fdArg(fd), off = Number(cWide(pos, "long")), wh = cInt(how);
     if (shimFs) return fs.seekFd(f, off, wh);
     const c = cliPos.get(f);
     // (a descriptor not opened here: a closed or unknown one is EBADF, as fstat says; another, a stream's, ESPIPE)
@@ -2357,7 +2363,7 @@ newBuiltinModule("os", (m) => {
     c.pos = base + off;
     return c.pos;
   }));
-  fn(m, "fstat", (fd: any) => fdCall(() => statResult(fs.fstatSync(cInt(fd)))));
+  fn(m, "fstat", (fd: any) => fdCall(() => statResult(fs.fstatSync(fdArg(fd)))));
   wrap("chmod", (p: any, mode: any, dir_fd: any = null, _follow_symlinks: any = true) => {
     noDirFd(dir_fd);
     fs.chmodSync(at(pathStr(p)), cInt(mode));
@@ -2424,6 +2430,8 @@ newBuiltinModule("os", (m) => {
   });
   fn(m, "get_terminal_size", (fd: any = 1) => {
     const f = cInt(fd);
+    // (a descriptor not open, a negative one among them: EBADF, as the ioctl's; an open one that is no terminal, ENOTTY)
+    if (f < 0 || f > 2) fdCall(() => fs.fstatSync(fdArg(f)));
     const s = !shimFs && f === 1 ? process.stdout : !shimFs && f === 2 ? process.stderr : null;
     if (s && (s as any).isTTY && (s as any).columns) return termSize((s as any).columns, (s as any).rows);
     throw markRaised(callObj(T.OSError, [25, "Inappropriate ioctl for device"]));

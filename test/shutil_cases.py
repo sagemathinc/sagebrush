@@ -38,6 +38,12 @@ for bad in [lambda: os.open("h.bin", 2**32 + os.O_CREAT + os.O_WRONLY), lambda: 
     except (OSError, OverflowError, MemoryError) as e:
         print(type(e).__name__, getattr(e, "errno", None), e)
 print(os.path.exists("h.bin"), os.lseek(fd, 0, os.SEEK_CUR), os.read(fd, 2**24), os.lseek(fd, 0, os.SEEK_CUR))
+# descriptors: only 0, 1 and 2 are the standard streams; a negative one, or one not open, is EBADF
+for bad in [lambda: os.write(-1, b"X"), lambda: os.read(-1, 1), lambda: os.close(-1), lambda: os.lseek(-1, 0, os.SEEK_SET), lambda: os.fstat(-1), lambda: os.write(-2**31, b"X"), lambda: os.read(-7, 0), lambda: os.write(77, b"X"), lambda: os.read(77, 1), lambda: os.close(77), lambda: os.lseek(77, 0, os.SEEK_SET), lambda: os.get_terminal_size(-1), lambda: os.get_terminal_size(77)]:
+    try:
+        bad(); print("no error")
+    except OSError as e:
+        print(type(e).__name__, e.errno, e.strerror)
 os.close(fd)
 
 # chmod, utime, access

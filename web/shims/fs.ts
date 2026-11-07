@@ -387,8 +387,9 @@ function writeFd(h: Fd, data: Uint8Array): number {
 export function writeSync(fd: number, data: any) {
   const h = fds.get(fd);
   if (h !== undefined) return writeFd(h, typeof data === "string" ? new TextEncoder().encode(data) : data);
-  // (a closed or never-opened descriptor: EBADF, as the kernel says; only 1 and 2 are the page's streams)
-  if (fd > 2) fail("EBADF", -9, "write", "");
+  // (a closed, never-opened or negative descriptor: EBADF, as the kernel says; only 0, 1 and 2 are the standard
+  // streams, 1 and 2 the page's)
+  if (!(fd >= 0 && fd <= 2)) fail("EBADF", -9, "write", "");
   hooks.write(fd, typeof data === "string" ? data : new TextDecoder().decode(data));
 }
 // (so that the runtime's writeAll knows this writeSync, which takes all of
@@ -399,7 +400,7 @@ export function writeSync(fd: number, data: any) {
 export function readSync(fd?: number, buf?: Uint8Array) {
   const h = fd === undefined ? undefined : fds.get(fd);
   if (h === undefined) {
-    if (fd !== undefined && fd > 2) fail("EBADF", -9, "read", "");
+    if (fd !== undefined && !(fd >= 0 && fd <= 2)) fail("EBADF", -9, "read", "");
     return 0;
   }
   if (!h.read) fail("EBADF", -9, "read", "");
