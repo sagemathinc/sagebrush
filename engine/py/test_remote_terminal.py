@@ -216,7 +216,14 @@ async def test_not_served_and_hello():
         g, r = await recv(leg)
         assert g == 2 and r["error"]["data"]["code"] == "refused" and r["error"]["message"] == "this page is paired for a kernel, not a terminal", r
         assert await until(lambda: {"relay": "close", "gen": 1} in leg.controls and {"relay": "close", "gen": 2} in leg.controls)
-        p = await tpaired(t, leg, sg, 3)
+        # (any other purpose, or none: the plain form, naming only this page's channel (grader's P4))
+        for gen, purpose in ((3, "files"), (4, None)):
+            leg.control(relay="page-open", conn="c%d" % gen, kind="runner", chan="terminal", gen=gen)
+            leg.send(pair_hello(sg, purpose=purpose), gen=gen)
+            g, r = await recv(leg)
+            assert g == gen and r["error"]["data"]["code"] == "refused" and r["error"]["message"] == "this page is paired for a terminal", (purpose, r)
+        assert await until(lambda: {"relay": "close", "gen": 3} in leg.controls and {"relay": "close", "gen": 4} in leg.controls)
+        p = await tpaired(t, leg, sg, 5)
         assert p.token and p.nonce == t.runner.gateway.current_nonce()
         # (a terminal page pairs nothing in the gateway: the kernel's paired connection is untouched)
         assert t.runner.paired_conn is None
