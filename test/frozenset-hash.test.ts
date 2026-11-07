@@ -36,6 +36,12 @@ test("a tuple subclass hashes as its tuple, and a __hash__ result in range is th
 
 // (daybreak3's HASH-EXACT-CONSUMER-1: a GenericAlias's hash, origin ^ args, and a union's, xored over its members,
 // combine exact hashes, now often bigints, on one 64-bit lane; equal aliases and unions find each other as keys)
+// (grader's TYPE-HASH-ROUND-1: a class whose metaclass defines __hash__ gets its result as an instance does, exactly,
+// in the 64-bit range as is and a larger one hashed; it was rounded through a double)
+test("a metaclass's __hash__ is a class's hash, exactly, as an instance's, as CPython's", () => {
+  assert.equal(run("m.py", "t = hash((int,))\nclass M(type):\n    def __hash__(s): return ~t\nC = M(\"C\", (), {})\nclass I:\n    def __hash__(s): return ~t\nclass M2(type):\n    def __hash__(s): return 2**62\nD = M2(\"D\", (), {})\nclass M3(type):\n    def __hash__(s): return 10**30\nE = M3(\"E\", (), {})\nprint(hash(C) == ~t, hash(I()) == ~t, hash(D), hash(E), {C: 1}[C], hash(int) == hash(int), len({C, D, E, I}))\n"), "True True 4611686018427387904 465258685558744706 1 True 4\n");
+});
+
 test("generic aliases and unions hash, equal ones alike, as CPython's", () => {
   assert.equal(run("g.py", "a, b = list[int], list[int]\nprint(hash(a) == hash(b), {a: 1}[b], hash(dict[str, tuple[int, ...]]) == hash(dict[str, tuple[int, ...]]))\nu, v = int | list[int], list[int] | int\nprint(hash(u) == hash(v), {u: \"u\"}[v], hash(int | str) == hash(str | int), type(hash(u)).__name__, type(hash(a)).__name__)\nprint(len({list[int], list[int], list[str], dict[str, int], int | list[int], list[int] | int}))\n"), "True 1 True\nTrue u True int int\n4\n");
 });

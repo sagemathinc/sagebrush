@@ -1463,8 +1463,11 @@ export function hashExact(x: any): any {
     if (isInt(v)) return normBig(hashIntExact(BigInt(v)));
     return normBig(hashFloatExact(v));
   }
-  if (x !== null && typeof x === "object" && x.$cls !== undefined && !(x instanceof PySet)) {
-    const f = lookupType(x.$cls, "__hash__");
+  // (an instance of a Python class, or a class whose metaclass is one: its __hash__, exactly; grader's
+  // TYPE-HASH-ROUND-1, a metaclass's result was rounded)
+  const cls = x !== null && typeof x === "object" && x.$cls !== undefined && !(x instanceof PySet) ? x.$cls : typeof x === "function" && x.$dict !== undefined && x.$meta !== undefined ? x.$meta : undefined;
+  if (cls !== undefined) {
+    const f = lookupType(cls, "__hash__");
     if (f !== undefined && f !== null && f !== objectHash) {
       const r = f(x);
       // (as CPython's slot_tp_hash: a result in the hash's 64-bit range is the hash, -1 made -2; a larger one is hashed)
