@@ -11,7 +11,7 @@ recorded the §7 answers, is part of r12.*
 
 ## In plain words
 
-- **The engine always runs as its own process.** The app talks to it through **one versioned protocol** (§2).
+- **The engine always runs apart from the app:** as its own process on the desktop and on remote machines, and in a worker on the web and mobile. The app talks to it through **one versioned protocol** (§2).
   There are three ways to reach it:
   - **desktop:** a local subprocess;
   - **web and mobile:** an in-page WebAssembly worker, because those can't start processes;
