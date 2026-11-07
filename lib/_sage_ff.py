@@ -424,9 +424,6 @@ class IntegerModRing_:
         return self.multiplicative_generator()
 
     def __getitem__(self, names):
-        if isinstance(names, str):
-            import _sage_poly
-            _sage_poly._check_ring_names([t.strip() for t in names.split(",")] if "," in names else [names])
         return _poly_ring_from_names(self, names)
 
     def square_roots_of_one(self):
@@ -2044,9 +2041,6 @@ class FiniteField_ext:
         return self._make([_random.randrange(self._p) for _ in range(self._n)])
 
     def __getitem__(self, names):
-        if isinstance(names, str):
-            import _sage_poly
-            _sage_poly._check_ring_names([t.strip() for t in names.split(",")] if "," in names else [names])
         return _poly_ring_from_names(self, names)
 
     def __reduce__(self):
@@ -3403,7 +3397,11 @@ def _poly_ring_from_names(base, names):
     if isinstance(names, list):
         # GF(7)[['T']]: power series
         import _sage_series
-        return _sage_series.PowerSeriesRing(base, names[0] if names else "x")
+        return _sage_series._series_ring_from_list(base, names)
+    # (each name as given is checked as Sage checks it: GF(5)[('a{b',)] and
+    # Zmod(6)['x', '_y'] are refused)
+    import _sage_poly
+    _sage_poly.ring_names(names)
     if (isinstance(names, (tuple, list)) and len(names) != 1) or (isinstance(names, str) and "," in names):
         import _sage_mpoly
         return _sage_mpoly.MPolynomialRing(base, None, names)

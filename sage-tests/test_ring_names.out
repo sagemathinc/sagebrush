@@ -62,3 +62,42 @@ PowerSeriesRing(QQ, '') -> ValueError: variable name must be nonempty
 LaurentSeriesRing(QQ, '') -> ValueError: variable name must be nonempty
 PolynomialRing(QQ, ['x', '']) -> ValueError: variable name must be nonempty
 PolynomialRing(QQ, 'x,') -> ValueError: variable name must be nonempty
+GF(5)[('a{b',)] -> ValueError: variable name 'a{b' is not alphanumeric
+GF(5)[('x', 'a{b')] -> ValueError: variable name 'a{b' is not alphanumeric
+GF(5)[['a{b']] -> ValueError: variable name 'a{b' is not alphanumeric
+GF(5)[['x', 'a{b']] -> ValueError: variable name 'a{b' is not alphanumeric
+GF(5)[('1x',)] -> ValueError: variable name '1x' does not start with a letter
+GF(5)[('x', '')] -> ValueError: variable name must be nonempty
+Zmod(6)[('a{b',)] -> ValueError: variable name 'a{b' is not alphanumeric
+Zmod(6)[('x', '_y')] -> ValueError: variable name '_y' does not start with a letter
+Zmod(6)[['x', 'a{b']] -> ValueError: variable name 'a{b' is not alphanumeric
+Zmod(6)[('α',)] -> Univariate Polynomial Ring in α over Ring of integers modulo 6
+GF(5)[('x', 'for')] -> Multivariate Polynomial Ring in x, for over Finite Field of size 5
+GF(9, 'c')[('a{b',)] -> ValueError: variable name 'a{b' is not alphanumeric
+QQ[['x', 'a{b']] -> ValueError: variable name 'a{b' is not alphanumeric
+QQ[['x', '']] -> ValueError: variable name must be nonempty
+ZZ[['x', 'a{b']] -> ValueError: variable name 'a{b' is not alphanumeric
+ZZ[('x', 'a{b')] -> ValueError: variable name 'a{b' is not alphanumeric
+Qp(5)['a{b'] -> ValueError: variable name 'a{b' is not alphanumeric
+Qp(5)[('a{b',)] -> ValueError: variable name 'a{b' is not alphanumeric
+Qp(5)[['a{b']] -> ValueError: variable name 'a{b' is not alphanumeric
+Qp(5)[['x', 'a{b']] -> ValueError: variable name 'a{b' is not alphanumeric
+Zp(5)['1x'] -> ValueError: variable name '1x' does not start with a letter
+Zp(5)[('a{b',)] -> ValueError: variable name 'a{b' is not alphanumeric
+Zp(5)[['x', 'a{b']] -> ValueError: variable name 'a{b' is not alphanumeric
+PolynomialRing(GF(5), ('x', 'a{b')) -> ValueError: variable name 'a{b' is not alphanumeric
+PolynomialRing(GF(5), names=('x', 'a{b')) -> ValueError: variable name 'a{b' is not alphanumeric
+PolynomialRing(GF(5), 2, 'a{b') -> ValueError: variable name 'a{b0' is not alphanumeric
+PolynomialRing(QQ, 2, '1x') -> ValueError: variable name '1x0' does not start with a letter
+PolynomialRing(QQ, 2, 'xy').gens() -> (x, y)
+PolynomialRing(QQ, 2, 'a1').gens() -> (a10, a11)
+PolynomialRing(QQ, 2, 'x_').gens() -> (x_0, x_1)
+PolynomialRing(QQ, 2, 'a{').gens() -> ValueError: variable name 'a{0' is not alphanumeric
+PolynomialRing(QQ, 3, 'abc').gens() -> (a, b, c)
+PolynomialRing(QQ, 3, 'ab1').gens() -> (ab10, ab11, ab12)
+PolynomialRing(QQ, 2, '_a').gens() -> ValueError: variable name '_a0' does not start with a letter
+PolynomialRing(QQ, 2, 'αβ').gens() -> (α, β)
+PolynomialRing(QQ, 2, 'ab,').gens() -> ValueError: variable name must be nonempty
+PolynomialRing(QQ, 1, 'xy').gens() -> (xy,)
+Multivariate Polynomial Ring in x, y over Finite Field of size 5
+T.<_x, y> = GF(5)[] -> ValueError: variable name '_x' does not start with a letter

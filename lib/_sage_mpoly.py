@@ -340,7 +340,9 @@ def _normalize_names(n, names):
         return [t.strip() for t in s.split(",") if t.strip()]
     if n is None or n == 1:
         return [s]
-    if len(s) == n and n > 1:
+    if len(s) == n and n > 1 and s.isalpha():
+        # (one letter per variable only when all are letters, as Sage:
+        # PolynomialRing(QQ, 2, 'a1') is in a10, a11)
         return list(s)
     return [s + str(i) for i in range(n)]
 

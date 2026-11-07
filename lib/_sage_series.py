@@ -19,6 +19,17 @@ def _sa():
 _RINGS = {}
 
 
+def _series_ring_from_list(base, names):
+    """K[['x']]: the power series ring in x, each name checked as Sage checks
+    it; several names (K[['x', 'y']]) are a multivariate power series ring,
+    not here yet."""
+    import _sage_poly
+    names = _sage_poly.ring_names(names) if names else ["x"]
+    if len(names) > 1:
+        raise NotImplementedError("multivariate power series rings are not available in sagebrush yet")
+    return PowerSeriesRing(base, names[0])
+
+
 def PowerSeriesRing(base, name=None, default_prec=20, names=None, sparse=False, **kwds):
     """The ring of power series over base.
 
@@ -35,9 +46,8 @@ def PowerSeriesRing(base, name=None, default_prec=20, names=None, sparse=False, 
         name = "x"
     if isinstance(name, (list, tuple)):
         name = name[0]
-    if isinstance(name, str):
-        import _sage_poly
-        _sage_poly._check_ring_names([name])
+    import _sage_poly
+    _sage_poly.ring_names(name)
     key = ("P", id(base), str(name), int(default_prec))
     if key not in _RINGS:
         _RINGS[key] = SeriesRing_(base, str(name), int(default_prec), False)
@@ -60,9 +70,8 @@ def LaurentSeriesRing(base, name=None, default_prec=20, names=None, sparse=False
         name = "x"
     if isinstance(name, (list, tuple)):
         name = name[0]
-    if isinstance(name, str):
-        import _sage_poly
-        _sage_poly._check_ring_names([name])
+    import _sage_poly
+    _sage_poly.ring_names(name)
     key = ("L", id(base), str(name), int(default_prec))
     if key not in _RINGS:
         _RINGS[key] = SeriesRing_(base, str(name), int(default_prec), True)

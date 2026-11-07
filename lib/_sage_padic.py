@@ -387,7 +387,9 @@ class pAdicGeneric_:
         # univariate polynomial ring (lib/_sage_padic_ext.py)
         if isinstance(names, list):
             import _sage_series
-            return _sage_series.PowerSeriesRing(self, names[0] if names else "x")
+            return _sage_series._series_ring_from_list(self, names)
+        import _sage_poly
+        _sage_poly.ring_names(names)
         if isinstance(names, tuple):
             if len(names) != 1:
                 raise NotImplementedError("multivariate polynomial rings over p-adic rings are not available in sagebrush yet")
