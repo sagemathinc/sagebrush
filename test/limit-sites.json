@@ -9950,6 +9950,21 @@
   "owner": "python (@sagebrush-python)",
   "row": "src-7"
  },
+ "src/runtime/modules.ts :: cInt :: if (i > 2147483647 || i < -2147483648) raise(T.OverflowError, \"Python int too large to convert to C int\"); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython's own argument contract, not a Sagebrush cap: os's descriptors, flags, modes and lseek's how are C ints in CPython (Modules/posixmodule.c), and outside it CPython raises this same OverflowError; no value reaches the file system with bits dropped (astra's OPEN-FLAGS-1)"
+ },
+ "src/runtime/modules.ts :: cWide :: if (e?.unsupported) raise(T.NotImplementedError, String(e.message)); #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an os.open form the browser's virtual file system doesn't do (O_DIRECTORY, a folder, O_TRUNC read-only, unknown flags): NotImplementedError saying so, before any effect (P3b-2 design note, SEC cleared)"
+ },
+ "src/runtime/modules.ts :: cWide :: if (i > 9223372036854775807n || i < -9223372036854775808n) raise(T.OverflowError, `Python int too large to convert to C ${c}`); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython's own argument contract, not a Sagebrush cap: os.read's count is a ssize_t and os.lseek's offset a C long (off_t) in CPython, and outside them CPython raises this same OverflowError"
+ },
  "src/runtime/modules.ts :: chdir :: const READ_NOFOLLOW_MAX = 50_000_000; #0": {
   "class": "1",
   "disposition": {
@@ -9962,11 +9977,6 @@
   "class": "2+3",
   "owner": "python (@sagebrush-python)",
   "row": "src-7"
- },
- "src/runtime/modules.ts :: fdInt :: if (e?.unsupported) raise(T.NotImplementedError, String(e.message)); #0": {
-  "class": "coverage",
-  "owner": "python (@sagebrush-python)",
-  "reason": "an os.open form the browser's virtual file system doesn't do (O_DIRECTORY, a folder, O_TRUNC read-only, unknown flags): NotImplementedError saying so, before any effect (P3b-2 design note, SEC cleared)"
  },
  "src/runtime/modules.ts :: importStar :: [\"debug\", \"inspect\", \"interactive\", \"optimize\", \"dont_write_bytecode\", \"no_user_site\", \"no_site\", \"ignore_environment\", \"verbose\", \"bytes_warning\", \"quiet\", \"hash_randomization\", \"isolated\", \"dev_mode\", \"utf8_mode\", \"warn_default_encoding\", \"safe_path\", \"int_max_str_digits\"], #0": {
   "class": "none",
@@ -10084,7 +10094,7 @@
   "owner": "python (@sagebrush-python)",
   "row": "src-7"
  },
- "src/runtime/modules.ts :: quiet :: EBUSY: \"Device or resource busy\", EINVAL: \"Invalid argument\", ELOOP: \"Too many levels of symbolic links\", #0": {
+ "src/runtime/modules.ts :: quiet :: EBUSY: \"Device or resource busy\", EINVAL: \"Invalid argument\", EFBIG: \"File too large\", ELOOP: \"Too many levels of symbolic links\", #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
   "reason": "the strerror table (CPython's messages for errno codes): the word resource in EBUSY's text, not a cap"
