@@ -242,8 +242,15 @@ function handleFromlist(m: any, fromlist: any, recursive: boolean): void {
 // CPython's _bootstrap._gcd_import) does not go through builtins.__import__
 // or importlib.__import__, whoever replaced them: a checked absolute name
 // to the module itself, from sys.modules or loaded
+// (importlib.invalidate_caches()'s generation, as CPython's _NamespacePath._epoch: a namespace package's portions
+// are recomputed after it advances even if its parent's path is unchanged; compile.ts's nsRefresh)
+export const importEpoch = { n: 0 };
 newBuiltinModule("_pyjs_import", (m) => {
   m.find_and_load = builtin((name: any) => importModule(name), "find_and_load");
+  m.invalidate_caches = builtin(() => {
+    importEpoch.n++;
+    return null;
+  }, "invalidate_caches");
 });
 
 // builtins.__import__, and the import statements, which call a replaced
