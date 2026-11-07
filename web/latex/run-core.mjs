@@ -8,7 +8,7 @@
 // SECURITY: the items' code reaches the session only as base64 inside the script (never spliced into it as text); what
 // the session prints is parsed, never evaluated, and each result is checked here as the CLI checks it (the LaTeX's
 // size, the plot's SVG), and again where it is shown (sagetex.mjs).
-import { MAX_RESULT, WRAPPER_VERSION, utf8len, whyRejected, safeRel, sha256hex, DEPS_MAX, depsOf, staleOf } from "./engine/sagetex.mjs";
+import { MAX_RESULT, WRAPPER_VERSION, utf8len, whyRejected, safeRel, sha256hex, DEPS_MAX } from "./engine/sagetex.mjs";
 
 export const RESULTS_FORMAT = "sagebrush-latex-results";
 export const RUN_LIMITS = { svg: 2 * 2 ** 20, msg: 4000 };   // (the CLI's SVG_MAX and MSG_MAX, src/latex-cli.ts)
@@ -175,37 +175,9 @@ export function statesOf(items, got, stopped) {
   return states;
 }
 
-// ---- the editor reading a results file's record of what its Run imported (Codex W01)
-/** The .tex's folder's reader of recorded files, the CLI's rule (sagetex.mjs staleOf): the file's bytes, at most
- * `left`; null if it isn't there or is in the Trash; "over" if larger than `left`. */
-export const wsReader = (ws, dir) => async (rel, left) => {
-  const p = (dir === "/" ? "" : dir) + "/" + rel;
-  try { const r = await ws.readUpTo(p, left); return r.entry?.trashed ? null : r.content; }
-  catch (err) { return err?.code === "limit" ? "over" : null; }
-};
-/** What was seen of a results file (`e`, its entry) and of each file its Run imported: their ids, revisions and
- * sizes in one string; null if there is no results file. */
-export async function seenOf(ws, e, dir, deps) {
-  if (!e || e.trashed) return null;
-  const base = dir === "/" ? "" : dir;
-  const ds = await Promise.all(deps.map(([rel]) => ws.stat(base + "/" + rel).catch(() => undefined)));
-  // (rev counts every write: `updated` is a time in ms and two writes may share it (daybreak3's ENGINE-SEEN-REV-1))
-  return `${e.fid}:${e.rev}:${e.updated}:${e.size}#` + ds.map((d) => d && !d.trashed ? `${d.fid}:${d.rev}:${d.updated}:${d.size}` : "-").join("|");
-}
-/** A results file `j` (read from `p`, its entry `e`) checked against the files its Run imported: {saved, deps, stale,
- * seen}. `saved`: its items if they may be used, else []; `stale`: why not (sagetex.mjs staleWhy), or null. `seen`
- * is the state checked, or null if anything changed while it was checked (astra's DEP-SEEN-1, daybreak3's
- * ENGINE-SEEN-COMMIT-1): then nothing is used and nothing counts as seen, so the next read checks again. */
-export async function checkedResults(ws, p, e, j, dir) {
-  const deps = depsOf(j);
-  if (deps === "invalid" || deps === "incomplete") return { saved: [], deps: [], stale: deps, seen: await seenOf(ws, e, dir, []) };
-  if (!deps) return { saved: j.items, deps: [], stale: null, seen: await seenOf(ws, e, dir, []) };
-  const before = await seenOf(ws, e, dir, deps);
-  const stale = await staleOf(deps, wsReader(ws, dir));
-  const after = await seenOf(ws, await ws.stat(p).catch(() => undefined), dir, deps);
-  const stable = before !== null && before === after;
-  return { saved: stale || !stable ? [] : j.items, deps, stale: stable ? stale : null, seen: stable ? after : null };
-}
+// (the results file checked against the files its Run imported: results-check.mjs, a module of its own so the page
+//  reads results without fetching Run's chunk (#824); re-exported for Run's callers)
+export { wsReader, seenOf, checkedResults } from "./results-check.mjs";
 
 /** The results file's text. */
 export const resultsText = (states, deps = []) => JSON.stringify({ format: RESULTS_FORMAT, version: 1, wrapper: WRAPPER_VERSION, generator: "sagebrush editor", items: states, ...(deps === "incomplete" || deps.length ? { deps } : {}) }) + "\n";
