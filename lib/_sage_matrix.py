@@ -838,6 +838,15 @@ def _select(k, n, err="matrix index out of range"):
     return [one(k)], True
 
 
+def _no_generalized(m, other):
+    # A v = lambda B v: Sage solves it only over RDF and CDF (an exact
+    # matrix's eigenmatrix_right(B) ignored B and gave a wrong answer); the
+    # refusal in _sage_matrix_more, loaded on first use
+    if other is not None:
+        import _sage_matrix_more
+        _sage_matrix_more.refuse_generalized(m)
+
+
 class Matrix:
     """A dense matrix over ZZ or QQ.
 
@@ -1246,6 +1255,36 @@ class Matrix:
             True
         """
         return not self.is_immutable()
+
+    def __copy__(self):
+        """A mutable copy with its own rows, as Sage: changing it leaves self
+        alone (copy() shared the rows, so N[0, 1] = 4 changed M too).
+
+        EXAMPLES::
+
+            sage: from copy import copy
+            sage: M = matrix(QQ, [[0, 1], [1, 0]]); M.set_immutable(); N = copy(M); N[0, 1] = 4
+            sage: M[0, 1], N[0, 1], N.is_mutable()
+            (1, 4, True)
+        """
+        m = object.__new__(type(self))
+        for cls in type(self).__mro__:
+            for s in getattr(cls, "__slots__", ()):
+                if s != "__dict__" and hasattr(self, s):
+                    setattr(m, s, getattr(self, s))
+        if hasattr(self, "__dict__"):
+            m.__dict__.update(self.__dict__)
+        m._rows = [list(r) for r in self._rows]
+        m._immutable = False
+        if self._subdiv is not None:
+            m._subdiv = tuple(list(p) for p in self._subdiv)
+        return m
+
+    def __deepcopy__(self, memo):
+        # (as Sage: a deep copy keeps the immutability, a copy does not)
+        m = self.__copy__()
+        m._immutable = self.is_immutable()
+        return m
 
     def __hash__(self):
         # (a mutable matrix's hash would change under it, as in Sage: the
@@ -2185,6 +2224,7 @@ class Matrix:
             sage: matrix(QQ, [[1, 2], [3, 4]]).eigenvectors_right()
             [(-0.3722813232690144?, [(1, -0.6861406616345072?)], 1), (5.372281323269015?, [(1, 2.186140661634508?)], 1)]
         """
+        _no_generalized(self, other)
         return self._eigenvectors("right")
 
     right_eigenvectors = eigenvectors_right
@@ -2199,6 +2239,7 @@ class Matrix:
             sage: matrix(QQ, [[1, 2], [3, 4]]).eigenvectors_left()
             [(-0.3722813232690144?, [(1, -0.4574271077563382?)], 1), (5.372281323269015?, [(1, 1.457427107756339?)], 1)]
         """
+        _no_generalized(self, other)
         return self._eigenvectors("left")
 
     left_eigenvectors = eigenvectors_left
@@ -2308,7 +2349,12 @@ class Matrix:
             [1 0 0]
             sage: A*P == P*D
             True
+            sage: A.eigenmatrix_right(2*identity_matrix(QQ, 3))
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: generalized eigenvector decomposition is implemented for RDF and CDF, but not for Rational Field
         """
+        _no_generalized(self, other)
         return self._eigenmatrix("right")
 
     def eigenmatrix_left(self, other=None):
@@ -2320,6 +2366,7 @@ class Matrix:
             [                   1 -0.4574271077563382?]
             [                   1   1.457427107756339?]
         """
+        _no_generalized(self, other)
         return self._eigenmatrix("left")
 
     def diagonal(self):
