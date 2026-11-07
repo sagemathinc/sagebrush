@@ -1223,6 +1223,7 @@ try {
   // a search matching 7,500 entries in 2,500 folders: drawn once typing pauses, quickly, and capped
   const tSearch = await ev(`new Promise((ok) => { const i = document.querySelector("#wssidebar .fsearch"); const t0 = performance.now(); i.value = "x"; i.dispatchEvent(new Event("input")); const wait = () => (document.querySelectorAll("#wssidebar .frow").length > 100 ? ok(performance.now() - t0) : setTimeout(wait, 20)); wait(); })`);
   const rowsN = await ev(`document.querySelectorAll("#wssidebar .frow").length`);
+  console.log(`a search over 10,000+ entries in 2,500 folders drawn in ${Math.round(tSearch)} ms (bound 3000 ms)`); // (printed: its margin, read from CI's logs)
   check(tSearch < 3000 && rowsN <= 1000 && /more not shown/.test(await ev(`document.querySelector("#wssidebar .ftree").innerText`)), `a search over 10,000+ entries in 2,500 folders: ${Math.round(tSearch)} ms, ${rowsN} rows drawn, the rest said`);
   await ev(`(() => { const i = document.querySelector("#wssidebar .fsearch"); i.value = ""; i.dispatchEvent(new Event("input")); return 1; })()`);
   await sleep(400);
