@@ -33,10 +33,41 @@ print(sys.flags.int_max_str_digits)
 print(locale.getpreferredencoding(), locale.getpreferredencoding(False), locale.getencoding(), io.text_encoding(None))
 `;
 
+// (its hash: the first one computed is kept through set_int_max_str_digits' in-place change, so a dict keyed by
+// sys.flags still finds it, as CPython 3.14's; and one first computed after the change is the changed tuple's;
+// daybreak3's SYS-FLAGS-HASH-1 on #827; each in its own process, the first hash being the one that's kept)
+const HASH_BEFORE = `
+import sys
+f = sys.flags
+h = hash(f)
+d = {f: 1}
+sys.set_int_max_str_digits(5000)
+print(hash(f) == h, d.get(f), f in d, {sys.flags: 2}[f], tuple(f)[17], hash(tuple(f)) == h)
+sys.set_int_max_str_digits(0)
+print(hash(sys.flags) == h, d[sys.flags])
+`;
+const HASH_AFTER = `
+import sys
+sys.set_int_max_str_digits(5000)
+f = sys.flags
+print(hash(f) == hash(tuple(f)), f.int_max_str_digits)
+sys.set_int_max_str_digits(0)
+print(hash(f) == hash(tuple(f)), {f: 3}[sys.flags])
+`;
+
 test("sys.flags: CPython 3.14's struct sequence and values; locale.getpreferredencoding works", () => {
   const env: Record<string, string> = { LC_ALL: "C.UTF-8", PATH: process.env.PATH ?? "" };
   const want = execFileSync("python3", ["-X", "int_max_str_digits=0", "-c", PROG], { encoding: "utf8", env });
   assert.equal(want.split("\n").length, 13, `CPython ran every line:\n${want}`);
   const got = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", PROG], { encoding: "utf8" });
   assert.equal(got, want);
+});
+
+test("sys.flags' hash: the first one kept through set_int_max_str_digits, as CPython 3.14's", () => {
+  const env: Record<string, string> = { LC_ALL: "C.UTF-8", PATH: process.env.PATH ?? "" };
+  for (const prog of [HASH_BEFORE, HASH_AFTER]) {
+    const want = execFileSync("python3", ["-X", "int_max_str_digits=0", "-c", prog], { encoding: "utf8", env });
+    assert.equal(want.split("\n").length, 3, `CPython ran every line:\n${want}`);
+    assert.equal(execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", prog], { encoding: "utf8" }), want);
+  }
 });

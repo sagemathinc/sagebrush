@@ -3934,6 +3934,12 @@ export function structseq(name: string, fields: string[], values: any[], extra: 
     extra.forEach((f, i) => d.set(f, new GetSet(cls!, f, (o) => o.$extra[i], readonly, readonly)));
     // (sys.flags and sys.version_info can't be made from Python, as CPython's can't)
     if (noNew) allocator(cls, () => raise(T.TypeError, `cannot create '${name}' instances`));
+    // (the first hash computed is kept, as CPython 3.14's tuples keep theirs: set_int_max_str_digits changes
+    // sys.flags in place, and a dict keyed by it still finds it; a hash first taken after the change is the new one's)
+    method(cls, "__hash__", (o: any) => {
+      if (o.$hash === undefined) Object.defineProperty(o, "$hash", { value: O.hashTupleOf(o) });
+      return o.$hash;
+    });
     d.set("n_fields", fields.length + extra.length);
     d.set("n_sequence_fields", fields.length);
     d.set("_fields", tuple(fields));
