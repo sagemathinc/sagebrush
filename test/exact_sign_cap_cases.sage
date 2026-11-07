@@ -36,3 +36,28 @@ finally:
 print(bool(d*s6 == 0), bool(d*s6 != 0), bool(d*s6 + 2^-100 > 0), bool(s6 - 20 == 0), _sage_qqbar._degree_cap is None)
 # 6. a small one is still exact
 print(_sage_expr._exact_sign(sqrt(2) + sqrt(3) - sqrt(5 + 2*sqrt(6))), _sage_qqbar._degree_cap is None)
+# 7. I counts as degree 2 in the tree's bound: I times five square roots is degree 64, so the whole constant is refused
+#    before it is built (its factors, each under the cap, are still tried for a zero)
+calls.clear(); _sage_qqbar._convert = _spy
+try:
+    e7 = I*(sqrt(5) + sqrt(7) + sqrt(11) + sqrt(13) + sqrt(17)) - 20
+    print(_sage_expr._exact_sign(e7), any(str(c) == str(e7) for c in calls), _sage_qqbar._degree_cap is None)
+finally:
+    _sage_qqbar._convert = saved
+# 8. a Gaussian rational atom has no tree bound: the conversion runs under the armed cap (32), restored after
+caps = []
+def _cap_spy(x):
+    caps.append(_sage_qqbar._degree_cap)
+    return saved(x)
+_sage_qqbar._convert = _cap_spy
+try:
+    print(_sage_expr._exact_sign((1 + 2*I)*(sqrt(2) + sqrt(3)) - 5), sorted(set(caps)), _sage_qqbar._degree_cap is None)
+finally:
+    _sage_qqbar._convert = saved
+# 9. a constant past 4000 characters is refused at once, before any factor is pruned or converted
+calls.clear(); _sage_qqbar._convert = _spy
+try:
+    big = d*sum(sqrt(k) for k in range(2, 400))
+    print(len(big._s) > 4000, _sage_expr._exact_sign(big), len(calls), _sage_qqbar._degree_cap is None)
+finally:
+    _sage_qqbar._convert = saved
