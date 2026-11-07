@@ -10112,9 +10112,10 @@ def _ws_vars(ns):
 def ws_call(name, ns, args, nargout):
     """functions that see the caller's variables; one that gives no value where one is
     asked for (x = save) is MATLAB's error, raised before the call for those with no
-    outputs at all, as MATLAB's, so nothing is written or cleared"""
+    outputs at all, as MATLAB's, so nothing is written or cleared (save and clear are
+    MATLAB built-ins, whose identifier for it is MATLAB:maxlhs)"""
     if nargout >= 1 and name in ("save", "clear", "clearvars"):
-        raise _err("Too many output arguments.", "MATLAB:TooManyOutputs")
+        raise _err("Too many output arguments.", "MATLAB:TooManyOutputs" if name == "clearvars" else "MATLAB:maxlhs")
     r = _ws_call(name, ns, args, nargout)
     if nargout == 1 and r is NOVAL:
         raise _err("Too many output arguments.", "MATLAB:TooManyOutputs")

@@ -2868,19 +2868,23 @@ test("x = save, x = clear and x = clearvars refuse before they run: no matlab.ma
   const { mkdtempSync, readdirSync, rmSync } = require("node:fs");
   const { join } = require("node:path");
   // MathWorks documents no output arguments for save, clear and clearvars, so the
-  // call fails with "Too many output arguments." before it does anything.
+  // call fails with "Too many output arguments." before it does anything. save and
+  // clear are built-ins, whose identifier for it is MATLAB:maxlhs (MathWorks Answers
+  // 603655; the y = disp(...) case). clearvars' identifier has no source: only its
+  // message is pinned.
   const dir = mkdtempSync(join(require("node:os").tmpdir(), "sb-save-"));
   try {
+    const both = "catch err, disp([err.message ' | ' err.identifier]), end";
     const code = ["y = 5;",
-      "try, x = save; catch err, disp(err.message), end",
-      "try, x = save('a.mat', 'y'); catch err, disp(err.message), end",
-      "try, x = clear; catch err, disp(err.message), end",
+      `try, x = save; ${both}`,
+      `try, x = save('a.mat', 'y'); ${both}`,
+      `try, x = clear; ${both}`,
       "try, x = clearvars('y'); catch err, disp(err.message), end",
       "disp(exist('y'))"].join("\n");
     const lines = execFileSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
       { encoding: "utf8", cwd: dir, timeout: 10000 }).trim().split("\n").map((s: string) => s.trim());
-    assert.deepEqual(lines, ["Too many output arguments.", "Too many output arguments.", "Too many output arguments.",
-      "Too many output arguments.", "1"]);
+    const maxlhs = "Too many output arguments. | MATLAB:maxlhs";
+    assert.deepEqual(lines, [maxlhs, maxlhs, maxlhs, "Too many output arguments.", "1"]);
     assert.deepEqual(readdirSync(dir), []);
   } finally {
     rmSync(dir, { recursive: true, force: true });
