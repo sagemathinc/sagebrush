@@ -197,3 +197,67 @@ class FigureCanvas:
     def get_width_height(self, physical=False):
         w, h = self.figure._size
         return (int(round(w * self.figure.dpi)), int(round(h * self.figure.dpi)))
+
+
+def set_aspect(ax, aspect, adjustable=None):
+    """Axes.set_aspect: 'auto', 'equal' (1.0) or a number, y units per x unit
+    on screen; adjustable 'box' (matplotlib's default: the limits stay, the
+    Axes box takes their shape) or 'datalim' (a pair of limits moves as the
+    figure is drawn)."""
+    if adjustable is not None:
+        set_adjustable(ax, adjustable)
+    if isinstance(aspect, str) and aspect == "auto":
+        ax._opts.pop("aspect_ratio", None)
+        return
+    a = 1.0 if isinstance(aspect, str) and aspect == "equal" else float(aspect)
+    if not (a > 0 and math.isfinite(a)):
+        raise ValueError("aspect must be finite and positive ")
+    ax._opts["aspect_ratio"] = a
+
+
+def set_adjustable(ax, adjustable):
+    if adjustable not in ("box", "datalim"):
+        raise ValueError("%r is not a valid value for adjustable; supported values are 'box', 'datalim'" % (adjustable,))
+    ax._opts["_adjustable"] = adjustable
+
+
+def autoscale(ax, enable, axis):
+    """Axes.autoscale: on (the limits from the data again) or off (the
+    current limits kept)."""
+    for a in ("x", "y"):
+        if axis not in ("both", a):
+            continue
+        if enable:
+            for k in (a + "min", a + "max", "_" + a + "view"):
+                ax._opts.pop(k, None)
+        elif enable is False:
+            lo, hi = ax.get_xlim() if a == "x" else ax.get_ylim()
+            ax._opts[a + "min"], ax._opts[a + "max"] = lo, hi
+
+
+def axis_equal(ax, arg):
+    """axis('equal'): equal scales, the limits adjusted (datalim);
+    'scaled': in a box of their shape, the limits fixed as they are;
+    'square': both spans the larger one."""
+    if arg == "equal":
+        set_aspect(ax, "equal", "datalim")
+        return
+    set_aspect(ax, "equal", "box")
+    (x0, x1), (y0, y1) = ax.get_xlim(), ax.get_ylim()
+    if arg == "square":
+        edge = max(x1 - x0, y1 - y0)
+        x1, y1 = x0 + edge, y0 + edge
+    ax.set_xlim(x0, x1)
+    ax.set_ylim(y0, y1)
+
+
+def set_position(ax, pos):
+    """Axes.set_position: [left, bottom, width, height] or a Bbox, in figure
+    coordinates (kept as given: no float lost)."""
+    if hasattr(pos, "bounds") and hasattr(pos, "x0"):
+        l, b, w, h = (float(v) for v in pos.bounds)
+    else:
+        l, b, w, h = (float(v) for v in pos)
+    ax._rect = (l, 1 - b - h, w, h)
+    ax._bounds = (l, b, w, h)
+    ax._opts["exact"] = True

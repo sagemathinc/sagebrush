@@ -912,17 +912,9 @@ class Axes:
             apply_aspect(self)
 
     def set_position(self, pos, which="both"):
-        """The Axes at [left, bottom, width, height] (or a Bbox), in figure
-        coordinates."""
-        if hasattr(pos, "bounds") and hasattr(pos, "x0"):
-            l, b, w, h = (float(v) for v in pos.bounds)
-        else:
-            l, b, w, h = (float(v) for v in pos)
-        self._rect = (l, 1 - b - h, w, h)
-        self._bounds = (l, b, w, h)
-        self._opts["exact"] = True
+        from matplotlib._axes_geometry import set_position
+        set_position(self, pos)
 
-    # ---------------------------------------------------------------- contourf
     def contourf(self, *args, levels=None, cmap=None, colors=None, extend="neither", alpha=None, vmin=None, vmax=None, **kw):
         """Filled contours of Z (on its index grid, or over X, Y): drawn as
         one picture of the bands, as matplotlib's rasterized output looks."""
@@ -1169,62 +1161,30 @@ class Axes:
             self._opts["legend_loc"] = loc if loc != "best" else "upper right"
 
     def set_aspect(self, aspect, **kw):
-        """The data's aspect: 'auto', 'equal' (1) or a number, y units per x
-        unit on screen; adjustable 'box' (matplotlib's default: the limits
-        stay, the Axes box shrinks to the shape) or 'datalim' (the box
-        stays, a limit moves)."""
-        # (adjustable, anchor and share as keywords: **kw, as before)
-        if kw.get("adjustable") is not None:
-            self.set_adjustable(kw["adjustable"])
-        if isinstance(aspect, str) and aspect == "auto":
-            self._opts.pop("aspect_ratio", None)
-            return
-        a = 1.0 if isinstance(aspect, str) and aspect == "equal" else float(aspect)
-        if not (a > 0 and math.isfinite(a)):
-            raise ValueError("aspect must be finite and positive ")
-        self._opts["aspect_ratio"] = a
+        """'auto', 'equal' or a number; adjustable= 'box' (the default) or 'datalim'."""
+        from matplotlib._axes_geometry import set_aspect
+        set_aspect(self, aspect, kw.get("adjustable"))
 
     def get_aspect(self):
-        """'auto', or the aspect as a float ('equal' is 1.0)."""
         return self._opts.get("aspect_ratio", "auto")
 
     def set_adjustable(self, adjustable, share=False):
-        if adjustable not in ("box", "datalim"):
-            raise ValueError("%r is not a valid value for adjustable; supported values are 'box', 'datalim'" % (adjustable,))
-        self._opts["_adjustable"] = adjustable
+        from matplotlib._axes_geometry import set_adjustable
+        set_adjustable(self, adjustable)
 
     def get_adjustable(self):
         return self._opts.get("_adjustable", "box")
 
     def autoscale(self, enable=True, axis="both", tight=None):
-        """Autoscaling on (the limits from the data again) or off (the
-        current limits kept)."""
-        for a in ("x", "y"):
-            if axis not in ("both", a):
-                continue
-            if enable:
-                for k in (a + "min", a + "max", "_" + a + "view"):
-                    self._opts.pop(k, None)
-            elif enable is False:
-                lo, hi = self.get_xlim() if a == "x" else self.get_ylim()
-                self._opts[a + "min"], self._opts[a + "max"] = lo, hi
+        from matplotlib._axes_geometry import autoscale
+        autoscale(self, enable, axis)
 
     def axis(self, arg=None, **kw):
         if arg == "off":
             self._opts["axes"] = False
-        elif arg == "equal":
-            # (matplotlib's: equal scales, the limits adjusted)
-            self.set_aspect("equal", adjustable="datalim")
-        elif arg in ("scaled", "square"):
-            # (equal scales in a box of their shape, the limits fixed as
-            # they are; square: both spans the larger one)
-            self.set_aspect("equal", adjustable="box")
-            (x0, x1), (y0, y1) = self.get_xlim(), self.get_ylim()
-            if arg == "square":
-                edge = max(x1 - x0, y1 - y0)
-                x1, y1 = x0 + edge, y0 + edge
-            self.set_xlim(x0, x1)
-            self.set_ylim(y0, y1)
+        elif arg in ("equal", "scaled", "square"):
+            from matplotlib._axes_geometry import axis_equal
+            axis_equal(self, arg)
         elif isinstance(arg, (list, tuple)) and len(arg) == 4:
             self.set_xlim(arg[0], arg[1])
             self.set_ylim(arg[2], arg[3])
