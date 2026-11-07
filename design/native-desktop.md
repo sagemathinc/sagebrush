@@ -1,6 +1,6 @@
 # Native engines in the desktop app
 
-*Status: plan r11: the architecture revision (r10) plus its tests (§8.1) and the page items; docs only, nothing is built. It replaces r12 (merged at 2999416e) with William's architecture decision of
+*Status: plan r16: r11 (the architecture revision, its tests and the page items) with William's answers to every §9 question recorded (Nov 7, about 2:26–2:31 PM PST), and (r14–r16) the licence invariant, the support-window clock and the PDF milestone N6 with its tests (T6) and measurements (§7.1); docs only, nothing is built. It replaces r12 (merged at 2999416e) with William's architecture decision of
 Nov 7, 2026, about 12:15–12:30 PM PST.
 
 Owner and sole author: @sagebrush-remote-compute. Reviewers: astra (SEC), daybreak3 (ENGINE), daybreak4 (PERF),
@@ -17,9 +17,9 @@ recorded the §7 answers, is part of r12.*
   - **web and mobile:** an in-page WebAssembly worker, because those can't start processes;
   - **cloud and "Your computer":** the remote relay.
 - **The app has one client for all three.**
-- **Sagebrush Engine becomes its own product** (§4):
+- **Sagebrush Engine becomes its own product,** `sagebrush-engine` (§4):
   - command line only, without the browser app;
-  - the engine's own code is MIT, always. Whether a build may include LGPL runtime code (Bun) is William's question (§9);
+  - the engine's own code stays MIT OR Apache-2.0, always. LGPL is allowed only for the Bun runtime (William, §1);
   - its own releases and upgrades;
   - it runs code and works with LaTeX.
   - One engine serves the desktop app, "Your computer", CI and agents.
@@ -45,6 +45,11 @@ recorded the §7 answers, is part of r12.*
    - the app requires the engine, and may come with one version of it;
    - the app's licence is William's call;
    - the JavaScript runtime is not decided ("bun may be better for the engine").
+6. **The licence** (about 2:26 PM PST): "LGPL OK for Bun; stay MIT OR Apache-2.0" (§4.2).
+7. **"Your computer"** (about 2:26 PM PST): "Yes, keep CPython as an option" (§4.3).
+8. **The protocol support window** (about 2:29 PM PST): "12 months but this support should ONLY start once we make a 1.0 release. Before a 1.0 release, there's no compatibility guarantees at all." (§2.1).
+9. **The name** (about 2:29 PM PST): "Use sagebrush-engine", for both the command and the package.
+10. **LaTeX to PDF** (about 2:31 PM PST): "Both: user's TeX if present, else offer the Tectonic download" (§4.1).
 
 r12's lead question ("decide after the prototype's side-by-side measurements") was about where pyjs runs inside the app. The architecture decision answers it: pyjs and the native engine run in the engine process. N1 still measures, but now only to choose the engine's runtime (§7).
 
@@ -91,7 +96,12 @@ The protocol is the message set the page's worker kernel already uses (`src/note
 **Version skew.**
 - **Desktop app:** if the installed engine is outside the app's range, the app uses the engine it ships with (§5) and says that an engine upgrade (or an app upgrade) is available. It never runs a mismatched pair.
 - **Relay:** the page already requires a minimum runner version (`RUNNER_MIN`). The handshake replaces that check with the same rule: outside the range, the page says which side to upgrade.
-- **Support window:** an engine keeps speaking at least the previous protocol version for a period that William sets.
+- **Support window** (William, §1): **before 1.0 there is no compatibility guarantee at all.** From 1.0 on:
+  - **The clock:** when an engine release first speaks protocol version $v+1$, version $v$ gets a window that ends 12 months after that release's date. The date comes from the signed release metadata, never from the person's computer clock.
+  - **The end date, exactly:** calendar arithmetic in UTC. The end date is the same day of the month 12 months later; if that day doesn't exist, it is the last day of that month (a supersession dated 2028-02-29 ends on 2029-02-28). The end date is **inclusive**: an engine release dated on it must still speak $v$.
+  - **The promise:** every engine release dated on or before the window's end date still speaks $v$.
+  - **Several predecessors:** each older version has its own window, so an engine may speak several older versions at once. A version is dropped only after its own window ends.
+  - **Before 1.0:** versions superseded before the 1.0 release get no window. The version current at 1.0 gets its window from the first release after 1.0 that supersedes it.
 - Within a negotiated version, an unknown message type is a protocol error. It ends the session, never silently drops the message.
 
 **Transports, all carrying the same messages:**
@@ -154,24 +164,43 @@ r4's A-vs-B timings stay withdrawn: the PyPI wheel came from a different commit.
 
 ### 4.1 What it is
 
-- **One command-line program.** It runs code in Python (pyjs), Sage, Magma and MATLAB modes, as `sagebrush` does today. It also gains the engine protocol's server side (`--stdio` for the app, the relay for remote).
+- **One command-line program, `sagebrush-engine`** (the command and the package; William, §1). It runs code in Python (pyjs), Sage, Magma and MATLAB modes, as `sagebrush` does today. It also gains the engine protocol's server side (`--stdio` for the app, the relay for remote).
 - **The browser app is cut out.** Today's single-file CLI embeds the web page for `sagebrush notebook` (`scripts/build-cli.mjs`). The engine build leaves it out. The page lives in the app and on the website.
 - **LaTeX:** the engine includes today's LaTeX tools (`src/latex-cli.ts`: the expander, the HTML preview, SageTeX).
   - **Today Sagebrush doesn't make PDFs:** the preview is not TeX (`articles/latex/01-how-it-works.md`).
-  - "Compiles LaTeX" to PDF would need a TeX engine. Whether to add one, and which, is a separate decision for William. It must also pass the licence check (§4.2).
+  - **PDFs** (William, §1):
+    - the engine compiles to PDF with **the person's installed TeX** if it finds one;
+    - otherwise, on the first PDF compile, it **offers Tectonic** as a separate, optional download.
+  - **Tectonic is never bundled with or linked into the engine.** It is its own executable, with its own licence notices, and the docs carry a source offer: its `pdf_io` carries GPL headers and its `graphite2` is LGPL.
+  - **The offer is the person's explicit choice:** a dialog showing the size, the source, the licence and Cancel. It is never automatic, including when an agent starts the compile.
+  - **The download must be verified before installation.**
+    - The SHA-256 digest must be either pinned per version, OS and architecture in the verified engine release, or come from signed release metadata checked against a public key already pinned in the installed engine, with version, expiry and rollback checks.
+    - The metadata must bind the version, OS and architecture, byte length and archive hash. An unsigned checksum downloaded alongside the executable is not enough.
+    - The download must be staged. Its length and hash must be checked before it is extracted or run, archive paths must be validated, and the verified executable must be installed atomically.
+    - It must fail closed: missing or mismatched data must never fall back to running something unverified.
+    - It reuses the engine updater's verification (§4.4), not a separate verification scheme.
+    - **Not covered by this verification, today:** Tectonic's later bundle and package downloads. Verifying the executable archive doesn't authenticate them.
+    - **Before N6 ships**, a separately reviewed bundle policy must:
+      - pin an approved bundle identity and source;
+      - authenticate fetched contents and any reuse of the cache before use;
+      - reject source overrides chosen by a document;
+      - define the consent, bounds and offline behaviour of package fetches.
+    - A failure must never use unverified data. A verified full local bundle with an offline-only path is also acceptable, if authenticated partial fetches can't be established. This is a requirement on the deferred work, not a claim that stock Tectonic provides it.
+    - Signature keys and signing remain William's only. Agents use fixtures and mock metadata.
 - **The runtime is a packaging choice:** Bun (`bun build --compile`), Deno (`deno compile`) or a Node single executable. `scripts/build-cli.mjs` already builds all three (`--bun`, `--deno`, `--sea`).
   - The native Rust engine is loaded into that runtime, through N-API or the runtime's own FFI.
   - A Rust module without a native build stays wasm inside the engine.
 
-### 4.2 MIT always: the licence check
+### 4.2 MIT OR Apache-2.0 always: the licence check
 
-- **Today:** Sagebrush is MIT OR Apache-2.0 (`NOTICE.md`), so the MIT licence is always available. The engine keeps that. Changing it to MIT-only is William's call.
-- **Every dependency must be MIT-compatible:** permissive, so the engine can be redistributed under MIT terms with the notices kept.
+- **The engine stays MIT OR Apache-2.0** (`NOTICE.md`; William, §1), so the MIT licence is always available.
+- **Every dependency must be MIT-compatible** (permissive, so the engine can be redistributed under MIT terms with the notices kept), **with one scoped exception:** the Bun runtime's own LGPL parts, below.
 - **The proposed allow-list** is the licences the npm package already carries: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, 0BSD, Zlib, BSL-1.0, Unicode-3.0, PSF-2.0 (CPython parts) and Artistic-2.0 (Cremona's data).
-  - **Not allowed without William's OK:** GPL, LGPL, AGPL, MPL and anything unlisted.
+  - **One scoped exception:** LGPL is allowed **for the Bun runtime only** (William, §1). It is not allowed for anything else in the engine.
+  - **Not allowed:** GPL, AGPL, MPL, LGPL outside the Bun runtime, and anything unlisted.
 - **A finding for the runtime choice:** Bun says "Bun statically links JavaScriptCore (and WebKit), which is LGPL-2 licensed" (bun.com/docs/project/licensing).
-  - So a Bun-compiled engine contains LGPL-2 code, with LGPL's relinking obligations.
-  - That fails the proposed allow-list unless William accepts it.
+  - So a Bun-compiled engine contains LGPL-2 code, with LGPL's relinking obligations. William accepted that for the Bun runtime.
+  - The check allows LGPL only in the Bun runtime's own inventory entries.
   - Node and Deno ship V8 (BSD-3-Clause) and their own permissively licensed parts. Their full inventories are N1 work (§7).
 - **The check (proposed, not yet running):** a script (`scripts/license-check.mjs`) inventories everything that goes into each engine build: the Rust crates, the npm packages bundled, the runtime binary's own parts, and the data. It fails on anything outside the allow-list.
   - It runs in the existing CI `checks` job. Wiring it into a workflow file is done by William or @sagebrush, because agents don't push workflow files.
@@ -181,8 +210,8 @@ r4's A-vs-B timings stay withdrawn: the PyPI wheel came from a different commit.
 
 - **"Your computer" (#778)** today runs `uvx sagebrush@latest remote --loopback`, which is **CPython** with the PyO3 engine, as William chose ("uvx only", Nov 6).
 - **Merging means the engine also speaks the relay transport.** The page then talks to "Your computer" with the same protocol and client as to the desktop subprocess.
-- **That changes the interpreter on "Your computer"** from CPython to pyjs, and the install from uvx to the engine's installer. **Both are William's decisions** (§9, Q2).
-  - Until he decides, the CPython runner stays as it is.
+- **The CPython runner stays as an option** (William, §1: "Yes, keep CPython as an option"). "Your computer" can run the engine (pyjs) or the existing CPython runner (`uvx sagebrush remote`), for people's own Python and packages.
+  - When both are available, the page offers a plain-words picker, and the choice is remembered per machine.
   - The relay, DPoP and terminal designs don't change; only the program at the end of the relay does.
 - **CI and agents** run the same engine binary from the command line or over the protocol.
 
@@ -194,6 +223,7 @@ r4's A-vs-B timings stay withdrawn: the PyPI wheel came from a different commit.
   - The engine upgrades itself from the release channel (`engine upgrade`). The app can trigger that.
   - Every upgrade is checked against the release's published checksum.
   - Signature checks use William's keys once he sets them up (§6). No agent creates or holds an updater key, not even a test one; development uses unsigned or mock update metadata.
+  - So, for now, no test shows a signed file passing verification; T6 says so (option c) until William chooses between a fixture he signs once and an ephemeral in-memory test keypair (which would need an exception to this rule).
 - **Size and start-up:** William's CLI rule applies: judged by install time and start-up time, with no fixed size ceiling.
   - Each engine build gets its own size-gate entry, with tight growth markers.
   - N1 reports, per runtime and OS:
@@ -270,6 +300,22 @@ Node is the baseline because r8's evidence (A) is Node. 1b is the A/A control. T
 
 r4 goes back to PERF. Counted runs still need PERF's final harness and packet review. William answered the machine questions on Nov 7 (about 12:46 PM PST): Windows runs use a CI workflow he adds himself; the m1 GUI "Yes, for N1 only"; sudo packages and the VM3/VM4 timing box "Yes to both".
 
+### 7.1 Outside N1: the optional Tectonic path
+
+The optional Tectonic download (§4.1) is **not** an N1 runtime label. It and its cache never enter N1's artifacts or F1–F3. Before N6 ships, it gets its own frozen measurement, per supported OS and architecture, on a machine with **no system TeX**:
+- **frozen inputs:** the exact Tectonic build and archive (sha256), the document corpus (each document's packages recorded), and the fixtures;
+- **archive bytes**, and **verified local install time** from a frozen local archive. Network transfer time is descriptive only;
+- **accept the offer → first successful PDF**, including the first-use package fetch;
+- **warm compile** time;
+- **the package cache** Tectonic downloads on first compile, as its own row in bytes, per corpus document;
+- **steady installed footprint:** the executable plus the cache, logical and allocated bytes;
+- **peak footprint during install or update:** staged archive + current + replacement or staged extraction + rollback;
+- **the update delta**, or a statement that each update is a full archive;
+- **offline behaviour:** with no network, the compile ends within a bounded time with a clear message, and runs nothing unverified;
+- **the control:** the person's own installed TeX, which has zero bytes managed by Sagebrush.
+
+The current figures are uncounted pilot observations by @sagebrush (Tectonic 0.17.0): a 54–60 MB binary, a 10–22 MB download, a 35 s first compile with a 43 MB cache, and 0.8 s afterwards. This measurement gets its own pre-registration and PERF review.
+
 ## 8. Milestones and tests
 
 | | Work | Gate |
@@ -278,8 +324,9 @@ r4 goes back to PERF. Counted runs still need PERF's final harness and packet re
 | **N1** | §7: runtime comparison, protocol over the pipe, licence inventory; unsigned local builds only | ENGINE, PERF, SIZE, SEC |
 | **N2** | **First, one client:** merge the page's worker client (`web/notebook/worker-kernel.js`) and remote client (`web/notebook/remote-client.js`) into the one protocol client of §2, pinned to today's `WorkerKernel` behaviour, before any subprocess work. Then the protocol and handshake in the client and the engine. Then: the engine subprocess on macOS and Linux with the chosen runtime, the bundled engine in the app, engine upgrades, the licence check in CI, and permissions in the engine. **The page items** (carried from r12): the refused-write restore per change kind, progress from the engine's snapshots, Stop through the one client with the restart pattern for the hard kill, a "starting" pill state, and the engine's own words for "where code runs" and "didn't start" (board writes the words) | all lanes, with the §8.1 tests (T1–T5) passing |
 | **N3** | Windows parity | all lanes; the same T1 suite passes on the Windows subprocess |
-| **N4** | The engine as the desktop default; "Your computer" on the engine, if William decides so (Q2) | William |
+| **N4** | The engine as the desktop default; "Your computer" offers the engine alongside the CPython runner (§4.3) | William |
 | **N5** | Later, planned separately: CPython and C extensions, terminals over the protocol, Android native, warm engines | — |
+| **N6** | PDFs (§4.1): the installed TeX first; otherwise the offered Tectonic download behind the person's explicit choice, verified and installed as §4.1 requires; notices and the source offer; the separately reviewed bundle policy of §4.1 (or a verified full local bundle, offline only). Deferred until after N4; its own PR series | all lanes, with T6 passing and §7.1's measurements reported |
 
 ### 8.1 Tests
 
@@ -298,7 +345,15 @@ r4 goes back to PERF. Counted runs still need PERF's final harness and packet re
 - only capabilities both sides declared are used. A fixture engine without `latex` shows LaTeX as unavailable, and the client never sends it a LaTeX request;
 - an unknown message type within a negotiated version ends the session, never a silent drop;
 - fixture engines one version older and one version newer than the app's range: the app falls back to its bundled engine and says so;
-- the relay's handshake replaces `RUNNER_MIN` with the same rule.
+- the relay's handshake replaces `RUNNER_MIN` with the same rule;
+- the support window, from fixture release metadata with fixed dates (never wall time):
+  - a pre-1.0 engine may drop any older version;
+  - a version superseded before 1.0 gets no window, even after 1.0;
+  - the version current at 1.0 is windowed from the first post-1.0 release that supersedes it, not from the 1.0 date;
+  - after 1.0: an engine dated the day before the end date, and one dated **on** the end date, still speak $v$; one dated the day after may drop it;
+  - calendar fixtures: a supersession dated 2028-02-29 ends on 2029-02-28, and one dated 2028-01-31 ends on 2029-01-31;
+  - two older versions with live windows are both spoken;
+  - a control with the computer's clock injected far before and far after the metadata dates: the result doesn't change.
 
 **T3. The §2.2 control contracts, on each transport, deterministically:**
 - a stale `pv` or another generation can't reopen writes;
@@ -310,7 +365,8 @@ r4 goes back to PERF. Counted runs still need PERF's final harness and packet re
 The hard-restart deadline uses a fake clock or an injected deadline, never wall time, and no test fixes a flake by raising a timeout.
 
 **T4. Controls for the licence check** (§4.2), so a check that never fails can't pass forever:
-- an LGPL fixture dependency fails;
+- an LGPL fixture dependency **outside the Bun runtime** fails, including one named like Bun (`bun-plugin-x`), so a name-prefix matcher can't pass it;
+- the Bun runtime's own LGPL inventory entries pass (the scoped exception of §4.2), and the same LGPL entry attached to any other component fails;
 - a dependency under an unlisted licence fails;
 - an MIT fixture passes;
 - `THIRD-PARTY-NOTICES.txt` must regenerate byte-identical from the inventory, so a stale notices file fails.
@@ -325,14 +381,29 @@ Wiring it into a workflow file stays William's or @sagebrush's.
 | T2 | all cases, against fixture engines | — |
 | T3 | Linux subprocess; wasm worker | macOS and Windows subprocess; relay |
 | T4 | all controls | — |
+| T6 | all cases, against fixtures | — |
 
-## 9. Questions for William
+**T6. PDFs and the Tectonic download** (N6), against fixture archives and mock metadata (never real keys):
+- precedence: a fixture installed TeX is used, and no offer is made;
+- with no TeX, the offer appears only on a PDF compile, and nothing is downloaded until the person accepts. An agent-started compile shows the same offer and never accepts it by itself;
+- the target, length and hash are bound: a wrong length, a wrong hash, metadata for another OS or architecture, or another version each fail before extraction. This holds on both routes, the pinned digest and the signed metadata;
+- verification negative controls, each failing before extraction: a bad signature; a signature by a key that isn't pinned; missing metadata; metadata without a digest;
+- signed metadata: expired metadata and a rollback to an older version both fail;
+- **not covered by PR CI, for now (option c):** "a signed fixture passes, and the same fixture with one byte altered fails". No agent may hold a signing key (§4.4), so until William chooses, this case is outside PR CI. His choices: (a) a fixture he signs once, with the tests carrying only its public key; or (b) an ephemeral in-memory test keypair, which needs an exception to §4.4. The negative controls above run with mock metadata;
+- an archive entry with `..`, an absolute path or a link outside the destination fails, including the Windows forms (`..\`, a drive letter such as `C:\`, and a UNC path `\\server\share`);
+- injected failures at each of four points (download, verify, extract, replace) leave the previous executable byte-identical (or still absent), run nothing unverified, and a retry starts from a clean staging area;
+- **offline, deterministically:** a network fixture that refuses connections and an injected deadline (no wall-clock assertion). The compile ends with the offline message, runs nothing, and leaves the previous state intact;
+- the bundle policy (§4.1): a changed bundle or index, a changed cached file, a changed source, and a missing package while offline each refuse deterministically, use no unverified data, and leave the previous verified cache intact;
+- the notices and the source offer are installed with the executable.
 
-1. **The licence allow-list** (§4.2): is the list right (including PSF-2.0 and Artistic-2.0)? Is LGPL-2 acceptable if Bun is chosen? Should the engine stay MIT OR Apache-2.0, or become MIT-only?
-2. **"Your computer" on the engine** (§4.3): this replaces CPython with pyjs there, and uvx with the engine's installer. Should the CPython runner stay as an option for people's own Python and packages?
-3. **LaTeX to PDF** (§4.1): should the engine include a TeX engine, and which one?
-4. **The protocol support window** (§2.1): how long should an engine keep the previous protocol version?
-5. **Names:** the engine's command and package names. Nothing is renamed without you.
+## 9. Questions for William: answered
+
+All five were answered on Nov 7, 2026, between about 2:26 and 2:31 PM PST. They are recorded verbatim in §1 (items 6–10):
+- the licence (§4.2);
+- "Your computer" (§4.3);
+- LaTeX to PDF (§4.1);
+- the support window (§2.1);
+- the name (§4.1).
 
 ## Appendix: what r10 removes
 
