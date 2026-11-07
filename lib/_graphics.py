@@ -128,45 +128,40 @@ _TEX_SYMBOLS = {
     "%": "%", "$": "$", "{": "{", "}": "}", "_": "_", "#": "#", "&": "&", ",": "\u2009", ";": "\u2005", ":": "\u2005",
     "!": "", " ": " ", "quad": "\u2003", "qquad": "\u2003\u2003", "log": "log", "ln": "ln", "exp": "exp",
     "sin": "sin", "cos": "cos", "tan": "tan", "max": "max", "min": "min", "lim": "lim", "det": "det",
-    # (logic, sets, relations, operators and arrows: matplotlib 3.11.1's
-    # characters for these names)
-    "neg": "¬", "wedge": "∧", "vee": "∨", "forall": "∀", "exists": "∃", "nexists": "∄", "Leftarrow": "⇐",
-    "Leftrightarrow": "⇔", "leftrightarrow": "↔", "Longrightarrow": "⟹", "Longleftarrow": "⟸", "Longleftrightarrow": "⟺",
-    "longrightarrow": "⟶", "longleftarrow": "⟵", "longleftrightarrow": "⟷", "mapsto": "↦", "longmapsto": "⟼",
-    "hookrightarrow": "↪", "hookleftarrow": "↩", "uparrow": "↑", "downarrow": "↓", "updownarrow": "↕", "Uparrow": "⇑",
-    "Downarrow": "⇓", "nearrow": "↗", "searrow": "↘", "swarrow": "↙", "nwarrow": "↖", "rightleftharpoons": "⇌",
-    "leftrightarrows": "⇆", "rightharpoonup": "⇀", "leadsto": "⇝", "top": "⊤", "bot": "⊥", "vdash": "⊢", "dashv": "⊣",
-    "models": "⊧", "cup": "∪", "cap": "∩", "subset": "⊂", "subseteq": "⊆", "supset": "⊃", "supseteq": "⊇", "subsetneq": "⊊",
-    "supsetneq": "⊋", "setminus": "∖", "smallsetminus": "∖", "emptyset": "∅", "varnothing": "∅", "notin": "∉", "ni": "∋",
-    "sqcup": "⊔", "sqcap": "⊓", "sqsubseteq": "⊑", "sqsupseteq": "⊒", "uplus": "⊎", "ll": "≪", "gg": "≫", "prec": "≺",
-    "succ": "≻", "preceq": "≼", "succeq": "≽", "cong": "≅", "perp": "⟂", "parallel": "∥", "mid": "∣", "nmid": "∤",
-    "leqslant": "⩽", "geqslant": "⩾", "asymp": "≍", "doteq": "≐", "lesssim": "≲", "gtrsim": "≳", "nleq": "≰", "ngeq": "≱",
-    "nsim": "≁", "ncong": "≇", "nequiv": "≢", "oplus": "⊕", "otimes": "⊗", "ominus": "⊖", "odot": "⊙", "oslash": "⊘",
-    "ast": "∗", "star": "⋆", "bullet": "∙", "dagger": "†", "ddagger": "‡", "amalg": "⨿", "wr": "≀", "diamond": "⋄",
-    "triangleleft": "◁", "triangleright": "▷", "bigtriangleup": "△", "bigtriangledown": "▽", "bigcup": "⋃", "bigcap": "⋂",
-    "bigoplus": "⨁", "bigotimes": "⨂", "bigodot": "⨀", "bigsqcup": "⨆", "biguplus": "⨄", "bigvee": "⋁", "bigwedge": "⋀",
-    "coprod": "∐", "iint": "∬", "iiint": "∭", "oiint": "∯", "aleph": "ℵ", "beth": "ℶ", "gimel": "ℷ", "daleth": "ℸ", "wp": "℘",
-    "angle": "∠", "measuredangle": "∡", "triangle": "△", "checkmark": "✓", "therefore": "∴", "because": "∵", "lfloor": "⌊",
-    "rfloor": "⌋", "lceil": "⌈", "rceil": "⌉", "lbrace": "{", "rbrace": "}", "vert": "|", "Vert": "‖", "backslash": "\\",
-    "imath": "ı", "jmath": "ȷ", "flat": "♭", "sharp": "♯", "natural": "♮", "clubsuit": "♣", "diamondsuit": "♢",
-    "heartsuit": "♡", "spadesuit": "♠", "S": "§", "P": "¶", "copyright": "©", "varkappa": "ϰ", "digamma": "ϝ", "mho": "℧",
-    "hslash": "ℏ", "Finv": "Ⅎ", "Game": "⅁", "complement": "∁", "ddots": "⋱", "vdots": "⋮", "colon": ":", "slash": "∕",
-    "circledR": "®", "blacksquare": "■", "lhd": "◁", "rhd": "▷", "unlhd": "⊴", "unrhd": "⊵", "intercal": "⊺",
-    "barwedge": "⊼", "veebar": "⊻", "pitchfork": "⋔", "bowtie": "⋈", "rightarrowtail": "↣", "twoheadrightarrow": "↠",
-    "circlearrowleft": "↺", "circlearrowright": "↻", "curvearrowleft": "↶", "curvearrowright": "↷",
 }
+# (logic, sets, relations, operators and arrows: matplotlib 3.11.1's
+# characters for these names, as "name char" pairs)
+_more = ('neg ¬ wedge ∧ vee ∨ forall ∀ exists ∃ nexists ∄ Leftarrow ⇐ Leftrightarrow ⇔ leftrightarrow ↔ '
+         'Longrightarrow ⟹ Longleftarrow ⟸ Longleftrightarrow ⟺ longrightarrow ⟶ longleftarrow ⟵ '
+         'longleftrightarrow ⟷ mapsto ↦ longmapsto ⟼ hookrightarrow ↪ hookleftarrow ↩ uparrow ↑ downarrow ↓ '
+         'updownarrow ↕ Uparrow ⇑ Downarrow ⇓ nearrow ↗ searrow ↘ swarrow ↙ nwarrow ↖ rightleftharpoons ⇌ '
+         'leftrightarrows ⇆ rightharpoonup ⇀ leadsto ⇝ top ⊤ bot ⊥ vdash ⊢ dashv ⊣ models ⊧ cup ∪ cap ∩ '
+         'subset ⊂ subseteq ⊆ supset ⊃ supseteq ⊇ subsetneq ⊊ supsetneq ⊋ setminus ∖ smallsetminus ∖ emptyset '
+         '∅ varnothing ∅ notin ∉ ni ∋ sqcup ⊔ sqcap ⊓ sqsubseteq ⊑ sqsupseteq ⊒ uplus ⊎ ll ≪ gg ≫ prec ≺ succ '
+         '≻ preceq ≼ succeq ≽ cong ≅ perp ⟂ parallel ∥ mid ∣ nmid ∤ leqslant ⩽ geqslant ⩾ asymp ≍ doteq ≐ '
+         'lesssim ≲ gtrsim ≳ nleq ≰ ngeq ≱ nsim ≁ ncong ≇ nequiv ≢ oplus ⊕ otimes ⊗ ominus ⊖ odot ⊙ oslash ⊘ '
+         'ast ∗ star ⋆ bullet ∙ dagger † ddagger ‡ amalg ⨿ wr ≀ diamond ⋄ triangleleft ◁ triangleright ▷ '
+         'bigtriangleup △ bigtriangledown ▽ bigcup ⋃ bigcap ⋂ bigoplus ⨁ bigotimes ⨂ bigodot ⨀ bigsqcup ⨆ '
+         'biguplus ⨄ bigvee ⋁ bigwedge ⋀ coprod ∐ iint ∬ iiint ∭ oiint ∯ aleph ℵ beth ℶ gimel ℷ daleth ℸ wp ℘ '
+         'angle ∠ measuredangle ∡ triangle △ checkmark ✓ therefore ∴ because ∵ lfloor ⌊ rfloor ⌋ lceil ⌈ '
+         'rceil ⌉ lbrace { rbrace } vert | Vert ‖ backslash \\ imath ı jmath ȷ flat ♭ sharp ♯ natural ♮ '
+         'clubsuit ♣ diamondsuit ♢ heartsuit ♡ spadesuit ♠ S § P ¶ copyright © varkappa ϰ digamma ϝ mho ℧ '
+         'hslash ℏ Finv Ⅎ Game ⅁ complement ∁ ddots ⋱ vdots ⋮ colon : slash ∕ circledR ® blacksquare ■ lhd ◁ '
+         'rhd ▷ unlhd ⊴ unrhd ⊵ intercal ⊺ barwedge ⊼ veebar ⊻ pitchfork ⋔ bowtie ⋈ rightarrowtail ↣ '
+         'twoheadrightarrow ↠ circlearrowleft ↺ circlearrowright ↻ curvearrowleft ↶ curvearrowright ↷').split()
+_TEX_SYMBOLS.update(zip(_more[::2], _more[1::2]))
+del _more
 _TEX_FUNCS = {"log", "ln", "exp", "sin", "cos", "tan", "max", "min", "lim", "det"}
 # (relations and arrows, spaced as TeX spaces them; binary operators)
-_TEX_REL = {"leq", "le", "geq", "ge", "neq", "ne", "approx", "sim", "simeq", "equiv", "propto", "to", "rightarrow", "in",
-            "leftarrow", "Rightarrow", "Leftarrow", "Leftrightarrow", "leftrightarrow", "Longrightarrow", "Longleftarrow",
-            "Longleftrightarrow", "longrightarrow", "longleftarrow", "longleftrightarrow", "mapsto", "longmapsto",
-            "hookrightarrow", "hookleftarrow", "rightleftharpoons", "leadsto", "vdash", "dashv", "models", "subset", "subseteq",
-            "supset", "supseteq", "subsetneq", "supsetneq", "notin", "ni", "sqsubseteq", "sqsupseteq", "ll", "gg", "prec", "succ",
-            "preceq", "succeq", "cong", "perp", "parallel", "mid", "nmid", "leqslant", "geqslant", "asymp", "doteq", "lesssim",
-            "gtrsim", "nleq", "ngeq", "nsim", "ncong", "nequiv"}
-_TEX_BIN = {"pm", "mp", "times", "cdot", "div", "wedge", "vee", "cup", "cap", "setminus", "smallsetminus", "sqcup", "sqcap",
-            "uplus", "oplus", "otimes", "ominus", "odot", "oslash", "ast", "star", "bullet", "amalg", "wr", "diamond",
-            "triangleleft", "triangleright", "lhd", "rhd", "unlhd", "unrhd", "barwedge", "veebar"}
+_TEX_REL = set(('leq le geq ge neq ne approx sim simeq equiv propto to rightarrow in Leftarrow Leftrightarrow '
+                'Longleftarrow Longleftrightarrow Longrightarrow Rightarrow asymp cong dashv doteq geqslant gg '
+                'gtrsim hookleftarrow hookrightarrow leadsto leftarrow leftrightarrow leqslant lesssim ll '
+                'longleftarrow longleftrightarrow longmapsto longrightarrow mapsto mid models ncong nequiv ngeq ni '
+                'nleq nmid notin nsim parallel perp prec preceq rightleftharpoons sqsubseteq sqsupseteq subset '
+                'subseteq subsetneq succ succeq supset supseteq supsetneq vdash').split())
+_TEX_BIN = set(('pm mp times cdot div amalg ast barwedge bullet cap cup diamond lhd odot ominus oplus oslash otimes '
+                'rhd setminus smallsetminus sqcap sqcup star triangleleft triangleright unlhd unrhd uplus vee veebar '
+                'wedge wr').split())
 # (\mathbb, \mathcal, \mathscr, \mathfrak: Unicode's mathematical letters,
 # the first capital's, small letter's and digit's code points, and the letters
 # it has elsewhere)
