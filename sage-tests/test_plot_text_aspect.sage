@@ -41,3 +41,6 @@ for ls in ("--", ":", "-.", "dashed", "dotted", "-"):
     print("circle linestyle", ls, "dasharray" in svg(circle((0, 0), 1, color='teal', linestyle=ls)))
 print("polygon linestyle --", "dasharray" in svg(polygon([(0, 0), (1, 0), (1, 1)], fill=False, linestyle="--")))
 print("unfilled polygon outlined:", any(c in svg(polygon([(0, 0), (1, 0), (1, 1)], fill=False, color="red")).lower() for c in ("stroke: #ff0000", 'stroke="#ff0000"', 'stroke="red"')))
+for name, Q in (("segment", Polyhedron(vertices=[(0, 0), (1, 1)])), ("point", Polyhedron(vertices=[(1, 2)])),
+                ("ray", Polyhedron(vertices=[(0, 0)], rays=[(1, 1)])), ("square", Polyhedron(vertices=[(0, 0), (1, 0), (1, 1), (0, 1)]))):
+    print("polyhedron", name, Q.plot().aspect_ratio())

@@ -28,13 +28,15 @@ def _split(options):
 
 def _aspect_figsize(r):
     """A figure size (inches) whose plot area has the shape of data r times
-    as wide as high, plus room for tick labels: the cropped picture Sage
-    saves (as sage_plot_fields' frames)."""
+    as wide as high, plus room for tick labels: the picture Sage saves, its
+    6.4 x 4.8 figure cropped to the plot (so never wider than 6.4: a wide
+    one keeps that width and loses height)."""
     h = 4.6
-    w = max(2.5, min(9.0, (h - 0.5) * r + 0.75))
-    if w >= 9.0:
+    w = (h - 0.5) * r + 0.75
+    if w > 6.4:
+        w = 6.4
         h = (w - 0.75) / r + 0.5
-    return (w, h)
+    return (max(w, 1.0), h)
 
 
 def _label(s):
@@ -687,6 +689,17 @@ def polygon(points, **options):
     Sage draws it (the ranges are not widened to the canvas)::
 
         sage: 'data-xr="0.0 4.0" data-yr="0.0 1.0"' in polygon([(0, 0), (4, 0), (0, 1)])._svg()  # sagebrush only
+        True
+
+    The figure takes the plot's shape, as Sage's cropped picture does (a
+    square plot a square picture; given ranges kept; a wide one at most
+    Sage's 6.4 inches wide)::
+
+        sage: 'width="485" height="460"' in plot(x, (x, 0, 4), aspect_ratio=1)._svg()  # sagebrush only
+        True
+        sage: 'data-xr="-1.0 4.0" data-yr="0.0 4.0"' in plot(x, (x, 0, 4), xmin=-1, aspect_ratio=1)._svg()  # sagebrush only
+        True
+        sage: 'width="640" height="55.65"' in line([(0, 0), (100, 1)], aspect_ratio=1)._svg()  # sagebrush only
         True
     """
     gopts, p = _split(options)

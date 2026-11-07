@@ -29,3 +29,7 @@ circle linestyle dotted True
 circle linestyle - False
 polygon linestyle -- True
 unfilled polygon outlined: True
+polyhedron segment automatic
+polyhedron point automatic
+polyhedron ray automatic
+polyhedron square 1.0
