@@ -460,6 +460,17 @@
   <p class="exnote">Each opens as a new notebook; yours stays saved.</p>
   <div id="exlist"></div>
 </dialog>
+<!-- What this notebook's code may do (web/notebook/permissions.js): drawn by the page, only the person's own clicks
+     change it. Named for what it does, never "trust". Each section appears in the phase that enforces it (the
+     confinement spec r3.1, its phases 2-4): today, File writes. -->
+<dialog id="permsdlg" class="pick" aria-labelledby="permstitle">
+  <form method="dialog" style="display:flex;justify-content:space-between;align-items:center"><b id="permstitle">Permissions</b><button aria-label="Close">✕</button></form>
+  <p class="note" id="permsfor"></p>
+  <h4 style="margin:12px 0 4px">File writes</h4>
+  <p id="permsfiles" style="margin:0 0 6px"></p>
+  <button id="filesperm">Don't allow file changes</button>
+  <p class="note" style="margin-top:14px">Kept in this browser, for you: never in the notebook, so anyone you send it to starts with nothing allowed.</p>
+</dialog>
 <dialog id="sharedlg" class="pick" aria-labelledby="sharetitle">
   <form method="dialog" style="display:flex;justify-content:space-between;align-items:center"><b id="sharetitle">Share</b><button aria-label="Close">✕</button></form>
   <h4>A link with the notebook in it</h4>
@@ -1745,10 +1756,16 @@ const filesBarEl = $("#filesbar");
 function filesBar(on) { filesBarEl.hidden = !on || !current.id || perms.may(current.id, "files"); }
 function filesShown() {
   const on = !!current.id && perms.may(current.id, "files");
-  const fp = document.getElementById("filesperm"); // (the File menu's, drawn again with it)
+  const fp = document.getElementById("filesperm"); // (the Permissions panel's)
   if (fp) fp.textContent = on ? "Don't allow file changes" : "Allow file changes";
+  $("#permsfiles").textContent = !current.id ? "" : on ? "Allowed: this notebook's code may change your files." : "Not allowed: this notebook's code can't change your files.";
+  $("#permsfor").textContent = current.id ? `For "${docName()}".` : "";
   if (on) filesBarEl.hidden = true;
 }
+// The Permissions panel (File > Permissions…): what the notebook shown may do, and the person's own switch
+const permsDlg = $("#permsdlg");
+function showPerms() { filesShown(); if (!permsDlg.open) permsDlg.showModal(); }
+$("#filesperm").onclick = (e) => { setFiles(e, !(current.id && perms.may(current.id, "files"))); };
 // (a choice this browser couldn't keep holds in this page, and says so: astra's NM-DENY-2)
 const setFiles = (e, on) => {
   if (e?.isTrusted !== true || !current.id) return false;
@@ -2667,14 +2684,14 @@ function drawFileMenu() {
       { after: "upload", key: "openfile", label: "Open file…", hidden: true },
       { after: "saveCopy", key: "saveas", label: "Save as…", hidden: true },
       // (whether this notebook's code may change the person's files: no-mutation's one switch, a document's setting)
-      { after: "share", key: "filesperm", label: "Don't allow file changes", title: "Whether this notebook's code may change your files (a notebook from elsewhere may not, until you allow it)" },
+      { after: "share", key: "perms", label: "Permissions…", title: "What this notebook's code may do: change your files (a notebook from elsewhere may not, until you allow it)" },
     ],
     recent: ws ? async () => (await recentOpened(ws, current.kind === "browser" ? { kind: "notebook", ref: current.id } : undefined)).map((e) => ({ label: recentLabel(e), title: e.path, open: () => openEntry(e) })) : undefined,
     chosen: () => toggleFileMenu(false),
   });
   // (Share…, as the share tests and the share dialog know it)
   fileMenu.querySelector('[data-item="share"]').id = "sharemenu";
-  fileMenu.querySelector('[data-f="filesperm"]').id = "filesperm";
+  fileMenu.querySelector('[data-f="perms"]').id = "permsmenu";
   filesShown();
 }
 // (a document opened from the File menu (Recent, Open…): a notebook here, a board on its page)
@@ -2807,7 +2824,7 @@ fileMenu.addEventListener("click", async (e) => {
   toggleFileMenu(false);
   switch (b.dataset.f) {
     // (the person's own click only: setFiles checks isTrusted)
-    case "filesperm": setFiles(e, !(current.id && perms.may(current.id, "files"))); break;
+    case "perms": showPerms(); break;
     case "newfolder": {
       const name = prompt("A new folder, at the top of your files: its name", "New folder");
       if (!name?.trim() || !ws) break;
