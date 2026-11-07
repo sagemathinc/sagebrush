@@ -1473,6 +1473,8 @@ export function hashExact(x: any): any {
       raise(T.TypeError, "__hash__ method should return an integer");
     }
   }
+  if (Array.isArray(x) && (x as any).$cls === undefined && (x as any).$t === true) return normBig(hashTupleExact(x));
+  if (x instanceof PySet && x.$frozen) return normBig(hashFrozensetExact(x));
   return hashAny(x);
 }
 
@@ -1549,11 +1551,7 @@ export function hashAny(x: any): number {
     if ((x as any).$t !== true) raise(T.TypeError, "unhashable type: 'list'");
     return hashTuple(x);
   }
-  if (x instanceof PySet && x.$frozen) {
-    let h = 0;
-    for (const v of setItems(x)) h ^= hashAny(v) * 3644798167;
-    return h | 0;
-  }
+  if (x instanceof PySet && x.$frozen) return Number(hashFrozensetExact(x));
   const t = typeOf(x);
   const f = lookupType(t, "__hash__");
   if (f === null) raise(T.TypeError, `unhashable type: '${t.$name}'`);
@@ -1570,19 +1568,40 @@ export function hashAny(x: any): number {
 export function hashTupleOf(a: any[]): number {
   return hashTuple(a);
 }
-// CPython's tuplehash (xxHash-based) on 64-bit lanes.
 function hashTuple(a: any[]): number {
-  const P1 = 11400714785074694791n, P2 = 14029467366897019727n, P5 = 2870177450012600261n, M = (1n << 64n) - 1n;
+  return Number(hashTupleExact(a));
+}
+// An element's hash as a 64-bit lane, exactly as CPython's: what tuples and frozensets mix
+const hashLane = (v: any): bigint => BigInt.asUintN(64, BigInt(hashExact(v)));
+const M64 = (1n << 64n) - 1n;
+// CPython's tuplehash (xxHash-based) on 64-bit lanes.
+function hashTupleExact(a: any[]): bigint {
+  const P1 = 11400714785074694791n, P2 = 14029467366897019727n, P5 = 2870177450012600261n;
   let acc = P5;
   for (const v of a) {
-    const lane = BigInt.asUintN(64, BigInt(hashAny(v)));
-    acc = (acc + lane * P2) & M;
-    acc = ((acc << 31n) | (acc >> 33n)) & M;
-    acc = (acc * P1) & M;
+    acc = (acc + hashLane(v) * P2) & M64;
+    acc = ((acc << 31n) | (acc >> 33n)) & M64;
+    acc = (acc * P1) & M64;
   }
-  acc = (acc + (BigInt(a.length) ^ (P5 ^ 3527539n))) & M;
-  if (acc === M) return 1546275796;
-  return Number(BigInt.asIntN(64, acc));
+  acc = (acc + (BigInt(a.length) ^ (P5 ^ 3527539n))) & M64;
+  if (acc === M64) return 1546275796n;
+  return BigInt.asIntN(64, acc);
+}
+// CPython's frozenset_hash on 64-bit lanes: each element's hash shuffled and xored (order-free), then the size
+// factored in and the bits dispersed
+function hashFrozensetExact(x: PySet): bigint {
+  const shuffle = (h: bigint) => ((((h ^ 89869747n) ^ (h << 16n)) & M64) * 3644798167n) & M64;
+  let h = 0n;
+  let n = 0n;
+  for (const v of setItems(x)) {
+    h ^= shuffle(hashLane(v));
+    n++;
+  }
+  h ^= ((n + 1n) * 1927868237n) & M64;
+  h ^= (h >> 11n) ^ (h >> 25n);
+  h = (h * 69069n + 907133923n) & M64;
+  if (h === M64) return 590923713n;
+  return BigInt.asIntN(64, h);
 }
 
 function markPy(f: any, name: string) {
