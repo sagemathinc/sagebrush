@@ -528,7 +528,7 @@ function floorControl(body) {
 
 /** The headers of an answer passed to the page, without those the front sets itself; a Location (or a 3xx) that isn't
  * on the front's own origin, or the files origin's /__files/, is counted as a leak of another origin, and the run fails
- * on any.  The blob GET's 303 to /__files/ is sent to the files origin, as PROD's goes to files.cocalcusercontent.com */
+ * on any.  The blob GET's 303 to /__files/ is sent to the files origin, as the hosted API uses its FILES_ORIGIN binding */
 function pageHeaders(r, path) {
   const h = {};
   r.headers.forEach((v, k) => { if (k !== "set-cookie" && k !== "content-length" && k !== "content-encoding") h[k] = v; });

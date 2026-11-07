@@ -17,7 +17,7 @@ export interface SyncEnv {
   SHARE_DB?: D1;
   /** sharing's bucket: synced blobs are under s/<account hash>/ (§1) */
   SHARE_BUCKET?: R2;
-  /** where signed reads go, e.g. https://files.cocalcusercontent.dev (§5.4) */
+  /** where signed reads go, the FILES_ORIGIN binding from web/content-domains.mts (§5.4) */
   FILES_ORIGIN?: string;
   /**
    * Test seams, bound only in web/sync/test-sync.mjs: a shorter pin

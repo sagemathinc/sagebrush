@@ -213,7 +213,7 @@ Source: [`web/share/server.ts, lines 19–41`](https://github.com/sagemathinc/sa
 
 ### A separate domain for user bytes
 
-Shared files are served only from `files.cocalcusercontent.com`, only through a collection that has them, and always as `application/octet-stream` attachments with a sandboxing CSP. An uploaded `.html` or `.svg` can never become a page.
+Shared files are served only from the configured files origin (`web/content-domains.mts`), only through a collection that has them, and always as `application/octet-stream` attachments with a sandboxing CSP. An uploaded `.html` or `.svg` can never become a page.
 
 Files are named by their hash, so they're cached in the browser for good. Range requests work, so code that reads part of a large file doesn't download it all. "Not shared" and "absent" are the same 404.
 

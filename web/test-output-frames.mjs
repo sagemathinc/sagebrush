@@ -19,6 +19,7 @@
 //   - 50 and 200 areas, scrolled under the cap and dense with none: the figures that freeze the
 //     cap (printed, not asserted).
 //   CHROME=google-chrome bun web/test-output-frames.mjs
+import { forbiddenContentRoots } from "./content-domains.mts";
 import { spawn } from "node:child_process";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -192,7 +193,7 @@ const ok = (c, msg) => { checks++; console.log((c ? "ok   " : "FAIL ") + msg); i
 ok(Object.values(SITES).every((s) => s.shell === "") && checkSites().length === 0, "every environment's shell URL is empty, so each uses the packaged variant");
 {
   const bad = (shell, extra = {}) => checkSites({ ...SITES, dev: { shell, ancestors: SITES.dev.ancestors }, ...extra }).length > 0;
-  ok(bad("http://shell.example/") && bad("https://shell.example/x") && bad("https://shell.example/?a=1") && bad("https://render.cocalcusercontent.com/")
+  ok(bad("http://shell.example/") && bad("https://shell.example/x") && bad("https://shell.example/?a=1") && bad(`https://render.${forbiddenContentRoots()[0]}/`)
     && bad("https://out.sagebrush.space/") && bad("https://shell.example/", { prod: { shell: "https://shell.example/", ancestors: SITES.prod.ancestors } })
     && !bad("https://shell.example/"), "the config refuses http, a path not ending in /, a query, the app's or user content's site, and one shell for two environments");
 }

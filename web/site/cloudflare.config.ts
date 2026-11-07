@@ -4,7 +4,7 @@
 //
 // `--mode dev` deploys the same site to https://dev.sagebrush.space with
 // the share API on (web/share/server.ts): the dev R2 bucket and D1 database,
-// shared files served by web/files on files.cocalcusercontent.dev.  The
+// shared files served by web/files on the configured files host.  The
 // production site gets the share API once it is reviewed.
 //
 // The dev site also has sync (web/sync, design/sync-server.md): its two
@@ -12,6 +12,7 @@
 // accounts in SYNC_ACCOUNTS only (a secret: comma-separated CoCalc account
 // ids; unset or empty, nobody), from its own entry, src/dev.ts.  Production
 // has none of it: its entry neither routes sync nor exports the classes.
+import { filesOrigin } from "../content-domains.mts";
 import { bindings, defineConfig, exports, triggers } from "cf/config";
 import * as entrypoint from "./src/index.ts" with { type: "cf-worker" };
 import * as devEntrypoint from "./src/dev.ts" with { type: "cf-worker" };
@@ -34,7 +35,7 @@ export default defineConfig({
           ? {
               SHARE_DB: bindings.d1({ name: "sagebrush-share-dev", id: "94675861-6f72-4cbc-a419-b28647eb9e9e" }),
               SHARE_BUCKET: bindings.r2({ name: "sagebrush-share-dev" }),
-              FILES_ORIGIN: bindings.text("https://files.cocalcusercontent.dev"),
+              FILES_ORIGIN: bindings.text(filesOrigin("dev")),
               // (lite4b: the dev CoCalc, its seed bay, with this site registered as a client)
               COCALC_ORIGIN: bindings.text("https://lite4b.cocalc.ai"),
               SHARE_DEV: bindings.text("1"),

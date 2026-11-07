@@ -53,7 +53,7 @@
 | Slow code outputs (a cache) | IndexedDB `sagebrush-outputs` | | web/board/outcache.ts:164 |
 | Remote and CoCalc boards (a cache) | IndexedDB, `IdbDocCache` | | web/board/cached.ts:82-95; bounded open in web/board/idb-open.ts |
 | The last notebook, its language | localStorage `sagebrush-current`, `sagebrush-mode` | | web/index.html:1950-2049 |
-| Shared collections | R2 and D1 on the server; served from `files.cocalcusercontent.com` at `/c/<collection>/<sha256>` | collection id and version hash | design/sharing.md; web/share/, web/files/ |
+| Shared collections | R2 and D1 on the server; served from the configured files origin (`web/content-domains.mts`) at `/c/<collection>/<sha256>` | collection id and version hash | design/sharing.md; web/share/, web/files/ |
 
 **One rule from stores.js:47-52 carries over:** an existing database is never upgraded, because an older tab or the installed app would block the upgrade. Every new store therefore goes in a **new database**.
 
@@ -337,7 +337,7 @@ Delete                     (to Trash)
 **Shared collections** (design/sharing.md):
 - A collection's link, `/s/<id>` (or a frozen `/s/<id>@<hash>`), opens the same browser with that collection as a **read-only root** above the workspace. Its title and owner are shown, along with "Shared · read-only".
 - Its files open in the normal editors from `/s/<id>/<path>`.
-  - Their bytes come from `files.cocalcusercontent.com/c/<collection>/<sha256>`.
+  - Their bytes come from `<FILES_ORIGIN>/c/<collection>/<sha256>`.
   - Opening a file never runs its code by itself, as sharing.md requires.
 - Editing a shared file asks first: "Save a copy to your workspace". The copy goes to `/From <title>/<path>`.
 - "Copy all to my workspace" copies the whole collection.
@@ -572,7 +572,7 @@ The service scales by adding objects. Its limits per object, from Cloudflare's p
 | **A collaborator's code running in my browser.** This is the new risk. Today a person runs only their own code. With collaboration, another person's edit becomes code that my browser can run. | **Code always runs in the runner** (design/runner.md): an opaque-origin, sandboxed frame with no storage, no network and no cookies. Python that escapes into JavaScript there reaches nothing: not my workspace, not my session, not the network. This is already the default on the notebook page and boards. **Before collaboration ships,** it must be the only way code runs, and that is not yet true in Firefox and Safari (runner.md, remaining steps 4-5). |
 | A collaborator's edit running **without my say-so** | Autorun is the reactive notebook's default (design/reactive-notebook.md). **An edit from someone else never triggers a run.** The cells it changes are marked "changed by Ana, not run" until I run them, as a shared collection already behaves ("Opening a shared link never runs its code by itself"). The same rule applies to a board's code notes. |
 | A malicious or malformed patch, or a whole document | The server checks sizes, rates and the shape of each patch, and never runs anything. Every client treats remote documents as untrusted input. This is the class of the Oct 18 `__proto__` fixes (board-proto-ids, board-own-names): ids are only ever own-property keys. Outputs are already bounded and sanitized (design/security.md rules 1-4). |
-| Using storage as free file hosting | Synced files are served only to accounts with access, as `private` attachments with `nosniff` and a `sandbox` CSP, the same as files.cocalcusercontent.com. Public sharing stays the separate, explicit act it is now. Quota is per membership. |
+| Using storage as free file hosting | Synced files are served only to accounts with access, as `private` attachments with `nosniff` and a `sandbox` CSP, the same as the configured files origin. Public sharing stays the separate, explicit act it is now. Quota is per membership. |
 | Cloudflare or an insider reading data | Encrypted at rest by Cloudflare. End-to-end encryption is not built now; the design keeps it possible (§7.4). With collaboration, it would mean per-document keys shared with each invitee, which is possible but means a lot more to get right, so it is not proposed for the first version. |
 | Losing data (a bug, a bad deploy) | 30-day point-in-time recovery of every Durable Object's SQLite. Copies off Cloudflare, encrypted, as in sharing.md's Backups section. Trash. Nothing removed by quota pressure. |
 

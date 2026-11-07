@@ -1,4 +1,4 @@
-// The dev files Worker's entry (files.cocalcusercontent.dev, `--mode dev`):
+// The dev files Worker's entry (configured files host, `--mode dev`):
 // a device's signed URLs for synced files (/p/, web/sync/server.ts
 // handleSyncFiles) first, then the production entry (./index.ts), which
 // doesn't import sync.

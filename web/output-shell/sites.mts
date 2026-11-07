@@ -2,12 +2,14 @@
 // shell's exact final URL (no redirect, pretty-URL redirects included) and the app pages
 // that may show it (frame-ancestors).  Every `shell` is EMPTY until the dedicated,
 // cookie-free site exists: a separate registrable domain from the app and from any site
-// hosting user-published pages (files.cocalcusercontent.* is neither: astra checked the
-// public suffix list, Nov 7).  Choosing and buying that domain is William's decision.
+// hosting user-published pages. Legacy and pending content roots remain forbidden
+// until real-host isolation gates and PSL/browser adoption are reviewed.
 // While a shell is empty, that environment uses the packaged srcdoc variant; it never
 // falls back to inline rich output.  Filling one in is a reviewed change, with the
 // hosted gates (final URL, headers, cookies, ancestors) rerun on that exact config first
 // (daybreak3's ruling, Nov 7).  No DEV page may point at a production shell.
+import { forbiddenContentRoots } from "../content-domains.mts";
+
 export const SITES = Object.freeze({
   preview: { shell: "", ancestors: [] as string[] },
   dev: { shell: "", ancestors: ["https://dev.sagebrush.space"] },
@@ -18,7 +20,7 @@ export const SITES = Object.freeze({
 export function checkSites(sites: typeof SITES = SITES): string[] {
   const out: string[] = [];
   const site = (u: string) => new URL(u).hostname.split(".").slice(-2).join(".");
-  const forbidden = new Set(["sagebrush.space", "cocalcusercontent.com", "cocalcusercontent.dev", "sagebrush.cloud"]);
+  const forbidden = new Set(["sagebrush.space", "sagebrush.cloud", ...forbiddenContentRoots()]);
   for (const [env, s] of Object.entries(sites)) {
     if (!s.shell) continue;
     let u: URL;
