@@ -1,0 +1,120 @@
+QuadraticField(2, 'r') Power QQ[x].gen S(q) | x | [x] | 0 | Power Series Ring in x over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QuadraticField(2, 'r') Power QQ[x].gen q*t | x*x | [0, x] | 1 | Power Series Ring in x over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QuadraticField(2, 'r') Power QQ[x].gen t*q | x*x | [0, x] | 1 | Power Series Ring in x over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QuadraticField(2, 'r') Power QQ[x].gen q+t | x + x | [x, 1] | 0 | Power Series Ring in x over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QuadraticField(2, 'r') Power QQ[x].gen t+q | x + x | [x, 1] | 0 | Power Series Ring in x over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QuadraticField(2, 'r') Power QQ[x].gen t-q | -x + x | [-x, 1] | 0 | Power Series Ring in x over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QuadraticField(2, 'r') Power ZZ[x].gen S(q) | x | [x] | 0 | Power Series Ring in x over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QuadraticField(2, 'r') Power ZZ[x].gen q*t | x*x | [0, x] | 1 | Power Series Ring in x over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QuadraticField(2, 'r') Power ZZ[x].gen t*q | x*x | [0, x] | 1 | Power Series Ring in x over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QuadraticField(2, 'r') Power ZZ[x].gen q+t | x + x | [x, 1] | 0 | Power Series Ring in x over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QuadraticField(2, 'r') Power ZZ[x].gen t+q | x + x | [x, 1] | 0 | Power Series Ring in x over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QuadraticField(2, 'r') Power ZZ[x].gen t-q | -x + x | [-x, 1] | 0 | Power Series Ring in x over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QuadraticField(2, 'r') Power QQ[x](x^2+1/2) S(q) | x^2 + 1/2 | [x^2 + 1/2] | 0 | Power Series Ring in x over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QuadraticField(2, 'r') Power QQ[x](x^2+1/2) q*t | (x^2 + 1/2)*x | [0, x^2 + 1/2] | 1 | Power Series Ring in x over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QuadraticField(2, 'r') Power QQ[x](x^2+1/2) t*q | (x^2 + 1/2)*x | [0, x^2 + 1/2] | 1 | Power Series Ring in x over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QuadraticField(2, 'r') Power QQ[x](x^2+1/2) q+t | x^2 + 1/2 + x | [x^2 + 1/2, 1] | 0 | Power Series Ring in x over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QuadraticField(2, 'r') Power QQ[x](x^2+1/2) t+q | x^2 + 1/2 + x | [x^2 + 1/2, 1] | 0 | Power Series Ring in x over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QuadraticField(2, 'r') Power QQ[x](x^2+1/2) t-q | -x^2 - 1/2 + x | [-x^2 - 1/2, 1] | 0 | Power Series Ring in x over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QuadraticField(2, 'r') Power GF5[x].gen S(q) | x | [0, 1] | 1 | Power Series Ring in x over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QuadraticField(2, 'r') Power GF5[x].gen q*t | ERR TypeError
+QuadraticField(2, 'r') Power GF5[x].gen t*q | ERR TypeError
+QuadraticField(2, 'r') Power GF5[x].gen q+t | ERR TypeError
+QuadraticField(2, 'r') Power GF5[x].gen t+q | ERR TypeError
+QuadraticField(2, 'r') Power GF5[x].gen t-q | ERR TypeError
+QuadraticField(2, 'r') Power QQ[y].gen S(q) | x | [0, 1] | 1 | Power Series Ring in x over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QuadraticField(2, 'r') Power QQ[y].gen q*t | ERR TypeError
+QuadraticField(2, 'r') Power QQ[y].gen t*q | ERR TypeError
+QuadraticField(2, 'r') Power QQ[y].gen q+t | ERR TypeError
+QuadraticField(2, 'r') Power QQ[y].gen t+q | ERR TypeError
+QuadraticField(2, 'r') Power QQ[y].gen t-q | ERR TypeError
+QuadraticField(2, 'r') Laurent QQ[x].gen S(q) | x | [x] | 0 | Laurent Series Ring in x over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QuadraticField(2, 'r') Laurent QQ[x].gen q*t | x*x | [x] | 1 | Laurent Series Ring in x over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QuadraticField(2, 'r') Laurent QQ[x].gen t*q | x*x | [x] | 1 | Laurent Series Ring in x over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QuadraticField(2, 'r') Laurent QQ[x].gen q+t | x + x | [x, 1] | 0 | Laurent Series Ring in x over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QuadraticField(2, 'r') Laurent QQ[x].gen t+q | x + x | [x, 1] | 0 | Laurent Series Ring in x over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QuadraticField(2, 'r') Laurent QQ[x].gen t-q | -x + x | [-x, 1] | 0 | Laurent Series Ring in x over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QuadraticField(2, 'r') Laurent ZZ[x].gen S(q) | x | [x] | 0 | Laurent Series Ring in x over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QuadraticField(2, 'r') Laurent ZZ[x].gen q*t | x*x | [x] | 1 | Laurent Series Ring in x over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QuadraticField(2, 'r') Laurent ZZ[x].gen t*q | x*x | [x] | 1 | Laurent Series Ring in x over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QuadraticField(2, 'r') Laurent ZZ[x].gen q+t | x + x | [x, 1] | 0 | Laurent Series Ring in x over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QuadraticField(2, 'r') Laurent ZZ[x].gen t+q | x + x | [x, 1] | 0 | Laurent Series Ring in x over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QuadraticField(2, 'r') Laurent ZZ[x].gen t-q | -x + x | [-x, 1] | 0 | Laurent Series Ring in x over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QuadraticField(2, 'r') Laurent QQ[x](x^2+1/2) S(q) | (x^2 + 1/2) | [x^2 + 1/2] | 0 | Laurent Series Ring in x over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QuadraticField(2, 'r') Laurent QQ[x](x^2+1/2) q*t | (x^2 + 1/2)*x | [x^2 + 1/2] | 1 | Laurent Series Ring in x over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QuadraticField(2, 'r') Laurent QQ[x](x^2+1/2) t*q | (x^2 + 1/2)*x | [x^2 + 1/2] | 1 | Laurent Series Ring in x over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QuadraticField(2, 'r') Laurent QQ[x](x^2+1/2) q+t | (x^2 + 1/2) + x | [x^2 + 1/2, 1] | 0 | Laurent Series Ring in x over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QuadraticField(2, 'r') Laurent QQ[x](x^2+1/2) t+q | (x^2 + 1/2) + x | [x^2 + 1/2, 1] | 0 | Laurent Series Ring in x over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QuadraticField(2, 'r') Laurent QQ[x](x^2+1/2) t-q | (-x^2 - 1/2) + x | [-x^2 - 1/2, 1] | 0 | Laurent Series Ring in x over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QuadraticField(2, 'r') Laurent GF5[x].gen S(q) | x | [1] | 1 | Laurent Series Ring in x over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QuadraticField(2, 'r') Laurent GF5[x].gen q*t | ERR TypeError
+QuadraticField(2, 'r') Laurent GF5[x].gen t*q | ERR TypeError
+QuadraticField(2, 'r') Laurent GF5[x].gen q+t | ERR TypeError
+QuadraticField(2, 'r') Laurent GF5[x].gen t+q | ERR TypeError
+QuadraticField(2, 'r') Laurent GF5[x].gen t-q | ERR TypeError
+QuadraticField(2, 'r') Laurent QQ[y].gen S(q) | x | [1] | 1 | Laurent Series Ring in x over Univariate Polynomial Ring in x over Number Field in r with defining polynomial x^2 - 2 with r = 1.414213562373095?
+QuadraticField(2, 'r') Laurent QQ[y].gen q*t | ERR TypeError
+QuadraticField(2, 'r') Laurent QQ[y].gen t*q | ERR TypeError
+QuadraticField(2, 'r') Laurent QQ[y].gen q+t | ERR TypeError
+QuadraticField(2, 'r') Laurent QQ[y].gen t+q | ERR TypeError
+QuadraticField(2, 'r') Laurent QQ[y].gen t-q | ERR TypeError
+CyclotomicField(3) Power QQ[x].gen S(q) | x | [x] | 0 | Power Series Ring in x over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+CyclotomicField(3) Power QQ[x].gen q*t | x*x | [0, x] | 1 | Power Series Ring in x over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+CyclotomicField(3) Power QQ[x].gen t*q | x*x | [0, x] | 1 | Power Series Ring in x over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+CyclotomicField(3) Power QQ[x].gen q+t | x + x | [x, 1] | 0 | Power Series Ring in x over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+CyclotomicField(3) Power QQ[x].gen t+q | x + x | [x, 1] | 0 | Power Series Ring in x over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+CyclotomicField(3) Power QQ[x].gen t-q | -x + x | [-x, 1] | 0 | Power Series Ring in x over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+CyclotomicField(3) Power ZZ[x].gen S(q) | x | [x] | 0 | Power Series Ring in x over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+CyclotomicField(3) Power ZZ[x].gen q*t | x*x | [0, x] | 1 | Power Series Ring in x over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+CyclotomicField(3) Power ZZ[x].gen t*q | x*x | [0, x] | 1 | Power Series Ring in x over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+CyclotomicField(3) Power ZZ[x].gen q+t | x + x | [x, 1] | 0 | Power Series Ring in x over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+CyclotomicField(3) Power ZZ[x].gen t+q | x + x | [x, 1] | 0 | Power Series Ring in x over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+CyclotomicField(3) Power ZZ[x].gen t-q | -x + x | [-x, 1] | 0 | Power Series Ring in x over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+CyclotomicField(3) Power QQ[x](x^2+1/2) S(q) | x^2 + 1/2 | [x^2 + 1/2] | 0 | Power Series Ring in x over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+CyclotomicField(3) Power QQ[x](x^2+1/2) q*t | (x^2 + 1/2)*x | [0, x^2 + 1/2] | 1 | Power Series Ring in x over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+CyclotomicField(3) Power QQ[x](x^2+1/2) t*q | (x^2 + 1/2)*x | [0, x^2 + 1/2] | 1 | Power Series Ring in x over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+CyclotomicField(3) Power QQ[x](x^2+1/2) q+t | x^2 + 1/2 + x | [x^2 + 1/2, 1] | 0 | Power Series Ring in x over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+CyclotomicField(3) Power QQ[x](x^2+1/2) t+q | x^2 + 1/2 + x | [x^2 + 1/2, 1] | 0 | Power Series Ring in x over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+CyclotomicField(3) Power QQ[x](x^2+1/2) t-q | -x^2 - 1/2 + x | [-x^2 - 1/2, 1] | 0 | Power Series Ring in x over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+CyclotomicField(3) Power GF5[x].gen S(q) | x | [0, 1] | 1 | Power Series Ring in x over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+CyclotomicField(3) Power GF5[x].gen q*t | ERR TypeError
+CyclotomicField(3) Power GF5[x].gen t*q | ERR TypeError
+CyclotomicField(3) Power GF5[x].gen q+t | ERR TypeError
+CyclotomicField(3) Power GF5[x].gen t+q | ERR TypeError
+CyclotomicField(3) Power GF5[x].gen t-q | ERR TypeError
+CyclotomicField(3) Power QQ[y].gen S(q) | x | [0, 1] | 1 | Power Series Ring in x over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+CyclotomicField(3) Power QQ[y].gen q*t | ERR TypeError
+CyclotomicField(3) Power QQ[y].gen t*q | ERR TypeError
+CyclotomicField(3) Power QQ[y].gen q+t | ERR TypeError
+CyclotomicField(3) Power QQ[y].gen t+q | ERR TypeError
+CyclotomicField(3) Power QQ[y].gen t-q | ERR TypeError
+CyclotomicField(3) Laurent QQ[x].gen S(q) | x | [x] | 0 | Laurent Series Ring in x over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+CyclotomicField(3) Laurent QQ[x].gen q*t | x*x | [x] | 1 | Laurent Series Ring in x over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+CyclotomicField(3) Laurent QQ[x].gen t*q | x*x | [x] | 1 | Laurent Series Ring in x over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+CyclotomicField(3) Laurent QQ[x].gen q+t | x + x | [x, 1] | 0 | Laurent Series Ring in x over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+CyclotomicField(3) Laurent QQ[x].gen t+q | x + x | [x, 1] | 0 | Laurent Series Ring in x over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+CyclotomicField(3) Laurent QQ[x].gen t-q | -x + x | [-x, 1] | 0 | Laurent Series Ring in x over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+CyclotomicField(3) Laurent ZZ[x].gen S(q) | x | [x] | 0 | Laurent Series Ring in x over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+CyclotomicField(3) Laurent ZZ[x].gen q*t | x*x | [x] | 1 | Laurent Series Ring in x over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+CyclotomicField(3) Laurent ZZ[x].gen t*q | x*x | [x] | 1 | Laurent Series Ring in x over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+CyclotomicField(3) Laurent ZZ[x].gen q+t | x + x | [x, 1] | 0 | Laurent Series Ring in x over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+CyclotomicField(3) Laurent ZZ[x].gen t+q | x + x | [x, 1] | 0 | Laurent Series Ring in x over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+CyclotomicField(3) Laurent ZZ[x].gen t-q | -x + x | [-x, 1] | 0 | Laurent Series Ring in x over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+CyclotomicField(3) Laurent QQ[x](x^2+1/2) S(q) | (x^2 + 1/2) | [x^2 + 1/2] | 0 | Laurent Series Ring in x over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+CyclotomicField(3) Laurent QQ[x](x^2+1/2) q*t | (x^2 + 1/2)*x | [x^2 + 1/2] | 1 | Laurent Series Ring in x over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+CyclotomicField(3) Laurent QQ[x](x^2+1/2) t*q | (x^2 + 1/2)*x | [x^2 + 1/2] | 1 | Laurent Series Ring in x over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+CyclotomicField(3) Laurent QQ[x](x^2+1/2) q+t | (x^2 + 1/2) + x | [x^2 + 1/2, 1] | 0 | Laurent Series Ring in x over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+CyclotomicField(3) Laurent QQ[x](x^2+1/2) t+q | (x^2 + 1/2) + x | [x^2 + 1/2, 1] | 0 | Laurent Series Ring in x over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+CyclotomicField(3) Laurent QQ[x](x^2+1/2) t-q | (-x^2 - 1/2) + x | [-x^2 - 1/2, 1] | 0 | Laurent Series Ring in x over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+CyclotomicField(3) Laurent GF5[x].gen S(q) | x | [1] | 1 | Laurent Series Ring in x over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+CyclotomicField(3) Laurent GF5[x].gen q*t | ERR TypeError
+CyclotomicField(3) Laurent GF5[x].gen t*q | ERR TypeError
+CyclotomicField(3) Laurent GF5[x].gen q+t | ERR TypeError
+CyclotomicField(3) Laurent GF5[x].gen t+q | ERR TypeError
+CyclotomicField(3) Laurent GF5[x].gen t-q | ERR TypeError
+CyclotomicField(3) Laurent QQ[y].gen S(q) | x | [1] | 1 | Laurent Series Ring in x over Univariate Polynomial Ring in x over Cyclotomic Field of order 3 and degree 2
+CyclotomicField(3) Laurent QQ[y].gen q*t | ERR TypeError
+CyclotomicField(3) Laurent QQ[y].gen t*q | ERR TypeError
+CyclotomicField(3) Laurent QQ[y].gen q+t | ERR TypeError
+CyclotomicField(3) Laurent QQ[y].gen t+q | ERR TypeError
+CyclotomicField(3) Laurent QQ[y].gen t-q | ERR TypeError
