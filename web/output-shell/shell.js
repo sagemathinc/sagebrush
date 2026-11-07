@@ -9,7 +9,8 @@
 // - A render replaces what the frame shows.  Each output is checked again here, with
 //   the same code the host uses (safe-html.ts, safe-svg.js), before it is shown.
 // - RENDER-COMMIT-1: one committed per accepted generation, after the outputs are in
-//   the DOM, the fonts and pictures are ready (or READY_MS passed) and the layout has
+//   the DOM, the fonts and pictures are ready (or READY_MS passed), the frame has its
+//   width (or READY_MS passed again) and the layout has
 //   settled; a newer render abandons an older one, which then commits nothing.  Later
 //   size changes are height messages, at most HEIGHT_HZ a second, the last always sent.
 // - The frame never navigates, opens, downloads, prints or asks the host to do work:
@@ -68,6 +69,24 @@ for (const t of ["click", "auxclick"]) addEventListener(t, (e) => { if (e.target
 // (the layout settled: forced now, then a frame or, where a hidden frame's frames are paused, a short timer)
 const frame = () => { root.getBoundingClientRect(); return Promise.race([new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))), deadline(50)]); };
 const deadline = (ms) => new Promise((r) => setTimeout(r, ms));
+// (the frame's own width, before anything is measured: an out-of-process frame learns its size from the page a
+// moment after it loads, and until then its viewport is 0 wide, every word on its own line. A height measured
+// then is too tall, and an offscreen frame, whose resize observations are paused, never corrects it: the area's
+// placeholder would hold it and the page shift when the frame comes back (EVICT-LAYOUT-1). Bounded: a frame
+// really laid out 0 wide still commits at the deadline)
+// The width usually comes within a few milliseconds. Timers in an offscreen cross-origin frame run about once a
+// second, so for its first 250 ms the wait yields through a MessageChannel, whose tasks aren't throttled, then
+// polls every 50 ms.
+const sized = (ms) => innerWidth > 0 ? Promise.resolve() : new Promise((r) => {
+  const t0 = performance.now(), ch = new MessageChannel();
+  const next = () => {
+    const t = performance.now() - t0;
+    if (innerWidth > 0 || t >= ms) { ch.port1.close(); return r(); }
+    if (t < 250) ch.port2.postMessage(0); else setTimeout(next, 50);
+  };
+  ch.port1.onmessage = next;
+  next();
+});
 const pictures = () => Promise.all([...root.querySelectorAll("img")].map((i) => i.decode().catch(() => {})));
 
 async function render(m) {
@@ -88,6 +107,7 @@ async function render(m) {
     return;
   }
   await Promise.race([Promise.all([document.fonts.ready, pictures()]), deadline(READY_MS)]);
+  await sized(READY_MS);
   await frame();
   if (g !== gen) return; // (replaced meanwhile: this generation commits nothing)
   committed = true;

@@ -545,6 +545,24 @@ try {
     "disposing the set ends the live, the frame-starved and the offscreen render once each, a late commit included, and leaves nothing: " + JSON.stringify([zs.before, zd]));
   await ev("(sc3.remove(), 1)");
 
+  // ---- a frame measured before it has its width (an out-of-process frame starts 0 wide): the shell waits for its width,
+  // so its committed height is its real one (the source of the 35 px anchor shift seen in CI, EVICT-LAYOUT-1)
+  const zw = await ev(`(async () => {
+    const M = make();
+    const ref = M.area("zw-ref", box()), narrow = box(); narrow.style.width = "0px";
+    const z = M.area("zw", narrow);
+    const outputs = [{ id: "o", kind: "html", body: "<p>area 1</p><div style=\\"height:50px\\"></div>" }];
+    ref.show(); ref.render(outputs); z.show(); z.render(outputs);
+    await until(() => events.find((e) => e.area === "zw-ref" && e.type === "committed"));
+    await new Promise((r) => setTimeout(r, 400));
+    narrow.style.width = "";
+    await until(() => events.find((e) => e.area === "zw" && e.type === "committed"), 8000);
+    const out = { ref: ref.state.height, zw: z.state.height };
+    M.dispose();
+    return out;
+  })()`);
+  ok(zw.ref > 0 && zw.zw === zw.ref, "a frame that has no width yet commits only once it has one, with its real height: " + JSON.stringify(zw));
+
   // ---- EVICT-LAYOUT-1 under a cap of 3, in a scrolling container
   await ev(`(() => {
     window.sc = document.getElementById("scroller");
