@@ -7058,6 +7058,14 @@
   "owner": "board",
   "row": "src-18"
  },
+ "src/board-check.ts ::  :: import { b64Bytes, pictureSize, pictureUrl, PixelBudget, SVG_MAX_BYTES, svgDataUrl } from \"../web/image-size\"; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "board",
+  "row": "src-18"
+ },
  "src/board-check.ts :: boardCheck :: const bytes = readBounded(file, FILE_MAX); #0": {
   "class": "1",
   "owner": "board",
@@ -7065,6 +7073,38 @@
  },
  "src/board-check.ts :: boardCheck :: if (bytes === null) { say(`${file}: too large for the board to open (at most ${FILE_MAX / 2 ** 20} MB)`); return 1; } #0": {
   "class": "1",
+  "owner": "board",
+  "row": "src-18"
+ },
+ "src/board-check.ts :: ref :: const size = pictureSize(u.type, u.base64), why = budget.take(size); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "board",
+  "row": "src-18"
+ },
+ "src/board-check.ts :: svgWhy :: if (b64 !== null && b64Bytes(b64) > SVG_MAX_BYTES) return \"it's over 2 MB of text\"; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "board",
+  "row": "src-18"
+ },
+ "src/board-check.ts :: svgWhy :: if (bytes && bytes.length > SVG_MAX_BYTES) return \"it's over 2 MB of text\"; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "board",
+  "row": "src-18"
+ },
+ "src/board-check.ts :: svgWhy :: if (src.length > 3 * SVG_MAX_BYTES + 64) return \"it's over 2 MB of text\"; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
   "owner": "board",
   "row": "src-18"
  },
