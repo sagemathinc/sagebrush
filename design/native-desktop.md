@@ -1,39 +1,258 @@
 # Native engines in the desktop app
 
-*Status: plan r3, for review. No code accompanies it, and nothing is built until it is reviewed and William
+*Status: plan r4, for review. No code accompanies it, and nothing is built until it is reviewed and William
 approves (his rule of Oct 30). Owner: @sagebrush-remote-compute. Reviewers: astra (SEC), daybreak3 (ENGINE), daybreak4
-(PERF), daybreak2 (SIZE), agents-ui (app). r2 took the r1 reviews. r3 takes the r2 reviews:
-- PERF: the low-level thread rows now have a wasm run of the identical call (§2);
-- SEC: NATIVE-DIFF-1's three contracts, destination resolution, the disk failure model and the freeze barrier
-  (§3.1, N1, N2);
-- ENGINE: NATIVE-IPC-2, unsupported modes (§1.3), and NATIVE-IPC-3, views of a shared kernel (§1.3);
-- app: the N4 interact gate and agents-ui's addendum, where the all-or-nothing batch is a new page API (§3.1).
-
-Whether an item is closed is for its reviewer to say. Still open whatever the reviews say: N1's proofs and William's
-decisions (§7).*
+(PERF), daybreak2 (SIZE), agents-ui (app). r3 (bb03eabb) was PLAN CLEAR in all five lanes for route B alone. r4
+answers William (Nov 7, about 6:33 AM PST): "there are two approaches to no wasm native: js runtime and napi; cpython
+and oxpy. we need to fully consider both options". r4 compares the two routes in full, on the same cells and the
+same version, and recommends one. Part B is r3's route-B plan, unchanged. Whether anything is closed is for its
+reviewer to say. Still open whatever the reviews say: N1's proofs and William's decisions (§5).*
 
 ## In plain words
 
-- The desktop app will run notebooks with Sagebrush's **native engines**: the Rust engine compiled for your computer,
-  with real threads, native SIMD and all of your memory, inside a real CPython. It will not use WebAssembly in the web
-  view.
-  - On the engine-heavy cells measured below it is 2.2–4.8 times faster than WebAssembly at the same version. The
-    most is where an engine uses many cores, which WebAssembly here doesn't. It starts in milliseconds.
-  - It is not yet faster at everything; §2 says plainly where.
-- Each notebook gets its own engine process, locked down by the operating system before any of its code runs:
-  - it reads only the notebook's own folder and what you've allowed;
-  - its file changes reach your files only after Sagebrush's permission checks;
-  - it has no network of its own.
-- The website, iPhone and iPad keep WebAssembly, and so does Android at first. Where the app can't lock a process
-  down, it keeps today's behaviour, never something looser.
+- Either way, the desktop app runs Sagebrush's **engines natively**: the Rust engine compiled for your computer, with
+  real threads, native code and all of your memory, not WebAssembly. William's rule holds on both routes.
+- There are two ways to run the **Python** around those engines:
+  - **A:** the same Python interpreter the website uses (Sagebrush's own, written in TypeScript), run by a JavaScript
+    runtime such as Node, with the Rust engine loaded as a native add-on;
+  - **B:** CPython, the standard Python, with the Rust engine loaded as a native Python extension (r3's plan).
+- Measured here, at the same version and on the same machine:
+  - both routes make the engine cells about **2–3 times faster** than WebAssembly;
+  - A keeps the web's fast pure Python and big integers, where B is 2–14 times slower;
+  - B is faster at dictionaries and strings (about 2×) and at big gcd (about 75×; a pyjs gap that also affects the
+    website);
+  - B starts in tens of milliseconds, A in about half a second (one second with the Sage library).
+- **A runs exactly the website's Python, Sage, Magma and MATLAB.** Its Python can't touch files or the network
+  except through the page's own permission checks, as in the browser. So the operating-system sandbox is only the
+  outer wall, and **no change to the permission rules** is needed.
+- **B gives standard CPython** and, later, real C extensions such as numpy. But it is a second Python whose behaviour
+  differs from the website's, and it needs new file machinery and two exceptions to the permission rules.
+- **Recommendation: A for the desktop app's native engines, with B as a later, separately planned option** for real C
+  extensions (§4).
 
-William, Nov 7 2026: "one key thing: the desktop app must NOT just use wasm. that it does not must be very temporary"
-(6:02 AM PST), and "we really need to have a native app that is not wasm, since that is a major part of the value
-prop of native" (~6:05 AM).
+## 1. The two routes
 
-## 1. What runs, and how the app runs it
+| | **A: a JavaScript runtime + N-API** | **B: CPython + PyO3** (r3, Part B) |
+|---|---|---|
+| Python interpreter | **pyjs**, Sagebrush's own (src/runtime), the one the website and the npm CLI run | CPython (python-build-standalone, bundled) |
+| Sage, Magma, MATLAB layers | lib/ (the same files as the web), run by pyjs | the Sage layer: the same Python files (`engine/py/python/sagebrush/_sagelib`, "the same Python files implement Sage mode in the browser"), but run by CPython; Magma and MATLAB not available (NATIVE-IPC-2) |
+| The engine | **engine/web's JSON ABI** (`call`, `sym_call`, `mp_call`: exactly what pyjs calls in wasm today), built as a native **N-API add-on** (napi-rs), with rayon threads | the PyO3 wheel `sagebrush._native` (engine/py), a separate binding layer |
+| JS runtime | Node first (V8, measured); Bun or Deno load the same add-on file (smoke-tested, §2); an embedded V8 host is an N1 option | — |
+| The session | `notebookSession` (src/notebook-session.ts), already run by the web worker **and** in a Node worker thread by `sagebrush notebook` (src/notebook.ts) | `child.py` (the native runner's kernel) plus a new adapter |
 
-### 1.1 The engines run native, not only the interpreter
+"oxpy" is read here as the PyO3 route (Rust "oxide" bindings for Python). If William meant something else, B's
+column changes with it.
+
+## 2. Measured: the same cells on both routes and on wasm, same version
+
+- **Version:** Sagebrush **0.6.0** everywhere.
+  - **W (wasm):** the npm CLI under Node v26.13.0. This is the browser runtime: pyjs plus the wasm engine.
+  - **A (the spike):** the same CLI, its engine calls sent to an **N-API add-on built from the v0.6.0 tag's
+    engine/web** (release, LTO, one codegen unit, as `engine/Cargo.toml`; `sagebrush-ap` with rayon, as the wheel).
+    A 12-line napi-rs crate wraps `sagebrush_web::call`, `sagebrush_sym::api::call` and
+    `sagebrush_mpoly::call_framed`. A preload (`napi-engine.mjs`) swaps the wasm instance's `sb_call`,
+    `sb_sym_call` and `sb_mp_call` for the add-on.
+  - **B:** CPython 3.14.4 with the PyPI wheel, as in r3.
+  - **A1, B1:** the same, with `RAYON_NUM_THREADS=1`.
+- **Method:** two cells files (`cells.py`, r3's, and `cells2.py`, new: more pure Python and big integers). Each cell
+  gets one warm-up and then the median of 3, in each process. There is one discarded process per configuration, then
+  5 counted processes. The table gives the **median of the 5 per-process medians**, with their range.
+- **Machine:** the same 32-core Xeon as r3. The load average was 12–20 from other agents during the matrix, so
+  ranges are wider than r3's. N1 re-measures on quiet machines.
+- **Agreement:** every result agrees across W, A and B.
+- **Evidence:** `/scratch/sagebrush-reviews/remote-compute/native-bench-0.6.0-r4-routes/`. It holds the scripts,
+  the spike's source and Cargo.lock, the add-on's SHA-256, raw runs, `summary.txt`, `wasm-calls.txt`,
+  `startup.txt`, `sizes.txt`, `runtimes-smoke.txt` and `env.txt`, with SHA256SUMS, read-only. Every number below
+  is from these files.
+- **Which cells reach the engine** (`wasm-calls.txt`, counting wasm exports): det, factor and aplist call
+  `sb_call`. fib, the factorial and every cell of `cells2.py` never do: in pyjs, Python and big integers run as V8
+  JIT code and V8 `BigInt`.
+  - **Correction to r3:** r3 said the browser runtime does big-integer arithmetic on Sagebrush's Rust bigint. It
+    doesn't: it is V8's `BigInt`.
+
+| Cell | W (wasm) | **A** (N-API) | **B** (CPython) | A1 / B1 (1 thread) |
+|---|---|---|---|---|
+| `det`, 200×200 integer matrix (engine) | 181.7 (165.5–210.7) | **95.6** (88.7–100.8): **1.9×** | **82.2** (76.2–109.0): **2.2×** | 96.2 / 78.9 |
+| `factor`, 41-digit product (engine, ECM) | 567.7 (543.0–598.1) | **257.4** (250.9–260.4): **2.2×** | **299.0** (283.1–339.4): **1.9×** | 257.7 / 279.6 |
+| `aplist(200000)`, Sage namespace (engine) | 100.6 (96.1–113.1) | **43.6** (35.9–52.3): **2.3×** | **32.1** (31.8–34.7): **3.1×** | 99.2 (1.0×) / 88.9 (1.1×) |
+| `fib(24)`, pure Python | 2.8 | 2.8: 1.0× | 5.9: 0.47× | |
+| `fib(27)`, pure Python | 9.7 (9.4–13.1) | 10.1: 0.96× | 32.0 (21.7–40.4): **0.30×** | |
+| a 10⁶-iteration arithmetic loop | 30.5 | 32.8: 0.93× | 70.8: **0.43×** | |
+| a 200,000-key dict of formatted strings, sorted | 402.1 | 411.8: 0.98× | 186.4: **2.2×** | |
+| `factorial(60000)` | 11.5 | 11.7: 0.98× | 62.9: **0.18×** | |
+| a 317,000 × 456,000-bit multiply | 2.5 | 2.6: 0.96× | 37.1: **0.07×** | |
+| the matching division | 11.6 | 11.5: 1.0× | 86.6: **0.13×** | |
+| `gcd` of a 91,700-bit and a 96,400-bit integer | 1333.4 | 1306.6: 1.0× | 17.8: **75×** | |
+| `import` of the Sage library | 459–507 | 441–529 | 20–28 | |
+
+(ms; the speedup is W's median over the route's median. Cells, sizes and exact operands are in `cells2.py`.)
+
+**What this shows:**
+- **Engine cells: both routes are native and comparable,** 1.9–3.1× over wasm here.
+  - B is somewhat ahead on `det` and `aplist`. A is ahead on `factor`.
+  - A's spike still copies each request and reply through the wasm instance's memory and JSON. A real build calls
+    the add-on directly; N1 measures what that saves.
+  - With one thread, both are about wasm's speed on `aplist`. Threads are what make the difference there, and both
+    routes have them.
+- **Pure Python and big integers: A keeps the web's speed; B is slower,** 2–3× on pure Python and 5–14× on big
+  integers. On B, NAT-BIGINT-1 (Part B §2) remains a gate before native becomes the default.
+- **B wins on dict and string work (2.2×) and on big `gcd` (75×).**
+  - The `gcd` gap is pyjs computing `gcd` in JS `BigInt` instead of calling the engine. Routing it (and the other
+    big-integer kernels) to the engine fixes it **for the website too**, through wasm. That is ordinary engine work
+    on route A.
+  - The dict/string gap is pyjs's own; it shows on the website today.
+- **Startup** (`startup.txt`; load 26–34, 7 runs each; time to the first printed line, in ms):
+
+  | Program | A | B |
+  |---|---|---|
+  | `print(1)` | 411–483 | 23–25 |
+  | after importing the Sage library | 1060–1284 | 53–65 |
+  | for reference: W's `print(1)` | 398–454 | |
+
+  `node -e 0` takes 43–58 ms, and loading the add-on adds nothing measurable. A's startup is pyjs's boot, the same
+  as the web worker's today (design/runner.md: about 300 ms to ready in the page). A V8 startup snapshot of the
+  booted interpreter is the obvious remedy: **a guess**, N1 measures it.
+- **Other JS runtimes** (`runtimes-smoke.txt`, **one process each, not a benchmark**):
+  - The same add-on file loads and answers in Node v26.13.0, Bun 1.3.14 and Deno 2.9.0.
+  - The wasm CLI also runs all five r3 cells under Bun and Deno.
+  - Under Bun (JavaScriptCore) `factorial(60000)` took 84.0 ms, against 11.2–12.6 ms on V8 (Node, Deno). **The JS
+    engine matters for pyjs's big integers.** That is one reason A names Node (V8) first. It also suggests that the
+    website itself is slower at big integers in Safari and the macOS/Linux web views, which this plan doesn't fix.
+- **Limits:** one machine, Linux x86_64, under load. The cells are mine. A is a spike through a shim. N1 measures
+  both routes properly, at one commit, on each OS (Part A §A.6).
+
+## 3. The comparison, criterion by criterion
+
+Each row says whether it is **measured** (here, with the evidence above), **from the code** (read at master), or **a
+guess** (to be settled in N1).
+
+| | **A: JS runtime + N-API** | **B: CPython + PyO3** |
+|---|---|---|
+| **Semantics parity with the web** | **One interpreter** (from the code): the same pyjs, lib/, Sage, Magma and MATLAB layers, numpy implementation, `@interact`, display bundles and errors. The same test suites and oracle diffs cover both. NAT-BIGINT-1 doesn't exist: big integers are V8's, as on the web. The engine is the same Rust behind the same JSON ABI. | **Two interpreters** (from the code): CPython against pyjs. The shared Sage files run on different builtins (`Integer` is an `int` subclass, NAT-BIGINT-1). Magma and MATLAB are missing (NATIVE-IPC-2), interact is deferred (N4 gate), and the engine is reached through a second binding layer (PyO3, engine/py) that must track engine/web's. Every oracle and test needs a CPython run too. |
+| **Speed** | **Measured:** engine cells 1.9–2.3× over wasm; pure Python and big integers equal to wasm-in-V8; dict/strings and big gcd as slow as the web. | **Measured:** engine cells 1.9–3.1×; pure Python 2–3× slower, big integers 5–14× slower than wasm-in-V8; dict/strings 2.2× faster, big gcd 75× faster. |
+| **Startup** | **Measured:** about 0.4 s to the first line, about 1.1 s with Sage. A snapshot could cut it (**guess**). | **Measured:** 23–25 ms; 53–65 ms with Sage. |
+| **Threads** | **Measured:** rayon in the add-on, all cores (`aplist` 43.6 ms against 99.2 with one thread). The interpreter is single-threaded, as on the web. | **Measured:** rayon in the wheel (32.1 against 88.9). Python threads exist, but the GIL limits them. |
+| **Memory** | 64-bit, so the engine has no 4 GB cap (from the code). V8's heap limit for JS objects is set by a flag (`--max-old-space-size`); the > 4 GB case is N1 (**guess** that it passes). | 64-bit, no cap (from the code). |
+| **Files and permissions** | **From the code:** pyjs has no raw file system. Python's files are the in-memory `web/shims/fs`: the page delivers `{files}`, Python's changes come back as `{fsChanged}`, and every write is checked at the call by `setWritable`, with `PermissionError`, exactly as in the browser. There is no shell process (`!cmd` is just-bash, in JS: web/shell). So **no reconciliation transaction, no freeze barrier, no disk journal, and neither of the two semantic exceptions** of Part B §3.1 and §3.5: refusals happen at the call, revoke is immediate (`fsWritable`), as on the web. | **From the code:** CPython code makes real system calls, so Part B §3.1's delivery and reconciliation, the freeze barrier, the journal and both William exceptions are needed. |
+| **The OS sandbox** | Still required: the runtime and the add-on are native code, and a pyjs or engine bug must not become the user's account. The policy can be **stricter than B's**: no writable file system at all (a private temp at most), no sockets, no child processes (fork and exec denied on every OS, so the descendant problem of NATIVE-OS-1 disappears). V8 needs JIT memory: on macOS the hardened runtime's `com.apple.security.cs.allow-jit` entitlement, and seccomp must allow executable mappings (**guess** that both fit; Chromium runs V8 under seccomp and Seatbelt). Node's own permission model is **not** a sandbox (its docs: "a seat belt" for trusted code), so it is not relied on. | Required, with Part B §3.3's table: files limited to the working directory, no sockets, and the descendant problem (PID namespace or Job, macOS open). CPython has no JIT, so the profiles are simpler. |
+| **IPC and WorkerKernel fit** | **From the code:** the child runs `notebookSession`, the same protocol the page's `WorkerKernel` already speaks (init, runs with sage/magma/matlab, files, `fsWritable`, interact, completion, check, live data). The `NativeKernelPort` is a framed pipe carrying those messages. `input()` and Stop keep their SharedArrayBuffer design **inside** the child (a worker thread runs the session; the child's main thread answers the buffer), so no signals and no Windows special case. NATIVE-IPC-1 and IPC-2 don't arise. IPC-3 (two views) stays. | **From the code:** a new adapter maps WorkerKernel to child.py's narrower protocol (Part B §1.3: IPC-1, IPC-2, IPC-3), plus `input()` and Stop by signal or control message (Part B §1.4). |
+| **Size** | **Measured** (Linux x86_64, xz -9e): Node v26.13.0 stripped 27.3 MB (Bun 24.8, Deno 30.9) plus the add-on 3.1 MB, about **+30 MB**. pyjs and lib/ are already in the app for the wasm worker. | **Measured:** uv's CPython 3.13 install, untrimmed, 21.2 MB, plus the wheel's `.so` 1.7 MB and Python files, about **+23–28 MB**. A trimmed build is smaller (**guess**). |
+| **Signing** | The app, the launcher, the Node binary (with the JIT entitlement on macOS) and the add-on. | The app, the launcher, `python`, every `.so`/`.pyd`/DLL of the runtime, and the wheel. |
+| **Maintenance** | **One Python implementation**, the one the web needs anyway. New: an N-API build of engine/web (the spike is 12 lines), later engine/nd and the SIMD kernels too, a Node entry for the session with the web's file shim, and a pinned Node with its security updates. | **Two Python implementations:** every behaviour difference between CPython and pyjs is a user-visible difference between desktop and web. Two engine binding layers (PyO3 and the JSON ABI). A pinned CPython. |
+| **Native C extensions** (numpy, scipy, pandas) | **Never** through pyjs: it isn't CPython and has no C API. numpy, scipy and pandas stay Sagebrush's own implementations, as on the web, made faster by native engine kernels. | **Possible later:** real wheels load into CPython. Each is arbitrary native code, so it runs only under the OS sandbox, and the app's size grows with each. |
+| **Risks** | V8 under each OS sandbox (JIT entitlement, seccomp, AppContainer): N1. pyjs's startup. Node's release cadence and CVEs. The engine's interrupt and memory limits are wasm-specific today: natively, the Stop flag must be a shared atomic the host sets (engine/interrupt's native mode installs a SIGINT handler, which would fight Node's), and the limits must be re-plumbed. pyjs's slow spots (dicts, big gcd) are shared with the web. | Semantic drift between two interpreters, forever. The larger security design of Part B §3 and its William exceptions. Magma, MATLAB and interact gaps. NAT-BIGINT-1. The macOS descendant question. |
+
+## 4. Recommendation
+
+**Route A for the desktop app's native engines; route B as a later option, planned separately, for real C
+extensions and "your own Python".**
+
+- **It meets William's rule:** the engines run natively, with threads and 64-bit memory (**measured** 1.9–2.3× on the
+  engine cells, close to B's 1.9–3.1×).
+- **It is the web's Python, exactly.** Parity comes by construction, not by testing two interpreters against each
+  other. Magma, MATLAB, interact and the numpy layer work from the first day.
+- **It is faster than B** at pure Python and big integers (**measured**), and slower at startup (**measured**) and
+  dict/string work. The big-gcd gap is fixable in the engine, for the web as well.
+- **Its confinement is simpler and stronger.** Python never makes a system call, so the browser's permission semantics
+  hold unchanged. The OS sandbox only has to stop native code from doing anything at all: no files, no sockets, no
+  children. Neither of Part B's William exceptions is needed.
+- **What A gives up:** CPython's ecosystem of C extensions. Users who need real numpy or scipy have the native runner
+  (`sagebrush remote`, the "Your computer" runner) today, and B later as N5.
+
+**What would change this:**
+- N1 finds that V8 can't be confined to the minimum policy on an OS: then B on that OS, or Part B §3.6's fallback.
+- pyjs's startup can't be brought near the web worker's.
+- William wants CPython semantics on the desktop for their own sake.
+
+## 5. Decisions for William
+
+1. **The route: A (recommended) or B.**
+2. **Signing:** the Apple Developer ID and notarization account (on A, also the JIT entitlement for Node), and Windows
+   code signing.
+3. **Size:** bundle the native runtime (about +30 MB on A, +23–28 MB on B, compressed; budget +40 MB per thin
+   installer; recommended), or download it on first use?
+4. **An "unconfined" native mode:** recommended not in v1, on either route.
+5. **Only if B:** the native kernel's two semantic exceptions (Part B §3.1, §3.5). On A neither is needed.
+
+## Part A: route A in detail (if William chooses A)
+
+### A.1 What runs
+
+- The app bundles a pinned Node (V8), the **N-API add-on** built from engine/web at the app's commit (with
+  sagebrush-ap's rayon, and later engine/nd's and the SIMD kernels' native builds), and the pyjs bundle the web
+  worker already uses.
+- **A trusted launcher** (Part B §3.4's, unchanged in role) starts one child per document identity, confined before
+  Node runs any JavaScript.
+- **The child's entry** is a Node build of `web/worker.ts`'s session: `notebookSession` with **`web/shims/fs`** (the
+  in-memory file system), not `sagebrush notebook`'s real files. It runs in a worker thread, so the SharedArrayBuffer
+  `input()` and interrupt designs work unchanged. The child's main thread relays framed messages between stdio and
+  that worker.
+- Engine modules that have no native build yet keep running as **wasm inside the same child** (Node runs wasm too).
+  So the change is incremental, and each module's native build is its own reviewed step. engine/web, which carries
+  the hot paths measured here (modular symbols, a_p, factoring, exact linear algebra), is native from the first
+  release.
+
+### A.2 The port
+
+- `NativeKernelPort` carries **the worker protocol itself** over a framed pipe: the host's
+  `postMessage`/`onmessage`, with structured data serialized (`v8.serialize` or JSON plus binary frames, chosen in N1
+  by cost).
+- `init` stays host-handled, as in Part B §1.3 (launch, self-check, then `ready`).
+- **Generation fencing, attachment IDs and host request IDs, origin binding, fanout and refcount** are Part B §1.3's
+  NATIVE-IPC-3 contract, unchanged.
+- No mode map is needed: Python, Sage, Magma and MATLAB are all the session's own modes.
+
+### A.3 Files and permissions
+
+- The page delivers the read scope as `{files}`, and later `{fsPut}`, as it does for the wasm worker.
+- Python's changes come back as `{fsChanged}` and enter `drainFiles()`, the queue wasm writes use, with today's
+  semantics.
+- `{fsWritable}` turns writes on and off at once.
+- Narrowing the read scope behaves as it does for the wasm worker today: files already delivered stay in the
+  child's memory until it restarts. The confinement spec's existing worker semantics apply, unchanged.
+- **There is no working directory on disk, no reconciliation, no freeze, no journal.**
+- The host checks that every `fsChanged` comes from the registered child and its generation (stale fencing), as the
+  page already does for workers.
+- A forged message from a compromised child meets the same page gate as a compromised wasm worker today.
+
+### A.4 Network
+
+None in the child. Live data goes through the session's existing `liveData` request, answered by the host's broker
+(Part B §3.2's binding to identity and generation).
+
+### A.5 The OS policy (stricter than Part B §3.3)
+
+| | Files | Sockets and IPC | Processes |
+|---|---|---|---|
+| **Linux** | Landlock, minimum ABI 3: read the runtime only; write nothing (a private temp only if N1 finds Node needs one) | seccomp: `socket()` refused for every family; plus Part B's list; executable mappings allowed for V8's JIT | `fork`/`vfork`/`clone` without `CLONE_THREAD`, and `execve` after start, refused: no children at all |
+| **macOS** | Seatbelt before exec: read the runtime; no writes | `(deny network*)`, Mach lookups minimal | `(deny process-fork)` and `(deny process-exec)` after start; the hardened runtime with `allow-jit` |
+| **Windows** | an AppContainer with no file capabilities; read-only runtime | no network capabilities | a Job with an active-process limit of 1 and no breakaway |
+
+The self-check and N1's proof work as in Part B §3.3, with the stricter probes: any file write, any socket, any
+child process.
+
+### A.6 Milestones for route A
+
+| | What | Gate |
+|---|---|---|
+| **N0** | This plan, reviewed; William's choice of route and the decisions of §5 | all lanes; William |
+| **N1** | Spikes and measurements: **(1)** Node under §A.5's policy on macOS, Linux and Windows, with SEC's escape tests and the JIT under each sandbox. **(2)** daybreak4's measurements at one commit, A against W (in each OS's web view) and against B: the cells here, with the engine called directly (no shim), threads on and off, the > 4 GB case, startup with and without a V8 snapshot. **(3)** The framing (`v8.serialize` or JSON plus binary) by cost. **(4)** Size per OS and architecture: Node against an embedded V8 host (deno_core) against Bun, under Part B §4's budget (+40 MB compressed). **(5)** Native Stop: a host-set atomic flag polled by engine/interrupt (no SIGINT handler in the child). | SEC, ENGINE, PERF, SIZE |
+| **N2** | macOS and Linux: the add-on (engine/web; nd and the SIMD kernels as separate reviewed steps), the child entry with `web/shims/fs`, the port, the launcher, the engine's limits natively, broker-only network, the fallback (Part B §3.6), and the judges' native lines. **#822's option 1 ends** as in Part B's N2. | all lanes |
+| **N3** | Windows | all lanes |
+| **N4** | Native becomes the default. No interact or bigint gate is needed: both are the web's own. | William |
+| **N5** | Later, each planned separately: **route B** for real C extensions, native terminals, Android native, warm kernels | — |
+
+---
+
+## Part B: route B in detail (the r3 plan)
+
+*This is r3's text (bb03eabb), PLAN CLEAR in all five lanes as a plan for route B, unchanged except one correction
+in its §2 (the browser's big integers are V8's `BigInt`). Section numbers and references inside Part B are Part B's
+own. Its §7 decisions are §5 above.*
+
+### 1. What runs, and how the app runs it
+
+#### 1.1 The engines run native, not only the interpreter
 
 The point of the native app is the **engines**: the Rust crates under `engine/` (exact linear algebra, number fields
 and factoring, modular symbols and forms, a_p, polynomials, Gröbner bases, the parallel scheduler), compiled for the
@@ -61,7 +280,7 @@ commit as the app** in the app's own release job.
   If B is chosen it enters N2; otherwise it is dropped. (A separate `x86-64-v3` build is not proposed: it doubles the
   artifacts.)
 
-### 1.2 How the app starts it: the native runner's kernel as a sidecar (recommended)
+#### 1.2 How the app starts it: the native runner's kernel as a sidecar (recommended)
 
 - The app bundles a pinned CPython (python-build-standalone, stripped) and the wheel above. There's no system Python
   and nothing for the user to install.
@@ -76,7 +295,7 @@ commit as the app** in the app's own release job.
 - The page reaches it through an adapter behind `WorkerKernel` (§1.3). The **run API** the notebook, boards and console
   call stays the same. Underneath, files (§3.1) and `input()` (§1.4) change.
 
-### 1.3 The adapter: page ↔ Tauri ↔ kernel (NATIVE-IPC-1)
+#### 1.3 The adapter: page ↔ Tauri ↔ kernel (NATIVE-IPC-1)
 
 `WorkerKernel` and `child.py` are **not wire-compatible**:
 - `WorkerKernel` sends `{init: {limits}}` first;
@@ -143,7 +362,7 @@ run. So N2 builds a **`NativeKernelPort`**: a Worker-like object (`postMessage`,
 - **`done` waits for reconciliation:** a run's terminal `done` reaches the page only after its reconciliation (§3.1)
   has finished. The page can never start the next run against an unreconciled tree.
 
-### 1.4 What the wasm kernel does today, and how the native one does it
+#### 1.4 What the wasm kernel does today, and how the native one does it
 
 - **`input()`:** today it is a SharedArrayBuffer round trip (design/runner.md). Natively it becomes a protocol message:
   the kernel sends `{id, input: {prompt, max}}` and blocks for the page's `{runnerInput: id, text}`, with today's
@@ -165,14 +384,14 @@ run. So N2 builds a **`NativeKernelPort`**: a Worker-like object (`postMessage`,
   - Closing a window or switching documents follows the wasm worker's rule.
   - Quitting the app kills every kernel's descendant tree.
 
-### 1.5 Rejected alternatives
+#### 1.5 Rejected alternatives
 
 - **CPython embedded in the app process (pyo3), with the engine linked into the Tauri binary.** It is one process, so
   there is no OS sandbox per document, a crash takes the app down, and there is no tree to kill.
 - **The wasm engine under wasmtime outside the web view.** It is still wasm32, which is what William ruled out.
 - **The user's own Python and packages.** That is later (N5); it can't be sandboxed or versioned with the app.
 
-## 2. Measured: native engine against wasm, same version
+### 2. Measured: native engine against wasm, same version
 
 - **Version:** Sagebrush **0.6.0** on both sides, the newest release on both npm and PyPI.
 - **Wasm:** the npm CLI (the browser runtime: Python compiled to JS plus the wasm engine) under Node v26.13.0 (V8).
@@ -207,7 +426,8 @@ run. So N2 builds a **`NativeKernelPort`**: a Worker-like object (`postMessage`,
 - **NAT-BIGINT-1 (an N2 ENGINE gate):** in the native wheel, `Integer` is a subclass of CPython's `int`, so big-integer
   arithmetic is CPython's. In a separate frozen probe, `factorial(Integer(60000))` takes 58 ms against
   `math.factorial`'s 55 ms, the same code path (`native-bench-0.6.0-bigint/`); in the browser runtime it runs on
-  Sagebrush's Rust bigint. N2 owns a representation and dispatch design:
+  V8's `BigInt` (corrected in r4: r3 said Sagebrush's Rust bigint; see §2 above). N2 owns a representation and
+  dispatch design:
   - mixed `int`/`Integer` operands;
   - exact result types and Sage semantics;
   - interrupt and limit propagation;
@@ -219,7 +439,7 @@ run. So N2 builds a **`NativeKernelPort`**: a Worker-like object (`postMessage`,
 - **Limits:** this is V8, not the app's web views (JavaScriptCore on macOS and Linux); it is one machine, and the
   cells are mine. N1 re-measures (§6).
 
-## 3. Enforcing "File writes" and "Network" for native code
+### 3. Enforcing "File writes" and "Network" for native code
 
 The confinement spec (r3.2) defines two switches per document and the host's authority (§4.1). It labels a native
 kernel "unconfined" (§4.4). Inside the app this plan makes the native kernel **confined**:
@@ -228,7 +448,7 @@ kernel "unconfined" (§4.4). Inside the app this plan makes the native kernel **
 
 The native semantics differ from the browser's in two stated ways (§3.1, §3.5); both go to William (§7).
 
-### 3.1 Files: delivery in, one transaction out (NATIVE-DIFF-1)
+#### 3.1 Files: delivery in, one transaction out (NATIVE-DIFF-1)
 
 - **The working directory.** Each kernel has a private per-document directory under the app's data folder. It holds
   the **read scope only** (spec §2.7): the document's own folder tree plus granted trees. These are **independent
@@ -338,7 +558,7 @@ The native semantics differ from the browser's in two stated ways (§3.1, §3.5)
   separately reviewed, is a FUSE or ProjFS view that refuses at the call.
 - **Widening** (a new read or write grant) delivers more files before the next run, with no restart.
 
-### 3.2 Network: none in the kernel
+#### 3.2 Network: none in the kernel
 
 - The OS policy (§3.3) refuses every socket. The kernel has only its inherited stdio pipes.
 - Live data, the remote relay and any future fetch go through the host's one connection broker (spec §4.1,
@@ -346,7 +566,7 @@ The native semantics differ from the browser's in two stated ways (§3.1, §3.5)
   generation**, known to the host by the pipe it came on and never by a field in the message, and is bounded in size
   and rate.
 
-### 3.3 The OS policy, per platform: a minimum contract (NATIVE-OS-1)
+#### 3.3 The OS policy, per platform: a minimum contract (NATIVE-OS-1)
 
 The kernel runs only if the **whole** minimum policy for its platform is installed. Otherwise, §3.6.
 
@@ -366,7 +586,7 @@ The kernel runs only if the **whole** minimum policy for its platform is install
   Any success means that kernel isn't used. **N1's proof** is the complete policy tested on each platform: denied
   IPC, descendant lifecycle through Stop, close and revoke, and the escape attempts SEC lists.
 
-### 3.4 The trusted launcher: no ambient authority before confinement (NATIVE-BOOT-1)
+#### 3.4 The trusted launcher: no ambient authority before confinement (NATIVE-BOOT-1)
 
 - **Confinement precedes every untrusted instruction.** The launcher, a small Rust program shipped and signed with the
   app, installs the whole policy of §3.3, then `exec`s the interpreter. On Windows the AppContainer token is applied at
@@ -386,7 +606,7 @@ The kernel runs only if the **whole** minimum policy for its platform is install
   bounds, checked again by the host), and malformed framing ends the kernel. Every broker request is bound to its
   generation (§3.2).
 
-### 3.5 Revoke: restart, in order (NATIVE-REVOKE-1, a William decision)
+#### 3.5 Revoke: restart, in order (NATIVE-REVOKE-1, a William decision)
 
 An OS policy can't re-check reads on handles opened earlier (spec LIVE-HANDLE-1). The proposal, which needs
 **William's explicit exception** to spec §4.2 (interpreter preservation) and §4.1 (immediate revoke) for native kernels
@@ -401,7 +621,7 @@ An OS policy can't re-check reads on handles opened earlier (spec LIVE-HANDLE-1)
 The person sees "permissions changed: the kernel restarted". Widening never restarts. Restarting can't take back bytes
 the old kernel already read; the plan doesn't claim it does.
 
-### 3.6 When native confinement isn't available: today's behaviour, not looser (NATIVE-FALLBACK-1)
+#### 3.6 When native confinement isn't available: today's behaviour, not looser (NATIVE-FALLBACK-1)
 
 - A kernel that fails launch, policy or self-check is **killed and retired** before anything else runs for that
   document. Its generation is fenced, and its started cell is never replayed.
@@ -413,7 +633,7 @@ the old kernel already read; the plan doesn't claim it does.
 - The page says which mode is available and why (the words go to COPY).
 - Spec §4.4's kernels (a remote runner, Jupyter, `sagebrush remote` on a server) stay as the spec says.
 
-## 4. Size, install and startup, and signing
+### 4. Size, install and startup, and signing
 
 - **Size (daybreak2):** today's installers are 10–15 MB. The wheel adds about 6–7 MB compressed (0.8.2 on PyPI,
   6.0–6.8 MB). A stripped CPython adds roughly 15–30 MB compressed.
@@ -453,7 +673,7 @@ the old kernel already read; the plan doesn't claim it does.
   - **Linux:** signed checksums; AppImage, deb and rpm.
   - The accounts and their cost are William's decision.
 
-## 5. What stays wasm
+### 5. What stays wasm
 
 - **The website:** a page can't start processes. "Run on: Your computer" (loopback) and remote compute remain its
   native paths.
@@ -468,7 +688,7 @@ the old kernel already read; the plan doesn't claim it does.
 - **The runner pill's words** are COPY's (board's) to rule on. "Isolated" may describe only the process sandbox. It
   must not read as the confinement claim, which the spec reserves until its phases ship.
 
-## 6. Milestones
+### 6. Milestones
 
 | | What | Gate |
 |---|---|---|
@@ -479,22 +699,7 @@ the old kernel already read; the plan doesn't claim it does.
 | **N4** | Native becomes the app's default, once NAT-BIGINT-1's controls pass **and** interact and widgets reach parity natively, or notebooks that use them are routed to wasm under §3.6's rules, so `@interact` notebooks don't regress; the wasm fallback stays | William |
 | **N5** | Later, each planned separately: the user's own Python, native terminals in the app, Android native, warm kernels, a FUSE or ProjFS file view | — |
 
-## 7. Decisions for William
-
-1. **Signing:** the Apple Developer ID and notarization account, and Windows code signing (Azure Trusted Signing or an
-   EV certificate).
-2. **Size:** bundle the native runtime (payload +21–37 MB per thin installer; budget +40 MB; recommended), or download
-   it on first use?
-3. **An "unconfined" native mode,** where the user explicitly runs a notebook's native code without the OS sandbox.
-   Recommended: not in v1; the remote runner covers that, labelled as spec §4.4 says.
-4. **The native kernel's two semantic exceptions to the confinement spec:**
-   - (a) a refused write fails at the end of the cell, all or nothing, not at the call (§3.1). For disk documents
-     "all or nothing" is a decision with recovery: other programs can briefly see a commit in progress, and a failed
-     rollback is reported as partially applied. Subfolder changes of disk documents are refused natively until
-     subfolder writes exist for both engines;
-   - (b) a revoke restarts the document's kernel, with the ordering of §3.5, an exception to §4.1 and §4.2.
-
-## 8. Grounding
+### 8. Grounding (r3)
 
 - master cfa6d281 (Nov 7 2026);
 - app/README.md;
@@ -509,3 +714,16 @@ the old kernel already read; the plan doesn't claim it does.
 - the r1 reviews in /scratch/sagebrush-reviews/pr825-81e508e7-*.md and /home/user/sagebrush/reviews/pr825-81e508e7-perf-daybreak4.md;
 - the r2 reviews (pr825-6d6c2fd3-*.md in the same folders, daybreak3's and daybreak4's updated in place);
 - Linux Landlock (docs.kernel.org/userspace-api/landlock.html), setsid(2), and Windows Job objects (learn.microsoft.com).
+
+## Grounding (r4)
+
+- master b9a712b4 (Nov 7 2026); the v0.6.0 tag (dbdf5984) for the spike;
+- src/runtime/engine.ts (`_sbengine`: `sb_call`, `sb_sym_call`, `sb_mp_call`), engine/web/src/lib.rs (`pub fn
+  call`), engine/node (an earlier, partial napi-rs add-on, not wired to pyjs);
+- src/notebook-session.ts (the protocol; run by web/worker.ts and by src/notebook.ts in a Node worker thread),
+  web/shims/fs.ts (the in-memory files and `setWritable`), web/shell (just-bash);
+- engine/py/python/sagebrush/sage.py ("the same Python files implement Sage mode in the browser");
+- engine/interrupt/src/lib.rs (the wasm host flag and the native SIGINT handler);
+- the evidence in §2: /scratch/sagebrush-reviews/remote-compute/native-bench-0.6.0-r4-routes/;
+- Node's permission model: nodejs.org/api/permissions.html (a "seat belt", not a defence against malicious code);
+- the r3 reviews: /scratch/sagebrush-reviews/pr825-bb03eabb-*.md and the updated pr825-81e508e7 files.
