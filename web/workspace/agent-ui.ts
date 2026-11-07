@@ -71,7 +71,8 @@ export const RESTORE_MS = 10_000;
 // then given up on as before. Nothing about who may pair changes: the same session, the same refusal otherwise)
 export const BUSY_STEP_MS = 250;
 export const BUSY_FOR_MS = 2000;
-const busy = (p: AgentPairing) => /^the agent refused: another page is paired/.test(p.closeReason);
+// (exactly the agent server's words, engine/py/python/sagebrush/pairing.py; not the remote computer's, which differ)
+const busy = (p: AgentPairing) => /^the agent refused: another page is paired with this agent$/.test(p.closeReason);
 
 /** The page's pairing: a dialog to connect, a bar while connected.  Returns the button's handler. `reload` (A14) turns on
  * the reload record: its scope, and a callback for the restore's states; `quietLoss` leaves an involuntary loss to the
