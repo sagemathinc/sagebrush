@@ -901,84 +901,15 @@ class Axes:
         pass  # (contourf is drawn as a picture already)
 
     def get_position(self, original=False):
-        """Where the Axes is, a Bbox in figure coordinates (the origin at
-        the bottom left), as matplotlib's: from the subplot parameters, or
-        the rect given; with an aspect and adjustable 'box', the box shrunk
-        to the data's shape and centred (unless original)."""
-        from matplotlib.transforms import Bbox
-        grid = getattr(self, "_grid", None)
-        if getattr(self, "_bounds", None) is not None:
-            # (the bounds given, kept as given: no float lost on the way)
-            pb = Bbox.from_bounds(*self._bounds)
-        elif self._opts.get("exact") or grid is None:
-            # (the rect given, or one made outside a grid: a colorbar's)
-            l, t, w, h = self._rect
-            pb = Bbox.from_bounds(l, 1 - t - h, w, h)
-        else:
-            nrows, ncols = grid
-            x, y = self._rect[0], self._rect[1]
-            pb = _grid_bbox(nrows, ncols, min(nrows - 1, int(round(y * nrows))), min(ncols - 1, int(round(x * ncols))))
-        ar = self._opts.get("aspect_ratio")
-        if original or ar is None or self.get_adjustable() != "box":
-            return pb
-        # (matplotlib's apply_aspect: Bbox.shrunk_to_aspect, then anchored at 'C')
-        (x0, x1), (y0, y1) = self.get_xlim(), self.get_ylim()
-        tx = (lambda v: math.log10(v)) if self.get_xscale() == "log" else (lambda v: v)
-        ty = (lambda v: math.log10(v)) if self.get_yscale() == "log" else (lambda v: v)
-        xsize, ysize = abs(tx(x1) - tx(x0)), abs(ty(y1) - ty(y0))
-        if not (xsize > 0 and ysize > 0):
-            return pb
-        box_aspect = float(ar) * (ysize / xsize)
-        fig_aspect = self.figure._size[1] / self.figure._size[0]
-        w, h = pb.width, pb.height
-        H = w * box_aspect / fig_aspect
-        if H <= h:
-            W = w
-        else:
-            W = h * fig_aspect / box_aspect
-            H = h
-        dx, dy = 0.5 * (w - W), 0.5 * (h - H)
-        return Bbox([[pb.x0 + dx, pb.y0 + dy], [pb.x0 + W + dx, pb.y0 + H + dy]])
+        """Where the Axes is, a Bbox in figure coordinates (matplotlib's)."""
+        from matplotlib._axes_geometry import position
+        return position(self, original)
 
     def _apply_aspect(self):
-        """matplotlib's apply_aspect for adjustable 'datalim', run as the
-        figure is drawn (savefig, show, canvas.draw): one pair of limits
-        moved so that the data's aspect fills the Axes box (the y pair,
-        or the x pair, by matplotlib's margins rule), and kept, as
-        matplotlib's set_ybound keeps it; limits that were fixed are moved
-        with matplotlib's warning."""
-        ar = self._opts.get("aspect_ratio")
-        if ar is None or self.get_adjustable() != "datalim" or self.get_xscale() != "linear" or self.get_yscale() != "linear":
-            return
-        bb = Panel([p for p in self._prims if not p.options.get("hidden")]).data_bbox()
-        if bb is None or None in bb:
-            return
-        pos = self.get_position(original=True)
-        fig_aspect = self.figure._size[1] / self.figure._size[0]
-        box_aspect = fig_aspect * (pos.height / pos.width)
-        data_ratio = box_aspect / float(ar)
-        (x0, x1), (y0, y1) = self.get_xlim(), self.get_ylim()
-        xmin, xmax, ymin, ymax = min(x0, x1), max(x0, x1), min(y0, y1), max(y0, y1)
-        xsize, ysize = max(abs(xmax - xmin), 1e-30), max(abs(ymax - ymin), 1e-30)
-        y_expander = data_ratio * xsize / ysize - 1
-        if abs(y_expander) < 0.005:
-            return
-        xr, yr = 1.05 * (bb[1] - bb[0]), 1.05 * (bb[3] - bb[2])
-        xmarg, ymarg = xsize - xr, ysize - yr
-        Ysize, Xsize = data_ratio * xsize, ysize / data_ratio
-        Xmarg, Ymarg = Xsize - xr, Ysize - yr
-        if xmarg > 0 and ymarg > 0:
-            adjust_y = (Ymarg > 0 and y_expander < 0) or (Xmarg < 0 and y_expander > 0)
-        else:
-            adjust_y = y_expander > 0
-        a, c, half, inv = ("y", 0.5 * (ymin + ymax), Ysize / 2.0, y1 < y0) if adjust_y else ("x", 0.5 * (xmin + xmax), Xsize / 2.0, x1 < x0)
-        new = (c + half, c - half) if inv else (c - half, c + half)
-        if self._opts.get(a + "min") is not None or self._opts.get(a + "max") is not None:
-            import sys
-            sys.stderr.write("Ignoring fixed %s limits to fulfill fixed data aspect with adjustable data limits.\n" % a)
-            self._opts[a + "min"], self._opts[a + "max"] = new
-        else:
-            self._opts["_" + a + "view"] = new
+        # (adjustable 'datalim': the limits moved as the figure is drawn)
+        if self._opts.get("aspect_ratio") is not None and self.get_adjustable() == "datalim" and self.get_xscale() == self.get_yscale() == "linear":
+            from matplotlib._axes_geometry import apply_aspect
+            apply_aspect(self)
 
     def set_position(self, pos, which="both"):
         """The Axes at [left, bottom, width, height] (or a Bbox), in figure
@@ -1100,21 +1031,14 @@ class Axes:
         lo, hi = self.get_ylim()
         return bool(hi < lo)
 
-    def _view_size(self):
-        """The Axes' size on the canvas (pixels at 100 per inch), as
-        matplotlib lays it out: what an aspect with adjustable 'datalim'
-        fits the limits to."""
-        b = self.get_position(original=True)
-        return (b.width * self.figure._size[0] * 100, b.height * self.figure._size[1] * 100)
-
     def get_xlim(self):
         p = self._panel()
-        r = p.ranges(*self._view_size())
+        r = p.ranges(500, 400)
         return (r[0], r[1])
 
     def get_ylim(self):
         p = self._panel()
-        r = p.ranges(*self._view_size())
+        r = p.ranges(500, 400)
         return (r[2], r[3])
 
     def set_xscale(self, s, **kw):
@@ -1171,25 +1095,8 @@ class Axes:
         self._ticks_view("y", self._opts["yticks"])
 
     def _ticks_view(self, a, ticks):
-        """matplotlib's set_ticks: the view widened, now, to take in the
-        ticks (never narrowed; its direction kept).  Limits that were set
-        are widened; an autoscaled view is widened until new data, a
-        set_xlim or autoscale() scales it again (the friction's W41: a tick
-        at -1 under bars from 0 was not drawn)."""
-        if not ticks:
-            return
-        lo, hi = self.get_xlim() if a == "x" else self.get_ylim()
-        inv = hi < lo
-        vlo, vhi = (hi, lo) if inv else (lo, hi)
-        nlo, nhi = min(vlo, min(ticks)), max(vhi, max(ticks))
-        if (nlo, nhi) == (vlo, vhi):
-            return
-        new = (nhi, nlo) if inv else (nlo, nhi)
-        if self._opts.get(a + "min") is not None or self._opts.get(a + "max") is not None:
-            self._opts[a + "min"], self._opts[a + "max"] = new
-            self._opts.pop(a + "invert", None)
-        else:
-            self._opts["_" + a + "view"] = new
+        from matplotlib._axes_geometry import ticks_view
+        ticks_view(self, a, ticks)
 
     def set_xticklabels(self, labels, **kw):
         self._opts["xticklabels"] = [str(s) for s in labels]
@@ -1202,25 +1109,8 @@ class Axes:
             self._opts["_ytick_rotation"] = _rotation(kw["rotation"])
 
     def _ticklabels(self, a):
-        """The tick labels as matplotlib lists them: its locator's ticks,
-        those just outside the view too, or the ticks set, with their
-        texts (matplotlib's formatter, or the labels set) and rotation."""
-        p = self._panel()
-        xlo, xhi, ylo, yhi, xlog, ylog = p.ranges(*self._view_size())
-        lo, hi, log = (xlo, xhi, xlog) if a == "x" else (ylo, yhi, ylog)
-        pos, labs = self._opts.get(a + "ticks"), self._opts.get(a + "ticklabels")
-        bins = (p.options.get("tick_bins") or {}).get(a)
-        if pos is None and bins and not log:
-            from _graphics import mpl_ticks
-            pos = mpl_ticks(min(lo, hi), max(lo, hi), bins)
-        if pos is None:
-            pairs = p.ticks(lo, hi, log, None, None, 5, a)
-            pos, texts = [v for v, _ in pairs], [_strip_markup(t) for _, t in pairs]
-        else:
-            from _graphics import _mpl_labels
-            texts = list(labs) if labs is not None else _mpl_labels(pos)
-        rot = float(self._opts.get("xtick_rotation" if a == "x" else "_ytick_rotation") or 0)
-        return [_TickText(v, t, rot, a) for v, t in zip(pos, texts)]
+        from matplotlib._axes_geometry import ticklabels
+        return ticklabels(self, a)
 
     def get_xticklabels(self, minor=False, which=None):
         return self._ticklabels("x")
@@ -1442,74 +1332,6 @@ def _rotation(r):
     return float(r) % 360
 
 
-def _strip_markup(s):
-    import re
-    return re.sub(r"<[^>]*>", "", str(s))
-
-
-class _TickText:
-    """A tick label, as matplotlib's Text: get_text(), get_position(),
-    get_rotation()."""
-
-    def __init__(self, v, text, rotation, axis):
-        self._v, self._text, self._rot, self._axis = float(v), str(text), float(rotation), axis
-
-    def get_text(self):
-        return self._text
-
-    def get_position(self):
-        return (self._v, 0) if self._axis == "x" else (0, self._v)
-
-    def get_rotation(self):
-        return self._rot
-
-    def __repr__(self):
-        x, y = self.get_position()
-        return "Text(%r, %r, %r)" % (x, y, self._text)
-
-
-class _FigureCanvas:
-    def __init__(self, figure):
-        self.figure = figure
-
-    def draw(self):
-        for ax in self.figure.axes:
-            ax._apply_aspect()
-
-    def draw_idle(self):
-        self.draw()
-
-    def flush_events(self):
-        pass
-
-    def get_width_height(self, physical=False):
-        w, h = self.figure._size
-        return (int(round(w * self.figure.dpi)), int(round(h * self.figure.dpi)))
-
-
-def _grid_bbox(nrows, ncols, row, col):
-    """The Bbox of cell (row, col) of an nrows x ncols grid of subplots, by
-    matplotlib's GridSpec arithmetic (the subplot parameters from rcParams;
-    the same sums in the same order, so the same floats)."""
-    from matplotlib.transforms import Bbox
-    sp = lambda k: float(rcParams["figure.subplot." + k])
-    left, right, bottom, top = sp("left"), sp("right"), sp("bottom"), sp("top")
-    wspace, hspace = sp("wspace"), sp("hspace")
-
-    def cells(total, n, space):
-        cell = total / (n + space * (n - 1))
-        sep = space * cell
-        norm = cell * n / n
-        acc, out = 0.0, []
-        for i, step in enumerate([0.0, norm] + [sep, norm] * (n - 1)):
-            acc = acc + step if i else step
-            out.append(acc)
-        return out[0::2], out[1::2]
-    t0, t1 = cells(top - bottom, nrows, hspace)
-    l0, l1 = cells(right - left, ncols, wspace)
-    return Bbox([[left + l0[col], top - t1[row]], [left + l1[col], top - t0[row]]])
-
-
 class _AxesFraction:
     _axes_fraction = True
 
@@ -1627,9 +1449,9 @@ class Figure:
 
     @property
     def canvas(self):
-        """The figure's canvas: draw() lays it out as saving it does (the
-        aspects applied), get_width_height() its size in pixels."""
-        return _FigureCanvas(self)
+        """The figure's canvas: draw(), get_width_height()."""
+        from matplotlib._axes_geometry import FigureCanvas
+        return FigureCanvas(self)
 
     def set_size_inches(self, w, h=None):
         if h is None:
@@ -2014,22 +1836,14 @@ def ylim(*args, **kw):
     gca().set_ylim(*args, **kw)
 
 
-def _ticks_now(ax, a):
-    """(locs, labels), as plt.xticks() returns them: the ticks as given
-    (their numpy type), or the locator's."""
-    import numpy as np
-    labels = ax._ticklabels(a)
-    given = ax._opts.get("_" + a + "ticks_given")
-    return np.asarray(given if given is not None else [t._v for t in labels]), labels
-
-
 def xticks(ticks=None, labels=None, **kw):
     if ticks is not None:
         gca().set_xticks(ticks, labels)
     if kw.get("rotation") is not None:
         gca()._opts["xtick_rotation"] = _rotation(kw["rotation"])
     if ticks is None and labels is None and not kw:
-        return _ticks_now(gca(), "x")
+        from matplotlib._axes_geometry import ticks_now
+        return ticks_now(gca(), "x")
     if kw.get("fontsize", kw.get("size")) is not None:
         gca()._opts["tick_size"] = _size_px(kw.get("fontsize", kw.get("size")), 10)
 
@@ -2040,7 +1854,8 @@ def yticks(ticks=None, labels=None, **kw):
     if kw.get("rotation") is not None:
         gca()._opts["_ytick_rotation"] = _rotation(kw["rotation"])
     if ticks is None and labels is None and not kw:
-        return _ticks_now(gca(), "y")
+        from matplotlib._axes_geometry import ticks_now
+        return ticks_now(gca(), "y")
     if kw.get("fontsize", kw.get("size")) is not None:
         gca()._opts["tick_size"] = _size_px(kw.get("fontsize", kw.get("size")), 10)
 
