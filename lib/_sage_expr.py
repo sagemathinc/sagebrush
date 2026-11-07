@@ -58,6 +58,74 @@ def _float_s(v):
     return _call("float", repr(float(v)))[0]
 
 
+def _bits(v):
+    """The IEEE bits of the double v, in hex (the engine's float serialization)."""
+    import struct
+    return "%x" % struct.unpack("<Q", struct.pack("<d", float(v)))[0]
+
+
+def _double_s(v):
+    """An element of RDF (d) or CDF (h) as an engine number of that parent: Sage keeps it,
+    printed as RDF prints (1.5*x, not RR's 1.50000000000000*x)."""
+    if isinstance(v, float):
+        return "d%s;" % _bits(v)
+    z = complex(v)
+    return "h%s,%s;" % (_bits(z.real), _bits(z.imag))
+
+
+def _hash_form(s):
+    """The serialization s with each float as its value only, for hashing: the
+    parent (f RR, d RDF, g CC, h CDF) is not part of the value, so sin(x + RR(1.5))
+    and sin(x + RDF(1.5)), which are equal, hash alike, as in Sage.  -0.0 is 0.0,
+    and a complex float with imaginary part 0 is the real one (x + RR(1.5) ==
+    x + CC(1.5)).  Names (s, F, D) are skipped by their length, which the engine
+    writes in UTF-8 bytes: the walk is over bytes (a 3-byte name such as var('\\u53d8')
+    was misread, the daybreak3 HASH-2)."""
+    b = s.encode("utf-8")
+    out, i, n, expect = [], 0, len(b), True
+
+    def bits(t):
+        return b"0" if t == b"8000000000000000" else t
+
+    while i < n:
+        c = b[i:i + 1]
+        if not expect:
+            out.append(c)
+            expect = c == b"{"
+            i += 1
+            continue
+        expect = False
+        if c in (b"f", b"d", b"g", b"h"):
+            j = b.index(b";", i)
+            parts = b[i + 1:j].split(b",")
+            if len(parts) == 2 and bits(parts[1]) != b"0":
+                out.append(b"g" + bits(parts[0]) + b"," + parts[1] + b";")
+            else:
+                out.append(b"f" + bits(parts[0]) + b";")
+            i = j + 1
+        elif c == b"n":
+            j = b.index(b";", i) + 1
+            out.append(b[i:j])
+            i = j
+        elif c == b"z":
+            j = b.index(b";", b.index(b";", i) + 1) + 1
+            out.append(b[i:j])
+            i = j
+        elif c in (b"s", b"F", b"D"):
+            k = b.index(b":", i)
+            j = k + 1 + int(b[i + 1:k])
+            out.append(b[i:j])
+            i = j
+        elif c in (b"c", b"R"):
+            out.append(b[i:i + 2])
+            i += 2
+            expect = False
+        else:
+            # A or M and their count, or P: what follows is copied up to '{'
+            out.append(c)
+            i += 1
+    return b"".join(out)
+
 # The largest integer an expression may hold (the engine's MAX_INT_BITS):
 # expressions cross into the engine as decimal text, so a larger one is
 # refused before it is formatted, as CPython refuses int-to-str past its
@@ -84,15 +152,16 @@ def _to_s(v):
     if isinstance(v, _Fraction):
         # exact ints first: formatting an int subclass must not round it
         return _rat_s(int(v.numerator), int(v.denominator))
+    if type(v).__name__ in ("RealDoubleElement", "ComplexDoubleElement"):
+        return _double_s(v)
     if isinstance(v, float):
         if _rr_args((v,)) == 2:
             # (the engine's real numbers are doubles)
             raise NotImplementedError("%s, an element of RR past the double range, has no symbolic form in sagebrush yet" % (v,))
         return _float_s(v)
     if isinstance(v, complex):
-        if v.imag == 0:
-            return _float_s(v.real)
-        return _call("complex", repr(v.real), repr(v.imag))[0]
+        # (an element of CC stays one with imaginary part 0: it meets RDF as CC)
+        return "g%s,%s;" % (_bits(v.real), _bits(v.imag))
     if _is_poly(v):
         t, r = Expression(_sym_s(v.variable_name())), Expression("n0/1;")
         for i, c in enumerate(v._c):
@@ -136,7 +205,10 @@ def _py_number(s):
         p, q = r[1].split("/")
         import sage_all as sa
         return sa._intdiv(int(p), int(q)) if q != "1" else sa.Integer(int(p))
-    if r[0] == "f" and float(r[2]) == 0:
+    if r[0] == "f" and r[3:4] == ["RDF"]:
+        import _sage_rdf
+        return _sage_rdf.RDF(float(r[1]))
+    if r[0] == "f" and r[3:4] in (["RR"], []):
         from _sage_lang import RealNumber
         return RealNumber(float(r[1]))
     return None
@@ -173,18 +245,12 @@ def _infinite_relation(kind, a, b):
     return {"<": sa < sb, "<=": sa < sb, ">": sa > sb, ">=": sa > sb}[kind]
 
 
-def _numerically_equal(a, b):
-    """Heuristic equality of two constants that the engine could neither
-    simplify to equal nor separate: their difference, evaluated at 400 bits,
-    is below 2^-300 relative to them.  (A double, which underflows or
-    cancels, is never used.)"""
-    import _sage_real
-    try:
-        d = abs(_sage_real.N(a - b, 400))
-        m = max(abs(_sage_real.N(a, 400)), abs(_sage_real.N(b, 400)), 1)
-        return bool(d <= m * _sage_real.N(Expression("2") ** -300, 400))
-    except Exception:
-        return False
+def _exact_sign(d):
+    """The exact sign of a constant relation's difference, for when the
+    engine and the double enclosure cannot decide it: 0, 1, -1, "c" (not
+    real) or None (undecided).  The work is in the lazy _sage_expr_more."""
+    import _sage_expr_more
+    return _sage_expr_more._exact_sign(d)
 
 
 def _relop(sym):
@@ -226,6 +292,10 @@ class Expression:
 
     # --- arithmetic
     def _bin(self, op, other, rev=False):
+        if type(other).__name__ == "PolynomialInexact" and self._s == "z0/1;1/1;":
+            # (I with a polynomial over an inexact field is over its complex field:
+            # I*t in RR[t] is in CC[t], as Sage)
+            return NotImplemented
         o = _to_s(other)
         if o is None:
             return NotImplemented
@@ -298,7 +368,7 @@ class Expression:
                 from _sage_poly import poly_hash
                 h = poly_hash(terms)
         if h is None:
-            h = hash(s)
+            h = hash(_hash_form(s))
         self._h = h
         return h
 
@@ -312,11 +382,13 @@ class Expression:
                 return inf
             if kind in ("==", "!="):
                 z = _call("is_zero", (a - b)._s)[0] == "1"
-                if not z and kind == "==" and not (a - b).variables() and _call("const_sign", (a - b)._s)[0] == "":
-                    # constants of undecided sign: equal if they agree to
-                    # far more than double precision (never from an
-                    # underflowed or cancelled double)
-                    z = _numerically_equal(a, b)
+                # (a constant the enclosure cannot separate from 0: exactly,
+                # when it is algebraic)
+                xs = _exact_sign(a - b) if not z and not (a - b).variables() and _call("const_sign", (a - b)._s)[0] == "" else None
+                if xs is not None:
+                    z = xs == 0
+                # (other constants the enclosure cannot separate stay
+                # undecided, as Sage: log(6) == log(2) + log(3) is False)
                 if not z and _ASSUMPTIONS and (a - b).variables():
                     # the rewritten difference tested directly: bool() of
                     # (rewrite == 0) came back here and rewrote again,
@@ -334,7 +406,10 @@ class Expression:
             # rationals); undecided is False, as in Sage
             sg = _call("const_sign", (a - b)._s)[0]
             if sg == "":
-                return False
+                # (an algebraic constant: its sign exactly; not real: False)
+                sg = _exact_sign(a - b)
+                if sg is None or sg == "c":
+                    return False
             sg = int(sg)
             return {"<": sg < 0, "<=": sg <= 0, ">": sg > 0, ">=": sg >= 0}[kind]
         return _call("is_zero", self._s)[0] != "1"
@@ -417,7 +492,7 @@ class Expression:
         EXAMPLES::
 
             sage: (x^2).operator(), (x + 1).operator()  # sagebrush only
-            (<function pow at 0x...>, <function add at 0x...>)
+            (<built-in function pow>, <built-in function add>)
         """
         import operator as o
         tag = self._op()[0]
@@ -473,7 +548,7 @@ class Expression:
             sage: SR(2/3).is_numeric(), pi.is_numeric()
             (True, False)
         """
-        return self._s[0] in "nzfg"
+        return self._s[0] in "nzfgdh"
 
     def is_constant(self):
         """Whether the expression has no variables.
@@ -733,6 +808,11 @@ class Expression:
         """
         v = _py_number(self._s)
         if v is None:
+            r = _call("number", self._s)
+            if r[0] == "f" and r[3:4] in (["CC"], ["CDF"]):
+                # (a complex float as an element of its parent, as Sage)
+                import sage_all as sa
+                return (sa.CDF if r[3] == "CDF" else sa.CC)(float(r[1]), float(r[2]))
             raise TypeError("self must be a numeric expression")
         return v
 
@@ -756,6 +836,8 @@ class Expression:
             (3*x^2, 2*x*cos(x^2), 12*x^2, 3*x^2)
             sage: y = var('y'); (x^2*y).diff([x, y]), (x^2).diff([])
             (2*x, x^2)
+            sage: (1 + x^2/2).diff(x, 0), diff(x^2*y^3, x, y, 0), diff(x^2, 0)
+            (1/2*x^2 + 1, 2*x*y^3, x^2)
         """
         # a list alone is the list of variables, and an empty one means no
         # differentiation, as in Sage (diff(x^2, []) was 2*x); a tuple, or a
@@ -772,16 +854,31 @@ class Expression:
             if len(names) != 1:
                 raise ValueError("No differentiation variable specified.")
             args = (Expression(_sym_s(names[0])),)
-        r, last = self, None
+        # (a count k after a variable: k derivatives in it, 0 none, as
+        # Sage: diff(f, x, 0) is f; a 0 with no variable before it is
+        # skipped, any other count there is Sage's ValueError)
+        r, last, before = self, None, self
         for a in args:
             if isinstance(a, int) and not isinstance(a, bool):
+                if a < 0:
+                    raise ValueError("derivative counts must be nonnegative")
                 if last is None:
-                    raise ValueError("No differentiation variable specified.")
-                if a > 1:
+                    if a == 0:
+                        continue
+                    names = r._names()
+                    if len(names) != 1:
+                        raise ValueError("No differentiation variable specified.")
+                    # (in the only variable: diff(1 + x^2/2, 2) is 1)
+                    r = _one("diff", r._s, names[0], str(a))
+                    continue
+                if a == 0:
+                    r = before
+                elif a > 1:
                     r = _one("diff", r._s, last, str(a - 1))
                 last = None
                 continue
             last = _var_name(a)
+            before = r
             r = _one("diff", r._s, last, "1")
         return r
 
@@ -1509,6 +1606,9 @@ def _real_imag(e, k):
         return e if k == 0 else Expression("n0/1;")
     if r[0] == "z":
         return Expression("n%s;" % r[1 + k])
+    if r[0] == "f" and r[3:4] in (["RDF"], ["CDF"]):
+        # (a part of an element of RDF or CDF is one of RDF: SR(CDF(1, 2)).real_part() is 1.0)
+        return Expression("d%s;" % _bits(float(r[1 + k])))
     c = complex(e)
     return _expr(c.imag if k else c.real)
 
@@ -1906,6 +2006,7 @@ class _SymbolicRing:
             names = tuple(names[0])
         if len(names) == 1 and isinstance(names[0], str):
             names = names[0].replace(",", " ").split()
+        _check_var_names(names)
         vs = tuple(Expression(_sym_s(n)) for n in names)
         if kw.get("latex_name") is not None:
             for n in names:
@@ -2830,6 +2931,19 @@ def _assume_rewrite(e):
     return e
 
 
+_PY_KEYWORDS = frozenset("False None True and as assert async await break class continue def del elif else except finally for from global if import in is lambda nonlocal not or pass raise return try while with yield".split())
+
+
+def _check_var_names(names):
+    """Sage's refusals of a variable name: none at all, or one that is not a
+    Python identifier (a keyword, 1a, a{b): var('for') is a ValueError."""
+    if not names:
+        raise ValueError("You need to specify the name of the new variable.")
+    for n in names:
+        if not (isinstance(n, str) and n.isidentifier()) or n in _PY_KEYWORDS:
+            raise ValueError("The name \"%s\" is not a valid Python identifier." % n)
+
+
 def var(*names, **kw):
     """var('x y') or var('x', 'y'): symbolic variables, also defined in __main__.
 
@@ -2844,9 +2958,7 @@ def var(*names, **kw):
         names = tuple(names[0])
     if len(names) == 1 and isinstance(names[0], str):
         names = names[0].replace(",", " ").split()
-    for n in names:
-        if not n.isidentifier():
-            raise ValueError("The name \"%s\" is not a valid Python identifier." % n)
+    _check_var_names(names)
     vs = tuple(Expression(_sym_s(n)) for n in names)
     if kw.get("latex_name") is not None:
         for n in names:
@@ -4326,6 +4438,13 @@ def diff(f, *args):
     """
     if _callable(f):
         return f.diff(*args)
+    if _is_poly(f) and hasattr(f, "derivative"):
+        # (in its own ring, as Sage: diff(m^3, m) is in QQ[m]; a symbolic
+        # variable it does not know goes the symbolic way)
+        try:
+            return f.derivative(*args)
+        except TypeError:
+            pass
     f = _poly_or(f)
     if not isinstance(f, Expression):
         if hasattr(f, "derivative"):

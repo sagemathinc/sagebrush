@@ -1,0 +1,148 @@
+RDF RDF | add 3.0 RDF | mul 2.25 RDF | coef 3.0 RDF | x+a+b x + 3.0 RDF
+RDF RR | add 4.0 RDF | mul 3.75 RDF | coef 4.0 RDF | x+a+b x + 4.0 RDF
+RDF CDF | add 2.5 + 2.0*I CDF | mul 1.5 + 3.0*I CDF | coef 2.5 + 2.0*I CDF | x+a+b x + 2.5 + 2.0*I CDF
+RDF ZZ | add 3.5 RDF | mul 3.0 RDF | coef 3.5 RDF | x+a+b x + 3.5 RDF
+RDF QQ | add 1.8333333333333333 RDF | mul 0.5 RDF | coef 1.8333333333333333 RDF | x+a+b x + 1.8333333333333333 RDF
+RR RDF | add 4.00000000000000 RR | mul 3.75000000000000 RR | coef 4.00000000000000 RR | x+a+b x + 4.00000000000000 RR
+RR RR | add 5.00000000000000 RR | mul 6.25000000000000 RR | coef 5.00000000000000 RR | x+a+b x + 5.00000000000000 RR
+RR CDF | add 3.5 + 2.0*I CDF | mul 2.5 + 5.0*I CDF | coef 3.5 + 2.0*I CDF | x+a+b x + 3.5 + 2.0*I CDF
+RR ZZ | add 4.50000000000000 RR | mul 5.00000000000000 RR | coef 4.50000000000000 RR | x+a+b x + 4.50000000000000 RR
+RR QQ | add 2.83333333333333 RR | mul 0.833333333333333 RR | coef 2.83333333333333 RR | x+a+b x + 2.83333333333333 RR
+CDF RDF | add 2.5 + 2.0*I CDF | mul 1.5 + 3.0*I CDF | coef 2.5 + 2.0*I CDF | x+a+b x + 2.5 + 2.0*I CDF
+CDF RR | add 3.5 + 2.0*I CDF | mul 2.5 + 5.0*I CDF | coef 3.5 + 2.0*I CDF | x+a+b x + 3.5 + 2.0*I CDF
+CDF CDF | add 2.0 + 4.0*I CDF | mul -3.0 + 4.0*I CDF | coef 2.0 + 4.0*I CDF | x+a+b x + 2.0 + 4.0*I CDF
+CDF ZZ | add 3.0 + 2.0*I CDF | mul 2.0 + 4.0*I CDF | coef 3.0 + 2.0*I CDF | x+a+b x + 3.0 + 2.0*I CDF
+CDF QQ | add 1.3333333333333333 + 2.0*I CDF | mul 0.3333333333333333 + 0.6666666666666666*I CDF | coef 1.3333333333333333 + 2.0*I CDF | x+a+b x + 1.3333333333333333 + 2.0*I CDF
+ZZ RDF | add 3.5 RDF | mul 3.0 RDF | coef 3.5 RDF | x+a+b x + 3.5 RDF
+ZZ RR | add 4.50000000000000 RR | mul 5.00000000000000 RR | coef 4.50000000000000 RR | x+a+b x + 4.50000000000000 RR
+ZZ CDF | add 3.0 + 2.0*I CDF | mul 2.0 + 4.0*I CDF | coef 3.0 + 2.0*I CDF | x+a+b x + 3.0 + 2.0*I CDF
+QQ RDF | add 1.8333333333333333 RDF | mul 0.5 RDF | coef 1.8333333333333333 RDF | x+a+b x + 1.8333333333333333 RDF
+QQ RR | add 2.83333333333333 RR | mul 0.833333333333333 RR | coef 2.83333333333333 RR | x+a+b x + 2.83333333333333 RR
+QQ CDF | add 1.3333333333333333 + 2.0*I CDF | mul 0.3333333333333333 + 0.6666666666666666*I CDF | coef 1.3333333333333333 + 2.0*I CDF | x+a+b x + 1.3333333333333333 + 2.0*I CDF
+print 1.5 | 1.5 | 1.5*x | x + 1.5 | x - 1.5 | x^1.5 | 1.5 \, x | x + 1.5
+print -2.0 | -2.0 | -2.0*x | x - 2.0 | x + 2.0 | x^(-2.0) | -2.0 \, x | x - 2.0
+print 3.0 | 3.0 | 3.0*x | x + 3.0 | x - 3.0 | x^3.0 | 3.0 \, x | x + 3.0
+print 1e+20 | 1e+20 | (1e+20)*x | x + 1e+20 | x - 1e+20 | x^(1e+20) | 1 \times 10^{20} \, x | x + 1 \times 10^{20}
+print 1e-20 | 1e-20 | (1e-20)*x | x + 1e-20 | x - 1e-20 | x^(1e-20) | \left(1 \times 10^{-20}\right) \, x | x + 1 \times 10^{-20}
+print 123456789.123 | 123456789.123 | 123456789.123*x | x + 123456789.123 | x - 123456789.123 | x^123456789.123 | 123456789.123 \, x | x + 123456789.123
+print 0.1 | 0.1 | 0.1*x | x + 0.1 | x - 0.1 | x^0.1 | 0.1 \, x | x + 0.1
+print 0.3333333333333333 | 0.3333333333333333 | 0.3333333333333333*x | x + 0.3333333333333333 | x - 0.3333333333333333 | x^0.3333333333333333 | 0.3333333333333333 \, x | x + 0.3333333333333333
+print 1.414213562373095 | 1.414213562373095 | 1.414213562373095*x | x + 1.414213562373095 | x - 1.414213562373095 | x^1.414213562373095 | 1.414213562373095 \, x | x + 1.414213562373095
+print 1.0 + 2.0*I | 1.0 + 2.0*I | (1.0 + 2.0*I)*x | x + 1.0 + 2.0*I | x - 1.0 - 2.0*I | x^(1.0 + 2.0*I) | \left(1.0 + 2.0i\right) \, x | x + 1.0 + 2.0i
+print 2.0*I | 2.0*I | 2.0*I*x | x + 2.0*I | x - 2.0*I | x^(2.0*I) | 2.0i \, x | x + 2.0i
+print 1.0 - 2.0*I | 1.0 - 2.0*I | (1.0 - 2.0*I)*x | x + 1.0 - 2.0*I | x - 1.0 + 2.0*I | x^(1.0 - 2.0*I) | \left(1.0 - 2.0i\right) \, x | x + 1.0 - 2.0i
+print -1.0 + 0.5*I | -1.0 + 0.5*I | -(1.0 - 0.5*I)*x | x - 1.0 + 0.5*I | x + 1.0 - 0.5*I | x^(-1.0 + 0.5*I) | -\left(1.0 - 0.5i\right) \, x | x - 1.0 + 0.5i
+print 2.0 | 2.0 | 2.0*x | x + 2.0 | x - 2.0 | x^2.0 | 2.0 \, x | x + 2.0
+print 1e+20 + 1.0*I | 1e+20 + 1.0*I | (1e+20 + 1.0*I)*x | x + 1e+20 + 1.0*I | x - 1e+20 - 1.0*I | x^(1e+20 + 1.0*I) | \left(1 \times 10^{20} + 1.0i\right) \, x | x + 1 \times 10^{20} + 1.0i
+sin(SR(RDF(0.5))) => 0.479425538604203 | RDF
+sqrt(SR(RDF(2))) => 1.414213562373095 | RDF
+SR(RDF(2))^SR(RDF(0.5)) => 1.414213562373095 | RDF
+SR(RDF(2))^3 => 8.0 | RDF
+SR(RDF(-1))^0.5 => ERR ValueError
+log(SR(RDF(2))) => 0.6931471805599453 | RDF
+SR(RDF(2))^x => 2.0^x | -
+(RDF(1.5)*x).subs(x=2) => 3.0 | RDF
+(RDF(1.5)*x).subs(x=RR(2)) => 3.0 | RDF
+(RR(1.5)*x).subs(x=RDF(2)) => 3.00000000000000 | RR
+(RDF(1.5)*x + 1).subs(x=1/3) => 1.5 | RDF
+(sin(RDF(1)*x)).subs(x=1) => 0.8414709848078965 | RDF
+abs(SR(CDF(3,4))) => 5.0 | RDF
+SR(CDF(1,2)).real_part() => 1.0 | RDF
+SR(CDF(0,1))*SR(CDF(0,1)) => -1.0 | CDF
+SR(RDF(4)).sqrt() => 2.0 | RDF
+SR(RDF(-4)).sqrt() => ERR ValueError
+RDF(1.5)*x*y => 1.5*x*y | -
+RDF(1.5)*(x+1) => 1.5*x + 1.5 | -
+expand(RDF(1.5)*(x+1)^2) => 1.5*x^2 + 3.0*x + 1.5 | -
+RDF(2)*x^2 + RDF(3)*x + RDF(1) => 2.0*x^2 + 3.0*x + 1.0 | -
+(RDF(2)*x).diff(x) => 2.0 | RDF
+RDF(1.5)*x/RR(3) => 0.5*x | -
+RDF(-1.5)*x => -1.5*x | -
+x - RDF(1.5)*y => x - 1.5*y | -
+RDF(1.5)*sin(x) + RDF(2.5)*cos(x) => 2.5*cos(x) + 1.5*sin(x) | -
+1/(RDF(2)*x) => 0.5/x | -
+x/RDF(2) => 0.5*x | -
+(x + RDF(1))^2 => (x + 1.0)^2 | -
+(x + RDF(1))*(x + RDF(2)) => (x + 2.0)*(x + 1.0) | -
+expand((x + RDF(1))*(x + RDF(2))) => x^2 + 3.0*x + 2.0 | -
+n(SR(RDF(1))/3) => 0.333333333333333 | -
+SR(RDF(1.5)).n() => 1.50000000000000 | -
+RDF(1.5)*x + RDF(1.5)*x => 3.0*x | -
+RDF(0.1)*x + RDF(0.2)*x => 0.30000000000000004*x | -
+RR(0.1)*x + RR(0.2)*x => 0.300000000000000*x | -
+RDF(1e16)*x => (1e+16)*x | -
+RDF(1e15)*x => 1000000000000000.0*x | -
+RDF(0.0001)*x => 0.0001*x | -
+RDF(0.00001)*x => (1e-05)*x | -
+RDF(-1e20)*x => -(1e+20)*x | -
+RDF(float('inf'))*x => (+infinity)*x | -
+RDF(float('nan'))*x => NaN*x | -
+RR(1.5)*x + RDF(2.5) => 1.50000000000000*x + 2.5 | -
+RDF(1.5)*x + RR(2.5) => 1.5*x + 2.50000000000000 | -
+RDF(1.5)*x + 1/3 => 1.5*x + 1/3 | -
+RDF(1.5)*x + sqrt(2) => 1.5*x + sqrt(2) | -
+RDF(1.5)*x + RDF(2.5)*y => 1.5*x + 2.5*y | -
+CDF(1,2)*x + RR(1) => (1.0 + 2.0*I)*x + 1.00000000000000 | -
+parent((RDF(1.5)*x).subs(x=2)) => Symbolic Ring | -
+parent((RR(1.5)*x + RDF(2.5)).subs(x=0)) => Symbolic Ring | -
+RDF(1.5)*x^2 + RDF(0.1)*x => 1.5*x^2 + 0.1*x | -
+sin(RDF(0.5)*x) => sin(0.5*x) | -
+exp(RDF(1)*x) => e^(1.0*x) | -
+(RDF(1.5)*x).coefficient(x) => 1.5 | RDF
+parent((RDF(1.5)*x).coefficient(x)) => Symbolic Ring | -
+RDF(1)/3*x => 0.3333333333333333*x | -
+RDF(2)*x == 2*x => 2.0*x == 2*x | -
+latex(RDF(1.5)*x) => 1.5 \, x | -
+RDF(1e20)*x => (1e+20)*x | -
+RDF(1e-20)*x => (1e-20)*x | -
+RDF(1.5)*x + RDF(-1.5)*x => 0 | Integer Ring
+x*RDF(2)^(1/2) => 1.414213562373095*x | -
+x^RDF(1.5) => x^1.5 | -
+RDF(1.5)^x => 1.5^x | -
+RDF(1.5)*x + RR(2.5)*x => 4.0*x | -
+RR(1.5)*x + RDF(2.5)*x => 4.00000000000000*x | -
+CDF(1,2)*x + RDF(1)*x => (2.0 + 2.0*I)*x | -
+RDF(1.5)*x + 2*x => 3.5*x | -
+RDF(1.5)*x + 1/3*x => 1.8333333333333333*x | -
+RDF(1.5)*x*RR(2) => 3.0*x | -
+SR(RDF(1)) + SR(RR(1)) => 2.0 | RDF
+parent(SR(RDF(1)) + SR(RR(1))) => Symbolic Ring | -
+(SR(RDF(1)) + SR(RR(1))).pyobject().parent() => Real Double Field | -
+(RDF(1.5)*x + RR(2.5)*x).coefficient(x).pyobject().parent() => Real Double Field | -
+(RDF(1.5)*x*RR(2)).coefficient(x).pyobject().parent() => Real Double Field | -
+(RDF(1.5)*x + 2*x).coefficient(x).pyobject().parent() => Real Double Field | -
+(x + RDF(1)) * (x + RR(1)) => (x + 1.00000000000000)^2 | -
+expand((x + RDF(1)) * (x + RR(1))) => x^2 + 2.00000000000000*x + 1.00000000000000 | -
+(x + RR(1)) * (x + RDF(1)) => (x + 1.0)^2 | -
+(x + RDF(1))^2 * (x + RR(1)) => (x + 1.00000000000000)^3 | -
+(x + RR(1))^2 * (x + RDF(1)) => (x + 1.0)^3 | -
+(x + RDF(1)) * (x + RR(1)) * (x + RDF(1)) => (x + 1.0)^3 | -
+(x + RDF(2)) * (x + RR(2)) => (x + 2.00000000000000)^2 | -
+(x + RR(2)) * (x + RDF(2)) => (x + 2.0)^2 | -
+x^RDF(2) * x^RR(1) => x^3.0 | -
+(y + RDF(1))*x*(y + RR(1)) => x*(y + 1.00000000000000)^2 | -
+sin(x + RDF(1)) * sin(x + RR(1)) => sin(x + 1.00000000000000)^2 | -
+sin(x + RR(1)) * sin(x + RDF(1)) => sin(x + 1.0)^2 | -
+sin(x + RR(1)) + sin(x + RDF(1)) => 2*sin(x + 1.0) | -
+sin(x + RDF(1)) + sin(x + RR(1)) => 2*sin(x + 1.00000000000000) | -
+RDF(1.5)*sin(x + RR(1)) + RR(2)*sin(x + RDF(1)) => 3.5*sin(x + 1.0) | -
+RR(1e20)*x => 1.00000000000000e20*x | -
+RR(1e-20)*x => (1.00000000000000e-20)*x | -
+RR(-1e20)*x => -1.00000000000000e20*x | -
+x + RR(1e20) => x + 1.00000000000000e20 | -
+x^RR(1e20) => x^1.00000000000000e20 | -
+RR(1e20)^x => 1.00000000000000e20^x | -
+latex(RR(1e20)*x) => 1.00000000000000 \times 10^{20} \, x | -
+latex(RR(1e-20)*x) => \left(1.00000000000000 \times 10^{-20}\right) \, x | -
+latex(RDF(-1e20)*x) => -1 \times 10^{20} \, x | -
+latex(x^RDF(1e20)) => x^{1 \times 10^{20}} | -
+RDF(-1.5)^x => (-1.5)^x | -
+CDF(1,2)^x => (1.0 + 2.0*I)^x | -
+x^CDF(1,2) => x^(1.0 + 2.0*I) | -
+RDF(2)^(x+1) => 2.0^(x + 1) | -
+exp(SR(RDF(2))) => 7.38905609893065 | RDF
+SR(RDF(2))^0.5 => 1.414213562373095 | RDF
+SR(RDF(2))^RDF(0.5) => 1.414213562373095 | RDF
+SR(RDF(3))^2 => 9.0 | RDF
+sin(SR(RDF(1))) => 0.8414709848078965 | RDF
+SR(RDF(10))^RDF(0.3) => 1.9952623149688797 | RDF

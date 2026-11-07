@@ -1,0 +1,64 @@
+SR(RDF(0))^3 | 0 | Integer Ring
+SR(RR(0))^3 | 0 | Integer Ring
+SR(RDF(0))^0 | 1 | Integer Ring
+SR(RDF(0))^x | 0.0^x | 
+SR(RDF(-2))^3 | -8.0 | Real Double Field
+SR(RR(-2))^3 | -8.00000000000000 | Real Field with 53 bits of precision
+SR(RDF(-2))^2 | 4.0 | Real Double Field
+SR(RDF(-2))^5 | -32.0 | Real Double Field
+SR(RDF(-2))^SR(RDF(3)) | -7.999999999999998 | Real Double Field
+SR(CDF(0))^2 | 0 | Integer Ring
+SR(CC(0))^2 | 0 | Integer Ring
+SR(CDF(0))^RDF(2) | 0 | Integer Ring
+SR(RDF(0))^RDF(2) | 0 | Integer Ring
+SR(0)^-1 | ERR ValueError 'power::eval(): division by zero'
+SR(RR(0))^-1 | ERR ValueError 'power::eval(): division by zero'
+SR(RDF(0))^-2 | ERR ValueError 'power::eval(): division by zero'
+SR(CDF(0))^-1 | ERR ValueError 'power::eval(): division by zero'
+SR(RDF(0))^RDF(-1) | ERR ValueError 'power::eval(): division by zero'
+SR(RDF(0))^(-1/2) | ERR ValueError 'power::eval(): division by zero'
+1/SR(RDF(0)) | ERR ZeroDivisionError 'symbolic division by zero'
+1/SR(0) | ERR ZeroDivisionError 'symbolic division by zero'
+x/0 | ERR ZeroDivisionError 'symbolic division by zero'
+abs(SR(RDF(-2))) | 2.0 | Real Double Field
+abs(SR(CDF(3,4))) | 5.0 | Real Double Field
+abs(SR(RR(-2))) | 2.00000000000000 | Real Field with 53 bits of precision
+abs(SR(CC(3,4))) | 5.00000000000000 | Real Field with 53 bits of precision
+conjugate(SR(RDF(2))) | 2.0 | Real Double Field
+conjugate(SR(CDF(1,2))) | 1.0 - 2.0*I | Complex Double Field
+conjugate(SR(RR(2))) | 2.00000000000000 | Real Field with 53 bits of precision
+conjugate(SR(CC(1,2))) | 1.00000000000000 - 2.00000000000000*I | Complex Field with 53 bits of precision
+atan2(D1,D1) | 1/4*pi | 
+atan2(R1,R1) | 1/4*pi | 
+atan2(D1,D0) | 1/2*pi | 
+atan2(D0,D1) | 0 | Integer Ring
+atan2(D-1,D-1) | -3/4*pi | 
+atan2(D2,D2) | 1/4*pi | 
+atan2(D1,D-1) | 3/4*pi | 
+atan2(D0,D-1) | pi | 
+atan2(D0,D0) | NaN | 
+atan2(D1.5,D1.5) | 1/4*pi | 
+atan2(1,D1) | 1/4*pi | 
+atan2(D1,1) | 1/4*pi | 
+atan2(D1,R2) | 0.463647609000806 | Real Field with 53 bits of precision
+atan2(R1,D2) | 0.4636476090008061 | Real Double Field
+atan2(D1,D2) | 0.4636476090008061 | Real Double Field
+atan2(D1,C2) | 0.4636476090008061 | Complex Double Field
+atan2(C1,D2) | 0.4636476090008061 | Complex Double Field
+atan2(R1,K2) | 0.463647609000806 | Complex Field with 53 bits of precision
+atan2(K1,R2) | 0.463647609000806 | Complex Field with 53 bits of precision
+atan2(D1,2) | 0.4636476090008061 | Real Double Field
+atan2(1,D2) | 0.4636476090008061 | Real Double Field
+SR(RDF(2)).is_numeric() | True | 
+SR(CDF(1,2)).is_numeric() | True | 
+SR(RDF(2)).is_constant() | True | 
+(x + SR(RDF(2))).is_numeric() | False | 
+hash -0.0 vs 0.0 | True | 
+hash RDF -0 vs 0 | True | 
+hash df | True | 
+hash f1 | True | 
+hash h | True | 
+hash x RDF | True | 
+hash 'α' | (True, True, True) | 
+hash 'αβ' | (True, True, True) | 
+hash '变' | (True, True, True) | 

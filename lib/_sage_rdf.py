@@ -5,6 +5,7 @@ and numerical linear algebra for matrices over RDF, CDF, RR and CC
 
 import cmath
 import math
+import sys as _sys
 
 
 def _sa():
@@ -76,6 +77,17 @@ class RealDoubleField_:
     _is_generic_field = True
     _numeric = True
     _instance = None
+
+    def __getitem__(self, names):
+        """The polynomial ring over this field in the given variable(s): RR['t'].
+
+        EXAMPLES::
+
+            sage: RDF['t']
+            Univariate Polynomial Ring in t over Real Double Field
+        """
+        import _sage_poly
+        return _sage_poly.PolynomialRing(self, names)
 
     def __new__(cls):
         if cls._instance is None:
@@ -384,7 +396,8 @@ class RealDoubleElement(float):
                 # real power through float(), CORR-726-2)
                 import _sage_real
                 return _sage_real._real_complex_pow(self, 53, e)
-            if type(e).__name__ == "ComplexDoubleElement":
+            if type(e).__name__ in ("ComplexDoubleElement", "Expression"):
+                # (a symbolic exponent: the symbolic power, as Sage's RDF(1.5)^x is 1.5^x)
                 return NotImplemented
             y = float(e)
         if x == 0:
@@ -671,6 +684,17 @@ class ComplexDoubleField_:
     _numeric = True
     _instance = None
 
+    def __getitem__(self, names):
+        """The polynomial ring over this field in the given variable(s): RR['t'].
+
+        EXAMPLES::
+
+            sage: CDF['t']
+            Univariate Polynomial Ring in t over Complex Double Field
+        """
+        import _sage_poly
+        return _sage_poly.PolynomialRing(self, names)
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = object.__new__(cls)
@@ -834,7 +858,9 @@ class ComplexDoubleElement:
     def __repr__(self):
         re, im = self._z.real, self._z.imag
         if im == 0:
-            return _frepr(re)
+            # (a zero prints 0.0 whatever its signs, as Sage: CDF(-0.0) is 0.0,
+            # where RDF(-0.0) is -0.0)
+            return "0.0" if re == 0 else _frepr(re)
         si = _frepr(abs(im)) + "*I"
         if re == 0:
             return ("-" if im < 0 else "") + si
@@ -875,6 +901,10 @@ class ComplexDoubleElement:
     def _c(self, o):
         if isinstance(o, ComplexDoubleElement):
             return o._z
+        m = _sys.modules.get("_sage_ff")
+        if m is not None and m.is_exact_algebraic(o):
+            # (an element of Zmod(n), a finite field or a number field refuses CDF, as Sage)
+            return None
         try:
             return complex(o)
         except (TypeError, ValueError):
@@ -929,6 +959,9 @@ class ComplexDoubleElement:
     def __pow__(self, e, mod=None):
         if mod is not None:
             raise TypeError("the 3-argument version of pow() is not supported")
+        if type(e).__name__ == "Expression":
+            # (a symbolic exponent: the symbolic power, as Sage's CDF(1, 2)^x)
+            return NotImplemented
         z = self._z
         if z == 0:
             return ComplexDoubleElement(0.0, 0.0)
@@ -954,7 +987,26 @@ class ComplexDoubleElement:
         return r if r is NotImplemented else not r
 
     def __bool__(self):
-        return self._z != 0
+        """Whether self is nonzero: as Sage's CDF, a part that is NaN counts as 0.
+
+        EXAMPLES::
+
+            sage: n = float('nan')
+            sage: bool(CDF(n, 0)), bool(CDF(n, n)), bool(CDF(n, 1)), bool(CDF(float('inf'), n)), bool(CDF(1e-320))
+            (False, False, True, True, True)
+        """
+        z = self._z
+        return not ((z.real == 0 or z.real != z.real) and (z.imag == 0 or z.imag != z.imag))
+
+    def is_zero(self):
+        """Whether self is 0 (a NaN part counts as 0, as Sage's CDF).
+
+        EXAMPLES::
+
+            sage: CDF(0).is_zero(), CDF(float('nan')).is_zero(), CDF(1, 2).is_zero()
+            (True, True, False)
+        """
+        return not self
 
     @staticmethod
     def _of(z):

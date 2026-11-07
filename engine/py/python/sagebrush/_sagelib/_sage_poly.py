@@ -123,7 +123,7 @@ class _Ring:
         if isinstance(names, list):
             # QQ[['x']]: power series
             import _sage_series
-            return _sage_series.PowerSeriesRing(self, names[0] if names else "x")
+            return _sage_series._series_ring_from_list(self, names)
         K = _algebraic_extension(self, names)
         if K is not None:
             return K
@@ -459,6 +459,11 @@ class PolynomialRing_:
         self._base = base
         self._name = name
 
+    def _repr_name(self):
+        # the variable's name in printed polynomials (Magma mode's rings
+        # override it: lib/_magma.py _MPolyRingZQ)
+        return self._name
+
     def __repr__(self):
         if self._name == "$.1":
             return "Univariate Polynomial Ring over %r" % (self._base,)
@@ -498,7 +503,7 @@ class PolynomialRing_:
             sage: PolynomialRing(ZZ, 'x').change_ring(GF(5))
             Univariate Polynomial Ring in x over Finite Field of size 5
         """
-        return _sa().PolynomialRing(R, self._name)
+        return _sa().PolynomialRing(R, self._name, _internal=True)
 
     def variable_name(self):
         """The name of the variable.
@@ -640,6 +645,49 @@ _RINGS = {}
 _MAX_DENSE_COEFFS = 1 << 20
 
 
+def _check_ring_names(names):
+    """Sage's refusals of a ring's variable names: none, one with a character
+    other than a letter, a digit or _ (a{b, x.y, 'x '), or one that does not
+    start with a letter (1x, _x), in that order; a name of digits alone is
+    no name at all.  Keywords and letters beyond ASCII are names."""
+    for n in names:
+        if n == "":
+            raise ValueError("variable name must be nonempty")
+        if n.replace("_", "").isdigit():
+            raise TypeError("you must specify the names of the variables")
+        if not n.replace("_", "").isalnum():
+            raise ValueError("variable name %r is not alphanumeric" % (n,))
+        if not n[0].isalpha():
+            raise ValueError("variable name %r does not start with a letter" % (n,))
+
+
+def ring_names(names, n=None):
+    """The names a user gives a ring (a string, 'x,y', a tuple or a list, and
+    with n variables 'x' as x0, x1, ...), each checked as Sage checks it
+    (_check_ring_names) before any ring is built; the one way user names
+    reach a ring constructor.
+
+    EXAMPLES::
+
+        sage: import _sage_poly
+        sage: _sage_poly.ring_names('x,y'), _sage_poly.ring_names(('t',)), _sage_poly.ring_names('x', 2)  # sagebrush only
+        (['x', 'y'], ['t'], ['x0', 'x1'])
+    """
+    import _sage_mpoly
+    if isinstance(names, (list, tuple)):
+        out = [str(t) for t in names]
+        if n is not None:
+            out = _sage_mpoly._normalize_names(n, out)
+    elif isinstance(names, str) and "," in names:
+        out = [t.strip() for t in names.split(",")]
+    elif n is not None:
+        out = _sage_mpoly._normalize_names(n, str(names))
+    else:
+        out = [str(names)]
+    _check_ring_names(out)
+    return out
+
+
 def PolynomialRing(base, *args, **kwds):
     """PolynomialRing(ZZ, 'x'), PolynomialRing(QQ, names=('y',)); several
     variables: PolynomialRing(QQ, 'x,y'), PolynomialRing(QQ, 3, 'x'),
@@ -657,6 +705,7 @@ def PolynomialRing(base, *args, **kwds):
         (Multivariate Polynomial Ring in x0, x1, x2 over Rational Field, Multivariate Polynomial Ring in a, b over Rational Field)
     """
     import _sage_ff
+    internal = kwds.pop("_internal", False)
     n = None
     names = kwds.get("names", kwds.get("name"))
     for a in args:
@@ -673,18 +722,26 @@ def PolynomialRing(base, *args, **kwds):
     multi = n is not None or (isinstance(names, (list, tuple)) and len(names) != 1) or (isinstance(names, str) and "," in names)
     if multi:
         import _sage_mpoly
+        if not internal:
+            ring_names(names, n)
         return _sage_mpoly.MPolynomialRing(base, n, names, order or "degrevlex")
     if isinstance(names, (tuple, list)):
         names = names[0]
+    if not internal:
+        ring_names(names)
     names = str(names).strip()
     if _sage_ff._is_ff_base(base):
-        return _sage_ff._poly_ring_from_names(base, names)
+        # (an internal ring, _t, is built without the user-name check)
+        return _sage_ff.PolynomialRing_ff(base, names) if internal else _sage_ff._poly_ring_from_names(base, names)
     import _sage_nfpoly
     if _sage_nfpoly.is_number_field(base):
         return _sage_nfpoly.PolynomialRing_nf(base, names)
     if type(base).__name__ in ("pAdicRingCappedRelative", "pAdicFieldCappedRelative"):
         import _sage_padic_ext
         return _sage_padic_ext.PolynomialRing_padic(base, names)
+    import _sage_rpoly
+    if _sage_rpoly.is_inexact_field(base):
+        return _sage_rpoly.PolynomialRing_inexact(base, names)
     if base is not ZZ and base is not QQ:
         raise NotImplementedError("polynomial rings over %r are not available in sagebrush yet" % (base,))
     key = (base._name, names)
@@ -739,7 +796,7 @@ class Polynomial:
         while c and c[-1] == 0:
             c.pop()
         if ring._base is ZZ and any(not isinstance(a, int) for a in c):
-            ring = PolynomialRing(QQ, ring._name)
+            ring = PolynomialRing(QQ, ring._name, _internal=True)
         self._ring = ring
         self._c = c
 
@@ -801,10 +858,13 @@ class Polynomial:
 
             sage: (x + 1).list()[0].parent()
             Rational Field
+            sage: R(0).list(), R(0).coefficients(sparse=False)
+            ([], [])
         """
+        # (the zero polynomial's list is empty, as Sage's)
         if self._ring._base is QQ:
-            return [_qq_coeff(a) for a in self._c] if self._c else [QQ(0)]
-        return list(self._c) if self._c else [0]
+            return [_qq_coeff(a) for a in self._c]
+        return list(self._c)
 
     def _out(self, a):
         """A coefficient as handed out: over QQ an element of QQ (an
@@ -921,8 +981,14 @@ class Polynomial:
         n = self._ring._name
         return poly_hash({((n, i),) if i else (): c for i, c in enumerate(self._c)})
 
+    def _qq_ring(self):
+        # the ring over QQ in the same variable: our own when it is over QQ
+        # (an equal ring either way; keeping ours keeps its class, e.g. Magma
+        # mode's ring, which names its variable when printing)
+        return self._ring if self._ring._base is QQ else PolynomialRing(QQ, self._ring._name, _internal=True)
+
     def __repr__(self):
-        return _poly_repr(self._c, self._ring._name) if self._c else "0"
+        return _poly_repr(self._c, self._ring._repr_name()) if self._c else "0"
 
     def _latex_(self):
         # Sage's form: x^{20} - \frac{1}{2} x + 3
@@ -968,14 +1034,26 @@ class Polynomial:
             ring = other._ring
         return Polynomial(ring, coeffs)
 
+    def _inexact(self, other):
+        # (an inexact number moves the polynomial to its field: QQ[t] times RR(1.5) is
+        # over RR, as Sage)
+        import _sage_rpoly
+        return _sage_rpoly.lift(self, other)
+
     def __add__(self, other):
         o = self._coerce(other)
         if o is None:
-            return NotImplemented
+            L = self._inexact(other)
+            return NotImplemented if L is None else L + other
         n = max(len(self._c), len(o._c))
         return self._make([self[i] + o[i] for i in range(n)], o)
 
-    __radd__ = __add__
+    def __radd__(self, other):
+        o = self._coerce(other)
+        if o is None:
+            L = self._inexact(other)
+            return NotImplemented if L is None else other + L
+        return self.__add__(other)
 
     def __neg__(self):
         return Polynomial(self._ring, [-a for a in self._c])
@@ -986,19 +1064,22 @@ class Polynomial:
     def __sub__(self, other):
         o = self._coerce(other)
         if o is None:
-            return NotImplemented
+            L = self._inexact(other)
+            return NotImplemented if L is None else L - other
         return self + (-o)
 
     def __rsub__(self, other):
         o = self._coerce(other)
         if o is None:
-            return NotImplemented
+            L = self._inexact(other)
+            return NotImplemented if L is None else other - L
         return o + (-self)
 
     def __mul__(self, other):
         o = self._coerce(other)
         if o is None:
-            return NotImplemented
+            L = self._inexact(other)
+            return NotImplemented if L is None else L * other
         if not self._c or not o._c:
             return self._make([], o)
         if len(self._c) * len(o._c) > 2500:
@@ -1016,7 +1097,12 @@ class Polynomial:
                     r[i + j] += a * b
         return self._make(r, o)
 
-    __rmul__ = __mul__
+    def __rmul__(self, other):
+        o = self._coerce(other)
+        if o is None:
+            L = self._inexact(other)
+            return NotImplemented if L is None else other * L
+        return self.__mul__(other)
 
     def __xor__(self, other):
         # plain Python (sagebrush.sage under CPython): ^ is xor, with the
@@ -1075,7 +1161,7 @@ class Polynomial:
             if c:
                 for j, b in enumerate(d):
                     r[i + j] -= c * b
-        qq, rr = Polynomial(PolynomialRing(QQ, self._ring._name), q), Polynomial(PolynomialRing(QQ, self._ring._name), r[: len(d) - 1])
+        qq, rr = Polynomial(self._qq_ring(), q), Polynomial(self._qq_ring(), r[: len(d) - 1])
         if self._ring._base is ZZ and o._ring._base is ZZ:
             if all(isinstance(a, int) for a in qq._c + rr._c):
                 qq, rr = Polynomial(self._ring, qq._c), Polynomial(self._ring, rr._c)
@@ -1114,14 +1200,15 @@ class Polynomial:
     def __truediv__(self, other):
         o = self._coerce(other)
         if o is None:
-            return NotImplemented
+            L = self._inexact(other)
+            return NotImplemented if L is None else L / other
         if not isinstance(other, Polynomial) and o.degree() <= 0:
             # a number: a polynomial over the fraction field of the base
             # (x/2 is 1/2*x in QQ[x])
             if not o._c:
                 raise ZeroDivisionError("rational division by zero")
             c = _F(o._c[0])
-            return Polynomial(PolynomialRing(QQ, self._ring._name), [_F(a) / c for a in self._c]) if self._ring._base is QQ or c.denominator != 1 or any(_F(a) / c != int(_F(a) / c) for a in self._c) else Polynomial(self._ring, [int(_F(a) / c) for a in self._c])
+            return Polynomial(self._qq_ring(), [_F(a) / c for a in self._c]) if self._ring._base is QQ or c.denominator != 1 or any(_F(a) / c != int(_F(a) / c) for a in self._c) else Polynomial(self._ring, [int(_F(a) / c) for a in self._c])
         # a polynomial: an element of the fraction field, even when the
         # division is exact (x/x is 1 in Frac(ZZ[x]), as Sage)
         if not o._c:
@@ -1129,8 +1216,8 @@ class Polynomial:
         import _sage_frac
         if self._ring._base is ZZ and o._ring._base is ZZ:
             return _sage_frac.FractionFieldElement(self, o)
-        a = self if self._ring._base is QQ else Polynomial(PolynomialRing(QQ, self._ring._name), self._c)
-        b = o if o._ring._base is QQ else Polynomial(PolynomialRing(QQ, self._ring._name), o._c)
+        a = self if self._ring._base is QQ else Polynomial(self._qq_ring(), self._c)
+        b = o if o._ring._base is QQ else Polynomial(self._qq_ring(), o._c)
         return _sage_frac.FractionFieldElement(a, b)
 
     def __rtruediv__(self, other):
@@ -1141,7 +1228,7 @@ class Polynomial:
         if not self._c:
             raise ZeroDivisionError("fraction field element division by zero")
         import _sage_frac
-        R = self._ring if self._ring._base is QQ or _F(other).denominator == 1 else PolynomialRing(QQ, self._ring._name)
+        R = self._ring if self._ring._base is QQ or _F(other).denominator == 1 else self._qq_ring()
         return _sage_frac.FractionFieldElement(R(other), Polynomial(R, self._c))
 
     # ---- evaluation and calculus
@@ -1198,7 +1285,7 @@ class Polynomial:
             sage: (3*x^2 + 1).integral()
             x^3 + x
         """
-        return Polynomial(PolynomialRing(QQ, self._ring._name), [0] + [_F(a) / (i + 1) for i, a in enumerate(self._c)])
+        return Polynomial(self._qq_ring(), [0] + [_F(a) / (i + 1) for i, a in enumerate(self._c)])
 
     def change_ring(self, R):
         """The polynomial with its coefficients converted to the ring R.
@@ -1216,10 +1303,10 @@ class Polynomial:
             # shared core's budget; daybreak2 LIMIT-F3-2)
             S.charge([S.WORK], len(self._c), refuse)
             if R is QQ:
-                return PolynomialRing(R, self._ring._name)(self._c)
+                return PolynomialRing(R, self._ring._name, _internal=True)(self._c)
             if any(int(a.denominator) != 1 for a in self._c):
                 raise TypeError("no conversion of this rational to integer")
-            return PolynomialRing(R, self._ring._name)([int(a) for a in self._c])
+            return PolynomialRing(R, self._ring._name, _internal=True)([int(a) for a in self._c])
         if isinstance(R, PolynomialRing_):
             return R(self._c)
         import _sage_ff
@@ -1254,7 +1341,7 @@ class Polynomial:
         # CORR-F3-1)
         B = self._ring._base
         T = B if new_base_ring is None else new_base_ring
-        return _sa().PolynomialRing(T, self._ring._name)([T(f(B(c))) if c else T(0) for c in self._c])
+        return _sa().PolynomialRing(T, self._ring._name, _internal=True)([T(f(B(c))) if c else T(0) for c in self._c])
 
     def monic(self):
         """The polynomial divided by its leading coefficient.
@@ -1266,7 +1353,7 @@ class Polynomial:
             x^2 + 3/2
         """
         lc = _F(self.leading_coefficient())
-        return Polynomial(PolynomialRing(QQ, self._ring._name) if lc not in (1,) else self._ring, [_F(a) / lc for a in self._c])
+        return Polynomial(self._qq_ring() if lc not in (1,) else self._ring, [_F(a) / lc for a in self._c])
 
     def content(self):
         """The gcd of the coefficients (over ZZ), as Sage's content().
@@ -1306,7 +1393,7 @@ class Polynomial:
             sage: (x^2 - 1).gcd(x^2 + 2*x + 1)
             x + 1
         """
-        o = other if isinstance(other, Polynomial) else Polynomial(PolynomialRing(QQ, self._ring._name), [other])
+        o = other if isinstance(other, Polynomial) else Polynomial(self._qq_ring(), [other])
         over_zz = self._ring._base is ZZ and o._ring._base is ZZ
         if not self._c or not o._c:
             # Sage returns the other one unchanged (monic over QQ)
@@ -1320,7 +1407,7 @@ class Polynomial:
         g = poly.gcd(ca, cb)
         if over_zz:
             return Polynomial(self._ring, g)
-        return Polynomial(PolynomialRing(QQ, self._ring._name), g).monic()
+        return Polynomial(self._qq_ring(), g).monic()
 
     def lcm(self, other):
         """The least common multiple.

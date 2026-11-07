@@ -3921,13 +3921,21 @@ method(property, "__init__", (p: PyProperty, fget: any = null, fset: any = null,
 
 // Named tuples made by the runtime (sys.version_info, os.stat_result, ...).
 const structseqTypes = new Map<string, PyType>();
-export function structseq(name: string, fields: string[], values: any[]): any {
+// (`extra`: fields beyond the tuple, attributes only, as os.stat_result's st_*_ns are CPython's)
+export function structseq(name: string, fields: string[], values: any[], extra: string[] = [], extraValues: any[] = [], noNew = false): any {
   let cls = structseqTypes.get(name);
   if (cls === undefined) {
     const d = new Map<string, any>();
     cls = objectType(name.slice(name.lastIndexOf(".") + 1), [tupleType], d, name.includes(".") ? name.slice(0, name.lastIndexOf(".")) : "builtins");
-    fields.forEach((f, i) => d.set(f, new GetSet(cls!, f, (o) => o[i])));
-    d.set("n_fields", fields.length);
+    // (each field is read-only, as CPython's member descriptors are: "readonly attribute" to set or delete)
+    const readonly = () => raise(T.AttributeError, "readonly attribute");
+    fields.forEach((f, i) => d.set(f, new GetSet(cls!, f, (o) => o[i], readonly, readonly)));
+    // (an extra field of a tuple field's name is its attribute: stat_result's float st_atime over the tuple's int)
+    extra.forEach((f, i) => d.set(f, new GetSet(cls!, f, (o) => o.$extra[i], readonly, readonly)));
+    // (sys.flags and sys.version_info can't be made from Python, as CPython's can't)
+    if (noNew) allocator(cls, () => raise(T.TypeError, `cannot create '${name}' instances`));
+    d.set("n_fields", fields.length + extra.length);
+    d.set("n_sequence_fields", fields.length);
     d.set("_fields", tuple(fields));
     const c = cls;
     method(c, "__repr__", (o: any) => `${name}(${fields.map((f, i) => `${f}=${repr(o[i])}`).join(", ")})`);
@@ -3935,6 +3943,7 @@ export function structseq(name: string, fields: string[], values: any[]): any {
   }
   const o = new cls.$ctor!();
   for (const v of values) o.push(v);
+  if (extra.length) Object.defineProperty(o, "$extra", { value: extraValues });
   return o;
 }
 

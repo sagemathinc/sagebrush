@@ -11,6 +11,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "./test-port.mjs";
+import { allowFiles } from "./test-allow.mjs";
 import { gunzipSync } from "node:zlib";
 import { createHash } from "node:crypto";
 import { bundleHashes } from "./notebook/bundle-blobs.mjs";
@@ -223,6 +224,9 @@ try {
   const drop = (name, text) => a.ev(`(() => { const dt = new DataTransfer(); dt.items.add(new File([${JSON.stringify(text)}], ${JSON.stringify(name)})); dispatchEvent(new DragEvent("drop", { dataTransfer: dt, cancelable: true })); return true; })()`);
   for (const [name, text] of Object.entries(FILES)) await drop(name, text);
   await sleep(800);
+  // (its run renames and writes: the person allows this notebook's file changes first, as a person does (every notebook
+  // starts with them off: confinement 1b))
+  await allowFiles(a.send, a.ev);
   await a.ev("sagebrush.kernel.restart(); true");
   await a.until("sagebrush.kernel.ready && document.querySelector('#status').textContent.startsWith('ready')", 15000);
   const CELL1 = "import os\nos.rename('keep.txt', 'moved.txt')\nprint(open('moved.txt').read())\nopen('over.txt', 'w').write('mine')\nprint(open('over.txt').read())\nprint(open('data.txt').read())\nwith open('app.txt', 'a') as h:\n    h.write('+more')\nprint(open('app.txt').read())\nwith open('w6.txt', 'w') as h:\n    h.write('new6')\nprint(open('w6.txt').read())\nwith open('rp.txt', 'r+') as h:\n    h.write('RP')\nprint(open('r2.txt').read())";

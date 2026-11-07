@@ -12,8 +12,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
-import { driver, runnable, parseOutput, statesOf, resultsText, msgOf, MARK, RUN_LIMITS, RESULTS_FORMAT, runAndSave, sessionOf, sandboxEngine, SANDBOX_FAILED, folderFiles, runIn } from "./run-core.mjs";
-import { itemKey, savedStates, stateOf, WRAPPER_VERSION, MAX_RESULT } from "./engine/sagetex.mjs";
+import { seenOf, driver, runnable, parseOutput, statesOf, resultsText, msgOf, MARK, RUN_LIMITS, RESULTS_FORMAT, runAndSave, sessionOf, sandboxEngine, SANDBOX_FAILED, folderFiles, runIn, DEPS_MARK, parseDeps, depsWith, wsReader, checkedResults } from "./run-core.mjs";
+import { itemKey, savedStates, stateOf, WRAPPER_VERSION, MAX_RESULT, safeRel, depsOf, staleOf, staleOfSync, sha256hex, readComplete, DEPS_MAX } from "./engine/sagetex.mjs";
 
 const results = [];
 const check = (name, ok, detail) => { results.push([name, !!ok]); if (!ok) console.log("FAIL", name, JSON.stringify(detail)?.slice(0, 900)); };
@@ -366,6 +366,12 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
   ];
   const r = await sage(runs.join("\n"));
   const got = parseOutput(r.out);
+  // (Codex W01: each Run's last line, the modules it imported from its folder; the deps lines aren't results)
+  const depLines = r.out.split("\n").filter((l) => l.startsWith(DEPS_MARK)).map((l) => JSON.parse(l.slice(DEPS_MARK.length)));
+  // (astra's DEP-PARTIAL-COMMIT-1: the driver prints each item's line before its result: a result printed always
+  //  follows a line naming what it used)
+  const marked = r.out.split("\n").filter((l) => l.startsWith(MARK));
+  check("DEP-PARTIAL-COMMIT-1: the driver prints each item's deps line just before its result", marked.length === 20 && marked.every((l, i) => l.startsWith(DEPS_MARK) === (i % 2 === 0)), marked.map((l) => (l.startsWith(DEPS_MARK) ? "D" : "R")).join(""));
   rmSync(root, { recursive: true, force: true });
   // (a tuple's LaTeX without Sage's \\left( \\right))
   const lx = (i) => String(got[i]?.latex ?? got[i]?.msg ?? JSON.stringify(got[i])).replace(/\\left|\\right/g, "");
@@ -374,6 +380,9 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
   check("folder: the working folder is the .tex's, last on sys.path, once", /\\mathrm\{True\}, \\mathrm\{True\}, 1/.test(lx(3)), lx(3));
   check("folder: the next Run imports them afresh (an edited helper, an edited package child)", /\(2, 20\)/.test(lx(5)), lx(5));
   check("folder: a deleted helper is gone at the next Run", got[6]?.s === "error" && /No module named .?helper/.test(got[6]?.msg ?? ""), got[6]);
+  check("W01: each Run names the modules it imported from its folder (a package's files too), and those of no other folder; the deps lines aren't results",
+    // (one line after each item: Run 1's four, Run 2's two, Run 3's one, Run 4's three; each Run's last one counts)
+    depLines.length === 10 && JSON.stringify(depLines[0]) === JSON.stringify(["helper.py", "pkg/__init__.py", "pkg/child.py"]) && JSON.stringify(depLines[3]) === JSON.stringify(depLines[0]) && JSON.stringify(depLines[5]) === JSON.stringify(depLines[0]) && JSON.stringify(depLines[6]) === "[]" && JSON.stringify(depLines[9]) === JSON.stringify(["helper.py", "other.py"]) && JSON.stringify(parseDeps(r.out)) === JSON.stringify(["helper.py", "other.py"]) && got.length === 10, { depLines, n: got.length });
   check("folder: a Run in another folder imports its own (its own helper.py of the same name), and not the first folder's (off sys.path, its modules dropped)", /\(5, \\mathrm\{True\}, 0, \\mathrm\{True\}, 7\)/.test(lx(8)) && got[9]?.s === "error" && /No module named .?pkg/.test(got[9]?.msg ?? ""), { r8: lx(8), r9: got[9] });
 }
 
@@ -545,6 +554,138 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
   holds.C({}, "x".repeat(5000));
   const rL = await within(pL);
   check("runAndSave (through runIn): the printed results past the bound: what ran written, never \"Stopped before it ran\"", rL.ok === true && rL.states?.[0]?.latex === "2" && /the results are too large/.test(rL.states?.[1]?.msg ?? ""), rL);
+}
+
+// ---- (Codex W01) the results' record of what their Run imported: its shape (safe relative paths, SHA-256 hex), the
+// hashes from the bytes the session was given, and a changed or missing file found
+{
+  const enc = (t) => new TextEncoder().encode(t);
+  check("W01 safeRel: relative paths only, no . or .. segment, no backslash", safeRel("h.py") && safeRel("pkg/child.py") && !safeRel("/h.py") && !safeRel("../h.py") && !safeRel("a/./b") && !safeRel("a//b") && !safeRel("a\\b") && !safeRel(""), null);
+  const h1 = await sha256hex(enc("v = 1\n"));
+  check("W01 depsOf: none, valid, invalid", depsOf({}) === null && JSON.stringify(depsOf({ deps: [["h.py", h1]] })) === JSON.stringify([["h.py", h1]]) && depsOf({ deps: [["../h.py", h1]] }) === "invalid" && depsOf({ deps: [["h.py", "x"]] }) === "invalid" && depsOf({ deps: "h.py" }) === "invalid", null);
+  const files = { "h.py": enc("v = 1\n") };
+  const read = async (rel) => files[rel] ?? null;
+  const same = await staleOf([["h.py", h1]], read);
+  files["h.py"] = enc("v = 2\n");
+  const changed = await staleOf([["h.py", h1]], read);
+  delete files["h.py"];
+  const gone = await staleOf([["h.py", h1]], read);
+  check("W01 staleOf: the same file: none; changed or gone: that file", same === null && changed === "h.py" && gone === "h.py", { same, changed, gone });
+  const deps = await depsWith(["h.py", "pkg/c.py"], [["/A/h.py", enc("v = 1\n")], ["/A/pkg/c.py", enc("x")]], "/A");
+  const root = await depsWith(["h.py"], [["/h.py", enc("v = 1\n")]], "/");
+  const missing = await depsWith(["h.py", "missing.py"], [["/A/h.py", enc("v = 1\n")]], "/A"), none = await depsWith(null, [], "/A");
+  check("W01 depsWith: hashes from the bytes the session was given (a folder or the top); a file it didn't have, or no record at all: incomplete", JSON.stringify(deps.map((d) => d[0])) === JSON.stringify(["h.py", "pkg/c.py"]) && deps[0][1] === h1 && root.length === 1 && root[0][1] === h1 && missing === "incomplete" && none === "incomplete", { deps, root, missing, none });
+  // (a Run writes them: its session's deps line, hashed from the bytes it was given, into the results file it writes)
+  {
+    let written = null;
+    const sW = sessionOf({ module: async () => ({ WorkerKernel: class { constructor(o) { this.o = o; this.ready = false; } start() { this.worker = { postMessage() {} }; this.o.onStart(this.worker); this.ready = true; } post() {} on() { return () => {}; } } }), worker: () => null }, 1000);
+    const rW = await runAndSave({ items: [item("silent", "from h import v")], current: () => true, max: 1 << 20, now: () => 0, fid: "f",
+      ws: { pathOfFile: async () => ({ ok: true, path: "/W/d.tex" }), stat: async () => undefined, createByPerson: async (p, o) => { written = JSON.parse(new TextDecoder().decode(o.content)); return {}; } },
+      session: sW, store: sW, serial: sW.serial, folder: async () => ({ dir: "/W", files: [["/W/d.tex", enc("x")], ["/W/h.py", enc("v = 1\n")]] }),
+      exec: async () => ({ out: DEPS_MARK + JSON.stringify(["h.py"]) + "\n" + MARK + JSON.stringify({ s: "ok" }) + "\n", stopped: "" }) });
+    check("W01: a Run's results file records what it imported, hashed from the bytes it was given", rW.ok && JSON.stringify(written?.deps) === JSON.stringify([["h.py", h1]]) && written.items.length === 1, { rW, written });
+  }
+  // (the record's rules (astra's DEP-READ-1): a path twice, or "incomplete": not used; the reading budget shared)
+  check("W01 depsOf: a path named twice is invalid; an incomplete record is incomplete", depsOf({ deps: [["h.py", h1], ["h.py", h1]] }) === "invalid" && depsOf({ deps: "incomplete" }) === "incomplete", null);
+  const big = { "a.py": new Uint8Array(60), "b.py": new Uint8Array(60) };
+  const a60 = await sha256hex(big["a.py"]);
+  const over = await staleOf([["a.py", a60], ["b.py", a60]], async (rel, left) => (big[rel].length > left ? "over" : big[rel]), 100);
+  check("W01 staleOf: the files read within one budget: past it, \"over\" (not checked: not used)", over === "over", over);
+  // (grader's #804 S3, S4, S7: the record's bounds and shape, exactly: DEPS_MAX entries are a record, one more isn't;
+  //  a hash is 64 hex digits, no fewer; staleOfSync (the CLI's) shares one budget across the files, as staleOf does)
+  const many = (n) => ({ deps: Array.from({ length: n }, (_, k) => ["f" + k + ".py", h1]) });
+  check("W01 depsOf: DEPS_MAX entries are a record; DEPS_MAX + 1 are invalid", Array.isArray(depsOf(many(DEPS_MAX))) && depsOf(many(DEPS_MAX + 1)) === "invalid", { max: DEPS_MAX });
+  check("W01 depsOf: a hash of 63 hex digits is invalid", depsOf({ deps: [["h.py", h1.slice(1)]] }) === "invalid" && Array.isArray(depsOf({ deps: [["h.py", h1]] })), null);
+  const overSync = staleOfSync([["a.py", a60], ["b.py", a60]], (rel, left) => (big[rel].length > left ? "over" : big[rel]), () => a60, 100);
+  check("W01 staleOfSync: the files read within one budget: past it, \"over\"", overSync === "over", overSync);
+  // (astra's DEP-READ-1 r2: the CLI's reader reads a file whole: stat 1, now 6 bytes (grew): null, no prefix hashed;
+  //  stat 6, now 2 (shrank): null; reads of a byte at a time: the whole file)
+  const fileOf = (bytes, step = 1 << 20) => (buf, at) => { const k = Math.min(step, buf.length, Math.max(0, bytes.length - at)); buf.set(bytes.subarray(at, at + k)); return k; };
+  const six = enc("v = 1\n");
+  const grew = readComplete(fileOf(six), 1), shrank = readComplete(fileOf(six.subarray(0, 2)), 6), whole = readComplete(fileOf(six, 1), 6), empty = readComplete(fileOf(new Uint8Array(0)), 0);
+  check("DEP-READ-1 readComplete: a file grown or shrunk since its stat: null (no prefix); read a byte at a time: whole", grew === null && shrank === null && whole && (await sha256hex(whole)) === h1 && empty?.length === 0, { grew, shrank, whole: whole?.length });
+  const wsT = { readUpTo: async (p, max) => { if (p.endsWith("t.py")) return { entry: { trashed: true }, content: enc("x") }; if (p.endsWith("big.py")) throw Object.assign(new Error("x"), { code: "limit" }); return { entry: {}, content: enc("ok") }; } };
+  const rd = wsReader(wsT, "/A");
+  check("W01 wsReader: a file in the Trash isn't there; one past the bound is \"over\"", (await rd("t.py", 10)) === null && (await rd("big.py", 10)) === "over" && (await rd("h.py", 10))?.length === 2, null);
+  // (daybreak3's ENGINE-DEPS-PARTIAL-1: a Run whose first item imported the helper and whose second was stopped: its
+  //  results file records the helper (from the line after item 1); the helper edited, item 1's result isn't used)
+  {
+    let written = null;
+    const sP = sessionOf({ module: async () => ({ WorkerKernel: class { constructor(o) { this.o = o; this.ready = false; } start() { this.worker = { postMessage() {} }; this.o.onStart(this.worker); this.ready = true; } post() {} on() { return () => {}; } } }), worker: () => null }, 1000);
+    // (a file's entry changes with every write, as the workspace's does: `rev` counts them; `updated`, a time in ms,
+    //  may not change (daybreak3's ENGINE-SEEN-REV-1), so here it never does)
+    const writes = new Map();
+    const files = new Proxy({ "/P/d.tex": enc("x"), "/P/h.py": enc("v = 1\n"), "/P/d.tex.results.json": enc("{}") }, { set: (t, k, v) => { writes.set(k, (writes.get(k) ?? 0) + 1); t[k] = v; return true; } });
+    const ws = { pathOfFile: async () => ({ ok: true, path: "/P/d.tex" }), stat: async (p) => (files[p] ? { fid: p, rev: writes.get(p) ?? 0, updated: 0, size: files[p].length } : undefined), createByPerson: async (p, o) => { written = JSON.parse(new TextDecoder().decode(o.content)); return {}; }, write: async (p, bytes) => { written = JSON.parse(new TextDecoder().decode(bytes)); return { ok: true }; },
+      readUpTo: async (p, max) => { if (!files[p]) throw new Error("gone"); if (files[p].length > max) throw Object.assign(new Error("x"), { code: "limit" }); return { entry: {}, content: files[p] }; } };
+    const rP = await runAndSave({ items: [item("silent", "from h import v"), item("sage", "v")], current: () => true, max: 1 << 20, now: () => 0, fid: "f",
+      ws, session: sP, store: sP, serial: sP.serial, folder: async () => ({ dir: "/P", files: Object.entries(files) }),
+      exec: async () => ({ out: DEPS_MARK + JSON.stringify(["h.py"]) + "\n" + MARK + JSON.stringify({ s: "ok" }) + "\n", stopped: "the run was stopped" }) });
+    const c1 = await checkedResults(ws, "/P/d.tex.results.json", await ws.stat("/P/d.tex.results.json"), written, "/P");
+    files["/P/h.py"] = enc("v = 2\n");
+    const c2 = await checkedResults(ws, "/P/d.tex.results.json", await ws.stat("/P/d.tex.results.json"), written, "/P");
+    check("ENGINE-DEPS-PARTIAL-1: item 1 imports the helper, item 2 stopped: the results record it; the helper edited, item 1 isn't used", rP.ok && JSON.stringify(written?.deps?.map((d) => d[0])) === JSON.stringify(["h.py"]) && c1.stale === null && c1.saved.length === 2 && c2.stale === "h.py" && c2.saved.length === 0, { written: written?.deps, c1: c1.stale, c2: c2.stale });
+    // (results printed but no record of what was imported: incomplete, never an older file's no record)
+    written = null;
+    await runAndSave({ items: [item("silent", "x = 1")], current: () => true, max: 1 << 20, now: () => 0, fid: "f",
+      ws, session: sP, store: sP, serial: sP.serial, folder: async () => ({ dir: "/P", files: Object.entries(files) }),
+      exec: async () => ({ out: MARK + JSON.stringify({ s: "ok" }) + "\n", stopped: "" }) });
+    check("DEP-SNAPSHOT-1: results without a record of what their Run imported are written as incomplete", written?.deps === "incomplete", written?.deps);
+    // (astra's DEP-SEEN-1, daybreak3's ENGINE-SEEN-COMMIT-1: the helper changed while it is checked: nothing used, nothing
+    //  seen; checked again, it is stale)
+    files["/P/h.py"] = enc("v = 1\n");
+    const rec = { format: RESULTS_FORMAT, version: 1, wrapper: WRAPPER_VERSION, items: [{ key: "k", s: "ok" }], deps: [["h.py", h1]] };
+    const orig = ws.readUpTo;
+    ws.readUpTo = async (p, max) => { const r = await orig(p, max); if (p.endsWith("h.py")) files["/P/h.py"] = enc("v = 9\n"); return r; };
+    const mid = await checkedResults(ws, "/P/d.tex.results.json", await ws.stat("/P/d.tex.results.json"), rec, "/P");
+    ws.readUpTo = orig;
+    const again = await checkedResults(ws, "/P/d.tex.results.json", await ws.stat("/P/d.tex.results.json"), rec, "/P");
+    check("DEP-SEEN-1: a recorded file changed while it is checked: nothing used, nothing counted as seen; checked again, stale", mid.seen === null && mid.saved.length === 0 && again.stale === "h.py" && again.seen !== null && again.saved.length === 0, { mid, again: { stale: again.stale, seen: !!again.seen } });
+    // (daybreak3's ENGINE-SEEN-REV-1: a helper rewritten, same size, in the same ms (fid, updated, size all the same):
+    //  its rev differs, so nothing is used or seen; checked again, stale)
+    files["/P/h.py"] = enc("v = 1\n");
+    const before = (await ws.stat("/P/h.py")).rev;
+    ws.readUpTo = async (p, max) => { const r = await orig(p, max); if (p.endsWith("h.py")) files["/P/h.py"] = enc("v = 7\n"); return r; };
+    const same = await checkedResults(ws, "/P/d.tex.results.json", await ws.stat("/P/d.tex.results.json"), rec, "/P");
+    ws.readUpTo = orig;
+    const st2 = await ws.stat("/P/h.py"), retry = await checkedResults(ws, "/P/d.tex.results.json", await ws.stat("/P/d.tex.results.json"), rec, "/P");
+    check("ENGINE-SEEN-REV-1: same fid, updated, size, another rev: nothing used, nothing seen; checked again, stale", st2.updated === 0 && st2.size === 6 && st2.rev === before + 1 && same.saved.length === 0 && same.seen === null && retry.stale === "h.py" && retry.saved.length === 0, { same: { saved: same.saved.length, seen: same.seen }, retry: retry.stale });
+    // (astra's DEP-PARTIAL-COMMIT-1: item 2 imported b.py and printed its result, then Stop: saved with b.py recorded,
+    //  never with item 1's list alone; and a result with no line of its own before it: incomplete)
+    files["/P/a.py"] = enc("a"); files["/P/b.py"] = enc("b");
+    const two = (out) => runAndSave({ items: [item("silent", "import a"), item("silent", "import b")], current: () => true, max: 1 << 20, now: () => 0, fid: "f",
+      ws, session: sP, store: sP, serial: sP.serial, folder: async () => ({ dir: "/P", files: Object.entries(files) }), exec: async () => ({ out, stopped: "the run was stopped" }) });
+    const R = MARK + JSON.stringify({ s: "ok" }) + "\n", D = (l) => DEPS_MARK + JSON.stringify(l) + "\n";
+    written = null; await two(D(["a.py"]) + R + D(["a.py", "b.py"]) + R);
+    const ok2 = written?.deps;
+    written = null; await two(D(["a.py"]) + R + R);
+    const unmatched = written?.deps;
+    check("DEP-PARTIAL-COMMIT-1: Stop after item 2's result: b.py recorded; a result without its own line: incomplete", JSON.stringify(ok2?.map((d) => d[0])) === JSON.stringify(["a.py", "b.py"]) && unmatched === "incomplete" && parseDeps(D(["a.py"]) + R + R) === null && JSON.stringify(parseDeps(D(["a.py"]) + R + D(["a.py"]))) === JSON.stringify(["a.py"]), { ok2, unmatched });
+    // (grader's #804 R4: a recorded file moved to the Trash (its entry otherwise the same) changes what is seen, so the
+    //  page checks again; R6: the results file itself changed while it is checked: nothing used, nothing seen; R10: a
+    //  Run whose items printed no result records nothing of what it imported)
+    {
+      const trashed = new Set();
+      const wsT2 = { stat: async (p) => (files[p] ? { fid: p, rev: writes.get(p) ?? 0, updated: 0, size: files[p].length, ...(trashed.has(p) ? { trashed: true } : {}) } : undefined) };
+      const eR = await ws.stat("/P/d.tex.results.json");
+      const k1 = await seenOf(wsT2, eR, "/P", [["h.py", h1]]);
+      trashed.add("/P/h.py");
+      const k2 = await seenOf(wsT2, eR, "/P", [["h.py", h1]]);
+      check("W01 seenOf: a recorded file moved to the Trash is seen as changed", typeof k1 === "string" && k1 !== k2, { k1, k2 });
+      files["/P/h.py"] = enc("v = 1\n");
+      const e0 = await ws.stat("/P/d.tex.results.json");
+      ws.readUpTo = async (p, max) => { const r = await orig(p, max); if (p.endsWith("h.py")) files["/P/d.tex.results.json"] = enc("{ }"); return r; };
+      const midR = await checkedResults(ws, "/P/d.tex.results.json", e0, rec, "/P");
+      ws.readUpTo = orig;
+      check("W01 checkedResults: the results file changed while it is checked: nothing used, nothing seen", midR.seen === null && midR.saved.length === 0, { seen: midR.seen, saved: midR.saved.length });
+      written = null;
+      await runAndSave({ items: [item("silent", "import h")], current: () => true, max: 1 << 20, now: () => 0, fid: "f",
+        ws, session: sP, store: sP, serial: sP.serial, folder: async () => ({ dir: "/P", files: Object.entries(files) }),
+        exec: async () => ({ out: DEPS_MARK + JSON.stringify(["h.py"]) + "\n", stopped: "the run was stopped" }) });
+      check("W01 runAndSave: a Run whose items printed no result records nothing of what it imported", written && written.deps === undefined, written && { deps: written.deps, items: written.items?.length });
+    }
+  }
+  check("W01 resultsText: deps only when there are some", !("deps" in JSON.parse(resultsText([]))) && JSON.stringify(JSON.parse(resultsText([], [["h.py", h1]])).deps) === JSON.stringify([["h.py", h1]]), null);
 }
 
 // ---- (grader's Z2, Z3, Z7, Z9 on #794) a Run stopped while queued reads nothing (not even the .tex's recheck) and

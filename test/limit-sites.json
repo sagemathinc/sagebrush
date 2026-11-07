@@ -1,4 +1,9 @@
 {
+ "engine/ap/tests/stop.rs :: traced :: let (gap, poll) = (hooks::max_gap_ns() as f64 / 1e6, hooks::max_poll_gap_ns() as f64 / 1e6); #0": {
+  "class": "none",
+  "owner": "remote-compute",
+  "reason": "test-hook timing (longest wall-time gap between interrupt checks / simulated wasm host polls) and its readout in ap Stop pins; measures, refuses nothing"
+ },
  "engine/ball/src/ball.rs ::  :: pub const EXP_MAX: i64 = 1 << 40; #0": {
   "class": "2+3",
   "owner": "ball arithmetic",
@@ -474,9 +479,15 @@
   "class": "none",
   "owner": "HMF engine"
  },
- "engine/interrupt/src/lib.rs :: count :: MAX_POLL_GAP_NS.fetch_max(n - last, Relaxed); #0": {
+ "engine/interrupt/src/lib.rs :: count :: MAX_GAP_NS.fetch_max(n.saturating_sub(last), Relaxed); #0": {
   "class": "none",
-  "owner": "sage"
+  "owner": "remote-compute",
+  "reason": "test-hook timing (longest wall-time gap between interrupt checks / simulated wasm host polls) and its readout in ap Stop pins; measures, refuses nothing"
+ },
+ "engine/interrupt/src/lib.rs :: count :: MAX_POLL_GAP_NS.fetch_max(n.saturating_sub(last), Relaxed); #0": {
+  "class": "none",
+  "owner": "remote-compute",
+  "reason": "test-hook timing (longest wall-time gap between interrupt checks / simulated wasm host polls) and its readout in ap Stop pins; measures, refuses nothing"
  },
  "engine/interrupt/src/lib.rs :: drop :: static MAX_POLL_GAP_NS: AtomicU64 = AtomicU64::new(0); #0": {
   "class": "none",
@@ -3009,6 +3020,16 @@
   "owner": "visualization/display",
   "row": "inv-30"
  },
+ "lib/_graphics.py ::  :: 'leftrightarrows ⇆ rightharpoonup ⇀ leadsto ⇝ top ⊤ bot ⊥ vdash ⊢ dashv ⊣ models ⊧ cup ∪ cap ∩ ' #0": {
+  "class": "none",
+  "owner": "matplotlib mathtext (@sagebrush-matlab)",
+  "reason": "\"cap\" is TeX's \\cap, the set intersection symbol (∩) in the mathtext tables, not a cap: nothing is refused"
+ },
+ "lib/_graphics.py ::  :: _TEX_BIN = set(('pm mp times cdot div amalg ast barwedge bullet cap cup diamond lhd odot ominus oplus oslash otimes ' #0": {
+  "class": "none",
+  "owner": "matplotlib mathtext (@sagebrush-matlab)",
+  "reason": "\"cap\" is TeX's \\cap, the set intersection symbol (∩) in the mathtext tables, not a cap: nothing is refused"
+ },
  "lib/_limits.py ::  :: \"ff.conway_work\": (UNLIMITED, 10 ** 6, 653528895), #0": {
   "class": "3",
   "owner": "finite fields + configuration"
@@ -3608,6 +3629,11 @@
   "owner": "Magma compatibility",
   "row": "inv-25"
  },
+ "lib/_matlab.py :: ws_call :: raise _err(\"Too many output arguments.\", \"MATLAB:TooManyOutputs\" if name == \"clearvars\" else \"MATLAB:maxlhs\") #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the census matches 'max' in the identifier MATLAB:maxlhs. The line raises MATLAB's own error for asking save, clear or clearvars for an output (MathWorks documents none), before the call runs; it is not a limit on a computation"
+ },
  "lib/_matlab_cpow.py ::  :: _RESCUE_MAX = 100000 #0": {
   "class": "3",
   "owner": "MATLAB numeric",
@@ -4091,6 +4117,11 @@
   "class": "none",
   "owner": "memory guards' message (item D)"
  },
+ "lib/_os_lazy.py :: PathLike.__fspath__ :: raise NotImplementedError #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14's os.PathLike, copied: the abstract method's body, not a cap"
+ },
  "lib/_png.py ::  :: MAX_AXIS = 16384 #0": {
   "class": "1+2",
   "owner": "raster/image I/O",
@@ -4516,6 +4547,81 @@
   "owner": "symbolic sums (@sagebrush-matlab)",
   "reason": "doctests' expected output for that refusal (the review's N11, N13, N15 pins), not a cap"
  },
+ "lib/_sage_expr_more.py ::  :: _EXACT_SIGN_MAX_DEGREE = 32 #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap is an algorithm switch (past it the relation is decided at 400 bits, as Sage decides such identities), not a limit on a computation; nothing is refused (or a docstring/except line of it)"
+ },
+ "lib/_sage_expr_more.py ::  :: algebraic number under a degree cap, after factors proven 0 are pruned.\"\"\" #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "the lazy exact-sign module's docstring: it names the degree cap (32) of the exact conversion, registered on its lines in this file; nothing raises"
+ },
+ "lib/_sage_expr_more.py :: _exact_degree_bound :: except (TypeError, ValueError, ArithmeticError, NotImplementedError): #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap is an algorithm switch (past it the relation is decided at 400 bits, as Sage decides such identities), not a limit on a computation; nothing is refused (or a docstring/except line of it)"
+ },
+ "lib/_sage_expr_more.py :: _exact_degree_bound :: except (TypeError, ValueError, ArithmeticError, NotImplementedError): #1": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap is an algorithm switch (past it the relation is decided at 400 bits, as Sage decides such identities), not a limit on a computation; nothing is refused (or a docstring/except line of it)"
+ },
+ "lib/_sage_expr_more.py :: _exact_sign :: cannot be decided (another kind of constant, or past the degree cap), as #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap (32, from the tree's bound, before anything is built) bounds the automatic proof's work; past it the relation stays undecided (bool False), as it was before the exact path existed; nothing raises (or a docstring/except line of it)"
+ },
+ "lib/_sage_expr_more.py :: _exact_sign :: except (TypeError, ValueError, ArithmeticError, NotImplementedError, AttributeError, RecursionError): #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap is an algorithm switch (past it the relation is decided at 400 bits, as Sage decides such identities), not a limit on a computation; nothing is refused (or a docstring/except line of it)"
+ },
+ "lib/_sage_expr_more.py :: _exact_sign_capped :: \"c\" (not real); _CAPPED when its degree is past _EXACT_SIGN_MAX_DEGREE #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap (32, from the tree's bound, before anything is built) bounds the automatic proof's work; past it the relation stays undecided (bool False), as it was before the exact path existed; nothing raises (or a docstring/except line of it)"
+ },
+ "lib/_sage_expr_more.py :: _exact_sign_capped :: _sage_qqbar._degree_cap = cap #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap (32, from the tree's bound, before anything is built) bounds the automatic proof's work; past it the relation stays undecided (bool False), as it was before the exact path existed; nothing raises (or a docstring/except line of it)"
+ },
+ "lib/_sage_expr_more.py :: _exact_sign_capped :: by the algebraic numbers' own degree check, under that cap); None for #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap (32, from the tree's bound, before anything is built) bounds the automatic proof's work; past it the relation stays undecided (bool False), as it was before the exact path existed; nothing raises (or a docstring/except line of it)"
+ },
+ "lib/_sage_expr_more.py :: _exact_sign_capped :: cap = _EXACT_SIGN_MAX_DEGREE if old is None else min(old, _EXACT_SIGN_MAX_DEGREE) #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap (32, from the tree's bound, before anything is built) bounds the automatic proof's work; past it the relation stays undecided (bool False), as it was before the exact path existed; nothing raises (or a docstring/except line of it)"
+ },
+ "lib/_sage_expr_more.py :: _exact_sign_capped :: except (TypeError, ValueError, ArithmeticError, NotImplementedError, AttributeError, RecursionError): #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap (32, from the tree's bound, before anything is built) bounds the automatic proof's work; past it the relation stays undecided (bool False), as it was before the exact path existed; nothing raises (or a docstring/except line of it)"
+ },
+ "lib/_sage_expr_more.py :: _exact_sign_capped :: except NotImplementedError as e: #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap (32, from the tree's bound, before anything is built) bounds the automatic proof's work; past it the relation stays undecided (bool False), as it was before the exact path existed; nothing raises (or a docstring/except line of it)"
+ },
+ "lib/_sage_expr_more.py :: _exact_sign_capped :: if bound is not None and bound > cap: #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap (32, from the tree's bound, before anything is built) bounds the automatic proof's work; past it the relation stays undecided (bool False), as it was before the exact path existed; nothing raises (or a docstring/except line of it)"
+ },
+ "lib/_sage_expr_more.py :: _exact_sign_capped :: return _CAPPED if \"more than %d\" % cap in str(e) else None #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap (32, from the tree's bound, before anything is built) bounds the automatic proof's work; past it the relation stays undecided (bool False), as it was before the exact path existed; nothing raises (or a docstring/except line of it)"
+ },
+ "lib/_sage_expr_more.py :: _prune_zero :: factor under the degree cap) replaced by 0, and such zero terms dropped #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap (32, from the tree's bound, before anything is built) bounds the automatic proof's work; past it the relation stays undecided (bool False), as it was before the exact path existed; nothing raises (or a docstring/except line of it)"
+ },
  "lib/_sage_ff.py ::  :: CONWAY_WORK = _limits.finalize()[\"ff.conway_work\"] #0": {
   "class": "3",
   "owner": "finite fields + configuration",
@@ -4537,6 +4643,31 @@
  "lib/_sage_ff.py :: _ff_subfields :: refuse = lambda: NotImplementedError(\"subfields of %r are not supported yet (computed here only for fields of at most %s elements%s)\" % (self, S.embed_max_text(), S.work_clause())) #0": {
   "class": "3",
   "owner": "finite fields + configuration"
+ },
+ "lib/_sage_ff_inexact.py :: refuse :: TypeError: unsupported operand parent(s) for +: 'Univariate Polynomial Ring in t over Finite Field of size 7' and 'Real Field with 53 bits of precision' #0": {
+  "class": "none",
+  "owner": "inexact numbers with Zmod, finite fields and number fields (@sagebrush-sage2)",
+  "reason": "Sage's coercion refusal (TypeError) for an RR/CC/... number or a Python float with Zmod(n), a finite field or a number field, in Sage's text (and its doctest); refuses nothing for size"
+ },
+ "lib/_sage_ff_inexact.py :: refuse :: TypeError: unsupported operand type(s) for *: 'float' and 'sage.rings.finite_rings.integer_mod.IntegerMod_int' #0": {
+  "class": "none",
+  "owner": "inexact numbers with Zmod, finite fields and number fields (@sagebrush-sage2)",
+  "reason": "Sage's coercion refusal (TypeError) for an RR/CC/... number or a Python float with Zmod(n), a finite field or a number field, in Sage's text (and its doctest); refuses nothing for size"
+ },
+ "lib/_sage_ff_inexact.py :: refuse :: raise NotImplementedError(\"arithmetic with %s and %s together is not available in sagebrush yet\" % ((x, y) if rev else (y, x))) #0": {
+  "class": "coverage",
+  "owner": "inexact numbers with Zmod, finite fields and number fields (@sagebrush-sage2)",
+  "reason": "an inexact number with a number field that has an embedding (Sage computes in RR, CC, ...): L33, not a cap"
+ },
+ "lib/_sage_ff_inexact.py :: refuse :: raise TypeError(\"unsupported operand parent(s) for %s: '%s' and '%s'\" % ((op, x, y) if rev else (op, y, x))) #0": {
+  "class": "none",
+  "owner": "inexact numbers with Zmod, finite fields and number fields (@sagebrush-sage2)",
+  "reason": "Sage's coercion refusal (TypeError) for an RR/CC/... number or a Python float with Zmod(n), a finite field or a number field, in Sage's text (and its doctest); refuses nothing for size"
+ },
+ "lib/_sage_ff_inexact.py :: refuse :: raise TypeError(\"unsupported operand type(s) for %s: '%s' and '%s'\" % ((op, x, c) if rev else (op, c, x))) #0": {
+  "class": "none",
+  "owner": "inexact numbers with Zmod, finite fields and number fields (@sagebrush-sage2)",
+  "reason": "Sage's coercion refusal (TypeError) for an RR/CC/... number or a Python float with Zmod(n), a finite field or a number field, in Sage's text (and its doctest); refuses nothing for size"
  },
  "lib/_sage_ffmat.py ::  :: _ENGINE_CHARPOLY_MAX_N = 512 #0": {
   "class": "1+3",
@@ -4567,6 +4698,16 @@
   "class": "none",
   "owner": "pcimc quick wins 3 (@sagebrush-sage2)",
   "reason": "Sage's TypeError messages for products of a GF(q) vector with a rational or a non-ZZ matrix: matched words, no limit"
+ },
+ "lib/_sage_ffmat.py :: FFVector.__truediv__ :: TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 5' and 'Rational Field' #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "a doctest's expected output (Sage's coercion refusal), not code"
+ },
+ "lib/_sage_ffmat.py :: FFVector.__truediv__ :: raise TypeError(\"unsupported operand parent(s) for /: '%r' and '%r'\" % (self.parent(), type(o))) #0": {
+  "class": "none",
+  "owner": "matrices over inexact fields (@sagebrush-sage2)",
+  "reason": "Sage's refusal (TypeError) of a vector divided by anything that has no inverse (a str, a list, an object with its own __rtruediv__), in Sage's text; refuses nothing for size"
  },
  "lib/_sage_ffmat.py :: _AlgCharge :: against the budget for one matrix. A charge per entry alone admitted #0": {
   "class": "2",
@@ -5873,6 +6014,11 @@
   "owner": "real/complex arithmetic",
   "row": "inv-17"
  },
+ "lib/_sage_series.py :: PowerSeriesRing :: raise NotImplementedError(\"multivariate power series rings are not available in sagebrush yet\") #0": {
+  "class": "coverage",
+  "owner": "series rings (@sagebrush-sage2)",
+  "reason": "multivariate power series rings (PowerSeriesRing(QQ, 'x,y'), (QQ, n, 'x')): Sage builds one, not here yet (L32); not a cap"
+ },
  "lib/_sage_series.py :: Series._poly_target :: raise TypeError(\"unsupported operand parent(s): '%r' and '%r'\" % (self._R, P)) #0": {
   "class": "none",
   "owner": "sage kernel (@sagebrush-sage2)",
@@ -5892,6 +6038,16 @@
   "class": "none",
   "owner": "sage kernel (@sagebrush-sage2)",
   "reason": "a TypeError for a series and an element of another ring with no common parent (Sage's coercion refusal, as probed: another variable, GF(p) with QQ, Laurent and power series' own rules); refuses nothing for size"
+ },
+ "lib/_sage_series.py :: _first_counted :: raise NotImplementedError(\"LaurentSeriesRing with a count of 0 is not available in sagebrush yet\") #0": {
+  "class": "coverage",
+  "owner": "series rings (@sagebrush-sage2)",
+  "reason": "LaurentSeriesRing with a count of 0 (Sage makes a ring that cannot print itself, L39): refused rather than guessed; not a cap"
+ },
+ "lib/_sage_series.py :: _series_ring_from_list :: raise NotImplementedError(\"multivariate power series rings are not available in sagebrush yet\") #0": {
+  "class": "coverage",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "an unsupported case, not a cap: K[['x', 'y']] is a multivariate power series ring in Sage; refused here rather than a ring in x alone (the extra names were dropped before)"
  },
  "lib/_sbdata.py :: _Parser.string :: def string(self, cap, capcode=\"cap:string\"): #0": {
   "class": "1",
@@ -6365,6 +6521,36 @@
   "owner": "csv (@sagebrush-sage2)",
   "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
  },
+ "lib/difflib.py :: HtmlDiff._split_line :: if (size <= max) or ((size -(text.count('\\0')*3)) <= max): #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "HtmlDiff's wrapcolumn: the column a table line wraps at (CPython 3.14.10's difflib, unchanged); it splits a line for display and refuses nothing"
+ },
+ "lib/difflib.py :: HtmlDiff._split_line :: max = self._wrapcolumn #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "HtmlDiff's wrapcolumn: the column a table line wraps at (CPython 3.14.10's difflib, unchanged); it splits a line for display and refuses nothing"
+ },
+ "lib/difflib.py :: HtmlDiff._split_line :: while n < max and i < size: #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "HtmlDiff's wrapcolumn: the column a table line wraps at (CPython 3.14.10's difflib, unchanged); it splits a line for display and refuses nothing"
+ },
+ "lib/difflib.py :: SequenceMatcher.find_longest_match :: In other words, of all maximal matching blocks, return one that #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "a docstring line (CPython 3.14.10's difflib, unchanged): 'maximal matching blocks', no limit"
+ },
+ "lib/difflib.py :: SequenceMatcher.find_longest_match :: starts earliest in a, and of all those maximal matching blocks that #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "a docstring line (CPython 3.14.10's difflib, unchanged): 'maximal matching blocks', no limit"
+ },
+ "lib/difflib.py :: get_close_matches :: Optional arg n (default 3) is the maximum number of close matches to #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "a docstring line (CPython 3.14.10's difflib, unchanged): n, the most close matches to return, the caller's own argument; no limit is applied"
+ },
  "lib/enum.py :: EnumType.__call__ :: `names` should be either a string of white-space/comma delimited names #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
@@ -6405,6 +6591,26 @@
   "owner": "python (@sagebrush-python)",
   "reason": "CPython 3.14's Lib/enum.py, copied unchanged: the census vocabulary matches max_bits (a padding width in enum.bin), \"unsupported operand\" (the TypeError CPython raises for a non-Flag in a Flag) and \"delimited\" (contains limit) in EnumType.__call__'s TypeError; none refuses for size"
  },
+ "lib/errno.py ::  :: 82: 'ELIBMAX', #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "errno's name ELIBMAX (CPython's value, generated): a constant, not a cap"
+ },
+ "lib/errno.py ::  :: ELIBMAX = 82 #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "errno's name ELIBMAX (CPython's value, generated): a constant, not a cap"
+ },
+ "lib/fnmatch.py ::  :: @functools.lru_cache(maxsize=32768, typed=True) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14's fnmatch, copied unchanged: the size of its compiled-pattern cache; every pattern still compiles, not a cap"
+ },
+ "lib/fnmatch.py ::  :: _re_escape = functools.lru_cache(maxsize=512)(re.escape) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14's fnmatch, copied unchanged: a cache's size, not a cap"
+ },
  "lib/fredapi.py :: _error :: if code == \"rate_limited\": #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
@@ -6414,6 +6620,26 @@
   "class": "none",
   "owner": "python (@sagebrush-python)",
   "reason": "live data's error vocabulary (no_key, rate_limited, ...) and yfinance's refusal text, relayed from upstream or the bridge: matched words that bound nothing here"
+ },
+ "lib/glob.py ::  :: @functools.lru_cache(maxsize=512) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14's glob, copied unchanged: a cache's size, not a cap"
+ },
+ "lib/glob.py :: _GlobberBase.concat_path :: raise NotImplementedError #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14's glob, copied unchanged: an abstract method's body, not a cap"
+ },
+ "lib/glob.py :: _GlobberBase.lexists :: raise NotImplementedError #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14's glob, copied unchanged: an abstract method's body, not a cap"
+ },
+ "lib/glob.py :: _GlobberBase.scandir :: raise NotImplementedError #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14's glob, copied unchanged: an abstract method's body, not a cap"
  },
  "lib/hashlib.py :: new :: raise ValueError(\"unsupported hash type \" + name) #0": {
   "class": "coverage",
@@ -7969,7 +8195,7 @@
   "owner": "the LaTeX CLI (@sagebrush-latex)",
   "reason": "matched text that refuses nothing: help text (unsupported), path.delimiter, CSS max-width"
  },
- "src/latex-cli.ts ::  :: import { itemKey, MAX_RESULT, WRAPPER_VERSION } from \"../web/latex/engine/sagetex.mjs\"; #0": {
+ "src/latex-cli.ts ::  :: import { itemKey, MAX_RESULT, WRAPPER_VERSION, depsOf, safeRel, DEPS_MAX, DEPS_BYTES, staleOfSync, readComplete } from \"../web/latex/engine/sagetex.mjs\"; #0": {
   "class": "none",
   "owner": "the LaTeX CLI (@sagebrush-latex)",
   "reason": "matched text that refuses nothing: an import line"
@@ -8024,6 +8250,22 @@
   "owner": "the LaTeX CLI (@sagebrush-latex)",
   "reason": "sagebrush latex run: bounds on the results file it writes and reads (32 MiB), a plot's SVG (2 MiB), a \\\\sage result (MAX_RESULT) and a message (4000): output and parser protection of a local command"
  },
+ "src/latex-cli.ts :: preHashes :: if (!d.name.endsWith(\".py\") || out.size >= DEPS_MAX) continue; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "Codex W01 (astra's DEP-SNAPSHOT-1): the folder's .py files hashed before a run, at most DEPS_MAX (1000) files and DEPS_BYTES (64 MiB); a run importing one past either records \"incomplete\", so its results aren't used (fails closed)"
+ },
+ "src/latex-cli.ts :: preHashes :: while (queue.length && out.size < DEPS_MAX) { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "Codex W01 (astra's DEP-SNAPSHOT-1): the folder's .py files hashed before a run, at most DEPS_MAX (1000) files and DEPS_BYTES (64 MiB); a run importing one past either records \"incomplete\", so its results aren't used (fails closed)"
+ },
  "src/latex-cli.ts :: readResults :: _sbtx_r[\"out\"] = _sbtx_buf.getvalue()[-${MSG_MAX}:] #0": {
   "class": "1",
   "disposition": {
@@ -8032,7 +8274,7 @@
   "owner": "the LaTeX CLI (@sagebrush-latex)",
   "reason": "sagebrush latex run: bounds on the results file it writes and reads (32 MiB), a plot's SVG (2 MiB), a \\\\sage result (MAX_RESULT) and a message (4000): output and parser protection of a local command"
  },
- "src/latex-cli.ts :: readResults :: if (!existsSync(p) || statSync(p).size > RESULTS_MAX) return []; #0": {
+ "src/latex-cli.ts :: readResults :: if (!existsSync(p) || statSync(p).size > RESULTS_MAX) return none; #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -8055,6 +8297,14 @@
   },
   "owner": "latex",
   "reason": "removeTemp retries the scratch folder's removal at most 10 times, 50 ms apart (Node's rmSync maxRetries), so a browser helper still writing can't fail a finished render; then it gives up quietly"
+ },
+ "src/latex-cli.ts :: report :: if (!Array.isArray(rels) || rels.length > DEPS_MAX || !rels.every(safeRel)) deps = \"incomplete\"; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "Codex W01: the results' record of what their run imported from the .tex's folder holds at most DEPS_MAX (1000) paths; past it the run records \"incomplete\" and its results aren't used: parser protection of a results file"
  },
  "src/latex-cli.ts :: resultsPath :: const RESULTS_MAX = 32 * 2 ** 20, SVG_MAX = 2 * 2 ** 20, MSG_MAX = 4000; #0": {
   "class": "1",
@@ -9646,6 +9896,16 @@
   "owner": "python (@sagebrush-python)",
   "row": "src-7"
  },
+ "src/runtime/modules.ts :: importStar :: [\"debug\", \"inspect\", \"interactive\", \"optimize\", \"dont_write_bytecode\", \"no_user_site\", \"no_site\", \"ignore_environment\", \"verbose\", \"bytes_warning\", \"quiet\", \"hash_randomization\", \"isolated\", \"dev_mode\", \"utf8_mode\", \"warn_default_encoding\", \"safe_path\", \"int_max_str_digits\"], #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "sys.flags' field names (CPython 3.14's): int_max_str_digits names the flag, no limit is applied here"
+ },
+ "src/runtime/modules.ts :: importStar :: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, false, 0, 0, false, intDigits.max], #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "sys.flags' values: int_max_str_digits reports the current limit (intDigits.max), it refuses nothing; the limit itself is applied in src/runtime/format.ts and set by sys.set_int_max_str_digits"
+ },
  "src/runtime/modules.ts :: importStar :: export { heapLimit } from \"./heap\"; #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)"
@@ -9656,10 +9916,6 @@
  },
  "src/runtime/modules.ts :: importStar :: m._sagebrush_heap_limit = heapLimit(); #0": {
   "class": "2",
-  "owner": "python (@sagebrush-python)"
- },
- "src/runtime/modules.ts :: importStar :: m.flags.int_max_str_digits = intDigits.max; #0": {
-  "class": "3",
   "owner": "python (@sagebrush-python)"
  },
  "src/runtime/modules.ts :: importStar :: m.int_info = Ty.structseq(\"sys.int_info\", [\"bits_per_digit\", \"sizeof_digit\", \"default_max_str_digits\", \"str_digits_check_threshold\"], [30, 4, 0, 640]); #0": {
@@ -9682,6 +9938,16 @@
  "src/runtime/modules.ts :: logOf :: if (bytes > heapLimit() / 2) #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/modules.ts :: lstatOf :: if (dir_fd !== null) raise(T.NotImplementedError, \"dir_fd unavailable on this platform\"); #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "os.stat(dir_fd=): this runtime has no directory descriptors, refused with CPython's own message on a platform without dir_fd; unsupported, not a cap"
+ },
+ "src/runtime/modules.ts :: lstatOf :: if (dir_fd !== null) raise(T.NotImplementedError, \"dir_fd unavailable on this platform\"); #1": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "os.lstat(dir_fd=): this runtime has no directory descriptors, refused with CPython's own message on a platform without dir_fd; unsupported, not a cap"
  },
  "src/runtime/modules.ts :: memoryGuard :: export function memoryGuard(what: string, needBytes: number | bigint, limitBytes: number | bigint, allowanceFor: string, fixed = false): never { #0": {
   "class": "none",
@@ -9735,6 +10001,11 @@
   "class": "2+3",
   "owner": "python (@sagebrush-python)",
   "row": "src-7"
+ },
+ "src/runtime/modules.ts :: quiet :: EBUSY: \"Device or resource busy\", EINVAL: \"Invalid argument\", ELOOP: \"Too many levels of symbolic links\", #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "the strerror table (CPython's messages for errno codes): the word resource in EBUSY's text, not a cap"
  },
  "src/runtime/modules.ts :: quiet :: const buf = new Uint8Array(Math.min(limit, st.size) + 1); #0": {
   "class": "1",
@@ -10389,6 +10660,14 @@
   "owner": "sagebrush-remote-compute",
   "reason": "The wave envelope's validation of the scheduler's automatic-run time budget field (null or a finite number), before anything is admitted; it limits nothing, it refuses a malformed wave."
  },
+ "web/latex/results-check.mjs :: wsReader :: catch (err) { return err?.code === \"limit\" ? \"over\" : null; } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX editor's Run (@sagebrush-latex)",
+  "reason": "Codex W01 (astra's DEP-READ-1): the files a results file records are read within one budget, DEPS_BYTES (64 MiB) in all; past it the results aren't used (\"over\", said)"
+ },
  "web/latex/run-core.mjs ::  :: export const FOLDER_LIMITS = { files: 500, bytes: 64 * 2 ** 20 }; #0": {
   "class": "1",
   "disposition": {
@@ -10405,7 +10684,7 @@
   "owner": "the LaTeX editor's Run (@sagebrush-latex)",
   "reason": "the editor's Run: the .tex's folder given to Sage (FOLDER_LIMITS: 500 files, 64 MiB; past either, Run runs nothing), and what a Run's results hold (the results file's size, a result's LaTeX, a plot's SVG, a message: RUN_LIMITS, as the CLI's): bounds protecting the page and its session"
  },
- "web/latex/run-core.mjs ::  :: import { MAX_RESULT, WRAPPER_VERSION, utf8len, whyRejected } from \"./engine/sagetex.mjs\"; #0": {
+ "web/latex/run-core.mjs ::  :: import { MAX_RESULT, WRAPPER_VERSION, utf8len, whyRejected, safeRel, sha256hex, DEPS_MAX } from \"./engine/sagetex.mjs\"; #0": {
   "class": "none",
   "owner": "the LaTeX editor's Run (@sagebrush-latex)",
   "reason": "matched text that refuses nothing: an import line"
@@ -10458,6 +10737,14 @@
   "owner": "the LaTeX editor's Run (@sagebrush-latex)",
   "reason": "the editor's Run: the .tex's folder given to Sage (FOLDER_LIMITS: 500 files, 64 MiB; past either, Run runs nothing), and what a Run's results hold (the results file's size, a result's LaTeX, a plot's SVG, a message: RUN_LIMITS, as the CLI's): bounds protecting the page and its session"
  },
+ "web/latex/run-core.mjs :: parseDeps :: if (!Array.isArray(got) || got.length > DEPS_MAX || !got.every(safeRel)) return null; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX editor's Run (@sagebrush-latex)",
+  "reason": "Codex W01: the results' record of what their run imported from the .tex's folder holds at most DEPS_MAX (1000) paths; past it the run records \"incomplete\" and its results aren't used: parser protection of a results file"
+ },
  "web/latex/run-core.mjs :: runIn :: done(_ms, o) { resolve({ out, stopped: o?.interrupted ? \"the run was stopped\" : out.length >= max ? \"the results are too large\" : o?.error ? \"the session stopped with an error\" : \"\" }); }, #0": {
   "class": "1",
   "disposition": {
@@ -10498,6 +10785,91 @@
   "owner": "the LaTeX editor's Run (@sagebrush-latex)",
   "reason": "the editor's Run: the .tex's folder given to Sage (FOLDER_LIMITS: 500 files, 64 MiB; past either, Run runs nothing), and what a Run's results hold (the results file's size, a result's LaTeX, a plot's SVG, a message: RUN_LIMITS, as the CLI's): bounds protecting the page and its session"
  },
+ "web/notebook/output-frames.js ::  :: export const COMMIT_MS = FRAME_LIMITS.commitMs; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/notebook/output-frames.js ::  :: export const DEFAULT_CAP = FRAME_LIMITS.cap; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/notebook/output-frames.js ::  :: export const FRAME_LIMITS = Object.freeze({ loadMs: 10000, commitMs: 6000, initialPx: 120, cap: 24, heightHz: 30 }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/notebook/output-frames.js ::  :: export const HEIGHT_HZ = FRAME_LIMITS.heightHz; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/notebook/output-frames.js ::  :: export const INITIAL_PX = FRAME_LIMITS.initialPx; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/notebook/output-frames.js ::  :: export const LOAD_MS = FRAME_LIMITS.loadMs; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/notebook/output-frames.js ::  :: import { LIMITS, decode, encode } from \"../output-shell/protocol.js\"; #0": {
+  "class": "none",
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "matched text that refuses nothing: an import line"
+ },
+ "web/notebook/output-frames.js :: admit :: if (live().length >= cap) { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/notebook/output-frames.js :: createOutputFrames :: export function createOutputFrames({ srcdoc = null, url = null, cap = DEFAULT_CAP, root = null, onEvent = () => {}, loadMs = LOAD_MS, commitMs = COMMIT_MS } = {}) { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/notebook/output-frames.js :: createOutputFrames :: if (!Number.isSafeInteger(cap) || cap < 1) throw new Error(\"output frames: a cap of at least one frame\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/notebook/output-frames.js :: render :: if (!Array.isArray(outputs) || outputs.length > LIMITS.outputsPerRender) throw new Error(\"output area: too many outputs\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
  "web/notebook/text-overlap.ts ::  :: export const TEXT_DIFF_PRODUCT_LIMIT = 4_000_000; #0": {
   "class": "1",
   "disposition": {
@@ -10513,6 +10885,107 @@
   },
   "owner": "notebook/board text merge (@sagebrush-sync-client, @sagebrush-board)",
   "reason": "the shared 3-way text merge diff-work bound: past it lineMerge3 returns tagged exhaustion; notebook records a too-large clash, while board refuses the whole merge as work with no partial records; neither guesses nor loses data."
+ },
+ "web/output-shell/protocol.js ::  :: export const LIMITS = Object.freeze({ messageChars: 4 * 1024 * 1024, outputsPerRender: 64, idChars: 64, heightPx: 32768, reasonChars: 200 }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/output-shell/protocol.js :: decode :: if (typeof data !== \"string\" || data.length > LIMITS.messageChars) return null; // (before any parse) #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/output-shell/protocol.js :: encode :: if (s.length > LIMITS.messageChars) throw new Error(`a ${type} message over ${LIMITS.messageChars} characters`); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/output-shell/protocol.js :: isId :: const isId = (v) => typeof v === \"string\" && v.length > 0 && v.length <= LIMITS.idChars && /^[A-Za-z0-9_.:-]+$/.test(v); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/output-shell/protocol.js :: isId :: height: (v) => typeof v === \"number\" && Number.isFinite(v) && v >= 0 && v <= LIMITS.heightPx, #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/output-shell/protocol.js :: isId :: ids: (v) => Array.isArray(v) && v.length <= LIMITS.outputsPerRender && v.every(isId) && new Set(v).size === v.length, #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/output-shell/protocol.js :: isId :: outputs: (v) => Array.isArray(v) && v.length <= LIMITS.outputsPerRender && new Set(v.map((o) => o?.id)).size === v.length && #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/output-shell/protocol.js :: isId :: reason: (v) => typeof v === \"string\" && v.length <= LIMITS.reasonChars, #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/output-shell/shell.js ::  :: export const HEIGHT_HZ = SHELL_LIMITS.heightHz; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/output-shell/shell.js ::  :: export const READY_MS = SHELL_LIMITS.readyMs; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/output-shell/shell.js ::  :: export const SHELL_LIMITS = Object.freeze({ readyMs: 3000, heightHz: 30 }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/output-shell/shell.js ::  :: import { LIMITS, decode, encode } from \"./protocol.js\"; #0": {
+  "class": "none",
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "matched text that refuses nothing: an import line"
+ },
+ "web/output-shell/shell.js :: measure :: const measure = () => Math.min(LIMITS.heightPx, Math.ceil(root.getBoundingClientRect().height)); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
  },
  "web/stall-fetch.js ::  :: export const STALL_LIMIT_MS = 20000; #0": {
   "class": "1",
@@ -10767,5 +11240,111 @@
  "web/workspace/sync-ledger.ts :: waitSync :: if (t !== undefined && (!Number.isSafeInteger(t) || t < 1 || t > WAIT.timeoutMax)) throw Object.assign(new WorkspaceError(\"invalid\", `timeoutMs is an integer from 1 to ${WAIT.timeoutMax}`), { max: WAIT.timeoutMax }); #0": {
   "class": "1",
   "owner": "sync client"
+ },
+ "lib/_sage_rpoly.py :: PolynomialInexact.__pow__ :: raise NotImplementedError(\"a power of a polynomial over %r by %r is not available in sagebrush yet\" % (self._ring._base, n)) #0": {
+  "class": "coverage",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "the fraction field of a polynomial ring over an inexact field (negative powers, division by a polynomial) and powers by a non-integer: 1b stage 2, not a cap"
+ },
+ "lib/_sage_rpoly.py :: PolynomialInexact.__pow__ :: raise NotImplementedError(\"the fraction field of %r is not available in sagebrush yet\" % (self._ring,)) #0": {
+  "class": "coverage",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "the fraction field of a polynomial ring over an inexact field (negative powers, division by a polynomial) and powers by a non-integer: 1b stage 2, not a cap"
+ },
+ "lib/_sage_rpoly.py :: PolynomialInexact.__rtruediv__ :: raise NotImplementedError(\"the fraction field of %r is not available in sagebrush yet\" % (self._ring,)) #0": {
+  "class": "coverage",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "the fraction field of a polynomial ring over an inexact field (negative powers, division by a polynomial) and powers by a non-integer: 1b stage 2, not a cap"
+ },
+ "lib/_sage_rpoly.py :: PolynomialInexact.__truediv__ :: raise NotImplementedError(\"the fraction field of %r is not available in sagebrush yet\" % (self._ring,)) #0": {
+  "class": "coverage",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "the fraction field of a polynomial ring over an inexact field (negative powers, division by a polynomial) and powers by a non-integer: 1b stage 2, not a cap"
+ },
+ "lib/_sage_rpoly.py :: PolynomialInexact._refuse_parents :: raise TypeError(\"unsupported operand parent(s) for %s: '%r' and '%r'\" % (sym, a, b)) #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "Sage's coercion refusal (TypeError) for polynomials over an inexact field with another ring or a Python complex, in Sage's text; refuses nothing for size"
+ },
+ "lib/_sage_rpoly.py :: PolynomialRingInexact.__call__ :: Converting an expression of degree 1048577 to a dense polynomial needs about 8.4 MB, but Sagebrush has a fixed limit of about 8.3 MB for one polynomial. #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "docstring text and examples of the dense coefficient bound; refuses nothing"
+ },
+ "lib/_sage_rpoly.py :: PolynomialRingInexact.__call__ :: conversion (a fixed limit of 2^20 coefficients):: #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "docstring text and examples of the dense coefficient bound; refuses nothing"
+ },
+ "lib/_sage_rpoly.py :: PolynomialRingInexact.__call__ :: sage: _sage_poly._MAX_DENSE_COEFFS = cap # sagebrush only #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "docstring text and examples of the dense coefficient bound; refuses nothing"
+ },
+ "lib/_sage_rpoly.py :: PolynomialRingInexact.__call__ :: sage: import _sage_poly; cap = _sage_poly._MAX_DENSE_COEFFS; _sage_poly._MAX_DENSE_COEFFS = 11 # sagebrush only #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "docstring text and examples of the dense coefficient bound; refuses nothing"
+ },
+ "lib/_sage_rpoly.py :: _admit :: cap = _sage_poly._MAX_DENSE_COEFFS #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "the dense coefficient bound of the exact polynomials (_sage_poly._MAX_DENSE_COEFFS, 2^20), admitted before a polynomial over an inexact field is built: SR conversion, product, square, power, shift (astra's RPOLY-ALLOC-1)",
+  "row": "inv-13"
+ },
+ "lib/_sage_rpoly.py :: _admit :: exact polynomials' _MAX_DENSE_COEFFS coefficients (the memory guard's error, at 8 bytes a #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "docstring text and examples of the dense coefficient bound; refuses nothing"
+ },
+ "lib/_sage_rpoly.py :: _admit :: if n > cap: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "the dense coefficient bound of the exact polynomials (_sage_poly._MAX_DENSE_COEFFS, 2^20), admitted before a polynomial over an inexact field is built: SR conversion, product, square, power, shift (astra's RPOLY-ALLOC-1)",
+  "row": "inv-13"
+ },
+ "lib/_sage_rpoly.py :: _admit :: raise _memguard.memory_guard(what, n * 8, cap * 8, \"one polynomial\", fixed=True) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "the dense coefficient bound of the exact polynomials (_sage_poly._MAX_DENSE_COEFFS, 2^20), admitted before a polynomial over an inexact field is built: SR conversion, product, square, power, shift (astra's RPOLY-ALLOC-1)",
+  "row": "inv-13"
+ },
+ "lib/_sage_rpoly.py :: _refuse_foreign :: raise TypeError(\"unsupported operand parent(s) for %s: '%s' and '%s'\" % (sym, a, b)) #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "Sage's coercion refusal (TypeError) for polynomials over an inexact field with another ring or a Python complex, in Sage's text; refuses nothing for size"
+ },
+ "lib/_sage_rpoly.py :: _refuse_foreign :: raise TypeError(\"unsupported operand type(s) for /: '%s' and '%s'\" % (ca, cb)) #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "Sage's coercion refusal (TypeError) for polynomials over an inexact field with another ring or a Python complex, in Sage's text; refuses nothing for size"
+ },
+ "lib/_sage_rpoly.py :: _refuse_mixed :: raise NotImplementedError(\"arithmetic with %s and %s together is not available in sagebrush yet\" % (a, b)) #0": {
+  "class": "coverage",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "polynomials over an inexact field with a number field that has an embedding (Sage computes in the common ring): L33, not a cap"
+ },
+ "lib/_sage_rpoly.py :: _refuse_types :: raise TypeError(\"unsupported operand type(s) for /: '%s' and '%s'\" % (ca, cb)) #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "Sage's coercion refusal (TypeError) for polynomials over an inexact field with another ring or a Python complex, in Sage's text; refuses nothing for size"
  }
 }

@@ -1,0 +1,161 @@
+Real Double Field 0 ^ RDF(2.5) -> 0 | Integer Ring
+Real Double Field 0 ^ RR(2.5) -> 0 | Integer Ring
+Real Double Field 0 ^ RDF(0) -> 1 | Integer Ring
+Real Double Field 0 ^ RDF(-0.0) -> 1 | Integer Ring
+Real Double Field 0 ^ RR(0) -> 1 | Integer Ring
+Real Double Field 0 ^ CDF(0) -> 1 | Integer Ring
+Real Double Field 0 ^ CDF(1,1) -> 0 | Integer Ring
+Real Double Field 0 ^ CDF(1,-1) -> 0 | Integer Ring
+Real Double Field 0 ^ CDF(2.5) -> 0 | Integer Ring
+Real Double Field 0 ^ CC(2,0) -> 0 | Integer Ring
+Real Double Field 0 ^ CDF(-1,1) -> ValueError: power::eval(): division by zero
+Real Double Field 0 ^ CDF(0,1) -> ValueError: power::eval(): pow(0,I) is undefined
+Real Double Field 0 ^ CDF(0,-1) -> ValueError: power::eval(): pow(0,I) is undefined
+Real Double Field 0 ^ RDF(-1.5) -> ValueError: power::eval(): division by zero
+Real Double Field 0 ^ RDF(nan) -> 0 | Integer Ring
+Real Double Field 0 ^ RDF(inf) -> 0 | Integer Ring
+Real Double Field 0 ^ RDF(-inf) -> ValueError: power::eval(): division by zero
+Real Double Field 0 ^ 0 -> 1 | Integer Ring
+Real Double Field 0 ^ 2 -> 0 | Integer Ring
+Real Double Field 0 ^ -1 -> ValueError: power::eval(): division by zero
+Real Double Field -0.0 ^ RDF(2.5) -> 0 | Integer Ring
+Real Double Field -0.0 ^ RR(2.5) -> 0 | Integer Ring
+Real Double Field -0.0 ^ RDF(0) -> 1 | Integer Ring
+Real Double Field -0.0 ^ RDF(-0.0) -> 1 | Integer Ring
+Real Double Field -0.0 ^ RR(0) -> 1 | Integer Ring
+Real Double Field -0.0 ^ CDF(0) -> 1 | Integer Ring
+Real Double Field -0.0 ^ CDF(1,1) -> 0 | Integer Ring
+Real Double Field -0.0 ^ CDF(1,-1) -> 0 | Integer Ring
+Real Double Field -0.0 ^ CDF(2.5) -> 0 | Integer Ring
+Real Double Field -0.0 ^ CC(2,0) -> 0 | Integer Ring
+Real Double Field -0.0 ^ CDF(-1,1) -> ValueError: power::eval(): division by zero
+Real Double Field -0.0 ^ CDF(0,1) -> ValueError: power::eval(): pow(0,I) is undefined
+Real Double Field -0.0 ^ CDF(0,-1) -> ValueError: power::eval(): pow(0,I) is undefined
+Real Double Field -0.0 ^ RDF(-1.5) -> ValueError: power::eval(): division by zero
+Real Double Field -0.0 ^ RDF(nan) -> 0 | Integer Ring
+Real Double Field -0.0 ^ RDF(inf) -> 0 | Integer Ring
+Real Double Field -0.0 ^ RDF(-inf) -> ValueError: power::eval(): division by zero
+Real Double Field -0.0 ^ 0 -> 1 | Integer Ring
+Real Double Field -0.0 ^ 2 -> 0 | Integer Ring
+Real Double Field -0.0 ^ -1 -> ValueError: power::eval(): division by zero
+Real Field with 53 bits of precision 0 ^ RDF(2.5) -> 0 | Integer Ring
+Real Field with 53 bits of precision 0 ^ RR(2.5) -> 0 | Integer Ring
+Real Field with 53 bits of precision 0 ^ RDF(0) -> 1 | Integer Ring
+Real Field with 53 bits of precision 0 ^ RDF(-0.0) -> 1 | Integer Ring
+Real Field with 53 bits of precision 0 ^ RR(0) -> 1 | Integer Ring
+Real Field with 53 bits of precision 0 ^ CDF(0) -> 1 | Integer Ring
+Real Field with 53 bits of precision 0 ^ CDF(1,1) -> 0 | Integer Ring
+Real Field with 53 bits of precision 0 ^ CDF(1,-1) -> 0 | Integer Ring
+Real Field with 53 bits of precision 0 ^ CDF(2.5) -> 0 | Integer Ring
+Real Field with 53 bits of precision 0 ^ CC(2,0) -> 0 | Integer Ring
+Real Field with 53 bits of precision 0 ^ CDF(-1,1) -> ValueError: power::eval(): division by zero
+Real Field with 53 bits of precision 0 ^ CDF(0,1) -> ValueError: power::eval(): pow(0,I) is undefined
+Real Field with 53 bits of precision 0 ^ CDF(0,-1) -> ValueError: power::eval(): pow(0,I) is undefined
+Real Field with 53 bits of precision 0 ^ RDF(-1.5) -> ValueError: power::eval(): division by zero
+Real Field with 53 bits of precision 0 ^ RDF(nan) -> 0 | Integer Ring
+Real Field with 53 bits of precision 0 ^ RDF(inf) -> 0 | Integer Ring
+Real Field with 53 bits of precision 0 ^ RDF(-inf) -> ValueError: power::eval(): division by zero
+Real Field with 53 bits of precision 0 ^ 0 -> 1 | Integer Ring
+Real Field with 53 bits of precision 0 ^ 2 -> 0 | Integer Ring
+Real Field with 53 bits of precision 0 ^ -1 -> ValueError: power::eval(): division by zero
+Real Field with 53 bits of precision -0.0 ^ RDF(2.5) -> 0 | Integer Ring
+Real Field with 53 bits of precision -0.0 ^ RR(2.5) -> 0 | Integer Ring
+Real Field with 53 bits of precision -0.0 ^ RDF(0) -> 1 | Integer Ring
+Real Field with 53 bits of precision -0.0 ^ RDF(-0.0) -> 1 | Integer Ring
+Real Field with 53 bits of precision -0.0 ^ RR(0) -> 1 | Integer Ring
+Real Field with 53 bits of precision -0.0 ^ CDF(0) -> 1 | Integer Ring
+Real Field with 53 bits of precision -0.0 ^ CDF(1,1) -> 0 | Integer Ring
+Real Field with 53 bits of precision -0.0 ^ CDF(1,-1) -> 0 | Integer Ring
+Real Field with 53 bits of precision -0.0 ^ CDF(2.5) -> 0 | Integer Ring
+Real Field with 53 bits of precision -0.0 ^ CC(2,0) -> 0 | Integer Ring
+Real Field with 53 bits of precision -0.0 ^ CDF(-1,1) -> ValueError: power::eval(): division by zero
+Real Field with 53 bits of precision -0.0 ^ CDF(0,1) -> ValueError: power::eval(): pow(0,I) is undefined
+Real Field with 53 bits of precision -0.0 ^ CDF(0,-1) -> ValueError: power::eval(): pow(0,I) is undefined
+Real Field with 53 bits of precision -0.0 ^ RDF(-1.5) -> ValueError: power::eval(): division by zero
+Real Field with 53 bits of precision -0.0 ^ RDF(nan) -> 0 | Integer Ring
+Real Field with 53 bits of precision -0.0 ^ RDF(inf) -> 0 | Integer Ring
+Real Field with 53 bits of precision -0.0 ^ RDF(-inf) -> ValueError: power::eval(): division by zero
+Real Field with 53 bits of precision -0.0 ^ 0 -> 1 | Integer Ring
+Real Field with 53 bits of precision -0.0 ^ 2 -> 0 | Integer Ring
+Real Field with 53 bits of precision -0.0 ^ -1 -> ValueError: power::eval(): division by zero
+Complex Double Field 0 ^ RDF(2.5) -> 0 | Integer Ring
+Complex Double Field 0 ^ RR(2.5) -> 0 | Integer Ring
+Complex Double Field 0 ^ RDF(0) -> 1 | Integer Ring
+Complex Double Field 0 ^ RDF(-0.0) -> 1 | Integer Ring
+Complex Double Field 0 ^ RR(0) -> 1 | Integer Ring
+Complex Double Field 0 ^ CDF(0) -> 1 | Integer Ring
+Complex Double Field 0 ^ CDF(1,1) -> 0 | Integer Ring
+Complex Double Field 0 ^ CDF(1,-1) -> 0 | Integer Ring
+Complex Double Field 0 ^ CDF(2.5) -> 0 | Integer Ring
+Complex Double Field 0 ^ CC(2,0) -> 0 | Integer Ring
+Complex Double Field 0 ^ CDF(-1,1) -> ValueError: power::eval(): division by zero
+Complex Double Field 0 ^ CDF(0,1) -> ValueError: power::eval(): pow(0,I) is undefined
+Complex Double Field 0 ^ CDF(0,-1) -> ValueError: power::eval(): pow(0,I) is undefined
+Complex Double Field 0 ^ RDF(-1.5) -> ValueError: power::eval(): division by zero
+Complex Double Field 0 ^ RDF(nan) -> 0 | Integer Ring
+Complex Double Field 0 ^ RDF(inf) -> 0 | Integer Ring
+Complex Double Field 0 ^ RDF(-inf) -> ValueError: power::eval(): division by zero
+Complex Double Field 0 ^ 0 -> 1 | Integer Ring
+Complex Double Field 0 ^ 2 -> 0 | Integer Ring
+Complex Double Field 0 ^ -1 -> ValueError: power::eval(): division by zero
+Complex Double Field -0.0 ^ RDF(2.5) -> 0 | Integer Ring
+Complex Double Field -0.0 ^ RR(2.5) -> 0 | Integer Ring
+Complex Double Field -0.0 ^ RDF(0) -> 1 | Integer Ring
+Complex Double Field -0.0 ^ RDF(-0.0) -> 1 | Integer Ring
+Complex Double Field -0.0 ^ RR(0) -> 1 | Integer Ring
+Complex Double Field -0.0 ^ CDF(0) -> 1 | Integer Ring
+Complex Double Field -0.0 ^ CDF(1,1) -> 0 | Integer Ring
+Complex Double Field -0.0 ^ CDF(1,-1) -> 0 | Integer Ring
+Complex Double Field -0.0 ^ CDF(2.5) -> 0 | Integer Ring
+Complex Double Field -0.0 ^ CC(2,0) -> 0 | Integer Ring
+Complex Double Field -0.0 ^ CDF(-1,1) -> ValueError: power::eval(): division by zero
+Complex Double Field -0.0 ^ CDF(0,1) -> ValueError: power::eval(): pow(0,I) is undefined
+Complex Double Field -0.0 ^ CDF(0,-1) -> ValueError: power::eval(): pow(0,I) is undefined
+Complex Double Field -0.0 ^ RDF(-1.5) -> ValueError: power::eval(): division by zero
+Complex Double Field -0.0 ^ RDF(nan) -> 0 | Integer Ring
+Complex Double Field -0.0 ^ RDF(inf) -> 0 | Integer Ring
+Complex Double Field -0.0 ^ RDF(-inf) -> ValueError: power::eval(): division by zero
+Complex Double Field -0.0 ^ 0 -> 1 | Integer Ring
+Complex Double Field -0.0 ^ 2 -> 0 | Integer Ring
+Complex Double Field -0.0 ^ -1 -> ValueError: power::eval(): division by zero
+Complex Field with 53 bits of precision 0 ^ RDF(2.5) -> 0 | Integer Ring
+Complex Field with 53 bits of precision 0 ^ RR(2.5) -> 0 | Integer Ring
+Complex Field with 53 bits of precision 0 ^ RDF(0) -> 1 | Integer Ring
+Complex Field with 53 bits of precision 0 ^ RDF(-0.0) -> 1 | Integer Ring
+Complex Field with 53 bits of precision 0 ^ RR(0) -> 1 | Integer Ring
+Complex Field with 53 bits of precision 0 ^ CDF(0) -> 1 | Integer Ring
+Complex Field with 53 bits of precision 0 ^ CDF(1,1) -> 0 | Integer Ring
+Complex Field with 53 bits of precision 0 ^ CDF(1,-1) -> 0 | Integer Ring
+Complex Field with 53 bits of precision 0 ^ CDF(2.5) -> 0 | Integer Ring
+Complex Field with 53 bits of precision 0 ^ CC(2,0) -> 0 | Integer Ring
+Complex Field with 53 bits of precision 0 ^ CDF(-1,1) -> ValueError: power::eval(): division by zero
+Complex Field with 53 bits of precision 0 ^ CDF(0,1) -> ValueError: power::eval(): pow(0,I) is undefined
+Complex Field with 53 bits of precision 0 ^ CDF(0,-1) -> ValueError: power::eval(): pow(0,I) is undefined
+Complex Field with 53 bits of precision 0 ^ RDF(-1.5) -> ValueError: power::eval(): division by zero
+Complex Field with 53 bits of precision 0 ^ RDF(nan) -> 0 | Integer Ring
+Complex Field with 53 bits of precision 0 ^ RDF(inf) -> 0 | Integer Ring
+Complex Field with 53 bits of precision 0 ^ RDF(-inf) -> ValueError: power::eval(): division by zero
+Complex Field with 53 bits of precision 0 ^ 0 -> 1 | Integer Ring
+Complex Field with 53 bits of precision 0 ^ 2 -> 0 | Integer Ring
+Complex Field with 53 bits of precision 0 ^ -1 -> ValueError: power::eval(): division by zero
+Complex Field with 53 bits of precision -0.0 ^ RDF(2.5) -> 0 | Integer Ring
+Complex Field with 53 bits of precision -0.0 ^ RR(2.5) -> 0 | Integer Ring
+Complex Field with 53 bits of precision -0.0 ^ RDF(0) -> 1 | Integer Ring
+Complex Field with 53 bits of precision -0.0 ^ RDF(-0.0) -> 1 | Integer Ring
+Complex Field with 53 bits of precision -0.0 ^ RR(0) -> 1 | Integer Ring
+Complex Field with 53 bits of precision -0.0 ^ CDF(0) -> 1 | Integer Ring
+Complex Field with 53 bits of precision -0.0 ^ CDF(1,1) -> 0 | Integer Ring
+Complex Field with 53 bits of precision -0.0 ^ CDF(1,-1) -> 0 | Integer Ring
+Complex Field with 53 bits of precision -0.0 ^ CDF(2.5) -> 0 | Integer Ring
+Complex Field with 53 bits of precision -0.0 ^ CC(2,0) -> 0 | Integer Ring
+Complex Field with 53 bits of precision -0.0 ^ CDF(-1,1) -> ValueError: power::eval(): division by zero
+Complex Field with 53 bits of precision -0.0 ^ CDF(0,1) -> ValueError: power::eval(): pow(0,I) is undefined
+Complex Field with 53 bits of precision -0.0 ^ CDF(0,-1) -> ValueError: power::eval(): pow(0,I) is undefined
+Complex Field with 53 bits of precision -0.0 ^ RDF(-1.5) -> ValueError: power::eval(): division by zero
+Complex Field with 53 bits of precision -0.0 ^ RDF(nan) -> 0 | Integer Ring
+Complex Field with 53 bits of precision -0.0 ^ RDF(inf) -> 0 | Integer Ring
+Complex Field with 53 bits of precision -0.0 ^ RDF(-inf) -> ValueError: power::eval(): division by zero
+Complex Field with 53 bits of precision -0.0 ^ 0 -> 1 | Integer Ring
+Complex Field with 53 bits of precision -0.0 ^ 2 -> 0 | Integer Ring
+Complex Field with 53 bits of precision -0.0 ^ -1 -> ValueError: power::eval(): division by zero
+0 0 1

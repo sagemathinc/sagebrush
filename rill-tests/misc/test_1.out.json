@@ -1,0 +1,175 @@
+{
+ "cases": [
+  {
+   "id": "misc-1",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"integer\"\n[1] \"numeric\"\n[1] \"character\"\n[1] \"logical\"\n[1] \"NULL\"\n[1] \"list\"\n[1] \"function\"\n"
+  },
+  {
+   "id": "misc-2",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"integer\"\n[1] \"double\"\n[1] \"closure\"\n[1] TRUE\n[1] TRUE\n"
+  },
+  {
+   "id": "misc-3",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 3.5\n[1] 3\n[1] \"1\" \"2\" \"3\"\n[1]   NA TRUE TRUE\n"
+  },
+  {
+   "id": "misc-4",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] TRUE\n[1] TRUE\n"
+  },
+  {
+   "id": "misc-5",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 4 5 6 7\n"
+  },
+  {
+   "id": "misc-6",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 5 4\n[[1]]\n[1] \"b\"\n\n[[2]]\n[1] 1\n\n"
+  },
+  {
+   "id": "misc-7",
+   "status": 0,
+   "stderr": "",
+   "stdout": " [1] 10  9  8  7  6  5  4  3  2  1\n"
+  },
+  {
+   "id": "misc-8",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1 2 3\n"
+  },
+  {
+   "id": "misc-9",
+   "status": 0,
+   "stderr": "",
+   "stdout": ""
+  },
+  {
+   "id": "misc-10",
+   "status": 0,
+   "stderr": "",
+   "stdout": "a b \n1 2 \n"
+  },
+  {
+   "id": "misc-11",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"banana\"\n[1] \"a\" \"A\" \"b\" \"B\"\n"
+  },
+  {
+   "id": "misc-12",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 120\n[1] 1e+15\n[1] 1e+16\n[1] 0.1234568\n"
+  },
+  {
+   "id": "misc-13",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1.123457e+00 1.234561e+05\n"
+  },
+  {
+   "id": "misc-14",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 162.8895\n"
+  },
+  {
+   "id": "misc-15",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1e+05 1e-05\n"
+  },
+  {
+   "id": "misc-16",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 2\n"
+  },
+  {
+   "id": "misc-17",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 5.5\n[1] 1.5\n[1] 3\n"
+  },
+  {
+   "id": "misc-18",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] NA\n"
+  },
+  {
+   "id": "misc-19",
+   "status": 1,
+   "stderr": "Error: bad input\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "misc-20",
+   "status": 0,
+   "stderr": "Warning message:\nIn log(-1) : NaNs produced\n",
+   "stdout": "[1] NaN\n"
+  },
+  {
+   "id": "misc-21",
+   "status": 0,
+   "stderr": "Warning message:\nNAs introduced by coercion \n",
+   "stdout": "[1] NA\n"
+  },
+  {
+   "id": "misc-22",
+   "status": 0,
+   "stderr": "",
+   "stdout": " [1] 7 8 5 5 3 4 4 6 9 7 8 8\n"
+  },
+  {
+   "id": "misc-23",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] FALSE\n[1] TRUE\n"
+  },
+  {
+   "id": "misc-24",
+   "status": 0,
+   "stderr": "",
+   "stdout": "     [,1] [,2]\n[1,]  1.5    3\n[2,]   NA    4\n"
+  },
+  {
+   "id": "misc-25",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.5 1.5 2.5\n"
+  },
+  {
+   "id": "misc-26",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] TRUE\n"
+  },
+  {
+   "id": "misc-27",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"2024-04-14\"\n"
+  },
+  {
+   "id": "misc-28",
+   "status": 0,
+   "stderr": "",
+   "stdout": "\nz y x \n3 2 1 \n"
+  }
+ ],
+ "file": "rill-tests/misc/test_1.R",
+ "format": "rill-out",
+ "v": 1
+}

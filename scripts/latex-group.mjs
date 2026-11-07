@@ -16,6 +16,7 @@ export const LATEX_LAZY = {
   DOC: "dist/sagebrush-latex-doc.js",
   EXAMPLES: "dist/sagebrush-latex-examples.js",
   BEAMER: "dist/sagebrush-latex-beamer.js",
+  RUN: "dist/sagebrush-latex-run.js",
 };
 // (232 KiB / 78 KiB: William, 2026-11-03, "OK 232/78", for the open editor following a change made elsewhere (#599);
 //  224 KiB / 76 KiB: @sagebrush's ruling of 2026-11-02, for the Beamer track (William: LaTeX and beamer the top
@@ -61,6 +62,13 @@ export const LATEX_LAZY_CAPS = {
   //  the review-required fixes FURN644-SAGE-1, FURN644-FRAME-NO-1 and BEAMER644-FURN-1 (7,566 / 3,312), about 7.6% room
   //  on each; lazy: no growth for other documents)
   BEAMER: { label: "the LaTeX beamer chunk", raw: 8 * 1024, gzip: 3.5 * 1024 },
+  // (Run's code: web/latex/run-core.mjs, fetched on the first Run (first-use code: the editor opens without it). Out of
+  //  the group so save-as-you-type (#551, eager by nature) fits under the group's cap without a raise (daybreak2, Nov 7:
+  //  a lazy split, not a raise). 12 KiB / 5.25 KiB: daybreak2's ruling, Nov 7, on 11,330 / 4,804 measured at master
+  //  59d5ec95, about 8% / 12% room. 15.5 KiB / 6.5 KiB: daybreak2's ruling, Nov 7, for #804 (W01's record of what a
+  //  Run imported, its own Run growth): 14,552 / 6,066 measured at #804's head 9759eac5 (master fd24862b merged),
+  //  +1,320 / +590, about 9.1% / 9.7% room)
+  RUN: { label: "the LaTeX Run chunk", raw: 15.5 * 1024, gzip: 6.5 * 1024 },
 };
 
 /** Each lazy chunk of `files`, measured against its own cap; one not in this tree: present false (and not ok). */

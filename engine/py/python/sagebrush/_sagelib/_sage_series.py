@@ -19,7 +19,121 @@ def _sa():
 _RINGS = {}
 
 
-def PowerSeriesRing(base, name=None, default_prec=20, names=None, sparse=False, **kwds):
+def _series_ring_from_list(base, names):
+    """K[['x']]: the power series ring in x, each name checked as Sage checks
+    it (an entry 'x,y' is two names); several names (K[['x', 'y']], K[['x,y']])
+    are a multivariate power series ring, not here yet."""
+    import _sage_poly
+    flat = []
+    for t in names:
+        flat += [u.strip() for u in str(t).split(",")] if "," in str(t) else [str(t)]
+    names = _sage_poly.ring_names(flat) if flat else ["x"]
+    if len(names) > 1:
+        raise NotImplementedError("multivariate power series rings are not available in sagebrush yet")
+    return PowerSeriesRing(base, names[0])
+
+
+def _check_generated(name):
+    """Sage's check of a name it makes from a count (x0, x1, ...): nonempty, only
+    letters, digits and _, a letter first (all digits is "does not start with a
+    letter" here: LaurentSeriesRing(QQ, 2, '12') names '120')."""
+    if not name:
+        raise ValueError("variable name must be nonempty")
+    if not name.replace("_", "").isalnum():
+        raise ValueError("variable name %r is not alphanumeric" % (name,))
+    if not name[0].isalpha():
+        raise ValueError("variable name %r does not start with a letter" % (name,))
+
+
+def _multi_names(names):
+    """Several names as Sage reads them, each checked: a string split at its
+    commas ('x, y'), a list or tuple entry by entry (['x', 'y,z'] fails on
+    'y,z'), no name twice."""
+    flat = [t.strip() for t in names.split(",")] if isinstance(names, str) else [str(t) for t in names]
+    for t in flat:
+        _check_generated(t)
+    seen = set()
+    for t in flat:
+        if t in seen:
+            raise ValueError("variable name %r appears more than once" % (t,))
+        seen.add(t)
+    return flat
+
+
+def _one_name(v):
+    """The one name of a univariate series ring, as Sage reads it: a list or
+    tuple must hold exactly one, anything else is read as its string
+    (LaurentSeriesRing(QQ, 2) fails on '2')."""
+    if isinstance(v, (list, tuple)):
+        if len(v) != 1:
+            raise IndexError("the number of names must equal the number of generators")
+        v = v[0]
+    v = str(v)
+    _check_generated(v)
+    return v
+
+
+def _first_counted(n, src, laurent):
+    """The first name a count n and a string src give a series ring, checked as
+    Sage checks it, WITHOUT listing the n names (astra's and daybreak3's
+    SERIES-NAME-WORK-3): src + '0', src + '1', ... are all good exactly when
+    src + '0' is, the first to fail.  A Laurent series ring is in that name;
+    a power series ring with a count is multivariate, refused by the caller."""
+    # (as Sage 10.10, probed for counts 0 to 3 and -1 to -100: names after
+    # commas are each checked, then a count of 0 or more must match them; a
+    # count of 0 checks no other name; a count of 1 or less takes one name, checked,
+    # and a Laurent series ring over it then fails to coerce)
+    if "," in src:
+        parts = _multi_names(src)
+        if n >= 0 and len(parts) != n:
+            raise IndexError("the number of names must equal the number of generators")
+        return parts[0]
+    if n == 0:
+        # (Sage makes a ring that cannot print itself: L39)
+        if laurent:
+            raise NotImplementedError("LaurentSeriesRing with a count of 0 is not available in sagebrush yet")
+        return src
+    if n >= 2:
+        if len(src) == n and src.isalpha():
+            return src[0]
+        _check_generated(src + "0")
+        return src + "0"
+    _check_generated(src)
+    if laurent:
+        raise TypeError("Input does not coerce to any of the expected rings.")
+    return src
+
+
+def _series_names(name, arg2, names, default_prec, laurent=False):
+    """(first name, multivariate, default_prec): the arguments of a series
+    ring read as Sage 10.10 reads them (probed as a black box), every name
+    checked before any ring is built.  names= wins over name; several names
+    ('x,y', ['x', 'y']) are a multivariate ring, arg2 then its count; a count
+    before a string (PowerSeriesRing(QQ, 2, 'x')) is one too, only its first
+    name made, never the list; otherwise one name, and a count in name is
+    the default precision (LaurentSeriesRing(QQ, 2, names='x'))."""
+    if names is None:
+        names = name if name is not None else "x"
+    if (isinstance(names, (list, tuple)) and len(names) > 1) or (isinstance(names, str) and "," in names):
+        flat = _multi_names(names)
+        if isinstance(arg2, int) and arg2 >= 0 and len(flat) != arg2:
+            raise IndexError("the number of names must equal the number of generators")
+        return flat[0], True, (12 if default_prec is None else default_prec)
+    if isinstance(arg2, str) and isinstance(names, int):
+        return _first_counted(names, arg2, laurent), True, (12 if default_prec is None else default_prec)
+    if arg2 is not None:
+        default_prec = arg2
+    elif default_prec is None:
+        default_prec = 20
+    if isinstance(name, int):
+        default_prec = name
+    first = _one_name(names)
+    if default_prec < 0:
+        raise ValueError("default_prec (= %s) must be nonnegative" % (default_prec,))
+    return first, False, default_prec
+
+
+def PowerSeriesRing(base, name=None, arg2=None, names=None, sparse=False, default_prec=None, **kwds):
     """The ring of power series over base.
 
     EXAMPLES::
@@ -29,19 +143,17 @@ def PowerSeriesRing(base, name=None, default_prec=20, names=None, sparse=False, 
         sage: f = T + 3*T^2 + T^3 + O(T^4); f^3, 1/f
         (T^3 + 2*T^4 + 2*T^5 + O(T^6), T^-1 + 4 + T + O(T^2))
     """
-    if names is not None:
-        name = names[0] if isinstance(names, (list, tuple)) else names
-    if name is None:
-        name = "x"
-    if isinstance(name, (list, tuple)):
-        name = name[0]
+    name, multi, default_prec = _series_names(name, arg2, names, default_prec)
+    if multi:
+        # (Sage: a multivariate power series ring, PowerSeriesRing(QQ, 'x,y') or (QQ, 1, 'x'))
+        raise NotImplementedError("multivariate power series rings are not available in sagebrush yet")
     key = ("P", id(base), str(name), int(default_prec))
     if key not in _RINGS:
         _RINGS[key] = SeriesRing_(base, str(name), int(default_prec), False)
     return _RINGS[key]
 
 
-def LaurentSeriesRing(base, name=None, default_prec=20, names=None, sparse=False, **kwds):
+def LaurentSeriesRing(base, name=None, arg2=None, names=None, sparse=False, default_prec=None, **kwds):
     """The ring of Laurent series over base.
 
     EXAMPLES::
@@ -51,12 +163,9 @@ def LaurentSeriesRing(base, name=None, default_prec=20, names=None, sparse=False
         sage: 1/(1 - x) + O(x^10)
         1 + x + x^2 + x^3 + x^4 + x^5 + x^6 + x^7 + x^8 + x^9 + O(x^10)
     """
-    if names is not None:
-        name = names[0] if isinstance(names, (list, tuple)) else names
-    if name is None:
-        name = "x"
-    if isinstance(name, (list, tuple)):
-        name = name[0]
+    # (as Sage: every name is checked, and the ring is in the first one,
+    # LaurentSeriesRing(QQ, 'x,y') in x and (QQ, 2, 'x') in x0)
+    name, multi, default_prec = _series_names(name, arg2, names, default_prec, laurent=True)
     key = ("L", id(base), str(name), int(default_prec))
     if key not in _RINGS:
         _RINGS[key] = SeriesRing_(base, str(name), int(default_prec), True)
@@ -89,6 +198,10 @@ class SeriesRing_:
         if _is_padic(self._base) and not self._base._field:
             # stay in Zp: b is a unit there (inverse() checks)
             return a * self._base(b).inverse_of_unit()
+        if type(b).__name__ == "PolynomialInexact" and b.degree() == 0:
+            # (a number of the base RR['a']: a coefficient over it times the number's
+            # inverse, as Sage's series over RR['a'] divided by RR(1.5))
+            return a / b[0]
         return a / b
 
     def __repr__(self):
@@ -679,9 +792,32 @@ class Series:
         return [self._v + i for i, c in enumerate(self._c) if not _is_zero(c)]
 
     def __getitem__(self, n):
+        """The coefficient of x^n, as Sage: in the base ring (over QQ an
+        element of QQ), and an IndexError at or past the precision, where it
+        is not known.
+
+        EXAMPLES::
+
+            sage: R.<t> = QQ[[]]; f = 1 + 2*t + O(t^3); f[1], f[1].parent(), f[2]
+            (2, Rational Field, 0)
+            sage: f[3]
+            Traceback (most recent call last):
+            ...
+            IndexError: coefficient not known
+        """
         if isinstance(n, slice):
             raise NotImplementedError("slices of series")
         n = int(n)
+        if self._prec is not None and n >= self._prec:
+            raise IndexError("coefficient not known")
+        c = self._coef(n)
+        if self._R._base is _sa().QQ:
+            from _sage_poly import _qq_coeff
+            return _qq_coeff(c)
+        return c
+
+    def _coef(self, n):
+        # the coefficient of x^n, 0 past the known ones (for the code here)
         k = n - self._v
         if 0 <= k < len(self._c):
             return _out(self._c[k])
@@ -1356,7 +1492,7 @@ class Series:
             2*t + 1
         """
         from _sage_poly import PolynomialRing
-        P = PolynomialRing(self._R._base, self._R._name)
+        P = PolynomialRing(self._R._base, self._R._name, _internal=True)
         n = prec if prec is not None else (self._prec if self._prec is not None else self._v + len(self._c))
         if self._R._laurent:
             # a Laurent series: the exact Laurent series of the terms below n
@@ -1484,7 +1620,7 @@ class Series:
             raise ValueError("can only take the exponential of a series with constant term 0 and no negative powers")
         p = self._prec if self._prec is not None else (prec or R._dp)
         # f' = g' f, f(0) = 1
-        g = [self[i] for i in range(p)]
+        g = [self._coef(i) for i in range(p)]
         f = [R._zero()] * p
         f[0] = R._one()
         for n in range(1, p):
@@ -1562,7 +1698,7 @@ class Series:
         pw = Series(R, 0, [R._one()], p)
         for k in range(0, p):
             if k >= self._v:
-                c = self[k]
+                c = self._coef(k)
                 if not _is_zero(c):
                     res = res + pw * R._base(c)
             pw = (pw * g).add_bigoh(p)
@@ -1591,7 +1727,7 @@ class Series:
             pw = x.inverse() ** (-first) if first < 0 else Series(x._R, 0, [x._R._one()], None)
             res = Series(pw._R, 0, [], p)
             for k in range(first, self._v + len(self._c)):
-                c = self[k]
+                c = self._coef(k)
                 if not _is_zero(c):
                     res = res + pw * x._R._base(c)
                 if k + 1 < self._v + len(self._c):
@@ -1604,6 +1740,10 @@ class Series:
         s = 0
         for i, c in enumerate(self._c):
             s = s + _out(c) * x ** (self._v + i)
+        if isinstance(s, int) and not isinstance(s, bool) and self._R._base is _sa().QQ:
+            # (an integer value over QQ is an element of QQ, as Sage)
+            from _sage_poly import _qq_coeff
+            return _qq_coeff(s)
         return s
 
 

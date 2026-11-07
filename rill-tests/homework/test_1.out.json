@@ -1,0 +1,667 @@
+{
+ "cases": [
+  {
+   "id": "h-1",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 169.8333\n[1] 7.73089\n[1] 6\n"
+  },
+  {
+   "id": "h-2",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 12.26\n[1] 3.173\n"
+  },
+  {
+   "id": "h-3",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 85 92 88 95\n"
+  },
+  {
+   "id": "h-4",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.5714286\n"
+  },
+  {
+   "id": "h-5",
+   "status": 0,
+   "stderr": "",
+   "stdout": " [1]  2  4  6  8 10 12 14 16 18 20\n"
+  },
+  {
+   "id": "h-6",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] -1  0  1\n"
+  },
+  {
+   "id": "h-7",
+   "status": 0,
+   "stderr": "",
+   "stdout": "   Min. 1st Qu.  Median    Mean 3rd Qu.    Max. \n  2.900   3.500   4.600   4.450   5.025   6.300 \n"
+  },
+  {
+   "id": "h-8",
+   "status": 0,
+   "stderr": "",
+   "stdout": " 90% \n12.8 \n"
+  },
+  {
+   "id": "h-9",
+   "status": 0,
+   "stderr": "",
+   "stdout": "x\n1 3 5 7 9 \n1 2 1 3 1 \n"
+  },
+  {
+   "id": "h-10",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"red\"\n"
+  },
+  {
+   "id": "h-11",
+   "status": 0,
+   "stderr": "",
+   "stdout": "\n   a    b \n0.75 0.25 \n"
+  },
+  {
+   "id": "h-12",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.1 0.2 0.3 0.4\n"
+  },
+  {
+   "id": "h-13",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.1672898\n"
+  },
+  {
+   "id": "h-14",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.512 0.384 0.096 0.008\n"
+  },
+  {
+   "id": "h-15",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.3827828\n"
+  },
+  {
+   "id": "h-16",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.6826895\n"
+  },
+  {
+   "id": "h-17",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 664.4854\n"
+  },
+  {
+   "id": "h-18",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.0531\n"
+  },
+  {
+   "id": "h-19",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] -2.262157  2.262157\n"
+  },
+  {
+   "id": "h-20",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 98.04984 98.95016\n"
+  },
+  {
+   "id": "h-21",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.2424239\n"
+  },
+  {
+   "id": "h-22",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.25\n"
+  },
+  {
+   "id": "h-23",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.6321206\n"
+  },
+  {
+   "id": "h-24",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.05010606\n"
+  },
+  {
+   "id": "h-25",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.1089\n"
+  },
+  {
+   "id": "h-26",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 15.85 11.14 16.84 19.93\n"
+  },
+  {
+   "id": "h-27",
+   "status": 0,
+   "stderr": "",
+   "stdout": "   Min. 1st Qu.  Median    Mean 3rd Qu.    Max. \n  43.72   46.86   48.11   49.61   50.61   58.56 \n"
+  },
+  {
+   "id": "h-28",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.945\n"
+  },
+  {
+   "id": "h-29",
+   "status": 0,
+   "stderr": "",
+   "stdout": "(Intercept)           x \n -3.0451977   0.9661017 \n"
+  },
+  {
+   "id": "h-30",
+   "status": 0,
+   "stderr": "",
+   "stdout": "\nCall:\nlm(formula = y ~ x)\n\nResiduals:\n      1       2       3       4       5       6 \n 0.2147  0.2825  0.3164 -1.6497  0.3842  0.4520 \n\nCoefficients:\n            Estimate Std. Error t value Pr(>|t|)   \n(Intercept)  -3.0452     1.4689  -2.073  0.10685   \nx             0.9661     0.1672   5.778  0.00446 **\n---\nSignif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1\n\nResidual standard error: 0.9082 on 4 degrees of freedom\nMultiple R-squared:  0.893,\tAdjusted R-squared:  0.8662 \nF-statistic: 33.38 on 1 and 4 DF,  p-value: 0.004457\n\n"
+  },
+  {
+   "id": "h-31",
+   "status": 0,
+   "stderr": "",
+   "stdout": "       1 \n7.581921 \n"
+  },
+  {
+   "id": "h-32",
+   "status": 0,
+   "stderr": "",
+   "stdout": "\nCall:\nlm(formula = mpg ~ hp, data = mtcars)\n\nResiduals:\n    Min      1Q  Median      3Q     Max \n-5.7121 -2.1122 -0.8854  1.5819  8.2360 \n\nCoefficients:\n            Estimate Std. Error t value Pr(>|t|)    \n(Intercept) 30.09886    1.63392  18.421  < 2e-16 ***\nhp          -0.06823    0.01012  -6.742 1.79e-07 ***\n---\nSignif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1\n\nResidual standard error: 3.863 on 30 degrees of freedom\nMultiple R-squared:  0.6024,\tAdjusted R-squared:  0.5892 \nF-statistic: 45.46 on 1 and 30 DF,  p-value: 1.788e-07\n\n"
+  },
+  {
+   "id": "h-33",
+   "status": 0,
+   "stderr": "",
+   "stdout": "             Estimate Std. Error    t value     Pr(>|t|)\n(Intercept) 19.746223  5.2520617   3.759709 7.650466e-04\nwt          -5.047982  0.4839974 -10.429771 2.518948e-11\nqsec         0.929198  0.2650173   3.506179 1.499883e-03\n"
+  },
+  {
+   "id": "h-34",
+   "status": 0,
+   "stderr": "",
+   "stdout": "\nCall:\nlm(formula = Sepal.Length ~ Petal.Length, data = iris)\n\nCoefficients:\n (Intercept)  Petal.Length  \n      4.3066        0.4089  \n\n"
+  },
+  {
+   "id": "h-35",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.76\n"
+  },
+  {
+   "id": "h-36",
+   "status": 0,
+   "stderr": "",
+   "stdout": "                2.5 %    97.5 %\n(Intercept) 33.450500 41.119753\nwt          -6.486308 -4.202635\n"
+  },
+  {
+   "id": "h-37",
+   "status": 0,
+   "stderr": "",
+   "stdout": "\n\tOne Sample t-test\n\ndata:  mtcars$mpg\nt = 0.08506, df = 31, p-value = 0.9328\nalternative hypothesis: true mean is not equal to 20\n95 percent confidence interval:\n 17.91768 22.26357\nsample estimates:\nmean of x \n 20.09062 \n\n"
+  },
+  {
+   "id": "h-38",
+   "status": 0,
+   "stderr": "",
+   "stdout": "\n\tWelch Two Sample t-test\n\ndata:  mpg by am\nt = -3.7671, df = 18.332, p-value = 0.001374\nalternative hypothesis: true difference in means between group 0 and group 1 is not equal to 0\n95 percent confidence interval:\n -11.280194  -3.209684\nsample estimates:\nmean in group 0 mean in group 1 \n       17.14737        24.39231 \n\n"
+  },
+  {
+   "id": "h-39",
+   "status": 0,
+   "stderr": "",
+   "stdout": "\n\tWelch Two Sample t-test\n\ndata:  a and b\nt = -3.2831, df = 6.8966, p-value = 0.006858\nalternative hypothesis: true difference in means is less than 0\n95 percent confidence interval:\n      -Inf -2.698435\nsample estimates:\nmean of x mean of y \n     25.4      31.8 \n\n"
+  },
+  {
+   "id": "h-40",
+   "status": 0,
+   "stderr": "",
+   "stdout": "     t \n-3.283 \n"
+  },
+  {
+   "id": "h-41",
+   "status": 0,
+   "stderr": "",
+   "stdout": "\n\tPearson's Chi-squared test\n\ndata:  tab\nX-squared = 11.429, df = 1, p-value = 0.0007232\n\n"
+  },
+  {
+   "id": "h-42",
+   "status": 0,
+   "stderr": "",
+   "stdout": "\n\tChi-squared test for given probabilities\n\ndata:  observed\nX-squared = 1.4583, df = 2, p-value = 0.4823\n\n"
+  },
+  {
+   "id": "h-43",
+   "status": 0,
+   "stderr": "",
+   "stdout": "\n\tExact binomial test\n\ndata:  60 and 100\nnumber of successes = 60, number of trials = 100, p-value = 0.05689\nalternative hypothesis: true probability of success is not equal to 0.5\n95 percent confidence interval:\n 0.4972092 0.6967052\nsample estimates:\nprobability of success \n                   0.6 \n\n"
+  },
+  {
+   "id": "h-44",
+   "status": 0,
+   "stderr": "",
+   "stdout": "\n\t1-sample proportions test without continuity correction\n\ndata:  30 out of 80, null probability 0.5\nX-squared = 5, df = 1, p-value = 0.02535\nalternative hypothesis: true p is not equal to 0.5\n95 percent confidence interval:\n 0.2769418 0.4845127\nsample estimates:\n    p \n0.375 \n\n"
+  },
+  {
+   "id": "h-45",
+   "status": 0,
+   "stderr": "",
+   "stdout": "\n\tPearson's product-moment correlation\n\ndata:  mtcars$mpg and mtcars$wt\nt = -9.559, df = 30, p-value = 1.294e-10\nalternative hypothesis: true correlation is not equal to 0\n95 percent confidence interval:\n -0.9338264 -0.7440872\nsample estimates:\n       cor \n-0.8676594 \n\n"
+  },
+  {
+   "id": "h-46",
+   "status": 0,
+   "stderr": "",
+   "stdout": "  3   4   5 \n180  94 175 \n"
+  },
+  {
+   "id": "h-47",
+   "status": 0,
+   "stderr": "",
+   "stdout": "  cyl      mpg\n1   4 26.66364\n2   6 19.74286\n3   8 15.10000\n"
+  },
+  {
+   "id": "h-48",
+   "status": 0,
+   "stderr": "",
+   "stdout": "   \n     3  4  5\n  0 15  4  0\n  1  0  8  5\n"
+  },
+  {
+   "id": "h-49",
+   "status": 0,
+   "stderr": "",
+   "stdout": "\n    setosa versicolor  virginica \n        50         50         50 \n"
+  },
+  {
+   "id": "h-50",
+   "status": 0,
+   "stderr": "",
+   "stdout": "Sepal.Length  Sepal.Width Petal.Length  Petal.Width \n    5.843333     3.057333     3.758000     1.199333 \n"
+  },
+  {
+   "id": "h-51",
+   "status": 0,
+   "stderr": "",
+   "stdout": "Sepal.Length  Sepal.Width Petal.Length  Petal.Width \n    5.843333     3.057333     3.758000     1.199333 \n"
+  },
+  {
+   "id": "h-52",
+   "status": 0,
+   "stderr": "",
+   "stdout": "  mpg    hp \n 6.03 68.56 \n"
+  },
+  {
+   "id": "h-53",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 6\n"
+  },
+  {
+   "id": "h-54",
+   "status": 0,
+   "stderr": "",
+   "stdout": "                mpg cyl\nFiat 128       32.4   4\nHonda Civic    30.4   4\nToyota Corolla 33.9   4\nLotus Europa   30.4   4\n"
+  },
+  {
+   "id": "h-55",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 33.9 32.4 30.4 30.4 27.3\n"
+  },
+  {
+   "id": "h-56",
+   "status": 0,
+   "stderr": "",
+   "stdout": "  student exam1 exam2  avg\n1       A    80    85 82.5\n2       B    75    70 72.5\n3       C    92    95 93.5\n4       D    68    72 70.0\n"
+  },
+  {
+   "id": "h-57",
+   "status": 0,
+   "stderr": "",
+   "stdout": "  x   y\n2 2 5.1\n"
+  },
+  {
+   "id": "h-58",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 2 3\n"
+  },
+  {
+   "id": "h-59",
+   "status": 0,
+   "stderr": "",
+   "stdout": "'data.frame':\t4 obs. of  2 variables:\n $ g: Factor w/ 2 levels \"ctl\",\"trt\": 1 2 1 2\n $ w: num  4.17 4.81 5.58 4.17\n"
+  },
+  {
+   "id": "h-60",
+   "status": 0,
+   "stderr": "",
+   "stdout": "   g           w        \n ctl:2   Min.   :4.170  \n trt:2   1st Qu.:4.170  \n         Median :4.490  \n         Mean   :4.683  \n         3rd Qu.:5.003  \n         Max.   :5.580  \n"
+  },
+  {
+   "id": "h-61",
+   "status": 0,
+   "stderr": "",
+   "stdout": "  Sepal.Length    Sepal.Width     Petal.Length    Petal.Width   \n Min.   :4.300   Min.   :2.000   Min.   :1.000   Min.   :0.100  \n 1st Qu.:5.100   1st Qu.:2.800   1st Qu.:1.600   1st Qu.:0.300  \n Median :5.800   Median :3.000   Median :4.350   Median :1.300  \n Mean   :5.843   Mean   :3.057   Mean   :3.758   Mean   :1.199  \n 3rd Qu.:6.400   3rd Qu.:3.300   3rd Qu.:5.100   3rd Qu.:1.800  \n Max.   :7.900   Max.   :4.400   Max.   :6.900   Max.   :2.500  \n       Species  \n setosa    :50  \n versicolor:50  \n virginica :50  \n                \n                \n                \n"
+  },
+  {
+   "id": "h-62",
+   "status": 0,
+   "stderr": "",
+   "stdout": "'data.frame':\t32 obs. of  3 variables:\n $ mpg : num  21 21 22.8 21.4 18.7 18.1 14.3 24.4 22.8 19.2 ...\n $ cyl : num  6 6 4 6 8 6 8 4 4 6 ...\n $ disp: num  160 160 108 258 360 ...\n"
+  },
+  {
+   "id": "h-63",
+   "status": 0,
+   "stderr": "",
+   "stdout": "f\nA B C \n3 2 1 \n"
+  },
+  {
+   "id": "h-64",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] low  high med  low \nLevels: low < med < high\n"
+  },
+  {
+   "id": "h-65",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1]  TRUE FALSE  TRUE  TRUE\n"
+  },
+  {
+   "id": "h-66",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] young  middle middle old    old    young \nLevels: young middle old\n"
+  },
+  {
+   "id": "h-67",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 7\n[1] 2\n"
+  },
+  {
+   "id": "h-68",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1]  4  0  7  0 10\n"
+  },
+  {
+   "id": "h-69",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1]  TRUE FALSE FALSE\n"
+  },
+  {
+   "id": "h-70",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1]   2  40 600\n"
+  },
+  {
+   "id": "h-71",
+   "status": 0,
+   "stderr": "",
+   "stdout": "     [,1] [,2] [,3]\n[1,]    1    2    3\n[2,]    4    5    6\n"
+  },
+  {
+   "id": "h-72",
+   "status": 0,
+   "stderr": "",
+   "stdout": "     [,1]         [,2]\n[1,]    1 6.661338e-16\n[2,]    0 1.000000e+00\n"
+  },
+  {
+   "id": "h-73",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.2 0.6\n"
+  },
+  {
+   "id": "h-74",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 3 2\n     [,1] [,2] [,3]\n[1,]    2    6   10\n[2,]    4    8   12\n"
+  },
+  {
+   "id": "h-75",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1]  1  4  9 16 25 36\n"
+  },
+  {
+   "id": "h-76",
+   "status": 0,
+   "stderr": "",
+   "stdout": " [1]  1  1  2  3  5  8 13 21 34 55\n"
+  },
+  {
+   "id": "h-77",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"A\" \"B\" \"C\"\n"
+  },
+  {
+   "id": "h-78",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 19.86\n"
+  },
+  {
+   "id": "h-79",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1.290994\n"
+  },
+  {
+   "id": "h-80",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"Mean: 3.46\"\n"
+  },
+  {
+   "id": "h-81",
+   "status": 0,
+   "stderr": "",
+   "stdout": "The answer is 42 \n"
+  },
+  {
+   "id": "h-82",
+   "status": 0,
+   "stderr": "",
+   "stdout": "3.142\n"
+  },
+  {
+   "id": "h-83",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"n = 10\"\n"
+  },
+  {
+   "id": "h-84",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"7 of 20 (35.0%)\"\n"
+  },
+  {
+   "id": "h-85",
+   "status": 0,
+   "stderr": "",
+   "stdout": "  a   b \n3.0 4.5 \n"
+  },
+  {
+   "id": "h-86",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1]   0  25  50  75 100\n"
+  },
+  {
+   "id": "h-87",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 9 6 5\n"
+  },
+  {
+   "id": "h-88",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1]  5.0  7.5 10.0\n"
+  },
+  {
+   "id": "h-89",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1.000 1.649 2.718 4.482 7.389\n"
+  },
+  {
+   "id": "h-90",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1]  3  6  9 12 15 18\n"
+  },
+  {
+   "id": "h-91",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"S\"\n"
+  },
+  {
+   "id": "h-92",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 4 6 4\n"
+  },
+  {
+   "id": "h-93",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] TRUE\n[1] TRUE\n"
+  },
+  {
+   "id": "h-94",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 3\n"
+  },
+  {
+   "id": "h-95",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 36.324\n"
+  },
+  {
+   "id": "h-96",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] -1.2649111 -0.6324555  0.0000000  0.6324555  1.2649111\n"
+  },
+  {
+   "id": "h-97",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 100\n"
+  },
+  {
+   "id": "h-98",
+   "status": 0,
+   "stderr": "",
+   "stdout": "\n    4     6     8 \n0.344 0.219 0.438 \n"
+  },
+  {
+   "id": "h-99",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.246\n"
+  },
+  {
+   "id": "h-100",
+   "status": 0,
+   "stderr": "",
+   "stdout": "    setosa versicolor  virginica \n     5.006      5.936      6.588 \n"
+  },
+  {
+   "id": "h-101",
+   "status": 0,
+   "stderr": "",
+   "stdout": "\nCall:  glm(formula = vs ~ mpg, family = binomial, data = mtcars)\n\nCoefficients:\n(Intercept)          mpg  \n    -8.8331       0.4304  \n\nDegrees of Freedom: 31 Total (i.e. Null);  30 Residual\nNull Deviance:\t    43.86 \nResidual Deviance: 25.53 \tAIC: 29.53\n"
+  },
+  {
+   "id": "h-102",
+   "status": 0,
+   "stderr": "",
+   "stdout": "(Intercept)         mpg \n    -8.8331      0.4304 \n"
+  },
+  {
+   "id": "h-103",
+   "status": 0,
+   "stderr": "",
+   "stdout": "Analysis of Variance Table\n\nResponse: y\n          Df Sum Sq Mean Sq F value    Pr(>F)    \nx          1 41.105  41.105  1504.5 1.962e-08 ***\nResiduals  6  0.164   0.027                      \n---\nSignif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1\n"
+  },
+  {
+   "id": "h-104",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 85\n"
+  },
+  {
+   "id": "h-105",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"non-pos\" \"non-pos\" \"pos\"    \n"
+  },
+  {
+   "id": "h-106",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 6\n"
+  },
+  {
+   "id": "h-107",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] FALSE\n"
+  },
+  {
+   "id": "h-108",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1.00 1.25 1.50 1.75 2.00\n"
+  },
+  {
+   "id": "h-109",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1]    0.50  100.00 2500.75\n"
+  },
+  {
+   "id": "h-110",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.001 0.002 1.000\n"
+  }
+ ],
+ "file": "rill-tests/homework/test_1.R",
+ "format": "rill-out",
+ "v": 1
+}
