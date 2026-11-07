@@ -1735,6 +1735,8 @@ class Polyhedron_:
         if self.dim() == 1 and not edges:
             g += sa.line(pts, color="blue")
         g += sa.points(pts, color="black", size=20)
+        # (a 2d one's aspect ratio is its polygon's, 1.0, as in Sage, W21;
+        # a segment, a point or a ray stays 'automatic', as in Sage)
         return g
 
     def show(self, **options):

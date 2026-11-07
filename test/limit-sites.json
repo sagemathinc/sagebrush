@@ -6770,6 +6770,16 @@
   "owner": "permutation groups (@sagebrush-sage2)",
   "reason": "PermutationGroup.is_isomorphic: groups of order above _ISO_MAX (5040), or a search past _ISO_STEPS, are refused as not available yet (never guessed)"
  },
+ "lib/sage_plot.py :: Graphics._panel :: for k, v in zip((\"xmin\", \"xmax\", \"ymin\", \"ymax\"), bb)) #0": {
+  "class": "none",
+  "owner": "Sage graphics (@sagebrush-matlab)",
+  "reason": "xmax/ymax are a figure's axis limits (the data's ranges kept for an aspect ratio), not a cap: nothing is refused"
+ },
+ "lib/sage_plot.py :: Graphics._panel :: p.update(xmin=xa, xmax=xb, ymin=ya, ymax=yb, fit_aspect=True) #0": {
+  "class": "none",
+  "owner": "Sage graphics (@sagebrush-matlab)",
+  "reason": "xmax/ymax are a figure's axis limits (the data's ranges kept for an aspect ratio), not a cap: nothing is refused"
+ },
  "lib/sage_plot3d.py ::  :: _GC_BUDGET_S = 0.05 # (a pass's work, at most; the next pass goes on from its cursor) #0": {
   "class": "1",
   "disposition": {
