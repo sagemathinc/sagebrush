@@ -979,7 +979,7 @@ class Polynomial:
         # the ring over QQ in the same variable: our own when it is over QQ
         # (an equal ring either way; keeping ours keeps its class, e.g. Magma
         # mode's ring, which names its variable when printing)
-        return self._ring if self._ring._base is QQ else PolynomialRing(QQ, self._ring._name)
+        return self._ring if self._ring._base is QQ else PolynomialRing(QQ, self._ring._name, _internal=True)
 
     def __repr__(self):
         return _poly_repr(self._c, self._ring._repr_name()) if self._c else "0"
