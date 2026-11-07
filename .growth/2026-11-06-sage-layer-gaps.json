@@ -1,12 +1,12 @@
 {
  "v": 1,
- "reason": "Sage layer gaps the bracket-notation spike found: improper integrals of powers on half-lines (engine/sym definite.rs: its root scan, joined logarithms), alternating, telescoping and trig series sums and the divergent 1/k, k^2 (lib/_sage_expr.py symbolic_sum, its shifts admitted first), eigenvalues and eigenvectors over SR (a fresh variable) and QQ solves with SR right-hand sides (lib/_sage_matrix_sr.py, _sage_matrix.py). Re-measured with bun 1.4.4 (size-record.sh) on a probe merge of head 0793c167 into master 0a255d10: cli/lib.gen.js +6236, cli/pyjs.cjs +11588, engine/lib/sage-more.src +5711, engine/lib/sage.pre +41193, engine/lib/sage.src +13665, engine/sagebrush-engine.wasm +958; no other row moves. Markers: exact, except cli/pyjs.cjs 11620 (+11588 measured, plus 32 B of margin, as it moves with master). Ceilings raised to measured + 64, as #753 did: sage-more.src 421552, sage.src 2943702.",
+ "reason": "Sage layer gaps the bracket-notation spike found: improper integrals of powers on half-lines (engine/sym definite.rs: its root scan, joined logarithms), alternating, telescoping and trig series sums and the divergent 1/k, k^2 (lib/_sage_expr.py symbolic_sum, its shifts admitted first), eigenvalues and eigenvectors over SR (a fresh variable) and QQ solves with SR right-hand sides (lib/_sage_matrix_sr.py, _sage_matrix.py). Re-measured with bun 1.4.4 (size-record.sh) on a probe merge of head a9c9b009 into master 0a255d10: cli/lib.gen.js +6272, cli/pyjs.cjs +11800, engine/lib/sage-more.src +5711, engine/lib/sage.pre +41280, engine/lib/sage.src +13751, engine/sagebrush-engine.wasm +958; no other row moves. Markers: exact, except cli/pyjs.cjs 11832 (+11800 measured, plus 32 B of margin, as it moves with master). Ceilings raised to measured + 64, as #753 did: sage-more.src 421552, sage.src 2943788.",
  "bytes": {
-  "cli/lib.gen.js": 6236,
-  "cli/pyjs.cjs": 11620,
+  "cli/lib.gen.js": 6272,
+  "cli/pyjs.cjs": 11832,
   "engine/lib/sage-more.src": 5711,
-  "engine/lib/sage.pre": 41193,
-  "engine/lib/sage.src": 13665,
+  "engine/lib/sage.pre": 41280,
+  "engine/lib/sage.src": 13751,
   "engine/sagebrush-engine.wasm": 958
  }
 }
