@@ -3,8 +3,8 @@ tabular, or an HTML table, with an optional header row and header column, a
 frame and an alignment (sage.misc.table, written from what Sage 10.10 shows).
 
 The text form is Sage's: columns padded to their widest entry, three spaces
-between them, " | " (a box-drawing bar) after a header column, a rule under a
-header row, and box-drawing lines all round with frame=True.  In the LaTeX and
+between them, " │ " (a box-drawing bar; "║" in a frame) after a header column, a
+rule under a header row, and box-drawing lines all round with frame=True.  In the LaTeX and
 HTML forms a string is written as it is and anything else as its LaTeX, in
 math mode.  A notebook shows the HTML (Jupyter), or a Markdown table
 (Sagebrush's notebook, which typesets the Markdown's math).
