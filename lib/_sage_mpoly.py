@@ -1599,6 +1599,9 @@ class MPolynomial:
                 p = self._over_qq(o)
                 return p[0] / p[1] if p is not None else NotImplemented
             o = o2
+        if isinstance(o, MPolynomial) and not o._d:
+            # (Sage's message is empty here, x/0 is a rational division)
+            raise ZeroDivisionError()
         if isinstance(o, MPolynomial) and not o.is_constant():
             return R.fraction_field()(self, o)
         if isinstance(o, MFraction):
@@ -1618,6 +1621,8 @@ class MPolynomial:
         return self._new({e: dom._mul(v, ic) for e, v in self._d.items()})
 
     def __rtruediv__(self, o):
+        if not self._d:
+            raise ZeroDivisionError()
         return self._ring.fraction_field()(self._ring(o), self)
 
     def __floordiv__(self, o):
@@ -3198,18 +3203,23 @@ class MFraction:
         if not den._d:
             raise ZeroDivisionError("fraction field element division by zero")
         if reduce:
-            g = _gcd(num, den)
-            if not g.is_constant():
-                num, den = _exact_div(num, g), _exact_div(den, g)
-            # the denominator monic (over a field)
+            # as Sage: the gcd cancelled (over ZZ with its content, over a
+            # field only its monic part: 3*x/(6*x*y) is 3/(6*y) in
+            # Frac(QQ[x, y]), 1/(2*y) in Frac(ZZ[x, y])), and a unit
+            # denominator moved up (x*y/(-y) is -x); no other constant
+            # normalized
             R = num._ring
             dom = R._dom
-            if not dom.generic or True:
-                lc = den._leading()[1]
-                if R._base is not _sa().ZZ and lc != dom.one:
-                    il = dom._inv(lc)
-                    num = MPolynomial(R, {e: dom._mul(c, il) for e, c in num._d.items()})
-                    den = MPolynomial(R, {e: dom._mul(c, il) for e, c in den._d.items()})
+            zz = R._base is _sa().ZZ
+            g = _gcd(num, den)
+            if (g != 1) if zz else not g.is_constant():
+                num, den = _exact_div(num, g), _exact_div(den, g)
+            if den.is_constant():
+                c = den._leading()[1]
+                if not zz or c == -1:
+                    il = dom._inv(c)
+                    num = MPolynomial(R, {e: dom._mul(v, il) for e, v in num._d.items()})
+                    den = R.one()
         self._num, self._den = num, den
 
     def numerator(self):
@@ -3329,7 +3339,18 @@ class MFraction:
         return self._num * o._den == o._num * self._den
 
     def __hash__(self):
-        return hash((self._num, self._den))
+        n, d = self._num, self._den
+        if d == 1:
+            # (as Sage: hash(F(x)) == hash(x))
+            return hash(n)
+        # equal fractions hash alike: x/(-y) and (-x)/y, 3/(6*y) and 1/(2*y)
+        R = n._ring
+        dom = R._dom
+        c = d._leading()[1]
+        if R._base is _sa().ZZ:
+            return hash((-n, -d) if c < 0 else (n, d))
+        il = dom._inv(c)
+        return hash((MPolynomial(R, {e: dom._mul(v, il) for e, v in n._d.items()}), MPolynomial(R, {e: dom._mul(v, il) for e, v in d._d.items()})))
 
     def __call__(self, *args, **kwds):
         """Evaluate (or substitute).
