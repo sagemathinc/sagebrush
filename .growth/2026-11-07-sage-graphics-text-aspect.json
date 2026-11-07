@@ -1,12 +1,12 @@
 {
  "v": 1,
- "reason": "Sage graphics as Sage draws them (friction W03, W11, W21, W42): a text's fontsize is its own (it was taken as the figure's: every text drew at 11), in points at 100 dpi, blue by default; a primitive's options() is callable; parametric_plot, polar_plot, polygon, circle, disk and 2d polyhedron plots (their polygon) have aspect ratio 1.0, drawn as Sage does (the data's ranges kept, the plot area shaped to them, matplotlib's adjustable='box'); circle and polygon linestyles drawn; an unfilled polygon outlined (lib/sage_plot.py, _graphics.py, _sage_polyhedra.py). Re-measured with bun 1.4.4 (size-record.sh) on master c32e38de vs head ce4c008e: cli/lib.gen.js +2004, cli/pyjs.cjs +4676, engine/lib/core.pre +2661, engine/lib/core.src +785, engine/lib/sage.pre +6734, engine/lib/sage.src +3965; examples/corpus -730 and site/examples -945 (two refreshed gallery notebooks); no other row moves. Markers: exact, except cli/pyjs.cjs 4708 (+4676 measured, plus 32 B of margin, as it moves with master).",
+ "reason": "Sage graphics as Sage draws them (friction W03, W11, W21, W42): a text's fontsize is its own (it was taken as the figure's: every text drew at 11), in points at 100 dpi, blue by default; a primitive's options() is callable; parametric_plot, polar_plot, polygon, circle, disk and 2d polyhedron plots (their polygon) have aspect ratio 1.0, drawn as Sage does (the data's ranges kept, the plot area shaped to them, matplotlib's adjustable='box'); circle and polygon linestyles drawn; an unfilled polygon outlined (lib/sage_plot.py, _graphics.py, _sage_polyhedra.py). Re-measured with bun 1.4.4 (size-record.sh) on a probe merge of head 7a89117e into master 8da532b4: cli/lib.gen.js +2220, cli/pyjs.cjs +6624, engine/lib/core.pre +2661, engine/lib/core.src +785, engine/lib/sage.pre +7263, engine/lib/sage.src +4689; the gallery rows shrink (two refreshed notebooks); no other row moves. Markers: exact, except cli/pyjs.cjs 6656 (+6624 measured, plus 32 B of margin, as it moves with master).",
  "bytes": {
-  "cli/lib.gen.js": 2004,
-  "cli/pyjs.cjs": 4708,
+  "cli/lib.gen.js": 2220,
+  "cli/pyjs.cjs": 6656,
   "engine/lib/core.pre": 2661,
   "engine/lib/core.src": 785,
-  "engine/lib/sage.pre": 6734,
-  "engine/lib/sage.src": 3965
+  "engine/lib/sage.pre": 7263,
+  "engine/lib/sage.src": 4689
  }
 }
