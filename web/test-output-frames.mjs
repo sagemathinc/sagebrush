@@ -67,6 +67,13 @@ const ROGUES = {
     if (r.generation > 1) port.postMessage(JSON.stringify({ v: 1, type: "error", generation: r.generation - 1, reason: "old" }));
     port.postMessage(JSON.stringify({ v: 1, type: "committed", generation: r.generation, area: r.area, ids: r.outputs.map((x) => x.id), height: 52 }));
   }`),
+  // (O2: commits its own generation at 40, then, from the first render on, floods commits for the NEXT generation at
+  // 999, as an old frame whose messages are still queued at the host when it is swapped out)
+  prophet: rogue(`(port, r) => {
+    const c = (g, h) => port.postMessage(JSON.stringify({ v: 1, type: "committed", generation: g, area: r.area, ids: r.outputs.map((x) => x.id), height: h }));
+    c(r.generation, 40);
+    if (r.generation === 1) setInterval(() => { for (let i = 0; i < 50; i++) c(r.generation + 1, 999); }, 1);
+  }`),
   // (commits 300 ms after the render: a message still to come when the set is disposed)
   late: rogue(`(port, r) => setTimeout(() => port.postMessage(JSON.stringify({ v: 1, type: "committed", generation: r.generation, area: r.area, ids: r.outputs.map((x) => x.id), height: 40 })), 300)`),
 };
@@ -419,6 +426,22 @@ try {
   await sleep(300);
   const ea = await ev(`({ hs: events.filter((e) => e.area === "ea1" && e.type === "height").map((e) => [e.generation, e.height]), h: EA1.state.height })`);
   ok(ea.hs.length === 1 && ea.hs[0][1] === 60 && ea.h === 51, "a height the frame sends before its generation's commit is never applied, even just after that commit: " + JSON.stringify(ea));
+
+  // ---- an old frame's messages, queued at the host when its frame is swapped out in the same task, change nothing (O2)
+  await ev(`(window.PR = make({ rogue: "prophet" }), window.PRA = PR.area("pr1", box()), PRA.show(), PRA.render([{ id: "x", kind: "text", body: "t" }]), 1)`);
+  await ev(`until(() => events.find((e) => e.area === "pr1" && e.type === "committed" && e.generation === 1))`);
+  await sleep(100);
+  const pq = await ev(`(() => {
+    // (the old frame's flood queues on the host's port while this task runs, then the frame is swapped in it)
+    const t = performance.now(); while (performance.now() - t < 40) {}
+    PRA.clear(); PRA.render([{ id: "x", kind: "text", body: "t2" }]); PRA.show();
+    return PRA.state.generation;
+  })()`);
+  await ev(`until(() => events.find((e) => e.area === "pr1" && e.type === "committed" && e.generation === 2))`);
+  await sleep(300);
+  const pr = await ev(`({ ends: events.filter((e) => e.area === "pr1" && e.type === "committed").map((e) => e.generation), h: PRA.state.height })`);
+  ok(pq === 2 && JSON.stringify(pr.ends) === "[1,2]" && pr.h === 40, "an old frame's messages still queued when it is swapped out are dropped: the new frame's own commit stands (40, not 999): " + JSON.stringify(pr));
+  await ev("(PR.dispose(), 1)");
 
   // ---- an error for another generation doesn't end the current render (O16)
   await ev(`(window.OE = make({ rogue: "olderr" }).area("oe1", box()), OE.show(), OE.render([{ id: "x", kind: "text", body: "t" }]), 1)`);

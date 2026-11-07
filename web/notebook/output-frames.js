@@ -171,7 +171,7 @@ export function createOutputFrames({ srcdoc = null, url = null, cap = DEFAULT_CA
     a.failed = reason;
     retireHeight(a);
     end(a, "error", reason);
-    if (a.frame) { a.asked = false; const f = a.frame; a.frame = null; clearTimeout(a.loadTimer); a.port?.close(); a.port = null; f.remove(); }
+    if (a.frame) { a.asked = false; const f = a.frame; clearTimeout(a.loadTimer); a.port?.close(); a.port = null; a.frame = null; f.remove(); } // (its port closed before it stops being the frame)
     placeholder(a);
   }
 
