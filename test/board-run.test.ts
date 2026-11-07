@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { cleanPreview } from "../web/board/preview";
 import { codeOrder } from "../web/board/doc";
 import { boardExample, boardExamples } from "./board-examples";
-import { collect, interactError, ITEM_OUTPUT_MAX, RUN_OUTPUT_MAX } from "../src/board-run";
+import { collect, interactError, interactFlags, ITEM_DISPLAYS_MAX, ITEM_OUTPUT_MAX, RUN_OUTPUT_MAX } from "../src/board-run";
 
 // `sagebrush board run`: every code item of a board run as the board runs it
 // in a browser (src/board-run.ts), each item's output or error reported.
@@ -111,6 +111,32 @@ test("board run: an @interact's output: under the item's caps, a traceback past 
   assert.equal(interactError(l), null, "…and its run after the clear succeeding: still none");
   collect(l, { stream: "stdout", text: "z".repeat(3 * MB) }, k3);
   assert.ok(!textOf(l).includes("[output cut"), "3 MB after the clear is kept: its bytes were given back");
+  // (the cell's own clear_output() after an interact raised: the item's whole output and what it knew of its interacts
+  // go; no error left; astra on r2)
+  const w: any[] = [], k5 = { run: 0 };
+  collect(w, { target: 1, stream: "stderr", text: tb }, k5);
+  collect(w, { clear: true }, k5);
+  assert.equal(interactError(w), null, "a whole clear forgets the interact's traceback");
+  assert.equal(interactFlags(w), 0);
+  collect(w, { target: 1, stream: "stdout", text: "5/3\n" }, k5);
+  assert.equal(interactError(w), null, "…and its run after succeeding: no error");
+  // (an interact's clear after the item's cut: what it gave back can be written again; astra on r2)
+  const c: any[] = [], k6 = { run: 0 };
+  for (let i = 0; i < 5; i++) collect(c, { target: 1, stream: "stdout", text: "y".repeat(MB) }, k6);
+  assert.ok(textOf(c).includes("[output cut"), "(cut)");
+  collect(c, { target: 1, clear: true }, k6);
+  collect(c, { stream: "stdout", text: "after the clear\n" }, k6);
+  assert.ok(textOf(c).endsWith("after the clear\n"), "output after an interact's clear past the cut is kept: " + JSON.stringify(textOf(c).slice(-60)));
+  // (interacts past the cut, many, each raising: at most ITEM_DISPLAYS_MAX of their flags kept, and the item still fails;
+  // astra's INTERACT-META-1)
+  const many: any[] = [], k7 = { run: 0 };
+  for (let i = 0; i < 5; i++) collect(many, { target: 0, stream: "stdout", text: "y".repeat(MB) }, k7);
+  for (let t = 1; t <= ITEM_DISPLAYS_MAX + 50; t++) collect(many, { target: t, stream: "stderr", text: tb }, k7);
+  assert.ok(interactFlags(many) <= ITEM_DISPLAYS_MAX, `flags kept: ${interactFlags(many)}`);
+  assert.ok(textOf(many).length <= ITEM_OUTPUT_MAX + 200);
+  assert.ok(REASON.test(String(interactError(many))), "…and the item still fails, its tracebacks past the limit");
+  for (let t = 1; t <= ITEM_DISPLAYS_MAX + 50; t++) collect(many, { target: t, clear: true }, k7);
+  assert.ok(REASON.test(String(interactError(many))), "…its interacts' clears can't take back the ones it could not keep track of");
   // (a traceback kept: the error is it, the reason last)
   const ok: any[] = [], k4 = { run: 0 };
   collect(ok, { target: 1, stream: "stdout", text: "5/3\n" }, k4);

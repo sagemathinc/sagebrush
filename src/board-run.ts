@@ -504,8 +504,14 @@ const sizes = new WeakMap<any[], { used: number; cut: boolean; displays: number 
 // and gives its bytes back; no copy of its text is kept beside the item's capped list (astra's INTERACT-BUFFER-1,
 // daybreak3's INTERACT-COLLECT-1). That a traceback came to a target is a flag of that target's, set as each message
 // passes, kept or not (past the item's caps, it still fails), and cleared with it)
-const interactTarget = new WeakMap<object, unknown>(), interactBytes = new WeakMap<object, number>(), interactRaised = new WeakMap<any[], Set<unknown>>();
+const interactTarget = new WeakMap<object, unknown>(), interactBytes = new WeakMap<object, number>(), interactDisplays = new WeakSet<object>();
+const interactRaised = new WeakMap<any[], Set<unknown>>(), interactRaisedUntracked = new WeakSet<any[]>();
 const TRACEBACK = "Traceback (most recent call last):";
+// (at most this many interacts' flags an item: past them, one mark of the item's that one raised, kept until the item's
+// own clear (astra's INTERACT-META-1): its error is still said, its interact's clear just can't take it back)
+const INTERACT_FLAGS_MAX = ITEM_DISPLAYS_MAX;
+/** (for the tests: how many interacts' flags the item keeps) */
+export const interactFlags = (list: any[]) => interactRaised.get(list)?.size ?? 0;
 /** The error of an item's @interact runs at their defaults, if one raised: each one's traceback as kept (else said
  * not kept), and why, last (board check keeps an error's last lines). From each target's kept stderr, and its flag. */
 export function interactError(list: any[]): string | null {
@@ -517,6 +523,7 @@ export function interactError(list: any[]): string | null {
     if (tb >= 0) said.push(kept.slice(tb).trim());
     else if (interactRaised.get(list)?.has(t)) said.push("[its traceback was not kept: past the output limit]");
   }
+  if (!said.length && interactRaisedUntracked.has(list)) said.push("[its traceback was not kept: past the output limit]");
   return said.length ? said.join("\n") + "\n(raised by the item's @interact function, run with its default values)" : null;
 }
 
@@ -533,13 +540,26 @@ export function collect(list: any[], m: any, kept: { run: number }) {
   const mine = m.target != null;
   if (mine) {
     if (m.clear) {
-      for (let i = list.length - 1; i >= 0; i--) if (interactTarget.has(list[i]) && interactTarget.get(list[i]) === m.target) { const b = interactBytes.get(list[i]) ?? 0; size.used -= b; kept.run -= b; list.splice(i, 1); }
+      let freed = false;
+      for (let i = list.length - 1; i >= 0; i--) if (interactTarget.has(list[i]) && interactTarget.get(list[i]) === m.target) {
+        const b = interactBytes.get(list[i]) ?? 0;
+        size.used -= b; kept.run -= b;
+        if (interactDisplays.has(list[i])) size.displays--;
+        list.splice(i, 1);
+        freed = true;
+      }
+      // (what it gave back can be written again: each message is checked against the caps as it comes)
+      if (freed) size.cut = false;
       interactRaised.get(list)?.delete(m.target);
       return;
     }
-    if (m.stream === "stderr" && String(m.text ?? "").includes(TRACEBACK)) { const r = interactRaised.get(list) ?? new Set(); r.add(m.target); interactRaised.set(list, r); }
+    if (m.stream === "stderr" && String(m.text ?? "").includes(TRACEBACK)) {
+      const r = interactRaised.get(list) ?? new Set();
+      if (r.has(m.target) || r.size < INTERACT_FLAGS_MAX) { r.add(m.target); interactRaised.set(list, r); }
+      else interactRaisedUntracked.add(list);
+    }
   }
-  if (m.clear) { kept.run -= size.used; size.used = 0; size.cut = false; size.displays = 0; list.length = 0; return; }
+  if (m.clear) { kept.run -= size.used; size.used = 0; size.cut = false; size.displays = 0; list.length = 0; interactRaised.delete(list); interactRaisedUntracked.delete(list); return; }
   // (the worker cut the rest where it was written)
   if (m.cut) {
     if (!size.cut) list.push(cutNote(m.cut in CUT_WHY ? m.cut : "item"));
@@ -566,7 +586,7 @@ export function collect(list: any[], m: any, kept: { run: number }) {
     // (joined only with the same area's: the cell's own, or the same interact's)
     if (last?.output_type === "stream" && last.name === m.stream && interactTarget.has(last) === mine && (!mine || interactTarget.get(last) === m.target)) { last.text += m.text; if (mine) interactBytes.set(last, (interactBytes.get(last) ?? 0) + bytes); }
     else keep({ output_type: "stream", name: m.stream, text: m.text });
-  } else if (m.display) keep({ output_type: "display_data", data: m.display, metadata: {} });
+  } else if (m.display) { const o = { output_type: "display_data", data: m.display, metadata: {} }; keep(o); if (mine) interactDisplays.add(o); }
   else if (m.interact) list.push({ output_type: "display_data", data: { "text/plain": "[interactive controls]" }, metadata: {} });
 }
 
