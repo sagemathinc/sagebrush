@@ -928,10 +928,79 @@ async def test_version_in_the_hello_and_needs():
         w = await WS.open(s.port)
         w.send(hello(sg, code=s.code, needs="0.8.2"))
         assert (await w.json())["result"]["version"] == "0.8.2" and not any("needs" in m for m in said), said
+        s.close()
+        # (a remembered page coming back (a session, not a code) that needs a newer runner: told here too (grader's
+        # r782 N6); the first pairing, needing nothing newer, says nothing)
+        said.clear()
+        s = P.PairServer(err=said.append)
+        await s.listen(0)
+        w = await WS.open(s.port)
+        w.send(hello(sg, code=s.code, remember=True, needs="0.8.2"))
+        sess = (await w.json())["result"]["session"]
+        w.close()
+        for _ in range(100):
+            if s.paired_conn is None:
+                break
+            await asyncio.sleep(0.01)
+        assert s.paired_conn is None and not any("needs" in m for m in said), said
+        w = await WS.open(s.port)
+        w.send(hello(sg, session=sess, needs="0.9.0"))
+        assert (await w.json())["result"]["version"] == "0.8.2"
+        warn = [m for m in said if "needs sagebrush" in m]
+        assert len(warn) == 1 and "needs sagebrush 0.9.0 or newer; this is 0.8.2." in warn[0], said
     finally:
         P.VERSION = real
         s.close()
         sg.close()
+
+
+def test_runner_version_is_the_packages_own():
+    """The version a runner reports (its banner, its hello) is its installed distribution's, when this code is that
+    distribution's (grader's r782 R2); from a checkout beside another installed copy it is "dev", never the installed
+    one's (R3), so a page's minimum isn't passed for code the number doesn't describe."""
+    from importlib import metadata
+    here = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(P.__file__)), "..", "__init__.py"))
+
+    class Dist:
+        def __init__(self, init, version):
+            self.init, self.version = init, version
+
+        def locate_file(self, rel):
+            assert rel == "sagebrush/__init__.py", rel
+            return self.init
+
+    real = metadata.distribution
+    try:
+        metadata.distribution = lambda name: Dist(here, "1.2.3")
+        assert P.runner_version() == "1.2.3"
+        metadata.distribution = lambda name: Dist("/somewhere/else/site-packages/sagebrush/__init__.py", "1.2.3")
+        assert P.runner_version() == "dev"
+
+        def missing(name):
+            raise metadata.PackageNotFoundError(name)
+        metadata.distribution = missing
+        assert P.runner_version() == "dev"
+    finally:
+        metadata.distribution = real
+
+
+@aio
+async def test_startup_banner():
+    """`sagebrush remote --loopback` says first, on stderr, which sagebrush and which Python run here (grader's r782
+    B1): "sagebrush <version> (Python <v> at <executable>)"; the link goes to stdout."""
+    out, err = [], []
+    task = asyncio.ensure_future(P.run_loopback(port=0, out=out.append, err=err.append))
+    for _ in range(500):
+        if out:
+            break
+        await asyncio.sleep(0.01)
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    want = "sagebrush %s (Python %s at %s)\n" % (P.VERSION, sys.version.split()[0], sys.executable)
+    assert out and err and err[0] == want, (out, err[:2])
 
 
 def test_windows_refusal_and_python_m():

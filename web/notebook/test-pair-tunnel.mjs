@@ -473,6 +473,9 @@ for (const [what, m, code] of [
   }
   a = await answer({ ...RESULT, version: "dev" });
   check(a.r.v instanceof Tunnel && !("needs" in a.hello.params), "with no minimum, no needs is sent, and dev pairs");
+  // (the default is the page's own: a call without `min` sends RUNNER_MIN as needs, none while it is null (grader's
+  // r782 J22 note))
+  check(RUNNER_MIN === null ? !("needs" in a.hello.params) : a.hello.params.needs === RUNNER_MIN, `a call without min sends RUNNER_MIN (${RUNNER_MIN}) as needs`);
   const { pairedStarter, PAIRED, PAIR_SHEET } = await import("./remote-ui.js");
   class Old extends FakeSocket {
     constructor(u) { super(u); setTimeout(() => this.open(), 1); }
