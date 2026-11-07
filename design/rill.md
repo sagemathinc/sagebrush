@@ -6,7 +6,7 @@
 
 Rill runs R, the statistics language, in Sagebrush: on the command line, in notebooks and Jupyter, and in documents. The first target is the R that students and teachers write: vectors, data frames, factors, summaries, distributions, tests, linear models and plots. Then R Markdown documents (`.Rmd`), then ggplot2, then dplyr.
 
-Rill is new code, written from R's documentation and checked against real R as a black box. It is a Python package that runs on Sagebrush's engine, as the Magma and MATLAB modes do. So it works the same in the CLI, the kernel and the browser, needs no install, and costs other modes nothing: the browser fetches it only when a Rill session starts.
+Rill is new code, written from R's documentation and checked against real R as a black box. It is a Python package that runs on Sagebrush's engine, as the Magma and MATLAB modes do.In the browser, other modes pay nothing: Rill is fetched only when a Rill session starts. (The CLI carries Rill's files, kept lazy and measured, §6.3.)
 
 The feasibility spike (`/scratch/sagebrush-reviews/r-spike/REPORT.md`, branch `spike-r-mode` b7a1a1e7) matched R 4.5.3 byte for byte on 252 of 254 tuned cases, and on 95 of 110 held-out cases at the first attempt. This design turns that prototype into a product. The spike branch is not merged: its code is the starting point for the phased PRs, rewritten into the layout of §4.
 
@@ -77,7 +77,7 @@ Performance work (§10) goes into whichever phase needs it, with measurements in
 - the `.Rmd` editor (phase B, §5.7).
 
 **Tests:**
-- `rill-tests/test_*.R` with recorded `.out` files (§7);
+- `rill-tests/<area>/test_<n>.R` with recorded `.out.json` files and `PROVENANCE.json` (§7);
 - `test/rill-corpus.test.ts`, which replays the corpus;
 - `test/rill.test.ts`, for host behaviour: the REPL, the kernel, Stop and the gates.
 
@@ -195,7 +195,7 @@ The routing lands in A1's first PR, with the first `lib/_rill/` source, so later
 
 ### 6.3 The CLI pays from A1, so it is measured and kept lazy
 
-"Other modes pay nothing" holds only in the browser. The CLI embeds Rill's files from A1, so every CLI download and install carries them, and an unchanged embedding could slow a cold Python or Sage start.
+The plain words say "in the browser, other modes pay nothing", and that limit to the browser is deliberate. The CLI embeds Rill's files from A1, so every CLI download and install carries them, and an unchanged embedding could slow a cold Python or Sage start.
 
 - **Plan:** extend `scripts/lazy-lib.mjs` from one shared gzip blob (pathlib's, today) to **keyed family blobs**:
   - one for pathlib, as now;
@@ -227,31 +227,86 @@ Every Rill PR's SIZE packet reports, against current master:
 
 ## 7. Tests: a corpus of recorded R outputs (grader)
 
-### 7.1 The corpus
+### 7.1 The corpus and its oracle
 
-**Layout.** `rill-tests/test_<area>_<n>.R` holds the cases, and `rill-tests/test_<area>_<n>.out` holds R 4.5.3's recorded output.
+**Layout:**
+- `rill-tests/<area>/test_<n>.R` hold cases, several per file, separated by `#-- <id>` lines.
+- `rill-tests/<area>/test_<n>.out.json` holds each case's recorded stdout, stderr and exit status.
+- `rill-tests/PROVENANCE.json` records the oracle.
 
-**Recording.** `rill-tests/run.py --regen` runs `oracle.py` on VM4 over ssh: one fresh `Rscript --vanilla -` per case, recording stdout, stderr and the exit status. It never runs in CI.
+**Recording.** `rill-tests/run.py --regen` is the **only** writer of `.out.json` files (T6). It runs on VM4 over ssh: one fresh `Rscript --vanilla -` per case, never in CI.
 
-**Comparing.** `test/rill-corpus.test.ts` replays every case through the built CLI. It compares stdout byte for byte, the exit status, and the first `Error` line, as the spike's `compare.py` does. It is a node test, so the existing `node-tests` shards run it: CI needs **no workflow-file change** (agents never push those). `scripts/ci-paths.mjs` maps `rill-tests/` and `lib/_rill/` to the node suites.
+**The oracle's environment (T1)** is pinned and recorded from inside each run:
+- the recording sets `LC_ALL=C.UTF-8`, `TZ=UTC`, and `options(width = 80, digits = 7, scipen = 0, OutDec = ".")` at the start of every case;
+- a preamble prints `R.version.string`, `R.version$platform`, `Sys.getlocale()`, `Sys.timezone()`, those options, and (phases B–D) `packageVersion()` of every package used.
 
-**Seed.** The spike's 364 cases (`corpus.R`, `corpus2.R`), split by area. Every PR adds the cases for what it implements, recorded before the code is written.
+`PROVENANCE.json` holds that record, the oracle's path and the `run.py` revision, and, for each `.out.json`, its sha256.
 
-**Known differences.** `rill-tests/KNOWN.md` lists each case we knowingly don't match, with the reason: an undocumented layout not yet derived, an unmatched RNG stream, or LAPACK rounding. A case leaves the list only by becoming exact.
+**Oracle bumps.** A new R or package version re-records **everything** in one PR. The PR shows the diff of the outputs, updates `KNOWN.json` (§7.3), and states the new provenance; no partial re-recording is allowed.
 
-### 7.2 Held-out discipline
+**Replay pins the same environment.** Rill runs every case with the recorded options and locale, and `TZ=UTC` for dates. `test/rill-corpus.test.ts` fails if `PROVENANCE.json` is missing or incomplete, or if an `.out.json` hash doesn't match its provenance entry (T6: a hand-edited output is caught).
 
-Each phase sets aside a held-out file, written before the phase's code. It is scored at the phase's end and reported, as the spike's 86% first-attempt figure was, so the corpus can't only measure what was tuned against it.
+### 7.2 What is compared (T2)
 
-### 7.3 Plots and documents
+For each case, the comparison covers three things, byte for byte:
 
-- **Graphics:** R's computed values (§5.5) as corpus cases, plus SVG description snapshots of ours.
+1. **stdout.**
+2. **The exit status.**
+3. **The condition lines on stderr.** These are all of `Error …`, `Warning message(s):`, the numbered warning lines, `In f(…) :` lines, and `message()` output, with their text. The only normalization is dropping Rscript's final `Execution halted` line. R prints warnings on stderr, so a mutant that drops or changes a warning or a message fails a case.
+
+### 7.3 Known differences, enforced both ways (T3)
+
+`rill-tests/KNOWN.json` is machine-readable. Each entry holds a case id, a reason class (`layout-undocumented`, `rng-stream`, `lapack-rounding`, `not-implemented`, …), one line of reason, and the sha256 of **our** current output for that case.
+
+A listed case still runs, and the test checks two things:
+
+- **Our output still matches its recorded hash.** A regression inside a known difference is therefore visible, and updating the hash needs `--update` (T6).
+- **It still differs from the oracle.** If it has become exact, the test fails with "remove from KNOWN.json", so a case leaves the list only by becoming exact.
+
+### 7.4 Held-out files you can check (T4)
+
+Each phase's held-out file is committed **with its recorded `.out.json` and sha256**, in a small PR that lands before the phase's first code PR. The phase-end score names that commit.
+
+No held-out case is edited after code starts: a needed fix becomes a new, visible case. The scored first-attempt figure, like the spike's 86%, is reported against exactly the committed hashes.
+
+### 7.5 Cost and CI budget (T5)
+
+William's rule is PR CI of at most 10 minutes, with no raised timeouts.
+
+**Per-case cost.** The spike measured about 0.6 s of engine start per CLI process, and 10–60 ms per case in-process. One process per case (364 cases now, thousands by phase D) wouldn't fit.
+
+**Batch runner:**
+- `test/rill-corpus.test.ts` starts **one CLI process per case file** and runs each case in a **fresh Rill session** inside it: a new global environment, options reset to the pinned set, the RNG unseeded, warnings cleared, connections and devices closed.
+- Fresh-session equivalence is itself pinned. A fixed 5% subset of cases (chosen by id hash) also runs one process per case, and must give identical results.
+
+**Shards:**
+- The corpus is split across `test/rill-corpus-{1..4}.test.ts`, each a fixed partition of the case files by filename hash, so the existing 8 `node-tests` shards spread it.
+- Budget: each partition at most 45 s of wall time on CI's runners, and at most 3 min summed. The A1 PR gives measured numbers.
+- A phase that would pass the budget splits further, or asks for a dedicated path-selected `modes (rill)` group. That needs a workflow-file change, which agents never push, so it would go to @sagebrush and William.
+
+**Path selection.** `scripts/ci-paths.mjs` maps `rill-tests/`, `lib/_rill/` and `src/rill*.ts` to the node suite. The node suite already runs on most PRs, which is why the budget above is strict.
+
+### 7.6 Our own snapshots (T6)
+
+SVG-description snapshots (§5.5) and `KNOWN.json`'s hashes are **ours**: they pin behaviour, they don't verify it.
+- They change only through an explicit `--update` run that the PR states.
+- They never change silently in the same commit as the code they pin.
+- `.out.json` files come only from the oracle, through `run.py --regen` (checked by the provenance hashes in §7.1).
+
+### 7.7 Plots, documents and generators
+
+- **Graphics:** R's computed values (§5.5) are corpus cases; our SVG descriptions are snapshots (§7.6).
 - **ggplot2:** `ggplot_build(p)$data` and `layer_scales` outputs, printed by the oracle.
-- **Rmd:** knitr's markdown output for each test document, recorded from the oracle (§12, question 1), against our knit's markdown.
+- **Rmd:** knitr's markdown output for each test document.
+  - Its normalization is stated before recording and recorded in the provenance (S2): version banners, figure paths, timestamps.
+  - It is compared against our knit's markdown, normalized the same way.
+- **Generators not on R's stream yet** (S1): each gets a deterministic distribution pin with a fixed seed and sample size. The pin checks the first four moments against the distribution's, within stated bounds, and bounds the Kolmogorov–Smirnov statistic, so "a correct generator of the right distribution" is pinned, not only listed.
 
-### 7.4 Mutants
+### 7.8 Mutants
 
-Grader's mutant runs apply per PR, as for every lane: each new rule has a pin that kills its mutant, or the mutant is shown equivalent.
+- Grader's mutant runs apply per PR, as for every lane.
+- Each PR lists the rules it adds, so mutants map to cases.
+- A mutant counts as killed only by the **visible** corpus or host tests; a held-out-only kill doesn't count (S3).
 
 ## 8. Stop, recursion and memory (daybreak3)
 
@@ -304,7 +359,7 @@ The publish step takes one of two forms:
 
 Each pin checks that the original values are unchanged byte for byte and that the session still answers.
 
-### 8.4 Recursion: the host stack is protected by construction
+### 8.4 Recursion: the host stack must be protected by construction
 
 A depth counter alone can't protect a recursive host evaluator: Python's recursion limit or the browser's JavaScript stack could fail first. Rill's evaluator therefore **does not recurse on the host stack for R calls**.
 
@@ -314,7 +369,7 @@ A depth counter alone can't protect a recursive host evaluator: Python's recursi
   - Valid values are R's documented 25–500000 (`?options`); the default is 5000.
   - Passing the R depth gives R's own message for runaway recursion.
   - Passing `S` first, possible only through deeply nested callbacks, gives R's own message for exhausted stack space, as R does when its C stack runs out.
-  - Both texts are recorded from the oracle in A1. A host `RecursionError` or `RangeError` never reaches the user.
+  - Both texts are recorded from the oracle in A1. A host `RecursionError` or `RangeError` must never reach the user.
 - **Pins**, in the CLI and in the browser: direct recursion (`f <- function(n) f(n + 1)`), mutual recursion, recursion through `sapply`, and `options(expressions = 100)`. Each must produce R's message, and the session must still answer afterwards.
 
 ### 8.5 Memory: reserve before allocating, in every host
@@ -370,11 +425,12 @@ Rill reaches files only through Sagebrush's Python file layer, so the existing p
   - `sink()` output;
   - `dev.off()`'s final write;
   - writes done by `on.exit` cleanup.
-- If changes are revoked, or the destination is moved, replaced or removed, an old connection can't write with stale authority. Its next write fails with R's write error, and the file layer, not the connection, decides.
-- Rill keeps no write-capable handle across calls: a connection holds a path and a buffer, not an open host file descriptor with write rights.
+- If changes are revoked, or the destination is moved, replaced or removed, an old connection must not be able to write with stale authority. Its next write fails with R's write error, and the file layer, not the connection, decides.
+- Rill keeps no write-capable handle across calls: a connection holds its destination's identity and a buffer, not an open host file descriptor with write rights.
+- Each write checks that the destination is still the **same file** (the workspace's file identity, not just its path). Reopening by a stored path is not enough: if the file was replaced, moved or removed, the write is refused.
 
 **RILL-SEC-2: an `.Rmd` source is neither execution nor output authority.**
-- Opening or previewing an `.Rmd`, reading its YAML front matter, chunk options or inline expressions **cannot run code**. Execution follows the existing document Run policy: nothing runs on open, and running is the person's explicit action.
+- Opening or previewing an `.Rmd`, reading its YAML front matter, chunk options or inline expressions **must not run code**. Execution follows the existing document Run policy: nothing runs on open, and running is the person's explicit action.
 - Chunk options use a closed grammar of the supported options (§5.7). An option can't select:
   - a foreign engine (`engine = "python"`, `"bash"`, `"sql"`, …);
   - a shell or render hook;
@@ -382,13 +438,15 @@ Rill reaches files only through Sagebrush's Python file layer, so the existing p
   - an external renderer;
   - a network destination.
   Such an option is reported as unsupported, and the chunk does not run.
-- `results = "asis"` output, tables, chunk labels and figure captions, inline `` `r …` `` results, and SVG all stay untrusted input to the same sanitizer and escaping (`safeHtml`/`renderMarkdown` with `remote: false`; labels escaped as text). No option turns that off.
+- `results = "asis"` output, tables, chunk labels and figure captions, inline `` `r …` `` results, and SVG are all treated as document content and go through the same sanitizer and escaping (`safeHtml`/`renderMarkdown` with `remote: false`; labels escaped as text). No option turns that off.
 
 **The R-only evaluator boundary, with negative controls.** `eval(parse(text = s))` must evaluate R inside Rill only. Rill must offer no escape to Python, and must not expose `py_run` or anything like reticulate. R values, environments, attributes and function lookup must never reach Python objects, module globals, imports, or foreign-call entry points:
 - `.Call`, `.External`, `.C`, `.Internal`, `.Primitive` lookups by string;
 - `get`/`mget`/`exists`, `as.environment`, `sys.function`, `environment()<-`.
 
-Escape-shaped calls that Rill doesn't support fail before any effect. A1 ships negative-control pins for each, for example `get("__import__")`, `.Call("x")`, `environment(sum)`, `attr(x, "__class__")`, and a crafted name in `as.name`, each of which must give an R error and leave the session unchanged.
+Escape-shaped calls that Rill doesn't support fail before any effect. Supported R introspection returns ordinary Rill values, as R does, and never a host object: `environment(sum)` and `attr(x, "__class__")` give `NULL`, as in R. A1 ships negative-control pins:
+- unsupported entry points give an R error and leave the session unchanged, for example `.Call("x")`, `.External("x")`, `.Internal(f())`, and `get("__import__")` (no such R object);
+- legitimate introspection returns only R values, for example `environment(sum)`, `attr(x, "__class__")`, a crafted name in `as.name`, and `ls(environment(f))`.
 
 **The gate inventory** (astra's audit) is generated from the code by a census script, like the arraybuffer census. It lists every Rill route to a file, a process or the host, with an explicit gated or refused decision for each. That includes indirect and deferred routes:
 - `source()` and module loading;
@@ -432,6 +490,7 @@ The plan, measured in each PR and always within §8's rules:
   - the docsearch index `docs-index-rill.json`, our own one-line summaries plus examples run and compared like MATLAB's `doc_examples`;
   - completion;
   - examples.
+- **A host test for each integration item:** the notebook, the Jupyter kernel, the board and the web worker each run at least one corpus case through that host, not only through the CLI.
 - **Lazy groups and budgets (§6).**
 - **Docs:** README's mode list, `llms.txt`, and capabilities.md's gate inventory.
 
@@ -444,7 +503,7 @@ The plan, measured in each PR and always within §8's rules:
    - daybreak2: A1 already sets the final routing and budget names, and A2 keeps a minimal, measured first-cell start;
    - daybreak3: A1's corpus and §8's invariants are green, the registry lands alone first, and no eager Rill import or unmeasured core cost is added;
    - astra: the registry refactor stays a separate review, and the host permission pins ship with the first exposed host.
-   Grader's verdict is pending.
+   - grader: each A2 integration item carries its own host test (§11).
 
 ## 13. Estimate
 
@@ -457,4 +516,4 @@ From the spike report, refined by this design:
 | C (ggplot2) | 3–4 agent-weeks |
 | D (dplyr with tibble printing) | 3–4 agent-weeks |
 
-Each phase ends with its held-out score reported, and with no known corpus difference left unexplained in `KNOWN.md`.
+Each phase ends with its held-out score reported, and with no known corpus difference left unexplained in `KNOWN.json`.
