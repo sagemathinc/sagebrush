@@ -667,9 +667,32 @@ class Series:
         return [self._v + i for i, c in enumerate(self._c) if not _is_zero(c)]
 
     def __getitem__(self, n):
+        """The coefficient of x^n, as Sage: in the base ring (over QQ an
+        element of QQ), and an IndexError at or past the precision, where it
+        is not known.
+
+        EXAMPLES::
+
+            sage: R.<t> = QQ[[]]; f = 1 + 2*t + O(t^3); f[1], f[1].parent(), f[2]
+            (2, Rational Field, 0)
+            sage: f[3]
+            Traceback (most recent call last):
+            ...
+            IndexError: coefficient not known
+        """
         if isinstance(n, slice):
             raise NotImplementedError("slices of series")
         n = int(n)
+        if self._prec is not None and n >= self._prec:
+            raise IndexError("coefficient not known")
+        c = self._coef(n)
+        if self._R._base is _sa().QQ:
+            from _sage_poly import _qq_coeff
+            return _qq_coeff(c)
+        return c
+
+    def _coef(self, n):
+        # the coefficient of x^n, 0 past the known ones (for the code here)
         k = n - self._v
         if 0 <= k < len(self._c):
             return _out(self._c[k])
@@ -1454,7 +1477,7 @@ class Series:
             raise ValueError("can only take the exponential of a series with constant term 0 and no negative powers")
         p = self._prec if self._prec is not None else (prec or R._dp)
         # f' = g' f, f(0) = 1
-        g = [self[i] for i in range(p)]
+        g = [self._coef(i) for i in range(p)]
         f = [R._zero()] * p
         f[0] = R._one()
         for n in range(1, p):
@@ -1532,7 +1555,7 @@ class Series:
         pw = Series(R, 0, [R._one()], p)
         for k in range(0, p):
             if k >= self._v:
-                c = self[k]
+                c = self._coef(k)
                 if not _is_zero(c):
                     res = res + pw * R._base(c)
             pw = (pw * g).add_bigoh(p)
@@ -1561,7 +1584,7 @@ class Series:
             pw = x.inverse() ** (-first) if first < 0 else Series(x._R, 0, [x._R._one()], None)
             res = Series(pw._R, 0, [], p)
             for k in range(first, self._v + len(self._c)):
-                c = self[k]
+                c = self._coef(k)
                 if not _is_zero(c):
                     res = res + pw * x._R._base(c)
                 if k + 1 < self._v + len(self._c):
@@ -1574,6 +1597,10 @@ class Series:
         s = 0
         for i, c in enumerate(self._c):
             s = s + _out(c) * x ** (self._v + i)
+        if isinstance(s, int) and not isinstance(s, bool) and self._R._base is _sa().QQ:
+            # (an integer value over QQ is an element of QQ, as Sage)
+            from _sage_poly import _qq_coeff
+            return _qq_coeff(s)
         return s
 
 
