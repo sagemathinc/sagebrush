@@ -232,6 +232,43 @@ test("web-tests run: in WORKERS, a failure is the run's code; no suite starts af
   assert.deepEqual([...ran].sort(), Array.from({ length: ran.length }, (_, i) => `test-${i + 1}.mjs`));
 });
 
+// (a solo suite: it marks itself started and running, logs how many run with it, then looks 20 times (a moment in
+// which a suite started beside it would be seen; never a bound on anything), logs how many have started, and ends)
+const alone = (header: string) =>
+  `${header}\nimport { appendFileSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";\n` +
+  `const me = import.meta.url.split("/").pop();\n` +
+  `for (const d of ["started", "running"]) mkdirSync(d, { recursive: true });\n` +
+  `writeFileSync("started/" + me, ""); writeFileSync("running/" + me, "");\n` +
+  `appendFileSync("log.txt", me + " " + readdirSync("running").length + "\\n");\n` +
+  `for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 10));\n` +
+  `appendFileSync("log.txt", "end " + me + " started=" + readdirSync("started").length + "\\n");\n` +
+  `rmSync("running/" + me);\n`;
+
+test("web-tests run: in WORKERS, a solo suite runs first and alone (nothing beside it, nothing started while it runs); the rest then run together", () => {
+  const files: Record<string, string> = { ".github/workflows/ci.yml": workflow("web-runner") };
+  // (the solo one is in the plan's middle; the three others meet: they only end once all three have started)
+  files["web/test-1.mjs"] = meeting("// ci: web-runner order=10", 3);
+  files["web/test-2.mjs"] = alone("// ci: web-runner order=15 solo");
+  files["web/test-3.mjs"] = meeting("// ci: web-runner order=20", 3);
+  files["web/test-4.mjs"] = meeting("// ci: web-runner order=30", 3);
+  const dir = repo(files);
+  const r = cli(dir, "run", "web-runner");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /^web-tests: ran 4 of 4 \(web-runner, 3 at a time\)$/m);
+  const log = readFileSync(join(dir, "log.txt"), "utf8").trim().split("\n");
+  assert.deepEqual(log.slice(0, 2), ["test-2.mjs 1", "end test-2.mjs started=1"], log.join("; "));
+  assert.deepEqual(log.slice(2).map((l) => l.split(" ")[0]).sort(), ["test-1.mjs", "test-3.mjs", "test-4.mjs"]);
+  assert.ok(r.stdout.indexOf("END web-runner: node web/test-2.mjs") < r.stdout.indexOf("START web-runner: node web/test-1.mjs"), r.stdout);
+});
+
+test("web-tests: solo is a header word; the plan's commands don't change with it", () => {
+  const dir = repo({ ".github/workflows/ci.yml": workflow("web-runner"), "web/test-a.mjs": suite("// ci: web-runner order=1 runner=bun solo -- x") });
+  const r = cli(dir, "plan", "web-runner");
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout.trim(), "web-runner\tbun web/test-a.mjs x");
+  assert.equal(cli(dir, "check").status, 0);
+});
+
 // (a suite that marks itself started, then on SIGTERM or SIGINT notes that it cleaned up and exits 0; otherwise it
 // waits for a file no one writes, and exits 9 after 3000 looks)
 const tidy = (header: string) =>
