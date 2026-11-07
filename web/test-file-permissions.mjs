@@ -135,6 +135,7 @@ const check = (ok, what) => { checks++; console.log((ok ? "ok   " : "FAIL ") + w
   check(rec().migrated === 1 && !store.has("sagebrush-permissions") && rec().docs.r1?.denied?.some((x) => x[0] === "write" && x[1] === "/") && !rec().docs.r1?.write?.includes("/"), "…that write carried the old choices and the mark, and the old key is retired");
   const mr2 = createPermissions();
   check(mr2.may("r1", "files") === false && mr2.may("r2", "files") === true, "…a reload keeps the newer \"don't allow\" (the old allow isn't replayed), and the other notebook's old allow");
+  check(mr.revoke("r2", "write", "/") && mr.may("r2", "files") === false, "…and in the first page, what it held for the old choices is let go once they are stored: removing the other notebook's grant there turns it off");
   // (daybreak3's same-choice case: the migration's write fails, storage recovers, the person repeats an old allow: a
   // change of nothing itself, the write still carries the pending migration, so the notebook stays allowed)
   store.clear();
