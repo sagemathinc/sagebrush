@@ -1829,7 +1829,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   };
   $("newfolder").onclick = () => elsewhereNot("No folder made", () => host.files!.newFolder!());
   const newLatex = root.querySelector<HTMLElement>('[data-sbb="newlatex"]');
-  if (newLatex) newLatex.onclick = async () => { await editor.keepWriting(); elsewhereNot("No LaTeX document made", () => host.files!.newLatex!()); };
+  // (what is being written kept by the host's departure, which says so when it can't be: board/page.ts settled)
+  if (newLatex) newLatex.onclick = () => elsewhereNot("No LaTeX document made", () => host.files!.newLatex!());
   $("openfiles").onclick = () => host.files?.open?.();
   $("deleteboard").onclick = async () => {
     await editor.keepWriting();

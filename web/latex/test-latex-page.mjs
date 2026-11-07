@@ -1559,6 +1559,28 @@ try {
   await fresh(`!!window.sagebrush?.board?.snapshot && window.sagebrush.board.snapshot().doc !== null`, 60000).catch(() => false);
   const k15 = await ev(`window.sagebrush.board.snapshot().doc?.nodes?.find((n) => n.id === "k15")?.title ?? null`);
   check(writing && k15 === "Note kept", "U0: the board's New ▸ LaTeX document while a note is being written: what was typed is kept, in the board when it is opened again", { writing, atNote, k15, boardHref });
+  // (written once more, on the board opened again, for the failure below: last, as a failed keep stays failed)
+  await ev("window.sagebrush.board.editing(true), 1");
+  await ev(`Promise.resolve(window.sagebrush.board.focus(["k15"])).then(() => new Promise((r) => setTimeout(r, 400))).then(() => 1)`);
+  await ev("(() => { const r = window.board.clientRect('k15'); const x = r.left + 20, y = r.top + 12; document.elementFromPoint(x, y).dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX: x, clientY: y })); return 1; })()");
+  const writing2 = await until("window.board.editing === 'k15' && document.activeElement === document.querySelector('.board-editing .be-title')", 5000);
+  const texBefore2 = await ev(untitled);
+  // (and when what is being written can't be kept: the departure says so, the board stays, nothing made (grader's
+  // K15, @sagebrush's ruling): a board document's JSON.stringify made to throw once, for the keep alone)
+  const failed = writing2 && await ev(`(async () => {
+    const said = [], orig = JSON.stringify, alert0 = window.alert, before = location.href;
+    JSON.stringify = function (v, ...a) { if (window.__k15 && v && Array.isArray(v.nodes)) { window.__k15 = false; throw new Error("k15 test: not kept"); } return orig.call(JSON, v, ...a); };
+    window.alert = (m) => { said.push(String(m)); };
+    window.__k15 = true;
+    try {
+      document.querySelector('[data-sbb=newlatex]').click();
+      for (let i = 0; i < 100 && !said.length; i++) await new Promise((r) => setTimeout(r, 50));
+      await new Promise((r) => setTimeout(r, 300));
+      return { said, stayed: location.href === before, writing: window.board.editing === "k15" };
+    } finally { window.__k15 = false; JSON.stringify = orig; window.alert = alert0; }
+  })()`);
+  const texKept = writing2 ? await ev(untitled) : [];
+  check(failed && failed.said.length === 1 && /couldn't be kept/.test(failed.said[0]) && failed.stayed && texKept.length === texBefore2.length, "U0: the board's New ▸ LaTeX document when what is being written can't be kept: the person told why, the board stays, no .tex made", { writing2, failed, texBefore2, texKept });
   // ---- U0's entry points, each pinned (grader's r764): New LaTeX document in a folder (a folder's ⋯ menu, browser.ts;
   // the notebook page's hook; the page module's newTex), File ▸ New ▸ LaTeX document saving the notebook first, the
   // board's file panel From an example…, and the editor's File ▸ Open… and its Ctrl+O
