@@ -1075,6 +1075,36 @@ class FFVector:
             return NotImplemented
         return FFVector(self._base, [c * a for a in self._e])
 
+    def __truediv__(self, o):
+        """self / c, as Sage: self * (1/c), the inverse in c's own ring (an
+        integer's in QQ, which a vector over GF(q) refuses as a product).
+
+        EXAMPLES::
+
+            sage: vector(RDF, [49, 49])/RDF(49), vector(GF(5), [1, 2])/GF(5)(3)
+            ((0.9999999999999999, 0.9999999999999999), (2, 4))
+            sage: vector(GF(5), [1, 2])/2
+            Traceback (most recent call last):
+            ...
+            TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 5' and 'Rational Field'
+        """
+        if isinstance(o, (FFVector, FFMatrix)) or _vec_base(o) is not None:
+            return NotImplemented
+        if "Complex" in repr(_sa().parent(o)) and "Complex" not in repr(self._base):
+            # (a real vector times a complex number is over the complex field
+            # in Sage; the product here would stay real: refused, as the
+            # product is)
+            return NotImplemented
+        if isinstance(o, int) and not isinstance(o, bool):
+            # (1/o in QQ: rational division by zero for 0, as Sage)
+            inv = _sa()._QQ(1, o)
+        else:
+            try:
+                inv = 1 / o
+            except TypeError:
+                return NotImplemented
+        return self * inv
+
     def dot_product(self, o):
         """The dot product, in the ring where the two base rings meet.
 

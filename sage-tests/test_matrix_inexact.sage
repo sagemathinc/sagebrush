@@ -21,3 +21,17 @@ C = [('CC(1,2)', 'M', 'c*o'), ('CC(1,2)', 'M', 'o*c'), ('CC(1,2)', 'M', 'c+o'), 
 for sn, on, op in C:
     c, o = SC[sn](), OB[on]()
     show('%s %s %s' % (sn, on, op), lambda: sage_eval(OP[op], locals={'c': c, 'o': o}))
+# a division multiplies by the inverse, at full precision (49*(1/49) is 0.9999999999999999 in binary64 where
+# 49/49 is 1.0): a matrix or vector over RDF or CDF, or over QQ meeting one, divided by an inexact number
+D = [('RDF M / RDF(49)', lambda: matrix(RDF, [[49, 49]])/RDF(49)), ('QQ M / RDF(49)', lambda: matrix(QQ, [[49, 98]])/RDF(49)),
+     ('QQ v / RDF(49)', lambda: vector(QQ, [49, 98])/RDF(49)), ('CDF M / CDF(49)', lambda: matrix(CDF, [[49, 49]])/CDF(49)),
+     ('QQ M / CDF(49)', lambda: matrix(QQ, [[49, 98]])/CDF(49)), ('RDF entry repr', lambda: repr((matrix(RDF, [[49]])/RDF(49))[0, 0])),
+     ('RDF v / RDF(49)', lambda: vector(RDF, [49, 49])/RDF(49)), ('RDF v / 49', lambda: vector(RDF, [49, 49])/49),
+     ('RDF v / RR(49)', lambda: vector(RDF, [49, 49])/RR(49)), ('RDF v / 1.5', lambda: vector(RDF, [3, 6])/1.5),
+     ('RDF v / (1/7)', lambda: vector(RDF, [1, 2])/(1/7)), ('RDF v / RDF(0)', lambda: vector(RDF, [1, 2])/RDF(0)),
+     ('RDF v / 0', lambda: vector(RDF, [1, 2])/0), ('CDF v / CDF(49)', lambda: vector(CDF, [49, 49])/CDF(49)),
+     ('CDF v / 2', lambda: vector(CDF, [1, 2])/2), ('CDF v / CDF(0)', lambda: vector(CDF, [1, 2])/CDF(0)),
+     ('GF5 v / GF5(3)', lambda: vector(GF(5), [1, 2])/GF(5)(3)), ('GF5 v / 2', lambda: vector(GF(5), [1, 2])/2),
+     ('QQbar v / QQbar(2)', lambda: vector(QQbar, [1, 2])/QQbar(2))]
+for n, f in D:
+    show(n, f)

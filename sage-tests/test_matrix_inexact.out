@@ -94,3 +94,22 @@ C100(1,2) v o/c | (0.20000000000000000000000000000 - 0.4000000000000000000000000
 1.5 v c-o | ERR TypeError
 1.5 v o-c | ERR TypeError
 1.5 v o/c | (0.666666666666667, 1.33333333333333) | Vector space of dimension 2 over Real Field with 53 bits of precision
+RDF M / RDF(49) | [0.9999999999999999 0.9999999999999999] | Full MatrixSpace of 1 by 2 dense matrices over Real Double Field
+QQ M / RDF(49) | [0.9999999999999999 1.9999999999999998] | Full MatrixSpace of 1 by 2 dense matrices over Real Double Field
+QQ v / RDF(49) | (0.9999999999999999, 1.9999999999999998) | Vector space of dimension 2 over Real Double Field
+CDF M / CDF(49) | [0.9999999999999998 0.9999999999999998] | Full MatrixSpace of 1 by 2 dense matrices over Complex Double Field
+QQ M / CDF(49) | [0.9999999999999998 1.9999999999999996] | Full MatrixSpace of 1 by 2 dense matrices over Complex Double Field
+RDF entry repr | 0.9999999999999999 | str
+RDF v / RDF(49) | (0.9999999999999999, 0.9999999999999999) | Vector space of dimension 2 over Real Double Field
+RDF v / 49 | (0.9999999999999999, 0.9999999999999999) | Vector space of dimension 2 over Real Double Field
+RDF v / RR(49) | (0.9999999999999999, 0.9999999999999999) | Vector space of dimension 2 over Real Double Field
+RDF v / 1.5 | (2.0, 4.0) | Vector space of dimension 2 over Real Double Field
+RDF v / (1/7) | (7.0, 14.0) | Vector space of dimension 2 over Real Double Field
+RDF v / RDF(0) | (+infinity, +infinity) | Vector space of dimension 2 over Real Double Field
+RDF v / 0 | ERR ZeroDivisionError
+CDF v / CDF(49) | (0.9999999999999998, 0.9999999999999998) | Vector space of dimension 2 over Complex Double Field
+CDF v / 2 | (0.5, 1.0) | Vector space of dimension 2 over Complex Double Field
+CDF v / CDF(0) | (NaN + NaN*I, NaN + NaN*I) | Vector space of dimension 2 over Complex Double Field
+GF5 v / GF5(3) | (2, 4) | Vector space of dimension 2 over Finite Field of size 5
+GF5 v / 2 | ERR TypeError
+QQbar v / QQbar(2) | (1/2, 1) | Vector space of dimension 2 over Algebraic Field
