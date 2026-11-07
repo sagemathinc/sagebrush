@@ -459,3 +459,20 @@ test("an annotation's error, drawn again and again: the same each draw, then a h
     "a healthy figure after each: ok",
   ]);
 });
+
+// (which error matplotlib 3.11.1 raises first, in its drawing order: the
+// text's place, the arrow's point (xycoords), the connection's style, its
+// search for the text's edge (StopIteration), the arrow's style, the box)
+test("several bad parts: matplotlib 3.11.1's first error (#801 X1-X5)", () => {
+  const out = run("import matplotlib\nREAL = 'site-packages' in (getattr(matplotlib, '__file__', '') or '')\nif REAL:\n    matplotlib.use('Agg')\nimport matplotlib.pyplot as plt\ndef t(label, f):\n    fig, ax = plt.subplots()\n    try:\n        f(ax)\n    except Exception as e:\n        print(label, 'annotate !!', type(e).__name__, str(e)[:100]); plt.close(fig); return\n    try:\n        fig.savefig('xc.svg'); print(label, 'ok')\n    except Exception as e:\n        print(label, '!!', type(e).__name__, str(e)[:100])\n    plt.close(fig)\nt('X1 offset text, bad xycoords', lambda ax: ax.annotate('t', (0.5, 0.5), (5, 5), xycoords='bogus', textcoords='offset points'))\nt('X1 offset text, bad xycoords, clip=False', lambda ax: ax.annotate('t', (0.5, 0.5), (5, 5), xycoords='bogus', textcoords='offset points', annotation_clip=False))\nt('X2 arrow, bad xycoords', lambda ax: ax.annotate('t', (0.5, 0.5), (0.2, 0.2), xycoords='bogus', textcoords='data', arrowprops=dict(arrowstyle='->')))\nt('X2 arrow, bad xycoords, clip=False', lambda ax: ax.annotate('t', (0.5, 0.5), (0.2, 0.2), xycoords='bogus', textcoords='data', annotation_clip=False, arrowprops=dict(arrowstyle='->')))\nt('X5 inf xytext, bad textcoords, arrow', lambda ax: ax.annotate('t', (0.5, 0.5), (float('inf'), 0), textcoords='bogus', arrowprops=dict(arrowstyle='->')))\nt('X5 inf xytext, bad arrowstyle', lambda ax: ax.annotate('t', (0.5, 0.5), (float('inf'), 0), arrowprops=dict(arrowstyle=5)))\nt('X5 inf xytext, bad xycoords, arrow', lambda ax: ax.annotate('t', (0.5, 0.5), (float('inf'), 0), xycoords='bogus', textcoords='data', arrowprops=dict(arrowstyle='->')))\nt('X3 bad textcoords and arrowstyle', lambda ax: ax.annotate('t', (0.5, 0.5), (0, 0), textcoords='bogus', arrowprops=dict(arrowstyle=5)))\n");
+  assert.deepEqual(out.trim().split("\n").map((l) => l.trimEnd()), [
+    "X1 offset text, bad xycoords !! ValueError 'bogus' is not a valid coordinate",
+    "X1 offset text, bad xycoords, clip=False !! ValueError 'bogus' is not a valid coordinate",
+    "X2 arrow, bad xycoords !! ValueError 'bogus' is not a valid coordinate",
+    "X2 arrow, bad xycoords, clip=False !! ValueError 'bogus' is not a valid coordinate",
+    "X5 inf xytext, bad textcoords, arrow !! ValueError 'bogus' is not a valid coordinate",
+    "X5 inf xytext, bad arrowstyle !! StopIteration",
+    "X5 inf xytext, bad xycoords, arrow !! ValueError 'bogus' is not a valid coordinate",
+    "X3 bad textcoords and arrowstyle !! ValueError 'bogus' is not a valid coordinate",
+  ]);
+});

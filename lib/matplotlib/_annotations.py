@@ -43,6 +43,10 @@ class _Later(Exception):
     its class and arguments (args): Text.svg raises a fresh one each draw."""
 
 
+class _ArrowStyleLater(_Later):
+    """_Later from an arrow's arrowstyle, which matplotlib calls last."""
+
+
 def _coords(c, size_pt, textcoords):
     if hasattr(c, "_axes_fraction"):  # ax.transAxes
         return "axes fraction", 1, False
@@ -136,23 +140,31 @@ def annotation(text, xy, xytext, xycoords, textcoords, arrowprops, annotation_cl
         else:
             o["only_inside"] = (x, y, {"coords": xc})
     # (then, if drawn: the text's place, the arrow's point, its style, the box)
+    # (in matplotlib's order: the connection's style, its search for the
+    # text's edge, the arrow's style, the box)
     later = terr
-    try:
-        if arrowprops is not None:
+    if arrowprops is not None:
+        later = later or xerr
+        head = None
+        try:
             o["arrow"] = _arrow_options(arrowprops, (x, y, xc), size_pt)
-            later = later or xerr
+        except _ArrowStyleLater as e:
+            head = e.args
+        except _Later as e:
+            later = later or e.args
+        if not all(math.isfinite(float(v)) for v in xytext):
+            later = later or (StopIteration,)  # (as matplotlib, whose arrow search finds no point of such a text)
+        later = later or head
+    try:
         if kw.get("bbox") is not None:
             o["box"] = text_box(kw["bbox"], size_pt)
     except _Later as e:
-        o.pop("arrow", None)
         later = later or e.args
-    if "arrow" in o and not all(math.isfinite(float(v)) for v in xytext):
-        later = later or (StopIteration,)  # (as matplotlib, whose arrow search finds no point of such a text)
-    if later:
+    if later:  # (it raises if drawn: nothing of it is drawn)
         o["later"] = later
-    if terr or (xerr and "arrow" in o):
         o.pop("arrow", None)
-        tx = ty = 0.0  # (not drawn: it raises first)
+    if terr:
+        tx = ty = 0.0  # (no place for the text: it raises first)
     # (an annotation has no clip box: it is drawn wherever it is)
     return Text(text, tx, ty, no_bbox=True, clip=False, **dict(text_options, **o))
 
@@ -209,7 +221,10 @@ def _arrow_options(props, end, size_pt):
                  tail_width=props.pop("width", 4) / ms)
         props.pop("shrinkA", None), props.pop("shrinkB", None)
     else:
-        name, params = _style(style, "arrowstyle", ("simple",) + tuple(_CURVES))
+        try:
+            name, params = _style(style, "arrowstyle", ("simple",) + tuple(_CURVES))
+        except _Later as e:  # (matplotlib calls the arrow's style last)
+            raise _ArrowStyleLater(*e.args) from None
         if name == "simple":
             a = dict(style="simple", head_length=params.get("head_length", 0.5), head_width=params.get("head_width", 0.5),
                      tail_width=params.get("tail_width", 0.2))
