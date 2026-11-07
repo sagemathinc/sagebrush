@@ -324,6 +324,18 @@ def _coerces_into(x, B):
     return _coef_coerces(k, K)
 
 
+def _inexact_parent(o):
+    """The field of o when o is an inexact real or complex number (RR, RDF, CC, CDF, RealField(p),
+    ComplexField(p), a float literal), else None."""
+    if isinstance(o, bool) or not hasattr(o, "parent"):
+        return None
+    try:
+        P = o.parent()
+    except Exception:
+        return None
+    return P if type(P).__name__ in ("_RealField", "RealField_", "RealDoubleField_", "ComplexField_", "ComplexDoubleField_") else None
+
+
 def _names(R):
     """A ring's variable names as a tuple."""
     return tuple(R.variable_names()) if hasattr(R, "variable_names") else (R.variable_name(),)
@@ -873,6 +885,13 @@ class Series:
             if isinstance(o, Series) and not _coerces(P, B) and _coerces(B, P):
                 return P
             return _series_pushout(B, P)
+        # an inexact number (RR, RDF, CC, CDF, RealField(p), ComplexField(p)) moves an exact base
+        # to its field: QQ[[y]] times RR(1.5) is over RR, not 3/2 over QQ (Sage)
+        I = None if isinstance(o, Series) else _inexact_parent(o)
+        if I is not None and (B is _sa().ZZ or B is _sa().QQ):
+            return I
+        if I is not None and _poly_base(B) and B.base_ring() in (_sa().ZZ, _sa().QQ):
+            return B.change_ring(I)
         if _poly_base(B) and not isinstance(o, Series):
             return self._poly_target(o, op)
         F = _frac(B)
@@ -1054,6 +1073,11 @@ class Series:
         B = self._R._base
         # (a polynomial in the series variable divides as a series, not as a scalar)
         scalar = not isinstance(o, Series) and not self._R._var_poly(o)
+        if scalar and _inexact_parent(o) is not None:
+            # by an inexact number: in its field first (Sage: (1 + x)/RR(1.5) over ZZ is over RR)
+            T = self._target_base(o, "/")
+            if T is not B:
+                return self._over(T).__truediv__(o)
         if _is_padic(B) and scalar:
             # by a scalar: over the fraction field (Sage: T/2 and T/Zp(5)(2)
             # are over Qp; the review's CORR-D9E-2), joined with the
@@ -1105,7 +1129,13 @@ class Series:
             return Series(self._R, 0, [], None)
         if o2._prec is None and len(o2._c) == 1 and o2._v == 0 and self._prec is None and not _is_padic(B):
             # exact division by a constant stays exact
-            return Series(self._R, self._v, [self._R._div(c, o2._c[0]) for c in self._c], None)
+            d = o2._c[0]
+            if _inexact_parent(d) is not None:
+                # (an inexact field multiplies by the inverse, as Sage: (1 + y)/CDF(1, 2) has
+                # 0.19999999999999998 - 0.39999999999999997*I)
+                inv = self._R._div(self._R._one(), d)
+                return Series(self._R, self._v, [c * inv for c in self._c], None)
+            return Series(self._R, self._v, [self._R._div(c, d) for c in self._c], None)
         return self * o2.inverse()
 
     def _poly_scalar_div(self, o):
