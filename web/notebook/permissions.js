@@ -140,10 +140,15 @@ export function createPermissions() {
   // (a change to the stored record, written at once: false if it couldn't be, and then nothing stored changed)
   const commit = (doc, change) => {
     const r = stored();
-    if (pending && r.migrated !== 1) applyOld(r, pending); // (the pending old choices first: this change is newer)
+    // (the pending old choices first: this change is newer. Carried, they make this a write even when the change
+    // itself is none, a repeat of an old choice included (daybreak3's same-choice case))
+    const carried = !!pending && r.migrated !== 1;
+    if (carried) applyOld(r, pending);
     const e = (r.docs[doc] ??= {});
-    if (!change(e, r)) { if (empty(e)) delete r.docs[doc]; return true; } // (nothing stored changed)
-    e.t = ++r.seq;
+    if (!change(e, r)) {
+      if (empty(e)) delete r.docs[doc];
+      if (!carried) return true; // (nothing stored changed)
+    } else e.t = ++r.seq;
     trim(r);
     const ok = write(GRANTS, r);
     if (ok && pending) settled();
