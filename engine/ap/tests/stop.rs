@@ -35,25 +35,55 @@ fn traced<T>(phases: &[&str], f: impl FnOnce() -> T) -> (T, Vec<usize>, f64, f64
     (r, counts, gap, poll)
 }
 
+/// Call f with a Stop armed at check `at` (1-based, since the last reset),
+/// and time the Stop from its request to f's return: a watcher thread notes
+/// when the armed check requests it.  Returns (stopped?, the phase stopped
+/// in, ms from the request to the return).
+fn stop_at<T>(at: u64, f: impl Fn() -> T) -> (bool, &'static str, f64) {
+    use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
+    use std::sync::{Arc, Mutex};
+    hooks::reset();
+    hooks::arm_at(at);
+    let done = Arc::new(AtomicBool::new(false));
+    let asked: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
+    let watcher = {
+        let (done, asked) = (done.clone(), asked.clone());
+        std::thread::spawn(move || {
+            while !done.load(SeqCst) {
+                if sagebrush_interrupt::requested() {
+                    *asked.lock().unwrap() = Some(Instant::now());
+                    return;
+                }
+                std::hint::spin_loop();
+            }
+        })
+    };
+    let r = catch(&f);
+    let back = Instant::now();
+    done.store(true, SeqCst);
+    watcher.join().unwrap();
+    let at = hooks::stopped_in();
+    hooks::reset();
+    sagebrush_interrupt::clear();
+    let ms = asked.lock().unwrap().map_or(f64::INFINITY, |t| back.duration_since(t).as_secs_f64() * 1e3);
+    (r.is_err(), at, ms)
+}
+
 /// Stop at the median check of `phase` (from a traced run): f must stop in
-/// that phase, and within `ms` of starting.
-fn stops_in<T>(phase: &str, f: impl Fn() -> T, ms: f64) {
+/// that phase within 2 s of the Stop's request (in any build: the time to
+/// reach the median check isn't counted).
+fn stops_in<T>(phase: &str, f: impl Fn() -> T) {
     hooks::reset();
     hooks::trace();
     let _ = f();
     let idx = hooks::traced(phase);
     hooks::reset();
     assert!(!idx.is_empty(), "{phase}: no checks");
-    hooks::arm_at(idx[idx.len() / 2]);
-    let t = Instant::now();
-    let r = catch(&f);
-    let took = t.elapsed().as_secs_f64() * 1e3;
-    let at = hooks::stopped_in();
-    hooks::reset();
-    sagebrush_interrupt::clear();
-    assert!(r.is_err(), "{phase}: not stopped");
+    let (stopped, at, ms) = stop_at(idx[idx.len() / 2], &f);
+    assert!(stopped, "{phase}: not stopped");
     assert_eq!(at, phase, "stopped in the phase asked");
-    assert!(took < ms, "{phase}: stopping took {took:.0} ms");
+    eprintln!("{phase}: Stop at its median check, returned {ms:.2} ms after the request");
+    assert!(ms < 2000.0, "{phase}: returned {ms:.0} ms after the Stop's request");
 }
 
 #[test]
@@ -81,9 +111,9 @@ fn ap_kernels_stop_everywhere_and_change_nothing_otherwise() {
     assert!(gap < 50.0 && poll < 100.0, "gap {gap:.2} ms, poll gap {poll:.2} ms");
 
     // 3. Stop in each phase of each entry point; the next call works.
-    stops_in("ap.sieve", || aplist(&e, 20_000_000), 2000.0);
-    stops_in("ap.aplist", || aplist(&e, 20_000_000), 2000.0);
-    stops_in("ap.aplist_many", || aplist_many(&[e.clone(), e2.clone()], 2_000_000), 2000.0);
+    stops_in("ap.sieve", || aplist(&e, 20_000_000));
+    stops_in("ap.aplist", || aplist(&e, 20_000_000));
+    stops_in("ap.aplist_many", || aplist_many(&[e.clone(), e2.clone()], 2_000_000));
     assert_eq!(digest(&aplist(&e, 1000)), (168, 64, 7745706942851138522), "reusable after a Stop");
 
     // 4. moments(2e8): the sieve alone, traced (a 100 MB sieve), then a Stop
@@ -91,15 +121,10 @@ fn ap_kernels_stop_everywhere_and_change_nothing_otherwise() {
     let (_, counts, gap, poll) = traced(&["ap.sieve"], || primes_up_to(200_000_000));
     eprintln!("primes_up_to(2e8): {} checks; longest gap {gap:.2} ms, poll gap {poll:.2} ms", counts[0]);
     assert!(gap < 50.0 && poll < 100.0, "sieve(2e8): gap {gap:.2} ms, poll gap {poll:.2} ms");
-    hooks::reset();
-    hooks::arm_after(counts[0] as u64 / 2);
-    let t = Instant::now();
-    let r = catch(|| moments(&e, 200_000_000, 4));
-    let (took, at) = (t.elapsed().as_secs_f64() * 1e3, hooks::stopped_in());
-    hooks::reset();
-    sagebrush_interrupt::clear();
-    assert!(r.is_err() && at == "ap.sieve", "moments(2e8) stopped in its sieve ({at})");
-    assert!(took < 2000.0, "moments(2e8): stopping took {took:.0} ms");
-    stops_in("ap.moments", || moments(&e, 2_000_000, 4), 2000.0);
+    let (stopped, at, ms) = stop_at(counts[0] as u64 / 2, || moments(&e, 200_000_000, 4));
+    assert!(stopped && at == "ap.sieve", "moments(2e8) stopped in its sieve ({at})");
+    eprintln!("moments(2e8): Stop half-way through its sieve, returned {ms:.2} ms after the request");
+    assert!(ms < 2000.0, "moments(2e8): returned {ms:.0} ms after the Stop's request");
+    stops_in("ap.moments", || moments(&e, 2_000_000, 4));
     assert_eq!(digest(&aplist(&e, 1000)), (168, 64, 7745706942851138522), "reusable after a Stop");
 }
