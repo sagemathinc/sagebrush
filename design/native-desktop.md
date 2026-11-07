@@ -1,6 +1,6 @@
 # Native engines in the desktop app
 
-*Status: plan r10, the architecture revision; docs only, nothing is built. It replaces r12 (merged at 2999416e) with William's architecture decision of
+*Status: plan r11: the architecture revision (r10) with its tests added (§8.1, r11); docs only, nothing is built. It replaces r12 (merged at 2999416e) with William's architecture decision of
 Nov 7, 2026, about 12:15–12:30 PM PST.
 
 Owner and sole author: @sagebrush-remote-compute. Reviewers: astra (SEC), daybreak3 (ENGINE), daybreak4 (PERF),
@@ -254,6 +254,7 @@ Node is the baseline because r8's evidence (A) is Node. 1b is the A/A control. T
 - the permission acknowledgement window;
 - the protocol over the pipe: framing stages, bytes and the empty round-trip;
 - download, install time and **update deltas**, as bytes;
+- the installed footprint, both steady (the bundled engine plus the current one) and at the peak of an update (bundled, current, the download being staged and any rollback copy);
 - the licence inventory (§4.2).
 
 **Machine-independent work already done or in progress** (branch `n1-native-proto`, never merged):
@@ -265,18 +266,63 @@ Node is the baseline because r8's evidence (A) is Node. 1b is the A/A control. T
 - the labels become the three runtimes above;
 - the measurements are those listed here. The page and webview marks are dropped; the subprocess's own marks stay.
 
-r4 goes back to PERF. Counted runs still need PERF's final harness and packet review, and William's machine answers (Q1 Windows, Q2 m1 GUI, Q3 sudo on a build VM, Q5 a timing box).
+r4 goes back to PERF. Counted runs still need PERF's final harness and packet review. William answered the machine questions on Nov 7 (about 12:46 PM PST): Windows runs use a CI workflow he adds himself; the m1 GUI "Yes, for N1 only"; sudo packages and the VM3/VM4 timing box "Yes to both".
 
-## 8. Milestones
+## 8. Milestones and tests
 
 | | Work | Gate |
 |---|---|---|
 | **N0** | r10 reviewed; William's architecture decision recorded | all lanes; William |
 | **N1** | §7: runtime comparison, protocol over the pipe, licence inventory; unsigned local builds only | ENGINE, PERF, SIZE, SEC |
-| **N2** | The protocol and handshake in the page client and the engine. Then: the engine subprocess on macOS and Linux with the chosen runtime, the bundled engine in the app, engine upgrades, the licence check in CI, and permissions in the engine | all lanes |
-| **N3** | Windows parity | all lanes |
+| **N2** | The protocol and handshake in the page client and the engine. Then: the engine subprocess on macOS and Linux with the chosen runtime, the bundled engine in the app, engine upgrades, the licence check in CI, and permissions in the engine | all lanes, with the §8.1 tests (T1–T5) passing |
+| **N3** | Windows parity | all lanes; the same T1 suite passes on the Windows subprocess |
 | **N4** | The engine as the desktop default; "Your computer" on the engine, if William decides so (Q2) | William |
 | **N5** | Later, planned separately: CPython and C extensions, terminals over the protocol, Android native, warm engines | — |
+
+### 8.1 Tests
+
+**T1. One conformance suite for every transport.** "A transport may change how a message travels, never what it means" (§2.1) is tested by one suite of protocol cases, run unchanged on each transport.
+- **It lives in** `test/engine-protocol/`: the cases, plus one small adapter per transport. It grows from N1-2's conformance rows 1–5.
+- **It covers:** run, input and live data; outputs; files; permission; Stop.
+- **The transports:**
+  - the local subprocess;
+  - the in-page wasm worker, in headless Chrome;
+  - the relay, against a local relay: engine/py's fake relay in core, and Miniflare in the cloud repo.
+- **A new transport, or a new OS for the subprocess, must pass it before it ships.**
+
+**T2. Handshake and skew**, each its own case, using fixture engines rather than real old builds:
+- the highest common version is chosen;
+- non-overlapping ranges give `incompatible` with the engine's range, and the connection closes. The test asserts that no run message is accepted afterwards;
+- only capabilities both sides declared are used. A fixture engine without `latex` shows LaTeX as unavailable, and the client never sends it a LaTeX request;
+- an unknown message type within a negotiated version ends the session, never a silent drop;
+- fixture engines one version older and one version newer than the app's range: the app falls back to its bundled engine and says so;
+- the relay's handshake replaces `RUNNER_MIN` with the same rule.
+
+**T3. The §2.2 control contracts, on each transport, deterministically:**
+- a stale `pv` or another generation can't reopen writes;
+- `ready` echoes `pv`, and no run comes before it;
+- a missing acknowledgement or a malformed control frame ends the generation;
+- the Stop compare-and-set gives exactly one result per request, across `done`, Stop and the hard restart;
+- a late input or live-data answer does nothing.
+
+The hard-restart deadline uses a fake clock or an injected deadline, never wall time, and no test fixes a flake by raising a timeout.
+
+**T4. Controls for the licence check** (§4.2), so a check that never fails can't pass forever:
+- an LGPL fixture dependency fails;
+- a dependency under an unlisted licence fails;
+- an MIT fixture passes;
+- `THIRD-PARTY-NOTICES.txt` must regenerate byte-identical from the inventory, so a stale notices file fails.
+
+Wiring it into a workflow file stays William's or @sagebrush's.
+
+**T5. Where they run.** PR CI stays within 10 minutes.
+
+| | Every PR | Nightly, or the APP job |
+|---|---|---|
+| T1 | Linux subprocess; wasm worker in headless Chrome | macOS and Windows subprocess; relay (local relay) |
+| T2 | all cases, against fixture engines | — |
+| T3 | Linux subprocess; wasm worker | macOS and Windows subprocess; relay |
+| T4 | all controls | — |
 
 ## 9. Questions for William
 
