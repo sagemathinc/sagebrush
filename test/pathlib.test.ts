@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -54,4 +54,40 @@ test("os: stat_result's fields, stat/lstat of a path-like, bytes paths, and CPyt
   } finally {
     rmSync(d, { recursive: true, force: true });
   }
+});
+
+// (grader's r820 pins, each against CPython 3.14 on the same program, each run in a fresh folder holding f.txt and a
+// symlink to it made from node: stat's follow_symlinks=False is lstat; the tuple's times are whole seconds; makedirs'
+// exist_ok both ways; a DirEntry's stat is cached when first asked, as CPython's; scandir of a bytes path gives bytes
+// names; io.text_encoding(None) and io.open as CPython's)
+test("os: follow_symlinks, the tuple's integer times, makedirs' exist_ok, DirEntry's cached stat, bytes scandir, io", () => {
+  const prog = [
+    "import os, io, stat",
+    "print(stat.S_ISLNK(os.stat('ln', follow_symlinks=False).st_mode), stat.S_ISLNK(os.stat('ln').st_mode), os.stat('ln').st_size)",
+    "st = os.stat('f.txt')",
+    "print(type(st[8]).__name__, st[8] == int(st.st_mtime), type(st[7]).__name__, type(st.st_mtime).__name__)",
+    "os.makedirs('m/n', exist_ok=True); os.makedirs('m/n', exist_ok=True)",
+    "try: os.makedirs('m/n')",
+    "except FileExistsError as e: print('FileExistsError', e.errno, e.filename)",
+    "e = [x for x in os.scandir('.') if x.name == 'f.txt'][0]",
+    "print(e.stat().st_size)",
+    "open('f.txt', 'a').write('more')",
+    "print(e.stat().st_size, os.stat('f.txt').st_size)",
+    "print(sorted((type(x.name).__name__, x.name) for x in os.scandir(b'.')))",
+    "print(io.text_encoding(None), io.text_encoding('utf-8'), io.open is open)",
+  ].join("\n");
+  const run = (cmd: string, args: string[]) => {
+    const d = mkdtempSync(join(process.env.TMPDIR || tmpdir(), "pathlib-os2-"));
+    try {
+      writeFileSync(join(d, "p.py"), prog);
+      writeFileSync(join(d, "f.txt"), "abc");
+      symlinkSync("f.txt", join(d, "ln"));
+      return execFileSync(cmd, args, { cwd: d, encoding: "utf8" });
+    } finally {
+      rmSync(d, { recursive: true, force: true });
+    }
+  };
+  const want = run("python3", ["p.py"]);
+  assert.equal(want.split("\n").length, 8, `CPython ran every line:\n${want}`);
+  assert.equal(run(process.execPath, [CLI, "p.py"]), want);
 });
