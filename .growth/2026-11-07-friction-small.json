@@ -1,0 +1,10 @@
+{
+ "v": 1,
+ "reason": "Seven small Sage wrong answers (friction W18 W19 W24 W26 W35 W38 W39): zero lists and the zero ideal, diff order 0 and polynomial derivatives in their ring, str(Word), ring membership of strings and other rings elements, the random_matrix upper bound, unknown series coefficients and QQ coefficients, latex(Set) and Set(ZZ) (lib/_sage_poly.py, _sage_ff.py, _sage_frac.py, _sage_mpoly.py, _sage_expr.py, _sage_crystals.py, _sage_real.py, _sage_rdf.py, _sage_lang.py, _sage_matrix.py, _sage_series.py, _sage_combinat.py) Re-measured with bun 1.4.4 (size-record.sh) on master ae28018c vs head 27d7b042: cli/lib.gen.js +2296, cli/pyjs.cjs +2764, engine/lib/sage.pre +30017, engine/lib/sage.src +7115; no other row moves. Markers: exact, except cli/pyjs.cjs 2796 (+2764 measured, plus 32 B of margin, as it moves with master).",
+ "bytes": {
+  "cli/lib.gen.js": 2296,
+  "cli/pyjs.cjs": 2796,
+  "engine/lib/sage.pre": 30017,
+  "engine/lib/sage.src": 7115
+ }
+}
