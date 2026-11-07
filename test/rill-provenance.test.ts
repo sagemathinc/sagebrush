@@ -203,4 +203,3 @@ test("control: a corpus below its floor is caught", () => {
   provEdit(b, (j) => { delete j.files["rill-tests/homework/test_1.R"]; });
   has(checkCorpus(b), /fewer than its floor of 450/);
 });
-
