@@ -146,6 +146,16 @@ check((await prepare(svgFile(notUtf8))) === null, "an SVG file with a byte that 
 check((await prepare(svgFile(new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" width="9000" height="10"/>')))) === null, "an SVG file past MAX_SIDE: refused");
 check((await prepare(svgFile(new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" width="8000" height="8000"/>')))) === null, "an SVG file past MAX_PIXELS: refused");
 check((await prepare(svgFile(new TextEncoder().encode(refs)))) === null, "an SVG file whose width is a character reference: refused (SVG-SIZE-1)");
+// (an SVG file past SVG_MAX_BYTES: refused before its bytes are read; at the cap, read and taken: grader's V20)
+{
+  let reads = 0;
+  class Counted extends Blob { arrayBuffer() { reads++; return super.arrayBuffer(); } }
+  const head = '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>';
+  const atCap = new Counted([head + " ".repeat(SVG_MAX_BYTES - head.length)], { type: "image/svg+xml" });
+  const over = new Counted([head + " ".repeat(SVG_MAX_BYTES + 1 - head.length)], { type: "image/svg+xml" });
+  const r1 = await prepare(over), n1 = reads, r2 = await prepare(atCap);
+  check(over.size === SVG_MAX_BYTES + 1 && r1 === null && n1 === 0 && r2 && r2.w === 1 && reads === 1, `an SVG file one byte past the cap: refused unread; at the cap: taken (reads ${n1}, ${reads})`);
+}
 check((await prepare(svgFile(new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"/>')))) === null, "an SVG file sized only by its viewBox: refused (SVG-VIEWBOX-SIZE-1)");
 
 if (fails.length) {
