@@ -1371,7 +1371,7 @@ class Series:
             2*t + 1
         """
         from _sage_poly import PolynomialRing
-        P = PolynomialRing(self._R._base, self._R._name)
+        P = PolynomialRing(self._R._base, self._R._name, _internal=True)
         n = prec if prec is not None else (self._prec if self._prec is not None else self._v + len(self._c))
         if self._R._laurent:
             # a Laurent series: the exact Laurent series of the terms below n

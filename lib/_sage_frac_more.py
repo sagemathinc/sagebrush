@@ -50,7 +50,7 @@ def _pfd_zz(n, d, R):
     from _sage_poly import PolynomialRing, QQ
     if d.content() != 1:
         raise ArithmeticError("element is non-invertible")
-    S = PolynomialRing(QQ, R.variable_name())
+    S = PolynomialRing(QQ, R.variable_name(), _internal=True)
     q, r = n.quo_rem(d)
     F = d.factor()
     facs = list(F)
