@@ -10,6 +10,7 @@ with guard bits by Taylor series after argument reduction.  Printed as
 Sage prints them: max(2, floor((prec - 1) log10 2)) significant digits."""
 
 import math
+import sys as _sys
 from fractions import Fraction as _F
 
 _LOG10_2 = 0.30102999566398119521
@@ -1846,6 +1847,10 @@ class RealNumberMP:
     # ---- arithmetic
     def _other(self, o):
         """(o as a RealNumberMP, the field of the result), or (None, None)."""
+        m = _sys.modules.get("_sage_ff")
+        if m is not None and m.is_exact_algebraic(o):
+            # (an element of Zmod(n), a finite field or a number field refuses RealField(p), as Sage)
+            return None, None
         mp = _rr_big_mp(o)
         if mp is not None:
             # an element of RR past the doubles: its 53-bit value, the
@@ -4000,6 +4005,10 @@ class ComplexNumberMP:
         if getattr(o, "_is_ffmatrix", False):
             # (a matrix answers for itself: converting it into the field
             # recursed, so A / ComplexField(200)(1) was a RecursionError)
+            return None
+        m = _sys.modules.get("_sage_ff")
+        if m is not None and m.is_exact_algebraic(o):
+            # (an element of Zmod(n), a finite field or a number field refuses ComplexField(p), as Sage)
             return None
         if isinstance(o, RealNumberMP):
             return ComplexNumberMP(self._C, self._C._R(o), self._C._R(0))

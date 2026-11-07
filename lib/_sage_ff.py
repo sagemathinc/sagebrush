@@ -19,6 +19,7 @@ import array as _array
 import math as _m
 import random as _random
 import collections as _collections
+import sys as _sys
 from fractions import Fraction as _F
 
 
@@ -36,6 +37,67 @@ def _factor_int(n):
     if n == 1:
         return []
     return [(int(p), int(e)) for p, e in _sa().factor(n)]
+
+
+# ---- inexact numbers (RR, RDF, CC, CDF, RealField(p), ComplexField(p), a Python float
+# or complex) with Zmod(n), finite fields and number fields, their elements and
+# polynomials: Sage has no common parent and refuses (the refusal, with Sage's class
+# families, in the lazy _sage_ff_inexact), except with a number field that has an
+# embedding, where it computes (refused there too: L33).  Probed in Sage 10.10.
+
+_INEXACT_FIELDS = ("_RealField", "RealField_", "RealDoubleField_", "ComplexField_", "ComplexDoubleField_")
+
+
+def _inexact(b):
+    """"py" for a Python float or complex, "sage" for an element of RR, RDF, CC, CDF,
+    RealField(p) or ComplexField(p), else None."""
+    if type(b) in (float, complex):
+        return "py"
+    parent = getattr(type(b), "parent", None)
+    if parent is None or not callable(parent):
+        return None
+    try:
+        P = b.parent()
+    except Exception:
+        return None
+    return "sage" if type(P).__name__ in _INEXACT_FIELDS else None
+
+
+def _number_field(B):
+    nf = _sys.modules.get("_sage_nf")
+    return nf is not None and isinstance(B, nf.NumberField_absolute)
+
+
+def _exact_base(B):
+    """Whether B is Zmod(n), a finite field or a number field (Polynomial_ff also
+    serves inexact bases internally: the characteristic polynomial over RealField(p))."""
+    return isinstance(B, (IntegerModRing_, FiniteField_ext)) or _number_field(B)
+
+
+def refuse_inexact(a, b, op, rev=False):
+    """For a OP b (b OP a when rev; op "call" for a(b)), a a polynomial over or an
+    element of Zmod(n), a finite field or a number field: if b is an inexact number,
+    raise as Sage, or give False for ==; None if b is not one."""
+    k = _inexact(b)
+    if k is None:
+        return None
+    is_poly = isinstance(a, Polynomial_ff) or type(a).__name__ == "Polynomial_nf"
+    B = a.parent().base_ring() if is_poly else a.parent()
+    if not _exact_base(B):
+        return None
+    import _sage_ff_inexact
+    return _sage_ff_inexact.refuse(a, b, k, B, is_poly, op, rev)
+
+
+def is_exact_algebraic(o):
+    """Whether o is an element of Zmod(n), a finite field or a number field, or a
+    polynomial over one (CC and CDF hand those back, so that refuse_inexact decides)."""
+    if isinstance(o, (IntegerMod, FiniteFieldElement)):
+        return True
+    if isinstance(o, Polynomial_ff):
+        return _exact_base(o.parent().base_ring())
+    nf, nfp = _sys.modules.get("_sage_nf"), _sys.modules.get("_sage_nfpoly")
+    return (nf is not None and isinstance(o, nf.NumberFieldElement)) or (nfp is not None and isinstance(o, nfp.Polynomial_nf))
 
 
 def _is_prime(n):
@@ -743,8 +805,9 @@ class IntegerMod:
             _no_coercion(op, self, b)
         return None
 
-    def _coerce_pair(self, b, op):
+    def _coerce_pair(self, b, op, rev=False):
         """(ring, a, b) for a binary operation, the smaller modulus winning."""
+        refuse_inexact(self, b, op, rev)
         if isinstance(b, IntegerMod) and b._parent is not self._parent and self._parent._n % b._parent._n == 0:
             R = b._parent
             return R, self._v % R._n, b._v
@@ -761,6 +824,7 @@ class IntegerMod:
         return _elt(R, (x + y) % R._n)
 
     def __radd__(self, b):
+        refuse_inexact(self, b, "+", True)
         return self.__add__(b)
 
     def __sub__(self, b):
@@ -771,7 +835,7 @@ class IntegerMod:
         return _elt(R, (x - y) % R._n)
 
     def __rsub__(self, b):
-        t = self._coerce_pair(b, "-")
+        t = self._coerce_pair(b, "-", True)
         if t is None:
             return NotImplemented
         R, x, y = t
@@ -785,6 +849,7 @@ class IntegerMod:
         return _elt(R, x * y % R._n)
 
     def __rmul__(self, b):
+        refuse_inexact(self, b, "*", True)
         return self.__mul__(b)
 
     def _inverse_value(self, v, n):
@@ -800,7 +865,7 @@ class IntegerMod:
         return _elt(R, x * self._inverse_value(y, R._n) % R._n)
 
     def __rtruediv__(self, b):
-        t = self._coerce_pair(b, "/")
+        t = self._coerce_pair(b, "/", True)
         if t is None:
             return NotImplemented
         R, x, y = t
@@ -867,6 +932,8 @@ class IntegerMod:
             if na % nb == 0:
                 return self._v % nb == b._v
             return False
+        if _inexact(b) is not None:
+            return refuse_inexact(self, b, "==")
         try:
             v = self._other(b, "==")
         except TypeError:
@@ -2159,7 +2226,8 @@ class FiniteFieldElement:
         """
         return not any(self._c[1:])
 
-    def _coerce(self, b, op):
+    def _coerce(self, b, op, rev=False):
+        refuse_inexact(self, b, op, rev)
         if isinstance(b, FiniteFieldElement):
             if b._parent is self._parent:
                 return b
@@ -2184,7 +2252,9 @@ class FiniteFieldElement:
         p = self._parent._p
         return FiniteFieldElement(self._parent, tuple((x + y) % p for x, y in zip(self._c, b._c)))
 
-    __radd__ = __add__
+    def __radd__(self, b):
+        refuse_inexact(self, b, "+", True)
+        return self.__add__(b)
 
     def __sub__(self, b):
         if isinstance(b, FiniteFieldElement) and b._parent is not self._parent:
@@ -2197,7 +2267,7 @@ class FiniteFieldElement:
         return FiniteFieldElement(self._parent, tuple((x - y) % p for x, y in zip(self._c, b._c)))
 
     def __rsub__(self, b):
-        b = self._coerce(b, "-")
+        b = self._coerce(b, "-", True)
         if b is None:
             return NotImplemented
         return b - self
@@ -2220,7 +2290,9 @@ class FiniteFieldElement:
         prod = _pmul(_ptrim(list(self._c)), _ptrim(list(b._c)), K._p)
         return K._make(_pmod(prod, K._f, K._p))
 
-    __rmul__ = __mul__
+    def __rmul__(self, b):
+        refuse_inexact(self, b, "*", True)
+        return self.__mul__(b)
 
     def _inverse(self):
         if not self:
@@ -2238,7 +2310,7 @@ class FiniteFieldElement:
         return self * b._inverse()
 
     def __rtruediv__(self, b):
-        b = self._coerce(b, "/")
+        b = self._coerce(b, "/", True)
         if b is None:
             return NotImplemented
         return b * self._inverse()
@@ -2269,6 +2341,8 @@ class FiniteFieldElement:
             except TypeError:
                 return False
             return a._c == b._c
+        if _inexact(b) is not None:
+            return refuse_inexact(self, b, "==")
         try:
             b = self._coerce(b, "==")
         except TypeError:
@@ -3795,6 +3869,7 @@ class Polynomial_ff:
             return None
 
     def __add__(self, b):
+        refuse_inexact(self, b, "+")
         b = self._coerce(b)
         if b is None:
             return NotImplemented
@@ -3802,24 +3877,29 @@ class Polynomial_ff:
         z = self._ring._base.zero()
         return Polynomial_ff(self._ring, [(self._c[i] if i < len(self._c) else z) + (b._c[i] if i < len(b._c) else z) for i in range(n)])
 
-    __radd__ = __add__
+    def __radd__(self, b):
+        refuse_inexact(self, b, "+", True)
+        return self.__add__(b)
 
     def __neg__(self):
         return Polynomial_ff(self._ring, [-c for c in self._c])
 
     def __sub__(self, b):
+        refuse_inexact(self, b, "-")
         b = self._coerce(b)
         if b is None:
             return NotImplemented
         return self + (-b)
 
     def __rsub__(self, b):
+        refuse_inexact(self, b, "-", True)
         b = self._coerce(b)
         if b is None:
             return NotImplemented
         return b + (-self)
 
     def __mul__(self, b):
+        refuse_inexact(self, b, "*")
         b = self._coerce(b)
         if b is None:
             return NotImplemented
@@ -3849,7 +3929,9 @@ class Polynomial_ff:
                     prod[i + j] = prod[i + j] + x * y
         return Polynomial_ff(self._ring, prod)
 
-    __rmul__ = __mul__
+    def __rmul__(self, b):
+        refuse_inexact(self, b, "*", True)
+        return self.__mul__(b)
 
     def __pow__(self, e, mod=None):
         e = int(e)
@@ -3909,6 +3991,7 @@ class Polynomial_ff:
         return self.quo_rem(b)[1]
 
     def __truediv__(self, b):
+        refuse_inexact(self, b, "/")
         b2 = self._coerce(b)
         if b2 is None:
             return NotImplemented
@@ -3922,10 +4005,13 @@ class Polynomial_ff:
         return _sage_frac.FractionFieldElement(self, b2)
 
     def __rtruediv__(self, b):
+        refuse_inexact(self, b, "/", True)
         import _sage_frac
         return _sage_frac.FractionFieldElement(self._ring(b), self)
 
     def __eq__(self, b):
+        if _inexact(b) is not None:
+            return refuse_inexact(self, b, "==")
         b = self._coerce(b) if not isinstance(b, Polynomial_ff) else b
         if b is None:
             return NotImplemented
@@ -3950,6 +4036,7 @@ class Polynomial_ff:
             sage: R.<x> = GF(7)[]; (x^2 + 1)(3), (x^2 + 1)(x + 1)
             (3, x^2 + 2*x + 2)
         """
+        refuse_inexact(self, x, "call")
         r = self._ring._base.zero() if not isinstance(x, Polynomial_ff) else Polynomial_ff(x._ring, [])
         for c in reversed(self._c):
             r = r * x + c
