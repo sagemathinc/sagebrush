@@ -6,10 +6,11 @@
 // an overflowing frame reported.
 //   node scripts/build-cli.mjs && node web/latex/test-latex-cli.mjs
 //   (CHROME=/path/to/chrome for the PNGs; LATEX_CLI_PNG=1 makes a missing browser a failure, not a skip)
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync, mkdirSync, copyFileSync, symlinkSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync, mkdirSync, copyFileSync, symlinkSync, truncateSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 
 const CLI = new URL("../../build/cli/pyjs.cjs", import.meta.url).pathname;
 if (!existsSync(CLI) || !existsSync(new URL("../../build/cli/sagebrush-latex.cjs", import.meta.url).pathname)) {
@@ -472,6 +473,57 @@ $\sage{1/0}$ then $\sage{2+2}$.
   const h = await run(dir, "--help");
   const x = await run(dir, "frobnicate");
   check("usage-exit-2", u.code === 2 && n.code === 2 && /no such file/.test(n.err) && x.code === 2 && h.code === 0 && h.out.includes("sagebrush latex render FILE.tex"), { u: u.err, n: n.err, x: x.err });
+  // ---- (Codex W01, python's repro/wrong/W01) an edited helper's old results never used: run records what it imported
+  // from the .tex's folder (deps: path, SHA-256); after h.py is edited, check says so (a warning: not run) and render
+  // shows the items not run, not the old value; run again, the new value. A deleted helper: the same. A results file
+  // without deps (an older one) is used exactly as before, the edit not noticed; one whose deps can't be read is not used
+  {
+    const w = join(dir, "w01");
+    mkdirSync(w);
+    writeFileSync(join(w, "h.py"), "v = 1\n");
+    writeFileSync(join(w, "d.tex"), "\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n\\begin{sagesilent}\nfrom h import v\n\\end{sagesilent}\n$\\sage{v}$\n\\end{document}\n");
+    const rp = join(w, "d.tex.results.json"), saved = () => JSON.parse(readFileSync(rp, "utf8"));
+    const r1 = await run(w, "run", "d.tex", "--json"), j1 = saved();
+    const hash = createHash("sha256").update("v = 1\n").digest("hex");
+    check("W01: run records what it imported from the .tex's folder, with its SHA-256", r1.code === 0 && JSON.stringify(j1.deps) === JSON.stringify([["h.py", hash]]) && j1.items[1].latex === "1", { code: r1.code, deps: j1.deps });
+    const c1 = await run(w, "check", "d.tex", "--json");
+    writeFileSync(join(w, "h.py"), "v = 2\n");
+    const c2 = await run(w, "check", "d.tex", "--json"), rd = await run(w, "render", "d.tex", "-o", "d.html", "--json");
+    const html = readFileSync(join(w, "d.html"), "utf8");
+    check("W01: h.py edited: check says the results aren't used (h.py changed), the items not run", c1.json?.code?.every((x) => x.state === "ok") && c2.json?.code?.every((x) => x.state === "not run") && c2.json.problems.some((p) => p.kind === "stale" && /h\.py changed or was removed since they were run/.test(p.message)), { c1: c1.json?.code, c2: c2.json?.problems });
+    check("W01: h.py edited: render shows the items not run, never the old value", rd.code === 0 && /s-notrun/.test(html) && !/<span class="katex[^"]*">.*>1<\/mn>/.test(html), { code: rd.code, chips: (html.match(/s-notrun/g) || []).length });
+    const r2 = await run(w, "run", "d.tex", "--json"), c3 = await run(w, "check", "d.tex", "--json");
+    check("W01: run again: the new value, its new hash, check clean", r2.code === 0 && saved().items[1].latex === "2" && saved().deps[0][1] === createHash("sha256").update("v = 2\n").digest("hex") && c3.json?.code?.every((x) => x.state === "ok") && !c3.json.problems.some((p) => p.kind === "stale"), { r2: r2.code, c3: c3.json?.problems });
+    rmSync(join(w, "h.py"));
+    const c4 = await run(w, "check", "d.tex", "--json");
+    check("W01: the helper deleted: the results aren't used", c4.json?.code?.every((x) => x.state === "not run") && c4.json.problems.some((p) => p.kind === "stale" && /h\.py/.test(p.message)), c4.json?.problems);
+    // (an older results file: no deps; the helper edited: used as before, its old value shown)
+    writeFileSync(join(w, "h.py"), "v = 3\n");
+    const old = saved(); delete old.deps; writeFileSync(rp, JSON.stringify(old) + "\n");
+    const c5 = await run(w, "check", "d.tex", "--json");
+    check("W01: a results file without deps (an older one) is used exactly as before", c5.json?.code?.every((x) => x.state === "ok") && !c5.json.problems.some((p) => p.kind === "stale"), c5.json?.problems);
+    // (deps not of the shape (a path out of the folder): not used, said)
+    const bad = saved(); bad.deps = [["../h.py", "0".repeat(64)]]; writeFileSync(rp, JSON.stringify(bad) + "\n");
+    const c6 = await run(w, "check", "d.tex", "--json");
+    check("W01: deps that can't be read (a path out of the folder): the results aren't used, said", c6.json?.code?.every((x) => x.state === "not run") && c6.json.problems.some((p) => p.kind === "stale" && /can't be read/.test(p.message)), c6.json?.problems);
+    // (astra's DEP-READ-1: one bounded reader. A helper that is a link out of the folder, a folder, or past the
+    //  budget: not read, so not used (the link's target's own hash doesn't make it so))
+    const stale = async (deps) => { const j = saved(); j.deps = deps; writeFileSync(rp, JSON.stringify(j) + "\n"); const c = await run(w, "check", "d.tex", "--json"); return c.json?.code?.every((x) => x.state === "not run") && c.json.problems.some((p) => p.kind === "stale"); };
+    writeFileSync(join(dir, "out.py"), "v = 1\n");
+    rmSync(join(w, "h.py")); symlinkSync(join(dir, "out.py"), join(w, "h.py"));
+    const viaLink = await stale([["h.py", hash]]);
+    rmSync(join(w, "h.py")); mkdirSync(join(w, "h.py"));
+    const aDir = await stale([["h.py", hash]]);
+    rmSync(join(w, "h.py"), { recursive: true }); writeFileSync(join(w, "h.py"), "v = 1\n"); writeFileSync(join(w, "big.py"), ""); truncateSync(join(w, "big.py"), 65 * 2 ** 20);
+    const past = await stale([["big.py", hash]]);
+    check("DEP-READ-1: a helper linked out of the folder, a folder, or past the budget: not read, the results not used", viaLink && aDir && past, { viaLink, aDir, past });
+    rmSync(join(w, "big.py"));
+    // (astra's DEP-SNAPSHOT-1: a helper changed while the run ran: what it imported can't be named, the results recorded
+    //  "incomplete" and not used; never left without a record, as an older file's)
+    writeFileSync(join(w, "d.tex"), "\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n\\begin{sagesilent}\nfrom h import v\n\\end{sagesilent}\n\\begin{sagesilent}\nopen('h.py', 'w').write('v = 5')\n\\end{sagesilent}\n$\\sage{v}$\n\\end{document}\n");
+    const r3 = await run(w, "run", "d.tex", "--json"), c7 = await run(w, "check", "d.tex", "--json");
+    check("DEP-SNAPSHOT-1: a helper changed during the run: recorded incomplete, the results not used, said", r3.code === 0 && saved().deps === "incomplete" && c7.json?.code?.every((x) => x.state === "not run") && c7.json.problems.some((p) => p.kind === "stale" && /didn't record everything/.test(p.message)), { r3: r3.code, deps: saved().deps, c7: c7.json?.problems });
+  }
 } finally {
   rmSync(dir, { recursive: true, force: true });
 }
