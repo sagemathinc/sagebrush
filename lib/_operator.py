@@ -1,5 +1,11 @@
 """The parts of CPython's C module _operator that Sagebrush has: lib/operator.py
-(copied unchanged from CPython) takes them in place of its pure-Python ones."""
+(copied unchanged from CPython) takes them in place of its pure-Python ones.
+
+Its functions are CPython's C functions there: builtin_function_or_method, named
+_operator's, binding to nothing as a class attribute (glob's _StringGlobber has
+concat_path = operator.add, which is not a method). Here each is operator.py's own
+pure-Python function, the same code, made one (_pyjs_types.as_builtin); the
+classes (attrgetter, itemgetter, methodcaller) stay operator.py's."""
 __all__ = ["index"]
 
 import _pyjs_types
@@ -38,3 +44,22 @@ def __getattr__(name):
         from _pyjs_digest import _compare_digest
         return _compare_digest
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def _builtins_of_operator():
+    # (operator.py imports this module last, its own functions defined: those it would take from CPython's
+    # _operator, every plain function of __all__, made builtins; index is this module's own, above)
+    import sys
+    op = sys.modules.get("operator")
+    if op is None:
+        return
+    function = type(_builtins_of_operator)
+    for name in op.__all__:
+        f = getattr(op, name, None)
+        if type(f) is function and name != "index":
+            globals()[name] = _pyjs_types.as_builtin(f, "_operator")
+            __all__.append(name)
+
+
+index = _pyjs_types.as_builtin(index, "_operator")
+_builtins_of_operator()
