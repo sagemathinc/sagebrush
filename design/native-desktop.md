@@ -1,6 +1,6 @@
 # Native engines in the desktop app
 
-*Status: plan r14: r11 (the architecture revision, its tests and the page items) with William's answers to every §9 question recorded (Nov 7, about 2:26–2:31 PM PST), and (r14) the licence invariant, the support-window clock and the PDF milestone N6 with its tests (T6) and measurements (§7.1); docs only, nothing is built. It replaces r12 (merged at 2999416e) with William's architecture decision of
+*Status: plan r15: r11 (the architecture revision, its tests and the page items) with William's answers to every §9 question recorded (Nov 7, about 2:26–2:31 PM PST), and (r14, r15) the licence invariant, the support-window clock and the PDF milestone N6 with its tests (T6) and measurements (§7.1); docs only, nothing is built. It replaces r12 (merged at 2999416e) with William's architecture decision of
 Nov 7, 2026, about 12:15–12:30 PM PST.
 
 Owner and sole author: @sagebrush-remote-compute. Reviewers: astra (SEC), daybreak3 (ENGINE), daybreak4 (PERF),
@@ -98,6 +98,7 @@ The protocol is the message set the page's worker kernel already uses (`src/note
 - **Relay:** the page already requires a minimum runner version (`RUNNER_MIN`). The handshake replaces that check with the same rule: outside the range, the page says which side to upgrade.
 - **Support window** (William, §1): **before 1.0 there is no compatibility guarantee at all.** From 1.0 on:
   - **The clock:** when an engine release first speaks protocol version $v+1$, version $v$ gets a window that ends 12 months after that release's date. The date comes from the signed release metadata, never from the person's computer clock.
+  - **The end date, exactly:** calendar arithmetic in UTC. The end date is the same day of the month 12 months later; if that day doesn't exist, it is the last day of that month (a supersession dated 2028-02-29 ends on 2029-02-28). The end date is **inclusive**: an engine release dated on it must still speak $v$.
   - **The promise:** every engine released before the window ends still speaks $v$.
   - **Several predecessors:** each older version has its own window, so an engine may speak several older versions at once. A version is dropped only after its own window ends.
   - **Before 1.0:** versions superseded before the 1.0 release get no window. The version current at 1.0 gets its window from the first release after 1.0 that supersedes it.
@@ -178,6 +179,7 @@ r4's A-vs-B timings stay withdrawn: the PyPI wheel came from a different commit.
     - The download must be staged. Its length and hash must be checked before it is extracted or run, archive paths must be validated, and the verified executable must be installed atomically.
     - It must fail closed: missing or mismatched data must never fall back to running something unverified.
     - It reuses the engine updater's verification (§4.4), not a separate verification scheme.
+    - **Not covered by this verification:** the packages Tectonic itself fetches on first use come through Tectonic's own mechanism. That is a known limit, recorded here, not a claim.
     - Signature keys and signing remain William's only. Agents use fixtures and mock metadata.
 - **The runtime is a packaging choice:** Bun (`bun build --compile`), Deno (`deno compile`) or a Node single executable. `scripts/build-cli.mjs` already builds all three (`--bun`, `--deno`, `--sea`).
   - The native Rust engine is loaded into that runtime, through N-API or the runtime's own FFI.
@@ -215,6 +217,7 @@ r4's A-vs-B timings stay withdrawn: the PyPI wheel came from a different commit.
   - The engine upgrades itself from the release channel (`engine upgrade`). The app can trigger that.
   - Every upgrade is checked against the release's published checksum.
   - Signature checks use William's keys once he sets them up (§6). No agent creates or holds an updater key, not even a test one; development uses unsigned or mock update metadata.
+  - So, for now, no test shows a signed file passing verification; T6 says so (option c) until William chooses between a fixture he signs once and an ephemeral in-memory test keypair (which would need an exception to this rule).
 - **Size and start-up:** William's CLI rule applies: judged by install time and start-up time, with no fixed size ceiling.
   - Each engine build gets its own size-gate entry, with tight growth markers.
   - N1 reports, per runtime and OS:
@@ -339,8 +342,12 @@ The current figures are uncounted pilot observations by @sagebrush (Tectonic 0.1
 - the relay's handshake replaces `RUNNER_MIN` with the same rule;
 - the support window, from fixture release metadata with fixed dates (never wall time):
   - a pre-1.0 engine may drop any older version;
-  - after 1.0, an engine dated one day inside a window still speaks that version, and one dated one day after may drop it;
-  - two older versions with live windows are both spoken.
+  - a version superseded before 1.0 gets no window, even after 1.0;
+  - the version current at 1.0 is windowed from the first post-1.0 release that supersedes it, not from the 1.0 date;
+  - after 1.0: an engine dated the day before the end date, and one dated **on** the end date, still speak $v$; one dated the day after may drop it;
+  - calendar fixtures: a supersession dated 2028-02-29 ends on 2029-02-28, and one dated 2028-01-31 ends on 2029-01-31;
+  - two older versions with live windows are both spoken;
+  - a control with the computer's clock injected far before and far after the metadata dates: the result doesn't change.
 
 **T3. The §2.2 control contracts, on each transport, deterministically:**
 - a stale `pv` or another generation can't reopen writes;
@@ -352,7 +359,7 @@ The current figures are uncounted pilot observations by @sagebrush (Tectonic 0.1
 The hard-restart deadline uses a fake clock or an injected deadline, never wall time, and no test fixes a flake by raising a timeout.
 
 **T4. Controls for the licence check** (§4.2), so a check that never fails can't pass forever:
-- an LGPL fixture dependency **outside the Bun runtime** fails;
+- an LGPL fixture dependency **outside the Bun runtime** fails, including one named like Bun (`bun-plugin-x`), so a name-prefix matcher can't pass it;
 - the Bun runtime's own LGPL inventory entries pass (the scoped exception of §4.2), and the same LGPL entry attached to any other component fails;
 - a dependency under an unlisted licence fails;
 - an MIT fixture passes;
@@ -373,10 +380,13 @@ Wiring it into a workflow file stays William's or @sagebrush's.
 **T6. PDFs and the Tectonic download** (N6), against fixture archives and mock metadata (never real keys):
 - precedence: a fixture installed TeX is used, and no offer is made;
 - with no TeX, the offer appears only on a PDF compile, and nothing is downloaded until the person accepts. An agent-started compile shows the same offer and never accepts it by itself;
-- the target, length and hash are bound: a wrong length, a wrong hash, metadata for another OS or architecture, or another version each fail before extraction;
+- the target, length and hash are bound: a wrong length, a wrong hash, metadata for another OS or architecture, or another version each fail before extraction. This holds on both routes, the pinned digest and the signed metadata;
+- verification negative controls, each failing before extraction: a bad signature; a signature by a key that isn't pinned; missing metadata; metadata without a digest;
 - signed metadata: expired metadata and a rollback to an older version both fail;
-- an archive entry with `..`, an absolute path or a link outside the destination fails;
-- a failure at any step leaves the previous state intact (no executable, or the previous verified one), and nothing unverified runs;
+- **not covered by PR CI, for now (option c):** "a signed fixture passes, and the same fixture with one byte altered fails". No agent may hold a signing key (§4.4), so until William chooses, this case is outside PR CI. His choices: (a) a fixture he signs once, with the tests carrying only its public key; or (b) an ephemeral in-memory test keypair, which needs an exception to §4.4. The negative controls above run with mock metadata;
+- an archive entry with `..`, an absolute path or a link outside the destination fails, including the Windows forms (`..\`, a drive letter such as `C:\`, and a UNC path `\\server\share`);
+- injected failures at each of four points (download, verify, extract, replace) leave the previous executable byte-identical (or still absent), run nothing unverified, and a retry starts from a clean staging area;
+- **offline, deterministically:** a network fixture that refuses connections and an injected deadline (no wall-clock assertion). The compile ends with the offline message, runs nothing, and leaves the previous state intact;
 - the notices and the source offer are installed with the executable.
 
 ## 9. Questions for William: answered
