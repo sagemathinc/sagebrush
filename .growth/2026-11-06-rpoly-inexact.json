@@ -1,12 +1,12 @@
 {
  "v": 1,
- "reason": "Polynomial rings over inexact fields, stage 1 (lib/_sage_rpoly.py: RR, RDF, CC, CDF, RealField(p) and ComplexField(p) [t] as Sage: parents, printing, arithmetic in Sage's order, evaluation, calculus; the fields' [] ; CDF bool and is_zero) Re-measured with bun 1.4.4 (size-record.sh) on the #767 head c3aabc99 (this PR's base) vs head 280c7530: cli/lib.gen.js +11068, cli/pyjs.cjs +11480, engine/lib/sage-more.src +34901, engine/lib/sage.pre +12620, engine/lib/sage.src +4744, engine/sagebrush-worker.js +29; no other row moves. Markers: exact, except cli/pyjs.cjs 11512 (+11480 measured, plus 32 B of margin, as it moves with master). Ceiling (rule 4): engine/lib/sage-more.src 415841 -> 450742, measured base 415777 and head 450678, each + 64: the lazy _sage_rpoly module is demand-loaded with sage-more.",
+ "reason": "Polynomial rings over inexact fields, stage 1 (lib/_sage_rpoly.py: RR, RDF, CC, CDF, RealField(p) and ComplexField(p) [t] as Sage: parents, printing, arithmetic in Sage's order, evaluation, calculus, Sage's errors; mixed rings refused as Sage, with a hand-back in Polynomial_ff/_nf; the fields' [] ; CDF bool and is_zero) Re-measured with bun 1.4.4 (size-record.sh) on master c3aabc99 vs head 9c98f977: cli/lib.gen.js +14284, cli/pyjs.cjs +14752, engine/lib/sage-more.src +43341, engine/lib/sage.pre +14328, engine/lib/sage.src +5236, engine/sagebrush-worker.js +29; no other row moves. Markers: exact, except cli/pyjs.cjs 14784 (+14752 measured, plus 32 B of margin, as it moves with master). Ceiling (rule 4): engine/lib/sage-more.src 415841 -> 459182, measured base 415777 and head 459118, each + 64: the lazy _sage_rpoly module is demand-loaded with sage-more.",
  "bytes": {
-  "cli/lib.gen.js": 11068,
-  "cli/pyjs.cjs": 11512,
-  "engine/lib/sage-more.src": 34901,
-  "engine/lib/sage.pre": 12620,
-  "engine/lib/sage.src": 4744,
+  "cli/lib.gen.js": 14284,
+  "cli/pyjs.cjs": 14784,
+  "engine/lib/sage-more.src": 43341,
+  "engine/lib/sage.pre": 14328,
+  "engine/lib/sage.src": 5236,
   "engine/sagebrush-worker.js": 29
  }
 }
