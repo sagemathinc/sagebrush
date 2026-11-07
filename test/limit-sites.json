@@ -4958,6 +4958,11 @@
   "owner": "pcimc quick wins 3 (@sagebrush-sage2)",
   "reason": "Sage's TypeError messages for products of a GF(q) vector with a rational or a non-ZZ matrix: matched words, no limit"
  },
+ "lib/_sage_matrix.py :: Matrix.eigenmatrix_right :: NotImplementedError: generalized eigenvector decomposition is implemented for RDF and CDF, but not for Rational Field #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "a doctest's expected output (Sage's refusal), not code"
+ },
  "lib/_sage_matrix.py :: Matrix.hermite_form :: raise NotImplementedError(\"hermite_form(transformation=True) is implemented over QQ only in sagebrush yet\") #0": {
   "class": "coverage",
   "owner": "Sage kernel (@sagebrush-sage2)",
@@ -5137,6 +5142,21 @@
   "class": "2",
   "owner": "matrices/runtime memory",
   "row": "inv-8"
+ },
+ "lib/_sage_matrix_more.py :: refuse_generalized :: raise NotImplementedError(\"generalized eigenvector decomposition is implemented for RDF and CDF, but not for %s\" % (m.base_ring(),)) #0": {
+  "class": "coverage",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "Sage's own refusal of the generalized eigenproblem over exact rings (same message): an unsupported feature in Sage too, not a cap"
+ },
+ "lib/_sage_matrix_more.py :: refuse_generalized_numeric :: ....: except NotImplementedError as e: #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "a doctest line of the RDF/CDF generalized-eigenproblem refusal's pin (grader's r800 R1-R6): it prints the refusal; nothing is capped"
+ },
+ "lib/_sage_matrix_more.py :: refuse_generalized_numeric :: raise NotImplementedError(\"the generalized eigenvalue problem (other=B) over RDF and CDF is not available in sagebrush yet\") #0": {
+  "class": "coverage",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "eigen*(B) over RDF/CDF not implemented yet (B was ignored): an unsupported feature (Sage: LAPACK), not a cap"
  },
  "lib/_sage_matrix_sr.py ::  :: _SR_MAX = 16 #0": {
   "class": "2",
