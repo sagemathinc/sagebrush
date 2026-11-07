@@ -1423,6 +1423,14 @@
    "owner": "numerics (python)"
   },
   {
+   "id": "wasm:nd-helper.ts",
+   "transport": "wasm:nd-helper.ts",
+   "status": "planned",
+   "exception": "XK",
+   "family": "numerics-core engine/nd",
+   "owner": "numerics-core"
+  },
+  {
    "id": "wasm:nd.ts",
    "transport": "wasm:nd.ts",
    "status": "planned",
