@@ -46,3 +46,10 @@ from RR | 2.0*u^2 + 1.0 | [1.0, 0.0, 2.0] | ['1.0/0.0', '-0.0/0.0', '2.0/0.0']
 -0.0 [-0.0] -0.0 0.0
 hash CC['t']([1, 2]) == hash RR['t']([1, 2]) -> True
 CC['t']([1, 2]) == RR['t']([1, 2]) -> True
+Complex Field with 100 bits of precision Real Field with 100 bits of precision True True
+Complex Field with 100 bits of precision Real Field with 100 bits of precision True True
+Complex Field with 80 bits of precision Real Field with 80 bits of precision True True
+Real Field with 100 bits of precision Integer Ring True False
+Real Field with 100 bits of precision Rational Field True False
+Complex Field with 100 bits of precision Integer Ring True False
+Real Field with 53 bits of precision Integer Ring True False

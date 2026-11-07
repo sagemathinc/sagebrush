@@ -1109,12 +1109,14 @@ class PolynomialInexact:
 
 
 def _chash(c):
-    """A coefficient's hash: as the number it is (a complex number with imaginary
-    part 0 as its real part)."""
+    """A coefficient's hash, as Sage hashes an element of RR, CC, RealField(p) or
+    ComplexField(p): through its double (Sage 10.10: hash(RealField(100)(1/3)) is
+    hash(float(...)), so RealField(100)['t']([2^60 + 1]) and ZZ['t']([2^60 + 1])
+    are equal with different hashes, and ComplexField(100)['t']([1/3]) hashes as
+    RealField(100)['t']([1/3]); a complex number with imaginary part 0 hashes as its
+    real part, as Python's)."""
     try:
         if hasattr(c, "imag") and callable(getattr(c, "imag", None)):
-            if c.imag() == 0:
-                return hash(c.real())
             return hash(complex(c))
         if isinstance(c, complex):
             return hash(c.real) if c.imag == 0 else hash(c)

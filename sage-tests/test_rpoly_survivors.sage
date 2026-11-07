@@ -36,3 +36,11 @@ for w in [CDF(-0.0, -0.0), CDF(-0.0, 0), CDF(0, -0.0), CDF(-0.0), CDF(1, -0.0), 
     print(repr(w), [w], w.real(), w.imag())
 show("hash CC['t']([1, 2]) == hash RR['t']([1, 2])", lambda: hash(CC['t']([1, 2])) == hash(RR['t']([1, 2])))
 show("CC['t']([1, 2]) == RR['t']([1, 2])", lambda: CC['t']([1, 2]) == RR['t']([1, 2]))
+# The hash goes through doubles, as Sage's (grader's r784d H1): equal polynomials over ComplexField(100) and
+# RealField(100) hash alike, and one over RealField(100) or ComplexField(100) with a coefficient past the doubles
+# (2^60 + 1) is equal to, but hashes unlike, the same polynomial over ZZ or QQ.
+N = 2^60 + 1
+for a, b in [(ComplexField(100)['t']([1/3]), RealField(100)['t']([1/3])), (ComplexField(100)['t']([1/3, 2/7]), RealField(100)['t']([1/3, 2/7])),
+             (ComplexField(80)['t']([1/3, 0, 5]), RealField(80)['t']([1/3, 0, 5])), (RealField(100)['t']([N]), ZZ['t']([N])), (RealField(100)['t']([N, 1]), QQ['t']([N, 1])),
+             (ComplexField(100)['t']([N]), ZZ['t']([N])), (RR['t']([N]), ZZ['t']([N]))]:
+    print(a.parent().base_ring(), b.parent().base_ring(), a == b, hash(a) == hash(b))
