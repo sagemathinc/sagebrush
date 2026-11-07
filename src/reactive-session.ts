@@ -20,8 +20,9 @@ import { Reactive, SCOPE_SEP, type Analysis, type CellState, type RunReport } fr
 import type { CellError } from "./notebook-graph";
 import { analyzeCell, ImportStarError } from "./dataflow";
 import { renameRedefinitions } from "./rename";
+import { modeFlags, type DocumentMode } from "./modes";
 
-export type Mode = "python" | "sage" | "magma" | "matlab";
+export type Mode = DocumentMode;
 /** what one run sent back: its time, whether it raised, ran out of time, or found the interpreter stopped */
 export interface Sent { ms: number; error: boolean; timedOut: boolean; dead: boolean; evaluated?: string }
 
@@ -76,7 +77,7 @@ export async function startInterpreter(o: { mode: Mode; entry?: string; label?: 
       kill = setTimeout(() => { dead = `the interpreter was stopped: ${label(msg.cell)} did not stop when interrupted`; void worker.terminate(); }, 2000);
     };
     if (limit < Infinity && limit > 0) timer = setTimeout(over, absolute ? clamp(limit) : START_GRACE_MS);
-    worker.postMessage({ id, code: msg.code, sage: o.mode === "sage", magma: o.mode === "magma", matlab: o.mode === "matlab", ...(msg.opts ?? {}) });
+    worker.postMessage({ id, code: msg.code, ...modeFlags(o.mode), ...(msg.opts ?? {}) });
   });
   // (warmed up first, untimed but for START_GRACE_MS: its parser, Sage's one-time load, its first imports)
   if (!dead) await send({ cell: "warm-up", code: "" }, () => {}, START_GRACE_MS, true);

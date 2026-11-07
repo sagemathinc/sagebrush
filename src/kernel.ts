@@ -30,36 +30,11 @@ import { requestCtrlC } from "./runtime/interrupt";
 import { typeName } from "./runtime/object";
 import { exitStatus } from "./notebook-session";
 import { MAGIC_PRE, MAGIC_POST, GET_IPYTHON, magicTransform } from "./magic-syntax";
+import { KERNEL_MODES, KERNEL_SPECS, isModeName, type KernelMode } from "./modes";
 
-export type Mode = "sage" | "python" | "magma" | "matlab";
+export type Mode = KernelMode;
 
-const SPECS: Record<Mode, { dir: string; display: string; language: string; info: any }> = {
-  sage: {
-    dir: "sagebrush",
-    display: "Sagebrush (Sage)",
-    language: "sage",
-    info: { name: "sage", version: "3.14", mimetype: "text/x-python", file_extension: ".sage", codemirror_mode: { name: "ipython", version: 3 }, pygments_lexer: "ipython3" },
-  },
-  python: {
-    dir: "sagebrush-python",
-    display: "Sagebrush (Python)",
-    language: "python",
-    info: { name: "python", version: "3.14", mimetype: "text/x-python", file_extension: ".py", codemirror_mode: { name: "ipython", version: 3 }, pygments_lexer: "ipython3", nbconvert_exporter: "python" },
-  },
-  magma: {
-    dir: "sagebrush-magma",
-    display: "Sagebrush (Magma)",
-    language: "magma",
-    info: { name: "magma", version: "", mimetype: "text/x-magma", file_extension: ".m" },
-  },
-  matlab: {
-    dir: "sagebrush-matlab",
-    display: "Sagebrush (MATLAB)",
-    language: "matlab",
-    // (as the MathWorks kernel describes MATLAB: Jupyter's front ends highlight it as Octave)
-    info: { name: "matlab", version: "", mimetype: "text/x-matlab", file_extension: ".m", codemirror_mode: "octave", pygments_lexer: "matlab" },
-  },
-};
+const SPECS = KERNEL_SPECS;
 
 const VERSION = () => (globalThis as any).__SAGEBRUSH_VERSION__ ?? "dev";
 // (said of a run whose worker was ended: it did not stop when interrupted;
@@ -120,8 +95,8 @@ function bundleFile(): string | null {
 function modes(args: string[]): Mode[] {
   const i = args.indexOf("--mode");
   const m = i >= 0 ? args[i + 1] : "sage";
-  if (m === "all") return ["sage", "python", "magma", "matlab"];
-  if (m !== "sage" && m !== "python" && m !== "magma" && m !== "matlab") throw new Error(`--mode must be sage, python, magma, matlab or all, not ${m}`);
+  if (m === "all") return [...KERNEL_MODES];
+  if (!isModeName(m) || KERNEL_MODES.indexOf(m) < 0) throw new Error(`--mode must be ${KERNEL_MODES.join(", ")} or all, not ${m}`);
   return [m];
 }
 

@@ -13,8 +13,9 @@
 // they do not correspond); Magma cells are not renamed.
 import { parse } from "../pyparse/src/index";
 import { preparse } from "./sagepre";
+import { isTranslated, type ModeName } from "./modes";
 
-type Mode = "python" | "sage" | "magma" | "matlab";
+type Mode = ModeName;
 
 interface Occurrence {
   line: number; // 1-based
@@ -1130,7 +1131,7 @@ export function takeInitLines(code: string): { code: string; inits: [string, str
  * attribute or an item, are never evaluated.
  */
 export function forwardRefers(code: string, name: string, mode: Mode = "python"): boolean {
-  if (mode === "magma" || mode === "matlab" || !code.includes(name)) return false;
+  if (isTranslated(mode) || !code.includes(name)) return false;
   let tree: any;
   try {
     tree = parse(mode === "sage" ? preparse(code) : code, "exec");
@@ -1183,7 +1184,7 @@ export function forwardRefers(code: string, name: string, mode: Mode = "python")
  * whose occurrences do not correspond after preparsing; a syntax error).
  */
 export function renameInCell(source: string, name: string, to: string, opts: { mode?: Mode; from?: "all" | "definition"; before?: string } = {}): string | null {
-  if (opts.mode === "magma" || opts.mode === "matlab") return null;
+  if (isTranslated(opts.mode)) return null;
   const analyzed = opts.mode === "sage" ? preparse(source) : source;
   let tree: any;
   try {

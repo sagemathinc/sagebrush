@@ -41,6 +41,7 @@ import { renameRedefinitions } from "./rename";
 import { oneLine, textLines } from "./terminal-text";
 import { CLI_READER, pictureWarning, previewsPath } from "./board-cli";
 import { DISPLAY_ENVELOPE, displayCost } from "./output-cost";
+import { isTranslated, modeFlags } from "./modes";
 
 const USAGE = `usage: sagebrush board run FILE [--json] [--timeout S] [--figures DIR] [--store-previews [-o OUT] [--preview-ms MS]]
   run every code item of a board as the board runs it in a browser (its
@@ -337,7 +338,7 @@ export async function runBoard(doc: BoardDoc, timeout: number, after?: (evaluate
       };
       // (until it starts, START_GRACE_MS at most: an interpreter that never begins it is still stopped)
       if (limit < Infinity && limit > 0) timer = setTimeout(over, absolute ? clamp(limit) : START_GRACE_MS);
-      worker.postMessage({ id, code: msg.code, sage: mode === "sage", magma: mode === "magma", matlab: mode === "matlab", ...msg.opts });
+      worker.postMessage({ id, code: msg.code, ...modeFlags(mode), ...msg.opts });
     });
     // (the interpreter warmed up first, untimed but for START_GRACE_MS: its
     // parser, Sage's one-time load, its first imports; so no item's time
@@ -353,7 +354,7 @@ export async function runBoard(doc: BoardDoc, timeout: number, after?: (evaluate
     // interpreter that can't run it is stopped, its checks not run)
     const warmChecks = async () => {
       // (Magma's and MATLAB's checks aren't run yet, each saying so: nothing to warm)
-      if (!after || !worker || dead || mode === "magma" || mode === "matlab") return;
+      if (!after || !worker || dead || isTranslated(mode)) return;
       // (its code: True; another only for the tests, from the command's environment, never the board's)
       const code = process.env.SAGEBRUSH_TEST_CHECK_WARMUP ?? "True";
       const r = await send({ cell: "check-warm-up", code: "", opts: { evaluate: { code, answer: null }, seed: seedOf("check") } }, () => {}, START_GRACE_MS, true);

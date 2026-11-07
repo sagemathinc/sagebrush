@@ -56,8 +56,9 @@ import { expandMagics, codeParser } from "../../src/magic-syntax";
 import { preparse } from "../../src/sagepre";
 import { magmaToPython } from "../../src/magma";
 import { matlabToPython } from "../../src/matlab";
+import type { DocumentMode } from "../../src/modes";
 
-export type CellKind = "python" | "sage" | "magma" | "matlab" | "markdown";
+export type CellKind = DocumentMode | "markdown";
 export type Reason =
   | { kind: "read"; cell: number } // a runtime observation (merged by the dialog, never by fileDeps)
   | { kind: "opened" | "named" | "linked" | "imported"; cell: number }

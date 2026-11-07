@@ -63,6 +63,7 @@ import { checkParams, type LiveAnswer, type LiveOp, type LiveParams } from "./li
 import { consumeCtrlC, INTR_GRADING } from "./runtime/interrupt";
 import { DISPLAY_ENVELOPE, displayCost } from "./output-cost";
 import { startLimits, type LimitsText } from "./limits";
+import { modeOfFlags } from "./modes";
 
 export interface Session {
   // text Python wrote to a file descriptor (1 or 2), when the host captures it
@@ -336,7 +337,7 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     magma: ["import _magma\n", "host"],
     matlab: ["import _matlab\n", "host"],
   };
-  const modeOf = (m: any) => (m.sage ? "sage" : m.magma ? "magma" : m.matlab ? "matlab" : "python");
+  const modeOf = (m: any) => modeOfFlags(m) ?? "python";
   /** The language's environment: "ready", "interrupted" (a Stop during the
    * load) or {error, text} (it raised; text its traceback).  Synchronous:
    * the interpreter runs one thing at a time, so loads never overlap. */

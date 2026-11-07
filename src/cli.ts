@@ -26,6 +26,7 @@ import { runNotebookServer, notebookWorker } from "./notebook";
 import { takeLimitsOption, launcherLimits, startLimits, setSessionLimits, type LimitsText } from "./limits";
 import { selectLimits } from "./limits-file";
 import { setDataRoot } from "./runtime/modules";
+import type { ReplMode, TranslatedMode } from "./modes";
 
 const VERSION = `sagebrush ${(globalThis as any).__SAGEBRUSH_VERSION__ ?? "dev"} (Python 3.14 language on a JavaScript runtime)`;
 const USAGE = `usage: sagebrush [-c cmd | -m mod | file | -] [args]
@@ -408,9 +409,6 @@ function historyFile(): string | null {
   }
 }
 
-/** The interactive prompt's language: Python (or Sage, with --sage), Magma or MATLAB. */
-type ReplMode = "python" | "magma" | "matlab";
-
 /**
  * One input typed at a Magma or MATLAB prompt, translated as the kernel's
  * cells are (src/kernel.ts) and run in the session's __main__: Magma as a
@@ -418,7 +416,7 @@ type ReplMode = "python" | "magma" | "matlab";
  * mode (its error message on stderr, and the session goes on).  The exit
  * status of a quit, else null.
  */
-function runTranslated(mode: "magma" | "matlab", src: string, main: any): number | null {
+function runTranslated(mode: TranslatedMode, src: string, main: any): number | null {
   if (mode === "magma") {
     const py = magmaSource(src, "<stdin>", "session");
     return py === null ? null : guarded(() => R.loader.exec(py, main, "exec", "<stdin>", opts()));
