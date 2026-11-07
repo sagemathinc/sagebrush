@@ -26,6 +26,17 @@ def _split(options):
     return g, p
 
 
+def _aspect_figsize(r):
+    """A figure size (inches) whose plot area has the shape of data r times
+    as wide as high, plus room for tick labels: the cropped picture Sage
+    saves (as sage_plot_fields' frames)."""
+    h = 4.6
+    w = max(2.5, min(9.0, (h - 0.5) * r + 0.75))
+    if w >= 9.0:
+        h = (w - 0.75) / r + 0.5
+    return (w, h)
+
+
 def _label(s):
     # (a label, title or text as given: its $...$ parts are typeset when it
     # is drawn, the rest stays as written, as Sage shows them through
@@ -219,6 +230,21 @@ class Graphics:
                 p["xticks"] = _ticks(xt, o.get("xmin"), o.get("xmax"), self, 0)
             if yt is not None:
                 p["yticks"] = _ticks(yt, o.get("ymin"), o.get("ymax"), self, 1)
+        ar = o.get("aspect_ratio")
+        if ar not in (None, "automatic") and not o.get("fit_aspect") and o.get("scale") is None:
+            # (a numeric aspect ratio keeps the data's ranges and gives the
+            # plot area their shape, matplotlib's adjustable='box', as Sage
+            # draws it, cropped to the drawing: the ranges were widened to
+            # the 640 x 480 canvas instead, a Riemann sum's 0..2 drawn from
+            # -1.5 to 3.5)
+            bb = Panel(self._primitives).data_bbox()
+            if bb is not None and None not in bb:
+                xa, xb, ya, yb = (float(o[k]) if o.get(k) is not None else float(v)
+                                  for k, v in zip(("xmin", "xmax", "ymin", "ymax"), bb))
+                if xb > xa and yb > ya:
+                    p.update(xmin=xa, xmax=xb, ymin=ya, ymax=yb, fit_aspect=True)
+                    if o.get("figsize") is None:
+                        o["figsize"] = _aspect_figsize((xb - xa) / ((yb - ya) * float(ar)))
         fs = o.get("figsize", (6.4, 4.8))
         if isinstance(fs, (int, float)):
             fs = (fs, fs * 0.75)
@@ -654,6 +680,14 @@ def polygon(points, **options):
 
         sage: polygon([(0, 0), (1, 0), (0, 1)], color='orange')
         Graphics object consisting of 1 graphics primitive
+        sage: polygon([(0, 0), (1, 0), (1, 1)]).aspect_ratio()
+        1.0
+
+    Its aspect ratio keeps the data's ranges and shapes the plot area, as
+    Sage draws it (the ranges are not widened to the canvas)::
+
+        sage: 'data-xr="0.0 4.0" data-yr="0.0 1.0"' in polygon([(0, 0), (4, 0), (0, 1)])._svg()  # sagebrush only
+        True
     """
     gopts, p = _split(options)
     pts = list(points)
