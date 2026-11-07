@@ -912,6 +912,44 @@ try {
         // (back on A, entry 0)
         await ev(`(history.go(-(history.state && history.state.sbTex || 0)), true)`); await until(`history.state && history.state.sbTex === 0`, 20000); await shownIs(fa); await sleep(500);
       }
+      // (18) (grader G6) the person's own Back while the fence's take-back is under way, the file shown current; the
+      // take-back then refused: the fence ends anyway, so the next file asked for opens. C 1, A 2, B 3 after A's entry 0,
+      // A shown; the switch to B decided (A's close held), A asked for again (its return held), A's close released, and
+      // Back two entries to C: C opens, current. The held return then lands, stale, on A 2: the take-back to C starts
+      // (held); the person's Back, two entries, to A 0: C's own listener takes it (C current); and only then the take-back
+      // refused. Each step released by the test, not a timer: A opens on its entry 0, its URL, the refused take-back
+      // having ended the fence; B never shown
+      {
+        const mark = "% the fence refused after the person's Back";
+        await ev(`(window.__sbTex({ path: "/sw/c.tex", fid: ${JSON.stringify(fc)} }), true)`); await shownIs(fc); await sleep(300);
+        await ev(`(window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }), true)`); await shownIs(fa); await sleep(300);
+        await watchX(fb); await holdClose(mark);
+        const nav = await ev(`(() => { const v = window.navigation; if (!v?.traverseTo) return false; const orig = v.traverseTo.bind(v); window.__late = 0;
+          v.traverseTo = (k, o) => { const n = ++window.__late;
+            if (n === 2) { const f = new Promise((_, rej) => (window.__refuse = () => rej(new Error("test: the traverse refused")))); f.catch(() => {}); return { committed: f, finished: f }; }
+            const late = new Promise((r) => (window.__land = r)); return { committed: late, finished: late.then(() => orig(k, o).finished) }; };
+          window.__navRestore = () => { delete v.traverseTo; }; return true; })()`);
+        await ev(`(window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} }), true)`);
+        const held = await until(`window.__k >= 2`, 10000);
+        await ev(`(async () => { window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }); window.__rel(); await new Promise((r) => setTimeout(r, 50)); history.go(-2); return 1; })()`);
+        const onC = await shownIs(fc);
+        // (the held return released: it lands, stale, and the take-back starts: the second traversal)
+        await ev(`(window.__land(), true)`);
+        const fenced = await until(`window.__late >= 2`, 10000);
+        const mid = await ev(`({ url: new URLSearchParams(location.search).get("tex"), at: history.state && history.state.sbTex, title: document.querySelector(".tex-title")?.textContent, ro: document.querySelector(".tex-src")?.readOnly })`);
+        await ev(`(history.go(-2), true)`);
+        // (the person's Back taken (A 0's entry), then the take-back refused)
+        const back = await until(`new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fa)} && history.state && history.state.sbTex === 0`, 10000);
+        await sleep(500);
+        await ev(`(window.__refuse(), true)`);
+        const opened = await shownIs(fa); await sleep(1500);
+        const s = await stateOf(fa), fA = await textOf(fa);
+        await ev(`(window.__navRestore?.(), delete window.__navRestore, window.__obsB?.disconnect(), true)`); await writesWork();
+        check(nav && held && onC && fenced && back && mid.title === "c.tex" && mid.url === fa && mid.at === 2 && opened && s.url === fa && s.at === 0 && s.title === "a.tex" && s.shows && s.ro === false && s.pages === 1 && !s.saw && s.kept && fA.includes(mark),
+          "U8-RETURN (grader G6; Navigation API): the person's own Back while the fence's take-back is under way (the file shown current), the take-back then refused: the fence ends, and the file gone back to opens, editable, on its entry, its URL; B never shown", { nav, held, onC, fenced, back, mid, opened, s: { ...s, src: s.src.slice(-30) }, fileA: fA.slice(-30) });
+        // (back on A, entry 0: there)
+        await until(`history.state && history.state.sbTex === 0`, 20000); await shownIs(fa); await sleep(500);
+      }
     }
     // (SB_STOP_U8: the run ends here, after the switch and return cases: for mutant runs of those)
     if (process.env.SB_STOP_U8) throw new Error("stopped after the U8 block (SB_STOP_U8)");
