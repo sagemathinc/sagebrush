@@ -1,0 +1,184 @@
+CC(1,2) y c*o | 1.00000000000000 + 2.00000000000000*I + (1.00000000000000 + 2.00000000000000*I)*y + O(y^3) | Power Series Ring in y over Complex Field with 53 bits of precision
+CC(1,2) y o*c | 1.00000000000000 + 2.00000000000000*I + (1.00000000000000 + 2.00000000000000*I)*y + O(y^3) | Power Series Ring in y over Complex Field with 53 bits of precision
+CC(1,2) y c+o | 2.00000000000000 + 2.00000000000000*I + 1.00000000000000*y + O(y^3) | Power Series Ring in y over Complex Field with 53 bits of precision
+CC(1,2) y o+c | 2.00000000000000 + 2.00000000000000*I + 1.00000000000000*y + O(y^3) | Power Series Ring in y over Complex Field with 53 bits of precision
+CC(1,2) y c-o | 2.00000000000000*I - 1.00000000000000*y + O(y^3) | Power Series Ring in y over Complex Field with 53 bits of precision
+CC(1,2) y o-c | -2.00000000000000*I + 1.00000000000000*y + O(y^3) | Power Series Ring in y over Complex Field with 53 bits of precision
+CC(1,2) y o/c | 0.200000000000000 - 0.400000000000000*I + (0.200000000000000 - 0.400000000000000*I)*y + O(y^3) | Power Series Ring in y over Complex Field with 53 bits of precision
+CC(1,2) z c*o | (1.00000000000000 + 2.00000000000000*I)*z^-1 + (1.00000000000000 + 2.00000000000000*I) | Laurent Series Ring in z over Complex Field with 53 bits of precision
+CC(1,2) z o*c | (1.00000000000000 + 2.00000000000000*I)*z^-1 + (1.00000000000000 + 2.00000000000000*I) | Laurent Series Ring in z over Complex Field with 53 bits of precision
+CC(1,2) z c+o | 1.00000000000000*z^-1 + (2.00000000000000 + 2.00000000000000*I) | Laurent Series Ring in z over Complex Field with 53 bits of precision
+CC(1,2) z o+c | 1.00000000000000*z^-1 + (2.00000000000000 + 2.00000000000000*I) | Laurent Series Ring in z over Complex Field with 53 bits of precision
+CC(1,2) z c-o | -1.00000000000000*z^-1 + 2.00000000000000*I | Laurent Series Ring in z over Complex Field with 53 bits of precision
+CC(1,2) z o-c | 1.00000000000000*z^-1 - 2.00000000000000*I | Laurent Series Ring in z over Complex Field with 53 bits of precision
+CC(1,2) z o/c | (0.200000000000000 - 0.400000000000000*I)*z^-1 + (0.200000000000000 - 0.400000000000000*I) | Laurent Series Ring in z over Complex Field with 53 bits of precision
+RR(1.5) y c*o | 1.50000000000000 + 1.50000000000000*y + O(y^3) | Power Series Ring in y over Real Field with 53 bits of precision
+RR(1.5) y o*c | 1.50000000000000 + 1.50000000000000*y + O(y^3) | Power Series Ring in y over Real Field with 53 bits of precision
+RR(1.5) y c+o | 2.50000000000000 + 1.00000000000000*y + O(y^3) | Power Series Ring in y over Real Field with 53 bits of precision
+RR(1.5) y o+c | 2.50000000000000 + 1.00000000000000*y + O(y^3) | Power Series Ring in y over Real Field with 53 bits of precision
+RR(1.5) y c-o | 0.500000000000000 - 1.00000000000000*y + O(y^3) | Power Series Ring in y over Real Field with 53 bits of precision
+RR(1.5) y o-c | -0.500000000000000 + 1.00000000000000*y + O(y^3) | Power Series Ring in y over Real Field with 53 bits of precision
+RR(1.5) y o/c | 0.666666666666667 + 0.666666666666667*y + O(y^3) | Power Series Ring in y over Real Field with 53 bits of precision
+RR(1.5) z c*o | 1.50000000000000*z^-1 + 1.50000000000000 | Laurent Series Ring in z over Real Field with 53 bits of precision
+RR(1.5) z o*c | 1.50000000000000*z^-1 + 1.50000000000000 | Laurent Series Ring in z over Real Field with 53 bits of precision
+RR(1.5) z c+o | 1.00000000000000*z^-1 + 2.50000000000000 | Laurent Series Ring in z over Real Field with 53 bits of precision
+RR(1.5) z o+c | 1.00000000000000*z^-1 + 2.50000000000000 | Laurent Series Ring in z over Real Field with 53 bits of precision
+RR(1.5) z c-o | -1.00000000000000*z^-1 + 0.500000000000000 | Laurent Series Ring in z over Real Field with 53 bits of precision
+RR(1.5) z o-c | 1.00000000000000*z^-1 - 0.500000000000000 | Laurent Series Ring in z over Real Field with 53 bits of precision
+RR(1.5) z o/c | 0.666666666666667*z^-1 + 0.666666666666667 | Laurent Series Ring in z over Real Field with 53 bits of precision
+RDF(1.5) y c*o | 1.5 + 1.5*y + O(y^3) | Power Series Ring in y over Real Double Field
+RDF(1.5) y o*c | 1.5 + 1.5*y + O(y^3) | Power Series Ring in y over Real Double Field
+RDF(1.5) y c+o | 2.5 + 1.0*y + O(y^3) | Power Series Ring in y over Real Double Field
+RDF(1.5) y o+c | 2.5 + 1.0*y + O(y^3) | Power Series Ring in y over Real Double Field
+RDF(1.5) y c-o | 0.5 - 1.0*y + O(y^3) | Power Series Ring in y over Real Double Field
+RDF(1.5) y o-c | -0.5 + 1.0*y + O(y^3) | Power Series Ring in y over Real Double Field
+RDF(1.5) y o/c | 0.6666666666666666 + 0.6666666666666666*y + O(y^3) | Power Series Ring in y over Real Double Field
+RDF(1.5) z c*o | 1.5*z^-1 + 1.5 | Laurent Series Ring in z over Real Double Field
+RDF(1.5) z o*c | 1.5*z^-1 + 1.5 | Laurent Series Ring in z over Real Double Field
+RDF(1.5) z c+o | 1.0*z^-1 + 2.5 | Laurent Series Ring in z over Real Double Field
+RDF(1.5) z o+c | 1.0*z^-1 + 2.5 | Laurent Series Ring in z over Real Double Field
+RDF(1.5) z c-o | -1.0*z^-1 + 0.5 | Laurent Series Ring in z over Real Double Field
+RDF(1.5) z o-c | 1.0*z^-1 - 0.5 | Laurent Series Ring in z over Real Double Field
+RDF(1.5) z o/c | 0.6666666666666666*z^-1 + 0.6666666666666666 | Laurent Series Ring in z over Real Double Field
+CDF(1,2) y c*o | 1.0 + 2.0*I + (1.0 + 2.0*I)*y + O(y^3) | Power Series Ring in y over Complex Double Field
+CDF(1,2) y o*c | 1.0 + 2.0*I + (1.0 + 2.0*I)*y + O(y^3) | Power Series Ring in y over Complex Double Field
+CDF(1,2) y c+o | 2.0 + 2.0*I + 1.0*y + O(y^3) | Power Series Ring in y over Complex Double Field
+CDF(1,2) y o+c | 2.0 + 2.0*I + 1.0*y + O(y^3) | Power Series Ring in y over Complex Double Field
+CDF(1,2) y c-o | 2.0*I - 1.0*y + O(y^3) | Power Series Ring in y over Complex Double Field
+CDF(1,2) y o-c | -2.0*I + 1.0*y + O(y^3) | Power Series Ring in y over Complex Double Field
+CDF(1,2) z c*o | (1.0 + 2.0*I)*z^-1 + (1.0 + 2.0*I) | Laurent Series Ring in z over Complex Double Field
+CDF(1,2) z o*c | (1.0 + 2.0*I)*z^-1 + (1.0 + 2.0*I) | Laurent Series Ring in z over Complex Double Field
+CDF(1,2) z c+o | 1.0*z^-1 + (2.0 + 2.0*I) | Laurent Series Ring in z over Complex Double Field
+CDF(1,2) z o+c | 1.0*z^-1 + (2.0 + 2.0*I) | Laurent Series Ring in z over Complex Double Field
+CDF(1,2) z c-o | -1.0*z^-1 + 2.0*I | Laurent Series Ring in z over Complex Double Field
+CDF(1,2) z o-c | 1.0*z^-1 - 2.0*I | Laurent Series Ring in z over Complex Double Field
+R100(1.5) y c*o | 1.5000000000000000000000000000 + 1.5000000000000000000000000000*y + O(y^3) | Power Series Ring in y over Real Field with 100 bits of precision
+R100(1.5) y o*c | 1.5000000000000000000000000000 + 1.5000000000000000000000000000*y + O(y^3) | Power Series Ring in y over Real Field with 100 bits of precision
+R100(1.5) y c+o | 2.5000000000000000000000000000 + 1.0000000000000000000000000000*y + O(y^3) | Power Series Ring in y over Real Field with 100 bits of precision
+R100(1.5) y o+c | 2.5000000000000000000000000000 + 1.0000000000000000000000000000*y + O(y^3) | Power Series Ring in y over Real Field with 100 bits of precision
+R100(1.5) y c-o | 0.50000000000000000000000000000 - 1.0000000000000000000000000000*y + O(y^3) | Power Series Ring in y over Real Field with 100 bits of precision
+R100(1.5) y o-c | -0.50000000000000000000000000000 + 1.0000000000000000000000000000*y + O(y^3) | Power Series Ring in y over Real Field with 100 bits of precision
+R100(1.5) y o/c | 0.66666666666666666666666666667 + 0.66666666666666666666666666667*y + O(y^3) | Power Series Ring in y over Real Field with 100 bits of precision
+R100(1.5) z c*o | 1.5000000000000000000000000000*z^-1 + 1.5000000000000000000000000000 | Laurent Series Ring in z over Real Field with 100 bits of precision
+R100(1.5) z o*c | 1.5000000000000000000000000000*z^-1 + 1.5000000000000000000000000000 | Laurent Series Ring in z over Real Field with 100 bits of precision
+R100(1.5) z c+o | 1.0000000000000000000000000000*z^-1 + 2.5000000000000000000000000000 | Laurent Series Ring in z over Real Field with 100 bits of precision
+R100(1.5) z o+c | 1.0000000000000000000000000000*z^-1 + 2.5000000000000000000000000000 | Laurent Series Ring in z over Real Field with 100 bits of precision
+R100(1.5) z c-o | -1.0000000000000000000000000000*z^-1 + 0.50000000000000000000000000000 | Laurent Series Ring in z over Real Field with 100 bits of precision
+R100(1.5) z o-c | 1.0000000000000000000000000000*z^-1 - 0.50000000000000000000000000000 | Laurent Series Ring in z over Real Field with 100 bits of precision
+R100(1.5) z o/c | 0.66666666666666666666666666667*z^-1 + 0.66666666666666666666666666667 | Laurent Series Ring in z over Real Field with 100 bits of precision
+C100(1,2) y c*o | 1.0000000000000000000000000000 + 2.0000000000000000000000000000*I + (1.0000000000000000000000000000 + 2.0000000000000000000000000000*I)*y + O(y^3) | Power Series Ring in y over Complex Field with 100 bits of precision
+C100(1,2) y o*c | 1.0000000000000000000000000000 + 2.0000000000000000000000000000*I + (1.0000000000000000000000000000 + 2.0000000000000000000000000000*I)*y + O(y^3) | Power Series Ring in y over Complex Field with 100 bits of precision
+C100(1,2) y c+o | 2.0000000000000000000000000000 + 2.0000000000000000000000000000*I + 1.0000000000000000000000000000*y + O(y^3) | Power Series Ring in y over Complex Field with 100 bits of precision
+C100(1,2) y o+c | 2.0000000000000000000000000000 + 2.0000000000000000000000000000*I + 1.0000000000000000000000000000*y + O(y^3) | Power Series Ring in y over Complex Field with 100 bits of precision
+C100(1,2) y c-o | 2.0000000000000000000000000000*I - 1.0000000000000000000000000000*y + O(y^3) | Power Series Ring in y over Complex Field with 100 bits of precision
+C100(1,2) y o-c | -2.0000000000000000000000000000*I + 1.0000000000000000000000000000*y + O(y^3) | Power Series Ring in y over Complex Field with 100 bits of precision
+C100(1,2) y o/c | 0.20000000000000000000000000000 - 0.40000000000000000000000000000*I + (0.20000000000000000000000000000 - 0.40000000000000000000000000000*I)*y + O(y^3) | Power Series Ring in y over Complex Field with 100 bits of precision
+C100(1,2) z c*o | (1.0000000000000000000000000000 + 2.0000000000000000000000000000*I)*z^-1 + (1.0000000000000000000000000000 + 2.0000000000000000000000000000*I) | Laurent Series Ring in z over Complex Field with 100 bits of precision
+C100(1,2) z o*c | (1.0000000000000000000000000000 + 2.0000000000000000000000000000*I)*z^-1 + (1.0000000000000000000000000000 + 2.0000000000000000000000000000*I) | Laurent Series Ring in z over Complex Field with 100 bits of precision
+C100(1,2) z c+o | 1.0000000000000000000000000000*z^-1 + (2.0000000000000000000000000000 + 2.0000000000000000000000000000*I) | Laurent Series Ring in z over Complex Field with 100 bits of precision
+C100(1,2) z o+c | 1.0000000000000000000000000000*z^-1 + (2.0000000000000000000000000000 + 2.0000000000000000000000000000*I) | Laurent Series Ring in z over Complex Field with 100 bits of precision
+C100(1,2) z c-o | -1.0000000000000000000000000000*z^-1 + 2.0000000000000000000000000000*I | Laurent Series Ring in z over Complex Field with 100 bits of precision
+C100(1,2) z o-c | 1.0000000000000000000000000000*z^-1 - 2.0000000000000000000000000000*I | Laurent Series Ring in z over Complex Field with 100 bits of precision
+C100(1,2) z o/c | (0.20000000000000000000000000000 - 0.40000000000000000000000000000*I)*z^-1 + (0.20000000000000000000000000000 - 0.40000000000000000000000000000*I) | Laurent Series Ring in z over Complex Field with 100 bits of precision
+1.5 y c*o | 1.50000000000000 + 1.50000000000000*y + O(y^3) | Power Series Ring in y over Real Field with 53 bits of precision
+1.5 y o*c | 1.50000000000000 + 1.50000000000000*y + O(y^3) | Power Series Ring in y over Real Field with 53 bits of precision
+1.5 y c+o | 2.50000000000000 + 1.00000000000000*y + O(y^3) | Power Series Ring in y over Real Field with 53 bits of precision
+1.5 y o+c | 2.50000000000000 + 1.00000000000000*y + O(y^3) | Power Series Ring in y over Real Field with 53 bits of precision
+1.5 y c-o | 0.500000000000000 - 1.00000000000000*y + O(y^3) | Power Series Ring in y over Real Field with 53 bits of precision
+1.5 y o-c | -0.500000000000000 + 1.00000000000000*y + O(y^3) | Power Series Ring in y over Real Field with 53 bits of precision
+1.5 y o/c | 0.666666666666667 + 0.666666666666667*y + O(y^3) | Power Series Ring in y over Real Field with 53 bits of precision
+1.5 z c*o | 1.50000000000000*z^-1 + 1.50000000000000 | Laurent Series Ring in z over Real Field with 53 bits of precision
+1.5 z o*c | 1.50000000000000*z^-1 + 1.50000000000000 | Laurent Series Ring in z over Real Field with 53 bits of precision
+1.5 z c+o | 1.00000000000000*z^-1 + 2.50000000000000 | Laurent Series Ring in z over Real Field with 53 bits of precision
+1.5 z o+c | 1.00000000000000*z^-1 + 2.50000000000000 | Laurent Series Ring in z over Real Field with 53 bits of precision
+1.5 z c-o | -1.00000000000000*z^-1 + 0.500000000000000 | Laurent Series Ring in z over Real Field with 53 bits of precision
+1.5 z o-c | 1.00000000000000*z^-1 - 0.500000000000000 | Laurent Series Ring in z over Real Field with 53 bits of precision
+1.5 z o/c | 0.666666666666667*z^-1 + 0.666666666666667 | Laurent Series Ring in z over Real Field with 53 bits of precision
+Power ZZ CC(1,2) c+t | 1.00000000000000 + 2.00000000000000*I + 1.00000000000000*x | Power Series Ring in x over Complex Field with 53 bits of precision
+Power ZZ CC(1,2) t-c | -1.00000000000000 - 2.00000000000000*I + 1.00000000000000*x | Power Series Ring in x over Complex Field with 53 bits of precision
+Power ZZ CC(1,2) (1+t)/c | 0.200000000000000 - 0.400000000000000*I + (0.200000000000000 - 0.400000000000000*I)*x | Power Series Ring in x over Complex Field with 53 bits of precision
+Power ZZ RR(1.5) c+t | 1.50000000000000 + 1.00000000000000*x | Power Series Ring in x over Real Field with 53 bits of precision
+Power ZZ RR(1.5) t-c | -1.50000000000000 + 1.00000000000000*x | Power Series Ring in x over Real Field with 53 bits of precision
+Power ZZ RR(1.5) (1+t)/c | 0.666666666666667 + 0.666666666666667*x | Power Series Ring in x over Real Field with 53 bits of precision
+Power ZZ RDF(1.5) c+t | 1.5 + 1.0*x | Power Series Ring in x over Real Double Field
+Power ZZ RDF(1.5) t-c | -1.5 + 1.0*x | Power Series Ring in x over Real Double Field
+Power ZZ RDF(1.5) (1+t)/c | 0.6666666666666666 + 0.6666666666666666*x | Power Series Ring in x over Real Double Field
+Power ZZ R100(1.5) c+t | 1.5000000000000000000000000000 + 1.0000000000000000000000000000*x | Power Series Ring in x over Real Field with 100 bits of precision
+Power ZZ R100(1.5) t-c | -1.5000000000000000000000000000 + 1.0000000000000000000000000000*x | Power Series Ring in x over Real Field with 100 bits of precision
+Power ZZ R100(1.5) (1+t)/c | 0.66666666666666666666666666667 + 0.66666666666666666666666666667*x | Power Series Ring in x over Real Field with 100 bits of precision
+Power ZZ C100(1,2) c+t | 1.0000000000000000000000000000 + 2.0000000000000000000000000000*I + 1.0000000000000000000000000000*x | Power Series Ring in x over Complex Field with 100 bits of precision
+Power ZZ C100(1,2) t-c | -1.0000000000000000000000000000 - 2.0000000000000000000000000000*I + 1.0000000000000000000000000000*x | Power Series Ring in x over Complex Field with 100 bits of precision
+Power ZZ C100(1,2) (1+t)/c | 0.20000000000000000000000000000 - 0.40000000000000000000000000000*I + (0.20000000000000000000000000000 - 0.40000000000000000000000000000*I)*x | Power Series Ring in x over Complex Field with 100 bits of precision
+Power ZZ 1.5 c+t | 1.50000000000000 + 1.00000000000000*x | Power Series Ring in x over Real Field with 53 bits of precision
+Power ZZ 1.5 t-c | -1.50000000000000 + 1.00000000000000*x | Power Series Ring in x over Real Field with 53 bits of precision
+Power ZZ 1.5 (1+t)/c | 0.666666666666667 + 0.666666666666667*x | Power Series Ring in x over Real Field with 53 bits of precision
+Power QQ['a,b'] RR(1.5) c*t | 1.50000000000000*x | Power Series Ring in x over Multivariate Polynomial Ring in a, b over Real Field with 53 bits of precision
+Power QQ['a,b'] RR(1.5) t*c | 1.50000000000000*x | Power Series Ring in x over Multivariate Polynomial Ring in a, b over Real Field with 53 bits of precision
+Power QQ['a,b'] RR(1.5) c+t | 1.50000000000000 + 1.00000000000000*x | Power Series Ring in x over Multivariate Polynomial Ring in a, b over Real Field with 53 bits of precision
+Power QQ['a,b'] RR(1.5) t-c | -1.50000000000000 + 1.00000000000000*x | Power Series Ring in x over Multivariate Polynomial Ring in a, b over Real Field with 53 bits of precision
+Power QQ['a,b'] RR(1.5) (1+t)/c | 0.666666666666667 + 0.666666666666667*x | Power Series Ring in x over Multivariate Polynomial Ring in a, b over Real Field with 53 bits of precision
+Power QQ['a,b'] RDF(1.5) c*t | 1.5*x | Power Series Ring in x over Multivariate Polynomial Ring in a, b over Real Double Field
+Power QQ['a,b'] RDF(1.5) t*c | 1.5*x | Power Series Ring in x over Multivariate Polynomial Ring in a, b over Real Double Field
+Power QQ['a,b'] RDF(1.5) c+t | 1.5 + 1.0*x | Power Series Ring in x over Multivariate Polynomial Ring in a, b over Real Double Field
+Power QQ['a,b'] RDF(1.5) t-c | -1.5 + 1.0*x | Power Series Ring in x over Multivariate Polynomial Ring in a, b over Real Double Field
+Power QQ['a,b'] RDF(1.5) (1+t)/c | 0.6666666666666666 + 0.6666666666666666*x | Power Series Ring in x over Multivariate Polynomial Ring in a, b over Real Double Field
+Power QQ['a,b'] R100(1.5) c*t | 1.5000000000000000000000000000*x | Power Series Ring in x over Multivariate Polynomial Ring in a, b over Real Field with 100 bits of precision
+Power QQ['a,b'] R100(1.5) t*c | 1.5000000000000000000000000000*x | Power Series Ring in x over Multivariate Polynomial Ring in a, b over Real Field with 100 bits of precision
+Power QQ['a,b'] R100(1.5) c+t | 1.5000000000000000000000000000 + 1.0000000000000000000000000000*x | Power Series Ring in x over Multivariate Polynomial Ring in a, b over Real Field with 100 bits of precision
+Power QQ['a,b'] R100(1.5) t-c | -1.5000000000000000000000000000 + 1.0000000000000000000000000000*x | Power Series Ring in x over Multivariate Polynomial Ring in a, b over Real Field with 100 bits of precision
+Power QQ['a,b'] R100(1.5) (1+t)/c | 0.66666666666666666666666666667 + 0.66666666666666666666666666667*x | Power Series Ring in x over Multivariate Polynomial Ring in a, b over Real Field with 100 bits of precision
+Power QQ['a,b'] 1.5 c*t | 1.50000000000000*x | Power Series Ring in x over Multivariate Polynomial Ring in a, b over Real Field with 53 bits of precision
+Power QQ['a,b'] 1.5 t*c | 1.50000000000000*x | Power Series Ring in x over Multivariate Polynomial Ring in a, b over Real Field with 53 bits of precision
+Power QQ['a,b'] 1.5 c+t | 1.50000000000000 + 1.00000000000000*x | Power Series Ring in x over Multivariate Polynomial Ring in a, b over Real Field with 53 bits of precision
+Power QQ['a,b'] 1.5 t-c | -1.50000000000000 + 1.00000000000000*x | Power Series Ring in x over Multivariate Polynomial Ring in a, b over Real Field with 53 bits of precision
+Power QQ['a,b'] 1.5 (1+t)/c | 0.666666666666667 + 0.666666666666667*x | Power Series Ring in x over Multivariate Polynomial Ring in a, b over Real Field with 53 bits of precision
+Laurent ZZ CC(1,2) c*t | (1.00000000000000 + 2.00000000000000*I)*x | Laurent Series Ring in x over Complex Field with 53 bits of precision
+Laurent ZZ CC(1,2) t*c | (1.00000000000000 + 2.00000000000000*I)*x | Laurent Series Ring in x over Complex Field with 53 bits of precision
+Laurent ZZ CC(1,2) c+t | (1.00000000000000 + 2.00000000000000*I) + 1.00000000000000*x | Laurent Series Ring in x over Complex Field with 53 bits of precision
+Laurent ZZ CC(1,2) t-c | (-1.00000000000000 - 2.00000000000000*I) + 1.00000000000000*x | Laurent Series Ring in x over Complex Field with 53 bits of precision
+Laurent ZZ CC(1,2) (1+t)/c | (0.200000000000000 - 0.400000000000000*I) + (0.200000000000000 - 0.400000000000000*I)*x | Laurent Series Ring in x over Complex Field with 53 bits of precision
+Laurent ZZ RR(1.5) c*t | 1.50000000000000*x | Laurent Series Ring in x over Real Field with 53 bits of precision
+Laurent ZZ RR(1.5) t*c | 1.50000000000000*x | Laurent Series Ring in x over Real Field with 53 bits of precision
+Laurent ZZ RR(1.5) c+t | 1.50000000000000 + 1.00000000000000*x | Laurent Series Ring in x over Real Field with 53 bits of precision
+Laurent ZZ RR(1.5) t-c | -1.50000000000000 + 1.00000000000000*x | Laurent Series Ring in x over Real Field with 53 bits of precision
+Laurent ZZ RR(1.5) (1+t)/c | 0.666666666666667 + 0.666666666666667*x | Laurent Series Ring in x over Real Field with 53 bits of precision
+Laurent ZZ RDF(1.5) c*t | 1.5*x | Laurent Series Ring in x over Real Double Field
+Laurent ZZ RDF(1.5) t*c | 1.5*x | Laurent Series Ring in x over Real Double Field
+Laurent ZZ RDF(1.5) c+t | 1.5 + 1.0*x | Laurent Series Ring in x over Real Double Field
+Laurent ZZ RDF(1.5) t-c | -1.5 + 1.0*x | Laurent Series Ring in x over Real Double Field
+Laurent ZZ RDF(1.5) (1+t)/c | 0.6666666666666666 + 0.6666666666666666*x | Laurent Series Ring in x over Real Double Field
+Laurent ZZ R100(1.5) c*t | 1.5000000000000000000000000000*x | Laurent Series Ring in x over Real Field with 100 bits of precision
+Laurent ZZ R100(1.5) t*c | 1.5000000000000000000000000000*x | Laurent Series Ring in x over Real Field with 100 bits of precision
+Laurent ZZ R100(1.5) c+t | 1.5000000000000000000000000000 + 1.0000000000000000000000000000*x | Laurent Series Ring in x over Real Field with 100 bits of precision
+Laurent ZZ R100(1.5) t-c | -1.5000000000000000000000000000 + 1.0000000000000000000000000000*x | Laurent Series Ring in x over Real Field with 100 bits of precision
+Laurent ZZ R100(1.5) (1+t)/c | 0.66666666666666666666666666667 + 0.66666666666666666666666666667*x | Laurent Series Ring in x over Real Field with 100 bits of precision
+Laurent ZZ C100(1,2) c*t | (1.0000000000000000000000000000 + 2.0000000000000000000000000000*I)*x | Laurent Series Ring in x over Complex Field with 100 bits of precision
+Laurent ZZ C100(1,2) t*c | (1.0000000000000000000000000000 + 2.0000000000000000000000000000*I)*x | Laurent Series Ring in x over Complex Field with 100 bits of precision
+Laurent ZZ C100(1,2) c+t | (1.0000000000000000000000000000 + 2.0000000000000000000000000000*I) + 1.0000000000000000000000000000*x | Laurent Series Ring in x over Complex Field with 100 bits of precision
+Laurent ZZ C100(1,2) t-c | (-1.0000000000000000000000000000 - 2.0000000000000000000000000000*I) + 1.0000000000000000000000000000*x | Laurent Series Ring in x over Complex Field with 100 bits of precision
+Laurent ZZ C100(1,2) (1+t)/c | (0.20000000000000000000000000000 - 0.40000000000000000000000000000*I) + (0.20000000000000000000000000000 - 0.40000000000000000000000000000*I)*x | Laurent Series Ring in x over Complex Field with 100 bits of precision
+Laurent ZZ 1.5 c*t | 1.50000000000000*x | Laurent Series Ring in x over Real Field with 53 bits of precision
+Laurent ZZ 1.5 t*c | 1.50000000000000*x | Laurent Series Ring in x over Real Field with 53 bits of precision
+Laurent ZZ 1.5 c+t | 1.50000000000000 + 1.00000000000000*x | Laurent Series Ring in x over Real Field with 53 bits of precision
+Laurent ZZ 1.5 t-c | -1.50000000000000 + 1.00000000000000*x | Laurent Series Ring in x over Real Field with 53 bits of precision
+Laurent ZZ 1.5 (1+t)/c | 0.666666666666667 + 0.666666666666667*x | Laurent Series Ring in x over Real Field with 53 bits of precision
+Laurent QQ['a,b'] RR(1.5) c*t | 1.50000000000000*x | Laurent Series Ring in x over Multivariate Polynomial Ring in a, b over Real Field with 53 bits of precision
+Laurent QQ['a,b'] RR(1.5) t*c | 1.50000000000000*x | Laurent Series Ring in x over Multivariate Polynomial Ring in a, b over Real Field with 53 bits of precision
+Laurent QQ['a,b'] RR(1.5) c+t | 1.50000000000000 + 1.00000000000000*x | Laurent Series Ring in x over Multivariate Polynomial Ring in a, b over Real Field with 53 bits of precision
+Laurent QQ['a,b'] RR(1.5) t-c | -1.50000000000000 + 1.00000000000000*x | Laurent Series Ring in x over Multivariate Polynomial Ring in a, b over Real Field with 53 bits of precision
+Laurent QQ['a,b'] RR(1.5) (1+t)/c | 0.666666666666667 + 0.666666666666667*x | Laurent Series Ring in x over Multivariate Polynomial Ring in a, b over Real Field with 53 bits of precision
+Laurent QQ['a,b'] RDF(1.5) c*t | 1.5*x | Laurent Series Ring in x over Multivariate Polynomial Ring in a, b over Real Double Field
+Laurent QQ['a,b'] RDF(1.5) t*c | 1.5*x | Laurent Series Ring in x over Multivariate Polynomial Ring in a, b over Real Double Field
+Laurent QQ['a,b'] RDF(1.5) c+t | 1.5 + 1.0*x | Laurent Series Ring in x over Multivariate Polynomial Ring in a, b over Real Double Field
+Laurent QQ['a,b'] RDF(1.5) t-c | -1.5 + 1.0*x | Laurent Series Ring in x over Multivariate Polynomial Ring in a, b over Real Double Field
+Laurent QQ['a,b'] RDF(1.5) (1+t)/c | 0.6666666666666666 + 0.6666666666666666*x | Laurent Series Ring in x over Multivariate Polynomial Ring in a, b over Real Double Field
+Laurent QQ['a,b'] R100(1.5) c*t | 1.5000000000000000000000000000*x | Laurent Series Ring in x over Multivariate Polynomial Ring in a, b over Real Field with 100 bits of precision
+Laurent QQ['a,b'] R100(1.5) t*c | 1.5000000000000000000000000000*x | Laurent Series Ring in x over Multivariate Polynomial Ring in a, b over Real Field with 100 bits of precision
+Laurent QQ['a,b'] R100(1.5) c+t | 1.5000000000000000000000000000 + 1.0000000000000000000000000000*x | Laurent Series Ring in x over Multivariate Polynomial Ring in a, b over Real Field with 100 bits of precision
+Laurent QQ['a,b'] R100(1.5) t-c | -1.5000000000000000000000000000 + 1.0000000000000000000000000000*x | Laurent Series Ring in x over Multivariate Polynomial Ring in a, b over Real Field with 100 bits of precision
+Laurent QQ['a,b'] R100(1.5) (1+t)/c | 0.66666666666666666666666666667 + 0.66666666666666666666666666667*x | Laurent Series Ring in x over Multivariate Polynomial Ring in a, b over Real Field with 100 bits of precision
+Laurent QQ['a,b'] 1.5 c*t | 1.50000000000000*x | Laurent Series Ring in x over Multivariate Polynomial Ring in a, b over Real Field with 53 bits of precision
+Laurent QQ['a,b'] 1.5 t*c | 1.50000000000000*x | Laurent Series Ring in x over Multivariate Polynomial Ring in a, b over Real Field with 53 bits of precision
+Laurent QQ['a,b'] 1.5 c+t | 1.50000000000000 + 1.00000000000000*x | Laurent Series Ring in x over Multivariate Polynomial Ring in a, b over Real Field with 53 bits of precision
+Laurent QQ['a,b'] 1.5 t-c | -1.50000000000000 + 1.00000000000000*x | Laurent Series Ring in x over Multivariate Polynomial Ring in a, b over Real Field with 53 bits of precision
+Laurent QQ['a,b'] 1.5 (1+t)/c | 0.666666666666667 + 0.666666666666667*x | Laurent Series Ring in x over Multivariate Polynomial Ring in a, b over Real Field with 53 bits of precision
