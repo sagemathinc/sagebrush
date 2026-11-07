@@ -1566,6 +1566,14 @@ export function hashAny(x: any): number {
   return id(x) / 32;
 }
 
+// Exact hashes (numbers or bigints, as hashExact gives) xored on one 64-bit lane, as CPython's Py_hash_t xor
+// (GenericAlias's origin ^ args; a union's members): a signed hash, -1 made -2
+export function hashXor(hs: any[]): any {
+  let h = 0n;
+  for (const x of hs) h ^= BigInt.asUintN(64, BigInt(x));
+  const r = BigInt.asIntN(64, h);
+  return normBig(r === -1n ? -2n : r);
+}
 // tuple.__hash__: the exact value, as hash() gives for a tuple (a subclass's, struct_time's, equal to its tuple's)
 export function hashTupleOf(a: any[]): any {
   return normBig(hashTupleExact(a));

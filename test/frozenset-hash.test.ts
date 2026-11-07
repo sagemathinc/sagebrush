@@ -34,6 +34,12 @@ test("a tuple subclass hashes as its tuple, and a __hash__ result in range is th
   assert.equal(run("s.py", "import time\nclass T(tuple): pass\nclass A:\n    def __init__(self, h): self.h = h\n    def __hash__(self): return self.h\nst = time.gmtime(0)\nprint(hash(st) == hash(tuple(st)), hash(T((1, 2))) == hash((1, 2)), hash(T((1, 2))))\nprint([hash(A(h)) for h in (2**62, -2**63, 2**63, -1, 2**61 - 1, 2**61, 10**30)])\nd = {(1, 2): \"t\"}; print(d[T((1, 2))], {T((1, 2)): 1}[(1, 2)], d.get(st, \"no\"))\nprint(hash(frozenset([T((1, 2))])) == hash(frozenset([(1, 2)])))\n"), "True True -3550055125485641917\n[4611686018427387904, -9223372036854775808, 4, -2, 2305843009213693951, 2305843009213693952, 465258685558744706]\nt 1 no\nTrue\n");
 });
 
+// (daybreak3's HASH-EXACT-CONSUMER-1: a GenericAlias's hash, origin ^ args, and a union's, xored over its members,
+// combine exact hashes, now often bigints, on one 64-bit lane; equal aliases and unions find each other as keys)
+test("generic aliases and unions hash, equal ones alike, as CPython's", () => {
+  assert.equal(run("g.py", "a, b = list[int], list[int]\nprint(hash(a) == hash(b), {a: 1}[b], hash(dict[str, tuple[int, ...]]) == hash(dict[str, tuple[int, ...]]))\nu, v = int | list[int], list[int] | int\nprint(hash(u) == hash(v), {u: \"u\"}[v], hash(int | str) == hash(str | int), type(hash(u)).__name__, type(hash(a)).__name__)\nprint(len({list[int], list[int], list[str], dict[str, int], int | list[int], list[int] | int}))\n"), "True 1 True\nTrue u True int int\n4\n");
+});
+
 test("polynomials over ZZ[x,y] hash apart, as in Sage (hash(x) != hash(-x))", () => {
   assert.equal(run("q.sage", "R.<x,y> = ZZ[]\nprint(hash(x) == hash(-x), hash(x + y) == hash(x - y), len({hash(x^i * y^j) for i in range(8) for j in range(8)}))\nF = R.fraction_field()\nprint(hash(F(x)/y) == hash(F(-x)/y))\n"), "False False 64\nFalse\n");
 });
