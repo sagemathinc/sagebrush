@@ -18,7 +18,7 @@ import { PAGE_CSS } from "./style";
 import { registerLatexTools, setTarget, clearTarget } from "./agent-tools";
 import { mark } from "./marks";
 import type { Example } from "./examples";
-import { sessionOf, sandboxEngine, runIn, runAndSave, folderFiles, NO_SANDBOX } from "./run-core.mjs";
+import type { sessionOf } from "./run-core.mjs";
 // (the embeddable editor, for the questions site: component.ts)
 export { mountEditor, type LatexEditor } from "./component";
 import { viewOf } from "./component";
@@ -48,6 +48,11 @@ const loadPresent = () => (presentMod ??= (import(presentTries++ ? `${presentUrl
 // for the next file opened in place; started again on a Run after it failed to start. Each Run's number: a Run is
 // current only while it is the last one asked for, on a page not disposed of)
 let sageSession: ReturnType<typeof sessionOf> | null = null;
+// (Run's code, run-core.mjs: a chunk of its own, /sagebrush-latex-run.js, fetched on the first Run (it is first-use
+//  code: the editor loads without it); a failed fetch is tried again by a URL of its own)
+const runUrl = new URL("sagebrush-latex-run.js", import.meta.url).href;
+let runMod: Promise<typeof import("./run-core.mjs")> | null = null, runTries = 0;
+const loadRun = () => (runMod ??= (import(runTries++ ? `${runUrl}?try=${runTries}` : runUrl) as Promise<typeof import("./run-core.mjs")>).catch((e) => { runMod = null; throw e; }));
 let runGen = 0;
 // (a failed fetch is forgotten, so the next try fetches again, by a URL of its own: a browser may keep a failed
 // module's result for its URL; each caller says the failure)
@@ -537,8 +542,15 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const runIdle = () => { running = false; runBtn.textContent = "Run"; runBtn.title = "Run the document's SageTeX code (Sage, in this browser)"; };
   runBtn.onclick = async () => {
     if (running) { runStop?.abort(); say("stopping…"); return; }
-    if (!host.sandbox) { say(NO_SANDBOX); return; }
-    const session = (sageSession ??= sessionOf(sandboxEngine(host.sandbox, new URL(".", import.meta.url))));
+    let rc: typeof import("./run-core.mjs");
+    try { rc = await loadRun(); } catch { say("Not run: Run's code couldn't be loaded; press Run again"); return; }
+    // (the test build only: the page test holds Run's code loading here; elsewhere this folds away)
+    if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) await (globalThis as any).__sbTexRunLoaded?.();
+    // (the page replaced or closed while Run's code loaded: this Run never starts, so nothing of the old document's
+    //  folder is listed or read (daybreak3, #824))
+    if (!live() || running) return;
+    if (!host.sandbox) { say(rc.NO_SANDBOX); return; }
+    const session = (sageSession ??= rc.sessionOf(rc.sandboxEngine(host.sandbox, new URL(".", import.meta.url))));
     const c = E.lastCheck();
     if (!c) { say("the preview is behind the source: try again when it has caught up"); return; }
     const items = (Array.isArray(c.sage) ? c.sage : []) as any[];
@@ -549,13 +561,13 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     life.signal.addEventListener("abort", stop, { once: true });
     const current = () => live() && my === runGen;
     try {
-      const r = await runAndSave({
+      const r = await rc.runAndSave({
         items, ws: host.ws, fid: host.fid, current, signal: run.signal, max: RESULTS_MAX, now: () => performance.now(),
         session: async () => { const k = await session(); if (current()) runBtn.textContent = "Running…"; return k; },
-        exec: runIn,
+        exec: rc.runIn,
         // (the .tex's folder, as it is now, given to the session: its code imports a helper beside the .tex and reads
         //  its data, read-only, as real SageTeX run in the document's folder does; nothing else of the workspace)
-        folder: async () => { const at = await host.ws.pathOfFile(host.fid); return at.ok ? folderFiles(host.ws, at.path) : { msg: "Not run: this file isn't here any more" }; },
+        folder: async () => { const at = await host.ws.pathOfFile(host.fid); return at.ok ? rc.folderFiles(host.ws, at.path) : { msg: "Not run: this file isn't here any more" }; },
         store: session, serial: session.serial, stop: stopRun.signal,
       });
       if (r.stale || !current()) return;
