@@ -303,16 +303,20 @@ try {
   // after its cache is dropped (SEC-975-4).  (The first write's completion is
   // held; meanwhile another board is loaded, which drops this one's cache;
   // then it is released: no second write may follow.)
-  await ev(`(() => { window.__holdPut = 0; window.__released = []; const put = IDBObjectStore.prototype.put; IDBObjectStore.prototype.put = function (value, key) { const r = put.call(this, value, key); if (window.__holdPut === 1 && this.name === "entries" && value && Array.isArray(value.outputs)) { window.__holdPut = 2; const t = this.transaction; let h = null; Object.defineProperty(t, "oncomplete", { configurable: true, set(f) { h = f; }, get() { return h; } }); t.addEventListener("complete", (e) => window.__released.push(() => h && h.call(t, e))); } return r; }; })(), 1`);
+  // (each hold below is armed before its board is loaded, so the write or hash it holds is the board's first one
+  // after, however long the steps between take (the test's own "big-" rows aside); the items sleep past CACHE_MS (2 s) only so that their outputs are kept.
+  // A sweep's end is an event: the board's sweep is the one read-write transaction reading the entries' "doc" index)
+  await ev(`(() => { window.__sweeps = 0; const ga = IDBIndex.prototype.getAll; IDBIndex.prototype.getAll = function (...a) { const r = ga.apply(this, a); const t = this.objectStore.transaction; if (this.objectStore.name === "entries" && this.name === "doc" && t.mode === "readwrite") t.addEventListener("complete", () => { window.__sweeps++; }); return r; }; })(), 1`);
+  await ev(`(() => { window.__holdPut = 0; window.__released = []; const put = IDBObjectStore.prototype.put; IDBObjectStore.prototype.put = function (value, key) { const r = put.call(this, value, key); if (window.__holdPut === 1 && this.name === "entries" && value && Array.isArray(value.outputs) && !String(value.key).startsWith("big-")) { window.__holdPut = 2; const t = this.transaction; let h = null; Object.defineProperty(t, "oncomplete", { configurable: true, set(f) { h = f; }, get() { return h; } }); t.addEventListener("complete", (e) => window.__released.push(() => h && h.call(t, e))); } return r; }; })(), 1`);
   const twoSlow = { title: "two slow", seed: SEED_C, nodes: [
-    { id: "t1", code: "import time\nt0 = time.time()\nwhile time.time() - t0 < 2.1:\n    pass\nprint('t1')" },
-    { id: "t2", code: "import time\nt0 = time.time()\nwhile time.time() - t0 < 2.1:\n    pass\nprint('t2')" },
+    { id: "t1", code: "import time\ntime.sleep(2.1)\nprint('t1')" },
+    { id: "t2", code: "import time\ntime.sleep(2.1)\nprint('t2')" },
   ] };
   // (in Edit: slow code keeps its preview in the board in Edit only; View writes nothing, web/doc-mode.ts)
   await ev("window.sagebrush.board.editing(true), 1");
+  await ev("window.__holdPut = 1, 1");
   await ev(`window.sagebrush.board.load(${JSON.stringify(twoSlow)}).then(() => 1)`);
   const idHeld = await ev(`localStorage.getItem(${JSON.stringify(idKey)})`);
-  await ev("window.__holdPut = 1, 1");
   check(await until("window.sagebrush.board.outputs().then((os) => os.length === 2 && os.every((o) => o.state === ''))", 60000), "two slow items ran");
   check(await until("window.__holdPut === 2 && window.__released.length === 1", 10000), "the first write is held");
   // (in Edit: slow code keeps its preview in the board in Edit only; View writes nothing, web/doc-mode.ts)
@@ -324,23 +328,24 @@ try {
   // An older run's entries, held, don't overwrite a newer run's: t1's write
   // is held, t2 runs again meanwhile, then it is released (CORR-4DF-2)
   const twoStamps = { title: "two stamps", seed: SEED_C, nodes: [
-    { id: "t1", code: "import time\nt0 = time.time()\nwhile time.time() - t0 < 2.1:\n    pass\nprint('t1')" },
-    { id: "t2", code: "import time, os\nt0 = time.time()\nwhile time.time() - t0 < 2.1:\n    pass\nprint('t2', os.urandom(8).hex())" },
+    { id: "t1", code: "import time\ntime.sleep(2.1)\nprint('t1')" },
+    { id: "t2", code: "import time, os\ntime.sleep(2.1)\nprint('t2', os.urandom(8).hex())" },
   ] };
   await ev("window.__holdPut = 0, window.__released = [], 1");
   // (in Edit: slow code keeps its preview in the board in Edit only; View writes nothing, web/doc-mode.ts)
   await ev("window.sagebrush.board.editing(true), 1");
+  await ev("window.__holdPut = 1, 1");
   await ev(`window.sagebrush.board.load(${JSON.stringify(twoStamps)}).then(() => 1)`);
   const idTwo = await ev(`localStorage.getItem(${JSON.stringify(idKey)})`);
-  await ev("window.__holdPut = 1, 1");
   check(await until("window.sagebrush.board.outputs().then((os) => os.length === 2 && os.every((o) => o.state === ''))", 60000), "two items ran");
   check(await until("window.__holdPut === 2 && window.__released.length === 1", 10000), "t1's write is held");
   await ev("window.sagebrush.board.run(['t2']).then(() => 1)");
   const newer = (await outputs()).t2.output, t2key = (await keys()).t2.key;
-  await sleep(500);
+  const sweeps2 = await ev("window.__sweeps");
   await ev("window.__released.splice(0).forEach((f) => f()), 1");
-  for (let i = 0; i < 50 && (await countFor(idTwo)) < 2; i++) await sleep(100);
-  await sleep(800);
+  // (the newer run's write was queued behind the held one: its sweep, after it, ends the writes)
+  check(await until(`window.__sweeps > ${sweeps2}`, 60000), "the writes done: the newer run's sweep");
+  check((await countFor(idTwo)) === 2, "both items' outputs are kept");
   const keptOut = await ev(`new Promise((res) => { const r = indexedDB.open('sagebrush-outputs'); r.onsuccess = () => { const db = r.result; const g = db.transaction('entries').objectStore('entries').get([${JSON.stringify(idTwo)}, ${JSON.stringify(t2key)}]); g.onsuccess = () => { db.close(); res(JSON.stringify(g.result?.outputs ?? null)); }; }; })`);
   check(keptOut.includes(newer.trim()), "t2's cached output is the newer run's: " + JSON.stringify([newer, keptOut.slice(0, 120)]));
 
@@ -351,48 +356,52 @@ try {
   await ev("window.__holdPut = 0, window.__released = [], 1");
   // (code of their own: the last board's items, with the same ids, would not run again)
   const swept = { title: "swept", seed: SEED_C, nodes: [
-    { id: "t1", code: "import time\nt0 = time.time()\nwhile time.time() - t0 < 2.1:\n    pass\nprint('t1 swept')" },
-    { id: "t2", code: "import time, os\nt0 = time.time()\nwhile time.time() - t0 < 2.1:\n    pass\nprint('t2 swept', os.urandom(8).hex())" },
+    { id: "t1", code: "import time\ntime.sleep(2.1)\nprint('t1 swept')" },
+    { id: "t2", code: "import time, os\ntime.sleep(2.1)\nprint('t2 swept', os.urandom(8).hex())" },
   ] };
   // (in Edit: slow code keeps its preview in the board in Edit only; View writes nothing, web/doc-mode.ts)
   await ev("window.sagebrush.board.editing(true), 1");
+  await ev("window.__holdPut = 1, 1");
   await ev(`window.sagebrush.board.load(${JSON.stringify(swept)}).then(() => 1)`);
   const idSwept = await ev(`localStorage.getItem(${JSON.stringify(idKey)})`);
   await ev(`new Promise((res) => { const r = indexedDB.open('sagebrush-outputs'); r.onsuccess = () => { const db = r.result, t = db.transaction(['entries', 'docs'], 'readwrite'); for (let i = 0; i < 5; i++) t.objectStore('entries').put({ doc: ${JSON.stringify(idSwept)}, key: 'big-' + i, outputs: [], at: '2026-10-14T00:00:00.000Z', ms: 1, total: 1, bytes: 16000000, used: Date.now() + 1e9 }); t.objectStore('docs').put({ doc: ${JSON.stringify(idSwept)}, bytes: 80000000, used: Date.now() }); t.oncomplete = () => { db.close(); res(1); }; }; })`);
-  await ev("window.__holdPut = 1, 1");
   check(await until("window.sagebrush.board.outputs().then((os) => os.length === 2 && os.every((o) => o.state === ''))", 60000), "the board ran");
   check(await until("window.__holdPut === 2 && window.__released.length === 1", 10000), "the older run's first write is held: " + JSON.stringify([await ev("window.__holdPut"), await countFor(idSwept), await keys()]).slice(0, 400));
   await ev(`window.sagebrush.board.edit((d) => { d.nodes.find((x) => x.id === "t2").code += "\\n2"; }).then(() => 1)`);
   check(await until("window.sagebrush.board.outputs().then((os) => os.every((o) => o.state === '') && /\\n2$/.test(os.find((o) => o.id === 't2').code))", 60000), "t2, changed, ran again");
   const newKey = (await keys()).t2.key;
+  const sweeps3 = await ev("window.__sweeps");
   await ev("window.__released.splice(0).forEach((f) => f()), 1");
-  await sleep(2500);
+  check(await until(`window.__sweeps > ${sweeps3}`, 60000), "...then the newer run's sweep, over the cap");
   const hasNew = await ev(`new Promise((res) => { const r = indexedDB.open('sagebrush-outputs'); r.onsuccess = () => { const db = r.result; const g = db.transaction('entries').objectStore('entries').get([${JSON.stringify(idSwept)}, ${JSON.stringify(newKey)}]); g.onsuccess = () => { db.close(); res(!!g.result); }; }; })`);
   check(hasNew, "the newer run's entry survives the older run's sweep");
 
   // The sweep's mark is of one moment: if an item runs while the older run's
   // keys are being found (their hash held here), that sweep doesn't happen,
   // and the newer entry stays, the board over its cap (CORR-68B-2)
-  await ev(`(() => { window.__holdDigest = 0; const digest = crypto.subtle.digest.bind(crypto.subtle); crypto.subtle.digest = (...a) => { const p = digest(...a); if (window.__holdDigest !== 1) return p; window.__holdDigest = 2; return new Promise((res, rej) => { window.__digestHeld = () => p.then(res, rej); }); }; const put = IDBObjectStore.prototype.put; IDBObjectStore.prototype.put = function (value, key) { const r = put.call(this, value, key); if (window.__digestAfterPut && this.name === "entries" && value && Array.isArray(value.outputs)) { window.__digestAfterPut = false; this.transaction.addEventListener("complete", () => { window.__holdDigest = 1; }); } return r; }; })(), 1`);
+  await ev(`(() => { window.__holdDigest = 0; const digest = crypto.subtle.digest.bind(crypto.subtle); crypto.subtle.digest = (...a) => { const p = digest(...a); if (window.__holdDigest !== 1) return p; window.__holdDigest = 2; return new Promise((res, rej) => { window.__digestHeld = () => p.then(res, rej); }); }; const put = IDBObjectStore.prototype.put; IDBObjectStore.prototype.put = function (value, key) { const r = put.call(this, value, key); if (window.__digestAfterPut && this.name === "entries" && value && Array.isArray(value.outputs) && !String(value.key).startsWith("big-")) { window.__digestAfterPut = false; this.transaction.addEventListener("complete", () => { window.__holdDigest = 1; }); } return r; }; })(), 1`);
   await ev("window.__holdPut = 0, window.__released = [], 1");
-  const marked = { title: "marked", seed: SEED_C, nodes: [{ id: "m", code: "import time, os\nt0 = time.time()\nwhile time.time() - t0 < 2.1:\n    pass\nprint('m', os.urandom(8).hex())" }] };
+  const marked = { title: "marked", seed: SEED_C, nodes: [{ id: "m", code: "import time, os\ntime.sleep(2.1)\nprint('m', os.urandom(8).hex())" }] };
   // (in Edit: slow code keeps its preview in the board in Edit only; View writes nothing, web/doc-mode.ts)
   await ev("window.sagebrush.board.editing(true), 1");
+  await ev("window.__digestAfterPut = true, 1");
   await ev(`window.sagebrush.board.load(${JSON.stringify(marked)}).then(() => 1)`);
   const idMarked = await ev(`localStorage.getItem(${JSON.stringify(idKey)})`);
   await ev(`new Promise((res) => { const r = indexedDB.open('sagebrush-outputs'); r.onsuccess = () => { const db = r.result, t = db.transaction(['entries', 'docs'], 'readwrite'); for (let i = 0; i < 5; i++) t.objectStore('entries').put({ doc: ${JSON.stringify(idMarked)}, key: 'big-' + i, outputs: [], at: '2026-10-14T00:00:00.000Z', ms: 1, total: 1, bytes: 16000000, used: Date.now() + 1e9 }); t.objectStore('docs').put({ doc: ${JSON.stringify(idMarked)}, bytes: 80000000, used: Date.now() }); t.oncomplete = () => { db.close(); res(1); }; }; })`);
   // (the old run's entry written, then the hash of its keys for the sweep held)
-  await ev("window.__digestAfterPut = true, 1");
   check(await until("window.__holdDigest === 2", 60000), "the older run's keys, for its sweep, held");
   // (meanwhile the item changes and runs; its write's completion held, so the older sweep comes first)
   await ev("window.__holdPut = 1, 1");
   await ev(`window.sagebrush.board.edit((d) => { d.nodes[0].code += "\\n3"; }).then(() => 1)`);
   check(await until("window.sagebrush.board.outputs().then((os) => os[0].state === '' && /\\n3$/.test(os[0].code))", 60000) && await until("window.__holdPut === 2 && window.__released.length === 1", 10000), "the item, changed, ran; its write held");
   const markedKey = (await keys()).m.key;
+  const sweeps4 = await ev("window.__sweeps");
   await ev("window.__digestHeld(), 1");
+  // (a moment for the older run, its hash released, to find that an item ran meanwhile and sweep nothing: a sweep
+  // of its keys would be queued now, ahead of the newer write, and seen below as the entry gone)
   await sleep(500);
   await ev("window.__released.splice(0).forEach((f) => f()), 1");
-  await sleep(2500);
+  check(await until(`window.__sweeps > ${sweeps4}`, 60000), "...then the newer run's sweep");
   const stays = await ev(`new Promise((res) => { const r = indexedDB.open('sagebrush-outputs'); r.onsuccess = () => { const db = r.result; const g = db.transaction('entries').objectStore('entries').get([${JSON.stringify(idMarked)}, ${JSON.stringify(markedKey)}]); g.onsuccess = () => { db.close(); res(!!g.result); }; }; })`);
   check(stays, "the newer run's entry stays");
   check(!errors.length, "no exceptions: " + errors.join(" | ").slice(0, 400));
