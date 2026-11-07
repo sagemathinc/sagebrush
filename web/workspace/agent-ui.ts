@@ -275,7 +275,9 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
           // (superseded meanwhile by a pairing the person chose: this attempt goes, touching nothing of theirs)
           if (pairing !== p) { p.drop(); return null; }
           await p.allow({ folders: k.grant.folders, write: k.grant.write, expires: k.grant.expires }, true);
-          if (pairing !== p) return null;
+          // (superseded while the grant was being given, by a Connect submitted meanwhile: its socket goes too, so no
+          //  granted connection outlives the person's choice)
+          if (pairing !== p) { p.drop(); return null; }
           showBar();
           return k.grant;
         } catch {
@@ -317,6 +319,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     if (r.grant.expires !== null && !(Date.now() < r.grant.expires)) { void p.revoke("the grant expired"); return { res: "expired", p }; }
     if (pairing !== p) { p.drop(); return { res: "unreachable", p }; }
     try { await p.allow({ folders: r.grant.folders, write: r.grant.write, expires: r.grant.expires }, false); } catch { void p.revoke("the grant couldn't be given again"); return { res: "refused", p }; }
+    if (pairing !== p) { p.drop(); return { res: "unreachable", p }; } // (superseded while the grant was being given)
     showBar();
     return { res: "ok", p };
   }

@@ -29,6 +29,9 @@ import { Workspace } from ${JSON.stringify(join(here, "api.ts"))};
 import { mountAgentPairing } from ${JSON.stringify(join(here, "agent-ui.ts"))};
 import { AgentPairing } from ${JSON.stringify(join(here, "agent-pair.ts"))};
 const ws = await Workspace.open();
+// (test only: the remembered grant's store made slow, window.__grantDelay ms, to hold an allow() in its await)
+const putAgentGrant = ws.putAgentGrant.bind(ws);
+(ws as any).putAgentGrant = async (...a: any[]) => { const d = (window as any).__grantDelay; if (d) await new Promise((r) => setTimeout(r, d)); return (putAgentGrant as any)(...a); };
 // (?r=1: the page keeps a reload record (A14), so a reload's silent restore is restoreWith's, not a remembered grant's)
 const ui = mountAgentPairing(ws as any, new URLSearchParams(location.search).has("r") ? { reload: { scope: { workspace: "e2e", page: "/" } } } : {});
 // (a second page's attempt, made the same way the dialog makes one)
@@ -300,6 +303,25 @@ try {
   const kept6 = await ev(`T.ws.agentGrants().then((g) => Object.values(g).map((k) => k.session))`);
   ok(early6.length >= 2 && late6.length === 0 && s2.paired === true && s1.paired === false && !(await ev(`!!document.querySelector(".sbag-bar")`)) && kept6.length === 1 && kept6[0] === kept0[0],
     `reload 6: the superseded retry asks no more, the person's agent stays paired, and the remembered grant is untouched (${early6.length} hellos before, ${late6.length} after; second ${JSON.stringify(s2)}, first ${JSON.stringify(s1)})`);
+
+  // ---- superseded while its grant is being given: a Connect dialog opened during the wait, submitted while the retry's
+  // allow() is held in its store; the retry's socket goes, so the old server is left neither paired nor granted
+  await drive({ op: "slow", s: 0.6 });
+  ok(await open(""), "reload 8a");
+  ok(await until(`!!document.querySelector(".sbag-bar")`, 15000), "reload 8a: reconnected (its grant holds the server's reader for 0.6 s)");
+  const fourth = await drive({ op: "code2" });
+  ok(await open(""), "reload 8, at once: refused, asking again");
+  ok(await openConnect(fourth.code, fourth.port), "reload 8: the person opens the Connect dialog during the wait");
+  await ev("(window.__grantDelay = 2000, 1)");
+  // (allow() sets the pairing's grant, sends it, then waits in the store before "granted": that is the moment)
+  ok(await until(`!!T.ui.pairing?.grant && T.ui.pairing.state === "paired"`, 5000), "reload 8: the retry pairs, and its allow() waits in the grant's store");
+  await click(".sbag-box button.primary");
+  ok(await until(`[...document.querySelectorAll(".sbag-box h2")].some((h) => h.textContent === "Allow this agent?")`), "reload 8: the person's Connect is submitted then");
+  await sleep(2600);
+  await ev("(window.__grantDelay = 0, 1)");
+  const u1 = (await drive({ op: "status" })).ok, u2 = (await drive({ op: "status2" })).ok;
+  ok(u1.paired === false && u1.granted === false && u2.paired === true && !(await ev(`!!document.querySelector(".sbag-bar")`)),
+    `reload 8: superseded while giving its grant, the retry's connection goes: the old server neither paired nor granted, the person's agent paired (first ${JSON.stringify(u1)}, second ${JSON.stringify(u2)})`);
 
   // ---- the same for restoreWith()'s path: a reload record (a grant until the page closes, ?r=1)
   await drive({ op: "slow", s: 0 });
