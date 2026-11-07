@@ -69,6 +69,8 @@ onHistoryRefused((m: string) => showHistoryNotice(m, HISTORY_STOPPED));
 import { uploadFiles, openableAsFile, blobHead, convertCopy, MystNotebookError, pauseBoard, isPaused, unpause, carryNotice, takeNotice, type DocKind } from "../workspace/upload";
 import { readBundle, keepBundle } from "../notebook/bundle.js";
 import { openFilesDialog, recentOpened, recentLabel, recordOpened } from "../workspace/fileopen";
+import { langOf } from "../code/langs";
+import { codeUrl } from "../code/url";
 import { openGallery } from "../examples/open";
 import { mountBrowser } from "../workspace/browser";
 import { mountAgentPairing, floatingButton } from "../workspace/agent-ui";
@@ -981,6 +983,14 @@ let chosen: string | null = null;
 // (U1, William Nov 2: a .tex file clicked in the board's file panel did nothing. It opens in the LaTeX editor, on the
 // notebook page's /?tex=<fid>, where the editor is on (the hosts the build lists: latexOn); this board left the way every
 // open leaves it (leaveFor: what is being written kept first). Elsewhere, or a file without a stable id: its preview)
+// (a code or text file: its own page on the notebook page, /?code=<fid> (1a, web/code/page.ts), left for as a .tex is)
+function openCode(e: Entry, tab: boolean): boolean {
+  if (langOf(e.path) === null || !e.fid) return false;
+  const url = codeUrl(e.fid);
+  if (tab) window.open(url, "_blank", "noopener");
+  else void leaveFor(url, nameOf(e.path));
+  return true;
+}
 function openTex(e: Entry, tab: boolean): boolean {
   if (!/\.tex$/i.test(e.path) || !e.fid || !latexOn(location.hostname)) return false;
   const url = "/?tex=" + e.fid;
@@ -1601,7 +1611,7 @@ if (ws && local) {
       ws,
       current: () => ({ kind: "board", ref: source.slice(6) }),
       open: openEntry,
-      openFile: openTex,
+      openFile: (e: Entry, tab: boolean) => openTex(e, tab) || openCode(e, tab),
       upload: (files, folder) => uploadToWorkspace(ws, files, mounted.agent.snapshot().doc?.mode ?? "python", folder),
       openAs: (e, as) => openAsHere(ws, e, as, mounted.agent.snapshot().doc?.mode ?? "python").then((err) => (err ? `"${nameOf(e.path)}" couldn't be opened as a ${as}: ${err}` : undefined)),
       close: () => show(false),
