@@ -1,6 +1,6 @@
 # Content-host configuration
 
-William chose a fresh Sagebrush-only production `.com` / staging `.dev` content pair plus PRIVATE PSL submission (November 7, 2026). Names remain unconfirmed. Only William checks availability, purchases domains, changes DNS, submits to the PSL or deploys.
+William chose a fresh Sagebrush-only production `.com` / staging `.dev` content pair plus a submission to the PRIVATE section of the Public Suffix List (November 7, 2026). Names remain unconfirmed. Only William checks availability, purchases domains, changes DNS, submits to the PSL or deploys.
 
 `web/content-domains.mts` is the configuration source. Pending roots and role origins are empty. The files Worker’s routes and the DEV API’s `FILES_ORIGIN` binding continue using the existing compatibility origins. Production sharing stays disabled. No hosted runner or renderer is enabled.
 
