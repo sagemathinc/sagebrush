@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DOCUMENT_MODES, FLAG_MODES, KERNEL_MODES, KERNEL_SPECS, MODE_NAMES, REPL_MODES, TRANSLATED_MODES, isFlagMode, isModeName, isTranslated, modeFlag, modeFlags, modeOfFlags } from "../src/modes";
@@ -127,8 +127,15 @@ test("the Jupyter kernels: specs, install order and --mode's error", () => {
 });
 
 test("the board format: its mode, Python by default and not written; a code item's, any of the four", () => {
-  // (BoardMode is written out in web/board/doc.ts, where the schema's script reads it)
-  assert.match(text("web/board/doc.ts"), /^export type BoardMode = "python" \| "sage" \| "magma" \| "matlab";$/m);
+  // (written out in web/board/: the schema's script reads BoardMode from doc.ts's text, and packages/sagebrush-board
+  // compiles web/ alone, so web/board/ reads nothing from src/)
+  const doc = text("web/board/doc.ts");
+  assert.match(doc, /^export type BoardMode = "python" \| "sage" \| "magma" \| "matlab";$/m);
+  assert.match(doc, /^const MODES = \["sage", "magma", "matlab"\] as const, ITEM_MODES = \["python", "sage", "magma", "matlab"\] as const;$/m);
+  assert.match(text("web/board/mount.ts"), /const m = b\.dataset\.mode; if \(m === "sage" \|\| m === "magma" \|\| m === "matlab"\) d\.mode = m; else delete d\.mode;/);
+  assert.match(text("web/board/page.ts"), /^const LOCAL_LIST = "sagebrush-boards", MODES = \["python", "sage", "magma", "matlab"\];$/m);
+  for (const f of readdirSync(join(repo, "web", "board")).filter((f) => f.endsWith(".ts"))) assert.doesNotMatch(text(`web/board/${f}`), /from "\.\.\/\.\.\/src\//, f);
+  assert.deepEqual([FLAG_MODES, DOCUMENT_MODES], [["sage", "magma", "matlab"], ["python", "sage", "magma", "matlab"]]);
   const schema = BOARD_SCHEMA as any;
   assert.deepEqual(schema.properties.mode.enum, DOCUMENT_MODES);
   const json = JSON.parse(text("web/board-format.schema.json"));

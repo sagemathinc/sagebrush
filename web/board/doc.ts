@@ -12,7 +12,6 @@ import type { ImageInfo } from "./images";
 import { routeSteps, type Rect, type RouteRequest } from "./route";
 import { inkOutline } from "./ink";
 import { springLayout } from "../graph/spring";
-import { DOCUMENT_MODES, FLAG_MODES } from "../../src/modes";
 
 // A stroke's outline, made once: by its id, size and points (a hash of
 // them), not again at each layout (5000 strokes: 90 ms each time).  At
@@ -350,8 +349,9 @@ export const VERSION = 1;
 
 /** a board's language (BoardDoc.mode) */
 export type BoardMode = "python" | "sage" | "magma" | "matlab";
-// (BoardMode stays written out: scripts/board-format-schema.mjs reads it from this file; test/modes.test.ts pins it to DOCUMENT_MODES)
-const MODES = FLAG_MODES, ITEM_MODES = DOCUMENT_MODES;
+// (written out, not read from src/modes.ts: scripts/board-format-schema.mjs reads BoardMode from this file's text, and
+// packages/sagebrush-board compiles web/ alone; test/modes.test.ts pins all three to the registry)
+const MODES = ["sage", "magma", "matlab"] as const, ITEM_MODES = ["python", "sage", "magma", "matlab"] as const;
 
 /** A board: one page (its own `nodes`, `edges` and `steps`), or several (`pages`). */
 export interface BoardDoc {

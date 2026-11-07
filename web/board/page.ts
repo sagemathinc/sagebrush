@@ -71,7 +71,6 @@ import { readBundle, keepBundle } from "../notebook/bundle.js";
 import { openFilesDialog, recentOpened, recentLabel, recordOpened } from "../workspace/fileopen";
 import { langOf } from "../code/langs";
 import { codeUrl } from "../code/url";
-import { DOCUMENT_MODES } from "../../src/modes";
 import { openGallery } from "../examples/open";
 import { mountBrowser } from "../workspace/browser";
 import { mountAgentPairing, floatingButton } from "../workspace/agent-ui";
@@ -102,7 +101,7 @@ const q = new URLSearchParams(location.search);
 // language and when last written) so that the notebook's Whiteboard opens
 // its language's latest: `?recent=MODE` (or a new one, if there is none);
 // `?new=MODE`, a new one.
-const LOCAL_LIST = "sagebrush-boards", MODES: string[] = [...DOCUMENT_MODES];
+const LOCAL_LIST = "sagebrush-boards", MODES = ["python", "sage", "magma", "matlab"];
 // (the list's bounds: its newest records, each title cut, HARD-7F9-2)
 const LOCAL_MAX = 200, TITLE_MAX = 200;
 // (why nothing is kept: said, and no board presented as kept, HARD-7F9-1)
