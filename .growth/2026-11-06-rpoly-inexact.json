@@ -1,12 +1,12 @@
 {
  "v": 1,
- "reason": "Polynomial rings over inexact fields, stage 1 (lib/_sage_rpoly.py: RR, RDF, CC, CDF, RealField(p) and ComplexField(p) [t] as Sage: parents, printing, arithmetic in Sage's order, evaluation, calculus; the fields' [] ; CDF bool and is_zero) Re-measured with bun 1.4.4 (size-record.sh) on the 1c head 4e995931 (this PR's base) vs head 2b01be4c: cli/lib.gen.js +11372, cli/pyjs.cjs +11828, engine/lib/sage-more.src +34759, engine/lib/sage.pre +12581, engine/lib/sage.src +4599, engine/sagebrush-worker.js +29; no other row moves. Markers: exact, except cli/pyjs.cjs 11860 (+11828 measured, plus 32 B of margin, as it moves with master). Ceiling (rule 4): engine/lib/sage-more.src 396378 -> 431137, the measured head 431073 + 64: the lazy _sage_rpoly module is demand-loaded with sage-more.",
+ "reason": "Polynomial rings over inexact fields, stage 1 (lib/_sage_rpoly.py: RR, RDF, CC, CDF, RealField(p) and ComplexField(p) [t] as Sage: parents, printing, arithmetic in Sage's order, evaluation, calculus; the fields' [] ; CDF bool and is_zero) Re-measured with bun 1.4.4 (size-record.sh) on master 57daba6d vs head 39460d0b: cli/lib.gen.js +11096, cli/pyjs.cjs +11596, engine/lib/sage-more.src +34901, engine/lib/sage.pre +12620, engine/lib/sage.src +4744, engine/sagebrush-worker.js +29; no other row moves. Markers: exact, except cli/pyjs.cjs 11628 (+11596 measured, plus 32 B of margin, as it moves with master). Ceiling (rule 4): engine/lib/sage-more.src 396378 -> 450742, the measured head 450678 + 64: the lazy _sage_rpoly module is demand-loaded with sage-more.",
  "bytes": {
-  "cli/lib.gen.js": 11372,
-  "cli/pyjs.cjs": 11860,
-  "engine/lib/sage-more.src": 34759,
-  "engine/lib/sage.pre": 12581,
-  "engine/lib/sage.src": 4599,
+  "cli/lib.gen.js": 11096,
+  "cli/pyjs.cjs": 11628,
+  "engine/lib/sage-more.src": 34901,
+  "engine/lib/sage.pre": 12620,
+  "engine/lib/sage.src": 4744,
   "engine/sagebrush-worker.js": 29
  }
 }
