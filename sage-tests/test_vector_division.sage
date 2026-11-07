@@ -19,3 +19,13 @@ show("RDF v / int(2)", lambda: u / int(2))
 show("RDF v / int(0)", lambda: u / int(0))
 show("RDF v / 'a'", lambda: u / "a")
 show("RDF v / (1,)", lambda: u / (1,))
+# A divisor whose class has its own __rtruediv__ (grader's r767f R1 and F5b): Sage refuses it too, naming the class,
+# and never calls D.__rtruediv__
+class D:
+    def __rtruediv__(self, other):
+        if isinstance(other, int):
+            raise TypeError("D: no int")
+        return "D.__rtruediv__"
+for K in [GF(7), RDF, CDF]:
+    show("vector(%s, [1, 2]) / D()" % K, lambda: vector(K, [1, 2]) / D())
+show("int(1) / D()", lambda: int(1) / D())

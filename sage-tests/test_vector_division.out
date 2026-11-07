@@ -9,3 +9,7 @@ RDF v / int(2) -> (0.5, 1.0)
 RDF v / int(0) -> ZeroDivisionError: rational division by zero
 RDF v / 'a' -> TypeError: unsupported operand parent(s) for /: 'Vector space of dimension 2 over Real Double Field' and '<class 'str'>'
 RDF v / (1,) -> TypeError: unsupported operand parent(s) for /: 'Vector space of dimension 2 over Real Double Field' and '<class 'tuple'>'
+vector(Finite Field of size 7, [1, 2]) / D() -> TypeError: unsupported operand parent(s) for /: 'Vector space of dimension 2 over Finite Field of size 7' and '<class '__main__.D'>'
+vector(Real Double Field, [1, 2]) / D() -> TypeError: unsupported operand parent(s) for /: 'Vector space of dimension 2 over Real Double Field' and '<class '__main__.D'>'
+vector(Complex Double Field, [1, 2]) / D() -> TypeError: unsupported operand parent(s) for /: 'Vector space of dimension 2 over Complex Double Field' and '<class '__main__.D'>'
+int(1) / D() -> TypeError: D: no int
