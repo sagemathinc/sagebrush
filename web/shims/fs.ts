@@ -61,6 +61,10 @@ interface Entry {
    * append, gone once Python writes it over or truncates it, or the page puts
    * it again (another version) */
   origin?: string;
+  /** os.chmod's permission bits and os.utime's access time: session-local (P3b-2, @sagebrush's ruling): stat shows
+   * them for the session, the page's change callback (bytes only) never carries them, a reload forgets them */
+  perm?: number;
+  atime?: number;
 }
 const files = new Map<string, Entry>();
 // (an entry named r; one that r named before is unlinked)
@@ -84,6 +88,9 @@ const fileIno = new WeakMap<Entry, number>();
 const dirIno = new Map<string, number>();
 const inoOfFile = (f: Entry) => fileIno.get(f) ?? (fileIno.set(f, nextIno), nextIno++);
 const inoOfDir = (d: string) => dirIno.get(d) ?? (dirIno.set(d, nextIno), nextIno++);
+// (a folder's os.chmod bits and os.utime access time, session-local as a file's: they move with a rename, go with rmdir)
+const dirPerm = new Map<string, number>();
+const dirAtime = new Map<string, number>();
 let cwd = "/";
 
 const g = globalThis as any;
@@ -260,14 +267,181 @@ export function onceWrite(h: OpenFile, data: Uint8Array): void {
   if (f.path !== null) hooks.changed(f.path, out);
 }
 
+// The interpreter's file descriptors (os.open, os.read, os.write, os.lseek, os.fstat, os.close: P3b-2, the design note
+// astra cleared): this worker's own table, one per session, dropped with the worker. A descriptor holds its entry,
+// not its path, as onceOpen's handle does (a rename keeps it, an unlink orphans it, a new file at the path is another
+// entry). Numbers are the lowest free from 3 (0, 1 and 2 stay the standard streams), and name only entries here: no
+// host, Tauri or internal descriptor is reachable through them. Every write is checked when it happens
+// (mayChange with the entry's current path), never once at the open.
+interface Fd {
+  entry: Entry;
+  read: boolean;
+  write: boolean;
+  append: boolean;
+  pos: number;
+}
+const fds = new Map<number, Fd>();
+// (Linux's open flags: the access mode, the effects, and those with nothing to do here; anything else is refused)
+const O_ACCMODE = 3, O_CREAT = 64, O_EXCL = 128, O_TRUNC = 512, O_APPEND = 1024;
+const O_NOEFFECT = 2048 | 131072 | 524288; // O_NONBLOCK, O_NOFOLLOW (no symlinks here), O_CLOEXEC
+// (an operation this file system doesn't do: os raises NotImplementedError with these words, before any effect)
+function unsupported(what: string): never {
+  const e: any = new Error(`${what} is not supported in Sagebrush's browser filesystem`);
+  e.unsupported = true;
+  throw e;
+}
+// (a descriptor's file is at most what a bytes object can be, the runtime's checked limit (ops.ts, 2**32 - 1): a
+// position past it is EINVAL at lseek and a write past it EFBIG, as a file system's maximum size is; a growth the
+// host can't allocate is MemoryError)
+const FILE_MAX = 2 ** 32 - 1;
+function noMemory(): never {
+  const e: any = new Error("out of memory");
+  e.memory = true;
+  throw e;
+}
+const fdOf = (fd: number, what: string): Fd => fds.get(fd) ?? fail("EBADF", -9, what, "");
+export function openSync(p: string, flags: number, _mode?: number): number {
+  // (the whole value checked before any bitwise operator, which would drop the bits above 31: a C int, never negative)
+  if (typeof flags !== "number" || !Number.isInteger(flags) || flags < 0 || flags > 0x7fffffff) unsupported("open with these flags");
+  const acc = flags & O_ACCMODE;
+  if (acc === 3) fail("EINVAL", -22, "open", p);
+  if (flags & ~(O_ACCMODE | O_CREAT | O_EXCL | O_TRUNC | O_APPEND | O_NOEFFECT)) unsupported(`open with flags 0o${(flags & ~(O_ACCMODE | O_CREAT | O_EXCL | O_TRUNC | O_APPEND | O_NOEFFECT)).toString(8)}`);
+  const write = acc !== 0;
+  if (flags & O_TRUNC && !write) unsupported("open with O_TRUNC and O_RDONLY");
+  const r = resolve(p);
+  if (dirs.has(r)) unsupported("open of a folder");
+  let f = files.get(r);
+  if (f === undefined) {
+    if (!(flags & O_CREAT)) fail("ENOENT", -2, "open", p);
+    if (!dirs.has(parent(r))) fail("ENOENT", -2, "open", p);
+    mayChange(r, "open");
+    f = { data: new Uint8Array(0), mtime: Date.now(), path: r };
+    place(r, f);
+    hooks.changed(r, f.data);
+  } else {
+    if (flags & O_CREAT && flags & O_EXCL) fail("EEXIST", -17, "open", p);
+    if (flags & O_TRUNC) {
+      mayChange(r, "open");
+      delete f.remote;
+      delete f.origin;
+      f.data = new Uint8Array(0);
+      f.mtime = Date.now();
+      hooks.changed(r, f.data);
+    }
+  }
+  let fd = 3;
+  while (fds.has(fd)) fd++;
+  fds.set(fd, { entry: f, read: acc !== 1, write, append: !!(flags & O_APPEND), pos: 0 });
+  return fd;
+}
+export function closeSync(fd: number): void {
+  fdOf(fd, "close");
+  fds.delete(fd);
+}
+export function fstatSync(fd: number) {
+  const f = fdOf(fd, "fstat").entry;
+  return {
+    isDirectory: () => false, isFile: () => true, isSymbolicLink: () => false,
+    size: f.remote ? f.remote.size : f.data.length,
+    mode: 0o100000 | (f.perm ?? 0o644),
+    ino: inoOfFile(f), dev: 1, nlink: f.path === null ? 0 : 1, uid: 0, gid: 0,
+    atimeMs: f.atime ?? f.mtime, mtimeMs: f.mtime, ctimeMs: f.mtime,
+  };
+}
+// (os.lseek: the descriptor's position; SEEK_END from the entry's size now)
+export function seekFd(fd: number, pos: number, how: number): number {
+  const h = fdOf(fd, "lseek");
+  const base = how === 0 ? 0 : how === 1 ? h.pos : how === 2 ? contents(h.entry.path ?? "", h.entry).length : NaN;
+  if (Number.isNaN(base) || !Number.isSafeInteger(pos)) fail("EINVAL", -22, "lseek", "");
+  const at = base + pos;
+  if (at < 0 || at > FILE_MAX) fail("EINVAL", -22, "lseek", "");
+  h.pos = at;
+  return at;
+}
+// (os.write on a descriptor of this table: the bytes at its position, or the end when appending; checked now)
+function writeFd(h: Fd, data: Uint8Array): number {
+  if (!h.write) fail("EBADF", -9, "write", "");
+  const f = h.entry;
+  if (f.path !== null) mayChange(f.path, "write");
+  const old = contents(f.path ?? "", f);
+  const at = h.append ? old.length : h.pos;
+  // (nothing to write changes nothing, wherever the position is, as POSIX's write of 0 bytes to a regular file)
+  if (data.length === 0) return 0;
+  if (at + data.length > FILE_MAX) fail("EFBIG", -27, "write", "");
+  let out: Uint8Array;
+  try {
+    out = new Uint8Array(Math.max(old.length, at + data.length));
+  } catch (e) {
+    if (e instanceof RangeError) noMemory();
+    throw e;
+  }
+  out.set(old);
+  out.set(data, at);
+  f.data = out;
+  f.mtime = Date.now();
+  delete f.origin;
+  h.pos = at + data.length;
+  if (f.path !== null) hooks.changed(f.path, out);
+  return data.length;
+}
 export function writeSync(fd: number, data: any) {
+  const h = fds.get(fd);
+  if (h !== undefined) return writeFd(h, typeof data === "string" ? new TextEncoder().encode(data) : data);
+  // (a closed, never-opened or negative descriptor: EBADF, as the kernel says; only 0, 1 and 2 are the standard
+  // streams, 1 and 2 the page's)
+  if (!(fd >= 0 && fd <= 2)) fail("EBADF", -9, "write", "");
   hooks.write(fd, typeof data === "string" ? data : new TextDecoder().decode(data));
 }
 // (so that the runtime's writeAll knows this writeSync, which takes all of
 // its data at once and returns no count, from Node's)
 (writeSync as any).webShim = true;
-export function readSync() {
-  return 0;
+// (a descriptor of this table: up to buf.length bytes from its position, advanced; 0 at the end. Any other
+// descriptor, the standard input among them, reads nothing here, as before)
+export function readSync(fd?: number, buf?: Uint8Array) {
+  const h = fd === undefined ? undefined : fds.get(fd);
+  if (h === undefined) {
+    if (fd !== undefined && !(fd >= 0 && fd <= 2)) fail("EBADF", -9, "read", "");
+    return 0;
+  }
+  if (!h.read) fail("EBADF", -9, "read", "");
+  const data = contents(h.entry.path ?? "", h.entry);
+  const n = Math.max(0, Math.min(buf!.length, data.length - h.pos));
+  buf!.set(data.subarray(h.pos, h.pos + n));
+  h.pos += n;
+  return n;
+}
+// (os.read on a descriptor of this table: up to n bytes from its position, advanced; the result exactly the bytes
+// read, never a buffer of n)
+export function readFd(fd: number, n: number): Uint8Array {
+  const h = fdOf(fd, "read");
+  if (!h.read) fail("EBADF", -9, "read", "");
+  const data = contents(h.entry.path ?? "", h.entry);
+  const out = data.slice(h.pos, h.pos + Math.max(0, Math.min(n, data.length - h.pos)));
+  h.pos += out.length;
+  return out;
+}
+// os.chmod: the permission bits only (never the kind or identity), checked before the change; session-local
+export function chmodSync(p: string, mode: number) {
+  const r = resolve(p);
+  const f = files.get(r);
+  if (!f && !dirs.has(r)) fail("ENOENT", -2, "chmod", p);
+  mayChange(r, "chmod");
+  if (f) f.perm = mode & 0o7777;
+  else dirPerm.set(r, mode & 0o7777);
+}
+// os.utime: access and modification times in milliseconds, checked before the change; session-local
+export function utimesMs(p: string, atimeMs: number, mtimeMs: number) {
+  const r = resolve(p);
+  const f = files.get(r);
+  if (!f && !dirs.has(r)) fail("ENOENT", -2, "utime", p);
+  mayChange(r, "utime");
+  if (f) {
+    f.atime = atimeMs;
+    f.mtime = mtimeMs;
+  } else {
+    dirAtime.set(r, atimeMs);
+    dirs.set(r, mtimeMs);
+  }
 }
 export const existsSync = (p: string) => {
   const r = resolve(p);
@@ -345,9 +519,9 @@ export function statSync(p: string) {
     isFile: () => !!f,
     isSymbolicLink: () => false,
     size: f ? (f.remote ? f.remote.size : f.data.length) : 0,
-    mode: f ? 0o100644 : 0o40755,
+    mode: f ? 0o100000 | (f.perm ?? 0o644) : 0o40000 | (dirPerm.get(r) ?? 0o755),
     ino: f ? inoOfFile(f) : inoOfDir(r), dev: 1, nlink: 1, uid: 0, gid: 0,
-    atimeMs: t, mtimeMs: t, ctimeMs: t,
+    atimeMs: (f ? f.atime : dirAtime.get(r)) ?? t, mtimeMs: t, ctimeMs: t,
   };
 }
 export function unlinkSync(p: string) {
@@ -365,6 +539,8 @@ export function rmdirSync(p: string) {
   if (r !== "/") {
     dirs.delete(r);
     dirIno.delete(r);
+    dirPerm.delete(r);
+    dirAtime.delete(r);
   }
 }
 export function renameSync(a: string, b: string) {
@@ -402,10 +578,12 @@ export function renameSync(a: string, b: string) {
     if (k === ra || k.startsWith(pre)) {
       dirs.delete(k);
       dirs.set(rb + k.slice(ra.length), v);
-      const ino = dirIno.get(k);
-      if (ino !== undefined) {
-        dirIno.delete(k);
-        dirIno.set(rb + k.slice(ra.length), ino);
+      for (const meta of [dirIno, dirPerm, dirAtime]) {
+        const x = meta.get(k);
+        if (x !== undefined) {
+          meta.delete(k);
+          meta.set(rb + k.slice(ra.length), x);
+        }
       }
     }
   }
@@ -418,4 +596,4 @@ export function rmSync(p: string, opts?: { recursive?: boolean; force?: boolean 
   for (const f of readdirSync(r)) rmSync(r + "/" + f, opts);
   rmdirSync(r);
 }
-export default { onceOpen, onceWrite, writeSync, readSync, existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, readdirSync, statSync, unlinkSync, rmdirSync, rmSync, renameSync };
+export default { onceOpen, onceWrite, writeSync, readSync, openSync, closeSync, fstatSync, seekFd, readFd, chmodSync, utimesMs, existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, readdirSync, statSync, unlinkSync, rmdirSync, rmSync, renameSync };
