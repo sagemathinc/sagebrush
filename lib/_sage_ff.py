@@ -424,6 +424,9 @@ class IntegerModRing_:
         return self.multiplicative_generator()
 
     def __getitem__(self, names):
+        if isinstance(names, str):
+            import _sage_poly
+            _sage_poly._check_ring_names([t.strip() for t in names.split(",")] if "," in names else [names])
         return _poly_ring_from_names(self, names)
 
     def square_roots_of_one(self):
@@ -2041,6 +2044,9 @@ class FiniteField_ext:
         return self._make([_random.randrange(self._p) for _ in range(self._n)])
 
     def __getitem__(self, names):
+        if isinstance(names, str):
+            import _sage_poly
+            _sage_poly._check_ring_names([t.strip() for t in names.split(",")] if "," in names else [names])
         return _poly_ring_from_names(self, names)
 
     def __reduce__(self):
