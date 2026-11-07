@@ -1944,12 +1944,21 @@ try {
     await sleep(1500);
     const onOpen = { runner: requests.slice(n0).filter((u) => /\/runner\/|sagebrush-worker\.js/.test(u)), frames: await ev(`document.querySelectorAll("iframe[sandbox]").length`), results: await resultsOf("/t/run.tex"), chips: await ev(`document.querySelectorAll(".tex-preview .sagechip").length`) };
     check(onOpen.runner.length === 0 && onOpen.frames === 0 && onOpen.results === null && onOpen.chips >= 2, "Run: nothing runs on open (no runner, no worker, no results file; the items show as not run)", onOpen);
+    // (Run's code is a chunk of its own, /sagebrush-latex-run.js (daybreak2, #551's group cap): not fetched by the editor's
+    //  load or by any document opened so far, Run shown or not; the first Run fetches it once, later Runs not again)
+    const runChunk = () => byId.filter((x) => /\/sagebrush-latex-run\.js(\?|$)/.test(x.url));
+    const runBefore = runChunk().length;
+    check(runBefore === 0, "Run's chunk: not fetched by the editor's load, nor by opening documents with SageTeX code", runChunk());
     // (the click: its labels as they change, then the results)
     const labels = await ev(`new Promise((res) => { const b = document.querySelector(".tex-head .tex-run"), seen = [b.textContent];
       const o = new MutationObserver(() => { if (seen[seen.length - 1] !== b.textContent) seen.push(b.textContent); if (b.textContent === "Run" && seen.length > 1) { o.disconnect(); res(seen); } });
       o.observe(b, { childList: true, characterData: true, subtree: true }); b.click(); setTimeout(() => { o.disconnect(); res(seen); }, 180000); })`);
     check(JSON.stringify(labels) === JSON.stringify(["Run", "Starting Sage…", "Running…", "Run"]), "Run: its labels, Run → Starting Sage… → Running… → Run", labels);
     const ran = await statusIs(/Ran 5 SageTeX items in [0-9.]+ s$/, 30000);
+    const firstRun = runChunk();
+    const timing = await ev(`JSON.stringify(performance.getEntriesByType("resource").filter((e) => e.name.includes("sagebrush-latex-run.js")).map((e) => ({ ms: Math.round(e.duration), bytes: e.transferSize, body: e.decodedBodySize })))`);
+    check(firstRun.length === 1 && firstRun[0].status === 200 && firstRun[0].bytes > 0, "Run's chunk: the first Run fetches it, once", firstRun);
+    console.log("timing, reported, not gated: Run's chunk on the first Run (loopback):", timing, "CDP encoded bytes:", firstRun[0]?.bytes);
     await until(`document.querySelector(".tex-preview").textContent.includes("1024") && document.querySelectorAll(".tex-preview .sagechip").length === 0`, 20000);
     const shownRun = await ev(`(() => { const t = document.querySelector(".tex-preview").textContent; return { has1024: t.includes("1024"), has7: /x\\s*=\\s*\\{?7/.test(t) || t.includes("= {7}") || t.includes("=7"), frac: !!document.querySelector(".tex-preview .katex .mfrac"), chips: document.querySelectorAll(".tex-preview .sagechip").length, status: document.querySelector(".tex-status")?.textContent }; })()`);
     check(ran && shownRun.has1024 && shownRun.has7 && shownRun.frac && shownRun.chips === 0, "Run: the preview shows x = 1024, 1/3, and x = 7 (redefined later, page order), no item left not run", shownRun);
@@ -2103,6 +2112,7 @@ open('made.txt', 'w').write('x')
     await until(`document.querySelector(".tex-preview")?.textContent.includes("Hello")`, 20000);
     await sleep(15000);
     check(started && (await resultsOf("/t/run-stale.tex")) === null, "Run: a Run made stale (another file opened in place while it runs) writes no results", { started });
+    check(runChunk().length === 1, "Run's chunk: every later Run on this page (other documents opened in place, Stop, queued Runs) uses the one fetched, never fetched again", runChunk().map((x) => x.url));
     // (no runner here: ?runner=0 on a loopback host; Run says why, and runs nothing)
     const fn0 = await mk("/t/run-none.tex", enc(RUN_DOC));
     const n1 = requests.length;
