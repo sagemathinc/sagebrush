@@ -4009,6 +4009,15 @@ def _CallableReal(x):
 _RR_BIG = None
 
 
+def _cc_or_none(o):
+    """complex(o) as _cc gives it, or None when o is no number (a series, a polynomial, a
+    matrix: the operation is the other operand's, NotImplemented)."""
+    try:
+        return _cc(o)
+    except (TypeError, ValueError):
+        return None
+
+
 def _cc(o):
     """complex(o) for CC's arithmetic: an element of RR past the doubles is
     refused (CC holds doubles; its float would be inf or 0)."""
@@ -4142,36 +4151,54 @@ class ComplexNumber(complex):
         # TypeError, so CC(I) + M over QQbar never reached M.__radd__)
         if getattr(o, "_is_ffmatrix", False):
             return NotImplemented
-        return ComplexNumber(complex(self) + _cc(o))
+        c = _cc_or_none(o)
+        if c is None:
+            return NotImplemented
+        return ComplexNumber(complex(self) + c)
 
     __radd__ = __add__
 
     def __sub__(self, o):
         if getattr(o, "_is_ffmatrix", False):
             return NotImplemented
-        return ComplexNumber(complex(self) - _cc(o))
+        c = _cc_or_none(o)
+        if c is None:
+            return NotImplemented
+        return ComplexNumber(complex(self) - c)
 
     def __rsub__(self, o):
         if getattr(o, "_is_ffmatrix", False):
             return NotImplemented
-        return ComplexNumber(_cc(o) - complex(self))
+        c = _cc_or_none(o)
+        if c is None:
+            return NotImplemented
+        return ComplexNumber(c - complex(self))
 
     def __mul__(self, o):
         if getattr(o, "_is_ffmatrix", False):
             return NotImplemented
-        return ComplexNumber(complex(self) * _cc(o))
+        c = _cc_or_none(o)
+        if c is None:
+            return NotImplemented
+        return ComplexNumber(complex(self) * c)
 
     __rmul__ = __mul__
 
     def __truediv__(self, o):
         if getattr(o, "_is_ffmatrix", False):
             return NotImplemented
-        return ComplexNumber(complex(self) / _cc(o))
+        c = _cc_or_none(o)
+        if c is None:
+            return NotImplemented
+        return ComplexNumber(complex(self) / c)
 
     def __rtruediv__(self, o):
         if getattr(o, "_is_ffmatrix", False):
             return NotImplemented
-        return ComplexNumber(_cc(o) / complex(self))
+        c = _cc_or_none(o)
+        if c is None:
+            return NotImplemented
+        return ComplexNumber(c / complex(self))
 
     def __neg__(self):
         return ComplexNumber(-complex(self))
