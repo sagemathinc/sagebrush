@@ -10,7 +10,7 @@
 //
 // Outputs are Jupyter's (stream, display_data), as the notebook saves them.
 
-import { imageSize } from "../image-size";
+import { imageSize, svgDataUrl, svgSize } from "../image-size";
 
 export interface PreviewStream { output_type: "stream"; name: "stdout" | "stderr"; text: string }
 export interface PreviewDisplay { output_type: "display_data"; data: Record<string, string>; metadata: Record<string, never> }
@@ -99,6 +99,11 @@ export async function makePreview(outputs: any[], o: { at: string; ms: number; t
           if (small && fits(small[0], small[1])) {
             data[small[0]] = small[1];
             picture = true;
+          } else if (!img && svg && svgFits(svg)) {
+            // (no canvas to draw it on, as the command line has none: the SVG as it is, within the bounds and with
+            // a size its root gives, P9a; a board shows it only as an image, or as the notebook's cleaned SVG)
+            data["image/svg+xml"] = svg;
+            picture = true;
           }
         }
       }
@@ -113,6 +118,8 @@ export async function makePreview(outputs: any[], o: { at: string; ms: number; t
 
 // (a picture's size from its header: image-size.ts, SEC-B00-1)
 export { imageSize };
+// (an SVG preview picture: within image-size.ts's bounds (svgDataUrl) and IMAGE_W by IMAGE_H as its root says)
+const svgFits = (text: string) => { const s = svgDataUrl(text) ? svgSize(text) : null; return !!s && s.w <= IMAGE_W && s.h <= IMAGE_H; };
 const fits = (type: string, base64: string) => {
   const s = imageSize(type, base64);
   return !!s && s.w > 0 && s.h > 0 && s.w <= IMAGE_W && s.h <= IMAGE_H;
@@ -136,6 +143,9 @@ export function cleanPreview(p: any): Preview | undefined {
       const img = picture ? undefined : IMAGES.find((t) => typeof x.data[t] === "string" && BASE64.test(x.data[t]) && fits(t, x.data[t]));
       if (img) {
         data[img] = x.data[img];
+        picture = true;
+      } else if (!picture && typeof x.data["image/svg+xml"] === "string" && svgFits(x.data["image/svg+xml"])) {
+        data["image/svg+xml"] = x.data["image/svg+xml"];
         picture = true;
       }
       if (Object.keys(data).length) outputs.push({ output_type: "display_data", data, metadata: {} });
