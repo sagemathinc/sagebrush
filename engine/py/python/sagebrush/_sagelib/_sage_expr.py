@@ -759,6 +759,8 @@ class Expression:
             (3*x^2, 2*x*cos(x^2), 12*x^2, 3*x^2)
             sage: y = var('y'); (x^2*y).diff([x, y]), (x^2).diff([])
             (2*x, x^2)
+            sage: (1 + x^2/2).diff(x, 0), diff(x^2*y^3, x, y, 0), diff(x^2, 0)
+            (1/2*x^2 + 1, 2*x*y^3, x^2)
         """
         # a list alone is the list of variables, and an empty one means no
         # differentiation, as in Sage (diff(x^2, []) was 2*x); a tuple, or a
@@ -775,16 +777,31 @@ class Expression:
             if len(names) != 1:
                 raise ValueError("No differentiation variable specified.")
             args = (Expression(_sym_s(names[0])),)
-        r, last = self, None
+        # (a count k after a variable: k derivatives in it, 0 none, as
+        # Sage: diff(f, x, 0) is f; a 0 with no variable before it is
+        # skipped, any other count there is Sage's ValueError)
+        r, last, before = self, None, self
         for a in args:
             if isinstance(a, int) and not isinstance(a, bool):
+                if a < 0:
+                    raise ValueError("derivative counts must be nonnegative")
                 if last is None:
-                    raise ValueError("No differentiation variable specified.")
-                if a > 1:
+                    if a == 0:
+                        continue
+                    names = r._names()
+                    if len(names) != 1:
+                        raise ValueError("No differentiation variable specified.")
+                    # (in the only variable: diff(1 + x^2/2, 2) is 1)
+                    r = _one("diff", r._s, names[0], str(a))
+                    continue
+                if a == 0:
+                    r = before
+                elif a > 1:
                     r = _one("diff", r._s, last, str(a - 1))
                 last = None
                 continue
             last = _var_name(a)
+            before = r
             r = _one("diff", r._s, last, "1")
         return r
 
@@ -4329,6 +4346,13 @@ def diff(f, *args):
     """
     if _callable(f):
         return f.diff(*args)
+    if _is_poly(f) and hasattr(f, "derivative"):
+        # (in its own ring, as Sage: diff(m^3, m) is in QQ[m]; a symbolic
+        # variable it does not know goes the symbolic way)
+        try:
+            return f.derivative(*args)
+        except TypeError:
+            pass
     f = _poly_or(f)
     if not isinstance(f, Expression):
         if hasattr(f, "derivative"):

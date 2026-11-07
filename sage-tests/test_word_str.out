@@ -1,0 +1,15 @@
+kitten
+word: kitten
+kitten
+str(Word list) | 123
+repr(Word list) | word: 123
+str(Word empty) | 
+repr(Word empty) | word: 
+format Word | abc
+format Word r | word: abc
+str(Word([10,2])) | 10,2
+str(Word(['ab','c'])) | ab,c
+repr(Word([10,2])) | word: 10,2
+str(Word((1,2))) | 12
+list of words | [word: ab, word: 1]
+str list of words | [word: ab]
