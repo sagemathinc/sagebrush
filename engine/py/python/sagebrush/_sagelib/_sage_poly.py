@@ -588,7 +588,10 @@ class PolynomialRing_:
         """
         if isinstance(x, Polynomial):
             # (Sage converts between univariate rings by coefficients, so
-            # QQ['y'](f) for f in ZZ['x'] maps x to y)
+            # QQ['y'](f) for f in ZZ['x'] maps x to y; into ZZ only integral
+            # coefficients)
+            if self._base is ZZ and any(_F(a).denominator != 1 for a in x._c):
+                raise TypeError("no conversion of this rational to integer")
             return Polynomial(self, x._c)
         if type(x).__name__ == "MPolynomial" and hasattr(x, "_ring") and hasattr(x._ring, "_names"):
             # ZZ['x'](x) for x in ZZ['x', 'y']: in the variable of this
@@ -610,6 +613,16 @@ class PolynomialRing_:
                 raise _memguard.memory_guard("Converting this polynomial of degree %d to a dense one" % max(cs),
                                              (max(cs) + 1) * 8, _MAX_DENSE_COEFFS * 8, "this conversion", fixed=True)
             return Polynomial(self, [cs.get(i, 0) for i in range(max(cs) + 1)] if cs else [])
+        if type(x).__name__ == "FractionFieldElement" and isinstance(x._den, Polynomial):
+            # a quotient with denominator 1 (its normal form), as Sage:
+            # R((x^2 - 1)/(x - 1)) is x + 1; else Sage's TypeError, worded by
+            # whether the fraction's base ring is this ring's
+            d = x._den
+            if d == 1:
+                return self(x._num)
+            if d._ring._base is self._base:
+                raise TypeError("fraction must have unit denominator")
+            raise TypeError("denominator must be a unit")
         if isinstance(x, (list, tuple)):
             return Polynomial(self, list(x))
         if isinstance(x, str):
@@ -1057,14 +1070,18 @@ class Polynomial:
         return r if r is NotImplemented else not r
 
     def quo_rem(self, other):
-        """(q, r) with self = q other + r, deg r < deg other (over QQ; over ZZ
-        the result must be integral).
+        """(q, r) with self = q other + r, deg r < deg other over QQ; over ZZ
+        as Sage divides there (by a non-monic divisor the remainder may keep
+        a higher degree).
 
         EXAMPLES::
 
             sage: R.<x> = QQ[]
             sage: (x^3 + 2*x + 1).quo_rem(x^2 + 1)
             (x, x + 1)
+            sage: S.<t> = ZZ[]
+            sage: t.quo_rem(2*t + 1), (3*t^2 + 1).quo_rem(2*t + 1), (-3*t^2).quo_rem(2*t + 1)
+            ((0, t), (t, t^2 - t + 1), (-2*t + 1, t^2 - 1))
         """
         o = self._coerce(other)
         if o is None or not o._c:
@@ -1082,8 +1099,23 @@ class Polynomial:
         if self._ring._base is ZZ and o._ring._base is ZZ:
             if all(isinstance(a, int) for a in qq._c + rr._c):
                 qq, rr = Polynomial(self._ring, qq._c), Polynomial(self._ring, rr._c)
-            elif o.leading_coefficient() not in (1, -1):
-                raise ArithmeticError("division not exact in Integer Ring (use QQ[x])")
+            else:
+                # Sage's division in ZZ[x] by a non-monic divisor: from the
+                # top down to the divisor's degree, a coefficient at least
+                # the leading coefficient in size gives the floor of their
+                # quotient, a smaller one none, and the remainder keeps what
+                # is left (x.quo_rem(2*x + 1) is (0, x))
+                r = list(self._c)
+                b = list(o._c)
+                lb, db = b[-1], len(b) - 1
+                q = [0] * max(len(r) - db, 0)
+                for i in range(len(r) - 1, db - 1, -1):
+                    if abs(r[i]) >= abs(lb):
+                        c = r[i] // lb
+                        q[i - db] = c
+                        for j, bj in enumerate(b):
+                            r[i - db + j] -= c * bj
+                qq, rr = Polynomial(self._ring, q), Polynomial(self._ring, r)
         return qq, rr
 
     def __floordiv__(self, other):
@@ -1103,25 +1135,33 @@ class Polynomial:
         o = self._coerce(other)
         if o is None:
             return NotImplemented
-        if o.degree() <= 0:
+        if not isinstance(other, Polynomial) and o.degree() <= 0:
+            # a number: a polynomial over the fraction field of the base
+            # (x/2 is 1/2*x in QQ[x])
             if not o._c:
-                raise ZeroDivisionError("division by zero")
+                raise ZeroDivisionError("rational division by zero")
             c = _F(o._c[0])
             return Polynomial(PolynomialRing(QQ, self._ring._name), [_F(a) / c for a in self._c]) if self._ring._base is QQ or c.denominator != 1 or any(_F(a) / c != int(_F(a) / c) for a in self._c) else Polynomial(self._ring, [int(_F(a) / c) for a in self._c])
-        q, r = self.quo_rem(o)
-        if not r:
-            # (Sage returns an element of the fraction field equal to q)
-            return q
+        # a polynomial: an element of the fraction field, even when the
+        # division is exact (x/x is 1 in Frac(ZZ[x]), as Sage)
+        if not o._c:
+            raise ZeroDivisionError("fraction field element division by zero")
         import _sage_frac
+        if self._ring._base is ZZ and o._ring._base is ZZ:
+            return _sage_frac.FractionFieldElement(self, o)
         a = self if self._ring._base is QQ else Polynomial(PolynomialRing(QQ, self._ring._name), self._c)
         b = o if o._ring._base is QQ else Polynomial(PolynomialRing(QQ, self._ring._name), o._c)
         return _sage_frac.FractionFieldElement(a, b)
 
     def __rtruediv__(self, other):
-        if self.degree() == 0:
-            return _F(other) / _F(self._c[0])
+        # a number over a polynomial: 2/x in Frac(ZZ[x]), 1/2/x in
+        # Frac(QQ[x]), 2/R(4) is 1/2 in Frac(R), as Sage
+        if self._coerce(other) is None:
+            return NotImplemented
+        if not self._c:
+            raise ZeroDivisionError("fraction field element division by zero")
         import _sage_frac
-        R = self._ring if self._ring._base is QQ else PolynomialRing(QQ, self._ring._name)
+        R = self._ring if self._ring._base is QQ or _F(other).denominator == 1 else PolynomialRing(QQ, self._ring._name)
         return _sage_frac.FractionFieldElement(R(other), Polynomial(R, self._c))
 
     # ---- evaluation and calculus
