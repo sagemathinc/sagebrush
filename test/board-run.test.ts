@@ -176,6 +176,61 @@ test("board run: an @interact's output: under the item's caps, a traceback past 
   assert.match(String(interactError(ok)), /^Traceback[\s\S]*ZeroDivisionError: x\n\(raised by the item's @interact function, run with its default values\)$/);
 });
 
+test("board run: an @interact's output: what its clear gives back, and what is (and isn't) its error (grader's r788 pins)", () => {
+  const MB = 2 ** 20, tb = "Traceback (most recent call last):\n  File \"<cell>\", line 3, in bad\nZeroDivisionError: x\n";
+  const textOf = (l: any[]) => l.filter((o) => o.output_type === "stream").map((o) => o.text).join("");
+  const displays = (l: any[]) => l.filter((o) => o.output_type === "display_data").length;
+  // (I10: an interact's two writes joined into one entry, then its clear: both given back, so the item's whole
+  // allowance can be written again)
+  const j: any[] = [], k1 = { run: 0 };
+  collect(j, { target: 1, stream: "stdout", text: "a".repeat(MB) }, k1);
+  collect(j, { target: 1, stream: "stdout", text: "b".repeat(MB) }, k1);
+  assert.equal(j.length, 1, "(joined)");
+  collect(j, { target: 1, clear: true }, k1);
+  assert.equal(k1.run, 0);
+  collect(j, { stream: "stdout", text: "z".repeat(ITEM_OUTPUT_MAX) }, k1);
+  assert.ok(!textOf(j).includes("[output cut") && textOf(j).length === ITEM_OUTPUT_MAX, "the item's whole allowance after the clear is kept");
+  // (J5/J6: an interact's displays, up to the item's count, then its clear: as many more are kept)
+  const d: any[] = [], k2 = { run: 0 };
+  for (let i = 0; i < ITEM_DISPLAYS_MAX; i++) collect(d, { target: 1, display: { "text/plain": "d" } }, k2);
+  assert.equal(displays(d), ITEM_DISPLAYS_MAX);
+  collect(d, { target: 1, clear: true }, k2);
+  assert.equal(displays(d), 0);
+  for (let i = 0; i < ITEM_DISPLAYS_MAX; i++) collect(d, { display: { "text/plain": "e" } }, k2);
+  assert.ok(displays(d) === ITEM_DISPLAYS_MAX && !textOf(d).includes("[output cut"), `kept ${displays(d)} displays after the clear: ${textOf(d)}`);
+  // (J2: interacts past the flags' count, each raising, then the cell's own clear: the item's mark goes too, so a run
+  // after it succeeding leaves no error)
+  const many: any[] = [], k3 = { run: 0 };
+  for (let t = 1; t <= ITEM_DISPLAYS_MAX + 50; t++) collect(many, { target: t, stream: "stderr", text: tb }, k3);
+  assert.ok(interactError(many) !== null, "(raised)");
+  collect(many, { clear: true }, k3);
+  collect(many, { target: 1, stream: "stdout", text: "5/3\n" }, k3);
+  assert.equal(interactError(many), null, "the cell's clear forgets the mark of the interacts it could not keep track of");
+  // (I17/I18: a traceback's first line printed to stdout, nothing raised: no error)
+  const out: any[] = [], k4 = { run: 0 };
+  collect(out, { target: 1, stream: "stdout", text: "Traceback (most recent call last):\nnot really\n" }, k4);
+  assert.equal(interactError(out), null, "stdout is not where an interact's error goes");
+  // (I19: a warning on stderr, nothing raised: no error)
+  const warn: any[] = [], k5 = { run: 0 };
+  collect(warn, { target: 1, stream: "stderr", text: "UserWarning: careful\n" }, k5);
+  collect(warn, { target: 1, stream: "stdout", text: "5/3\n" }, k5);
+  assert.equal(interactError(warn), null, "a warning is not an error");
+  // (J4: the item cut where the worker cut it, room left under the caps, then the clear of an interact that kept
+  // nothing: nothing given back, so the cut stays)
+  const cut: any[] = [], k6 = { run: 0 };
+  collect(cut, { stream: "stdout", text: "y" }, k6);
+  collect(cut, { cut: "item" }, k6);
+  assert.ok(textOf(cut).includes("[output cut"), "(cut)");
+  collect(cut, { target: 5, clear: true }, k6);
+  collect(cut, { stream: "stdout", text: "small" }, k6);
+  assert.ok(!textOf(cut).includes("small") && k6.run === 1, "a clear that gave nothing back doesn't lift the cut");
+  // (I14: stderr before the traceback: the error is the traceback, from its first line)
+  const pre: any[] = [], k7 = { run: 0 };
+  collect(pre, { target: 1, stream: "stderr", text: "UserWarning: careful\n" }, k7);
+  collect(pre, { target: 1, stream: "stderr", text: tb }, k7);
+  assert.match(String(interactError(pre)), /^Traceback \(most recent call last\):\n[\s\S]*ZeroDivisionError: x\n\(raised by/);
+});
+
 test("board run: an item that does not stop when interrupted: the interpreter is stopped, and what was left is not run", () => {
   const t0 = Date.now();
   // (a catastrophic regular expression: the engine's own matching, which never polls Stop)
