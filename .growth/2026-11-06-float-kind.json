@@ -1,6 +1,6 @@
 {
  "v": 1,
- "reason": "Symbolic floats keep their parent, as Sage (engine/sym/src/num.rs: Num::Float carries RR, CC, RDF or CDF; RDF and CDF print as Python repr; powers and real functions over the kind; bridge tokens d and h; lib/_sage_rdf.py) Re-measured with bun 1.4.4 (size-record.sh) on master cfa6d281 vs head c9afd472: cli/lib.gen.js +4432, cli/pyjs.cjs +20136, engine/lib/sage-more.src +16, engine/lib/sage.pre +35031, engine/lib/sage.src +11304, engine/sagebrush-engine.wasm +10919; no other row moves. Markers: exact, except cli/pyjs.cjs 20168 (+20136 measured, plus 32 B of margin, as it moves with master).",
+ "reason": "Symbolic floats keep their parent, as Sage (engine/sym/src/num.rs: Num::Float carries RR, CC, RDF or CDF; RDF and CDF print as Python repr; powers and real functions over the kind; bridge tokens d and h; lib/_sage_rdf.py) Re-measured with bun 1.4.4 (size-record.sh) on master cfa6d281 vs head c9afd472: cli/lib.gen.js +4432, cli/pyjs.cjs +20136, engine/lib/sage-more.src +16, engine/lib/sage.pre +35031, engine/lib/sage.src +11304, engine/sagebrush-engine.wasm +10919; no other row moves. Markers: exact, except cli/pyjs.cjs 20168 (+20136 measured, plus 32 B of margin, as it moves with master). Ceiling (rule 4): engine/lib/sage.src 2946494 -> 2957798, master cfa6d281's 2946430 (SIZE's measurement) + the measured 11304 + 64.",
  "bytes": {
   "cli/lib.gen.js": 4432,
   "cli/pyjs.cjs": 20168,
