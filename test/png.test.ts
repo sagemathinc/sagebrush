@@ -113,24 +113,24 @@ for f in [${file("wide.png", png(16385, 1, tiny))}, ${file("big.png", png(4097, 
 
 test("imread stops at the image's last row: the image data after it is not inflated", () => {
   // a file whose image data inflates to 64 MB more than its 2 pixels need,
-  // read in no more time than a small file; and one whose image data goes on
-  // with what is not deflate at all, an OSError as in matplotlib (the
-  // decoder reads ahead within the chunk it has, never past what it can
-  // keep)
+  // read as its 2 pixels; and one whose image data goes on with what is not
+  // deflate at all, an OSError as in matplotlib (the decoder reads ahead
+  // within the chunk it has, never past what it can keep).  No clock (a time
+  // bound here was #806's kind of flake): that the rows are read one by one,
+  // never the whole frame, is pinned by the first test's files, which a
+  // whole-frame read (next_frame) fails
   const rows = deflateSync(Buffer.from([0, 10, 20, 30, 0, 40, 50, 60]), { finishFlush: constants.Z_SYNC_FLUSH });
   const bomb = deflateSync(Buffer.concat([Buffer.from([0, 10, 20, 30, 0, 40, 50, 60]), Buffer.alloc(64 << 20)]), { level: 9 });
   const out = py(`
-import time, matplotlib.pyplot as plt
-plt.imread(${file("small.png", png(1, 2, deflateSync(Buffer.from([0, 10, 20, 30, 0, 40, 50, 60]))))})  # (the module compiled)
-t = time.time()
+import matplotlib.pyplot as plt
 a = plt.imread(${file("bomb.png", png(1, 2, bomb))})
-print([round(v * 255) for v in a.ravel().tolist()], time.time() - t < 1)
+print([round(v * 255) for v in a.ravel().tolist()])
 try:
     plt.imread(${file("garbage.png", png(1, 2, Buffer.concat([rows, Buffer.alloc(64, 0xff)])))})
 except OSError as e:
     print("OSError")
 `);
-  assert.equal(out, "[10, 20, 30, 40, 50, 60] True\nOSError\n");
+  assert.equal(out, "[10, 20, 30, 40, 50, 60]\nOSError\n");
 });
 
 test("imread caps the memory of a file's other chunks at 64 MB", () => {
@@ -148,10 +148,13 @@ for f in [${file("text-ok.png", ok)}, ${file("text-big.png", big)}]:
   assert.equal(out, "(1, 1, 3)\nValueError imread: a PNG file whose chunks need more than the 64 MB Sagebrush gives them\n");
 });
 
-test("imread caps a file's chunks (HARD-6BC-2): empty image data chunks by the hundred thousand are refused promptly", () => {
+test("imread caps a file's chunks (HARD-6BC-2): empty image data chunks by the hundred thousand are refused before decoding", () => {
   // at most 4096 + rows + bytes / 4096 chunks (engine/raster/src/pngio.rs,
   // max_chunks): the decoder's work for each, also an empty one, is bounded,
-  // and an encoder's chunks of 8 KB or more, or one a row, are read
+  // and an encoder's chunks of 8 KB or more, or one a row, are read.  The
+  // count is taken in one pass before the decoder sees the file, told without
+  // a clock (#806's): a file past it whose image data is broken as well is
+  // refused for its chunks, not for its data
   const head = (w: number, h: number) => {
     const ihdr = Buffer.alloc(13);
     ihdr.writeUInt32BE(w, 0);
@@ -162,7 +165,7 @@ test("imread caps a file's chunks (HARD-6BC-2): empty image data chunks by the h
   const empty = chunk("IDAT", new Uint8Array());
   const end = chunk("IEND", new Uint8Array());
   const data = chunk("IDAT", deflateSync(Buffer.from([0, 1, 2, 3])));
-  const many = (k: number) => Buffer.concat([...head(1, 1), ...Array(k).fill(empty), data, end]);
+  const many = (k: number, d = data) => Buffer.concat([...head(1, 1), ...Array(k).fill(empty), d, end]);
   // (a file of k empty chunks has k + 3; a 1 x 1 image's limit is 4096 + 1 + len / 4096)
   const limit = (k: number) => 4097 + Math.floor((many(0).length + 12 * k) / 4096);
   let k = 4000;
@@ -171,51 +174,65 @@ test("imread caps a file's chunks (HARD-6BC-2): empty image data chunks by the h
   const rows = Buffer.concat(Array.from({ length: 512 }, (_, y) => Buffer.from([0, ...Array(192).fill(y % 256)])));
   const z = deflateSync(rows);
   const perRow = Buffer.concat([...head(64, 512), ...Array.from({ length: 512 }, (_, i) => chunk("IDAT", z.subarray(Math.floor((i * z.length) / 512), Math.floor(((i + 1) * z.length) / 512)))), end]);
+  const broken = chunk("IDAT", Buffer.alloc(64, 0xff));
   const out = py(`
-import time, matplotlib.pyplot as plt
-plt.imread(${file("warm.png", png(1, 1, deflateSync(Buffer.from([0, 1, 2, 3]))))})  # (the module compiled)
+import matplotlib.pyplot as plt
 print(plt.imread(${file("per-row.png", perRow)}).shape)
 print(plt.imread(${file("at-limit.png", many(k))}).shape)
-for f in [${file("over-limit.png", many(k + 1))}, ${file("many.png", many(200000))}]:
-    t = time.time()
+for f in [${file("over-limit.png", many(k + 1))}, ${file("many.png", many(200000))}, ${file("many-broken.png", many(200000, broken))}]:
     try:
         plt.imread(f)
-    except ValueError as e:
-        print("ValueError", str(e).split(",")[0], time.time() - t < 0.25)
+    except (ValueError, OSError) as e:
+        print(type(e).__name__, str(e).split(",")[0])
 `);
   assert.equal(out, [
     "(512, 64, 3)",
     "(1, 1, 3)",
-    `ValueError imread: a PNG file of more than ${limit(k + 1)} chunks True`,
-    `ValueError imread: a PNG file of more than ${limit(200000)} chunks True`,
+    `ValueError imread: a PNG file of more than ${limit(k + 1)} chunks`,
+    `ValueError imread: a PNG file of more than ${limit(200000)} chunks`,
+    `ValueError imread: a PNG file of more than ${limit(200000)} chunks`,
     "",
   ].join("\n"));
 });
 
 test("nested opacity groups and clip paths are limited before their rasters are allocated (HARD-6BC-1)", () => {
   // (each keeps a raster the size of the picture while its content is drawn:
-  // at most 16 nested, and 256 MB with the picture's)
-  const out = py(`
-import time, _sbraster
+  // at most 16 nested, and 256 MB with the picture's).  "Before" is told by
+  // the module's memory, which only grows, not by a clock (a 1 s bound failed
+  // on a slow runner, #806): each case in a fresh process, a refused drawing
+  // grows it no more than the deepest one allowed of its kind (16 nested; 3
+  // opacity groups at 4096 x 4096) and less than half its next raster more,
+  // so the one refused was never allocated.
+  const one = (depth: number, size: number, attr: string) => {
+    const out = py(`
+import _sbraster
 def nested(depth, size, attr):
     s = '<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d"><defs><clipPath id="c"><rect width="9" height="9"/></clipPath></defs>' % (size, size)
     return s + ("<g %s>" % attr) * depth + '<rect width="1" height="1" fill="red"/>' + "</g>" * depth + "</svg>"
 _sbraster.render(nested(1, 8, 'opacity="0.5"'), 1.0, 0, 0, "white", 100.0, [])  # (the module compiled)
-for depth, size, attr in [(16, 512, 'opacity="0.5"'), (17, 512, 'opacity="0.5"'), (200, 512, 'clip-path="url(#c)"'), (4, 4096, 'opacity="0.5"')]:
-    t = time.time()
-    try:
-        _sbraster.render(nested(depth, size, attr), 1.0, 0, 0, "white", 100.0, [])
-        print(depth, "drawn")
-    except ValueError as e:
-        print(depth, "ValueError", e, time.time() - t < 1)
-`);
-  assert.equal(out, [
-    "16 drawn",
-    "17 ValueError opacity groups and clip paths nested more than 16 deep True",
-    "200 ValueError opacity groups and clip paths nested more than 16 deep True",
-    "4 ValueError a drawing of 4096 x 4096 pixels whose nested opacity groups and clip paths need more than 256 MB at once True",
-    "",
-  ].join("\n"));
+m = _sbraster.memory_bytes()
+try:
+    _sbraster.render(nested(${depth}, ${size}, '${attr}'), 1.0, 0, 0, "white", 100.0, [])
+    print("drawn")
+except ValueError as e:
+    print("ValueError", e)
+print(_sbraster.memory_bytes() - m)
+`).trim().split("\n");
+    return { said: out[0], grew: Number(out[1]) };
+  };
+  const op = 'opacity="0.5"', clip = 'clip-path="url(#c)"', a = 512 * 512, big = 4096 * 4096;
+  const deep = "ValueError opacity groups and clip paths nested more than 16 deep";
+  const allowedLayers = one(16, 512, op), refusedLayers = one(17, 512, op);
+  const allowedMasks = one(16, 512, clip), refusedMasks = one(200, 512, clip);
+  const allowedBig = one(3, 4096, op), refusedBig = one(4, 4096, op);
+  assert.deepEqual([allowedLayers.said, refusedLayers.said, allowedMasks.said, refusedMasks.said, allowedBig.said, refusedBig.said], [
+    "drawn", deep, "drawn", deep, "drawn",
+    "ValueError a drawing of 4096 x 4096 pixels whose nested opacity groups and clip paths need more than 256 MB at once",
+  ]);
+  // (a layer is 4 bytes a pixel, a mask 1)
+  assert.ok(refusedLayers.grew < allowedLayers.grew + 2 * a, `17 deep grew ${refusedLayers.grew}, 16 deep ${allowedLayers.grew}`);
+  assert.ok(refusedMasks.grew < allowedMasks.grew + a / 2, `200 clip paths grew ${refusedMasks.grew}, 16 ${allowedMasks.grew}`);
+  assert.ok(refusedBig.grew < allowedBig.grew + 2 * big, `4 at 4096 grew ${refusedBig.grew}, 3 ${allowedBig.grew}`);
 });
 
 test("a PNG module fetched from a URL runs only with the SHA-256 the page was built with, which it must have", () => {
