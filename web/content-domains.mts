@@ -26,16 +26,16 @@ export function checkContentDomains(config: ContentDomains = CONTENT_DOMAINS): s
   if (config.dev.root && config.dev.root === config.prod.root) problems.push("dev and prod must use different content roots");
   return problems;
 }
-export function filesOrigin(env: ContentEnvironment): string {
-  const problems = checkContentDomains();
+export function filesOrigin(env: ContentEnvironment, config: ContentDomains = CONTENT_DOMAINS): string {
+  const problems = checkContentDomains(config);
   if (problems.length) throw new Error(problems.join("; "));
-  return CONTENT_DOMAINS[env].filesOrigin || legacyFiles[env];
+  return config[env].filesOrigin || legacyFiles[env];
 }
-export const filesHost = (env: ContentEnvironment): string => new URL(filesOrigin(env)).hostname;
+export const filesHost = (env: ContentEnvironment, config: ContentDomains = CONTENT_DOMAINS): string => new URL(filesOrigin(env, config)).hostname;
 // Keep old raw download links working during the reviewed dual-host cutover.
-export const filesHosts = (env: ContentEnvironment): string[] => [...new Set([new URL(legacyFiles[env]).hostname, filesHost(env)])];
+export const filesHosts = (env: ContentEnvironment, config: ContentDomains = CONTENT_DOMAINS): string[] => [...new Set([new URL(legacyFiles[env]).hostname, filesHost(env, config)])];
 // Until real-host isolation gates and PSL/browser adoption are reviewed,
 // neither a pending root nor its role hosts are eligible output-shell sites.
-export function forbiddenContentRoots(): string[] {
-  return [...LEGACY_CONTENT_ROOTS, ...Object.values(CONTENT_DOMAINS).map((c) => c.root).filter(Boolean)];
+export function forbiddenContentRoots(config: ContentDomains = CONTENT_DOMAINS): string[] {
+  return [...LEGACY_CONTENT_ROOTS, ...Object.values(config).map((c) => c.root).filter(Boolean)];
 }
