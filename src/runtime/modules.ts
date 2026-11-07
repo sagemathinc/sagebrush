@@ -2139,7 +2139,7 @@ newBuiltinModule("_fs", (m) => {
 const STRERROR: Record<string, string> = {
   ENOENT: "No such file or directory", EEXIST: "File exists", EACCES: "Permission denied", EPERM: "Operation not permitted",
   EISDIR: "Is a directory", ENOTDIR: "Not a directory", ENOTEMPTY: "Directory not empty", EXDEV: "Invalid cross-device link",
-  EBUSY: "Device or resource busy", EINVAL: "Invalid argument", ELOOP: "Too many levels of symbolic links",
+  EBUSY: "Device or resource busy", EINVAL: "Invalid argument", EFBIG: "File too large", ELOOP: "Too many levels of symbolic links",
   ENAMETOOLONG: "File name too long", EROFS: "Read-only file system", ENOSPC: "No space left on device", EMFILE: "Too many open files",
   EBADF: "Bad file descriptor", ESPIPE: "Illegal seek",
 };
@@ -2270,6 +2270,7 @@ newBuiltinModule("os", (m) => {
       return f();
     } catch (e: any) {
       if (e?.unsupported) raise(T.NotImplementedError, String(e.message));
+      if (e?.memory) raise(T.MemoryError);
       // (a write the files permission refuses: PermissionError 13 and why, no file named, as open()'s writes)
       if (e?.name === "PermissionDenied" || e?.name === "NotCapable") throw markRaised(callObj(T.PermissionError, [13, String(e.message).split("\n")[0]]));
       // (a descriptor's errors name no file, as CPython's: "[Errno 9] Bad file descriptor")
@@ -2277,16 +2278,24 @@ newBuiltinModule("os", (m) => {
       throw e;
     }
   };
-  const fdInt = (fd: any): number => {
-    const i = O.index(fd);
-    return typeof i === "bigint" ? Number(i) : i;
+  // (CPython's argument converters, so that no value reaches a file system with bits dropped: a descriptor, flags,
+  // a mode or `how` is a C int, read's count a ssize_t and an offset a C long, each OverflowError beyond)
+  const cInt = (x: any): number => {
+    const i = O.index(x);
+    if (i > 2147483647 || i < -2147483648) raise(T.OverflowError, "Python int too large to convert to C int");
+    return Number(i);
+  };
+  const cWide = (x: any, c: string): bigint => {
+    const i = BigInt(O.index(x));
+    if (i > 9223372036854775807n || i < -9223372036854775808n) raise(T.OverflowError, `Python int too large to convert to C ${c}`);
+    return i;
   };
   // (the CLI's descriptors are the host's; their positions are kept here, as node has no lseek: reads and writes
   // at the position, an O_APPEND descriptor's writes at the end, as the kernel puts them)
   const cliPos = new Map<number, { pos: number; append: boolean }>();
   wrap("open", (p: any, flags: any, mode: any = 0o777, dir_fd: any = null) => {
     noDirFd(dir_fd);
-    const q = pathStr(p), fl = fdInt(flags), md = fdInt(mode);
+    const q = pathStr(p), fl = cInt(flags), md = cInt(mode);
     if (shimFs) {
       try {
         return fs.openSync(at(q), fl, md);
@@ -2301,27 +2310,27 @@ newBuiltinModule("os", (m) => {
   });
   m.open.$sig = { args: ["path", "flags", "mode"], posonly: 0, vararg: null, kwonly: ["dir_fd"], kwarg: null, defaults: [0o777], kwdefaults: { dir_fd: null } };
   fn(m, "close", (fd: any) => fdCall(() => {
-    const n = fdInt(fd);
+    const n = cInt(fd);
     fs.closeSync(n);
     cliPos.delete(n);
     return null;
   }));
   fn(m, "read", (fd: any, n: any) => fdCall(() => {
-    const f = fdInt(fd), want = fdInt(n);
-    if (want < 0) throw Object.assign(new Error("EINVAL"), { code: "EINVAL", errno: -22 });
-    // (at most 64 MiB a call: a short read, as POSIX allows any read to be; the buffer is the runtime's checked one)
-    const buf = new Uint8Array(Math.min(want, 1 << 26));
-    let got: number;
-    if (shimFs) got = fs.readSync(f, buf);
-    else {
-      const c = cliPos.get(f);
-      got = fs.readSync(f, buf, 0, buf.length, c ? c.pos : null);
-      if (c) c.pos += got;
-    }
+    const f = cInt(fd), want = cWide(n, "ssize_t");
+    if (want < 0n) throw Object.assign(new Error("EINVAL"), { code: "EINVAL", errno: -22 });
+    // (a count more than a bytes object can hold (ops.ts's checked 2**32 - 1): MemoryError, as CPython's allocation
+    // of the count fails; the browser's result is exactly the bytes read, the CLI's buffer at most 64 MiB a call, a
+    // short read as POSIX allows any read to be)
+    if (want > 4294967295n) raise(T.MemoryError);
+    if (shimFs) return new PyBytes(fs.readFd(f, Number(want)));
+    const buf = new Uint8Array(Math.min(Number(want), 1 << 26));
+    const c = cliPos.get(f);
+    const got = fs.readSync(f, buf, 0, buf.length, c ? c.pos : null);
+    if (c) c.pos += got;
     return new PyBytes(buf.slice(0, got));
   }));
   fn(m, "write", (fd: any, data: any) => fdCall(() => {
-    const f = fdInt(fd);
+    const f = cInt(fd);
     const b = O.bufferOf(data);
     if (b === undefined || b === null) raise(T.TypeError, `a bytes-like object is required, not '${typeName(data)}'`);
     if (shimFs) {
@@ -2334,7 +2343,7 @@ newBuiltinModule("os", (m) => {
     return n;
   }));
   fn(m, "lseek", (fd: any, pos: any, how: any) => fdCall(() => {
-    const f = fdInt(fd), off = fdInt(pos), wh = fdInt(how);
+    const f = cInt(fd), off = Number(cWide(pos, "long")), wh = cInt(how);
     if (shimFs) return fs.seekFd(f, off, wh);
     const c = cliPos.get(f);
     // (a descriptor not opened here: a closed or unknown one is EBADF, as fstat says; another, a stream's, ESPIPE)
@@ -2343,14 +2352,15 @@ newBuiltinModule("os", (m) => {
       throw Object.assign(new Error("ESPIPE"), { code: "ESPIPE", errno: -29 });
     }
     const base = wh === 0 ? 0 : wh === 1 ? c.pos : wh === 2 ? fs.fstatSync(f).size : NaN;
-    if (Number.isNaN(base) || base + off < 0) throw Object.assign(new Error("EINVAL"), { code: "EINVAL", errno: -22 });
+    // (an offset a JS number can't hold exactly is past any file's largest: EINVAL, as a file system's maximum is)
+    if (Number.isNaN(base) || !Number.isSafeInteger(off) || base + off < 0 || !Number.isSafeInteger(base + off)) throw Object.assign(new Error("EINVAL"), { code: "EINVAL", errno: -22 });
     c.pos = base + off;
     return c.pos;
   }));
-  fn(m, "fstat", (fd: any) => fdCall(() => statResult(fs.fstatSync(fdInt(fd)))));
+  fn(m, "fstat", (fd: any) => fdCall(() => statResult(fs.fstatSync(cInt(fd)))));
   wrap("chmod", (p: any, mode: any, dir_fd: any = null, _follow_symlinks: any = true) => {
     noDirFd(dir_fd);
-    fs.chmodSync(at(pathStr(p)), fdInt(mode));
+    fs.chmodSync(at(pathStr(p)), cInt(mode));
     return null;
   });
   m.chmod.$sig = { args: ["path", "mode"], posonly: 0, vararg: null, kwonly: ["dir_fd", "follow_symlinks"], kwarg: null, defaults: [], kwdefaults: { dir_fd: null, follow_symlinks: true } };
@@ -2385,7 +2395,7 @@ newBuiltinModule("os", (m) => {
   // switch not consulted, as a policy isn't a permission bit)
   fn(m, "access", (p: any, mode: any, dir_fd: any = null, _effective_ids: any = false, _follow_symlinks: any = true) => {
     noDirFd(dir_fd);
-    const q = at(pathStr(p)), md = fdInt(mode);
+    const q = at(pathStr(p)), md = cInt(mode);
     if (shimFs) {
       let st: any;
       try {
@@ -2413,7 +2423,7 @@ newBuiltinModule("os", (m) => {
     return termSize(items[0], items[1]);
   });
   fn(m, "get_terminal_size", (fd: any = 1) => {
-    const f = fdInt(fd);
+    const f = cInt(fd);
     const s = !shimFs && f === 1 ? process.stdout : !shimFs && f === 2 ? process.stderr : null;
     if (s && (s as any).isTTY && (s as any).columns) return termSize((s as any).columns, (s as any).rows);
     throw markRaised(callObj(T.OSError, [25, "Inappropriate ioctl for device"]));

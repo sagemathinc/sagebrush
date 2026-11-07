@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -45,4 +45,42 @@ test("os: supports_fd and supports_dir_fd empty, dir_fd refused, posix exactly o
     "True False False",
     "",
   ].join("\n"));
+});
+
+// The web build's fs itself (web/shims/fs.ts, its types stripped and its SHA-256 import stubbed, as file-once.test
+// runs it): every bound holds before any effect, whatever os passes (astra's OPEN-FLAGS-1: flags with a bit above 31
+// made the file; design note §Allocations: a descriptor's file is at most a bytes object's 2**32 - 1 bytes)
+test("the web fs's descriptors: flags beyond a C int refused before any effect; seeks and writes past 2**32 - 1 refused, nothing allocated; reads exactly the bytes read", () => {
+  const d = mkdtempSync(join(process.env.TMPDIR || tmpdir(), "shutil-shim-"));
+  try {
+    const src = readFileSync(join(__dirname, "..", "..", "web", "shims", "fs.ts"), "utf8").replace('import { sha256Hex } from "../../src/runtime/sha256";', 'const sha256Hex = (_d: Uint8Array): string => "";');
+    assert.ok(src.includes("const sha256Hex = "), "the shim's import, stubbed");
+    writeFileSync(join(d, "fs.mts"), src);
+    writeFileSync(join(d, "run.mjs"), `
+      const shim = await import(${JSON.stringify(join(d, "fs.mts"))});
+      const changed = [];
+      shim.__hooks.changed = (p) => changed.push(p);
+      const t = (f) => { try { return String(f()); } catch (e) { return e.unsupported ? "unsupported" : e.memory ? "memory" : String(e.code); } };
+      const out = {};
+      out.flags = [2 ** 32 + 64 + 1, 2 ** 31, 2 ** 53, -1, 1.5, 2 ** 32].map((fl) => t(() => shim.openSync("/unknown-flags", fl, 0o644)));
+      out.made = [shim.existsSync("/unknown-flags"), changed.length];
+      shim.writeFileSync("/k", "Kept");
+      changed.length = 0;
+      const fd = shim.openSync("/k", 2, 0);
+      out.seek = [t(() => shim.seekFd(fd, 2 ** 32, 0)), t(() => shim.seekFd(fd, 2 ** 53 + 2, 0)), t(() => shim.seekFd(fd, 1e300, 0)), t(() => shim.seekFd(fd, 2 ** 32 - 1, 0))];
+      out.write = [t(() => shim.writeSync(fd, new Uint8Array(2))), t(() => shim.writeSync(fd, new Uint8Array(0))), shim.fstatSync(fd).size, changed.length];
+      shim.seekFd(fd, 0, 0);
+      const r = shim.readFd(fd, 2 ** 32 - 1);
+      out.read = [r.length, r.buffer.byteLength, new TextDecoder().decode(r), shim.readFd(fd, 2 ** 32 - 1).length];
+      console.log(JSON.stringify(out));
+    `);
+    const r = JSON.parse(execFileSync(process.execPath, [join(d, "run.mjs")], { encoding: "utf8" }));
+    assert.deepEqual(r.flags, Array(6).fill("unsupported"));
+    assert.deepEqual(r.made, [false, 0]);
+    assert.deepEqual(r.seek, ["EINVAL", "EINVAL", "EINVAL", String(2 ** 32 - 1)]);
+    assert.deepEqual(r.write, ["EFBIG", "0", 4, 0]);
+    assert.deepEqual(r.read, [4, 4, "Kept", 0]);
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
 });

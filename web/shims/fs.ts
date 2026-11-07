@@ -290,9 +290,19 @@ function unsupported(what: string): never {
   e.unsupported = true;
   throw e;
 }
+// (a descriptor's file is at most what a bytes object can be, the runtime's checked limit (ops.ts, 2**32 - 1): a
+// position past it is EINVAL at lseek and a write past it EFBIG, as a file system's maximum size is; a growth the
+// host can't allocate is MemoryError)
+const FILE_MAX = 2 ** 32 - 1;
+function noMemory(): never {
+  const e: any = new Error("out of memory");
+  e.memory = true;
+  throw e;
+}
 const fdOf = (fd: number, what: string): Fd => fds.get(fd) ?? fail("EBADF", -9, what, "");
 export function openSync(p: string, flags: number, _mode?: number): number {
-  if (typeof flags !== "number" || !Number.isInteger(flags) || flags < 0) unsupported("open with these flags");
+  // (the whole value checked before any bitwise operator, which would drop the bits above 31: a C int, never negative)
+  if (typeof flags !== "number" || !Number.isInteger(flags) || flags < 0 || flags > 0x7fffffff) unsupported("open with these flags");
   const acc = flags & O_ACCMODE;
   if (acc === 3) fail("EINVAL", -22, "open", p);
   if (flags & ~(O_ACCMODE | O_CREAT | O_EXCL | O_TRUNC | O_APPEND | O_NOEFFECT)) unsupported(`open with flags 0o${(flags & ~(O_ACCMODE | O_CREAT | O_EXCL | O_TRUNC | O_APPEND | O_NOEFFECT)).toString(8)}`);
@@ -342,9 +352,9 @@ export function fstatSync(fd: number) {
 export function seekFd(fd: number, pos: number, how: number): number {
   const h = fdOf(fd, "lseek");
   const base = how === 0 ? 0 : how === 1 ? h.pos : how === 2 ? contents(h.entry.path ?? "", h.entry).length : NaN;
-  if (Number.isNaN(base)) fail("EINVAL", -22, "lseek", "");
+  if (Number.isNaN(base) || !Number.isSafeInteger(pos)) fail("EINVAL", -22, "lseek", "");
   const at = base + pos;
-  if (at < 0) fail("EINVAL", -22, "lseek", "");
+  if (at < 0 || at > FILE_MAX) fail("EINVAL", -22, "lseek", "");
   h.pos = at;
   return at;
 }
@@ -355,7 +365,16 @@ function writeFd(h: Fd, data: Uint8Array): number {
   if (f.path !== null) mayChange(f.path, "write");
   const old = contents(f.path ?? "", f);
   const at = h.append ? old.length : h.pos;
-  const out = new Uint8Array(Math.max(old.length, at + data.length));
+  // (nothing to write changes nothing, wherever the position is, as POSIX's write of 0 bytes to a regular file)
+  if (data.length === 0) return 0;
+  if (at + data.length > FILE_MAX) fail("EFBIG", -27, "write", "");
+  let out: Uint8Array;
+  try {
+    out = new Uint8Array(Math.max(old.length, at + data.length));
+  } catch (e) {
+    if (e instanceof RangeError) noMemory();
+    throw e;
+  }
   out.set(old);
   out.set(data, at);
   f.data = out;
@@ -389,6 +408,16 @@ export function readSync(fd?: number, buf?: Uint8Array) {
   buf!.set(data.subarray(h.pos, h.pos + n));
   h.pos += n;
   return n;
+}
+// (os.read on a descriptor of this table: up to n bytes from its position, advanced; the result exactly the bytes
+// read, never a buffer of n)
+export function readFd(fd: number, n: number): Uint8Array {
+  const h = fdOf(fd, "read");
+  if (!h.read) fail("EBADF", -9, "read", "");
+  const data = contents(h.entry.path ?? "", h.entry);
+  const out = data.slice(h.pos, h.pos + Math.max(0, Math.min(n, data.length - h.pos)));
+  h.pos += out.length;
+  return out;
 }
 // os.chmod: the permission bits only (never the kind or identity), checked before the change; session-local
 export function chmodSync(p: string, mode: number) {
@@ -566,4 +595,4 @@ export function rmSync(p: string, opts?: { recursive?: boolean; force?: boolean 
   for (const f of readdirSync(r)) rmSync(r + "/" + f, opts);
   rmdirSync(r);
 }
-export default { onceOpen, onceWrite, writeSync, readSync, openSync, closeSync, fstatSync, seekFd, chmodSync, utimesMs, existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, readdirSync, statSync, unlinkSync, rmdirSync, rmSync, renameSync };
+export default { onceOpen, onceWrite, writeSync, readSync, openSync, closeSync, fstatSync, seekFd, readFd, chmodSync, utimesMs, existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, readdirSync, statSync, unlinkSync, rmdirSync, rmSync, renameSync };

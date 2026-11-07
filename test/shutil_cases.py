@@ -29,6 +29,16 @@ for bad in [lambda: os.write(ro, b"x"), lambda: os.read(wo, 1)]:
         print(type(e).__name__, e.errno, e.strerror)
 os.close(ro); os.close(wo)
 print(open("f.bin", "rb").read(), open("g.bin", "rb").read())
+# the converters' limits (a C int, read's ssize_t, lseek's C long): OverflowError beyond, MemoryError for a count no
+# bytes object can hold; nothing made, the descriptor's position unchanged
+fd = os.open("f.bin", os.O_RDWR)
+for bad in [lambda: os.open("h.bin", 2**32 + os.O_CREAT + os.O_WRONLY), lambda: os.open("h.bin", 2**31), lambda: os.open("h.bin", os.O_RDONLY, 2**32), lambda: os.close(2**31), lambda: os.close(2**64), lambda: os.read(2**40, 1), lambda: os.read(fd, 2**63), lambda: os.read(fd, 2**62), lambda: os.lseek(fd, 2**63, os.SEEK_SET), lambda: os.lseek(fd, -2**63 - 1, os.SEEK_SET), lambda: os.lseek(fd, 0, 2**31), lambda: os.write(2**32, b"x"), lambda: os.fstat(-2**31 - 1), lambda: os.chmod("f.bin", 2**32)]:
+    try:
+        bad(); print("no error")
+    except (OSError, OverflowError, MemoryError) as e:
+        print(type(e).__name__, getattr(e, "errno", None), e)
+print(os.path.exists("h.bin"), os.lseek(fd, 0, os.SEEK_CUR), os.read(fd, 2**24), os.lseek(fd, 0, os.SEEK_CUR))
+os.close(fd)
 
 # chmod, utime, access
 os.chmod("f.bin", 0o640); print(oct(stat.S_IMODE(os.stat("f.bin").st_mode)), stat.S_ISREG(os.stat("f.bin").st_mode))

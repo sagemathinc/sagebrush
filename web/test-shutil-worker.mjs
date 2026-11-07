@@ -206,6 +206,31 @@ try {
   check(dl[2] === "Kept True True", `none of them changed anything (${dl[2]})`);
   check((await log("perm")).changed.length === 0, "the page was told of no change for them");
 
+  // ---- the bounds (design note §Allocations, astra's OPEN-FLAGS-1): flags beyond a C int refused before any effect; a
+  // descriptor's file at most a bytes object's 2**32 - 1 bytes, a seek past it EINVAL and a write past it EFBIG, with
+  // nothing allocated or changed; a read's result exactly the bytes read, a count no bytes object holds MemoryError
+  const BOUNDS = [
+    "def b(f):",
+    "    try:",
+    "        return repr(f())",
+    "    except (OSError, MemoryError, OverflowError) as e:",
+    "        return type(e).__name__ + ' ' + str(getattr(e, 'errno', None))",
+    "h = os.open('keep.txt', os.O_RDWR)",
+    "print(b(lambda: os.lseek(h, 2**32, os.SEEK_SET)), b(lambda: os.lseek(h, 2**62, os.SEEK_SET)), b(lambda: os.lseek(h, 2**53 + 1, os.SEEK_SET)), os.lseek(h, 0, os.SEEK_CUR))",
+    "print(b(lambda: os.lseek(h, 2**32 - 1, os.SEEK_SET)), b(lambda: os.write(h, b'ab')), b(lambda: os.write(h, b'')), os.fstat(h).st_size, b(lambda: os.lseek(h, 2**32 - 2, os.SEEK_SET)), b(lambda: os.write(h, b'ab')), os.fstat(h).st_size)",
+    "print(os.fstat(h).st_size, os.lseek(h, 0, os.SEEK_SET), b(lambda: os.read(h, 2**32 - 1)), b(lambda: os.read(h, 2**32)), os.lseek(h, 0, os.SEEK_CUR))",
+    "os.close(h)",
+    "print(b(lambda: os.open('big.bin', 2**32 + os.O_CREAT + os.O_WRONLY)), os.path.exists('big.bin'), open('keep.txt').read())",
+  ].join("\n");
+  const g = await run("perm", BOUNDS);
+  ranOk(g, "the bounds");
+  const gl = g.stdout.split("\n");
+  check(gl[0] === "OSError 22 OSError 22 OSError 22 0", `lseek past 2**32 - 1: EINVAL, the position kept (${gl[0]})`);
+  check(gl[1] === "4294967295 OSError 27 0 4 4294967294 OSError 27 4", `a write ending past 2**32 - 1: EFBIG; one of 0 bytes there changes nothing (${gl[1]})`);
+  check(gl[2] === "4 0 b'Kept' MemoryError None 4", `os.read(fd, 2**32 - 1) gives the 4 bytes there are; 2**32: MemoryError, the position kept (${gl[2]})`);
+  check(gl[3] === "OverflowError None False Kept", `os.open with 2**32 + O_CREAT + O_WRONLY: OverflowError, no file made (${gl[3]})`);
+  check((await log("perm")).changed.length === 0, "the page was told of no change for them");
+
   // ---- metadata: session-local, no change message, gone in a new worker
   const e = await run("perm", "os.chmod('keep.txt', 0o600); os.utime('keep.txt', (1_000_000_000, 1_000_000_000)); print(oct(os.stat('keep.txt').st_mode & 0o777), int(os.stat('keep.txt').st_mtime))");
   check(e.stdout === "0o600 1000000000\n", `chmod and utime shown by stat in the session (${JSON.stringify(e.stdout)})`);
