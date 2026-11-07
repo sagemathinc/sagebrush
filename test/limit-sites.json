@@ -4497,6 +4497,11 @@
   "owner": "pcimc quick wins 3 (@sagebrush-sage2)",
   "reason": "Sage's TypeError messages for products of a GF(q) vector with a rational or a non-ZZ matrix: matched words, no limit"
  },
+ "lib/_sage_ffmat.py :: FFVector.__truediv__ :: TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 5' and 'Rational Field' #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "a doctest's expected output (Sage's coercion refusal), not code"
+ },
  "lib/_sage_ffmat.py :: _AlgCharge :: against the budget for one matrix. A charge per entry alone admitted #0": {
   "class": "2",
   "owner": "linear algebra/runtime memory",
