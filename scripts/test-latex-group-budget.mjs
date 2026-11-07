@@ -127,6 +127,11 @@ else {
   const bundles = Object.keys(meta).filter((k) => k.startsWith("the LaTeX editor ("));
   const inputs = [...new Set(bundles.flatMap((k) => meta[k]))].sort();
   check(bundles.length >= 8, "the metafile names the LaTeX editor's bundles (the group's two and the six lazy chunks)", bundles);
+  // (Run's code stays in Run's chunk (#824): the page imports it only lazily (loadRun) or as a type, so the page bundle's
+  //  inputs never list run-core.mjs; Bun tree-shakes an eager import of a re-export down to a few bytes the caps don't
+  //  see, so it is the inputs that are checked (grader's #804 RC1, @sagebrush's ruling, Nov 7))
+  const pageIn = meta["the LaTeX editor (sagebrush-latex.js)"] ?? [], runIn = meta["the LaTeX editor (sagebrush-latex-run.js)"] ?? [];
+  check(pageIn.length > 0 && !pageIn.includes("web/latex/run-core.mjs") && runIn.includes("web/latex/run-core.mjs"), "run-core.mjs is an input of the Run chunk only, not of the page bundle", { page: pageIn.filter((f) => /run-core/.test(f)), run: runIn.filter((f) => /run-core/.test(f)) });
   const dir = mkdtempSync(join(tmpdir(), "latex-group-paths-"));
   const notFull = inputs.filter((f) => {
     writeFileSync(join(dir, "files.txt"), f + "\n");
