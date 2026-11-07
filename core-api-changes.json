@@ -14,6 +14,22 @@
    "new": "(self, text, xy, xytext=, xycoords=, textcoords=, arrowprops=, annotation_clip=, **kw=)",
    "reason": "Matplotlib's own annotate signature (3.11.1): xycoords, textcoords and annotation_clip are its parameters, xycoords the fourth; the recorded order put arrowprops fourth, where Matplotlib reads a positional argument as xycoords. ha and fontsize are read from **kwargs, as Matplotlib's Text keywords are: a ninth positional argument is refused, as in Matplotlib.",
    "pr": 801
+  },
+  {
+   "name": "pathlib.PureWindowsPath.ntpath",
+   "old": "(module)",
+   "new": "(absent)",
+   "upstream": "CPython 3.14.10",
+   "reason": "Upstream removed it: 3.14.4's PureWindowsPath class body did `import ntpath`, so the module was a class attribute; 3.14.10's pathlib imports ntpath at module level (pathlib.ntpath). Checked: hasattr(pathlib.PureWindowsPath, 'ntpath'), hasattr(pathlib.WindowsPath, 'ntpath') on CPython 3.14.4: True, True; on CPython 3.14.10: False, False. P3b-1's resync of pathlib to 3.14.10 follows it.",
+   "pr": 830
+  },
+  {
+   "name": "pathlib.WindowsPath.ntpath",
+   "old": "(module)",
+   "new": "(absent)",
+   "upstream": "CPython 3.14.10",
+   "reason": "Upstream removed it: 3.14.4's PureWindowsPath class body did `import ntpath`, so the module was a class attribute; 3.14.10's pathlib imports ntpath at module level (pathlib.ntpath). Checked: hasattr(pathlib.PureWindowsPath, 'ntpath'), hasattr(pathlib.WindowsPath, 'ntpath') on CPython 3.14.4: True, True; on CPython 3.14.10: False, False. P3b-1's resync of pathlib to 3.14.10 follows it.",
+   "pr": 830
   }
  ]
 }
