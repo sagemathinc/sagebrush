@@ -154,6 +154,21 @@ r, m = run(kc, "interact(lambda **kw: None, **{'v' * 8192: checkbox(True, label=
 out = "".join(c["text"] for c in of(m, "stream") if c["name"] == "stdout")
 check("@interact: its note is bounded", r["status"] == "ok" and len(out) < 1200 and ("v" * 40 + "=True") in out and ("v" * 41) not in out
       and "and 10 more]" in out and "s='" + "w" * 58 + "…," in out, (r["status"], len(out), out[:300]))
+# (each kind of control's value as Python writes it: a labelled slider's label, an integer slider rounded, a range
+# slider's pair, a quote escaped; buttons and text not listed; a long function name cut at 40; grader's r796 pins)
+r, m = run(kc, "from _interact import button\n@interact\ndef a_function_whose_name_is_longer_than_forty_characters(a=slider(['x', 'yy', 'z'], default='yy'), "
+               "b=slider(0, 10, 1, 2.6), r=range_slider(0, 10, 1, (2, 5)), go=button('Go'), t=text_control('hello'), s=input_box(\"it's\")):\n    pass")
+out = "".join(c["text"] for c in of(m, "stream") if c["name"] == "stdout")
+check("@interact: each control's value as Python writes it", r["status"] == "ok" and out ==
+      "[The Sagebrush kernel can't show interact controls in Jupyter yet, so " + "a_function_whose_name_is_longer_than_forty_characters"[:40] + " ran once with its default values: "
+      "a=yy, b=3, r=(2, 5), s='it\\'s']\n", (r["status"], out))
+# (past 12 values, the rest counted; a button there is not one of them)
+r, m = run(kc, "from _interact import button\ninteract(lambda **kw: None, **{**{'c%d' % i: True for i in range(12)}, 'go': button('Go'), 'c12': True})")
+out = "".join(c["text"] for c in of(m, "stream") if c["name"] == "stdout")
+check("@interact: past 12 values, the rest counted, buttons not", r["status"] == "ok" and out.endswith("c11=True, and 1 more]\n"), (r["status"], out))
+# (a spec the host can't read: nothing written)
+r, m = run(kc, "x = __pyjs_host__('interact', '{')")
+check("@interact: a spec that isn't JSON writes nothing", r["status"] == "ok" and not of(m, "stream"), (r["status"], of(m, "stream")))
 r, m = run(kc, "@interact\ndef bad(u=slider(0,4,1,2)):\n    1/0")
 err = "".join(c["text"] for c in of(m, "stream") if c["name"] == "stderr")
 check("@interact whose function raises: its traceback, and the cell succeeds",
