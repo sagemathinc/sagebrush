@@ -666,13 +666,15 @@ class Polynomial_nf:
         b2 = self._coerce(b)
         if b2 is None:
             return NotImplemented
-        if b2.degree() == 0:
+        from _sage_poly import Polynomial
+        if not isinstance(b, (Polynomial_nf, Polynomial)) and b2.degree() == 0:
             return self * (1 / b2._c[0])
-        q, r = self.quo_rem(b2)
-        if r:
-            import _sage_frac
-            return _sage_frac.FractionFieldElement(self, b2)
-        return q
+        # a polynomial: an element of the fraction field, even when the
+        # division is exact (x/x is 1 in Frac(K[x]), as Sage)
+        if not b2:
+            raise ZeroDivisionError("fraction field element division by zero")
+        import _sage_frac
+        return _sage_frac.FractionFieldElement(self, b2)
 
     def __rtruediv__(self, b):
         import _sage_frac
