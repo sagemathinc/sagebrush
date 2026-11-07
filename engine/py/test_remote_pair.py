@@ -959,6 +959,8 @@ def test_runner_version_is_the_packages_own():
     distribution's (grader's r782 R2); from a checkout beside another installed copy it is "dev", never the installed
     one's (R3), so a page's minimum isn't passed for code the number doesn't describe."""
     from importlib import metadata
+    # (the version the runner reports everywhere (banner, hello, the needs check) is runner_version()'s, not a constant)
+    assert P.VERSION == P.runner_version(), (P.VERSION, P.runner_version())
     here = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(P.__file__)), "..", "__init__.py"))
 
     class Dist:
@@ -973,6 +975,10 @@ def test_runner_version_is_the_packages_own():
     try:
         metadata.distribution = lambda name: Dist(here, "1.2.3")
         assert P.runner_version() == "1.2.3"
+        # (and the module's VERSION, what the banner, the hello and the needs check say, is that, read at import: the
+        # module loaded again as an installed copy would load (grader's r782 R2))
+        import importlib
+        assert importlib.reload(P).VERSION == "1.2.3"
         metadata.distribution = lambda name: Dist("/somewhere/else/site-packages/sagebrush/__init__.py", "1.2.3")
         assert P.runner_version() == "dev"
 
@@ -982,6 +988,8 @@ def test_runner_version_is_the_packages_own():
         assert P.runner_version() == "dev"
     finally:
         metadata.distribution = real
+        import importlib
+        importlib.reload(P)
 
 
 @aio
@@ -999,7 +1007,7 @@ async def test_startup_banner():
         await task
     except asyncio.CancelledError:
         pass
-    want = "sagebrush %s (Python %s at %s)\n" % (P.VERSION, sys.version.split()[0], sys.executable)
+    want = "sagebrush %s (Python %s at %s)\n" % (P.runner_version(), sys.version.split()[0], sys.executable)
     assert out and err and err[0] == want, (out, err[:2])
 
 
