@@ -59,6 +59,9 @@ test("web/notebook/worker-kernel.js (loaded from its text, so it imports nothing
   assert.match(src, /if \(mode !== "sage" && mode !== "magma" && mode !== "matlab"\) return null;/);
   const sent = src.match(/sage: (?:opts\.)?mode === "sage", magma: (?:opts\.)?mode === "magma", matlab: (?:opts\.)?mode === "matlab"/g) ?? [];
   assert.equal(sent.length, 3);
+  // (and the notebook's setMode, whose text test/remote-approval-census.test.ts plants a fault in)
+  assert.match(text("web/notebook/notebook.js"), /^    mode = \["python", "sage", "magma", "matlab"\]\.includes\(m\) \? m : "python";$/m);
+  assert.deepEqual(MODE_NAMES, ["python", "sage", "magma", "matlab"]);
   assert.deepEqual(FLAG_MODES, ["sage", "magma", "matlab"]);
 });
 

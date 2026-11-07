@@ -23,7 +23,6 @@ import { safeSvg, RASTER_URL, XLINK_NS } from "../safe-svg.js";
 export { safeSvg };
 import { cellId } from "./ipynb.js";
 import { Reactive, SCOPE_SEP } from "../../src/notebook-reactive.ts";
-import { isModeName } from "../../src/modes.ts";
 
 export const SCENE3D = "application/vnd.sagebrush.scene3d+json";
 export const GRAPH = "application/vnd.sagebrush.graph+json";
@@ -2173,7 +2172,7 @@ export function createNotebook(root, opts = {}) {
   }
   function setMode(m, notify = true) {
     const before = mode;
-    mode = isModeName(m) ? m : "python";
+    mode = ["python", "sage", "magma", "matlab"].includes(m) ? m : "python";
     gateCfg = null;
     for (const c of cells()) paint(c);
     if (notify) { emit("mode", mode); schedule(); }
