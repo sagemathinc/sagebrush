@@ -1,0 +1,21 @@
+v / int(2) -> TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 7' and 'Rational Field'
+v / int(0) -> ZeroDivisionError: rational division by zero
+v / 2 -> TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 7' and 'Rational Field'
+v / 0 -> ZeroDivisionError: rational division by zero
+v / GF(7)(2) -> (4, 1)
+v / 'a' -> TypeError: unsupported operand parent(s) for /: 'Vector space of dimension 2 over Finite Field of size 7' and '<class 'str'>'
+v / [1] -> TypeError: unsupported operand parent(s) for /: 'Vector space of dimension 2 over Finite Field of size 7' and '<class 'list'>'
+RDF v / int(2) -> (0.5, 1.0)
+RDF v / int(0) -> ZeroDivisionError: rational division by zero
+RDF v / 'a' -> TypeError: unsupported operand parent(s) for /: 'Vector space of dimension 2 over Real Double Field' and '<class 'str'>'
+RDF v / (1,) -> TypeError: unsupported operand parent(s) for /: 'Vector space of dimension 2 over Real Double Field' and '<class 'tuple'>'
+vector(Finite Field of size 7, [1, 2]) / D() -> TypeError: unsupported operand parent(s) for /: 'Vector space of dimension 2 over Finite Field of size 7' and '<class '__main__.D'>'
+vector(Real Double Field, [1, 2]) / D() -> TypeError: unsupported operand parent(s) for /: 'Vector space of dimension 2 over Real Double Field' and '<class '__main__.D'>'
+vector(Complex Double Field, [1, 2]) / D() -> TypeError: unsupported operand parent(s) for /: 'Vector space of dimension 2 over Complex Double Field' and '<class '__main__.D'>'
+int(1) / D() -> TypeError: D: no int
+vector(Finite Field of size 7, [1, 2]) / Finite Field of size 7(0) -> ZeroDivisionError: inverse of Mod(0, 7) does not exist
+vector(Finite Field of size 7, [1, 2]) / Finite Field in a of size 7^2(0) -> ZeroDivisionError: division by zero in finite field
+vector(Finite Field of size 7, [1, 2]) / Integer Ring(0) -> ZeroDivisionError: rational division by zero
+vector(Real Double Field, [1, 2]) / Real Double Field(0) -> (+infinity, +infinity)
+vector(Real Field with 53 bits of precision, [1, 2]) / Real Field with 53 bits of precision(0) -> (+infinity, +infinity)
+vector(Complex Double Field, [1, 2]) / Complex Double Field(0) -> (NaN + NaN*I, NaN + NaN*I)

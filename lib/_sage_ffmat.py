@@ -896,6 +896,26 @@ def _real_field(R):
     return _sa().RealField(k[2])
 
 
+def _inexact_kind(F):
+    """(complex, double, precision) of RDF, CDF, RR, CC, RealField(p) or
+    ComplexField(p), by identity and class, never by its name; None for
+    any other parent (test/inexact-kind.test.ts).
+    """
+    S = _sa()
+    if F is S.RDF:
+        return (False, True, 53)
+    if F is S.CDF:
+        return (True, True, 53)
+    import _sage_lang
+    import _sage_matrix
+    import _sage_real
+    if isinstance(F, (_sage_lang._RealField, _sage_real.RealField_)):
+        return (False, False, int(F.prec()))
+    if isinstance(F, (_sage_matrix.ComplexField_, _sage_real.ComplexField_)):
+        return (True, False, int(F.prec()))
+    return None
+
+
 class FFVector:
     """A vector over a finite field.
 
@@ -1032,9 +1052,45 @@ class FFVector:
             return NotImplemented
         return _vector_op(o, self, "-")
 
+    def _inexact_meet(self, o):
+        """(K, self over K, o in K) where this vector over a real or complex
+        field meets a number o of another such field, as Sage: o's field
+        coerces into self's (o's precision at least self's, and a complex o
+        only into a complex field), so K is self's field; otherwise K has the
+        lower precision, is complex when either is, and is RDF or CDF only
+        for two doubles (a double counting as 53 bits; vector(RealField(80))
+        times RDF(3) is over RR, vector(RDF) times CC(3) over CC).  None
+        when either field is not one of these, or K is self's field and o
+        already in it."""
+        P, B = _sa().parent(o), self._base
+        kb, kp = _inexact_kind(B), _inexact_kind(P)
+        if kb is None or kp is None:
+            return None
+        (cb, db, pb), (cp, dp, pp) = kb, kp
+        if pp >= pb and (cb or not cp):
+            K = B
+        else:
+            c, p = cb or cp, min(pb, pp)
+            if db and dp:
+                K = _sa().CDF if c else _sa().RDF
+            else:
+                K = _sa().ComplexField(p) if c else _sa().RealField(p)
+        if K is B and P == B:
+            return None
+        try:
+            c = K(o)
+        except TypeError:
+            # (ComplexField(20) takes a CDF number by its parts)
+            c = K(o.real(), o.imag())
+        return K, (self if K is B else FFVector(K, [K(a) for a in self._e])), c
+
     def __mul__(self, o):
         if _vec_base(o) is not None:
             return _vector_op(self, o, "*")
+        m = self._inexact_meet(o)
+        if m is not None:
+            K, v, c = m
+            return FFVector(K, [a * c for a in v._e])
         if isinstance(o, FFMatrix):
             return o._vecmat(self)
         import _sage_matrix
@@ -1067,6 +1123,10 @@ class FFVector:
         """
         if _vec_base(o) is not None:
             return _vector_op(o, self, "*")
+        m = self._inexact_meet(o)
+        if m is not None:
+            K, v, c = m
+            return FFVector(K, [c * a for a in v._e])
         c = _admit(self._base, o)
         if c is None:
             if isinstance(o, _F) or type(o).__name__ == "Rational":
@@ -1074,6 +1134,41 @@ class FFVector:
                 raise TypeError("unsupported operand parent(s) for *: '%s' and '%s'" % (_sa().parent(o), self.parent()))
             return NotImplemented
         return FFVector(self._base, [c * a for a in self._e])
+
+    def __truediv__(self, o):
+        """self / c, as Sage: self * (1/c), the inverse in c's own ring (an
+        integer's in QQ, which a vector over GF(q) refuses as a product).
+
+        EXAMPLES::
+
+            sage: vector(RDF, [49, 49])/RDF(49), vector(GF(5), [1, 2])/GF(5)(3)
+            ((0.9999999999999999, 0.9999999999999999), (2, 4))
+            sage: vector(GF(5), [1, 2])/2
+            Traceback (most recent call last):
+            ...
+            TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 5' and 'Rational Field'
+        """
+        if isinstance(o, (FFVector, FFMatrix)) or _vec_base(o) is not None:
+            return NotImplemented
+        m = self._inexact_meet(o)
+        if m is not None:
+            # (over the field where the two meet, as for a product:
+            # vector(RDF, [2, 4])/CDF(2) is over CDF, vector(ComplexField(100),
+            # [2, 4])/RealField(80)(2) over ComplexField(80))
+            K, v, c = m
+            inv = 1 / c
+            return FFVector(K, [a * inv for a in v._e])
+        if isinstance(o, int) and not isinstance(o, bool):
+            # (1/o in QQ: rational division by zero for 0, as Sage)
+            inv = _sa()._QQ(1, o)
+        else:
+            try:
+                inv = 1 / o
+            except TypeError:
+                # (Sage's refusal, naming the vector's parent and o's class, whether
+                # or not o's class has its own __rtruediv__: Sage 10.10 never calls it)
+                raise TypeError("unsupported operand parent(s) for /: '%r' and '%r'" % (self.parent(), type(o)))
+        return self * inv
 
     def dot_product(self, o):
         """The dot product, in the ring where the two base rings meet.
