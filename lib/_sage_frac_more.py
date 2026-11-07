@@ -1,6 +1,7 @@
-"""Partial fraction decomposition in a univariate fraction field, as Sage:
-_sage_frac's FractionFieldElement.partial_fraction_decomposition, loaded on
-first use rather than at Sage's start."""
+"""Fraction-field work loaded on first use rather than at Sage's start:
+partial fraction decomposition in a univariate fraction field
+(FractionFieldElement.partial_fraction_decomposition) and the hash of a
+multivariate fraction (MFraction.__hash__), as Sage."""
 
 from fractions import Fraction as _F
 
@@ -51,3 +52,19 @@ def partial_fraction_decomposition(self):
         raise ArithmeticError("element is non-invertible")
     whole = R(q) if zz else q
     return whole, parts
+
+
+def mfraction_hash(self):
+    from _sage_mpoly import MPolynomial, _sa
+    n, d = self._num, self._den
+    if d == 1:
+        # (as Sage: hash(F(x)) == hash(x))
+        return hash(n)
+    # equal fractions hash alike: x/(-y) and (-x)/y, 3/(6*y) and 1/(2*y)
+    R = n._ring
+    dom = R._dom
+    c = d._leading()[1]
+    if R._base is _sa().ZZ:
+        return hash((-n, -d) if c < 0 else (n, d))
+    il = dom._inv(c)
+    return hash((MPolynomial(R, {e: dom._mul(v, il) for e, v in n._d.items()}), MPolynomial(R, {e: dom._mul(v, il) for e, v in d._d.items()})))

@@ -370,9 +370,9 @@ class FractionFieldElement:
             ....:     print(e)
             element is non-invertible
         """
-        # (in _sage_frac_pfd, loaded on first use: not at Sage's start)
-        import _sage_frac_pfd
-        return _sage_frac_pfd.partial_fraction_decomposition(self)
+        # (in _sage_frac_more, loaded on first use: not at Sage's start)
+        import _sage_frac_more
+        return _sage_frac_more.partial_fraction_decomposition(self)
 
 
 def _inverse_mod(a, m):

@@ -3339,18 +3339,9 @@ class MFraction:
         return self._num * o._den == o._num * self._den
 
     def __hash__(self):
-        n, d = self._num, self._den
-        if d == 1:
-            # (as Sage: hash(F(x)) == hash(x))
-            return hash(n)
-        # equal fractions hash alike: x/(-y) and (-x)/y, 3/(6*y) and 1/(2*y)
-        R = n._ring
-        dom = R._dom
-        c = d._leading()[1]
-        if R._base is _sa().ZZ:
-            return hash((-n, -d) if c < 0 else (n, d))
-        il = dom._inv(c)
-        return hash((MPolynomial(R, {e: dom._mul(v, il) for e, v in n._d.items()}), MPolynomial(R, {e: dom._mul(v, il) for e, v in d._d.items()})))
+        # (in _sage_frac_more, loaded on first use: not at Sage's start)
+        import _sage_frac_more
+        return _sage_frac_more.mfraction_hash(self)
 
     def __call__(self, *args, **kwds):
         """Evaluate (or substitute).
