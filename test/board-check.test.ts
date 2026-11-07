@@ -149,6 +149,8 @@ test("pictures: their sizes against what the board shows; their shape", () => {
   // (base64 with other pad bits is no reason: it is read in its one form, so only a real cause is said)
   assert.deepEqual(why("data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMSIgaGVpZ2h0PSIxIi8+Ch=="), []);
   assert.deepEqual(why(big), svgErr("it's over 2 MB of text"));
+  // (text past 2 MB once decoded, though its data: URL is within the length read: the cause still said, grader's V23)
+  assert.deepEqual(why("data:image/svg+xml," + '<svg width="1" height="1"/>' + "a".repeat(2_000_100)), svgErr("it's over 2 MB of text"));
   // (one past the bound, by its length or by the bytes its base64 decodes to, is said so without being decoded:
   // atob and decodeURIComponent never called for it, SVG-DIAGNOSTIC-BOUND-1)
   const undecoded = spawnSync(process.execPath, ["-e", `const { checkText } = require(${JSON.stringify(__dirname + "/../src/board-check.js")});

@@ -90,6 +90,17 @@ check(svgDataUrl(refs) === null && pictureSize("image/svg+xml", b64(new TextEnco
 const canon1 = "PHN2ZyB3aWR0aD0iMSIgaGVpZ2h0PSIxIi8+Cg==", loose1 = "PHN2ZyB3aWR0aD0iMSIgaGVpZ2h0PSIxIi8+Ch==";
 check(atob(canon1) === atob(loose1) && svgText(canon1) === '<svg width="1" height="1"/>\n' && svgText(loose1) === null && svgText(canon1.slice(0, -2)) === null, "base64 that isn't the one form (pad bits, no padding): refused");
 check(pictureSize("image/svg+xml", loose1) === null && svgDataUrl("data:image/svg+xml;base64," + loose1) === "data:image/svg+xml;base64," + canon1, "so too as a picture's size; a data: URL is read in the one form");
+// (grader's r791 pins: a comment holding ">" before the root; a duplicate width, the first read; the stored form
+// lower-case only; base64 at exactly SVG_MAX_BYTES with its padding admitted, one byte over refused)
+check(sz('<!-- a > b --><svg width="10" height="20"/>') === '{"w":10,"h":20}', "a comment with > before the root (V6)");
+check(sz('<svg width="10" width="900" height="5"/>') === '{"w":10,"h":5}', "a duplicate width: the first (V7)");
+{
+  const ok = svgDataUrl('<svg width="1" height="1"/>');
+  check(pictureUrl(ok)?.type === "image/svg+xml" && pictureUrl("DATA:IMAGE/SVG+XML;BASE64," + ok.slice(26)) === null, "the stored form is lower-case only (V11)");
+  const at = (n) => { const head = '<svg width="1" height="1"/>'; return Buffer.from(head + " ".repeat(n - head.length)).toString("base64"); };
+  const cap = at(SVG_MAX_BYTES), over = at(SVG_MAX_BYTES + 1);
+  check(cap.endsWith("=") && svgText(cap) !== null && svgText(over) === null, "exactly SVG_MAX_BYTES with padding: admitted; one byte over: refused (V28)");
+}
 // (base64 that decodes past 2 MB is refused from its length, before anything decodes it: astra's preflight note)
 {
   const real = globalThis.atob; let calls = 0;

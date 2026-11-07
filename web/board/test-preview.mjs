@@ -48,6 +48,10 @@ const plain = await makePreview(svgOut('<svg xmlns="http://www.w3.org/2000/svg" 
 check(typeof plain?.outputs[0].data["image/svg+xml"] === "string", "an SVG with a plain width and height: kept");
 const refd = await makePreview(svgOut('<svg xmlns="http://www.w3.org/2000/svg" width="&#57;6" height="&#54;4" viewBox="0 0 1 1"/>'), { at, ms: 1, total: 1 }, noRaster);
 check(refd && refd.outputs[0].data["image/svg+xml"] === undefined && refd.outputs[0].data["text/plain"] === "fig", "an SVG whose width is a character reference: not kept, its text is");
+// (an SVG kept as it is only within a preview's picture bounds, IMAGE_W x IMAGE_H: grader's V18)
+const wideSvg = await makePreview(svgOut('<svg xmlns="http://www.w3.org/2000/svg" width="641" height="10"/>'), { at, ms: 1, total: 1 }, noRaster);
+const fits = await makePreview(svgOut('<svg xmlns="http://www.w3.org/2000/svg" width="640" height="10"/>'), { at, ms: 1, total: 1 }, noRaster);
+check(wideSvg && wideSvg.outputs[0].data["image/svg+xml"] === undefined && typeof fits?.outputs[0].data["image/svg+xml"] === "string", "an SVG preview past 640 wide: not kept; at 640: kept (V18)");
 const vbOnly = await makePreview(svgOut('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"/>'), { at, ms: 1, total: 1 }, noRaster);
 check(vbOnly && vbOnly.outputs[0].data["image/svg+xml"] === undefined, "an SVG sized only by its viewBox: not kept (SVG-VIEWBOX-SIZE-1)");
 check(cleanPreview({ ...plain, outputs: [{ output_type: "display_data", data: { "image/svg+xml": '<svg width="72pt" height="48pt" viewBox="0 0 1 1"/>', "text/plain": "fig" }, metadata: {} }] })?.outputs[0].data["image/svg+xml"] === undefined, "read back: an SVG in pt, not kept");
