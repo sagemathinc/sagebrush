@@ -1,4 +1,9 @@
 {
+ "engine/ap/tests/stop.rs :: traced :: let (gap, poll) = (hooks::max_gap_ns() as f64 / 1e6, hooks::max_poll_gap_ns() as f64 / 1e6); #0": {
+  "class": "none",
+  "owner": "remote-compute",
+  "reason": "test-hook timing (longest wall-time gap between interrupt checks / simulated wasm host polls) and its readout in ap Stop pins; measures, refuses nothing"
+ },
  "engine/ball/src/ball.rs ::  :: pub const EXP_MAX: i64 = 1 << 40; #0": {
   "class": "2+3",
   "owner": "ball arithmetic",
@@ -474,9 +479,15 @@
   "class": "none",
   "owner": "HMF engine"
  },
- "engine/interrupt/src/lib.rs :: count :: MAX_POLL_GAP_NS.fetch_max(n - last, Relaxed); #0": {
+ "engine/interrupt/src/lib.rs :: count :: MAX_GAP_NS.fetch_max(n.saturating_sub(last), Relaxed); #0": {
   "class": "none",
-  "owner": "sage"
+  "owner": "remote-compute",
+  "reason": "test-hook timing (longest wall-time gap between interrupt checks / simulated wasm host polls) and its readout in ap Stop pins; measures, refuses nothing"
+ },
+ "engine/interrupt/src/lib.rs :: count :: MAX_POLL_GAP_NS.fetch_max(n.saturating_sub(last), Relaxed); #0": {
+  "class": "none",
+  "owner": "remote-compute",
+  "reason": "test-hook timing (longest wall-time gap between interrupt checks / simulated wasm host polls) and its readout in ap Stop pins; measures, refuses nothing"
  },
  "engine/interrupt/src/lib.rs :: drop :: static MAX_POLL_GAP_NS: AtomicU64 = AtomicU64::new(0); #0": {
   "class": "none",
