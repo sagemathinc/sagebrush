@@ -4421,75 +4421,10 @@
   "owner": "curves over QQ (@sagebrush-sage2)",
   "reason": "base_extend of a curve over RR to a ring other than RR: not available yet (Sage has them)"
  },
- "lib/_sage_expr.py ::  :: _EXACT_SIGN_MAX_DEGREE = 32 #0": {
-  "class": "none",
-  "owner": "Sage kernel (@sagebrush-sage2)",
-  "reason": "bool() of algebraic constants: the exact conversion's degree cap is an algorithm switch (past it the relation is decided at 400 bits, as Sage decides such identities), not a limit on a computation; nothing is refused (or a docstring/except line of it)"
- },
  "lib/_sage_expr.py :: _assume_simplify :: \"\"\"The assumptions' simplifications, applied through e (Maxima's simplify #0": {
   "class": "none",
   "owner": "Sage kernel (@sagebrush-sage2)",
   "reason": "a docstring naming Maxima (Sage's simplify); it refuses nothing"
- },
- "lib/_sage_expr.py :: _exact_degree_bound :: except (TypeError, ValueError, ArithmeticError, NotImplementedError): #0": {
-  "class": "none",
-  "owner": "Sage kernel (@sagebrush-sage2)",
-  "reason": "bool() of algebraic constants: the exact conversion's degree cap is an algorithm switch (past it the relation is decided at 400 bits, as Sage decides such identities), not a limit on a computation; nothing is refused (or a docstring/except line of it)"
- },
- "lib/_sage_expr.py :: _exact_degree_bound :: except (TypeError, ValueError, ArithmeticError, NotImplementedError): #1": {
-  "class": "none",
-  "owner": "Sage kernel (@sagebrush-sage2)",
-  "reason": "bool() of algebraic constants: the exact conversion's degree cap is an algorithm switch (past it the relation is decided at 400 bits, as Sage decides such identities), not a limit on a computation; nothing is refused (or a docstring/except line of it)"
- },
- "lib/_sage_expr.py :: _exact_sign :: cannot be decided (another kind of constant, or past the degree cap), as #0": {
-  "class": "none",
-  "owner": "Sage kernel (@sagebrush-sage2)",
-  "reason": "bool() of algebraic constants: the exact conversion's degree cap (32, from the tree's bound, before anything is built) bounds the automatic proof's work; past it the relation stays undecided (bool False), as it was before the exact path existed; nothing raises (or a docstring/except line of it)"
- },
- "lib/_sage_expr.py :: _exact_sign :: except (TypeError, ValueError, ArithmeticError, NotImplementedError, AttributeError, RecursionError): #0": {
-  "class": "none",
-  "owner": "Sage kernel (@sagebrush-sage2)",
-  "reason": "bool() of algebraic constants: the exact conversion's degree cap is an algorithm switch (past it the relation is decided at 400 bits, as Sage decides such identities), not a limit on a computation; nothing is refused (or a docstring/except line of it)"
- },
- "lib/_sage_expr.py :: _exact_sign_capped :: \"c\" (not real); _CAPPED when its degree is past _EXACT_SIGN_MAX_DEGREE #0": {
-  "class": "none",
-  "owner": "Sage kernel (@sagebrush-sage2)",
-  "reason": "bool() of algebraic constants: the exact conversion's degree cap (32, from the tree's bound, before anything is built) bounds the automatic proof's work; past it the relation stays undecided (bool False), as it was before the exact path existed; nothing raises (or a docstring/except line of it)"
- },
- "lib/_sage_expr.py :: _exact_sign_capped :: _sage_qqbar._degree_cap = cap #0": {
-  "class": "none",
-  "owner": "Sage kernel (@sagebrush-sage2)",
-  "reason": "bool() of algebraic constants: the exact conversion's degree cap (32, from the tree's bound, before anything is built) bounds the automatic proof's work; past it the relation stays undecided (bool False), as it was before the exact path existed; nothing raises (or a docstring/except line of it)"
- },
- "lib/_sage_expr.py :: _exact_sign_capped :: by the algebraic numbers' own degree check, under that cap); None for #0": {
-  "class": "none",
-  "owner": "Sage kernel (@sagebrush-sage2)",
-  "reason": "bool() of algebraic constants: the exact conversion's degree cap (32, from the tree's bound, before anything is built) bounds the automatic proof's work; past it the relation stays undecided (bool False), as it was before the exact path existed; nothing raises (or a docstring/except line of it)"
- },
- "lib/_sage_expr.py :: _exact_sign_capped :: cap = _EXACT_SIGN_MAX_DEGREE if old is None else min(old, _EXACT_SIGN_MAX_DEGREE) #0": {
-  "class": "none",
-  "owner": "Sage kernel (@sagebrush-sage2)",
-  "reason": "bool() of algebraic constants: the exact conversion's degree cap (32, from the tree's bound, before anything is built) bounds the automatic proof's work; past it the relation stays undecided (bool False), as it was before the exact path existed; nothing raises (or a docstring/except line of it)"
- },
- "lib/_sage_expr.py :: _exact_sign_capped :: except (TypeError, ValueError, ArithmeticError, NotImplementedError, AttributeError, RecursionError): #0": {
-  "class": "none",
-  "owner": "Sage kernel (@sagebrush-sage2)",
-  "reason": "bool() of algebraic constants: the exact conversion's degree cap (32, from the tree's bound, before anything is built) bounds the automatic proof's work; past it the relation stays undecided (bool False), as it was before the exact path existed; nothing raises (or a docstring/except line of it)"
- },
- "lib/_sage_expr.py :: _exact_sign_capped :: except NotImplementedError as e: #0": {
-  "class": "none",
-  "owner": "Sage kernel (@sagebrush-sage2)",
-  "reason": "bool() of algebraic constants: the exact conversion's degree cap (32, from the tree's bound, before anything is built) bounds the automatic proof's work; past it the relation stays undecided (bool False), as it was before the exact path existed; nothing raises (or a docstring/except line of it)"
- },
- "lib/_sage_expr.py :: _exact_sign_capped :: if bound is not None and bound > cap: #0": {
-  "class": "none",
-  "owner": "Sage kernel (@sagebrush-sage2)",
-  "reason": "bool() of algebraic constants: the exact conversion's degree cap (32, from the tree's bound, before anything is built) bounds the automatic proof's work; past it the relation stays undecided (bool False), as it was before the exact path existed; nothing raises (or a docstring/except line of it)"
- },
- "lib/_sage_expr.py :: _exact_sign_capped :: return _CAPPED if \"more than %d\" % cap in str(e) else None #0": {
-  "class": "none",
-  "owner": "Sage kernel (@sagebrush-sage2)",
-  "reason": "bool() of algebraic constants: the exact conversion's degree cap (32, from the tree's bound, before anything is built) bounds the automatic proof's work; past it the relation stays undecided (bool False), as it was before the exact path existed; nothing raises (or a docstring/except line of it)"
  },
  "lib/_sage_expr.py :: _ilt_term :: raise NotImplementedError(\"inverse_laplace: no inverse known for %s\" % F) #0": {
   "class": "coverage",
@@ -4526,11 +4461,6 @@
   "owner": "Sage kernel (@sagebrush-sage2)",
   "reason": "laplace/inverse_laplace: no rule for this input; the public function returns it unevaluated, as Sage does (an unsupported case, not a cap)"
  },
- "lib/_sage_expr.py :: _prune_zero :: factor under the degree cap) replaced by 0, and such zero terms dropped #0": {
-  "class": "none",
-  "owner": "Sage kernel (@sagebrush-sage2)",
-  "reason": "bool() of algebraic constants: the exact conversion's degree cap (32, from the tree's bound, before anything is built) bounds the automatic proof's work; past it the relation stays undecided (bool False), as it was before the exact path existed; nothing raises (or a docstring/except line of it)"
- },
  "lib/_sage_expr.py :: inverse_laplace :: except NotImplementedError: #0": {
   "class": "none",
   "owner": "Sage kernel (@sagebrush-sage2)",
@@ -4540,6 +4470,81 @@
   "class": "none",
   "owner": "Sage kernel (@sagebrush-sage2)",
   "reason": "catches the internal no-rule signal (or partial_fraction's refusal) to fall back to the unevaluated form or the per-term path; it refuses nothing"
+ },
+ "lib/_sage_expr_more.py ::  :: _EXACT_SIGN_MAX_DEGREE = 32 #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap is an algorithm switch (past it the relation is decided at 400 bits, as Sage decides such identities), not a limit on a computation; nothing is refused (or a docstring/except line of it)"
+ },
+ "lib/_sage_expr_more.py ::  :: algebraic number under a degree cap, after factors proven 0 are pruned.\"\"\" #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "the lazy exact-sign module's docstring: it names the degree cap (32) of the exact conversion, registered on its lines in this file; nothing raises"
+ },
+ "lib/_sage_expr_more.py :: _exact_degree_bound :: except (TypeError, ValueError, ArithmeticError, NotImplementedError): #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap is an algorithm switch (past it the relation is decided at 400 bits, as Sage decides such identities), not a limit on a computation; nothing is refused (or a docstring/except line of it)"
+ },
+ "lib/_sage_expr_more.py :: _exact_degree_bound :: except (TypeError, ValueError, ArithmeticError, NotImplementedError): #1": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap is an algorithm switch (past it the relation is decided at 400 bits, as Sage decides such identities), not a limit on a computation; nothing is refused (or a docstring/except line of it)"
+ },
+ "lib/_sage_expr_more.py :: _exact_sign :: cannot be decided (another kind of constant, or past the degree cap), as #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap (32, from the tree's bound, before anything is built) bounds the automatic proof's work; past it the relation stays undecided (bool False), as it was before the exact path existed; nothing raises (or a docstring/except line of it)"
+ },
+ "lib/_sage_expr_more.py :: _exact_sign :: except (TypeError, ValueError, ArithmeticError, NotImplementedError, AttributeError, RecursionError): #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap is an algorithm switch (past it the relation is decided at 400 bits, as Sage decides such identities), not a limit on a computation; nothing is refused (or a docstring/except line of it)"
+ },
+ "lib/_sage_expr_more.py :: _exact_sign_capped :: \"c\" (not real); _CAPPED when its degree is past _EXACT_SIGN_MAX_DEGREE #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap (32, from the tree's bound, before anything is built) bounds the automatic proof's work; past it the relation stays undecided (bool False), as it was before the exact path existed; nothing raises (or a docstring/except line of it)"
+ },
+ "lib/_sage_expr_more.py :: _exact_sign_capped :: _sage_qqbar._degree_cap = cap #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap (32, from the tree's bound, before anything is built) bounds the automatic proof's work; past it the relation stays undecided (bool False), as it was before the exact path existed; nothing raises (or a docstring/except line of it)"
+ },
+ "lib/_sage_expr_more.py :: _exact_sign_capped :: by the algebraic numbers' own degree check, under that cap); None for #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap (32, from the tree's bound, before anything is built) bounds the automatic proof's work; past it the relation stays undecided (bool False), as it was before the exact path existed; nothing raises (or a docstring/except line of it)"
+ },
+ "lib/_sage_expr_more.py :: _exact_sign_capped :: cap = _EXACT_SIGN_MAX_DEGREE if old is None else min(old, _EXACT_SIGN_MAX_DEGREE) #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap (32, from the tree's bound, before anything is built) bounds the automatic proof's work; past it the relation stays undecided (bool False), as it was before the exact path existed; nothing raises (or a docstring/except line of it)"
+ },
+ "lib/_sage_expr_more.py :: _exact_sign_capped :: except (TypeError, ValueError, ArithmeticError, NotImplementedError, AttributeError, RecursionError): #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap (32, from the tree's bound, before anything is built) bounds the automatic proof's work; past it the relation stays undecided (bool False), as it was before the exact path existed; nothing raises (or a docstring/except line of it)"
+ },
+ "lib/_sage_expr_more.py :: _exact_sign_capped :: except NotImplementedError as e: #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap (32, from the tree's bound, before anything is built) bounds the automatic proof's work; past it the relation stays undecided (bool False), as it was before the exact path existed; nothing raises (or a docstring/except line of it)"
+ },
+ "lib/_sage_expr_more.py :: _exact_sign_capped :: if bound is not None and bound > cap: #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap (32, from the tree's bound, before anything is built) bounds the automatic proof's work; past it the relation stays undecided (bool False), as it was before the exact path existed; nothing raises (or a docstring/except line of it)"
+ },
+ "lib/_sage_expr_more.py :: _exact_sign_capped :: return _CAPPED if \"more than %d\" % cap in str(e) else None #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap (32, from the tree's bound, before anything is built) bounds the automatic proof's work; past it the relation stays undecided (bool False), as it was before the exact path existed; nothing raises (or a docstring/except line of it)"
+ },
+ "lib/_sage_expr_more.py :: _prune_zero :: factor under the degree cap) replaced by 0, and such zero terms dropped #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap (32, from the tree's bound, before anything is built) bounds the automatic proof's work; past it the relation stays undecided (bool False), as it was before the exact path existed; nothing raises (or a docstring/except line of it)"
  },
  "lib/_sage_ff.py ::  :: CONWAY_WORK = _limits.finalize()[\"ff.conway_work\"] #0": {
   "class": "3",
