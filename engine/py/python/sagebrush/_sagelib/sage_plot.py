@@ -515,6 +515,8 @@ def parametric_plot(funcs, *args, **options):
         except (ValueError, ZeroDivisionError, OverflowError):
             xs.append(None)
             ys.append(None)
+    # (Sage's parametric plots have aspect ratio 1.0, W42)
+    gopts.setdefault("aspect_ratio", 1.0)
     return Graphics([Line(xs, ys, **_line_options(p))], **gopts)
 
 
@@ -540,7 +542,7 @@ def polar_plot(r, *args, **options):
         except (ValueError, ZeroDivisionError, OverflowError):
             xs.append(None)
             ys.append(None)
-    gopts.setdefault("aspect_ratio", 1)
+    gopts.setdefault("aspect_ratio", 1.0)
     return Graphics([Line(xs, ys, **_line_options(p))], **gopts)
 
 
@@ -618,13 +620,31 @@ def text(string, xy, **options):
 
         sage: text("hello", (1, 1))
         Graphics object consisting of 1 graphics primitive
+        sage: P = text("LARGE", (0, 0), fontsize=40); P[0].options()['fontsize'], text("d", (0, 0))[0].options()['fontsize']
+        (40, 10)
+
+    The size is in points, drawn at 100 dpi as Sage draws its figures (40
+    points, 55.56 pixels on the 640 x 480 canvas)::
+
+        sage: 'font-size="55.56"' in P._svg()  # sagebrush only
+        True
     """
+    # (fontsize is the text's own, not the figure's tick label size, as in
+    # Sage: it was taken for the figure's, and every text drew at 11; Sage's
+    # default is 10)
+    options = dict(options)
+    fontsize = options.pop("fontsize", 10)
     gopts, p = _split(options)
-    o = {"fontsize": p.pop("fontsize", 11), "color": p.pop("color", p.pop("rgbcolor", None)),
+    # (Sage's default color is blue, (0.0, 0.0, 1.0))
+    o = {"fontsize": fontsize, "color": p.pop("color", p.pop("rgbcolor", (0.0, 0.0, 1.0))),
          "horizontal_alignment": p.pop("horizontal_alignment", "center"),
          "vertical_alignment": p.pop("vertical_alignment", "center"), "rotation": p.pop("rotation", 0),
          "background_color": p.pop("background_color", None)}
-    return Graphics([Text(_label(string), xy[0], xy[1], **o)], **gopts)
+    T = Text(_label(string), xy[0], xy[1], **o)
+    # (its fontsize is in points, drawn at 100 dpi as Sage's figures are:
+    # 40 was drawn 40 px high on the 640 px canvas, 72% of Sage's)
+    T._px_per_size = 100 / 72
+    return Graphics([T], **gopts)
 
 
 def polygon(points, **options):
@@ -640,10 +660,18 @@ def polygon(points, **options):
     o = {"color": _color(p), "alpha": p.pop("alpha", None), "fill": p.pop("fill", True),
          "edgecolor": p.pop("edgecolor", None), "thickness": p.pop("thickness", 1),
          "legend_label": p.pop("legend_label", None)}
+    if "linestyle" in p:
+        o["linestyle"] = p.pop("linestyle")
+    if not o["fill"] and o["edgecolor"] is None:
+        # (an unfilled polygon is its outline, in its color, as in Sage: it
+        # was drawn with no stroke at all, W11)
+        o["edgecolor"] = o["color"]
     P = Polygon([q[0] for q in pts], [q[1] for q in pts], **o)
     bad = {k: v for k, v in p.items() if k not in _POLYGON_OPTIONS}
     if bad:
         P._sage_ignored = (bad, _POLYGON_OPTIONS)
+    # (Sage's polygons have aspect ratio 1.0, W42)
+    gopts.setdefault("aspect_ratio", 1.0)
     return Graphics([P], **gopts)
 
 
@@ -694,13 +722,13 @@ def circle(center, radius, **options):
         Graphics object consisting of 1 graphics primitive
     """
     gopts, p = _split(options)
-    gopts.setdefault("aspect_ratio", 1)
+    gopts.setdefault("aspect_ratio", 1.0)
     pts = _arc(center, float(radius), 0, 2 * math.pi)
     color = _color(p)
     fill = p.pop("fill", False)
     o = {"fill": fill, "color": p.pop("facecolor", color), "edgecolor": p.pop("edgecolor", color),
          "thickness": p.pop("thickness", 1) * 1.5, "alpha": p.pop("alpha", None),
-         "legend_label": p.pop("legend_label", None)}
+         "legend_label": p.pop("legend_label", None), "linestyle": p.pop("linestyle", "-")}
     return Graphics([Polygon([q[0] for q in pts], [q[1] for q in pts], **o)], **gopts)
 
 
@@ -713,7 +741,7 @@ def disk(center, radius, angle=(0, 2 * math.pi), **options):
         Graphics object consisting of 1 graphics primitive
     """
     gopts, p = _split(options)
-    gopts.setdefault("aspect_ratio", 1)
+    gopts.setdefault("aspect_ratio", 1.0)
     a, b = float(angle[0]), float(angle[1])
     pts = _arc(center, float(radius), a, b)
     if (b - a) < 2 * math.pi - 1e-9:

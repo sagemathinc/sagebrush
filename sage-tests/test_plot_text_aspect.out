@@ -1,0 +1,31 @@
+fontsize: 40
+default fontsize: 10
+fontsize with axes=False: 40
+text with a plot: 30
+text drawn blue: True
+text drawn red: True
+aspect plot automatic
+aspect parametric_plot 1.0
+aspect polar_plot 1.0
+aspect polygon 1.0
+aspect polygon2d 1.0
+aspect circle 1.0
+aspect disk 1.0
+aspect line automatic
+aspect point automatic
+aspect text automatic
+aspect implicit_plot 1
+aspect contour_plot 1
+aspect region_plot 1
+aspect polyhedron 1.0
+aspect circle + plot 1.0
+aspect plot + polygon 1.0
+aspect given 2
+circle linestyle -- True
+circle linestyle : True
+circle linestyle -. True
+circle linestyle dashed True
+circle linestyle dotted True
+circle linestyle - False
+polygon linestyle -- True
+unfilled polygon outlined: True

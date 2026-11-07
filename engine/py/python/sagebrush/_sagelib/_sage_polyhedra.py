@@ -1735,6 +1735,9 @@ class Polyhedron_:
         if self.dim() == 1 and not edges:
             g += sa.line(pts, color="blue")
         g += sa.points(pts, color="black", size=20)
+        # (Sage's 2d polyhedron plots have aspect ratio 1.0: a square was
+        # stretched, W21)
+        g.set_aspect_ratio(1.0)
         return g
 
     def show(self, **options):
