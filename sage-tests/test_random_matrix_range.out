@@ -1,6 +1,0 @@
-{'x': 1, 'y': 2} [1] Full MatrixSpace of 30 by 30 dense matrices over Integer Ring
-{'x': 0, 'y': 5} [0, 1, 2, 3, 4] Full MatrixSpace of 30 by 30 dense matrices over Integer Ring
-{'x': -3, 'y': 3} [-3, -2, -1, 0, 1, 2] Full MatrixSpace of 30 by 30 dense matrices over Integer Ring
-{'x': 5} [0, 1, 2, 3, 4] Full MatrixSpace of 30 by 30 dense matrices over Integer Ring
-{'x': -1, 'y': 0} [-1] Full MatrixSpace of 30 by 30 dense matrices over Integer Ring
-{'x': 10, 'y': 12} [10, 11] Full MatrixSpace of 30 by 30 dense matrices over Integer Ring
