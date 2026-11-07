@@ -1949,6 +1949,16 @@ try {
     const runChunk = () => byId.filter((x) => /\/sagebrush-latex-run\.js(\?|$)/.test(x.url));
     const runBefore = runChunk().length;
     check(runBefore === 0, "Run's chunk: not fetched by the editor's load, nor by opening documents with SageTeX code", runChunk());
+    // (its load fails (grader's #824 R1-R3): the first request for it refused (the Fetch domain): Run says so and runs
+    //  nothing; pressed again, it loads by a URL of its own (?try=: the browser keeps a failed module import for its
+    //  URL), so a failure is never kept)
+    let runRefused = 0;
+    onPaused = (p) => { if (!runRefused++) send("Fetch.failRequest", { requestId: p.requestId, errorReason: "ConnectionFailed" }); else send("Fetch.continueRequest", { requestId: p.requestId }); };
+    await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-latex-run.js*" }] });
+    await ev(`(document.querySelector(".tex-status").textContent = "", document.querySelector(".tex-head .tex-run").click(), 1)`);
+    const refusedSaid = await statusIs(/^Not run: Run's code couldn't be loaded; press Run again$/, 15000);
+    const refusedRun = { refused: runRefused, said: refusedSaid, label: await ev(`document.querySelector(".tex-head .tex-run").textContent`), results: await resultsOf("/t/run.tex"), fetched: runChunk().map((x) => [x.url.replace(/^.*\//, ""), x.status]) };
+    check(refusedRun.refused === 1 && refusedRun.said && refusedRun.label === "Run" && refusedRun.results === null && runChunk().length === 1 && !runChunk()[0].status, "Run's chunk: its load refused: Run says so, and nothing runs (no results file)", refusedRun);
     // (the click: its labels as they change, then the results)
     const labels = await ev(`new Promise((res) => { const b = document.querySelector(".tex-head .tex-run"), seen = [b.textContent];
       const o = new MutationObserver(() => { if (seen[seen.length - 1] !== b.textContent) seen.push(b.textContent); if (b.textContent === "Run" && seen.length > 1) { o.disconnect(); res(seen); } });
@@ -1956,9 +1966,10 @@ try {
     check(JSON.stringify(labels) === JSON.stringify(["Run", "Starting Sage…", "Running…", "Run"]), "Run: its labels, Run → Starting Sage… → Running… → Run", labels);
     const ran = await statusIs(/Ran 5 SageTeX items in [0-9.]+ s$/, 30000);
     const firstRun = runChunk();
+    await send("Fetch.disable"); onPaused = null;
     const timing = await ev(`JSON.stringify(performance.getEntriesByType("resource").filter((e) => e.name.includes("sagebrush-latex-run.js")).map((e) => ({ ms: Math.round(e.duration), bytes: e.transferSize, body: e.decodedBodySize })))`);
-    check(firstRun.length === 1 && firstRun[0].status === 200 && firstRun[0].bytes > 0, "Run's chunk: the first Run fetches it, once", firstRun);
-    console.log("timing, reported, not gated: Run's chunk on the first Run (loopback):", timing, "CDP encoded bytes:", firstRun[0]?.bytes);
+    check(firstRun.length === 2 && /\?try=\d+$/.test(firstRun[1].url) && firstRun[1].status === 200 && firstRun[1].bytes > 0, "Run's chunk: pressed again after the refused load, it loads by a URL of its own (?try=), once", firstRun);
+    console.log("timing, reported, not gated: Run's chunk on the first Run (loopback):", timing, "CDP encoded bytes:", firstRun[1]?.bytes);
     await until(`document.querySelector(".tex-preview").textContent.includes("1024") && document.querySelectorAll(".tex-preview .sagechip").length === 0`, 20000);
     const shownRun = await ev(`(() => { const t = document.querySelector(".tex-preview").textContent; return { has1024: t.includes("1024"), has7: /x\\s*=\\s*\\{?7/.test(t) || t.includes("= {7}") || t.includes("=7"), frac: !!document.querySelector(".tex-preview .katex .mfrac"), chips: document.querySelectorAll(".tex-preview .sagechip").length, status: document.querySelector(".tex-status")?.textContent }; })()`);
     check(ran && shownRun.has1024 && shownRun.has7 && shownRun.frac && shownRun.chips === 0, "Run: the preview shows x = 1024, 1/3, and x = 7 (redefined later, page order), no item left not run", shownRun);
@@ -1968,7 +1979,7 @@ try {
     // (a second Run on the same page: the chunk already fetched is used, not fetched again)
     await ev(`(document.querySelector(".tex-status").textContent = "", document.querySelector(".tex-head .tex-run").click(), 1)`);
     const ranAgain = await statusIs(/Ran 5 SageTeX items in [0-9.]+ s$/, 60000);
-    check(ranAgain && runChunk().length === 1, "Run's chunk: a second Run on the page uses the one fetched, not fetched again", { ranAgain, fetched: runChunk().length });
+    check(ranAgain && runChunk().length === 2, "Run's chunk: a second Run on the page uses the one fetched, not fetched again", { ranAgain, fetched: runChunk().length });
     // (daybreak3, #824: the page replaced while Run's code loads: once it has loaded, that Run never starts: not one
     //  workspace call for the old document or its folder, and its results file as it was)
     {

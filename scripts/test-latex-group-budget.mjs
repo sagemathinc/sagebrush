@@ -107,6 +107,13 @@ else {
     const stale = readdirSync(site).filter((f) => f.startsWith("sagebrush-latex") && !existsSync(join(web, "dist", f)));
     check(ours.length === g.js.length + 9 && bad.length === 0 && stale.length === 0, `the site serves each of this build's ${ours.length} LaTeX editor files: web/site/public's copy is web/dist's, byte for byte, and none stale`, { bad, stale });
   }
+  // (the app ships every one of them too: app/build-frontend.mjs copies web/dist's files by name (FILES), and one left
+  //  off it is missing from the native app only (grader's #824 R7))
+  const appSrc = readFileSync(join(web, "..", "app", "build-frontend.mjs"), "utf8");
+  const appFiles = new Set([...(/const FILES = \[([^\]]*)\]/.exec(appSrc)?.[1] ?? "").matchAll(/"([^"]+)"/g)].map((m) => m[1]));
+  const ourJs = [...g.js, ...Object.values(LATEX_LAZY)].map((n) => n.slice("dist/".length));
+  const notInApp = ourJs.filter((f) => !appFiles.has(f));
+  check(appFiles.size > 0 && notInApp.length === 0, `the app ships each of this build's ${ourJs.length} LaTeX editor files (app/build-frontend.mjs FILES)`, { notInApp });
 }
 
 // ---- every input of the LaTeX editor's bundles selects the full tier on a pull request (scripts/ci-paths.mjs fullTierPaths), so
