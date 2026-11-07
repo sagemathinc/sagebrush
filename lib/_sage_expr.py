@@ -3920,6 +3920,13 @@ def symbolic_sum(f, v, a, b, algorithm=None, hold=False):
         sum(1/(k + 1000000000000)^2, k, 1, +Infinity)
         sage: symbolic_sum((-1)^k/k^2, k, 10^12, oo)  # sagebrush only
         sum((-1)^k/k^2, k, 1000000000000, +Infinity)
+
+    An alternating sum whose terms don't tend to 0 stays unevaluated (Sage
+    10.10 gives und for this one, ind for (-1)^k*k and "Sum is divergent."
+    for (-1)^k*(k + 1))::
+
+        sage: symbolic_sum((-1)^k*k^2/(k + 1), k, 1, oo)  # sagebrush only
+        sum(k^2*(-1)^k/(k + 1), k, 1, +Infinity)
     """
     import sage_all as _sa
     f, v = _expr(f), _expr(v)
@@ -4146,7 +4153,8 @@ def _sum_signed_rational(f, v, a):
         return None
     if num.degree(v) >= den.degree(v):
         # a polynomial part: its terms don't tend to 0, so the sum diverges,
-        # as Sage says (an alternating one stays unevaluated)
+        # as Sage says; an alternating one stays unevaluated (Sage's answers
+        # there vary with the polynomial: ind, und or "Sum is divergent.")
         if s == 1:
             raise ValueError("Sum is divergent.")
         return None
