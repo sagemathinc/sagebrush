@@ -40,7 +40,35 @@ export const TUNNEL_LIMITS = Object.freeze({
 const ID = "[A-Za-z0-9._~-]{1,64}";
 const ID_RE = new RegExp(`^${ID}$`);
 const FRAME_ID_RE = /^t[1-9]\d{0,14}$/;
-const NULL_BODY = new Set([204, 205, 304]); // (fetch's null-body statuses at or above 200)
+const NULL_BODY = new Set([204, 205, 304]);
+// The oldest runner this page pairs with, the one place it is set: 0.9.0, the release that first ships `sagebrush
+// remote`.  A source checkout reports "dev" and always pairs.
+export const RUNNER_MIN = "0.9.0";
+// (a runner's version: this subset of PEP 440's canonical form, whole, or "dev" (astra's VERSION-2): numbers, then
+// optionally a pre-release (aN, bN, rcN), a post-release (.postN), a dev release (.devN) and a local part (+x.y))
+const NEED_RE = /^\d{1,6}(\.\d{1,6}){0,3}$/; // (a minimum: a release's numbers, nothing else)
+const VERSION_RE = /^(?:dev|(\d{1,6}(?:\.\d{1,6}){0,3})((?:a|b|rc)\d{1,6})?(\.post\d{1,6})?(\.dev\d{1,6})?(\+[A-Za-z0-9]{1,16}(?:\.[A-Za-z0-9]{1,16}){0,3})?)$/;
+
+/**
+ * Is version v at least need (a release's numbers, "0.9.0")?  A release gate, as PEP 440 orders versions: "dev" (a
+ * checkout) always is; a pre-release (0.9.0rc1, 0.9.0a2, 0.9.0.dev3) is below its release; a post-release or a local
+ * version (0.9.0.post1, 0.9.0+x) is not.
+ */
+export function versionAtLeast(v, need) {
+  // (a malformed minimum never passes, not even for "dev" (daybreak3's VERSION-3); then the whole version, before
+  // any ordering)
+  if (typeof need !== "string" || !NEED_RE.test(need)) return false;
+  if (v === "dev") return true;
+  const m = typeof v === "string" ? VERSION_RE.exec(v) : null;
+  if (!m || !m[1]) return false;
+  const a = m[1].split(".").map(Number), b = need.split(".").map(Number);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const x = a[i] ?? 0, y = b[i] ?? 0;
+    if (x !== y) return x > y;
+  }
+  // (the release's own numbers: below it if a pre-release or a dev release; a post or local version is not)
+  return m[2] === undefined && m[4] === undefined;
+} // (fetch's null-body statuses at or above 200)
 // (method, path pattern, rpc, the ref's members in path order)
 const ROUTES = [
   ["POST", /^\/bindings$/, "g.bind", []],
@@ -66,7 +94,7 @@ export class PairError extends Error {
   constructor(message, { kind = "refused", sent = true } = {}) {
     super(message);
     this.name = "PairError";
-    this.kind = kind; // "refused" | "protocol" | "closed" | "timeout" | "unreachable"
+    this.kind = kind; // "refused" | "protocol" | "closed" | "timeout" | "unreachable" | "port" | "old" | "config"
     // (whether the hello, and with it the code, may have reached the runner: only a failure before it was handed to
     // the socket is false, and only then may the same code be tried again (astra's RETRY-2))
     this.sent = sent;
@@ -313,11 +341,15 @@ export class Tunnel {
  * Pair with the runner on this computer: a hello with the pairing code (or a remembered session) and the
  * RemoteClient's public key.  Resolves to a Tunnel; rejects with PairError.  Only 127.0.0.1, only a port number.
  */
-export function pairTunnel({ port, code, session, remember = false, jwk, jkt, WebSocket: WS = globalThis.WebSocket, onClose, timeoutMs = TUNNEL_LIMITS.helloMs }) {
+export function pairTunnel({ port, code, session, remember = false, jwk, jkt, WebSocket: WS = globalThis.WebSocket, onClose, timeoutMs = TUNNEL_LIMITS.helloMs, min = RUNNER_MIN }) {
   const n = Number(port);
-  if (!Number.isInteger(n) || n < 1 || n > 65535) return Promise.reject(new PairError("the port is a number from 1 to 65535", { kind: "unreachable", sent: false }));
+  if (!Number.isInteger(n) || n < 1 || n > 65535) return Promise.reject(new PairError("the port is a number from 1 to 65535", { kind: "port", sent: false }));
   if ((typeof code === "string") === (typeof session === "string")) return Promise.reject(new PairError("a pairing needs its code (or a remembered session)", { sent: false }));
   const params = { protocol: 1, purpose: "kernel", jwk: { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y }, jkt };
+  // (null is the one "no minimum configured"; any other value is a configured minimum, checked, never skipped
+  // (daybreak3's and astra's VERSION-4))
+  if (min === undefined) min = RUNNER_MIN;
+  if (min !== null) params.needs = min; // (so a runner too old for this page says so on its own side too)
   if (typeof code === "string") {
     params.code = code.trim().toUpperCase();
     if (remember) params.remember = true;
@@ -336,7 +368,7 @@ export function pairTunnel({ port, code, session, remember = false, jwk, jkt, We
       } else resolve(tunnel);
     };
     let sent = false; // (set as the hello is handed to the socket: from then on it may have arrived)
-    const timer = setTimeout(() => finish(new PairError(sent ? "your computer didn't answer the pairing: run sagebrush remote --loopback again for a new link" : "your computer didn't answer", { kind: "timeout", sent })), timeoutMs);
+    const timer = setTimeout(() => finish(new PairError(sent ? "your computer didn't answer the pairing: run uvx sagebrush@latest remote --loopback again for a new link" : "your computer didn't answer", { kind: "timeout", sent })), timeoutMs);
     try {
       ws = new WS(`ws://127.0.0.1:${n}${PAIR_PATH}`);
     } catch (e) {
@@ -349,7 +381,7 @@ export function pairTunnel({ port, code, session, remember = false, jwk, jkt, We
       ws.send(JSON.stringify({ jsonrpc: "2.0", id: "h1", method: "hello", params }));
     };
     ws.onerror = () => {};
-    ws.onclose = (e) => finish(new PairError(opened ? `your computer closed the connection (${e?.code ?? "?"})` : "nothing answered on that port: is sagebrush remote --loopback running?", { kind: opened ? "closed" : "unreachable", sent }));
+    ws.onclose = (e) => finish(new PairError(opened ? `your computer closed the connection (${e?.code ?? "?"})` : "nothing answered on that port: is uvx sagebrush@latest remote --loopback running?", { kind: opened ? "closed" : "unreachable", sent }));
     ws.onmessage = (e) => {
       let m;
       try {
@@ -362,8 +394,12 @@ export function pairTunnel({ port, code, session, remember = false, jwk, jkt, We
       const r = m?.result;
       const ok = m?.id === "h1" && r && r.protocol === 1 && r.purpose === "kernel" && typeof r.token === "string" && /^[A-Za-z0-9_-]{43}$/.test(r.token)
         && typeof r.nonce === "string" && r.nonce.length > 0 && r.nonce.length <= 256 && typeof r.incarnation === "string" && /^[0-9a-f]{16}$/.test(r.incarnation)
-        && Number.isInteger(r.limits?.frame) && r.limits.frame > 0 && (r.session === undefined || (typeof r.session === "string" && r.session.length <= 128));
+        && Number.isInteger(r.limits?.frame) && r.limits.frame > 0 && (r.session === undefined || (typeof r.session === "string" && r.session.length <= 128))
+        && typeof r.version === "string" && VERSION_RE.test(r.version);
       if (!ok) return finish(new PairError("your computer's answer wasn't a pairing answer", { kind: "protocol" }));
+      // (a runner older than this page needs: refused before anything is bound; the code was seen, so a new link)
+      if (min !== null && !(typeof min === "string" && NEED_RE.test(min))) return finish(new PairError("this page has a broken version setting (a Sagebrush problem, not your computer)", { kind: "config" }));
+      if (min !== null && !versionAtLeast(r.version, min)) return finish(new PairError(`your computer's sagebrush is ${r.version}; this page needs ${min} or newer`, { kind: "old" }));
       const t = new Tunnel(ws, r, { onClose });
       t.session = r.session ?? null;
       finish(null, t);

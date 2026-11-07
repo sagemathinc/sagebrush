@@ -388,6 +388,15 @@ def eigenvalues(a):
         [-1/2*sqrt(33) + 5/2, 1/2*sqrt(33) + 5/2]
         sage: matrix(SR, [[SR(2), SR(1)], [SR(1), SR(2)]]).eigenvalues()
         [3, 1]
+
+    A symbolic characteristic polynomial whose roots solve doesn't give
+    explicitly is refused, not answered with implicit roots (Sage gives this
+    cubic's roots by Cardano's formula)::
+
+        sage: matrix(SR, [[a, 1, 0], [0, 0, 1], [1, 1, 0]]).eigenvalues()  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: the eigenvalues of this symbolic matrix are not available in sagebrush yet
     """
     return [v for v, m in _eigen(a) for _ in range(m)]
 
