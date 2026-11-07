@@ -1,7 +1,8 @@
-# N1-0 pre-registration (draft r2, for PERF review before the protocol is frozen)
+# N1-0 pre-registration (draft r3, for PERF review before the protocol is frozen)
 
 *This is item N1-0 of the #825 N1 plan r3 (f391bdb1). It folds in daybreak4's PERF review of r0 (eecf6da6, items P1–P10 below), its r1 addendum (fa55a37f, residuals 1–4: schedule balance,
-T1/T2 coupling, one decision coordinate, controls and unstable rows), both in
+T1/T2 coupling, one decision coordinate, controls and unstable rows) and its r2 addendum (e381b9d9: escalation
+balance, minimum rounds first, control targets for page-ready, M6 peak and M10), all in
 `reviews/n1-prereg-eecf6da6-perf-daybreak4.md`, and their earlier guardrails. Branch
 n1-native-proto, never merged. Nothing here is a counted result.*
 
@@ -109,7 +110,8 @@ The case is frozen in `m6.json` before any counted run.
 - **Expected result:** a hash, frozen.
 - **Deadline:** **[pilot]** ×3.
 - **Machine:** at least 16 GiB of RAM.
-- **Memory:** high-water sampling at 10 Hz on the M4 tree. The peak is reported per candidate.
+- **Memory:** high-water sampling at 10 Hz on the M4 tree. The peak is reported per candidate. The peak is **ranked**, and its sensitivity control is the M6 peak buffer (§5).
+- **Wall time:** recorded as **descriptive only**, never ranked.
 - **Swap and OOM:** if swap use grows during the run, or there is any OOM intervention, the row is **invalid** for both correctness and timing. It is reported, never re-run silently.
 
 ### M7 Stop (P9)
@@ -165,6 +167,8 @@ The corpus is `corpus/m10-bigint.json`, frozen. It holds:
 
 It runs in each candidate's actual pyjs runtime and boundary. System webviews are used only for candidate 4's spike.
 
+**Status of the rows.** M10 is a **correctness** row: every hash must match within its deadline, or the row is a FAILURE. Its **timings are descriptive only**: they are reported per operation and size, but never ranked or used in decisions. The engine-call control does not cover the pyjs big-integer path.
+
 ## 3. Run discipline
 
 ### Schedule (P4)
@@ -173,7 +177,7 @@ It runs in each candidate's actual pyjs runtime and boundary. System webviews ar
 - **Main schedule labels:** 1a, 1b, 2 and 3.
 - **Position balance.** Exact balance is impossible for 4 labels over 7 rounds. The achievable rule is:
   - for every label, its counts over the 4 positions differ by **at most one** (each count is 1 or 2);
-  - the positions where a label appears twice are rotated in the escalation schedule, so that over all 21 rounds its counts again differ by at most one;
+  - the escalation schedule (§4) has the **same structure**: the same 4 labels and 4 positions, 14 rounds, each count 3 or 4. Its orders are chosen so that over all 21 rounds each label's counts per position are 5 or 6, so they again differ by at most one;
   - orders are drawn from the seed and accepted only if they meet this rule;
   - the frozen file and the report list every label's position counts.
 - **Control schedules are separate.** Each perturbation (§5) has its own frozen schedule, `controls-<os>-<class>.json`, with labels 1 and 1+perturbation over 7 rounds, so positions are 4/3 per label, reported. Control schedules run in the same session right after the main run, under the same admission gate. They never change the main schedule's positions.
@@ -233,7 +237,7 @@ $a = 0$ makes a class ratio-only, and $\rho = 0$ makes it absolute-only.
 |---|---|---|
 | startup marks (M1, M5) | 0.15 | 150 ms |
 | memory (M4, M5, M6 peak) | 0.15 | 40 MiB |
-| engine calls (M3 steady, M10) | 0.10 | 0 |
+| engine calls (M3 steady) | 0.10 | 0 |
 | M3 first call | 0.20 | 0 |
 | Stop send→accepted, Stop accepted→done | 0 | 50 ms |
 | M8 ack latency | 0 | 50 ms |
@@ -243,15 +247,18 @@ $a = 0$ makes a class ratio-only, and $\rho = 0$ makes it absolute-only.
 ### Decision and escalation rule, fixed before any counted result
 
 For each comparison and metric, with $R$ the set of usable rounds:
-- **Equivalent** iff $|e_r| \le 1$ for every $r \in R$.
-- **Different** iff every $e_r$ has the same strict sign **and** $|\operatorname{median}_{r\in R}(e_r)| > 1$.
-  - The sign of the median says which candidate is better.
-- **Undecided** otherwise. This includes any comparison with fewer than 5 usable rounds.
+The tests are applied **in this order**:
+1. If $|R| < 5$: **undecided**. Nothing else is tested.
+2. **Equivalent** iff $|e_r| \le 1$ for every $r \in R$.
+3. **Different** iff every $e_r$ has the same strict sign **and** $|\operatorname{median}_{r\in R}(e_r)| > 1$.
+   - The sign of the median says which candidate is better.
+4. Otherwise **undecided**.
 
 **Escalation.** An undecided comparison gets **one** escalation:
-- a newly frozen schedule of 14 further rounds;
-- labels 1a, 1b and the candidate, balanced as in §3 and rotated against the first 7;
-- the same rule then applies to all usable rounds of the 21.
+- a newly frozen schedule of 14 further rounds of the **full main structure** (labels 1a, 1b, 2 and 3, 4 positions), balanced as in §3, so the 21 rounds pool rounds of one structure only;
+- the same rule, starting at step 1, then applies to the undecided comparison over all usable rounds of the 21;
+- for comparisons already decided in the first 7, the extra rounds are descriptive only and never change that decision;
+- the A/A check (§5) is repeated on the 14 rounds.
 
 If it is still undecided, it is reported to William as undecided. There is no second escalation.
 
@@ -272,12 +279,13 @@ If recovery fails, the run is invalid for that metric class.
 
 | Class | Perturbation | Targeted row |
 |---|---|---|
-| startup | a fixed delay in the page before the first content node | M1 `fcp`, `render-proxy` |
+| startup | a fixed delay in the page before the first content node, on the identical path that precedes `page-ready` | M1 `fcp`, `render-proxy`, `page-ready` |
 | kernel ready | a fixed delay in the child before `ready` | M1 `kernel-ready-*` |
 | engine calls | a fixed delay in the child's call handler | M3 first and steady, stage 4 |
 | framing time | a fixed delay at the start of the child-decode stage (stage 3) | M9 stage 3 and the empty round-trip |
 | framing bytes | fixed padding bytes added to each frame | M9 bytes per boundary; recovery must be exact, and it is not a timing control |
 | memory | the child allocates and touches a fixed buffer | M4 at each mark |
+| M6 peak | the child allocates and touches a fixed buffer during the M6 call, held until the call returns | M6 10 Hz peak |
 | Stop send→accepted | the child delays sending its Stop-accepted acknowledgement by a fixed time | M7 send→accepted |
 | Stop accepted→done | the child delays applying an accepted Stop by a fixed time, after sending its acknowledgement | M7 accepted→done |
 | M8 | the child delays its permission acknowledgement by a fixed time | M8 ack latency |
