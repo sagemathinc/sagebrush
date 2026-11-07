@@ -86,8 +86,9 @@ if _sbtx_d is not None:
         _sbtx_sys.path.append(_sbtx_d)
         _sbtx_added = _sbtx_d
 _sbtx_il.invalidate_caches()
-# (the modules imported from the .tex's folder so far: printed after each item (daybreak3's ENGINE-DEPS-PARTIAL-1: a
-#  Run stopped later still records what its earlier results used), the last line counting; the results file records
+# (the modules imported from the .tex's folder so far: printed with each item, before its result (daybreak3's
+#  ENGINE-DEPS-PARTIAL-1: a Run stopped later still records what its earlier results used; astra's DEP-PARTIAL-COMMIT-1:
+#  a result printed is always after a line naming what it used), the last line counting; the results file records
 #  them with their hashes, so an edited helper's old results are never used (Codex W01))
 def _sbtx_deps_line():
     if _sbtx_d is None:
@@ -119,8 +120,8 @@ for _sbtx_it in _sbtx_json.loads(_sbtx_b64.b64decode("${b64(JSON.stringify(items
         _sbtx_r = {"s": "error", "msg": _sbtx_tb.format_exc()}
     finally:
         _sbtx_sys.stdout = _sbtx_old
-    print("\\x1eSBTX" + _sbtx_json.dumps(_sbtx_r))
     _sbtx_deps_line()
+    print("\\x1eSBTX" + _sbtx_json.dumps(_sbtx_r))
 `;
 }
 
@@ -188,7 +189,8 @@ export async function seenOf(ws, e, dir, deps) {
   if (!e || e.trashed) return null;
   const base = dir === "/" ? "" : dir;
   const ds = await Promise.all(deps.map(([rel]) => ws.stat(base + "/" + rel).catch(() => undefined)));
-  return `${e.fid}:${e.updated}:${e.size}#` + ds.map((d) => d && !d.trashed ? `${d.fid}:${d.updated}:${d.size}` : "-").join("|");
+  // (rev counts every write: `updated` is a time in ms and two writes may share it (daybreak3's ENGINE-SEEN-REV-1))
+  return `${e.fid}:${e.rev}:${e.updated}:${e.size}#` + ds.map((d) => d && !d.trashed ? `${d.fid}:${d.rev}:${d.updated}:${d.size}` : "-").join("|");
 }
 /** A results file `j` (read from `p`, its entry `e`) checked against the files its Run imported: {saved, deps, stale,
  * seen}. `saved`: its items if they may be used, else []; `stale`: why not (sagetex.mjs staleWhy), or null. `seen`
@@ -210,10 +212,14 @@ export const resultsText = (states, deps = []) => JSON.stringify({ format: RESUL
 /** The modules the session's Run imported from the .tex's folder (its last line's), paths relative to the folder:
  * only safe relative ones, at most DEPS_MAX; [] if it printed none. */
 export function parseDeps(out) {
-  // (the last line counts; none at all, or one not of the shape (a path not safe, too many): null, the record
-  //  incomplete: never read as an older results file's no record)
-  let got = null;
-  for (const line of String(out).split("\n")) if (line.startsWith(DEPS_MARK)) { try { const a = JSON.parse(line.slice(DEPS_MARK.length)); got = Array.isArray(a) ? a : "bad"; } catch { got = "bad"; } }
+  // (the last line counts; none at all, one not of the shape (a path not safe, too many), or a result with no line of
+  //  its own before it (astra's DEP-PARTIAL-COMMIT-1: what it used not named): null, the record incomplete: never read
+  //  as an older results file's no record)
+  let got = null, fresh = false;
+  for (const line of String(out).split("\n")) {
+    if (line.startsWith(DEPS_MARK)) { try { const a = JSON.parse(line.slice(DEPS_MARK.length)); got = Array.isArray(a) ? a : "bad"; } catch { got = "bad"; } fresh = true; }
+    else if (line.startsWith(MARK)) { if (!fresh) return null; fresh = false; }
+  }
   if (!Array.isArray(got) || got.length > DEPS_MAX || !got.every(safeRel)) return null;
   return got;
 }

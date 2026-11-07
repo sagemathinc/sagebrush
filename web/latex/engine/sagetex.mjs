@@ -54,6 +54,15 @@ export async function sha256hex(bytes) {
 //  isn't a regular file inside the .tex's folder (gone, in the Trash, a link out of it), or "over" if it is larger than
 //  what is left of DEPS_BYTES; the files are read in the record's order, the budget shared)
 /** The first recorded file now changed or gone (its path), "over" if the budget ran out first, or null. */
+/** A file of `size` bytes (its stat) read whole: `readAt(buf, at)` reads into `buf` from offset `at` and returns how
+ * many bytes (0 at the end). Read to the end, at most one byte past `size`: a file that grew or shrank since its stat
+ * (a short read, a prefix) is null, never hashed (astra's DEP-READ-1 r2). */
+export function readComplete(readAt, size) {
+  const buf = new Uint8Array(size + 1);
+  let n = 0;
+  for (let k; n < buf.length && (k = readAt(buf.subarray(n), n)) > 0; ) n += k;
+  return n === size ? buf.subarray(0, n) : null;
+}
 export async function staleOf(deps, read, budget = DEPS_BYTES) {
   let left = budget;
   for (const [rel, h] of deps) {
@@ -77,7 +86,7 @@ export function staleOfSync(deps, read, hash, budget = DEPS_BYTES) {
 }
 /** Why a results file's results aren't used: a recorded file changed or gone, or its record unusable. */
 export const staleWhy = (rel) => rel === "invalid" ? "the results file's record of what its run imported can't be read"
-  : rel === "incomplete" ? "their run couldn't record everything it imported (a file changed while it ran, or couldn't be read)"
+  : rel === "incomplete" ? "their run didn't record everything it imported (it stopped early, a file changed while it ran, or one couldn't be read)"
   : rel === "over" ? "what their run imported is too large to check here"
   : `${rel} changed or was removed since they were run`;
 

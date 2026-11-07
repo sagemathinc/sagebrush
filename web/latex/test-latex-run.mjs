@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { driver, runnable, parseOutput, statesOf, resultsText, msgOf, MARK, RUN_LIMITS, RESULTS_FORMAT, runAndSave, sessionOf, sandboxEngine, SANDBOX_FAILED, folderFiles, runIn, DEPS_MARK, parseDeps, depsWith, wsReader, checkedResults } from "./run-core.mjs";
-import { itemKey, savedStates, stateOf, WRAPPER_VERSION, MAX_RESULT, safeRel, depsOf, staleOf, sha256hex } from "./engine/sagetex.mjs";
+import { itemKey, savedStates, stateOf, WRAPPER_VERSION, MAX_RESULT, safeRel, depsOf, staleOf, sha256hex, readComplete } from "./engine/sagetex.mjs";
 
 const results = [];
 const check = (name, ok, detail) => { results.push([name, !!ok]); if (!ok) console.log("FAIL", name, JSON.stringify(detail)?.slice(0, 900)); };
@@ -368,6 +368,10 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
   const got = parseOutput(r.out);
   // (Codex W01: each Run's last line, the modules it imported from its folder; the deps lines aren't results)
   const depLines = r.out.split("\n").filter((l) => l.startsWith(DEPS_MARK)).map((l) => JSON.parse(l.slice(DEPS_MARK.length)));
+  // (astra's DEP-PARTIAL-COMMIT-1: the driver prints each item's line before its result: a result printed always
+  //  follows a line naming what it used)
+  const marked = r.out.split("\n").filter((l) => l.startsWith(MARK));
+  check("DEP-PARTIAL-COMMIT-1: the driver prints each item's deps line just before its result", marked.length === 20 && marked.every((l, i) => l.startsWith(DEPS_MARK) === (i % 2 === 0)), marked.map((l) => (l.startsWith(DEPS_MARK) ? "D" : "R")).join(""));
   rmSync(root, { recursive: true, force: true });
   // (a tuple's LaTeX without Sage's \\left( \\right))
   const lx = (i) => String(got[i]?.latex ?? got[i]?.msg ?? JSON.stringify(got[i])).replace(/\\left|\\right/g, "");
@@ -561,7 +565,7 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
     const rW = await runAndSave({ items: [item("silent", "from h import v")], current: () => true, max: 1 << 20, now: () => 0, fid: "f",
       ws: { pathOfFile: async () => ({ ok: true, path: "/W/d.tex" }), stat: async () => undefined, createByPerson: async (p, o) => { written = JSON.parse(new TextDecoder().decode(o.content)); return {}; } },
       session: sW, store: sW, serial: sW.serial, folder: async () => ({ dir: "/W", files: [["/W/d.tex", enc("x")], ["/W/h.py", enc("v = 1\n")]] }),
-      exec: async () => ({ out: MARK + JSON.stringify({ s: "ok" }) + "\n" + DEPS_MARK + JSON.stringify(["h.py"]) + "\n", stopped: "" }) });
+      exec: async () => ({ out: DEPS_MARK + JSON.stringify(["h.py"]) + "\n" + MARK + JSON.stringify({ s: "ok" }) + "\n", stopped: "" }) });
     check("W01: a Run's results file records what it imported, hashed from the bytes it was given", rW.ok && JSON.stringify(written?.deps) === JSON.stringify([["h.py", h1]]) && written.items.length === 1, { rW, written });
   }
   // (the record's rules (astra's DEP-READ-1): a path twice, or "incomplete": not used; the reading budget shared)
@@ -570,6 +574,12 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
   const a60 = await sha256hex(big["a.py"]);
   const over = await staleOf([["a.py", a60], ["b.py", a60]], async (rel, left) => (big[rel].length > left ? "over" : big[rel]), 100);
   check("W01 staleOf: the files read within one budget: past it, \"over\" (not checked: not used)", over === "over", over);
+  // (astra's DEP-READ-1 r2: the CLI's reader reads a file whole: stat 1, now 6 bytes (grew): null, no prefix hashed;
+  //  stat 6, now 2 (shrank): null; reads of a byte at a time: the whole file)
+  const fileOf = (bytes, step = 1 << 20) => (buf, at) => { const k = Math.min(step, buf.length, Math.max(0, bytes.length - at)); buf.set(bytes.subarray(at, at + k)); return k; };
+  const six = enc("v = 1\n");
+  const grew = readComplete(fileOf(six), 1), shrank = readComplete(fileOf(six.subarray(0, 2)), 6), whole = readComplete(fileOf(six, 1), 6), empty = readComplete(fileOf(new Uint8Array(0)), 0);
+  check("DEP-READ-1 readComplete: a file grown or shrunk since its stat: null (no prefix); read a byte at a time: whole", grew === null && shrank === null && whole && (await sha256hex(whole)) === h1 && empty?.length === 0, { grew, shrank, whole: whole?.length });
   const wsT = { readUpTo: async (p, max) => { if (p.endsWith("t.py")) return { entry: { trashed: true }, content: enc("x") }; if (p.endsWith("big.py")) throw Object.assign(new Error("x"), { code: "limit" }); return { entry: {}, content: enc("ok") }; } };
   const rd = wsReader(wsT, "/A");
   check("W01 wsReader: a file in the Trash isn't there; one past the bound is \"over\"", (await rd("t.py", 10)) === null && (await rd("big.py", 10)) === "over" && (await rd("h.py", 10))?.length === 2, null);
@@ -578,14 +588,15 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
   {
     let written = null;
     const sP = sessionOf({ module: async () => ({ WorkerKernel: class { constructor(o) { this.o = o; this.ready = false; } start() { this.worker = { postMessage() {} }; this.o.onStart(this.worker); this.ready = true; } post() {} on() { return () => {}; } } }), worker: () => null }, 1000);
-    // (a file's entry changes with every write, as the workspace's does: `updated` counts them)
+    // (a file's entry changes with every write, as the workspace's does: `rev` counts them; `updated`, a time in ms,
+    //  may not change (daybreak3's ENGINE-SEEN-REV-1), so here it never does)
     const writes = new Map();
     const files = new Proxy({ "/P/d.tex": enc("x"), "/P/h.py": enc("v = 1\n"), "/P/d.tex.results.json": enc("{}") }, { set: (t, k, v) => { writes.set(k, (writes.get(k) ?? 0) + 1); t[k] = v; return true; } });
-    const ws = { pathOfFile: async () => ({ ok: true, path: "/P/d.tex" }), stat: async (p) => (files[p] ? { fid: p, updated: writes.get(p) ?? 0, size: files[p].length } : undefined), createByPerson: async (p, o) => { written = JSON.parse(new TextDecoder().decode(o.content)); return {}; }, write: async (p, bytes) => { written = JSON.parse(new TextDecoder().decode(bytes)); return { ok: true }; },
+    const ws = { pathOfFile: async () => ({ ok: true, path: "/P/d.tex" }), stat: async (p) => (files[p] ? { fid: p, rev: writes.get(p) ?? 0, updated: 0, size: files[p].length } : undefined), createByPerson: async (p, o) => { written = JSON.parse(new TextDecoder().decode(o.content)); return {}; }, write: async (p, bytes) => { written = JSON.parse(new TextDecoder().decode(bytes)); return { ok: true }; },
       readUpTo: async (p, max) => { if (!files[p]) throw new Error("gone"); if (files[p].length > max) throw Object.assign(new Error("x"), { code: "limit" }); return { entry: {}, content: files[p] }; } };
     const rP = await runAndSave({ items: [item("silent", "from h import v"), item("sage", "v")], current: () => true, max: 1 << 20, now: () => 0, fid: "f",
       ws, session: sP, store: sP, serial: sP.serial, folder: async () => ({ dir: "/P", files: Object.entries(files) }),
-      exec: async () => ({ out: MARK + JSON.stringify({ s: "ok" }) + "\n" + DEPS_MARK + JSON.stringify(["h.py"]) + "\n", stopped: "the run was stopped" }) });
+      exec: async () => ({ out: DEPS_MARK + JSON.stringify(["h.py"]) + "\n" + MARK + JSON.stringify({ s: "ok" }) + "\n", stopped: "the run was stopped" }) });
     const c1 = await checkedResults(ws, "/P/d.tex.results.json", await ws.stat("/P/d.tex.results.json"), written, "/P");
     files["/P/h.py"] = enc("v = 2\n");
     const c2 = await checkedResults(ws, "/P/d.tex.results.json", await ws.stat("/P/d.tex.results.json"), written, "/P");
@@ -606,6 +617,26 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
     ws.readUpTo = orig;
     const again = await checkedResults(ws, "/P/d.tex.results.json", await ws.stat("/P/d.tex.results.json"), rec, "/P");
     check("DEP-SEEN-1: a recorded file changed while it is checked: nothing used, nothing counted as seen; checked again, stale", mid.seen === null && mid.saved.length === 0 && again.stale === "h.py" && again.seen !== null && again.saved.length === 0, { mid, again: { stale: again.stale, seen: !!again.seen } });
+    // (daybreak3's ENGINE-SEEN-REV-1: a helper rewritten, same size, in the same ms (fid, updated, size all the same):
+    //  its rev differs, so nothing is used or seen; checked again, stale)
+    files["/P/h.py"] = enc("v = 1\n");
+    const before = (await ws.stat("/P/h.py")).rev;
+    ws.readUpTo = async (p, max) => { const r = await orig(p, max); if (p.endsWith("h.py")) files["/P/h.py"] = enc("v = 7\n"); return r; };
+    const same = await checkedResults(ws, "/P/d.tex.results.json", await ws.stat("/P/d.tex.results.json"), rec, "/P");
+    ws.readUpTo = orig;
+    const st2 = await ws.stat("/P/h.py"), retry = await checkedResults(ws, "/P/d.tex.results.json", await ws.stat("/P/d.tex.results.json"), rec, "/P");
+    check("ENGINE-SEEN-REV-1: same fid, updated, size, another rev: nothing used, nothing seen; checked again, stale", st2.updated === 0 && st2.size === 6 && st2.rev === before + 1 && same.saved.length === 0 && same.seen === null && retry.stale === "h.py" && retry.saved.length === 0, { same: { saved: same.saved.length, seen: same.seen }, retry: retry.stale });
+    // (astra's DEP-PARTIAL-COMMIT-1: item 2 imported b.py and printed its result, then Stop: saved with b.py recorded,
+    //  never with item 1's list alone; and a result with no line of its own before it: incomplete)
+    files["/P/a.py"] = enc("a"); files["/P/b.py"] = enc("b");
+    const two = (out) => runAndSave({ items: [item("silent", "import a"), item("silent", "import b")], current: () => true, max: 1 << 20, now: () => 0, fid: "f",
+      ws, session: sP, store: sP, serial: sP.serial, folder: async () => ({ dir: "/P", files: Object.entries(files) }), exec: async () => ({ out, stopped: "the run was stopped" }) });
+    const R = MARK + JSON.stringify({ s: "ok" }) + "\n", D = (l) => DEPS_MARK + JSON.stringify(l) + "\n";
+    written = null; await two(D(["a.py"]) + R + D(["a.py", "b.py"]) + R);
+    const ok2 = written?.deps;
+    written = null; await two(D(["a.py"]) + R + R);
+    const unmatched = written?.deps;
+    check("DEP-PARTIAL-COMMIT-1: Stop after item 2's result: b.py recorded; a result without its own line: incomplete", JSON.stringify(ok2?.map((d) => d[0])) === JSON.stringify(["a.py", "b.py"]) && unmatched === "incomplete" && parseDeps(D(["a.py"]) + R + R) === null && JSON.stringify(parseDeps(D(["a.py"]) + R + D(["a.py"]))) === JSON.stringify(["a.py"]), { ok2, unmatched });
   }
   check("W01 resultsText: deps only when there are some", !("deps" in JSON.parse(resultsText([]))) && JSON.stringify(JSON.parse(resultsText([], [["h.py", h1]])).deps) === JSON.stringify([["h.py", h1]]), null);
 }

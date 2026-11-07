@@ -18,7 +18,7 @@ import katex from "katex";
 import { Engine } from "../web/latex/engine/pipeline.mjs";
 import { setKatex, installBeamer } from "../web/latex/engine/render.mjs";
 import * as beamerCode from "../web/latex/engine/beamer.mjs";
-import { itemKey, MAX_RESULT, WRAPPER_VERSION, depsOf, safeRel, DEPS_MAX, DEPS_BYTES, staleOfSync } from "../web/latex/engine/sagetex.mjs";
+import { itemKey, MAX_RESULT, WRAPPER_VERSION, depsOf, safeRel, DEPS_MAX, DEPS_BYTES, staleOfSync, readComplete } from "../web/latex/engine/sagetex.mjs";
 import { PAGE_CSS } from "../web/latex/style";
 import { imageCandidates, graphicsPathOf, notFoundWhy, sniffImage, admitImageBytes, IMAGE_EXTS } from "../web/latex/images";
 import { engineInputs, admitInput, INPUT_BOUNDS, type Known } from "../web/latex/inputs";
@@ -237,11 +237,10 @@ function folderReader(dir: string): (rel: string, left: number) => Uint8Array | 
       const st = statSync(real);
       if (!st.isFile()) return null;
       if (st.size > left) return "over";
-      // (at most one byte past `left`: a file that grew since its stat is refused, never read whole)
+      // (read to the end, at most one byte past its size: a file that grew or shrank since its stat (a short read, a
+      //  prefix) is not read as it is, so not used (astra's DEP-READ-1 r2))
       fd = openSync(real, "r");
-      const buf = Buffer.alloc(Math.min(st.size, left) + 1);
-      const n = readSync(fd, buf, 0, buf.length, 0);
-      return n > left ? "over" : new Uint8Array(buf.buffer, buf.byteOffset, n);
+      return readComplete((buf, at) => readSync(fd, buf, 0, buf.length, at), st.size);
     } catch { return null; } finally { if (fd >= 0) try { closeSync(fd); } catch {} }
   };
 }

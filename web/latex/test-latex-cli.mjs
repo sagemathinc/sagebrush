@@ -522,7 +522,7 @@ $\sage{1/0}$ then $\sage{2+2}$.
     //  "incomplete" and not used; never left without a record, as an older file's)
     writeFileSync(join(w, "d.tex"), "\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n\\begin{sagesilent}\nfrom h import v\n\\end{sagesilent}\n\\begin{sagesilent}\nopen('h.py', 'w').write('v = 5')\n\\end{sagesilent}\n$\\sage{v}$\n\\end{document}\n");
     const r3 = await run(w, "run", "d.tex", "--json"), c7 = await run(w, "check", "d.tex", "--json");
-    check("DEP-SNAPSHOT-1: a helper changed during the run: recorded incomplete, the results not used, said", r3.code === 0 && saved().deps === "incomplete" && c7.json?.code?.every((x) => x.state === "not run") && c7.json.problems.some((p) => p.kind === "stale" && /couldn't record everything/.test(p.message)), { r3: r3.code, deps: saved().deps, c7: c7.json?.problems });
+    check("DEP-SNAPSHOT-1: a helper changed during the run: recorded incomplete, the results not used, said", r3.code === 0 && saved().deps === "incomplete" && c7.json?.code?.every((x) => x.state === "not run") && c7.json.problems.some((p) => p.kind === "stale" && /didn't record everything/.test(p.message)), { r3: r3.code, deps: saved().deps, c7: c7.json?.problems });
   }
 } finally {
   rmSync(dir, { recursive: true, force: true });
