@@ -115,7 +115,8 @@ function serializeRuns(runs) {
   }
   return out;
 }
-const NEWPAGE = '<div class="newpage"></div>';
+// (a reader of the preview is told a page ends there (board's A1); it shows as a line (style.ts))
+export const NEWPAGE = '<div class="newpage" role="separator" aria-label="Page break"></div>';
 class Flow {
   // (pos: the source offset of the latest node walked; rootPos[k]: the offset where top-level item k began, or -1)
   constructor(inline = false) { this.inline = inline; this.root = { items: [] }; this.stack = [this.root]; this.runs = null; this.noindent = false; this.pcls = ""; this.pos = -1; this.parPos = -1; this.rootPos = []; }
