@@ -1,0 +1,103 @@
+{
+ "cases": [
+  {
+   "id": "dist-1",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.3989423\n[1] 0.9750021\n[1] 1.959964\n"
+  },
+  {
+   "id": "dist-2",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.1586553 0.5000000 0.8413447\n"
+  },
+  {
+   "id": "dist-3",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.1171875\n[1] 0.171875\n[1] 3\n"
+  },
+  {
+   "id": "dist-4",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.0625 0.2500 0.3750 0.2500 0.0625\n"
+  },
+  {
+   "id": "dist-5",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.2240418\n[1] 0.4231901\n[1] 5\n"
+  },
+  {
+   "id": "dist-6",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.963306\n[1] 2.570582\n[1] 0.3675526\n"
+  },
+  {
+   "id": "dist-7",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.9499565\n[1] 5.991465\n"
+  },
+  {
+   "id": "dist-8",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.9046326\n[1] 3.098391\n"
+  },
+  {
+   "id": "dist-9",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.3\n[1] 0.5\n[1] 1.5\n"
+  },
+  {
+   "id": "dist-10",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.8646647\n[1] 0.6931472\n[1] 0.3678794\n"
+  },
+  {
+   "id": "dist-11",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.7475075\n[1] 0.02275013\n"
+  },
+  {
+   "id": "dist-12",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.0668072\n"
+  },
+  {
+   "id": "dist-13",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] -1.959964  0.000000  1.959964\n"
+  },
+  {
+   "id": "dist-14",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.3828273\n"
+  },
+  {
+   "id": "dist-15",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.1079819 0.7978846 0.1079819\n"
+  },
+  {
+   "id": "dist-16",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.5939942\n[1] 0.6875\n"
+  }
+ ],
+ "file": "rill-tests/distributions/test_1.R",
+ "format": "rill-out",
+ "v": 1
+}

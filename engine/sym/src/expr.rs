@@ -423,6 +423,7 @@ pub fn add(terms: Vec<Expr>) -> Expr {
     let mut infinities: Vec<Const> = vec![];
     let mut order: Vec<Expr> = vec![];
     let mut coeffs: HashMap<Expr, Num> = HashMap::new();
+    let mut last: HashMap<Expr, Expr> = HashMap::new();
     for t in flat {
         if let Kind::Num(n) = &t.kind {
             numsum = Some(match numsum {
@@ -439,7 +440,12 @@ pub fn add(terms: Vec<Expr>) -> Expr {
         }
         let (c, rest) = split_coeff(&t);
         match coeffs.get_mut(&rest) {
-            Some(s) => *s = s.add(&c),
+            Some(s) => {
+                *s = s.add(&c);
+                // equal terms of different float parents print as the last one (Sage:
+                // sin(x + RR(1)) + sin(x + RDF(1)) is 2*sin(x + 1.0))
+                last.insert(rest.clone(), rest);
+            }
             None => {
                 order.push(rest.clone());
                 coeffs.insert(rest, c);
@@ -457,6 +463,7 @@ pub fn add(terms: Vec<Expr>) -> Expr {
     let mut out: Vec<Expr> = vec![];
     for r in order {
         let c = coeffs.remove(&r).unwrap();
+        let r = last.remove(&r).unwrap_or(r);
         // a term whose coefficient became zero, exact or float, drops out (Sage: RR(2)*x - RR(2)*x
         // is 0)
         if c.is_zero() {
@@ -512,6 +519,7 @@ pub fn mul(factors: Vec<Expr>) -> Expr {
     let mut order: Vec<Expr> = vec![];
     let mut exps: HashMap<Expr, Vec<Expr>> = HashMap::new();
     let mut first: HashMap<Expr, Expr> = HashMap::new();
+    let mut lastb: HashMap<Expr, Expr> = HashMap::new();
     let mut zero_factor = false;
     for f in flat {
         match &f.kind {
@@ -540,7 +548,12 @@ pub fn mul(factors: Vec<Expr>) -> Expr {
         let key = if b.is_num() && !x.is_num() { f.clone() } else { b.clone() };
         let x = if b.is_num() && !x.is_num() { one() } else { x };
         match exps.get_mut(&key) {
-            Some(v) => v.push(x),
+            Some(v) => {
+                v.push(x);
+                // equal bases of different float parents: the last one's (Sage: (x + RDF(1))*(x +
+                // RR(1)) is (x + 1.00000000000000)^2)
+                lastb.insert(key.clone(), key.clone());
+            }
             None => {
                 order.push(key.clone());
                 first.insert(key.clone(), f.clone());
@@ -565,7 +578,7 @@ pub fn mul(factors: Vec<Expr>) -> Expr {
         // sin(I x)/e^x went wrong: the fourth review's U5)
         let complex = match &coeff {
             Num::Exact(_, im) => !num_traits::Zero::is_zero(im),
-            Num::Float(_, im) => *im != 0.0,
+            Num::Float(_, im, _) => *im != 0.0,
         };
         if complex && c != Const::UnsignedInfinity {
             return constant(Const::UnsignedInfinity);
@@ -588,7 +601,7 @@ pub fn mul(factors: Vec<Expr>) -> Expr {
             // a single factor is already simplified
             first.remove(&b).unwrap()
         } else {
-            pow(&b, &add(xs))
+            pow(lastb.get(&b).unwrap_or(&b), &add(xs))
         };
         // the power may have become a number, or a product with a number
         match &p.kind {
@@ -705,7 +718,8 @@ pub fn pow(b: &Expr, x: &Expr) -> Expr {
                 if crate::err::soft_division() {
                     return constant(Const::UnsignedInfinity);
                 }
-                throw(SymError::DivisionByZero);
+                // (Sage's error for 0 to a negative power: SR(0)^-1)
+                crate::err::value_error("power::eval(): division by zero");
             }
             if n.is_positive() {
                 return zero();
@@ -748,7 +762,8 @@ pub fn pow(b: &Expr, x: &Expr) -> Expr {
         (Kind::Const(Const::E), Kind::Num(n)) if !n.is_exact() => {
             let (re, im) = n.to_c64();
             let m = re.exp();
-            return num(if im == 0.0 { Num::float(m) } else { Num::Float(m * im.cos(), m * im.sin()) });
+            let k = n.fk().unwrap_or(crate::num::Fk::RR);
+            return num(if im == 0.0 { Num::Float(m, 0.0, k) } else { Num::fl(m * im.cos(), m * im.sin(), k) });
         }
         (Kind::Const(Const::Infinity), Kind::Num(n)) if n.is_positive() => return infinity(),
         (Kind::Const(Const::Infinity), Kind::Num(n)) if n.is_negative() => return zero(),
@@ -774,6 +789,14 @@ pub fn pow(b: &Expr, x: &Expr) -> Expr {
 }
 
 fn num_pow(b: &Num, x: &Num) -> Expr {
+    // an element of RDF or CDF to an exact integer: binary powering, as Sage's RDF (9.0 for
+    // SR(RDF(3))^2, but 9.000000000000002 for SR(RDF(3))^RDF(2))
+    // (CDF's power is always GSL's formula: SR(CDF(1, 2))^2 is -2.9999999999999987 + 4.0*I)
+    if !b.is_exact() && b.fk_with(x) == crate::num::Fk::RDF {
+        if let Some(n) = x.as_i64() {
+            return num(b.pow_int(n));
+        }
+    }
     if !b.is_exact() || !x.is_exact() {
         return num(float_pow(b, x));
     }
@@ -884,18 +907,64 @@ fn small_factor(n: &BigInt) -> Vec<(BigInt, u32)> {
 pub fn float_pow(b: &Num, x: &Num) -> Num {
     let (br, bi) = b.to_c64();
     let (xr, xi) = x.to_c64();
+    // a float zero base is exact, as Sage: SR(RDF(0))^SR(RDF(0)) is 1, to a
+    // positive (or NaN) exponent 0, to a negative real part division by zero
+    if br == 0.0 && bi == 0.0 {
+        if xr == 0.0 && xi == 0.0 {
+            return Num::rat(Q::one());
+        }
+        if xr < 0.0 {
+            value_error("power::eval(): division by zero");
+        }
+        if xr == 0.0 {
+            value_error("power::eval(): pow(0,I) is undefined");
+        }
+        return Num::rat(Q::zero());
+    }
+    // (the operands' parent: SR(RDF(2))^3 is RDF's 8.0)
+    let k = b.fk_with(x);
+    if k.double() {
+        return double_pow(br, bi, xr, xi, k);
+    }
     if bi == 0.0 && xi == 0.0 && (br >= 0.0 || xr.fract() == 0.0) {
-        return Num::float(br.powf(xr));
+        return Num::Float(br.powf(xr), 0.0, k);
     }
     if br == 0.0 && bi == 0.0 {
-        return Num::float(0.0);
+        return Num::Float(0.0, 0.0, k);
     }
     // exp(x log b)
     let lr = (br * br + bi * bi).sqrt().ln();
     let li = bi.atan2(br);
     let (er, ei) = (xr * lr - xi * li, xr * li + xi * lr);
     let m = er.exp();
-    Num::Float(m * ei.cos(), m * ei.sin())
+    Num::fl(m * ei.cos(), m * ei.sin(), k)
+}
+
+/// A power in RDF or CDF as Sage computes it: a real one exp(y log x) (2.0^0.5 is
+/// 1.414213562373095), a negative base only to an integral power; a complex one by GSL's
+/// formula, with its log |z| (a zero base is float_pow's)
+fn double_pow(br: f64, bi: f64, xr: f64, xi: f64, k: crate::num::Fk) -> Num {
+    if !k.complex() && bi == 0.0 && xi == 0.0 {
+        let (x, y) = (br, xr);
+        if !(x > 0.0) {
+            if !y.is_finite() || y != y.floor() {
+                value_error("negative number cannot be raised to a fractional power".to_string());
+            }
+            let r = (y * (-x).ln()).exp();
+            return Num::Float(if y % 2.0 != 0.0 { -r } else { r }, 0.0, k);
+        }
+        if y == 0.0 || x == 1.0 {
+            return Num::Float(1.0, 0.0, k);
+        }
+        return Num::Float((y * x.ln()).exp(), 0.0, k);
+    }
+    let (xa, ya) = (br.abs(), bi.abs());
+    let (mx, u) = if xa >= ya { (xa, if xa != 0.0 { ya / xa } else { 0.0 }) } else { (ya, xa / ya) };
+    let lr = mx.ln() + 0.5 * (u * u).ln_1p();
+    let th = bi.atan2(br);
+    let rho = (lr * xr - xi * th).exp();
+    let beta = th * xr + xi * lr;
+    Num::fl(rho * beta.cos(), rho * beta.sin(), k.to_complex())
 }
 
 // ------------------------------------------------------------------ functions and relations
@@ -1080,7 +1149,7 @@ mod float_zero_tests {
     }
     fn bits(e: &Expr) -> Option<u64> {
         match &e.kind {
-            Kind::Num(Num::Float(a, b)) if *b == 0.0 => Some(a.to_bits()),
+            Kind::Num(Num::Float(a, b, _)) if *b == 0.0 => Some(a.to_bits()),
             _ => None,
         }
     }

@@ -1,0 +1,43 @@
+{
+ "cases": [
+  {
+   "id": "list-1",
+   "status": 0,
+   "stderr": "",
+   "stdout": "$a\n[1] 1\n\n$b\n[1] \"two\"\n\n$c\n[1] 3 4\n\n"
+  },
+  {
+   "id": "list-2",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[[1]]\n[1] 1\n\n[[2]]\n[1] \"a\"\n\n"
+  },
+  {
+   "id": "list-3",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1 2 3\n[1] \"a\" \"b\"\n[1] \"x\" \"y\"\n"
+  },
+  {
+   "id": "list-4",
+   "status": 0,
+   "stderr": "",
+   "stdout": "List of 2\n $ a: num 1\n $ b: num 2\n"
+  },
+  {
+   "id": "list-5",
+   "status": 0,
+   "stderr": "",
+   "stdout": " a b1 b2 \n 1  2  3 \n"
+  },
+  {
+   "id": "list-6",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 3\n"
+  }
+ ],
+ "file": "rill-tests/list/test_1.R",
+ "format": "rill-out",
+ "v": 1
+}

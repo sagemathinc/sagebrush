@@ -1,0 +1,67 @@
+{
+ "cases": [
+  {
+   "id": "ctrl-1",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1\n[1] 2\n[1] 3\n"
+  },
+  {
+   "id": "ctrl-2",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"big\"\n"
+  },
+  {
+   "id": "ctrl-3",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 3\n"
+  },
+  {
+   "id": "ctrl-4",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 3628800\n"
+  },
+  {
+   "id": "ctrl-5",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"lo\" \"hi\" \"hi\"\n"
+  },
+  {
+   "id": "ctrl-6",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 12\n"
+  },
+  {
+   "id": "ctrl-7",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 4\n"
+  },
+  {
+   "id": "ctrl-8",
+   "status": 0,
+   "stderr": "",
+   "stdout": "1 3 5 \n"
+  },
+  {
+   "id": "ctrl-9",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"second\"\n"
+  },
+  {
+   "id": "ctrl-10",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0\n"
+  }
+ ],
+ "file": "rill-tests/ctrl/test_1.R",
+ "format": "rill-out",
+ "v": 1
+}

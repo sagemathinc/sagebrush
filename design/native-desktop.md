@@ -1,344 +1,424 @@
 # Native engines in the desktop app
 
-*Status: plan r12: r9 (cleared by all five lanes at 6849c320) with William's §7 answers recorded (r10), installers worded as unsigned local builds (r11), and (r12) the big-integer corpus placed in
-each candidate's actual pyjs runtime and candidate 3 described as a per-document helper process. Docs only; nothing is built. Owner and sole author: @sagebrush-remote-compute. The r8 base
-was drafted by @sagebrush-daybreak3 at @sagebrush's request. Reviewers: astra (SEC), daybreak3 (ENGINE), daybreak4
-(PERF), daybreak2 (SIZE), agents-ui (app). William decided the interpreter route and the sandbox question on Nov 7,
-2026 at about 7:54 AM PST, and added Electron as a first-class candidate at about 8:03 AM PST. This revision replaces
-r7's one Node layout with a comparison of the real ways to build the chosen route. It also replaces r4's A-vs-B
-timings, which were invalid (§3).*
+*Status: plan r16: r11 (the architecture revision, its tests and the page items) with William's answers to every §9 question recorded (Nov 7, about 2:26–2:31 PM PST), and (r14–r16) the licence invariant, the support-window clock and the PDF milestone N6 with its tests (T6) and measurements (§7.1); docs only, nothing is built. It replaces r12 (merged at 2999416e) with William's architecture decision of
+Nov 7, 2026, about 12:15–12:30 PM PST.
+
+Owner and sole author: @sagebrush-remote-compute. Reviewers: astra (SEC), daybreak3 (ENGINE), daybreak4 (PERF),
+daybreak2 (SIZE), grader (TESTS), board (COPY), agents-ui (app).
+
+The r1–r12 history and its evidence are kept in §3 and the appendix. William asked for this as "r10"; the earlier r10, which
+recorded the §7 answers, is part of r12.*
 
 ## In plain words
 
-- The desktop app will run **the same Python interpreter as the website**: Sagebrush's pyjs, not CPython. The Rust
-  engines run as native machine code, with native threads and a 64-bit address space. The website, phones and tablets
-  keep WebAssembly.
-- The plan does **not** add an operating-system sandbox. Sagebrush enforces File writes and Network in pyjs and at
-  the host's control bridge, as the website does. That is application permission enforcement. It doesn't contain a
-  bug in the JavaScript runtime, the Rust engine or the desktop host, and the plan doesn't claim it does.
-- There are several ways to put pyjs and the native engine in a desktop app (§2). They differ in which JavaScript
-  engine runs pyjs and the UI, the download size, startup, and whether an engine call is a direct call, an N-API call
-  or serialized IPC.
-- Measured at one commit (§3), the native engine is **about 2.0–2.6× faster than WebAssembly** on the engine cells,
-  through the same pyjs. These are observed medians on a loaded machine, not precise speedups. Pure Python stays at
-  the website's speed.
-- **Recommendation: keep Tauri and add one bundled Node process per document, with the engine as a narrow N-API
-  add-on** (candidate 1). It is the smallest change: the spike already runs today's pyjs engine calls on V8, the Tauri
-  app and its iOS/Android builds stay, and a separate process makes crash and restart simple.
-- **Electron (candidate 2) is a valid alternative.** It uses one V8 engine for both the UI and pyjs on every OS. Its
-  costs are a larger download, a port of the desktop shell off Tauri, and a separate shell for iOS/Android, which
-  Electron doesn't build. The download difference is **about +50 MB, a derived, provisional estimate**: roughly 93 MB
-  against roughly 40–45 MB. That comes from measured Linux runtime parts (Electron 90.1 MB compressed; Node plus the
-  add-on 30.3 MB), plus the README's 10–15 MB for today's app, which wasn't re-measured. N1's matched unsigned
-  local installers are authoritative. N1 builds both, packaged, and measures them side by side before N2 starts.
-- Startup of about a second with the Sage library is **worrying but can be optimized**. As William said, it stays an
-  N1 measurement and optimization item, not a reason to choose one candidate over another.
+- **The engine always runs apart from the app:** as its own process on the desktop and on remote machines, and in a worker on the web and mobile. The app talks to it through **one versioned protocol** (§2).
+  There are three ways to reach it:
+  - **desktop:** a local subprocess;
+  - **web and mobile:** an in-page WebAssembly worker, because those can't start processes;
+  - **cloud and "Your computer":** the remote relay.
+- **The app has one client for all three.**
+- **Sagebrush Engine becomes its own product,** `sagebrush-engine` (§4):
+  - command line only, without the browser app;
+  - the engine's own code stays MIT OR Apache-2.0, always. LGPL is allowed only for the Bun runtime (William, §1);
+  - its own releases and upgrades;
+  - it runs code and works with LaTeX.
+  - One engine serves the desktop app, "Your computer", CI and agents.
+- **The Sagebrush App** (§5) ships one known-good engine, so the first run works offline. The engine can then be upgraded on its own.
+  - File and network permissions are enforced in the engine.
+  - There is still no OS sandbox.
+- **Which JavaScript runtime the engine uses is a packaging choice, not architecture.** The options are Bun, Deno and Node's single executable (SEA). V8 against JSC is part of that choice. N1 measures it (§7).
+- **Signing and notarizing engine binaries:** William's keys only. Agents never touch them (§6).
+- **Nothing ships, is signed, tagged, renamed or relicensed without William.**
 
-## 1. Decisions and fixed boundaries
+## 1. William's decisions
 
-### 1.1 William's decisions
+1. **Interpreter route A** (Nov 7, about 7:54 AM PST): "the same Python interpreter the website uses", which is pyjs, not CPython.
+2. **No OS sandbox** (same message): "I do not think OS sandboxing should be part of our plan". So there is no Landlock, seccomp, Seatbelt or AppContainer work.
+3. **Signing** (about 9:30 AM PST): "I (William) own them; agents never touch the keys."
+4. **Easy upgrades** (about 9:30 AM PST): "it depends - easy upgrades are just as important to get right."
+5. **The architecture** (about 12:15–12:30 PM PST): "we could 100% chose 'run sagebrush engine as a subprocess'"; "Let's go with sagebrush engine."; "Proceed with r10." Mobile stays WebAssembly.
 
-1. **Interpreter route A is chosen:** "I think obviously we do option A 'the same Python interpreter the website
-   uses'." Route B (bundled CPython plus PyO3) is not the desktop v1 plan. Real CPython and C extensions may come
-   later, as a separately designed feature.
-2. **No OS sandbox is part of this plan:** "I do not think OS sandboxing should be part of our plan, since that is just
-   at the wrong level and adds a lot of complexity and reduces the ability of people to run this software." So there is
-   no Landlock, seccomp, Seatbelt, AppContainer, JIT-entitlement-under-sandbox work or escape-test gate. The r1–r7
-   sections that required them are removed.
-3. **Electron is a first-class candidate:** "This could be a reason to switch to Electron which is another completely
-   valid native option, right?" (about Tauri's JavaScriptCore on macOS and Linux). §2.1 compares it head to head.
+   Recorded with it:
+   - the engine is a separate product, CLI-only (the browser app is cut out), with its own upgrade cycle;
+   - "It is mit licensed always";
+   - it runs code and compiles LaTeX;
+   - the app requires the engine, and may come with one version of it;
+   - the app's licence is William's call;
+   - the JavaScript runtime is not decided ("bun may be better for the engine").
+6. **The licence** (about 2:26 PM PST): "LGPL OK for Bun; stay MIT OR Apache-2.0" (§4.2).
+7. **"Your computer"** (about 2:26 PM PST): "Yes, keep CPython as an option" (§4.3).
+8. **The protocol support window** (about 2:29 PM PST): "12 months but this support should ONLY start once we make a 1.0 release. Before a 1.0 release, there's no compatibility guarantees at all." (§2.1).
+9. **The name** (about 2:29 PM PST): "Use sagebrush-engine", for both the command and the package.
+10. **LaTeX to PDF** (about 2:31 PM PST): "Both: user's TeX if present, else offer the Tectonic download" (§4.1).
 
-### 1.2 What every candidate must preserve
+r12's lead question ("decide after the prototype's side-by-side measurements") was about where pyjs runs inside the app. The architecture decision answers it: pyjs and the native engine run in the engine process. N1 still measures, but now only to choose the engine's runtime (§7).
 
-- **One interpreter:** `src/runtime` pyjs and `lib/`, including Sage, Magma, MATLAB, numpy, displays and `@interact`.
-- **One narrow engine ABI:** the operations pyjs calls today (`call`, `sym_call`, `mp_call`). Native builds of
-  `engine/nd` and the other kernels come later, each reviewed separately. Python can't receive a Node, Tauri, FFI,
-  native-pointer or host object. It sees only validated values and the in-memory web file shim.
-- **Application permissions:** Python uses `web/shims/fs`, not the host `fs` of Node, Deno or Bun. File changes go
-  back through the page's existing change queue and permission gate. Live data and network requests go through the
-  existing host broker. Python has no supported API for sockets, subprocesses or the host filesystem.
-- **Control ordering:** generation, permission version, acknowledgement, retirement and Stop linearization are the
-  contracts of §5. They apply whatever the transport is: child pipes, Tauri IPC, Electron MessagePorts or an
-  in-process V8 op.
-- **No containment claim:** these checks govern supported Sagebrush operations. Without an OS sandbox, a defect in, or
-  a deliberately introduced escape from, native code or the host is outside the permission model. The document never
-  calls the kernel "sandboxed", and never claims that the permission switches contain arbitrary native code.
+## 2. Architecture: one engine process, one protocol, three transports
 
-## 2. Architecture candidates
+```
+  Sagebrush App / sagebrush.space page            (one client)
+        |                 |                  |
+   local subprocess   in-page wasm worker   remote relay
+   (desktop)          (web, mobile)         (cloud, "Your computer")
+        |                 |                  |
+  Sagebrush Engine:  pyjs + lib/ + the Rust engines
+                     (native code in a subprocess, wasm in a worker)
+```
 
-Ordered by estimated **product implementation complexity**, not download size. Sizes are xz-compressed Linux x86_64
-runtime payloads, measured where marked (`sizes.txt` of r4, `electron-size.txt` of r8). Startups and memory are N1
-measurements unless marked.
+- **One client.** The page's kernel client speaks the engine protocol and doesn't care which transport carries it. Today the page has separate paths: the wasm worker (`web/notebook/worker-kernel.js`) and the remote client (`web/notebook/remote-client.js`, #778). They become three transports under one client.
+- **What runs where:**
+  - **subprocess:** pyjs runs in the engine's JavaScript runtime, and the Rust engines are native code, with native threads and 64-bit memory;
+  - **wasm worker:** the same pyjs with the Rust engines as WebAssembly, as on the website today;
+  - **relay:** whatever engine runs on the remote machine.
+- **The engine owns its own state:** sessions, files given to it, permissions, Stop. The app owns the UI, documents and the person's choices.
 
-| Candidate | Where pyjs runs; JS engine on macOS / Windows / Linux | Engine crossing | Added payload | Startup | Complexity and status |
-|---|---|---|---|---|---|
-| **1. Tauri + bundled Node process + N-API (recommended)** | pyjs in Node: **V8 / V8 / V8**. The UI stays in the system webview: **JSC / V8 (WebView2) / JSC (WebKitGTK)**, so macOS and Linux ship two JS engines | synchronous **N-API** inside the Node process; framed IPC only between it and the Tauri host | **measured: Node 27.3 MB + add-on 3.1 MB ≈ +30 MB** on top of today's app (README: installers about 10–15 MB; not re-measured here) | spike: 0.4 s to the first line, 1.1 s with Sage (r4); packaged: N1 | **The smallest code change.** Keeps Tauri 2, its iOS/Android builds and today's pyjs engine calls; r4's spike and r5–r7's control design exercise it. Costs: an extra runtime, two JS engines on macOS/Linux, a child process to manage. |
-| **2. Electron + Node utility process + N-API** | Chromium UI and pyjs in a Node utility process: **V8 / V8 / V8** for both | synchronous **N-API** in the utility process; MessagePorts to the UI | **measured: Electron v45.2.3 runtime 90.1 MB** (287 MB unpacked); + add-on 3.1 MB ≈ **+93 MB**, replacing Tauri's ~10–15 MB | N1 | One engine family for the UI and pyjs everywhere. Engine integration is as simple as candidate 1. The shell port is real work (§2.1), and iOS/Android stay on Tauri, so there are two shells. |
-| **3. Tauri + embedded V8 (`deno_core`/`rusty_v8`) in a per-document helper** | pyjs in V8 embedded in a small Rust helper process that Tauri starts per document (restartable): **V8 / V8 / V8**; the UI stays **JSC / V8 / JSC** | **direct Rust calls** inside the helper to the linked engine; framed IPC between the helper and the Tauri host; no Node, no N-API | estimate **+20–35 MB** (rusty_v8's release static library is 40.3 MB gzipped for Linux; linked size is N1) | N1; V8 snapshots may help | A direct engine boundary inside the helper, and a helper process per document, so crash and restart match candidates 1 and 2. More runtime engineering becomes ours: module loading, workers, timers, structured data, snapshots, debugging, updates. `deno_core` 0.413 is a core, not Node or a browser. |
-| **4. Tauri + system webview, engine linked into the Rust core** | today's page and worker: **JSC (WKWebView) / V8 (WebView2) / JSC (WebKitGTK)** | Tauri commands/channels: **asynchronous serialized IPC** to direct Rust calls | **smallest: no extra JS runtime** | likely lowest; N1 | **Not a drop-in.** Tauri's `invoke()` returns a Promise, while pyjs's engine calls are synchronous. N1 must prove a bridge that doesn't deadlock, keeps Stop ordering and copies acceptably. pyjs runs on JSC on macOS/Linux, with its big-integer profile (§3.3). |
-| **5. Tauri 3 CEF runtime, engine linked into the Rust core** | bundled Chromium: **V8 / V8 / V8** | as candidate 4 | Tauri's docs: hundreds of MB larger | N1 | Removes the JSC difference but keeps candidate 4's sync-to-async bridge. `tauri-runtime-cef` is **3.0.0-alpha.7** (crates.io, Nov 6, 2026); Tauri 3 with CEF is an API-unstable alpha. **Not a v1 foundation.** |
-| **6a. Tauri + Bun single-file process + N-API** | Bun: **JSC / JSC / JSC** | N-API in the process; framed IPC to Tauri | measured: Bun 24.8 MB + 3.1 MB ≈ **+28 MB** | N1 | The same add-on file loads (r4 smoke). JSC's big-integer profile applies (§3.3). |
-| **6b. Tauri + Deno single-file process + N-API** | `deno compile`: **V8 / V8 / V8** | Deno's Node-API (the add-on is materialized locally); framed IPC | measured: Deno 30.9 MB + 3.1 MB ≈ **+34 MB** | N1 | V8 in a standalone binary, but native add-ons need extraction details and a larger compatibility surface than Node. |
-| **7. Deno Desktop instead of Tauri** | Deno's V8 backend, with the system webview (**JSC/V8/JSC**) or CEF (**V8 everywhere**) | Node-API in Deno | webview: unknown; CEF: Deno's docs estimate about 150 MB for the framework | N1 | A real extra candidate: Deno 2.9 ships both backends. It replaces Tauri and is young. It doesn't beat candidate 1 on v1 complexity. |
+### 2.1 The protocol
 
-### 2.1 Electron head to head with candidates 1 and 3
+The protocol is the message set the page's worker kernel already uses (`src/notebook-session.ts`, `web/worker.ts`), with a version and a handshake added:
+- run, input and live-data answers;
+- outputs and progress;
+- files (`files`, `fsPut`, `fsChanged`);
+- permission and Stop.
 
-| | **1. Tauri + Node** | **2. Electron** | **3. Tauri + embedded V8 helper** |
+**Handshake.** It happens before anything else, on every transport.
+
+1. The client sends `hello`:
+   - `protocol: {min, max}`, the range of protocol versions it speaks;
+   - its own version;
+   - the capabilities it wants.
+2. The engine replies with:
+   - the chosen protocol version, which is the highest one both sides speak;
+   - its engine version and build ID;
+   - the capabilities it has, for example `native`, `threads`, `latex`, `files`, `network`, `terminal`, `stop-word`.
+3. If the two ranges don't overlap, the engine replies `incompatible`, gives its own range and closes. Nothing runs.
+4. Both sides use only the capabilities that both declared. A feature whose capability is missing is shown as unavailable, never attempted.
+
+**Version skew.**
+- **Desktop app:** if the installed engine is outside the app's range, the app uses the engine it ships with (§5) and says that an engine upgrade (or an app upgrade) is available. It never runs a mismatched pair.
+- **Relay:** the page already requires a minimum runner version (`RUNNER_MIN`). The handshake replaces that check with the same rule: outside the range, the page says which side to upgrade.
+- **Support window** (William, §1): **before 1.0 there is no compatibility guarantee at all.** From 1.0 on:
+  - **The clock:** when an engine release first speaks protocol version $v+1$, version $v$ gets a window that ends 12 months after that release's date. The date comes from the signed release metadata, never from the person's computer clock.
+  - **The end date, exactly:** calendar arithmetic in UTC. The end date is the same day of the month 12 months later; if that day doesn't exist, it is the last day of that month (a supersession dated 2028-02-29 ends on 2029-02-28). The end date is **inclusive**: an engine release dated on it must still speak $v$.
+  - **The promise:** every engine release dated on or before the window's end date still speaks $v$.
+  - **Several predecessors:** each older version has its own window, so an engine may speak several older versions at once. A version is dropped only after its own window ends.
+  - **Before 1.0:** versions superseded before the 1.0 release get no window. The version current at 1.0 gets its window from the first release after 1.0 that supersedes it.
+- Within a negotiated version, an unknown message type is a protocol error. It ends the session, never silently drops the message.
+
+**Transports, all carrying the same messages:**
+
+| Transport | Data | Control (permission, Stop) |
+|---|---|---|
+| local subprocess | length-prefixed frames on one pipe | a **separate** framed pipe, so large data can't queue in front of Stop or permission (N1-2) |
+| in-page wasm worker | `postMessage` | the existing shared `WRITABLE` / `INTR` / `RUN` words |
+| relay | the relay's frames over its one outbound connection, end-to-end DPoP | control frames on the same connection, sent ahead of queued data |
+
+**Stop and permission semantics are the same on every transport** (§2.2). A transport may change how a message travels, never what it means.
+
+### 2.2 Control contracts (from r5–r9, unchanged in meaning)
+
+**Permission version.**
+- The client keeps a monotonic `pv` per (session, generation) and sends `{writable, gen, pv, on}`.
+- The engine applies and acknowledges only a matching generation with a strictly newer `pv`, so a stale allow can't reopen writes.
+- The current permission is applied before the session starts. `ready` echoes `pv`, and no run comes before it.
+- A missing acknowledgement, a malformed control frame or a closed channel ends the generation.
+
+**Stop.**
+- Each run has a 64-bit token. `RUN = token*2 + stopbit` is visible to pyjs, and the native engine's `ARMED` word has the same layout. Around each engine call, the engine arms and clears only its own token.
+- Stop's one decision in the engine is `RUN: token*2 → token*2+1`:
+  - only a successful swap stops `ARMED`, wakes waits and returns `applied: true`;
+  - a failed swap returns `applied: false` and changes nothing.
+- Before its terminal `done`, the engine retires `RUN`:
+  - `token*2 → 0` keeps the completion;
+  - `token*2+1 → 0` makes the run interrupted.
+- The client has one terminal compare-and-set per request, shared by `done`, Stop and the hard restart. So every request gets exactly one result.
+- Stop never uses a signal: no SIGINT handler is installed in the engine (`engine/interrupt`'s `host-word` feature on the N1 branch).
+- **Stop now reaches the long `ap` calls** (#831: `aplist`, `aplist_many` and the sieve check for interrupts).
+- **The hard restart:** after a deadline, the client stops waiting, ends the generation, kills the subprocess and starts a new one. A wasm worker is terminated; a relay session is closed.
+
+**Input and live data** bind to the generation and the active request. Late answers do nothing.
+
+## 3. Evidence carried over from r8–r12
+
+The same-commit packet is unchanged:
+- **Evidence:** `/scratch/sagebrush-reviews/remote-compute/native-bench-r8-dbdf5984/`, frozen with SHA256SUMS, together with daybreak4's packets `pr825-r8-aplist-decomposition/` and `pr825-r8-jsengines/`. All PERF CLEAR.
+- **What was measured:** every engine is the v0.6.0 tag `dbdf5984`.
+  - **W:** the npm CLI, pyjs plus wasm.
+  - **A:** the same CLI with its engine calls on a native N-API add-on in the same process. A is the shape of an engine subprocess.
+
+| Engine cell | W (wasm) | A (native, via pyjs) | A vs W |
 |---|---|---|---|
-| JS engine for the UI | system webview: JSC on macOS/Linux, V8 on Windows | **V8 everywhere** (Chromium) | system webview |
-| JS engine for pyjs | **V8** (Node) | **V8** (Node in a utility process) | **V8** (embedded) |
-| Where pyjs runs | a Node child per document; a worker thread inside it runs `notebookSession` | a utility process per document (`utilityProcess.fork`); a worker thread runs `notebookSession` | a V8 isolate in a Rust helper process per document (restartable), started by Tauri |
-| How the engine is loaded | `require()` of the N-API add-on in the child | `require()` of the N-API add-on in the utility process (rebuilt against Electron's Node ABI, or using N-API's stable ABI) | linked into the helper binary; ops are Rust functions |
-| Added download, Linux x86_64, measured | **+30.3 MB** (Node 27.3 + add-on 3.1) over today's ~10–15 MB app | **≈ 93 MB** total runtime (Electron 90.1 + add-on 3.1), instead of Tauri's | estimate +20–35 MB |
-| Download on macOS and Windows | N1 (Node is a similar size) | Electron's release zips: 121 MB (macOS arm64), 125 MB (macOS x64), 158 MB (Windows x64); installers compress further; N1 | N1 |
-| Memory | Tauri host + webview + one Node process per document; N1 measures the whole process tree | Chromium's browser, GPU and renderer processes + one utility process per document; N1 measures the whole tree | Tauri host + webview + one helper process per document; N1 measures the whole process tree |
-| Startup | Node itself 43–58 ms (r4); pyjs boot dominates; N1 | Chromium start + utility process; N1 | V8 start + pyjs; snapshots; N1 |
-| Security updates (maintenance on every candidate) | the system webview updates with the OS; Node is pinned by us, with its own CVE cadence | a new Electron major **every 8 weeks**; only the **latest three** are supported, so we ship a Chromium update at least every ~6 months, sooner for security fixes | V8 pinned by us through rusty_v8; we track V8 security fixes ourselves |
-| Moving today's app | none | port `app/src-tauri`: 202 lines of Rust (4 commands: `startup_files`, `selftest_file`, `selftest_report`, `app_log`), the dialog, fs and localhost plugins, the capabilities file, file associations and bundling to Electron's main process, preload and electron-builder. Replace the Tauri uses in the page (24 in web/index.html, plus web/board/page.ts and web/notebook/terminal-probe.js and their tests) with a preload API that keeps the same interface. The localhost plugin serves the page at 127.0.0.1 with COOP/COEP, so Electron needs a protocol handler sending the same headers. No updater is in use yet. Signing needs the same Apple and Windows accounts. **iOS and Android stay on Tauri 2:** two shells. | none for the shell; a new Rust helper binary hosting V8 |
-| Complexity | lowest | moderate: the shell port and two shells | highest runtime engineering |
+| `det` 200×200 | 183.7 ms (167.7–212.1) | 90.2 ms (87.7–97.7) | about 2.0× |
+| `factor`, 41 digits | 611.8 ms (578.6–703.3) | 248.5 ms (244.2–285.9) | about 2.5× |
+| `aplist(200000)`, 32 threads | 100.6 ms (98.1–116.5) | 38.7 ms (36.2–51.5) | about 2.6× |
 
-**What JSC means here.** pyjs runs on JSC only in **candidate 4 on macOS and Linux** and **candidate 6a on every OS**.
-Candidates 1, 2, 3, 5, 6b and 7 keep pyjs on V8, even where a separate UI webview is JSC. Electron's real advantage over candidate 1 is one
-engine for the UI as well, so a page tested in Chrome behaves the same in the app. Its costs are the size, the
-8-week update treadmill and two shells.
+These are medians of 5 per-process medians, with their range, on a loaded machine: observed values, not precise speedups. The causal findings stand:
+- `factor` converges across kernel, direct, A and CPython;
+- `aplist`'s gap is the data format and the wrapper;
+- `aplist`'s gain needs threads.
 
-### 2.2 Recommendation and fallbacks
+**Big integers depend on the JavaScript engine** (daybreak4's packet, identical pyjs on both): JSC is 7.3× slower than V8 on `factorial(60000)`, 13.4× on a big multiply and 9.8× on division, but 11.2× faster on a 92,000-bit `gcd`. So if the engine runs on Bun (JSC), big integers need per-operation Rust dispatch, measured in N1 (§7).
 
-**Build candidate 1 first.** It alone combines pyjs on V8, today's synchronous engine calls, a measured add-on
-spike, an unchanged Tauri shell (desktop and mobile), and independent crash and restart per document.
+r4's A-vs-B timings stay withdrawn: the PyPI wheel came from a different commit.
 
-N1 builds **candidates 1, 2 and 3 as packaged comparisons**, with the same UI payload and the same engine commit, and
-spikes candidate 4's boundary.
-- **Electron (2)** becomes the lead if its measured size, memory and startup are acceptable to William, and one V8
-  engine for the UI is judged worth the shell port and the second (mobile) shell.
-- **Candidate 4** becomes preferred if it keeps the interpreter contract without blocking the UI's event loop and
-  passes the control-race pins. Its JSC big-integer profile must be acceptable on the workload corpus, or answered
-  by per-operation Rust dispatch (§3.3).
-- **Candidate 3** is the fallback if bundling Node is unacceptable but V8 is required.
-- The others are measured alternatives, not parallel implementation tracks.
+## 4. Sagebrush Engine, the product
 
-## 3. Performance evidence: one commit
+### 4.1 What it is
 
-### 3.1 r4's A-vs-B timings are invalid
+- **One command-line program, `sagebrush-engine`** (the command and the package; William, §1). It runs code in Python (pyjs), Sage, Magma and MATLAB modes, as `sagebrush` does today. It also gains the engine protocol's server side (`--stdio` for the app, the relay for remote).
+- **The browser app is cut out.** Today's single-file CLI embeds the web page for `sagebrush notebook` (`scripts/build-cli.mjs`). The engine build leaves it out. The page lives in the app and on the website.
+- **LaTeX:** the engine includes today's LaTeX tools (`src/latex-cli.ts`: the expander, the HTML preview, SageTeX).
+  - **Today Sagebrush doesn't make PDFs:** the preview is not TeX (`articles/latex/01-how-it-works.md`).
+  - **PDFs** (William, §1):
+    - the engine compiles to PDF with **the person's installed TeX** if it finds one;
+    - otherwise, on the first PDF compile, it **offers Tectonic** as a separate, optional download.
+  - **Tectonic is never bundled with or linked into the engine.** It is its own executable, with its own licence notices, and the docs carry a source offer: its `pdf_io` carries GPL headers and its `graphite2` is LGPL.
+  - **The offer is the person's explicit choice:** a dialog showing the size, the source, the licence and Cancel. It is never automatic, including when an agent starts the compile.
+  - **The download must be verified before installation.**
+    - The SHA-256 digest must be either pinned per version, OS and architecture in the verified engine release, or come from signed release metadata checked against a public key already pinned in the installed engine, with version, expiry and rollback checks.
+    - The metadata must bind the version, OS and architecture, byte length and archive hash. An unsigned checksum downloaded alongside the executable is not enough.
+    - The download must be staged. Its length and hash must be checked before it is extracted or run, archive paths must be validated, and the verified executable must be installed atomically.
+    - It must fail closed: missing or mismatched data must never fall back to running something unverified.
+    - It reuses the engine updater's verification (§4.4), not a separate verification scheme.
+    - **Not covered by this verification, today:** Tectonic's later bundle and package downloads. Verifying the executable archive doesn't authenticate them.
+    - **Before N6 ships**, a separately reviewed bundle policy must:
+      - pin an approved bundle identity and source;
+      - authenticate fetched contents and any reuse of the cache before use;
+      - reject source overrides chosen by a document;
+      - define the consent, bounds and offline behaviour of package fetches.
+    - A failure must never use unverified data. A verified full local bundle with an offline-only path is also acceptable, if authenticated partial fetches can't be established. This is a requirement on the deferred work, not a claim that stock Tectonic provides it.
+    - Signature keys and signing remain William's only. Agents use fixtures and mock metadata.
+- **The runtime is a packaging choice:** Bun (`bun build --compile`), Deno (`deno compile`) or a Node single executable. `scripts/build-cli.mjs` already builds all three (`--bun`, `--deno`, `--sea`).
+  - The native Rust engine is loaded into that runtime, through N-API or the runtime's own FFI.
+  - A Rust module without a native build stays wasm inside the engine.
 
-r4 compared W and A (engine at the v0.6.0 tag, `dbdf5984`, Oct 23) with B, which used the **PyPI wheel "sagebrush
-0.6.0"**. That wheel was built from **`61a18002` (Oct 7)**: PyPI and npm number their versions separately, and the
-tag's own `engine/py` already says 0.7.2. So r4's A-vs-B rows compared different engines and are withdrawn, along
-with every conclusion drawn from them. r8's packet rebuilds B from the tag.
+### 4.2 MIT OR Apache-2.0 always: the licence check
 
-### 3.2 The same-commit packet
+- **The engine stays MIT OR Apache-2.0** (`NOTICE.md`; William, §1), so the MIT licence is always available.
+- **Every dependency must be MIT-compatible** (permissive, so the engine can be redistributed under MIT terms with the notices kept), **with one scoped exception:** the Bun runtime's own LGPL parts, below.
+- **The proposed allow-list** is the licences the npm package already carries: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, 0BSD, Zlib, BSL-1.0, Unicode-3.0, PSF-2.0 (CPython parts) and Artistic-2.0 (Cremona's data).
+  - **One scoped exception:** LGPL is allowed **for the Bun runtime only** (William, §1). It is not allowed for anything else in the engine.
+  - **Not allowed:** GPL, AGPL, MPL, LGPL outside the Bun runtime, and anything unlisted.
+- **A finding for the runtime choice:** Bun says "Bun statically links JavaScriptCore (and WebKit), which is LGPL-2 licensed" (bun.com/docs/project/licensing).
+  - So a Bun-compiled engine contains LGPL-2 code, with LGPL's relinking obligations. William accepted that for the Bun runtime.
+  - The check allows LGPL only in the Bun runtime's own inventory entries.
+  - Node and Deno ship V8 (BSD-3-Clause) and their own permissively licensed parts. Their full inventories are N1 work (§7).
+- **The check (proposed, not yet running):** a script (`scripts/license-check.mjs`) inventories everything that goes into each engine build: the Rust crates, the npm packages bundled, the runtime binary's own parts, and the data. It fails on anything outside the allow-list.
+  - It runs in the existing CI `checks` job. Wiring it into a workflow file is done by William or @sagebrush, because agents don't push workflow files.
+  - `THIRD-PARTY-NOTICES.txt` is generated from the same inventory.
 
-- **Evidence:** `/scratch/sagebrush-reviews/remote-compute/native-bench-r8-dbdf5984/` (frozen, SHA256SUMS), together
-  with daybreak4's two packets: `/scratch/sagebrush-reviews/daybreak4/pr825-r8-aplist-decomposition/` and
-  `.../pr825-r8-jsengines/`. daybreak4 reviewed the packet itself as PERF CLEAR (checksums, commit pins, build,
-  method). The wording here is reviewed with r8.
-- **Every engine is `dbdf5984`:**
-  - **W:** the npm CLI, pyjs plus wasm, under Node v26.13.0.
-  - **A:** the same CLI with its engine calls on the N-API add-on (r4's shim).
-  - **D:** the add-on called directly from Node, with no pyjs and no shim: the call, then `JSON.parse`.
-  - **K:** the kernels alone, in Rust.
-  - **B, reference only:** CPython 3.14.4 with a maturin wheel built from the tag.
-- **Build:** rustc 1.99.0. Every Rust build uses opt-level 3, `lto = true` and `codegen-units = 1`, with no RUSTFLAGS
-  and no `target-cpu`. The rayon pool is 32 threads; the `1` columns use `RAYON_NUM_THREADS=1`.
-- **Method:** each cell gets a warm-up, then the median of 3 (5 for D and K). There are 5 counted processes per
-  configuration, and the tables give the median of the per-process medians.
-- **Load:** the configurations ran one after another on a loaded machine, at a 1-minute load of 9.9–28.0, recorded
-  per process (W 20.5–28.0, A 16.8–20.6). So the **A-vs-W ratios are approximate observed medians**, not precise
-  stable speedups; read the ranges. N1's interleaved packaged runs are authoritative. The causal findings (`factor`
-  converging, the direct and kernel decompositions) are much stronger than small ratios between configurations.
-- **factor is deterministic everywhere:** a rho seed of `0x9E3779B9`, then an ECM seed of `0x2545F4914F6CDD1D`,
-  sequential, through the same `classgroup` `factor_integer` in web, PyO3 and Rust.
+### 4.3 One engine for local, remote, CI and agents
 
-| Engine cell | W (wasm) | **A** (N-API, via pyjs) | D (add-on direct) | K (kernel alone) | B (reference) | **A vs W** |
-|---|---|---|---|---|---|---|
-| `det` 200×200 | 183.7 (167.7–212.1) | **90.2** (87.7–97.7) | 48.8 + 0.0 parse | 44.5; with JSON 47.5 | 70.0 | **≈2.0×** |
-| `factor` 41 digits | 611.8 (578.6–703.3) | **248.5** (244.2–285.9) | 247.5 | 243.9 | 247.4 | **≈2.5×** |
-| `aplist(200000)`, 32 threads | 100.6 (98.1–116.5) | **38.7** (36.2–51.5) | 25.5 + 2.0 parse | 19.3; with JSON 24.8 | 25.1 | **≈2.6×** |
-| `aplist(200000)`, 1 thread | — | 105.1 | 83.4 + 2.1 | 78.1; with JSON 83.1 | 81.3 | |
+- **"Your computer" (#778)** today runs `uvx sagebrush@latest remote --loopback`, which is **CPython** with the PyO3 engine, as William chose ("uvx only", Nov 6).
+- **Merging means the engine also speaks the relay transport.** The page then talks to "Your computer" with the same protocol and client as to the desktop subprocess.
+- **The CPython runner stays as an option** (William, §1: "Yes, keep CPython as an option"). "Your computer" can run the engine (pyjs) or the existing CPython runner (`uvx sagebrush remote`), for people's own Python and packages.
+  - When both are available, the page offers a plain-words picker, and the choice is remembered per machine.
+  - The relay, DPoP and terminal designs don't change; only the program at the end of the relay does.
+- **CI and agents** run the same engine binary from the command line or over the protocol.
 
-(ms, median of the 5 per-process medians, with their range.)
+### 4.4 Releases, upgrades, size and start-up
 
-**What this shows:**
-- **`factor` converges:** the kernel, the direct call, A and B are all 244–249 ms. r4's gap was the old wheel.
-- **`aplist`:** the result is **17,984 (p, a_p) pairs**, which engine/web's JSON makes 226,270 bytes.
-  - The kernel takes 19.3 ms. JSON generation adds about 5.5 ms, and parsing about 2 ms (daybreak4's decomposition
-    agrees: 5–11 ms of JSON and 2–3 ms of copying and parsing).
-  - A then adds about 11 ms in pyjs, turning the pairs into Python objects, plus the spike's shim.
-  - So A's gap to B is the data format and the wrapper, not the engine or build flags. A binary reply format and
-    the shim's removal are N2 work, measured in N1.
-- **`det`:** the kernel is 44.5 ms. A's extra time over the direct call (~41 ms) is pyjs building the matrix and its
-  137 KB request. That is pyjs work, the same on the website.
-- **Threads matter:** with one thread, `aplist` is about wasm's speed. All the native gain on that cell comes from
-  rayon's 32 threads.
+- **Own release cycle:** the engine has its own version and release notes, separate from the app's.
+  - The protocol range in the handshake (§2.1) is what ties an app to the engines it accepts, not equal version numbers.
+- **Upgrades:**
+  - The engine upgrades itself from the release channel (`engine upgrade`). The app can trigger that.
+  - Every upgrade is checked against the release's published checksum.
+  - Signature checks use William's keys once he sets them up (§6). No agent creates or holds an updater key, not even a test one; development uses unsigned or mock update metadata.
+  - So, for now, no test shows a signed file passing verification; T6 says so (option c) until William chooses between a fixture he signs once and an ephemeral in-memory test keypair (which would need an exception to this rule).
+- **Size and start-up:** William's CLI rule applies: judged by install time and start-up time, with no fixed size ceiling.
+  - Each engine build gets its own size-gate entry, with tight growth markers.
+  - N1 reports, per runtime and OS:
+    - the download;
+    - the update delta;
+    - the time to install;
+    - the time to the first line;
+    - the time to first output with Sage's library loaded.
+  - Today, measured in r4: about 0.4 s to the first line and 1.1 s with Sage under Node.
+  - Start-up work: snapshots where the runtime has them, lazy library loading, and no browser bundle. A target, not a gate.
 
-### 3.3 Pure Python and big integers: the JS engine and the Rust engine
+## 5. Sagebrush App
 
-| Cell | W = A (pyjs on V8) | pyjs on JSC (Bun; daybreak4 jsengines) | K (Rust engine, dashu) | B (CPython, reference) |
-|---|---|---|---|---|
-| `fib(27)` | 9.6 / 10.2 | — | — | 21.8 |
-| 10⁶-iteration loop | 28.9 / 34.5 | — | — | 57.0 |
-| 200,000-key dict, sorted | 467.3 / 447.2 | — | — | 123.8 |
-| `factorial(60000)` | 11.5 | 85.0 | 15.8 (product tree) | 54.3 |
-| 317,000 × 456,000-bit multiply | 2.6 | 36.2 | 3.2 | 21.2 |
-| the matching division | 11.6 | 112.7 | 8.2 | 59.9 |
-| `gcd`, 91,700 and 96,400 bits | 1364.8 / 1341.4 | 120.1 | **3.5** | 12.4 |
+- **The shell:** Tauri 2 on desktop, unchanged, with iOS and Android builds.
+  - **Desktop** starts the engine as a subprocess (§2).
+  - **Phones and tablets** use the wasm worker, as William decided (mobile stays WebAssembly); iOS doesn't allow an app to start a separate engine process.
+  - **Electron is kept only as a fallback shell,** if Tauri's webviews block something N1 finds (§7).
+- **It ships one known-good engine**, so the first run works offline.
+  - The app prefers an installed engine whose protocol range fits, and otherwise uses its own.
+  - The person can upgrade the engine without upgrading the app.
+- **Permissions are enforced in the engine:** the engine's files and network switches (William, Nov 3: two per-document permissions).
+  - Python sees only `web/shims/fs` and the host broker, never the runtime's own `fs`, sockets or subprocesses.
+  - The app sets the switches over the control channel (§2.2), and the page keeps its own gate for durable changes.
+  - These are application boundaries. They don't contain a bug in the runtime, the native engine or the app, and nothing calls the engine "sandboxed". **There is no OS sandbox.**
+- **The app's licence is William's call.** The engine stays MIT whatever the app's licence is. The app talks to the engine only through the protocol.
 
-- **The gcd row is not a route difference.** pyjs computes `gcd` in JS `BigInt`; CPython uses its C code. The Rust
-  engine does it in 3.5 ms. Routing big `gcd` to the engine fixes it **for the website too**, through wasm.
-- **JSC is workload-dependent, not uniformly slower:** 7.3× slower than V8 on factorial, 13.4× on multiply and 9.8× on
-  division, but **11.2× faster on this gcd**. These ratios come from daybreak4's packet, which ran identical pyjs on
-  both engines (V8 medians 11.6, 2.7, 11.5 and 1347 ms there). Factorial alone neither requires Rust routing nor selects Electron.
-- **Rust dispatch is per operation and size.** The Rust engine is best here for gcd and division, close to V8 for
-  multiply, and slower than V8's factorial. N1 benchmarks a real big-integer corpus in each candidate's actual pyjs runtime and
-  boundary (system webviews only for candidate 4's spike), and then chooses per-operation, per-size dispatch, counting the crossing cost and exact result semantics (an N2 ENGINE
-  gate). It matters for the candidates where pyjs runs on JSC: 4 on macOS and Linux, and 6a everywhere.
-- **Pure Python:** A keeps pyjs's V8 speed. The dict/string gap is pyjs's own and shows on the website today.
-- **Startup** (r4, unchanged): A takes about 0.4 s to the first line and about 1.1 s with Sage. It is an N1
-  optimization item (V8 snapshots, lazy library loading), not a gate.
+## 6. Signing and notarization
 
-## 4. Candidate 1 in detail
+- Engine binaries and app installers are signed and notarized **only with William's keys, by William.**
+  - This covers Apple notarization, Windows Authenticode and the update signing key.
+  - Agents never touch the keys, accounts, certificates or signing steps.
+- Until then, every build an agent makes is an unsigned local build, and nothing is published.
 
-### 4.1 Processes and data path
+## 7. N1, narrowed
 
-- Tauri owns one child generation per stable document identity. Views attach with host-minted IDs; page request IDs
-  never become child authority.
-- The pinned Node child's main thread owns the bounded host pipes and the control words. A worker thread runs
-  `notebookSession` with `web/shims/fs` and the same pyjs and lib bundles as the website.
-- The add-on exports only the fixed engine ABI and the control functions. It exports no general FFI, host objects,
-  file descriptors, Node callbacks, `require`, Tauri handles or arbitrary Rust entry points to Python.
-- `NativeKernelPort` maps the worker protocol to bounded frames. Large files and outputs use binary frames; framing
-  and copy costs are N1 measurements.
-- Engine modules without a reviewed native build stay wasm inside the child, so native adoption is incremental.
-- Under candidate 2 the same design holds, with Electron's utility process in place of the Node child and
-  MessagePorts in place of pipes.
+**Dropped:**
+- engines inside the app's process: an N-API add-on in the app, the engine linked into Tauri's Rust core, Tauri commands with a sync-to-async bridge, and Tauri 3 CEF;
+- the embedded-V8 helper (old candidate 3);
+- Deno Desktop.
 
-### 4.2 Application permission enforcement
+**Electron** remains only as a fallback shell, not a measured candidate.
 
-- **Files:** the host delivers `{files}`/`{fsPut}` to the in-memory shim. Python's writes produce `{fsChanged}` and
-  enter the page's existing change queue. The page admits durable changes only while File writes is on. The child has
-  no supported host filesystem API.
-- **Network:** Python's live-data requests cross the session protocol to the host broker. The child has no supported
-  direct socket API.
-- **Revocation:** the page's durable gate closes immediately. The versioned control below reaches a busy child. A
-  write made in the child's memory inside the window is refused at the page and conditionally restored in the child.
-- These are application boundaries. They don't contain a defect in Node, the add-on, Tauri or native memory.
+**The new candidate 1** is Tauri plus an engine subprocess. N1 compares **the engine's runtime**, all as a subprocess under the same Tauri shell, at one engine commit:
 
-## 5. Control bridge (from r5–r7, independent of transport)
+| Label | Runtime | JavaScript engine |
+|---|---|---|
+| **1a, 1b** | Node single executable (SEA) | V8 |
+| **2** | Bun (`bun build --compile`) | JSC |
+| **3** | Deno (`deno compile`) | V8 |
 
-### 5.1 Boundaries
+Node is the baseline because r8's evidence (A) is Node. 1b is the A/A control. These are the same four labels as pre-registration r3, so its schedule and balance rules carry over unchanged.
 
-| Candidate 1 boundary | What crosses it |
-|---|---|
-| Tauri host ↔ child main thread | separate bounded data and control frames, so large data can't queue behind Stop or permission. Malformed framing retires the generation. |
-| child main thread ↔ pyjs worker | child-local `WRITABLE`, `INTR`, `RUN`, progress and input/live-answer buffers, created before the worker starts. The Node entry is given them explicitly: no `crossOriginIsolated` test and no between-runs fallback. A child without them refuses to start. |
-| child main thread ↔ add-on | narrow control exports and the process-global `ARMED`. The main thread never runs pyjs or an engine call. |
+**What N1 measures**, per runtime and OS:
+- the engine's start-up (to `ready`, and to first output with Sage);
+- memory of the engine process and the whole tree;
+- the big-integer corpus (§3), which now decides the Rust-dispatch thresholds and weighs on Bun;
+- Stop, as send→accepted and accepted→done after RUN/ARMED, plus the 2 s restart;
+- the permission acknowledgement window;
+- the protocol over the pipe: framing stages, bytes and the empty round-trip;
+- download, install time and **update deltas**, as bytes;
+- the installed footprint, both steady (the bundled engine plus the current one) and at the peak of an update (bundled, current, the download being staged and any rollback copy);
+- the licence inventory (§4.2).
 
-Other candidates may replace the transport, but must keep the authority, ordering and outcomes below.
+**Machine-independent work already done or in progress** (branch `n1-native-proto`, never merged):
+- the `host-word` interrupt feature;
+- the N-API add-on with Stop pins;
+- the framed data and control pipes, permission version and RUN/ARMED Stop (N1-2), with conformance rows 1–5.
 
-### 5.2 Permission version and retirement
+**The output-frames harness** (#826, carried from r12) runs in the app's webview: the desktop UI is still WebKit (macOS, Linux) and WebView2 (Windows), and outputs move into frames from OUT-ISO phase 2. This is a UI test, not an engine measurement.
 
-- The host keeps a monotonic `pv` per (identity, generation) and sends `{writable, gen, pv, on}`. Only a matching
-  generation with a strictly newer `pv` is applied and acknowledged, so a stale allow can't reopen writes.
-- At startup the current permission is applied before the session starts; `ready` echoes `pv`, and no run comes
-  before it.
-- The page's durable gate closes immediately and drops changes from stale generations.
-- A refused change made in the child's memory (modify, create, delete, rename, directory) is restored only while the
-  generation, `pv` and the page's revision of that path still match, **checked when the restore is applied**. A newer
-  revision, grant or run is never overwritten.
-- A missing acknowledgement, a malformed control frame or a closed channel retires the generation. N1 measures the
-  window and sets the deadline from evidence.
+**The pre-registration** (`proto/n1/harness/PREREGISTRATION.md`, r3, PERF PROTOCOL CLEAR at 98ed461e) becomes r4:
+- the labels become the three runtimes above;
+- the measurements are those listed here. The page and webview timing marks are dropped from the runtime comparison (the subprocess's own marks stay); the output-frames harness above is separate.
 
-### 5.3 Stop linearization (NATIVE-A-STOP-1/2/3)
+r4 goes back to PERF. Counted runs still need PERF's final harness and packet review. William answered the machine questions on Nov 7 (about 12:46 PM PST): Windows runs use a CI workflow he adds himself; the m1 GUI "Yes, for N1 only"; sudo packages and the VM3/VM4 timing box "Yes to both".
 
-- Each run has a unique 64-bit token (`BigInt64Array` and `AtomicU64`). The generation retires before the counter
-  could wrap.
-  - `RUN = token*2 + stopbit` is visible to pyjs; the add-on's `ARMED` has the same layout.
-  - Around each add-on call, the add-on arms and clears only its own token.
-- Stop's only child-side decision is `RUN: token*2 → token*2+1`.
-  - Only a successful swap may stop `ARMED`, set `INTR`, wake waits and return `applied: true`.
-  - A failed swap returns `applied: false` and changes no word, wait or answer.
-- Before its terminal `done`, the worker retires `RUN`:
-  - `token*2 → 0` keeps the original completion;
-  - if the Stop won, `token*2+1 → 0` makes the run interrupted and clears `INTR`.
+### 7.1 Outside N1: the optional Tectonic path
 
-  That retire, racing the Stop, is the one race that decides the outcome.
-- Rust checks and rayon helpers read `ARMED`, and an interrupted call leaves the add-on reusable. Stop never uses a
-  signal, and no SIGINT handler is installed in the child (`engine/interrupt`'s new `host-word` feature).
-- The host has one terminal compare-and-set per (generation, request), shared by `done`, Stop and the hard restart.
-  - `done` first: the completion stands.
-  - Stop first: the host holds `done` until the acknowledgement. `applied: false` releases it unchanged, and
-    `applied: true` ends the run interrupted.
-  - A timeout fences the generation before terminating the child, and yields exactly one result.
-- A Stop that comes too late shows nothing to the person, as in the browser. Any wording is board's, the same in
-  both kernels.
+The optional Tectonic download (§4.1) is **not** an N1 runtime label. It and its cache never enter N1's artifacts or F1–F3. Before N6 ships, it gets its own frozen measurement, per supported OS and architecture, on a machine with **no system TeX**:
+- **frozen inputs:** the exact Tectonic build and archive (sha256), the document corpus (each document's packages recorded), and the fixtures;
+- **archive bytes**, and **verified local install time** from a frozen local archive. Network transfer time is descriptive only;
+- **accept the offer → first successful PDF**, including the first-use package fetch;
+- **warm compile** time;
+- **the package cache** Tectonic downloads on first compile, as its own row in bytes, per corpus document;
+- **steady installed footprint:** the executable plus the cache, logical and allocated bytes;
+- **peak footprint during install or update:** staged archive + current + replacement or staged extraction + rollback;
+- **the update delta**, or a statement that each update is a full archive;
+- **offline behaviour:** with no network, the compile ends within a bounded time with a clear message, and runs nothing unverified;
+- **the control:** the person's own installed TeX, which has zero bytes managed by Sagebrush.
 
-### 5.4 Input, live data, progress and pins
+The current figures are uncounted pilot observations by @sagebrush (Tectonic 0.17.0): a 54–60 MB binary, a 10–22 MB download, a 35 s first compile with a 43 MB cache, and 0.8 s afterwards. This measurement gets its own pre-registration and PERF review.
 
-- Input and live-data answers bind to the generation, the attachment and the active request. Stop, detach or a
-  deadline aborts them, and late answers do nothing. Progress snapshots go to the page's single reader at most ten
-  times a second.
-- Deterministic pins cover:
-  - **permission:** a busy cell, in-window refusal and conditional restore, a stale allow or generation, startup
-    with writes off, and channel failures;
-  - **Stop:** every engine ABI call and rayon, reuse by the next call, both `done`/Stop orders, the hard restart,
-    a stale Stop against newer pyjs, input, live-data or engine work, colliding view IDs, and exactly one terminal
-    result.
-- The held-control pin asserts that `RUN == 0` before `done` leaves the worker, that the released Stop reports
-  `applied: false`, that `INTR` stays clear, and that the next run succeeds.
-
-## 6. Milestones
+## 8. Milestones and tests
 
 | | Work | Gate |
 |---|---|---|
-| **N0** | The plan reviewed (r9 cleared by all lanes) and William's §7 answers recorded: the lead is decided after N1's measurements | all lanes; William (done) |
-| **N1** | No product integration. **(1)** Build packaged comparisons of **1 (Tauri + Node), 2 (Electron utility process) and 3 (Tauri + an embedded-V8 helper process per document)**, with the same UI payload and engine commit; spike 4's boundary and resolve its sync-engine/async-IPC design. **(2)** Prove pyjs boot, native calls, Stop, busy-cell permission and crash/restart. **(3)** Measure per OS: the compressed unsigned local installer and update delta, installed size, cold and warm launch to runner-ready, first and steady engine calls, idle memory as RSS/PSS of the whole process tree after first paint and after the pyjs worker is ready, the > 4 GB case, framing copies, and the permission acknowledgement window. **(4)** The big-integer corpus runs in each candidate's actual pyjs runtime and boundary; system webviews apply only to candidate 4's spike. From it come the per-operation Rust dispatch thresholds (§3.3). **(5)** Startup optimization (snapshots, lazy loading): a target, not a gate. **(6)** Before rich output moves into frames in the desktop app, #826's output-frames harness in each candidate's UI engine (WebKit for 1, 3 and 4; Chromium for 2 and 5). **(7)** The upgrade path of each candidate, bundled and downloaded (William, §7): the update delta size, the auto-update mechanics, and updating the runtime and the engine add-on with the app or apart from it. **(8)** Unsigned local builds only; signing is William's (§7). | ENGINE, PERF, SIZE, SEC (application boundaries) |
-| **N2** | macOS and Linux, the chosen candidate: the pinned runtime, the `web/shims/fs` worker, the native `engine/web` add-on, a binary reply format, the port, the §5 bridge and its pins, native limits, broker-only supported network, per-engine wasm fallback, and the page items (refused-write restore per change kind, progress from port snapshots, Stop through `NativeKernelPort.interrupt()` with the restart pattern for the hard kill, a "starting" pill state, and the native kernel's own words for "where code runs" and "didn't start": the runner-sandbox messages don't apply, and board writes the words). Later engine modules are reviewed separately. **#822's option 1 ends.** | all lanes |
-| **N3** | Windows parity for N2 | all lanes |
-| **N4** | Native becomes the desktop default, after parity, limits, corrected performance, size and the big-integer dispatch decision close | William |
-| **N5** | Planned separately later: CPython and C extensions, terminals, Android native, warm kernels | — |
+| **N0** | r10 reviewed; William's architecture decision recorded | all lanes; William |
+| **N1** | §7: runtime comparison, protocol over the pipe, licence inventory; unsigned local builds only | ENGINE, PERF, SIZE, SEC |
+| **N2** | **First, one client:** merge the page's worker client (`web/notebook/worker-kernel.js`) and remote client (`web/notebook/remote-client.js`) into the one protocol client of §2, pinned to today's `WorkerKernel` behaviour, before any subprocess work. Then the protocol and handshake in the client and the engine. Then: the engine subprocess on macOS and Linux with the chosen runtime, the bundled engine in the app, engine upgrades, the licence check in CI, and permissions in the engine. **The page items** (carried from r12): the refused-write restore per change kind, progress from the engine's snapshots, Stop through the one client with the restart pattern for the hard kill, a "starting" pill state, and the engine's own words for "where code runs" and "didn't start" (board writes the words) | all lanes, with the §8.1 tests (T1–T5) passing |
+| **N3** | Windows parity | all lanes; the same T1 suite passes on the Windows subprocess |
+| **N4** | The engine as the desktop default; "Your computer" offers the engine alongside the CPython runner (§4.3) | William |
+| **N5** | Later, planned separately: CPython and C extensions, terminals over the protocol, Android native, warm engines | — |
+| **N6** | PDFs (§4.1): the installed TeX first; otherwise the offered Tectonic download behind the person's explicit choice, verified and installed as §4.1 requires; notices and the source offer; the separately reviewed bundle policy of §4.1 (or a verified full local bundle, offline only). Deferred until after N4; its own PR series | all lanes, with T6 passing and §7.1's measurements reported |
 
-## 7. William's decisions
+### 8.1 Tests
 
-Already decided: pyjs (route A); no OS sandbox; Electron is a first-class candidate.
+**T1. One conformance suite for every transport.** "A transport may change how a message travels, never what it means" (§2.1) is tested by one suite of protocol cases, run unchanged on each transport.
+- **It lives in** `test/engine-protocol/`: the cases, plus one small adapter per transport. It grows from N1-2's conformance rows 1–5.
+- **It covers:** run, input and live data; outputs; files; permission; Stop.
+- **The transports:**
+  - the local subprocess;
+  - the in-page wasm worker, in headless Chrome;
+  - the relay, against a local relay: engine/py's fake relay in core, and Miniflare in the cloud repo.
+- **A new transport, or a new OS for the subprocess, must pass it before it ships.**
 
-William answered §7 on Nov 7, 2026 at about 9:30 AM PST:
+**T2. Handshake and skew**, each its own case, using fixture engines rather than real old builds:
+- the highest common version is chosen;
+- non-overlapping ranges give `incompatible` with the engine's range, and the connection closes. The test asserts that no run message is accepted afterwards;
+- only capabilities both sides declared are used. A fixture engine without `latex` shows LaTeX as unavailable, and the client never sends it a LaTeX request;
+- an unknown message type within a negotiated version ends the session, never a silent drop;
+- fixture engines one version older and one version newer than the app's range: the app falls back to its bundled engine and says so;
+- the relay's handshake replaces `RUNNER_MIN` with the same rule;
+- the support window, from fixture release metadata with fixed dates (never wall time):
+  - a pre-1.0 engine may drop any older version;
+  - a version superseded before 1.0 gets no window, even after 1.0;
+  - the version current at 1.0 is windowed from the first post-1.0 release that supersedes it, not from the 1.0 date;
+  - after 1.0: an engine dated the day before the end date, and one dated **on** the end date, still speak $v$; one dated the day after may drop it;
+  - calendar fixtures: a supersession dated 2028-02-29 ends on 2029-02-28, and one dated 2028-01-31 ends on 2029-01-31;
+  - two older versions with live windows are both spoken;
+  - a control with the computer's clock injected far before and far after the metadata dates: the result doesn't change.
 
-1. **The lead architecture:** "Decide after the prototype's side-by-side measurements." N1 goes ahead with packaged
-   prototypes of candidate 1 (Tauri + Node + N-API), 2 (Electron) and 3 (Tauri + an embedded-V8 helper per document),
-   measured side by side
-   at one commit on each OS. N1 builds measurement prototypes only: nothing ships and nothing is released.
-2. **Bundle the runtime or download it on first use:** "it depends - easy upgrades are just as important to get
-   right." N1 measures and compares the upgrade path of each option: the update delta size, the auto-update
-   mechanics, and how the runtime and the engine add-on are updated with the app or apart from it.
-3. **Signing:** "I (William) own them; agents never touch the keys." N1 makes unsigned local builds only. No agent
-   handles signing accounts, certificates or keys.
+**T3. The §2.2 control contracts, on each transport, deterministically:**
+- a stale `pv` or another generation can't reopen writes;
+- `ready` echoes `pv`, and no run comes before it;
+- a missing acknowledgement or a malformed control frame ends the generation;
+- the Stop compare-and-set gives exactly one result per request, across `done`, Stop and the hard restart;
+- a late input or live-data answer does nothing.
 
-There is no "unconfined mode" switch. Without an OS sandbox, that label would suggest a boundary the plan doesn't
-provide. The UI describes only where code runs and the application permissions.
+The hard-restart deadline uses a fake clock or an injected deadline, never wall time, and no test fixes a flake by raising a timeout.
 
-## Appendix: what r8 removes or corrects
+**T4. Controls for the licence check** (§4.2), so a check that never fails can't pass forever:
+- an LGPL fixture dependency **outside the Bun runtime** fails, including one named like Bun (`bun-plugin-x`), so a name-prefix matcher can't pass it;
+- the Bun runtime's own LGPL inventory entries pass (the scoped exception of §4.2), and the same LGPL entry attached to any other component fails;
+- a dependency under an unlisted licence fails;
+- an MIT fixture passes;
+- `THIRD-PARTY-NOTICES.txt` must regenerate byte-identical from the inventory, so a stale notices file fails.
 
-- CPython/PyO3 is no longer a competing v1 plan. r3 is historical input to a separate, future proposal.
-- Landlock, seccomp, Seatbelt, AppContainer, Job objects as containment, JIT-under-sandbox entitlements, the sandbox
-  fallback and escape probes are removed from the milestones and gates.
-- r4's A-vs-B timings are invalid (B used a different engine commit) and are replaced by §3's same-commit packet.
-- r4's big-integer reading is corrected: JSC is not uniformly slower, and Rust dispatch is per operation and size.
-- r5–r7's permission-version and Stop contracts stay. They are application ordering and lifecycle contracts, not OS
-  sandboxing.
+Wiring it into a workflow file stays William's or @sagebrush's.
+
+**T5. Where they run.** PR CI stays within 10 minutes.
+
+| | Every PR | Nightly, or the APP job |
+|---|---|---|
+| T1 | Linux subprocess; wasm worker in headless Chrome | macOS and Windows subprocess; relay (local relay) |
+| T2 | all cases, against fixture engines | — |
+| T3 | Linux subprocess; wasm worker | macOS and Windows subprocess; relay |
+| T4 | all controls | — |
+| T6 | all cases, against fixtures | — |
+
+**T6. PDFs and the Tectonic download** (N6), against fixture archives and mock metadata (never real keys):
+- precedence: a fixture installed TeX is used, and no offer is made;
+- with no TeX, the offer appears only on a PDF compile, and nothing is downloaded until the person accepts. An agent-started compile shows the same offer and never accepts it by itself;
+- the target, length and hash are bound: a wrong length, a wrong hash, metadata for another OS or architecture, or another version each fail before extraction. This holds on both routes, the pinned digest and the signed metadata;
+- verification negative controls, each failing before extraction: a bad signature; a signature by a key that isn't pinned; missing metadata; metadata without a digest;
+- signed metadata: expired metadata and a rollback to an older version both fail;
+- **not covered by PR CI, for now (option c):** "a signed fixture passes, and the same fixture with one byte altered fails". No agent may hold a signing key (§4.4), so until William chooses, this case is outside PR CI. His choices: (a) a fixture he signs once, with the tests carrying only its public key; or (b) an ephemeral in-memory test keypair, which needs an exception to §4.4. The negative controls above run with mock metadata;
+- an archive entry with `..`, an absolute path or a link outside the destination fails, including the Windows forms (`..\`, a drive letter such as `C:\`, and a UNC path `\\server\share`);
+- injected failures at each of four points (download, verify, extract, replace) leave the previous executable byte-identical (or still absent), run nothing unverified, and a retry starts from a clean staging area;
+- **offline, deterministically:** a network fixture that refuses connections and an injected deadline (no wall-clock assertion). The compile ends with the offline message, runs nothing, and leaves the previous state intact;
+- the bundle policy (§4.1): a changed bundle or index, a changed cached file, a changed source, and a missing package while offline each refuse deterministically, use no unverified data, and leave the previous verified cache intact;
+- the notices and the source offer are installed with the executable.
+
+## 9. Questions for William: answered
+
+All five were answered on Nov 7, 2026, between about 2:26 and 2:31 PM PST. They are recorded verbatim in §1 (items 6–10):
+- the licence (§4.2);
+- "Your computer" (§4.3);
+- LaTeX to PDF (§4.1);
+- the support window (§2.1);
+- the name (§4.1).
+
+## Appendix: what r10 removes
+
+- r12's eight in-app candidates and the Electron head-to-head (r8–r12): the engine is always a subprocess, so where pyjs runs inside the app is no longer a question.
+- The recommendation of an N-API add-on inside a Node child as the app's design: that child is now simply the engine.
+- The JSC-in-the-webview discussion: the webview runs only the UI now. JSC matters only if the engine runs on Bun.
+- Unchanged: route A, no OS sandbox, William's signing, the §2.2 control contracts, the §3 evidence and r4's withdrawn timings.
 
 ## Grounding
 
-- master at review time, and the v0.6.0 tag `dbdf5984` for every measurement;
-- `src/runtime/engine.ts` (`_sbengine`), `engine/web/src/lib.rs` (`pub fn call`), `src/notebook-session.ts`,
-  `web/worker.ts`, `web/shims/fs.ts`, `web/notebook/worker-kernel.js`, `engine/interrupt/src/lib.rs`,
-  `classgroup/src/nf/factor.rs`;
-- `app/src-tauri` (lib.rs, Cargo.toml, capabilities/default.json, tauri.conf.json, gen/android, gen/apple) and
-  `app/README.md`;
-- the evidence in §3 and r4's `sizes.txt`;
-- external, checked Nov 7, 2026:
-  - Tauri's process model and IPC: v2.tauri.app/concept/process-model, v2.tauri.app/concept/inter-process-communication;
-  - Tauri CEF: v3.tauri.app/develop/cef, and crates.io `tauri-runtime-cef` (3.0.0-alpha.7, Nov 6);
-  - `deno_core` (crates.io 0.413.0); rusty_v8 v152.2.0 release assets;
-  - Electron: the process model and utility processes, native modules, the release timeline (8-week majors, the
-    latest three supported), and the v45.2.3 release assets;
-  - Bun's compiler; Deno compile and Node-API; Deno Desktop.
+- **Code at master** (2503bcf7):
+  - `src/notebook-session.ts`, `web/worker.ts`, `web/notebook/worker-kernel.js`;
+  - `web/notebook/remote-client.js`, `engine/py/python/sagebrush/remote/`;
+  - `scripts/build-cli.mjs`, `scripts/install.sh`, `src/latex-cli.ts`;
+  - `NOTICE.md`, `packages/sagebrush/package.json`;
+  - `engine/interrupt/src/lib.rs`, `engine/ap/src/lib.rs` (#831).
+- **Evidence:** the §3 packets.
+- **External, checked Nov 7, 2026:** bun.com/docs/project/licensing.

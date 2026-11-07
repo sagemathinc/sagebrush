@@ -1,0 +1,73 @@
+{
+ "cases": [
+  {
+   "id": "test-1",
+   "status": 0,
+   "stderr": "",
+   "stdout": "\n\tOne Sample t-test\n\ndata:  x\nt = 2.9979, df = 6, p-value = 0.02407\nalternative hypothesis: true mean is not equal to 5\n95 percent confidence interval:\n 5.099776 5.985938\nsample estimates:\nmean of x \n 5.542857 \n\n"
+  },
+  {
+   "id": "test-2",
+   "status": 0,
+   "stderr": "",
+   "stdout": "\n\tWelch Two Sample t-test\n\ndata:  x and y\nt = -5.0468, df = 7.854, p-value = 0.00105\nalternative hypothesis: true difference in means is not equal to 0\n95 percent confidence interval:\n -11.958975  -4.441025\nsample estimates:\nmean of x mean of y \n     14.0      22.2 \n\n"
+  },
+  {
+   "id": "test-3",
+   "status": 0,
+   "stderr": "",
+   "stdout": "\n\tTwo Sample t-test\n\ndata:  x and y\nt = -5.0468, df = 8, p-value = 0.0009933\nalternative hypothesis: true difference in means is not equal to 0\n95 percent confidence interval:\n -11.946813  -4.453187\nsample estimates:\nmean of x mean of y \n     14.0      22.2 \n\n"
+  },
+  {
+   "id": "test-4",
+   "status": 0,
+   "stderr": "",
+   "stdout": "\n\tPaired t-test\n\ndata:  before and after\nt = 4.899, df = 3, p-value = 0.01628\nalternative hypothesis: true mean difference is not equal to 0\n95 percent confidence interval:\n  3.503859 16.496141\nsample estimates:\nmean difference \n             10 \n\n"
+  },
+  {
+   "id": "test-5",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.02407259\n"
+  },
+  {
+   "id": "test-6",
+   "status": 0,
+   "stderr": "",
+   "stdout": "\n\tPearson's Chi-squared test with Yates' continuity correction\n\ndata:  matrix(c(10, 20, 30, 40), 2)\nX-squared = 0.44643, df = 1, p-value = 0.504\n\n"
+  },
+  {
+   "id": "test-7",
+   "status": 0,
+   "stderr": "",
+   "stdout": "\n\tChi-squared test for given probabilities\n\ndata:  c(20, 30, 50)\nX-squared = 14, df = 2, p-value = 0.0009119\n\n"
+  },
+  {
+   "id": "test-8",
+   "status": 0,
+   "stderr": "",
+   "stdout": "\n\tOne Sample t-test\n\ndata:  x\nt = 2.3534, df = 4, p-value = 0.03911\nalternative hypothesis: true mean is greater than 5\n95 percent confidence interval:\n 5.056484      Inf\nsample estimates:\nmean of x \n      5.6 \n\n"
+  },
+  {
+   "id": "test-9",
+   "status": 0,
+   "stderr": "",
+   "stdout": "\n\t1-sample proportions test with continuity correction\n\ndata:  45 out of 100, null probability 0.5\nX-squared = 0.81, df = 1, p-value = 0.3681\nalternative hypothesis: true p is not equal to 0.5\n95 percent confidence interval:\n 0.3514281 0.5524574\nsample estimates:\n   p \n0.45 \n\n"
+  },
+  {
+   "id": "test-10",
+   "status": 0,
+   "stderr": "",
+   "stdout": "\n\tExact binomial test\n\ndata:  7 and 20\nnumber of successes = 7, number of trials = 20, p-value = 0.2632\nalternative hypothesis: true probability of success is not equal to 0.5\n95 percent confidence interval:\n 0.1539092 0.5921885\nsample estimates:\nprobability of success \n                  0.35 \n\n"
+  },
+  {
+   "id": "test-11",
+   "status": 0,
+   "stderr": "",
+   "stdout": "\n\tPearson's product-moment correlation\n\ndata:  c(1, 2, 3, 4, 5, 6) and c(2, 1, 4, 3, 7, 8)\nt = 4.1651, df = 4, p-value = 0.01409\nalternative hypothesis: true correlation is not equal to 0\n95 percent confidence interval:\n 0.3349310 0.9892765\nsample estimates:\n      cor \n0.9014601 \n\n"
+  }
+ ],
+ "file": "rill-tests/test/test_1.R",
+ "format": "rill-out",
+ "v": 1
+}
