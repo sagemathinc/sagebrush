@@ -185,6 +185,13 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/mod-difflib.src": {
+   "exact": false,
+   "ceiling": 87141,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/mod-encodings.src": {
    "exact": false,
    "ceiling": 19995,
@@ -439,7 +446,7 @@
   },
   "engine/lib/mod-pathlib.src": {
    "exact": false,
-   "ceiling": 158732,
+   "ceiling": 159850,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -621,7 +628,7 @@
   },
   "engine/lib/sci.src": {
    "exact": false,
-   "ceiling": 410118,
+   "ceiling": 410859,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -670,7 +677,7 @@
   },
   "engine/sagebrush-notebook.js": {
    "exact": false,
-   "ceiling": 239505,
+   "ceiling": 239593,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -763,6 +770,7 @@
    "engine/lib/mod-csv.src": 45697,
    "engine/lib/mod-ctypes.src": 8274,
    "engine/lib/mod-datetime.src": 1399,
+   "engine/lib/mod-difflib.src": 87077,
    "engine/lib/mod-encodings.src": 18178,
    "engine/lib/mod-enum.src": 88257,
    "engine/lib/mod-future.src": 5652,

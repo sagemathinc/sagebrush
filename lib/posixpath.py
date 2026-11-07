@@ -476,3 +476,24 @@ def islink(path):
 def getsize(filename):
     """Return the size of a file, reported by os.stat()."""
     return os.stat(filename).st_size
+
+
+# (genericpath's samestat and samefile, unchanged: shutil's _samefile asks for them)
+# Are two stat buffers (obtained from stat, fstat or lstat)
+# describing the same file?
+def samestat(s1, s2):
+    """Test whether two stat buffers reference the same file"""
+    return (s1.st_ino == s2.st_ino and
+            s1.st_dev == s2.st_dev)
+
+
+# Are two filenames really pointing to the same file?
+def samefile(f1, f2):
+    """Test whether two pathnames reference the same actual file or directory
+
+    This is determined by the device number and i-node number and
+    raises an exception if an os.stat() call on either pathname fails.
+    """
+    s1 = os.stat(f1)
+    s2 = os.stat(f2)
+    return samestat(s1, s2)
