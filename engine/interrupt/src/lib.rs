@@ -225,13 +225,15 @@ pub mod hooks {
             TRACE.lock().unwrap_or_else(|e| e.into_inner()).push(cur as u8);
             let n = now_ns();
             let last = LAST_NS.swap(n, Relaxed);
+            // (saturating: checks from several threads, a parallel kernel's,
+            // may record their times out of order)
             if last != 0 {
-                MAX_GAP_NS.fetch_max(n - last, Relaxed);
+                MAX_GAP_NS.fetch_max(n.saturating_sub(last), Relaxed);
             }
             if coarse || FINE.fetch_add(1, Relaxed) % 1024 == 0 {
                 let last = LAST_POLL_NS.swap(n, Relaxed);
                 if last != 0 {
-                    MAX_POLL_GAP_NS.fetch_max(n - last, Relaxed);
+                    MAX_POLL_GAP_NS.fetch_max(n.saturating_sub(last), Relaxed);
                 }
             }
         }

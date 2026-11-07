@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startDev } from "./serve-dev.mjs";
 import { devtoolsPort } from "../test-port.mjs";
+import { allowFiles } from "../test-allow.mjs";
 
 const A = "11111111-1111-4111-8111-111111111111";
 const REMOTE = process.env.SHARE_URL;
@@ -49,6 +50,8 @@ try {
   await until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000);
   await ev("document.querySelector('#filemenu [data-f=new]').click()");
   await until("document.querySelectorAll('.cell').length === 1 && !document.querySelector('.cell textarea').value");
+  // (its code writes the data file: every notebook starts with file changes off, confinement 1b, so they're allowed first)
+  await allowFiles(send, ev);
   await runFirst("import os\nos.makedirs('data', exist_ok=True)\nopen('data/points.csv', 'w').write('x,y\\n1,2\\n3,4\\n')");
   const out = await runFirst("print(open('data/points.csv').read().strip().replace('\\n', ';'))");
   ok(out.includes("x,y;1,2;3,4"), "the notebook reads its data file: " + out.trim());

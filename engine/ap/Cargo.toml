@@ -16,5 +16,9 @@ num-traits = "0.2"
 sagebrush-interrupt = { path = "../interrupt" }
 sagebrush-par = { path = "../par" }
 
+[dev-dependencies]
+# (tests only: Stop at a chosen check, per phase, and the density of checks: tests/stop.rs)
+sagebrush-interrupt = { path = "../interrupt", features = ["test-hooks"] }
+
 [lints]
 workspace = true

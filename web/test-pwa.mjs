@@ -9,6 +9,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort, freePort } from "./test-port.mjs";
+import { allowFiles } from "./test-allow.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let failures = 0;
@@ -101,7 +102,11 @@ await send("Page.reload", { ignoreCache: false });
 await sleep(1500);
 ok(await ready(), "offline, the notebook loads: " + (await ev("document.querySelector('#status')?.textContent")));
 ok(await ev("crossOriginIsolated"), "offline, the page is still cross-origin isolated (Stop keeps variables)");
+// (offline the runner's sandbox doesn't start: with file changes allowed, every notebook starting with them off
+// (confinement 1b), the first run says so and running again runs in the page, as a person does)
+await allowFiles(send, ev);
 out = await runCode("from sage_all import factor\nprint(factor(2**64 + 1))");
+if (/Run it again/.test(out)) out = await runCode("from sage_all import factor\nprint(factor(2**64 + 1))");
 ok(out.includes("274177 * 67280421310721"), "offline, Python and the engines run: " + JSON.stringify(out));
 out = await runCode("import heapq\nprint(heapq.nsmallest(2, [3, 1, 2]))");
 ok(out.includes("[1, 2]"), "offline, a library module imported online (its chunk fetched lazily then) imports: " + JSON.stringify(out));

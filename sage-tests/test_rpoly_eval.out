@@ -1,0 +1,80 @@
+RR zero(QQ mat) | [0.000000000000000 0.000000000000000] ; [0.000000000000000 0.000000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision
+RR f(QQ mat) | [8.00000000000000 10.0000000000000] ; [15.0000000000000 23.0000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision
+RR zero(CDF mat) | [0.0 0.0] ; [0.0 0.0] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+RR f(CDF mat) | [ 8.0 10.0] ; [15.0 23.0] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+RR zero(CDF u) | 0 | Univariate Polynomial Ring in u over Complex Double Field
+RR f(CDF u) | u^2 + 1.0 | Univariate Polynomial Ring in u over Complex Double Field
+RR zero(QQ s) | 0 | Univariate Polynomial Ring in s over Real Field with 53 bits of precision
+RR f(QQ s) | s^2 + 1.00000000000000 | Univariate Polynomial Ring in s over Real Field with 53 bits of precision
+RR zero(t+1) | 0 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+RR f(t+1) | t^2 + 2.00000000000000*t + 2.00000000000000 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+RR zero(2) | 0.000000000000000 | Real Field with 53 bits of precision
+RR f(2) | 5.00000000000000 | Real Field with 53 bits of precision
+RR zero(RDF 2) | 0.000000000000000 | Real Field with 53 bits of precision
+RR f(RDF 2) | 5.00000000000000 | Real Field with 53 bits of precision
+RR zero(RR mat) | [0.000000000000000 0.000000000000000] ; [0.000000000000000 0.000000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision
+RR f(RR mat) | [8.00000000000000 10.0000000000000] ; [15.0000000000000 23.0000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision
+RR zero(x) | 0.000000000000000 | Symbolic Ring
+RR f(x) | 1.00000000000000*x^2 + 1.00000000000000 | Symbolic Ring
+RDF zero(QQ mat) | [0.0 0.0] ; [0.0 0.0] | Full MatrixSpace of 2 by 2 dense matrices over Real Double Field
+RDF f(QQ mat) | [ 8.0 10.0] ; [15.0 23.0] | Full MatrixSpace of 2 by 2 dense matrices over Real Double Field
+RDF zero(CDF mat) | [0.0 0.0] ; [0.0 0.0] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+RDF f(CDF mat) | [ 8.0 10.0] ; [15.0 23.0] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+RDF zero(CDF u) | 0 | Univariate Polynomial Ring in u over Complex Double Field
+RDF f(CDF u) | u^2 + 1.0 | Univariate Polynomial Ring in u over Complex Double Field
+RDF zero(QQ s) | 0 | Univariate Polynomial Ring in s over Real Double Field
+RDF f(QQ s) | s^2 + 1.0 | Univariate Polynomial Ring in s over Real Double Field
+RDF zero(t+1) | 0 | Univariate Polynomial Ring in t over Real Double Field
+RDF f(t+1) | t^2 + 2.0*t + 2.0 | Univariate Polynomial Ring in t over Real Double Field
+RDF zero(2) | 0.0 | Real Double Field
+RDF f(2) | 5.0 | Real Double Field
+RDF zero(RDF 2) | 0.0 | Real Double Field
+RDF f(RDF 2) | 5.0 | Real Double Field
+RDF zero(RR mat) | [0.000000000000000 0.000000000000000] ; [0.000000000000000 0.000000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision
+RDF f(RR mat) | [8.00000000000000 10.0000000000000] ; [15.0000000000000 23.0000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision
+CC zero(QQ mat) | [0.000000000000000 0.000000000000000] ; [0.000000000000000 0.000000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CC f(QQ mat) | [8.00000000000000 10.0000000000000] ; [15.0000000000000 23.0000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CC zero(CDF mat) | [0.0 0.0] ; [0.0 0.0] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+CC f(CDF mat) | [ 8.0 10.0] ; [15.0 23.0] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+CC zero(CDF u) | 0 | Univariate Polynomial Ring in u over Complex Double Field
+CC f(CDF u) | u^2 + 1.0 | Univariate Polynomial Ring in u over Complex Double Field
+CC zero(QQ s) | 0 | Univariate Polynomial Ring in s over Complex Field with 53 bits of precision
+CC f(QQ s) | s^2 + 1.00000000000000 | Univariate Polynomial Ring in s over Complex Field with 53 bits of precision
+CC zero(t+1) | 0 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+CC f(t+1) | t^2 + 2.00000000000000*t + 2.00000000000000 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+CC zero(2) | 0.000000000000000 | Complex Field with 53 bits of precision
+CC f(2) | 5.00000000000000 | Complex Field with 53 bits of precision
+CC zero(RDF 2) | 0.000000000000000 | Complex Field with 53 bits of precision
+CC f(RDF 2) | 5.00000000000000 | Complex Field with 53 bits of precision
+CC zero(x) | 0.000000000000000 | Symbolic Ring
+CC f(x) | 1.00000000000000*x^2 + 1.00000000000000 | Symbolic Ring
+CDF zero(QQ mat) | [0.0 0.0] ; [0.0 0.0] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+CDF f(QQ mat) | [ 8.0 10.0] ; [15.0 23.0] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+CDF zero(CDF mat) | [0.0 0.0] ; [0.0 0.0] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+CDF f(CDF mat) | [ 8.0 10.0] ; [15.0 23.0] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+CDF zero(CDF u) | 0 | Univariate Polynomial Ring in u over Complex Double Field
+CDF f(CDF u) | u^2 + 1.0 | Univariate Polynomial Ring in u over Complex Double Field
+CDF zero(QQ s) | 0 | Univariate Polynomial Ring in s over Complex Double Field
+CDF f(QQ s) | s^2 + 1.0 | Univariate Polynomial Ring in s over Complex Double Field
+CDF zero(t+1) | 0 | Univariate Polynomial Ring in t over Complex Double Field
+CDF f(t+1) | t^2 + 2.0*t + 2.0 | Univariate Polynomial Ring in t over Complex Double Field
+CDF zero(2) | 0.0 | Complex Double Field
+CDF f(2) | 5.0 | Complex Double Field
+CDF zero(RDF 2) | 0.0 | Complex Double Field
+CDF f(RDF 2) | 5.0 | Complex Double Field
+R100 zero(QQ mat) | [0.00000000000000000000000000000 0.00000000000000000000000000000] ; [0.00000000000000000000000000000 0.00000000000000000000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 100 bits of precision
+R100 f(QQ mat) | [8.0000000000000000000000000000 10.000000000000000000000000000] ; [15.000000000000000000000000000 23.000000000000000000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 100 bits of precision
+R100 zero(CDF mat) | [0.0 0.0] ; [0.0 0.0] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+R100 f(CDF mat) | [ 8.0 10.0] ; [15.0 23.0] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+R100 zero(CDF u) | 0 | Univariate Polynomial Ring in u over Complex Double Field
+R100 f(CDF u) | u^2 + 1.0 | Univariate Polynomial Ring in u over Complex Double Field
+R100 zero(QQ s) | 0 | Univariate Polynomial Ring in s over Real Field with 100 bits of precision
+R100 f(QQ s) | s^2 + 1.0000000000000000000000000000 | Univariate Polynomial Ring in s over Real Field with 100 bits of precision
+R100 zero(t+1) | 0 | Univariate Polynomial Ring in t over Real Field with 100 bits of precision
+R100 f(t+1) | t^2 + 2.0000000000000000000000000000*t + 2.0000000000000000000000000000 | Univariate Polynomial Ring in t over Real Field with 100 bits of precision
+R100 zero(2) | 0.00000000000000000000000000000 | Real Field with 100 bits of precision
+R100 f(2) | 5.0000000000000000000000000000 | Real Field with 100 bits of precision
+R100 zero(RDF 2) | 0.0 | Real Double Field
+R100 f(RDF 2) | 5.0 | Real Double Field
+R100 zero(RR mat) | [0.000000000000000 0.000000000000000] ; [0.000000000000000 0.000000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision
+R100 f(RR mat) | [8.00000000000000 10.0000000000000] ; [15.0000000000000 23.0000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision

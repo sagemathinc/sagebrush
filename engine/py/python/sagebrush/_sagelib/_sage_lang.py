@@ -1405,6 +1405,17 @@ class _RealField:
     _is_generic_field = True
     _numeric = True
 
+    def __getitem__(self, names):
+        """The polynomial ring over this field in the given variable(s): RR['t'].
+
+        EXAMPLES::
+
+            sage: RR['t']
+            Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+        """
+        import _sage_poly
+        return _sage_poly.PolynomialRing(self, names)
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = object.__new__(cls)

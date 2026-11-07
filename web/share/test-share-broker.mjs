@@ -19,6 +19,7 @@
 //
 //   bun web/build.ts && node web/share/test-share-broker.mjs      (CHROME=... for another browser)
 import { startDev } from "./serve-dev.mjs";
+import { allowFiles } from "../test-allow.mjs";
 import { browser, runnerWorker, forge, refused, sleep, until, within, tally } from "../test-broker-lib.mjs";
 
 const A = "11111111-1111-4111-8111-111111111111";
@@ -45,6 +46,8 @@ async function world(name, sitePort, filesPort, intercept = null) {
     await uev("document.querySelector('#status')?.textContent.startsWith('ready')", 60000);
     await b.ev("document.querySelector('#filemenu [data-f=new]').click()");
     await uev("document.querySelectorAll('.cell').length === 1 && !document.querySelector('.cell textarea').value");
+    // (its code writes the data file: every notebook starts with file changes off, confinement 1b)
+    await allowFiles(b.send, b.ev);
     await runFirst("import os\nos.makedirs('data', exist_ok=True)\nopen('data/points.csv', 'w').write('x,y\\n1,2\\n3,4\\n')");
     await runFirst("print(open('data/points.csv').read().strip().replace('\\n', ';'))");
     const signed = await b.ev(`fetch('/auth/dev', { method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({ token: 'dev-token', account_id: '${A}' }) }).then((r) => r.status)`);

@@ -77,6 +77,17 @@ class RealDoubleField_:
     _numeric = True
     _instance = None
 
+    def __getitem__(self, names):
+        """The polynomial ring over this field in the given variable(s): RR['t'].
+
+        EXAMPLES::
+
+            sage: RDF['t']
+            Univariate Polynomial Ring in t over Real Double Field
+        """
+        import _sage_poly
+        return _sage_poly.PolynomialRing(self, names)
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = object.__new__(cls)
@@ -671,6 +682,17 @@ class ComplexDoubleField_:
     _numeric = True
     _instance = None
 
+    def __getitem__(self, names):
+        """The polynomial ring over this field in the given variable(s): RR['t'].
+
+        EXAMPLES::
+
+            sage: CDF['t']
+            Univariate Polynomial Ring in t over Complex Double Field
+        """
+        import _sage_poly
+        return _sage_poly.PolynomialRing(self, names)
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = object.__new__(cls)
@@ -834,7 +856,9 @@ class ComplexDoubleElement:
     def __repr__(self):
         re, im = self._z.real, self._z.imag
         if im == 0:
-            return _frepr(re)
+            # (a zero prints 0.0 whatever its signs, as Sage: CDF(-0.0) is 0.0,
+            # where RDF(-0.0) is -0.0)
+            return "0.0" if re == 0 else _frepr(re)
         si = _frepr(abs(im)) + "*I"
         if re == 0:
             return ("-" if im < 0 else "") + si
@@ -954,7 +978,26 @@ class ComplexDoubleElement:
         return r if r is NotImplemented else not r
 
     def __bool__(self):
-        return self._z != 0
+        """Whether self is nonzero: as Sage's CDF, a part that is NaN counts as 0.
+
+        EXAMPLES::
+
+            sage: n = float('nan')
+            sage: bool(CDF(n, 0)), bool(CDF(n, n)), bool(CDF(n, 1)), bool(CDF(float('inf'), n)), bool(CDF(1e-320))
+            (False, False, True, True, True)
+        """
+        z = self._z
+        return not ((z.real == 0 or z.real != z.real) and (z.imag == 0 or z.imag != z.imag))
+
+    def is_zero(self):
+        """Whether self is 0 (a NaN part counts as 0, as Sage's CDF).
+
+        EXAMPLES::
+
+            sage: CDF(0).is_zero(), CDF(float('nan')).is_zero(), CDF(1, 2).is_zero()
+            (True, True, False)
+        """
+        return not self
 
     @staticmethod
     def _of(z):
