@@ -559,7 +559,7 @@ import { createDownloadDialog } from "./share-client/download.ts";
 import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, SyncOwner, registerJournalWriter, DocSync, readJournal, docSyncOrigin, docSyncAllowed, enableDocSync, docSyncChannel, DOC_SYNC_RELOAD } from "./workspace/index.ts";
 import { mountBrowser } from "./workspace/browser.ts";
 // (the LaTeX editor's entry; a build without it takes this line out before bundling: web/build.ts)
-import { latexBoot } from "./latex/boot.ts";
+import { latexBoot, latexOn, texNew } from "./latex/boot.ts";
 import { codeBoot } from "./code/boot.ts";
 import { createPermissions, hostMade } from "./notebook/permissions.js";
 import { renderFileMenu, fileMenuKey } from "./workspace/filemenu.ts";
@@ -2665,11 +2665,14 @@ const fileMenu = $("#filemenu"), fileBtn = $("#filebtn");
 // The one File menu (design/workspace-files.md §3, web/workspace/filemenu.ts):
 // drawn the same as the board page's; what an item does is here, by its key
 // (data-f).  Without the workspace, what needs it is disabled.
+// (whether this page has the LaTeX editor: New ▸ LaTeX document in the File menu and the file panel, U0)
+const latexHere = typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && latexOn(location.hostname);
 function drawFileMenu() {
   const none = !ws;
   renderFileMenu(fileMenu, {
     attr: "data-f",
-    keys: { newNotebook: "new", newMatlab: "newmatlab", newBoard: "whiteboard", newFolder: "newfolder", fromExample: "examples", open: "open", upload: "import", saveCopy: "duplicate", rename: "rename", print: "print", share: "share", delete: "delete" },
+    latex: latexHere,
+    keys: { newNotebook: "new", newMatlab: "newmatlab", newBoard: "whiteboard", newLatex: "newlatex", newFolder: "newfolder", fromExample: "examples", open: "open", upload: "import", saveCopy: "duplicate", rename: "rename", print: "print", share: "share", delete: "delete" },
     disabled: { newFolder: none },
     downloads: [
       { key: "ipynb", label: ".ipynb" },
@@ -2705,7 +2708,8 @@ const toggleFileMenu = menuOf(fileBtn, fileMenu);
 // (Ctrl+Alt+N a new notebook, Ctrl+O Open…: the File menu's keys)
 document.addEventListener("keydown", (e) => {
   const it = fileMenuKey(e);
-  if (!it) return;
+  // (the LaTeX editor's page over this one: its own File menu answers them, never both: one notebook a Ctrl+Alt+N)
+  if (!it || document.querySelector(".tex-page")) return;
   e.preventDefault();
   fileMenu.querySelector(`[data-item="${it}"]:not([disabled])`)?.click();
 });
@@ -2842,6 +2846,7 @@ fileMenu.addEventListener("click", async (e) => {
     case "new": saveNow(); await openNew("Untitled", nb.mode, [""], true); cells()[0].ta.focus(); break;
     // (a MATLAB notebook, whatever this one's language: sage's n8 walkthrough)
     case "newmatlab": saveNow(); await openNew("Untitled", "matlab", [""], true); cells()[0].ta.focus(); break;
+    case "newlatex": if (ws) { saveNow(); await texNew(ws); } break;
     // (a new board in the notebook's language, opened in Edit; this notebook stays saved: board/page.ts ?new=)
     case "whiteboard": await toBoard("/board/?new=" + encodeURIComponent(nb.mode)); break;
     // (the file browser as a dialog; without the workspace, the notebooks of this browser as before)
@@ -3843,6 +3848,9 @@ function wsShowFiles(on) {
       },
       upload: (files, folder) => uploadHere(files, folder),
       openAs: (e, as) => openAs(e, as),
+      // (New ▸ LaTeX document and From an example…, as the File menu has them: filemenu.ts NEW_ITEMS, U0)
+      ...(latexHere ? { newLatex: (folder) => { saveNow(); void texNew(ws, folder); } } : {}),
+      fromExample: () => fileMenu.querySelector('[data-f="examples"]:not([disabled])')?.click(),
       close: () => wsShowFiles(false),
       // (the Storage panel's export: its lazy chunk beside this page; the open notebook saved first)
       exportUrl: (f) => new URL(f, location.href).href,

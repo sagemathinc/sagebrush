@@ -9,14 +9,19 @@
 // (no import of the workspace here: the board library draws this menu in
 // exported files and frames too; the Open… dialog and Recent are fileopen.ts)
 
+/** New ▸'s items, in the file panel's + order (U0, William Nov 2: one order in every editor and in the file panel). */
+export const NEW_ITEMS: FileItem[] = ["newNotebook", "newMatlab", "newBoard", "newLatex", "newFolder", "fromExample"];
+/** An item's words, the same everywhere it is offered. */
+export const fileLabel = (id: FileItem) => LABELS[id];
 /** The items, in order; "-" a rule.  New ▸, Recent ▸ and Download ▸ are groups.  Examples… is New ▸ From an
  * example…, also at the top (sim run 12: an agent read the File menu, never saw the word, and wrote a Beamer deck
  * from nothing); it has no key of its own: it clicks From an example…, so the page's handler is the one. */
-export type FileItem = "newNotebook" | "newMatlab" | "newBoard" | "newFolder" | "fromExample" | "open" | "examples" | "upload" | "saveCopy" | "rename" | "print" | "share" | "delete";
+export type FileItem = "newNotebook" | "newMatlab" | "newBoard" | "newLatex" | "newFolder" | "fromExample" | "open" | "examples" | "upload" | "saveCopy" | "rename" | "print" | "share" | "delete";
 const LABELS: Record<FileItem, string> = {
   newNotebook: "Notebook",
   newMatlab: "MATLAB notebook",
   newBoard: "Board",
+  newLatex: "LaTeX document",
   newFolder: "Folder",
   fromExample: "From an example…",
   open: "Open…",
@@ -57,6 +62,9 @@ export type FileMenuOptions = {
   recent?: () => Promise<{ label: string; title?: string; open: () => void }[]>;
   /** Called when an item is chosen (the page closes its menu). */
   chosen?: () => void;
+  /** Whether this page has the LaTeX editor (New ▸ LaTeX document): without it the item isn't drawn, as it means
+   * nothing in such a build (web/latex/boot.ts latexOn) */
+  latex?: boolean;
   /** Extra items the page keeps in the menu, at the end of a section (the desktop app's Open file…, Save as…). */
   extra?: { after: FileItem; key: string; label: string; title?: string; hidden?: boolean }[];
 };
@@ -123,7 +131,7 @@ export function renderFileMenu(menu: HTMLElement, o: FileMenuOptions) {
   // (New's items and Download's are in the page from the start, though their
   // group is closed: the page's handlers and tests find them)
   const nw = group("New", "new", () => {});
-  for (const id of ["newNotebook", "newMatlab", "newBoard", "newFolder", "fromExample"] as FileItem[]) item(id, nw);
+  for (const id of NEW_ITEMS) if (id !== "newLatex" || o.latex) item(id, nw);
   item("open", menu);
   // (Examples…: From an example…, clicked; disabled where it is)
   const fromExample = nw.querySelector<HTMLButtonElement>("[data-item=fromExample]")!;
