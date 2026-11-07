@@ -1,9 +1,9 @@
 {
  "v": 1,
- "reason": "Polynomial rings over inexact fields, stage 1 (lib/_sage_rpoly.py: RR, RDF, CC, CDF, RealField(p) and ComplexField(p) [t] as Sage: parents, printing, arithmetic in Sage's order, evaluation, calculus, Sage's errors; mixed rings refused as Sage, with a hand-back in Polynomial_ff/_nf; the fields' [] ; CDF bool and is_zero) Re-measured with bun 1.4.4 (size-record.sh) on master 684e6fee vs head efde9182: cli/lib.gen.js +15492, cli/pyjs.cjs +16056, engine/lib/sage-more.src +43540, engine/lib/sage.pre +14332, engine/lib/sage.src +5236, engine/sagebrush-worker.js +29; no other row moves. Markers: exact, except cli/pyjs.cjs 16088 (+16056 measured, plus 32 B of margin, as it moves with master). And engine/lib/sage.src 2957427 -> 2962663, the measured head 2962599 + 64.",
+ "reason": "Polynomial rings over inexact fields, stage 1 (lib/_sage_rpoly.py: RR, RDF, CC, CDF, RealField(p) and ComplexField(p) [t] as Sage: parents, printing, arithmetic in Sage's order, evaluation, calculus, Sage's errors; mixed rings refused as Sage, with a hand-back in Polynomial_ff/_nf; the fields' [] ; CDF bool and is_zero) Re-measured on master d2a28090 + #767 289987a7 (daybreak2's exact stacked gate): cli/lib.gen.js +14424, cli/pyjs.cjs +14960, engine/lib/sage-more.src +43540, engine/lib/sage.pre +14332, engine/lib/sage.src +5236, engine/sagebrush-worker.js +29 (the bundle-map entry of _sage_rpoly.py); no other row moves. Markers: exact, except cli/pyjs.cjs 15024 (+14960 measured + 64, as it moves with master). Ceilings (rule 4): engine/lib/sage-more.src 429387 -> 472927, the measured head 472863 + 64; engine/lib/sage.src 2957427 -> 2962663, the measured head 2962599 + 64.",
  "bytes": {
-  "cli/lib.gen.js": 15492,
-  "cli/pyjs.cjs": 16088,
+  "cli/lib.gen.js": 14424,
+  "cli/pyjs.cjs": 15024,
   "engine/lib/sage-more.src": 43540,
   "engine/lib/sage.pre": 14332,
   "engine/lib/sage.src": 5236,
