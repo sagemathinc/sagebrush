@@ -5,7 +5,7 @@
 //     write, mkdir, remove, rename and replace each raise PermissionError, /tmp's writes don't; the workspace is unchanged
 //     and the page shows "This notebook wants to change files";
 //   - a synthetic click on Allow changes nothing; the person's own (trusted) click does, and the cell run again writes;
-//   - the person's own notebook writes; File "Don't allow file changes" (trusted) makes its writes refused, a run in
+//   - the person's own notebook writes; File > Permissions…, its "Don't allow file changes" (trusted) makes its writes refused, a run in
 //     flight at its next write; "Allow file changes" makes them work again; an explicit "don't allow" survives a reopen;
 //   - a change queued before "don't allow" isn't kept; a change the page didn't ask for (a forged fsChanged) isn't kept;
 //   - a notebook that can't change files never runs in a plain worker (?runner=0): it says why; one that can, runs;
@@ -74,11 +74,13 @@ const until = async (expr, ms = 30000) => { const t = Date.now(); while (Date.no
 const fails = [];
 let checks = 0;
 const check = (ok, what) => { checks++; console.log((ok ? "ok   " : "FAIL ") + what); if (!ok) fails.push(what); };
-// ---- the record itself (NM-DENY-2), with a storage of its own
+// ---- the record itself (NM-DENY-2), with a storage of its own; the confinement spec's phase 1a: a new key (an allow
+// under the old one asks once more), and the scoped grants recorded, bounded (32 a kind stored and once together;
+// denials 256 a document and 4,096 a page for the session, 20,000 stored), canonical, and not yet enforced
 {
   const store = new Map(); let failing = false;
   Object.defineProperty(globalThis, "localStorage", { configurable: true, value: { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => { if (failing) throw new Error("QuotaExceededError"); store.set(k, String(v)); }, removeItem: (k) => store.delete(k) } });
-  const { createPermissions, ALLOWS_KEPT } = await import("data:text/javascript," + encodeURIComponent(readFileSync(join(here, "notebook", "permissions.js"), "utf8")));
+  const { createPermissions, ALLOWS_KEPT, GRANT_CAPS, canonicalScope } = await import("data:text/javascript," + encodeURIComponent(readFileSync(join(here, "notebook", "permissions.js"), "utf8")));
   const p = createPermissions();
   p.provenance("own", "person");
   p.set("own", "files", false);
@@ -87,11 +89,41 @@ const check = (ok, what) => { checks++; console.log((ok ? "ok   " : "FAIL ") + w
   for (let i = 0; i < ALLOWS_KEPT + 500; i++) p.set("b" + i, "files", true);
   const q = createPermissions(); q.provenance("own", "person");
   check(p.may("own", "files") === false && q.may("own", "files") === false && q.may("d0", "files") === false, "an own notebook's \"don't allow\" survives thousands of later choices, a reload included: never evicted into its allow default");
-  check(Object.keys(JSON.parse(store.get("sagebrush-permissions"))).filter((k) => /^[ab]/.test(k)).length === ALLOWS_KEPT, "…the allows kept are bounded, the oldest gone first");
+  check(Object.entries(JSON.parse(store.get("sagebrush-grants")).docs).filter(([k, e]) => /^[ab]/.test(k) && e.files === true).length === ALLOWS_KEPT, "…the allows kept are bounded, the oldest gone first");
   p.provenance("own2", "person"); failing = true;
   const kept = p.set("own2", "files", false);
   check(kept === false && p.may("own2", "files") === false && p.record("own2").files === false, "storage refusing the choice: set says it wasn't kept, and \"don't allow\" is in effect anyway");
   failing = false;
+  // (the confinement spec's phase 1a: a new key; a choice under the old one isn't read, so a notebook from elsewhere
+  // allowed before asks once more: no silent migration, no silent widening)
+  store.set("sagebrush-permissions", JSON.stringify({ old: { files: true } }));
+  const o = createPermissions(); o.provenance("old", "elsewhere");
+  check(o.may("old", "files") === false && o.record("old").explicit === null, "a notebook from elsewhere allowed under the old key is not allowed now: it asks once more");
+  // (the scoped grants: recorded, bounded, not yet enforced)
+  const g = createPermissions(); g.provenance("doc", "elsewhere");
+  check(g.grant("doc", "write", "/out").ok && g.may("doc", "files") === false, "a write tree is recorded but enforces nothing yet: may(files) stays the switch's");
+  check(["/a/../b", "/a/", "a", "//x", "/x/./y"].every((t) => canonicalScope("write", t) === null) && canonicalScope("write", "/") === "/" && canonicalScope("net", "API.Example.org:443") === "api.example.org" && ["*.x.org", "https://x.org", "u@x.org", "x.org/p", "x.org:0"].every((h) => canonicalScope("net", h) === null), "scopes are canonical: folders without . or .. or empty parts, exact hosts without wildcard, scheme, user or path");
+  for (let i = 0; i < 20; i++) g.grant("doc", "write", "/s" + i);
+  for (let i = 20; i < 40; i++) g.grant("doc", "write", "/s" + i, { once: true });
+  const w = g.grants("doc").write;
+  check(w.stored.length + w.once.length === GRANT_CAPS.perKind && g.grant("doc", "write", "/more").why === "cap" && g.grant("doc", "write", "/more", { once: true }).why === "cap" && g.grant("doc", "write", "/s3").ok, "stored and once grants share one cap of 32 a kind: past it, refused (nothing widens), an existing scope still fine");
+  g.revoke("doc", "write", "/s3");
+  check(g.grant("doc", "write", "/more").ok, "…removing one makes room");
+  g.endSession("doc");
+  check(g.grants("doc").write.once.length === 0 && g.grants("doc").write.stored.includes("/more"), "the end of a session takes its once grants, and keeps the stored ones");
+  for (let i = 0; i < GRANT_CAPS.sessionDenialsPerDoc + 10; i++) g.deny("doc", "net", "h" + i + ".org");
+  const den = g.grants("doc").denied.session;
+  check(den.length === GRANT_CAPS.sessionDenialsPerDoc && !den.some(([, h]) => h === "h0.org") && den.some(([, h]) => h === "h265.org"), "a document's session denials are bounded at 256, the oldest evicted");
+  for (let d = 0; d < 20; d++) for (let i = 0; i < 256; i++) g.deny("doc" + d, "net", "h" + i + ".org");
+  const total = ["doc", ...Array.from({ length: 20 }, (_, d) => "doc" + d)].reduce((n, d) => n + g.grants(d).denied.session.length, 0);
+  check(total === GRANT_CAPS.sessionDenialsPage, "the page's session denials are bounded at 4,096, the oldest evicted: " + total);
+  g.deny("doc", "read", "/x", { stored: true });
+  g.grant("doc", "read", "/x");
+  check(!g.grants("doc").denied.stored.some(([k, x]) => k === "read" && x === "/x") && g.grants("doc").read.stored.includes("/x"), "a grant forgets the same scope's denial");
+  const sd = createPermissions();
+  for (let i = 0; i < GRANT_CAPS.storedDenials + 50; i++) sd.deny("big" + (i % 50), "net", "h" + i + ".org", { stored: true });
+  const kept2 = Object.values(JSON.parse(store.get("sagebrush-grants")).docs).reduce((n, e) => n + (e.denied?.length ?? 0), 0);
+  check(kept2 === GRANT_CAPS.storedDenials && !sd.grants("big0").denied.stored.some(([, h]) => h === "h0.org"), "stored denials are bounded at 20,000 page-wide, the oldest evicted: " + kept2);
   delete globalThis.localStorage;
 }
 const W = "window.sagebrush.workspace";
@@ -104,6 +136,10 @@ const trusted = async (sel) => {
   for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, x: r.x, y: r.y, button: "left", clickCount: 1 });
   await sleep(200);
 };
+// (File > Permissions…, the panel with the File writes switch: opened and closed as a person does, by clicks and Escape)
+const openPerms = async () => { await trusted("#filebtn"); await trusted("#permsmenu"); };
+const closePerms = async () => { for (const type of ["keyDown", "keyUp"]) await send("Input.dispatchKeyEvent", { type, key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 }); await sleep(150); };
+const filesSwitch = async () => { await openPerms(); await trusted("#filesperm"); await closePerms(); };
 const out = (i = 0) => ev(`[...document.querySelectorAll('#cells .cell')][${i}]?.querySelector('.out')?.textContent ?? ''`);
 const setCode = (code, i = 0) => ev(`(() => { const ta = [...document.querySelectorAll('#cells .cell textarea')][${i}]; ta.value = ${JSON.stringify(code)}; ta.dispatchEvent(new Event('input', { bubbles: true })); return 1; })()`);
 const runAll = () => ev("sagebrush.notebook.runAll().then(() => 1)");
@@ -161,9 +197,13 @@ try {
   await setCode("open('own-1.txt', 'w').write('x'); print('W1')");
   await runAll();
   check(await until(`${W}.stat("/own-1.txt").then((e) => !!e)`, 30000), "…it writes: /own-1.txt");
-  await trusted("#filebtn");
-  check(/Don't allow file changes/.test(await ev("document.querySelector('#filesperm').textContent")), "File offers Don't allow file changes");
+  await openPerms();
+  check(/Don't allow file changes/.test(await ev("document.querySelector('#filesperm').textContent")), "File > Permissions… offers Don't allow file changes");
+  const panel = await ev("document.querySelector('#permsdlg').open && document.querySelector('#permsdlg').textContent");
+  check(typeof panel === "string" && /File writes/.test(panel) && /Allowed: this notebook's code may change your files/.test(panel) && !/trust/i.test(panel), "…a panel drawn by the page: File writes, what it allows now, never the word trust");
   await trusted("#filesperm");
+  check(/Not allowed: this notebook's code can't change your files/.test(await ev("document.querySelector('#permsfiles').textContent")), "…and it says so at once");
+  await closePerms();
   check((await files()) === false, "…the person's own click: it can't change files now");
   await setCode("try:\n    open('own-2.txt', 'w').write('x'); print('W2')\nexcept PermissionError as e:\n    print('REFUSED', e)");
   await runAll();
@@ -173,9 +213,10 @@ try {
   await go(base + "?nb=" + encodeURIComponent(ownId));
   await sleep(800);
   check((await files()) === false, "…the person's choice survives a reopen (an explicit don't-allow beats the own-notebook default)");
-  await trusted("#filebtn");
-  check(/^Allow file changes/.test(await ev("document.querySelector('#filesperm').textContent")), "File now offers Allow file changes");
+  await openPerms();
+  check(/^Allow file changes/.test(await ev("document.querySelector('#filesperm').textContent")), "File > Permissions… now offers Allow file changes");
   await trusted("#filesperm");
+  await closePerms();
   check((await files()) === true, "…which allows them again");
   await setCode("open('own-3.txt', 'w').write('x'); print('W3')");
   await runAll();
@@ -184,11 +225,9 @@ try {
   await setCode("import time\nh = open('flight.txt', 'w')\nfor i in range(40):\n    try:\n        h.write('x'); h.flush(); print('w', i, flush=True)\n    except PermissionError:\n        print('refused at', i); break\n    time.sleep(0.25)");
   await ev("(sagebrush.notebook.runAll(), 1)");
   await until("/w 3/.test(document.querySelector('#cells .cell .out')?.textContent ?? '')", 30000);
-  await trusted("#filebtn");
-  await trusted("#filesperm");
+  await filesSwitch();
   check(await until("/refused at \\d+/.test(document.querySelector('#cells .cell .out')?.textContent ?? '')", 20000), "a run in flight is refused at its next write once file changes aren't allowed, through a file it opened before: " + (await out()).trim().split("\n").slice(-1)[0]);
-  await trusted("#filebtn");
-  await trusted("#filesperm");
+  await filesSwitch();
   check((await files()) === true, "(allowed again)");
   // (a change still queued when file changes stop being allowed: not kept)
   await ev("(window.__release = sagebrush.files.holdDrain(), 1)");
@@ -196,15 +235,14 @@ try {
   await runAll();
   await until("/Q/.test(document.querySelector('#cells .cell .out')?.textContent ?? '')", 30000);
   await until("sagebrush.files.queue().paths > 0", 10000);
-  await trusted("#filebtn");
-  await trusted("#filesperm");
+  await filesSwitch();
   await ev("(window.__release(), 1)");
   await sleep(1500);
   check((await files()) === false && !(await stat("/queued.txt")), "a change queued before file changes stopped being allowed isn't kept");
 
   // ---- past the queue's own check (held there): "don't allow" before it is kept; the workspace's admission refuses
   const VS = (p) => ev(`${W}.stat(${JSON.stringify(p)}).then(async (e) => e ? [e.fid, e.size ?? null, (await ${W}.history(${JSON.stringify(p)}).catch(() => [])).length].join(":") : "none", () => "err")`);
-  const allowOwn = async () => { if (!(await files())) { await trusted("#filebtn"); await trusted("#filesperm"); } };
+  const allowOwn = async () => { if (!(await files())) { await filesSwitch(); } };
   const taken = () => until("sagebrush.files.queue().draining && sagebrush.files.queue().paths === 0", 20000);
   const lateCase = async (code, revoke) => {
     await allowOwn();
@@ -213,7 +251,7 @@ try {
     await runAll();
     await until("/L/.test(document.querySelector('#cells .cell .out')?.textContent ?? '')", 30000);
     await taken(); await sleep(500);
-    if (revoke) { await trusted("#filebtn"); await trusted("#filesperm"); }
+    if (revoke) { await filesSwitch(); }
     await ev("(window.__go(), 1)");
     await until("!sagebrush.files.queue().draining", 20000); await sleep(800);
   };
@@ -269,9 +307,8 @@ try {
   check(await until(`${W}.stat("/cur-ctl.txt").then((e) => !!e)`, 15000), "control: the same change from the current worker is kept");
 
   // ---- "don't allow" when storage can't keep it: in effect, and said
-  await ev(`(() => { const o = Storage.prototype.setItem; window.__setItem = o; Storage.prototype.setItem = function (k, v) { if (k === "sagebrush-permissions") throw new DOMException("full", "QuotaExceededError"); return o.call(this, k, v); }; return 1; })()`);
-  await trusted("#filebtn");
-  await trusted("#filesperm");
+  await ev(`(() => { const o = Storage.prototype.setItem; window.__setItem = o; Storage.prototype.setItem = function (k, v) { if (k === "sagebrush-grants") throw new DOMException("full", "QuotaExceededError"); return o.call(this, k, v); }; return 1; })()`);
+  await filesSwitch();
   check((await files()) === false && /couldn't keep the choice/.test(await ev("document.querySelector('#status').textContent")), "\"don't allow\" with storage refusing it: in effect anyway, and the page says it couldn't keep it: " + (await ev("document.querySelector('#status').textContent")).slice(0, 140));
   await setCode("try:\n    open('unkept.txt', 'w').write('x'); print('W')\nexcept PermissionError:\n    print('REFUSED')");
   await runAll();
@@ -326,7 +363,7 @@ try {
     await runAll();
     await until("/F/.test(document.querySelector('#cells .cell .out')?.textContent ?? '')", 30000);
     await taken(); await sleep(500);
-    if (revoke) { await trusted("#filebtn"); await trusted("#filesperm"); }
+    if (revoke) { await filesSwitch(); }
     await ev("(window.__go(), 1)");
     await until("!sagebrush.files.queue().draining", 20000); await sleep(800);
   };
