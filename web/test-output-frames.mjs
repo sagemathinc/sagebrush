@@ -428,7 +428,9 @@ try {
   ok(ea.hs.length === 1 && ea.hs[0][1] === 60 && ea.h === 51, "a height the frame sends before its generation's commit is never applied, even just after that commit: " + JSON.stringify(ea));
 
   // ---- an old frame's messages, queued at the host when its frame is swapped out in the same task, change nothing (O2)
-  await ev(`(window.PR = make({ rogue: "prophet" }), window.PRA = PR.area("pr1", box()), PRA.show(), PRA.render([{ id: "x", kind: "text", body: "t" }]), 1)`);
+  // (in view: an offscreen cross-origin frame's timers are throttled to about once a second, which would starve the flood)
+  await ev(`(window.fxP = document.createElement("div"), fxP.style.cssText = "position:fixed;top:0;left:0;width:300px;z-index:9", document.body.append(fxP),
+    window.PR = make({ rogue: "prophet" }), window.PRA = PR.area("pr1", box(fxP)), PRA.show(), PRA.render([{ id: "x", kind: "text", body: "t" }]), 1)`);
   await ev(`until(() => events.find((e) => e.area === "pr1" && e.type === "committed" && e.generation === 1))`);
   await sleep(100);
   const pq = await ev(`(() => {
@@ -441,7 +443,7 @@ try {
   await sleep(300);
   const pr = await ev(`({ ends: events.filter((e) => e.area === "pr1" && e.type === "committed").map((e) => e.generation), h: PRA.state.height })`);
   ok(pq === 2 && JSON.stringify(pr.ends) === "[1,2]" && pr.h === 40, "an old frame's messages still queued when it is swapped out are dropped: the new frame's own commit stands (40, not 999): " + JSON.stringify(pr));
-  await ev("(PR.dispose(), 1)");
+  await ev("(PR.dispose(), fxP.remove(), 1)");
 
   // ---- an error for another generation doesn't end the current render (O16)
   await ev(`(window.OE = make({ rogue: "olderr" }).area("oe1", box()), OE.show(), OE.render([{ id: "x", kind: "text", body: "t" }]), 1)`);
