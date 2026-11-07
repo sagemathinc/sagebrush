@@ -16,7 +16,7 @@ import { EXAMPLES } from "./examples.ts";
 import { makeAnchor, locate } from "./comments.ts";
 import { Engine, withBeamer, once, declaresBeamer } from "./engine/pipeline.mjs";
 import { coldRun, incremental } from "./engine/incremental-demo.mjs";
-import { setKatex, render, installBeamer, BOX_MAX, BOX_KEY, boxCost, fitsBoxes, NAME_MAX, NAME_TOTAL } from "./engine/render.mjs";
+import { setKatex, render, installBeamer, NEWPAGE, BOX_MAX, BOX_KEY, boxCost, fitsBoxes, NAME_MAX, NAME_TOTAL } from "./engine/render.mjs";
 import { itemKey } from "./engine/sagetex.mjs";
 import * as beamerCode from "./engine/beamer.mjs";
 
@@ -593,6 +593,23 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
     ["math-list-item", "\\begin{itemize}\\item $a\n\n\\item b text\\end{itemize}", (h) => count(h, "$ not closed") === 1 && h.includes("b text") && count(h, "<li") === 2],
     ["math-grouped-closed", "{$a$} and {$$b$$}", (h) => !h.includes("mathopen") && count(h, 'class="KI"') === 1 && count(h, 'class="KD"') === 1],
     ["math-closed-unchanged", "$a$ and $$b$$ and \\[c\\] \\(d\\) and $$\ne\n$$", (h) => !h.includes("mathopen") && count(h, 'class="KI"') === 2 && count(h, 'class="KD"') === 3],
+    // (Codex W05: a page break, as TeX's: \newpage, \clearpage, \cleardoublepage, \pagebreak (and [4]) each end the page
+    //  there, the paragraph too; \pagebreak[n] below 4 is a hint: nothing, its [n] not shown as text; \nopagebreak nothing)
+    ["newpage-breaks", "One.\\newpage Two.\n\n\\clearpage Three.\\cleardoublepage Four.\n\n\\pagebreak Five.\n\n\\pagebreak[4] Six.", (h) => count(h, NEWPAGE) === 5 && h.includes('One.</div>' + NEWPAGE + '<div class="p">Two.') && h.includes("Six.")],
+    // (TeX: \pagebreak within a paragraph breaks the page after its line, the paragraph whole (TeX Live: "One.\pagebreak
+    //  Two.\clearpage Three." is 2 pages, "One.Two." on the first: the space after a control word skipped))
+    ["pagebreak-in-par", "One.\\pagebreak Two.\\clearpage Three.", (h) => count(h, NEWPAGE) === 1 && h.includes('One.Two.</div>' + NEWPAGE + '<div class="p">Three.')],
+    // (no blank page: a break before anything, two in a row, or one after everything, is none, as in TeX)
+    ["newpage-collapse", "\\newpage\\clearpage A.\\newpage\\newpage\n\n\\clearpage B.\\newpage", (h) => count(h, NEWPAGE) === 1 && h.includes('A.</div>' + NEWPAGE + '<div class="p">B.</div>') && !h.trimEnd().endsWith(NEWPAGE)],
+    // (grader's #816 pins, each page layout TeX Live 2025's (pdflatex): "One.\pagebreak Two." then "Three." is 2 pages,
+    //  "One.Two." | "Three." (N5); "A." then a paragraph of a tie and \pagebreak, then "B.", is 2 pages, "A." | "B.": the
+    //  paragraph left empty, its break kept (N6); \mbox{C\pagebreak D}: one page, no break (N9). \newpage in a box
+    //  isn't pinned: TeX errs ("Missing } inserted") and then breaks, which this doesn't (a known gap, in #816's body))
+    ["pagebreak-par-only", "One.\\pagebreak Two.\n\nThree.", (h) => count(h, NEWPAGE) === 1 && h.includes('One.Two.</div>' + NEWPAGE + '<div class="p">Three.')],
+    ["pagebreak-empty-par", "A.\n\n~\\pagebreak\n\nB.", (h) => count(h, NEWPAGE) === 1 && h.includes('A.</div>' + NEWPAGE + '<div class="p">B.')],
+    ["pagebreak-in-mbox", "Before.\n\n\\mbox{C\\pagebreak D}\n\nAfter.", (h) => count(h, "newpage") === 0 && /C\s*D/.test(h.replace(/<[^>]+>/g, ""))],
+    ["newpage-said", "A.\\newpage B.", (h) => h.includes('<div class="newpage" role="separator" aria-label="Page break"></div>')],
+    ["pagebreak-hint", "A.\\pagebreak[2] B.\\nopagebreak C.\\pagebreak[0]D.\n\n\\pagebreak[3]\n\nE.", (h) => count(h, "newpage") === 0 && !h.includes("[2]") && !h.includes("[0]") && !h.includes("[3]") && /A\.\s*B\.\s*C\.\s*D\.\s*E\./.test(h.replace(/<[^>]+>/g, ""))],
   ];
   for (const [name, body, ok] of cases) { const h = html(body); check(name, ok(h), h.slice(0, 600)); }
   // half-typed arguments (as TeX: a blank line ends a name, an optional [...] or a section title; the command is
@@ -795,6 +812,12 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
     check("pos-aligned", Array.isArray(r1.chunkPos) && r1.chunkPos.length === r1.chunks.length, { n: r1.chunks.length, p: r1.chunkPos?.length });
     check("pos-paragraph", a.k >= 0 && a.pos === a.want, a);
     check("pos-heading", b.k >= 0 && b.pos === text.indexOf("\\section{Start}"), b);
+    // (grader's N12: a page break's chunk begins where its \newpage is)
+    {
+      const t = "\\documentclass{article}\n\\begin{document}\nFirst words.\n\n\\newpage\nSecond words.\n\\end{document}\n";
+      const r = new Engine().update(t), k = r.chunks.findIndex((c) => c === NEWPAGE);
+      check("pos-newpage", k > 0 && r.chunkPos[k] === t.indexOf("\\newpage") && r.chunkPos[k + 1] === t.indexOf("Second words."), { k, pos: r.chunkPos[k], want: t.indexOf("\\newpage"), next: r.chunkPos[k + 1], chunks: r.chunks.length });
+    }
     const text2 = text.replace("Paragraph number 0 ", "Inserted words here.\n\nParagraph number 0 ");
     const r2 = eng.update(text2);
     const c = where(r2, text2, "Paragraph number 300 "), d = where(r2, text2, "Inserted words");
