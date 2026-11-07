@@ -360,5 +360,124 @@
     ],
     "status": "partial",
     "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.axes.Axes.get_aspect",
+    "kind": "method",
+    "signature": "(self)",
+    "summary": "The aspect: 'auto', or y units per x unit on screen as a float ('equal' is 1.0).",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nfig, ax = plt.subplots()\nprint(ax.get_aspect())\nax.set_aspect('equal')\nprint(ax.get_aspect())\nplt.close('all')",
+        "expected": "auto\n1.0\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Matplotlib 3.11.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.axes.Axes.set_adjustable",
+    "kind": "method",
+    "signature": "(self, adjustable, share=False)",
+    "summary": "What an aspect adjusts: 'box' (the limits stay, the Axes box takes their shape; the default) or 'datalim' (limits move when drawn).",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nfig, ax = plt.subplots()\nax.set_adjustable('datalim')\nprint(ax.get_adjustable())\nplt.close('all')",
+        "expected": "datalim\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Matplotlib 3.11.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.axes.Axes.get_adjustable",
+    "kind": "method",
+    "signature": "(self)",
+    "summary": "'box' (matplotlib's default) or 'datalim': what an aspect adjusts.",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nfig, ax = plt.subplots()\nprint(ax.get_adjustable())\nax.set_aspect('equal', adjustable='datalim')\nprint(ax.get_adjustable())\nplt.close('all')",
+        "expected": "box\ndatalim\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Matplotlib 3.11.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.axes.Axes.autoscale",
+    "kind": "method",
+    "signature": "(self, enable=True, axis='both', tight=None)",
+    "summary": "Autoscaling on (the limits from the data again: limits that were set are dropped) or off (the current limits kept).",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nfig, ax = plt.subplots()\nax.plot([0, 1], [0, 1])\nax.set_xlim(0, 5)\nax.autoscale()\nprint(tuple(float(v) for v in ax.get_xlim()))\nplt.close('all')",
+        "expected": "(-0.05, 1.05)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Matplotlib 3.11.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.axes.Axes.get_xticklabels",
+    "kind": "method",
+    "signature": "(self, minor=False, which=None)",
+    "summary": "The x tick labels as Text objects: those set, or the formatter's for the locator's ticks (just outside the view too).",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nfig, ax = plt.subplots()\nax.plot([0, 10], [0, 1])\nprint([t.get_text() for t in ax.get_xticklabels()])\nax.set_xticks([0, 5, 10], ['a', 'b', 'c'], rotation=45)\nprint([(t.get_text(), t.get_rotation()) for t in ax.get_xticklabels()])\nplt.close('all')",
+        "expected": "['−2', '0', '2', '4', '6', '8', '10', '12']\n[('a', 45.0), ('b', 45.0), ('c', 45.0)]\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Matplotlib 3.11.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.axes.Axes.get_yticklabels",
+    "kind": "method",
+    "signature": "(self, minor=False, which=None)",
+    "summary": "The y tick labels, as Text objects (as get_xticklabels).",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nfig, ax = plt.subplots()\nax.plot([0, 10], [0, 1])\nprint([t.get_text() for t in ax.get_yticklabels()])\nplt.close('all')",
+        "expected": "['−0.2', '0.0', '0.2', '0.4', '0.6', '0.8', '1.0', '1.2']\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Matplotlib 3.11.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.axes.Axes.set_position",
+    "kind": "method",
+    "signature": "(self, pos, which='both')",
+    "summary": "The Axes at [left, bottom, width, height] (or a Bbox), in figure coordinates; get_position() returns it as a Bbox.",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nfig, ax = plt.subplots()\nprint(ax.get_position())\nax.set_position([0.1, 0.1, 0.3, 0.3])\nprint(ax.get_position())\nplt.close('all')",
+        "expected": "Bbox(x0=0.125, y0=0.10999999999999999, x1=0.9, y1=0.88)\nBbox(x0=0.1, y0=0.1, x1=0.4, y1=0.4)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Matplotlib 3.11.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
   }
 ]

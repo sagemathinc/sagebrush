@@ -2780,6 +2780,13 @@ def render(fig):
     return mfig
 
 
+def _equal(mx):
+    """An equal aspect as MATLAB's axes keep it: the box stays, the ranges
+    widen to its shape (matplotlib's adjustable='box' would shrink the box)."""
+    mx.set_aspect("equal")
+    mx._opts["_adjustable"] = "_widen"
+
+
 def _set_title(ax, mx):
     """the title in its FontWeight (bold by default), and after it the subtitle in its own"""
     t = _text_value(ax.title.props["String"])
@@ -2919,7 +2926,7 @@ def _draw_axes(ax, mx, mfig):
     if _m._text(ax.props["XGrid"]) == "on" or _m._text(ax.props["YGrid"]) == "on":
         mx.grid(True)
     if _m._text(ax.props["DataAspectRatioMode"]) == "manual":
-        mx.set_aspect("equal")
+        _equal(mx)
     if _m._text(ax.props["Visible"]) == "off":
         mx.axis("off")
     if ax.legend is not None and _m._text(ax.legend.props["Visible"]) == "on":
@@ -3572,7 +3579,7 @@ def _draw_axes3d(ax, mx, mfig, cmap, clim):
     pad = 0.22
     mx.set_xlim(min(sx) - pad, max(sx) + pad)
     mx.set_ylim(min(sy) - pad, max(sy) + pad * 0.6)
-    mx.set_aspect("equal")
+    _equal(mx)
     mx.axis("off")
     _set_title(ax, mx)
     if shown:
