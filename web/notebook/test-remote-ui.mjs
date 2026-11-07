@@ -211,7 +211,7 @@ export async function runUiTests(check) {
             close() { w.closed.push(r.kernel.tag); },
           };
           w.starts.push({ d, r, o });
-          return d.p.then((how) => { if (how?.failed) r.failed = how.failed; return r; });
+          return d.p.then((how) => { if (how?.failed) r.failed = how.failed; if (how?.noRetry) r.noRetry = true; return r; });
         },
         unbound: (id, why) => ({ kernel: { tag: `u${w.installs.length + 1}`, notebook: id }, failed: why, retry: null, close() { w.closed.push("unbound"); } }),
       };
@@ -351,6 +351,35 @@ export async function runUiTests(check) {
       closeSheet();
       c((await p2) === null, "sheet: closeSheet settles the open one as cancelled");
     }
+    // 7h2. the pairing sheet (grader's r782 U3, U5): the copy button's accessible name; the Windows note only for Windows
+    {
+      const { pairSheet, closeSheet, PAIR_SHEET } = await import("./remote-ui.js");
+      const all = (el) => [el, ...(el.children ?? []).flatMap((x) => (typeof x === "object" ? all(x) : []))];
+      const sheetFor = (ua) => {
+        const d = (() => {
+          const mk = (tag) => {
+            const el = { tag, children: [], listeners: {}, open: false, style: {}, attrs: {}, id: "",
+              append(...a) { el.children.push(...a); }, remove() { el.removed = true; },
+              setAttribute(k, v) { el.attrs[k] = v; }, addEventListener(t, f) { (el.listeners[t] ??= []).push(f); },
+              showModal() { el.open = true; }, close() { if (!el.open) return; el.open = false; for (const f of el.listeners.close ?? []) f(); }, focus() {} };
+            return el;
+          };
+          return { head: mk("head"), body: mk("body"), createElement: mk, getElementById: () => null };
+        })();
+        const done = pairSheet(d, null, ua);
+        const els = all(d.body);
+        closeSheet();
+        return { els, done };
+      };
+      const win = sheetFor("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36");
+      const mac = sheetFor("Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36");
+      const copyBtn = win.els.find((e) => e.tag === "button" && e.textContent === PAIR_SHEET.copy);
+      c(copyBtn?.attrs["aria-label"] === "Copy the command", `sheet: the copy button's accessible name is "Copy the command" (${copyBtn?.attrs["aria-label"]})`);
+      const note = (r) => r.els.some((e) => e.tag === "p" && e.textContent === PAIR_SHEET.windows);
+      c(note(win) && !note(mac), "sheet: the Windows note with a Windows userAgent, and not without one");
+      await win.done;
+      await mac.done;
+    }
     // (a connect whose sheet is answered and whose start resolves as told: `how` {failed} or nothing)
     const connected = async (w, id = "A", how = undefined) => {
       const done = w.sw.connect(id);
@@ -372,6 +401,21 @@ export async function runUiTests(check) {
       r.retries[0].resolve(true);
       await flush();
       c(w.acts.at(-1).length === 0 && w.installs.length === 1, "switch: Retry binds the same kernel; the actions go");
+    }
+    // 7i2. a failure marked noRetry (nothing the person can retry: a broken minimum) offers only Switch to browser, at the
+    // first failure (grader's r782 U9) and after a Retry that failed and came back noRetry (U8)
+    {
+      const w = world();
+      const r = await connected(w, "A", { failed: "a broken version setting", noRetry: true });
+      c(r.failed && labels(w) === "Switch to browser", `switch: a noRetry failure offers only Switch to browser (${labels(w)})`);
+      const w2 = world();
+      const r2 = await connected(w2, "A", { failed: "down" });
+      c(labels(w2) === "Retry,Switch to browser", "switch: (control) an ordinary failure offers Retry too");
+      act(w2, "Retry").run();
+      r2.noRetry = true;
+      r2.retries.at(-1).resolve(false);
+      await flush();
+      c(labels(w2) === "Switch to browser", `switch: a Retry that fails noRetry then offers only Switch to browser (${labels(w2)})`);
     }
     // 7j. RCPLAN-A1: an old action invoked after a newer attempt, a notebook change, or a newer offer does nothing
     for (const label of ["Retry", "Switch to browser"]) {
