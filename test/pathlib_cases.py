@@ -48,6 +48,8 @@ print(os.stat("t/mv2").st_ino == ino, os.stat("t/mv2").st_ino != os.stat("t").st
 os.rmdir("t/mv2")
 # (os.path.samefile and samestat, genericpath's: through the inode numbers above)
 print(os.path.samefile("t/a.txt", "t/./a.txt"), os.path.samefile("t/a.txt", "t/data.bin"), os.path.samestat(os.stat("t"), os.stat("t/sub/..")), os.path.samestat(os.stat("t"), os.stat("t/sub")))
+import types
+print(os.path.samestat(types.SimpleNamespace(st_ino=1, st_dev=2), types.SimpleNamespace(st_ino=1, st_dev=3)), os.path.samestat(types.SimpleNamespace(st_ino=1, st_dev=2), types.SimpleNamespace(st_ino=1, st_dev=2)))
 (base / "b.py").rename(base / "b2.py")
 print(sorted(x.name for x in base.iterdir()))
 (base / "b2.py").replace(base / "b3.py")

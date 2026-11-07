@@ -75,7 +75,7 @@ test("os: follow_symlinks, the tuple's integer times, makedirs' exist_ok, DirEnt
     "print(e.stat().st_size, os.stat('f.txt').st_size)",
     "print(sorted((type(x.name).__name__, x.name) for x in os.scandir(b'.')))",
     "print(io.text_encoding(None), io.text_encoding('utf-8'), io.open is open)",
-    "print(os.fsdecode(b'caf\\xc3\\xa9'), os.fsdecode(b'\\xff') == '\\udcff', os.fsdecode('s'), os.fsdecode(pathlib.Path('p')), os.fsdecode(os.fsencode('\\udcff')) == '\\udcff')",
+    "print(os.fsdecode(b'caf\\xc3\\xa9'), os.fsdecode(b'\\xff') == '\\udcff', os.fsdecode('s'), repr(os.fsdecode(pathlib.Path('p'))), type(os.fsdecode(pathlib.Path('p'))).__name__, os.fsdecode(os.fsencode('\\udcff')) == '\\udcff')",
     "print(os.F_OK, os.R_OK, os.W_OK, os.X_OK, os.SEEK_SET, os.SEEK_CUR, os.SEEK_END, os.O_NONBLOCK, os.defpath, os.defpath == os.path.defpath)",
   ].join("\n");
   const run = (cmd: string, args: string[]) => {

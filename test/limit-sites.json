@@ -1,4 +1,9 @@
 {
+ "engine/ap/tests/stop.rs :: traced :: let (gap, poll) = (hooks::max_gap_ns() as f64 / 1e6, hooks::max_poll_gap_ns() as f64 / 1e6); #0": {
+  "class": "none",
+  "owner": "remote-compute",
+  "reason": "test-hook timing (longest wall-time gap between interrupt checks / simulated wasm host polls) and its readout in ap Stop pins; measures, refuses nothing"
+ },
  "engine/ball/src/ball.rs ::  :: pub const EXP_MAX: i64 = 1 << 40; #0": {
   "class": "2+3",
   "owner": "ball arithmetic",
@@ -474,9 +479,15 @@
   "class": "none",
   "owner": "HMF engine"
  },
- "engine/interrupt/src/lib.rs :: count :: MAX_POLL_GAP_NS.fetch_max(n - last, Relaxed); #0": {
+ "engine/interrupt/src/lib.rs :: count :: MAX_GAP_NS.fetch_max(n.saturating_sub(last), Relaxed); #0": {
   "class": "none",
-  "owner": "sage"
+  "owner": "remote-compute",
+  "reason": "test-hook timing (longest wall-time gap between interrupt checks / simulated wasm host polls) and its readout in ap Stop pins; measures, refuses nothing"
+ },
+ "engine/interrupt/src/lib.rs :: count :: MAX_POLL_GAP_NS.fetch_max(n.saturating_sub(last), Relaxed); #0": {
+  "class": "none",
+  "owner": "remote-compute",
+  "reason": "test-hook timing (longest wall-time gap between interrupt checks / simulated wasm host polls) and its readout in ap Stop pins; measures, refuses nothing"
  },
  "engine/interrupt/src/lib.rs :: drop :: static MAX_POLL_GAP_NS: AtomicU64 = AtomicU64::new(0); #0": {
   "class": "none",
@@ -3618,6 +3629,11 @@
   "owner": "Magma compatibility",
   "row": "inv-25"
  },
+ "lib/_matlab.py :: ws_call :: raise _err(\"Too many output arguments.\", \"MATLAB:TooManyOutputs\" if name == \"clearvars\" else \"MATLAB:maxlhs\") #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the census matches 'max' in the identifier MATLAB:maxlhs. The line raises MATLAB's own error for asking save, clear or clearvars for an output (MathWorks documents none), before the call runs; it is not a limit on a computation"
+ },
  "lib/_matlab_cpow.py ::  :: _RESCUE_MAX = 100000 #0": {
   "class": "3",
   "owner": "MATLAB numeric",
@@ -5973,6 +5989,112 @@
   "owner": "real/complex arithmetic",
   "row": "inv-17"
  },
+ "lib/_sage_rpoly.py :: PolynomialInexact.__pow__ :: raise NotImplementedError(\"a power of a polynomial over %r by %r is not available in sagebrush yet\" % (self._ring._base, n)) #0": {
+  "class": "coverage",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "the fraction field of a polynomial ring over an inexact field (negative powers, division by a polynomial) and powers by a non-integer: 1b stage 2, not a cap"
+ },
+ "lib/_sage_rpoly.py :: PolynomialInexact.__pow__ :: raise NotImplementedError(\"the fraction field of %r is not available in sagebrush yet\" % (self._ring,)) #0": {
+  "class": "coverage",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "the fraction field of a polynomial ring over an inexact field (negative powers, division by a polynomial) and powers by a non-integer: 1b stage 2, not a cap"
+ },
+ "lib/_sage_rpoly.py :: PolynomialInexact.__rtruediv__ :: raise NotImplementedError(\"the fraction field of %r is not available in sagebrush yet\" % (self._ring,)) #0": {
+  "class": "coverage",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "the fraction field of a polynomial ring over an inexact field (negative powers, division by a polynomial) and powers by a non-integer: 1b stage 2, not a cap"
+ },
+ "lib/_sage_rpoly.py :: PolynomialInexact.__truediv__ :: raise NotImplementedError(\"the fraction field of %r is not available in sagebrush yet\" % (self._ring,)) #0": {
+  "class": "coverage",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "the fraction field of a polynomial ring over an inexact field (negative powers, division by a polynomial) and powers by a non-integer: 1b stage 2, not a cap"
+ },
+ "lib/_sage_rpoly.py :: PolynomialInexact._refuse_parents :: raise TypeError(\"unsupported operand parent(s) for %s: '%r' and '%r'\" % (sym, a, b)) #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "Sage's coercion refusal (TypeError) for polynomials over an inexact field with another ring or a Python complex, in Sage's text; refuses nothing for size"
+ },
+ "lib/_sage_rpoly.py :: PolynomialRingInexact.__call__ :: Converting an expression of degree 1048577 to a dense polynomial needs about 8.4 MB, but Sagebrush has a fixed limit of about 8.3 MB for one polynomial. #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "docstring text and examples of the dense coefficient bound; refuses nothing"
+ },
+ "lib/_sage_rpoly.py :: PolynomialRingInexact.__call__ :: conversion (a fixed limit of 2^20 coefficients):: #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "docstring text and examples of the dense coefficient bound; refuses nothing"
+ },
+ "lib/_sage_rpoly.py :: PolynomialRingInexact.__call__ :: sage: _sage_poly._MAX_DENSE_COEFFS = cap # sagebrush only #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "docstring text and examples of the dense coefficient bound; refuses nothing"
+ },
+ "lib/_sage_rpoly.py :: PolynomialRingInexact.__call__ :: sage: import _sage_poly; cap = _sage_poly._MAX_DENSE_COEFFS; _sage_poly._MAX_DENSE_COEFFS = 11 # sagebrush only #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "docstring text and examples of the dense coefficient bound; refuses nothing"
+ },
+ "lib/_sage_rpoly.py :: _admit :: cap = _sage_poly._MAX_DENSE_COEFFS #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "the dense coefficient bound of the exact polynomials (_sage_poly._MAX_DENSE_COEFFS, 2^20), admitted before a polynomial over an inexact field is built: SR conversion, product, square, power, shift (astra's RPOLY-ALLOC-1)",
+  "row": "inv-13"
+ },
+ "lib/_sage_rpoly.py :: _admit :: exact polynomials' _MAX_DENSE_COEFFS coefficients (the memory guard's error, at 8 bytes a #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "docstring text and examples of the dense coefficient bound; refuses nothing"
+ },
+ "lib/_sage_rpoly.py :: _admit :: if n > cap: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "the dense coefficient bound of the exact polynomials (_sage_poly._MAX_DENSE_COEFFS, 2^20), admitted before a polynomial over an inexact field is built: SR conversion, product, square, power, shift (astra's RPOLY-ALLOC-1)",
+  "row": "inv-13"
+ },
+ "lib/_sage_rpoly.py :: _admit :: raise _memguard.memory_guard(what, n * 8, cap * 8, \"one polynomial\", fixed=True) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "the dense coefficient bound of the exact polynomials (_sage_poly._MAX_DENSE_COEFFS, 2^20), admitted before a polynomial over an inexact field is built: SR conversion, product, square, power, shift (astra's RPOLY-ALLOC-1)",
+  "row": "inv-13"
+ },
+ "lib/_sage_rpoly.py :: _refuse_foreign :: raise TypeError(\"unsupported operand parent(s) for %s: '%s' and '%s'\" % (sym, a, b)) #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "Sage's coercion refusal (TypeError) for polynomials over an inexact field with another ring or a Python complex, in Sage's text; refuses nothing for size"
+ },
+ "lib/_sage_rpoly.py :: _refuse_foreign :: raise TypeError(\"unsupported operand type(s) for /: '%s' and '%s'\" % (ca, cb)) #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "Sage's coercion refusal (TypeError) for polynomials over an inexact field with another ring or a Python complex, in Sage's text; refuses nothing for size"
+ },
+ "lib/_sage_rpoly.py :: _refuse_mixed :: raise NotImplementedError(\"arithmetic with %s and %s together is not available in sagebrush yet\" % (a, b)) #0": {
+  "class": "coverage",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "polynomials over an inexact field with a number field that has an embedding (Sage computes in the common ring): L33, not a cap"
+ },
+ "lib/_sage_rpoly.py :: _refuse_types :: raise TypeError(\"unsupported operand type(s) for /: '%s' and '%s'\" % (ca, cb)) #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "Sage's coercion refusal (TypeError) for polynomials over an inexact field with another ring or a Python complex, in Sage's text; refuses nothing for size"
+ },
  "lib/_sage_series.py :: Series._poly_target :: raise TypeError(\"unsupported operand parent(s): '%r' and '%r'\" % (self._R, P)) #0": {
   "class": "none",
   "owner": "sage kernel (@sagebrush-sage2)",
@@ -7111,6 +7233,31 @@
   "class": "none",
   "owner": "python (@sagebrush-python)",
   "reason": "the exception a file object without a descriptor raises (Sagebrush's), which skips the fsync; matched text that bounds nothing"
+ },
+ "lib/shutil.py ::  :: XXX The functions here don't copy the resource fork or other metadata on Mac. #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "a comment in CPython 3.14.10's shutil, unchanged: no limit"
+ },
+ "lib/shutil.py :: _determine_linux_fastcopy_blocksize :: if sys.maxsize < 2 ** 32: #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14.10's shutil, unchanged: a 32-bit platform check for a copy block size; refuses nothing"
+ },
+ "lib/shutil.py :: _rmtree_unsafe :: raise NotImplementedError(\"dir_fd unavailable on this platform\") #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14.10's shutil, unchanged: rmtree(dir_fd=) where os has no dir_fd support (os.supports_dir_fd is empty here), CPython's own message"
+ },
+ "lib/shutil.py :: copystat :: except NotImplementedError: #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14.10's shutil, unchanged: copystat ignores a follow_symlinks the platform lacks; handles, refuses nothing"
+ },
+ "lib/shutil.py :: rmtree :: If it is unavailable, using it will raise a NotImplementedError. #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "a docstring line of CPython 3.14.10's shutil, unchanged"
  },
  "lib/ssl.py :: SSLContext.load_cert_chain :: raise NotImplementedError(\"ssl: certificate files are not used by Sagebrush's replay-only network client\") #0": {
   "class": "coverage",
@@ -9816,6 +9963,11 @@
   "owner": "python (@sagebrush-python)",
   "row": "src-7"
  },
+ "src/runtime/modules.ts :: fdInt :: if (e?.unsupported) raise(T.NotImplementedError, String(e.message)); #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an os.open form the browser's virtual file system doesn't do (O_DIRECTORY, a folder, O_TRUNC read-only, unknown flags): NotImplementedError saying so, before any effect (P3b-2 design note, SEC cleared)"
+ },
  "src/runtime/modules.ts :: importStar :: [\"debug\", \"inspect\", \"interactive\", \"optimize\", \"dont_write_bytecode\", \"no_user_site\", \"no_site\", \"ignore_environment\", \"verbose\", \"bytes_warning\", \"quiet\", \"hash_randomization\", \"isolated\", \"dev_mode\", \"utf8_mode\", \"warn_default_encoding\", \"safe_path\", \"int_max_str_digits\"], #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
@@ -9872,6 +10024,16 @@
  "src/runtime/modules.ts :: memoryGuard :: export function memoryGuard(what: string, needBytes: number | bigint, limitBytes: number | bigint, allowanceFor: string, fixed = false): never { #0": {
   "class": "none",
   "owner": "memory guards' message (item D)"
+ },
+ "src/runtime/modules.ts :: noDirFd :: if (dir_fd !== null) raise(T.NotImplementedError, \"dir_fd unavailable on this platform\"); #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "os.open/chmod/utime/access(dir_fd=): no directory descriptors here (supports_dir_fd is empty), refused with CPython's own message on a platform without dir_fd, before any effect"
+ },
+ "src/runtime/modules.ts :: noDirFd :: if (e?.unsupported) raise(T.NotImplementedError, String(e.message)); #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an os.open form the browser's virtual file system doesn't do (O_DIRECTORY, a folder, O_TRUNC read-only, unknown flags): NotImplementedError saying so, before any effect (P3b-2 design note, SEC cleared)"
  },
  "src/runtime/modules.ts :: norm :: const e = callKw(getattr(importModule(\"_memguard\"), \"memory_guard\"), [what, norm(needBytes), norm(limitBytes), allowanceFor], [\"fixed\"], [fixed]); #0": {
   "class": "none",

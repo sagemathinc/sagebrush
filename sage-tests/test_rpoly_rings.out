@@ -1,0 +1,348 @@
+RR ring | Univariate Polynomial Ring in t over Real Field with 53 bits of precision | \Bold{R}[t] | True True Real Field with 53 bits of precision False False 0
+RR gen | t | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+RR f | 1.50000000000000*t^2 - 2.00000000000000*t + 1.00000000000000 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+RR f latex | 1.50000000000000 t^{2} - 2.00000000000000 t + 1.00000000000000
+RR (t-1)(t+1) | t^2 - 1.00000000000000 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+RR (t-1)(t+1) list | [-1.00000000000000, 0.000000000000000, 1.00000000000000]
+RR zero lead | 2.00000000000000*t + 1.00000000000000 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+RR degrees | 1 -1 -1 -1 100 [1.00000000000000, 2.00000000000000]
+RR P(-0.0) | 0 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+RR t - t | 0 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+RR 1/3*t | 0.333333333333333*t | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+RR t/3 | 0.333333333333333*t | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+RR (t+1/3)^3 | t^3 + t^2 + 0.333333333333333*t + 0.0370370370370370 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+RR f(2) | 3.00000000000000 | Real Field with 53 bits of precision
+RR f(1/3) | 0.500000000000000 | Real Field with 53 bits of precision
+RR f(x) | 1.50000000000000*x^2 - 2.00000000000000*x + 1.00000000000000 | Symbolic Ring
+RR t + x | 1.00000000000000*t + x | Symbolic Ring
+RR t*sqrt2 | 1.00000000000000*sqrt(2)*t | Symbolic Ring
+RR f(t+1) | 1.50000000000000*t^2 + t + 0.500000000000000 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+RR deriv | 4.50000000000000*t^2 - 2.00000000000000 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+RR diff | 4.50000000000000*t^2 - 2.00000000000000 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+RR change_ring QQ | 3/2*t^2 + 1 | Univariate Polynomial Ring in t over Rational Field
+RR change_ring RDF | 1.5*t^2 + 0.3333333333333333 | Univariate Polynomial Ring in t over Real Double Field
+RR change_ring CC | 1.50000000000000*t^2 + 0.333333333333333 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+RR P(list) | 2.00000000000000*t^2 + 0.333333333333333*t + 1.00000000000000 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+RR P(SR) | t^2 + 0.333333333333333 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+RR P(QQt) | 0.333333333333333*t + 1.00000000000000 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+RR P(str) | t^2 + 1.00000000000000 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+RR eq | True True True False True True
+RR hash | True True
+RR ZZt + t | 2.00000000000000*t | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+RR t + QQt | 1.33333333333333*t | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+RR QQt * t | 0.333333333333333*t^2 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+RR t + ZZx | ERR TypeError
+RR t^0 | 1.00000000000000 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+RR coefficients | [1.00000000000000, 1.50000000000000] [1.00000000000000, 0.000000000000000, 0.000000000000000, 1.50000000000000] 2.00000000000000 1.50000000000000 {0: 1.00000000000000, 3: 1.50000000000000} [0, 3]
+RR small | t + 1.00000000000000e-20 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+RR big | 1.00000000000000e20*t^2 + 1.00000000000000 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+RR neg lead | -t^2 - 1.00000000000000 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+RR zero | True False True True True False 1.00000000000000 (t,)
+RR monic | t + 0.500000000000000 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+RR nan | NaN*t + 1.00000000000000 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+RR inf | +infinity*t + 1.00000000000000 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+RR pow | t^5 + 5.00000000000000*t^4 + 10.0000000000000*t^3 + 10.0000000000000*t^2 + 5.00000000000000*t + 1.00000000000000 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+RR pow 1.1 | 1.33100000000000*t^3 + 3.63000000000000*t^2 + 3.30000000000000*t + 1.00000000000000 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+RR call B | 5.00000000000000 | Real Field with 53 bits of precision
+RR call QQ | 1.25000000000000 | Real Field with 53 bits of precision
+RR call RDF | 5.00000000000000 | Real Field with 53 bits of precision
+RR call I | 0.000000000000000 | Complex Field with 53 bits of precision
+RR call poly | s^2 + 1.00000000000000 | Univariate Polynomial Ring in s over Real Field with 53 bits of precision
+RR call mat | [8.00000000000000 10.0000000000000] ; [15.0000000000000 23.0000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 53 bits of precision
+RR neg | -t^2 + 2.00000000000000*t - 1.00000000000000 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+RR subs | 10.0000000000000 | Real Field with 53 bits of precision
+RR trunc | 2.00000000000000*t + 1.00000000000000 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+RR shift | t^4 + 2.00000000000000*t^2 + t | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+RR reverse | 2.00000000000000*t^2 + 1.00000000000000 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+RR int | 0.333333333333333*t^3 + t | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+RR iter | [2.00000000000000, 0.000000000000000, 1.00000000000000]
+RR latex | t^{3} + 0.000000000000000 t^{2} + 0.000000000000000 t + 0.000000000000000 | t^{2} - t + 0.000000000000000 | 2.00000000000000 t^{2} + 0.000000000000000 t + 1.00000000000000 | 0 | 2.00000000000000 t^{5} + 0.000000000000000 t^{4} + 0.000000000000000 t^{3} + 0.000000000000000 t^{2} + 0.000000000000000 t - 3.00000000000000 | y_{2}^{2} + 0.000000000000000 y_{2} + 0.333333333333333
+RDF ring | Univariate Polynomial Ring in t over Real Double Field | \Bold{R}[t] | True True Real Double Field False False 0
+RDF gen | t | Univariate Polynomial Ring in t over Real Double Field
+RDF f | 1.5*t^2 - 2.0*t + 1.0 | Univariate Polynomial Ring in t over Real Double Field
+RDF f latex | 1.5 t^{2} - 2.0 t + 1.0
+RDF (t-1)(t+1) | t^2 - 1.0 | Univariate Polynomial Ring in t over Real Double Field
+RDF (t-1)(t+1) list | [-1.0, 0.0, 1.0]
+RDF zero lead | 2.0*t + 1.0 | Univariate Polynomial Ring in t over Real Double Field
+RDF degrees | 1 -1 -1 -1 100 [1.0, 2.0]
+RDF P(-0.0) | 0 | Univariate Polynomial Ring in t over Real Double Field
+RDF t - t | 0 | Univariate Polynomial Ring in t over Real Double Field
+RDF 1/3*t | 0.3333333333333333*t | Univariate Polynomial Ring in t over Real Double Field
+RDF t/3 | 0.3333333333333333*t | Univariate Polynomial Ring in t over Real Double Field
+RDF (t+1/3)^3 | t^3 + t^2 + 0.3333333333333333*t + 0.037037037037037035 | Univariate Polynomial Ring in t over Real Double Field
+RDF f(2) | 3.0 | Real Double Field
+RDF f(1/3) | 0.5 | Real Double Field
+RDF f(t+1) | 1.5*t^2 + t + 0.5 | Univariate Polynomial Ring in t over Real Double Field
+RDF deriv | 4.5*t^2 - 2.0 | Univariate Polynomial Ring in t over Real Double Field
+RDF diff | 4.5*t^2 - 2.0 | Univariate Polynomial Ring in t over Real Double Field
+RDF change_ring QQ | 3/2*t^2 + 1 | Univariate Polynomial Ring in t over Rational Field
+RDF change_ring RDF | 1.5*t^2 + 0.3333333333333333 | Univariate Polynomial Ring in t over Real Double Field
+RDF change_ring CC | 1.50000000000000*t^2 + 0.333333333333333 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+RDF P(list) | 2.0*t^2 + 0.3333333333333333*t + 1.0 | Univariate Polynomial Ring in t over Real Double Field
+RDF P(SR) | t^2 + 0.3333333333333333 | Univariate Polynomial Ring in t over Real Double Field
+RDF P(QQt) | 0.3333333333333333*t + 1.0 | Univariate Polynomial Ring in t over Real Double Field
+RDF P(str) | t^2 + 1.0 | Univariate Polynomial Ring in t over Real Double Field
+RDF eq | True True True False True True
+RDF hash | True True
+RDF ZZt + t | 2.0*t | Univariate Polynomial Ring in t over Real Double Field
+RDF t + QQt | 1.3333333333333333*t | Univariate Polynomial Ring in t over Real Double Field
+RDF QQt * t | 0.3333333333333333*t^2 | Univariate Polynomial Ring in t over Real Double Field
+RDF t + ZZx | ERR TypeError
+RDF t^0 | 1.0 | Univariate Polynomial Ring in t over Real Double Field
+RDF coefficients | [1.0, 1.5] [1.0, 0.0, 0.0, 1.5] 2.0 1.5 {0: 1.0, 3: 1.5} [0, 3]
+RDF small | t + 1e-20 | Univariate Polynomial Ring in t over Real Double Field
+RDF big | 1e+20*t^2 + 1.0 | Univariate Polynomial Ring in t over Real Double Field
+RDF neg lead | -t^2 - 1.0 | Univariate Polynomial Ring in t over Real Double Field
+RDF zero | True False True True True False 1.0 (t,)
+RDF monic | t + 0.5 | Univariate Polynomial Ring in t over Real Double Field
+RDF nan | NaN*t + 1.0 | Univariate Polynomial Ring in t over Real Double Field
+RDF inf | +infinity*t + 1.0 | Univariate Polynomial Ring in t over Real Double Field
+RDF pow | t^5 + 5.0*t^4 + 10.0*t^3 + 10.0*t^2 + 5.0*t + 1.0 | Univariate Polynomial Ring in t over Real Double Field
+RDF pow 1.1 | 1.3310000000000004*t^3 + 3.630000000000001*t^2 + 3.3000000000000003*t + 1.0 | Univariate Polynomial Ring in t over Real Double Field
+RDF call B | 5.0 | Real Double Field
+RDF call QQ | 1.25 | Real Double Field
+RDF call RDF | 5.0 | Real Double Field
+RDF call I | 0.000000000000000 | Complex Field with 53 bits of precision
+RDF call poly | s^2 + 1.0 | Univariate Polynomial Ring in s over Real Double Field
+RDF call mat | [ 8.0 10.0] ; [15.0 23.0] | Full MatrixSpace of 2 by 2 dense matrices over Real Double Field
+RDF neg | -t^2 + 2.0*t - 1.0 | Univariate Polynomial Ring in t over Real Double Field
+RDF subs | 10.0 | Real Double Field
+RDF trunc | 2.0*t + 1.0 | Univariate Polynomial Ring in t over Real Double Field
+RDF shift | t^4 + 2.0*t^2 + t | Univariate Polynomial Ring in t over Real Double Field
+RDF reverse | 2.0*t^2 + 1.0 | Univariate Polynomial Ring in t over Real Double Field
+RDF int | 0.3333333333333333*t^3 + t | Univariate Polynomial Ring in t over Real Double Field
+RDF iter | [2.0, 0.0, 1.0]
+RDF latex | t^{3} + 0.0 t^{2} + 0.0 t + 0.0 | t^{2} - t + 0.0 | 2.0 t^{2} + 0.0 t + 1.0 | 0 | 2.0 t^{5} + 0.0 t^{4} + 0.0 t^{3} + 0.0 t^{2} + 0.0 t - 3.0 | y_{2}^{2} + 0.0 y_{2} + 0.3333333333333333
+CC ring | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision | \Bold{C}[t] | True True Complex Field with 53 bits of precision False False 0
+CC gen | t | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+CC f | 1.50000000000000*t^2 - 2.00000000000000*t + 1.00000000000000 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+CC f latex | 1.50000000000000 t^{2} - 2.00000000000000 t + 1.00000000000000
+CC (t-1)(t+1) | t^2 - 1.00000000000000 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+CC (t-1)(t+1) list | [-1.00000000000000, 0.000000000000000, 1.00000000000000]
+CC zero lead | 2.00000000000000*t + 1.00000000000000 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+CC degrees | 1 -1 -1 -1 100 [1.00000000000000, 2.00000000000000]
+CC P(-0.0) | 0 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+CC t - t | 0 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+CC 1/3*t | 0.333333333333333*t | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+CC t/3 | 0.333333333333333*t | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+CC (t+1/3)^3 | t^3 + t^2 + 0.333333333333333*t + 0.0370370370370370 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+CC f(2) | 3.00000000000000 | Complex Field with 53 bits of precision
+CC f(1/3) | 0.500000000000000 | Complex Field with 53 bits of precision
+CC f(x) | 1.50000000000000*x^2 - 2.00000000000000*x + 1.00000000000000 | Symbolic Ring
+CC t + x | 1.00000000000000*t + x | Symbolic Ring
+CC t*sqrt2 | 1.00000000000000*sqrt(2)*t | Symbolic Ring
+CC f(t+1) | 1.50000000000000*t^2 + t + 0.500000000000000 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+CC deriv | 4.50000000000000*t^2 - 2.00000000000000 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+CC diff | 4.50000000000000*t^2 - 2.00000000000000 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+CC change_ring QQ | ERR TypeError
+CC change_ring RDF | 1.5*t^2 + 0.3333333333333333 | Univariate Polynomial Ring in t over Real Double Field
+CC change_ring CC | 1.50000000000000*t^2 + 0.333333333333333 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+CC P(list) | 2.00000000000000*t^2 + 0.333333333333333*t + 1.00000000000000 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+CC P(SR) | t^2 + 0.333333333333333 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+CC P(QQt) | 0.333333333333333*t + 1.00000000000000 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+CC P(str) | t^2 + 1.00000000000000 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+CC eq | True True True False True True
+CC hash | True True
+CC ZZt + t | 2.00000000000000*t | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+CC t + QQt | 1.33333333333333*t | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+CC QQt * t | 0.333333333333333*t^2 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+CC t + ZZx | ERR TypeError
+CC t^0 | 1.00000000000000 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+CC coefficients | [1.00000000000000, 1.50000000000000] [1.00000000000000, 0.000000000000000, 0.000000000000000, 1.50000000000000] 2.00000000000000 1.50000000000000 {0: 1.00000000000000, 3: 1.50000000000000} [0, 3]
+CC small | t + 1.00000000000000e-20 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+CC big | 1.00000000000000e20*t^2 + 1.00000000000000 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+CC neg lead | -t^2 - 1.00000000000000 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+CC I coeff | I*t | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+CC cplx | 3.00000000000000*t^2 - I*t + 1.00000000000000 + 2.00000000000000*I | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+CC zero | True False True True True False 1.00000000000000 (t,)
+CC monic | t + 0.500000000000000 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+CC nan | NaN*t + 1.00000000000000 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+CC inf | (+infinity)*t + 1.00000000000000 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+CC pow | t^5 + 5.00000000000000*t^4 + 10.0000000000000*t^3 + 10.0000000000000*t^2 + 5.00000000000000*t + 1.00000000000000 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+CC pow 1.1 | 1.33100000000000*t^3 + 3.63000000000000*t^2 + 3.30000000000000*t + 1.00000000000000 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+CC call B | 5.00000000000000 | Complex Field with 53 bits of precision
+CC call QQ | 1.25000000000000 | Complex Field with 53 bits of precision
+CC call RDF | 5.00000000000000 | Complex Field with 53 bits of precision
+CC call I | 0.000000000000000 | Complex Field with 53 bits of precision
+CC call poly | s^2 + 1.00000000000000 | Univariate Polynomial Ring in s over Complex Field with 53 bits of precision
+CC call mat | [8.00000000000000 10.0000000000000] ; [15.0000000000000 23.0000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 53 bits of precision
+CC neg | -t^2 + 2.00000000000000*t - 1.00000000000000 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+CC subs | 10.0000000000000 | Complex Field with 53 bits of precision
+CC trunc | 2.00000000000000*t + 1.00000000000000 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+CC shift | t^4 + 2.00000000000000*t^2 + t | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+CC reverse | 2.00000000000000*t^2 + 1.00000000000000 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+CC int | 0.333333333333333*t^3 + t | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+CC iter | [2.00000000000000, 0.000000000000000, 1.00000000000000]
+CC latex | t^{3} + 0.000000000000000 t^{2} + 0.000000000000000 t + 0.000000000000000 | t^{2} - t + 0.000000000000000 | 2.00000000000000 t^{2} + 0.000000000000000 t + 1.00000000000000 | 0 | 2.00000000000000 t^{5} + 0.000000000000000 t^{4} + 0.000000000000000 t^{3} + 0.000000000000000 t^{2} + 0.000000000000000 t - 3.00000000000000 | y_{2}^{2} + 0.000000000000000 y_{2} + 0.333333333333333
+CDF ring | Univariate Polynomial Ring in t over Complex Double Field | \Bold{C}[t] | True True Complex Double Field False False 0
+CDF gen | t | Univariate Polynomial Ring in t over Complex Double Field
+CDF f | 1.5*t^2 - 2.0*t + 1.0 | Univariate Polynomial Ring in t over Complex Double Field
+CDF f latex | 1.5 t^{2} - 2.0 t + 1.0
+CDF (t-1)(t+1) | t^2 - 1.0 | Univariate Polynomial Ring in t over Complex Double Field
+CDF (t-1)(t+1) list | [-1.0, 0.0, 1.0]
+CDF zero lead | 2.0*t + 1.0 | Univariate Polynomial Ring in t over Complex Double Field
+CDF degrees | 1 -1 -1 -1 100 [1.0, 2.0]
+CDF P(-0.0) | 0 | Univariate Polynomial Ring in t over Complex Double Field
+CDF t - t | 0 | Univariate Polynomial Ring in t over Complex Double Field
+CDF 1/3*t | 0.3333333333333333*t | Univariate Polynomial Ring in t over Complex Double Field
+CDF t/3 | 0.3333333333333333*t | Univariate Polynomial Ring in t over Complex Double Field
+CDF (t+1/3)^3 | t^3 + t^2 + 0.3333333333333333*t + 0.037037037037037035 | Univariate Polynomial Ring in t over Complex Double Field
+CDF f(2) | 3.0 | Complex Double Field
+CDF f(1/3) | 0.5 | Complex Double Field
+CDF f(t+1) | 1.5*t^2 + t + 0.5 | Univariate Polynomial Ring in t over Complex Double Field
+CDF deriv | 4.5*t^2 - 2.0 | Univariate Polynomial Ring in t over Complex Double Field
+CDF diff | 4.5*t^2 - 2.0 | Univariate Polynomial Ring in t over Complex Double Field
+CDF change_ring QQ | ERR TypeError
+CDF change_ring RDF | 1.5*t^2 + 0.3333333333333333 | Univariate Polynomial Ring in t over Real Double Field
+CDF change_ring CC | 1.50000000000000*t^2 + 0.333333333333333 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+CDF P(list) | 2.0*t^2 + 0.3333333333333333*t + 1.0 | Univariate Polynomial Ring in t over Complex Double Field
+CDF P(SR) | t^2 + 0.3333333333333333 | Univariate Polynomial Ring in t over Complex Double Field
+CDF P(QQt) | 0.3333333333333333*t + 1.0 | Univariate Polynomial Ring in t over Complex Double Field
+CDF P(str) | t^2 + 1.0 | Univariate Polynomial Ring in t over Complex Double Field
+CDF eq | True True True False True True
+CDF hash | True True
+CDF ZZt + t | 2.0*t | Univariate Polynomial Ring in t over Complex Double Field
+CDF t + QQt | 1.3333333333333333*t | Univariate Polynomial Ring in t over Complex Double Field
+CDF QQt * t | 0.3333333333333333*t^2 | Univariate Polynomial Ring in t over Complex Double Field
+CDF t + ZZx | ERR TypeError
+CDF t^0 | 1.0 | Univariate Polynomial Ring in t over Complex Double Field
+CDF coefficients | [1.0, 1.5] [1.0, 0.0, 0.0, 1.5] 2.0 1.5 {0: 1.0, 3: 1.5} [0, 3]
+CDF small | t + 1e-20 | Univariate Polynomial Ring in t over Complex Double Field
+CDF big | (1e+20)*t^2 + 1.0 | Univariate Polynomial Ring in t over Complex Double Field
+CDF neg lead | -t^2 - 1.0 | Univariate Polynomial Ring in t over Complex Double Field
+CDF I coeff | I*t | Univariate Polynomial Ring in t over Complex Double Field
+CDF cplx | 3.0*t^2 - I*t + 1.0 + 2.0*I | Univariate Polynomial Ring in t over Complex Double Field
+CDF zero | True False True True True False 1.0 (t,)
+CDF monic | t + 0.5 | Univariate Polynomial Ring in t over Complex Double Field
+CDF nan | 1.0 | Univariate Polynomial Ring in t over Complex Double Field
+CDF inf | (+infinity)*t + 1.0 | Univariate Polynomial Ring in t over Complex Double Field
+CDF pow | t^5 + 5.0*t^4 + 10.0*t^3 + 10.0*t^2 + 5.0*t + 1.0 | Univariate Polynomial Ring in t over Complex Double Field
+CDF pow 1.1 | 1.3310000000000004*t^3 + 3.630000000000001*t^2 + 3.3000000000000003*t + 1.0 | Univariate Polynomial Ring in t over Complex Double Field
+CDF call B | 5.0 | Complex Double Field
+CDF call QQ | 1.25 | Complex Double Field
+CDF call RDF | 5.0 | Complex Double Field
+CDF call I | 0.0 | Complex Double Field
+CDF call poly | s^2 + 1.0 | Univariate Polynomial Ring in s over Complex Double Field
+CDF call mat | [ 8.0 10.0] ; [15.0 23.0] | Full MatrixSpace of 2 by 2 dense matrices over Complex Double Field
+CDF neg | -t^2 + 2.0*t - 1.0 | Univariate Polynomial Ring in t over Complex Double Field
+CDF subs | 10.0 | Complex Double Field
+CDF trunc | 2.0*t + 1.0 | Univariate Polynomial Ring in t over Complex Double Field
+CDF shift | t^4 + 2.0*t^2 + t | Univariate Polynomial Ring in t over Complex Double Field
+CDF reverse | 2.0*t^2 + 1.0 | Univariate Polynomial Ring in t over Complex Double Field
+CDF int | 0.3333333333333333*t^3 + t | Univariate Polynomial Ring in t over Complex Double Field
+CDF iter | [2.0, 0.0, 1.0]
+CDF latex | t^{3} + 0.0 t^{2} + 0.0 t + 0.0 | t^{2} - t + 0.0 | 2.0 t^{2} + 0.0 t + 1.0 | 0 | 2.0 t^{5} + 0.0 t^{4} + 0.0 t^{3} + 0.0 t^{2} + 0.0 t - 3.0 | y_{2}^{2} + 0.0 y_{2} + 0.3333333333333333
+R100 ring | Univariate Polynomial Ring in t over Real Field with 100 bits of precision | \Bold{R}[t] | True True Real Field with 100 bits of precision False False 0
+R100 gen | t | Univariate Polynomial Ring in t over Real Field with 100 bits of precision
+R100 f | 1.50000000000000*t^2 - 2.00000000000000*t + 1.00000000000000 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+R100 f latex | 1.50000000000000 t^{2} - 2.00000000000000 t + 1.00000000000000
+R100 (t-1)(t+1) | t^2 - 1.00000000000000 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+R100 (t-1)(t+1) list | [-1.00000000000000, 0.000000000000000, 1.00000000000000]
+R100 zero lead | 2.0000000000000000000000000000*t + 1.0000000000000000000000000000 | Univariate Polynomial Ring in t over Real Field with 100 bits of precision
+R100 degrees | 1 -1 -1 -1 100 [1.0000000000000000000000000000, 2.0000000000000000000000000000]
+R100 P(-0.0) | 0 | Univariate Polynomial Ring in t over Real Field with 100 bits of precision
+R100 t - t | 0 | Univariate Polynomial Ring in t over Real Field with 100 bits of precision
+R100 1/3*t | 0.33333333333333333333333333333*t | Univariate Polynomial Ring in t over Real Field with 100 bits of precision
+R100 t/3 | 0.33333333333333333333333333333*t | Univariate Polynomial Ring in t over Real Field with 100 bits of precision
+R100 (t+1/3)^3 | t^3 + t^2 + 0.33333333333333333333333333333*t + 0.037037037037037037037037037037 | Univariate Polynomial Ring in t over Real Field with 100 bits of precision
+R100 f(2) | 3.00000000000000 | Real Field with 53 bits of precision
+R100 f(1/3) | 0.500000000000000 | Real Field with 53 bits of precision
+R100 f(t+1) | 1.50000000000000*t^2 + t + 0.500000000000000 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+R100 deriv | 4.50000000000000*t^2 - 2.00000000000000 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+R100 diff | 4.50000000000000*t^2 - 2.00000000000000 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+R100 change_ring QQ | 3/2*t^2 + 1 | Univariate Polynomial Ring in t over Rational Field
+R100 change_ring RDF | 1.5*t^2 + 0.3333333333333333 | Univariate Polynomial Ring in t over Real Double Field
+R100 change_ring CC | 1.50000000000000*t^2 + 0.333333333333333 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+R100 P(list) | 2.0000000000000000000000000000*t^2 + 0.33333333333333333333333333333*t + 1.0000000000000000000000000000 | Univariate Polynomial Ring in t over Real Field with 100 bits of precision
+R100 P(SR) | t^2 + 0.33333333333333333333333333333 | Univariate Polynomial Ring in t over Real Field with 100 bits of precision
+R100 P(QQt) | 0.33333333333333333333333333333*t + 1.0000000000000000000000000000 | Univariate Polynomial Ring in t over Real Field with 100 bits of precision
+R100 P(str) | t^2 + 1.0000000000000000000000000000 | Univariate Polynomial Ring in t over Real Field with 100 bits of precision
+R100 eq | True True True False True True
+R100 hash | True True
+R100 ZZt + t | 2.0000000000000000000000000000*t | Univariate Polynomial Ring in t over Real Field with 100 bits of precision
+R100 t + QQt | 1.3333333333333333333333333333*t | Univariate Polynomial Ring in t over Real Field with 100 bits of precision
+R100 QQt * t | 0.33333333333333333333333333333*t^2 | Univariate Polynomial Ring in t over Real Field with 100 bits of precision
+R100 t + ZZx | ERR TypeError
+R100 t^0 | 1.0000000000000000000000000000 | Univariate Polynomial Ring in t over Real Field with 100 bits of precision
+R100 coefficients | [1.00000000000000, 1.50000000000000] [1.00000000000000, 0.000000000000000, 0.000000000000000, 1.50000000000000] 2.00000000000000 1.50000000000000 {0: 1.00000000000000, 3: 1.50000000000000} [0, 3]
+R100 small | t + 1.00000000000000e-20 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+R100 big | 1.00000000000000e20*t^2 + 1.00000000000000 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+R100 neg lead | -t^2 - 1.0000000000000000000000000000 | Univariate Polynomial Ring in t over Real Field with 100 bits of precision
+R100 zero | True False True True True False 1.0000000000000000000000000000 (t,)
+R100 monic | t + 0.50000000000000000000000000000 | Univariate Polynomial Ring in t over Real Field with 100 bits of precision
+R100 nan | NaN*t + 1.0000000000000000000000000000 | Univariate Polynomial Ring in t over Real Field with 100 bits of precision
+R100 inf | +infinity*t + 1.0000000000000000000000000000 | Univariate Polynomial Ring in t over Real Field with 100 bits of precision
+R100 pow | t^5 + 5.0000000000000000000000000000*t^4 + 10.000000000000000000000000000*t^3 + 10.000000000000000000000000000*t^2 + 5.0000000000000000000000000000*t + 1.0000000000000000000000000000 | Univariate Polynomial Ring in t over Real Field with 100 bits of precision
+R100 pow 1.1 | 1.33100000000000*t^3 + 3.63000000000000*t^2 + 3.30000000000000*t + 1.00000000000000 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+R100 call B | 5.0000000000000000000000000000 | Real Field with 100 bits of precision
+R100 call QQ | 1.2500000000000000000000000000 | Real Field with 100 bits of precision
+R100 call RDF | 5.0 | Real Double Field
+R100 call I | 0.000000000000000 | Complex Field with 53 bits of precision
+R100 call poly | s^2 + 1.0000000000000000000000000000 | Univariate Polynomial Ring in s over Real Field with 100 bits of precision
+R100 call mat | [8.0000000000000000000000000000 10.000000000000000000000000000] ; [15.000000000000000000000000000 23.000000000000000000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Real Field with 100 bits of precision
+R100 neg | -t^2 + 2.0000000000000000000000000000*t - 1.0000000000000000000000000000 | Univariate Polynomial Ring in t over Real Field with 100 bits of precision
+R100 subs | 10.000000000000000000000000000 | Real Field with 100 bits of precision
+R100 trunc | 2.0000000000000000000000000000*t + 1.0000000000000000000000000000 | Univariate Polynomial Ring in t over Real Field with 100 bits of precision
+R100 shift | t^4 + 2.0000000000000000000000000000*t^2 + t | Univariate Polynomial Ring in t over Real Field with 100 bits of precision
+R100 reverse | 2.0000000000000000000000000000*t^2 + 1.0000000000000000000000000000 | Univariate Polynomial Ring in t over Real Field with 100 bits of precision
+R100 int | 0.33333333333333333333333333333*t^3 + t | Univariate Polynomial Ring in t over Real Field with 100 bits of precision
+R100 iter | [2.0000000000000000000000000000, 0.00000000000000000000000000000, 1.0000000000000000000000000000]
+R100 latex | t^{3} + 0.00000000000000000000000000000 t^{2} + 0.00000000000000000000000000000 t + 0.00000000000000000000000000000 | t^{2} - t + 0.00000000000000000000000000000 | 2.0000000000000000000000000000 t^{2} + 0.00000000000000000000000000000 t + 1.0000000000000000000000000000 | 0 | 2.0000000000000000000000000000 t^{5} + 0.00000000000000000000000000000 t^{4} + 0.00000000000000000000000000000 t^{3} + 0.00000000000000000000000000000 t^{2} + 0.00000000000000000000000000000 t - 3.0000000000000000000000000000 | y_{2}^{2} + 0.00000000000000000000000000000 y_{2} + 0.33333333333333333333333333333
+C100 ring | Univariate Polynomial Ring in t over Complex Field with 100 bits of precision | \Bold{C}[t] | True True Complex Field with 100 bits of precision False False 0
+C100 gen | t | Univariate Polynomial Ring in t over Complex Field with 100 bits of precision
+C100 f | 1.50000000000000*t^2 - 2.00000000000000*t + 1.00000000000000 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+C100 f latex | 1.50000000000000 t^{2} - 2.00000000000000 t + 1.00000000000000
+C100 (t-1)(t+1) | t^2 - 1.00000000000000 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+C100 (t-1)(t+1) list | [-1.00000000000000, 0.000000000000000, 1.00000000000000]
+C100 zero lead | 2.0000000000000000000000000000*t + 1.0000000000000000000000000000 | Univariate Polynomial Ring in t over Complex Field with 100 bits of precision
+C100 degrees | 1 -1 -1 -1 100 [1.0000000000000000000000000000, 2.0000000000000000000000000000]
+C100 P(-0.0) | 0 | Univariate Polynomial Ring in t over Complex Field with 100 bits of precision
+C100 t - t | 0 | Univariate Polynomial Ring in t over Complex Field with 100 bits of precision
+C100 1/3*t | 0.33333333333333333333333333333*t | Univariate Polynomial Ring in t over Complex Field with 100 bits of precision
+C100 t/3 | 0.33333333333333333333333333333*t | Univariate Polynomial Ring in t over Complex Field with 100 bits of precision
+C100 (t+1/3)^3 | t^3 + t^2 + 0.33333333333333333333333333333*t + 0.037037037037037037037037037037 | Univariate Polynomial Ring in t over Complex Field with 100 bits of precision
+C100 f(2) | 3.00000000000000 | Complex Field with 53 bits of precision
+C100 f(1/3) | 0.500000000000000 | Complex Field with 53 bits of precision
+C100 f(t+1) | 1.50000000000000*t^2 + t + 0.500000000000000 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+C100 deriv | 4.50000000000000*t^2 - 2.00000000000000 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+C100 diff | 4.50000000000000*t^2 - 2.00000000000000 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+C100 change_ring QQ | ERR TypeError
+C100 change_ring RDF | 1.5*t^2 + 0.3333333333333333 | Univariate Polynomial Ring in t over Real Double Field
+C100 change_ring CC | 1.50000000000000*t^2 + 0.333333333333333 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+C100 P(list) | 2.0000000000000000000000000000*t^2 + 0.33333333333333333333333333333*t + 1.0000000000000000000000000000 | Univariate Polynomial Ring in t over Complex Field with 100 bits of precision
+C100 P(SR) | t^2 + 0.33333333333333333333333333333 | Univariate Polynomial Ring in t over Complex Field with 100 bits of precision
+C100 P(QQt) | 0.33333333333333333333333333333*t + 1.0000000000000000000000000000 | Univariate Polynomial Ring in t over Complex Field with 100 bits of precision
+C100 P(str) | t^2 + 1.0000000000000000000000000000 | Univariate Polynomial Ring in t over Complex Field with 100 bits of precision
+C100 eq | True True True False True True
+C100 hash | True True
+C100 ZZt + t | 2.0000000000000000000000000000*t | Univariate Polynomial Ring in t over Complex Field with 100 bits of precision
+C100 t + QQt | 1.3333333333333333333333333333*t | Univariate Polynomial Ring in t over Complex Field with 100 bits of precision
+C100 QQt * t | 0.33333333333333333333333333333*t^2 | Univariate Polynomial Ring in t over Complex Field with 100 bits of precision
+C100 t + ZZx | ERR TypeError
+C100 t^0 | 1.0000000000000000000000000000 | Univariate Polynomial Ring in t over Complex Field with 100 bits of precision
+C100 coefficients | [1.00000000000000, 1.50000000000000] [1.00000000000000, 0.000000000000000, 0.000000000000000, 1.50000000000000] 2.00000000000000 1.50000000000000 {0: 1.00000000000000, 3: 1.50000000000000} [0, 3]
+C100 small | t + 1.00000000000000e-20 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+C100 big | 1.00000000000000e20*t^2 + 1.00000000000000 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+C100 neg lead | -t^2 - 1.0000000000000000000000000000 | Univariate Polynomial Ring in t over Complex Field with 100 bits of precision
+C100 I coeff | I*t | Univariate Polynomial Ring in t over Complex Field with 100 bits of precision
+C100 cplx | 3.0000000000000000000000000000*t^2 - I*t + 1.0000000000000000000000000000 + 2.0000000000000000000000000000*I | Univariate Polynomial Ring in t over Complex Field with 100 bits of precision
+C100 zero | True False True True True False 1.0000000000000000000000000000 (t,)
+C100 monic | t + 0.50000000000000000000000000000 | Univariate Polynomial Ring in t over Complex Field with 100 bits of precision
+C100 nan | NaN*t + 1.0000000000000000000000000000 | Univariate Polynomial Ring in t over Complex Field with 100 bits of precision
+C100 inf | (+infinity)*t + 1.0000000000000000000000000000 | Univariate Polynomial Ring in t over Complex Field with 100 bits of precision
+C100 pow | t^5 + 5.0000000000000000000000000000*t^4 + 10.000000000000000000000000000*t^3 + 10.000000000000000000000000000*t^2 + 5.0000000000000000000000000000*t + 1.0000000000000000000000000000 | Univariate Polynomial Ring in t over Complex Field with 100 bits of precision
+C100 pow 1.1 | 1.33100000000000*t^3 + 3.63000000000000*t^2 + 3.30000000000000*t + 1.00000000000000 | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+C100 call B | 5.0000000000000000000000000000 | Complex Field with 100 bits of precision
+C100 call QQ | 1.2500000000000000000000000000 | Complex Field with 100 bits of precision
+C100 call RDF | 5.00000000000000 | Complex Field with 53 bits of precision
+C100 call I | 0.000000000000000 | Complex Field with 53 bits of precision
+C100 call poly | s^2 + 1.0000000000000000000000000000 | Univariate Polynomial Ring in s over Complex Field with 100 bits of precision
+C100 call mat | [8.0000000000000000000000000000 10.000000000000000000000000000] ; [15.000000000000000000000000000 23.000000000000000000000000000] | Full MatrixSpace of 2 by 2 dense matrices over Complex Field with 100 bits of precision
+C100 neg | -t^2 + 2.0000000000000000000000000000*t - 1.0000000000000000000000000000 | Univariate Polynomial Ring in t over Complex Field with 100 bits of precision
+C100 subs | 10.000000000000000000000000000 | Complex Field with 100 bits of precision
+C100 trunc | 2.0000000000000000000000000000*t + 1.0000000000000000000000000000 | Univariate Polynomial Ring in t over Complex Field with 100 bits of precision
+C100 shift | t^4 + 2.0000000000000000000000000000*t^2 + t | Univariate Polynomial Ring in t over Complex Field with 100 bits of precision
+C100 reverse | 2.0000000000000000000000000000*t^2 + 1.0000000000000000000000000000 | Univariate Polynomial Ring in t over Complex Field with 100 bits of precision
+C100 int | 0.33333333333333333333333333333*t^3 + t | Univariate Polynomial Ring in t over Complex Field with 100 bits of precision
+C100 iter | [2.0000000000000000000000000000, 0.00000000000000000000000000000, 1.0000000000000000000000000000]
+C100 latex | t^{3} + 0.00000000000000000000000000000 t^{2} + 0.00000000000000000000000000000 t + 0.00000000000000000000000000000 | t^{2} - t + 0.00000000000000000000000000000 | 2.0000000000000000000000000000 t^{2} + 0.00000000000000000000000000000 t + 1.0000000000000000000000000000 | 0 | 2.0000000000000000000000000000 t^{5} + 0.00000000000000000000000000000 t^{4} + 0.00000000000000000000000000000 t^{3} + 0.00000000000000000000000000000 t^{2} + 0.00000000000000000000000000000 t - 3.0000000000000000000000000000 | y_{2}^{2} + 0.00000000000000000000000000000 y_{2} + 0.33333333333333333333333333333

@@ -10,7 +10,7 @@
   "baseSwGzip": 43602,
   "topology": "inventory-3span",
   "baseTopology": "legacy-2span",
-  "swRaw": 222267,
+  "swRaw": 222579,
   "swGzip": 54643,
-  "transition": "difflib (P3b-1, one lazy chunk mod-difflib, fetched on import): measured on its branch with bun 1.4.4 and node v24.21.0: sw.js raw 222203 (the group's manifest entry), over 221953, so swRaw = exact + 64 = 222267; normalized gzip-9 54579, over 54525, so swGzip = exact + 64 = 54643"
+  "transition": "shutil (P3b-2, one lazy chunk mod-shutil, fetched on import): measured on its branch with bun 1.4.4 and node v24.21.0: sw.js raw 222515 (the group's manifest entry), over 222267, so swRaw = exact + 64 = 222579; normalized gzip-9 54621, under 54643, unchanged"
 }
