@@ -1,6 +1,6 @@
 # Native engines in the desktop app
 
-*Status: plan r11: the architecture revision (r10) with its tests added (§8.1, r11); docs only, nothing is built. It replaces r12 (merged at 2999416e) with William's architecture decision of
+*Status: plan r11: the architecture revision (r10) plus its tests (§8.1) and the page items; docs only, nothing is built. It replaces r12 (merged at 2999416e) with William's architecture decision of
 Nov 7, 2026, about 12:15–12:30 PM PST.
 
 Owner and sole author: @sagebrush-remote-compute. Reviewers: astra (SEC), daybreak3 (ENGINE), daybreak4 (PERF),
@@ -262,9 +262,11 @@ Node is the baseline because r8's evidence (A) is Node. 1b is the A/A control. T
 - the N-API add-on with Stop pins;
 - the framed data and control pipes, permission version and RUN/ARMED Stop (N1-2), with conformance rows 1–5.
 
+**The output-frames harness** (#826, carried from r12) runs in the app's webview: the desktop UI is still WebKit (macOS, Linux) and WebView2 (Windows), and outputs move into frames from OUT-ISO phase 2. This is a UI test, not an engine measurement.
+
 **The pre-registration** (`proto/n1/harness/PREREGISTRATION.md`, r3, PERF PROTOCOL CLEAR at 98ed461e) becomes r4:
 - the labels become the three runtimes above;
-- the measurements are those listed here. The page and webview marks are dropped; the subprocess's own marks stay.
+- the measurements are those listed here. The page and webview timing marks are dropped from the runtime comparison (the subprocess's own marks stay); the output-frames harness above is separate.
 
 r4 goes back to PERF. Counted runs still need PERF's final harness and packet review. William answered the machine questions on Nov 7 (about 12:46 PM PST): Windows runs use a CI workflow he adds himself; the m1 GUI "Yes, for N1 only"; sudo packages and the VM3/VM4 timing box "Yes to both".
 
@@ -274,7 +276,7 @@ r4 goes back to PERF. Counted runs still need PERF's final harness and packet re
 |---|---|---|
 | **N0** | r10 reviewed; William's architecture decision recorded | all lanes; William |
 | **N1** | §7: runtime comparison, protocol over the pipe, licence inventory; unsigned local builds only | ENGINE, PERF, SIZE, SEC |
-| **N2** | The protocol and handshake in the page client and the engine. Then: the engine subprocess on macOS and Linux with the chosen runtime, the bundled engine in the app, engine upgrades, the licence check in CI, and permissions in the engine | all lanes, with the §8.1 tests (T1–T5) passing |
+| **N2** | **First, one client:** merge the page's worker client (`web/notebook/worker-kernel.js`) and remote client (`web/notebook/remote-client.js`) into the one protocol client of §2, pinned to today's `WorkerKernel` behaviour, before any subprocess work. Then the protocol and handshake in the client and the engine. Then: the engine subprocess on macOS and Linux with the chosen runtime, the bundled engine in the app, engine upgrades, the licence check in CI, and permissions in the engine. **The page items** (carried from r12): the refused-write restore per change kind, progress from the engine's snapshots, Stop through the one client with the restart pattern for the hard kill, a "starting" pill state, and the engine's own words for "where code runs" and "didn't start" (board writes the words) | all lanes, with the §8.1 tests (T1–T5) passing |
 | **N3** | Windows parity | all lanes; the same T1 suite passes on the Windows subprocess |
 | **N4** | The engine as the desktop default; "Your computer" on the engine, if William decides so (Q2) | William |
 | **N5** | Later, planned separately: CPython and C extensions, terminals over the protocol, Android native, warm engines | — |
