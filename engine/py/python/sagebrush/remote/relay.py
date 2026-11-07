@@ -881,6 +881,10 @@ async def run_relay(key, err=None, cwd=None):
         runner.gateway.shutdown()
         if runner.terms is not None:
             runner.terms.stop_all()
+            from sagebrush.remote.terminal import drain_sessions
+            left = await drain_sessions(3.0)  # (every PTY session empty, a late group included, before drain_groups)
+            if left:
+                runner.err("Terminal sessions %s were killed at the deadline.\n" % ", ".join(map(str, left)))
         from sagebrush.remote.gateway import drain_groups
         left = await drain_groups(3.0)
         if left:

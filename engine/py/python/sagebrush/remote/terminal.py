@@ -27,9 +27,13 @@ nothing.  Every reattach and every new leg needs a fresh proof.
 
 Sessions (T4): at most 4 running; a PTY with the user's $SHELL (else /bin/sh) as a login shell, in a new session,
 TERM=xterm-256color, the runner's cwd and environment; output read into a 1 MiB ring at most 1 MiB/s (whether a page
-is attached or not, until T-1b's credit); ended sessions' rings kept 10 minutes, the last 8; a detached session with
+is attached or not, until T-1b's credit); ended sessions' rings kept 10 minutes, the last 8, by an expiry timer of
+their own (and checked again at a reattach), their ring and any grant released when they go; a detached session with
 no output and no attach for 24 h stopped.  Stopping (kill, exit's leftovers, the runner ending) is the tree rule over
-every process group in the PTY's session: SIGHUP, SIGTERM, then SIGKILL 2 s later.
+every process group in the PTY's session: SIGHUP, SIGTERM, then SIGKILL 2 s later, with the session counted again
+every 50 ms until it is empty, so a group made after one census (a job trapping HUP or TERM) is caught by the next.
+Only then is the PTY drained (bounded: one ring's worth) and closed; meanwhile it is read at the rate ceiling only,
+and at 30 s it is closed whatever still writes.  At the runner's exit drain_sessions waits for every such session.
 """
 
 import base64
@@ -59,6 +63,9 @@ TERMINAL_LIMITS = {
     "rate": 1024 * 1024,        # output bytes read per second, at most
     "read": 49_137,             # one PTY read, at most (T12-CAP-1: the decoded bytes one output frame holds)
     "size": (1, 1000),          # rows and cols
+    "killMs": 2000,             # the tree rule's SIGTERM -> SIGKILL (gateway._kill_tree)
+    "sweepMs": 50,              # a stopping session's census, again, until its PTY session is empty
+    "sweepCapMs": 30_000,       # ... the PTY closed by then regardless; the census goes on every second
     "body": 256,                # an open's body, bytes
     "message": 8 * 1024,        # any message to the runner but `in` (T-1b), bytes
 }
@@ -169,6 +176,9 @@ class Session:
         self.pidfd = None
         self.poll_timer = None
         self.stopping = False
+        self.sweep_started = None   # (when the stop's census began)
+        self.sweep_timer = None
+        self.signalled = {}         # (process group -> when it was sent SIGHUP and the tree rule)
         self.rows, self.cols = rows, cols
 
     # ---- start
@@ -230,7 +240,8 @@ class Session:
         if not b:
             return self._read_off()
         self.rate_bytes += len(b)
-        self.ring.append(b)
+        if self.ring is not None:  # (released: an ended session pruned while its stop's sweep still runs)
+            self.ring.append(b)
         self.last_activity = now
         self.host.stats["outBytes"] += len(b)
 
@@ -276,55 +287,131 @@ class Session:
             self.exit = {"code": None, "signal": sig}
         else:
             self.exit = {"code": code, "signal": None}
-        self._drain()
-        self._release()
-        # (what the shell left in its session, background jobs included: the tree rule, as at a kill)
-        self._stop_groups()
-        self.host.ended(self)
-        return True
-
-    def _drain(self):
-        """What the PTY still holds after the shell's exit, into the ring (bounded by the ring and the rate's read)."""
-        while self.master is not None:
-            try:
-                b = os.read(self.master, TERMINAL_LIMITS["read"])
-            except OSError:
-                return
-            if not b:
-                return
-            self.ring.append(b)
-
-    def _release(self):
-        self._read_off()
-        self.host.timers.clear_timeout(self.rate_timer)
-        self.host.timers.clear_timeout(self.poll_timer)
-        self.rate_timer = self.poll_timer = None
         if self.pidfd is not None:
             self.host.loop.remove_reader(self.pidfd)
             os.close(self.pidfd)
             self.pidfd = None
+        self.host.timers.clear_timeout(self.poll_timer)
+        self.poll_timer = None
+        # (what the shell left in its session, background jobs included: the tree rule, as at a kill; the PTY is
+        # drained and closed once the session is empty, or at the sweep's bound, whichever is first)
+        self._start_sweep()
+        self.host.ended(self)
+        return True
+
+    def _drain(self):
+        """The PTY's last output into the ring, once the session is empty: bounded work, never "until it stops"
+        (at most one ring's worth, in at most that many reads), whatever is still writing."""
+        left = TERMINAL_LIMITS["ring"]
+        for _ in range(-(-left // TERMINAL_LIMITS["read"])):
+            if self.master is None or left <= 0:
+                return
+            try:
+                b = os.read(self.master, min(TERMINAL_LIMITS["read"], left))
+            except OSError:
+                return
+            if not b:
+                return
+            left -= len(b)
+            if self.ring is not None:
+                self.ring.append(b)
+
+    def _release(self):
+        self._read_off()
+        self.host.timers.clear_timeout(self.rate_timer)
+        self.rate_timer = None
         if self.master is not None:
             os.close(self.master)
             self.master = None
 
-    # ---- stop: the tree rule over every group in the PTY's session
+    # ---- stop: the tree rule over every group in the PTY's session, again and again until it is empty
     def stop(self):
         self.stopping = True
-        self._stop_groups()
+        self._start_sweep()
 
-    def _stop_groups(self):
-        if self.leader is None:
+    def _start_sweep(self):
+        if self.leader is None or self.sweep_started is not None:
             return
+        self.sweep_started = self.host.timers.now()
+        STOPPING[self.leader] = self
+        self._sweep()
+
+    def _sweep(self):
+        """One census of the PTY's session: a group not seen before gets SIGHUP and the tree rule (SIGTERM, SIGKILL
+        2 s later); one seen and still there past that gets SIGKILL again.  So a job that makes a new group after
+        an earlier census (trapping HUP or TERM) is caught by a later one.  Repeated every sweepMs until the session
+        is empty and the shell reaped; then the bounded drain and the PTY closed.  At sweepCapMs the PTY is closed
+        anyway (cleanup never waits on a producer), and the census goes on every second."""
+        self.sweep_timer = None
+        now = self.host.timers.now()
+        groups = self.census()
+        for g in groups:
+            if g not in self.signalled:
+                self.signalled[g] = now
+                try:
+                    os.killpg(g, signal.SIGHUP)
+                except (ProcessLookupError, PermissionError):
+                    continue
+                _kill_tree(g)
+                self.host.stats["groupsStopped"] += 1
+            elif now - self.signalled[g] > TERMINAL_LIMITS["killMs"] + TERMINAL_LIMITS["sweepMs"]:
+                try:
+                    os.killpg(g, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
+        if not groups and self.exit is not None:
+            self._drain()
+            self._release()
+            STOPPING.pop(self.leader, None)
+            return
+        late = now - self.sweep_started >= TERMINAL_LIMITS["sweepCapMs"]
+        if late and self.master is not None:
+            self.host.stats["sweepCapped"] += 1
+            self._drain()
+            self._release()
+        self.sweep_timer = self.host.timers.set_timeout(self._sweep, 1000 if late else TERMINAL_LIMITS["sweepMs"])
+
+    def census(self):
         groups = _session_groups(self.leader)
         if self.exit is None:
             groups.add(self.leader)
-        for g in groups:
-            try:
-                os.killpg(g, signal.SIGHUP)
-            except (ProcessLookupError, PermissionError):
+        return groups
+
+
+STOPPING = {}  # (leader pid -> a Session being stopped whose census goes on: drain_sessions waits for them at exit)
+
+
+async def drain_sessions(timeout=3.0):
+    """At the runner's exit, before drain_groups: census every stopping session's PTY session until each is empty,
+    giving any group made late its tree rule, then SIGKILL to every group still there at the deadline.  Returns the
+    leaders whose sessions still had members then."""
+    import asyncio
+    loop = asyncio.get_running_loop()
+    end = loop.time() + timeout
+    while True:
+        alive = []
+        for leader, s in list(STOPPING.items()):
+            groups = s.census()
+            if not groups and s.exit is not None:
+                STOPPING.pop(leader, None)
                 continue
-            _kill_tree(g)
-        self.host.stats["groupsStopped"] += len(groups)
+            alive.append(leader)
+            for g in groups:
+                if g not in s.signalled:
+                    s.signalled[g] = s.host.timers.now()
+                    try:
+                        os.killpg(g, signal.SIGHUP)
+                    except (ProcessLookupError, PermissionError):
+                        continue
+                    _kill_tree(g)
+                elif loop.time() >= end:
+                    try:
+                        os.killpg(g, signal.SIGKILL)
+                    except (ProcessLookupError, PermissionError):
+                        pass
+        if not alive or loop.time() >= end + 0.5:
+            return alive
+        await asyncio.sleep(0.05)
 
 
 class Terminals:
@@ -337,8 +424,9 @@ class Terminals:
         self.running = {}   # (session id -> Session)
         self.ended_ = []    # (ended Sessions, oldest first: at most TERMINAL_LIMITS["ended"], for endedMs)
         self.idle_timer = None
+        self.prune_timer = None
         self.stats = {"spawned": 0, "opens": 0, "refused": 0, "takeovers": 0, "lateIgnored": 0, "outBytes": 0,
-                      "ratePauses": 0, "groupsStopped": 0, "idleStopped": 0}
+                      "ratePauses": 0, "groupsStopped": 0, "idleStopped": 0, "sweepCapped": 0, "expired": 0}
 
     # ---- pages
     def page_message(self, p, msg):
@@ -407,6 +495,7 @@ class Terminals:
                 return self._error(p, "spawn", detail=type(e).__name__)
             self.running[s.id] = s
         else:
+            self._prune_ended()  # (an ended session past its time is gone, whether or not its timer has run yet)
             s = self.running.get(sid) or next((e for e in self.ended_ if e.id == sid), None)
             if s is None:
                 return self._error(p, "unknown_session")
@@ -457,8 +546,25 @@ class Terminals:
             s.grant.page.send({"t": "exit", "code": s.exit["code"], "signal": s.exit["signal"]})
 
     def _prune_ended(self):
+        """Ended sessions past endedMs, or beyond the last `ended`, are gone: out of the list, their grant ended (so
+        no page keeps one through it) and their ring released.  Then the next expiry is scheduled, running sessions
+        or not."""
         now = self.timers.now()
-        self.ended_ = [e for e in self.ended_ if now - e.ended_at < TERMINAL_LIMITS["endedMs"]][-TERMINAL_LIMITS["ended"]:]
+        keep = [e for e in self.ended_ if now - e.ended_at < TERMINAL_LIMITS["endedMs"]][-TERMINAL_LIMITS["ended"]:]
+        for e in self.ended_:
+            if e not in keep:
+                self.stats["expired"] += 1
+                if e.grant is not None:
+                    page = e.grant.page
+                    self._end_grant(e.grant)
+                    self._error(page, "expired")
+                e.ring = None
+        self.ended_ = keep
+        self.timers.clear_timeout(self.prune_timer)
+        self.prune_timer = None
+        if keep:
+            due = keep[0].ended_at + TERMINAL_LIMITS["endedMs"] - now
+            self.prune_timer = self.timers.set_timeout(self._prune_ended, max(due, 1))
 
     def _arm_idle(self):
         if self.idle_timer is None and self.running:
@@ -478,7 +584,8 @@ class Terminals:
     def stop_all(self):
         """The runner ending (Ctrl-C, SIGTERM, revoke, replacement): every session stopped by the tree rule (R8)."""
         self.timers.clear_timeout(self.idle_timer)
-        self.idle_timer = None
+        self.timers.clear_timeout(self.prune_timer)
+        self.idle_timer = self.prune_timer = None
         for s in list(self.running.values()):
             if s.grant is not None:
                 self._end_grant(s.grant)

@@ -57,6 +57,42 @@ while :; do sleep 0.05; done
 EXIT7 = shell("exit7.sh", "echo bye\nexit 7\n")
 
 
+def script(name, body):
+    path = os.path.join(TMP, name)
+    with open(path, "w") as f:
+        f.write(body)
+    return path
+
+
+# (daybreak3's TERM-SESSION-GROUP-RACE-1: a job in its own group that, on SIGHUP, makes a NEW group in the same
+# session 0.3 s later (after the first census), records its pid, and ignores SIGTERM: only a census that repeats
+# catches it)
+TRAPPER = script("trapper.py", """import os, signal, subprocess, sys, time
+os.setpgid(0, 0)
+def late(*a):
+    time.sleep(0.3)
+    p = subprocess.Popen([sys.executable, "-I", "-S", "-c", "import os,time; os.setpgid(0,0); time.sleep(600)"])
+    with open(sys.argv[1], "w") as f:
+        f.write(str(p.pid))
+signal.signal(signal.SIGHUP, late)
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+while True:
+    time.sleep(0.05)
+""")
+LATE_PID = os.path.join(TMP, "late.pid")
+LATE = shell("late.sh", "%s -I -S %s %s &\nwhile :; do sleep 0.05; done\n" % (sys.executable, TRAPPER, LATE_PID))
+# (astra's T1-DRAIN-WORK-1: a producer in its own group that floods the PTY and ignores HUP and TERM (only SIGKILL,
+# or the PTY's close, ends it); the shell exits at once)
+FLOODER = script("flood.py", """import os, signal
+os.setpgid(0, 0)
+signal.signal(signal.SIGHUP, signal.SIG_IGN)
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+while True:
+    os.write(1, b"x" * 65536)
+""")
+FLOOD = shell("flood.sh", "%s -I -S %s &\nsleep 0.3\nexit 3\n" % (sys.executable, FLOODER))
+
+
 class Run:
     """A RelayRunner serving terminals, against the fake relay."""
 
@@ -84,6 +120,7 @@ class Run:
         self.runner.gateway.shutdown()
         if self.runner.terms is not None:
             self.runner.terms.stop_all()
+        await T.drain_sessions(3.0)
         await drain_groups(3.0)
         self.relay.stop()
 
@@ -312,7 +349,8 @@ async def test_session_lifecycle():
         g, m = await recv(leg)
         assert g == 1 and m["t"] == "exit" and m["code"] is None and m["signal"] in ("SIGHUP", "SIGTERM", "SIGKILL"), m
         assert await until(lambda: not session_groups_alive(s), 5), session_groups_alive(s)
-        assert s.id not in t.terms.running and s in t.terms.ended_ and s.master is None and s.pidfd is None
+        assert await until(lambda: s.master is None and s.pidfd is None and s.leader not in T.STOPPING, 5)
+        assert s.id not in t.terms.running and s in t.terms.ended_
     finally:
         await t.end()
         sg.close()
@@ -333,7 +371,7 @@ async def test_exit_code_and_ended_sessions():
         g, m = await recv(leg)
         assert m == {"t": "exit", "code": 7, "signal": None}, m
         s = t.terms.ended_[-1]
-        assert s.id == sid and b"bye" in bytes(s.ring.buf)
+        assert s.id == sid and await until(lambda: b"bye" in bytes(s.ring.buf)), bytes(s.ring.buf)
         # (an ended session's ring stays for a reattach: opened, then its exit; still one page per session, so the
         # page that held it is told "elsewhere")
         p2 = await tpaired(t, leg, sg, 2)
@@ -347,6 +385,8 @@ async def test_exit_code_and_ended_sessions():
             t.terms.ended_[-1].ended_at = t.terms.timers.now()
         t.terms._prune_ended()
         assert len(t.terms.ended_) == 8 and s not in t.terms.ended_
+        # (pruned by count while page 2 holds it: that page is told, its grant released)
+        assert await recv(leg) == (2, {"t": "error", "error": "expired"}) and t.runner.pages[2].grant is None
         t.terms.ended_[0].ended_at -= T.TERMINAL_LIMITS["endedMs"]
         t.terms._prune_ended()
         assert len(t.terms.ended_) == 7
@@ -456,6 +496,165 @@ async def test_limits_idle_and_stop():
     finally:
         await t.end()
         sg.close()
+
+
+# ================= r2: ended expiry when nothing else happens; a late group; a flooding producer
+
+def proc_gone(pid):
+    try:
+        with open("/proc/%d/stat" % pid, "rb") as f:
+            st = f.read()
+    except OSError:
+        return True
+    return st[st.rfind(b")") + 2:].split()[0] == b"Z"
+
+
+@aio
+async def test_ended_expiry_quiet_and_on_lookup():
+    """TERM-ENDED-TTL-1 / T1-ENDED-TTL-1: the last session's ring expires with nothing running and no other activity
+    (its own timer), releasing its ring and the attached page's grant; and a reattach checks the age itself."""
+    if NODE is None:
+        print("  (no node) SKIPPED")
+        return
+    sg = await Signer().start()
+    saved = T.TERMINAL_LIMITS["endedMs"]
+    T.TERMINAL_LIMITS["endedMs"] = 400
+    t = await Run().start(sh=EXIT7)
+    try:
+        leg = await t.relay.leg()
+        p = await tpaired(t, leg, sg, 1)
+        sid = (await p.open())["session"]
+        g, m = await recv(leg)
+        assert m["t"] == "exit", m
+        s = t.terms.ended_[-1]
+        page = t.runner.pages[1]
+        assert not t.terms.running and page.grant is not None and t.terms.idle_timer is not None
+        # (quiet: nothing running, nothing sent; its expiry runs anyway)
+        g, m = await recv(leg, 3)
+        assert (g, m) == (1, {"t": "error", "error": "expired"}), (g, m)
+        assert t.terms.ended_ == [] and t.terms.stats["expired"] == 1 and page.grant is None and s.grant is None
+        assert s.ring is None and t.terms.prune_timer is None
+        # (on lookup: an ended session past its age, its timer not yet run, can't be reattached)
+        p2 = await tpaired(t, leg, sg, 2)
+        sid2 = (await p2.open())["session"]
+        await recv(leg)  # (its exit)
+        t.terms.timers.clear_timeout(t.terms.prune_timer)
+        t.terms.prune_timer = None
+        await asyncio.sleep(0.5)
+        assert [e.id for e in t.terms.ended_] == [sid2]
+        leg.control(relay="page-close", conn="c2", gen=2)
+        await asyncio.sleep(0.1)
+        p3 = await tpaired(t, leg, sg, 3)
+        assert await p3.open(session=sid2) == {"t": "error", "error": "unknown_session"}
+        assert t.terms.ended_ == [] and sid != sid2
+    finally:
+        T.TERMINAL_LIMITS["endedMs"] = saved
+        await t.end()
+        sg.close()
+
+
+@aio
+async def test_late_group_caught():
+    """TERM-SESSION-GROUP-RACE-1: a job that makes a new group in the session after the first census is still
+    stopped (the census repeats until the session is empty); and at the runner's exit drain_sessions does the same."""
+    if NODE is None:
+        print("  (no node) SKIPPED")
+        return
+    sg = await Signer().start()
+    for how in ("kill", "exit"):
+        if os.path.exists(LATE_PID):
+            os.unlink(LATE_PID)
+        t = await Run().start(sh=LATE)
+        try:
+            leg = await t.relay.leg()
+            p = await tpaired(t, leg, sg, 1)
+            sid = (await p.open())["session"]
+            s = t.terms.running[sid]
+            assert await until(lambda: len(session_groups_alive(s)) >= 2, 5), session_groups_alive(s)
+            if how == "kill":
+                p.send({"t": "kill", "session": sid})
+            else:
+                t.terms.stop_all()
+                left = await T.drain_sessions(6.0)
+                assert left == [], left
+            assert await until(lambda: os.path.exists(LATE_PID) and open(LATE_PID).read().strip(), 5)
+            late = int(open(LATE_PID).read())
+            assert await until(lambda: not session_groups_alive(s), 8), (how, session_groups_alive(s))
+            assert await until(lambda: proc_gone(late), 3), (how, late)
+            assert late in s.signalled, (how, late, s.signalled)  # (its own group, made late, was signalled)
+            assert await until(lambda: s.master is None and s.leader not in T.STOPPING, 5), how
+        finally:
+            await t.end()
+    sg.close()
+
+
+@aio
+async def test_flooding_producer_bounded():
+    """T1-DRAIN-WORK-1: the shell exits leaving a producer that floods the PTY and ignores HUP and TERM.  The groups
+    are stopped first, the PTY is read only at the rate ceiling meanwhile, then drained (bounded) and closed once
+    the session is empty; and with a short cap the PTY is closed even while the producer still writes."""
+    if NODE is None:
+        print("  (no node) SKIPPED")
+        return
+    sg = await Signer().start()
+    saved = T.TERMINAL_LIMITS["sweepCapMs"]
+    try:
+        for cap in (30_000, 300):
+            T.TERMINAL_LIMITS["sweepCapMs"] = cap
+            t = await Run().start(sh=FLOOD)
+            try:
+                leg = await t.relay.leg()
+                p = await tpaired(t, leg, sg, 1)
+                t0 = time.monotonic()
+                sid = (await p.open())["session"]
+                g, m = await recv(leg, 10)
+                assert m == {"t": "exit", "code": 3, "signal": None}, m
+                s = t.terms.ended_[-1]
+                assert s.id == sid
+                if cap == 300:
+                    # (closed at the cap, the producer not yet stopped (it ignores HUP and TERM; SIGKILL is at 2 s))
+                    assert await until(lambda: s.master is None, 2), "the PTY not closed at the cap"
+                    assert t.terms.stats["sweepCapped"] == 1 and time.monotonic() - t0 < 2.0
+                assert await until(lambda: not session_groups_alive(s), 6), session_groups_alive(s)
+                assert await until(lambda: s.master is None and s.leader not in T.STOPPING, 3)
+                elapsed = time.monotonic() - t0
+                # (work bounded: at most the rate per second, plus the final drain of one ring)
+                assert t.terms.stats["outBytes"] <= T.TERMINAL_LIMITS["rate"] * (elapsed + 1) + T.TERMINAL_LIMITS["ring"], \
+                    (t.terms.stats["outBytes"], elapsed)
+                assert len(s.ring.buf) <= T.TERMINAL_LIMITS["ring"] and t.terms.stats["ratePauses"] >= 1
+            finally:
+                await t.end()
+    finally:
+        T.TERMINAL_LIMITS["sweepCapMs"] = saved
+        sg.close()
+
+
+def test_drain_is_bounded_whatever_writes():
+    """T1-DRAIN-WORK-1, exactly: the final drain against a PTY that never runs dry (a fake read that always has more)
+    stops after one ring's worth, in at most ring/read reads."""
+    from sagebrush.remote.pair import RealTimers
+
+    class Host:
+        stats = {"outBytes": 0}
+        timers = RealTimers()
+    s = T.Session(Host(), "s" * 22, 24, 80)
+    s.master = 12345  # (never a real fd: the read below is replaced)
+    calls = []
+    real = T.os.read
+
+    def endless(fd, n):
+        assert fd == 12345
+        calls.append(n)
+        if len(calls) > 1000:
+            raise RuntimeError("an unbounded drain")
+        return b"y" * n
+    T.os.read = endless
+    try:
+        s._drain()
+    finally:
+        T.os.read = real
+    cap, rd = T.TERMINAL_LIMITS["ring"], T.TERMINAL_LIMITS["read"]
+    assert len(calls) <= -(-cap // rd) and sum(calls) <= cap and len(s.ring.buf) == sum(calls) == cap, (len(calls), sum(calls))
 
 
 def test_ring_and_replay():
