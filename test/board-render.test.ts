@@ -14,7 +14,7 @@ test("board render: an example board, to a file; a Mermaid flowchart from standa
   const dir = mkdtempSync(join(tmpdir(), "sb-render-"));
   try {
     const out = join(dir, "b.svg");
-    const r = cli([boardExample("primes.json"), "--svg", "-o", out, "--page", "2"]);
+    const r = cli([boardExample("primes.board.json"), "--svg", "-o", out, "--page", "2"]);
     assert.equal(r.status, 0, r.stderr);
     const svg = readFileSync(out, "utf8");
     assert.match(svg, /^<\?xml version="1\.0" encoding="UTF-8"\?>\n<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg"/);
@@ -47,7 +47,7 @@ test("board: a board command it doesn't have is said so (agent-UX R0-3); a progr
 });
 
 test("board render: a page that is not there, a file that is not there, no file", () => {
-  const p = cli([boardExample("primes.json"), "--page", "9"]);
+  const p = cli([boardExample("primes.board.json"), "--page", "9"]);
   assert.equal(p.status, 2);
   assert.match(p.stderr, /--page: from 1 to 3/);
   const n = cli(["/nonexistent/board.json"]);
