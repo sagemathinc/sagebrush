@@ -16,6 +16,22 @@
    "pr": 801
   },
   {
+   "name": "pathlib.PureWindowsPath.ntpath",
+   "old": "(module)",
+   "new": "(absent)",
+   "upstream": "CPython 3.14.10",
+   "reason": "Upstream removed it: 3.14.4's PureWindowsPath class body did `import ntpath`, so the module was a class attribute; 3.14.10's pathlib imports ntpath at module level (pathlib.ntpath). Checked: hasattr(pathlib.PureWindowsPath, 'ntpath'), hasattr(pathlib.WindowsPath, 'ntpath') on CPython 3.14.4: True, True; on CPython 3.14.10: False, False. P3b-1's resync of pathlib to 3.14.10 follows it.",
+   "pr": 830
+  },
+  {
+   "name": "pathlib.WindowsPath.ntpath",
+   "old": "(module)",
+   "new": "(absent)",
+   "upstream": "CPython 3.14.10",
+   "reason": "Upstream removed it: 3.14.4's PureWindowsPath class body did `import ntpath`, so the module was a class attribute; 3.14.10's pathlib imports ntpath at module level (pathlib.ntpath). Checked: hasattr(pathlib.PureWindowsPath, 'ntpath'), hasattr(pathlib.WindowsPath, 'ntpath') on CPython 3.14.4: True, True; on CPython 3.14.10: False, False. P3b-1's resync of pathlib to 3.14.10 follows it.",
+   "pr": 830
+  },
+  {
    "name": "sage_all.LaurentSeriesRing",
    "old": "(base, name=, default_prec=, names=, sparse=, **kwds=)",
    "new": "(base, name=, arg2=, names=, sparse=, default_prec=, **kwds=)",

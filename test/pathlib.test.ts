@@ -62,7 +62,7 @@ test("os: stat_result's fields, stat/lstat of a path-like, bytes paths, and CPyt
 // names; io.text_encoding(None) and io.open as CPython's)
 test("os: follow_symlinks, the tuple's integer times, makedirs' exist_ok, DirEntry's cached stat, bytes scandir, io", () => {
   const prog = [
-    "import os, io, stat",
+    "import os, io, stat, pathlib",
     "print(stat.S_ISLNK(os.stat('ln', follow_symlinks=False).st_mode), stat.S_ISLNK(os.stat('ln').st_mode), os.stat('ln').st_size)",
     "st = os.stat('f.txt')",
     "print(type(st[8]).__name__, st[8] == int(st.st_mtime), type(st[7]).__name__, type(st.st_mtime).__name__)",
@@ -75,6 +75,8 @@ test("os: follow_symlinks, the tuple's integer times, makedirs' exist_ok, DirEnt
     "print(e.stat().st_size, os.stat('f.txt').st_size)",
     "print(sorted((type(x.name).__name__, x.name) for x in os.scandir(b'.')))",
     "print(io.text_encoding(None), io.text_encoding('utf-8'), io.open is open)",
+    "print(os.fsdecode(b'caf\\xc3\\xa9'), os.fsdecode(b'\\xff') == '\\udcff', os.fsdecode('s'), repr(os.fsdecode(pathlib.Path('p'))), type(os.fsdecode(pathlib.Path('p'))).__name__, os.fsdecode(os.fsencode('\\udcff')) == '\\udcff')",
+    "print(os.F_OK, os.R_OK, os.W_OK, os.X_OK, os.SEEK_SET, os.SEEK_CUR, os.SEEK_END, os.O_NONBLOCK, os.defpath, os.defpath == os.path.defpath)",
   ].join("\n");
   const run = (cmd: string, args: string[]) => {
     const d = mkdtempSync(join(process.env.TMPDIR || tmpdir(), "pathlib-os2-"));
@@ -88,6 +90,6 @@ test("os: follow_symlinks, the tuple's integer times, makedirs' exist_ok, DirEnt
     }
   };
   const want = run("python3", ["p.py"]);
-  assert.equal(want.split("\n").length, 8, `CPython ran every line:\n${want}`);
+  assert.equal(want.split("\n").length, 10, `CPython ran every line:\n${want}`);
   assert.equal(run(process.execPath, [CLI, "p.py"]), want);
 });

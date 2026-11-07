@@ -151,42 +151,84 @@ pub fn isqrt(n: u64) -> u64 {
     r as u64
 }
 
-/// The primes up to n (sieve of Eratosthenes on odd numbers).
+/// Sieve writes (or indices scanned) between two interrupt checks: tens of
+/// microseconds of work, so a Stop is seen promptly, and in WebAssembly one
+/// host poll per block (check_coarse) costs nothing measurable.
+const SIEVE_BLOCK: usize = 1 << 16;
+
+/// The primes up to n (sieve of Eratosthenes on odd numbers).  Interruptible
+/// throughout: before the allocation, every SIEVE_BLOCK writes of a marking
+/// pass, and every SIEVE_BLOCK indices of the collection.
 pub fn primes_up_to(n: u64) -> Vec<u64> {
     if n < 2 {
         return vec![];
     }
+    sagebrush_interrupt::phase("ap.sieve");
+    sagebrush_interrupt::check_coarse();
     let half = (n as usize - 1) / 2; // index i is 2 i + 3
     let mut composite = vec![false; half];
+    sagebrush_interrupt::check_coarse();
     let mut i = 0;
     while ((2 * i + 3) as u64) * ((2 * i + 3) as u64) <= n {
         if !composite[i] {
             let q = 2 * i + 3;
             let mut j = (q * q - 3) / 2;
             while j < half {
-                composite[j] = true;
-                j += q;
+                let end = half.min(j.saturating_add(q.saturating_mul(SIEVE_BLOCK)));
+                while j < end {
+                    composite[j] = true;
+                    j += q;
+                }
+                sagebrush_interrupt::check_coarse();
             }
         }
         i += 1;
     }
     let mut out = vec![2];
-    out.extend((0..half).filter(|&i| !composite[i]).map(|i| 2 * i as u64 + 3));
+    let mut start = 0;
+    while start < half {
+        let end = half.min(start + SIEVE_BLOCK);
+        out.extend((start..end).filter(|&i| !composite[i]).map(|i| 2 * i as u64 + 3));
+        sagebrush_interrupt::check_coarse();
+        start = end;
+    }
     out
 }
 
 /// (p, a_p) for every prime p <= n, None at primes dividing the
-/// discriminant; in parallel over chunks of primes.
+/// discriminant; in parallel over chunks of primes.  Interruptible at every
+/// prime (as `moments`), and throughout the sieve.
 pub fn aplist(e: &EllipticCurve, n: u64) -> Vec<(u64, Option<i64>)> {
     let primes = primes_up_to(n);
+    sagebrush_interrupt::phase("ap.aplist");
     let chunks: Vec<&[u64]> = primes.chunks(4096).collect();
-    map(&chunks, |ch| ch.iter().map(|&p| (p, e.ap(p))).collect::<Vec<_>>()).into_iter().flatten().collect()
+    map(&chunks, |ch| {
+        ch.iter()
+            .map(|&p| {
+                sagebrush_interrupt::check();
+                (p, e.ap(p))
+            })
+            .collect::<Vec<_>>()
+    })
+    .into_iter()
+    .flatten()
+    .collect()
 }
 
-/// aplist for many curves, in parallel over curves.
+/// aplist for many curves, in parallel over curves.  Interruptible at every
+/// prime of every curve, and throughout the sieve.
 pub fn aplist_many(curves: &[EllipticCurve], n: u64) -> Vec<Vec<(u64, Option<i64>)>> {
     let primes = primes_up_to(n);
-    map(curves, |e| primes.iter().map(|&p| (p, e.ap(p))).collect())
+    sagebrush_interrupt::phase("ap.aplist_many");
+    map(curves, |e| {
+        primes
+            .iter()
+            .map(|&p| {
+                sagebrush_interrupt::check();
+                (p, e.ap(p))
+            })
+            .collect()
+    })
 }
 
 /// (parallel with this crate's own `parallel` feature: the engine's one
@@ -220,6 +262,7 @@ mod par_gate_tests {
 /// (1, 2, 5, 14 for a non-CM curve; 1, 3, 10, 35 with CM, as n grows).
 pub fn moments(e: &EllipticCurve, n: u64, kmax: usize) -> (u64, Vec<f64>) {
     let primes = primes_up_to(n);
+    sagebrush_interrupt::phase("ap.moments");
     let chunks: Vec<&[u64]> = primes.chunks(4096).collect();
     let parts = map(&chunks, |ch| {
         let mut sums = vec![0.0f64; kmax];
