@@ -1,0 +1,126 @@
+Univariate Polynomial Ring in a over Rational Field | a + 1 | (a + 1)*y + O(y^3) | \left(a + 1\right) y + O(y^{3})
+Univariate Polynomial Ring in a over Rational Field | a + 1 | a + 1 + y + O(y^2) | a + 1 +  y + O(y^{2})
+Univariate Polynomial Ring in a over Rational Field | a + 1 | (a + 1)*y^2 | \left(a + 1\right) y^{2}
+Univariate Polynomial Ring in a over Rational Field | a + 1 | (a + 1)*z^-1 + O(z) | \frac{a + 1}{z} + O(z)
+Univariate Polynomial Ring in a over Rational Field | a + 1 | (a + 1)*z^-2 + (a + 1) + (a + 1)*z + O(z^2) | \frac{a + 1}{z^{2}} + a + 1 + \left(a + 1\right)z + O(z^{2})
+Univariate Polynomial Ring in a over Rational Field | a + 1 | (a + 1)*z + z^3 | \left(a + 1\right)z + z^{3}
+Univariate Polynomial Ring in a over Rational Field | -a | -a*y + O(y^3) | -a y + O(y^{3})
+Univariate Polynomial Ring in a over Rational Field | -a | -a + y + O(y^2) | -a +  y + O(y^{2})
+Univariate Polynomial Ring in a over Rational Field | -a | -a*y^2 | -a y^{2}
+Univariate Polynomial Ring in a over Rational Field | -a | -a*z^-1 + O(z) | \frac{-a}{z} + O(z)
+Univariate Polynomial Ring in a over Rational Field | -a | -a*z^-2 - a - a*z + O(z^2) | \frac{-a}{z^{2}} - a - az + O(z^{2})
+Univariate Polynomial Ring in a over Rational Field | -a | -a*z + z^3 | -az + z^{3}
+Univariate Polynomial Ring in a over Rational Field | a - 1 | (a - 1)*y + O(y^3) | \left(a - 1\right) y + O(y^{3})
+Univariate Polynomial Ring in a over Rational Field | a - 1 | a - 1 + y + O(y^2) | a - 1 +  y + O(y^{2})
+Univariate Polynomial Ring in a over Rational Field | a - 1 | (a - 1)*y^2 | \left(a - 1\right) y^{2}
+Univariate Polynomial Ring in a over Rational Field | a - 1 | (a - 1)*z^-1 + O(z) | \frac{a - 1}{z} + O(z)
+Univariate Polynomial Ring in a over Rational Field | a - 1 | (a - 1)*z^-2 + (a - 1) + (a - 1)*z + O(z^2) | \frac{a - 1}{z^{2}} + a - 1 + \left(a - 1\right)z + O(z^{2})
+Univariate Polynomial Ring in a over Rational Field | a - 1 | (a - 1)*z + z^3 | \left(a - 1\right)z + z^{3}
+Univariate Polynomial Ring in a over Rational Field | 2*a | 2*a*y + O(y^3) | 2 a y + O(y^{3})
+Univariate Polynomial Ring in a over Rational Field | 2*a | 2*a + y + O(y^2) | 2 a +  y + O(y^{2})
+Univariate Polynomial Ring in a over Rational Field | 2*a | 2*a*y^2 | 2 a y^{2}
+Univariate Polynomial Ring in a over Rational Field | 2*a | 2*a*z^-1 + O(z) | \frac{2 a}{z} + O(z)
+Univariate Polynomial Ring in a over Rational Field | 2*a | 2*a*z^-2 + 2*a + 2*a*z + O(z^2) | \frac{2 a}{z^{2}} + 2 a + 2 az + O(z^{2})
+Univariate Polynomial Ring in a over Rational Field | 2*a | 2*a*z + z^3 | 2 az + z^{3}
+Univariate Polynomial Ring in a over Rational Field | a^2 | a^2*y + O(y^3) | a^{2} y + O(y^{3})
+Univariate Polynomial Ring in a over Rational Field | a^2 | a^2 + y + O(y^2) | a^{2} +  y + O(y^{2})
+Univariate Polynomial Ring in a over Rational Field | a^2 | a^2*y^2 | a^{2} y^{2}
+Univariate Polynomial Ring in a over Rational Field | a^2 | a^2*z^-1 + O(z) | \frac{a^{2}}{z} + O(z)
+Univariate Polynomial Ring in a over Rational Field | a^2 | a^2*z^-2 + a^2 + a^2*z + O(z^2) | \frac{a^{2}}{z^{2}} + a^{2} + a^{2}z + O(z^{2})
+Univariate Polynomial Ring in a over Rational Field | a^2 | a^2*z + z^3 | a^{2}z + z^{3}
+Univariate Polynomial Ring in a over Rational Field | -a - 1 | (-a - 1)*y + O(y^3) | \left(-a - 1\right) y + O(y^{3})
+Univariate Polynomial Ring in a over Rational Field | -a - 1 | -a - 1 + y + O(y^2) | -a - 1 +  y + O(y^{2})
+Univariate Polynomial Ring in a over Rational Field | -a - 1 | (-a - 1)*y^2 | \left(-a - 1\right) y^{2}
+Univariate Polynomial Ring in a over Rational Field | -a - 1 | (-a - 1)*z^-1 + O(z) | \frac{-a - 1}{z} + O(z)
+Univariate Polynomial Ring in a over Rational Field | -a - 1 | (-a - 1)*z^-2 + (-a - 1) + (-a - 1)*z + O(z^2) | \frac{-a - 1}{z^{2}} - a - 1 + \left(-a - 1\right)z + O(z^{2})
+Univariate Polynomial Ring in a over Rational Field | -a - 1 | (-a - 1)*z + z^3 | \left(-a - 1\right)z + z^{3}
+Univariate Polynomial Ring in a over Rational Field | -1 | -y + O(y^3) | - y + O(y^{3})
+Univariate Polynomial Ring in a over Rational Field | -1 | -1 + y + O(y^2) | -1 +  y + O(y^{2})
+Univariate Polynomial Ring in a over Rational Field | -1 | -y^2 | - y^{2}
+Univariate Polynomial Ring in a over Rational Field | -1 | -z^-1 + O(z) | \frac{-1}{z} + O(z)
+Univariate Polynomial Ring in a over Rational Field | -1 | -z^-2 - 1 - z + O(z^2) | \frac{-1}{z^{2}} - 1 - z + O(z^{2})
+Univariate Polynomial Ring in a over Rational Field | -1 | -z + z^3 | -z + z^{3}
+Univariate Polynomial Ring in a over Rational Field | 1 | y + O(y^3) | y + O(y^{3})
+Univariate Polynomial Ring in a over Rational Field | 1 | 1 + y + O(y^2) | 1 +  y + O(y^{2})
+Univariate Polynomial Ring in a over Rational Field | 1 | y^2 | y^{2}
+Univariate Polynomial Ring in a over Rational Field | 1 | z^-1 + O(z) | \frac{1}{z} + O(z)
+Univariate Polynomial Ring in a over Rational Field | 1 | z^-2 + 1 + z + O(z^2) | \frac{1}{z^{2}} + 1 + z + O(z^{2})
+Univariate Polynomial Ring in a over Rational Field | 1 | z + z^3 | z + z^{3}
+Univariate Polynomial Ring in a over Rational Field | -2/3 | -2/3*y + O(y^3) | -\frac{2}{3} y + O(y^{3})
+Univariate Polynomial Ring in a over Rational Field | -2/3 | -2/3 + y + O(y^2) | -\frac{2}{3} +  y + O(y^{2})
+Univariate Polynomial Ring in a over Rational Field | -2/3 | -2/3*y^2 | -\frac{2}{3} y^{2}
+Univariate Polynomial Ring in a over Rational Field | -2/3 | -2/3*z^-1 + O(z) | \frac{-\frac{2}{3}}{z} + O(z)
+Univariate Polynomial Ring in a over Rational Field | -2/3 | -2/3*z^-2 - 2/3 - 2/3*z + O(z^2) | \frac{-\frac{2}{3}}{z^{2}} - \frac{2}{3} - \frac{2}{3}z + O(z^{2})
+Univariate Polynomial Ring in a over Rational Field | -2/3 | -2/3*z + z^3 | -\frac{2}{3}z + z^{3}
+Univariate Polynomial Ring in a over Rational Field | 1/3*a + 1 | (1/3*a + 1)*y + O(y^3) | \left(\frac{1}{3} a + 1\right) y + O(y^{3})
+Univariate Polynomial Ring in a over Rational Field | 1/3*a + 1 | 1/3*a + 1 + y + O(y^2) | \frac{1}{3} a + 1 +  y + O(y^{2})
+Univariate Polynomial Ring in a over Rational Field | 1/3*a + 1 | (1/3*a + 1)*y^2 | \left(\frac{1}{3} a + 1\right) y^{2}
+Univariate Polynomial Ring in a over Rational Field | 1/3*a + 1 | (1/3*a + 1)*z^-1 + O(z) | \frac{\frac{1}{3} a + 1}{z} + O(z)
+Univariate Polynomial Ring in a over Rational Field | 1/3*a + 1 | (1/3*a + 1)*z^-2 + (1/3*a + 1) + (1/3*a + 1)*z + O(z^2) | \frac{\frac{1}{3} a + 1}{z^{2}} + \frac{1}{3} a + 1 + \left(\frac{1}{3} a + 1\right)z + O(z^{2})
+Univariate Polynomial Ring in a over Rational Field | 1/3*a + 1 | (1/3*a + 1)*z + z^3 | \left(\frac{1}{3} a + 1\right)z + z^{3}
+Cyclotomic Field of order 3 and degree 2 | w + 1 | (w + 1)*y + O(y^3) | \left(w + 1\right) y + O(y^{3})
+Cyclotomic Field of order 3 and degree 2 | w + 1 | w + 1 + y + O(y^2) | w + 1 +  y + O(y^{2})
+Cyclotomic Field of order 3 and degree 2 | w + 1 | (w + 1)*y^2 | \left(w + 1\right) y^{2}
+Cyclotomic Field of order 3 and degree 2 | w + 1 | (w + 1)*z^-1 + O(z) | \frac{w + 1}{z} + O(z)
+Cyclotomic Field of order 3 and degree 2 | w + 1 | (w + 1)*z^-2 + (w + 1) + (w + 1)*z + O(z^2) | \frac{w + 1}{z^{2}} + w + 1 + \left(w + 1\right)z + O(z^{2})
+Cyclotomic Field of order 3 and degree 2 | w + 1 | (w + 1)*z + z^3 | \left(w + 1\right)z + z^{3}
+Cyclotomic Field of order 3 and degree 2 | -w | -w*y + O(y^3) | -w y + O(y^{3})
+Cyclotomic Field of order 3 and degree 2 | -w | -w + y + O(y^2) | -w +  y + O(y^{2})
+Cyclotomic Field of order 3 and degree 2 | -w | -w*y^2 | -w y^{2}
+Cyclotomic Field of order 3 and degree 2 | -w | -w*z^-1 + O(z) | \frac{-w}{z} + O(z)
+Cyclotomic Field of order 3 and degree 2 | -w | -w*z^-2 - w - w*z + O(z^2) | \frac{-w}{z^{2}} - w - wz + O(z^{2})
+Cyclotomic Field of order 3 and degree 2 | -w | -w*z + z^3 | -wz + z^{3}
+Cyclotomic Field of order 3 and degree 2 | 2*w | 2*w*y + O(y^3) | 2 w y + O(y^{3})
+Cyclotomic Field of order 3 and degree 2 | 2*w | 2*w + y + O(y^2) | 2 w +  y + O(y^{2})
+Cyclotomic Field of order 3 and degree 2 | 2*w | 2*w*y^2 | 2 w y^{2}
+Cyclotomic Field of order 3 and degree 2 | 2*w | 2*w*z^-1 + O(z) | \frac{2 w}{z} + O(z)
+Cyclotomic Field of order 3 and degree 2 | 2*w | 2*w*z^-2 + 2*w + 2*w*z + O(z^2) | \frac{2 w}{z^{2}} + 2 w + 2 wz + O(z^{2})
+Cyclotomic Field of order 3 and degree 2 | 2*w | 2*w*z + z^3 | 2 wz + z^{3}
+Cyclotomic Field of order 3 and degree 2 | -1 | -y + O(y^3) | - y + O(y^{3})
+Cyclotomic Field of order 3 and degree 2 | -1 | -1 + y + O(y^2) | -1 +  y + O(y^{2})
+Cyclotomic Field of order 3 and degree 2 | -1 | -y^2 | - y^{2}
+Cyclotomic Field of order 3 and degree 2 | -1 | -z^-1 + O(z) | \frac{-1}{z} + O(z)
+Cyclotomic Field of order 3 and degree 2 | -1 | -z^-2 - 1 - z + O(z^2) | \frac{-1}{z^{2}} - 1 - z + O(z^{2})
+Cyclotomic Field of order 3 and degree 2 | -1 | -z + z^3 | -z + z^{3}
+Cyclotomic Field of order 3 and degree 2 | 1/2*w | 1/2*w*y + O(y^3) | \frac{1}{2} w y + O(y^{3})
+Cyclotomic Field of order 3 and degree 2 | 1/2*w | 1/2*w + y + O(y^2) | \frac{1}{2} w +  y + O(y^{2})
+Cyclotomic Field of order 3 and degree 2 | 1/2*w | 1/2*w*y^2 | \frac{1}{2} w y^{2}
+Cyclotomic Field of order 3 and degree 2 | 1/2*w | 1/2*w*z^-1 + O(z) | \frac{\frac{1}{2} w}{z} + O(z)
+Cyclotomic Field of order 3 and degree 2 | 1/2*w | 1/2*w*z^-2 + 1/2*w + 1/2*w*z + O(z^2) | \frac{\frac{1}{2} w}{z^{2}} + \frac{1}{2} w + \frac{1}{2} wz + O(z^{2})
+Cyclotomic Field of order 3 and degree 2 | 1/2*w | 1/2*w*z + z^3 | \frac{1}{2} wz + z^{3}
+Finite Field in u of size 2^2 | u | u*y + O(y^3) | u y + O(y^{3})
+Finite Field in u of size 2^2 | u | u + y + O(y^2) | u +  y + O(y^{2})
+Finite Field in u of size 2^2 | u | u*y^2 | u y^{2}
+Finite Field in u of size 2^2 | u | u*z^-1 + O(z) | \frac{u}{z} + O(z)
+Finite Field in u of size 2^2 | u | u*z^-2 + u + u*z + O(z^2) | \frac{u}{z^{2}} + u + uz + O(z^{2})
+Finite Field in u of size 2^2 | u | u*z + z^3 | uz + z^{3}
+Finite Field in u of size 2^2 | u + 1 | (u + 1)*y + O(y^3) | \left(u + 1\right) y + O(y^{3})
+Finite Field in u of size 2^2 | u + 1 | u + 1 + y + O(y^2) | u + 1 +  y + O(y^{2})
+Finite Field in u of size 2^2 | u + 1 | (u + 1)*y^2 | \left(u + 1\right) y^{2}
+Finite Field in u of size 2^2 | u + 1 | (u + 1)*z^-1 + O(z) | \frac{u + 1}{z} + O(z)
+Finite Field in u of size 2^2 | u + 1 | (u + 1)*z^-2 + (u + 1) + (u + 1)*z + O(z^2) | \frac{u + 1}{z^{2}} + u + 1 + \left(u + 1\right)z + O(z^{2})
+Finite Field in u of size 2^2 | u + 1 | (u + 1)*z + z^3 | \left(u + 1\right)z + z^{3}
+5-adic Field with capped relative precision 3 | 1 + O(5^3) | (1 + O(5^3))*y + O(y^3) | \left(1 + O(5^{3})\right) y + O(y^{3})
+5-adic Field with capped relative precision 3 | 1 + O(5^3) | 1 + O(5^3) + (1 + O(5^3))*y + O(y^2) | 1 + O(5^{3}) + \left(1 + O(5^{3})\right) y + O(y^{2})
+5-adic Field with capped relative precision 3 | 1 + O(5^3) | (1 + O(5^3))*y^2 | \left(1 + O(5^{3})\right) y^{2}
+5-adic Field with capped relative precision 3 | 1 + O(5^3) | (1 + O(5^3))*z^-1 + O(z) | \frac{1 + O(5^{3})}{z} + O(z)
+5-adic Field with capped relative precision 3 | 1 + O(5^3) | (1 + O(5^3))*z^-2 + (1 + O(5^3)) + (1 + O(5^3))*z + O(z^2) | \frac{1 + O(5^{3})}{z^{2}} + 1 + O(5^{3}) + \left(1 + O(5^{3})\right)z + O(z^{2})
+5-adic Field with capped relative precision 3 | 1 + O(5^3) | (1 + O(5^3))*z + (1 + O(5^3))*z^3 | \left(1 + O(5^{3})\right)z + \left(1 + O(5^{3})\right)z^{3}
+5-adic Field with capped relative precision 3 | 4 + 4*5 + 4*5^2 + O(5^3) | (4 + 4*5 + 4*5^2 + O(5^3))*y + O(y^3) | \left(4 + 4 \cdot 5 + 4 \cdot 5^{2} + O(5^{3})\right) y + O(y^{3})
+5-adic Field with capped relative precision 3 | 4 + 4*5 + 4*5^2 + O(5^3) | 4 + 4*5 + 4*5^2 + O(5^3) + (1 + O(5^3))*y + O(y^2) | 4 + 4 \cdot 5 + 4 \cdot 5^{2} + O(5^{3}) + \left(1 + O(5^{3})\right) y + O(y^{2})
+5-adic Field with capped relative precision 3 | 4 + 4*5 + 4*5^2 + O(5^3) | (4 + 4*5 + 4*5^2 + O(5^3))*y^2 | \left(4 + 4 \cdot 5 + 4 \cdot 5^{2} + O(5^{3})\right) y^{2}
+5-adic Field with capped relative precision 3 | 4 + 4*5 + 4*5^2 + O(5^3) | (4 + 4*5 + 4*5^2 + O(5^3))*z^-1 + O(z) | \frac{4 + 4 \cdot 5 + 4 \cdot 5^{2} + O(5^{3})}{z} + O(z)
+5-adic Field with capped relative precision 3 | 4 + 4*5 + 4*5^2 + O(5^3) | (4 + 4*5 + 4*5^2 + O(5^3))*z^-2 + (4 + 4*5 + 4*5^2 + O(5^3)) + (4 + 4*5 + 4*5^2 + O(5^3))*z + O(z^2) | \frac{4 + 4 \cdot 5 + 4 \cdot 5^{2} + O(5^{3})}{z^{2}} + 4 + 4 \cdot 5 + 4 \cdot 5^{2} + O(5^{3}) + \left(4 + 4 \cdot 5 + 4 \cdot 5^{2} + O(5^{3})\right)z + O(z^{2})
+5-adic Field with capped relative precision 3 | 4 + 4*5 + 4*5^2 + O(5^3) | (4 + 4*5 + 4*5^2 + O(5^3))*z + (1 + O(5^3))*z^3 | \left(4 + 4 \cdot 5 + 4 \cdot 5^{2} + O(5^{3})\right)z + \left(1 + O(5^{3})\right)z^{3}
+5-adic Field with capped relative precision 3 | 5 + O(5^4) | (5 + O(5^4))*y + O(y^3) | \left(5 + O(5^{4})\right) y + O(y^{3})
+5-adic Field with capped relative precision 3 | 5 + O(5^4) | 5 + O(5^4) + (1 + O(5^3))*y + O(y^2) | 5 + O(5^{4}) + \left(1 + O(5^{3})\right) y + O(y^{2})
+5-adic Field with capped relative precision 3 | 5 + O(5^4) | (5 + O(5^4))*y^2 | \left(5 + O(5^{4})\right) y^{2}
+5-adic Field with capped relative precision 3 | 5 + O(5^4) | (5 + O(5^4))*z^-1 + O(z) | \frac{5 + O(5^{4})}{z} + O(z)
+5-adic Field with capped relative precision 3 | 5 + O(5^4) | (5 + O(5^4))*z^-2 + (5 + O(5^4)) + (5 + O(5^4))*z + O(z^2) | \frac{5 + O(5^{4})}{z^{2}} + 5 + O(5^{4}) + \left(5 + O(5^{4})\right)z + O(z^{2})
+5-adic Field with capped relative precision 3 | 5 + O(5^4) | (5 + O(5^4))*z + (1 + O(5^3))*z^3 | \left(5 + O(5^{4})\right)z + \left(1 + O(5^{3})\right)z^{3}
+5-adic Field with capped relative precision 3 | 5^-1 + O(5^2) | (5^-1 + O(5^2))*y + O(y^3) | \left(5^{-1} + O(5^{2})\right) y + O(y^{3})
+5-adic Field with capped relative precision 3 | 5^-1 + O(5^2) | 5^-1 + O(5^2) + (1 + O(5^3))*y + O(y^2) | 5^{-1} + O(5^{2}) + \left(1 + O(5^{3})\right) y + O(y^{2})
+5-adic Field with capped relative precision 3 | 5^-1 + O(5^2) | (5^-1 + O(5^2))*y^2 | \left(5^{-1} + O(5^{2})\right) y^{2}
+5-adic Field with capped relative precision 3 | 5^-1 + O(5^2) | (5^-1 + O(5^2))*z^-1 + O(z) | \frac{5^{-1} + O(5^{2})}{z} + O(z)
+5-adic Field with capped relative precision 3 | 5^-1 + O(5^2) | (5^-1 + O(5^2))*z^-2 + (5^-1 + O(5^2)) + (5^-1 + O(5^2))*z + O(z^2) | \frac{5^{-1} + O(5^{2})}{z^{2}} + 5^{-1} + O(5^{2}) + \left(5^{-1} + O(5^{2})\right)z + O(z^{2})
+5-adic Field with capped relative precision 3 | 5^-1 + O(5^2) | (5^-1 + O(5^2))*z + (1 + O(5^3))*z^3 | \left(5^{-1} + O(5^{2})\right)z + \left(1 + O(5^{3})\right)z^{3}
