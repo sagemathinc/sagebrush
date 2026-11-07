@@ -3004,6 +3004,16 @@
   "owner": "visualization/display",
   "row": "inv-30"
  },
+ "lib/_graphics.py ::  :: 'leftrightarrows ⇆ rightharpoonup ⇀ leadsto ⇝ top ⊤ bot ⊥ vdash ⊢ dashv ⊣ models ⊧ cup ∪ cap ∩ ' #0": {
+  "class": "none",
+  "owner": "matplotlib mathtext (@sagebrush-matlab)",
+  "reason": "\"cap\" is TeX's \\cap, the set intersection symbol (∩) in the mathtext tables, not a cap: nothing is refused"
+ },
+ "lib/_graphics.py ::  :: _TEX_BIN = set(('pm mp times cdot div amalg ast barwedge bullet cap cup diamond lhd odot ominus oplus oslash otimes ' #0": {
+  "class": "none",
+  "owner": "matplotlib mathtext (@sagebrush-matlab)",
+  "reason": "\"cap\" is TeX's \\cap, the set intersection symbol (∩) in the mathtext tables, not a cap: nothing is refused"
+ },
  "lib/_limits.py ::  :: \"ff.conway_work\": (UNLIMITED, 10 ** 6, 653528895), #0": {
   "class": "3",
   "owner": "finite fields + configuration"
