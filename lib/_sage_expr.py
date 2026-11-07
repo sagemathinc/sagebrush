@@ -173,15 +173,74 @@ def _infinite_relation(kind, a, b):
     return {"<": sa < sb, "<=": sa < sb, ">": sa > sb, ">=": sa > sb}[kind]
 
 
+_EXACT_SIGN_MAX_DEGREE = 32
+_CAPPED = "capped"
+
+
+def _exact_degree_bound(e):
+    """An upper bound for the degree over QQ of a constant built from
+    rationals, I, sums, products, rational powers and abs, from its tree
+    (abs(z) has degree at most 2*deg(z)^2), or None for any other node; it
+    stops past 2^20."""
+    from fractions import Fraction
+    import operator as o
+    from _sage_poly import QQ
+    stack, total = [e], 1
+    while stack:
+        x = stack.pop()
+        try:
+            Fraction(QQ(x))
+            continue
+        except (TypeError, ValueError, ArithmeticError, NotImplementedError):
+            pass
+        if str(x) == "I":
+            total *= 2
+            continue
+        op = x.operator()
+        args = x.operands()
+        if op is o.pow and len(args) == 2:
+            try:
+                q = Fraction(QQ(args[1]))
+            except (TypeError, ValueError, ArithmeticError, NotImplementedError):
+                return None
+            total *= q.denominator
+            stack.append(args[0])
+        elif op in (o.add, o.mul):
+            stack.extend(args)
+        elif x._op()[0] == "fun:abs" and len(args) == 1:
+            b = _exact_degree_bound(args[0])
+            if b is None:
+                return None
+            total *= 2 * b * b
+        else:
+            return None
+        if total > 1 << 20:
+            break
+    return total
+
+
 def _exact_sign(d):
     """The sign of a constant made of rationals, I, sums, products, rational
     powers and abs, decided exactly as an algebraic number: 0, 1, -1, or
-    "c" (not real); None for any other constant.  (bool(q*sqrt(2) < p) was
-    False for p^2 - 2*q^2 = 1 with p, q near 10^7: the double enclosure of
-    the difference held 0; bool(8*4^(1/4)*sqrt(2) == 16) was False.)"""
+    "c" (not real); _CAPPED when its degree is past _EXACT_SIGN_MAX_DEGREE
+    (refused from the expression tree's bound, before any field is built, or
+    by the algebraic numbers' own degree check, under that cap); None for
+    any other constant.  (bool(q*sqrt(2) < p) was False for p^2 - 2*q^2 = 1
+    with p, q near 10^7: the double enclosure of the difference held 0;
+    bool(8*4^(1/4)*sqrt(2) == 16) was False.)"""
     if len(d._s) > 4000:
         return None
     import _sage_qqbar
+    old = _sage_qqbar._degree_cap
+    # (a stricter cap already set stays)
+    cap = _EXACT_SIGN_MAX_DEGREE if old is None else min(old, _EXACT_SIGN_MAX_DEGREE)
+    try:
+        bound = _exact_degree_bound(d)
+    except (TypeError, ValueError, ArithmeticError, NotImplementedError, AttributeError, RecursionError):
+        bound = None
+    if bound is not None and bound > cap:
+        return _CAPPED
+    _sage_qqbar._degree_cap = cap
     try:
         a = _sage_qqbar._convert(d)
         if a == 0:
@@ -189,22 +248,28 @@ def _exact_sign(d):
         if a.imag() != 0:
             return "c"
         return 1 if a > 0 else -1
-    except (TypeError, ValueError, ArithmeticError, NotImplementedError, MemoryError):
+    except NotImplementedError as e:
+        return _CAPPED if "more than %d" % cap in str(e) else None
+    except (TypeError, ValueError, ArithmeticError, MemoryError):
         return None
+    finally:
+        _sage_qqbar._degree_cap = old
 
 
-def _numerically_equal(a, b):
-    """Heuristic equality of two constants that the engine could neither
-    simplify to equal nor separate: their difference, evaluated at 400 bits,
-    is below 2^-300 relative to them.  (A double, which underflows or
-    cancels, is never used.)"""
+def _numeric_sign(a, b):
+    """For algebraic constants too large to decide exactly: 0 when a and b
+    agree to far more than double precision (400 bits, a difference below
+    2^-300 relative to them; Sage proves such identities), else the sign of
+    a - b at that precision; None if it cannot be evaluated."""
     import _sage_real
     try:
-        d = abs(_sage_real.N(a - b, 400))
+        d = _sage_real.N(a - b, 400)
         m = max(abs(_sage_real.N(a, 400)), abs(_sage_real.N(b, 400)), 1)
-        return bool(d <= m * _sage_real.N(Expression("2") ** -300, 400))
+        if abs(d) <= m * _sage_real.RealField(400)(2) ** -300:
+            return 0
+        return 1 if d > 0 else -1
     except Exception:
-        return False
+        return None
 
 
 def _relop(sym):
@@ -335,13 +400,12 @@ class Expression:
                 # (a constant the enclosure cannot separate from 0: exactly,
                 # when it is algebraic)
                 xs = _exact_sign(a - b) if not z and not (a - b).variables() and _call("const_sign", (a - b)._s)[0] == "" else None
-                if xs is not None:
+                if xs == _CAPPED:
+                    z = _numeric_sign(a, b) == 0
+                elif xs is not None:
                     z = xs == 0
-                elif not z and kind == "==" and not (a - b).variables() and _call("const_sign", (a - b)._s)[0] == "":
-                    # constants of undecided sign: equal if they agree to
-                    # far more than double precision (never from an
-                    # underflowed or cancelled double)
-                    z = _numerically_equal(a, b)
+                # (other constants the enclosure cannot separate stay
+                # undecided, as Sage: log(6) == log(2) + log(3) is False)
                 if not z and _ASSUMPTIONS and (a - b).variables():
                     # the rewritten difference tested directly: bool() of
                     # (rewrite == 0) came back here and rewrote again,
@@ -361,6 +425,8 @@ class Expression:
             if sg == "":
                 # (an algebraic constant: its sign exactly; not real: False)
                 sg = _exact_sign(a - b)
+                if sg == _CAPPED:
+                    sg = _numeric_sign(a, b)
                 if sg is None or sg == "c":
                     return False
             sg = int(sg)

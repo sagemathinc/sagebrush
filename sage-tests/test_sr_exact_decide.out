@@ -50,3 +50,9 @@ pi > 355/113 | False
 pi < 355/113 | True
 sin(pi/12) == (sqrt6-sqrt2)/4 | True
 cos(pi/5) == (1+sqrt5)/4 | True
+1 True False True True True
+2 True False True True True
+3 True False True True True
+4 True False True True True
+5 True False True True True
+6 True False True True True

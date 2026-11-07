@@ -65,3 +65,8 @@ cases = [
 ]
 for n, f in cases:
     show(n, f)
+# identities of high degree (past the exact conversion's degree cap) are still decided as Sage decides them
+d = sqrt(sqrt(3) + 2) - (sqrt(6) + sqrt(2))/2
+for k, rs in [(1, [5]), (2, [5, 7]), (3, [5, 7, 11]), (4, [5, 7, 11, 13]), (5, [5, 7, 11, 13, 17]), (6, [5, 7, 11, 13, 17, 19])]:
+    s = sum(sqrt(r) for r in rs)
+    print(k, bool(d*s == 0), bool(d*s != 0), bool(d*s < 1), bool(d*s <= 0), bool(d*s + 2^-100 > 0))
