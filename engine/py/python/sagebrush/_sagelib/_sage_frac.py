@@ -1,5 +1,6 @@
-"""Fraction fields of univariate polynomial rings over a field, as in Sage:
-(x^3 + 1)/(x^2 - 17), in lowest terms with a monic denominator; arithmetic,
+"""Fraction fields of univariate polynomial rings over a field or ZZ, as in
+Sage: (x^3 + 1)/(x^2 - 17), in lowest terms with a monic denominator (over
+ZZ: the gcd and the content cancelled, the signs kept); arithmetic,
 evaluation, derivatives and partial fractions.  The polynomials only need
 gcd, quo_rem (or //), arithmetic and leading_coefficient."""
 
@@ -72,6 +73,10 @@ class _FractionField:
             if not d:
                 raise ZeroDivisionError("the denominator of %r is zero in %r" % (num, self))
             return FractionFieldElement(n, d)
+        if den is None and _over_zz(R) and (isinstance(num, _F) or type(num).__name__ == "Rational"):
+            # (F(1/2) is 1/2 in Frac(ZZ[x]))
+            q = _F(num)
+            return FractionFieldElement(R(q.numerator), R(q.denominator))
         num = R(num) if not _is_poly(num, R) else num
         den = R(1) if den is None else (R(den) if not _is_poly(den, R) else den)
         return FractionFieldElement(num, den)
@@ -124,6 +129,11 @@ def _is_poly(x, R):
         return False
 
 
+def _over_zz(R):
+    from _sage_poly import ZZ
+    return getattr(R, "_base", None) is ZZ
+
+
 def _atomic_num(s):
     # (a leading minus sign is fine: -1/x^2)
     return "+" not in s[1:] and "-" not in s[1:]
@@ -134,7 +144,8 @@ def _atomic_den(s):
 
 
 class FractionFieldElement:
-    """A quotient of polynomials in lowest terms, the denominator monic.
+    """A quotient of polynomials in lowest terms, the denominator monic
+    (over a field; over ZZ the gcd, content included, is cancelled).
 
     EXAMPLES::
 
@@ -152,7 +163,17 @@ class FractionFieldElement:
     def __init__(self, num, den, reduce=True):
         if not den:
             raise ZeroDivisionError("fraction field element division by zero")
-        if reduce:
+        if reduce and _over_zz(num.parent()):
+            # as Sage over ZZ: the gcd (its content included, its leading
+            # coefficient positive) cancelled and a denominator -1 moved up,
+            # no other sign or constant normalized: (6*x^2 - 6)/(-4*x - 4)
+            # is (3*x - 3)/-2
+            g = num.gcd(den)
+            if g != 1:
+                num, den = num // g, den // g
+            if den == -1:
+                num, den = -num, -den
+        elif reduce:
             g = num.gcd(den)
             if g.degree() > 0:
                 num, den = num // g, den // g
@@ -206,12 +227,22 @@ class FractionFieldElement:
 
     def _latex_(self):
         from sage_all import latex
+        if self._den == 1:
+            return str(latex(self._num))
         return "\\frac{%s}{%s}" % (latex(self._num), latex(self._den))
 
     def _coerce(self, o):
         if isinstance(o, FractionFieldElement):
             return o
         R = self._num.parent()
+        from _sage_poly import Polynomial, QQ
+        if _over_zz(R) and isinstance(o, Polynomial) and o._ring._base is QQ:
+            # a polynomial over QQ: the sum is in Frac(QQ[x]), as Sage
+            return FractionFieldElement(o, o._ring(1), False)
+        if _over_zz(R) and (isinstance(o, _F) or type(o).__name__ == "Rational"):
+            # a rational number in Frac(ZZ[x]): F(x) + 1/2 is (2*x + 1)/2
+            q = _F(o)
+            return FractionFieldElement(R(q.numerator), R(q.denominator), False)
         try:
             return FractionFieldElement(R(o), R(1), False)
         except (TypeError, ValueError, ArithmeticError):
@@ -271,7 +302,14 @@ class FractionFieldElement:
         return not self == o
 
     def __hash__(self):
-        return hash((repr(self._num), repr(self._den)))
+        n, d = self._num, self._den
+        if d == 1:
+            # (as Sage: hash(F(x)) == hash(x))
+            return hash(n)
+        if _over_zz(n.parent()) and d.leading_coefficient() < 0:
+            # x/-2 == -x/2 over ZZ
+            n, d = -n, -d
+        return hash((repr(n), repr(d)))
 
     def __bool__(self):
         return bool(self._num)
@@ -290,12 +328,13 @@ class FractionFieldElement:
                 return FractionField_(a.parent())(a, b)
             except (TypeError, AttributeError):
                 pass
-        try:
+        if all(isinstance(v, (int, _F)) or type(v).__name__ in ("Integer", "Rational") for v in (a, b)):
+            # a rational number, in QQ (as Sage: (1/x)(1) is 1 in QQ)
+            if not b:
+                raise ZeroDivisionError("rational division by zero")
             q = _F(a) / _F(b)
-            from _sage_poly import _norm
-            return _norm(q)
-        except (TypeError, ValueError):
-            return a / b
+            return _sa().Rational._from_coprime_ints(q.numerator, q.denominator)
+        return a / b
 
     def derivative(self, *args):
         """The derivative.
@@ -311,29 +350,68 @@ class FractionFieldElement:
     diff = derivative
 
     def partial_fraction_decomposition(self):
-        """(polynomial part, [proper fractions]) with denominators the
-        powers of the irreducible factors of the denominator.
+        """(polynomial part, [proper fractions]): for each irreducible factor
+        p^e of the denominator, c/p, c'/p^2, ..., up to p^e, with
+        numerators of degree less than p's (zero ones left out), as Sage.
+        Over ZZ the inverses must exist in ZZ[x]/(p^e), else
+        ArithmeticError, as Sage.
 
         EXAMPLES::
 
             sage: R.<x> = QQ[]; (1/(x^2 - 1)).partial_fraction_decomposition()
             (0, [1/2/(x - 1), -1/2/(x + 1)])
+            sage: ((x^2 + 3)/(x + 1)^3).partial_fraction_decomposition()
+            (0, [1/(x + 1), -2/(x^2 + 2*x + 1), 4/(x^3 + 3*x^2 + 3*x + 1)])
+            sage: S.<t> = ZZ[]; (2/(-t^2 - t)).partial_fraction_decomposition()
+            (0, [-2/t, 2/(t + 1)])
+            sage: try:
+            ....:     (1/(t^2 - 1)).partial_fraction_decomposition()
+            ....: except ArithmeticError as e:
+            ....:     print(e)
+            element is non-invertible
         """
         R = self._num.parent()
-        q, r = self._num.quo_rem(self._den)
+        zz = _over_zz(R)
+        n, d = self._num, self._den
+        if zz:
+            # (over QQ, then each piece checked integral: ZZ[x]/(2*x) and
+            # x + 2 modulo x, 2, have no inverse)
+            from _sage_poly import PolynomialRing, QQ
+            if d.content() != 1:
+                raise ArithmeticError("element is non-invertible")
+            S = PolynomialRing(QQ, R.variable_name())
+            f = FractionFieldElement(S(n), S(d))
+            n, d = f._num, f._den
+        bad = lambda h: zz and any(_F(c).denominator != 1 for c in h._c)
+        q, r = n.quo_rem(d)
+        P = d.parent()
         parts = []
-        F = self._den.factor()
-        facs = [(g ** e) for g, e in F]
-        for k, pk in enumerate(facs):
-            other = R(1)
-            for j, pj in enumerate(facs):
+        facs = list(d.factor())
+        for k, (g, e) in enumerate(facs):
+            pk = g ** e
+            other = P(1)
+            for j, (h, m) in enumerate(facs):
                 if j != k:
-                    other = other * pj
+                    other = other * h ** m
             # r/den = sum a_k / p_k with a_k = r * other^-1 mod p_k
             inv = _inverse_mod(other % pk, pk)
+            if bad(inv):
+                raise ArithmeticError("element is non-invertible")
             a = (r * inv) % pk
-            parts.append(FractionFieldElement(a, pk))
-        whole = q
+            # a = sum c_i g^i: the parts c_(e-1)/g, ..., c_0/g^e
+            cs = []
+            for i in range(e):
+                a, c = a.quo_rem(g)
+                cs.append(c)
+            for i in range(e - 1, -1, -1):
+                if cs[i]:
+                    if bad(cs[i]):
+                        raise ArithmeticError("element is non-invertible")
+                    c, den = (R(cs[i]), R(g ** (e - i))) if zz else (cs[i], g ** (e - i))
+                    parts.append(FractionFieldElement(c, den))
+        if bad(q):
+            raise ArithmeticError("element is non-invertible")
+        whole = R(q) if zz else q
         return whole, parts
 
 
