@@ -277,3 +277,17 @@ test("datalim, log ticks, colorbar positions and inversions: matplotlib 3.11.1's
     "A19 ... drawn => (2, -1)",
   ]);
 });
+
+// (a colorbar on an Axes of a GridSpec cell, its room taken from the cell
+// it was given; datalim moving a linear pair past the largest float:
+// matplotlib's ValueError; each line matplotlib 3.11.1's own)
+test("a colorbar on a GridSpec cell; datalim limits past the largest float: matplotlib 3.11.1's (#797 r3)", () => {
+  const out = runIn("import matplotlib\nREAL = 'site-packages' in (getattr(matplotlib, '__file__', '') or '')\nif REAL:\n    matplotlib.use('Agg')\nimport matplotlib.pyplot as plt, warnings\nwarnings.simplefilter('ignore')\ndef r(v):\n    if isinstance(v, (tuple, list)):\n        return \"(\" + \", \".join(r(x) for x in v) + \")\"\n    if isinstance(v, float):\n        return \"%.6g\" % v\n    return str(v)\ndef show(label, f):\n    try:\n        print(label, \"=>\", r(f()))\n    except Exception as e:\n        print(label, \"!!\", type(e).__name__, str(e)[:100])\nb = lambda ax: tuple(float(v) for v in ax.get_position().bounds)\nfig = plt.figure()\ngs = fig.add_gridspec(2, 2)\nax = fig.add_subplot(gs[0, 1])\ncb = fig.colorbar(ax.scatter([0, 1], [0, 1], c=[0, 1]), ax=ax)\nshow(\"CB12 add_subplot(gs[0, 1]) of 2x2: colorbar axes\", lambda: b(cb.ax))\nshow(\"CB12 add_subplot(gs[0, 1]) of 2x2: the parent\", lambda: b(ax))\nplt.close(fig)\nfor ys in ([-1.5e308, 1.5e308], [-1e308, 1e308], [0, 1.7e308]):\n    fig, ax = plt.subplots()\n    ax.plot([0, 1], ys)\n    ax.set_aspect('equal', adjustable='datalim')\n    def lims():\n        fig.canvas.draw()\n        return tuple(float(v) for v in ax.get_xlim()), tuple(float(v) for v in ax.get_ylim())\n    show(\"L2v datalim, data (0, 1) %s\" % r(tuple(ys)), lims)\n    plt.close(fig)\n");
+  assert.deepEqual(out.trim().split("\n"), [
+    "CB12 add_subplot(gs[0, 1]) of 2x2: colorbar axes => (0.847159, 0.53, 0.0528409, 0.35)",
+    "CB12 add_subplot(gs[0, 1]) of 2x2: the parent => (0.547727, 0.53, 0.281818, 0.35)",
+    "L2v datalim, data (0, 1) (-1.5e+308, 1.5e+308) !! ValueError Axis limits cannot be NaN or Inf",
+    "L2v datalim, data (0, 1) (-1e+308, 1e+308) !! ValueError Axis limits cannot be NaN or Inf",
+    "L2v datalim, data (0, 1) (0, 1.7e+308) !! ValueError Axis limits cannot be NaN or Inf",
+  ]);
+});
