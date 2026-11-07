@@ -1,0 +1,123 @@
+PowerSeriesRing(Rational Field, 'x') -> Power Series Ring in x over Rational Field
+PowerSeriesRing(Rational Field, ('x',)) -> Power Series Ring in x over Rational Field
+PowerSeriesRing(Rational Field, ['x']) -> Power Series Ring in x over Rational Field
+PowerSeriesRing(Rational Field, 'x,') -> ValueError: variable name must be nonempty
+PowerSeriesRing(Rational Field, ',x') -> ValueError: variable name must be nonempty
+PowerSeriesRing(Rational Field, 'x,,y') -> ValueError: variable name must be nonempty
+PowerSeriesRing(Rational Field, 'a{b,c') -> ValueError: variable name 'a{b' is not alphanumeric
+PowerSeriesRing(Rational Field, 'x,1y') -> ValueError: variable name '1y' does not start with a letter
+PowerSeriesRing(Rational Field, ('x', '1y')) -> ValueError: variable name '1y' does not start with a letter
+PowerSeriesRing(Rational Field, ['x', '']) -> ValueError: variable name must be nonempty
+LaurentSeriesRing(Rational Field, 'x,y') -> Laurent Series Ring in x over Rational Field
+LaurentSeriesRing(Rational Field, 'x, y') -> Laurent Series Ring in x over Rational Field
+LaurentSeriesRing(Rational Field, 'x,y,z') -> Laurent Series Ring in x over Rational Field
+LaurentSeriesRing(Rational Field, ('x', 'y')) -> Laurent Series Ring in x over Rational Field
+LaurentSeriesRing(Rational Field, ['x', 'y']) -> Laurent Series Ring in x over Rational Field
+LaurentSeriesRing(Rational Field, 'x') -> Laurent Series Ring in x over Rational Field
+LaurentSeriesRing(Rational Field, 'x,') -> ValueError: variable name must be nonempty
+LaurentSeriesRing(Rational Field, ',x') -> ValueError: variable name must be nonempty
+LaurentSeriesRing(Rational Field, 'x,,y') -> ValueError: variable name must be nonempty
+LaurentSeriesRing(Rational Field, 'a{b,c') -> ValueError: variable name 'a{b' is not alphanumeric
+LaurentSeriesRing(Rational Field, 'x,1y') -> ValueError: variable name '1y' does not start with a letter
+LaurentSeriesRing(Rational Field, ('x', '1y')) -> ValueError: variable name '1y' does not start with a letter
+PowerSeriesRing(Integer Ring, 'x') -> Power Series Ring in x over Integer Ring
+PowerSeriesRing(Integer Ring, ('x',)) -> Power Series Ring in x over Integer Ring
+PowerSeriesRing(Integer Ring, ['x']) -> Power Series Ring in x over Integer Ring
+PowerSeriesRing(Integer Ring, 'x,') -> ValueError: variable name must be nonempty
+PowerSeriesRing(Integer Ring, ',x') -> ValueError: variable name must be nonempty
+PowerSeriesRing(Integer Ring, 'x,,y') -> ValueError: variable name must be nonempty
+PowerSeriesRing(Integer Ring, 'a{b,c') -> ValueError: variable name 'a{b' is not alphanumeric
+PowerSeriesRing(Integer Ring, 'x,1y') -> ValueError: variable name '1y' does not start with a letter
+PowerSeriesRing(Integer Ring, ('x', '1y')) -> ValueError: variable name '1y' does not start with a letter
+PowerSeriesRing(Integer Ring, ['x', '']) -> ValueError: variable name must be nonempty
+LaurentSeriesRing(Integer Ring, 'x,y') -> Laurent Series Ring in x over Integer Ring
+LaurentSeriesRing(Integer Ring, 'x, y') -> Laurent Series Ring in x over Integer Ring
+LaurentSeriesRing(Integer Ring, 'x,y,z') -> Laurent Series Ring in x over Integer Ring
+LaurentSeriesRing(Integer Ring, ('x', 'y')) -> Laurent Series Ring in x over Integer Ring
+LaurentSeriesRing(Integer Ring, ['x', 'y']) -> Laurent Series Ring in x over Integer Ring
+LaurentSeriesRing(Integer Ring, 'x') -> Laurent Series Ring in x over Integer Ring
+LaurentSeriesRing(Integer Ring, 'x,') -> ValueError: variable name must be nonempty
+LaurentSeriesRing(Integer Ring, ',x') -> ValueError: variable name must be nonempty
+LaurentSeriesRing(Integer Ring, 'x,,y') -> ValueError: variable name must be nonempty
+LaurentSeriesRing(Integer Ring, 'a{b,c') -> ValueError: variable name 'a{b' is not alphanumeric
+LaurentSeriesRing(Integer Ring, 'x,1y') -> ValueError: variable name '1y' does not start with a letter
+LaurentSeriesRing(Integer Ring, ('x', '1y')) -> ValueError: variable name '1y' does not start with a letter
+PowerSeriesRing(Finite Field of size 7, 'x') -> Power Series Ring in x over Finite Field of size 7
+PowerSeriesRing(Finite Field of size 7, ('x',)) -> Power Series Ring in x over Finite Field of size 7
+PowerSeriesRing(Finite Field of size 7, ['x']) -> Power Series Ring in x over Finite Field of size 7
+PowerSeriesRing(Finite Field of size 7, 'x,') -> ValueError: variable name must be nonempty
+PowerSeriesRing(Finite Field of size 7, ',x') -> ValueError: variable name must be nonempty
+PowerSeriesRing(Finite Field of size 7, 'x,,y') -> ValueError: variable name must be nonempty
+PowerSeriesRing(Finite Field of size 7, 'a{b,c') -> ValueError: variable name 'a{b' is not alphanumeric
+PowerSeriesRing(Finite Field of size 7, 'x,1y') -> ValueError: variable name '1y' does not start with a letter
+PowerSeriesRing(Finite Field of size 7, ('x', '1y')) -> ValueError: variable name '1y' does not start with a letter
+PowerSeriesRing(Finite Field of size 7, ['x', '']) -> ValueError: variable name must be nonempty
+LaurentSeriesRing(Finite Field of size 7, 'x,y') -> Laurent Series Ring in x over Finite Field of size 7
+LaurentSeriesRing(Finite Field of size 7, 'x, y') -> Laurent Series Ring in x over Finite Field of size 7
+LaurentSeriesRing(Finite Field of size 7, 'x,y,z') -> Laurent Series Ring in x over Finite Field of size 7
+LaurentSeriesRing(Finite Field of size 7, ('x', 'y')) -> Laurent Series Ring in x over Finite Field of size 7
+LaurentSeriesRing(Finite Field of size 7, ['x', 'y']) -> Laurent Series Ring in x over Finite Field of size 7
+LaurentSeriesRing(Finite Field of size 7, 'x') -> Laurent Series Ring in x over Finite Field of size 7
+LaurentSeriesRing(Finite Field of size 7, 'x,') -> ValueError: variable name must be nonempty
+LaurentSeriesRing(Finite Field of size 7, ',x') -> ValueError: variable name must be nonempty
+LaurentSeriesRing(Finite Field of size 7, 'x,,y') -> ValueError: variable name must be nonempty
+LaurentSeriesRing(Finite Field of size 7, 'a{b,c') -> ValueError: variable name 'a{b' is not alphanumeric
+LaurentSeriesRing(Finite Field of size 7, 'x,1y') -> ValueError: variable name '1y' does not start with a letter
+LaurentSeriesRing(Finite Field of size 7, ('x', '1y')) -> ValueError: variable name '1y' does not start with a letter
+LaurentSeriesRing(QQ, 2, 'x') -> Laurent Series Ring in x0 over Rational Field
+LaurentSeriesRing(QQ, names=('x','y')) -> Laurent Series Ring in x over Rational Field
+LaurentSeriesRing(QQ, 'x', 5) -> Laurent Series Ring in x over Rational Field
+PowerSeriesRing(QQ, 'x', 5) -> Power Series Ring in x over Rational Field
+PowerSeriesRing(QQ, 2, 'a{b') -> ValueError: variable name 'a{b0' is not alphanumeric
+QQ[['x,']] -> ValueError: variable name must be nonempty
+QQ[['a{b,c']] -> ValueError: variable name 'a{b' is not alphanumeric
+QQ[['t']] -> Power Series Ring in t over Rational Field
+5-adic Field with capped relative precision 20['x'] -> Univariate Polynomial Ring in x over 5-adic Field with capped relative precision 20
+5-adic Field with capped relative precision 20[('x',)] -> Univariate Polynomial Ring in x over 5-adic Field with capped relative precision 20
+5-adic Field with capped relative precision 20['x,'] -> ValueError: variable name must be nonempty
+5-adic Field with capped relative precision 20['x,,y'] -> ValueError: variable name must be nonempty
+5-adic Field with capped relative precision 20['a{b,c'] -> ValueError: variable name 'a{b' is not alphanumeric
+5-adic Field with capped relative precision 20['x,1y'] -> ValueError: variable name '1y' does not start with a letter
+5-adic Field with capped relative precision 20[['x']] -> Power Series Ring in x over 5-adic Field with capped relative precision 20
+5-adic Ring with capped relative precision 20['x'] -> Univariate Polynomial Ring in x over 5-adic Ring with capped relative precision 20
+5-adic Ring with capped relative precision 20[('x',)] -> Univariate Polynomial Ring in x over 5-adic Ring with capped relative precision 20
+5-adic Ring with capped relative precision 20['x,'] -> ValueError: variable name must be nonempty
+5-adic Ring with capped relative precision 20['x,,y'] -> ValueError: variable name must be nonempty
+5-adic Ring with capped relative precision 20['a{b,c'] -> ValueError: variable name 'a{b' is not alphanumeric
+5-adic Ring with capped relative precision 20['x,1y'] -> ValueError: variable name '1y' does not start with a letter
+5-adic Ring with capped relative precision 20[['x']] -> Power Series Ring in x over 5-adic Ring with capped relative precision 20
+LaurentSeriesRing(QQ, 2, 'x') -> Laurent Series Ring in x0 over Rational Field
+LaurentSeriesRing(QQ, 3, 'x') -> Laurent Series Ring in x0 over Rational Field
+LaurentSeriesRing(QQ, 3, 'xyz') -> Laurent Series Ring in x over Rational Field
+LaurentSeriesRing(QQ, 2, 'x,y') -> Laurent Series Ring in x over Rational Field
+LaurentSeriesRing(QQ, 3, 'x,y') -> IndexError: the number of names must equal the number of generators
+LaurentSeriesRing(QQ, 2, ['t']) -> ValueError: variable name '2' does not start with a letter
+LaurentSeriesRing(QQ, 2, ('s', 't')) -> ValueError: variable name '2' does not start with a letter
+LaurentSeriesRing(QQ, 3, ('s', 't')) -> ValueError: variable name '3' does not start with a letter
+LaurentSeriesRing(QQ, 2, '') -> ValueError: variable name '0' does not start with a letter
+LaurentSeriesRing(QQ, 2, '12') -> ValueError: variable name '120' does not start with a letter
+LaurentSeriesRing(QQ, 2, 'a{b') -> ValueError: variable name 'a{b0' is not alphanumeric
+LaurentSeriesRing(QQ, 2, 'x,') -> ValueError: variable name must be nonempty
+LaurentSeriesRing(QQ, 2, 'x,12') -> ValueError: variable name '12' does not start with a letter
+LaurentSeriesRing(QQ, 1, 'x') -> TypeError: Input does not coerce to any of the expected rings.
+LaurentSeriesRing(QQ, 1, 'x,y') -> IndexError: the number of names must equal the number of generators
+LaurentSeriesRing(QQ, 1, ('s', 't')) -> ValueError: variable name '1' does not start with a letter
+LaurentSeriesRing(QQ, 1, 'a{b') -> ValueError: variable name 'a{b' is not alphanumeric
+LaurentSeriesRing(QQ, 1, '12') -> ValueError: variable name '12' does not start with a letter
+LaurentSeriesRing(QQ, 1, '') -> ValueError: variable name must be nonempty
+LaurentSeriesRing(QQ, 1, 'x,') -> ValueError: variable name must be nonempty
+LaurentSeriesRing(QQ, -1, 'x') -> TypeError: Input does not coerce to any of the expected rings.
+LaurentSeriesRing(QQ, -1, 'x,y,z') -> Laurent Series Ring in x over Rational Field
+LaurentSeriesRing(QQ, -1, ['t']) -> ValueError: variable name '-1' is not alphanumeric
+LaurentSeriesRing(QQ, -1, '12') -> ValueError: variable name '12' does not start with a letter
+LaurentSeriesRing(QQ, -1, '') -> ValueError: variable name must be nonempty
+LaurentSeriesRing(QQ, -2, 'x') -> TypeError: Input does not coerce to any of the expected rings.
+LaurentSeriesRing(QQ, -2, 'x,y') -> Laurent Series Ring in x over Rational Field
+LaurentSeriesRing(QQ, -2, ('s', 't')) -> ValueError: variable name '-2' is not alphanumeric
+LaurentSeriesRing(QQ, -2, 'a{b') -> ValueError: variable name 'a{b' is not alphanumeric
+LaurentSeriesRing(QQ, -5, 'xyz') -> TypeError: Input does not coerce to any of the expected rings.
+LaurentSeriesRing(QQ, -5, '12') -> ValueError: variable name '12' does not start with a letter
+LaurentSeriesRing(QQ, -5, 'x,12') -> ValueError: variable name '12' does not start with a letter
+LaurentSeriesRing(QQ, -100, 'x,y') -> Laurent Series Ring in x over Rational Field
+PowerSeriesRing(QQ, 3, 'a{b') -> ValueError: variable name 'a{b0' is not alphanumeric
+PowerSeriesRing(QQ, 2, '1x') -> ValueError: variable name '1x0' does not start with a letter

@@ -795,7 +795,7 @@ class Polynomial_nf:
         """
         sa = _sa()
         if R is sa.QQ or R is sa.ZZ:
-            return sa.PolynomialRing(R, self._ring._name)([R(_rational(c)) for c in self._c])
+            return sa.PolynomialRing(R, self._ring._name, _internal=True)([R(_rational(c)) for c in self._c])
         if is_number_field(R):
             return PolynomialRing_nf(R, self._ring._name)(self._c)
         # a polynomial ring

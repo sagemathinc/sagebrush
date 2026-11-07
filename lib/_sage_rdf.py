@@ -384,7 +384,8 @@ class RealDoubleElement(float):
                 # real power through float(), CORR-726-2)
                 import _sage_real
                 return _sage_real._real_complex_pow(self, 53, e)
-            if type(e).__name__ == "ComplexDoubleElement":
+            if type(e).__name__ in ("ComplexDoubleElement", "Expression"):
+                # (a symbolic exponent: the symbolic power, as Sage's RDF(1.5)^x is 1.5^x)
                 return NotImplemented
             y = float(e)
         if x == 0:
@@ -929,6 +930,9 @@ class ComplexDoubleElement:
     def __pow__(self, e, mod=None):
         if mod is not None:
             raise TypeError("the 3-argument version of pow() is not supported")
+        if type(e).__name__ == "Expression":
+            # (a symbolic exponent: the symbolic power, as Sage's CDF(1, 2)^x)
+            return NotImplemented
         z = self._z
         if z == 0:
             return ComplexDoubleElement(0.0, 0.0)

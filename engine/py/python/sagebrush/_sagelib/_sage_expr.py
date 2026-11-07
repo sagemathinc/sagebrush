@@ -58,6 +58,74 @@ def _float_s(v):
     return _call("float", repr(float(v)))[0]
 
 
+def _bits(v):
+    """The IEEE bits of the double v, in hex (the engine's float serialization)."""
+    import struct
+    return "%x" % struct.unpack("<Q", struct.pack("<d", float(v)))[0]
+
+
+def _double_s(v):
+    """An element of RDF (d) or CDF (h) as an engine number of that parent: Sage keeps it,
+    printed as RDF prints (1.5*x, not RR's 1.50000000000000*x)."""
+    if isinstance(v, float):
+        return "d%s;" % _bits(v)
+    z = complex(v)
+    return "h%s,%s;" % (_bits(z.real), _bits(z.imag))
+
+
+def _hash_form(s):
+    """The serialization s with each float as its value only, for hashing: the
+    parent (f RR, d RDF, g CC, h CDF) is not part of the value, so sin(x + RR(1.5))
+    and sin(x + RDF(1.5)), which are equal, hash alike, as in Sage.  -0.0 is 0.0,
+    and a complex float with imaginary part 0 is the real one (x + RR(1.5) ==
+    x + CC(1.5)).  Names (s, F, D) are skipped by their length, which the engine
+    writes in UTF-8 bytes: the walk is over bytes (a 3-byte name such as var('\\u53d8')
+    was misread, the daybreak3 HASH-2)."""
+    b = s.encode("utf-8")
+    out, i, n, expect = [], 0, len(b), True
+
+    def bits(t):
+        return b"0" if t == b"8000000000000000" else t
+
+    while i < n:
+        c = b[i:i + 1]
+        if not expect:
+            out.append(c)
+            expect = c == b"{"
+            i += 1
+            continue
+        expect = False
+        if c in (b"f", b"d", b"g", b"h"):
+            j = b.index(b";", i)
+            parts = b[i + 1:j].split(b",")
+            if len(parts) == 2 and bits(parts[1]) != b"0":
+                out.append(b"g" + bits(parts[0]) + b"," + parts[1] + b";")
+            else:
+                out.append(b"f" + bits(parts[0]) + b";")
+            i = j + 1
+        elif c == b"n":
+            j = b.index(b";", i) + 1
+            out.append(b[i:j])
+            i = j
+        elif c == b"z":
+            j = b.index(b";", b.index(b";", i) + 1) + 1
+            out.append(b[i:j])
+            i = j
+        elif c in (b"s", b"F", b"D"):
+            k = b.index(b":", i)
+            j = k + 1 + int(b[i + 1:k])
+            out.append(b[i:j])
+            i = j
+        elif c in (b"c", b"R"):
+            out.append(b[i:i + 2])
+            i += 2
+            expect = False
+        else:
+            # A or M and their count, or P: what follows is copied up to '{'
+            out.append(c)
+            i += 1
+    return b"".join(out)
+
 # The largest integer an expression may hold (the engine's MAX_INT_BITS):
 # expressions cross into the engine as decimal text, so a larger one is
 # refused before it is formatted, as CPython refuses int-to-str past its
@@ -84,15 +152,16 @@ def _to_s(v):
     if isinstance(v, _Fraction):
         # exact ints first: formatting an int subclass must not round it
         return _rat_s(int(v.numerator), int(v.denominator))
+    if type(v).__name__ in ("RealDoubleElement", "ComplexDoubleElement"):
+        return _double_s(v)
     if isinstance(v, float):
         if _rr_args((v,)) == 2:
             # (the engine's real numbers are doubles)
             raise NotImplementedError("%s, an element of RR past the double range, has no symbolic form in sagebrush yet" % (v,))
         return _float_s(v)
     if isinstance(v, complex):
-        if v.imag == 0:
-            return _float_s(v.real)
-        return _call("complex", repr(v.real), repr(v.imag))[0]
+        # (an element of CC stays one with imaginary part 0: it meets RDF as CC)
+        return "g%s,%s;" % (_bits(v.real), _bits(v.imag))
     if _is_poly(v):
         t, r = Expression(_sym_s(v.variable_name())), Expression("n0/1;")
         for i, c in enumerate(v._c):
@@ -136,7 +205,10 @@ def _py_number(s):
         p, q = r[1].split("/")
         import sage_all as sa
         return sa._intdiv(int(p), int(q)) if q != "1" else sa.Integer(int(p))
-    if r[0] == "f" and float(r[2]) == 0:
+    if r[0] == "f" and r[3:4] == ["RDF"]:
+        import _sage_rdf
+        return _sage_rdf.RDF(float(r[1]))
+    if r[0] == "f" and r[3:4] in (["RR"], []):
         from _sage_lang import RealNumber
         return RealNumber(float(r[1]))
     return None
@@ -292,7 +364,7 @@ class Expression:
                 from _sage_poly import poly_hash
                 h = poly_hash(terms)
         if h is None:
-            h = hash(s)
+            h = hash(_hash_form(s))
         self._h = h
         return h
 
@@ -472,7 +544,7 @@ class Expression:
             sage: SR(2/3).is_numeric(), pi.is_numeric()
             (True, False)
         """
-        return self._s[0] in "nzfg"
+        return self._s[0] in "nzfgdh"
 
     def is_constant(self):
         """Whether the expression has no variables.
@@ -732,6 +804,11 @@ class Expression:
         """
         v = _py_number(self._s)
         if v is None:
+            r = _call("number", self._s)
+            if r[0] == "f" and r[3:4] in (["CC"], ["CDF"]):
+                # (a complex float as an element of its parent, as Sage)
+                import sage_all as sa
+                return (sa.CDF if r[3] == "CDF" else sa.CC)(float(r[1]), float(r[2]))
             raise TypeError("self must be a numeric expression")
         return v
 
@@ -1508,6 +1585,9 @@ def _real_imag(e, k):
         return e if k == 0 else Expression("n0/1;")
     if r[0] == "z":
         return Expression("n%s;" % r[1 + k])
+    if r[0] == "f" and r[3:4] in (["RDF"], ["CDF"]):
+        # (a part of an element of RDF or CDF is one of RDF: SR(CDF(1, 2)).real_part() is 1.0)
+        return Expression("d%s;" % _bits(float(r[1 + k])))
     c = complex(e)
     return _expr(c.imag if k else c.real)
 
@@ -1905,6 +1985,7 @@ class _SymbolicRing:
             names = tuple(names[0])
         if len(names) == 1 and isinstance(names[0], str):
             names = names[0].replace(",", " ").split()
+        _check_var_names(names)
         vs = tuple(Expression(_sym_s(n)) for n in names)
         if kw.get("latex_name") is not None:
             for n in names:
@@ -2829,6 +2910,19 @@ def _assume_rewrite(e):
     return e
 
 
+_PY_KEYWORDS = frozenset("False None True and as assert async await break class continue def del elif else except finally for from global if import in is lambda nonlocal not or pass raise return try while with yield".split())
+
+
+def _check_var_names(names):
+    """Sage's refusals of a variable name: none at all, or one that is not a
+    Python identifier (a keyword, 1a, a{b): var('for') is a ValueError."""
+    if not names:
+        raise ValueError("You need to specify the name of the new variable.")
+    for n in names:
+        if not (isinstance(n, str) and n.isidentifier()) or n in _PY_KEYWORDS:
+            raise ValueError("The name \"%s\" is not a valid Python identifier." % n)
+
+
 def var(*names, **kw):
     """var('x y') or var('x', 'y'): symbolic variables, also defined in __main__.
 
@@ -2843,9 +2937,7 @@ def var(*names, **kw):
         names = tuple(names[0])
     if len(names) == 1 and isinstance(names[0], str):
         names = names[0].replace(",", " ").split()
-    for n in names:
-        if not n.isidentifier():
-            raise ValueError("The name \"%s\" is not a valid Python identifier." % n)
+    _check_var_names(names)
     vs = tuple(Expression(_sym_s(n)) for n in names)
     if kw.get("latex_name") is not None:
         for n in names:

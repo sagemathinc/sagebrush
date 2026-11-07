@@ -5873,6 +5873,11 @@
   "owner": "real/complex arithmetic",
   "row": "inv-17"
  },
+ "lib/_sage_series.py :: PowerSeriesRing :: raise NotImplementedError(\"multivariate power series rings are not available in sagebrush yet\") #0": {
+  "class": "coverage",
+  "owner": "series rings (@sagebrush-sage2)",
+  "reason": "multivariate power series rings (PowerSeriesRing(QQ, 'x,y'), (QQ, n, 'x')): Sage builds one, not here yet (L32); not a cap"
+ },
  "lib/_sage_series.py :: Series._poly_target :: raise TypeError(\"unsupported operand parent(s): '%r' and '%r'\" % (self._R, P)) #0": {
   "class": "none",
   "owner": "sage kernel (@sagebrush-sage2)",
@@ -5892,6 +5897,21 @@
   "class": "none",
   "owner": "sage kernel (@sagebrush-sage2)",
   "reason": "a TypeError for a series and an element of another ring with no common parent (Sage's coercion refusal, as probed: another variable, GF(p) with QQ, Laurent and power series' own rules); refuses nothing for size"
+ },
+ "lib/_sage_series.py :: _first_counted :: raise NotImplementedError(\"LaurentSeriesRing with a count of 0 is not available in sagebrush yet\") #0": {
+  "class": "coverage",
+  "owner": "series rings (@sagebrush-sage2)",
+  "reason": "LaurentSeriesRing with a count of 0 (Sage makes a ring that cannot print itself, L39) or names Sage takes on another path: refused rather than guessed; not a cap"
+ },
+ "lib/_sage_series.py :: _first_counted :: raise NotImplementedError(\"LaurentSeriesRing with the names %r is not available in sagebrush yet\" % (src,)) #0": {
+  "class": "coverage",
+  "owner": "series rings (@sagebrush-sage2)",
+  "reason": "LaurentSeriesRing with a count of 0 (Sage makes a ring that cannot print itself, L39) or names Sage takes on another path: refused rather than guessed; not a cap"
+ },
+ "lib/_sage_series.py :: _series_ring_from_list :: raise NotImplementedError(\"multivariate power series rings are not available in sagebrush yet\") #0": {
+  "class": "coverage",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "an unsupported case, not a cap: K[['x', 'y']] is a multivariate power series ring in Sage; refused here rather than a ring in x alone (the extra names were dropped before)"
  },
  "lib/_sbdata.py :: _Parser.string :: def string(self, cap, capcode=\"cap:string\"): #0": {
   "class": "1",
