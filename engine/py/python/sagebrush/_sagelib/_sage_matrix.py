@@ -32,6 +32,14 @@ def _norm(c):
     return _sa().Rational._from_coprime_ints(f.numerator, f.denominator)
 
 
+def _sr_rational(x):
+    """x, or the int or Rational it is when x is an exact rational of SR
+    (SR(2), SR(3)/4: the engine's n<p>/<q>; encoding)."""
+    if type(x).__name__ == "Expression" and getattr(x, "_s", "").startswith("n"):
+        return _norm(x.pyobject())
+    return x
+
+
 def _is_sr_scalar(x):
     """A symbolic expression (not a relation): a scalar of M + c, c - M."""
     return type(x).__name__ == "Expression" and hasattr(x, "_s") and not x.is_relational()
@@ -859,6 +867,15 @@ def _select(k, n, err="matrix index out of range"):
     return [one(k)], True
 
 
+def _no_generalized(m, other):
+    # A v = lambda B v: Sage solves it only over RDF and CDF (an exact
+    # matrix's eigenmatrix_right(B) ignored B and gave a wrong answer); the
+    # refusal in _sage_matrix_more, loaded on first use
+    if other is not None:
+        import _sage_matrix_more
+        _sage_matrix_more.refuse_generalized(m)
+
+
 class Matrix:
     """A dense matrix over ZZ or QQ.
 
@@ -886,6 +903,10 @@ class Matrix:
         if any(len(r) != width for r in rows):
             raise ValueError("the rows of a matrix must have the same length")
         self._rows = [[_norm(x) for x in r] for r in rows]
+        if base is _sa().QQ or base is _sa().ZZ:
+            # (entries in QQ: SR(2) is 2 there, as Sage converts it; kept
+            # as SR it reached sagebrush.linalg, whose Fraction() refused it)
+            self._rows = [[_sr_rational(x) for x in r] for r in self._rows]
         self._immutable = False
         # the number of columns, kept when there are no rows (a 0 x 3
         # matrix was 0 x 0: the systematic review's LIN-F4)
@@ -1263,6 +1284,36 @@ class Matrix:
             True
         """
         return not self.is_immutable()
+
+    def __copy__(self):
+        """A mutable copy with its own rows, as Sage: changing it leaves self
+        alone (copy() shared the rows, so N[0, 1] = 4 changed M too).
+
+        EXAMPLES::
+
+            sage: from copy import copy
+            sage: M = matrix(QQ, [[0, 1], [1, 0]]); M.set_immutable(); N = copy(M); N[0, 1] = 4
+            sage: M[0, 1], N[0, 1], N.is_mutable()
+            (1, 4, True)
+        """
+        m = object.__new__(type(self))
+        for cls in type(self).__mro__:
+            for s in getattr(cls, "__slots__", ()):
+                if s != "__dict__" and hasattr(self, s):
+                    setattr(m, s, getattr(self, s))
+        if hasattr(self, "__dict__"):
+            m.__dict__.update(self.__dict__)
+        m._rows = [list(r) for r in self._rows]
+        m._immutable = False
+        if self._subdiv is not None:
+            m._subdiv = tuple(list(p) for p in self._subdiv)
+        return m
+
+    def __deepcopy__(self, memo):
+        # (as Sage: a deep copy keeps the immutability, a copy does not)
+        m = self.__copy__()
+        m._immutable = self.is_immutable()
+        return m
 
     def __hash__(self):
         # (a mutable matrix's hash would change under it, as in Sage: the
@@ -1751,10 +1802,18 @@ class Matrix:
             sage: A.solve_right(vector([5, 6]))
             (-4, 9/2)
         """
+        if not isinstance(B, (Matrix, Vector)):
+            # (as Sage: a list, tuple or generator is refused, not read)
+            raise TypeError("the second argument must be a vector or a matrix")
         if self._base is _sa().SR:
             import _sage_matrix_sr
             return _sage_matrix_sr.solve_right(self, B)
         is_vec = not isinstance(B, Matrix)
+        if (getattr(B, "_ring", None) if is_vec else B._base) is _sa().SR or (is_vec and any(_is_sr_scalar(_sr_rational(x)) for x in B)):
+            # a right-hand side over SR: the solution is over SR (Sage's
+            # coercion), by the symbolic elimination
+            import _sage_matrix_sr
+            return _sage_matrix_sr.solve_right(Matrix(_sa().SR, self._rows, self._nc), B)
         Bm = Matrix(_sa().QQ, [[x] for x in _bounded_list(B, self.nrows())], 1) if is_vec else B
         if Bm.nrows() != self.nrows():
             raise ValueError("number of rows of self must equal number of rows of right-hand side")
@@ -2182,6 +2241,9 @@ class Matrix:
             sage: matrix(QQ, [[1, 1, 0], [0, 2, 0], [0, 0, 3]]).eigenvalues()
             [3, 2, 1]
         """
+        if self._base is _sa().SR:
+            import _sage_matrix_sr
+            return _sage_matrix_sr.eigenvalues(self)
         import _sage_qqbar
         out = []
         for g, e in self._eigen_factors():
@@ -2193,6 +2255,9 @@ class Matrix:
         return out
 
     def _eigenvectors(self, side):
+        if self._base is _sa().SR:
+            import _sage_matrix_sr
+            return _sage_matrix_sr.eigenvectors(self, side)
         import _sage_qqbar
         import _sage_ffmat
         a = self if side == "right" else self.transpose()
@@ -2220,6 +2285,7 @@ class Matrix:
             sage: matrix(QQ, [[1, 2], [3, 4]]).eigenvectors_right()
             [(-0.3722813232690144?, [(1, -0.6861406616345072?)], 1), (5.372281323269015?, [(1, 2.186140661634508?)], 1)]
         """
+        _no_generalized(self, other)
         return self._eigenvectors("right")
 
     right_eigenvectors = eigenvectors_right
@@ -2234,6 +2300,7 @@ class Matrix:
             sage: matrix(QQ, [[1, 2], [3, 4]]).eigenvectors_left()
             [(-0.3722813232690144?, [(1, -0.4574271077563382?)], 1), (5.372281323269015?, [(1, 1.457427107756339?)], 1)]
         """
+        _no_generalized(self, other)
         return self._eigenvectors("left")
 
     left_eigenvectors = eigenvectors_left
@@ -2343,7 +2410,12 @@ class Matrix:
             [1 0 0]
             sage: A*P == P*D
             True
+            sage: A.eigenmatrix_right(2*identity_matrix(QQ, 3))
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: generalized eigenvector decomposition is implemented for RDF and CDF, but not for Rational Field
         """
+        _no_generalized(self, other)
         return self._eigenmatrix("right")
 
     def eigenmatrix_left(self, other=None):
@@ -2355,6 +2427,7 @@ class Matrix:
             [                   1 -0.4574271077563382?]
             [                   1   1.457427107756339?]
         """
+        _no_generalized(self, other)
         return self._eigenmatrix("left")
 
     def diagonal(self):
