@@ -6,7 +6,7 @@
 // an overflowing frame reported.
 //   node scripts/build-cli.mjs && node web/latex/test-latex-cli.mjs
 //   (CHROME=/path/to/chrome for the PNGs; LATEX_CLI_PNG=1 makes a missing browser a failure, not a skip)
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync, mkdirSync, copyFileSync, symlinkSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync, mkdirSync, copyFileSync, symlinkSync, truncateSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawn } from "node:child_process";
@@ -506,6 +506,23 @@ $\sage{1/0}$ then $\sage{2+2}$.
     const bad = saved(); bad.deps = [["../h.py", "0".repeat(64)]]; writeFileSync(rp, JSON.stringify(bad) + "\n");
     const c6 = await run(w, "check", "d.tex", "--json");
     check("W01: deps that can't be read (a path out of the folder): the results aren't used, said", c6.json?.code?.every((x) => x.state === "not run") && c6.json.problems.some((p) => p.kind === "stale" && /can't be read/.test(p.message)), c6.json?.problems);
+    // (astra's DEP-READ-1: one bounded reader. A helper that is a link out of the folder, a folder, or past the
+    //  budget: not read, so not used (the link's target's own hash doesn't make it so))
+    const stale = async (deps) => { const j = saved(); j.deps = deps; writeFileSync(rp, JSON.stringify(j) + "\n"); const c = await run(w, "check", "d.tex", "--json"); return c.json?.code?.every((x) => x.state === "not run") && c.json.problems.some((p) => p.kind === "stale"); };
+    writeFileSync(join(dir, "out.py"), "v = 1\n");
+    rmSync(join(w, "h.py")); symlinkSync(join(dir, "out.py"), join(w, "h.py"));
+    const viaLink = await stale([["h.py", hash]]);
+    rmSync(join(w, "h.py")); mkdirSync(join(w, "h.py"));
+    const aDir = await stale([["h.py", hash]]);
+    rmSync(join(w, "h.py"), { recursive: true }); writeFileSync(join(w, "h.py"), "v = 1\n"); writeFileSync(join(w, "big.py"), ""); truncateSync(join(w, "big.py"), 65 * 2 ** 20);
+    const past = await stale([["big.py", hash]]);
+    check("DEP-READ-1: a helper linked out of the folder, a folder, or past the budget: not read, the results not used", viaLink && aDir && past, { viaLink, aDir, past });
+    rmSync(join(w, "big.py"));
+    // (astra's DEP-SNAPSHOT-1: a helper changed while the run ran: what it imported can't be named, the results recorded
+    //  "incomplete" and not used; never left without a record, as an older file's)
+    writeFileSync(join(w, "d.tex"), "\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n\\begin{sagesilent}\nfrom h import v\n\\end{sagesilent}\n\\begin{sagesilent}\nopen('h.py', 'w').write('v = 5')\n\\end{sagesilent}\n$\\sage{v}$\n\\end{document}\n");
+    const r3 = await run(w, "run", "d.tex", "--json"), c7 = await run(w, "check", "d.tex", "--json");
+    check("DEP-SNAPSHOT-1: a helper changed during the run: recorded incomplete, the results not used, said", r3.code === 0 && saved().deps === "incomplete" && c7.json?.code?.every((x) => x.state === "not run") && c7.json.problems.some((p) => p.kind === "stale" && /couldn't record everything/.test(p.message)), { r3: r3.code, deps: saved().deps, c7: c7.json?.problems });
   }
 } finally {
   rmSync(dir, { recursive: true, force: true });

@@ -12,7 +12,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
-import { driver, runnable, parseOutput, statesOf, resultsText, msgOf, MARK, RUN_LIMITS, RESULTS_FORMAT, runAndSave, sessionOf, sandboxEngine, SANDBOX_FAILED, folderFiles, runIn, DEPS_MARK, parseDeps, depsWith } from "./run-core.mjs";
+import { driver, runnable, parseOutput, statesOf, resultsText, msgOf, MARK, RUN_LIMITS, RESULTS_FORMAT, runAndSave, sessionOf, sandboxEngine, SANDBOX_FAILED, folderFiles, runIn, DEPS_MARK, parseDeps, depsWith, wsReader, checkedResults } from "./run-core.mjs";
 import { itemKey, savedStates, stateOf, WRAPPER_VERSION, MAX_RESULT, safeRel, depsOf, staleOf, sha256hex } from "./engine/sagetex.mjs";
 
 const results = [];
@@ -377,7 +377,8 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
   check("folder: the next Run imports them afresh (an edited helper, an edited package child)", /\(2, 20\)/.test(lx(5)), lx(5));
   check("folder: a deleted helper is gone at the next Run", got[6]?.s === "error" && /No module named .?helper/.test(got[6]?.msg ?? ""), got[6]);
   check("W01: each Run names the modules it imported from its folder (a package's files too), and those of no other folder; the deps lines aren't results",
-    depLines.length === 4 && JSON.stringify(depLines[0]) === JSON.stringify(["helper.py", "pkg/__init__.py", "pkg/child.py"]) && JSON.stringify(depLines[1]) === JSON.stringify(depLines[0]) && JSON.stringify(depLines[2]) === "[]" && JSON.stringify(depLines[3]) === JSON.stringify(["helper.py", "other.py"]) && JSON.stringify(parseDeps(r.out)) === JSON.stringify(["helper.py", "other.py"]) && got.length === 10, { depLines, n: got.length });
+    // (one line after each item: Run 1's four, Run 2's two, Run 3's one, Run 4's three; each Run's last one counts)
+    depLines.length === 10 && JSON.stringify(depLines[0]) === JSON.stringify(["helper.py", "pkg/__init__.py", "pkg/child.py"]) && JSON.stringify(depLines[3]) === JSON.stringify(depLines[0]) && JSON.stringify(depLines[5]) === JSON.stringify(depLines[0]) && JSON.stringify(depLines[6]) === "[]" && JSON.stringify(depLines[9]) === JSON.stringify(["helper.py", "other.py"]) && JSON.stringify(parseDeps(r.out)) === JSON.stringify(["helper.py", "other.py"]) && got.length === 10, { depLines, n: got.length });
   check("folder: a Run in another folder imports its own (its own helper.py of the same name), and not the first folder's (off sys.path, its modules dropped)", /\(5, \\mathrm\{True\}, 0, \\mathrm\{True\}, 7\)/.test(lx(8)) && got[9]?.s === "error" && /No module named .?pkg/.test(got[9]?.msg ?? ""), { r8: lx(8), r9: got[9] });
 }
 
@@ -549,9 +550,10 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
   delete files["h.py"];
   const gone = await staleOf([["h.py", h1]], read);
   check("W01 staleOf: the same file: none; changed or gone: that file", same === null && changed === "h.py" && gone === "h.py", { same, changed, gone });
-  const deps = await depsWith(["h.py", "pkg/c.py", "missing.py"], [["/A/h.py", enc("v = 1\n")], ["/A/pkg/c.py", enc("x")]], "/A");
+  const deps = await depsWith(["h.py", "pkg/c.py"], [["/A/h.py", enc("v = 1\n")], ["/A/pkg/c.py", enc("x")]], "/A");
   const root = await depsWith(["h.py"], [["/h.py", enc("v = 1\n")]], "/");
-  check("W01 depsWith: hashes from the bytes the session was given (a folder or the top), only the files it had", JSON.stringify(deps.map((d) => d[0])) === JSON.stringify(["h.py", "pkg/c.py"]) && deps[0][1] === h1 && root.length === 1 && root[0][1] === h1, { deps, root });
+  const missing = await depsWith(["h.py", "missing.py"], [["/A/h.py", enc("v = 1\n")]], "/A"), none = await depsWith(null, [], "/A");
+  check("W01 depsWith: hashes from the bytes the session was given (a folder or the top); a file it didn't have, or no record at all: incomplete", JSON.stringify(deps.map((d) => d[0])) === JSON.stringify(["h.py", "pkg/c.py"]) && deps[0][1] === h1 && root.length === 1 && root[0][1] === h1 && missing === "incomplete" && none === "incomplete", { deps, root, missing, none });
   // (a Run writes them: its session's deps line, hashed from the bytes it was given, into the results file it writes)
   {
     let written = null;
@@ -561,6 +563,49 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
       session: sW, store: sW, serial: sW.serial, folder: async () => ({ dir: "/W", files: [["/W/d.tex", enc("x")], ["/W/h.py", enc("v = 1\n")]] }),
       exec: async () => ({ out: MARK + JSON.stringify({ s: "ok" }) + "\n" + DEPS_MARK + JSON.stringify(["h.py"]) + "\n", stopped: "" }) });
     check("W01: a Run's results file records what it imported, hashed from the bytes it was given", rW.ok && JSON.stringify(written?.deps) === JSON.stringify([["h.py", h1]]) && written.items.length === 1, { rW, written });
+  }
+  // (the record's rules (astra's DEP-READ-1): a path twice, or "incomplete": not used; the reading budget shared)
+  check("W01 depsOf: a path named twice is invalid; an incomplete record is incomplete", depsOf({ deps: [["h.py", h1], ["h.py", h1]] }) === "invalid" && depsOf({ deps: "incomplete" }) === "incomplete", null);
+  const big = { "a.py": new Uint8Array(60), "b.py": new Uint8Array(60) };
+  const a60 = await sha256hex(big["a.py"]);
+  const over = await staleOf([["a.py", a60], ["b.py", a60]], async (rel, left) => (big[rel].length > left ? "over" : big[rel]), 100);
+  check("W01 staleOf: the files read within one budget: past it, \"over\" (not checked: not used)", over === "over", over);
+  const wsT = { readUpTo: async (p, max) => { if (p.endsWith("t.py")) return { entry: { trashed: true }, content: enc("x") }; if (p.endsWith("big.py")) throw Object.assign(new Error("x"), { code: "limit" }); return { entry: {}, content: enc("ok") }; } };
+  const rd = wsReader(wsT, "/A");
+  check("W01 wsReader: a file in the Trash isn't there; one past the bound is \"over\"", (await rd("t.py", 10)) === null && (await rd("big.py", 10)) === "over" && (await rd("h.py", 10))?.length === 2, null);
+  // (daybreak3's ENGINE-DEPS-PARTIAL-1: a Run whose first item imported the helper and whose second was stopped: its
+  //  results file records the helper (from the line after item 1); the helper edited, item 1's result isn't used)
+  {
+    let written = null;
+    const sP = sessionOf({ module: async () => ({ WorkerKernel: class { constructor(o) { this.o = o; this.ready = false; } start() { this.worker = { postMessage() {} }; this.o.onStart(this.worker); this.ready = true; } post() {} on() { return () => {}; } } }), worker: () => null }, 1000);
+    // (a file's entry changes with every write, as the workspace's does: `updated` counts them)
+    const writes = new Map();
+    const files = new Proxy({ "/P/d.tex": enc("x"), "/P/h.py": enc("v = 1\n"), "/P/d.tex.results.json": enc("{}") }, { set: (t, k, v) => { writes.set(k, (writes.get(k) ?? 0) + 1); t[k] = v; return true; } });
+    const ws = { pathOfFile: async () => ({ ok: true, path: "/P/d.tex" }), stat: async (p) => (files[p] ? { fid: p, updated: writes.get(p) ?? 0, size: files[p].length } : undefined), createByPerson: async (p, o) => { written = JSON.parse(new TextDecoder().decode(o.content)); return {}; }, write: async (p, bytes) => { written = JSON.parse(new TextDecoder().decode(bytes)); return { ok: true }; },
+      readUpTo: async (p, max) => { if (!files[p]) throw new Error("gone"); if (files[p].length > max) throw Object.assign(new Error("x"), { code: "limit" }); return { entry: {}, content: files[p] }; } };
+    const rP = await runAndSave({ items: [item("silent", "from h import v"), item("sage", "v")], current: () => true, max: 1 << 20, now: () => 0, fid: "f",
+      ws, session: sP, store: sP, serial: sP.serial, folder: async () => ({ dir: "/P", files: Object.entries(files) }),
+      exec: async () => ({ out: MARK + JSON.stringify({ s: "ok" }) + "\n" + DEPS_MARK + JSON.stringify(["h.py"]) + "\n", stopped: "the run was stopped" }) });
+    const c1 = await checkedResults(ws, "/P/d.tex.results.json", await ws.stat("/P/d.tex.results.json"), written, "/P");
+    files["/P/h.py"] = enc("v = 2\n");
+    const c2 = await checkedResults(ws, "/P/d.tex.results.json", await ws.stat("/P/d.tex.results.json"), written, "/P");
+    check("ENGINE-DEPS-PARTIAL-1: item 1 imports the helper, item 2 stopped: the results record it; the helper edited, item 1 isn't used", rP.ok && JSON.stringify(written?.deps?.map((d) => d[0])) === JSON.stringify(["h.py"]) && c1.stale === null && c1.saved.length === 2 && c2.stale === "h.py" && c2.saved.length === 0, { written: written?.deps, c1: c1.stale, c2: c2.stale });
+    // (results printed but no record of what was imported: incomplete, never an older file's no record)
+    written = null;
+    await runAndSave({ items: [item("silent", "x = 1")], current: () => true, max: 1 << 20, now: () => 0, fid: "f",
+      ws, session: sP, store: sP, serial: sP.serial, folder: async () => ({ dir: "/P", files: Object.entries(files) }),
+      exec: async () => ({ out: MARK + JSON.stringify({ s: "ok" }) + "\n", stopped: "" }) });
+    check("DEP-SNAPSHOT-1: results without a record of what their Run imported are written as incomplete", written?.deps === "incomplete", written?.deps);
+    // (astra's DEP-SEEN-1, daybreak3's ENGINE-SEEN-COMMIT-1: the helper changed while it is checked: nothing used, nothing
+    //  seen; checked again, it is stale)
+    files["/P/h.py"] = enc("v = 1\n");
+    const rec = { format: RESULTS_FORMAT, version: 1, wrapper: WRAPPER_VERSION, items: [{ key: "k", s: "ok" }], deps: [["h.py", h1]] };
+    const orig = ws.readUpTo;
+    ws.readUpTo = async (p, max) => { const r = await orig(p, max); if (p.endsWith("h.py")) files["/P/h.py"] = enc("v = 9\n"); return r; };
+    const mid = await checkedResults(ws, "/P/d.tex.results.json", await ws.stat("/P/d.tex.results.json"), rec, "/P");
+    ws.readUpTo = orig;
+    const again = await checkedResults(ws, "/P/d.tex.results.json", await ws.stat("/P/d.tex.results.json"), rec, "/P");
+    check("DEP-SEEN-1: a recorded file changed while it is checked: nothing used, nothing counted as seen; checked again, stale", mid.seen === null && mid.saved.length === 0 && again.stale === "h.py" && again.seen !== null && again.saved.length === 0, { mid, again: { stale: again.stale, seen: !!again.seen } });
   }
   check("W01 resultsText: deps only when there are some", !("deps" in JSON.parse(resultsText([]))) && JSON.stringify(JSON.parse(resultsText([], [["h.py", h1]])).deps) === JSON.stringify([["h.py", h1]]), null);
 }

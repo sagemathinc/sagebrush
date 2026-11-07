@@ -8,7 +8,7 @@
 // render says so and still writes the HTML.
 // Built as its own file, sagebrush-latex.cjs, beside the CLI's bundle (scripts/build-cli.mjs). src/cli.ts loads it
 // only for `latex`, so other commands don't carry the engine, KaTeX and its fonts.
-import { readFileSync, writeFileSync, existsSync, statSync, realpathSync, mkdirSync, mkdtempSync, rmSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, statSync, realpathSync, mkdirSync, mkdtempSync, rmSync, openSync, readSync, closeSync, readdirSync } from "fs";
 import { basename, dirname, join, resolve, relative, delimiter, sep, posix } from "path";
 import { tmpdir } from "os";
 import { createHash } from "crypto";
@@ -18,7 +18,7 @@ import katex from "katex";
 import { Engine } from "../web/latex/engine/pipeline.mjs";
 import { setKatex, installBeamer } from "../web/latex/engine/render.mjs";
 import * as beamerCode from "../web/latex/engine/beamer.mjs";
-import { itemKey, MAX_RESULT, WRAPPER_VERSION, depsOf, safeRel, DEPS_MAX } from "../web/latex/engine/sagetex.mjs";
+import { itemKey, MAX_RESULT, WRAPPER_VERSION, depsOf, safeRel, DEPS_MAX, DEPS_BYTES, staleOfSync } from "../web/latex/engine/sagetex.mjs";
 import { PAGE_CSS } from "../web/latex/style";
 import { imageCandidates, graphicsPathOf, notFoundWhy, sniffImage, admitImageBytes, IMAGE_EXTS } from "../web/latex/images";
 import { engineInputs, admitInput, INPUT_BOUNDS, type Known } from "../web/latex/inputs";
@@ -222,9 +222,49 @@ export const RESULTS_FORMAT = "sagebrush-latex-results";
 const RESULTS_MAX = 32 * 2 ** 20, SVG_MAX = 2 * 2 ** 20, MSG_MAX = 4000;
 type State = { key: string; s: "ok" | "error" | "blocked"; latex?: string; src?: string; msg?: string };
 
-/** A file's SHA-256 (hex), or null if it can't be read. */
-function fileHash(p: string): string | null {
-  try { return createHash("sha256").update(readFileSync(p)).digest("hex"); } catch { return null; }
+const sha256 = (b: Uint8Array) => createHash("sha256").update(b).digest("hex");
+/** The .tex's folder's reader of recorded files (astra's DEP-READ-1, the editor's rule too: sagetex.mjs staleOf):
+ * `rel` resolved, links followed, to a regular file inside the folder's own real path, read at most `left` bytes:
+ * its bytes; null if it isn't one (gone, a directory, a link out of the folder); "over" if larger than `left`. */
+function folderReader(dir: string): (rel: string, left: number) => Uint8Array | null | "over" {
+  let root: string;
+  try { root = realpathSync(dir); } catch { return () => null; }
+  return (rel, left) => {
+    let fd = -1;
+    try {
+      const real = realpathSync(join(dir, ...rel.split("/")));
+      if (!real.startsWith(root + sep)) return null;
+      const st = statSync(real);
+      if (!st.isFile()) return null;
+      if (st.size > left) return "over";
+      // (at most one byte past `left`: a file that grew since its stat is refused, never read whole)
+      fd = openSync(real, "r");
+      const buf = Buffer.alloc(Math.min(st.size, left) + 1);
+      const n = readSync(fd, buf, 0, buf.length, 0);
+      return n > left ? "over" : new Uint8Array(buf.buffer, buf.byteOffset, n);
+    } catch { return null; } finally { if (fd >= 0) try { closeSync(fd); } catch {} }
+  };
+}
+/** The .py files of the .tex's folder, hashed before a run (DEP-SNAPSHOT-1): relative path -> SHA-256, breadth
+ * first (the files beside the .tex first), not into a hidden folder, node_modules or __pycache__, at most DEPS_MAX
+ * files and DEPS_BYTES in all; a file past either isn't hashed (a run that imports it records "incomplete"). */
+function preHashes(dir: string): Map<string, string> {
+  const read = folderReader(dir), out = new Map<string, string>();
+  let left = DEPS_BYTES;
+  const queue = [""];
+  while (queue.length && out.size < DEPS_MAX) {
+    const sub = queue.shift()!;
+    let names: { name: string; dir: boolean }[] = [];
+    try { names = readdirSync(join(dir, ...sub.split("/").filter(Boolean)), { withFileTypes: true }).map((d) => ({ name: d.name, dir: d.isDirectory() })).sort((a, b) => (a.name < b.name ? -1 : 1)); } catch { continue; }
+    for (const d of names) {
+      const rel = sub ? sub + "/" + d.name : d.name;
+      if (d.dir) { if (!d.name.startsWith(".") && d.name !== "node_modules" && d.name !== "__pycache__") queue.push(rel); continue; }
+      if (!d.name.endsWith(".py") || out.size >= DEPS_MAX) continue;
+      const b = read(rel, left);
+      if (b && b !== "over") { out.set(rel, sha256(b)); left -= b.length; }
+    }
+  }
+  return out;
 }
 /** The results file's states, or [] if there is none or it isn't one (never trusted beyond its shape); and, if it
  * records what its run imported (deps) and one of those files changed or is gone, none of its states and the reason
@@ -236,8 +276,9 @@ function readResults(file: string): { states: State[]; stale: string | null } {
     const j = JSON.parse(readFileSync(p, "utf8"));
     if (j?.format !== RESULTS_FORMAT || j.version !== 1 || j.wrapper !== WRAPPER_VERSION || !Array.isArray(j.items)) return none;
     const deps = depsOf(j);
-    if (deps === "invalid") return { states: [], stale: "invalid" };
-    for (const [rel, h] of deps ?? []) if (fileHash(join(dirname(file), rel)) !== h) return { states: [], stale: rel };
+    if (deps === "invalid" || deps === "incomplete") return { states: [], stale: deps };
+    const stale = deps ? staleOfSync(deps, folderReader(dirname(file)), sha256) : null;
+    if (stale) return { states: [], stale };
     return { stale: null, states: j.items.filter((x: any) => x && typeof x.key === "string" && ["ok", "error", "blocked"].includes(x.s)).map((x: any) => ({
       key: x.key, s: x.s, ...(typeof x.latex === "string" ? { latex: x.latex } : {}), ...(typeof x.src === "string" ? { src: x.src } : {}), ...(typeof x.msg === "string" ? { msg: x.msg.slice(0, MSG_MAX) } : {}),
     })) };
@@ -338,6 +379,8 @@ async function runCommand(file: string, text: string, timeout: number, json: boo
   writeFileSync(join(tmp, "items.json"), JSON.stringify(toRun));
   writeFileSync(join(tmp, "driver.sage"), DRIVER);
   const outp = join(tmp, "out.json"), depp = join(tmp, "deps.json");
+  // (the folder's .py files hashed before the run: what it imports is recorded only if unchanged by the end)
+  const before = preHashes(dirname(resolve(file)));
   const t0 = Date.now();
   const done = await new Promise<{ code: number | null; timedOut: boolean; err: string }>((res) => {
     const p = spawn(cmd[0], [...cmd.slice(1), join(tmp, "driver.sage"), join(tmp, "items.json"), outp, depp], { cwd: dirname(resolve(file)), stdio: ["ignore", "ignore", "pipe"] });
@@ -349,12 +392,25 @@ async function runCommand(file: string, text: string, timeout: number, json: boo
   });
   let got: any[] = [];
   try { got = existsSync(outp) ? JSON.parse(readFileSync(outp, "utf8")) : []; } catch {}
-  // (what it imported from the .tex's folder, with each file's hash now: the results' record of their inputs)
-  let deps: [string, string][] = [];
+  // (what it imported from the .tex's folder: each file hashed again, and recorded only if it is as it was before the
+  //  run (DEP-SNAPSHOT-1); one changed, new, not hashed before, unreadable, unsafe or past the bounds, and the record is
+  //  "incomplete", so none of these results is used later: never a record left out, as an older file's is)
+  let deps: [string, string][] | "incomplete" = [];
   try {
-    const rels = existsSync(depp) ? JSON.parse(readFileSync(depp, "utf8")) : [];
-    if (Array.isArray(rels)) deps = rels.filter(safeRel).slice(0, DEPS_MAX).flatMap((rel: string) => { const h = fileHash(join(dirname(file), rel)); return h ? [[rel, h] as [string, string]] : []; });
-  } catch {}
+    const rels = existsSync(depp) ? JSON.parse(readFileSync(depp, "utf8")) : got.length ? null : [];
+    if (!Array.isArray(rels) || rels.length > DEPS_MAX || !rels.every(safeRel)) deps = "incomplete";
+    else {
+      const read = folderReader(dirname(resolve(file)));
+      let left = DEPS_BYTES;
+      const out: [string, string][] = [];
+      for (const rel of rels as string[]) {
+        const b = read(rel, left), h = b && b !== "over" ? sha256(b) : null;
+        if (!h || before.get(rel) !== h) { deps = "incomplete"; break; }
+        out.push([rel, h]); left -= (b as Uint8Array).length;
+      }
+      if (deps !== "incomplete") deps = out;
+    }
+  } catch { deps = "incomplete"; }
   removeTemp(tmp);
   const states: State[] = [];
   let failed = false;
@@ -382,7 +438,7 @@ async function runCommand(file: string, text: string, timeout: number, json: boo
     } else states.push({ key, s: "ok" });
   }
   const rp = resultsPath(file);
-  writeFileSync(rp, JSON.stringify({ format: RESULTS_FORMAT, version: 1, wrapper: WRAPPER_VERSION, generator: "sagebrush latex run", items: states, ...(deps.length ? { deps } : {}) }) + "\n");
+  writeFileSync(rp, JSON.stringify({ format: RESULTS_FORMAT, version: 1, wrapper: WRAPPER_VERSION, generator: "sagebrush latex run", items: states, ...(deps === "incomplete" || deps.length ? { deps } : {}) }) + "\n");
   const lines = items.map((it, k) => ({ n: k + 1, mode: String(it.mode), line: typeof it.at === "number" && it.at >= 0 ? text.slice(0, it.at).split("\n").length : null, state: states[k].s, ...(states[k].s === "error" ? { message: states[k].msg } : {}) }));
   const ms = Date.now() - t0, bad = states.some((x) => x.s === "error");
   if (!json) {

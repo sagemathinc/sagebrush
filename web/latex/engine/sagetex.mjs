@@ -24,17 +24,25 @@ export function utf8len(s) {
 // without `deps` (an older one) is used as before. Real SageTeX doesn't track a helper either (its .sout keys on the
 // .sage code alone): this is Sagebrush's own guarantee.
 export const DEPS_MAX = 1000;
+/** All the recorded files' bytes read to check or record them, in all (astra's DEP-READ-1): past it, not checked */
+export const DEPS_BYTES = 64 * 2 ** 20;
 /** A recorded path: relative, its segments neither empty nor "." nor "..", no backslash or control character. */
 export function safeRel(p) {
   if (typeof p !== "string" || !p || p.length > 1024 || p.startsWith("/") || /[\\\u0000-\u001f\u007f]/.test(p)) return false;
   return p.split("/").every((s) => s !== "" && s !== "." && s !== "..");
 }
-/** The results file's `deps`: null if it has none (used as before); [] never; "invalid" if it isn't the shape above
- * (then none of its results is used: its inputs can't be checked). */
+/** The results file's `deps`: null if it has none (used as before); "incomplete" if its run couldn't record them all
+ * (a file changed while it ran, one not readable, too many); "invalid" if it isn't the shape above or names a path
+ * twice. Either of those: none of its results is used. */
 export function depsOf(j) {
   if (!j || j.deps === undefined) return null;
+  if (j.deps === "incomplete") return "incomplete";
   if (!Array.isArray(j.deps) || j.deps.length > DEPS_MAX) return "invalid";
-  for (const d of j.deps) if (!Array.isArray(d) || d.length !== 2 || !safeRel(d[0]) || typeof d[1] !== "string" || !/^[0-9a-f]{64}$/.test(d[1])) return "invalid";
+  const seen = new Set();
+  for (const d of j.deps) {
+    if (!Array.isArray(d) || d.length !== 2 || !safeRel(d[0]) || typeof d[1] !== "string" || !/^[0-9a-f]{64}$/.test(d[1]) || seen.has(d[0])) return "invalid";
+    seen.add(d[0]);
+  }
   return j.deps;
 }
 /** The SHA-256 of `bytes`, hex. */
@@ -42,17 +50,36 @@ export async function sha256hex(bytes) {
   const h = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
   return [...h].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
-/** The first recorded file now gone or changed (its path), or null: `read(rel)` -> its bytes, or null if it isn't
- * there. `deps`: depsOf's array. */
-export async function staleOf(deps, read) {
+// (the one reading rule, the CLI's and the editor's: each side's `read(rel, left)` gives the file's bytes, null if it
+//  isn't a regular file inside the .tex's folder (gone, in the Trash, a link out of it), or "over" if it is larger than
+//  what is left of DEPS_BYTES; the files are read in the record's order, the budget shared)
+/** The first recorded file now changed or gone (its path), "over" if the budget ran out first, or null. */
+export async function staleOf(deps, read, budget = DEPS_BYTES) {
+  let left = budget;
   for (const [rel, h] of deps) {
-    const b = await read(rel);
+    const b = await read(rel, left);
+    if (b === "over") return "over";
     if (!b || (await sha256hex(b)) !== h) return rel;
+    left -= b.length;
   }
   return null;
 }
-/** Why a results file's results aren't used: its recorded input `rel` changed or gone ("invalid": the record unreadable). */
-export const staleWhy = (rel) => rel === "invalid" ? "the results file's record of what its run imported can't be read" : `${rel} changed or was removed since they were run`;
+/** staleOf's twin for a synchronous reader and hash (the CLI's). */
+export function staleOfSync(deps, read, hash, budget = DEPS_BYTES) {
+  let left = budget;
+  for (const [rel, h] of deps) {
+    const b = read(rel, left);
+    if (b === "over") return "over";
+    if (!b || hash(b) !== h) return rel;
+    left -= b.length;
+  }
+  return null;
+}
+/** Why a results file's results aren't used: a recorded file changed or gone, or its record unusable. */
+export const staleWhy = (rel) => rel === "invalid" ? "the results file's record of what its run imported can't be read"
+  : rel === "incomplete" ? "their run couldn't record everything it imported (a file changed while it ran, or couldn't be read)"
+  : rel === "over" ? "what their run imported is too large to check here"
+  : `${rel} changed or was removed since they were run`;
 
 const SAGE_ENVS = new Set(["sageblock", "sagesilent"]);
 export const UNSUPPORTED_ENVS = new Set(["sagecommandline", "sageexample"]);

@@ -28,12 +28,14 @@ export function lineOf(text: string, at: number): number | null {
   return n;
 }
 
+import { staleWhy } from "./engine/sagetex.mjs";
+
 const MESSAGES: Record<string, (name: string) => string> = {
   command: (n) => `\\${n} is not supported by the preview (it shows as a grey \\${n} chip)`,
   environment: (n) => `the ${n} environment is not supported by the preview (its content is shown in a plain box)`,
   "not-rendered": (n) => `${n} is not drawn by the preview (a placeholder is shown instead)`,
   // (Codex W01: results whose run imported a file of the .tex's folder since changed or gone: not used)
-  stale: (n) => `the SageTeX results beside the .tex aren't used: ${n === "invalid" ? "their record of what their run imported can't be read" : n + " changed or was removed since they were run"}; \`sagebrush latex run\` runs the code again`,
+  stale: (n) => `the SageTeX results beside the .tex aren't used: ${staleWhy(n)}; \`sagebrush latex run\` runs the code again`,
   math: (n) => `KaTeX can't typeset this math: ${n}`,
   runaway: (n) => `\\${n}: the paragraph ended before its argument was complete (a missing "}"?)`,
   redefined: (n) => `\\newcommand: \\${n} is already defined (LaTeX would stop here; use \\renewcommand)`,

@@ -8,7 +8,7 @@
 // SECURITY: the items' code reaches the session only as base64 inside the script (never spliced into it as text); what
 // the session prints is parsed, never evaluated, and each result is checked here as the CLI checks it (the LaTeX's
 // size, the plot's SVG), and again where it is shown (sagetex.mjs).
-import { MAX_RESULT, WRAPPER_VERSION, utf8len, whyRejected, safeRel, sha256hex, DEPS_MAX } from "./engine/sagetex.mjs";
+import { MAX_RESULT, WRAPPER_VERSION, utf8len, whyRejected, safeRel, sha256hex, DEPS_MAX, depsOf, staleOf } from "./engine/sagetex.mjs";
 
 export const RESULTS_FORMAT = "sagebrush-latex-results";
 export const RUN_LIMITS = { svg: 2 * 2 ** 20, msg: 4000 };   // (the CLI's SVG_MAX and MSG_MAX, src/latex-cli.ts)
@@ -86,6 +86,18 @@ if _sbtx_d is not None:
         _sbtx_sys.path.append(_sbtx_d)
         _sbtx_added = _sbtx_d
 _sbtx_il.invalidate_caches()
+# (the modules imported from the .tex's folder so far: printed after each item (daybreak3's ENGINE-DEPS-PARTIAL-1: a
+#  Run stopped later still records what its earlier results used), the last line counting; the results file records
+#  them with their hashes, so an edited helper's old results are never used (Codex W01))
+def _sbtx_deps_line():
+    if _sbtx_d is None:
+        return
+    _sbtx_dl = set()
+    for _sbtx_m in list(_sbtx_sys.modules.values()):
+        _sbtx_f = getattr(_sbtx_m, "__file__", None)
+        if _sbtx_under(_sbtx_f, _sbtx_d):
+            _sbtx_dl.add(_sbtx_os.path.normpath(_sbtx_f)[len(_sbtx_d.rstrip("/")) + 1:])
+    print("\\x1eSBTXD" + _sbtx_json.dumps(sorted(_sbtx_dl)))
 for _sbtx_it in _sbtx_json.loads(_sbtx_b64.b64decode("${b64(JSON.stringify(items))}").decode("utf-8")):
     _sbtx_buf = _sbtx_io.StringIO()
     _sbtx_old = _sbtx_sys.stdout
@@ -108,15 +120,7 @@ for _sbtx_it in _sbtx_json.loads(_sbtx_b64.b64decode("${b64(JSON.stringify(items
     finally:
         _sbtx_sys.stdout = _sbtx_old
     print("\\x1eSBTX" + _sbtx_json.dumps(_sbtx_r))
-# (the modules imported from the .tex's folder, after the items: the results file records them with their hashes, so
-#  an edited helper's old results are never used (Codex W01))
-if _sbtx_d is not None:
-    _sbtx_dl = set()
-    for _sbtx_m in list(_sbtx_sys.modules.values()):
-        _sbtx_f = getattr(_sbtx_m, "__file__", None)
-        if _sbtx_under(_sbtx_f, _sbtx_d):
-            _sbtx_dl.add(_sbtx_os.path.normpath(_sbtx_f)[len(_sbtx_d.rstrip("/")) + 1:])
-    print("\\x1eSBTXD" + _sbtx_json.dumps(sorted(_sbtx_dl)))
+    _sbtx_deps_line()
 `;
 }
 
@@ -170,20 +174,56 @@ export function statesOf(items, got, stopped) {
   return states;
 }
 
+// ---- the editor reading a results file's record of what its Run imported (Codex W01)
+/** The .tex's folder's reader of recorded files, the CLI's rule (sagetex.mjs staleOf): the file's bytes, at most
+ * `left`; null if it isn't there or is in the Trash; "over" if larger than `left`. */
+export const wsReader = (ws, dir) => async (rel, left) => {
+  const p = (dir === "/" ? "" : dir) + "/" + rel;
+  try { const r = await ws.readUpTo(p, left); return r.entry?.trashed ? null : r.content; }
+  catch (err) { return err?.code === "limit" ? "over" : null; }
+};
+/** What was seen of a results file (`e`, its entry) and of each file its Run imported: their ids, revisions and
+ * sizes in one string; null if there is no results file. */
+export async function seenOf(ws, e, dir, deps) {
+  if (!e || e.trashed) return null;
+  const base = dir === "/" ? "" : dir;
+  const ds = await Promise.all(deps.map(([rel]) => ws.stat(base + "/" + rel).catch(() => undefined)));
+  return `${e.fid}:${e.updated}:${e.size}#` + ds.map((d) => d && !d.trashed ? `${d.fid}:${d.updated}:${d.size}` : "-").join("|");
+}
+/** A results file `j` (read from `p`, its entry `e`) checked against the files its Run imported: {saved, deps, stale,
+ * seen}. `saved`: its items if they may be used, else []; `stale`: why not (sagetex.mjs staleWhy), or null. `seen`
+ * is the state checked, or null if anything changed while it was checked (astra's DEP-SEEN-1, daybreak3's
+ * ENGINE-SEEN-COMMIT-1): then nothing is used and nothing counts as seen, so the next read checks again. */
+export async function checkedResults(ws, p, e, j, dir) {
+  const deps = depsOf(j);
+  if (deps === "invalid" || deps === "incomplete") return { saved: [], deps: [], stale: deps, seen: await seenOf(ws, e, dir, []) };
+  if (!deps) return { saved: j.items, deps: [], stale: null, seen: await seenOf(ws, e, dir, []) };
+  const before = await seenOf(ws, e, dir, deps);
+  const stale = await staleOf(deps, wsReader(ws, dir));
+  const after = await seenOf(ws, await ws.stat(p).catch(() => undefined), dir, deps);
+  const stable = before !== null && before === after;
+  return { saved: stale || !stable ? [] : j.items, deps, stale: stable ? stale : null, seen: stable ? after : null };
+}
+
 /** The results file's text. */
-export const resultsText = (states, deps = []) => JSON.stringify({ format: RESULTS_FORMAT, version: 1, wrapper: WRAPPER_VERSION, generator: "sagebrush editor", items: states, ...(deps.length ? { deps } : {}) }) + "\n";
+export const resultsText = (states, deps = []) => JSON.stringify({ format: RESULTS_FORMAT, version: 1, wrapper: WRAPPER_VERSION, generator: "sagebrush editor", items: states, ...(deps === "incomplete" || deps.length ? { deps } : {}) }) + "\n";
 /** The modules the session's Run imported from the .tex's folder (its last line's), paths relative to the folder:
  * only safe relative ones, at most DEPS_MAX; [] if it printed none. */
 export function parseDeps(out) {
-  let got = [];
-  for (const line of String(out).split("\n")) if (line.startsWith(DEPS_MARK)) { try { const a = JSON.parse(line.slice(DEPS_MARK.length)); got = Array.isArray(a) ? a : []; } catch { got = []; } }
-  return got.filter(safeRel).slice(0, DEPS_MAX);
+  // (the last line counts; none at all, or one not of the shape (a path not safe, too many): null, the record
+  //  incomplete: never read as an older results file's no record)
+  let got = null;
+  for (const line of String(out).split("\n")) if (line.startsWith(DEPS_MARK)) { try { const a = JSON.parse(line.slice(DEPS_MARK.length)); got = Array.isArray(a) ? a : "bad"; } catch { got = "bad"; } }
+  if (!Array.isArray(got) || got.length > DEPS_MAX || !got.every(safeRel)) return null;
+  return got;
 }
 /** Those modules with their hashes, from the bytes the session was given (`files`, the folder's snapshot, `dir` its
- * folder): [[rel, sha256]], the results file's `deps`. */
+ * folder: the exact input of the Run): [[rel, sha256]], the results file's `deps`; "incomplete" if `rels` is null or
+ * one of them wasn't in the snapshot (a file the session had otherwise: not trusted). */
 export async function depsWith(rels, files, dir) {
+  if (!rels) return "incomplete";
   const byPath = new Map(files), base = dir === "/" ? "" : dir, out = [];
-  for (const rel of rels) { const b = byPath.get(base + "/" + rel); if (b) out.push([rel, await sha256hex(b)]); }
+  for (const rel of rels) { const b = byPath.get(base + "/" + rel); if (!b) return "incomplete"; out.push([rel, await sha256hex(b)]); }
   return out;
 }
 
@@ -341,7 +381,8 @@ export async function runAndSave(o) {
   if (ran.stoppedBefore === true) return { msg: "Stopped before it ran" };
   const { out, stopped } = ran;
   const states = statesOf(o.items, parseOutput(out), stopped);
-  const deps = f ? await depsWith(parseDeps(out), f.files, f.dir) : [];
+  // (no results printed at all: nothing ran, nothing to record)
+  const deps = !f ? [] : parseOutput(out).length ? await depsWith(parseDeps(out), f.files, f.dir) : [];
   if (stale()) return { stale: true };
   const bytes = new TextEncoder().encode(resultsText(states, deps));
   if (bytes.length > o.max) return { msg: "Not saved: the results are too large" };
