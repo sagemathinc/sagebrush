@@ -9,6 +9,13 @@
    "pr": 600
   },
   {
+   "name": "matplotlib.pyplot.Axes.annotate",
+   "old": "(self, text, xy, xytext=, arrowprops=, fontsize=, ha=, **kw=)",
+   "new": "(self, text, xy, xytext=, xycoords=, textcoords=, arrowprops=, annotation_clip=, **kw=)",
+   "reason": "Matplotlib's own annotate signature (3.11.1): xycoords, textcoords and annotation_clip are its parameters, xycoords the fourth; the recorded order put arrowprops fourth, where Matplotlib reads a positional argument as xycoords. ha and fontsize are read from **kwargs, as Matplotlib's Text keywords are: a ninth positional argument is refused, as in Matplotlib.",
+   "pr": 801
+  },
+  {
    "name": "sage_all.LaurentSeriesRing",
    "old": "(base, name=, default_prec=, names=, sparse=, **kwds=)",
    "new": "(base, name=, arg2=, names=, sparse=, default_prec=, **kwds=)",

@@ -855,10 +855,13 @@ class Polynomial:
 
             sage: (x + 1).list()[0].parent()
             Rational Field
+            sage: R(0).list(), R(0).coefficients(sparse=False)
+            ([], [])
         """
+        # (the zero polynomial's list is empty, as Sage's)
         if self._ring._base is QQ:
-            return [_qq_coeff(a) for a in self._c] if self._c else [QQ(0)]
-        return list(self._c) if self._c else [0]
+            return [_qq_coeff(a) for a in self._c]
+        return list(self._c)
 
     def _out(self, a):
         """A coefficient as handed out: over QQ an element of QQ (an
