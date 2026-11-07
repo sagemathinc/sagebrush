@@ -1,6 +1,6 @@
 {
  "v": 1,
- "reason": "Four small Sage wrong answers (friction W18 W19 W24 W38): zero lists and the zero ideal, diff order 0 and polynomial derivatives in their ring, str(Word), unknown series coefficients and QQ coefficients (lib/_sage_poly.py, _sage_ff.py, _sage_frac.py, _sage_mpoly.py, _sage_expr.py, _sage_crystals.py, _sage_series.py) Re-measured with bun 1.4.4 (size-record.sh) on master 564b64d7 vs head c52350cb: cli/lib.gen.js +940, cli/pyjs.cjs +1424, engine/lib/sage.pre +9068, engine/lib/sage.src +3293; no other row moves. Markers: exact, except cli/pyjs.cjs 1456 (+1424 measured, plus 32 B of margin, as it moves with master).",
+ "reason": "Four small Sage wrong answers (friction W18 W19 W24 W38): zero lists and the zero ideal, diff order 0 and polynomial derivatives in their ring, str(Word), unknown series coefficients and QQ coefficients (lib/_sage_poly.py, _sage_ff.py, _sage_frac.py, _sage_mpoly.py, _sage_expr.py, _sage_crystals.py, _sage_series.py) Re-measured with bun 1.4.4 (size-record.sh) on master 564b64d7 vs head c52350cb: cli/lib.gen.js +940, cli/pyjs.cjs +1424, engine/lib/sage.pre +9068, engine/lib/sage.src +3293; no other row moves. Markers: exact, except cli/pyjs.cjs 1456 (+1424 measured, plus 32 B of margin, as it moves with master). Ceiling (rule 4): engine/lib/sage.src 2946380 -> 2949673, master 564b64d7's 2946316 (SIZE's measurement) + the measured 3293 + 64.",
  "bytes": {
   "cli/lib.gen.js": 940,
   "cli/pyjs.cjs": 1456,
