@@ -70,7 +70,7 @@ for (const t of ["click", "auxclick"]) addEventListener(t, (e) => { if (e.target
 const frame = () => { root.getBoundingClientRect(); return Promise.race([new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))), deadline(50)]); };
 const deadline = (ms) => new Promise((r) => setTimeout(r, ms));
 // (the frame's own width, before anything is measured: an out-of-process frame learns its size from the page a
-// moment after it loads, and until then its viewport is 0 wide, every word on its own line. A height measured
+// moment after it loads, and until then its viewport is 0 wide and its text wraps as if it had no width. A height measured
 // then is too tall, and an offscreen frame, whose resize observations are paused, never corrects it: the area's
 // placeholder would hold it and the page shift when the frame comes back (EVICT-LAYOUT-1). Bounded: a frame
 // really laid out 0 wide still commits at the deadline)

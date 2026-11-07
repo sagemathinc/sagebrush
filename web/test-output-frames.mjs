@@ -562,6 +562,19 @@ try {
     return out;
   })()`);
   ok(zw.ref > 0 && zw.zw === zw.ref, "a frame that has no width yet commits only once it has one, with its real height: " + JSON.stringify(zw));
+  // (and one laid out 0 wide for good still commits, at the readiness deadline, before the commit deadline)
+  const zk = await ev(`(async () => {
+    const M = make({ commitMs: 6000 });
+    const narrow = box(); narrow.style.width = "0px";
+    const z = M.area("zk", narrow); z.show();
+    const t0 = performance.now();
+    z.render([{ id: "o", kind: "text", body: "x" }]);
+    const end = await until(() => events.find((e) => e.area === "zk" && (e.type === "committed" || e.type === "error")), 9000);
+    const out = { type: end?.type, ms: Math.round((end?.t ?? 0) - t0) };
+    M.dispose();
+    return out;
+  })()`);
+  ok(zk.type === "committed" && zk.ms < 6000, "a frame laid out 0 wide for good still commits at the readiness deadline, not the commit deadline: " + JSON.stringify(zk));
 
   // ---- EVICT-LAYOUT-1 under a cap of 3, in a scrolling container
   await ev(`(() => {
