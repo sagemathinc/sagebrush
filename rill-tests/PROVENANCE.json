@@ -80,6 +80,21 @@
    "out_sha256": "de83564e01d2d62d60b4b9e87808a3a682d7e5d5b4d77e11b20012c2275d2cc6",
    "r_sha256": "2dba47bab5b49393e19a1877deaeb36bd6ab0fb1ee468accaecc828e85d68c02"
   },
+  "rill-tests/parse/test_1.R": {
+   "cases": 82,
+   "out_sha256": "750d7cecc347316683128c6e29a70e6c238fe773e8348edcffa982baa119bbb4",
+   "r_sha256": "3165128076b66138a4ff8977ae5c069966ed903b13b62b466ec82ad6f28b920b"
+  },
+  "rill-tests/parse/test_2.R": {
+   "cases": 78,
+   "out_sha256": "cb571d98da4777c63d5788be5a9b433e2544efa17195b75e87e542938071dd09",
+   "r_sha256": "4aa551b876a2c046f8fb8c8ff90be7d32c3a36609d85a91a76016877ae71c47d"
+  },
+  "rill-tests/parse/test_3.R": {
+   "cases": 59,
+   "out_sha256": "e94c94933e62f27b65a14fcddab6e7ff59f95c523d546c8a6fc054578df77a58",
+   "r_sha256": "bde29bf17c458ff21315b1245987d65e1b22f402ea8b9431d38b3e9dc02f8cef"
+  },
   "rill-tests/rng/test_1.R": {
    "cases": 7,
    "out_sha256": "100f844b155df9ebb43aeee6737d6a5e4f9f7fdeef3737160ed0fbd9a5ee72f2",
@@ -137,7 +152,7 @@
    "timezone": "UTC"
   },
   "rscript": "~/sbm-r/env/bin/Rscript",
-  "run_py_sha256": "f69ef8e32bfe006d81099befaf3b8918d16ca25a2e7827a3e9acc9a4c10a770f"
+  "run_py_sha256": "801d4e7f415a7040120b639bc38ce72c6b4b669dd5f399243dce82db4b0135d4"
  },
  "v": 1
 }
