@@ -115,5 +115,6 @@ try {
   await sleep(300);
   rmSync(profile, { recursive: true, force: true, maxRetries: 5 });
 }
+ok(false, "deliberate break (the web-runner proof): this one check must fail the web-runner job, and its revert follows");
 console.log(failures ? `${failures} failed` : "all passed");
 process.exit(failures ? 1 : 0);
