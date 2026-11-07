@@ -2093,18 +2093,88 @@ try {
     await sleep(1500);
     const onOpen = { runner: requests.slice(n0).filter((u) => /\/runner\/|sagebrush-worker\.js/.test(u)), frames: await ev(`document.querySelectorAll("iframe[sandbox]").length`), results: await resultsOf("/t/run.tex"), chips: await ev(`document.querySelectorAll(".tex-preview .sagechip").length`) };
     check(onOpen.runner.length === 0 && onOpen.frames === 0 && onOpen.results === null && onOpen.chips >= 2, "Run: nothing runs on open (no runner, no worker, no results file; the items show as not run)", onOpen);
+    // (Run's code is a chunk of its own, /sagebrush-latex-run.js (daybreak2, #551's group cap): not fetched by the editor's
+    //  load or by any document opened so far, Run shown or not; the first Run fetches it once, later Runs not again)
+    const runChunk = () => byId.filter((x) => /\/sagebrush-latex-run\.js(\?|$)/.test(x.url));
+    const runBefore = runChunk().length;
+    check(runBefore === 0, "Run's chunk: not fetched by the editor's load, nor by opening documents with SageTeX code", runChunk());
+    // (its load fails (grader's #824 R1-R3): the first request for it refused (the Fetch domain): Run says so and runs
+    //  nothing; pressed again, it loads by a URL of its own (?try=: the browser keeps a failed module import for its
+    //  URL), so a failure is never kept)
+    let runRefused = 0;
+    onPaused = (p) => { if (!runRefused++) send("Fetch.failRequest", { requestId: p.requestId, errorReason: "ConnectionFailed" }); else send("Fetch.continueRequest", { requestId: p.requestId }); };
+    await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-latex-run.js*" }] });
+    await ev(`(document.querySelector(".tex-status").textContent = "", document.querySelector(".tex-head .tex-run").click(), 1)`);
+    const refusedSaid = await statusIs(/^Not run: Run's code couldn't be loaded; press Run again$/, 15000);
+    const refusedRun = { refused: runRefused, said: refusedSaid, label: await ev(`document.querySelector(".tex-head .tex-run").textContent`), results: await resultsOf("/t/run.tex"), fetched: runChunk().map((x) => [x.url.replace(/^.*\//, ""), x.status]) };
+    check(refusedRun.refused === 1 && refusedRun.said && refusedRun.label === "Run" && refusedRun.results === null && runChunk().length === 1 && !runChunk()[0].status, "Run's chunk: its load refused: Run says so, and nothing runs (no results file)", refusedRun);
     // (the click: its labels as they change, then the results)
     const labels = await ev(`new Promise((res) => { const b = document.querySelector(".tex-head .tex-run"), seen = [b.textContent];
       const o = new MutationObserver(() => { if (seen[seen.length - 1] !== b.textContent) seen.push(b.textContent); if (b.textContent === "Run" && seen.length > 1) { o.disconnect(); res(seen); } });
       o.observe(b, { childList: true, characterData: true, subtree: true }); b.click(); setTimeout(() => { o.disconnect(); res(seen); }, 180000); })`);
     check(JSON.stringify(labels) === JSON.stringify(["Run", "Starting Sage…", "Running…", "Run"]), "Run: its labels, Run → Starting Sage… → Running… → Run", labels);
     const ran = await statusIs(/Ran 5 SageTeX items in [0-9.]+ s$/, 30000);
+    const firstRun = runChunk();
+    await send("Fetch.disable"); onPaused = null;
+    const timing = await ev(`JSON.stringify(performance.getEntriesByType("resource").filter((e) => e.name.includes("sagebrush-latex-run.js")).map((e) => ({ ms: Math.round(e.duration), bytes: e.transferSize, body: e.decodedBodySize })))`);
+    check(firstRun.length === 2 && /\?try=\d+$/.test(firstRun[1].url) && firstRun[1].status === 200 && firstRun[1].bytes > 0, "Run's chunk: pressed again after the refused load, it loads by a URL of its own (?try=), once", firstRun);
+    console.log("timing, reported, not gated: Run's chunk on the first Run (loopback):", timing, "CDP encoded bytes:", firstRun[1]?.bytes);
     await until(`document.querySelector(".tex-preview").textContent.includes("1024") && document.querySelectorAll(".tex-preview .sagechip").length === 0`, 20000);
     const shownRun = await ev(`(() => { const t = document.querySelector(".tex-preview").textContent; return { has1024: t.includes("1024"), has7: /x\\s*=\\s*\\{?7/.test(t) || t.includes("= {7}") || t.includes("=7"), frac: !!document.querySelector(".tex-preview .katex .mfrac"), chips: document.querySelectorAll(".tex-preview .sagechip").length, status: document.querySelector(".tex-status")?.textContent }; })()`);
     check(ran && shownRun.has1024 && shownRun.has7 && shownRun.frac && shownRun.chips === 0, "Run: the preview shows x = 1024, 1/3, and x = 7 (redefined later, page order), no item left not run", shownRun);
     const rj = JSON.parse((await resultsOf("/t/run.tex")) ?? "null");
     check(rj && rj.format === "sagebrush-latex-results" && rj.version === 1 && rj.items.length === 5 && rj.items.every((x) => x.s === "ok") && rj.items[1].latex === "1024" && rj.items[2].latex === "\\frac{1}{3}" && rj.items[4].latex === "7",
       "Run: the results file beside the .tex (results v1, every item ok: 1024, \\frac{1}{3}, 7)", rj && { n: rj.items.length, items: rj.items.map((x) => [x.s, x.latex]) });
+    // (a second Run on the same page: the chunk already fetched is used, not fetched again)
+    await ev(`(document.querySelector(".tex-status").textContent = "", document.querySelector(".tex-head .tex-run").click(), 1)`);
+    const ranAgain = await statusIs(/Ran 5 SageTeX items in [0-9.]+ s$/, 60000);
+    check(ranAgain && runChunk().length === 2, "Run's chunk: a second Run on the page uses the one fetched, not fetched again", { ranAgain, fetched: runChunk().length });
+    // (grader's #824 R5: Run pressed twice while its code loads: once loaded, one Run, not two: a second would make the
+    //  first stale, and the first, ending, would show the button as "Run" (and take a press as a new Run, not Stop)
+    //  while the second still runs. So: the button back to "Run" once, at the end; one results write; one "Ran")
+    {
+      const two = await ev(`(async () => {
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms)), ws = window.__sbTexWs, realW = ws.write, writes = [];
+        ws.write = function (p, ...a) { writes.push(String(p)); return realW.call(this, p, ...a); };
+        let release; const held = new Promise((r) => { release = r; }); window.__sbTexRunLoaded = () => held;
+        let started = 0; const prevHold = window.__sbTexRunHold; window.__sbTexRunHold = () => { started++; };
+        const b = document.querySelector(".tex-head .tex-run"), st = document.querySelector(".tex-status"), said = [], labels = [];
+        const ob = new MutationObserver(() => { if (labels[labels.length - 1] !== b.textContent) labels.push(b.textContent); });
+        ob.observe(b, { childList: true, characterData: true, subtree: true });
+        const o = new MutationObserver(() => { const t = st.textContent; if (/^Ran \\d+ SageTeX item/.test(t) && said[said.length - 1] !== t) said.push(t); });
+        o.observe(st, { childList: true, characterData: true, subtree: true });
+        st.textContent = ""; b.click(); await wait(100); b.click(); await wait(300);
+        window.__sbTexRunLoaded = undefined; release();
+        for (let i = 0; i < 600 && !said.length; i++) await wait(100);
+        await wait(4000); o.disconnect(); ob.disconnect(); ws.write = realW; window.__sbTexRunHold = prevHold;
+        return { started, labels, said: said.length, results: writes.filter((p) => p === "/t/run.tex.results.json").length, label: b.textContent };
+      })()`);
+      check(two.started === 1 && two.said === 1 && two.results === 1 && two.label === "Run" && two.labels.filter((l) => l === "Run").length === 1 && two.labels[two.labels.length - 1] === "Run", "Run's chunk: Run pressed twice while its code loads: one Run (the button back to Run once, at its end; one results write, one \"Ran\")", two);
+    }
+    // (daybreak3, #824: the page replaced while Run's code loads: once it has loaded, that Run never starts: not one
+    //  workspace call for the old document or its folder, and its results file as it was)
+    {
+      const fo = await mk("/u/other.tex", enc("\\documentclass{article}\n\\begin{document}\nOther page.\n\\end{document}\n"));
+      const before = await resultsOf("/t/run.tex");
+      const lz = await ev(`(async () => {
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms)), ws = window.__sbTexWs, calls = [];
+        let release; window.__sbTexRunLoaded = () => new Promise((r) => { release = r; });
+        document.querySelector(".tex-head .tex-run").click();
+        for (let i = 0; i < 50 && !release; i++) await wait(100);
+        const held = !!release;
+        window.__sbTexRunLoaded = undefined;
+        window.__sbTex({ path: "/u/other.tex", fid: ${JSON.stringify(fo)} });
+        for (let i = 0; i < 100 && !document.querySelector(".tex-preview")?.textContent.includes("Other page."); i++) await wait(100);
+        const shown = !!document.querySelector(".tex-preview")?.textContent.includes("Other page.");
+        const orig = {};
+        for (const m of ["list", "readUpTo", "read", "stat", "pathOfFile", "write", "createByPerson"]) { orig[m] = ws[m]; ws[m] = function (a, ...r) { calls.push([m, String(a)]); return orig[m].call(this, a, ...r); }; }
+        release?.(); await wait(3000);
+        for (const m of Object.keys(orig)) ws[m] = orig[m];
+        const old = calls.filter(([m, a]) => a.startsWith("/t/") || a === "/t" || a === ${JSON.stringify(fr)});
+        return { held, shown, old, n: calls.length, starting: document.querySelector(".tex-head .tex-run")?.textContent ?? null };
+      })()`);
+      check(lz.held && lz.shown && lz.old.length === 0 && (await resultsOf("/t/run.tex")) === before, "Run's chunk: the page replaced while it loads: that Run never starts (no call for the old document or its folder, its results as they were)", lz);
+    }
     // (William, Nov 3: L0 "latex-beamer + sagetex ... didn't work", L1 "\title{$\sage{factor(2026)}$} doesn't work"):
     // a beamer deck of his shape, clicked Run: every item ok in the results file, the title page's result (an item in
     // \title, shown where \titlepage prints it), the plot and the curve's point in the preview and in Present
