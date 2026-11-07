@@ -899,8 +899,7 @@ def _real_field(R):
 def _inexact_kind(F):
     """(complex, double, precision) of RDF, CDF, RR, CC, RealField(p) or
     ComplexField(p), by identity and class, never by its name; None for
-    any other parent.
-
+    any other parent (test/inexact-kind.test.ts).
     """
     S = _sa()
     if F is S.RDF:
@@ -924,19 +923,6 @@ class FFVector:
 
         sage: v = vector(GF(5), [1, 2, 3]); v, 2*v, v*v
         ((1, 2, 3), (2, 4, 1), 4)
-
-    A vector over a real or complex field meets a number of another such
-    field in the field _inexact_meet gives; the fields are known by
-    identity and class (_inexact_kind), never by their names::
-
-        sage: import _sage_ffmat
-        sage: [_sage_ffmat._inexact_kind(F) for F in (RDF, CDF, RR, CC, RealField(20), ComplexField(100))]  # sagebrush only
-        [(False, True, 53), (True, True, 53), (False, False, 53), (True, False, 53), (False, False, 20), (True, False, 100)]
-        sage: class Named:  # sagebrush only: a parent named like a real field is not one
-        ....:     def __repr__(self): return "Real Field with 53 bits of precision"
-        ....:     def prec(self): return 53
-        sage: _sage_ffmat._inexact_kind(Named()), _sage_ffmat._inexact_kind(QQ), _sage_ffmat._inexact_kind(RealIntervalField(53))  # sagebrush only
-        (None, None, None)
     """
 
     __slots__ = ("_base", "_e", "_space")
