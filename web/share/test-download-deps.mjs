@@ -9,10 +9,12 @@
 //   - the names: the notebook's folder is the root when every file is inside it, else the workspace paths;
 //   - astra's DEP2B-ZIPNAME-1: a name with \ or a drive (..\x, C:\x) refuses the download before any file is read,
 //     nothing handed over; a nested helper's name is fine;
-//   - the caps: a listed size over a cap disables the button, with why; actual bytes over a cap (the file grew after
-//     it was listed) stop the download, nothing handed over;
+//   - the caps: a listed size over a cap disables the button, with why; actual bytes over a cap, one file's or the
+//     total (a file grew after it was listed), stop the download, nothing handed over;
+//   - the notebook's bytes are those at the click: an edit while a read waits isn't in the .zip;
 //   - a file replaced at its path while its read waits, the notebook switched, the dialog closed: each stops it,
-//     nothing handed over.
+//     nothing handed over; and each of the switch's guards alone, the others held off (the check at the click,
+//     invalidate()'s stop, the check before every read).
 // Serve web/dist first (python3 web/serve.py 8765), then
 //   node web/share/test-download-deps.mjs
 import { spawn, spawnSync } from "node:child_process";
@@ -62,8 +64,9 @@ async function openDialog() {
   await until(`!${D}.analyzing && /^(Checked|Found no|Stopped|The notebook's interpreter didn't answer)/.test(document.querySelector('#dldepsstatus').textContent)`, 60000);
 }
 const toggle = (name) => ev(`(() => { const r = [...document.querySelectorAll('#dldepslist .sharerow')].find((r) => r.querySelector('.name').title === ${JSON.stringify(name)}); r.querySelector('input').click(); return 1; })()`);
-// (the reads the dialog makes, by path; a read can be held: hold(path) makes the next read of it wait until let go)
-const READS = `(() => { const t = window.sagebrush.shareTest; window.__reads = []; window.__holds = {}; t.onRead = async (p) => { window.__reads.push(p); const h = window.__holds[p]; if (h) { delete window.__holds[p]; window.__held = p; await h.p; } }; return 1; })()`;
+// (the reads the dialog makes, by path; a read can be held: hold(path) makes the next read of it wait until let go,
+// hold("*") the next read of any file)
+const READS = `(() => { const t = window.sagebrush.shareTest; window.__reads = []; window.__holds = {}; t.onRead = async (p) => { window.__reads.push(p); const k = p in window.__holds ? p : "*" in window.__holds ? "*" : null; if (k) { const h = window.__holds[k]; delete window.__holds[k]; window.__held = p; await h.p; } }; return 1; })()`;
 const hold = (p) => ev(`(() => { let go; const pr = new Promise((r) => (go = r)); window.__holds[${JSON.stringify(p)}] = { p: pr, go }; window.__go = go; window.__held = null; return 1; })()`);
 // (the .zip handed over, caught: its bytes as base64, and its name; a hand that comes after none was expected is caught too)
 const CATCH = `(() => { window.__zip = null; window.__SB_EXPORT_TEST__ = { ...(window.__SB_EXPORT_TEST__ ?? {}), onHand: async (blob, name) => { const b = new Uint8Array(await blob.arrayBuffer()); let s = ""; for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000)); window.__zip = { name, b64: btoa(s) }; } }; return 1; })()`;
@@ -161,6 +164,14 @@ try {
     const r = await download();
     ok(!r.zip && /is over/.test(r.line) && /Nothing was downloaded/.test(r.line), `a file grown past the cap after it was listed stops the download, nothing handed over: ${r.line}`);
     await put("/data/points.csv", POINTS);
+    // (the total: every file under its own cap and the total as listed; data/points.csv then grows past the total)
+    await ev("window.sagebrush.downloadTest.caps = { files: 10000, file: 1e9, total: 4000 }");
+    await openDialog();
+    ok(!(await ev("document.querySelector('#dldepsgo').disabled")), "(under the total as listed, Download .zip is enabled)");
+    await put("/data/points.csv", POINTS + "9,9\n".repeat(2000));
+    const t = await download();
+    ok(!t.zip && /in all/.test(t.line) && /Nothing was downloaded/.test(t.line), `the files grown past the total after they were listed stop the download, nothing handed over: ${t.line}`);
+    await put("/data/points.csv", POINTS);
     await ev("window.sagebrush.downloadTest.caps = null");
   }
 
@@ -193,6 +204,24 @@ try {
     const r = await outcome();
     ok(!r.zip && /changed/.test(r.line), `a file replaced at its path during its read stops the download, nothing handed over: ${r.line}`);
     await put("/data/points.csv", POINTS);
+  }
+  // ---- the notebook's bytes are taken at the click: an edit after it, before the notebook is read (while its path is
+  // looked up, the click's first wait), isn't in the .zip
+  {
+    await openDialog();
+    const atClick = await ev("document.querySelector('.cell textarea').value");
+    await ev("(() => { let go; const p = new Promise((r) => (go = r)); window.__pathGo = go; window.__pathHeld = false; window.sagebrush.downloadTest.afterPath = async () => { window.sagebrush.downloadTest.afterPath = null; window.__pathHeld = true; await p; }; return 1; })()");
+    await download({ wait: false });
+    ok(await until("window.__pathHeld === true"), "(the lookup of the notebook's path, at the click, is held)");
+    await setFirst(atClick + "\nedited_after_the_click = 1");
+    await sleep(300);
+    await ev("window.__pathGo()");
+    await until(`!${D}.busy && !!document.querySelector('#dldepsresult').textContent`);
+    const r = await outcome();
+    const nb = r.zip ? JSON.parse(r.zip["Untitled.ipynb"] ?? "{}") : {};
+    const code = (nb.cells ?? []).map((c) => [].concat(c.source).join("")).join("\n");
+    ok(r.zip && code.includes("from _code import helpers") && !code.includes("edited_after_the_click"), `the notebook in the .zip is as it was at the click, not edited after: ${r.line}`);
+    await setFirst(atClick);
   }
   // ---- the dialog closed while a read waits: stopped, nothing handed over
   {
@@ -275,6 +304,67 @@ try {
     await until(`!${D}.busy`, 30000);
     await sleep(300);
     ok(!(await ev("window.__zip")), `the notebook switched during the download: nothing handed over: ${await result()}`);
+  }
+
+  // ---- each of the switch's guards alone (the others held off): the dialog's close stops a download, and a switch
+  // closes it; invalidate() stops it too, without waiting for the close; the notebook is checked at the click, and
+  // again before every read
+  const NOCLOSE = "(() => { window.__noClose = (e) => e.stopImmediatePropagation(); document.querySelector('#dldepsdlg').addEventListener('close', window.__noClose, { capture: true }); return 1; })()";
+  const CLOSE = "(() => { document.querySelector('#dldepsdlg').removeEventListener('close', window.__noClose, { capture: true }); return 1; })()";
+  const NOINVALIDATE = `(() => { window.__invalidate = ${D}.invalidate; ${D}.invalidate = () => {}; return 1; })()`;
+  const INVALIDATE = `(() => { ${D}.invalidate = window.__invalidate; return 1; })()`;
+  // (File > New; the old cell's text marked, unsaved, so the new notebook's empty cell shows the switch is done)
+  const newNotebook = async () => {
+    await ev("document.querySelector('.cell textarea').value = '# was open'");
+    await ev("document.querySelector('#filemenu [data-f=new]').click()");
+    ok(await until("document.querySelectorAll('.cell').length === 1 && document.querySelector('.cell textarea').value === ''"), "(another notebook is open)");
+  };
+  {
+    // (a switch with the dialog left open: Download .zip refuses before anything is read)
+    await openDialog();
+    await ev("document.querySelector('#dldepsall').click()");
+    await ev(NOINVALIDATE);
+    await newNotebook();
+    ok(await ev("document.querySelector('#dldepsdlg').open"), "(the dialog is still open after the switch)");
+    await ev("window.__reads = []");
+    const r = await download();
+    await ev(INVALIDATE);
+    const reads = await ev("window.__reads");
+    ok(!r.zip && /since this was opened/.test(r.line) && reads.length === 0, `the notebook switched with the dialog open: Download .zip refuses, nothing read or handed over: ${r.line} (reads ${reads.length})`);
+  }
+  {
+    // (invalidate() during the download, the close's own stop held off)
+    await openDialog();
+    await ev("document.querySelector('#dldepsall').click()");
+    await ev(NOCLOSE);
+    await hold("*");
+    await download({ wait: false });
+    ok(await until("window.__held !== null"), "(the first file's read is held)");
+    await ev(`${D}.invalidate()`);
+    await ev("window.__go()");
+    await until(`!${D}.busy`, 30000);
+    await sleep(300);
+    await ev(CLOSE);
+    ok(!(await ev("window.__zip")), `invalidate() during the download stops it by itself, nothing handed over: ${await result()}`);
+  }
+  {
+    // (a switch while a read waits, the close and invalidate() held off: the next read refuses)
+    await openDialog();
+    await ev("document.querySelector('#dldepsall').click()");
+    await ev(NOCLOSE);
+    await ev(NOINVALIDATE);
+    await hold("*");
+    await download({ wait: false });
+    ok(await until("window.__held !== null"), "(the first file's read is held)");
+    await newNotebook();
+    await ev("window.__go()");
+    await until(`!${D}.busy`, 30000);
+    await sleep(300);
+    await ev(INVALIDATE);
+    await ev(CLOSE);
+    const r = await outcome();
+    ok(!r.zip && /the notebook changed/.test(r.line), `the notebook switched while a read waits: the next read refuses, nothing handed over: ${r.line}`);
+    await ev("document.querySelector('#dldepsdlg').open && document.querySelector('#dldepsdlg').close()");
   }
   ok(errors.length === 0, `no uncaught page errors: ${JSON.stringify(errors).slice(0, 300)}`);
 } catch (e) {
