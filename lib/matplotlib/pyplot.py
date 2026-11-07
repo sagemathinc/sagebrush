@@ -1261,11 +1261,13 @@ class Axes:
         o.setdefault("clip_exact", True)
         # (an aspect with adjustable 'box': the limits stay and the box
         # takes their shape, W04; with 'datalim', the limits the last
-        # drawing moved, _apply_aspect, and the box as it is)
+        # drawing moved, _apply_aspect, and the box as it is; MATLAB's
+        # axes, drawn here, keep their box and widen the limits instead,
+        # adjustable "_widen")
         if self._opts.get("aspect_ratio") is not None:
             if self.get_adjustable() == "box":
                 o["fit_aspect"] = True
-            else:
+            elif self.get_adjustable() == "datalim":
                 o.pop("aspect_ratio", None)
         for a in ("x", "y"):
             view = self._opts.get("_" + a + "view")
