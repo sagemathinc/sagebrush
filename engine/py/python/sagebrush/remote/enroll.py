@@ -16,6 +16,10 @@ from sagebrush.remote import keys
 
 DEFAULT_ORIGIN = "https://sagebrush.space"
 _RESPONSE_BYTES = 8192
+# (every request the runner makes names itself, its HTTP POSTs as its relay upgrade does: sagebrush.space's edge refuses
+# urllib's default "Python-urllib/3.x" (Cloudflare error 1010, a 403 with no JSON), so without it the device flow and
+# every connection's challenge failed there)
+USER_AGENT = "sagebrush-remote/1"
 
 
 class EnrollError(Exception):
@@ -42,7 +46,8 @@ def check_origin(origin):
 def _post(origin, path, body, timeout=30.0):
     """(status, object) for a JSON POST; a non-JSON or oversized answer is an EnrollError."""
     req = urllib.request.Request(origin + path, data=json.dumps(body).encode("utf-8"), method="POST",
-                                 headers={"content-type": "application/json", "accept": "application/json"})
+                                 headers={"content-type": "application/json", "accept": "application/json",
+                                          "user-agent": USER_AGENT})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             status, raw = r.status, r.read(_RESPONSE_BYTES + 1)

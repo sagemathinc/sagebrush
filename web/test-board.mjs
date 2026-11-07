@@ -1,6 +1,6 @@
 // ci: web-browser/board-a order=10
-// ci: web-browser/board-a order=20 env=NO_EDIT=1 -- examples/primes.json
-// ci: web-browser/board-a order=30 env=NO_EDIT=1 -- examples/mermaid.md
+// ci: web-browser/board-a order=20 env=NO_EDIT=1 -- examples/primes.board.json
+// ci: web-browser/board-a order=30 env=NO_EDIT=1 -- examples/mermaid.board.json
 // ci: web-browser/board-a order=40 env=NO_EDIT=1 -- examples/source.json
 // ci: web-browser/board-a order=50 env=NO_EDIT=1 -- examples/integers.json
 // The board page with a document (examples/board/<slug>/, served as examples/<file>), in headless
@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "./test-port.mjs";
 
-const doc = process.argv[2] ?? "examples/sagebrush.json";
+const doc = process.argv[2] ?? "examples/sagebrush.board.json";
 const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
 const url = `${base}board/?doc=${encodeURIComponent(doc)}`;
 let port = Number(process.env.CDP_PORT) || 0;
@@ -29,9 +29,15 @@ for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
 await new Promise((r) => (ws.onopen = r));
 let n = 0; const waiting = new Map(), errors = [];
+// (a renderer that crashes or stalls answers nothing: every call has a time limit, and a crash or a closed
+// socket fails the calls waiting, so the test fails with the step instead of hanging until the job is cancelled)
+let step = "start";
+const failAll = (why) => { for (const [, w] of waiting) w.fail(new Error(`${why} (during: ${step})`)); waiting.clear(); };
+ws.onclose = () => failAll("the DevTools socket closed");
 ws.onmessage = (ev) => {
   const m = JSON.parse(ev.data);
-  if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
+  if (m.id && waiting.has(m.id)) { const w = waiting.get(m.id); waiting.delete(m.id); clearTimeout(w.timer); w.ok(m.result ?? m.error); }
+  if (m.method === "Inspector.targetCrashed") failAll("the page crashed");
   if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails));
   // (the site's /version.json is optional: a build without it is a 404 the
   // board answers with its own engine (page.ts); that 404 only, nothing else
@@ -39,7 +45,13 @@ ws.onmessage = (ev) => {
   const optional = (e) => /status of 404\b/.test(e.text) && (() => { try { return new URL(e.url).pathname === "/version.json"; } catch { return false; } })();
   if (m.method === "Log.entryAdded" && m.params.entry.level === "error" && !/favicon/.test(m.params.entry.url ?? "") && !optional(m.params.entry)) errors.push(m.params.entry.text + " " + (m.params.entry.url ?? ""));
 };
-const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
+const send = (method, params = {}, ms = method === "Page.printToPDF" ? 120000 : 60000) => new Promise((ok, fail) => {
+  const id = ++n;
+  const timer = setTimeout(() => { waiting.delete(id); fail(new Error(`${method}: no answer in ${ms / 1000} s (during: ${step})`)); }, ms);
+  waiting.set(id, { ok, fail, timer });
+  ws.send(JSON.stringify({ id, method, params }));
+});
+const at = (what) => { step = what; if (process.env.STEPS) console.log("... " + what); };
 const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails)); return r.result.value; };
 const until = async (expr, ms = 20000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr)) return; await sleep(50); } throw new Error("timeout: " + expr); };
 const shot = async (name) => {
@@ -69,6 +81,7 @@ try {
   const pg = s.doc.pages?.length ? s.doc.pages[s.page] : s.doc;
   const notes = s.items.filter((i) => i.kind === "note"), groups = s.items.filter((i) => i.kind === "group");
   console.log(`${notes.length} notes, ${groups.length} groups, ${pg.edges?.length ?? 0} edges, ${pg.steps?.length ?? 0} steps${s.pages > 1 ? ` on the first of ${s.pages} pages` : ""}; shown in ${loadMs} ms, routed by ${routeMs} ms`);
+  at("overlaps and routes");
   // no two boxes overlap unless one holds the other (a sweep over x)
   const inside = (a, b) => a.x >= b.x && a.y >= b.y && a.x + a.w <= b.x + b.w && a.y + a.h <= b.y + b.h;
   const byX = [...s.items].sort((a, b) => a.x - b.x);
@@ -112,6 +125,7 @@ try {
     }
   };
   pg.nodes.forEach(walk);
+  at("text fits");
   // notes' text fits (fully zoomed in, at the whole board's camera, every mounted note)
   // (once the page's fonts are in, KaTeX's among them, and the board laid out again for them)
   await ev("document.fonts.ready.then(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(1)))))");
@@ -143,6 +157,7 @@ try {
     check(n > 20 && !over.length, `text overflows in ${over.length} of ${n} notes: ${over.slice(0, 8).join(", ")}`);
     await ev("window.board.focus(undefined, true)");
   }
+  at("pinch and double-click");
   // input: a trackpad's pinch (many small ctrl+wheel deltas) zooms quickly;
   // a double-click flies to a note and leaves no text selected; on the note
   // already shown, it selects a word and the camera stays
@@ -181,6 +196,7 @@ try {
     await ev("getSelection().removeAllRanges(), window.board.focus(undefined, true)");
     await sleep(300);
   }
+  at("math and tour");
   // math was typeset where the document has it (close to the first note with math)
   const withMath = notes.find((n) => /\$/.test(JSON.stringify(pg.nodes).match(new RegExp(`"id":"${n.id}"[^}]*`))?.[0] ?? ""));
   if (withMath) {
@@ -198,6 +214,7 @@ try {
     check((await ev("location.hash")) === `#${i + 1}`, `step ${i + 1}: hash`);
     await shot(`step${String(i + 1).padStart(2, "0")}`);
   }
+  at("pages");
   // pages: each its own board, #pP its address; PageDown and PageUp
   if (s.pages > 1) {
     for (let p = 1; p < s.pages; p++) {
@@ -267,6 +284,7 @@ try {
     check(sn.page === s.pages - 1 && sn.step === (s.doc.pages[s.pages - 1].steps?.length ? 0 : -1), `#p${s.pages}-1 opened page ${sn.page + 1}, step ${sn.step + 1}`);
     await ev("window.sagebrush.board.page(0)");
   }
+  at("print");
   // print (or save as PDF): a sheet per page, or per step of the tours; the
   // PDF has as many pages, and the sheets' notes fit their text, math typeset
   {

@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { cleanPreview } from "../web/board/preview";
 import { codeOrder } from "../web/board/doc";
 import { boardExample, boardExamples } from "./board-examples";
+import { collect, interactError, interactFlags, ITEM_DISPLAYS_MAX, ITEM_OUTPUT_MAX, RUN_OUTPUT_MAX } from "../src/board-run";
 
 // `sagebrush board run`: every code item of a board run as the board runs it
 // in a browser (src/board-run.ts), each item's output or error reported.
@@ -16,7 +17,7 @@ const json = (args: string[], input?: string) => { const r = run([...args, "--js
 const item = (rep: any, id: string) => rep.items.find((i: any) => i.id === id);
 
 test("board run: an example board, every item as the board shows it", () => {
-  const r = run([boardExample("live.json")]);
+  const r = run([boardExample("live.board.json")]);
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.match(r.stdout, /871 takes 178 steps/);
   assert.match(r.stdout, /111 steps, as high as 9232/);
@@ -44,6 +45,190 @@ test("board run: what fails, says why, and what reads it is not run; the others 
   assert.match(item(report, "h").error, /ran out of time: stopped after 2 s[\s\S]*KeyboardInterrupt/);
   assert.match(item(report, "k").error, /item 5 "Forever", which it depends on, ran out of time/);
   assert.equal(item(report, "j").stdout, "43\n", "a last expression's value, as the board shows it");
+});
+
+// (Codex's friction P11a, python's reproduction /scratch/codex-friction/recheck/repro/P11/w.board.json: an @interact
+// item reported ok with only "[interactive controls]", its function's run at its defaults (Sage's text mode prints
+// 5/3 for this one) not shown, and a function that raises passing)
+test("board run: an @interact item reports its function's run at its defaults; one whose function raises fails, saying so", () => {
+  const { status, report } = json(["-"], board([
+    { id: "w", title: "widget", code: "@interact\ndef pairing(u=slider(0,4,1,2), v=slider(0,4,1,1)):\n    print((2*u+v)/3)" },
+    { id: "e", title: "err", code: "@interact\ndef bad(u=slider(0,4,1,2)):\n    1/0" },
+    { id: "after", title: "after", code: "print('next')" },
+  ], { mode: "sage" }));
+  assert.equal(status, 1);
+  assert.equal(item(report, "w").status, "ok");
+  assert.equal(item(report, "w").stdout, "5/3\n", JSON.stringify(item(report, "w")));
+  assert.equal(item(report, "e").status, "failed", JSON.stringify(item(report, "e")));
+  assert.match(item(report, "e").error, /^Traceback[\s\S]*ZeroDivisionError[^\n]*\n\(raised by the item's @interact function, run with its default values\)$/);
+  assert.equal(item(report, "after").status, "ok");
+  assert.equal(item(report, "after").stdout, "next\n");
+  // (and board check, which runs the items the same way: an error, the reason in what it keeps of it)
+  const dir = mkdtempSync(join(tmpdir(), "sb-interact-")), f = join(dir, "w.board.json");
+  try {
+    writeFileSync(f, board([{ id: "e", title: "err", code: "@interact\ndef bad(u=slider(0,4,1,2)):\n    1/0" }], { mode: "sage" }));
+    const c = spawnSync(process.execPath, [__dirname + "/../src/cli.js", "board", "check", f], { encoding: "utf8", timeout: 120_000 });
+    assert.equal(c.status, 1, c.stdout + c.stderr);
+    assert.match(c.stdout, /code item "e" \("err"\) failed:[\s\S]*ZeroDivisionError[\s\S]*\(raised by the item's @interact function, run with its default values\)/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// (what is kept of an @interact's own output area is the item's, under its caps: no copy of it beside them, a
+// traceback past them still failing the item, and a clear_output() there giving back exactly what it kept; astra's
+// INTERACT-BUFFER-1 on #788)
+test("board run: an @interact's output: under the item's caps, a traceback past them still fails it, a clear there clears that interact's only", () => {
+  const MB = 2 ** 20, tb = "Traceback (most recent call last):\n  File \"<cell>\", line 3, in bad\nZeroDivisionError: x\n";
+  const textOf = (l: any[]) => l.filter((o) => o.output_type === "stream").map((o) => o.text).join("");
+  const REASON = /\n\(raised by the item's @interact function, run with its default values\)$/;
+  // (the item's cut: six 1 MiB writes there, then the traceback, past the item's 4 MiB: nothing kept past it, and no copy
+  // of it beside the list; the traceback that was dropped still fails the item, said)
+  const big: any[] = [], k1 = { run: 0 };
+  for (let i = 0; i < 6; i++) collect(big, { target: 1, stream: "stderr", text: "x".repeat(MB) }, k1);
+  collect(big, { target: 1, stream: "stderr", text: tb }, k1);
+  assert.ok(textOf(big).length <= ITEM_OUTPUT_MAX + 200 && k1.run <= ITEM_OUTPUT_MAX, `kept ${textOf(big).length}, run ${k1.run}`);
+  const e1 = interactError(big);
+  assert.ok(e1 !== null && e1.length < 300 && /^\[its traceback was not kept: past the output limit\]/.test(e1) && REASON.test(e1), String(e1));
+  // (the run's cut: the board's output nearly spent, the traceback dropped: the same)
+  const r: any[] = [], k2 = { run: RUN_OUTPUT_MAX - 10 };
+  collect(r, { target: 1, stream: "stderr", text: tb }, k2);
+  assert.ok(textOf(r).includes("[output cut") && !textOf(r).includes("ZeroDivisionError") && k2.run === RUN_OUTPUT_MAX - 10);
+  assert.ok(REASON.test(String(interactError(r))), String(interactError(r)));
+  // (a clear in one interact's area: what it kept goes, its bytes given back to the item and the run, its traceback
+  // forgotten; the cell's own output and another interact's stay)
+  const l: any[] = [], k3 = { run: 0 };
+  collect(l, { stream: "stdout", text: "mine\n" }, k3);
+  collect(l, { target: 2, stream: "stdout", text: "two\n" }, k3);
+  collect(l, { target: 1, stream: "stdout", text: "y".repeat(3 * MB) }, k3);
+  collect(l, { target: 1, stream: "stderr", text: tb }, k3);
+  assert.ok(REASON.test(String(interactError(l))));
+  collect(l, { target: 1, clear: true }, k3);
+  assert.equal(textOf(l), "mine\ntwo\n");
+  assert.equal(k3.run, 9);
+  assert.equal(interactError(l), null, "a traceback cleared, then nothing raised: no error");
+  collect(l, { target: 1, stream: "stdout", text: "5/3\n" }, k3);
+  assert.equal(interactError(l), null, "…and its run after the clear succeeding: still none");
+  collect(l, { stream: "stdout", text: "z".repeat(3 * MB) }, k3);
+  assert.ok(!textOf(l).includes("[output cut"), "3 MB after the clear is kept: its bytes were given back");
+  // (the cell's own clear_output() after an interact raised: the item's whole output and what it knew of its interacts
+  // go; no error left; astra on r2)
+  const w: any[] = [], k5 = { run: 0 };
+  collect(w, { target: 1, stream: "stderr", text: tb }, k5);
+  collect(w, { clear: true }, k5);
+  assert.equal(interactError(w), null, "a whole clear forgets the interact's traceback");
+  assert.equal(interactFlags(w), 0);
+  collect(w, { target: 1, stream: "stdout", text: "5/3\n" }, k5);
+  assert.equal(interactError(w), null, "…and its run after succeeding: no error");
+  // (an interact's clear after the item's cut: what it gave back can be written again; astra on r2)
+  const c: any[] = [], k6 = { run: 0 };
+  for (let i = 0; i < 5; i++) collect(c, { target: 1, stream: "stdout", text: "y".repeat(MB) }, k6);
+  assert.ok(textOf(c).includes("[output cut"), "(cut)");
+  collect(c, { target: 1, clear: true }, k6);
+  collect(c, { stream: "stdout", text: "after the clear\n" }, k6);
+  assert.ok(textOf(c).endsWith("after the clear\n"), "output after an interact's clear past the cut is kept: " + JSON.stringify(textOf(c).slice(-60)));
+  // (interacts past the cut, many, each raising: at most ITEM_DISPLAYS_MAX of their flags kept, and the item still fails;
+  // astra's INTERACT-META-1)
+  const many: any[] = [], k7 = { run: 0 };
+  for (let i = 0; i < 5; i++) collect(many, { target: 0, stream: "stdout", text: "y".repeat(MB) }, k7);
+  for (let t = 1; t <= ITEM_DISPLAYS_MAX + 50; t++) collect(many, { target: t, stream: "stderr", text: tb }, k7);
+  assert.ok(interactFlags(many) <= ITEM_DISPLAYS_MAX, `flags kept: ${interactFlags(many)}`);
+  assert.ok(textOf(many).length <= ITEM_OUTPUT_MAX + 200);
+  assert.ok(REASON.test(String(interactError(many))), "…and the item still fails, its tracebacks past the limit");
+  for (let t = 1; t <= ITEM_DISPLAYS_MAX + 50; t++) collect(many, { target: t, clear: true }, k7);
+  assert.ok(REASON.test(String(interactError(many))), "…its interacts' clears can't take back the ones it could not keep track of");
+  // (cut, refilled and cleared again and again: the cut said once, by the item's own caps or the worker's cut alike;
+  // astra's INTERACT-CUT-NOTE-1)
+  const notes = (l: any[]) => l.filter((o) => o.output_type === "stream" && o.text.includes("[output cut")).length;
+  const rep1: any[] = [], k8 = { run: 0 };
+  for (let i = 0; i < 200; i++) {
+    collect(rep1, { target: 1, stream: "stdout", text: "y".repeat(ITEM_OUTPUT_MAX) }, k8);
+    collect(rep1, { target: 1, stream: "stdout", text: "more" }, k8);
+    collect(rep1, { target: 1, clear: true }, k8);
+  }
+  assert.equal(notes(rep1), 1, "the item's own cut said once");
+  const rep2: any[] = [], k9 = { run: 0 };
+  for (let i = 0; i < 200; i++) {
+    collect(rep2, { target: 1, stream: "stdout", text: "y" }, k9);
+    collect(rep2, { cut: "item" }, k9);
+    collect(rep2, { target: 1, clear: true }, k9);
+  }
+  assert.equal(notes(rep2), 1, "the worker's cut said once");
+  // (and the run's cut: the board's output nearly spent; each cycle keeps a little there, is cut by the run's cap, and
+  // its clear gives the little back)
+  const rep3: any[] = [], k10 = { run: RUN_OUTPUT_MAX - 100 };
+  for (let i = 0; i < 200; i++) {
+    collect(rep3, { target: 1, stream: "stdout", text: "y".repeat(50) }, k10);
+    collect(rep3, { target: 1, stream: "stdout", text: "y".repeat(80) }, k10);
+    collect(rep3, { target: 1, clear: true }, k10);
+  }
+  assert.equal(notes(rep3), 1, "the run's cut said once");
+  assert.equal(k10.run, RUN_OUTPUT_MAX - 100);
+  assert.ok(textOf(rep2).length < 200 && textOf(rep1).length < 200, "nothing else kept growing");
+  collect(rep2, { clear: true }, k9);
+  collect(rep2, { cut: "item" }, k9);
+  assert.equal(notes(rep2), 1, "after the item's own clear, a cut is said again, once");
+  // (a traceback kept: the error is it, the reason last)
+  const ok: any[] = [], k4 = { run: 0 };
+  collect(ok, { target: 1, stream: "stdout", text: "5/3\n" }, k4);
+  assert.equal(interactError(ok), null);
+  collect(ok, { target: 1, stream: "stderr", text: tb }, k4);
+  assert.match(String(interactError(ok)), /^Traceback[\s\S]*ZeroDivisionError: x\n\(raised by the item's @interact function, run with its default values\)$/);
+});
+
+test("board run: an @interact's output: what its clear gives back, and what is (and isn't) its error (grader's r788 pins)", () => {
+  const MB = 2 ** 20, tb = "Traceback (most recent call last):\n  File \"<cell>\", line 3, in bad\nZeroDivisionError: x\n";
+  const textOf = (l: any[]) => l.filter((o) => o.output_type === "stream").map((o) => o.text).join("");
+  const displays = (l: any[]) => l.filter((o) => o.output_type === "display_data").length;
+  // (I10: an interact's two writes joined into one entry, then its clear: both given back, so the item's whole
+  // allowance can be written again)
+  const j: any[] = [], k1 = { run: 0 };
+  collect(j, { target: 1, stream: "stdout", text: "a".repeat(MB) }, k1);
+  collect(j, { target: 1, stream: "stdout", text: "b".repeat(MB) }, k1);
+  assert.equal(j.length, 1, "(joined)");
+  collect(j, { target: 1, clear: true }, k1);
+  assert.equal(k1.run, 0);
+  collect(j, { stream: "stdout", text: "z".repeat(ITEM_OUTPUT_MAX) }, k1);
+  assert.ok(!textOf(j).includes("[output cut") && textOf(j).length === ITEM_OUTPUT_MAX, "the item's whole allowance after the clear is kept");
+  // (J5/J6: an interact's displays, up to the item's count, then its clear: as many more are kept)
+  const d: any[] = [], k2 = { run: 0 };
+  for (let i = 0; i < ITEM_DISPLAYS_MAX; i++) collect(d, { target: 1, display: { "text/plain": "d" } }, k2);
+  assert.equal(displays(d), ITEM_DISPLAYS_MAX);
+  collect(d, { target: 1, clear: true }, k2);
+  assert.equal(displays(d), 0);
+  for (let i = 0; i < ITEM_DISPLAYS_MAX; i++) collect(d, { display: { "text/plain": "e" } }, k2);
+  assert.ok(displays(d) === ITEM_DISPLAYS_MAX && !textOf(d).includes("[output cut"), `kept ${displays(d)} displays after the clear: ${textOf(d)}`);
+  // (J2: interacts past the flags' count, each raising, then the cell's own clear: the item's mark goes too, so a run
+  // after it succeeding leaves no error)
+  const many: any[] = [], k3 = { run: 0 };
+  for (let t = 1; t <= ITEM_DISPLAYS_MAX + 50; t++) collect(many, { target: t, stream: "stderr", text: tb }, k3);
+  assert.ok(interactError(many) !== null, "(raised)");
+  collect(many, { clear: true }, k3);
+  collect(many, { target: 1, stream: "stdout", text: "5/3\n" }, k3);
+  assert.equal(interactError(many), null, "the cell's clear forgets the mark of the interacts it could not keep track of");
+  // (I17/I18: a traceback's first line printed to stdout, nothing raised: no error)
+  const out: any[] = [], k4 = { run: 0 };
+  collect(out, { target: 1, stream: "stdout", text: "Traceback (most recent call last):\nnot really\n" }, k4);
+  assert.equal(interactError(out), null, "stdout is not where an interact's error goes");
+  // (I19: a warning on stderr, nothing raised: no error)
+  const warn: any[] = [], k5 = { run: 0 };
+  collect(warn, { target: 1, stream: "stderr", text: "UserWarning: careful\n" }, k5);
+  collect(warn, { target: 1, stream: "stdout", text: "5/3\n" }, k5);
+  assert.equal(interactError(warn), null, "a warning is not an error");
+  // (J4: the item cut where the worker cut it, room left under the caps, then the clear of an interact that kept
+  // nothing: nothing given back, so the cut stays)
+  const cut: any[] = [], k6 = { run: 0 };
+  collect(cut, { stream: "stdout", text: "y" }, k6);
+  collect(cut, { cut: "item" }, k6);
+  assert.ok(textOf(cut).includes("[output cut"), "(cut)");
+  collect(cut, { target: 5, clear: true }, k6);
+  collect(cut, { stream: "stdout", text: "small" }, k6);
+  assert.ok(!textOf(cut).includes("small") && k6.run === 1, "a clear that gave nothing back doesn't lift the cut");
+  // (I14: stderr before the traceback: the error is the traceback, from its first line)
+  const pre: any[] = [], k7 = { run: 0 };
+  collect(pre, { target: 1, stream: "stderr", text: "UserWarning: careful\n" }, k7);
+  collect(pre, { target: 1, stream: "stderr", text: tb }, k7);
+  assert.match(String(interactError(pre)), /^Traceback \(most recent call last\):\n[\s\S]*ZeroDivisionError: x\n\(raised by/);
 });
 
 test("board run: an item that does not stop when interrupted: the interpreter is stopped, and what was left is not run", () => {
@@ -123,9 +308,9 @@ test("board run --store-previews: a copy with its items' outputs as previews, ne
     const p = Object.fromEntries(d.nodes.map((n: any) => [n.id, n.preview]));
     assert.deepEqual(p.a.outputs, [{ output_type: "stream", name: "stdout", text: "42\n" }]);
     assert.match(p.b.outputs[0].text, /ZeroDivisionError/);
-    // (a plot is an SVG, which a preview can't hold here: none, and the board runs it)
-    assert.equal(p.c, undefined);
-    for (const x of [p.a, p.b]) assert.deepEqual(cleanPreview(x), x, "a preview as the board reads it");
+    // (a plot is an SVG: kept as its text, which a board shows only as an image (P9a), within the bounds)
+    assert.match(p.c?.outputs?.[0]?.data?.["image/svg+xml"] ?? "", /^<svg /, JSON.stringify(p.c).slice(0, 300));
+    for (const x of [p.a, p.b, p.c]) assert.deepEqual(cleanPreview(x), x, "a preview as the board reads it");
     assert.equal(readFileSync(f, "utf8"), before, "the board itself untouched");
     assert.equal(run(["-", "--store-previews"], board([])).status, 2, "standard input needs -o");
   } finally {
@@ -135,8 +320,8 @@ test("board run --store-previews: a copy with its items' outputs as previews, ne
 
 test("board run: what it is told wrong, a board that is not one, and text for a terminal", () => {
   assert.equal(run([]).status, 2);
-  assert.equal(run([boardExample("live.json"), "--bogus"]).status, 2);
-  assert.equal(run([boardExample("live.json"), "-o", "x.json"]).status, 2, "-o is for --store-previews");
+  assert.equal(run([boardExample("live.board.json"), "--bogus"]).status, 2);
+  assert.equal(run([boardExample("live.board.json"), "-o", "x.json"]).status, 2, "-o is for --store-previews");
   assert.equal(run(["/nonexistent.board.json"]).status, 1);
   assert.equal(run(["-"], '{"format": "something-else"}').status, 1);
   const r = run(["-"], board([{ id: "a\u001b[31m", title: "T\u001b[2J", code: "print('\\x1b[31mred')" }]));
@@ -184,7 +369,7 @@ test("board run --store-previews: a file made while the board ran is not written
 test("board run: no control character reaches the terminal from an early error either (HARD-CD6-3)", () => {
   for (const r of [
     run(["-"], JSON.stringify({ format: "evil\u001b[31m", nodes: [] })),
-    run([boardExample("live.json"), "--bad\u001b[31m"]),
+    run([boardExample("live.board.json"), "--bad\u001b[31m"]),
     run(["/nonexistent\u001b[2J.board.json"]),
   ]) {
     assert.ok(r.status === 1 || r.status === 2, String(r.status));
@@ -194,12 +379,12 @@ test("board run: no control character reaches the terminal from an early error e
 
 test("board run: --timeout is a number of seconds a timer can wait; --preview-ms 0 or more (CORR-CD6-4)", () => {
   for (const t of ["Infinity", "2147484", "0", "-1", "NaN", "x"]) {
-    const r = run([boardExample("live.json"), "--timeout", t]);
+    const r = run([boardExample("live.board.json"), "--timeout", t]);
     assert.equal(r.status, 2, t);
     assert.match(r.stderr, /--timeout takes a number of seconds, more than 0 and at most 2147483/);
   }
-  assert.equal(run([boardExample("live.json"), "--timeout", "2147483"]).status, 0);
-  for (const t of ["Infinity", "-1"]) assert.match(run([boardExample("live.json"), "--store-previews", "--preview-ms", t]).stderr, /--preview-ms takes a number of milliseconds, 0 or more/);
+  assert.equal(run([boardExample("live.board.json"), "--timeout", "2147483"]).status, 0);
+  for (const t of ["Infinity", "-1"]) assert.match(run([boardExample("live.board.json"), "--store-previews", "--preview-ms", t]).stderr, /--preview-ms takes a number of milliseconds, 0 or more/);
 });
 
 test("board run: an item whose own id is another's cell's (x, x, x@p2): three cells, each run and reported (CORR-239-1)", () => {
@@ -232,7 +417,7 @@ test("board run: what it says of a board it refuses is one line, a newline or a 
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
-  r = run([boardExample("live.json"), "--x\ny"]);
+  r = run([boardExample("live.board.json"), "--x\ny"]);
   assert.equal(r.status, 2);
   assert.ok(r.stderr.startsWith("sagebrush board run: unknown option --x\\x0ay\n"), r.stderr);
   r = run(["-"], board([{ id: "p", code: "print('one\\ttwo\\nthree')" }]));

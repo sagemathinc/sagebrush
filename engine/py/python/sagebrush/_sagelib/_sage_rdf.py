@@ -794,6 +794,29 @@ def _logabs(x, y):
     return math.log(mx) + 0.5 * math.log1p(u * u)
 
 
+def _cs(b):
+    """GSL's s = 1/|b| in IEEE arithmetic: +infinity for b = 0 (Python's 1.0/0.0 raises)."""
+    h = math.hypot(b.real, b.imag)
+    return 1.0 / h if h else math.inf
+
+
+def _cdiv(a, b):
+    """a/b for complex doubles as Sage's CDF computes it (GSL's gsl_complex_div: s = 1/|b|, then
+    ((a.x b.x s + a.y b.y s) s, (a.y b.x s - a.x b.y s) s)), not Python's complex division: a
+    division by 0 is NaN + NaN*I, and CDF(infinity, 1)/2 is +infinity + NaN*I, as Sage."""
+    s = _cs(b)
+    sbr, sbi = s * b.real, s * b.imag
+    return complex((a.real * sbr + a.imag * sbi) * s, (a.imag * sbr - a.real * sbi) * s)
+
+
+def _cinv(b):
+    """~b as Sage's CDF computes it (GSL's gsl_complex_inverse: ((b.x s) s, (-b.y s) s)), not
+    1/b's division: ~CDF(infinity, 1) is NaN with imaginary part -0.0, ~CDF(1e-310) is
+    +infinity + NaN*I, ~CDF(0) is NaN + NaN*I."""
+    s = _cs(b)
+    return complex((b.real * s) * s, (-b.imag * s) * s)
+
+
 class ComplexDoubleElement:
     """An element of CDF.
 
@@ -878,12 +901,27 @@ class ComplexDoubleElement:
     __rmul__ = __mul__
 
     def __truediv__(self, o):
+        # GSL's division, as Sage's CDF (1/CDF(49) is 0.020408163265306117)
         v = self._c(o)
-        return NotImplemented if v is None else ComplexDoubleElement._of(self._z / v)
+        if v is None:
+            return NotImplemented
+        return ComplexDoubleElement._of(_cdiv(self._z, v))
 
     def __rtruediv__(self, o):
         v = self._c(o)
-        return NotImplemented if v is None else ComplexDoubleElement._of(v / self._z)
+        if v is None:
+            return NotImplemented
+        return ComplexDoubleElement._of(_cdiv(v, self._z))
+
+    def __invert__(self):
+        """1/self, as Sage's CDF computes it.
+
+        EXAMPLES::
+
+            sage: ~CDF(49), ~CDF(1, 2), ~CDF(0)
+            (0.020408163265306117, 0.19999999999999998 - 0.39999999999999997*I, NaN + NaN*I)
+        """
+        return ComplexDoubleElement._of(_cinv(self._z))
 
     def __neg__(self):
         return ComplexDoubleElement._of(-self._z)
@@ -1146,8 +1184,19 @@ def _eig(np, a):
     return f(a) if f is not None else np.linalg.eig(a)
 
 
+def _no_generalized(args, kwds):
+    # A v = lambda B v (Sage: LAPACK's generalized problem) is refused rather
+    # than B ignored: eigenmatrix_right(B) gave the eigenvalues of A alone;
+    # the refusal in _sage_matrix_more, loaded on first use
+    other = args[0] if args else kwds.get("other")
+    if other is not None:
+        import _sage_matrix_more
+        _sage_matrix_more.refuse_generalized_numeric()
+
+
 def _eigenvalues(M, *args, **kwds):
     """The eigenvalues, in the order LAPACK gives them."""
+    _no_generalized(args, kwds)
     np = _np()
     w = _eig(np, _array(M))[0]
     out = []
@@ -1163,12 +1212,14 @@ def _eigenvalues(M, *args, **kwds):
 
 def _eigenvectors_right(M, *args, **kwds):
     """[(eigenvalue, [unit eigenvector], 1)], as LAPACK gives them."""
+    _no_generalized(args, kwds)
     np = _np()
     w, v = _eig(np, _array(M))
     return _pairs(M, w, v)
 
 
 def _eigenvectors_left(M, *args, **kwds):
+    _no_generalized(args, kwds)
     np = _np()
     w, v = _eig(np, _array(M).T)
     return _pairs(M, w, v)
@@ -1186,7 +1237,8 @@ def _pairs(M, w, v):
     return out
 
 
-def _eigenmatrix_right(M):
+def _eigenmatrix_right(M, other=None):
+    _no_generalized((other,), {})
     np = _np()
     w, v = _eig(np, _array(M))
     n = len(w.tolist())

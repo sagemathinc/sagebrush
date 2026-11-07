@@ -85,11 +85,11 @@ function inspect(svg) {
 
 // ---- the example boards: every page; the same each time; nothing overflows --
 const HASHES = {
-  "sagebrush-0": "119690ce7f019263", "live-0": "1effa302c7b83f0f", "primes-0": "5ff20192569e199b", "primes-1": "895ebd4a38777287", "primes-2": "f41e30fae80e71f2", "polynomials-0": "e94553d47bd3d0e3", "museum-tour-0": "999888d248719e81",
+  "sagebrush-0": "119690ce7f019263", "live-0": "681e65134b369a1d", "primes-0": "5ff20192569e199b", "primes-1": "895ebd4a38777287", "primes-2": "f41e30fae80e71f2", "polynomials-0": "6e953eefb97ca62d", "museum-tour-0": "dd86f7554badad32",
 };
 const got = {};
 for (const f of ["sagebrush", "live", "primes", "polynomials", "museum-tour"]) {
-  const d = JSON.parse(readFileSync(EXAMPLES.get(f + ".json"), "utf8"));
+  const d = JSON.parse(readFileSync(EXAMPLES.get(f + ".board.json"), "utf8"));
   for (let p = 0; p < pageCount(cleanDoc(d)); p++) {
     const a = boardSvg(d, { page: p }), b = boardSvg(d, { page: p });
     const h = createHash("sha256").update(a.svg).digest("hex").slice(0, 16);

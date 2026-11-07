@@ -2,9 +2,8 @@
 loopback address, paired with a sagebrush.space page exactly as `sagebrush
 notebook --pair` is (src/notebook-pair.ts, whose contract this ports; design
 remote-v1 §11 (a)).  A page that speaks that contract connects here unchanged;
-the code runs in this computer's own CPython (gateway.py, child.py).  (The
-sagebrush.space page's side of the pairing is not built yet: the tests, and
-a terminal client, play the page.)
+the code runs in this computer's own CPython (gateway.py, child.py).  The
+page's side is web/notebook/pair-tunnel.js and remote-ui.js ("Your computer").
 
 The contract (the agent pairing's, design/workspace-agent-protocol.md §2, at its own path):
   - a WebSocket on 127.0.0.1 only, at GET /sagebrush-kernel (any other path: 400, before any WebSocket);
@@ -63,6 +62,50 @@ _B64URL43 = re.compile(r"[A-Za-z0-9_-]{43}")
 _WSKEY = re.compile(r"[A-Za-z0-9+/]{22}==")
 
 
+def runner_version():
+    """This runner's sagebrush version, as the hello reports it: the installed distribution's, or "dev" when this code
+    isn't that distribution's (a source checkout, whatever else is installed)."""
+    try:
+        from importlib import metadata
+        dist = metadata.distribution("sagebrush")
+        here = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "__init__.py"))
+        if os.path.realpath(str(dist.locate_file("sagebrush/__init__.py"))) != here:
+            return "dev"
+        return dist.version
+    except Exception:
+        return "dev"
+
+
+_NEED = re.compile(r"\d{1,6}(\.\d{1,6}){0,3}")  # (a minimum: a release's numbers, nothing else)
+# (a runner's version: this subset of PEP 440's canonical form, whole, or "dev" (astra's VERSION-2): numbers, then
+# optionally a pre-release (aN, bN, rcN), a post-release (.postN), a dev release (.devN) and a local part (+x.y))
+_VERSION = re.compile(r"(\d{1,6}(?:\.\d{1,6}){0,3})((?:a|b|rc)\d{1,6})?(\.post\d{1,6})?(\.dev\d{1,6})?(\+[A-Za-z0-9]{1,16}(?:\.[A-Za-z0-9]{1,16}){0,3})?")
+
+
+def version_at_least(v, need):
+    """Is version v at least need (a release's numbers, e.g. "0.9.0")?  A release gate, as PEP 440 orders it: "dev" (a
+    checkout) always is; a pre-release (0.9.0rc1, 0.9.0a2, 0.9.0.dev3) is below its release; a post-release or a local
+    version (0.9.0.post1, 0.9.0+x) is not."""
+    if not isinstance(need, str) or not _NEED.fullmatch(need):
+        return False  # (a malformed minimum never passes, not even for "dev" (daybreak3's VERSION-3))
+    if v == "dev":
+        return True
+    m = _VERSION.fullmatch(v) if isinstance(v, str) else None
+    if not m:
+        return False  # (a malformed version never passes: the whole version is checked before any ordering)
+    a, b = [int(x) for x in m.group(1).split(".")], [int(x) for x in need.split(".")]
+    n = max(len(a), len(b))
+    a, b = a + [0] * (n - len(a)), b + [0] * (n - len(b))
+    if a != b:
+        return a > b
+    # (the release's own numbers: below it if a pre-release or a dev release; a post or local version is not)
+    return m.group(2) is None and m.group(4) is None
+
+
+VERSION = runner_version()
+UPGRADE = "Run the newest version: uvx sagebrush@latest remote --loopback (it always fetches the latest)."
+
+
 def b64url(b):
     return base64.urlsafe_b64encode(b).rstrip(b"=").decode("ascii")
 
@@ -101,6 +144,31 @@ def strict_json(text):
     def const(name):
         raise ValueError("not JSON: %s" % name)
     return json.loads(text, object_pairs_hook=pairs, parse_constant=const)
+
+
+def page_key_error(p, stats=None):
+    """Why the hello's DPoP key (params jwk and jkt) is refused, or None: lengths first, then the shape, canonical
+    base64url, a point on P-256, and only then the thumbprint (the one costly step, counted in stats)."""
+    jwk = p.get("jwk")
+    jx = jwk.get("x") if isinstance(jwk, dict) else None
+    jy = jwk.get("y") if isinstance(jwk, dict) else None
+
+    def too_long(v):
+        return isinstance(v, str) and len(v) > PAIR_LIMITS["keyChars"]
+    if too_long(p.get("jkt")) or too_long(jx) or too_long(jy):
+        return "the page's key is too long"
+    if not (isinstance(jwk, dict) and sorted(jwk) == ["crv", "kty", "x", "y"] and jwk["kty"] == "EC" and jwk["crv"] == "P-256"
+            and isinstance(jx, str) and isinstance(jy, str)):
+        return "the page's key must be an EC P-256 public key"
+    if not (isinstance(p.get("jkt"), str) and _B64URL43.fullmatch(p["jkt"]) and _canonical32(jx) and _canonical32(jy)):
+        return "the page's key is not canonical base64url"
+    if not _es256.es256_key_ok(base64.urlsafe_b64decode(jx + "="), base64.urlsafe_b64decode(jy + "=")):
+        return "the page's key isn't a point on P-256"
+    if stats is not None:
+        stats["thumbprints"] += 1
+    if p["jkt"] != jwk_thumbprint(jwk):
+        return "the key's thumbprint doesn't match"
+    return None
 
 
 def _close_status_ok(s):
@@ -574,24 +642,9 @@ class PairServer:
         has_code, has_session = isinstance(p.get("code"), str), isinstance(p.get("session"), str)
         if has_code == has_session:
             return self._refuse(c, rid, "refused", "a hello carries exactly one of code and session")
-        jwk = p.get("jwk")
-        jx = jwk.get("x") if isinstance(jwk, dict) else None
-        jy = jwk.get("y") if isinstance(jwk, dict) else None
-
-        def too_long(v):
-            return isinstance(v, str) and len(v) > PAIR_LIMITS["keyChars"]
-        if too_long(p.get("jkt")) or too_long(jx) or too_long(jy):
-            return self._refuse(c, rid, "refused", "the page's key is too long")
-        if not (isinstance(jwk, dict) and sorted(jwk) == ["crv", "kty", "x", "y"] and jwk["kty"] == "EC" and jwk["crv"] == "P-256"
-                and isinstance(jx, str) and isinstance(jy, str)):
-            return self._refuse(c, rid, "refused", "the page's key must be an EC P-256 public key")
-        if not (isinstance(p.get("jkt"), str) and _B64URL43.fullmatch(p["jkt"]) and _canonical32(jx) and _canonical32(jy)):
-            return self._refuse(c, rid, "refused", "the page's key is not canonical base64url")
-        if not _es256.es256_key_ok(base64.urlsafe_b64decode(jx + "="), base64.urlsafe_b64decode(jy + "=")):
-            return self._refuse(c, rid, "refused", "the page's key isn't a point on P-256")
-        self.stats["thumbprints"] += 1
-        if p["jkt"] != jwk_thumbprint(jwk):
-            return self._refuse(c, rid, "refused", "the key's thumbprint doesn't match")
+        bad = page_key_error(p, self.stats)
+        if bad:
+            return self._refuse(c, rid, "refused", bad)
         if has_code:
             if self.code_used:
                 return self._refuse(c, rid, "refused", "this code was used: run the command again for a new one")
@@ -617,7 +670,7 @@ class PairServer:
                 session = b64url(secrets.token_bytes(32))
                 self.session = hashlib.sha256(session.encode("ascii")).digest()
                 self.session_wrong = 0
-            return self._paired(c, rid, p["jkt"], session)
+            return self._paired(c, rid, p["jkt"], session, p.get("needs"))
         if p.get("purpose") != "kernel":
             return self._refuse(c, rid, "refused", "this is a kernel's pairing (purpose \"kernel\")")
         if self.session is None:
@@ -629,10 +682,14 @@ class PairServer:
             return self._refuse(c, rid, "refused", "wrong session")
         if self.paired_conn is not None:
             return self._refuse(c, rid, "refused", "another page is paired with this computer")
-        return self._paired(c, rid, p["jkt"], None)
+        return self._paired(c, rid, p["jkt"], None, p.get("needs"))
 
-    def _paired(self, c, rid, jkt, session):
+    def _paired(self, c, rid, jkt, session, needs=None):
         self.timers.clear_timeout(c.hello_timer)
+        # (astra's NEEDS-1: only an authenticated hello's minimum is said, and only one of a release's numbers, so no
+        # page text reaches this terminal; the page will refuse this runner, and the person is looking here too)
+        if isinstance(needs, str) and _NEED.fullmatch(needs) and not version_at_least(VERSION, needs):
+            self.err("This page needs sagebrush %s or newer; this is %s. %s\n" % (needs, VERSION, UPGRADE))
         c.paired = True
         c.jkt = jkt
         c.token = b64url(secrets.token_bytes(32))  # (this socket's and this key's; never written anywhere)
@@ -641,7 +698,7 @@ class PairServer:
         self.gateway.socket_paired(c)
         self.err("A page is paired.\n")
         result = {"protocol": 1, "purpose": "kernel", "token": c.token, "nonce": self.gateway.current_nonce(),
-                  "limits": {"frame": PAIR_LIMITS["frame"]}, "incarnation": self.incarnation}
+                  "limits": {"frame": PAIR_LIMITS["frame"]}, "incarnation": self.incarnation, "version": VERSION}
         if session:
             result["session"] = session
         c.send({"jsonrpc": "2.0", "id": rid, "result": result})
@@ -654,8 +711,9 @@ async def run_loopback(port=0, dev_origin=None, out=None, err=None, cwd=None):
     err = err or (lambda s: (sys.stderr.write(s), sys.stderr.flush()))
     server = PairServer(dev_origin=dev_origin, err=err, cwd=cwd)
     await server.listen(port)
+    err("sagebrush %s (Python %s at %s)\n" % (VERSION, sys.version.split()[0], sys.executable))
     out(server.link() + "\n")
-    err("The link above is for a sagebrush.space page that pairs with this computer (that page is not released yet).\n"
+    err("The link above is for a sagebrush.space page that pairs with this computer.\n"
         "Pairing code: %s (single use, for 5 minutes). Code you run there will run on this computer, in this Python "
         "(%s), with your files and permissions.\n" % (server.code, sys.executable))
     stop = asyncio.Event()
@@ -682,10 +740,13 @@ async def run_loopback(port=0, dev_origin=None, out=None, err=None, cwd=None):
 
 
 def main(argv):
-    """`sagebrush remote --loopback [--port N]`, or `sagebrush remote login ...`."""
+    """`sagebrush remote` (the relay), `sagebrush remote login ...`, or `sagebrush remote --loopback [--port N]`."""
     if argv[:1] == ["login"]:
         from sagebrush.remote.enroll import main as login_main
         return login_main(argv[1:])
+    if not argv:
+        from sagebrush.remote.relay import main as relay_main
+        return relay_main([])
     port, loopback = 0, False
     i = 0
     while i < len(argv):
@@ -701,6 +762,11 @@ def main(argv):
             sys.stderr.write("sagebrush remote: unknown argument %s\n" % a)
             return 2
         i += 1
+    if os.name == "nt":
+        # (Stop and the kernel's tree end use POSIX process groups, which Windows doesn't have)
+        sys.stderr.write("sagebrush remote: not on Windows yet; run it in WSL (Windows Subsystem for Linux), where it works as "
+                         "on Linux, and pair this browser with it as usual\n")
+        return 2
     # (an ordinary check, never assert: python -O removes asserts (daybreak3's R763-CLI-1))
     try:
         port = int(port)
@@ -710,9 +776,11 @@ def main(argv):
         sys.stderr.write("sagebrush remote: --port takes a port number (0 to 65535)\n")
         return 2
     if not loopback:
-        sys.stderr.write("usage: sagebrush remote --loopback [--port N]\n"
+        sys.stderr.write("usage: sagebrush remote\n"
                          "       sagebrush remote login [--origin URL] [--name NAME] [--force]\n"
-                         "  (--loopback: this computer as a paired page's runner, over 127.0.0.1, in this\n"
-                         "   Python; login: enroll this computer with your account, for the cloud relay)\n")
+                         "       sagebrush remote --loopback [--port N]\n"
+                         "  (this computer as a runner for your sagebrush.space notebooks, in this Python: through the\n"
+                         "   cloud relay, enrolling it first if needed; login: enroll it again; --loopback: a paired\n"
+                         "   page's runner, over 127.0.0.1)\n")
         return 2
     return asyncio.run(run_loopback(port, dev_origin=os.environ.get("SAGEBRUSH_KERNEL_DEV_ORIGIN") or None))

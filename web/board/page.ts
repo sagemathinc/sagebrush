@@ -1,6 +1,6 @@
 // The board page (web/board/index.html): sagebrush.space as a board's host
 // (mount.ts).  /board/?doc=URL shows a board document (web/board/doc.ts);
-// /board/ alone, Sagebrush's own architecture (examples/sagebrush.json);
+// /board/ alone, Sagebrush's own architecture (examples/sagebrush.board.json);
 // ?mermaid=TEXT, a Mermaid flowchart; an exported file (export.ts), the
 // document it carries; ?items=N&strokes=N, a synthetic board for the
 // benchmark (bench.mjs, window.boardBench).  A document's tour steps through
@@ -69,6 +69,8 @@ onHistoryRefused((m: string) => showHistoryNotice(m, HISTORY_STOPPED));
 import { uploadFiles, openableAsFile, blobHead, convertCopy, MystNotebookError, pauseBoard, isPaused, unpause, carryNotice, takeNotice, type DocKind } from "../workspace/upload";
 import { readBundle, keepBundle } from "../notebook/bundle.js";
 import { openFilesDialog, recentOpened, recentLabel, recordOpened } from "../workspace/fileopen";
+import { langOf } from "../code/langs";
+import { codeUrl } from "../code/url";
 import { openGallery } from "../examples/open";
 import { mountBrowser } from "../workspace/browser";
 import { mountAgentPairing, floatingButton } from "../workspace/agent-ui";
@@ -332,12 +334,18 @@ const mdText = (t: string) => t.replace(/[\\`*_[\]()<>#!|~]/g, "\\$&");
     history.replaceState(null, "", location.pathname + (q.toString() ? "?" + q.toString().replace("local%3A", "local:") : "") + location.hash);
   }
 }
+// (the corpus boards renamed to .board.json, Nov 7 2026: an old address opens the new file, and this browser's edits
+// and history of it stay where they were, under the old name)
+const RENAMED: Record<string, string> = Object.fromEntries(["live", "sagebrush", "primes", "museum-tour", "polynomials"]
+  .map((n) => ["examples/" + n + ".json", "examples/" + n + ".board.json"]).concat([["examples/mermaid.md", "examples/mermaid.board.json"]]));
+if (Object.hasOwn(RENAMED, q.get("doc") ?? "")) { q.set("doc", RENAMED[q.get("doc")!]); history.replaceState(null, "", location.pathname + "?" + q.toString() + location.hash); }
 // (?mermaid=TEXT: a flowchart given in the address; an exported file, its own)
-const source = unsaved ? "unsaved:" + unsaved : embedded() ? "embedded:" + location.pathname : q.get("doc") ?? (q.has("mermaid") ? "mermaid:" + q.get("mermaid") : "examples/sagebrush.json");
-const saveKey = "sagebrush-board:" + source;
+const source = unsaved ? "unsaved:" + unsaved : embedded() ? "embedded:" + location.pathname : q.get("doc") ?? (q.has("mermaid") ? "mermaid:" + q.get("mermaid") : "examples/sagebrush.board.json");
+const storeName = Object.keys(RENAMED).find((o) => RENAMED[o] === source) ?? source;
+const saveKey = "sagebrush-board:" + storeName;
 const local = /^local:[0-9a-f]{12}$/.test(source);
 // (a document's history in this browser: by its source and its name beside it)
-const historyKey = (id: string | null) => "board:" + source + (id ? ":" + id : "");
+const historyKey = (id: string | null) => "board:" + storeName + (id ? ":" + id : "");
 // The board journal (DEV-only; journal.ts): a board of the workspace is saved through the
 // journal's store once this browser's workspace journal is active, read once, at load (its gate).  Everything it
 // changes here is behind `journalOn`; with it off, the page is as before
@@ -990,6 +998,14 @@ const newLatexHere = ws && !file && latexOn(location.hostname) ? (folder = "/") 
   await (await import(TEX_PAGE)).newTex(ws!, (e: Entry) => { url = "/?tex=" + e.fid; }, folder);
   return url;
 }) : undefined;
+// (a code or text file: its own page on the notebook page, /?code=<fid> (1a, web/code/page.ts), left for as a .tex is)
+function openCode(e: Entry, tab: boolean): boolean {
+  if (langOf(e.path) === null || !e.fid) return false;
+  const url = codeUrl(e.fid);
+  if (tab) window.open(url, "_blank", "noopener");
+  else void leaveFor(url, nameOf(e.path));
+  return true;
+}
 function openTex(e: Entry, tab: boolean): boolean {
   if (!/\.tex$/i.test(e.path) || !e.fid || !latexOn(location.hostname)) return false;
   const url = "/?tex=" + e.fid;
@@ -1611,7 +1627,7 @@ if (ws && local) {
       ws,
       current: () => ({ kind: "board", ref: source.slice(6) }),
       open: openEntry,
-      openFile: openTex,
+      openFile: (e: Entry, tab: boolean) => openTex(e, tab) || openCode(e, tab),
       ...(newLatexHere ? { newLatex: (folder: string) => void newLatexHere(folder) } : {}),
       // (From an example…: the board's own, as its File menu has it)
       fromExample: () => document.querySelector<HTMLElement>('[data-sbb="filemenu"] [data-sbb="examples"]:not([disabled])')?.click(),

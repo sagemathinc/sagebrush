@@ -762,15 +762,16 @@ try {
   // (on by default, William Nov 2: no ?latex=1, nothing stored, and ?tex= opens the editor on an allowed host)
   check(await until(`!!document.querySelector(".tex-page") && !document.body.innerText.includes("The LaTeX editor isn't enabled here.")`, 20000), "on by default: ?tex= opens the editor with no flag");
   // ---- a middle-click on a file row (board i1c01 U1): a new tab of the editor only for a .tex file it takes; any
-  // other file (or the flag off), nothing, as before the editor: no preview here, no tab
-  await mk("/mid.txt", enc("plain\n")); const midFid = await mk("/mid.tex", enc(DOC));
+  // other file (or the flag off), nothing, as before the editor: no preview here, no tab (the other file a data file: a
+  // code or text file has a page of its own, web/code/test-code-page.mjs)
+  await mk("/mid.csv", enc("a,b\n1,2\n")); const midFid = await mk("/mid.tex", enc(DOC));
   const middle = async (q) => {
     await ev(`localStorage.setItem("sagebrush-files-sidebar", "1"); true`);
     await go(base + q); await until(`!!${W}`, 60000);
     const sel = (p) => JSON.stringify(`.frow[data-path="${p}"]`);
-    const rows = await until(`!!document.querySelector(${sel("/mid.txt")}) && !!document.querySelector(${sel("/mid.tex")})`, 20000);
+    const rows = await until(`!!document.querySelector(${sel("/mid.csv")}) && !!document.querySelector(${sel("/mid.tex")})`, 20000);
     const out = { rows };
-    for (const p of ["/mid.txt", "/mid.tex"]) out[p] = rows && await ev(`(async () => {
+    for (const p of ["/mid.csv", "/mid.tex"]) out[p] = rows && await ev(`(async () => {
       window.__opened = []; window.open = (u) => { window.__opened.push(String(u)); return null; };
       const before = location.href;
       document.querySelector(${sel(p)}).dispatchEvent(new MouseEvent("auxclick", { button: 1, bubbles: true, cancelable: true }));
@@ -782,9 +783,9 @@ try {
   };
   const nothing = (r) => r && r.opened.length === 0 && !r.preview && r.here;
   const mOff = await middle("");
-  check(mOff.rows && nothing(mOff["/mid.txt"]) && mOff["/mid.tex"] && mOff["/mid.tex"].opened.length === 1 && mOff["/mid.tex"].opened[0].includes("?tex=" + midFid), "on by default: with no flag, a middle-click on a .tex file opens the editor in a new tab (on any other file, nothing)", mOff);
+  check(mOff.rows && nothing(mOff["/mid.csv"]) && mOff["/mid.tex"] && mOff["/mid.tex"].opened.length === 1 && mOff["/mid.tex"].opened[0].includes("?tex=" + midFid), "on by default: with no flag, a middle-click on a .tex file opens the editor in a new tab (on any other file, nothing)", mOff);
   const mOn = await middle("?latex=1");
-  check(mOn.rows && nothing(mOn["/mid.txt"]), "flag on: a middle-click on a non-.tex file does nothing (no preview here, no tab)", mOn);
+  check(mOn.rows && nothing(mOn["/mid.csv"]), "flag on: a middle-click on a non-.tex file does nothing (no preview here, no tab)", mOn);
   check(mOn.rows && mOn["/mid.tex"] && mOn["/mid.tex"].opened.length === 1 && mOn["/mid.tex"].opened[0].includes("?tex=" + midFid) && !mOn["/mid.tex"].preview && mOn["/mid.tex"].here, "flag on: a middle-click on a .tex file opens the editor in a new tab only", mOn);
   // ---- U1 (William, Nov 2 evening): with a BOARD open, a .tex file clicked in the file panel did nothing. It opens the
   // LaTeX editor (the notebook page's /?tex=<fid>): a click here, the board left the way any open leaves it; a
@@ -796,7 +797,7 @@ try {
     await ev(`localStorage.setItem("sagebrush-files-sidebar", "1"); true`);
     await go(base + "board/?doc=local:" + bref);
     const sel = (p) => JSON.stringify(`.frow[data-path="${p}"]`);
-    const rows = await until(`!!document.querySelector(${sel("/mid.tex")}) && !!document.querySelector(${sel("/mid.txt")})`, 30000);
+    const rows = await until(`!!document.querySelector(${sel("/mid.tex")}) && !!document.querySelector(${sel("/mid.csv")})`, 30000);
     const mid = rows && await ev(`(async () => {
       window.__opened = []; window.open = (u) => { window.__opened.push(String(u)); return null; };
       document.querySelector(${sel("/mid.tex")}).dispatchEvent(new MouseEvent("auxclick", { button: 1, bubbles: true, cancelable: true }));
@@ -804,7 +805,7 @@ try {
       return { opened: window.__opened, board: location.pathname };
     })()`);
     const txt = rows && await ev(`(async () => {
-      document.querySelector(${sel("/mid.txt")}).click();
+      document.querySelector(${sel("/mid.csv")}).click();
       await new Promise((s) => setTimeout(s, 800));
       const p = !!document.querySelector(".sbfprev");
       document.querySelector(".sbfprev")?.remove();
@@ -2130,6 +2131,93 @@ $P = \sage{g[0]}$
       await pkey("Escape", "Escape", 27);
       await until(`!${P}`, 5000);
       check(p1 && p2 && p3, "Run, beamer: Present shows the title page's result, the plot and the point", { p1, p2, p3 });
+    }
+    // (Codex friction P5, the editor's half: a helper .py beside the .tex, imported by the document's code as by real
+    //  SageTeX run in the document's folder. The .tex's folder is given to Sage, read-only, at each Run, as it is then:
+    //  #772's example in its own folder gives its values; a second folder's document imports its own helper.py (same
+    //  name), not the first's (gone from the session), works in its folder, last on sys.path after the runtime's own
+    //  entries, and gets the standard statistics over a statistics.py beside it (imported cold); its code can't make a
+    //  file; its helper edited, the next Run sees the edit; deleted, the next Run can't import it. A folder past the
+    //  bound: Run says so and runs nothing)
+    {
+      const exDir = new URL("../../examples/latex/sagetex-helper/", import.meta.url);
+      const paper = await mk("/ex-helper/paper.tex", enc(readFileSync(new URL("paper.tex", exDir), "utf8")));
+      await mk("/ex-helper/helper.py", enc(readFileSync(new URL("helper.py", exDir), "utf8")));
+      await open(paper);
+      await until(`!document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
+      await ev(`(document.querySelector(".tex-head .tex-run").click(), 1)`);
+      const ranH = await statusIs(/Ran 6 SageTeX items in [0-9.]+ s$/, 120000);
+      const hj = JSON.parse((await resultsOf("/ex-helper/paper.tex")) ?? "null");
+      const hl = hj?.items?.map((x) => x.latex ?? x.msg ?? x.s) ?? [];
+      check(ranH && hj?.items?.length === 6 && hj.items.every((x) => x.s === "ok") && hl.some((l) => /1766319049.*226153980/.test(l)) && hl.includes("871") && hl.includes("178"),
+        "Run (Codex P5): #772's example imports helper.py beside the .tex: Pell's (1766319049, 226153980), Collatz 871 after 178 steps", { ranH, status: await ev(`document.querySelector(".tex-status")?.textContent ?? ""`), hl: hl.map((l) => String(l).slice(0, 120)) });
+      const B_DOC = String.raw`\documentclass{article}
+\usepackage{sagetex}
+\begin{document}
+\begin{sagesilent}
+import sys, os
+sys.modules.pop('statistics', None)
+import statistics, helper
+\end{sagesilent}
+$\sage{helper.v()}$, $\sage{(hasattr(statistics, 'median'), hasattr(statistics, 'SHADOW'))}$,
+$\sage{(os.getcwd() == '/ex-b', any(str(p).startswith('/$') for p in sys.path[:-1]), sys.path[-1] == '/ex-b', sys.path.count('/ex-b'), str(sys.path))}$,
+$\sage{(os.path.exists('/ex-helper/helper.py'), os.path.exists('helper.py'))}$.
+\begin{sagesilent}
+open('made.txt', 'w').write('x')
+\end{sagesilent}
+\end{document}
+`;
+      const fbB = await mk("/ex-b/doc.tex", enc(B_DOC));
+      await mk("/ex-b/helper.py", enc("def v():\n    return 7\n"));
+      await mk("/ex-b/statistics.py", enc("SHADOW = 1\n"));
+      const runB = async () => { await ev(`(document.querySelector(".tex-status").textContent = "", document.querySelector(".tex-head .tex-run").click(), 1)`); await statusIs(/Ran 6 SageTeX items|Not run/, 120000); return JSON.parse((await resultsOf("/ex-b/doc.tex")) ?? "null"); };
+      await open(fbB);
+      await until(`!document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
+      const b1 = await runB();
+      const L = (j, i) => String(j?.items?.[i]?.latex ?? j?.items?.[i]?.msg ?? "").replace(/\\left|\\right/g, "");
+      const made = await ev(`${W}.stat("/ex-b/made.txt").then((e) => !!e && !e.trashed)`);
+      check(L(b1, 1) === "7" && /\\mathrm\{True\}, \\mathrm\{False\}/.test(L(b1, 2)) && /^\(\\mathrm\{True\}, \\mathrm\{True\}, \\mathrm\{True\}, 1,/.test(L(b1, 3)) && /\(\\mathrm\{False\}, \\mathrm\{True\}\)/.test(L(b1, 4)),
+        "Run (Codex P5): another folder's document imports its own helper.py, not the first folder's (gone from the session); its folder is the working one, last on sys.path, once, the runtime's own library ahead of it; the standard statistics over one beside it", { items: [1, 2, 3, 4].map((i) => L(b1, i)) });
+      check(b1?.items?.[5]?.s === "error" && !made, "Run (Codex P5): the document's code can't make a file (read-only), and no file is made", { item: L(b1, 5).slice(-160), made });
+      await ev(`${W}.stat("/ex-b/helper.py").then((e) => ${W}.write("/ex-b/helper.py", new TextEncoder().encode("def v():\\n    return 8\\n"), { fid: e.fid, base: e.rev ?? 0 })).then(() => 1)`);
+      const b2 = await runB();
+      check(L(b2, 1) === "8", "Run (Codex P5): the helper edited, the next Run imports the edit", { got: L(b2, 1) });
+      await ev(`${W}.remove("/ex-b/helper.py").then(() => 1)`);
+      const b3 = await runB();
+      check(b3?.items?.[0]?.s === "error" && /No module named .?helper/.test(L(b3, 0)), "Run (Codex P5): the helper deleted, the next Run can't import it", { got: L(b3, 0).slice(-160) });
+      // (a folder past the bound: 501 files; Run says so, starts nothing and writes no results file)
+      const fbig = await mk("/ex-big/doc.tex", enc("\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n$\\sage{1+1}$\n\\end{document}\n"));
+      await ev(`(async () => { for (let i = 0; i < 500; i++) await ${W}.create("/ex-big/f" + i + ".txt", { content: new Uint8Array([120]) }); return 1; })()`);
+      await open(fbig);
+      await until(`!document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
+      await ev(`(document.querySelector(".tex-head .tex-run").click(), 1)`);
+      const tooBig = await statusIs(/Not run: the \.tex's folder is too large/, 30000);
+      await sleep(1000);
+      check(tooBig && (await resultsOf("/ex-big/doc.tex")) === null, "Run (Codex P5): a folder past the bound (over 500 files): Run says so, runs nothing, writes no results", { tooBig, status: await ev(`document.querySelector(".tex-status")?.textContent ?? ""`) });
+    }
+    // (astra's LATEX-QUEUE-STOP-1: Stop on a Run waiting for another one in the session: A's Run held in its turn (the
+    //  test build's hook), B opened in place and its Run queued behind it, then B's Stop; A's turn released: B runs
+    //  nothing ("Stopped before it ran", no results file), and A, its page gone, writes nothing)
+    {
+      const qa = await mk("/qs/a.tex", enc(RUN_DOC)), qb = await mk("/qs/b.tex", enc(RUN_DOC));
+      await open(qa);
+      await until(`!document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
+      await ev(`(window.__qsN = 0, window.__qsHold = new Promise((r) => (window.__qsRel = r)), window.__sbTexRunHold = () => (++window.__qsN === 1 ? window.__qsHold : undefined), document.querySelector(".tex-head .tex-run").click(), 1)`);
+      const heldA = await until(`window.__qsN === 1`, 120000);
+      await ev(`(window.__sbTex({ path: "/qs/b.tex", fid: ${JSON.stringify(qb)} }), 1)`);
+      await until(`document.querySelector(".tex-title")?.textContent === "b.tex" && !document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
+      await ev(`(document.querySelector(".tex-head .tex-run").click(), 1)`);
+      const queued = await until(`document.querySelector(".tex-head .tex-run")?.textContent === "Running…"`, 60000);
+      await ev(`(document.querySelector(".tex-head .tex-run").click(), 1)`);
+      await sleep(300);
+      const nBefore = await ev(`window.__qsN`);
+      await ev(`(window.__qsRel(), 1)`);
+      const said = await statusIs(/Stopped before it ran/, 20000);
+      await sleep(1000);
+      const ra = await resultsOf("/qs/a.tex"), rb = await resultsOf("/qs/b.tex");
+      await ev(`(delete window.__sbTexRunHold, 1)`);
+      check(heldA && queued && nBefore === 1 && said && ra === null && rb === null, "Run (astra LATEX-QUEUE-STOP-1): Stop on a Run waiting for another in the session: it runs nothing, says so, no results; the one ahead (its page gone) writes nothing",
+        { heldA, queued, nBefore, said, status: await ev(`document.querySelector(".tex-status")?.textContent ?? ""`), ra: ra && ra.slice(0, 80), rb: rb && rb.slice(0, 80) });
     }
     // (a Run made stale: another file opened in place while it runs; it writes nothing)
     const fs = await mk("/t/run-stale.tex", enc(RUN_DOC.replace("x = 2^10", "x = 2^10\n_s = sum(i for i in range(2*10^6))")));
