@@ -2285,9 +2285,9 @@ newBuiltinModule("os", (m) => {
     if (i > 2147483647 || i < -2147483648) raise(T.OverflowError, "Python int too large to convert to C int");
     return Number(i);
   };
-  // (a descriptor: a C int, and a negative one EBADF before any host call, as the kernel's)
-  const fdArg = (x: any): number => {
-    const fd = cInt(x);
+  // (a descriptor converted as a C int with the other arguments, in signature order, then their checks; a negative
+  // one is EBADF only then, just before the host call, where the kernel's would be: CPython's order of errors)
+  const fdOpen = (fd: number): number => {
     if (fd < 0) throw Object.assign(new Error("EBADF"), { code: "EBADF", errno: -9 });
     return fd;
   };
@@ -2316,18 +2316,19 @@ newBuiltinModule("os", (m) => {
   });
   m.open.$sig = { args: ["path", "flags", "mode"], posonly: 0, vararg: null, kwonly: ["dir_fd"], kwarg: null, defaults: [0o777], kwdefaults: { dir_fd: null } };
   fn(m, "close", (fd: any) => fdCall(() => {
-    const n = fdArg(fd);
-    fs.closeSync(n);
+    const n = cInt(fd);
+    fs.closeSync(fdOpen(n));
     cliPos.delete(n);
     return null;
   }));
   fn(m, "read", (fd: any, n: any) => fdCall(() => {
-    const want = cWide(n, "ssize_t"), f = fdArg(fd);
+    const f = cInt(fd), want = cWide(n, "ssize_t");
     if (want < 0n) throw Object.assign(new Error("EINVAL"), { code: "EINVAL", errno: -22 });
     // (a count more than a bytes object can hold (ops.ts's checked 2**32 - 1): MemoryError, as CPython's allocation
     // of the count fails; the browser's result is exactly the bytes read, the CLI's buffer at most 64 MiB a call, a
     // short read as POSIX allows any read to be)
     if (want > 4294967295n) raise(T.MemoryError);
+    fdOpen(f);
     if (shimFs) return new PyBytes(fs.readFd(f, Number(want)));
     const buf = new Uint8Array(Math.min(Number(want), 1 << 26));
     const c = cliPos.get(f);
@@ -2336,9 +2337,10 @@ newBuiltinModule("os", (m) => {
     return new PyBytes(buf.slice(0, got));
   }));
   fn(m, "write", (fd: any, data: any) => fdCall(() => {
-    const f = fdArg(fd);
+    const f = cInt(fd);
     const b = O.bufferOf(data);
     if (b === undefined || b === null) raise(T.TypeError, `a bytes-like object is required, not '${typeName(data)}'`);
+    fdOpen(f);
     if (shimFs) {
       const n = fs.writeSync(f, b);
       return typeof n === "number" ? n : b!.length;
@@ -2349,7 +2351,8 @@ newBuiltinModule("os", (m) => {
     return n;
   }));
   fn(m, "lseek", (fd: any, pos: any, how: any) => fdCall(() => {
-    const f = fdArg(fd), off = Number(cWide(pos, "long")), wh = cInt(how);
+    const f = cInt(fd), off = Number(cWide(pos, "long")), wh = cInt(how);
+    fdOpen(f);
     if (shimFs) return fs.seekFd(f, off, wh);
     const c = cliPos.get(f);
     // (a descriptor not opened here: a closed or unknown one is EBADF, as fstat says; another, a stream's, ESPIPE)
@@ -2363,7 +2366,7 @@ newBuiltinModule("os", (m) => {
     c.pos = base + off;
     return c.pos;
   }));
-  fn(m, "fstat", (fd: any) => fdCall(() => statResult(fs.fstatSync(fdArg(fd)))));
+  fn(m, "fstat", (fd: any) => fdCall(() => statResult(fs.fstatSync(fdOpen(cInt(fd))))));
   wrap("chmod", (p: any, mode: any, dir_fd: any = null, _follow_symlinks: any = true) => {
     noDirFd(dir_fd);
     fs.chmodSync(at(pathStr(p)), cInt(mode));
@@ -2431,7 +2434,7 @@ newBuiltinModule("os", (m) => {
   fn(m, "get_terminal_size", (fd: any = 1) => {
     const f = cInt(fd);
     // (a descriptor not open, a negative one among them: EBADF, as the ioctl's; an open one that is no terminal, ENOTTY)
-    if (f < 0 || f > 2) fdCall(() => fs.fstatSync(fdArg(f)));
+    if (f < 0 || f > 2) fdCall(() => fs.fstatSync(fdOpen(f)));
     const s = !shimFs && f === 1 ? process.stdout : !shimFs && f === 2 ? process.stderr : null;
     if (s && (s as any).isTTY && (s as any).columns) return termSize((s as any).columns, (s as any).rows);
     throw markRaised(callObj(T.OSError, [25, "Inappropriate ioctl for device"]));
