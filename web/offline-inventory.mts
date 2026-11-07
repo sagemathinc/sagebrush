@@ -43,6 +43,8 @@ const MODES: { id: string; title: string; prefix: string; exact?: string; needs?
   { id: "sage", title: "Sage", prefix: "sage", needs: ["python"] },
   { id: "matlab", title: "MATLAB", prefix: "matlab", needs: ["python", "scientific"] },
   { id: "magma", title: "Magma", prefix: "magma", needs: ["python", "sage"] },
+  // (every Rill group is named rill-*, so this item owns them all: design/rill.md §6.1)
+  { id: "rill", title: "R (Rill)", prefix: "rill", needs: ["python"] },
 ];
 
 /** a library group's item id, by rule; a group no rule covers fails the build (each new group is placed on purpose) */
