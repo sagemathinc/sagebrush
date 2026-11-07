@@ -1115,13 +1115,10 @@ def _chash(c):
     are equal with different hashes, and ComplexField(100)['t']([1/3]) hashes as
     RealField(100)['t']([1/3]); a complex number with imaginary part 0 hashes as its
     real part, as Python's)."""
-    try:
-        if hasattr(c, "imag") and callable(getattr(c, "imag", None)):
-            return hash(complex(c))
-        if isinstance(c, complex):
-            return hash(c.real) if c.imag == 0 else hash(c)
-    except Exception:
-        pass
+    if hasattr(c, "imag") and callable(getattr(c, "imag", None)):
+        return hash(complex(c))
+    if isinstance(c, complex):
+        return hash(c.real) if c.imag == 0 else hash(c)
     return hash(c)
 
 
