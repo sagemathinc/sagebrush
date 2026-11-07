@@ -1487,6 +1487,7 @@ export const R: any = {
   importStar: M.importStar,
   resolveRelative: M.resolveRelative,
   sysModules: M.sysModules,
+  importEpoch: M.importEpoch,
   loader: M.loader,
   newModule: Ty.newModule,
   formatException,

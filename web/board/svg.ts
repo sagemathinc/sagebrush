@@ -59,8 +59,12 @@ function width(r: Run, size: number): number {
 
 /** A line of text: its runs, size, height, and where it starts (left, or
  * centered); `base`: its baseline from its top, when math makes it taller. */
-interface Line { runs: Run[]; size: number; lh: number; indent: number; gap: number; color?: string; box?: "code"; base?: number }
+// (a table's row: its cells at their columns' x, and the grid's columns, xs, from 0 to the table's width)
+interface Cell { lines: Line[]; x: number; w: number; align: "left" | "center" | "right" }
+interface Line { runs: Run[]; size: number; lh: number; indent: number; gap: number; color?: string; box?: "code"; base?: number; cells?: Cell[]; grid?: { xs: number[]; top: boolean; head: boolean } }
 const FONT = 14, LH = 1.45;
+// (a table's cell: its padding; its grid's lines, the header's rule)
+const CELL_X = 6, CELL_Y = 3, GRID = "#c8ccd2", GRID_HEAD = "#8a9099";
 const ENT: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
 const decode = (s: string) => s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e: string) => {
   if (e[0] !== "#") return ENT[e.toLowerCase()] ?? m;
@@ -126,23 +130,48 @@ function lines(md: string, w: number, size = FONT, color?: string, plain?: Omit<
         const cs = size - 2;
         restore(t.text).replace(/\t/g, "    ").split("\n").forEach((l: string, k: number) => flow([{ t: l || " ", m: true }], w - indent - 12, cs, indent + 6, k ? 0 : gap, "code"));
       } else if (t.type === "blockquote") block(t.tokens ?? [], indent + 12);
-      else if (t.type === "table") {
-        const row = (cells: Tokens.TableCell[], b: boolean) => { const rs: Run[] = []; cells.forEach((c, k) => { if (k) rs.push({ t: "  |  " }); rs.push(...runsOf(c.tokens, b ? { b } : {})); }); return rs; };
-        flow(row(t.header, true), w - indent, size, indent, gap);
-        for (const r of t.rows) flow(row(r, false), w - indent, size, indent, 0);
-      } else if (t.type === "html") continue;
+      else if (t.type === "table") table(t as Tokens.Table, indent, gap); else if (t.type === "html") continue;
       else if ("tokens" in t && t.tokens) block(t.tokens as Token[], indent);
     }
   };
   const runsOf = (tokens: Token[] | undefined, style: Omit<Run, "t">, s = size) => { const r: Run[] = []; inline(tokens, style, math, r, s); return r; };
+  // (a table, as the board draws one: a grid of cells, its header row bold and ruled off, each column as wide as its
+  // widest cell, all narrowed together to fit the note, a cell's text then wrapped in it, each cell aligned as its
+  // column's :--- / :---: / ---: says; codex friction P10a)
+  const table = (t: Tokens.Table, indent: number, gap: number) => {
+    const n = t.header.length;
+    const cellRuns = (cells: Tokens.TableCell[], b: boolean) => Array.from({ length: n }, (_, k) => runsOf(cells[k]?.tokens, b ? { b: true } : {}));
+    const rows = [cellRuns(t.header, true), ...t.rows.map((r) => cellRuns(r, false))];
+    const natural = (rs: Run[]) => rs.reduce((a, r) => a + (r.math ? r.math.w : width(r, size)), 0);
+    // (the widths as a browser lays out a table on its own: each column at most as wide as its widest cell, and at
+    // least as its longest word; when they don't all fit at their widest, the room past the words' share is given
+    // out as each column wants more)
+    const longest = (rs: Run[]) => Math.max(0, ...rs.flatMap((r) => (r.math ? [r.math.w] : r.t.split(/\s+/).map((p) => width({ ...r, t: p }, size)))));
+    const most = Array.from({ length: n }, (_, k) => Math.max(...rows.map((r) => natural(r[k]))) + 2 * CELL_X);
+    const least = Array.from({ length: n }, (_, k) => Math.max(...rows.map((r) => longest(r[k]))) + 2 * CELL_X);
+    const room = w - indent, sum = (a: number[]) => a.reduce((x, c) => x + c, 0);
+    let cw = most;
+    if (sum(most) > room) {
+      const spare = room - sum(least), want = sum(most) - sum(least);
+      cw = spare <= 0 ? least.map((c) => (c * room) / sum(least)) : least.map((c, k) => c + ((most[k] - least[k]) * spare) / want);
+    }
+    const xs = [0];
+    for (const c of cw) xs.push(xs[xs.length - 1] + c);
+    rows.forEach((cells, k) => {
+      // (each cell's text wrapped at its column's width, as the rest of a note's text is; the row as tall as its tallest)
+      const ls = cells.map((runs, j) => { const into: Line[] = []; flow(runs.length ? runs : [{ t: " " }], Math.max(1, cw[j] - 2 * CELL_X + 0.01), size, 0, 0, undefined, into); return into; });
+      out.push({ runs: [], size, lh: Math.max(...ls.map(heightOf)) + 2 * CELL_Y, indent, gap: k ? 0 : gap, color,
+        cells: ls.map((lines, j) => ({ lines, x: xs[j], w: cw[j], align: t.align[j] ?? "left" })), grid: { xs, top: k === 0, head: k === 0 } });
+    });
+  };
   // (runs wrapped into lines at width ww: at spaces, a word longer than a line at a character)
-  const flow = (runs: Run[], ww: number, s: number, indent: number, gap: number, box?: "code") => {
+  const flow = (runs: Run[], ww: number, s: number, indent: number, gap: number, box?: "code", into: Line[] = out) => {
     let line: Run[] = [], used = 0, first = true;
     const end = () => {
       // (math taller than the text: the line as tall as it, its baseline lower)
       const ms = line.filter((r) => r.math).map((r) => r.math!);
       const above = Math.max(s * LH * 0.74, ...ms.map((m) => m.h - m.d + 3)), below = Math.max(s * LH * 0.26, ...ms.map((m) => m.d + 3));
-      out.push({ runs: line, size: s, lh: ms.length ? above + below : s * LH, indent, gap: first ? gap : 0, color, ...(box ? { box } : {}), ...(ms.length ? { base: above } : {}) });
+      into.push({ runs: line, size: s, lh: ms.length ? above + below : s * LH, indent, gap: first ? gap : 0, color, ...(box ? { box } : {}), ...(ms.length ? { base: above } : {}) });
       line = []; used = 0; first = false;
     };
     for (const r of runs) {
@@ -200,7 +229,7 @@ function ellipsisStart(r: Run, size: number, w: number): string {
   return "…" + cs.join("");
 }
 const heightOf = (ls: Line[]) => ls.reduce((h, l) => h + l.lh + l.gap, 0);
-const lineWidth = (l: Line) => l.indent + l.runs.reduce((w, r) => w + width(r, l.size), 0);
+const lineWidth = (l: Line) => l.indent + (l.grid ? l.grid.xs[l.grid.xs.length - 1] : l.runs.reduce((w, r) => w + width(r, l.size), 0));
 
 // ---- notes: their boxes ----------------------------------------------------
 
@@ -267,6 +296,25 @@ function outline(it: Item, fill: string): string {
 // a run as a tspan (its style as attributes)
 const tspan = (r: Run) => (r.b || r.i || r.m ? `<tspan${r.b ? ' font-weight="bold"' : ""}${r.i ? ' font-style="italic"' : ""}${r.m ? ' font-family="DejaVu Sans Mono, Menlo, Consolas, monospace"' : ""}>${esc(r.t)}</tspan>` : esc(r.t));
 
+// runs from x on the baseline: runs of one style next to each other, one tspan; a formula, its own SVG, at the place
+// the text before it ends, as the file's font measures it
+function drawRuns(out: string[], ls: Run[], x: number, base: number, size: number, color?: string) {
+  let runs: Run[] = [], rx = x, sx = x;
+  const flush = () => { if (runs.length) out.push(`<text x="${n1(sx)}" y="${n1(base)}" font-size="${n1(size)}"${color ? ` fill="${color}"` : ""} xml:space="preserve">${runs.map(tspan).join("")}</text>`); runs = []; };
+  for (const r of ls) {
+    if (r.math) {
+      flush();
+      out.push(`<svg x="${n1(rx)}" y="${n1(base - (r.math.h - r.math.d))}" width="${n1(r.math.w)}" height="${n1(r.math.h)}" viewBox="${r.math.viewBox}" overflow="visible" color="${color ?? TEXT}">${r.math.inner}</svg>`);
+      rx += r.math.w;
+      sx = rx;
+      continue;
+    }
+    const p = runs[runs.length - 1];
+    if (p && !p.b === !r.b && !p.i === !r.i && !p.m === !r.m) p.t += r.t; else runs.push({ ...r });
+    rx += width(r, size);
+  }
+  flush();
+}
 function textBlock(ls: Line[], x: number, y: number, w: number, center: boolean): string {
   const out: string[] = [];
   let at = y;
@@ -276,23 +324,28 @@ function textBlock(ls: Line[], x: number, y: number, w: number, center: boolean)
     const lw = lineWidth(l) - l.indent;
     const tx = center ? x + (w - lw) / 2 : x + l.indent;
     const base = at + (l.base ?? l.lh * 0.74);
-    // (runs of one style next to each other: one tspan; a formula: its own
-    // SVG, at the place the text before it ends, as the file's font measures it)
-    let runs: Run[] = [], rx = tx, sx = tx;
-    const flush = () => { if (runs.length) out.push(`<text x="${n1(sx)}" y="${n1(base)}" font-size="${n1(l.size)}"${l.color ? ` fill="${l.color}"` : ""} xml:space="preserve">${runs.map(tspan).join("")}</text>`); runs = []; };
-    for (const r of l.runs) {
-      if (r.math) {
-        flush();
-        out.push(`<svg x="${n1(rx)}" y="${n1(base - (r.math.h - r.math.d))}" width="${n1(r.math.w)}" height="${n1(r.math.h)}" viewBox="${r.math.viewBox}" overflow="visible" color="${l.color ?? TEXT}">${r.math.inner}</svg>`);
-        rx += r.math.w;
-        sx = rx;
-        continue;
+    if (l.cells && l.grid) {
+      // (a table's row: its grid's lines, the header's rule darker, then each cell's runs, cut to the cell)
+      const { xs } = l.grid, right = tx + xs[xs.length - 1], bottom = at + l.lh;
+      // (as paths, the one element the file's lines are: its top if first, its columns' edges, its bottom; the
+      // header's bottom its own, darker and heavier)
+      const d = (l.grid.top ? `M${n1(tx)} ${n1(at)}H${n1(right)}` : "") + xs.map((gx) => `M${n1(tx + gx)} ${n1(at)}V${n1(bottom)}`).join("") + (l.grid.head ? "" : `M${n1(tx)} ${n1(bottom)}H${n1(right)}`);
+      out.push(`<path d="${d}" fill="none" stroke="${GRID}"/>`);
+      if (l.grid.head) out.push(`<path d="M${n1(tx)} ${n1(bottom)}H${n1(right)}" fill="none" stroke="${GRID_HEAD}" stroke-width="1.5"/>`);
+      for (const c of l.cells) {
+        const room = c.w - 2 * CELL_X;
+        let cy = at + CELL_Y;
+        for (const cl of c.lines) {
+          const used = lineWidth(cl);
+          const cx = tx + c.x + CELL_X + (c.align === "center" ? (room - used) / 2 : c.align === "right" ? room - used : 0);
+          drawRuns(out, cl.runs, cx, cy + (cl.base ?? cl.lh * 0.74), cl.size, l.color);
+          cy += cl.lh;
+        }
       }
-      const p = runs[runs.length - 1];
-      if (p && !p.b === !r.b && !p.i === !r.i && !p.m === !r.m) p.t += r.t; else runs.push({ ...r });
-      rx += width(r, l.size);
+      at += l.lh;
+      continue;
     }
-    flush();
+    drawRuns(out, l.runs, tx, base, l.size, l.color);
     at += l.lh;
   }
   return out.join("");

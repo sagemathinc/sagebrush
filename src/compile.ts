@@ -381,6 +381,19 @@ const fileExists = (p: string) => {
   // directory: a worker thread's is virtual, modules.ts)
   return embedded !== undefined && p.startsWith(LIB_VIRTUAL + "/") ? Object.hasOwn(embedded, p.slice(LIB_VIRTUAL.length + 1)) : safeExists(cwdPath(p));
 };
+// A directory of the user's files, as a namespace package's portion (PEP 420): never the embedded library's nor a
+// mounted package's, which hold only their checked files
+const dirExists = (p: string) => {
+  if (mountedBases.some((b) => p === b || p.startsWith(b + "/"))) return false;
+  if (embedded !== undefined && (p === LIB_VIRTUAL || p.startsWith(LIB_VIRTUAL + "/"))) return false;
+  // (only a directory can be listed: a file, or nothing, throws)
+  try {
+    readdirSync(cwdPath(p));
+    return true;
+  } catch {
+    return false;
+  }
+};
 const fileRead = (p: string) => {
   const checked = mounted.get(p);
   if (checked !== undefined) return checked;
@@ -398,7 +411,8 @@ export function libDir(): string {
   return embedded !== undefined ? LIB_VIRTUAL : resolvePath(__dirname, "../../lib");
 }
 
-// Import search: directories in sys.path, `name.py` or `name/__init__.py`.
+// Import search: directories in sys.path, `name.py` or `name/__init__.py`; failing those anywhere (and in the
+// registry's and optional packages), a namespace package (PEP 420) of every directory `name` found on the way.
 R.loader.load = (name: string) => {
   const sys = R.importModule("sys");
   const parts = name.split(".");
@@ -413,20 +427,69 @@ R.loader.load = (name: string) => {
       e.name = name;
       throw e;
     }
+    if (parent?.$ns) nsRefresh(parent);
     dirs = parent?.__path__ ? R.toArray(parent.__path__) : [];
   } else dirs = R.toArray(sys.path);
   const leaf = parts[parts.length - 1];
+  const portions: string[] = [];
   for (const d of dirs) {
     const pkg = join(d, leaf, "__init__.py");
     if (fileExists(pkg)) return execFile(fileRead(pkg), pkg, name, true);
     const file = join(d, leaf + ".py");
     if (fileExists(file)) return execFile(fileRead(file), file, name, false);
+    // (absolute, as CPython's: a relative sys.path entry against the current directory)
+    if (dirExists(join(d, leaf))) portions.push(resolvePath(cwdPath(join(d, leaf))));
   }
   // (not on sys.path: a package's, if the registry names one for it; then
   // this session's optional package set's)
   const found = packageModule(name, false) ?? optionalModule(name, false);
-  return found === null ? null : execFile(found[0], found[1], name, found[1].endsWith("/__init__.py"));
+  if (found !== null) return execFile(found[0], found[1], name, found[1].endsWith("/__init__.py"));
+  return portions.length ? namespacePackage(name, portions) : null;
 };
+// The portions of namespace package `leaf` in `dirs`, or null if a module or package of the name is there
+function nsPortions(dirs: string[], leaf: string): string[] | null {
+  const portions: string[] = [];
+  for (const d of dirs) {
+    if (fileExists(join(d, leaf, "__init__.py")) || fileExists(join(d, leaf + ".py"))) return null;
+    // (absolute, as CPython's: a relative sys.path entry against the current directory)
+    if (dirExists(join(d, leaf))) portions.push(resolvePath(cwdPath(join(d, leaf))));
+  }
+  return portions;
+}
+// A namespace package: no code of its own, its __path__ the directories found (CPython's __file__ None)
+function namespacePackage(name: string, portions: string[]): any {
+  const m = R.newModule(name);
+  m.__file__ = null;
+  m.__package__ = name;
+  m.__path__ = portions;
+  // (what its portions are recomputed from: the parent's path or sys.path, as last seen, and the list it fills)
+  const st = { parent: name.includes(".") ? name.slice(0, name.lastIndexOf(".")) : null, leaf: name.slice(name.lastIndexOf(".") + 1), path: portions, last: [] as string[], epoch: R.importEpoch.n };
+  st.last = nsParentDirs(st);
+  m.$ns = st;
+  R.dictSet(R.sysModules, name, m);
+  return m;
+}
+function nsParentDirs(st: { parent: string | null }): string[] {
+  if (st.parent === null) return R.toArray(R.importModule("sys").path).slice();
+  const p = R.sysModules.$m.get(st.parent);
+  if (p?.$ns) nsRefresh(p);
+  return p?.__path__ ? R.toArray(p.__path__).slice() : [];
+}
+// A namespace package's __path__ follows its parent's path (sys.path at the top), as CPython's _NamespacePath does:
+// before a submodule is searched for, if that path has changed since last seen (or importlib.invalidate_caches() has
+// been called since), its portions are recomputed in the
+// path's order, into the same list; kept as they are if a module or package of the name has appeared there since or
+// none is left; and not at all once the package's __path__ has been replaced by another object (CPython's then a list)
+function nsRefresh(m: any): void {
+  const st = m.$ns;
+  if (m.__path__ !== st.path) return;
+  const dirs = nsParentDirs(st);
+  if (st.epoch === R.importEpoch.n && dirs.length === st.last.length && dirs.every((d, i) => d === st.last[i])) return;
+  st.last = dirs;
+  st.epoch = R.importEpoch.n;
+  const now = nsPortions(dirs, st.leaf);
+  if (now !== null && now.length) st.path.splice(0, st.path.length, ...now);
+}
 // Every module the loader runs from a file goes through here.  A file of the
 // optional set (optKeys, by its mounted path, whatever name or sys.path entry
 // found it) is refused before any of it runs while a grading allowance is armed
