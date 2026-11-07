@@ -1467,7 +1467,8 @@ export function hashExact(x: any): any {
     const f = lookupType(x.$cls, "__hash__");
     if (f !== undefined && f !== null && f !== objectHash) {
       const r = f(x);
-      if (typeof r === "bigint") return normBig(hashIntExact(r));
+      // (as CPython's slot_tp_hash: a result in the hash's 64-bit range is the hash, -1 made -2; a larger one is hashed)
+      if (typeof r === "bigint") return inHash64(r) ? normBig(r === -1n ? -2n : r) : normBig(hashIntExact(r));
       if (typeof r === "boolean") return +r;
       if (typeof r === "number" && isInt(r)) return r === -1 ? -2 : r;
       raise(T.TypeError, "__hash__ method should return an integer");
@@ -1559,15 +1560,17 @@ export function hashAny(x: any): number {
     const r = f(x);
     if (typeof r === "number" && isInt(r)) return r;
     if (typeof r === "boolean") return +r;
-    if (typeof r === "bigint") return hashInt(r);
+    if (typeof r === "bigint") return inHash64(r) ? Number(r) : hashInt(r);
     raise(T.TypeError, "__hash__ method should return an integer");
   }
   return id(x) / 32;
 }
 
-export function hashTupleOf(a: any[]): number {
-  return hashTuple(a);
+// tuple.__hash__: the exact value, as hash() gives for a tuple (a subclass's, struct_time's, equal to its tuple's)
+export function hashTupleOf(a: any[]): any {
+  return normBig(hashTupleExact(a));
 }
+const inHash64 = (r: bigint) => r >= -(1n << 63n) && r < 1n << 63n;
 function hashTuple(a: any[]): number {
   return Number(hashTupleExact(a));
 }
