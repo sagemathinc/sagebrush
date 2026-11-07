@@ -7,8 +7,8 @@ answers William (Nov 7, about 6:33 AM PST): "there are two approaches to no wasm
 and oxpy. we need to fully consider both options". r4 compares the two routes in full, on the same cells and the
 same version, and recommends one. Part B is r3's route-B plan, unchanged. Whether anything is closed is for its
 reviewer to say. r5 adds §A.2b, the control bridge for permission and Stop (astra's NATIVE-A-CONTROL-1,
-daybreak3's NATIVE-A-STOP-1). r6 adds the Stop linearization (NATIVE-A-STOP-2) and astra's r5
-notes. Still open whatever the reviews say: N1's proofs and William's decisions (§5).*
+daybreak3's NATIVE-A-STOP-1). r6 adds the Stop linearization (NATIVE-A-STOP-2), astra's r5 notes
+and agents-ui's four N2 page items. Still open whatever the reviews say: N1's proofs and William's decisions (§5).*
 
 ## In plain words
 
@@ -242,6 +242,15 @@ add-on and acknowledges it. It never forwards a control frame into the worker's 
     That restore is conditional: it is sent only if the generation and `pv` are still current and the page's
     revision of that path is still the one the refusal saw. A newer page revision, run or grant is never
     overwritten by it; the newer revision reaches the child by its own `fsPut`.
+    The restore is **new page code** (wasm refuses inside the worker and never diverges). It covers every kind of
+    change:
+    - a refused modify gets the page's bytes back;
+    - a refused create is deleted in the child (`fsPut` with `data: null`, its delete form);
+    - a refused delete gets its bytes back;
+    - a refused rename restores both ends;
+    - directories are restored likewise.
+
+    Each restore is conditional as above: never over a newer page revision or a later run's write.
   - The browser has the same race for any change queued before a revoke and drained after it. Route A widens the
     window from a memory store to a pipe round trip. N1 measures it, and the ack deadline below bounds it.
   - So route A claims **no new permission exception**, provided this ordering holds. SEC rules on whether the
@@ -389,7 +398,7 @@ child process.
 |---|---|---|
 | **N0** | This plan, reviewed; William's choice of route and the decisions of §5 | all lanes; William |
 | **N1** | Spikes and measurements: **(1)** Node under §A.5's policy on macOS, Linux and Windows, with SEC's escape tests and the JIT under each sandbox. **(2)** daybreak4's measurements at one commit, A against W (in each OS's web view) and against B: the cells here, with the engine called directly (no shim), threads on and off, the > 4 GB case, startup with and without a V8 snapshot. **(3)** The framing (`v8.serialize` or JSON plus binary) by cost. **(4)** Size per OS and architecture: Node against an embedded V8 host (deno_core) against Bun, under Part B §4's budget (+40 MB compressed). **(5)** The control bridge of §A.2b: Stop reaching the Rust check during a deliberately blocking add-on call, a permission change reaching a busy cell, and the acknowledgement window measured. | SEC, ENGINE, PERF, SIZE |
-| **N2** | macOS and Linux: the add-on (engine/web; nd and the SIMD kernels as separate reviewed steps), the child entry with `web/shims/fs`, the port, the control bridge with its pins (§A.2b), `engine/interrupt`'s `host-word` feature, the launcher, the engine's limits natively, broker-only network, the fallback (Part B §3.6), and the judges' native lines. **#822's option 1 ends** as in Part B's N2. | all lanes |
+| **N2** | macOS and Linux: the add-on (engine/web; nd and the SIMD kernels as separate reviewed steps), the child entry with `web/shims/fs`, the port, the control bridge with its pins (§A.2b), `engine/interrupt`'s `host-word` feature, the launcher, the engine's limits natively, broker-only network, the fallback (Part B §3.6), and the judges' native lines. **Page items** (agents-ui): the refused-write restore of §A.2b for modify, create, delete, rename and directories; the progress reader fed by the port's snapshots (one reader, no second shared-memory path); Stop through `NativeKernelPort.interrupt()`, with the hard kill using the existing restart pattern (the words go to board); a "starting" runner-pill state for the launch (0.4 s, or 1.1 s with Sage, measured in §2). **#822's option 1 ends** as in Part B's N2. | all lanes |
 | **N3** | Windows | all lanes |
 | **N4** | Native becomes the default. No interact or bigint gate is needed: both are the web's own. | William |
 | **N5** | Later, each planned separately: **route B** for real C extensions, native terminals, Android native, warm kernels | — |
