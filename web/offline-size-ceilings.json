@@ -11,6 +11,6 @@
   "topology": "inventory-3span",
   "baseTopology": "legacy-2span",
   "swRaw": 222579,
-  "swGzip": 54643,
-  "transition": "shutil (P3b-2, one lazy chunk mod-shutil, fetched on import): measured on its branch with bun 1.4.4 and node v24.21.0: sw.js raw 222515 (the group's manifest entry), over 222267, so swRaw = exact + 64 = 222579; normalized gzip-9 54621, under 54643, unchanged"
+  "swGzip": 54711,
+  "transition": "shutil (P3b-2, one lazy chunk mod-shutil, fetched on import): measured on its branch merged with master 6e1fc873, with bun 1.4.4 and node v24.21.0: sw.js raw 222515 (the group's manifest entry), over 222267, so swRaw = exact + 64 = 222579; normalized gzip-9 54647, over 54643, so swGzip = exact + 64 = 54711"
 }
