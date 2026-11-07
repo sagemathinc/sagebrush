@@ -65,9 +65,9 @@ export const LATEX_LAZY_CAPS = {
   // (Run's code: web/latex/run-core.mjs, fetched on the first Run (first-use code: the editor opens without it). Out of
   //  the group so save-as-you-type (#551, eager by nature) fits under the group's cap without a raise (daybreak2, Nov 7:
   //  a lazy split, not a raise). 12 KiB / 5.25 KiB: daybreak2's ruling, Nov 7, on 11,330 / 4,804 measured at master
-  //  59d5ec95, about 8% / 12% room; #804's Run growth is its own cap change, from its exact bundle: 15.5 KiB / 6.5 KiB
-  //  proposed for daybreak2's ruling, on 14,552 / 6,066 measured with #804 (W01's record of what a Run imported) on
-  //  master fd24862b, about 9% / 10% room, as 12 / 5.25 had)
+  //  59d5ec95, about 8% / 12% room. 15.5 KiB / 6.5 KiB: daybreak2's ruling, Nov 7, for #804 (W01's record of what a
+  //  Run imported, its own Run growth): 14,552 / 6,066 measured at #804's head 9759eac5 (master fd24862b merged),
+  //  +1,320 / +590, about 9.1% / 9.7% room)
   RUN: { label: "the LaTeX Run chunk", raw: 15.5 * 1024, gzip: 6.5 * 1024 },
 };
 
