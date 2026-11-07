@@ -2564,6 +2564,8 @@ const downloadDialog = createDownloadDialog({
 });
 beforeSwitch.push(async () => downloadDialog.invalidate());
 
+// (a share link's language: its m=, else Python)
+const linkMode = (hash) => (/m=sage/.test(hash) ? "sage" : /m=magma/.test(hash) ? "magma" : /m=matlab/.test(hash) ? "matlab" : "python");
 async function fromLink(hash) {
   const z = /z=([\w-]+)/.exec(hash), c = /c=([\w-]+)/.exec(hash);
   if (!z && !c) return null;
@@ -4025,12 +4027,24 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
     for (const b of [$("#filesbtn")]) if (b) b.hidden = true;
   }
   else if (opened) {}
-  else if (shared) await openNew("Shared notebook", /m=sage/.test(location.hash) ? "sage" : /m=magma/.test(location.hash) ? "magma" : /m=matlab/.test(location.hash) ? "matlab" : "python", shared);
+  else if (shared) await openNew("Shared notebook", linkMode(location.hash), shared);
   else if (!(last && (await openId(last)))) {
     // (the first visit's Welcome: Sagebrush's own, which may change files: permissions.js)
     await openHostMade(mode === "sage" ? "Sage" : "Welcome", mode, mode === "sage" ? EXAMPLES.Sage : EXAMPLES.Welcome);
   }
   booted();
+  // a share link opened in this tab while the page is already open (pasted into the address bar, or a link followed
+  // here): only the fragment changes and nothing reloads, so it is opened here as it would be at load (run 13's
+  // APP-share-link-same-tab: the old notebook stayed, and its Run all ran its own cells). Through open(), as File > Open:
+  // the notebook left is kept (saved as it goes), and one whose saves can't be made yet stays open, saying why. A
+  // fragment that is no share link changes nothing; under `sagebrush notebook`'s one file, as at load, it isn't opened
+  if (!LOCAL) addEventListener("hashchange", async () => {
+    let codes = null;
+    try { codes = await fromLink(location.hash); } catch { statusEl.textContent = "could not open the share link: it is damaged or cut short"; return; }
+    if (!codes) return;
+    try { await openNew("Shared notebook", linkMode(location.hash), codes); }
+    catch (err) { if (!err?.navWon) statusEl.textContent = `could not open the share link: ${err?.message ?? err}`; }
+  });
   // ?openas=PATH&fid=FID: a file opened as a notebook from the board page (a Jupytext MyST .md sent there, which
   // offers it here instead: agents-ui's N-2), through openAs as the file browser's menu does; one replaced
   // meanwhile (another fid), said, nothing made
