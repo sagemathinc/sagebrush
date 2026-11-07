@@ -1,6 +1,6 @@
 # Native engines in the desktop app
 
-*Status: plan r9, for review (r8 with daybreak3's JSC wording fix and the reviewers' r8 notes). Docs only; nothing is built. Owner and sole author: @sagebrush-remote-compute. The r8 base
+*Status: plan r10: r9 (cleared by all five lanes at 6849c320) with William's §7 answers recorded. Docs only; nothing is built. Owner and sole author: @sagebrush-remote-compute. The r8 base
 was drafted by @sagebrush-daybreak3 at @sagebrush's request. Reviewers: astra (SEC), daybreak3 (ENGINE), daybreak4
 (PERF), daybreak2 (SIZE), agents-ui (app). William decided the interpreter route and the sandbox question on Nov 7,
 2026 at about 7:54 AM PST, and added Electron as a first-class candidate at about 8:03 AM PST. This revision replaces
@@ -289,23 +289,27 @@ Other candidates may replace the transport, but must keep the authority, orderin
 
 | | Work | Gate |
 |---|---|---|
-| **N0** | r8 reviewed; William accepts the lead candidate and the packaging and signing choices | all lanes; William |
-| **N1** | No product integration. **(1)** Build packaged comparisons of **1 (Tauri + Node), 2 (Electron utility process) and 3 (Tauri + embedded V8)**, with the same UI payload and engine commit; spike 4's boundary and resolve its sync-engine/async-IPC design. **(2)** Prove pyjs boot, native calls, Stop, busy-cell permission and crash/restart. **(3)** Measure per OS: the compressed signed installer and update delta, installed size, cold and warm launch to runner-ready, first and steady engine calls, idle memory as RSS/PSS of the whole process tree after first paint and after the pyjs worker is ready, the > 4 GB case, framing copies, and the permission acknowledgement window. **(4)** The big-integer corpus in the real system webviews, and per-operation Rust dispatch thresholds (§3.3). **(5)** Startup optimization (snapshots, lazy loading): a target, not a gate. **(6)** Before rich output moves into frames in the desktop app, #826's output-frames harness in each candidate's UI engine (WebKit for 1, 3 and 4; Chromium for 2 and 5). | ENGINE, PERF, SIZE, SEC (application boundaries) |
+| **N0** | The plan reviewed (r9 cleared by all lanes) and William's §7 answers recorded: the lead is decided after N1's measurements | all lanes; William (done) |
+| **N1** | No product integration. **(1)** Build packaged comparisons of **1 (Tauri + Node), 2 (Electron utility process) and 3 (Tauri + embedded V8)**, with the same UI payload and engine commit; spike 4's boundary and resolve its sync-engine/async-IPC design. **(2)** Prove pyjs boot, native calls, Stop, busy-cell permission and crash/restart. **(3)** Measure per OS: the compressed signed installer and update delta, installed size, cold and warm launch to runner-ready, first and steady engine calls, idle memory as RSS/PSS of the whole process tree after first paint and after the pyjs worker is ready, the > 4 GB case, framing copies, and the permission acknowledgement window. **(4)** The big-integer corpus in the real system webviews, and per-operation Rust dispatch thresholds (§3.3). **(5)** Startup optimization (snapshots, lazy loading): a target, not a gate. **(6)** Before rich output moves into frames in the desktop app, #826's output-frames harness in each candidate's UI engine (WebKit for 1, 3 and 4; Chromium for 2 and 5). **(7)** The upgrade path of each candidate, bundled and downloaded (William, §7): the update delta size, the auto-update mechanics, and updating the runtime and the engine add-on with the app or apart from it. **(8)** Unsigned local builds only; signing is William's (§7). | ENGINE, PERF, SIZE, SEC (application boundaries) |
 | **N2** | macOS and Linux, the chosen candidate: the pinned runtime, the `web/shims/fs` worker, the native `engine/web` add-on, a binary reply format, the port, the §5 bridge and its pins, native limits, broker-only supported network, per-engine wasm fallback, and the page items (refused-write restore per change kind, progress from port snapshots, Stop through `NativeKernelPort.interrupt()` with the restart pattern for the hard kill, a "starting" pill state, and the native kernel's own words for "where code runs" and "didn't start": the runner-sandbox messages don't apply, and board writes the words). Later engine modules are reviewed separately. **#822's option 1 ends.** | all lanes |
 | **N3** | Windows parity for N2 | all lanes |
 | **N4** | Native becomes the desktop default, after parity, limits, corrected performance, size and the big-integer dispatch decision close | William |
 | **N5** | Planned separately later: CPython and C extensions, terminals, Android native, warm kernels | — |
 
-## 7. Open decisions for William
+## 7. William's decisions
 
 Already decided: pyjs (route A); no OS sandbox; Electron is a first-class candidate.
 
-1. **The lead for N1/N2:** candidate 1 (Tauri + Node, recommended), with 2 (Electron) and 3 (embedded V8) as packaged N1
-   comparisons? Or Electron as the lead, accepting a larger download (about +50 MB, a derived provisional estimate from measured Linux runtime parts and the README app size; N1's signed installers decide), the shell port and a
-   separate mobile shell?
-2. **Delivery:** bundle the runtime in each installer, or download it on the first native run? N1 supplies the exact
-   signed payloads.
-3. **Signing:** who owns the Apple Developer ID and notarization, and Windows signing.
+William answered §7 on Nov 7, 2026 at about 9:30 AM PST:
+
+1. **The lead architecture:** "Decide after the prototype's side-by-side measurements." N1 goes ahead with packaged
+   prototypes of candidate 1 (Tauri + Node + N-API), 2 (Electron) and 3 (Tauri + embedded V8), measured side by side
+   at one commit on each OS. N1 builds measurement prototypes only: nothing ships and nothing is released.
+2. **Bundle the runtime or download it on first use:** "it depends - easy upgrades are just as important to get
+   right." N1 measures and compares the upgrade path of each option: the update delta size, the auto-update
+   mechanics, and how the runtime and the engine add-on are updated with the app or apart from it.
+3. **Signing:** "I (William) own them; agents never touch the keys." N1 makes unsigned local builds only. No agent
+   handles signing accounts, certificates or keys.
 
 There is no "unconfined mode" switch. Without an OS sandbox, that label would suggest a boundary the plan doesn't
 provide. The UI describes only where code runs and the application permissions.
