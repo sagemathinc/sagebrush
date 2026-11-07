@@ -1,8 +1,8 @@
 {
  "v": 1,
- "reason": "Inexact numbers with Zmod(n), finite fields and number fields refused as Sage, wrong answers before (lib/_sage_ff.py refuse_inexact with Sage's class families, called by the ff and number-field elements and polynomials; CC, CDF, RealField(p) and ComplexField(p) hand those operands back) Re-measured with bun 1.4.4 (size-record.sh) on master 564b64d7 vs head 1fcce100: cli/lib.gen.js +4296, cli/pyjs.cjs +5716, engine/lib/sage-more.src +8085, engine/lib/sage.pre +27340, engine/lib/sage.src +5721, engine/sagebrush-worker.js +34; no other row moves. Markers: exact, except cli/pyjs.cjs 5748 (+5716 measured, plus 32 B of margin, as it moves with master). Ceiling (rule 4): engine/lib/sage-more.src 424633 -> 432718, measured base 424569 and head 432654, each + 64. And engine/lib/sage.src 2946380 -> 2952101: master 564b64d7's 2946316 (SIZE's measurement) + the measured 5721 + 64.",
+ "reason": "Inexact numbers with Zmod(n), finite fields and number fields refused as Sage, wrong answers before (lib/_sage_ff.py refuse_inexact with Sage's class families, called by the ff and number-field elements and polynomials; CC, CDF, RealField(p) and ComplexField(p) hand those operands back) Re-measured with bun 1.4.4 (size-record.sh) on master d2a28090 vs head 5e5e836a: cli/lib.gen.js +4320, cli/pyjs.cjs +5716, engine/lib/sage-more.src +8085, engine/lib/sage.pre +27340, engine/lib/sage.src +5721, engine/sagebrush-worker.js +34; no other row moves. Markers: exact, except cli/pyjs.cjs 5748 (+5716 measured, plus 32 B of margin, as it moves with master). Ceiling (rule 4): engine/lib/sage-more.src 429387 -> 437472, the measured head 437408 + 64. Ceiling (rule 4): engine/lib/sage.src 2950802 -> 2956523, the measured head 2956459 + 64.",
  "bytes": {
-  "cli/lib.gen.js": 4296,
+  "cli/lib.gen.js": 4320,
   "cli/pyjs.cjs": 5748,
   "engine/lib/sage-more.src": 8085,
   "engine/lib/sage.pre": 27340,
