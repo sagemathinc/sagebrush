@@ -1,0 +1,143 @@
+{
+ "files": {
+  "rill-tests/apply/test_1.R": {
+   "cases": 9,
+   "out_sha256": "b3ec2f21fb36e11be147a6ec0408a6d6419f8005515badf143edd30b9dd147cb",
+   "r_sha256": "a8592ea0213bd373e2faa368398e0e9f85f3acd70f843f1636126ef28a1f1881"
+  },
+  "rill-tests/arith/test_1.R": {
+   "cases": 27,
+   "out_sha256": "a31e78d56e98f6699b75f106877aedd4877ba9ae18f1609a2bcac9c50cb804d0",
+   "r_sha256": "ad025b1ee03dd686a8d773350f1bd5976b23dc2b9ec7f2f476f518eb11aa6fc8"
+  },
+  "rill-tests/ctrl/test_1.R": {
+   "cases": 10,
+   "out_sha256": "e41b7f955402a7eb2b61547be1cffcd8c6ceb44d346f114a160d6001f9c8e826",
+   "r_sha256": "1848a5b3f2d112cf6b2735b7ba144d5a84b7fbcfbf0b4dbdade5ca15be6ed1c3"
+  },
+  "rill-tests/df/test_1.R": {
+   "cases": 18,
+   "out_sha256": "40399607d014de210315c592a255791df2bf53a303045a6173a37b7fe298bfd5",
+   "r_sha256": "b261869baadc9441de07c7ec0a2a0317832d6a74184b4fe2be7ea317f8a9158c"
+  },
+  "rill-tests/dist/test_1.R": {
+   "cases": 16,
+   "out_sha256": "ad3ccc491589cb500e40e6dccf56472ae5c1016bef777400de7ff53031da2687",
+   "r_sha256": "4e6977fd6f5bb8ae7297802c22b6e955f4fd3767271aaac0013846dc01b2860e"
+  },
+  "rill-tests/fac/test_1.R": {
+   "cases": 12,
+   "out_sha256": "9546207c88bd5f120eb14fd6e6c2af77883576d1f4bf4302d135067d916d0978",
+   "r_sha256": "0f874369ee2b76339423988c8d2a016eb174374ad64bf9c657c8e1048ad84889"
+  },
+  "rill-tests/fun/test_1.R": {
+   "cases": 15,
+   "out_sha256": "171464672e7aed21a65c49a9f6cee7150910ba7597c2a36178af863f1c0c3198",
+   "r_sha256": "8e79953c6adfffdf5b6a73d5da239597877156c2ec942f01d83c5589b93d6aff"
+  },
+  "rill-tests/glm/test_1.R": {
+   "cases": 4,
+   "out_sha256": "708969e8aa3844ee8f25fbfcafcdc2ce8905f176b48d0fce638619073bb2cfc4",
+   "r_sha256": "adb759b5f78c74387eb497cb9c721fa2792a0c28c5aca0d0b0420fccb6cc8c06"
+  },
+  "rill-tests/heldout/a1/test_1.R": {
+   "cases": 93,
+   "out_sha256": "cd914daeac5b141f86043f165717c43571da60d6856aa56e708cec1ed565f46c",
+   "r_sha256": "045a228aa73bd7d6586f814eabcabc4c8a131230bda6bf89ddd9839c163e8c72"
+  },
+  "rill-tests/homework/test_1.R": {
+   "cases": 110,
+   "out_sha256": "b26ffd8471bb48dcf8823b3c9526b01584648f88d1178fda3ff272eabe5f307d",
+   "r_sha256": "295d7e71c723dbe90df234ac9243355625fe05a160e5fef7365a0652df57746a"
+  },
+  "rill-tests/list/test_1.R": {
+   "cases": 6,
+   "out_sha256": "74f0293073a4fec71feb8f427985b3c6364c5029aea50940307d6338378da3c2",
+   "r_sha256": "3af322bf237c2d71cfaa8cb0ae4856f5dc2cbfc804bd6232f7a6534685745aff"
+  },
+  "rill-tests/lm/test_1.R": {
+   "cases": 12,
+   "out_sha256": "6c08fccc2697e528e56dc2014531f4c0cc4bec8421eea6b6275ffc7e490c6000",
+   "r_sha256": "56c7ebd611e4a385817e14ee930af2b8578c03a213f10bf74480379cfdd89e9c"
+  },
+  "rill-tests/logic/test_1.R": {
+   "cases": 4,
+   "out_sha256": "d8cc89d8934816593f182d8b45b7aa9a672149d25fa1fab0cd714fd5e3c4db4d",
+   "r_sha256": "f944d266b9a31b68462feac1e1acd5f343215fc2c7b43250323031572f4cd743"
+  },
+  "rill-tests/mat/test_1.R": {
+   "cases": 9,
+   "out_sha256": "d8a8461d91e7dd0187e7200a04c01b076ef51dac4e0fe0779f53844e1d0673fb",
+   "r_sha256": "916ef904507babcd9bd9e55b7a0dcb0924d0491e1bba629ba7c9eee40195f278"
+  },
+  "rill-tests/misc/test_1.R": {
+   "cases": 28,
+   "out_sha256": "3417dcd33df6e61dbc58fdf8c58849e9988e9128025bf9673a73c33e767fd254",
+   "r_sha256": "787f820863772d87eb9dd4fe5f3ead241ee11f6d483d972e5cdf786b714f04a2"
+  },
+  "rill-tests/na/test_1.R": {
+   "cases": 7,
+   "out_sha256": "de83564e01d2d62d60b4b9e87808a3a682d7e5d5b4d77e11b20012c2275d2cc6",
+   "r_sha256": "2dba47bab5b49393e19a1877deaeb36bd6ab0fb1ee468accaecc828e85d68c02"
+  },
+  "rill-tests/rng/test_1.R": {
+   "cases": 7,
+   "out_sha256": "100f844b155df9ebb43aeee6737d6a5e4f9f7fdeef3737160ed0fbd9a5ee72f2",
+   "r_sha256": "8dc85e64675c909149e831dc18340d728f94b1c43cbeb6c08cd36d40be936e7c"
+  },
+  "rill-tests/stats/test_1.R": {
+   "cases": 14,
+   "out_sha256": "bb99320085565f3f8c62fe63fc814729352cf1aa3b02dd8bc34144bcca1f9e5c",
+   "r_sha256": "ec2684f801c0e5a1c0b96f11a503b36a9f9227d4bce55ba34ca8d885f6bb0fd6"
+  },
+  "rill-tests/str/test_1.R": {
+   "cases": 15,
+   "out_sha256": "4e8ce25463fe25d5018bcd895d4ccddaa4f5f8c3d3caeb2a6e3b76fea32c22f8",
+   "r_sha256": "17c59217222b2a1372943b3b546ff7a6888c52edf470684ad5777b4424cdf44b"
+  },
+  "rill-tests/test/test_1.R": {
+   "cases": 11,
+   "out_sha256": "aad715ed1d2c267541d83679249bed3e5a0332cb20f2166019df05f6fd9b8ebe",
+   "r_sha256": "bbf96d9547dc85c04680e70b52ef9aad0b0bae241c7832f8a06811a2d3048c9b"
+  },
+  "rill-tests/vec/test_1.R": {
+   "cases": 30,
+   "out_sha256": "41dd7ec8cb0920a43d6c4f6792332ed064248e6305d603252383d4c3239f8d7e",
+   "r_sha256": "602642aa56993754d3de7eb2a484407ee5ea2f81eef1e3133634064cdeeb57c1"
+  }
+ },
+ "format": "rill-provenance",
+ "oracle": {
+  "env": {
+   "LC_ALL": "C.UTF-8",
+   "TZ": "UTC"
+  },
+  "host": "VM4 (sagebrush-4)",
+  "oracle_py_sha256": "afdf7a70b2998cd5a0641667aa680749aae50b7e3b4849e1cdba134d860a055d",
+  "record": {
+   "R.version.string": "R version 4.5.3 (2026-03-11)",
+   "locale": "LC_CTYPE=C.UTF-8;LC_NUMERIC=C;LC_TIME=C.UTF-8;LC_COLLATE=C.UTF-8;LC_MONETARY=C.UTF-8;LC_MESSAGES=C.UTF-8;LC_PAPER=C.UTF-8;LC_NAME=C;LC_ADDRESS=C;LC_TELEPHONE=C;LC_MEASUREMENT=C.UTF-8;LC_IDENTIFICATION=C",
+   "namespaces": {
+    "base": "4.5.3",
+    "compiler": "4.5.3",
+    "datasets": "4.5.3",
+    "grDevices": "4.5.3",
+    "graphics": "4.5.3",
+    "methods": "4.5.3",
+    "stats": "4.5.3",
+    "utils": "4.5.3"
+   },
+   "options": {
+    "OutDec": ".",
+    "digits": 7,
+    "scipen": 0,
+    "width": 80
+   },
+   "platform": "x86_64-conda-linux-gnu",
+   "timezone": "UTC"
+  },
+  "rscript": "~/sbm-r/env/bin/Rscript",
+  "run_py_sha256": "3b22419471c3f2b28dd9671f20dc53f21e31547f665c49f4084c899e27904373"
+ },
+ "v": 1
+}
