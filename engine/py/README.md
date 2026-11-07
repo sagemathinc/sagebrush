@@ -74,6 +74,19 @@ methods. The output is checked line by line against Sage itself: Sage's
 own preparser turns Sagebrush's Sage test files into plain Python, and
 their output under `sagebrush.sage` must equal Sage's.
 
+## Run a notebook on your computer: `sagebrush remote`
+
+On https://sagebrush.space, choose **Your computer** where you pick the
+kernel, then run the command it shows, on your computer:
+
+```
+uvx sagebrush@latest remote --loopback
+```
+
+It prints a link. Open it in the same browser, and the notebook's code runs
+on your computer, in that Python, with your files and permissions. It needs
+[uv](https://docs.astral.sh/uv/). On Windows, run it in WSL.
+
 ## For AI agents: `sagebrush-mcp`
 
 This package installs `sagebrush-mcp`, a
