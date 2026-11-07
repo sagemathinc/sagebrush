@@ -1,0 +1,880 @@
+Finite Field of size 2 2.00000000000000 B(2) == s -> False
+Finite Field of size 2 2.00000000000000 s == B(2) -> False
+Finite Field of size 2 2.00000000000000 B(2) != s -> True
+Finite Field of size 2 2.00000000000000 f2 == s -> False
+Finite Field of size 2 2.00000000000000 s == f2 -> False
+Finite Field of size 2 2.0 B(2) == s -> False
+Finite Field of size 2 2.0 s == B(2) -> False
+Finite Field of size 2 2.0 B(2) != s -> True
+Finite Field of size 2 2.0 f2 == s -> False
+Finite Field of size 2 2.0 s == f2 -> False
+Finite Field of size 2 2.0000000000000000000000000000 B(2) == s -> False
+Finite Field of size 2 2.0000000000000000000000000000 s == B(2) -> False
+Finite Field of size 2 2.0000000000000000000000000000 B(2) != s -> True
+Finite Field of size 2 2.0000000000000000000000000000 f2 == s -> False
+Finite Field of size 2 2.0000000000000000000000000000 s == f2 -> False
+Finite Field of size 2 2.00000000000000 B(2) == s -> False
+Finite Field of size 2 2.00000000000000 s == B(2) -> False
+Finite Field of size 2 2.00000000000000 B(2) != s -> True
+Finite Field of size 2 2.00000000000000 f2 == s -> False
+Finite Field of size 2 2.00000000000000 s == f2 -> False
+Finite Field of size 2 2.0 B(2) == s -> False
+Finite Field of size 2 2.0 s == B(2) -> False
+Finite Field of size 2 2.0 B(2) != s -> True
+Finite Field of size 2 2.0 f2 == s -> False
+Finite Field of size 2 2.0 s == f2 -> False
+Finite Field of size 2 2.0000000000000000000000000000 B(2) == s -> False
+Finite Field of size 2 2.0000000000000000000000000000 s == B(2) -> False
+Finite Field of size 2 2.0000000000000000000000000000 B(2) != s -> True
+Finite Field of size 2 2.0000000000000000000000000000 f2 == s -> False
+Finite Field of size 2 2.0000000000000000000000000000 s == f2 -> False
+Finite Field of size 2 2.0 B(2) == s -> False
+Finite Field of size 2 2.0 s == B(2) -> False
+Finite Field of size 2 2.0 B(2) != s -> True
+Finite Field of size 2 2.0 f2 == s -> False
+Finite Field of size 2 2.0 s == f2 -> False
+Finite Field of size 2 (2+0j) B(2) == s -> False
+Finite Field of size 2 (2+0j) s == B(2) -> False
+Finite Field of size 2 (2+0j) B(2) != s -> True
+Finite Field of size 2 (2+0j) f2 == s -> False
+Finite Field of size 2 (2+0j) s == f2 -> False
+Finite Field of size 7 2.00000000000000 B(2) == s -> False
+Finite Field of size 7 2.00000000000000 s == B(2) -> False
+Finite Field of size 7 2.00000000000000 B(2) != s -> True
+Finite Field of size 7 2.00000000000000 f2 == s -> False
+Finite Field of size 7 2.00000000000000 s == f2 -> False
+Finite Field of size 7 2.0 B(2) == s -> False
+Finite Field of size 7 2.0 s == B(2) -> False
+Finite Field of size 7 2.0 B(2) != s -> True
+Finite Field of size 7 2.0 f2 == s -> False
+Finite Field of size 7 2.0 s == f2 -> False
+Finite Field of size 7 2.0000000000000000000000000000 B(2) == s -> False
+Finite Field of size 7 2.0000000000000000000000000000 s == B(2) -> False
+Finite Field of size 7 2.0000000000000000000000000000 B(2) != s -> True
+Finite Field of size 7 2.0000000000000000000000000000 f2 == s -> False
+Finite Field of size 7 2.0000000000000000000000000000 s == f2 -> False
+Finite Field of size 7 2.00000000000000 B(2) == s -> False
+Finite Field of size 7 2.00000000000000 s == B(2) -> False
+Finite Field of size 7 2.00000000000000 B(2) != s -> True
+Finite Field of size 7 2.00000000000000 f2 == s -> False
+Finite Field of size 7 2.00000000000000 s == f2 -> False
+Finite Field of size 7 2.0 B(2) == s -> False
+Finite Field of size 7 2.0 s == B(2) -> False
+Finite Field of size 7 2.0 B(2) != s -> True
+Finite Field of size 7 2.0 f2 == s -> False
+Finite Field of size 7 2.0 s == f2 -> False
+Finite Field of size 7 2.0000000000000000000000000000 B(2) == s -> False
+Finite Field of size 7 2.0000000000000000000000000000 s == B(2) -> False
+Finite Field of size 7 2.0000000000000000000000000000 B(2) != s -> True
+Finite Field of size 7 2.0000000000000000000000000000 f2 == s -> False
+Finite Field of size 7 2.0000000000000000000000000000 s == f2 -> False
+Finite Field of size 7 2.0 B(2) == s -> False
+Finite Field of size 7 2.0 s == B(2) -> False
+Finite Field of size 7 2.0 B(2) != s -> True
+Finite Field of size 7 2.0 f2 == s -> False
+Finite Field of size 7 2.0 s == f2 -> False
+Finite Field of size 7 (2+0j) B(2) == s -> False
+Finite Field of size 7 (2+0j) s == B(2) -> False
+Finite Field of size 7 (2+0j) B(2) != s -> True
+Finite Field of size 7 (2+0j) f2 == s -> False
+Finite Field of size 7 (2+0j) s == f2 -> False
+Ring of integers modulo 6 2.00000000000000 B(2) == s -> False
+Ring of integers modulo 6 2.00000000000000 s == B(2) -> False
+Ring of integers modulo 6 2.00000000000000 B(2) != s -> True
+Ring of integers modulo 6 2.00000000000000 f2 == s -> False
+Ring of integers modulo 6 2.00000000000000 s == f2 -> False
+Ring of integers modulo 6 2.0 B(2) == s -> False
+Ring of integers modulo 6 2.0 s == B(2) -> False
+Ring of integers modulo 6 2.0 B(2) != s -> True
+Ring of integers modulo 6 2.0 f2 == s -> False
+Ring of integers modulo 6 2.0 s == f2 -> False
+Ring of integers modulo 6 2.0000000000000000000000000000 B(2) == s -> False
+Ring of integers modulo 6 2.0000000000000000000000000000 s == B(2) -> False
+Ring of integers modulo 6 2.0000000000000000000000000000 B(2) != s -> True
+Ring of integers modulo 6 2.0000000000000000000000000000 f2 == s -> False
+Ring of integers modulo 6 2.0000000000000000000000000000 s == f2 -> False
+Ring of integers modulo 6 2.00000000000000 B(2) == s -> False
+Ring of integers modulo 6 2.00000000000000 s == B(2) -> False
+Ring of integers modulo 6 2.00000000000000 B(2) != s -> True
+Ring of integers modulo 6 2.00000000000000 f2 == s -> False
+Ring of integers modulo 6 2.00000000000000 s == f2 -> False
+Ring of integers modulo 6 2.0 B(2) == s -> False
+Ring of integers modulo 6 2.0 s == B(2) -> False
+Ring of integers modulo 6 2.0 B(2) != s -> True
+Ring of integers modulo 6 2.0 f2 == s -> False
+Ring of integers modulo 6 2.0 s == f2 -> False
+Ring of integers modulo 6 2.0000000000000000000000000000 B(2) == s -> False
+Ring of integers modulo 6 2.0000000000000000000000000000 s == B(2) -> False
+Ring of integers modulo 6 2.0000000000000000000000000000 B(2) != s -> True
+Ring of integers modulo 6 2.0000000000000000000000000000 f2 == s -> False
+Ring of integers modulo 6 2.0000000000000000000000000000 s == f2 -> False
+Ring of integers modulo 6 2.0 B(2) == s -> False
+Ring of integers modulo 6 2.0 s == B(2) -> False
+Ring of integers modulo 6 2.0 B(2) != s -> True
+Ring of integers modulo 6 2.0 f2 == s -> False
+Ring of integers modulo 6 2.0 s == f2 -> False
+Ring of integers modulo 6 (2+0j) B(2) == s -> False
+Ring of integers modulo 6 (2+0j) s == B(2) -> False
+Ring of integers modulo 6 (2+0j) B(2) != s -> True
+Ring of integers modulo 6 (2+0j) f2 == s -> False
+Ring of integers modulo 6 (2+0j) s == f2 -> False
+Ring of integers modulo 46341 2.00000000000000 B(2) == s -> False
+Ring of integers modulo 46341 2.00000000000000 s == B(2) -> False
+Ring of integers modulo 46341 2.00000000000000 B(2) != s -> True
+Ring of integers modulo 46341 2.00000000000000 f2 == s -> False
+Ring of integers modulo 46341 2.00000000000000 s == f2 -> False
+Ring of integers modulo 46341 2.0 B(2) == s -> False
+Ring of integers modulo 46341 2.0 s == B(2) -> False
+Ring of integers modulo 46341 2.0 B(2) != s -> True
+Ring of integers modulo 46341 2.0 f2 == s -> False
+Ring of integers modulo 46341 2.0 s == f2 -> False
+Ring of integers modulo 46341 2.0000000000000000000000000000 B(2) == s -> False
+Ring of integers modulo 46341 2.0000000000000000000000000000 s == B(2) -> False
+Ring of integers modulo 46341 2.0000000000000000000000000000 B(2) != s -> True
+Ring of integers modulo 46341 2.0000000000000000000000000000 f2 == s -> False
+Ring of integers modulo 46341 2.0000000000000000000000000000 s == f2 -> False
+Ring of integers modulo 46341 2.00000000000000 B(2) == s -> False
+Ring of integers modulo 46341 2.00000000000000 s == B(2) -> False
+Ring of integers modulo 46341 2.00000000000000 B(2) != s -> True
+Ring of integers modulo 46341 2.00000000000000 f2 == s -> False
+Ring of integers modulo 46341 2.00000000000000 s == f2 -> False
+Ring of integers modulo 46341 2.0 B(2) == s -> False
+Ring of integers modulo 46341 2.0 s == B(2) -> False
+Ring of integers modulo 46341 2.0 B(2) != s -> True
+Ring of integers modulo 46341 2.0 f2 == s -> False
+Ring of integers modulo 46341 2.0 s == f2 -> False
+Ring of integers modulo 46341 2.0000000000000000000000000000 B(2) == s -> False
+Ring of integers modulo 46341 2.0000000000000000000000000000 s == B(2) -> False
+Ring of integers modulo 46341 2.0000000000000000000000000000 B(2) != s -> True
+Ring of integers modulo 46341 2.0000000000000000000000000000 f2 == s -> False
+Ring of integers modulo 46341 2.0000000000000000000000000000 s == f2 -> False
+Ring of integers modulo 46341 2.0 B(2) == s -> False
+Ring of integers modulo 46341 2.0 s == B(2) -> False
+Ring of integers modulo 46341 2.0 B(2) != s -> True
+Ring of integers modulo 46341 2.0 f2 == s -> False
+Ring of integers modulo 46341 2.0 s == f2 -> False
+Ring of integers modulo 46341 (2+0j) B(2) == s -> False
+Ring of integers modulo 46341 (2+0j) s == B(2) -> False
+Ring of integers modulo 46341 (2+0j) B(2) != s -> True
+Ring of integers modulo 46341 (2+0j) f2 == s -> False
+Ring of integers modulo 46341 (2+0j) s == f2 -> False
+Ring of integers modulo 46342 2.00000000000000 B(2) == s -> False
+Ring of integers modulo 46342 2.00000000000000 s == B(2) -> False
+Ring of integers modulo 46342 2.00000000000000 B(2) != s -> True
+Ring of integers modulo 46342 2.00000000000000 f2 == s -> False
+Ring of integers modulo 46342 2.00000000000000 s == f2 -> False
+Ring of integers modulo 46342 2.0 B(2) == s -> False
+Ring of integers modulo 46342 2.0 s == B(2) -> False
+Ring of integers modulo 46342 2.0 B(2) != s -> True
+Ring of integers modulo 46342 2.0 f2 == s -> False
+Ring of integers modulo 46342 2.0 s == f2 -> False
+Ring of integers modulo 46342 2.0000000000000000000000000000 B(2) == s -> False
+Ring of integers modulo 46342 2.0000000000000000000000000000 s == B(2) -> False
+Ring of integers modulo 46342 2.0000000000000000000000000000 B(2) != s -> True
+Ring of integers modulo 46342 2.0000000000000000000000000000 f2 == s -> False
+Ring of integers modulo 46342 2.0000000000000000000000000000 s == f2 -> False
+Ring of integers modulo 46342 2.00000000000000 B(2) == s -> False
+Ring of integers modulo 46342 2.00000000000000 s == B(2) -> False
+Ring of integers modulo 46342 2.00000000000000 B(2) != s -> True
+Ring of integers modulo 46342 2.00000000000000 f2 == s -> False
+Ring of integers modulo 46342 2.00000000000000 s == f2 -> False
+Ring of integers modulo 46342 2.0 B(2) == s -> False
+Ring of integers modulo 46342 2.0 s == B(2) -> False
+Ring of integers modulo 46342 2.0 B(2) != s -> True
+Ring of integers modulo 46342 2.0 f2 == s -> False
+Ring of integers modulo 46342 2.0 s == f2 -> False
+Ring of integers modulo 46342 2.0000000000000000000000000000 B(2) == s -> False
+Ring of integers modulo 46342 2.0000000000000000000000000000 s == B(2) -> False
+Ring of integers modulo 46342 2.0000000000000000000000000000 B(2) != s -> True
+Ring of integers modulo 46342 2.0000000000000000000000000000 f2 == s -> False
+Ring of integers modulo 46342 2.0000000000000000000000000000 s == f2 -> False
+Ring of integers modulo 46342 2.0 B(2) == s -> False
+Ring of integers modulo 46342 2.0 s == B(2) -> False
+Ring of integers modulo 46342 2.0 B(2) != s -> True
+Ring of integers modulo 46342 2.0 f2 == s -> False
+Ring of integers modulo 46342 2.0 s == f2 -> False
+Ring of integers modulo 46342 (2+0j) B(2) == s -> False
+Ring of integers modulo 46342 (2+0j) s == B(2) -> False
+Ring of integers modulo 46342 (2+0j) B(2) != s -> True
+Ring of integers modulo 46342 (2+0j) f2 == s -> False
+Ring of integers modulo 46342 (2+0j) s == f2 -> False
+Finite Field of size 2147483647 2.00000000000000 B(2) == s -> False
+Finite Field of size 2147483647 2.00000000000000 s == B(2) -> False
+Finite Field of size 2147483647 2.00000000000000 B(2) != s -> True
+Finite Field of size 2147483647 2.00000000000000 f2 == s -> False
+Finite Field of size 2147483647 2.00000000000000 s == f2 -> False
+Finite Field of size 2147483647 2.0 B(2) == s -> False
+Finite Field of size 2147483647 2.0 s == B(2) -> False
+Finite Field of size 2147483647 2.0 B(2) != s -> True
+Finite Field of size 2147483647 2.0 f2 == s -> False
+Finite Field of size 2147483647 2.0 s == f2 -> False
+Finite Field of size 2147483647 2.0000000000000000000000000000 B(2) == s -> False
+Finite Field of size 2147483647 2.0000000000000000000000000000 s == B(2) -> False
+Finite Field of size 2147483647 2.0000000000000000000000000000 B(2) != s -> True
+Finite Field of size 2147483647 2.0000000000000000000000000000 f2 == s -> False
+Finite Field of size 2147483647 2.0000000000000000000000000000 s == f2 -> False
+Finite Field of size 2147483647 2.00000000000000 B(2) == s -> False
+Finite Field of size 2147483647 2.00000000000000 s == B(2) -> False
+Finite Field of size 2147483647 2.00000000000000 B(2) != s -> True
+Finite Field of size 2147483647 2.00000000000000 f2 == s -> False
+Finite Field of size 2147483647 2.00000000000000 s == f2 -> False
+Finite Field of size 2147483647 2.0 B(2) == s -> False
+Finite Field of size 2147483647 2.0 s == B(2) -> False
+Finite Field of size 2147483647 2.0 B(2) != s -> True
+Finite Field of size 2147483647 2.0 f2 == s -> False
+Finite Field of size 2147483647 2.0 s == f2 -> False
+Finite Field of size 2147483647 2.0000000000000000000000000000 B(2) == s -> False
+Finite Field of size 2147483647 2.0000000000000000000000000000 s == B(2) -> False
+Finite Field of size 2147483647 2.0000000000000000000000000000 B(2) != s -> True
+Finite Field of size 2147483647 2.0000000000000000000000000000 f2 == s -> False
+Finite Field of size 2147483647 2.0000000000000000000000000000 s == f2 -> False
+Finite Field of size 2147483647 2.0 B(2) == s -> False
+Finite Field of size 2147483647 2.0 s == B(2) -> False
+Finite Field of size 2147483647 2.0 B(2) != s -> True
+Finite Field of size 2147483647 2.0 f2 == s -> False
+Finite Field of size 2147483647 2.0 s == f2 -> False
+Finite Field of size 2147483647 (2+0j) B(2) == s -> False
+Finite Field of size 2147483647 (2+0j) s == B(2) -> False
+Finite Field of size 2147483647 (2+0j) B(2) != s -> True
+Finite Field of size 2147483647 (2+0j) f2 == s -> False
+Finite Field of size 2147483647 (2+0j) s == f2 -> False
+Ring of integers modulo 2147483648 2.00000000000000 B(2) == s -> False
+Ring of integers modulo 2147483648 2.00000000000000 s == B(2) -> False
+Ring of integers modulo 2147483648 2.00000000000000 B(2) != s -> True
+Ring of integers modulo 2147483648 2.00000000000000 f2 == s -> False
+Ring of integers modulo 2147483648 2.00000000000000 s == f2 -> False
+Ring of integers modulo 2147483648 2.0 B(2) == s -> False
+Ring of integers modulo 2147483648 2.0 s == B(2) -> False
+Ring of integers modulo 2147483648 2.0 B(2) != s -> True
+Ring of integers modulo 2147483648 2.0 f2 == s -> False
+Ring of integers modulo 2147483648 2.0 s == f2 -> False
+Ring of integers modulo 2147483648 2.0000000000000000000000000000 B(2) == s -> False
+Ring of integers modulo 2147483648 2.0000000000000000000000000000 s == B(2) -> False
+Ring of integers modulo 2147483648 2.0000000000000000000000000000 B(2) != s -> True
+Ring of integers modulo 2147483648 2.0000000000000000000000000000 f2 == s -> False
+Ring of integers modulo 2147483648 2.0000000000000000000000000000 s == f2 -> False
+Ring of integers modulo 2147483648 2.00000000000000 B(2) == s -> False
+Ring of integers modulo 2147483648 2.00000000000000 s == B(2) -> False
+Ring of integers modulo 2147483648 2.00000000000000 B(2) != s -> True
+Ring of integers modulo 2147483648 2.00000000000000 f2 == s -> False
+Ring of integers modulo 2147483648 2.00000000000000 s == f2 -> False
+Ring of integers modulo 2147483648 2.0 B(2) == s -> False
+Ring of integers modulo 2147483648 2.0 s == B(2) -> False
+Ring of integers modulo 2147483648 2.0 B(2) != s -> True
+Ring of integers modulo 2147483648 2.0 f2 == s -> False
+Ring of integers modulo 2147483648 2.0 s == f2 -> False
+Ring of integers modulo 2147483648 2.0000000000000000000000000000 B(2) == s -> False
+Ring of integers modulo 2147483648 2.0000000000000000000000000000 s == B(2) -> False
+Ring of integers modulo 2147483648 2.0000000000000000000000000000 B(2) != s -> True
+Ring of integers modulo 2147483648 2.0000000000000000000000000000 f2 == s -> False
+Ring of integers modulo 2147483648 2.0000000000000000000000000000 s == f2 -> False
+Ring of integers modulo 2147483648 2.0 B(2) == s -> False
+Ring of integers modulo 2147483648 2.0 s == B(2) -> False
+Ring of integers modulo 2147483648 2.0 B(2) != s -> True
+Ring of integers modulo 2147483648 2.0 f2 == s -> False
+Ring of integers modulo 2147483648 2.0 s == f2 -> False
+Ring of integers modulo 2147483648 (2+0j) B(2) == s -> False
+Ring of integers modulo 2147483648 (2+0j) s == B(2) -> False
+Ring of integers modulo 2147483648 (2+0j) B(2) != s -> True
+Ring of integers modulo 2147483648 (2+0j) f2 == s -> False
+Ring of integers modulo 2147483648 (2+0j) s == f2 -> False
+Finite Field of size 18446744073709551557 2.00000000000000 B(2) == s -> False
+Finite Field of size 18446744073709551557 2.00000000000000 s == B(2) -> False
+Finite Field of size 18446744073709551557 2.00000000000000 B(2) != s -> True
+Finite Field of size 18446744073709551557 2.00000000000000 f2 == s -> False
+Finite Field of size 18446744073709551557 2.00000000000000 s == f2 -> False
+Finite Field of size 18446744073709551557 2.0 B(2) == s -> False
+Finite Field of size 18446744073709551557 2.0 s == B(2) -> False
+Finite Field of size 18446744073709551557 2.0 B(2) != s -> True
+Finite Field of size 18446744073709551557 2.0 f2 == s -> False
+Finite Field of size 18446744073709551557 2.0 s == f2 -> False
+Finite Field of size 18446744073709551557 2.0000000000000000000000000000 B(2) == s -> False
+Finite Field of size 18446744073709551557 2.0000000000000000000000000000 s == B(2) -> False
+Finite Field of size 18446744073709551557 2.0000000000000000000000000000 B(2) != s -> True
+Finite Field of size 18446744073709551557 2.0000000000000000000000000000 f2 == s -> False
+Finite Field of size 18446744073709551557 2.0000000000000000000000000000 s == f2 -> False
+Finite Field of size 18446744073709551557 2.00000000000000 B(2) == s -> False
+Finite Field of size 18446744073709551557 2.00000000000000 s == B(2) -> False
+Finite Field of size 18446744073709551557 2.00000000000000 B(2) != s -> True
+Finite Field of size 18446744073709551557 2.00000000000000 f2 == s -> False
+Finite Field of size 18446744073709551557 2.00000000000000 s == f2 -> False
+Finite Field of size 18446744073709551557 2.0 B(2) == s -> False
+Finite Field of size 18446744073709551557 2.0 s == B(2) -> False
+Finite Field of size 18446744073709551557 2.0 B(2) != s -> True
+Finite Field of size 18446744073709551557 2.0 f2 == s -> False
+Finite Field of size 18446744073709551557 2.0 s == f2 -> False
+Finite Field of size 18446744073709551557 2.0000000000000000000000000000 B(2) == s -> False
+Finite Field of size 18446744073709551557 2.0000000000000000000000000000 s == B(2) -> False
+Finite Field of size 18446744073709551557 2.0000000000000000000000000000 B(2) != s -> True
+Finite Field of size 18446744073709551557 2.0000000000000000000000000000 f2 == s -> False
+Finite Field of size 18446744073709551557 2.0000000000000000000000000000 s == f2 -> False
+Finite Field of size 18446744073709551557 2.0 B(2) == s -> False
+Finite Field of size 18446744073709551557 2.0 s == B(2) -> False
+Finite Field of size 18446744073709551557 2.0 B(2) != s -> True
+Finite Field of size 18446744073709551557 2.0 f2 == s -> False
+Finite Field of size 18446744073709551557 2.0 s == f2 -> False
+Finite Field of size 18446744073709551557 (2+0j) B(2) == s -> False
+Finite Field of size 18446744073709551557 (2+0j) s == B(2) -> False
+Finite Field of size 18446744073709551557 (2+0j) B(2) != s -> True
+Finite Field of size 18446744073709551557 (2+0j) f2 == s -> False
+Finite Field of size 18446744073709551557 (2+0j) s == f2 -> False
+Finite Field of size 18446744073709551629 2.00000000000000 B(2) == s -> False
+Finite Field of size 18446744073709551629 2.00000000000000 s == B(2) -> False
+Finite Field of size 18446744073709551629 2.00000000000000 B(2) != s -> True
+Finite Field of size 18446744073709551629 2.00000000000000 f2 == s -> False
+Finite Field of size 18446744073709551629 2.00000000000000 s == f2 -> False
+Finite Field of size 18446744073709551629 2.0 B(2) == s -> False
+Finite Field of size 18446744073709551629 2.0 s == B(2) -> False
+Finite Field of size 18446744073709551629 2.0 B(2) != s -> True
+Finite Field of size 18446744073709551629 2.0 f2 == s -> False
+Finite Field of size 18446744073709551629 2.0 s == f2 -> False
+Finite Field of size 18446744073709551629 2.0000000000000000000000000000 B(2) == s -> False
+Finite Field of size 18446744073709551629 2.0000000000000000000000000000 s == B(2) -> False
+Finite Field of size 18446744073709551629 2.0000000000000000000000000000 B(2) != s -> True
+Finite Field of size 18446744073709551629 2.0000000000000000000000000000 f2 == s -> False
+Finite Field of size 18446744073709551629 2.0000000000000000000000000000 s == f2 -> False
+Finite Field of size 18446744073709551629 2.00000000000000 B(2) == s -> False
+Finite Field of size 18446744073709551629 2.00000000000000 s == B(2) -> False
+Finite Field of size 18446744073709551629 2.00000000000000 B(2) != s -> True
+Finite Field of size 18446744073709551629 2.00000000000000 f2 == s -> False
+Finite Field of size 18446744073709551629 2.00000000000000 s == f2 -> False
+Finite Field of size 18446744073709551629 2.0 B(2) == s -> False
+Finite Field of size 18446744073709551629 2.0 s == B(2) -> False
+Finite Field of size 18446744073709551629 2.0 B(2) != s -> True
+Finite Field of size 18446744073709551629 2.0 f2 == s -> False
+Finite Field of size 18446744073709551629 2.0 s == f2 -> False
+Finite Field of size 18446744073709551629 2.0000000000000000000000000000 B(2) == s -> False
+Finite Field of size 18446744073709551629 2.0000000000000000000000000000 s == B(2) -> False
+Finite Field of size 18446744073709551629 2.0000000000000000000000000000 B(2) != s -> True
+Finite Field of size 18446744073709551629 2.0000000000000000000000000000 f2 == s -> False
+Finite Field of size 18446744073709551629 2.0000000000000000000000000000 s == f2 -> False
+Finite Field of size 18446744073709551629 2.0 B(2) == s -> False
+Finite Field of size 18446744073709551629 2.0 s == B(2) -> False
+Finite Field of size 18446744073709551629 2.0 B(2) != s -> True
+Finite Field of size 18446744073709551629 2.0 f2 == s -> False
+Finite Field of size 18446744073709551629 2.0 s == f2 -> False
+Finite Field of size 18446744073709551629 (2+0j) B(2) == s -> False
+Finite Field of size 18446744073709551629 (2+0j) s == B(2) -> False
+Finite Field of size 18446744073709551629 (2+0j) B(2) != s -> True
+Finite Field of size 18446744073709551629 (2+0j) f2 == s -> False
+Finite Field of size 18446744073709551629 (2+0j) s == f2 -> False
+Ring of integers modulo 18446744073709551616 2.00000000000000 B(2) == s -> False
+Ring of integers modulo 18446744073709551616 2.00000000000000 s == B(2) -> False
+Ring of integers modulo 18446744073709551616 2.00000000000000 B(2) != s -> True
+Ring of integers modulo 18446744073709551616 2.00000000000000 f2 == s -> False
+Ring of integers modulo 18446744073709551616 2.00000000000000 s == f2 -> False
+Ring of integers modulo 18446744073709551616 2.0 B(2) == s -> False
+Ring of integers modulo 18446744073709551616 2.0 s == B(2) -> False
+Ring of integers modulo 18446744073709551616 2.0 B(2) != s -> True
+Ring of integers modulo 18446744073709551616 2.0 f2 == s -> False
+Ring of integers modulo 18446744073709551616 2.0 s == f2 -> False
+Ring of integers modulo 18446744073709551616 2.0000000000000000000000000000 B(2) == s -> False
+Ring of integers modulo 18446744073709551616 2.0000000000000000000000000000 s == B(2) -> False
+Ring of integers modulo 18446744073709551616 2.0000000000000000000000000000 B(2) != s -> True
+Ring of integers modulo 18446744073709551616 2.0000000000000000000000000000 f2 == s -> False
+Ring of integers modulo 18446744073709551616 2.0000000000000000000000000000 s == f2 -> False
+Ring of integers modulo 18446744073709551616 2.00000000000000 B(2) == s -> False
+Ring of integers modulo 18446744073709551616 2.00000000000000 s == B(2) -> False
+Ring of integers modulo 18446744073709551616 2.00000000000000 B(2) != s -> True
+Ring of integers modulo 18446744073709551616 2.00000000000000 f2 == s -> False
+Ring of integers modulo 18446744073709551616 2.00000000000000 s == f2 -> False
+Ring of integers modulo 18446744073709551616 2.0 B(2) == s -> False
+Ring of integers modulo 18446744073709551616 2.0 s == B(2) -> False
+Ring of integers modulo 18446744073709551616 2.0 B(2) != s -> True
+Ring of integers modulo 18446744073709551616 2.0 f2 == s -> False
+Ring of integers modulo 18446744073709551616 2.0 s == f2 -> False
+Ring of integers modulo 18446744073709551616 2.0000000000000000000000000000 B(2) == s -> False
+Ring of integers modulo 18446744073709551616 2.0000000000000000000000000000 s == B(2) -> False
+Ring of integers modulo 18446744073709551616 2.0000000000000000000000000000 B(2) != s -> True
+Ring of integers modulo 18446744073709551616 2.0000000000000000000000000000 f2 == s -> False
+Ring of integers modulo 18446744073709551616 2.0000000000000000000000000000 s == f2 -> False
+Ring of integers modulo 18446744073709551616 2.0 B(2) == s -> False
+Ring of integers modulo 18446744073709551616 2.0 s == B(2) -> False
+Ring of integers modulo 18446744073709551616 2.0 B(2) != s -> True
+Ring of integers modulo 18446744073709551616 2.0 f2 == s -> False
+Ring of integers modulo 18446744073709551616 2.0 s == f2 -> False
+Ring of integers modulo 18446744073709551616 (2+0j) B(2) == s -> False
+Ring of integers modulo 18446744073709551616 (2+0j) s == B(2) -> False
+Ring of integers modulo 18446744073709551616 (2+0j) B(2) != s -> True
+Ring of integers modulo 18446744073709551616 (2+0j) f2 == s -> False
+Ring of integers modulo 18446744073709551616 (2+0j) s == f2 -> False
+Finite Field in a of size 2^2 2.00000000000000 B(2) == s -> False
+Finite Field in a of size 2^2 2.00000000000000 s == B(2) -> False
+Finite Field in a of size 2^2 2.00000000000000 B(2) != s -> True
+Finite Field in a of size 2^2 2.00000000000000 f2 == s -> False
+Finite Field in a of size 2^2 2.00000000000000 s == f2 -> False
+Finite Field in a of size 2^2 2.0 B(2) == s -> False
+Finite Field in a of size 2^2 2.0 s == B(2) -> False
+Finite Field in a of size 2^2 2.0 B(2) != s -> True
+Finite Field in a of size 2^2 2.0 f2 == s -> False
+Finite Field in a of size 2^2 2.0 s == f2 -> False
+Finite Field in a of size 2^2 2.0000000000000000000000000000 B(2) == s -> False
+Finite Field in a of size 2^2 2.0000000000000000000000000000 s == B(2) -> False
+Finite Field in a of size 2^2 2.0000000000000000000000000000 B(2) != s -> True
+Finite Field in a of size 2^2 2.0000000000000000000000000000 f2 == s -> False
+Finite Field in a of size 2^2 2.0000000000000000000000000000 s == f2 -> False
+Finite Field in a of size 2^2 2.00000000000000 B(2) == s -> False
+Finite Field in a of size 2^2 2.00000000000000 s == B(2) -> False
+Finite Field in a of size 2^2 2.00000000000000 B(2) != s -> True
+Finite Field in a of size 2^2 2.00000000000000 f2 == s -> False
+Finite Field in a of size 2^2 2.00000000000000 s == f2 -> False
+Finite Field in a of size 2^2 2.0 B(2) == s -> False
+Finite Field in a of size 2^2 2.0 s == B(2) -> False
+Finite Field in a of size 2^2 2.0 B(2) != s -> True
+Finite Field in a of size 2^2 2.0 f2 == s -> False
+Finite Field in a of size 2^2 2.0 s == f2 -> False
+Finite Field in a of size 2^2 2.0000000000000000000000000000 B(2) == s -> False
+Finite Field in a of size 2^2 2.0000000000000000000000000000 s == B(2) -> False
+Finite Field in a of size 2^2 2.0000000000000000000000000000 B(2) != s -> True
+Finite Field in a of size 2^2 2.0000000000000000000000000000 f2 == s -> False
+Finite Field in a of size 2^2 2.0000000000000000000000000000 s == f2 -> False
+Finite Field in a of size 2^2 2.0 B(2) == s -> False
+Finite Field in a of size 2^2 2.0 s == B(2) -> False
+Finite Field in a of size 2^2 2.0 B(2) != s -> True
+Finite Field in a of size 2^2 2.0 f2 == s -> False
+Finite Field in a of size 2^2 2.0 s == f2 -> False
+Finite Field in a of size 2^2 (2+0j) B(2) == s -> False
+Finite Field in a of size 2^2 (2+0j) s == B(2) -> False
+Finite Field in a of size 2^2 (2+0j) B(2) != s -> True
+Finite Field in a of size 2^2 (2+0j) f2 == s -> False
+Finite Field in a of size 2^2 (2+0j) s == f2 -> False
+Finite Field in a of size 3^10 2.00000000000000 B(2) == s -> False
+Finite Field in a of size 3^10 2.00000000000000 s == B(2) -> False
+Finite Field in a of size 3^10 2.00000000000000 B(2) != s -> True
+Finite Field in a of size 3^10 2.00000000000000 f2 == s -> False
+Finite Field in a of size 3^10 2.00000000000000 s == f2 -> False
+Finite Field in a of size 3^10 2.0 B(2) == s -> False
+Finite Field in a of size 3^10 2.0 s == B(2) -> False
+Finite Field in a of size 3^10 2.0 B(2) != s -> True
+Finite Field in a of size 3^10 2.0 f2 == s -> False
+Finite Field in a of size 3^10 2.0 s == f2 -> False
+Finite Field in a of size 3^10 2.0000000000000000000000000000 B(2) == s -> False
+Finite Field in a of size 3^10 2.0000000000000000000000000000 s == B(2) -> False
+Finite Field in a of size 3^10 2.0000000000000000000000000000 B(2) != s -> True
+Finite Field in a of size 3^10 2.0000000000000000000000000000 f2 == s -> False
+Finite Field in a of size 3^10 2.0000000000000000000000000000 s == f2 -> False
+Finite Field in a of size 3^10 2.00000000000000 B(2) == s -> False
+Finite Field in a of size 3^10 2.00000000000000 s == B(2) -> False
+Finite Field in a of size 3^10 2.00000000000000 B(2) != s -> True
+Finite Field in a of size 3^10 2.00000000000000 f2 == s -> False
+Finite Field in a of size 3^10 2.00000000000000 s == f2 -> False
+Finite Field in a of size 3^10 2.0 B(2) == s -> False
+Finite Field in a of size 3^10 2.0 s == B(2) -> False
+Finite Field in a of size 3^10 2.0 B(2) != s -> True
+Finite Field in a of size 3^10 2.0 f2 == s -> False
+Finite Field in a of size 3^10 2.0 s == f2 -> False
+Finite Field in a of size 3^10 2.0000000000000000000000000000 B(2) == s -> False
+Finite Field in a of size 3^10 2.0000000000000000000000000000 s == B(2) -> False
+Finite Field in a of size 3^10 2.0000000000000000000000000000 B(2) != s -> True
+Finite Field in a of size 3^10 2.0000000000000000000000000000 f2 == s -> False
+Finite Field in a of size 3^10 2.0000000000000000000000000000 s == f2 -> False
+Finite Field in a of size 3^10 2.0 B(2) == s -> False
+Finite Field in a of size 3^10 2.0 s == B(2) -> False
+Finite Field in a of size 3^10 2.0 B(2) != s -> True
+Finite Field in a of size 3^10 2.0 f2 == s -> False
+Finite Field in a of size 3^10 2.0 s == f2 -> False
+Finite Field in a of size 3^10 (2+0j) B(2) == s -> False
+Finite Field in a of size 3^10 (2+0j) s == B(2) -> False
+Finite Field in a of size 3^10 (2+0j) B(2) != s -> True
+Finite Field in a of size 3^10 (2+0j) f2 == s -> False
+Finite Field in a of size 3^10 (2+0j) s == f2 -> False
+Finite Field in a of size 251^2 2.00000000000000 B(2) == s -> False
+Finite Field in a of size 251^2 2.00000000000000 s == B(2) -> False
+Finite Field in a of size 251^2 2.00000000000000 B(2) != s -> True
+Finite Field in a of size 251^2 2.00000000000000 f2 == s -> False
+Finite Field in a of size 251^2 2.00000000000000 s == f2 -> False
+Finite Field in a of size 251^2 2.0 B(2) == s -> False
+Finite Field in a of size 251^2 2.0 s == B(2) -> False
+Finite Field in a of size 251^2 2.0 B(2) != s -> True
+Finite Field in a of size 251^2 2.0 f2 == s -> False
+Finite Field in a of size 251^2 2.0 s == f2 -> False
+Finite Field in a of size 251^2 2.0000000000000000000000000000 B(2) == s -> False
+Finite Field in a of size 251^2 2.0000000000000000000000000000 s == B(2) -> False
+Finite Field in a of size 251^2 2.0000000000000000000000000000 B(2) != s -> True
+Finite Field in a of size 251^2 2.0000000000000000000000000000 f2 == s -> False
+Finite Field in a of size 251^2 2.0000000000000000000000000000 s == f2 -> False
+Finite Field in a of size 251^2 2.00000000000000 B(2) == s -> False
+Finite Field in a of size 251^2 2.00000000000000 s == B(2) -> False
+Finite Field in a of size 251^2 2.00000000000000 B(2) != s -> True
+Finite Field in a of size 251^2 2.00000000000000 f2 == s -> False
+Finite Field in a of size 251^2 2.00000000000000 s == f2 -> False
+Finite Field in a of size 251^2 2.0 B(2) == s -> False
+Finite Field in a of size 251^2 2.0 s == B(2) -> False
+Finite Field in a of size 251^2 2.0 B(2) != s -> True
+Finite Field in a of size 251^2 2.0 f2 == s -> False
+Finite Field in a of size 251^2 2.0 s == f2 -> False
+Finite Field in a of size 251^2 2.0000000000000000000000000000 B(2) == s -> False
+Finite Field in a of size 251^2 2.0000000000000000000000000000 s == B(2) -> False
+Finite Field in a of size 251^2 2.0000000000000000000000000000 B(2) != s -> True
+Finite Field in a of size 251^2 2.0000000000000000000000000000 f2 == s -> False
+Finite Field in a of size 251^2 2.0000000000000000000000000000 s == f2 -> False
+Finite Field in a of size 251^2 2.0 B(2) == s -> False
+Finite Field in a of size 251^2 2.0 s == B(2) -> False
+Finite Field in a of size 251^2 2.0 B(2) != s -> True
+Finite Field in a of size 251^2 2.0 f2 == s -> False
+Finite Field in a of size 251^2 2.0 s == f2 -> False
+Finite Field in a of size 251^2 (2+0j) B(2) == s -> False
+Finite Field in a of size 251^2 (2+0j) s == B(2) -> False
+Finite Field in a of size 251^2 (2+0j) B(2) != s -> True
+Finite Field in a of size 251^2 (2+0j) f2 == s -> False
+Finite Field in a of size 251^2 (2+0j) s == f2 -> False
+Finite Field in a of size 2^16 2.00000000000000 B(2) == s -> False
+Finite Field in a of size 2^16 2.00000000000000 s == B(2) -> False
+Finite Field in a of size 2^16 2.00000000000000 B(2) != s -> True
+Finite Field in a of size 2^16 2.00000000000000 f2 == s -> False
+Finite Field in a of size 2^16 2.00000000000000 s == f2 -> False
+Finite Field in a of size 2^16 2.0 B(2) == s -> False
+Finite Field in a of size 2^16 2.0 s == B(2) -> False
+Finite Field in a of size 2^16 2.0 B(2) != s -> True
+Finite Field in a of size 2^16 2.0 f2 == s -> False
+Finite Field in a of size 2^16 2.0 s == f2 -> False
+Finite Field in a of size 2^16 2.0000000000000000000000000000 B(2) == s -> False
+Finite Field in a of size 2^16 2.0000000000000000000000000000 s == B(2) -> False
+Finite Field in a of size 2^16 2.0000000000000000000000000000 B(2) != s -> True
+Finite Field in a of size 2^16 2.0000000000000000000000000000 f2 == s -> False
+Finite Field in a of size 2^16 2.0000000000000000000000000000 s == f2 -> False
+Finite Field in a of size 2^16 2.00000000000000 B(2) == s -> False
+Finite Field in a of size 2^16 2.00000000000000 s == B(2) -> False
+Finite Field in a of size 2^16 2.00000000000000 B(2) != s -> True
+Finite Field in a of size 2^16 2.00000000000000 f2 == s -> False
+Finite Field in a of size 2^16 2.00000000000000 s == f2 -> False
+Finite Field in a of size 2^16 2.0 B(2) == s -> False
+Finite Field in a of size 2^16 2.0 s == B(2) -> False
+Finite Field in a of size 2^16 2.0 B(2) != s -> True
+Finite Field in a of size 2^16 2.0 f2 == s -> False
+Finite Field in a of size 2^16 2.0 s == f2 -> False
+Finite Field in a of size 2^16 2.0000000000000000000000000000 B(2) == s -> False
+Finite Field in a of size 2^16 2.0000000000000000000000000000 s == B(2) -> False
+Finite Field in a of size 2^16 2.0000000000000000000000000000 B(2) != s -> True
+Finite Field in a of size 2^16 2.0000000000000000000000000000 f2 == s -> False
+Finite Field in a of size 2^16 2.0000000000000000000000000000 s == f2 -> False
+Finite Field in a of size 2^16 2.0 B(2) == s -> False
+Finite Field in a of size 2^16 2.0 s == B(2) -> False
+Finite Field in a of size 2^16 2.0 B(2) != s -> True
+Finite Field in a of size 2^16 2.0 f2 == s -> False
+Finite Field in a of size 2^16 2.0 s == f2 -> False
+Finite Field in a of size 2^16 (2+0j) B(2) == s -> False
+Finite Field in a of size 2^16 (2+0j) s == B(2) -> False
+Finite Field in a of size 2^16 (2+0j) B(2) != s -> True
+Finite Field in a of size 2^16 (2+0j) f2 == s -> False
+Finite Field in a of size 2^16 (2+0j) s == f2 -> False
+Finite Field in a of size 257^2 2.00000000000000 B(2) == s -> False
+Finite Field in a of size 257^2 2.00000000000000 s == B(2) -> False
+Finite Field in a of size 257^2 2.00000000000000 B(2) != s -> True
+Finite Field in a of size 257^2 2.00000000000000 f2 == s -> False
+Finite Field in a of size 257^2 2.00000000000000 s == f2 -> False
+Finite Field in a of size 257^2 2.0 B(2) == s -> False
+Finite Field in a of size 257^2 2.0 s == B(2) -> False
+Finite Field in a of size 257^2 2.0 B(2) != s -> True
+Finite Field in a of size 257^2 2.0 f2 == s -> False
+Finite Field in a of size 257^2 2.0 s == f2 -> False
+Finite Field in a of size 257^2 2.0000000000000000000000000000 B(2) == s -> False
+Finite Field in a of size 257^2 2.0000000000000000000000000000 s == B(2) -> False
+Finite Field in a of size 257^2 2.0000000000000000000000000000 B(2) != s -> True
+Finite Field in a of size 257^2 2.0000000000000000000000000000 f2 == s -> False
+Finite Field in a of size 257^2 2.0000000000000000000000000000 s == f2 -> False
+Finite Field in a of size 257^2 2.00000000000000 B(2) == s -> False
+Finite Field in a of size 257^2 2.00000000000000 s == B(2) -> False
+Finite Field in a of size 257^2 2.00000000000000 B(2) != s -> True
+Finite Field in a of size 257^2 2.00000000000000 f2 == s -> False
+Finite Field in a of size 257^2 2.00000000000000 s == f2 -> False
+Finite Field in a of size 257^2 2.0 B(2) == s -> False
+Finite Field in a of size 257^2 2.0 s == B(2) -> False
+Finite Field in a of size 257^2 2.0 B(2) != s -> True
+Finite Field in a of size 257^2 2.0 f2 == s -> False
+Finite Field in a of size 257^2 2.0 s == f2 -> False
+Finite Field in a of size 257^2 2.0000000000000000000000000000 B(2) == s -> False
+Finite Field in a of size 257^2 2.0000000000000000000000000000 s == B(2) -> False
+Finite Field in a of size 257^2 2.0000000000000000000000000000 B(2) != s -> True
+Finite Field in a of size 257^2 2.0000000000000000000000000000 f2 == s -> False
+Finite Field in a of size 257^2 2.0000000000000000000000000000 s == f2 -> False
+Finite Field in a of size 257^2 2.0 B(2) == s -> False
+Finite Field in a of size 257^2 2.0 s == B(2) -> False
+Finite Field in a of size 257^2 2.0 B(2) != s -> True
+Finite Field in a of size 257^2 2.0 f2 == s -> False
+Finite Field in a of size 257^2 2.0 s == f2 -> False
+Finite Field in a of size 257^2 (2+0j) B(2) == s -> False
+Finite Field in a of size 257^2 (2+0j) s == B(2) -> False
+Finite Field in a of size 257^2 (2+0j) B(2) != s -> True
+Finite Field in a of size 257^2 (2+0j) f2 == s -> False
+Finite Field in a of size 257^2 (2+0j) s == f2 -> False
+Finite Field in a of size 3^11 2.00000000000000 B(2) == s -> False
+Finite Field in a of size 3^11 2.00000000000000 s == B(2) -> False
+Finite Field in a of size 3^11 2.00000000000000 B(2) != s -> True
+Finite Field in a of size 3^11 2.00000000000000 f2 == s -> False
+Finite Field in a of size 3^11 2.00000000000000 s == f2 -> False
+Finite Field in a of size 3^11 2.0 B(2) == s -> False
+Finite Field in a of size 3^11 2.0 s == B(2) -> False
+Finite Field in a of size 3^11 2.0 B(2) != s -> True
+Finite Field in a of size 3^11 2.0 f2 == s -> False
+Finite Field in a of size 3^11 2.0 s == f2 -> False
+Finite Field in a of size 3^11 2.0000000000000000000000000000 B(2) == s -> False
+Finite Field in a of size 3^11 2.0000000000000000000000000000 s == B(2) -> False
+Finite Field in a of size 3^11 2.0000000000000000000000000000 B(2) != s -> True
+Finite Field in a of size 3^11 2.0000000000000000000000000000 f2 == s -> False
+Finite Field in a of size 3^11 2.0000000000000000000000000000 s == f2 -> False
+Finite Field in a of size 3^11 2.00000000000000 B(2) == s -> False
+Finite Field in a of size 3^11 2.00000000000000 s == B(2) -> False
+Finite Field in a of size 3^11 2.00000000000000 B(2) != s -> True
+Finite Field in a of size 3^11 2.00000000000000 f2 == s -> False
+Finite Field in a of size 3^11 2.00000000000000 s == f2 -> False
+Finite Field in a of size 3^11 2.0 B(2) == s -> False
+Finite Field in a of size 3^11 2.0 s == B(2) -> False
+Finite Field in a of size 3^11 2.0 B(2) != s -> True
+Finite Field in a of size 3^11 2.0 f2 == s -> False
+Finite Field in a of size 3^11 2.0 s == f2 -> False
+Finite Field in a of size 3^11 2.0000000000000000000000000000 B(2) == s -> False
+Finite Field in a of size 3^11 2.0000000000000000000000000000 s == B(2) -> False
+Finite Field in a of size 3^11 2.0000000000000000000000000000 B(2) != s -> True
+Finite Field in a of size 3^11 2.0000000000000000000000000000 f2 == s -> False
+Finite Field in a of size 3^11 2.0000000000000000000000000000 s == f2 -> False
+Finite Field in a of size 3^11 2.0 B(2) == s -> False
+Finite Field in a of size 3^11 2.0 s == B(2) -> False
+Finite Field in a of size 3^11 2.0 B(2) != s -> True
+Finite Field in a of size 3^11 2.0 f2 == s -> False
+Finite Field in a of size 3^11 2.0 s == f2 -> False
+Finite Field in a of size 3^11 (2+0j) B(2) == s -> False
+Finite Field in a of size 3^11 (2+0j) s == B(2) -> False
+Finite Field in a of size 3^11 (2+0j) B(2) != s -> True
+Finite Field in a of size 3^11 (2+0j) f2 == s -> False
+Finite Field in a of size 3^11 (2+0j) s == f2 -> False
+Number Field in j with defining polynomial x^2 + 1 2.00000000000000 B(2) == s -> False
+Number Field in j with defining polynomial x^2 + 1 2.00000000000000 s == B(2) -> False
+Number Field in j with defining polynomial x^2 + 1 2.00000000000000 B(2) != s -> True
+Number Field in j with defining polynomial x^2 + 1 2.00000000000000 f2 == s -> False
+Number Field in j with defining polynomial x^2 + 1 2.00000000000000 s == f2 -> False
+Number Field in j with defining polynomial x^2 + 1 2.0 B(2) == s -> False
+Number Field in j with defining polynomial x^2 + 1 2.0 s == B(2) -> False
+Number Field in j with defining polynomial x^2 + 1 2.0 B(2) != s -> True
+Number Field in j with defining polynomial x^2 + 1 2.0 f2 == s -> False
+Number Field in j with defining polynomial x^2 + 1 2.0 s == f2 -> False
+Number Field in j with defining polynomial x^2 + 1 2.0000000000000000000000000000 B(2) == s -> False
+Number Field in j with defining polynomial x^2 + 1 2.0000000000000000000000000000 s == B(2) -> False
+Number Field in j with defining polynomial x^2 + 1 2.0000000000000000000000000000 B(2) != s -> True
+Number Field in j with defining polynomial x^2 + 1 2.0000000000000000000000000000 f2 == s -> False
+Number Field in j with defining polynomial x^2 + 1 2.0000000000000000000000000000 s == f2 -> False
+Number Field in j with defining polynomial x^2 + 1 2.00000000000000 B(2) == s -> False
+Number Field in j with defining polynomial x^2 + 1 2.00000000000000 s == B(2) -> False
+Number Field in j with defining polynomial x^2 + 1 2.00000000000000 B(2) != s -> True
+Number Field in j with defining polynomial x^2 + 1 2.00000000000000 f2 == s -> False
+Number Field in j with defining polynomial x^2 + 1 2.00000000000000 s == f2 -> False
+Number Field in j with defining polynomial x^2 + 1 2.0 B(2) == s -> False
+Number Field in j with defining polynomial x^2 + 1 2.0 s == B(2) -> False
+Number Field in j with defining polynomial x^2 + 1 2.0 B(2) != s -> True
+Number Field in j with defining polynomial x^2 + 1 2.0 f2 == s -> False
+Number Field in j with defining polynomial x^2 + 1 2.0 s == f2 -> False
+Number Field in j with defining polynomial x^2 + 1 2.0000000000000000000000000000 B(2) == s -> False
+Number Field in j with defining polynomial x^2 + 1 2.0000000000000000000000000000 s == B(2) -> False
+Number Field in j with defining polynomial x^2 + 1 2.0000000000000000000000000000 B(2) != s -> True
+Number Field in j with defining polynomial x^2 + 1 2.0000000000000000000000000000 f2 == s -> False
+Number Field in j with defining polynomial x^2 + 1 2.0000000000000000000000000000 s == f2 -> False
+Number Field in j with defining polynomial x^2 + 1 2.0 B(2) == s -> False
+Number Field in j with defining polynomial x^2 + 1 2.0 s == B(2) -> False
+Number Field in j with defining polynomial x^2 + 1 2.0 B(2) != s -> True
+Number Field in j with defining polynomial x^2 + 1 2.0 f2 == s -> False
+Number Field in j with defining polynomial x^2 + 1 2.0 s == f2 -> False
+Number Field in j with defining polynomial x^2 + 1 (2+0j) B(2) == s -> False
+Number Field in j with defining polynomial x^2 + 1 (2+0j) s == B(2) -> False
+Number Field in j with defining polynomial x^2 + 1 (2+0j) B(2) != s -> True
+Number Field in j with defining polynomial x^2 + 1 (2+0j) f2 == s -> False
+Number Field in j with defining polynomial x^2 + 1 (2+0j) s == f2 -> False
+Number Field in k with defining polynomial x^2 + 3 2.00000000000000 B(2) == s -> False
+Number Field in k with defining polynomial x^2 + 3 2.00000000000000 s == B(2) -> False
+Number Field in k with defining polynomial x^2 + 3 2.00000000000000 B(2) != s -> True
+Number Field in k with defining polynomial x^2 + 3 2.00000000000000 f2 == s -> False
+Number Field in k with defining polynomial x^2 + 3 2.00000000000000 s == f2 -> False
+Number Field in k with defining polynomial x^2 + 3 2.0 B(2) == s -> False
+Number Field in k with defining polynomial x^2 + 3 2.0 s == B(2) -> False
+Number Field in k with defining polynomial x^2 + 3 2.0 B(2) != s -> True
+Number Field in k with defining polynomial x^2 + 3 2.0 f2 == s -> False
+Number Field in k with defining polynomial x^2 + 3 2.0 s == f2 -> False
+Number Field in k with defining polynomial x^2 + 3 2.0000000000000000000000000000 B(2) == s -> False
+Number Field in k with defining polynomial x^2 + 3 2.0000000000000000000000000000 s == B(2) -> False
+Number Field in k with defining polynomial x^2 + 3 2.0000000000000000000000000000 B(2) != s -> True
+Number Field in k with defining polynomial x^2 + 3 2.0000000000000000000000000000 f2 == s -> False
+Number Field in k with defining polynomial x^2 + 3 2.0000000000000000000000000000 s == f2 -> False
+Number Field in k with defining polynomial x^2 + 3 2.00000000000000 B(2) == s -> False
+Number Field in k with defining polynomial x^2 + 3 2.00000000000000 s == B(2) -> False
+Number Field in k with defining polynomial x^2 + 3 2.00000000000000 B(2) != s -> True
+Number Field in k with defining polynomial x^2 + 3 2.00000000000000 f2 == s -> False
+Number Field in k with defining polynomial x^2 + 3 2.00000000000000 s == f2 -> False
+Number Field in k with defining polynomial x^2 + 3 2.0 B(2) == s -> False
+Number Field in k with defining polynomial x^2 + 3 2.0 s == B(2) -> False
+Number Field in k with defining polynomial x^2 + 3 2.0 B(2) != s -> True
+Number Field in k with defining polynomial x^2 + 3 2.0 f2 == s -> False
+Number Field in k with defining polynomial x^2 + 3 2.0 s == f2 -> False
+Number Field in k with defining polynomial x^2 + 3 2.0000000000000000000000000000 B(2) == s -> False
+Number Field in k with defining polynomial x^2 + 3 2.0000000000000000000000000000 s == B(2) -> False
+Number Field in k with defining polynomial x^2 + 3 2.0000000000000000000000000000 B(2) != s -> True
+Number Field in k with defining polynomial x^2 + 3 2.0000000000000000000000000000 f2 == s -> False
+Number Field in k with defining polynomial x^2 + 3 2.0000000000000000000000000000 s == f2 -> False
+Number Field in k with defining polynomial x^2 + 3 2.0 B(2) == s -> False
+Number Field in k with defining polynomial x^2 + 3 2.0 s == B(2) -> False
+Number Field in k with defining polynomial x^2 + 3 2.0 B(2) != s -> True
+Number Field in k with defining polynomial x^2 + 3 2.0 f2 == s -> False
+Number Field in k with defining polynomial x^2 + 3 2.0 s == f2 -> False
+Number Field in k with defining polynomial x^2 + 3 (2+0j) B(2) == s -> False
+Number Field in k with defining polynomial x^2 + 3 (2+0j) s == B(2) -> False
+Number Field in k with defining polynomial x^2 + 3 (2+0j) B(2) != s -> True
+Number Field in k with defining polynomial x^2 + 3 (2+0j) f2 == s -> False
+Number Field in k with defining polynomial x^2 + 3 (2+0j) s == f2 -> False
+Number Field in m with defining polynomial x^2 + 4 2.00000000000000 B(2) == s -> False
+Number Field in m with defining polynomial x^2 + 4 2.00000000000000 s == B(2) -> False
+Number Field in m with defining polynomial x^2 + 4 2.00000000000000 B(2) != s -> True
+Number Field in m with defining polynomial x^2 + 4 2.00000000000000 f2 == s -> False
+Number Field in m with defining polynomial x^2 + 4 2.00000000000000 s == f2 -> False
+Number Field in m with defining polynomial x^2 + 4 2.0 B(2) == s -> False
+Number Field in m with defining polynomial x^2 + 4 2.0 s == B(2) -> False
+Number Field in m with defining polynomial x^2 + 4 2.0 B(2) != s -> True
+Number Field in m with defining polynomial x^2 + 4 2.0 f2 == s -> False
+Number Field in m with defining polynomial x^2 + 4 2.0 s == f2 -> False
+Number Field in m with defining polynomial x^2 + 4 2.0000000000000000000000000000 B(2) == s -> False
+Number Field in m with defining polynomial x^2 + 4 2.0000000000000000000000000000 s == B(2) -> False
+Number Field in m with defining polynomial x^2 + 4 2.0000000000000000000000000000 B(2) != s -> True
+Number Field in m with defining polynomial x^2 + 4 2.0000000000000000000000000000 f2 == s -> False
+Number Field in m with defining polynomial x^2 + 4 2.0000000000000000000000000000 s == f2 -> False
+Number Field in m with defining polynomial x^2 + 4 2.00000000000000 B(2) == s -> False
+Number Field in m with defining polynomial x^2 + 4 2.00000000000000 s == B(2) -> False
+Number Field in m with defining polynomial x^2 + 4 2.00000000000000 B(2) != s -> True
+Number Field in m with defining polynomial x^2 + 4 2.00000000000000 f2 == s -> False
+Number Field in m with defining polynomial x^2 + 4 2.00000000000000 s == f2 -> False
+Number Field in m with defining polynomial x^2 + 4 2.0 B(2) == s -> False
+Number Field in m with defining polynomial x^2 + 4 2.0 s == B(2) -> False
+Number Field in m with defining polynomial x^2 + 4 2.0 B(2) != s -> True
+Number Field in m with defining polynomial x^2 + 4 2.0 f2 == s -> False
+Number Field in m with defining polynomial x^2 + 4 2.0 s == f2 -> False
+Number Field in m with defining polynomial x^2 + 4 2.0000000000000000000000000000 B(2) == s -> False
+Number Field in m with defining polynomial x^2 + 4 2.0000000000000000000000000000 s == B(2) -> False
+Number Field in m with defining polynomial x^2 + 4 2.0000000000000000000000000000 B(2) != s -> True
+Number Field in m with defining polynomial x^2 + 4 2.0000000000000000000000000000 f2 == s -> False
+Number Field in m with defining polynomial x^2 + 4 2.0000000000000000000000000000 s == f2 -> False
+Number Field in m with defining polynomial x^2 + 4 2.0 B(2) == s -> False
+Number Field in m with defining polynomial x^2 + 4 2.0 s == B(2) -> False
+Number Field in m with defining polynomial x^2 + 4 2.0 B(2) != s -> True
+Number Field in m with defining polynomial x^2 + 4 2.0 f2 == s -> False
+Number Field in m with defining polynomial x^2 + 4 2.0 s == f2 -> False
+Number Field in m with defining polynomial x^2 + 4 (2+0j) B(2) == s -> False
+Number Field in m with defining polynomial x^2 + 4 (2+0j) s == B(2) -> False
+Number Field in m with defining polynomial x^2 + 4 (2+0j) B(2) != s -> True
+Number Field in m with defining polynomial x^2 + 4 (2+0j) f2 == s -> False
+Number Field in m with defining polynomial x^2 + 4 (2+0j) s == f2 -> False
+Number Field in n with defining polynomial x^2 + x + 1 2.00000000000000 B(2) == s -> False
+Number Field in n with defining polynomial x^2 + x + 1 2.00000000000000 s == B(2) -> False
+Number Field in n with defining polynomial x^2 + x + 1 2.00000000000000 B(2) != s -> True
+Number Field in n with defining polynomial x^2 + x + 1 2.00000000000000 f2 == s -> False
+Number Field in n with defining polynomial x^2 + x + 1 2.00000000000000 s == f2 -> False
+Number Field in n with defining polynomial x^2 + x + 1 2.0 B(2) == s -> False
+Number Field in n with defining polynomial x^2 + x + 1 2.0 s == B(2) -> False
+Number Field in n with defining polynomial x^2 + x + 1 2.0 B(2) != s -> True
+Number Field in n with defining polynomial x^2 + x + 1 2.0 f2 == s -> False
+Number Field in n with defining polynomial x^2 + x + 1 2.0 s == f2 -> False
+Number Field in n with defining polynomial x^2 + x + 1 2.0000000000000000000000000000 B(2) == s -> False
+Number Field in n with defining polynomial x^2 + x + 1 2.0000000000000000000000000000 s == B(2) -> False
+Number Field in n with defining polynomial x^2 + x + 1 2.0000000000000000000000000000 B(2) != s -> True
+Number Field in n with defining polynomial x^2 + x + 1 2.0000000000000000000000000000 f2 == s -> False
+Number Field in n with defining polynomial x^2 + x + 1 2.0000000000000000000000000000 s == f2 -> False
+Number Field in n with defining polynomial x^2 + x + 1 2.00000000000000 B(2) == s -> False
+Number Field in n with defining polynomial x^2 + x + 1 2.00000000000000 s == B(2) -> False
+Number Field in n with defining polynomial x^2 + x + 1 2.00000000000000 B(2) != s -> True
+Number Field in n with defining polynomial x^2 + x + 1 2.00000000000000 f2 == s -> False
+Number Field in n with defining polynomial x^2 + x + 1 2.00000000000000 s == f2 -> False
+Number Field in n with defining polynomial x^2 + x + 1 2.0 B(2) == s -> False
+Number Field in n with defining polynomial x^2 + x + 1 2.0 s == B(2) -> False
+Number Field in n with defining polynomial x^2 + x + 1 2.0 B(2) != s -> True
+Number Field in n with defining polynomial x^2 + x + 1 2.0 f2 == s -> False
+Number Field in n with defining polynomial x^2 + x + 1 2.0 s == f2 -> False
+Number Field in n with defining polynomial x^2 + x + 1 2.0000000000000000000000000000 B(2) == s -> False
+Number Field in n with defining polynomial x^2 + x + 1 2.0000000000000000000000000000 s == B(2) -> False
+Number Field in n with defining polynomial x^2 + x + 1 2.0000000000000000000000000000 B(2) != s -> True
+Number Field in n with defining polynomial x^2 + x + 1 2.0000000000000000000000000000 f2 == s -> False
+Number Field in n with defining polynomial x^2 + x + 1 2.0000000000000000000000000000 s == f2 -> False
+Number Field in n with defining polynomial x^2 + x + 1 2.0 B(2) == s -> False
+Number Field in n with defining polynomial x^2 + x + 1 2.0 s == B(2) -> False
+Number Field in n with defining polynomial x^2 + x + 1 2.0 B(2) != s -> True
+Number Field in n with defining polynomial x^2 + x + 1 2.0 f2 == s -> False
+Number Field in n with defining polynomial x^2 + x + 1 2.0 s == f2 -> False
+Number Field in n with defining polynomial x^2 + x + 1 (2+0j) B(2) == s -> False
+Number Field in n with defining polynomial x^2 + x + 1 (2+0j) s == B(2) -> False
+Number Field in n with defining polynomial x^2 + x + 1 (2+0j) B(2) != s -> True
+Number Field in n with defining polynomial x^2 + x + 1 (2+0j) f2 == s -> False
+Number Field in n with defining polynomial x^2 + x + 1 (2+0j) s == f2 -> False
+Number Field in p with defining polynomial x^2 - 18 2.00000000000000 B(2) == s -> False
+Number Field in p with defining polynomial x^2 - 18 2.00000000000000 s == B(2) -> False
+Number Field in p with defining polynomial x^2 - 18 2.00000000000000 B(2) != s -> True
+Number Field in p with defining polynomial x^2 - 18 2.00000000000000 f2 == s -> False
+Number Field in p with defining polynomial x^2 - 18 2.00000000000000 s == f2 -> False
+Number Field in p with defining polynomial x^2 - 18 2.0 B(2) == s -> False
+Number Field in p with defining polynomial x^2 - 18 2.0 s == B(2) -> False
+Number Field in p with defining polynomial x^2 - 18 2.0 B(2) != s -> True
+Number Field in p with defining polynomial x^2 - 18 2.0 f2 == s -> False
+Number Field in p with defining polynomial x^2 - 18 2.0 s == f2 -> False
+Number Field in p with defining polynomial x^2 - 18 2.0000000000000000000000000000 B(2) == s -> False
+Number Field in p with defining polynomial x^2 - 18 2.0000000000000000000000000000 s == B(2) -> False
+Number Field in p with defining polynomial x^2 - 18 2.0000000000000000000000000000 B(2) != s -> True
+Number Field in p with defining polynomial x^2 - 18 2.0000000000000000000000000000 f2 == s -> False
+Number Field in p with defining polynomial x^2 - 18 2.0000000000000000000000000000 s == f2 -> False
+Number Field in p with defining polynomial x^2 - 18 2.00000000000000 B(2) == s -> False
+Number Field in p with defining polynomial x^2 - 18 2.00000000000000 s == B(2) -> False
+Number Field in p with defining polynomial x^2 - 18 2.00000000000000 B(2) != s -> True
+Number Field in p with defining polynomial x^2 - 18 2.00000000000000 f2 == s -> False
+Number Field in p with defining polynomial x^2 - 18 2.00000000000000 s == f2 -> False
+Number Field in p with defining polynomial x^2 - 18 2.0 B(2) == s -> False
+Number Field in p with defining polynomial x^2 - 18 2.0 s == B(2) -> False
+Number Field in p with defining polynomial x^2 - 18 2.0 B(2) != s -> True
+Number Field in p with defining polynomial x^2 - 18 2.0 f2 == s -> False
+Number Field in p with defining polynomial x^2 - 18 2.0 s == f2 -> False
+Number Field in p with defining polynomial x^2 - 18 2.0000000000000000000000000000 B(2) == s -> False
+Number Field in p with defining polynomial x^2 - 18 2.0000000000000000000000000000 s == B(2) -> False
+Number Field in p with defining polynomial x^2 - 18 2.0000000000000000000000000000 B(2) != s -> True
+Number Field in p with defining polynomial x^2 - 18 2.0000000000000000000000000000 f2 == s -> False
+Number Field in p with defining polynomial x^2 - 18 2.0000000000000000000000000000 s == f2 -> False
+Number Field in p with defining polynomial x^2 - 18 2.0 B(2) == s -> False
+Number Field in p with defining polynomial x^2 - 18 2.0 s == B(2) -> False
+Number Field in p with defining polynomial x^2 - 18 2.0 B(2) != s -> True
+Number Field in p with defining polynomial x^2 - 18 2.0 f2 == s -> False
+Number Field in p with defining polynomial x^2 - 18 2.0 s == f2 -> False
+Number Field in p with defining polynomial x^2 - 18 (2+0j) B(2) == s -> False
+Number Field in p with defining polynomial x^2 - 18 (2+0j) s == B(2) -> False
+Number Field in p with defining polynomial x^2 - 18 (2+0j) B(2) != s -> True
+Number Field in p with defining polynomial x^2 - 18 (2+0j) f2 == s -> False
+Number Field in p with defining polynomial x^2 - 18 (2+0j) s == f2 -> False
+Number Field in c with defining polynomial x^3 - 2 2.00000000000000 B(2) == s -> False
+Number Field in c with defining polynomial x^3 - 2 2.00000000000000 s == B(2) -> False
+Number Field in c with defining polynomial x^3 - 2 2.00000000000000 B(2) != s -> True
+Number Field in c with defining polynomial x^3 - 2 2.00000000000000 f2 == s -> False
+Number Field in c with defining polynomial x^3 - 2 2.00000000000000 s == f2 -> False
+Number Field in c with defining polynomial x^3 - 2 2.0 B(2) == s -> False
+Number Field in c with defining polynomial x^3 - 2 2.0 s == B(2) -> False
+Number Field in c with defining polynomial x^3 - 2 2.0 B(2) != s -> True
+Number Field in c with defining polynomial x^3 - 2 2.0 f2 == s -> False
+Number Field in c with defining polynomial x^3 - 2 2.0 s == f2 -> False
+Number Field in c with defining polynomial x^3 - 2 2.0000000000000000000000000000 B(2) == s -> False
+Number Field in c with defining polynomial x^3 - 2 2.0000000000000000000000000000 s == B(2) -> False
+Number Field in c with defining polynomial x^3 - 2 2.0000000000000000000000000000 B(2) != s -> True
+Number Field in c with defining polynomial x^3 - 2 2.0000000000000000000000000000 f2 == s -> False
+Number Field in c with defining polynomial x^3 - 2 2.0000000000000000000000000000 s == f2 -> False
+Number Field in c with defining polynomial x^3 - 2 2.00000000000000 B(2) == s -> False
+Number Field in c with defining polynomial x^3 - 2 2.00000000000000 s == B(2) -> False
+Number Field in c with defining polynomial x^3 - 2 2.00000000000000 B(2) != s -> True
+Number Field in c with defining polynomial x^3 - 2 2.00000000000000 f2 == s -> False
+Number Field in c with defining polynomial x^3 - 2 2.00000000000000 s == f2 -> False
+Number Field in c with defining polynomial x^3 - 2 2.0 B(2) == s -> False
+Number Field in c with defining polynomial x^3 - 2 2.0 s == B(2) -> False
+Number Field in c with defining polynomial x^3 - 2 2.0 B(2) != s -> True
+Number Field in c with defining polynomial x^3 - 2 2.0 f2 == s -> False
+Number Field in c with defining polynomial x^3 - 2 2.0 s == f2 -> False
+Number Field in c with defining polynomial x^3 - 2 2.0000000000000000000000000000 B(2) == s -> False
+Number Field in c with defining polynomial x^3 - 2 2.0000000000000000000000000000 s == B(2) -> False
+Number Field in c with defining polynomial x^3 - 2 2.0000000000000000000000000000 B(2) != s -> True
+Number Field in c with defining polynomial x^3 - 2 2.0000000000000000000000000000 f2 == s -> False
+Number Field in c with defining polynomial x^3 - 2 2.0000000000000000000000000000 s == f2 -> False
+Number Field in c with defining polynomial x^3 - 2 2.0 B(2) == s -> False
+Number Field in c with defining polynomial x^3 - 2 2.0 s == B(2) -> False
+Number Field in c with defining polynomial x^3 - 2 2.0 B(2) != s -> True
+Number Field in c with defining polynomial x^3 - 2 2.0 f2 == s -> False
+Number Field in c with defining polynomial x^3 - 2 2.0 s == f2 -> False
+Number Field in c with defining polynomial x^3 - 2 (2+0j) B(2) == s -> False
+Number Field in c with defining polynomial x^3 - 2 (2+0j) s == B(2) -> False
+Number Field in c with defining polynomial x^3 - 2 (2+0j) B(2) != s -> True
+Number Field in c with defining polynomial x^3 - 2 (2+0j) f2 == s -> False
+Number Field in c with defining polynomial x^3 - 2 (2+0j) s == f2 -> False

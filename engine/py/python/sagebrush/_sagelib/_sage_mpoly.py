@@ -340,7 +340,9 @@ def _normalize_names(n, names):
         return [t.strip() for t in s.split(",") if t.strip()]
     if n is None or n == 1:
         return [s]
-    if len(s) == n and n > 1:
+    if len(s) == n and n > 1 and s.isalpha():
+        # (one letter per variable only when all are letters, as Sage:
+        # PolynomialRing(QQ, 2, 'a1') is in a10, a11)
         return list(s)
     return [s + str(i) for i in range(n)]
 
@@ -2048,7 +2050,7 @@ class MPolynomial:
             cs[e[i]] = c
         if R is None:
             from _sage_poly import PolynomialRing
-            R = PolynomialRing(S._base, S._names[i])
+            R = PolynomialRing(S._base, S._names[i], _internal=True)
         return R([S._dom._out(c) for c in cs])
 
     def resultant(self, other, variable=None):
@@ -2451,7 +2453,7 @@ def _to_univariate(f, vs, D):
     for k, c in terms.items():
         cs[k] = c
     from _sage_poly import PolynomialRing
-    U = PolynomialRing(R._base, "_t")
+    U = PolynomialRing(R._base, "_t", _internal=True)
     return U([dom._out(c) for c in cs])
 
 
