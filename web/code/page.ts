@@ -109,7 +109,9 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   if (o.kind !== "text") { toggle.hidden = true; note(`This file can't be shown as text (${o.why}): download it from Files.`); return; }
   let text = o.text, saved = o.text, rev = entry.rev ?? 0, eol = o.eol;
   let editable = editableOf(o.saveable, read.content.length, entry.remote);
-  const whyNot = () => (!o.saveable ? o.why : entry.remote ? "it is in the cloud: open it on the device that made it" : `it is over ${fmtSize(CODE.editBytes)}`);
+  // (why it can't be written back exactly, as it is now: as it opened, then as each change made elsewhere left it)
+  let unsaveable = o.saveable ? "" : o.why;
+  const whyNot = () => (unsaveable ? unsaveable : entry.remote ? "it is in the cloud: open it on the device that made it" : `it is over ${fmtSize(CODE.editBytes)}`);
 
   // ---- View and Edit
   const key = modeKey("file", host.fid);
@@ -244,6 +246,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     if (!fresh || !fo || fo.kind !== "text") { stop("This file was changed elsewhere and can't be shown here now."); return; }
     text = saved = fo.text; eol = fo.eol; rev = fresh.entry.rev ?? 0; entry = fresh.entry;
     editable = editableOf(fo.saveable, fresh.content.length, entry.remote);
+    unsaveable = fo.saveable ? "" : fo.why;
     if (!editable && mode === "edit") mode = "view";
     if (mode === "edit") { const a = ta.selectionStart, b = ta.selectionEnd, top = ta.scrollTop; ta.value = text; ta.setSelectionRange(Math.min(a, text.length), Math.min(b, text.length)); ta.scrollTop = top; drawEditHl(); toggle.disabled = !editable; }
     else showMode();

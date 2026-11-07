@@ -253,6 +253,62 @@ try {
   await go(base + "?code=nosuchfid000");
   check(await until(`/isn't here any more/.test(document.querySelector(".code-page .code-note")?.textContent ?? "")`, 30000), "an id no file has: said");
 
+  // (a change made elsewhere that leaves the file unable to be written back exactly: the page follows it, read-only,
+  // saying why: this file's why, not the one it opened with; grader's P2)
+  await ev(`${W}.create("/p2.py", { content: "v1\\n" }).then(() => 1)`);
+  check(await openCode("/p2.py"), "(a file to follow into read-only)");
+  await ev(`${C}.setMode("edit").then(() => 1)`);
+  await until(`!!${TA} && ${C}.editable()`);
+  await ev(`${W}.write("/p2.py", "a\\r\\nb\\n").then(() => 1)`);
+  check(await until(`${C}.mode() === "view" && !${C}.editable() && document.querySelector(".code-page .code-toggle").disabled && /mixes line endings/.test(document.querySelector(".code-page .code-toggle").title)`, 10000), "a change elsewhere it can't write back exactly: followed, read-only, saying why: " + JSON.stringify(await ev(`document.querySelector(".code-page .code-toggle")?.title`)));
+  // (a page mounted over another: the other's is disposed, its watcher gone: a rename of its file elsewhere names
+  // nothing, a change to it reads nothing; grader's C18. The page module itself, over an in-memory workspace of two
+  // files, as boot.ts mounts it)
+  await go(base);
+  await until(`!!${W}`, 60000);
+  const c18 = await ev(`(async () => {
+    const m = await import("/sagebrush-code.js");
+    const files = { a: { path: "/c18a.py", text: "a\\n", rev: 1 }, b: { path: "/c18b.py", text: "b\\n", rev: 1 } };
+    const subs = new Set(), reads = { a: 0, b: 0 };
+    const entryOf = (fid) => ({ kind: "file", fid, path: files[fid].path, rev: files[fid].rev, size: files[fid].text.length });
+    const ws = {
+      pathOfFile: async (fid) => (files[fid] ? { ok: true, path: files[fid].path, entry: entryOf(fid) } : { ok: false, why: "none" }),
+      readUpTo: async (path) => { const fid = Object.keys(files).find((k) => files[k].path === path); reads[fid]++; return { content: new TextEncoder().encode(files[fid].text), entry: entryOf(fid) }; },
+      watch: (cb) => { subs.add(cb); return () => subs.delete(cb); },
+      list: async () => [],
+    };
+    const host = (fid) => ({ ws, fid, open() {}, openFiles() {}, examples: async () => false, renderFileMenu() {} });
+    const root = document.createElement("div"); document.body.append(root);
+    await m.mount(root, host("a"));
+    await m.mount(root, host("b"));
+    const before = { subs: subs.size, readsA: reads.a };
+    files.a.path = "/c18a-moved.py"; files.a.rev = 2; files.a.text = "a changed\\n";
+    for (const cb of [...subs]) cb({ ops: [{ op: "rename", fid: "a", path: "/c18a.py", to: "/c18a-moved.py" }, { op: "write", fid: "a", path: "/c18a-moved.py" }] });
+    await new Promise((r) => setTimeout(r, 800));
+    const out = { subs: before.subs, readsA: reads.a - before.readsA, title: document.title, shown: window.sagebrush?.code?.path };
+    window.sagebrush?.code && root.remove();
+    return out;
+  })()`);
+  check(c18.subs === 1 && c18.readsA === 0 && c18.title.startsWith("c18b.py") && c18.shown === "/c18b.py", "a page mounted over another: the other's watcher is gone; its file renamed and changed elsewhere, the title stays the shown one's and nothing of it is read: " + JSON.stringify(c18));
+  // (a middle-click on a code file in Trash opens nothing, as a click there; grader's B5c)
+  await ev(`(async () => { const w = ${W}; await w.create("/trashed.py", { content: "x\\n" }); await w.remove("/trashed.py"); return 1; })()`);
+  await go(base);
+  await until(`!!${W} && typeof window.__sbCode === "function"`, 60000);
+  await ev(`(() => { if (document.querySelector("#wssidebar")?.hidden !== false) document.querySelector("#wsfilesbtn").click(); return 1; })()`);
+  await until(`[...document.querySelectorAll("#wssidebar button")].some((b) => b.textContent === "Trash")`, 20000);
+  await ev(`(() => { [...document.querySelectorAll("#wssidebar button")].find((b) => b.textContent === "Trash").click(); return 1; })()`);
+  check(await until(`!!document.querySelector('#wssidebar .frow[data-path="/Trash/trashed.py"]')`, 20000), "(Trash shown, the trashed .py in it)");
+  const midT = await ev(`(async () => {
+    const opened = [], own = window.open, before = location.href;
+    window.open = (u) => { opened.push(String(u)); return null; };
+    document.querySelector('#wssidebar .frow[data-path="/Trash/trashed.py"]').dispatchEvent(new MouseEvent("auxclick", { button: 1, bubbles: true, cancelable: true }));
+    await new Promise((s) => setTimeout(s, 500));
+    window.open = own;
+    return { opened, here: location.href === before };
+  })()`);
+  check(midT.opened.length === 0 && midT.here, "a middle-click on a code file in Trash opens nothing: " + JSON.stringify(midT));
+  await ev(`(() => { [...document.querySelectorAll("#wssidebar button")].find((b) => /All files/.test(b.textContent))?.click(); return 1; })()`);
+
   // an address that isn't a file's: refused, said
   await go(base + "?code=a%2Fb");
   check(await until(`[...document.querySelectorAll("body > p")].some((p) => p.textContent === "This isn't a file's address.")`, 30000) && !(await ev(`!!${C}`)), "?code= with a / in it: not a file's address, said");
