@@ -76,7 +76,9 @@ __all__ = [
     "text_control",
 ]
 
-from _sage_table import table
+# (Sage's table(): its module loaded at its first use, not at Sage mode's start, which is compiled ahead: _sage_lazy)
+from _sage_lazy import lazy_import as _lazy_import
+_lazy_import("_sage_table", "table", globals())
 from _sage_expr import (Expression as _Expr, _expr, var, x, pi, e, I, oo, infinity, Infinity, symbolic_sum, assume, forget, assumptions, assuming,
                         euler_gamma, SR, function, sin, cos, tan, cot, sec, csc, asin, acos, atan,
                         arcsin, arccos, arctan, arccot, arcsec, arccsc, atan2, arctan2, sinh, cosh,
