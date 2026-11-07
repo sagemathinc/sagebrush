@@ -1,9 +1,9 @@
 {
  "v": 1,
- "reason": "bool() of a relation between algebraic constants (rationals, I, sums, products, rational powers, abs) decided exactly as Sage decides it, by their algebraic number (lib/_sage_qqbar.py converts abs), friction W28 part 1; the exact-sign work in lib/_sage_expr_more.py, loaded only when the engine and the double enclosure leave the relation undecided (lib/_sage_expr.py keeps a thin _exact_sign) Re-measured with bun 1.4.4 (size-record.sh) on master 1c64ac7b vs head 8ac5502c: cli/lib.gen.js +1656, cli/pyjs.cjs +1532, engine/lib/sage-more.src +4754, engine/lib/sage.src +114, engine/sagebrush-worker.js +33; no other row moves. Markers: exact, except cli/pyjs.cjs 1564 (+1532 measured, plus 32 B of margin, as it moves with master).",
+ "reason": "bool() of a relation between algebraic constants (rationals, I, sums, products, rational powers, abs) decided exactly as Sage decides it, by their algebraic number (lib/_sage_qqbar.py converts abs), friction W28 part 1; the exact-sign work in lib/_sage_expr_more.py, loaded only when the engine and the double enclosure leave the relation undecided (lib/_sage_expr.py keeps a thin _exact_sign) Re-measured with bun 1.4.4 (size-record.sh) on master 0a255d10 vs head c0c46778: cli/lib.gen.js +2052, cli/pyjs.cjs +1968, engine/lib/sage-more.src +4754, engine/lib/sage.src +114, engine/sagebrush-worker.js +33; no other row moves. Markers: exact, except cli/pyjs.cjs 2000 (+1968 measured, plus 32 B of margin, as it moves with master).",
  "bytes": {
-  "cli/lib.gen.js": 1656,
-  "cli/pyjs.cjs": 1564,
+  "cli/lib.gen.js": 2052,
+  "cli/pyjs.cjs": 2000,
   "engine/lib/sage-more.src": 4754,
   "engine/lib/sage.src": 114,
   "engine/sagebrush-worker.js": 33
