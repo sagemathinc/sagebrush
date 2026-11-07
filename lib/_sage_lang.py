@@ -1578,9 +1578,6 @@ class _RealField:
         return RealNumber(_r.uniform(float(min), float(max)))
 
     def __contains__(self, x):
-        # (a string converts but is no element, as Sage: '7' in RR is False)
-        if isinstance(x, (str, bytes)):
-            return False
         try:
             float(x)
             return True

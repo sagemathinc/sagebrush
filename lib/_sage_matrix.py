@@ -4255,17 +4255,6 @@ class ComplexField_:
 
     prec = precision
 
-    def __contains__(self, x):
-        # (an element is what converts, but a string is none, as Sage:
-        # '7' in CC is False)
-        if isinstance(x, (str, bytes)):
-            return False
-        try:
-            self(x)
-            return True
-        except (TypeError, ValueError, ArithmeticError):
-            return False
-
     def __call__(self, re=0, im=0):
         """A complex number from a number or real and imaginary parts.
 
