@@ -13,10 +13,10 @@
 //   settled; a newer render abandons an older one, which then commits nothing.  Later
 //   size changes are height messages, at most HEIGHT_HZ a second, the last always sent.
 // - The frame never navigates, opens, downloads, prints or asks the host to do work:
-//   the schema has no such message.  Links are inert (OUTISO-NAV-1): every <a> and
-//   <area> the sanitizers kept (their hrefs, the "Open … in a new tab" link that stands
-//   for an <iframe>) is drawn as its text alone, and a click, a key or a submit that
-//   would still follow one is cancelled.  A host action for links is separately
+//   the schema has no such message.  Links are inert (OUTISO-NAV-1): every
+//   link the sanitizers kept (their hrefs, the "Open … in a new tab" link that stands
+//   for an <iframe>) is drawn as its text alone, and a click that would still follow
+//   one is cancelled; forms can't submit (no allow-forms, form-action 'none').  A host action for links is separately
 //   reviewed later; until then a link here goes nowhere, not even within the frame.
 import { LIMITS, decode, encode } from "./protocol.js";
 import { safeHtml } from "../safe-html.ts";
@@ -55,13 +55,15 @@ function draw(o) {
   return d;
 }
 
-// (a link drawn as its text: the element goes, its children stay; SVG's <a> too)
+// (a link drawn as its text: the element goes, its children stay; SVG's <a> too.  The sanitizers emit no <area>:
+// safe-html.ts allows only its TAGS, and SVG has none)
 function inert(el) {
-  for (const a of el.querySelectorAll("a, area")) a.replaceWith(...a.childNodes);
+  for (const a of el.querySelectorAll("a")) a.replaceWith(...a.childNodes);
   return el;
 }
-// (and nothing that would still navigate: a link's activation, a form's submission)
-for (const t of ["click", "auxclick", "submit"]) addEventListener(t, (e) => { if (t === "submit" || e.target.closest?.("a, area, [href]")) e.preventDefault(); }, true);
+// (and a link's activation, should one ever be there, cancelled.  A form can't submit at all: the sandbox has no
+// allow-forms and the policy's form-action is 'none')
+for (const t of ["click", "auxclick"]) addEventListener(t, (e) => { if (e.target.closest?.("a, area, [href]")) e.preventDefault(); }, true);
 
 // (the layout settled: forced now, then a frame or, where a hidden frame's frames are paused, a short timer)
 const frame = () => { root.getBoundingClientRect(); return Promise.race([new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))), deadline(50)]); };

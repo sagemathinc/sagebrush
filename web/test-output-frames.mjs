@@ -56,6 +56,17 @@ const ROGUES = {
     else if (r.generation === 2) { c(50); h(600); h(999, 1); setTimeout(() => h(601), 5); }
     else c(77);
   }`),
+  // (O5: generation 1 commits, then one height; generation 2 sends a height BEFORE its commit, then commits at 51)
+  early: rogue(`(port, r) => {
+    const c = (h) => port.postMessage(JSON.stringify({ v: 1, type: "committed", generation: r.generation, area: r.area, ids: r.outputs.map((x) => x.id), height: h }));
+    const h = (height) => port.postMessage(JSON.stringify({ v: 1, type: "height", generation: r.generation, height }));
+    if (r.generation === 1) { c(50); h(60); } else { h(333); c(51); }
+  }`),
+  // (O16: from generation 2 on, an error for the generation before, then the right commit)
+  olderr: rogue(`(port, r) => {
+    if (r.generation > 1) port.postMessage(JSON.stringify({ v: 1, type: "error", generation: r.generation - 1, reason: "old" }));
+    port.postMessage(JSON.stringify({ v: 1, type: "committed", generation: r.generation, area: r.area, ids: r.outputs.map((x) => x.id), height: 52 }));
+  }`),
   // (commits 300 ms after the render: a message still to come when the set is disposed)
   late: rogue(`(port, r) => setTimeout(() => port.postMessage(JSON.stringify({ v: 1, type: "committed", generation: r.generation, area: r.area, ids: r.outputs.map((x) => x.id), height: 40 })), 300)`),
 };
@@ -96,7 +107,7 @@ const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req) => {
 } });
 // (the hosted shell's own site: 127.0.0.1, while the page is on localhost; "/" lists the page as
 // its ancestor, "/other/" only a page that isn't this one; it records any cookie it is sent)
-const shellSeen = { cookies: [], paths: [] };
+const shellSeen = { cookies: [], paths: [], referers: [] };
 const hosted = (ancestors) => {
   const f = hostedShellFiles(shell, ancestors);
   const headers = Object.fromEntries(f._headers.split("\n/index.html")[0].split("\n").slice(1).filter(Boolean).map((l) => l.trim().split(/: (.*)/s).slice(0, 2)));
@@ -107,6 +118,7 @@ const shellSite = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req) => {
   const p = new URL(req.url).pathname;
   shellSeen.paths.push(p);
   if (req.headers.get("cookie")) shellSeen.cookies.push(req.headers.get("cookie"));
+  if (req.headers.get("referer")) shellSeen.referers.push(req.headers.get("referer"));
   const page = shellPages[p];
   return page ? new Response(page.body, { headers: page.headers }) : new Response("not found", { status: 404 });
 } });
@@ -245,6 +257,74 @@ try {
     ok(probe.worker !== "ran", "nor runs a worker (worker-src 'none'): " + probe.worker);
   }
 
+  // ---- the shell itself, driven without the host: its port from its parent only and only once (S1, S2), one commit
+  // per generation (S4), and its last height always sent (S6)
+  await ev(`(window.driver = async ({ width = "600px" } = {}) => {
+    const f = document.createElement("iframe"); f.setAttribute("sandbox", "allow-scripts"); f.style.cssText = "border:0;display:block;position:fixed;top:0;left:0;z-index:9;height:200px;width:" + width; /* (in view: an offscreen frame's rendering, so its ResizeObserver, is paused) */ f.srcdoc = SHELL;
+    document.body.append(f);
+    await new Promise((r) => f.addEventListener("load", r, { once: true }));
+    const d = { f, got: [], ch: null };
+    d.adopt = () => { const ch = new MessageChannel(); const mine = []; ch.port1.onmessage = (e) => { const m = JSON.parse(e.data); mine.push(m); d.got.push(m); }; d.ch = ch; f.contentWindow.postMessage({ sbOutIso: 1 }, "*", [ch.port2]); return mine; };
+    d.send = (o) => d.ch.port1.postMessage(JSON.stringify({ v: 1, ...o }));
+    return d;
+  }, 1)`);
+  // (S1: a sibling frame offers the shell a port first; the shell takes only its parent's)
+  const s1 = await ev(`(async () => {
+    const d = await driver();
+    const idx = Array.from({ length: window.frames.length }, (_, i) => window.frames[i]).indexOf(d.f.contentWindow);
+    window.rogueGot = 0; addEventListener("message", (e) => { if (e.data?.rogueGot) rogueGot++; });
+    const r = document.createElement("iframe"); r.setAttribute("sandbox", "allow-scripts");
+    r.srcdoc = "<script>const ch = new MessageChannel(); ch.port1.onmessage = () => parent.postMessage({ rogueGot: 1 }, '*'); parent.frames[" + idx + "].postMessage({ sbOutIso: 1 }, '*', [ch.port2]);<\/script>";
+    document.body.append(r);
+    await new Promise((ok) => setTimeout(ok, 500));
+    const mine = d.adopt();
+    await new Promise((ok) => setTimeout(ok, 300));
+    const out = { idx, parentReady: mine.filter((m) => m.type === "ready").length, rogueGot };
+    // (S2: after a dispose the shell has no port, and still takes no other)
+    d.send({ type: "dispose" });
+    await new Promise((ok) => setTimeout(ok, 100));
+    const again = d.adopt();
+    await new Promise((ok) => setTimeout(ok, 400));
+    out.afterDispose = again.length;
+    d.f.remove(); r.remove();
+    return out;
+  })()`);
+  ok(s1.idx >= 0 && s1.parentReady === 1 && s1.rogueGot === 0, "the shell takes its port only from its parent: a sibling frame's offer, made first, gets nothing: " + JSON.stringify(s1));
+  ok(s1.afterDispose === 0, "it takes a port only once: offered another after a dispose, it says nothing: " + JSON.stringify(s1));
+  // (S4: generation 2 sent right behind generation 1: only generation 2 commits)
+  const s4 = await ev(`(async () => {
+    const d = await driver(); const mine = d.adopt();
+    await until(() => mine.some((m) => m.type === "ready"));
+    d.send({ type: "render", generation: 1, area: "s4", outputs: [{ id: "o", kind: "text", body: "one" }] });
+    d.send({ type: "render", generation: 2, area: "s4", outputs: [{ id: "o", kind: "text", body: "two" }] });
+    await until(() => mine.some((m) => m.type === "committed" && m.generation === 2), 5000);
+    await new Promise((ok) => setTimeout(ok, 400));
+    d.f.remove();
+    return mine.filter((m) => m.type === "committed").map((m) => m.generation);
+  })()`);
+  ok(JSON.stringify(s4) === "[2]", "a render replaced before it settles commits nothing: only the newer generation commits: " + JSON.stringify(s4));
+  // (S6: two size changes 5 ms apart, the second inside the shell's interval: its height is still sent, late)
+  const s6 = await ev(`(async () => {
+    const d = await driver(); const mine = d.adopt();
+    await until(() => mine.some((m) => m.type === "ready"));
+    const outputs = [{ id: "o", kind: "text", body: "word ".repeat(600) }];
+    d.send({ type: "render", generation: 1, area: "s6", outputs });
+    await until(() => mine.some((m) => m.type === "committed"));
+    const first = mine.find((m) => m.type === "committed").height;
+    await new Promise((ok) => setTimeout(ok, 200));
+    d.f.style.width = "300px";
+    await new Promise((ok) => setTimeout(ok, 5));
+    d.f.style.width = "150px";
+    await new Promise((ok) => setTimeout(ok, 500));
+    const last = mine.filter((m) => m.type === "height").at(-1)?.height ?? null;
+    d.send({ type: "render", generation: 2, area: "s6", outputs });
+    await until(() => mine.some((m) => m.type === "committed" && m.generation === 2));
+    const fresh = mine.find((m) => m.type === "committed" && m.generation === 2).height;
+    d.f.remove();
+    return { first, last, fresh, heights: mine.filter((m) => m.type === "height").map((m) => m.height) };
+  })()`);
+  ok(s6.last !== null && s6.last === s6.fresh && s6.fresh > s6.first, "the shell's last height is always sent: after two quick resizes it ends at the final size's height: " + JSON.stringify(s6));
+
   // ---- OUTISO-NAV-1: links are inert, packaged and hosted: no navigation, no request, the frame still live
   const navCheck = async (sess, label, mgr, areaVar) => {
     const before = location => location;
@@ -303,6 +383,7 @@ try {
       "inside it: an opaque origin, no cookie or storage, and no network under the response's own policy (no meta CSP): " + JSON.stringify(hp));
   }
   if (hsess) { await ev(`(window.HA.id = "h1", 1)`); await navCheck(hsess, "hosted", "H", "HA"); }
+  ok(shellSeen.referers.length === 0, "the shell's site is never told the page's address (no Referer, referrerpolicy no-referrer): " + JSON.stringify(shellSeen.referers));
   ok(shellSeen.cookies.length === 0, "the shell's site was never sent its cookie: " + JSON.stringify(shellSeen.cookies));
   await ev(`(window.HX = make({ url: ${JSON.stringify(shellUrl + "other/")}, loadMs: 1500 }), window.HXA = HX.area("hx1", box()), HXA.show(), HXA.render([{ id: "o1", kind: "html", body: "<i>x</i>" }]), 1)`);
   const hx = await ev(`until(() => events.find((e) => e.area === "hx1" && (e.type === "committed" || e.type === "error")), 6000)`);
@@ -331,11 +412,36 @@ try {
     "a height queued at the host when a newer render starts is dropped, another generation's is ignored, and the new commit's height stands: " + JSON.stringify(fl2));
   await ev("(FL.dispose(), 1)");
 
+  // ---- a height sent before its commit is never applied, even when the commit comes before the host's next interval (O5)
+  await ev(`(window.EA1 = make({ rogue: "early" }).area("ea1", box()), EA1.show(), EA1.render([{ id: "x", kind: "text", body: "t" }]),
+    window.hook = (e) => { if (e.area === "ea1" && e.type === "height" && e.generation === 1) { window.hook = null; EA1.render([{ id: "x", kind: "text", body: "t2" }]); } }, 1)`);
+  await ev(`until(() => events.find((e) => e.area === "ea1" && e.type === "committed" && e.generation === 2))`);
+  await sleep(300);
+  const ea = await ev(`({ hs: events.filter((e) => e.area === "ea1" && e.type === "height").map((e) => [e.generation, e.height]), h: EA1.state.height })`);
+  ok(ea.hs.length === 1 && ea.hs[0][1] === 60 && ea.h === 51, "a height the frame sends before its generation's commit is never applied, even just after that commit: " + JSON.stringify(ea));
+
+  // ---- an error for another generation doesn't end the current render (O16)
+  await ev(`(window.OE = make({ rogue: "olderr" }).area("oe1", box()), OE.show(), OE.render([{ id: "x", kind: "text", body: "t" }]), 1)`);
+  await ev(`until(() => events.find((e) => e.area === "oe1" && e.type === "committed" && e.generation === 1))`);
+  await ev(`(OE.render([{ id: "x", kind: "text", body: "t2" }]), 1)`);
+  await ev(`until(() => events.find((e) => e.area === "oe1" && e.type === "committed" && e.generation === 2), 5000)`);
+  await sleep(200);
+  const oe = await ev(`events.filter((e) => e.area === "oe1" && (e.type === "committed" || e.type === "error")).map((e) => e.type + e.generation)`);
+  ok(JSON.stringify(oe) === '["committed1","committed2"]', "an error the frame reports for an older generation doesn't end the current one: " + JSON.stringify(oe));
+
+  // ---- a newer render, or a clear, ends the pending one at once, as "replaced" or "cleared" (O12, O17)
+  await ev(`(window.RC = make({ rogue: "stuck", commitMs: 60000 }), window.RCA = RC.area("rc1", box()), window.RCB = RC.area("rc2", box()), RCA.show(), RCB.show(),
+    RCA.render([{ id: "x", kind: "text", body: "a" }]), RCA.render([{ id: "x", kind: "text", body: "b" }]), RCB.render([{ id: "x", kind: "text", body: "c" }]), RCB.clear(), 1)`);
+  await sleep(200);
+  const rc = await ev(`events.filter((e) => (e.area === "rc1" || e.area === "rc2") && (e.type === "committed" || e.type === "error")).map((e) => [e.area, e.generation, e.reason])`);
+  ok(JSON.stringify(rc) === '[["rc1",1,"replaced"],["rc2",1,"cleared"]]', "a newer render ends the pending one as replaced, and a clear as cleared, at once: " + JSON.stringify(rc));
+  await ev("(RC.dispose(), 1)");
+
   // ---- deadlines: a renderer that never starts, or never commits, ends with text
   await ev(`(window.S = make({ rogue: "silent", loadMs: 700 }), window.SA = S.area("s1", window.SB = box()), SA.show(), SA.render([{ id: "x", kind: "html", body: "<b>rich</b>" }]), 1)`);
   const se = await ev(`until(() => events.find((e) => e.area === "s1" && e.type === "error"), 5000)`);
   const sbox = await ev(`(() => { const b = SB; return { text: b.textContent, rich: !!b.querySelector("b, table, iframe") }; })()`);
-  ok(!!se && /didn't start/.test(se.reason) && !sbox.rich && /couldn't be shown/.test(sbox.text), "a renderer that never starts ends at its deadline, with text, nothing inline: " + JSON.stringify([se?.reason, sbox]));
+  ok(!!se && /didn't start/.test(se.reason) && !sbox.rich && /couldn't be shown \(the output viewer didn't start\)/.test(sbox.text), "a renderer that never starts ends at its deadline, with text, nothing inline: " + JSON.stringify([se?.reason, sbox]));
   await ev(`(window.T = make({ rogue: "stuck", commitMs: 700 }), window.TA = T.area("t1", box()), TA.show(), TA.render([{ id: "x", kind: "html", body: "<b>rich</b>" }]), 1)`);
   const te = await ev(`until(() => events.find((e) => e.area === "t1" && e.type === "error"), 5000)`);
   ok(!!te && /didn't finish/.test(te.reason) && (await ev(`T.counts().live`)) === 0, "one that never commits ends at its deadline, its frame gone: " + te?.reason);
@@ -358,6 +464,45 @@ try {
   const k3 = await ev(`until(() => events.find((e) => e.area === "k1" && e.type === "committed" && e.generation === 2))`);
   ok(!!k3 && (await ev("KB.state.live")) === false && (await ev("K.counts().live")) === 1, "revealed again, it replays as a new generation and the other gives its frame back");
   await ev("(K.dispose(), sc2.remove(), 1)");
+
+  // ---- EVICT-LAYOUT-1's victim: never the focused area (O7); the one seen least recently (O8)
+  await ev(`(window.scF = ${offscreen}, window.FM = make({ cap: 1, root: scF }), window.FA = FM.area("f1", box(scF)), window.FB = FM.area("f2", box(scF)),
+    FA.focus(true), FA.render([{ id: "o", kind: "text", body: "a" }]), FB.render([{ id: "o", kind: "text", body: "b" }]), FA.show(), 1)`);
+  await ev(`until(() => events.find((e) => e.area === "f1" && e.type === "committed"))`);
+  await ev(`(FB.show(), 1)`); await sleep(400);
+  const fx = await ev(`({ a: FA.state.live, b: FB.state.live })`);
+  ok(fx.a === true && fx.b === false, "the focused area keeps its frame: the next reveal waits as a placeholder: " + JSON.stringify(fx));
+  await ev("(FM.dispose(), scF.remove(), 1)");
+  await ev(`(window.scL = ${offscreen}, window.LM = make({ cap: 2, root: scL }), window.LA = LM.area("l1", box(scL)), window.LB = LM.area("l2", box(scL)), window.LC = LM.area("l3", box(scL)),
+    [LA, LB, LC].forEach((a, i) => a.render([{ id: "o", kind: "text", body: "x" + i }])), LA.show(), 1)`);
+  await ev(`until(() => events.find((e) => e.area === "l1" && e.type === "committed"))`);
+  await sleep(50);
+  await ev(`(LB.show(), 1)`);
+  await ev(`until(() => events.find((e) => e.area === "l2" && e.type === "committed"))`);
+  await ev(`(LC.show(), 1)`);
+  await ev(`until(() => events.find((e) => e.area === "l3" && e.type === "committed"))`);
+  const lx = await ev(`({ a: LA.state.live, b: LB.state.live, c: LC.state.live })`);
+  ok(lx.a === false && lx.b === true && lx.c === true, "at the cap, the area seen least recently gives its frame back, not the latest: " + JSON.stringify(lx));
+  await ev("(LM.dispose(), scL.remove(), 1)");
+
+  // ---- the asked-for area is admitted before a visible one (O9): both waiting when the one frame frees
+  await ev(`(() => {
+    const fixed = (top) => { const d = document.createElement("div"); d.style.cssText = "position:fixed;left:0;width:300px;height:80px;top:" + top + "px"; document.body.append(d); return d; };
+    window.fxL = fixed(5000); window.fxV = fixed(0); window.fxX = fixed(6000);
+    window.QM = make({ cap: 1 }); window.QL = QM.area("q1", box(fxL)); QL.focus(true); QL.render([{ id: "o", kind: "text", body: "l" }]); QL.show();
+    return 1;
+  })()`);
+  await ev(`until(() => events.find((e) => e.area === "q1" && e.type === "committed"))`);
+  await ev(`(window.QV = QM.area("q2", box(fxV)), QV.render([{ id: "o", kind: "text", body: "v" }]), window.QX = QM.area("q3", box(fxX)), QX.render([{ id: "o", kind: "text", body: "x" }]), 1)`);
+  await sleep(400);
+  const qBefore = await ev(`({ v: QV.state.live, l: QL.state.live })`);
+  await ev(`(QL.focus(false), QX.show(), 1)`);
+  await ev(`until(() => events.find((e) => (e.area === "q3" || e.area === "q2") && e.type === "committed"))`);
+  await sleep(200);
+  const qx = await ev(`({ x: QX.state.live, v: QV.state.live, l: QL.state.live })`);
+  ok(qBefore.v === false && qBefore.l === true && qx.x === true && qx.v === false && qx.l === false,
+    "when the one frame frees, the asked-for area gets it before a visible one: " + JSON.stringify([qBefore, qx]));
+  await ev("(QM.dispose(), fxL.remove(), fxV.remove(), fxX.remove(), 1)");
 
   // ---- RENDER-COMMIT-2: disposing the set ends every pending render once (live, starved of a frame, offscreen)
   await ev(`(window.sc3 = ${offscreen}, window.Z = make({ rogue: "late", cap: 1, root: sc3, commitMs: 60000 }),
