@@ -1,12 +1,12 @@
 {
  "v": 1,
- "reason": "Inexact numbers with Zmod(n), finite fields and number fields refused as Sage, wrong answers before (lib/_sage_ff.py refuse_inexact with Sage's class families, called by the ff and number-field elements and polynomials; CC, CDF, RealField(p) and ComplexField(p) hand those operands back) Re-measured with bun 1.4.4 (size-record.sh) on master 2c7816a2 vs head 01491b9f: cli/lib.gen.js +4080, cli/pyjs.cjs +5520, engine/lib/sage-more.src +8085, engine/lib/sage.pre +27346, engine/lib/sage.src +5721, engine/sagebrush-worker.js +34; no other row moves. Markers: exact, except cli/pyjs.cjs 5552 (+5520 measured, plus 32 B of margin, as it moves with master). Ceiling (rule 4): engine/lib/sage-more.src 429387 -> 437472, the measured head 437408 + 64. Ceiling (rule 4): engine/lib/sage.src 2957427 -> 2963148, the measured head 2963084 + 64.",
+ "reason": "Inexact numbers with Zmod(n), finite fields and number fields refused as Sage, wrong answers before (lib/_sage_ff.py refuse_inexact with Sage's class families, called by the ff and number-field elements and polynomials; CC, CDF, RealField(p) and ComplexField(p) hand those operands back) Re-measured with bun 1.4.4 (size-record.sh) on master 390d8220 vs head 88ac2662: cli/lib.gen.js +4824, cli/pyjs.cjs +6216, engine/lib/sage-more.src +8085, engine/lib/sage.pre +27274, engine/lib/sage.src +5701, engine/sagebrush-worker.js +34; no other row moves. Markers: exact, except cli/pyjs.cjs 6248 (+6216 measured, plus 32 B of margin, as it moves with master). Ceiling (rule 4): engine/lib/sage-more.src 472927 -> 481012, the measured head 480948 + 64. Ceiling (rule 4): engine/lib/sage.src 2962663 -> 2968364, the measured head 2968300 + 64.",
  "bytes": {
-  "cli/lib.gen.js": 4080,
-  "cli/pyjs.cjs": 5552,
+  "cli/lib.gen.js": 4824,
+  "cli/pyjs.cjs": 6248,
   "engine/lib/sage-more.src": 8085,
-  "engine/lib/sage.pre": 27346,
-  "engine/lib/sage.src": 5721,
+  "engine/lib/sage.pre": 27274,
+  "engine/lib/sage.src": 5701,
   "engine/sagebrush-worker.js": 34
  }
 }
