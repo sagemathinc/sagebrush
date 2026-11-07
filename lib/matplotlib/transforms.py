@@ -70,9 +70,6 @@ class Bbox:
     def frozen(self):
         return Bbox(self._p)
 
-    def __eq__(self, other):
-        return isinstance(other, Bbox) and self._p == other._p
-
     def __repr__(self):
         return "Bbox([[%r, %r], [%r, %r]])" % (self.x0, self.y0, self.x1, self.y1)
 

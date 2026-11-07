@@ -907,7 +907,7 @@ class Axes:
 
     def _apply_aspect(self):
         # (adjustable 'datalim': the limits moved as the figure is drawn)
-        if self._opts.get("aspect_ratio") is not None and self.get_adjustable() == "datalim" and self.get_xscale() == self.get_yscale() == "linear":
+        if self._opts.get("aspect_ratio") is not None and self.get_adjustable() == "datalim":
             from matplotlib._axes_geometry import apply_aspect
             apply_aspect(self)
 

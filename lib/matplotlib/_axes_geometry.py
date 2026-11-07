@@ -68,25 +68,38 @@ def position(ax, original=False):
     return Bbox([[pb.x0 + dx, pb.y0 + dy], [pb.x0 + W + dx, pb.y0 + H + dy]])
 
 
+def _scale(ax, a):
+    """(forward, inverse) of an axis' scale, as its transform: log10 for 'log'"""
+    if (ax.get_xscale() if a == "x" else ax.get_yscale()) == "log":
+        return math.log10, (lambda v: 10.0 ** v)
+    return (lambda v: v), (lambda v: v)
+
+
 def apply_aspect(ax):
     """matplotlib's apply_aspect for adjustable 'datalim', as the figure is
     drawn: one pair of limits moved so that the data's aspect fills the
-    Axes box (the y pair or the x pair, by matplotlib's margins rule), and
-    kept, as its set_ybound keeps it; fixed limits move with its warning."""
+    Axes box (the y pair or the x pair, by matplotlib's margins rule), in
+    the axes' scales (a log axis in decades), and kept, as its set_ybound
+    keeps it; fixed limits move with its warning."""
     from _graphics import Panel
     bb = Panel([p for p in ax._prims if not p.options.get("hidden")]).data_bbox()
     if bb is None or None in bb:
         return
+    (fx, ix), (fy, iy) = _scale(ax, "x"), _scale(ax, "y")
+    try:
+        (x0, x1), (y0, y1) = [fx(v) for v in ax.get_xlim()], [fy(v) for v in ax.get_ylim()]
+        dx0, dx1, dy0, dy1 = fx(bb[0]), fx(bb[1]), fy(bb[2]), fy(bb[3])
+    except ValueError:  # (data at or below 0 on a log axis)
+        return
     pos = position(ax, original=True)
     fig_aspect = ax.figure._size[1] / ax.figure._size[0]
     data_ratio = fig_aspect * (pos.height / pos.width) / float(ax._opts["aspect_ratio"])
-    (x0, x1), (y0, y1) = ax.get_xlim(), ax.get_ylim()
     xmin, xmax, ymin, ymax = min(x0, x1), max(x0, x1), min(y0, y1), max(y0, y1)
     xsize, ysize = max(abs(xmax - xmin), 1e-30), max(abs(ymax - ymin), 1e-30)
     y_expander = data_ratio * xsize / ysize - 1
     if abs(y_expander) < 0.005:
         return
-    xr, yr = 1.05 * (bb[1] - bb[0]), 1.05 * (bb[3] - bb[2])
+    xr, yr = 1.05 * (dx1 - dx0), 1.05 * (dy1 - dy0)
     xmarg, ymarg = xsize - xr, ysize - yr
     Ysize, Xsize = data_ratio * xsize, ysize / data_ratio
     Xmarg, Ymarg = Xsize - xr, Ysize - yr
@@ -94,8 +107,8 @@ def apply_aspect(ax):
         adjust_y = (Ymarg > 0 and y_expander < 0) or (Xmarg < 0 and y_expander > 0)
     else:
         adjust_y = y_expander > 0
-    a, c, half, inv = ("y", 0.5 * (ymin + ymax), Ysize / 2.0, y1 < y0) if adjust_y else ("x", 0.5 * (xmin + xmax), Xsize / 2.0, x1 < x0)
-    new = (c + half, c - half) if inv else (c - half, c + half)
+    a, c, half, inv, back = ("y", 0.5 * (ymin + ymax), Ysize / 2.0, y1 < y0, iy) if adjust_y else ("x", 0.5 * (xmin + xmax), Xsize / 2.0, x1 < x0, ix)
+    new = (back(c + half), back(c - half)) if inv else (back(c - half), back(c + half))
     if ax._opts.get(a + "min") is not None or ax._opts.get(a + "max") is not None:
         import sys
         sys.stderr.write("Ignoring fixed %s limits to fulfill fixed data aspect with adjustable data limits.\n" % a)
@@ -146,6 +159,43 @@ class TickText:
         return "Text(%r, %r, %r)" % (x, y, self._text)
 
 
+def _log_decades(vmin, vmax, n_request):
+    """The decades matplotlib's LogLocator (base 10) ticks between vmin and
+    vmax, n_request of them at most (its tick_values: a stride over the
+    decades, and one just outside each end)."""
+    efmin, efmax = math.log10(vmin), math.log10(vmax)
+    emin, emax = math.ceil(efmin), math.floor(efmax)
+    n_avail = emax - emin + 1
+    stride = n_avail // (n_request + 1) + 1
+    n_request = min(n_request, math.ceil(n_avail / stride))
+    if n_request == 0:  # (no tick inside: two just outside)
+        return [emin - 1, emax + 1]
+    if n_request == 1:  # (one near the middle)
+        mid = round((efmin + efmax) / 2)
+        stride = max(mid - (emin - 1), (emax + 1) - mid)
+        return [mid - stride, mid, mid + stride]
+    stride = (n_avail - 1) // (n_request - 1)
+    if stride < n_avail / n_request:
+        stride = n_avail // n_request
+    olo = max(n_avail - stride * n_request, 0)
+    ohi = min(n_avail - stride * (n_request - 1), stride)
+    offset = (-emin) % stride
+    if not olo <= offset < ohi:
+        offset = olo
+    return list(range(emin + offset - stride, emax + stride + 1, stride))
+
+
+def _tick_space(ax, a):
+    """matplotlib's Axis.get_tick_space: how many tick labels fit along the
+    axis (its length in points over 3 label sizes for x, 2 for y), 2 to 9."""
+    from matplotlib.pyplot import _size_px, PT
+    p = position(ax)
+    w, h = ax.figure._size
+    length = (p.width * w if a == "x" else p.height * h) * 72
+    size = _size_px(rcParams.get(a + "tick.labelsize", "medium"), 10) / PT
+    return max(2, min(9, int(math.floor(length / (size * (3 if a == "x" else 2))))))
+
+
 def ticklabels(ax, a):
     """The tick labels as matplotlib lists them: its locator's ticks (those
     just outside the view too), or the ticks set, with their texts (its
@@ -159,7 +209,11 @@ def ticklabels(ax, a):
     bins = (p.options.get("tick_bins") or {}).get(a)
     if pos is None and bins and not log:
         pos = mpl_ticks(min(lo, hi), max(lo, hi), bins)
-    if pos is None:
+    if pos is None and log and min(lo, hi) > 0:
+        # (matplotlib's LogLocator and LogFormatterSciNotation: decades, as 10^k)
+        ks = _log_decades(min(lo, hi), max(lo, hi), _tick_space(ax, a))
+        pos, texts = [10.0 ** k for k in ks], ["$\\mathdefault{10^{%d}}$" % k for k in ks]
+    elif pos is None:
         pairs = p.ticks(lo, hi, log, None, None, 5, a)
         pos, texts = [v for v, _ in pairs], [re.sub(r"<[^>]*>", "", str(t)) for _, t in pairs]
     else:
@@ -217,7 +271,7 @@ def set_aspect(ax, aspect, adjustable=None):
 
 def set_adjustable(ax, adjustable):
     if adjustable not in ("box", "datalim"):
-        raise ValueError("%r is not a valid value for adjustable; supported values are 'box', 'datalim'" % (adjustable,))
+        raise ValueError("%r is not a valid value for adjustable. Supported values are 'box', 'datalim'" % (adjustable,))
     ax._opts["_adjustable"] = adjustable
 
 

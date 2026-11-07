@@ -1279,9 +1279,11 @@ class Panel:
         if o.get("fit_aspect") and ar not in (None, "automatic", "auto"):
             # keep the ranges (given or autoscaled) and shrink the plot area
             # to their shape instead
+            # (a log axis in decades, as matplotlib's apply_aspect measures it)
             bx = self.ranges(pw, ph)
-            xr, yr = abs(bx[1] - bx[0]), abs(bx[3] - bx[2]) * float(ar)
-            if xr > 0 and yr > 0 and not bx[4] and not bx[5]:
+            span = lambda lo, hi, log: abs(math.log10(hi) - math.log10(lo)) if log and lo > 0 and hi > 0 else 0.0 if log else abs(hi - lo)
+            xr, yr = span(bx[0], bx[1], bx[4]), span(bx[2], bx[3], bx[5]) * float(ar)
+            if xr > 0 and yr > 0:
                 k = min(pw / xr, ph / yr)
                 left += (pw - xr * k) / 2
                 top += (ph - yr * k) / 2
