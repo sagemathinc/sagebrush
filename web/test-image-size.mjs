@@ -90,6 +90,15 @@ check(svgDataUrl(refs) === null && pictureSize("image/svg+xml", b64(new TextEnco
 const canon1 = "PHN2ZyB3aWR0aD0iMSIgaGVpZ2h0PSIxIi8+Cg==", loose1 = "PHN2ZyB3aWR0aD0iMSIgaGVpZ2h0PSIxIi8+Ch==";
 check(atob(canon1) === atob(loose1) && svgText(canon1) === '<svg width="1" height="1"/>\n' && svgText(loose1) === null && svgText(canon1.slice(0, -2)) === null, "base64 that isn't the one form (pad bits, no padding): refused");
 check(pictureSize("image/svg+xml", loose1) === null && svgDataUrl("data:image/svg+xml;base64," + loose1) === "data:image/svg+xml;base64," + canon1, "so too as a picture's size; a data: URL is read in the one form");
+// (base64 that decodes past 2 MB is refused from its length, before anything decodes it: astra's preflight note)
+{
+  const real = globalThis.atob; let calls = 0;
+  globalThis.atob = (x) => { calls++; return real(x); };
+  const over4 = "A".repeat(2666672); // 2,000,004 bytes
+  const r = [svgDataUrl("data:image/svg+xml;base64," + over4), svgText(over4), pictureSize("image/svg+xml", over4)];
+  globalThis.atob = real;
+  check(r.every((x) => x === null) && calls === 0, "base64 decoding past 2 MB: refused before atob (" + calls + " calls)");
+}
 // (a carried document: every SVG through svgDataUrl, so only its one form, in the bounds, UTF-8 and with a size, is kept: SVG-CLEANDOC-1)
 const over = "data:image/svg+xml;base64," + btoa('<svg width="1" height="1"/>' + " ".repeat(SVG_MAX_BYTES));
 const loose = (await import("./board/doc.ts")).cleanDoc({ images: { a: { w: 1, h: 1, src: "data:image/svg+xml;base64," + canon1 }, b: { w: 1, h: 1, src: "data:image/svg+xml;base64," + loose1 }, c: { w: 1, h: 1, src: "data:image/svg+xml;base64,////" }, d: { w: 1, h: 1, src: "data:image/svg+xml;base64,PHN2Zy8+" }, e: { w: 1, h: 1, src: over }, f: { w: 1, h: 1, src: "data:image/svg+xml," + encodeURIComponent('<svg width="1" height="1"/>\n') } }, nodes: [] }).images;

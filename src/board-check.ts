@@ -22,7 +22,7 @@ import { cleanDoc, formatError, isBoard, oneEmoji, VERSION, type DocAsk } from "
 import { cleanPreview } from "../web/board/preview";
 import { askProblems } from "../web/board/ask";
 import { BOARD_SCHEMA } from "../web/board/format-schema";
-import { pictureSize, pictureUrl, PixelBudget, SVG_MAX_BYTES, svgDataUrl } from "../web/image-size";
+import { b64Bytes, pictureSize, pictureUrl, PixelBudget, SVG_MAX_BYTES, svgDataUrl } from "../web/image-size";
 import { SchemaValidator, didYouMean, step } from "./json-schema";
 import { CLI_READER } from "./board-cli";
 import { oneLine, textLines } from "./terminal-text";
@@ -399,15 +399,21 @@ function itemPaths(d: any): Map<string, string> {
   return out;
 }
 
-// Why the board won't show an SVG picture svgDataUrl refused: its bytes past the bound, its bytes not
-// UTF-8 (or not decoding at all), else its root without a plain width and height (P9a)
+// Why the board won't show an SVG picture svgDataUrl refused: its data not decoding at all, its bytes past
+// the bound or not UTF-8, else its root without a plain width and height (P9a).  (Base64 in another
+// spelling, other pad bits, isn't a reason: svgDataUrl reads it in its one form.)
 function svgWhy(src: string): string {
+  // (past the length svgDataUrl reads, it is past 2 MB however written: said before anything is decoded,
+  // daybreak3's SVG-DIAGNOSTIC-BOUND-1; base64 is 4 characters for 3 bytes, percent-encoding at most 3 for 1)
+  if (src.length > 3 * SVG_MAX_BYTES + 64) return "it's over 2 MB of text";
   const m = /^data:image\/svg\+xml(?:;charset=utf-8)?(;base64)?,([\s\S]*)$/i.exec(src);
+  const b64 = m?.[1] ? m[2].replace(/\s/g, "") : null;
+  if (b64 !== null && b64Bytes(b64) > SVG_MAX_BYTES) return "it's over 2 MB of text";
   let bytes: Uint8Array | null = null;
   try {
-    bytes = !m ? null : m[1] ? Uint8Array.from(atob(m[2].replace(/\s/g, "")), (c) => c.charCodeAt(0)) : new TextEncoder().encode(decodeURIComponent(m[2]));
+    bytes = !m ? null : b64 !== null ? Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)) : new TextEncoder().encode(decodeURIComponent(m[2]));
   } catch {
-    return "it isn't UTF-8 text";
+    return "it can't be read as text";
   }
   if (bytes && bytes.length > SVG_MAX_BYTES) return "it's over 2 MB of text";
   try {
@@ -415,5 +421,5 @@ function svgWhy(src: string): string {
   } catch {
     return "it isn't UTF-8 text";
   }
-  return "its root needs a width and a height";
+  return "its root needs a width and a height in pixels (a number, or px)";
 }

@@ -7028,7 +7028,7 @@
   "owner": "board",
   "row": "src-18"
  },
- "src/board-check.ts ::  :: import { pictureSize, pictureUrl, PixelBudget, SVG_MAX_BYTES, svgDataUrl } from \"../web/image-size\"; #0": {
+ "src/board-check.ts ::  :: import { b64Bytes, pictureSize, pictureUrl, PixelBudget, SVG_MAX_BYTES, svgDataUrl } from \"../web/image-size\"; #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -7054,7 +7054,23 @@
   "owner": "board",
   "row": "src-18"
  },
+ "src/board-check.ts :: svgWhy :: if (b64 !== null && b64Bytes(b64) > SVG_MAX_BYTES) return \"it's over 2 MB of text\"; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "board",
+  "row": "src-18"
+ },
  "src/board-check.ts :: svgWhy :: if (bytes && bytes.length > SVG_MAX_BYTES) return \"it's over 2 MB of text\"; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "board",
+  "row": "src-18"
+ },
+ "src/board-check.ts :: svgWhy :: if (src.length > 3 * SVG_MAX_BYTES + 64) return \"it's over 2 MB of text\"; #0": {
   "class": "1",
   "disposition": {
    "1": "shared"

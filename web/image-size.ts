@@ -131,10 +131,13 @@ export function svgSize(text: string): { w: number; h: number } | null {
   return Number.isFinite(W) && Number.isFinite(H) ? { w: W, h: H } : null;
 }
 
+/** The bytes base64 of this length and padding decodes to, read before it is decoded. */
+export const b64Bytes = (b: string) => Math.floor((b.length * 3) / 4) - (b.endsWith("==") ? 2 : b.endsWith("=") ? 1 : 0);
+
 /** An SVG's text from its base64 (canonical), within the bounds and as UTF-8; null if not. */
 export function svgText(base64: string): string | null {
   // (the bounds before it is decoded: its length, and the bytes that length decodes to)
-  if (base64.length > SVG_MAX_B64 || Math.floor((base64.length * 3) / 4) > SVG_MAX_BYTES + 2 || !/^[A-Za-z0-9+/]*={0,2}$/.test(base64)) return null;
+  if (base64.length > SVG_MAX_B64 || b64Bytes(base64) > SVG_MAX_BYTES || !/^[A-Za-z0-9+/]*={0,2}$/.test(base64)) return null;
   try {
     const bin = atob(base64);
     // (its one form: the base64 its bytes encode to, so no other spelling of them, daybreak3's SVG-BASE64-CANON-1)
@@ -175,7 +178,7 @@ export function svgDataUrl(input: string): string | null {
     // (base64 in another spelling of the same bytes, other pad bits or no padding: read in its one form)
     const b = m[2].replace(/\s/g, "");
     let c: string | null = null;
-    if (b.length <= SVG_MAX_B64 && /^[A-Za-z0-9+/]*={0,2}$/.test(b)) try { c = btoa(atob(b)); } catch { /* not base64 */ }
+    if (b.length <= SVG_MAX_B64 && b64Bytes(b) <= SVG_MAX_BYTES && /^[A-Za-z0-9+/]*={0,2}$/.test(b)) try { c = btoa(atob(b)); } catch { /* not base64 */ }
     text = c === null ? null : svgText(c);
   }
   else { try { text = decodeURIComponent(m[2]); } catch { return null; } }

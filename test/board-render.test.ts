@@ -228,7 +228,7 @@ test("board render and check: an SVG picture is drawn as an <image> of its one f
     const refDoc = { ...doc, images: { s: { w: 96, h: 64, src: "data:image/svg+xml;base64," + Buffer.from(refs).toString("base64") } } };
     writeFileSync(f, JSON.stringify(refDoc));
     const ref = spawnSync(process.execPath, [__dirname + "/../src/cli.js", "board", "check", f], { encoding: "utf8" });
-    assert.match(ref.stdout + ref.stderr, /won't show this SVG picture: its root needs a width and a height/, ref.stdout + ref.stderr);
+    assert.match(ref.stdout + ref.stderr, /won't show this SVG picture: its root needs a width and a height in pixels \(a number, or px\)/, ref.stdout + ref.stderr);
     const drawn = cli(["-"], JSON.stringify(refDoc));
     assert.equal([...drawn.stdout.matchAll(/<image [^>]*href="data:/g)].length, 0, "not drawn as an <image>");
     // (base64 in another spelling of the same bytes, other pad bits: read, and drawn, only in its one form, SVG-BASE64-CANON-1)
