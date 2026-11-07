@@ -1,12 +1,13 @@
 {
  "v": 1,
- "reason": "Sage table() for 48 explainer topics, oracle 45/45 (codex friction P10b; @sagebrush's ruling (a), daybreak2's rows). Measured vs master 7ceef17f, probe 53c69135, node 24.21.0, bun 1.4.4. lib/_sage_table.py, about 11.7 KB of source, half of it docstrings and examples (help() and the doctests; all 11 pass in real Sage 10.10). sage_all imports it eagerly, as it does every other name it exports, so it is in Sage mode's precompiled start (engine/lib/sage.pre +44317) as well as the library (sage.src +12728) and the CLI's copies (pyjs +8992, lib.gen +4800); the capability map gains its \"tables\" line (+77); the worker's chunk manifest +24.",
+ "reason": "Sage table() for 48 explainer topics, oracle 45/45 (codex friction P10b; @sagebrush's ruling: lazy). Measured vs master 7ceef17f, probe d03455ed, node 24.21.0, bun 1.4.4. lib/_sage_table.py, about 11.7 KB of source, half of it docstrings and examples (help() and the doctests; all pass in real Sage 10.10), loaded at the first use of table() (_sage_lazy), so it is in Sage's lazy library chunk (engine/lib/sage-more.src +12632, its ceiling raised to match) and not in Sage mode's precompiled start: sage.pre +437 and sage.src +289 are sage_all's stub lines. The CLI carries the library (pyjs +9032, lib.gen +4900); the capability map gains its \"tables\" line (+77); the worker's chunk manifest +29.",
  "bytes": {
-  "cli/pyjs.cjs": 9056,
-  "cli/lib.gen.js": 4864,
+  "cli/pyjs.cjs": 9096,
+  "cli/lib.gen.js": 4964,
   "engine/lib/mod-capability-map.src": 141,
-  "engine/lib/sage.pre": 44381,
-  "engine/lib/sage.src": 12792,
-  "engine/sagebrush-worker.js": 88
+  "engine/lib/sage-more.src": 12696,
+  "engine/lib/sage.pre": 501,
+  "engine/lib/sage.src": 353,
+  "engine/sagebrush-worker.js": 93
  }
 }
