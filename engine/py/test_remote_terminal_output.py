@@ -23,7 +23,7 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from test_remote_terminal import Run, tpaired, recv, shell, script, until, NODE, TMP  # noqa: E402
+from test_remote_terminal import Run, tpaired, recv, shell, script, until, NODE, TMP, FLOOD  # noqa: E402
 from test_remote_pair import Signer, aio  # noqa: E402
 from sagebrush.remote import terminal_output as O  # noqa: E402
 
@@ -101,6 +101,15 @@ while True:
 """)
 INTFLOOD = shell("intflood.sh", "%s -I -S %s %s\nwhile :; do sleep 0.05; done\n" % (PY, YES, FLOODPID))
 SLEEPER = shell("sleeper.sh", "echo first-marker\nwhile :; do sleep 0.05; done\n")
+BIG = script("big.py", """import os
+os.write(1, b"".join(b"%012d\\n" % i for i in range(100000)))
+os.write(1, b"BIG-END\\n")
+""")
+BIGOUT = shell("bigout.sh", "stty -opost -echo\n%s -I -S %s\nwhile :; do sleep 0.05; done\n" % (PY, BIG))
+TAIL = script("tail.py", """import os
+os.write(1, b"".join(b"%012d\\n" % i for i in range(30000)) + b"LAST-BYTES\\n")
+""")
+TAILEXIT = shell("tailexit.sh", "stty -opost -echo\n%s -I -S %s\nexit 5\n" % (PY, TAIL))
 NOREAD = shell("noread.sh", "stty raw -echo\nwhile :; do sleep 0.05; done\n")
 
 
@@ -323,6 +332,162 @@ async def test_takeover_replays_then_live():
     finally:
         await t.end()
         sg.close()
+
+
+@aio
+async def test_large_replay_keeps_the_hysteresis():
+    """daybreak4's and astra's finding: a replay larger than the credit stalls at exactly the high-water mark; an ack
+    leaving more than the low-water mark outstanding sends nothing; an ack down to it resumes; then live, and the
+    replayed bytes are exactly a reset and the ring."""
+    if NODE is None:
+        print("  (no node) SKIPPED")
+        return
+    sg = await Signer().start()
+    t = await Run().start(sh=BIGOUT)
+    try:
+        leg = await t.relay.leg()
+        p1 = await tpaired(t, leg, sg, 1)
+        sid = (await p1.open())["session"]
+        s = t.terms.running[sid]
+        st1 = Stream(p1)
+        assert await st1.pump(lambda x: b"BIG-END" in x.data, 20)
+        assert len(s.ring.buf) == s.ring.cap  # (the ring is full: 1 MiB, more than the credit)
+        ring = s.ring.replay()
+        p2 = await tpaired(t, leg, sg, 2)
+        p2.send(await p2.open_msg(session=sid))
+        g, m = await recv(leg)
+        assert (g, m["error"]) == (1, "elsewhere"), (g, m)
+        g, m = await recv(leg)
+        assert g == 2 and m["t"] == "opened", (g, m)
+        st2 = Stream(p2, ack=False)
+        assert await st2.pump(lambda x: len(x.data) >= O.CREDIT_HIGH, 10), len(st2.data)
+        a = s.grant.att
+        assert a.replaying and a.paused and a.sent == len(st2.data) == O.CREDIT_HIGH
+        assert not await st2.pump(lambda x: len(x.data) > O.CREDIT_HIGH, 0.6)  # (stalled at exactly the mark)
+        # (an ack leaving more than the low-water mark outstanding: nothing more)
+        p2.send({"t": "ack", "upto": a.sent - O.CREDIT_LOW - 1})
+        assert not await st2.pump(lambda x: len(x.data) > O.CREDIT_HIGH, 0.6), len(st2.data)
+        assert a.paused
+        # (down to it: the replay resumes)
+        p2.send({"t": "ack", "upto": a.sent - O.CREDIT_LOW})
+        assert await st2.pump(lambda x: len(x.data) > O.CREDIT_HIGH, 5)
+        st2.ack = True
+        p2.send({"t": "ack", "upto": len(st2.data)})
+        assert await st2.pump(lambda x: "live" in x.events, 20)
+        i = st2.events.index("live")
+        assert st2.events[0] == "replay" and all(e == "out" for e in st2.events[1:i]), st2.events[:3]
+        assert bytes(st2.data) == b"\x1bc" + ring, (len(st2.data), len(ring) + 2)
+    finally:
+        await t.end()
+        sg.close()
+
+
+@aio
+async def test_exit_is_last_after_the_final_output():
+    """daybreak3's E1 (@sagebrush: drain before exit): a program that writes a lot and the shell exits: the page gets
+    every byte to the end, then the exit, and no out frame after it."""
+    if NODE is None:
+        print("  (no node) SKIPPED")
+        return
+    sg = await Signer().start()
+    t = await Run().start(sh=TAILEXIT)
+    try:
+        leg = await t.relay.leg()
+        p = await tpaired(t, leg, sg, 1)
+        await p.open()
+        st = Stream(p)
+        assert await st.pump(lambda x: "exit" in x.events, 20), (st.events[-3:], len(st.data))
+        exit_at = st.events.index("exit")
+        await st.pump(lambda x: False, 0.8)  # (and nothing after it)
+        assert st.events[exit_at + 1:] == [], st.events[exit_at:]
+        assert st.data.endswith(b"LAST-BYTES\n"), bytes(st.data[-40:])
+        lines = bytes(st.data[2:]).split(b"\n")[:-2]
+        assert [int(x) for x in lines if x.isdigit()][-1] == 29999
+    finally:
+        await t.end()
+        sg.close()
+
+
+@aio
+async def test_exit_is_last_with_a_background_flooder():
+    """daybreak3's E1 with the shell leaving a background flooder that ignores HUP and TERM: output may continue while
+    its groups are stopped, but the exit still comes last, once the PTY is closed; nothing follows it."""
+    if NODE is None:
+        print("  (no node) SKIPPED")
+        return
+    sg = await Signer().start()
+    t = await Run().start(sh=FLOOD)
+    try:
+        leg = await t.relay.leg()
+        p = await tpaired(t, leg, sg, 1)
+        await p.open()
+        st = Stream(p)
+        assert await st.pump(lambda x: "exit" in x.events, 20), st.events[-3:]
+        exit_at = st.events.index("exit")
+        await st.pump(lambda x: False, 1.0)
+        assert st.events[exit_at + 1:] == [], st.events[exit_at:exit_at + 4]
+        s = t.terms.ended_[-1]
+        assert s.master is None and s.exit == {"code": 3, "signal": None}
+    finally:
+        await t.end()
+        sg.close()
+
+
+class FakeSession:
+    def __init__(self, timers):
+        self.host = type("H", (), {"timers": timers})()
+        self.exit = None
+
+    def reading_changed(self):
+        pass
+
+    def writing_changed(self):
+        pass
+
+
+class FakePage:
+    def __init__(self):
+        self.frames = []
+        self.msgs = []
+
+    def send_text(self, text, kind):
+        import json
+        self.frames.append(json.loads(text))
+
+    def send(self, obj):
+        self.msgs.append(obj)
+
+
+def test_rate_steps_through_an_attachment():
+    """daybreak3's E3 (@sagebrush: measure a flush window's bytes, as CoCalc's throttle does): through Attachment's
+    own reads and acks, windows of <= 8 KiB keep 24/s, of 32-128 KiB step to 8/s, of >= 128 KiB to 4/s; every frame
+    stays <= OUT_MAX bytes."""
+    tm = FakeTimers()
+    tm.t = 1000
+    a = O.Attachment(FakeSession(tm), FakePage(), lambda b: len(b))
+
+    def window(nbytes):
+        # (reads as the session makes them: each at most room(); then the window's timer fires; then the page acks)
+        left = nbytes
+        while left:
+            n = min(left, a.room())
+            assert n > 0
+            a.feed(b"z" * n)
+            left -= n
+        tm.advance(1000)
+        a.ack(a.sent)
+
+    window(4096)
+    assert a.throttle.rate == O.MAX_MSGS_PER_SECOND
+    window(64 * 1024)
+    assert a.throttle.rate == O.ADAPTIVE_MEDIUM_MSGS_PER_SECOND
+    window(200 * 1024)
+    assert a.throttle.rate == O.ADAPTIVE_SLOW_MSGS_PER_SECOND
+    window(4096)
+    assert a.throttle.rate == O.MAX_MSGS_PER_SECOND
+    page = a.page
+    assert all(len(base64.b64decode(f["b"])) <= O.OUT_MAX for f in page.frames)
+    assert sum(len(base64.b64decode(f["b"])) for f in page.frames) == a.sent == 4096 + 64 * 1024 + 200 * 1024 + 4096
 
 
 class FakeTimers:

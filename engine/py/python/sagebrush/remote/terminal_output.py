@@ -8,9 +8,14 @@ Output (PTY -> page), credit with the program blocked by the PTY itself:
   under CREDIT_HIGH (256 KiB); at the mark it stops reading, so the kernel's PTY buffer fills and the program blocks
   in write(); it reads again once the page's acks bring the unacknowledged output down to CREDIT_LOW (64 KiB);
 - credit is reserved before a read: a read is at most min(credit left, room in the frame, the rate ceiling);
-- output is coalesced into frames {"t":"out","b":"<canonical base64 of the exact PTY bytes>"} of at most
-  OUT_MAX = 49,137 decoded bytes (T12-CAP-1: 65,534 serialized bytes), at most 24 frames a second, stepping down to
-  8 and 4 as frames grow and back to 24 when they shrink (the throttle below, ported from CoCalc);
+- output is coalesced (the throttle below, ported from CoCalc with its constants): the bytes of one flush window go
+  at once, at most 24 windows a second, stepping down to 8 as a window's bytes pass 32 KiB and to 4 past 128 KiB, and
+  back to 24 at or below 8 KiB.  As in CoCalc the step is measured on the whole window's bytes; here a window is cut
+  into frames {"t":"out","b":"<canonical base64 of the exact PTY bytes>"} of at most OUT_MAX = 49,137 decoded bytes
+  (T12-CAP-1: 65,534 serialized bytes), sent back to back.  A window holds at most the credit left (<= 256 KiB);
+- each PTY read is at most OUT_MAX bytes and at most the credit left;
+- the exit is the last output message: the PTY's output up to its close (after the shell's groups are stopped) goes
+  to the page first, within credit; what doesn't fit goes to the ring only (a reattach replays it);
 - the page acks {"t":"ack","upto":<decoded bytes rendered>}, cumulative; an ack that goes back or names more than was
   sent closes the page before any credit changes;
 - an attach first replays: {"t":"replay"}, then a terminal reset and the session's ring (scrollback) as out frames
@@ -26,8 +31,8 @@ import base64
 import binascii
 import json
 
-# ---- ported from CoCalc packages/conat/project/terminal/index.ts : 37-83 @ 2265acac (the tuned constants only; SageMath,
-# Inc.; relicensed by the copyright owner, Nov 7 2026)
+# ---- Ported from CoCalc packages/conat/project/terminal/index.ts (SageMath, Inc.; relicensed by the copyright owner, Nov 7 2026)
+# (lines 37-83 at commit 2265acac: the tuned constants only)
 MAX_MSGS_PER_SECOND = 24
 ADAPTIVE_MEDIUM_MSGS_PER_SECOND = 8
 ADAPTIVE_SLOW_MSGS_PER_SECOND = 4
@@ -52,9 +57,9 @@ class OutputThrottle:
     quiet interval at once; the rate steps down to medium and slow as emitted frames grow past mediumBytes and
     slowBytes, and back to the base rate at or below coolBytes.
 
-    Ported from CoCalc packages/util/throttle.ts : 14-73 (class ThrottleString) and 130-194
-    (createAdaptiveTerminalOutputThrottle) @ 2265acac (SageMath, Inc.; relicensed by the copyright owner, Nov 7
-    2026): the same timer rule and rate steps, over bytes instead of strings, on the runner's timers."""
+    Ported from CoCalc packages/util/throttle.ts (SageMath, Inc.; relicensed by the copyright owner, Nov 7 2026)
+    (lines 14-73, class ThrottleString, and 130-194, createAdaptiveTerminalOutputThrottle, at commit 2265acac): the
+    same timer rule and rate steps, over bytes instead of strings, on the runner's timers."""
 
     def __init__(self, timers, publish, messages_per_second=MAX_MSGS_PER_SECOND,
                  medium_messages_per_second=ADAPTIVE_MEDIUM_MSGS_PER_SECOND,
@@ -149,26 +154,34 @@ class Attachment:
         self.in_recv = self.in_written = self.in_acked = 0
         self.writing = False
         self.ended = False
+        self.exited = False            # (the exit was sent: it is this attachment's last output message)
         self.throttle = OutputThrottle(self.timers, self._publish)
 
     # ---- output
     def outstanding(self):
         return self.sent - self.acked
 
-    def room(self):
-        """How many bytes may be read into this attachment now (0: don't read)."""
-        if self.ended or self.replaying:
+    def credit(self):
+        """How many more bytes may go toward the page now, live or replay alike: none from the high-water mark until
+        acks bring the unacknowledged output down to the low-water mark (the one hysteresis for both)."""
+        if self.ended or self.exited:
             return 0
         held = self.outstanding() + self.throttle.buffered()
         if held >= CREDIT_HIGH:
             self.paused = True
         if self.paused:
             return 0
-        return max(0, min(OUT_MAX - self.throttle.buffered(), CREDIT_HIGH - held))
+        return max(0, CREDIT_HIGH - held)
+
+    def room(self):
+        """How many bytes one PTY read into this attachment may take now (0: don't read)."""
+        if self.replaying:
+            return 0
+        return min(OUT_MAX, self.credit())
 
     def feed(self, b):
         """Bytes read from the PTY (at most room() of them) toward the page."""
-        if not self.ended and b:
+        if not self.ended and not self.exited and b:
             self.throttle.write(b)
 
     def start_replay(self, ring_bytes):
@@ -181,8 +194,8 @@ class Attachment:
         if self.ended or not self.replaying:
             return
         if self.replay:
-            room = max(0, min(OUT_MAX - self.throttle.buffered(), CREDIT_HIGH - self.outstanding() - self.throttle.buffered()))
-            if self.paused or room == 0:
+            room = min(OUT_MAX, self.credit())
+            if room == 0:
                 return  # (an ack, or the throttle's flush, pumps again)
             chunk = bytes(self.replay[:room])
             del self.replay[:room]
@@ -198,9 +211,11 @@ class Attachment:
         self.session.reading_changed()
 
     def _publish(self, data):
-        if self.ended:
+        """One flush window's bytes, cut into frames of at most OUT_MAX, back to back."""
+        if self.ended or self.exited:
             return
-        self.page.send_text(out_message(data), "data")
+        for i in range(0, len(data), OUT_MAX):
+            self.page.send_text(out_message(data[i:i + OUT_MAX]), "data")
         self.sent += len(data)
         if self.replaying:
             self._pump_replay()
@@ -218,6 +233,14 @@ class Attachment:
         self.session.reading_changed()
         return True
 
+    def push_final(self, b):
+        """The PTY's last bytes (its drain, at the close): as many as the credit allows go to the page; the rest is in
+        the ring only.  Returns how many were taken."""
+        n = min(len(b), self.credit())
+        if n:
+            self.throttle.buf += b[:n]
+        return n
+
     def flush_now(self):
         """Before the exit message: whatever is buffered goes now (it is within credit already)."""
         self.timers.clear_timeout(self.throttle.timer)
@@ -225,8 +248,13 @@ class Attachment:
         self.throttle.flush()
 
     def send_exit(self):
+        """The exit, terminal for this page's output: what the PTY yields after it (a background job of the shell's
+        still writing while its groups are stopped) goes to the ring only, which a reattach replays."""
         e = self.session.exit
+        self.exited = True
+        self.throttle.close()
         self.page.send({"t": "exit", "code": e["code"], "signal": e["signal"]})
+        self.session.reading_changed()
 
     # ---- input
     def input(self, b):
@@ -241,9 +269,9 @@ class Attachment:
     def writable(self):
         """The PTY can take input: one IN_CHUNK piece (CoCalc's chunked write).
 
-        Ported from CoCalc packages/conat/project/terminal/writable-pty.ts : 21-65 (writeToWritablePty, waitForDrain)
-        @ 2265acac (SageMath, Inc.; relicensed by the copyright owner, Nov 7 2026): 1 KiB pieces, the next only once
-        the PTY has taken the last (here, the master's writability instead of a stream's drain event)."""
+        Ported from CoCalc packages/conat/project/terminal/writable-pty.ts (SageMath, Inc.; relicensed by the copyright owner, Nov 7 2026)
+        (lines 21-65, writeToWritablePty and waitForDrain, at commit 2265acac): 1 KiB pieces, the next only once the
+        PTY has taken the last (here, the master's writability instead of a stream's drain event)."""
         if self.ended or not self.inq:
             return False
         n = self.write_pty(bytes(self.inq[:IN_CHUNK]))

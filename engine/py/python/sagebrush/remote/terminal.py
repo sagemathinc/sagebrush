@@ -222,8 +222,10 @@ class Session:
     # ---- output into the ring, at most TERMINAL_LIMITS["rate"] bytes a second, and to an attached page within its
     # credit (T3): no credit, no read, so the PTY fills and the program blocks in write()
     def _att(self):
+        """The attached page's output path, if it still takes output (not after its exit message)."""
         g = self.grant
-        return g.att if g is not None and g.live and g.att is not None else None
+        a = g.att if g is not None and g.live else None
+        return a if a is not None and not a.exited else None
 
     def reading_changed(self):
         """Read again if nothing holds the reads back: the rate ceiling's pause, or an attached page's credit."""
@@ -371,6 +373,9 @@ class Session:
             left -= len(b)
             if self.ring is not None:
                 self.ring.append(b)
+            a = self._att()
+            if a is not None:
+                a.push_final(b)  # (within credit; the rest is in the ring only)
 
     def _release(self):
         self._read_off()
@@ -380,6 +385,8 @@ class Session:
         if self.master is not None:
             os.close(self.master)
             self.master = None
+            if self.exit is not None:
+                self.host.closed(self)  # (the PTY can yield nothing more: now the page's exit, after its last output)
 
     # ---- stop: the tree rule over every group in the PTY's session, again and again until it is empty
     def stop(self):
@@ -580,7 +587,7 @@ class Terminals:
         self.stats["opens"] += 1
         p.send({"t": "opened", "session": s.id, "nonce": runner.gateway.current_nonce()})
         # (every attach replays: a reset, the ring, then live output; an ended session's exit comes after its replay)
-        g.att.exit_after_replay = s.exit is not None
+        g.att.exit_after_replay = s.exit is not None and s.master is None  # (closed: else closed() sends it)
         g.att.start_replay(s.ring.replay() if s.ring is not None else b"")
         s.reading_changed()
         self._arm_idle()
@@ -617,12 +624,17 @@ class Terminals:
         s.ended_at = self.timers.now()
         self.ended_.append(s)
         self._prune_ended()
+        # (the page's exit waits for the PTY's close (closed()): the shell's groups are stopped, the PTY drained to the
+        # page within credit, and only then the exit, so no output can follow it)
+
+    def closed(self, s):
+        """An exited session's PTY is closed: its attached page gets what was buffered, then the exit, last."""
         g = s.grant
-        if g is not None and g.live and not g.page.closed and g.att is not None:
+        if g is not None and g.live and not g.page.closed and g.att is not None and not g.att.exited:
             if g.att.replaying:
                 g.att.exit_after_replay = True
             else:
-                g.att.flush_now()  # (what was read before the exit, then the exit)
+                g.att.flush_now()
                 g.att.send_exit()
 
     def _prune_ended(self):
