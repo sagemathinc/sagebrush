@@ -119,3 +119,36 @@ test("board render: pictures the board leaves out for their names are named on s
   r = cli(["-"], JSON.stringify({ format: "sagebrush-board", version: 1, images: Object.fromEntries(many.map((n) => [n, pic])), nodes: [{ id: "a", text: "x" }] }));
   assert.match(r.stderr, /^sagebrush board render: pictures left out: .*and these are not: "p 0", [^\n]*"p 9", and 2 more\n/);
 });
+
+// A Markdown table in a note is a grid (codex friction P10a): each cell its own text, in its column, the header row
+// bold and ruled off, cells aligned as the separator row says, and a narrow note's cells wrapped at words (never a
+// "4 | 2" line). The reproduction is python's recheck's, repro/P10/table.board.json.
+const texts = (svg: string) => [...svg.matchAll(/<text x="([\d.-]+)" y="([\d.-]+)"[^>]*>(.*?)<\/text>/g)].map((m) => ({ x: +m[1], y: +m[2], t: m[3].replace(/<[^>]*>/g, "") }));
+test("board render: a Markdown table is a grid, each cell in its column, the header ruled off (P10a)", () => {
+  const doc = { format: "sagebrush-board", version: 1, title: "t", mode: "sage", nodes: [{ id: "n", title: "table", text: "| Degree | Power |\n|---|---|\n| 4 | 2 |\n| 5 | 3 |", x: 0, y: 0, w: 300 }] };
+  const r = cli(["-"], JSON.stringify(doc));
+  assert.equal(r.status, 0, r.stderr);
+  const ts = texts(r.stdout), at = (s: string) => ts.find((x) => x.t === s);
+  for (const s of ["Degree", "Power", "4", "2", "5", "3"]) assert.ok(at(s), `"${s}" is a cell's own text: ${JSON.stringify(ts.map((x) => x.t))}`);
+  assert.ok(!ts.some((x) => x.t.includes("|")), "no cell joined to another with a |");
+  assert.ok(at("4")!.x === at("Degree")!.x && at("5")!.x === at("Degree")!.x && at("2")!.x === at("Power")!.x && at("Power")!.x > at("Degree")!.x, "each column under its header");
+  assert.ok(at("Degree")!.y < at("4")!.y && at("4")!.y < at("5")!.y && at("Power")!.y === at("Degree")!.y, "the header first, a row a line");
+  assert.match(r.stdout, /<tspan font-weight="bold">Degree<\/tspan>/, "the header bold");
+  assert.match(r.stdout, /<path d="M[\d.]+ [\d.]+H[\d.]+" fill="none" stroke="#8a9099" stroke-width="1.5"\/>/, "the header ruled off");
+});
+test("board render: a table's cells aligned as its separator row says, and wrapped at words in a narrow note (P10a)", () => {
+  const doc = { format: "sagebrush-board", version: 1, nodes: [
+    { id: "a", text: "| left | center | right |\n|:---|:---:|---:|\n| 1 | 22 | 333 |", x: 0, y: 0, w: 300 },
+    { id: "b", text: "| a very long header cell | another long one |\n|---|---|\n| some quite long content here | more |", x: 0, y: 300, w: 200 }] };
+  const r = cli(["-"], JSON.stringify(doc));
+  assert.equal(r.status, 0, r.stderr);
+  const ts = texts(r.stdout), at = (s: string) => ts.find((x) => x.t === s)!;
+  // (a column's text: left at its left padding, centered, at its right padding: the header's and the cell's sides agree)
+  assert.equal(at("1").x, at("left").x, "left-aligned");
+  assert.ok(at("22").x > at("center").x, "centered: a narrower cell starts further in than its header");
+  assert.ok(at("333").x > at("right").x, "right-aligned: a narrower cell starts further in than its header");
+  const narrow = ts.filter((x) => x.y > 300);
+  assert.ok(!narrow.some((x) => x.t.includes("…")), "nothing cut with an ellipsis");
+  for (const w of ["a very", "long", "header", "cell", "another", "long one", "some quite", "content", "here", "more"]) assert.ok(narrow.some((x) => x.t === w), `"${w}" a wrapped line of its own: ${JSON.stringify(narrow.map((x) => x.t))}`);
+  assert.ok(!narrow.some((x) => /^(anothe|r long( one)?)$/.test(x.t)), "no word broken: each column at least as wide as its longest word");
+});
