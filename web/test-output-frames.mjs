@@ -550,7 +550,7 @@ try {
   for (let y = 0; y <= 12 * 340; y += 680) { await ev(`(sc.scrollTop = ${y}, 1)`); await sleep(150); }
   await anchor(); await sleep(400);
   const after2 = await ev(at6), top1 = await ev("sc.getBoundingClientRect().top"), sizes1 = await ev(sizes);
-  ok(Math.abs(after2 - before) <= 1, `after eviction cycles the anchor moved at most a pixel in its scroller: ${before} -> ${after2} (the page above it moved ${Math.round(top1 - top0)} px; the areas above it ${sizes0} -> ${sizes1})`);
+  ok(Math.abs(after2 - before) <= 1, `after eviction cycles the anchor moved at most a pixel in its scroller: ${before} -> ${after2} (the page above it moved ${Math.round(top1 - top0)} px; the areas above it ${sizes0} -> ${sizes1})` + (Math.abs(after2 - before) <= 1 ? "" : "; e0-e5 events: " + JSON.stringify(await ev(`events.filter((e) => /^e[0-5]$/.test(e.area) && e.type !== "ready").map((e) => [e.area, e.type, e.generation, e.height ?? e.why ?? "", Math.round(e.t)])`))));
 
   // ---- 50 and 200 areas: the figures for the cap (printed; the cap's frozen value comes from these)
   for (const count of [50, 200]) {
