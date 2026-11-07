@@ -137,6 +137,37 @@ test("board run: an @interact's output: under the item's caps, a traceback past 
   assert.ok(REASON.test(String(interactError(many))), "…and the item still fails, its tracebacks past the limit");
   for (let t = 1; t <= ITEM_DISPLAYS_MAX + 50; t++) collect(many, { target: t, clear: true }, k7);
   assert.ok(REASON.test(String(interactError(many))), "…its interacts' clears can't take back the ones it could not keep track of");
+  // (cut, refilled and cleared again and again: the cut said once, by the item's own caps or the worker's cut alike;
+  // astra's INTERACT-CUT-NOTE-1)
+  const notes = (l: any[]) => l.filter((o) => o.output_type === "stream" && o.text.includes("[output cut")).length;
+  const rep1: any[] = [], k8 = { run: 0 };
+  for (let i = 0; i < 200; i++) {
+    collect(rep1, { target: 1, stream: "stdout", text: "y".repeat(ITEM_OUTPUT_MAX) }, k8);
+    collect(rep1, { target: 1, stream: "stdout", text: "more" }, k8);
+    collect(rep1, { target: 1, clear: true }, k8);
+  }
+  assert.equal(notes(rep1), 1, "the item's own cut said once");
+  const rep2: any[] = [], k9 = { run: 0 };
+  for (let i = 0; i < 200; i++) {
+    collect(rep2, { target: 1, stream: "stdout", text: "y" }, k9);
+    collect(rep2, { cut: "item" }, k9);
+    collect(rep2, { target: 1, clear: true }, k9);
+  }
+  assert.equal(notes(rep2), 1, "the worker's cut said once");
+  // (and the run's cut: the board's output nearly spent; each cycle keeps a little there, is cut by the run's cap, and
+  // its clear gives the little back)
+  const rep3: any[] = [], k10 = { run: RUN_OUTPUT_MAX - 100 };
+  for (let i = 0; i < 200; i++) {
+    collect(rep3, { target: 1, stream: "stdout", text: "y".repeat(50) }, k10);
+    collect(rep3, { target: 1, stream: "stdout", text: "y".repeat(80) }, k10);
+    collect(rep3, { target: 1, clear: true }, k10);
+  }
+  assert.equal(notes(rep3), 1, "the run's cut said once");
+  assert.equal(k10.run, RUN_OUTPUT_MAX - 100);
+  assert.ok(textOf(rep2).length < 200 && textOf(rep1).length < 200, "nothing else kept growing");
+  collect(rep2, { clear: true }, k9);
+  collect(rep2, { cut: "item" }, k9);
+  assert.equal(notes(rep2), 1, "after the item's own clear, a cut is said again, once");
   // (a traceback kept: the error is it, the reason last)
   const ok: any[] = [], k4 = { run: 0 };
   collect(ok, { target: 1, stream: "stdout", text: "5/3\n" }, k4);

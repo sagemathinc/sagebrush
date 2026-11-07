@@ -529,6 +529,10 @@ export function interactError(list: any[]): string | null {
 
 const CUT_WHY = { item: `${ITEM_OUTPUT_MAX / 2 ** 20} MB for this item`, run: `${RUN_OUTPUT_MAX / 2 ** 20} MB for the whole board`, displays: `${ITEM_DISPLAYS_MAX} displays for this item` };
 const cutNote = (why: keyof typeof CUT_WHY) => ({ output_type: "stream", name: "stderr", text: `\n[output cut: past ${CUT_WHY[why]}; the rest was not kept]\n` });
+// (an item's cut said once: an interact's clear can lift the cut, and its next cut must not add another note, which
+// is charged to nothing (astra's INTERACT-CUT-NOTE-1); the item's own clear empties the list, and the note with it)
+const cutSaid = new WeakSet<any[]>();
+const sayCut = (list: any[], why: keyof typeof CUT_WHY) => { if (cutSaid.has(list)) return; cutSaid.add(list); list.push(cutNote(why)); };
 
 // a run's messages, as the notebook keeps them (Jupyter's outputs): streams
 // joined, displays as display_data, clear_output() as it says
@@ -559,23 +563,23 @@ export function collect(list: any[], m: any, kept: { run: number }) {
       else interactRaisedUntracked.add(list);
     }
   }
-  if (m.clear) { kept.run -= size.used; size.used = 0; size.cut = false; size.displays = 0; list.length = 0; interactRaised.delete(list); interactRaisedUntracked.delete(list); return; }
+  if (m.clear) { kept.run -= size.used; size.used = 0; size.cut = false; size.displays = 0; list.length = 0; cutSaid.delete(list); interactRaised.delete(list); interactRaisedUntracked.delete(list); return; }
   // (the worker cut the rest where it was written)
   if (m.cut) {
-    if (!size.cut) list.push(cutNote(m.cut in CUT_WHY ? m.cut : "item"));
+    if (!size.cut) sayCut(list, m.cut in CUT_WHY ? m.cut : "item");
     size.cut = true;
     return;
   }
   const bytes = m.stream ? String(m.text ?? "").length : m.display ? displayCost(m.display) : m.interact ? DISPLAY_ENVELOPE + JSON.stringify(m.interact).length : 0;
   if ((m.display || m.interact) && !size.cut && ++size.displays > ITEM_DISPLAYS_MAX) {
     size.cut = true;
-    list.push(cutNote("displays"));
+    sayCut(list, "displays");
     return;
   }
   if (size.cut) return;
   if (size.used + bytes > ITEM_OUTPUT_MAX || kept.run + bytes > RUN_OUTPUT_MAX) {
     size.cut = true;
-    list.push(cutNote(size.used + bytes > ITEM_OUTPUT_MAX ? "item" : "run"));
+    sayCut(list, size.used + bytes > ITEM_OUTPUT_MAX ? "item" : "run");
     return;
   }
   size.used += bytes;
