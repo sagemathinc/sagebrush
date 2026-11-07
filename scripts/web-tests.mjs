@@ -17,11 +17,12 @@
 // its own), named there by its path.
 //
 //   node scripts/web-tests.mjs run TARGET     run the target's suites in order; stop at the first failure
+//                                             (a target in WORKERS: that many at once, each one's output whole)
 //   node scripts/web-tests.mjs plan [TARGET] [--json]   the commands, without running them
 //   node scripts/web-tests.mjs check          every suite has a header; every target is run by a workflow
 //                                             and every workflow target has a suite; inline suites are
 //                                             named in a workflow, and a workflow names no other suite
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { readFileSync, readdirSync, realpathSync } from "node:fs";
 import { constants } from "node:os";
 import { join } from "node:path";
@@ -203,6 +204,84 @@ export function check(all, workflows) {
   return problems;
 }
 
+// The suites a target runs at once: one unless named here.  web-runner's 70
+// suites took 19.5 min one after another, past "PR CI <= 10 min" (@sagebrush's
+// work order, Nov 7).  Each of its suites has its own temporary site, Chromium
+// profile and DevTools port (0, as CDP_PORT is unset), so they share only the
+// step's read-only site server.
+export const WORKERS = { "web-runner": 3 };
+
+function runEnv(r) {
+  return {
+    ...process.env,
+    ...Object.fromEntries(
+      r.env.map((e) => [e.slice(0, e.indexOf("=")), e.slice(e.indexOf("=") + 1)]),
+    ),
+  };
+}
+
+// The plan's suites, `workers` at a time, started in the plan's order.  Each
+// suite's output is printed whole when it ends (START, its output, then END
+// and its time), so the log reads suite by suite.  After a failure no more
+// suites start; the ones running finish and are printed, and the first
+// failure's code is the run's.
+function runParallel(runs, workers, target) {
+  return new Promise((resolve) => {
+    let next = 0, ran = 0, running = 0, failed = null;
+    const children = new Set();
+    const stop = (sig, code) => {
+      for (const c of children) c.kill(sig);
+      resolve(code);
+    };
+    process.once("SIGTERM", () => stop("SIGTERM", 143));
+    process.once("SIGINT", () => stop("SIGINT", 130));
+    const finish = () => {
+      if (failed !== null) return resolve(failed);
+      console.log(`web-tests: ran ${ran} of ${runs.length} (${target}, ${workers} at a time)`);
+      resolve(ran > 0 && ran === runs.length ? 0 : 1);
+    };
+    const start = () => {
+      while (running < workers && next < runs.length && failed === null) {
+        const r = runs[next++];
+        const t0 = Date.now(), out = [];
+        const child = spawn(r.runner, [...(r.test ? ["--test"] : []), r.file, ...r.args], {
+          stdio: ["ignore", "pipe", "pipe"],
+          env: runEnv(r),
+        });
+        running++;
+        children.add(child);
+        child.stdout.on("data", (d) => out.push(d));
+        child.stderr.on("data", (d) => out.push(d));
+        let done = false;
+        const end = (status, signal, error) => {
+          if (done) return;
+          done = true;
+          running--;
+          children.delete(child);
+          const s = ((Date.now() - t0) / 1000).toFixed(1);
+          process.stdout.write(`START ${r.target}: ${command(r)}\n${Buffer.concat(out).toString()}`);
+          if (error) {
+            console.error(`web-tests: ${r.runner}: ${error.message}`);
+            if (failed === null) failed = 127;
+          } else if (status !== 0) {
+            console.error(`FAILED ${r.target}: ${command(r)} (${signal ?? `exit ${status}`}) after ${s}s`);
+            // (as the shell reports a signal: 128 + its number)
+            if (failed === null) failed = status ?? 128 + (constants.signals[signal] ?? 0);
+          } else {
+            console.log(`END ${r.target}: ${command(r)} (${s}s)`);
+            ran++;
+          }
+          if (running === 0 && (failed !== null || next === runs.length)) finish();
+          else start();
+        };
+        child.on("error", (e) => end(null, null, e));
+        child.on("close", (status, signal) => end(status, signal, null));
+      }
+    };
+    start();
+  });
+}
+
 function main(argv) {
   const [cmd, ...rest] = argv;
   if (cmd === "check") {
@@ -244,6 +323,8 @@ function main(argv) {
       console.error(`web-tests: no suite names target ${rest[0]}`);
       return 1;
     }
+    if ((WORKERS[rest[0]] ?? 1) > 1)
+      return runParallel(runs, WORKERS[rest[0]], rest[0]);
     let ran = 0;
     for (const r of runs) {
       console.log(`START ${r.target}: ${command(r)}`);
@@ -295,4 +376,7 @@ const isMain = () => {
     return false;
   }
 };
-if (isMain()) process.exitCode = main(process.argv.slice(2));
+if (isMain())
+  Promise.resolve(main(process.argv.slice(2))).then((code) => {
+    process.exitCode = code;
+  });

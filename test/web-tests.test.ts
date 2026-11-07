@@ -186,3 +186,46 @@ test("web-tests: a malformed header is an error naming its line", () => {
     assert.match(r.stderr, message, header);
   }
 });
+
+// (a suite for a target in WORKERS: it marks itself started and running, logs how many run with it, waits until
+// `meet` suites have started (a barrier: one at a time never gets there, and the suite exits 9 after 3000 looks), prints
+// a line of its own, then ends with CODE)
+const meeting = (header: string, meet: number, code = 0) =>
+  `${header}\nimport { appendFileSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";\n` +
+  `const me = import.meta.url.split("/").pop();\n` +
+  `for (const d of ["started", "running"]) mkdirSync(d, { recursive: true });\n` +
+  `writeFileSync("started/" + me, ""); writeFileSync("running/" + me, "");\n` +
+  `appendFileSync("log.txt", me + " " + readdirSync("running").length + "\\n");\n` +
+  `let n = 0;\n` +
+  `while (readdirSync("started").length < ${meet}) { if (++n > 3000) process.exit(9); await new Promise((r) => setTimeout(r, 10)); }\n` +
+  `console.log("own line of " + me);\n` +
+  `rmSync("running/" + me);\n` +
+  `process.exit(${code});\n`;
+
+test("web-tests run: a target in WORKERS runs that many suites at once, never more, and prints each suite's output whole", () => {
+  const files: Record<string, string> = { ".github/workflows/ci.yml": workflow("web-runner") };
+  for (let i = 1; i <= 5; i++) files[`web/test-${i}.mjs`] = meeting(`// ci: web-runner order=${i}0`, 3);
+  const dir = repo(files);
+  const r = cli(dir, "run", "web-runner");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /^web-tests: ran 5 of 5 \(web-runner, 3 at a time\)$/m);
+  const log = readFileSync(join(dir, "log.txt"), "utf8").trim().split("\n");
+  assert.equal(log.length, 5);
+  assert.ok(log.every((l) => Number(l.split(" ")[1]) <= 3), log.join("; "));
+  // (each suite's START, its own line and its END, together)
+  for (let i = 1; i <= 5; i++)
+    assert.match(r.stdout, new RegExp(`^START web-runner: node web/test-${i}\\.mjs\\nown line of test-${i}\\.mjs\\nEND web-runner: node web/test-${i}\\.mjs \\([0-9.]+s\\)$`, "m"));
+});
+
+test("web-tests run: in WORKERS, a failure is the run's code; no suite starts after it, and the ones that ran are the plan's first", () => {
+  const files: Record<string, string> = { ".github/workflows/ci.yml": workflow("web-runner") };
+  for (let i = 1; i <= 6; i++) files[`web/test-${i}.mjs`] = meeting(`// ci: web-runner order=${i}0`, 3, i === 2 ? 4 : 0);
+  const dir = repo(files);
+  const r = cli(dir, "run", "web-runner");
+  assert.equal(r.status, 4);
+  assert.match(r.stderr, /^FAILED web-runner: node web\/test-2\.mjs \(exit 4\) after [0-9.]+s$/m);
+  assert.doesNotMatch(r.stdout, /web-tests: ran/);
+  const ran = readFileSync(join(dir, "log.txt"), "utf8").trim().split("\n").map((l) => l.split(" ")[0]);
+  assert.ok(ran.length >= 3 && ran.length < 6, ran.join(" "));
+  assert.deepEqual([...ran].sort(), Array.from({ length: ran.length }, (_, i) => `test-${i + 1}.mjs`));
+});
