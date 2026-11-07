@@ -16,10 +16,14 @@
 //   says so, or the shell doesn't load within LOAD_MS, or the commit doesn't come within
 //   COMMIT_MS of being sent).  A render is accepted, and pending, from render() on, so a
 //   renderer that never starts still ends it.  A newer render, a clear or a dispose ends the old one at once, here,
-//   without waiting for the frame.  Heights after the commit only resize.
+//   without waiting for the frame.  Heights after the commit only resize.  Disposing the
+//   whole set ends every pending render (live, starved of a frame or offscreen) as
+//   "disposed", once, and leaves no frame, box content, timer or observer (RENDER-COMMIT-2).
 // - EVICT-LAYOUT-1: at most `cap` frames live in the page.  An area asks for a frame when
 //   it is visible (or deliberately, show()); the focused or asked-for area first, then
-//   the visible ones nearest the viewport, document order breaking ties.  If none is
+//   the visible ones nearest the viewport, document order breaking ties.  Asking is
+//   one admission's priority, not a pin: once mounted, an asked-for area is evictable
+//   like any other when it is offscreen, unfocused and committed (EVICT-LAYOUT-2).  If none is
 //   free, the unfocused area seen least recently offscreen gives its frame back; if none
 //   may, the area stays a placeholder.  An area with a render in flight is never
 //   evicted.  A placeholder keeps the last height (or INITIAL_PX before any).
@@ -30,8 +34,9 @@
 import { LIMITS, decode, encode } from "../output-shell/protocol.js";
 
 // (loadMs: the shell must say ready within this; commitMs: a render must commit within this after it is sent;
-// initialPx: a placeholder's height before any commit; cap: live frames a page, derived from the dense 50/200
-// measurements, web/test-output-frames.mjs, with Firefox's and WebKit's figures to come)
+// initialPx: a placeholder's height before any commit; cap: live frames a page, the frozen initial value (daybreak3,
+// Nov 7) from the dense 50/200 measurements of web/test-output-frames.mjs: about 32-34 MB and 0.3-0.36 s at most in
+// Chromium and Firefox; WebKit's figures come before any raise)
 export const FRAME_LIMITS = Object.freeze({ loadMs: 10000, commitMs: 6000, initialPx: 120, cap: 24 });
 export const LOAD_MS = FRAME_LIMITS.loadMs;
 export const COMMIT_MS = FRAME_LIMITS.commitMs;
@@ -50,7 +55,7 @@ export function createOutputFrames({ srcdoc = null, url = null, cap = DEFAULT_CA
   if ((srcdoc === null) === (url === null)) throw new Error("output frames: exactly one of srcdoc and url");
   if (!Number.isSafeInteger(cap) || cap < 1) throw new Error("output frames: a cap of at least one frame");
   const areas = new Map(); // id -> area
-  let order = 0, theme = "light";
+  let order = 0, theme = "light", closed = false;
   const live = () => [...areas.values()].filter((a) => a.frame);
 
   const seen = new IntersectionObserver((entries) => {
@@ -69,6 +74,7 @@ export function createOutputFrames({ srcdoc = null, url = null, cap = DEFAULT_CA
   }
   // (who gets a frame: the asked-for or focused first, then visible ones by distance, then document order)
   function admit() {
+    if (closed) return;
     const want = [...areas.values()].filter((a) => !a.frame && a.outputs && (a.asked || a.visible))
       .sort((x, y) => (y.asked - x.asked) || (distance(x) - distance(y)) || (x.order - y.order));
     for (const a of want) {
@@ -104,8 +110,10 @@ export function createOutputFrames({ srcdoc = null, url = null, cap = DEFAULT_CA
     f.style.cssText = `border:0;width:100%;display:block;height:${a.height ?? INITIAL_PX}px`;
     const ch = new MessageChannel();
     a.frame = f; a.port = ch.port1; a.ready = false;
+    a.asked = false; // (admitted: the request is spent, EVICT-LAYOUT-2)
+    a.seenAt = performance.now();
     const mine = f;
-    a.loadTimer = setTimeout(() => { if (a.frame === mine && !a.ready) fail(a, "the renderer didn't start"); }, loadMs);
+    a.loadTimer = setTimeout(() => { if (a.frame === mine && !a.ready) fail(a, "the output viewer didn't start"); }, loadMs);
     f.addEventListener("load", () => {
       if (a.frame !== mine || !f.contentWindow) return;
       f.contentWindow.postMessage({ sbOutIso: 1 }, "*", [ch.port2]); // (opaque origin: "*"; the port, not the origin, is the identity)
@@ -136,7 +144,7 @@ export function createOutputFrames({ srcdoc = null, url = null, cap = DEFAULT_CA
     a.sent = a.generation;
     clearTimeout(a.commitTimer);
     const g = a.generation;
-    a.commitTimer = setTimeout(() => { if (a.pending?.generation === g) fail(a, "the renderer didn't finish"); }, commitMs);
+    a.commitTimer = setTimeout(() => { if (a.pending?.generation === g) fail(a, "the output viewer didn't finish"); }, commitMs);
     a.port.postMessage(encode("to-frame", "render", { generation: g, area: a.id, outputs: a.outputs }));
   }
 
@@ -180,12 +188,13 @@ export function createOutputFrames({ srcdoc = null, url = null, cap = DEFAULT_CA
       onEvent({ type: "height", area: a.id, generation: m.generation, height: m.height });
       return;
     }
-    if (m.type === "error" && p && m.generation === p.generation) fail(a, "the renderer refused it");
+    if (m.type === "error" && p && m.generation === p.generation) fail(a, "the output viewer refused it");
   }
 
   return {
     /** An area for `id` in `box` (an element the caller placed in the document). */
     area(id, box, { title = "Output" } = {}) {
+      if (closed) throw new Error("output frames: disposed");
       if (!/^[A-Za-z0-9_.:-]{1,64}$/.test(id) || areas.has(id)) throw new Error(`output area ${id}: not a fresh id`);
       const a = { id, box, el: box, title, order: order++, frame: null, port: null, ready: false, outputs: null, generation: 0, pending: null,
         height: null, sent: -1, visible: false, asked: false, focused: false, seenAt: 0, failed: null, loadTimer: 0, commitTimer: 0 };
@@ -215,6 +224,18 @@ export function createOutputFrames({ srcdoc = null, url = null, cap = DEFAULT_CA
     },
     setTheme(t) { theme = t; for (const a of live()) if (a.ready) a.port.postMessage(encode("to-frame", "theme", { theme })); },
     counts() { return { areas: areas.size, live: live().length, ports: live().filter((a) => a.port).length, pending: [...areas.values()].filter((a) => a.pending).length }; },
-    dispose() { for (const a of [...areas.values()]) if (a.frame) unmount(a, "disposed"); areas.clear(); seen.disconnect(); },
+    dispose() {
+      closed = true;
+      for (const a of [...areas.values()]) {
+        end(a, "error", "disposed"); // (every pending render, live or not, ends here, once)
+        a.outputs = null;
+        if (a.frame) unmount(a, "disposed");
+        clearTimeout(a.loadTimer); clearTimeout(a.commitTimer);
+        seen.unobserve(a.box);
+        a.box.replaceChildren();
+      }
+      areas.clear();
+      seen.disconnect();
+    },
   };
 }

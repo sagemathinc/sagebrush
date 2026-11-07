@@ -47,6 +47,8 @@ const ROGUES = {
   }`),
   silent: `<!doctype html><body></body>`,
   stuck: rogue(`() => {}`),
+  // (commits 300 ms after the render: a message still to come when the set is disposed)
+  late: rogue(`(port, r) => setTimeout(() => port.postMessage(JSON.stringify({ v: 1, type: "committed", generation: r.generation, area: r.area, ids: r.outputs.map((x) => x.id), height: 40 })), 300)`),
 };
 const host = await Bun.build({ entrypoints: [join(here, "notebook", "output-frames.js")], target: "browser", format: "esm", define: { __SB_OUTPUT_SHELL__: JSON.stringify(shell.srcdoc) } });
 if (!host.success) throw new Error(host.logs.join("\n"));
@@ -283,6 +285,36 @@ try {
   await sleep(300);
   const dd = await ev(`({ ends: events.filter((e) => e.area === "d1" && (e.type === "committed" || e.type === "error")).map((e) => e.reason || e.type), counts: D.counts() })`);
   ok(dd.ends.length === 1 && dd.ends[0] === "disposed" && dd.counts.live === 0 && dd.counts.areas === 0 && dd.counts.ports === 0, "a dispose before ready ends the render once and leaves no frame, port or area: " + JSON.stringify(dd));
+
+  // ---- EVICT-LAYOUT-2: show() is one admission's priority, not a pin (cap 1, both areas offscreen)
+  const offscreen = `(() => { const s = document.createElement("div"); s.style.cssText = "height:100px;overflow:auto"; document.body.append(s); const sp = document.createElement("div"); sp.style.height = "3000px"; s.append(sp); return s; })()`;
+  await ev(`(window.sc2 = ${offscreen}, window.K = make({ cap: 1, root: sc2 }), window.KA = K.area("k1", box(sc2)), window.KB = K.area("k2", box(sc2)),
+    KA.render([{ id: "o", kind: "html", body: "<div style=\\"height:66px\\">a</div>" }]), KB.render([{ id: "o", kind: "text", body: "b" }]), KA.show(), 1)`);
+  const k1 = await ev(`until(() => events.find((e) => e.area === "k1" && e.type === "committed"))`);
+  await ev(`(KB.show(), 1)`);
+  const k2 = await ev(`until(() => events.find((e) => e.area === "k2" && e.type === "committed"))`);
+  const kx = await ev(`({ a: KA.state, b: KB.state, live: K.counts().live, hold: sc2.querySelectorAll(".area")[0].querySelector(".sb-out-placeholder")?.style.height })`);
+  ok(!!k1 && !!k2 && kx.live === 1 && !kx.a.live && kx.b.live && kx.hold === `${kx.a.height}px`,
+    "an area revealed with show() and committed, then offscreen, gives its frame to the next reveal, its height held: " + JSON.stringify(kx));
+  await ev(`(KA.show(), 1)`);
+  const k3 = await ev(`until(() => events.find((e) => e.area === "k1" && e.type === "committed" && e.generation === 2))`);
+  ok(!!k3 && (await ev("KB.state.live")) === false && (await ev("K.counts().live")) === 1, "revealed again, it replays as a new generation and the other gives its frame back");
+  await ev("(K.dispose(), sc2.remove(), 1)");
+
+  // ---- RENDER-COMMIT-2: disposing the set ends every pending render once (live, starved of a frame, offscreen)
+  await ev(`(window.sc3 = ${offscreen}, window.Z = make({ rogue: "late", cap: 1, root: sc3, commitMs: 60000 }),
+    window.ZA = Z.area("z1", box(sc3)), window.ZB = Z.area("z2", box(sc3)), window.ZC = Z.area("z3", box(sc3)),
+    ZA.render([{ id: "o", kind: "text", body: "a" }]), ZA.show(), 1)`);
+  await ev(`until(() => events.find((e) => e.area === "z1" && e.type === "ready"))`);
+  const zs = await ev(`(ZB.render([{ id: "o", kind: "text", body: "b" }]), ZB.show(), ZC.render([{ id: "o", kind: "text", body: "c" }]),
+    ({ before: Z.counts(), bLive: ZB.state.live, cLive: ZC.state.live, _: Z.dispose() }))`);
+  await sleep(800);
+  const zd = await ev(`({ ends: ["z1", "z2", "z3"].map((id) => events.filter((e) => e.area === id && (e.type === "committed" || e.type === "error")).map((e) => e.reason || e.type)),
+    counts: Z.counts(), kids: [...sc3.querySelectorAll(".area")].map((b) => b.childElementCount), refused: (() => { try { Z.area("z4", box(sc3)); return false; } catch { return true; } })() })`);
+  ok(zs.before.live === 1 && zs.before.pending === 3 && !zs.bLive && !zs.cLive && zd.ends.every((e) => e.length === 1 && e[0] === "disposed")
+    && zd.counts.areas === 0 && zd.counts.live === 0 && zd.kids.slice(0, 3).every((n) => n === 0) && zd.refused,
+    "disposing the set ends the live, the frame-starved and the offscreen render once each, a late commit included, and leaves nothing: " + JSON.stringify([zs.before, zd]));
+  await ev("(sc3.remove(), 1)");
 
   // ---- EVICT-LAYOUT-1 under a cap of 3, in a scrolling container
   await ev(`(() => {
