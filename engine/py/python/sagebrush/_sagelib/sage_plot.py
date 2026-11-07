@@ -26,6 +26,20 @@ def _split(options):
     return g, p
 
 
+def _aspect_figsize(r):
+    """A figure size (inches) whose plot area has the shape of data r times
+    as wide as high, plus room for tick labels: the picture Sage saves, its
+    6.4 x 4.8 figure cropped to the plot (so never wider than 6.4: a wide
+    one keeps that width and loses height; a very tall one is narrow, its
+    width mostly the tick labels' room, as Sage's)."""
+    h = 4.6
+    w = (h - 0.5) * r + 0.75
+    if w > 6.4:
+        w = 6.4
+        h = (w - 0.75) / r + 0.5
+    return (w, h)
+
+
 def _label(s):
     # (a label, title or text as given: its $...$ parts are typeset when it
     # is drawn, the rest stays as written, as Sage shows them through
@@ -219,6 +233,21 @@ class Graphics:
                 p["xticks"] = _ticks(xt, o.get("xmin"), o.get("xmax"), self, 0)
             if yt is not None:
                 p["yticks"] = _ticks(yt, o.get("ymin"), o.get("ymax"), self, 1)
+        ar = o.get("aspect_ratio")
+        if ar not in (None, "automatic") and not o.get("fit_aspect") and o.get("scale") is None:
+            # (a numeric aspect ratio keeps the data's ranges and gives the
+            # plot area their shape, matplotlib's adjustable='box', as Sage
+            # draws it, cropped to the drawing: the ranges were widened to
+            # the 640 x 480 canvas instead, a Riemann sum's 0..2 drawn from
+            # -1.5 to 3.5)
+            bb = Panel(self._primitives).data_bbox()
+            if bb is not None and None not in bb:
+                xa, xb, ya, yb = (float(o[k]) if o.get(k) is not None else float(v)
+                                  for k, v in zip(("xmin", "xmax", "ymin", "ymax"), bb))
+                if xb > xa and yb > ya:
+                    p.update(xmin=xa, xmax=xb, ymin=ya, ymax=yb, fit_aspect=True)
+                    if o.get("figsize") is None:
+                        o["figsize"] = _aspect_figsize((xb - xa) / ((yb - ya) * float(ar)))
         fs = o.get("figsize", (6.4, 4.8))
         if isinstance(fs, (int, float)):
             fs = (fs, fs * 0.75)
@@ -515,6 +544,8 @@ def parametric_plot(funcs, *args, **options):
         except (ValueError, ZeroDivisionError, OverflowError):
             xs.append(None)
             ys.append(None)
+    # (Sage's parametric plots have aspect ratio 1.0, W42)
+    gopts.setdefault("aspect_ratio", 1.0)
     return Graphics([Line(xs, ys, **_line_options(p))], **gopts)
 
 
@@ -540,7 +571,7 @@ def polar_plot(r, *args, **options):
         except (ValueError, ZeroDivisionError, OverflowError):
             xs.append(None)
             ys.append(None)
-    gopts.setdefault("aspect_ratio", 1)
+    gopts.setdefault("aspect_ratio", 1.0)
     return Graphics([Line(xs, ys, **_line_options(p))], **gopts)
 
 
@@ -618,13 +649,31 @@ def text(string, xy, **options):
 
         sage: text("hello", (1, 1))
         Graphics object consisting of 1 graphics primitive
+        sage: P = text("LARGE", (0, 0), fontsize=40); P[0].options()['fontsize'], text("d", (0, 0))[0].options()['fontsize']
+        (40, 10)
+
+    The size is in points, drawn at 100 dpi as Sage draws its figures (40
+    points, 55.56 pixels on the 640 x 480 canvas)::
+
+        sage: 'font-size="55.56"' in P._svg()  # sagebrush only
+        True
     """
+    # (fontsize is the text's own, not the figure's tick label size, as in
+    # Sage: it was taken for the figure's, and every text drew at 11; Sage's
+    # default is 10)
+    options = dict(options)
+    fontsize = options.pop("fontsize", 10)
     gopts, p = _split(options)
-    o = {"fontsize": p.pop("fontsize", 11), "color": p.pop("color", p.pop("rgbcolor", None)),
+    # (Sage's default color is blue, (0.0, 0.0, 1.0))
+    o = {"fontsize": fontsize, "color": p.pop("color", p.pop("rgbcolor", (0.0, 0.0, 1.0))),
          "horizontal_alignment": p.pop("horizontal_alignment", "center"),
          "vertical_alignment": p.pop("vertical_alignment", "center"), "rotation": p.pop("rotation", 0),
          "background_color": p.pop("background_color", None)}
-    return Graphics([Text(_label(string), xy[0], xy[1], **o)], **gopts)
+    T = Text(_label(string), xy[0], xy[1], **o)
+    # (its fontsize is in points, drawn at 100 dpi as Sage's figures are:
+    # 40 was drawn 40 px high on the 640 px canvas, 72% of Sage's)
+    T._px_per_size = 100 / 72
+    return Graphics([T], **gopts)
 
 
 def polygon(points, **options):
@@ -634,16 +683,55 @@ def polygon(points, **options):
 
         sage: polygon([(0, 0), (1, 0), (0, 1)], color='orange')
         Graphics object consisting of 1 graphics primitive
+        sage: polygon([(0, 0), (1, 0), (1, 1)]).aspect_ratio()
+        1.0
+
+    Its aspect ratio keeps the data's ranges and shapes the plot area, as
+    Sage draws it (the ranges are not widened to the canvas)::
+
+        sage: 'data-xr="0.0 4.0" data-yr="0.0 1.0"' in polygon([(0, 0), (4, 0), (0, 1)])._svg()  # sagebrush only
+        True
+
+    The figure takes the plot's shape, as Sage's cropped picture does (a
+    square plot a square picture; given ranges kept; a wide one at most
+    Sage's 6.4 inches wide)::
+
+        sage: 'width="485" height="460"' in plot(x, (x, 0, 4), aspect_ratio=1)._svg()  # sagebrush only
+        True
+        sage: 'data-xr="-1.0 4.0" data-yr="0.0 4.0"' in plot(x, (x, 0, 4), xmin=-1, aspect_ratio=1)._svg()  # sagebrush only
+        True
+        sage: 'width="640" height="55.65"' in line([(0, 0), (100, 1)], aspect_ratio=1)._svg()  # sagebrush only
+        True
+
+    A numeric aspect ratio other than 1 shapes it too: 2 makes square data's
+    plot twice as tall as wide, 1/2 twice as wide (Sage's pictures: 271 x 468
+    and 626 x 331 pixels); data 20 times as tall as wide makes a narrow one
+    (Sage's: 79 x 468)::
+
+        sage: 'width="280" height="460"' in line([(0, 0), (1, 1)], aspect_ratio=2)._svg()  # sagebrush only
+        True
+        sage: 'width="640" height="332.5"' in line([(0, 0), (1, 1)], aspect_ratio=1/2)._svg()  # sagebrush only
+        True
+        sage: 'width="95.5" height="460"' in line([(0, 0), (1, 20)], aspect_ratio=1)._svg()  # sagebrush only
+        True
     """
     gopts, p = _split(options)
     pts = list(points)
     o = {"color": _color(p), "alpha": p.pop("alpha", None), "fill": p.pop("fill", True),
          "edgecolor": p.pop("edgecolor", None), "thickness": p.pop("thickness", 1),
          "legend_label": p.pop("legend_label", None)}
+    if "linestyle" in p:
+        o["linestyle"] = p.pop("linestyle")
+    if not o["fill"] and o["edgecolor"] is None:
+        # (an unfilled polygon is its outline, in its color, as in Sage: it
+        # was drawn with no stroke at all, W11)
+        o["edgecolor"] = o["color"]
     P = Polygon([q[0] for q in pts], [q[1] for q in pts], **o)
     bad = {k: v for k, v in p.items() if k not in _POLYGON_OPTIONS}
     if bad:
         P._sage_ignored = (bad, _POLYGON_OPTIONS)
+    # (Sage's polygons have aspect ratio 1.0, W42)
+    gopts.setdefault("aspect_ratio", 1.0)
     return Graphics([P], **gopts)
 
 
@@ -694,13 +782,13 @@ def circle(center, radius, **options):
         Graphics object consisting of 1 graphics primitive
     """
     gopts, p = _split(options)
-    gopts.setdefault("aspect_ratio", 1)
+    gopts.setdefault("aspect_ratio", 1.0)
     pts = _arc(center, float(radius), 0, 2 * math.pi)
     color = _color(p)
     fill = p.pop("fill", False)
     o = {"fill": fill, "color": p.pop("facecolor", color), "edgecolor": p.pop("edgecolor", color),
          "thickness": p.pop("thickness", 1) * 1.5, "alpha": p.pop("alpha", None),
-         "legend_label": p.pop("legend_label", None)}
+         "legend_label": p.pop("legend_label", None), "linestyle": p.pop("linestyle", "-")}
     return Graphics([Polygon([q[0] for q in pts], [q[1] for q in pts], **o)], **gopts)
 
 
@@ -713,7 +801,7 @@ def disk(center, radius, angle=(0, 2 * math.pi), **options):
         Graphics object consisting of 1 graphics primitive
     """
     gopts, p = _split(options)
-    gopts.setdefault("aspect_ratio", 1)
+    gopts.setdefault("aspect_ratio", 1.0)
     a, b = float(angle[0]), float(angle[1])
     pts = _arc(center, float(radius), a, b)
     if (b - a) < 2 * math.pi - 1e-9:

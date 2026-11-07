@@ -502,12 +502,20 @@ def nice_ticks(lo, hi, target=6):
 
 # ------------------------------------------------------------------ primitives
 
+class _PrimitiveOptions(dict):
+    """A primitive's options: a dict, and callable as Sage's options()
+    method is (a copy: P[0].options()['fontsize'])."""
+
+    def __call__(self):
+        return dict(self)
+
+
 class Primitive:
     """A drawable with data coordinates and options."""
     kind = "primitive"
 
     def __init__(self, **options):
-        self.options = options
+        self.options = _PrimitiveOptions(options)
 
     def bbox(self):  # (xmin, xmax, ymin, ymax) of finite data, or None
         return None
@@ -685,9 +693,13 @@ class Polygon(Primitive):
         fill = to_color(o.get("color"), "#1f77b4") if o.get("fill", True) else "none"
         edge = to_color(o.get("edgecolor"))
         a = o.get("alpha")
-        return '<path d="%s" fill="%s"%s%s/>' % (
+        # (its outline's linestyle, as a line's: circle(..., linestyle='--')
+        # was drawn solid, W11)
+        dash = DASHES.get(o.get("linestyle", "-"), None) if edge else None
+        return '<path d="%s" fill="%s"%s%s%s/>' % (
             d, _esc(fill), ' fill-opacity="%s"' % _fmt(a) if a is not None else "",
-            ' stroke="%s" stroke-width="%s"' % (_esc(edge), _fmt(o.get("thickness", 1))) if edge else "")
+            ' stroke="%s" stroke-width="%s"' % (_esc(edge), _fmt(o.get("thickness", 1))) if edge else "",
+            ' stroke-dasharray="%s"' % dash if dash else "")
 
     def describe(self):
         return "filled region%s" % _label(self)
@@ -853,10 +865,17 @@ def _inside(P, p):
 
 class Text(Primitive):
     kind = "text"
+    # pixels per unit of its fontsize when drawn: 1 for a size given in
+    # pixels (matplotlib's Text, converted when it is made), 100/72 for
+    # Sage's text(), whose fontsize stays in points in its options
+    _px_per_size = 1
 
     def __init__(self, string, x, y, **options):
         super().__init__(**options)
         self.string, self.x, self.y = str(string), _finite(x), _finite(y)
+
+    def _px(self):
+        return float(self.options.get("fontsize", 11)) * self._px_per_size
 
     def bbox(self):
         if self.x is None or self.y is None or self.options.get("no_bbox"):
@@ -889,7 +908,7 @@ class Text(Primitive):
         whole, by its last line's baseline for "baseline"."""
         o = self.options
         n = self.string.count("\n") + 1
-        fs = float(o.get("fontsize", 11))
+        fs = self._px()
         gap = _GAP if n > 1 else 0
         a, d = (_ASCENT + gap / 2) * fs, (_DESCENT + gap / 2) * fs
         h = n * (a + d)
@@ -903,7 +922,7 @@ class Text(Primitive):
         if not self.string:
             return p[0], p[1], p[0], p[1]
         o = self.options
-        fs = float(o.get("fontsize", 11))
+        fs = self._px()
         _, top, bottom = self._box(p)
         w = 0.6 * fs * max(len(_strip_tags(_rich(s))) for s in self.string.split("\n"))
         x0 = {"left": p[0], "right": p[0] - w}.get(o.get("horizontal_alignment", "center"), p[0] - w / 2)
@@ -915,7 +934,7 @@ class Text(Primitive):
         base = {"top": "hanging", "bottom": "auto", "center": "middle", "baseline": "auto"}.get(o.get("vertical_alignment", "center"), "middle")
         color = to_color(o.get("color"))
         rot = o.get("rotation", 0)
-        fs = float(o.get("fontsize", 11))
+        fs = self._px()
         rich = (lambda s: P.markup.svg(s, fs)) if getattr(P, "markup", None) else _rich
         if "\n" in self.string:
             # (several lines: each its own text, at its baseline)
@@ -935,7 +954,7 @@ class Text(Primitive):
                 _fmt(x0), _fmt(y0), _fmt(w), _fmt(hh), _esc(bg),
                 ' transform="rotate(%s %s %s)"' % (_fmt(-float(rot)), _fmt(p[0]), _fmt(p[1])) if rot else "")
         return box + "".join('<text x="%s" y="%s" font-size="%s" text-anchor="%s" dominant-baseline="%s"%s%s>%s</text>' % (
-            _fmt(p[0]), _fmt(y), _fmt(o.get("fontsize", 11)), anchor, base,
+            _fmt(p[0]), _fmt(y), _fmt(fs), anchor, base,
             ' fill="%s"' % _esc(color) if color else "",
             ' transform="rotate(%s %s %s)"' % (_fmt(-float(rot)), _fmt(p[0]), _fmt(p[1])) if rot else "", body)
             for y, body, base in texts)

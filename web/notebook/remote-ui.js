@@ -318,7 +318,9 @@ export function statusText(text, network = NO_NETWORK) {
 export const PAIRED = {
   label: "Your computer",
   ready: "Your computer · ready",
-  sessionGone: "the runner restarted, so this page needs its new link: choose Your computer again and paste it",
+  sessionGone: "this page needs a new link from your computer: run uvx sagebrush@latest remote --loopback again, then choose Your computer and paste it",
+  upgrade: "Run the newest version: uvx sagebrush@latest remote --loopback (it always fetches the latest).",
+  config: "Use This browser for now, and please let us know.",
   blocked: "If you blocked this site's access to apps on this device, allow it in the site settings (the icon left of the address), then Retry.",
 };
 
@@ -334,7 +336,7 @@ export function pairedStatusText(text) {
  * once); without one (Retry, Reconnect), it pairs again by the remembered session.  Resolves as startPreview does:
  * {kernel, failed, retry(), close()}; `onLost(why)` is told when the socket goes.  `WebSocket`: tests.
  */
-export function pairedStarter({ WebSocket, helloMs } = {}) {
+export function pairedStarter({ WebSocket, helloMs, min } = {}) {
   let remembered = null; // {port, session, incarnation}
   return async function startPaired({ notebook, answer, onStatus = () => {}, onLost = () => {} }) {
     let tunnel = null;
@@ -362,13 +364,14 @@ export function pairedStarter({ WebSocket, helloMs } = {}) {
       if (!how) return PAIRED.sessionGone;
       r.hint = null;
       try {
-        tunnel = await pairTunnel({ port, jwk: client.jwk, jkt: client.jkt, WebSocket, timeoutMs: helloMs, ...how, onClose: (w) => { tunnel = null; if (!closed) onLost(w); } });
+        tunnel = await pairTunnel({ port, jwk: client.jwk, jkt: client.jkt, WebSocket, timeoutMs: helloMs, ...(min !== undefined ? { min } : {}), ...how, onClose: (w) => { tunnel = null; if (!closed) onLost(w); } });
         pending = null; // (a code pairs once)
       } catch (e) {
         // (a code that may have reached the runner is never sent again (astra's RETRY-2): only one whose hello was
         // never handed to a socket (nothing listening, blocked, or no answer before it opened) is kept for Retry)
         if (e?.sent !== false) pending = null;
-        r.hint = e?.kind === "unreachable" ? PAIRED.blocked : null;
+        r.hint = e?.kind === "unreachable" ? PAIRED.blocked : e?.kind === "old" ? PAIRED.upgrade : e?.kind === "config" ? PAIRED.config : null;
+        r.noRetry = e?.kind === "config"; // (board's V-1: nothing the person can retry; This browser only)
         if (how.session && e?.kind === "refused") remembered = null; // (the runner forgot it: a new code is needed)
         return how.session && e?.kind === "refused" ? PAIRED.sessionGone : e?.message ?? String(e);
       }
@@ -400,6 +403,7 @@ export function pairedStarter({ WebSocket, helloMs } = {}) {
       gateway: null,
       failed: null,
       hint: null, // (a way forward said after the failure, outside its parentheses)
+      noRetry: false,
       retry: bind,
       get tunnel() { return tunnel; },
       close() {
@@ -419,12 +423,18 @@ export function pairedStarter({ WebSocket, helloMs } = {}) {
 export const PAIR_SHEET = {
   title: "Run on your computer",
   consent: "Code you run will run on your computer, with your files and permissions.",
-  command: "sagebrush remote --loopback",
   how: "Run this in a terminal on this computer. It prints a link: open it, or paste it here.",
+  // (one way to run the runner: uvx, which always fetches the newest; every message that names the command names this
+  // one, since uvx installs no `sagebrush` command (board's #782 B-1))
+  // (one command, uvx: William, Nov 6)
+  quickLabel: "This fetches the newest Sagebrush and runs it in its own Python:",
+  getUv: "No uv? Install it first: curl -LsSf https://astral.sh/uv/install.sh | sh (or see docs.astral.sh/uv).",
+  command: "uvx sagebrush@latest remote --loopback",
+  windows: "On Windows, run it in WSL (Windows Subsystem for Linux); this browser pairs with it as usual.",
   paste: "The link (or its pairing code and port)",
   lna: "Your browser may ask to let this site access apps on this device: click Allow.",
   safari: "Safari doesn't let a website connect to programs on your computer. On a Mac, open this page in Chrome, Edge or Firefox. (On an iPhone or iPad every browser is Safari underneath, and running on your computer needs a Mac or PC.)",
-  bad: "That isn't the link sagebrush remote --loopback printed.",
+  bad: "That isn't the link uvx sagebrush@latest remote --loopback printed.",
   copied: "Copied",
   copy: "Copy",
   allow: "Connect",
@@ -446,15 +456,22 @@ export function pairSheet(doc = document, prefill = null, userAgent = globalThis
   const el = (tag, text, props = {}) => Object.assign(doc.createElement(tag), text == null ? {} : { textContent: text }, props);
   const dlg = el("dialog", null, { id: "remotedlg" });
   dlg.setAttribute("aria-labelledby", "pairtitle");
-  const cmd = el("code", PAIR_SHEET.command);
-  const copy = el("button", PAIR_SHEET.copy, { type: "button" });
-  copy.addEventListener("click", () => {
-    const cb = globalThis.navigator?.clipboard;
-    if (typeof cb?.writeText !== "function") return; // (no clipboard here: nothing is said to have been copied)
-    cb.writeText(PAIR_SHEET.command).then(() => { said.textContent = PAIR_SHEET.copied; }, () => {});
-  });
-  const cmdRow = el("p", null, { className: "cap" });
-  cmdRow.append(cmd, copy);
+  const row = (label, command, copyLabel, note) => {
+    const copy = el("button", PAIR_SHEET.copy, { type: "button" });
+    copy.setAttribute("aria-label", copyLabel);
+    copy.addEventListener("click", () => {
+      const cb = globalThis.navigator?.clipboard;
+      if (typeof cb?.writeText !== "function") return; // (no clipboard here: nothing is said to have been copied)
+      cb.writeText(command).then(() => { said.textContent = PAIR_SHEET.copied; }, () => {});
+    });
+    const p = el("p", null, { className: "cap" });
+    p.append(el("code", command), copy);
+    const box = el("div", null, { className: "cmd" });
+    box.append(el("div", label, { className: "note" }), p);
+    if (note) box.append(el("div", note, { className: "note" }));
+    return box;
+  };
+  const windows = /Windows/.test(userAgent);
   const field = el("input", null, { type: "text", id: "pairlink", autocomplete: "off", spellcheck: false });
   field.setAttribute("aria-label", PAIR_SHEET.paste);
   field.placeholder = PAIR_SHEET.paste;
@@ -466,7 +483,9 @@ export function pairSheet(doc = document, prefill = null, userAgent = globalThis
   const no = el("button", PAIR_SHEET.cancel, { id: "paircancel" });
   const acts = el("div", null, { className: "acts" });
   acts.append(no, ok);
-  dlg.append(el("h2", PAIR_SHEET.title, { id: "pairtitle" }), el("p", PAIR_SHEET.consent, { className: "preview" }), el("p", PAIR_SHEET.how), cmdRow, field,
+  dlg.append(el("h2", PAIR_SHEET.title, { id: "pairtitle" }), el("p", PAIR_SHEET.consent, { className: "preview" }), el("p", PAIR_SHEET.how),
+    row(PAIR_SHEET.quickLabel, PAIR_SHEET.command, "Copy the command", PAIR_SHEET.getUv),
+    ...(windows ? [el("p", PAIR_SHEET.windows, { className: "note" })] : []), field,
     el("p", safari ? PAIR_SHEET.safari : PAIR_SHEET.lna, { className: "note" }), said, acts);
   doc.body.append(dlg);
   return new Promise((resolve) => {
@@ -587,7 +606,7 @@ export function remoteSwitch(page, deps = {}) {
         if (ok) clearActions();
         else {
           page.status(`${label}: couldn't connect (${owner.r.failed}).${owner.r.hint ? " " + owner.r.hint : ""}`);
-          offer(owner, ["retry", "switch"]);
+          offer(owner, owner.r.noRetry ? ["switch"] : ["retry", "switch"]);
         }
       }),
       reconnect: () => act("Reconnect (a fresh kernel: its variables are lost)", async () => {
@@ -679,7 +698,7 @@ export function remoteSwitch(page, deps = {}) {
       r.kernel.on?.("lifecycle", (_old, lc) => { if (lc.phase === "moved") offer(owner, ["reconnect", "switch"]); });
       if (r.failed) {
         page.status(`${label}: couldn't connect (${r.failed}).${r.hint ? " " + r.hint : ""}`);
-        offer(owner, ["retry", "switch"]);
+        offer(owner, r.noRetry ? ["switch"] : ["retry", "switch"]);
       } else if (skipSheet) {
         page.status(`${deps.readyText ?? statusText("ready (remote)", network())} · a fresh kernel: earlier variables are gone`);
       }
@@ -703,6 +722,10 @@ const CSS = `
 #remotedlg .note { color: var(--muted); font-size: 12px; margin: 4px 0 12px; }
 #remotedlg .acts { display: flex; gap: 8px; justify-content: flex-end; }
 #remotedlg #pairlink { width: 100%; box-sizing: border-box; font: inherit; margin: 4px 0; }
+#remotedlg .cmd { margin: 4px 0 6px; }
+#remotedlg .cmd .note { margin: 0; }
+#remotedlg .cmd .cap { align-items: flex-start; }
+#remotedlg .cmd code { white-space: pre; overflow-x: auto; min-width: 0; flex: 1; padding-bottom: 2px; }
 `;
 
 /** The Connect sheet's text (the plan's §5 consent copy and §9.1 cap field, marked as a preview). */
