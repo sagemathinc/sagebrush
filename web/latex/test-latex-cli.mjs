@@ -529,6 +529,22 @@ $\sage{1/0}$ then $\sage{2+2}$.
     writeFileSync(join(w, "d.tex"), "\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n\\begin{sagesilent}\nfrom h import v\n\\end{sagesilent}\n\\begin{sagesilent}\nopen('h.py', 'w').write('v = 5')\n\\end{sagesilent}\n$\\sage{v}$\n\\end{document}\n");
     const r3 = await run(w, "run", "d.tex", "--json"), c7 = await run(w, "check", "d.tex", "--json");
     check("DEP-SNAPSHOT-1: a helper changed during the run: recorded incomplete, the results not used, said", r3.code === 0 && saved().deps === "incomplete" && c7.json?.code?.every((x) => x.state === "not run") && c7.json.problems.some((p) => p.kind === "stale" && /didn't record everything/.test(p.message)), { r3: r3.code, deps: saved().deps, c7: c7.json?.problems });
+    // (grader's #804 C4, daybreak3's probe: an item removes the run's own record of what it imported (deps.json, its
+    //  sys.argv[3]) and runs until the timeout, so the results of the items before it are kept with no record beside
+    //  them: recorded "incomplete", never as "imported nothing"; h.py edited, check uses none of them)
+    {
+      const w3 = join(dir, "w01c");
+      mkdirSync(w3);
+      writeFileSync(join(w3, "h.py"), "v = 17\n");
+      writeFileSync(join(w3, "d.tex"), "\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n\\begin{sagesilent}\nfrom h import v\n\\end{sagesilent}\n$\\sage{v}$\n\\begin{sagesilent}\nimport os, sys\nos.remove(sys.argv[3])\nwhile True:\n    pass\n\\end{sagesilent}\n\\end{document}\n");
+      const r5 = await run(w3, "run", "d.tex", "--timeout", "5", "--json"), j5 = JSON.parse(readFileSync(join(w3, "d.tex.results.json"), "utf8"));
+      writeFileSync(join(w3, "h.py"), "v = 18\n");
+      const c5 = await run(w3, "check", "d.tex", "--json");
+      check("DEP-SNAPSHOT-1: an item removes the run's record and runs to the timeout: the results before it recorded incomplete; h.py edited, none used",
+        j5.deps === "incomplete" && j5.items?.[1]?.latex === "17" && c5.json?.code?.every((x) => x.state !== "ok") && c5.json.problems.some((p) => p.kind === "stale" && /didn't record everything/.test(p.message)),
+        { code: r5.code, deps: j5.deps, items: j5.items?.map((x) => x.s + ":" + (x.latex ?? "")), check: c5.json?.code?.map((x) => x.state) });
+      rmSync(w3, { recursive: true, force: true });
+    }
     // (grader's #804 C2: the files hashed before a run share one budget, DEPS_BYTES (64 MiB): a.py (not imported) takes
     //  all but 4 bytes of it, so b.py (6 bytes), under the budget alone, isn't hashed before the run, and a run importing it
     //  records "incomplete")
