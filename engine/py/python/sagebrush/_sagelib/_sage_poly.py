@@ -640,6 +640,22 @@ _RINGS = {}
 _MAX_DENSE_COEFFS = 1 << 20
 
 
+def _check_ring_names(names):
+    """Sage's refusals of a ring's variable names: none, one with a character
+    other than a letter, a digit or _ (a{b, x.y, 'x '), or one that does not
+    start with a letter (1x, _x), in that order; a name of digits alone is
+    no name at all.  Keywords and letters beyond ASCII are names."""
+    for n in names:
+        if n == "":
+            raise ValueError("variable name must be nonempty")
+        if n.replace("_", "").isdigit():
+            raise TypeError("you must specify the names of the variables")
+        if not n.replace("_", "").isalnum():
+            raise ValueError("variable name %r is not alphanumeric" % (n,))
+        if not n[0].isalpha():
+            raise ValueError("variable name %r does not start with a letter" % (n,))
+
+
 def PolynomialRing(base, *args, **kwds):
     """PolynomialRing(ZZ, 'x'), PolynomialRing(QQ, names=('y',)); several
     variables: PolynomialRing(QQ, 'x,y'), PolynomialRing(QQ, 3, 'x'),
@@ -657,6 +673,7 @@ def PolynomialRing(base, *args, **kwds):
         (Multivariate Polynomial Ring in x0, x1, x2 over Rational Field, Multivariate Polynomial Ring in a, b over Rational Field)
     """
     import _sage_ff
+    internal = kwds.pop("_internal", False)
     n = None
     names = kwds.get("names", kwds.get("name"))
     for a in args:
@@ -673,9 +690,14 @@ def PolynomialRing(base, *args, **kwds):
     multi = n is not None or (isinstance(names, (list, tuple)) and len(names) != 1) or (isinstance(names, str) and "," in names)
     if multi:
         import _sage_mpoly
+        if not internal:
+            # (the pieces between commas as given: 'x,' has an empty name)
+            _check_ring_names([t.strip() for t in names.split(",")] if isinstance(names, str) and "," in names else _sage_mpoly._normalize_names(n, names))
         return _sage_mpoly.MPolynomialRing(base, n, names, order or "degrevlex")
     if isinstance(names, (tuple, list)):
         names = names[0]
+    if not internal and isinstance(names, str):
+        _check_ring_names([names])
     names = str(names).strip()
     if _sage_ff._is_ff_base(base):
         return _sage_ff._poly_ring_from_names(base, names)

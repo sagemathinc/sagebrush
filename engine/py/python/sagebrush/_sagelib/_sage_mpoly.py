@@ -2450,7 +2450,7 @@ def _to_univariate(f, vs, D):
     for k, c in terms.items():
         cs[k] = c
     from _sage_poly import PolynomialRing
-    U = PolynomialRing(R._base, "_t")
+    U = PolynomialRing(R._base, "_t", _internal=True)
     return U([dom._out(c) for c in cs])
 
 

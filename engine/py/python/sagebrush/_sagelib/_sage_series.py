@@ -35,6 +35,9 @@ def PowerSeriesRing(base, name=None, default_prec=20, names=None, sparse=False, 
         name = "x"
     if isinstance(name, (list, tuple)):
         name = name[0]
+    if isinstance(name, str):
+        import _sage_poly
+        _sage_poly._check_ring_names([name])
     key = ("P", id(base), str(name), int(default_prec))
     if key not in _RINGS:
         _RINGS[key] = SeriesRing_(base, str(name), int(default_prec), False)
@@ -57,6 +60,9 @@ def LaurentSeriesRing(base, name=None, default_prec=20, names=None, sparse=False
         name = "x"
     if isinstance(name, (list, tuple)):
         name = name[0]
+    if isinstance(name, str):
+        import _sage_poly
+        _sage_poly._check_ring_names([name])
     key = ("L", id(base), str(name), int(default_prec))
     if key not in _RINGS:
         _RINGS[key] = SeriesRing_(base, str(name), int(default_prec), True)
