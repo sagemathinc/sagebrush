@@ -220,6 +220,10 @@ class Expression:
 
     # --- arithmetic
     def _bin(self, op, other, rev=False):
+        if type(other).__name__ == "PolynomialInexact" and self._s == "z0/1;1/1;":
+            # (I with a polynomial over an inexact field is over its complex field:
+            # I*t in RR[t] is in CC[t], as Sage)
+            return NotImplemented
         o = _to_s(other)
         if o is None:
             return NotImplemented

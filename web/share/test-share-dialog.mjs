@@ -23,6 +23,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startDev } from "./serve-dev.mjs";
 import { devtoolsPort } from "../test-port.mjs";
+import { allowFiles } from "../test-allow.mjs";
 
 // (where crashAndReopen's renderer-attribution trace is taken, SHARE_TRACE_SCOPE: "page" (the default), the page's
 // own flattened session, whose trace is the one used; or "browser", the browser target, REPORT-ONLY: its trace is
@@ -208,6 +209,8 @@ try {
   await until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000);
   await ev("document.querySelector('#filemenu [data-f=new]').click()");
   await until("document.querySelectorAll('.cell').length === 1 && !document.querySelector('.cell textarea').value");
+  // (its code writes the files the dialog finds: every notebook starts with file changes off, confinement 1b)
+  await allowFiles(p.send, ev);
   // (#172 r2's review, PY-172-1: every module a fresh session already has in sys.modules is one the dialog
   // treats as resolved without sys.path: builtinModules holds them all)
   {

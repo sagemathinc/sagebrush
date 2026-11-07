@@ -1204,6 +1204,17 @@ class RealField_:
     # doubles: its arithmetic keeps MP values instead of returning RR)
     _rr_internal = False
 
+    def __getitem__(self, names):
+        """The polynomial ring over this field in the given variable(s): RR['t'].
+
+        EXAMPLES::
+
+            sage: RealField(100)['t']
+            Univariate Polynomial Ring in t over Real Field with 100 bits of precision
+        """
+        import _sage_poly
+        return _sage_poly.PolynomialRing(self, names)
+
     def __init__(self, prec, rnd="RNDN"):
         self._prec, self._rnd = prec, rnd
 
@@ -3781,9 +3792,24 @@ class ComplexField_:
     _numeric = True
 
 
+    def __getitem__(self, names):
+        """The polynomial ring over this field in the given variable(s): RR['t'].
+
+        EXAMPLES::
+
+            sage: ComplexField(100)['t']
+            Univariate Polynomial Ring in t over Complex Field with 100 bits of precision
+        """
+        import _sage_poly
+        return _sage_poly.PolynomialRing(self, names)
+
     def __init__(self, prec):
         self._prec = prec
         self._R = RealField(prec) if prec != 53 else RealField_(53, "RNDN")
+
+    def _latex_(self):
+        """LaTeX, as Sage: latex(ComplexField(100)) is \\Bold{C}."""
+        return "\\Bold{C}"
 
     def __repr__(self):
         return "Complex Field with %d bits of precision" % self._prec
