@@ -94,7 +94,7 @@ try {
   ok(await ev("!/kpair|kport/.test(location.href) && !/kpair/.test(JSON.stringify(history.state ?? null))"), "the code is taken off the address at once");
   await until("!!document.querySelector('#remotedlg') && document.querySelector('#remotedlg').open && document.querySelector('#kernelpick').value === 'paired'");
   const sheet = await ev("document.querySelector('#remotedlg').textContent");
-  ok(/run on your computer, with your files and permissions/.test(sheet) && /sagebrush remote --loopback/.test(sheet), "the sheet: the consent line and the command");
+  ok(/run on your computer, with your files and permissions/.test(sheet) && /uvx sagebrush@latest remote --loopback/.test(sheet) && !/pip/.test(sheet), "the sheet: the consent line and its one command, uvx (no pip)");
   await shot("paired-sheet.png");
   ok(await ev(`document.querySelector('#pairlink').value.includes(${JSON.stringify(q.get("kpair"))})`), "prefilled from the link");
   ok(await ev("document.activeElement !== document.querySelector('#pairallow')"), "focus isn't on Connect (Enter doesn't connect)");
