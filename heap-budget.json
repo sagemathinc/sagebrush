@@ -1,11 +1,11 @@
 {
- "note": "Magma mode's load heap, bytes used after it has loaded in a 96 MiB heap: scripts/heap-budget.mjs; raising the ceiling is made here, in review. The load heap is bimodal, run to run with the same build: about 72.45-73.15 MB, or about 73.4-73.55 MB, so a median of 7 is in either mode (Nov 3: 26 CI runs, 182 processes, 72450688..73542128; 20 fresh processes on master 85999b33, 72542432..73457568). The ceiling, 71 MiB, is 906768 B over the highest single run seen; at it _COLLECT_MAX is 25600 (collect_floor 20000).",
+ "note": "Magma mode's load heap, bytes used after it has loaded in a 96 MiB heap: scripts/heap-budget.mjs; raising the ceiling is made here, in review. The load heap is bimodal, run to run with the same build: about 72.45-73.15 MB, or about 73.4-73.55 MB, so a median of 7 is in either mode (Nov 3: 26 CI runs, 182 processes, 72450688..73542128; 20 fresh processes on master 85999b33, 72542432..73457568). Nov 7, after the intentional loaded Sage/runtime growth in #781, #800 and #809: three 7-run medians on master 26302449 were 73969288, 74039296 and 74102224; 35 fresh processes included an independently recorded 14-run set and spanned 73790600..74596896. The ceiling, 72 MiB, is 900576 B over that highest run; at it _COLLECT_MAX is 24576 (collect_floor 20000).",
  "toolchain": {
   "node": "24.21.0"
  },
  "heap_mib": 96,
  "runs": 7,
- "ceiling": 74448896,
+ "ceiling": 75497472,
  "collect_floor": 20000,
  "measured": {
   "median": 72938312,
