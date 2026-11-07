@@ -1,0 +1,10 @@
+{
+ "v": 1,
+ "reason": "Matrices (lib/_sage_matrix.py, lib/_sage_rdf.py, friction W37): copy() an independent mutable matrix and deepcopy keeping immutability, as Sage; the generalized eigenproblem eigen*(B) refused as Sage refuses it over exact rings, and refused over RDF/CDF rather than B ignored Re-measured with bun 1.4.4 (size-record.sh) on master c32e38de vs head 7083dc29: cli/lib.gen.js +904, cli/pyjs.cjs +1124, engine/lib/sage.pre +11199, engine/lib/sage.src +2490; no other row moves. Markers: exact, except cli/pyjs.cjs 1156 (+1124 measured, plus 32 B of margin, as it moves with master).",
+ "bytes": {
+  "cli/lib.gen.js": 904,
+  "cli/pyjs.cjs": 1156,
+  "engine/lib/sage.pre": 11199,
+  "engine/lib/sage.src": 2490
+ }
+}
