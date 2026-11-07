@@ -1,9 +1,9 @@
 {
  "v": 1,
- "reason": "Sage layer gaps the bracket-notation spike found: improper integrals of powers on half-lines (engine/sym definite.rs: its root scan, joined logarithms), alternating, telescoping and trig series sums and the divergent 1/k, k^2 (lib/_sage_expr.py symbolic_sum, its shifts admitted first), eigenvalues and eigenvectors over SR (a fresh variable) and QQ solves with SR right-hand sides (lib/_sage_matrix_sr.py, _sage_matrix.py). Re-measured with bun 1.4.4 (size-record.sh) on a probe merge of head 327e8ad4 into master 66816e3f: cli/lib.gen.js +6336, cli/pyjs.cjs +9952, engine/lib/sage-more.src +5711, engine/lib/sage.pre +39117, engine/lib/sage.src +11992, engine/sagebrush-engine.wasm +958; no other row moves. Markers: exact, except cli/pyjs.cjs 9984 (+9952 measured, plus 32 B of margin, as it moves with master). The sage-more.src ceiling is raised to 417093 (417029 measured + 64), as #753 did.",
+ "reason": "Sage layer gaps the bracket-notation spike found: improper integrals of powers on half-lines (engine/sym definite.rs: its root scan, joined logarithms), alternating, telescoping and trig series sums and the divergent 1/k, k^2 (lib/_sage_expr.py symbolic_sum, its shifts admitted first), eigenvalues and eigenvectors over SR (a fresh variable) and QQ solves with SR right-hand sides (lib/_sage_matrix_sr.py, _sage_matrix.py). Re-measured with bun 1.4.4 (size-record.sh) on a probe merge of head 2d893c17 into master 0a255d10: cli/lib.gen.js +5984, cli/pyjs.cjs +9572, engine/lib/sage-more.src +5711, engine/lib/sage.pre +39117, engine/lib/sage.src +11992, engine/sagebrush-engine.wasm +958; no other row moves. Markers: exact, except cli/pyjs.cjs 9604 (+9572 measured, plus 32 B of margin, as it moves with master). The sage-more.src ceiling is raised to 421552 (421488 measured + 64), as #753 did.",
  "bytes": {
-  "cli/lib.gen.js": 6336,
-  "cli/pyjs.cjs": 9984,
+  "cli/lib.gen.js": 5984,
+  "cli/pyjs.cjs": 9604,
   "engine/lib/sage-more.src": 5711,
   "engine/lib/sage.pre": 39117,
   "engine/lib/sage.src": 11992,
