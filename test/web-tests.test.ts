@@ -274,8 +274,10 @@ test("web-tests: solo is a header word; the plan's commands don't change with it
 const tidy = (header: string) =>
   `${header}\nimport { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";\n` +
   `const me = import.meta.url.split("/").pop();\n` +
-  `mkdirSync("started", { recursive: true }); writeFileSync("started/" + me, "");\n` +
   `for (const s of ["SIGTERM", "SIGINT"]) process.on(s, () => { appendFileSync("log.txt", "cleaned " + me + " " + s + "\\n"); process.exit(0); });\n` +
+  // (its handlers before its started mark: the run is signalled once three marks exist, so a suite marked but not yet
+  // listening would die by the signal's default and log no cleanup)
+  `mkdirSync("started", { recursive: true }); writeFileSync("started/" + me, "");\n` +
   `let n = 0;\n` +
   `while (!existsSync("never")) { if (++n > 3000) process.exit(9); await new Promise((r) => setTimeout(r, 10)); }\n`;
 
