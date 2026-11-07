@@ -12,7 +12,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
-import { driver, runnable, parseOutput, statesOf, resultsText, msgOf, MARK, RUN_LIMITS, RESULTS_FORMAT, runAndSave, sessionOf, sandboxEngine, SANDBOX_FAILED, folderFiles } from "./run-core.mjs";
+import { driver, runnable, parseOutput, statesOf, resultsText, msgOf, MARK, RUN_LIMITS, RESULTS_FORMAT, runAndSave, sessionOf, sandboxEngine, SANDBOX_FAILED, folderFiles, runIn } from "./run-core.mjs";
 import { itemKey, savedStates, stateOf, WRAPPER_VERSION, MAX_RESULT } from "./engine/sagetex.mjs";
 
 const results = [];
@@ -502,12 +502,32 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
   holds.A();
   const rA = await within(pA), rB = await within(pB);
   check("Stop: a Run stopped while it waits runs nothing, and the Run running isn't interrupted", !afterStop.includes("interrupt A") && !log.includes("exec B") && /Stopped before it ran/.test(rB.msg ?? "") && rA.ok, { log, rA, rB });
-  const stopC = new AbortController(), pC = run("C", stopC.signal);
+  // (through runIn itself (astra's LATEX-STOP-RESULT-1, daybreak3): the kernel's callbacks as a real session calls them,
+  //  one item's result printed and then the run ended early: interrupted (this Run's Stop), the session's error, the
+  //  results past the bound: what ran is written, the rest not run, never "Stopped before it ran")
+  const two = [item("sage", "1 + 1"), item("sage", "2 + 2")];
+  const ranOne = MARK + JSON.stringify({ s: "ok", latex: "2" }) + "\n";
+  K.prototype.execute = function (code, opts, cb) { running = "C"; log.push("exec C"); holds.C = (outcome, extra = "") => { running = null; cb.out(ranOne + extra, false); cb.done(0, outcome); }; };
+  const runTwo = (stop, max = 1 << 20) => runAndSave({ items: two, ws, fid: "f", current: () => true, max, now: () => 0, stop,
+    session: s, store: s, serial: s.serial, folder: async () => ({ dir: "/Q", files: [] }), exec: runIn });
+  const stopC = new AbortController(), pC = runTwo(stopC.signal);
   for (let i = 0; i < 50 && running !== "C"; i++) await new Promise((r) => setTimeout(r, 5));
   stopC.abort();
-  holds.C();
+  holds.C({ interrupted: true });
   const rC = await within(pC);
-  check("Stop: a Run stopped while its script runs: that script interrupted, once; what ran written", log.filter((l) => l === "interrupt C").length === 1 && rC.ok === true, { log, rC });
+  check("Stop (through runIn): a Run stopped while its script runs: that script interrupted, once; what ran written, the rest not run", log.filter((l) => l === "interrupt C").length === 1 && rC.ok === true && rC.states?.[0]?.s === "ok" && rC.states?.[0]?.latex === "2" && rC.states?.[1]?.s === "error" && /the run was stopped/.test(rC.states?.[1]?.msg ?? ""), { log, rC });
+  const pE = runTwo(undefined);
+  for (let i = 0; i < 50 && running !== "C"; i++) await new Promise((r) => setTimeout(r, 5));
+  holds.C({ error: true });
+  const rE = await within(pE);
+  check("runAndSave (through runIn): the session's error after one item: what ran written, never \"Stopped before it ran\"", rE.ok === true && rE.states?.[0]?.latex === "2" && /the session stopped with an error/.test(rE.states?.[1]?.msg ?? ""), rE);
+  // (the printed results past runIn's bound: the bound is the results file's too, so one big enough for the file and
+  //  smaller than what was printed)
+  const pL = runTwo(undefined, 4096);
+  for (let i = 0; i < 50 && running !== "C"; i++) await new Promise((r) => setTimeout(r, 5));
+  holds.C({}, "x".repeat(5000));
+  const rL = await within(pL);
+  check("runAndSave (through runIn): the printed results past the bound: what ran written, never \"Stopped before it ran\"", rL.ok === true && rL.states?.[0]?.latex === "2" && /the results are too large/.test(rL.states?.[1]?.msg ?? ""), rL);
 }
 
 const bad = results.filter(([, ok]) => !ok);

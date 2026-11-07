@@ -292,12 +292,12 @@ export async function runAndSave(o) {
     if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) await globalThis.__sbTexRunHold?.();
     if (stale()) return null;
     // (this Run stopped (its own Stop) while it waited: nothing runs (astra's LATEX-QUEUE-STOP-1))
-    if (stopAsked()) return { stopped: true };
+    if (stopAsked()) return { stoppedBefore: true };
     // (the .tex still in the folder that was read: moved meanwhile, nothing runs)
     if (f) {
       const at = await o.ws.pathOfFile(o.fid);
       if (stale()) return null;
-      if (stopAsked()) return { stopped: true };
+      if (stopAsked()) return { stoppedBefore: true };
       if (!at.ok || (at.path.slice(0, at.path.lastIndexOf("/")) || "/") !== f.dir) return { moved: true };
       putFolder(k, f.files, o.store);
     }
@@ -312,7 +312,8 @@ export async function runAndSave(o) {
   const ran = await (o.serial ? o.serial(go) : go());
   if (!ran || stale()) return { stale: true };
   if (ran.moved) return { msg: "Not run: the .tex was moved meanwhile: press Run again" };
-  if (ran.stopped) return { msg: "Stopped before it ran" };
+  // (a distinct mark: runIn's own `stopped` is why a Run that ran ended early, its results still written (astra))
+  if (ran.stoppedBefore === true) return { msg: "Stopped before it ran" };
   const { out, stopped } = ran;
   const states = statesOf(o.items, parseOutput(out), stopped);
   const bytes = new TextEncoder().encode(resultsText(states));
