@@ -143,6 +143,19 @@ def _atomic_den(s):
     return not any(c in s[1:] for c in "+-*/")
 
 
+def _plain_repr(p):
+    """A fraction's numerator or denominator, its variable by the ring's own
+    name.  Magma mode's polynomial rings print an unnamed variable as P.1 for
+    a global P (lib/_magma.py _MPolyRingZQ), but a rational function never
+    takes a global's name (Magma: ($.1 + 1)/($.1 - 1), even after
+    F := Parent(f)).  In Sage mode the two names are always the same."""
+    r = getattr(p, "_ring", None)
+    if r is not None and hasattr(p, "_c") and hasattr(r, "_repr_name") and r._repr_name() != r._name:
+        from _sage_poly import _poly_repr
+        return _poly_repr(p._c, r._name) if p._c else "0"
+    return repr(p)
+
+
 class FractionFieldElement:
     """A quotient of polynomials in lowest terms, the denominator monic
     (over a field; over ZZ the gcd, content included, is cancelled).
@@ -215,8 +228,8 @@ class FractionFieldElement:
 
     def __repr__(self):
         if self._den == 1:
-            return repr(self._num)
-        n, d = repr(self._num), repr(self._den)
+            return _plain_repr(self._num)
+        n, d = _plain_repr(self._num), _plain_repr(self._den)
         if not _atomic_num(n):
             n = "(" + n + ")"
         if not _atomic_den(d):
@@ -699,7 +712,8 @@ def _ideal(self, *gens):
     """
     if len(gens) == 1 and isinstance(gens[0], (list, tuple)):
         gens = gens[0]
-    gens = [self(g) for g in gens]
+    # (no generators: the zero ideal, as Sage)
+    gens = [self(g) for g in gens] or [self(0)]
     nonzero = [h for h in gens if h]
     field = self.base_ring().is_field()
     if not field and len(nonzero) > 1:
@@ -1027,10 +1041,14 @@ class QuotientElement:
 
         EXAMPLES::
 
-            sage: R.<x> = QQ[]; R.quotient(x^2 + 1, 'i')(x + 2).list()
-            [2, 1]
+            sage: R.<x> = QQ[]; Q = R.quotient(x^2 + 1, 'i'); Q(x + 2).list(), Q(3).list(), Q(0).list()
+            ([2, 1], [3, 0], [0, 0])
         """
-        return self._p.list()
+        # (one coefficient per power below the modulus's degree, as Sage)
+        c = self._p.list()
+        n = self._S._f.degree()
+        z = self._p.parent().base_ring()(0)
+        return c + [z] * (n - len(c))
 
     def __repr__(self):
         return repr(self._S._display(self._p.list()))

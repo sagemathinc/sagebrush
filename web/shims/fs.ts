@@ -26,7 +26,7 @@ export const __hooks = hooks;
 // it while the permission is off; /$pyjs is the runtime's own. Refused: a PermissionError saying why.
 let writable: () => boolean = () => true;
 export function setWritable(f: () => boolean) { writable = f; }
-export const NOT_WRITABLE = "this notebook can't change your files (it came from elsewhere): press Allow changes for this notebook";
+export const NOT_WRITABLE = "this notebook can't change your files until you allow it: press Allow changes for this notebook";
 const scratch = (r: string) => r === "/tmp" || r.startsWith("/tmp/") || r.startsWith("/$pyjs");
 function mayChange(r: string, what: string) {
   if (scratch(r) || writable()) return;
@@ -76,6 +76,14 @@ function drop(r: string): void {
   files.delete(r);
 }
 const dirs = new Map<string, number>([["/", Date.now()]]); // path -> mtime
+// (inode numbers, given at a file's or folder's first stat: a file's is its entry's, kept through a rename as a
+// descriptor's inode is; a folder's moves with it; os.path.samefile and pathlib's samefile compare them, as
+// CPython's do, so two files must never share one)
+let nextIno = 2;
+const fileIno = new WeakMap<Entry, number>();
+const dirIno = new Map<string, number>();
+const inoOfFile = (f: Entry) => fileIno.get(f) ?? (fileIno.set(f, nextIno), nextIno++);
+const inoOfDir = (d: string) => dirIno.get(d) ?? (dirIno.set(d, nextIno), nextIno++);
 let cwd = "/";
 
 const g = globalThis as any;
@@ -338,7 +346,7 @@ export function statSync(p: string) {
     isSymbolicLink: () => false,
     size: f ? (f.remote ? f.remote.size : f.data.length) : 0,
     mode: f ? 0o100644 : 0o40755,
-    ino: 0, dev: 0, nlink: 1, uid: 0, gid: 0,
+    ino: f ? inoOfFile(f) : inoOfDir(r), dev: 1, nlink: 1, uid: 0, gid: 0,
     atimeMs: t, mtimeMs: t, ctimeMs: t,
   };
 }
@@ -354,7 +362,10 @@ export function rmdirSync(p: string) {
   if (!dirs.has(r)) fail("ENOENT", -2, "rmdir", p);
   if (readdirSync(r).length) fail("ENOTEMPTY", -39, "rmdir", p);
   mayChange(r, "rmdir");
-  if (r !== "/") dirs.delete(r);
+  if (r !== "/") {
+    dirs.delete(r);
+    dirIno.delete(r);
+  }
 }
 export function renameSync(a: string, b: string) {
   const ra = resolve(a), rb = resolve(b);
@@ -391,6 +402,11 @@ export function renameSync(a: string, b: string) {
     if (k === ra || k.startsWith(pre)) {
       dirs.delete(k);
       dirs.set(rb + k.slice(ra.length), v);
+      const ino = dirIno.get(k);
+      if (ino !== undefined) {
+        dirIno.delete(k);
+        dirIno.set(rb + k.slice(ra.length), ino);
+      }
     }
   }
 }

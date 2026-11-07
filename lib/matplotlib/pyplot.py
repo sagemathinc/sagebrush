@@ -19,7 +19,8 @@ Jupyter); on the command line show() writes an SVG file and prints its path.
 import math
 import os
 from _graphics import (Panel, Line, Points, Polygon, Rects, Text, Arrow, AxLine, Image, render_svg, render_frame,
-                       show as _show, save_svg, TAB10, to_color as _css, colormap, describe_svg, mpl_ticks, DASHES)
+                       show as _show, save_svg, TAB10, to_color as _css, colormap, describe_svg, mpl_ticks, DASHES,
+                       LEGEND_LOCS as _LEGEND_LOCS)
 from matplotlib.colors import to_rgba as _to_rgba, CSS4_COLORS as _CSS4_COLORS, Colormap as _Colormap
 # (one rcParams: matplotlib's, with its defaults and its key checks)
 from matplotlib import rcParams, rcParamsDefault, rcParamsOrig, rc, rcdefaults, rc_context
@@ -380,6 +381,9 @@ class Axes:
 
     def _add(self, p):
         self._prims.append(p)
+        # (new data autoscales again: a view set_xticks widened is forgotten)
+        self._opts.pop("_xview", None)
+        self._opts.pop("_yview", None)
         return p
 
     # ---------------------------------------------------------------- plots
@@ -738,30 +742,38 @@ class Axes:
         return _AxLine2D(self._add(p))
 
     def text(self, x, y, s, fontsize=10, color=None, ha="left", va="baseline", rotation=0, transform=None, **kw):
-        if transform is not None and getattr(transform, "_axes_fraction", False):  # ax.transAxes
-            lo, hi = self.get_xlim(), self.get_ylim()
-            x, y = lo[0] + x * (lo[1] - lo[0]), hi[0] + y * (hi[1] - hi[0])
+        # (ax.transAxes: axes fractions, wherever the limits are when it is
+        # drawn; as matplotlib's ax.text, not clipped unless clip_on=True)
+        coords = "axes fraction" if transform is not None and getattr(transform, "_axes_fraction", False) else None
         if color is None:
             color = rcParams._given("text.color")  # (None: the page's text color)
-        return _Artist(self._add(Text(s, x, y, fontsize=float(kw.get("size", fontsize)) * PT, color=to_color(color),
+        size = float(kw.get("size", fontsize))
+        box = later = None
+        if kw.get("bbox") is not None:
+            from matplotlib._annotations import text_box, _Later
+            try:
+                box = text_box(kw["bbox"], size)
+            except _Later as e:  # (matplotlib's error when it is drawn)
+                later = e.args
+        return _Artist(self._add(Text(s, x, y, fontsize=size * PT, color=to_color(color),
                        horizontal_alignment=kw.get("horizontalalignment", ha),
-                       vertical_alignment=kw.get("verticalalignment", va), rotation=rotation, no_bbox=True)), "text.Text")
+                       vertical_alignment=kw.get("verticalalignment", va), rotation=rotation, no_bbox=True,
+                       coords=coords, clip=bool(kw.get("clip_on", False)), box=box, later=later)), "text.Text")
 
     @property
     def transAxes(self):
         return _AxesFraction()
 
-    def annotate(self, text, xy, xytext=None, arrowprops=None, fontsize=10, ha=None, **kw):
-        if xytext is None:
-            xytext = xy
-        if arrowprops is not None and tuple(xytext) != tuple(xy):
-            self._add(Arrow(xytext, xy, color=to_color(arrowprops.get("color", arrowprops.get("facecolor", "currentColor"))),
-                            thickness=1.2))
-        # (matplotlib: the text's left end at xytext, unless told otherwise)
-        ha = kw.get("horizontalalignment", ha) or ("center" if arrowprops else "left")
-        size = kw.get("size", fontsize)
-        return _Artist(self._add(Text(text, xytext[0], xytext[1], fontsize=_size_px(size, 10), horizontal_alignment=ha, color=to_color(kw.get("color")),
-                       vertical_alignment=kw.get("verticalalignment", kw.get("va", "bottom" if arrowprops else "baseline")), no_bbox=True)), "text.Text")
+    def annotate(self, text, xy, xytext=None, xycoords="data", textcoords=None, arrowprops=None, annotation_clip=None, **kw):
+        # (its coordinates, box and arrow: matplotlib._annotations)
+        from matplotlib._annotations import annotation
+        size = kw.get("size", kw.get("fontsize", 10))
+        size_pt = _size_px(size, 10) / PT
+        return _Artist(self._add(annotation(
+            text, xy, xytext, xycoords, textcoords, arrowprops, annotation_clip, kw, size_pt, fontsize=size_pt * PT,
+            color=to_color(kw.get("color")), rotation=kw.get("rotation", 0),
+            horizontal_alignment=kw.get("horizontalalignment", kw.get("ha", "left")),
+            vertical_alignment=kw.get("verticalalignment", kw.get("va", "baseline")))), "text.Text")
 
     def pie(self, x, labels=None, colors=None, autopct=None, startangle=0, **kw):
         vals = [float(v) for v in _list(x)]
@@ -889,14 +901,33 @@ class Axes:
     def tick_params(self, axis="both", labelsize=None, **kw):
         if labelsize is not None:
             self._opts["tick_size"] = _size_px(labelsize, 10)
+        if kw.get("labelrotation") is not None and axis in ("x", "both"):
+            self._opts["xtick_rotation"] = float(kw["labelrotation"])
+        if kw.get("labelrotation") is not None and axis in ("y", "both"):
+            self._opts["_ytick_rotation"] = float(kw["labelrotation"])
 
     def set_rasterization_zorder(self, z):
         pass  # (contourf is drawn as a picture already)
 
-    def get_position(self):
-        return self._rect
+    def get_position(self, original=False):
+        """Where the Axes is, a Bbox in figure coordinates (matplotlib's)."""
+        from matplotlib._axes_geometry import position
+        return position(self, original)
 
-    # ---------------------------------------------------------------- contourf
+    def _apply_aspect(self):
+        # (a colorbar's axes takes its box aspect when first drawn, as
+        # matplotlib's colorbar locator gives it; adjustable 'datalim': the
+        # limits moved as the figure is drawn)
+        if getattr(self, "_cb_of", None) is not None:
+            self._cb_drawn = True
+        if self._opts.get("aspect_ratio") is not None and self.get_adjustable() == "datalim":
+            from matplotlib._axes_geometry import apply_aspect
+            apply_aspect(self)
+
+    def set_position(self, pos, which="both"):
+        from matplotlib._axes_geometry import set_position
+        set_position(self, pos)
+
     def contourf(self, *args, levels=None, cmap=None, colors=None, extend="neither", alpha=None, vmin=None, vmax=None, **kw):
         """Filled contours of Z (on its index grid, or over X, Y): drawn as
         one picture of the bands, as matplotlib's rasterized output looks."""
@@ -976,6 +1007,7 @@ class Axes:
             self._opts[a + "min"] = lo
         if hi is not None:
             self._opts[a + "max"] = hi
+        self._opts.pop("_" + a + "view", None)
 
     def _invert(self, a):
         # (as matplotlib's Axis.set_inverted: limits that were set are
@@ -1048,20 +1080,48 @@ class Axes:
         return self.plot(*args, **{k: v for k, v in kwargs.items() if k not in {*dx, *dy}})
 
     def set_xticks(self, ticks, labels=None, **kw):
+        self._opts["_xticks_given"] = list(ticks)
         self._opts["xticks"] = [float(t) for t in ticks]
         if labels is not None:
             self._opts["xticklabels"] = [str(s) for s in labels]
+            # (Text properties for the labels: rotation=45)
+            if kw.get("rotation") is not None:
+                self._opts["xtick_rotation"] = _rotation(kw["rotation"])
+        self._ticks_view("x", self._opts["xticks"])
 
     def set_yticks(self, ticks, labels=None, **kw):
+        self._opts["_yticks_given"] = list(ticks)
         self._opts["yticks"] = [float(t) for t in ticks]
         if labels is not None:
             self._opts["yticklabels"] = [str(s) for s in labels]
+            # (Text properties for the labels: rotation=45)
+            if kw.get("rotation") is not None:
+                self._opts["_ytick_rotation"] = _rotation(kw["rotation"])
+        self._ticks_view("y", self._opts["yticks"])
+
+    def _ticks_view(self, a, ticks):
+        from matplotlib._axes_geometry import ticks_view
+        ticks_view(self, a, ticks)
 
     def set_xticklabels(self, labels, **kw):
         self._opts["xticklabels"] = [str(s) for s in labels]
+        if kw.get("rotation") is not None:
+            self._opts["xtick_rotation"] = _rotation(kw["rotation"])
 
     def set_yticklabels(self, labels, **kw):
         self._opts["yticklabels"] = [str(s) for s in labels]
+        if kw.get("rotation") is not None:
+            self._opts["_ytick_rotation"] = _rotation(kw["rotation"])
+
+    def _ticklabels(self, a):
+        from matplotlib._axes_geometry import ticklabels
+        return ticklabels(self, a)
+
+    def get_xticklabels(self, minor=False, which=None):
+        return self._ticklabels("x")
+
+    def get_yticklabels(self, minor=False, which=None):
+        return self._ticklabels("y")
 
     def grid(self, visible=True, **kw):
         self._opts["grid"] = bool(visible)
@@ -1111,19 +1171,43 @@ class Axes:
         self._opts["legend"] = True
         self._opts["legend_entries"] = entries
         if loc is not None:
+            # (as matplotlib checks it; "best" is drawn upper right)
+            if isinstance(loc, str):
+                if loc not in _LEGEND_LOCS:
+                    raise ValueError("%r is not a valid value for loc." % loc)
+            elif isinstance(loc, (tuple, list)) and len(loc) == 2:
+                loc = (float(loc[0]), float(loc[1]))
+            elif isinstance(loc, int) and not isinstance(loc, bool) and 0 <= loc < len(_LEGEND_LOCS):
+                loc = _LEGEND_LOCS[loc]
+            else:
+                raise ValueError("loc must be string, coordinate tuple, or an integer 0-10, not %r" % (loc,))
             self._opts["legend_loc"] = loc if loc != "best" else "upper right"
 
     def set_aspect(self, aspect, **kw):
-        if aspect == "equal":
-            self._opts["aspect_ratio"] = 1
-        elif isinstance(aspect, (int, float)):
-            self._opts["aspect_ratio"] = aspect
+        """'auto', 'equal' or a number; adjustable= 'box' (the default) or 'datalim'."""
+        from matplotlib._axes_geometry import set_aspect
+        set_aspect(self, aspect, kw.get("adjustable"))
+
+    def get_aspect(self):
+        return self._opts.get("aspect_ratio", "auto")
+
+    def set_adjustable(self, adjustable, share=False):
+        from matplotlib._axes_geometry import set_adjustable
+        set_adjustable(self, adjustable)
+
+    def get_adjustable(self):
+        return self._opts.get("_adjustable", "box")
+
+    def autoscale(self, enable=True, axis="both", tight=None):
+        from matplotlib._axes_geometry import autoscale
+        autoscale(self, enable, axis)
 
     def axis(self, arg=None, **kw):
         if arg == "off":
             self._opts["axes"] = False
         elif arg in ("equal", "scaled", "square"):
-            self._opts["aspect_ratio"] = 1
+            from matplotlib._axes_geometry import axis_equal
+            axis_equal(self, arg)
         elif isinstance(arg, (list, tuple)) and len(arg) == 4:
             self.set_xlim(arg[0], arg[1])
             self.set_ylim(arg[2], arg[3])
@@ -1192,6 +1276,23 @@ class Axes:
         o.setdefault("margins", 0.05)
         o.setdefault("autoscale", "matplotlib")
         o.setdefault("tick_bins", self._tick_bins(o["tick_size"]))
+        # (matplotlib clips to the Axes box itself, W51)
+        o.setdefault("clip_exact", True)
+        # (an aspect with adjustable 'box': the limits stay and the box
+        # takes their shape, W04; with 'datalim', the limits the last
+        # drawing moved, _apply_aspect, and the box as it is; MATLAB's
+        # axes, drawn here, keep their box and widen the limits instead,
+        # adjustable "_widen")
+        if self._opts.get("aspect_ratio") is not None:
+            if self.get_adjustable() == "box":
+                o["fit_aspect"] = True
+            elif self.get_adjustable() == "datalim":
+                o.pop("aspect_ratio", None)
+        for a in ("x", "y"):
+            view = self._opts.get("_" + a + "view")
+            if view is not None and o.get(a + "min") is None and o.get(a + "max") is None:
+                # (in increasing order under an invert flag, which turns it)
+                o[a + "min"], o[a + "max"] = sorted(view) if o.get(a + "invert") else view
         for k, v in self._style.items():
             if not k.startswith("_"):
                 o.setdefault(k, v)
@@ -1207,6 +1308,13 @@ class Axes:
             if bb and bb[0] >= 0 and o.get("xscale") != "log":
                 o["xmin"] = 0.0
         return Panel(prims, **o)
+
+
+def _rotation(r):
+    """matplotlib's text rotation in degrees ('horizontal' 0, 'vertical' 90)."""
+    if isinstance(r, str):
+        return {"horizontal": 0.0, "vertical": 90.0}[r]
+    return float(r) % 360
 
 
 class _AxesFraction:
@@ -1280,6 +1388,7 @@ class Figure:
         """Axes at [left, bottom, width, height] (fractions of the figure)."""
         l, b, w, h = [float(v) for v in rect]
         ax = Axes(self, (l, 1 - b - h, w, h))
+        ax._bounds = (l, b, w, h)
         ax._opts["exact"] = True
         self.axes.append(ax)
         return ax
@@ -1323,12 +1432,20 @@ class Figure:
     def tight_layout(self, **kw):
         pass
 
+    @property
+    def canvas(self):
+        """The figure's canvas: draw(), get_width_height()."""
+        from matplotlib._axes_geometry import FigureCanvas
+        return FigureCanvas(self)
+
     def set_size_inches(self, w, h=None):
         if h is None:
             w, h = w
         self._size = (float(w), float(h))
 
     def _panels(self):
+        for ax in self.axes:
+            ax._apply_aspect()
         panels = [(ax._panel(), ax._rect) for ax in self.axes]
         return panels or [(Panel([], frame=True), (0, 0, 1, 1))]
 
@@ -1707,6 +1824,11 @@ def ylim(*args, **kw):
 def xticks(ticks=None, labels=None, **kw):
     if ticks is not None:
         gca().set_xticks(ticks, labels)
+    if kw.get("rotation") is not None:
+        gca()._opts["xtick_rotation"] = _rotation(kw["rotation"])
+    if ticks is None and labels is None and not kw:
+        from matplotlib._axes_geometry import ticks_now
+        return ticks_now(gca(), "x")
     if kw.get("fontsize", kw.get("size")) is not None:
         gca()._opts["tick_size"] = _size_px(kw.get("fontsize", kw.get("size")), 10)
 
@@ -1714,6 +1836,11 @@ def xticks(ticks=None, labels=None, **kw):
 def yticks(ticks=None, labels=None, **kw):
     if ticks is not None:
         gca().set_yticks(ticks, labels)
+    if kw.get("rotation") is not None:
+        gca()._opts["_ytick_rotation"] = _rotation(kw["rotation"])
+    if ticks is None and labels is None and not kw:
+        from matplotlib._axes_geometry import ticks_now
+        return ticks_now(gca(), "y")
     if kw.get("fontsize", kw.get("size")) is not None:
         gca()._opts["tick_size"] = _size_px(kw.get("fontsize", kw.get("size")), 10)
 
@@ -1928,10 +2055,18 @@ def _colorbar(fig, mappable, cax, ax, **kw):
     if cax is None:
         # room taken from the axes' right side, as matplotlib does
         parent = ax if ax is not None else fig.gca()
+        # (get_position reports matplotlib's make_axes geometry: the
+        # arguments kept, and the parent's box before any colorbar)
+        from matplotlib._axes_geometry import colorbar_geometry
+        g = colorbar_geometry(kw)
         fx, fy, fw, fh = parent._rect
+        if getattr(parent, "_cb_rect", None) is None:
+            parent._cb_rect = parent._rect
         parent._rect = (fx, fy, fw * 0.82, fh)
         cax = Axes(fig, (fx + fw * 0.85, fy + fh * 0.05, fw * 0.04, fh * 0.9))
         cax._opts["exact"] = parent._opts.get("exact", False)
+        parent._cbs = getattr(parent, "_cbs", []) + [g]
+        cax._cb_of = (parent, len(parent._cbs) - 1)
         fig.axes.append(cax)
     cb = Colorbar(mappable, cax)
     if kw.get("label"):

@@ -559,7 +559,7 @@ import { createDownloadDialog } from "./share-client/download.ts";
 import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, SyncOwner, registerJournalWriter, DocSync, readJournal, docSyncOrigin, docSyncAllowed, enableDocSync, docSyncChannel, DOC_SYNC_RELOAD } from "./workspace/index.ts";
 import { mountBrowser } from "./workspace/browser.ts";
 // (the LaTeX editor's entry; a build without it takes this line out before bundling: web/build.ts)
-import { latexBoot } from "./latex/boot.ts";
+import { latexBoot, latexOn, texNew } from "./latex/boot.ts";
 import { codeBoot } from "./code/boot.ts";
 import { createPermissions, hostMade } from "./notebook/permissions.js";
 import { renderFileMenu, fileMenuKey } from "./workspace/filemenu.ts";
@@ -672,8 +672,8 @@ const perms = createPermissions();
 // is the sandboxed runner, or none, astra's no-mutation CLEAR; every run then says why, as a runner given up does)
 const NEEDS_RUNNER = window.__TAURI__
   // (the app has no sandbox: a notebook that may not change files can't run in it at all, @sagebrush's ruling)
-  ? "This notebook can't run in the app while it may not change files: the app has no sandbox to run it in. Allow file changes (File menu) to run it.\n"
-  : "This notebook can't run here: it came from elsewhere, so it runs only in Sagebrush's sandbox, which didn't start in this browser. Allow changes for this notebook (File menu) to run it in this page's own interpreter.\n";
+  ? "This notebook can't run in the app while it isn't allowed to change files: the app has no sandbox to run it in. Allow file changes (File > Permissions…) to run it.\n"
+  : "This notebook can't run here: it isn't allowed to change your files, so it runs only in Sagebrush's sandbox, which didn't start in this browser. Allow changes for this notebook (File > Permissions…) to run it in this page's own interpreter.\n";
 class RefusingWorker {
   constructor(text) { this.text = text; this.onmessage = null; this.onerror = null; }
   postMessage(m) {
@@ -2665,11 +2665,14 @@ const fileMenu = $("#filemenu"), fileBtn = $("#filebtn");
 // The one File menu (design/workspace-files.md §3, web/workspace/filemenu.ts):
 // drawn the same as the board page's; what an item does is here, by its key
 // (data-f).  Without the workspace, what needs it is disabled.
+// (whether this page has the LaTeX editor: New ▸ LaTeX document in the File menu and the file panel, U0)
+const latexHere = typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && latexOn(location.hostname);
 function drawFileMenu() {
   const none = !ws;
   renderFileMenu(fileMenu, {
     attr: "data-f",
-    keys: { newNotebook: "new", newMatlab: "newmatlab", newBoard: "whiteboard", newFolder: "newfolder", fromExample: "examples", open: "open", upload: "import", saveCopy: "duplicate", rename: "rename", print: "print", share: "share", delete: "delete" },
+    latex: latexHere,
+    keys: { newNotebook: "new", newMatlab: "newmatlab", newBoard: "whiteboard", newLatex: "newlatex", newFolder: "newfolder", fromExample: "examples", open: "open", upload: "import", saveCopy: "duplicate", rename: "rename", print: "print", share: "share", delete: "delete" },
     disabled: { newFolder: none },
     downloads: [
       { key: "ipynb", label: ".ipynb" },
@@ -2684,7 +2687,7 @@ function drawFileMenu() {
       { after: "upload", key: "openfile", label: "Open file…", hidden: true },
       { after: "saveCopy", key: "saveas", label: "Save as…", hidden: true },
       // (whether this notebook's code may change the person's files: no-mutation's one switch, a document's setting)
-      { after: "share", key: "perms", label: "Permissions…", title: "What this notebook's code may do: change your files (a notebook from elsewhere may not, until you allow it)" },
+      { after: "share", key: "perms", label: "Permissions…", title: "What this notebook's code may do: change your files (no notebook may until you allow it)" },
     ],
     recent: ws ? async () => (await recentOpened(ws, current.kind === "browser" ? { kind: "notebook", ref: current.id } : undefined)).map((e) => ({ label: recentLabel(e), title: e.path, open: () => openEntry(e) })) : undefined,
     chosen: () => toggleFileMenu(false),
@@ -2705,7 +2708,8 @@ const toggleFileMenu = menuOf(fileBtn, fileMenu);
 // (Ctrl+Alt+N a new notebook, Ctrl+O Open…: the File menu's keys)
 document.addEventListener("keydown", (e) => {
   const it = fileMenuKey(e);
-  if (!it) return;
+  // (the LaTeX editor's page over this one: its own File menu answers them, never both: one notebook a Ctrl+Alt+N)
+  if (!it || document.querySelector(".tex-page")) return;
   e.preventDefault();
   fileMenu.querySelector(`[data-item="${it}"]:not([disabled])`)?.click();
 });
@@ -2842,6 +2846,7 @@ fileMenu.addEventListener("click", async (e) => {
     case "new": saveNow(); await openNew("Untitled", nb.mode, [""], true); cells()[0].ta.focus(); break;
     // (a MATLAB notebook, whatever this one's language: sage's n8 walkthrough)
     case "newmatlab": saveNow(); await openNew("Untitled", "matlab", [""], true); cells()[0].ta.focus(); break;
+    case "newlatex": if (ws) { saveNow(); await texNew(ws); } break;
     // (a new board in the notebook's language, opened in Edit; this notebook stays saved: board/page.ts ?new=)
     case "whiteboard": await toBoard("/board/?new=" + encodeURIComponent(nb.mode)); break;
     // (the file browser as a dialog; without the workspace, the notebooks of this browser as before)
@@ -3518,6 +3523,12 @@ async function selftest(path) {
     try { st = await bounded(import(new URL("sagebrush-selftest.js", location.href).href), 15000); infoLines = await st.diagnoseLines(kernel); } catch (e) { console.log("diagnose import: " + e); }
     await openDiskFile(path);
     check("opened the notebook from disk", current.id === "file:" + path && cells().length > 0, statusEl.textContent);
+    // (every notebook starts with file changes off (confinement 1b), and the app has no sandbox, so it runs none that
+    // isn't allowed: the app's own self-test allows its notebook, as the person's click would, and waits for the
+    // page's own interpreter. No check line of its own: the judges' list of checks is closed, and if this fails, "ran
+    // it" fails with the refusal in its output.)
+    perms.set(current.id, "files", true);
+    await until(() => kernel.ready && !((kernel.worker?.inner ?? kernel.worker) instanceof RefusingWorker), 60000);
     await nb.runAll();
     await until(() => !cells().some((c) => /\*/.test(c.n.textContent)), 120000);
     const out = cells().map((c) => c.out.textContent).join("\n");
@@ -3837,6 +3848,9 @@ function wsShowFiles(on) {
       },
       upload: (files, folder) => uploadHere(files, folder),
       openAs: (e, as) => openAs(e, as),
+      // (New ▸ LaTeX document and From an example…, as the File menu has them: filemenu.ts NEW_ITEMS, U0)
+      ...(latexHere ? { newLatex: (folder) => { saveNow(); void texNew(ws, folder); } } : {}),
+      fromExample: () => fileMenu.querySelector('[data-f="examples"]:not([disabled])')?.click(),
       close: () => wsShowFiles(false),
       // (the Storage panel's export: its lazy chunk beside this page; the open notebook saved first)
       exportUrl: (f) => new URL(f, location.href).href,

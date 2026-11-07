@@ -459,6 +459,11 @@ class PolynomialRing_:
         self._base = base
         self._name = name
 
+    def _repr_name(self):
+        # the variable's name in printed polynomials (Magma mode's rings
+        # override it: lib/_magma.py _MPolyRingZQ)
+        return self._name
+
     def __repr__(self):
         if self._name == "$.1":
             return "Univariate Polynomial Ring over %r" % (self._base,)
@@ -801,10 +806,13 @@ class Polynomial:
 
             sage: (x + 1).list()[0].parent()
             Rational Field
+            sage: R(0).list(), R(0).coefficients(sparse=False)
+            ([], [])
         """
+        # (the zero polynomial's list is empty, as Sage's)
         if self._ring._base is QQ:
-            return [_qq_coeff(a) for a in self._c] if self._c else [QQ(0)]
-        return list(self._c) if self._c else [0]
+            return [_qq_coeff(a) for a in self._c]
+        return list(self._c)
 
     def _out(self, a):
         """A coefficient as handed out: over QQ an element of QQ (an
@@ -921,8 +929,14 @@ class Polynomial:
         n = self._ring._name
         return poly_hash({((n, i),) if i else (): c for i, c in enumerate(self._c)})
 
+    def _qq_ring(self):
+        # the ring over QQ in the same variable: our own when it is over QQ
+        # (an equal ring either way; keeping ours keeps its class, e.g. Magma
+        # mode's ring, which names its variable when printing)
+        return self._ring if self._ring._base is QQ else PolynomialRing(QQ, self._ring._name)
+
     def __repr__(self):
-        return _poly_repr(self._c, self._ring._name) if self._c else "0"
+        return _poly_repr(self._c, self._ring._repr_name()) if self._c else "0"
 
     def _latex_(self):
         # Sage's form: x^{20} - \frac{1}{2} x + 3
@@ -1075,7 +1089,7 @@ class Polynomial:
             if c:
                 for j, b in enumerate(d):
                     r[i + j] -= c * b
-        qq, rr = Polynomial(PolynomialRing(QQ, self._ring._name), q), Polynomial(PolynomialRing(QQ, self._ring._name), r[: len(d) - 1])
+        qq, rr = Polynomial(self._qq_ring(), q), Polynomial(self._qq_ring(), r[: len(d) - 1])
         if self._ring._base is ZZ and o._ring._base is ZZ:
             if all(isinstance(a, int) for a in qq._c + rr._c):
                 qq, rr = Polynomial(self._ring, qq._c), Polynomial(self._ring, rr._c)
@@ -1121,7 +1135,7 @@ class Polynomial:
             if not o._c:
                 raise ZeroDivisionError("rational division by zero")
             c = _F(o._c[0])
-            return Polynomial(PolynomialRing(QQ, self._ring._name), [_F(a) / c for a in self._c]) if self._ring._base is QQ or c.denominator != 1 or any(_F(a) / c != int(_F(a) / c) for a in self._c) else Polynomial(self._ring, [int(_F(a) / c) for a in self._c])
+            return Polynomial(self._qq_ring(), [_F(a) / c for a in self._c]) if self._ring._base is QQ or c.denominator != 1 or any(_F(a) / c != int(_F(a) / c) for a in self._c) else Polynomial(self._ring, [int(_F(a) / c) for a in self._c])
         # a polynomial: an element of the fraction field, even when the
         # division is exact (x/x is 1 in Frac(ZZ[x]), as Sage)
         if not o._c:
@@ -1129,8 +1143,8 @@ class Polynomial:
         import _sage_frac
         if self._ring._base is ZZ and o._ring._base is ZZ:
             return _sage_frac.FractionFieldElement(self, o)
-        a = self if self._ring._base is QQ else Polynomial(PolynomialRing(QQ, self._ring._name), self._c)
-        b = o if o._ring._base is QQ else Polynomial(PolynomialRing(QQ, self._ring._name), o._c)
+        a = self if self._ring._base is QQ else Polynomial(self._qq_ring(), self._c)
+        b = o if o._ring._base is QQ else Polynomial(self._qq_ring(), o._c)
         return _sage_frac.FractionFieldElement(a, b)
 
     def __rtruediv__(self, other):
@@ -1141,7 +1155,7 @@ class Polynomial:
         if not self._c:
             raise ZeroDivisionError("fraction field element division by zero")
         import _sage_frac
-        R = self._ring if self._ring._base is QQ or _F(other).denominator == 1 else PolynomialRing(QQ, self._ring._name)
+        R = self._ring if self._ring._base is QQ or _F(other).denominator == 1 else self._qq_ring()
         return _sage_frac.FractionFieldElement(R(other), Polynomial(R, self._c))
 
     # ---- evaluation and calculus
@@ -1198,7 +1212,7 @@ class Polynomial:
             sage: (3*x^2 + 1).integral()
             x^3 + x
         """
-        return Polynomial(PolynomialRing(QQ, self._ring._name), [0] + [_F(a) / (i + 1) for i, a in enumerate(self._c)])
+        return Polynomial(self._qq_ring(), [0] + [_F(a) / (i + 1) for i, a in enumerate(self._c)])
 
     def change_ring(self, R):
         """The polynomial with its coefficients converted to the ring R.
@@ -1266,7 +1280,7 @@ class Polynomial:
             x^2 + 3/2
         """
         lc = _F(self.leading_coefficient())
-        return Polynomial(PolynomialRing(QQ, self._ring._name) if lc not in (1,) else self._ring, [_F(a) / lc for a in self._c])
+        return Polynomial(self._qq_ring() if lc not in (1,) else self._ring, [_F(a) / lc for a in self._c])
 
     def content(self):
         """The gcd of the coefficients (over ZZ), as Sage's content().
@@ -1306,7 +1320,7 @@ class Polynomial:
             sage: (x^2 - 1).gcd(x^2 + 2*x + 1)
             x + 1
         """
-        o = other if isinstance(other, Polynomial) else Polynomial(PolynomialRing(QQ, self._ring._name), [other])
+        o = other if isinstance(other, Polynomial) else Polynomial(self._qq_ring(), [other])
         over_zz = self._ring._base is ZZ and o._ring._base is ZZ
         if not self._c or not o._c:
             # Sage returns the other one unchanged (monic over QQ)
@@ -1320,7 +1334,7 @@ class Polynomial:
         g = poly.gcd(ca, cb)
         if over_zz:
             return Polynomial(self._ring, g)
-        return Polynomial(PolynomialRing(QQ, self._ring._name), g).monic()
+        return Polynomial(self._qq_ring(), g).monic()
 
     def lcm(self, other):
         """The least common multiple.
