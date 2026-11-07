@@ -484,7 +484,7 @@ newBuiltinModule("sys", (m) => {
   // context_aware_warnings beyond them, with the values of a script run with no options; locale and io read
   // utf8_mode and warn_default_encoding.  set_int_max_str_digits installs a new one, as CPython 3.14.8's does:
   // the old object keeps its values, so a hash taken of it stays right)
-  const newFlags = () =>
+  const newFlags: () => any = () =>
     Ty.structseq(
       "sys.flags",
       ["debug", "inspect", "interactive", "optimize", "dont_write_bytecode", "no_user_site", "no_site", "ignore_environment", "verbose", "bytes_warning", "quiet", "hash_randomization", "isolated", "dev_mode", "utf8_mode", "warn_default_encoding", "safe_path", "int_max_str_digits"],
