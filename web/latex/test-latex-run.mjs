@@ -12,8 +12,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
-import { driver, runnable, parseOutput, statesOf, resultsText, msgOf, MARK, RUN_LIMITS, RESULTS_FORMAT, runAndSave, sessionOf, sandboxEngine, SANDBOX_FAILED, folderFiles, runIn, DEPS_MARK, parseDeps, depsWith, wsReader, checkedResults } from "./run-core.mjs";
-import { itemKey, savedStates, stateOf, WRAPPER_VERSION, MAX_RESULT, safeRel, depsOf, staleOf, sha256hex, readComplete } from "./engine/sagetex.mjs";
+import { seenOf, driver, runnable, parseOutput, statesOf, resultsText, msgOf, MARK, RUN_LIMITS, RESULTS_FORMAT, runAndSave, sessionOf, sandboxEngine, SANDBOX_FAILED, folderFiles, runIn, DEPS_MARK, parseDeps, depsWith, wsReader, checkedResults } from "./run-core.mjs";
+import { itemKey, savedStates, stateOf, WRAPPER_VERSION, MAX_RESULT, safeRel, depsOf, staleOf, staleOfSync, sha256hex, readComplete, DEPS_MAX } from "./engine/sagetex.mjs";
 
 const results = [];
 const check = (name, ok, detail) => { results.push([name, !!ok]); if (!ok) console.log("FAIL", name, JSON.stringify(detail)?.slice(0, 900)); };
@@ -574,6 +574,13 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
   const a60 = await sha256hex(big["a.py"]);
   const over = await staleOf([["a.py", a60], ["b.py", a60]], async (rel, left) => (big[rel].length > left ? "over" : big[rel]), 100);
   check("W01 staleOf: the files read within one budget: past it, \"over\" (not checked: not used)", over === "over", over);
+  // (grader's #804 S3, S4, S7: the record's bounds and shape, exactly: DEPS_MAX entries are a record, one more isn't;
+  //  a hash is 64 hex digits, no fewer; staleOfSync (the CLI's) shares one budget across the files, as staleOf does)
+  const many = (n) => ({ deps: Array.from({ length: n }, (_, k) => ["f" + k + ".py", h1]) });
+  check("W01 depsOf: DEPS_MAX entries are a record; DEPS_MAX + 1 are invalid", Array.isArray(depsOf(many(DEPS_MAX))) && depsOf(many(DEPS_MAX + 1)) === "invalid", { max: DEPS_MAX });
+  check("W01 depsOf: a hash of 63 hex digits is invalid", depsOf({ deps: [["h.py", h1.slice(1)]] }) === "invalid" && Array.isArray(depsOf({ deps: [["h.py", h1]] })), null);
+  const overSync = staleOfSync([["a.py", a60], ["b.py", a60]], (rel, left) => (big[rel].length > left ? "over" : big[rel]), () => a60, 100);
+  check("W01 staleOfSync: the files read within one budget: past it, \"over\"", overSync === "over", overSync);
   // (astra's DEP-READ-1 r2: the CLI's reader reads a file whole: stat 1, now 6 bytes (grew): null, no prefix hashed;
   //  stat 6, now 2 (shrank): null; reads of a byte at a time: the whole file)
   const fileOf = (bytes, step = 1 << 20) => (buf, at) => { const k = Math.min(step, buf.length, Math.max(0, bytes.length - at)); buf.set(bytes.subarray(at, at + k)); return k; };
@@ -637,6 +644,29 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
     written = null; await two(D(["a.py"]) + R + R);
     const unmatched = written?.deps;
     check("DEP-PARTIAL-COMMIT-1: Stop after item 2's result: b.py recorded; a result without its own line: incomplete", JSON.stringify(ok2?.map((d) => d[0])) === JSON.stringify(["a.py", "b.py"]) && unmatched === "incomplete" && parseDeps(D(["a.py"]) + R + R) === null && JSON.stringify(parseDeps(D(["a.py"]) + R + D(["a.py"]))) === JSON.stringify(["a.py"]), { ok2, unmatched });
+    // (grader's #804 R4: a recorded file moved to the Trash (its entry otherwise the same) changes what is seen, so the
+    //  page checks again; R6: the results file itself changed while it is checked: nothing used, nothing seen; R10: a
+    //  Run whose items printed no result records nothing of what it imported)
+    {
+      const trashed = new Set();
+      const wsT2 = { stat: async (p) => (files[p] ? { fid: p, rev: writes.get(p) ?? 0, updated: 0, size: files[p].length, ...(trashed.has(p) ? { trashed: true } : {}) } : undefined) };
+      const eR = await ws.stat("/P/d.tex.results.json");
+      const k1 = await seenOf(wsT2, eR, "/P", [["h.py", h1]]);
+      trashed.add("/P/h.py");
+      const k2 = await seenOf(wsT2, eR, "/P", [["h.py", h1]]);
+      check("W01 seenOf: a recorded file moved to the Trash is seen as changed", typeof k1 === "string" && k1 !== k2, { k1, k2 });
+      files["/P/h.py"] = enc("v = 1\n");
+      const e0 = await ws.stat("/P/d.tex.results.json");
+      ws.readUpTo = async (p, max) => { const r = await orig(p, max); if (p.endsWith("h.py")) files["/P/d.tex.results.json"] = enc("{ }"); return r; };
+      const midR = await checkedResults(ws, "/P/d.tex.results.json", e0, rec, "/P");
+      ws.readUpTo = orig;
+      check("W01 checkedResults: the results file changed while it is checked: nothing used, nothing seen", midR.seen === null && midR.saved.length === 0, { seen: midR.seen, saved: midR.saved.length });
+      written = null;
+      await runAndSave({ items: [item("silent", "import h")], current: () => true, max: 1 << 20, now: () => 0, fid: "f",
+        ws, session: sP, store: sP, serial: sP.serial, folder: async () => ({ dir: "/P", files: Object.entries(files) }),
+        exec: async () => ({ out: DEPS_MARK + JSON.stringify(["h.py"]) + "\n", stopped: "the run was stopped" }) });
+      check("W01 runAndSave: a Run whose items printed no result records nothing of what it imported", written && written.deps === undefined, written && { deps: written.deps, items: written.items?.length });
+    }
   }
   check("W01 resultsText: deps only when there are some", !("deps" in JSON.parse(resultsText([]))) && JSON.stringify(JSON.parse(resultsText([], [["h.py", h1]])).deps) === JSON.stringify([["h.py", h1]]), null);
 }

@@ -2064,6 +2064,31 @@ open('made.txt', 'w').write('x')
       check(w01deps.includes("helper.py") && w01deps.includes("statistics.py") === false && staleSaid && notRun, "Run (Codex W01): the results record helper.py; it edited, the page doesn't use them: says why, the items not run", { w01deps, staleSaid, notRun, status: await ev(`document.querySelector(".tex-status")?.textContent ?? ""`), preview: await ev(`(document.querySelector(".tex-preview")?.textContent ?? "").slice(0, 200)`) });
       const b2 = await runB();
       check(L(b2, 1) === "8", "Run (Codex P5): the helper edited, the next Run imports the edit", { got: L(b2, 1) });
+      // (grader's #804 P2: what was checked is what is seen: back in focus with nothing changed, the results file isn't
+      //  read again)
+      await sleep(1500);
+      const rp = "/ex-b/doc.tex.results.json";
+      const quiet = await ev(`(async () => { const ws = window.__sbTexWs, real = ws.readUpTo, reads = [];
+        ws.readUpTo = function (p, ...a) { reads.push(p); return real.call(this, p, ...a); };
+        window.dispatchEvent(new Event("focus")); await new Promise((r) => setTimeout(r, 1500)); ws.readUpTo = real;
+        return reads.filter((p) => p === ${JSON.stringify(rp)}).length; })()`);
+      check(quiet === 0, "Run (Codex W01): back in focus with nothing changed, the results file isn't read again (what was checked is what is seen)", { reads: quiet });
+      // (grader's #804 P3: the helper changed while its results are checked: nothing used then, and checked again
+      //  shortly by the page itself (no further focus, no Run): then said not used)
+      const settle = await ev(`(async () => { const ws = window.__sbTexWs, real = ws.readUpTo; let once = true;
+        ws.readUpTo = async function (p, ...a) { const r = await real.call(this, p, ...a);
+          if (once && p === "/ex-b/helper.py") { once = false; const e = await ${W}.stat(p); await ${W}.write(p, new TextEncoder().encode("def v():\\n    return 9\\n"), { fid: e.fid, base: e.rev ?? 0 }); }
+          return r; };
+        // (the results file rewritten as it is (its entry changes), so the page, back in focus, checks it again)
+        const rp = ${JSON.stringify(rp)}, re = await ${W}.stat(rp), rb = (await ${W}.read(rp)).content;
+        await ${W}.write(rp, rb, { fid: re.fid, base: re.rev ?? 0 });
+        document.querySelector(".tex-status").textContent = ""; window.dispatchEvent(new Event("focus"));
+        for (let i = 0; i < 60 && once; i++) await new Promise((r) => setTimeout(r, 50));
+        const mid = !once;
+        for (let i = 0; i < 80 && !/helper\.py changed or was removed/.test(document.querySelector(".tex-status")?.textContent ?? ""); i++) await new Promise((r) => setTimeout(r, 100));
+        ws.readUpTo = real;
+        return { mid, said: /helper\.py changed or was removed/.test(document.querySelector(".tex-status")?.textContent ?? ""), status: document.querySelector(".tex-status")?.textContent ?? "" }; })()`);
+      check(settle.mid && settle.said, "Run (Codex W01): the helper changed while its results are checked: checked again by the page shortly after, then said not used", settle);
       await ev(`${W}.remove("/ex-b/helper.py").then(() => 1)`);
       const b3 = await runB();
       check(b3?.items?.[0]?.s === "error" && /No module named .?helper/.test(L(b3, 0)), "Run (Codex P5): the helper deleted, the next Run can't import it", { got: L(b3, 0).slice(-160) });

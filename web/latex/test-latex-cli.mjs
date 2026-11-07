@@ -523,6 +523,19 @@ $\sage{1/0}$ then $\sage{2+2}$.
     writeFileSync(join(w, "d.tex"), "\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n\\begin{sagesilent}\nfrom h import v\n\\end{sagesilent}\n\\begin{sagesilent}\nopen('h.py', 'w').write('v = 5')\n\\end{sagesilent}\n$\\sage{v}$\n\\end{document}\n");
     const r3 = await run(w, "run", "d.tex", "--json"), c7 = await run(w, "check", "d.tex", "--json");
     check("DEP-SNAPSHOT-1: a helper changed during the run: recorded incomplete, the results not used, said", r3.code === 0 && saved().deps === "incomplete" && c7.json?.code?.every((x) => x.state === "not run") && c7.json.problems.some((p) => p.kind === "stale" && /didn't record everything/.test(p.message)), { r3: r3.code, deps: saved().deps, c7: c7.json?.problems });
+    // (grader's #804 C2: the files hashed before a run share one budget, DEPS_BYTES (64 MiB): a.py (not imported) takes
+    //  all but 4 bytes of it, so b.py (6 bytes), under the budget alone, isn't hashed before the run, and a run importing it
+    //  records "incomplete")
+    {
+      const w2 = join(dir, "w01b");
+      mkdirSync(w2);
+      writeFileSync(join(w2, "a.py"), ""); truncateSync(join(w2, "a.py"), 64 * 2 ** 20 - 4);
+      writeFileSync(join(w2, "b.py"), "v = 1\n");
+      writeFileSync(join(w2, "d.tex"), "\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n\\begin{sagesilent}\nfrom b import v\n\\end{sagesilent}\n$\\sage{v}$\n\\end{document}\n");
+      const r4 = await run(w2, "run", "d.tex", "--json"), j4 = JSON.parse(readFileSync(join(w2, "d.tex.results.json"), "utf8"));
+      check("DEP-SNAPSHOT-1: the files hashed before a run share one budget: past it, a helper imported is recorded incomplete", r4.code === 0 && j4.deps === "incomplete" && j4.items?.[1]?.latex === "1", { code: r4.code, deps: j4.deps });
+      rmSync(w2, { recursive: true, force: true });
+    }
   }
 } finally {
   rmSync(dir, { recursive: true, force: true });
