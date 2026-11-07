@@ -1,0 +1,49 @@
+{
+ "cases": [
+  {
+   "id": "na-1",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] NA\n[1] 4\n[1] 2\n"
+  },
+  {
+   "id": "na-2",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] FALSE  TRUE  TRUE FALSE\n"
+  },
+  {
+   "id": "na-3",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] NA\n[1] FALSE\n[1] TRUE\n"
+  },
+  {
+   "id": "na-4",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] NA  \"a\"\n"
+  },
+  {
+   "id": "na-5",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 2 5\n"
+  },
+  {
+   "id": "na-6",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] NA\n"
+  },
+  {
+   "id": "na-7",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] NA\n[1] NA\n[1] NA\nNULL\n"
+  }
+ ],
+ "file": "rill-tests/na/test_1.R",
+ "format": "rill-out",
+ "v": 1
+}

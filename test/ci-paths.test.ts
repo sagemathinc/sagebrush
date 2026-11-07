@@ -456,3 +456,8 @@ test("slow_tests: the slow node tests (test/slow-tests.ts) run for the full-ci l
   assert.equal(push.full, "true");
   assert.equal(push.slow_tests, "false");
 });
+
+test("Rill's recorded outputs select the node suite, which checks their provenance (design/rill.md §7.5)", () => {
+  // (runtime paths, not an unknown path: the engine's smoke test isn't selected)
+  assert.deepEqual(suites(classify(["rill-tests/arith/test_1.out.json", "rill-tests/PROVENANCE.json"])), { node: "true", web: "true", modes: "true", engine_smoke: "false", docs_only: "false" });
+});
