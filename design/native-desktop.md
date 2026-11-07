@@ -171,7 +171,7 @@ r4's A-vs-B timings stay withdrawn: the PyPI wheel came from a different commit.
 - **LaTeX:** the engine includes today's LaTeX tools (`src/latex-cli.ts`: the expander, the HTML preview, SageTeX).
   - **Today Sagebrush doesn't make PDFs:** the preview is not TeX (`articles/latex/01-how-it-works.md`).
   - **PDFs** (William, §1 item 11): the engine compiles to PDF with **the person's installed TeX** only.
-    - **Detection runs again on every compile**, and looks beyond `PATH` in each OS's standard install locations (macOS `/Library/TeX/texbin`; the MiKTeX and TeX Live directories on Windows; the Linux distributions' paths). So a TeX installed while the app runs is found by the next compile, without a restart: a running app keeps the `PATH` it started with.
+    - **Detection runs again on every compile**: first `PATH`, then each OS's standard install locations (macOS `/Library/TeX/texbin`; the MiKTeX and TeX Live directories on Windows; the Linux distributions' paths). So a TeX installed while the app runs is found by the next compile, without a restart: a running app keeps the `PATH` it started with.
     - **With no TeX found,** the engine shows plain guidance instead: board's text, with per-OS pointers, saying that Sagebrush doesn't download or install LaTeX, and a "Compile again" action. There is no consent dialog, because nothing is offered. Agents get the same guidance from the command line.
     - **Sagebrush downloads and manages no TeX.** The Tectonic offer, its download verification, its bundle policy and its licence and source-offer text (r13–r17) are **superseded, Nov 7** (William, §1 item 11; Tectonic's own package downloads aren't verified, which @sagebrush and astra confirmed in its source).
 - **The runtime is a packaging choice:** Bun (`bun build --compile`), Deno (`deno compile`) or a Node single executable. `scripts/build-cli.mjs` already builds all three (`--bun`, `--deno`, `--sea`).
@@ -366,10 +366,12 @@ Wiring it into a workflow file stays William's or @sagebrush's.
 | T7 | all cases, with an ephemeral test key | — |
 
 **T6. PDFs with the installed TeX** (N6), against fixture TeX installations:
-- precedence: a fixture TeX on `PATH` is used;
+- precedence: with two distinct fixture TeX installations, one on `PATH` and one in a standard location, the one on `PATH` is used;
 - detection beyond `PATH`: a fixture TeX only in an OS's standard location is found;
 - **found without a restart:** a fixture TeX installed after the engine started is found by the next compile;
-- with no TeX, the compile shows the guidance message, downloads nothing (a network fixture that refuses connections sees no request) and falls back to nothing.
+- **gone without a restart:** a fixture TeX that was used, then removed, makes the next compile show the guidance (no cached path is reused);
+- with no TeX, the compile shows the guidance message, downloads nothing (a network fixture that refuses connections sees no request) and falls back to nothing;
+- the command line with no TeX prints the same guidance and exits with a stated non-zero status.
 
 **T7. Engine upgrade verification** (§4.4), with an ephemeral in-memory test key (§1 item 12) and fixture releases:
 - **the positive case:** a release signed by the ephemeral key, with its public key injected as the test's pinned key, passes;
@@ -378,7 +380,8 @@ Wiring it into a workflow file stays William's or @sagebrush's.
 - wrong length, wrong hash, metadata for another OS or architecture or another version, missing metadata and a missing digest each fail before anything is unpacked;
 - expired metadata and a rollback to an older version both fail;
 - a failure at download, verify, unpack or replace leaves the previous engine byte-identical, and a retry starts clean;
-- the ephemeral key is never written to disk: the test checks its temporary directory and its logs.
+- **a release-configured engine refuses the injection:** the same key injection given to an engine built in its release configuration is ignored, and the ephemeral-signed release is rejected, so a test hook left on in a release build fails T7;
+- the ephemeral key is never written to disk or logged: the test checks its temporary directory and its logs for the key in every encoding (raw, hex, base64, PEM and JWK).
 
 ## 9. Questions for William: answered
 
