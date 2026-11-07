@@ -88,6 +88,19 @@ class table:
         Traceback (most recent call last):
         ...
         ValueError: do not set both 'rows' and 'columns' when defining a table
+
+    Rows of different lengths are cut to the shortest in the text form, and
+    an empty first row shows nothing (Sage's)::
+
+        sage: table([[1, 2], [3]], header_column=True)
+          1 │
+          3 │
+        sage: str(table([[], [1, 2]]))
+        ''
+        sage: table([[1, 2], []])._html_()
+        Traceback (most recent call last):
+        ...
+        IndexError: list index out of range
     """
 
     def __init__(self, rows=None, columns=None, header_row=False, header_column=False, frame=False, align="left"):
@@ -159,30 +172,35 @@ class table:
         return s.rjust(w) if a == "right" else s.center(w) if a == "center" else s.ljust(w)
 
     def __str__(self):
+        # (an empty first row: nothing at all, whatever the options, as Sage's)
+        if not self._rows[0]:
+            return ""
         rows, widths = self._str_rows()
         o = self._options
         hcol, frame = o["header_column"], o["frame"]
         if not frame:
             def line(r):
                 cells = [self._pad(c, w) for c, w in zip(r, widths)]
-                s = "  " + cells[0] if cells else "  "
-                for j, c in enumerate(cells[1:], 1):
-                    s += (" │ " if hcol and j == 1 else "   ") + c
-                return s.rstrip()
+                # (a header column's bar even with nothing after it; with no columns at all, Sage's IndexError)
+                if hcol:
+                    return ("  " + cells[0] + " │ " + "   ".join(cells[1:])).rstrip()
+                return ("  " + "   ".join(cells)).rstrip()
             rule = "├" + "┼".join("─" * (w + 2) for w in widths) + "┤"
             out = []
             for i, r in enumerate(rows):
                 out.append(line(r))
                 if i == 0 and o["header_row"]:
                     out.append(rule)
-            return "\n".join(out)
+            # (the blank lines of rows left with no columns, at either end, dropped: Sage's)
+            return "\n".join(out).strip("\n")
 
         def border(left, mid, after_head, right, fill):
             segs = [fill * (w + 2) for w in widths]
             s = left
             for j, seg in enumerate(segs):
                 s += seg + (right if j == len(segs) - 1 else (after_head if hcol and j == 0 else mid))
-            return s
+            # (no columns: the corners alone)
+            return s if segs else left + right
 
         def line(r):
             cells = [self._pad(c, w) for c, w in zip(r, widths)]
@@ -204,6 +222,9 @@ class table:
     def _latex_(self):
         o = self._options
         n = len(self._rows[0])
+        # (an empty first row: no tabular at all, as Sage's)
+        if not n:
+            return ""
         a = str(o["align"])[:1]
         # (a header column: a double bar after it in a frame, a single one without)
         hc = o["header_column"] and n > 0
@@ -245,6 +266,9 @@ class table:
             </div>
         """
         o = self._options
+        # (a row with no entries: Sage's IndexError)
+        if any(not r for r in self._rows):
+            raise IndexError("list index out of range")
         a = o["align"]
         style = ' style="text-align:%s"' % a if a in ("left", "center", "right") else ""
         out = ['<div class="notruncate">', "<table " + ('border="1"' if o["frame"] else "") + ' class="table_form">', "<tbody>"]
@@ -266,7 +290,11 @@ class table:
         return "\n".join(out)
 
     def _repr_html_(self):
-        return self._html_()
+        # (none where Sage's HTML is an error, a row with no entries: the display falls back to the text)
+        try:
+            return self._html_()
+        except IndexError:
+            return None
 
     # ---- Markdown (Sagebrush's notebook: its Markdown output typesets $...$)
     def _repr_markdown_(self):
@@ -281,6 +309,9 @@ class table:
             | $\\frac{1}{2}$ | a |
         """
         o = self._options
+        # (none where Sage's HTML is an error, a row with no entries: the display falls back to the text)
+        if any(not r for r in self._rows):
+            return None
         rows = [list(r) for r in self._rows]
         n = len(rows[0]) if rows else 0
         md = lambda v: (v if isinstance(v, str) else "$" + _latex(v) + "$").replace("|", "\\|").replace("\n", " ")
