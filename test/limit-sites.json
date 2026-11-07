@@ -4573,6 +4573,11 @@
   "owner": "Sage kernel (@sagebrush-sage2)",
   "reason": "a doctest's expected output (Sage's coercion refusal), not code"
  },
+ "lib/_sage_ffmat.py :: FFVector.__truediv__ :: raise TypeError(\"unsupported operand parent(s) for /: '%r' and '<class '%s'>'\" % (self.parent(), type(o).__name__)) #0": {
+  "class": "none",
+  "owner": "matrices over inexact fields (@sagebrush-sage2)",
+  "reason": "Sage's refusal (TypeError) of a vector divided by a str, a list or a tuple, in Sage's text; refuses nothing for size"
+ },
  "lib/_sage_ffmat.py :: _AlgCharge :: against the budget for one matrix. A charge per entry alone admitted #0": {
   "class": "2",
   "owner": "linear algebra/runtime memory",
