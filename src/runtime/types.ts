@@ -2529,6 +2529,25 @@ const viewTypes = ["dict_keys", "dict_values", "dict_items"].map((name, kind) =>
     for (const [op, f] of [["__and__", "and"], ["__or__", "or"], ["__sub__", "sub"], ["__xor__", "xor"]] as const) {
       method(vt, op, (v: DictView, other: any) => O.setOp(O.newSet(O.dictIter(v.d, v.kind)), O.newSet(other), f));
     }
+    // (set-like comparisons, as CPython's dictview_richcompare: against a set, a frozenset or another keys or items
+    // view only, else NotImplemented; the sizes first, then whether every element of the one is in the other)
+    const setLike = (o: any) => o instanceof O.PySet || (o instanceof DictView && o.kind !== 1);
+    const size = (o: any) => (o instanceof DictView ? o.d.$m.size : o.$d.$m.size);
+    const within = (a: any, b: any) => {
+      for (const x of O.toArray(O.iter(a))) if (!O.contains(b, x)) return false;
+      return true;
+    };
+    const cmp: [string, (n: number, m: number) => boolean, boolean][] = [
+      ["__eq__", (n, m) => n === m, false], ["__lt__", (n, m) => n < m, false], ["__le__", (n, m) => n <= m, false],
+      ["__gt__", (n, m) => n > m, true], ["__ge__", (n, m) => n >= m, true],
+    ];
+    for (const [op, sizes, flip] of cmp) {
+      method(vt, op, (v: DictView, o: any) => {
+        if (!setLike(o)) return NotImplemented;
+        return sizes(v.d.$m.size, size(o)) && (flip ? within(o, v) : within(v, o));
+      });
+    }
+    method(vt, "__ne__", (v: DictView, o: any) => (setLike(o) ? !(v.d.$m.size === size(o) && within(v, o)) : NotImplemented));
   }
   return vt;
 });
