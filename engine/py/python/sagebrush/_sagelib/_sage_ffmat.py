@@ -1032,29 +1032,48 @@ class FFVector:
             return NotImplemented
         return _vector_op(o, self, "-")
 
-    def _complex_promotion(self, o):
-        """self over the complex field where it meets the complex number o,
-        when self is real, as Sage: CDF for two doubles, else ComplexField of
-        the lower precision (a double counting as 53 bits); None otherwise."""
+    def _inexact_meet(self, o):
+        """(K, self over K, o in K) where this vector over a real or complex
+        field meets a number o of another such field, as Sage: o's field
+        coerces into self's (o's precision at least self's, and a complex o
+        only into a complex field), so K is self's field; otherwise K has the
+        lower precision, is complex when either is, and is RDF or CDF only
+        for two doubles (a double counting as 53 bits; vector(RealField(80))
+        times RDF(3) is over RR, vector(RDF) times CC(3) over CC).  None
+        when either field is not one of these, or K is self's field and o
+        already in it."""
         P, B = _sa().parent(o), self._base
-        rp, rb = repr(P), repr(B)
-        if "Complex" not in rp or "Complex" in rb or not ("Real" in rb):
-            return None
-        dbl_b, dbl_p = "Double" in rb, "Double" in rp
-        if dbl_b and dbl_p:
-            K = _sa().CDF
+        kinds = []
+        for F in (B, P):
+            r = repr(F)
+            if not (r.startswith("Real") or r.startswith("Complex")) or not ("Double" in r or "bits of precision" in r):
+                return None
+            kinds.append(("Complex" in r, "Double" in r, 53 if "Double" in r else int(F.prec())))
+        (cb, db, pb), (cp, dp, pp) = kinds
+        if pp >= pb and (cb or not cp):
+            K = B
         else:
-            pb = 53 if dbl_b else int(B.prec())
-            pp = 53 if dbl_p else int(P.prec())
-            K = _sa().ComplexField(min(pb, pp))
-        return FFVector(K, [K(a) for a in self._e])
+            c, p = cb or cp, min(pb, pp)
+            if db and dp:
+                K = _sa().CDF if c else _sa().RDF
+            else:
+                K = _sa().ComplexField(p) if c else _sa().RealField(p)
+        if K is B and P == B:
+            return None
+        try:
+            c = K(o)
+        except TypeError:
+            # (ComplexField(20) takes a CDF number by its parts)
+            c = K(o.real(), o.imag())
+        return K, (self if K is B else FFVector(K, [K(a) for a in self._e])), c
 
     def __mul__(self, o):
         if _vec_base(o) is not None:
             return _vector_op(self, o, "*")
-        promoted = self._complex_promotion(o)
-        if promoted is not None:
-            return promoted * o
+        m = self._inexact_meet(o)
+        if m is not None:
+            K, v, c = m
+            return FFVector(K, [a * c for a in v._e])
         if isinstance(o, FFMatrix):
             return o._vecmat(self)
         import _sage_matrix
@@ -1087,9 +1106,10 @@ class FFVector:
         """
         if _vec_base(o) is not None:
             return _vector_op(o, self, "*")
-        promoted = self._complex_promotion(o)
-        if promoted is not None:
-            return o * promoted
+        m = self._inexact_meet(o)
+        if m is not None:
+            K, v, c = m
+            return FFVector(K, [c * a for a in v._e])
         c = _admit(self._base, o)
         if c is None:
             if isinstance(o, _F) or type(o).__name__ == "Rational":
@@ -1113,11 +1133,14 @@ class FFVector:
         """
         if isinstance(o, (FFVector, FFMatrix)) or _vec_base(o) is not None:
             return NotImplemented
-        promoted = self._complex_promotion(o)
-        if promoted is not None:
-            # (a real vector divided by a complex number is over the complex
-            # field, as Sage: vector(RDF, [2, 4])/CDF(2) is over CDF)
-            return promoted / o
+        m = self._inexact_meet(o)
+        if m is not None:
+            # (over the field where the two meet, as for a product:
+            # vector(RDF, [2, 4])/CDF(2) is over CDF, vector(ComplexField(100),
+            # [2, 4])/RealField(80)(2) over ComplexField(80))
+            K, v, c = m
+            inv = 1 / c
+            return FFVector(K, [a * inv for a in v._e])
         if isinstance(o, int) and not isinstance(o, bool):
             # (1/o in QQ: rational division by zero for 0, as Sage)
             inv = _sa()._QQ(1, o)
