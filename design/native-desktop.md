@@ -1,6 +1,6 @@
 # Native engines in the desktop app
 
-*Status: plan r13: r11 (the architecture revision, its tests and the page items) with William's answers to every §9 question recorded (Nov 7, about 2:26–2:31 PM PST); docs only, nothing is built. It replaces r12 (merged at 2999416e) with William's architecture decision of
+*Status: plan r14: r11 (the architecture revision, its tests and the page items) with William's answers to every §9 question recorded (Nov 7, about 2:26–2:31 PM PST), and (r14) the licence invariant, the support-window clock and the PDF milestone N6 with its tests (T6) and measurements (§7.1); docs only, nothing is built. It replaces r12 (merged at 2999416e) with William's architecture decision of
 Nov 7, 2026, about 12:15–12:30 PM PST.
 
 Owner and sole author: @sagebrush-remote-compute. Reviewers: astra (SEC), daybreak3 (ENGINE), daybreak4 (PERF),
@@ -96,7 +96,11 @@ The protocol is the message set the page's worker kernel already uses (`src/note
 **Version skew.**
 - **Desktop app:** if the installed engine is outside the app's range, the app uses the engine it ships with (§5) and says that an engine upgrade (or an app upgrade) is available. It never runs a mismatched pair.
 - **Relay:** the page already requires a minimum runner version (`RUNNER_MIN`). The handshake replaces that check with the same rule: outside the range, the page says which side to upgrade.
-- **Support window** (William, §1): **before 1.0 there is no compatibility guarantee at all.** From the 1.0 release on, an engine keeps speaking the previous protocol version for 12 months.
+- **Support window** (William, §1): **before 1.0 there is no compatibility guarantee at all.** From 1.0 on:
+  - **The clock:** when an engine release first speaks protocol version $v+1$, version $v$ gets a window that ends 12 months after that release's date. The date comes from the signed release metadata, never from the person's computer clock.
+  - **The promise:** every engine released before the window ends still speaks $v$.
+  - **Several predecessors:** each older version has its own window, so an engine may speak several older versions at once. A version is dropped only after its own window ends.
+  - **Before 1.0:** versions superseded before the 1.0 release get no window. The version current at 1.0 gets its window from the first release after 1.0 that supersedes it.
 - Within a negotiated version, an unknown message type is a protocol error. It ends the session, never silently drops the message.
 
 **Transports, all carrying the same messages:**
@@ -167,21 +171,22 @@ r4's A-vs-B timings stay withdrawn: the PyPI wheel came from a different commit.
     - the engine compiles to PDF with **the person's installed TeX** if it finds one;
     - otherwise, on the first PDF compile, it **offers Tectonic** as a separate, optional download.
   - **Tectonic is never bundled with or linked into the engine.** It is its own executable, with its own licence notices, and the docs carry a source offer: its `pdf_io` carries GPL headers and its `graphite2` is LGPL.
-  - **The download is verified before installation.**
-    - The SHA-256 digest is either pinned per version, OS and architecture in the verified engine release, or comes from signed release metadata checked against an already-trusted key, with version, expiry and rollback checks.
-    - The metadata binds the version, OS and architecture, byte length and archive hash. An unsigned checksum downloaded alongside the executable is not enough.
-    - The download is staged. Its length and hash are checked before it is extracted or run, archive paths are validated, and the verified executable is installed atomically.
-    - It fails closed: missing or mismatched data never falls back to running something unverified.
-    - It reuses the engine updater's verification (§4.4), not a separate trust scheme.
+  - **The offer is the person's explicit choice:** a dialog showing the size, the source, the licence and Cancel. It is never automatic, including when an agent starts the compile.
+  - **The download must be verified before installation.**
+    - The SHA-256 digest must be either pinned per version, OS and architecture in the verified engine release, or come from signed release metadata checked against a public key already pinned in the installed engine, with version, expiry and rollback checks.
+    - The metadata must bind the version, OS and architecture, byte length and archive hash. An unsigned checksum downloaded alongside the executable is not enough.
+    - The download must be staged. Its length and hash must be checked before it is extracted or run, archive paths must be validated, and the verified executable must be installed atomically.
+    - It must fail closed: missing or mismatched data must never fall back to running something unverified.
+    - It reuses the engine updater's verification (§4.4), not a separate verification scheme.
     - Signature keys and signing remain William's only. Agents use fixtures and mock metadata.
 - **The runtime is a packaging choice:** Bun (`bun build --compile`), Deno (`deno compile`) or a Node single executable. `scripts/build-cli.mjs` already builds all three (`--bun`, `--deno`, `--sea`).
   - The native Rust engine is loaded into that runtime, through N-API or the runtime's own FFI.
   - A Rust module without a native build stays wasm inside the engine.
 
-### 4.2 MIT always: the licence check
+### 4.2 MIT OR Apache-2.0 always: the licence check
 
 - **The engine stays MIT OR Apache-2.0** (`NOTICE.md`; William, §1), so the MIT licence is always available.
-- **Every dependency must be MIT-compatible:** permissive, so the engine can be redistributed under MIT terms with the notices kept.
+- **Every dependency must be MIT-compatible** (permissive, so the engine can be redistributed under MIT terms with the notices kept), **with one scoped exception:** the Bun runtime's own LGPL parts, below.
 - **The proposed allow-list** is the licences the npm package already carries: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, 0BSD, Zlib, BSL-1.0, Unicode-3.0, PSF-2.0 (CPython parts) and Artistic-2.0 (Cremona's data).
   - **One scoped exception:** LGPL is allowed **for the Bun runtime only** (William, §1). It is not allowed for anything else in the engine.
   - **Not allowed:** GPL, AGPL, MPL, LGPL outside the Bun runtime, and anything unlisted.
@@ -198,6 +203,7 @@ r4's A-vs-B timings stay withdrawn: the PyPI wheel came from a different commit.
 - **"Your computer" (#778)** today runs `uvx sagebrush@latest remote --loopback`, which is **CPython** with the PyO3 engine, as William chose ("uvx only", Nov 6).
 - **Merging means the engine also speaks the relay transport.** The page then talks to "Your computer" with the same protocol and client as to the desktop subprocess.
 - **The CPython runner stays as an option** (William, §1: "Yes, keep CPython as an option"). "Your computer" can run the engine (pyjs) or the existing CPython runner (`uvx sagebrush remote`), for people's own Python and packages.
+  - When both are available, the page offers a plain-words picker, and the choice is remembered per machine.
   - The relay, DPoP and terminal designs don't change; only the program at the end of the relay does.
 - **CI and agents** run the same engine binary from the command line or over the protocol.
 
@@ -285,6 +291,22 @@ Node is the baseline because r8's evidence (A) is Node. 1b is the A/A control. T
 
 r4 goes back to PERF. Counted runs still need PERF's final harness and packet review. William answered the machine questions on Nov 7 (about 12:46 PM PST): Windows runs use a CI workflow he adds himself; the m1 GUI "Yes, for N1 only"; sudo packages and the VM3/VM4 timing box "Yes to both".
 
+### 7.1 Outside N1: the optional Tectonic path
+
+The optional Tectonic download (§4.1) is **not** an N1 runtime label. It and its cache never enter N1's artifacts or F1–F3. Before N6 ships, it gets its own frozen measurement, per supported OS and architecture, on a machine with **no system TeX**:
+- **frozen inputs:** the exact Tectonic build and archive (sha256), the document corpus (each document's packages recorded), and the fixtures;
+- **archive bytes**, and **verified local install time** from a frozen local archive. Network transfer time is descriptive only;
+- **accept the offer → first successful PDF**, including the first-use package fetch;
+- **warm compile** time;
+- **the package cache** Tectonic downloads on first compile, as its own row in bytes, per corpus document;
+- **steady installed footprint:** the executable plus the cache, logical and allocated bytes;
+- **peak footprint during install or update:** staged archive + current + replacement or staged extraction + rollback;
+- **the update delta**, or a statement that each update is a full archive;
+- **offline behaviour:** with no network, the compile ends within a bounded time with a clear message, and runs nothing unverified;
+- **the control:** the person's own installed TeX, which has zero bytes managed by Sagebrush.
+
+The current figures are uncounted pilot observations by @sagebrush (Tectonic 0.17.0): a 54–60 MB binary, a 10–22 MB download, a 35 s first compile with a 43 MB cache, and 0.8 s afterwards. This measurement gets its own pre-registration and PERF review.
+
 ## 8. Milestones and tests
 
 | | Work | Gate |
@@ -295,6 +317,7 @@ r4 goes back to PERF. Counted runs still need PERF's final harness and packet re
 | **N3** | Windows parity | all lanes; the same T1 suite passes on the Windows subprocess |
 | **N4** | The engine as the desktop default; "Your computer" offers the engine alongside the CPython runner (§4.3) | William |
 | **N5** | Later, planned separately: CPython and C extensions, terminals over the protocol, Android native, warm engines | — |
+| **N6** | PDFs (§4.1): the installed TeX first; otherwise the offered Tectonic download behind the person's explicit choice, verified and installed as §4.1 requires; notices and the source offer. Deferred until after N4; its own PR series | all lanes, with T6 passing and §7.1's measurements reported |
 
 ### 8.1 Tests
 
@@ -313,7 +336,11 @@ r4 goes back to PERF. Counted runs still need PERF's final harness and packet re
 - only capabilities both sides declared are used. A fixture engine without `latex` shows LaTeX as unavailable, and the client never sends it a LaTeX request;
 - an unknown message type within a negotiated version ends the session, never a silent drop;
 - fixture engines one version older and one version newer than the app's range: the app falls back to its bundled engine and says so;
-- the relay's handshake replaces `RUNNER_MIN` with the same rule.
+- the relay's handshake replaces `RUNNER_MIN` with the same rule;
+- the support window, from fixture release metadata with fixed dates (never wall time):
+  - a pre-1.0 engine may drop any older version;
+  - after 1.0, an engine dated one day inside a window still speaks that version, and one dated one day after may drop it;
+  - two older versions with live windows are both spoken.
 
 **T3. The §2.2 control contracts, on each transport, deterministically:**
 - a stale `pv` or another generation can't reopen writes;
@@ -341,6 +368,16 @@ Wiring it into a workflow file stays William's or @sagebrush's.
 | T2 | all cases, against fixture engines | — |
 | T3 | Linux subprocess; wasm worker | macOS and Windows subprocess; relay |
 | T4 | all controls | — |
+| T6 | all cases, against fixtures | — |
+
+**T6. PDFs and the Tectonic download** (N6), against fixture archives and mock metadata (never real keys):
+- precedence: a fixture installed TeX is used, and no offer is made;
+- with no TeX, the offer appears only on a PDF compile, and nothing is downloaded until the person accepts. An agent-started compile shows the same offer and never accepts it by itself;
+- the target, length and hash are bound: a wrong length, a wrong hash, metadata for another OS or architecture, or another version each fail before extraction;
+- signed metadata: expired metadata and a rollback to an older version both fail;
+- an archive entry with `..`, an absolute path or a link outside the destination fails;
+- a failure at any step leaves the previous state intact (no executable, or the previous verified one), and nothing unverified runs;
+- the notices and the source offer are installed with the executable.
 
 ## 9. Questions for William: answered
 
