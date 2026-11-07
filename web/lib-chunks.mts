@@ -52,12 +52,17 @@ export type Packages = { registry: { packages: Record<string, { dir: string }> }
 export const START_ORDER = ["core", "sci", "sage", "matlab", "magma"] as const;
 
 // (the mod- groups groupOf gives several top-level names on purpose, which the clash check below lets through)
-const SHARED_MOD_GROUPS = new Set(["mod-live-data"]);
+const SHARED_MOD_GROUPS = new Set(["mod-live-data", "mod-pathlib"]);
+// (pathlib and what it imports, CPython 3.14's Lib modules (P3a), imported together: one group, fetched on import, so
+// the service worker and the manifest name one group, not eight; the CLI embeds the same files lazily,
+// scripts/lazy-lib.mjs. None may be in a mode's start: libChunks refuses the build if one is.)
+const PATHLIB_FAMILY = new Set(["pathlib", "glob", "fnmatch", "stat", "ntpath", "genericpath", "errno", "_os_lazy"]);
 
 export function groupOf(path: string, sets: Record<string, Set<string>>): string {
   if (sets.py?.has(path) || (sets.sci?.has(path) && sets.sage?.has(path))) return "core";
   for (const g of ["sci", "sage", "matlab", "magma"]) if (sets[g]?.has(path)) return g;
   const top = path.split("/")[0].replace(/\.py$/, "");
+  if (PATHLIB_FAMILY.has(top)) return "mod-pathlib";
   // (elliptic curves over GF(p), imported only by EllipticCurve() over a
   // finite field: its own group, so sage-more's users don't fetch it)
   if (top === "_sage_ec_ff") return "mod-sage-ec-ff";
@@ -92,6 +97,8 @@ export function libChunks(lib: Record<string, string>, recordings: Record<string
   const tops = new Map<string, string>();
   for (const path of Object.keys(lib).sort()) {
     const g = groupOf(path, sets);
+    // (a lazily embedded module is in no start: P3a's guard, the browser's half; web/test-cli-lazy-lib.mjs the CLI's)
+    if (PATHLIB_FAMILY.has(path.split("/")[0].replace(/\.py$/, "")) && g !== "mod-pathlib") throw new Error(`library chunks: ${path} is lazily embedded but a mode's start imports it (${g})`);
     // (two top-level names that would share a group's name: never silently
     // merged, but for a private module and its public twin, _string and
     // string, which are imported together)

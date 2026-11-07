@@ -495,3 +495,17 @@ class StringIO(TextIOBase):
 
     def __exit__(self, *exc):
         self.close()
+
+
+def text_encoding(encoding, stacklevel=2):
+    """A helper function to choose the text encoding (CPython 3.14's io.text_encoding): `encoding` unless it is None;
+    then "utf-8" in UTF-8 mode, else "locale" (open()'s locale encoding)."""
+    if encoding is None:
+        return "utf-8" if getattr(_sys.flags, "utf8_mode", 0) else "locale"
+    return encoding
+
+
+# (io.open is the builtin open, as CPython's: the same object; last, as builtins' open is _pyjs_open's, which uses
+# this module's classes)
+import builtins as _builtins
+open = _builtins.open

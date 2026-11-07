@@ -10,7 +10,7 @@
   "baseSwGzip": 43602,
   "topology": "inventory-3span",
   "baseTopology": "legacy-2span",
-  "swRaw": 221638,
+  "swRaw": 221953,
   "swGzip": 54525,
-  "transition": "the exact colormap tables (B2, its own lazy chunk mod-cmap-data): measured at its head e5012cdf (stacked on #750 b6d32dc6) with bun 1.4.4 and node v24.21.0: sw.js raw 221574, over 221319, so swRaw = exact + 64 = 221638; normalized gzip-9 54461, over 54444, so swGzip = exact + 64 = 54525 (@sagebrush: a ceiling is renewed only when over)"
+  "transition": "pathlib and its imports (P3a, one lazy chunk mod-pathlib, fetched on import): measured on its branch with bun 1.4.4 and node v24.21.0: sw.js raw 221889 (the group's manifest entry), over 221638, so swRaw = exact + 64 = 221953; normalized gzip-9 54502, within 54525, unchanged (@sagebrush: a ceiling is renewed only when over)"
 }
