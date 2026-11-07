@@ -10574,7 +10574,15 @@
   "owner": "the isolated output renderer (@sagebrush-agents-ui)",
   "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
  },
- "web/notebook/output-frames.js ::  :: export const FRAME_LIMITS = Object.freeze({ loadMs: 10000, commitMs: 6000, initialPx: 120, cap: 24 }); #0": {
+ "web/notebook/output-frames.js ::  :: export const FRAME_LIMITS = Object.freeze({ loadMs: 10000, commitMs: 6000, initialPx: 120, cap: 24, heightHz: 30 }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/notebook/output-frames.js ::  :: export const HEIGHT_HZ = FRAME_LIMITS.heightHz; #0": {
   "class": "1",
   "disposition": {
    "1": "shared"

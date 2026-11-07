@@ -16,7 +16,10 @@
 //   says so, or the shell doesn't load within LOAD_MS, or the commit doesn't come within
 //   COMMIT_MS of being sent).  A render is accepted, and pending, from render() on, so a
 //   renderer that never starts still ends it.  A newer render, a clear or a dispose ends the old one at once, here,
-//   without waiting for the frame.  Heights after the commit only resize.  Disposing the
+//   without waiting for the frame.  Heights after the commit only resize, at most
+//   heightHz a second here at the host, whatever the frame sends: the latest one is kept
+//   and applied when the interval allows, and dropped if the area's generation, frame or
+//   render changes first (OUTISO-RATE-1).  Disposing the
 //   whole set ends every pending render (live, starved of a frame or offscreen) as
 //   "disposed", once, and leaves no frame, box content, timer or observer (RENDER-COMMIT-2).
 // - EVICT-LAYOUT-1: at most `cap` frames live in the page.  An area asks for a frame when
@@ -37,11 +40,12 @@ import { LIMITS, decode, encode } from "../output-shell/protocol.js";
 // initialPx: a placeholder's height before any commit; cap: live frames a page, the frozen initial value (daybreak3,
 // Nov 7) from the dense 50/200 measurements of web/test-output-frames.mjs: about 32-34 MB and 0.3-0.36 s at most in
 // Chromium and Firefox; WebKit's figures come before any raise)
-export const FRAME_LIMITS = Object.freeze({ loadMs: 10000, commitMs: 6000, initialPx: 120, cap: 24 });
+export const FRAME_LIMITS = Object.freeze({ loadMs: 10000, commitMs: 6000, initialPx: 120, cap: 24, heightHz: 30 });
 export const LOAD_MS = FRAME_LIMITS.loadMs;
 export const COMMIT_MS = FRAME_LIMITS.commitMs;
 export const INITIAL_PX = FRAME_LIMITS.initialPx;
 export const DEFAULT_CAP = FRAME_LIMITS.cap;
+export const HEIGHT_HZ = FRAME_LIMITS.heightHz;
 // (the packaged shell page, web/output-shell/build.mts: every bundle's __SB_OUTPUT_SHELL__, web/build.ts)
 export const PACKAGED_SHELL = typeof __SB_OUTPUT_SHELL__ === "string" ? __SB_OUTPUT_SHELL__ : "";
 
@@ -125,7 +129,7 @@ export function createOutputFrames({ srcdoc = null, url = null, cap = DEFAULT_CA
   }
 
   function unmount(a, why) {
-    clearTimeout(a.loadTimer); clearTimeout(a.commitTimer);
+    clearTimeout(a.loadTimer); clearTimeout(a.commitTimer); retireHeight(a);
     if (a.port) { try { a.port.postMessage(encode("to-frame", "dispose")); } catch {} a.port.close(); }
     a.frame?.remove();
     a.frame = null; a.port = null; a.ready = false;
@@ -148,6 +152,13 @@ export function createOutputFrames({ srcdoc = null, url = null, cap = DEFAULT_CA
     a.port.postMessage(encode("to-frame", "render", { generation: g, area: a.id, outputs: a.outputs }));
   }
 
+  // (a queued height, dropped: a new render, a clear, an unmount or a failure retires it)
+  function retireHeight(a) {
+    clearTimeout(a.heightTimer);
+    a.heightTimer = 0;
+    a.nextHeight = null;
+  }
+
   function end(a, result, reason = "") {
     const p = a.pending;
     if (!p) return;
@@ -158,6 +169,7 @@ export function createOutputFrames({ srcdoc = null, url = null, cap = DEFAULT_CA
 
   function fail(a, reason) {
     a.failed = reason;
+    retireHeight(a);
     end(a, "error", reason);
     if (a.frame) { a.asked = false; const f = a.frame; a.frame = null; clearTimeout(a.loadTimer); a.port?.close(); a.port = null; f.remove(); }
     placeholder(a);
@@ -183,9 +195,19 @@ export function createOutputFrames({ srcdoc = null, url = null, cap = DEFAULT_CA
     }
     if (m.type === "height") {
       if (p || m.generation !== a.generation) return; // (heights only after its commit, for the latest generation)
-      a.height = m.height;
-      frame.style.height = `${m.height}px`;
-      onEvent({ type: "height", area: a.id, generation: m.generation, height: m.height });
+      a.nextHeight = m.height; // (the latest kept; applied at most heightHz a second)
+      if (a.heightTimer) return;
+      const g = a.generation;
+      a.heightTimer = setTimeout(() => {
+        a.heightTimer = 0;
+        const h = a.nextHeight;
+        a.nextHeight = null;
+        if (a.frame !== frame || a.generation !== g || a.pending || h === null) return; // (retired meanwhile: dropped)
+        a.heightAt = performance.now();
+        a.height = h;
+        frame.style.height = `${h}px`;
+        onEvent({ type: "height", area: a.id, generation: g, height: h });
+      }, Math.max(0, a.heightAt + 1000 / HEIGHT_HZ - performance.now()));
       return;
     }
     if (m.type === "error" && p && m.generation === p.generation) fail(a, "the output viewer refused it");
@@ -197,7 +219,8 @@ export function createOutputFrames({ srcdoc = null, url = null, cap = DEFAULT_CA
       if (closed) throw new Error("output frames: disposed");
       if (!/^[A-Za-z0-9_.:-]{1,64}$/.test(id) || areas.has(id)) throw new Error(`output area ${id}: not a fresh id`);
       const a = { id, box, el: box, title, order: order++, frame: null, port: null, ready: false, outputs: null, generation: 0, pending: null,
-        height: null, sent: -1, visible: false, asked: false, focused: false, seenAt: 0, failed: null, loadTimer: 0, commitTimer: 0 };
+        height: null, sent: -1, visible: false, asked: false, focused: false, seenAt: 0, failed: null, loadTimer: 0, commitTimer: 0,
+        heightTimer: 0, nextHeight: null, heightAt: -Infinity };
       areas.set(id, a);
       placeholder(a);
       seen.observe(box);
@@ -206,6 +229,7 @@ export function createOutputFrames({ srcdoc = null, url = null, cap = DEFAULT_CA
         render(outputs) {
           if (!Array.isArray(outputs) || outputs.length > LIMITS.outputsPerRender) throw new Error("output area: too many outputs");
           if (a.pending) end(a, "error", "replaced");
+          retireHeight(a);
           a.outputs = outputs.map((o) => ({ id: o.id, kind: o.kind, body: o.body }));
           a.generation++;
           a.pending = { generation: a.generation, ids: a.outputs.map((o) => o.id) }; // (accepted: it ends exactly once from here)
@@ -216,8 +240,8 @@ export function createOutputFrames({ srcdoc = null, url = null, cap = DEFAULT_CA
         /** Show it now, if the cap allows (a deliberate request: it goes first). */
         show() { a.asked = true; admit(); },
         focus(on) { a.focused = !!on; },
-        clear() { if (a.pending) end(a, "error", "cleared"); a.outputs = null; a.height = null; if (a.frame) unmount(a, "cleared"); else placeholder(a); },
-        dispose() { if (a.pending) end(a, "error", "disposed"); a.outputs = null; if (a.frame) unmount(a, "disposed"); seen.unobserve(box); box.replaceChildren(); areas.delete(id); admit(); },
+        clear() { retireHeight(a); if (a.pending) end(a, "error", "cleared"); a.outputs = null; a.height = null; if (a.frame) unmount(a, "cleared"); else placeholder(a); },
+        dispose() { retireHeight(a); if (a.pending) end(a, "error", "disposed"); a.outputs = null; if (a.frame) unmount(a, "disposed"); seen.unobserve(box); box.replaceChildren(); areas.delete(id); admit(); },
         get state() { return { live: !!a.frame, ready: a.ready, generation: a.generation, pending: a.pending?.generation ?? null, height: a.height, failed: a.failed }; },
       };
       return api;
@@ -230,7 +254,7 @@ export function createOutputFrames({ srcdoc = null, url = null, cap = DEFAULT_CA
         end(a, "error", "disposed"); // (every pending render, live or not, ends here, once)
         a.outputs = null;
         if (a.frame) unmount(a, "disposed");
-        clearTimeout(a.loadTimer); clearTimeout(a.commitTimer);
+        clearTimeout(a.loadTimer); clearTimeout(a.commitTimer); retireHeight(a);
         seen.unobserve(a.box);
         a.box.replaceChildren();
       }

@@ -47,6 +47,15 @@ const ROGUES = {
   }`),
   silent: `<!doctype html><body></body>`,
   stuck: rogue(`() => {}`),
+  // (OUTISO-RATE-1: generation 1 commits, then floods 500 heights; generation 2 commits, then sends one height now,
+  // another generation's, and one more 5 ms later (queued at the host); generation 3 commits at 77)
+  flood: rogue(`(port, r) => {
+    const c = (h) => port.postMessage(JSON.stringify({ v: 1, type: "committed", generation: r.generation, area: r.area, ids: r.outputs.map((x) => x.id), height: h }));
+    const h = (height, generation = r.generation) => port.postMessage(JSON.stringify({ v: 1, type: "height", generation, height }));
+    if (r.generation === 1) { c(50); for (let i = 0; i < 500; i++) h(10 + i); }
+    else if (r.generation === 2) { c(50); h(600); h(999, 1); setTimeout(() => h(601), 5); }
+    else c(77);
+  }`),
   // (commits 300 ms after the render: a message still to come when the set is disposed)
   late: rogue(`(port, r) => setTimeout(() => port.postMessage(JSON.stringify({ v: 1, type: "committed", generation: r.generation, area: r.area, ids: r.outputs.map((x) => x.id), height: 40 })), 300)`),
 };
@@ -65,7 +74,7 @@ window.SHELL = data.shell;
 window.PACKAGED = PACKAGED_SHELL === data.shell;
 window.ROGUES = data.rogues;
 window.events = [];
-window.make = (o = {}) => createOutputFrames({ ...(o.url ? { url: o.url } : { srcdoc: o.rogue ? ROGUES[o.rogue] : SHELL }), cap: o.cap ?? 24, root: o.root ?? null, loadMs: o.loadMs, commitMs: o.commitMs, onEvent: (e) => events.push({ ...e, t: performance.now() }) });
+window.make = (o = {}) => createOutputFrames({ ...(o.url ? { url: o.url } : { srcdoc: o.rogue ? ROGUES[o.rogue] : SHELL }), cap: o.cap ?? 24, root: o.root ?? null, loadMs: o.loadMs, commitMs: o.commitMs, onEvent: (e) => { events.push({ ...e, t: performance.now() }); window.hook?.(e); } });
 window.until = async (f, ms = 15000) => { const t = performance.now(); while (performance.now() - t < ms) { const v = f(); if (v) return v; await new Promise((r) => setTimeout(r, 20)); } return null; };
 window.box = (parent = document.getElementById("top")) => { const d = document.createElement("div"); d.className = "area"; parent.append(d); return d; };
 document.cookie = "canary=host-cookie"; localStorage.setItem("canary", "host-storage");
@@ -75,8 +84,10 @@ window.ready = true;
 // only where the page's policy lists the shell's script hash too)
 const pageHtml = readFileSync(join(site, "index.html"), "utf8");
 const appPolicy = { "/app.html": pagePolicy([...scriptHashes(pageHtml), shell.scriptHash]), "/app-nohash.html": pagePolicy(scriptHashes(pageHtml)) };
+const appSeen = [];
 const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req) => {
   const p = new URL(req.url).pathname;
+  appSeen.push(p);
   if (appPolicy[p]) return new Response(pageHtml, { headers: { "content-type": "text/html", "content-security-policy": appPolicy[p] } });
   if (p === "/secret") return new Response("host secret", { headers: { "access-control-allow-origin": "*" } });
   const files = { "/": ["index.html", "text/html"], "/of.js": ["of.js", "text/javascript"], "/data.json": ["data.json", "application/json"] };
@@ -234,6 +245,37 @@ try {
     ok(probe.worker !== "ran", "nor runs a worker (worker-src 'none'): " + probe.worker);
   }
 
+  // ---- OUTISO-NAV-1: links are inert, packaged and hosted: no navigation, no request, the frame still live
+  const navCheck = async (sess, label, mgr, areaVar) => {
+    const before = location => location;
+    await ev(`(${areaVar}.render([{ id: "o1", kind: "html", body: '<p><a href="/nav-canary-1">one</a> <a href="?nav-canary-2">two</a> <a href="https://example.com/nav-canary-3">three</a></p>' }]), 1)`);
+    await ev(`until(() => events.filter((e) => e.area === ${areaVar}.id && e.type === "committed").length >= 2)`);
+    await sleep(200);
+    const r = await evIn(sess, `(async () => {
+      const href = location.href, anchors = document.querySelectorAll("a, area").length, text = document.getElementById("root").textContent;
+      // (a link a sanitizer might keep: put in by hand, then followed by click, middle click and a submit)
+      const a = document.createElement("a"); a.href = "/nav-canary-4"; a.textContent = "four"; document.getElementById("root").append(a);
+      a.click(); a.dispatchEvent(new MouseEvent("auxclick", { bubbles: true, button: 1 }));
+      const f = document.createElement("form"); f.action = "/nav-canary-5"; document.body.append(f); f.requestSubmit();
+      await new Promise((r) => setTimeout(r, 500));
+      return { href, now: location.href, anchors, text };
+    })()`).catch((e) => ({ error: String(e) }));
+    await sleep(300);
+    const asked = [...appSeen, ...shellSeen.paths].filter((x) => /nav-canary/.test(x));
+    ok(r.anchors === 0 && /one two three/.test(r.text) && r.now === r.href && asked.length === 0,
+      `${label}: links are drawn as their text, and following one (click, middle click, submit) navigates nowhere and requests nothing: ` + JSON.stringify([r, asked]));
+  };
+  if (fsess) {
+    await ev(`(window.NA = F.area("nav1", box()), window.NA.id = "nav1", NA.show(), NA.render([{ id: "o0", kind: "text", body: "x" }]), 1)`);
+    await ev(`until(() => events.find((e) => e.area === "nav1" && e.type === "committed"))`);
+    await sleep(300);
+    let ns = null;
+    for (const s of frames) if ((await evIn(s, `document.querySelector("#root")?.textContent === "x"`).catch(() => false))) ns = s;
+    if (ns) await navCheck(ns, "packaged", "F", "NA"); else ok(false, "the packaged link check's frame is reachable");
+    await ev(`(NA.render([{ id: "o2", kind: "text", body: "after" }]), 1)`);
+    ok(!!(await ev(`until(() => events.filter((e) => e.area === "nav1" && e.type === "committed").length >= 3)`)) && (await ev("NA.state.live")), "after that, the same frame still renders and commits");
+  }
+
   ok(await ev("window.PACKAGED"), "the host module's packaged shell is the built srcdoc (the bundles' __SB_OUTPUT_SHELL__)");
 
   // ---- the hosted variant, cross-site: its headers, no redirect, no cookie, its ancestors
@@ -260,6 +302,7 @@ try {
     ok(hp.origin === "null" && !hp.meta && /^threw/.test(hp.cookie) && /^threw/.test(String(hp.storage)) && /^threw/.test(hp.fetch),
       "inside it: an opaque origin, no cookie or storage, and no network under the response's own policy (no meta CSP): " + JSON.stringify(hp));
   }
+  if (hsess) { await ev(`(window.HA.id = "h1", 1)`); await navCheck(hsess, "hosted", "H", "HA"); }
   ok(shellSeen.cookies.length === 0, "the shell's site was never sent its cookie: " + JSON.stringify(shellSeen.cookies));
   await ev(`(window.HX = make({ url: ${JSON.stringify(shellUrl + "other/")}, loadMs: 1500 }), window.HXA = HX.area("hx1", box()), HXA.show(), HXA.render([{ id: "o1", kind: "html", body: "<i>x</i>" }]), 1)`);
   const hx = await ev(`until(() => events.find((e) => e.area === "hx1" && (e.type === "committed" || e.type === "error")), 6000)`);
@@ -272,6 +315,21 @@ try {
   await sleep(400);
   const rl = await ev(`({ ends: events.filter((e) => e.area === "r1" && (e.type === "committed" || e.type === "error")), h: RA.state.height })`);
   ok(rl.ends.length === 1 && rl.ends[0].type === "committed" && rl.h === 77, "a rogue renderer's other generation, area, ids, fields, sizes and duplicate commit are ignored: one commit, its height 77: " + JSON.stringify(rl));
+
+  // ---- OUTISO-RATE-1: the host coalesces post-commit heights itself, the latest kept, a stale one dropped
+  await ev(`(window.FL = make({ rogue: "flood" }), window.FLA = FL.area("fl1", box()), FLA.show(), FLA.render([{ id: "x", kind: "text", body: "t" }]), 1)`);
+  await ev(`until(() => events.find((e) => e.area === "fl1" && e.type === "committed"))`);
+  await sleep(600);
+  const fl1 = await ev(`({ hs: events.filter((e) => e.area === "fl1" && e.type === "height").map((e) => e.height), h: FLA.state.height, px: document.querySelector("#top .area:last-child iframe")?.style.height })`);
+  ok(fl1.hs.length >= 1 && fl1.hs.length <= 3 && fl1.h === 509 && fl1.hs.at(-1) === 509, "a burst of 500 heights after the commit makes at most a few updates at the host, the last one kept: " + JSON.stringify(fl1));
+  await ev(`(window.hook = (e) => { if (e.area === "fl1" && e.type === "height" && e.generation === 2) { window.hook = null; window.t3 = performance.now(); FLA.render([{ id: "x", kind: "text", body: "t3" }]); } },
+    FLA.render([{ id: "x", kind: "text", body: "t2" }]), 1)`);
+  await ev(`until(() => events.find((e) => e.area === "fl1" && e.type === "committed" && e.generation === 3))`);
+  await sleep(400);
+  const fl2 = await ev(`({ g2: events.filter((e) => e.area === "fl1" && e.type === "height" && e.generation === 2).map((e) => e.height), late: events.filter((e) => e.area === "fl1" && e.type === "height" && e.t > window.t3).length, h: FLA.state.height })`);
+  ok(fl2.g2.length === 1 && fl2.g2[0] === 600 && fl2.late === 0 && fl2.h === 77,
+    "a height queued at the host when a newer render starts is dropped, another generation's is ignored, and the new commit's height stands: " + JSON.stringify(fl2));
+  await ev("(FL.dispose(), 1)");
 
   // ---- deadlines: a renderer that never starts, or never commits, ends with text
   await ev(`(window.S = make({ rogue: "silent", loadMs: 700 }), window.SA = S.area("s1", window.SB = box()), SA.show(), SA.render([{ id: "x", kind: "html", body: "<b>rich</b>" }]), 1)`);

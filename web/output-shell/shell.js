@@ -13,7 +13,11 @@
 //   settled; a newer render abandons an older one, which then commits nothing.  Later
 //   size changes are height messages, at most HEIGHT_HZ a second, the last always sent.
 // - The frame never navigates, opens, downloads, prints or asks the host to do work:
-//   the schema has no such message.
+//   the schema has no such message.  Links are inert (OUTISO-NAV-1): every <a> and
+//   <area> the sanitizers kept (their hrefs, the "Open … in a new tab" link that stands
+//   for an <iframe>) is drawn as its text alone, and a click, a key or a submit that
+//   would still follow one is cancelled.  A host action for links is separately
+//   reviewed later; until then a link here goes nowhere, not even within the frame.
 import { LIMITS, decode, encode } from "./protocol.js";
 import { safeHtml } from "../safe-html.ts";
 import { safeSvg } from "../safe-svg.js";
@@ -51,6 +55,14 @@ function draw(o) {
   return d;
 }
 
+// (a link drawn as its text: the element goes, its children stay; SVG's <a> too)
+function inert(el) {
+  for (const a of el.querySelectorAll("a, area")) a.replaceWith(...a.childNodes);
+  return el;
+}
+// (and nothing that would still navigate: a link's activation, a form's submission)
+for (const t of ["click", "auxclick", "submit"]) addEventListener(t, (e) => { if (t === "submit" || e.target.closest?.("a, area, [href]")) e.preventDefault(); }, true);
+
 // (the layout settled: forced now, then a frame or, where a hidden frame's frames are paused, a short timer)
 const frame = () => { root.getBoundingClientRect(); return Promise.race([new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))), deadline(50)]); };
 const deadline = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -66,7 +78,7 @@ async function render(m) {
       const s = document.createElement("section");
       s.className = "out";
       s.dataset.id = o.id;
-      s.append(draw(o));
+      s.append(inert(draw(o)));
       return s;
     }));
   } catch {
