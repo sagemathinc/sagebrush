@@ -868,11 +868,15 @@ class Text(Primitive):
 
     def svg(self, P):
         o = self.options
+        if o.get("error") is not None:
+            raise o["error"]  # (coordinates matplotlib refuses when the annotation is drawn)
+        if o.get("only_inside") is not None and not _inside(P, _anchor(P, *o["only_inside"])):
+            return ""  # (an annotation of a point outside the axes, as matplotlib's annotation_clip)
+        if o.get("later") is not None:
+            raise o["later"]  # (what matplotlib refuses when it draws the annotation)
         p = _anchor(P, self.x, self.y, o)
         if p is None:
             return ""
-        if o.get("only_inside") is not None and not _inside(P, _anchor(P, *o["only_inside"])):
-            return ""  # (an annotation of a point outside the axes, as matplotlib's annotation_clip)
         if o.get("box") or o.get("arrow"):
             from matplotlib._annotations import annotation_svg  # (pyplot's bbox= and arrowprops=, loaded when used)
             return annotation_svg(self, P, p)

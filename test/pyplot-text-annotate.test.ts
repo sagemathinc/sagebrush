@@ -278,10 +278,11 @@ test("\\mathbb, \\mathcal, multi-line text and a text box in a saved SVG (W29, W
 
 test("arrows of huge, infinite and NaN coordinates: drawn as matplotlib 3.11.1 draws them (ANNOT-LOOP-1)", () => {
   // (matplotlib draws not a pixel of a curve arrow with an infinite or NaN
-  // point; Sagebrush draws no arrow.  Not pinned, as matplotlib raises
-  // there: a "simple" arrow's (ValueError) and an infinite xytext
-  // (StopIteration))
-  const out = run("import matplotlib.pyplot as plt\nimport math\nimport re\n\nCASES = [\n    ('ordinary', dict(xy=(1.5, 1.6), xytext=(0.3, 0.4)), dict(arrowstyle='->')),\n    ('huge xy', dict(xy=(1e300, 1.6), xytext=(0.3, 0.4), annotation_clip=False), dict(arrowstyle='->')),\n    ('huge xy text', dict(xy=(1e300, 1.6), xytext=(0.3, 0.4), annotation_clip=False, text='T'), dict(arrowstyle='->')),\n    ('huge both', dict(xy=(1e300, 1e300), xytext=(-1e300, -1e300), annotation_clip=False), dict(arrowstyle='->')),\n    ('huge simple', dict(xy=(1e300, 1.6), xytext=(0.3, 0.4), annotation_clip=False), dict(arrowstyle='simple')),\n    ('huge default', dict(xy=(1e300, 1.6), xytext=(0.3, 0.4), annotation_clip=False), dict()),\n    ('1e17 offset', dict(xy=(1e17, 1.6), xytext=(1e17 + 1, 0.4), annotation_clip=False), dict(arrowstyle='->')),\n    ('same point', dict(xy=(1, 1), xytext=(1, 1)), dict(arrowstyle='->')),\n    ('inf xy', dict(xy=(math.inf, 1.6), xytext=(0.3, 0.4), annotation_clip=False), dict(arrowstyle='->')),\n    ('nan xy', dict(xy=(math.nan, 1.6), xytext=(0.3, 0.4), annotation_clip=False), dict(arrowstyle='->')),\n    ('nan rad', dict(xy=(1.5, 1.6), xytext=(0.3, 0.4)), dict(arrowstyle='->', connectionstyle='arc3,rad=nan')),\n    ('huge rad', dict(xy=(1.5, 1.6), xytext=(0.3, 0.4)), dict(arrowstyle='->', connectionstyle='arc3,rad=1e300')),\n]\nfor name, kw, ap in CASES:\n    fig = plt.figure()\n    ax = fig.add_axes([0.125, 0.11, 0.775, 0.77])\n    ax.set_xlim(0, 2); ax.set_ylim(0, 2)\n    kw = dict(kw)\n    text = kw.pop('text', '')\n    try:\n        ax.annotate(text, arrowprops=ap, **kw)\n        fig.savefig('t_loop.svg')\n        svg = open('t_loop.svg').read()\n        paths = re.findall(r'<path d=\"([^\"]*)\"[^>]*stroke-linejoin=\"round\"', svg)\n        if not paths:\n            print(name, '=> no arrow')\n            continue\n        vs = []\n        for d in paths:\n            nums = re.findall(r'-?[0-9.]+(?:e[-+]?[0-9]+)?|nan|inf', d)\n            n = len(nums) // 2 + (1 if d.endswith('Z') and 'Q' in d else 0)\n            vs.append(n)\n            fin = all(v not in ('nan', 'inf') for v in nums)\n        print(name, '=> drawn, %d vertices, all finite: %s' % (sum(vs), fin))\n    except Exception as e:\n        print(name, '!!', type(e).__name__, (str(e).splitlines() or [''])[0][:100])\n    plt.close(fig)\n");
+  // point, given or reached on the way from finite ends near the double limit
+  // ("edge" rows: its path's points come out non-finite); Sagebrush draws no
+  // arrow.  matplotlib raises for a "simple" arrow's (ValueError) and an
+  // infinite xytext (StopIteration), and so does Sagebrush, when drawn)
+  const out = run("import matplotlib.pyplot as plt\nimport math\nimport re\n\nCASES = [\n    ('ordinary', dict(xy=(1.5, 1.6), xytext=(0.3, 0.4)), dict(arrowstyle='->')),\n    ('huge xy', dict(xy=(1e300, 1.6), xytext=(0.3, 0.4), annotation_clip=False), dict(arrowstyle='->')),\n    ('huge xy text', dict(xy=(1e300, 1.6), xytext=(0.3, 0.4), annotation_clip=False, text='T'), dict(arrowstyle='->')),\n    ('huge both', dict(xy=(1e300, 1e300), xytext=(-1e300, -1e300), annotation_clip=False), dict(arrowstyle='->')),\n    ('huge simple', dict(xy=(1e300, 1.6), xytext=(0.3, 0.4), annotation_clip=False), dict(arrowstyle='simple')),\n    ('huge default', dict(xy=(1e300, 1.6), xytext=(0.3, 0.4), annotation_clip=False), dict()),\n    ('1e17 offset', dict(xy=(1e17, 1.6), xytext=(1e17 + 1, 0.4), annotation_clip=False), dict(arrowstyle='->')),\n    ('same point', dict(xy=(1, 1), xytext=(1, 1)), dict(arrowstyle='->')),\n    ('inf xy', dict(xy=(math.inf, 1.6), xytext=(0.3, 0.4), annotation_clip=False), dict(arrowstyle='->')),\n    ('nan xy', dict(xy=(math.nan, 1.6), xytext=(0.3, 0.4), annotation_clip=False), dict(arrowstyle='->')),\n    ('nan rad', dict(xy=(1.5, 1.6), xytext=(0.3, 0.4)), dict(arrowstyle='->', connectionstyle='arc3,rad=nan')),\n    ('huge rad', dict(xy=(1.5, 1.6), xytext=(0.3, 0.4)), dict(arrowstyle='->', connectionstyle='arc3,rad=1e300')),\n    ('edge both', dict(xy=(6e305, 6e305), xytext=(-6e305, -6e305), annotation_clip=False), dict(arrowstyle='->')),\n    ('edge x', dict(xy=(7e305, 1.6), xytext=(-7e305, 0.4), annotation_clip=False), dict(arrowstyle='->')),\n    ('edge x <->', dict(xy=(7e305, 1.6), xytext=(-7e305, 0.4), annotation_clip=False), dict(arrowstyle='<->')),\n    ('edge x text', dict(xy=(7e305, 1.6), xytext=(-7e305, 0.4), annotation_clip=False, text='T'), dict(arrowstyle='->')),\n    ('edge x simple', dict(xy=(7e305, 1.6), xytext=(-7e305, 0.4), annotation_clip=False), dict(arrowstyle='simple')),\n    ('edge x default', dict(xy=(7e305, 1.6), xytext=(-7e305, 0.4), annotation_clip=False), dict()),\n    ('edge one', dict(xy=(7.2e305, 1.6), xytext=(0.3, 0.4), annotation_clip=False), dict(arrowstyle='->')),\n    ('edge rad', dict(xy=(3e305, 1.6), xytext=(-3e305, 0.4), annotation_clip=False), dict(arrowstyle='->', connectionstyle='arc3,rad=0.5')),\n    ('rad 1e305 simple', dict(xy=(1.5, 1.6), xytext=(0.3, 0.4)), dict(arrowstyle='simple', connectionstyle='arc3,rad=1e305')),\n    ('inf xy simple', dict(xy=(math.inf, 1.6), xytext=(0.3, 0.4), annotation_clip=False), dict(arrowstyle='simple')),\n    ('inf xytext', dict(xy=(1.5, 1.6), xytext=(math.inf, 0.4)), dict(arrowstyle='->')),\n]\nfor name, kw, ap in CASES:\n    fig = plt.figure()\n    ax = fig.add_axes([0.125, 0.11, 0.775, 0.77])\n    ax.set_xlim(0, 2); ax.set_ylim(0, 2)\n    kw = dict(kw)\n    text = kw.pop('text', '')\n    try:\n        ax.annotate(text, arrowprops=ap, **kw)\n        fig.savefig('t_loop.svg')\n        svg = open('t_loop.svg').read()\n        paths = re.findall(r'<path d=\"([^\"]*)\"[^>]*stroke-linejoin=\"round\"', svg)\n        if not paths:\n            print(name, '=> no arrow')\n            continue\n        vs = []\n        for d in paths:\n            nums = re.findall(r'-?[0-9.]+(?:e[-+]?[0-9]+)?|nan|inf', d)\n            n = len(nums) // 2 + (1 if d.endswith('Z') and 'Q' in d else 0)\n            vs.append(n)\n            fin = all(v not in ('nan', 'inf') for v in nums)\n        print(name, '=> drawn, %d vertices, all finite: %s' % (sum(vs), fin))\n    except Exception as e:\n        print(name, '!!', type(e).__name__, (str(e).splitlines() or [''])[0][:100])\n    plt.close(fig)\n");
   assert.deepEqual(out.trim().split("\n"), [
     "ordinary => drawn, 6 vertices, all finite: True",
     "huge xy => drawn, 6 vertices, all finite: True",
@@ -295,6 +296,17 @@ test("arrows of huge, infinite and NaN coordinates: drawn as matplotlib 3.11.1 d
     "nan xy => no arrow",
     "nan rad => no arrow",
     "huge rad => drawn, 6 vertices, all finite: True",
+    "edge both => no arrow",
+    "edge x => no arrow",
+    "edge x <-> => no arrow",
+    "edge x text => no arrow",
+    "edge x simple !! ValueError 'path' is not a valid quadratic Bezier curve",
+    "edge x default !! ValueError 'path' is not a valid quadratic Bezier curve",
+    "edge one => drawn, 6 vertices, all finite: True",
+    "edge rad => drawn, 6 vertices, all finite: True",
+    "rad 1e305 simple => drawn, 12 vertices, all finite: True",
+    "inf xy simple !! ValueError 'path' is not a valid quadratic Bezier curve",
+    "inf xytext !! StopIteration",
   ]);
 });
 
@@ -320,5 +332,59 @@ test("style names, parameters and annotate's arguments refused as matplotlib 3.1
     "8 positional ok",
     "9 positional !! TypeError",
     "fontsize keyword ok",
+  ]);
+});
+
+// (each expected line matplotlib 3.11.1's own, for the same program: the
+// errors it raises, and when, annotate() or the drawing (savefig): an offset
+// unit as xycoords at once; an unknown coordinate or unit, a style that is
+// neither a string nor a style object (it calls it), a "simple" arrow whose
+// path is not finite (given so, or overflowed from finite ends near the
+// double limit) and an infinite xytext, each when drawn, and only if drawn)
+test("annotate's errors, and when matplotlib 3.11.1 raises them (#801 S5, C5, N8)", () => {
+  const out = run("import matplotlib\nREAL = 'site-packages' in (getattr(matplotlib, '__file__', '') or '')\nif REAL:\n    matplotlib.use('Agg')\nimport matplotlib.pyplot as plt, math\nclass Obj: pass\ndef t(label, kw, ap=None, bbox=None):\n    fig = plt.figure(); ax = fig.add_axes([0.125, 0.11, 0.775, 0.77]); ax.set_xlim(0, 2); ax.set_ylim(0, 2)\n    try:\n        extra = {}\n        if ap is not None: extra['arrowprops'] = ap\n        if bbox is not None: extra['bbox'] = bbox\n        ax.annotate(kw.pop('text', ''), **kw, **extra)\n    except Exception as e:\n        print(label, 'annotate !!', type(e).__name__, str(e)[:120]); plt.close(fig); return\n    try:\n        fig.savefig('t_when.svg'); print(label, 'ok')\n    except Exception as e:\n        print(label, 'savefig !!', type(e).__name__, str(e)[:120])\n    plt.close(fig)\nt('C5 offset points', dict(xy=(1, 2), xycoords='offset points'))\nt('C5 bogus xycoords', dict(xy=(1, 2), xycoords='bogus'))\nt('C5 bogus textcoords', dict(xy=(1, 1), xytext=(0, 0), textcoords='bogus'))\nt('S5 arrowstyle Obj', dict(xy=(1, 1), xytext=(0.2, 0.2)), dict(arrowstyle=Obj()))\nt('S5 arrowstyle 5', dict(xy=(1, 1), xytext=(0.2, 0.2)), dict(arrowstyle=5))\nt('S5 connectionstyle Obj', dict(xy=(1, 1), xytext=(0.2, 0.2)), dict(arrowstyle='->', connectionstyle=Obj()))\nt('S5 boxstyle Obj', dict(xy=(1, 1), text='t'), None, dict(boxstyle=Obj()))\nt('S5 boxstyle 5', dict(xy=(1, 1), text='t'), None, dict(boxstyle=5))\nt('S5 bbox boxstyle Obj text', dict(xy=(1, 1), text='t'), None, dict(boxstyle=Obj(), pad=0.5))\nt('N8 inf xy simple', dict(xy=(math.inf, 1.6), xytext=(0.3, 0.4), annotation_clip=False), dict(arrowstyle='simple'))\nt('N8 inf xy default', dict(xy=(math.inf, 1.6), xytext=(0.3, 0.4), annotation_clip=False), dict())\nt('N8 nan rad simple', dict(xy=(1.5, 1.6), xytext=(0.3, 0.4)), dict(arrowstyle='simple', connectionstyle='arc3,rad=nan'))\nt('N8 edge x simple', dict(xy=(7e305, 1.6), xytext=(-7e305, 0.4), annotation_clip=False), dict(arrowstyle='simple'))\nt('N8 edge x default', dict(xy=(7e305, 1.6), xytext=(-7e305, 0.4), annotation_clip=False), dict())\nt('N8 edge x ->', dict(xy=(7e305, 1.6), xytext=(-7e305, 0.4), annotation_clip=False), dict(arrowstyle='->'))\nt('N8 inf xy ->', dict(xy=(math.inf, 1.6), xytext=(0.3, 0.4), annotation_clip=False), dict(arrowstyle='->'))\n\ndef u(label, **kw):\n    fig = plt.figure(); ax = fig.add_axes([0.125, 0.11, 0.775, 0.77]); ax.set_xlim(0, 2); ax.set_ylim(0, 2)\n    try:\n        ax.annotate(kw.pop('text', ''), **kw)\n        fig.savefig('t_inf.svg'); print(label, 'ok')\n    except Exception as e:\n        print(label, '!!', type(e).__name__, str(e)[:80])\n    plt.close(fig)\nu('inf xytext ->', xy=(1.5, 1.6), xytext=(math.inf, 0.4), arrowprops=dict(arrowstyle='->'))\nu('nan xytext ->', xy=(1.5, 1.6), xytext=(math.nan, 0.4), arrowprops=dict(arrowstyle='->'))\nu('-inf ytext ->', xy=(1.5, 1.6), xytext=(0.4, -math.inf), arrowprops=dict(arrowstyle='->'))\nu('inf xytext no arrow', xy=(1.5, 1.6), xytext=(math.inf, 0.4), text='T')\nu('inf xytext text ->', xy=(1.5, 1.6), xytext=(math.inf, 0.4), text='T', arrowprops=dict(arrowstyle='->'))\nu('inf xytext xy outside ->', xy=(5, 5), xytext=(math.inf, 0.4), arrowprops=dict(arrowstyle='->'))\nu('inf xytext offset ->', xy=(1.5, 1.6), xytext=(math.inf, 10), textcoords='offset points', arrowprops=dict(arrowstyle='->'))\nu('huge xytext 1e306 ->', xy=(1.5, 1.6), xytext=(1e306, 0.4), annotation_clip=False, arrowprops=dict(arrowstyle='->'))\nu('inf xy and xytext ->', xy=(math.inf, 1.6), xytext=(math.inf, 0.4), annotation_clip=False, arrowprops=dict(arrowstyle='->'))\n\ndef v(label, f):\n    fig, ax = plt.subplots()\n    try:\n        f(ax)\n    except Exception as e:\n        print(label, 'annotate !!', type(e).__name__, str(e)[:120]); plt.close(fig); return\n    try:\n        fig.savefig('t2.svg'); print(label, 'ok')\n    except Exception as e:\n        print(label, 'savefig !!', type(e).__name__, str(e)[:120])\n    plt.close(fig)\nv('offset bogus', lambda ax: ax.annotate('t', (1, 1), xycoords='offset bogus'))\nv('textcoords offset bogus', lambda ax: ax.annotate('t', (1, 1), (0, 0), textcoords='offset bogus'))\nv('both bad', lambda ax: ax.annotate('t', (1, 1), (0, 0), xycoords='bogus', arrowprops=dict(arrowstyle=5)))\nv('bad style and offset xy', lambda ax: ax.annotate('t', (1, 1), xycoords='offset points', arrowprops=dict(arrowstyle=5)))\nv('arrowstyle 5 clipped', lambda ax: ax.annotate('t', (5, 5), (0.5, 0.5), arrowprops=dict(arrowstyle=5)))\nv('text bbox 5', lambda ax: ax.text(0.5, 0.5, 't', bbox=dict(boxstyle=5)))\n");
+  assert.deepEqual(out.trim().split("\n").map((l) => l.trimEnd()), [
+    "C5 offset points annotate !! ValueError xycoords cannot be an offset coordinate",
+    "C5 bogus xycoords savefig !! ValueError 'bogus' is not a valid coordinate",
+    "C5 bogus textcoords savefig !! ValueError 'bogus' is not a valid coordinate",
+    "S5 arrowstyle Obj savefig !! TypeError 'Obj' object is not callable",
+    "S5 arrowstyle 5 savefig !! TypeError 'int' object is not callable",
+    "S5 connectionstyle Obj savefig !! TypeError 'Obj' object is not callable",
+    "S5 boxstyle Obj savefig !! TypeError 'Obj' object is not callable",
+    "S5 boxstyle 5 savefig !! TypeError 'int' object is not callable",
+    "S5 bbox boxstyle Obj text savefig !! TypeError 'Obj' object is not callable",
+    "N8 inf xy simple savefig !! ValueError 'path' is not a valid quadratic Bezier curve",
+    "N8 inf xy default savefig !! ValueError 'path' is not a valid quadratic Bezier curve",
+    "N8 nan rad simple savefig !! ValueError 'path' is not a valid quadratic Bezier curve",
+    "N8 edge x simple savefig !! ValueError 'path' is not a valid quadratic Bezier curve",
+    "N8 edge x default savefig !! ValueError 'path' is not a valid quadratic Bezier curve",
+    "N8 edge x -> ok",
+    "N8 inf xy -> ok",
+    "inf xytext -> !! StopIteration",
+    "nan xytext -> !! StopIteration",
+    "-inf ytext -> !! StopIteration",
+    "inf xytext no arrow ok",
+    "inf xytext text -> !! StopIteration",
+    "inf xytext xy outside -> ok",
+    "inf xytext offset -> !! StopIteration",
+    "huge xytext 1e306 -> ok",
+    "inf xy and xytext -> !! StopIteration",
+    "offset bogus annotate !! ValueError xycoords cannot be an offset coordinate",
+    "textcoords offset bogus savefig !! ValueError 'bogus' is not a recognized unit",
+    "both bad savefig !! ValueError 'bogus' is not a valid coordinate",
+    "bad style and offset xy annotate !! ValueError xycoords cannot be an offset coordinate",
+    "arrowstyle 5 clipped ok",
+    "text bbox 5 savefig !! TypeError 'int' object is not callable",
+  ]);
+});
+
+// (Sagebrush's own: a style object of matplotlib's, which matplotlib calls,
+// is refused; give the style as a string)
+test("a style given as an object is refused, not implemented here (#801 S5)", () => {
+  const out = run("import matplotlib.pyplot as plt\nstyle = lambda *a, **k: None\nfor kw in (dict(arrowprops=dict(arrowstyle=style)), dict(arrowprops=dict(arrowstyle='->', connectionstyle=style)), dict(bbox=dict(boxstyle=style))):\n    fig, ax = plt.subplots()\n    try:\n        ax.annotate('t', (1, 1), (0, 0), **kw)\n        print('accepted')\n    except Exception as e:\n        print(type(e).__name__, e)\n    plt.close(fig)\n");
+  assert.deepEqual(out.trim().split("\n"), [
+    "NotImplementedError a arrowstyle object is not implemented in Sagebrush; give the style as a string, such as '->'",
+    "NotImplementedError a connectionstyle object is not implemented in Sagebrush; give the style as a string, such as 'arc3,rad=0.2'",
+    "NotImplementedError a boxstyle object is not implemented in Sagebrush; give the style as a string, such as 'round,pad=0.3'",
   ]);
 });

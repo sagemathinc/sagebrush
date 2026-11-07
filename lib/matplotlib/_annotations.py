@@ -33,11 +33,28 @@ _IGNORED = {"zorder", "antialiased", "aa", "visible", "picker", "label", "gid", 
             "capstyle", "clip_on"}
 
 
+# (matplotlib's coordinate names, the "offset" units excepted)
+_MPL_COORDS = {"data", "polar", "figure points", "figure pixels", "figure fraction", "subfigure points",
+               "subfigure pixels", "subfigure fraction", "axes points", "axes pixels", "axes fraction"}
+
+
+class _Later(Exception):
+    """An error matplotlib raises only when the annotation is drawn: args[0]."""
+
+
 def _coords(c, size_pt, textcoords):
     if hasattr(c, "_axes_fraction"):  # ax.transAxes
         return "axes fraction", 1, False
+    if isinstance(c, str) and c.startswith("offset") and not textcoords:
+        raise ValueError("xycoords cannot be an offset coordinate")
     r = _COORDS.get(c) if isinstance(c, str) else None
-    if r is None or (r[2] and not textcoords):
+    if r is None and isinstance(c, str):
+        if c.startswith("offset "):
+            if c[7:] not in ("points", "pixels", "fontsize"):
+                raise _Later(ValueError("%r is not a recognized unit" % c[7:]))
+        elif c not in _MPL_COORDS:
+            raise _Later(ValueError("%r is not a valid coordinate" % c))
+    if r is None:
         raise NotImplementedError("annotate: the coordinates %r are not implemented in Sagebrush" % (c,))
     return r if r[1] is not None else (None, size_pt * PT, True)
 
@@ -58,6 +75,9 @@ def _style(s, what, supported):
     as matplotlib checks it (an unknown name, a bad value, a parameter its
     class doesn't take); a style of matplotlib's not in `supported` is
     refused as not implemented here."""
+    if not isinstance(s, str) and not callable(s):
+        # (matplotlib calls a style that isn't a string, when it is drawn)
+        raise _Later(TypeError("'%s' object is not callable" % type(s).__name__))
     if not isinstance(s, str):
         raise NotImplementedError("a %s object is not implemented in Sagebrush; give the style as a string, such as %s"
                                   % (what, {"arrowstyle": "'->'", "connectionstyle": "'arc3,rad=0.2'"}.get(what, "'round,pad=0.3'")))
@@ -87,8 +107,11 @@ def annotation(text, xy, xytext, xycoords, textcoords, arrowprops, annotation_cl
         textcoords = xycoords
     if xytext is None:
         xytext = xy
-    xc, xk, _ = _coords(xycoords, size_pt, False)
-    tc, tk, offset = _coords(textcoords, size_pt, True)
+    try:
+        xc, xk, _ = _coords(xycoords, size_pt, False)
+        tc, tk, offset = _coords(textcoords, size_pt, True)
+    except _Later as e:  # (raised whenever it is drawn)
+        return Text(text, 0, 0, no_bbox=True, clip=False, error=e.args[0], **text_options)
     x, y = float(xy[0]) * xk, float(xy[1]) * xk
     if offset:  # (the text placed from xy)
         o = dict(coords=xc, offset=(float(xytext[0]) * tk, float(xytext[1]) * tk))
@@ -100,10 +123,16 @@ def annotation(text, xy, xytext, xycoords, textcoords, arrowprops, annotation_cl
     # coordinates is drawn only while its point is inside the axes)
     if annotation_clip or (annotation_clip is None and xycoords == "data"):
         o["only_inside"] = (x, y, {"coords": xc})
-    if arrowprops is not None:
-        o["arrow"] = _arrow_options(arrowprops, (x, y, xc), size_pt)
-    if kw.get("bbox") is not None:
-        o["box"] = text_box(kw["bbox"], size_pt)
+    try:
+        if arrowprops is not None:
+            o["arrow"] = _arrow_options(arrowprops, (x, y, xc), size_pt)
+        if kw.get("bbox") is not None:
+            o["box"] = text_box(kw["bbox"], size_pt)
+    except _Later as e:  # (raised if it is drawn: not when annotation_clip hides it)
+        o.pop("arrow", None)
+        o["later"] = e.args[0]
+    if "arrow" in o and not all(math.isfinite(float(v)) for v in xytext):
+        o["later"] = StopIteration()  # (as matplotlib, whose arrow search finds no point of such a text)
     # (an annotation has no clip box: it is drawn wherever it is)
     return Text(text, tx, ty, no_bbox=True, clip=False, **dict(text_options, **o))
 
@@ -209,8 +238,19 @@ def _paint_svg(a, fill):
 
 def _arrow_svg(a, P, ext, rect, string):
     s = _arrow_paths(a, P, ext, rect, string)
-    # (a point that overflowed on the way, inf - inf: no arrow either)
-    return "" if any(not math.isfinite(float(v)) for d in re.findall(r' d="([^"]*)"', s) for v in re.findall(r'[-+]?(?:[0-9.]+(?:e[-+]?[0-9]+)?|nan|inf)', d)) else s
+    # (a point that overflowed on the way, from finite ends near the double
+    # limit, inf - inf: no arrow either, or matplotlib's error for a "simple")
+    if any(not math.isfinite(float(v)) for d in re.findall(r' d="([^"]*)"', s) for v in re.findall(r'[-+]?(?:[0-9.]+(?:e[-+]?[0-9]+)?|nan|inf)', d)):
+        return _no_arrow(a)
+    return s
+
+
+def _no_arrow(a):
+    """An arrow with a non-finite point: matplotlib draws nothing of a curve
+    arrow, and refuses a "simple" one."""
+    if a["style"] == "simple":
+        raise ValueError("'path' is not a valid quadratic Bezier curve")
+    return ""
 
 
 def _arrow_paths(a, P, ext, rect, string):
@@ -232,7 +272,7 @@ def _arrow_paths(a, P, ext, rect, string):
     # the arc3 connection: the control point off the middle by rad times the length
     bez = [(X0, Y0), ((X0 + X1) / 2 + a["rad"] * (Y1 - Y0), (Y0 + Y1) / 2 - a["rad"] * (X1 - X0)), (X1, Y1)]
     if not all(math.isfinite(v) for q in bez for v in q):
-        return ""  # (an arrow with an infinite or NaN point: none; matplotlib draws nothing of such a curve arrow, and refuses a "simple" one)
+        return _no_arrow(a)  # (an infinite or NaN point)
     # clipped at the text's box (the bbox, or the text padded 2 points), then shrunk
     if rect is None and string:
         q = 2 * PT

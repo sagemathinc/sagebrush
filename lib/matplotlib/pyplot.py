@@ -745,14 +745,17 @@ class Axes:
         if color is None:
             color = rcParams._given("text.color")  # (None: the page's text color)
         size = float(kw.get("size", fontsize))
-        box = None
+        box = later = None
         if kw.get("bbox") is not None:
-            from matplotlib._annotations import text_box
-            box = text_box(kw["bbox"], size)
+            from matplotlib._annotations import text_box, _Later
+            try:
+                box = text_box(kw["bbox"], size)
+            except _Later as e:  # (matplotlib's error when it is drawn)
+                later = e.args[0]
         return _Artist(self._add(Text(s, x, y, fontsize=size * PT, color=to_color(color),
                        horizontal_alignment=kw.get("horizontalalignment", ha),
                        vertical_alignment=kw.get("verticalalignment", va), rotation=rotation, no_bbox=True,
-                       coords=coords, clip=bool(kw.get("clip_on", False)), box=box)), "text.Text")
+                       coords=coords, clip=bool(kw.get("clip_on", False)), box=box, later=later)), "text.Text")
 
     @property
     def transAxes(self):
