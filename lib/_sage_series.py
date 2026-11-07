@@ -45,62 +45,95 @@ def _check_generated(name):
         raise ValueError("variable name %r does not start with a letter" % (name,))
 
 
+def _multi_names(names):
+    """Several names as Sage reads them, each checked: a string split at its
+    commas ('x, y'), a list or tuple entry by entry (['x', 'y,z'] fails on
+    'y,z'), no name twice."""
+    flat = [t.strip() for t in names.split(",")] if isinstance(names, str) else [str(t) for t in names]
+    for t in flat:
+        _check_generated(t)
+    seen = set()
+    for t in flat:
+        if t in seen:
+            raise ValueError("variable name %r appears more than once" % (t,))
+        seen.add(t)
+    return flat
+
+
+def _one_name(v):
+    """The one name of a univariate series ring, as Sage reads it: a list or
+    tuple must hold exactly one, anything else is read as its string
+    (LaurentSeriesRing(QQ, 2) fails on '2')."""
+    if isinstance(v, (list, tuple)):
+        if len(v) != 1:
+            raise IndexError("the number of names must equal the number of generators")
+        v = v[0]
+    v = str(v)
+    _check_generated(v)
+    return v
+
+
 def _first_counted(n, src, laurent):
-    """The first name a count n and names src give a series ring, checked as Sage
-    checks it, WITHOUT listing the n names (astra's and daybreak3's
+    """The first name a count n and a string src give a series ring, checked as
+    Sage checks it, WITHOUT listing the n names (astra's and daybreak3's
     SERIES-NAME-WORK-3): src + '0', src + '1', ... are all good exactly when
     src + '0' is, the first to fail.  A Laurent series ring is in that name;
     a power series ring with a count is multivariate, refused by the caller."""
-    import _sage_poly
-    if laurent:
-        # (as Sage 10.10, probed for counts 2, 3, 1 and -1 to -100: a tuple or list
-        # fails on the count read as a name; names after commas are each checked,
-        # then a positive count must match them; a count of 1 or less takes one
-        # name, checked, and then fails to coerce)
-        if n == 0:
-            # (Sage makes a ring that cannot print itself: L39)
-            raise NotImplementedError("LaurentSeriesRing with a count of 0 is not available in sagebrush yet")
-        if isinstance(src, (list, tuple)):
-            _check_generated(str(n))
-        if not isinstance(src, str):
-            raise NotImplementedError("LaurentSeriesRing with the names %r is not available in sagebrush yet" % (src,))
-        if "," in src:
-            parts = [t.strip() for t in src.split(",")]
-            for t in parts:
-                _check_generated(t)
-            if n >= 1 and len(parts) != n:
-                raise IndexError("the number of names must equal the number of generators")
-            return parts[0]
-        if n >= 2:
-            if len(src) == n and src.isalpha():
-                return src[0]
-            _check_generated(src + "0")
-            return src + "0"
-        _check_generated(src)
-        raise TypeError("Input does not coerce to any of the expected rings.")
-    if not isinstance(src, str):
-        return None
+    # (as Sage 10.10, probed for counts 0 to 3 and -1 to -100: names after
+    # commas are each checked, then a count of 0 or more must match them; a
+    # count of 0 checks no other name; a count of 1 or less takes one name, checked,
+    # and a Laurent series ring over it then fails to coerce)
     if "," in src:
-        return _sage_poly.ring_names([t.strip() for t in src.split(",")])[0]
-    if len(src) == n and src.isalpha():
-        return src[0]
-    _check_generated(src + "0")
-    return src + "0"
+        parts = _multi_names(src)
+        if n >= 0 and len(parts) != n:
+            raise IndexError("the number of names must equal the number of generators")
+        return parts[0]
+    if n == 0:
+        # (Sage makes a ring that cannot print itself: L39)
+        if laurent:
+            raise NotImplementedError("LaurentSeriesRing with a count of 0 is not available in sagebrush yet")
+        return src
+    if n >= 2:
+        if len(src) == n and src.isalpha():
+            return src[0]
+        _check_generated(src + "0")
+        return src + "0"
+    _check_generated(src)
+    if laurent:
+        raise TypeError("Input does not coerce to any of the expected rings.")
+    return src
 
 
-def _series_names(name, default_prec, names, laurent=False):
-    """(names, counted, default_prec): every name a user gives a series ring,
-    checked as Sage checks it before any ring is built: a string ('x' or
-    'x,y'), a tuple, a list or names=...; with a count first
-    (PowerSeriesRing(QQ, 2, 'x')), only the first name, never the list."""
-    import _sage_poly
-    if isinstance(name, int) and not isinstance(name, bool):
-        first = _first_counted(name, names if names is not None else default_prec, laurent)
-        return ([first] if first is not None else []), True, 20
-    return _sage_poly.ring_names(names if names is not None else (name if name is not None else "x")), False, default_prec
+def _series_names(name, arg2, names, default_prec, laurent=False):
+    """(first name, multivariate, default_prec): the arguments of a series
+    ring read as Sage 10.10 reads them (probed as a black box), every name
+    checked before any ring is built.  names= wins over name; several names
+    ('x,y', ['x', 'y']) are a multivariate ring, arg2 then its count; a count
+    before a string (PowerSeriesRing(QQ, 2, 'x')) is one too, only its first
+    name made, never the list; otherwise one name, and a count in name is
+    the default precision (LaurentSeriesRing(QQ, 2, names='x'))."""
+    if names is None:
+        names = name if name is not None else "x"
+    if (isinstance(names, (list, tuple)) and len(names) > 1) or (isinstance(names, str) and "," in names):
+        flat = _multi_names(names)
+        if isinstance(arg2, int) and arg2 >= 0 and len(flat) != arg2:
+            raise IndexError("the number of names must equal the number of generators")
+        return flat[0], True, (12 if default_prec is None else default_prec)
+    if isinstance(arg2, str) and isinstance(names, int):
+        return _first_counted(names, arg2, laurent), True, (12 if default_prec is None else default_prec)
+    if arg2 is not None:
+        default_prec = arg2
+    elif default_prec is None:
+        default_prec = 20
+    if isinstance(name, int):
+        default_prec = name
+    first = _one_name(names)
+    if default_prec < 0:
+        raise ValueError("default_prec (= %s) must be nonnegative" % (default_prec,))
+    return first, False, default_prec
 
 
-def PowerSeriesRing(base, name=None, default_prec=20, names=None, sparse=False, **kwds):
+def PowerSeriesRing(base, name=None, arg2=None, names=None, sparse=False, default_prec=None, **kwds):
     """The ring of power series over base.
 
     EXAMPLES::
@@ -110,18 +143,17 @@ def PowerSeriesRing(base, name=None, default_prec=20, names=None, sparse=False, 
         sage: f = T + 3*T^2 + T^3 + O(T^4); f^3, 1/f
         (T^3 + 2*T^4 + 2*T^5 + O(T^6), T^-1 + 4 + T + O(T^2))
     """
-    ns, counted, default_prec = _series_names(name, default_prec, names)
-    if counted or len(ns) > 1:
+    name, multi, default_prec = _series_names(name, arg2, names, default_prec)
+    if multi:
         # (Sage: a multivariate power series ring, PowerSeriesRing(QQ, 'x,y') or (QQ, 1, 'x'))
         raise NotImplementedError("multivariate power series rings are not available in sagebrush yet")
-    name = ns[0]
     key = ("P", id(base), str(name), int(default_prec))
     if key not in _RINGS:
         _RINGS[key] = SeriesRing_(base, str(name), int(default_prec), False)
     return _RINGS[key]
 
 
-def LaurentSeriesRing(base, name=None, default_prec=20, names=None, sparse=False, **kwds):
+def LaurentSeriesRing(base, name=None, arg2=None, names=None, sparse=False, default_prec=None, **kwds):
     """The ring of Laurent series over base.
 
     EXAMPLES::
@@ -133,8 +165,7 @@ def LaurentSeriesRing(base, name=None, default_prec=20, names=None, sparse=False
     """
     # (as Sage: every name is checked, and the ring is in the first one,
     # LaurentSeriesRing(QQ, 'x,y') in x and (QQ, 2, 'x') in x0)
-    ns, counted, default_prec = _series_names(name, default_prec, names, laurent=True)
-    name = ns[0]
+    name, multi, default_prec = _series_names(name, arg2, names, default_prec, laurent=True)
     key = ("L", id(base), str(name), int(default_prec))
     if key not in _RINGS:
         _RINGS[key] = SeriesRing_(base, str(name), int(default_prec), True)

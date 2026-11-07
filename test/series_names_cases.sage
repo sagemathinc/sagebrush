@@ -18,6 +18,15 @@ show(lambda: Qp(5)['x,y'])
 show(lambda: Zp(5)[('x', 'y')])
 show(lambda: Zp(5)[['x,y']])
 show(lambda: LaurentSeriesRing(QQ, 0, 'x'))
+# (the multivariate power series rings Sage makes from names by keyword or a count after a count, SERIES-NAME-WORK-4,
+# and a count of 0 given by names=, L39)
+show(lambda: PowerSeriesRing(QQ, 0, '1'))
+show(lambda: PowerSeriesRing(QQ, 2, 'x', names=-1))
+show(lambda: PowerSeriesRing(QQ, 2, 'x', names=0))
+show(lambda: PowerSeriesRing(QQ, 2, names=['x', 'y', 'z']))
+show(lambda: PowerSeriesRing(QQ, 2, 2, names='x,y'))
+show(lambda: PowerSeriesRing(QQ, 'x,y', -1))
+show(lambda: LaurentSeriesRing(QQ, 2, 'x', names=0))
 import _sage_series
 print(sorted(k[2] for k in _sage_series._RINGS if k[0] == "P"))
 # A huge count makes no list of names (SERIES-NAME-WORK-3): with the materializer and range() made to fail, the

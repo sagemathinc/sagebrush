@@ -15,6 +15,9 @@ test("multivariate series and p-adic polynomial rings are refused before a ring 
     S, S, S, S, S, S, S, S, P, P, S,
     // (a count of 0: Sage makes a ring that cannot print itself; refused here, L39)
     "NotImplementedError: LaurentSeriesRing with a count of 0 is not available in sagebrush yet",
+    // (names by keyword, a count after a count: SERIES-NAME-WORK-4)
+    S, S, S, S, S, S,
+    "NotImplementedError: LaurentSeriesRing with a count of 0 is not available in sagebrush yet",
     "[]",
     // (a huge count with the name list's materializer made to fail: SERIES-NAME-WORK-3)
     "Laurent Series Ring in x0 over Rational Field",
