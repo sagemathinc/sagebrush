@@ -1,0 +1,31 @@
+{
+ "cases": [
+  {
+   "id": "glm-1",
+   "status": 0,
+   "stderr": "",
+   "stdout": "(Intercept)          wt \n   12.04037    -4.02397 \n"
+  },
+  {
+   "id": "glm-2",
+   "status": 0,
+   "stderr": "",
+   "stdout": "\nCall:  glm(formula = am ~ wt, family = binomial, data = mtcars)\n\nCoefficients:\n(Intercept)           wt  \n     12.040       -4.024  \n\nDegrees of Freedom: 31 Total (i.e. Null);  30 Residual\nNull Deviance:\t    43.23 \nResidual Deviance: 19.18 \tAIC: 23.18\n"
+  },
+  {
+   "id": "glm-3",
+   "status": 0,
+   "stderr": "",
+   "stdout": "\nCall:\nglm(formula = am ~ wt, family = binomial, data = mtcars)\n\nCoefficients:\n            Estimate Std. Error z value Pr(>|z|)   \n(Intercept)   12.040      4.510   2.670  0.00759 **\nwt            -4.024      1.436  -2.801  0.00509 **\n---\nSignif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1\n\n(Dispersion parameter for binomial family taken to be 1)\n\n    Null deviance: 43.230  on 31  degrees of freedom\nResidual deviance: 19.176  on 30  degrees of freedom\nAIC: 23.176\n\nNumber of Fisher Scoring iterations: 6\n\n"
+  },
+  {
+   "id": "glm-4",
+   "status": 0,
+   "stderr": "",
+   "stdout": "\nCall:  glm(formula = count ~ x, family = poisson, data = data.frame(x = 1:6, \n    count = c(1, 3, 2, 6, 8, 12)))\n\nCoefficients:\n(Intercept)            x  \n    -0.1430       0.4421  \n\nDegrees of Freedom: 5 Total (i.e. Null);  4 Residual\nNull Deviance:\t    16.64 \nResidual Deviance: 1.176 \tAIC: 24.71\n"
+  }
+ ],
+ "file": "rill-tests/glm/test_1.R",
+ "format": "rill-out",
+ "v": 1
+}

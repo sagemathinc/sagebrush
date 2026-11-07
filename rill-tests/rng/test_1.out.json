@@ -1,0 +1,49 @@
+{
+ "cases": [
+  {
+   "id": "rng-1",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.2655087 0.3721239 0.5728534\n"
+  },
+  {
+   "id": "rng-2",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1]  1.3709584 -0.5646982  0.3631284  0.6328626  0.4042683\n"
+  },
+  {
+   "id": "rng-3",
+   "status": 0,
+   "stderr": "",
+   "stdout": " [1]  3 10  2  8  6  9  1  7  5  4\n"
+  },
+  {
+   "id": "rng-4",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 11.964 10.937  9.784\n"
+  },
+  {
+   "id": "rng-5",
+   "status": 0,
+   "stderr": "",
+   "stdout": " [1] \"T\" \"H\" \"H\" \"T\" \"H\" \"T\" \"H\" \"T\" \"T\" \"T\"\n"
+  },
+  {
+   "id": "rng-6",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 4 4 5 7 4\n"
+  },
+  {
+   "id": "rng-7",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.5052715\n"
+  }
+ ],
+ "file": "rill-tests/rng/test_1.R",
+ "format": "rill-out",
+ "v": 1
+}
