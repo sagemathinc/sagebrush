@@ -8170,7 +8170,7 @@
   "owner": "the LaTeX CLI (@sagebrush-latex)",
   "reason": "matched text that refuses nothing: help text (unsupported), path.delimiter, CSS max-width"
  },
- "src/latex-cli.ts ::  :: import { itemKey, MAX_RESULT, WRAPPER_VERSION } from \"../web/latex/engine/sagetex.mjs\"; #0": {
+ "src/latex-cli.ts ::  :: import { itemKey, MAX_RESULT, WRAPPER_VERSION, depsOf, safeRel, DEPS_MAX, DEPS_BYTES, staleOfSync, readComplete } from \"../web/latex/engine/sagetex.mjs\"; #0": {
   "class": "none",
   "owner": "the LaTeX CLI (@sagebrush-latex)",
   "reason": "matched text that refuses nothing: an import line"
@@ -8225,6 +8225,22 @@
   "owner": "the LaTeX CLI (@sagebrush-latex)",
   "reason": "sagebrush latex run: bounds on the results file it writes and reads (32 MiB), a plot's SVG (2 MiB), a \\\\sage result (MAX_RESULT) and a message (4000): output and parser protection of a local command"
  },
+ "src/latex-cli.ts :: preHashes :: if (!d.name.endsWith(\".py\") || out.size >= DEPS_MAX) continue; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "Codex W01 (astra's DEP-SNAPSHOT-1): the folder's .py files hashed before a run, at most DEPS_MAX (1000) files and DEPS_BYTES (64 MiB); a run importing one past either records \"incomplete\", so its results aren't used (fails closed)"
+ },
+ "src/latex-cli.ts :: preHashes :: while (queue.length && out.size < DEPS_MAX) { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "Codex W01 (astra's DEP-SNAPSHOT-1): the folder's .py files hashed before a run, at most DEPS_MAX (1000) files and DEPS_BYTES (64 MiB); a run importing one past either records \"incomplete\", so its results aren't used (fails closed)"
+ },
  "src/latex-cli.ts :: readResults :: _sbtx_r[\"out\"] = _sbtx_buf.getvalue()[-${MSG_MAX}:] #0": {
   "class": "1",
   "disposition": {
@@ -8233,7 +8249,7 @@
   "owner": "the LaTeX CLI (@sagebrush-latex)",
   "reason": "sagebrush latex run: bounds on the results file it writes and reads (32 MiB), a plot's SVG (2 MiB), a \\\\sage result (MAX_RESULT) and a message (4000): output and parser protection of a local command"
  },
- "src/latex-cli.ts :: readResults :: if (!existsSync(p) || statSync(p).size > RESULTS_MAX) return []; #0": {
+ "src/latex-cli.ts :: readResults :: if (!existsSync(p) || statSync(p).size > RESULTS_MAX) return none; #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -8256,6 +8272,14 @@
   },
   "owner": "latex",
   "reason": "removeTemp retries the scratch folder's removal at most 10 times, 50 ms apart (Node's rmSync maxRetries), so a browser helper still writing can't fail a finished render; then it gives up quietly"
+ },
+ "src/latex-cli.ts :: report :: if (!Array.isArray(rels) || rels.length > DEPS_MAX || !rels.every(safeRel)) deps = \"incomplete\"; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "Codex W01: the results' record of what their run imported from the .tex's folder holds at most DEPS_MAX (1000) paths; past it the run records \"incomplete\" and its results aren't used: parser protection of a results file"
  },
  "src/latex-cli.ts :: resultsPath :: const RESULTS_MAX = 32 * 2 ** 20, SVG_MAX = 2 * 2 ** 20, MSG_MAX = 4000; #0": {
   "class": "1",
@@ -10611,6 +10635,14 @@
   "owner": "sagebrush-remote-compute",
   "reason": "The wave envelope's validation of the scheduler's automatic-run time budget field (null or a finite number), before anything is admitted; it limits nothing, it refuses a malformed wave."
  },
+ "web/latex/results-check.mjs :: wsReader :: catch (err) { return err?.code === \"limit\" ? \"over\" : null; } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX editor's Run (@sagebrush-latex)",
+  "reason": "Codex W01 (astra's DEP-READ-1): the files a results file records are read within one budget, DEPS_BYTES (64 MiB) in all; past it the results aren't used (\"over\", said)"
+ },
  "web/latex/run-core.mjs ::  :: export const FOLDER_LIMITS = { files: 500, bytes: 64 * 2 ** 20 }; #0": {
   "class": "1",
   "disposition": {
@@ -10627,7 +10659,7 @@
   "owner": "the LaTeX editor's Run (@sagebrush-latex)",
   "reason": "the editor's Run: the .tex's folder given to Sage (FOLDER_LIMITS: 500 files, 64 MiB; past either, Run runs nothing), and what a Run's results hold (the results file's size, a result's LaTeX, a plot's SVG, a message: RUN_LIMITS, as the CLI's): bounds protecting the page and its session"
  },
- "web/latex/run-core.mjs ::  :: import { MAX_RESULT, WRAPPER_VERSION, utf8len, whyRejected } from \"./engine/sagetex.mjs\"; #0": {
+ "web/latex/run-core.mjs ::  :: import { MAX_RESULT, WRAPPER_VERSION, utf8len, whyRejected, safeRel, sha256hex, DEPS_MAX } from \"./engine/sagetex.mjs\"; #0": {
   "class": "none",
   "owner": "the LaTeX editor's Run (@sagebrush-latex)",
   "reason": "matched text that refuses nothing: an import line"
@@ -10679,6 +10711,14 @@
   },
   "owner": "the LaTeX editor's Run (@sagebrush-latex)",
   "reason": "the editor's Run: the .tex's folder given to Sage (FOLDER_LIMITS: 500 files, 64 MiB; past either, Run runs nothing), and what a Run's results hold (the results file's size, a result's LaTeX, a plot's SVG, a message: RUN_LIMITS, as the CLI's): bounds protecting the page and its session"
+ },
+ "web/latex/run-core.mjs :: parseDeps :: if (!Array.isArray(got) || got.length > DEPS_MAX || !got.every(safeRel)) return null; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX editor's Run (@sagebrush-latex)",
+  "reason": "Codex W01: the results' record of what their run imported from the .tex's folder holds at most DEPS_MAX (1000) paths; past it the run records \"incomplete\" and its results aren't used: parser protection of a results file"
  },
  "web/latex/run-core.mjs :: runIn :: done(_ms, o) { resolve({ out, stopped: o?.interrupted ? \"the run was stopped\" : out.length >= max ? \"the results are too large\" : o?.error ? \"the session stopped with an error\" : \"\" }); }, #0": {
   "class": "1",
