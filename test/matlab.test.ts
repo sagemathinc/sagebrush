@@ -2862,3 +2862,27 @@ test("axis equal in 2-D keeps the axes box and widens the limits to its shape (M
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("x = save, x = clear and x = clearvars refuse before they run: no matlab.mat is written and no variable is cleared", () => {
+  const { execFileSync } = require("node:child_process");
+  const { mkdtempSync, readdirSync, rmSync } = require("node:fs");
+  const { join } = require("node:path");
+  // MathWorks documents no output arguments for save, clear and clearvars, so the
+  // call fails with "Too many output arguments." before it does anything.
+  const dir = mkdtempSync(join(require("node:os").tmpdir(), "sb-save-"));
+  try {
+    const code = ["y = 5;",
+      "try, x = save; catch err, disp(err.message), end",
+      "try, x = save('a.mat', 'y'); catch err, disp(err.message), end",
+      "try, x = clear; catch err, disp(err.message), end",
+      "try, x = clearvars('y'); catch err, disp(err.message), end",
+      "disp(exist('y'))"].join("\n");
+    const lines = execFileSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+      { encoding: "utf8", cwd: dir, timeout: 10000 }).trim().split("\n").map((s: string) => s.trim());
+    assert.deepEqual(lines, ["Too many output arguments.", "Too many output arguments.", "Too many output arguments.",
+      "Too many output arguments.", "1"]);
+    assert.deepEqual(readdirSync(dir), []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
