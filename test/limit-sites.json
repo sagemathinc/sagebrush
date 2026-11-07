@@ -5792,6 +5792,26 @@
   "owner": "real/complex arithmetic",
   "row": "inv-17"
  },
+ "lib/_sage_series.py :: Series._poly_target :: raise TypeError(\"unsupported operand parent(s): '%r' and '%r'\" % (self._R, P)) #0": {
+  "class": "none",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "a TypeError for a series and an element of another ring with no common parent (Sage's coercion refusal, as probed: another variable, GF(p) with QQ, Laurent and power series' own rules); refuses nothing for size"
+ },
+ "lib/_sage_series.py :: Series._poly_target :: raise TypeError(\"unsupported operand parent(s): '%r' and '%r'\" % (self._R, P)) #1": {
+  "class": "none",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "a TypeError for a series and an element of another ring with no common parent (Sage's coercion refusal, as probed: another variable, GF(p) with QQ, Laurent and power series' own rules); refuses nothing for size"
+ },
+ "lib/_sage_series.py :: Series._poly_target :: raise TypeError(\"unsupported operand parent(s): '%r' and '%r'\" % (self._R, S)) #0": {
+  "class": "none",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "a TypeError for a series and an element of another ring with no common parent (Sage's coercion refusal, as probed: another variable, GF(p) with QQ, Laurent and power series' own rules); refuses nothing for size"
+ },
+ "lib/_sage_series.py :: Series._poly_target :: raise TypeError(\"unsupported operand parent(s): '%r' and '%r'\" % (self._R, S)) #1": {
+  "class": "none",
+  "owner": "sage kernel (@sagebrush-sage2)",
+  "reason": "a TypeError for a series and an element of another ring with no common parent (Sage's coercion refusal, as probed: another variable, GF(p) with QQ, Laurent and power series' own rules); refuses nothing for size"
+ },
  "lib/_sbdata.py :: _Parser.string :: def string(self, cap, capcode=\"cap:string\"): #0": {
   "class": "1",
   "disposition": {
