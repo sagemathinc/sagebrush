@@ -1,12 +1,13 @@
-# N1-0 pre-registration (draft r1, for PERF review before the protocol is frozen)
+# N1-0 pre-registration (draft r2, for PERF review before the protocol is frozen)
 
-*This is item N1-0 of the #825 N1 plan r3 (f391bdb1). It folds in daybreak4's PERF review of r0 (eecf6da6,
-`reviews/n1-prereg-eecf6da6-perf-daybreak4.md`, items P1–P10 below) and their earlier guardrails. Branch
+*This is item N1-0 of the #825 N1 plan r3 (f391bdb1). It folds in daybreak4's PERF review of r0 (eecf6da6, items P1–P10 below), its r1 addendum (fa55a37f, residuals 1–4: schedule balance,
+T1/T2 coupling, one decision coordinate, controls and unstable rows), both in
+`reviews/n1-prereg-eecf6da6-perf-daybreak4.md`, and their earlier guardrails. Branch
 n1-native-proto, never merged. Nothing here is a counted result.*
 
 *Gate.* Before any counted run, the final pre-registration names:
 - the exact harness commit;
-- every frozen file: `schedule-*.json`, `controls.json`, `corpus/m8-writes.json`, `corpus/m10-bigint.json`, `m6.json`, `expected-hashes.json`.
+- every frozen file: `schedule-<os>.json`, `controls-<os>-<class>.json`, `controls.json` (perturbation sizes), `corpus/m8-writes.json`, `corpus/m10-bigint.json`, `m6.json`, `expected-hashes.json`.
 
 PERF reviews that code and that packet before authorizing a counted run. Runs that need a machine also wait for William's answers to Q1, Q2, Q3 and Q5. Values marked **[pilot]** are picked from uncounted pilot runs and frozen in those files before counting starts. Pilot data never enters a counted result.
 
@@ -18,7 +19,9 @@ Candidates:
 - **3:** Tauri + embedded-V8 helper;
 - **4:** boundary spike only, never ranked.
 
-The **baseline** of every paired comparison is candidate 1. Comparisons are made only **within one OS, one machine class and one metric definition** (P7). Results are never ranked across OSes, across unlike cache treatments (P1), or across different memory definitions.
+Candidate 1 runs under two labels in every main schedule (§5):
+- **1a is the baseline** of every paired comparison and the only candidate-1 label used in decisions;
+- **1b** is the A/A control only, never ranked or used in decisions. Comparisons are made only **within one OS, one machine class and one metric definition** (P7). Results are never ranked across OSes, across unlike cache treatments (P1), or across different memory definitions.
 
 ## 2. Measurements
 
@@ -45,10 +48,18 @@ The page runs one frozen event sequence, the same in every candidate. Its source
 | Treatment | Procedure | Ranked? |
 |---|---|---|
 | **T1 profile-cold** (primary) | A new process with a fresh user-data directory. The OS file cache is left as it is. The previous process in the round has exited and the admission gate (§3) has passed. | Yes |
-| **T2 warm** | The next launch of the same candidate with the same user-data directory. It starts **10 s after the harness observes the T1 process's exit**. | Yes, within T2 only |
+| **T2 warm** | The next launch of the same candidate with the same user-data directory. It starts **10 s after the harness observes that candidate's own T1 exit**. | Yes, within T2 only |
 | **T3 boot-cold** | Exactly one launch per boot, from a pre-generated reboot schedule. The schedule rotates which candidate gets each boot, so every candidate gets the same number of first-after-boot launches. | Only if T3 is run at all. It is never compared with a non-first launch. |
 
 `drop_caches` is **not used** on any OS.
+
+**T1/T2 are one scheduled unit.** Each round has one frozen label order (§3). For each label in that order, the harness runs the label's unit as one atomic step:
+1. T1 launch, measure, exit;
+2. 10 s wait;
+3. T2 launch, measure, exit;
+4. 10 s idle before the next label's unit.
+
+Both the T1 and T2 comparisons come from the same rounds and the same order. There are no separate per-treatment schedules. T3 has its own reboot schedule (one T1-style launch per boot, never followed by a T2).
 
 ### M3 engine calls (P6)
 
@@ -79,7 +90,10 @@ The definition is per OS. Values are never compared across OSes.
 
 **Sampling.**
 - Samples are taken at the marks: after `render-proxy`, after `kernel-ready-base`, and after M3.
-- At each mark the harness waits for stability: three consecutive 500 ms samples within 2 % of each other, up to 10 s. If they never settle, the row is marked **unstable** and the last sample is recorded.
+- At each mark the harness waits for stability: three consecutive 500 ms samples within 2 % of each other, up to 10 s. If they never settle, the row is marked **unstable**. Its last sample is kept as a diagnostic only.
+- **Unstable rows, closed rule:**
+  - An unstable row is **excluded from decisions**, and so is the paired round it belongs to, for that mark.
+  - If more than 1 of the 7 rounds is unstable for any label at a mark, that mark's memory configuration is **invalid** for the run.
 - Swap in use is recorded at every mark.
 
 ### M5 scaling
@@ -155,7 +169,14 @@ It runs in each candidate's actual pyjs runtime and boundary. System webviews ar
 
 ### Schedule (P4)
 
-- The full seeded schedule is generated and **frozen before running**, in `schedule-<os>-<treatment>.json`. It lists every round and the candidate order within each round. Orders are seeded permutations, balanced so that each candidate holds each position equally often over the rounds.
+- The full seeded schedule is generated and **frozen before running**, in `schedule-<os>.json` (one per OS, covering T1 and T2 together, §2 M2). It lists every round and the label order within each round.
+- **Main schedule labels:** 1a, 1b, 2 and 3.
+- **Position balance.** Exact balance is impossible for 4 labels over 7 rounds. The achievable rule is:
+  - for every label, its counts over the 4 positions differ by **at most one** (each count is 1 or 2);
+  - the positions where a label appears twice are rotated in the escalation schedule, so that over all 21 rounds its counts again differ by at most one;
+  - orders are drawn from the seed and accepted only if they meet this rule;
+  - the frozen file and the report list every label's position counts.
+- **Control schedules are separate.** Each perturbation (§5) has its own frozen schedule, `controls-<os>-<class>.json`, with labels 1 and 1+perturbation over 7 rounds, so positions are 4/3 per label, reported. Control schedules run in the same session right after the main run, under the same admission gate. They never change the main schedule's positions.
 - One uncounted warm-up process runs per candidate and configuration, then **N = 7 rounds**.
 
 ### Pre-round admission gate (P4)
@@ -191,11 +212,14 @@ A process that crashes, passes its fixed deadline or gives a wrong hash is a **F
 
 ## 4. Statistics (P3)
 
-**Paired summary.** For each candidate $c$ against the baseline $b$, and each admitted, uncontaminated round $r$, the summary keeps:
+**Paired summary.** For each candidate $c$ against the baseline $b$ (label 1a), each metric, and each admitted, uncontaminated, stable round $r$:
 
-$$d_r = x_{c,r} - x_{b,r}, \qquad q_r = x_{c,r} / x_{b,r}.$$
+$$t_r = \max(a,\ \rho\, x_{b,r}), \qquad e_r = \frac{x_{c,r} - x_{b,r}}{t_r}.$$
 
-Here $x$ is the per-process median of the in-process repetitions. The report lists **every** $d_r$ and $q_r$, then their median and range. Independent per-candidate medians are reported too, but never used for a decision.
+Here $x$ is the per-process median of the in-process repetitions.
+- **Report:** every $x_{c,r}$, $x_{b,r}$, $d_r = x_{c,r}-x_{b,r}$, $q_r = x_{c,r}/x_{b,r}$ and $e_r$, then the median and range of each.
+- **Decisions:** only $e_r$ is used. $d_r$, $q_r$ and the independent per-candidate medians are descriptive only.
+- **Direction, frozen:** every ranked metric (times, memory, bytes) is smaller-is-better, so $e_r > 0$ means $c$ is worse than the baseline.
 
 **Pilot status.** N = 7 is a **decision pilot**:
 - no significance or precision claims;
@@ -203,44 +227,60 @@ Here $x$ is the per-process median of the in-process repetitions. The report lis
 
 ### Smallest effect of interest (SESOI), frozen now
 
-| Metric class | SESOI (ratio band, or absolute, whichever is larger) |
-|---|---|
-| startup marks (M1, M5) | ±15 % or 150 ms |
-| memory (M4, M5, M6 peak) | ±15 % or 40 MiB |
-| engine calls (M3 steady, M10) | ±10 % |
-| M3 first call | ±20 % |
-| Stop (send→accepted, accepted→done) | 50 ms |
-| M8 ack latency | 50 ms |
-| M9 empty round-trip / stage | ±20 % or 0.2 ms |
+$a = 0$ makes a class ratio-only, and $\rho = 0$ makes it absolute-only.
+
+| Metric class | $\rho$ | $a$ |
+|---|---|---|
+| startup marks (M1, M5) | 0.15 | 150 ms |
+| memory (M4, M5, M6 peak) | 0.15 | 40 MiB |
+| engine calls (M3 steady, M10) | 0.10 | 0 |
+| M3 first call | 0.20 | 0 |
+| Stop send→accepted, Stop accepted→done | 0 | 50 ms |
+| M8 ack latency | 0 | 50 ms |
+| M9 empty round-trip and each stage | 0.20 | 0.2 ms |
+| M9 bytes per boundary | 0.10 | 0 |
 
 ### Decision and escalation rule, fixed before any counted result
 
-For each comparison and metric:
-- **Different:** all paired $q_r$ (or $d_r$) are on the same side of no-difference, **and** the paired median is outside the SESOI band.
-- **Equivalent:** all paired values are inside the SESOI band.
-- **Undecided:** anything else.
+For each comparison and metric, with $R$ the set of usable rounds:
+- **Equivalent** iff $|e_r| \le 1$ for every $r \in R$.
+- **Different** iff every $e_r$ has the same strict sign **and** $|\operatorname{median}_{r\in R}(e_r)| > 1$.
+  - The sign of the median says which candidate is better.
+- **Undecided** otherwise. This includes any comparison with fewer than 5 usable rounds.
 
-**Escalation.** An undecided comparison gets **one** escalation: a newly frozen schedule of 14 further rounds for those two candidates only. Its rounds are reported alongside the first 7, and the same rule is applied to all 21. If it is still undecided, it is reported to William as undecided. There is no second escalation.
+**Escalation.** An undecided comparison gets **one** escalation:
+- a newly frozen schedule of 14 further rounds;
+- labels 1a, 1b and the candidate, balanced as in §3 and rotated against the first 7;
+- the same rule then applies to all usable rounds of the 21.
+
+If it is still undecided, it is reported to William as undecided. There is no second escalation.
 
 ## 5. Sensitivity controls (P5)
 
 ### A/A
 
-Every schedule includes candidate 1 under two labels, 1a and 1b, each in its own randomized position. The paired 1a/1b values of every ranked metric must be **equivalent** under §4. If they are not, that metric's run is invalid, because it shows drift or order effects.
+1b runs in every main schedule as a label of its own (§3). For every ranked metric, the comparison of 1b against 1a must be **equivalent** under §4. If it is not, that metric is invalid for the run, because it shows drift or order effects. 1b is never ranked.
 
 ### Known perturbations
 
-Each metric class used in a ranking gets one perturbation, run as a marked configuration of candidate 1 in the same schedule. The sizes are **[pilot]**, set near 2× the SESOI and frozen in `controls.json`. The recovered paired median must fall in **[0.5, 1.5]×** the injected effect. If it does not, the run is invalid for that metric class.
+Each metric class used in a ranking gets one or more perturbations. Each perturbation is its **own control schedule** (§3): candidate 1 against candidate 1 with the perturbation.
+- **Sizes:** **[pilot]**, near 2× the class's SESOI, frozen in `controls.json`.
+- **Timing and memory recovery:** with $d_r$ the perturbed-minus-plain difference in the targeted row, the median of $d_r$ must fall in **[0.5, 1.5]×** the injected amount.
+- **Byte recovery:** must be **exact**.
 
-| Class | Perturbation |
-|---|---|
-| startup | a fixed delay in the page before the first content node |
-| kernel ready | a fixed delay in the child before `ready` |
-| engine calls | a fixed delay in the child's call handler |
-| framing | fixed padding bytes added to each frame |
-| memory | the child allocates and touches a fixed buffer |
-| Stop | the child delays applying an accepted Stop by a fixed time |
-| M8 | the child delays its permission acknowledgement by a fixed time |
+If recovery fails, the run is invalid for that metric class.
+
+| Class | Perturbation | Targeted row |
+|---|---|---|
+| startup | a fixed delay in the page before the first content node | M1 `fcp`, `render-proxy` |
+| kernel ready | a fixed delay in the child before `ready` | M1 `kernel-ready-*` |
+| engine calls | a fixed delay in the child's call handler | M3 first and steady, stage 4 |
+| framing time | a fixed delay at the start of the child-decode stage (stage 3) | M9 stage 3 and the empty round-trip |
+| framing bytes | fixed padding bytes added to each frame | M9 bytes per boundary; recovery must be exact, and it is not a timing control |
+| memory | the child allocates and touches a fixed buffer | M4 at each mark |
+| Stop send→accepted | the child delays sending its Stop-accepted acknowledgement by a fixed time | M7 send→accepted |
+| Stop accepted→done | the child delays applying an accepted Stop by a fixed time, after sending its acknowledgement | M7 accepted→done |
+| M8 | the child delays its permission acknowledgement by a fixed time | M8 ack latency |
 
 ## 6. Freezing
 
