@@ -856,7 +856,9 @@ class ComplexDoubleElement:
     def __repr__(self):
         re, im = self._z.real, self._z.imag
         if im == 0:
-            return _frepr(re)
+            # (a zero prints 0.0 whatever its signs, as Sage: CDF(-0.0) is 0.0,
+            # where RDF(-0.0) is -0.0)
+            return "0.0" if re == 0 else _frepr(re)
         si = _frepr(abs(im)) + "*I"
         if re == 0:
             return ("-" if im < 0 else "") + si

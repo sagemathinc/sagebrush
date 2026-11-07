@@ -343,8 +343,11 @@ class PolynomialRingInexact:
             return self(eval(x.replace("^", "**"), {self._name: self.gen(), "__builtins__": {}}))
         if type(x).__name__ == "Expression" and not x.is_numeric():
             v = _sa().SR.var(self._name)
-            if set(map(str, x.variables())) - {self._name}:
-                raise TypeError("%s is not a polynomial in %s" % (x, self._name))
+            others = [str(u) for u in x.variables() if str(u) != self._name]
+            if others:
+                # (Sage names the first other variable: RR['t'](x + y) is "x is
+                # not a variable of Univariate Polynomial Ring in t over ...")
+                raise TypeError("%s is not a variable of %r" % (others[0], self))
             d = int(x.degree(v))
             _admit(d + 1, "Converting an expression of degree %d to a dense polynomial" % d)
             return PolynomialInexact(self, [B(_num(x.coefficient(v, i))) for i in range(d + 1)])
@@ -383,10 +386,8 @@ class PolynomialInexact:
 
     def __init__(self, ring, coeffs):
         c = list(coeffs)
-        if ring._complex and _info(ring._base)[0]:
-            # (CDF: a coefficient that is not nonzero, NaN or -0.0, is 0.0, as Sage)
-            z = ring._base(0)
-            c = [x if _nonzero(x) else z for x in c]
+        # (a zero coefficient keeps its signs, as Sage: CDF['u']([1, CDF(-0.0,
+        # -0.0), 2]).list()[1] is -0.0 - 0.0*I; only the top zeros are dropped)
         while c and not _nonzero(c[-1]):
             c.pop()
         self._ring = ring
