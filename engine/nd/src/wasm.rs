@@ -8,10 +8,11 @@
 //! having written nothing. `nd_gemm_part`, `nd_solve` (single-threaded, numerics-core P2b-1) and `nd_potrf`
 //! (single-threaded, CHOL-1) are the only exports that write memory.
 
-use crate::boundary::{check, check_potrf, check_solve, desc_region, desc_region_of, Facts, DESC_WORDS, POTRF_DESC_WORDS, POTRF_REPORT_WORDS, REPORT_WORDS, SOLVE_DESC_WORDS};
+use crate::boundary::{check_part, check_potrf, check_solve, desc_region, desc_region_of, pool_regions, Facts, Pool, DESC_WORDS, POTRF_DESC_WORDS, POTRF_REPORT_WORDS, REPORT_WORDS, SOLVE_DESC_WORDS};
 use crate::gemm::{gemm_cols, partition, scratch_len, Kernel, Mat};
 use core::arch::wasm32::memory_size;
 use core::ptr::{addr_of, with_exposed_provenance, with_exposed_provenance_mut};
+use core::sync::atomic::{AtomicU32, Ordering::{AcqRel, Acquire, Relaxed, Release}};
 
 extern "C" {
     /// The linker's end of the module's own memory (static data and its stack): the host's part starts here.
@@ -39,23 +40,64 @@ pub extern "C" fn nd_info(what: u32) -> u32 {
     }
 }
 
+// The thread pool's layout, recorded once by `nd_pool_init` (in this module's own statics, so in the shared
+// memory: every instance on it sees the one record): [ctl, stacks, slot, participants], published by POOL_SET
+// (0 none, 1 being recorded, 2 recorded) with Release after the words, read with Acquire before them.
+static POOL_SET: AtomicU32 = AtomicU32::new(0);
+static POOL: [AtomicU32; 4] = [const { AtomicU32::new(0) }; 4];
+
+/// The recorded pool, if any.
+fn pool() -> Option<Pool> {
+    if POOL_SET.load(Acquire) != 2 {
+        return None;
+    }
+    let [ctl, stacks, slot, participants] = [0, 1, 2, 3].map(|i| u64::from(POOL[i].load(Relaxed)));
+    Some(Pool { ctl, stacks, slot, participants })
+}
+
+/// Record the thread pool's layout (threads r2, contract 3): the control words at `ctl` ([`CTL_BYTES`]),
+/// `participants` stack slots of `slot` bytes from `stacks` ([`Pool`]). Once per memory: returns 1, or 0 if
+/// a pool was already recorded or the layout is bad ([`pool_regions`]), having recorded nothing. A job on more
+/// than one thread runs only within the recorded pool ([`nd_gemm_part`]).
+#[no_mangle]
+#[allow(unsafe_code)]
+pub extern "C" fn nd_pool_init(ctl: u32, stacks: u32, slot: u32, participants: u32) -> u32 {
+    let p = Pool { ctl: ctl.into(), stacks: stacks.into(), slot: slot.into(), participants: participants.into() };
+    let facts = Facts { mem: memory_bytes(), floor: addr_of!(__heap_base) as usize as u64, max_len: isize::MAX as u64, frame: 0 };
+    if pool_regions(&p, &facts).is_none() || POOL_SET.compare_exchange(0, 1, AcqRel, Acquire).is_err() {
+        return 0;
+    }
+    for (w, v) in POOL.iter().zip([ctl, stacks, slot, participants]) {
+        w.store(v, Relaxed);
+    }
+    POOL_SET.store(2, Release);
+    1
+}
+
 /// Thread `id`'s share of C = A * B (its columns, [`partition`]). Returns 1 on success (an `id` at or
 /// beyond the job's thread count has nothing to do), 0 if the job was refused, having written nothing.
 ///
-/// Checked here, before any pointer is read or slice made ([`check`]): the descriptor and every nonempty
+/// Checked here, before any pointer is read or slice made ([`check_part`]): the descriptor and every nonempty
 /// region are aligned, in the host's part of memory (at or above `__heap_base`, so never at 0), within memory
 /// and at most `isize::MAX` bytes long; C and the scratch lie in the job's arena and overlap neither A, B, each
 /// other nor the descriptor (which lies outside the arena); the stride holds a thread's scratch; this thread's
-/// frame lies below the arena. Pointers are made from the checked absolute addresses (exposed provenance: the
-/// host's part of linear memory is foreign to Rust, like memory handed over by FFI).
+/// frame lies below the arena. A job on more than one thread also needs the recorded pool ([`nd_pool_init`]):
+/// its thread count at most the pool's participants and `id` one of them, the pool's control words and stacks
+/// disjoint from the descriptor, the arena, A, B, C and the scratch, and this thread's frame in its own stack
+/// slot. Pointers are made from the checked absolute addresses (exposed provenance: the host's part of linear
+/// memory is foreign to Rust, like memory handed over by FFI).
 ///
 /// # Safety
 /// Host preconditions (the trusted host's contract; not checkable here, since each call sees only its own frame,
-/// which it checks lies below the arena), in the reviewed wording:
+/// which it checks lies below the arena and, on a threaded job, in its own slot of the recorded pool's
+/// stacks), in the reviewed wording:
 ///
 /// All participant stacks are pairwise disjoint and disjoint from module-owned memory, descriptor/control, A/B,
 /// and the writable arena; the host and other jobs leave all job ranges untouched until join, apart from each
 /// participant owning only its assigned C columns and scratch slot.
+///
+/// (For a threaded job the stacks' layout is the recorded pool's, checked as above; what stays the host's is
+/// setting each participant's `__stack_pointer` within its own slot.)
 ///
 /// And every thread of the job is called with the same descriptor and a distinct `id` (so the threads' columns
 /// of C and scratch areas, disjoint by construction, belong to one thread each).
@@ -74,7 +116,7 @@ pub unsafe extern "C" fn nd_gemm_part(desc: u32, id: u32) -> u32 {
     }
     // SAFETY: the descriptor's DESC_WORDS u32s lie in the host's part of memory, 4-aligned (checked above)
     let d = with_exposed_provenance::<[u32; DESC_WORDS]>(desc as usize).read();
-    let Some(j) = check(u64::from(desc), &d, &facts) else { return 0 };
+    let Some(j) = check_part(u64::from(desc), &d, pool().as_ref(), u64::from(id), &facts) else { return 0 };
     let id = id as usize;
     if id >= j.threads {
         return 1;

@@ -30,6 +30,7 @@ import { RemoteClient } from "./remote-client.js";
 import { RemoteKernel } from "./remote-kernel.js";
 import { RemoteGate } from "./remote-gate.js";
 import { FakeGateway } from "./remote-fake.js";
+import { pairTunnel, parsePairLink, SYNTHETIC_BASE, TunnelNotSent } from "./pair-tunnel.js";
 
 // (the simulated gateway's address: https, as the client requires; never fetched, its fetch is the fake's)
 const PREVIEW_BASE = "https://compute.preview.invalid/api/compute/v1";
@@ -311,6 +312,215 @@ export function statusText(text, network = NO_NETWORK) {
     : `Remote compute (preview): ${t}`;
 }
 
+// ------------------------------------------------------------- your computer (paired)
+
+/** The status line's words for the paired runner (local-kernel plan r2 §6). */
+export const PAIRED = {
+  label: "Your computer",
+  ready: "Your computer · ready",
+  sessionGone: "this page needs a new link from your computer: run uvx sagebrush@latest remote --loopback again, then choose Your computer and paste it",
+  upgrade: "Run the newest version: uvx sagebrush@latest remote --loopback (it always fetches the latest).",
+  config: "Use This browser for now, and please let us know.",
+  blocked: "If you blocked this site's access to apps on this device, allow it in the site settings (the icon left of the address), then Retry.",
+};
+
+/** The status line's text for a paired kernel's status. */
+export function pairedStatusText(text) {
+  const t = String(text ?? "");
+  return /^ready \(remote\)/.test(t) ? `${PAIRED.ready}${t.replace(/^ready \(remote\)/, "")}` : `${PAIRED.label}: ${t}`;
+}
+
+/**
+ * The paired runner's start, for remoteSwitch (deps.start): one per page, holding the pairing it made (its port and
+ * remembered session, in memory only; never stored).  `answer` is the pairing sheet's {code, port} (a code is used
+ * once); without one (Retry, Reconnect), it pairs again by the remembered session.  Resolves as startPreview does:
+ * {kernel, failed, retry(), close()}; `onLost(why)` is told when the socket goes.  `WebSocket`: tests.
+ */
+export function pairedStarter({ WebSocket, helloMs, min } = {}) {
+  let remembered = null; // {port, session, incarnation}
+  return async function startPaired({ notebook, answer, onStatus = () => {}, onLost = () => {} }) {
+    let tunnel = null;
+    let closed = false;
+    const client = await RemoteClient.create({
+      base: SYNTHETIC_BASE,
+      token: () => (tunnel ? tunnel.tokenSource() : Promise.reject(new Error("your computer isn't connected"))),
+      fetch: (url, init) => {
+        if (!tunnel) throw new TunnelNotSent("your computer isn't connected");
+        return tunnel.fetch(url, init);
+      },
+    });
+    const kernel = new RemoteKernel({ client, notebook: String(notebook ?? "notebook"), requireGate: true });
+    kernel.paired = true;
+    let why = "";
+    const off = kernel.on("status", (text) => {
+      const m = /^error: the remote kernel did not start: (.*)$/.exec(String(text));
+      if (m) why = m[1];
+      onStatus(pairedStatusText(text));
+    });
+    let pending = answer ? { code: answer.code, port: answer.port } : null;
+    const pair = async () => {
+      const how = pending ? { code: pending.code, remember: true } : remembered ? { session: remembered.session } : null;
+      const port = pending?.port ?? remembered?.port;
+      if (!how) return PAIRED.sessionGone;
+      r.hint = null;
+      try {
+        tunnel = await pairTunnel({ port, jwk: client.jwk, jkt: client.jkt, WebSocket, timeoutMs: helloMs, ...(min !== undefined ? { min } : {}), ...how, onClose: (w) => { tunnel = null; if (!closed) onLost(w); } });
+        pending = null; // (a code pairs once)
+      } catch (e) {
+        // (a code that may have reached the runner is never sent again (astra's RETRY-2): only one whose hello was
+        // never handed to a socket (nothing listening, blocked, or no answer before it opened) is kept for Retry)
+        if (e?.sent !== false) pending = null;
+        r.hint = e?.kind === "unreachable" ? PAIRED.blocked : e?.kind === "old" ? PAIRED.upgrade : e?.kind === "config" ? PAIRED.config : null;
+        r.noRetry = e?.kind === "config"; // (board's V-1: nothing the person can retry; This browser only)
+        if (how.session && e?.kind === "refused") remembered = null; // (the runner forgot it: a new code is needed)
+        return how.session && e?.kind === "refused" ? PAIRED.sessionGone : e?.message ?? String(e);
+      }
+      if (closed) {
+        tunnel.close();
+        return "closed";
+      }
+      client.nonce = tunnel.nonce;
+      remembered = { port, session: tunnel.session ?? remembered?.session ?? null, incarnation: tunnel.incarnation };
+      if (!remembered.session) remembered = null;
+      return null;
+    };
+    const bind = async () => {
+      if (!tunnel) {
+        const failed = await pair();
+        if (failed) {
+          kernel.notReadyNote = NOT_CONNECTED;
+          r.failed = failed;
+          return false;
+        }
+      }
+      for (let i = 0; i < BIND_TRIES && !kernel.ready && !kernel.closed; i++) await kernel.start();
+      kernel.notReadyNote = kernel.ready ? null : NOT_CONNECTED;
+      r.failed = kernel.ready ? null : why || "the kernel on your computer did not start";
+      return kernel.ready;
+    };
+    const r = {
+      kernel,
+      gateway: null,
+      failed: null,
+      hint: null, // (a way forward said after the failure, outside its parentheses)
+      noRetry: false,
+      retry: bind,
+      get tunnel() { return tunnel; },
+      close() {
+        closed = true;
+        off();
+        kernel.close();
+        tunnel?.close();
+        tunnel = null;
+      },
+    };
+    await bind();
+    return r;
+  };
+}
+
+/** The pairing sheet's text (local-kernel plan r2 §6). */
+export const PAIR_SHEET = {
+  title: "Run on your computer",
+  consent: "Code you run will run on your computer, with your files and permissions.",
+  how: "Run this in a terminal on this computer. It prints a link: open it, or paste it here.",
+  // (one way to run the runner: uvx, which always fetches the newest; every message that names the command names this
+  // one, since uvx installs no `sagebrush` command (board's #782 B-1))
+  // (one command, uvx: William, Nov 6)
+  quickLabel: "This fetches the newest Sagebrush and runs it in its own Python:",
+  getUv: "No uv? Install it first: curl -LsSf https://astral.sh/uv/install.sh | sh (or see docs.astral.sh/uv).",
+  command: "uvx sagebrush@latest remote --loopback",
+  windows: "On Windows, run it in WSL (Windows Subsystem for Linux); this browser pairs with it as usual.",
+  paste: "The link (or its pairing code and port)",
+  lna: "Your browser may ask to let this site access apps on this device: click Allow.",
+  safari: "Safari doesn't let a website connect to programs on your computer. On a Mac, open this page in Chrome, Edge or Firefox. (On an iPhone or iPad every browser is Safari underneath, and running on your computer needs a Mac or PC.)",
+  bad: "That isn't the link uvx sagebrush@latest remote --loopback printed.",
+  copied: "Copied",
+  copy: "Copy",
+  allow: "Connect",
+  cancel: "Cancel",
+};
+
+/**
+ * Show the pairing sheet (a real dialog, never connecting by itself: Connect is the person's); resolves to
+ * {code, port} or null (Cancel, Escape, closeSheet()).  `prefill`: a link's {code, port}, from ?kpair= .
+ */
+export function pairSheet(doc = document, prefill = null, userAgent = globalThis.navigator?.userAgent ?? "") {
+  closeSheet();
+  if (!doc.getElementById("remotedlgcss")) {
+    const st = doc.createElement("style");
+    st.id = "remotedlgcss";
+    st.textContent = CSS;
+    doc.head.append(st);
+  }
+  const el = (tag, text, props = {}) => Object.assign(doc.createElement(tag), text == null ? {} : { textContent: text }, props);
+  const dlg = el("dialog", null, { id: "remotedlg" });
+  dlg.setAttribute("aria-labelledby", "pairtitle");
+  const row = (label, command, copyLabel, note) => {
+    const copy = el("button", PAIR_SHEET.copy, { type: "button" });
+    copy.setAttribute("aria-label", copyLabel);
+    copy.addEventListener("click", () => {
+      const cb = globalThis.navigator?.clipboard;
+      if (typeof cb?.writeText !== "function") return; // (no clipboard here: nothing is said to have been copied)
+      cb.writeText(command).then(() => { said.textContent = PAIR_SHEET.copied; }, () => {});
+    });
+    const p = el("p", null, { className: "cap" });
+    p.append(el("code", command), copy);
+    const box = el("div", null, { className: "cmd" });
+    box.append(el("div", label, { className: "note" }), p);
+    if (note) box.append(el("div", note, { className: "note" }));
+    return box;
+  };
+  const windows = /Windows/.test(userAgent);
+  const field = el("input", null, { type: "text", id: "pairlink", autocomplete: "off", spellcheck: false });
+  field.setAttribute("aria-label", PAIR_SHEET.paste);
+  field.placeholder = PAIR_SHEET.paste;
+  if (prefill) field.value = `?kpair=${prefill.code}&kport=${prefill.port}`;
+  const said = el("p", "", { className: "note", id: "pairstatus" });
+  said.setAttribute("role", "status");
+  const safari = /Safari\//.test(userAgent) && !/Chrome\/|Chromium\/|Edg\/|Firefox\//.test(userAgent);
+  const ok = el("button", PAIR_SHEET.allow, { className: "primary", id: "pairallow", disabled: safari });
+  const no = el("button", PAIR_SHEET.cancel, { id: "paircancel" });
+  const acts = el("div", null, { className: "acts" });
+  acts.append(no, ok);
+  dlg.append(el("h2", PAIR_SHEET.title, { id: "pairtitle" }), el("p", PAIR_SHEET.consent, { className: "preview" }), el("p", PAIR_SHEET.how),
+    row(PAIR_SHEET.quickLabel, PAIR_SHEET.command, "Copy the command", PAIR_SHEET.getUv),
+    ...(windows ? [el("p", PAIR_SHEET.windows, { className: "note" })] : []), field,
+    el("p", safari ? PAIR_SHEET.safari : PAIR_SHEET.lna, { className: "note" }), said, acts);
+  doc.body.append(dlg);
+  return new Promise((resolve) => {
+    let settled = false;
+    const sheet = {
+      settle(answer) {
+        if (settled) return;
+        settled = true;
+        if (openSheet === sheet) openSheet = null;
+        if (dlg.open) dlg.close();
+        dlg.remove();
+        resolve(answer);
+      },
+    };
+    openSheet = sheet;
+    ok.addEventListener("click", () => {
+      const v = field.value.trim();
+      // (the whole link, or "CODE PORT" as pasted from the runner's two lines)
+      const m = /^([A-Za-z2-7]{26})[\s:]+(\d{1,5})$/.exec(v);
+      const got = parsePairLink(m ? `?kpair=${m[1]}&kport=${m[2]}` : v);
+      if (!got) {
+        said.textContent = PAIR_SHEET.bad;
+        return;
+      }
+      sheet.settle(got);
+    });
+    no.addEventListener("click", () => sheet.settle(null));
+    dlg.addEventListener("close", () => sheet.settle(null));
+    if (typeof dlg.showModal === "function") dlg.showModal();
+    else dlg.setAttribute("open", "");
+    dlg.tabIndex = -1;
+    dlg.focus?.();
+  });
+}
+
 // ------------------------------------------------------------- the switch
 
 /**
@@ -349,6 +559,9 @@ export function statusText(text, network = NO_NETWORK) {
  * `deps` replaces the sheet, its cancellation, startPreview and unboundPreview (tests).
  */
 export function remoteSwitch(page, deps = {}) {
+  // (the paired runner is the same switch: its own picker value, sheet, start and words; no preview interpreter)
+  const kind = deps.kind ?? "gpu";
+  const label = deps.label ?? "Remote compute (preview)";
   const sheet = deps.sheet ?? (() => connectSheet());
   const cancelSheet = deps.cancelSheet ?? closeSheet;
   const start = deps.start ?? startPreview;
@@ -392,8 +605,8 @@ export function remoteSwitch(page, deps = {}) {
         if (!live()) return; // (stale meanwhile: changes nothing)
         if (ok) clearActions();
         else {
-          page.status(`Remote compute (preview): couldn't connect (${owner.r.failed}).`);
-          offer(owner, ["retry", "switch"]);
+          page.status(`${label}: couldn't connect (${owner.r.failed}).${owner.r.hint ? " " + owner.r.hint : ""}`);
+          offer(owner, owner.r.noRetry ? ["switch"] : ["retry", "switch"]);
         }
       }),
       reconnect: () => act("Reconnect (a fresh kernel: its variables are lost)", async () => {
@@ -435,7 +648,7 @@ export function remoteSwitch(page, deps = {}) {
       sw.leave(); // (a newer attempt supersedes any other)
       const mine = attempt;
       const current = () => mine === attempt;
-      const live = () => current() && page.currentId() === id && page.picked() === "gpu";
+      const live = () => current() && page.currentId() === id && page.picked() === kind;
       // (only the current attempt may touch the picker or the status line)
       const back = (why) => {
         if (!current()) return null;
@@ -446,21 +659,28 @@ export function remoteSwitch(page, deps = {}) {
       };
       if (!page.reactive()) return back("remote compute runs only in the reactive notebook");
       const skipSheet = again && connected.has(id);
+      let answer = null;
       if (!skipSheet) {
-        let answer;
         try {
           answer = await sheet();
         } catch (e) {
-          return back(`Remote compute (preview): ${e?.message ?? e}`);
+          return back(`${label}: ${e?.message ?? e}`);
         }
         if (!current()) return null; // (superseded: whoever did it settled this sheet and owns the picker)
         if (!answer || !live()) return back();
         connected.add(id); // (the person's Connect, for this notebook, in this page)
       } else if (!live()) return back();
       let r, local = null;
+      // (the paired runner: a lost socket offers Retry (pairing again by the remembered session) and This browser)
+      let owner = null;
+      const onLost = (why) => {
+        if (!owner || !current()) return;
+        page.status(`${label}: disconnected (${why}).`);
+        offer(owner, ["retry", "switch"]);
+      };
       try {
-        local = page.makeLocal();
-        r = await start({ notebook: id, local, network: network(), onStatus: (t) => { if (current()) page.status(t); } });
+        local = deps.noLocal ? null : page.makeLocal();
+        r = await start({ notebook: id, local, network: network(), answer: skipSheet ? null : answer, onLost, onStatus: (t) => { if (current()) page.status(t); } });
       } catch (e) {
         local?.close?.(); // (the preview interpreter made for it is not leaked)
         if (!live()) return back();
@@ -473,14 +693,14 @@ export function remoteSwitch(page, deps = {}) {
       }
       on = { id, r };
       page.setKernel(r.kernel);
-      const owner = { attempt: mine, id, r };
+      owner = { attempt: mine, id, r };
       // (another tab took this notebook's kernel: Reconnect, or This browser)
       r.kernel.on?.("lifecycle", (_old, lc) => { if (lc.phase === "moved") offer(owner, ["reconnect", "switch"]); });
       if (r.failed) {
-        page.status(`Remote compute (preview): couldn't connect (${r.failed}).`);
-        offer(owner, ["retry", "switch"]);
+        page.status(`${label}: couldn't connect (${r.failed}).${r.hint ? " " + r.hint : ""}`);
+        offer(owner, r.noRetry ? ["switch"] : ["retry", "switch"]);
       } else if (skipSheet) {
-        page.status(`${statusText("ready (remote)", network())} · a fresh kernel: earlier variables are gone`);
+        page.status(`${deps.readyText ?? statusText("ready (remote)", network())} · a fresh kernel: earlier variables are gone`);
       }
       return r;
     },
@@ -501,6 +721,11 @@ const CSS = `
 #remotedlg .cap input { width: 5em; font: inherit; }
 #remotedlg .note { color: var(--muted); font-size: 12px; margin: 4px 0 12px; }
 #remotedlg .acts { display: flex; gap: 8px; justify-content: flex-end; }
+#remotedlg #pairlink { width: 100%; box-sizing: border-box; font: inherit; margin: 4px 0; }
+#remotedlg .cmd { margin: 4px 0 6px; }
+#remotedlg .cmd .note { margin: 0; }
+#remotedlg .cmd .cap { align-items: flex-start; }
+#remotedlg .cmd code { white-space: pre; overflow-x: auto; min-width: 0; flex: 1; padding-bottom: 2px; }
 `;
 
 /** The Connect sheet's text (the plan's §5 consent copy and §9.1 cap field, marked as a preview). */

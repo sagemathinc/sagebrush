@@ -2529,6 +2529,25 @@ const viewTypes = ["dict_keys", "dict_values", "dict_items"].map((name, kind) =>
     for (const [op, f] of [["__and__", "and"], ["__or__", "or"], ["__sub__", "sub"], ["__xor__", "xor"]] as const) {
       method(vt, op, (v: DictView, other: any) => O.setOp(O.newSet(O.dictIter(v.d, v.kind)), O.newSet(other), f));
     }
+    // (set-like comparisons, as CPython's dictview_richcompare: against a set, a frozenset or another keys or items
+    // view only, else NotImplemented; the sizes first, then whether every element of the one is in the other)
+    const setLike = (o: any) => o instanceof O.PySet || (o instanceof DictView && o.kind !== 1);
+    const size = (o: any) => (o instanceof DictView ? o.d.$m.size : o.$d.$m.size);
+    const within = (a: any, b: any) => {
+      for (const x of O.toArray(O.iter(a))) if (!O.contains(b, x)) return false;
+      return true;
+    };
+    const cmp: [string, (n: number, m: number) => boolean, boolean][] = [
+      ["__eq__", (n, m) => n === m, false], ["__lt__", (n, m) => n < m, false], ["__le__", (n, m) => n <= m, false],
+      ["__gt__", (n, m) => n > m, true], ["__ge__", (n, m) => n >= m, true],
+    ];
+    for (const [op, sizes, flip] of cmp) {
+      method(vt, op, (v: DictView, o: any) => {
+        if (!setLike(o)) return NotImplemented;
+        return sizes(v.d.$m.size, size(o)) && (flip ? within(o, v) : within(v, o));
+      });
+    }
+    method(vt, "__ne__", (v: DictView, o: any) => (setLike(o) ? !(v.d.$m.size === size(o) && within(v, o)) : NotImplemented));
   }
   return vt;
 });
@@ -4059,7 +4078,7 @@ let unionOf: (a: any, b: any) => any;
   // (a GenericAlias member: equal by value, hashed by value)
   const same = (a: any, b: any) => a === b || (a instanceof PyGenericAlias && O.truth(O.eq(a, b)));
   method(unionType, "__eq__", (u: PyUnion, o: any) => (o instanceof PyUnion ? u.args.length === o.args.length && u.args.every((t) => o.args.some((x) => same(t, x))) : NotImplemented));
-  method(unionType, "__hash__", (u: PyUnion) => u.args.reduce((h, t) => h ^ (t instanceof PyGenericAlias ? O.hashExact(t) : O.id(t)), 0));
+  method(unionType, "__hash__", (u: PyUnion) => O.hashXor(u.args.map((t) => (t instanceof PyGenericAlias ? O.hashExact(t) : O.id(t)))));
   // (each member in order through the whole protocol, stopping at the
   // first that holds, as isinstance() with a tuple: an alias raises only
   // when it is reached)
@@ -4180,7 +4199,7 @@ T.GenericAlias = genericAliasType;
     if (a.starred !== o.starred) return false;
     return O.truth(O.eq(a.origin, o.origin)) && O.truth(O.eq(tuple(a.args), tuple(o.args)));
   });
-  method(ga, "__hash__", (a: PyGenericAlias) => O.hashExact(a.origin) ^ O.hashExact(tuple(a.args)));
+  method(ga, "__hash__", (a: PyGenericAlias) => O.hashXor([O.hashExact(a.origin), O.hashExact(tuple(a.args))]));
   method(ga, "__or__", (a: any, b: any) => unionOf(a, b));
   method(ga, "__ror__", (a: any, b: any) => unionOf(b, a));
   method(ga, "__instancecheck__", (_a: any, _o: any) => raise(T.TypeError, "isinstance() argument 2 cannot be a parameterized generic"));

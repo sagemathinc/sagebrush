@@ -21,7 +21,7 @@ import { PAGE_CSS } from "./style";
 import { registerLatexTools, setTarget, clearTarget } from "./agent-tools";
 import { mark } from "./marks";
 import type { Example } from "./examples";
-import { sessionOf, sandboxEngine, runIn, runAndSave, NO_SANDBOX } from "./run-core.mjs";
+import { sessionOf, sandboxEngine, runIn, runAndSave, folderFiles, NO_SANDBOX } from "./run-core.mjs";
 // (the embeddable editor, for the questions site: component.ts)
 export { mountEditor, type LatexEditor } from "./component";
 import { viewOf } from "./component";
@@ -716,10 +716,13 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // open); their states written as the results file beside the .tex, then read and shown as the CLI's are. A second
   // click while it runs stops it.
   let running = false;
+  // (the Run under way's own Stop: a second click stops that Run, and only it (astra's LATEX-QUEUE-STOP-1): waiting for
+  //  another Run in the session, it runs nothing; running, its script is interrupted)
+  let runStop: AbortController | null = null;
   E.onRendered(() => { const c = E.lastCheck(); if (c) runBtn.hidden = !(Array.isArray(c.sage) && c.sage.length); });
   const runIdle = () => { running = false; runBtn.textContent = "Run"; runBtn.title = "Run the document's SageTeX code (Sage, in this browser)"; };
   runBtn.onclick = async () => {
-    if (running) { sageSession?.kernel?.interrupt(); say("stopping…"); return; }
+    if (running) { runStop?.abort(); say("stopping…"); return; }
     if (!host.sandbox) { say(NO_SANDBOX); return; }
     const session = (sageSession ??= sessionOf(sandboxEngine(host.sandbox, new URL(".", import.meta.url))));
     const c = E.lastCheck();
@@ -727,7 +730,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     const items = (Array.isArray(c.sage) ? c.sage : []) as any[];
     if (!items.length) { say("No SageTeX code to run"); return; }
     running = true; runBtn.textContent = "Starting Sage…"; runBtn.title = "Stop"; say("");
-    const my = ++runGen, run = new AbortController(), stop = () => run.abort();
+    const my = ++runGen, run = new AbortController(), stop = () => run.abort(), stopRun = new AbortController();
+    runStop = stopRun;
     life.signal.addEventListener("abort", stop, { once: true });
     const current = () => live() && my === runGen;
     try {
@@ -735,6 +739,10 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
         items, ws: host.ws, fid: host.fid, current, signal: run.signal, max: RESULTS_MAX, now: () => performance.now(),
         session: async () => { const k = await session(); if (current()) runBtn.textContent = "Running…"; return k; },
         exec: runIn,
+        // (the .tex's folder, as it is now, given to the session: its code imports a helper beside the .tex and reads
+        //  its data, read-only, as real SageTeX run in the document's folder does; nothing else of the workspace)
+        folder: async () => { const at = await host.ws.pathOfFile(host.fid); return at.ok ? folderFiles(host.ws, at.path) : { msg: "Not run: this file isn't here any more" }; },
+        store: session, serial: session.serial, stop: stopRun.signal,
       });
       if (r.stale || !current()) return;
       if (r.msg) { say(r.msg); return; }

@@ -32,6 +32,14 @@ def _norm(c):
     return _sa().Rational._from_coprime_ints(f.numerator, f.denominator)
 
 
+def _sr_rational(x):
+    """x, or the int or Rational it is when x is an exact rational of SR
+    (SR(2), SR(3)/4: the engine's n<p>/<q>; encoding)."""
+    if type(x).__name__ == "Expression" and getattr(x, "_s", "").startswith("n"):
+        return _norm(x.pyobject())
+    return x
+
+
 def _is_sr_scalar(x):
     """A symbolic expression (not a relation): a scalar of M + c, c - M."""
     return type(x).__name__ == "Expression" and hasattr(x, "_s") and not x.is_relational()
@@ -856,6 +864,10 @@ class Matrix:
         if any(len(r) != width for r in rows):
             raise ValueError("the rows of a matrix must have the same length")
         self._rows = [[_norm(x) for x in r] for r in rows]
+        if base is _sa().QQ or base is _sa().ZZ:
+            # (entries in QQ: SR(2) is 2 there, as Sage converts it; kept
+            # as SR it reached sagebrush.linalg, whose Fraction() refused it)
+            self._rows = [[_sr_rational(x) for x in r] for r in self._rows]
         self._immutable = False
         # the number of columns, kept when there are no rows (a 0 x 3
         # matrix was 0 x 0: the systematic review's LIN-F4)
@@ -1689,10 +1701,18 @@ class Matrix:
             sage: A.solve_right(vector([5, 6]))
             (-4, 9/2)
         """
+        if not isinstance(B, (Matrix, Vector)):
+            # (as Sage: a list, tuple or generator is refused, not read)
+            raise TypeError("the second argument must be a vector or a matrix")
         if self._base is _sa().SR:
             import _sage_matrix_sr
             return _sage_matrix_sr.solve_right(self, B)
         is_vec = not isinstance(B, Matrix)
+        if (getattr(B, "_ring", None) if is_vec else B._base) is _sa().SR or (is_vec and any(_is_sr_scalar(_sr_rational(x)) for x in B)):
+            # a right-hand side over SR: the solution is over SR (Sage's
+            # coercion), by the symbolic elimination
+            import _sage_matrix_sr
+            return _sage_matrix_sr.solve_right(Matrix(_sa().SR, self._rows, self._nc), B)
         Bm = Matrix(_sa().QQ, [[x] for x in _bounded_list(B, self.nrows())], 1) if is_vec else B
         if Bm.nrows() != self.nrows():
             raise ValueError("number of rows of self must equal number of rows of right-hand side")
@@ -2120,6 +2140,9 @@ class Matrix:
             sage: matrix(QQ, [[1, 1, 0], [0, 2, 0], [0, 0, 3]]).eigenvalues()
             [3, 2, 1]
         """
+        if self._base is _sa().SR:
+            import _sage_matrix_sr
+            return _sage_matrix_sr.eigenvalues(self)
         import _sage_qqbar
         out = []
         for g, e in self._eigen_factors():
@@ -2131,6 +2154,9 @@ class Matrix:
         return out
 
     def _eigenvectors(self, side):
+        if self._base is _sa().SR:
+            import _sage_matrix_sr
+            return _sage_matrix_sr.eigenvectors(self, side)
         import _sage_qqbar
         import _sage_ffmat
         a = self if side == "right" else self.transpose()
@@ -3964,6 +3990,15 @@ def _CallableReal(x):
 _RR_BIG = None
 
 
+def _cc_or_none(o):
+    """complex(o) as _cc gives it, or None when o is no number (a series, a polynomial, a
+    matrix: the operation is the other operand's, NotImplemented)."""
+    try:
+        return _cc(o)
+    except (TypeError, ValueError):
+        return None
+
+
 def _cc(o):
     """complex(o) for CC's arithmetic: an element of RR past the doubles is
     refused (CC holds doubles; its float would be inf or 0)."""
@@ -4097,36 +4132,54 @@ class ComplexNumber(complex):
         # TypeError, so CC(I) + M over QQbar never reached M.__radd__)
         if getattr(o, "_is_ffmatrix", False):
             return NotImplemented
-        return ComplexNumber(complex(self) + _cc(o))
+        c = _cc_or_none(o)
+        if c is None:
+            return NotImplemented
+        return ComplexNumber(complex(self) + c)
 
     __radd__ = __add__
 
     def __sub__(self, o):
         if getattr(o, "_is_ffmatrix", False):
             return NotImplemented
-        return ComplexNumber(complex(self) - _cc(o))
+        c = _cc_or_none(o)
+        if c is None:
+            return NotImplemented
+        return ComplexNumber(complex(self) - c)
 
     def __rsub__(self, o):
         if getattr(o, "_is_ffmatrix", False):
             return NotImplemented
-        return ComplexNumber(_cc(o) - complex(self))
+        c = _cc_or_none(o)
+        if c is None:
+            return NotImplemented
+        return ComplexNumber(c - complex(self))
 
     def __mul__(self, o):
         if getattr(o, "_is_ffmatrix", False):
             return NotImplemented
-        return ComplexNumber(complex(self) * _cc(o))
+        c = _cc_or_none(o)
+        if c is None:
+            return NotImplemented
+        return ComplexNumber(complex(self) * c)
 
     __rmul__ = __mul__
 
     def __truediv__(self, o):
         if getattr(o, "_is_ffmatrix", False):
             return NotImplemented
-        return ComplexNumber(complex(self) / _cc(o))
+        c = _cc_or_none(o)
+        if c is None:
+            return NotImplemented
+        return ComplexNumber(complex(self) / c)
 
     def __rtruediv__(self, o):
         if getattr(o, "_is_ffmatrix", False):
             return NotImplemented
-        return ComplexNumber(_cc(o) / complex(self))
+        c = _cc_or_none(o)
+        if c is None:
+            return NotImplemented
+        return ComplexNumber(c / complex(self))
 
     def __neg__(self):
         return ComplexNumber(-complex(self))
