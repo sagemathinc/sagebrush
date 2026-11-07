@@ -906,7 +906,11 @@ class Axes:
         return position(self, original)
 
     def _apply_aspect(self):
-        # (adjustable 'datalim': the limits moved as the figure is drawn)
+        # (a colorbar's axes takes its box aspect when first drawn, as
+        # matplotlib's colorbar locator gives it; adjustable 'datalim': the
+        # limits moved as the figure is drawn)
+        if getattr(self, "_cb_of", None) is not None:
+            self._cb_drawn = True
         if self._opts.get("aspect_ratio") is not None and self.get_adjustable() == "datalim":
             from matplotlib._axes_geometry import apply_aspect
             apply_aspect(self)
@@ -2030,11 +2034,18 @@ def _colorbar(fig, mappable, cax, ax, **kw):
     if cax is None:
         # room taken from the axes' right side, as matplotlib does
         parent = ax if ax is not None else fig.gca()
+        # (get_position reports matplotlib's make_axes geometry: the
+        # arguments kept, and the parent's box before any colorbar)
+        from matplotlib._axes_geometry import colorbar_geometry
+        g = colorbar_geometry(kw)
         fx, fy, fw, fh = parent._rect
+        if getattr(parent, "_cb_rect", None) is None:
+            parent._cb_rect = parent._rect
         parent._rect = (fx, fy, fw * 0.82, fh)
-        parent._bounds = None  # (its rect changed: the colorbar's room taken from it)
         cax = Axes(fig, (fx + fw * 0.85, fy + fh * 0.05, fw * 0.04, fh * 0.9))
         cax._opts["exact"] = parent._opts.get("exact", False)
+        parent._cbs = getattr(parent, "_cbs", []) + [g]
+        cax._cb_of = (parent, len(parent._cbs) - 1)
         fig.axes.append(cax)
     cb = Colorbar(mappable, cax)
     if kw.get("label"):

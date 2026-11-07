@@ -202,3 +202,78 @@ test("rotated x tick labels: centred on their ticks, at matplotlib 3.11.1's heig
     assert.ok(Math.abs(Number(out[i][2]) - y) <= 2, `${s}: y ${out[i][2]} vs ${y}`);
   }
 });
+
+// (#797's second tests round, each line matplotlib 3.11.1's own for the same
+// program: datalim's margins rule, a given inversion kept, a log axis moved
+// in decades (and past the largest float, matplotlib's ValueError), a log
+// axis' data at or below 0 clipped as its transform clips it; LogLocator's
+// middle tick and how many decades fit the axes; a datalim axes drawn in its
+// plain box; colorbars' axes and their parents, make_axes' geometry; x
+// moved where the margins rule doesn't apply; an inversion through
+// set_xticks and autoscale(False))
+test("datalim, log ticks, colorbar positions and inversions: matplotlib 3.11.1's (#797 r3)", () => {
+  const out = runIn("import matplotlib\nREAL = 'site-packages' in (getattr(matplotlib, '__file__', '') or '')\nif REAL:\n    matplotlib.use('Agg')\nimport matplotlib.pyplot as plt\nimport re\nimport warnings\nwarnings.simplefilter('ignore')\n\n\ndef r(v):\n    if isinstance(v, (tuple, list)):\n        return \"(\" + \", \".join(r(x) for x in v) + \")\"\n    if isinstance(v, float):\n        return \"%.6g\" % v\n    return str(v)\n\n\ndef show(label, f):\n    try:\n        print(label, \"=>\", r(f()))\n    except Exception as e:\n        print(label, \"!!\", type(e).__name__, str(e)[:100])\n\n\ndef lims(fig, ax):\n    fig.canvas.draw()\n    return tuple(float(v) for v in ax.get_xlim()), tuple(float(v) for v in ax.get_ylim())\n\n\ndef drawn(fig, ax):\n    \"\"\"the Axes' box as drawn (figure fractions) and its x limits, left to right\"\"\"\n    if REAL:\n        fig.canvas.draw()\n        b = ax.get_window_extent()\n        W, H = fig.get_size_inches() * fig.dpi\n        return (round(b.x0 / W, 4), round(b.y0 / H, 4), round(b.width / W, 4), round(b.height / H, 4)), tuple(float(v) for v in ax.get_xlim())\n    fig.savefig('pins797.svg')\n    svg = open('pins797.svg').read()\n    W, H = (float(v) for v in re.search(r'viewBox=\"0 0 ([0-9.]+) ([0-9.]+)\"', svg).groups())\n    m = re.search(r'data-xr=\"([^ ]+) ([^\"]+)\" data-yr=\"[^\"]+\" data-box=\"([^ ]+) ([^ ]+) ([^ ]+) ([^\"]+)\"', svg)\n    x0, x1, bl, bt, bw, bh = (float(v) for v in m.groups())\n    return (round(bl / W, 4), round(1 - (bt + bh) / H, 4), round(bw / W, 4), round(bh / H, 4)), (x0, x1)\n\n\ndef bounds(ax):\n    return tuple(float(v) for v in ax.get_position().bounds)\n\n\n# A12b: the 5% margins decide which pair datalim moves\nfig, ax = plt.subplots()\nax.plot([0, 1.45], [0, 1])\nax.set_aspect('equal', adjustable='datalim')\nshow(\"A12b datalim, data 1.45 x 1\", lambda: lims(fig, ax))\nplt.close(fig)\n\n# A15b: the moved pair keeps its given inversion\nfor xs, ys, inv in (([0, 3], [0, 1], 'y'), ([0, 1], [0, 3], 'x')):\n    fig, ax = plt.subplots()\n    ax.plot(xs, ys)\n    if inv == 'y':\n        ax.set_ylim(max(ys) + 0.1, min(ys) - 0.1)\n    else:\n        ax.set_xlim(max(xs) + 0.1, min(xs) - 0.1)\n    ax.set_aspect('equal', adjustable='datalim')\n    show(\"A15b datalim, %slim given inverted, data %s\" % (inv, r(tuple(xs + ys))), lambda: lims(fig, ax))\n    plt.close(fig)\n\n# L2: datalim moving a log axis' limits (in decades), and past the largest float\nfor xs, ys in (([1, 3], [0, 1]), ([1, 10], [0, 3]), ([1, 2], [1, 1000])):\n    fig, ax = plt.subplots()\n    ax.plot(xs, ys)\n    ax.set_xscale('log')\n    ax.set_aspect('equal', adjustable='datalim')\n    show(\"L2 datalim, log x, data %s\" % r(tuple(xs + ys)), lambda: lims(fig, ax))\n    plt.close(fig)\n\n# L3: a log axis' data at or below 0, its limits given (clipped to -1000 decades)\nfor xs, ys, xl, yl in (([0, 10], [1, 2], (1, 100), (0, 3)), ([-5, 10], [0, 4], (1, 1000), (0, 4))):\n    fig, ax = plt.subplots()\n    ax.plot(xs, ys)\n    ax.set_xscale('log')\n    ax.set_xlim(*xl)\n    ax.set_ylim(*yl)\n    ax.set_aspect('equal', adjustable='datalim')\n    show(\"L3 datalim, log x, data %s, limits %s %s\" % (r(tuple(xs + ys)), r(xl), r(yl)), lambda: lims(fig, ax))\n    plt.close(fig)\n\n# L5: LogLocator's one tick near the middle, of a view with one decade inside\nfig, ax = plt.subplots()\nax.set_xscale('log')\nax.set_xlim(10 ** 2.2, 10 ** 3.4)\nfig.canvas.draw()\nshow(\"L5 log x 10^2.2..10^3.4: tick locations\", lambda: [float(t.get_position()[0]) for t in ax.get_xticklabels()])\nplt.close(fig)\n\n# L9, L10, L11: how many log decades are labelled, by the axes' size\nfor size in ((2, 1.5), (8, 2), (2, 8), (1, 1), (0.6, 0.6)):\n    fig, ax = plt.subplots(figsize=size)\n    ax.set_xscale('log'); ax.set_yscale('log')\n    ax.set_xlim(1, 1e20); ax.set_ylim(1, 1e20)\n    fig.canvas.draw()\n    show(\"L9-L11 figsize %s: x ticks\" % r(size), lambda: [float(t.get_position()[0]) for t in ax.get_xticklabels()])\n    show(\"L9-L11 figsize %s: y ticks\" % r(size), lambda: [float(t.get_position()[1]) for t in ax.get_yticklabels()])\n    plt.close(fig)\n\n# P2: a datalim axes is drawn in the box it has without the aspect\nfig, ax = plt.subplots()\nax.plot([0, 1], [0, 3])\nplain = drawn(fig, ax)[0]\nax.set_aspect('equal', adjustable='datalim')\nshow(\"P2 datalim drawn in the plain box\", lambda: drawn(fig, ax)[0] == plain)\nplt.close(fig)\n\n# A4: colorbar axes and their parents (matplotlib's make_axes geometry)\nfor kw in (dict(), dict(location='left'), dict(location='top'), dict(orientation='horizontal'),\n           dict(fraction=0.3, pad=0.1), dict(shrink=0.5), dict(aspect=10)):\n    fig, ax = plt.subplots()\n    im = ax.imshow([[1, 2], [3, 4]])\n    cb = fig.colorbar(im, **kw)\n    show(\"A4 colorbar %s: its axes\" % r(sorted(kw.items())), lambda: bounds(cb.ax))\n    show(\"A4 colorbar %s: the parent\" % r(sorted(kw.items())), lambda: bounds(ax))\n    fig.canvas.draw()\n    show(\"A4 colorbar %s, drawn: its axes\" % r(sorted(kw.items())), lambda: bounds(cb.ax))\n    plt.close(fig)\nfig, (a1, a2) = plt.subplots(2, 1)\ncb = fig.colorbar(a1.imshow([[1, 2], [3, 4]]), ax=a1)\nshow(\"A4 2x1, colorbar on the top one: its axes\", lambda: bounds(cb.ax))\nshow(\"A4 2x1, colorbar on the top one: the parent\", lambda: bounds(a1))\nshow(\"A4 2x1, colorbar on the top one: the other\", lambda: bounds(a2))\nplt.close(fig)\nfig = plt.figure()\nax = fig.add_axes([0.1, 0.2, 0.6, 0.5])\ncb = fig.colorbar(ax.scatter([0, 1], [0, 1], c=[0, 1]), ax=ax)\nshow(\"A4 add_axes parent: colorbar axes\", lambda: bounds(cb.ax))\nshow(\"A4 add_axes parent: the parent\", lambda: bounds(ax))\nplt.close(fig)\nfig, ax = plt.subplots()\nm = ax.scatter([0, 1], [0, 1], c=[0, 1])\nc1, c2 = fig.colorbar(m), fig.colorbar(m)\nshow(\"A4 two colorbars: the first\", lambda: bounds(c1.ax))\nshow(\"A4 two colorbars: the second\", lambda: bounds(c2.ax))\nshow(\"A4 two colorbars: the parent\", lambda: bounds(ax))\nfig.canvas.draw()\nshow(\"A4 two colorbars, drawn: the second\", lambda: bounds(c2.ax))\nplt.close(fig)\n\n# A14: x must expand where the margins rule doesn't apply (limits given tight)\nfor ys in ([0, 3], [0, 10]):\n    fig, ax = plt.subplots()\n    ax.plot([0, 1], ys)\n    ax.set_xlim(0, 1); ax.set_ylim(*ys)\n    ax.set_aspect('equal', adjustable='datalim')\n    show(\"A14 datalim, limits given (0, 1) %s\" % r(tuple(ys)), lambda: lims(fig, ax))\n    plt.close(fig)\n\n# A19: inverted by invert_xaxis, set_xticks widening, then set_xlim again\nfig, ax = plt.subplots()\nax.plot([0, 1], [0, 1])\nax.set_xlim(0, 1)\nax.invert_xaxis()\nax.set_xticks([-1, 2])\nshow(\"A19 widened\", lambda: (tuple(float(v) for v in ax.get_xlim()), ax.xaxis_inverted()))\nax.set_xlim(0, 1)\nshow(\"A19 set_xlim(0, 1) after\", lambda: (tuple(float(v) for v in ax.get_xlim()), ax.xaxis_inverted()))\nshow(\"A19 drawn\", lambda: drawn(fig, ax)[1])\nplt.close(fig)\n\n# A19: inverted while autoscaled, the limits fixed by autoscale(False), then set_xticks widening\nfig, ax = plt.subplots()\nax.plot([0, 1], [0, 1])\nax.invert_xaxis()\nax.autoscale(False)\nax.set_xticks([-1, 2])\nshow(\"A19 invert_xaxis, autoscale(False), set_xticks widening\", lambda: (tuple(float(v) for v in ax.get_xlim()), ax.xaxis_inverted()))\nshow(\"A19 ... drawn\", lambda: drawn(fig, ax)[1])\nplt.close(fig)\n\n# A4: an Axes on a GridSpec cell (add_subplot(gs[i, j])): its position\nfig = plt.figure()\ngs = fig.add_gridspec(2, 1)\ntop, bottom = fig.add_subplot(gs[0, 0]), fig.add_subplot(gs[1, 0])\nshow(\"A4 add_subplot(gs[0, 0]) of 2x1\", lambda: bounds(top))\nshow(\"A4 add_subplot(gs[1, 0]) of 2x1\", lambda: bounds(bottom))\nplt.close(fig)\n\n# A19: one limit given, invert_xaxis, set_xticks widening\nfig, ax = plt.subplots()\nax.plot([0, 1], [0, 1])\nax.set_xlim(left=0)\nax.invert_xaxis()\nax.set_xticks([-1, 2])\nshow(\"A19 set_xlim(left=0), invert_xaxis, set_xticks widening\", lambda: (tuple(float(v) for v in ax.get_xlim()), ax.xaxis_inverted()))\nshow(\"A19 ... drawn\", lambda: drawn(fig, ax)[1])\nplt.close(fig)\n");
+  assert.deepEqual(out.trim().split("\n"), [
+    "A12b datalim, data 1.45 x 1 => ((-0.0725, 1.5225), (-0.0942661, 1.09427))",
+    "A15b datalim, ylim given inverted, data (0, 3, 0, 1) => ((-0.15, 3.15), (1.72952, -0.729516))",
+    "A15b datalim, xlim given inverted, data (0, 1, 0, 3) => ((2.71429, -1.71429), (-0.15, 3.15))",
+    "L2 datalim, log x, data (1, 3, 0, 1) => ((0.316567, 9.47667), (-0.05, 1.05))",
+    "L2 datalim, log x, data (1, 10, 0, 3) => ((0.019307, 517.947), (-0.15, 3.15))",
+    "L2 datalim, log x, data (1, 2, 1, 1000) !! ValueError Axis limits cannot be NaN or Inf",
+    "L3 datalim, log x, data (0, 10, 1, 2), limits (1, 100) (0, 3) => ((0.0970539, 1030.36), (0, 3))",
+    "L3 datalim, log x, data (-5, 10, 0, 4), limits (1, 1000) (0, 4) => ((0.0654662, 15275.1), (0, 4))",
+    "L5 log x 10^2.2..10^3.4: tick locations => (100, 1000, 10000)",
+    "L9-L11 figsize (2, 1.5): x ticks => (1e-10, 1, 1e+10, 1e+20, 1e+30)",
+    "L9-L11 figsize (2, 1.5): y ticks => (1e-06, 1, 1e+06, 1e+12, 1e+18, 1e+24)",
+    "L9-L11 figsize (8, 2): x ticks => (0.001, 1, 1000, 1e+06, 1e+09, 1e+12, 1e+15, 1e+18, 1e+21)",
+    "L9-L11 figsize (8, 2): y ticks => (1e-05, 1, 100000, 1e+10, 1e+15, 1e+20, 1e+25)",
+    "L9-L11 figsize (2, 8): x ticks => (1e-10, 1, 1e+10, 1e+20, 1e+30)",
+    "L9-L11 figsize (2, 8): y ticks => (0.001, 1, 1000, 1e+06, 1e+09, 1e+12, 1e+15, 1e+18, 1e+21)",
+    "L9-L11 figsize (1, 1): x ticks => (1e-20, 1, 1e+20, 1e+40)",
+    "L9-L11 figsize (1, 1): y ticks => (1e-20, 1, 1e+20, 1e+40)",
+    "L9-L11 figsize (0.6, 0.6): x ticks => (1e-20, 1, 1e+20, 1e+40)",
+    "L9-L11 figsize (0.6, 0.6): y ticks => (1e-20, 1, 1e+20, 1e+40)",
+    "P2 datalim drawn in the plain box => True",
+    "A4 colorbar (): its axes => (0.78375, 0.11, 0.11625, 0.77)",
+    "A4 colorbar (): the parent => (0.1675, 0.11, 0.5775, 0.77)",
+    "A4 colorbar (), drawn: its axes => (0.78375, 0.11, 0.028875, 0.77)",
+    "A4 colorbar ((location, left)): its axes => (0.125, 0.11, 0.11625, 0.77)",
+    "A4 colorbar ((location, left)): the parent => (0.31875, 0.11, 0.5775, 0.77)",
+    "A4 colorbar ((location, left)), drawn: its axes => (0.212375, 0.11, 0.028875, 0.77)",
+    "A4 colorbar ((location, top)): its axes => (0.125, 0.7645, 0.775, 0.1155)",
+    "A4 colorbar ((location, top)): the parent => (0.2815, 0.11, 0.462, 0.616)",
+    "A4 colorbar ((location, top)), drawn: its axes => (0.125, 0.7645, 0.775, 0.0516667)",
+    "A4 colorbar ((orientation, horizontal)): its axes => (0.125, 0.11, 0.775, 0.1155)",
+    "A4 colorbar ((orientation, horizontal)): the parent => (0.310375, 0.341, 0.40425, 0.539)",
+    "A4 colorbar ((orientation, horizontal)), drawn: its axes => (0.125, 0.173833, 0.775, 0.0516667)",
+    "A4 colorbar ((fraction, 0.3), (pad, 0.1)): its axes => (0.6675, 0.11, 0.2325, 0.77)",
+    "A4 colorbar ((fraction, 0.3), (pad, 0.1)): the parent => (0.125, 0.185, 0.465, 0.62)",
+    "A4 colorbar ((fraction, 0.3), (pad, 0.1)), drawn: its axes => (0.6675, 0.11, 0.028875, 0.77)",
+    "A4 colorbar ((shrink, 0.5)): its axes => (0.78375, 0.3025, 0.11625, 0.385)",
+    "A4 colorbar ((shrink, 0.5)): the parent => (0.1675, 0.11, 0.5775, 0.77)",
+    "A4 colorbar ((shrink, 0.5)), drawn: its axes => (0.78375, 0.3025, 0.0144375, 0.385)",
+    "A4 colorbar ((aspect, 10)): its axes => (0.78375, 0.11, 0.11625, 0.77)",
+    "A4 colorbar ((aspect, 10)): the parent => (0.1675, 0.11, 0.5775, 0.77)",
+    "A4 colorbar ((aspect, 10)), drawn: its axes => (0.78375, 0.11, 0.05775, 0.77)",
+    "A4 2x1, colorbar on the top one: its axes => (0.78375, 0.53, 0.11625, 0.35)",
+    "A4 2x1, colorbar on the top one: the parent => (0.4825, 0.53, 0.2625, 0.35)",
+    "A4 2x1, colorbar on the top one: the other => (0.125, 0.11, 0.775, 0.35)",
+    "A4 add_axes parent: colorbar axes => (0.61, 0.2, 0.09, 0.5)",
+    "A4 add_axes parent: the parent => (0.1, 0.2, 0.48, 0.5)",
+    "A4 two colorbars: the first => (0.78375, 0.11, 0.11625, 0.77)",
+    "A4 two colorbars: the second => (0.652, 0.11, 0.093, 0.77)",
+    "A4 two colorbars: the parent => (0.125, 0.11, 0.496, 0.77)",
+    "A4 two colorbars, drawn: the second => (0.652, 0.11, 0.028875, 0.77)",
+    "A14 datalim, limits given (0, 1) (0, 3) => ((-1.51299, 2.51299), (0, 3))",
+    "A14 datalim, limits given (0, 1) (0, 10) => ((-6.20996, 7.20996), (0, 10))",
+    "A19 widened => ((2, -1), True)",
+    "A19 set_xlim(0, 1) after => ((0, 1), False)",
+    "A19 drawn => (0, 1)",
+    "A19 invert_xaxis, autoscale(False), set_xticks widening => ((2, -1), True)",
+    "A19 ... drawn => (2, -1)",
+    "A4 add_subplot(gs[0, 0]) of 2x1 => (0.125, 0.53, 0.775, 0.35)",
+    "A4 add_subplot(gs[1, 0]) of 2x1 => (0.125, 0.11, 0.775, 0.35)",
+    "A19 set_xlim(left=0), invert_xaxis, set_xticks widening => ((2, -1), True)",
+    "A19 ... drawn => (2, -1)",
+  ]);
+});
