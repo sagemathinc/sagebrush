@@ -1,0 +1,79 @@
+{
+ "cases": [
+  {
+   "id": "fac-1",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] lo  hi  mid hi  lo \nLevels: hi lo mid\n"
+  },
+  {
+   "id": "fac-2",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] lo  hi  mid hi \nLevels: lo mid hi\n[1] \"lo\"  \"mid\" \"hi\" \n[1] 3\n[1] 1 3 2 3\n"
+  },
+  {
+   "id": "fac-3",
+   "status": 0,
+   "stderr": "",
+   "stdout": "\na b c \n3 1 1 \n"
+  },
+  {
+   "id": "fac-4",
+   "status": 0,
+   "stderr": "",
+   "stdout": "x y \n2 1 \n"
+  },
+  {
+   "id": "fac-5",
+   "status": 0,
+   "stderr": "",
+   "stdout": "x\n1 2 3 \n1 1 3 \n"
+  },
+  {
+   "id": "fac-6",
+   "status": 0,
+   "stderr": "",
+   "stdout": "f\na b c \n1 1 0 \n"
+  },
+  {
+   "id": "fac-7",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"u\" \"v\"\n"
+  },
+  {
+   "id": "fac-8",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] one two one\nLevels: one two\n"
+  },
+  {
+   "id": "fac-9",
+   "status": 0,
+   "stderr": "",
+   "stdout": "a b \n2 3 \n"
+  },
+  {
+   "id": "fac-10",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] (0,3]  (3,6]  (6,10]\nLevels: (0,3] (3,6] (6,10]\n"
+  },
+  {
+   "id": "fac-11",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] a\nLevels: a\n"
+  },
+  {
+   "id": "fac-12",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] a B a\nLevels: a B\n"
+  }
+ ],
+ "file": "rill-tests/fac/test_1.R",
+ "format": "rill-out",
+ "v": 1
+}
