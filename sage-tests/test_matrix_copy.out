@@ -1,0 +1,98 @@
+1
+NotImplementedError
+Rational Field copy | (1, 4, False, [0 1]
+[1 0])
+Rational Field mutable | (True, True)
+Rational Field copy of immutable | (0, 1, True, False)
+Rational Field deepcopy | (1, 7)
+Rational Field deepcopy of immutable | (False, False, True)
+Rational Field __copy__ | (0, 3)
+Rational Field subdivisions | (([1], [1]), ([], []))
+Rational Field entries set on a copy | ([1 2]
+[3 4], [9 2]
+[3 8])
+Rational Field hashes | (True, True)
+Integer Ring copy | (1, 4, False, [0 1]
+[1 0])
+Integer Ring mutable | (True, True)
+Integer Ring copy of immutable | (0, 1, True, False)
+Integer Ring deepcopy | (1, 7)
+Integer Ring deepcopy of immutable | (False, False, True)
+Integer Ring __copy__ | (0, 3)
+Integer Ring subdivisions | (([1], [1]), ([], []))
+Integer Ring entries set on a copy | ([1 2]
+[3 4], [9 2]
+[3 8])
+Integer Ring hashes | (True, True)
+Symbolic Ring copy | (1, 4, False, [0 1]
+[1 0])
+Symbolic Ring mutable | (True, True)
+Symbolic Ring copy of immutable | (0, 1, True, False)
+Symbolic Ring deepcopy | (1, 7)
+Symbolic Ring deepcopy of immutable | (False, False, True)
+Symbolic Ring __copy__ | (0, 3)
+Symbolic Ring subdivisions | (([1], [1]), ([], []))
+Symbolic Ring entries set on a copy | ([1 2]
+[3 4], [9 2]
+[3 8])
+Symbolic Ring hashes | (True, True)
+Real Double Field copy | (1.0, 4.0, False, [0.0 1.0]
+[1.0 0.0])
+Real Double Field deepcopy | (1.0, 7.0)
+Real Double Field __copy__ | (0.0, 3.0)
+Complex Double Field copy | (1.0, 4.0, False, [0.0 1.0]
+[1.0 0.0])
+Complex Double Field deepcopy | (1.0, 7.0)
+Complex Double Field __copy__ | (0.0, 3.0)
+Finite Field of size 5 copy | (1, 4, False, [0 1]
+[1 0])
+Finite Field of size 5 deepcopy | (1, 2)
+Finite Field of size 5 __copy__ | (0, 3)
+Finite Field in a of size 2^2 copy | (1, 0, False, [0 1]
+[1 0])
+Finite Field in a of size 2^2 deepcopy | (1, 1)
+Finite Field in a of size 2^2 __copy__ | (0, 1)
+Algebraic Field copy | (1, 4, False, [0 1]
+[1 0])
+Algebraic Field deepcopy | (1, 7)
+Algebraic Field __copy__ | (0, 3)
+Number Field in b with defining polynomial x^2 - 2 with b = 1.414213562373095? copy | (1, 4, False, [0 1]
+[1 0])
+Number Field in b with defining polynomial x^2 - 2 with b = 1.414213562373095? deepcopy | (1, 7)
+Number Field in b with defining polynomial x^2 - 2 with b = 1.414213562373095? __copy__ | (0, 3)
+Ring of integers modulo 6 copy | (1, 4, False, [0 1]
+[1 0])
+Ring of integers modulo 6 deepcopy | (1, 1)
+Ring of integers modulo 6 __copy__ | (0, 3)
+Rational Field eigenmatrix_right(B) | ERR NotImplementedError 'generalized eigenvector decomposition is implemented for RDF and CDF, but not for Rational Field'
+Rational Field eigenmatrix_left(B) | ERR NotImplementedError 'generalized eigenvector decomposition is implemented for RDF and CDF, but not for Rational Field'
+Rational Field eigenvectors_right(B) | ERR NotImplementedError 'generalized eigenvector decomposition is implemented for RDF and CDF, but not for Rational Field'
+Rational Field eigenvectors_left(B) | ERR NotImplementedError 'generalized eigenvector decomposition is implemented for RDF and CDF, but not for Rational Field'
+Rational Field eigenmatrix_right(other=B) | ERR NotImplementedError 'generalized eigenvector decomposition is implemented for RDF and CDF, but not for Rational Field'
+Rational Field eigenvectors_left(other=B) | ERR NotImplementedError 'generalized eigenvector decomposition is implemented for RDF and CDF, but not for Rational Field'
+Integer Ring eigenmatrix_right(B) | ERR NotImplementedError 'generalized eigenvector decomposition is implemented for RDF and CDF, but not for Integer Ring'
+Integer Ring eigenmatrix_left(B) | ERR NotImplementedError 'generalized eigenvector decomposition is implemented for RDF and CDF, but not for Integer Ring'
+Integer Ring eigenvectors_right(B) | ERR NotImplementedError 'generalized eigenvector decomposition is implemented for RDF and CDF, but not for Integer Ring'
+Integer Ring eigenvectors_left(B) | ERR NotImplementedError 'generalized eigenvector decomposition is implemented for RDF and CDF, but not for Integer Ring'
+Integer Ring eigenmatrix_right(other=B) | ERR NotImplementedError 'generalized eigenvector decomposition is implemented for RDF and CDF, but not for Integer Ring'
+Integer Ring eigenvectors_left(other=B) | ERR NotImplementedError 'generalized eigenvector decomposition is implemented for RDF and CDF, but not for Integer Ring'
+Symbolic Ring eigenmatrix_right(B) | ERR NotImplementedError 'generalized eigenvector decomposition is implemented for RDF and CDF, but not for Symbolic Ring'
+Symbolic Ring eigenmatrix_left(B) | ERR NotImplementedError 'generalized eigenvector decomposition is implemented for RDF and CDF, but not for Symbolic Ring'
+Symbolic Ring eigenvectors_right(B) | ERR NotImplementedError 'generalized eigenvector decomposition is implemented for RDF and CDF, but not for Symbolic Ring'
+Symbolic Ring eigenvectors_left(B) | ERR NotImplementedError 'generalized eigenvector decomposition is implemented for RDF and CDF, but not for Symbolic Ring'
+Symbolic Ring eigenmatrix_right(other=B) | ERR NotImplementedError 'generalized eigenvector decomposition is implemented for RDF and CDF, but not for Symbolic Ring'
+Symbolic Ring eigenvectors_left(other=B) | ERR NotImplementedError 'generalized eigenvector decomposition is implemented for RDF and CDF, but not for Symbolic Ring'
+Rational Field eigenvalues(B) (B is extend) | [2, 1]
+Rational Field eigenmatrix_right(None) | ([2 0]
+[0 1], [0 1]
+[1 0])
+Rational Field eigenmatrix_left(None) | ([2 0]
+[0 1], [0 1]
+[1 0])
+Integer Ring eigenvalues(B) (B is extend) | [2, 1]
+Integer Ring eigenmatrix_right(None) | ([2 0]
+[0 1], [0 1]
+[1 0])
+Integer Ring eigenmatrix_left(None) | ([2 0]
+[0 1], [0 1]
+[1 0])
