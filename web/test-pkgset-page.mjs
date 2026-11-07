@@ -19,6 +19,7 @@ import { createServer, request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort, freePort } from "./test-port.mjs";
+import { allowFiles } from "./test-allow.mjs";
 
 const here = new URL(".", import.meta.url).pathname;
 const root = join(here, "..");
@@ -103,7 +104,16 @@ async function chromium() {
     const cell = (k) => `document.querySelectorAll('.cell')[${k}]`;
     return {
       errors, ev, until, send,
-      open: async (url) => { await send("Page.navigate", { url }); return until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000); },
+      // (?runner=0, the page's own interpreter: a notebook gets it only once it may change files, which every notebook
+      // starts without (confinement 1b), so the person allows it, as a person does, and its interpreter starts)
+      open: async (url) => {
+        await send("Page.navigate", { url });
+        if (!(await until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000))) return false;
+        await allowFiles(send, ev);
+        return until("sagebrush.kernel.ready", 60000);
+      },
+      // (a new notebook made in the page starts off too: the person allows it, and its interpreter starts)
+      allow: async () => { await allowFiles(send, ev); return until("sagebrush.kernel.ready", 60000); },
       reload: () => send("Page.reload", { ignoreCache: false }),
       // a run asked for in a new last cell (not waited for): its index
       startRun: async (code) => {
@@ -191,6 +201,7 @@ const fetched = (s, S) => s.asked.includes(`/pkgset/${S}.json`);
     const A = await t.ev("localStorage.getItem('sagebrush-current')");
     await t.ev("document.querySelector('#filemenu [data-f=new]').click()");
     ok(await t.until(`localStorage.getItem('sagebrush-current') !== ${JSON.stringify(A)}`, 10000), "another notebook is shown");
+    await t.allow();
     s.answer(S1);
     await sleep(1500);
     // (the new notebook resolves for itself: its own run pins and uses the set)
@@ -303,6 +314,7 @@ const fetched = (s, S) => s.asked.includes(`/pkgset/${S}.json`);
         await t.ev("document.querySelector('#filemenu [data-f=new]').click()");
         await t.until(`localStorage.getItem('sagebrush-current') !== ${JSON.stringify(before)}`, 10000);
         await t.until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000);
+        await t.allow();
       }
       const k = await t.startRun(HELLO);
       await t.done(k);
