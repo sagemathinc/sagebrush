@@ -101,6 +101,19 @@ class table:
         Traceback (most recent call last):
         ...
         IndexError: list index out of range
+
+    A notebook shows its HTML, or none for such a table (its text instead);
+    a value's own error is never hidden::
+
+        sage: table([[1, 2], []])._repr_html_() is None  # sagebrush only
+        True
+        sage: class Bad:  # sagebrush only
+        ....:     def _latex_(self):
+        ....:         raise IndexError("cell failure")
+        sage: table([[Bad()]])._repr_html_()  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        IndexError: cell failure
     """
 
     def __init__(self, rows=None, columns=None, header_row=False, header_column=False, frame=False, align="left"):
@@ -290,11 +303,11 @@ class table:
         return "\n".join(out)
 
     def _repr_html_(self):
-        # (none where Sage's HTML is an error, a row with no entries: the display falls back to the text)
-        try:
-            return self._html_()
-        except IndexError:
+        # (none for a row with no entries, where Sage's HTML is an error, so a display falls back to the text;
+        # any other error, a value's own, is raised: daybreak3's TABLE-REPR-1, the class's examples)
+        if any(not r for r in self._rows):
             return None
+        return self._html_()
 
     # ---- Markdown (Sagebrush's notebook: its Markdown output typesets $...$)
     def _repr_markdown_(self):
