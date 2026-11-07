@@ -30,18 +30,18 @@ test("shutil_cases.py: os's descriptors, chmod, utime and access, Path.touch, sh
 
 // (what differs from CPython by design, Sagebrush's own: no call takes a descriptor in place of a path, or dir_fd,
 // so supports_fd and supports_dir_fd are empty; dir_fd is NotImplementedError, as on a platform without it)
-test("os: supports_fd and supports_dir_fd empty, dir_fd refused, posix exactly os's reviewed functions", () => {
+test("os: supports_fd and supports_dir_fd empty, dir_fd refused (open, chmod, utime, access, stat, lstat), posix exactly os's reviewed functions", () => {
   const out = execFileSync(process.execPath, [CLI, "-c", [
     "import os, posix",
     "print(len(os.supports_fd), len(os.supports_dir_fd), sorted(f.__name__ for f in os.supports_follow_symlinks))",
-    "for f in [lambda: os.open('x', os.O_RDONLY, dir_fd=3), lambda: os.chmod('x', 0o600, dir_fd=3), lambda: os.utime('x', dir_fd=3), lambda: os.access('x', os.F_OK, dir_fd=3)]:",
+    "for f in [lambda: os.open('x', os.O_RDONLY, dir_fd=3), lambda: os.chmod('x', 0o600, dir_fd=3), lambda: os.utime('x', dir_fd=3), lambda: os.access('x', os.F_OK, dir_fd=3), lambda: os.stat('x', dir_fd=3), lambda: os.lstat('x', dir_fd=3)]:",
     "    try: f()",
     "    except NotImplementedError as e: print('NotImplementedError', e)",
     "print(all(getattr(posix, n) is getattr(os, n) for n in dir(posix) if not n.startswith('__') and n != 'error'), hasattr(posix, 'environ'), hasattr(posix, 'path'))",
   ].join("\n")], { encoding: "utf8" });
   assert.equal(out, [
     "0 0 ['access', 'stat', 'utime']",
-    ...Array(4).fill("NotImplementedError dir_fd unavailable on this platform"),
+    ...Array(6).fill("NotImplementedError dir_fd unavailable on this platform"),
     "True False False",
     "",
   ].join("\n"));

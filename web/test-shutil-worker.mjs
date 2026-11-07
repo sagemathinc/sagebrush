@@ -197,6 +197,11 @@ try {
     "print(u(lambda: os.open('keep.txt', os.O_RDONLY | os.O_DIRECTORY)), u(lambda: os.open('dir', os.O_RDONLY)), u(lambda: os.open('keep.txt', os.O_RDONLY | os.O_TRUNC)), u(lambda: os.open('keep.txt', os.O_RDONLY, dir_fd=3)), u(lambda: os.open('keep.txt', 3)))",
     "print(u(lambda: os.utime('keep.txt', (1, 2), ns=(1, 2))), u(lambda: os.utime('keep.txt', dir_fd=3)), u(lambda: os.chmod('keep.txt', 0o600, dir_fd=3)))",
     "print(open('keep.txt').read(), os.stat('keep.txt').st_mtime == st1.st_mtime, os.stat('keep.txt').st_mode == st1.st_mode)",
+    "for f in [lambda: os.stat('keep.txt', dir_fd=3), lambda: os.lstat('keep.txt', dir_fd=3)]:",
+    "    try:",
+    "        f(); print('done')",
+    "    except NotImplementedError as e:",
+    "        print('NotImplementedError', e)",
   ].join("\n");
   const d = await run("perm", UNSUP);
   ranOk(d, "the unsupported calls");
@@ -204,6 +209,7 @@ try {
   check(dl[0] === "NotImplementedError NotImplementedError NotImplementedError NotImplementedError OSError", `O_DIRECTORY, a folder, O_TRUNC read-only and dir_fd: NotImplementedError; access mode 3: EINVAL (${dl[0]})`);
   check(dl[1] === "ValueError NotImplementedError NotImplementedError", `utime's times with ns: ValueError; dir_fd: NotImplementedError (${dl[1]})`);
   check(dl[2] === "Kept True True", `none of them changed anything (${dl[2]})`);
+  check(dl[3] === "NotImplementedError dir_fd unavailable on this platform" && dl[4] === dl[3], `os.stat and os.lstat with dir_fd: NotImplementedError (${dl[3]}; ${dl[4]})`);
   check((await log("perm")).changed.length === 0, "the page was told of no change for them");
 
   // ---- the bounds (design note §Allocations, astra's OPEN-FLAGS-1): flags beyond a C int refused before any effect; a
