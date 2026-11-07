@@ -639,7 +639,7 @@ fn singular_args(z: &Expr, x: &str, out: &mut Vec<Expr>) {
             // has a positive real part, which a double rounds to 0: CSOL-F16)
             match k {
                 crate::num::Num::Exact(a, _) => !a.is_positive(),
-                crate::num::Num::Float(re, _) => *re <= 0.0,
+                crate::num::Num::Float(re, _, _) => *re <= 0.0,
             }
         });
         if nonpositive && !b.is_const(Const::E) && !out.contains(b) {

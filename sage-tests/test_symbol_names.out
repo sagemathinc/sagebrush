@@ -1,0 +1,35 @@
+SR.var('a{b') -> ValueError: The name "a{b" is not a valid Python identifier.
+var('a{b') -> ValueError: The name "a{b" is not a valid Python identifier.
+SR.var('for') -> ValueError: The name "for" is not a valid Python identifier.
+var('for') -> ValueError: The name "for" is not a valid Python identifier.
+SR.var('lambda') -> ValueError: The name "lambda" is not a valid Python identifier.
+var('lambda') -> ValueError: The name "lambda" is not a valid Python identifier.
+SR.var('None') -> ValueError: The name "None" is not a valid Python identifier.
+var('None') -> ValueError: The name "None" is not a valid Python identifier.
+SR.var('1a') -> ValueError: The name "1a" is not a valid Python identifier.
+var('1a') -> ValueError: The name "1a" is not a valid Python identifier.
+SR.var('_a') -> _a
+var('_a') -> _a
+SR.var('a b') -> (a, b)
+var('a b') -> (a, b)
+SR.var('a,b') -> (a, b)
+var('a,b') -> (a, b)
+SR.var('x y{') -> ValueError: The name "y{" is not a valid Python identifier.
+var('x y{') -> ValueError: The name "y{" is not a valid Python identifier.
+SR.var('变') -> 变
+var('变') -> 变
+SR.var('αβ') -> αβ
+var('αβ') -> αβ
+SR.var('a.b') -> ValueError: The name "a.b" is not a valid Python identifier.
+var('a.b') -> ValueError: The name "a.b" is not a valid Python identifier.
+SR.var('a-b') -> ValueError: The name "a-b" is not a valid Python identifier.
+var('a-b') -> ValueError: The name "a-b" is not a valid Python identifier.
+SR.var('') -> ValueError: You need to specify the name of the new variable.
+var('') -> ValueError: You need to specify the name of the new variable.
+'变{' True True
+'{变' True True
+'a{变' True True
+'变{d' True True
+'α{{' True True
+'f' True True
+True True

@@ -455,7 +455,7 @@ class EisensteinExtensionGeneric:
     def __getitem__(self, names):
         if isinstance(names, list):
             import _sage_series
-            return _sage_series.PowerSeriesRing(self, names[0] if names else "x")
+            return _sage_series._series_ring_from_list(self, names)
         raise NotImplementedError("polynomial rings over p-adic extensions are not available in sagebrush yet")
 
     # --------------------------------------------------------- conversion

@@ -16,8 +16,8 @@ fn cpow(b: C, x: C) -> C {
     if b.1 == 0.0 && x.1 == 0.0 && (b.0 >= 0.0 || x.0.fract() == 0.0) {
         return (b.0.powf(x.0), 0.0);
     }
-    match crate::expr::float_pow(&Num::Float(b.0, b.1), &Num::Float(x.0, x.1)) {
-        Num::Float(a, c) => (a, c),
+    match crate::expr::float_pow(&Num::fl(b.0, b.1, crate::num::Fk::RR), &Num::fl(x.0, x.1, crate::num::Fk::RR)) {
+        Num::Float(a, c, _) => (a, c),
         n => n.to_c64(),
     }
 }
@@ -91,7 +91,8 @@ pub fn n(e: &Expr) -> Expr {
         value_error("cannot evaluate symbolic expression numerically");
     }
     match to_c64(e) {
-        Some((a, b)) => num(if b == 0.0 { Num::float(a) } else { Num::Float(a, b) }),
+        // (an element of RR or CC, as Sage's n())
+        Some((a, b)) => num(Num::fl(a, b, crate::num::Fk::RR)),
         None => value_error("cannot evaluate symbolic expression numerically"),
     }
 }
