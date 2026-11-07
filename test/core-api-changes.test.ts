@@ -76,3 +76,48 @@ test("--check reports a stale entry (checkErrors, what the CLI's --check runs): 
   assert.match(C.checkErrors(surface(NEW), surface(NEW), [entry()], { api: 1, level: 4 }, 100).join(), /src\/pkgset\.ts has CORE_API 1 level 4/);
   assert.match(C.checkErrors(surface(NEW), surface(NEW), [entry()], consts, 10 * 1024 * 1024).join(), /over its caps/);
 });
+
+// (reviewed REMOVALS, upstream's: @sagebrush's ruling on P3b-1, Nov 7. CPython 3.14.10's pathlib no longer has
+// PureWindowsPath.ntpath, a class attribute 3.14.4's class body made with `import ntpath`)
+const withMember = (members: object) => ({
+  format: "sagebrush-core-api", api: 1, level: 5, prefixes: [],
+  modules: { m: { since: 1, names: { C: { kind: "class", since: 1, members }, k: { kind: "module", since: 1 } } } },
+});
+const removal = (over: object = {}) => ({ name: "m.C.ntpath", old: "(module)", new: "(absent)", upstream: "CPython 3.14.10", reason: "r", pr: 1, ...over });
+
+test("a listed removal is recorded exactly (the member goes, the level rises); unlisted removals still fail", () => {
+  const before = withMember({ ntpath: { kind: "module", since: 1 }, keep: { kind: "module", since: 1 } });
+  const after = withMember({ keep: { kind: "module", since: 1 } });
+  const r = C.merge(before, after, 6, [removal()]);
+  assert.deepEqual(r.problems, []);
+  assert.equal(r.added, 1);
+  assert.equal("ntpath" in r.api.modules.m.names.C.members, false);
+  // (without the entry, the same removal fails)
+  assert.deepEqual(C.merge(before, after, 6, []).problems, ["m.C.ntpath: removed"]);
+  // (an unlisted member removed beside the listed one: still a problem, the listed one isn't)
+  assert.deepEqual(C.merge(before, withMember({}), 6, [removal()]).problems, ["m.C.keep: removed"]);
+  // (a module-level name, listed and unlisted)
+  const noK = { ...after, modules: { m: { since: 1, names: { C: after.modules.m.names.C } } } };
+  assert.deepEqual(C.merge(after, noK, 6, [removal({ name: "m.k" })]).problems, []);
+  assert.deepEqual(C.merge(after, noK, 6, [removal()]).problems, ["m.k: removed"]);
+});
+
+test("a removal entry applies only to its exact name and kind", () => {
+  const before = withMember({ ntpath: { kind: "module", since: 1 } });
+  const after = withMember({});
+  // (another kind: the recorded member is a module, the entry says function)
+  assert.deepEqual(C.merge(before, after, 6, [removal({ old: "(function)" })]).problems, ["m.C.ntpath: removed"]);
+  // (another name)
+  assert.deepEqual(C.merge(before, after, 6, [removal({ name: "m.C.other" })]).problems, ["m.C.ntpath: removed"]);
+  // (a signature entry for the name, not a removal, doesn't remove it)
+  assert.deepEqual(C.merge(before, after, 6, [entry({ name: "m.C.ntpath" })]).problems, ["m.C.ntpath: removed"]);
+});
+
+test("a removal entry's shape: the kind in parentheses and the upstream release that removed it", () => {
+  const doc = (changes: object[]) => JSON.stringify({ format: "sagebrush-core-api-changes", changes });
+  assert.equal(C.readChanges(doc([removal()])).length, 1);
+  for (const bad of [{ upstream: undefined }, { upstream: "" }, { old: "module" }, { old: "(m o)" }, { reason: "" }, { pr: "1" }]) assert.throws(() => C.readChanges(doc([removal(bad)])), /a bad entry/);
+  // (one already applied is not stale; one whose member is still recorded is)
+  assert.deepEqual(C.staleChanges(withMember({}), [removal()]), []);
+  assert.equal(C.staleChanges(withMember({ ntpath: { kind: "module", since: 1 } }), [removal()]).length, 1);
+});

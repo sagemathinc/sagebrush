@@ -269,7 +269,11 @@ export function readChanges(text) {
   if (doc?.format !== "sagebrush-core-api-changes" || !Array.isArray(list)) throw new Error("core-api-changes.json: not {format: 'sagebrush-core-api-changes', changes: [...]}");
   for (const c of list) {
     const ok = c && typeof c.name === "string" && typeof c.old === "string" && typeof c.new === "string" && c.old !== c.new && typeof c.reason === "string" && c.reason && Number.isInteger(c.pr);
-    if (!ok) throw new Error(`core-api-changes.json: a bad entry ${JSON.stringify(c).slice(0, 200)}`);
+    // (a reviewed removal, upstream's: new "(absent)", old the removed entry's kind in parentheses, and the upstream
+    // release that removed it; @sagebrush's ruling on P3b-1, Nov 7)
+    const removal = c?.new === "(absent)";
+    const okRemoval = !removal || (/^\([a-z]+\)$/.test(c.old) && typeof c.upstream === "string" && c.upstream !== "");
+    if (!ok || !okRemoval) throw new Error(`core-api-changes.json: a bad entry ${JSON.stringify(c).slice(0, 200)}`);
   }
   if (new Set(list.map((c) => c.name)).size !== list.length) throw new Error("core-api-changes.json: two entries for one name");
   return list;
@@ -320,6 +324,11 @@ export function merge(recorded, gen, newLevel, changes = []) {
     if (w.added) added++;
     return w.params;
   };
+  // (a removed name or member: a problem, unless a reviewed removal names exactly it and its kind)
+  const removed = (where, r) => {
+    if (changes.some((c) => c.new === "(absent)" && c.name === where && c.old === `(${r?.kind})`)) added++;
+    else problems.push(`${where}: removed`);
+  };
   const mergeEntry = (where, r, g) => {
     const since = sinceOf(r, newLevel);
     if (!r) added++;
@@ -329,7 +338,7 @@ export function merge(recorded, gen, newLevel, changes = []) {
     if (g.members !== undefined) {
       e.members = {};
       for (const [n, gm] of Object.entries(g.members)) e.members[n] = mergeEntry(`${where}.${n}`, r?.members?.[n], gm);
-      for (const n of Object.keys(r?.members ?? {})) if (!Object.hasOwn(g.members, n)) problems.push(`${where}.${n}: removed`);
+      for (const n of Object.keys(r?.members ?? {})) if (!Object.hasOwn(g.members, n)) removed(`${where}.${n}`, r.members[n]);
     }
     return e;
   };
@@ -338,7 +347,7 @@ export function merge(recorded, gen, newLevel, changes = []) {
     if (!rm) added++;
     const names = {};
     for (const [n, ge] of Object.entries(gm.names)) names[n] = mergeEntry(`${m}.${n}`, rm?.names?.[n], ge);
-    for (const n of Object.keys(rm?.names ?? {})) if (!Object.hasOwn(gm.names, n)) problems.push(`${m}.${n}: removed`);
+    for (const n of Object.keys(rm?.names ?? {})) if (!Object.hasOwn(gm.names, n)) removed(`${m}.${n}`, rm.names[n]);
     out.modules[m] = { since: sinceOf(rm, newLevel), names };
   }
   for (const m of Object.keys(recorded?.modules ?? {})) if (!Object.hasOwn(gen.modules, m)) problems.push(`module ${m}: removed`);
