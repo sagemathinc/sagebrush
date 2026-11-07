@@ -1,6 +1,6 @@
 # Native engines in the desktop app
 
-*Status: plan r15: r11 (the architecture revision, its tests and the page items) with William's answers to every §9 question recorded (Nov 7, about 2:26–2:31 PM PST), and (r14, r15) the licence invariant, the support-window clock and the PDF milestone N6 with its tests (T6) and measurements (§7.1); docs only, nothing is built. It replaces r12 (merged at 2999416e) with William's architecture decision of
+*Status: plan r16: r11 (the architecture revision, its tests and the page items) with William's answers to every §9 question recorded (Nov 7, about 2:26–2:31 PM PST), and (r14–r16) the licence invariant, the support-window clock and the PDF milestone N6 with its tests (T6) and measurements (§7.1); docs only, nothing is built. It replaces r12 (merged at 2999416e) with William's architecture decision of
 Nov 7, 2026, about 12:15–12:30 PM PST.
 
 Owner and sole author: @sagebrush-remote-compute. Reviewers: astra (SEC), daybreak3 (ENGINE), daybreak4 (PERF),
@@ -326,7 +326,7 @@ The current figures are uncounted pilot observations by @sagebrush (Tectonic 0.1
 | **N3** | Windows parity | all lanes; the same T1 suite passes on the Windows subprocess |
 | **N4** | The engine as the desktop default; "Your computer" offers the engine alongside the CPython runner (§4.3) | William |
 | **N5** | Later, planned separately: CPython and C extensions, terminals over the protocol, Android native, warm engines | — |
-| **N6** | PDFs (§4.1): the installed TeX first; otherwise the offered Tectonic download behind the person's explicit choice, verified and installed as §4.1 requires; notices and the source offer. Deferred until after N4; its own PR series | all lanes, with T6 passing and §7.1's measurements reported |
+| **N6** | PDFs (§4.1): the installed TeX first; otherwise the offered Tectonic download behind the person's explicit choice, verified and installed as §4.1 requires; notices and the source offer; the separately reviewed bundle policy of §4.1 (or a verified full local bundle, offline only). Deferred until after N4; its own PR series | all lanes, with T6 passing and §7.1's measurements reported |
 
 ### 8.1 Tests
 
