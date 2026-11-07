@@ -97,7 +97,27 @@ LaurentSeriesRing(QQ, 3, ('s', 't')) -> ValueError: variable name '3' does not s
 LaurentSeriesRing(QQ, 2, '') -> ValueError: variable name '0' does not start with a letter
 LaurentSeriesRing(QQ, 2, '12') -> ValueError: variable name '120' does not start with a letter
 LaurentSeriesRing(QQ, 2, 'a{b') -> ValueError: variable name 'a{b0' is not alphanumeric
+LaurentSeriesRing(QQ, 2, 'x,') -> ValueError: variable name must be nonempty
+LaurentSeriesRing(QQ, 2, 'x,12') -> ValueError: variable name '12' does not start with a letter
 LaurentSeriesRing(QQ, 1, 'x') -> TypeError: Input does not coerce to any of the expected rings.
+LaurentSeriesRing(QQ, 1, 'x,y') -> IndexError: the number of names must equal the number of generators
+LaurentSeriesRing(QQ, 1, ('s', 't')) -> ValueError: variable name '1' does not start with a letter
+LaurentSeriesRing(QQ, 1, 'a{b') -> ValueError: variable name 'a{b' is not alphanumeric
+LaurentSeriesRing(QQ, 1, '12') -> ValueError: variable name '12' does not start with a letter
+LaurentSeriesRing(QQ, 1, '') -> ValueError: variable name must be nonempty
+LaurentSeriesRing(QQ, 1, 'x,') -> ValueError: variable name must be nonempty
 LaurentSeriesRing(QQ, -1, 'x') -> TypeError: Input does not coerce to any of the expected rings.
+LaurentSeriesRing(QQ, -1, 'x,y,z') -> Laurent Series Ring in x over Rational Field
+LaurentSeriesRing(QQ, -1, ['t']) -> ValueError: variable name '-1' is not alphanumeric
+LaurentSeriesRing(QQ, -1, '12') -> ValueError: variable name '12' does not start with a letter
+LaurentSeriesRing(QQ, -1, '') -> ValueError: variable name must be nonempty
+LaurentSeriesRing(QQ, -2, 'x') -> TypeError: Input does not coerce to any of the expected rings.
+LaurentSeriesRing(QQ, -2, 'x,y') -> Laurent Series Ring in x over Rational Field
+LaurentSeriesRing(QQ, -2, ('s', 't')) -> ValueError: variable name '-2' is not alphanumeric
+LaurentSeriesRing(QQ, -2, 'a{b') -> ValueError: variable name 'a{b' is not alphanumeric
+LaurentSeriesRing(QQ, -5, 'xyz') -> TypeError: Input does not coerce to any of the expected rings.
+LaurentSeriesRing(QQ, -5, '12') -> ValueError: variable name '12' does not start with a letter
+LaurentSeriesRing(QQ, -5, 'x,12') -> ValueError: variable name '12' does not start with a letter
+LaurentSeriesRing(QQ, -100, 'x,y') -> Laurent Series Ring in x over Rational Field
 PowerSeriesRing(QQ, 3, 'a{b') -> ValueError: variable name 'a{b0' is not alphanumeric
 PowerSeriesRing(QQ, 2, '1x') -> ValueError: variable name '1x0' does not start with a letter

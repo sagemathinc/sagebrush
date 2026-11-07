@@ -17,6 +17,7 @@ show(lambda: QQ[['x', 'y']])
 show(lambda: Qp(5)['x,y'])
 show(lambda: Zp(5)[('x', 'y')])
 show(lambda: Zp(5)[['x,y']])
+show(lambda: LaurentSeriesRing(QQ, 0, 'x'))
 import _sage_series
 print(sorted(k[2] for k in _sage_series._RINGS if k[0] == "P"))
 # A huge count makes no list of names (SERIES-NAME-WORK-3): with the materializer and range() made to fail, the

@@ -27,7 +27,9 @@ for K in [Qp(5), Zp(5)]:
     show("%s[['x']]" % K, lambda: K[['x']])
 # A count first (astra's and daybreak3's SERIES-NAME-WORK-3: only the first name is made, never the list): a Laurent
 # series ring is in the first generated name, x0, or the first letter of n letters, or the first of exactly n given names
-for n, nm in [(2, 'x'), (3, 'x'), (3, 'xyz'), (2, 'x,y'), (3, 'x,y'), (2, ['t']), (2, ('s', 't')), (3, ('s', 't')), (2, ''), (2, '12'), (2, 'a{b'), (1, 'x'), (-1, 'x')]:
+for n, nm in [(2, 'x'), (3, 'x'), (3, 'xyz'), (2, 'x,y'), (3, 'x,y'), (2, ['t']), (2, ('s', 't')), (3, ('s', 't')), (2, ''), (2, '12'), (2, 'a{b'), (2, 'x,'), (2, 'x,12'),
+              (1, 'x'), (1, 'x,y'), (1, ('s', 't')), (1, 'a{b'), (1, '12'), (1, ''), (1, 'x,'), (-1, 'x'), (-1, 'x,y,z'), (-1, ['t']), (-1, '12'), (-1, ''),
+              (-2, 'x'), (-2, 'x,y'), (-2, ('s', 't')), (-2, 'a{b'), (-5, 'xyz'), (-5, '12'), (-5, 'x,12'), (-100, 'x,y')]:
     show("LaurentSeriesRing(QQ, %r, %r)" % (n, nm), lambda: LaurentSeriesRing(QQ, n, nm))
 show("PowerSeriesRing(QQ, 3, 'a{b')", lambda: PowerSeriesRing(QQ, 3, 'a{b'))
 show("PowerSeriesRing(QQ, 2, '1x')", lambda: PowerSeriesRing(QQ, 2, '1x'))

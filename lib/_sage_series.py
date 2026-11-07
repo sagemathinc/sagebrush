@@ -53,22 +53,35 @@ def _first_counted(n, src, laurent):
     a power series ring with a count is multivariate, refused by the caller."""
     import _sage_poly
     if laurent:
-        # (Sage 10.10, probed: a count of 1 or -1, and a tuple or list of
-        # names, take other paths with these errors)
-        if isinstance(src, (list, tuple)) and n >= 2:
-            raise ValueError("variable name %r does not start with a letter" % (str(n),))
-        if n in (1, -1):
-            raise TypeError("Input does not coerce to any of the expected rings.")
-        if n < -1 or n == 0 or isinstance(src, (list, tuple)):
-            # (Sage's LaurentSeriesRing(QQ, 0, 'x') is a ring that cannot print itself)
-            raise NotImplementedError("LaurentSeriesRing with %r and the names %r is not available in sagebrush yet" % (n, src))
+        # (as Sage 10.10, probed for counts 2, 3, 1 and -1 to -100: a tuple or list
+        # fails on the count read as a name; names after commas are each checked,
+        # then a positive count must match them; a count of 1 or less takes one
+        # name, checked, and then fails to coerce)
+        if n == 0:
+            # (Sage makes a ring that cannot print itself: L39)
+            raise NotImplementedError("LaurentSeriesRing with a count of 0 is not available in sagebrush yet")
+        if isinstance(src, (list, tuple)):
+            _check_generated(str(n))
+        if not isinstance(src, str):
+            raise NotImplementedError("LaurentSeriesRing with the names %r is not available in sagebrush yet" % (src,))
+        if "," in src:
+            parts = [t.strip() for t in src.split(",")]
+            for t in parts:
+                _check_generated(t)
+            if n >= 1 and len(parts) != n:
+                raise IndexError("the number of names must equal the number of generators")
+            return parts[0]
+        if n >= 2:
+            if len(src) == n and src.isalpha():
+                return src[0]
+            _check_generated(src + "0")
+            return src + "0"
+        _check_generated(src)
+        raise TypeError("Input does not coerce to any of the expected rings.")
     if not isinstance(src, str):
         return None
     if "," in src:
-        parts = [t.strip() for t in src.split(",")]
-        if laurent and len(parts) != n:
-            raise IndexError("the number of names must equal the number of generators")
-        return _sage_poly.ring_names(parts)[0]
+        return _sage_poly.ring_names([t.strip() for t in src.split(",")])[0]
     if len(src) == n and src.isalpha():
         return src[0]
     _check_generated(src + "0")

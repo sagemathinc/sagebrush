@@ -12,7 +12,10 @@ test("multivariate series and p-adic polynomial rings are refused before a ring 
   const S = "NotImplementedError: multivariate power series rings are not available in sagebrush yet";
   const P = "NotImplementedError: multivariate polynomial rings over p-adic rings are not available in sagebrush yet";
   assert.deepEqual(out.trim().split("\n"), [
-    S, S, S, S, S, S, S, S, P, P, S, "[]",
+    S, S, S, S, S, S, S, S, P, P, S,
+    // (a count of 0: Sage makes a ring that cannot print itself; refused here, L39)
+    "NotImplementedError: LaurentSeriesRing with a count of 0 is not available in sagebrush yet",
+    "[]",
     // (a huge count with the name list's materializer made to fail: SERIES-NAME-WORK-3)
     "Laurent Series Ring in x0 over Rational Field",
     S,
