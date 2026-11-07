@@ -453,8 +453,11 @@ export function interactNote(spec: any): string {
     values.push(!c.label && /^_w\d+$/.test(c.name) ? v : `${name}=${v}`);
   }
   if (more) values.push(`and ${more} more`);
-  const who = spec?.name === "widgets_changed" ? "these widgets keep their values" : `${String(spec?.name ?? "f").slice(0, 40)} ran once with its default values`;
-  return `[Jupyter shows no controls for this yet: ${who}${values.length ? ": " + values.join(", ") : ""}]`;
+  // (it is this kernel, not Jupyter, that can't draw them yet: front ends draw widgets for kernels speaking their protocol)
+  const said = spec?.name === "widgets_changed"
+    ? "The Sagebrush kernel can't show these widgets' controls in Jupyter yet; they keep their values"
+    : `The Sagebrush kernel can't show interact controls in Jupyter yet, so ${String(spec?.name ?? "f").slice(0, 40)} ran once with its default values`;
+  return `[${said}${values.length ? ": " + values.join(", ") : ""}]`;
 }
 
 export function kernelWorker(mode: Mode) {

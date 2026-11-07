@@ -148,7 +148,7 @@ check("!ls is refused", r["status"] == "error" and "shell commands are not avail
 r, m = run(kc, "@interact\ndef pairing(u=slider(0,4,1,2), v=slider(0,4,1,1), k=['a', 'b'], g=True):\n    print((2*u+v)/3, k, g)")
 out = "".join(c["text"] for c in of(m, "stream") if c["name"] == "stdout")
 check("@interact: a note, then its run at the defaults", r["status"] == "ok" and out ==
-      "[Jupyter shows no controls for this yet: pairing ran once with its default values: u=2, v=1, k='a', g=True]\n5/3 a True\n", (r["status"], out))
+      "[The Sagebrush kernel can't show interact controls in Jupyter yet, so pairing ran once with its default values: u=2, v=1, k='a', g=True]\n5/3 a True\n", (r["status"], out))
 # (the note is bounded: a name past 40 characters, a value past 60, and past 12 values, counted; astra's NOTE-NAME-1)
 r, m = run(kc, "interact(lambda **kw: None, **{'v' * 8192: checkbox(True, label=''), 's': input_box('w' * 500), **{'c%d' % i: True for i in range(20)}})")
 out = "".join(c["text"] for c in of(m, "stream") if c["name"] == "stdout")
@@ -170,13 +170,13 @@ check("python mode", of(m, "execute_result")[0]["data"]["text/plain"] == "(8, 3.
 r, m = run(kc, "from ipywidgets import interact\n@interact(n=(1, 10), kind=['sin', 'cos'], x=0.5)\ndef f(n=3, kind='cos', x=0.5):\n    print(n, kind, x)")
 out = "".join(c["text"] for c in of(m, "stream"))
 check("ipywidgets interact: a note, then its run at the defaults", r["status"] == "ok" and out ==
-      "[Jupyter shows no controls for this yet: f ran once with its default values: n=3, kind='cos', x=0.5]\n3 cos 0.5\n", (r["status"], out))
+      "[The Sagebrush kernel can't show interact controls in Jupyter yet, so f ran once with its default values: n=3, kind='cos', x=0.5]\n3 cos 0.5\n", (r["status"], out))
 # widgets passed to display(): the note with their values, and interactive_output's function run with them
 r, m = run(kc, "from ipywidgets import IntSlider, Dropdown, VBox, interactive_output\nn = IntSlider(5, 1, 10, description='n')\nd = Dropdown(options=['x', 'y'])\n"
                "o = interactive_output(lambda n, d: print(n * n, d), {'n': n, 'd': d})\nfrom IPython.display import display\ndisplay(VBox([n, d]))")
 out = "".join(c["text"] for c in of(m, "stream"))
 check("ipywidgets display(): the note, then interactive_output's run", r["status"] == "ok" and out ==
-      "[Jupyter shows no controls for this yet: these widgets keep their values: n=5, 'x']\n25 x\n", (r["status"], out, of(m, "display_data")))
+      "[The Sagebrush kernel can't show these widgets' controls in Jupyter yet; they keep their values: n=5, 'x']\n25 x\n", (r["status"], out, of(m, "display_data")))
 km.shutdown_kernel(now=True)
 
 # ---- Magma mode
