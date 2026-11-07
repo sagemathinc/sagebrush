@@ -224,24 +224,30 @@ function runEnv(r) {
 // suite's output is printed whole when it ends (START, its output, then END
 // and its time), so the log reads suite by suite.  After a failure no more
 // suites start; the ones running finish and are printed, and the first
-// failure's code is the run's.
+// failure's code is the run's.  A SIGTERM or SIGINT closes the queue first,
+// then goes to the suites running; they finish (and are printed), and the
+// run's code is the signal's (143, 130), whatever theirs (astra's
+// RUNNER-SIGNAL-1: a suite that cleaned up and exited 0 let the next start).
 function runParallel(runs, workers, target) {
   return new Promise((resolve) => {
-    let next = 0, ran = 0, running = 0, failed = null;
+    let next = 0, ran = 0, running = 0, failed = null, stopped = null;
     const children = new Set();
     const stop = (sig, code) => {
+      if (stopped !== null) return;
+      stopped = code;
       for (const c of children) c.kill(sig);
-      resolve(code);
+      if (running === 0) resolve(code);
     };
     process.once("SIGTERM", () => stop("SIGTERM", 143));
     process.once("SIGINT", () => stop("SIGINT", 130));
     const finish = () => {
+      if (stopped !== null) return resolve(stopped);
       if (failed !== null) return resolve(failed);
       console.log(`web-tests: ran ${ran} of ${runs.length} (${target}, ${workers} at a time)`);
       resolve(ran > 0 && ran === runs.length ? 0 : 1);
     };
     const start = () => {
-      while (running < workers && next < runs.length && failed === null) {
+      while (running < workers && next < runs.length && failed === null && stopped === null) {
         const r = runs[next++];
         const t0 = Date.now(), out = [];
         const child = spawn(r.runner, [...(r.test ? ["--test"] : []), r.file, ...r.args], {
@@ -271,7 +277,7 @@ function runParallel(runs, workers, target) {
             console.log(`END ${r.target}: ${command(r)} (${s}s)`);
             ran++;
           }
-          if (running === 0 && (failed !== null || next === runs.length)) finish();
+          if (running === 0 && (failed !== null || stopped !== null || next === runs.length)) finish();
           else start();
         };
         child.on("error", (e) => end(null, null, e));

@@ -1,9 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   symlinkSync,
   writeFileSync,
@@ -229,3 +231,37 @@ test("web-tests run: in WORKERS, a failure is the run's code; no suite starts af
   assert.ok(ran.length >= 3 && ran.length < 6, ran.join(" "));
   assert.deepEqual([...ran].sort(), Array.from({ length: ran.length }, (_, i) => `test-${i + 1}.mjs`));
 });
+
+// (a suite that marks itself started, then on SIGTERM or SIGINT notes that it cleaned up and exits 0; otherwise it
+// waits for a file no one writes, and exits 9 after 3000 looks)
+const tidy = (header: string) =>
+  `${header}\nimport { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";\n` +
+  `const me = import.meta.url.split("/").pop();\n` +
+  `mkdirSync("started", { recursive: true }); writeFileSync("started/" + me, "");\n` +
+  `for (const s of ["SIGTERM", "SIGINT"]) process.on(s, () => { appendFileSync("log.txt", "cleaned " + me + " " + s + "\\n"); process.exit(0); });\n` +
+  `let n = 0;\n` +
+  `while (!existsSync("never")) { if (++n > 3000) process.exit(9); await new Promise((r) => setTimeout(r, 10)); }\n`;
+
+for (const [signal, code] of [["SIGTERM", 143], ["SIGINT", 130]] as const)
+  test(`web-tests run: in WORKERS, ${signal} stops the queue before it reaches the suites; they clean up and end, none starts after, and the run's code is ${code}`, async () => {
+    const files: Record<string, string> = { ".github/workflows/ci.yml": workflow("web-runner") };
+    for (let i = 1; i <= 5; i++) files[`web/test-${i}.mjs`] = tidy(`// ci: web-runner order=${i}0`);
+    const dir = repo(files);
+    const child = spawn(process.execPath, [script, "run", "web-runner"], { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    child.stdout.on("data", (d) => (stdout += d));
+    const closed = new Promise<number | null>((r) => child.on("close", (c) => r(c)));
+    // (signalled once its three suites have started: they say so themselves)
+    let n = 0;
+    const started = () => (existsSync(join(dir, "started")) ? readdirSync(join(dir, "started")).length : 0);
+    while (started() < 3) {
+      assert.ok(++n < 3000, "three suites started");
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    child.kill(signal);
+    assert.equal(await closed, code);
+    assert.deepEqual(readdirSync(join(dir, "started")).sort(), ["test-1.mjs", "test-2.mjs", "test-3.mjs"]);
+    assert.deepEqual(readFileSync(join(dir, "log.txt"), "utf8").trim().split("\n").sort(), [1, 2, 3].map((i) => `cleaned test-${i}.mjs ${signal}`));
+    assert.doesNotMatch(stdout, /START web-runner: node web\/test-[45]\.mjs/);
+    assert.doesNotMatch(stdout, /web-tests: ran/);
+  });
