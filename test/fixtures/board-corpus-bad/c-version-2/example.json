@@ -1,0 +1,14 @@
+{
+ "title": "t",
+ "summary": "s",
+ "tags": [
+  "diagrams"
+ ],
+ "level": "intro",
+ "main": "c.board.json",
+ "files": [
+  "c.board.json"
+ ],
+ "author": "Sagebrush",
+ "license": "MIT"
+}

@@ -1,6 +1,6 @@
 // The board page (web/board/index.html): sagebrush.space as a board's host
 // (mount.ts).  /board/?doc=URL shows a board document (web/board/doc.ts);
-// /board/ alone, Sagebrush's own architecture (examples/sagebrush.json);
+// /board/ alone, Sagebrush's own architecture (examples/sagebrush.board.json);
 // ?mermaid=TEXT, a Mermaid flowchart; an exported file (export.ts), the
 // document it carries; ?items=N&strokes=N, a synthetic board for the
 // benchmark (bench.mjs, window.boardBench).  A document's tour steps through
@@ -334,12 +334,18 @@ const mdText = (t: string) => t.replace(/[\\`*_[\]()<>#!|~]/g, "\\$&");
     history.replaceState(null, "", location.pathname + (q.toString() ? "?" + q.toString().replace("local%3A", "local:") : "") + location.hash);
   }
 }
+// (the corpus boards renamed to .board.json, Nov 7 2026: an old address opens the new file, and this browser's edits
+// and history of it stay where they were, under the old name)
+const RENAMED: Record<string, string> = Object.fromEntries(["live", "sagebrush", "primes", "museum-tour", "polynomials"]
+  .map((n) => ["examples/" + n + ".json", "examples/" + n + ".board.json"]).concat([["examples/mermaid.md", "examples/mermaid.board.json"]]));
+if (Object.hasOwn(RENAMED, q.get("doc") ?? "")) { q.set("doc", RENAMED[q.get("doc")!]); history.replaceState(null, "", location.pathname + "?" + q.toString() + location.hash); }
 // (?mermaid=TEXT: a flowchart given in the address; an exported file, its own)
-const source = unsaved ? "unsaved:" + unsaved : embedded() ? "embedded:" + location.pathname : q.get("doc") ?? (q.has("mermaid") ? "mermaid:" + q.get("mermaid") : "examples/sagebrush.json");
-const saveKey = "sagebrush-board:" + source;
+const source = unsaved ? "unsaved:" + unsaved : embedded() ? "embedded:" + location.pathname : q.get("doc") ?? (q.has("mermaid") ? "mermaid:" + q.get("mermaid") : "examples/sagebrush.board.json");
+const storeName = Object.keys(RENAMED).find((o) => RENAMED[o] === source) ?? source;
+const saveKey = "sagebrush-board:" + storeName;
 const local = /^local:[0-9a-f]{12}$/.test(source);
 // (a document's history in this browser: by its source and its name beside it)
-const historyKey = (id: string | null) => "board:" + source + (id ? ":" + id : "");
+const historyKey = (id: string | null) => "board:" + storeName + (id ? ":" + id : "");
 // The board journal (DEV-only; journal.ts): a board of the workspace is saved through the
 // journal's store once this browser's workspace journal is active, read once, at load (its gate).  Everything it
 // changes here is behind `journalOn`; with it off, the page is as before
