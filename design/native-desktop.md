@@ -99,7 +99,7 @@ The protocol is the message set the page's worker kernel already uses (`src/note
 - **Support window** (William, §1): **before 1.0 there is no compatibility guarantee at all.** From 1.0 on:
   - **The clock:** when an engine release first speaks protocol version $v+1$, version $v$ gets a window that ends 12 months after that release's date. The date comes from the signed release metadata, never from the person's computer clock.
   - **The end date, exactly:** calendar arithmetic in UTC. The end date is the same day of the month 12 months later; if that day doesn't exist, it is the last day of that month (a supersession dated 2028-02-29 ends on 2029-02-28). The end date is **inclusive**: an engine release dated on it must still speak $v$.
-  - **The promise:** every engine released before the window ends still speaks $v$.
+  - **The promise:** every engine release dated on or before the window's end date still speaks $v$.
   - **Several predecessors:** each older version has its own window, so an engine may speak several older versions at once. A version is dropped only after its own window ends.
   - **Before 1.0:** versions superseded before the 1.0 release get no window. The version current at 1.0 gets its window from the first release after 1.0 that supersedes it.
 - Within a negotiated version, an unknown message type is a protocol error. It ends the session, never silently drops the message.
