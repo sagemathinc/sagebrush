@@ -458,6 +458,27 @@ class FakePage:
         self.msgs.append(obj)
 
 
+def test_final_drain_during_a_replay_stays_behind_it():
+    """astra's r2 finding: the PTY closing during a replay; its final bytes come after the whole replay, then the
+    exit, whatever the credit."""
+    tm = FakeTimers()
+    tm.t = 1000
+    sess = FakeSession(tm)
+    sess.exit = {"code": 0, "signal": None}
+    page = FakePage()
+    a = O.Attachment(sess, page, lambda b: len(b))
+    ring = bytes(range(256)) * 400  # (102,400 bytes: more than one frame)
+    a.exit_after_replay = True
+    a.start_replay(ring)
+    assert a.push_final(b"FINAL") == 5  # (queued behind the replay, not into the window)
+    for _ in range(50):
+        tm.advance(100)
+        a.ack(a.sent)
+    data = b"".join(base64.b64decode(f["b"]) for f in page.frames)
+    assert data == b"\x1bc" + ring + b"FINAL", (len(data), data.find(b"FINAL"))
+    assert [m["t"] for m in page.msgs] == ["replay", "live", "exit"], page.msgs
+
+
 def test_rate_steps_through_an_attachment():
     """daybreak3's E3 (@sagebrush: measure a flush window's bytes, as CoCalc's throttle does): through Attachment's
     own reads and acks, windows of <= 8 KiB keep 24/s, of 32-128 KiB step to 8/s, of >= 128 KiB to 4/s; every frame

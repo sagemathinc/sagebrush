@@ -235,7 +235,14 @@ class Attachment:
 
     def push_final(self, b):
         """The PTY's last bytes (its drain, at the close): as many as the credit allows go to the page; the rest is in
-        the ring only.  Returns how many were taken."""
+        the ring only.  During a replay they queue behind it (astra's ordering finding), so the page sees the reset,
+        the ring, then these, then the exit; that queue is bounded by the drain itself (one ring's worth).  Returns how
+        many were taken."""
+        if self.ended or self.exited:
+            return 0
+        if self.replaying:
+            self.replay += b
+            return len(b)
         n = min(len(b), self.credit())
         if n:
             self.throttle.buf += b[:n]
