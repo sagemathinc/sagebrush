@@ -1,0 +1,10 @@
+{
+ "v": 1,
+ "reason": "bool() of a relation between algebraic constants (rationals, I, sums, products, rational powers, abs) decided exactly as Sage decides it, by their algebraic number (lib/_sage_expr.py _exact_sign; lib/_sage_qqbar.py converts abs), friction W28 part 1 Re-measured with bun 1.4.4 (size-record.sh) on master 60435643 vs head 055607bd: cli/lib.gen.js +1444, cli/pyjs.cjs +1448, engine/lib/sage.pre +16753, engine/lib/sage.src +4238; no other row moves. Markers: exact, except cli/pyjs.cjs 1480 (+1448 measured, plus 32 B of margin, as it moves with master).",
+ "bytes": {
+  "cli/lib.gen.js": 1444,
+  "cli/pyjs.cjs": 1480,
+  "engine/lib/sage.pre": 16753,
+  "engine/lib/sage.src": 4238
+ }
+}
