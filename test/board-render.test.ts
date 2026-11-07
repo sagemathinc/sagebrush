@@ -119,3 +119,63 @@ test("board render: pictures the board leaves out for their names are named on s
   r = cli(["-"], JSON.stringify({ format: "sagebrush-board", version: 1, images: Object.fromEntries(many.map((n) => [n, pic])), nodes: [{ id: "a", text: "x" }] }));
   assert.match(r.stderr, /^sagebrush board render: pictures left out: .*and these are not: "p 0", [^\n]*"p 9", and 2 more\n/);
 });
+
+// (P9a, the Codex friction recheck: code's outputs and pictures in the SVG, from what the file holds)
+const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+const at = "2026-11-07T00:00:00Z";
+
+test("board render: a code item's stored preview is drawn, its text and its raster picture; without one, the way to store it is said", () => {
+  const preview = { at, ms: 12000, total: 12000, outputs: [
+    { output_type: "stream", name: "stdout", text: "5\n" },
+    { output_type: "stream", name: "stderr", text: "careful <now>\n" },
+    { output_type: "display_data", data: { "image/png": PNG, "text/plain": "Graphics object" }, metadata: {} },
+  ] };
+  const doc = { format: "sagebrush-board", version: 1, nodes: [{ id: "c", code: "print(2+3)", w: 300, preview }] };
+  let r = cli(["-"], JSON.stringify(doc));
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(!r.stdout.includes("its output: in the board"), "the output, not the placeholder");
+  assert.match(r.stdout, />5<\/tspan>/, "the item's text output");
+  assert.ok(r.stdout.includes("careful &lt;now&gt;") && !r.stdout.includes("<now>"), "stderr shown, escaped");
+  assert.ok(r.stdout.includes(`<image `) && r.stdout.includes(`href="data:image/png;base64,${PNG}"`), "the preview's picture, as an <image> of its data: URL");
+  assert.ok(!r.stdout.includes("Graphics object"), "the picture, not its text, when it has one");
+  assert.match(r.stdout, /Preview, computed/);
+  assert.ok(!r.stderr.includes("code's outputs"), r.stderr);
+  // (no preview: the placeholder, and how to store the outputs, said once)
+  r = cli(["-"], JSON.stringify({ ...doc, nodes: [{ id: "c", code: "print(2+3)" }] }));
+  assert.equal(r.status, 0);
+  assert.ok(r.stdout.includes("its output: in the board"));
+  assert.ok(r.stderr.includes("shown only in part: code's outputs\n"), r.stderr);
+  assert.ok(r.stderr.includes("store them first: sagebrush board run FILE --store-previews --preview-ms 0"), r.stderr);
+  // (some stored, some not: said of those only, and no advice to store what was stored)
+  r = cli(["-"], JSON.stringify({ ...doc, nodes: [{ id: "c", code: "print(2+3)", preview }, { id: "d", code: "1", x: 0, y: 400 }] }));
+  assert.ok(r.stderr.includes("code's outputs (of the items with no stored preview)") && !r.stderr.includes("store them first"), r.stderr);
+});
+
+test("board render: a picture whose bytes are in the file is drawn as an <image>; an https: one stays a box and nothing in the file loads", () => {
+  const doc = { format: "sagebrush-board", version: 1, images: { dot: { w: 1, h: 1, src: `data:image/png;base64,${PNG}` }, far: { w: 10, h: 10, src: "https://example.com/x.png" } },
+    nodes: [{ id: "a", image: "dot", w: 120 }, { id: "b", image: "far", x: 300, w: 120 }] };
+  const r = cli(["-"], JSON.stringify(doc));
+  assert.equal(r.status, 0, r.stderr);
+  const hrefs = [...r.stdout.matchAll(/<image [^>]*href="([^"]*)"/g)].map((m) => m[1]);
+  assert.deepEqual(hrefs, [`data:image/png;base64,${PNG}`]);
+  assert.ok(!r.stdout.includes("example.com"), "no address of the document's in the file");
+  assert.ok(r.stderr.includes("pictures (shown as a box)"), r.stderr);
+  // (a data: URL whose header doesn't give a size: a box, not an <image>)
+  const bad = cli(["-"], JSON.stringify({ ...doc, images: { dot: { w: 10, h: 10, src: "data:image/png;base64,iVBORw0KGgo=" } }, nodes: [{ id: "a", image: "dot" }] }));
+  assert.ok(!bad.stdout.includes("<image "), "an unreadable picture isn't drawn");
+});
+
+test("board render: python's P9 reproduction, after board run --store-previews --preview-ms 0, shows the text output", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sb-p9-"));
+  try {
+    const f = join(dir, "basic.board.json");
+    writeFileSync(f, JSON.stringify({ format: "sagebrush-board", version: 1, title: "probe", mode: "sage", nodes: [{ id: "c", title: "code", code: "print(2+3)", x: 0, y: 0, w: 300 }, { id: "p", title: "plot", code: "plot(sin(x),(x,0,3))", x: 0, y: 200, w: 300 }] }));
+    const run = spawnSync(process.execPath, [__dirname + "/../src/cli.js", "board", "run", f, "--store-previews", "--preview-ms", "0"], { encoding: "utf8" });
+    assert.equal(run.status, 0, run.stderr + run.stdout);
+    const r = cli([join(dir, "basic.previews.board.json")]);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, />5<\/tspan>/, "the item's output, as stored");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

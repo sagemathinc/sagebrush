@@ -104,6 +104,8 @@ export async function boardCommand(argv: string[]): Promise<number> {
   if (out === null) process.stdout.write(svg);
   else writeFileSync(out, svg);
   if (left.length) process.stderr.write(`sagebrush board render: shown only in part: ${left.join(", ")}\n`);
+  // (code's outputs are drawn from the previews a board keeps: how to keep every item's, the way forward)
+  if (left.includes("code's outputs")) process.stderr.write("sagebrush board render: to show code's outputs, store them first: sagebrush board run FILE --store-previews --preview-ms 0, then render the NAME.previews.board.json it writes beside FILE\n");
   // (the notes' ids, quoted as JSON: a board's text never reaches the terminal as control characters, CORR-974-1)
   if (overflow.length) process.stderr.write(`sagebrush board render: text cut to its note's box (a note of a given size): ${overflow.map((id) => JSON.stringify(id)).join(", ")}\n`);
   return 0;
