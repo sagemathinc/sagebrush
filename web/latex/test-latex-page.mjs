@@ -1540,10 +1540,24 @@ try {
   await fresh(`!!window.sagebrush?.board?.snapshot && window.sagebrush.board.snapshot().doc !== null && !!document.querySelector('[data-sbb=filemenu] [data-group=new]')`, 60000);
   const boardNew = await ev(`[...document.querySelector('[data-sbb=filemenu] [data-group=new]').nextElementSibling.querySelectorAll('button')].map((b) => b.dataset.sbb)`);
   check(JSON.stringify(boardNew) === JSON.stringify(["newnotebook", "newmatlab", "newboard", "newlatex", "newfolder", "examples"]), "U0: the board's File ▸ New is Notebook, MATLAB notebook, Board, LaTeX document, Folder, From an example…", boardNew);
+  // (a note being written where it is when New ▸ LaTeX document is clicked: what is typed kept first (grader's K15))
+  await ev(`window.sagebrush.board.edit((d) => { d.nodes = [{ id: "k15", title: "Note", text: "", x: 0, y: 0, w: 300 }]; }).then(() => 1)`);
+  await ev("window.sagebrush.board.editing(true), 1");
+  await ev(`Promise.resolve(window.sagebrush.board.focus(["k15"])).then(() => new Promise((r) => setTimeout(r, 400))).then(() => 1)`);
+  await ev("(() => { const r = window.board.clientRect('k15'); const x = r.left + 20, y = r.top + 12; document.elementFromPoint(x, y).dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX: x, clientY: y })); return 1; })()");
+  const writing = await until("window.board.editing === 'k15' && document.activeElement === document.querySelector('.board-editing .be-title')", 5000);
+  const atNote = writing || await ev("(() => { const r = window.board.clientRect('k15'); const e = document.elementFromPoint(r.left + 20, r.top + 12); return { r: [r.left, r.top, r.width, r.height], at: e?.className?.baseVal ?? e?.className ?? e?.tagName, editing: window.board.editing }; })()");
+  if (writing) { await ev("(() => { const t = document.querySelector('.board-editing .be-title'); t.setSelectionRange(t.value.length, t.value.length); return 1; })()"); await send("Input.insertText", { text: " kept" }); }
+  const boardHref = await ev("location.href");
   await mark(); await ev(`(document.querySelector('[data-sbb=newlatex]').click(), true)`);
   const boardTex = await fresh(`location.pathname === "/" && /[?&]tex=/.test(location.search) && !!document.querySelector(".tex-page .tex-src") && !!${W}`, 60000).catch(() => false);
   const texAfter = boardTex ? await ev(untitled) : [], opened = await ev(`new URLSearchParams(location.search).get("tex")`);
   check(boardTex && texAfter.length === texBefore.length + 1 && texAfter.includes(opened) && !texBefore.includes(opened), "U0: the board's New ▸ LaTeX document: a new Untitled .tex made at the top of the files and opened in the editor", { texBefore, texAfter, opened });
+  // (the board opened again: the note's title as typed)
+  await mark(); await send("Page.navigate", { url: boardHref });
+  await fresh(`!!window.sagebrush?.board?.snapshot && window.sagebrush.board.snapshot().doc !== null`, 60000).catch(() => false);
+  const k15 = await ev(`window.sagebrush.board.snapshot().doc?.nodes?.find((n) => n.id === "k15")?.title ?? null`);
+  check(writing && k15 === "Note kept", "U0: the board's New ▸ LaTeX document while a note is being written: what was typed is kept, in the board when it is opened again", { writing, atNote, k15, boardHref });
   // ---- U0's entry points, each pinned (grader's r764): New LaTeX document in a folder (a folder's ⋯ menu, browser.ts;
   // the notebook page's hook; the page module's newTex), File ▸ New ▸ LaTeX document saving the notebook first, the
   // board's file panel From an example…, and the editor's File ▸ Open… and its Ctrl+O
@@ -1783,6 +1797,32 @@ try {
     const after = await ev(`document.documentElement.classList.contains("tex-print")`);
     check(b && b.label === "Print or save as PDF…" && JSON.stringify(b.printed) === "[true]" && !after, "File > Print or save as PDF… (the one File menu's, U0): the browser's print dialog, in the print layout, and the page is itself again after", { b, after });
     check(await ev(`typeof window.sagebrush?.latex?.print === "function" && typeof window.sagebrush.latex.printMode === "function"`), "…and the agent's route: window.sagebrush.latex.print() and printMode()");
+    // (the File menu: Escape closes it, and so does a click outside it, in the editor (grader's K28, K29))
+    const menuHidden = `document.querySelector(".tex-filemenu").hidden`;
+    await ev(`(document.querySelector(".tex-filebtn").click(), 1)`);
+    const openedEsc = !(await ev(menuHidden));
+    await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    check(openedEsc && await until(menuHidden, 2000), "U0: the editor's File menu: Escape closes it", { openedEsc });
+    await ev(`(document.querySelector(".tex-filebtn").click(), 1)`);
+    const openedOut = !(await ev(menuHidden));
+    await ev(`(document.querySelector(".tex-src").click(), 1)`);
+    check(openedOut && await until(menuHidden, 2000), "U0: the editor's File menu: a click outside it, in the editor, closes it", { openedOut });
+    // (its Recent: the documents opened before, not the one open here (grader's K21; only notebooks and boards are
+    // recorded, fileopen.ts, so the open .tex is never among them))
+    const recent = await ev(`(async () => { document.querySelector(".tex-filebtn").click(); await new Promise((r) => setTimeout(r, 50));
+      document.querySelector('.tex-filemenu button[data-group="recent"]').click(); await new Promise((r) => setTimeout(r, 1500));
+      const shown = [...document.querySelectorAll('.tex-filemenu [data-recent]')].map((b) => b.dataset.recent);
+      return { shown }; })()`);
+    check(recent.shown.length > 0 && !recent.shown.includes("/t/print.tex"), "U0: the editor's File ▸ Recent lists the documents opened before, not the open one", recent);
+    // (in print, the File menu hidden even while open (grader's K31))
+    const openPrint = !(await ev(menuHidden));
+    await ev(`(window.sagebrush.latex.printMode(true), 1)`);
+    await send("Emulation.setEmulatedMedia", { media: "print" });
+    const menuPrinted = await ev(`getComputedStyle(document.querySelector(".tex-filemenu")).display`);
+    await send("Emulation.setEmulatedMedia", { media: "" });
+    check(openPrint && menuPrinted === "none", "…in print, the File menu hidden, even open", { openPrint, menuPrinted });
+    await ev(`(window.sagebrush.latex.printMode(false), document.querySelector(".tex-filebtn").click(), 1)`);
     await ev(`(window.sagebrush.latex.printMode(true), 1)`);
     await send("Emulation.setEmulatedMedia", { media: "print" });
     const shown = await ev(`(() => { const d = (s) => { const e = document.querySelector(s); return e ? getComputedStyle(e).display : "absent"; };
