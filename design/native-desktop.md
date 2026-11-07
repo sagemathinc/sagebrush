@@ -325,7 +325,8 @@ r4 goes back to PERF. Counted runs still need PERF's final harness and packet re
 The hard-restart deadline uses a fake clock or an injected deadline, never wall time, and no test fixes a flake by raising a timeout.
 
 **T4. Controls for the licence check** (§4.2), so a check that never fails can't pass forever:
-- an LGPL fixture dependency fails;
+- an LGPL fixture dependency **outside the Bun runtime** fails;
+- the Bun runtime's own LGPL inventory entries pass (the scoped exception of §4.2), and the same LGPL entry attached to any other component fails;
 - a dependency under an unlisted licence fails;
 - an MIT fixture passes;
 - `THIRD-PARTY-NOTICES.txt` must regenerate byte-identical from the inventory, so a stale notices file fails.
