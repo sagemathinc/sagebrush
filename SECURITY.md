@@ -23,7 +23,7 @@ Report these **privately**, never in a public issue or pull request:
 
 - the board frame that CoCalc embeds (`/frame/board/`, and the board host
   protocol between it and CoCalc);
-- the user-content hosting on `cocalcusercontent.com` (and `.dev`);
+- the configured content hosts (`web/content-domains.mts`), including legacy compatibility hosting;
 - CoCalc accounts, sign-in with CoCalc, and CoCalc tokens or secrets.
 
 They can affect CoCalc's users. Report them through
