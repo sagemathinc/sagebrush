@@ -123,7 +123,7 @@ class _Ring:
         if isinstance(names, list):
             # QQ[['x']]: power series
             import _sage_series
-            return _sage_series.PowerSeriesRing(self, names[0] if names else "x")
+            return _sage_series._series_ring_from_list(self, names)
         K = _algebraic_extension(self, names)
         if K is not None:
             return K
@@ -656,6 +656,33 @@ def _check_ring_names(names):
             raise ValueError("variable name %r does not start with a letter" % (n,))
 
 
+def ring_names(names, n=None):
+    """The names a user gives a ring (a string, 'x,y', a tuple or a list, and
+    with n variables 'x' as x0, x1, ...), each checked as Sage checks it
+    (_check_ring_names) before any ring is built; the one way user names
+    reach a ring constructor.
+
+    EXAMPLES::
+
+        sage: import _sage_poly
+        sage: _sage_poly.ring_names('x,y'), _sage_poly.ring_names(('t',)), _sage_poly.ring_names('x', 2)  # sagebrush only
+        (['x', 'y'], ['t'], ['x0', 'x1'])
+    """
+    import _sage_mpoly
+    if isinstance(names, (list, tuple)):
+        out = [str(t) for t in names]
+        if n is not None:
+            out = _sage_mpoly._normalize_names(n, out)
+    elif isinstance(names, str) and "," in names:
+        out = [t.strip() for t in names.split(",")]
+    elif n is not None:
+        out = _sage_mpoly._normalize_names(n, str(names))
+    else:
+        out = [str(names)]
+    _check_ring_names(out)
+    return out
+
+
 def PolynomialRing(base, *args, **kwds):
     """PolynomialRing(ZZ, 'x'), PolynomialRing(QQ, names=('y',)); several
     variables: PolynomialRing(QQ, 'x,y'), PolynomialRing(QQ, 3, 'x'),
@@ -691,16 +718,16 @@ def PolynomialRing(base, *args, **kwds):
     if multi:
         import _sage_mpoly
         if not internal:
-            # (the pieces between commas as given: 'x,' has an empty name)
-            _check_ring_names([t.strip() for t in names.split(",")] if isinstance(names, str) and "," in names else _sage_mpoly._normalize_names(n, names))
+            ring_names(names, n)
         return _sage_mpoly.MPolynomialRing(base, n, names, order or "degrevlex")
     if isinstance(names, (tuple, list)):
         names = names[0]
-    if not internal and isinstance(names, str):
-        _check_ring_names([names])
+    if not internal:
+        ring_names(names)
     names = str(names).strip()
     if _sage_ff._is_ff_base(base):
-        return _sage_ff._poly_ring_from_names(base, names)
+        # (an internal ring, _t, is built without the user-name check)
+        return _sage_ff.PolynomialRing_ff(base, names) if internal else _sage_ff._poly_ring_from_names(base, names)
     import _sage_nfpoly
     if _sage_nfpoly.is_number_field(base):
         return _sage_nfpoly.PolynomialRing_nf(base, names)
