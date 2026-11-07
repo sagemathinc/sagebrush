@@ -2862,3 +2862,33 @@ test("axis equal in 2-D keeps the axes box and widens the limits to its shape (M
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("x = save, x = clear and x = clearvars refuse before they run: no matlab.mat is written and no variable is cleared", () => {
+  const { execFileSync } = require("node:child_process");
+  const { mkdtempSync, readdirSync, rmSync } = require("node:fs");
+  const { join } = require("node:path");
+  // MathWorks documents no output arguments for save, clear and clearvars, so the
+  // call fails with "Too many output arguments." before it does anything. Its
+  // identifier for save and clear, MATLAB:maxlhs, is inferred (they are built-ins)
+  // from two sources about other calls: an answer on MATLAB Answers 603655 catches
+  // MATLAB:maxlhs for this message from an out-of-process MEX host's feval, and
+  // Ohio State's MATLAB course page lists it for y = disp('message'). clearvars'
+  // identifier has no source: only its message is pinned.
+  const dir = mkdtempSync(join(require("node:os").tmpdir(), "sb-save-"));
+  try {
+    const both = "catch err, disp([err.message ' | ' err.identifier]), end";
+    const code = ["y = 5;",
+      `try, x = save; ${both}`,
+      `try, x = save('a.mat', 'y'); ${both}`,
+      `try, x = clear; ${both}`,
+      "try, x = clearvars('y'); catch err, disp(err.message), end",
+      "disp(exist('y'))"].join("\n");
+    const lines = execFileSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+      { encoding: "utf8", cwd: dir, timeout: 10000 }).trim().split("\n").map((s: string) => s.trim());
+    const maxlhs = "Too many output arguments. | MATLAB:maxlhs";
+    assert.deepEqual(lines, [maxlhs, maxlhs, maxlhs, "Too many output arguments.", "1"]);
+    assert.deepEqual(readdirSync(dir), []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
