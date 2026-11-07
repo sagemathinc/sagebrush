@@ -79,6 +79,10 @@
   "web/notebook/notebook.js :: whole :: const before = new Map(cells().filter((c) => c.type === \"code\").map((c) => [c.id, [outputText(c.out), whole(c)]])); #0": {
    "owner": "phase-2",
    "role": "agent-text"
+  },
+  "web/output-shell/shell.js :: render :: await Promise.race([Promise.all([document.fonts.ready, pictures()]), deadline(READY_MS)]); #0": {
+   "owner": "host",
+   "role": "host"
   }
  },
  "sinks": {
@@ -354,20 +358,6 @@
     "web/notebook/notebook.js :: renderMd"
    ]
   },
-  "web/notebook/notebook.js :: safeSvg :: const root = new DOMParser().parseFromString(text, \"image/svg+xml\").documentElement; #0": {
-   "kind": "rich",
-   "owner": "phase-3",
-   "readers": [
-    "web/notebook/notebook.js :: outputText",
-    "web/notebook/notebook.js :: pictures",
-    "web/notebook/notebook.js :: recountPictures",
-    "web/notebook/notebook.js :: whole",
-    "web/notebook/notebook.js :: applyEdits",
-    "web/index.html :: result",
-    "web/index.html :: until",
-    "web/board/code.ts :: text"
-   ]
-  },
   "web/notebook/notebook.js :: showCompleter :: completer.innerHTML = matches.slice(0, 500).map((m, i) => `<li role=\"option\" id=\"sbnb-comp${i}\" aria-selected=\"${i === sel}\">${esc(m.slice(dot))}</li>`).join(\"\"); #0": {
    "kind": "host",
    "owner": "host"
@@ -376,9 +366,33 @@
    "kind": "host",
    "owner": "host"
   },
+  "web/notebook/output-frames.js :: createOutputFrames :: export function createOutputFrames({ srcdoc = null, url = null, cap = DEFAULT_CAP, root = null, onEvent = () => {}, loadMs = LOAD_MS, commitMs = COMMIT_MS } = {}) { #0": {
+   "kind": "renderer",
+   "owner": "renderer"
+  },
+  "web/notebook/output-frames.js :: createOutputFrames :: if ((srcdoc === null) === (url === null)) throw new Error(\"output frames: exactly one of srcdoc and url\"); #0": {
+   "kind": "renderer",
+   "owner": "renderer"
+  },
+  "web/notebook/output-frames.js :: mount :: if (srcdoc !== null) f.srcdoc = srcdoc; else f.src = url; #0": {
+   "kind": "renderer",
+   "owner": "renderer"
+  },
   "web/notebook/runner-worker.js :: say :: f.srcdoc = FILES_RUNNER; #0": {
    "kind": "host",
    "owner": "host"
+  },
+  "web/output-shell/build.mts :: buildOutputShell :: export async function buildOutputShell(build: (o: any) => Promise<any>, entry: string): Promise<{ hosted: string; srcdoc: string; scriptHash: string; styleHash: string }> { #0": {
+   "kind": "renderer",
+   "owner": "renderer"
+  },
+  "web/output-shell/build.mts :: page :: srcdoc: page(`<meta http-equiv=\"Content-Security-Policy\" content=\"${policy.replace(/\"/g, \"&quot;\")}\">`), #0": {
+   "kind": "renderer",
+   "owner": "renderer"
+  },
+  "web/output-shell/shell.js :: draw :: d.innerHTML = safeHtml(o.body); #0": {
+   "kind": "renderer",
+   "owner": "renderer"
   },
   "web/questions/index.html :: drawFigure :: el.innerHTML = `<div class=\"wait\">${kernel.ready ? \"Drawing the figure…\" : \"Starting Sage to draw the figure…\"}</div>`; #0": {
    "kind": "host",
@@ -477,6 +491,20 @@
   "web/questions/index.html :: write :: if (st) st.innerHTML = chip(item, student); #0": {
    "kind": "host",
    "owner": "host"
+  },
+  "web/safe-svg.js :: safeSvg :: const root = new DOMParser().parseFromString(text, \"image/svg+xml\").documentElement; #0": {
+   "kind": "rich",
+   "owner": "phase-3",
+   "readers": [
+    "web/notebook/notebook.js :: outputText",
+    "web/notebook/notebook.js :: pictures",
+    "web/notebook/notebook.js :: recountPictures",
+    "web/notebook/notebook.js :: whole",
+    "web/notebook/notebook.js :: applyEdits",
+    "web/index.html :: result",
+    "web/index.html :: until",
+    "web/board/code.ts :: text"
+   ]
   },
   "web/share-client/list-view.ts :: rowEl :: el.innerHTML = `<label><input type=\"checkbox\"><span class=\"name\"></span><span class=\"size\"></span></label><div class=\"why\"></div>`; #0": {
    "kind": "host",
