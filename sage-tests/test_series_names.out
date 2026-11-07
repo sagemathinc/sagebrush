@@ -86,3 +86,18 @@ QQ[['t']] -> Power Series Ring in t over Rational Field
 5-adic Ring with capped relative precision 20['a{b,c'] -> ValueError: variable name 'a{b' is not alphanumeric
 5-adic Ring with capped relative precision 20['x,1y'] -> ValueError: variable name '1y' does not start with a letter
 5-adic Ring with capped relative precision 20[['x']] -> Power Series Ring in x over 5-adic Ring with capped relative precision 20
+LaurentSeriesRing(QQ, 2, 'x') -> Laurent Series Ring in x0 over Rational Field
+LaurentSeriesRing(QQ, 3, 'x') -> Laurent Series Ring in x0 over Rational Field
+LaurentSeriesRing(QQ, 3, 'xyz') -> Laurent Series Ring in x over Rational Field
+LaurentSeriesRing(QQ, 2, 'x,y') -> Laurent Series Ring in x over Rational Field
+LaurentSeriesRing(QQ, 3, 'x,y') -> IndexError: the number of names must equal the number of generators
+LaurentSeriesRing(QQ, 2, ['t']) -> ValueError: variable name '2' does not start with a letter
+LaurentSeriesRing(QQ, 2, ('s', 't')) -> ValueError: variable name '2' does not start with a letter
+LaurentSeriesRing(QQ, 3, ('s', 't')) -> ValueError: variable name '3' does not start with a letter
+LaurentSeriesRing(QQ, 2, '') -> ValueError: variable name '0' does not start with a letter
+LaurentSeriesRing(QQ, 2, '12') -> ValueError: variable name '120' does not start with a letter
+LaurentSeriesRing(QQ, 2, 'a{b') -> ValueError: variable name 'a{b0' is not alphanumeric
+LaurentSeriesRing(QQ, 1, 'x') -> TypeError: Input does not coerce to any of the expected rings.
+LaurentSeriesRing(QQ, -1, 'x') -> TypeError: Input does not coerce to any of the expected rings.
+PowerSeriesRing(QQ, 3, 'a{b') -> ValueError: variable name 'a{b0' is not alphanumeric
+PowerSeriesRing(QQ, 2, '1x') -> ValueError: variable name '1x0' does not start with a letter

@@ -5898,6 +5898,11 @@
   "owner": "sage kernel (@sagebrush-sage2)",
   "reason": "a TypeError for a series and an element of another ring with no common parent (Sage's coercion refusal, as probed: another variable, GF(p) with QQ, Laurent and power series' own rules); refuses nothing for size"
  },
+ "lib/_sage_series.py :: _first_counted :: raise NotImplementedError(\"LaurentSeriesRing with %r and the names %r is not available in sagebrush yet\" % (n, src)) #0": {
+  "class": "coverage",
+  "owner": "series rings (@sagebrush-sage2)",
+  "reason": "LaurentSeriesRing with a count Sage was not probed for (below -1, or with names as a tuple or list beside an unprobed count) or 0 (Sage makes a ring that cannot print): refused rather than guessed; not a cap"
+ },
  "lib/_sage_series.py :: _series_ring_from_list :: raise NotImplementedError(\"multivariate power series rings are not available in sagebrush yet\") #0": {
   "class": "coverage",
   "owner": "Sage kernel (@sagebrush-sage2)",
