@@ -36,7 +36,7 @@ test("os: stat_result's fields, stat/lstat of a path-like, bytes paths, and CPyt
     "open('f.txt', 'w').write('abc')",
     "st = os.stat(pathlib.Path('f.txt'))",
     "print(len(st), st.n_fields, st.n_sequence_fields, st.st_size, type(st.st_mtime_ns).__name__, st.st_mtime_ns // 10**9 == int(st.st_mtime))",
-    "print(os.stat('f.txt', follow_symlinks=False).st_size, os.lstat(b'f.txt').st_size, os.listdir(b'.'), os.stat in os.supports_follow_symlinks)",
+    "print(os.stat('f.txt', follow_symlinks=False).st_size, os.lstat(b'f.txt').st_size, sorted(os.listdir(b'.')), os.stat in os.supports_follow_symlinks)",
     "os.mkdir(pathlib.Path('d')); os.rename(b'd', pathlib.Path('e')); print(sorted(os.listdir()))",
     "for f, a in [(os.mkdir, 'e'), (os.rmdir, 'nope'), (os.unlink, 'e'), (os.listdir, 'f.txt')]:",
     "    try: f(a)",
