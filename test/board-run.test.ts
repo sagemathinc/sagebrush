@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { cleanPreview } from "../web/board/preview";
 import { codeOrder } from "../web/board/doc";
 import { boardExample, boardExamples } from "./board-examples";
+import { collect, interactError, ITEM_OUTPUT_MAX, RUN_OUTPUT_MAX } from "../src/board-run";
 
 // `sagebrush board run`: every code item of a board run as the board runs it
 // in a browser (src/board-run.ts), each item's output or error reported.
@@ -59,7 +60,7 @@ test("board run: an @interact item reports its function's run at its defaults; o
   assert.equal(item(report, "w").status, "ok");
   assert.equal(item(report, "w").stdout, "5/3\n", JSON.stringify(item(report, "w")));
   assert.equal(item(report, "e").status, "failed", JSON.stringify(item(report, "e")));
-  assert.match(item(report, "e").error, /^Traceback[\s\S]*ZeroDivisionError[^\n]*\n\(raised by its @interact function, run with its default values\)$/);
+  assert.match(item(report, "e").error, /^Traceback[\s\S]*ZeroDivisionError[^\n]*\n\(raised by the item's @interact function, run with its default values\)$/);
   assert.equal(item(report, "after").status, "ok");
   assert.equal(item(report, "after").stdout, "next\n");
   // (and board check, which runs the items the same way: an error, the reason in what it keeps of it)
@@ -68,10 +69,54 @@ test("board run: an @interact item reports its function's run at its defaults; o
     writeFileSync(f, board([{ id: "e", title: "err", code: "@interact\ndef bad(u=slider(0,4,1,2)):\n    1/0" }], { mode: "sage" }));
     const c = spawnSync(process.execPath, [__dirname + "/../src/cli.js", "board", "check", f], { encoding: "utf8", timeout: 120_000 });
     assert.equal(c.status, 1, c.stdout + c.stderr);
-    assert.match(c.stdout, /code item "e" \("err"\) failed:[\s\S]*ZeroDivisionError[\s\S]*\(raised by its @interact function, run with its default values\)/);
+    assert.match(c.stdout, /code item "e" \("err"\) failed:[\s\S]*ZeroDivisionError[\s\S]*\(raised by the item's @interact function, run with its default values\)/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// (what is kept of an @interact's own output area is the item's, under its caps: no copy of it beside them, a
+// traceback past them still failing the item, and a clear_output() there giving back exactly what it kept; astra's
+// INTERACT-BUFFER-1 on #788)
+test("board run: an @interact's output: under the item's caps, a traceback past them still fails it, a clear there clears that interact's only", () => {
+  const MB = 2 ** 20, tb = "Traceback (most recent call last):\n  File \"<cell>\", line 3, in bad\nZeroDivisionError: x\n";
+  const textOf = (l: any[]) => l.filter((o) => o.output_type === "stream").map((o) => o.text).join("");
+  const REASON = /\n\(raised by the item's @interact function, run with its default values\)$/;
+  // (the item's cut: six 1 MiB writes there, then the traceback, past the item's 4 MiB: nothing kept past it, and no copy
+  // of it beside the list; the traceback that was dropped still fails the item, said)
+  const big: any[] = [], k1 = { run: 0 };
+  for (let i = 0; i < 6; i++) collect(big, { target: 1, stream: "stderr", text: "x".repeat(MB) }, k1);
+  collect(big, { target: 1, stream: "stderr", text: tb }, k1);
+  assert.ok(textOf(big).length <= ITEM_OUTPUT_MAX + 200 && k1.run <= ITEM_OUTPUT_MAX, `kept ${textOf(big).length}, run ${k1.run}`);
+  const e1 = interactError(big);
+  assert.ok(e1 !== null && e1.length < 300 && /^\[its traceback was not kept: past the output limit\]/.test(e1) && REASON.test(e1), String(e1));
+  // (the run's cut: the board's output nearly spent, the traceback dropped: the same)
+  const r: any[] = [], k2 = { run: RUN_OUTPUT_MAX - 10 };
+  collect(r, { target: 1, stream: "stderr", text: tb }, k2);
+  assert.ok(textOf(r).includes("[output cut") && !textOf(r).includes("ZeroDivisionError") && k2.run === RUN_OUTPUT_MAX - 10);
+  assert.ok(REASON.test(String(interactError(r))), String(interactError(r)));
+  // (a clear in one interact's area: what it kept goes, its bytes given back to the item and the run, its traceback
+  // forgotten; the cell's own output and another interact's stay)
+  const l: any[] = [], k3 = { run: 0 };
+  collect(l, { stream: "stdout", text: "mine\n" }, k3);
+  collect(l, { target: 2, stream: "stdout", text: "two\n" }, k3);
+  collect(l, { target: 1, stream: "stdout", text: "y".repeat(3 * MB) }, k3);
+  collect(l, { target: 1, stream: "stderr", text: tb }, k3);
+  assert.ok(REASON.test(String(interactError(l))));
+  collect(l, { target: 1, clear: true }, k3);
+  assert.equal(textOf(l), "mine\ntwo\n");
+  assert.equal(k3.run, 9);
+  assert.equal(interactError(l), null, "a traceback cleared, then nothing raised: no error");
+  collect(l, { target: 1, stream: "stdout", text: "5/3\n" }, k3);
+  assert.equal(interactError(l), null, "…and its run after the clear succeeding: still none");
+  collect(l, { stream: "stdout", text: "z".repeat(3 * MB) }, k3);
+  assert.ok(!textOf(l).includes("[output cut"), "3 MB after the clear is kept: its bytes were given back");
+  // (a traceback kept: the error is it, the reason last)
+  const ok: any[] = [], k4 = { run: 0 };
+  collect(ok, { target: 1, stream: "stdout", text: "5/3\n" }, k4);
+  assert.equal(interactError(ok), null);
+  collect(ok, { target: 1, stream: "stderr", text: tb }, k4);
+  assert.match(String(interactError(ok)), /^Traceback[\s\S]*ZeroDivisionError: x\n\(raised by the item's @interact function, run with its default values\)$/);
 });
 
 test("board run: an item that does not stop when interrupted: the interpreter is stopped, and what was left is not run", () => {

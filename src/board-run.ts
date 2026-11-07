@@ -439,9 +439,8 @@ export async function runBoard(doc: BoardDoc, timeout: number, after?: (evaluate
       else if (reactive.outcome.get(id) === "ok" && !failed.has(id)) {
         r.status = "ok";
         // (its @interact's function raised when run with its defaults (P11a, Codex's friction): the item fails, saying so)
-        const ie = interactErr.get(list) ?? "", tb = ie.indexOf(TRACEBACK);
-        // (the reason last: board check keeps an error's last lines)
-        if (tb >= 0) { r.status = "failed"; r.error = ie.slice(tb).trim() + "\n(raised by its @interact function, run with its default values)"; }
+        const ie = interactError(list);
+        if (ie !== null) { r.status = "failed"; r.error = ie; }
       }
       else if (failed.has(id) || reactive.outcome.get(id) === "exception") { r.status = "failed"; r.error = r.stderr.trim() || "raised an error"; }
       else {
@@ -499,25 +498,47 @@ export const ITEM_OUTPUT_MAX = 4 * 2 ** 20, RUN_OUTPUT_MAX = 32 * 2 ** 20;
 // notebook-session.ts displayCost, HARD-58F-1)
 export const ITEM_DISPLAYS_MAX = 10000;
 const sizes = new WeakMap<any[], { used: number; cut: boolean; displays: number }>();
-// (what an item's @interact wrote to stderr in its own output area: its function's run at its defaults, whose error
-// lib/_interact.py prints there as a traceback rather than raising, as Sage's interact does)
-const interactErr = new WeakMap<any[], string>();
+// (an @interact's own output area, one per interact (its target): its function's run at its defaults, whose error
+// lib/_interact.py prints there as a traceback rather than raising, as Sage's interact does. What of each is kept is
+// known by identity, its target and what each entry was charged, so a clear_output() there clears that target's only
+// and gives its bytes back; no copy of its text is kept beside the item's capped list (astra's INTERACT-BUFFER-1,
+// daybreak3's INTERACT-COLLECT-1). That a traceback came to a target is a flag of that target's, set as each message
+// passes, kept or not (past the item's caps, it still fails), and cleared with it)
+const interactTarget = new WeakMap<object, unknown>(), interactBytes = new WeakMap<object, number>(), interactRaised = new WeakMap<any[], Set<unknown>>();
 const TRACEBACK = "Traceback (most recent call last):";
+/** The error of an item's @interact runs at their defaults, if one raised: each one's traceback as kept (else said
+ * not kept), and why, last (board check keeps an error's last lines). From each target's kept stderr, and its flag. */
+export function interactError(list: any[]): string | null {
+  const stderr = new Map<unknown, string>();
+  for (const o of list) if (interactTarget.has(o) && o.output_type === "stream" && o.name === "stderr") stderr.set(interactTarget.get(o), (stderr.get(interactTarget.get(o)) ?? "") + o.text);
+  const said: string[] = [];
+  for (const t of new Set([...stderr.keys(), ...(interactRaised.get(list) ?? [])])) {
+    const kept = stderr.get(t) ?? "", tb = kept.indexOf(TRACEBACK);
+    if (tb >= 0) said.push(kept.slice(tb).trim());
+    else if (interactRaised.get(list)?.has(t)) said.push("[its traceback was not kept: past the output limit]");
+  }
+  return said.length ? said.join("\n") + "\n(raised by the item's @interact function, run with its default values)" : null;
+}
 
 const CUT_WHY = { item: `${ITEM_OUTPUT_MAX / 2 ** 20} MB for this item`, run: `${RUN_OUTPUT_MAX / 2 ** 20} MB for the whole board`, displays: `${ITEM_DISPLAYS_MAX} displays for this item` };
 const cutNote = (why: keyof typeof CUT_WHY) => ({ output_type: "stream", name: "stderr", text: `\n[output cut: past ${CUT_WHY[why]}; the rest was not kept]\n` });
 
 // a run's messages, as the notebook keeps them (Jupyter's outputs): streams
 // joined, displays as display_data, clear_output() as it says
-function collect(list: any[], m: any, kept: { run: number }) {
-  // (an @interact's own output area: its function's run at its defaults, reported with the item, after its controls;
-  // a clear_output() there clears only that area in a browser, so here nothing)
-  if (m.target != null) {
-    if (m.clear) return;
-    if (m.stream === "stderr") interactErr.set(list, (interactErr.get(list) ?? "") + String(m.text ?? ""));
-  }
+export function collect(list: any[], m: any, kept: { run: number }) {
   const size = sizes.get(list) ?? { used: 0, cut: false, displays: 0 };
   sizes.set(list, size);
+  // (an @interact's own output area: its run at its defaults, kept with the item, after its controls, under the item's
+  // caps; a clear_output() there clears only what was kept of that interact's, its bytes given back, and its flag)
+  const mine = m.target != null;
+  if (mine) {
+    if (m.clear) {
+      for (let i = list.length - 1; i >= 0; i--) if (interactTarget.has(list[i]) && interactTarget.get(list[i]) === m.target) { const b = interactBytes.get(list[i]) ?? 0; size.used -= b; kept.run -= b; list.splice(i, 1); }
+      interactRaised.get(list)?.delete(m.target);
+      return;
+    }
+    if (m.stream === "stderr" && String(m.text ?? "").includes(TRACEBACK)) { const r = interactRaised.get(list) ?? new Set(); r.add(m.target); interactRaised.set(list, r); }
+  }
   if (m.clear) { kept.run -= size.used; size.used = 0; size.cut = false; size.displays = 0; list.length = 0; return; }
   // (the worker cut the rest where it was written)
   if (m.cut) {
@@ -539,11 +560,13 @@ function collect(list: any[], m: any, kept: { run: number }) {
   }
   size.used += bytes;
   kept.run += bytes;
+  const keep = (o: object) => { list.push(o); if (mine) { interactTarget.set(o, m.target); interactBytes.set(o, bytes); } };
   if (m.stream) {
     const last = list[list.length - 1];
-    if (last?.output_type === "stream" && last.name === m.stream) last.text += m.text;
-    else list.push({ output_type: "stream", name: m.stream, text: m.text });
-  } else if (m.display) list.push({ output_type: "display_data", data: m.display, metadata: {} });
+    // (joined only with the same area's: the cell's own, or the same interact's)
+    if (last?.output_type === "stream" && last.name === m.stream && interactTarget.has(last) === mine && (!mine || interactTarget.get(last) === m.target)) { last.text += m.text; if (mine) interactBytes.set(last, (interactBytes.get(last) ?? 0) + bytes); }
+    else keep({ output_type: "stream", name: m.stream, text: m.text });
+  } else if (m.display) keep({ output_type: "display_data", data: m.display, metadata: {} });
   else if (m.interact) list.push({ output_type: "display_data", data: { "text/plain": "[interactive controls]" }, metadata: {} });
 }
 
