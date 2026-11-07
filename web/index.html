@@ -460,6 +460,17 @@
   <p class="exnote">Each opens as a new notebook; yours stays saved.</p>
   <div id="exlist"></div>
 </dialog>
+<!-- What this notebook's code may do (web/notebook/permissions.js): drawn by the page, only the person's own clicks
+     change it. Named for what it does, never "trust". Each section appears in the phase that enforces it (the
+     confinement spec r3.1, its phases 2-4): today, File writes. -->
+<dialog id="permsdlg" class="pick" aria-labelledby="permstitle">
+  <form method="dialog" style="display:flex;justify-content:space-between;align-items:center"><b id="permstitle">Permissions</b><button aria-label="Close">✕</button></form>
+  <p class="note" id="permsfor"></p>
+  <h4 style="margin:12px 0 4px">File writes</h4>
+  <p id="permsfiles" style="margin:0 0 6px"></p>
+  <button id="filesperm">Don't allow file changes</button>
+  <p class="note" style="margin-top:14px">Kept in this browser, for you: never in the notebook, so anyone you send it to starts with nothing allowed.</p>
+</dialog>
 <dialog id="sharedlg" class="pick" aria-labelledby="sharetitle">
   <form method="dialog" style="display:flex;justify-content:space-between;align-items:center"><b id="sharetitle">Share</b><button aria-label="Close">✕</button></form>
   <h4>A link with the notebook in it</h4>
@@ -548,7 +559,7 @@ import { createDownloadDialog } from "./share-client/download.ts";
 import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, SyncOwner, registerJournalWriter, DocSync, readJournal, docSyncOrigin, docSyncAllowed, enableDocSync, docSyncChannel, DOC_SYNC_RELOAD } from "./workspace/index.ts";
 import { mountBrowser } from "./workspace/browser.ts";
 // (the LaTeX editor's entry; a build without it takes this line out before bundling: web/build.ts)
-import { latexBoot } from "./latex/boot.ts";
+import { latexBoot, latexOn, texNew } from "./latex/boot.ts";
 import { codeBoot } from "./code/boot.ts";
 import { createPermissions, hostMade } from "./notebook/permissions.js";
 import { renderFileMenu, fileMenuKey } from "./workspace/filemenu.ts";
@@ -661,8 +672,8 @@ const perms = createPermissions();
 // is the sandboxed runner, or none, astra's no-mutation CLEAR; every run then says why, as a runner given up does)
 const NEEDS_RUNNER = window.__TAURI__
   // (the app has no sandbox: a notebook that may not change files can't run in it at all, @sagebrush's ruling)
-  ? "This notebook can't run in the app while it may not change files: the app has no sandbox to run it in. Allow file changes (File menu) to run it.\n"
-  : "This notebook can't run here: it came from elsewhere, so it runs only in Sagebrush's sandbox, which didn't start in this browser. Allow changes for this notebook (File menu) to run it in this page's own interpreter.\n";
+  ? "This notebook can't run in the app while it isn't allowed to change files: the app has no sandbox to run it in. Allow file changes (File > Permissions…) to run it.\n"
+  : "This notebook can't run here: it isn't allowed to change your files, so it runs only in Sagebrush's sandbox, which didn't start in this browser. Allow changes for this notebook (File > Permissions…) to run it in this page's own interpreter.\n";
 class RefusingWorker {
   constructor(text) { this.text = text; this.onmessage = null; this.onerror = null; }
   postMessage(m) {
@@ -1684,7 +1695,8 @@ async function open(store, id, kind = "browser", guard = null, intent = null) {
     if (trashTest.pause) await trashTest.pause("beforeDetach");
     if (!(current.kind === "browser" && current.id === guard.expect)) throw Object.assign(new Error("another notebook was opened here meanwhile"), { navWon: true });
   }
-  if (intent && intent.attach !== attachSeq) throw Object.assign(new Error("another notebook was opened here meanwhile"), { navWon: true });
+  // (and an intent that knows it was superseded otherwise, a share link a later fragment replaced: its `current`)
+  if (intent && (intent.attach !== attachSeq || intent.current?.() === false)) throw Object.assign(new Error("another notebook was opened here meanwhile"), { navWon: true });
   nb.detach();
   docGen++;
   ttShow(false);
@@ -1744,10 +1756,16 @@ const filesBarEl = $("#filesbar");
 function filesBar(on) { filesBarEl.hidden = !on || !current.id || perms.may(current.id, "files"); }
 function filesShown() {
   const on = !!current.id && perms.may(current.id, "files");
-  const fp = document.getElementById("filesperm"); // (the File menu's, drawn again with it)
+  const fp = document.getElementById("filesperm"); // (the Permissions panel's)
   if (fp) fp.textContent = on ? "Don't allow file changes" : "Allow file changes";
+  $("#permsfiles").textContent = !current.id ? "" : on ? "Allowed: this notebook's code may change your files." : "Not allowed: this notebook's code can't change your files.";
+  $("#permsfor").textContent = current.id ? `For "${docName()}".` : "";
   if (on) filesBarEl.hidden = true;
 }
+// The Permissions panel (File > Permissions…): what the notebook shown may do, and the person's own switch
+const permsDlg = $("#permsdlg");
+function showPerms() { filesShown(); if (!permsDlg.open) permsDlg.showModal(); }
+$("#filesperm").onclick = (e) => { setFiles(e, !(current.id && perms.may(current.id, "files"))); };
 // (a choice this browser couldn't keep holds in this page, and says so: astra's NM-DENY-2)
 const setFiles = (e, on) => {
   if (e?.isTrusted !== true || !current.id) return false;
@@ -1769,17 +1787,17 @@ perms.onChange((doc) => {
   }
   if (doc === current.id) filesShown();
 });
-async function openDocument(doc, here = false, made = "elsewhere", guard = null) {
+async function openDocument(doc, here = false, made = "elsewhere", guard = null, intent = null) {
   const id = newId();
   // (Sagebrush's own (the first visit's Welcome, an example): host-made before its interpreter starts, so it never
   // starts as one that can't change files and is restarted (the app on Windows: still loading at the self-test's check))
   if (made === "host") { hostMade(id); perms.provenance(id, "host"); made = "elsewhere"; }
   madeAs.set(id, here ? "person" : made);
   const { here: _h, ...rest } = doc;
-  return open(await storeFor(id, { ...rest, ...(here ? { here: true } : {}), id, cells: (doc.cells ?? []).map((c) => (c.id ? c : { ...c, id: cellId() })) }), id, "browser", guard);
+  return open(await storeFor(id, { ...rest, ...(here ? { here: true } : {}), id, cells: (doc.cells ?? []).map((c) => (c.id ? c : { ...c, id: cellId() })) }), id, "browser", guard, intent);
 }
 // (here: a new notebook, written in this browser; else examples and share links)
-const openNew = (name, mode, codes, here = false, guard = null) => openDocument({ name, mode, cells: codes.map(asCell) }, here, undefined, guard);
+const openNew = (name, mode, codes, here = false, guard = null, intent = null) => openDocument({ name, mode, cells: codes.map(asCell) }, here, undefined, guard, intent);
 // (one of Sagebrush's own notebooks, made here from its bundled examples: permissions.js's "host")
 const openHostMade = (name, mode, codes) => openDocument({ name, mode, cells: codes.map(asCell) }, false, "host");
 /** `intent`: an automatic open's (awaitArrival), given to open() through either branch. */
@@ -2565,6 +2583,8 @@ const downloadDialog = createDownloadDialog({
 });
 beforeSwitch.push(async () => downloadDialog.invalidate());
 
+// (a share link's language: its m=, else Python)
+const linkMode = (hash) => (/m=sage/.test(hash) ? "sage" : /m=magma/.test(hash) ? "magma" : /m=matlab/.test(hash) ? "matlab" : "python");
 async function fromLink(hash) {
   const z = /z=([\w-]+)/.exec(hash), c = /c=([\w-]+)/.exec(hash);
   if (!z && !c) return null;
@@ -2645,11 +2665,14 @@ const fileMenu = $("#filemenu"), fileBtn = $("#filebtn");
 // The one File menu (design/workspace-files.md §3, web/workspace/filemenu.ts):
 // drawn the same as the board page's; what an item does is here, by its key
 // (data-f).  Without the workspace, what needs it is disabled.
+// (whether this page has the LaTeX editor: New ▸ LaTeX document in the File menu and the file panel, U0)
+const latexHere = typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && latexOn(location.hostname);
 function drawFileMenu() {
   const none = !ws;
   renderFileMenu(fileMenu, {
     attr: "data-f",
-    keys: { newNotebook: "new", newMatlab: "newmatlab", newBoard: "whiteboard", newFolder: "newfolder", fromExample: "examples", open: "open", upload: "import", saveCopy: "duplicate", rename: "rename", print: "print", share: "share", delete: "delete" },
+    latex: latexHere,
+    keys: { newNotebook: "new", newMatlab: "newmatlab", newBoard: "whiteboard", newLatex: "newlatex", newFolder: "newfolder", fromExample: "examples", open: "open", upload: "import", saveCopy: "duplicate", rename: "rename", print: "print", share: "share", delete: "delete" },
     disabled: { newFolder: none },
     downloads: [
       { key: "ipynb", label: ".ipynb" },
@@ -2664,14 +2687,14 @@ function drawFileMenu() {
       { after: "upload", key: "openfile", label: "Open file…", hidden: true },
       { after: "saveCopy", key: "saveas", label: "Save as…", hidden: true },
       // (whether this notebook's code may change the person's files: no-mutation's one switch, a document's setting)
-      { after: "share", key: "filesperm", label: "Don't allow file changes", title: "Whether this notebook's code may change your files (a notebook from elsewhere may not, until you allow it)" },
+      { after: "share", key: "perms", label: "Permissions…", title: "What this notebook's code may do: change your files (no notebook may until you allow it)" },
     ],
     recent: ws ? async () => (await recentOpened(ws, current.kind === "browser" ? { kind: "notebook", ref: current.id } : undefined)).map((e) => ({ label: recentLabel(e), title: e.path, open: () => openEntry(e) })) : undefined,
     chosen: () => toggleFileMenu(false),
   });
   // (Share…, as the share tests and the share dialog know it)
   fileMenu.querySelector('[data-item="share"]').id = "sharemenu";
-  fileMenu.querySelector('[data-f="filesperm"]').id = "filesperm";
+  fileMenu.querySelector('[data-f="perms"]').id = "permsmenu";
   filesShown();
 }
 // (a document opened from the File menu (Recent, Open…): a notebook here, a board on its page)
@@ -2685,7 +2708,8 @@ const toggleFileMenu = menuOf(fileBtn, fileMenu);
 // (Ctrl+Alt+N a new notebook, Ctrl+O Open…: the File menu's keys)
 document.addEventListener("keydown", (e) => {
   const it = fileMenuKey(e);
-  if (!it) return;
+  // (the LaTeX editor's page over this one: its own File menu answers them, never both: one notebook a Ctrl+Alt+N)
+  if (!it || document.querySelector(".tex-page")) return;
   e.preventDefault();
   fileMenu.querySelector(`[data-item="${it}"]:not([disabled])`)?.click();
 });
@@ -2804,7 +2828,7 @@ fileMenu.addEventListener("click", async (e) => {
   toggleFileMenu(false);
   switch (b.dataset.f) {
     // (the person's own click only: setFiles checks isTrusted)
-    case "filesperm": setFiles(e, !(current.id && perms.may(current.id, "files"))); break;
+    case "perms": showPerms(); break;
     case "newfolder": {
       const name = prompt("A new folder, at the top of your files: its name", "New folder");
       if (!name?.trim() || !ws) break;
@@ -2822,6 +2846,7 @@ fileMenu.addEventListener("click", async (e) => {
     case "new": saveNow(); await openNew("Untitled", nb.mode, [""], true); cells()[0].ta.focus(); break;
     // (a MATLAB notebook, whatever this one's language: sage's n8 walkthrough)
     case "newmatlab": saveNow(); await openNew("Untitled", "matlab", [""], true); cells()[0].ta.focus(); break;
+    case "newlatex": if (ws) { saveNow(); await texNew(ws); } break;
     // (a new board in the notebook's language, opened in Edit; this notebook stays saved: board/page.ts ?new=)
     case "whiteboard": await toBoard("/board/?new=" + encodeURIComponent(nb.mode)); break;
     // (the file browser as a dialog; without the workspace, the notebooks of this browser as before)
@@ -3498,6 +3523,12 @@ async function selftest(path) {
     try { st = await bounded(import(new URL("sagebrush-selftest.js", location.href).href), 15000); infoLines = await st.diagnoseLines(kernel); } catch (e) { console.log("diagnose import: " + e); }
     await openDiskFile(path);
     check("opened the notebook from disk", current.id === "file:" + path && cells().length > 0, statusEl.textContent);
+    // (every notebook starts with file changes off (confinement 1b), and the app has no sandbox, so it runs none that
+    // isn't allowed: the app's own self-test allows its notebook, as the person's click would, and waits for the
+    // page's own interpreter. No check line of its own: the judges' list of checks is closed, and if this fails, "ran
+    // it" fails with the refusal in its output.)
+    perms.set(current.id, "files", true);
+    await until(() => kernel.ready && !((kernel.worker?.inner ?? kernel.worker) instanceof RefusingWorker), 60000);
     await nb.runAll();
     await until(() => !cells().some((c) => /\*/.test(c.n.textContent)), 120000);
     const out = cells().map((c) => c.out.textContent).join("\n");
@@ -3817,6 +3848,9 @@ function wsShowFiles(on) {
       },
       upload: (files, folder) => uploadHere(files, folder),
       openAs: (e, as) => openAs(e, as),
+      // (New ▸ LaTeX document and From an example…, as the File menu has them: filemenu.ts NEW_ITEMS, U0)
+      ...(latexHere ? { newLatex: (folder) => { saveNow(); void texNew(ws, folder); } } : {}),
+      fromExample: () => fileMenu.querySelector('[data-f="examples"]:not([disabled])')?.click(),
       close: () => wsShowFiles(false),
       // (the Storage panel's export: its lazy chunk beside this page; the open notebook saved first)
       exportUrl: (f) => new URL(f, location.href).href,
@@ -4028,12 +4062,32 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
     for (const b of [$("#filesbtn")]) if (b) b.hidden = true;
   }
   else if (opened) {}
-  else if (shared) await openNew("Shared notebook", /m=sage/.test(location.hash) ? "sage" : /m=magma/.test(location.hash) ? "magma" : /m=matlab/.test(location.hash) ? "matlab" : "python", shared);
+  else if (shared) await openNew("Shared notebook", linkMode(location.hash), shared);
   else if (!(last && (await openId(last)))) {
     // (the first visit's Welcome: Sagebrush's own, which may change files: permissions.js)
     await openHostMade(mode === "sage" ? "Sage" : "Welcome", mode, mode === "sage" ? EXAMPLES.Sage : EXAMPLES.Welcome);
   }
   booted();
+  // a share link opened in this tab while the page is already open (pasted into the address bar, or a link followed
+  // here): only the fragment changes and nothing reloads, so it is opened here as it would be at load (run 13's
+  // APP-share-link-same-tab: the old notebook stayed, and its Run all ran its own cells). Through open(), as File > Open:
+  // the notebook left is kept (saved as it goes), and one whose saves can't be made yet stays open, saying why. A
+  // fragment that is no share link changes nothing; under `sagebrush notebook`'s one file, as at load, it isn't opened.
+  // Only the latest fragment counts (astra's SHARE-HASH-STALE-1): each is read once, numbered, and decoded; a decode a
+  // later fragment superseded (a link, or anything else) is dropped, its error unsaid; and it attaches only if no other
+  // notebook was attached here since it was asked for, and it is still the latest fragment then (an `intent`, both
+  // checked by open() under the navigation lease, just before anything is detached: a File > Open meanwhile wins, and a
+  // later fragment while it waits for the lease or its store drops it)
+  let linkSeq = 0;
+  if (!LOCAL) addEventListener("hashchange", async () => {
+    const hash = location.hash, seq = ++linkSeq, intent = { attach: attachSeq, current: () => seq === linkSeq };
+    let codes = null;
+    try { await shareTest.beforeLinkDecode?.(hash); codes = await fromLink(hash); }
+    catch { if (seq === linkSeq) statusEl.textContent = "could not open the share link: it is damaged or cut short"; return; }
+    if (seq !== linkSeq || !codes) return;
+    try { await openNew("Shared notebook", linkMode(hash), codes, false, null, intent); }
+    catch (err) { if (!err?.navWon && seq === linkSeq) statusEl.textContent = `could not open the share link: ${err?.message ?? err}`; }
+  });
   // ?openas=PATH&fid=FID: a file opened as a notebook from the board page (a Jupytext MyST .md sent there, which
   // offers it here instead: agents-ui's N-2), through openAs as the file browser's menu does; one replaced
   // meanwhile (another fid), said, nothing made

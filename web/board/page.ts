@@ -1,6 +1,6 @@
 // The board page (web/board/index.html): sagebrush.space as a board's host
 // (mount.ts).  /board/?doc=URL shows a board document (web/board/doc.ts);
-// /board/ alone, Sagebrush's own architecture (examples/sagebrush.json);
+// /board/ alone, Sagebrush's own architecture (examples/sagebrush.board.json);
 // ?mermaid=TEXT, a Mermaid flowchart; an exported file (export.ts), the
 // document it carries; ?items=N&strokes=N, a synthetic board for the
 // benchmark (bench.mjs, window.boardBench).  A document's tour steps through
@@ -334,12 +334,18 @@ const mdText = (t: string) => t.replace(/[\\`*_[\]()<>#!|~]/g, "\\$&");
     history.replaceState(null, "", location.pathname + (q.toString() ? "?" + q.toString().replace("local%3A", "local:") : "") + location.hash);
   }
 }
+// (the corpus boards renamed to .board.json, Nov 7 2026: an old address opens the new file, and this browser's edits
+// and history of it stay where they were, under the old name)
+const RENAMED: Record<string, string> = Object.fromEntries(["live", "sagebrush", "primes", "museum-tour", "polynomials"]
+  .map((n) => ["examples/" + n + ".json", "examples/" + n + ".board.json"]).concat([["examples/mermaid.md", "examples/mermaid.board.json"]]));
+if (Object.hasOwn(RENAMED, q.get("doc") ?? "")) { q.set("doc", RENAMED[q.get("doc")!]); history.replaceState(null, "", location.pathname + "?" + q.toString() + location.hash); }
 // (?mermaid=TEXT: a flowchart given in the address; an exported file, its own)
-const source = unsaved ? "unsaved:" + unsaved : embedded() ? "embedded:" + location.pathname : q.get("doc") ?? (q.has("mermaid") ? "mermaid:" + q.get("mermaid") : "examples/sagebrush.json");
-const saveKey = "sagebrush-board:" + source;
+const source = unsaved ? "unsaved:" + unsaved : embedded() ? "embedded:" + location.pathname : q.get("doc") ?? (q.has("mermaid") ? "mermaid:" + q.get("mermaid") : "examples/sagebrush.board.json");
+const storeName = Object.keys(RENAMED).find((o) => RENAMED[o] === source) ?? source;
+const saveKey = "sagebrush-board:" + storeName;
 const local = /^local:[0-9a-f]{12}$/.test(source);
 // (a document's history in this browser: by its source and its name beside it)
-const historyKey = (id: string | null) => "board:" + source + (id ? ":" + id : "");
+const historyKey = (id: string | null) => "board:" + storeName + (id ? ":" + id : "");
 // The board journal (DEV-only; journal.ts): a board of the workspace is saved through the
 // journal's store once this browser's workspace journal is active, read once, at load (its gate).  Everything it
 // changes here is behind `journalOn`; with it off, the page is as before
@@ -983,6 +989,15 @@ let chosen: string | null = null;
 // (U1, William Nov 2: a .tex file clicked in the board's file panel did nothing. It opens in the LaTeX editor, on the
 // notebook page's /?tex=<fid>, where the editor is on (the hosts the build lists: latexOn); this board left the way every
 // open leaves it (leaveFor: what is being written kept first). Elsewhere, or a file without a stable id: its preview)
+// (the LaTeX editor's module, from the site's root: a variable, so the bundler leaves it to the browser)
+const TEX_PAGE = "/sagebrush-latex.js";
+// New ▸ LaTeX document in `folder` (the File menu's and the file panel's, where the editor is on: U0): made by the
+// editor's own newTex in this workspace, then opened there, this board left as New notebook leaves it
+const newLatexHere = ws && !file && latexOn(location.hostname) ? (folder = "/") => departFor("A new LaTeX document", async () => {
+  let url: string | undefined;
+  await (await import(TEX_PAGE)).newTex(ws!, (e: Entry) => { url = "/?tex=" + e.fid; }, folder);
+  return url;
+}) : undefined;
 // (a code or text file: its own page on the notebook page, /?code=<fid> (1a, web/code/page.ts), left for as a .tex is)
 function openCode(e: Entry, tab: boolean): boolean {
   if (langOf(e.path) === null || !e.fid) return false;
@@ -1447,6 +1462,7 @@ const host: BoardHost = {
       const e = await ws!.createByPerson(p, { mode, signal });
       return "/?nb=" + encodeURIComponent(e.ref!);
     }),
+    ...(newLatexHere ? { newLatex: newLatexHere } : {}),
     async newFolder() {
       const name = prompt("A new folder, at the top of your files: its name", "New folder");
       if (!name?.trim()) return;
@@ -1612,6 +1628,9 @@ if (ws && local) {
       current: () => ({ kind: "board", ref: source.slice(6) }),
       open: openEntry,
       openFile: (e: Entry, tab: boolean) => openTex(e, tab) || openCode(e, tab),
+      ...(newLatexHere ? { newLatex: (folder: string) => void newLatexHere(folder) } : {}),
+      // (From an example…: the board's own, as its File menu has it)
+      fromExample: () => document.querySelector<HTMLElement>('[data-sbb="filemenu"] [data-sbb="examples"]:not([disabled])')?.click(),
       upload: (files, folder) => uploadToWorkspace(ws, files, mounted.agent.snapshot().doc?.mode ?? "python", folder),
       openAs: (e, as) => openAsHere(ws, e, as, mounted.agent.snapshot().doc?.mode ?? "python").then((err) => (err ? `"${nameOf(e.path)}" couldn't be opened as a ${as}: ${err}` : undefined)),
       close: () => show(false),

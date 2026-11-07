@@ -242,6 +242,10 @@ def open(file, mode="r", buffering=-1, encoding=None, errors=None, newline=None,
     if not isinstance(mode, str) or not set(mode) <= set("rwxabt+"):
         raise ValueError("invalid mode: %r" % (mode,))
     binary = "b" in mode
+    # (encoding="locale", io.text_encoding's answer for None: the locale's encoding, UTF-8 here, as
+    # locale.getencoding() is CPython's)
+    if encoding == "locale":
+        encoding = "UTF-8"
     # (an unclosed file of the same path is not written first: a held file's
     # data is CPython's buffer, not yet on disk; open(f, "w").write(s) with
     # plain operands writes and closes at once instead, src/emit.ts's

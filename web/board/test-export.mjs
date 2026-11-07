@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
 
-const docs = process.argv.slice(2).length ? process.argv.slice(2) : ["examples/primes.json", "examples/sagebrush.json", "examples/mermaid.md", "examples/live.json"];
+const docs = process.argv.slice(2).length ? process.argv.slice(2) : ["examples/primes.board.json", "examples/sagebrush.board.json", "examples/mermaid.board.json", "examples/live.board.json"];
 const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
 let port = Number(process.env.CDP_PORT) || 0, sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const dir = mkdtempSync(join(tmpdir(), "sb-export-")), profile = mkdtempSync(join(tmpdir(), "sb-export-prof-"));
@@ -142,14 +142,14 @@ try {
     await send("Input.dispatchKeyEvent", { type: "keyUp", key: "s", code: "KeyS", windowsVirtualKeyCode: 83, modifiers });
   };
   const dialogOpen = () => ev("document.querySelector('[data-sbb=htmldlg]').open");
-  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.json")}` });
+  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.board.json")}` });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
   // (its code run first: the dialog shows what the file would carry, so it
   // opens only when what was asked for has run, which under load is slow)
   if (!(await until("window.sagebrush.board.outputs().then((os) => os.length > 0)", 90000).then(() => true, () => false))) {
     // (what the board said, and the page's errors: why its engine never answered, should it happen again)
     const said = await ev("document.querySelector('[data-sbb=say]')?.textContent ?? ''", 10000).catch((e) => String(e));
-    check(false, `examples/live.json's code did not run in 90 s; the board says: ${said.slice(0, 200)}; page errors: ${errors.slice(0, 5).join(" | ") || "none"}`);
+    check(false, `examples/live.board.json's code did not run in 90 s; the board says: ${said.slice(0, 200)}; page errors: ${errors.slice(0, 5).join(" | ") || "none"}`);
   }
   for (const [mod, name] of [[2, "Ctrl"], [4, "Cmd"]]) {
     await keyS(mod);
@@ -175,7 +175,7 @@ try {
   check(await ev("window.__got.length === 2 && !window.board.editing && window.sagebrush.board.snapshot().doc.nodes[0].title === 'Note kept'"), "Ctrl+S while a note is written: not kept first, or not downloaded: " + JSON.stringify(await ev("({ got: window.__got, editing: window.board.editing, title: window.sagebrush.board.snapshot().doc.nodes[0].title })")));
   // (an exported file is itself the saved board: there Ctrl/Cmd+S is the
   // browser's, its ⋯ menu still downloading it again, CORR-2C4-1)
-  await send("Page.navigate", { url: "file://" + files.get("examples/primes.json") });
+  await send("Page.navigate", { url: "file://" + files.get("examples/primes.board.json") });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 30000);
   await ev("window.__got = []; HTMLAnchorElement.prototype.click = function () { window.__got.push(this.download); }; window.__kept = []; document.addEventListener('keydown', (e) => window.__kept.push(e.defaultPrevented)); 1");
   await keyS(2);
@@ -191,7 +191,7 @@ try {
   errors = [];
   // (?workspace=0: opened into the board shown, the in-place path; with the workspace a file is
   // uploaded and opened as a copy, test-workspace-upload.mjs)
-  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/primes.json")}&workspace=0` });
+  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/primes.board.json")}&workspace=0` });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
   const docJson = () => ev("JSON.stringify(window.sagebrush.board.snapshot().doc)");
   const sayText = () => ev("document.querySelector('[data-sbb=say]').textContent");
