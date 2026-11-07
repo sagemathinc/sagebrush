@@ -1,0 +1,353 @@
+-- ZZ[x]
+(-x^2+1)/(x+1) | -x + 1 | -x + 1 | 1 | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+(x^2-1)/(-x-1) | -x + 1 | -x + 1 | 1 | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+(6x^2-6)/(-4x-4) | (3*x - 3)/-2 | 3*x - 3 | -2 | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+(-6x^2+6)/(4x-4) | (-3*x - 3)/2 | -3*x - 3 | 2 | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+(2x)/F(-4) | x/-2 | x | -2 | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+(-2x)/F(-4) | -x/-2 | -x | -2 | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+(4x+2)/(6x) | (2*x + 1)/(3*x) | 2*x + 1 | 3*x | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+(-2x-4)/(-6x) | (-x - 2)/(-3*x) | -x - 2 | -3*x | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+2/(4x+6) | 1/(2*x + 3) | 1 | 2*x + 3 | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+x/(-x+1) | x/(-x + 1) | x | -x + 1 | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+1/(-2x) | 1/(-2*x) | 1 | -2*x | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+(x+1)/(2x)*2 | (x + 1)/x | x + 1 | x | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+(x+1)/(2x)+1 | (3*x + 1)/(2*x) | 3*x + 1 | 2*x | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+1/(2x)+1/(2x) | 1/x | 1 | x | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+1/(2x)-1/(3x) | 1/(6*x) | 1 | 6*x | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+((x+1)/(2x))^2 | (x^2 + 2*x + 1)/(4*x^2) | x^2 + 2*x + 1 | 4*x^2 | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+((x+1)/(2x))^-2 | 4*x^2/(x^2 + 2*x + 1) | 4*x^2 | x^2 + 2*x + 1 | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+((-x-1)/(2x))^-1 | 2*x/(-x - 1) | 2*x | -x - 1 | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+1/((x+1)/(2x)) | 2*x/(x + 1) | 2*x | x + 1 | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+-(x+1)/(2x) | (-x - 1)/(2*x) | -x - 1 | 2*x | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+product to 1 | 1 | 1 | 1 | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+x/x | 1 | 1 | 1 | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+(-x)/x | -1 | -1 | 1 | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+F(2)/F(-2) | -1 | -1 | 1 | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+F(1/2)*x | x/2 | x | 2 | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+x/2 | 1/2*x | Univariate Polynomial Ring in x over Rational Field
+x/R(2) | x/2 | x | 2 | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+(2x)/R(2) | x | x | 1 | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+2/x | 2/x | 2 | x | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+2/R(4) | 1/2 | 1 | 2 | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+R(4)/R(2) | 2 | 2 | 1 | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+(1/2)/x | 1/2/x | 1/2 | x | Fraction Field of Univariate Polynomial Ring in x over Rational Field
+x/(1/2) | 2*x | Univariate Polynomial Ring in x over Rational Field
+F(x)+1/2 | (2*x + 1)/2 | 2*x + 1 | 2 | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+F(x)/(1/2) | 2*x | 2*x | 1 | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+(2x)/F(1/2) | 4*x | 4*x | 1 | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+-F(x)/2 | -x/2 | -x | 2 | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+F(2,4) | 1/2 | 1 | 2 | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+F(2x,-4) | x/-2 | x | -2 | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+F(x,-1) | -x | -x | 1 | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+F(-x,-1) | x | x | 1 | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+F(1/2) | 1/2 | 1 | 2 | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+x*(1/x) | 1 | 1 | 1 | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+QQ[x] gen + 1/x | (x^2 + 1)/x | x^2 + 1 | x | Fraction Field of Univariate Polynomial Ring in x over Rational Field
+0/(-x) | 0 | 0 | 1 | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+difference 0 | 0 | 0 | 1 | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+x//x | 1 | Univariate Polynomial Ring in x over Integer Ring
+(x^2-1)//(x-1) | x + 1 | Univariate Polynomial Ring in x over Integer Ring
+derivative | -1/(2*x^2) | -1 | 2*x^2 | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+at 1 | 1 | Rational Field
+at 1/3 | 2 | Rational Field
+(x^2-1)/(x-1) at 2 | 3 | Rational Field
+(x+1)/x at y | (y + 1)/y | y + 1 | y | Fraction Field of Univariate Polynomial Ring in y over Rational Field
+equal | True
+x/-2 == -x/2 | True
+hash x/-2, -x/2 | True
+hash F(x), x | True
+hash equal | True
+latex x/-2 | \frac{x}{-2}
+latex (x+1)/(-2x) | \frac{x + 1}{-2x}
+latex x/x | 1
+(x/x).numerator() | 1 | Univariate Polynomial Ring in x over Integer Ring
+R((x^2-1)/(x-1)) | x + 1 | Univariate Polynomial Ring in x over Integer Ring
+R(F(x,-1)) | -x | Univariate Polynomial Ring in x over Integer Ring
+R(1/x) | ERR TypeError 'fraction must have unit denominator'
+R(x/F(2)) | ERR TypeError 'fraction must have unit denominator'
+x/0 | ERR ZeroDivisionError 'rational division by zero'
+x/R(0) | ERR ZeroDivisionError 'fraction field element division by zero'
+1/R(0) | ERR ZeroDivisionError 'fraction field element division by zero'
+R(0)/R(0) | ERR ZeroDivisionError 'fraction field element division by zero'
+F(x,0) | ERR ZeroDivisionError 'fraction field element division by zero'
+(1/x)/R(0) | ERR ZeroDivisionError 'fraction field element division by zero'
+(1/x)/0 | ERR ZeroDivisionError 'fraction field element division by zero'
+1/(x-x) | ERR ZeroDivisionError 'fraction field element division by zero'
+(1/x)^-1 | x | x | 1 | Fraction Field of Univariate Polynomial Ring in x over Integer Ring
+F(0)^-1 | ERR ZeroDivisionError 'fraction field element division by zero'
+-- QQ[x]
+(-x^2+1)/(x+1) | -x + 1 | -x + 1 | 1 | Fraction Field of Univariate Polynomial Ring in x over Rational Field
+(6x^2-6)/(-4x-4) | -3/2*x + 3/2 | -3/2*x + 3/2 | 1 | Fraction Field of Univariate Polynomial Ring in x over Rational Field
+x/x | 1 | 1 | 1 | Fraction Field of Univariate Polynomial Ring in x over Rational Field
+(x+1)/(x+1) | 1 | 1 | 1 | Fraction Field of Univariate Polynomial Ring in x over Rational Field
+2x/x | 2 | 2 | 1 | Fraction Field of Univariate Polynomial Ring in x over Rational Field
+x/R(2) | 1/2*x | 1/2*x | 1 | Fraction Field of Univariate Polynomial Ring in x over Rational Field
+2/R(4) | 1/2 | 1/2 | 1 | Fraction Field of Univariate Polynomial Ring in x over Rational Field
+(x^2-1)/(x-1)+1 | x + 2 | x + 2 | 1 | Fraction Field of Univariate Polynomial Ring in x over Rational Field
+(x+1)/(2x) | (1/2*x + 1/2)/x | 1/2*x + 1/2 | x | Fraction Field of Univariate Polynomial Ring in x over Rational Field
+1/(-2x) | -1/2/x | -1/2 | x | Fraction Field of Univariate Polynomial Ring in x over Rational Field
+R((x^2-1)/(x-1)) | x + 1 | Univariate Polynomial Ring in x over Rational Field
+R(1/x) | ERR TypeError 'fraction must have unit denominator'
+hash F(x), x | True
+x/x == 1 | True
+at 1 | 1/2 | Rational Field
+x/0 | ERR ZeroDivisionError 'rational division by zero'
+x/R(0) | ERR ZeroDivisionError 'fraction field element division by zero'
+1/R(0) | ERR ZeroDivisionError 'fraction field element division by zero'
+F(x,0) | ERR ZeroDivisionError 'fraction field element division by zero'
+(1/x)/0 | ERR ZeroDivisionError 'fraction field element division by zero'
+F(0)^-1 | ERR ZeroDivisionError 'fraction field element division by zero'
+-- GF(5)[x]
+x/x | 1 | 1 | 1 | Fraction Field of Univariate Polynomial Ring in x over Finite Field of size 5
+(x^2-1)/(x-1) | x + 1 | x + 1 | 1 | Fraction Field of Univariate Polynomial Ring in x over Finite Field of size 5
+x/R(2) | 3*x | 3*x | 1 | Fraction Field of Univariate Polynomial Ring in x over Finite Field of size 5
+x/2 | 3*x | Univariate Polynomial Ring in x over Finite Field of size 5
+(x+1)/(2x) | (3*x + 3)/x | 3*x + 3 | x | Fraction Field of Univariate Polynomial Ring in x over Finite Field of size 5
+(2x^2-2)/(4x+4) | 3*x + 2 | 3*x + 2 | 1 | Fraction Field of Univariate Polynomial Ring in x over Finite Field of size 5
+-- QQ[x,y]
+(2x^2-2y^2)/(4x-4y) | 1/2*x + 1/2*y | 1/2*x + 1/2*y | 1 | Fraction Field of Multivariate Polynomial Ring in x, y over Rational Field
+(x^2-y^2)/(-x+y) | -x - y | -x - y | 1 | Fraction Field of Multivariate Polynomial Ring in x, y over Rational Field
+(x^2-y^2)/(2x-2y) | 1/2*x + 1/2*y | 1/2*x + 1/2*y | 1 | Fraction Field of Multivariate Polynomial Ring in x, y over Rational Field
+(xy)/(2x) | 1/2*y | 1/2*y | 1 | Fraction Field of Multivariate Polynomial Ring in x, y over Rational Field
+(3x)/(6xy) | 3/(6*y) | 3 | 6*y | Fraction Field of Multivariate Polynomial Ring in x, y over Rational Field
+(-2xy)/(4x) | -1/2*y | -1/2*y | 1 | Fraction Field of Multivariate Polynomial Ring in x, y over Rational Field
+(6x^2)/(-4xy) | 6*x/(-4*y) | 6*x | -4*y | Fraction Field of Multivariate Polynomial Ring in x, y over Rational Field
+(2x+2)/(4y) | (2*x + 2)/(4*y) | 2*x + 2 | 4*y | Fraction Field of Multivariate Polynomial Ring in x, y over Rational Field
+3/(6x+9y) | 3/(6*x + 9*y) | 3 | 6*x + 9*y | Fraction Field of Multivariate Polynomial Ring in x, y over Rational Field
+(x/2)/(y/3) | 1/2*x/(1/3*y) | 1/2*x | 1/3*y | Fraction Field of Multivariate Polynomial Ring in x, y over Rational Field
+1/(2x)+1/(2y) | (2*x + 2*y)/(4*x*y) | 2*x + 2*y | 4*x*y | Fraction Field of Multivariate Polynomial Ring in x, y over Rational Field
+(x/2)*(2/y) | x/y | x | y | Fraction Field of Multivariate Polynomial Ring in x, y over Rational Field
+(x+y)/(2x)*2 | (2*x + 2*y)/(2*x) | 2*x + 2*y | 2*x | Fraction Field of Multivariate Polynomial Ring in x, y over Rational Field
+x/x | 1 | 1 | 1 | Fraction Field of Multivariate Polynomial Ring in x, y over Rational Field
+(-x)/x | -1 | -1 | 1 | Fraction Field of Multivariate Polynomial Ring in x, y over Rational Field
+(-x)/y | (-x)/y | -x | y | Fraction Field of Multivariate Polynomial Ring in x, y over Rational Field
+x/(-2y) | x/(-2*y) | x | -2*y | Fraction Field of Multivariate Polynomial Ring in x, y over Rational Field
+(-1)/y | (-1)/y | -1 | y | Fraction Field of Multivariate Polynomial Ring in x, y over Rational Field
+2/(-y) | 2/(-y) | 2 | -y | Fraction Field of Multivariate Polynomial Ring in x, y over Rational Field
+-1/(2xy) | (-1)/(2*x*y) | -1 | 2*x*y | Fraction Field of Multivariate Polynomial Ring in x, y over Rational Field
+(-x-y)/(x*y) | (-x - y)/(x*y) | -x - y | x*y | Fraction Field of Multivariate Polynomial Ring in x, y over Rational Field
+(xy)/(-y) | -x | -x | 1 | Fraction Field of Multivariate Polynomial Ring in x, y over Rational Field
+-(x/y) | (-x)/y | -x | y | Fraction Field of Multivariate Polynomial Ring in x, y over Rational Field
+(x/y)^-1 | y/x | y | x | Fraction Field of Multivariate Polynomial Ring in x, y over Rational Field
+((x+1)/(2y))^2 | (x^2 + 2*x + 1)/(4*y^2) | x^2 + 2*x + 1 | 4*y^2 | Fraction Field of Multivariate Polynomial Ring in x, y over Rational Field
+(x-y)/(y-x) | -1 | -1 | 1 | Fraction Field of Multivariate Polynomial Ring in x, y over Rational Field
+(y-x)/(x-y)^2 | (-1)/(x - y) | -1 | x - y | Fraction Field of Multivariate Polynomial Ring in x, y over Rational Field
+(x+y)/(-x-y) | -1 | -1 | 1 | Fraction Field of Multivariate Polynomial Ring in x, y over Rational Field
+x/(y-x) | x/(-x + y) | x | -x + y | Fraction Field of Multivariate Polynomial Ring in x, y over Rational Field
+x/(2y-2x) | x/(-2*x + 2*y) | x | -2*x + 2*y | Fraction Field of Multivariate Polynomial Ring in x, y over Rational Field
+(2y-2x)/(4x) | (-2*x + 2*y)/(4*x) | -2*x + 2*y | 4*x | Fraction Field of Multivariate Polynomial Ring in x, y over Rational Field
+x/R(2) | 1/2*x | Multivariate Polynomial Ring in x, y over Rational Field
+(2x)/R(2) | x | Multivariate Polynomial Ring in x, y over Rational Field
+x/2 | 1/2*x | Multivariate Polynomial Ring in x, y over Rational Field
+F(x)/2 | 1/2*x | 1/2*x | 1 | Fraction Field of Multivariate Polynomial Ring in x, y over Rational Field
+2/F(-4) | -1/2 | -1/2 | 1 | Fraction Field of Multivariate Polynomial Ring in x, y over Rational Field
+hash x/(-y), (-x)/y | True
+hash F(x), x | True
+hash 3/(6y), 1/(2y) | True
+x/0 | ERR ZeroDivisionError 'rational division by zero'
+x/R(0) | ERR ZeroDivisionError ''
+1/R(0) | ERR ZeroDivisionError ''
+R(0)/R(0) | ERR ZeroDivisionError ''
+F(x,0) | ERR ZeroDivisionError 'fraction field element division by zero'
+(1/x)/R(0) | ERR ZeroDivisionError 'fraction field element division by zero'
+1/(x-x) | ERR ZeroDivisionError ''
+F(0)^-1 | ERR ZeroDivisionError 'fraction field element division by zero'
+-- ZZ[x,y]
+(2x^2-2y^2)/(4x-4y) | (x + y)/2 | x + y | 2 | Fraction Field of Multivariate Polynomial Ring in x, y over Integer Ring
+(x^2-y^2)/(-x+y) | -x - y | -x - y | 1 | Fraction Field of Multivariate Polynomial Ring in x, y over Integer Ring
+(x^2-y^2)/(2x-2y) | (x + y)/2 | x + y | 2 | Fraction Field of Multivariate Polynomial Ring in x, y over Integer Ring
+(xy)/(2x) | y/2 | y | 2 | Fraction Field of Multivariate Polynomial Ring in x, y over Integer Ring
+(3x)/(6xy) | 1/(2*y) | 1 | 2*y | Fraction Field of Multivariate Polynomial Ring in x, y over Integer Ring
+(-2xy)/(4x) | (-y)/2 | -y | 2 | Fraction Field of Multivariate Polynomial Ring in x, y over Integer Ring
+(6x^2)/(-4xy) | 3*x/(-2*y) | 3*x | -2*y | Fraction Field of Multivariate Polynomial Ring in x, y over Integer Ring
+(2x+2)/(4y) | (x + 1)/(2*y) | x + 1 | 2*y | Fraction Field of Multivariate Polynomial Ring in x, y over Integer Ring
+3/(6x+9y) | 1/(2*x + 3*y) | 1 | 2*x + 3*y | Fraction Field of Multivariate Polynomial Ring in x, y over Integer Ring
+(x/2)/(y/3) | 1/2*x/(1/3*y) | 1/2*x | 1/3*y | Fraction Field of Multivariate Polynomial Ring in x, y over Rational Field
+1/(2x)+1/(2y) | (x + y)/(2*x*y) | x + y | 2*x*y | Fraction Field of Multivariate Polynomial Ring in x, y over Integer Ring
+(x/2)*(2/y) | x/y | x | y | Fraction Field of Multivariate Polynomial Ring in x, y over Integer Ring
+(x+y)/(2x)*2 | (x + y)/x | x + y | x | Fraction Field of Multivariate Polynomial Ring in x, y over Integer Ring
+x/x | 1 | 1 | 1 | Fraction Field of Multivariate Polynomial Ring in x, y over Integer Ring
+(-x)/x | -1 | -1 | 1 | Fraction Field of Multivariate Polynomial Ring in x, y over Integer Ring
+(-x)/y | (-x)/y | -x | y | Fraction Field of Multivariate Polynomial Ring in x, y over Integer Ring
+x/(-2y) | x/(-2*y) | x | -2*y | Fraction Field of Multivariate Polynomial Ring in x, y over Integer Ring
+(-1)/y | (-1)/y | -1 | y | Fraction Field of Multivariate Polynomial Ring in x, y over Integer Ring
+2/(-y) | 2/(-y) | 2 | -y | Fraction Field of Multivariate Polynomial Ring in x, y over Integer Ring
+-1/(2xy) | (-1)/(2*x*y) | -1 | 2*x*y | Fraction Field of Multivariate Polynomial Ring in x, y over Integer Ring
+(-x-y)/(x*y) | (-x - y)/(x*y) | -x - y | x*y | Fraction Field of Multivariate Polynomial Ring in x, y over Integer Ring
+(xy)/(-y) | -x | -x | 1 | Fraction Field of Multivariate Polynomial Ring in x, y over Integer Ring
+-(x/y) | (-x)/y | -x | y | Fraction Field of Multivariate Polynomial Ring in x, y over Integer Ring
+(x/y)^-1 | y/x | y | x | Fraction Field of Multivariate Polynomial Ring in x, y over Integer Ring
+((x+1)/(2y))^2 | (x^2 + 2*x + 1)/(4*y^2) | x^2 + 2*x + 1 | 4*y^2 | Fraction Field of Multivariate Polynomial Ring in x, y over Integer Ring
+(x-y)/(y-x) | -1 | -1 | 1 | Fraction Field of Multivariate Polynomial Ring in x, y over Integer Ring
+(y-x)/(x-y)^2 | (-1)/(x - y) | -1 | x - y | Fraction Field of Multivariate Polynomial Ring in x, y over Integer Ring
+(x+y)/(-x-y) | -1 | -1 | 1 | Fraction Field of Multivariate Polynomial Ring in x, y over Integer Ring
+x/(y-x) | x/(-x + y) | x | -x + y | Fraction Field of Multivariate Polynomial Ring in x, y over Integer Ring
+x/(2y-2x) | x/(-2*x + 2*y) | x | -2*x + 2*y | Fraction Field of Multivariate Polynomial Ring in x, y over Integer Ring
+(2y-2x)/(4x) | (-x + y)/(2*x) | -x + y | 2*x | Fraction Field of Multivariate Polynomial Ring in x, y over Integer Ring
+x/R(2) | 1/2*x | Multivariate Polynomial Ring in x, y over Rational Field
+(2x)/R(2) | x | Multivariate Polynomial Ring in x, y over Rational Field
+x/2 | 1/2*x | Multivariate Polynomial Ring in x, y over Rational Field
+F(x)/2 | x/2 | x | 2 | Fraction Field of Multivariate Polynomial Ring in x, y over Integer Ring
+2/F(-4) | 1/(-2) | 1 | -2 | Fraction Field of Multivariate Polynomial Ring in x, y over Integer Ring
+hash x/(-y), (-x)/y | True
+hash F(x), x | True
+hash 3/(6y), 1/(2y) | True
+x/0 | ERR ZeroDivisionError 'rational division by zero'
+x/R(0) | ERR ZeroDivisionError ''
+1/R(0) | ERR ZeroDivisionError ''
+R(0)/R(0) | ERR ZeroDivisionError ''
+F(x,0) | ERR ZeroDivisionError 'fraction field element division by zero'
+(1/x)/R(0) | ERR ZeroDivisionError 'fraction field element division by zero'
+1/(x-x) | ERR ZeroDivisionError ''
+F(0)^-1 | ERR ZeroDivisionError 'fraction field element division by zero'
+-- GF(5)[x,y]
+(2x^2-2y^2)/(4x-4y) | -2*x - 2*y | -2*x - 2*y | 1 | Fraction Field of Multivariate Polynomial Ring in x, y over Finite Field of size 5
+(x^2-y^2)/(-x+y) | -x - y | -x - y | 1 | Fraction Field of Multivariate Polynomial Ring in x, y over Finite Field of size 5
+(x^2-y^2)/(2x-2y) | -2*x - 2*y | -2*x - 2*y | 1 | Fraction Field of Multivariate Polynomial Ring in x, y over Finite Field of size 5
+(xy)/(2x) | -2*y | -2*y | 1 | Fraction Field of Multivariate Polynomial Ring in x, y over Finite Field of size 5
+(3x)/(6xy) | (-2)/y | -2 | y | Fraction Field of Multivariate Polynomial Ring in x, y over Finite Field of size 5
+(-2xy)/(4x) | 2*y | 2*y | 1 | Fraction Field of Multivariate Polynomial Ring in x, y over Finite Field of size 5
+(6x^2)/(-4xy) | x/y | x | y | Fraction Field of Multivariate Polynomial Ring in x, y over Finite Field of size 5
+(2x+2)/(4y) | (2*x + 2)/(-y) | 2*x + 2 | -y | Fraction Field of Multivariate Polynomial Ring in x, y over Finite Field of size 5
+3/(6x+9y) | (-2)/(x - y) | -2 | x - y | Fraction Field of Multivariate Polynomial Ring in x, y over Finite Field of size 5
+(x/2)/(y/3) | (-2*x)/(2*y) | -2*x | 2*y | Fraction Field of Multivariate Polynomial Ring in x, y over Finite Field of size 5
+1/(2x)+1/(2y) | (2*x + 2*y)/(-x*y) | 2*x + 2*y | -x*y | Fraction Field of Multivariate Polynomial Ring in x, y over Finite Field of size 5
+(x/2)*(2/y) | x/y | x | y | Fraction Field of Multivariate Polynomial Ring in x, y over Finite Field of size 5
+(x+y)/(2x)*2 | (2*x + 2*y)/(2*x) | 2*x + 2*y | 2*x | Fraction Field of Multivariate Polynomial Ring in x, y over Finite Field of size 5
+x/x | 1 | 1 | 1 | Fraction Field of Multivariate Polynomial Ring in x, y over Finite Field of size 5
+(-x)/x | -1 | -1 | 1 | Fraction Field of Multivariate Polynomial Ring in x, y over Finite Field of size 5
+(-x)/y | (-x)/y | -x | y | Fraction Field of Multivariate Polynomial Ring in x, y over Finite Field of size 5
+x/(-2y) | x/(-2*y) | x | -2*y | Fraction Field of Multivariate Polynomial Ring in x, y over Finite Field of size 5
+(-1)/y | (-1)/y | -1 | y | Fraction Field of Multivariate Polynomial Ring in x, y over Finite Field of size 5
+2/(-y) | 2/(-y) | 2 | -y | Fraction Field of Multivariate Polynomial Ring in x, y over Finite Field of size 5
+-1/(2xy) | (-1)/(2*x*y) | -1 | 2*x*y | Fraction Field of Multivariate Polynomial Ring in x, y over Finite Field of size 5
+(-x-y)/(x*y) | (-x - y)/(x*y) | -x - y | x*y | Fraction Field of Multivariate Polynomial Ring in x, y over Finite Field of size 5
+(xy)/(-y) | -x | -x | 1 | Fraction Field of Multivariate Polynomial Ring in x, y over Finite Field of size 5
+-(x/y) | (-x)/y | -x | y | Fraction Field of Multivariate Polynomial Ring in x, y over Finite Field of size 5
+(x/y)^-1 | y/x | y | x | Fraction Field of Multivariate Polynomial Ring in x, y over Finite Field of size 5
+((x+1)/(2y))^2 | (x^2 + 2*x + 1)/(-y^2) | x^2 + 2*x + 1 | -y^2 | Fraction Field of Multivariate Polynomial Ring in x, y over Finite Field of size 5
+(x-y)/(y-x) | -1 | -1 | 1 | Fraction Field of Multivariate Polynomial Ring in x, y over Finite Field of size 5
+(y-x)/(x-y)^2 | (-1)/(x - y) | -1 | x - y | Fraction Field of Multivariate Polynomial Ring in x, y over Finite Field of size 5
+(x+y)/(-x-y) | -1 | -1 | 1 | Fraction Field of Multivariate Polynomial Ring in x, y over Finite Field of size 5
+x/(y-x) | x/(-x + y) | x | -x + y | Fraction Field of Multivariate Polynomial Ring in x, y over Finite Field of size 5
+x/(2y-2x) | x/(-2*x + 2*y) | x | -2*x + 2*y | Fraction Field of Multivariate Polynomial Ring in x, y over Finite Field of size 5
+(2y-2x)/(4x) | (-2*x + 2*y)/(-x) | -2*x + 2*y | -x | Fraction Field of Multivariate Polynomial Ring in x, y over Finite Field of size 5
+x/R(2) | -2*x | Multivariate Polynomial Ring in x, y over Finite Field of size 5
+(2x)/R(2) | x | Multivariate Polynomial Ring in x, y over Finite Field of size 5
+x/2 | -2*x | Multivariate Polynomial Ring in x, y over Finite Field of size 5
+F(x)/2 | -2*x | -2*x | 1 | Fraction Field of Multivariate Polynomial Ring in x, y over Finite Field of size 5
+2/F(-4) | 2 | 2 | 1 | Fraction Field of Multivariate Polynomial Ring in x, y over Finite Field of size 5
+hash x/(-y), (-x)/y | True
+hash F(x), x | True
+hash 3/(6y), 1/(2y) | True
+x/R(0) | ERR ZeroDivisionError ''
+1/R(0) | ERR ZeroDivisionError ''
+R(0)/R(0) | ERR ZeroDivisionError ''
+F(x,0) | ERR ZeroDivisionError 'fraction field element division by zero'
+(1/x)/R(0) | ERR ZeroDivisionError 'fraction field element division by zero'
+1/(x-x) | ERR ZeroDivisionError ''
+F(0)^-1 | ERR ZeroDivisionError 'fraction field element division by zero'
+-- partial fractions over QQ[x]
+(x+1)/x^2 | (0, [1/x, 1/x^2])
+1/((x+1)^2*x) | (0, [1/x, -1/(x + 1), -1/(x^2 + 2*x + 1)])
+(x^2+3)/(x+1)^3 | (0, [1/(x + 1), -2/(x^2 + 2*x + 1), 4/(x^3 + 3*x^2 + 3*x + 1)])
+1/(x^2+1)^2 | (0, [1/(x^4 + 2*x^2 + 1)])
+(x^3+x+1)/((x^2+1)^2*(x-1)) | (0, [3/4/(x - 1), (-3/4*x + 1/4)/(x^2 + 1), (-1/2*x - 1/2)/(x^4 + 2*x^2 + 1)])
+x/(-x-1) | (-1, [1/(x + 1)])
+1/(-x^2+1) | (0, [-1/2/(x - 1), 1/2/(x + 1)])
+x^4/(x^2-1) | (x^2 + 1, [1/2/(x - 1), -1/2/(x + 1)])
+1/(x^2-x) | (0, [1/(x - 1), -1/x])
+1/(x^2+3x+2) | (0, [1/(x + 1), -1/(x + 2)])
+1/(-x) | (0, [-1/x])
+2/(-x^2-x) | (0, [-2/x, 2/(x + 1)])
+2/(x^2-1) | (0, [1/(x - 1), -1/(x + 1)])
+1/(2x) | (0, [1/2/x])
+x^2/(x+1) | (x - 1, [1/(x + 1)])
+3/(x^3-x) | (0, [3/2/(x - 1), -3/x, 3/2/(x + 1)])
+(x^2+1)/x^2 | (1, [1/x^2])
+5 | (5, [])
+-- partial fractions over ZZ[x]
+(x+1)/x^2 | (0, [1/x, 1/x^2])
+1/((x+1)^2*x) | (0, [1/x, -1/(x + 1), -1/(x^2 + 2*x + 1)])
+(x^2+3)/(x+1)^3 | (0, [1/(x + 1), -2/(x^2 + 2*x + 1), 4/(x^3 + 3*x^2 + 3*x + 1)])
+1/(x^2+1)^2 | (0, [1/(x^4 + 2*x^2 + 1)])
+(x^3+x+1)/((x^2+1)^2*(x-1)) | ERR ArithmeticError 'element is non-invertible'
+x/(-x-1) | (-1, [1/(x + 1)])
+1/(-x^2+1) | ERR ArithmeticError 'element is non-invertible'
+x^4/(x^2-1) | ERR ArithmeticError 'element is non-invertible'
+1/(x^2-x) | (0, [1/(x - 1), -1/x])
+1/(x^2+3x+2) | (0, [1/(x + 1), -1/(x + 2)])
+1/(-x) | (0, [-1/x])
+2/(-x^2-x) | (0, [-2/x, 2/(x + 1)])
+2/(x^2-1) | ERR ArithmeticError 'element is non-invertible'
+1/(2x) | ERR ArithmeticError 'element is non-invertible'
+x^2/(x+1) | (x - 1, [1/(x + 1)])
+3/(x^3-x) | ERR ArithmeticError 'element is non-invertible'
+(x^2+1)/x^2 | (1, [1/x^2])
+5 | (5, [])
+-- partial fractions over GF(5)[x]
+(x+1)/x^2 | (0, [1/x, 1/x^2])
+1/((x+1)^2*x) | (0, [1/x, 4/(x + 1), 4/(x^2 + 2*x + 1)])
+(x^2+3)/(x+1)^3 | (0, [1/(x + 1), 3/(x^2 + 2*x + 1), 4/(x^3 + 3*x^2 + 3*x + 1)])
+1/(x^2+1)^2 | (0, [3/(x + 2), 1/(x^2 + 4*x + 4), 2/(x + 3), 1/(x^2 + x + 4)])
+(x^3+x+1)/((x^2+1)^2*(x-1)) | (0, [2/(x + 4), 4/(x + 2), 3/(x^2 + 4*x + 4), 4/(x + 3), 1/(x^2 + x + 4)])
+x/(-x-1) | (4, [1/(x + 1)])
+1/(-x^2+1) | (0, [3/(x + 1), 2/(x + 4)])
+x^4/(x^2-1) | (x^2 + 1, [2/(x + 1), 3/(x + 4)])
+1/(x^2-x) | (0, [4/x, 1/(x + 4)])
+1/(x^2+3x+2) | (0, [1/(x + 1), 4/(x + 2)])
+1/(-x) | (0, [4/x])
+2/(-x^2-x) | (0, [3/x, 2/(x + 1)])
+2/(x^2-1) | (0, [4/(x + 1), 1/(x + 4)])
+1/(2x) | (0, [3/x])
+x^2/(x+1) | (x + 4, [1/(x + 1)])
+3/(x^3-x) | (0, [2/x, 4/(x + 1), 4/(x + 4)])
+(x^2+1)/x^2 | (1, [1/x^2])
+5 | (0, [])
+-- evaluation at a root of the denominator, conversions, division in ZZ[x], partial fractions over ZZ
+(1/(x-1))(1) | ERR ZeroDivisionError 'rational division by zero'
+((x+1)/(x^2-4))(2) | ERR ZeroDivisionError 'rational division by zero'
+QQ (1/(x-1))(1) | ERR ZeroDivisionError 'rational division by zero'
+pfd whole | x - 1 | Univariate Polynomial Ring in x over Integer Ring
+pfd whole 2 | x^2 + x + 1 | Univariate Polynomial Ring in x over Integer Ring
+set of opposite-sign fractions | 1
+set 2 | 1
+dict | ERR AttributeError "'dict' object has no attribute 'parent'"
+ZZ[x]((x+1)/F(-1)) | -x - 1 | Univariate Polynomial Ring in x over Integer Ring
+QQ[x]((x+1)/QQ(2)) | 1/2*x + 1/2 | Univariate Polynomial Ring in x over Rational Field
+QQ[x](F(x+1,2)) | ERR TypeError 'denominator must be a unit'
+ZZ[x](F(x+1,2)) | ERR TypeError 'fraction must have unit denominator'
+ZZ[x](F(x+1,-1)) | -x - 1 | Univariate Polynomial Ring in x over Integer Ring
+ZZ[x](FS((x+1)/2)) | ERR TypeError 'no conversion of this rational to integer'
+QQ[x](F(1,x)) | ERR TypeError 'denominator must be a unit'
+QQ[x](F(2x,2)) | x | Univariate Polynomial Ring in x over Rational Field
+ZZ[x](FS(x/2)) | ERR TypeError 'no conversion of this rational to integer'
+ZZ[x](FS(1/x)) | ERR TypeError 'denominator must be a unit'
+QQ[x](FS(1/x)) | ERR TypeError 'fraction must have unit denominator'
+ZZ[x](QQ[x](x/2)) | ERR TypeError 'no conversion of this rational to integer'
+x qr 2x+1 | (0, x)
+3x^2+1 qr 2x+1 | (x, x^2 - x + 1)
+4x^2+1 qr 2x+1 | (2*x - 1, 2)
+x^2 qr 2x | (0, x^2)
+6x^3+x qr 4x^2+2 | (x, 2*x^3 - x)
+5x^2+3x+1 qr 3x+2 | (x, 2*x^2 + x + 1)
+x qr 2 | (0, x)
+3x+5 qr 2 | (x + 2, x + 1)
+-3x-5 qr 2 | (-2*x - 3, x + 1)
+-x qr 2x+1 | (0, -x)
+-3x^2 qr 2x+1 | (-2*x + 1, x^2 - 1)
+x // 2x+1 | 0 | Univariate Polynomial Ring in x over Integer Ring
+x % 2x+1 | x | Univariate Polynomial Ring in x over Integer Ring
+x^3 qr -2x+1 | (0, x^3)
+pfd x/(2x+1) | (0, [x/(2*x + 1)])
+pfd x^2/(2x+1) | (0, [x^2/(2*x + 1)])
+pfd 1/(2x+1) | (0, [1/(2*x + 1)])
+pfd 1/((2x+1)(x+1)) | (0, [-1/(x + 1), 2/(2*x + 1)])
+pfd (3x+1)/(2x+1)^2 | (0, [1/(2*x + 1), x/(4*x^2 + 4*x + 1)])
+pfd x^3/(3x-1) | (0, [x^3/(3*x - 1)])
+pfd 1/(2x+2) | ERR ArithmeticError 'element is non-invertible'
+pfd 3/(2x) | ERR ArithmeticError 'element is non-invertible'
+pfd (2x+1)/(2x^2) | ERR ArithmeticError 'element is non-invertible'
+pfd (x+1)/(2x-2) | ERR ArithmeticError 'element is non-invertible'
+pfd 1/(-2x-1) | (0, [-1/(2*x + 1)])
+pfd x/(-x^2+1) | ERR ArithmeticError 'element is non-invertible'
