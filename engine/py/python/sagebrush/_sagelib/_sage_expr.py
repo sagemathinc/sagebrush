@@ -173,15 +173,112 @@ def _infinite_relation(kind, a, b):
     return {"<": sa < sb, "<=": sa < sb, ">": sa > sb, ">=": sa > sb}[kind]
 
 
+_EXACT_SIGN_MAX_DEGREE = 32
+_CAPPED = "capped"
+
+
+def _exact_degree_bound(e):
+    """An upper bound for the degree over QQ of a constant built from
+    rationals, I, sums, products, rational powers and abs, from its tree
+    (abs(z) has degree at most 2*deg(z)^2), or None for any other node; it
+    stops past 2^20."""
+    from fractions import Fraction
+    import operator as o
+    from _sage_poly import QQ
+    stack, total = [e], 1
+    while stack:
+        x = stack.pop()
+        try:
+            Fraction(QQ(x))
+            continue
+        except (TypeError, ValueError, ArithmeticError, NotImplementedError):
+            pass
+        if str(x) == "I":
+            total *= 2
+            continue
+        op = x.operator()
+        args = x.operands()
+        if op is o.pow and len(args) == 2:
+            try:
+                q = Fraction(QQ(args[1]))
+            except (TypeError, ValueError, ArithmeticError, NotImplementedError):
+                return None
+            total *= q.denominator
+            stack.append(args[0])
+        elif op in (o.add, o.mul):
+            stack.extend(args)
+        elif x._op()[0] == "fun:abs" and len(args) == 1:
+            b = _exact_degree_bound(args[0])
+            if b is None:
+                return None
+            total *= 2 * b * b
+        else:
+            return None
+        if total > 1 << 20:
+            break
+    return total
+
+
+def _prune_zero(e):
+    """e with each product holding a factor proven exactly 0 (an algebraic
+    factor under the degree cap) replaced by 0, and such zero terms dropped
+    from sums: d*(sqrt(5) + ... + sqrt(19)) with d a denesting identity's
+    difference is 0 without building the large field, as Sage proves it."""
+    import operator as o
+    op = e.operator()
+    if op is o.mul:
+        fs = e.operands()
+        for f in fs:
+            if not f.variables() and _exact_sign_capped(f) == 0:
+                return Expression(_rat_s(0))
+        return e
+    if op is o.add:
+        ts = [_prune_zero(t) for t in e.operands()]
+        r = Expression(_rat_s(0))
+        for t in ts:
+            r = r + t
+        return r
+    return e
+
+
 def _exact_sign(d):
     """The sign of a constant made of rationals, I, sums, products, rational
+    powers and abs, decided exactly: 0, 1, -1, or "c" (not real); None when it
+    cannot be decided (another kind of constant, or past the degree cap), as
+    Sage leaves an unprovable relation False.  Products with a factor proven 0
+    are pruned first (_prune_zero)."""
+    if len(d._s) > 4000:
+        return None
+    try:
+        d = _prune_zero(d)
+    except (TypeError, ValueError, ArithmeticError, NotImplementedError, AttributeError, RecursionError):
+        pass
+    r = _exact_sign_capped(d)
+    return None if r == _CAPPED else r
+
+
+def _exact_sign_capped(d):
+    """The sign of a constant made of rationals, I, sums, products, rational
     powers and abs, decided exactly as an algebraic number: 0, 1, -1, or
-    "c" (not real); None for any other constant.  (bool(q*sqrt(2) < p) was
-    False for p^2 - 2*q^2 = 1 with p, q near 10^7: the double enclosure of
-    the difference held 0; bool(8*4^(1/4)*sqrt(2) == 16) was False.)"""
+    "c" (not real); _CAPPED when its degree is past _EXACT_SIGN_MAX_DEGREE
+    (refused from the expression tree's bound, before any field is built, or
+    by the algebraic numbers' own degree check, under that cap); None for
+    any other constant.  (bool(q*sqrt(2) < p) was False for p^2 - 2*q^2 = 1
+    with p, q near 10^7: the double enclosure of the difference held 0;
+    bool(8*4^(1/4)*sqrt(2) == 16) was False.)"""
     if len(d._s) > 4000:
         return None
     import _sage_qqbar
+    old = _sage_qqbar._degree_cap
+    # (a stricter cap already set stays)
+    cap = _EXACT_SIGN_MAX_DEGREE if old is None else min(old, _EXACT_SIGN_MAX_DEGREE)
+    try:
+        bound = _exact_degree_bound(d)
+    except (TypeError, ValueError, ArithmeticError, NotImplementedError, AttributeError, RecursionError):
+        bound = None
+    if bound is not None and bound > cap:
+        return _CAPPED
+    _sage_qqbar._degree_cap = cap
     try:
         a = _sage_qqbar._convert(d)
         if a == 0:
@@ -189,22 +286,12 @@ def _exact_sign(d):
         if a.imag() != 0:
             return "c"
         return 1 if a > 0 else -1
-    except (TypeError, ValueError, ArithmeticError, NotImplementedError, MemoryError):
+    except NotImplementedError as e:
+        return _CAPPED if "more than %d" % cap in str(e) else None
+    except (TypeError, ValueError, ArithmeticError, MemoryError):
         return None
-
-
-def _numerically_equal(a, b):
-    """Heuristic equality of two constants that the engine could neither
-    simplify to equal nor separate: their difference, evaluated at 400 bits,
-    is below 2^-300 relative to them.  (A double, which underflows or
-    cancels, is never used.)"""
-    import _sage_real
-    try:
-        d = abs(_sage_real.N(a - b, 400))
-        m = max(abs(_sage_real.N(a, 400)), abs(_sage_real.N(b, 400)), 1)
-        return bool(d <= m * _sage_real.N(Expression("2") ** -300, 400))
-    except Exception:
-        return False
+    finally:
+        _sage_qqbar._degree_cap = old
 
 
 def _relop(sym):
@@ -337,11 +424,8 @@ class Expression:
                 xs = _exact_sign(a - b) if not z and not (a - b).variables() and _call("const_sign", (a - b)._s)[0] == "" else None
                 if xs is not None:
                     z = xs == 0
-                elif not z and kind == "==" and not (a - b).variables() and _call("const_sign", (a - b)._s)[0] == "":
-                    # constants of undecided sign: equal if they agree to
-                    # far more than double precision (never from an
-                    # underflowed or cancelled double)
-                    z = _numerically_equal(a, b)
+                # (other constants the enclosure cannot separate stay
+                # undecided, as Sage: log(6) == log(2) + log(3) is False)
                 if not z and _ASSUMPTIONS and (a - b).variables():
                     # the rewritten difference tested directly: bool() of
                     # (rewrite == 0) came back here and rewrote again,
