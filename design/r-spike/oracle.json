@@ -1,0 +1,1780 @@
+[
+ {
+  "id": "arith-1",
+  "code": "1 + 2\n",
+  "stdout": "[1] 3\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "arith-2",
+  "code": "2^10\n",
+  "stdout": "[1] 1024\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "arith-3",
+  "code": "-2^2\n",
+  "stdout": "[1] -4\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "arith-4",
+  "code": "7 %/% 2; 7 %% 2; -7 %/% 2; -7 %% 2\n",
+  "stdout": "[1] 3\n[1] 1\n[1] -4\n[1] 1\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "arith-5",
+  "code": "5 / 2\n",
+  "stdout": "[1] 2.5\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "arith-6",
+  "code": "1/3\n",
+  "stdout": "[1] 0.3333333\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "arith-7",
+  "code": "22/7\n",
+  "stdout": "[1] 3.142857\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "arith-8",
+  "code": "1e6\n",
+  "stdout": "[1] 1e+06\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "arith-9",
+  "code": "100000\n",
+  "stdout": "[1] 1e+05\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "arith-10",
+  "code": "123456789\n",
+  "stdout": "[1] 123456789\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "arith-11",
+  "code": "1e-5\n",
+  "stdout": "[1] 1e-05\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "arith-12",
+  "code": "0.1 + 0.2\n",
+  "stdout": "[1] 0.3\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "arith-13",
+  "code": "1/0; -1/0; 0/0\n",
+  "stdout": "[1] Inf\n[1] -Inf\n[1] NaN\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "arith-14",
+  "code": "sqrt(2)\n",
+  "stdout": "[1] 1.414214\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "arith-15",
+  "code": "exp(1)\n",
+  "stdout": "[1] 2.718282\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "arith-16",
+  "code": "pi * 1e10\n",
+  "stdout": "[1] 31415926536\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "arith-17",
+  "code": ".Machine$integer.max\n",
+  "stdout": "[1] 2147483647\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "arith-18",
+  "code": "5L / 2L\n",
+  "stdout": "[1] 2.5\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "arith-19",
+  "code": "c(1.5, 2, 3.25)\n",
+  "stdout": "[1] 1.50 2.00 3.25\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "arith-20",
+  "code": "c(0.001, 1000)\n",
+  "stdout": "[1] 1e-03 1e+03\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "arith-21",
+  "code": "c(1e-10, 1)\n",
+  "stdout": "[1] 1e-10 1e+00\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "arith-22",
+  "code": "c(123456, 0.1)\n",
+  "stdout": "[1] 123456.0      0.1\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "arith-23",
+  "code": "x <- c(10.5, 3, NA, 7)\nx * 2\n",
+  "stdout": "[1] 21  6 NA 14\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "arith-24",
+  "code": "round(3.14159, 2); signif(123456, 2); round(-2.5); round(0.5); round(1.5)\n",
+  "stdout": "[1] 3.14\n[1] 120000\n[1] -2\n[1] 0\n[1] 2\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "arith-25",
+  "code": "log(100); log10(1000); log(8, base = 2); log2(1024); log1p(0)\n",
+  "stdout": "[1] 4.60517\n[1] 3\n[1] 3\n[1] 10\n[1] 0\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "arith-26",
+  "code": "abs(-3:3)\n",
+  "stdout": "[1] 3 2 1 0 1 2 3\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "arith-27",
+  "code": "floor(-2.5); ceiling(2.1); trunc(-2.7)\n",
+  "stdout": "[1] -3\n[1] 3\n[1] -2\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "vec-1",
+  "code": "1:10\n",
+  "stdout": " [1]  1  2  3  4  5  6  7  8  9 10\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "vec-2",
+  "code": "1:30\n",
+  "stdout": " [1]  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25\n[26] 26 27 28 29 30\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "vec-3",
+  "code": "seq(0, 1, by = 0.1)\n",
+  "stdout": " [1] 0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "vec-4",
+  "code": "seq(1, 10, length.out = 4)\n",
+  "stdout": "[1]  1  4  7 10\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "vec-5",
+  "code": "seq_len(5); seq_along(c(\"a\", \"b\", \"c\"))\n",
+  "stdout": "[1] 1 2 3 4 5\n[1] 1 2 3\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "vec-6",
+  "code": "rep(1:3, times = 2); rep(1:3, each = 2); rep(c(\"x\", \"y\"), times = c(2, 3))\n",
+  "stdout": "[1] 1 2 3 1 2 3\n[1] 1 1 2 2 3 3\n[1] \"x\" \"x\" \"y\" \"y\" \"y\"\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "vec-7",
+  "code": "x <- c(5, 3, 8, 1)\nsort(x); order(x); rev(x); sort(x, decreasing = TRUE)\n",
+  "stdout": "[1] 1 3 5 8\n[1] 4 2 1 3\n[1] 1 8 3 5\n[1] 8 5 3 1\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "vec-8",
+  "code": "x <- c(a = 1, b = 2, c = 3)\nx\n",
+  "stdout": "a b c \n1 2 3 \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "vec-9",
+  "code": "x <- c(a = 1, b = 2, c = 3)\nx[\"b\"]; names(x)\n",
+  "stdout": "b \n2 \n[1] \"a\" \"b\" \"c\"\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "vec-10",
+  "code": "x <- 1:10\nx[x > 5]\n",
+  "stdout": "[1]  6  7  8  9 10\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "vec-11",
+  "code": "x <- c(4, 8, 15, 16, 23, 42)\nx[-1]; x[c(1, 3)]; x[length(x)]\n",
+  "stdout": "[1]  8 15 16 23 42\n[1]  4 15\n[1] 42\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "vec-12",
+  "code": "x <- 1:5\nx[8] <- 10L\nx\n",
+  "stdout": "[1]  1  2  3  4  5 NA NA 10\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "vec-13",
+  "code": "which(c(FALSE, TRUE, TRUE, FALSE))\n",
+  "stdout": "[1] 2 3\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "vec-14",
+  "code": "x <- c(3, 9, 2, 9)\nwhich.max(x); which.min(x); range(x)\n",
+  "stdout": "[1] 2\n[1] 3\n[1] 2 9\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "vec-15",
+  "code": "cumsum(1:10); cumprod(1:6)\n",
+  "stdout": " [1]  1  3  6 10 15 21 28 36 45 55\n[1]   1   2   6  24 120 720\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "vec-16",
+  "code": "x <- 101:150\nx\n",
+  "stdout": " [1] 101 102 103 104 105 106 107 108 109 110 111 112 113 114 115 116 117 118 119\n[20] 120 121 122 123 124 125 126 127 128 129 130 131 132 133 134 135 136 137 138\n[39] 139 140 141 142 143 144 145 146 147 148 149 150\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "vec-17",
+  "code": "c(1, \"a\", TRUE)\n",
+  "stdout": "[1] \"1\"    \"a\"    \"TRUE\"\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "vec-18",
+  "code": "c(1, TRUE, FALSE)\n",
+  "stdout": "[1] 1 1 0\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "vec-19",
+  "code": "length(NULL); c()\n",
+  "stdout": "[1] 0\nNULL\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "vec-20",
+  "code": "1:3 + 1:6\n",
+  "stdout": "[1] 2 4 6 5 7 9\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "vec-21",
+  "code": "x <- c(1, 2, 3)\ny <- x\ny[1] <- 100\nx; y\n",
+  "stdout": "[1] 1 2 3\n[1] 100   2   3\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "vec-22",
+  "code": "diff(c(1, 4, 9, 16))\n",
+  "stdout": "[1] 3 5 7\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "vec-23",
+  "code": "unique(c(3, 1, 3, 2, 1)); duplicated(c(3, 1, 3, 2, 1))\n",
+  "stdout": "[1] 3 1 2\n[1] FALSE FALSE  TRUE FALSE  TRUE\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "vec-24",
+  "code": "x <- c(2.5, 1.25, 10)\nx / 3\n",
+  "stdout": "[1] 0.8333333 0.4166667 3.3333333\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "vec-25",
+  "code": "seq(-1, 1, 0.5)\n",
+  "stdout": "[1] -1.0 -0.5  0.0  0.5  1.0\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "vec-26",
+  "code": "any(c(1, 5) > 4); all(c(1, 5) > 4)\n",
+  "stdout": "[1] TRUE\n[1] FALSE\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "vec-27",
+  "code": "5 %in% c(1, 5, 9); match(c(\"b\", \"z\"), c(\"a\", \"b\"))\n",
+  "stdout": "[1] TRUE\n[1]  2 NA\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "vec-28",
+  "code": "head(letters); tail(LETTERS, 3)\n",
+  "stdout": "[1] \"a\" \"b\" \"c\" \"d\" \"e\" \"f\"\n[1] \"X\" \"Y\" \"Z\"\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "vec-29",
+  "code": "month.name[1:3]\n",
+  "stdout": "[1] \"January\"  \"February\" \"March\"   \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "vec-30",
+  "code": "x <- 1:12\nx[x %% 2 == 0]\n",
+  "stdout": "[1]  2  4  6  8 10 12\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "na-1",
+  "code": "x <- c(1, NA, 3)\nsum(x); sum(x, na.rm = TRUE); mean(x, na.rm = TRUE)\n",
+  "stdout": "[1] NA\n[1] 4\n[1] 2\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "na-2",
+  "code": "is.na(c(1, NA, NaN, 4))\n",
+  "stdout": "[1] FALSE  TRUE  TRUE FALSE\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "na-3",
+  "code": "NA > 1; NA & FALSE; NA | TRUE\n",
+  "stdout": "[1] NA\n[1] FALSE\n[1] TRUE\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "na-4",
+  "code": "c(NA, \"a\")\n",
+  "stdout": "[1] NA  \"a\"\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "na-5",
+  "code": "x <- c(2, NA, 5)\nx[!is.na(x)]\n",
+  "stdout": "[1] 2 5\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "na-6",
+  "code": "mean(c(NA, 1))\n",
+  "stdout": "[1] NA\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "na-7",
+  "code": "NA_integer_; NA_real_; NA_character_; NULL\n",
+  "stdout": "[1] NA\n[1] NA\n[1] NA\nNULL\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "logic-1",
+  "code": "TRUE && FALSE; TRUE || FALSE; !TRUE\n",
+  "stdout": "[1] FALSE\n[1] TRUE\n[1] FALSE\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "logic-2",
+  "code": "c(TRUE, FALSE) & c(TRUE, TRUE)\n",
+  "stdout": "[1]  TRUE FALSE\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "logic-3",
+  "code": "xor(TRUE, FALSE); isTRUE(c(TRUE, TRUE))\n",
+  "stdout": "[1] TRUE\n[1] FALSE\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "logic-4",
+  "code": "sum(c(TRUE, TRUE, FALSE))\n",
+  "stdout": "[1] 2\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "str-1",
+  "code": "paste(\"a\", \"b\", sep = \"-\"); paste0(\"x\", 1:3)\n",
+  "stdout": "[1] \"a-b\"\n[1] \"x1\" \"x2\" \"x3\"\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "str-2",
+  "code": "paste(c(\"a\", \"b\"), collapse = \"+\")\n",
+  "stdout": "[1] \"a+b\"\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "str-3",
+  "code": "nchar(\"hello\"); toupper(\"abc\"); tolower(\"ABC\"); substr(\"abcdef\", 2, 4)\n",
+  "stdout": "[1] 5\n[1] \"ABC\"\n[1] \"abc\"\n[1] \"bcd\"\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "str-4",
+  "code": "sprintf(\"%.2f\", pi); sprintf(\"%5d|%-5s|\", 42L, \"ab\"); sprintf(\"%e\", 12345.6789)\n",
+  "stdout": "[1] \"3.14\"\n[1] \"   42|ab   |\"\n[1] \"1.234568e+04\"\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "str-5",
+  "code": "cat(\"Hello\", \"world\\n\")\n",
+  "stdout": "Hello world\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "str-6",
+  "code": "cat(\"x =\", 3.14159, \"\\n\")\n",
+  "stdout": "x = 3.14159 \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "str-7",
+  "code": "cat(1:5, sep = \", \"); cat(\"\\n\")\n",
+  "stdout": "1, 2, 3, 4, 5\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "str-8",
+  "code": "print(\"quoted\")\n",
+  "stdout": "[1] \"quoted\"\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "str-9",
+  "code": "strsplit(\"a,b,c\", \",\"); \n",
+  "stdout": "[[1]]\n[1] \"a\" \"b\" \"c\"\n\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "str-10",
+  "code": "x <- \"Statistics\"\nrev(strsplit(x, \"\")[[1]])\n",
+  "stdout": " [1] \"s\" \"c\" \"i\" \"t\" \"s\" \"i\" \"t\" \"a\" \"t\" \"S\"\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "str-11",
+  "code": "format(3.14159, nsmall = 2); format(42L, width = 6); format(TRUE)\n",
+  "stdout": "[1] \"3.14159\"\n[1] \"    42\"\n[1] \"TRUE\"\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "str-12",
+  "code": "formatC(3.14159, digits = 3, format = \"f\"); formatC(5, width = 3, flag = \"0\")\n",
+  "stdout": "[1] \"3.142\"\n[1] \"005\"\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "str-13",
+  "code": "toupper(letters[1:5])\n",
+  "stdout": "[1] \"A\" \"B\" \"C\" \"D\" \"E\"\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "str-14",
+  "code": "cat(sep = \"\", \"a\", \"b\\n\")\n",
+  "stdout": "ab\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "str-15",
+  "code": "cat(TRUE, NA, 1L, 2.5, \"s\\n\")\n",
+  "stdout": "TRUE NA 1 2.5 s\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "stats-1",
+  "code": "x <- c(2, 4, 4, 4, 5, 5, 7, 9)\nmean(x); median(x); var(x); sd(x)\n",
+  "stdout": "[1] 5\n[1] 4.5\n[1] 4.571429\n[1] 2.13809\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "stats-2",
+  "code": "x <- c(1, 2, 3, 4, 100)\nsummary(x)\n",
+  "stdout": "   Min. 1st Qu.  Median    Mean 3rd Qu.    Max. \n      1       2       3      22       4     100 \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "stats-3",
+  "code": "quantile(1:10)\n",
+  "stdout": "   0%   25%   50%   75%  100% \n 1.00  3.25  5.50  7.75 10.00 \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "stats-4",
+  "code": "quantile(c(1.5, 2.5, 10, 7), probs = c(0.1, 0.9))\n",
+  "stdout": "10% 90% \n1.8 9.1 \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "stats-5",
+  "code": "x <- c(1, 2, 3, 4, 5); y <- c(2.1, 3.9, 6.2, 7.8, 10.1)\ncor(x, y)\n",
+  "stdout": "[1] 0.9986518\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "stats-6",
+  "code": "min(3, 1, 2); max(c(4, 9), 7); prod(1:6); sum(1:100)\n",
+  "stdout": "[1] 1\n[1] 9\n[1] 720\n[1] 5050\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "stats-7",
+  "code": "x <- c(10, 20, 30)\nscale(x)[, 1]\n",
+  "stdout": "[1] -1  0  1\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "stats-8",
+  "code": "IQR(c(1, 3, 5, 7, 9, 11)); mad(c(1, 2, 3, 4, 100))\n",
+  "stdout": "[1] 5\n[1] 1.4826\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "stats-9",
+  "code": "tabulate(c(1, 2, 2, 5))\n",
+  "stdout": "[1] 1 2 0 0 1\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "stats-10",
+  "code": "cumsum(c(0.1, 0.2, 0.3))\n",
+  "stdout": "[1] 0.1 0.3 0.6\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "stats-11",
+  "code": "fivenum(c(1, 2, 3, 4, 5, 6))\n",
+  "stdout": "[1] 1.0 2.0 3.5 5.0 6.0\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "stats-12",
+  "code": "choose(5, 2); factorial(5); gamma(0.5); beta(2, 3)\n",
+  "stdout": "[1] 10\n[1] 120\n[1] 1.772454\n[1] 0.08333333\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "stats-13",
+  "code": "var(c(1, 2), c(3, 5)); cov(1:5, c(2, 4, 6, 8, 10))\n",
+  "stdout": "[1] 1\n[1] 5\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "stats-14",
+  "code": "weighted.mean(c(1, 2, 3), c(3, 2, 1))\n",
+  "stdout": "[1] 1.666667\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "dist-1",
+  "code": "dnorm(0); pnorm(1.96); qnorm(0.975)\n",
+  "stdout": "[1] 0.3989423\n[1] 0.9750021\n[1] 1.959964\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "dist-2",
+  "code": "pnorm(c(-1, 0, 1))\n",
+  "stdout": "[1] 0.1586553 0.5000000 0.8413447\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "dist-3",
+  "code": "dbinom(3, size = 10, prob = 0.5); pbinom(3, 10, 0.5); qbinom(0.5, 10, 0.3)\n",
+  "stdout": "[1] 0.1171875\n[1] 0.171875\n[1] 3\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "dist-4",
+  "code": "dbinom(0:4, 4, 0.5)\n",
+  "stdout": "[1] 0.0625 0.2500 0.3750 0.2500 0.0625\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "dist-5",
+  "code": "dpois(2, lambda = 3); ppois(2, 3); qpois(0.9, 3)\n",
+  "stdout": "[1] 0.2240418\n[1] 0.4231901\n[1] 5\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "dist-6",
+  "code": "pt(2.0, df = 10); qt(0.975, df = 5); dt(0, 3)\n",
+  "stdout": "[1] 0.963306\n[1] 2.570582\n[1] 0.3675526\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "dist-7",
+  "code": "pchisq(3.84, df = 1); qchisq(0.95, 2)\n",
+  "stdout": "[1] 0.9499565\n[1] 5.991465\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "dist-8",
+  "code": "pf(3, 2, 10); qf(0.95, 3, 20)\n",
+  "stdout": "[1] 0.9046326\n[1] 3.098391\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "dist-9",
+  "code": "punif(0.3); dunif(0.5, 0, 2); qunif(0.25, 1, 3)\n",
+  "stdout": "[1] 0.3\n[1] 0.5\n[1] 1.5\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "dist-10",
+  "code": "pexp(1, rate = 2); qexp(0.5); dexp(1)\n",
+  "stdout": "[1] 0.8646647\n[1] 0.6931472\n[1] 0.3678794\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "dist-11",
+  "code": "pnorm(110, mean = 100, sd = 15); 1 - pnorm(2)\n",
+  "stdout": "[1] 0.7475075\n[1] 0.02275013\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "dist-12",
+  "code": "pnorm(1.5, lower.tail = FALSE)\n",
+  "stdout": "[1] 0.0668072\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "dist-13",
+  "code": "qnorm(c(0.025, 0.5, 0.975))\n",
+  "stdout": "[1] -1.959964  0.000000  1.959964\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "dist-14",
+  "code": "pbinom(5, 20, 0.25, lower.tail = FALSE)\n",
+  "stdout": "[1] 0.3828273\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "dist-15",
+  "code": "dnorm(1:3, mean = 2, sd = 0.5)\n",
+  "stdout": "[1] 0.1079819 0.7978846 0.1079819\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "dist-16",
+  "code": "pgamma(2, shape = 2, rate = 1); pbeta(0.5, 2, 3)\n",
+  "stdout": "[1] 0.5939942\n[1] 0.6875\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "rng-1",
+  "code": "set.seed(1)\nrunif(3)\n",
+  "stdout": "[1] 0.2655087 0.3721239 0.5728534\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "rng-2",
+  "code": "set.seed(42)\nrnorm(5)\n",
+  "stdout": "[1]  1.3709584 -0.5646982  0.3631284  0.6328626  0.4042683\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "rng-3",
+  "code": "set.seed(123)\nsample(1:10)\n",
+  "stdout": " [1]  3 10  2  8  6  9  1  7  5  4\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "rng-4",
+  "code": "set.seed(2024)\nround(rnorm(3, mean = 10, sd = 2), 3)\n",
+  "stdout": "[1] 11.964 10.937  9.784\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "rng-5",
+  "code": "set.seed(7)\nsample(c(\"H\", \"T\"), 10, replace = TRUE)\n",
+  "stdout": " [1] \"T\" \"H\" \"H\" \"T\" \"H\" \"T\" \"H\" \"T\" \"T\" \"T\"\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "rng-6",
+  "code": "set.seed(1)\nrbinom(5, 10, 0.5)\n",
+  "stdout": "[1] 4 4 5 7 4\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "rng-7",
+  "code": "set.seed(10)\nmean(runif(1000))\n",
+  "stdout": "[1] 0.5052715\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "fac-1",
+  "code": "f <- factor(c(\"lo\", \"hi\", \"mid\", \"hi\", \"lo\"))\nf\n",
+  "stdout": "[1] lo  hi  mid hi  lo \nLevels: hi lo mid\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "fac-2",
+  "code": "f <- factor(c(\"lo\", \"hi\", \"mid\", \"hi\"), levels = c(\"lo\", \"mid\", \"hi\"))\nf; levels(f); nlevels(f); as.integer(f)\n",
+  "stdout": "[1] lo  hi  mid hi \nLevels: lo mid hi\n[1] \"lo\"  \"mid\" \"hi\" \n[1] 3\n[1] 1 3 2 3\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "fac-3",
+  "code": "table(c(\"a\", \"b\", \"a\", \"c\", \"a\"))\n",
+  "stdout": "\na b c \n3 1 1 \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "fac-4",
+  "code": "f <- factor(c(\"x\", \"y\", \"x\"))\nsummary(f)\n",
+  "stdout": "x y \n2 1 \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "fac-5",
+  "code": "x <- c(3, 1, 2, 3, 3)\ntable(x)\n",
+  "stdout": "x\n1 2 3 \n1 1 3 \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "fac-6",
+  "code": "f <- factor(c(\"b\", \"a\"), levels = c(\"a\", \"b\", \"c\"))\ntable(f)\n",
+  "stdout": "f\na b c \n1 1 0 \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "fac-7",
+  "code": "as.vector(factor(c(\"u\", \"v\")))\n",
+  "stdout": "[1] \"u\" \"v\"\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "fac-8",
+  "code": "factor(c(1, 2, 1), labels = c(\"one\", \"two\"))\n",
+  "stdout": "[1] one two one\nLevels: one two\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "fac-9",
+  "code": "g <- factor(c(\"a\", \"b\", \"a\", \"b\"))\ntapply(c(1, 2, 3, 4), g, mean)\n",
+  "stdout": "a b \n2 3 \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "fac-10",
+  "code": "cut(c(1, 5, 9), breaks = c(0, 3, 6, 10))\n",
+  "stdout": "[1] (0,3]  (3,6]  (6,10]\nLevels: (0,3] (3,6] (6,10]\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "fac-11",
+  "code": "droplevels(factor(c(\"a\", \"b\"))[1])\n",
+  "stdout": "[1] a\nLevels: a\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "fac-12",
+  "code": "f <- factor(c(\"a\", \"b\", \"a\"))\nlevels(f)[2] <- \"B\"\nf\n",
+  "stdout": "[1] a B a\nLevels: a B\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "list-1",
+  "code": "l <- list(a = 1, b = \"two\", c = c(3, 4))\nl\n",
+  "stdout": "$a\n[1] 1\n\n$b\n[1] \"two\"\n\n$c\n[1] 3 4\n\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "list-2",
+  "code": "l <- list(1, \"a\")\nl\n",
+  "stdout": "[[1]]\n[1] 1\n\n[[2]]\n[1] \"a\"\n\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "list-3",
+  "code": "l <- list(x = 1:3, y = letters[1:2])\nl$x; l[[\"y\"]]; names(l)\n",
+  "stdout": "[1] 1 2 3\n[1] \"a\" \"b\"\n[1] \"x\" \"y\"\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "list-4",
+  "code": "l <- list(a = 1)\nl$b <- 2\nstr(l)\n",
+  "stdout": "List of 2\n $ a: num 1\n $ b: num 2\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "list-5",
+  "code": "unlist(list(a = 1, b = 2:3))\n",
+  "stdout": " a b1 b2 \n 1  2  3 \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "list-6",
+  "code": "length(list(1, 2, list(3, 4)))\n",
+  "stdout": "[1] 3\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "apply-1",
+  "code": "sapply(1:5, function(i) i^2)\n",
+  "stdout": "[1]  1  4  9 16 25\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "apply-2",
+  "code": "lapply(1:2, function(x) x * 10)\n",
+  "stdout": "[[1]]\n[1] 10\n\n[[2]]\n[1] 20\n\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "apply-3",
+  "code": "m <- matrix(1:6, nrow = 2)\napply(m, 1, sum); apply(m, 2, max)\n",
+  "stdout": "[1]  9 12\n[1] 2 4 6\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "apply-4",
+  "code": "sapply(c(a = 1, b = 2), function(v) v + 0.5)\n",
+  "stdout": "  a   b \n1.5 2.5 \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "apply-5",
+  "code": "vapply(list(1:3, 4:6), sum, numeric(1))\n",
+  "stdout": "[1]  6 15\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "apply-6",
+  "code": "Map(function(a, b) a + b, 1:2, 3:4)\n",
+  "stdout": "[[1]]\n[1] 4\n\n[[2]]\n[1] 6\n\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "apply-7",
+  "code": "Reduce(`+`, 1:5, accumulate = TRUE); Filter(function(v) v > 2, 1:5)\n",
+  "stdout": "[1]  1  3  6 10 15\n[1] 3 4 5\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "apply-8",
+  "code": "sapply(list(a = 1:3, b = 4:6), mean)\n",
+  "stdout": "a b \n2 5 \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "apply-9",
+  "code": "mapply(rep, 1:3, 3:1)\n",
+  "stdout": "[[1]]\n[1] 1 1 1\n\n[[2]]\n[1] 2 2\n\n[[3]]\n[1] 3\n\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "mat-1",
+  "code": "m <- matrix(1:6, nrow = 2)\nm\n",
+  "stdout": "     [,1] [,2] [,3]\n[1,]    1    3    5\n[2,]    2    4    6\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "mat-2",
+  "code": "m <- matrix(1:4, 2)\nt(m); dim(m); m %*% m\n",
+  "stdout": "     [,1] [,2]\n[1,]    1    2\n[2,]    3    4\n[1] 2 2\n     [,1] [,2]\n[1,]    7   15\n[2,]   10   22\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "mat-3",
+  "code": "m <- matrix(c(2, 1, 1, 3), 2)\nsolve(m)\n",
+  "stdout": "     [,1] [,2]\n[1,]  0.6 -0.2\n[2,] -0.2  0.4\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "mat-4",
+  "code": "m <- matrix(c(2.5, 1, -1, 3), 2, dimnames = list(c(\"r1\", \"r2\"), c(\"A\", \"B\")))\nm\n",
+  "stdout": "     A  B\nr1 2.5 -1\nr2 1.0  3\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "mat-5",
+  "code": "cbind(1:3, 4:6); rbind(a = 1:2, b = 3:4)\n",
+  "stdout": "     [,1] [,2]\n[1,]    1    4\n[2,]    2    5\n[3,]    3    6\n  [,1] [,2]\na    1    2\nb    3    4\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "mat-6",
+  "code": "m <- matrix(1:9, 3, byrow = TRUE)\nm[2, ]; m[, 3]; m[2, 3]; diag(m)\n",
+  "stdout": "[1] 4 5 6\n[1] 3 6 9\n[1] 6\n[1] 1 5 9\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "mat-7",
+  "code": "det(matrix(c(1, 2, 3, 4), 2)); diag(2)\n",
+  "stdout": "[1] -2\n     [,1] [,2]\n[1,]    1    0\n[2,]    0    1\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "mat-8",
+  "code": "outer(1:3, 1:3)\n",
+  "stdout": "     [,1] [,2] [,3]\n[1,]    1    2    3\n[2,]    2    4    6\n[3,]    3    6    9\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "mat-9",
+  "code": "rowSums(matrix(1:6, 2)); colMeans(matrix(1:6, 2))\n",
+  "stdout": "[1]  9 12\n[1] 1.5 3.5 5.5\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "df-1",
+  "code": "df <- data.frame(x = 1:3, y = c(\"a\", \"b\", \"c\"))\ndf\n",
+  "stdout": "  x y\n1 1 a\n2 2 b\n3 3 c\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "df-2",
+  "code": "df <- data.frame(name = c(\"Ann\", \"Bob\"), score = c(90.5, 85))\ndf$score; nrow(df); ncol(df); names(df)\n",
+  "stdout": "[1] 90.5 85.0\n[1] 2\n[1] 2\n[1] \"name\"  \"score\"\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "df-3",
+  "code": "df <- data.frame(a = c(1.5, 2.25, 3), b = c(TRUE, FALSE, NA))\ndf\n",
+  "stdout": "     a     b\n1 1.50  TRUE\n2 2.25 FALSE\n3 3.00    NA\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "df-4",
+  "code": "df <- data.frame(g = c(\"x\", \"y\", \"x\"), v = c(1, 2, 3))\ndf[df$v > 1, ]\n",
+  "stdout": "  g v\n2 y 2\n3 x 3\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "df-5",
+  "code": "df <- data.frame(x = 1:5, y = c(2, 4, 6, 8, 10))\nsummary(df)\n",
+  "stdout": "       x           y     \n Min.   :1   Min.   : 2  \n 1st Qu.:2   1st Qu.: 4  \n Median :3   Median : 6  \n Mean   :3   Mean   : 6  \n 3rd Qu.:4   3rd Qu.: 8  \n Max.   :5   Max.   :10  \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "df-6",
+  "code": "df <- data.frame(x = 1:3)\ndf$z <- df$x^2\ndf\n",
+  "stdout": "  x z\n1 1 1\n2 2 4\n3 3 9\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "df-7",
+  "code": "df <- data.frame(x = 1:10)\nhead(df, 3)\n",
+  "stdout": "  x\n1 1\n2 2\n3 3\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "df-8",
+  "code": "df <- data.frame(a = 1:2, b = 3:4)\nstr(df)\n",
+  "stdout": "'data.frame':\t2 obs. of  2 variables:\n $ a: int  1 2\n $ b: int  3 4\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "df-9",
+  "code": "df <- data.frame(x = c(3, 1, 2), y = c(\"c\", \"a\", \"b\"))\ndf[order(df$x), ]\n",
+  "stdout": "  x y\n2 1 a\n3 2 b\n1 3 c\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "df-10",
+  "code": "df <- data.frame(g = c(\"a\", \"b\", \"a\"), v = c(1, 5, 3))\naggregate(v ~ g, data = df, FUN = mean)\n",
+  "stdout": "  g v\n1 a 2\n2 b 5\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "df-11",
+  "code": "head(mtcars)\n",
+  "stdout": "                   mpg cyl disp  hp drat    wt  qsec vs am gear carb\nMazda RX4         21.0   6  160 110 3.90 2.620 16.46  0  1    4    4\nMazda RX4 Wag     21.0   6  160 110 3.90 2.875 17.02  0  1    4    4\nDatsun 710        22.8   4  108  93 3.85 2.320 18.61  1  1    4    1\nHornet 4 Drive    21.4   6  258 110 3.08 3.215 19.44  1  0    3    1\nHornet Sportabout 18.7   8  360 175 3.15 3.440 17.02  0  0    3    2\nValiant           18.1   6  225 105 2.76 3.460 20.22  1  0    3    1\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "df-12",
+  "code": "mean(mtcars$mpg); table(mtcars$cyl)\n",
+  "stdout": "[1] 20.09062\n\n 4  6  8 \n11  7 14 \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "df-13",
+  "code": "df <- data.frame(x = 1:3, y = 4:6)\ncolMeans(df); sapply(df, class)\n",
+  "stdout": "x y \n2 5 \n        x         y \n\"integer\" \"integer\" \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "df-14",
+  "code": "df <- data.frame(x = c(1, 2), y = c(\"p\", \"q\"), stringsAsFactors = TRUE)\nlevels(df$y); df[2, \"x\"]\n",
+  "stdout": "[1] \"p\" \"q\"\n[1] 2\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "df-15",
+  "code": "dim(iris); levels(iris$Species)\n",
+  "stdout": "[1] 150   5\n[1] \"setosa\"     \"versicolor\" \"virginica\" \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "df-16",
+  "code": "with(mtcars, tapply(mpg, cyl, mean))\n",
+  "stdout": "       4        6        8 \n26.66364 19.74286 15.10000 \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "df-17",
+  "code": "subset(data.frame(a = 1:4, b = c(5, 6, 7, 8)), a > 2)\n",
+  "stdout": "  a b\n3 3 7\n4 4 8\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "df-18",
+  "code": "df <- data.frame(x = c(-1.5, 22.25, 3))\ndf\n",
+  "stdout": "      x\n1 -1.50\n2 22.25\n3  3.00\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "ctrl-1",
+  "code": "for (i in 1:3) print(i)\n",
+  "stdout": "[1] 1\n[1] 2\n[1] 3\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "ctrl-2",
+  "code": "x <- 5\nif (x > 3) \"big\" else \"small\"\n",
+  "stdout": "[1] \"big\"\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "ctrl-3",
+  "code": "i <- 0\nwhile (i < 3) { i <- i + 1 }\ni\n",
+  "stdout": "[1] 3\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "ctrl-4",
+  "code": "f <- function(n) if (n <= 1) 1 else n * f(n - 1)\nf(10)\n",
+  "stdout": "[1] 3628800\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "ctrl-5",
+  "code": "ifelse(c(1, 5, 10) > 4, \"hi\", \"lo\")\n",
+  "stdout": "[1] \"lo\" \"hi\" \"hi\"\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "ctrl-6",
+  "code": "total <- 0\nfor (v in c(2, 4, 6)) total <- total + v\ntotal\n",
+  "stdout": "[1] 12\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "ctrl-7",
+  "code": "s <- 0\nrepeat { s <- s + 1; if (s >= 4) break }\ns\n",
+  "stdout": "[1] 4\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "ctrl-8",
+  "code": "for (i in 1:5) { if (i %% 2 == 0) next; cat(i, \"\") }; cat(\"\\n\")\n",
+  "stdout": "1 3 5 \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "ctrl-9",
+  "code": "switch(\"b\", a = \"first\", b = \"second\", \"other\")\n",
+  "stdout": "[1] \"second\"\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "ctrl-10",
+  "code": "x <- 3\ny <- if (x > 5) 1 else 0\ny\n",
+  "stdout": "[1] 0\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "fun-1",
+  "code": "sq <- function(x) x^2\nsq(1:4)\n",
+  "stdout": "[1]  1  4  9 16\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "fun-2",
+  "code": "f <- function(x, y = 2) x + y\nf(1); f(1, 10); f(y = 5, x = 1)\n",
+  "stdout": "[1] 3\n[1] 11\n[1] 6\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "fun-3",
+  "code": "f <- function(...) sum(...)\nf(1, 2, 3)\n",
+  "stdout": "[1] 6\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "fun-4",
+  "code": "f <- function(x) { x[1] <- 99; x }\nv <- c(1, 2)\nf(v); v\n",
+  "stdout": "[1] 99  2\n[1] 1 2\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "fun-5",
+  "code": "make_counter <- function() { i <- 0; function() { i <<- i + 1; i } }\ncnt <- make_counter()\ncnt(); cnt()\n",
+  "stdout": "[1] 1\n[1] 2\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "fun-6",
+  "code": "f <- function(a, b) { if (missing(b)) \"no b\" else b }\nf(1)\n",
+  "stdout": "[1] \"no b\"\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "fun-7",
+  "code": "f <- function(x) { stopifnot(is.numeric(x)); invisible(x * 2) }\nf(3)\ny <- f(3)\ny\n",
+  "stdout": "[1] 6\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "fun-8",
+  "code": "f <- function(x) substitute(x)\nf(a + b)\n",
+  "stdout": "a + b\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "fun-9",
+  "code": "(function(x, y) x * y)(3, 4)\n",
+  "stdout": "[1] 12\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "fun-10",
+  "code": "sapply(1:3, \\(k) k + 1)\n",
+  "stdout": "[1] 2 3 4\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "fun-11",
+  "code": "c(1, 4, 9) |> sqrt()\n",
+  "stdout": "[1] 1 2 3\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "fun-12",
+  "code": "f <- function(x) { return(x + 1); 0 }\nf(1)\n",
+  "stdout": "[1] 2\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "fun-13",
+  "code": "g <- function(n = 5) seq_len(n)\ng()\n",
+  "stdout": "[1] 1 2 3 4 5\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "fun-14",
+  "code": "tryCatch(stop(\"boom\"), error = function(e) conditionMessage(e))\n",
+  "stdout": "[1] \"boom\"\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "fun-15",
+  "code": "do.call(paste, list(\"a\", \"b\", sep = \"\"))\n",
+  "stdout": "[1] \"ab\"\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "test-1",
+  "code": "x <- c(5.1, 4.9, 6.2, 5.8, 6.0, 5.5, 5.3)\nt.test(x, mu = 5)\n",
+  "stdout": "\n\tOne Sample t-test\n\ndata:  x\nt = 2.9979, df = 6, p-value = 0.02407\nalternative hypothesis: true mean is not equal to 5\n95 percent confidence interval:\n 5.099776 5.985938\nsample estimates:\nmean of x \n 5.542857 \n\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "test-2",
+  "code": "x <- c(12, 15, 11, 18, 14); y <- c(22, 19, 25, 21, 24)\nt.test(x, y)\n",
+  "stdout": "\n\tWelch Two Sample t-test\n\ndata:  x and y\nt = -5.0468, df = 7.854, p-value = 0.00105\nalternative hypothesis: true difference in means is not equal to 0\n95 percent confidence interval:\n -11.958975  -4.441025\nsample estimates:\nmean of x mean of y \n     14.0      22.2 \n\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "test-3",
+  "code": "x <- c(12, 15, 11, 18, 14); y <- c(22, 19, 25, 21, 24)\nt.test(x, y, var.equal = TRUE)\n",
+  "stdout": "\n\tTwo Sample t-test\n\ndata:  x and y\nt = -5.0468, df = 8, p-value = 0.0009933\nalternative hypothesis: true difference in means is not equal to 0\n95 percent confidence interval:\n -11.946813  -4.453187\nsample estimates:\nmean of x mean of y \n     14.0      22.2 \n\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "test-4",
+  "code": "before <- c(200, 190, 210, 220); after <- c(190, 185, 200, 205)\nt.test(before, after, paired = TRUE)\n",
+  "stdout": "\n\tPaired t-test\n\ndata:  before and after\nt = 4.899, df = 3, p-value = 0.01628\nalternative hypothesis: true mean difference is not equal to 0\n95 percent confidence interval:\n  3.503859 16.496141\nsample estimates:\nmean difference \n             10 \n\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "test-5",
+  "code": "x <- c(5.1, 4.9, 6.2, 5.8, 6.0, 5.5, 5.3)\nt.test(x, mu = 5)$p.value\n",
+  "stdout": "[1] 0.02407259\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "test-6",
+  "code": "chisq.test(matrix(c(10, 20, 30, 40), 2))\n",
+  "stdout": "\n\tPearson's Chi-squared test with Yates' continuity correction\n\ndata:  matrix(c(10, 20, 30, 40), 2)\nX-squared = 0.44643, df = 1, p-value = 0.504\n\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "test-7",
+  "code": "chisq.test(c(20, 30, 50))\n",
+  "stdout": "\n\tChi-squared test for given probabilities\n\ndata:  c(20, 30, 50)\nX-squared = 14, df = 2, p-value = 0.0009119\n\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "test-8",
+  "code": "x <- c(5.1, 4.9, 6.2, 5.8, 6.0)\nt.test(x, alternative = \"greater\", mu = 5)\n",
+  "stdout": "\n\tOne Sample t-test\n\ndata:  x\nt = 2.3534, df = 4, p-value = 0.03911\nalternative hypothesis: true mean is greater than 5\n95 percent confidence interval:\n 5.056484      Inf\nsample estimates:\nmean of x \n      5.6 \n\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "test-9",
+  "code": "prop.test(45, 100)\n",
+  "stdout": "\n\t1-sample proportions test with continuity correction\n\ndata:  45 out of 100, null probability 0.5\nX-squared = 0.81, df = 1, p-value = 0.3681\nalternative hypothesis: true p is not equal to 0.5\n95 percent confidence interval:\n 0.3514281 0.5524574\nsample estimates:\n   p \n0.45 \n\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "test-10",
+  "code": "binom.test(7, 20)\n",
+  "stdout": "\n\tExact binomial test\n\ndata:  7 and 20\nnumber of successes = 7, number of trials = 20, p-value = 0.2632\nalternative hypothesis: true probability of success is not equal to 0.5\n95 percent confidence interval:\n 0.1539092 0.5921885\nsample estimates:\nprobability of success \n                  0.35 \n\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "test-11",
+  "code": "cor.test(c(1, 2, 3, 4, 5, 6), c(2, 1, 4, 3, 7, 8))\n",
+  "stdout": "\n\tPearson's product-moment correlation\n\ndata:  c(1, 2, 3, 4, 5, 6) and c(2, 1, 4, 3, 7, 8)\nt = 4.1651, df = 4, p-value = 0.01409\nalternative hypothesis: true correlation is not equal to 0\n95 percent confidence interval:\n 0.3349310 0.9892765\nsample estimates:\n      cor \n0.9014601 \n\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "lm-1",
+  "code": "x <- c(1, 2, 3, 4, 5); y <- c(2.1, 3.9, 6.2, 7.8, 10.1)\nlm(y ~ x)\n",
+  "stdout": "\nCall:\nlm(formula = y ~ x)\n\nCoefficients:\n(Intercept)            x  \n       0.05         1.99  \n\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "lm-2",
+  "code": "x <- c(1, 2, 3, 4, 5); y <- c(2.1, 3.9, 6.2, 7.8, 10.1)\ncoef(lm(y ~ x))\n",
+  "stdout": "(Intercept)           x \n       0.05        1.99 \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "lm-3",
+  "code": "x <- c(1, 2, 3, 4, 5); y <- c(2.1, 3.9, 6.2, 7.8, 10.1)\nsummary(lm(y ~ x))\n",
+  "stdout": "\nCall:\nlm(formula = y ~ x)\n\nResiduals:\n    1     2     3     4     5 \n 0.06 -0.13  0.18 -0.21  0.10 \n\nCoefficients:\n            Estimate Std. Error t value Pr(>|t|)    \n(Intercept)  0.05000    0.19807   0.252    0.817    \nx            1.99000    0.05972  33.321 5.94e-05 ***\n---\nSignif. codes:  0 \u2018***\u2019 0.001 \u2018**\u2019 0.01 \u2018*\u2019 0.05 \u2018.\u2019 0.1 \u2018 \u2019 1\n\nResidual standard error: 0.1889 on 3 degrees of freedom\nMultiple R-squared:  0.9973,\tAdjusted R-squared:  0.9964 \nF-statistic:  1110 on 1 and 3 DF,  p-value: 5.942e-05\n\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "lm-4",
+  "code": "fit <- lm(mpg ~ wt, data = mtcars)\nfit\n",
+  "stdout": "\nCall:\nlm(formula = mpg ~ wt, data = mtcars)\n\nCoefficients:\n(Intercept)           wt  \n     37.285       -5.344  \n\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "lm-5",
+  "code": "fit <- lm(mpg ~ wt, data = mtcars)\nsummary(fit)\n",
+  "stdout": "\nCall:\nlm(formula = mpg ~ wt, data = mtcars)\n\nResiduals:\n    Min      1Q  Median      3Q     Max \n-4.5432 -2.3647 -0.1252  1.4096  6.8727 \n\nCoefficients:\n            Estimate Std. Error t value Pr(>|t|)    \n(Intercept)  37.2851     1.8776  19.858  < 2e-16 ***\nwt           -5.3445     0.5591  -9.559 1.29e-10 ***\n---\nSignif. codes:  0 \u2018***\u2019 0.001 \u2018**\u2019 0.01 \u2018*\u2019 0.05 \u2018.\u2019 0.1 \u2018 \u2019 1\n\nResidual standard error: 3.046 on 30 degrees of freedom\nMultiple R-squared:  0.7528,\tAdjusted R-squared:  0.7446 \nF-statistic: 91.38 on 1 and 30 DF,  p-value: 1.294e-10\n\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "lm-6",
+  "code": "fit <- lm(mpg ~ wt + hp, data = mtcars)\nsummary(fit)\n",
+  "stdout": "\nCall:\nlm(formula = mpg ~ wt + hp, data = mtcars)\n\nResiduals:\n   Min     1Q Median     3Q    Max \n-3.941 -1.600 -0.182  1.050  5.854 \n\nCoefficients:\n            Estimate Std. Error t value Pr(>|t|)    \n(Intercept) 37.22727    1.59879  23.285  < 2e-16 ***\nwt          -3.87783    0.63273  -6.129 1.12e-06 ***\nhp          -0.03177    0.00903  -3.519  0.00145 ** \n---\nSignif. codes:  0 \u2018***\u2019 0.001 \u2018**\u2019 0.01 \u2018*\u2019 0.05 \u2018.\u2019 0.1 \u2018 \u2019 1\n\nResidual standard error: 2.593 on 29 degrees of freedom\nMultiple R-squared:  0.8268,\tAdjusted R-squared:  0.8148 \nF-statistic: 69.21 on 2 and 29 DF,  p-value: 9.109e-12\n\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "lm-7",
+  "code": "fit <- lm(mpg ~ wt, data = mtcars)\nround(residuals(fit)[1:3], 4); round(fitted(fit)[1:3], 3)\n",
+  "stdout": "    Mazda RX4 Mazda RX4 Wag    Datsun 710 \n      -2.2826       -0.9198       -2.0860 \n    Mazda RX4 Mazda RX4 Wag    Datsun 710 \n       23.283        21.920        24.886 \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "lm-8",
+  "code": "fit <- lm(mpg ~ wt, data = mtcars)\npredict(fit, data.frame(wt = c(3, 4)))\n",
+  "stdout": "       1        2 \n21.25171 15.90724 \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "lm-9",
+  "code": "fit <- lm(mpg ~ wt, data = mtcars)\nsummary(fit)$r.squared; summary(fit)$coefficients\n",
+  "stdout": "[1] 0.7528328\n             Estimate Std. Error   t value     Pr(>|t|)\n(Intercept) 37.285126   1.877627 19.857575 8.241799e-19\nwt          -5.344472   0.559101 -9.559044 1.293959e-10\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "lm-10",
+  "code": "x <- c(1, 2, 3, 4, 5); y <- c(1, 4, 9, 16, 25)\nlm(y ~ x + I(x^2))\n",
+  "stdout": "\nCall:\nlm(formula = y ~ x + I(x^2))\n\nCoefficients:\n(Intercept)            x       I(x^2)  \n          0            0            1  \n\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "lm-11",
+  "code": "fit <- lm(mpg ~ factor(cyl), data = mtcars)\ncoef(fit)\n",
+  "stdout": " (Intercept) factor(cyl)6 factor(cyl)8 \n   26.663636    -6.920779   -11.563636 \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "lm-12",
+  "code": "anova(lm(mpg ~ wt, data = mtcars))\n",
+  "stdout": "Analysis of Variance Table\n\nResponse: mpg\n          Df Sum Sq Mean Sq F value    Pr(>F)    \nwt         1 847.73  847.73  91.375 1.294e-10 ***\nResiduals 30 278.32    9.28                      \n---\nSignif. codes:  0 \u2018***\u2019 0.001 \u2018**\u2019 0.01 \u2018*\u2019 0.05 \u2018.\u2019 0.1 \u2018 \u2019 1\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "glm-1",
+  "code": "fit <- glm(am ~ wt, data = mtcars, family = binomial)\ncoef(fit)\n",
+  "stdout": "(Intercept)          wt \n   12.04037    -4.02397 \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "glm-2",
+  "code": "fit <- glm(am ~ wt, data = mtcars, family = binomial)\nfit\n",
+  "stdout": "\nCall:  glm(formula = am ~ wt, family = binomial, data = mtcars)\n\nCoefficients:\n(Intercept)           wt  \n     12.040       -4.024  \n\nDegrees of Freedom: 31 Total (i.e. Null);  30 Residual\nNull Deviance:\t    43.23 \nResidual Deviance: 19.18 \tAIC: 23.18\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "glm-3",
+  "code": "fit <- glm(am ~ wt, data = mtcars, family = binomial)\nsummary(fit)\n",
+  "stdout": "\nCall:\nglm(formula = am ~ wt, family = binomial, data = mtcars)\n\nCoefficients:\n            Estimate Std. Error z value Pr(>|z|)   \n(Intercept)   12.040      4.510   2.670  0.00759 **\nwt            -4.024      1.436  -2.801  0.00509 **\n---\nSignif. codes:  0 \u2018***\u2019 0.001 \u2018**\u2019 0.01 \u2018*\u2019 0.05 \u2018.\u2019 0.1 \u2018 \u2019 1\n\n(Dispersion parameter for binomial family taken to be 1)\n\n    Null deviance: 43.230  on 31  degrees of freedom\nResidual deviance: 19.176  on 30  degrees of freedom\nAIC: 23.176\n\nNumber of Fisher Scoring iterations: 6\n\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "glm-4",
+  "code": "glm(count ~ x, family = poisson, data = data.frame(x = 1:6, count = c(1, 3, 2, 6, 8, 12)))\n",
+  "stdout": "\nCall:  glm(formula = count ~ x, family = poisson, data = data.frame(x = 1:6, \n    count = c(1, 3, 2, 6, 8, 12)))\n\nCoefficients:\n(Intercept)            x  \n    -0.1430       0.4421  \n\nDegrees of Freedom: 5 Total (i.e. Null);  4 Residual\nNull Deviance:\t    16.64 \nResidual Deviance: 1.176 \tAIC: 24.71\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "misc-1",
+  "code": "x <- 1:3; class(x); class(1); class(\"a\"); class(TRUE); class(NULL); class(list()); class(sum)\n",
+  "stdout": "[1] \"integer\"\n[1] \"numeric\"\n[1] \"character\"\n[1] \"logical\"\n[1] \"NULL\"\n[1] \"list\"\n[1] \"function\"\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "misc-2",
+  "code": "typeof(1L); typeof(1); typeof(mean); is.numeric(1L); is.character(\"a\")\n",
+  "stdout": "[1] \"integer\"\n[1] \"double\"\n[1] \"closure\"\n[1] TRUE\n[1] TRUE\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "misc-3",
+  "code": "as.numeric(\"3.5\"); as.integer(3.9); as.character(1:3); as.logical(c(\"yes\", \"TRUE\", \"T\"))\n",
+  "stdout": "[1] 3.5\n[1] 3\n[1] \"1\" \"2\" \"3\"\n[1]   NA TRUE TRUE\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "misc-4",
+  "code": "identical(c(1, 2), c(1, 2)); all.equal(1, 1 + 1e-10)\n",
+  "stdout": "[1] TRUE\n[1] TRUE\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "misc-5",
+  "code": "x <- 1:10\nx[x > 3 & x < 8]\n",
+  "stdout": "[1] 4 5 6 7\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "misc-6",
+  "code": "nchar(c(\"apple\", \"kiwi\")); rev(list(1, \"b\"))\n",
+  "stdout": "[1] 5 4\n[[1]]\n[1] \"b\"\n\n[[2]]\n[1] 1\n\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "misc-7",
+  "code": "seq(10, 1)\n",
+  "stdout": " [1] 10  9  8  7  6  5  4  3  2  1\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "misc-8",
+  "code": "print(1:3)\n",
+  "stdout": "[1] 1 2 3\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "misc-9",
+  "code": "invisible(5)\n",
+  "stdout": "",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "misc-10",
+  "code": "x <- c(b = 2, a = 1)\nx[order(names(x))]\n",
+  "stdout": "a b \n1 2 \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "misc-11",
+  "code": "max(c(\"apple\", \"banana\")); sort(c(\"b\", \"A\", \"a\", \"B\"))\n",
+  "stdout": "[1] \"banana\"\n[1] \"a\" \"A\" \"b\" \"B\"\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "misc-12",
+  "code": "round(123.456, -1); 1e15; 1e16; 0.1234567891\n",
+  "stdout": "[1] 120\n[1] 1e+15\n[1] 1e+16\n[1] 0.1234568\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "misc-13",
+  "code": "c(1.123456789, 123456.1)\n",
+  "stdout": "[1] 1.123457e+00 1.234561e+05\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "misc-14",
+  "code": "100 * (1 + 0.05)^10\n",
+  "stdout": "[1] 162.8895\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "misc-15",
+  "code": "x <- c(1e5, 1e-5)\nx\n",
+  "stdout": "[1] 1e+05 1e-05\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "misc-16",
+  "code": "TRUE + TRUE\n",
+  "stdout": "[1] 2\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "misc-17",
+  "code": "mean(1:10); median(c(1L, 2L)); 10 %/% 3L\n",
+  "stdout": "[1] 5.5\n[1] 1.5\n[1] 3\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "misc-18",
+  "code": "x <- c(1, 2, 3)\nx[5]\n",
+  "stdout": "[1] NA\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "misc-19",
+  "code": "stop(\"bad input\")\n",
+  "stdout": "",
+  "stderr": "Error: bad input\nExecution halted\n",
+  "rc": 1
+ },
+ {
+  "id": "misc-20",
+  "code": "log(-1)\n",
+  "stdout": "[1] NaN\n",
+  "stderr": "Warning message:\nIn log(-1) : NaNs produced\n",
+  "rc": 0
+ },
+ {
+  "id": "misc-21",
+  "code": "as.integer(\"x\")\n",
+  "stdout": "[1] NA\n",
+  "stderr": "Warning message:\nNAs introduced by coercion \n",
+  "rc": 0
+ },
+ {
+  "id": "misc-22",
+  "code": "nchar(month.name)\n",
+  "stdout": " [1] 7 8 5 5 3 4 4 6 9 7 8 8\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "misc-23",
+  "code": "exists(\"undefined_var_xyz\"); is.null(NULL)\n",
+  "stdout": "[1] FALSE\n[1] TRUE\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "misc-24",
+  "code": "x <- matrix(c(1.5, NA, 3, 4), 2)\nx\n",
+  "stdout": "     [,1] [,2]\n[1,]  1.5    3\n[2,]   NA    4\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "misc-25",
+  "code": "seq(0.5, 2.5)\n",
+  "stdout": "[1] 0.5 1.5 2.5\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "misc-26",
+  "code": "Sys.Date() > as.Date(\"2020-01-01\")\n",
+  "stdout": "[1] TRUE\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "misc-27",
+  "code": "as.Date(\"2024-03-15\") + 30\n",
+  "stdout": "[1] \"2024-04-14\"\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "misc-28",
+  "code": "rev(sort(table(c(\"x\", \"y\", \"y\", \"z\", \"z\", \"z\"))))\n",
+  "stdout": "\nz y x \n3 2 1 \n",
+  "stderr": "",
+  "rc": 0
+ }
+]

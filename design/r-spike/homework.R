@@ -1,0 +1,12 @@
+# A typical intro-stats lab, run with: sagebrush homework.R   (or sagebrush --rill)
+data <- mtcars
+summary(data$mpg)
+table(data$cyl)
+tapply(data$mpg, data$cyl, mean)
+t.test(mpg ~ am, data = data)
+fit <- lm(mpg ~ wt + hp, data = data)
+summary(fit)
+predict(fit, data.frame(wt = 3, hp = 120))
+set.seed(42)
+x <- rnorm(20, mean = 10, sd = 2)
+round(c(mean = mean(x), sd = sd(x)), 3)
