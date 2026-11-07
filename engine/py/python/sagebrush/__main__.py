@@ -10,12 +10,17 @@ Module paths of code written for Sage resolve to Sagebrush's names
 installed in the same Python is not used by this command.
 """
 
+import os
 import sys
 import types
 
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] == "remote" and not os.path.isfile("remote"):
+        # (python -m sagebrush remote ...: the runner in this very Python, whatever `sagebrush` on PATH is)
+        from sagebrush.cli import main as cli_main
+        return cli_main(argv)
     if not argv or argv[0] in ("-h", "--help"):
         print(__doc__.strip())
         return 0
