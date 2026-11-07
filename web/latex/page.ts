@@ -544,7 +544,11 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     if (running) { runStop?.abort(); say("stopping…"); return; }
     let rc: typeof import("./run-core.mjs");
     try { rc = await loadRun(); } catch { say("Not run: Run's code couldn't be loaded; press Run again"); return; }
-    if (running) return;
+    // (the test build only: the page test holds Run's code loading here; elsewhere this folds away)
+    if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) await (globalThis as any).__sbTexRunLoaded?.();
+    // (the page replaced or closed while Run's code loaded: this Run never starts, so nothing of the old document's
+    //  folder is listed or read (daybreak3, #824))
+    if (!live() || running) return;
     if (!host.sandbox) { say(rc.NO_SANDBOX); return; }
     const session = (sageSession ??= rc.sessionOf(rc.sandboxEngine(host.sandbox, new URL(".", import.meta.url))));
     const c = E.lastCheck();

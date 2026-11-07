@@ -1969,6 +1969,30 @@ try {
     await ev(`(document.querySelector(".tex-status").textContent = "", document.querySelector(".tex-head .tex-run").click(), 1)`);
     const ranAgain = await statusIs(/Ran 5 SageTeX items in [0-9.]+ s$/, 60000);
     check(ranAgain && runChunk().length === 1, "Run's chunk: a second Run on the page uses the one fetched, not fetched again", { ranAgain, fetched: runChunk().length });
+    // (daybreak3, #824: the page replaced while Run's code loads: once it has loaded, that Run never starts: not one
+    //  workspace call for the old document or its folder, and its results file as it was)
+    {
+      const fo = await mk("/u/other.tex", enc("\\documentclass{article}\n\\begin{document}\nOther page.\n\\end{document}\n"));
+      const before = await resultsOf("/t/run.tex");
+      const lz = await ev(`(async () => {
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms)), ws = window.__sbTexWs, calls = [];
+        let release; window.__sbTexRunLoaded = () => new Promise((r) => { release = r; });
+        document.querySelector(".tex-head .tex-run").click();
+        for (let i = 0; i < 50 && !release; i++) await wait(100);
+        const held = !!release;
+        window.__sbTexRunLoaded = undefined;
+        window.__sbTex({ path: "/u/other.tex", fid: ${JSON.stringify(fo)} });
+        for (let i = 0; i < 100 && !document.querySelector(".tex-preview")?.textContent.includes("Other page."); i++) await wait(100);
+        const shown = !!document.querySelector(".tex-preview")?.textContent.includes("Other page.");
+        const orig = {};
+        for (const m of ["list", "readUpTo", "read", "stat", "pathOfFile", "write", "createByPerson"]) { orig[m] = ws[m]; ws[m] = function (a, ...r) { calls.push([m, String(a)]); return orig[m].call(this, a, ...r); }; }
+        release?.(); await wait(3000);
+        for (const m of Object.keys(orig)) ws[m] = orig[m];
+        const old = calls.filter(([m, a]) => a.startsWith("/t/") || a === "/t" || a === ${JSON.stringify(fr)});
+        return { held, shown, old, n: calls.length, starting: document.querySelector(".tex-head .tex-run")?.textContent ?? null };
+      })()`);
+      check(lz.held && lz.shown && lz.old.length === 0 && (await resultsOf("/t/run.tex")) === before, "Run's chunk: the page replaced while it loads: that Run never starts (no call for the old document or its folder, its results as they were)", lz);
+    }
     // (William, Nov 3: L0 "latex-beamer + sagetex ... didn't work", L1 "\title{$\sage{factor(2026)}$} doesn't work"):
     // a beamer deck of his shape, clicked Run: every item ok in the results file, the title page's result (an item in
     // \title, shown where \titlepage prints it), the plot and the curve's point in the preview and in Present
