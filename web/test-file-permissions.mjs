@@ -80,7 +80,7 @@ const check = (ok, what) => { checks++; console.log((ok ? "ok   " : "FAIL ") + w
 {
   const store = new Map(); let failing = false;
   Object.defineProperty(globalThis, "localStorage", { configurable: true, value: { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => { if (failing) throw new Error("QuotaExceededError"); store.set(k, String(v)); }, removeItem: (k) => store.delete(k) } });
-  const { createPermissions, ALLOWS_KEPT, GRANT_CAPS, canonicalScope } = await import("data:text/javascript," + encodeURIComponent(readFileSync(join(here, "notebook", "permissions.js"), "utf8")));
+  const { createPermissions, ALLOWS_KEPT, DENIALS_KEPT, GRANT_CAPS, canonicalScope, scopeCovers } = await import("data:text/javascript," + encodeURIComponent(readFileSync(join(here, "notebook", "permissions.js"), "utf8")));
   // (the switch, as before)
   const p = createPermissions();
   p.provenance("own", "person");
@@ -109,6 +109,19 @@ const check = (ok, what) => { checks++; console.log((ok ? "ok   " : "FAIL ") + w
   check(["h.org", "H.ORG", "h.org:443", "h.org:00443"].every((h) => canonicalScope("net", h) === "h.org:443") && canonicalScope("net", "h.org:8443") === "h.org:8443" && canonicalScope("net", "münchen.de") === "xn--mnchen-3ya.de:443", "a host is lowercase IDNA with its port explicit, the port normalized first: h.org, H.ORG, h.org:443, h.org:00443 are one");
   check(["h.org", "münchen.de:8443", "X.org:00080"].every((h) => canonicalScope("net", canonicalScope("net", h)) === canonicalScope("net", h)), "…and canonicalizing twice changes nothing");
   check(["*.x.org", "https://x.org", "u@x.org", "x.org/p", "x.org:0", "x.org:70000", "[::1]", ""].every((h) => canonicalScope("net", h) === null), "…no wildcard, scheme, user, path, bad port or IPv6 literal");
+  check([".example.com", "example.com."].every((h) => canonicalScope("net", h) === null), "…nor a leading or trailing dot");
+  const label = (n) => "a".repeat(n), h253 = [label(63), label(63), label(63), label(61)].join("."), h254 = [label(63), label(63), label(63), label(62)].join(".");
+  check(canonicalScope("net", h253) === h253 + ":443" && canonicalScope("net", h254) === null, "…a host of 253 characters is a scope, one of 254 isn't");
+  const p1024 = "/" + "a".repeat(1023);
+  check(canonicalScope("write", p1024) === p1024 && canonicalScope("write", p1024 + "a") === null, "a folder of 1,024 characters is a scope, one of 1,025 isn't");
+  check(["/a\nb", "/a\u0000b", "/a\u001fb", "/a\tb"].every((t) => canonicalScope("write", t) === null), "…nor one with a control character in it");
+  // (what a grant covers: a folder its own tree, a host itself; never a sibling or a lookalike)
+  check(scopeCovers("write", "/a", "/a") && scopeCovers("write", "/a", "/a/b") && scopeCovers("write", "/", "/x") && !scopeCovers("write", "/a", "/ab") && !scopeCovers("write", "/a", "/a.txt"), "a grant of /a covers /a and /a/b, never /ab or /a.txt");
+  check(scopeCovers("net", "example.com:443", "example.com:443") && !scopeCovers("net", "example.com:443", "evil-example.com:443") && !scopeCovers("net", "example.com:443", "sub.example.com:443") && !scopeCovers("net", "example.com:443", "example.com:8443"), "a grant of example.com covers it alone: not evil-example.com, sub.example.com or another port");
+  // (the cap at its edge: the 32nd scope of a kind granted, the 33rd refused)
+  const k32 = createPermissions();
+  const got32 = Array.from({ length: 32 }, (_, i) => k32.grant("k", "write", "/c" + i).ok).filter(Boolean).length;
+  check(got32 === 32 && k32.grant("k", "write", "/c32").why === "cap", "a kind's 32nd scope is granted, its 33rd refused (cap)");
   // (the cap, stored and once together)
   for (let i = 0; i < 20; i++) g.grant("doc", "write", "/s" + i);
   for (let i = 20; i < 40; i++) g.grant("doc", "write", "/s" + i, { once: true });
@@ -153,12 +166,41 @@ const check = (ok, what) => { checks++; console.log((ok ? "ok   " : "FAIL ") + w
   const sp = createPermissions();
   sp.deny("p", "net", "c.org"); sp.grant("p", "net", "c.org", { once: true }); sp.deny("p", "net", "c.org"); sp.forgetDenials("p");
   check(sp.sessionCounts().docs === 0, "a document's session entry left empty is pruned");
+  const rv = createPermissions();
+  rv.grant("r", "write", "/o", { once: true }); rv.revoke("r", "write", "/o");
+  check(!rv.grants("r").write.once.includes("/o") && rv.sessionCounts().docs === 0, "removing a scope granted once takes it from this session too");
+  const fg = createPermissions();
+  for (let i = 0; i < 100; i++) fg.deny("f", "net", "h" + i + ".org");
+  fg.forgetDenials("f");
+  check(fg.sessionCounts().denials === 0 && fg.sessionCounts().docs === 0, "forgetting a document's denials takes them from the page's count");
+  const pe = createPermissions();
+  pe.deny("old", "net", "o.org");
+  for (let d = 0; d < GRANT_CAPS.sessionDenialsPage / GRANT_CAPS.sessionDenialsPerDoc; d++) for (let i = 0; i < GRANT_CAPS.sessionDenialsPerDoc; i++) pe.deny("p" + d, "net", "h" + i + ".org");
+  check(pe.grants("old").denied.session.length === 0 && pe.sessionCounts().denials === GRANT_CAPS.sessionDenialsPage && pe.sessionCounts().docs === GRANT_CAPS.sessionDenialsPage / GRANT_CAPS.sessionDenialsPerDoc, "a document whose last session denial the page's bound evicts leaves no entry behind");
   // (stored denials, page-wide: the record preloaded at its cap in one write, then one more denial: the oldest goes)
   store.set("sagebrush-grants", JSON.stringify({ v: 1, seq: GRANT_CAPS.storedDenials, docs: Object.fromEntries(Array.from({ length: 50 }, (_, d) => ["big" + d, { denied: Array.from({ length: GRANT_CAPS.storedDenials / 50 }, (_, j) => ["net", `h${j * 50 + d}.org:443`, j * 50 + d + 1]), t: 1 }])) }));
   const sd = createPermissions();
   check(sd.deny("big0", "net", "new.org", { stored: true }), "(one more stored denial)");
   const kept2 = Object.values(JSON.parse(store.get("sagebrush-grants")).docs).reduce((n, e) => n + (e.denied?.length ?? 0), 0);
   check(kept2 === GRANT_CAPS.storedDenials && !sd.grants("big0").denied.stored.some(([, h]) => h === "h0.org:443") && sd.grants("big0").denied.stored.some(([, h]) => h === "new.org:443") && sd.grants("big1").denied.stored.some(([, h]) => h === "h1.org:443"), "stored denials are bounded at 20,000 page-wide, the oldest evicted: " + kept2);
+  // (the switch's bounds at their edges, preloaded in one write: past DENIALS_KEPT a "don't allow" holds in this page
+  // only; past ALLOWS_KEPT the oldest allow goes)
+  const sw = () => JSON.parse(store.get("sagebrush-permissions"));
+  store.set("sagebrush-permissions", JSON.stringify(Object.fromEntries(Array.from({ length: DENIALS_KEPT }, (_, i) => ["dk" + i, { files: false }]))));
+  const kd = createPermissions();
+  check(kd.set("dk-new", "files", false) === false && !("dk-new" in sw()) && Object.keys(sw()).length === DENIALS_KEPT && kd.may("dk-new", "files") === false, "past 20,000 kept, one more \"don't allow\" isn't stored, and holds in this page");
+  store.set("sagebrush-permissions", JSON.stringify(Object.fromEntries(Array.from({ length: ALLOWS_KEPT }, (_, i) => ["ak" + i, { files: true }]))));
+  check(createPermissions().set("ak-new", "files", true) && "ak-new" in sw() && !("ak0" in sw()) && "ak1" in sw(), "past 2,000 allows kept, the oldest goes and the newest stays");
+  // (the scoped record: past docsKept the least recently changed document goes; an emptied one leaves nothing; only v 1 is read)
+  store.set("sagebrush-grants", JSON.stringify({ v: 1, seq: GRANT_CAPS.docsKept, docs: Object.fromEntries(Array.from({ length: GRANT_CAPS.docsKept }, (_, i) => ["dd" + i, { write: ["/w"], t: i + 1 }])) }));
+  const dk = createPermissions();
+  const gdocs = () => JSON.parse(store.get("sagebrush-grants")).docs;
+  check(dk.grant("dd-new", "write", "/w").ok && "dd-new" in gdocs() && !("dd0" in gdocs()) && "dd1" in gdocs() && Object.keys(gdocs()).length === GRANT_CAPS.docsKept, "past 2,000 documents, the least recently changed one's record goes and the newest stays");
+  dk.grant("t8", "write", "/a"); dk.revoke("t8", "write", "/a");
+  check(!("t8" in gdocs()), "a document whose grants are all removed leaves no entry in the stored record");
+  store.set("sagebrush-grants", JSON.stringify({ v: 2, seq: 5, docs: { v2: { write: ["/a"], net: ["x.org:443"], t: 1 } } }));
+  const v2 = createPermissions().grants("v2");
+  check(v2.write.stored.length === 0 && v2.net.stored.length === 0, "a stored record of another version is read as empty, not used");
   delete globalThis.localStorage;
 }
 const W = "window.sagebrush.workspace";
@@ -263,6 +305,14 @@ try {
   await filesSwitch();
   check(await until("/refused at \\d+/.test(document.querySelector('#cells .cell .out')?.textContent ?? '')", 20000), "a run in flight is refused at its next write once file changes aren't allowed, through a file it opened before: " + (await out()).trim().split("\n").slice(-1)[0]);
   await filesSwitch();
+  check((await files()) === true, "(allowed again)");
+  // (a choice made in another tab while the panel was closed: opening it shows the one now in effect)
+  const otherTab = (on) => ev(`(() => { const k = "sagebrush-permissions", a = JSON.parse(localStorage.getItem(k) ?? "{}"); a[${JSON.stringify(ownId)}] = { files: ${on} }; localStorage.setItem(k, JSON.stringify(a)); return 1; })()`);
+  await otherTab(false);
+  await openPerms();
+  check(/Not allowed: this notebook's code can't change your files/.test(await ev("document.querySelector('#permsfiles').textContent")) && /^Allow file changes/.test(await ev("document.querySelector('#filesperm').textContent")), "opening the panel shows the choice in effect now, one made in another tab included");
+  await closePerms();
+  await otherTab(true);
   check((await files()) === true, "(allowed again)");
   // (a change still queued when file changes stop being allowed: not kept)
   await ev("(window.__release = sagebrush.files.holdDrain(), 1)");
