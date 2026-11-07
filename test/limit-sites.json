@@ -7718,6 +7718,54 @@
   "class": "1",
   "owner": "board open --edit (@sagebrush-board)"
  },
+ "src/board-run.ts :: collect :: if (r.has(m.target) || r.size < INTERACT_FLAGS_MAX) { r.add(m.target); interactRaised.set(list, r); } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "board run (@sagebrush-agents-ui)",
+  "reason": "board run's output bound per item and run, and its @interact bookkeeping (#788): traceback flags capped at the item's display count, one cut note per item; protects the process and stored result; refuses no computation"
+ },
+ "src/board-run.ts :: collect :: sayCut(list, size.used + bytes > ITEM_OUTPUT_MAX ? \"item\" : \"run\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "board run (@sagebrush-agents-ui)",
+  "reason": "board run's output bound per item and run, and its @interact bookkeeping (#788): traceback flags capped at the item's display count, one cut note per item; protects the process and stored result; refuses no computation"
+ },
+ "src/board-run.ts :: interactError :: const CUT_WHY = { item: `${ITEM_OUTPUT_MAX / 2 ** 20} MB for this item`, run: `${RUN_OUTPUT_MAX / 2 ** 20} MB for the whole board`, displays: `${ITEM_DISPLAYS_MAX} displays for this item` }; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "board run (@sagebrush-agents-ui)",
+  "reason": "board run's output bound per item and run, and its @interact bookkeeping (#788): traceback flags capped at the item's display count, one cut note per item; protects the process and stored result; refuses no computation"
+ },
+ "src/board-run.ts :: interactError :: else if (interactRaised.get(list)?.has(t)) said.push(\"[its traceback was not kept: past the output limit]\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "board run (@sagebrush-agents-ui)",
+  "reason": "board run's output bound per item and run, and its @interact bookkeeping (#788): traceback flags capped at the item's display count, one cut note per item; protects the process and stored result; refuses no computation"
+ },
+ "src/board-run.ts :: interactError :: if (!said.length && interactRaisedUntracked.has(list)) said.push(\"[its traceback was not kept: past the output limit]\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "board run (@sagebrush-agents-ui)",
+  "reason": "board run's output bound per item and run, and its @interact bookkeeping (#788): traceback flags capped at the item's display count, one cut note per item; protects the process and stored result; refuses no computation"
+ },
+ "src/board-run.ts :: note :: const INTERACT_FLAGS_MAX = ITEM_DISPLAYS_MAX; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "board run (@sagebrush-agents-ui)",
+  "reason": "board run's output bound per item and run, and its @interact bookkeeping (#788): traceback flags capped at the item's display count, one cut note per item; protects the process and stored result; refuses no computation"
+ },
  "src/board-try.ts :: isObj :: export const CASES_MAX = 10_000; #0": {
   "class": "1",
   "owner": "board",
