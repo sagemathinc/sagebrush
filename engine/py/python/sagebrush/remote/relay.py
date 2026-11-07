@@ -748,7 +748,9 @@ class RelayRunner:
             return self._refuse(p, rid, "refused", "this is the relay")
         # (a page's purpose is its channel's: a kernel page pairs as a kernel, a terminal page as a terminal)
         if q.get("purpose") != p.chan:
-            return self._refuse(p, rid, "refused", "this is a %s's pairing (purpose \"%s\")" % (p.chan, p.chan))
+            other = "terminal" if p.chan == "kernel" else "kernel"
+            why = "this page is paired for a %s, not a %s" % (p.chan, other) if q.get("purpose") == other else "this page is paired for a %s" % p.chan
+            return self._refuse(p, rid, "refused", why)
         bad = page_key_error(q, self.stats)
         if bad:
             return self._refuse(p, rid, "refused", bad)
@@ -761,7 +763,8 @@ class RelayRunner:
             return p.send({"jsonrpc": "2.0", "id": rid, "result": {
                 "protocol": 1, "purpose": "terminal", "via": "relay", "token": p.token,
                 "nonce": self.gateway.current_nonce(), "limits": {"frame": TERMINAL_FRAME},
-                "incarnation": self.incarnation}})
+                # (the page's generation on this leg: its open's proof binds it (T5), and only the runner knows it)
+                "gen": p.gen, "incarnation": self.incarnation}})
         self.paired_conn = p
         self.gateway.socket_paired(p)
         self.err("A page is paired.\n")
