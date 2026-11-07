@@ -603,11 +603,11 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
     ["newpage-collapse", "\\newpage\\clearpage A.\\newpage\\newpage\n\n\\clearpage B.\\newpage", (h) => count(h, NEWPAGE) === 1 && h.includes('A.</div>' + NEWPAGE + '<div class="p">B.</div>') && !h.trimEnd().endsWith(NEWPAGE)],
     // (grader's #816 pins, each page layout TeX Live 2025's (pdflatex): "One.\pagebreak Two." then "Three." is 2 pages,
     //  "One.Two." | "Three." (N5); "A." then a paragraph of a tie and \pagebreak, then "B.", is 2 pages, "A." | "B.": the
-    //  paragraph left empty, its break kept (N6); \mbox{A\pagebreak B}: one page, no break (N9). \mbox{A\newpage B} is an
-    //  error in TeX ("Missing } inserted"), which then breaks; here, in a box: nothing (a difference, in #816's body))
+    //  paragraph left empty, its break kept (N6); \mbox{C\pagebreak D}: one page, no break (N9). \newpage in a box
+    //  isn't pinned: TeX errs ("Missing } inserted") and then breaks, which this doesn't (a known gap, in #816's body))
     ["pagebreak-par-only", "One.\\pagebreak Two.\n\nThree.", (h) => count(h, NEWPAGE) === 1 && h.includes('One.Two.</div>' + NEWPAGE + '<div class="p">Three.')],
     ["pagebreak-empty-par", "A.\n\n~\\pagebreak\n\nB.", (h) => count(h, NEWPAGE) === 1 && h.includes('A.</div>' + NEWPAGE + '<div class="p">B.')],
-    ["breaks-in-mbox", "Before.\n\n\\mbox{A\\newpage B}\n\n\\mbox{C\\pagebreak D}\n\nAfter.", (h) => count(h, "newpage") === 0 && /A\s*B/.test(h.replace(/<[^>]+>/g, "")) && /C\s*D/.test(h.replace(/<[^>]+>/g, ""))],
+    ["pagebreak-in-mbox", "Before.\n\n\\mbox{C\\pagebreak D}\n\nAfter.", (h) => count(h, "newpage") === 0 && /C\s*D/.test(h.replace(/<[^>]+>/g, ""))],
     ["newpage-said", "A.\\newpage B.", (h) => h.includes('<div class="newpage" role="separator" aria-label="Page break"></div>')],
     ["pagebreak-hint", "A.\\pagebreak[2] B.\\nopagebreak C.\\pagebreak[0]D.\n\n\\pagebreak[3]\n\nE.", (h) => count(h, "newpage") === 0 && !h.includes("[2]") && !h.includes("[0]") && !h.includes("[3]") && /A\.\s*B\.\s*C\.\s*D\.\s*E\./.test(h.replace(/<[^>]+>/g, ""))],
   ];
