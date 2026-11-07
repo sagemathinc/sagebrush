@@ -37,6 +37,7 @@ SAGE_AREAS = [
     ("_sage_coding", "coding theory", "code"),
     ("_sage_manifolds", "manifolds and differential geometry", "manifold"),
     ("_sage_milp", "linear and mixed integer programming", "program"),
+    ("_sage_table", "tables of values (text, LaTeX, HTML)", "table"),
     ("sage_plot", "2D plots", "graphics"),
     ("sage_plot3d", "3D plots", "plot3d"),
     ("_interact", "interacts (live controls)", "interact"),
