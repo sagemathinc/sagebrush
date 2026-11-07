@@ -1165,6 +1165,10 @@ class FFVector:
             try:
                 inv = 1 / o
             except TypeError:
+                if getattr(type(o), "__rtruediv__", None) is None:
+                    # (nothing divides by o, a str or a list: Sage's refusal, naming the
+                    # vector's parent and o's class)
+                    raise TypeError("unsupported operand parent(s) for /: '%r' and '<class '%s'>'" % (self.parent(), type(o).__name__))
                 return NotImplemented
         return self * inv
 
