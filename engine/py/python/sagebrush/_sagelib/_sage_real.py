@@ -1388,6 +1388,9 @@ class RealField_:
         return _to_real(self, x, base)
 
     def __contains__(self, x):
+        # (a string converts but is no element, as Sage: '7' in RR is False)
+        if isinstance(x, (str, bytes)):
+            return False
         try:
             self(x)
             return True
@@ -3873,6 +3876,17 @@ class ComplexField_:
             1.0000000
         """
         return self(1)
+
+    def __contains__(self, x):
+        # (an element is what converts, but a string is none, as Sage:
+        # '7' in CC is False)
+        if isinstance(x, (str, bytes)):
+            return False
+        try:
+            self(x)
+            return True
+        except (TypeError, ValueError, ArithmeticError):
+            return False
 
     def __call__(self, re=0, im=None):
         """A complex number from a number, or real and imaginary parts.

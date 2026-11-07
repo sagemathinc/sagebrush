@@ -3847,8 +3847,9 @@ def random_matrix(base, nrows, ncols=None, algorithm="randomize", density=None, 
             nb = 2 if num_bound is None else int(num_bound)
             db = 2 if den_bound is None else int(den_bound)
             return _F(_r.randint(-nb, nb), _r.randint(1, max(db, 1)))
+        # (x <= entry < y: Sage excludes y, as ZZ.random_element(x, y) does)
         lo = -2 if x is None else int(x)
-        hi = 2 if y is None else int(y)
+        hi = 2 if y is None else int(y) - 1
         if y is None and x is not None:
             lo, hi = 0, int(x) - 1
         return _r.randint(lo, hi)
@@ -4254,6 +4255,17 @@ class ComplexField_:
         return 53
 
     prec = precision
+
+    def __contains__(self, x):
+        # (an element is what converts, but a string is none, as Sage:
+        # '7' in CC is False)
+        if isinstance(x, (str, bytes)):
+            return False
+        try:
+            self(x)
+            return True
+        except (TypeError, ValueError, ArithmeticError):
+            return False
 
     def __call__(self, re=0, im=0):
         """A complex number from a number or real and imaginary parts.

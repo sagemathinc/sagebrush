@@ -162,8 +162,25 @@ class _Ring:
             h += 1
 
     def __contains__(self, x):
+        """Membership as Sage decides it: a string is never an element (it
+        converts, '7' in ZZ is False), an element of another ring is one when
+        it converts and compares equal (GF(5)(2) and QQbar(2) are in ZZ).
+
+        EXAMPLES::
+
+            sage: '7' in ZZ, 7.0 in ZZ, 1/2 in ZZ, GF(5)(2) in ZZ, GF(5)(2) in QQ
+            (False, True, False, True, False)
+        """
+        if isinstance(x, (str, bytes)):
+            return False
         try:
             return self._field and _F(x) is not None or (not self._field and _F(x).denominator == 1)
+        except Exception:
+            pass
+        if isinstance(x, complex) or "Complex" in repr(getattr(x, "parent", lambda: None)()):
+            return False
+        try:
+            return bool(self(x) == x)
         except Exception:
             return False
 
@@ -788,10 +805,13 @@ class Polynomial:
 
             sage: (x + 1).list()[0].parent()
             Rational Field
+            sage: R(0).list(), R(0).coefficients(sparse=False)
+            ([], [])
         """
+        # (the zero polynomial's list is empty, as Sage's)
         if self._ring._base is QQ:
-            return [_qq_coeff(a) for a in self._c] if self._c else [QQ(0)]
-        return list(self._c) if self._c else [0]
+            return [_qq_coeff(a) for a in self._c]
+        return list(self._c)
 
     def _out(self, a):
         """A coefficient as handed out: over QQ an element of QQ (an

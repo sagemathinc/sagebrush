@@ -154,8 +154,18 @@ class Word:
         self._w = list(letters)
 
     def __repr__(self):
+        return "word: " + str(self)
+
+    def __str__(self):
+        """The letters alone, as Sage's str(w) (repr(w) is "word: ...").
+
+        EXAMPLES::
+
+            sage: w = Word('kitten'); str(w), repr(w), str(Word([10, 2]))
+            ('kitten', 'word: kitten', '10,2')
+        """
         ls = [str(x) for x in self._w]
-        return "word: " + ("".join(ls) if all(len(x) == 1 for x in ls) else ",".join(ls))
+        return "".join(ls) if all(len(x) == 1 for x in ls) else ",".join(ls)
 
     def __iter__(self):
         return iter(self._w)

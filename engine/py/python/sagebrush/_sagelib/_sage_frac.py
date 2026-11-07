@@ -661,7 +661,8 @@ def _ideal(self, *gens):
     """
     if len(gens) == 1 and isinstance(gens[0], (list, tuple)):
         gens = gens[0]
-    gens = [self(g) for g in gens]
+    # (no generators: the zero ideal, as Sage)
+    gens = [self(g) for g in gens] or [self(0)]
     nonzero = [h for h in gens if h]
     field = self.base_ring().is_field()
     if not field and len(nonzero) > 1:
@@ -989,10 +990,14 @@ class QuotientElement:
 
         EXAMPLES::
 
-            sage: R.<x> = QQ[]; R.quotient(x^2 + 1, 'i')(x + 2).list()
-            [2, 1]
+            sage: R.<x> = QQ[]; Q = R.quotient(x^2 + 1, 'i'); Q(x + 2).list(), Q(3).list(), Q(0).list()
+            ([2, 1], [3, 0], [0, 0])
         """
-        return self._p.list()
+        # (one coefficient per power below the modulus's degree, as Sage)
+        c = self._p.list()
+        n = self._S._f.degree()
+        z = self._p.parent().base_ring()(0)
+        return c + [z] * (n - len(c))
 
     def __repr__(self):
         return repr(self._S._display(self._p.list()))

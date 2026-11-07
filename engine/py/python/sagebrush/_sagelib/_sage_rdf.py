@@ -203,6 +203,9 @@ class RealDoubleField_:
         return RealDoubleElement(_r.uniform(float(min), float(max)))
 
     def __contains__(self, x):
+        # (a string converts but is no element, as Sage: '7' in RR is False)
+        if isinstance(x, (str, bytes)):
+            return False
         try:
             self(x)
             return True
@@ -681,6 +684,17 @@ class ComplexDoubleField_:
 
     def _latex_(self):
         return "\\Bold{C}"
+
+    def __contains__(self, x):
+        # (an element is what converts, but a string is none, as Sage:
+        # '7' in CDF is False)
+        if isinstance(x, (str, bytes)):
+            return False
+        try:
+            self(x)
+            return True
+        except (TypeError, ValueError, ArithmeticError):
+            return False
 
     def __call__(self, re=0, im=None):
         """A complex double from a number or real and imaginary parts.
