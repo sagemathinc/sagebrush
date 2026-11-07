@@ -19,6 +19,7 @@ import { createServer, request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort, startServe } from "./test-port.mjs";
+import { allowFiles } from "./test-allow.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let failures = 0;
@@ -110,6 +111,9 @@ async function visit(variant) {
     })()` });
     await send("Page.navigate", { url: s.url + variant });
     ok(await ready(), `${name} the notebook is ready`);
+    // (every notebook starts with file changes off, confinement 1b: without the runner, Python runs in the page only
+    // once they are allowed)
+    if (variant) await allowFiles(send, ev);
     ok((await ev("typeof window.__releaseSW")) === "function" && (await ev("navigator.serviceWorker.getRegistrations().then((r) => r.length)")) === 0, `${name} (its service worker's registration is held back)`);
     let out = await runCode("import fractions, json\nprint(fractions.Fraction(1, 3), json.dumps([1]))");
     ok(out.includes("1/3 [1]") && (await ev("navigator.serviceWorker.controller === null")), `${name} Python imports on a first visit, no service worker yet: ` + JSON.stringify(out));
@@ -165,7 +169,12 @@ async function visit(variant) {
     await send("Page.reload", { ignoreCache: false });
     await sleep(1500);
     ok(await ready(), `${name} offline, the notebook loads`);
+    // (offline the runner's sandbox doesn't start, so here too Python runs in the page, with file changes allowed)
+    await allowFiles(send, ev);
     out = await runCode("import fractions, json\nprint(fractions.Fraction(2, 4), json.dumps({'a': 1}))");
+    // (the runner's sandbox doesn't start offline: the first run says so, and running again runs in the page, as a
+    // person does)
+    if (/Run it again/.test(out)) out = await runCode("import fractions, json\nprint(fractions.Fraction(2, 4), json.dumps({'a': 1}))");
     ok(out.includes('1/2 {"a": 1}'), `${name} offline, the modules imported on the first visit import again: ` + JSON.stringify(out));
     ok(!errors.length, `${name} no exceptions on the page: ` + JSON.stringify(errors));
   } finally {
