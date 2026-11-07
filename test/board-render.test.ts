@@ -223,6 +223,20 @@ test("board render and check: an SVG picture is drawn as an <image> of its one f
     writeFileSync(f, JSON.stringify({ ...doc, images: { s: { w: 9000, h: 10, src: "data:image/svg+xml;charset=utf-8," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="9000" height="10"/>') } } }));
     const big = spawnSync(process.execPath, [__dirname + "/../src/cli.js", "board", "check", f], { encoding: "utf8" });
     assert.match(big.stdout + big.stderr, /won't show this picture: it is 9000 × 10 pixels/, big.stdout + big.stderr);
+    // (a width and height written as character references, with a viewBox of 1 × 1: refused, not taken as 1 × 1, SVG-SIZE-1)
+    const refs = '<svg xmlns="http://www.w3.org/2000/svg" width="&#57;6" height="&#54;4" viewBox="0 0 1 1"/>';
+    const refDoc = { ...doc, images: { s: { w: 96, h: 64, src: "data:image/svg+xml;base64," + Buffer.from(refs).toString("base64") } } };
+    writeFileSync(f, JSON.stringify(refDoc));
+    const ref = spawnSync(process.execPath, [__dirname + "/../src/cli.js", "board", "check", f], { encoding: "utf8" });
+    assert.match(ref.stdout + ref.stderr, /won't show this SVG picture: its root needs a width and a height/, ref.stdout + ref.stderr);
+    const drawn = cli(["-"], JSON.stringify(refDoc));
+    assert.equal([...drawn.stdout.matchAll(/<image [^>]*href="data:/g)].length, 0, "not drawn as an <image>");
+    // (base64 in another spelling of the same bytes, other pad bits: read, and drawn, only in its one form, SVG-BASE64-CANON-1)
+    const loose = { ...doc, images: { s: { w: 1, h: 1, src: "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMSIgaGVpZ2h0PSIxIi8+Ch==" } } };
+    writeFileSync(f, JSON.stringify(loose));
+    const lc = spawnSync(process.execPath, [__dirname + "/../src/cli.js", "board", "check", f], { encoding: "utf8" });
+    assert.ok(!/won't show/.test(lc.stdout + lc.stderr), lc.stdout + lc.stderr);
+    assert.deepEqual([...cli(["-"], JSON.stringify(loose)).stdout.matchAll(/<image [^>]*href="(data:[^"]*)"/g)].map((m) => m[1]), ["data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMSIgaGVpZ2h0PSIxIi8+Cg=="], "drawn in its one form");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

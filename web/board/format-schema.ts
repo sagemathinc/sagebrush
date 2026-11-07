@@ -1072,7 +1072,7 @@ export const BOARD_SCHEMA = {
       },
       {
        "pattern": "^[dD][aA][tT][aA]:[iI][mM][aA][gG][eE]\\/[sS][vV][gG]\\+[xX][mM][lL](?:;[cC][hH][aA][rR][sS][eE][tT]=[uU][tT][fF]-8)?(;[bB][aA][sS][eE]64)?,([\\s\\S]*)$",
-       "description": "a data: URL of an SVG picture (base64, or its text percent-encoded; kept as base64), shown only as an image"
+       "description": "a data: URL of an SVG picture (base64, or its text percent-encoded; kept as base64), shown only as a picture: nothing in it runs or loads"
       }
      ],
      "description": "its bytes, which a file needs to show the picture: a `data:` URL (PNG, JPEG, GIF, WebP or SVG), or an `https:` address"

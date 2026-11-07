@@ -92,23 +92,24 @@ export function dataUrl(src: string): { type: string; base64: string } | null {
 // A browser shows an image-context SVG in its secure mode: no script, no interaction, nothing loaded
 // from elsewhere (SVG 2, section 2.3).  It is kept in one form, a base64 data: URL, within SVG_MAX_B64
 // characters encoded and SVG_MAX_BYTES decoded, checked before it is decoded; its text must be UTF-8.
-// Its size is read from its root <svg>'s width and height (numbers, or px) or its viewBox: that is
-// layout, not a check of what it draws; one whose size can't be read so is refused.
+// Its size is read from its root <svg>'s width and height, both plain lengths (numbers, or px), the size a
+// browser gives it: that is layout, not a check of what it draws; one whose size can't be read so is refused.
 
 /** An SVG picture's bounds: base64 characters in its data: URL, and bytes of its text. */
 export const SVG_MAX_B64 = 2_800_000, SVG_MAX_BYTES = 2_000_000;
 const SVG_URL = /^data:image\/svg\+xml;base64,([A-Za-z0-9+/]*={0,2})$/;
 
-// (a length: a number, unitless or px; anything else, a percentage or another unit, is not read)
-const svgLength = (v: string | undefined): number | null => {
-  if (v === undefined) return null;
+// (a length: a number, unitless or px; anything else, a percentage, another unit or a character
+// reference, is not read, and then the SVG is refused: a browser may size it otherwise, astra's SVG-SIZE-1)
+const svgLength = (v: string): number | null => {
   const m = /^\s*(\d*\.?\d+(?:e[+-]?\d+)?)\s*(px)?\s*$/i.exec(v);
   const x = m ? Number(m[1]) : NaN;
   return Number.isFinite(x) && x > 0 ? x : null;
 };
 
-/** An SVG's size from its text: its root <svg>'s width and height, else its viewBox (scaled to the one
- * given), rounded up; null if its root isn't an <svg> or its size can't be read so. */
+/** An SVG's size from its text: its root <svg>'s width and height, both there and plain lengths, rounded
+ * up; null if its root isn't an <svg> or it hasn't both.  (Never from its viewBox: a browser sizes such an
+ * SVG otherwise, 300 × 150 shaped by it, daybreak3's SVG-VIEWBOX-SIZE-1.) */
 export function svgSize(text: string): { w: number; h: number } | null {
   // (before the root: a BOM, an XML declaration, comments and white space; a DOCTYPE is refused)
   let t = text.replace(/^\uFEFF/, "").slice(0, 65536);
@@ -123,23 +124,21 @@ export function svgSize(text: string): { w: number; h: number } | null {
   if (!m) return null;
   const attrs = new Map<string, string>();
   for (const a of m[1].matchAll(/([\w:.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) if (!attrs.has(a[1])) attrs.set(a[1], a[2] ?? a[3]);
-  const w = svgLength(attrs.get("width")), h = svgLength(attrs.get("height"));
-  const vb = (attrs.get("viewBox") ?? "").trim().split(/[\s,]+/).map(Number);
-  const vw = vb.length === 4 && vb.every(Number.isFinite) && vb[2] > 0 && vb[3] > 0 ? vb[2] : null, vh = vw ? vb[3] : null;
-  let size: [number, number] | null = null;
-  if (w && h) size = [w, h];
-  else if (vw && vh) size = w ? [w, (w * vh) / vw] : h ? [(h * vw) / vh, h] : [vw, vh];
-  if (!size) return null;
-  const [W, H] = size.map(Math.ceil);
-  return Number.isFinite(W) && Number.isFinite(H) && W > 0 && H > 0 ? { w: W, h: H } : null;
+  const aw = attrs.get("width"), ah = attrs.get("height");
+  const w = aw === undefined ? null : svgLength(aw), h = ah === undefined ? null : svgLength(ah);
+  if (!w || !h) return null;
+  const W = Math.ceil(w), H = Math.ceil(h);
+  return Number.isFinite(W) && Number.isFinite(H) ? { w: W, h: H } : null;
 }
 
-/** An SVG's text from its base64, within the bounds and as UTF-8; null if not. */
+/** An SVG's text from its base64 (canonical), within the bounds and as UTF-8; null if not. */
 export function svgText(base64: string): string | null {
-  if (base64.length > SVG_MAX_B64 || !/^[A-Za-z0-9+/]*={0,2}$/.test(base64)) return null;
+  // (the bounds before it is decoded: its length, and the bytes that length decodes to)
+  if (base64.length > SVG_MAX_B64 || Math.floor((base64.length * 3) / 4) > SVG_MAX_BYTES + 2 || !/^[A-Za-z0-9+/]*={0,2}$/.test(base64)) return null;
   try {
     const bin = atob(base64);
-    if (bin.length > SVG_MAX_BYTES) return null;
+    // (its one form: the base64 its bytes encode to, so no other spelling of them, daybreak3's SVG-BASE64-CANON-1)
+    if (bin.length > SVG_MAX_BYTES || btoa(bin) !== base64) return null;
     return new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)));
   } catch {
     return null;
@@ -172,7 +171,13 @@ export function svgDataUrl(input: string): string | null {
   if (input.length > 3 * SVG_MAX_BYTES + 64) return null;
   const m = /^data:image\/svg\+xml(?:;charset=utf-8)?(;base64)?,([\s\S]*)$/i.exec(input);
   if (!m) text = input;
-  else if (m[1]) text = svgText(m[2].replace(/\s/g, ""));
+  else if (m[1]) {
+    // (base64 in another spelling of the same bytes, other pad bits or no padding: read in its one form)
+    const b = m[2].replace(/\s/g, "");
+    let c: string | null = null;
+    if (b.length <= SVG_MAX_B64 && /^[A-Za-z0-9+/]*={0,2}$/.test(b)) try { c = btoa(atob(b)); } catch { /* not base64 */ }
+    text = c === null ? null : svgText(c);
+  }
   else { try { text = decodeURIComponent(m[2]); } catch { return null; } }
   if (text === null || new TextEncoder().encode(text).length > SVG_MAX_BYTES || !svgSize(text)) return null;
   const b = b64utf8(text);

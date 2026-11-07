@@ -7028,7 +7028,7 @@
   "owner": "board",
   "row": "src-18"
  },
- "src/board-check.ts ::  :: import { pictureSize, pictureUrl, PixelBudget, svgDataUrl } from \"../web/image-size\"; #0": {
+ "src/board-check.ts ::  :: import { pictureSize, pictureUrl, PixelBudget, SVG_MAX_BYTES, svgDataUrl } from \"../web/image-size\"; #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -7047,6 +7047,14 @@
   "row": "src-18"
  },
  "src/board-check.ts :: ref :: const size = pictureSize(u.type, u.base64), why = budget.take(size); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "board",
+  "row": "src-18"
+ },
+ "src/board-check.ts :: svgWhy :: if (bytes && bytes.length > SVG_MAX_BYTES) return \"it's over 2 MB of text\"; #0": {
   "class": "1",
   "disposition": {
    "1": "shared"

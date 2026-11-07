@@ -132,6 +132,17 @@ test("pictures: their sizes against what the board shows; their shape", () => {
   assert.deepEqual(lines(d(many)), ["error images.p2.src: the board won't show this picture: this document's pictures are too many pixels in all"]);
   assert.deepEqual(lines(d({ wide: { w: 100, h: 100, src: png(200, 100) } })), ["warning images.wide: its w and h (100 × 100) are not the picture's shape (200 × 100 pixels), so it is drawn stretched"]);
   assert.deepEqual(lines(d({ ok: { w: 50, h: 25, src: png(200, 100) } })), []);
+  // (an SVG the board won't show: one line for each way it can fail, P9a)
+  const nosize = "data:image/svg+xml;base64," + Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>').toString("base64");
+  const vbOnly = "data:image/svg+xml;base64," + Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"/>').toString("base64");
+  const notUtf8 = "data:image/svg+xml;base64," + Buffer.from([...Buffer.from('<svg width="1" height="1"><desc>'), 0xff, ...Buffer.from("</desc></svg>")]).toString("base64");
+  const big = "data:image/svg+xml;base64," + Buffer.from('<svg width="1" height="1"/>' + " ".repeat(2_000_000)).toString("base64");
+  const why = (src: string) => lines(d({ s: { w: 10, h: 10, src } }));
+  const svgErr = (s: string) => [`error images.s.src: the board won't show this SVG picture: ${s}`];
+  assert.deepEqual(why(nosize), svgErr("its root needs a width and a height"));
+  assert.deepEqual(why(vbOnly), svgErr("its root needs a width and a height"), "a viewBox alone: refused (SVG-VIEWBOX-SIZE-1)");
+  assert.deepEqual(why(notUtf8), svgErr("it isn't UTF-8 text"));
+  assert.deepEqual(why(big), svgErr("it's over 2 MB of text"));
 });
 
 test("the size a board opens is the board's (web/board/mount.ts FILE_MAX)", () => {

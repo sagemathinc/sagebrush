@@ -519,10 +519,10 @@ function cleanImages(m: any): Record<string, ImageInfo> | undefined {
     const w = num(v?.w), h = num(v?.h);
     if (!IMAGE_NAME.test(k) || !w || !h || w <= 0 || h <= 0) continue;
     // (a source that is not a raster image's data: URL or an https: address: the picture is dropped)
-    // (an SVG data: URL in another form a browser takes, percent-encoded text or base64 with a charset: kept in
+    // (an SVG data: URL, in its one form or another a browser takes, percent-encoded text or base64 with a charset: kept in
     // the one form, base64, if it is within the bounds and its size can be read; else dropped, as any other)
     let src = v.src;
-    if (typeof src === "string" && /^data:image\/svg\+xml/i.test(src) && !pictureUrl(src)) src = svgDataUrl(src) ?? undefined;
+    if (typeof src === "string" && /^data:image\/svg\+xml/i.test(src)) src = svgDataUrl(src) ?? undefined;
     if (v.src !== undefined && !(typeof src === "string" && imageSrc(src))) continue;
     setOwn(out, k, src !== undefined ? { w, h, src } : { w, h });
   }

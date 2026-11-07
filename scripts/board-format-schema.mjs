@@ -111,7 +111,7 @@ const FIELD_RULES = {
   "DocSticker.color": { pattern: colorPattern }, "DocAsk.color": { pattern: colorPattern }, "PageBackground.color": { pattern: colorPattern },
   "DocNote.image": { pattern: IMAGE_NAME }, "PageBackground.image": { pattern: IMAGE_NAME },
   "DocSticker.icon": { pattern: ICON_NAME }, "DocSticker.emoji": { pattern: "^[^A-Za-z\\p{Cc}]*[^A-Za-z\\p{Cc}\\s][^A-Za-z\\p{Cc}]*$" }, "BoardDoc.seed": { pattern: SEED },
-  "ImageInfo.src": { anyOf: [{ pattern: IMAGE_SRC, description: "an https: address" }, { pattern: DATA_URL, description: "a data: URL of a PNG, JPEG, GIF or WebP picture (base64)" }, { pattern: SVG_DATA_URL, description: "a data: URL of an SVG picture (base64, or its text percent-encoded; kept as base64), shown only as an image" }] },
+  "ImageInfo.src": { anyOf: [{ pattern: IMAGE_SRC, description: "an https: address" }, { pattern: DATA_URL, description: "a data: URL of a PNG, JPEG, GIF or WebP picture (base64)" }, { pattern: SVG_DATA_URL, description: "a data: URL of an SVG picture (base64, or its text percent-encoded; kept as base64), shown only as a picture: nothing in it runs or loads" }] },
   "ImageInfo.w": positive, "ImageInfo.h": positive, "SlideRect.w": positive, "SlideRect.h": positive,
   "DocInk.size": { exclusiveMinimum: 0, maximum: 200 }, "DocInk.opacity": { exclusiveMinimum: 0, exclusiveMaximum: 1 },
   "DocInk.points": { minItems: 3 }, "DocAsk.checkMs": { type: "integer", minimum: 1, maximum: 10000 }, "DocAsk.attempts": { type: "integer", minimum: 0, maximum: Number.MAX_VALUE }, "DocAsk.wrongAttempts": { type: "integer", minimum: 0, maximum: Number.MAX_VALUE }, "DocSticker.w": { minimum: 8, maximum: 4000 },

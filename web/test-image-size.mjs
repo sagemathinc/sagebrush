@@ -71,16 +71,30 @@ check(["HTTPS://x.example/a.png", "Https://x.example/a.png", "hTtP://x.example/a
 // a board's carried pictures in the same grammar (CORR-68B-1)
 const { cleanDoc } = await import("./board/doc.ts");
 const carried = cleanDoc({ images: { p: { w: 1, h: 1, src: "data:IMAGE/PNG;base64," + png(1, 1) }, q: { w: 1, h: 1, src: "data:image/jpg;base64," + jpeg(1, 1) }, r: { w: 1, h: 1, src: "data:image/svg+xml;base64,PHN2Zy8+" } }, nodes: [{ id: "n", image: "p" }] });
-check(Object.keys(carried.images ?? {}).sort().join() === "p,q,r", "a board keeps its IMAGE/PNG and image/jpg pictures, and an SVG in its one form (shown only if its root gives its size): " + Object.keys(carried.images ?? {}));
+check(Object.keys(carried.images ?? {}).sort().join() === "p,q", "a board keeps its IMAGE/PNG and image/jpg pictures; an SVG whose root gives no size, dropped (SVG-CLEANDOC-1): " + Object.keys(carried.images ?? {}));
 
 // ---- SVG pictures (P9a): only as an image, one form (base64), bounded, a size from the root or refused
 const sz = (t) => JSON.stringify(svgSize(t));
 check(sz('<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480"/>') === '{"w":640,"h":480}', "width and height");
 check(sz('<svg width="300px" height="200.5px" viewBox="0 0 10 10"></svg>') === '{"w":300,"h":201}', "px, rounded up; width and height win over the viewBox");
-check(sz('<svg viewBox="0 0 400 300"/>') === '{"w":400,"h":300}' && sz('<svg width="200" viewBox="0,0,400,300"/>') === '{"w":200,"h":150}' && sz("<svg height='150' viewBox='0 0 400 300'/>") === '{"w":200,"h":150}', "the viewBox, scaled to a width or a height given");
+check(sz('<svg viewBox="0 0 400 300"/>') === "null" && sz('<svg width="200" viewBox="0,0,400,300"/>') === "null" && sz("<svg height='150' viewBox='0 0 400 300'/>") === "null", "a viewBox alone, or with a width or a height only: refused, a browser sizes it otherwise (SVG-VIEWBOX-SIZE-1)");
 check(sz('\uFEFF<?xml version="1.0"?>\n<!-- a plot -->\n<svg width="1" height="2"/>') === '{"w":1,"h":2}', "a BOM, an XML declaration and a comment before the root");
 check(["<svg/>", '<svg width="50%" height="10"/>', '<svg width="10em" height="10"/>', '<svg width="0" height="10"/>', '<svg width="-5" height="10"/>', '<svg viewBox="0 0 0 10"/>', '<svg width="Infinity" height="1"/>',
   '<!DOCTYPE svg [<!ENTITY a "b">]><svg width="1" height="1"/>', '<html><svg width="1" height="1"/></html>', '<svgx width="1" height="1"/>', '<svg width="1" height="1"'].every((t) => svgSize(t) === null), "no size, another unit, a DOCTYPE, another root or an unclosed tag: refused");
+// (a width or height that is there but not a plain length, a character reference or another unit: refused,
+// never sized from the viewBox (astra's SVG-SIZE-1))
+const refs = '<svg xmlns="http://www.w3.org/2000/svg" width="&#57;6" height="&#54;4" viewBox="0 0 1 1"/>';
+check([refs, '<svg width="72pt" height="48pt" viewBox="0 0 1 1"/>', '<svg width="100%" viewBox="0 0 1 1"/>', '<svg height="2em" viewBox="0 0 1 1"/>'].every((t) => svgSize(t) === null), "a width or height not read: refused, not the viewBox's size");
+check(svgDataUrl(refs) === null && pictureSize("image/svg+xml", b64(new TextEncoder().encode(refs))) === null, "so too as a data: URL and as a picture's size");
+// (base64 in its one form only: other pad bits that decode the same are refused, daybreak3's SVG-BASE64-CANON-1)
+const canon1 = "PHN2ZyB3aWR0aD0iMSIgaGVpZ2h0PSIxIi8+Cg==", loose1 = "PHN2ZyB3aWR0aD0iMSIgaGVpZ2h0PSIxIi8+Ch==";
+check(atob(canon1) === atob(loose1) && svgText(canon1) === '<svg width="1" height="1"/>\n' && svgText(loose1) === null && svgText(canon1.slice(0, -2)) === null, "base64 that isn't the one form (pad bits, no padding): refused");
+check(pictureSize("image/svg+xml", loose1) === null && svgDataUrl("data:image/svg+xml;base64," + loose1) === "data:image/svg+xml;base64," + canon1, "so too as a picture's size; a data: URL is read in the one form");
+// (a carried document: every SVG through svgDataUrl, so only its one form, in the bounds, UTF-8 and with a size, is kept: SVG-CLEANDOC-1)
+const over = "data:image/svg+xml;base64," + btoa('<svg width="1" height="1"/>' + " ".repeat(SVG_MAX_BYTES));
+const loose = (await import("./board/doc.ts")).cleanDoc({ images: { a: { w: 1, h: 1, src: "data:image/svg+xml;base64," + canon1 }, b: { w: 1, h: 1, src: "data:image/svg+xml;base64," + loose1 }, c: { w: 1, h: 1, src: "data:image/svg+xml;base64,////" }, d: { w: 1, h: 1, src: "data:image/svg+xml;base64,PHN2Zy8+" }, e: { w: 1, h: 1, src: over }, f: { w: 1, h: 1, src: "data:image/svg+xml," + encodeURIComponent('<svg width="1" height="1"/>\n') } }, nodes: [] }).images;
+check(loose.a?.src === "data:image/svg+xml;base64," + canon1 && loose.b?.src === loose.a.src && loose.f?.src === loose.a.src, "a carried document: the one form kept; other pad bits and percent-encoded text, converted to it");
+check(["c", "d", "e"].every((k) => loose[k] === undefined), "a carried document: bytes that aren't UTF-8, no size, past 2 MB decoded: dropped");
 const plot = '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480"><path d="M0 0L640 480"/><text>é ∞</text></svg>';
 const canon = svgDataUrl(plot);
 check(!!canon && canon.startsWith("data:image/svg+xml;base64,") && svgText(canon.slice(26)) === plot, "an SVG's text, kept as base64 (UTF-8, round trip)");
@@ -96,11 +110,23 @@ check(new PixelBudget().take(pictureSize("image/svg+xml", svgDataUrl('<svg width
 check(dataUrl(canon) === null, "dataUrl (Markdown's and the notebook's data: images) still takes rasters only");
 // (a board: an SVG picture in another form kept as base64; an SVG with no size, or past the bounds, dropped)
 const svgDoc = cleanDoc({ images: { a: { w: 640, h: 480, src: "data:image/svg+xml;charset=utf-8," + encodeURIComponent(plot) }, b: { w: 1, h: 1, src: canon }, c: { w: 1, h: 1, src: "data:image/svg+xml;base64,PHN2Zy8+" } }, nodes: [{ id: "n", image: "a" }] });
-check(svgDoc.images?.a?.src === canon && svgDoc.images?.b?.src === canon && svgDoc.images?.c?.src === "data:image/svg+xml;base64,PHN2Zy8+", "a board keeps SVG pictures in the one form (another form converted): " + JSON.stringify(Object.keys(svgDoc.images ?? {})));
+check(svgDoc.images?.a?.src === canon && svgDoc.images?.b?.src === canon && svgDoc.images?.c === undefined, "a board keeps SVG pictures in the one form (another form converted; one with no size, dropped): " + JSON.stringify(Object.keys(svgDoc.images ?? {})));
 // (as for a raster whose header says nothing, its size is checked where it is shown: one that can't be read isn't)
 check(new PixelBudget().take(pictureSize("image/svg+xml", "PHN2Zy8+")) === "its size can't be read", "an SVG whose root gives no size: not shown");
 const bad = cleanDoc({ images: { a: { w: 1, h: 1, src: "data:image/svg+xml,%3Csvg%2F%3E" }, b: { w: 1, h: 1, src: "data:image/svg+xml;base64,PHN2Zy8+ " } }, nodes: [{ id: "n", image: "a" }] });
 check(!bad.images, "an SVG in another form that can't be converted (no size), or with white space in its base64: dropped");
+
+// (the board's upload of an SVG file, images.ts prepare(): strict UTF-8 and a picture's bounds, as for a carried one)
+const { prepare } = await import("./board/images.ts");
+const svgFile = (bytes) => new Blob([bytes], { type: "image/svg+xml" });
+const ok1 = await prepare(svgFile(new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>')));
+check(ok1 && ok1.w === 1 && ok1.h === 1, "an SVG file: taken, at its root's size");
+const notUtf8 = new Uint8Array([...new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><desc>'), 0xff, ...new TextEncoder().encode("</desc></svg>")]);
+check((await prepare(svgFile(notUtf8))) === null, "an SVG file with a byte that isn't UTF-8: refused (not taken with U+FFFD)");
+check((await prepare(svgFile(new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" width="9000" height="10"/>')))) === null, "an SVG file past MAX_SIDE: refused");
+check((await prepare(svgFile(new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" width="8000" height="8000"/>')))) === null, "an SVG file past MAX_PIXELS: refused");
+check((await prepare(svgFile(new TextEncoder().encode(refs)))) === null, "an SVG file whose width is a character reference: refused (SVG-SIZE-1)");
+check((await prepare(svgFile(new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"/>')))) === null, "an SVG file sized only by its viewBox: refused (SVG-VIEWBOX-SIZE-1)");
 
 if (fails.length) {
   console.log(`${fails.length} of ${checks} checks failed:\n  ` + fails.join("\n  "));

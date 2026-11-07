@@ -6,7 +6,7 @@
 // carries them in `images`, as data: URLs, and opening one puts them back.
 
 import type { BoardDoc, DocNode } from "./doc";
-import { PixelBudget, pictureSize, pictureUrl, svgDataUrl, svgSize, svgText } from "../image-size";
+import { PixelBudget, SVG_MAX_BYTES, pictureSize, pictureUrl, svgDataUrl, svgSize, svgText } from "../image-size";
 import { openDb } from "./idb-open";
 
 /** A picture a note shows, by its name in the document's `images`. */
@@ -129,9 +129,16 @@ export async function prepare(file: Blob, opts: { paste?: boolean } = {}): Promi
   // (an SVG: kept as it is, in the bounds and with a size image-size.ts reads (svgDataUrl), never drawn on a
   // canvas; it is only ever shown as an image)
   if (file.type === "image/svg+xml") {
-    if (file.size > 2 * 2_000_000) return null;
-    const url = svgDataUrl(await file.text()), text = url ? svgText(url.slice(url.indexOf(",") + 1)) : null, size = text ? svgSize(text) : null;
-    return url && text && size ? { blob: new Blob([text], { type: "image/svg+xml" }), w: size.w, h: size.h, cssW: size.w } : null;
+    if (file.size > SVG_MAX_BYTES) return null;
+    // (its bytes strictly UTF-8, as svgText decodes a carried one; its size within a picture's bounds, as for a carried one)
+    let raw: string;
+    try {
+      raw = new TextDecoder("utf-8", { fatal: true }).decode(await file.arrayBuffer());
+    } catch {
+      return null;
+    }
+    const url = svgDataUrl(raw), text = url ? svgText(url.slice(url.indexOf(",") + 1)) : null, size = text ? svgSize(text) : null;
+    return url && text && size && new PixelBudget().take(size) === null ? { blob: new Blob([text], { type: "image/svg+xml" }), w: size.w, h: size.h, cssW: size.w } : null;
   }
   let bmp: ImageBitmap;
   try {
