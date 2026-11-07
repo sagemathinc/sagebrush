@@ -247,7 +247,7 @@
       {
        "id": "sh-files",
        "title": "A separate domain for user bytes",
-       "text": "Shared files are served only from `files.cocalcusercontent.com`, only through a collection that has them, and always as `application/octet-stream` attachments with a sandboxing CSP. An uploaded `.html` or `.svg` can never become a page.",
+       "text": "Shared files are served only from the configured files origin (`web/content-domains.mts`), only through a collection that has them, and always as `application/octet-stream` attachments with a sandboxing CSP. An uploaded `.html` or `.svg` can never become a page.",
        "detail": "Files are named by their hash, so they're cached in the browser for good. Range requests work, so code that reads part of a large file doesn't download it all. \"Not shared\" and \"absent\" are the same 404.",
        "ref": "https://github.com/sagemathinc/sagebrush/blob/cfa609d474f72401fa7e8792a5c2291a7d22b5c5/web/share/files.ts#L1-L12"
       }

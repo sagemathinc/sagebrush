@@ -67,7 +67,7 @@ A **collection** is a directory of notebooks, boards and data files that someone
 
 ## Serving: the user-content domain
 
-Uploaded bytes are never served from sagebrush.space. A separate Worker (web/files/) serves them from `files.cocalcusercontent.com`.
+Uploaded bytes are never served from sagebrush.space. A separate Worker (web/files/) serves them from the configured files origin (`web/content-domains.mts`).
 
 **Reading goes through a collection:** `/c/<collection>/<sha256>`, and only for files of that collection's versions.
 - A hash alone reads nothing: not another collection's files, and not an upload never shared.
