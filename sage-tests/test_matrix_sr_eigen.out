@@ -31,3 +31,15 @@ Jordan right: [(u, [(1, 0)], 2)]
 Jordan left: [(u, [(0, 1)], 2)]
 colliding symmetric: [sbEigenT - 1, sbEigenT + 1]
 colliding symmetric vectors: [(sbEigenT - 1, [(1, -1)], 1), (sbEigenT + 1, [(1, 1)], 1)]
+quintic: ArithmeticError could not determine eigenvalues exactly using symbolic matrices; try using a different type of matrix via self.change_ring(), if possible
+QQ matrix, symbolic, no ring: (1/2*x + 1/2, 1/2*x - 1/2)
+its parent: Vector space of dimension 2 over Symbolic Ring
+QQ list: TypeError the second argument must be a vector or a matrix
+QQ tuple: TypeError the second argument must be a vector or a matrix
+QQ generator: TypeError the second argument must be a vector or a matrix
+SR list: TypeError the second argument must be a vector or a matrix
+SR tuple: TypeError the second argument must be a vector or a matrix
+SR generator: TypeError the second argument must be a vector or a matrix
+ZZ list: TypeError the second argument must be a vector or a matrix
+ZZ tuple: TypeError the second argument must be a vector or a matrix
+ZZ generator: TypeError the second argument must be a vector or a matrix

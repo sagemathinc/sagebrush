@@ -351,15 +351,28 @@ def _eigen(a):
                 out.append((_sr(g[0]) * -1 / g[1], e))
             else:
                 p = sum(_sr(c) * t ** i for i, c in enumerate(g))
-                out.extend((s.rhs(), e) for s in _sa().solve(p == 0, t))
+                roots = _explicit_roots(p, t, len(g) - 1)
+                if roots is None:
+                    raise ArithmeticError("could not determine eigenvalues exactly using symbolic matrices; try using a different type of matrix via self.change_ring(), if possible")
+                out.extend((r, m * e) for r, m in roots)
         return out
     _sr_guard(n, n)
     cp = det(_sr_matrix([[_sr(x) - (t if i == j else 0) for j, x in enumerate(r)] for i, r in enumerate(a._rows)], n)).expand()
-    sols, mults = _sa().solve(cp == 0, t, multiplicities=True)
-    out = [(s.rhs(), int(m)) for s, m in zip(sols, mults)]
-    if sum(m for _, m in out) != n or any(t in s.variables() for s, _ in out):
+    out = _explicit_roots(cp, t, n)
+    if out is None:
         raise NotImplementedError("the eigenvalues of this symbolic matrix are not available in sagebrush yet")
     return out
+
+
+def _explicit_roots(p, t, degree):
+    """[(root, multiplicity)] of the polynomial p in t, when solve's roots
+    account for its whole degree; None otherwise.  (An implicit solution,
+    0 == t^5 - t - 1, counts once against a degree of at least 2: taken as a
+    root, it gave the eigenvalue t^5 - t - 1, the review's YS3/YS4.)"""
+    sols, mults = _sa().solve(p == 0, t, multiplicities=True)
+    if sum(int(m) for m in mults) != degree:
+        return None
+    return [(s.rhs(), int(m)) for s, m in zip(sols, mults)]
 
 
 def eigenvalues(a):
@@ -391,6 +404,18 @@ def eigenvectors(a, side):
         [(a - b, [(1, -1)], 1), (a + b, [(1, 1)], 1)]
         sage: matrix(SR, [[1, 2], [3, 4]]).eigenvectors_right()
         [(-1/2*sqrt(33) + 5/2, [(1, -1/4*sqrt(33) + 3/4)], 1), (1/2*sqrt(33) + 5/2, [(1, 1/4*sqrt(33) + 3/4)], 1)]
+
+    A matrix past the symbolic workspace bound is refused first, before any
+    eigenvalue work (that of the companion matrix of x^17 - x - 1 would
+    end in an ArithmeticError, as an irreducible factor has no exact
+    roots)::
+
+        sage: C = matrix(SR, 17, 17, lambda i, j: 1 if i == j + 1 or (j == 16 and i < 2) else 0)
+        sage: try:  # sagebrush only
+        ....:     C.eigenvectors_right()
+        ....: except Exception as e:
+        ....:     print(type(e).__name__)
+        SagebrushMemoryError
     """
     n = a.nrows()
     # (each shifted matrix is a symbolic n x n workspace: admitted before

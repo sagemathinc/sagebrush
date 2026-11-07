@@ -43,3 +43,16 @@ for s in (sbEigenT, u):
     show("Jordan left:", lambda: matrix(SR, [[s, 1], [0, s]]).eigenvectors_left())
 show("colliding symmetric:", lambda: matrix(SR, [[sbEigenT, 1], [1, sbEigenT]]).eigenvalues())
 show("colliding symmetric vectors:", lambda: matrix(SR, [[sbEigenT, 1], [1, sbEigenT]]).eigenvectors_right())
+# An irreducible quintic factor: no exact roots, Sage's ArithmeticError (not
+# solve's implicit 0 == t^5 - t - 1 as an "eigenvalue")
+C5 = matrix(SR, [[0, 0, 0, 0, 1], [1, 0, 0, 0, 1], [0, 1, 0, 0, 0], [0, 0, 1, 0, 0], [0, 0, 0, 1, 0]])
+show("quintic:", lambda: C5.eigenvalues())
+# A symbolic right-hand side given without a ring, and the right-hand sides
+# Sage refuses (a list, a tuple, a generator)
+A2 = matrix(QQ, [[1, 1], [1, -1]])
+show("QQ matrix, symbolic, no ring:", lambda: A2.solve_right(vector([x, 1])))
+show("its parent:", lambda: A2.solve_right(vector([x, 1])).parent())
+for nm, M in (("QQ", A2), ("SR", matrix(SR, [[1, 1], [1, -1]])), ("ZZ", matrix(ZZ, [[1, 1], [1, -1]]))):
+    show(nm + " list:", lambda: M.solve_right([3, 1]))
+    show(nm + " tuple:", lambda: M.solve_right((3, 1)))
+    show(nm + " generator:", lambda: M.solve_right((u for u in [3, 1])))

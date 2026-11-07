@@ -1701,12 +1701,13 @@ class Matrix:
             sage: A.solve_right(vector([5, 6]))
             (-4, 9/2)
         """
+        if not isinstance(B, (Matrix, Vector)):
+            # (as Sage: a list, tuple or generator is refused, not read)
+            raise TypeError("the second argument must be a vector or a matrix")
         if self._base is _sa().SR:
             import _sage_matrix_sr
             return _sage_matrix_sr.solve_right(self, B)
         is_vec = not isinstance(B, Matrix)
-        if is_vec and not isinstance(B, Vector):
-            B = _bounded_list(B, self.nrows())  # (read once: a generator is read again below)
         if (getattr(B, "_ring", None) if is_vec else B._base) is _sa().SR or (is_vec and any(_is_sr_scalar(_sr_rational(x)) for x in B)):
             # a right-hand side over SR: the solution is over SR (Sage's
             # coercion), by the symbolic elimination

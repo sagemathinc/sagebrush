@@ -3910,6 +3910,12 @@ def symbolic_sum(f, v, a, b, algorithm=None, hold=False):
         Traceback (most recent call last):
         ...
         ValueError: Sum is divergent.
+        sage: symbolic_sum(1/(k + 2001)^2, k, 1, oo)  # sagebrush only
+        sum(1/(k + 2001)^2, k, 1, +Infinity)
+        sage: symbolic_sum(1/(k + 1500)^2 + 1/(k + 1500)^3, k, 1, oo)  # sagebrush only
+        sum(1/(k + 1500)^2 + 1/(k + 1500)^3, k, 1, +Infinity)
+        sage: symbolic_sum(1/(k - 3)^2, k, 1, oo)  # sagebrush only
+        sum(1/(k - 3)^2, k, 1, +Infinity)
         sage: symbolic_sum(1/(k + 10^12)^2, k, 1, oo)  # sagebrush only
         sum(1/(k + 1000000000000)^2, k, 1, +Infinity)
         sage: symbolic_sum((-1)^k/k^2, k, 10^12, oo)  # sagebrush only
@@ -4132,11 +4138,18 @@ def _sum_signed_rational(f, v, a):
     if sp is None:
         return None
     s, c, r = sp
-    num, den = r.numerator(), r.denominator()
+    # (over a common denominator: a sum such as 1/k + 1/(k*(k + 1)) is its
+    # own numerator, with no denominator, and left this path: XE16)
+    rt = r.simplify_rational()
+    num, den = rt.numerator(), rt.denominator()
     if not (num.is_polynomial(v) and den.is_polynomial(v)) or vn not in den._names():
         return None
     if num.degree(v) >= den.degree(v):
-        return None  # (a polynomial part: divergent; Sage raises, this leaves it)
+        # a polynomial part: its terms don't tend to 0, so the sum diverges,
+        # as Sage says (an alternating one stays unevaluated)
+        if s == 1:
+            raise ValueError("Sum is divergent.")
+        return None
     terms = []  # (A, gamma, m): A/(v + gamma)^m
     pf = r.partial_fraction(v)
     for t in (pf.operands() if pf._op()[0] == "add" else [pf]):
