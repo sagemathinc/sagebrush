@@ -1,6 +1,6 @@
 # Native engines in the desktop app
 
-*Status: plan r6, for review. No code accompanies it, and nothing is built until it is reviewed and William
+*Status: plan r7, for review. No code accompanies it, and nothing is built until it is reviewed and William
 approves (his rule of Oct 30). Owner: @sagebrush-remote-compute. Reviewers: astra (SEC), daybreak3 (ENGINE), daybreak4
 (PERF), daybreak2 (SIZE), agents-ui (app). r3 (bb03eabb) was PLAN CLEAR in all five lanes for route B alone. r4
 answers William (Nov 7, about 6:33 AM PST): "there are two approaches to no wasm native: js runtime and napi; cpython
@@ -8,7 +8,8 @@ and oxpy. we need to fully consider both options". r4 compares the two routes in
 same version, and recommends one. Part B is r3's route-B plan, unchanged. Whether anything is closed is for its
 reviewer to say. r5 adds §A.2b, the control bridge for permission and Stop (astra's NATIVE-A-CONTROL-1,
 daybreak3's NATIVE-A-STOP-1). r6 adds the Stop linearization (NATIVE-A-STOP-2), astra's r5 notes
-and agents-ui's four N2 page items. Still open whatever the reviews say: N1's proofs and William's decisions (§5).*
+and agents-ui's four N2 page items. r7 retires `RUN` before
+`done` (NATIVE-A-STOP-3). Still open whatever the reviews say: N1's proofs and William's decisions (§5).*
 
 ## In plain words
 
@@ -272,6 +273,15 @@ add-on and acknowledges it. It never forwards a control frame into the worker's 
   - **`RUN`**, child-local, read by pyjs: `token × 2 + stopbit`.
   - **`ARMED`**, inside the add-on, read by the Rust engine: the same layout.
   - When the session worker starts a run it stores `RUN = token × 2` and clears `INTR`.
+  - **When the run ends, before the worker emits its terminal `done`, it retires `RUN` by compare-and-swap**
+    (NATIVE-A-STOP-3):
+    - `token × 2 → 0`: the run completed, and its `done` reports the original result;
+    - if that fails because the child's Stop already set the bit, `token × 2 + 1 → 0`: the run is reported
+      "interrupted", even if its last statement had finished, and the worker clears `INTR`.
+
+    This one race between the worker's retire and the child's Stop compare-and-swap decides the outcome. If the
+    retire wins, a later Stop finds `RUN = 0`: `applied: false`, no `INTR`, the original completion. If the Stop
+    wins: `applied: true`, interrupted. A finished run can never accept a delayed Stop.
   - Around **every** add-on call (`call`, `symCall`, `mpCall`), the add-on stores `ARMED = token × 2` on entry and
     sets it back to 0 on exit, by compare-and-swap on its own token only.
 - **Applying a Stop: one linearization point, the `RUN` compare-and-swap** (NATIVE-A-STOP-2's child half).
@@ -351,8 +361,10 @@ add-on and acknowledges it. It never forwards a control frame into the worker's 
   - Stop during each of `call`, `symCall` and `mpCall`, including one rayon-parallel call;
   - a stopped call followed by a successful call in the same interpreter;
   - **the race, deterministically:** the Stop control frame held while `done` reaches the host, then released.
-    The result is the single terminal outcome chosen above: the original completion when `applied: false`. Also
-    the reverse order, and the hard kill racing a held `done`;
+    The result is the single terminal outcome chosen above, the original completion when `applied: false`, and
+    with it: `RUN` is 0 before `done` leaves the worker, the released Stop reports `applied: false`, `INTR` stays
+    clear, and the next run succeeds. Also the reverse order (Stop's compare-and-swap first: interrupted), and the
+    hard kill racing a held `done`;
   - a late, duplicate or stale-generation Stop delivered while a **newer** request is blocked in pyjs, in
     `input()`, in a live-data wait and in an engine call, causing **no observable change** to any of them;
   - two attached views with colliding page IDs, where only the origin's active request stops;
