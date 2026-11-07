@@ -173,6 +173,26 @@ def _infinite_relation(kind, a, b):
     return {"<": sa < sb, "<=": sa < sb, ">": sa > sb, ">=": sa > sb}[kind]
 
 
+def _exact_sign(d):
+    """The sign of a constant made of rationals, I, sums, products, rational
+    powers and abs, decided exactly as an algebraic number: 0, 1, -1, or
+    "c" (not real); None for any other constant.  (bool(q*sqrt(2) < p) was
+    False for p^2 - 2*q^2 = 1 with p, q near 10^7: the double enclosure of
+    the difference held 0; bool(8*4^(1/4)*sqrt(2) == 16) was False.)"""
+    if len(d._s) > 4000:
+        return None
+    import _sage_qqbar
+    try:
+        a = _sage_qqbar._convert(d)
+        if a == 0:
+            return 0
+        if a.imag() != 0:
+            return "c"
+        return 1 if a > 0 else -1
+    except (TypeError, ValueError, ArithmeticError, NotImplementedError, MemoryError):
+        return None
+
+
 def _numerically_equal(a, b):
     """Heuristic equality of two constants that the engine could neither
     simplify to equal nor separate: their difference, evaluated at 400 bits,
@@ -312,7 +332,12 @@ class Expression:
                 return inf
             if kind in ("==", "!="):
                 z = _call("is_zero", (a - b)._s)[0] == "1"
-                if not z and kind == "==" and not (a - b).variables() and _call("const_sign", (a - b)._s)[0] == "":
+                # (a constant the enclosure cannot separate from 0: exactly,
+                # when it is algebraic)
+                xs = _exact_sign(a - b) if not z and not (a - b).variables() and _call("const_sign", (a - b)._s)[0] == "" else None
+                if xs is not None:
+                    z = xs == 0
+                elif not z and kind == "==" and not (a - b).variables() and _call("const_sign", (a - b)._s)[0] == "":
                     # constants of undecided sign: equal if they agree to
                     # far more than double precision (never from an
                     # underflowed or cancelled double)
@@ -334,7 +359,10 @@ class Expression:
             # rationals); undecided is False, as in Sage
             sg = _call("const_sign", (a - b)._s)[0]
             if sg == "":
-                return False
+                # (an algebraic constant: its sign exactly; not real: False)
+                sg = _exact_sign(a - b)
+                if sg is None or sg == "c":
+                    return False
             sg = int(sg)
             return {"<": sg < 0, "<=": sg <= 0, ">": sg > 0, ">=": sg >= 0}[kind]
         return _call("is_zero", self._s)[0] != "1"
