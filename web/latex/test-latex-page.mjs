@@ -1980,6 +1980,28 @@ try {
     await ev(`(document.querySelector(".tex-status").textContent = "", document.querySelector(".tex-head .tex-run").click(), 1)`);
     const ranAgain = await statusIs(/Ran 5 SageTeX items in [0-9.]+ s$/, 60000);
     check(ranAgain && runChunk().length === 2, "Run's chunk: a second Run on the page uses the one fetched, not fetched again", { ranAgain, fetched: runChunk().length });
+    // (grader's #824 R5: Run pressed twice while its code loads: once loaded, one Run, not two: a second would make the
+    //  first stale, and the first, ending, would show the button as "Run" (and take a press as a new Run, not Stop)
+    //  while the second still runs. So: the button back to "Run" once, at the end; one results write; one "Ran")
+    {
+      const two = await ev(`(async () => {
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms)), ws = window.__sbTexWs, realW = ws.write, writes = [];
+        ws.write = function (p, ...a) { writes.push(String(p)); return realW.call(this, p, ...a); };
+        let release; const held = new Promise((r) => { release = r; }); window.__sbTexRunLoaded = () => held;
+        let started = 0; const prevHold = window.__sbTexRunHold; window.__sbTexRunHold = () => { started++; };
+        const b = document.querySelector(".tex-head .tex-run"), st = document.querySelector(".tex-status"), said = [], labels = [];
+        const ob = new MutationObserver(() => { if (labels[labels.length - 1] !== b.textContent) labels.push(b.textContent); });
+        ob.observe(b, { childList: true, characterData: true, subtree: true });
+        const o = new MutationObserver(() => { const t = st.textContent; if (/^Ran \\d+ SageTeX item/.test(t) && said[said.length - 1] !== t) said.push(t); });
+        o.observe(st, { childList: true, characterData: true, subtree: true });
+        st.textContent = ""; b.click(); await wait(100); b.click(); await wait(300);
+        window.__sbTexRunLoaded = undefined; release();
+        for (let i = 0; i < 600 && !said.length; i++) await wait(100);
+        await wait(4000); o.disconnect(); ob.disconnect(); ws.write = realW; window.__sbTexRunHold = prevHold;
+        return { started, labels, said: said.length, results: writes.filter((p) => p === "/t/run.tex.results.json").length, label: b.textContent };
+      })()`);
+      check(two.started === 1 && two.said === 1 && two.results === 1 && two.label === "Run" && two.labels.filter((l) => l === "Run").length === 1 && two.labels[two.labels.length - 1] === "Run", "Run's chunk: Run pressed twice while its code loads: one Run (the button back to Run once, at its end; one results write, one \"Ran\")", two);
+    }
     // (daybreak3, #824: the page replaced while Run's code loads: once it has loaded, that Run never starts: not one
     //  workspace call for the old document or its folder, and its results file as it was)
     {
