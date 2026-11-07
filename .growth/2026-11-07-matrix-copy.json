@@ -1,10 +1,10 @@
 {
  "v": 1,
- "reason": "Matrices (lib/_sage_matrix.py, lib/_sage_rdf.py, friction W37): copy() an independent mutable matrix and deepcopy keeping immutability, as Sage; the generalized eigenproblem eigen*(B) refused as Sage refuses it over exact rings, and refused over RDF/CDF rather than B ignored; the refusals in lib/_sage_matrix_more.py, loaded on first use Re-measured with bun 1.4.4 (size-record.sh) on master 47b9712c vs head 61299446: cli/lib.gen.js +1220, cli/pyjs.cjs +1584, engine/lib/sage-more.src +735, engine/lib/sage.pre +10746, engine/lib/sage.src +2507, engine/sagebrush-worker.js +35; no other row moves. Markers: exact, except cli/pyjs.cjs 1616 (+1584 measured, plus 32 B of margin, as it moves with master).",
+ "reason": "Matrices (lib/_sage_matrix.py, lib/_sage_rdf.py, friction W37): copy() an independent mutable matrix and deepcopy keeping immutability, as Sage; the generalized eigenproblem eigen*(B) refused as Sage refuses it over exact rings, and refused over RDF/CDF rather than B ignored; the refusals in lib/_sage_matrix_more.py, loaded on first use Re-measured with bun 1.4.4 (size-record.sh) on master 0a255d10 vs head 454fe62b: cli/lib.gen.js +1840, cli/pyjs.cjs +2188, engine/lib/sage-more.src +3081, engine/lib/sage.pre +10746, engine/lib/sage.src +2507, engine/sagebrush-worker.js +35; no other row moves. Markers: exact, except cli/pyjs.cjs 2220 (+2188 measured, plus 32 B of margin, as it moves with master).",
  "bytes": {
-  "cli/lib.gen.js": 1220,
-  "cli/pyjs.cjs": 1616,
-  "engine/lib/sage-more.src": 735,
+  "cli/lib.gen.js": 1840,
+  "cli/pyjs.cjs": 2220,
+  "engine/lib/sage-more.src": 3081,
   "engine/lib/sage.pre": 10746,
   "engine/lib/sage.src": 2507,
   "engine/sagebrush-worker.js": 35
