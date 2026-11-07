@@ -17,6 +17,43 @@ export function utf8len(s) {
   for (const ch of String(s)) { const c = ch.codePointAt(0); n += c < 0x80 ? 1 : c < 0x800 ? 2 : c < 0x10000 ? 3 : 4; }
   return n;
 }
+// ---- what a Run imported from the .tex's folder (Codex W01: an edited helper.py left the old results in use).
+// A results file may record, as `deps`, every module its Run imported from the .tex's folder: [path relative to that
+// folder, the file's SHA-256 (hex)], at most DEPS_MAX. Its readers (check, render, the editor) hash those files again:
+// one changed or gone, and none of the file's results is used (its items not run, the file named). A results file
+// without `deps` (an older one) is used as before. Real SageTeX doesn't track a helper either (its .sout keys on the
+// .sage code alone): this is Sagebrush's own guarantee.
+export const DEPS_MAX = 1000;
+/** A recorded path: relative, its segments neither empty nor "." nor "..", no backslash or control character. */
+export function safeRel(p) {
+  if (typeof p !== "string" || !p || p.length > 1024 || p.startsWith("/") || /[\\\u0000-\u001f\u007f]/.test(p)) return false;
+  return p.split("/").every((s) => s !== "" && s !== "." && s !== "..");
+}
+/** The results file's `deps`: null if it has none (used as before); [] never; "invalid" if it isn't the shape above
+ * (then none of its results is used: its inputs can't be checked). */
+export function depsOf(j) {
+  if (!j || j.deps === undefined) return null;
+  if (!Array.isArray(j.deps) || j.deps.length > DEPS_MAX) return "invalid";
+  for (const d of j.deps) if (!Array.isArray(d) || d.length !== 2 || !safeRel(d[0]) || typeof d[1] !== "string" || !/^[0-9a-f]{64}$/.test(d[1])) return "invalid";
+  return j.deps;
+}
+/** The SHA-256 of `bytes`, hex. */
+export async function sha256hex(bytes) {
+  const h = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  return [...h].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+/** The first recorded file now gone or changed (its path), or null: `read(rel)` -> its bytes, or null if it isn't
+ * there. `deps`: depsOf's array. */
+export async function staleOf(deps, read) {
+  for (const [rel, h] of deps) {
+    const b = await read(rel);
+    if (!b || (await sha256hex(b)) !== h) return rel;
+  }
+  return null;
+}
+/** Why a results file's results aren't used: its recorded input `rel` changed or gone ("invalid": the record unreadable). */
+export const staleWhy = (rel) => rel === "invalid" ? "the results file's record of what its run imported can't be read" : `${rel} changed since they were run`;
+
 const SAGE_ENVS = new Set(["sageblock", "sagesilent"]);
 export const UNSUPPORTED_ENVS = new Set(["sagecommandline", "sageexample"]);
 export const isCodeEnv = (env) => SAGE_ENVS.has(env);

@@ -12,8 +12,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
-import { driver, runnable, parseOutput, statesOf, resultsText, msgOf, MARK, RUN_LIMITS, RESULTS_FORMAT, runAndSave, sessionOf, sandboxEngine, SANDBOX_FAILED, folderFiles, runIn } from "./run-core.mjs";
-import { itemKey, savedStates, stateOf, WRAPPER_VERSION, MAX_RESULT } from "./engine/sagetex.mjs";
+import { driver, runnable, parseOutput, statesOf, resultsText, msgOf, MARK, RUN_LIMITS, RESULTS_FORMAT, runAndSave, sessionOf, sandboxEngine, SANDBOX_FAILED, folderFiles, runIn, DEPS_MARK, parseDeps, depsWith } from "./run-core.mjs";
+import { itemKey, savedStates, stateOf, WRAPPER_VERSION, MAX_RESULT, safeRel, depsOf, staleOf, sha256hex } from "./engine/sagetex.mjs";
 
 const results = [];
 const check = (name, ok, detail) => { results.push([name, !!ok]); if (!ok) console.log("FAIL", name, JSON.stringify(detail)?.slice(0, 900)); };
@@ -366,6 +366,8 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
   ];
   const r = await sage(runs.join("\n"));
   const got = parseOutput(r.out);
+  // (Codex W01: each Run's last line, the modules it imported from its folder; the deps lines aren't results)
+  const depLines = r.out.split("\n").filter((l) => l.startsWith(DEPS_MARK)).map((l) => JSON.parse(l.slice(DEPS_MARK.length)));
   rmSync(root, { recursive: true, force: true });
   // (a tuple's LaTeX without Sage's \\left( \\right))
   const lx = (i) => String(got[i]?.latex ?? got[i]?.msg ?? JSON.stringify(got[i])).replace(/\\left|\\right/g, "");
@@ -374,6 +376,8 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
   check("folder: the working folder is the .tex's, last on sys.path, once", /\\mathrm\{True\}, \\mathrm\{True\}, 1/.test(lx(3)), lx(3));
   check("folder: the next Run imports them afresh (an edited helper, an edited package child)", /\(2, 20\)/.test(lx(5)), lx(5));
   check("folder: a deleted helper is gone at the next Run", got[6]?.s === "error" && /No module named .?helper/.test(got[6]?.msg ?? ""), got[6]);
+  check("W01: each Run names the modules it imported from its folder (a package's files too), and those of no other folder; the deps lines aren't results",
+    depLines.length === 4 && JSON.stringify(depLines[0]) === JSON.stringify(["helper.py", "pkg/__init__.py", "pkg/child.py"]) && JSON.stringify(depLines[1]) === JSON.stringify(depLines[0]) && JSON.stringify(depLines[2]) === "[]" && JSON.stringify(depLines[3]) === JSON.stringify(["helper.py", "other.py"]) && JSON.stringify(parseDeps(r.out)) === JSON.stringify(["helper.py", "other.py"]) && got.length === 10, { depLines, n: got.length });
   check("folder: a Run in another folder imports its own (its own helper.py of the same name), and not the first folder's (off sys.path, its modules dropped)", /\(5, \\mathrm\{True\}, 0, \\mathrm\{True\}, 7\)/.test(lx(8)) && got[9]?.s === "error" && /No module named .?pkg/.test(got[9]?.msg ?? ""), { r8: lx(8), r9: got[9] });
 }
 
@@ -528,6 +532,37 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
   holds.C({}, "x".repeat(5000));
   const rL = await within(pL);
   check("runAndSave (through runIn): the printed results past the bound: what ran written, never \"Stopped before it ran\"", rL.ok === true && rL.states?.[0]?.latex === "2" && /the results are too large/.test(rL.states?.[1]?.msg ?? ""), rL);
+}
+
+// ---- (Codex W01) the results' record of what their Run imported: its shape (safe relative paths, SHA-256 hex), the
+// hashes from the bytes the session was given, and a changed or missing file found
+{
+  const enc = (t) => new TextEncoder().encode(t);
+  check("W01 safeRel: relative paths only, no . or .. segment, no backslash", safeRel("h.py") && safeRel("pkg/child.py") && !safeRel("/h.py") && !safeRel("../h.py") && !safeRel("a/./b") && !safeRel("a//b") && !safeRel("a\\b") && !safeRel(""), null);
+  const h1 = await sha256hex(enc("v = 1\n"));
+  check("W01 depsOf: none, valid, invalid", depsOf({}) === null && JSON.stringify(depsOf({ deps: [["h.py", h1]] })) === JSON.stringify([["h.py", h1]]) && depsOf({ deps: [["../h.py", h1]] }) === "invalid" && depsOf({ deps: [["h.py", "x"]] }) === "invalid" && depsOf({ deps: "h.py" }) === "invalid", null);
+  const files = { "h.py": enc("v = 1\n") };
+  const read = async (rel) => files[rel] ?? null;
+  const same = await staleOf([["h.py", h1]], read);
+  files["h.py"] = enc("v = 2\n");
+  const changed = await staleOf([["h.py", h1]], read);
+  delete files["h.py"];
+  const gone = await staleOf([["h.py", h1]], read);
+  check("W01 staleOf: the same file: none; changed or gone: that file", same === null && changed === "h.py" && gone === "h.py", { same, changed, gone });
+  const deps = await depsWith(["h.py", "pkg/c.py", "missing.py"], [["/A/h.py", enc("v = 1\n")], ["/A/pkg/c.py", enc("x")]], "/A");
+  const root = await depsWith(["h.py"], [["/h.py", enc("v = 1\n")]], "/");
+  check("W01 depsWith: hashes from the bytes the session was given (a folder or the top), only the files it had", JSON.stringify(deps.map((d) => d[0])) === JSON.stringify(["h.py", "pkg/c.py"]) && deps[0][1] === h1 && root.length === 1 && root[0][1] === h1, { deps, root });
+  // (a Run writes them: its session's deps line, hashed from the bytes it was given, into the results file it writes)
+  {
+    let written = null;
+    const sW = sessionOf({ module: async () => ({ WorkerKernel: class { constructor(o) { this.o = o; this.ready = false; } start() { this.worker = { postMessage() {} }; this.o.onStart(this.worker); this.ready = true; } post() {} on() { return () => {}; } } }), worker: () => null }, 1000);
+    const rW = await runAndSave({ items: [item("silent", "from h import v")], current: () => true, max: 1 << 20, now: () => 0, fid: "f",
+      ws: { pathOfFile: async () => ({ ok: true, path: "/W/d.tex" }), stat: async () => undefined, createByPerson: async (p, o) => { written = JSON.parse(new TextDecoder().decode(o.content)); return {}; } },
+      session: sW, store: sW, serial: sW.serial, folder: async () => ({ dir: "/W", files: [["/W/d.tex", enc("x")], ["/W/h.py", enc("v = 1\n")]] }),
+      exec: async () => ({ out: MARK + JSON.stringify({ s: "ok" }) + "\n" + DEPS_MARK + JSON.stringify(["h.py"]) + "\n", stopped: "" }) });
+    check("W01: a Run's results file records what it imported, hashed from the bytes it was given", rW.ok && JSON.stringify(written?.deps) === JSON.stringify([["h.py", h1]]) && written.items.length === 1, { rW, written });
+  }
+  check("W01 resultsText: deps only when there are some", !("deps" in JSON.parse(resultsText([]))) && JSON.stringify(JSON.parse(resultsText([], [["h.py", h1]])).deps) === JSON.stringify([["h.py", h1]]), null);
 }
 
 // ---- (grader's Z2, Z3, Z7, Z9 on #794) a Run stopped while queued reads nothing (not even the .tex's recheck) and

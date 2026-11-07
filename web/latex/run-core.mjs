@@ -8,7 +8,7 @@
 // SECURITY: the items' code reaches the session only as base64 inside the script (never spliced into it as text); what
 // the session prints is parsed, never evaluated, and each result is checked here as the CLI checks it (the LaTeX's
 // size, the plot's SVG), and again where it is shown (sagetex.mjs).
-import { MAX_RESULT, WRAPPER_VERSION, utf8len, whyRejected } from "./engine/sagetex.mjs";
+import { MAX_RESULT, WRAPPER_VERSION, utf8len, whyRejected, safeRel, sha256hex, DEPS_MAX } from "./engine/sagetex.mjs";
 
 export const RESULTS_FORMAT = "sagebrush-latex-results";
 export const RUN_LIMITS = { svg: 2 * 2 ** 20, msg: 4000 };   // (the CLI's SVG_MAX and MSG_MAX, src/latex-cli.ts)
@@ -16,6 +16,8 @@ export const RUN_LIMITS = { svg: 2 * 2 ** 20, msg: 4000 };   // (the CLI's SVG_M
 export const FOLDER_LIMITS = { files: 500, bytes: 64 * 2 ** 20 };
 /** what starts each result line the session prints (a record separator: never in an item's own printing, which is kept apart) */
 export const MARK = "\u001eSBTX";
+/** what starts the line the session prints last: the modules its Run imported from the .tex's folder (Codex W01) */
+export const DEPS_MARK = MARK + "D";
 
 const b64 = (s) => {
   const u = new TextEncoder().encode(s);
@@ -106,6 +108,15 @@ for _sbtx_it in _sbtx_json.loads(_sbtx_b64.b64decode("${b64(JSON.stringify(items
     finally:
         _sbtx_sys.stdout = _sbtx_old
     print("\\x1eSBTX" + _sbtx_json.dumps(_sbtx_r))
+# (the modules imported from the .tex's folder, after the items: the results file records them with their hashes, so
+#  an edited helper's old results are never used (Codex W01))
+if _sbtx_d is not None:
+    _sbtx_dl = set()
+    for _sbtx_m in list(_sbtx_sys.modules.values()):
+        _sbtx_f = getattr(_sbtx_m, "__file__", None)
+        if _sbtx_under(_sbtx_f, _sbtx_d):
+            _sbtx_dl.add(_sbtx_os.path.normpath(_sbtx_f)[len(_sbtx_d.rstrip("/")) + 1:])
+    print("\\x1eSBTXD" + _sbtx_json.dumps(sorted(_sbtx_dl)))
 `;
 }
 
@@ -116,7 +127,7 @@ export const runnable = (items) => items.filter((it) => !it.err && typeof it.cod
 export function parseOutput(out) {
   const got = [];
   for (const line of String(out).split("\n")) {
-    if (!line.startsWith(MARK)) continue;
+    if (!line.startsWith(MARK) || line.startsWith(DEPS_MARK)) continue;
     try { const r = JSON.parse(line.slice(MARK.length)); if (r && typeof r === "object") got.push(r); else got.push({ s: "error", msg: "an unreadable result" }); }
     catch { got.push({ s: "error", msg: "an unreadable result" }); }
   }
@@ -160,7 +171,21 @@ export function statesOf(items, got, stopped) {
 }
 
 /** The results file's text. */
-export const resultsText = (states) => JSON.stringify({ format: RESULTS_FORMAT, version: 1, wrapper: WRAPPER_VERSION, generator: "sagebrush editor", items: states }) + "\n";
+export const resultsText = (states, deps = []) => JSON.stringify({ format: RESULTS_FORMAT, version: 1, wrapper: WRAPPER_VERSION, generator: "sagebrush editor", items: states, ...(deps.length ? { deps } : {}) }) + "\n";
+/** The modules the session's Run imported from the .tex's folder (its last line's), paths relative to the folder:
+ * only safe relative ones, at most DEPS_MAX; [] if it printed none. */
+export function parseDeps(out) {
+  let got = [];
+  for (const line of String(out).split("\n")) if (line.startsWith(DEPS_MARK)) { try { const a = JSON.parse(line.slice(DEPS_MARK.length)); got = Array.isArray(a) ? a : []; } catch { got = []; } }
+  return got.filter(safeRel).slice(0, DEPS_MAX);
+}
+/** Those modules with their hashes, from the bytes the session was given (`files`, the folder's snapshot, `dir` its
+ * folder): [[rel, sha256]], the results file's `deps`. */
+export async function depsWith(rels, files, dir) {
+  const byPath = new Map(files), base = dir === "/" ? "" : dir, out = [];
+  for (const rel of rels) { const b = byPath.get(base + "/" + rel); if (b) out.push([rel, await sha256hex(b)]); }
+  return out;
+}
 
 // ---- the session: in the runner, the opaque-origin sandbox, only (astra's LATEX-RUN-2)
 // The board's siteEngine gives the runner a fallback, a plain worker of the page's own origin, for a frame that
@@ -316,7 +341,9 @@ export async function runAndSave(o) {
   if (ran.stoppedBefore === true) return { msg: "Stopped before it ran" };
   const { out, stopped } = ran;
   const states = statesOf(o.items, parseOutput(out), stopped);
-  const bytes = new TextEncoder().encode(resultsText(states));
+  const deps = f ? await depsWith(parseDeps(out), f.files, f.dir) : [];
+  if (stale()) return { stale: true };
+  const bytes = new TextEncoder().encode(resultsText(states, deps));
   if (bytes.length > o.max) return { msg: "Not saved: the results are too large" };
   // (the .tex where it is now, by its id, as Save finds it)
   const at = await o.ws.pathOfFile(o.fid);

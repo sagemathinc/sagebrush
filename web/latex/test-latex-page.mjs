@@ -2051,7 +2051,16 @@ open('made.txt', 'w').write('x')
       check(L(b1, 1) === "7" && /\\mathrm\{True\}, \\mathrm\{False\}/.test(L(b1, 2)) && /^\(\\mathrm\{True\}, \\mathrm\{True\}, \\mathrm\{True\}, 1,/.test(L(b1, 3)) && /\(\\mathrm\{False\}, \\mathrm\{True\}\)/.test(L(b1, 4)),
         "Run (Codex P5): another folder's document imports its own helper.py, not the first folder's (gone from the session); its folder is the working one, last on sys.path, once, the runtime's own library ahead of it; the standard statistics over one beside it", { items: [1, 2, 3, 4].map((i) => L(b1, i)) });
       check(b1?.items?.[5]?.s === "error" && !made, "Run (Codex P5): the document's code can't make a file (read-only), and no file is made", { item: L(b1, 5).slice(-160), made });
+      // (Codex W01: the results record what their Run imported from the folder: helper.py, with its hash)
+      const w01deps = b1?.deps?.map((d) => d[0]) ?? [];
       await ev(`${W}.stat("/ex-b/helper.py").then((e) => ${W}.write("/ex-b/helper.py", new TextEncoder().encode("def v():\\n    return 8\\n"), { fid: e.fid, base: e.rev ?? 0 })).then(() => 1)`);
+      // (the helper edited, the page read again (its window back in focus): its results aren't used, said; the items
+      //  not run, the old 7 gone from the preview)
+      await ev(`(document.querySelector(".tex-status").textContent = "", window.dispatchEvent(new Event("focus")), 1)`);
+      const staleSaid = await statusIs(/The SageTeX results aren't used: helper\.py changed since they were run/, 15000);
+      // (inline in math, an item not run shows as "…" where its value was: the old 7 gone, four of them)
+      const notRun = await until(`(() => { const t = document.querySelector(".tex-preview")?.textContent ?? ""; return (t.match(/\u2026/g) || []).length >= 4 && !/\b7\b/.test(t); })()`, 15000);
+      check(w01deps.includes("helper.py") && w01deps.includes("statistics.py") === false && staleSaid && notRun, "Run (Codex W01): the results record helper.py; it edited, the page doesn't use them: says why, the items not run", { w01deps, staleSaid, notRun, status: await ev(`document.querySelector(".tex-status")?.textContent ?? ""`), preview: await ev(`(document.querySelector(".tex-preview")?.textContent ?? "").slice(0, 200)`) });
       const b2 = await runB();
       check(L(b2, 1) === "8", "Run (Codex P5): the helper edited, the next Run imports the edit", { got: L(b2, 1) });
       await ev(`${W}.remove("/ex-b/helper.py").then(() => 1)`);

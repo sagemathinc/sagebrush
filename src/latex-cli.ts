@@ -11,13 +11,14 @@
 import { readFileSync, writeFileSync, existsSync, statSync, realpathSync, mkdirSync, mkdtempSync, rmSync } from "fs";
 import { basename, dirname, join, resolve, relative, delimiter, sep, posix } from "path";
 import { tmpdir } from "os";
+import { createHash } from "crypto";
 import { spawn, type ChildProcess } from "child_process";
 import { pathToFileURL } from "url";
 import katex from "katex";
 import { Engine } from "../web/latex/engine/pipeline.mjs";
 import { setKatex, installBeamer } from "../web/latex/engine/render.mjs";
 import * as beamerCode from "../web/latex/engine/beamer.mjs";
-import { itemKey, MAX_RESULT, WRAPPER_VERSION } from "../web/latex/engine/sagetex.mjs";
+import { itemKey, MAX_RESULT, WRAPPER_VERSION, depsOf, safeRel, DEPS_MAX } from "../web/latex/engine/sagetex.mjs";
 import { PAGE_CSS } from "../web/latex/style";
 import { imageCandidates, graphicsPathOf, notFoundWhy, sniffImage, admitImageBytes, IMAGE_EXTS } from "../web/latex/images";
 import { engineInputs, admitInput, INPUT_BOUNDS, type Known } from "../web/latex/inputs";
@@ -199,13 +200,16 @@ export function renderTex(file: string, text: string): { result: CheckResult; ht
     else { images[name] = got; imgReport.push({ name, found: false, why: got.why }); }
   }
   // (the code items' results, from `sagebrush latex run`'s file beside it, for the items still as they were run)
-  const r = new Engine({ images, sage: { saved: readResults(file) } }).update(text, { cold: true, inputs: inputsNow().opt });
+  const saved = readResults(file);
+  const r = new Engine({ images, sage: { saved: saved.states } }).update(text, { cold: true, inputs: inputsNow().opt });
   const states = r.sageStates as State[];
   // (the page as the editor's preview shows it, split once as its worker splits it, web/latex/split.ts: a placeholder
   //  where the preview has one, and check's warning for it)
   const tooLarge: { kind: string; name: string; at: number }[] = [];
   const pieces = (r.chunks as string[]).map((c, g) => splitChunk(c, (why, size) => tooLarge.push(tooLargeProblem(why, size, r.chunkPos?.[g]))).join(""));
-  const result = checkResult(file, text, { outcome: String(r.stats.outcome), beamer: !!r.beamer, problems: r.problems.concat(tooLarge), frames: r.frames,
+  // (results not used, a helper they imported having changed since: said, the items shown as not run)
+  const stale = saved.stale === null ? [] : [{ kind: "stale", name: saved.stale, at: -1 }];
+  const result = checkResult(file, text, { outcome: String(r.stats.outcome), beamer: !!r.beamer, problems: r.problems.concat(tooLarge, stale), frames: r.frames,
     sage: (r.sageItems as any[]).map((it, k) => ({ mode: String(it.mode), err: it.err ?? null, at: typeof it.at === "number" ? it.at : -1, ...(states[k] ? { s: states[k].s, msg: states[k].msg } : {}) })) }, imgReport);
   return { result, html: pageHtml(basename(file), pieces.join("\n"), !!r.beamer) };
 }
@@ -218,17 +222,26 @@ export const RESULTS_FORMAT = "sagebrush-latex-results";
 const RESULTS_MAX = 32 * 2 ** 20, SVG_MAX = 2 * 2 ** 20, MSG_MAX = 4000;
 type State = { key: string; s: "ok" | "error" | "blocked"; latex?: string; src?: string; msg?: string };
 
-/** The results file's states, or [] if there is none or it isn't one (never trusted beyond its shape). */
-function readResults(file: string): State[] {
-  const p = resultsPath(file);
+/** A file's SHA-256 (hex), or null if it can't be read. */
+function fileHash(p: string): string | null {
+  try { return createHash("sha256").update(readFileSync(p)).digest("hex"); } catch { return null; }
+}
+/** The results file's states, or [] if there is none or it isn't one (never trusted beyond its shape); and, if it
+ * records what its run imported (deps) and one of those files changed or is gone, none of its states and the reason
+ * (`stale`): an edited helper's old results are never used (Codex W01). A file without deps: used as before. */
+function readResults(file: string): { states: State[]; stale: string | null } {
+  const p = resultsPath(file), none = { states: [], stale: null };
   try {
-    if (!existsSync(p) || statSync(p).size > RESULTS_MAX) return [];
+    if (!existsSync(p) || statSync(p).size > RESULTS_MAX) return none;
     const j = JSON.parse(readFileSync(p, "utf8"));
-    if (j?.format !== RESULTS_FORMAT || j.version !== 1 || j.wrapper !== WRAPPER_VERSION || !Array.isArray(j.items)) return [];
-    return j.items.filter((x: any) => x && typeof x.key === "string" && ["ok", "error", "blocked"].includes(x.s)).map((x: any) => ({
+    if (j?.format !== RESULTS_FORMAT || j.version !== 1 || j.wrapper !== WRAPPER_VERSION || !Array.isArray(j.items)) return none;
+    const deps = depsOf(j);
+    if (deps === "invalid") return { states: [], stale: "invalid" };
+    for (const [rel, h] of deps ?? []) if (fileHash(join(dirname(file), rel)) !== h) return { states: [], stale: rel };
+    return { stale: null, states: j.items.filter((x: any) => x && typeof x.key === "string" && ["ok", "error", "blocked"].includes(x.s)).map((x: any) => ({
       key: x.key, s: x.s, ...(typeof x.latex === "string" ? { latex: x.latex } : {}), ...(typeof x.src === "string" ? { src: x.src } : {}), ...(typeof x.msg === "string" ? { msg: x.msg.slice(0, MSG_MAX) } : {}),
-    }));
-  } catch { return []; }
+    })) };
+  } catch { return none; }
 }
 
 // the session's script (Sage mode): each item preparsed, then exec'd (sagesilent, sageblock) or eval'd (\sage: its
@@ -249,7 +262,19 @@ except NameError:
 #  but its script is in a temporary folder. After the script's own imports: a sagebrush.py beside the .tex is the
 #  items' to import, never the script's)
 sys.path.append(os.getcwd())
-_sbtx_in, _sbtx_outp = sys.argv[1], sys.argv[2]
+_sbtx_in, _sbtx_outp, _sbtx_depp = sys.argv[1], sys.argv[2], sys.argv[3]
+# (the modules imported from the document's folder, after each item: the results file records them, with their
+#  hashes, so a later check or render knows when a helper changed (Codex W01))
+_sbtx_root = os.path.realpath(os.getcwd())
+def _sbtx_deps():
+    got = set()
+    for m in list(sys.modules.values()):
+        f = getattr(m, "__file__", None)
+        if isinstance(f, str):
+            f = os.path.realpath(f)
+            if f.startswith(_sbtx_root + os.sep):
+                got.add(os.path.relpath(f, _sbtx_root).replace(os.sep, "/"))
+    return sorted(got)
 with open(_sbtx_in) as _sbtx_f:
     _sbtx_items = json.load(_sbtx_f)
 _sbtx_g = dict(globals())
@@ -282,6 +307,8 @@ for _sbtx_it in _sbtx_items:
         sys.stdout = _sbtx_old
     _sbtx_r["out"] = _sbtx_buf.getvalue()[-${MSG_MAX}:]
     _sbtx_out.append(_sbtx_r)
+    with open(_sbtx_depp, "w") as _sbtx_f:
+        json.dump(_sbtx_deps(), _sbtx_f)
     with open(_sbtx_outp, "w") as _sbtx_f:
         json.dump(_sbtx_out, _sbtx_f)
 `;
@@ -310,10 +337,10 @@ async function runCommand(file: string, text: string, timeout: number, json: boo
   const toRun = (firstBad < 0 ? runnable : runnable.slice(0, firstBad)) as { mode: string; code: string }[];
   writeFileSync(join(tmp, "items.json"), JSON.stringify(toRun));
   writeFileSync(join(tmp, "driver.sage"), DRIVER);
-  const outp = join(tmp, "out.json");
+  const outp = join(tmp, "out.json"), depp = join(tmp, "deps.json");
   const t0 = Date.now();
   const done = await new Promise<{ code: number | null; timedOut: boolean; err: string }>((res) => {
-    const p = spawn(cmd[0], [...cmd.slice(1), join(tmp, "driver.sage"), join(tmp, "items.json"), outp], { cwd: dirname(resolve(file)), stdio: ["ignore", "ignore", "pipe"] });
+    const p = spawn(cmd[0], [...cmd.slice(1), join(tmp, "driver.sage"), join(tmp, "items.json"), outp, depp], { cwd: dirname(resolve(file)), stdio: ["ignore", "ignore", "pipe"] });
     let err = "", timedOut = false;
     p.stderr!.on("data", (d) => { if (err.length < 16384) err += d; });
     const t = setTimeout(() => { timedOut = true; p.kill("SIGKILL"); }, timeout * 1000);
@@ -322,6 +349,12 @@ async function runCommand(file: string, text: string, timeout: number, json: boo
   });
   let got: any[] = [];
   try { got = existsSync(outp) ? JSON.parse(readFileSync(outp, "utf8")) : []; } catch {}
+  // (what it imported from the .tex's folder, with each file's hash now: the results' record of their inputs)
+  let deps: [string, string][] = [];
+  try {
+    const rels = existsSync(depp) ? JSON.parse(readFileSync(depp, "utf8")) : [];
+    if (Array.isArray(rels)) deps = rels.filter(safeRel).slice(0, DEPS_MAX).flatMap((rel: string) => { const h = fileHash(join(dirname(file), rel)); return h ? [[rel, h] as [string, string]] : []; });
+  } catch {}
   removeTemp(tmp);
   const states: State[] = [];
   let failed = false;
@@ -349,7 +382,7 @@ async function runCommand(file: string, text: string, timeout: number, json: boo
     } else states.push({ key, s: "ok" });
   }
   const rp = resultsPath(file);
-  writeFileSync(rp, JSON.stringify({ format: RESULTS_FORMAT, version: 1, wrapper: WRAPPER_VERSION, generator: "sagebrush latex run", items: states }) + "\n");
+  writeFileSync(rp, JSON.stringify({ format: RESULTS_FORMAT, version: 1, wrapper: WRAPPER_VERSION, generator: "sagebrush latex run", items: states, ...(deps.length ? { deps } : {}) }) + "\n");
   const lines = items.map((it, k) => ({ n: k + 1, mode: String(it.mode), line: typeof it.at === "number" && it.at >= 0 ? text.slice(0, it.at).split("\n").length : null, state: states[k].s, ...(states[k].s === "error" ? { message: states[k].msg } : {}) }));
   const ms = Date.now() - t0, bad = states.some((x) => x.s === "error");
   if (!json) {
