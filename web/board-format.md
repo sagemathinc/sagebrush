@@ -578,7 +578,7 @@ A picture a note shows, by its name in the document's `images`.
 |---|---|---|
 | `w` | number | required: its width in pixels |
 | `h` | number | required: its height in pixels |
-| `src` | string | its bytes, which a file needs to show the picture: a `data:` URL (PNG, JPEG, GIF or WebP), or an `https:` address |
+| `src` | string | its bytes, which a file needs to show the picture: a `data:` URL (PNG, JPEG, GIF, WebP or SVG), or an `https:` address |
 
 <!-- /fields -->
 

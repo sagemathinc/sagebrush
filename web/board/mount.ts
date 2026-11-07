@@ -1396,7 +1396,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   editor.penStyle = () => pen.style();
   // pictures chosen from files (or the camera, on a phone), added in the middle of the view
   function pickImages() {
-    const input = Object.assign(document.createElement("input"), { type: "file", accept: "image/png,image/jpeg,image/gif,image/webp", multiple: true });
+    const input = Object.assign(document.createElement("input"), { type: "file", accept: "image/png,image/jpeg,image/gif,image/webp,image/svg+xml", multiple: true });
     // (in the DOM, out of sight: some browsers do not open the chooser for a detached input)
     input.className = "sb-fileinput";
     input.style.cssText = "position:fixed;left:-9999px";
@@ -1540,7 +1540,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     pgdlg.showModal();
   };
   $("pg-pic").onclick = () => {
-    const input = Object.assign(document.createElement("input"), { type: "file", accept: "image/png,image/jpeg,image/gif,image/webp" });
+    const input = Object.assign(document.createElement("input"), { type: "file", accept: "image/png,image/jpeg,image/gif,image/webp,image/svg+xml" });
     input.className = "sb-fileinput";
     input.style.cssText = "position:fixed;left:-9999px";
     input.onchange = async () => {

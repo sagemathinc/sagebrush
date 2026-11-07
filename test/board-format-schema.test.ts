@@ -89,7 +89,7 @@ const P = ["pages", 1], N = (i: number) => [...P, "nodes", i];
 const BAD: [Path, unknown[]][] = [
   [["format"], ["sagebrush", 1]], [["title"], [3]], [["mode"], ["sage-math", "octave"]], [["engine"], ["newest", true]], [["seed"], ["AB".repeat(32), "ab", 5]],
   [["refBase"], [1]], [["tools"], ["select"]], [["intro"], [{}]], [["images"], [[], "x"]],
-  [["images", "pic-1", "w"], [0, -1, "40"]], [["images", "pic-1", "h"], [0]], [["images", "pic-1", "src"], ["http://example.org/a.png", "data:image/svg+xml;base64,AAAA", "javascript:x"]],
+  [["images", "pic-1", "w"], [0, -1, "40"]], [["images", "pic-1", "h"], [0]], [["images", "pic-1", "src"], ["http://example.org/a.png", "data:image/svgz;base64,AAAA", "javascript:x"]],
   [[...P, "layout"], ["tree"]], [[...P, "direction"], ["RL"]], [["pages", 0, "slide", "w"], [0, -5]], [[...P, "background", "color"], ["url(x)", "red;"]],
   [[...P, "background", "image"], ["a b", "x.png"]], [[...P, "template"], ["yes"]], [[...P, "title"], [[]]],
   [[...N(0), "image"], ["figure 1.png", "a/b"]], [[...N(0), "color"], ["red; x: y", "#12", "javascript:1"]], [[...N(0), "shape"], ["square"]],

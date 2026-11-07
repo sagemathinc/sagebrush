@@ -1,8 +1,8 @@
 {
   "v": 1,
-  "reason": "Dependencies 2b, File > Download \"with its files (.zip)\" (@sagebrush's ruling, Nov 6: accept, light trim): the Download dialog's lazy zip path, export/selected.ts zipPicks: every name checked before any read (astra's DEP2B-ZIPNAME-1, names.ts), caps on the actual bytes, this chunk's own ZipWriter, BlobSink and worker reused, nothing duplicated. 70689 bytes in bun 1.4.4's build at master 30ca1462 + 2b (master's: 68865, +1824), ceiling measured + 64; the worker unchanged. Before: EXPORT-ZIPNAME-1 (astra, Nov 5): every member's name checked before any body is read, in preflight and in the writer; 68865 bytes (+2682), ceiling measured + 64.",
+  "reason": "Board SVG pictures (P9a part 2, #791): the export chunk carries web/board/doc.ts's cleanImages, which now runs every SVG picture through image-size.ts svgDataUrl (one admission: canonical base64, byte caps before decoding, strict UTF-8, root width and height required; astra's and daybreak3's SEC/ENGINE findings), so an exported board keeps only what the board shows. 73068 bytes in bun 1.4.4's build of #791 at 7502a711 (master 1a7620b2 and #787: 70689, +2379), ceiling measured + 64; the worker unchanged. Before: Dependencies 2b, File > Download \"with its files (.zip)\" (@sagebrush's ruling, Nov 6: accept, light trim): the Download dialog's lazy zip path, export/selected.ts zipPicks: every name checked before any read (astra's DEP2B-ZIPNAME-1, names.ts), caps on the actual bytes, this chunk's own ZipWriter, BlobSink and worker reused, nothing duplicated. 70689 bytes in bun 1.4.4's build at master 30ca1462 + 2b (master's: 68865, +1824), ceiling measured + 64; the worker unchanged. Before: EXPORT-ZIPNAME-1 (astra, Nov 5): every member's name checked before any body is read, in preflight and in the writer; 68865 bytes (+2682), ceiling measured + 64.",
   "bytes": {
-    "sagebrush-export.js": 70753,
+    "sagebrush-export.js": 73132,
     "sagebrush-export-worker.js": 5709
   }
 }

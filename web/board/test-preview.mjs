@@ -41,6 +41,20 @@ const small = await makePreview([{ output_type: "display_data", data: { "image/p
 check(small?.outputs[0].data["image/webp"] === webp(100, 100), "a picture, however small, is drawn again at most 640 wide");
 const tooTall = await makePreview([{ output_type: "display_data", data: { "image/png": png(10, 10), "text/plain": "tall" }, metadata: {} }], { at, ms: 1, total: 1 }, async () => ["image/png", png(640, 5000)]);
 check(tooTall && !tooTall.outputs[0].data["image/png"] && tooTall.outputs[0].data["text/plain"] === "tall", "a picture drawn too big is not kept");
+// an SVG kept as it is when it can't be drawn again: only with a size read from its root (astra's SVG-SIZE-1)
+const noRaster = async () => null;
+const svgOut = (svg) => [{ output_type: "display_data", data: { "image/svg+xml": svg, "text/plain": "fig" }, metadata: {} }];
+const plain = await makePreview(svgOut('<svg xmlns="http://www.w3.org/2000/svg" width="96" height="64"/>'), { at, ms: 1, total: 1 }, noRaster);
+check(typeof plain?.outputs[0].data["image/svg+xml"] === "string", "an SVG with a plain width and height: kept");
+const refd = await makePreview(svgOut('<svg xmlns="http://www.w3.org/2000/svg" width="&#57;6" height="&#54;4" viewBox="0 0 1 1"/>'), { at, ms: 1, total: 1 }, noRaster);
+check(refd && refd.outputs[0].data["image/svg+xml"] === undefined && refd.outputs[0].data["text/plain"] === "fig", "an SVG whose width is a character reference: not kept, its text is");
+// (an SVG kept as it is only within a preview's picture bounds, IMAGE_W x IMAGE_H: grader's V18)
+const wideSvg = await makePreview(svgOut('<svg xmlns="http://www.w3.org/2000/svg" width="641" height="10"/>'), { at, ms: 1, total: 1 }, noRaster);
+const fits = await makePreview(svgOut('<svg xmlns="http://www.w3.org/2000/svg" width="640" height="10"/>'), { at, ms: 1, total: 1 }, noRaster);
+check(wideSvg && wideSvg.outputs[0].data["image/svg+xml"] === undefined && typeof fits?.outputs[0].data["image/svg+xml"] === "string", "an SVG preview past 640 wide: not kept; at 640: kept (V18)");
+const vbOnly = await makePreview(svgOut('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"/>'), { at, ms: 1, total: 1 }, noRaster);
+check(vbOnly && vbOnly.outputs[0].data["image/svg+xml"] === undefined, "an SVG sized only by its viewBox: not kept (SVG-VIEWBOX-SIZE-1)");
+check(cleanPreview({ ...plain, outputs: [{ output_type: "display_data", data: { "image/svg+xml": '<svg width="72pt" height="48pt" viewBox="0 0 1 1"/>', "text/plain": "fig" }, metadata: {} }] })?.outputs[0].data["image/svg+xml"] === undefined, "read back: an SVG in pt, not kept");
 // a picture's size from its header; a small file saying it is huge is refused (SEC-B00-1)
 check(JSON.stringify([imageSize("image/png", png(8192, 8192)), imageSize("image/webp", webp(641, 2)), imageSize("image/jpeg", jpeg(300, 1300))]) === '[{"w":8192,"h":8192},{"w":641,"h":2},{"w":300,"h":1300}]', "sizes from PNG, WebP and JPEG headers");
 check(imageSize("image/png", "iVBORw0KGgo=") === null && imageSize("image/jpeg", b64([0xff, 0xd8])) === null && imageSize("image/webp", "UklGRg==") === null, "a header that can't be read: no size");

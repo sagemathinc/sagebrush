@@ -22,7 +22,7 @@ import { cleanDoc, formatError, isBoard, oneEmoji, VERSION, type DocAsk } from "
 import { cleanPreview } from "../web/board/preview";
 import { askProblems } from "../web/board/ask";
 import { BOARD_SCHEMA } from "../web/board/format-schema";
-import { dataUrl, imageSize, PixelBudget } from "../web/image-size";
+import { b64Bytes, pictureSize, pictureUrl, PixelBudget, SVG_MAX_BYTES, svgDataUrl } from "../web/image-size";
 import { SchemaValidator, didYouMean, step } from "./json-schema";
 import { CLI_READER } from "./board-cli";
 import { oneLine, textLines } from "./terminal-text";
@@ -206,9 +206,12 @@ export function checkText(text: string): { problems: Problem[]; doc: any } {
     if (!used.has(name)) warn(at, "not used by any note or background");
     if (v.src === undefined) { warn(at, "no `src`: a file needs the picture itself, a data: URL or an https: address, or the board shows an empty frame"); continue; }
     if (typeof v.src !== "string" || !v.src.toLowerCase().startsWith("data:")) continue;
-    const u = dataUrl(v.src);
+    // (an SVG, in any form a browser takes: what the board keeps of it, its one form, or nothing, said; P9a)
+    const src = /^data:image\/svg\+xml/i.test(v.src) ? svgDataUrl(v.src) : v.src;
+    if (src === null) { err(step(at, "src"), `the board won't show this SVG picture: ${svgWhy(v.src)}`); continue; }
+    const u = pictureUrl(src);
     if (!u) continue; // (the schema says so)
-    const size = imageSize(u.type, u.base64), why = budget.take(size);
+    const size = pictureSize(u.type, u.base64), why = budget.take(size);
     if (why) err(step(at, "src"), `the board won't show this picture: ${why}`);
     else if (size && typeof v.w === "number" && typeof v.h === "number" && v.w > 0 && v.h > 0 && Math.abs(size.w / size.h - v.w / v.h) > 0.01 * (size.w / size.h))
       warn(at, `its w and h (${v.w} × ${v.h}) are not the picture's shape (${size.w} × ${size.h} pixels), so it is drawn stretched`);
@@ -394,4 +397,29 @@ function itemPaths(d: any): Map<string, string> {
   if (Array.isArray(d.pages)) d.pages.forEach((p: any, i: number) => walk(p?.nodes, `pages[${i}].nodes`, i + 1));
   else walk(d.nodes, "nodes", 1);
   return out;
+}
+
+// Why the board won't show an SVG picture svgDataUrl refused: its data not decoding at all, its bytes past
+// the bound or not UTF-8, else its root without a plain width and height (P9a).  (Base64 in another
+// spelling, other pad bits, isn't a reason: svgDataUrl reads it in its one form.)
+function svgWhy(src: string): string {
+  // (past the length svgDataUrl reads, it is past 2 MB however written: said before anything is decoded,
+  // daybreak3's SVG-DIAGNOSTIC-BOUND-1; base64 is 4 characters for 3 bytes, percent-encoding at most 3 for 1)
+  if (src.length > 3 * SVG_MAX_BYTES + 64) return "it's over 2 MB of text";
+  const m = /^data:image\/svg\+xml(?:;charset=utf-8)?(;base64)?,([\s\S]*)$/i.exec(src);
+  const b64 = m?.[1] ? m[2].replace(/\s/g, "") : null;
+  if (b64 !== null && b64Bytes(b64) > SVG_MAX_BYTES) return "it's over 2 MB of text";
+  let bytes: Uint8Array | null = null;
+  try {
+    bytes = !m ? null : b64 !== null ? Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)) : new TextEncoder().encode(decodeURIComponent(m[2]));
+  } catch {
+    return "it can't be read as text";
+  }
+  if (bytes && bytes.length > SVG_MAX_BYTES) return "it's over 2 MB of text";
+  try {
+    if (bytes) new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return "it isn't UTF-8 text";
+  }
+  return "its root needs a width and a height in pixels (a number, or px)";
 }

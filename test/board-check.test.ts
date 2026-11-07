@@ -132,6 +132,38 @@ test("pictures: their sizes against what the board shows; their shape", () => {
   assert.deepEqual(lines(d(many)), ["error images.p2.src: the board won't show this picture: this document's pictures are too many pixels in all"]);
   assert.deepEqual(lines(d({ wide: { w: 100, h: 100, src: png(200, 100) } })), ["warning images.wide: its w and h (100 × 100) are not the picture's shape (200 × 100 pixels), so it is drawn stretched"]);
   assert.deepEqual(lines(d({ ok: { w: 50, h: 25, src: png(200, 100) } })), []);
+  // (an SVG the board won't show: one line for each way it can fail, P9a)
+  const nosize = "data:image/svg+xml;base64," + Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>').toString("base64");
+  const vbOnly = "data:image/svg+xml;base64," + Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"/>').toString("base64");
+  const notUtf8 = "data:image/svg+xml;base64," + Buffer.from([...Buffer.from('<svg width="1" height="1"><desc>'), 0xff, ...Buffer.from("</desc></svg>")]).toString("base64");
+  const big = "data:image/svg+xml;base64," + Buffer.from('<svg width="1" height="1"/>' + " ".repeat(2_000_000)).toString("base64");
+  const why = (src: string) => lines(d({ s: { w: 10, h: 10, src } }));
+  const svgErr = (s: string) => [`error images.s.src: the board won't show this SVG picture: ${s}`];
+  assert.deepEqual(why(nosize), svgErr("its root needs a width and a height in pixels (a number, or px)"));
+  assert.deepEqual(why(vbOnly), svgErr("its root needs a width and a height in pixels (a number, or px)"), "a viewBox alone: refused (SVG-VIEWBOX-SIZE-1)");
+  assert.deepEqual(why(notUtf8), svgErr("it isn't UTF-8 text"));
+  // (a width and height there, but not in pixels: the same line, which says what is needed; percent-encoding that doesn't decode)
+  for (const root of ['width="100%" height="10"', 'width="2in" height="10"', 'width="10em" height="10"', 'width="&#57;6" height="64"'])
+    assert.deepEqual(why("data:image/svg+xml," + encodeURIComponent(`<svg ${root}/>`)), svgErr("its root needs a width and a height in pixels (a number, or px)"), root);
+  assert.deepEqual(why("data:image/svg+xml,%E0%A4%A"), svgErr("it can't be read as text"));
+  // (base64 with other pad bits is no reason: it is read in its one form, so only a real cause is said)
+  assert.deepEqual(why("data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMSIgaGVpZ2h0PSIxIi8+Ch=="), []);
+  assert.deepEqual(why(big), svgErr("it's over 2 MB of text"));
+  // (text past 2 MB once decoded, though its data: URL is within the length read: the cause still said, grader's V23)
+  assert.deepEqual(why("data:image/svg+xml," + '<svg width="1" height="1"/>' + "a".repeat(2_000_100)), svgErr("it's over 2 MB of text"));
+  // (one past the bound, by its length or by the bytes its base64 decodes to, is said so without being decoded:
+  // atob and decodeURIComponent never called for it, SVG-DIAGNOSTIC-BOUND-1)
+  const undecoded = spawnSync(process.execPath, ["-e", `const { checkText } = require(${JSON.stringify(__dirname + "/../src/board-check.js")});
+    let calls = 0;
+    for (const f of ["atob", "decodeURIComponent"]) { const real = globalThis[f]; globalThis[f] = (s) => { if (s.length > 2e6) calls++; return real(s); }; }
+    const srcs = ["data:image/svg+xml;base64," + "A".repeat(7e6), "data:image/svg+xml;base64," + "A".repeat(2666672), "data:image/svg+xml," + "%20".repeat(2.1e6)];
+    for (const src of srcs) {
+      const d = JSON.stringify({ format: "sagebrush-board", version: 1, images: { s: { w: 1, h: 1, src } }, nodes: [{ id: "n", image: "s" }] });
+      console.log(checkText(d).problems.map((p) => p.message).filter((m) => m.includes("SVG")).join("|"));
+    }
+    console.log("decoded " + calls);`], { encoding: "utf8" });
+  assert.equal(undecoded.status, 0, undecoded.stderr.slice(-400));
+  assert.deepEqual(undecoded.stdout.trim().split("\n"), [...Array(3).fill("the board won't show this SVG picture: it's over 2 MB of text"), "decoded 0"]);
 });
 
 test("the size a board opens is the board's (web/board/mount.ts FILE_MAX)", () => {
