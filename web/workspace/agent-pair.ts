@@ -278,6 +278,10 @@ export class AgentPairing {
     if (!held || held.pairingId === this.pairingId) putReloadRecord(r.storage, null);
   }
 
+  /** Dropped: the socket closed and nothing else (no grant change sent, nothing forgotten): an attempt another pairing
+   * has superseded, which must not touch what the person has since chosen. */
+  drop(why = "superseded") { this.close(1000, why); }
+
   /** Revoke: the server told ({}), the socket closed, the kept grant and session forgotten, at once. */
   async revoke(why = "revoked") {
     const id = this.pairingId;
