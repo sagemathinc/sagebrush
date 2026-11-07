@@ -6265,9 +6265,23 @@ def PolynomialRing(R, n=1):
     base = _sp.ZZ if R is _ZZ else _sp.QQ if R is _QQ else None
     if base is None:
         raise MagmaError("PolynomialRing over a %s (not the integers, the rationals or a finite field) is not supported yet" % _type_of(R), "'PolynomialRing'")
-    out = _sp.PolynomialRing_(base, "$.1")
+    out = _MPolyRingZQ(base, "$.1")
     _fun_remember_poly(_fun_base_key(R), out)
     return out
+
+
+class _MPolyRingZQ(_sp.PolynomialRing_):
+    """PolynomialRing(Integers()) or PolynomialRing(Rationals()) in Magma mode.
+    Until its variable is named, it prints as P.1 for the oldest global P that
+    holds the ring now, and as $.1 when none does (Magma: `P := PolynomialRing(
+    Rationals()); P.1 + 1;` prints P.1 + 1).  Only the printing changes: the
+    ring's _name, which equality and hashing use, stays $.1."""
+
+    def _repr_name(self):
+        if self._name != "$.1":
+            return self._name
+        v = _global_name(self)
+        return "%s.1" % v if v is not None else "$.1"
 
 
 # The procedure call being made with reference arguments (f(~x, y)), as the
@@ -7587,7 +7601,7 @@ def _cr_source_ok(X):
     if isinstance(X, (_MFFPolyRing, _MFFPoly)):
         return True
     ring = X if isinstance(X, _sp.PolynomialRing_) else getattr(X, "_ring", None)
-    return type(ring) is _sp.PolynomialRing_ and (ring._base is _sp.ZZ or ring._base is _sp.QQ)
+    return type(ring) in (_sp.PolynomialRing_, _MPolyRingZQ) and (ring._base is _sp.ZZ or ring._base is _sp.QQ)
 
 
 @_signature("ChangeRing", "RngUPol", "Rng", ret="RngUPol")
@@ -9441,6 +9455,13 @@ class _MNumberField(_snf.NumberField_absolute):
         super().__init__(f, "$.1", irreducible=irreducible)
         self._quadratic = quadratic
         self._order = None
+        self._fring = getattr(f, "_ring", None)  # the defining polynomial's ring
+
+    def _fvar(self):
+        # the defining polynomial's variable as its ring prints it now (P.1
+        # for the global P holding an unnamed ring, as Magma prints it)
+        r = self._fring
+        return r._repr_name() if hasattr(r, "_repr_name") else self._var
 
     def _magma_names(self, names):
         self._name = names[0]
@@ -9483,7 +9504,7 @@ class _MNumberField(_snf.NumberField_absolute):
 
     def __repr__(self):
         kind = "Quadratic Field" if self._quadratic else "Number Field"
-        return "%s with defining polynomial %s over the Rational Field" % (kind, _snf._repr_poly(self._f, self._var))
+        return "%s with defining polynomial %s over the Rational Field" % (kind, _snf._repr_poly(self._f, self._fvar()))
 
     def _maximal_order(self):
         if self._order is None:
