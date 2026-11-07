@@ -48,7 +48,7 @@ const noteOn = (pageIx, id) => (d) => d.pages[pageIx].nodes.find((x) => x.id ===
 
 try {
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
-  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/primes.json")}` });
+  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/primes.board.json")}` });
   await until(`${B}?.snapshot().items.length > 0`, 60000);
   const d0 = await docOf();
   check(d0.pages?.length === 3, "primes.json has pages");
@@ -76,6 +76,12 @@ try {
   const last = kept?.[kept.length - 1] ?? "";
   check(kept?.length === 3 && last.length < 700, `moving an item is a tiny patch: ${last.length} bytes`);
   check(last.includes(String(moved.x)) && !last.includes("Euclid") && !last.includes("Renamed"), "...holding its new place, not the other items' text: " + last.slice(0, 300));
+  // (the board's name in this browser stays the one from before the corpus's .board.json names (Nov 7): an old
+  // address opens the new file, its address rewritten, with this browser's edits of it)
+  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/primes.json")}` });
+  await until(`${B}?.snapshot().items.length > 0`, 60000);
+  check((await ev("new URLSearchParams(location.search).get('doc')")) === "examples/primes.board.json", "an old address: the new file's, in the address bar");
+  check(await until(`(${B}.snapshot().doc.pages[0].nodes.find((x) => x.id === ${JSON.stringify(id)}) ?? {}).title === "Renamed"`, 10000), "...with this browser's edits of it, kept under its old name");
   // any version comes back as it was
   const v0 = await ev(`${B}.version(0)`), v2 = await ev(`${B}.version(2)`);
   check(canon(v0) === canon(d0), "version 1 is the board as it was");
@@ -160,7 +166,7 @@ try {
   check((await count()) === 0, "another document loaded: no versions yet: " + await count());
 
   // a board with code: a version is shown with its code, not run
-  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.json")}` });
+  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.board.json")}` });
   await until(`${B}?.snapshot().items.length > 0`, 60000);
   check(await until(`${B}.outputs().then((os) => os.length === 5 && os.every((o) => o.state === ''))`, 90000), "the code board ran");
   const before = await ev(`${B}.outputs().then((os) => JSON.stringify(os))`);

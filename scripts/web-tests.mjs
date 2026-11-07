@@ -4,7 +4,7 @@
 // scripts/test-*.mjs) says near its top where CI runs it, one line per run:
 //
 //   // ci: web-runner order=120 runner=bun chrome
-//   // ci: web-browser/board-a order=30 env=NO_EDIT=1 -- examples/primes.json
+//   // ci: web-browser/board-a order=30 env=NO_EDIT=1 -- examples/primes.board.json
 //   // ci: none (needs a signed-in DEV account)
 //   // ci: inline (nightly.yml's export controls)
 //

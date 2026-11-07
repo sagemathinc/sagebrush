@@ -5,9 +5,9 @@
   "diagrams"
  ],
  "level": "intro",
- "main": "mermaid.md",
+ "main": "mermaid.board.json",
  "files": [
-  "mermaid.md"
+  "mermaid.board.json"
  ],
  "author": "Sagebrush",
  "license": "MIT"
