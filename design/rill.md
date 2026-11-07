@@ -1,6 +1,6 @@
 # Rill: an R-language mode (R0 design)
 
-*Status: design for review (R0). Author @sagebrush-magma, Nov 7 2026. Reviewers: all five lanes. Daybreak2 reviews size (§6), daybreak3 the engine and Stop (§8), astra files, network and processes (§9), grader the tests (§7), board the copy. No product code lands before DESIGN CLEAR. After that, code comes in the small phased PRs of §3, each through all five lanes.*
+*Status: design for review (R0). Author @sagebrush-magma, Nov 7 2026. Reviewers: all five lanes. Daybreak2 reviews size (§6), daybreak3 the engine, Stop, recursion and memory (§8, §5.1, §10), astra files, network and processes (§9), grader the tests (§7), board the copy. No product code lands before DESIGN CLEAR. After that, code comes in the small phased PRs of §3, each through all five lanes.*
 
 ## In plain words
 
@@ -33,8 +33,8 @@ The order is least complex first, and each phase is useful on its own. A phase i
 
 | Phase | What | Done when |
 |---|---|---|
-| **A1 Core** | The package skeleton (§4); the full R grammar; the evaluator: promises, environments, R's three-pass argument matching, closures, replacement functions, `UseMethod`/`NextMethod`/group generics, conditions (`stop`, `warning`, `tryCatch`, `withCallingHandlers`, `on.exit`); the printing core (vectors, named vectors, factors, lists, matrices, data frames, `str`); `sagebrush --rill`, `.R` files, and the REPL with continuation (`_rill.is_incomplete`) | The language and printing corpus is exact |
-| **A2 In the product** | The mode registry (§5.1) and Rill in the notebook, the Jupyter kernel (`--mode rill`), boards, the web worker as a lazy group (§6), completion and docsearch (our own one-line summaries) | A notebook cell runs R; other modes' bundles are unchanged |
+| **A1 Core** | The package skeleton (§4); the full R grammar; the evaluator: promises, environments, R's three-pass argument matching, closures, replacement functions, `UseMethod`/`NextMethod`/group generics, conditions (`stop`, `warning`, `tryCatch`, `withCallingHandlers`, `on.exit`); the printing core (vectors, named vectors, factors, lists, matrices, data frames, `str`); `sagebrush --rill`, `.R` files, and the REPL with continuation (`_rill.is_incomplete`). Also in A1: the final lazy-group routing and budget names (§6.1), §8's Stop, transaction, recursion and memory invariants, and §9's host permission pins and escape negative controls | The language and printing corpus is exact; §6.5's, §8's and §9's pins pass |
+| **A2 In the product** | The mode registry (§5.1, its own no-behaviour-change PR first) and Rill in the notebook, the Jupyter kernel (`--mode rill`), boards, the web worker as a lazy group (§6), completion and docsearch (our own one-line summaries) | A notebook cell runs R; other modes' bundles are unchanged |
 | **A3 Base and stats** | About 300 functions: vectors, strings, regex, factors, `table`, apply family, `Reduce`/`Map`, dates, data frames (`merge`, `aggregate`, `subset`, `with`, `transform`), summaries, distributions (d/p/q/r for the common families), the RNG (fitted, §5.4), `read.csv`/`write.csv` through the file gate (§9), the `datasets` values | The intro-stats corpus is exact |
 | **A4 Models and tests** | `lm`/`glm` with `model.frame`, NA handling and interactions; a pivoting QR, with aliased coefficients as `NA`; `summary`, `anova`, `aov`, `TukeyHSD`, `predict` (intervals), `confint`; t/chi-squared/prop/binom/cor/wilcox/shapiro tests | The models corpus is exact |
 | **A5 Base graphics** | `plot`, `hist`, `boxplot`, `barplot`, `lines`, `points`, `abline`, `legend`, `curve`, `qqnorm`/`qqline`, `par(mfrow)`, on Sagebrush's SVG renderer (§5.5) | The computed values match R; the SVG descriptions are snapshot-tested |
@@ -64,7 +64,7 @@ Performance work (§10) goes into whichever phase needs it, with measurements in
 | `_rill/base/*.py` | Base builtins, by family |
 | `_rill/stats/*.py` | Summaries, distributions, the RNG, tests, models |
 | `_rill/graphics.py` | Base graphics on `lib/_graphics.py` |
-| `_rill/datasets.py` | Dataset values, loaded on first reference (§5.6) |
+| `_rill/datasets.py`, `_rill/data/**` | Dataset loader (`rill-more`) and the values payload (`rill-data`), loaded on first reference (§5.6) |
 | `_rill/rmd.py` | Chunk parsing, chunk options, the knit driver (phase B) |
 | `_rill/ggplot2/*.py` | Phase C |
 | `_rill/dplyr/*.py`, `_rill/tibble.py` | Phase D |
@@ -85,9 +85,20 @@ Performance work (§10) goes into whichever phase needs it, with measurements in
 
 ### 5.1 A mode registry instead of a fifth copy
 
-Today a mode's name is a string union repeated in 32 files: 9 under `src/` and 23 under `web/`, for example `Mode = "sage" | "python" | "magma" | "matlab"` in `src/kernel.ts`, `src/reactive-session.ts`, `web/notebook/types.ts` and `web/latex/cells.ts`. Adding "rill" to each copy invites drift.
+Today a mode's name is a string union repeated in 32 files: 9 under `src/` and 23 under `web/`, for example `Mode = "sage" | "python" | "magma" | "matlab"` in `src/kernel.ts`, `src/reactive-session.ts`, `web/notebook/types.ts` and `web/latex/cells.ts`. The copies are deliberately not uniform: the kernel's `Mode`, the CLI's `ReplMode`, board modes, worker modes and offline items admit different sets.
 
-A2 first adds `src/modes.ts`. It holds one table: each mode's name, its label, its file extensions, its kernel `language_info`, the worker message flag, its library start and its completion hook. The existing unions derive from it with no behaviour change, and that refactor is reviewed as its own PR. Rill is then one row.
+A2 first adds `src/modes.ts`, in its own PR with no behaviour change, landed before the Rill row:
+
+- **Pure data.** It holds names, labels, extensions, kernel `language_info` and the worker flag name. It imports no mode implementation, so it adds nothing to any bundle that doesn't already need those strings.
+- **Hooks by reference.** Hooks (completion, `is_incomplete`, translation) are identifiers that each host resolves itself through its own lazy dynamic import. The shared table never holds code.
+- **One subset per consumer.** Each consumer derives an explicit subset (`KernelMode`, `ReplMode`, `BoardMode`, `WorkerMode`, `LatexLang` and so on) instead of using one universal union. A mode a consumer doesn't support stays out of its subset.
+- **Pins:**
+  - today's defaults;
+  - the serialized board schema;
+  - the kernel and CLI specs and their error strings (for example `--mode must be sage, python, magma, matlab or all`);
+  - the lazy-import and bundle boundaries (no new eager import; size unchanged).
+
+Rill is then one row, plus its membership in the subsets that support it.
 
 Rill's kernel `language_info`: name `R`, file extension `.R`, mimetype `text/x-r-source`, codemirror mode `r`, pygments lexer `r`. Its label in menus is "R (Rill)".
 
@@ -137,7 +148,7 @@ William: "similar to sagetex and knitr". An `.Rmd` is a source document whose ch
 
 The Rmd editor reuses that machinery with Markdown in place of TeX:
 - **Items:** ```` ```{r label, opt = value} ```` chunks and inline `` `r expr` ``. One Rill session per document, chunks in order, as knitr runs them.
-- **Chunk options, first set:** `echo`, `eval`, `include`, `results` ("markup", "asis", "hide"), `message`, `warning`, `error`, `collapse`, `comment` (default `"##"`, as knitr prefixes output lines), `fig.width`, `fig.height`, `fig.cap`, `label`. An unknown option is kept and reported; it is never silently ignored.
+- **Chunk options, first set:** `echo`, `eval`, `include`, `results` ("markup", "asis", "hide"), `message`, `warning`, `error`, `collapse`, `comment` (default `"##"`, as knitr prefixes output lines), `fig.width`, `fig.height`, `fig.cap`, `label`. An unknown option is kept and reported; it is never silently ignored. Options that would select another engine, a hook, a renderer or a destination are refused, and the chunk doesn't run (§9, RILL-SEC-2).
 - **YAML front matter:** `title`, `author`, `date` and `output` (`html_document`, plus later `pdf_document`/`beamer_presentation` through the LaTeX pipeline, for William's "presentation"). It is read by a closed grammar, as `web/notebook/myst-head.ts` reads MyST's.
 - **Preview and render:** HTML through `web/markdown.ts`, with its sanitiser and `remote: false`. Plots are inline SVG.
 - **Also:** "Open as notebook", which makes a notebook copy, as MyST `.md` files have today.
@@ -157,19 +168,62 @@ knitr's exact output text (the `##` prefixes, code fences, figure markup) is rec
 
 ## 6. Lazy loading and size (daybreak2)
 
-- **Other modes pay nothing.** Rill is not in the core:
-  - `web/lib-chunks.mts` gets a `rill` start (`["--rill", "-c", "1"]` in web/build.ts's `STARTS`) and `"rill"` in `START_ORDER`. The modules Rill's start imports form the `rill` group (src + pre chunks), fetched when a Rill session starts (`modes.rill`).
-  - Files no start imports form `rill-more` and lazy families: `mod-rill-ggplot2`, `mod-rill-dplyr` and `rill-data`, each fetched on first import.
-  - The preload table (`web/preload.ts`) and the offline inventory follow from the manifest, as for Magma and MATLAB.
-- **The CLI** embeds Rill's files like the other modes' (`lib.gen.js`). If CLI growth matters, Rill's later families can be embedded lazily as `scripts/lazy-lib.mjs` does for pathlib.
-- **Budgets:**
-  - Each new group gets its own `budgets.json` rows (new rows, ceiling `floor(1.1 × size)`), not core growth.
-  - The core rows grow only by the TypeScript wiring and the CLI's embedded sources. Each PR carries a tight growth marker, measured with the exact pull_request gate (Node 24.21.0, bun 1.4.4, equal-length paths) against current master.
-- **The estimate:**
-  - The spike was about 250 KB of source for the MVP slice. A complete phase A is estimated at 600–800 KB of source; with the precompiled chunk at about 5× source (as `magma.pre` is to `magma.src`), about 3–4 MB fetched once, only by Rill sessions.
-  - ggplot2 and dplyr are separate lazy groups, about 200–300 KB of source each.
-  - Each PR reports its measured numbers.
-- **Startup:** the spike measured about 130 ms for the mode's import over the engine's start. A2 records it in the PR, and keeps the `rill` start group to what the first cell needs.
+### 6.1 Final group routing, from A1's first `_rill` file
+
+The routing lands in A1's first PR, with the first `lib/_rill/` source, so later phases never rename or remove a bundle. A later split would read to the gate as a forbidden removal. `web/lib-chunks.mts` changes:
+
+- **The start.** `rill` joins web/build.ts's `STARTS` (`["--rill", "-c", "1"]`) and `START_ORDER`, **after** the existing modes. `groupOf`'s start loop checks it last (`sci`, `sage`, `matlab`, `magma`, then `rill`), so a file another start already uses stays in core, sci or sage: Rill never takes a shared file. `manifest.modes.rill` is built like the others.
+- **Path rules**, before the generic `mod-` fallback, so no `lib/_rill/**` file ever becomes `mod-rill`:
+
+  | Path | Group |
+  |---|---|
+  | in Rill's start recording | `rill` |
+  | `_rill/ggplot2/**` | `rill-ggplot2` |
+  | `_rill/dplyr/**`, `_rill/tibble.py` | `rill-dplyr` |
+  | the dataset payload, `_rill/data/**` | `rill-data` |
+  | any other `_rill/**` | `rill-more` |
+
+- **Offline ownership.** `web/offline-inventory.mts` `MODES` gains `{ id: "rill", title: "R (Rill)", prefix: "rill", needs: ["python"] }`. Because every Rill group is named with the `rill-` prefix, the Rill item owns all five, and none falls into "Other Python modules". If a measured start closure turns out to import scientific modules, `needs` names them, and the PR says why.
+
+### 6.2 Budget rows and markers
+
+- **New bundles.** A genuinely new measured bundle is authorized by its new `budgets.json` row. Only rows that are actually measured are added:
+  - `rill.src` and `rill.pre` (the start is precompiled);
+  - `rill-more.src`, plus `.pre` only if the build makes one; it doesn't for files no start compiles;
+  - later each family's `.src` (`rill-ggplot2`, `rill-dplyr`, `rill-data`).
+- **Growth of existing rows** (the CLI's `lib.gen.js` and `pyjs.cjs`, the TypeScript wiring, and every later increment to a Rill row) is authorized by tight `.growth` markers. They are measured with the exact pull_request gate (Node 24.21.0, bun 1.4.4, equal-length paths) against current master.
+
+### 6.3 The CLI pays from A1, so it is measured and kept lazy
+
+"Other modes pay nothing" holds only in the browser. The CLI embeds Rill's files from A1, so every CLI download and install carries them, and an unchanged embedding could slow a cold Python or Sage start.
+
+- **Plan:** extend `scripts/lazy-lib.mjs` from one shared gzip blob (pathlib's, today) to **keyed family blobs**:
+  - one for pathlib, as now;
+  - one for Rill's start files;
+  - one each for `rill-more`, `rill-ggplot2`, `rill-dplyr` and `rill-data`.
+- **Effect:** each blob is decoded only by the first import of a module in it. A pathlib import then never decodes Rill, and a Python or Sage start never decodes any Rill blob; they pay only the installed bytes.
+- **When:** this goes in A1, with the CLI's lazy-module guard (`web/test-cli-lazy-lib.mjs`) extended to the new families. If the measured cost of the single-blob approach is accepted instead, A1 says so with the numbers.
+
+### 6.4 What each phase reports
+
+Every Rill PR's SIZE packet reports, against current master:
+- `lib.gen.js`, `pyjs.cjs`, and the packaged install/download (npm pack) bytes;
+- cold start of Python, Sage and Rill on the CLI;
+- browser stored and Brotli transfer bytes per Rill row (`rill.src`/`.pre`, `rill-more.src`, each family);
+- the remaining headroom under the offline caps (`OFFLINE_CAPS` files, stored, transfer, max entry).
+
+**No aggregate estimate stands in for these.** The spike's numbers (about 250 KB of source for its slice; an import of about 130 ms over the engine's start) are only a starting point.
+
+**First-use target.** The target covers the full first use: download, decode, compile and import. A Rill session's first cell, measured cold in the browser (empty cache, the CI network profile) and on the CLI, must stay within 1.2× of MATLAB mode's first cell measured the same way, or the PR explains the difference. Each later family's first import is measured the same way.
+
+### 6.5 Pins (A1, extended per phase)
+
+- Synthetic path-to-group cases for every rule in §6.1, including a shared file that stays in core, sci or sage.
+- No other mode's start or `manifest.modes` entry includes a Rill group.
+- A Rill start fetches only its start group and its declared dependency groups.
+- The first import of a ggplot2, dplyr or dataset module fetches only that family's group.
+- The preload intent follows `modes.rill` (`web/preload.ts`).
+- The offline inventory owns every group exactly once and stays under its caps.
 
 ## 7. Tests: a corpus of recorded R outputs (grader)
 
@@ -199,18 +253,87 @@ Each phase sets aside a held-out file, written before the phase's code. It is sc
 
 Grader's mutant runs apply per PR, as for every lane: each new rule has a pin that kills its mutant, or the mutant is shown equivalent.
 
-## 8. Stop and interrupts (daybreak3)
+## 8. Stop, recursion and memory (daybreak3)
 
 Rill is Python on the engine, so it inherits Sagebrush's interrupt model (design/reading-rust.md §10). Stop sets the shared flag, and compiled Python loops test it every iteration. R's `for`, `while` and `repeat`, the apply family, and every builtin's loop are such loops. Rust engine calls check through `sagebrush_interrupt::check()`.
 
-Rill adds these rules:
+A1 establishes the invariants below, with their pins, before A2 starts.
 
-1. **No R construct swallows Stop.** `tryCatch`, `try`, `withCallingHandlers` and `suppressWarnings` catch R conditions (`RError`, warnings, messages). They never catch `KeyboardInterrupt` or `SystemExit`. MATLAB mode's `try/catch` follows the same rule. R's own `interrupt` condition class is not offered to handlers, a documented difference: in R, `tryCatch(..., interrupt =)` can catch Ctrl-C.
-2. **`on.exit` handlers run on Stop.** They are implemented with Python's `finally`, so files are closed and `par()` is restored. A second Stop during an `on.exit` handler stops it too.
-3. **State survives.** Variables defined before Stop are kept, as in the other modes. A replacement function interrupted mid-way leaves the old value, because replacement copies and then rebinds (copy-on-modify), so there is never a half-updated object.
-4. **Deep recursion is an R error, not a crash.** R's `expressions` limit (default 5000, per `?options`, and confirmed on the oracle) maps to a Rill depth bound checked in the evaluator, below the engine's stack limit. Passing it gives R's own message for runaway recursion, recorded from the oracle in the phase PR. `test/rill.test.ts` pins it.
-5. **Allocations are bounded before they happen.** For example `rep(0, 1e10)` or `matrix(0, 1e6, 1e6)` are refused before allocating, with R's own allocation-failure message, recorded from the oracle in the phase PR. The bound is the session's memory accounting, as MATLAB's LU uses it. Any new limit is registered in the limits census.
-6. **Tests:** `test/rill.test.ts` pins Stop in a tight `while (TRUE)`, inside `sapply`, inside `tryCatch` (not caught), during `on.exit`, and in a long `lm`. Each run is followed by a check that the session still answers and keeps its variables. Rill is added to the `interrupt-matrix` modes list, which is a test-side table, not a workflow file.
+### 8.1 Conditions never swallow Stop
+
+`tryCatch`, `try`, `withCallingHandlers`, `suppressWarnings` and `suppressMessages` catch only Rill's own condition classes: R errors, warnings, messages, and conditions created by `simpleCondition`/`signalCondition`. The implementation catches those Python classes by name. **No bare `except`, and no `except BaseException`/`Exception` around R code.** A census script fails the build on any.
+
+`KeyboardInterrupt` (Stop) and `SystemExit` always propagate. R's own `interrupt` condition class is not offered to handlers, a documented difference: in R, `tryCatch(..., interrupt =)` can catch Ctrl-C.
+
+### 8.2 `on.exit`: a stack per frame, run once, in order
+
+- **The stack.** Each closure frame keeps a list of `on.exit` expressions; `add = TRUE` appends, and `after = FALSE` prepends, as R documents in `?on.exit`. When the frame exits (normal return, R error, or Stop), the list runs once, in order, from one `finally` in the frame's exit path. The list is taken from the frame before it runs, so no handler can run twice.
+- **A handler that raises an R error** stops that frame's remaining handlers, and the error replaces the frame's outcome, as R does. Its text and order are recorded from the oracle in A1.
+- **A second Stop during a handler** stops the remaining handlers, and Stop propagates. The interrupted frame's handlers are never resumed.
+- **State.** Variables bound before Stop are kept, as in the other modes.
+
+### 8.3 Replacement is transactional
+
+A replacement (`x[i] <- v`, `names(x) <- n`, `df$col <- v`, `attr(x, "a") <- v`) runs in two parts:
+
+1. **Prepare.** It evaluates every index, the value, each coercion and the result's shape, and builds the plan, all before any session-visible object changes.
+2. **Publish.** It publishes the result in one step that no interrupt check can split.
+
+The publish step takes one of two forms:
+
+- **Multi-element replacements stage privately.** They build the new value in private storage, then rebind the target name, which is one environment store with no loop and so no interrupt check inside. Stop during staging leaves the old value byte for byte.
+- **The in-place fast path is a single element.** `x[i] <- scalar` on an *unshared* vector (§10) stores one slot, again one store. Nothing larger is ever mutated in place, so the fast path never exposes a partial update. This is the case that matters for loops: it removes the $O(n^2)$ cost of `for (i in ...) x[i] <- ...`.
+
+**Native kernels** (§10) write only to scratch or output storage they allocated. Rill publishes the result after the kernel returns successfully. A Stop inside a kernel unwinds through `sagebrush_interrupt` and leaves session-visible storage untouched.
+
+**Ownership** follows R's "named" rule, in its simple sticky form:
+- **Unshared:** a value is unshared only when it is fresh from a computation or a staging copy and bound to exactly one name.
+- **Shared (permanently):** a value becomes shared, and stays shared until a copy is made, when it is:
+  - bound to a second name;
+  - passed as an argument (promise values);
+  - stored in a list element, attribute, environment or data-frame column;
+  - captured by a closure's environment;
+  - returned from a function.
+- Every transition is in one module (`values.py`), so it can be audited.
+
+**Pins:**
+- Stop midway through a multi-index replacement on a large vector;
+- an aliased replacement (`y <- x; y[1:n] <- 0`);
+- a replacement inside a function on an argument;
+- a native-kernel operation.
+
+Each pin checks that the original values are unchanged byte for byte and that the session still answers.
+
+### 8.4 Recursion: the host stack is protected by construction
+
+A depth counter alone can't protect a recursive host evaluator: Python's recursion limit or the browser's JavaScript stack could fail first. Rill's evaluator therefore **does not recurse on the host stack for R calls**.
+
+- **The explicit stack.** Closure application, promise forcing, and control flow (`{`, `if`, loops, `switch`, `&&`/`||`) run on an explicit continuation stack, as a trampoline. Deep R recursion grows a Python list, not the host stack.
+- **Builtins that call back into R** (`sapply`, `lapply`, `Reduce`, `do.call`, `tryCatch`'s expression, `eval`, S3 dispatch from an internal generic) re-enter the trampoline. Each re-entry is a host segment, with a measured, fixed number of host frames per segment. The number of nested segments is bounded by a constant `S`, chosen in A1 from that measurement and the smallest host stack among the CLI's Node, Deno and Bun and the browsers, with margin.
+- **What counts as depth.** Each closure application and each `eval`/promise-forcing level increments the R depth, compared against `getOption("expressions")`.
+  - Valid values are R's documented 25–500000 (`?options`); the default is 5000.
+  - Passing the R depth gives R's own message for runaway recursion.
+  - Passing `S` first, possible only through deeply nested callbacks, gives R's own message for exhausted stack space, as R does when its C stack runs out.
+  - Both texts are recorded from the oracle in A1. A host `RecursionError` or `RangeError` never reaches the user.
+- **Pins**, in the CLI and in the browser: direct recursion (`f <- function(n) f(n + 1)`), mutual recursion, recursion through `sapply`, and `options(expressions = 100)`. Each must produce R's message, and the session must still answer afterwards.
+
+### 8.5 Memory: reserve before allocating, in every host
+
+Every allocation or growth site follows one discipline, a real refusal in every host, mapped to R's message afterwards:
+
+1. **Size first.** Lengths, dimension products and byte counts are computed in Python integers, which can't overflow, before anything is allocated. A product past the host's limits (`matrix(0, 2^31, 2^31)`) is refused at that point.
+2. **Charge the peak live storage** of the operation: the old value, the new or staging value, masks, index vectors, coercion temporaries and attributes. Per-element costs per storage kind (Python list of floats, NumPy array, strings) are measured per host in A1.
+3. **Reserve, then release.** The charge is reserved against the session's allowance before allocating, and released in `finally` when the operation's temporaries die.
+   - Where a host can't measure its memory (the browser's JavaScript heap today, as design/matlab.md records), Rill uses fixed, explicit caps instead: per object, per session and per operation's work. They are registered in the limits census and named in the refusal (`_memguard.memory_guard(..., fixed=True)` or `unmeasured=`).
+   - Native and Wasm allocations go through the engine's own ledger.
+4. **The message.** Refusals raise `SagebrushMemoryError` (lib/_memguard.py's one guard type). Rill maps it to R's own allocation-failure message, recorded from the oracle in A1, keeping Sagebrush's detail (need, allowance) on a following line.
+
+**Pins:** the exact boundary, one past it, a product overflow, and Stop during an allocation, which must release its reservation.
+
+### 8.6 Tests and integration
+
+- `test/rill.test.ts` holds §8.1–§8.5's pins, each run in the CLI, with the Stop and recursion pins also in the browser through the web tests.
+- Rill joins the `interrupt-matrix` modes list (scripts/web-tests.mjs, a test-side table, not a workflow file). Its cases cover Stop in a tight `while (TRUE)`, inside `sapply`, inside `tryCatch` (not caught), during `on.exit`, and in a long `lm`. Each is followed by a check that the session answers and keeps its variables.
 
 ## 9. Files, network and processes (astra)
 
@@ -227,7 +350,7 @@ Rill reaches files only through Sagebrush's Python file layer, so the existing p
 **Network: off.**
 - `url()`, `download.file`, `read.csv("https://…")` and `source("https://…")` fail with a Rill message saying the network is off for documents. Its exact text is quoted in the phase PR for the COPY check.
 - `install.packages` explains what's built in.
-- Nothing in Rill opens a connection. When the network permission gains a first feature, these route through it.
+- Nothing in Rill opens a network connection. When the network permission gains a first feature, these route through it.
 
 **Processes.**
 - `system()`, `system2()` and `shell()` are refused in phases A–D. Later they may use the same ShellHost as Python's `os.system` (just-bash), under the files permission, if William wants it (§12, question 2).
@@ -238,9 +361,44 @@ Rill reaches files only through Sagebrush's Python file layer, so the existing p
 - Plots are our own SVG.
 - Rill must offer no API that emits script or reaches JavaScript.
 
-**`eval(parse(text = s))`** must evaluate R inside Rill only: Rill must offer no escape to Python, and must not expose `py_run` or anything like reticulate.
+**RILL-SEC-1: retained connections hold no lasting authority.**
+- Opening a file connection (`file()`, `gzfile()`), starting a `sink()`, or selecting a graphics device (`png()`, `svg()`, `pdf()`) grants nothing that lasts.
+- Every actual mutation goes through the existing file layer with the document's **current** permission and identity checks:
+  - creating or truncating the file;
+  - each buffered flush;
+  - `close()`;
+  - `sink()` output;
+  - `dev.off()`'s final write;
+  - writes done by `on.exit` cleanup.
+- If changes are revoked, or the destination is moved, replaced or removed, an old connection can't write with stale authority. Its next write fails with R's write error, and the file layer, not the connection, decides.
+- Rill keeps no write-capable handle across calls: a connection holds a path and a buffer, not an open host file descriptor with write rights.
 
-**The gate inventory** (astra's audit) lists every Rill function that reaches a file or a process, generated from the code by a census script, like the arraybuffer census.
+**RILL-SEC-2: an `.Rmd` source is neither execution nor output authority.**
+- Opening or previewing an `.Rmd`, reading its YAML front matter, chunk options or inline expressions **cannot run code**. Execution follows the existing document Run policy: nothing runs on open, and running is the person's explicit action.
+- Chunk options use a closed grammar of the supported options (§5.7). An option can't select:
+  - a foreign engine (`engine = "python"`, `"bash"`, `"sql"`, …);
+  - a shell or render hook;
+  - a Python evaluator;
+  - an external renderer;
+  - a network destination.
+  Such an option is reported as unsupported, and the chunk does not run.
+- `results = "asis"` output, tables, chunk labels and figure captions, inline `` `r …` `` results, and SVG all stay untrusted input to the same sanitizer and escaping (`safeHtml`/`renderMarkdown` with `remote: false`; labels escaped as text). No option turns that off.
+
+**The R-only evaluator boundary, with negative controls.** `eval(parse(text = s))` must evaluate R inside Rill only. Rill must offer no escape to Python, and must not expose `py_run` or anything like reticulate. R values, environments, attributes and function lookup must never reach Python objects, module globals, imports, or foreign-call entry points:
+- `.Call`, `.External`, `.C`, `.Internal`, `.Primitive` lookups by string;
+- `get`/`mget`/`exists`, `as.environment`, `sys.function`, `environment()<-`.
+
+Escape-shaped calls that Rill doesn't support fail before any effect. A1 ships negative-control pins for each, for example `get("__import__")`, `.Call("x")`, `environment(sum)`, `attr(x, "__class__")`, and a crafted name in `as.name`, each of which must give an R error and leave the session unchanged.
+
+**The gate inventory** (astra's audit) is generated from the code by a census script, like the arraybuffer census. It lists every Rill route to a file, a process or the host, with an explicit gated or refused decision for each. That includes indirect and deferred routes:
+- `source()` and module loading;
+- connections;
+- sinks and devices;
+- `on.exit` and finalizer cleanup;
+- output and render hooks (Rmd);
+- session environment access (`Sys.getenv`/`Sys.setenv`, `options`).
+
+The census proves only that routes are listed. Behavioural pins prove the checks: the permission and refusal pins (files off and on, revocation mid-connection, network refusal, `system()` refusal, the escape negative controls) ship with the **first** host exposure of Rill (A1's CLI, then A2's notebook and worker), not later.
 
 ## 10. Performance
 
@@ -250,11 +408,16 @@ The spike measured, under load:
 - `x[i] <- v` in a loop is $O(n^2)$, because each step copies;
 - a uniform draw costs about 17 µs.
 
-The plan, measured in each PR:
+The plan, measured in each PR and always within §8's rules:
 
-1. **Copy-on-modify with reference counts.** A vector records whether it is shared, and replacement functions update an unshared vector in place. This is R's own strategy, and it removes the $O(n^2)$ (phase A1/A3).
-2. **Typed vector fast paths.** Doubles and integers of more than about 1,000 elements use numpy arrays with NA masks for arithmetic, comparison, summaries and indexing. Short vectors stay on lists.
-3. **Native kernels**, per William's principle that performance means Rust kernels per runtime: the Mersenne Twister, `sort`/`order`, `rowsum`/`tabulate`-class loops, and the QR. These are added to the engine only where measurements show the need, and are interruptible (§8).
+1. **Single-element in-place updates on unshared vectors** (§8.3's ownership rule). This removes the $O(n^2)$, in A1/A3. Multi-element replacements stage and publish, as §8.3 requires.
+2. **Typed vector fast paths.** Long doubles and integers use NumPy arrays with NA masks for arithmetic, comparison, summaries and indexing.
+   - The crossover length is chosen by measurement in each implementing PR; no number is frozen here.
+   - Fast paths must keep R's coercion, NA handling and attributes exactly; the corpus runs both paths.
+   - They obey §8.3 (scratch, then publish) and §8.5 (reserve the arrays and masks).
+3. **Native kernels**, per William's principle that performance means Rust kernels per runtime: the Mersenne Twister, `sort`/`order`, `rowsum`/`tabulate`-class loops, and the QR.
+   - Each is added only where measurements show the need.
+   - Each reserves its scratch through the engine ledger, writes only to its own output, is interruptible (§8), and is published by Rill after success.
 
 ## 11. Integration checklist (each item a reviewed PR in phase A2)
 
@@ -277,7 +440,11 @@ The plan, measured in each PR:
 1. **Oracle packages: approved by @sagebrush (Nov 7).** When phases B–D start, `r-knitr`, `r-rmarkdown`, `r-ggplot2`, `r-dplyr` and `r-tibble` go into VM4 `~/sbm-r` only (micromamba, home only, as R itself). They stay black boxes: their source is never read or printed. Before installing, run the VM checklist (no QUARANTINE marker, `lsof -w`, `df` on the exact path). Their versions are recorded in `rill-tests/` provenance.
 2. **`system()` (for William; @sagebrush has asked).** Should R's `system()` use the just-bash ShellHost, as Python's `os.system` does? Until he answers it stays refused, the least complex default.
 3. **Rmd output formats (for William; @sagebrush has asked).** Beyond HTML, which comes first: PDF through the LaTeX pipeline, or slides (`beamer_presentation` or HTML slides)?
-4. **Order of A2 and A3 (for the lanes).** A2 (in the product) comes before the bulk of builtins, so teachers can try Rill early. Is that the order you want?
+4. **Order of A2 and A3 (lanes).** A2 (in the product) comes before the bulk of builtins, so teachers can try Rill early. The conditions given in the design verdicts are folded in:
+   - daybreak2: A1 already sets the final routing and budget names, and A2 keeps a minimal, measured first-cell start;
+   - daybreak3: A1's corpus and §8's invariants are green, the registry lands alone first, and no eager Rill import or unmeasured core cost is added;
+   - astra: the registry refactor stays a separate review, and the host permission pins ship with the first exposed host.
+   Grader's verdict is pending.
 
 ## 13. Estimate
 
