@@ -2165,6 +2165,7 @@ newBuiltinModule("os", (m) => {
   m.pathsep = ":";
   m.linesep = "\n";
   m.curdir = ".";
+  m.defpath = "/bin:/usr/bin";
   m.pardir = "..";
   m.devnull = "/dev/null";
   const env = new PyDict();
@@ -2228,7 +2229,9 @@ newBuiltinModule("os", (m) => {
   m.lstat.$sig = { args: ["path"], posonly: 0, vararg: null, kwonly: ["dir_fd"], kwarg: null, defaults: [], kwdefaults: { dir_fd: null } };
   m.stat_result = typeOf(statResult({ mode: 0, ino: 0, dev: 0, nlink: 0, uid: 0, gid: 0, size: 0, atimeMs: 0, mtimeMs: 0, ctimeMs: 0 }));
   // (the flags pathlib and glob name: Linux's values, as CPython's; this runtime has no os.open, so no call takes them)
-  Object.assign(m, { O_RDONLY: 0, O_WRONLY: 1, O_RDWR: 2, O_CREAT: 64, O_EXCL: 128, O_TRUNC: 512, O_APPEND: 1024, O_DIRECTORY: 65536, O_NOFOLLOW: 131072, O_CLOEXEC: 524288 });
+  Object.assign(m, { O_RDONLY: 0, O_WRONLY: 1, O_RDWR: 2, O_CREAT: 64, O_EXCL: 128, O_TRUNC: 512, O_APPEND: 1024, O_NONBLOCK: 2048, O_DIRECTORY: 65536, O_NOFOLLOW: 131072, O_CLOEXEC: 524288 });
+  // (access()'s modes and lseek()'s whences, Linux's values, as CPython's os has them: shutil.which names F_OK | X_OK)
+  Object.assign(m, { F_OK: 0, R_OK: 4, W_OK: 2, X_OK: 1, SEEK_SET: 0, SEEK_CUR: 1, SEEK_END: 2 });
   // (the functions that take follow_symlinks=False: stat's own, as CPython lists them, the others not being here)
   // (made at its first read: os.stat is wrapped by checkArity after this module is filled, and the set holds that one)
   Object.defineProperty(m, "supports_follow_symlinks", {
@@ -2241,7 +2244,7 @@ newBuiltinModule("os", (m) => {
     },
   });
   // (the rest, Python, in _os_lazy: imported the first time one of them is read, never at startup)
-  for (const name of ["PathLike", "DirEntry", "scandir", "walk", "_walk_symlinks_as_files", "fsencode"]) {
+  for (const name of ["PathLike", "DirEntry", "scandir", "walk", "_walk_symlinks_as_files", "fsencode", "fsdecode"]) {
     const settle = (value: any) => Object.defineProperty(m, name, { value, writable: true, enumerable: true, configurable: true });
     Object.defineProperty(m, name, {
       enumerable: true,

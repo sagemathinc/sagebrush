@@ -6587,6 +6587,36 @@
   "owner": "csv (@sagebrush-sage2)",
   "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
  },
+ "lib/difflib.py :: HtmlDiff._split_line :: if (size <= max) or ((size -(text.count('\\0')*3)) <= max): #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "HtmlDiff's wrapcolumn: the column a table line wraps at (CPython 3.14.10's difflib, unchanged); it splits a line for display and refuses nothing"
+ },
+ "lib/difflib.py :: HtmlDiff._split_line :: max = self._wrapcolumn #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "HtmlDiff's wrapcolumn: the column a table line wraps at (CPython 3.14.10's difflib, unchanged); it splits a line for display and refuses nothing"
+ },
+ "lib/difflib.py :: HtmlDiff._split_line :: while n < max and i < size: #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "HtmlDiff's wrapcolumn: the column a table line wraps at (CPython 3.14.10's difflib, unchanged); it splits a line for display and refuses nothing"
+ },
+ "lib/difflib.py :: SequenceMatcher.find_longest_match :: In other words, of all maximal matching blocks, return one that #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "a docstring line (CPython 3.14.10's difflib, unchanged): 'maximal matching blocks', no limit"
+ },
+ "lib/difflib.py :: SequenceMatcher.find_longest_match :: starts earliest in a, and of all those maximal matching blocks that #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "a docstring line (CPython 3.14.10's difflib, unchanged): 'maximal matching blocks', no limit"
+ },
+ "lib/difflib.py :: get_close_matches :: Optional arg n (default 3) is the maximum number of close matches to #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "a docstring line (CPython 3.14.10's difflib, unchanged): n, the most close matches to return, the caller's own argument; no limit is applied"
+ },
  "lib/enum.py :: EnumType.__call__ :: `names` should be either a string of white-space/comma delimited names #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
