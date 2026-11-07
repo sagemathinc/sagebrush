@@ -14,7 +14,7 @@ submodules it does not have (util, machinery, abc, resources) are missing,
 an ImportError.
 """
 import sys
-from _pyjs_import import find_and_load as _find_and_load
+from _pyjs_import import find_and_load as _find_and_load, invalidate_caches as _invalidate_path_caches
 
 __all__ = ["__import__", "import_module", "invalidate_caches", "reload"]
 
@@ -25,6 +25,9 @@ from builtins import __import__
 def invalidate_caches():
     """Call the invalidate_caches() method on all meta path finders stored in
     sys.meta_path (where implemented)."""
+    # (this runtime's own path finder isn't on sys.meta_path: its part, CPython's PathFinder.invalidate_caches,
+    # advancing the generation namespace packages recompute their portions by)
+    _invalidate_path_caches()
     for finder in sys.meta_path:
         if hasattr(finder, "invalidate_caches"):
             finder.invalidate_caches()
