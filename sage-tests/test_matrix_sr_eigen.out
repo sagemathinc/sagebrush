@@ -1,0 +1,45 @@
+SR numbers: [3, 1]
+SR numbers, vectors: [(3, [(1, 1)], 1), (1, [(1, -1)], 1)]
+SR numbers, entry parent: Symbolic Ring
+symbolic: [a - b, a + b]
+symbolic, right vectors: [(a - b, [(1, -1)], 1), (a + b, [(1, 1)], 1)]
+symbolic, left vectors: [(a - b, [(1, -1)], 1), (a + b, [(1, 1)], 1)]
+repeated symbolic: [x, x]
+radicals: [-1/2*sqrt(33) + 5/2, 1/2*sqrt(33) + 5/2]
+radicals, right vectors: [(-1/2*sqrt(33) + 5/2, [(1, -1/4*sqrt(33) + 3/4)], 1), (1/2*sqrt(33) + 5/2, [(1, 1/4*sqrt(33) + 3/4)], 1)]
+radicals, left vectors: [(-1/2*sqrt(33) + 5/2, [(1, -1/6*sqrt(33) + 1/2)], 1), (1/2*sqrt(33) + 5/2, [(1, 1/6*sqrt(33) + 1/2)], 1)]
+ints over SR: [3, 1]
+complex: [-I, I]
+scalar: [(2, [(1, 0), (0, 1)], 2)]
+Jordan block: [(1, [(1, 0)], 2)]
+sqrt(2) entries: [sqrt(2) - 1, sqrt(2) + 1]
+change_ring(QQ): 3
+QQ matrix, SR numbers: (2, 1)
+its parent: Vector space of dimension 2 over Symbolic Ring
+QQ matrix, symbolic: (1/2*a + 1/2*b, 1/2*a - 1/2*b)
+QQ matrix, SR halves: (1/4, 1/4)
+QQ matrix times SR vector: (5, 11)
+1x1: [2*sbEigenT]
+scalar: [sbEigenT, sbEigenT]
+scalar vectors: [(sbEigenT, [(1, 0), (0, 1)], 2)]
+Jordan right: [(sbEigenT, [(1, 0)], 2)]
+Jordan left: [(sbEigenT, [(0, 1)], 2)]
+1x1: [2*u]
+scalar: [u, u]
+scalar vectors: [(u, [(1, 0), (0, 1)], 2)]
+Jordan right: [(u, [(1, 0)], 2)]
+Jordan left: [(u, [(0, 1)], 2)]
+colliding symmetric: [sbEigenT - 1, sbEigenT + 1]
+colliding symmetric vectors: [(sbEigenT - 1, [(1, -1)], 1), (sbEigenT + 1, [(1, 1)], 1)]
+quintic: ArithmeticError could not determine eigenvalues exactly using symbolic matrices; try using a different type of matrix via self.change_ring(), if possible
+QQ matrix, symbolic, no ring: (1/2*x + 1/2, 1/2*x - 1/2)
+its parent: Vector space of dimension 2 over Symbolic Ring
+QQ list: TypeError the second argument must be a vector or a matrix
+QQ tuple: TypeError the second argument must be a vector or a matrix
+QQ generator: TypeError the second argument must be a vector or a matrix
+SR list: TypeError the second argument must be a vector or a matrix
+SR tuple: TypeError the second argument must be a vector or a matrix
+SR generator: TypeError the second argument must be a vector or a matrix
+ZZ list: TypeError the second argument must be a vector or a matrix
+ZZ tuple: TypeError the second argument must be a vector or a matrix
+ZZ generator: TypeError the second argument must be a vector or a matrix
