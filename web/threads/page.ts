@@ -106,7 +106,7 @@ async function startPool(maxT: number): Promise<Pool> {
   try {
     for (let id = 1; id < maxT; id++)
       p.crew.add(`helper ${id}`, { role: "helper", module, memory, id, stackTop: stacks + (id + 1) * STACK, ctl, desc, fault });
-    p.conductor = p.crew.add("the conductor", { role: "conductor", module, memory, stackTop: stacks + STACK, ctl, desc, helpers: maxT - 1 });
+    p.conductor = p.crew.add("the conductor", { role: "conductor", module, memory, stackTop: stacks + STACK, ctl, desc, helpers: maxT - 1, stacks, slot: STACK });
     const failed = new Promise<never>((_, rej) => {
       const timer = setTimeout(() => rej(new Error(`the thread pool did not start within ${STARTUP_MS / 1000} s`)), STARTUP_MS);
       const check = setInterval(() => { if (p.dead) { clearInterval(check); clearTimeout(timer); rej(new Error("the thread pool failed while starting")); } }, 100);

@@ -549,6 +549,7 @@ import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIM
 import { mountBrowser } from "./workspace/browser.ts";
 // (the LaTeX editor's entry; a build without it takes this line out before bundling: web/build.ts)
 import { latexBoot } from "./latex/boot.ts";
+import { codeBoot } from "./code/boot.ts";
 import { createPermissions, hostMade } from "./notebook/permissions.js";
 import { renderFileMenu, fileMenuKey } from "./workspace/filemenu.ts";
 import { recordOpened, recentOpened, recentLabel, openFilesDialog } from "./workspace/fileopen.ts";
@@ -1683,7 +1684,8 @@ async function open(store, id, kind = "browser", guard = null, intent = null) {
     if (trashTest.pause) await trashTest.pause("beforeDetach");
     if (!(current.kind === "browser" && current.id === guard.expect)) throw Object.assign(new Error("another notebook was opened here meanwhile"), { navWon: true });
   }
-  if (intent && intent.attach !== attachSeq) throw Object.assign(new Error("another notebook was opened here meanwhile"), { navWon: true });
+  // (and an intent that knows it was superseded otherwise, a share link a later fragment replaced: its `current`)
+  if (intent && (intent.attach !== attachSeq || intent.current?.() === false)) throw Object.assign(new Error("another notebook was opened here meanwhile"), { navWon: true });
   nb.detach();
   docGen++;
   ttShow(false);
@@ -1768,17 +1770,17 @@ perms.onChange((doc) => {
   }
   if (doc === current.id) filesShown();
 });
-async function openDocument(doc, here = false, made = "elsewhere", guard = null) {
+async function openDocument(doc, here = false, made = "elsewhere", guard = null, intent = null) {
   const id = newId();
   // (Sagebrush's own (the first visit's Welcome, an example): host-made before its interpreter starts, so it never
   // starts as one that can't change files and is restarted (the app on Windows: still loading at the self-test's check))
   if (made === "host") { hostMade(id); perms.provenance(id, "host"); made = "elsewhere"; }
   madeAs.set(id, here ? "person" : made);
   const { here: _h, ...rest } = doc;
-  return open(await storeFor(id, { ...rest, ...(here ? { here: true } : {}), id, cells: (doc.cells ?? []).map((c) => (c.id ? c : { ...c, id: cellId() })) }), id, "browser", guard);
+  return open(await storeFor(id, { ...rest, ...(here ? { here: true } : {}), id, cells: (doc.cells ?? []).map((c) => (c.id ? c : { ...c, id: cellId() })) }), id, "browser", guard, intent);
 }
 // (here: a new notebook, written in this browser; else examples and share links)
-const openNew = (name, mode, codes, here = false, guard = null) => openDocument({ name, mode, cells: codes.map(asCell) }, here, undefined, guard);
+const openNew = (name, mode, codes, here = false, guard = null, intent = null) => openDocument({ name, mode, cells: codes.map(asCell) }, here, undefined, guard, intent);
 // (one of Sagebrush's own notebooks, made here from its bundled examples: permissions.js's "host")
 const openHostMade = (name, mode, codes) => openDocument({ name, mode, cells: codes.map(asCell) }, false, "host");
 /** `intent`: an automatic open's (awaitArrival), given to open() through either branch. */
@@ -2564,6 +2566,8 @@ const downloadDialog = createDownloadDialog({
 });
 beforeSwitch.push(async () => downloadDialog.invalidate());
 
+// (a share link's language: its m=, else Python)
+const linkMode = (hash) => (/m=sage/.test(hash) ? "sage" : /m=magma/.test(hash) ? "magma" : /m=matlab/.test(hash) ? "matlab" : "python");
 async function fromLink(hash) {
   const z = /z=([\w-]+)/.exec(hash), c = /c=([\w-]+)/.exec(hash);
   if (!z && !c) return null;
@@ -3940,6 +3944,8 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   // (the LaTeX editor: in a build with it, and on, its hooks are installed, and /?tex=<fid> is its page; a build
   // without it has none of this: web/latex/boot.ts, web/build.ts SAGEBRUSH_LATEX_PREVIEW)
   if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && (await latexBoot(ws, RUNNER ? { WorkerKernel, RunnerWorker } : null))) return;
+  // (a code or text file's own page, /?code=<fid> (1a): web/code/boot.ts; its hooks for the file browser and the preview either way)
+  if (await codeBoot(ws, (e, how) => openEntry(e, how))) return;
   let mode = "python";
   try { mode = localStorage.getItem("sagebrush-mode") || mode; } catch {}
   // a shared link opens as a new notebook; else the last one; else the welcome
@@ -4025,12 +4031,32 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
     for (const b of [$("#filesbtn")]) if (b) b.hidden = true;
   }
   else if (opened) {}
-  else if (shared) await openNew("Shared notebook", /m=sage/.test(location.hash) ? "sage" : /m=magma/.test(location.hash) ? "magma" : /m=matlab/.test(location.hash) ? "matlab" : "python", shared);
+  else if (shared) await openNew("Shared notebook", linkMode(location.hash), shared);
   else if (!(last && (await openId(last)))) {
     // (the first visit's Welcome: Sagebrush's own, which may change files: permissions.js)
     await openHostMade(mode === "sage" ? "Sage" : "Welcome", mode, mode === "sage" ? EXAMPLES.Sage : EXAMPLES.Welcome);
   }
   booted();
+  // a share link opened in this tab while the page is already open (pasted into the address bar, or a link followed
+  // here): only the fragment changes and nothing reloads, so it is opened here as it would be at load (run 13's
+  // APP-share-link-same-tab: the old notebook stayed, and its Run all ran its own cells). Through open(), as File > Open:
+  // the notebook left is kept (saved as it goes), and one whose saves can't be made yet stays open, saying why. A
+  // fragment that is no share link changes nothing; under `sagebrush notebook`'s one file, as at load, it isn't opened.
+  // Only the latest fragment counts (astra's SHARE-HASH-STALE-1): each is read once, numbered, and decoded; a decode a
+  // later fragment superseded (a link, or anything else) is dropped, its error unsaid; and it attaches only if no other
+  // notebook was attached here since it was asked for, and it is still the latest fragment then (an `intent`, both
+  // checked by open() under the navigation lease, just before anything is detached: a File > Open meanwhile wins, and a
+  // later fragment while it waits for the lease or its store drops it)
+  let linkSeq = 0;
+  if (!LOCAL) addEventListener("hashchange", async () => {
+    const hash = location.hash, seq = ++linkSeq, intent = { attach: attachSeq, current: () => seq === linkSeq };
+    let codes = null;
+    try { await shareTest.beforeLinkDecode?.(hash); codes = await fromLink(hash); }
+    catch { if (seq === linkSeq) statusEl.textContent = "could not open the share link: it is damaged or cut short"; return; }
+    if (seq !== linkSeq || !codes) return;
+    try { await openNew("Shared notebook", linkMode(hash), codes, false, null, intent); }
+    catch (err) { if (!err?.navWon && seq === linkSeq) statusEl.textContent = `could not open the share link: ${err?.message ?? err}`; }
+  });
   // ?openas=PATH&fid=FID: a file opened as a notebook from the board page (a Jupytext MyST .md sent there, which
   // offers it here instead: agents-ui's N-2), through openAs as the file browser's menu does; one replaced
   // meanwhile (another fid), said, nothing made
