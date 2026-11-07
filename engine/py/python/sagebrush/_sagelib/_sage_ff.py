@@ -3455,7 +3455,7 @@ class PolynomialRing_ff_:
             sage: GF(4, 'a')['t'].change_ring(GF(2))
             Univariate Polynomial Ring in t over Finite Field of size 2 (using GF2X)
         """
-        return _sa().PolynomialRing(R, self._name)
+        return _sa().PolynomialRing(R, self._name, _internal=True)
 
     def variable_name(self):
         """The variable name.
@@ -4128,7 +4128,7 @@ class Polynomial_ff:
         is moved), else Sage's error.  A zero polynomial goes anywhere.
         """
         sa, S = _sa(), _ffsub()
-        P = sa.PolynomialRing(R, self._ring._name)
+        P = sa.PolynomialRing(R, self._ring._name, _internal=True)
         # (the polynomial's own coefficient list: not copied, converted or
         # visited before its work is charged; daybreak2 LIMIT-F3-2)
         cs, B = self._c, self._ring._base
@@ -4193,11 +4193,11 @@ class Polynomial_ff:
             cs = [D(c) for c in self._c]
             ys = [S.apply(c, U, f._img, paid, refuse) for c in cs]
             T = U if new_base_ring is None else new_base_ring
-            return _sa().PolynomialRing(T, name)([T(y) for y in ys] if T is not U else ys)
+            return _sa().PolynomialRing(T, name, _internal=True)([T(y) for y in ys] if T is not U else ys)
         T = self._ring._base if new_base_ring is None else new_base_ring
         # (a function's own work is the caller's; the copy, a word each)
         _ffsub().charge([_ffsub().WORK], len(self._c), lambda: NotImplementedError("map_coefficients of a polynomial of degree %d is not supported yet (work)" % self.degree()))
-        return _sa().PolynomialRing(T, name)([T(f(c)) if c else T(0) for c in self._c])
+        return _sa().PolynomialRing(T, name, _internal=True)([T(f(c)) if c else T(0) for c in self._c])
 
     def factor(self):
         """The factorization into monic irreducibles (Sage's order: by degree,

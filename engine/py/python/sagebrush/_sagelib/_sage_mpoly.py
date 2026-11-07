@@ -2049,7 +2049,7 @@ class MPolynomial:
             cs[e[i]] = c
         if R is None:
             from _sage_poly import PolynomialRing
-            R = PolynomialRing(S._base, S._names[i])
+            R = PolynomialRing(S._base, S._names[i], _internal=True)
         return R([S._dom._out(c) for c in cs])
 
     def resultant(self, other, variable=None):
