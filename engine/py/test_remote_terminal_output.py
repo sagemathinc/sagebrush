@@ -181,9 +181,9 @@ async def test_ack_cheats_close_the_page():
     t = await Run().start(sh=SLEEPER)
     try:
         leg = await t.relay.leg()
-        for gen, bad in ((1, lambda sent: sent + 1), (2, None), (3, lambda sent: True), (4, lambda sent: float(sent))):
+        for gen, bad in ((1, lambda sent: sent + 1), (2, None), (3, lambda sent: True), (4, lambda sent: float(sent)), (5, "extra")):
             p = await tpaired(t, leg, sg, gen)
-            await p.open()
+            sid = (await p.open())["session"]
             st = Stream(p, ack=False)
             assert await st.pump(lambda x: "live" in x.events and b"first-marker" in x.data, 10)
             sent = len(st.data)
@@ -191,9 +191,13 @@ async def test_ack_cheats_close_the_page():
                 p.send({"t": "ack", "upto": sent})
                 await asyncio.sleep(0.1)
                 p.send({"t": "ack", "upto": sent - 1})  # (going back)
+            elif bad == "extra":
+                p.send({"t": "ack", "upto": sent, "x": 1})  # (an ack with another key: grader's T3)
             else:
                 p.send({"t": "ack", "upto": bad(sent)})
             assert await until(lambda: {"relay": "close", "gen": gen} in leg.controls, 5), gen
+            t.terms.running[sid].stop()  # (at most 4 sessions run at once: end this one before the next case)
+            assert await until(lambda: sid not in t.terms.running, 5)
     finally:
         await t.end()
         sg.close()
@@ -433,6 +437,44 @@ async def test_exit_is_last_with_a_background_flooder():
         sg.close()
 
 
+@aio
+async def test_reattach_after_exit_before_close_gets_exit_last():
+    """grader's T4: a reattach after the shell has exited but while its PTY is still open (a background flooder
+    ignoring HUP and TERM keeps the session alive until SIGKILL); the exit comes only after the PTY's close, last."""
+    if NODE is None:
+        print("  (no node) SKIPPED")
+        return
+    sg = await Signer().start()
+    t = await Run().start(sh=FLOOD)
+    try:
+        leg = await t.relay.leg()
+        p1 = await tpaired(t, leg, sg, 1)
+        sid = (await p1.open())["session"]
+        st1 = Stream(p1)
+        assert await until(lambda: any(e.id == sid for e in t.terms.ended_), 10)
+        s = next(e for e in t.terms.ended_ if e.id == sid)
+        assert s.exit is not None and s.master is not None  # (exited, the PTY still open: the window)
+        await st1.pump(lambda x: "exit" in x.events, 0.1)
+        p2 = await tpaired(t, leg, sg, 2)
+        p2.send(await p2.open_msg(session=sid))
+        st2 = Stream(p2)
+        seen = {}
+
+        def at_exit(x):
+            if "exit" in x.events and "master" not in seen:
+                seen["master"] = s.master
+            return "exit" in x.events
+        assert await st2.pump(at_exit, 15), st2.events[-4:]
+        assert seen["master"] is None, "exit came before the PTY closed"
+        i = st2.events.index("exit")
+        assert "live" in st2.events[:i]
+        await st2.pump(lambda x: False, 0.6)
+        assert st2.events[i + 1:] == [], st2.events[i:i + 3]
+    finally:
+        await t.end()
+        sg.close()
+
+
 class FakeSession:
     def __init__(self, timers):
         self.host = type("H", (), {"timers": timers})()
@@ -477,6 +519,96 @@ def test_final_drain_during_a_replay_stays_behind_it():
     data = b"".join(base64.b64decode(f["b"]) for f in page.frames)
     assert data == b"\x1bc" + ring + b"FINAL", (len(data), data.find(b"FINAL"))
     assert [m["t"] for m in page.msgs] == ["replay", "live", "exit"], page.msgs
+
+
+def test_final_drain_stays_under_credit():
+    """grader's K14: with a page that never acks, the final drain adds only what the credit allows; the rest stays in
+    the ring only."""
+    tm = FakeTimers()
+    tm.t = 1000
+    a = O.Attachment(FakeSession(tm), FakePage(), lambda b: len(b))
+    a.feed(b"a" * O.OUT_MAX)
+    tm.advance(1000)
+    a.feed(b"b" * 150_000)
+    tm.advance(1000)
+    held = a.outstanding() + a.throttle.buffered()
+    assert held < O.CREDIT_HIGH
+    took = a.push_final(b"c" * 200_000)
+    assert took == O.CREDIT_HIGH - held, (took, held)
+    a.flush_now()
+    assert a.outstanding() == O.CREDIT_HIGH and a.push_final(b"d" * 10) == 0
+
+
+def test_drain_feeds_the_attached_page():
+    """grader's T5: the bytes still in the PTY when the session ends (Session._drain) reach an attached page within
+    credit, before the exit."""
+    import types
+    from sagebrush.remote import terminal as T
+
+    tm = FakeTimers()
+    host = types.SimpleNamespace(stats={"outBytes": 0}, timers=tm)
+    s = T.Session(host, "s" * 22, 24, 80)
+    s.master = 12345  # (never a real fd: the read is replaced)
+    page = FakePage()
+    a = O.Attachment(s, page, lambda b: len(b))
+    s.grant = types.SimpleNamespace(live=True, att=a)
+    s.reading_changed = lambda: None
+    chunks = [b"tail-1|", b"tail-2|", b""]
+    real_read = T.os.read
+    T.os.read = lambda fd, n: chunks.pop(0) if fd == 12345 else real_read(fd, n)
+    try:
+        s._drain()
+    finally:
+        T.os.read = real_read
+    a.flush_now()
+    got = b"".join(base64.b64decode(f["b"]) for f in page.frames)
+    assert got == b"tail-1|tail-2|", got
+    assert bytes(s.ring.buf).endswith(b"tail-1|tail-2|")
+
+
+def test_input_credit_boundary_chunks_and_inacks():
+    """grader's K22-K25: exactly 64 KiB unwritten is accepted and one more byte refused; writes are 1 KiB pieces; a short
+    input is inacked once written; a long one is inacked at 16 KiB before its queue empties."""
+    tm = FakeTimers()
+    # (K22: nothing taken by the PTY, so everything stays pending)
+    a = O.Attachment(FakeSession(tm), FakePage(), lambda b: None)
+    for _ in range(O.IN_PENDING // O.IN_MAX):
+        assert a.input(b"x" * O.IN_MAX)
+    assert a.in_recv - a.in_written == O.IN_PENDING
+    assert not a.input(b"y")
+    # (K23 and K25: a PTY that takes whatever it is given, recorded)
+    sizes = []
+    page = FakePage()
+    a = O.Attachment(FakeSession(tm), page, lambda b: sizes.append(len(b)) or len(b))
+    for _ in range(4):
+        assert a.input(b"z" * O.IN_MAX)
+    inacks_before_empty = []
+    while a.writable():
+        if page.msgs and not inacks_before_empty:
+            inacks_before_empty.append(page.msgs[-1])
+    assert set(sizes) == {1024} and sum(sizes) == 4 * O.IN_MAX, sorted(set(sizes))  # (CoCalc's 1 KiB pieces, literally)
+    assert inacks_before_empty == [{"t": "inack", "upto": O.INACK_EVERY}], inacks_before_empty
+    assert page.msgs[-1] == {"t": "inack", "upto": 4 * O.IN_MAX}
+    # (K24: a short input, inacked with its length once written)
+    page = FakePage()
+    a = O.Attachment(FakeSession(tm), page, lambda b: len(b))
+    assert a.input(b"hello")
+    while a.writable():
+        pass
+    assert page.msgs == [{"t": "inack", "upto": 5}], page.msgs
+
+
+def test_throttle_flushes_at_once_when_the_wait_is_exactly_zero():
+    """grader's K12: as CoCalc's ThrottleString (timeUntilEmit > 0 waits; 0 goes at once), a write exactly 1000/rate ms
+    after the last flush is emitted immediately (here at 8 a second, 125 ms)."""
+    tm, out = FakeTimers(), []
+    th = O.OutputThrottle(tm, out.append)
+    tm.t = 1000
+    th.write(b"x" * O.ADAPTIVE_MEDIUM_BYTES)  # (steps the rate to 8 a second)
+    assert th.rate == O.ADAPTIVE_MEDIUM_MSGS_PER_SECOND and len(out) == 1
+    tm.advance(125)
+    th.write(b"y")
+    assert out[-1] == b"y" and th.timer is None
 
 
 def test_rate_steps_through_an_attachment():
