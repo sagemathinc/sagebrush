@@ -48,6 +48,18 @@ else:
     abi3 = [f for f in py["tool"]["maturin"]["features"] if "abi3" in f]
     assert abi3 == ["pyo3/abi3-py%d%d" % FLOOR], abi3
     print("python floor: pyproject.toml and py-mcp require %d.%d; the wheel is abi3-py%d%d" % (FLOOR + FLOOR))
+    # (the release's versions agree (grader's #799 V6, V7): the package is at least the page's RUNNER_MIN, or the page
+    # would refuse every released runner as old; and sagebrush-mcp requires exactly this sagebrush)
+    version = py["project"]["version"]
+    with open(os.path.join(HERE, "..", "..", "web", "notebook", "pair-tunnel.js"), encoding="utf-8") as f:
+        m = re.search(r'^export const RUNNER_MIN = (null|"([0-9.]+)");$', f.read(), re.M)
+    assert m, "pair-tunnel.js: no RUNNER_MIN line of the expected form"
+    nums = lambda v: tuple(int(x) for x in v.split("."))
+    assert re.fullmatch(r"\d+(\.\d+){1,3}", version), "the package version %r isn't a plain release" % version
+    if m.group(2) is not None:
+        assert nums(version) >= nums(m.group(2)), "sagebrush %s is below the page's RUNNER_MIN %s" % (version, m.group(2))
+    assert mcp["project"]["dependencies"] == ["sagebrush>=%s" % version], mcp["project"]["dependencies"]
+    print("python floor: sagebrush %s >= RUNNER_MIN %s; sagebrush-mcp requires sagebrush>=%s" % (version, m.group(2) or "(none)", version))
 
 # 2. every Python file of the two packages (and the package's tests) parses as 3.10 (grader's check)
 files = sorted(set(glob.glob(os.path.join(HERE, "python", "**", "*.py"), recursive=True)

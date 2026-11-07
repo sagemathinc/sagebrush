@@ -41,9 +41,9 @@ const ID = "[A-Za-z0-9._~-]{1,64}";
 const ID_RE = new RegExp(`^${ID}$`);
 const FRAME_ID_RE = /^t[1-9]\d{0,14}$/;
 const NULL_BODY = new Set([204, 205, 304]);
-// The oldest runner this page pairs with: the one place it is set, at the release that first ships `sagebrush remote`
-// (William's call).  null until then: any runner that reports a version (a source checkout reports "dev").
-export const RUNNER_MIN = null;
+// The oldest runner this page pairs with, the one place it is set: 0.9.0, the release that first ships `sagebrush
+// remote`.  A source checkout reports "dev" and always pairs.
+export const RUNNER_MIN = "0.9.0";
 // (a runner's version: this subset of PEP 440's canonical form, whole, or "dev" (astra's VERSION-2): numbers, then
 // optionally a pre-release (aN, bN, rcN), a post-release (.postN), a dev release (.devN) and a local part (+x.y))
 const NEED_RE = /^\d{1,6}(\.\d{1,6}){0,3}$/; // (a minimum: a release's numbers, nothing else)
