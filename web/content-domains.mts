@@ -35,7 +35,7 @@ export const filesHost = (env: ContentEnvironment, config: ContentDomains = CONT
 // Keep old raw download links working during the reviewed dual-host cutover.
 export const filesHosts = (env: ContentEnvironment, config: ContentDomains = CONTENT_DOMAINS): string[] => [...new Set([new URL(legacyFiles[env]).hostname, filesHost(env, config)])];
 // Until real-host isolation gates and PSL/browser adoption are reviewed,
-// neither a pending root nor its role hosts are eligible output-shell sites.
+// neither a configured root nor its role hosts are eligible output-shell sites.
 export function forbiddenContentRoots(config: ContentDomains = CONTENT_DOMAINS): string[] {
   return [...LEGACY_CONTENT_ROOTS, ...Object.values(config).map((c) => c.root).filter(Boolean)];
 }

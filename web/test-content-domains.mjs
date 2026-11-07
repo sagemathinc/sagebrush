@@ -66,7 +66,7 @@ it("configured routes retain each environment's legacy host alongside its new on
   assert.deepEqual(filesHosts("dev", c), ["files.cocalcusercontent.dev", "files.content-example.dev"]);
   assert.deepEqual(filesHosts("prod", c), ["files.cocalcusercontent.com", "files.content-example.com"]);
 });
-it("legacy and pending content roots stay forbidden for hosted rendering", () => {
+it("legacy and owned content roots stay forbidden for hosted rendering", () => {
   assert.deepEqual(forbiddenContentRoots(), [...legacy, "sagebrushusercontent.dev", "sagebrushusercontent.com"]);
   assert.deepEqual(forbiddenContentRoots(configured()), [...legacy, "content-example.dev", "content-example.com"]);
   for (const root of [...legacy, "sagebrushusercontent.dev", "sagebrushusercontent.com"]) {
