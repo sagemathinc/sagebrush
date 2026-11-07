@@ -30,7 +30,11 @@ dialog.sb-examples::backdrop { background: #0006; }
 .sb-examples li .m { font-size: 0.8rem; opacity: 0.7; }
 .sb-examples .show { display: flex; flex-direction: column; min-width: 0; }
 .sb-examples .acts { display: flex; gap: 0.6rem; align-items: center; padding: 0.5rem 0.8rem; border-bottom: 1px solid #8884; }
-.sb-examples .acts .msg { font-size: 0.9rem; opacity: 0.85; }
+.sb-examples .acts .msg { font-size: 0.9rem; opacity: 0.85; flex: 1; }
+/* Expand (William, Nov 6): the panel across the whole window, the list hidden, so the preview has all of it */
+dialog.sb-examples.big { width: 100vw; height: 100vh; max-width: none; max-height: none; margin: 0; border: 0; border-radius: 0; }
+.sb-examples.big .body { grid-template-columns: 1fr; }
+.sb-examples.big ul { display: none; }
 .sb-examples iframe { flex: 1; width: 100%; border: 0; background: #fff; }
 .sb-examples .empty { padding: 2rem; opacity: 0.7; }
 `;
@@ -76,11 +80,20 @@ export async function openExamplesPanel(host: ExamplesHost, opts: { kind?: Kind;
   const copyBtn = el("button", { type: "button", textContent: "Open a copy", disabled: true });
   const zipLink = el("a", { textContent: "Download (ZIP)" });
   const msg = el("span", { className: "msg" });
+  const bigBtn = el("button", { type: "button", textContent: "Expand", title: "Show the preview across the whole window" });
+  bigBtn.dataset.act = "expand";
+  bigBtn.setAttribute("aria-pressed", "false");
+  bigBtn.onclick = () => {
+    const on = dlg.classList.toggle("big");
+    bigBtn.setAttribute("aria-pressed", String(on));
+    bigBtn.textContent = on ? "Show the list" : "Expand";
+    bigBtn.title = on ? "Back to the list of examples beside the preview" : "Show the preview across the whole window";
+  };
   const frame = el("iframe");
   frame.setAttribute("sandbox", "");
   frame.setAttribute("referrerpolicy", "no-referrer");
   frame.title = "The example's preview";
-  const show = el("div", { className: "show" }, el("div", { className: "acts" }, copyBtn, zipLink, msg), frame);
+  const show = el("div", { className: "show" }, el("div", { className: "acts" }, copyBtn, zipLink, msg, bigBtn), frame);
   dlg.append(el("div", { className: "body" }, list, show));
   document.body.append(dlg);
 
