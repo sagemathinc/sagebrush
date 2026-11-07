@@ -185,6 +185,10 @@ newBuiltinModule("_sbraster", (m) => {
   // whether the module has been compiled (it is, the first time a PNG is
   // written or read)
   m.loaded = Obj.builtin(() => R !== null, "loaded");
+  // the module's linear memory in bytes (0 before it is compiled): it only
+  // grows, so a test can tell, without a clock, that a drawing was refused
+  // before its rasters were allocated (test/png.test.ts, HARD-6BC-1)
+  m.memory_bytes = Obj.builtin(() => (R === null ? 0 : R.memory.buffer.byteLength), "memory_bytes");
   m.decode = Obj.builtin((png: any) => {
     const a = bytesOf(png);
     let out: Uint8Array;
