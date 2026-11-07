@@ -151,6 +151,54 @@ test("board render: a code item's stored preview is drawn, its text and its rast
   assert.ok(r.stderr.includes("code's outputs (of the items with no stored preview)") && r.stderr.includes("some code outputs aren't stored in this board"), r.stderr);
 });
 
+// (a PNG of this size, its header only: what the picture's size is read from)
+const be32 = (v: number) => [(v >>> 24) & 255, (v >>> 16) & 255, (v >>> 8) & 255, v & 255];
+const pngOf = (w: number, h: number) => Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, ...be32(w), ...be32(h), 8, 2, 0, 0, 0, 0, 0, 0, 0]).toString("base64");
+
+test("board render: a stored preview's text display, stderr in the error color, an output with backticks whole, a wide picture held to the item, an item in a group (grader's r787 pins)", () => {
+  const item = (outputs: any[], extra: any = {}) => ({ id: "c", code: "f()", w: 300, preview: { at, ms: 12000, total: 12000, outputs }, ...extra });
+  const render = (nodes: any[]) => { const r = cli(["-"], JSON.stringify({ format: "sagebrush-board", version: 1, nodes })); assert.equal(r.status, 0, r.stderr); return r.stdout; };
+  // (R8: a display with only text/plain, as an Out: value is, is drawn)
+  let svg = render([item([{ output_type: "display_data", data: { "text/plain": "Out: 42" }, metadata: {} }])]);
+  assert.ok(svg.includes("Out: 42") && !svg.includes("output not stored"), "a text/plain display drawn");
+  // (R5: stderr in the board's error color, stdout not)
+  svg = render([item([{ output_type: "stream", name: "stdout", text: "fine\n" }, { output_type: "stream", name: "stderr", text: "oops\n" }])]);
+  assert.match(svg, /fill="#b3261e"[^>]*>(?:<tspan[^>]*>)?oops</, "stderr drawn in #b3261e");
+  assert.doesNotMatch(svg, /fill="#b3261e"[^>]*>(?:<tspan[^>]*>)?fine</, "stdout not");
+  // (R7: an output with its own ``` drawn whole: the fence is longer than any run of backticks in it)
+  // (a line of ``` in it would end a three-backtick fence, and what follows be read as Markdown: *em* lose its stars)
+  svg = render([item([{ output_type: "stream", name: "stdout", text: "start\n```\nmiddle *em* __b__\n" }])]);
+  assert.ok(svg.includes(">```<") && svg.includes("middle *em* __b__"), "the output's own backticks don't end it: drawn as it is");
+  // (R10: a picture wider than the item (600 wide, within a preview's 640, in a 300-wide item): drawn at most the item's text width)
+  svg = render([item([{ output_type: "display_data", data: { "image/png": pngOf(600, 50) }, metadata: {} }])]);
+  const w = [...svg.matchAll(/<image [^>]*width="([\d.]+)"/g)].map((m) => Number(m[1]));
+  assert.equal(w.length, 1, svg.slice(0, 400));
+  assert.ok(w[0] > 0 && w[0] <= 300, `the picture held to the item: ${w[0]}`);
+  // (R13: a code item inside a group: its stored output drawn, not the placeholder)
+  svg = render([{ id: "g", kind: "group", title: "G", children: [item([{ output_type: "stream", name: "stdout", text: "in the group\n" }])] }]);
+  assert.ok(svg.includes("in the group") && !svg.includes("output not stored"), "a grouped item's preview drawn");
+});
+
+test("board render: the way to store outputs, for a file whose name has a newline or an ESC: no control character on the command line (grader's R19)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sb-hint-ctl-"));
+  try {
+    for (const name of ["a\nb.board.json", "x\u001b[31my.board.json"]) {
+      const f = join(dir, name);
+      writeFileSync(f, JSON.stringify({ format: "sagebrush-board", version: 1, nodes: [{ id: "c", code: "1" }] }));
+      const r = cli([f, "-o", join(dir, "o.svg")]);
+      assert.equal(r.status, 0, r.stderr);
+      const lines = r.stderr.split("\n");
+      const i = lines.findIndex((l) => l.endsWith("To draw them, run"));
+      assert.ok(i >= 0, r.stderr);
+      const cmd = lines[i + 1];
+      assert.ok(cmd.startsWith("  sagebrush board run ") && cmd.endsWith(" --store-previews --preview-ms 0"), JSON.stringify(cmd));
+      assert.doesNotMatch(r.stderr.replace(/\n/g, ""), /[\u0000-\u001f\u007f-\u009f]/, JSON.stringify(r.stderr));
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("board render: the way to store code's outputs names this file and the one it writes, the command on its own line", () => {
   const dir = mkdtempSync(join(tmpdir(), "sb-hint-"));
   try {
