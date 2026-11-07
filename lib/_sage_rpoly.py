@@ -6,6 +6,7 @@ field's.  The rules (parents, printing, the order of the arithmetic) are Sage's,
 probed as a black box: /scratch/sage2-notes/rpoly/RULES.md.
 """
 
+import sys as _sys
 from fractions import Fraction as _F
 
 
@@ -84,6 +85,163 @@ def _meet_scalar(B, s):
         # (RDF[t] with an element of CC is over CC)
         return _field(False, True, p)
     return _field(d, cplx, p)
+
+
+_SAGE_CLASSES = ("sage.rings.polynomial.polynomial_real_mpfr_dense.PolynomialRealDense", "PolynomialRing_field_with_category.element_class",
+                 "sage.rings.polynomial.polynomial_integer_dense_flint.Polynomial_integer_dense_flint",
+                 "sage.rings.polynomial.polynomial_rational_flint.Polynomial_rational_flint")
+
+
+def _sage_class(p):
+    """The class Sage names for p when it refuses p / q: a polynomial over an inexact
+    field, ZZ or QQ, or a Python complex; None for anything else."""
+    if type(p) is complex:
+        return "complex"
+    if isinstance(p, PolynomialInexact):
+        d, c, _ = _info(p._ring._base)
+        # (RR and RealField(p) polynomials are Sage's MPFR class; RDF, CC, CDF and ComplexField(p) the generic one)
+        return _SAGE_CLASSES[0] if not d and not c else _SAGE_CLASSES[1]
+    if type(p).__name__ == "Polynomial":
+        S = _sa()
+        B = p.base_ring()
+        if B is S.ZZ:
+            return _SAGE_CLASSES[2]
+        if B is S.QQ:
+            return _SAGE_CLASSES[3]
+    return None
+
+
+def _refuse_types(a, b):
+    """Raise Sage's TypeError for a / b when both classes are known."""
+    ca, cb = _sage_class(a), _sage_class(b)
+    if ca is not None and cb is not None:
+        raise TypeError("unsupported operand type(s) for /: '%s' and '%s'" % (ca, cb))
+
+
+# Sage's polynomial classes over Zmod(n) and the finite fields, which it names when it
+# refuses p / q (probed: GF(2) and Zmod(2); prime fields and Zmod(n) below 2^64; prime
+# fields and Zmod(p) from 2^64; composite Zmod(n) from 2^64; GF(p^k) for k >= 2)
+_FF_CLASSES = ("sage.rings.polynomial.polynomial_gf2x.Polynomial_GF2X", "sage.rings.polynomial.polynomial_zmod_flint.Polynomial_zmod_flint",
+               "sage.rings.polynomial.polynomial_modn_dense_ntl.Polynomial_dense_mod_p",
+               "sage.rings.polynomial.polynomial_modn_dense_ntl.Polynomial_dense_modn_ntl_ZZ",
+               "sage.rings.polynomial.polynomial_zz_pex.Polynomial_ZZ_pEX")
+
+
+def _foreign(x):
+    """(is_polynomial, base) for a polynomial over, or an element of, Zmod(n), a finite
+    field or a number field; None for anything else."""
+    ff, nfp, nf = _sys.modules.get("_sage_ff"), _sys.modules.get("_sage_nfpoly"), _sys.modules.get("_sage_nf")
+    if ff is not None:
+        if isinstance(x, ff.Polynomial_ff):
+            return True, x.base_ring()
+        if isinstance(x, (ff.IntegerMod, ff.FiniteFieldElement)):
+            return False, x.parent()
+    if nfp is not None and isinstance(x, nfp.Polynomial_nf):
+        return True, x.base_ring()
+    if nf is not None and isinstance(x, nf.NumberFieldElement):
+        return False, x.parent()
+    return None
+
+
+def _number_field(B):
+    nf = _sys.modules.get("_sage_nf")
+    return nf is not None and isinstance(B, nf.NumberField_absolute)
+
+
+def _embedded(B):
+    """Whether B is a number field with an embedding (QuadraticField(2), a cyclotomic
+    field): Sage computes with those and RR, CC, ..."""
+    return _number_field(B) and (getattr(B, "_emb", None) is not None or getattr(B, "_cyclotomic_order", None) is not None)
+
+
+def _foreign_class(B):
+    """The class Sage names for a polynomial over B (Zmod(n), a finite field or a
+    number field without an embedding) in a refusal of p / q; None if not probed."""
+    if _number_field(B):
+        return _SAGE_CLASSES[1]
+    n, p = int(B.order()), int(B.characteristic())
+    if n != p:
+        return _FF_CLASSES[4]
+    if n == 1:
+        return None
+    if n == 2:
+        return _FF_CLASSES[0]
+    if n < 2 ** 64:
+        return _FF_CLASSES[1]
+    return _FF_CLASSES[2] if B.is_field() else _FF_CLASSES[3]
+
+
+def _parent_repr(x, foreign):
+    """repr(x.parent()) as Sage prints it: its polynomial rings over Zmod(n) and GF(p)
+    from n = 2^64 say "(using NTL)"."""
+    r = repr(x.parent())
+    is_poly, B = foreign
+    if is_poly and not _number_field(B) and int(B.order()) == int(B.characteristic()) >= 2 ** 64 and not r.endswith(" (using NTL)"):
+        r += " (using NTL)"
+    return r
+
+
+def _refuse_mixed(a, b):
+    raise NotImplementedError("arithmetic with %s and %s together is not available in sagebrush yet" % (a, b))
+
+
+def _refuse_foreign(P, other, rev, sym):
+    """Raise as Sage for P (a polynomial over an inexact field) OP other, other from
+    Zmod(n), a finite field or a number field; return if other is not one of those."""
+    f = _foreign(other)
+    if f is None:
+        return
+    is_poly, B = f
+    mine, theirs = repr(P._ring), _parent_repr(other, f)
+    a, b = (theirs, mine) if rev else (mine, theirs)
+    if _embedded(B) and (not is_poly or other.variable_name() == P._ring._name):
+        # (Sage answers: RR[t] + w*t for QQ(sqrt(2)), RR[t] == ... in the common ring)
+        _refuse_mixed(a, b)
+    if sym == "/" and is_poly:
+        c = _foreign_class(B)
+        if c is None:
+            raise TypeError("sagebrush does not divide polynomials over %r and over %r" % ((B, P._ring._base) if rev else (P._ring._base, B)))
+        ca, cb = (c, _sage_class(P)) if rev else (_sage_class(P), c)
+        raise TypeError("unsupported operand type(s) for /: '%s' and '%s'" % (ca, cb))
+    raise TypeError("unsupported operand parent(s) for %s: '%s' and '%s'" % (sym, a, b))
+
+
+def _refuse_foreign_value(K, x, f):
+    """Raise as Sage for p(x), p over K and x from (a polynomial over) Zmod(n), a finite
+    field or a number field, or x over an inexact field and p over K, one of those."""
+    if _embedded(f[1] if f is not None else K):
+        _refuse_mixed(repr(K), repr(x.parent()))
+    theirs = _parent_repr(x, f) if f is not None else repr(x.parent())
+    raise TypeError("no common canonical parent for objects with parents: '%r' and '%s'" % (K, theirs))
+
+
+def refuse_value(g, x):
+    """For Polynomial_ff and Polynomial_nf: g(x), x a polynomial over an inexact field."""
+    _refuse_foreign_value(g.base_ring(), x, None)
+
+
+def is_inexact_polynomial(x):
+    return isinstance(x, PolynomialInexact)
+
+
+def _refused_exponent(n):
+    """True if Sage refuses n as the exponent of a polynomial ("non-integral exponents
+    not supported"), False if it takes n (an integer value of another type)."""
+    if isinstance(n, _F):
+        return n.denominator != 1
+    if type(n) is complex:
+        return True
+    s = _scalar(n)
+    if isinstance(s, tuple):
+        if s[1]:
+            # (an element of CC or CDF, even CC(2))
+            return True
+        if n != n:
+            raise ValueError("cannot convert float NaN to integer")
+        return not n.is_integer()
+    if type(n).__name__ in ("Expression", "Rational"):
+        return not n.is_integer()
+    return False
 
 
 def _meet_rings(A, B):
@@ -238,7 +396,7 @@ class PolynomialRingInexact:
             t
         """
         if i != 0:
-            raise IndexError("generator not defined")
+            raise IndexError("generator n not defined")
         return PolynomialInexact(self, [self._base(0), self._base(1)])
 
     def gens(self):
@@ -609,20 +767,25 @@ class PolynomialInexact:
     def _in(self, R):
         return self if R is self._ring else PolynomialInexact(R, [_conv(R._base, c) for c in self._c])
 
-    def _operands(self, other, rev):
+    def _refuse_parents(self, other, rev, sym):
+        a, b = (other.parent(), self._ring) if rev else (self._ring, other.parent())
+        raise TypeError("unsupported operand parent(s) for %s: '%r' and '%r'" % (sym, a, b))
+
+    def _operands(self, other, rev, sym="=="):
         """(a, b) in a common ring, a the left operand; None if other is not one of ours."""
         R = self._ring
         if isinstance(other, PolynomialInexact):
             if other._ring._name != R._name:
-                raise TypeError("unsupported operand parent(s) for polynomials in %s and %s" % (R._name, other._ring._name))
+                self._refuse_parents(other, rev, sym)
             S = self._ring_over(_meet_rings(other._ring._base, R._base) if rev else _meet_rings(R._base, other._ring._base))
             a, b = self._in(S), other._in(S)
             return (b, a) if rev else (a, b)
         if hasattr(other, "_c") and hasattr(other, "_ring") and hasattr(other, "variable_name") and type(other).__name__ == "Polynomial":
             if other.variable_name() != R._name:
-                raise TypeError("unsupported operand parent(s): '%r' and '%r'" % (R, other.parent()))
+                self._refuse_parents(other, rev, sym)
             o = R(other)
             return (o, self) if rev else (self, o)
+        _refuse_foreign(self, other, rev, sym)
         s = _scalar(other)
         if s is None:
             return None
@@ -639,34 +802,34 @@ class PolynomialInexact:
         me = _sa().SR(self)
         return op(other, me) if rev else op(me, other)
 
-    def _bin(self, other, rev, f, op):
+    def _bin(self, other, rev, f, op, sym):
         r = self._symbolic(other, op, rev)
         if r is not None and r is not NotImplemented:
             return r
-        p = self._operands(other, rev)
+        p = self._operands(other, rev, sym)
         if p is None:
             return NotImplemented
         return f(*p)
 
     def __add__(self, other):
-        return self._bin(other, False, _add, lambda a, b: a + b)
+        return self._bin(other, False, _add, lambda a, b: a + b, "+")
 
     def __radd__(self, other):
-        return self._bin(other, True, _add, lambda a, b: a + b)
+        return self._bin(other, True, _add, lambda a, b: a + b, "+")
 
     def __sub__(self, other):
-        return self._bin(other, False, _sub, lambda a, b: a - b)
+        return self._bin(other, False, _sub, lambda a, b: a - b, "-")
 
     def __rsub__(self, other):
-        return self._bin(other, True, _sub, lambda a, b: a - b)
+        return self._bin(other, True, _sub, lambda a, b: a - b, "-")
 
     def __mul__(self, other):
         if other is self:
             return _square(self)
-        return self._bin(other, False, _mul, lambda a, b: a * b)
+        return self._bin(other, False, _mul, lambda a, b: a * b, "*")
 
     def __rmul__(self, other):
-        return self._bin(other, True, _mul, lambda a, b: a * b)
+        return self._bin(other, True, _mul, lambda a, b: a * b, "*")
 
     def __neg__(self):
         return PolynomialInexact(self._ring, [-c for c in self._c])
@@ -687,19 +850,30 @@ class PolynomialInexact:
         if r is not None and r is not NotImplemented:
             return r
         if isinstance(other, PolynomialInexact) or type(other).__name__ == "Polynomial":
+            if other.variable_name() != self._ring._name:
+                _refuse_types(self, other)
             raise NotImplementedError("the fraction field of %r is not available in sagebrush yet" % (self._ring,))
+        _refuse_foreign(self, other, False, "/")
         s = _scalar(other)
         if s is None:
             return NotImplemented
-        if type(other) is complex and not (self._ring._complex and _info(self._ring._base)[2] <= 53):
-            # (as Sage: RR[t], RDF[t] and ComplexField(100)[t] refuse t/complex(1, 2))
-            raise TypeError("unsupported operand parent(s) for /: '%r' and '<class 'complex'>'" % (self._ring,))
+        if type(other) is complex and not self._complex_divides():
+            _refuse_types(self, other)
         S = self._ring_over(_meet_scalar(self._ring._base, s))
         F = S._base
         c = F(0, 1) if s == "I" else _conv(F, other)
         return self._in(S)._divide(c)
 
+    def _complex_divides(self):
+        # (as Sage: RR[t], RDF[t] and ComplexField(100)[t] refuse t/complex(1, 2) and complex(1, 2)/t)
+        return self._ring._complex and _info(self._ring._base)[2] <= 53
+
     def __rtruediv__(self, other):
+        if type(other) is complex and not self._complex_divides():
+            _refuse_types(other, self)
+        if type(other).__name__ == "Polynomial" and other.variable_name() != self._ring._name:
+            _refuse_types(other, self)
+        _refuse_foreign(self, other, True, "/")
         raise NotImplementedError("the fraction field of %r is not available in sagebrush yet" % (self._ring,))
 
     def _scale(self, c):
@@ -720,6 +894,9 @@ class PolynomialInexact:
             1.3310000000000004*t^3 + 3.630000000000001*t^2 + 3.3000000000000003*t + 1.0
         """
         if type(n).__name__ == "Expression" or not (isinstance(n, int) or type(n).__name__ == "Integer" or (isinstance(n, _F) and n.denominator == 1)):
+            if _refused_exponent(n):
+                raise TypeError("non-integral exponents not supported")
+            # (Sage takes an integer value of another type: RR(2), SR(2), Mod(2, 5))
             raise NotImplementedError("a power of a polynomial over %r by %r is not available in sagebrush yet" % (self._ring._base, n))
         n = int(n)
         if n < 0:
@@ -768,7 +945,8 @@ class PolynomialInexact:
             t + 0.500000000000000
         """
         if not self._c:
-            raise ZeroDivisionError("the zero polynomial has no leading coefficient")
+            # (the zero polynomial is its own monic, as Sage)
+            return self
         return self._divide(self._c[-1])
 
     # ---- evaluation and calculus
@@ -783,13 +961,18 @@ class PolynomialInexact:
             sage: f(1/3), f(CC(0, 1)), f(SR.var('x')), f(t + 1)
             (0.500000000000000, -0.500000000000000 - 2.00000000000000*I, 1.50000000000000*x^2 - 2.00000000000000*x + 1.00000000000000, 1.50000000000000*t^2 + t + 0.500000000000000)
         """
-        if kwds:
-            if set(kwds) != {self._ring._name} or args:
-                raise TypeError("unexpected keyword arguments %r" % (sorted(kwds),))
+        # (as Sage: a value given by position wins, other keywords are ignored, and with
+        # no value f() is f)
+        if len(args) > 1:
+            raise TypeError("Wrong number of arguments")
+        if not args:
+            if self._ring._name not in kwds:
+                return self
             args = (kwds[self._ring._name],)
-        if len(args) != 1:
-            raise TypeError("a polynomial in one variable takes one argument")
         x = args[0]
+        f = _foreign(x)
+        if f is not None:
+            _refuse_foreign_value(self._ring._base, x, f)
         if type(x).__name__ == "Expression" and not x.is_numeric():
             r = 0
             for i, c in enumerate(self._c):
