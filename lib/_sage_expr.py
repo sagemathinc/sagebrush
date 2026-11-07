@@ -173,18 +173,12 @@ def _infinite_relation(kind, a, b):
     return {"<": sa < sb, "<=": sa < sb, ">": sa > sb, ">=": sa > sb}[kind]
 
 
-def _numerically_equal(a, b):
-    """Heuristic equality of two constants that the engine could neither
-    simplify to equal nor separate: their difference, evaluated at 400 bits,
-    is below 2^-300 relative to them.  (A double, which underflows or
-    cancels, is never used.)"""
-    import _sage_real
-    try:
-        d = abs(_sage_real.N(a - b, 400))
-        m = max(abs(_sage_real.N(a, 400)), abs(_sage_real.N(b, 400)), 1)
-        return bool(d <= m * _sage_real.N(Expression("2") ** -300, 400))
-    except Exception:
-        return False
+def _exact_sign(d):
+    """The exact sign of a constant relation's difference, for when the
+    engine and the double enclosure cannot decide it: 0, 1, -1, "c" (not
+    real) or None (undecided).  The work is in the lazy _sage_expr_more."""
+    import _sage_expr_more
+    return _sage_expr_more._exact_sign(d)
 
 
 def _relop(sym):
@@ -312,11 +306,13 @@ class Expression:
                 return inf
             if kind in ("==", "!="):
                 z = _call("is_zero", (a - b)._s)[0] == "1"
-                if not z and kind == "==" and not (a - b).variables() and _call("const_sign", (a - b)._s)[0] == "":
-                    # constants of undecided sign: equal if they agree to
-                    # far more than double precision (never from an
-                    # underflowed or cancelled double)
-                    z = _numerically_equal(a, b)
+                # (a constant the enclosure cannot separate from 0: exactly,
+                # when it is algebraic)
+                xs = _exact_sign(a - b) if not z and not (a - b).variables() and _call("const_sign", (a - b)._s)[0] == "" else None
+                if xs is not None:
+                    z = xs == 0
+                # (other constants the enclosure cannot separate stay
+                # undecided, as Sage: log(6) == log(2) + log(3) is False)
                 if not z and _ASSUMPTIONS and (a - b).variables():
                     # the rewritten difference tested directly: bool() of
                     # (rewrite == 0) came back here and rewrote again,
@@ -334,7 +330,10 @@ class Expression:
             # rationals); undecided is False, as in Sage
             sg = _call("const_sign", (a - b)._s)[0]
             if sg == "":
-                return False
+                # (an algebraic constant: its sign exactly; not real: False)
+                sg = _exact_sign(a - b)
+                if sg is None or sg == "c":
+                    return False
             sg = int(sg)
             return {"<": sg < 0, "<=": sg <= 0, ">": sg > 0, ">=": sg >= 0}[kind]
         return _call("is_zero", self._s)[0] != "1"
