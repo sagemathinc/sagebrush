@@ -1,4 +1,9 @@
 {
+ "engine/ap/tests/stop.rs :: traced :: let (gap, poll) = (hooks::max_gap_ns() as f64 / 1e6, hooks::max_poll_gap_ns() as f64 / 1e6); #0": {
+  "class": "none",
+  "owner": "remote-compute",
+  "reason": "test-hook timing (longest wall-time gap between interrupt checks / simulated wasm host polls) and its readout in ap Stop pins; measures, refuses nothing"
+ },
  "engine/ball/src/ball.rs ::  :: pub const EXP_MAX: i64 = 1 << 40; #0": {
   "class": "2+3",
   "owner": "ball arithmetic",
@@ -474,9 +479,15 @@
   "class": "none",
   "owner": "HMF engine"
  },
- "engine/interrupt/src/lib.rs :: count :: MAX_POLL_GAP_NS.fetch_max(n - last, Relaxed); #0": {
+ "engine/interrupt/src/lib.rs :: count :: MAX_GAP_NS.fetch_max(n.saturating_sub(last), Relaxed); #0": {
   "class": "none",
-  "owner": "sage"
+  "owner": "remote-compute",
+  "reason": "test-hook timing (longest wall-time gap between interrupt checks / simulated wasm host polls) and its readout in ap Stop pins; measures, refuses nothing"
+ },
+ "engine/interrupt/src/lib.rs :: count :: MAX_POLL_GAP_NS.fetch_max(n.saturating_sub(last), Relaxed); #0": {
+  "class": "none",
+  "owner": "remote-compute",
+  "reason": "test-hook timing (longest wall-time gap between interrupt checks / simulated wasm host polls) and its readout in ap Stop pins; measures, refuses nothing"
  },
  "engine/interrupt/src/lib.rs :: drop :: static MAX_POLL_GAP_NS: AtomicU64 = AtomicU64::new(0); #0": {
   "class": "none",
@@ -6601,6 +6612,36 @@
   "owner": "csv (@sagebrush-sage2)",
   "reason": "refuses nothing: CPython 3.14's Lib/csv.py, unchanged; the census matches 'delimiter' (it contains 'limit'), the import of field_size_limit, and Sniffer's consistency threshold, a heuristic of its delimiter guess, not a cap"
  },
+ "lib/difflib.py :: HtmlDiff._split_line :: if (size <= max) or ((size -(text.count('\\0')*3)) <= max): #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "HtmlDiff's wrapcolumn: the column a table line wraps at (CPython 3.14.10's difflib, unchanged); it splits a line for display and refuses nothing"
+ },
+ "lib/difflib.py :: HtmlDiff._split_line :: max = self._wrapcolumn #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "HtmlDiff's wrapcolumn: the column a table line wraps at (CPython 3.14.10's difflib, unchanged); it splits a line for display and refuses nothing"
+ },
+ "lib/difflib.py :: HtmlDiff._split_line :: while n < max and i < size: #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "HtmlDiff's wrapcolumn: the column a table line wraps at (CPython 3.14.10's difflib, unchanged); it splits a line for display and refuses nothing"
+ },
+ "lib/difflib.py :: SequenceMatcher.find_longest_match :: In other words, of all maximal matching blocks, return one that #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "a docstring line (CPython 3.14.10's difflib, unchanged): 'maximal matching blocks', no limit"
+ },
+ "lib/difflib.py :: SequenceMatcher.find_longest_match :: starts earliest in a, and of all those maximal matching blocks that #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "a docstring line (CPython 3.14.10's difflib, unchanged): 'maximal matching blocks', no limit"
+ },
+ "lib/difflib.py :: get_close_matches :: Optional arg n (default 3) is the maximum number of close matches to #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "a docstring line (CPython 3.14.10's difflib, unchanged): n, the most close matches to return, the caller's own argument; no limit is applied"
+ },
  "lib/enum.py :: EnumType.__call__ :: `names` should be either a string of white-space/comma delimited names #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
@@ -10795,6 +10836,91 @@
   "owner": "the LaTeX editor's Run (@sagebrush-latex)",
   "reason": "the editor's Run: the .tex's folder given to Sage (FOLDER_LIMITS: 500 files, 64 MiB; past either, Run runs nothing), and what a Run's results hold (the results file's size, a result's LaTeX, a plot's SVG, a message: RUN_LIMITS, as the CLI's): bounds protecting the page and its session"
  },
+ "web/notebook/output-frames.js ::  :: export const COMMIT_MS = FRAME_LIMITS.commitMs; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/notebook/output-frames.js ::  :: export const DEFAULT_CAP = FRAME_LIMITS.cap; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/notebook/output-frames.js ::  :: export const FRAME_LIMITS = Object.freeze({ loadMs: 10000, commitMs: 6000, initialPx: 120, cap: 24, heightHz: 30 }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/notebook/output-frames.js ::  :: export const HEIGHT_HZ = FRAME_LIMITS.heightHz; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/notebook/output-frames.js ::  :: export const INITIAL_PX = FRAME_LIMITS.initialPx; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/notebook/output-frames.js ::  :: export const LOAD_MS = FRAME_LIMITS.loadMs; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/notebook/output-frames.js ::  :: import { LIMITS, decode, encode } from \"../output-shell/protocol.js\"; #0": {
+  "class": "none",
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "matched text that refuses nothing: an import line"
+ },
+ "web/notebook/output-frames.js :: admit :: if (live().length >= cap) { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/notebook/output-frames.js :: createOutputFrames :: export function createOutputFrames({ srcdoc = null, url = null, cap = DEFAULT_CAP, root = null, onEvent = () => {}, loadMs = LOAD_MS, commitMs = COMMIT_MS } = {}) { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/notebook/output-frames.js :: createOutputFrames :: if (!Number.isSafeInteger(cap) || cap < 1) throw new Error(\"output frames: a cap of at least one frame\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/notebook/output-frames.js :: render :: if (!Array.isArray(outputs) || outputs.length > LIMITS.outputsPerRender) throw new Error(\"output area: too many outputs\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
  "web/notebook/text-overlap.ts ::  :: export const TEXT_DIFF_PRODUCT_LIMIT = 4_000_000; #0": {
   "class": "1",
   "disposition": {
@@ -10810,6 +10936,107 @@
   },
   "owner": "notebook/board text merge (@sagebrush-sync-client, @sagebrush-board)",
   "reason": "the shared 3-way text merge diff-work bound: past it lineMerge3 returns tagged exhaustion; notebook records a too-large clash, while board refuses the whole merge as work with no partial records; neither guesses nor loses data."
+ },
+ "web/output-shell/protocol.js ::  :: export const LIMITS = Object.freeze({ messageChars: 4 * 1024 * 1024, outputsPerRender: 64, idChars: 64, heightPx: 32768, reasonChars: 200 }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/output-shell/protocol.js :: decode :: if (typeof data !== \"string\" || data.length > LIMITS.messageChars) return null; // (before any parse) #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/output-shell/protocol.js :: encode :: if (s.length > LIMITS.messageChars) throw new Error(`a ${type} message over ${LIMITS.messageChars} characters`); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/output-shell/protocol.js :: isId :: const isId = (v) => typeof v === \"string\" && v.length > 0 && v.length <= LIMITS.idChars && /^[A-Za-z0-9_.:-]+$/.test(v); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/output-shell/protocol.js :: isId :: height: (v) => typeof v === \"number\" && Number.isFinite(v) && v >= 0 && v <= LIMITS.heightPx, #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/output-shell/protocol.js :: isId :: ids: (v) => Array.isArray(v) && v.length <= LIMITS.outputsPerRender && v.every(isId) && new Set(v).size === v.length, #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/output-shell/protocol.js :: isId :: outputs: (v) => Array.isArray(v) && v.length <= LIMITS.outputsPerRender && new Set(v.map((o) => o?.id)).size === v.length && #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/output-shell/protocol.js :: isId :: reason: (v) => typeof v === \"string\" && v.length <= LIMITS.reasonChars, #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/output-shell/shell.js ::  :: export const HEIGHT_HZ = SHELL_LIMITS.heightHz; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/output-shell/shell.js ::  :: export const READY_MS = SHELL_LIMITS.readyMs; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/output-shell/shell.js ::  :: export const SHELL_LIMITS = Object.freeze({ readyMs: 3000, heightHz: 30 }); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
+ },
+ "web/output-shell/shell.js ::  :: import { LIMITS, decode, encode } from \"./protocol.js\"; #0": {
+  "class": "none",
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "matched text that refuses nothing: an import line"
+ },
+ "web/output-shell/shell.js :: measure :: const measure = () => Math.min(LIMITS.heightPx, Math.ceil(root.getBoundingClientRect().height)); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the isolated output renderer (@sagebrush-agents-ui)",
+  "reason": "OUT-ISO phase 1: the frame messages' limits (LIMITS), the shell's wait and height rate, the host's deadlines and live-frame cap: past one, dropped, refused or shown as text, never truncated. Candidates measured by web/test-output-frames.mjs (Nov 7), frozen before rich output is enabled"
  },
  "web/stall-fetch.js ::  :: export const STALL_LIMIT_MS = 20000; #0": {
   "class": "1",

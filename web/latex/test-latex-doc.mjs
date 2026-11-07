@@ -98,6 +98,13 @@ try {
   const c1 = await ev(`${W}.stat("/LaTeX articles/doc.tex").then(async (e) => e && { fid: e.fid, text: new TextDecoder().decode((await ${W}.read("/LaTeX articles/doc.tex")).content) })`);
   const c2 = await ev(`${W}.stat("/LaTeX articles/doc (2).tex").then((e) => e && { fid: e.fid })`);
   check(c1?.text === DOC && s1 === "?tex=" + c1.fid && c2?.fid && s2 === "?tex=" + c2.fid, "Edit a copy: /LaTeX articles/doc.tex with its bytes, opened; then doc (2).tex", { s1, s2, c1, c2 });
+  // (DEV n8, William's U8: the copy is saved as every editor's file is: no Save button, nothing said about Save; an
+  // edit reaches the file by itself, with no Ctrl/Cmd+S)
+  const copyUi = await ev(`(() => { const p = document.querySelector(".tex-page:not(.tex-doc)"); return { save: !!p.querySelector(".tex-save"), banner: p.querySelector(".tex-banner").textContent, state: p.querySelector(".tex-savestate")?.textContent ?? null }; })()`);
+  await ev(`(() => { const t = document.querySelector(".tex-page:not(.tex-doc) .tex-src"); t.focus(); t.value = t.value + "% edited in the copy\\n"; t.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`);
+  const copySaved = await until(`(async () => new TextDecoder().decode((await ${W}.read("/LaTeX articles/doc (2).tex")).content).endsWith("% edited in the copy\\n"))()`, 8000)
+    && await until(`document.querySelector(".tex-page:not(.tex-doc) .tex-savestate")?.textContent === "Saved ✓"`, 5000);
+  check(!copyUi.save && !/Save \(Ctrl|Nothing is saved automatically/.test(copyUi.banner) && copyUi.state === "Saved ✓" && copySaved, "Edit a copy: no Save button, no Save in the banner; an edit reaches the file without Ctrl/Cmd+S, Saved ✓", { copyUi, copySaved });
 
   // ---- refused: not fetched at all, or (a redirect, a 404) fetched and said why
   // (grader P1, P11: a "." in a segment ("..", "..tex") and another extension are refused too)
