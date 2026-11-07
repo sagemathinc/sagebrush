@@ -211,9 +211,9 @@ r4's A-vs-B timings stay withdrawn: the PyPI wheel came from a different commit.
   - Every upgrade is checked against the release's published checksum.
   - Signature checks use William's keys once he sets them up (§6). No agent creates or holds an updater key; development uses unsigned or mock update metadata.
   - **One scoped exception, for tests only** (William, §1 item 12): a test run may generate an **ephemeral in-memory keypair** and inject its public key as that test's pinned key.
-    - The keypair is made fresh in each run, and is never written to disk, never logged and never committed.
-    - It is never pinned or trusted by any shipped engine, app or release metadata.
-    - It is not a release, updater, signing or notarization key and can't become one. Real signing and notarization keys remain William's only (§6).
+    - The keypair must be made fresh in each run, and must never be written to disk, logged or committed.
+    - It must never be pinned or accepted by any shipped engine, app or release metadata.
+    - It must never be, or become, a release, updater, signing or notarization key. Real signing and notarization keys remain William's only (§6).
 - **Size and start-up:** William's CLI rule applies: judged by install time and start-up time, with no fixed size ceiling.
   - Each engine build gets its own size-gate entry, with tight growth markers.
   - N1 reports, per runtime and OS:
