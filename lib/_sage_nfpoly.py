@@ -275,6 +275,18 @@ class PolynomialRing_nf_:
         return Polynomial_nf(self, [K([random.randint(-2, 2) for _ in range(K.degree())]) for _ in range(int(degree) + 1)])
 
 
+def _refuse_inexact(a, b, op, rev=False):
+    """_sage_ff.refuse_inexact: an RR, CC, ... number or a Python float with this
+    number field's polynomial is refused as Sage refuses it."""
+    import _sage_ff
+    return _sage_ff.refuse_inexact(a, b, op, rev)
+
+
+def _inexact_number(b):
+    import _sage_ff
+    return _sage_ff._inexact(b) is not None
+
+
 class Polynomial_nf:
     """A polynomial over a number field.
 
@@ -568,13 +580,16 @@ class Polynomial_nf:
             return None
 
     def __add__(self, b):
+        _refuse_inexact(self, b, "+")
         b = self._coerce(b)
         if b is None:
             return NotImplemented
         n = max(len(self._c), len(b._c))
         return Polynomial_nf(self._ring, [self[i] + b[i] for i in range(n)])
 
-    __radd__ = __add__
+    def __radd__(self, b):
+        _refuse_inexact(self, b, "+", True)
+        return self.__add__(b)
 
     def __neg__(self):
         return Polynomial_nf(self._ring, [-c for c in self._c])
@@ -583,18 +598,21 @@ class Polynomial_nf:
         return self
 
     def __sub__(self, b):
+        _refuse_inexact(self, b, "-")
         b = self._coerce(b)
         if b is None:
             return NotImplemented
         return self + (-b)
 
     def __rsub__(self, b):
+        _refuse_inexact(self, b, "-", True)
         b = self._coerce(b)
         if b is None:
             return NotImplemented
         return b + (-self)
 
     def __mul__(self, b):
+        _refuse_inexact(self, b, "*")
         b = self._coerce(b)
         if b is None:
             return NotImplemented
@@ -609,7 +627,9 @@ class Polynomial_nf:
                         prod[i + j] = prod[i + j] + x * y
         return Polynomial_nf(self._ring, prod)
 
-    __rmul__ = __mul__
+    def __rmul__(self, b):
+        _refuse_inexact(self, b, "*", True)
+        return self.__mul__(b)
 
     def __pow__(self, e, mod=None):
         e = _exact_int(e)
@@ -673,6 +693,7 @@ class Polynomial_nf:
         return self._coerce(b).quo_rem(self)[1]
 
     def __truediv__(self, b):
+        _refuse_inexact(self, b, "/")
         b2 = self._coerce(b)
         if b2 is None:
             return NotImplemented
@@ -687,10 +708,13 @@ class Polynomial_nf:
         return _sage_frac.FractionFieldElement(self, b2)
 
     def __rtruediv__(self, b):
+        _refuse_inexact(self, b, "/", True)
         import _sage_frac
         return _sage_frac.FractionFieldElement(self._ring(b), self)
 
     def __eq__(self, b):
+        if _inexact_number(b):
+            return _refuse_inexact(self, b, "==")
         if not isinstance(b, Polynomial_nf):
             b = self._coerce(b)
             if b is None:
@@ -720,6 +744,7 @@ class Polynomial_nf:
             x = kwds.get(self._ring._name, self._ring.gen())
         else:
             (x,) = args
+        _refuse_inexact(self, x, "call")
         if _inexact_polynomial(x):
             _sys.modules["_sage_rpoly"].refuse_value(self, x)
         if not self._c:

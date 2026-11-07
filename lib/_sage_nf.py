@@ -937,6 +937,18 @@ def _latex_name(K):
     return _latex_variable_name(K._name)
 
 
+def _refuse_inexact(a, b, op, rev=False):
+    """_sage_ff.refuse_inexact: an RR, CC, ... number or a Python float with this
+    number field (its element or polynomial) is refused as Sage refuses it."""
+    import _sage_ff
+    return _sage_ff.refuse_inexact(a, b, op, rev)
+
+
+def _inexact_number(b):
+    import _sage_ff
+    return _sage_ff._inexact(b) is not None
+
+
 class NumberFieldElement:
     """An element of a number field.
 
@@ -1038,6 +1050,8 @@ class NumberFieldElement:
             if other.degree() > 0:
                 return False
             other = other[0]
+        if _inexact_number(other):
+            return _refuse_inexact(self, other, "==")
         try:
             o = self._coerce(other)
         except TypeError:
@@ -1058,18 +1072,22 @@ class NumberFieldElement:
             raise TypeError("cannot coerce %r into %r" % (other, self._K))
 
     def __add__(self, other):
+        _refuse_inexact(self, other, "+")
         try:
             o = self._coerce(other)
         except TypeError:
             return NotImplemented
         return type(self)(self._K, [a + b for a, b in zip(self._c, o._c)])
 
-    __radd__ = __add__
+    def __radd__(self, other):
+        _refuse_inexact(self, other, "+", True)
+        return self.__add__(other)
 
     def __neg__(self):
         return type(self)(self._K, [-a for a in self._c])
 
     def __sub__(self, other):
+        _refuse_inexact(self, other, "-")
         try:
             o = self._coerce(other)
         except TypeError:
@@ -1077,16 +1095,20 @@ class NumberFieldElement:
         return type(self)(self._K, [a - b for a, b in zip(self._c, o._c)])
 
     def __rsub__(self, other):
+        _refuse_inexact(self, other, "-", True)
         return (-self) + other
 
     def __mul__(self, other):
+        _refuse_inexact(self, other, "*")
         try:
             o = self._coerce(other)
         except TypeError:
             return NotImplemented
         return type(self)(self._K, _reduce(_polmul(self._c, o._c), self._K._f))
 
-    __rmul__ = __mul__
+    def __rmul__(self, other):
+        _refuse_inexact(self, other, "*", True)
+        return self.__mul__(other)
 
     def __invert__(self):
         # extended Euclid in Q[x]: s self + t f = 1
@@ -1115,6 +1137,7 @@ class NumberFieldElement:
     inverse = __invert__
 
     def __truediv__(self, other):
+        _refuse_inexact(self, other, "/")
         try:
             o = self._coerce(other)
         except TypeError:
@@ -1122,6 +1145,7 @@ class NumberFieldElement:
         return self * ~o
 
     def __rtruediv__(self, other):
+        _refuse_inexact(self, other, "/", True)
         return self._K(other) * ~self
 
     def __xor__(self, other):

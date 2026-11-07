@@ -4644,6 +4644,31 @@
   "class": "3",
   "owner": "finite fields + configuration"
  },
+ "lib/_sage_ff_inexact.py :: refuse :: TypeError: unsupported operand parent(s) for +: 'Univariate Polynomial Ring in t over Finite Field of size 7' and 'Real Field with 53 bits of precision' #0": {
+  "class": "none",
+  "owner": "inexact numbers with Zmod, finite fields and number fields (@sagebrush-sage2)",
+  "reason": "Sage's coercion refusal (TypeError) for an RR/CC/... number or a Python float with Zmod(n), a finite field or a number field, in Sage's text (and its doctest); refuses nothing for size"
+ },
+ "lib/_sage_ff_inexact.py :: refuse :: TypeError: unsupported operand type(s) for *: 'float' and 'sage.rings.finite_rings.integer_mod.IntegerMod_int' #0": {
+  "class": "none",
+  "owner": "inexact numbers with Zmod, finite fields and number fields (@sagebrush-sage2)",
+  "reason": "Sage's coercion refusal (TypeError) for an RR/CC/... number or a Python float with Zmod(n), a finite field or a number field, in Sage's text (and its doctest); refuses nothing for size"
+ },
+ "lib/_sage_ff_inexact.py :: refuse :: raise NotImplementedError(\"arithmetic with %s and %s together is not available in sagebrush yet\" % ((x, y) if rev else (y, x))) #0": {
+  "class": "coverage",
+  "owner": "inexact numbers with Zmod, finite fields and number fields (@sagebrush-sage2)",
+  "reason": "an inexact number with a number field that has an embedding (Sage computes in RR, CC, ...): L33, not a cap"
+ },
+ "lib/_sage_ff_inexact.py :: refuse :: raise TypeError(\"unsupported operand parent(s) for %s: '%s' and '%s'\" % ((op, x, y) if rev else (op, y, x))) #0": {
+  "class": "none",
+  "owner": "inexact numbers with Zmod, finite fields and number fields (@sagebrush-sage2)",
+  "reason": "Sage's coercion refusal (TypeError) for an RR/CC/... number or a Python float with Zmod(n), a finite field or a number field, in Sage's text (and its doctest); refuses nothing for size"
+ },
+ "lib/_sage_ff_inexact.py :: refuse :: raise TypeError(\"unsupported operand type(s) for %s: '%s' and '%s'\" % ((op, x, c) if rev else (op, c, x))) #0": {
+  "class": "none",
+  "owner": "inexact numbers with Zmod, finite fields and number fields (@sagebrush-sage2)",
+  "reason": "Sage's coercion refusal (TypeError) for an RR/CC/... number or a Python float with Zmod(n), a finite field or a number field, in Sage's text (and its doctest); refuses nothing for size"
+ },
  "lib/_sage_ffmat.py ::  :: _ENGINE_CHARPOLY_MAX_N = 512 #0": {
   "class": "1+3",
   "owner": "engine web + finite-field matrices",
