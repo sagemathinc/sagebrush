@@ -392,3 +392,70 @@ test("a style given as an object is refused, not implemented here (#801 S5)", ()
     "NotImplementedError a boxstyle object is not implemented in Sagebrush; give the style as a string, such as 'round,pad=0.3'",
   ]);
 });
+
+// (matplotlib 3.11.1 resolves each coordinate system when it uses it: bad
+// textcoords raise only if the annotation is drawn (annotation_clip hides one
+// outside the axes, by default and with True); bad xycoords only for the clip
+// check (annotation_clip=True), an arrow or offset text; each line its own)
+test("bad coordinates raise as matplotlib 3.11.1's, only where it uses them (#801 ANNOT-TEXTCOORDS-CLIP-1)", () => {
+  const out = run("import matplotlib\nREAL = 'site-packages' in (getattr(matplotlib, '__file__', '') or '')\nif REAL:\n    matplotlib.use('Agg')\nimport matplotlib.pyplot as plt\ndef t(label, f):\n    fig, ax = plt.subplots()\n    try:\n        f(ax)\n    except Exception as e:\n        print(label, 'annotate !!', type(e).__name__, str(e)[:100]); plt.close(fig); return\n    for i in range(3):\n        try:\n            fig.savefig('c4.svg'); print(label, 'draw', i, 'ok')\n        except Exception as e:\n            print(label, 'draw', i, '!!', type(e).__name__, str(e)[:100])\n    plt.close(fig)\nfor clip in (None, True, False):\n    t('textcoords bogus, outside, clip=%s' % clip, lambda ax: ax.annotate('t', (5, 5), (0, 0), textcoords='bogus', annotation_clip=clip))\nt('textcoords bogus, inside', lambda ax: ax.annotate('t', (0.5, 0.5), (0, 0), textcoords='bogus'))\nfor clip in (None, True, False):\n    t('xycoords bogus, clip=%s' % clip, lambda ax: ax.annotate('t', (5, 5), (0, 0), xycoords='bogus', textcoords='data', annotation_clip=clip))\nfor clip in (None, True, False):\n    t('textcoords offset bogus, outside, clip=%s' % clip, lambda ax: ax.annotate('t', (5, 5), (0, 0), textcoords='offset bogus', annotation_clip=clip))\nt('arrowstyle 5, outside, clip=False', lambda ax: ax.annotate('t', (5, 5), (0.5, 0.5), annotation_clip=False, arrowprops=dict(arrowstyle=5)))\nt('text bbox 5', lambda ax: ax.text(0.5, 0.5, 't', bbox=dict(boxstyle=5)))\nt('inf xytext, inside', lambda ax: ax.annotate('t', (0.5, 0.5), (float('inf'), 0), arrowprops=dict(arrowstyle='->')))\n");
+  assert.deepEqual(out.trim().split("\n").map((l) => l.trimEnd()), [
+    "textcoords bogus, outside, clip=None draw 0 ok",
+    "textcoords bogus, outside, clip=None draw 1 ok",
+    "textcoords bogus, outside, clip=None draw 2 ok",
+    "textcoords bogus, outside, clip=True draw 0 ok",
+    "textcoords bogus, outside, clip=True draw 1 ok",
+    "textcoords bogus, outside, clip=True draw 2 ok",
+    "textcoords bogus, outside, clip=False draw 0 !! ValueError 'bogus' is not a valid coordinate",
+    "textcoords bogus, outside, clip=False draw 1 !! ValueError 'bogus' is not a valid coordinate",
+    "textcoords bogus, outside, clip=False draw 2 !! ValueError 'bogus' is not a valid coordinate",
+    "textcoords bogus, inside draw 0 !! ValueError 'bogus' is not a valid coordinate",
+    "textcoords bogus, inside draw 1 !! ValueError 'bogus' is not a valid coordinate",
+    "textcoords bogus, inside draw 2 !! ValueError 'bogus' is not a valid coordinate",
+    "xycoords bogus, clip=None draw 0 ok",
+    "xycoords bogus, clip=None draw 1 ok",
+    "xycoords bogus, clip=None draw 2 ok",
+    "xycoords bogus, clip=True draw 0 !! ValueError 'bogus' is not a valid coordinate",
+    "xycoords bogus, clip=True draw 1 !! ValueError 'bogus' is not a valid coordinate",
+    "xycoords bogus, clip=True draw 2 !! ValueError 'bogus' is not a valid coordinate",
+    "xycoords bogus, clip=False draw 0 ok",
+    "xycoords bogus, clip=False draw 1 ok",
+    "xycoords bogus, clip=False draw 2 ok",
+    "textcoords offset bogus, outside, clip=None draw 0 ok",
+    "textcoords offset bogus, outside, clip=None draw 1 ok",
+    "textcoords offset bogus, outside, clip=None draw 2 ok",
+    "textcoords offset bogus, outside, clip=True draw 0 ok",
+    "textcoords offset bogus, outside, clip=True draw 1 ok",
+    "textcoords offset bogus, outside, clip=True draw 2 ok",
+    "textcoords offset bogus, outside, clip=False draw 0 !! ValueError 'bogus' is not a recognized unit",
+    "textcoords offset bogus, outside, clip=False draw 1 !! ValueError 'bogus' is not a recognized unit",
+    "textcoords offset bogus, outside, clip=False draw 2 !! ValueError 'bogus' is not a recognized unit",
+    "arrowstyle 5, outside, clip=False draw 0 !! TypeError 'int' object is not callable",
+    "arrowstyle 5, outside, clip=False draw 1 !! TypeError 'int' object is not callable",
+    "arrowstyle 5, outside, clip=False draw 2 !! TypeError 'int' object is not callable",
+    "text bbox 5 draw 0 !! TypeError 'int' object is not callable",
+    "text bbox 5 draw 1 !! TypeError 'int' object is not callable",
+    "text bbox 5 draw 2 !! TypeError 'int' object is not callable",
+    "inf xytext, inside draw 0 !! StopIteration",
+    "inf xytext, inside draw 1 !! StopIteration",
+    "inf xytext, inside draw 2 !! StopIteration",
+  ]);
+});
+
+// (each draw raises a fresh exception object, the same each time, no
+// traceback kept growing; the figure draws again once the annotation is hidden, and others
+// draw throughout: matplotlib 3.11.1's lines)
+test("an annotation's error, drawn again and again: the same each draw, then a healthy draw (#801 ANNOT-ERROR-RETAIN-1)", () => {
+  const out = run("import matplotlib\nREAL = 'site-packages' in (getattr(matplotlib, '__file__', '') or '')\nif REAL:\n    matplotlib.use('Agg')\nimport matplotlib.pyplot as plt\nimport traceback\ndef redraws(label, make, heal=None):\n    fig, ax = plt.subplots()\n    make(ax)\n    seen, objs = [], []\n    for i in range(4):\n        try:\n            fig.savefig('rd.svg')\n            seen.append('ok')\n        except Exception as e:\n            seen.append((type(e).__name__, str(e), len(traceback.extract_tb(e.__traceback__))))\n            objs.append(e)\n    errs = [s for s in seen if s != 'ok']\n    same = len(set(errs)) <= 1\n    fresh = all(a is not b for a, b in zip(objs, objs[1:]))\n    print(label, '=>', errs[0][:2] if errs else 'ok', 'x%d,' % len(errs), 'the same each draw:', same, '- a fresh exception each draw:', fresh)\n    if heal:\n        heal(ax)\n        try:\n            fig.savefig('rd.svg'); print(label, 'healed => ok')\n        except Exception as e:\n            print(label, 'healed !!', type(e).__name__, e)\n    plt.close(fig)\n    fig2, ax2 = plt.subplots(); ax2.plot([0, 1]); fig2.savefig('rd2.svg'); plt.close(fig2)\nredraws('textcoords bogus, inside', lambda ax: ax.annotate('t', (0.5, 0.5), (0, 0), textcoords='bogus'), lambda ax: ax.set_xlim(2, 3))\nredraws('xycoords bogus, clip=True', lambda ax: ax.annotate('t', (5, 5), (0, 0), xycoords='bogus', textcoords='data', annotation_clip=True))\nredraws('arrowstyle 5, inside', lambda ax: ax.annotate('t', (0.5, 0.5), (0.2, 0.2), arrowprops=dict(arrowstyle=5)), lambda ax: ax.set_xlim(2, 3))\nredraws('text bbox boxstyle 5', lambda ax: ax.text(0.5, 0.5, 't', bbox=dict(boxstyle=5)))\nredraws('inf xytext arrow, inside', lambda ax: ax.annotate('t', (0.5, 0.5), (float('inf'), 0), arrowprops=dict(arrowstyle='->')), lambda ax: ax.set_xlim(2, 3))\nprint('a healthy figure after each: ok')\n");
+  assert.deepEqual(out.trim().split("\n"), [
+    "textcoords bogus, inside => ('ValueError', \"'bogus' is not a valid coordinate\") x4, the same each draw: True - a fresh exception each draw: True",
+    "textcoords bogus, inside healed => ok",
+    "xycoords bogus, clip=True => ('ValueError', \"'bogus' is not a valid coordinate\") x4, the same each draw: True - a fresh exception each draw: True",
+    "arrowstyle 5, inside => ('TypeError', \"'int' object is not callable\") x4, the same each draw: True - a fresh exception each draw: True",
+    "arrowstyle 5, inside healed => ok",
+    "text bbox boxstyle 5 => ('TypeError', \"'int' object is not callable\") x4, the same each draw: True - a fresh exception each draw: True",
+    "inf xytext arrow, inside => ('StopIteration', '') x4, the same each draw: True - a fresh exception each draw: True",
+    "inf xytext arrow, inside healed => ok",
+    "a healthy figure after each: ok",
+  ]);
+});

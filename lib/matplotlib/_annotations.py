@@ -39,7 +39,8 @@ _MPL_COORDS = {"data", "polar", "figure points", "figure pixels", "figure fracti
 
 
 class _Later(Exception):
-    """An error matplotlib raises only when the annotation is drawn: args[0]."""
+    """An error matplotlib raises only when the annotation is drawn, kept as
+    its class and arguments (args): Text.svg raises a fresh one each draw."""
 
 
 def _coords(c, size_pt, textcoords):
@@ -51,9 +52,9 @@ def _coords(c, size_pt, textcoords):
     if r is None and isinstance(c, str):
         if c.startswith("offset "):
             if c[7:] not in ("points", "pixels", "fontsize"):
-                raise _Later(ValueError("%r is not a recognized unit" % c[7:]))
+                raise _Later(ValueError, "%r is not a recognized unit" % c[7:])
         elif c not in _MPL_COORDS:
-            raise _Later(ValueError("%r is not a valid coordinate" % c))
+            raise _Later(ValueError, "%r is not a valid coordinate" % c)
     if r is None:
         raise NotImplementedError("annotate: the coordinates %r are not implemented in Sagebrush" % (c,))
     return r if r[1] is not None else (None, size_pt * PT, True)
@@ -77,7 +78,7 @@ def _style(s, what, supported):
     refused as not implemented here."""
     if not isinstance(s, str) and not callable(s):
         # (matplotlib calls a style that isn't a string, when it is drawn)
-        raise _Later(TypeError("'%s' object is not callable" % type(s).__name__))
+        raise _Later(TypeError, "'%s' object is not callable" % type(s).__name__)
     if not isinstance(s, str):
         raise NotImplementedError("a %s object is not implemented in Sagebrush; give the style as a string, such as %s"
                                   % (what, {"arrowstyle": "'->'", "connectionstyle": "'arc3,rad=0.2'"}.get(what, "'round,pad=0.3'")))
@@ -107,32 +108,51 @@ def annotation(text, xy, xytext, xycoords, textcoords, arrowprops, annotation_cl
         textcoords = xycoords
     if xytext is None:
         xytext = xy
+    # (each coordinate system is resolved as matplotlib uses it, when the
+    # annotation is drawn: a bad one raises only where it is needed)
+    xerr = terr = None
     try:
         xc, xk, _ = _coords(xycoords, size_pt, False)
+    except _Later as e:
+        xerr, xc, xk = e.args, None, 1
+    try:
         tc, tk, offset = _coords(textcoords, size_pt, True)
-    except _Later as e:  # (raised whenever it is drawn)
-        return Text(text, 0, 0, no_bbox=True, clip=False, error=e.args[0], **text_options)
+    except _Later as e:
+        terr, tc, tk, offset = e.args, None, 1, False
     x, y = float(xy[0]) * xk, float(xy[1]) * xk
     if offset:  # (the text placed from xy)
         o = dict(coords=xc, offset=(float(xytext[0]) * tk, float(xytext[1]) * tk))
         tx, ty = x, y
+        terr = terr or xerr
     else:
         o = dict(coords=tc)
         tx, ty = float(xytext[0]) * tk, float(xytext[1]) * tk
     # (as matplotlib's annotation_clip: by default an annotation of data
-    # coordinates is drawn only while its point is inside the axes)
+    # coordinates is drawn only while its point is inside the axes; the
+    # check needs xy, so bad xycoords raise there)
     if annotation_clip or (annotation_clip is None and xycoords == "data"):
-        o["only_inside"] = (x, y, {"coords": xc})
+        if xerr:
+            o["error"] = xerr
+        else:
+            o["only_inside"] = (x, y, {"coords": xc})
+    # (then, if drawn: the text's place, the arrow's point, its style, the box)
+    later = terr
     try:
         if arrowprops is not None:
             o["arrow"] = _arrow_options(arrowprops, (x, y, xc), size_pt)
+            later = later or xerr
         if kw.get("bbox") is not None:
             o["box"] = text_box(kw["bbox"], size_pt)
-    except _Later as e:  # (raised if it is drawn: not when annotation_clip hides it)
+    except _Later as e:
         o.pop("arrow", None)
-        o["later"] = e.args[0]
+        later = later or e.args
     if "arrow" in o and not all(math.isfinite(float(v)) for v in xytext):
-        o["later"] = StopIteration()  # (as matplotlib, whose arrow search finds no point of such a text)
+        later = later or (StopIteration,)  # (as matplotlib, whose arrow search finds no point of such a text)
+    if later:
+        o["later"] = later
+    if terr or (xerr and "arrow" in o):
+        o.pop("arrow", None)
+        tx = ty = 0.0  # (not drawn: it raises first)
     # (an annotation has no clip box: it is drawn wherever it is)
     return Text(text, tx, ty, no_bbox=True, clip=False, **dict(text_options, **o))
 

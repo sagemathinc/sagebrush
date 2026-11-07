@@ -751,7 +751,7 @@ class Axes:
             try:
                 box = text_box(kw["bbox"], size)
             except _Later as e:  # (matplotlib's error when it is drawn)
-                later = e.args[0]
+                later = e.args
         return _Artist(self._add(Text(s, x, y, fontsize=size * PT, color=to_color(color),
                        horizontal_alignment=kw.get("horizontalalignment", ha),
                        vertical_alignment=kw.get("verticalalignment", va), rotation=rotation, no_bbox=True,

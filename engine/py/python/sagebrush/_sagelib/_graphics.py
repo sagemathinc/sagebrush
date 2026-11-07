@@ -887,12 +887,15 @@ class Text(Primitive):
 
     def svg(self, P):
         o = self.options
+        # (what matplotlib refuses when it draws the annotation: kept as a
+        # class and its arguments, a fresh exception each draw; "error"
+        # before annotation_clip's check, "later" after it)
         if o.get("error") is not None:
-            raise o["error"]  # (coordinates matplotlib refuses when the annotation is drawn)
+            raise o["error"][0](*o["error"][1:])
         if o.get("only_inside") is not None and not _inside(P, _anchor(P, *o["only_inside"])):
             return ""  # (an annotation of a point outside the axes, as matplotlib's annotation_clip)
         if o.get("later") is not None:
-            raise o["later"]  # (what matplotlib refuses when it draws the annotation)
+            raise o["later"][0](*o["later"][1:])
         p = _anchor(P, self.x, self.y, o)
         if p is None:
             return ""
