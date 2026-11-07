@@ -238,10 +238,10 @@ def _paint_svg(a, fill):
 
 def _arrow_svg(a, P, ext, rect, string):
     s = _arrow_paths(a, P, ext, rect, string)
-    # (a point that overflowed on the way, from finite ends near the double
-    # limit, inf - inf: no arrow either, or matplotlib's error for a "simple")
+    # (a point that overflowed on the way, from a finite curve near the double
+    # limit: no arrow either, as matplotlib draws nothing of it, "simple" too)
     if any(not math.isfinite(float(v)) for d in re.findall(r' d="([^"]*)"', s) for v in re.findall(r'[-+]?(?:[0-9.]+(?:e[-+]?[0-9]+)?|nan|inf)', d)):
-        return _no_arrow(a)
+        return ""
     return s
 
 
@@ -322,9 +322,12 @@ def _point(bez, t):
 def _split(bez, t):
     """The two halves of a quadratic Bezier curve at t (de Casteljau)."""
     (x0, y0), (x1, y1), (x2, y2) = bez
-    a = (x0 + (x1 - x0) * t, y0 + (y1 - y0) * t)
-    b = (x1 + (x2 - x1) * t, y1 + (y2 - y1) * t)
-    m = (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)
+    # (as matplotlib's (1 - t) p + t q: no difference of two points, which
+    # overflows for points near the double limit on either side)
+    u = 1 - t
+    a = (x0 * u + x1 * t, y0 * u + y1 * t)
+    b = (x1 * u + x2 * t, y1 * u + y2 * t)
+    m = (a[0] * u + b[0] * t, a[1] * u + b[1] * t)
     return [(x0, y0), a, m], [m, b, (x2, y2)]
 
 
