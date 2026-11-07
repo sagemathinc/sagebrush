@@ -1,23 +1,24 @@
 # Native engines in the desktop app
 
-*Status: plan r2, for review. No code accompanies it, and nothing is built until it is reviewed and William
+*Status: plan r3, for review. No code accompanies it, and nothing is built until it is reviewed and William
 approves (his rule of Oct 30). Owner: @sagebrush-remote-compute. Reviewers: astra (SEC), daybreak3 (ENGINE), daybreak4
-(PERF), daybreak2 (SIZE), agents-ui (app). r2 takes the r1 reviews:
-- SIZE: the payload versus the budget, two choices, the N1 gate;
-- app: A1–A4 and the notes;
-- PERF: P1–P3;
-- SEC: DIFF, BOOT, OS, FALLBACK and REVOKE;
-- ENGINE: NATIVE-IPC-1 and NATIVE-DIFF-1.
+(PERF), daybreak2 (SIZE), agents-ui (app). r2 took the r1 reviews. r3 takes the r2 reviews:
+- PERF: the low-level thread rows now have a wasm run of the identical call (§2);
+- SEC: NATIVE-DIFF-1's three contracts, destination resolution, the disk failure model and the freeze barrier
+  (§3.1, N1, N2);
+- ENGINE: NATIVE-IPC-2, unsupported modes (§1.3), and NATIVE-IPC-3, views of a shared kernel (§1.3);
+- app: the N4 interact gate and agents-ui's addendum, where the all-or-nothing batch is a new page API (§3.1).
 
-Each item is closed where it is cited below.*
+Whether an item is closed is for its reviewer to say. Still open whatever the reviews say: N1's proofs and William's
+decisions (§7).*
 
 ## In plain words
 
 - The desktop app will run notebooks with Sagebrush's **native engines**: the Rust engine compiled for your computer,
   with real threads, native SIMD and all of your memory, inside a real CPython. It will not use WebAssembly in the web
   view.
-  - On the engine-heavy cells measured below it is 2.2–4.1 times faster than WebAssembly at the same version, and
-    much more where an engine uses many cores. It starts in milliseconds.
+  - On the engine-heavy cells measured below it is 2.2–4.8 times faster than WebAssembly at the same version. The
+    most is where an engine uses many cores, which WebAssembly here doesn't. It starts in milliseconds.
   - It is not yet faster at everything; §2 says plainly where.
 - Each notebook gets its own engine process, locked down by the operating system before any of its code runs:
   - it reads only the notebook's own folder and what you've allowed;
@@ -66,8 +67,8 @@ commit as the app** in the app's own release job.
   and nothing for the user to install.
 - **A trusted launcher** (§3.4) in the Rust shell (`app/src-tauri`) starts **one kernel process per document
   identity** (confinement spec §4.2), confined before the interpreter starts.
-- **The execution core** is `sagebrush/remote/child.py`, the native kernel the runner already uses: line-delimited
-  JSON on stdin/stdout, SIGINT Stop, display bundles. Its existing tests (`test_remote_child.py`) cover that core
+- **The execution core** is `engine/py/python/sagebrush/remote/child.py`, the native kernel the runner already
+  uses: line-delimited JSON on stdin/stdout, SIGINT Stop, display bundles. Its existing tests (`test_remote_child.py`) cover that core
   only. The adapter (§1.3), the sandbox and the reconciliation (§3) are new and get their own tests in N1 and N2.
 - **Over stdio pipes only:** the kernel runs no listening service, so there is no port, no pairing and no DPoP inside
   the app. The app host and the kernel still share an OS-local trust boundary, which §3 confines. The loopback gateway
@@ -91,7 +92,8 @@ run. So N2 builds a **`NativeKernelPort`**: a Worker-like object (`postMessage`,
   | WorkerKernel → | Native |
   |---|---|
   | `init {limits}` | handled by the host: launch, sandbox self-check, file delivery, then `ready {python, engine, limits}` to the page; never forwarded as a run |
-  | run `{id, code, sage\|magma\|matlab}` | `{id, code, mode: "python"\|"sage"\|"magma"\|"matlab"}` |
+  | run `{id, code}` or `{id, code, sage}` | `{id, code, mode: "python"\|"sage"}` |
+  | run `{id, code, magma\|matlab}` | **never sent to the child** (NATIVE-IPC-2, below) |
   | completion / check | `{id, complete, mode}`; check is refused until the child supports it |
   | file messages, `writable` | not forwarded: files go by delivery and reconciliation (§3.1); the policy stays in the page |
   | live data | through the host broker (§3.2) |
@@ -99,13 +101,44 @@ run. So N2 builds a **`NativeKernelPort`**: a Worker-like object (`postMessage`,
   | interact and widgets | refused with a clear error in N2 unless the child supports them; listed as deferred |
   | lifecycle (Stop, restart, close) | §1.4 and §3.5 |
 
+- **Modes (NATIVE-IPC-2):** `child.py` implements Python and Sage only. Any other `mode` string takes its plain-Python
+  path, so mapping Magma or MATLAB to it would run their source as Python. Two rules:
+  - **A document that uses Magma or MATLAB runs on the wasm kernel.** The page decides before the kernel starts: the
+    document's cells or its stated mode select the engine. A Magma or MATLAB cell that appears later in a native
+    session is **refused before anything is sent**, with nothing executed and a clear error ("this cell needs the wasm
+    kernel; switch engines"). Switching follows §1.4's engine-switch rule: a new interpreter, the run in flight ends
+    "interrupted". Real native Magma and MATLAB implementations are N5, each with its own parity tests.
+  - **The host validates `mode` against an allowlist** (`python`, `sage`) and refuses any other value without
+    forwarding it. In the same N2 PR `child.py` refuses unknown modes too, rather than defaulting to Python, so the
+    rule holds at both ends.
+
+  N2 pins: a Magma cell and a MATLAB cell in a native session are refused with nothing executed; an unknown mode is
+  refused by the host and, sent directly, by the child.
 - **Startup ordering:** launch, then confinement (§3.4), then the self-check (§3.3), then delivery of the read scope
   (§3.1), then `ready`. The page sends no run before `ready`.
 - **Identity:**
   - The host owns the kernel for each stable document identity.
-  - Two views of one identity share it, and their runs are serialized.
   - Every message carries the host's **generation** for that kernel. A message from an older generation, after a
     restart, crash or close, is dropped and acted on by no one (stale fencing).
+- **Views of a shared kernel (NATIVE-IPC-3):** two views of one identity share its kernel, and their runs are
+  serialized. Each `WorkerKernel` numbers its requests from 1, so the page's own IDs collide across views. Therefore:
+  - **The host mints an attachment ID** for each view when it attaches, and a **host request ID**, unique for the
+    kernel's lifetime, for each request. Only host request IDs reach the child. The host keeps the map from host
+    request ID to (attachment, page request ID), and every response is routed by it to the originating view alone.
+  - **Origin binding:** `runnerInput` answers, Stop and completion are accepted only from the attachment that issued
+    the request, for that request. An input answer or Stop from another view is refused. Output, `input()` prompts and
+    `done` go to the originating view only.
+  - **Fanout:** a restart (by either view, an engine switch, a revoke, a crash) is announced to every attached view
+    with the new generation. Each view's in-flight request ends "interrupted" or "restarted", and the views
+    re-attach to the new generation.
+  - **Refcount:** closing a view detaches it. Its in-flight run is stopped if it has one, and its pending input
+    requests end. Replies still due to it are dropped. The kernel ends (after reconciliation, §3.1) only when the
+    last attachment closes.
+
+  N2 adapter pins: colliding page IDs from two views; a late reply after its view detaches (dropped, delivered to no
+  one); Stop from each view (it stops only its own run, and is refused for the other's); a restart from one view
+  notifying the other; closing a view that is not the last, with the kernel kept; closing the last view, with the
+  kernel ended.
 - **Stop and hard kill:** §1.4. A hard kill ends the whole descendant tree (§3.3).
 - **`done` waits for reconciliation:** a run's terminal `done` reaches the page only after its reconciliation (§3.1)
   has finished. The page can never start the next run against an unreconciled tree.
@@ -146,10 +179,11 @@ run. So N2 builds a **`NativeKernelPort`**: a Worker-like object (`postMessage`,
 - **Native:** the PyPI wheel `sagebrush-0.6.0-cp39-abi3-manylinux_2_28_x86_64.whl` under CPython 3.14.4.
 - **Machine:** an Intel Xeon at 2.80 GHz with 32 cores (AVX2 and AVX-512 present; the baseline build doesn't use them).
 - **Method:** the same cells file on both sides. Each cell gets one warm-up, then the median of 3, in each process.
-  There were two process runs per side, and five for the threads comparison.
+  There were two process runs per side, and five per side for the threads comparison.
 - **Agreement:** the mathematical outputs agree on both sides. The timings vary as shown.
 - **Evidence:** `/scratch/sagebrush-reviews/remote-compute/native-bench-0.6.0/` (two runs per side),
-  `native-bench-0.6.0-threads/` (five native processes) and `native-bench-0.6.0-bigint/` (the `Integer` probe):
+  `native-bench-0.6.0-threads/` (five native processes), `native-bench-0.6.0-threads-wasm/` (the identical
+  `threads.py`, five wasm processes) and `native-bench-0.6.0-bigint/` (the `Integer` probe):
   scripts, environment, raw runs, SHA256SUMS, read-only. Every number in the table is from these files.
 
 | Cell | Threads (native) | Native | Wasm | Native speedup |
@@ -157,16 +191,18 @@ run. So N2 builds a **`NativeKernelPort`**: a Worker-like object (`postMessage`,
 | `det` of a 200×200 integer matrix (539-digit result) | engine default | 65–69 ms | 166 ms | **2.4–2.5×** |
 | `factor` of a 41-digit product of three primes (ECM) | engine default | 243–247 ms | 541–544 ms | **2.2×** |
 | `aplist(200000)` for `[0,0,1,-1,0]` (a_p engine), Sage namespace | all cores (32) | 27.7–34.7 ms | 96.7–98.7 ms | **2.8–3.6×** |
-| `sagebrush.ap.aplist(…, 200000)`, `threads=1` | 1 | 78.5–79.3 ms | (≈98 ms above) | **≈1.2×** |
-| `sagebrush.ap.aplist(…, 200000)`, `threads=0` | all (32) | 22.4–24.4 ms | (≈98 ms above) | **≈4.1×** |
+| `sagebrush.ap.aplist(…, 200000)`, `threads=1`, both sides | 1 | 78.5–79.3 ms | 100.6–111.2 ms | **1.3–1.4×** |
+| `sagebrush.ap.aplist(…, 200000)`, `threads=0`, both sides | all (32) | 22.4–24.4 ms | 102.2–108.0 ms | **4.2–4.8×** |
 | `fib(24)`, pure Python recursion | — | 5.0–5.1 ms | 2.7–5.0 ms | 0.5–1.0× |
 | `factorial(60000)` (865,809 bits) | — | 88–89 ms | 11.4 ms | **≈0.13×** |
 | `import` of the library | — | 19–22 ms | 454–528 ms | — |
 
 **What this shows, and what it doesn't:**
-- **The engines are 2.2–4.1× faster natively** with the baseline build. **Threads matter:** on one thread, `aplist` is
-  only about 1.2× faster; on all cores, about 4.1×. Native's advantage grows with the cores an engine can use and with
-  problems that don't fit in 4 GB, which N1 measures.
+- **The engines are 2.2–4.8× faster natively** with the baseline build. **Threads matter:** with the identical
+  low-level call on both sides, `aplist` on one thread is 1.3–1.4× faster natively; with `threads=0` it is 4.2–4.8×
+  faster. Wasm takes the same time either way (102.2–108.0 ms against 100.6–111.2 ms): this runtime runs it on one
+  thread. Native's advantage grows with the cores an engine can use and with problems that don't fit in 4 GB, which
+  N1 measures. (Each range spans the per-process medians, and each speedup range pairs the extremes.)
 - **Pure Python is not faster natively.** V8 JIT-compiles the JS-compiled Python, while CPython 3.14 interprets it.
 - **NAT-BIGINT-1 (an N2 ENGINE gate):** in the native wheel, `Integer` is a subclass of CPython's `int`, so big-integer
   arithmetic is CPython's. In a separate frozen probe, `factorial(Integer(60000))` takes 58 ms against
@@ -208,27 +244,86 @@ The native semantics differ from the browser's in two stated ways (§3.1, §3.5)
   authority:
   - Only **regular files and directories** are reconciled. Symlinks, hard links (link count above 1), special files,
     reparse points and link changes make the run fail reconciliation; they are never followed or copied back.
-  - Paths are canonicalized by the host and must lie under the working directory.
+  - Paths are canonicalized by the host and must lie under the working directory. Each maps to a real destination
+    under the document root or a granted write tree, resolved only as in step 5 of the transaction.
   - Traversal, file count, total bytes and per-file size are bounded, with the app's existing limits, including files
     native C code created.
-- **A stable snapshot first.** A cell finishing doesn't mean every writer stopped: background threads and children may
-  still write. Before scanning, the host **freezes the kernel's whole descendant tree**: a cgroup freeze or SIGSTOP of
-  the contained tree on Linux and macOS, `NtSuspendProcess` over the Job's processes on Windows. It resumes them after
-  reconciliation. A tree that can't be frozen fails reconciliation.
+- **The freeze barrier (a stable snapshot first).** A cell finishing doesn't mean every writer stopped: background
+  threads and children may still write. **The invariant:** from the freeze until the resume, no thread in the
+  kernel's tree runs, no new process can join the tree, and none can leave it.
+  - **Linux:** the launcher puts the kernel in its own delegated cgroup v2. `cgroup.freeze` freezes every thread in it.
+    A child forked during the freeze is born in the same cgroup and frozen too. The host waits for `cgroup.events` to
+    report `frozen 1` before it scans. Without a delegated cgroup v2 there is no barrier, so native execution is
+    denied (§3.6). SIGSTOP of a process group is racy against fork and is not used.
+  - **macOS:** only §3.3's option (a), where the profile denies `process-fork`, gives a barrier: the tree is one process,
+    and `task_suspend` stops all of its threads at once. Under option (b) native execution is denied unless N1 proves
+    a barrier.
+  - **Windows:** the Job's active-process limit is first set to its current count, so no process can be created in it.
+    Then every process in the Job is suspended, and the host checks that the Job's process list is unchanged and all
+    suspended. N1 (for N3) establishes this, or Windows native execution is denied.
+  - **Order:** freeze, verify, scan, run the transaction below, then **either** advance the baseline (everything
+    applied) **or** restore every changed path from the baseline and verify the restore. **Only then resume.** The
+    resume never comes before restore or advance has finished, and finishing the page's batch is not enough.
+  - **On failure:** if the freeze can't be established or verified, or the restore, verification or resume fails,
+    the generation is **retired**. Its tree is killed and the kill confirmed, its working directory is discarded, and
+    the run fails. The next run gets a fresh kernel from a clean delivery, never this generation.
 - **The transaction:**
   1. The host diffs the snapshot against the baseline: create, modify, delete and rename.
-  2. It sends the whole set to the **page** as one batch. The batch enters **the same change queue wasm writes use**
-     (`sagebrush.files` / `fsChanged` and the workspace's locked admission): `mayChange`, the write trees, `rename` at
-     both ends, the stale-generation and sender checks, and the current grants at that moment.
-  3. Each change also carries its **expected revision**, so it is a compare-and-swap. A real file that changed since
-     delivery is a **conflict**, never overwritten.
-  4. **All or nothing:** if every change is admitted and none conflicts, all of them apply (for a disk document, the
-     app's existing disk-write path writes them). If any change is refused or conflicts, **none** applies.
-  5. Every path the run changed is then **restored from the baseline** in the working directory, or the kernel
-     restarts from a clean snapshot, before any later run. Unauthorized bytes never survive into the next cell.
-  6. The baseline advances only after a successful apply.
+  2. **Admission, all or nothing, before anything is applied.** This is a **new page API**, `files.applyBatch`,
+     added in N2. Today's queue doesn't do it: `drainFiles()` (web/index.html) admits one path at a time, each in its
+     own write, and skips a refused path while the rest go on. wasm keeps that queue. Under the workspace's lock,
+     held from the first check to the last write, `applyBatch` checks **every** change before applying any:
+     `mayChange`, the write trees, `rename` at both ends, the stale-generation and sender checks, the current grants
+     and each change's **expected revision** (a compare-and-swap: a real file that changed since delivery is a
+     **conflict**, never overwritten). If any check fails, nothing is applied.
+  3. **Apply, workspace documents:** one IndexedDB `readwrite` transaction over every store the batch touches. It
+     commits or aborts as a whole. N2 confirms that the workspace store allows this; if it doesn't, the same journal
+     model as for disk is used, inside the database.
+  4. **Apply, disk documents: a journal, staged then renamed, with recovery.** No OS gives a multi-file atomic write,
+     so the host provides **an all-or-nothing decision with recovery**, not instant atomic visibility:
+     - **Prepare:** each new content goes into a staging file in its target's own folder (same file system),
+       written and `fsync`ed. A journal in the host's private data folder lists every step, its expected revision,
+       its staging and backup names and the grant version, and is `fsync`ed.
+     - **Commit, step by step, recorded in the journal:** before each step, the host checks the grant version, the
+       target's expected revision and the destination identity (below). A modify moves the original to a backup and
+       renames the staged file into place. A create and the new end of a rename use a no-replace rename
+       (`renameat2` `RENAME_NOREPLACE`, `renamex_np` `RENAME_EXCL`, `MoveFileEx` without `REPLACE_EXISTING`). A
+       delete moves the file to a backup. Then a "committed" mark, and the backups and journal are removed.
+     - **A failure during commit** (a late conflict, an I/O error, narrowed permission, a revoke's grant bump) rolls
+       back the completed steps from their backups, in reverse order. If the rollback succeeds, the run is reported
+       refused, with nothing changed. **If the rollback fails, the run is reported as partially applied,** naming
+       each path changed and each restored, and the backups are kept. A batch is never reported fully refused when a
+       real change was committed.
+     - **A crash:** at the next start, before any kernel for that document runs, the host reads the unfinished
+       journals. Before the "committed" mark, it rolls back; after it, it finishes the cleanup. The person is told
+       what happened.
+     - **The stated limits:** other programs can see the intermediate state while a commit runs, and staging or
+       backup files (`.sagebrush-txn-…`, in the target folders) until recovery after a crash.
+     - **Subfolders:** wasm's disk writes reach only the document's top folder today (`writeDisk`, `/^\/[^/]+$/`).
+       N2 keeps that limit. A native run that changed a path in a subfolder of a disk document fails reconciliation
+       with a named error, and nothing is applied. That is louder than wasm, where such a write never reaches disk,
+       and not looser. Subfolder writes, for both engines and with directory creation in the journal, are later
+       work, planned separately.
+  5. **Destination identity, at the durable step.** The kernel can't reach the real files, but another program or
+     links already in the real tree can change a destination between the check and the write. Paths are never
+     re-resolved by name:
+     - At delivery the host opens the **document root** and records its identity (device and inode; on Windows, the
+       volume serial and file ID). It records every delivered file's parent identity too.
+     - Every durable operation (a write's staging and rename, both ends of a rename, a delete) walks from the held
+       root handle one component at a time: `openat2` with `RESOLVE_BENEATH` and `RESOLVE_NO_SYMLINKS` on Linux
+       (`O_NOFOLLOW` at each step where `openat2` is missing), `O_NOFOLLOW_ANY` on macOS, and on Windows a relative
+       `NtCreateFile` with `FILE_OPEN_REPARSE_POINT` that refuses any object carrying a reparse point. The operation
+       then happens relative to the parent handle (`renameat`, `unlinkat`).
+     - A link or reparse point anywhere on the path, or a parent whose identity differs from the recorded one, is a
+       **conflict**. A file revision alone is not enough when its parent has changed.
+     - The current grant version is checked immediately before the durable operation, not only at admission.
+     - Workspace documents have no links. Their identity is the workspace document's ID, checked in the same
+       transaction.
+  6. Every path the run changed is then restored from the baseline in the working directory, or the generation is
+     retired, before any later run (the barrier above). Unauthorized bytes never survive into the next cell.
+  7. The baseline advances only after a complete apply.
 - **The run's outcome:** a refused or conflicting batch marks the run failed. The error names each target to allow or
-  each conflict. The page draws the prompt for the first refused target (spec §3), and **nothing is replayed after a
+  each conflict. A partially applied batch (a failed rollback, step 4) is reported as that, never as refused. The page draws the prompt for the first refused target (spec §3), and **nothing is replayed after a
   grant**: the person runs it again.
 - **Serialization:** run completion, Stop, close and crash all go through reconciliation before the kernel takes
   another run.
@@ -258,7 +353,7 @@ The kernel runs only if the **whole** minimum policy for its platform is install
 | | Files | Sockets and local IPC | Descendants (who owns every child) |
 |---|---|---|---|
 | **Linux** | Landlock, **minimum ABI 3** (Linux 6.2: read/write rights and truncate): read the runtime, read and write the working dir and temp, nothing else. ABI 6's scoping of abstract Unix sockets and signals is used where present. The launcher checks the ABI and refuses below the minimum. | seccomp-bpf: `socket()` refused for **every** family, `AF_UNIX` included, so there are no abstract or filesystem Unix sockets; `socketpair()` allowed (no external endpoint). Also refused: `ptrace`, `process_vm_readv/writev`, `mount`, `unshare` of new namespaces, `bpf`, `perf_event_open`, `keyctl`, `io_uring_setup`. `no_new_privs`. | a **PID namespace** (in an unprivileged user namespace) whose init is the launcher: killing it ends every descendant, whatever `setsid` they call. Without user namespaces, seccomp also refuses `setsid`/`setpgid`, so the process group is durable, and the host kills the group. |
-| **macOS** | a Seatbelt profile applied by the launcher **before exec** of the interpreter (`sandbox_init` with a generated profile; it persists across exec): deny by default; allow the runtime (read), the working dir and temp (read and write) | `(deny network*)`, which covers Unix-domain sockets too, plus `(deny mach-lookup)` except the minimum the runtime needs (listed in N1), and `(deny process-info*)` for other processes | **open, decided in N1:** macOS has no PID namespace. Candidates: (a) a Seatbelt profile that denies `process-fork`, so no children and no native `!cmd` on macOS in v1 (the shell stays wasm); or (b) a session leader plus a descendant sweep with verified completeness. **Fail closed:** without a verified mechanism, (a). |
+| **macOS** | a Seatbelt profile applied by the launcher **before exec** of the interpreter (`sandbox_init` with a generated profile; it persists across exec): deny by default; allow the runtime (read), the working dir and temp (read and write) | `(deny network*)`, which covers Unix-domain sockets too, plus `(deny mach-lookup)` except the minimum the runtime needs (listed in N1), and `(deny process-info*)` for other processes | **open, decided in N1:** macOS has no PID namespace. Candidates: (a) a Seatbelt profile that denies `process-fork`, so no children and no native `!cmd` on macOS in v1 (the shell stays wasm); or (b) a session leader plus a descendant sweep with verified completeness. **Fail closed:** without a verified mechanism, (a). The freeze barrier (§3.1) also needs (a), unless N1 proves one for (b). |
 | **Windows** | an AppContainer token at `CreateProcess`, so the kernel is confined from its first instruction; ACLs grant its SID only the working dir and temp; the runtime is read-only | no network capabilities (no `internetClient` or `privateNetwork`), and no named pipes beyond the inherited ones (AppContainer object isolation) | a Job object with `KILL_ON_JOB_CLOSE`, **no breakaway** (`BREAKAWAY_OK` and `SILENT_BREAKAWAY_OK` off), the process assigned at creation, and `PROC_THREAD_ATTRIBUTE_HANDLE_LIST` so that only the pipes are inherited |
 
 - **The self-check is a canary, not the proof.** At start, before `ready`, the kernel runs probes:
@@ -378,10 +473,10 @@ the old kernel already read; the plan doesn't claim it does.
 | | What | Gate |
 |---|---|---|
 | **N0** | This plan, reviewed; William's decisions (§7) | all lanes; William |
-| **N1** | Spikes and measurements, no product code. **(1)** The launcher and §3.3's complete minimum policy on macOS, Linux and Windows, with SEC's escape tests: sockets of every family, local IPC, write and read outside, descendant escape (`setsid`, double fork, Job breakaway), ptrace, Stop, close and revoke lifecycle; and the macOS descendant decision (§3.3). **(2)** daybreak4's measurements at one commit in the app's own web views (JavaScriptCore on macOS arm64 and Linux x86_64, WebView2 on Windows x86_64): for each parallel cell, native at `threads=1` and in automatic mode with the pool size recorded, against wasm; a specified **> 4 GB case** (native completes with peak RSS and time recorded; wasm reaches its memory limit or fails cleanly); enough independent process runs for medians and variability; and §4's startup breakdown. **(3)** The CPU-dispatch decision A or B (§1.1), profiled first. **(4)** §4's size gate against the budget. **(5)** The IPC cost of large payloads. | SEC, ENGINE, PERF, SIZE |
-| **N2** | macOS and Linux: the bundled runtime and wheel (same commit), the launcher, `NativeKernelPort` (§1.3) with adapter-level tests for every mapping and transition, the reconciliation transaction (§3.1) with pins (refused modify, create, delete and rename followed by another cell; an external edit during a run; a mixed admitted and refused batch; Stop; crash; close; a second view), revoke ordering (§3.5), broker-only network, the fallback (§3.6), NAT-BIGINT-1, CPU dispatch if N1 chose B. **The self-test judges** (`app/selftest/android-report.py`, `run-judge.mjs`, `ios-judge.py`) gain the native lines in the same PR. **#822's option 1 ends:** `NEEDS_RUNNER` ("the app has no sandbox") and its branch change; the self-test stops allowing by default; both cases are pinned (allowed means writes go through the gate; not allowed means refused at reconciliation and nothing written). | all lanes |
+| **N1** | Spikes and measurements, no product code. **(1)** The launcher and §3.3's complete minimum policy on macOS, Linux and Windows, with SEC's escape tests: sockets of every family, local IPC, write and read outside, descendant escape (`setsid`, double fork, Job breakaway), ptrace, Stop, close and revoke lifecycle; and the macOS descendant decision (§3.3). **(2)** daybreak4's measurements at one commit in the app's own web views (JavaScriptCore on macOS arm64 and Linux x86_64, WebView2 on Windows x86_64): for each parallel cell, native at `threads=1` and in automatic mode with the pool size recorded, against wasm; a specified **> 4 GB case** (native completes with peak RSS and time recorded; wasm reaches its memory limit or fails cleanly); enough independent process runs for medians and variability; and §4's startup breakdown. **(3)** The CPU-dispatch decision A or B (§1.1), profiled first. **(4)** §4's size gate against the budget. **(5)** The IPC cost of large payloads. **(6)** The freeze barrier of §3.1 on each platform (a delegated cgroup v2 freeze on Linux, the single-process `task_suspend` on macOS, the Job's process limit and suspension on Windows), with controls: a background thread writing in a loop through reconciliation, a child forking repeatedly during the freeze, a child created between the cell's end and the freeze, and a failed freeze retiring the generation. Where no barrier is established, that execution mode is denied. **(7)** Destination resolution from a held root (`openat2`, `O_NOFOLLOW_ANY`, `FILE_OPEN_REPARSE_POINT`) on each platform, with the substitution controls listed under N2. | SEC, ENGINE, PERF, SIZE |
+| **N2** | macOS and Linux: the bundled runtime and wheel (same commit), the launcher, `NativeKernelPort` (§1.3) with adapter-level tests for every mapping and transition, the reconciliation transaction (§3.1) with pins (refused modify, create, delete and rename followed by another cell; an external edit during a run; a mixed admitted and refused batch; Stop; crash; close; a second view), the new page API `files.applyBatch` (wasm keeps `drainFiles()`), the disk journal with controls (an I/O failure injected at each commit step, rolled back with nothing changed; a failed rollback, reported as partially applied with each path named; a crash at each journal state, recovered before the document's next kernel starts; a narrowed grant and a revoke during commit; a late external conflict on the last file; a workspace transaction abort; a subfolder change in a disk document, refused), destination controls (a destination parent replaced by a symlink or junction between delivery and commit; a parent renamed; a target replaced by a link; each end of a rename and a delete target substituted), barrier controls (a failed restore retiring the generation; a writer that would run before restore finishes never sees staged bytes), revoke ordering (§3.5), broker-only network, the fallback (§3.6), NAT-BIGINT-1, CPU dispatch if N1 chose B. **The self-test judges** (`app/selftest/android-report.py`, `run-judge.mjs`, `ios-judge.py`) gain the native lines in the same PR. **#822's option 1 ends:** `NEEDS_RUNNER` ("the app has no sandbox") and its branch change; the self-test stops allowing by default; both cases are pinned (allowed means writes go through the gate; not allowed means refused at reconciliation and nothing written). | all lanes |
 | **N3** | Windows: the AppContainer, the Job and the control-message Stop | all lanes |
-| **N4** | Native becomes the app's default, once NAT-BIGINT-1's controls pass; the wasm fallback stays | William |
+| **N4** | Native becomes the app's default, once NAT-BIGINT-1's controls pass **and** interact and widgets reach parity natively, or notebooks that use them are routed to wasm under §3.6's rules, so `@interact` notebooks don't regress; the wasm fallback stays | William |
 | **N5** | Later, each planned separately: the user's own Python, native terminals in the app, Android native, warm kernels, a FUSE or ProjFS file view | — |
 
 ## 7. Decisions for William
@@ -393,7 +488,10 @@ the old kernel already read; the plan doesn't claim it does.
 3. **An "unconfined" native mode,** where the user explicitly runs a notebook's native code without the OS sandbox.
    Recommended: not in v1; the remote runner covers that, labelled as spec §4.4 says.
 4. **The native kernel's two semantic exceptions to the confinement spec:**
-   - (a) a refused write fails at the end of the cell, all or nothing, not at the call (§3.1);
+   - (a) a refused write fails at the end of the cell, all or nothing, not at the call (§3.1). For disk documents
+     "all or nothing" is a decision with recovery: other programs can briefly see a commit in progress, and a failed
+     rollback is reported as partially applied. Subfolder changes of disk documents are refused natively until
+     subfolder writes exist for both engines;
    - (b) a revoke restarts the document's kernel, with the ordering of §3.5, an exception to §4.1 and §4.2.
 
 ## 8. Grounding
@@ -403,9 +501,11 @@ the old kernel already read; the plan doesn't claim it does.
 - design/runner.md and design/engines.md;
 - `engine/py/Cargo.toml` and `pyproject.toml` (`sagebrush-par` with `parallel`; abi3-py310);
 - `engine/py/python/sagebrush/ap.py` (`threads=0` means all cores);
-- `sagebrush/remote/child.py`;
+- `engine/py/python/sagebrush/remote/child.py`;
 - `web/notebook/worker-kernel.js`;
 - the confinement spec r3.2 (§2.2–2.7, §4.1–4.4);
 - the evidence in §2;
+- `web/index.html` (`drainFiles()`, `writeDisk()`);
 - the r1 reviews in /scratch/sagebrush-reviews/pr825-81e508e7-*.md and /home/user/sagebrush/reviews/pr825-81e508e7-perf-daybreak4.md;
+- the r2 reviews (pr825-6d6c2fd3-*.md in the same folders, daybreak3's and daybreak4's updated in place);
 - Linux Landlock (docs.kernel.org/userspace-api/landlock.html), setsid(2), and Windows Job objects (learn.microsoft.com).
