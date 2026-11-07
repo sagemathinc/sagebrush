@@ -67,7 +67,8 @@ RELAY_LIMITS = {
     "outTotal": PAIR_LIMITS["outTotal"],
 }
 _SAFE = 2 ** 53 - 1
-CHANNELS = ("kernel", "terminal")  # (terminal addendum T1.4 §T2; this runner serves kernel pages, terminals are b5)
+CHANNELS = ("kernel", "terminal")  # (terminal addendum T1.4 §T2; terminal pages served only when asked, until T-1b)
+TERMINAL_FRAME = 65_536  # (a terminal message's whole serialization, either way: T2's terminal row, T12-CAP-1)
 _GEN_PREFIX = re.compile(r"([1-9][0-9]{0,15})\n")
 _CONN = re.compile(r"[A-Za-z0-9_-]{1,64}")
 _TOKEN = re.compile(r"[A-Za-z0-9_-]{22}")
@@ -544,6 +545,8 @@ class RelayPage:
         self.token = None
         self.jkt = None
         self.hello_timer = None
+        self.grant = None  # (a terminal page's attachment grant, terminal.py)
+        self.jtis = {}     # (a terminal page's proofs' jtis: once each)
 
     def fits(self, n, kind):
         return not self.closed and self.leg.fits(n + len(self.prefix), kind)
@@ -574,8 +577,14 @@ class RelayPage:
 class RelayRunner:
     """The gateway's host on the relay: its pages, its leg, and dialing again."""
 
-    def __init__(self, key, timers=None, cwd=None, err=None, post=_post, rnd=random.random, sleep=asyncio.sleep, port=None):
+    def __init__(self, key, timers=None, cwd=None, err=None, post=_post, rnd=random.random, sleep=asyncio.sleep, port=None,
+                 terminals=False):
         self.key = key
+        # (terminal pages (terminal.py): served only when asked, until T-1b's output path; otherwise refused at once,
+        # with no PTY opened, as before)
+        self.serve_terminals = terminals
+        self.terms = None
+        self.cwd = cwd
         self.origin = check_origin(key.origin)
         self.timers = timers or RealTimers()
         self.err = err or (lambda s: (sys.stderr.write(s), sys.stderr.flush()))
@@ -613,6 +622,8 @@ class RelayRunner:
         if page.closed:
             return  # (a page this runner ended (close {gen}) or replaced, whose page-close is still to come)
         if not page.paired and len(text.encode("utf-8", "surrogatepass")) > PAIR_LIMITS["preHello"]:
+            return page.close(1009, "message too big")
+        if page.chan == "terminal" and len(text.encode("utf-8", "surrogatepass")) > TERMINAL_FRAME:
             return page.close(1009, "message too big")
         try:
             msg = strict_json(text)
@@ -663,23 +674,37 @@ class RelayRunner:
     def open_page(self, conn, gen, chan="kernel"):
         p = RelayPage(self, self.leg, conn, gen, chan)
         self.pages[gen] = p
-        if chan != "kernel":
-            # (terminals are b5: until then this runner offers kernels only, and ends any other page at once)
+        if chan == "terminal" and self.serve_terminals:
+            pass  # (any number the relay admits (4 per remote); each its own generation and grant)
+        elif chan != "kernel":
+            # (a channel this runner doesn't serve: that page ended at once, nothing opened for it)
             return p.close(1008, "this runner doesn't offer %s pages" % chan)
-        if self.page is not None and not self.page.closed:
-            self.page_gone(self.page)  # (one kernel page at a time: the newer one replaces it)
-        self.page = p
+        else:
+            if self.page is not None and not self.page.closed:
+                self.page_gone(self.page)  # (one kernel page at a time: the newer one replaces it)
+            self.page = p
 
         def no_hello():
-            if self.page is p and not p.paired and not p.closed:
+            if self.pages.get(gen) is p and not p.paired and not p.closed:
                 p.close(1008, "no hello in time")
         p.hello_timer = self.timers.set_timeout(no_hello, PAIR_LIMITS["helloMs"])
+
+    def terminals(self):
+        if self.terms is None:
+            from sagebrush.remote.terminal import Terminals
+            self.terms = Terminals(self, asyncio.get_running_loop(), cwd=self.cwd)
+        return self.terms
 
     def page_gone(self, p):
         if p.closed:
             return
         p.closed = True
         self.timers.clear_timeout(p.hello_timer)
+        if p.chan == "terminal":
+            if self.terms is not None:
+                self.terms.page_gone(p)  # (its grant ends; its session goes on, detached)
+            p.token = None
+            return
         if p.paired:
             if self.paired_conn is p:
                 self.paired_conn = None
@@ -694,6 +719,8 @@ class RelayRunner:
     def page_message(self, p, msg):
         if not p.paired:
             return self.hello(p, msg)
+        if p.chan == "terminal":
+            return self.terminals().page_message(p, msg)
         plain = isinstance(msg, dict)
         if plain and msg.get("unpair") is True and len(msg) == 1:
             self.gateway.shutdown()
@@ -719,8 +746,9 @@ class RelayRunner:
             return self._refuse(p, rid, "refused", "a code or session hello on the relay")
         if "via" in q and q["via"] != "relay":
             return self._refuse(p, rid, "refused", "this is the relay")
-        if q.get("purpose") != "kernel":
-            return self._refuse(p, rid, "refused", "this is a kernel's pairing (purpose \"kernel\")")
+        # (a page's purpose is its channel's: a kernel page pairs as a kernel, a terminal page as a terminal)
+        if q.get("purpose") != p.chan:
+            return self._refuse(p, rid, "refused", "this is a %s's pairing (purpose \"%s\")" % (p.chan, p.chan))
         bad = page_key_error(q, self.stats)
         if bad:
             return self._refuse(p, rid, "refused", bad)
@@ -728,6 +756,12 @@ class RelayRunner:
         p.paired = True
         p.jkt = q["jkt"]
         p.token = b64url(os.urandom(32))  # (this page's and this key's; never written anywhere)
+        if p.chan == "terminal":
+            # (its token is good for this page's terminal opens only: no kernel binding, nothing in the gateway)
+            return p.send({"jsonrpc": "2.0", "id": rid, "result": {
+                "protocol": 1, "purpose": "terminal", "via": "relay", "token": p.token,
+                "nonce": self.gateway.current_nonce(), "limits": {"frame": TERMINAL_FRAME},
+                "incarnation": self.incarnation}})
         self.paired_conn = p
         self.gateway.socket_paired(p)
         self.err("A page is paired.\n")
@@ -845,6 +879,8 @@ async def run_relay(key, err=None, cwd=None):
         code = await runner.run(stop)
     finally:
         runner.gateway.shutdown()
+        if runner.terms is not None:
+            runner.terms.stop_all()
         from sagebrush.remote.gateway import drain_groups
         left = await drain_groups(3.0)
         if left:
