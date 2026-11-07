@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 
@@ -15,6 +15,9 @@ import { join, relative } from "node:path";
 const root = join(__dirname, "..", "..");
 const RECORD_KEYS = ["R.version.string", "platform", "locale", "timezone", "options", "namespaces"];
 const OPTION_KEYS = ["width", "digits", "scipen", "OutDec"];
+/** The pinned printing options (oracle.py's prelude) and the corpus's floor: the seed plus A1's held-out file. */
+const PINNED_OPTIONS = { OutDec: ".", digits: 7, scipen: 0, width: 80 };
+const MIN_CASES = 450;
 
 const sha256 = (p: string) => createHash("sha256").update(readFileSync(p)).digest("hex");
 
@@ -44,6 +47,11 @@ export function checkCorpus(base: string): string[] {
   for (const k of OPTION_KEYS) if (!(k in (record.options ?? {}))) problems.push(`the oracle's options lack ${k}`);
   if (record.timezone !== undefined && record.timezone !== "UTC") problems.push(`the oracle ran in time zone ${record.timezone}, not the pinned UTC`);
   if (record.locale !== undefined && !/LC_CTYPE=C\.UTF-8/.test(record.locale)) problems.push("the oracle's locale is not the pinned C.UTF-8");
+  for (const [k, v] of Object.entries(PINNED_OPTIONS)) {
+    if (record.options && k in record.options && record.options[k] !== v) problems.push(`the oracle's option ${k} is ${JSON.stringify(record.options[k])}, not the pinned ${JSON.stringify(v)}`);
+  }
+  const total = Object.values((prov.files ?? {}) as Record<string, { cases: number }>).reduce((n, e) => n + (e.cases ?? 0), 0);
+  if (total < MIN_CASES) problems.push(`the corpus has ${total} cases, fewer than its floor of ${MIN_CASES}`);
   const files = caseFiles(dir).map((p) => relative(base, p).split("\\").join("/"));
   const listed = Object.keys(prov.files ?? {});
   for (const f of [...new Set([...files, ...listed])].sort()) {
@@ -82,13 +90,10 @@ test("the corpus of recorded R outputs is complete and its outputs come from the
   assert.deepEqual(checkCorpus(root), []);
 });
 
-test("the corpus has at least the seed and the A1 held-out file, with the pinned environment", () => {
+test("the corpus includes A1's held-out file, recorded by an identified R version", () => {
   const prov = JSON.parse(readFileSync(join(root, "rill-tests", "PROVENANCE.json"), "utf8"));
   assert.match(prov.oracle.record["R.version.string"], /^R version \d+\.\d+\.\d+/);
-  assert.deepEqual(prov.oracle.record.options, { OutDec: ".", digits: 7, scipen: 0, width: 80 });
   assert.ok(Object.keys(prov.files).includes("rill-tests/heldout/a1/test_1.R"));
-  const cases = Object.values(prov.files as Record<string, { cases: number }>).reduce((n, e) => n + e.cases, 0);
-  assert.ok(cases >= 450, `${cases} cases`);
 });
 
 // (controls: each check fails when its rule is broken, on a copy of the corpus)
@@ -147,3 +152,55 @@ test("control: an edited or unlisted held-out file is caught", () => {
   writeFileSync(join(c, "rill-tests", "heldout", "a1", "test_2.R"), "#-- late\n1\n");
   has(checkCorpus(c), /heldout\/a1\/test_2\.R: not in its SHA256SUMS/);
 });
+
+// (grader's #835 survivors: a control per rule, each asserting that rule's own message)
+const provEdit = (b: string, f: (j: any) => void) =>
+  edit(join(b, "rill-tests", "PROVENANCE.json"), (s) => { const j = JSON.parse(s); f(j); return JSON.stringify(j); });
+
+test("control: case ids that differ from the output's are caught", () => {
+  const b = copyCorpus();
+  edit(join(b, "rill-tests", "logic", "test_1.out.json"), (s) => s.replace('"id": "logic-1"', '"id": "logic-x"'));
+  has(checkCorpus(b), /logic\/test_1\.R: case ids differ from its output's/);
+});
+
+test("control: a case count that differs from PROVENANCE.json is caught", () => {
+  const b = copyCorpus();
+  provEdit(b, (j) => { j.files["rill-tests/glm/test_1.R"].cases += 1; });
+  has(checkCorpus(b), /glm\/test_1\.R: case count differs from PROVENANCE\.json/);
+});
+
+test("control: a listed case file that is missing is caught", () => {
+  const b = copyCorpus();
+  for (const f of ["test_1.R", "test_1.out.json"]) rmSync(join(b, "rill-tests", "rng", f));
+  has(checkCorpus(b), /rng\/test_1\.R: in PROVENANCE\.json but missing/);
+});
+
+test("control: a listed case file without its recorded output is caught", () => {
+  const b = copyCorpus();
+  rmSync(join(b, "rill-tests", "list", "test_1.out.json"));
+  has(checkCorpus(b), /list\/test_1\.R: no recorded output/);
+});
+
+test("control: a held-out phase without SHA256SUMS is caught", () => {
+  const b = copyCorpus();
+  mkdirSync(join(b, "rill-tests", "heldout", "a2"));
+  writeFileSync(join(b, "rill-tests", "heldout", "a2", "test_1.R"), "#-- h\n1\n");
+  has(checkCorpus(b), /heldout\/a2: not frozen \(no SHA256SUMS\)/);
+});
+
+test("control: an option recorded with another value is caught, option by option", () => {
+  const changed: Record<string, unknown> = { width: 100, digits: 3, scipen: 999, OutDec: "," };
+  for (const [k, v] of Object.entries(changed)) {
+    const b = copyCorpus();
+    provEdit(b, (j) => { j.oracle.record.options[k] = v; });
+    has(checkCorpus(b), new RegExp(`option ${k} is .*not the pinned`));
+  }
+});
+
+test("control: a corpus below its floor is caught", () => {
+  const b = copyCorpus();
+  for (const f of ["test_1.R", "test_1.out.json"]) rmSync(join(b, "rill-tests", "homework", f));
+  provEdit(b, (j) => { delete j.files["rill-tests/homework/test_1.R"]; });
+  has(checkCorpus(b), /fewer than its floor of 450/);
+});
+
