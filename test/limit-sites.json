@@ -10948,5 +10948,111 @@
  "web/workspace/sync-ledger.ts :: waitSync :: if (t !== undefined && (!Number.isSafeInteger(t) || t < 1 || t > WAIT.timeoutMax)) throw Object.assign(new WorkspaceError(\"invalid\", `timeoutMs is an integer from 1 to ${WAIT.timeoutMax}`), { max: WAIT.timeoutMax }); #0": {
   "class": "1",
   "owner": "sync client"
+ },
+ "lib/_sage_rpoly.py :: PolynomialInexact.__pow__ :: raise NotImplementedError(\"a power of a polynomial over %r by %r is not available in sagebrush yet\" % (self._ring._base, n)) #0": {
+  "class": "coverage",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "the fraction field of a polynomial ring over an inexact field (negative powers, division by a polynomial) and powers by a non-integer: 1b stage 2, not a cap"
+ },
+ "lib/_sage_rpoly.py :: PolynomialInexact.__pow__ :: raise NotImplementedError(\"the fraction field of %r is not available in sagebrush yet\" % (self._ring,)) #0": {
+  "class": "coverage",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "the fraction field of a polynomial ring over an inexact field (negative powers, division by a polynomial) and powers by a non-integer: 1b stage 2, not a cap"
+ },
+ "lib/_sage_rpoly.py :: PolynomialInexact.__rtruediv__ :: raise NotImplementedError(\"the fraction field of %r is not available in sagebrush yet\" % (self._ring,)) #0": {
+  "class": "coverage",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "the fraction field of a polynomial ring over an inexact field (negative powers, division by a polynomial) and powers by a non-integer: 1b stage 2, not a cap"
+ },
+ "lib/_sage_rpoly.py :: PolynomialInexact.__truediv__ :: raise NotImplementedError(\"the fraction field of %r is not available in sagebrush yet\" % (self._ring,)) #0": {
+  "class": "coverage",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "the fraction field of a polynomial ring over an inexact field (negative powers, division by a polynomial) and powers by a non-integer: 1b stage 2, not a cap"
+ },
+ "lib/_sage_rpoly.py :: PolynomialInexact._refuse_parents :: raise TypeError(\"unsupported operand parent(s) for %s: '%r' and '%r'\" % (sym, a, b)) #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "Sage's coercion refusal (TypeError) for polynomials over an inexact field with another ring or a Python complex, in Sage's text; refuses nothing for size"
+ },
+ "lib/_sage_rpoly.py :: PolynomialRingInexact.__call__ :: Converting an expression of degree 1048577 to a dense polynomial needs about 8.4 MB, but Sagebrush has a fixed limit of about 8.3 MB for one polynomial. #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "docstring text and examples of the dense coefficient bound; refuses nothing"
+ },
+ "lib/_sage_rpoly.py :: PolynomialRingInexact.__call__ :: conversion (a fixed limit of 2^20 coefficients):: #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "docstring text and examples of the dense coefficient bound; refuses nothing"
+ },
+ "lib/_sage_rpoly.py :: PolynomialRingInexact.__call__ :: sage: _sage_poly._MAX_DENSE_COEFFS = cap # sagebrush only #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "docstring text and examples of the dense coefficient bound; refuses nothing"
+ },
+ "lib/_sage_rpoly.py :: PolynomialRingInexact.__call__ :: sage: import _sage_poly; cap = _sage_poly._MAX_DENSE_COEFFS; _sage_poly._MAX_DENSE_COEFFS = 11 # sagebrush only #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "docstring text and examples of the dense coefficient bound; refuses nothing"
+ },
+ "lib/_sage_rpoly.py :: _admit :: cap = _sage_poly._MAX_DENSE_COEFFS #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "the dense coefficient bound of the exact polynomials (_sage_poly._MAX_DENSE_COEFFS, 2^20), admitted before a polynomial over an inexact field is built: SR conversion, product, square, power, shift (astra's RPOLY-ALLOC-1)",
+  "row": "inv-13"
+ },
+ "lib/_sage_rpoly.py :: _admit :: exact polynomials' _MAX_DENSE_COEFFS coefficients (the memory guard's error, at 8 bytes a #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "docstring text and examples of the dense coefficient bound; refuses nothing"
+ },
+ "lib/_sage_rpoly.py :: _admit :: if n > cap: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "the dense coefficient bound of the exact polynomials (_sage_poly._MAX_DENSE_COEFFS, 2^20), admitted before a polynomial over an inexact field is built: SR conversion, product, square, power, shift (astra's RPOLY-ALLOC-1)",
+  "row": "inv-13"
+ },
+ "lib/_sage_rpoly.py :: _admit :: raise _memguard.memory_guard(what, n * 8, cap * 8, \"one polynomial\", fixed=True) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "the dense coefficient bound of the exact polynomials (_sage_poly._MAX_DENSE_COEFFS, 2^20), admitted before a polynomial over an inexact field is built: SR conversion, product, square, power, shift (astra's RPOLY-ALLOC-1)",
+  "row": "inv-13"
+ },
+ "lib/_sage_rpoly.py :: _refuse_foreign :: raise TypeError(\"unsupported operand parent(s) for %s: '%s' and '%s'\" % (sym, a, b)) #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "Sage's coercion refusal (TypeError) for polynomials over an inexact field with another ring or a Python complex, in Sage's text; refuses nothing for size"
+ },
+ "lib/_sage_rpoly.py :: _refuse_foreign :: raise TypeError(\"unsupported operand type(s) for /: '%s' and '%s'\" % (ca, cb)) #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "Sage's coercion refusal (TypeError) for polynomials over an inexact field with another ring or a Python complex, in Sage's text; refuses nothing for size"
+ },
+ "lib/_sage_rpoly.py :: _refuse_mixed :: raise NotImplementedError(\"arithmetic with %s and %s together is not available in sagebrush yet\" % (a, b)) #0": {
+  "class": "coverage",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "polynomials over an inexact field with a number field that has an embedding (Sage computes in the common ring): L33, not a cap"
+ },
+ "lib/_sage_rpoly.py :: _refuse_types :: raise TypeError(\"unsupported operand type(s) for /: '%s' and '%s'\" % (ca, cb)) #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "Sage's coercion refusal (TypeError) for polynomials over an inexact field with another ring or a Python complex, in Sage's text; refuses nothing for size"
  }
 }

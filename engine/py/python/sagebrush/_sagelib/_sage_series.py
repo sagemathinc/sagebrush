@@ -198,6 +198,10 @@ class SeriesRing_:
         if _is_padic(self._base) and not self._base._field:
             # stay in Zp: b is a unit there (inverse() checks)
             return a * self._base(b).inverse_of_unit()
+        if type(b).__name__ == "PolynomialInexact" and b.degree() == 0:
+            # (a number of the base RR['a']: a coefficient over it times the number's
+            # inverse, as Sage's series over RR['a'] divided by RR(1.5))
+            return a / b[0]
         return a / b
 
     def __repr__(self):

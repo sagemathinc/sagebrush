@@ -21,6 +21,13 @@ returns).
 
 from fractions import Fraction as _F
 from functools import cmp_to_key as _cmp_to_key
+import sys as _sys
+
+
+def _inexact_polynomial(x):
+    """Whether x is a polynomial over RR, CC, ... (_sage_rpoly, loaded on demand)."""
+    m = _sys.modules.get("_sage_rpoly")
+    return m is not None and m.is_inexact_polynomial(x)
 
 
 def _sa():
@@ -543,6 +550,9 @@ class Polynomial_nf:
     # ---- arithmetic
     def _coerce(self, b):
         R = self._ring
+        if _inexact_polynomial(b):
+            # (the polynomial over RR, CC, ... decides, refusing the pair as Sage)
+            return None
         if isinstance(b, Polynomial_nf):
             if b._ring is R or b._ring == R:
                 return b
@@ -710,6 +720,8 @@ class Polynomial_nf:
             x = kwds.get(self._ring._name, self._ring.gen())
         else:
             (x,) = args
+        if _inexact_polynomial(x):
+            _sys.modules["_sage_rpoly"].refuse_value(self, x)
         if not self._c:
             return self._ring._base(0) if not isinstance(x, Polynomial_nf) else Polynomial_nf(x._ring, [])
         r = self._c[-1]
