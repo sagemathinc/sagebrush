@@ -5303,6 +5303,11 @@
   "owner": "matrices over SR (@sagebrush-sage2)",
   "reason": "a symbolic determinant larger than 3 x 3 / adjugate larger than 4 x 4: Sage's division-free path, lane 4b-2"
  },
+ "lib/_sage_matrix_sr.py :: eigenvalues :: NotImplementedError: the eigenvalues of this symbolic matrix are not available in sagebrush yet #0": {
+  "class": "coverage",
+  "owner": "symbolic linear algebra (@sagebrush-matlab)",
+  "reason": "the doctest's expected output for _eigen's unsupported case (the review's N10 pin), not a cap"
+ },
  "lib/_sage_modular.py :: EllipticCurvePoint._same_curve :: raise TypeError(\"unsupported operand parent(s) for %s: 'Abelian group of points on %r' and 'Abelian group of points on %r'\" % (op, self._E, other._E)) #0": {
   "class": "none",
   "owner": "sage kernel (@sagebrush-sage2)",
