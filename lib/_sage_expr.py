@@ -3954,6 +3954,8 @@ def symbolic_sum(f, v, a, b, algorithm=None, hold=False):
         Traceback (most recent call last):
         ...
         ValueError: Sum is divergent.
+        sage: symbolic_sum((-1)^k*(k + 1) - (-1)^k*k - (-1)^k, k, 1, oo)
+        0
         sage: symbolic_sum(k + 1/k, k, 1, oo)
         Traceback (most recent call last):
         ...
