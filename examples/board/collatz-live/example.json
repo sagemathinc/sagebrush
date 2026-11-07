@@ -6,9 +6,9 @@
   "programming"
  ],
  "level": "intro",
- "main": "live.json",
+ "main": "live.board.json",
  "files": [
-  "live.json"
+  "live.board.json"
  ],
  "modes": [
   "python"

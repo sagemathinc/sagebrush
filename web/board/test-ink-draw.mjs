@@ -61,7 +61,7 @@ const line = (x0, y0, x1, y1, k = 25) => Array.from({ length: k }, (_, i) => [x0
 try {
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
   await send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
-  await send("Page.navigate", { url: `${base}board/?runner=0&doc=${encodeURIComponent("examples/primes.json")}` });
+  await send("Page.navigate", { url: `${base}board/?runner=0&doc=${encodeURIComponent("examples/primes.board.json")}` });
   await until(`${B}?.snapshot().items.length > 0`, 60000);
   await ev("localStorage.clear(), 1");
   await ev(`${B}.load({ title: "Draw", nodes: [{ id: "n1", title: "A note", text: "Draw over me, and around me.", x: 0, y: 0, w: 240 }] }).then(() => 1)`);

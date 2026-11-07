@@ -19,7 +19,7 @@ run, and no workflow lists it:
 
 ```js
 // ci: web-runner order=125 runner=bun chrome
-// ci: web-browser/board-a order=30 env=NO_EDIT=1 -- examples/primes.json
+// ci: web-browser/board-a order=30 env=NO_EDIT=1 -- examples/primes.board.json
 // ci: none (needs a signed-in DEV account)
 ```
 

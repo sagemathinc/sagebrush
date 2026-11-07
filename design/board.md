@@ -270,7 +270,7 @@ clear of the caption. Double-click flies to a box. Pinch zooms on touch screens.
 - `step(n)`;
 - `snapshot()`, which returns the document, the step, the camera and every placed box.
 
-The first document is examples/sagebrush.json, Sagebrush's own architecture,
+The first document is examples/sagebrush.board.json, Sagebrush's own architecture,
 which `/board/` shows. web/test-board.mjs checks a document in CI:
 - no boxes overlap except a group and its members;
 - every note's text fits;
@@ -364,7 +364,7 @@ The page picker in the top bar (and PageUp/PageDown) moves between them;
 `#p2` in the address is page 2 and `#p2-3` its step 3 (`#3` is still step 3
 of page 1). The menu adds, renames and deletes pages: adding one to a board
 without pages makes the board page 1. Editing, Tidy and undo work on the
-page shown. examples/primes.json, three proofs that there are infinitely many
+page shown. examples/primes.board.json, three proofs that there are infinitely many
 primes, is a page each.
 
 **Print or save as PDF** (web/board/print.ts, the menu or Ctrl+P) lays out
@@ -412,7 +412,7 @@ You open a `.mmd` file, or Markdown, where each ```` ```mermaid ```` block
 becomes a page titled by the heading above it. You can also paste a
 diagram into *Import Mermaid…*, put it in the address (`?mermaid=`), or,
 as an agent, call `fromMermaid(text)`. Undo (now also outside Edit) brings
-back the board it replaced. examples/mermaid.md has two pages: a cell
+back the board it replaced. examples/mermaid.board.json has two pages: a cell
 running, with every shape and kind of line, and Mermaid's own code-flow
 diagram (about 100 nodes).
 
@@ -511,7 +511,7 @@ the boxes whose tops lie above the middle of the row's shortest box.
   as text, after what was asked for has run.
 
 Outputs are not saved in the document. A board's code runs when it is
-opened. Example: examples/live.json (the Collatz map).
+opened. Example: examples/live.board.json (the Collatz map).
 
 web/board/test-code.mjs (31 checks) covers:
 - the run on load and the reading order;

@@ -6,9 +6,9 @@
   "number theory"
  ],
  "level": "course",
- "main": "museum-tour.json",
+ "main": "museum-tour.board.json",
  "files": [
-  "museum-tour.json"
+  "museum-tour.board.json"
  ],
  "author": "Sagebrush",
  "license": "MIT"

@@ -208,7 +208,7 @@ try {
   }
 
   // an example board (not blank) opens as before: not in Edit, Revert there once edited
-  await go("?doc=examples/primes.json");
+  await go("?doc=examples/primes.board.json");
   check(!(await here()).editing, "an example board opens out of Edit");
   // a host without a notebook to make (grader's MT2 on #704): New ▸ Notebook and MATLAB notebook both disabled
   await ev(`import('/board/board.js').then((m) => m.mounted.destroy()).then(() => 1)`);

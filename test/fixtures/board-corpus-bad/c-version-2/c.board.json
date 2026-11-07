@@ -1,0 +1,11 @@
+{
+ "format": "sagebrush-board",
+ "version": 2,
+ "title": "t",
+ "nodes": [
+  {
+   "id": "a",
+   "title": "a"
+  }
+ ]
+}

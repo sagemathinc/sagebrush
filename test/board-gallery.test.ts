@@ -2,13 +2,23 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
-import { boardExample, boardExamples } from "./board-examples";
+import { boardExample, boardExamples, corpusProblems } from "./board-examples";
 
 // The gallery of example boards (examples/board/<slug>/gallery-*.board.json,
 // one per area, linked from llms.txt): each one's every code item runs
 // (`sagebrush board run`), and it draws (`sagebrush board render`).
 const gallery = [...boardExamples.keys()].filter((f) => /^gallery-.*\.board\.json$/.test(f)).sort();
 const cli = (args: string[]) => spawnSync(process.execPath, [__dirname + "/../src/cli.js", "board", ...args], { encoding: "utf8", timeout: 300_000 });
+
+test("every example board is a native board file: its main a .board.json with the format's header", () => {
+  assert.deepEqual(corpusProblems(), []);
+  // (and each check is seen to fail: a corpus with one board wrong each way, and one right)
+  assert.deepEqual(corpusProblems(__dirname + "/../../test/fixtures/board-corpus-bad"), [
+    'a-main-not-board-json: its main, "a.json", is not a .board.json file',
+    "b-main-not-in-files: b.board.json is not in its files",
+    'c-version-2: c.board.json has no "format": "sagebrush-board", "version": 1 header',
+  ]);
+});
 
 test("the gallery: a board for each area, and one with every kind of item", () => {
   assert.deepEqual(gallery, ["calculus", "hello", "linear-algebra", "magma", "matlab", "number-theory", "plots"].map((n) => `gallery-${n}.board.json`));

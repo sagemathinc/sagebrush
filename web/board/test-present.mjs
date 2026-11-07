@@ -59,7 +59,7 @@ const DOC = {
 
 try {
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
-  await send("Page.navigate", { url: `${base}board/?runner=0&doc=${encodeURIComponent("examples/primes.json")}` });
+  await send("Page.navigate", { url: `${base}board/?runner=0&doc=${encodeURIComponent("examples/primes.board.json")}` });
   await until(`${B}?.snapshot().items.length > 0`, 60000);
   await ev("localStorage.clear(), 1");
   await ev(`${B}.load(${JSON.stringify(DOC)}).then(() => 1)`);

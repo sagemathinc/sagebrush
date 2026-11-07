@@ -1,7 +1,7 @@
 // ci: web-browser/board-unit.2 order=20 runner=bun
 // A board as Mermaid (mermaid.ts toMermaid): a flowchart read as a board,
 // written back, and read again is the same board, for every flowchart in
-// examples/mermaid.md and a set covering the syntax; the example boards'
+// test/fixtures/mermaid-flowcharts.md (the Mermaid board example's source) and a set covering the syntax; the example boards'
 // pages keep their graph (groups, notes' text, edges); titles, texts,
 // labels and ids carrying markup or Mermaid syntax are written as entity
 // codes (no tag, no quote, no new node or link) and read back as they were;
@@ -21,7 +21,7 @@ const here = new URL(".", import.meta.url).pathname;
 
 // flowcharts: the example's, and the syntax the importer reads
 const corpus = [
-  ...mermaidBlocks(readFileSync(EXAMPLES.get("mermaid.md"), "utf8")).map((b) => b.text),
+  ...mermaidBlocks(readFileSync(here + "../../test/fixtures/mermaid-flowcharts.md", "utf8")).map((b) => b.text),
   "graph TD\n  A --> B\n  B --> C\n  C --> A",
   "flowchart LR\n  a([Stadium]) --- b((Circle))\n  b ==> c{Diamond}\n  c -.-> d{{Hexagon}}\n  d <--> e[(Cylinder)]\n  e --x f[[Subroutine]]\n  f -.- g>Flag]",
   "flowchart TB\n  p[/Lean right/] --> q[\\Lean left\\]\n  q --> r[/Trapezoid\\]\n  r --> s[\\Inverted/]",
@@ -53,7 +53,7 @@ const graph = (d, rename = (x) => x) => {
   return JSON.stringify([nodes.sort(), edges.sort()]);
 };
 for (const f of ["sagebrush", "live", "primes", "polynomials", "museum-tour"]) {
-  const d = cleanDoc(JSON.parse(readFileSync(EXAMPLES.get(f + ".json"), "utf8")));
+  const d = cleanDoc(JSON.parse(readFileSync(EXAMPLES.get(f + ".board.json"), "utf8")));
   for (let i = 0; i < pageCount(d); i++) {
     const v = pageView(d, i), { text } = toMermaid(d, i);
     // (ids that are not plain words were renamed: map them back by the order written)

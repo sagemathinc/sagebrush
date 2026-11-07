@@ -165,7 +165,7 @@ try {
   check(probes.length === 0, `outputs loaded from another site: ${probes.join(", ")}`);
   check(kept.refs >= 1, `a picture's own references (url(#id), #id) are kept: ${JSON.stringify(kept)}`);
   // the site's own pages run under their Content-Security-Policy without a single violation
-  for (const [path, ready] of [["", "window.sagebrush?.kernel?.ready"], ["board/?doc=examples%2Flive.json", "window.sagebrush?.board?.outputs?.().then((o) => o.length && o.every((x) => x.state === '' ))"], ["embed/", "document.querySelectorAll('.sbnb .cell').length > 0"]]) {
+  for (const [path, ready] of [["", "window.sagebrush?.kernel?.ready"], ["board/?doc=examples%2Flive.board.json", "window.sagebrush?.board?.outputs?.().then((o) => o.length && o.every((x) => x.state === '' ))"], ["embed/", "document.querySelectorAll('.sbnb .cell').length > 0"]]) {
     await send("Page.addScriptToEvaluateOnNewDocument", { source: "window.__csp = []; document.addEventListener('securitypolicyviolation', (e) => window.__csp.push(e.violatedDirective + ' ' + e.blockedURI));" });
     await send("Page.navigate", { url: base + path });
     for (let i = 0; i < 400 && !(await ev(ready).catch(() => false)); i++) await sleep(100);

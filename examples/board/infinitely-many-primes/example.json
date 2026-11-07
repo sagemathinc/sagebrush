@@ -6,9 +6,9 @@
   "proofs"
  ],
  "level": "intro",
- "main": "primes.json",
+ "main": "primes.board.json",
  "files": [
-  "primes.json"
+  "primes.board.json"
  ],
  "author": "Sagebrush",
  "license": "MIT"

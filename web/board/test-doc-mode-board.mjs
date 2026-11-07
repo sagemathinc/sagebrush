@@ -98,11 +98,11 @@ try {
   ok(!(await editing()), "Ctrl+E: nothing (the browser's)");
 
   // ---- a board not made here (an example): View
-  await go("?doc=examples/sagebrush.json");
+  await go("?doc=examples/sagebrush.board.json");
   ok(!(await editing()), "an example board (not made here) opens in View");
   await press("e");
   ok(await editing(), "…E: Edit");
-  await go("?doc=examples/sagebrush.json");
+  await go("?doc=examples/sagebrush.board.json");
   ok(!(await editing()), "…and an example's mode isn't kept (only this browser's own boards are)");
 
   // ---- View writes nothing (@sagebrush's ruling on #658): undo and redo, a menu's edit, slow code's previews
@@ -188,7 +188,7 @@ try {
 
   // ---- a host that doesn't let edit (grader's B3, B5): a remembered Edit, E, the control and the page's API all
   // leave it in View, and nothing is kept
-  await go("?doc=examples/sagebrush.json");
+  await go("?doc=examples/sagebrush.board.json");
   await ev("import('/board/board.js').then((m) => m.mounted.destroy()).then(() => 1)");
   await ev(`import('/board/board.js').then((m) => { window.__kept = []; const store = { ...m.host.store, editing: (f) => { f({ allowed: false, why: "Not here" }); return () => {}; } }; window.__b = m.mountBoard(document.getElementById("board"), { ...m.host, store, mode: { start: true, toggled: (on) => window.__kept.push(on) } }); return 1; })`);
   await until("!!window.__b?.agent && !!document.querySelector('[data-sbb=edit]')", 20000);
@@ -205,7 +205,7 @@ try {
 
   // (a host that offers no Edit at all, `hidden` (grader's A2), though it says allowed: the same, every way)
   const remount = async (state) => {
-    await go("?doc=examples/sagebrush.json");
+    await go("?doc=examples/sagebrush.board.json");
     await ev("import('/board/board.js').then((m) => m.mounted.destroy()).then(() => 1)");
     await ev(`import('/board/board.js').then((m) => { window.__kept = []; window.__setEditing = null; const store = { ...m.host.store, editing: (f) => { window.__setEditing = f; f(${JSON.stringify(state)}); return () => {}; } }; window.__b = m.mountBoard(document.getElementById("board"), { ...m.host, store, mode: { start: true, toggled: (on) => window.__kept.push(on) } }); return 1; })`);
     await until("!!window.__b?.agent && !!document.querySelector('[data-sbb=edit]')", 20000);

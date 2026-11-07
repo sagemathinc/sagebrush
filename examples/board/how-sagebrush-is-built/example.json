@@ -6,9 +6,9 @@
   "diagrams"
  ],
  "level": "intro",
- "main": "sagebrush.json",
+ "main": "sagebrush.board.json",
  "files": [
-  "sagebrush.json"
+  "sagebrush.board.json"
  ],
  "author": "Sagebrush",
  "license": "MIT"

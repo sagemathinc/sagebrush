@@ -89,7 +89,7 @@ const HASHES = {
 };
 const got = {};
 for (const f of ["sagebrush", "live", "primes", "polynomials", "museum-tour"]) {
-  const d = JSON.parse(readFileSync(EXAMPLES.get(f + ".json"), "utf8"));
+  const d = JSON.parse(readFileSync(EXAMPLES.get(f + ".board.json"), "utf8"));
   for (let p = 0; p < pageCount(cleanDoc(d)); p++) {
     const a = boardSvg(d, { page: p }), b = boardSvg(d, { page: p });
     const h = createHash("sha256").update(a.svg).digest("hex").slice(0, 16);

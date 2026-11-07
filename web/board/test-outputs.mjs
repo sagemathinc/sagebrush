@@ -50,7 +50,7 @@ const board = (seed, rCode = "import random\nx = random.random()") => ({
 const outputs = () => ev("window.sagebrush.board.outputs().then((os) => Object.fromEntries(os.map((o) => [o.id, o])))");
 const ran = () => until("window.sagebrush.board.outputs().then((os) => os.length === 3 && os.every((o) => o.state === '') && /\\d/.test(os.find((o) => o.id === 'p').output) && /2/.test(os.find((o) => o.id === 'q').output))", 90000);
 const open = async (doc) => {
-  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.json")}` });
+  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.board.json")}` });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
   // (in Edit: slow code keeps its preview in the board in Edit only; View writes nothing, web/doc-mode.ts)
   await ev("window.sagebrush.board.editing(true), 1");
@@ -103,7 +103,7 @@ try {
   await until("/^\\?doc=local:/.test(location.search) && !!window.sagebrush?.board?.snapshot()?.doc", 30000);
   check(await until("window.sagebrush.board.json().then((t) => /\"seed\": \"[0-9a-f]{64}\"/.test(t) && !t.includes('aaaa'))", 10000), "a new board has a seed of its own");
   // (back to the board the steps below load their documents into)
-  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.json")}` });
+  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.board.json")}` });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
 
   // Step 2: previews.  s takes 2.5 s; d and p and big read it; f is on its own.
@@ -141,7 +141,7 @@ try {
   check((await ev("window.sagebrush.board.json()")) === file1, "rerun with the same output: the file is as it was");
 
   // opened again, in a fresh page: the previews show, marked, and the slow items don't run; the fast one does
-  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.json")}` });
+  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.board.json")}` });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
   // (without the cache of step 3, whose full outputs would show instead)
   await ev("new Promise((res) => { const r = indexedDB.deleteDatabase('sagebrush-outputs'); r.onsuccess = r.onerror = r.onblocked = () => res(1); })");
@@ -213,7 +213,7 @@ try {
   const cacheCount = () => ev("indexedDB.databases().then((ds) => !ds.some((d) => d.name === 'sagebrush-outputs') ? 0 : new Promise((res) => { const r = indexedDB.open('sagebrush-outputs'); r.onsuccess = () => { const db = r.result; const c = db.transaction('entries').objectStore('entries').count(); c.onsuccess = () => { db.close(); res(c.result); }; }; }))");
   // (a clean start: no board kept in this browser from the steps above, previews at their usual 10 s)
   await ev("localStorage.clear(), 1");
-  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.json")}` });
+  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.board.json")}` });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
   const n0 = await cacheCount();
   // (in Edit: slow code keeps its preview in the board in Edit only; View writes nothing, web/doc-mode.ts)
@@ -232,7 +232,7 @@ try {
   const countFor = (id) => ev(`new Promise((res) => { const r = indexedDB.open('sagebrush-outputs'); r.onsuccess = () => { const db = r.result; const c = db.transaction('entries').objectStore('entries').index('doc').count(${JSON.stringify(id)}); c.onsuccess = () => { db.close(); res(c.result); }; }; })`);
   check((await countFor(id1)) === 2, "...and the entries are under it");
   // opened again, in a fresh page of this browser: the board kept, and its cache
-  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.json")}` });
+  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.board.json")}` });
   await until("window.sagebrush?.board?.snapshot().doc.title === 'Cached, kept'", 60000);
   check(await until("window.sagebrush.board.outputs().then((os) => os.find((o) => o.id === 'f')?.state === '')", 60000), "the fast item ran");
   const again = await outputs();
@@ -251,7 +251,7 @@ try {
   check(await until("/^\\?doc=local:/.test(location.search) && !!window.sagebrush?.board?.snapshot()?.doc", 30000), "New board: a board of its own");
   const id2 = await ev("localStorage.getItem('sagebrush-board:' + decodeURIComponent(location.search.slice(5)) + '#outputs')");
   check(!!id2 && id2 !== id1 && (await countFor(id1)) > 0, "...with its own name, the board it left keeping its outputs: " + JSON.stringify([id1, id2, await countFor(id1)]));
-  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.json")}` });
+  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.board.json")}` });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
   check((await ev(`localStorage.getItem(${JSON.stringify(idKey)})`)) === id1, "back on that board: the same name");
   // (and done: what it ran, and wrote, written before another document takes its place)
@@ -278,7 +278,7 @@ try {
   for (let i = 0; i < 100 && (await countFor(id3)) < 2; i++) await sleep(100);
   check((await countFor(id3)) === 2, "...and its outputs are kept: " + await countFor(id3));
   await ev("localStorage.clear(), 1");
-  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.json")}` });
+  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.board.json")}` });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
   await until("window.sagebrush.board.outputs().then((os) => os.length > 0 && os.every((o) => o.state === ''))", 60000);
   // (in Edit: slow code keeps its preview in the board in Edit only; View writes nothing, web/doc-mode.ts)

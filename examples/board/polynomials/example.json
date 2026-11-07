@@ -6,9 +6,9 @@
   "number theory"
  ],
  "level": "course",
- "main": "polynomials.json",
+ "main": "polynomials.board.json",
  "files": [
-  "polynomials.json"
+  "polynomials.board.json"
  ],
  "author": "Sagebrush",
  "license": "MIT"
