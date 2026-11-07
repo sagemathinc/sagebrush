@@ -123,7 +123,7 @@ class _Ring:
         if isinstance(names, list):
             # QQ[['x']]: power series
             import _sage_series
-            return _sage_series.PowerSeriesRing(self, names[0] if names else "x")
+            return _sage_series._series_ring_from_list(self, names)
         K = _algebraic_extension(self, names)
         if K is not None:
             return K
@@ -503,7 +503,7 @@ class PolynomialRing_:
             sage: PolynomialRing(ZZ, 'x').change_ring(GF(5))
             Univariate Polynomial Ring in x over Finite Field of size 5
         """
-        return _sa().PolynomialRing(R, self._name)
+        return _sa().PolynomialRing(R, self._name, _internal=True)
 
     def variable_name(self):
         """The name of the variable.
@@ -645,6 +645,49 @@ _RINGS = {}
 _MAX_DENSE_COEFFS = 1 << 20
 
 
+def _check_ring_names(names):
+    """Sage's refusals of a ring's variable names: none, one with a character
+    other than a letter, a digit or _ (a{b, x.y, 'x '), or one that does not
+    start with a letter (1x, _x), in that order; a name of digits alone is
+    no name at all.  Keywords and letters beyond ASCII are names."""
+    for n in names:
+        if n == "":
+            raise ValueError("variable name must be nonempty")
+        if n.replace("_", "").isdigit():
+            raise TypeError("you must specify the names of the variables")
+        if not n.replace("_", "").isalnum():
+            raise ValueError("variable name %r is not alphanumeric" % (n,))
+        if not n[0].isalpha():
+            raise ValueError("variable name %r does not start with a letter" % (n,))
+
+
+def ring_names(names, n=None):
+    """The names a user gives a ring (a string, 'x,y', a tuple or a list, and
+    with n variables 'x' as x0, x1, ...), each checked as Sage checks it
+    (_check_ring_names) before any ring is built; the one way user names
+    reach a ring constructor.
+
+    EXAMPLES::
+
+        sage: import _sage_poly
+        sage: _sage_poly.ring_names('x,y'), _sage_poly.ring_names(('t',)), _sage_poly.ring_names('x', 2)  # sagebrush only
+        (['x', 'y'], ['t'], ['x0', 'x1'])
+    """
+    import _sage_mpoly
+    if isinstance(names, (list, tuple)):
+        out = [str(t) for t in names]
+        if n is not None:
+            out = _sage_mpoly._normalize_names(n, out)
+    elif isinstance(names, str) and "," in names:
+        out = [t.strip() for t in names.split(",")]
+    elif n is not None:
+        out = _sage_mpoly._normalize_names(n, str(names))
+    else:
+        out = [str(names)]
+    _check_ring_names(out)
+    return out
+
+
 def PolynomialRing(base, *args, **kwds):
     """PolynomialRing(ZZ, 'x'), PolynomialRing(QQ, names=('y',)); several
     variables: PolynomialRing(QQ, 'x,y'), PolynomialRing(QQ, 3, 'x'),
@@ -662,6 +705,7 @@ def PolynomialRing(base, *args, **kwds):
         (Multivariate Polynomial Ring in x0, x1, x2 over Rational Field, Multivariate Polynomial Ring in a, b over Rational Field)
     """
     import _sage_ff
+    internal = kwds.pop("_internal", False)
     n = None
     names = kwds.get("names", kwds.get("name"))
     for a in args:
@@ -678,12 +722,17 @@ def PolynomialRing(base, *args, **kwds):
     multi = n is not None or (isinstance(names, (list, tuple)) and len(names) != 1) or (isinstance(names, str) and "," in names)
     if multi:
         import _sage_mpoly
+        if not internal:
+            ring_names(names, n)
         return _sage_mpoly.MPolynomialRing(base, n, names, order or "degrevlex")
     if isinstance(names, (tuple, list)):
         names = names[0]
+    if not internal:
+        ring_names(names)
     names = str(names).strip()
     if _sage_ff._is_ff_base(base):
-        return _sage_ff._poly_ring_from_names(base, names)
+        # (an internal ring, _t, is built without the user-name check)
+        return _sage_ff.PolynomialRing_ff(base, names) if internal else _sage_ff._poly_ring_from_names(base, names)
     import _sage_nfpoly
     if _sage_nfpoly.is_number_field(base):
         return _sage_nfpoly.PolynomialRing_nf(base, names)
@@ -747,7 +796,7 @@ class Polynomial:
         while c and c[-1] == 0:
             c.pop()
         if ring._base is ZZ and any(not isinstance(a, int) for a in c):
-            ring = PolynomialRing(QQ, ring._name)
+            ring = PolynomialRing(QQ, ring._name, _internal=True)
         self._ring = ring
         self._c = c
 
@@ -936,7 +985,7 @@ class Polynomial:
         # the ring over QQ in the same variable: our own when it is over QQ
         # (an equal ring either way; keeping ours keeps its class, e.g. Magma
         # mode's ring, which names its variable when printing)
-        return self._ring if self._ring._base is QQ else PolynomialRing(QQ, self._ring._name)
+        return self._ring if self._ring._base is QQ else PolynomialRing(QQ, self._ring._name, _internal=True)
 
     def __repr__(self):
         return _poly_repr(self._c, self._ring._repr_name()) if self._c else "0"
@@ -1254,10 +1303,10 @@ class Polynomial:
             # shared core's budget; daybreak2 LIMIT-F3-2)
             S.charge([S.WORK], len(self._c), refuse)
             if R is QQ:
-                return PolynomialRing(R, self._ring._name)(self._c)
+                return PolynomialRing(R, self._ring._name, _internal=True)(self._c)
             if any(int(a.denominator) != 1 for a in self._c):
                 raise TypeError("no conversion of this rational to integer")
-            return PolynomialRing(R, self._ring._name)([int(a) for a in self._c])
+            return PolynomialRing(R, self._ring._name, _internal=True)([int(a) for a in self._c])
         if isinstance(R, PolynomialRing_):
             return R(self._c)
         import _sage_ff
@@ -1292,7 +1341,7 @@ class Polynomial:
         # CORR-F3-1)
         B = self._ring._base
         T = B if new_base_ring is None else new_base_ring
-        return _sa().PolynomialRing(T, self._ring._name)([T(f(B(c))) if c else T(0) for c in self._c])
+        return _sa().PolynomialRing(T, self._ring._name, _internal=True)([T(f(B(c))) if c else T(0) for c in self._c])
 
     def monic(self):
         """The polynomial divided by its leading coefficient.
