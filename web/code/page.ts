@@ -18,8 +18,9 @@ import { openBytes, encodeText } from "../latex/save";
 import { freePath, nameOf, parentOf, safeName, splitExt } from "../workspace/paths";
 import { tokensOf, drawTokens } from "./tokens";
 import { langOf, type Lang } from "./langs";
+import { EDIT_BYTES, editableOf } from "./edit";
 
-export const CODE = { openBytes: 4 * 2 ** 20, editBytes: 2 ** 20, viewBytes: 2 ** 20, liveBytes: 256 * 1024, saveMs: 600 };
+export const CODE = { openBytes: 4 * 2 ** 20, editBytes: EDIT_BYTES, viewBytes: 2 ** 20, liveBytes: 256 * 1024, saveMs: 600 };
 /** What the notebook page gives the code page: its workspace and the file's id; how to open what is chosen here; and
  * its own Open… dialog, examples and File menu (in the page's script already, so this chunk carries none of them). */
 export type Host = {
@@ -98,6 +99,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const lg: Lang = langOf(path) ?? "text";
   lang.textContent = LANG_LABEL[lg];
   if ((entry.size ?? 0) > CODE.openBytes) { toggle.hidden = true; note(`This file is too large to open here (${fmtSize(entry.size!)}): download it from Files.`); return; }
+  // (a test's seam: the page test changes what is at the path here, between finding the file and reading it)
+  await (globalThis as any).__sbCodeBeforeOpen?.(path);
   const read = await ws.readUpTo(path, CODE.openBytes).catch((e) => e as Error);
   if (read instanceof Error) { note("This file couldn't be read: " + String(read.message ?? read).slice(0, 200)); return; }
   if (read.entry.fid !== host.fid) { note("Another file is at this path now: open it again from Files."); return; }
@@ -105,7 +108,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const o = openBytes(read.content);
   if (o.kind !== "text") { toggle.hidden = true; note(`This file can't be shown as text (${o.why}): download it from Files.`); return; }
   let text = o.text, saved = o.text, rev = entry.rev ?? 0, eol = o.eol;
-  let editable = o.saveable && read.content.length <= CODE.editBytes && !entry.remote;
+  let editable = editableOf(o.saveable, read.content.length, entry.remote);
   const whyNot = () => (!o.saveable ? o.why : entry.remote ? "it is in the cloud: open it on the device that made it" : `it is over ${fmtSize(CODE.editBytes)}`);
 
   // ---- View and Edit
@@ -219,6 +222,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   let checkTimer: any = null;
   const check = async () => {
     if (saving) await saving;
+    // (stopped: nothing to follow, and the stop's own reason stays said; disposed: nothing here any more)
+    if (stopped || life.signal.aborted) return;
     const r = await ws.pathOfFile(host.fid).catch(() => null);
     if (!r || !r.ok) { if (!stopped) stop("This file was moved to Trash or deleted elsewhere."); return; }
     if (r.path !== path) { path = r.path; showName(); }
@@ -238,14 +243,15 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     const fo = fresh && fresh.entry.fid === host.fid ? openBytes(fresh.content) : null;
     if (!fresh || !fo || fo.kind !== "text") { stop("This file was changed elsewhere and can't be shown here now."); return; }
     text = saved = fo.text; eol = fo.eol; rev = fresh.entry.rev ?? 0; entry = fresh.entry;
-    editable = fo.saveable && fresh.content.length <= CODE.editBytes && !entry.remote;
+    editable = editableOf(fo.saveable, fresh.content.length, entry.remote);
     if (!editable && mode === "edit") mode = "view";
     if (mode === "edit") { const a = ta.selectionStart, b = ta.selectionEnd, top = ta.scrollTop; ta.value = text; ta.setSelectionRange(Math.min(a, text.length), Math.min(b, text.length)); ta.scrollTop = top; drawEditHl(); toggle.disabled = !editable; }
     else showMode();
     say("Updated: changed elsewhere");
   };
+  // (every op on this file carries its fid, whatever its path (the workspace's log): a write, a rename, a move to Trash)
   const unwatch = ws.watch((c) => {
-    if (!(c.ops ?? []).some((op: any) => op.fid === host.fid || op.path === path || op.to === path)) return;
+    if (!(c.ops ?? []).some((op: any) => op.fid === host.fid)) return;
     clearTimeout(checkTimer); checkTimer = setTimeout(() => void check(), 50);
   });
   life.signal.addEventListener("abort", () => { unwatch(); clearTimeout(checkTimer); clearTimeout(saveTimer); clearTimeout(hlTimer); });

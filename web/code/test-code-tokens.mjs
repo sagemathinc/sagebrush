@@ -4,6 +4,7 @@
 // colors; anything a highlighter can't give back exactly is one plain token. No browser needed.
 //   bun web/code/test-code-tokens.mjs
 import { tokensOf, tokensFromHtml, langOf, CODE_LANGS } from "./tokens.ts";
+import { EDIT_BYTES, editableOf } from "./edit.ts";
 
 let checks = 0, failed = 0;
 const check = (ok, what) => { checks++; if (!ok) { failed++; console.log("FAIL " + what); } };
@@ -57,6 +58,17 @@ check(tokensFromHtml("a &lt;b&gt; &amp;\n", "a <b&gt; &") !== null, "adapter: on
 // the extensions
 for (const [ext, lang] of Object.entries(CODE_LANGS)) check(langOf("/a/b" + ext) === lang && langOf("/X" + ext.toUpperCase()) === lang, `langOf ${ext}`);
 check(langOf("/a.ipynb") === null && langOf("/a.tex") === null && langOf("/a.md") === null && langOf("/py") === null, "langOf: notebooks, .tex, .md and names without an extension aren't the code page's");
+
+// (an Object property name isn't an extension: no prototype member, x.constructor or x.__proto__, is a code file)
+check(["/x.constructor", "/a.__proto__", "/a.toString", "/a.hasOwnProperty", "/a.valueOf"].every((p) => langOf(p) === null), "langOf: an Object property name isn't an extension");
+// (a name that isn't a keyword isn't one: the scanners' keywords only)
+const mg2 = tokensOf("total := x + 1;", "magma"), js2 = tokensOf("let total = x + 1;", "js");
+check(!mg2.some(([c, t]) => c === "hk" && (t === "total" || t === "x")) && !js2.some(([c, t]) => c === "hk" && (t === "total" || t === "x")) && js2.some(([c, t]) => c === "hk" && t === "let"), "magma and js: a plain name isn't a keyword, let is: " + JSON.stringify([mg2, js2]));
+// when the page lets a file be edited (edit.ts): written back exactly, at most EDIT_BYTES, and here, not in the cloud
+check(editableOf(true, 10, false) && editableOf(true, EDIT_BYTES, undefined), "editable: saveable, small enough, here");
+check(!editableOf(false, 10, false), "…not if it can't be written back exactly");
+check(!editableOf(true, EDIT_BYTES + 1, false), "…not over EDIT_BYTES");
+check(!editableOf(true, 10, true), "…not if it is in the cloud (remote)");
 
 console.log(failed ? `${failed} of ${checks} failed` : `ok: code tokens, ${checks} checks`);
 process.exit(failed ? 1 : 0);
