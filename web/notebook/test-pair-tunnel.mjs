@@ -7,7 +7,7 @@
 // The real runner end to end: test-pair-runner.mjs.
 //   bun web/notebook/test-pair-tunnel.mjs
 import { RemoteClient, NotSentError, AmbiguousError, StreamError } from "./remote-client.js";
-import { Tunnel, pairTunnel, route, TunnelNotSent, PairError, SYNTHETIC_BASE, TUNNEL_LIMITS, parsePairLink } from "./pair-tunnel.js";
+import { Tunnel, pairTunnel, route, TunnelNotSent, PairError, SYNTHETIC_BASE, TUNNEL_LIMITS, parsePairLink, versionAtLeast, RUNNER_MIN } from "./pair-tunnel.js";
 
 setTimeout(() => { console.log("FAIL the tests did not finish within 120 s"); process.exit(1); }, 120_000).unref?.();
 let fails = 0;
@@ -37,7 +37,7 @@ class FakeSocket {
   deliver(m) { this.onmessage?.({ data: typeof m === "string" ? m : JSON.stringify(m) }); }
   requests() { return this.sent.filter((f) => f.rpc); }
 }
-const RESULT = { protocol: 1, purpose: "kernel", token: "T".repeat(43), nonce: "n1", incarnation: "0123456789abcdef", limits: { frame: 4 * 1024 * 1024 } };
+const RESULT = { protocol: 1, purpose: "kernel", token: "T".repeat(43), nonce: "n1", incarnation: "0123456789abcdef", limits: { frame: 4 * 1024 * 1024 }, version: "dev" };
 
 async function setup() {
   const ws = new FakeSocket("ws://127.0.0.1:1/sagebrush-kernel");
@@ -362,7 +362,11 @@ for (const [what, m, code] of [
   await r.retry();
   check(hellos.length === 1 && hellos[0].code === "ABCDEFGHIJKLMNOPQRSTUVWXYZ" && r.tunnel && r.kernel.ready && r.failed === null, "Retry pairs with the code that never reached the runner, and binds");
   r.close();
-  check(PAIRED.sessionGone === "the runner restarted, so this page needs its new link: choose Your computer again and paste it", "the session-gone words");
+  check(PAIRED.sessionGone === "this page needs a new link from your computer: run uvx sagebrush@latest remote --loopback again, then choose Your computer and paste it", "the session-gone words: neutral, since a post-send timeout ends there too (board's R3-a)");
+  // (board's R3-b: a bad port isn't a Block, so no Block hint; its code was never sent, so Retry keeps it)
+  const rp = await pairedStarter({ WebSocket: class extends FakeSocket {} })({ notebook: "nb", answer: { code: "ABCDEFGHIJKLMNOPQRSTUVWXYZ", port: 70000 } });
+  check(/port is a number/.test(rp.failed) && rp.hint === null, `a bad port: said, and no Block hint (${rp.failed} / ${rp.hint})`);
+  rp.close();
 }
 
 // ================= astra's RETRY-2: a code that may have reached the runner is never sent again
@@ -418,6 +422,91 @@ for (const [what, m, code] of [
   }
 }
 
+// ================= the runner's version: reported, compared, a too-old runner refused before anything is bound
+{
+  // (one table for both sides: test_remote_pair.py reads the same file (daybreak3's VERSION-1 parity))
+  const table = JSON.parse(await Bun.file(new URL("./version-cases.json", import.meta.url)).text()).cases;
+  check(table.length > 15 && table.every(([v, n, want]) => versionAtLeast(v, n) === want), `the version compare, a release gate (${table.filter(([v, n, w]) => versionAtLeast(v, n) !== w).map(([v, n]) => JSON.stringify(v) + " vs " + JSON.stringify(n)).join(", ") || "all as expected"})`);
+  check(RUNNER_MIN === "0.9.0", "the minimum: 0.9.0, the release that first ships sagebrush remote");
+  const made = [];
+  class S extends FakeSocket { constructor(u) { super(u); made.push(this); setTimeout(() => this.open(), 1); } }
+  const jwk = { kty: "EC", crv: "P-256", x: "X".repeat(43), y: "Y".repeat(43) };
+  // (a minimum passed exactly as given, falsy ones included)
+  const answerMin = async (result, min) => {
+    const p = pairTunnel({ port: 4321, code: "x", jwk, jkt: "J".repeat(43), WebSocket: S, min });
+    await tick(10);
+    const sock = made.at(-1);
+    sock.deliver({ jsonrpc: "2.0", id: "h1", result });
+    return { r: await within(p), hello: sock.sent[0], sock };
+  };
+  const answer = async (result, min) => {
+    const p = pairTunnel({ port: 4321, code: "x", jwk, jkt: "J".repeat(43), WebSocket: S, ...(min ? { min } : {}) });
+    await tick(10);
+    const sock = made.at(-1);
+    sock.deliver({ jsonrpc: "2.0", id: "h1", result });
+    return { r: await within(p), hello: sock.sent[0], sock };
+  };
+  let a = await answer({ ...RESULT, version: undefined });
+  check(a.r.e?.kind === "protocol", "a runner that reports no version isn't paired with");
+  a = await answer({ ...RESULT, version: "0.8.2" }, "0.9.0");
+  check(a.r.e?.kind === "old" && a.r.e.message === "your computer's sagebrush is 0.8.2; this page needs 0.9.0 or newer" && a.sock.closedWith === 1000 && a.hello.params.needs === "0.9.0",
+    `a too-old runner: refused, said, the socket closed; the hello said what it needs (${a.r.e?.message})`);
+  a = await answer({ ...RESULT, version: "0.9.0" }, "0.9.0");
+  check(a.r.v instanceof Tunnel, "a new-enough runner pairs");
+  // (astra's VERSION-2: a version outside the whole grammar is never paired with, minimum or not)
+  for (const bad of ["0.9.0+", "0.9.0.post1junk", "0.9.1-old", "0.9.0RC1", "v1.0"]) {
+    const x = await answer({ ...RESULT, version: bad }, "0.9.0");
+    const y = await answer({ ...RESULT, version: bad });
+    check(x.r.e?.kind === "protocol" && y.r.e?.kind === "protocol" && x.sock.closedWith === 1000, `a malformed version (${JSON.stringify(bad)}) is refused, with a minimum and without (${x.r.e?.kind}, ${y.r.e?.kind})`);
+  }
+  a = await answer({ ...RESULT, version: "0.9.0rc1" }, "0.9.0");
+  check(a.r.e?.kind === "old", "a pre-release of the minimum is too old");
+  // (daybreak3's VERSION-3: a page whose own minimum is malformed accepts no runner, a checkout's "dev" included)
+  // (VERSION-4: every configured minimum is checked, the empty one and other types included; only null is "none")
+  for (const badMin of ["0.9.0rc1", "0.9.0\n", "v1", "", false, 0, 9, {}]) {
+    const z = await answerMin({ ...RESULT, version: "dev" }, badMin);
+    check(z.r.e?.kind === "config" && z.sock.closedWith === 1000, `a malformed minimum (${JSON.stringify(badMin)}) pairs with nothing, not even dev (${z.r.e?.kind})`);
+  }
+  // (an explicit null: no minimum; undefined: the page's own, RUNNER_MIN)
+  let z = await answerMin({ ...RESULT, version: "dev" }, null);
+  check(z.r.v instanceof Tunnel && !("needs" in z.hello.params), "no minimum (null): dev pairs, and no needs is sent");
+  z = await answerMin({ ...RESULT, version: "dev" }, undefined);
+  check(z.r.v instanceof Tunnel && z.hello.params.needs === RUNNER_MIN, "the default minimum (undefined): needs is RUNNER_MIN, and dev pairs");
+  // (the release's gate, with the page's own minimum: 0.8.2 refused as old, 0.9.0 and dev paired)
+  for (const [version, pairs] of [["0.8.2", false], ["0.9.0rc1", false], ["0.9.0", true], ["0.9.1", true], ["dev", true]]) {
+    const x = await answer({ ...RESULT, version });
+    check(pairs ? x.r.v instanceof Tunnel : x.r.e?.kind === "old", `with the page's own minimum (${RUNNER_MIN}), a ${version} runner ${pairs ? "pairs" : "is refused as old"} (${x.r.e?.kind ?? "paired"})`);
+  }
+  a = await answer({ ...RESULT, version: "dev" });
+  // (the default is the page's own: a call without `min` sends RUNNER_MIN as needs, none while it is null (grader's
+  // r782 J22 note))
+  check(RUNNER_MIN === null ? !("needs" in a.hello.params) : a.hello.params.needs === RUNNER_MIN, `a call without min sends RUNNER_MIN (${RUNNER_MIN}) as needs`);
+  const { pairedStarter, PAIRED, PAIR_SHEET } = await import("./remote-ui.js");
+  class Old extends FakeSocket {
+    constructor(u) { super(u); setTimeout(() => this.open(), 1); }
+    send(t) { super.send(t); if (JSON.parse(t).method === "hello") this.deliver({ jsonrpc: "2.0", id: "h1", result: { ...RESULT, version: "0.8.2" } }); }
+  }
+  const r = await pairedStarter({ WebSocket: Old, min: "0.9.0" })({ notebook: "nb", answer: { code: "ABCDEFGHIJKLMNOPQRSTUVWXYZ", port: 4321 } });
+  check(/is 0\.8\.2; this page needs 0\.9\.0/.test(r.failed) && r.hint === PAIRED.upgrade && /uvx sagebrush@latest/.test(r.hint) && !/pip/.test(r.hint) && !r.kernel.ready && !r.noRetry,
+    `the too-old runner's words: the reason, then the uvx command; nothing bound (${r.failed} / ${r.hint})`);
+  r.close();
+  check(PAIR_SHEET.command === "uvx sagebrush@latest remote --loopback" && !("ownCommand" in PAIR_SHEET) && !Object.values(PAIR_SHEET).some((v) => /pip/.test(v)),
+    "the sheet: one command, uvx, and no pip (William, Nov 6: uvx only)");
+  // (board's V-1: a broken minimum is ours, not the person's: said so, This browser offered, no Retry)
+  const rc = await pairedStarter({ WebSocket: Old, min: "" })({ notebook: "nb", answer: { code: "ABCDEFGHIJKLMNOPQRSTUVWXYZ", port: 4321 } });
+  check(rc.failed === "this page has a broken version setting (a Sagebrush problem, not your computer)" && rc.hint === PAIRED.config && rc.noRetry === true,
+    `a broken minimum: the words, the hint, no Retry (${rc.failed} / ${rc.hint})`);
+  rc.close();
+}
+
+// (board's #782 B-1: uvx installs no `sagebrush` command, so every string the page shows that names the command names
+// the uvx one: checked over the two modules' string literals)
+{
+  const src = (await Bun.file(new URL("./remote-ui.js", import.meta.url)).text()) + (await Bun.file(new URL("./pair-tunnel.js", import.meta.url)).text());
+  const strings = [...src.matchAll(/"(?:[^"\\\n]|\\.)*"|`(?:[^`\\]|\\.)*`/g)].map((m) => m[0]).filter((t) => /remote --loopback/.test(t));
+  const bare = strings.filter((t) => t.split("remote --loopback").length - 1 !== t.split("uvx sagebrush@latest remote --loopback").length - 1);
+  check(strings.length >= 5 && bare.length === 0, `every message naming the command says uvx sagebrush@latest remote --loopback (${strings.length} strings; bare: ${JSON.stringify(bare)})`);
+}
 
 // ================= grader's #778 pins (r778 at 67a59056)
 {
