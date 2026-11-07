@@ -1,14 +1,14 @@
-# N1-0 pre-registration (draft r4, for PERF review before the protocol is frozen)
+# N1-0 pre-registration (draft r5, for PERF review before the protocol is frozen)
 
 *This is item N1-0 for the native-desktop plan r11 (#838, merged at 66f8df98). That plan fixed the architecture: the engine is always a subprocess behind one protocol, and N1 now compares only the engine's **runtime**.*
 
-*r4 is a **new measurement scope**. It is built on r3 (98ed461e, PERF PROTOCOL CLEAR), but nothing carries over implicitly: §2 maps every r3 row to retained, replaced, descriptive or dropped. r4 closes daybreak4's eight r4 requirements from the #838 review (`reviews/pr838-50b82b9d-perf-daybreak4.md`, R1–R8 below) and that review's carry notes.*
+*r4 is a **new measurement scope**. It is built on r3 (98ed461e, PERF PROTOCOL CLEAR), but nothing carries over implicitly: §2 maps every r3 row to retained, replaced, descriptive or dropped. r4 closes daybreak4's eight r4 requirements from the #838 review (`reviews/pr838-50b82b9d-perf-daybreak4.md`, R1–R8 below) and that review's carry notes. r5 closes PERF's four r4 residuals (86413cee): the complete ranked-row/control map, separate archive and footprint controls, exact update-peak capture, and frozen trees with no name collision.*
 
 *Branch n1-native-proto, never merged. Nothing here is a counted result.*
 
 **Gate.** Before any counted run, the final pre-registration names:
 - the exact harness commit;
-- every frozen file: `schedule-<os>.json`, `controls-<os>-<class>.json`, `controls.json`, `runtimes.json`, `artifacts.json`, `machines.json`, `corpus/m8-writes.json`, `corpus/m10-train.json`, `corpus/m10-heldout.json`, `dispatch-<runtime>.json`, `m6.json`, `expected-hashes.json`;
+- every frozen file: `schedule-<os>.json`, `controls-<os>-<class>.json`, `controls.json`, `runtimes.json`, `artifacts.json` (with every tree manifest), `machines.json`, `corpus/m8-writes.json`, `corpus/m10-train.json`, `corpus/m10-heldout.json`, `dispatch-<runtime>.json`, `m6.json`, `expected-hashes.json`;
 - the packet manifest.
 
 PERF reviews that exact code and packet before authorizing a counted run. Values marked **[pilot]** come from uncounted pilot runs and are frozen in those files before counting starts. Pilot data and every earlier development observation (r8, E3, the Stop pins at 0dca2358 and eecf6da6) never become counted evidence.
@@ -66,7 +66,7 @@ The harness starts the engine directly, with exactly the arguments the Tauri she
 
 | Row | Endpoint (harness clock) |
 |---|---|
-| **S1** spawned | the child process's `spawn` event |
+| **S1** spawned | the child process's `spawn` event. **Descriptive only**: it is mostly the OS's process creation, before any engine code runs, so no engine-side perturbation can test it. |
 | **S2** handshake | the engine's `hello` reply fully received and parsed, with a version in range |
 | **S3** ready | the engine's `ready` message received (base engine) |
 | **S4** first CLI line | separate CLI-mode process (`<engine> -c 'print(1)'`): the first byte on stdout |
@@ -113,7 +113,10 @@ The definition is per OS, and values are never compared across OSes.
 - **Stability:** three consecutive 500 ms samples within 2 %, up to 10 s; otherwise the row is **unstable**.
   - An unstable row and its paired round are excluded from decisions at that mark.
   - More than 1 unstable round in 7 for any label at a mark makes that mark invalid.
-- **E3:** E2 and S3 with 1, 2 and 4 engine sessions, one process each, all ready. The result is the incremental memory per session.
+- **E3:** E2 and S3 with 1, 2 and 4 engine sessions, one process each, all ready.
+  - **The ranked estimator**, per round: $\Delta = (M_4 - M_1)/3$, where $M_k$ is the stable engine-tree memory (§3.3's metric for the OS) at the after-S3 mark with $k$ sessions ready.
+  - $M_2$ and S3 for 2 and 4 sessions are descriptive.
+  - If $M_1$ or $M_4$ is unstable in a round, that round's $\Delta$ is excluded, under §3.3's rule.
 
 ### 3.4 E4 the over-4 GiB case (from M6)
 
@@ -130,9 +133,9 @@ The **peak** (10 Hz high-water on the engine tree) is ranked. **Wall time is des
 **E5, unchanged from r3:**
 - The calls are `spin` and `aplist` at a **[pilot]** size, which must run at least 10× the trigger delay on the fastest label.
 - Stop is sent 200 ms after the RUN/ARMED acknowledgement, and only after checking the call is still running.
-- Rows: send→accepted and accepted→done; the total is a separate row.
+- Ranked rows: send→accepted and accepted→done. **The total is descriptive** (it is their sum).
 - Accepted-but-completed is a FAILURE. A rejected or late Stop is not a latency row; more than 1 in 7 makes the configuration invalid. The deadline is 5 s.
-- The 2 s hard restart is a separate row.
+- The 2 s hard restart is a separate row and **descriptive**: its time is set by the frozen deadline, not by the runtime.
 
 **E6, unchanged from r3:** `corpus/m8-writes.json` with a **[pilot]** write cadence. Rows: attempted, allowed and refused counts in three windows (before the revoke is sent, between send and acknowledgement, after the acknowledgement), plus the ack latency. Any allowed write after the acknowledgement is a FAILURE.
 
@@ -171,15 +174,16 @@ Plus an empty framed round-trip, 8 times per process.
 ### 3.8 I1–I4 install and update, F1–F3 footprint (R4 and the footprint note)
 
 `artifacts.json` freezes, with sha256:
-- **B0:** the prior build, at an exact commit;
-- **B1:** the target build;
-- for each label: the download artifact, the installer command, and the update artifact from B0 to B1.
+- **the prior build** and **the target build**, each at an exact engine commit. These names are used only here, so they don't collide with the big-integer rows B1/B2;
+- for each label: the download artifact, the installer command, and the update artifact from the prior build to the target build;
+- **the app's bundled engine:** its artifact, plus a **tree manifest** (every path, logical size, allocated size and sha256);
+- **the expected tree manifest at each footprint mark** (F1, every F2 boundary, F3). After each mark, the harness records the actual tree and compares it with the frozen one; any difference makes that row invalid.
 
 | Row | Definition | Ranked? |
 |---|---|---|
-| **I1** download bytes | the size of the label's B1 download artifact | yes (bytes) |
+| **I1** download bytes | the size of the label's target-build download artifact | yes (bytes) |
 | **I2** install time | from a **frozen local artifact file**: the installer command into an **empty destination directory** on the same filesystem, from start to exit 0, with a deadline. No network. | yes |
-| **I3** update delta bytes | the size of the B0→B1 update artifact | yes (bytes) |
+| **I3** update delta bytes | the size of the prior→target update artifact | yes (bytes) |
 | **I4** network transfer time | downloading I1 from the release location | **descriptive only** |
 
 **Footprint.** Two byte measures:
@@ -188,9 +192,21 @@ Plus an empty framed round-trip, 8 times per process.
 
 | Row | Lifecycle mark |
 |---|---|
-| **F1** steady | after installing B1 into a destination that already holds the app's bundled engine, running S5 once and the engine exiting. It covers the bundled engine plus the current engine. |
-| **F2** update peak | the maximum of 10 Hz samples during the B0→B1 update: bundled + current + the staged download + any rollback copy |
+| **F1** steady | after installing the target build into a destination that already holds the app's bundled engine, running S5 once and the engine exiting. It covers the bundled engine plus the current engine. |
+| **F2** update peak | the maximum over the update's **lifecycle boundaries** (below) during the prior→target update: bundled + current + the staged download + any rollback copy |
 | **F3** after update | at the update's completion mark, with what the update keeps for rollback recorded as its retention policy |
+
+**Capturing F2 exactly.** 10 Hz sampling alone can miss a short peak, so each label's updater is instrumented.
+1. At each lifecycle boundary it emits a mark on its control channel and **waits** until the harness acknowledges. The boundaries are:
+   - download staged;
+   - new engine unpacked;
+   - switch done;
+   - old engine kept for rollback;
+   - cleanup done.
+2. While it waits, the harness measures the tree (logical and allocated) and checks it against that boundary's frozen manifest.
+3. F2 is the maximum over the boundaries.
+4. The 10 Hz sampler keeps running as a cross-check. If any sample exceeds the boundary maximum by more than F2's SESOI, F2 is **invalid**: a state was missed.
+5. Recovery is proven by the footprint control (§6) at every boundary.
 
 **Comparison boundary:** within one OS and one filesystem type (ext4, APFS or NTFS, recorded in `machines.json`) only.
 
@@ -255,8 +271,8 @@ N = 7 is a decision pilot: no significance claims, and every round is reported.
 
 | Metric class | $\rho$ | $a$ |
 |---|---|---|
-| start-up S1–S6 (T1 and T2 separately) | 0.15 | 50 ms |
-| memory E2, E3, E4 peak | 0.15 | 40 MiB |
+| start-up S2–S6 (T1 and T2 separately; S1 descriptive) | 0.15 | 50 ms |
+| memory E2, E3 $\Delta$, E4 peak | 0.15 | 40 MiB |
 | E1 steady | 0.10 | 0 |
 | E1 first call | 0.20 | 0 |
 | E5 send→accepted, accepted→done | 0 | 50 ms |
@@ -287,13 +303,15 @@ N = 7 is a decision pilot: no significance claims, and every round is reported.
 | framing time | a fixed delay at the start of engine decode | E7 stage 3; the empty round-trip |
 | framing bytes | fixed padding added to each frame | E7 bytes (exact) |
 | memory | the engine allocates and touches a fixed buffer | E2 at each mark |
+| E3 per session | each engine session allocates and touches a fixed buffer $m$ | E3 $\Delta$, recovered as $m$ |
 | E4 peak | a fixed buffer during the E4 call, held until it returns | E4 peak |
 | Stop send→accepted | a fixed delay before the engine sends Stop-accepted | E5 send→accepted |
 | Stop accepted→done | a fixed delay in applying an accepted Stop | E5 accepted→done |
 | permission | a fixed delay in the engine's permission acknowledgement | E6 ack latency |
 | **big integers** | a fixed delay at the dispatch entry, before the JS/Rust choice, so it is identical on both paths | B2 per class |
 | install time | a fixed delay inside the frozen installer command | I2 |
-| artifact bytes | a fixed padding file added to the artifact | I1, I3, F1–F3 (exact) |
+| archive bytes | $P_a$ fixed bytes appended to the frozen download artifact and to the update artifact, outside any compression | I1, I3: recovered exactly as $+P_a$ |
+| footprint bytes | the installer writes one extra file of $P_f$ bytes into the current engine's directory. $P_f$ is a multiple of the filesystem block size, written non-sparse, with filesystem compression off (recorded). | F1, every F2 boundary, F3: recovered exactly as $+k P_f$ in **both** logical and allocated bytes, where $k$ is the number of copies of the current engine's directory at that mark in the frozen manifest |
 
 ## 7. Machines (from the #838 carry notes)
 
@@ -331,5 +349,5 @@ Each packet is frozen before any cleanup. It contains:
 - the E6 write cadence;
 - every perturbation size;
 - the B1 training runs and the frozen dispatch tables;
-- B0/B1 and the artifacts;
+- the prior and target builds, the bundled engine, the artifacts and every tree manifest;
 - whether T3 runs on each machine.
