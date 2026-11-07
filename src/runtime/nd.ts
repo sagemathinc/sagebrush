@@ -322,7 +322,7 @@ let dead: string | null = null;
  *  a fault in helper 1 (src/runtime/nd-helper.ts), and how long a "late" one sleeps; shorter stall and startup
  *  bounds; helpers left unterminated on failure (as a helper that can't be stopped in time); a fresh memory that
  *  can't be made; a second bootstrap sent to helper 1, or to helper 2 during a job; a malformed first one sent to
- *  helper 1 (true: id 0; or which field is wrong); helper 1 started on another participant's stack slot. */
+ *  helper 1 (true: id 0; or which field is wrong); helper 1 started on a stack outside the pool's slots. */
 export type NdTestHooks = {
   helpers?: number; fault?: "exit" | "throw" | "late" | "silent"; lateMs?: number; stallMs?: number; startupMs?: number;
   noTerminate?: boolean; memoryFault?: boolean; rebootstrap?: boolean; rebootstrapMidJob?: boolean;
@@ -405,14 +405,16 @@ function startPool(): void {
     return;
   }
   const ctl = base, desc = ctl + 64, stacks = desc + 64, top = stacks + (helpers + 1) * SLOT;
-  reserve(top + 64);
+  // (the tests' bad stack: a spare slot past the pool's, which no participant uses)
+  const spare = tst.hooks?.badStack ? SLOT : 0;
+  reserve(top + spare + 64);
   if (ex!.nd_pool_init(ctl, stacks, SLOT, helpers + 1) !== 1) {
     threads = "off";
     threadsWhy = "the numerics module refused the pool's layout";
     return;
   }
   ex!.__stack_pointer.value = stacks + SLOT;
-  base = top;
+  base = top + spare;
   const h = tst.hooks;
   const p: Pool = { crew: null as any, c: new Int32Array(mem!.buffer, ctl, 16), helpers, desc, t0: now(), ready: false, failed: null };
   p.crew = new Crew(counted(make), (why) => {
@@ -425,7 +427,7 @@ function startPool(): void {
       const boot: any = { module: ndModule, memory: mem, id, stackTop: stacks + (id + 1) * SLOT, ctl, desc };
       if (id === 1 && h?.fault) Object.assign(boot, { fault: h.fault, lateMs: h.lateMs });
       if (id === 1 && h?.malformed) malform(boot, h.malformed);
-      if (id === 1 && h?.badStack) boot.stackTop = stacks + (id + 2) * SLOT;
+      if (id === 1 && h?.badStack) boot.stackTop = top + SLOT;
       p.crew.add(`helper ${id}`, boot);
       if (id === 1 && h?.rebootstrap) p.crew.workers[0].postMessage(boot);
     }

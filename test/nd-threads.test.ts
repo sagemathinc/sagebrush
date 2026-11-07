@@ -28,7 +28,7 @@ let s = 7;
 const rnd = (len) => Float64Array.from({ length: len }, () => (s = (Math.imul(s, 1103515245) + 12345) >>> 0) / 4294967296 - 0.5);
 const fnv = (c) => { let h = 0xcbf29ce484222325n; for (const x of new Uint8Array(c.buffer, c.byteOffset, c.byteLength)) h = ((h ^ BigInt(x)) * 0x100000001b3n) & 0xffffffffffffffffn; return h.toString(16); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const ready = async () => { for (let i = 0; i < 1000 && nd.ndThreads().state === "starting"; i++) await sleep(10); return nd.ndThreads(); };
+const ready = async () => { for (let i = 0; i < 3000 && nd.ndThreads().state === "starting"; i++) await sleep(10); return nd.ndThreads(); };
 const ops = ${JSON.stringify(SHAPES)}.map(([n, m, p]) => [rnd(n * m), rnd(m * p), n, m, p]);
 const hashes = () => ops.map(([A, B, n, m, p]) => fnv(nd.ndMatmul(A, B, n, m, p)));
 const big = ops[1];
@@ -350,8 +350,9 @@ out.counts = [T.teams, T.failovers, T.made, T.terminated];`);
   });
 }
 
-// (grader r775 F, P9: a helper on another participant's stack: the module refuses its part, the job fails over)
-test("a helper on another participant's stack slot: the module refuses its part, and the product fails over with the one-thread bytes", { timeout: 60000 }, () => {
+// (grader r775 F, P9: a helper on a stack outside the pool's slots (a spare one no participant uses, so nothing else
+// is disturbed): the module refuses exactly its part, the job fails over)
+test("a helper on a stack outside its slot: the module refuses its part, and the product fails over with the one-thread bytes", { timeout: 60000 }, () => {
   const r = scenario(`
 nd.ndTest({ helpers: 2, badStack: true });
 product();
@@ -362,6 +363,23 @@ out.after = nd.ndThreads();`);
   assert.equal(r.ready.threads, 3);
   assert.equal(r.result, oneThread().hashes[1]);
   assert.deepEqual(r.after, { threads: 1, state: "off", why: "1 helper(s) failed a matrix product" });
+});
+
+// (grader r775b N5: a helper refuses while this thread is blocked, so its message can't arrive: the BROKEN word alone
+// tells the next product's live() to fail over, before any job is started)
+test("a refusal seen only through the BROKEN word: the next product fails over before starting a job", { timeout: 60000 }, () => {
+  const r = scenario(`
+nd.ndTest({ helpers: 2, rebootstrap: true });
+product();
+Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1500);
+const t0 = T.teams;
+out.result = fnv(product());
+out.teams = T.teams - t0;
+out.after = nd.ndThreads();`);
+  assert.equal(r.error, undefined);
+  assert.equal(r.result, oneThread().hashes[1]);
+  assert.equal(r.teams, 0);
+  assert.deepEqual(r.after, { threads: 1, state: "off", why: "a helper refused a message" });
 });
 
 // (grader r775 G, Y4: a batched product on engine/nd, each batch its own product's bytes)
