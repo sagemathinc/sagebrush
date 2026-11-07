@@ -4400,6 +4400,11 @@
   "owner": "Sage kernel (@sagebrush-sage2)",
   "reason": "a docstring naming Maxima (Sage's simplify); it refuses nothing"
  },
+ "lib/_sage_expr.py :: _exact_sign :: except (TypeError, ValueError, ArithmeticError, NotImplementedError, MemoryError): #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "catches the algebraic-number conversion's refusals (and a memory guard's) so the relation stays undecided, False as in Sage: no cap here"
+ },
  "lib/_sage_expr.py :: _ilt_term :: raise NotImplementedError(\"inverse_laplace: no inverse known for %s\" % F) #0": {
   "class": "coverage",
   "owner": "Sage kernel (@sagebrush-sage2)",
