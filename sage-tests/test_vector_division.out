@@ -1,0 +1,11 @@
+v / int(2) -> TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 7' and 'Rational Field'
+v / int(0) -> ZeroDivisionError: rational division by zero
+v / 2 -> TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 7' and 'Rational Field'
+v / 0 -> ZeroDivisionError: rational division by zero
+v / GF(7)(2) -> (4, 1)
+v / 'a' -> TypeError: unsupported operand parent(s) for /: 'Vector space of dimension 2 over Finite Field of size 7' and '<class 'str'>'
+v / [1] -> TypeError: unsupported operand parent(s) for /: 'Vector space of dimension 2 over Finite Field of size 7' and '<class 'list'>'
+RDF v / int(2) -> (0.5, 1.0)
+RDF v / int(0) -> ZeroDivisionError: rational division by zero
+RDF v / 'a' -> TypeError: unsupported operand parent(s) for /: 'Vector space of dimension 2 over Real Double Field' and '<class 'str'>'
+RDF v / (1,) -> TypeError: unsupported operand parent(s) for /: 'Vector space of dimension 2 over Real Double Field' and '<class 'tuple'>'
