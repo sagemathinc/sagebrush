@@ -380,7 +380,7 @@ Wiring it into a workflow file stays William's or @sagebrush's.
 - wrong length, wrong hash, metadata for another OS or architecture or another version, missing metadata and a missing digest each fail before anything is unpacked;
 - expired metadata and a rollback to an older version both fail;
 - a failure at download, verify, unpack or replace leaves the previous engine byte-identical, and a retry starts clean;
-- **a release-configured engine refuses the injection:** the same key injection given to an engine built in its release configuration is ignored, and the ephemeral-signed release is rejected, so a test hook left on in a release build fails T7;
+- **a release-configured engine refuses the injection:** the same key injection given to an engine built in its release configuration is ignored, and the ephemeral-signed release is rejected, so a test hook left on in a release build fails T7. The injection hook must not exist in release builds at all;
 - the ephemeral key is never written to disk or logged: the test checks its temporary directory and its logs for the key in every encoding (raw, hex, base64, PEM and JWK).
 
 ## 9. Questions for William: answered
