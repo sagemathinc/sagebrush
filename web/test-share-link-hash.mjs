@@ -117,6 +117,17 @@ try {
   await release();
   await sleep(2500);
   check((await current()) === oldId && (await hasCell("OLD-CELL")) && !(await hasCell("LINK-A")), "a held link, then a fragment that is no share link: the held one is dropped");
+  // (a link decoded and its open queued, held at the switch under the navigation lease (the page's
+  // shareTest.beforeLeave), then a fragment that is no share link: released, it attaches nothing; astra's second window)
+  await go(base + "?nb=" + encodeURIComponent(oldId));
+  await ev(`(() => { const t = sagebrush.shareTest; t.beforeLeave = () => { t.beforeLeave = null; window.__reached = true; return new Promise((r) => (window.__releaseOpen = r)); }; window.__reached = false; return 1; })()`);
+  await setHash(A);
+  check(await until("window.__reached === true", 20000), "(link A decoded, its open queued and held at the switch)");
+  await setHash("#notes");
+  await sleep(300);
+  await ev("(window.__releaseOpen?.(), 1)");
+  await sleep(2500);
+  check((await current()) === oldId && (await hasCell("OLD-CELL")) && !(await hasCell("LINK-A")), "…then a fragment that is no share link, then released: it attaches nothing");
   // (an explicit open while a link is held: the open wins, and the released link doesn't replace it)
   const other = await ev(`sagebrush.workspace.create("/other.ipynb", { content: { name: "other", mode: "python", cells: [{ id: "c1", type: "code", code: "print('OTHER-CELL')" }] } }).then((e) => e.ref)`);
   await go(base + "?nb=" + encodeURIComponent(oldId));

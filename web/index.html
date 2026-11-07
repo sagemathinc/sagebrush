@@ -1683,7 +1683,8 @@ async function open(store, id, kind = "browser", guard = null, intent = null) {
     if (trashTest.pause) await trashTest.pause("beforeDetach");
     if (!(current.kind === "browser" && current.id === guard.expect)) throw Object.assign(new Error("another notebook was opened here meanwhile"), { navWon: true });
   }
-  if (intent && intent.attach !== attachSeq) throw Object.assign(new Error("another notebook was opened here meanwhile"), { navWon: true });
+  // (and an intent that knows it was superseded otherwise, a share link a later fragment replaced: its `current`)
+  if (intent && (intent.attach !== attachSeq || intent.current?.() === false)) throw Object.assign(new Error("another notebook was opened here meanwhile"), { navWon: true });
   nb.detach();
   docGen++;
   ttShow(false);
@@ -4040,11 +4041,12 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   // fragment that is no share link changes nothing; under `sagebrush notebook`'s one file, as at load, it isn't opened.
   // Only the latest fragment counts (astra's SHARE-HASH-STALE-1): each is read once, numbered, and decoded; a decode a
   // later fragment superseded (a link, or anything else) is dropped, its error unsaid; and it attaches only if no other
-  // notebook was attached here since it was asked for (an `intent`, checked by open() under the navigation lease: a
-  // File > Open meanwhile wins)
+  // notebook was attached here since it was asked for, and it is still the latest fragment then (an `intent`, both
+  // checked by open() under the navigation lease, just before anything is detached: a File > Open meanwhile wins, and a
+  // later fragment while it waits for the lease or its store drops it)
   let linkSeq = 0;
   if (!LOCAL) addEventListener("hashchange", async () => {
-    const hash = location.hash, seq = ++linkSeq, intent = { attach: attachSeq };
+    const hash = location.hash, seq = ++linkSeq, intent = { attach: attachSeq, current: () => seq === linkSeq };
     let codes = null;
     try { await shareTest.beforeLinkDecode?.(hash); codes = await fromLink(hash); }
     catch { if (seq === linkSeq) statusEl.textContent = "could not open the share link: it is damaged or cut short"; return; }
