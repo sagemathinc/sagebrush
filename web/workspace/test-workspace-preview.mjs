@@ -60,6 +60,8 @@ const closePanel = () => ev(`(() => { document.querySelector(".sbfprev .ph .x")?
 const history = (p) => ev(`${W}.history(${JSON.stringify(p)}).then((h) => h.length)`);
 const text = (p) => ev(`${W}.read(${JSON.stringify(p)}).then((r) => new TextDecoder().decode(r.content))`);
 const openRow = async (p) => { await until(`!!document.querySelector(${JSON.stringify(rowSel(p))})`); await click(rowSel(p)); };
+// (a code or text file's row opens its own page, the code page (web/code/page.ts): its preview is the row's menu item)
+const previewRow = async (p) => { await until(`!!document.querySelector(${JSON.stringify(rowSel(p))})`); await ev(`(() => { document.querySelector(${JSON.stringify(rowSel(p))}).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })); return 1; })()`); await until(`[...document.querySelectorAll(".sbfmenu button")].some((x) => x.textContent === "Preview and versions")`); await menu("Preview and versions"); };
 
 try {
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
@@ -110,10 +112,10 @@ try {
   await ev(`(() => { document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); return 1; })()`);
   check(await until(`!${P}`), "Esc closes the preview");
   // a text; a binary file isn't shown as one; a picture, in an <img> (an SVG's script doesn't run)
-  await openRow("/data/notes.txt");
+  await previewRow("/data/notes.txt");
   check(await until(`${P}?.querySelector("pre")?.textContent === "Primes below ten: 2, 3, 5, 7."`), "a text file's preview: its text");
   await closePanel();
-  await openRow("/raw.txt");
+  await previewRow("/raw.txt");
   check(await until(`/isn't text/.test(${P}?.textContent ?? "") && !${P}.querySelector("pre")`), "a binary file isn't shown as text, whatever its name");
   await closePanel();
   await openRow("/blob.bin");
@@ -180,14 +182,14 @@ try {
   await closePanel();
   // a stale preview's actions never touch another file put at its path (CORR-F85-1, -2)
   await ev(`(async () => { const w = ${W}; await w.create("/victim.txt", { content: "original" }); await w.write("/victim.txt", "original current"); await w.create("/v2.txt", { content: "old" }); await w.write("/v2.txt", "current"); return 1; })()`);
-  await openRow("/victim.txt");
+  await previewRow("/victim.txt");
   await until(`/Earlier versions \\(1\\)/.test(${P}?.textContent ?? "")`);
   await ev(`(async () => { const w = ${W}; await w.rename("/victim.txt", "/moved.txt"); await w.create("/victim.txt", { content: "replacement" }); await w.write("/victim.txt", "replacement 2"); return 1; })()`);
   await panelButton(/^Delete older versions/);
   await sleep(600);
   const hv = [await history("/moved.txt"), await history("/victim.txt")];
   check(hv[0] === 1 && hv[1] === 1 && /changed since it was shown/.test(await ev(`document.querySelector("#wssidebar .ftoast")?.textContent ?? ""`)), "Delete older versions in a preview of a file renamed, another put at its path: neither's versions go, and it says so: " + JSON.stringify(hv));
-  await openRow("/v2.txt");
+  await previewRow("/v2.txt");
   await until(`/Earlier versions \\(1\\)/.test(${P}?.textContent ?? "")`);
   await ev(`(async () => { let entered; const ready = new Promise((r) => (entered = r)); const gate = new Promise((r) => (window.__releaseLock = r)); window.__held = navigator.locks.request("sagebrush-workspace", async () => { entered(); await gate; }); await ready; const w = ${W}; window.__moving = w.rename("/v2.txt", "/moved2.txt"); window.__replacing = w.create("/v2.txt", { content: "replacement" }); return 1; })()`);
   await until(`navigator.locks.query().then((q) => q.pending.filter((x) => x.name === "sagebrush-workspace" && x.mode === "exclusive").length >= 2)`);
@@ -203,7 +205,7 @@ try {
   // (the folder open as it was left, remembered; else opened)
   await until(`!!document.querySelector(${JSON.stringify(rowSel("/data"))})`);
   if (await ev(`document.querySelector(${JSON.stringify(rowSel("/data"))}).getAttribute("aria-expanded") !== "true"`)) await click(rowSel("/data"));
-  await openRow("/data/notes.txt");
+  await previewRow("/data/notes.txt");
   check(await until(`${P}?.querySelector("pre")?.textContent === "v6"`), "the board page's file browser previews a file the same way");
   await shot("board-preview");
   for (const e of errors) fails.push("page error: " + e);

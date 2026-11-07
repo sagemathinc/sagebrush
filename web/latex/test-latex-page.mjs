@@ -743,15 +743,16 @@ try {
   // (on by default, William Nov 2: no ?latex=1, nothing stored, and ?tex= opens the editor on an allowed host)
   check(await until(`!!document.querySelector(".tex-page") && !document.body.innerText.includes("The LaTeX editor isn't enabled here.")`, 20000), "on by default: ?tex= opens the editor with no flag");
   // ---- a middle-click on a file row (board i1c01 U1): a new tab of the editor only for a .tex file it takes; any
-  // other file (or the flag off), nothing, as before the editor: no preview here, no tab
-  await mk("/mid.txt", enc("plain\n")); const midFid = await mk("/mid.tex", enc(DOC));
+  // other file (or the flag off), nothing, as before the editor: no preview here, no tab (the other file a data file: a
+  // code or text file has a page of its own, web/code/test-code-page.mjs)
+  await mk("/mid.csv", enc("a,b\n1,2\n")); const midFid = await mk("/mid.tex", enc(DOC));
   const middle = async (q) => {
     await ev(`localStorage.setItem("sagebrush-files-sidebar", "1"); true`);
     await go(base + q); await until(`!!${W}`, 60000);
     const sel = (p) => JSON.stringify(`.frow[data-path="${p}"]`);
-    const rows = await until(`!!document.querySelector(${sel("/mid.txt")}) && !!document.querySelector(${sel("/mid.tex")})`, 20000);
+    const rows = await until(`!!document.querySelector(${sel("/mid.csv")}) && !!document.querySelector(${sel("/mid.tex")})`, 20000);
     const out = { rows };
-    for (const p of ["/mid.txt", "/mid.tex"]) out[p] = rows && await ev(`(async () => {
+    for (const p of ["/mid.csv", "/mid.tex"]) out[p] = rows && await ev(`(async () => {
       window.__opened = []; window.open = (u) => { window.__opened.push(String(u)); return null; };
       const before = location.href;
       document.querySelector(${sel(p)}).dispatchEvent(new MouseEvent("auxclick", { button: 1, bubbles: true, cancelable: true }));
@@ -763,9 +764,9 @@ try {
   };
   const nothing = (r) => r && r.opened.length === 0 && !r.preview && r.here;
   const mOff = await middle("");
-  check(mOff.rows && nothing(mOff["/mid.txt"]) && mOff["/mid.tex"] && mOff["/mid.tex"].opened.length === 1 && mOff["/mid.tex"].opened[0].includes("?tex=" + midFid), "on by default: with no flag, a middle-click on a .tex file opens the editor in a new tab (on any other file, nothing)", mOff);
+  check(mOff.rows && nothing(mOff["/mid.csv"]) && mOff["/mid.tex"] && mOff["/mid.tex"].opened.length === 1 && mOff["/mid.tex"].opened[0].includes("?tex=" + midFid), "on by default: with no flag, a middle-click on a .tex file opens the editor in a new tab (on any other file, nothing)", mOff);
   const mOn = await middle("?latex=1");
-  check(mOn.rows && nothing(mOn["/mid.txt"]), "flag on: a middle-click on a non-.tex file does nothing (no preview here, no tab)", mOn);
+  check(mOn.rows && nothing(mOn["/mid.csv"]), "flag on: a middle-click on a non-.tex file does nothing (no preview here, no tab)", mOn);
   check(mOn.rows && mOn["/mid.tex"] && mOn["/mid.tex"].opened.length === 1 && mOn["/mid.tex"].opened[0].includes("?tex=" + midFid) && !mOn["/mid.tex"].preview && mOn["/mid.tex"].here, "flag on: a middle-click on a .tex file opens the editor in a new tab only", mOn);
   // ---- U1 (William, Nov 2 evening): with a BOARD open, a .tex file clicked in the file panel did nothing. It opens the
   // LaTeX editor (the notebook page's /?tex=<fid>): a click here, the board left the way any open leaves it; a
@@ -777,7 +778,7 @@ try {
     await ev(`localStorage.setItem("sagebrush-files-sidebar", "1"); true`);
     await go(base + "board/?doc=local:" + bref);
     const sel = (p) => JSON.stringify(`.frow[data-path="${p}"]`);
-    const rows = await until(`!!document.querySelector(${sel("/mid.tex")}) && !!document.querySelector(${sel("/mid.txt")})`, 30000);
+    const rows = await until(`!!document.querySelector(${sel("/mid.tex")}) && !!document.querySelector(${sel("/mid.csv")})`, 30000);
     const mid = rows && await ev(`(async () => {
       window.__opened = []; window.open = (u) => { window.__opened.push(String(u)); return null; };
       document.querySelector(${sel("/mid.tex")}).dispatchEvent(new MouseEvent("auxclick", { button: 1, bubbles: true, cancelable: true }));
@@ -785,7 +786,7 @@ try {
       return { opened: window.__opened, board: location.pathname };
     })()`);
     const txt = rows && await ev(`(async () => {
-      document.querySelector(${sel("/mid.txt")}).click();
+      document.querySelector(${sel("/mid.csv")}).click();
       await new Promise((s) => setTimeout(s, 800));
       const p = !!document.querySelector(".sbfprev");
       document.querySelector(".sbfprev")?.remove();
