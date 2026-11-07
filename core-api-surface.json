@@ -7414,6 +7414,7 @@
 "exc_info":{"kind":"function","since":1,"params":"opaque"},
 "exception":{"kind":"function","since":1,"params":"opaque"},
 "exit":{"kind":"function","since":1,"params":"opaque"},
+"flags":{"kind":"constant","since":48},
 "float_info":{"kind":"constant","since":1},
 "get_int_max_str_digits":{"kind":"function","since":1,"params":"opaque"},
 "getrecursionlimit":{"kind":"function","since":1,"params":"opaque"},

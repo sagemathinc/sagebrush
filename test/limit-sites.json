@@ -1996,6 +1996,11 @@
   "class": "2",
   "owner": "raster/image I/O"
  },
+ "engine/sym/src/definite.rs :: endpoints :: .or_else(|_| crate::limit::try_limit(&crate::rewrite::simplify_log(big_f), x, pt, dir)) #0": {
+  "class": "none",
+  "owner": "symbolic calculus (@sagebrush-matlab)",
+  "reason": "try_limit is the name of the limit function: this line asks for a one-sided limit and refuses nothing"
+ },
  "engine/sym/src/num.rs ::  :: pub const MAX_INT_BITS: u64 = 1 << 21; #0": {
   "class": "2+3",
   "owner": "symbolic engine",
@@ -4436,6 +4441,11 @@
   "owner": "curves over QQ (@sagebrush-sage2)",
   "reason": "base_extend of a curve over RR to a ring other than RR: not available yet (Sage has them)"
  },
+ "lib/_sage_expr.py ::  :: _SUM_SHIFT_LIMIT = 2000 # work limit of the shifted closed forms #0": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "the closed-form strategy's cutoff (symbolic_sum's direct-sum bound, 2000 prefix terms of shifts in all): past it the exact unevaluated sum is returned; not an error, a truncation or a limit on what can be represented (ruling LIMIT-1, #781)"
+ },
  "lib/_sage_expr.py :: _assume_simplify :: \"\"\"The assumptions' simplifications, applied through e (Maxima's simplify #0": {
   "class": "none",
   "owner": "Sage kernel (@sagebrush-sage2)",
@@ -4476,6 +4486,21 @@
   "owner": "Sage kernel (@sagebrush-sage2)",
   "reason": "laplace/inverse_laplace: no rule for this input; the public function returns it unevaluated, as Sage does (an unsupported case, not a cap)"
  },
+ "lib/_sage_expr.py :: _sum_signed_rational :: if sum(n for _, _, n, _ in shifts) > _SUM_SHIFT_LIMIT: # past the work limit: unevaluated #0": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "the closed-form strategy's cutoff (symbolic_sum's direct-sum bound, 2000 prefix terms of shifts in all): past it the exact unevaluated sum is returned; not an error, a truncation or a limit on what can be represented (ruling LIMIT-1, #781)"
+ },
+ "lib/_sage_expr.py :: _sum_signed_rational :: raise NotImplementedError(\"the sum of an alternating series with a polynomial part is not available in sagebrush yet\") #0": {
+  "class": "coverage",
+  "owner": "symbolic sums (@sagebrush-matlab)",
+  "reason": "an unsupported case (Sage 10.10 answers ind, und or divergent by the polynomial; @sagebrush's N8 ruling), not a cap"
+ },
+ "lib/_sage_expr.py :: _sum_signed_rational :: raise NotImplementedError(\"the sum of an alternating series with a polynomial part is not available in sagebrush yet\") #1": {
+  "class": "coverage",
+  "owner": "symbolic sums (@sagebrush-matlab)",
+  "reason": "an unsupported case (Sage 10.10 answers ind, und or divergent by the polynomial; @sagebrush's N8 ruling), not a cap"
+ },
  "lib/_sage_expr.py :: inverse_laplace :: except NotImplementedError: #0": {
   "class": "none",
   "owner": "Sage kernel (@sagebrush-sage2)",
@@ -4485,6 +4510,26 @@
   "class": "none",
   "owner": "Sage kernel (@sagebrush-sage2)",
   "reason": "catches the internal no-rule signal (or partial_fraction's refusal) to fall back to the unevaluated form or the per-term path; it refuses nothing"
+ },
+ "lib/_sage_expr.py :: symbolic_sum :: NotImplementedError: the sum of an alternating series with a polynomial part is not available in sagebrush yet #0": {
+  "class": "coverage",
+  "owner": "symbolic sums (@sagebrush-matlab)",
+  "reason": "the doctest's expected output for that refusal (the review's N8 pin), not a cap"
+ },
+ "lib/_sage_expr.py :: symbolic_sum :: NotImplementedError: the sum of an alternating series with a polynomial part is not available in sagebrush yet #1": {
+  "class": "coverage",
+  "owner": "symbolic sums (@sagebrush-matlab)",
+  "reason": "doctests' expected output for that refusal (the review's N11, N13, N15 pins), not a cap"
+ },
+ "lib/_sage_expr.py :: symbolic_sum :: NotImplementedError: the sum of an alternating series with a polynomial part is not available in sagebrush yet #2": {
+  "class": "coverage",
+  "owner": "symbolic sums (@sagebrush-matlab)",
+  "reason": "doctests' expected output for that refusal (the review's N11, N13, N15 pins), not a cap"
+ },
+ "lib/_sage_expr.py :: symbolic_sum :: NotImplementedError: the sum of an alternating series with a polynomial part is not available in sagebrush yet #3": {
+  "class": "coverage",
+  "owner": "symbolic sums (@sagebrush-matlab)",
+  "reason": "doctests' expected output for that refusal (the review's N11, N13, N15 pins), not a cap"
  },
  "lib/_sage_expr_more.py ::  :: _EXACT_SIGN_MAX_DEGREE = 32 #0": {
   "class": "none",
@@ -5008,6 +5053,11 @@
   "owner": "pcimc quick wins 3 (@sagebrush-sage2)",
   "reason": "Sage's TypeError messages for products of a GF(q) vector with a rational or a non-ZZ matrix: matched words, no limit"
  },
+ "lib/_sage_matrix.py :: Matrix.eigenmatrix_right :: NotImplementedError: generalized eigenvector decomposition is implemented for RDF and CDF, but not for Rational Field #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "a doctest's expected output (Sage's refusal), not code"
+ },
  "lib/_sage_matrix.py :: Matrix.hermite_form :: raise NotImplementedError(\"hermite_form(transformation=True) is implemented over QQ only in sagebrush yet\") #0": {
   "class": "coverage",
   "owner": "Sage kernel (@sagebrush-sage2)",
@@ -5188,6 +5238,21 @@
   "owner": "matrices/runtime memory",
   "row": "inv-8"
  },
+ "lib/_sage_matrix_more.py :: refuse_generalized :: raise NotImplementedError(\"generalized eigenvector decomposition is implemented for RDF and CDF, but not for %s\" % (m.base_ring(),)) #0": {
+  "class": "coverage",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "Sage's own refusal of the generalized eigenproblem over exact rings (same message): an unsupported feature in Sage too, not a cap"
+ },
+ "lib/_sage_matrix_more.py :: refuse_generalized_numeric :: ....: except NotImplementedError as e: #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "a doctest line of the RDF/CDF generalized-eigenproblem refusal's pin (grader's r800 R1-R6): it prints the refusal; nothing is capped"
+ },
+ "lib/_sage_matrix_more.py :: refuse_generalized_numeric :: raise NotImplementedError(\"the generalized eigenvalue problem (other=B) over RDF and CDF is not available in sagebrush yet\") #0": {
+  "class": "coverage",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "eigen*(B) over RDF/CDF not implemented yet (B was ignored): an unsupported feature (Sage: LAPACK), not a cap"
+ },
  "lib/_sage_matrix_sr.py ::  :: _SR_MAX = 16 #0": {
   "class": "2",
   "disposition": {
@@ -5227,6 +5292,11 @@
   },
   "owner": "matrices over SR (@sagebrush-sage2)",
   "reason": "lane 4b's symbolic workspace and expression-size guards (plan r3 R1/T5), raised as the memory guard's error"
+ },
+ "lib/_sage_matrix_sr.py :: _eigen :: raise NotImplementedError(\"the eigenvalues of this symbolic matrix are not available in sagebrush yet\") #0": {
+  "class": "coverage",
+  "owner": "symbolic linear algebra (@sagebrush-matlab)",
+  "reason": "an unsupported case (roots of the characteristic polynomial not found by solve), not a cap"
  },
  "lib/_sage_matrix_sr.py :: _memory_error :: def _memory_error(what, need, limit): #0": {
   "class": "2",
@@ -5382,6 +5452,11 @@
   "class": "coverage",
   "owner": "matrices over SR (@sagebrush-sage2)",
   "reason": "a symbolic determinant larger than 3 x 3 / adjugate larger than 4 x 4: Sage's division-free path, lane 4b-2"
+ },
+ "lib/_sage_matrix_sr.py :: eigenvalues :: NotImplementedError: the eigenvalues of this symbolic matrix are not available in sagebrush yet #0": {
+  "class": "coverage",
+  "owner": "symbolic linear algebra (@sagebrush-matlab)",
+  "reason": "the doctest's expected output for _eigen's unsupported case (the review's N10 pin), not a cap"
  },
  "lib/_sage_modular.py :: EllipticCurvePoint._same_curve :: raise TypeError(\"unsupported operand parent(s) for %s: 'Abelian group of points on %r' and 'Abelian group of points on %r'\" % (op, self._E, other._E)) #0": {
   "class": "none",
@@ -9726,6 +9801,16 @@
   "owner": "python (@sagebrush-python)",
   "row": "src-7"
  },
+ "src/runtime/modules.ts :: importStar :: [\"debug\", \"inspect\", \"interactive\", \"optimize\", \"dont_write_bytecode\", \"no_user_site\", \"no_site\", \"ignore_environment\", \"verbose\", \"bytes_warning\", \"quiet\", \"hash_randomization\", \"isolated\", \"dev_mode\", \"utf8_mode\", \"warn_default_encoding\", \"safe_path\", \"int_max_str_digits\"], #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "sys.flags' field names (CPython 3.14's): int_max_str_digits names the flag, no limit is applied here"
+ },
+ "src/runtime/modules.ts :: importStar :: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, false, 0, 0, false, intDigits.max], #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "sys.flags' values: int_max_str_digits reports the current limit (intDigits.max), it refuses nothing; the limit itself is applied in src/runtime/format.ts and set by sys.set_int_max_str_digits"
+ },
  "src/runtime/modules.ts :: importStar :: export { heapLimit } from \"./heap\"; #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)"
@@ -9736,10 +9821,6 @@
  },
  "src/runtime/modules.ts :: importStar :: m._sagebrush_heap_limit = heapLimit(); #0": {
   "class": "2",
-  "owner": "python (@sagebrush-python)"
- },
- "src/runtime/modules.ts :: importStar :: m.flags.int_max_str_digits = intDigits.max; #0": {
-  "class": "3",
   "owner": "python (@sagebrush-python)"
  },
  "src/runtime/modules.ts :: importStar :: m.int_info = Ty.structseq(\"sys.int_info\", [\"bits_per_digit\", \"sizeof_digit\", \"default_max_str_digits\", \"str_digits_check_threshold\"], [30, 4, 0, 640]); #0": {
@@ -10862,80 +10943,5 @@
  "web/workspace/sync-ledger.ts :: waitSync :: if (t !== undefined && (!Number.isSafeInteger(t) || t < 1 || t > WAIT.timeoutMax)) throw Object.assign(new WorkspaceError(\"invalid\", `timeoutMs is an integer from 1 to ${WAIT.timeoutMax}`), { max: WAIT.timeoutMax }); #0": {
   "class": "1",
   "owner": "sync client"
- },
- "engine/sym/src/definite.rs :: endpoints :: .or_else(|_| crate::limit::try_limit(&crate::rewrite::simplify_log(big_f), x, pt, dir)) #0": {
-  "class": "none",
-  "owner": "symbolic calculus (@sagebrush-matlab)",
-  "reason": "try_limit is the name of the limit function: this line asks for a one-sided limit and refuses nothing"
- },
- "lib/_sage_expr.py ::  :: _SUM_SHIFT_LIMIT = 2000 # work limit of the shifted closed forms #0": {
-  "class": "coverage",
-  "owner": "Sage kernel",
-  "reason": "the closed-form strategy's cutoff (symbolic_sum's direct-sum bound, 2000 prefix terms of shifts in all): past it the exact unevaluated sum is returned; not an error, a truncation or a limit on what can be represented (ruling LIMIT-1, #781)"
- },
- "lib/_sage_expr.py :: _sum_signed_rational :: if sum(n for _, _, n, _ in shifts) > _SUM_SHIFT_LIMIT: # past the work limit: unevaluated #0": {
-  "class": "coverage",
-  "owner": "Sage kernel",
-  "reason": "the closed-form strategy's cutoff (symbolic_sum's direct-sum bound, 2000 prefix terms of shifts in all): past it the exact unevaluated sum is returned; not an error, a truncation or a limit on what can be represented (ruling LIMIT-1, #781)"
- },
- "lib/_sage_expr.py :: _sum_signed_rational :: raise NotImplementedError(\"the sum of an alternating series with a polynomial part is not available in sagebrush yet\") #0": {
-  "class": "coverage",
-  "owner": "symbolic sums (@sagebrush-matlab)",
-  "reason": "an unsupported case (Sage 10.10 answers ind, und or divergent by the polynomial; @sagebrush's N8 ruling), not a cap"
- },
- "lib/_sage_expr.py :: _sum_signed_rational :: raise NotImplementedError(\"the sum of an alternating series with a polynomial part is not available in sagebrush yet\") #1": {
-  "class": "coverage",
-  "owner": "symbolic sums (@sagebrush-matlab)",
-  "reason": "an unsupported case (Sage 10.10 answers ind, und or divergent by the polynomial; @sagebrush's N8 ruling), not a cap"
- },
- "lib/_sage_expr.py :: symbolic_sum :: NotImplementedError: the sum of an alternating series with a polynomial part is not available in sagebrush yet #0": {
-  "class": "coverage",
-  "owner": "symbolic sums (@sagebrush-matlab)",
-  "reason": "the doctest's expected output for that refusal (the review's N8 pin), not a cap"
- },
- "lib/_sage_expr.py :: symbolic_sum :: NotImplementedError: the sum of an alternating series with a polynomial part is not available in sagebrush yet #1": {
-  "class": "coverage",
-  "owner": "symbolic sums (@sagebrush-matlab)",
-  "reason": "doctests' expected output for that refusal (the review's N11, N13, N15 pins), not a cap"
- },
- "lib/_sage_expr.py :: symbolic_sum :: NotImplementedError: the sum of an alternating series with a polynomial part is not available in sagebrush yet #2": {
-  "class": "coverage",
-  "owner": "symbolic sums (@sagebrush-matlab)",
-  "reason": "doctests' expected output for that refusal (the review's N11, N13, N15 pins), not a cap"
- },
- "lib/_sage_expr.py :: symbolic_sum :: NotImplementedError: the sum of an alternating series with a polynomial part is not available in sagebrush yet #3": {
-  "class": "coverage",
-  "owner": "symbolic sums (@sagebrush-matlab)",
-  "reason": "doctests' expected output for that refusal (the review's N11, N13, N15 pins), not a cap"
- },
- "lib/_sage_matrix.py :: Matrix.eigenmatrix_right :: NotImplementedError: generalized eigenvector decomposition is implemented for RDF and CDF, but not for Rational Field #0": {
-  "class": "none",
-  "owner": "Sage kernel (@sagebrush-sage2)",
-  "reason": "a doctest's expected output (Sage's refusal), not code"
- },
- "lib/_sage_matrix_more.py :: refuse_generalized :: raise NotImplementedError(\"generalized eigenvector decomposition is implemented for RDF and CDF, but not for %s\" % (m.base_ring(),)) #0": {
-  "class": "coverage",
-  "owner": "Sage kernel (@sagebrush-sage2)",
-  "reason": "Sage's own refusal of the generalized eigenproblem over exact rings (same message): an unsupported feature in Sage too, not a cap"
- },
- "lib/_sage_matrix_more.py :: refuse_generalized_numeric :: ....: except NotImplementedError as e: #0": {
-  "class": "none",
-  "owner": "Sage kernel (@sagebrush-sage2)",
-  "reason": "a doctest line of the RDF/CDF generalized-eigenproblem refusal's pin (grader's r800 R1-R6): it prints the refusal; nothing is capped"
- },
- "lib/_sage_matrix_more.py :: refuse_generalized_numeric :: raise NotImplementedError(\"the generalized eigenvalue problem (other=B) over RDF and CDF is not available in sagebrush yet\") #0": {
-  "class": "coverage",
-  "owner": "Sage kernel (@sagebrush-sage2)",
-  "reason": "eigen*(B) over RDF/CDF not implemented yet (B was ignored): an unsupported feature (Sage: LAPACK), not a cap"
- },
- "lib/_sage_matrix_sr.py :: _eigen :: raise NotImplementedError(\"the eigenvalues of this symbolic matrix are not available in sagebrush yet\") #0": {
-  "class": "coverage",
-  "owner": "symbolic linear algebra (@sagebrush-matlab)",
-  "reason": "an unsupported case (roots of the characteristic polynomial not found by solve), not a cap"
- },
- "lib/_sage_matrix_sr.py :: eigenvalues :: NotImplementedError: the eigenvalues of this symbolic matrix are not available in sagebrush yet #0": {
-  "class": "coverage",
-  "owner": "symbolic linear algebra (@sagebrush-matlab)",
-  "reason": "the doctest's expected output for _eigen's unsupported case (the review's N10 pin), not a cap"
  }
 }
