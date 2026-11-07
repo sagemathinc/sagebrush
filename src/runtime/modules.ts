@@ -1975,7 +1975,8 @@ newBuiltinModule("_fs", (m) => {
   const oserr = (e: any, path: string): never => {
     if (e?.name === "NotCapable" || e?.name === "PermissionDenied" || e?.code === "ERR_ACCESS_DENIED") throw markRaised(callObj(T.PermissionError, [13, String(e.message).split("\n")[0], path]));
     const cls = e.code === "ENOENT" ? T.FileNotFoundError : e.code === "EISDIR" ? T.IsADirectoryError : e.code === "EACCES" ? T.PermissionError : e.code === "EEXIST" ? T.FileExistsError : T.OSError;
-    throw markRaised(callObj(cls, [e.errno ? -e.errno : 0, e.code === "ENOENT" ? "No such file or directory" : String(e.message), path]));
+    // (CPython's strerror, as os's own errors give it: "Is a directory", not node's message)
+    throw markRaised(callObj(cls, [e.errno ? -e.errno : 0, e.code === "ENOENT" ? "No such file or directory" : STRERROR[e.code] ?? String(e.message), path]));
   };
   fn(m, "read", (path: string) => {
     try {
@@ -2140,7 +2141,17 @@ const STRERROR: Record<string, string> = {
   EISDIR: "Is a directory", ENOTDIR: "Not a directory", ENOTEMPTY: "Directory not empty", EXDEV: "Invalid cross-device link",
   EBUSY: "Device or resource busy", EINVAL: "Invalid argument", ELOOP: "Too many levels of symbolic links",
   ENAMETOOLONG: "File name too long", EROFS: "Read-only file system", ENOSPC: "No space left on device", EMFILE: "Too many open files",
+  EBADF: "Bad file descriptor", ESPIPE: "Illegal seek",
 };
+// (posix, os's C module in CPython (shutil imports it, reading only posix._fcopyfile through hasattr): the same
+// function objects os has, for exactly these names, those CPython 3.14's posix has; no other name, and no native
+// namespace or binding; P3b-2, astra's design review)
+const POSIX_NAMES = ["stat", "lstat", "open", "close", "read", "write", "lseek", "fstat", "chmod", "utime", "access", "listdir", "mkdir", "rmdir", "unlink", "remove", "rename", "replace", "getcwd", "chdir", "fspath", "scandir", "DirEntry", "get_terminal_size", "terminal_size", "stat_result", "uname", "getpid", "cpu_count", "urandom", "F_OK", "R_OK", "W_OK", "X_OK", "O_RDONLY", "O_WRONLY", "O_RDWR", "O_CREAT", "O_EXCL", "O_TRUNC", "O_APPEND", "O_NONBLOCK", "O_DIRECTORY", "O_NOFOLLOW", "O_CLOEXEC"];
+newBuiltinModule("posix", (m) => {
+  const os = importModule("os");
+  for (const n of POSIX_NAMES) if (O.truth(callObj(builtins.hasattr, [os, n]))) m[n] = getattr(os, n);
+  m.error = T.OSError;
+});
 newBuiltinModule("os", (m) => {
   const fs = require("fs");
   const nodeOs = require("os");
@@ -2232,16 +2243,180 @@ newBuiltinModule("os", (m) => {
   Object.assign(m, { O_RDONLY: 0, O_WRONLY: 1, O_RDWR: 2, O_CREAT: 64, O_EXCL: 128, O_TRUNC: 512, O_APPEND: 1024, O_NONBLOCK: 2048, O_DIRECTORY: 65536, O_NOFOLLOW: 131072, O_CLOEXEC: 524288 });
   // (access()'s modes and lseek()'s whences, Linux's values, as CPython's os has them: shutil.which names F_OK | X_OK)
   Object.assign(m, { F_OK: 0, R_OK: 4, W_OK: 2, X_OK: 1, SEEK_SET: 0, SEEK_CUR: 1, SEEK_END: 2 });
-  // (the functions that take follow_symlinks=False: stat's own, as CPython lists them, the others not being here)
+  // (the functions that take follow_symlinks=False, of those CPython 3.14 lists on Linux: stat, access and utime)
   // (made at its first read: os.stat is wrapped by checkArity after this module is filled, and the set holds that one)
   Object.defineProperty(m, "supports_follow_symlinks", {
     enumerable: true,
     configurable: true,
     get: () => {
-      const v = callObj(T.set, [[m.stat]]);
+      const v = callObj(T.set, [[m.stat, m.access, m.utime]]);
       Object.defineProperty(m, "supports_follow_symlinks", { value: v, writable: true, enumerable: true, configurable: true });
       return v;
     },
+  });
+  // (P3b-2, the design note astra and daybreak2 cleared: file descriptors, chmod, utime, access and the terminal's size,
+  // which shutil needs. In the browser worker they are web/shims/fs.ts's own (its descriptor table, its live write
+  // checks, metadata kept for the session only); in the CLI, node's on the host's files. No call takes a descriptor in
+  // place of a path, or dir_fd: supports_fd and supports_dir_fd are empty, as on a platform without them)
+  m.supports_fd = callObj(T.set, [[]]);
+  m.supports_dir_fd = callObj(T.set, [[]]);
+  const shimFs = typeof fs.seekFd === "function";
+  const noDirFd = (dir_fd: any) => {
+    if (dir_fd !== null) raise(T.NotImplementedError, "dir_fd unavailable on this platform");
+  };
+  // (an operation the browser's file system doesn't do: NotImplementedError, raised before any effect)
+  const fdCall = <R>(f: () => R): R => {
+    try {
+      return f();
+    } catch (e: any) {
+      if (e?.unsupported) raise(T.NotImplementedError, String(e.message));
+      // (a write the files permission refuses: PermissionError 13 and why, no file named, as open()'s writes)
+      if (e?.name === "PermissionDenied" || e?.name === "NotCapable") throw markRaised(callObj(T.PermissionError, [13, String(e.message).split("\n")[0]]));
+      // (a descriptor's errors name no file, as CPython's: "[Errno 9] Bad file descriptor")
+      if (e && e.code && e.errno !== undefined && e.name !== "PermissionDenied") throw markRaised(callObj(T.OSError, [-e.errno, STRERROR[e.code] ?? String(e.message)]));
+      throw e;
+    }
+  };
+  const fdInt = (fd: any): number => {
+    const i = O.index(fd);
+    return typeof i === "bigint" ? Number(i) : i;
+  };
+  // (the CLI's descriptors are the host's; their positions are kept here, as node has no lseek: reads and writes
+  // at the position, an O_APPEND descriptor's writes at the end, as the kernel puts them)
+  const cliPos = new Map<number, { pos: number; append: boolean }>();
+  wrap("open", (p: any, flags: any, mode: any = 0o777, dir_fd: any = null) => {
+    noDirFd(dir_fd);
+    const q = pathStr(p), fl = fdInt(flags), md = fdInt(mode);
+    if (shimFs) {
+      try {
+        return fs.openSync(at(q), fl, md);
+      } catch (e: any) {
+        if (e?.unsupported) raise(T.NotImplementedError, String(e.message));
+        throw e;
+      }
+    }
+    const fd = fs.openSync(at(q), fl, md);
+    cliPos.set(fd, { pos: 0, append: (fl & 1024) !== 0 });
+    return fd;
+  });
+  m.open.$sig = { args: ["path", "flags", "mode"], posonly: 0, vararg: null, kwonly: ["dir_fd"], kwarg: null, defaults: [0o777], kwdefaults: { dir_fd: null } };
+  fn(m, "close", (fd: any) => fdCall(() => {
+    const n = fdInt(fd);
+    fs.closeSync(n);
+    cliPos.delete(n);
+    return null;
+  }));
+  fn(m, "read", (fd: any, n: any) => fdCall(() => {
+    const f = fdInt(fd), want = fdInt(n);
+    if (want < 0) throw Object.assign(new Error("EINVAL"), { code: "EINVAL", errno: -22 });
+    // (at most 64 MiB a call: a short read, as POSIX allows any read to be; the buffer is the runtime's checked one)
+    const buf = new Uint8Array(Math.min(want, 1 << 26));
+    let got: number;
+    if (shimFs) got = fs.readSync(f, buf);
+    else {
+      const c = cliPos.get(f);
+      got = fs.readSync(f, buf, 0, buf.length, c ? c.pos : null);
+      if (c) c.pos += got;
+    }
+    return new PyBytes(buf.slice(0, got));
+  }));
+  fn(m, "write", (fd: any, data: any) => fdCall(() => {
+    const f = fdInt(fd);
+    const b = O.bufferOf(data);
+    if (b === undefined || b === null) raise(T.TypeError, `a bytes-like object is required, not '${typeName(data)}'`);
+    if (shimFs) {
+      const n = fs.writeSync(f, b);
+      return typeof n === "number" ? n : b!.length;
+    }
+    const c = cliPos.get(f);
+    const n = fs.writeSync(f, b, 0, b!.length, c && !c.append ? c.pos : null);
+    if (c) c.pos = c.append ? fs.fstatSync(f).size : c.pos + n;
+    return n;
+  }));
+  fn(m, "lseek", (fd: any, pos: any, how: any) => fdCall(() => {
+    const f = fdInt(fd), off = fdInt(pos), wh = fdInt(how);
+    if (shimFs) return fs.seekFd(f, off, wh);
+    const c = cliPos.get(f);
+    // (a descriptor not opened here: a closed or unknown one is EBADF, as fstat says; another, a stream's, ESPIPE)
+    if (c === undefined) {
+      fs.fstatSync(f);
+      throw Object.assign(new Error("ESPIPE"), { code: "ESPIPE", errno: -29 });
+    }
+    const base = wh === 0 ? 0 : wh === 1 ? c.pos : wh === 2 ? fs.fstatSync(f).size : NaN;
+    if (Number.isNaN(base) || base + off < 0) throw Object.assign(new Error("EINVAL"), { code: "EINVAL", errno: -22 });
+    c.pos = base + off;
+    return c.pos;
+  }));
+  fn(m, "fstat", (fd: any) => fdCall(() => statResult(fs.fstatSync(fdInt(fd)))));
+  wrap("chmod", (p: any, mode: any, dir_fd: any = null, _follow_symlinks: any = true) => {
+    noDirFd(dir_fd);
+    fs.chmodSync(at(pathStr(p)), fdInt(mode));
+    return null;
+  });
+  m.chmod.$sig = { args: ["path", "mode"], posonly: 0, vararg: null, kwonly: ["dir_fd", "follow_symlinks"], kwarg: null, defaults: [], kwdefaults: { dir_fd: null, follow_symlinks: true } };
+  wrap("utime", (p: any, times: any = null, ns: any = null, dir_fd: any = null, _follow_symlinks: any = true) => {
+    noDirFd(dir_fd);
+    if (times !== null && ns !== null) raise(T.ValueError, "utime: you may specify either 'times' or 'ns' but not both");
+    const pair = (v: any, what: string): [any, any] => {
+      if (!isinstance(v, T.tuple) || v.length !== 2) raise(T.TypeError, what === "ns" ? "utime: 'ns' must be a tuple of two ints" : "utime: 'times' must be either a tuple of two ints or None");
+      return [v[0], v[1]];
+    };
+    const secondsOf = (v: any): number => {
+      const f = callObj(T.float, [v]);
+      return f instanceof FloatBox ? f.v : Number(f);
+    };
+    let aMs: number, mMs: number;
+    if (ns !== null) {
+      const [a, b] = pair(ns, "ns");
+      aMs = Number(O.index(a)) / 1e6;
+      mMs = Number(O.index(b)) / 1e6;
+    } else if (times !== null) {
+      const [a, b] = pair(times, "times");
+      aMs = secondsOf(a) * 1000;
+      mMs = secondsOf(b) * 1000;
+    } else aMs = mMs = Date.now();
+    const q = at(pathStr(p));
+    if (shimFs) fs.utimesMs(q, aMs, mMs);
+    else fs.utimesSync(q, aMs / 1000, mMs / 1000);
+    return null;
+  });
+  m.utime.$sig = { args: ["path", "times"], posonly: 0, vararg: null, kwonly: ["ns", "dir_fd", "follow_symlinks"], kwarg: null, defaults: [null], kwdefaults: { ns: null, dir_fd: null, follow_symlinks: true } };
+  // (os.access asks, it never changes anything: the browser's from the entry's permission bits, the File-writes
+  // switch not consulted, as a policy isn't a permission bit)
+  fn(m, "access", (p: any, mode: any, dir_fd: any = null, _effective_ids: any = false, _follow_symlinks: any = true) => {
+    noDirFd(dir_fd);
+    const q = at(pathStr(p)), md = fdInt(mode);
+    if (shimFs) {
+      let st: any;
+      try {
+        st = fs.statSync(q);
+      } catch {
+        return false;
+      }
+      return ((md & 4) === 0 || (st.mode & 0o400) !== 0) && ((md & 2) === 0 || (st.mode & 0o200) !== 0) && ((md & 1) === 0 || (st.mode & 0o100) !== 0);
+    }
+    try {
+      fs.accessSync(q, md);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  m.access.$sig = { args: ["path", "mode"], posonly: 0, vararg: null, kwonly: ["dir_fd", "effective_ids", "follow_symlinks"], kwarg: null, defaults: [], kwdefaults: { dir_fd: null, effective_ids: false, follow_symlinks: true } };
+  // (os.terminal_size, built from a 2-sequence as CPython's struct sequence is; os.get_terminal_size: a terminal's,
+  // or ENOTTY for a descriptor that isn't one, as in the browser always)
+  const termSize = (c: any, l: any) => Ty.structseq("os.terminal_size", ["columns", "lines"], [c, l]);
+  m.terminal_size = typeOf(termSize(0, 0));
+  Ty.allocator(m.terminal_size, (_cls: any, seq: any) => {
+    const items = callObj(T.list, [seq]);
+    if (items.length !== 2) raise(T.TypeError, `os.terminal_size() takes a 2-sequence (${items.length}-sequence given)`);
+    return termSize(items[0], items[1]);
+  });
+  fn(m, "get_terminal_size", (fd: any = 1) => {
+    const f = fdInt(fd);
+    const s = !shimFs && f === 1 ? process.stdout : !shimFs && f === 2 ? process.stderr : null;
+    if (s && (s as any).isTTY && (s as any).columns) return termSize((s as any).columns, (s as any).rows);
+    throw markRaised(callObj(T.OSError, [25, "Inappropriate ioctl for device"]));
   });
   // (the rest, Python, in _os_lazy: imported the first time one of them is read, never at startup)
   for (const name of ["PathLike", "DirEntry", "scandir", "walk", "_walk_symlinks_as_files", "fsencode", "fsdecode"]) {
