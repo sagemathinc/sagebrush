@@ -1,0 +1,6 @@
+E3 (uncounted; median of 7, ms; 2026-11-07T17:50:15.814Z; load 17.2)
+aplist(199999) 17,984 pairs, reply-only: JSON  kernel 25.11, encode 4.59, decode 1.79  (reply 226270 B)
+aplist(199999) 17,984 pairs, reply-only: binary i64 kernel 22.48, encode 0.05, decode 3.14  (reply 287744 B)
+aplist(199999) 17,984 pairs, reply-only: binary f64 kernel 20.19, encode 0.07, decode 1.06  (reply 287744 B; decode includes one copy into an aligned buffer)
+det 200x200, request: text   build 1.10, decode 2.04, kernel 45.29  (det 539 digits)
+det 200x200, request: binary build 0.08, decode 0.36, kernel 46.63

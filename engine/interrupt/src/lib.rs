@@ -33,6 +33,65 @@ pub mod progress;
 
 static REQUESTED: AtomicBool = AtomicBool::new(false);
 
+// ---- the host word (feature `host-word`; #825 N1, design/native-desktop.md §5.3)
+//
+// `token * 2 + stopbit` for the call in flight, 0 between calls. The host arms it around each engine
+// call with the run's token, its control thread stops it by compare-and-swap on that token only, and
+// every check (on any thread, rayon's helpers included) reads the stop bit. A stop for another token,
+// or for none, changes nothing.
+
+#[cfg(feature = "host-word")]
+static ARMED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Arm the word for the call of `token` (1 ..= 2^63 - 1). False if another call is armed.
+#[cfg(feature = "host-word")]
+pub fn host_arm(token: u64) -> bool {
+    use std::sync::atomic::Ordering::SeqCst;
+    if token == 0 || token >> 63 != 0 {
+        return false;
+    }
+    let ok = ARMED.compare_exchange(0, token << 1, SeqCst, SeqCst).is_ok();
+    if ok {
+        REQUESTED.store(false, SeqCst);
+    }
+    ok
+}
+
+/// Stop the call of `token`: true only if that call is armed and wasn't stopped yet.
+#[cfg(feature = "host-word")]
+pub fn host_stop(token: u64) -> bool {
+    use std::sync::atomic::Ordering::SeqCst;
+    token != 0 && token >> 63 == 0 && ARMED.compare_exchange(token << 1, (token << 1) | 1, SeqCst, SeqCst).is_ok()
+}
+
+/// Disarm after the call of `token`, stopped or not; clears its request. False if `token` isn't the
+/// armed one (then nothing changes).
+#[cfg(feature = "host-word")]
+pub fn host_disarm(token: u64) -> bool {
+    use std::sync::atomic::Ordering::SeqCst;
+    let mut v = ARMED.load(SeqCst);
+    loop {
+        if v == 0 || v >> 1 != token {
+            return false;
+        }
+        match ARMED.compare_exchange(v, 0, SeqCst, SeqCst) {
+            Ok(_) => {
+                REQUESTED.store(false, SeqCst);
+                return true;
+            }
+            Err(now) => v = now,
+        }
+    }
+}
+
+#[cfg(feature = "host-word")]
+#[inline]
+fn poll_word() {
+    if ARMED.load(Relaxed) & 1 == 1 {
+        REQUESTED.store(true, Relaxed);
+    }
+}
+
 /// The panic payload of an interruption.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Interrupted;
@@ -330,6 +389,8 @@ static POLLS: AtomicU32 = AtomicU32::new(0);
 // arguments and only returns a flag.
 #[allow(unsafe_code)]
 fn poll_host() {
+    #[cfg(feature = "host-word")]
+    poll_word();
     #[cfg(all(target_arch = "wasm32", feature = "wasm-host"))]
     {
         if POLLS.fetch_add(1, Relaxed) % 1024 == 0 && unsafe { interrupted() } != 0 {
@@ -343,6 +404,8 @@ fn poll_host() {
 // arguments and only returns a flag.
 #[allow(unsafe_code)]
 fn poll_host_now() {
+    #[cfg(feature = "host-word")]
+    poll_word();
     #[cfg(all(target_arch = "wasm32", feature = "wasm-host"))]
     {
         if unsafe { interrupted() } != 0 {
@@ -573,5 +636,31 @@ pub(crate) mod tests {
         assert_eq!(r, Err(Interrupted));
         clear();
         assert_eq!(catch(check_coarse), Ok(()));
+    }
+}
+
+#[cfg(all(test, feature = "host-word"))]
+mod host_word_tests {
+    use super::*;
+
+    #[test]
+    fn arm_stop_disarm_by_token_only() {
+        assert!(host_arm(7));
+        assert!(!host_arm(8), "one call at a time");
+        assert!(!host_stop(8), "a stop for another token is inert");
+        assert!(!requested());
+        assert!(host_stop(7));
+        assert!(!host_stop(7), "a duplicate stop is inert");
+        assert!(requested());
+        assert!(catch(check).is_err());
+        assert!(!host_disarm(8), "only the armed token disarms");
+        assert!(host_disarm(7));
+        assert!(!requested(), "the next call starts clear");
+        assert!(!host_stop(7), "a late stop after disarm is inert");
+        assert!(host_arm(9));
+        assert!(!requested());
+        assert!(catch(check).is_ok());
+        assert!(host_disarm(9));
+        assert!(!host_arm(0) && !host_arm(1 << 63));
     }
 }

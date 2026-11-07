@@ -15,6 +15,10 @@ wasm-host = []
 # Tests only: count checks per phase and request Stop at a chosen check
 # (sagebrush_interrupt::hooks)
 test-hooks = []
+# Native hosts that must not install a SIGINT handler (the desktop app's N-API add-on, #825 N1):
+# a process-global word, armed per call with the run's token, that the host's control thread stops
+# by compare-and-swap (sagebrush_interrupt::host_arm/host_stop/host_disarm)
+host-word = []
 
 [lints]
 workspace = true
