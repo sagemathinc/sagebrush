@@ -30,13 +30,14 @@ def _aspect_figsize(r):
     """A figure size (inches) whose plot area has the shape of data r times
     as wide as high, plus room for tick labels: the picture Sage saves, its
     6.4 x 4.8 figure cropped to the plot (so never wider than 6.4: a wide
-    one keeps that width and loses height)."""
+    one keeps that width and loses height; a very tall one is narrow, its
+    width mostly the tick labels' room, as Sage's)."""
     h = 4.6
     w = (h - 0.5) * r + 0.75
     if w > 6.4:
         w = 6.4
         h = (w - 0.75) / r + 0.5
-    return (max(w, 1.0), h)
+    return (w, h)
 
 
 def _label(s):
@@ -700,6 +701,18 @@ def polygon(points, **options):
         sage: 'data-xr="-1.0 4.0" data-yr="0.0 4.0"' in plot(x, (x, 0, 4), xmin=-1, aspect_ratio=1)._svg()  # sagebrush only
         True
         sage: 'width="640" height="55.65"' in line([(0, 0), (100, 1)], aspect_ratio=1)._svg()  # sagebrush only
+        True
+
+    A numeric aspect ratio other than 1 shapes it too: 2 makes square data's
+    plot twice as tall as wide, 1/2 twice as wide (Sage's pictures: 271 x 468
+    and 626 x 331 pixels); data 20 times as tall as wide makes a narrow one
+    (Sage's: 79 x 468)::
+
+        sage: 'width="280" height="460"' in line([(0, 0), (1, 1)], aspect_ratio=2)._svg()  # sagebrush only
+        True
+        sage: 'width="640" height="332.5"' in line([(0, 0), (1, 1)], aspect_ratio=1/2)._svg()  # sagebrush only
+        True
+        sage: 'width="95.5" height="460"' in line([(0, 0), (1, 20)], aspect_ratio=1)._svg()  # sagebrush only
         True
     """
     gopts, p = _split(options)
