@@ -402,7 +402,8 @@ def _is_zero(c):
 
 def _latex_number(c):
     """c's latex when it is a plain number (an integer, a rational, an
-    element of a prime field): 3, -\\frac{1}{2}; else None."""
+    element of a prime field, which prints as its digits): 3, -\\frac{1}{2};
+    else None."""
     import re
     if isinstance(c, bool):
         return None
@@ -411,17 +412,28 @@ def _latex_number(c):
             return str(c.numerator)
         return "%s\\frac{%d}{%d}" % ("-" if c < 0 else "", abs(c.numerator), c.denominator)
     s = repr(c)
-    if re.fullmatch(r"-?\d+", s):
-        return s
-    m = re.fullmatch(r"(-?)(\d+)/(\d+)", s)
-    return "%s\\frac{%s}{%s}" % m.groups() if m else None
+    return s if re.fullmatch(r"-?\d+", s) else None
 
 
-def _latex_from_repr(s):
-    """The printed series with ^{} exponents (Laurent series, and
-    coefficients that are not plain numbers)."""
-    import re
-    return re.sub(r"\^(-?\d+)", r"^{\1}", repr(s).replace("*", " "))
+def _latex_coeff(c):
+    """(latex, unit, atomic) of a coefficient as Sage typesets it in a series:
+    its own latex; unit 1 or -1 for an exact one or minus one (left out before a
+    monomial), else 0; atomic when it is no sum (else \\left(...\\right) before a
+    monomial: \\left(a + 1\\right) y, but -a y)."""
+    lc = _latex_number(c)
+    exact = lc is not None or type(c).__name__ in ("Polynomial", "NumberFieldElement", "AlgebraicNumber", "FiniteFieldElement", "MPolynomial")
+    if lc is None:
+        lc = str(_sa().latex(c))
+    r = repr(c)
+    body = r[1:] if r.startswith("-") else r
+    atomic = " + " not in body and " - " not in body
+    unit = 0
+    if exact:
+        if r == "1":
+            unit = 1
+        elif r == "-1":
+            unit = -1
+    return lc, unit, atomic
 
 
 class Series:
@@ -575,6 +587,9 @@ class Series:
     def _padded_list(self, n=None):
         """padded_list of a power series."""
         L = self.list()
+        if self._R._laurent and self._c and self._v > 0:
+            # (from x^0, as before: a sagebrush addition, Sage's Laurent series has no padded_list)
+            L = [_out(self._R._zero())] * self._v + L
         if n is None:
             n = self._prec if self._prec is not None else len(L)
         return (L + [_out(self._R._zero())] * n)[:n]
@@ -696,8 +711,8 @@ class Series:
         latex, a space and the monomial, a coefficient 1 (or -1) left out
         (hence "1 +  x"); the terms are joined by " + ", and "+ -" becomes
         "- "; a series with no nonzero term to its precision is
-        "0 + \\cdots".  (Laurent series, and coefficients that are not plain
-        numbers, keep the earlier form.)
+        "0 + \\cdots".  (Coefficients that are not plain numbers keep the
+        earlier form.)
 
         EXAMPLES::
 
@@ -705,21 +720,38 @@ class Series:
             (1 +  x + \\frac{1}{2} x^{2} + O(x^{4}), -\\frac{1}{3} x + O(x^{2}))
             sage: latex(2 - x + O(x^3)), latex(O(x^3)), latex(R(0)), latex(3 + O(x))
             (2 -  x + O(x^{3}), 0 + \\cdots, 0, 3 + O(x))
+
+        A Laurent series as Sage writes one: a negative power as a fraction,
+        no space before the monomial::
+
+            sage: L.<z> = LaurentSeriesRing(QQ); latex(z^-2 + 1/3 + z + O(z^3)), latex(-z^-1 + 2 - z)
+            (\\frac{1}{z^{2}} + \\frac{1}{3} + z + O(z^{3}), \\frac{-1}{z} + 2 - z)
+
+        Coefficients that are not plain numbers keep the earlier form (here
+        as Sage writes it)::
+
+            sage: S.<y> = PowerSeriesRing(RR); latex(RR(1/3) + 2*y + O(y^3))
+            0.333333333333333 + 2.00000000000000 y + O(y^{3})
         """
-        if self._R._laurent:
-            return _latex_from_repr(self)
         name = self._R._name
+        lau = self._R._laurent
         terms = []
         e = self._v - 1
         for c in ([] if self.is_zero() else self._c):
             e += 1
             if _is_zero(c):
                 continue
-            lc = _latex_number(c)
-            if lc is None:
-                return _latex_from_repr(self)
-            if e:
-                lc = ("" if lc == "1" else "-" if lc == "-1" else lc) + " " + (name if e == 1 else "%s^{%d}" % (name, e))
+            lc, unit, atomic = _latex_coeff(c)
+            if lau and e < 0:
+                # (Sage: \\frac{c}{z^{k}}, the coefficient's own latex, its sign inside)
+                lc = "\\frac{%s}{%s}" % (lc, name if e == -1 else "%s^{%d}" % (name, -e))
+            elif e:
+                # (Sage: a space between coefficient and monomial in a power
+                # series, "2 x", none in a Laurent series, "2z"; a unit left out,
+                # a sum in \\left(...\\right))
+                sep = "" if lau else " "
+                pre = "" if unit == 1 else "-" if unit == -1 else lc if atomic else "\\left(%s\\right)" % lc
+                lc = pre + sep + (name if e == 1 else "%s^{%d}" % (name, e))
             terms.append(lc)
         if self._prec is not None:
             if not terms:
