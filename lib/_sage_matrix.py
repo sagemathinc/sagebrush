@@ -4273,6 +4273,17 @@ class ComplexField_:
     _is_generic_field = True
     _numeric = True
 
+    def __getitem__(self, names):
+        """The polynomial ring over this field in the given variable(s): RR['t'].
+
+        EXAMPLES::
+
+            sage: CC['t']
+            Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+        """
+        import _sage_poly
+        return _sage_poly.PolynomialRing(self, names)
+
     def __repr__(self):
         return "Complex Field with 53 bits of precision"
 

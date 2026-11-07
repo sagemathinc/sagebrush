@@ -1,0 +1,90 @@
+RR | RR=RR,RR,RR,RR,RR RDF=RR,RR,RR,RR,RR CC=CC,CC,CC,CC,CC CDF=CC,CC,CC,CC,CC R100=RR,RR,RR,RR,RR C100=CC,CC,CC,CC,CC R30=R30,R30,R30,R30,R30 C30=C30,C30,C30,C30,C30 float=RR,RR,RR,RR,RR complex=CC,CC,CC,CC,ERR:TypeError I=CC,CC,CC,CC,CC QQ=RR,RR,RR,RR,RR ZZ=RR,RR,RR,RR,RR int=RR,RR,RR,RR,RR
+RDF | RR=RDF,RDF,RDF,RDF,RDF RDF=RDF,RDF,RDF,RDF,RDF CC=CC,CC,CC,CC,CC CDF=CDF,CDF,CDF,CDF,CDF R100=RDF,RDF,RDF,RDF,RDF C100=CC,CC,CC,CC,CC R30=R30,R30,R30,R30,R30 C30=C30,C30,C30,C30,C30 float=RDF,RDF,RDF,RDF,RDF complex=CDF,CDF,CDF,CDF,ERR:TypeError I=CDF,CDF,CDF,CDF,CDF QQ=RDF,RDF,RDF,RDF,RDF ZZ=RDF,RDF,RDF,RDF,RDF int=RDF,RDF,RDF,RDF,RDF
+CC | RR=CC,CC,CC,CC,CC RDF=CC,CC,CC,CC,CC CC=CC,CC,CC,CC,CC CDF=CC,CC,CC,CC,CC R100=CC,CC,CC,CC,CC C100=CC,CC,CC,CC,CC R30=C30,C30,C30,C30,C30 C30=C30,C30,C30,C30,C30 float=CC,CC,CC,CC,CC complex=CC,CC,CC,CC,CC I=CC,CC,CC,CC,CC QQ=CC,CC,CC,CC,CC ZZ=CC,CC,CC,CC,CC int=CC,CC,CC,CC,CC
+CDF | RR=CDF,CDF,CDF,CDF,CDF RDF=CDF,CDF,CDF,CDF,CDF CC=CDF,CDF,CDF,CDF,CDF CDF=CDF,CDF,CDF,CDF,CDF R100=CDF,CDF,CDF,CDF,CDF C100=CDF,CDF,CDF,CDF,CDF R30=C30,C30,C30,C30,C30 C30=C30,C30,C30,C30,C30 float=CDF,CDF,CDF,CDF,CDF complex=CDF,CDF,CDF,CDF,CDF I=CDF,CDF,CDF,CDF,CDF QQ=CDF,CDF,CDF,CDF,CDF ZZ=CDF,CDF,CDF,CDF,CDF int=CDF,CDF,CDF,CDF,CDF
+R100 | RR=RR,RR,RR,RR,RR RDF=RR,RR,RR,RR,RR CC=CC,CC,CC,CC,CC CDF=CC,CC,CC,CC,CC R100=R100,R100,R100,R100,R100 C100=C100,C100,C100,C100,C100 R30=R30,R30,R30,R30,R30 C30=C30,C30,C30,C30,C30 float=RR,RR,RR,RR,RR complex=CC,CC,CC,CC,ERR:TypeError I=C100,C100,C100,C100,C100 QQ=R100,R100,R100,R100,R100 ZZ=R100,R100,R100,R100,R100 int=R100,R100,R100,R100,R100
+C100 | RR=CC,CC,CC,CC,CC RDF=CC,CC,CC,CC,CC CC=CC,CC,CC,CC,CC CDF=CC,CC,CC,CC,CC R100=C100,C100,C100,C100,C100 C100=C100,C100,C100,C100,C100 R30=C30,C30,C30,C30,C30 C30=C30,C30,C30,C30,C30 float=CC,CC,CC,CC,CC complex=CC,CC,CC,CC,ERR:TypeError I=C100,C100,C100,C100,C100 QQ=C100,C100,C100,C100,C100 ZZ=C100,C100,C100,C100,C100 int=C100,C100,C100,C100,C100
+R30 | RR=R30,R30,R30,R30,R30 RDF=R30,R30,R30,R30,R30 CC=C30,C30,C30,C30,C30 CDF=C30,C30,C30,C30,C30 R100=R30,R30,R30,R30,R30 C100=C30,C30,C30,C30,C30 R30=R30,R30,R30,R30,R30 C30=C30,C30,C30,C30,C30 float=R30,R30,R30,R30,R30 complex=C30,C30,C30,C30,ERR:TypeError I=C30,C30,C30,C30,C30 QQ=R30,R30,R30,R30,R30 ZZ=R30,R30,R30,R30,R30 int=R30,R30,R30,R30,R30
+C30 | RR=C30,C30,C30,C30,C30 RDF=C30,C30,C30,C30,C30 CC=C30,C30,C30,C30,C30 CDF=C30,C30,C30,C30,C30 R100=C30,C30,C30,C30,C30 C100=C30,C30,C30,C30,C30 R30=C30,C30,C30,C30,C30 C30=C30,C30,C30,C30,C30 float=C30,C30,C30,C30,C30 complex=C30,C30,C30,C30,C30 I=C30,C30,C30,C30,C30 QQ=C30,C30,C30,C30,C30 ZZ=C30,C30,C30,C30,C30 int=C30,C30,C30,C30,C30
+poly RR | RR=RR,RR,RR RDF=RR,RR,RDF CC=CC,CC,CC CDF=CDF,CDF,CDF R100=RR,RR,RR C100=CC,CC,CC R30=R30,R30,R30 C30=C30,C30,C30 QQ=RR,RR,RR ZZ=RR,RR,RR
+poly RDF | RR=RDF,RDF,RR RDF=RDF,RDF,RDF CC=CC,CC,CC CDF=CDF,CDF,CDF R100=RDF,RDF,RDF C100=CC,CC,CC R30=R30,R30,R30 C30=C30,C30,C30 QQ=RDF,RDF,RDF ZZ=RDF,RDF,RDF
+poly CC | RR=CC,CC,CC RDF=CC,CC,CC CC=CC,CC,CC CDF=CC,CC,CDF R100=CC,CC,CC C100=CC,CC,CC R30=C30,C30,C30 C30=C30,C30,C30 QQ=CC,CC,CC ZZ=CC,CC,CC
+poly CDF | RR=CDF,CDF,CDF RDF=CDF,CDF,CDF CC=CDF,CDF,CC CDF=CDF,CDF,CDF R100=CDF,CDF,CDF C100=CDF,CDF,CDF R30=C30,C30,C30 C30=C30,C30,C30 QQ=CDF,CDF,CDF ZZ=CDF,CDF,CDF
+poly R100 | RR=RR,RR,RR RDF=RDF,RDF,RDF CC=CC,CC,CC CDF=CDF,CDF,CDF R100=R100,R100,R100 C100=C100,C100,C100 R30=R30,R30,R30 C30=C30,C30,C30 QQ=R100,R100,R100 ZZ=R100,R100,R100
+poly C100 | RR=CC,CC,CC RDF=CC,CC,CC CC=CC,CC,CC CDF=CDF,CDF,CDF R100=C100,C100,C100 C100=C100,C100,C100 R30=C30,C30,C30 C30=C30,C30,C30 QQ=C100,C100,C100 ZZ=C100,C100,C100
+poly R30 | RR=R30,R30,R30 RDF=R30,R30,R30 CC=C30,C30,C30 CDF=C30,C30,C30 R100=R30,R30,R30 C100=C30,C30,C30 R30=R30,R30,R30 C30=C30,C30,C30 QQ=R30,R30,R30 ZZ=R30,R30,R30
+poly C30 | RR=C30,C30,C30 RDF=C30,C30,C30 CC=C30,C30,C30 CDF=C30,C30,C30 R100=C30,C30,C30 C100=C30,C30,C30 R30=C30,C30,C30 C30=C30,C30,C30 QQ=C30,C30,C30 ZZ=C30,C30,C30
+poly QQ | RR=RR,RR,RR RDF=RDF,RDF,RDF CC=CC,CC,CC CDF=CDF,CDF,CDF R100=R100,R100,R100 C100=C100,C100,C100 R30=R30,R30,R30 C30=C30,C30,C30
+poly ZZ | RR=RR,RR,RR RDF=RDF,RDF,RDF CC=CC,CC,CC CDF=CDF,CDF,CDF R100=R100,R100,R100 C100=C100,C100,C100 R30=R30,R30,R30 C30=C30,C30,C30
+QQt RR c*o | 1.50000000000000*t + 1.50000000000000 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+QQt RR o*c | 1.50000000000000*t + 1.50000000000000 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+QQt RR c+o | t + 2.50000000000000 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+QQt RR o+c | t + 2.50000000000000 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+QQt RR c-o | -t + 0.500000000000000 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+QQt RR o-c | t - 0.500000000000000 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+QQt RR o/c | 0.666666666666667*t + 0.666666666666667 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+QQt RDF c*o | 1.5*t + 1.5 | Univariate Polynomial Ring in t over Real Double Field
+QQt RDF o*c | 1.5*t + 1.5 | Univariate Polynomial Ring in t over Real Double Field
+QQt RDF c+o | t + 2.5 | Univariate Polynomial Ring in t over Real Double Field
+QQt RDF o+c | t + 2.5 | Univariate Polynomial Ring in t over Real Double Field
+QQt RDF c-o | -t + 0.5 | Univariate Polynomial Ring in t over Real Double Field
+QQt RDF o-c | t - 0.5 | Univariate Polynomial Ring in t over Real Double Field
+QQt RDF o/c | 0.6666666666666666*t + 0.6666666666666666 | Univariate Polynomial Ring in t over Real Double Field
+QQt CC c*o | (1.00000000000000 + 2.00000000000000*I)*t + 1.00000000000000 + 2.00000000000000*I | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+QQt CC o*c | (1.00000000000000 + 2.00000000000000*I)*t + 1.00000000000000 + 2.00000000000000*I | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+QQt CC c+o | t + 2.00000000000000 + 2.00000000000000*I | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+QQt CC o+c | t + 2.00000000000000 + 2.00000000000000*I | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+QQt CC c-o | -t + 2.00000000000000*I | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+QQt CC o-c | t - 2.00000000000000*I | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+QQt CC o/c | (0.200000000000000 - 0.400000000000000*I)*t + 0.200000000000000 - 0.400000000000000*I | Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+QQt CDF c*o | (1.0 + 2.0*I)*t + 1.0 + 2.0*I | Univariate Polynomial Ring in t over Complex Double Field
+QQt CDF o*c | (1.0 + 2.0*I)*t + 1.0 + 2.0*I | Univariate Polynomial Ring in t over Complex Double Field
+QQt CDF c+o | t + 2.0 + 2.0*I | Univariate Polynomial Ring in t over Complex Double Field
+QQt CDF o+c | t + 2.0 + 2.0*I | Univariate Polynomial Ring in t over Complex Double Field
+QQt CDF c-o | -t + 2.0*I | Univariate Polynomial Ring in t over Complex Double Field
+QQt CDF o-c | t - 2.0*I | Univariate Polynomial Ring in t over Complex Double Field
+QQt CDF o/c | (0.19999999999999998 - 0.39999999999999997*I)*t + 0.19999999999999998 - 0.39999999999999997*I | Univariate Polynomial Ring in t over Complex Double Field
+QQt R100 c*o | 1.5000000000000000000000000000*t + 1.5000000000000000000000000000 | Univariate Polynomial Ring in t over Real Field with 100 bits of precision
+QQt R100 o*c | 1.5000000000000000000000000000*t + 1.5000000000000000000000000000 | Univariate Polynomial Ring in t over Real Field with 100 bits of precision
+QQt R100 c+o | t + 2.5000000000000000000000000000 | Univariate Polynomial Ring in t over Real Field with 100 bits of precision
+QQt R100 o+c | t + 2.5000000000000000000000000000 | Univariate Polynomial Ring in t over Real Field with 100 bits of precision
+QQt R100 c-o | -t + 0.50000000000000000000000000000 | Univariate Polynomial Ring in t over Real Field with 100 bits of precision
+QQt R100 o-c | t - 0.50000000000000000000000000000 | Univariate Polynomial Ring in t over Real Field with 100 bits of precision
+QQt R100 o/c | 0.66666666666666666666666666667*t + 0.66666666666666666666666666667 | Univariate Polynomial Ring in t over Real Field with 100 bits of precision
+QQt C100 c*o | (1.0000000000000000000000000000 + 2.0000000000000000000000000000*I)*t + 1.0000000000000000000000000000 + 2.0000000000000000000000000000*I | Univariate Polynomial Ring in t over Complex Field with 100 bits of precision
+QQt C100 o*c | (1.0000000000000000000000000000 + 2.0000000000000000000000000000*I)*t + 1.0000000000000000000000000000 + 2.0000000000000000000000000000*I | Univariate Polynomial Ring in t over Complex Field with 100 bits of precision
+QQt C100 c+o | t + 2.0000000000000000000000000000 + 2.0000000000000000000000000000*I | Univariate Polynomial Ring in t over Complex Field with 100 bits of precision
+QQt C100 o+c | t + 2.0000000000000000000000000000 + 2.0000000000000000000000000000*I | Univariate Polynomial Ring in t over Complex Field with 100 bits of precision
+QQt C100 c-o | -t + 2.0000000000000000000000000000*I | Univariate Polynomial Ring in t over Complex Field with 100 bits of precision
+QQt C100 o-c | t - 2.0000000000000000000000000000*I | Univariate Polynomial Ring in t over Complex Field with 100 bits of precision
+QQt C100 o/c | (0.20000000000000000000000000000 - 0.40000000000000000000000000000*I)*t + 0.20000000000000000000000000000 - 0.40000000000000000000000000000*I | Univariate Polynomial Ring in t over Complex Field with 100 bits of precision
+QQt R30 c*o | 1.5000000*t + 1.5000000 | Univariate Polynomial Ring in t over Real Field with 30 bits of precision
+QQt R30 o*c | 1.5000000*t + 1.5000000 | Univariate Polynomial Ring in t over Real Field with 30 bits of precision
+QQt R30 c+o | t + 2.5000000 | Univariate Polynomial Ring in t over Real Field with 30 bits of precision
+QQt R30 o+c | t + 2.5000000 | Univariate Polynomial Ring in t over Real Field with 30 bits of precision
+QQt R30 c-o | -t + 0.50000000 | Univariate Polynomial Ring in t over Real Field with 30 bits of precision
+QQt R30 o-c | t - 0.50000000 | Univariate Polynomial Ring in t over Real Field with 30 bits of precision
+QQt R30 o/c | 0.66666667*t + 0.66666667 | Univariate Polynomial Ring in t over Real Field with 30 bits of precision
+QQt C30 c*o | (1.0000000 + 2.0000000*I)*t + 1.0000000 + 2.0000000*I | Univariate Polynomial Ring in t over Complex Field with 30 bits of precision
+QQt C30 o*c | (1.0000000 + 2.0000000*I)*t + 1.0000000 + 2.0000000*I | Univariate Polynomial Ring in t over Complex Field with 30 bits of precision
+QQt C30 c+o | t + 2.0000000 + 2.0000000*I | Univariate Polynomial Ring in t over Complex Field with 30 bits of precision
+QQt C30 o+c | t + 2.0000000 + 2.0000000*I | Univariate Polynomial Ring in t over Complex Field with 30 bits of precision
+QQt C30 c-o | -t + 2.0000000*I | Univariate Polynomial Ring in t over Complex Field with 30 bits of precision
+QQt C30 o-c | t - 2.0000000*I | Univariate Polynomial Ring in t over Complex Field with 30 bits of precision
+QQt C30 o/c | (0.20000000 - 0.40000000*I)*t + 0.20000000 - 0.40000000*I | Univariate Polynomial Ring in t over Complex Field with 30 bits of precision
+QQt float c*o | 1.50000000000000*t + 1.50000000000000 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+QQt float o*c | 1.50000000000000*t + 1.50000000000000 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+QQt float c+o | t + 2.50000000000000 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+QQt float o+c | t + 2.50000000000000 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+QQt float c-o | -t + 0.500000000000000 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+QQt float o-c | t - 0.500000000000000 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+QQt float o/c | 0.666666666666667*t + 0.666666666666667 | Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+ZZu RR | 1.50000000000000*u + 1.00000000000000 | Univariate Polynomial Ring in u over Real Field with 53 bits of precision
+ZZu RDF | 1.5*u + 1.0 | Univariate Polynomial Ring in u over Real Double Field
+ZZu CC | (1.00000000000000 + 2.00000000000000*I)*u + 1.00000000000000 | Univariate Polynomial Ring in u over Complex Field with 53 bits of precision
+ZZu CDF | (1.0 + 2.0*I)*u + 1.0 | Univariate Polynomial Ring in u over Complex Double Field
+ZZu R100 | 1.5000000000000000000000000000*u + 1.0000000000000000000000000000 | Univariate Polynomial Ring in u over Real Field with 100 bits of precision
+ZZu C100 | (1.0000000000000000000000000000 + 2.0000000000000000000000000000*I)*u + 1.0000000000000000000000000000 | Univariate Polynomial Ring in u over Complex Field with 100 bits of precision
+ZZu R30 | 1.5000000*u + 1.0000000 | Univariate Polynomial Ring in u over Real Field with 30 bits of precision
+ZZu C30 | (1.0000000 + 2.0000000*I)*u + 1.0000000 | Univariate Polynomial Ring in u over Complex Field with 30 bits of precision
+ZZu float | 1.50000000000000*u + 1.00000000000000 | Univariate Polynomial Ring in u over Real Field with 53 bits of precision
