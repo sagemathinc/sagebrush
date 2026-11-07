@@ -2978,6 +2978,16 @@
   "owner": "visualization/display",
   "row": "inv-30"
  },
+ "lib/_graphics.py ::  :: \"models\": \"⊧\", \"cup\": \"∪\", \"cap\": \"∩\", \"subset\": \"⊂\", \"subseteq\": \"⊆\", \"supset\": \"⊃\", \"supseteq\": \"⊇\", \"subsetneq\": \"⊊\", #0": {
+  "class": "none",
+  "owner": "matplotlib mathtext (@sagebrush-matlab)",
+  "reason": "\"cap\" is TeX's \\cap, the set intersection symbol (∩) in the mathtext tables, not a cap: nothing is refused"
+ },
+ "lib/_graphics.py ::  :: _TEX_BIN = {\"pm\", \"mp\", \"times\", \"cdot\", \"div\", \"wedge\", \"vee\", \"cup\", \"cap\", \"setminus\", \"smallsetminus\", \"sqcup\", \"sqcap\", #0": {
+  "class": "none",
+  "owner": "matplotlib mathtext (@sagebrush-matlab)",
+  "reason": "\"cap\" is TeX's \\cap, the set intersection symbol (∩) in the mathtext tables, not a cap: nothing is refused"
+ },
  "lib/_limits.py ::  :: \"ff.conway_work\": (UNLIMITED, 10 ** 6, 653528895), #0": {
   "class": "3",
   "owner": "finite fields + configuration"

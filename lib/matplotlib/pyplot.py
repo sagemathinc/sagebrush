@@ -19,7 +19,8 @@ Jupyter); on the command line show() writes an SVG file and prints its path.
 import math
 import os
 from _graphics import (Panel, Line, Points, Polygon, Rects, Text, Arrow, AxLine, Image, render_svg, render_frame,
-                       show as _show, save_svg, TAB10, to_color as _css, colormap, describe_svg, mpl_ticks, DASHES)
+                       show as _show, save_svg, TAB10, to_color as _css, colormap, describe_svg, mpl_ticks, DASHES,
+                       LEGEND_LOCS as _LEGEND_LOCS)
 from matplotlib.colors import to_rgba as _to_rgba, CSS4_COLORS as _CSS4_COLORS, Colormap as _Colormap
 # (one rcParams: matplotlib's, with its defaults and its key checks)
 from matplotlib import rcParams, rcParamsDefault, rcParamsOrig, rc, rcdefaults, rc_context
@@ -738,30 +739,36 @@ class Axes:
         return _AxLine2D(self._add(p))
 
     def text(self, x, y, s, fontsize=10, color=None, ha="left", va="baseline", rotation=0, transform=None, **kw):
-        if transform is not None and getattr(transform, "_axes_fraction", False):  # ax.transAxes
-            lo, hi = self.get_xlim(), self.get_ylim()
-            x, y = lo[0] + x * (lo[1] - lo[0]), hi[0] + y * (hi[1] - hi[0])
+        # (ax.transAxes: axes fractions, wherever the limits are when it is
+        # drawn; as matplotlib's ax.text, not clipped unless clip_on=True)
+        coords = "axes fraction" if transform is not None and getattr(transform, "_axes_fraction", False) else None
         if color is None:
             color = rcParams._given("text.color")  # (None: the page's text color)
-        return _Artist(self._add(Text(s, x, y, fontsize=float(kw.get("size", fontsize)) * PT, color=to_color(color),
+        size = float(kw.get("size", fontsize))
+        box = None
+        if kw.get("bbox") is not None:
+            from matplotlib._annotations import text_box
+            box = text_box(kw["bbox"], size)
+        return _Artist(self._add(Text(s, x, y, fontsize=size * PT, color=to_color(color),
                        horizontal_alignment=kw.get("horizontalalignment", ha),
-                       vertical_alignment=kw.get("verticalalignment", va), rotation=rotation, no_bbox=True)), "text.Text")
+                       vertical_alignment=kw.get("verticalalignment", va), rotation=rotation, no_bbox=True,
+                       coords=coords, clip=bool(kw.get("clip_on", False)), box=box)), "text.Text")
 
     @property
     def transAxes(self):
         return _AxesFraction()
 
-    def annotate(self, text, xy, xytext=None, arrowprops=None, fontsize=10, ha=None, **kw):
-        if xytext is None:
-            xytext = xy
-        if arrowprops is not None and tuple(xytext) != tuple(xy):
-            self._add(Arrow(xytext, xy, color=to_color(arrowprops.get("color", arrowprops.get("facecolor", "currentColor"))),
-                            thickness=1.2))
-        # (matplotlib: the text's left end at xytext, unless told otherwise)
-        ha = kw.get("horizontalalignment", ha) or ("center" if arrowprops else "left")
+    def annotate(self, text, xy, xytext=None, xycoords="data", textcoords=None, arrowprops=None, annotation_clip=None,
+                 fontsize=10, **kw):
+        # (its coordinates, box and arrow: matplotlib._annotations)
+        from matplotlib._annotations import annotation
         size = kw.get("size", fontsize)
-        return _Artist(self._add(Text(text, xytext[0], xytext[1], fontsize=_size_px(size, 10), horizontal_alignment=ha, color=to_color(kw.get("color")),
-                       vertical_alignment=kw.get("verticalalignment", kw.get("va", "bottom" if arrowprops else "baseline")), no_bbox=True)), "text.Text")
+        size_pt = _size_px(size, 10) / PT
+        return _Artist(self._add(annotation(
+            text, xy, xytext, xycoords, textcoords, arrowprops, annotation_clip, kw, size_pt, fontsize=size_pt * PT,
+            color=to_color(kw.get("color")), rotation=kw.get("rotation", 0),
+            horizontal_alignment=kw.get("horizontalalignment", kw.get("ha", "left")),
+            vertical_alignment=kw.get("verticalalignment", kw.get("va", "baseline")))), "text.Text")
 
     def pie(self, x, labels=None, colors=None, autopct=None, startangle=0, **kw):
         vals = [float(v) for v in _list(x)]
@@ -1111,6 +1118,16 @@ class Axes:
         self._opts["legend"] = True
         self._opts["legend_entries"] = entries
         if loc is not None:
+            # (as matplotlib checks it; "best" is drawn upper right)
+            if isinstance(loc, str):
+                if loc not in _LEGEND_LOCS:
+                    raise ValueError("%r is not a valid value for loc." % loc)
+            elif isinstance(loc, (tuple, list)) and len(loc) == 2:
+                loc = (float(loc[0]), float(loc[1]))
+            elif isinstance(loc, int) and not isinstance(loc, bool) and 0 <= loc < len(_LEGEND_LOCS):
+                loc = _LEGEND_LOCS[loc]
+            else:
+                raise ValueError("loc must be string, coordinate tuple, or an integer 0-10, not %r" % (loc,))
             self._opts["legend_loc"] = loc if loc != "best" else "upper right"
 
     def set_aspect(self, aspect, **kw):
