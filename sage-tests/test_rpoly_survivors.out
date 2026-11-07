@@ -1,0 +1,55 @@
+Real Field with 53 bits of precision R(1) == t + 1 -> False
+Real Field with 53 bits of precision t + 1 == R(1) -> False
+Complex Double Field R(1) == t + 1 -> False
+Complex Double Field t + 1 == R(1) -> False
+Real Field with 53 bits of precision[t](x + y) -> TypeError: x is not a variable of Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+Real Field with 53 bits of precision[t](t*x + y) -> TypeError: x is not a variable of Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+Real Field with 53 bits of precision[t](y + z) -> TypeError: y is not a variable of Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+Real Field with 53 bits of precision[t](t + y) -> TypeError: y is not a variable of Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+Real Field with 53 bits of precision[t](x*y) -> TypeError: x is not a variable of Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+Real Field with 53 bits of precision[t](sin(x)) -> TypeError: x is not a variable of Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+Complex Double Field[t](x + y) -> TypeError: x is not a variable of Univariate Polynomial Ring in t over Complex Double Field
+Complex Double Field[t](t*x + y) -> TypeError: x is not a variable of Univariate Polynomial Ring in t over Complex Double Field
+Complex Double Field[t](y + z) -> TypeError: y is not a variable of Univariate Polynomial Ring in t over Complex Double Field
+Complex Double Field[t](t + y) -> TypeError: y is not a variable of Univariate Polynomial Ring in t over Complex Double Field
+Complex Double Field[t](x*y) -> TypeError: x is not a variable of Univariate Polynomial Ring in t over Complex Double Field
+Complex Double Field[t](sin(x)) -> TypeError: x is not a variable of Univariate Polynomial Ring in t over Complex Double Field
+Real Field with 80 bits of precision[t](x + y) -> TypeError: x is not a variable of Univariate Polynomial Ring in t over Real Field with 80 bits of precision
+Real Field with 80 bits of precision[t](t*x + y) -> TypeError: x is not a variable of Univariate Polynomial Ring in t over Real Field with 80 bits of precision
+Real Field with 80 bits of precision[t](y + z) -> TypeError: y is not a variable of Univariate Polynomial Ring in t over Real Field with 80 bits of precision
+Real Field with 80 bits of precision[t](t + y) -> TypeError: y is not a variable of Univariate Polynomial Ring in t over Real Field with 80 bits of precision
+Real Field with 80 bits of precision[t](x*y) -> TypeError: x is not a variable of Univariate Polynomial Ring in t over Real Field with 80 bits of precision
+Real Field with 80 bits of precision[t](sin(x)) -> TypeError: x is not a variable of Univariate Polynomial Ring in t over Real Field with 80 bits of precision
+RR (t^3 + 2*t + 1).shift(-1) -> t^2 + 2.00000000000000
+RR (t^3 + 2*t + 1).shift(-1).parent() -> Univariate Polynomial Ring in t over Real Field with 53 bits of precision
+QQ (s + 1) * I -> I*s + I
+QQ I * (s + 1) -> I*s + I
+QQ (s^2 + 1)*I + s -> I*s^2 + s + I
+list -0-0i | 2.0*u^2 + 1.0 | [1.0, 0.0, 2.0] | ['1.0/0.0', '-0.0/-0.0', '2.0/0.0']
+list -0+0i | 2.0*u^2 + 1.0 | [1.0, 0.0, 2.0] | ['1.0/0.0', '-0.0/0.0', '2.0/0.0']
+list 0-0i | 2.0*u^2 + 1.0 | [1.0, 0.0, 2.0] | ['1.0/0.0', '0.0/-0.0', '2.0/0.0']
+const -0 | u | [0.0, 1.0] | ['-0.0/0.0', '1.0/0.0']
+times -0 | 0 | [] | []
+sub | u^2 | [0.0, 0.0, 1.0] | ['0.0/0.0', '0.0/0.0', '1.0/0.0']
+neg | -u^2 - 1.0 | [-1.0, 0.0, -1.0] | ['-1.0/-0.0', '-0.0/-0.0', '-1.0/-0.0']
+prod | u^2 - 1.0 | [-1.0, 0.0, 1.0] | ['-1.0/0.0', '0.0/0.0', '1.0/0.0']
+sq | u^2 - 2.0*I*u - 1.0 | [-1.0, -2.0*I, 1.0] | ['-1.0/-0.0', '0.0/-2.0', '1.0/0.0']
+from RR | 2.0*u^2 + 1.0 | [1.0, 0.0, 2.0] | ['1.0/0.0', '-0.0/0.0', '2.0/0.0']
+0.0 [0.0] -0.0 -0.0
+0.0 [0.0] -0.0 0.0
+0.0 [0.0] 0.0 -0.0
+0.0 [0.0] -0.0 0.0
+1.0 [1.0] 1.0 -0.0
+1.0*I [1.0*I] -0.0 1.0
+-1.0*I [-1.0*I] -0.0 -1.0
+-1.0 [-1.0] -1.0 -0.0
+-0.0 [-0.0] -0.0 0.0
+hash CC['t']([1, 2]) == hash RR['t']([1, 2]) -> True
+CC['t']([1, 2]) == RR['t']([1, 2]) -> True
+Complex Field with 100 bits of precision Real Field with 100 bits of precision True True
+Complex Field with 100 bits of precision Real Field with 100 bits of precision True True
+Complex Field with 80 bits of precision Real Field with 80 bits of precision True True
+Real Field with 100 bits of precision Integer Ring True False
+Real Field with 100 bits of precision Rational Field True False
+Complex Field with 100 bits of precision Integer Ring True False
+Real Field with 53 bits of precision Integer Ring True False

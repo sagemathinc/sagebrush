@@ -1,0 +1,120 @@
+Power QQ['a'] CC(1,2) c*t | (1.00000000000000 + 2.00000000000000*I)*x | Power Series Ring in x over Univariate Polynomial Ring in a over Complex Field with 53 bits of precision
+Power QQ['a'] CC(1,2) t*c | (1.00000000000000 + 2.00000000000000*I)*x | Power Series Ring in x over Univariate Polynomial Ring in a over Complex Field with 53 bits of precision
+Power QQ['a'] CC(1,2) c+t | 1.00000000000000 + 2.00000000000000*I + 1.00000000000000*x | Power Series Ring in x over Univariate Polynomial Ring in a over Complex Field with 53 bits of precision
+Power QQ['a'] CC(1,2) t-c | -1.00000000000000 - 2.00000000000000*I + 1.00000000000000*x | Power Series Ring in x over Univariate Polynomial Ring in a over Complex Field with 53 bits of precision
+Power QQ['a'] CC(1,2) (1+t)/c | 0.200000000000000 - 0.400000000000000*I + (0.200000000000000 - 0.400000000000000*I)*x | Power Series Ring in x over Univariate Polynomial Ring in a over Complex Field with 53 bits of precision
+Power QQ['a'] RR(1.5) c*t | 1.50000000000000*x | Power Series Ring in x over Univariate Polynomial Ring in a over Real Field with 53 bits of precision
+Power QQ['a'] RR(1.5) t*c | 1.50000000000000*x | Power Series Ring in x over Univariate Polynomial Ring in a over Real Field with 53 bits of precision
+Power QQ['a'] RR(1.5) c+t | 1.50000000000000 + 1.00000000000000*x | Power Series Ring in x over Univariate Polynomial Ring in a over Real Field with 53 bits of precision
+Power QQ['a'] RR(1.5) t-c | -1.50000000000000 + 1.00000000000000*x | Power Series Ring in x over Univariate Polynomial Ring in a over Real Field with 53 bits of precision
+Power QQ['a'] RR(1.5) (1+t)/c | 0.666666666666667 + 0.666666666666667*x | Power Series Ring in x over Univariate Polynomial Ring in a over Real Field with 53 bits of precision
+Power QQ['a'] RDF(1.5) c*t | 1.5*x | Power Series Ring in x over Univariate Polynomial Ring in a over Real Double Field
+Power QQ['a'] RDF(1.5) t*c | 1.5*x | Power Series Ring in x over Univariate Polynomial Ring in a over Real Double Field
+Power QQ['a'] RDF(1.5) c+t | 1.5 + 1.0*x | Power Series Ring in x over Univariate Polynomial Ring in a over Real Double Field
+Power QQ['a'] RDF(1.5) t-c | -1.5 + 1.0*x | Power Series Ring in x over Univariate Polynomial Ring in a over Real Double Field
+Power QQ['a'] RDF(1.5) (1+t)/c | 0.6666666666666666 + 0.6666666666666666*x | Power Series Ring in x over Univariate Polynomial Ring in a over Real Double Field
+Power QQ['a'] R100(1.5) c*t | 1.5000000000000000000000000000*x | Power Series Ring in x over Univariate Polynomial Ring in a over Real Field with 100 bits of precision
+Power QQ['a'] R100(1.5) t*c | 1.5000000000000000000000000000*x | Power Series Ring in x over Univariate Polynomial Ring in a over Real Field with 100 bits of precision
+Power QQ['a'] R100(1.5) c+t | 1.5000000000000000000000000000 + 1.0000000000000000000000000000*x | Power Series Ring in x over Univariate Polynomial Ring in a over Real Field with 100 bits of precision
+Power QQ['a'] R100(1.5) t-c | -1.5000000000000000000000000000 + 1.0000000000000000000000000000*x | Power Series Ring in x over Univariate Polynomial Ring in a over Real Field with 100 bits of precision
+Power QQ['a'] R100(1.5) (1+t)/c | 0.66666666666666666666666666667 + 0.66666666666666666666666666667*x | Power Series Ring in x over Univariate Polynomial Ring in a over Real Field with 100 bits of precision
+Power QQ['a'] C100(1,2) c*t | (1.0000000000000000000000000000 + 2.0000000000000000000000000000*I)*x | Power Series Ring in x over Univariate Polynomial Ring in a over Complex Field with 100 bits of precision
+Power QQ['a'] C100(1,2) t*c | (1.0000000000000000000000000000 + 2.0000000000000000000000000000*I)*x | Power Series Ring in x over Univariate Polynomial Ring in a over Complex Field with 100 bits of precision
+Power QQ['a'] C100(1,2) c+t | 1.0000000000000000000000000000 + 2.0000000000000000000000000000*I + 1.0000000000000000000000000000*x | Power Series Ring in x over Univariate Polynomial Ring in a over Complex Field with 100 bits of precision
+Power QQ['a'] C100(1,2) t-c | -1.0000000000000000000000000000 - 2.0000000000000000000000000000*I + 1.0000000000000000000000000000*x | Power Series Ring in x over Univariate Polynomial Ring in a over Complex Field with 100 bits of precision
+Power QQ['a'] C100(1,2) (1+t)/c | 0.20000000000000000000000000000 - 0.40000000000000000000000000000*I + (0.20000000000000000000000000000 - 0.40000000000000000000000000000*I)*x | Power Series Ring in x over Univariate Polynomial Ring in a over Complex Field with 100 bits of precision
+Power QQ['a'] 1.5 c*t | 1.50000000000000*x | Power Series Ring in x over Univariate Polynomial Ring in a over Real Field with 53 bits of precision
+Power QQ['a'] 1.5 t*c | 1.50000000000000*x | Power Series Ring in x over Univariate Polynomial Ring in a over Real Field with 53 bits of precision
+Power QQ['a'] 1.5 c+t | 1.50000000000000 + 1.00000000000000*x | Power Series Ring in x over Univariate Polynomial Ring in a over Real Field with 53 bits of precision
+Power QQ['a'] 1.5 t-c | -1.50000000000000 + 1.00000000000000*x | Power Series Ring in x over Univariate Polynomial Ring in a over Real Field with 53 bits of precision
+Power QQ['a'] 1.5 (1+t)/c | 0.666666666666667 + 0.666666666666667*x | Power Series Ring in x over Univariate Polynomial Ring in a over Real Field with 53 bits of precision
+Power ZZ['a'] CC(1,2) c*t | (1.00000000000000 + 2.00000000000000*I)*x | Power Series Ring in x over Univariate Polynomial Ring in a over Complex Field with 53 bits of precision
+Power ZZ['a'] CC(1,2) t*c | (1.00000000000000 + 2.00000000000000*I)*x | Power Series Ring in x over Univariate Polynomial Ring in a over Complex Field with 53 bits of precision
+Power ZZ['a'] CC(1,2) c+t | 1.00000000000000 + 2.00000000000000*I + 1.00000000000000*x | Power Series Ring in x over Univariate Polynomial Ring in a over Complex Field with 53 bits of precision
+Power ZZ['a'] CC(1,2) t-c | -1.00000000000000 - 2.00000000000000*I + 1.00000000000000*x | Power Series Ring in x over Univariate Polynomial Ring in a over Complex Field with 53 bits of precision
+Power ZZ['a'] CC(1,2) (1+t)/c | 0.200000000000000 - 0.400000000000000*I + (0.200000000000000 - 0.400000000000000*I)*x | Power Series Ring in x over Univariate Polynomial Ring in a over Complex Field with 53 bits of precision
+Power ZZ['a'] RR(1.5) c*t | 1.50000000000000*x | Power Series Ring in x over Univariate Polynomial Ring in a over Real Field with 53 bits of precision
+Power ZZ['a'] RR(1.5) t*c | 1.50000000000000*x | Power Series Ring in x over Univariate Polynomial Ring in a over Real Field with 53 bits of precision
+Power ZZ['a'] RR(1.5) c+t | 1.50000000000000 + 1.00000000000000*x | Power Series Ring in x over Univariate Polynomial Ring in a over Real Field with 53 bits of precision
+Power ZZ['a'] RR(1.5) t-c | -1.50000000000000 + 1.00000000000000*x | Power Series Ring in x over Univariate Polynomial Ring in a over Real Field with 53 bits of precision
+Power ZZ['a'] RR(1.5) (1+t)/c | 0.666666666666667 + 0.666666666666667*x | Power Series Ring in x over Univariate Polynomial Ring in a over Real Field with 53 bits of precision
+Power ZZ['a'] RDF(1.5) c*t | 1.5*x | Power Series Ring in x over Univariate Polynomial Ring in a over Real Double Field
+Power ZZ['a'] RDF(1.5) t*c | 1.5*x | Power Series Ring in x over Univariate Polynomial Ring in a over Real Double Field
+Power ZZ['a'] RDF(1.5) c+t | 1.5 + 1.0*x | Power Series Ring in x over Univariate Polynomial Ring in a over Real Double Field
+Power ZZ['a'] RDF(1.5) t-c | -1.5 + 1.0*x | Power Series Ring in x over Univariate Polynomial Ring in a over Real Double Field
+Power ZZ['a'] RDF(1.5) (1+t)/c | 0.6666666666666666 + 0.6666666666666666*x | Power Series Ring in x over Univariate Polynomial Ring in a over Real Double Field
+Power ZZ['a'] R100(1.5) c*t | 1.5000000000000000000000000000*x | Power Series Ring in x over Univariate Polynomial Ring in a over Real Field with 100 bits of precision
+Power ZZ['a'] R100(1.5) t*c | 1.5000000000000000000000000000*x | Power Series Ring in x over Univariate Polynomial Ring in a over Real Field with 100 bits of precision
+Power ZZ['a'] R100(1.5) c+t | 1.5000000000000000000000000000 + 1.0000000000000000000000000000*x | Power Series Ring in x over Univariate Polynomial Ring in a over Real Field with 100 bits of precision
+Power ZZ['a'] R100(1.5) t-c | -1.5000000000000000000000000000 + 1.0000000000000000000000000000*x | Power Series Ring in x over Univariate Polynomial Ring in a over Real Field with 100 bits of precision
+Power ZZ['a'] R100(1.5) (1+t)/c | 0.66666666666666666666666666667 + 0.66666666666666666666666666667*x | Power Series Ring in x over Univariate Polynomial Ring in a over Real Field with 100 bits of precision
+Power ZZ['a'] C100(1,2) c*t | (1.0000000000000000000000000000 + 2.0000000000000000000000000000*I)*x | Power Series Ring in x over Univariate Polynomial Ring in a over Complex Field with 100 bits of precision
+Power ZZ['a'] C100(1,2) t*c | (1.0000000000000000000000000000 + 2.0000000000000000000000000000*I)*x | Power Series Ring in x over Univariate Polynomial Ring in a over Complex Field with 100 bits of precision
+Power ZZ['a'] C100(1,2) c+t | 1.0000000000000000000000000000 + 2.0000000000000000000000000000*I + 1.0000000000000000000000000000*x | Power Series Ring in x over Univariate Polynomial Ring in a over Complex Field with 100 bits of precision
+Power ZZ['a'] C100(1,2) t-c | -1.0000000000000000000000000000 - 2.0000000000000000000000000000*I + 1.0000000000000000000000000000*x | Power Series Ring in x over Univariate Polynomial Ring in a over Complex Field with 100 bits of precision
+Power ZZ['a'] C100(1,2) (1+t)/c | 0.20000000000000000000000000000 - 0.40000000000000000000000000000*I + (0.20000000000000000000000000000 - 0.40000000000000000000000000000*I)*x | Power Series Ring in x over Univariate Polynomial Ring in a over Complex Field with 100 bits of precision
+Power ZZ['a'] 1.5 c*t | 1.50000000000000*x | Power Series Ring in x over Univariate Polynomial Ring in a over Real Field with 53 bits of precision
+Power ZZ['a'] 1.5 t*c | 1.50000000000000*x | Power Series Ring in x over Univariate Polynomial Ring in a over Real Field with 53 bits of precision
+Power ZZ['a'] 1.5 c+t | 1.50000000000000 + 1.00000000000000*x | Power Series Ring in x over Univariate Polynomial Ring in a over Real Field with 53 bits of precision
+Power ZZ['a'] 1.5 t-c | -1.50000000000000 + 1.00000000000000*x | Power Series Ring in x over Univariate Polynomial Ring in a over Real Field with 53 bits of precision
+Power ZZ['a'] 1.5 (1+t)/c | 0.666666666666667 + 0.666666666666667*x | Power Series Ring in x over Univariate Polynomial Ring in a over Real Field with 53 bits of precision
+Laurent QQ['a'] CC(1,2) c*t | (1.00000000000000 + 2.00000000000000*I)*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Complex Field with 53 bits of precision
+Laurent QQ['a'] CC(1,2) t*c | (1.00000000000000 + 2.00000000000000*I)*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Complex Field with 53 bits of precision
+Laurent QQ['a'] CC(1,2) c+t | (1.00000000000000 + 2.00000000000000*I) + 1.00000000000000*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Complex Field with 53 bits of precision
+Laurent QQ['a'] CC(1,2) t-c | (-1.00000000000000 - 2.00000000000000*I) + 1.00000000000000*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Complex Field with 53 bits of precision
+Laurent QQ['a'] CC(1,2) (1+t)/c | (0.200000000000000 - 0.400000000000000*I) + (0.200000000000000 - 0.400000000000000*I)*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Complex Field with 53 bits of precision
+Laurent QQ['a'] RR(1.5) c*t | 1.50000000000000*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Real Field with 53 bits of precision
+Laurent QQ['a'] RR(1.5) t*c | 1.50000000000000*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Real Field with 53 bits of precision
+Laurent QQ['a'] RR(1.5) c+t | 1.50000000000000 + 1.00000000000000*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Real Field with 53 bits of precision
+Laurent QQ['a'] RR(1.5) t-c | -1.50000000000000 + 1.00000000000000*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Real Field with 53 bits of precision
+Laurent QQ['a'] RR(1.5) (1+t)/c | 0.666666666666667 + 0.666666666666667*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Real Field with 53 bits of precision
+Laurent QQ['a'] RDF(1.5) c*t | 1.5*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Real Double Field
+Laurent QQ['a'] RDF(1.5) t*c | 1.5*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Real Double Field
+Laurent QQ['a'] RDF(1.5) c+t | 1.5 + 1.0*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Real Double Field
+Laurent QQ['a'] RDF(1.5) t-c | -1.5 + 1.0*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Real Double Field
+Laurent QQ['a'] RDF(1.5) (1+t)/c | 0.6666666666666666 + 0.6666666666666666*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Real Double Field
+Laurent QQ['a'] R100(1.5) c*t | 1.5000000000000000000000000000*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Real Field with 100 bits of precision
+Laurent QQ['a'] R100(1.5) t*c | 1.5000000000000000000000000000*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Real Field with 100 bits of precision
+Laurent QQ['a'] R100(1.5) c+t | 1.5000000000000000000000000000 + 1.0000000000000000000000000000*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Real Field with 100 bits of precision
+Laurent QQ['a'] R100(1.5) t-c | -1.5000000000000000000000000000 + 1.0000000000000000000000000000*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Real Field with 100 bits of precision
+Laurent QQ['a'] R100(1.5) (1+t)/c | 0.66666666666666666666666666667 + 0.66666666666666666666666666667*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Real Field with 100 bits of precision
+Laurent QQ['a'] C100(1,2) c*t | (1.0000000000000000000000000000 + 2.0000000000000000000000000000*I)*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Complex Field with 100 bits of precision
+Laurent QQ['a'] C100(1,2) t*c | (1.0000000000000000000000000000 + 2.0000000000000000000000000000*I)*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Complex Field with 100 bits of precision
+Laurent QQ['a'] C100(1,2) c+t | (1.0000000000000000000000000000 + 2.0000000000000000000000000000*I) + 1.0000000000000000000000000000*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Complex Field with 100 bits of precision
+Laurent QQ['a'] C100(1,2) t-c | (-1.0000000000000000000000000000 - 2.0000000000000000000000000000*I) + 1.0000000000000000000000000000*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Complex Field with 100 bits of precision
+Laurent QQ['a'] C100(1,2) (1+t)/c | (0.20000000000000000000000000000 - 0.40000000000000000000000000000*I) + (0.20000000000000000000000000000 - 0.40000000000000000000000000000*I)*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Complex Field with 100 bits of precision
+Laurent QQ['a'] 1.5 c*t | 1.50000000000000*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Real Field with 53 bits of precision
+Laurent QQ['a'] 1.5 t*c | 1.50000000000000*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Real Field with 53 bits of precision
+Laurent QQ['a'] 1.5 c+t | 1.50000000000000 + 1.00000000000000*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Real Field with 53 bits of precision
+Laurent QQ['a'] 1.5 t-c | -1.50000000000000 + 1.00000000000000*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Real Field with 53 bits of precision
+Laurent QQ['a'] 1.5 (1+t)/c | 0.666666666666667 + 0.666666666666667*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Real Field with 53 bits of precision
+Laurent ZZ['a'] CC(1,2) c*t | (1.00000000000000 + 2.00000000000000*I)*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Complex Field with 53 bits of precision
+Laurent ZZ['a'] CC(1,2) t*c | (1.00000000000000 + 2.00000000000000*I)*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Complex Field with 53 bits of precision
+Laurent ZZ['a'] CC(1,2) c+t | (1.00000000000000 + 2.00000000000000*I) + 1.00000000000000*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Complex Field with 53 bits of precision
+Laurent ZZ['a'] CC(1,2) t-c | (-1.00000000000000 - 2.00000000000000*I) + 1.00000000000000*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Complex Field with 53 bits of precision
+Laurent ZZ['a'] CC(1,2) (1+t)/c | (0.200000000000000 - 0.400000000000000*I) + (0.200000000000000 - 0.400000000000000*I)*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Complex Field with 53 bits of precision
+Laurent ZZ['a'] RR(1.5) c*t | 1.50000000000000*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Real Field with 53 bits of precision
+Laurent ZZ['a'] RR(1.5) t*c | 1.50000000000000*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Real Field with 53 bits of precision
+Laurent ZZ['a'] RR(1.5) c+t | 1.50000000000000 + 1.00000000000000*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Real Field with 53 bits of precision
+Laurent ZZ['a'] RR(1.5) t-c | -1.50000000000000 + 1.00000000000000*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Real Field with 53 bits of precision
+Laurent ZZ['a'] RR(1.5) (1+t)/c | 0.666666666666667 + 0.666666666666667*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Real Field with 53 bits of precision
+Laurent ZZ['a'] RDF(1.5) c*t | 1.5*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Real Double Field
+Laurent ZZ['a'] RDF(1.5) t*c | 1.5*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Real Double Field
+Laurent ZZ['a'] RDF(1.5) c+t | 1.5 + 1.0*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Real Double Field
+Laurent ZZ['a'] RDF(1.5) t-c | -1.5 + 1.0*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Real Double Field
+Laurent ZZ['a'] RDF(1.5) (1+t)/c | 0.6666666666666666 + 0.6666666666666666*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Real Double Field
+Laurent ZZ['a'] R100(1.5) c*t | 1.5000000000000000000000000000*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Real Field with 100 bits of precision
+Laurent ZZ['a'] R100(1.5) t*c | 1.5000000000000000000000000000*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Real Field with 100 bits of precision
+Laurent ZZ['a'] R100(1.5) c+t | 1.5000000000000000000000000000 + 1.0000000000000000000000000000*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Real Field with 100 bits of precision
+Laurent ZZ['a'] R100(1.5) t-c | -1.5000000000000000000000000000 + 1.0000000000000000000000000000*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Real Field with 100 bits of precision
+Laurent ZZ['a'] R100(1.5) (1+t)/c | 0.66666666666666666666666666667 + 0.66666666666666666666666666667*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Real Field with 100 bits of precision
+Laurent ZZ['a'] C100(1,2) c*t | (1.0000000000000000000000000000 + 2.0000000000000000000000000000*I)*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Complex Field with 100 bits of precision
+Laurent ZZ['a'] C100(1,2) t*c | (1.0000000000000000000000000000 + 2.0000000000000000000000000000*I)*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Complex Field with 100 bits of precision
+Laurent ZZ['a'] C100(1,2) c+t | (1.0000000000000000000000000000 + 2.0000000000000000000000000000*I) + 1.0000000000000000000000000000*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Complex Field with 100 bits of precision
+Laurent ZZ['a'] C100(1,2) t-c | (-1.0000000000000000000000000000 - 2.0000000000000000000000000000*I) + 1.0000000000000000000000000000*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Complex Field with 100 bits of precision
+Laurent ZZ['a'] C100(1,2) (1+t)/c | (0.20000000000000000000000000000 - 0.40000000000000000000000000000*I) + (0.20000000000000000000000000000 - 0.40000000000000000000000000000*I)*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Complex Field with 100 bits of precision
+Laurent ZZ['a'] 1.5 c*t | 1.50000000000000*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Real Field with 53 bits of precision
+Laurent ZZ['a'] 1.5 t*c | 1.50000000000000*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Real Field with 53 bits of precision
+Laurent ZZ['a'] 1.5 c+t | 1.50000000000000 + 1.00000000000000*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Real Field with 53 bits of precision
+Laurent ZZ['a'] 1.5 t-c | -1.50000000000000 + 1.00000000000000*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Real Field with 53 bits of precision
+Laurent ZZ['a'] 1.5 (1+t)/c | 0.666666666666667 + 0.666666666666667*x | Laurent Series Ring in x over Univariate Polynomial Ring in a over Real Field with 53 bits of precision
