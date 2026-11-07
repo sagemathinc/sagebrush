@@ -1697,6 +1697,8 @@ def _from_expr(e):
         return b.nth_root(q.denominator) ** q.numerator
     if tag == "neg":
         return -_convert(args[0])
+    if tag == "fun:abs" and len(args) == 1:
+        return abs(_convert(args[0]))
     raise TypeError("Illegal initializer for algebraic number")
 
 

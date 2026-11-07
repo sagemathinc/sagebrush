@@ -1,0 +1,58 @@
+True
+1 True 22619537 True True
+True
+denest | True
+denest ne | False
+roots sum lt | True
+roots sum gt | False
+4^(1/4) == sqrt2 | True
+8*4^(1/4)*sqrt2 != 16 | False
+8*4^(1/4)*sqrt2 <= 16 | True
+8*4^(1/4)*sqrt2 >= 16 | True
+8*4^(1/4)*sqrt2 < 16 | False
+q sqrt2 <= p | True
+q sqrt2 > p | False
+q sqrt2 >= p | False
+q sqrt2 == p | False
+q sqrt2 != p | True
+p > q sqrt2 | True
+min | 15994428*sqrt(2)
+sorted | [15994428*sqrt(2), 22619537]
+sorted 3 | [282842712474619/200000000000000, sqrt(2), 22619537/15994428]
+pell 12 digits | True
+pell 6 digits | True
+sqrt2+sqrt3 == sqrt(5+2 sqrt6) | True
+sqrt2*sqrt3 == sqrt6 | True
+(2^(1/3))^3 == 2 | True
+(1+sqrt2)^2 == 3+2sqrt2 | True
+(1+sqrt2)^10 > 5000 | True
+sqrt(2)^(1/2) == 2^(1/4) | True
+I sqrt2 == sqrt(-2) | True
+sqrt(-2) < 1 | False
+sqrt(-2) > 1 | False
+I + sqrt(2) == sqrt(2) + I | True
+(1 + I)^2 == 2*I | True
+abs(1-sqrt2) == sqrt2-1 | True
+abs(1-sqrt2) < 1/2 | True
+abs(1+I) == sqrt2 | True
+golden | True
+cube roots, principal | False
+(-8)^(1/3) == -2 | False
+(-8)^(1/3) == 1 + I*sqrt(3) | True
+2^(1/2) == 2^(2/4) | True
+sqrt(8) == 2 sqrt(2) | True
+27^(1/6) == sqrt(3) | True
+9^(1/4) == sqrt(3) | True
+9^(1/4) < 1.733 | True
+seven roots == 20 | False
+seven roots < 20 | True
+pi > 355/113 | False
+pi < 355/113 | True
+sin(pi/12) == (sqrt6-sqrt2)/4 | True
+cos(pi/5) == (1+sqrt5)/4 | True
+1 True False True True True
+2 True False True True True
+3 True False True True True
+4 True False True True True
+5 True False True True True
+6 True False True True True
