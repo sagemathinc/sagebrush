@@ -219,7 +219,45 @@ def _exact_degree_bound(e):
     return total
 
 
+def _prune_zero(e):
+    """e with each product holding a factor proven exactly 0 (an algebraic
+    factor under the degree cap) replaced by 0, and such zero terms dropped
+    from sums: d*(sqrt(5) + ... + sqrt(19)) with d a denesting identity's
+    difference is 0 without building the large field, as Sage proves it."""
+    import operator as o
+    op = e.operator()
+    if op is o.mul:
+        fs = e.operands()
+        for f in fs:
+            if not f.variables() and _exact_sign_capped(f) == 0:
+                return Expression(_rat_s(0))
+        return e
+    if op is o.add:
+        ts = [_prune_zero(t) for t in e.operands()]
+        r = Expression(_rat_s(0))
+        for t in ts:
+            r = r + t
+        return r
+    return e
+
+
 def _exact_sign(d):
+    """The sign of a constant made of rationals, I, sums, products, rational
+    powers and abs, decided exactly: 0, 1, -1, or "c" (not real); None when it
+    cannot be decided (another kind of constant, or past the degree cap), as
+    Sage leaves an unprovable relation False.  Products with a factor proven 0
+    are pruned first (_prune_zero)."""
+    if len(d._s) > 4000:
+        return None
+    try:
+        d = _prune_zero(d)
+    except (TypeError, ValueError, ArithmeticError, NotImplementedError, AttributeError, RecursionError):
+        pass
+    r = _exact_sign_capped(d)
+    return None if r == _CAPPED else r
+
+
+def _exact_sign_capped(d):
     """The sign of a constant made of rationals, I, sums, products, rational
     powers and abs, decided exactly as an algebraic number: 0, 1, -1, or
     "c" (not real); _CAPPED when its degree is past _EXACT_SIGN_MAX_DEGREE
@@ -254,22 +292,6 @@ def _exact_sign(d):
         return None
     finally:
         _sage_qqbar._degree_cap = old
-
-
-def _numeric_sign(a, b):
-    """For algebraic constants too large to decide exactly: 0 when a and b
-    agree to far more than double precision (400 bits, a difference below
-    2^-300 relative to them; Sage proves such identities), else the sign of
-    a - b at that precision; None if it cannot be evaluated."""
-    import _sage_real
-    try:
-        d = _sage_real.N(a - b, 400)
-        m = max(abs(_sage_real.N(a, 400)), abs(_sage_real.N(b, 400)), 1)
-        if abs(d) <= m * _sage_real.RealField(400)(2) ** -300:
-            return 0
-        return 1 if d > 0 else -1
-    except Exception:
-        return None
 
 
 def _relop(sym):
@@ -400,9 +422,7 @@ class Expression:
                 # (a constant the enclosure cannot separate from 0: exactly,
                 # when it is algebraic)
                 xs = _exact_sign(a - b) if not z and not (a - b).variables() and _call("const_sign", (a - b)._s)[0] == "" else None
-                if xs == _CAPPED:
-                    z = _numeric_sign(a, b) == 0
-                elif xs is not None:
+                if xs is not None:
                     z = xs == 0
                 # (other constants the enclosure cannot separate stay
                 # undecided, as Sage: log(6) == log(2) + log(3) is False)
@@ -425,8 +445,6 @@ class Expression:
             if sg == "":
                 # (an algebraic constant: its sign exactly; not real: False)
                 sg = _exact_sign(a - b)
-                if sg == _CAPPED:
-                    sg = _numeric_sign(a, b)
                 if sg is None or sg == "c":
                     return False
             sg = int(sg)
