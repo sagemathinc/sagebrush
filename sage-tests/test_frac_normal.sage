@@ -72,3 +72,22 @@ for bn, R in [('QQ[x]', QQ['x']), ('ZZ[x]', ZZ['x']), ('GF(5)[x]', GF(5)['x'])]:
                  ('1/(x^2-x)', lambda: 1/(x^2 - x)), ('1/(x^2+3x+2)', lambda: 1/(x^2 + 3*x + 2)), ('1/(-x)', lambda: 1/(-x)), ('2/(-x^2-x)', lambda: 2/(-x^2 - x)), ('2/(x^2-1)', lambda: 2/(x^2 - 1)),
                  ('1/(2x)', lambda: 1/(2*x)), ('x^2/(x+1)', lambda: x^2/(x + 1)), ('3/(x^3-x)', lambda: 3/(x^3 - x)), ('(x^2+1)/x^2', lambda: (x^2 + 1)/x^2), ('5', lambda: R(5)/R(1))]:
         show(n, lambda: f().partial_fraction_decomposition())
+
+print("-- evaluation at a root of the denominator, conversions, division in ZZ[x], partial fractions over ZZ")
+R = ZZ['x']; x = R.gen(); F = R.fraction_field(); S = QQ['x']; FS = S.fraction_field()
+T.<a,b> = ZZ[]; FT = T.fraction_field()
+for n, f in [('(1/(x-1))(1)', lambda: (1/(x - 1))(1)), ('((x+1)/(x^2-4))(2)', lambda: ((x + 1)/(x^2 - 4))(2)), ('QQ (1/(x-1))(1)', lambda: (1/(S.gen() - 1))(1)),
+             ('pfd whole', lambda: (x^2/(x + 1)).partial_fraction_decomposition()[0]), ('pfd whole 2', lambda: ((x^3 + 1)/(x - 1)).partial_fraction_decomposition()[0]),
+             ('set of opposite-sign fractions', lambda: str(len({FT(a, -b), FT(-a, b)}))), ('set 2', lambda: str(len({FT(a + 1, -b - 2), FT(-a - 1, b + 2)}))), ('dict', lambda: {FT(a, -b): 1, FT(-a, b): 2}),
+             ('ZZ[x]((x+1)/F(-1))', lambda: R((x + 1)/F(-1))), ('QQ[x]((x+1)/QQ(2))', lambda: S((S.gen() + 1)/FS(2))), ('QQ[x](F(x+1,2))', lambda: S(F(x + 1, 2))), ('ZZ[x](F(x+1,2))', lambda: R(F(x + 1, 2))),
+             ('ZZ[x](F(x+1,-1))', lambda: R(F(x + 1, -1))), ('ZZ[x](FS((x+1)/2))', lambda: R(FS(S.gen() + 1, 2))), ('QQ[x](F(1,x))', lambda: S(F(1, x))), ('QQ[x](F(2x,2))', lambda: S(F(2*x, 2))),
+             ('ZZ[x](FS(x/2))', lambda: R(FS(S.gen()/2))), ('ZZ[x](FS(1/x))', lambda: R(FS(1/S.gen()))), ('QQ[x](FS(1/x))', lambda: S(FS(1/S.gen()))), ('ZZ[x](QQ[x](x/2))', lambda: R(S.gen()/2)),
+             ('x qr 2x+1', lambda: x.quo_rem(2*x + 1)), ('3x^2+1 qr 2x+1', lambda: (3*x^2 + 1).quo_rem(2*x + 1)), ('4x^2+1 qr 2x+1', lambda: (4*x^2 + 1).quo_rem(2*x + 1)), ('x^2 qr 2x', lambda: (x^2).quo_rem(2*x)),
+             ('6x^3+x qr 4x^2+2', lambda: (6*x^3 + x).quo_rem(4*x^2 + 2)), ('5x^2+3x+1 qr 3x+2', lambda: (5*x^2 + 3*x + 1).quo_rem(3*x + 2)), ('x qr 2', lambda: x.quo_rem(R(2))), ('3x+5 qr 2', lambda: (3*x + 5).quo_rem(R(2))),
+             ('-3x-5 qr 2', lambda: (-3*x - 5).quo_rem(R(2))), ('-x qr 2x+1', lambda: (-x).quo_rem(2*x + 1)), ('-3x^2 qr 2x+1', lambda: (-3*x^2).quo_rem(2*x + 1)), ('x // 2x+1', lambda: x // (2*x + 1)), ('x % 2x+1', lambda: x % (2*x + 1)),
+             ('x^3 qr -2x+1', lambda: (x^3).quo_rem(-2*x + 1)), ('pfd x/(2x+1)', lambda: (x/(2*x + 1)).partial_fraction_decomposition()), ('pfd x^2/(2x+1)', lambda: (x^2/(2*x + 1)).partial_fraction_decomposition()),
+             ('pfd 1/(2x+1)', lambda: (1/(2*x + 1)).partial_fraction_decomposition()), ('pfd 1/((2x+1)(x+1))', lambda: (1/((2*x + 1)*(x + 1))).partial_fraction_decomposition()),
+             ('pfd (3x+1)/(2x+1)^2', lambda: ((3*x + 1)/(2*x + 1)^2).partial_fraction_decomposition()), ('pfd x^3/(3x-1)', lambda: (x^3/(3*x - 1)).partial_fraction_decomposition()),
+             ('pfd 1/(2x+2)', lambda: (1/(2*x + 2)).partial_fraction_decomposition()), ('pfd 3/(2x)', lambda: (3/(2*x)).partial_fraction_decomposition()), ('pfd (2x+1)/(2x^2)', lambda: ((2*x + 1)/(2*x^2)).partial_fraction_decomposition()),
+             ('pfd (x+1)/(2x-2)', lambda: ((x + 1)/(2*x - 2)).partial_fraction_decomposition()), ('pfd 1/(-2x-1)', lambda: (1/(-2*x - 1)).partial_fraction_decomposition()), ('pfd x/(-x^2+1)', lambda: (x/(-x^2 + 1)).partial_fraction_decomposition())]:
+    show(n, f)
