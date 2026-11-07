@@ -1,6 +1,6 @@
 # Native engines in the desktop app
 
-*Status: plan r8, for review. Docs only; nothing is built. Owner and sole author: @sagebrush-remote-compute. The r8 base
+*Status: plan r9, for review (r8 with daybreak3's JSC wording fix and the reviewers' r8 notes). Docs only; nothing is built. Owner and sole author: @sagebrush-remote-compute. The r8 base
 was drafted by @sagebrush-daybreak3 at @sagebrush's request. Reviewers: astra (SEC), daybreak3 (ENGINE), daybreak4
 (PERF), daybreak2 (SIZE), agents-ui (app). William decided the interpreter route and the sandbox question on Nov 7,
 2026 at about 7:54 AM PST, and added Electron as a first-class candidate at about 8:03 AM PST. This revision replaces
@@ -25,9 +25,11 @@ timings, which were invalid (§3).*
   add-on** (candidate 1). It is the smallest change: the spike already runs today's pyjs engine calls on V8, the Tauri
   app and its iOS/Android builds stay, and a separate process makes crash and restart simple.
 - **Electron (candidate 2) is a valid alternative.** It uses one V8 engine for both the UI and pyjs on every OS. Its
-  costs are about **+50 MB more download** than candidate 1 (measured on Linux: Electron 90.1 MB compressed, against
-  Node plus the add-on 30.3 MB), a port of the desktop shell off Tauri, and a separate shell for iOS/Android, which
-  Electron doesn't build. N1 builds both, packaged, and measures them side by side before N2 starts.
+  costs are a larger download, a port of the desktop shell off Tauri, and a separate shell for iOS/Android, which
+  Electron doesn't build. The download difference is **about +50 MB, a derived, provisional estimate**: roughly 93 MB
+  against roughly 40–45 MB. That comes from measured Linux runtime parts (Electron 90.1 MB compressed; Node plus the
+  add-on 30.3 MB), plus the README's 10–15 MB for today's app, which wasn't re-measured. N1's matched signed
+  installers are authoritative. N1 builds both, packaged, and measures them side by side before N2 starts.
 - Startup of about a second with the Sage library is **worrying but can be optimized**. As William said, it stays an
   N1 measurement and optimization item, not a reason to choose one candidate over another.
 
@@ -90,12 +92,12 @@ measurements unless marked.
 | Download on macOS and Windows | N1 (Node is a similar size) | Electron's release zips: 121 MB (macOS arm64), 125 MB (macOS x64), 158 MB (Windows x64); installers compress further; N1 | N1 |
 | Memory | Tauri host + webview + one Node process per document; N1 measures the whole process tree | Chromium's browser, GPU and renderer processes + one utility process per document; N1 measures the whole tree | one process; N1 |
 | Startup | Node itself 43–58 ms (r4); pyjs boot dominates; N1 | Chromium start + utility process; N1 | V8 start + pyjs; snapshots; N1 |
-| Security updates | the system webview updates with the OS; Node is pinned by us, with its own CVE cadence | a new Electron major **every 8 weeks**; only the **latest three** are supported, so we ship a Chromium update at least every ~6 months, sooner for security fixes | V8 pinned by us through rusty_v8; we track V8 security fixes ourselves |
-| Moving today's app | none | port `app/src-tauri`: 202 lines of Rust (4 commands: `startup_files`, `selftest_file`, `selftest_report`, `app_log`), the dialog, fs and localhost plugins, the capabilities file, file associations and bundling to Electron's main process, preload and electron-builder; replace the 24 `TAURI.`/`__TAURI__` uses in web/index.html with a preload API. No updater is in use yet. Signing needs the same Apple and Windows accounts. **iOS and Android stay on Tauri 2:** two shells. | none for the shell; a new Rust host for V8 |
+| Security updates (maintenance on every candidate) | the system webview updates with the OS; Node is pinned by us, with its own CVE cadence | a new Electron major **every 8 weeks**; only the **latest three** are supported, so we ship a Chromium update at least every ~6 months, sooner for security fixes | V8 pinned by us through rusty_v8; we track V8 security fixes ourselves |
+| Moving today's app | none | port `app/src-tauri`: 202 lines of Rust (4 commands: `startup_files`, `selftest_file`, `selftest_report`, `app_log`), the dialog, fs and localhost plugins, the capabilities file, file associations and bundling to Electron's main process, preload and electron-builder. Replace the Tauri uses in the page (24 in web/index.html, plus web/board/page.ts and web/notebook/terminal-probe.js and their tests) with a preload API that keeps the same interface. The localhost plugin serves the page at 127.0.0.1 with COOP/COEP, so Electron needs a protocol handler sending the same headers. No updater is in use yet. Signing needs the same Apple and Windows accounts. **iOS and Android stay on Tauri 2:** two shells. | none for the shell; a new Rust host for V8 |
 | Complexity | lowest | moderate: the shell port and two shells | highest runtime engineering |
 
-**What JSC means here.** In candidates 1 and 3, pyjs doesn't run on JSC; only the UI does. So the JSC question for
-pyjs's speed arises only in candidates 4, 5-with-WebKit and 6a. Electron's real advantage over candidate 1 is one
+**What JSC means here.** pyjs runs on JSC only in **candidate 4 on macOS and Linux** and **candidate 6a on every OS**.
+Candidates 1, 2, 3, 5, 6b and 7 keep pyjs on V8, even where a separate UI webview is JSC. Electron's real advantage over candidate 1 is one
 engine for the UI as well, so a page tested in Chrome behaves the same in the app. Its costs are the size, the
 8-week update treadmill and two shells.
 
@@ -188,7 +190,7 @@ with every conclusion drawn from them. r8's packet rebuilds B from the tag.
 - **Rust dispatch is per operation and size.** The Rust engine is best here for gcd and division, close to V8 for
   multiply, and slower than V8's factorial. N1 benchmarks a real big-integer corpus in the real system webviews and
   then chooses per-operation, per-size dispatch, counting the crossing cost and exact result semantics (an N2 ENGINE
-  gate). This matters most for candidates where pyjs runs on JSC (4, 5-with-WebKit, 6a).
+  gate). It matters for the candidates where pyjs runs on JSC: 4 on macOS and Linux, and 6a everywhere.
 - **Pure Python:** A keeps pyjs's V8 speed. The dict/string gap is pyjs's own and shows on the website today.
 - **Startup** (r4, unchanged): A takes about 0.4 s to the first line and about 1.1 s with Sage. It is an N1
   optimization item (V8 snapshots, lazy library loading), not a gate.
@@ -288,8 +290,8 @@ Other candidates may replace the transport, but must keep the authority, orderin
 | | Work | Gate |
 |---|---|---|
 | **N0** | r8 reviewed; William accepts the lead candidate and the packaging and signing choices | all lanes; William |
-| **N1** | No product integration. **(1)** Build packaged comparisons of **1 (Tauri + Node), 2 (Electron utility process) and 3 (Tauri + embedded V8)**, with the same UI payload and engine commit; spike 4's boundary and resolve its sync-engine/async-IPC design. **(2)** Prove pyjs boot, native calls, Stop, busy-cell permission and crash/restart. **(3)** Measure per OS: the compressed signed installer and update delta, installed size, cold and warm launch to runner-ready, first and steady engine calls, idle memory as RSS/PSS of the whole process tree after first paint and after the pyjs worker is ready, the > 4 GB case, framing copies, and the permission acknowledgement window. **(4)** The big-integer corpus in the real system webviews, and per-operation Rust dispatch thresholds (§3.3). **(5)** Startup optimization (snapshots, lazy loading): a target, not a gate. | ENGINE, PERF, SIZE, SEC (application boundaries) |
-| **N2** | macOS and Linux, the chosen candidate: the pinned runtime, the `web/shims/fs` worker, the native `engine/web` add-on, a binary reply format, the port, the §5 bridge and its pins, native limits, broker-only supported network, per-engine wasm fallback, and the page items (refused-write restore per change kind, progress from port snapshots, Stop through `NativeKernelPort.interrupt()` with the restart pattern for the hard kill, a "starting" pill state). Later engine modules are reviewed separately. **#822's option 1 ends.** | all lanes |
+| **N1** | No product integration. **(1)** Build packaged comparisons of **1 (Tauri + Node), 2 (Electron utility process) and 3 (Tauri + embedded V8)**, with the same UI payload and engine commit; spike 4's boundary and resolve its sync-engine/async-IPC design. **(2)** Prove pyjs boot, native calls, Stop, busy-cell permission and crash/restart. **(3)** Measure per OS: the compressed signed installer and update delta, installed size, cold and warm launch to runner-ready, first and steady engine calls, idle memory as RSS/PSS of the whole process tree after first paint and after the pyjs worker is ready, the > 4 GB case, framing copies, and the permission acknowledgement window. **(4)** The big-integer corpus in the real system webviews, and per-operation Rust dispatch thresholds (§3.3). **(5)** Startup optimization (snapshots, lazy loading): a target, not a gate. **(6)** Before rich output moves into frames in the desktop app, #826's output-frames harness in each candidate's UI engine (WebKit for 1, 3 and 4; Chromium for 2 and 5). | ENGINE, PERF, SIZE, SEC (application boundaries) |
+| **N2** | macOS and Linux, the chosen candidate: the pinned runtime, the `web/shims/fs` worker, the native `engine/web` add-on, a binary reply format, the port, the §5 bridge and its pins, native limits, broker-only supported network, per-engine wasm fallback, and the page items (refused-write restore per change kind, progress from port snapshots, Stop through `NativeKernelPort.interrupt()` with the restart pattern for the hard kill, a "starting" pill state, and the native kernel's own words for "where code runs" and "didn't start": the runner-sandbox messages don't apply, and board writes the words). Later engine modules are reviewed separately. **#822's option 1 ends.** | all lanes |
 | **N3** | Windows parity for N2 | all lanes |
 | **N4** | Native becomes the desktop default, after parity, limits, corrected performance, size and the big-integer dispatch decision close | William |
 | **N5** | Planned separately later: CPython and C extensions, terminals, Android native, warm kernels | — |
@@ -299,7 +301,7 @@ Other candidates may replace the transport, but must keep the authority, orderin
 Already decided: pyjs (route A); no OS sandbox; Electron is a first-class candidate.
 
 1. **The lead for N1/N2:** candidate 1 (Tauri + Node, recommended), with 2 (Electron) and 3 (embedded V8) as packaged N1
-   comparisons? Or Electron as the lead, accepting about +50 MB more download (Linux, measured), the shell port and a
+   comparisons? Or Electron as the lead, accepting a larger download (about +50 MB, a derived provisional estimate from measured Linux runtime parts and the README app size; N1's signed installers decide), the shell port and a
    separate mobile shell?
 2. **Delivery:** bundle the runtime in each installer, or download it on the first native run? N1 supplies the exact
    signed payloads.
