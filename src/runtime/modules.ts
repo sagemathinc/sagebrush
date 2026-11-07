@@ -417,7 +417,7 @@ newBuiltinModule("sys", (m) => {
   // (default_max_str_digits: Sagebrush's default, 0, where CPython's is
   // 4300: format.ts's intDigits)
   m.int_info = Ty.structseq("sys.int_info", ["bits_per_digit", "sizeof_digit", "default_max_str_digits", "str_digits_check_threshold"], [30, 4, 0, 640]);
-  m.version_info = Ty.structseq("sys.version_info", ["major", "minor", "micro", "releaselevel", "serial"], [3, 14, 0, "final", 0]);
+  m.version_info = Ty.structseq("sys.version_info", ["major", "minor", "micro", "releaselevel", "serial"], [3, 14, 0, "final", 0], [], [], true);
   m.hexversion = 0x30e00f0;
   m.implementation = Ty.simpleNamespace({ name: "pyjs", cache_tag: null, version: m.version_info, _multiarch: "js" });
   m.maxsize = 9223372036854775807n;
@@ -489,6 +489,7 @@ newBuiltinModule("sys", (m) => {
     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, false, 0, 0, false, intDigits.max],
     ["gil", "thread_inherit_context", "context_aware_warnings"],
     [1, 0, 0],
+    true,
   );
   fn(m, "get_int_max_str_digits", () => intDigits.max);
   // (as CPython's: the exact integer, in C int range, checked before

@@ -19,6 +19,12 @@ try: type(f)()
 except TypeError as e: print("TypeError", e)
 try: f.debug = 1
 except AttributeError as e: print("AttributeError", e)
+try: del f.gil
+except AttributeError as e: print("AttributeError", e)
+try: type(sys.version_info)()
+except TypeError as e: print("TypeError", e)
+try: sys.float_info.max = 1.0
+except AttributeError as e: print("AttributeError", e)
 f0 = sys.flags
 sys.set_int_max_str_digits(5000)
 print(sys.flags.int_max_str_digits, f0 is sys.flags, f0[17], sys.get_int_max_str_digits())
@@ -30,7 +36,7 @@ print(locale.getpreferredencoding(), locale.getpreferredencoding(False), locale.
 test("sys.flags: CPython 3.14's struct sequence and values; locale.getpreferredencoding works", () => {
   const env: Record<string, string> = { LC_ALL: "C.UTF-8", PATH: process.env.PATH ?? "" };
   const want = execFileSync("python3", ["-X", "int_max_str_digits=0", "-c", PROG], { encoding: "utf8", env });
-  assert.equal(want.split("\n").length, 10, `CPython ran every line:\n${want}`);
+  assert.equal(want.split("\n").length, 13, `CPython ran every line:\n${want}`);
   const got = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", PROG], { encoding: "utf8" });
   assert.equal(got, want);
 });
