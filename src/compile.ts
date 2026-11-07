@@ -462,25 +462,31 @@ function namespacePackage(name: string, portions: string[]): any {
   m.__file__ = null;
   m.__package__ = name;
   m.__path__ = portions;
-  // (what its portions are recomputed from before each submodule's search: the parent's path or sys.path)
-  m.$ns = { parent: name.includes(".") ? name.slice(0, name.lastIndexOf(".")) : null, leaf: name.slice(name.lastIndexOf(".") + 1) };
+  // (what its portions are recomputed from: the parent's path or sys.path, as last seen, and the list it fills)
+  const st = { parent: name.includes(".") ? name.slice(0, name.lastIndexOf(".")) : null, leaf: name.slice(name.lastIndexOf(".") + 1), path: portions, last: [] as string[] };
+  st.last = nsParentDirs(st);
+  m.$ns = st;
   R.dictSet(R.sysModules, name, m);
   return m;
 }
+function nsParentDirs(st: { parent: string | null }): string[] {
+  if (st.parent === null) return R.toArray(R.importModule("sys").path).slice();
+  const p = R.sysModules.$m.get(st.parent);
+  if (p?.$ns) nsRefresh(p);
+  return p?.__path__ ? R.toArray(p.__path__).slice() : [];
+}
 // A namespace package's __path__ follows its parent's path (sys.path at the top), as CPython's _NamespacePath does:
-// recomputed in that path's order before a submodule is searched for; kept as it is if a module or package of the
-// name has appeared there since, or if none of its portions is left
+// before a submodule is searched for, if that path has changed since last seen, its portions are recomputed in the
+// path's order, into the same list; kept as they are if a module or package of the name has appeared there since or
+// none is left; and not at all once the package's __path__ has been replaced by another object (CPython's then a list)
 function nsRefresh(m: any): void {
-  const { parent, leaf } = m.$ns;
-  let dirs: string[];
-  if (parent === null) dirs = R.toArray(R.importModule("sys").path);
-  else {
-    const p = R.sysModules.$m.get(parent);
-    if (p?.$ns) nsRefresh(p);
-    dirs = p?.__path__ ? R.toArray(p.__path__) : [];
-  }
-  const now = nsPortions(dirs, leaf);
-  if (now !== null && now.length) m.__path__.splice(0, m.__path__.length, ...now);
+  const st = m.$ns;
+  if (m.__path__ !== st.path) return;
+  const dirs = nsParentDirs(st);
+  if (dirs.length === st.last.length && dirs.every((d, i) => d === st.last[i])) return;
+  st.last = dirs;
+  const now = nsPortions(dirs, st.leaf);
+  if (now !== null && now.length) st.path.splice(0, st.path.length, ...now);
 }
 // Every module the loader runs from a file goes through here.  A file of the
 // optional set (optKeys, by its mounted path, whatever name or sys.path entry

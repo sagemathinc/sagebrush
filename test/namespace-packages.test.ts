@@ -113,3 +113,28 @@ test("a namespace package's __path__ follows sys.path and its parent's __path__ 
     rmSync(d, { recursive: true, force: true });
   }
 });
+
+// (daybreak3's follow-up: as _NamespacePath, the portions are recomputed only when the parent's path has changed, so
+// one the program appended stays until then; and a __path__ the program replaced is left as it is, and used.
+// CPython 3.14's output for the same program)
+test("a namespace package keeps an appended portion until its parent's path changes, and a replaced __path__, as CPython's", () => {
+  const d = tree({
+    "a/ns/one.py": "A = 1\n",
+    "b/ns/late.py": 'L = "late"\n',
+    "d/ns/extra.py": 'X = "extra"\n',
+    "e/ns/w.py": 'W = "w"\n',
+    "e/ns/r.py": 'R = "r"\n',
+    "t.py": "import sys, os\nrel = lambda p: [os.path.relpath(x) for x in p]\nsys.path.insert(0, \"a\")\nimport ns.one\nns.__path__.append(os.path.abspath(\"d\"))\nns.__path__[-1] = os.path.abspath(\"d/ns\")\nimport ns.extra\nprint(\"appended\", ns.extra.X, rel(ns.__path__))\nsys.path.insert(0, \"b\")\nimport ns.late\nprint(\"recomputed\", ns.late.L, rel(ns.__path__))\nns.__path__ = [os.path.abspath(\"e/ns\")]\nsys.path.insert(0, \"e\")\nimport ns.w\nprint(\"replaced\", ns.w.W, rel(ns.__path__), type(ns.__path__).__name__)\nsys.path.remove(\"e\")\nimport ns.r\nprint(\"kept\", ns.r.R, rel(ns.__path__))\n",
+  });
+  try {
+    assert.equal(run(d, "t.py"), [
+      "appended extra ['a/ns', 'd/ns']",
+      "recomputed late ['b/ns', 'a/ns']",
+      "replaced w ['e/ns'] list",
+      "kept r ['e/ns']",
+      "",
+    ].join("\n"));
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
+});
