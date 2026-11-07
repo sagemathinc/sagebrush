@@ -5,6 +5,7 @@ and numerical linear algebra for matrices over RDF, CDF, RR and CC
 
 import cmath
 import math
+import sys as _sys
 
 
 def _sa():
@@ -875,6 +876,10 @@ class ComplexDoubleElement:
     def _c(self, o):
         if isinstance(o, ComplexDoubleElement):
             return o._z
+        m = _sys.modules.get("_sage_ff")
+        if m is not None and m.is_exact_algebraic(o):
+            # (an element of Zmod(n), a finite field or a number field refuses CDF, as Sage)
+            return None
         try:
             return complex(o)
         except (TypeError, ValueError):
