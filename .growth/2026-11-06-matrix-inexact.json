@@ -1,9 +1,9 @@
 {
  "v": 1,
- "reason": "A matrix or vector meeting an inexact number (RR, RDF, CC, CDF, RealField(p), ComplexField(p)): over the number's field, as Sage (lib/_sage_matrix.py: Matrix and Vector _inexact_lift, Matrix.__truediv__, a vector divided by an inexact number multiplies by its inverse); a vector over RDF, CDF, GF(q), QQbar or a number field divided by a scalar, as Sage: times the inverse (lib/_sage_ffmat.py FFVector.__truediv__); a real vector meeting a complex number over the complex field (CDF for two doubles, else ComplexField of the lower precision), for * and / Re-measured with bun 1.4.4 (size-record.sh) on master 7f7f6c65 vs head bb3b705f: cli/lib.gen.js +2196, cli/pyjs.cjs +2272, engine/lib/sage.pre +23818, engine/lib/sage.src +6625; no other row moves. Markers: exact, except cli/pyjs.cjs 2304 (+2272 measured, plus 32 B of margin, as it moves with master). Ceiling (rule 4): engine/lib/sage.src 2947509 -> 2954134, the measured head 2954070 + 64.",
+ "reason": "A matrix or vector meeting an inexact number (RR, RDF, CC, CDF, RealField(p), ComplexField(p)): over the number's field, as Sage (lib/_sage_matrix.py: Matrix and Vector _inexact_lift, Matrix.__truediv__, a vector divided by an inexact number multiplies by its inverse); a vector over RDF, CDF, GF(q), QQbar or a number field divided by a scalar, as Sage: times the inverse (lib/_sage_ffmat.py FFVector.__truediv__); a real vector meeting a complex number over the complex field (CDF for two doubles, else ComplexField of the lower precision), for * and / Re-measured with bun 1.4.4 (size-record.sh) on master dfa660a7 vs head ad3711eb: cli/lib.gen.js +2216, cli/pyjs.cjs +2144, engine/lib/sage.pre +23818, engine/lib/sage.src +6625; no other row moves. Markers: exact, except cli/pyjs.cjs 2176 (+2144 measured, plus 32 B of margin, as it moves with master). Ceiling (rule 4): engine/lib/sage.src 2950802 -> 2957427, the measured head 2957363 + 64.",
  "bytes": {
-  "cli/lib.gen.js": 2196,
-  "cli/pyjs.cjs": 2304,
+  "cli/lib.gen.js": 2216,
+  "cli/pyjs.cjs": 2176,
   "engine/lib/sage.pre": 23818,
   "engine/lib/sage.src": 6625
  }
