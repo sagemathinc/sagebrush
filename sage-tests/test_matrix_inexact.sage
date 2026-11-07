@@ -35,3 +35,15 @@ D = [('RDF M / RDF(49)', lambda: matrix(RDF, [[49, 49]])/RDF(49)), ('QQ M / RDF(
      ('QQbar v / QQbar(2)', lambda: vector(QQbar, [1, 2])/QQbar(2))]
 for n, f in D:
     show(n, f)
+# a real vector meeting a complex number moves to the complex field, as Sage: CDF for two doubles, else ComplexField
+# of the lower precision (a double counts as 53 bits); division is times the inverse there
+R100, C100, C80, R80 = RealField(100), ComplexField(100), ComplexField(80), RealField(80)
+P = [('RDF/CDF', lambda: vector(RDF, [2, 4])/CDF(2)), ('RDF/CDF(1,1)', lambda: vector(RDF, [2, 4])/CDF(1, 1)), ('RR/CC', lambda: vector(RR, [2, 4])/CC(2)), ('RR/CC(1,1)', lambda: vector(RR, [2, 4])/CC(1, 1)),
+     ('R100/C100', lambda: vector(R100, [2, 4])/C100(2)), ('R100/C100(1,1)', lambda: vector(R100, [2, 4])/C100(1, 1)), ('R100/CC', lambda: vector(R100, [2, 4])/CC(2)), ('RR/C100', lambda: vector(RR, [2, 4])/C100(2)),
+     ('R80/C100', lambda: vector(R80, [2, 4])/C100(2)), ('R100/C80', lambda: vector(R100, [2, 4])/C80(2)), ('RDF/CC', lambda: vector(RDF, [2, 4])/CC(2)), ('RR/CDF', lambda: vector(RR, [2, 4])/CDF(2)),
+     ('R100/CDF', lambda: vector(R100, [2, 4])/CDF(2)), ('RDF/C100', lambda: vector(RDF, [2, 4])/C100(2)), ('RDF/CDF(49)', lambda: vector(RDF, [49, 49])/CDF(49)), ('RDF/CDF(0)', lambda: vector(RDF, [1, 2])/CDF(0)),
+     ('RDF*CDF', lambda: vector(RDF, [2, 4])*CDF(1, 1)), ('CDF*RDF v', lambda: CDF(1, 1)*vector(RDF, [2, 4])), ('RR*CC', lambda: vector(RR, [2, 4])*CC(1, 1)), ('CC*RR v', lambda: CC(1, 1)*vector(RR, [2, 4])),
+     ('R100*C80', lambda: vector(R100, [2, 4])*C80(1, 1)), ('QQ v/CDF', lambda: vector(QQ, [2, 4])/CDF(1, 1)), ('CDF/RDF', lambda: vector(CDF, [2, 4])/RDF(2)), ('CC/RR', lambda: vector(CC, [2, 4])/RR(2)),
+     ('C100/R100', lambda: vector(C100, [2, 4])/R100(2))]
+for n, f in P:
+    show(n, f)

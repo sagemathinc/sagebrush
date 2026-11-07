@@ -173,6 +173,8 @@
  "lib/_sage_ffmat.py: FFVector.__repr__ :: call :: \", \".join(repr(x) for x in self._e)": 1,
  "lib/_sage_ffmat.py: FFVector.__repr__ :: comprehension :: self._e": 1,
  "lib/_sage_ffmat.py: FFVector.__rmul__ :: comprehension :: self._e": 1,
+ "lib/_sage_ffmat.py: FFVector._complex_promotion :: call :: min(pb, pp)": 1,
+ "lib/_sage_ffmat.py: FFVector._complex_promotion :: comprehension :: self._e": 1,
  "lib/_sage_ffmat.py: FFVector._dot :: call :: zip(self._e, o)": 1,
  "lib/_sage_ffmat.py: FFVector._dot :: loop :: zip(self._e, o)": 1,
  "lib/_sage_ffmat.py: FFVector._latex_ :: call :: \", \".join(repr(x) for x in self._e)": 1,
