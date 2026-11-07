@@ -149,6 +149,8 @@ def regen(paths, everything):
         by_file.setdefault(r["file"], []).append({"id": r["id"], "stdout": r["stdout"], "stderr": r["stderr"], "status": r["status"]})
     if everything:
         prov["files"] = {}
+    # (entries for case files that no longer exist are dropped: a renamed or removed file)
+    prov["files"] = {f: e for f, e in prov["files"].items() if os.path.exists(os.path.join(ROOT, f))}
     for p in paths:
         f = rel(p)
         write_json(out_path(p), {"format": "rill-out", "v": 1, "file": f, "cases": by_file[f]})
@@ -187,6 +189,17 @@ def verify():
         got = [c["id"] for c in json.load(open(out_path(p), encoding="utf-8"))["cases"]]
         if ids != got:
             problems.append("%s: case ids differ from its output's" % f)
+    ignored = subprocess.run(["git", "-C", ROOT, "check-ignore", "--stdin"], input="\n".join(rel(p) for p in case_files()),
+                             capture_output=True, text=True).stdout.split()
+    for f in ignored:
+        problems.append("%s: ignored by .gitignore, so it would not be committed (rename its directory)" % f)
+    # (every file PROVENANCE.json names, and its output, must be tracked by git: an untracked or ignored area
+    # passes here but is missing from the commit, as rill-tests/dist/ was under .gitignore's "dist/")
+    named = [f for f in prov["files"]] + [f[:-2] + ".out.json" for f in prov["files"]]
+    tracked = set(subprocess.run(["git", "-C", ROOT, "ls-files", "--", "rill-tests"], capture_output=True, text=True).stdout.split())
+    for f in named:
+        if f not in tracked:
+            problems.append("%s: not tracked by git (git add it; check .gitignore)" % f)
     for p in case_files():
         d = heldout_dir(p)
         if d and os.path.exists(os.path.join(d, "SHA256SUMS")):

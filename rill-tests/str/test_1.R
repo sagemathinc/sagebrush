@@ -17,7 +17,7 @@ cat(1:5, sep = ", "); cat("\n")
 #-- str-8
 print("quoted")
 #-- str-9
-strsplit("a,b,c", ","); 
+strsplit("a,b,c", ",");
 #-- str-10
 x <- "Statistics"
 rev(strsplit(x, "")[[1]])
