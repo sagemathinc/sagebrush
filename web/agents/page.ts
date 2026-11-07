@@ -12,7 +12,7 @@
 import "../workspace/pair-link";
 import { BlockEditor } from "../board/blocks";
 import { render as markdown } from "../markdown";
-import { apply, newThread, runningTurn, type Artifact, type Thread, type ToolCall, type Turn, type TurnEvent, type UserEntry } from "./events";
+import { apply, boundLoaded, CHAT_BOUNDS, Ledger, newThread, runningTurn, type Artifact, type Chats, type Thread, type ToolCall, type Turn, type TurnEvent, type UserEntry } from "./events";
 import { startFakeTurn, type Draft, type FakeTurn } from "./fake-agent";
 import { AgentError, RELOAD_KEY, type AgentPairing, type Kept } from "../workspace/agent-pair";
 import type { NotebookEdit } from "../workspace/notebook-edit";
@@ -34,12 +34,7 @@ const $ = <T extends HTMLElement = HTMLElement>(sel: string, root: ParentNode = 
 // ---------------------------------------------------------------------------
 // State
 
-interface Saved {
-  threads: Thread[];
-  current: string;
-}
-
-function load(): Saved {
+function load(): Chats {
   try {
     const v = JSON.parse(localStorage.getItem(STORE) ?? "");
     if (v && Array.isArray(v.threads) && v.threads.length > 0) return v;
@@ -55,11 +50,59 @@ function id() {
 }
 
 const state = load();
+// (the chats' bounds (BH-1, events.ts Ledger): chats saved before them load within them; the current chat and the
+// running ones are never let go whole, and running turns go only after everything else)
+const ledger: Ledger = boundLoaded(state, () => new Set([state.current]));
 let saveTimer = 0;
+// What all the chats lost to their bounds, as a number, to know when the page must be drawn again
+const lostCount = () => Object.values(state.lost ?? {}).reduce((n, v) => n + (v as number), 0);
+const isQuota = (e: unknown) => {
+  const x = e as { name?: string; code?: number } | null;
+  return x?.name === "QuotaExceededError" || x?.name === "NS_ERROR_DOM_QUOTA_REACHED" || x?.code === 22 || x?.code === 1014;
+};
+// The chats saved.  They are within their bounds already (charged as each thing was added: the saved JSON is at most
+// CHAT_BOUNDS.bytes), so a save never changes them, except: a save the browser refuses because its storage is full is
+// tried once more with a copy bounded to half, and only if THAT is saved does the page take the copy (said); any other
+// refusal (SecurityError, ...) changes nothing and is said: what's shown stays as it is, only unsaved.
+function saveNow() {
+  saveTimer = 0;
+  try {
+    localStorage.setItem(STORE, JSON.stringify(state));
+    saveRefused(null);
+  } catch (e) {
+    const why = (x: unknown) => (x as Error)?.name ?? "refused";
+    if (isQuota(e)) {
+      const trial = structuredClone(state) as Chats;
+      const half = new Ledger(trial, { ...CHAT_BOUNDS, total: Math.floor(CHAT_BOUNDS.total / 2) }, ledger.keep);
+      for (let i = 0; i < 1000 && (trial.size ?? 0) > half.B.total; i++) {
+        const before = trial.size;
+        half.evict((trial.size ?? 0) - half.B.total, null, null);
+        if (trial.size === before) break;
+      }
+      try {
+        localStorage.setItem(STORE, JSON.stringify(trial));
+        Object.assign(state, trial);
+        saveRefused("This browser's storage was nearly full: older messages of your chats weren't kept.");
+        renderAll();
+      } catch (e2) {
+        saveRefused(`Your chats couldn't be saved in this browser (${why(e2)}): what's shown stays only until this page closes.`);
+      }
+    } else {
+      saveRefused(`Your chats couldn't be saved in this browser (${why(e)}): what's shown stays only until this page closes.`);
+    }
+  }
+  renderCapNote();
+}
 function save() {
   clearTimeout(saveTimer);
-  saveTimer = window.setTimeout(() => localStorage.setItem(STORE, JSON.stringify(state)), 300);
+  saveTimer = window.setTimeout(saveNow, 300);
 }
+let refusedSay: string | null = null;
+function saveRefused(say: string | null) {
+  refusedSay = say;
+}
+// (tests: the chats, their ledger and save, and what the page says of their bounds)
+(window as any).__sbChats = { state, ledger, saveNow, note: () => (document.getElementById("capnote")?.hidden ? "" : document.getElementById("capnote")?.textContent ?? ""), rendered: () => document.querySelectorAll("#log > .user, #log > .turn").length };
 
 const agents = new Map<string, { turn: FakeTurn; turn_id: string }>(); // scripted turns, by thread
 const liveRunning = new Set<string>(); // threads with a turn of the paired agent running
@@ -74,10 +117,14 @@ let openArtifact: string | null = null;
 let fullscreen = false;
 
 const current = () => state.threads.find((t) => t.id === state.current) ?? state.threads[0];
+ledger.keep = () => new Set([state.current, ...agents.keys(), ...liveRunning]);
 
 function emitTo(thread: Thread, turn_id: string, d: Draft) {
   const e = { ...d, seq: thread.applied_seq + 1, turn_id } as TurnEvent;
-  apply(thread, e);
+  const lostBefore = lostCount();
+  apply(thread, e, Date.now(), ledger);
+  // (something let go to make room, maybe in another chat: the whole page drawn again, so nothing shown is stale)
+  if (lostCount() !== lostBefore) renderAll();
   if (d.type === "artifact") {
     openArtifact = (d as { id: string }).id;
     // (a notebook the agent wrote: which cells, as it wrote them, for the written-by label)
@@ -111,9 +158,8 @@ function submit(mode: UserEntry["mode"]) {
   if (mode !== "note" && inert(thread)) return;
   const busy = isRunning(thread);
   if (mode === "queued" && !busy) mode = "sent";
-  const entry: UserEntry = { kind: "user", id: id(), text, mode, time: Date.now() };
-  thread.entries.push(entry);
-  if (thread.title === "New chat") thread.title = text.split("\n")[0].slice(0, 48);
+  const entry: UserEntry = ledger.addUser(thread, { kind: "user", id: id(), text, mode, time: Date.now() });
+  if (thread.title === "New chat") thread.title = ledger.setText(thread, null, thread.title, text.split("\n")[0], 48) ?? thread.title;
   editor.value = "";
   if (mode === "queued") {
     queues.set(thread.id, [...(queues.get(thread.id) ?? []), entry]);
@@ -253,6 +299,27 @@ function renderSidebar() {
   }
 }
 
+// What isn't kept (BH-1): the chat's oldest entries let go by its bounds, and a save the browser refused, said at the
+// top of the chat, never silently
+function renderCapNote() {
+  const note = $("#capnote");
+  if (!note) return;
+  const d = current().dropped, lost = state.lost;
+  const parts: string[] = [];
+  // (all the chats: what their bounds let go, kept with them, so it is said after a reload too)
+  if (lost) {
+    const n = (k: number, one: string, many: string) => (k ? `${k.toLocaleString("en-US")} ${k === 1 ? one : many}` : "");
+    const all = [n(lost.threads, "chat", "chats"), n(lost.running, "running turn", "running turns"), n(lost.bodies, "artifact body", "artifact bodies")].filter(Boolean);
+    if (all.length) parts.push(`To stay within this browser's limits, older history of your chats wasn't kept: ${all.join(", ")}.`);
+  }
+  if (d?.entries) parts.push(`${d.entries.toLocaleString("en-US")} older ${d.entries === 1 ? "entry" : "entries"} of this chat ${d.entries === 1 ? "isn't" : "aren't"} kept (a chat keeps its last ${CHAT_BOUNDS.entries.toLocaleString("en-US")}).`);
+  if (d?.artifacts) parts.push(`${d.artifacts} older artifact${d.artifacts === 1 ? "" : "s"} ${d.artifacts === 1 ? "isn't" : "aren't"} kept.`);
+  if (d?.bodies) parts.push(`${d.bodies} artifact bod${d.bodies === 1 ? "y was" : "ies were"} too large to keep.`);
+  if (refusedSay) parts.push(refusedSay);
+  note.textContent = parts.join(" ");
+  note.hidden = parts.length === 0;
+}
+
 // What's in the DOM, by entry, so a streaming turn re-renders alone.
 const rendered = new Map<string, { node: HTMLElement; key: string }>();
 let renderedThread = "";
@@ -266,13 +333,14 @@ function renderThread() {
     renderedThread = thread.id;
   }
   $("#empty").hidden = thread.entries.length > 0;
+  renderCapNote();
   const nearEnd = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
   const seen = new Set<string>();
   let prev: HTMLElement | null = null;
   for (const entry of thread.entries) {
     const eid = entry.kind === "user" ? entry.id : entry.turn_id;
     seen.add(eid);
-    const key = entry.kind === "user" ? `${entry.mode}` : JSON.stringify([entry.parts, entry.tools, entry.attention, entry.state, entry.error]);
+    const key = entry.kind === "user" ? `${entry.mode}` : JSON.stringify([entry.parts, entry.tools, entry.attention, entry.state, entry.error, entry.cut]);
     let r = rendered.get(eid);
     if (!r || r.key !== key) {
       const node = entry.kind === "user" ? userNode(entry) : turnNode(thread, entry);
@@ -312,9 +380,9 @@ function turnNode(thread: Thread, turn: Turn): HTMLElement {
   const parts: string[] = [];
   for (const p of turn.parts) {
     if (p.kind === "thinking") {
-      parts.push(`<details class="thinking"><summary>Thinking</summary><div>${esc(p.text)}</div></details>`);
+      parts.push(`<details class="thinking"><summary>Thinking${p.cut ? " (cut: too long to keep)" : ""}</summary><div>${esc(p.text)}</div></details>`);
     } else if (p.kind === "message") {
-      parts.push(`<div class="msg board-text">${md(p.text)}${p.truncated ? `<div class="tag">(cut at 256 KiB)</div>` : ""}</div>`);
+      parts.push(`<div class="msg board-text">${md(p.text)}${p.truncated ? `<div class="tag">(cut: too long to keep)</div>` : ""}</div>`);
     } else if (p.kind === "tool") {
       parts.push(toolHtml(turn.tools[p.call]));
     } else if (p.kind === "attention") {
@@ -333,6 +401,12 @@ function turnNode(thread: Thread, turn: Turn): HTMLElement {
       const a = thread.artifacts.find((x) => x.id === p.id);
       if (a) parts.push(`<button class="artifact-card" data-artifact="${esc(a.id)}"><span class="ai">${artifactIcon(a)}</span><span><b>${esc(a.title)}</b><small>${artifactLabel(a)} · click to open</small></span></button>`);
     }
+  }
+  {
+    // (what of this turn wasn't kept, each kind said: BH-1)
+    const c = turn.cut ?? {}, n = (k: number | undefined, one: string, many: string) => (k ? `${k.toLocaleString("en-US")} ${k === 1 ? one : many}` : "");
+    const said = [n(c.parts, "step", "steps"), n(c.tools, "tool call", "tool calls"), n(c.attention, "request", "requests"), n(c.text, "piece of text cut", "pieces of text cut")].filter(Boolean);
+    if (said.length) parts.push(`<div class="status">Not kept of this turn, to stay within limits: ${said.join(", ")}</div>`);
   }
   if (turn.error) parts.push(`<div class="turn-error">Error: ${esc(turn.error.message)}</div>`);
   const status =
@@ -365,7 +439,7 @@ function toolHtml(t: ToolCall): string {
   const state = t.status === "running" ? `<span class="spinner"></span>` : t.status === "ok" ? `<span class="ok">✓</span>` : `<span class="bad">${t.status === "unknown" ? "?" : "✗"}</span>`;
   const label = t.tool === "terminal" ? `<code>${esc(t.summary ?? t.name ?? "")}</code>` : `${esc(t.name ?? t.tool)} <code>${esc(t.summary ?? "")}</code>`;
   const meta = [t.status !== "running" && t.status !== "ok" ? t.status : "", t.duration_ms != null ? `${(t.duration_ms / 1000).toFixed(1)} s` : ""].filter(Boolean).join(" · ");
-  const body = t.diff ? diffHtml(t.diff.before, t.diff.after) : t.output ? `<pre class="out">${esc(t.output)}${t.body_cut ? "\n… (cut)" : ""}</pre>` : "";
+  const body = t.diff ? diffHtml(t.diff.before, t.diff.after) : t.output ? `<pre class="out">${esc(t.output)}${t.body_cut ? "\n… (cut)" : ""}</pre>` : t.diff_cut ? `<div class="status">(its change was too large to keep)</div>` : "";
   // (open while it runs, so its output streams in view; closed once it's done)
   return `<details class="tool ${t.status}"${t.status === "running" ? " open" : ""}><summary>${state}<span class="ti">${icon}</span>${label}${meta ? `<span class="meta">${esc(meta)}</span>` : ""}</summary>${body}</details>`;
 }
@@ -671,12 +745,16 @@ function mountHost(threadId: string, a: Artifact, h: Host) {
     keepFocus();
     return;
   }
-  if (a.kind === "markdown") h.el.innerHTML = `<div class="doc board-text">${md(a.body)}</div>`;
+  // (BH-1: a body too large to keep is said, never shown cut as if whole; a diff's or notebook's is never parsed cut)
+  if (a.omitted !== undefined) {
+    h.el.innerHTML = `<div class="status">This artifact (${a.omitted.toLocaleString("en-US")} characters) was too large to keep in the chat, so it isn't shown.</div>`;
+    h.copy = () => "";
+  } else if (a.kind === "markdown") h.el.innerHTML = `<div class="doc board-text">${md(a.body)}</div>${a.truncated !== undefined ? `<div class="status">(cut: only the start of ${a.truncated.toLocaleString("en-US")} characters is kept)</div>` : ""}`;
   else if (a.kind === "diff") {
     const d = JSON.parse(a.body) as { before: string; after: string };
     h.el.innerHTML = diffHtml(d.before, d.after);
     h.copy = () => d.after;
-  } else h.el.innerHTML = `<pre class="code">${esc(a.body)}</pre>`;
+  } else h.el.innerHTML = `<pre class="code">${esc(a.body)}</pre>${a.truncated !== undefined ? `<div class="status">(cut: only the start of ${a.truncated.toLocaleString("en-US")} characters is kept)</div>` : ""}`;
   typeset(h.el);
 }
 
@@ -1033,8 +1111,7 @@ function toast(text: string, ms = 1500) {
 const editor = mountComposer({ submit, stop: () => interrupt(current()), render: md, typeset: (el) => typeset(el) });
 $("#new").onclick = async () => {
   if (!(await mayLeaveThread())) return;
-  const t = newThread(id(), "New chat");
-  state.threads.push(t);
+  const t = ledger.newThread(id(), "New chat");
   state.current = t.id;
   openArtifact = null;
   save();
@@ -1252,7 +1329,7 @@ $("#ws-retry").onclick = async () => {
 };
 addEventListener("pagehide", () => {
   // (the chats, and the no-demo marker, kept now: a reload within save()'s 300 ms would lose them)
-  if (saveTimer) localStorage.setItem(STORE, JSON.stringify(state));
+  if (saveTimer) { clearTimeout(saveTimer); saveNow(); }
 });
 $("#howto").onclick = () => ($("#help").hidden = !$("#help").hidden);
 

@@ -290,6 +290,36 @@ try {
     const w1 = await ev(`window.__sbLayout.stats.writes`);
     ok("L2-write-count", w1 - w0 === 1, "one drag of 50 moves writes the stored layout once", { w0, w1 });
   }
+  // BH-1 (William, Nov 3: no history grows without bounds): chats saved before their bounds load within them, and what
+  // was let go is said, after a reload too (astra's DATA-1); a save the browser refuses changes nothing unless it is
+  // a full storage AND the smaller copy is saved (DATA-4), and what's drawn is always what's kept
+  {
+    const KEYC = "sagebrush-agents-preview-v1";
+    const many = { threads: [{ id: "big", title: "Big", artifacts: [], applied_seq: 0, entries: Array.from({ length: 1200 }, (_, i) => ({ kind: "user", id: "e" + i, text: "line " + i, mode: "note", time: i })) }], current: "big", lost: { threads: 3, entries: 0, running: 0, artifacts: 0, bodies: 0, parts: 0, text: 0 } };
+    await fresh(1280, { query: "" });
+    await ev(`(() => { localStorage.setItem(${JSON.stringify(KEYC)}, ${JSON.stringify(JSON.stringify(many))}); return 1; })()`);
+    await send("Page.navigate", { url: `${origin}/agents/?speed=20` });
+    await until(`!!window.__sbChats`);
+    const note = await ev(`window.__sbChats.note()`);
+    ok("BH1-load", /200 older entries of this chat aren't kept \(a chat keeps its last 1,000\)/.test(note), "a chat saved with 1,200 entries loads with its last 1,000, saying so", { note });
+    ok("BH1-lost-reload", /older history of your chats wasn't kept: 3 chats/.test(note), "…and chats let go before (Lost, saved with them) are said after a reload", { note });
+    const entries = () => ev(`window.__sbChats.state.threads.find((t) => t.id === "big").entries.length`);
+    const drawn = () => ev(`window.__sbChats.rendered()`);
+    const n0 = await entries();
+    // (a SecurityError: nothing let go, said)
+    await ev(`(() => { const set = Storage.prototype.setItem; window.__sbSet = set; Storage.prototype.setItem = function (k, v) { if (k === ${JSON.stringify(KEYC)}) throw new DOMException("no", "SecurityError"); return set.call(this, k, v); }; window.__sbChats.saveNow(); return 1; })()`);
+    const said1 = await ev(`window.__sbChats.note()`);
+    ok("BH1-security", /couldn't be saved in this browser \(SecurityError\)/.test(said1) && (await entries()) === n0 && (await drawn()) === n0, "a save refused for another reason (SecurityError) lets nothing go, and says so", { said1, n0, now: await entries() });
+    // (a full storage, the smaller copy refused too: nothing let go)
+    await ev(`(() => { Storage.prototype.setItem = function (k, v) { if (k === ${JSON.stringify(KEYC)}) throw new DOMException("full", "QuotaExceededError"); return window.__sbSet.call(this, k, v); }; window.__sbChats.saveNow(); return 1; })()`);
+    ok("BH1-quota-both", /couldn't be saved in this browser \(QuotaExceededError\)/.test(await ev(`window.__sbChats.note()`)) && (await entries()) === n0, "a full storage that refuses the smaller copy too: nothing let go, said");
+    // (a full storage that takes the smaller copy: it is taken, said, and what's drawn is what's kept)
+    await ev(`(() => { let first = true; Storage.prototype.setItem = function (k, v) { if (k === ${JSON.stringify(KEYC)} && first) { first = false; throw new DOMException("full", "QuotaExceededError"); } return window.__sbSet.call(this, k, v); }; window.__sbChats.saveNow(); return 1; })()`);
+    const said3 = await ev(`window.__sbChats.note()`);
+    ok("BH1-quota-copy", /storage was nearly full/.test(said3) && (await drawn()) === (await entries()), "a full storage that takes the smaller copy: said, and what's drawn is what's kept", { said3, drawn: await drawn(), entries: await entries() });
+    await ev(`(() => { Storage.prototype.setItem = window.__sbSet; window.__sbChats.saveNow(); return 1; })()`);
+    ok("BH1-cleared", !/couldn't be saved|nearly full/.test(await ev(`window.__sbChats.note()`)), "…and no longer said once a save goes through");
+  }
   console.log(`${checks - fails}/${checks} passed${fails ? "" : ", all passed"}`);
   code = fails ? 1 : 0;
 } finally {
