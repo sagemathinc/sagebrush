@@ -37,6 +37,8 @@ BINARY = {
 }
 UNARY = {"?": 10, "~": 50, "!": 80, "-": 140, "+": 140}
 POSTFIX = 160          # ( [ [[ $ @
+# R's parser stack holds 9998 units (rill-tests/parse/test_5.R)
+PARSER_CAPACITY = 9998
 NAMESPACE = 170        # :: :::
 LOWEST = 0
 
@@ -77,6 +79,7 @@ class Parser:
         self.i = 0
         self.stmt_start = self._line_start(self.toks[0].start)
         self.warnings = []   # the literal warnings (1.5L) of the statement just read
+        self.units = 0       # R's parser-stack units pending (see expr)
 
     # ---------------------------------------------------------------- tokens
 
@@ -156,33 +159,121 @@ class Parser:
     # ---------------------------------------------------------------- expressions
 
     def expr(self, rbp, eq_ok):
-        left = self.prefix(self.take(), eq_ok)
+        """An expression whose operators bind tighter than rbp.  Operator chains and
+        keyword constructs (if, for, while, repeat, function) are frames on an
+        explicit stack, not host recursion (design §8.4); only brackets recurse, and
+        the lexer stops them at R's 50 levels.  The pending frames are counted in R's
+        parser-stack units, and passing R's capacity is its "out of memory while
+        parsing" (rill-tests/parse/test_5.R pins each construct's boundary)."""
+        base = self.units
+        frames = []
         while True:
-            t = self.peek()
-            if t.kind == "EOF" or t.nl:
-                return left
-            if t.kind == "OP" and t.text in ("(", "[", "[[", "$", "@"):
-                if POSTFIX <= rbp:
+            # ---- an operand; prefix operators and keywords push a frame and loop
+            t = self.take()
+            k = t.kind
+            if t.kind == "OP" and t.text in UNARY:
+                frames.append(("unary", t, rbp, eq_ok))
+                self.units += 1
+                rbp = UNARY[t.text]
+                continue
+            if k in ("IF", "WHILE"):
+                self.units += 2
+                self.expect("(")
+                cond = self.expr(LOWEST, False)
+                self.expect(")")
+                frames.append((k.lower(), cond, rbp, eq_ok))
+                rbp, eq_ok = LOWEST, True
+                continue
+            if k == "FOR":
+                self.units += 4
+                self.expect("(")
+                var = self.peek()
+                if var.kind != "SYMBOL":
+                    raise self.unexpected(var)
+                self.take()
+                if self.peek().kind != "IN":
+                    raise self.unexpected(self.peek())
+                self.take()
+                seq = self.expr(LOWEST, False)
+                self.expect(")")
+                self.units -= 2
+                frames.append(("for", (sym(var.text), seq), rbp, eq_ok))
+                rbp, eq_ok = LOWEST, True
+                continue
+            if k == "REPEAT":
+                self.units += 1
+                frames.append(("repeat", None, rbp, eq_ok))
+                rbp, eq_ok = LOWEST, True
+                continue
+            if k == "FUNCTION" or t.is_op("\\"):
+                self.units += 2
+                formals = self.formals()
+                self.units += 3
+                frames.append(("function", formals, rbp, eq_ok))
+                rbp, eq_ok = LOWEST, True
+                continue
+            left = self.atom(t)
+            if self.units + 1 > PARSER_CAPACITY:
+                raise ParseError("out of memory while parsing")
+            # ---- continue with postfix and binary operators, reducing frames as they end
+            while True:
+                t = self.peek()
+                if not (t.kind == "EOF" or t.nl):
+                    if t.kind == "OP" and t.text in ("(", "[", "[[", "$", "@") and POSTFIX > rbp:
+                        self.take()
+                        left = self.postfix(t, left)
+                        continue
+                    if t.kind == "OP" and t.text in ("::", ":::"):
+                        self.take()
+                        left = self.namespace(t, left)
+                        continue
+                    key = t.kind if t.kind in BINARY else (t.text if t.kind == "OP" and t.text in BINARY else None)
+                    if key is not None and not (key == "EQ_ASSIGN" and not eq_ok):
+                        power, assoc = BINARY[key]
+                        if not (power < rbp or (power == rbp and assoc == "left")):
+                            self.take()
+                            frames.append(("binary", (t, left, self.peek()), rbp, eq_ok))
+                            self.units += 2
+                            rbp = power if assoc == "left" else power - 1
+                            break
+                if not frames:
+                    self.units = base
                     return left
-                self.take()
-                left = self.postfix(t, left)
-                continue
-            if t.kind == "OP" and t.text in ("::", ":::"):
-                self.take()
-                left = self.namespace(t, left)
-                continue
-            key = t.kind if t.kind in BINARY else (t.text if t.kind == "OP" and t.text in BINARY else None)
-            if key is None:
-                return left
-            if key == "EQ_ASSIGN" and not eq_ok:
-                return left
-            power, assoc = BINARY[key]
-            if power < rbp or (power == rbp and assoc == "left"):
-                return left
-            self.take()
-            first = self.peek()
-            right = self.expr(power if assoc == "left" else power - 1, eq_ok)
-            left = self.binary(t, left, right, first)
+                kind, data, rbp, eq_ok = frames.pop()
+                if kind == "unary":
+                    left = Lang(sym(data.text), [(None, left)])
+                    self.units -= 1
+                elif kind == "binary":
+                    op, lhs, first = data
+                    left = self.binary(op, lhs, left, first)
+                    self.units -= 2
+                elif kind == "if":
+                    t2 = self.peek()
+                    if t2.kind == "ELSE" and (not t2.nl or t2.ctx == "{"):
+                        self.take()
+                        self.units += 2
+                        frames.append(("else", (data, left), rbp, eq_ok))
+                        rbp, eq_ok = LOWEST, True
+                        break
+                    left = Lang(sym("if"), [(None, data), (None, left)])
+                    self.units -= 2
+                elif kind == "else":
+                    cond, body = data
+                    left = Lang(sym("if"), [(None, cond), (None, body), (None, left)])
+                    self.units -= 4
+                elif kind == "for":
+                    var, seq = data
+                    left = Lang(sym("for"), [(None, var), (None, seq), (None, left)])
+                    self.units -= 2
+                elif kind == "while":
+                    left = Lang(sym("while"), [(None, data), (None, left)])
+                    self.units -= 2
+                elif kind == "repeat":
+                    left = Lang(sym("repeat"), [(None, left)])
+                    self.units -= 1
+                else:
+                    left = Lang(sym("function"), [(None, data), (None, left)])
+                    self.units -= 5
 
     def binary(self, t, left, right, first):
         if t.kind == "RIGHT_ASSIGN":
@@ -210,7 +301,8 @@ class Parser:
             return Lang(rhs.fn, args)
         return Lang(rhs.fn, [(None, lhs)] + rhs.args)
 
-    def prefix(self, t, eq_ok):
+    def atom(self, t):
+        """An operand that isn't an operator or keyword construct."""
         k = t.kind
         if k == "NUM_CONST":
             return self.constant(t)
@@ -224,52 +316,19 @@ class Parser:
             return NULL
         if k == "PLACEHOLDER":
             return Placeholder(t.line, 0)
-        if k == "FUNCTION" or t.is_op("\\"):
-            return self.function(t)
-        if k == "IF":
-            self.expect("(")
-            cond = self.expr(LOWEST, False)
-            self.expect(")")
-            body = self.expr(LOWEST, True)
-            t2 = self.peek()
-            if t2.kind == "ELSE" and (not t2.nl or t2.ctx == "{"):
-                self.take()
-                alt = self.expr(LOWEST, True)
-                return Lang(sym("if"), [(None, cond), (None, body), (None, alt)])
-            return Lang(sym("if"), [(None, cond), (None, body)])
-        if k == "FOR":
-            self.expect("(")
-            var = self.peek()
-            if var.kind != "SYMBOL":
-                raise self.unexpected(var)
-            self.take()
-            if self.peek().kind != "IN":
-                raise self.unexpected(self.peek())
-            self.take()
-            seq = self.expr(LOWEST, False)
-            self.expect(")")
-            body = self.expr(LOWEST, True)
-            return Lang(sym("for"), [(None, sym(var.text)), (None, seq), (None, body)])
-        if k == "WHILE":
-            self.expect("(")
-            cond = self.expr(LOWEST, False)
-            self.expect(")")
-            body = self.expr(LOWEST, True)
-            return Lang(sym("while"), [(None, cond), (None, body)])
-        if k == "REPEAT":
-            return Lang(sym("repeat"), [(None, self.expr(LOWEST, True))])
         if k in ("BREAK", "NEXT"):
             return Lang(sym(t.text), [])
-        if k == "OP":
-            if t.text == "(":
-                e = self.expr(LOWEST, True)
-                self.expect(")")
-                return Lang(sym("("), [(None, e)])
-            if t.text == "{":
-                return self.braces()
-            if t.text in UNARY:
-                e = self.expr(UNARY[t.text], eq_ok)
-                return Lang(sym(t.text), [(None, e)])
+        if t.is_op("("):
+            self.units += 1
+            e = self.expr(LOWEST, True)
+            self.expect(")")
+            self.units -= 1
+            return Lang(sym("("), [(None, e)])
+        if t.is_op("{"):
+            self.units += 1
+            e = self.braces()
+            self.units -= 1
+            return e
         if k == "EOF":
             raise Incomplete()
         self.i -= 1
@@ -303,7 +362,8 @@ class Parser:
             elif not (t.nl or t.is_op("}") or t.kind == "EOF"):
                 raise self.unexpected(t)
 
-    def function(self, t):
+    def formals(self):
+        """`(x, y = 2, ...)` after `function` or `\\`."""
         self.expect("(")
         items = []
         seen = set()
@@ -311,7 +371,7 @@ class Parser:
             a = self.peek()
             if a.is_op(")") and not items:
                 self.take()
-                break
+                return Formals(items)
             if a.kind != "SYMBOL":
                 raise self.unexpected(a)
             self.take()
@@ -329,19 +389,16 @@ class Parser:
                 continue
             if nxt.is_op(")"):
                 self.take()
-                break
+                return Formals(items)
             raise self.unexpected(nxt)
-        body = self.expr(LOWEST, True)
-        return Lang(sym("function"), [(None, Formals(items)), (None, body)])
 
     def postfix(self, t, left):
         op = t.text
-        if op == "(":
-            return Lang(left, self.args(")"))
-        if op == "[":
-            return Lang(sym("["), [(None, left)] + self.args("]"))
-        if op == "[[":
-            return Lang(sym("[["), [(None, left)] + self.args("]]"))
+        if op in ("(", "[", "[["):
+            self.units += 2
+            args = self.args({"(": ")", "[": "]", "[[": "]]"}[op])
+            self.units -= 2
+            return Lang(left, args) if op == "(" else Lang(sym(op), [(None, left)] + args)
         nt = self.peek()
         if nt.kind == "SYMBOL":
             self.take()
@@ -419,17 +476,19 @@ def _extraction_head(rhs):
     return None
 
 
-def _check_placeholders(e, parent):
-    """A placeholder left after the pipes were rewritten is R's "invalid use"."""
-    if isinstance(e, Placeholder):
-        raise ParseError(_located("invalid use of pipe placeholder", e.line, 0), parent if parent is not None else e)
-    if isinstance(e, Lang):
-        _check_placeholders(e.fn, e)
-        for _, v in e.args:
-            _check_placeholders(v, e)
-    elif isinstance(e, Formals):
-        for _, v in e.items:
-            _check_placeholders(v, parent)
+def _check_placeholders(root, parent):
+    """A placeholder left after the pipes were rewritten is R's "invalid use"
+    (an explicit stack: a statement's tree can be thousands of levels deep)."""
+    stack = [(root, parent)]
+    while stack:
+        e, parent = stack.pop()
+        if isinstance(e, Placeholder):
+            raise ParseError(_located("invalid use of pipe placeholder", e.line, 0), parent if parent is not None else e)
+        if isinstance(e, Lang):
+            stack.append((e.fn, e))
+            stack.extend((v, e) for _, v in e.args)
+        elif isinstance(e, Formals):
+            stack.extend((v, parent) for _, v in e.items)
 
 
 def parse(src):

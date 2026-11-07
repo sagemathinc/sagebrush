@@ -38,6 +38,8 @@ DESCRIBE = {"NUM_CONST": "numeric constant", "STR_CONST": "string constant", "SY
             "NEWLINE": "end of line"}
 
 INT_MAX = 2147483647
+# R's lexer holds 50 open brackets; the 51st is "contextstack overflow" (rill-tests/parse/test_4.R)
+CONTEXT_DEPTH = 50
 HEX = "0123456789abcdefABCDEF"
 
 
@@ -222,6 +224,10 @@ class _Lexer:
                 i += 1
                 continue
             self.add(OP_KIND.get(op, "OP"), "^" if op == "**" else op, i, i + len(op), line, col)
+            if op in ("(", "{", "[", "[["):
+                if sum(1 for b in self.stack if b != "[[i") >= CONTEXT_DEPTH:
+                    self.toks.pop()
+                    return self.error(i, i + len(op), ("contextstack overflow",) + self.where(i))
             if op == "[[":
                 self.stack += ["[[", "[[i"]
             elif op in ("(", "{", "["):

@@ -25,6 +25,11 @@
    "out_sha256": "39a6884b75da176db1d973a6b78bbe565caf90b39c019fb9fd3ee3a544ffdc66",
    "r_sha256": "4e6977fd6f5bb8ae7297802c22b6e955f4fd3767271aaac0013846dc01b2860e"
   },
+  "rill-tests/errfmt/test_1.R": {
+   "cases": 27,
+   "out_sha256": "01fe9a0f549888373f588c600eeae158ee99190e954fa2f683da4fbf541b449e",
+   "r_sha256": "4b7d566d5f1c6734038bfeaee904132c72ec4170a8dc7522636d4c9a2485e53d"
+  },
   "rill-tests/fac/test_1.R": {
    "cases": 12,
    "out_sha256": "9546207c88bd5f120eb14fd6e6c2af77883576d1f4bf4302d135067d916d0978",
@@ -70,6 +75,11 @@
    "out_sha256": "d8a8461d91e7dd0187e7200a04c01b076ef51dac4e0fe0779f53844e1d0673fb",
    "r_sha256": "916ef904507babcd9bd9e55b7a0dcb0924d0491e1bba629ba7c9eee40195f278"
   },
+  "rill-tests/mem/test_1.R": {
+   "cases": 10,
+   "out_sha256": "3b46abaf9c4d063d7b27faf2f8e2e84a3a4bc1d1178e2cb9127acd304899a1d3",
+   "r_sha256": "73077187712fd594c54c7a97cc707ef701fa44e705eef310f3ae690cd560de18"
+  },
   "rill-tests/misc/test_1.R": {
    "cases": 28,
    "out_sha256": "3417dcd33df6e61dbc58fdf8c58849e9988e9128025bf9673a73c33e767fd254",
@@ -94,6 +104,16 @@
    "cases": 59,
    "out_sha256": "e94c94933e62f27b65a14fcddab6e7ff59f95c523d546c8a6fc054578df77a58",
    "r_sha256": "bde29bf17c458ff21315b1245987d65e1b22f402ea8b9431d38b3e9dc02f8cef"
+  },
+  "rill-tests/parse/test_4.R": {
+   "cases": 23,
+   "out_sha256": "f6c4950df7d9eee5b63548dd8b47fb6bc34671a59a7575d9694d3ea231743581",
+   "r_sha256": "ee0b377c8d3b7b2dd31148751886dc7fc8d6ed56c1eb058abe125f7187ef2ac0"
+  },
+  "rill-tests/parse/test_5.R": {
+   "cases": 16,
+   "out_sha256": "f5f6f2886443b9a0d49023817f26462e2555663ccf6607e71dad778152aafe8e",
+   "r_sha256": "716fde5678be0262fd30cd3aaacbb56b13dee2457a2968479afa772db4697470"
   },
   "rill-tests/rng/test_1.R": {
    "cases": 7,
