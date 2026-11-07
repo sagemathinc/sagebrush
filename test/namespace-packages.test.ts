@@ -87,3 +87,29 @@ test("namespace packages as CPython's: __file__ None, an absolute __path__ of ev
     rmSync(d, { recursive: true, force: true });
   }
 });
+
+// (daybreak3's NAMESPACE-DYNAMIC-1: a namespace package's __path__ follows its parent's path, sys.path at the top, as
+// CPython's _NamespacePath: portions added after the import are found, in the path's order, nested too; a regular
+// package of the name appearing later doesn't take it over. CPython 3.14's output for the same program)
+test("a namespace package's __path__ follows sys.path and its parent's __path__ after it is imported, as CPython's", () => {
+  const d = tree({
+    "a/ns/one.py": "A = 1\n",
+    "b/ns/late.py": 'L = "late"\n',
+    "a/ns/sub/x.py": 'X = "x"\n',
+    "b/ns/sub/y.py": 'Y = "y"\n',
+    "c/ns/__init__.py": "",
+    "c/ns/z.py": "Z = 1\n",
+    "t.py": "import sys, os\nrel = lambda p: [os.path.relpath(x) for x in p]\nsys.path.insert(0, \"a\")\nimport ns.one, ns.sub.x\nprint(rel(ns.__path__), rel(ns.sub.__path__))\nsys.path.insert(0, \"b\")\nimport ns.late\nprint(ns.late.L, rel(ns.__path__))\nimport ns.sub.y\nprint(ns.sub.y.Y, rel(ns.sub.__path__))\nsys.path.insert(0, \"c\")\ntry:\n    import ns.z\n    print(\"z imported\", rel(ns.__path__))\nexcept ModuleNotFoundError as e:\n    print(\"ModuleNotFoundError\", e, rel(ns.__path__))\n",
+  });
+  try {
+    assert.equal(run(d, "t.py"), [
+      "['a/ns'] ['a/ns/sub']",
+      "late ['b/ns', 'a/ns']",
+      "y ['b/ns/sub', 'a/ns/sub']",
+      "ModuleNotFoundError No module named 'ns.z' ['b/ns', 'a/ns']",
+      "",
+    ].join("\n"));
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
+});

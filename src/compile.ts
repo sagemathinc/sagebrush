@@ -427,6 +427,7 @@ R.loader.load = (name: string) => {
       e.name = name;
       throw e;
     }
+    if (parent?.$ns) nsRefresh(parent);
     dirs = parent?.__path__ ? R.toArray(parent.__path__) : [];
   } else dirs = R.toArray(sys.path);
   const leaf = parts[parts.length - 1];
@@ -445,14 +446,41 @@ R.loader.load = (name: string) => {
   if (found !== null) return execFile(found[0], found[1], name, found[1].endsWith("/__init__.py"));
   return portions.length ? namespacePackage(name, portions) : null;
 };
+// The portions of namespace package `leaf` in `dirs`, or null if a module or package of the name is there
+function nsPortions(dirs: string[], leaf: string): string[] | null {
+  const portions: string[] = [];
+  for (const d of dirs) {
+    if (fileExists(join(d, leaf, "__init__.py")) || fileExists(join(d, leaf + ".py"))) return null;
+    // (absolute, as CPython's: a relative sys.path entry against the current directory)
+    if (dirExists(join(d, leaf))) portions.push(resolvePath(cwdPath(join(d, leaf))));
+  }
+  return portions;
+}
 // A namespace package: no code of its own, its __path__ the directories found (CPython's __file__ None)
 function namespacePackage(name: string, portions: string[]): any {
   const m = R.newModule(name);
   m.__file__ = null;
   m.__package__ = name;
   m.__path__ = portions;
+  // (what its portions are recomputed from before each submodule's search: the parent's path or sys.path)
+  m.$ns = { parent: name.includes(".") ? name.slice(0, name.lastIndexOf(".")) : null, leaf: name.slice(name.lastIndexOf(".") + 1) };
   R.dictSet(R.sysModules, name, m);
   return m;
+}
+// A namespace package's __path__ follows its parent's path (sys.path at the top), as CPython's _NamespacePath does:
+// recomputed in that path's order before a submodule is searched for; kept as it is if a module or package of the
+// name has appeared there since, or if none of its portions is left
+function nsRefresh(m: any): void {
+  const { parent, leaf } = m.$ns;
+  let dirs: string[];
+  if (parent === null) dirs = R.toArray(R.importModule("sys").path);
+  else {
+    const p = R.sysModules.$m.get(parent);
+    if (p?.$ns) nsRefresh(p);
+    dirs = p?.__path__ ? R.toArray(p.__path__) : [];
+  }
+  const now = nsPortions(dirs, leaf);
+  if (now !== null && now.length) m.__path__.splice(0, m.__path__.length, ...now);
 }
 // Every module the loader runs from a file goes through here.  A file of the
 // optional set (optKeys, by its mounted path, whatever name or sys.path entry
