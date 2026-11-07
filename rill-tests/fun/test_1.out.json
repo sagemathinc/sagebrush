@@ -1,0 +1,97 @@
+{
+ "cases": [
+  {
+   "id": "fun-1",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1]  1  4  9 16\n"
+  },
+  {
+   "id": "fun-2",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 3\n[1] 11\n[1] 6\n"
+  },
+  {
+   "id": "fun-3",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 6\n"
+  },
+  {
+   "id": "fun-4",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 99  2\n[1] 1 2\n"
+  },
+  {
+   "id": "fun-5",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1\n[1] 2\n"
+  },
+  {
+   "id": "fun-6",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"no b\"\n"
+  },
+  {
+   "id": "fun-7",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 6\n"
+  },
+  {
+   "id": "fun-8",
+   "status": 0,
+   "stderr": "",
+   "stdout": "a + b\n"
+  },
+  {
+   "id": "fun-9",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 12\n"
+  },
+  {
+   "id": "fun-10",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 2 3 4\n"
+  },
+  {
+   "id": "fun-11",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1 2 3\n"
+  },
+  {
+   "id": "fun-12",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 2\n"
+  },
+  {
+   "id": "fun-13",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1 2 3 4 5\n"
+  },
+  {
+   "id": "fun-14",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"boom\"\n"
+  },
+  {
+   "id": "fun-15",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"ab\"\n"
+  }
+ ],
+ "file": "rill-tests/fun/test_1.R",
+ "format": "rill-out",
+ "v": 1
+}

@@ -1,0 +1,91 @@
+{
+ "cases": [
+  {
+   "id": "stats-1",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 5\n[1] 4.5\n[1] 4.571429\n[1] 2.13809\n"
+  },
+  {
+   "id": "stats-2",
+   "status": 0,
+   "stderr": "",
+   "stdout": "   Min. 1st Qu.  Median    Mean 3rd Qu.    Max. \n      1       2       3      22       4     100 \n"
+  },
+  {
+   "id": "stats-3",
+   "status": 0,
+   "stderr": "",
+   "stdout": "   0%   25%   50%   75%  100% \n 1.00  3.25  5.50  7.75 10.00 \n"
+  },
+  {
+   "id": "stats-4",
+   "status": 0,
+   "stderr": "",
+   "stdout": "10% 90% \n1.8 9.1 \n"
+  },
+  {
+   "id": "stats-5",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.9986518\n"
+  },
+  {
+   "id": "stats-6",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1\n[1] 9\n[1] 720\n[1] 5050\n"
+  },
+  {
+   "id": "stats-7",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] -1  0  1\n"
+  },
+  {
+   "id": "stats-8",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 5\n[1] 1.4826\n"
+  },
+  {
+   "id": "stats-9",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1 2 0 0 1\n"
+  },
+  {
+   "id": "stats-10",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.1 0.3 0.6\n"
+  },
+  {
+   "id": "stats-11",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1.0 2.0 3.5 5.0 6.0\n"
+  },
+  {
+   "id": "stats-12",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 10\n[1] 120\n[1] 1.772454\n[1] 0.08333333\n"
+  },
+  {
+   "id": "stats-13",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1\n[1] 5\n"
+  },
+  {
+   "id": "stats-14",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1.666667\n"
+  }
+ ],
+ "file": "rill-tests/stats/test_1.R",
+ "format": "rill-out",
+ "v": 1
+}

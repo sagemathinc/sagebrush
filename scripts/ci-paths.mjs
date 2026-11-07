@@ -151,6 +151,8 @@ const workflowOrBuildPaths = [
 const runtimePaths = [
   /^src\//, /^lib\//, /^test\//, /^target\//, /^conformance\//,
   /^catalog\//, /^scripts\/(?!ci-paths\.mjs$)/, /^wasm\//, /^cdn\//,
+  // (Rill's recorded R outputs and their provenance: read by the node tests, design/rill.md §7.5)
+  /^rill-tests\//,
 ];
 const webPaths = [/^web\//, /^examples\//, /^packages\/sagebrush-board\//];
 const modePaths = [

@@ -1,0 +1,31 @@
+{
+ "cases": [
+  {
+   "id": "logic-1",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] FALSE\n[1] TRUE\n[1] FALSE\n"
+  },
+  {
+   "id": "logic-2",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1]  TRUE FALSE\n"
+  },
+  {
+   "id": "logic-3",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] TRUE\n[1] FALSE\n"
+  },
+  {
+   "id": "logic-4",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 2\n"
+  }
+ ],
+ "file": "rill-tests/logic/test_1.R",
+ "format": "rill-out",
+ "v": 1
+}
