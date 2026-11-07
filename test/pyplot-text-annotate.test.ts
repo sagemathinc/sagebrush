@@ -476,3 +476,19 @@ test("several bad parts: matplotlib 3.11.1's first error (#801 X1-X5)", () => {
     "X3 bad textcoords and arrowstyle !! ValueError 'bogus' is not a valid coordinate",
   ]);
 });
+
+// (the box's style is called before the arrow's, after the connection's and
+// its search: matplotlib 3.11.1's first error, a float style told from an int)
+test("a bad box with other bad parts: matplotlib 3.11.1's first error (#801 X9)", () => {
+  const out = run("import matplotlib\nREAL = 'site-packages' in (getattr(matplotlib, '__file__', '') or '')\nif REAL:\n    matplotlib.use('Agg')\nimport matplotlib.pyplot as plt\ndef t(label, f):\n    fig, ax = plt.subplots()\n    try:\n        f(ax)\n        fig.savefig('x9.svg'); print(label, 'ok')\n    except Exception as e:\n        print(label, '!!', type(e).__name__, str(e)[:100])\n    plt.close(fig)\nt('bad connectionstyle (int), bad bbox (float)', lambda ax: ax.annotate('t', (0.5, 0.5), (0.2, 0.2), arrowprops=dict(arrowstyle='->', connectionstyle=5), bbox=dict(boxstyle=5.5)))\nt('bad arrowstyle (int), bad bbox (float)', lambda ax: ax.annotate('t', (0.5, 0.5), (0.2, 0.2), arrowprops=dict(arrowstyle=5), bbox=dict(boxstyle=5.5)))\nt('inf xytext arrow, bad bbox (float)', lambda ax: ax.annotate('t', (0.5, 0.5), (float('inf'), 0), arrowprops=dict(arrowstyle='->'), bbox=dict(boxstyle=5.5)))\nt('inf xytext, bad connectionstyle (int)', lambda ax: ax.annotate('t', (0.5, 0.5), (float('inf'), 0), arrowprops=dict(arrowstyle='->', connectionstyle=5)))\nt('bad connectionstyle (int), bad arrowstyle (float)', lambda ax: ax.annotate('t', (0.5, 0.5), (0.2, 0.2), arrowprops=dict(arrowstyle=5.5, connectionstyle=5)))\nt('bad textcoords, bad bbox (float)', lambda ax: ax.annotate('t', (0.5, 0.5), (0, 0), textcoords='bogus', bbox=dict(boxstyle=5.5)))\nt('bad xycoords arrow, bad bbox (float)', lambda ax: ax.annotate('t', (0.5, 0.5), (0.2, 0.2), xycoords='bogus', textcoords='data', arrowprops=dict(arrowstyle='->'), bbox=dict(boxstyle=5.5)))\nt('bbox (float) without arrow, point outside', lambda ax: ax.annotate('t', (5, 5), (0.2, 0.2), bbox=dict(boxstyle=5.5)))\n");
+  assert.deepEqual(out.trim().split("\n").map((l) => l.trimEnd()), [
+    "bad connectionstyle (int), bad bbox (float) !! TypeError 'int' object is not callable",
+    "bad arrowstyle (int), bad bbox (float) !! TypeError 'float' object is not callable",
+    "inf xytext arrow, bad bbox (float) !! StopIteration",
+    "inf xytext, bad connectionstyle (int) !! TypeError 'int' object is not callable",
+    "bad connectionstyle (int), bad arrowstyle (float) !! TypeError 'int' object is not callable",
+    "bad textcoords, bad bbox (float) !! ValueError 'bogus' is not a valid coordinate",
+    "bad xycoords arrow, bad bbox (float) !! ValueError 'bogus' is not a valid coordinate",
+    "bbox (float) without arrow, point outside ok",
+  ]);
+});

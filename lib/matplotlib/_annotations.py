@@ -141,11 +141,10 @@ def annotation(text, xy, xytext, xycoords, textcoords, arrowprops, annotation_cl
             o["only_inside"] = (x, y, {"coords": xc})
     # (then, if drawn: the text's place, the arrow's point, its style, the box)
     # (in matplotlib's order: the connection's style, its search for the
-    # text's edge, the arrow's style, the box)
-    later = terr
+    # text's edge, the box, the arrow's style)
+    later, head = terr, None
     if arrowprops is not None:
         later = later or xerr
-        head = None
         try:
             o["arrow"] = _arrow_options(arrowprops, (x, y, xc), size_pt)
         except _ArrowStyleLater as e:
@@ -154,12 +153,12 @@ def annotation(text, xy, xytext, xycoords, textcoords, arrowprops, annotation_cl
             later = later or e.args
         if not all(math.isfinite(float(v)) for v in xytext):
             later = later or (StopIteration,)  # (as matplotlib, whose arrow search finds no point of such a text)
-        later = later or head
     try:
         if kw.get("bbox") is not None:
             o["box"] = text_box(kw["bbox"], size_pt)
     except _Later as e:
         later = later or e.args
+    later = later or head
     if later:  # (it raises if drawn: nothing of it is drawn)
         o["later"] = later
         o.pop("arrow", None)
@@ -223,7 +222,7 @@ def _arrow_options(props, end, size_pt):
     else:
         try:
             name, params = _style(style, "arrowstyle", ("simple",) + tuple(_CURVES))
-        except _Later as e:  # (matplotlib calls the arrow's style last)
+        except _Later as e:  # (matplotlib calls the arrow's style last, after the box's)
             raise _ArrowStyleLater(*e.args) from None
         if name == "simple":
             a = dict(style="simple", head_length=params.get("head_length", 0.5), head_width=params.get("head_width", 0.5),
