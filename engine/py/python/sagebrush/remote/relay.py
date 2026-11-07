@@ -44,7 +44,7 @@ import urllib.parse
 import urllib.request
 
 from sagebrush.remote import keys as _keys
-from sagebrush.remote.enroll import EnrollError, _post, check_origin
+from sagebrush.remote.enroll import USER_AGENT, EnrollError, _post, check_origin
 from sagebrush.remote.gateway import Gateway
 from sagebrush.remote.pair import GUID, PAIR_LIMITS, RealTimers, _close_status_ok, b64url, page_key_error, strict_json
 
@@ -493,9 +493,9 @@ async def open_leg(origin, key, on_text, on_end, post=_post, connect_ms=None):
         wskey = base64.b64encode(os.urandom(16)).decode("ascii")
         hostport = host if u.port is None else "%s:%d" % (host, u.port)
         writer.write(("GET %s HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
-                      "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\nUser-Agent: sagebrush-remote/1\r\n"
+                      "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\nUser-Agent: %s\r\n"
                       "x-sb-remote-challenge: %s\r\nx-sb-remote-signature: %s\r\n\r\n"
-                      % (RELAY_PATH, hostport, wskey, c, sig)).encode("ascii"))
+                      % (RELAY_PATH, hostport, wskey, USER_AGENT, c, sig)).encode("ascii"))
         head = b""
         while b"\r\n\r\n" not in head:
             chunk = await asyncio.wait_for(reader.read(4096), left())

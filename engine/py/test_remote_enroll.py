@@ -379,11 +379,13 @@ def test_login_refusals():
 class PadHandler(http.server.BaseHTTPRequestHandler):
     """A valid JSON answer, padded with spaces to `size` bytes."""
     size = 0
+    agents = []
 
     def log_message(self, *a):
         pass
 
     def do_POST(self):
+        PadHandler.agents.append(self.headers.get("user-agent"))
         self.rfile.read(int(self.headers["content-length"]))
         b = json.dumps({"error": "authorization_pending"}).encode()
         b += b" " * (PadHandler.size - len(b))
@@ -408,6 +410,8 @@ def test_answer_size_bound():
             raise AssertionError("accepted")
         except enroll.EnrollError as e:
             assert "answered too much" in str(e)
+        # (every POST names itself: sagebrush.space's edge refuses urllib's default agent with a 403 (Cloudflare 1010))
+        assert PadHandler.agents == [enroll.USER_AGENT] * 2 and enroll.USER_AGENT == "sagebrush-remote/1", PadHandler.agents
     finally:
         srv.shutdown()
         srv.server_close()

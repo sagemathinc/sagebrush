@@ -251,6 +251,7 @@ class FakeRelay:
     def __init__(self, key):
         self.key = key
         self.challenges = {}
+        self.agents = []  # (each challenge POST's User-Agent)
         self.challenge_status = 200
         self.upgrade_status = 101
         self.extension = False
@@ -289,6 +290,7 @@ class FakeRelay:
             k, _, v = line.partition(":")
             h[k.strip().lower()] = v.strip()
         if method == "POST" and path == "/api/remote/v1/challenge":
+            self.agents.append(("challenge", h.get("user-agent")))
             n = int(h.get("content-length", "0"))
             while len(rest) < n:
                 rest += await reader.read(4096)
@@ -312,7 +314,7 @@ class FakeRelay:
             raw = base64.urlsafe_b64decode(sig + "=" * (-len(sig) % 4))
             ok = _native.es256_verify(self.key.x, self.key.y, ("sb-remote-chal/1\n" + c).encode(), raw)
             self.challenges[c] = True  # (single use)
-        self.upgrades.append({"ok": ok, "challenge": c})
+        self.upgrades.append({"ok": ok, "challenge": c, "agent": h.get("user-agent")})
         if not ok or self.upgrade_status != 101:
             writer.write(b"HTTP/1.1 %d No\r\ncontent-length: 0\r\n\r\n" % (403 if not ok else self.upgrade_status))
             await writer.drain()
@@ -378,6 +380,10 @@ async def test_page_over_the_relay():
     try:
         leg = await t.relay.leg()
         assert t.relay.upgrades[-1]["ok"]
+        # (the runner names itself on the challenge POST and on the upgrade alike: sagebrush.space's edge refuses
+        # urllib's default agent (Cloudflare 1010))
+        assert R.USER_AGENT == "sagebrush-remote/1" and t.relay.upgrades[-1]["agent"] == R.USER_AGENT, t.relay.upgrades[-1]
+        assert t.relay.agents and all(a == ("challenge", R.USER_AGENT) for a in t.relay.agents), t.relay.agents
         # a code or session hello is refused on the relay (the transport picks the trust mode): that page closed with
         # {"relay":"close","gen":n} (r1.9), the leg kept
         for gen, over in enumerate(({"code": "ABC"}, {"session": "x"}, {"via": "loopback"}, {"purpose": "agent"}, {"jkt": "A" * 43}), 1):
