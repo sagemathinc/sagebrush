@@ -1,6 +1,6 @@
 # Rill: an R-language mode (R0 design)
 
-*Status: design for review (R0). Author @sagebrush-magma, Nov 7 2026. Reviewers: all five lanes. Daybreak2 reviews size (§6), daybreak3 the engine and Stop (§8), astra sandboxing (§9), grader the tests (§7), board the copy. No product code lands before DESIGN CLEAR. After that, code comes in the small phased PRs of §3, each through all five lanes.*
+*Status: design for review (R0). Author @sagebrush-magma, Nov 7 2026. Reviewers: all five lanes. Daybreak2 reviews size (§6), daybreak3 the engine and Stop (§8), astra files, network and processes (§9), grader the tests (§7), board the copy. No product code lands before DESIGN CLEAR. After that, code comes in the small phased PRs of §3, each through all five lanes.*
 
 ## In plain words
 
@@ -23,7 +23,7 @@ The feasibility spike (`/scratch/sagebrush-reviews/r-spike/REPORT.md`, branch `s
 - **Only documentation is read.** R, its base packages, and every CRAN package Rill reimplements or uses as an oracle are GPL: knitr, rmarkdown, ggplot2, dplyr, tibble, pillar and rlang. For these we read only documentation: the R manuals, help pages (as text, `rhelp.sh`), the CRAN reference manuals, vignettes, and published books and papers. We never read their source code: no C, no Fortran, and no R-level source.
 - **The oracle is a black box.** It is R 4.5.3 in VM4 `~/sbm-r` (`/scratch/sagebrush-reviews/r-spike/APPENDIX-A-oracle.md`). We call functions and record outputs. We never print a function object, and never call `body`, `deparse`, `getAnywhere`, `edit`, `fix`, `page` or `View` on one. Inspecting data is fine: `.Random.seed`, `sprintf("%.17g", x)`, `write.csv(dataset)`, `ggplot_build(p)$data`.
 - **Our words, our code.** Help text is never copied into our docs, our docsearch index or our messages. Error and warning texts that R prints, and output layouts, are reproduced as observed behaviour; this is interoperability, as MATLAB mode reproduces MATLAB's.
-- **No Codex.**
+- **No code is written by Codex sessions.**
 - **Each oracle-derived algorithm records its provenance in its PR**, as the RNG section of the spike report does: what was observed, and what was fitted. For example: the RNG seeding and generators, `pretty()`, `format.pval`, and the column-header rules.
 - **Dataset values come with their published sources** (§5.6).
 
@@ -153,7 +153,7 @@ knitr's exact output text (the `##` prefixes, code fences, figure markup) is rec
 - `group_by` grouping metadata;
 - tibble printing (`# A tibble: n × m`, type abbreviations, truncation), which is its own printing layer, pinned by recorded outputs.
 
-`library(ggplot2)` and `library(dplyr)` attach our implementations. `library(other)` gives R's "there is no package called 'other'". `install.packages` explains that Rill provides base, stats, graphics, utils, datasets, ggplot2 and dplyr built in.
+`library(ggplot2)` and `library(dplyr)` attach our implementations. `library(other)` gives R's own error for a missing package (its exact text, quotes included, recorded from the oracle in the phase PR). `install.packages` explains that Rill provides base, stats, graphics, utils, datasets, ggplot2 and dplyr built in.
 
 ## 6. Lazy loading and size (daybreak2)
 
@@ -208,11 +208,11 @@ Rill adds these rules:
 1. **No R construct swallows Stop.** `tryCatch`, `try`, `withCallingHandlers` and `suppressWarnings` catch R conditions (`RError`, warnings, messages). They never catch `KeyboardInterrupt` or `SystemExit`. MATLAB mode's `try/catch` follows the same rule. R's own `interrupt` condition class is not offered to handlers, a documented difference: in R, `tryCatch(..., interrupt =)` can catch Ctrl-C.
 2. **`on.exit` handlers run on Stop.** They are implemented with Python's `finally`, so files are closed and `par()` is restored. A second Stop during an `on.exit` handler stops it too.
 3. **State survives.** Variables defined before Stop are kept, as in the other modes. A replacement function interrupted mid-way leaves the old value, because replacement copies and then rebinds (copy-on-modify), so there is never a half-updated object.
-4. **Deep recursion is an R error, not a crash.** R's `expressions` limit (5000) maps to a Rill depth bound checked in the evaluator, below the engine's stack limit. Passing it gives R's message ("evaluation nested too deeply: infinite recursion / options(expressions=)?"). `test/rill.test.ts` pins it.
-5. **Allocations are bounded before they happen.** For example `rep(0, 1e10)` or `matrix(0, 1e6, 1e6)` are refused before allocating, with R's "cannot allocate vector of size …" message. The bound is the session's memory accounting, as MATLAB's LU uses it. Any new limit is registered in the limits census.
+4. **Deep recursion is an R error, not a crash.** R's `expressions` limit (default 5000, per `?options`, and confirmed on the oracle) maps to a Rill depth bound checked in the evaluator, below the engine's stack limit. Passing it gives R's own message for runaway recursion, recorded from the oracle in the phase PR. `test/rill.test.ts` pins it.
+5. **Allocations are bounded before they happen.** For example `rep(0, 1e10)` or `matrix(0, 1e6, 1e6)` are refused before allocating, with R's own allocation-failure message, recorded from the oracle in the phase PR. The bound is the session's memory accounting, as MATLAB's LU uses it. Any new limit is registered in the limits census.
 6. **Tests:** `test/rill.test.ts` pins Stop in a tight `while (TRUE)`, inside `sapply`, inside `tryCatch` (not caught), during `on.exit`, and in a long `lm`. Each run is followed by a check that the session still answers and keeps its variables. Rill is added to the `interrupt-matrix` modes list, which is a test-side table, not a workflow file.
 
-## 9. Sandboxing: Files and Network (astra)
+## 9. Files, network and processes (astra)
 
 Rill reaches files only through Sagebrush's Python file layer, so the existing per-document switches apply unchanged (design/capabilities.md, and William's two permissions, files and network, Nov 2):
 
@@ -220,12 +220,12 @@ Rill reaches files only through Sagebrush's Python file layer, so the existing p
 - These all use Python's `open`/`os`, so the page's read gate and write gate decide. No Rill module touches the page or the workspace any other way:
   - reads: `read.csv`, `read.table`, `readLines`, `scan`, `file.exists`, `list.files`, `readRDS`;
   - writes: `write.csv`, `writeLines`, `cat(file =)`, `sink`, `saveRDS`, `file.remove`, `file.rename`, `dir.create`, `png()`/`svg()`/`pdf()` devices.
-- Every notebook starts with file changes off, including the person's own (#822, confinement 1b). Rill's first write raises the page's "wants to change your files" bar exactly as Python's does. Until the person allows changes, the R call fails with R's own write error.
+- Every notebook starts with file changes off, including the person's own (#822). Rill's first write raises the page's "wants to change your files" bar exactly as Python's does. Until the person allows changes, the R call fails with R's own write error.
 - `file.rename` is a true rename through workspace ops, as Python's is.
 - `setwd` is limited to the document's workspace.
 
 **Network: off.**
-- `url()`, `download.file`, `read.csv("https://…")` and `source("https://…")` fail with a clear Rill message saying the network is off for documents.
+- `url()`, `download.file`, `read.csv("https://…")` and `source("https://…")` fail with a Rill message saying the network is off for documents. Its exact text is quoted in the phase PR for the COPY check.
 - `install.packages` explains what's built in.
 - Nothing in Rill opens a connection. When the network permission gains a first feature, these route through it.
 
@@ -236,9 +236,9 @@ Rill reaches files only through Sagebrush's Python file layer, so the existing p
 **Output.**
 - HTML and Markdown from Rill (Rmd preview, `knitr::kable`-like tables) go through `safeHtml`/`renderMarkdown` with `remote: false`.
 - Plots are our own SVG.
-- No Rill API can emit script or reach JavaScript.
+- Rill must offer no API that emits script or reaches JavaScript.
 
-**`eval(parse(text = s))`** evaluates R inside Rill only: there is no escape to Python. Rill never exposes `py_run` or anything like reticulate.
+**`eval(parse(text = s))`** must evaluate R inside Rill only: Rill must offer no escape to Python, and must not expose `py_run` or anything like reticulate.
 
 **The gate inventory** (astra's audit) lists every Rill function that reaches a file or a process, generated from the code by a census script, like the arraybuffer census.
 
@@ -274,9 +274,9 @@ The plan, measured in each PR:
 
 ## 12. Open questions
 
-1. **Oracle packages (for @sagebrush).** May I install `r-knitr`, `r-rmarkdown`, `r-ggplot2`, `r-dplyr` and `r-tibble` into VM4 `~/sbm-r` (micromamba, home only, as R itself), when phases B–D start, so they can be recorded as black boxes?
-2. **`system()` (for William).** Should R's `system()` use the just-bash ShellHost, as Python's `os.system` does, or stay refused?
-3. **Rmd output formats (for William).** Beyond HTML, which comes first: PDF through the LaTeX pipeline, or slides (`beamer_presentation` or HTML slides)?
+1. **Oracle packages: approved by @sagebrush (Nov 7).** When phases B–D start, `r-knitr`, `r-rmarkdown`, `r-ggplot2`, `r-dplyr` and `r-tibble` go into VM4 `~/sbm-r` only (micromamba, home only, as R itself). They stay black boxes: their source is never read or printed. Before installing, run the VM checklist (no QUARANTINE marker, `lsof -w`, `df` on the exact path). Their versions are recorded in `rill-tests/` provenance.
+2. **`system()` (for William; @sagebrush has asked).** Should R's `system()` use the just-bash ShellHost, as Python's `os.system` does? Until he answers it stays refused, the least complex default.
+3. **Rmd output formats (for William; @sagebrush has asked).** Beyond HTML, which comes first: PDF through the LaTeX pipeline, or slides (`beamer_presentation` or HTML slides)?
 4. **Order of A2 and A3 (for the lanes).** A2 (in the product) comes before the bulk of builtins, so teachers can try Rill early. Is that the order you want?
 
 ## 13. Estimate
@@ -286,8 +286,8 @@ From the spike report, refined by this design:
 | Phases | Estimate |
 |---|---|
 | A (MVP base R in every host) | 14–18 agent-weeks |
-| B (`.Rmd` and `\rill` in LaTeX) | 2–3 weeks |
-| C (ggplot2) | 3–4 weeks |
-| D (dplyr with tibble printing) | 3–4 weeks |
+| B (`.Rmd` and `\rill` in LaTeX) | 2–3 agent-weeks |
+| C (ggplot2) | 3–4 agent-weeks |
+| D (dplyr with tibble printing) | 3–4 agent-weeks |
 
 Each phase ends with its held-out score reported, and with no known corpus difference left unexplained in `KNOWN.md`.
