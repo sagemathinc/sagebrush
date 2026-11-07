@@ -115,6 +115,7 @@ function serializeRuns(runs) {
   }
   return out;
 }
+const NEWPAGE = '<div class="newpage"></div>';
 class Flow {
   // (pos: the source offset of the latest node walked; rootPos[k]: the offset where top-level item k began, or -1)
   constructor(inline = false) { this.inline = inline; this.root = { items: [] }; this.stack = [this.root]; this.runs = null; this.noindent = false; this.pcls = ""; this.pos = -1; this.parPos = -1; this.rootPos = []; }
@@ -134,11 +135,22 @@ class Flow {
     const runs = this.runs; this.runs = null;
     while (runs.length && !runs[runs.length - 1].raw && runs[runs.length - 1].s === " ") runs.pop();
     const h = serializeRuns(runs);
-    if (!h.trim()) return;
+    // (a \pagebreak met in this paragraph: the page breaks after it (TeX: after that line))
+    const pg = this.pgAfter; this.pgAfter = false;
+    if (!h.trim()) { if (pg) this.pageBreak(); return; }
     if (this.inline) { const it = this.cur().items; if (it.length) it.push(" "); it.push(h); return; }
     const cls = [this.pni ? "ni" : "", this.pal ? "al-" + this.pal : ""].filter(Boolean).join(" ");
     this.cur().items.push('<div class="p' + (cls ? " " + cls : "") + '">' + h + "</div>");
     this.atRoot(this.parPos);
+    if (pg) this.pageBreak();
+  }
+  // (a page break: none on an empty page (TeX's \newpage there does nothing: two in a row, or one before anything, make
+  //  no blank page), nor after everything (finish))
+  pageBreak() {
+    this.par();
+    const it = this.cur().items;
+    if (it[it.length - 1] === NEWPAGE || (this.cur() === this.root && !it.length)) return;
+    it.push(NEWPAGE); this.atRoot(this.pos);
   }
   block(h) { this.par(); this.cur().items.push(h); this.atRoot(this.pos); }
   open(tag, attrs = "", head = "") { this.par(); const b = { tag, attrs, head, tail: "", items: [], pos: this.pos }; this.stack.push(b); return b; }
@@ -152,7 +164,11 @@ class Flow {
       if (x === b) break;
     }
   }
-  finish() { this.par(); while (this.stack.length > 1) this.close(this.cur()); return this.root.items; }
+  finish() {
+    this.par(); while (this.stack.length > 1) this.close(this.cur());
+    if (this.root.items[this.root.items.length - 1] === NEWPAGE) { this.root.items.pop(); this.rootPos.length = this.root.items.length; }
+    return this.root.items;
+  }
   inlineHtml() { return this.finish().join(""); }
 }
 
@@ -184,7 +200,7 @@ const LIST_ENVS = new Set(["itemize", "enumerate", "description", "list", "compa
 const step = (v) => (v + 1) | 0;
 const SEC_LEVEL = { part: -1, chapter: 0, section: 1, subsection: 2, subsubsection: 3, paragraph: 4, subparagraph: 5 };
 const NOOP = new Set(["relax", "protect", "makeatletter", "makeatother", "sloppy", "fussy", "nobreak", "allowbreak", "frenchspacing", "nonfrenchspacing",
-  "ignorespaces", "leavevmode", "null", "vfill", "vfil", "clearpage", "cleardoublepage", "newpage", "pagebreak", "nopagebreak", "nolinebreak", "indent",
+  "ignorespaces", "leavevmode", "null", "vfill", "vfil", "nopagebreak", "nolinebreak", "indent",
   "makeindex", "makeglossary", "maketitle@", "frontmatter", "mainmatter", "backmatter", "normalsize", "selectfont", "onecolumn", "twocolumn",
   "flushbottom", "raggedbottom", "strut", "unskip", "hss", "hfilneg", "break", "filbreak", "goodbreak", "noindent@", "centerline@", "displaystyle", "textstyle", "boldmath", "unboldmath",
   "thicklines@", "listoffigures", "listoftables", "FloatBarrier", "vss", "smallskipamount", "ifhmode", "fi", "else",
@@ -1108,6 +1124,19 @@ const CMDS = {
   medbreak: function (nodes, i, ctx, flow) { flow.block('<div class="vsp" style="height:.5em"></div>'); return i; },
   smallbreak: function (nodes, i, ctx, flow) { flow.block('<div class="vsp" style="height:.25em"></div>'); return i; },
   hrule: function (nodes, i, ctx, flow) { flow.block("<hr>"); return i; },
+  // (a page break, as TeX's (Codex W05: it was ignored): printed (and in a PDF) the page ends there; in the preview, a
+  //  line where it does. \newpage, \clearpage: the paragraph ends, then the page. \pagebreak in a paragraph: the page
+  //  breaks after it, the paragraph kept whole (TeX: after its line); [n] below 4 is only a hint: nothing. Within an
+  //  inline flow (a box): nothing. A beamer frame's: none (style.ts))
+  newpage: function (nodes, i, ctx, flow) { if (!flow.inline) flow.pageBreak(); return i; },
+  clearpage: function (nodes, i, ctx, flow) { if (!flow.inline) flow.pageBreak(); return i; },
+  cleardoublepage: function (nodes, i, ctx, flow) { if (!flow.inline) flow.pageBreak(); return i; },
+  pagebreak: function (nodes, i, ctx, flow) {
+    const [a, j] = this.opt(nodes, i);
+    if ((a ? this.str(a).trim() : "4") !== "4" || flow.inline) return j;
+    if (flow.runs) flow.pgAfter = true; else flow.pageBreak();
+    return j;
+  },
   rule: function (nodes, i, ctx, flow) { const [, j0] = this.opt(nodes, i); const [w, j1] = this.arg(nodes, j0); const [h, j2] = this.arg(nodes, j1); flow.html('<span class="rule" style="width:' + (cssDim(this.str(w)) || "0") + ";height:" + (cssDim(this.str(h)) || "0") + '"></span>', ctx.st); return j2; },
   symbol: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); const c = this.charCode(this.str(a)); if (c !== null) flow.text(String.fromCodePoint(c), ctx.st); return j; },
   char: function (nodes, i, ctx, flow) { let s = "", j = i + 1; while (j < nodes.length && nodes[j].t === "x" && !isCs(nodes[j].v) && catOf(nodes[j].v) !== CAT.SPACE && /["'`0-9A-Fa-f]/.test(String.fromCodePoint(codeOf(nodes[j].v)))) { s += String.fromCodePoint(codeOf(nodes[j].v)); j++; } if (this.isSp(nodes[j])) j++; const c = this.charCode(s); if (c !== null) flow.text(String.fromCodePoint(c), ctx.st); return j - 1; },

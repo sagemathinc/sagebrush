@@ -593,6 +593,15 @@ check("hl-blank-ends-math", run("", "M").end === "N" && run("  \t", "D").end ===
     ["math-list-item", "\\begin{itemize}\\item $a\n\n\\item b text\\end{itemize}", (h) => count(h, "$ not closed") === 1 && h.includes("b text") && count(h, "<li") === 2],
     ["math-grouped-closed", "{$a$} and {$$b$$}", (h) => !h.includes("mathopen") && count(h, 'class="KI"') === 1 && count(h, 'class="KD"') === 1],
     ["math-closed-unchanged", "$a$ and $$b$$ and \\[c\\] \\(d\\) and $$\ne\n$$", (h) => !h.includes("mathopen") && count(h, 'class="KI"') === 2 && count(h, 'class="KD"') === 3],
+    // (Codex W05: a page break, as TeX's: \newpage, \clearpage, \cleardoublepage, \pagebreak (and [4]) each end the page
+    //  there, the paragraph too; \pagebreak[n] below 4 is a hint: nothing, its [n] not shown as text; \nopagebreak nothing)
+    ["newpage-breaks", "One.\\newpage Two.\n\n\\clearpage Three.\\cleardoublepage Four.\n\n\\pagebreak Five.\n\n\\pagebreak[4] Six.", (h) => count(h, '<div class="newpage"></div>') === 5 && h.includes('One.</div><div class="newpage"></div><div class="p">Two.') && h.includes("Six.")],
+    // (TeX: \pagebreak within a paragraph breaks the page after its line, the paragraph whole (TeX Live: "One.\pagebreak
+    //  Two.\clearpage Three." is 2 pages, "One.Two." on the first: the space after a control word skipped))
+    ["pagebreak-in-par", "One.\\pagebreak Two.\\clearpage Three.", (h) => count(h, '<div class="newpage"></div>') === 1 && h.includes('One.Two.</div><div class="newpage"></div><div class="p">Three.')],
+    // (no blank page: a break before anything, two in a row, or one after everything, is none, as in TeX)
+    ["newpage-collapse", "\\newpage\\clearpage A.\\newpage\\newpage\n\n\\clearpage B.\\newpage", (h) => count(h, '<div class="newpage"></div>') === 1 && h.includes('A.</div><div class="newpage"></div><div class="p">B.</div>') && !h.trimEnd().endsWith('<div class="newpage"></div>')],
+    ["pagebreak-hint", "A.\\pagebreak[2] B.\\nopagebreak C.\\pagebreak[0]D.\n\n\\pagebreak[3]\n\nE.", (h) => count(h, "newpage") === 0 && !h.includes("[2]") && !h.includes("[0]") && !h.includes("[3]") && /A\.\s*B\.\s*C\.\s*D\.\s*E\./.test(h.replace(/<[^>]+>/g, ""))],
   ];
   for (const [name, body, ok] of cases) { const h = html(body); check(name, ok(h), h.slice(0, 600)); }
   // half-typed arguments (as TeX: a blank line ends a name, an optional [...] or a section title; the command is
