@@ -15,3 +15,14 @@ show(lambda: (K['t'].gen() + 1)(2.5r))
 show(lambda: CyclotomicField(3).gen() * CC(1, 1))
 show(lambda: Zmod(1)(0) + 2.0r)
 show(lambda: Zmod(1)['u'].gen() * 2.0r)
+# No factorization during a refusal (astra's REFUSAL-WORK-1): with the factor backends made to fail, refusals of a
+# Python float with quadratic fields, a large constant term included, still give Sage's text, twice over.
+import _sage_ff, sage_all
+def _no_factor(*a, **k):
+    raise AssertionError("factorization entered during a refusal")
+_sage_ff._factor_int = _no_factor
+sage_all.factor = _no_factor
+for D in [3, 12, 2 * 10007^2, (10^30 + 57) * (10^30 + 91)]:
+    K = NumberField(x^2 - D, 'g')
+    for _ in range(2):
+        show(lambda: str(K.gen() + 2.0r).split("'")[1].split(".")[-1])

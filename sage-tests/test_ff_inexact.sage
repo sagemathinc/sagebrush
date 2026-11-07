@@ -32,3 +32,8 @@ for B in Bs:
         show(L + " s / f", lambda: s / f)
         show(L + " f == s", lambda: f == s)
         show(L + " f(s)", lambda: f(s))
+# The class of a quadratic field's element, which Sage decides by the square factors p^2 with p < 10^4 of the
+# constant term (astra's REFUSAL-WORK-1: a bounded test, no factorization)
+for D in [3, 12, 2 * 9973^2, 2 * 10007^2, 99999989, 10^8 + 7, (10^9 + 7) * (10^9 + 9), 2 * (10^9 + 7)^2, -(10^9 + 7), -4 * (10^9 + 7)]:
+    K = NumberField(x^2 - D, 'g')
+    show("NumberField(x^2 - %s)(1) + 2.0" % D, lambda: K(1) + float(2))

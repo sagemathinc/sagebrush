@@ -3,7 +3,21 @@ Python float or complex) with Zmod(n), a finite field or a number field, their e
 and polynomials, in Sage 10.10's words (L34): loaded only when one is met, from
 _sage_ff.refuse_inexact."""
 
-from _sage_ff import IntegerMod, FiniteFieldElement, Polynomial_ff, _factor_int, _number_field
+from _sage_ff import IntegerMod, FiniteFieldElement, Polynomial_ff, _number_field
+
+
+def _no_small_square(D):
+    """Whether no p^2 with p < 10^4 divides D: the test that decides Sage's class of
+    a quadratic field's element (probed in Sage 10.10: x^2 - 2*9973^2 gives
+    NumberFieldElement_quadratic, x^2 - 2*10007^2 NumberFieldElement_quadratic_sqrt).
+    Bounded work, below 10^4 divisions, and no factorization."""
+    D = abs(D)
+    d = 2
+    while d < 10000 and d * d <= D:
+        if D % (d * d) == 0:
+            return False
+        d += 1
+    return True
 
 
 # the classes Sage names when it refuses a Python float or complex: polynomials over
@@ -58,10 +72,10 @@ def _sage_element_class(x):
         return "sage.rings.finite_rings.element_pari_ffelt.FiniteFieldElement_pari_ffelt"
     f = x._K._f
     if len(f) == 3:
-        # x^2 + 1, x^2 - D with D squarefree, any other quadratic
+        # x^2 + 1, x^2 - D with no small square factor, any other quadratic
         if f[1] == 0 and f[0] == 1:
             return "sage.rings.number_field.number_field_element_quadratic.NumberFieldElement_gaussian"
-        if f[1] == 0 and f[0] != 0 and all(e == 1 for _, e in _factor_int(abs(int(f[0])))):
+        if f[1] == 0 and f[0] != 0 and _no_small_square(int(f[0])):
             return "sage.rings.number_field.number_field_element_quadratic.NumberFieldElement_quadratic_sqrt"
         return "sage.rings.number_field.number_field_element_quadratic.NumberFieldElement_quadratic"
     if len(f) > 3:

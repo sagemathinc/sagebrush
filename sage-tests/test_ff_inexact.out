@@ -2572,3 +2572,13 @@ Number Field in c with defining polynomial x^3 - 2 (1+1j) f / s -> TypeError: un
 Number Field in c with defining polynomial x^3 - 2 (1+1j) s / f -> TypeError: unsupported operand type(s) for /: 'complex' and 'PolynomialRing_field_with_category.element_class'
 Number Field in c with defining polynomial x^3 - 2 (1+1j) f == s -> False
 Number Field in c with defining polynomial x^3 - 2 (1+1j) f(s) -> TypeError: no common canonical parent for objects with parents: 'Number Field in c with defining polynomial x^3 - 2' and '<class 'complex'>'
+NumberField(x^2 - 3)(1) + 2.0 -> TypeError: unsupported operand type(s) for +: 'sage.rings.number_field.number_field_element_quadratic.NumberFieldElement_quadratic_sqrt' and 'float'
+NumberField(x^2 - 12)(1) + 2.0 -> TypeError: unsupported operand type(s) for +: 'sage.rings.number_field.number_field_element_quadratic.NumberFieldElement_quadratic' and 'float'
+NumberField(x^2 - 198921458)(1) + 2.0 -> TypeError: unsupported operand type(s) for +: 'sage.rings.number_field.number_field_element_quadratic.NumberFieldElement_quadratic' and 'float'
+NumberField(x^2 - 200280098)(1) + 2.0 -> TypeError: unsupported operand type(s) for +: 'sage.rings.number_field.number_field_element_quadratic.NumberFieldElement_quadratic_sqrt' and 'float'
+NumberField(x^2 - 99999989)(1) + 2.0 -> TypeError: unsupported operand type(s) for +: 'sage.rings.number_field.number_field_element_quadratic.NumberFieldElement_quadratic_sqrt' and 'float'
+NumberField(x^2 - 100000007)(1) + 2.0 -> TypeError: unsupported operand type(s) for +: 'sage.rings.number_field.number_field_element_quadratic.NumberFieldElement_quadratic_sqrt' and 'float'
+NumberField(x^2 - 1000000016000000063)(1) + 2.0 -> TypeError: unsupported operand type(s) for +: 'sage.rings.number_field.number_field_element_quadratic.NumberFieldElement_quadratic_sqrt' and 'float'
+NumberField(x^2 - 2000000028000000098)(1) + 2.0 -> TypeError: unsupported operand type(s) for +: 'sage.rings.number_field.number_field_element_quadratic.NumberFieldElement_quadratic_sqrt' and 'float'
+NumberField(x^2 - -1000000007)(1) + 2.0 -> TypeError: unsupported operand type(s) for +: 'sage.rings.number_field.number_field_element_quadratic.NumberFieldElement_quadratic_sqrt' and 'float'
+NumberField(x^2 - -4000000028)(1) + 2.0 -> TypeError: unsupported operand type(s) for +: 'sage.rings.number_field.number_field_element_quadratic.NumberFieldElement_quadratic' and 'float'
