@@ -142,6 +142,18 @@ out = "".join(c["text"] for c in of(m, "stream"))
 check("%time (Sage)", of(m, "execute_result")[0]["data"]["text/plain"] == "1024" and out.startswith("11\nWall time: ") and out.count("Wall time") == 2, m)
 r, m = run(kc, "!ls")
 check("!ls is refused", r["status"] == "error" and "shell commands are not available" in r["evalue"], r)
+# @interact: no controls in Jupyter yet (P11b), so the function runs once with
+# its defaults, after a note saying so; one that raises prints its traceback and
+# the cell succeeds, as Sage's text mode does
+r, m = run(kc, "@interact\ndef pairing(u=slider(0,4,1,2), v=slider(0,4,1,1), k=['a', 'b'], g=True):\n    print((2*u+v)/3, k, g)")
+out = "".join(c["text"] for c in of(m, "stream") if c["name"] == "stdout")
+check("@interact: a note, then its run at the defaults", r["status"] == "ok" and out ==
+      "[Jupyter shows no controls for this yet: pairing ran once with its default values: u=2, v=1, k='a', g=True]\n5/3 a True\n", (r["status"], out))
+r, m = run(kc, "@interact\ndef bad(u=slider(0,4,1,2)):\n    1/0")
+err = "".join(c["text"] for c in of(m, "stream") if c["name"] == "stderr")
+check("@interact whose function raises: its traceback, and the cell succeeds",
+      r["status"] == "ok" and not of(m, "error") and "ZeroDivisionError" in err
+      and "bad ran once with its default values: u=2]" in "".join(c["text"] for c in of(m, "stream") if c["name"] == "stdout"), (r, m))
 km.shutdown_kernel(now=False)
 check("shutdown", not km.is_alive())
 
@@ -149,6 +161,17 @@ check("shutdown", not km.is_alive())
 km, kc = kernel("sagebrush-python")
 r, m = run(kc, "2^10, 7/2")
 check("python mode", of(m, "execute_result")[0]["data"]["text/plain"] == "(8, 3.5)", m)
+# ipywidgets' interact: the same note and run at the defaults
+r, m = run(kc, "from ipywidgets import interact\n@interact(n=(1, 10), kind=['sin', 'cos'], x=0.5)\ndef f(n=3, kind='cos', x=0.5):\n    print(n, kind, x)")
+out = "".join(c["text"] for c in of(m, "stream"))
+check("ipywidgets interact: a note, then its run at the defaults", r["status"] == "ok" and out ==
+      "[Jupyter shows no controls for this yet: f ran once with its default values: n=3, kind='cos', x=0.5]\n3 cos 0.5\n", (r["status"], out))
+# widgets passed to display(): the note with their values, and interactive_output's function run with them
+r, m = run(kc, "from ipywidgets import IntSlider, Dropdown, VBox, interactive_output\nn = IntSlider(5, 1, 10, description='n')\nd = Dropdown(options=['x', 'y'])\n"
+               "o = interactive_output(lambda n, d: print(n * n, d), {'n': n, 'd': d})\nfrom IPython.display import display\ndisplay(VBox([n, d]))")
+out = "".join(c["text"] for c in of(m, "stream"))
+check("ipywidgets display(): the note, then interactive_output's run", r["status"] == "ok" and out ==
+      "[Jupyter shows no controls for this yet: these widgets keep their values: n=5, 'x']\n25 x\n", (r["status"], out, of(m, "display_data")))
 km.shutdown_kernel(now=True)
 
 # ---- Magma mode

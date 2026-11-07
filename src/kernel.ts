@@ -422,6 +422,36 @@ export async function runKernel(connectionFile: string, mode: Mode): Promise<voi
 
 // ------------------------------------------------------------------ the worker thread
 
+// The note before an @interact's run at its defaults (lib/_interact.py's spec:
+// {name, controls: [{kind, name, label, value, labels?, options?, ints?}]}), its
+// values as Python writes them; ipywidgets' own controls (widgets_changed) keep their values.
+export function interactNote(spec: any): string {
+  const q = (s: string) => "'" + s.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\n/g, "\\n") + "'";
+  const num = (x: any, ints: boolean) => (ints ? String(Math.round(+x)) : String(+(+x).toPrecision(6)));
+  const text = (c: any): string | null => {
+    const v = c.value;
+    if (c.kind === "slider" && Array.isArray(c.labels)) return String(c.labels[v] ?? v);
+    if (c.kind === "selector" && Array.isArray(c.options)) return q(String(c.options[v] ?? v));
+    if (c.kind === "slider") return num(v, !!c.ints);
+    if (c.kind === "range" && Array.isArray(v)) return `(${num(v[0], !!c.ints)}, ${num(v[1], !!c.ints)})`;
+    if (c.kind === "button" || c.kind === "text") return null;
+    if (typeof v === "boolean") return v ? "True" : "False";
+    if (typeof v === "number") return num(v, Number.isInteger(v));
+    return q(String(v ?? ""));
+  };
+  const controls: any[] = Array.isArray(spec?.controls) ? spec.controls : [];
+  const shown = controls.flatMap((c) => {
+    const t = text(c);
+    if (t === null) return [];
+    const v = t.length > 60 ? t.slice(0, 59) + "…" : t;
+    // (a widget with no description: its value alone)
+    return [c.label ? `${String(c.label).slice(0, 40)}=${v}` : /^_w\d+$/.test(c.name) ? v : `${c.name}=${v}`];
+  });
+  const values = shown.length > 12 ? [...shown.slice(0, 12), `and ${shown.length - 12} more`] : shown;
+  const who = spec?.name === "widgets_changed" ? "these widgets keep their values" : `${String(spec?.name ?? "f").slice(0, 40)} ran once with its default values`;
+  return `[Jupyter shows no controls for this yet: ${who}${values.length ? ": " + values.join(", ") : ""}]`;
+}
+
 export function kernelWorker(mode: Mode) {
   const port = parentPort!;
   let current: number | null = null;
@@ -480,6 +510,18 @@ export function kernelWorker(mode: Mode) {
     clear_output() {
       flush();
       if (current !== null) port.postMessage({ id: current, clear: true });
+    },
+    // (an @interact, or ipywidgets shown: Jupyter front ends get no controls from this
+    // kernel yet, so the function runs once with its defaults, as in Sage's text mode,
+    // after a note saying so: lib/_interact.py runs it when this returns false)
+    interact(spec: string) {
+      if (current === null) return false;
+      let note = "";
+      try {
+        note = interactNote(JSON.parse(spec));
+      } catch {}
+      if (note) R.stdout.write(note + "\n");
+      return false;
     },
     target() {},
   };
