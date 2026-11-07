@@ -32,10 +32,10 @@ if (!isMainThread) {
   assert.equal(addon.stop(14n), true);
   m = await p; assert.equal(m.r, '{"interrupted":true}'); out.push(`stop during parallel moments(2e8): interrupted after ${m.ms.toFixed(0)} ms`);
   m = await run("aplist", 15, 1000); assert.ok(m.r.startsWith('{"ok":[['), m.r); out.push("an engine call after the stopped parallel call: ok");
-  // 4b. the finding: aplist has no interrupt check, so an accepted stop doesn't end it
+  // 4b. aplist itself now checks per prime (#831): an accepted stop ends it
   p = run("aplist", 16, 20000000); await sleep(200);
-  const st = addon.stop(16n);
-  m = await p; out.push(`FINDING aplist(2e7): stop()=${st} but reply ${m.r.slice(0, 8)}... after ${m.ms.toFixed(0)} ms (sagebrush_ap::aplist never calls check)`);
+  assert.equal(addon.stop(16n), true);
+  m = await p; assert.equal(m.r, '{"interrupted":true}'); out.push(`stop during aplist(2e7): interrupted after ${m.ms.toFixed(0)} ms (#831's checks)`);
   // 5. no SIGINT handler installed by the add-on
   out.push(`SIGINT listeners in this process: ${process.listenerCount("SIGINT")}`);
   console.log(out.join("\n"));
