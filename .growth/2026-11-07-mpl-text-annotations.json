@@ -1,14 +1,14 @@
 {
  "v": 1,
- "reason": "matplotlib text and annotations as matplotlib 3.11.1 (friction W13, W14, W15, W29, W30, W44): annotate's coordinates, annotation_clip and arrows (FancyArrowPatch: arc3, clipping, shrinking, heads, simple, the YAArrow look-alike), bbox= boxes, multi-line text, unclipped text, legend locations, 168 mathtext symbols and the \\mathbb/\\mathcal/\\mathfrak alphabets. The annotation code is the lazily imported matplotlib._annotations (mod-matplotlib); the core keeps the Text layout and the symbol table, the latter as one name/character string. Measured with bun 1.4.4 (size-record.sh) on a probe merge of head 2ceb0442 into master 0a255d10: cli/lib.gen.js +13820, cli/pyjs.cjs +13844, engine/lib/core.pre +27911, engine/lib/core.src +9425, engine/lib/mod-matplotlib.src +22801, engine/lib/sci.pre +4647, engine/lib/sci.src +1043, engine/sagebrush-worker.js +46; site/examples -3. Ceilings: mod-matplotlib.src 58349, sci.src 404404 (measured + 64). Markers exact but cli/pyjs.cjs 13908 (+64, as it moves with master).",
+ "reason": "matplotlib text and annotations as matplotlib 3.11.1 (friction W13, W14, W15, W29, W30, W44): annotate's coordinates, annotation_clip and arrows (FancyArrowPatch: arc3, clipping, shrinking, heads, simple, the YAArrow look-alike), bbox= boxes, multi-line text, unclipped text, legend locations, 168 mathtext symbols and the \\mathbb/\\mathcal/\\mathfrak alphabets. The annotation code is the lazily imported matplotlib._annotations (mod-matplotlib); the core keeps the Text layout and the symbol table, the latter as one name/character string. Measured with bun 1.4.4 (size-record.sh) on a probe merge of head ee4d1c61 into master 0a255d10: cli/lib.gen.js +14196, cli/pyjs.cjs +14136, engine/lib/core.pre +28126, engine/lib/core.src +9560, engine/lib/mod-matplotlib.src +23454, engine/lib/sci.pre +4635, engine/lib/sci.src +1040, engine/sagebrush-worker.js +46; site/examples -3. Ceilings: mod-matplotlib.src 59002, sci.src 404404 (measured + 64 when raised). Markers exact but cli/pyjs.cjs 14200 (+64, as it moves with master).",
  "bytes": {
-  "cli/lib.gen.js": 13820,
-  "cli/pyjs.cjs": 13908,
-  "engine/lib/core.pre": 27911,
-  "engine/lib/core.src": 9425,
-  "engine/lib/mod-matplotlib.src": 22801,
-  "engine/lib/sci.pre": 4647,
-  "engine/lib/sci.src": 1043,
+  "cli/lib.gen.js": 14196,
+  "cli/pyjs.cjs": 14200,
+  "engine/lib/core.pre": 28126,
+  "engine/lib/core.src": 9560,
+  "engine/lib/mod-matplotlib.src": 23454,
+  "engine/lib/sci.pre": 4635,
+  "engine/lib/sci.src": 1040,
   "engine/sagebrush-worker.js": 46
  }
 }
