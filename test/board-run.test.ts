@@ -46,6 +46,34 @@ test("board run: what fails, says why, and what reads it is not run; the others 
   assert.equal(item(report, "j").stdout, "43\n", "a last expression's value, as the board shows it");
 });
 
+// (Codex's friction P11a, python's reproduction /scratch/codex-friction/recheck/repro/P11/w.board.json: an @interact
+// item reported ok with only "[interactive controls]", its function's run at its defaults (Sage's text mode prints
+// 5/3 for this one) not shown, and a function that raises passing)
+test("board run: an @interact item reports its function's run at its defaults; one whose function raises fails, saying so", () => {
+  const { status, report } = json(["-"], board([
+    { id: "w", title: "widget", code: "@interact\ndef pairing(u=slider(0,4,1,2), v=slider(0,4,1,1)):\n    print((2*u+v)/3)" },
+    { id: "e", title: "err", code: "@interact\ndef bad(u=slider(0,4,1,2)):\n    1/0" },
+    { id: "after", title: "after", code: "print('next')" },
+  ], { mode: "sage" }));
+  assert.equal(status, 1);
+  assert.equal(item(report, "w").status, "ok");
+  assert.equal(item(report, "w").stdout, "5/3\n", JSON.stringify(item(report, "w")));
+  assert.equal(item(report, "e").status, "failed", JSON.stringify(item(report, "e")));
+  assert.match(item(report, "e").error, /^Traceback[\s\S]*ZeroDivisionError[^\n]*\n\(raised by its @interact function, run with its default values\)$/);
+  assert.equal(item(report, "after").status, "ok");
+  assert.equal(item(report, "after").stdout, "next\n");
+  // (and board check, which runs the items the same way: an error, the reason in what it keeps of it)
+  const dir = mkdtempSync(join(tmpdir(), "sb-interact-")), f = join(dir, "w.board.json");
+  try {
+    writeFileSync(f, board([{ id: "e", title: "err", code: "@interact\ndef bad(u=slider(0,4,1,2)):\n    1/0" }], { mode: "sage" }));
+    const c = spawnSync(process.execPath, [__dirname + "/../src/cli.js", "board", "check", f], { encoding: "utf8", timeout: 120_000 });
+    assert.equal(c.status, 1, c.stdout + c.stderr);
+    assert.match(c.stdout, /code item "e" \("err"\) failed:[\s\S]*ZeroDivisionError[\s\S]*\(raised by its @interact function, run with its default values\)/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("board run: an item that does not stop when interrupted: the interpreter is stopped, and what was left is not run", () => {
   const t0 = Date.now();
   // (a catastrophic regular expression: the engine's own matching, which never polls Stop)

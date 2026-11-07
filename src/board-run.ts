@@ -436,7 +436,13 @@ export async function runBoard(doc: BoardDoc, timeout: number, after?: (evaluate
       if (ms !== undefined && reactive.outcome.has(id)) r.ms = Math.round(ms);
       if (errs?.length) { r.status = "error"; r.error = syntax.get(id) ?? errs.map((e) => errorText(e, label, (n) => reactive.written(n))).join("\n"); r.stdout = r.stderr = ""; r.outputs = []; }
       else if (timedOut.has(id)) { r.status = "timeout"; r.error = `ran out of time: stopped after ${timeout} s` + (r.stderr ? "\n" + r.stderr : ""); }
-      else if (reactive.outcome.get(id) === "ok" && !failed.has(id)) r.status = "ok";
+      else if (reactive.outcome.get(id) === "ok" && !failed.has(id)) {
+        r.status = "ok";
+        // (its @interact's function raised when run with its defaults (P11a, Codex's friction): the item fails, saying so)
+        const ie = interactErr.get(list) ?? "", tb = ie.indexOf(TRACEBACK);
+        // (the reason last: board check keeps an error's last lines)
+        if (tb >= 0) { r.status = "failed"; r.error = ie.slice(tb).trim() + "\n(raised by its @interact function, run with its default values)"; }
+      }
       else if (failed.has(id) || reactive.outcome.get(id) === "exception") { r.status = "failed"; r.error = r.stderr.trim() || "raised an error"; }
       else {
         r.status = "not run";
@@ -493,6 +499,10 @@ export const ITEM_OUTPUT_MAX = 4 * 2 ** 20, RUN_OUTPUT_MAX = 32 * 2 ** 20;
 // notebook-session.ts displayCost, HARD-58F-1)
 export const ITEM_DISPLAYS_MAX = 10000;
 const sizes = new WeakMap<any[], { used: number; cut: boolean; displays: number }>();
+// (what an item's @interact wrote to stderr in its own output area: its function's run at its defaults, whose error
+// lib/_interact.py prints there as a traceback rather than raising, as Sage's interact does)
+const interactErr = new WeakMap<any[], string>();
+const TRACEBACK = "Traceback (most recent call last):";
 
 const CUT_WHY = { item: `${ITEM_OUTPUT_MAX / 2 ** 20} MB for this item`, run: `${RUN_OUTPUT_MAX / 2 ** 20} MB for the whole board`, displays: `${ITEM_DISPLAYS_MAX} displays for this item` };
 const cutNote = (why: keyof typeof CUT_WHY) => ({ output_type: "stream", name: "stderr", text: `\n[output cut: past ${CUT_WHY[why]}; the rest was not kept]\n` });
@@ -500,7 +510,12 @@ const cutNote = (why: keyof typeof CUT_WHY) => ({ output_type: "stream", name: "
 // a run's messages, as the notebook keeps them (Jupyter's outputs): streams
 // joined, displays as display_data, clear_output() as it says
 function collect(list: any[], m: any, kept: { run: number }) {
-  if (m.target != null) return; // (an @interact's own output area: shown when it is moved)
+  // (an @interact's own output area: its function's run at its defaults, reported with the item, after its controls;
+  // a clear_output() there clears only that area in a browser, so here nothing)
+  if (m.target != null) {
+    if (m.clear) return;
+    if (m.stream === "stderr") interactErr.set(list, (interactErr.get(list) ?? "") + String(m.text ?? ""));
+  }
   const size = sizes.get(list) ?? { used: 0, cut: false, displays: 0 };
   sizes.set(list, size);
   if (m.clear) { kept.run -= size.used; size.used = 0; size.cut = false; size.displays = 0; list.length = 0; return; }
