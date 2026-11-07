@@ -1,8 +1,8 @@
 {
  "v": 1,
- "reason": "sys.flags as CPython 3.14's struct sequence (18 fields plus gil, thread_inherit_context and context_aware_warnings; locale.getpreferredencoding read flags our two-attribute module lacked), struct sequence fields read-only with CPython's 'readonly attribute', sys.flags/sys.version_info refusing construction, and a struct sequence keeping its first hash (as CPython 3.14's tuples). Measured with bun 1.4.4 (size-record.sh) on master e94d6e40 vs its probe merge: engine/sagebrush-worker.js +550 (the runtime: the field list and values, the read-only setter, the allocator and the hash cache), cli/pyjs.cjs +525 (the same runtime and the embedded web build; +64 slack). No library or lazy-group change.",
+ "reason": "sys.flags as CPython 3.14's struct sequence (18 fields plus gil, thread_inherit_context and context_aware_warnings; locale.getpreferredencoding read flags our two-attribute module lacked), struct sequence fields read-only with CPython's 'readonly attribute', sys.flags/sys.version_info refusing construction, and set_int_max_str_digits installing a new sys.flags (as CPython 3.14.8's). Measured with bun 1.4.4 (size-record.sh) on master d2a28090 vs its probe merge: engine/sagebrush-worker.js +457 (the runtime: the field list and values, the read-only setter and the allocator), cli/pyjs.cjs +541 (the same runtime and the embedded web build; +64 slack). No library or lazy-group change.",
  "bytes": {
-  "cli/pyjs.cjs": 589,
-  "engine/sagebrush-worker.js": 550
+  "cli/pyjs.cjs": 605,
+  "engine/sagebrush-worker.js": 457
  }
 }
