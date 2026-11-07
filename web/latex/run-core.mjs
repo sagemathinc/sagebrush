@@ -271,7 +271,8 @@ export const runIn = (k, code, max) => new Promise((resolve) => {
 // nothing): a newer Run's results, another tab's, or a file put at that path, are never replaced by this one's.
 /** -> { ok: true, states, ms } | { stale: true } | { msg } (why nothing was written). `o`: { items (the worker's
  * check items), session (sessionOf), exec (runIn), ws, fid (the .tex's), current () => boolean, signal, max, now,
- * folder? () => folderFiles(...), store?, serial? (the session: sessionOf's get, and its get.serial) } */
+ * folder? () => folderFiles(...), store?, serial? (the session: sessionOf's get, and its get.serial), stop? (this Run's
+ * own Stop: waiting, it runs nothing; running, its script is interrupted and what ran is written) } */
 export async function runAndSave(o) {
   const stale = () => !o.current() || !!o.signal?.aborted;
   const t0 = o.now();
@@ -281,24 +282,34 @@ export async function runAndSave(o) {
   if (f?.msg) return { msg: f.msg };
   const k = await o.session();
   if (stale()) return { stale: true };
+  const stopAsked = () => !!o.stop?.aborted;
   const go = async () => {
+    // (the test build only: the page test can hold a Run here, its turn in the session taken, to queue another behind
+    //  it; elsewhere this folds away)
+    if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) await globalThis.__sbTexRunHold?.();
     if (stale()) return null;
+    // (this Run stopped (its own Stop) while it waited: nothing runs (astra's LATEX-QUEUE-STOP-1))
+    if (stopAsked()) return { stopped: true };
     // (the .tex still in the folder that was read: moved meanwhile, nothing runs)
     if (f) {
       const at = await o.ws.pathOfFile(o.fid);
       if (stale()) return null;
+      if (stopAsked()) return { stopped: true };
       if (!at.ok || (at.path.slice(0, at.path.lastIndexOf("/")) || "/") !== f.dir) return { moved: true };
       putFolder(k, f.files, o.store);
     }
-    // (this Run cancelled while its script runs: that script stopped, only it: the next Run's hasn't started)
+    // (this Run cancelled (its page gone) or stopped (its Stop) while its script runs: that script interrupted, only
+    //  it: the next Run's hasn't started. Stopped, what ran is still written, as before)
     const cancel = () => k.interrupt?.();
     o.signal?.addEventListener("abort", cancel);
+    o.stop?.addEventListener("abort", cancel);
     try { return await o.exec(k, driver(runnable(o.items), f ? f.dir : null), o.max); }
-    finally { o.signal?.removeEventListener("abort", cancel); }
+    finally { o.signal?.removeEventListener("abort", cancel); o.stop?.removeEventListener("abort", cancel); }
   };
   const ran = await (o.serial ? o.serial(go) : go());
   if (!ran || stale()) return { stale: true };
   if (ran.moved) return { msg: "Not run: the .tex was moved meanwhile: press Run again" };
+  if (ran.stopped) return { msg: "Stopped before it ran" };
   const { out, stopped } = ran;
   const states = statesOf(o.items, parseOutput(out), stopped);
   const bytes = new TextEncoder().encode(resultsText(states));

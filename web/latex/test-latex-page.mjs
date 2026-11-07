@@ -2067,6 +2067,30 @@ open('made.txt', 'w').write('x')
       await sleep(1000);
       check(tooBig && (await resultsOf("/ex-big/doc.tex")) === null, "Run (Codex P5): a folder past the bound (over 500 files): Run says so, runs nothing, writes no results", { tooBig, status: await ev(`document.querySelector(".tex-status")?.textContent ?? ""`) });
     }
+    // (astra's LATEX-QUEUE-STOP-1: Stop on a Run waiting for another one in the session: A's Run held in its turn (the
+    //  test build's hook), B opened in place and its Run queued behind it, then B's Stop; A's turn released: B runs
+    //  nothing ("Stopped before it ran", no results file), and A, its page gone, writes nothing)
+    {
+      const qa = await mk("/qs/a.tex", enc(RUN_DOC)), qb = await mk("/qs/b.tex", enc(RUN_DOC));
+      await open(qa);
+      await until(`!document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
+      await ev(`(window.__qsN = 0, window.__qsHold = new Promise((r) => (window.__qsRel = r)), window.__sbTexRunHold = () => (++window.__qsN === 1 ? window.__qsHold : undefined), document.querySelector(".tex-head .tex-run").click(), 1)`);
+      const heldA = await until(`window.__qsN === 1`, 120000);
+      await ev(`(window.__sbTex({ path: "/qs/b.tex", fid: ${JSON.stringify(qb)} }), 1)`);
+      await until(`document.querySelector(".tex-title")?.textContent === "b.tex" && !document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
+      await ev(`(document.querySelector(".tex-head .tex-run").click(), 1)`);
+      const queued = await until(`document.querySelector(".tex-head .tex-run")?.textContent === "Running…"`, 60000);
+      await ev(`(document.querySelector(".tex-head .tex-run").click(), 1)`);
+      await sleep(300);
+      const nBefore = await ev(`window.__qsN`);
+      await ev(`(window.__qsRel(), 1)`);
+      const said = await statusIs(/Stopped before it ran/, 20000);
+      await sleep(1000);
+      const ra = await resultsOf("/qs/a.tex"), rb = await resultsOf("/qs/b.tex");
+      await ev(`(delete window.__sbTexRunHold, 1)`);
+      check(heldA && queued && nBefore === 1 && said && ra === null && rb === null, "Run (astra LATEX-QUEUE-STOP-1): Stop on a Run waiting for another in the session: it runs nothing, says so, no results; the one ahead (its page gone) writes nothing",
+        { heldA, queued, nBefore, said, status: await ev(`document.querySelector(".tex-status")?.textContent ?? ""`), ra: ra && ra.slice(0, 80), rb: rb && rb.slice(0, 80) });
+    }
     // (a Run made stale: another file opened in place while it runs; it writes nothing)
     const fs = await mk("/t/run-stale.tex", enc(RUN_DOC.replace("x = 2^10", "x = 2^10\n_s = sum(i for i in range(2*10^6))")));
     const fo = await mk("/t/run-other.tex", enc(DOC));

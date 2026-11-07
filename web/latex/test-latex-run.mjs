@@ -471,6 +471,36 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
   check("runAndSave: the .tex moved to another folder while its Run waited: nothing runs, it says so", execd === 0 && /moved/.test(r.msg ?? ""), { r, execd });
 }
 
+// ---- a Run's own Stop (astra's LATEX-QUEUE-STOP-1): stopped while it waits for another Run, it runs nothing, and the
+// one running isn't interrupted; stopped while its script runs, that script is interrupted, once, and what ran written
+{
+  const log = [];
+  let running = null;
+  class K { constructor(o) { this.o = o; this.ready = false; } start() { this.worker = { postMessage() {} }; this.o.onStart(this.worker); this.ready = true; } post() {} on() { return () => {}; } interrupt() { log.push("interrupt " + running); } }
+  const s = sessionOf({ module: async () => ({ WorkerKernel: K }), worker: () => null }, 1000);
+  const ws = { pathOfFile: async () => ({ ok: true, path: "/Q/doc.tex" }), stat: async () => undefined, createByPerson: async () => ({}) };
+  const holds = {};
+  const within = (p, ms = 5000) => Promise.race([p, new Promise((r) => setTimeout(() => r({ timedOut: true }), ms))]);
+  const run = (tag, stop) => runAndSave({ items: [item("silent", "x = 1")], ws, fid: "f", current: () => true, max: 1 << 20, now: () => 0, stop,
+    session: s, store: s, serial: s.serial, folder: async () => ({ dir: "/Q", files: [] }),
+    exec: () => { running = tag; log.push("exec " + tag); return new Promise((r) => (holds[tag] = () => { running = null; r({ out: "", stopped: "" }); })); } });
+  const pA = run("A");
+  for (let i = 0; i < 50 && !holds.A; i++) await new Promise((r) => setTimeout(r, 5));
+  const stopB = new AbortController(), pB = run("B", stopB.signal);
+  await new Promise((r) => setTimeout(r, 20));
+  stopB.abort();
+  const afterStop = log.slice();
+  holds.A();
+  const rA = await within(pA), rB = await within(pB);
+  check("Stop: a Run stopped while it waits runs nothing, and the Run running isn't interrupted", !afterStop.includes("interrupt A") && !log.includes("exec B") && /Stopped before it ran/.test(rB.msg ?? "") && rA.ok, { log, rA, rB });
+  const stopC = new AbortController(), pC = run("C", stopC.signal);
+  for (let i = 0; i < 50 && running !== "C"; i++) await new Promise((r) => setTimeout(r, 5));
+  stopC.abort();
+  holds.C();
+  const rC = await within(pC);
+  check("Stop: a Run stopped while its script runs: that script interrupted, once; what ran written", log.filter((l) => l === "interrupt C").length === 1 && rC.ok === true, { log, rC });
+}
+
 const bad = results.filter(([, ok]) => !ok);
 console.log(`${results.length - bad.length}/${results.length} passed`);
 process.exit(bad.length ? 1 : 0);
