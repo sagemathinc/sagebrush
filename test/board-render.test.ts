@@ -120,6 +120,131 @@ test("board render: pictures the board leaves out for their names are named on s
   assert.match(r.stderr, /^sagebrush board render: pictures left out: .*and these are not: "p 0", [^\n]*"p 9", and 2 more\n/);
 });
 
+// (P9a, the Codex friction recheck: code's outputs and pictures in the SVG, from what the file holds)
+const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+const at = "2026-11-07T00:00:00Z";
+
+test("board render: a code item's stored preview is drawn, its text and its raster picture; without one, the way to store it is said", () => {
+  const preview = { at, ms: 12000, total: 12000, outputs: [
+    { output_type: "stream", name: "stdout", text: "5\n" },
+    { output_type: "stream", name: "stderr", text: "careful <now>\n" },
+    { output_type: "display_data", data: { "image/png": PNG, "text/plain": "Graphics object" }, metadata: {} },
+  ] };
+  const doc = { format: "sagebrush-board", version: 1, nodes: [{ id: "c", code: "print(2+3)", w: 300, preview }] };
+  let r = cli(["-"], JSON.stringify(doc));
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(!r.stdout.includes("output not stored"), "the output, not the placeholder");
+  assert.match(r.stdout, />5<\/tspan>/, "the item's text output");
+  assert.ok(r.stdout.includes("careful &lt;now&gt;") && !r.stdout.includes("<now>"), "stderr shown, escaped");
+  assert.ok(r.stdout.includes(`<image `) && r.stdout.includes(`href="data:image/png;base64,${PNG}"`), "the preview's picture, as an <image> of its data: URL");
+  assert.ok(!r.stdout.includes("Graphics object"), "the picture, not its text, when it has one");
+  assert.match(r.stdout, /Preview, computed/);
+  assert.ok(!r.stderr.includes("code's outputs"), r.stderr);
+  // (no preview: the placeholder, and how to store the outputs, said once)
+  r = cli(["-"], JSON.stringify({ ...doc, nodes: [{ id: "c", code: "print(2+3)" }] }));
+  assert.equal(r.status, 0);
+  assert.ok(r.stdout.includes("(output not stored)"));
+  assert.ok(r.stderr.includes("shown only in part: code's outputs\n"), r.stderr);
+  assert.ok(r.stderr.includes("code outputs aren't stored in this board, so they aren't drawn. To draw them, run\n  sagebrush board run FILE --store-previews --preview-ms 0\non the board's file, then render the .previews.board.json file it writes next to it.\n"), r.stderr);
+  // (some stored, some not: said of those only, and the same way to store the rest)
+  r = cli(["-"], JSON.stringify({ ...doc, nodes: [{ id: "c", code: "print(2+3)", preview }, { id: "d", code: "1", x: 0, y: 400 }] }));
+  assert.ok(r.stderr.includes("code's outputs (of the items with no stored preview)") && r.stderr.includes("some code outputs aren't stored in this board"), r.stderr);
+});
+
+// (a PNG of this size, its header only: what the picture's size is read from)
+const be32 = (v: number) => [(v >>> 24) & 255, (v >>> 16) & 255, (v >>> 8) & 255, v & 255];
+const pngOf = (w: number, h: number) => Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, ...be32(w), ...be32(h), 8, 2, 0, 0, 0, 0, 0, 0, 0]).toString("base64");
+
+test("board render: a stored preview's text display, stderr in the error color, an output with backticks whole, a wide picture held to the item, an item in a group (grader's r787 pins)", () => {
+  const item = (outputs: any[], extra: any = {}) => ({ id: "c", code: "f()", w: 300, preview: { at, ms: 12000, total: 12000, outputs }, ...extra });
+  const render = (nodes: any[]) => { const r = cli(["-"], JSON.stringify({ format: "sagebrush-board", version: 1, nodes })); assert.equal(r.status, 0, r.stderr); return r.stdout; };
+  // (R8: a display with only text/plain, as an Out: value is, is drawn)
+  let svg = render([item([{ output_type: "display_data", data: { "text/plain": "Out: 42" }, metadata: {} }])]);
+  assert.ok(svg.includes("Out: 42") && !svg.includes("output not stored"), "a text/plain display drawn");
+  // (R5: stderr in the board's error color, stdout not)
+  svg = render([item([{ output_type: "stream", name: "stdout", text: "fine\n" }, { output_type: "stream", name: "stderr", text: "oops\n" }])]);
+  assert.match(svg, /fill="#b3261e"[^>]*>(?:<tspan[^>]*>)?oops</, "stderr drawn in #b3261e");
+  assert.doesNotMatch(svg, /fill="#b3261e"[^>]*>(?:<tspan[^>]*>)?fine</, "stdout not");
+  // (R7: an output with its own ``` drawn whole: the fence is longer than any run of backticks in it)
+  // (a line of ``` in it would end a three-backtick fence, and what follows be read as Markdown: *em* lose its stars)
+  svg = render([item([{ output_type: "stream", name: "stdout", text: "start\n```\nmiddle *em* __b__\n" }])]);
+  assert.ok(svg.includes(">```<") && svg.includes("middle *em* __b__"), "the output's own backticks don't end it: drawn as it is");
+  // (R10: a picture wider than the item (600 wide, within a preview's 640, in a 300-wide item): drawn at most the item's text width)
+  svg = render([item([{ output_type: "display_data", data: { "image/png": pngOf(600, 50) }, metadata: {} }])]);
+  const w = [...svg.matchAll(/<image [^>]*width="([\d.]+)"/g)].map((m) => Number(m[1]));
+  assert.equal(w.length, 1, svg.slice(0, 400));
+  assert.ok(w[0] > 0 && w[0] <= 300, `the picture held to the item: ${w[0]}`);
+  // (R13: a code item inside a group: its stored output drawn, not the placeholder)
+  svg = render([{ id: "g", kind: "group", title: "G", children: [item([{ output_type: "stream", name: "stdout", text: "in the group\n" }])] }]);
+  assert.ok(svg.includes("in the group") && !svg.includes("output not stored"), "a grouped item's preview drawn");
+});
+
+test("board render: the way to store outputs, for a file whose name has a newline or an ESC: no control character on the command line (grader's R19)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sb-hint-ctl-"));
+  try {
+    for (const name of ["a\nb.board.json", "x\u001b[31my.board.json"]) {
+      const f = join(dir, name);
+      writeFileSync(f, JSON.stringify({ format: "sagebrush-board", version: 1, nodes: [{ id: "c", code: "1" }] }));
+      const r = cli([f, "-o", join(dir, "o.svg")]);
+      assert.equal(r.status, 0, r.stderr);
+      const lines = r.stderr.split("\n");
+      const i = lines.findIndex((l) => l.endsWith("To draw them, run"));
+      assert.ok(i >= 0, r.stderr);
+      const cmd = lines[i + 1];
+      assert.ok(cmd.startsWith("  sagebrush board run ") && cmd.endsWith(" --store-previews --preview-ms 0"), JSON.stringify(cmd));
+      assert.doesNotMatch(r.stderr.replace(/\n/g, ""), /[\u0000-\u001f\u007f-\u009f]/, JSON.stringify(r.stderr));
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("board render: the way to store code's outputs names this file and the one it writes, the command on its own line", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sb-hint-"));
+  try {
+    const f = join(dir, "basic.board.json"), g = join(dir, "my plot.previews.board.json");
+    writeFileSync(f, JSON.stringify({ format: "sagebrush-board", version: 1, nodes: [{ id: "c", code: "1" }] }));
+    let r = cli([f, "-o", join(dir, "o.svg")]);
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(r.stderr.endsWith(`sagebrush board render: code outputs aren't stored in this file, so they aren't drawn. To draw them, run\n  sagebrush board run ${f} --store-previews --preview-ms 0\nthen render ${join(dir, "basic.previews.board.json")}, which that command writes next to it.\n`), r.stderr);
+    // (a .previews.board.json already: written over, with -o; a name with a space: quoted)
+    writeFileSync(g, JSON.stringify({ format: "sagebrush-board", version: 1, nodes: [{ id: "c", code: "1" }] }));
+    r = cli([g, "-o", join(dir, "o.svg")]);
+    assert.ok(r.stderr.includes(`  sagebrush board run '${g}' --store-previews --preview-ms 0 -o '${g}'\nthen render ${g} again.\n`), r.stderr);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("board render: a picture whose bytes are in the file is drawn as an <image>; an https: one stays a box and nothing in the file loads", () => {
+  const doc = { format: "sagebrush-board", version: 1, images: { dot: { w: 1, h: 1, src: `data:image/png;base64,${PNG}` }, far: { w: 10, h: 10, src: "https://example.com/x.png" } },
+    nodes: [{ id: "a", image: "dot", w: 120 }, { id: "b", image: "far", x: 300, w: 120 }] };
+  const r = cli(["-"], JSON.stringify(doc));
+  assert.equal(r.status, 0, r.stderr);
+  const hrefs = [...r.stdout.matchAll(/<image [^>]*href="([^"]*)"/g)].map((m) => m[1]);
+  assert.deepEqual(hrefs, [`data:image/png;base64,${PNG}`]);
+  assert.ok(!r.stdout.includes("example.com"), "no address of the document's in the file");
+  assert.ok(r.stderr.includes("pictures (shown as a box)"), r.stderr);
+  // (a data: URL whose header doesn't give a size: a box, not an <image>)
+  const bad = cli(["-"], JSON.stringify({ ...doc, images: { dot: { w: 10, h: 10, src: "data:image/png;base64,iVBORw0KGgo=" } }, nodes: [{ id: "a", image: "dot" }] }));
+  assert.ok(!bad.stdout.includes("<image "), "an unreadable picture isn't drawn");
+});
+
+test("board render: python's P9 reproduction, after board run --store-previews --preview-ms 0, shows the text output", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sb-p9-"));
+  try {
+    const f = join(dir, "basic.board.json");
+    writeFileSync(f, JSON.stringify({ format: "sagebrush-board", version: 1, title: "probe", mode: "sage", nodes: [{ id: "c", title: "code", code: "print(2+3)", x: 0, y: 0, w: 300 }, { id: "p", title: "plot", code: "plot(sin(x),(x,0,3))", x: 0, y: 200, w: 300 }] }));
+    const run = spawnSync(process.execPath, [__dirname + "/../src/cli.js", "board", "run", f, "--store-previews", "--preview-ms", "0"], { encoding: "utf8" });
+    assert.equal(run.status, 0, run.stderr + run.stdout);
+    const r = cli([join(dir, "basic.previews.board.json")]);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, />5<\/tspan>/, "the item's output, as stored");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // A Markdown table in a note is a grid (codex friction P10a): each cell its own text, in its column, the header row
 // bold and ruled off, cells aligned as the separator row says, and a narrow note's cells wrapped at words (never a
 // "4 | 2" line). The reproduction is python's recheck's, repro/P10/table.board.json.

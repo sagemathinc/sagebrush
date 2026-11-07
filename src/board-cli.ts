@@ -5,6 +5,7 @@
 // starts slower.
 
 import { readFileSync, writeFileSync } from "fs";
+import { basename, dirname, join } from "path";
 import { boardFromText } from "../web/board/mermaid";
 import { boardSvg } from "../web/board/svg";
 import { badPictureNames, formatError, pageCount } from "../web/board/doc";
@@ -40,6 +41,13 @@ export const CLI_READER = { reader: `this sagebrush (${(globalThis as any).__SAG
 /** What the command line says of a board's pictures whose names the board
  * leaves out (doc.ts badPictureNames): the rule, and the names, so that
  * whoever wrote the board can rename them; null if there are none. */
+/** Where `board run FILE --store-previews` writes the board with its previews: NAME.previews.board.json beside FILE. */
+export function previewsPath(file: string): string {
+  return join(dirname(file), basename(file).replace(/(\.board)?\.json$/i, "").replace(/\.[^.]*$/, "") + ".previews.board.json");
+}
+// (a path as a shell word: as it is when it is plain, else in single quotes)
+const shellWord = (s: string) => (/^[\w@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`);
+
 export function pictureWarning(d: unknown): string | null {
   const bad = badPictureNames(d);
   if (!bad.length) return null;
@@ -104,6 +112,18 @@ export async function boardCommand(argv: string[]): Promise<number> {
   if (out === null) process.stdout.write(svg);
   else writeFileSync(out, svg);
   if (left.length) process.stderr.write(`sagebrush board render: shown only in part: ${left.join(", ")}\n`);
+  // (code's outputs are drawn from the previews a board keeps: how to store every item's, with this file's names,
+  // the command on its own line; a board that is already a .previews.board.json is written over, with -o)
+  if (left.some((x) => x.startsWith("code's outputs"))) {
+    const some = !left.includes("code's outputs") ? "some " : "";
+    if (file === "-") process.stderr.write(`sagebrush board render: ${some}code outputs aren't stored in this board, so they aren't drawn. To draw them, run\n  sagebrush board run FILE --store-previews --preview-ms 0\non the board's file, then render the .previews.board.json file it writes next to it.\n`);
+    else {
+      const again = /\.previews\.board\.json$/i.test(file), target = again ? file : previewsPath(file);
+      const cmd = `sagebrush board run ${shellWord(file)} --store-previews --preview-ms 0${again ? ` -o ${shellWord(target)}` : ""}`;
+      process.stderr.write(oneLine(`sagebrush board render: ${some}code outputs aren't stored in this file, so they aren't drawn. To draw them, run`) + "\n  " + oneLine(cmd) + "\n" +
+        oneLine(again ? `then render ${target} again.` : `then render ${target}, which that command writes next to it.`) + "\n");
+    }
+  }
   // (the notes' ids, quoted as JSON: a board's text never reaches the terminal as control characters, CORR-974-1)
   if (overflow.length) process.stderr.write(`sagebrush board render: text cut to its note's box (a note of a given size): ${overflow.map((id) => JSON.stringify(id)).join(", ")}\n`);
   return 0;

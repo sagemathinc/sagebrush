@@ -5,13 +5,17 @@
 // stickers.  Text is measured with DejaVu Sans's widths (Verdana's are
 // close), the font the file names, so it is wrapped where it fits; math
 // typeset as SVG by the renderer the caller gives (`math`: the CLI's,
-// src/board-math.ts), else shown as its TeX; pictures and code's outputs
-// as a box saying so.
+// src/board-math.ts), else shown as its TeX; a picture whose bytes are in
+// the file (a raster data: URL) as an <image>, else as a box saying so; a
+// code item's outputs as its stored preview has them (text, and its one
+// raster picture), else a line saying they are on the board.
 //
 // Every text in a board is untrusted: it is only ever character data or a
 // quoted attribute, escaped, with characters XML does not allow dropped;
 // no element of the document's choosing, no link, no style, no
-// foreignObject.  Colors are the document's, which cleanDoc has made
+// foreignObject.  A picture is an <image> whose href is a raster data: URL
+// only (PNG, JPEG, GIF or WebP, as image-size.ts reads it, within the
+// board's pixel budget): nothing in the file loads from anywhere.  Colors are the document's, which cleanDoc has made
 // colors.  Typeset math is the renderer's own paths, which it has checked.
 
 import { Lexer, type Token, type Tokens } from "marked";
@@ -20,6 +24,8 @@ import { backShapes, edgeLabelBox, xmlEscape } from "./print";
 import { inkPath } from "./ink";
 import { iconEmoji } from "./stickers";
 import type { Item } from "./board";
+import { previewLabel, type Preview } from "./preview";
+import { PixelBudget, dataUrl, imageSize, pictureKey } from "../image-size";
 
 // ---- text: its widths ------------------------------------------------------
 
@@ -61,7 +67,7 @@ function width(r: Run, size: number): number {
  * centered); `base`: its baseline from its top, when math makes it taller. */
 // (a table's row: its cells at their columns' x, and the grid's columns, xs, from 0 to the table's width)
 interface Cell { lines: Line[]; x: number; w: number; align: "left" | "center" | "right" }
-interface Line { runs: Run[]; size: number; lh: number; indent: number; gap: number; color?: string; box?: "code"; base?: number; cells?: Cell[]; grid?: { xs: number[]; top: boolean; head: boolean } }
+interface Line { runs: Run[]; size: number; lh: number; indent: number; gap: number; color?: string; box?: "code"; base?: number; cells?: Cell[]; grid?: { xs: number[]; top: boolean; head: boolean }; pic?: { src: string; w: number } }
 const FONT = 14, LH = 1.45;
 // (a table's cell: its padding; its grid's lines, the header's rule)
 const CELL_X = 6, CELL_Y = 3, GRID = "#c8ccd2", GRID_HEAD = "#8a9099";
@@ -237,7 +243,7 @@ const PAD_X = 10, PAD_Y = 8, TITLE = 15;
 // (an outline other than a rectangle: its side padding, as board.css's)
 const sidePad = (shape?: string) => (!shape || shape === "rect" || shape === "round" ? PAD_X : shape === "stadium" || shape === "circle" ? 18 : shape === "subroutine" ? 16 : shape === "cylinder" ? PAD_X : 26);
 // a note's content: its title, text, code, picture and link, as lines at width w
-function content(n: { title?: string; text?: string; code?: string; hideCode?: boolean; ref?: string; img?: { w: number; h: number } }, w: number): { ls: Line[]; pic?: number } {
+function content(n: { title?: string; text?: string; code?: string; hideCode?: boolean; ref?: string; img?: { w: number; h: number }; preview?: Preview }, w: number): { ls: Line[]; pic?: number } {
   const ls: Line[] = [];
   if (n.title) ls.push(...lines(n.title.replace(/\n/g, " "), w, TITLE, undefined, { b: true }));
   let pic: number | undefined;
@@ -250,11 +256,43 @@ function content(n: { title?: string; text?: string; code?: string; hideCode?: b
     if (cl.length) cl[0].gap = ls.length ? 6 : 0;
     ls.push(...cl);
   }
-  if (n.code !== undefined) ls.push({ runs: [{ t: "(its output: in the board)", i: true }], size: 11, lh: 16, indent: 0, gap: 4, color: "#667" });
+  if (n.code !== undefined) ls.push(...outputLines(n.preview, w));
   // (a link: one line, cut with an ellipsis, as on the board; text only)
   // (its words as on the board, and too long, its start cut, not its end: the file's name is the part a reader wants, round 0's 10)
   if (n.ref) ls.push({ runs: [{ t: "↗ " + ellipsisStart({ t: refLabel(n.ref), m: true }, 11, w - width({ t: "↗ ", m: true }, 11)), m: true }], size: 11, lh: 16, indent: 0, gap: 6, color: "#2a6f2f" });
   return { ls, pic };
+}
+// (a preview's picture: a raster of the types previews keep, its size from its header)
+const PREVIEW_IMAGES = ["image/png", "image/jpeg", "image/webp"];
+// a code item's outputs as its stored preview has them (preview.ts: text cut, at most one
+// picture, cleaned when the file was read): text as code, stderr in the error color, the
+// picture at most as wide as the note, and when they were computed; without a preview, a
+// line saying they are on the board
+function outputLines(p: Preview | undefined, w: number): Line[] {
+  if (!p) return [{ runs: [{ t: "(output not stored)", i: true }], size: 11, lh: 16, indent: 0, gap: 4, color: "#667" }];
+  const out: Line[] = [];
+  const text = (t: string, color?: string) => {
+    const body = t.replace(/\n$/, "");
+    if (!body) return;
+    const fence = "`".repeat(Math.max(3, ...[...body.matchAll(/`+/g)].map((m) => m[0].length + 1)));
+    const ls = lines(`${fence}\n${body}\n${fence}`, w, 13);
+    if (ls.length) ls[0].gap = 4;
+    if (color) for (const l of ls) l.color = color;
+    out.push(...ls);
+  };
+  for (const o of p.outputs) {
+    if (o.output_type === "stream") { text(o.text, o.name === "stderr" ? "#b3261e" : undefined); continue; }
+    const type = PREVIEW_IMAGES.find((t) => typeof o.data[t] === "string"), size = type ? imageSize(type, o.data[type]) : null;
+    if (type && size && size.w > 0 && size.h > 0) {
+      const dw = Math.min(w, size.w);
+      out.push({ runs: [], size: 11, lh: Math.round((dw * size.h) / size.w), indent: 0, gap: 6, pic: { src: `data:${type};base64,${o.data[type]}`, w: dw } });
+      continue;
+    }
+    const t = o.data["text/plain"] ?? o.data["text/markdown"] ?? o.data["text/latex"];
+    if (typeof t === "string") text(t);
+  }
+  out.push({ runs: [{ t: previewLabel(p).replace(/ Run to update\.$/, ""), i: true }], size: 11, lh: 16, indent: 0, gap: 4, color: "#667" });
+  return out;
 }
 /** The measure layout() asks for: a note's height at a width, and its natural width. */
 export const measure: Measure = Object.assign(
@@ -296,6 +334,13 @@ function outline(it: Item, fill: string): string {
 // a run as a tspan (its style as attributes)
 const tspan = (r: Run) => (r.b || r.i || r.m ? `<tspan${r.b ? ' font-weight="bold"' : ""}${r.i ? ' font-style="italic"' : ""}${r.m ? ' font-family="DejaVu Sans Mono, Menlo, Consolas, monospace"' : ""}>${esc(r.t)}</tspan>` : esc(r.t));
 
+// (the board's pictures drawn so far, within the pixel budget the board itself keeps: boardSvg sets it)
+let pixels = new PixelBudget();
+// whether a picture's source may be drawn: a raster data: URL whose header gives a size within the budget
+function picOk(src: string): boolean {
+  const u = dataUrl(src);
+  return !!u && pixels.take(imageSize(u.type, u.base64), pictureKey(src)) === null;
+}
 // runs from x on the baseline: runs of one style next to each other, one tspan; a formula, its own SVG, at the place
 // the text before it ends, as the file's font measures it
 function drawRuns(out: string[], ls: Run[], x: number, base: number, size: number, color?: string) {
@@ -320,6 +365,13 @@ function textBlock(ls: Line[], x: number, y: number, w: number, center: boolean)
   let at = y;
   for (const l of ls) {
     at += l.gap;
+    // (a picture: an <image> of a raster data: URL, the only source a line's picture has)
+    if (l.pic) {
+      if (picOk(l.pic.src)) out.push(`<image x="${n1(x)}" y="${n1(at)}" width="${n1(l.pic.w)}" height="${n1(l.lh)}" href="${esc(l.pic.src)}"/>`);
+      else out.push(`<rect x="${n1(x)}" y="${n1(at)}" width="${n1(l.pic.w)}" height="${n1(l.lh)}" rx="4" fill="#000" fill-opacity=".06"/>`);
+      at += l.lh;
+      continue;
+    }
     if (l.box === "code") out.push(`<rect x="${n1(x)}" y="${n1(at)}" width="${n1(w)}" height="${n1(l.lh)}" fill="#000" fill-opacity=".05"/>`);
     const lw = lineWidth(l) - l.indent;
     const tx = center ? x + (w - lw) / 2 : x + l.indent;
@@ -360,7 +412,8 @@ export function boardSvg(doc: BoardDoc, o: { page?: number; math?: MathRenderer 
   mathOf = o.math ?? null;
   mathCache = new Map();
   mathTex = false;
-  try { return drawBoard(doc, o); } finally { mathOf = null; mathCache = new Map(); }
+  pixels = new PixelBudget();
+  try { return drawBoard(doc, o); } finally { mathOf = null; mathCache = new Map(); pixels = new PixelBudget(); }
 }
 function drawBoard(doc: BoardDoc, o: { page?: number }): { svg: string; left: string[]; overflow: string[] } {
   const d = cleanDoc(doc), v = pageView(d, o.page ?? 0), left = new Set<string>(), overflow: string[] = [];
@@ -410,18 +463,28 @@ function drawBoard(doc: BoardDoc, o: { page?: number }): { svg: string; left: st
   }
   // notes, inner last; each clipped to its box, as on the board
   const notes = items.filter((it) => it.kind === "note" || it.kind === "shape").sort((a, b) => (a.depth ?? 0) - (b.depth ?? 0));
+  // (the code items' stored previews, by id: the layout's items don't carry them)
+  const previews = new Map<string, Preview>();
+  const walk = (ns: readonly any[] | undefined) => { for (const n of ns ?? []) { if (n?.kind === "group") walk(n.children); else if (n?.preview && n.code !== undefined) previews.set(n.id, n.preview); } };
+  walk(v.nodes);
   notes.forEach((it, k) => {
     const fill = esc(it.color ?? "#fff"), sp = sidePad(it.shape), centered = !!it.shape;
-    const c = content({ title: it.title, text: it.text, code: it.code, hideCode: it.hideCode, ref: it.ref, img: it.image }, it.w - 2 * sp - 2);
-    if (it.image) left.add("pictures (shown as a box)");
-    if (it.code !== undefined) left.add("code's outputs");
+    const preview = it.code !== undefined ? previews.get(it.id) : undefined;
+    const c = content({ title: it.title, text: it.text, code: it.code, hideCode: it.hideCode, ref: it.ref, img: it.image, preview }, it.w - 2 * sp - 2);
+    if (it.code !== undefined && !preview) left.add(previews.size ? "code's outputs (of the items with no stored preview)" : "code's outputs");
     clips.push(`<clipPath id="c${k}"><rect x="${n1(it.x)}" y="${n1(it.y)}" width="${n1(it.w)}" height="${n1(it.h)}" rx="8"/></clipPath>`);
     const h = heightOf(c.ls) + (c.pic ? c.pic + 8 : 0);
     if (h + 2 * PAD_Y + 2 + (it.shape === "cylinder" ? 10 : 0) > it.h + 0.5 || c.ls.some((l) => lineWidth(l) > it.w - 2 * sp - 2 + 0.5)) overflow.push(it.id);
     let ty = it.y + PAD_Y + 1 + (it.shape === "cylinder" ? 10 : 0);
     if (centered) ty = Math.max(ty, it.y + (it.h - h) / 2);
     let body = "";
-    if (c.pic) {
+    // (the picture itself when its bytes are in the file and within the budget, else a box saying so)
+    const src = it.image?.src;
+    if (c.pic && src !== undefined && picOk(src)) {
+      body += `<image x="${n1(it.x + sp + 1)}" y="${n1(ty)}" width="${n1(it.w - 2 * sp - 2)}" height="${n1(c.pic)}" href="${esc(src)}" preserveAspectRatio="xMidYMid meet"/>`;
+      ty += c.pic + 8;
+    } else if (c.pic) {
+      left.add("pictures (shown as a box)");
       body += `<rect x="${n1(it.x + sp + 1)}" y="${n1(ty)}" width="${n1(it.w - 2 * sp - 2)}" height="${n1(c.pic)}" rx="4" fill="#000" fill-opacity=".06"/><text x="${n1(it.x + it.w / 2)}" y="${n1(ty + c.pic / 2 + 4)}" text-anchor="middle" font-size="11" fill="#667">picture</text>`;
       ty += c.pic + 8;
     }
