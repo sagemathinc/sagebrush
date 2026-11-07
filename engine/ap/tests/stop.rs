@@ -36,36 +36,19 @@ fn traced<T>(phases: &[&str], f: impl FnOnce() -> T) -> (T, Vec<usize>, f64, f64
 }
 
 /// Call f with a Stop armed at check `at` (1-based, since the last reset),
-/// and time the Stop from its request to f's return: a watcher thread notes
-/// when the armed check requests it.  Returns (stopped?, the phase stopped
-/// in, ms from the request to the return).
+/// and time the Stop from its request (the instant the arming check called
+/// request(), recorded by the test hooks) to f's return.  Returns (stopped?,
+/// the phase stopped in, ms from the request to the return).
 fn stop_at<T>(at: u64, f: impl Fn() -> T) -> (bool, &'static str, f64) {
-    use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
-    use std::sync::{Arc, Mutex};
     hooks::reset();
     hooks::arm_at(at);
-    let done = Arc::new(AtomicBool::new(false));
-    let asked: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
-    let watcher = {
-        let (done, asked) = (done.clone(), asked.clone());
-        std::thread::spawn(move || {
-            while !done.load(SeqCst) {
-                if sagebrush_interrupt::requested() {
-                    *asked.lock().unwrap() = Some(Instant::now());
-                    return;
-                }
-                std::hint::spin_loop();
-            }
-        })
-    };
     let r = catch(&f);
     let back = Instant::now();
-    done.store(true, SeqCst);
-    watcher.join().unwrap();
+    let asked = hooks::stop_requested_at();
     let at = hooks::stopped_in();
     hooks::reset();
     sagebrush_interrupt::clear();
-    let ms = asked.lock().unwrap().map_or(f64::INFINITY, |t| back.duration_since(t).as_secs_f64() * 1e3);
+    let ms = asked.map_or(f64::INFINITY, |t| back.duration_since(t).as_secs_f64() * 1e3);
     (r.is_err(), at, ms)
 }
 

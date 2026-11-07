@@ -152,6 +152,8 @@ pub mod hooks {
     static FINE: AtomicU64 = AtomicU64::new(0);
     static LAST_POLL_NS: AtomicU64 = AtomicU64::new(0);
     static MAX_POLL_GAP_NS: AtomicU64 = AtomicU64::new(0);
+    // when an armed Stop was requested (the check that requested it)
+    static ASKED: Mutex<Option<Instant>> = Mutex::new(None);
 
     fn now_ns() -> u64 {
         static START: OnceLock<Instant> = OnceLock::new();
@@ -181,6 +183,7 @@ pub mod hooks {
         let a = ARMED.load(Relaxed);
         if a != 0 && t >= a && !super::REQUESTED.load(Relaxed) {
             STOPPED.store(cur, Relaxed);
+            *ASKED.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
             super::request();
         }
     }
@@ -242,8 +245,15 @@ pub mod hooks {
         CURRENT.store(i + 1, Relaxed);
     }
 
+    /// When the armed Stop was requested: the instant the arming check
+    /// called request(), for timing a Stop from its request to the return.
+    pub fn stop_requested_at() -> Option<Instant> {
+        *ASKED.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     /// Forget the counts, the phase and any arming.
     pub fn reset() {
+        *ASKED.lock().unwrap_or_else(|e| e.into_inner()) = None;
         CURRENT.store(0, Relaxed);
         TOTAL.store(0, Relaxed);
         ARMED.store(0, Relaxed);
