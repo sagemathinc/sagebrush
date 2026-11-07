@@ -111,6 +111,10 @@ try {
   const open = async (q) => { await send("Page.navigate", { url: origin + "/" + q }); await sleep(300); return until("window.ready === true"); };
   const click = (sel) => ev(`(() => { const b = [...document.querySelectorAll(${JSON.stringify(sel)})].pop(); if (!b) throw new Error("no ${sel}"); b.click(); return true; })()`);
 
+  // (the page shows its bar once it has SENT the grant (agent-pair.ts allow(): grant.changed, then "granted"); the
+  // server applies it when its reader gets that message. An agent's request in between is refused as not granted, which is
+  // right, so an agent's request is made once the server says the grant is in force)
+  const grantedAtServer = async (ms = 10000) => { const t = Date.now(); while (Date.now() - t < ms) { if ((await drive({ op: "status" })).ok?.granted === true) return true; await sleep(50); } return false; };
   ok(await open(""), "the page opens its workspace");
   // (the person's workspace: an old /A removed and a new /A made; a file in /A removed and a new one made at its name)
   const trashed = await ev(`(async () => {
@@ -145,6 +149,7 @@ try {
   await ev(`(() => { document.querySelector('.sbag-box input[value="/A"]').click(); document.querySelector(".sbag-box select").value = "page"; document.querySelector(".sbag-box select").dispatchEvent(new Event("change")); return true; })()`);
   await click(".sbag-box button.primary");
   ok(await until(`!!document.querySelector(".sbag-bar")`), "allowed: the bar shows the agent and its grant");
+  ok(await grantedAtServer(), "the agent's server has the grant");
   const made = await drive({ op: "req", method: "workspace.create", params: { path: "/A/n.txt", content: { text: "hi" } } });
   ok(made.ok?.entry?.path === "/A/n.txt", `an agent's create inside /A (${JSON.stringify(made).slice(0, 120)})`);
   ok((await ev(`T.ws.read("/A/n.txt").then((r) => typeof r.content === "string" ? r.content : new TextDecoder().decode(r.content))`)) === "hi", "the file is in the person's workspace");
@@ -215,6 +220,7 @@ try {
   for (const n of [1, 2]) {
     ok(await open(""), `reload ${n}`);
     ok(await until(`!!document.querySelector(".sbag-bar")`, 15000), `reload ${n}: the remembered agent reconnects by itself, the bar shows it`);
+    ok(await grantedAtServer(), `reload ${n}: the agent's server has the grant again`);
     const l = await drive({ op: "req", method: "workspace.list", params: { folder: "/A" } });
     ok(!!l.ok, `reload ${n}: the agent reaches /A again (${JSON.stringify(l).slice(0, 80)})`);
     const kept = await ev(`T.ws.agentGrants().then((g) => Object.values(g).map((k) => k.session))`);
