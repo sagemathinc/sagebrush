@@ -11,6 +11,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort, freePort } from "./test-port.mjs";
+import { allowFiles } from "./test-allow.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let failures = 0;
@@ -60,6 +61,7 @@ await send("Network.setCacheDisabled", { cacheDisabled: true });
 await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-raster.wasm*" }] });
 await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
 ok(await ready(), "the notebook is ready");
+await allowFiles(send, ev); // (its cells save figures: the person allows its file changes, as a person does)
 let out = await runCode("import matplotlib.pyplot as plt\nplt.plot([1, 3, 2])\nplt.title('a plot')\nplt.savefig('a.svg')\nprint('svg written')");
 ok(out.includes("svg written") && !fetched(), "an SVG is written without fetching the PNG module: " + JSON.stringify(out));
 out = await runCode("plt.plot([1, 3, 2])\nplt.savefig('a.png')\na = plt.imread('a.png')\nprint(a.shape, a.dtype, a[0, 0])");

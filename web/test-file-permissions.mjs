@@ -74,33 +74,96 @@ const until = async (expr, ms = 30000) => { const t = Date.now(); while (Date.no
 const fails = [];
 let checks = 0;
 const check = (ok, what) => { checks++; console.log((ok ? "ok   " : "FAIL ") + what); if (!ok) fails.push(what); };
-// ---- the record itself (NM-DENY-2), with a storage of its own; the confinement spec's phase 1a (r3.2): the File
-// writes switch keeps its key ("sagebrush-permissions") and its rules unchanged; the scoped grants, under their own key,
-// are recorded (not yet enforced), canonical, the latest decision winning atomically, and bounded (@sagebrush's R2-R4)
+// ---- the record itself, with a storage of its own; the confinement spec's phase 1b (r3.2): file changes are OFF for
+// every document until the person allows them (O1, O6); the switch is the scoped record's write scope "/"; the old
+// switch's key is read once, its explicit choices moved into the record, then retired (@sagebrush's ruling A). The
+// scoped grants are recorded, canonical, the latest decision winning atomically, and bounded (@sagebrush's R2-R4)
 {
   const store = new Map(); let failing = false;
   Object.defineProperty(globalThis, "localStorage", { configurable: true, value: { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => { if (failing) throw new Error("QuotaExceededError"); store.set(k, String(v)); }, removeItem: (k) => store.delete(k) } });
-  const { createPermissions, ALLOWS_KEPT, DENIALS_KEPT, GRANT_CAPS, canonicalScope, scopeCovers } = await import("data:text/javascript," + encodeURIComponent(readFileSync(join(here, "notebook", "permissions.js"), "utf8")));
-  // (the switch, as before)
+  const { createPermissions, GRANT_CAPS, canonicalScope, scopeCovers } = await import("data:text/javascript," + encodeURIComponent(readFileSync(join(here, "notebook", "permissions.js"), "utf8")));
+  const rec = () => JSON.parse(store.get("sagebrush-grants") ?? "null");
+  // (off for every document: the person's own, the bundled examples', one from elsewhere, one unknown)
   const p = createPermissions();
-  p.provenance("own", "person");
-  p.set("own", "files", false);
-  for (let i = 0; i < ALLOWS_KEPT + 500; i++) p.set("a" + i, "files", true);
-  for (let i = 0; i < 3000; i++) p.set("d" + i, "files", false);
-  for (let i = 0; i < ALLOWS_KEPT + 500; i++) p.set("b" + i, "files", true);
-  const q = createPermissions(); q.provenance("own", "person");
-  check(p.may("own", "files") === false && q.may("own", "files") === false && q.may("d0", "files") === false, "an own notebook's \"don't allow\" survives thousands of later choices, a reload included: never evicted into its allow default");
-  check(Object.keys(JSON.parse(store.get("sagebrush-permissions") ?? "{}")).filter((k) => /^[ab]/.test(k)).length === ALLOWS_KEPT, "…the allows kept are bounded, the oldest gone first");
-  p.provenance("own2", "person"); failing = true;
-  const kept = p.set("own2", "files", false);
-  check(kept === false && p.may("own2", "files") === false && p.record("own2").files === false, "storage refusing the choice: set says it wasn't kept, and \"don't allow\" is in effect anyway");
+  p.provenance("own", "person"); p.provenance("ex", "host"); p.provenance("far", "elsewhere");
+  check(["own", "ex", "far", "unknown"].every((d) => p.may(d, "files") === false), "file changes are off for every notebook until the person allows them: their own, a bundled example, one from elsewhere, one unknown");
+  // (the switch: a stored write grant of "/", or a stored write denial of it; a reload keeps both)
+  check(p.set("own", "files", true) && p.may("own", "files") === true && p.grants("own").write.stored.includes("/"), "allowing stores a write grant of the whole workspace (\"/\"), and the notebook may change files");
+  check(p.set("far", "files", false) && p.may("far", "files") === false && p.grants("far").denied.stored.some(([k, x]) => k === "write" && x === "/"), "\"don't allow\" stores a write denial of \"/\"");
+  check(p.set("own", "files", false) && p.may("own", "files") === false && !p.grants("own").write.stored.includes("/"), "…which takes the grant away");
+  p.set("own", "files", true);
+  const q = createPermissions();
+  check(q.may("own", "files") === true && q.may("far", "files") === false, "…and a reload keeps both");
+  check(!store.has("sagebrush-permissions"), "the old switch's key is never written");
+  // (a write grant of a folder isn't the switch: only "/" lets the notebook's code change files, until phase 2 checks trees)
+  check(q.grant("tree", "write", "/out").ok && q.may("tree", "files") === false, "a write grant of one folder doesn't turn file changes on");
+  // (storage refusing the choice: it holds in this page, and set says it wasn't kept)
+  failing = true;
+  const k1 = q.set("own", "files", false), k2 = q.set("new", "files", true);
   failing = false;
-  // (the switch's key is unchanged through 1a: an explicit choice made before is honoured, no prompt, no widening)
-  store.set("sagebrush-permissions", JSON.stringify({ ownOld: { files: false }, elOld: { files: true } }));
-  const o = createPermissions(); o.provenance("ownOld", "person"); o.provenance("elOld", "elsewhere");
-  check(o.may("ownOld", "files") === false, "an own notebook's old explicit \"don't allow\" stays refused (its default is on)");
-  check(o.may("elOld", "files") === true, "…a notebook from elsewhere allowed before stays allowed, with no prompt");
-  check(!store.has("sagebrush-grants") || !JSON.parse(store.get("sagebrush-grants")).docs.ownOld, "…and the switch's choices aren't copied into the scoped record");
+  check(k1 === false && q.may("own", "files") === false && k2 === false && q.may("new", "files") === true && createPermissions().may("own", "files") === true, "storage refusing a choice: set says it wasn't kept, it holds in this page, and the stored one is unchanged");
+  // (the migration, ruling A: allow -> grant, don't allow -> denial, absent -> off; read once, then the key retired)
+  store.clear();
+  store.set("sagebrush-permissions", JSON.stringify({ aOld: { files: true }, dOld: { files: false }, bad: { files: "yes" }, bad2: 7, bad3: null }));
+  const m = createPermissions(); m.provenance("nOld", "person"); m.provenance("aOld", "elsewhere");
+  check(m.may("aOld", "files") === true && rec().docs.aOld?.write?.includes("/"), "migration: an old explicit allow becomes a stored write grant of \"/\", with no prompt");
+  check(m.may("dOld", "files") === false && rec().docs.dOld?.denied?.some((x) => x[0] === "write" && x[1] === "/"), "…an old \"don't allow\" a stored write denial");
+  check(m.may("nOld", "files") === false && !rec().docs.nOld, "…and a notebook with no old choice, the person's own included, starts off (no one-time grant)");
+  check(!rec().docs.bad && !rec().docs.bad2 && !rec().docs.bad3 && ["bad", "bad2", "bad3"].every((d) => m.may(d, "files") === false), "…a corrupt old entry moves nothing");
+  check(!store.has("sagebrush-permissions") && rec().migrated === 1, "…and the old key is retired, the record marked migrated");
+  store.set("sagebrush-permissions", JSON.stringify({ aOld: { files: false }, late: { files: true } }));
+  const m2 = createPermissions();
+  check(m2.may("aOld", "files") === true && m2.may("late", "files") === false && store.has("sagebrush-permissions"), "a second load doesn't read the old key again (an old tab writing it changes nothing)");
+  store.clear();
+  store.set("sagebrush-permissions", "{not json");
+  check(createPermissions().may("x", "files") === false && rec().migrated === 1 && !store.has("sagebrush-permissions") && Object.keys(rec().docs).length === 0, "an old key that isn't JSON migrates nothing, and is retired");
+  store.clear();
+  store.set("sagebrush-permissions", JSON.stringify({ h: { files: false }, a: { files: true } }));
+  failing = true;
+  const mf = createPermissions();
+  failing = false;
+  check(mf.may("h", "files") === false && mf.may("a", "files") === true && store.has("sagebrush-permissions") && !store.has("sagebrush-grants"), "the record can't be written: the old choices hold in this page, and the old key stays");
+  check(createPermissions().may("a", "files") === true && !store.has("sagebrush-permissions"), "…and the next load migrates them");
+  // (astra's MIG-RETRY-1: the migration's write fails, storage recovers, the person turns file changes off: that
+  // write carries the pending old choices first, with the mark, so the newer choice wins and a reload keeps it)
+  store.clear();
+  store.set("sagebrush-permissions", JSON.stringify({ r1: { files: true }, r2: { files: true } }));
+  failing = true;
+  const mr = createPermissions();
+  failing = false;
+  check(mr.may("r1", "files") === true && mr.set("r1", "files", false) === true && mr.may("r1", "files") === false, "migration failed, storage back, then \"don't allow\": kept, and in effect");
+  check(rec().migrated === 1 && !store.has("sagebrush-permissions") && rec().docs.r1?.denied?.some((x) => x[0] === "write" && x[1] === "/") && !rec().docs.r1?.write?.includes("/"), "…that write carried the old choices and the mark, and the old key is retired");
+  const mr2 = createPermissions();
+  check(mr2.may("r1", "files") === false && mr2.may("r2", "files") === true, "…a reload keeps the newer \"don't allow\" (the old allow isn't replayed), and the other notebook's old allow");
+  check(mr.revoke("r2", "write", "/") && mr.may("r2", "files") === false, "…and in the first page, what it held for the old choices is let go once they are stored: removing the other notebook's grant there turns it off");
+  // (daybreak3's same-choice case: the migration's write fails, storage recovers, the person repeats an old allow: a
+  // change of nothing itself, the write still carries the pending migration, so the notebook stays allowed)
+  store.clear();
+  store.set("sagebrush-permissions", JSON.stringify({ same: { files: true }, other: { files: true } }));
+  failing = true;
+  const ms = createPermissions();
+  failing = false;
+  check(ms.set("same", "files", true) === true && ms.may("same", "files") === true && ms.may("other", "files") === true, "migration failed, storage back, then an old allow repeated: still allowed at once, the other notebook too");
+  check(rec().migrated === 1 && rec().docs.same?.write?.includes("/") && rec().docs.other?.write?.includes("/") && !store.has("sagebrush-permissions"), "…that write carried both old choices and the mark, and the old key is retired");
+  const ms2 = createPermissions();
+  check(ms2.may("same", "files") === true && ms2.may("other", "files") === true && rec().migrated === 1, "…and a reload is stable");
+  // (astra's MIG-BOUND-2: held in the page, the old choices are bounded as the record is: every "don't allow", and
+  // only the newest docsKept allows; a "don't allow" held over a stored grant still wins)
+  store.clear();
+  store.set("sagebrush-grants", JSON.stringify({ v: 1, seq: 1, docs: { gd: { write: ["/"], t: 1 } } }));
+  const many = [["gd", { files: false }], ["d0", { files: false }], ...Array.from({ length: GRANT_CAPS.docsKept + 500 }, (_, i) => ["ab" + i, { files: true }]), ["d1", { files: false }]];
+  store.set("sagebrush-permissions", JSON.stringify(Object.fromEntries(many)));
+  failing = true;
+  const mh = createPermissions();
+  const allowedHeld = Array.from({ length: GRANT_CAPS.docsKept + 500 }, (_, i) => mh.may("ab" + i, "files")).filter(Boolean).length;
+  failing = false;
+  check(allowedHeld === GRANT_CAPS.docsKept && mh.may("ab0", "files") === false && mh.may("ab" + (GRANT_CAPS.docsKept + 499), "files") === true, "migration failed: the page holds the newest 2,000 old allows, the oldest only off: " + allowedHeld);
+  check(["gd", "d0", "d1"].every((d) => mh.may(d, "files") === false), "…and every old \"don't allow\", one over a stored grant included");
+  store.clear();
+  store.set("sagebrush-permissions", JSON.stringify(Object.fromEntries(Array.from({ length: GRANT_CAPS.docsKept + 500 }, (_, i) => ["mm" + i, { files: i % 2 === 0 }]))));
+  const mb = createPermissions();
+  check(Object.keys(rec().docs).length === GRANT_CAPS.docsKept && !rec().docs.mm0 && !!rec().docs["mm" + (GRANT_CAPS.docsKept + 499)] && mb.may("mm0", "files") === false, "migrating more old choices than the record keeps: bounded at 2,000 notebooks, the oldest go (which only turns them off)");
+  store.clear();
   // (scoped grants: recorded, not enforced)
   const g = createPermissions(); g.provenance("doc", "elsewhere");
   check(g.grant("doc", "write", "/out").ok && g.may("doc", "files") === false, "a write tree is recorded but enforces nothing yet: may(files) stays the switch's");
@@ -183,14 +246,6 @@ const check = (ok, what) => { checks++; console.log((ok ? "ok   " : "FAIL ") + w
   check(sd.deny("big0", "net", "new.org", { stored: true }), "(one more stored denial)");
   const kept2 = Object.values(JSON.parse(store.get("sagebrush-grants")).docs).reduce((n, e) => n + (e.denied?.length ?? 0), 0);
   check(kept2 === GRANT_CAPS.storedDenials && !sd.grants("big0").denied.stored.some(([, h]) => h === "h0.org:443") && sd.grants("big0").denied.stored.some(([, h]) => h === "new.org:443") && sd.grants("big1").denied.stored.some(([, h]) => h === "h1.org:443"), "stored denials are bounded at 20,000 page-wide, the oldest evicted: " + kept2);
-  // (the switch's bounds at their edges, preloaded in one write: past DENIALS_KEPT a "don't allow" holds in this page
-  // only; past ALLOWS_KEPT the oldest allow goes)
-  const sw = () => JSON.parse(store.get("sagebrush-permissions"));
-  store.set("sagebrush-permissions", JSON.stringify(Object.fromEntries(Array.from({ length: DENIALS_KEPT }, (_, i) => ["dk" + i, { files: false }]))));
-  const kd = createPermissions();
-  check(kd.set("dk-new", "files", false) === false && !("dk-new" in sw()) && Object.keys(sw()).length === DENIALS_KEPT && kd.may("dk-new", "files") === false, "past 20,000 kept, one more \"don't allow\" isn't stored, and holds in this page");
-  store.set("sagebrush-permissions", JSON.stringify(Object.fromEntries(Array.from({ length: ALLOWS_KEPT }, (_, i) => ["ak" + i, { files: true }]))));
-  check(createPermissions().set("ak-new", "files", true) && "ak-new" in sw() && !("ak0" in sw()) && "ak1" in sw(), "past 2,000 allows kept, the oldest goes and the newest stays");
   // (the scoped record: past docsKept the least recently changed document goes; an emptied one leaves nothing; only v 1 is read)
   store.set("sagebrush-grants", JSON.stringify({ v: 1, seq: GRANT_CAPS.docsKept, docs: Object.fromEntries(Array.from({ length: GRANT_CAPS.docsKept }, (_, i) => ["dd" + i, { write: ["/w"], t: i + 1 }])) }));
   const dk = createPermissions();
@@ -200,7 +255,7 @@ const check = (ok, what) => { checks++; console.log((ok ? "ok   " : "FAIL ") + w
   check(!("t8" in gdocs()), "a document whose grants are all removed leaves no entry in the stored record");
   store.set("sagebrush-grants", JSON.stringify({ v: 2, seq: 5, docs: { v2: { write: ["/a"], net: ["x.org:443"], t: 1 } } }));
   const v2 = createPermissions().grants("v2");
-  check(v2.write.stored.length === 0 && v2.net.stored.length === 0, "a stored record of another version is read as empty, not used");
+  check(v2.write.stored.length === 0 && v2.net.stored.length === 0 && JSON.parse(store.get("sagebrush-grants")).v === 2, "a stored record of another version is read as empty, not used, and not rewritten");
   delete globalThis.localStorage;
 }
 const W = "window.sagebrush.workspace";
@@ -270,10 +325,20 @@ try {
   await ev(`(() => { document.querySelector('#filebtn')?.click(); document.querySelector('#filemenu [data-group="new"]')?.click(); document.querySelector('#filemenu [data-f="new"]').click(); return 1; })()`);
   await until("sagebrush.notebook.cells().length === 1 && !sagebrush.notebook.cells()[0].ta.value", 20000);
   await sleep(1000);
-  check((await files()) === true, "the person's own new notebook may change files: " + JSON.stringify(await ev("sagebrush.permissions()")));
+  // (confinement 1b, O1: the person's own new notebook starts with file changes off too; its first write is refused and
+  // the bar asks; the person's own click allows, and the cell run again writes)
+  check((await files()) === false, "the person's own new notebook starts with file changes off (O1): " + JSON.stringify(await ev("sagebrush.permissions()")));
+  await setCode("try:\n    open('own-1.txt', 'w').write('x'); print('W1')\nexcept PermissionError as e:\n    print('REFUSED', e)");
+  const tFirst = Date.now();
+  await runAll();
+  check(await until("/REFUSED/.test(document.querySelector('#cells .cell .out')?.textContent ?? '')", 60000), "…its first write is refused: " + (await out()).trim().slice(0, 160));
+  console.log(`(the own notebook's first run, in the sandbox frame: ${Date.now() - tFirst} ms)`);
+  check(!(await stat("/own-1.txt")) && (await ev("!document.querySelector('#filesbar').hidden && /wants to change files/.test(document.querySelector('#filesbar').textContent)")), "…nothing is written, and the bar says: This notebook wants to change files [Allow changes for this notebook]");
+  await trusted("#filesallow");
+  check((await files()) === true && (await ev("document.querySelector('#filesbar').hidden")), "…the person's own click on Allow: it may change files now, the bar gone");
   await setCode("open('own-1.txt', 'w').write('x'); print('W1')");
   await runAll();
-  check(await until(`${W}.stat("/own-1.txt").then((e) => !!e)`, 30000), "…it writes: /own-1.txt");
+  check(await until(`${W}.stat("/own-1.txt").then((e) => !!e)`, 30000), "…and the cell run again writes: /own-1.txt");
   await openPerms();
   check(/Don't allow file changes/.test(await ev("document.querySelector('#filesperm').textContent")), "File > Permissions… offers Don't allow file changes");
   const panel = await ev("document.querySelector('#permsdlg').open && document.querySelector('#permsdlg').textContent");
@@ -289,7 +354,7 @@ try {
   const ownId = await ev("localStorage.getItem('sagebrush-current')");
   await go(base + "?nb=" + encodeURIComponent(ownId));
   await sleep(800);
-  check((await files()) === false, "…the person's choice survives a reopen (an explicit don't-allow beats the own-notebook default)");
+  check((await files()) === false, "…the person's choice survives a reopen");
   await openPerms();
   check(/^Allow file changes/.test(await ev("document.querySelector('#filesperm').textContent")), "File > Permissions… now offers Allow file changes");
   await trusted("#filesperm");
@@ -307,7 +372,8 @@ try {
   await filesSwitch();
   check((await files()) === true, "(allowed again)");
   // (a choice made in another tab while the panel was closed: opening it shows the one now in effect)
-  const otherTab = (on) => ev(`(() => { const k = "sagebrush-permissions", a = JSON.parse(localStorage.getItem(k) ?? "{}"); a[${JSON.stringify(ownId)}] = { files: ${on} }; localStorage.setItem(k, JSON.stringify(a)); return 1; })()`);
+  // (another tab's choice is the scoped record's write scope "/": granted, or denied)
+  const otherTab = (on) => ev(`(() => { const k = "sagebrush-grants", r = JSON.parse(localStorage.getItem(k)), e = (r.docs[${JSON.stringify(ownId)}] ??= {}); e.write = (e.write ?? []).filter((x) => x !== "/"); e.denied = (e.denied ?? []).filter((x) => !(x[0] === "write" && x[1] === "/")); if (${on}) e.write.push("/"); else e.denied.push(["write", "/", ++r.seq]); e.t = ++r.seq; localStorage.setItem(k, JSON.stringify(r)); return 1; })()`);
   await otherTab(false);
   await openPerms();
   check(/Not allowed: this notebook's code can't change your files/.test(await ev("document.querySelector('#permsfiles').textContent")) && /^Allow file changes/.test(await ev("document.querySelector('#filesperm').textContent")), "opening the panel shows the choice in effect now, one made in another tab included");
@@ -377,6 +443,8 @@ try {
   await ev(`(() => { document.querySelector('#filebtn')?.click(); document.querySelector('#filemenu [data-group="new"]')?.click(); document.querySelector('#filemenu [data-f="new"]').click(); return 1; })()`);
   await until("sagebrush.notebook.cells().length === 1 && !sagebrush.notebook.cells()[0].ta.value", 20000);
   await sleep(800);
+  await allowOwn(); // (a new notebook starts off (O1): allowed by the person's click, as the rest of this needs)
+  check((await files()) === true, "(the second notebook, allowed by the person)");
   const seen = async (tag) => { await setCode(`import os; print('${tag}', os.path.exists('stale.txt'))`); await runAll(); await until(`/${tag} (True|False)/.test(document.querySelector('#cells .cell .out')?.textContent ?? '')`, 30000); return /True/.test(await out()); };
   check((await seen("B0")) === false, "(a second notebook's interpreter running, without /stale.txt)");
   // (the queue held while the old worker's message arrives: only the sender check can refuse it there)
@@ -392,7 +460,7 @@ try {
   check(await until(`${W}.stat("/cur-ctl.txt").then((e) => !!e)`, 15000), "control: the same change from the current worker is kept");
 
   // ---- "don't allow" when storage can't keep it: in effect, and said
-  await ev(`(() => { const o = Storage.prototype.setItem; window.__setItem = o; Storage.prototype.setItem = function (k, v) { if (k === "sagebrush-permissions") throw new DOMException("full", "QuotaExceededError"); return o.call(this, k, v); }; return 1; })()`);
+  await ev(`(() => { const o = Storage.prototype.setItem; window.__setItem = o; Storage.prototype.setItem = function (k, v) { if (k === "sagebrush-grants") throw new DOMException("full", "QuotaExceededError"); return o.call(this, k, v); }; return 1; })()`);
   await filesSwitch();
   check((await files()) === false && /couldn't keep the choice/.test(await ev("document.querySelector('#status').textContent")), "\"don't allow\" with storage refusing it: in effect anyway, and the page says it couldn't keep it: " + (await ev("document.querySelector('#status').textContent")).slice(0, 140));
   await setCode("try:\n    open('unkept.txt', 'w').write('x'); print('W')\nexcept PermissionError:\n    print('REFUSED')");
@@ -401,9 +469,10 @@ try {
   await ev("(Storage.prototype.setItem = window.__setItem, 1)");
   check(errors.length === 0, "no exceptions in the page: " + errors.slice(0, 3).join(" | "));
 
-  // ---- a notebook of the person's reopened while the page runs, with no sandbox (?runner=0, as in the app): its
-  // provenance is known before its interpreter starts, so that interpreter is a plain one from the start, never one
-  // that can't change files (whose ready has no version) restarted once the provenance arrives
+  // ---- with no sandbox (?runner=0, as in the app): a notebook allowed to change files, reopened while the page runs,
+  // has its grant known before its interpreter starts, so that interpreter is a plain one from the start, never one
+  // that can't change files (whose ready has no version) restarted once it's known; one not allowed (the person's own
+  // included, and an example: O1, O6) gets no plain interpreter at all
   const newOwn = async () => {
     await ev(`(() => { document.querySelector('#filebtn')?.click(); document.querySelector('#filemenu [data-group="new"]')?.click(); document.querySelector('#filemenu [data-f="new"]').click(); return 1; })()`);
     await until("sagebrush.notebook.cells().length === 1 && !sagebrush.notebook.cells()[0].ta.value", 20000);
@@ -411,11 +480,17 @@ try {
     return ev("localStorage.getItem('sagebrush-current')");
   };
   await go(base + "?runner=0");
-  const idA = await newOwn(), idB = await newOwn();
-  check(idA && idB && idA !== idB, "(two notebooks of the person's: A, then B)");
+  const idA = await newOwn();
+  await filesSwitch();
+  check((await files()) === true, "(A, the person's, allowed to change files)");
+  const idB = await newOwn();
+  check(idA && idB && idA !== idB && (await files()) === false, "(two notebooks of the person's: A, then B, which isn't allowed)");
+  await setCode("print('B ran')");
+  await runAll();
+  check(await until("/can't run here: it isn't allowed to change your files/.test(document.querySelector('#cells .cell .out')?.textContent ?? '')", 30000), "?runner=0: the person's own notebook not allowed to change files doesn't run in the page's own interpreter, and says why: " + (await out()).slice(0, 140));
   const { identifier: statusLog } = await send("Page.addScriptToEvaluateOnNewDocument", { source: `window.__statuses = []; new MutationObserver((ms) => { for (const m of ms) if (m.target.id === "status" || m.target.parentElement?.id === "status") for (const n of m.addedNodes) window.__statuses.push(n.textContent); }).observe(document, { childList: true, subtree: true });` });
   await go(base + "?runner=0");
-  check((await ev("localStorage.getItem('sagebrush-current')")) === idB && (await until("!!sagebrush.kernel?.context", 30000)), "(reloaded into B, its interpreter running; A has none in this page)");
+  check((await ev("localStorage.getItem('sagebrush-current')")) === idB, "(reloaded into B; A has no interpreter in this page)");
   await ev("(window.__statuses.length = 0, 1)");
   await ev(`sagebrush.open(${JSON.stringify(idA)}).then(() => 1)`);
   await until(`localStorage.getItem('sagebrush-current') === ${JSON.stringify(idA)} && !!sagebrush.kernel?.context`, 30000);
@@ -427,9 +502,10 @@ try {
   await until("!!document.querySelector('#exlist button')", 10000);
   const exBefore = await ev("localStorage.getItem('sagebrush-current')");
   await ev("(document.querySelector('#exlist button').click(), 1)");
-  await until(`localStorage.getItem('sagebrush-current') !== ${JSON.stringify(exBefore)} && !!sagebrush.kernel?.context`, 30000);
+  await until(`localStorage.getItem('sagebrush-current') !== ${JSON.stringify(exBefore)}`, 30000);
+  await sleep(800);
   const exStatuses = await ev("window.__statuses");
-  check(!exStatuses.some((t) => /^ready \(sagebrush ,/.test(t)) && (await files()) === true, "an example opened from the Examples dialog while the page runs: a plain interpreter from the start, files allowed: " + JSON.stringify(exStatuses.filter((t) => /ready/.test(t))));
+  check((await files()) === false, "an example opened from the Examples dialog starts with file changes off too (O6): " + JSON.stringify(exStatuses.filter((t) => /ready/.test(t))));
   await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: statusLog });
 
   // ---- no workspace (it can't be opened): the old store's write asks the same authority, in its own transaction

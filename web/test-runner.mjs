@@ -20,6 +20,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "./test-port.mjs";
+import { allowFiles } from "./test-allow.mjs";
 
 const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
 const profile = mkdtempSync(join(tmpdir(), "sb-runner-"));
@@ -360,6 +361,10 @@ try {
   ok(!!mainFrameId, "the page's frame (Page.getFrameTree): " + (mainFrameId ?? what(ft) ?? "none"));
   await send("Page.navigate", { url: new URL(process.env.NO_RUNNER ? "?runner=0" : "./", base).href });
   await until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000);
+  // (savemat and other cells write files: the person allows this notebook's file changes, as a person does; under
+  // NO_RUNNER that is also what gives it the page's own interpreter)
+  await allowFiles(send, ev);
+  await until("sagebrush.kernel.ready", 60000);
   console.log("     " + (await ev("document.querySelector('#status').textContent")));
   const frame = await ev("(() => { const f = document.querySelector('iframe[sandbox]'); return f && { sandbox: f.getAttribute('sandbox'), src: f.src }; })()");
   ok(frame?.sandbox === "allow-scripts", "the interpreter runs in <iframe sandbox=\"allow-scripts\">: " + JSON.stringify(frame));

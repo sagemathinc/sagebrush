@@ -17,6 +17,7 @@ import { createServer, request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort, freePort } from "./test-port.mjs";
+import { allowFiles } from "./test-allow.mjs";
 
 const here = new URL(".", import.meta.url).pathname;
 const dist = join(here, "dist");
@@ -82,6 +83,8 @@ async function chromium() {
   const cell = (k) => `document.querySelectorAll('.cell')[${k}]`;
   const t = {
     errors, ev, until,
+    // (the person allowing the notebook's file changes, as a person does; a refusing interpreter is replaced by a plain one)
+    allow: async () => { await allowFiles(send, ev); return until("sagebrush.kernel.ready", 60000); },
     open: async (url) => { await send("Page.navigate", { url }); return until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000); },
     // a run in a new last cell, waited for: its output
     run: async (code, ms = 120000) => {
@@ -114,6 +117,8 @@ for (const runner of ["0", "1"]) {
   try {
     const { t } = c;
     ok(await t.open(s.url + "?runner=" + runner), `${what}: the notebook page is ready`);
+    // (its cells write a CSV and read it back; and a notebook that may not change files never gets a plain worker)
+    ok(await t.allow(), `${what}: file changes allowed for this notebook`);
     const plain = await t.run("print(sum(range(10)))");
     ok(plain.includes("45"), `${what}: a cell without pandas runs (${JSON.stringify(plain)})`);
     await sleep(1000);

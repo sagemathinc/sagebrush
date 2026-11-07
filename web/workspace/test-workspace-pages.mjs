@@ -32,6 +32,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { devtoolsPort } from "../test-port.mjs";
+import { allowFiles } from "../test-allow.mjs";
 
 const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
 let port = Number(process.env.CDP_PORT) || 0;
@@ -584,6 +585,8 @@ try {
   // Python's writes go through the workspace: a second write keeps the first as a version
   // (the first code cell: the Welcome notebook starts with Markdown)
   const runPy = (code) => ev(`(async () => { const nb = sagebrush.notebook, c = nb.cells().find((x) => x.type === "code"); c.ta.value = ${JSON.stringify(code)}; c.ta.dispatchEvent(new Event("input", { bubbles: true })); await nb.run(c); return true; })()`);
+  // (the Welcome notebook, like every notebook, starts with file changes off (O6): the person allows them, as a person does)
+  await allowFiles(send, ev);
   await runPy('with open("/py.txt", "w") as f:\n    f.write("one")\nprint("wrote one")');
   const pyOk = await until(`${W}.read("/py.txt").then((r) => new TextDecoder().decode(r.content) === "one")`, 60000);
   const diag = pyOk ? "" : await ev(`(async () => { const keys = await new Promise((ok) => { const r = indexedDB.open("sagebrush"); r.onsuccess = () => { const q = r.result.transaction("files").objectStore("files").getAllKeys(); q.onsuccess = () => ok(q.result); }; }); const c = sagebrush.notebook.cells().find((x) => x.type === "code"); return JSON.stringify({ keys, stat: await ${W}.stat("/py.txt").catch((e) => String(e)), input: c?.ta?.value, out: c?.el?.innerText?.slice(0, 300) ?? Object.keys(c ?? {}).join(",") }); })()`).catch((e) => String(e));
