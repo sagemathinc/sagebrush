@@ -73,7 +73,7 @@ export interface ShareEnv {
   SESSION_KEY?: string;
   /** shared with CoCalc: signs admin calls */
   PURGE_KEY?: string;
-  /** where shared files are served, e.g. https://files.cocalcusercontent.com */
+  /** where shared files are served, the FILES_ORIGIN binding from web/content-domains.mts */
   FILES_ORIGIN?: string;
   /** dev deployments only: "1" enables /auth/dev and default limits */
   SHARE_DEV?: string;
