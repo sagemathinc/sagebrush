@@ -431,10 +431,11 @@ try {
 
   // ---- a newer render, or a clear, ends the pending one at once, as "replaced" or "cleared" (O12, O17)
   await ev(`(window.RC = make({ rogue: "stuck", commitMs: 60000 }), window.RCA = RC.area("rc1", box()), window.RCB = RC.area("rc2", box()), RCA.show(), RCB.show(),
-    RCA.render([{ id: "x", kind: "text", body: "a" }]), RCA.render([{ id: "x", kind: "text", body: "b" }]), RCB.render([{ id: "x", kind: "text", body: "c" }]), RCB.clear(), 1)`);
+    RCA.render([{ id: "x", kind: "text", body: "a" }]), RCA.render([{ id: "x", kind: "text", body: "b" }]), RCB.render([{ id: "x", kind: "text", body: "c" }]), RCB.clear(),
+    window.RCC = RC.area("rc3", box()), RCC.render([{ id: "x", kind: "text", body: "d" }]), RCC.clear(), 1)`);
   await sleep(200);
-  const rc = await ev(`events.filter((e) => (e.area === "rc1" || e.area === "rc2") && (e.type === "committed" || e.type === "error")).map((e) => [e.area, e.generation, e.reason])`);
-  ok(JSON.stringify(rc) === '[["rc1",1,"replaced"],["rc2",1,"cleared"]]', "a newer render ends the pending one as replaced, and a clear as cleared, at once: " + JSON.stringify(rc));
+  const rc = await ev(`events.filter((e) => /^rc\d$/.test(e.area) && (e.type === "committed" || e.type === "error")).map((e) => [e.area, e.generation, e.reason])`);
+  ok(JSON.stringify(rc) === '[["rc1",1,"replaced"],["rc2",1,"cleared"],["rc3",1,"cleared"]]', "a newer render ends the pending one as replaced, and a clear as cleared, at once, whether or not the area has a frame yet: " + JSON.stringify(rc));
   await ev("(RC.dispose(), 1)");
 
   // ---- deadlines: a renderer that never starts, or never commits, ends with text
