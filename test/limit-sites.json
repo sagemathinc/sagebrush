@@ -731,6 +731,27 @@
   "owner": "sagebrush-matlab",
   "reason": "engine/nd tests: deliberately overflowing sizes (u32::MAX, usize::MAX) that must be refused, and wasm32's limits in a test Facts; refuses no user work"
  },
+ "engine/nd/src/boundary.rs :: layout :: pub const MAX_PARTICIPANTS: u64 = 16; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-python",
+  "reason": "engine/nd's thread pool: min(cores - 1, 8) helpers per product, and the module's bound of 16 participants; they share the machine's cores and change a product's time, never its bits"
+ },
+ "engine/nd/src/boundary.rs :: pool_layouts :: refused(\"slot * participants overflowing\", Pool { slot: (u64::MAX / 2) & !15, ..POOL }); #0": {
+  "class": "none",
+  "owner": "sagebrush-python",
+  "reason": "refuses nothing itself: a test's overflowing size (u64::MAX), and Rust's slice-length bound (isize::MAX bytes) passed to the pool's layout check (engine/nd/src/boundary.rs); soundness rules, not policy caps"
+ },
+ "engine/nd/src/boundary.rs :: pool_regions :: if !(2..=MAX_PARTICIPANTS).contains(&p.participants) || p.ctl % 64 != 0 || p.stacks % 16 != 0 || p.slot == 0 || p.slot % 16 != 0 { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-python",
+  "reason": "engine/nd's thread pool: min(cores - 1, 8) helpers per product, and the module's bound of 16 participants; they share the machine's cores and change a product's time, never its bits"
+ },
  "engine/nd/src/boundary.rs :: potrf_layouts :: refused(\"n overflowing\", 3, u32::MAX); #0": {
   "class": "none",
   "owner": "sagebrush-matlab",
@@ -920,6 +941,11 @@
   "class": "none",
   "owner": "sagebrush-matlab",
   "reason": "refuses nothing itself: passes Rust's slice-length bound (isize::MAX bytes) to the Wasm boundary check (engine/nd/src/boundary.rs); a soundness rule for any slice, not a policy cap"
+ },
+ "engine/nd/src/wasm.rs :: nd_pool_init :: let facts = Facts { mem: memory_bytes(), floor: addr_of!(__heap_base) as usize as u64, max_len: isize::MAX as u64, frame: 0 }; #0": {
+  "class": "none",
+  "owner": "sagebrush-python",
+  "reason": "refuses nothing itself: a test's overflowing size (u64::MAX), and Rust's slice-length bound (isize::MAX bytes) passed to the pool's layout check (engine/nd/src/boundary.rs); soundness rules, not policy caps"
  },
  "engine/nd/src/wasm.rs :: nd_potrf :: max_len: isize::MAX as u64, #0": {
   "class": "none",
@@ -9810,6 +9836,14 @@
   "owner": "runtime file I/O",
   "row": "src-14"
  },
+ "src/runtime/nd.ts :: helperCount :: return hw <= 1 ? 0 : Math.min(hw - 1, MAX_HELPERS); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-python",
+  "reason": "engine/nd's thread pool: min(cores - 1, 8) helpers per product, and the module's bound of 16 participants; they share the machine's cores and change a product's time, never its bits"
+ },
  "src/runtime/nd.ts :: sharedMemory :: for (const maximum of [65536, 16384, 4096]) { #0": {
   "class": "none",
   "owner": "sagebrush-matlab",
@@ -9819,6 +9853,14 @@
   "class": "none",
   "owner": "sagebrush-matlab",
   "reason": "engine/nd's WebAssembly.Memory (src/runtime/nd.ts): the declared maximum is wasm32's own 4 GiB bound (the module's import declares it), retried smaller only where that much address space can't be reserved; refuses no user work (a growth past it is the MemoryError cholesky reports)"
+ },
+ "src/runtime/nd.ts :: up :: const MAX_HELPERS = 8; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-python",
+  "reason": "engine/nd's thread pool: min(cores - 1, 8) helpers per product, and the module's bound of 16 participants; they share the machine's cores and change a product's time, never its bits"
  },
  "src/runtime/numpy.ts :: admitArray :: if (bytes > 2n ** 63n - 1n) raise(T.ValueError, \"array is too big; `arr.size * arr.dtype.itemsize` is larger than the maximum possible size.\"); #0": {
   "class": "2",

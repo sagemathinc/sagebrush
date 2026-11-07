@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { Crew, type WorkerLike } from "../web/threads/crew";
+import { Crew, type WorkerLike } from "../src/runtime/nd-crew";
 
-// The threads demo's crew (web/threads/crew.ts; numerics-core M0, E3/ND-M3): a pool that fails while starting
+// The threads demo's crew (src/runtime/nd-crew.ts; numerics-core M0, E3/ND-M3): a pool that fails while starting
 // (a Worker constructor or a postMessage throwing after some workers were made) leaves no worker behind and
 // reports the original error, and a fresh crew starts cleanly after it. (The page's integration, startPool's
 // catch tearing the crew down, is exercised in a browser with ?fault=spawn and ?fault=post.)

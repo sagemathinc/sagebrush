@@ -9,6 +9,7 @@
 type Exports = {
   __stack_pointer: WebAssembly.Global;
   nd_gemm_part(desc: number, id: number): number;
+  nd_pool_init(ctl: number, stacks: number, slot: number, participants: number): number;
   nd_info(what: number): number; // 0 scratch length, 1 floor, 2 and 3 the microkernel name's address and length
 };
 
@@ -57,10 +58,12 @@ function helper(m: { module: WebAssembly.Module; memory: WebAssembly.Memory; id:
   }
 }
 
-function conductor(init: { module: WebAssembly.Module; memory: WebAssembly.Memory; stackTop: number; ctl: number; desc: number; helpers: number }) {
+function conductor(init: { module: WebAssembly.Module; memory: WebAssembly.Memory; stackTop: number; ctl: number; desc: number; helpers: number; stacks: number; slot: number }) {
   const t0 = performance.now();
   const ex = instantiate(init.module, init.memory, init.stackTop);
   const instantiateMs = performance.now() - t0;
+  // (the pool's layout, recorded once in the module: a job on more than one thread runs only within it)
+  if (init.helpers > 0 && ex.nd_pool_init(init.ctl, init.stacks, init.slot, init.helpers + 1) !== 1) throw new Error("the kernel refused the pool's layout");
   const mem = init.memory;
   const c = new Int32Array(mem.buffer, init.ctl, 4);
   const at = ex.nd_info(2);
