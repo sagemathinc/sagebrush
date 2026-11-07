@@ -5,6 +5,7 @@ prints them.  The exact linear algebra is the Rust engine's (sagebrush.linalg:
 multimodular and p-adic, certified; sagebrush.nf for the lattice algorithms).
 Dense; entries are Python ints or Sage Rationals."""
 
+import sys as _sys
 from fractions import Fraction as _F
 
 
@@ -3992,7 +3993,11 @@ _RR_BIG = None
 
 def _cc_or_none(o):
     """complex(o) as _cc gives it, or None when o is no number (a series, a polynomial, a
-    matrix: the operation is the other operand's, NotImplemented)."""
+    matrix: the operation is the other operand's, NotImplemented; an element of Zmod(n),
+    a finite field or a number field, which refuses CC as Sage does)."""
+    m = _sys.modules.get("_sage_ff")
+    if m is not None and m.is_exact_algebraic(o):
+        return None
     try:
         return _cc(o)
     except (TypeError, ValueError):
