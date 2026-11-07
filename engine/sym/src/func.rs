@@ -164,7 +164,15 @@ pub fn eval(f: Fun, args: Vec<Expr>) -> Expr {
     if numeric && args.iter().any(|a| a.is_float()) && !matches!(f, Fun::Gamma | Fun::Erf) {
         let v: Vec<(f64, f64)> = args.iter().map(|a| a.as_num().unwrap().to_c64()).collect();
         // the arguments' parent (Sage: sin(SR(RDF(0.5))) is over RDF)
-        let k = args.iter().filter_map(|a| a.as_num().and_then(|n| n.fk())).reduce(|a, b| a.meet(b)).unwrap_or(crate::num::Fk::RR);
+        let kinds = args.iter().filter_map(|a| a.as_num().and_then(|n| n.fk()));
+        // (atan2(y, x) takes x's parent in one domain: atan2(SR(RDF(1)), SR(RR(2)))
+        // is over RR, as Sage; across domains the complex one)
+        let k = if f == Fun::Atan2 { kinds.rev().reduce(|a, b| a.meet(b)) } else { kinds.reduce(|a, b| a.meet(b)) }.unwrap_or(crate::num::Fk::RR);
+        if f == Fun::Atan2 {
+            if let Some(e) = atan2_float_angle(&v, k) {
+                return e;
+            }
+        }
         // (a real-valued function is over the real parent: abs(SR(CDF(3, 4))) is RDF's 5.0)
         let k = if matches!(f, Fun::Abs | Fun::RealPart | Fun::ImagPart | Fun::Arg) { k.to_real() } else { k };
         if let Some((re, im)) = float_eval(&f, &v) {
@@ -826,4 +834,38 @@ pub fn erf(x: f64) -> f64 {
         }
         1.0 - (-x * x).exp() / std::f64::consts::PI.sqrt() / (x + f)
     }
+}
+
+
+/// atan2 of real floats on an axis or a diagonal, as Sage: an exact angle
+/// (atan2(SR(RDF(1.5)), SR(RDF(1.5))) is 1/4*pi, atan2(1.0, 0.0) is 1/2*pi),
+/// NaN at the origin; None elsewhere (the float is computed).
+fn atan2_float_angle(v: &[(f64, f64)], k: crate::num::Fk) -> Option<Expr> {
+    if v.len() != 2 || v[0].1 != 0.0 || v[1].1 != 0.0 {
+        return None;
+    }
+    let (y, x) = (v[0].0, v[1].0);
+    if !y.is_finite() || !x.is_finite() {
+        return None;
+    }
+    if y == 0.0 && x == 0.0 {
+        // (Sage's symbolic NaN, not a float)
+        let _ = k;
+        return Some(constant(Const::Undefined));
+    }
+    let q = if x == 0.0 {
+        if y > 0.0 { qq(1, 2) } else { qq(-1, 2) }
+    } else if y == 0.0 {
+        if x > 0.0 { return Some(zero()) } else { qq(1, 1) }
+    } else if y.abs() == x.abs() {
+        match (y > 0.0, x > 0.0) {
+            (true, true) => qq(1, 4),
+            (true, false) => qq(3, 4),
+            (false, false) => qq(-3, 4),
+            (false, true) => qq(-1, 4),
+        }
+    } else {
+        return None;
+    };
+    Some(pi_times(q))
 }

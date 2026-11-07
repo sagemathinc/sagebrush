@@ -718,7 +718,8 @@ pub fn pow(b: &Expr, x: &Expr) -> Expr {
                 if crate::err::soft_division() {
                     return constant(Const::UnsignedInfinity);
                 }
-                throw(SymError::DivisionByZero);
+                // (Sage's error for 0 to a negative power: SR(0)^-1)
+                crate::err::value_error("power::eval(): division by zero");
             }
             if n.is_positive() {
                 return zero();
@@ -933,7 +934,7 @@ fn double_pow(br: f64, bi: f64, xr: f64, xi: f64, k: crate::num::Fk) -> Num {
         let (x, y) = (br, xr);
         if x == 0.0 {
             if y < 0.0 {
-                throw(SymError::DivisionByZero);
+                crate::err::value_error("power::eval(): division by zero");
             }
             return Num::Float(if y == 0.0 { 1.0 } else { x }, 0.0, k);
         }
