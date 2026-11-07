@@ -1,15 +1,15 @@
 {
  "v": 1,
- "reason": "matplotlib Axes geometry as matplotlib 3.11.1 (friction W04, W41, W50, W51): set_aspect adjustable 'box' keeps the limits and shrinks the box, 'datalim' moves limits when drawn; get_position a Bbox (matplotlib.transforms) by GridSpec's arithmetic; set_xticks widens the view; get_xticklabels, label rotation, plt.xticks(); an Axes clips to its own box; fig.canvas. The logic is in the lazily imported matplotlib._axes_geometry (mod-matplotlib), pyplot keeps one-line methods. Re-measured with bun 1.4.4 (size-record.sh) on master c32e38de vs head 4df3bcde: cli/lib.gen.js +7084, cli/pyjs.cjs +11704, engine/lib/core.pre +1919, engine/lib/core.src +919, engine/lib/mod-matplotlib.src +13585, engine/lib/sci.pre +20878, engine/lib/sci.src +5042, engine/sagebrush-worker.js +92; examples/corpus +1, site/examples -75 (two refreshed notebooks). Ceilings: sci.src 408403, mod-matplotlib.src 49133 (measured + 64). Markers exact but cli/pyjs.cjs 11832: +11768 landing on master 1a7620b2 (daybreak2), + 64.",
+ "reason": "matplotlib Axes geometry as matplotlib 3.11.1 (friction W04, W41, W50, W51): set_aspect adjustable 'box' keeps the limits and shrinks the box, 'datalim' moves limits when drawn; get_position a Bbox (matplotlib.transforms) by GridSpec's arithmetic; set_xticks widens the view; get_xticklabels, label rotation, plt.xticks(); an Axes clips to its own box; fig.canvas. The logic is in the lazily imported matplotlib._axes_geometry (mod-matplotlib), pyplot keeps one-line methods. Re-measured with bun 1.4.4 (size-record.sh) on a probe merge of head 1b75dc76 into master 54cb845d: cli/lib.gen.js +8232, cli/pyjs.cjs +12912, engine/lib/core.pre +3445, engine/lib/core.src +1126, engine/lib/mod-matplotlib.src +16120, engine/lib/sci.pre +20663, engine/lib/sci.src +4985, engine/sagebrush-worker.js +92; examples/corpus +9, site/examples -116. Ceilings: sci.src 408403, mod-matplotlib.src 51668 (measured + 64). Markers exact but cli/pyjs.cjs 12976 (+64, as it moves with master).",
  "bytes": {
-  "cli/lib.gen.js": 7084,
-  "cli/pyjs.cjs": 11832,
-  "engine/lib/core.pre": 1919,
-  "engine/lib/core.src": 919,
-  "engine/lib/mod-matplotlib.src": 13585,
-  "engine/lib/sci.pre": 20878,
-  "engine/lib/sci.src": 5042,
+  "cli/lib.gen.js": 8232,
+  "cli/pyjs.cjs": 12976,
+  "engine/lib/core.pre": 3445,
+  "engine/lib/core.src": 1126,
+  "engine/lib/mod-matplotlib.src": 16120,
+  "engine/lib/sci.pre": 20663,
+  "engine/lib/sci.src": 4985,
   "engine/sagebrush-worker.js": 92,
-  "examples/corpus": 1
+  "examples/corpus": 9
  }
 }
