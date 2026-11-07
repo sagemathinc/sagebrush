@@ -126,6 +126,7 @@ try {
     await until(`!!document.querySelector('.sbfiles .frow[data-path="/Welcome.ipynb"]')`, 20000);
     await ev(`${W}.remove("/Welcome.ipynb").then(() => true)`);
     const listed = await until(`[...document.querySelectorAll(".sbfiles .fempty button")].some((b) => b.textContent === "New LaTeX document")`, 20000);
+    check(listed && await ev(`[...document.querySelectorAll(".sbfiles .fempty button")].some((b) => b.textContent === "From an example…")`), "phone: the empty file list offers From an example… too (U0)");
     const er = listed ? await reach(".sbfiles .fempty button", "New LaTeX document") : await ev(`({ files: !!document.querySelector(".sbfiles"), hidden: document.getElementById("wssidebar")?.hidden, rows: [...document.querySelectorAll(".sbfiles .frow")].map((r) => r.dataset.path).slice(0, 8), empty: [...document.querySelectorAll(".sbfiles .fempty")].map((x) => x.textContent.slice(0, 60)) })`);
     check(listed && er.found && er.inView && er.top && er.w === 390, "phone: the empty file list offers New LaTeX document, in view and not covered", er);
     if (listed) { await mark(); await ev(`([...document.querySelectorAll(".sbfiles .fempty button")].find((b) => b.textContent === "New LaTeX document").click(), true)`); }
@@ -139,48 +140,51 @@ try {
     await ev(`(document.querySelector('#filemenu button[data-group="new"]').click(), true)`);
     const items = await ev(`[...document.querySelectorAll('.fmgroup[aria-label="New"] button')].map((b) => b.dataset.item ?? b.firstChild?.textContent)`);
     const mr = await reach('.fmgroup[aria-label="New"] button', "LaTeX document");
-    check(fb.found && fb.inView && fb.top && items.indexOf("LaTeX document") >= 0 && items.indexOf("LaTeX document") === items.indexOf("newFolder") - 2 && items.indexOf("LaTeX example") === items.indexOf("newFolder") - 1 && mr.found && mr.inView && mr.top,
-      "phone: File > New offers LaTeX document and LaTeX example (before Folder), File and the item in view and not covered", { fb, items, mr });
+    check(fb.found && fb.inView && fb.top && JSON.stringify(items) === JSON.stringify(["newNotebook", "newMatlab", "newBoard", "newLatex", "newFolder", "fromExample"]) && mr.found && mr.inView && mr.top,
+      "phone: File > New offers LaTeX document, in the file panel's order (U0), File and the item in view and not covered", { fb, items, mr });
     await mark(); await ev(`([...document.querySelectorAll('.fmgroup[aria-label="New"] button')].find((b) => b.textContent === "LaTeX document").click(), true)`);
     check(await madeAs("/Untitled (2).tex"), "phone: File > New > LaTeX document: /Untitled (2).tex made and opened in the editor");
-    // File > New > LaTeX example: the examples' list fits the phone (10 large buttons, the dialog within the width,
-    // each button reachable), and the figure example opens with its image (a folder of its own, plot.png beside it)
-    await go(base + "?latex=1"); await until(`!!${W}`, 60000);
-    await ev(`(document.getElementById("filebtn").click(), true)`);
-    await until(`!!document.querySelector('.fmgroup[aria-label="New"]')`, 10000);
-    await ev(`(document.querySelector('#filemenu button[data-group="new"]').click(), true)`);
-    const exItem = await reach('.fmgroup[aria-label="New"] button', "LaTeX example");
+    // the editor's File > New > From an example… (U0: "From an example…" replaces "LaTeX example", William Nov 2), on
+    // a site without the examples gallery (this test's server: web/examples/open.ts finds no catalog): the LaTeX
+    // examples' own list fits the phone (10 large buttons, the dialog within the width, each button reachable), and the
+    // figure example opens with its image (a folder of its own, plot.png beside it)
+    await ev(`(document.querySelector(".tex-filebtn").click(), true)`);
+    await until(`!!document.querySelector('.tex-filemenu .fmgroup[aria-label="New"]')`, 10000);
+    await ev(`(document.querySelector('.tex-filemenu button[data-group="new"]').click(), true)`);
+    const exItem = await reach('.tex-filemenu .fmgroup[aria-label="New"] button', "From an example…");
     // (the examples are a chunk of their own, sagebrush-latex-examples.js: not fetched before their list is asked for)
     const exAsks = () => requests.filter((u) => /sagebrush-latex-examples\.js/.test(u)).length, exBefore = exAsks();
-    await ev(`([...document.querySelectorAll('.fmgroup[aria-label="New"] button')].find((b) => b.textContent === "LaTeX example").click(), true)`);
+    await ev(`(document.querySelector('.tex-filemenu [data-item="fromExample"]').click(), true)`);
     const listed2 = await until(`document.querySelectorAll("dialog.sb-tex-examples[open] button[data-example]").length === 10`, 20000);
     check(exBefore === 0 && exAsks() === 1, "phone: the examples' chunk fetched once, by their list, and not before", { exBefore, after: exAsks() });
     const dlg = listed2 && await ev(`(() => { const d = document.querySelector("dialog.sb-tex-examples"), r = d.getBoundingClientRect(), bs = [...d.querySelectorAll("button[data-example]")];
       const last = bs[bs.length - 1]; last.scrollIntoView({ block: "center" }); const lr = last.getBoundingClientRect(), at = document.elementFromPoint(lr.left + lr.width / 2, lr.top + lr.height / 2);
-      return { menuHidden: document.getElementById("filemenu").hidden, left: r.left, right: r.right, w: innerWidth, n: bs.length, minH: Math.min(...bs.map((b) => b.getBoundingClientRect().height)), lastReach: at === last || last.contains(at) }; })()`);
+      return { menuHidden: document.querySelector(".tex-filemenu").hidden, left: r.left, right: r.right, w: innerWidth, n: bs.length, minH: Math.min(...bs.map((b) => b.getBoundingClientRect().height)), lastReach: at === last || last.contains(at) }; })()`);
     check(exItem.found && exItem.inView && exItem.top && listed2 && dlg.menuHidden && dlg.left >= 0 && dlg.right <= dlg.w && dlg.n === 10 && dlg.minH >= 44 && dlg.lastReach,
-      "phone: File > New > LaTeX example: the File menu closed, the list of 10 fits the screen, every button at least 44 px and reachable", { exItem, dlg });
-    await mark(); await ev(`(document.querySelector('dialog.sb-tex-examples button[data-example="figure"]').click(), true)`);
-    const figOk = await madeAs("/LaTeX examples/Figure with an image/figure.tex");
+      "phone: the editor's File > New > From an example…: the File menu closed, the list of 10 fits the screen, every button at least 44 px and reachable", { exItem, dlg });
+    // (in the editor, another .tex opens in place, its URL pushed: no new document)
+    await ev(`(document.querySelector('dialog.sb-tex-examples button[data-example="figure"]').click(), true)`);
+    const figOk = await until(`${W}.stat("/LaTeX examples/Figure with an image/figure.tex").then((e) => !!e?.fid && new URLSearchParams(location.search).get("tex") === e.fid && !!document.querySelector(".tex-page .tex-src"))`, 20000);
     const figImg = figOk && await until(`[...document.querySelectorAll(".tex-preview img.graphic")].some((i) => i.src.startsWith("blob:"))`, 20000);
     check(figOk && figImg && await ev(`${W}.stat("/LaTeX examples/Figure with an image/plot.png").then((e) => e?.kind === "file")`), "phone: the figure example: its folder made, figure.tex opened, plot.png beside it and shown in the preview");
     await ev(`localStorage.removeItem("sagebrush-files-sidebar"); true`);
     await send("Emulation.clearDeviceMetricsOverride");
   }
   // ---- the examples' chunk fails to load (grader #685 E1, E2, E4): the first request for it refused (the Fetch
-  // domain), File > New > LaTeX example says so in an alert, and the list isn't shown; asked again, the list loads, by
-  // a new URL (?try=2: the browser keeps a failed module import for its URL), so a failure is never cached
+  // domain), the editor's File > New > From an example… says so in an alert, and the list isn't shown; asked again, the
+  // list loads, by a new URL (?try=2: the browser keeps a failed module import for its URL), so a failure is never cached
   {
     await go(base + "?latex=1"); await until(`!!${W}`, 60000);
+    await open(await ev(`${W}.stat("/Untitled.tex").then((e) => e.fid)`));
     let refused = 0;
     onPaused = (p) => { if (!refused++) send("Fetch.failRequest", { requestId: p.requestId, errorReason: "ConnectionFailed" }); else send("Fetch.continueRequest", { requestId: p.requestId }); };
     await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-latex-examples.js*" }] });
     const exUrls = () => requests.filter((u) => /sagebrush-latex-examples\.js/.test(u));
     const askExamples = async () => {
-      await ev(`(document.getElementById("filebtn").click(), true)`);
-      await until(`!!document.querySelector('.fmgroup[aria-label="New"]')`, 10000);
-      await ev(`(document.querySelector('#filemenu button[data-group="new"]').click(), true)`);
-      await ev(`([...document.querySelectorAll('.fmgroup[aria-label="New"] button')].find((b) => b.textContent === "LaTeX example").click(), true)`);
+      await ev(`(document.querySelector(".tex-filebtn").click(), true)`);
+      await until(`!!document.querySelector('.tex-filemenu .fmgroup[aria-label="New"]')`, 10000);
+      await ev(`(document.querySelector('.tex-filemenu button[data-group="new"]').click(), true)`);
+      await ev(`(document.querySelector('.tex-filemenu [data-item="fromExample"]').click(), true)`);
     };
     const r0 = exUrls().length, d0 = dialogText.length;
     await askExamples();
@@ -203,6 +207,20 @@ try {
       "…asked a third time, once loaded: the same 10, the chunk not fetched again", kept);
     await send("Fetch.disable"); onPaused = null;
     await ev(`(document.querySelector("dialog.sb-tex-examples[open]")?.close(), true)`);
+    // a site with the examples gallery (its catalog stubbed: one LaTeX document, one notebook): the editor's File ▸
+    // Examples… and New ▸ From an example… open the gallery's panel, on LaTeX first, as the notebook and board pages
+    // open it on theirs (#759), not the LaTeX examples' own list
+    await ev(`(() => { const f0 = window.__sbFetch0 ??= window.fetch; window.fetch = (u, o) => new URL(String(u?.url ?? u), location.href).pathname === "/examples/index.json" ? Promise.resolve(new Response(JSON.stringify({ examples: [{ id: "latex/stub", kind: "latex", title: "Stub LaTeX", summary: "" }, { id: "notebook/stub", kind: "notebook", title: "Stub notebook", summary: "" }] }), { headers: { "content-type": "application/json" } })) : f0(u, o); return 1; })()`);
+    const galleryOn = `!!document.querySelector("dialog.sb-examples[open]") && !document.querySelector("dialog.sb-tex-examples[open]") && (() => { const t = [...document.querySelectorAll("dialog.sb-examples [role=option]")].map((b) => b.textContent); return t.some((x) => x.includes("Stub LaTeX")) && !t.some((x) => x.includes("Stub notebook")); })()`;
+    const closeGallery = `(() => { [...document.querySelectorAll("dialog.sb-examples button")].find((b) => b.textContent === "Close")?.click(); return 1; })()`;
+    await ev(`(document.querySelector(".tex-filebtn").click(), true)`);
+    await ev(`(document.querySelector('.tex-filemenu [data-item="examples"]').click(), true)`);
+    check(await until(galleryOn, 20000), "the editor's File ▸ Examples… on a site with the gallery: its panel, on LaTeX first");
+    await ev(closeGallery);
+    await askExamples();
+    check(await until(galleryOn, 20000), "the editor's New ▸ From an example…: the same panel, not the LaTeX examples' own list");
+    await ev(closeGallery);
+    await ev(`(() => { if (window.__sbFetch0) window.fetch = window.__sbFetch0; return 1; })()`);
   }
   // ---- every example opened in the editor (made by the page module's makeExample, as the list does; the test's
   // workspace handle has create, not the page's createByPerson): each renders in the preview,
@@ -233,10 +251,11 @@ try {
     await ev(`localStorage.setItem("sagebrush-files-sidebar", "1"); true`);
     await open(fa);
     await until(`document.querySelector(".tex-preview").textContent.includes("File A here.")`, 20000);
-    const nm = await ev(`(async () => { document.querySelector(".tex-new").click(); await new Promise((r) => setTimeout(r, 50)); const items = [...document.querySelectorAll(".tex-newmenu button")].map((b) => b.textContent);
-      [...document.querySelectorAll(".tex-newmenu button")].find((b) => b.textContent === "LaTeX example").click(); await new Promise((r) => setTimeout(r, 300));
-      const n = document.querySelectorAll("dialog.sb-tex-examples[open] button[data-example]").length; document.querySelector("dialog.sb-tex-examples")?.close(); return { items, n }; })()`);
-    check(JSON.stringify(nm.items) === JSON.stringify(["LaTeX document", "LaTeX example", "Notebooks"]) && nm.n === 10, "B1: from a LaTeX file, New offers a LaTeX document, an example (the list opens) and the notebooks", nm);
+    const nm = await ev(`(async () => { document.querySelector(".tex-filebtn").click(); await new Promise((r) => setTimeout(r, 50)); document.querySelector('.tex-filemenu button[data-group="new"]').click();
+      const items = [...document.querySelectorAll('.tex-filemenu .fmgroup[aria-label="New"] button')].map((b) => b.dataset.item);
+      document.querySelector('.tex-filemenu [data-item="fromExample"]').click(); await new Promise((r) => setTimeout(r, 300));
+      const n = document.querySelectorAll("dialog.sb-tex-examples[open] button[data-example]").length; document.querySelector("dialog.sb-tex-examples")?.close(); return { items, n, closed: document.querySelector(".tex-filemenu").hidden }; })()`);
+    check(JSON.stringify(nm.items) === JSON.stringify(["newNotebook", "newMatlab", "newBoard", "newLatex", "newFolder", "fromExample"]) && nm.n === 10 && nm.closed, "B1 + U0: from a LaTeX file, File > New has every editor's items in the file panel's order, and From an example… opens the LaTeX examples", nm);
     const sel = (p) => JSON.stringify(`.frow[data-path="${p}"]`);
     await until(`!!document.querySelector(${sel("/sw/b.tex")}) || (document.querySelector('.frow[data-path="/sw"]')?.click(), false)`, 20000);
     const sw = await ev(`(async () => {
@@ -1744,7 +1763,9 @@ try {
     const spy = () => ev(`(() => { const t = document.querySelector(".tex-src"), d = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value"); window.__vals = [];
       Object.defineProperty(t, "value", { configurable: true, get() { return d.get.call(this); }, set(v) { window.__vals.push(v); d.set.call(this, v); } }); return true; })()`);
     const LONG = DOC.replace("\\end{document}", Array.from({ length: 220 }, (_, i) => `Line ${i} of filler text.`).join("\n") + "\n\\end{document}");
-    const opened = async (name, bytes = enc(DOC)) => { const f = await mk(name, bytes); await open(f); await until(`!!document.querySelector(".tex-src")`, 20000); await sleep(500); return f; };
+    // (the page's workspace first, and the agents' handle, set late in the editor's mount: waited for, so neither is used
+    // before it is there, under load)
+    const opened = async (name, bytes = enc(DOC)) => { await until(`!!${W}`, 20000); const f = await mk(name, bytes); await open(f); await until(`!!document.querySelector(".tex-src") && !!window.__sbTexWs`, 20000); await sleep(500); return f; };
     // (a dirty editor and the agent's change: the bar up)
     const conflicted = async (name) => { await opened(name); await typeInto(DOC + "% mine\n"); await agentWrite(name, DOC + "% theirs\n"); return barShows(); };
 
@@ -2272,14 +2293,115 @@ try {
     return ev(`(async () => { document.querySelector('.sbfiles .fh button[aria-label="New"]').click(); await new Promise((r) => setTimeout(r, 0)); return [...document.querySelectorAll(".sbfmenu button")].map((b) => b.textContent); })()`);
   };
   const offItems = await newMenu("");
-  check(JSON.stringify(offItems) === JSON.stringify(["Notebook", "MATLAB notebook", "Board", "LaTeX document", "Folder"]), "A0: on by default: with no flag, New offers a LaTeX file", offItems);
+  check(JSON.stringify(offItems) === JSON.stringify(["Notebook", "MATLAB notebook", "Board", "LaTeX document", "Folder", "From an example…"]), "A0: on by default: with no flag, New offers a LaTeX file", offItems);
   const onItems = await newMenu("?latex=1");
-  check(JSON.stringify(onItems) === JSON.stringify(["Notebook", "MATLAB notebook", "Board", "LaTeX document", "Folder"]), "A0: the editor on: New offers a LaTeX file", onItems);
+  check(JSON.stringify(onItems) === JSON.stringify(["Notebook", "MATLAB notebook", "Board", "LaTeX document", "Folder", "From an example…"]), "A0: the editor on: New offers a LaTeX file", onItems);
   await mark();
   await ev(`([...document.querySelectorAll(".sbfmenu button")].find((b) => b.textContent === "LaTeX document").click(), true)`);
   const made = await fresh(`!!document.querySelector(".tex-page .tex-src") && !!${W}`, 20000);
   const newTex = made && await ev(`${W}.stat("/Untitled (3).tex").then((e) => ({ kind: e?.kind, fid: e?.fid ?? "", here: !!e?.fid && new URLSearchParams(location.search).get("tex") === e.fid }))`);
   check(made && newTex.kind === "file" && newTex.fid && newTex.here && JSON.stringify(await bytesOf("/Untitled (3).tex")) === JSON.stringify(enc("\\documentclass{article}\n\\begin{document}\n\n\\end{document}\n")), "A0: New, LaTeX document: /Untitled (3).tex (the phone checks made the first two) made, with a short document, and opened in the editor", newTex);
+  // (the board page's File ▸ New, the same order (U0), and its LaTeX document: made at the top of the files and opened
+  // in the editor, the notebook page's /?tex=<fid>)
+  const untitled = `${W}.list("/").then((l) => l.filter((e) => /^\\/Untitled( \\(\\d+\\))?\\.tex$/.test(e.path)).map((e) => e.fid))`;
+  const texBefore = await ev(untitled);
+  await mark(); await send("Page.navigate", { url: base + "board/?new=python" });
+  await fresh(`!!window.sagebrush?.board?.snapshot && window.sagebrush.board.snapshot().doc !== null && !!document.querySelector('[data-sbb=filemenu] [data-group=new]')`, 60000);
+  const boardNew = await ev(`[...document.querySelector('[data-sbb=filemenu] [data-group=new]').nextElementSibling.querySelectorAll('button')].map((b) => b.dataset.sbb)`);
+  check(JSON.stringify(boardNew) === JSON.stringify(["newnotebook", "newmatlab", "newboard", "newlatex", "newfolder", "examples"]), "U0: the board's File ▸ New is Notebook, MATLAB notebook, Board, LaTeX document, Folder, From an example…", boardNew);
+  // (a note being written where it is when New ▸ LaTeX document is clicked: what is typed kept first (grader's K15))
+  await ev(`window.sagebrush.board.edit((d) => { d.nodes = [{ id: "k15", title: "Note", text: "", x: 0, y: 0, w: 300 }]; }).then(() => 1)`);
+  await ev("window.sagebrush.board.editing(true), 1");
+  await ev(`Promise.resolve(window.sagebrush.board.focus(["k15"])).then(() => new Promise((r) => setTimeout(r, 400))).then(() => 1)`);
+  await ev("(() => { const r = window.board.clientRect('k15'); const x = r.left + 20, y = r.top + 12; document.elementFromPoint(x, y).dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX: x, clientY: y })); return 1; })()");
+  const writing = await until("window.board.editing === 'k15' && document.activeElement === document.querySelector('.board-editing .be-title')", 5000);
+  const atNote = writing || await ev("(() => { const r = window.board.clientRect('k15'); const e = document.elementFromPoint(r.left + 20, r.top + 12); return { r: [r.left, r.top, r.width, r.height], at: e?.className?.baseVal ?? e?.className ?? e?.tagName, editing: window.board.editing }; })()");
+  if (writing) { await ev("(() => { const t = document.querySelector('.board-editing .be-title'); t.setSelectionRange(t.value.length, t.value.length); return 1; })()"); await send("Input.insertText", { text: " kept" }); }
+  const boardHref = await ev("location.href");
+  await mark(); await ev(`(document.querySelector('[data-sbb=newlatex]').click(), true)`);
+  const boardTex = await fresh(`location.pathname === "/" && /[?&]tex=/.test(location.search) && !!document.querySelector(".tex-page .tex-src") && !!${W}`, 60000).catch(() => false);
+  const texAfter = boardTex ? await ev(untitled) : [], opened = await ev(`new URLSearchParams(location.search).get("tex")`);
+  check(boardTex && texAfter.length === texBefore.length + 1 && texAfter.includes(opened) && !texBefore.includes(opened), "U0: the board's New ▸ LaTeX document: a new Untitled .tex made at the top of the files and opened in the editor", { texBefore, texAfter, opened });
+  // (the board opened again: the note's title as typed)
+  await mark(); await send("Page.navigate", { url: boardHref });
+  await fresh(`!!window.sagebrush?.board?.snapshot && window.sagebrush.board.snapshot().doc !== null`, 60000).catch(() => false);
+  const k15 = await ev(`window.sagebrush.board.snapshot().doc?.nodes?.find((n) => n.id === "k15")?.title ?? null`);
+  check(writing && k15 === "Note kept", "U0: the board's New ▸ LaTeX document while a note is being written: what was typed is kept, in the board when it is opened again", { writing, atNote, k15, boardHref });
+  // (written once more, on the board opened again, for the failure below: last, as a failed keep stays failed)
+  await ev("window.sagebrush.board.editing(true), 1");
+  await ev(`Promise.resolve(window.sagebrush.board.focus(["k15"])).then(() => new Promise((r) => setTimeout(r, 400))).then(() => 1)`);
+  await ev("(() => { const r = window.board.clientRect('k15'); const x = r.left + 20, y = r.top + 12; document.elementFromPoint(x, y).dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX: x, clientY: y })); return 1; })()");
+  const writing2 = await until("window.board.editing === 'k15' && document.activeElement === document.querySelector('.board-editing .be-title')", 5000);
+  const texBefore2 = await ev(untitled);
+  // (and when what is being written can't be kept: the departure says so, the board stays, nothing made (grader's
+  // K15, @sagebrush's ruling): a board document's JSON.stringify made to throw once, for the keep alone)
+  const failed = writing2 && await ev(`(async () => {
+    const said = [], orig = JSON.stringify, alert0 = window.alert, before = location.href;
+    JSON.stringify = function (v, ...a) { if (window.__k15 && v && Array.isArray(v.nodes)) { window.__k15 = false; throw new Error("k15 test: not kept"); } return orig.call(JSON, v, ...a); };
+    window.alert = (m) => { said.push(String(m)); };
+    window.__k15 = true;
+    try {
+      document.querySelector('[data-sbb=newlatex]').click();
+      for (let i = 0; i < 100 && !said.length; i++) await new Promise((r) => setTimeout(r, 50));
+      await new Promise((r) => setTimeout(r, 300));
+      return { said, stayed: location.href === before, writing: window.board.editing === "k15" };
+    } finally { window.__k15 = false; JSON.stringify = orig; window.alert = alert0; }
+  })()`);
+  const texKept = writing2 ? await ev(untitled) : [];
+  check(failed && failed.said.length === 1 && /couldn't be kept/.test(failed.said[0]) && failed.stayed && texKept.length === texBefore2.length, "U0: the board's New ▸ LaTeX document when what is being written can't be kept: the person told why, the board stays, no .tex made", { writing2, failed, texBefore2, texKept });
+  // ---- U0's entry points, each pinned (grader's r764): New LaTeX document in a folder (a folder's ⋯ menu, browser.ts;
+  // the notebook page's hook; the page module's newTex), File ▸ New ▸ LaTeX document saving the notebook first, the
+  // board's file panel From an example…, and the editor's File ▸ Open… and its Ctrl+O
+  {
+    // (a folder's ⋯: New LaTeX document here, made in that folder and opened in the editor)
+    await ev(`localStorage.setItem("sagebrush-files-sidebar", "1"); true`);
+    await go(base + "?latex=1"); await until(`!!${W}`, 60000);
+    await ev(`${W}.mkdir("/u0sub").then(() => true, () => true)`);
+    const subRow = '.sbfiles .frow[data-path="/u0sub"]';
+    await until(`!!document.querySelector(${JSON.stringify(subRow)})`, 20000);
+    await ev(`(document.querySelector(${JSON.stringify(subRow)}).querySelector("button.more").click(), true)`);
+    const here = await until(`[...document.querySelectorAll(".sbfmenu button")].some((b) => b.textContent === "New LaTeX document here")`, 5000);
+    check(here, "U0: a folder's ⋯ menu offers New LaTeX document here", await ev(`[...document.querySelectorAll(".sbfmenu button")].map((b) => b.textContent)`));
+    if (here) { await mark(); await ev(`([...document.querySelectorAll(".sbfmenu button")].find((b) => b.textContent === "New LaTeX document here").click(), true)`); }
+    const inSub = here && (await fresh(`!!document.querySelector(".tex-page .tex-src") && !!${W}`, 20000).catch(() => false)) && await ev(`${W}.stat("/u0sub/Untitled.tex").then((e) => !!e?.fid && new URLSearchParams(location.search).get("tex") === e.fid)`);
+    check(inSub, "U0: New LaTeX document here: /u0sub/Untitled.tex, made in that folder and opened", { at: await ev("location.search"), sub: await ev(`${W}.list("/u0sub").then((l) => l.map((e) => e.path))`) });
+    // (File ▸ New ▸ LaTeX document from a notebook with an edit not yet saved: saved first, and nobody asked to leave)
+    await go(base + "?latex=1"); await until(`!!${W} && !!document.querySelector(".cell textarea")`, 60000);
+    const edit = "u0_saved_first = " + Date.now(), d0 = dialogs.length;
+    await mark();
+    await ev(`(() => { const ta = document.querySelector(".cell textarea"); ta.value = ${JSON.stringify(edit)}; ta.dispatchEvent(new Event("input", { bubbles: true })); document.querySelector('#filemenu [data-f="newlatex"]').click(); return true; })()`);
+    const left = await fresh(`!!document.querySelector(".tex-page .tex-src") && !!${W}`, 20000).catch(() => false);
+    const asked = dialogs.slice(d0);
+    // (the notebook opened again, as a person going back would: the edit is in its cell)
+    if (left) { await go(base + "?latex=1"); await until(`!!${W} && !!document.querySelector(".cell textarea")`, 60000); }
+    const kept = left && await until(`[...document.querySelectorAll(".cell textarea")].some((t) => t.value.includes(${JSON.stringify(edit)}))`, 10000);
+    check(left && kept && !asked.includes("beforeunload"), "U0: File ▸ New ▸ LaTeX document saves the notebook first: its edit kept, nobody asked to leave", { left, kept, dialogs: asked, cells: await ev(`[...document.querySelectorAll(".cell textarea")].map((t) => t.value.slice(0, 60))`) });
+    // (the board's file panel: its New offers From an example…, as the File menu has it)
+    await mark(); await send("Page.navigate", { url: base + "board/?new=python" });
+    await fresh(`!!window.sagebrush?.board?.snapshot && window.sagebrush.board.snapshot().doc !== null && !!document.querySelector('.sbfiles .fh button[aria-label="New"]')`, 60000);
+    const boardPanelNew = await ev(`(async () => { document.querySelector('.sbfiles .fh button[aria-label="New"]').click(); await new Promise((r) => setTimeout(r, 0)); return [...document.querySelectorAll(".sbfmenu button")].map((b) => b.textContent); })()`);
+    check(boardPanelNew.includes("From an example…"), "U0: the board's file panel New offers From an example…", boardPanelNew);
+    await ev(`(document.querySelectorAll(".sbfmenu").forEach((m) => m.remove()), true)`);
+    // (the editor's File ▸ Open…: the files dialog; and Ctrl+O, its shortcut, the same)
+    const subFid = await ev(`${W}.stat("/u0sub/Untitled.tex").then((e) => e?.fid ?? null)`);
+    // (one dialog each time: the notebook page under the editor answers no File-menu key of its own)
+    const inEditor = !!subFid && await open(subFid);
+    if (inEditor) await ev(`(document.querySelector(".tex-filebtn").click(), document.querySelector('.tex-filemenu [data-item="open"]').click(), true)`);
+    check(inEditor && await until(`document.querySelectorAll(".sbfopen").length === 1`, 5000), "U0: the editor's File ▸ Open… shows the files dialog", { subFid, n: await ev(`document.querySelectorAll(".sbfopen").length`) });
+    await ev(`(document.querySelectorAll(".sbfopen").forEach((d) => d.remove()), true)`);
+    if (inEditor) await send("Input.dispatchKeyEvent", { type: "keyDown", key: "o", code: "KeyO", modifiers: 2, windowsVirtualKeyCode: 79 });
+    const ctrlO = inEditor && await until(`document.querySelectorAll(".sbfopen").length > 0`, 5000) && (await sleep(300), await ev(`document.querySelectorAll(".sbfopen").length`));
+    check(ctrlO === 1, "U0: in the editor, Ctrl+O (File ▸ Open…'s shortcut) shows the files dialog, once", { ctrlO });
+    await ev(`(document.querySelectorAll(".sbfopen").forEach((d) => d.remove()), true)`);
+    // (Ctrl+Alt+N, New ▸ Notebook's shortcut: one notebook made, and opened)
+    const nbs = `${W}.list("/").then((l) => l.filter((e) => e.kind === "notebook").map((e) => e.path).sort())`;
+    const nbBefore = inEditor ? await ev(nbs) : [];
+    if (inEditor) { await mark(); await send("Input.dispatchKeyEvent", { type: "keyDown", key: "n", code: "KeyN", modifiers: 3, windowsVirtualKeyCode: 78 }); }
+    const nbOpened = inEditor && await fresh(`!!${W} && !!document.querySelector(".cell textarea") && !document.querySelector(".tex-page")`, 20000).catch(() => false);
+    if (nbOpened) await sleep(1000);
+    const nbAfter = inEditor ? await ev(`(async () => { for (let i = 0; i < 50 && !window.sagebrush?.workspace; i++) await new Promise((r) => setTimeout(r, 100)); return ${nbs}; })()`).catch(() => []) : [];
+    check(nbOpened && nbAfter.length === nbBefore.length + 1, "U0: in the editor, Ctrl+Alt+N (New ▸ Notebook's shortcut) makes one notebook and opens it", { nbOpened, at: await ev("location.search").catch(() => null), old: await ev("!!window.__sbOld").catch(() => null), made: nbAfter.filter((p) => !nbBefore.includes(p)), dialogs: dialogText.slice(-3) });
+  }
   // A1, A7: the files shown beside the page, not over it; Files hides and shows them, the document staying open
   const UXDOC = "\\documentclass{article}\n\\begin{document}\n\\section{Hello}\nSome text " + "long words ".repeat(60) + "\n\\end{document}\n";
   const fu = await mk("/t/ux.tex", enc(UXDOC));
@@ -2458,13 +2580,40 @@ try {
     const fp = await mk("/t/print.tex", enc("\\documentclass{article}\n\\begin{document}\n\\section{Printed}\nA formula $$\\int_0^1 x^2\\,dx = \\frac13$$ in it.\n\\end{document}\n"));
     await open(fp);
     await until(`document.querySelector(".tex-preview")?.textContent.includes("Printed") && !!document.querySelector(".tex-preview .katex")`, 20000);
-    const b = await ev(`(() => { const b = document.querySelector(".tex-head .tex-printbtn"); if (!b) return null;
+    // (the File menu runs its item's action on the next microtask: the stub kept until it has)
+    const b = await ev(`(async () => { const b = document.querySelector('.tex-filemenu [data-item="print"]'); if (!b) return null;
       window.__printed = []; const real = window.print; window.print = () => window.__printed.push(document.documentElement.classList.contains("tex-print"));
-      b.click(); window.print = real; return { label: b.textContent, printed: window.__printed, after: document.documentElement.classList.contains("tex-print") }; })()`);
+      b.click(); await new Promise((r) => setTimeout(r, 50)); window.print = real; return { label: b.textContent, printed: window.__printed, after: document.documentElement.classList.contains("tex-print") }; })()`);
     await sleep(50);
     const after = await ev(`document.documentElement.classList.contains("tex-print")`);
-    check(b && b.label === "Print / Save as PDF" && JSON.stringify(b.printed) === "[true]" && !after, "Print / Save as PDF: the preview's button opens the browser's print dialog, in the print layout, and the page is itself again after", { b, after });
+    check(b && b.label === "Print or save as PDF…" && JSON.stringify(b.printed) === "[true]" && !after, "File > Print or save as PDF… (the one File menu's, U0): the browser's print dialog, in the print layout, and the page is itself again after", { b, after });
     check(await ev(`typeof window.sagebrush?.latex?.print === "function" && typeof window.sagebrush.latex.printMode === "function"`), "…and the agent's route: window.sagebrush.latex.print() and printMode()");
+    // (the File menu: Escape closes it, and so does a click outside it, in the editor (grader's K28, K29))
+    const menuHidden = `document.querySelector(".tex-filemenu").hidden`;
+    await ev(`(document.querySelector(".tex-filebtn").click(), 1)`);
+    const openedEsc = !(await ev(menuHidden));
+    await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    check(openedEsc && await until(menuHidden, 2000), "U0: the editor's File menu: Escape closes it", { openedEsc });
+    await ev(`(document.querySelector(".tex-filebtn").click(), 1)`);
+    const openedOut = !(await ev(menuHidden));
+    await ev(`(document.querySelector(".tex-src").click(), 1)`);
+    check(openedOut && await until(menuHidden, 2000), "U0: the editor's File menu: a click outside it, in the editor, closes it", { openedOut });
+    // (its Recent: the documents opened before, not the one open here (grader's K21; only notebooks and boards are
+    // recorded, fileopen.ts, so the open .tex is never among them))
+    const recent = await ev(`(async () => { document.querySelector(".tex-filebtn").click(); await new Promise((r) => setTimeout(r, 50));
+      document.querySelector('.tex-filemenu button[data-group="recent"]').click(); await new Promise((r) => setTimeout(r, 1500));
+      const shown = [...document.querySelectorAll('.tex-filemenu [data-recent]')].map((b) => b.dataset.recent);
+      return { shown }; })()`);
+    check(recent.shown.length > 0 && !recent.shown.includes("/t/print.tex"), "U0: the editor's File ▸ Recent lists the documents opened before, not the open one", recent);
+    // (in print, the File menu hidden even while open (grader's K31))
+    const openPrint = !(await ev(menuHidden));
+    await ev(`(window.sagebrush.latex.printMode(true), 1)`);
+    await send("Emulation.setEmulatedMedia", { media: "print" });
+    const menuPrinted = await ev(`getComputedStyle(document.querySelector(".tex-filemenu")).display`);
+    await send("Emulation.setEmulatedMedia", { media: "" });
+    check(openPrint && menuPrinted === "none", "…in print, the File menu hidden, even open", { openPrint, menuPrinted });
+    await ev(`(window.sagebrush.latex.printMode(false), document.querySelector(".tex-filebtn").click(), 1)`);
     await ev(`(window.sagebrush.latex.printMode(true), 1)`);
     await send("Emulation.setEmulatedMedia", { media: "print" });
     const shown = await ev(`(() => { const d = (s) => { const e = document.querySelector(s); return e ? getComputedStyle(e).display : "absent"; };
@@ -2712,18 +2861,88 @@ try {
     await sleep(1500);
     const onOpen = { runner: requests.slice(n0).filter((u) => /\/runner\/|sagebrush-worker\.js/.test(u)), frames: await ev(`document.querySelectorAll("iframe[sandbox]").length`), results: await resultsOf("/t/run.tex"), chips: await ev(`document.querySelectorAll(".tex-preview .sagechip").length`) };
     check(onOpen.runner.length === 0 && onOpen.frames === 0 && onOpen.results === null && onOpen.chips >= 2, "Run: nothing runs on open (no runner, no worker, no results file; the items show as not run)", onOpen);
+    // (Run's code is a chunk of its own, /sagebrush-latex-run.js (daybreak2, #551's group cap): not fetched by the editor's
+    //  load or by any document opened so far, Run shown or not; the first Run fetches it once, later Runs not again)
+    const runChunk = () => byId.filter((x) => /\/sagebrush-latex-run\.js(\?|$)/.test(x.url));
+    const runBefore = runChunk().length;
+    check(runBefore === 0, "Run's chunk: not fetched by the editor's load, nor by opening documents with SageTeX code", runChunk());
+    // (its load fails (grader's #824 R1-R3): the first request for it refused (the Fetch domain): Run says so and runs
+    //  nothing; pressed again, it loads by a URL of its own (?try=: the browser keeps a failed module import for its
+    //  URL), so a failure is never kept)
+    let runRefused = 0;
+    onPaused = (p) => { if (!runRefused++) send("Fetch.failRequest", { requestId: p.requestId, errorReason: "ConnectionFailed" }); else send("Fetch.continueRequest", { requestId: p.requestId }); };
+    await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-latex-run.js*" }] });
+    await ev(`(document.querySelector(".tex-status").textContent = "", document.querySelector(".tex-head .tex-run").click(), 1)`);
+    const refusedSaid = await statusIs(/^Not run: Run's code couldn't be loaded; press Run again$/, 15000);
+    const refusedRun = { refused: runRefused, said: refusedSaid, label: await ev(`document.querySelector(".tex-head .tex-run").textContent`), results: await resultsOf("/t/run.tex"), fetched: runChunk().map((x) => [x.url.replace(/^.*\//, ""), x.status]) };
+    check(refusedRun.refused === 1 && refusedRun.said && refusedRun.label === "Run" && refusedRun.results === null && runChunk().length === 1 && !runChunk()[0].status, "Run's chunk: its load refused: Run says so, and nothing runs (no results file)", refusedRun);
     // (the click: its labels as they change, then the results)
     const labels = await ev(`new Promise((res) => { const b = document.querySelector(".tex-head .tex-run"), seen = [b.textContent];
       const o = new MutationObserver(() => { if (seen[seen.length - 1] !== b.textContent) seen.push(b.textContent); if (b.textContent === "Run" && seen.length > 1) { o.disconnect(); res(seen); } });
       o.observe(b, { childList: true, characterData: true, subtree: true }); b.click(); setTimeout(() => { o.disconnect(); res(seen); }, 180000); })`);
     check(JSON.stringify(labels) === JSON.stringify(["Run", "Starting Sage…", "Running…", "Run"]), "Run: its labels, Run → Starting Sage… → Running… → Run", labels);
     const ran = await statusIs(/Ran 5 SageTeX items in [0-9.]+ s$/, 30000);
+    const firstRun = runChunk();
+    await send("Fetch.disable"); onPaused = null;
+    const timing = await ev(`JSON.stringify(performance.getEntriesByType("resource").filter((e) => e.name.includes("sagebrush-latex-run.js")).map((e) => ({ ms: Math.round(e.duration), bytes: e.transferSize, body: e.decodedBodySize })))`);
+    check(firstRun.length === 2 && /\?try=\d+$/.test(firstRun[1].url) && firstRun[1].status === 200 && firstRun[1].bytes > 0, "Run's chunk: pressed again after the refused load, it loads by a URL of its own (?try=), once", firstRun);
+    console.log("timing, reported, not gated: Run's chunk on the first Run (loopback):", timing, "CDP encoded bytes:", firstRun[1]?.bytes);
     await until(`document.querySelector(".tex-preview").textContent.includes("1024") && document.querySelectorAll(".tex-preview .sagechip").length === 0`, 20000);
     const shownRun = await ev(`(() => { const t = document.querySelector(".tex-preview").textContent; return { has1024: t.includes("1024"), has7: /x\\s*=\\s*\\{?7/.test(t) || t.includes("= {7}") || t.includes("=7"), frac: !!document.querySelector(".tex-preview .katex .mfrac"), chips: document.querySelectorAll(".tex-preview .sagechip").length, status: document.querySelector(".tex-status")?.textContent }; })()`);
     check(ran && shownRun.has1024 && shownRun.has7 && shownRun.frac && shownRun.chips === 0, "Run: the preview shows x = 1024, 1/3, and x = 7 (redefined later, page order), no item left not run", shownRun);
     const rj = JSON.parse((await resultsOf("/t/run.tex")) ?? "null");
     check(rj && rj.format === "sagebrush-latex-results" && rj.version === 1 && rj.items.length === 5 && rj.items.every((x) => x.s === "ok") && rj.items[1].latex === "1024" && rj.items[2].latex === "\\frac{1}{3}" && rj.items[4].latex === "7",
       "Run: the results file beside the .tex (results v1, every item ok: 1024, \\frac{1}{3}, 7)", rj && { n: rj.items.length, items: rj.items.map((x) => [x.s, x.latex]) });
+    // (a second Run on the same page: the chunk already fetched is used, not fetched again)
+    await ev(`(document.querySelector(".tex-status").textContent = "", document.querySelector(".tex-head .tex-run").click(), 1)`);
+    const ranAgain = await statusIs(/Ran 5 SageTeX items in [0-9.]+ s$/, 60000);
+    check(ranAgain && runChunk().length === 2, "Run's chunk: a second Run on the page uses the one fetched, not fetched again", { ranAgain, fetched: runChunk().length });
+    // (grader's #824 R5: Run pressed twice while its code loads: once loaded, one Run, not two: a second would make the
+    //  first stale, and the first, ending, would show the button as "Run" (and take a press as a new Run, not Stop)
+    //  while the second still runs. So: the button back to "Run" once, at the end; one results write; one "Ran")
+    {
+      const two = await ev(`(async () => {
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms)), ws = window.__sbTexWs, realW = ws.write, writes = [];
+        ws.write = function (p, ...a) { writes.push(String(p)); return realW.call(this, p, ...a); };
+        let release; const held = new Promise((r) => { release = r; }); window.__sbTexRunLoaded = () => held;
+        let started = 0; const prevHold = window.__sbTexRunHold; window.__sbTexRunHold = () => { started++; };
+        const b = document.querySelector(".tex-head .tex-run"), st = document.querySelector(".tex-status"), said = [], labels = [];
+        const ob = new MutationObserver(() => { if (labels[labels.length - 1] !== b.textContent) labels.push(b.textContent); });
+        ob.observe(b, { childList: true, characterData: true, subtree: true });
+        const o = new MutationObserver(() => { const t = st.textContent; if (/^Ran \\d+ SageTeX item/.test(t) && said[said.length - 1] !== t) said.push(t); });
+        o.observe(st, { childList: true, characterData: true, subtree: true });
+        st.textContent = ""; b.click(); await wait(100); b.click(); await wait(300);
+        window.__sbTexRunLoaded = undefined; release();
+        for (let i = 0; i < 600 && !said.length; i++) await wait(100);
+        await wait(4000); o.disconnect(); ob.disconnect(); ws.write = realW; window.__sbTexRunHold = prevHold;
+        return { started, labels, said: said.length, results: writes.filter((p) => p === "/t/run.tex.results.json").length, label: b.textContent };
+      })()`);
+      check(two.started === 1 && two.said === 1 && two.results === 1 && two.label === "Run" && two.labels.filter((l) => l === "Run").length === 1 && two.labels[two.labels.length - 1] === "Run", "Run's chunk: Run pressed twice while its code loads: one Run (the button back to Run once, at its end; one results write, one \"Ran\")", two);
+    }
+    // (daybreak3, #824: the page replaced while Run's code loads: once it has loaded, that Run never starts: not one
+    //  workspace call for the old document or its folder, and its results file as it was)
+    {
+      const fo = await mk("/u/other.tex", enc("\\documentclass{article}\n\\begin{document}\nOther page.\n\\end{document}\n"));
+      const before = await resultsOf("/t/run.tex");
+      const lz = await ev(`(async () => {
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms)), ws = window.__sbTexWs, calls = [];
+        let release; window.__sbTexRunLoaded = () => new Promise((r) => { release = r; });
+        document.querySelector(".tex-head .tex-run").click();
+        for (let i = 0; i < 50 && !release; i++) await wait(100);
+        const held = !!release;
+        window.__sbTexRunLoaded = undefined;
+        window.__sbTex({ path: "/u/other.tex", fid: ${JSON.stringify(fo)} });
+        for (let i = 0; i < 100 && !document.querySelector(".tex-preview")?.textContent.includes("Other page."); i++) await wait(100);
+        const shown = !!document.querySelector(".tex-preview")?.textContent.includes("Other page.");
+        const orig = {};
+        for (const m of ["list", "readUpTo", "read", "stat", "pathOfFile", "write", "createByPerson"]) { orig[m] = ws[m]; ws[m] = function (a, ...r) { calls.push([m, String(a)]); return orig[m].call(this, a, ...r); }; }
+        release?.(); await wait(3000);
+        for (const m of Object.keys(orig)) ws[m] = orig[m];
+        const old = calls.filter(([m, a]) => a.startsWith("/t/") || a === "/t" || a === ${JSON.stringify(fr)});
+        return { held, shown, old, n: calls.length, starting: document.querySelector(".tex-head .tex-run")?.textContent ?? null };
+      })()`);
+      check(lz.held && lz.shown && lz.old.length === 0 && (await resultsOf("/t/run.tex")) === before, "Run's chunk: the page replaced while it loads: that Run never starts (no call for the old document or its folder, its results as they were)", lz);
+    }
     // (William, Nov 3: L0 "latex-beamer + sagetex ... didn't work", L1 "\title{$\sage{factor(2026)}$} doesn't work"):
     // a beamer deck of his shape, clicked Run: every item ok in the results file, the title page's result (an item in
     // \title, shown where \titlepage prints it), the plot and the curve's point in the preview and in Present

@@ -3009,6 +3009,16 @@
   "owner": "visualization/display",
   "row": "inv-30"
  },
+ "lib/_graphics.py ::  :: 'leftrightarrows ⇆ rightharpoonup ⇀ leadsto ⇝ top ⊤ bot ⊥ vdash ⊢ dashv ⊣ models ⊧ cup ∪ cap ∩ ' #0": {
+  "class": "none",
+  "owner": "matplotlib mathtext (@sagebrush-matlab)",
+  "reason": "\"cap\" is TeX's \\cap, the set intersection symbol (∩) in the mathtext tables, not a cap: nothing is refused"
+ },
+ "lib/_graphics.py ::  :: _TEX_BIN = set(('pm mp times cdot div amalg ast barwedge bullet cap cup diamond lhd odot ominus oplus oslash otimes ' #0": {
+  "class": "none",
+  "owner": "matplotlib mathtext (@sagebrush-matlab)",
+  "reason": "\"cap\" is TeX's \\cap, the set intersection symbol (∩) in the mathtext tables, not a cap: nothing is refused"
+ },
  "lib/_limits.py ::  :: \"ff.conway_work\": (UNLIMITED, 10 ** 6, 653528895), #0": {
   "class": "3",
   "owner": "finite fields + configuration"
@@ -3608,6 +3618,11 @@
   "owner": "Magma compatibility",
   "row": "inv-25"
  },
+ "lib/_matlab.py :: ws_call :: raise _err(\"Too many output arguments.\", \"MATLAB:TooManyOutputs\" if name == \"clearvars\" else \"MATLAB:maxlhs\") #0": {
+  "class": "none",
+  "owner": "matlab (@sagebrush-matlab)",
+  "reason": "refuses nothing beyond MATLAB: the census matches 'max' in the identifier MATLAB:maxlhs. The line raises MATLAB's own error for asking save, clear or clearvars for an output (MathWorks documents none), before the call runs; it is not a limit on a computation"
+ },
  "lib/_matlab_cpow.py ::  :: _RESCUE_MAX = 100000 #0": {
   "class": "3",
   "owner": "MATLAB numeric",
@@ -4091,6 +4106,11 @@
   "class": "none",
   "owner": "memory guards' message (item D)"
  },
+ "lib/_os_lazy.py :: PathLike.__fspath__ :: raise NotImplementedError #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14's os.PathLike, copied: the abstract method's body, not a cap"
+ },
  "lib/_png.py ::  :: MAX_AXIS = 16384 #0": {
   "class": "1+2",
   "owner": "raster/image I/O",
@@ -4516,6 +4536,81 @@
   "owner": "symbolic sums (@sagebrush-matlab)",
   "reason": "doctests' expected output for that refusal (the review's N11, N13, N15 pins), not a cap"
  },
+ "lib/_sage_expr_more.py ::  :: _EXACT_SIGN_MAX_DEGREE = 32 #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap is an algorithm switch (past it the relation is decided at 400 bits, as Sage decides such identities), not a limit on a computation; nothing is refused (or a docstring/except line of it)"
+ },
+ "lib/_sage_expr_more.py ::  :: algebraic number under a degree cap, after factors proven 0 are pruned.\"\"\" #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "the lazy exact-sign module's docstring: it names the degree cap (32) of the exact conversion, registered on its lines in this file; nothing raises"
+ },
+ "lib/_sage_expr_more.py :: _exact_degree_bound :: except (TypeError, ValueError, ArithmeticError, NotImplementedError): #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap is an algorithm switch (past it the relation is decided at 400 bits, as Sage decides such identities), not a limit on a computation; nothing is refused (or a docstring/except line of it)"
+ },
+ "lib/_sage_expr_more.py :: _exact_degree_bound :: except (TypeError, ValueError, ArithmeticError, NotImplementedError): #1": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap is an algorithm switch (past it the relation is decided at 400 bits, as Sage decides such identities), not a limit on a computation; nothing is refused (or a docstring/except line of it)"
+ },
+ "lib/_sage_expr_more.py :: _exact_sign :: cannot be decided (another kind of constant, or past the degree cap), as #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap (32, from the tree's bound, before anything is built) bounds the automatic proof's work; past it the relation stays undecided (bool False), as it was before the exact path existed; nothing raises (or a docstring/except line of it)"
+ },
+ "lib/_sage_expr_more.py :: _exact_sign :: except (TypeError, ValueError, ArithmeticError, NotImplementedError, AttributeError, RecursionError): #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap is an algorithm switch (past it the relation is decided at 400 bits, as Sage decides such identities), not a limit on a computation; nothing is refused (or a docstring/except line of it)"
+ },
+ "lib/_sage_expr_more.py :: _exact_sign_capped :: \"c\" (not real); _CAPPED when its degree is past _EXACT_SIGN_MAX_DEGREE #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap (32, from the tree's bound, before anything is built) bounds the automatic proof's work; past it the relation stays undecided (bool False), as it was before the exact path existed; nothing raises (or a docstring/except line of it)"
+ },
+ "lib/_sage_expr_more.py :: _exact_sign_capped :: _sage_qqbar._degree_cap = cap #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap (32, from the tree's bound, before anything is built) bounds the automatic proof's work; past it the relation stays undecided (bool False), as it was before the exact path existed; nothing raises (or a docstring/except line of it)"
+ },
+ "lib/_sage_expr_more.py :: _exact_sign_capped :: by the algebraic numbers' own degree check, under that cap); None for #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap (32, from the tree's bound, before anything is built) bounds the automatic proof's work; past it the relation stays undecided (bool False), as it was before the exact path existed; nothing raises (or a docstring/except line of it)"
+ },
+ "lib/_sage_expr_more.py :: _exact_sign_capped :: cap = _EXACT_SIGN_MAX_DEGREE if old is None else min(old, _EXACT_SIGN_MAX_DEGREE) #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap (32, from the tree's bound, before anything is built) bounds the automatic proof's work; past it the relation stays undecided (bool False), as it was before the exact path existed; nothing raises (or a docstring/except line of it)"
+ },
+ "lib/_sage_expr_more.py :: _exact_sign_capped :: except (TypeError, ValueError, ArithmeticError, NotImplementedError, AttributeError, RecursionError): #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap (32, from the tree's bound, before anything is built) bounds the automatic proof's work; past it the relation stays undecided (bool False), as it was before the exact path existed; nothing raises (or a docstring/except line of it)"
+ },
+ "lib/_sage_expr_more.py :: _exact_sign_capped :: except NotImplementedError as e: #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap (32, from the tree's bound, before anything is built) bounds the automatic proof's work; past it the relation stays undecided (bool False), as it was before the exact path existed; nothing raises (or a docstring/except line of it)"
+ },
+ "lib/_sage_expr_more.py :: _exact_sign_capped :: if bound is not None and bound > cap: #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap (32, from the tree's bound, before anything is built) bounds the automatic proof's work; past it the relation stays undecided (bool False), as it was before the exact path existed; nothing raises (or a docstring/except line of it)"
+ },
+ "lib/_sage_expr_more.py :: _exact_sign_capped :: return _CAPPED if \"more than %d\" % cap in str(e) else None #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap (32, from the tree's bound, before anything is built) bounds the automatic proof's work; past it the relation stays undecided (bool False), as it was before the exact path existed; nothing raises (or a docstring/except line of it)"
+ },
+ "lib/_sage_expr_more.py :: _prune_zero :: factor under the degree cap) replaced by 0, and such zero terms dropped #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "bool() of algebraic constants: the exact conversion's degree cap (32, from the tree's bound, before anything is built) bounds the automatic proof's work; past it the relation stays undecided (bool False), as it was before the exact path existed; nothing raises (or a docstring/except line of it)"
+ },
  "lib/_sage_ff.py ::  :: CONWAY_WORK = _limits.finalize()[\"ff.conway_work\"] #0": {
   "class": "3",
   "owner": "finite fields + configuration",
@@ -4567,6 +4662,16 @@
   "class": "none",
   "owner": "pcimc quick wins 3 (@sagebrush-sage2)",
   "reason": "Sage's TypeError messages for products of a GF(q) vector with a rational or a non-ZZ matrix: matched words, no limit"
+ },
+ "lib/_sage_ffmat.py :: FFVector.__truediv__ :: TypeError: unsupported operand parent(s) for *: 'Vector space of dimension 2 over Finite Field of size 5' and 'Rational Field' #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "a doctest's expected output (Sage's coercion refusal), not code"
+ },
+ "lib/_sage_ffmat.py :: FFVector.__truediv__ :: raise TypeError(\"unsupported operand parent(s) for /: '%r' and '%r'\" % (self.parent(), type(o))) #0": {
+  "class": "none",
+  "owner": "matrices over inexact fields (@sagebrush-sage2)",
+  "reason": "Sage's refusal (TypeError) of a vector divided by anything that has no inverse (a str, a list, an object with its own __rtruediv__), in Sage's text; refuses nothing for size"
  },
  "lib/_sage_ffmat.py :: _AlgCharge :: against the budget for one matrix. A charge per entry alone admitted #0": {
   "class": "2",
@@ -4953,6 +5058,11 @@
   "owner": "pcimc quick wins 3 (@sagebrush-sage2)",
   "reason": "Sage's TypeError messages for products of a GF(q) vector with a rational or a non-ZZ matrix: matched words, no limit"
  },
+ "lib/_sage_matrix.py :: Matrix.eigenmatrix_right :: NotImplementedError: generalized eigenvector decomposition is implemented for RDF and CDF, but not for Rational Field #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "a doctest's expected output (Sage's refusal), not code"
+ },
  "lib/_sage_matrix.py :: Matrix.hermite_form :: raise NotImplementedError(\"hermite_form(transformation=True) is implemented over QQ only in sagebrush yet\") #0": {
   "class": "coverage",
   "owner": "Sage kernel (@sagebrush-sage2)",
@@ -5132,6 +5242,21 @@
   "class": "2",
   "owner": "matrices/runtime memory",
   "row": "inv-8"
+ },
+ "lib/_sage_matrix_more.py :: refuse_generalized :: raise NotImplementedError(\"generalized eigenvector decomposition is implemented for RDF and CDF, but not for %s\" % (m.base_ring(),)) #0": {
+  "class": "coverage",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "Sage's own refusal of the generalized eigenproblem over exact rings (same message): an unsupported feature in Sage too, not a cap"
+ },
+ "lib/_sage_matrix_more.py :: refuse_generalized_numeric :: ....: except NotImplementedError as e: #0": {
+  "class": "none",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "a doctest line of the RDF/CDF generalized-eigenproblem refusal's pin (grader's r800 R1-R6): it prints the refusal; nothing is capped"
+ },
+ "lib/_sage_matrix_more.py :: refuse_generalized_numeric :: raise NotImplementedError(\"the generalized eigenvalue problem (other=B) over RDF and CDF is not available in sagebrush yet\") #0": {
+  "class": "coverage",
+  "owner": "Sage kernel (@sagebrush-sage2)",
+  "reason": "eigen*(B) over RDF/CDF not implemented yet (B was ignored): an unsupported feature (Sage: LAPACK), not a cap"
  },
  "lib/_sage_matrix_sr.py ::  :: _SR_MAX = 16 #0": {
   "class": "2",
@@ -5853,6 +5978,112 @@
   "owner": "real/complex arithmetic",
   "row": "inv-17"
  },
+ "lib/_sage_rpoly.py :: PolynomialInexact.__pow__ :: raise NotImplementedError(\"a power of a polynomial over %r by %r is not available in sagebrush yet\" % (self._ring._base, n)) #0": {
+  "class": "coverage",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "the fraction field of a polynomial ring over an inexact field (negative powers, division by a polynomial) and powers by a non-integer: 1b stage 2, not a cap"
+ },
+ "lib/_sage_rpoly.py :: PolynomialInexact.__pow__ :: raise NotImplementedError(\"the fraction field of %r is not available in sagebrush yet\" % (self._ring,)) #0": {
+  "class": "coverage",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "the fraction field of a polynomial ring over an inexact field (negative powers, division by a polynomial) and powers by a non-integer: 1b stage 2, not a cap"
+ },
+ "lib/_sage_rpoly.py :: PolynomialInexact.__rtruediv__ :: raise NotImplementedError(\"the fraction field of %r is not available in sagebrush yet\" % (self._ring,)) #0": {
+  "class": "coverage",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "the fraction field of a polynomial ring over an inexact field (negative powers, division by a polynomial) and powers by a non-integer: 1b stage 2, not a cap"
+ },
+ "lib/_sage_rpoly.py :: PolynomialInexact.__truediv__ :: raise NotImplementedError(\"the fraction field of %r is not available in sagebrush yet\" % (self._ring,)) #0": {
+  "class": "coverage",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "the fraction field of a polynomial ring over an inexact field (negative powers, division by a polynomial) and powers by a non-integer: 1b stage 2, not a cap"
+ },
+ "lib/_sage_rpoly.py :: PolynomialInexact._refuse_parents :: raise TypeError(\"unsupported operand parent(s) for %s: '%r' and '%r'\" % (sym, a, b)) #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "Sage's coercion refusal (TypeError) for polynomials over an inexact field with another ring or a Python complex, in Sage's text; refuses nothing for size"
+ },
+ "lib/_sage_rpoly.py :: PolynomialRingInexact.__call__ :: Converting an expression of degree 1048577 to a dense polynomial needs about 8.4 MB, but Sagebrush has a fixed limit of about 8.3 MB for one polynomial. #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "docstring text and examples of the dense coefficient bound; refuses nothing"
+ },
+ "lib/_sage_rpoly.py :: PolynomialRingInexact.__call__ :: conversion (a fixed limit of 2^20 coefficients):: #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "docstring text and examples of the dense coefficient bound; refuses nothing"
+ },
+ "lib/_sage_rpoly.py :: PolynomialRingInexact.__call__ :: sage: _sage_poly._MAX_DENSE_COEFFS = cap # sagebrush only #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "docstring text and examples of the dense coefficient bound; refuses nothing"
+ },
+ "lib/_sage_rpoly.py :: PolynomialRingInexact.__call__ :: sage: import _sage_poly; cap = _sage_poly._MAX_DENSE_COEFFS; _sage_poly._MAX_DENSE_COEFFS = 11 # sagebrush only #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "docstring text and examples of the dense coefficient bound; refuses nothing"
+ },
+ "lib/_sage_rpoly.py :: _admit :: cap = _sage_poly._MAX_DENSE_COEFFS #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "the dense coefficient bound of the exact polynomials (_sage_poly._MAX_DENSE_COEFFS, 2^20), admitted before a polynomial over an inexact field is built: SR conversion, product, square, power, shift (astra's RPOLY-ALLOC-1)",
+  "row": "inv-13"
+ },
+ "lib/_sage_rpoly.py :: _admit :: exact polynomials' _MAX_DENSE_COEFFS coefficients (the memory guard's error, at 8 bytes a #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "docstring text and examples of the dense coefficient bound; refuses nothing"
+ },
+ "lib/_sage_rpoly.py :: _admit :: if n > cap: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "the dense coefficient bound of the exact polynomials (_sage_poly._MAX_DENSE_COEFFS, 2^20), admitted before a polynomial over an inexact field is built: SR conversion, product, square, power, shift (astra's RPOLY-ALLOC-1)",
+  "row": "inv-13"
+ },
+ "lib/_sage_rpoly.py :: _admit :: raise _memguard.memory_guard(what, n * 8, cap * 8, \"one polynomial\", fixed=True) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "the dense coefficient bound of the exact polynomials (_sage_poly._MAX_DENSE_COEFFS, 2^20), admitted before a polynomial over an inexact field is built: SR conversion, product, square, power, shift (astra's RPOLY-ALLOC-1)",
+  "row": "inv-13"
+ },
+ "lib/_sage_rpoly.py :: _refuse_foreign :: raise TypeError(\"unsupported operand parent(s) for %s: '%s' and '%s'\" % (sym, a, b)) #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "Sage's coercion refusal (TypeError) for polynomials over an inexact field with another ring or a Python complex, in Sage's text; refuses nothing for size"
+ },
+ "lib/_sage_rpoly.py :: _refuse_foreign :: raise TypeError(\"unsupported operand type(s) for /: '%s' and '%s'\" % (ca, cb)) #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "Sage's coercion refusal (TypeError) for polynomials over an inexact field with another ring or a Python complex, in Sage's text; refuses nothing for size"
+ },
+ "lib/_sage_rpoly.py :: _refuse_mixed :: raise NotImplementedError(\"arithmetic with %s and %s together is not available in sagebrush yet\" % (a, b)) #0": {
+  "class": "coverage",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "polynomials over an inexact field with a number field that has an embedding (Sage computes in the common ring): L33, not a cap"
+ },
+ "lib/_sage_rpoly.py :: _refuse_types :: raise TypeError(\"unsupported operand type(s) for /: '%s' and '%s'\" % (ca, cb)) #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "Sage's coercion refusal (TypeError) for polynomials over an inexact field with another ring or a Python complex, in Sage's text; refuses nothing for size"
+ },
  "lib/_sage_series.py :: Series._poly_target :: raise TypeError(\"unsupported operand parent(s): '%r' and '%r'\" % (self._R, P)) #0": {
   "class": "none",
   "owner": "sage kernel (@sagebrush-sage2)",
@@ -6385,6 +6616,26 @@
   "owner": "python (@sagebrush-python)",
   "reason": "CPython 3.14's Lib/enum.py, copied unchanged: the census vocabulary matches max_bits (a padding width in enum.bin), \"unsupported operand\" (the TypeError CPython raises for a non-Flag in a Flag) and \"delimited\" (contains limit) in EnumType.__call__'s TypeError; none refuses for size"
  },
+ "lib/errno.py ::  :: 82: 'ELIBMAX', #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "errno's name ELIBMAX (CPython's value, generated): a constant, not a cap"
+ },
+ "lib/errno.py ::  :: ELIBMAX = 82 #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "errno's name ELIBMAX (CPython's value, generated): a constant, not a cap"
+ },
+ "lib/fnmatch.py ::  :: @functools.lru_cache(maxsize=32768, typed=True) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14's fnmatch, copied unchanged: the size of its compiled-pattern cache; every pattern still compiles, not a cap"
+ },
+ "lib/fnmatch.py ::  :: _re_escape = functools.lru_cache(maxsize=512)(re.escape) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14's fnmatch, copied unchanged: a cache's size, not a cap"
+ },
  "lib/fredapi.py :: _error :: if code == \"rate_limited\": #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
@@ -6394,6 +6645,26 @@
   "class": "none",
   "owner": "python (@sagebrush-python)",
   "reason": "live data's error vocabulary (no_key, rate_limited, ...) and yfinance's refusal text, relayed from upstream or the bridge: matched words that bound nothing here"
+ },
+ "lib/glob.py ::  :: @functools.lru_cache(maxsize=512) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14's glob, copied unchanged: a cache's size, not a cap"
+ },
+ "lib/glob.py :: _GlobberBase.concat_path :: raise NotImplementedError #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14's glob, copied unchanged: an abstract method's body, not a cap"
+ },
+ "lib/glob.py :: _GlobberBase.lexists :: raise NotImplementedError #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14's glob, copied unchanged: an abstract method's body, not a cap"
+ },
+ "lib/glob.py :: _GlobberBase.scandir :: raise NotImplementedError #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14's glob, copied unchanged: an abstract method's body, not a cap"
  },
  "lib/hashlib.py :: new :: raise ValueError(\"unsupported hash type \" + name) #0": {
   "class": "coverage",
@@ -9626,6 +9897,16 @@
   "owner": "python (@sagebrush-python)",
   "row": "src-7"
  },
+ "src/runtime/modules.ts :: importStar :: [\"debug\", \"inspect\", \"interactive\", \"optimize\", \"dont_write_bytecode\", \"no_user_site\", \"no_site\", \"ignore_environment\", \"verbose\", \"bytes_warning\", \"quiet\", \"hash_randomization\", \"isolated\", \"dev_mode\", \"utf8_mode\", \"warn_default_encoding\", \"safe_path\", \"int_max_str_digits\"], #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "sys.flags' field names (CPython 3.14's): int_max_str_digits names the flag, no limit is applied here"
+ },
+ "src/runtime/modules.ts :: importStar :: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, false, 0, 0, false, intDigits.max], #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "sys.flags' values: int_max_str_digits reports the current limit (intDigits.max), it refuses nothing; the limit itself is applied in src/runtime/format.ts and set by sys.set_int_max_str_digits"
+ },
  "src/runtime/modules.ts :: importStar :: export { heapLimit } from \"./heap\"; #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)"
@@ -9636,10 +9917,6 @@
  },
  "src/runtime/modules.ts :: importStar :: m._sagebrush_heap_limit = heapLimit(); #0": {
   "class": "2",
-  "owner": "python (@sagebrush-python)"
- },
- "src/runtime/modules.ts :: importStar :: m.flags.int_max_str_digits = intDigits.max; #0": {
-  "class": "3",
   "owner": "python (@sagebrush-python)"
  },
  "src/runtime/modules.ts :: importStar :: m.int_info = Ty.structseq(\"sys.int_info\", [\"bits_per_digit\", \"sizeof_digit\", \"default_max_str_digits\", \"str_digits_check_threshold\"], [30, 4, 0, 640]); #0": {
@@ -9662,6 +9939,16 @@
  "src/runtime/modules.ts :: logOf :: if (bytes > heapLimit() / 2) #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/modules.ts :: lstatOf :: if (dir_fd !== null) raise(T.NotImplementedError, \"dir_fd unavailable on this platform\"); #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "os.stat(dir_fd=): this runtime has no directory descriptors, refused with CPython's own message on a platform without dir_fd; unsupported, not a cap"
+ },
+ "src/runtime/modules.ts :: lstatOf :: if (dir_fd !== null) raise(T.NotImplementedError, \"dir_fd unavailable on this platform\"); #1": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "os.lstat(dir_fd=): this runtime has no directory descriptors, refused with CPython's own message on a platform without dir_fd; unsupported, not a cap"
  },
  "src/runtime/modules.ts :: memoryGuard :: export function memoryGuard(what: string, needBytes: number | bigint, limitBytes: number | bigint, allowanceFor: string, fixed = false): never { #0": {
   "class": "none",
@@ -9715,6 +10002,11 @@
   "class": "2+3",
   "owner": "python (@sagebrush-python)",
   "row": "src-7"
+ },
+ "src/runtime/modules.ts :: quiet :: EBUSY: \"Device or resource busy\", EINVAL: \"Invalid argument\", ELOOP: \"Too many levels of symbolic links\", #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "the strerror table (CPython's messages for errno codes): the word resource in EBUSY's text, not a cap"
  },
  "src/runtime/modules.ts :: quiet :: const buf = new Uint8Array(Math.min(limit, st.size) + 1); #0": {
   "class": "1",

@@ -72,7 +72,7 @@ function fn(m: any, name: string, f: any) {
 // are the runtime's own, called only by its Python-written modules.
 export const ARITY: Record<string, Record<string, [number, number]>> = {
   // (os's functions are written (...a) to pass their errors through oserr)
-  os: { getcwd: [0, 0], chdir: [1, 1], listdir: [0, 1], mkdir: [1, 2], makedirs: [1, 3], remove: [1, 1], unlink: [1, 1], rmdir: [1, 1], rename: [2, 2], replace: [2, 2], stat: [1, 1] },
+  os: { getcwd: [0, 0], chdir: [1, 1], listdir: [0, 1], mkdir: [1, 2], makedirs: [1, 3], remove: [1, 1], unlink: [1, 1], rmdir: [1, 1], rename: [2, 2], replace: [2, 2], stat: [1, 1], lstat: [1, 1] },
   sys: { audit: [1, Infinity], getsizeof: [1, 2] },
   gc: { set_threshold: [1, 3] },
 };
@@ -83,6 +83,8 @@ function checkModuleArity(m: any) {
   const table = ARITY[mod];
   const wrapped = new Map<any, any>(); // (an alias stays the same object)
   for (const k of Object.keys(m)) {
+    // (a value got on first read, Python's, from a module imported then: os's lazy part, never read here)
+    if (Object.getOwnPropertyDescriptor(m, k)?.get !== undefined) continue;
     const f = m[k];
     // (a function written in Python checks its own arguments)
     if (typeof f !== "function" || isType(f) || f.$argRange !== undefined || (f.$pyfn === true && f.$globals !== undefined)) continue;
@@ -415,7 +417,7 @@ newBuiltinModule("sys", (m) => {
   // (default_max_str_digits: Sagebrush's default, 0, where CPython's is
   // 4300: format.ts's intDigits)
   m.int_info = Ty.structseq("sys.int_info", ["bits_per_digit", "sizeof_digit", "default_max_str_digits", "str_digits_check_threshold"], [30, 4, 0, 640]);
-  m.version_info = Ty.structseq("sys.version_info", ["major", "minor", "micro", "releaselevel", "serial"], [3, 14, 0, "final", 0]);
+  m.version_info = Ty.structseq("sys.version_info", ["major", "minor", "micro", "releaselevel", "serial"], [3, 14, 0, "final", 0], [], [], true);
   m.hexversion = 0x30e00f0;
   m.implementation = Ty.simpleNamespace({ name: "pyjs", cache_tag: null, version: m.version_info, _multiarch: "js" });
   m.maxsize = 9223372036854775807n;
@@ -478,9 +480,20 @@ newBuiltinModule("sys", (m) => {
   m.modules = sysModules;
   m.path = [];
   m.meta_path = [];
-  m.flags = Ty.newModule("flags");
-  m.flags.optimize = 0;
-  m.flags.int_max_str_digits = intDigits.max;
+  // (CPython 3.14's sys.flags: a struct sequence of its 18 fields, plus gil, thread_inherit_context and
+  // context_aware_warnings beyond them, with the values of a script run with no options; locale and io read
+  // utf8_mode and warn_default_encoding.  set_int_max_str_digits installs a new one, as CPython 3.14.8's does:
+  // the old object keeps its values, so a hash taken of it stays right)
+  const newFlags: () => any = () =>
+    Ty.structseq(
+      "sys.flags",
+      ["debug", "inspect", "interactive", "optimize", "dont_write_bytecode", "no_user_site", "no_site", "ignore_environment", "verbose", "bytes_warning", "quiet", "hash_randomization", "isolated", "dev_mode", "utf8_mode", "warn_default_encoding", "safe_path", "int_max_str_digits"],
+      [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, false, 0, 0, false, intDigits.max],
+      ["gil", "thread_inherit_context", "context_aware_warnings"],
+      [1, 0, 0],
+      true,
+    );
+  m.flags = newFlags();
   fn(m, "get_int_max_str_digits", () => intDigits.max);
   // (as CPython's: the exact integer, in C int range, checked before
   // anything is changed, CORR-606-2)
@@ -491,7 +504,7 @@ newBuiltinModule("sys", (m) => {
     const n = Number(b);
     if (n !== 0 && n < 640) raise(T.ValueError, "maxdigits must be >= 640 or 0 for unlimited");
     intDigits.max = n;
-    m.flags.int_max_str_digits = n;
+    m.flags = newFlags();
     return null;
   };
   fn(m, "set_int_max_str_digits", setDigits);
@@ -1657,6 +1670,16 @@ newBuiltinModule("_pyjs_types", (m) => {
   // (a hook's int result checked as everywhere else, O.intResult: an int; a
   // strict subclass's value with the DeprecationWarning; else TypeError)
   m.int_result = builtin((what: any, r: any) => O.intResult(String(what), r), "int_result");
+  // (a function written in Python as one of CPython's C functions: the same code, called as it is, but a
+  // builtin_function_or_method, which binds to nothing as a class attribute; lib/_operator.py's, as _operator's are)
+  m.as_builtin = builtin((f: any, module: any) => {
+    const w: any = (...a: any[]) => callObj(f, a);
+    w.$kw = (pos: any[], names: string[], values: any[]) => callKw(f, pos, names, values);
+    builtin(w, String(getattr(f, "__name__")));
+    w.__module__ = module;
+    w.__doc__ = getattr(f, "__doc__");
+    return w;
+  }, "as_builtin");
 });
 
 newBuiltinModule("types", (m) => {
@@ -2111,13 +2134,20 @@ newBuiltinModule("_fs", (m) => {
 
 // ------------------------------------------------------------------ os
 
+// (an OSError's strerror, as CPython's os.strerror gives it on Linux: node's messages are its own)
+const STRERROR: Record<string, string> = {
+  ENOENT: "No such file or directory", EEXIST: "File exists", EACCES: "Permission denied", EPERM: "Operation not permitted",
+  EISDIR: "Is a directory", ENOTDIR: "Not a directory", ENOTEMPTY: "Directory not empty", EXDEV: "Invalid cross-device link",
+  EBUSY: "Device or resource busy", EINVAL: "Invalid argument", ELOOP: "Too many levels of symbolic links",
+  ENAMETOOLONG: "File name too long", EROFS: "Read-only file system", ENOSPC: "No space left on device", EMFILE: "Too many open files",
+};
 newBuiltinModule("os", (m) => {
   const fs = require("fs");
   const nodeOs = require("os");
   const oserr = (e: any, path: any): never => {
     if (e?.name === "NotCapable" || e?.name === "PermissionDenied" || e?.code === "ERR_ACCESS_DENIED") throw markRaised(callObj(T.PermissionError, [13, String(e.message).split("\n")[0], path]));
     const cls = e.code === "ENOENT" ? T.FileNotFoundError : e.code === "EEXIST" ? T.FileExistsError : e.code === "EACCES" || e.code === "EPERM" ? T.PermissionError : e.code === "EISDIR" ? T.IsADirectoryError : e.code === "ENOTDIR" ? T.NotADirectoryError ?? T.OSError : T.OSError;
-    throw markRaised(callObj(cls, [e.errno ? -e.errno : 0, String(e.message).replace(/^[A-Z]+: /, "").replace(/, .*$/, ""), path]));
+    throw markRaised(callObj(cls, [e.errno ? -e.errno : 0, STRERROR[e.code] ?? String(e.message).replace(/^[A-Z]+: /, "").replace(/, .*$/, ""), path]));
   };
   const wrap = (name: string, f: (...a: any[]) => any) =>
     fn(m, name, (...a: any[]) => {
@@ -2145,25 +2175,85 @@ newBuiltinModule("os", (m) => {
   }
   m.environ = env;
   fn(m, "getenv", (k: string, d: any = null) => dictGet(env, k) ?? d);
+  // (a path argument: a str, bytes or os.PathLike, as CPython's path_converter takes it, as the str the file system
+  // is asked with; bytes are UTF-8 with surrogateescape, the file system encoding)
+  const pathStr = (p: any): string => {
+    const r = m.fspath(p);
+    return isinstance(r, T.bytes) ? callObj(getattr(r, "decode"), ["utf-8", "surrogateescape"]) : String(unbox(r));
+  };
   wrap("getcwd", () => cwd());
-  wrap("chdir", (p: string) => (chdir(p), null));
-  wrap("listdir", (p: string = ".") => fs.readdirSync(at(p)));
-  wrap("mkdir", (p: string, _mode: any = 0o777) => (fs.mkdirSync(at(p)), null));
-  wrap("makedirs", (p: string, _mode: any = 0o777, exist_ok: any = false) => {
-    if (fs.existsSync(at(p)) && !O.truth(exist_ok)) fs.mkdirSync(at(p));
-    fs.mkdirSync(at(p), { recursive: true });
+  wrap("chdir", (p: any) => (chdir(pathStr(p)), null));
+  wrap("listdir", (p: any = ".") => {
+    const names: string[] = fs.readdirSync(at(pathStr(p === null ? "." : p)));
+    // (a bytes path lists bytes names, as CPython's)
+    return p !== null && isinstance(m.fspath(p), T.bytes) ? names.map((n) => callObj(getattr(n, "encode"), ["utf-8", "surrogateescape"])) : names;
+  });
+  wrap("mkdir", (p: any, _mode: any = 0o777) => (fs.mkdirSync(at(pathStr(p))), null));
+  wrap("makedirs", (p: any, _mode: any = 0o777, exist_ok: any = false) => {
+    const q = at(pathStr(p));
+    if (fs.existsSync(q) && !O.truth(exist_ok)) fs.mkdirSync(q);
+    fs.mkdirSync(q, { recursive: true });
     return null;
   });
   m.makedirs.$sig = { args: ["name", "mode", "exist_ok"], posonly: 0, vararg: null, kwonly: [], kwarg: null };
-  wrap("remove", (p: string) => (fs.unlinkSync(at(p)), null));
-  wrap("unlink", (p: string) => (fs.unlinkSync(at(p)), null));
-  wrap("rmdir", (p: string) => (fs.rmdirSync(at(p)), null));
-  wrap("rename", (a: string, b: string) => (fs.renameSync(at(a), at(b)), null));
-  wrap("replace", (a: string, b: string) => (fs.renameSync(at(a), at(b)), null));
-  wrap("stat", (p: string) => {
-    const s = fs.statSync(at(p));
-    return Ty.structseq("os.stat_result", ["st_mode", "st_ino", "st_dev", "st_nlink", "st_uid", "st_gid", "st_size", "st_atime", "st_mtime", "st_ctime"], [s.mode, s.ino, s.dev, s.nlink, s.uid, s.gid, s.size, O.mkfloat(s.atimeMs / 1000), O.mkfloat(s.mtimeMs / 1000), O.mkfloat(s.ctimeMs / 1000)]);
+  wrap("remove", (p: any) => (fs.unlinkSync(at(pathStr(p))), null));
+  wrap("unlink", (p: any) => (fs.unlinkSync(at(pathStr(p))), null));
+  wrap("rmdir", (p: any) => (fs.rmdirSync(at(pathStr(p))), null));
+  wrap("rename", (a: any, b: any) => (fs.renameSync(at(pathStr(a)), at(pathStr(b))), null));
+  wrap("replace", (a: any, b: any) => (fs.renameSync(at(pathStr(a)), at(pathStr(b))), null));
+  // (os.stat_result: CPython's ten fields as the tuple, and the nanosecond times as attributes beyond it)
+  // (os.stat_result as CPython's on Linux: ten fields as the tuple, its times whole seconds; the attributes st_atime,
+  // st_mtime and st_ctime floats, and the nanosecond times, st_blksize, st_blocks and st_rdev beyond it: 19 fields)
+  const STAT_FIELDS = ["st_mode", "st_ino", "st_dev", "st_nlink", "st_uid", "st_gid", "st_size", "st_atime", "st_mtime", "st_ctime"];
+  const STAT_EXTRA = ["st_atime", "st_mtime", "st_ctime", "st_atime_ns", "st_mtime_ns", "st_ctime_ns", "st_blksize", "st_blocks", "st_rdev"];
+  const ns = (s: any, k: string): any => (typeof s[k + "Ns"] === "bigint" ? O.normBig(s[k + "Ns"]) : O.normBig(BigInt(Math.round(s[k + "Ms"] * 1e6))));
+  const secs = (s: any, k: string): number => Math.floor(s[k + "Ms"] / 1000);
+  const statResult = (s: any) =>
+    Ty.structseq("os.stat_result", STAT_FIELDS, [s.mode, s.ino, s.dev, s.nlink, s.uid, s.gid, s.size, secs(s, "atime"), secs(s, "mtime"), secs(s, "ctime")], STAT_EXTRA, [
+      O.mkfloat(s.atimeMs / 1000), O.mkfloat(s.mtimeMs / 1000), O.mkfloat(s.ctimeMs / 1000), ns(s, "atime"), ns(s, "mtime"), ns(s, "ctime"),
+      s.blksize ?? 4096, s.blocks ?? Math.ceil(s.size / 512), s.rdev ?? 0,
+    ]);
+  // (follow_symlinks=False: the link itself, where the file system has links; the browser's has none, so its stat)
+  const lstatOf = (p: string) => (typeof fs.lstatSync === "function" ? fs.lstatSync(at(p)) : fs.statSync(at(p)));
+  wrap("stat", (p: any, dir_fd: any = null, follow_symlinks: any = true) => {
+    if (dir_fd !== null) raise(T.NotImplementedError, "dir_fd unavailable on this platform");
+    const q = pathStr(p);
+    return statResult(O.truth(follow_symlinks) ? fs.statSync(at(q)) : lstatOf(q));
   });
+  m.stat.$sig = { args: ["path"], posonly: 0, vararg: null, kwonly: ["dir_fd", "follow_symlinks"], kwarg: null, defaults: [], kwdefaults: { dir_fd: null, follow_symlinks: true } };
+  wrap("lstat", (p: any, dir_fd: any = null) => {
+    if (dir_fd !== null) raise(T.NotImplementedError, "dir_fd unavailable on this platform");
+    return statResult(lstatOf(pathStr(p)));
+  });
+  m.lstat.$sig = { args: ["path"], posonly: 0, vararg: null, kwonly: ["dir_fd"], kwarg: null, defaults: [], kwdefaults: { dir_fd: null } };
+  m.stat_result = typeOf(statResult({ mode: 0, ino: 0, dev: 0, nlink: 0, uid: 0, gid: 0, size: 0, atimeMs: 0, mtimeMs: 0, ctimeMs: 0 }));
+  // (the flags pathlib and glob name: Linux's values, as CPython's; this runtime has no os.open, so no call takes them)
+  Object.assign(m, { O_RDONLY: 0, O_WRONLY: 1, O_RDWR: 2, O_CREAT: 64, O_EXCL: 128, O_TRUNC: 512, O_APPEND: 1024, O_DIRECTORY: 65536, O_NOFOLLOW: 131072, O_CLOEXEC: 524288 });
+  // (the functions that take follow_symlinks=False: stat's own, as CPython lists them, the others not being here)
+  // (made at its first read: os.stat is wrapped by checkArity after this module is filled, and the set holds that one)
+  Object.defineProperty(m, "supports_follow_symlinks", {
+    enumerable: true,
+    configurable: true,
+    get: () => {
+      const v = callObj(T.set, [[m.stat]]);
+      Object.defineProperty(m, "supports_follow_symlinks", { value: v, writable: true, enumerable: true, configurable: true });
+      return v;
+    },
+  });
+  // (the rest, Python, in _os_lazy: imported the first time one of them is read, never at startup)
+  for (const name of ["PathLike", "DirEntry", "scandir", "walk", "_walk_symlinks_as_files", "fsencode"]) {
+    const settle = (value: any) => Object.defineProperty(m, name, { value, writable: true, enumerable: true, configurable: true });
+    Object.defineProperty(m, name, {
+      enumerable: true,
+      configurable: true,
+      get: () => {
+        const v = getattr(importModule("_os_lazy"), name);
+        settle(v);
+        return v;
+      },
+      set: settle,
+    });
+  }
   fn(m, "uname", () => Ty.structseq("posix.uname_result", ["sysname", "nodename", "release", "version", "machine"], [nodeOs.type(), nodeOs.hostname(), nodeOs.release(), String(nodeOs.version?.() ?? ""), nodeOs.machine?.() ?? nodeOs.arch()]));
   fn(m, "getpid", () => process.pid);
   fn(m, "cpu_count", () => nodeOs.cpus().length);

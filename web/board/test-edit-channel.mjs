@@ -1,4 +1,4 @@
-// ci: web-runner order=540 runner=bun
+// ci: web-runner order=540 runner=bun solo
 // The frame's side of editing (web/board/edit-channel.ts; web/board-host-protocol.md, "Editing"), against a
 // host made of editState (the host's own merge and checks).  Run with Bun:
 //   bun web/board/test-edit-channel.mjs

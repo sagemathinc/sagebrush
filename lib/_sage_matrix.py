@@ -59,6 +59,19 @@ def _raw_entries(v):
     return [_norm(x) for x in list.__iter__(v)]
 
 
+def _inexact_parent(o):
+    """The field of o when o is an inexact real or complex number (RR, RDF, CC, CDF, RealField(p),
+    ComplexField(p), a float literal), else None: a matrix or vector over ZZ or QQ meeting one
+    moves to that field, as in Sage (RR(1.5)*M is over RR, not the exact 3/2 over QQ)."""
+    if isinstance(o, bool) or not hasattr(o, "parent"):
+        return None
+    try:
+        P = o.parent()
+    except Exception:
+        return None
+    return P if type(P).__name__ in ("_RealField", "RealField_", "RealDoubleField_", "ComplexField_", "ComplexDoubleField_") else None
+
+
 class Vector(list):
     """A row of a matrix, printed as Sage prints vectors: (1, 2, 3).
 
@@ -166,7 +179,17 @@ class Vector(list):
     def __neg__(self):
         return _over_qq(Vector(-a for a in self), self)
 
+    def _inexact_lift(self, other):
+        """self over other's field when other is an inexact number and self is over ZZ or QQ."""
+        F = _inexact_parent(other)
+        if F is None or self.base_ring() not in (_sa().ZZ, _sa().QQ):
+            return None
+        return _sa().vector(F, list(self))
+
     def __mul__(self, other):
+        L = self._inexact_lift(other)
+        if L is not None:
+            return L * other
         if _is_ffvector(other):
             return _ffmat()._vector_op(self, other, "*")
         if getattr(other, "_is_ffmatrix", False):
@@ -192,9 +215,16 @@ class Vector(list):
         return _over_qq(Vector(_norm(a * other) for a in self), self, other)
 
     def __rmul__(self, other):
+        L = self._inexact_lift(other)
+        if L is not None:
+            return other * L
         return _over_qq(Vector(_norm(other * a) for a in self), self, other)
 
     def __truediv__(self, other):
+        L = self._inexact_lift(other)
+        if L is not None:
+            # (by the inverse, as Sage: v/CDF(1, 2) is v times 1/CDF(1, 2))
+            return L * (other.parent()(1) / other)
         try:
             w = Vector(_norm(_F(a) / _F(other)) for a in self)
         except (TypeError, ValueError):
@@ -837,6 +867,15 @@ def _select(k, n, err="matrix index out of range"):
     return [one(k)], True
 
 
+def _no_generalized(m, other):
+    # A v = lambda B v: Sage solves it only over RDF and CDF (an exact
+    # matrix's eigenmatrix_right(B) ignored B and gave a wrong answer); the
+    # refusal in _sage_matrix_more, loaded on first use
+    if other is not None:
+        import _sage_matrix_more
+        _sage_matrix_more.refuse_generalized(m)
+
+
 class Matrix:
     """A dense matrix over ZZ or QQ.
 
@@ -1246,6 +1285,36 @@ class Matrix:
         """
         return not self.is_immutable()
 
+    def __copy__(self):
+        """A mutable copy with its own rows, as Sage: changing it leaves self
+        alone (copy() shared the rows, so N[0, 1] = 4 changed M too).
+
+        EXAMPLES::
+
+            sage: from copy import copy
+            sage: M = matrix(QQ, [[0, 1], [1, 0]]); M.set_immutable(); N = copy(M); N[0, 1] = 4
+            sage: M[0, 1], N[0, 1], N.is_mutable()
+            (1, 4, True)
+        """
+        m = object.__new__(type(self))
+        for cls in type(self).__mro__:
+            for s in getattr(cls, "__slots__", ()):
+                if s != "__dict__" and hasattr(self, s):
+                    setattr(m, s, getattr(self, s))
+        if hasattr(self, "__dict__"):
+            m.__dict__.update(self.__dict__)
+        m._rows = [list(r) for r in self._rows]
+        m._immutable = False
+        if self._subdiv is not None:
+            m._subdiv = tuple(list(p) for p in self._subdiv)
+        return m
+
+    def __deepcopy__(self, memo):
+        # (as Sage: a deep copy keeps the immutability, a copy does not)
+        m = self.__copy__()
+        m._immutable = self.is_immutable()
+        return m
+
     def __hash__(self):
         # (a mutable matrix's hash would change under it, as in Sage: the
         # systematic review's API-F4)
@@ -1420,6 +1489,20 @@ class Matrix:
             return _sage_ffmat.FFMatrix(base, self._rows, self.ncols())
         return None
 
+    def _inexact_lift(self, other):
+        """self over other's field when other is an inexact number and self is over ZZ or QQ."""
+        F = _inexact_parent(other)
+        if F is None or self._base not in (_sa().ZZ, _sa().QQ):
+            return None
+        return self.change_ring(F)
+
+    def __truediv__(self, other):
+        # by an inexact number: over its field, times the inverse (Sage's M/RR(1.5))
+        L = self._inexact_lift(other)
+        if L is not None:
+            return L * (other.parent()(1) / other)
+        return NotImplemented
+
     def _scalar_matrix(self, c, op):
         """c times the identity, for M + c, c - M and the like (Sage reads
         a scalar as that multiple of the identity of a square matrix; 0 is
@@ -1445,6 +1528,9 @@ class Matrix:
             sage: Z = matrix(QQ, 0, 3, []); (Z + 0).dimensions(), (0 - Z).dimensions(), (-Z).dimensions()
             ((0, 3), (0, 3), (0, 3))
         """
+        L = self._inexact_lift(other)
+        if L is not None:
+            return L + other
         g = self._generic(other)
         if g is not None:
             return g + other
@@ -1455,11 +1541,17 @@ class Matrix:
         return Matrix(self._same(other), [[a + b for a, b in zip(r, s)] for r, s in zip(self._rows, other._rows)], self.ncols())
 
     def __radd__(self, other):
+        L = self._inexact_lift(other)
+        if L is not None:
+            return other + L
         if isinstance(other, (int, _F)) or _is_sr_scalar(other):
             return self._scalar_matrix(int(other) if isinstance(other, bool) else other, "+") + self
         return NotImplemented
 
     def __sub__(self, other):
+        L = self._inexact_lift(other)
+        if L is not None:
+            return L - other
         g = self._generic(other)
         if g is not None:
             return g - other
@@ -1470,6 +1562,9 @@ class Matrix:
         return Matrix(self._same(other), [[a - b for a, b in zip(r, s)] for r, s in zip(self._rows, other._rows)], self.ncols())
 
     def __rsub__(self, other):
+        L = self._inexact_lift(other)
+        if L is not None:
+            return other - L
         if isinstance(other, (int, _F)) or _is_sr_scalar(other):
             return self._scalar_matrix(int(other) if isinstance(other, bool) else other, "-") - self
         return NotImplemented
@@ -1478,6 +1573,9 @@ class Matrix:
         return Matrix(self._base, [[-a for a in r] for r in self._rows], self.ncols())
 
     def __mul__(self, other):
+        L = self._inexact_lift(other)
+        if L is not None:
+            return L * other
         g = self._generic(other)
         if g is not None:
             return g * other
@@ -1512,6 +1610,9 @@ class Matrix:
         return Matrix(base, [[a * other for a in r] for r in self._rows], self.ncols())
 
     def __rmul__(self, other):
+        L = self._inexact_lift(other)
+        if L is not None:
+            return other * L
         if isinstance(other, (list, tuple)):
             return [sum((other[i] * self._rows[i][j] for i in range(self.nrows())), 0) for j in range(self.ncols())]
         base = self._base if isinstance(other, int) else _sa().SR if self._base is _sa().SR or hasattr(other, "_s") else _sa().QQ
@@ -2184,6 +2285,7 @@ class Matrix:
             sage: matrix(QQ, [[1, 2], [3, 4]]).eigenvectors_right()
             [(-0.3722813232690144?, [(1, -0.6861406616345072?)], 1), (5.372281323269015?, [(1, 2.186140661634508?)], 1)]
         """
+        _no_generalized(self, other)
         return self._eigenvectors("right")
 
     right_eigenvectors = eigenvectors_right
@@ -2198,6 +2300,7 @@ class Matrix:
             sage: matrix(QQ, [[1, 2], [3, 4]]).eigenvectors_left()
             [(-0.3722813232690144?, [(1, -0.4574271077563382?)], 1), (5.372281323269015?, [(1, 1.457427107756339?)], 1)]
         """
+        _no_generalized(self, other)
         return self._eigenvectors("left")
 
     left_eigenvectors = eigenvectors_left
@@ -2307,7 +2410,12 @@ class Matrix:
             [1 0 0]
             sage: A*P == P*D
             True
+            sage: A.eigenmatrix_right(2*identity_matrix(QQ, 3))
+            Traceback (most recent call last):
+            ...
+            NotImplementedError: generalized eigenvector decomposition is implemented for RDF and CDF, but not for Rational Field
         """
+        _no_generalized(self, other)
         return self._eigenmatrix("right")
 
     def eigenmatrix_left(self, other=None):
@@ -2319,6 +2427,7 @@ class Matrix:
             [                   1 -0.4574271077563382?]
             [                   1   1.457427107756339?]
         """
+        _no_generalized(self, other)
         return self._eigenmatrix("left")
 
     def diagonal(self):
@@ -4236,6 +4345,17 @@ class ComplexField_:
     """
     _is_generic_field = True
     _numeric = True
+
+    def __getitem__(self, names):
+        """The polynomial ring over this field in the given variable(s): RR['t'].
+
+        EXAMPLES::
+
+            sage: CC['t']
+            Univariate Polynomial Ring in t over Complex Field with 53 bits of precision
+        """
+        import _sage_poly
+        return _sage_poly.PolynomialRing(self, names)
 
     def __repr__(self):
         return "Complex Field with 53 bits of precision"

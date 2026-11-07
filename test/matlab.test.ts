@@ -2828,3 +2828,67 @@ test("histc counts along the requested dimension (MCF-32)", () => {
     "[2 2 2]", "[1 0;0 0]", "[0 1;0 0]", "[2 2]", "[1 2;0 0]",
   ]);
 });
+
+// (MathWorks: "axis equal" uses the same length for the data units along each
+// axis, and the axes keeps filling its allotted space: the box stays as it is
+// and the limits widen to its shape; Octave agrees in direction. Sagebrush
+// draws MATLAB's axes through pyplot, whose own set_aspect('equal') shrinks the
+// box, as matplotlib's adjustable='box' does: MATLAB's must not)
+test("axis equal in 2-D keeps the axes box and widens the limits to its shape (MATLAB's documented behaviour)", async () => {
+  const { spawnSync } = await import("node:child_process");
+  const { mkdtempSync, writeFileSync, readFileSync, rmSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const dir = mkdtempSync(join(tmpdir(), "sb-axeq-"));
+  try {
+    const f = join(dir, "eq.m");
+    writeFileSync(f, "plot([0 1], [0 1]);\nsaveas(gcf, 'plain.svg');\naxis equal\nsaveas(gcf, 'equal.svg');\n");
+    spawnSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--matlab", f], { cwd: dir, encoding: "utf8" });
+    const panel = (name: string) => {
+      const m = /data-xr="([^ ]+) ([^"]+)" data-yr="([^ ]+) ([^"]+)" data-box="([^"]+)"/.exec(readFileSync(join(dir, name), "utf8"));
+      assert.ok(m, name);
+      return { x: [Number(m![1]), Number(m![2])], y: [Number(m![3]), Number(m![4])], box: m![5] };
+    };
+    const plain = panel("plain.svg"), equal = panel("equal.svg");
+    assert.equal(equal.box, plain.box);
+    assert.ok(equal.x[0] < 0 && equal.x[1] > 1, `x widened: ${equal.x}`);
+    assert.deepEqual(equal.y, [0, 1]);
+    // (equal data units: the x span over the box width is the y span over its
+    // height, to the box's rounding)
+    const [, , bw, bh] = equal.box.split(" ").map(Number);
+    const ux = (equal.x[1] - equal.x[0]) / bw, uy = (equal.y[1] - equal.y[0]) / bh;
+    assert.ok(Math.abs(ux / uy - 1) < 1e-3, `units per pixel: ${ux} ${uy}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("x = save, x = clear and x = clearvars refuse before they run: no matlab.mat is written and no variable is cleared", () => {
+  const { execFileSync } = require("node:child_process");
+  const { mkdtempSync, readdirSync, rmSync } = require("node:fs");
+  const { join } = require("node:path");
+  // MathWorks documents no output arguments for save, clear and clearvars, so the
+  // call fails with "Too many output arguments." before it does anything. Its
+  // identifier for save and clear, MATLAB:maxlhs, is inferred (they are built-ins)
+  // from two sources about other calls: an answer on MATLAB Answers 603655 catches
+  // MATLAB:maxlhs for this message from an out-of-process MEX host's feval, and
+  // Ohio State's MATLAB course page lists it for y = disp('message'). clearvars'
+  // identifier has no source: only its message is pinned.
+  const dir = mkdtempSync(join(require("node:os").tmpdir(), "sb-save-"));
+  try {
+    const both = "catch err, disp([err.message ' | ' err.identifier]), end";
+    const code = ["y = 5;",
+      `try, x = save; ${both}`,
+      `try, x = save('a.mat', 'y'); ${both}`,
+      `try, x = clear; ${both}`,
+      "try, x = clearvars('y'); catch err, disp(err.message), end",
+      "disp(exist('y'))"].join("\n");
+    const lines = execFileSync(process.execPath, [join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+      { encoding: "utf8", cwd: dir, timeout: 10000 }).trim().split("\n").map((s: string) => s.trim());
+    const maxlhs = "Too many output arguments. | MATLAB:maxlhs";
+    assert.deepEqual(lines, [maxlhs, maxlhs, maxlhs, "Too many output arguments.", "1"]);
+    assert.deepEqual(readdirSync(dir), []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

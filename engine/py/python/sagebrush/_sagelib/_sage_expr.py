@@ -173,18 +173,12 @@ def _infinite_relation(kind, a, b):
     return {"<": sa < sb, "<=": sa < sb, ">": sa > sb, ">=": sa > sb}[kind]
 
 
-def _numerically_equal(a, b):
-    """Heuristic equality of two constants that the engine could neither
-    simplify to equal nor separate: their difference, evaluated at 400 bits,
-    is below 2^-300 relative to them.  (A double, which underflows or
-    cancels, is never used.)"""
-    import _sage_real
-    try:
-        d = abs(_sage_real.N(a - b, 400))
-        m = max(abs(_sage_real.N(a, 400)), abs(_sage_real.N(b, 400)), 1)
-        return bool(d <= m * _sage_real.N(Expression("2") ** -300, 400))
-    except Exception:
-        return False
+def _exact_sign(d):
+    """The exact sign of a constant relation's difference, for when the
+    engine and the double enclosure cannot decide it: 0, 1, -1, "c" (not
+    real) or None (undecided).  The work is in the lazy _sage_expr_more."""
+    import _sage_expr_more
+    return _sage_expr_more._exact_sign(d)
 
 
 def _relop(sym):
@@ -226,6 +220,10 @@ class Expression:
 
     # --- arithmetic
     def _bin(self, op, other, rev=False):
+        if type(other).__name__ == "PolynomialInexact" and self._s == "z0/1;1/1;":
+            # (I with a polynomial over an inexact field is over its complex field:
+            # I*t in RR[t] is in CC[t], as Sage)
+            return NotImplemented
         o = _to_s(other)
         if o is None:
             return NotImplemented
@@ -312,11 +310,13 @@ class Expression:
                 return inf
             if kind in ("==", "!="):
                 z = _call("is_zero", (a - b)._s)[0] == "1"
-                if not z and kind == "==" and not (a - b).variables() and _call("const_sign", (a - b)._s)[0] == "":
-                    # constants of undecided sign: equal if they agree to
-                    # far more than double precision (never from an
-                    # underflowed or cancelled double)
-                    z = _numerically_equal(a, b)
+                # (a constant the enclosure cannot separate from 0: exactly,
+                # when it is algebraic)
+                xs = _exact_sign(a - b) if not z and not (a - b).variables() and _call("const_sign", (a - b)._s)[0] == "" else None
+                if xs is not None:
+                    z = xs == 0
+                # (other constants the enclosure cannot separate stay
+                # undecided, as Sage: log(6) == log(2) + log(3) is False)
                 if not z and _ASSUMPTIONS and (a - b).variables():
                     # the rewritten difference tested directly: bool() of
                     # (rewrite == 0) came back here and rewrote again,
@@ -334,7 +334,10 @@ class Expression:
             # rationals); undecided is False, as in Sage
             sg = _call("const_sign", (a - b)._s)[0]
             if sg == "":
-                return False
+                # (an algebraic constant: its sign exactly; not real: False)
+                sg = _exact_sign(a - b)
+                if sg is None or sg == "c":
+                    return False
             sg = int(sg)
             return {"<": sg < 0, "<=": sg <= 0, ">": sg > 0, ">=": sg >= 0}[kind]
         return _call("is_zero", self._s)[0] != "1"
@@ -417,7 +420,7 @@ class Expression:
         EXAMPLES::
 
             sage: (x^2).operator(), (x + 1).operator()  # sagebrush only
-            (<function pow at 0x...>, <function add at 0x...>)
+            (<built-in function pow>, <built-in function add>)
         """
         import operator as o
         tag = self._op()[0]
@@ -756,6 +759,8 @@ class Expression:
             (3*x^2, 2*x*cos(x^2), 12*x^2, 3*x^2)
             sage: y = var('y'); (x^2*y).diff([x, y]), (x^2).diff([])
             (2*x, x^2)
+            sage: (1 + x^2/2).diff(x, 0), diff(x^2*y^3, x, y, 0), diff(x^2, 0)
+            (1/2*x^2 + 1, 2*x*y^3, x^2)
         """
         # a list alone is the list of variables, and an empty one means no
         # differentiation, as in Sage (diff(x^2, []) was 2*x); a tuple, or a
@@ -772,16 +777,31 @@ class Expression:
             if len(names) != 1:
                 raise ValueError("No differentiation variable specified.")
             args = (Expression(_sym_s(names[0])),)
-        r, last = self, None
+        # (a count k after a variable: k derivatives in it, 0 none, as
+        # Sage: diff(f, x, 0) is f; a 0 with no variable before it is
+        # skipped, any other count there is Sage's ValueError)
+        r, last, before = self, None, self
         for a in args:
             if isinstance(a, int) and not isinstance(a, bool):
+                if a < 0:
+                    raise ValueError("derivative counts must be nonnegative")
                 if last is None:
-                    raise ValueError("No differentiation variable specified.")
-                if a > 1:
+                    if a == 0:
+                        continue
+                    names = r._names()
+                    if len(names) != 1:
+                        raise ValueError("No differentiation variable specified.")
+                    # (in the only variable: diff(1 + x^2/2, 2) is 1)
+                    r = _one("diff", r._s, names[0], str(a))
+                    continue
+                if a == 0:
+                    r = before
+                elif a > 1:
                     r = _one("diff", r._s, last, str(a - 1))
                 last = None
                 continue
             last = _var_name(a)
+            before = r
             r = _one("diff", r._s, last, "1")
         return r
 
@@ -4326,6 +4346,13 @@ def diff(f, *args):
     """
     if _callable(f):
         return f.diff(*args)
+    if _is_poly(f) and hasattr(f, "derivative"):
+        # (in its own ring, as Sage: diff(m^3, m) is in QQ[m]; a symbolic
+        # variable it does not know goes the symbolic way)
+        try:
+            return f.derivative(*args)
+        except TypeError:
+            pass
     f = _poly_or(f)
     if not isinstance(f, Expression):
         if hasattr(f, "derivative"):

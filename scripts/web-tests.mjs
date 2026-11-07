@@ -4,7 +4,7 @@
 // scripts/test-*.mjs) says near its top where CI runs it, one line per run:
 //
 //   // ci: web-runner order=120 runner=bun chrome
-//   // ci: web-browser/board-a order=30 env=NO_EDIT=1 -- examples/primes.json
+//   // ci: web-browser/board-a order=30 env=NO_EDIT=1 -- examples/primes.board.json
 //   // ci: none (needs a signed-in DEV account)
 //   // ci: inline (nightly.yml's export controls)
 //
@@ -12,9 +12,10 @@
 // job runs its suites in more than one place.  The options: order=N (the
 // run's place among its target's, then the path), runner=node|bun (node),
 // test (node --test), chrome (CHROME=google-chrome), env=K=V (repeatable),
-// then -- and the arguments.  "none" is a suite CI doesn't run; "inline" is
-// one a workflow runs itself (its arguments are the shell's, or its step is
-// its own), named there by its path.
+// solo (in a WORKERS target, it runs alone: see runParallel), then -- and
+// the arguments.  "none" is a suite CI doesn't run; "inline" is one a
+// workflow runs itself (its arguments are the shell's, or its step is its
+// own), named there by its path.
 //
 //   node scripts/web-tests.mjs run TARGET     run the target's suites in order; stop at the first failure
 //                                             (a target in WORKERS: that many at once, each one's output whole)
@@ -72,6 +73,7 @@ export function parseHeader(text, where = "") {
     order: Infinity,
     runner: "node",
     test: false,
+    solo: false,
     env: [],
     args: [],
   };
@@ -89,6 +91,7 @@ export function parseHeader(text, where = "") {
     } else if ((m = /^order=(-?[0-9]+)$/.exec(w))) run.order = Number(m[1]);
     else if ((m = /^runner=(node|bun)$/.exec(w))) run.runner = m[1];
     else if (w === "test") run.test = true;
+    else if (w === "solo") run.solo = true;
     else if (w === "chrome") run.env.push("CHROME=google-chrome");
     else if ((m = /^env=(.*)$/.exec(w)) && ENV.test(m[1])) run.env.push(m[1]);
     else throw new Error(`${where}: unknown option ${JSON.stringify(w)}`);
@@ -228,9 +231,15 @@ function runEnv(r) {
 // then goes to the suites running; they finish (and are printed), and the
 // run's code is the signal's (143, 130), whatever theirs (astra's
 // RUNNER-SIGNAL-1: a suite that cleaned up and exited 0 let the next start).
+// A solo suite (its header's "solo": one that asserts the main thread's
+// blocking or a wall-clock bound, which suites beside it would skew: #801's
+// migrate-time 1135 ms) runs alone: the solo suites go first, in the plan's
+// order, one at a time with nothing beside them, then the rest `workers` at a
+// time (first, so no running suite has to be drained for one).
 function runParallel(runs, workers, target) {
+  runs = [...runs.filter((r) => r.solo), ...runs.filter((r) => !r.solo)];
   return new Promise((resolve) => {
-    let next = 0, ran = 0, running = 0, failed = null, stopped = null;
+    let next = 0, ran = 0, running = 0, failed = null, stopped = null, solo = false;
     const children = new Set();
     const stop = (sig, code) => {
       if (stopped !== null) return;
@@ -247,8 +256,9 @@ function runParallel(runs, workers, target) {
       resolve(ran > 0 && ran === runs.length ? 0 : 1);
     };
     const start = () => {
-      while (running < workers && next < runs.length && failed === null && stopped === null) {
+      while (running < workers && next < runs.length && failed === null && stopped === null && !solo) {
         const r = runs[next++];
+        solo = r.solo;
         const t0 = Date.now(), out = [];
         const child = spawn(r.runner, [...(r.test ? ["--test"] : []), r.file, ...r.args], {
           stdio: ["ignore", "pipe", "pipe"],
@@ -263,6 +273,7 @@ function runParallel(runs, workers, target) {
           if (done) return;
           done = true;
           running--;
+          if (r.solo) solo = false;
           children.delete(child);
           const s = ((Date.now() - t0) / 1000).toFixed(1);
           process.stdout.write(`START ${r.target}: ${command(r)}\n${Buffer.concat(out).toString()}`);

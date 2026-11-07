@@ -20,6 +20,13 @@ import math as _m
 import random as _random
 import collections as _collections
 from fractions import Fraction as _F
+import sys as _sys
+
+
+def _inexact_polynomial(x):
+    """Whether x is a polynomial over RR, CC, ... (_sage_rpoly, loaded on demand)."""
+    m = _sys.modules.get("_sage_rpoly")
+    return m is not None and m.is_inexact_polynomial(x)
 
 
 def _sa():
@@ -3653,10 +3660,11 @@ class Polynomial_ff:
 
         EXAMPLES::
 
-            sage: R.<x> = GF(5)[]; (2*x^2 + 3).list()
-            [3, 0, 2]
+            sage: R.<x> = GF(5)[]; (2*x^2 + 3).list(), R(0).list()
+            ([3, 0, 2], [])
         """
-        return list(self._c) if self._c else [self._ring._base.zero()]
+        # (the zero polynomial's list is empty, as Sage's)
+        return list(self._c)
 
     def coefficients(self, sparse=True):
         """The nonzero coefficients (sparse=False: all), constant first.
@@ -3785,6 +3793,9 @@ class Polynomial_ff:
     # ---- arithmetic
     def _coerce(self, b):
         R = self._ring
+        if _inexact_polynomial(b):
+            # (the polynomial over RR, CC, ... decides, refusing the pair as Sage)
+            return None
         if isinstance(b, Polynomial_ff):
             if b._ring is R or b._ring == R:
                 return b
@@ -3950,6 +3961,8 @@ class Polynomial_ff:
             sage: R.<x> = GF(7)[]; (x^2 + 1)(3), (x^2 + 1)(x + 1)
             (3, x^2 + 2*x + 2)
         """
+        if _inexact_polynomial(x):
+            _sys.modules["_sage_rpoly"].refuse_value(self, x)
         r = self._ring._base.zero() if not isinstance(x, Polynomial_ff) else Polynomial_ff(x._ring, [])
         for c in reversed(self._c):
             r = r * x + c
