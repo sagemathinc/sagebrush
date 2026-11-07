@@ -22,6 +22,8 @@ import { registerLatexTools, setTarget, clearTarget } from "./agent-tools";
 import { mark } from "./marks";
 import type { Example } from "./examples";
 import type { sessionOf } from "./run-core.mjs";
+import { seenOf, checkedResults } from "./results-check.mjs";
+import { staleWhy } from "./engine/sagetex.mjs";
 // (the embeddable editor, for the questions site: component.ts)
 export { mountEditor, type LatexEditor } from "./component";
 import { viewOf } from "./component";
@@ -554,23 +556,37 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   //  the window comes back into focus, and before an agent's tool call; bounded, and checked by the worker and renderer)
   const results: { wrapper: string | null; saved: unknown[] } = { wrapper: null, saved: [] };
   let resultsSeen: unknown = undefined;
+  // (the files the results' run imported from the .tex's folder (their `deps`, Codex W01): their state is part of what
+  //  was seen, so an edited helper is noticed at the next read, and the results it made aren't used (run-core.mjs
+  //  checkedResults); a check during which anything changed counts as nothing seen, and is made again shortly)
+  let resultsDeps: [string, string][] = [], recheck = 0;
+  const texDir = () => where.path.slice(0, where.path.lastIndexOf("/")) || "/";
   const loadResults = async () => {
     try {
       const p = where.path + ".results.json", e = await host.ws.stat(p).catch(() => undefined);
+      // (no results file: "none", seen as such until one comes)
+      const seen = e && !e.trashed ? await seenOf(host.ws, e, texDir(), resultsDeps) : "none";
       if (!live()) return;
-      const seen = e && !e.trashed ? `${e.fid}:${e.updated}:${e.size}` : null;
       if (seen === resultsSeen) return;
-      let next: typeof results = { wrapper: null, saved: [] };
+      let next: typeof results = { wrapper: null, saved: [] }, checked: { deps: [string, string][]; stale: string | null; seen: string | null } = { deps: [], stale: null, seen };
       if (e && !e.trashed && (e.size ?? 0) <= RESULTS_MAX) {
         const j = JSON.parse(new TextDecoder().decode((await host.ws.readUpTo(p, RESULTS_MAX)).content));
-        if (j && j.format === "sagebrush-latex-results" && j.version === 1 && typeof j.wrapper === "string" && Array.isArray(j.items)) next = { wrapper: j.wrapper, saved: j.items };
+        if (j && j.format === "sagebrush-latex-results" && j.version === 1 && typeof j.wrapper === "string" && Array.isArray(j.items)) {
+          const c = await checkedResults(host.ws, p, e, j, texDir());
+          next = { wrapper: j.wrapper, saved: c.saved };
+          checked = c;
+        }
       }
       if (!live()) return;
-      // (the file counted as seen only once it was read and parsed: one that failed or was malformed is read again
-      //  at the next chance, astra's #519 advisory; its old results stay meanwhile)
-      resultsSeen = seen;
+      // (the file counted as seen only once it was read and parsed, and checked with nothing changing meanwhile: one
+      //  that failed or was malformed is read again at the next chance, astra's #519 advisory)
+      resultsDeps = checked.deps;
+      resultsSeen = checked.seen ?? undefined;
       results.wrapper = next.wrapper; results.saved = next.saved;
+      if (checked.stale) say(`The SageTeX results aren't used: ${staleWhy(checked.stale)}; press Run`);
       request();
+      if (checked.seen === null && e && recheck++ < 3) setTimeout(() => void loadResults(), 1000);
+      else if (checked.seen !== null) recheck = 0;
     } catch {}
   };
   // ---- \input and \include (William's L4, Nov 2; inputs.ts): the files the document asks for, found as TeX finds them

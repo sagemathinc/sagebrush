@@ -32,8 +32,8 @@ function files(web) {
 check(LATEX_CAPS.raw === 240640 && LATEX_CAPS.gzip === 81408, "the caps are 235 KiB raw and 79.5 KiB gzip (@sagebrush, 2026-11-04, for the LaTeX fidelity queue)", LATEX_CAPS);
 
 // (and each lazy chunk's, as ruled: comments 16/6, comments-doc 40/16, agent 44/15.5 (@sagebrush, 2026-11-04), tools
-//  16/6, present 16/6, run 12/5.25 (daybreak2, Nov 7), in KiB)
-const lazyPinned = { COMMENTS: [16384, 6144], COMMENTS_DOC: [40960, 16384], AGENT: [45056, 15872], TOOLS: [16384, 6144], PRESENT: [16384, 6144], DOC: [3584, 1792], EXAMPLES: [13312, 6144], BEAMER: [8192, 3584], RUN: [12288, 5376] };
+//  16/6, present 16/6, run 15.5/6.5 (daybreak2, Nov 7, for #804 at 9759eac5; 12/5.25 before), in KiB)
+const lazyPinned = { COMMENTS: [16384, 6144], COMMENTS_DOC: [40960, 16384], AGENT: [45056, 15872], TOOLS: [16384, 6144], PRESENT: [16384, 6144], DOC: [3584, 1792], EXAMPLES: [13312, 6144], BEAMER: [8192, 3584], RUN: [15872, 6656] };
 check(JSON.stringify(Object.fromEntries(Object.entries(LATEX_LAZY_CAPS).map(([k, c]) => [k, [c.raw, c.gzip]]))) === JSON.stringify(lazyPinned), "each lazy chunk's cap as ruled", LATEX_LAZY_CAPS);
 
 // ---- the measure, on synthetic trees
@@ -127,6 +127,11 @@ else {
   const bundles = Object.keys(meta).filter((k) => k.startsWith("the LaTeX editor ("));
   const inputs = [...new Set(bundles.flatMap((k) => meta[k]))].sort();
   check(bundles.length >= 8, "the metafile names the LaTeX editor's bundles (the group's two and the six lazy chunks)", bundles);
+  // (Run's code stays in Run's chunk (#824): the page imports it only lazily (loadRun) or as a type, so the page bundle's
+  //  inputs never list run-core.mjs; Bun tree-shakes an eager import of a re-export down to a few bytes the caps don't
+  //  see, so it is the inputs that are checked (grader's #804 RC1, @sagebrush's ruling, Nov 7))
+  const pageIn = meta["the LaTeX editor (sagebrush-latex.js)"] ?? [], runIn = meta["the LaTeX editor (sagebrush-latex-run.js)"] ?? [];
+  check(pageIn.length > 0 && !pageIn.includes("web/latex/run-core.mjs") && runIn.includes("web/latex/run-core.mjs"), "run-core.mjs is an input of the Run chunk only, not of the page bundle", { page: pageIn.filter((f) => /run-core/.test(f)), run: runIn.filter((f) => /run-core/.test(f)) });
   const dir = mkdtempSync(join(tmpdir(), "latex-group-paths-"));
   const notFull = inputs.filter((f) => {
     writeFileSync(join(dir, "files.txt"), f + "\n");
