@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "sys.flags as CPython 3.14's struct sequence (18 fields plus gil, thread_inherit_context and context_aware_warnings; locale.getpreferredencoding read flags our two-attribute module lacked), struct sequence fields read-only with CPython's 'readonly attribute', and sys.flags/sys.version_info refusing construction. Measured with bun 1.4.4 (size-record.sh) on master 7f7f6c65 vs its probe merge: engine/sagebrush-worker.js +445 (the runtime: the field list and values, the read-only setter and the allocator), cli/pyjs.cjs +572 (the same runtime and the embedded web build; +64 slack). No library or lazy-group change.",
+ "bytes": {
+  "cli/pyjs.cjs": 636,
+  "engine/sagebrush-worker.js": 445
+ }
+}
