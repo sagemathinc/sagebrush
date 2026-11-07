@@ -1,6 +1,6 @@
 # Native engines in the desktop app
 
-*Status: plan r11: the architecture revision (r10) plus its tests (§8.1) and the page items; docs only, nothing is built. It replaces r12 (merged at 2999416e) with William's architecture decision of
+*Status: plan r13: r11 (the architecture revision, its tests and the page items) with William's answers to every §9 question recorded (Nov 7, about 2:26–2:31 PM PST); docs only, nothing is built. It replaces r12 (merged at 2999416e) with William's architecture decision of
 Nov 7, 2026, about 12:15–12:30 PM PST.
 
 Owner and sole author: @sagebrush-remote-compute. Reviewers: astra (SEC), daybreak3 (ENGINE), daybreak4 (PERF),
@@ -17,9 +17,9 @@ recorded the §7 answers, is part of r12.*
   - **web and mobile:** an in-page WebAssembly worker, because those can't start processes;
   - **cloud and "Your computer":** the remote relay.
 - **The app has one client for all three.**
-- **Sagebrush Engine becomes its own product** (§4):
+- **Sagebrush Engine becomes its own product,** `sagebrush-engine` (§4):
   - command line only, without the browser app;
-  - the engine's own code is MIT, always. Whether a build may include LGPL runtime code (Bun) is William's question (§9);
+  - the engine's own code stays MIT OR Apache-2.0, always. LGPL is allowed only for the Bun runtime (William, §1);
   - its own releases and upgrades;
   - it runs code and works with LaTeX.
   - One engine serves the desktop app, "Your computer", CI and agents.
@@ -45,6 +45,11 @@ recorded the §7 answers, is part of r12.*
    - the app requires the engine, and may come with one version of it;
    - the app's licence is William's call;
    - the JavaScript runtime is not decided ("bun may be better for the engine").
+6. **The licence** (about 2:26 PM PST): "LGPL OK for Bun; stay MIT OR Apache-2.0" (§4.2).
+7. **"Your computer"** (about 2:26 PM PST): "Yes, keep CPython as an option" (§4.3).
+8. **The protocol support window** (about 2:29 PM PST): "12 months but this support should ONLY start once we make a 1.0 release. Before a 1.0 release, there's no compatibility guarantees at all." (§2.1).
+9. **The name** (about 2:29 PM PST): "Use sagebrush-engine", for both the command and the package.
+10. **LaTeX to PDF** (about 2:31 PM PST): "Both: user's TeX if present, else offer the Tectonic download" (§4.1).
 
 r12's lead question ("decide after the prototype's side-by-side measurements") was about where pyjs runs inside the app. The architecture decision answers it: pyjs and the native engine run in the engine process. N1 still measures, but now only to choose the engine's runtime (§7).
 
@@ -91,7 +96,7 @@ The protocol is the message set the page's worker kernel already uses (`src/note
 **Version skew.**
 - **Desktop app:** if the installed engine is outside the app's range, the app uses the engine it ships with (§5) and says that an engine upgrade (or an app upgrade) is available. It never runs a mismatched pair.
 - **Relay:** the page already requires a minimum runner version (`RUNNER_MIN`). The handshake replaces that check with the same rule: outside the range, the page says which side to upgrade.
-- **Support window:** an engine keeps speaking at least the previous protocol version for a period that William sets.
+- **Support window** (William, §1): **before 1.0 there is no compatibility guarantee at all.** From the 1.0 release on, an engine keeps speaking the previous protocol version for 12 months.
 - Within a negotiated version, an unknown message type is a protocol error. It ends the session, never silently drops the message.
 
 **Transports, all carrying the same messages:**
@@ -154,24 +159,35 @@ r4's A-vs-B timings stay withdrawn: the PyPI wheel came from a different commit.
 
 ### 4.1 What it is
 
-- **One command-line program.** It runs code in Python (pyjs), Sage, Magma and MATLAB modes, as `sagebrush` does today. It also gains the engine protocol's server side (`--stdio` for the app, the relay for remote).
+- **One command-line program, `sagebrush-engine`** (the command and the package; William, §1). It runs code in Python (pyjs), Sage, Magma and MATLAB modes, as `sagebrush` does today. It also gains the engine protocol's server side (`--stdio` for the app, the relay for remote).
 - **The browser app is cut out.** Today's single-file CLI embeds the web page for `sagebrush notebook` (`scripts/build-cli.mjs`). The engine build leaves it out. The page lives in the app and on the website.
 - **LaTeX:** the engine includes today's LaTeX tools (`src/latex-cli.ts`: the expander, the HTML preview, SageTeX).
   - **Today Sagebrush doesn't make PDFs:** the preview is not TeX (`articles/latex/01-how-it-works.md`).
-  - "Compiles LaTeX" to PDF would need a TeX engine. Whether to add one, and which, is a separate decision for William. It must also pass the licence check (§4.2).
+  - **PDFs** (William, §1):
+    - the engine compiles to PDF with **the person's installed TeX** if it finds one;
+    - otherwise, on the first PDF compile, it **offers Tectonic** as a separate, optional download.
+  - **Tectonic is never bundled with or linked into the engine.** It is its own executable, with its own licence notices, and the docs carry a source offer: its `pdf_io` carries GPL headers and its `graphite2` is LGPL.
+  - **The download is verified before installation.**
+    - The SHA-256 digest is either pinned per version, OS and architecture in the verified engine release, or comes from signed release metadata checked against an already-trusted key, with version, expiry and rollback checks.
+    - The metadata binds the version, OS and architecture, byte length and archive hash. An unsigned checksum downloaded alongside the executable is not enough.
+    - The download is staged. Its length and hash are checked before it is extracted or run, archive paths are validated, and the verified executable is installed atomically.
+    - It fails closed: missing or mismatched data never falls back to running something unverified.
+    - It reuses the engine updater's verification (§4.4), not a separate trust scheme.
+    - Signature keys and signing remain William's only. Agents use fixtures and mock metadata.
 - **The runtime is a packaging choice:** Bun (`bun build --compile`), Deno (`deno compile`) or a Node single executable. `scripts/build-cli.mjs` already builds all three (`--bun`, `--deno`, `--sea`).
   - The native Rust engine is loaded into that runtime, through N-API or the runtime's own FFI.
   - A Rust module without a native build stays wasm inside the engine.
 
 ### 4.2 MIT always: the licence check
 
-- **Today:** Sagebrush is MIT OR Apache-2.0 (`NOTICE.md`), so the MIT licence is always available. The engine keeps that. Changing it to MIT-only is William's call.
+- **The engine stays MIT OR Apache-2.0** (`NOTICE.md`; William, §1), so the MIT licence is always available.
 - **Every dependency must be MIT-compatible:** permissive, so the engine can be redistributed under MIT terms with the notices kept.
 - **The proposed allow-list** is the licences the npm package already carries: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, 0BSD, Zlib, BSL-1.0, Unicode-3.0, PSF-2.0 (CPython parts) and Artistic-2.0 (Cremona's data).
-  - **Not allowed without William's OK:** GPL, LGPL, AGPL, MPL and anything unlisted.
+  - **One scoped exception:** LGPL is allowed **for the Bun runtime only** (William, §1). It is not allowed for anything else in the engine.
+  - **Not allowed:** GPL, AGPL, MPL, LGPL outside the Bun runtime, and anything unlisted.
 - **A finding for the runtime choice:** Bun says "Bun statically links JavaScriptCore (and WebKit), which is LGPL-2 licensed" (bun.com/docs/project/licensing).
-  - So a Bun-compiled engine contains LGPL-2 code, with LGPL's relinking obligations.
-  - That fails the proposed allow-list unless William accepts it.
+  - So a Bun-compiled engine contains LGPL-2 code, with LGPL's relinking obligations. William accepted that for the Bun runtime.
+  - The check allows LGPL only in the Bun runtime's own inventory entries.
   - Node and Deno ship V8 (BSD-3-Clause) and their own permissively licensed parts. Their full inventories are N1 work (§7).
 - **The check (proposed, not yet running):** a script (`scripts/license-check.mjs`) inventories everything that goes into each engine build: the Rust crates, the npm packages bundled, the runtime binary's own parts, and the data. It fails on anything outside the allow-list.
   - It runs in the existing CI `checks` job. Wiring it into a workflow file is done by William or @sagebrush, because agents don't push workflow files.
@@ -181,8 +197,7 @@ r4's A-vs-B timings stay withdrawn: the PyPI wheel came from a different commit.
 
 - **"Your computer" (#778)** today runs `uvx sagebrush@latest remote --loopback`, which is **CPython** with the PyO3 engine, as William chose ("uvx only", Nov 6).
 - **Merging means the engine also speaks the relay transport.** The page then talks to "Your computer" with the same protocol and client as to the desktop subprocess.
-- **That changes the interpreter on "Your computer"** from CPython to pyjs, and the install from uvx to the engine's installer. **Both are William's decisions** (§9, Q2).
-  - Until he decides, the CPython runner stays as it is.
+- **The CPython runner stays as an option** (William, §1: "Yes, keep CPython as an option"). "Your computer" can run the engine (pyjs) or the existing CPython runner (`uvx sagebrush remote`), for people's own Python and packages.
   - The relay, DPoP and terminal designs don't change; only the program at the end of the relay does.
 - **CI and agents** run the same engine binary from the command line or over the protocol.
 
@@ -278,7 +293,7 @@ r4 goes back to PERF. Counted runs still need PERF's final harness and packet re
 | **N1** | §7: runtime comparison, protocol over the pipe, licence inventory; unsigned local builds only | ENGINE, PERF, SIZE, SEC |
 | **N2** | **First, one client:** merge the page's worker client (`web/notebook/worker-kernel.js`) and remote client (`web/notebook/remote-client.js`) into the one protocol client of §2, pinned to today's `WorkerKernel` behaviour, before any subprocess work. Then the protocol and handshake in the client and the engine. Then: the engine subprocess on macOS and Linux with the chosen runtime, the bundled engine in the app, engine upgrades, the licence check in CI, and permissions in the engine. **The page items** (carried from r12): the refused-write restore per change kind, progress from the engine's snapshots, Stop through the one client with the restart pattern for the hard kill, a "starting" pill state, and the engine's own words for "where code runs" and "didn't start" (board writes the words) | all lanes, with the §8.1 tests (T1–T5) passing |
 | **N3** | Windows parity | all lanes; the same T1 suite passes on the Windows subprocess |
-| **N4** | The engine as the desktop default; "Your computer" on the engine, if William decides so (Q2) | William |
+| **N4** | The engine as the desktop default; "Your computer" offers the engine alongside the CPython runner (§4.3) | William |
 | **N5** | Later, planned separately: CPython and C extensions, terminals over the protocol, Android native, warm engines | — |
 
 ### 8.1 Tests
@@ -326,13 +341,14 @@ Wiring it into a workflow file stays William's or @sagebrush's.
 | T3 | Linux subprocess; wasm worker | macOS and Windows subprocess; relay |
 | T4 | all controls | — |
 
-## 9. Questions for William
+## 9. Questions for William: answered
 
-1. **The licence allow-list** (§4.2): is the list right (including PSF-2.0 and Artistic-2.0)? Is LGPL-2 acceptable if Bun is chosen? Should the engine stay MIT OR Apache-2.0, or become MIT-only?
-2. **"Your computer" on the engine** (§4.3): this replaces CPython with pyjs there, and uvx with the engine's installer. Should the CPython runner stay as an option for people's own Python and packages?
-3. **LaTeX to PDF** (§4.1): should the engine include a TeX engine, and which one?
-4. **The protocol support window** (§2.1): how long should an engine keep the previous protocol version?
-5. **Names:** the engine's command and package names. Nothing is renamed without you.
+All five were answered on Nov 7, 2026, between about 2:26 and 2:31 PM PST. They are recorded verbatim in §1 (items 6–10):
+- the licence (§4.2);
+- "Your computer" (§4.3);
+- LaTeX to PDF (§4.1);
+- the support window (§2.1);
+- the name (§4.1).
 
 ## Appendix: what r10 removes
 
