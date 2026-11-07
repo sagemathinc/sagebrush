@@ -3,11 +3,13 @@
 // (the page also on loopback hosts), served by web/serve.py (cross-origin isolated, as the site):
 //   - the flag: off, no editor and no LaTeX file fetched; on, nothing fetched before a .tex is opened;
 //   - a middle-click on a file row: a new tab of the editor only for a .tex it takes; otherwise nothing, as before;
-//   - opening by fid, the banner, Save gated on edits, Ctrl/Cmd+S, "Saved" / "No changes to save", cleared by an edit;
-//   - the byte rules: the fixtures saved and read back; mixed endings and NUL open without Save;
-//   - the save target: a rename followed; the file in Trash, refused; beforeunload with unsaved edits;
+//   - opening by fid, the banner; saving as you type (U8, autosave.ts): Saved ✓, Ctrl/Cmd+S at once, no leave prompt
+//     but after a failed write, the draft recovered after the page went away with a write in flight;
+//   - the byte rules: the fixtures saved and read back; mixed endings and NUL open read-only;
+//   - the save target: a rename followed; the file in Trash, refused; another tab's save taken in, then mine over it
+//     (kept as a version); leaving right after an edit, no prompt;
 //   - a change to the open file made elsewhere (an agent, another tab, another device): followed when nothing is
-//     unsaved; otherwise the bar, Save refused, Keep mine / Use theirs, and their races;
+//     pending; otherwise the bar, nothing written, Keep mine / Use theirs, and their races;
 //   - images: one in the folder shown from a blob: URL; one outside refused with its reason; a held read under a
 //     second render: each name read and kept once, within the count bound;
 //   - a 1.5 MiB paragraph and list shown as pieces of at most 128 KiB, never two versions at once;
@@ -94,6 +96,9 @@ const ctrlS = () => send("Input.dispatchKeyEvent", { type: "keyDown", key: "s", 
 // (LATEX_SHOTS=dir: screenshots at a few moments, for a look; nothing is checked from them)
 const shot = async (name) => { if (!process.env.LATEX_SHOTS) return; const r = await send("Page.captureScreenshot", { format: "png" }); writeFileSync(join(process.env.LATEX_SHOTS, name + ".png"), Buffer.from(r.data, "base64")); };
 const statusIs = (re, ms = 10000) => until(`${re}.test(document.querySelector(".tex-status")?.textContent ?? "")`, ms);
+// (the save state, as autosave.ts shows it: "Saved ✓" once every edit is written)
+const savedNow = (ms = 10000) => until(`document.querySelector(".tex-savestate")?.textContent === "Saved ✓"`, ms);
+const saveStateIs = (re, ms = 10000) => until(`${re}.test(document.querySelector(".tex-savestate")?.textContent ?? "")`, ms);
 
 try {
   for (const m of ["Page.enable", "Runtime.enable", "Network.enable"]) await send(m);
@@ -224,6 +229,7 @@ try {
   {
     const fa = await mk("/sw/a.tex", enc("\\documentclass{article}\n\\begin{document}\nFile A here.\n\\end{document}\n"));
     const fb = await mk("/sw/b.tex", enc("\\documentclass{article}\n\\begin{document}\nFile B here.\n\\end{document}\n"));
+    const fc = await mk("/sw/c.tex", enc("\\documentclass{article}\n\\begin{document}\nFile C here.\n\\end{document}\n"));
     await ev(`localStorage.setItem("sagebrush-files-sidebar", "1"); true`);
     await open(fa);
     await until(`document.querySelector(".tex-preview").textContent.includes("File A here.")`, 20000);
@@ -245,16 +251,19 @@ try {
     await ev(`(history.back(), true)`);
     const bk = await until(`window.__noReload === true && document.querySelector(".tex-preview")?.textContent.includes("File A here.") && new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fa)}`, 20000);
     check(bk, "B2: Back returns to the first file, in place");
-    // ---- (astra B5-A1) Back and Forward with unsaved text ask first, as opening another file does: declined, the
-    // history goes back to the shown file's entry and its text stays; accepted, the other file opens; clean, nothing asked
+    // ---- (astra B5-A1) Back and Forward with text that couldn't be saved ask first, as opening another file does:
+    // declined, the history goes back to the shown file's entry and its text stays; accepted, the other file opens (its
+    // own unsaved draft recovered); with everything saved, nothing asked (U8: edits are saved as you type, so the
+    // question comes only after a write failed: here every write fails while window.__failWrites is set)
     const S = (x) => `(${x})`;
-    await ev(`(() => { window.__asked = 0; window.__answer = false; window.confirm = () => { window.__asked++; return window.__answer; }; return true; })()`);
+    await ev(`(() => { window.__asked = 0; window.__answer = false; window.confirm = () => { window.__asked++; return window.__answer; }; window.__sbTexSaveWrite = () => { if (window.__failWrites) throw new Error("test: the write failed"); }; window.__failWrites = true; return true; })()`);
     const state = S(`{ asked: window.__asked, url: new URLSearchParams(location.search).get("tex"), at: history.state && history.state.sbTex, title: document.querySelector(".tex-title")?.textContent, src: document.querySelector(".tex-src")?.value, pages: document.querySelectorAll(".tex-page").length, kept: window.__noReload === true }`);
     await ev(`(history.forward(), true)`);
     const fw0 = await until(`document.querySelector(".tex-preview")?.textContent.includes("File B here.") && new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fb)}`, 20000);
     const fw0s = await ev(state);
     check(fw0 && fw0s.asked === 0 && fw0s.at === 1 && fw0s.kept, "B5-A1: Forward with nothing unsaved: the next file, nothing asked", fw0s);
     await ev(`(() => { const t = document.querySelector(".tex-src"); t.value += "% unsaved in B\\n"; t.dispatchEvent(new Event("input")); return true; })()`);
+    await saveStateIs(/^Not saved: test: the write failed/);
     await ev(`(history.back(), true)`); await sleep(1500);
     const db = await ev(state);
     check(db.asked === 1 && db.url === fb && db.at === 1 && db.title === "b.tex" && db.src.includes("% unsaved in B") && db.pages === 1 && db.kept, "B5-A1: Back with unsaved text asks; declined, the file, its URL, its history entry and its text stay", db);
@@ -262,17 +271,688 @@ try {
     const ab = await until(`document.querySelector(".tex-preview")?.textContent.includes("File A here.") && new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fa)}`, 20000);
     const abs = await ev(state);
     check(ab && abs.asked === 2 && abs.at === 0 && abs.title === "a.tex" && abs.kept, "B5-A1: Back with unsaved text, accepted: the first file opens", abs);
-    await ev(`(() => { window.__answer = false; const t = document.querySelector(".tex-src"); t.value += "% unsaved in A\\n"; t.dispatchEvent(new Event("input")); history.forward(); return true; })()`); await sleep(1500);
+    await ev(`(() => { window.__answer = false; const t = document.querySelector(".tex-src"); t.value += "% unsaved in A\\n"; t.dispatchEvent(new Event("input")); return true; })()`);
+    await saveStateIs(/^Not saved: test: the write failed/);
+    await ev(`(history.forward(), true)`); await sleep(1500);
     const df = await ev(state);
     check(df.asked === 3 && df.url === fa && df.at === 0 && df.title === "a.tex" && df.src.includes("% unsaved in A") && df.pages === 1 && df.kept, "B5-A1: Forward with unsaved text asks; declined, the file, its URL, its history entry and its text stay", df);
     await ev(`(window.__answer = true, history.forward(), true)`);
     const af = await until(`document.querySelector(".tex-preview")?.textContent.includes("File B here.") && new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fb)}`, 20000);
     const afs = await ev(state);
-    check(af && afs.asked === 4 && afs.at === 1 && !afs.src.includes("% unsaved") && afs.kept, "B5-A1: Forward with unsaved text, accepted: the next file opens, as saved", afs);
+    check(af && afs.asked === 4 && afs.at === 1 && afs.src.includes("% unsaved in B") && afs.kept, "B5-A1: Forward with unsaved text, accepted: the next file opens, its own unsaved draft recovered (U8)", afs);
+    // (writes work again: B's recovered draft saved, then Back to A: A's draft recovered and saved; nothing asked)
+    await ev(`(window.__failWrites = false, true)`); await ctrlS(); await savedNow();
     await ev(`(history.back(), true)`);
     const cb = await until(`document.querySelector(".tex-preview")?.textContent.includes("File A here.") && new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fa)}`, 20000);
     const cbs = await ev(state);
     check(cb && cbs.asked === 4 && cbs.at === 0 && cbs.kept, "B5-A1: Back with nothing unsaved: nothing asked", cbs);
+    // ---- (astra U8-SWITCH-2) a return to the file shown is a newer intent: A shown, an edit whose write is held,
+    // Forward to B (its switch waits for A to settle), then Back to A before it has: once A's write lands, A stays
+    // shown (its URL, editable, its edit written) and B never opens
+    {
+      await ev(`(() => { window.__failWrites = false; window.__hold = new Promise((r) => (window.__rel = r)); window.__sbTexSaveWrite = () => window.__hold; return true; })()`);
+      await ev(`(() => { const t = document.querySelector(".tex-src"); t.value += "% held in A\\n"; t.dispatchEvent(new Event("input")); return true; })()`);
+      await ev(`(history.forward(), true)`); await sleep(400);
+      const mid = await ev(`({ ro: document.querySelector(".tex-src").readOnly, url: new URLSearchParams(location.search).get("tex") })`);
+      await ev(`(history.back(), true)`); await sleep(400);
+      await ev(`(window.__rel(), delete window.__sbTexSaveWrite, true)`); await sleep(1500);
+      const sw2 = await ev(`({ url: new URLSearchParams(location.search).get("tex"), title: document.querySelector(".tex-title")?.textContent, a: !!document.querySelector(".tex-preview")?.textContent.includes("File A here."), ro: document.querySelector(".tex-src").readOnly, src: document.querySelector(".tex-src").value, asked: window.__asked, kept: window.__noReload === true })`);
+      const aFile = await ev(`${W}.read("/sw/a.tex").then((r) => new TextDecoder().decode(r.content))`);
+      check(mid.ro === true && mid.url === fb && sw2.url === fa && sw2.title === "a.tex" && sw2.a && sw2.ro === false && sw2.src.includes("% held in A") && aFile.includes("% held in A") && sw2.asked === 4 && sw2.kept,
+        "U8-SWITCH-2: Forward to B waits for A to settle (A held read-only meanwhile); Back to A first: A stays shown, editable, its edit written; B never opens", { mid, sw2, aFile: aFile.slice(-40) });
+    }
+    // ---- (astra U8-DURABLE-CLOSE-1, the page) a single, frozen close: A's write fails, its edit durable in its draft;
+    // Forward to B, accepted; while the close's last write is held the editor is read-only, so text typed then never
+    // reaches it; the close ends with A's last edit in its draft, and B opens
+    {
+      await ev(`(() => { window.__asked = 0; window.__answer = true; window.__k = 0; window.__hold = new Promise((r) => (window.__rel = r));
+        window.__sbTexSaveWrite = () => { if (window.__k++ === 0) throw new Error("test: the write failed"); return window.__hold.then(() => { throw new Error("test: the write failed"); }); }; return true; })()`);
+      await ev(`(() => { const t = document.querySelector(".tex-src"); t.value += "% OLD in A\\n"; t.dispatchEvent(new Event("input")); return true; })()`);
+      await saveStateIs(/^Not saved: test: the write failed/);
+      await ev(`(window.__k = 0, history.forward(), true)`);
+      const frozen = await until(`window.__k >= 2 && document.querySelector(".tex-src")?.readOnly === true && document.querySelector(".tex-title")?.textContent === "a.tex"`, 10000);
+      await ev(`(document.querySelector(".tex-src").focus(), true)`); await send("Input.insertText", { text: "NEW" });
+      const during = await ev(`document.querySelector(".tex-src").value`);
+      await ev(`(window.__rel(), true)`);
+      const opened = await until(`document.querySelector(".tex-preview")?.textContent.includes("File B here.") && new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fb)}`, 20000);
+      const drafts = await ev(`Object.keys(localStorage).filter((k) => k.startsWith("sb-tex-draft:" + ${JSON.stringify(fa)} + ":")).map((k) => JSON.parse(localStorage.getItem(k)).text)`);
+      await ev(`(delete window.__sbTexSaveWrite, window.__answer = false, true)`);
+      // (A's left-over draft removed: the blocks after this open A again and must find only its file's text)
+      await ev(`(Object.keys(localStorage).filter((k) => k.startsWith("sb-tex-draft:" + ${JSON.stringify(fa)} + ":")).forEach((k) => localStorage.removeItem(k)), true)`);
+      check(frozen && !during.includes("NEW") && during.includes("% OLD in A") && opened && drafts.some((t) => t.includes("% OLD in A")) && !drafts.some((t) => t.includes("NEW")),
+        "U8-DURABLE-CLOSE-1: a single, frozen close: held read-only through its last write, nothing typed then gets in; A's last edit durable in its draft; B opens", { frozen, during: during.slice(-30), opened, drafts: drafts.map((t) => t.slice(-30)) });
+    }
+    // (back as the blocks after these expect it: the B5-A1 write hook again, nothing failing, and A shown)
+    await ev(`(window.__sbTexSaveWrite = () => { if (window.__failWrites) throw new Error("test: the write failed"); }, window.__failWrites = false, window.__answer = false, history.back(), true)`);
+    await until(`document.querySelector(".tex-preview")?.textContent.includes("File A here.") && new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fa)}`, 20000);
+    await sleep(500); await ev(`(window.__asked = 4, true)`);
+    // (a watch on the preview: whether B was ever shown, from now on)
+    const watchB = () => ev(`(() => { window.__sawB = false; window.__obsB?.disconnect(); window.__obsB = new MutationObserver(() => { if (document.querySelector(".tex-preview")?.textContent.includes("File B here.") || document.querySelector(".tex-title")?.textContent === "b.tex") window.__sawB = true; }); window.__obsB.observe(document.body, { childList: true, subtree: true, characterData: true }); return true; })()`);
+    const endState = () => ev(`({ url: new URLSearchParams(location.search).get("tex"), title: document.querySelector(".tex-title")?.textContent, a: !!document.querySelector(".tex-preview")?.textContent.includes("File A here."), ro: document.querySelector(".tex-src")?.readOnly, src: document.querySelector(".tex-src")?.value ?? "", pages: document.querySelectorAll(".tex-page").length, sawB: window.__sawB, kept: window.__noReload === true, save: document.querySelector(".tex-savestate")?.textContent ?? "", bar: (() => { const b = document.querySelector(".tex-conflict"); return b && !b.hidden ? b.textContent.slice(0, 80) : ""; })() })`);
+    const aText = () => ev(`${W}.read("/sw/a.tex").then((r) => new TextDecoder().decode(r.content))`);
+    // ---- (astra U8-SWITCH-2, the final barrier) Forward to B decided (A's write failed, its draft durable; accepted),
+    // B's mount waiting on A's final close (its last write held); Back to A meanwhile: once the close ends, A is open
+    // again and editable under its own URL, its edit written; B never shown
+    {
+      await watchB();
+      await ev(`(() => { window.__answer = true; window.__k = 0; window.__hold = new Promise((r) => (window.__rel = r));
+        window.__sbTexSaveWrite = () => { const k = window.__k++; if (k === 0) throw new Error("test: the write failed"); if (k === 1) return window.__hold; }; return true; })()`);
+      await ev(`(() => { const t = document.querySelector(".tex-src"); t.value += "% barrier in A\\n"; t.dispatchEvent(new Event("input")); return true; })()`);
+      await saveStateIs(/^Not saved: test: the write failed/);
+      await ev(`(window.__k = 0, history.forward(), true)`);
+      const heldClose = await until(`window.__k >= 2`, 10000);
+      await ev(`(history.back(), true)`); await sleep(400);
+      await ev(`(window.__rel(), true)`);
+      await until(`!!document.querySelector(".tex-src") && !document.querySelector(".tex-src").readOnly && document.querySelector(".tex-title")?.textContent === "a.tex" && new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fa)}`, 20000); await sleep(1000);
+      const fb1 = await endState(), file1 = await aText();
+      check(heldClose && fb1.url === fa && fb1.title === "a.tex" && fb1.a && fb1.ro === false && fb1.src.includes("% barrier in A") && file1.includes("% barrier in A") && fb1.pages === 1 && !fb1.sawB && fb1.kept,
+        "U8-SWITCH-2 (the final barrier): Back to A while B's mount waits on A's last write: A open again, editable, its URL and its edit; B never shown", { heldClose, fb1: { ...fb1, src: fb1.src.slice(-30) }, file: file1.slice(-30) });
+      await ev(`(window.__sbTexSaveWrite = () => { if (window.__failWrites) throw new Error("test: the write failed"); }, window.__answer = false, true)`);
+    }
+    // ---- (daybreak3 DB3-U8-SWITCH-3) A's write held, Forward to B (the URL B's, the switch settling), then A asked
+    // for from the files (__sbTex): the history taken back to A's entry, A stays shown and editable, its edit
+    // written; B never shown
+    {
+      await watchB();
+      await ev(`(() => { window.__hold = new Promise((r) => (window.__rel = r)); window.__sbTexSaveWrite = () => window.__hold; return true; })()`);
+      await ev(`(() => { const t = document.querySelector(".tex-src"); t.value += "% clicked back to A\\n"; t.dispatchEvent(new Event("input")); return true; })()`);
+      await ev(`(history.forward(), true)`); await sleep(400);
+      const urlB = await ev(`new URLSearchParams(location.search).get("tex")`);
+      await ev(`(window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }), true)`); await sleep(600);
+      await ev(`(window.__rel(), true)`); await sleep(1500);
+      const s3 = await endState(), file3 = await aText();
+      const entry = await ev(`({ at: history.state && history.state.sbTex })`);
+      check(urlB === fb && s3.url === fa && entry.at === 0 && s3.title === "a.tex" && s3.a && s3.ro === false && s3.src.includes("% clicked back to A") && file3.includes("% clicked back to A") && s3.pages === 1 && !s3.sawB && s3.kept,
+        "DB3-U8-SWITCH-3: A asked for from the files after Forward moved the URL to B: the history back on A's entry, A shown, editable, its edit written; B never shown", { urlB, s3: { ...s3, src: s3.src.slice(-30) }, entry, file: file3.slice(-30) });
+      await ev(`(window.__sbTexSaveWrite = () => { if (window.__failWrites) throw new Error("test: the write failed"); }, window.__obsB?.disconnect(), window.__asked = 4, true)`);
+    }
+    // ---- (daybreak3 DB3-U8-SWITCH-4, astra) a fast close and a late history: Forward to B decided (A's write failed, its
+    // draft durable; accepted), B's mount waiting on A's close (its last write held); then, in one go, A asked for from
+    // the files (__sbTex) and the close released: no sleep between. A must open again only once the history is back
+    // on A's entry, so the new A takes A's URL for its own: with the Navigation API (its traverseTo made late) and
+    // without it (history.go). A shown, editable, its URL, entry and edit; B never shown
+    for (const withNav of [true, false]) {
+      await watchB();
+      await ev(`(() => { window.__answer = true; window.__k = 0; window.__hold = new Promise((r) => (window.__rel = r));
+        window.__sbTexSaveWrite = () => { const k = window.__k++; if (k === 0) throw new Error("test: the write failed"); if (k === 1) return window.__hold; }; return true; })()`);
+      await ev(`(() => { const t = document.querySelector(".tex-src"); t.value += "% late history ${withNav ? "nav" : "go"}\\n"; t.dispatchEvent(new Event("input")); return true; })()`);
+      await saveStateIs(/^Not saved: test: the write failed/);
+      await ev(`(window.__k = 0, history.forward(), true)`);
+      const held = await until(`window.__k >= 2`, 10000);
+      const nav = await ev(`(() => {
+        if (${withNav}) { const n = window.navigation; if (!n?.traverseTo) return false; const orig = n.traverseTo.bind(n);
+          n.traverseTo = (k, o) => { const late = new Promise((r) => setTimeout(r, 300)); return { committed: late, finished: late.then(() => orig(k, o).finished) }; }; window.__navRestore = () => { delete n.traverseTo; }; }
+        else { const was = window.navigation; Object.defineProperty(window, "navigation", { configurable: true, get: () => undefined }); window.__navRestore = () => { Object.defineProperty(window, "navigation", { configurable: true, get: () => was }); }; }
+        window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }); window.__rel(); return true; })()`);
+      // (A opens again once its close has written its edit: under heavy storage load that write has taken over 20 s
+      //  (the base3 recurrences, r16), the edit durable in its draft meanwhile and written in the end; so up to 60 s,
+      //  its time reported, and past that whether the edit reached the file late or not at all)
+      const t4 = Date.now();
+      const reopened = await until(`!!document.querySelector(".tex-src") && !document.querySelector(".tex-src").readOnly && document.querySelector(".tex-title")?.textContent === "a.tex" && new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fa)}`, 60000);
+      const reopenMs = Date.now() - t4;
+      await sleep(1500);
+      const s4 = await endState(), f4 = await aText(), at4 = await ev(`history.state && history.state.sbTex`);
+      const lateWrite = reopened ? null : await until(`${W}.read("/sw/a.tex").then((r) => new TextDecoder().decode(r.content).includes(${JSON.stringify(`% late history ${withNav ? "nav" : "go"}`)}))`, 60000);
+      await ev(`(window.__navRestore?.(), delete window.__navRestore, window.__sbTexSaveWrite = () => { if (window.__failWrites) throw new Error("test: the write failed"); }, window.__answer = false, window.__obsB?.disconnect(), window.__asked = 4, true)`);
+      const mark = `% late history ${withNav ? "nav" : "go"}`;
+      check(held && nav !== false && reopened && s4.url === fa && at4 === 0 && s4.title === "a.tex" && s4.a && s4.ro === false && s4.src.includes(mark) && f4.includes(mark) && s4.pages === 1 && !s4.sawB && s4.kept,
+        `DB3-U8-SWITCH-4 (${withNav ? "Navigation API, its traverse late" : "no Navigation API: history.go"}): A asked for and A's close released at once: A open again only on A's entry, editable, its URL and edit; B never shown`, { held, nav, reopened, reopenMs, lateWrite, s4: { ...s4, src: s4.src.slice(-30) }, at4, file: f4.slice(-30) });
+    }
+    // ---- (astra U8-SWITCH-5) the newest file asked for wins over a switch past its decision and a return still under
+    // way: the file shown's close held (its write failed, then its last write held), a switch to X decided, then...
+    {
+      const names = { [fa]: "A", [fb]: "B", [fc]: "C" };
+      // (a watch: whether X, the file never to be shown, ever was)
+      const watchX = (x) => ev(`(() => { window.__sawX = false; window.__obsB?.disconnect(); window.__obsB = new MutationObserver(() => { if (document.querySelector(".tex-preview")?.textContent.includes("File ${names[x]} here.") || document.querySelector(".tex-title")?.textContent === ${JSON.stringify(names[x].toLowerCase() + ".tex")}) window.__sawX = true; }); window.__obsB.observe(document.body, { childList: true, subtree: true, characterData: true }); return true; })()`);
+      const stateOf = (f) => ev(`({ url: new URLSearchParams(location.search).get("tex"), at: history.state && history.state.sbTex, title: document.querySelector(".tex-title")?.textContent, shows: !!document.querySelector(".tex-preview")?.textContent.includes("File ${names[f]} here."), ro: document.querySelector(".tex-src")?.readOnly, src: document.querySelector(".tex-src")?.value ?? "", pages: document.querySelectorAll(".tex-page").length, saw: window.__sawX, kept: window.__noReload === true })`);
+      const textOf = (f) => ev(`${W}.read(${JSON.stringify("/sw/" + names[f].toLowerCase() + ".tex")}).then((r) => new TextDecoder().decode(r.content))`);
+      // (the file shown: an edit whose write fails, then the close's last write held)
+      const holdClose = async (mark) => {
+        await ev(`(() => { window.__answer = true; window.__k = 0; window.__hold = new Promise((r) => (window.__rel = r));
+          window.__sbTexSaveWrite = () => { const k = window.__k++; if (k === 0) throw new Error("test: the write failed"); if (k === 1) return window.__hold; }; return true; })()`);
+        await ev(`(() => { const t = document.querySelector(".tex-src"); t.value += ${JSON.stringify(mark + "\n")}; t.dispatchEvent(new Event("input")); return true; })()`);
+        await saveStateIs(/^Not saved: test: the write failed/);
+        await ev(`(window.__k = 0, true)`);
+      };
+      const shownIs = (f) => until(`!!document.querySelector(".tex-src") && !document.querySelector(".tex-src").readOnly && document.querySelector(".tex-title")?.textContent === ${JSON.stringify(names[f].toLowerCase() + ".tex")} && new URLSearchParams(location.search).get("tex") === ${JSON.stringify(f)}`, 20000);
+      const writesWork = () => ev(`(window.__sbTexSaveWrite = () => { if (window.__failWrites) throw new Error("test: the write failed"); }, window.__answer = false, window.__asked = 4, true)`);
+      // (1) ...A asked for again (the history going back to A's entry, its traverse late, or by history.go) and A's
+      // close released at once, then a newer file N asked for while that return is under way: N opens, on the entry
+      // after A's, and A's stale reopening never runs; X never shown. A is at entry 0, X the one after it. (history.go
+      // first: A was last opened with the Navigation API hidden, so it has no entry key, and only a reopening with the
+      // API there gives the second run the key its traverse needs; that run checks its late traverse was the one used)
+      for (const withNav of [false, true]) {
+        const x = withNav ? fc : fb, n = withNav ? fb : fc, mark = `% newest wins ${withNav ? "nav" : "go"}`;
+        await watchX(x); await holdClose(mark);
+        await ev(`(history.forward(), true)`);
+        const held = await until(`window.__k >= 2`, 10000);
+        const went = await ev(`(async () => {
+          const url = new URLSearchParams(location.search).get("tex");
+          if (${withNav}) { const v = window.navigation; if (!v?.traverseTo) return false; const orig = v.traverseTo.bind(v);
+            v.traverseTo = (k, o) => { window.__late = true; const late = new Promise((r) => setTimeout(r, 300)); return { committed: late, finished: late.then(() => orig(k, o).finished) }; }; window.__navRestore = () => { delete v.traverseTo; }; }
+          else { const was = window.navigation; Object.defineProperty(window, "navigation", { configurable: true, get: () => undefined }); window.__navRestore = () => { Object.defineProperty(window, "navigation", { configurable: true, get: () => was }); }; }
+          window.__late = false;
+          window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }); window.__rel();
+          if (${withNav}) await new Promise((r) => setTimeout(r, 50));
+          // (the return still under way when the newer file is asked for: not back on A's entry yet)
+          const pending = new URLSearchParams(location.search).get("tex") !== ${JSON.stringify(fa)};
+          const accepted = window.__sbTex({ path: ${JSON.stringify("/sw/" + names[n].toLowerCase() + ".tex")}, fid: ${JSON.stringify(n)} });
+          return { url, accepted, pending, late: window.__late }; })()`);
+        await shownIs(n); await sleep(1500);
+        const s = await stateOf(n), fA = await textOf(fa);
+        await ev(`(window.__navRestore?.(), delete window.__navRestore, window.__obsB?.disconnect(), true)`); await writesWork();
+        check(held && went && went.url === x && went.accepted === true && went.pending && went.late === withNav && s.url === n && s.at === 1 && s.title === names[n].toLowerCase() + ".tex" && s.shows && s.ro === false && s.pages === 1 && !s.saw && s.kept && fA.includes(mark),
+          `U8-SWITCH-5 (${withNav ? "Navigation API, its traverse late; the newer file 50 ms after" : "no Navigation API: history.go; the newer file at once"}): A asked for while the switch to ${names[x]} waits on A's close, then ${names[n]}: ${names[n]} opens, editable, on the entry after A's; A not reopened; ${names[x]} never shown; A's edit written`, { held, went, s: { ...s, src: s.src.slice(-30) }, fileA: fA.slice(-30) });
+        // (back on A, entry 0: N, its edit-free text, left)
+        await ev(`(history.back(), true)`); await shownIs(fa); await sleep(500);
+      }
+      // (2) ...then a newer file asked for while X's mount waits, no return under way: it opens on the entry after
+      // X's; X never shown. Then (3), from there, Back to X decided (its close held) and Back again to A at once: A
+      // opens on its entry; X never shown; the left file's edit written
+      {
+        await watchX(fb); await holdClose("% newer while B waits");
+        await ev(`(history.forward(), true)`);
+        const held = await until(`window.__k >= 2`, 10000);
+        const accepted = await ev(`(() => { const r = window.__sbTex({ path: "/sw/c.tex", fid: ${JSON.stringify(fc)} }); window.__rel(); return r; })()`);
+        await shownIs(fc); await sleep(1500);
+        const s = await stateOf(fc), fA = await textOf(fa);
+        await ev(`(window.__obsB?.disconnect(), true)`); await writesWork();
+        check(held && accepted === true && s.url === fc && s.at === 2 && s.shows && s.ro === false && s.pages === 1 && !s.saw && s.kept && fA.includes("% newer while B waits"),
+          "U8-SWITCH-5 (a newer file while the switch's mount waits, no return under way): C opens, editable, on the entry after B's; B never shown; A's edit written", { held, accepted, s: { ...s, src: s.src.slice(-30) }, fileA: fA.slice(-30) });
+        await watchX(fb); await holdClose("% left C for A");
+        await ev(`(history.back(), true)`);
+        const held3 = await until(`window.__k >= 2`, 10000);
+        await ev(`(history.back(), true)`); await sleep(400);
+        await ev(`(window.__rel(), true)`);
+        await shownIs(fa); await sleep(1500);
+        const s3 = await stateOf(fa), fC = await textOf(fc);
+        await ev(`(window.__obsB?.disconnect(), true)`); await writesWork();
+        check(held3 && s3.url === fa && s3.at === 0 && s3.shows && s3.ro === false && s3.pages === 1 && !s3.saw && s3.kept && fC.includes("% left C for A"),
+          "U8-SWITCH-5 (Back past a decided switch to a third file): Back to B decided (C's close held), Back again to A: A opens, editable, on its entry; B never shown; C's edit written", { held3, s3: { ...s3, src: s3.src.slice(-30) }, fileC: fC.slice(-30) });
+      }
+      // (4) (astra U8-SWITCH-6) ...a newer Back while a return is already under way: C, A, B on the history after A's
+      // entry 0 (C 1, A 2, B 3), A shown; the switch to B decided (A's close held), A asked for again (its traverse
+      // late), A's close released at once, and 50 ms later Back two entries, to C, before that return lands: C opens,
+      // editable, on its entry, and stays (the late return to A, when it lands, is taken back: its target fenced); A
+      // never opened again; B never shown; A's edit written
+      {
+        const mark = "% back to C during the return";
+        await ev(`(window.__sbTex({ path: "/sw/c.tex", fid: ${JSON.stringify(fc)} }), true)`); await shownIs(fc); await sleep(300);
+        await ev(`(window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }), true)`); await shownIs(fa); await sleep(300);
+        await watchX(fb); await holdClose(mark);
+        const nav = await ev(`(() => { const v = window.navigation; if (!v?.traverseTo) return false; const orig = v.traverseTo.bind(v);
+          v.traverseTo = (k, o) => { window.__late = (window.__late ?? 0) + 1; const late = new Promise((r) => setTimeout(r, 300)); return { committed: late, finished: late.then(() => orig(k, o).finished) }; };
+          window.__navRestore = () => { delete v.traverseTo; }; window.__late = 0; return true; })()`);
+        await ev(`(window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} }), true)`);
+        const held = await until(`window.__k >= 2`, 10000);
+        const went = await ev(`(async () => {
+          const url = new URLSearchParams(location.search).get("tex"), at = history.state && history.state.sbTex;
+          window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }); window.__rel();
+          await new Promise((r) => setTimeout(r, 50));
+          // (the return still under way when Back is taken: not back on A's entry yet)
+          const pending = new URLSearchParams(location.search).get("tex") !== ${JSON.stringify(fa)};
+          history.go(-2);
+          return { url, at, pending }; })()`);
+        await shownIs(fc); await sleep(1800);
+        const s = await stateOf(fc), fA = await textOf(fa), late = await ev(`window.__late`);
+        await ev(`(window.__navRestore?.(), delete window.__navRestore, window.__obsB?.disconnect(), true)`); await writesWork();
+        check(nav && held && went && went.url === fb && went.at === 3 && went.pending && late >= 1 && s.url === fc && s.at === 1 && s.title === "c.tex" && s.shows && s.ro === false && s.pages === 1 && !s.saw && s.kept && fA.includes(mark),
+          "U8-SWITCH-6 (Navigation API, the return late): Back to C while the return to A is under way: C opens, editable, on its entry, and stays; A not reopened; B never shown; A's edit written", { nav, held, went, late, s: { ...s, src: s.src.slice(-30) }, fileA: fA.slice(-30) });
+        // (back on A, entry 0)
+        await ev(`(history.back(), true)`); await shownIs(fa); await sleep(500);
+      }
+      // (5) (astra U8-SWITCH-7) ...as (4), then the person's own Forward, back to A: before the late return lands (at
+      // 100 ms) and after it (at 900 ms). Either way A opens, editable, on its entry, and stays: only the superseded
+      // return's own traversal is taken back, never a Back or Forward to the same entry. A's edit written
+      for (const fwdAt of [100, 900]) {
+        const mark = `% forward to A at ${fwdAt}`;
+        await ev(`(window.__sbTex({ path: "/sw/c.tex", fid: ${JSON.stringify(fc)} }), true)`); await shownIs(fc); await sleep(300);
+        await ev(`(window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }), true)`); await shownIs(fa); await sleep(300);
+        await watchX(fb); await holdClose(mark);
+        const nav = await ev(`(() => { const v = window.navigation; if (!v?.traverseTo) return false; const orig = v.traverseTo.bind(v);
+          v.traverseTo = (k, o) => { window.__late = (window.__late ?? 0) + 1; const late = new Promise((r) => setTimeout(r, 300)); return { committed: late, finished: late.then(() => orig(k, o).finished) }; };
+          window.__navRestore = () => { delete v.traverseTo; }; window.__late = 0; return true; })()`);
+        await ev(`(window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} }), true)`);
+        const held = await until(`window.__k >= 2`, 10000);
+        const went = await ev(`(async () => {
+          window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }); window.__rel();
+          await new Promise((r) => setTimeout(r, 50));
+          const pending = new URLSearchParams(location.search).get("tex") !== ${JSON.stringify(fa)};
+          history.go(-2);
+          await new Promise((r) => setTimeout(r, ${fwdAt - 50}));
+          const onC = new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fc)};
+          history.forward();
+          return { pending, onC }; })()`);
+        await shownIs(fa); await sleep(1800);
+        const s = await stateOf(fa), fA = await textOf(fa), late = await ev(`window.__late`);
+        await ev(`(window.__navRestore?.(), delete window.__navRestore, window.__obsB?.disconnect(), true)`); await writesWork();
+        check(nav && held && went && went.pending && went.onC && late >= 1 && s.url === fa && s.at === 2 && s.title === "a.tex" && s.shows && s.ro === false && s.pages === 1 && !s.saw && s.kept && fA.includes(mark),
+          `U8-SWITCH-7 (Navigation API, the return late; Back to C at 50 ms, then Forward to A at ${fwdAt} ms${fwdAt < 300 ? ", before the late return lands" : ", after it"}): A opens, editable, on its entry, and stays; B never shown; A's edit written`, { nav, held, went, late, s: { ...s, src: s.src.slice(-30) }, fileA: fA.slice(-30) });
+        // (back on A, entry 0: two entries back)
+        await ev(`(history.go(-2), true)`); await until(`new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fa)} && history.state && history.state.sbTex === 0`, 20000); await shownIs(fa); await sleep(500);
+      }
+      // (6) (daybreak3 DB3-U8-SWITCH-7) ...as (4), with an unrelated pop before the late return lands: A 0, C 1, C#f 2,
+      // A 3, B 4; Back three entries to C at 50 ms, then Forward to C#f (C's own fragment entry) at 100 ms; the late
+      // return, landing on A at 300 ms, is still taken back: C stays, on C#f, its entry
+      {
+        const mark = "% an unrelated pop first";
+        await ev(`(window.__sbTex({ path: "/sw/c.tex", fid: ${JSON.stringify(fc)} }), true)`); await shownIs(fc); await sleep(300);
+        await ev(`(location.hash = "#f", true)`); await until(`location.hash === "#f" && history.state && history.state.sbTex === 2`, 10000);
+        await ev(`(window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }), true)`); await shownIs(fa); await sleep(300);
+        await watchX(fb); await holdClose(mark);
+        const nav = await ev(`(() => { const v = window.navigation; if (!v?.traverseTo) return false; const orig = v.traverseTo.bind(v);
+          v.traverseTo = (k, o) => { window.__late = (window.__late ?? 0) + 1; const late = new Promise((r) => setTimeout(r, 300)); return { committed: late, finished: late.then(() => orig(k, o).finished) }; };
+          window.__navRestore = () => { delete v.traverseTo; }; window.__late = 0; return true; })()`);
+        await ev(`(window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} }), true)`);
+        const held = await until(`window.__k >= 2`, 10000);
+        const went = await ev(`(async () => {
+          const at = history.state && history.state.sbTex;
+          window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }); window.__rel();
+          await new Promise((r) => setTimeout(r, 50));
+          history.go(-3);
+          await new Promise((r) => setTimeout(r, 50));
+          const onC = new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fc)} && location.hash === "";
+          history.forward();
+          return { at, onC }; })()`);
+        await shownIs(fc); await sleep(1800);
+        const s = await stateOf(fc), fA = await textOf(fa), late = await ev(`window.__late`), hash = await ev(`location.hash`);
+        await ev(`(window.__navRestore?.(), delete window.__navRestore, window.__obsB?.disconnect(), true)`); await writesWork();
+        check(nav && held && went && went.at === 4 && went.onC && late >= 2 && s.url === fc && hash === "#f" && s.at === 2 && s.title === "c.tex" && s.shows && s.ro === false && s.pages === 1 && !s.saw && s.kept && fA.includes(mark),
+          "U8-SWITCH-7 (an unrelated pop first: Back to C, then Forward to C's own fragment entry, before the late return lands): the late return is still taken back; C stays, on C#f, its entry; A not reopened; B never shown; A's edit written", { nav, held, went, late, hash, s: { ...s, src: s.src.slice(-30) }, fileA: fA.slice(-30) });
+        // (back on A, entry 0: two entries back)
+        await ev(`(history.go(-2), true)`); await shownIs(fa); await until(`history.state && history.state.sbTex === 0 && location.hash === ""`, 20000); await sleep(500);
+      }
+      // (7) (grader L8, K6) a switch to B decided (A's close held), then Back to A, then A asked for again, the history
+      // already on A's entry: A opens again, editable, on its entry, and stays; B never shown; A's edit written
+      {
+        const mark = "% back then A again";
+        await watchX(fb); await holdClose(mark);
+        await ev(`(window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} }), true)`);
+        const held = await until(`window.__k >= 2`, 10000);
+        await ev(`(history.back(), true)`);
+        const back = await until(`new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fa)}`, 10000);
+        await ev(`(window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }), window.__rel(), true)`);
+        await shownIs(fa); await sleep(1500);
+        const s = await stateOf(fa), fA = await textOf(fa);
+        await ev(`(window.__obsB?.disconnect(), true)`); await writesWork();
+        check(held && back && s.url === fa && s.at === 0 && s.shows && s.ro === false && s.pages === 1 && !s.saw && s.kept && fA.includes(mark),
+          "U8-RETURN (grader L8): a decided switch, Back to the file shown, then that file asked for again: it opens again, editable, on its entry; the other file never shown; its edit written", { held, back, s: { ...s, src: s.src.slice(-30) }, fileA: fA.slice(-30) });
+      }
+      // (8) (grader L7) the return's traversal refused (the Navigation API's finished rejected): the entry shown is pushed
+      // again and what waits for the return runs: A asked for again while the switch to B waits on A's close opens A
+      {
+        const mark = "% the traverse refused";
+        await watchX(fb); await holdClose(mark);
+        await ev(`(window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} }), true)`);
+        const held = await until(`window.__k >= 2`, 10000);
+        const nav = await ev(`(() => { const v = window.navigation; if (!v?.traverseTo) return false;
+          v.traverseTo = () => { window.__refused = (window.__refused ?? 0) + 1; const f = Promise.reject(new Error("test: the traverse refused")); f.catch(() => {}); return { committed: f, finished: f }; };
+          window.__navRestore = () => { delete v.traverseTo; }; window.__refused = 0; return true; })()`);
+        await ev(`(window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }), window.__rel(), true)`);
+        await shownIs(fa); await sleep(1500);
+        const s = await stateOf(fa), fA = await textOf(fa), refused = await ev(`window.__refused`);
+        await ev(`(window.__navRestore?.(), delete window.__navRestore, window.__obsB?.disconnect(), true)`); await writesWork();
+        check(nav && held && refused >= 1 && s.url === fa && s.at === 1 && s.shows && s.ro === false && s.pages === 1 && !s.saw && s.kept && fA.includes(mark),
+          "U8-RETURN (grader L7): the return's traversal refused: the file shown's entry pushed again and the file opened again there, editable; the other file never shown; its edit written", { nav, held, refused, s: { ...s, src: s.src.slice(-30) }, fileA: fA.slice(-30) });
+        // (back on A, entry 0: two entries back, B's and A's pushed again)
+        await ev(`(history.go(-2), true)`); await until(`history.state && history.state.sbTex === 0`, 20000); await shownIs(fa); await sleep(500);
+      }
+      // (9) (grader K6) no switch, no Navigation API: the file shown asked for again changes nothing: no entry pushed,
+      // the same entry, the editor as it was
+      {
+        const r = await ev(`(async () => {
+          const was = window.navigation; Object.defineProperty(window, "navigation", { configurable: true, get: () => undefined });
+          const len = history.length, id = history.state && history.state.sbTexId, at = history.state && history.state.sbTex;
+          window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} });
+          await new Promise((res) => setTimeout(res, 400));
+          const out = { len0: len, len: history.length, same: history.state && history.state.sbTexId === id, at0: at, at: history.state && history.state.sbTex, ro: document.querySelector(".tex-src")?.readOnly };
+          Object.defineProperty(window, "navigation", { configurable: true, get: () => was });
+          return out; })()`);
+        check(r && r.len === r.len0 && r.same && r.at === r.at0 && r.ro === false,
+          "U8-RETURN (grader K6): the file shown asked for again, no switch and no Navigation API: no entry pushed, the same entry, the editor editable", r);
+      }
+      // (10) (grader H2, H4, H7) two leaves at once: A's write held, a switch to B asked for, then to C (the newer
+      // leave); the write fails: the older leave, superseded, lets go of nothing (the newer one's hold kept), and the
+      // newer asks while the editor is still frozen (read-only); declined, the editor is editable again, on A's entry,
+      // its text kept. Asked LEAVE when the edit is durable in its draft, LEAVE_LOST when the draft couldn't be kept
+      for (const lost of [false, true]) {
+        const mark = `% two leaves${lost ? ", the draft lost" : ""}`;
+        await watchX(fb);
+        await ev(`(() => { window.__asks = []; window.confirm = (m) => { window.__asks.push({ m, ro: document.querySelector(".tex-src")?.readOnly }); return false; };
+          window.__failP = new Promise((_, rej) => (window.__failNow = () => rej(new Error("test: the write failed")))); window.__failP.catch(() => {});
+          window.__sbTexSaveWrite = () => window.__failP;
+          if (${lost}) { window.__lsSet = localStorage.setItem; localStorage.setItem = function (k, v) { if (String(k).startsWith("sb-tex-draft:")) throw new Error("test: storage full"); return window.__lsSet.call(localStorage, k, v); }; }
+          const t = document.querySelector(".tex-src"); t.value += ${JSON.stringify(mark + "\n")}; t.dispatchEvent(new Event("input")); return true; })()`);
+        await sleep(1200);
+        await ev(`(window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} }), true)`); await sleep(100);
+        await ev(`(window.__sbTex({ path: "/sw/c.tex", fid: ${JSON.stringify(fc)} }), true)`); await sleep(100);
+        const frozen = await ev(`document.querySelector(".tex-src")?.readOnly === true`);
+        await ev(`(window.__failNow(), true)`);
+        await until(`window.__asks.length >= 1`, 10000); await sleep(800);
+        const r = await ev(`({ asks: window.__asks.map((a) => ({ lost: /couldn't keep a copy/.test(a.m), ro: a.ro })), ro: document.querySelector(".tex-src")?.readOnly, url: new URLSearchParams(location.search).get("tex"), at: history.state && history.state.sbTex, src: document.querySelector(".tex-src")?.value.slice(-60), saw: window.__sawX })`);
+        await ev(`(() => { if (window.__lsSet) { localStorage.setItem = window.__lsSet; delete window.__lsSet; } window.__obsB?.disconnect(); return true; })()`);
+        await writesWork();
+        await ev(`(() => { window.confirm = () => { window.__asked++; return window.__answer; }; const t = document.querySelector(".tex-src"); t.dispatchEvent(new Event("input")); return true; })()`); await saveStateIs(/^Saved/);
+        check(frozen && r.asks.length === 1 && r.asks[0].ro === true && r.asks[0].lost === lost && r.ro === false && r.url === fa && r.at === 0 && r.src.includes(mark) && !r.saw,
+          `U8-HOLD (grader H2, H4${lost ? ", H7" : ""}): two leaves at once, the write failing${lost ? " and the draft not kept" : ""}: asked once, ${lost ? "LEAVE_LOST" : "LEAVE"}, the editor still frozen while asked; declined, editable again on the file's entry, its text kept`, { frozen, r });
+      }
+      // (11) (grader L6) no Navigation API, the history on an entry of another script's (unnumbered, as a pushState of
+      // its own leaves it) while the switch to B waits on A's close: A asked for again is pushed as a new entry, and
+      // what waits for that runs at once: A opens there, editable; B never shown; A's edit written
+      {
+        const mark = "% a foreign entry";
+        await watchX(fb); await holdClose(mark);
+        await ev(`(window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} }), true)`);
+        const held = await until(`window.__k >= 2`, 10000);
+        const went = await ev(`(() => { const was = window.navigation; Object.defineProperty(window, "navigation", { configurable: true, get: () => undefined });
+          window.__navRestore = () => { Object.defineProperty(window, "navigation", { configurable: true, get: () => was }); };
+          history.pushState({ other: 1 }, "", location.href);
+          window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }); window.__rel(); return true; })()`);
+        await shownIs(fa); await sleep(1500);
+        const s = await stateOf(fa), fA = await textOf(fa);
+        await ev(`(window.__navRestore?.(), delete window.__navRestore, window.__obsB?.disconnect(), true)`); await writesWork();
+        check(went && held && s.url === fa && s.at === 1 && s.shows && s.ro === false && s.pages === 1 && !s.saw && s.kept && fA.includes(mark),
+          "U8-RETURN (grader L6): no Navigation API, the history on another script's entry: the file shown asked for again is pushed as a new entry and opens there, editable; the other file never shown; its edit written", { went, held, s: { ...s, src: s.src.slice(-30) }, fileA: fA.slice(-30) });
+        // (back on A, entry 0: three entries back)
+        await ev(`(history.go(-3), true)`); await until(`history.state && history.state.sbTex === 0`, 20000); await shownIs(fa); await sleep(500);
+      }
+      // (12) (grader H9) a recovery ending while a leave holds the editor: A opened with another writer's draft (its
+      // edit, never written), the recovery's last step (the adopted draft's IndexedDB drop) held; meanwhile a switch
+      // to B asked for, its write held: when the recovery ends, the editor stays frozen (the leave's hold, not the
+      // recovery's read-only alone); released, B opens and A's file has the recovered edit
+      {
+        const mark = "% recovered while leaving";
+        const own = await ev(`(async () => {
+          window.__sbTexSaveWrite = () => { throw new Error("test: the write failed"); };
+          const t = document.querySelector(".tex-src"); t.value += ${JSON.stringify(mark + "\n")}; t.dispatchEvent(new Event("input"));
+          await new Promise((r) => setTimeout(r, 1500));
+          const k = Object.keys(localStorage).find((k) => k.startsWith("sb-tex-draft:" + ${JSON.stringify(fa)} + ":"));
+          if (!k) return null; const d = JSON.parse(localStorage.getItem(k)); d.writerId = "0123456789abcdef0123456789abcdef"; window.__foreign = d; return { key: k, text: d.text.slice(-30) }; })()`);
+        await ev(`(window.__answer = true, window.__sbTex({ path: "/sw/c.tex", fid: ${JSON.stringify(fc)} }), true)`); await shownIs(fc); await sleep(300);
+        const seeded = await ev(`(() => { Object.keys(localStorage).filter((k) => k.startsWith("sb-tex-draft:" + ${JSON.stringify(fa)} + ":")).forEach((k) => localStorage.removeItem(k));
+          const d = window.__foreign; localStorage.setItem("sb-tex-draft:" + d.fid + ":" + d.writerId, JSON.stringify(d));
+          window.__idbHold = new Promise((r) => (window.__idbRel = r)); const orig = IDBDatabase.prototype.transaction; window.__idbOrig = orig;
+          IDBDatabase.prototype.transaction = function (names, mode, ...rest) { const t = orig.call(this, names, mode, ...rest); if (mode !== "readwrite" || this.name !== "sagebrush-tex-drafts") return t;
+            let f = null; t.addEventListener("complete", (e) => { const h = window.__idbHold; (h ? h : Promise.resolve()).then(() => f && f.call(t, e)); });
+            Object.defineProperty(t, "oncomplete", { configurable: true, get: () => f, set: (v) => { f = v; } }); return t; };
+          window.__hold = new Promise((r) => (window.__rel = r)); window.__sbTexSaveWrite = () => window.__hold; window.__answer = false; return true; })()`);
+        await watchX(fb);
+        await ev(`(window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }), true)`);
+        const adopted = await until(`!!document.querySelector(".tex-src") && document.querySelector(".tex-title")?.textContent === "a.tex" && document.querySelector(".tex-src").value.includes(${JSON.stringify(mark)}) && document.querySelector(".tex-src").readOnly === true`, 15000);
+        await ev(`(window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} }), true)`); await sleep(300);
+        await ev(`(window.__idbRel(), true)`); await sleep(600);
+        const frozen = await ev(`({ ro: document.querySelector(".tex-src")?.readOnly, title: document.querySelector(".tex-title")?.textContent })`);
+        await ev(`(window.__rel(), true)`);
+        await shownIs(fb); await sleep(1000);
+        const fA = await textOf(fa), s = await stateOf(fb);
+        await ev(`(IDBDatabase.prototype.transaction = window.__idbOrig, delete window.__idbOrig, delete window.__idbHold, window.__obsB?.disconnect(), true)`); await writesWork();
+        check(own && seeded && adopted && frozen.ro === true && frozen.title === "a.tex" && s.url === fb && s.ro === false && fA.includes(mark),
+          "U8-HOLD (grader H9): a recovery ending while a leave holds the editor: the editor stays frozen (the hold kept); released, the other file opens and the recovered edit is written", { own, seeded, adopted, frozen, s: { ...s, src: s.src.slice(-30) }, fileA: fA.slice(-30) });
+        // (back on A, entry 0: three entries back, B to A)
+        await ev(`(window.__answer = true, history.go(-3), true)`); await until(`history.state && history.state.sbTex === 0`, 20000); await shownIs(fa); await sleep(500); await ev(`(window.__answer = false, true)`);
+      }
+      // (13) (astra, grader H10) a switch asked for while the file's editor is being made: A opened afresh, its read
+      // held; the read released and B asked for in the same task, so A's editor replaces its placeholder (the
+      // editor shown changing under the leave without a newer request): the request isn't lost: B opens
+      {
+        await ev(`(window.__sbTex({ path: "/sw/c.tex", fid: ${JSON.stringify(fc)} }), true)`); await shownIs(fc); await sleep(300);
+        const armed = await ev(`(() => { const ws = window.__sbTexWs; if (!ws) return false; const orig = ws.readUpTo; window.__readOrig = orig;
+          ws.readUpTo = function (p, n) { if (p !== "/sw/a.tex" || !window.__deferA) return orig.call(this, p, n); window.__deferA = false;
+            let res, rej; const out = new Promise((a, b) => { res = a; rej = b; });
+            orig.call(this, p, n).then((v) => { window.__readRel = () => res(v); }, (e) => { window.__readRel = () => rej(e); });
+            return out; };
+          window.__deferA = true; delete window.__readRel; return true; })()`);
+        await watchX(fb);
+        await ev(`(window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }), true)`);
+        const readHeld = await until(`typeof window.__readRel === "function"`, 15000);
+        const asked = await ev(`(() => { window.__readRel(); return window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} }); })()`);
+        const opened = await until(`document.querySelector(".tex-title")?.textContent === "b.tex" && new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fb)}`, 15000);
+        await sleep(800);
+        const s = await stateOf(fb);
+        await ev(`(window.__sbTexWs.readUpTo = window.__readOrig, delete window.__readOrig, window.__obsB?.disconnect(), true)`);
+        check(armed && readHeld && asked === true && opened && s.url === fb && s.title === "b.tex" && s.ro === false && s.pages === 1,
+          "U8-HOLD (astra, grader H10): a switch asked for as the file's editor replaces its placeholder: the request isn't lost, the other file opens", { armed, readHeld, asked, opened, s: { ...s, src: s.src.slice(-30) } });
+        // (back on A, entry 0)
+        await ev(`(history.go(-(history.state && history.state.sbTex || 0)), true)`); await until(`history.state && history.state.sbTex === 0`, 20000); await shownIs(fa); await sleep(500);
+      }
+      // (the file shown, its writes failing (so leaving it asks), and the questions answered in turn from `answers`,
+      //  each recorded with the file the URL was on when asked)
+      const askInTurn = (answers) => ev(`(() => { window.__asks = []; window.__answers = ${JSON.stringify(answers)};
+        window.confirm = () => { window.__asks.push(new URLSearchParams(location.search).get("tex")); return window.__answers.shift() === true; };
+        window.__sbTexSaveWrite = () => { throw new Error("test: the write failed"); }; return true; })()`);
+      const editFails = async (mark) => {
+        await ev(`(() => { const t = document.querySelector(".tex-src"); t.value += ${JSON.stringify(mark + "\n")}; t.dispatchEvent(new Event("input")); return true; })()`);
+        return saveStateIs(/^Not saved: test: the write failed/);
+      };
+      // (writes working again and the edit saved; the questions as the rest of this test answers them)
+      const saveAgain = async () => {
+        await ev(`(() => { window.confirm = () => { window.__asked++; return window.__answer; }; window.__sbTexSaveWrite = () => { if (window.__failWrites) throw new Error("test: the write failed"); };
+          window.__answer = false; window.__asked = 4; const t = document.querySelector(".tex-src"); t.dispatchEvent(new Event("input")); return true; })()`);
+        // (false, or what the save state says instead)
+        return (await saveStateIs(/^Saved/, 20000)) || await ev(`"save: " + (document.querySelector(".tex-savestate")?.textContent ?? "none") + "; ro: " + document.querySelector(".tex-src")?.readOnly`);
+      };
+      // (the Navigation API's traverseTo, its first call made late (300 ms), the others as they are; or, hidden, the
+      //  same for history.go: a return whose traversal is slow, a newer one after it not)
+      const lateFirst = (withNav) => ev(`(() => { window.__late = 0;
+        if (${withNav}) { const v = window.navigation; if (!v?.traverseTo) return false; const orig = v.traverseTo.bind(v);
+          v.traverseTo = (k, o) => { if (window.__late++) return orig(k, o); const late = new Promise((r) => setTimeout(r, 300)); return { committed: late, finished: late.then(() => orig(k, o).finished) }; };
+          window.__navRestore = () => { delete v.traverseTo; }; return true; }
+        const was = window.navigation; Object.defineProperty(window, "navigation", { configurable: true, get: () => undefined });
+        history.go = (d) => { if (window.__late++) return History.prototype.go.call(history, d); setTimeout(() => History.prototype.go.call(history, d), 300); };
+        window.__navRestore = () => { delete history.go; Object.defineProperty(window, "navigation", { configurable: true, get: () => was }); }; return true; })()`);
+      // (14) (grader V6, V7) a newer Back during a return that a file waits for: A 0, C 1, C#f 2, A 3, A shown, its
+      // write failing. Back to C#f declined (the return's traversal late); B asked for and accepted, so B waits for that
+      // return; then Back again, to C, declined: B, given up by that Back, never opens, and C is asked about (not
+      // opened outright). A stays, editable, on its entry; asked three times, the last about C
+      for (const withNav of [true, false]) {
+        const mark = `% a newer Back while B waits ${withNav ? "nav" : "go"}`;
+        await ev(`(window.__sbTex({ path: "/sw/c.tex", fid: ${JSON.stringify(fc)} }), true)`); await shownIs(fc); await sleep(300);
+        await ev(`(location.hash = "#f", true)`); await until(`location.hash === "#f" && history.state && history.state.sbTex === 2`, 10000);
+        await ev(`(window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }), true)`); await shownIs(fa); await sleep(300);
+        await watchX(fb); await askInTurn([false, true, false]);
+        const failed = await editFails(mark);
+        const late = await lateFirst(withNav);
+        await ev(`(history.back(), true)`);
+        const asked1 = await until(`window.__asks.length >= 1`, 10000);
+        const went = await ev(`(async () => {
+          const pending = new URLSearchParams(location.search).get("tex") !== ${JSON.stringify(fa)};
+          const accepted = window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} });
+          for (let i = 0; i < 50 && window.__asks.length < 2; i++) await new Promise((r) => setTimeout(r, 5));
+          const asked2 = window.__asks.length, stillPending = new URLSearchParams(location.search).get("tex") !== ${JSON.stringify(fa)};
+          history.back();
+          return { pending, accepted, asked2, stillPending }; })()`);
+        await until(`window.__asks.length >= 3`, 10000); await sleep(1500);
+        const s = await stateOf(fa), asks = await ev(`window.__asks`), lates = await ev(`window.__late`);
+        await ev(`(window.__navRestore?.(), delete window.__navRestore, window.__obsB?.disconnect(), true)`);
+        const saved = await saveAgain(), fA = await textOf(fa);
+        check(failed && late && asked1 && went && went.pending && went.accepted === true && went.asked2 === 2 && went.stillPending && lates >= 2
+          && asks.length === 3 && asks[2] === fc && s.url === fa && s.at === 3 && s.title === "a.tex" && s.shows && s.ro === false && s.src.includes(mark) && s.pages === 1 && !s.saw && s.kept && saved === true && fA.includes(mark),
+          `U8-RETURN (grader V6, V7; ${withNav ? "Navigation API" : "no Navigation API: history.go"}, the first return late): B waiting for a return, then a newer Back to C, declined: B never opens, C is asked about, not opened; A stays, editable, on its entry`, { failed, late, asked1, went, lates, asks, s: { ...s, src: s.src.slice(-30) }, saved, fileA: fA.slice(-30) });
+        // (back on A, entry 0: three entries back)
+        await ev(`(history.go(-3), true)`); await until(`history.state && history.state.sbTex === 0 && location.hash === ""`, 20000); await shownIs(fa); await sleep(500);
+      }
+      // (15) (grader V10) no Navigation API, a return by position landing on another script's entry (unnumbered): A 0,
+      // that entry (its URL A's), B 1 shown, B's write failing; Back two steps, to A, declined: history.go(+1) lands on
+      // the unnumbered entry, which is that return's landing, not a newer Back: B stays, no reload, A never opened, and
+      // B's entry is pushed again after it
+      {
+        const mark = "% back past a foreign entry";
+        await watchX(fa);
+        const went = await ev(`(() => { const was = window.navigation; Object.defineProperty(window, "navigation", { configurable: true, get: () => undefined });
+          window.__navRestore = () => { Object.defineProperty(window, "navigation", { configurable: true, get: () => was }); };
+          history.pushState({ other: 1 }, "", location.href);
+          window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} }); return true; })()`);
+        await shownIs(fb); await sleep(300);
+        const at0 = await ev(`history.state && history.state.sbTex`), len0 = await ev(`history.length`);
+        await ev(`(window.__sawX = false, true)`); await askInTurn([false]);
+        const failed = await editFails(mark);
+        await ev(`(history.go(-2), true)`);
+        await until(`window.__asks.length >= 1`, 10000); await sleep(1500);
+        const s = await stateOf(fb), asks = await ev(`window.__asks`), len = await ev(`history.length`);
+        await ev(`(window.__navRestore?.(), delete window.__navRestore, window.__obsB?.disconnect(), true)`);
+        const saved = await saveAgain();
+        check(went && at0 === 1 && failed && asks.length === 1 && s.url === fb && s.at === 2 && len === len0 && s.title === "b.tex" && s.shows && s.ro === false && s.src.includes(mark) && s.pages === 1 && !s.saw && s.kept && saved === true,
+          "U8-RETURN (grader V10; no Navigation API): a return by position landing on another script's unnumbered entry is that return's landing: B stays, editable, no reload, A never opened; B's entry pushed again after it", { went, at0, len0, len, failed, asks, s: { ...s, src: s.src.slice(-30) }, saved });
+        // (back on A, entry 0: two entries back)
+        await ev(`(window.__answer = true, history.go(-2), true)`); await until(`history.state && history.state.sbTex === 0`, 20000); await shownIs(fa); await sleep(500); await ev(`(window.__answer = false, true)`);
+      }
+      // (16) (grader W8; astra R16-FENCE-1, -2) the fence's take-back during a decided switch: A 0, B 1, C 2, A 3, A
+      // shown, its write failing; every traversal 300 ms late. Back to C declined; Back again, to B, accepted: that
+      // return superseded, B's mount waiting on A's close (its last write held). The stale return lands on A 3 and
+      // the fence takes the history back to B 1, where the person went. Then, by variant:
+      // - C: C asked for during the take-back, A's close released: C opens on the entry after B's; B never shown;
+      // - none: B opens on B 1, its URL (never under A's); the return over, C asked for then opens;
+      // - A, A mid: A asked for again once the take-back has landed, or while it is under way: A opens on A 3;
+      // - refused, missing: the take-back refused, or its entry gone: B's entry pushed again (B 4, B's URL), B opens there;
+      // - refused then A: that, then A asked for again before B's mount goes on: A opens on A 3 (B 4 isn't A's entry);
+      // - back after, back before: the person's own Back, to C 2, during the take-back, A's close released before it
+      //   or after: C opens on C 2; B never shown; the take-back, landing after all, taken back to C 2;
+      // - refused after back: as back after, the take-back then refused: nothing more: C stays on C 2, no entry pushed;
+      // - C then back: C asked for during the take-back, then the person's Back: C 2's C opens, and what waited for the
+      //   return (C asked for) is gone: a Back from there opens B on B 1, nothing else
+      const W8 = {
+        C: { shown: fc, at: 2, ask: "C" }, none: { shown: fb, at: 1, after: true }, A: { shown: fa, at: 3, ask: "A", landed: true },
+        "A mid": { shown: fa, at: 3, ask: "A" }, refused: { shown: fb, at: 4, after: true, refuse: true }, missing: { shown: fb, at: 4, after: true, missing: true },
+        "refused then A": { shown: fa, at: 3, ask: "A", refuse: true, fallback: true },
+        "back after": { shown: fc, at: 2, back: "after" }, "back before": { shown: fc, at: 2, back: "before" }, "refused after back": { shown: fc, at: 2, back: "after", refuse: true },
+        "C then back": { shown: fc, at: 2, ask: "C", back: "after", probe: true },
+      };
+      for (const [then, v] of Object.entries(W8)) {
+        const mark = `% the fence during a decided switch, then ${then}`;
+        await ev(`(window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} }), true)`); await shownIs(fb); await sleep(300);
+        await ev(`(window.__sbTex({ path: "/sw/c.tex", fid: ${JSON.stringify(fc)} }), true)`); await shownIs(fc); await sleep(300);
+        await ev(`(window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }), true)`); await shownIs(fa); await sleep(300);
+        await askInTurn([false, true]);
+        const failed = await editFails(mark);
+        await watchX(v.shown === fb ? fc : fb);
+        // (once the leave is accepted, the close's last write held; every title and entry the page shows, logged)
+        await ev(`(() => { window.__hold = new Promise((r) => (window.__rel = r)); window.__k = 0;
+          window.__sbTexSaveWrite = () => { if (window.__asks.length >= 2) { window.__k++; return window.__hold; } throw new Error("test: the write failed"); };
+          window.__log = []; let last = ""; window.__logT = setInterval(() => { const t = document.title + " @" + new URLSearchParams(location.search).get("tex") + "/" + (history.state && history.state.sbTex); if (t !== last) window.__log.push(last = t); }, 5); return true; })()`);
+        // (every traversal late; the fence's own, the second, refused if asked; the entries hidden if asked, from the
+        //  second Back on, so the take-back finds its entry gone)
+        const late = await ev(`(() => { const v = window.navigation; if (!v?.traverseTo) return false; const orig = v.traverseTo.bind(v), entries = v.entries.bind(v); window.__late = 0; window.__noEntries = false;
+          v.traverseTo = (k, o) => { window.__late++;
+            if (${!!v.refuse} && window.__late === 2) { const f = new Promise((_, rej) => setTimeout(() => rej(new Error("test: the traverse refused")), 300)); f.catch(() => {}); return { committed: f, finished: f }; }
+            const late = new Promise((r) => setTimeout(r, 300)); return { committed: late, finished: late.then(() => orig(k, o).finished) }; };
+          v.entries = () => window.__noEntries ? [] : entries();
+          window.__navRestore = () => { delete v.traverseTo; delete v.entries; }; return true; })()`);
+        await ev(`(history.back(), true)`);
+        const asked1 = await until(`window.__asks.length >= 1`, 10000);
+        await ev(`(window.__noEntries = ${!!v.missing}, history.back(), true)`);
+        const held = await until(`window.__k >= 1`, 10000);
+        // (the stale return landed on A 3 and the take-back started: its traversal the second; the entry gone: none)
+        const fenced = v.missing || v.fallback ? await until(`new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fb)} && history.state && history.state.sbTex === 4`, 5000) : await until(`window.__late >= 2`, 5000);
+        const onB = v.landed ? await until(`new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fb)}`, 5000) : true;
+        const mid = await ev(`(async () => { const out = { url: new URLSearchParams(location.search).get("tex"), at: history.state && history.state.sbTex };
+          if (${JSON.stringify(v.ask ?? "")} === "C") out.accepted = window.__sbTex({ path: "/sw/c.tex", fid: ${JSON.stringify(fc)} });
+          if (${JSON.stringify(v.ask ?? "")} === "A") out.accepted = window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} });
+          if (${JSON.stringify(v.back ?? "")} === "before") { history.back(); await new Promise((r) => setTimeout(r, 150)); }
+          window.__rel();
+          if (${JSON.stringify(v.back ?? "")} === "after") { await new Promise((r) => setTimeout(r, 50)); history.back(); }
+          out.len = history.length; return out; })()`);
+        const opened = await shownIs(v.shown); await sleep(1500);
+        const s = await stateOf(v.shown), asks = await ev(`window.__asks`), len = await ev(`history.length`), log = await ev(`(clearInterval(window.__logT), window.__log)`);
+        await ev(`(window.__navRestore?.(), delete window.__navRestore, window.__obsB?.disconnect(), true)`);
+        const probe = !v.probe ? null : await ev(`(history.back(), true)`).then(() => shownIs(fb)).then(async (ok) => { await sleep(800); return { ok, ...(await stateOf(fb)), len: await ev(`history.length`) }; });
+        // (the return over: C asked for now opens, on the entry after)
+        const after = !v.after ? null : await ev(`(window.__sbTex({ path: "/sw/c.tex", fid: ${JSON.stringify(fc)} }), true)`).then(() => shownIs(fc)).then(async (ok) => ({ ok, ...(await stateOf(fc)) }));
+        const saved = !v.after ? await saveAgain() : await ev(`(() => { window.confirm = () => { window.__asked++; return window.__answer; }; window.__sbTexSaveWrite = () => { if (window.__failWrites) throw new Error("test: the write failed"); }; window.__answer = false; window.__asked = 4; return true; })()`);
+        const fA = await textOf(fa);
+        const name = { [fa]: "a.tex", [fb]: "b.tex", [fc]: "c.tex" };
+        // (B, the decided switch's file, never under another file's URL (astra R16-FENCE-1); a superseded take-back's
+        //  own landing can show the file shown under its entry until the fence takes it back, as in U8-SWITCH-6)
+        const wrongUrl = log.filter((t) => t.startsWith("b.tex") && !t.includes("@" + fb + "/"));
+        check(failed && late && asked1 && held && fenced && onB && (v.ask ? mid.accepted === true : true) && asks.length === 2 && opened
+          && s.url === v.shown && s.at === v.at && s.title === name[v.shown] && s.ro === false && s.pages === 1 && s.kept && s.shows && wrongUrl.length === 0
+          && (v.shown !== fb ? !s.saw && !log.some((t) => t.startsWith("b.tex")) : true) && (then === "refused after back" ? len === mid.len : true)
+          && (v.probe ? probe.ok && probe.url === fb && probe.at === 1 && probe.title === "b.tex" && probe.len === len : true)
+          && (v.after ? after.ok && after.url === fc && after.at === v.at + 1 && after.title === "c.tex" : true) && saved === true && fA.includes(mark),
+          `U8-RETURN (grader W8, astra R16-FENCE; Navigation API, its traversals late): the fence's take-back during a decided switch, then ${then}: ${name[v.shown]} opens, editable, on entry ${v.at}, its URL; no file under another's URL${v.after ? "; the return over, a file asked for then opens" : ""}; A's edit written`,
+          { then, s: { ...s, src: s.src.slice(-30) }, wrongUrl, after, probe, saved, fileA: fA.slice(-30), failed, late, asked1, held, fenced, onB, mid, len, opened, asks, log });
+        // (back on A, entry 0)
+        await ev(`(history.go(-(history.state && history.state.sbTex || 0)), true)`); await until(`history.state && history.state.sbTex === 0`, 20000); await shownIs(fa); await sleep(500);
+      }
+      // (17) (grader H8) the editor read-only for a recovery, and a leave's hold let go: A opened with another writer's
+      // draft (its edit, never written), the recovery's last step (the adopted draft's IndexedDB drop) held; a switch to
+      // B asked for, its write failing, declined: the leave lets go of its hold, but the editor stays read-only (the
+      // recovery's), and the bar as it was; the recovery ended, the editor is editable and the edit written
+      {
+        const mark = "% recovered, a leave declined";
+        const own = await ev(`(async () => {
+          window.__sbTexSaveWrite = () => { throw new Error("test: the write failed"); };
+          const t = document.querySelector(".tex-src"); t.value += ${JSON.stringify(mark + "\n")}; t.dispatchEvent(new Event("input"));
+          await new Promise((r) => setTimeout(r, 1500));
+          const k = Object.keys(localStorage).find((k) => k.startsWith("sb-tex-draft:" + ${JSON.stringify(fa)} + ":"));
+          if (!k) return null; const d = JSON.parse(localStorage.getItem(k)); d.writerId = "0123456789abcdef0123456789abcdef"; window.__foreign = d; return { key: k, text: d.text.slice(-30) }; })()`);
+        await ev(`(window.__answer = true, window.__sbTex({ path: "/sw/c.tex", fid: ${JSON.stringify(fc)} }), true)`); await shownIs(fc); await sleep(300);
+        const seeded = await ev(`(() => { Object.keys(localStorage).filter((k) => k.startsWith("sb-tex-draft:" + ${JSON.stringify(fa)} + ":")).forEach((k) => localStorage.removeItem(k));
+          const d = window.__foreign; localStorage.setItem("sb-tex-draft:" + d.fid + ":" + d.writerId, JSON.stringify(d));
+          window.__idbHold = new Promise((r) => (window.__idbRel = r)); const orig = IDBDatabase.prototype.transaction; window.__idbOrig = orig;
+          IDBDatabase.prototype.transaction = function (names, mode, ...rest) { const t = orig.call(this, names, mode, ...rest); if (mode !== "readwrite" || this.name !== "sagebrush-tex-drafts") return t;
+            let f = null; t.addEventListener("complete", (e) => { const h = window.__idbHold; (h ? h : Promise.resolve()).then(() => f && f.call(t, e)); });
+            Object.defineProperty(t, "oncomplete", { configurable: true, get: () => f, set: (v) => { f = v; } }); return t; };
+          window.__sbTexSaveWrite = () => { throw new Error("test: the write failed"); }; window.__answer = false; return true; })()`);
+        await watchX(fb);
+        await ev(`(window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }), true)`);
+        const adopted = await until(`!!document.querySelector(".tex-src") && document.querySelector(".tex-title")?.textContent === "a.tex" && document.querySelector(".tex-src").value.includes(${JSON.stringify(mark)}) && document.querySelector(".tex-src").readOnly === true`, 15000);
+        const look = `({ ro: document.querySelector(".tex-src")?.readOnly, title: document.querySelector(".tex-title")?.textContent, url: new URLSearchParams(location.search).get("tex"), asked: window.__asked, bar: (() => { const b = document.querySelector(".tex-conflict"); return b && !b.hidden ? b.textContent.slice(0, 80) : ""; })() })`;
+        const before = await ev(look);
+        await ev(`(window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} }), true)`);
+        const asked = await until(`window.__asked > ${before.asked}`, 10000); await sleep(600);
+        const after = await ev(look);
+        await ev(`(window.__idbRel(), IDBDatabase.prototype.transaction = window.__idbOrig, delete window.__idbOrig, delete window.__idbHold, true)`);
+        await writesWork();
+        const editable = await until(`document.querySelector(".tex-src")?.readOnly === false`, 15000);
+        await ev(`(() => { const t = document.querySelector(".tex-src"); t.dispatchEvent(new Event("input")); return true; })()`);
+        const saved = await saveStateIs(/^Saved/), fA = await textOf(fa), saw = await ev(`window.__sawX`);
+        await ev(`(window.__obsB?.disconnect(), true)`);
+        check(own && seeded && adopted && before.ro === true && asked && after.asked === before.asked + 1 && after.ro === true && after.title === "a.tex" && after.url === fa && after.bar === before.bar && !saw && editable && saved === true && fA.includes(mark),
+          "U8-HOLD (grader H8): a leave declined while the editor is read-only for a recovery: its hold let go, the editor stays read-only (the recovery's), the bar as it was; the recovery ended, editable and the edit written", { own, seeded, adopted, before, asked, after, saw, editable, saved, fileA: fA.slice(-30) });
+        // (back on A, entry 0)
+        await ev(`(history.go(-(history.state && history.state.sbTex || 0)), true)`); await until(`history.state && history.state.sbTex === 0`, 20000); await shownIs(fa); await sleep(500);
+      }
+      // (18) (grader G6) the person's own Back while the fence's take-back is under way, the file shown current; the
+      // take-back then refused: the fence ends anyway, so the next file asked for opens. C 1, A 2, B 3 after A's entry 0,
+      // A shown; the switch to B decided (A's close held), A asked for again (its return held), A's close released, and
+      // Back two entries to C: C opens, current. The held return then lands, stale, on A 2: the take-back to C starts
+      // (held); the person's Back, two entries, to A 0: C's own listener takes it (C current); and only then the take-back
+      // refused. Each step released by the test, not a timer: A opens on its entry 0, its URL, the refused take-back
+      // having ended the fence; B never shown
+      {
+        const mark = "% the fence refused after the person's Back";
+        await ev(`(window.__sbTex({ path: "/sw/c.tex", fid: ${JSON.stringify(fc)} }), true)`); await shownIs(fc); await sleep(300);
+        await ev(`(window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }), true)`); await shownIs(fa); await sleep(300);
+        await watchX(fb); await holdClose(mark);
+        const nav = await ev(`(() => { const v = window.navigation; if (!v?.traverseTo) return false; const orig = v.traverseTo.bind(v); window.__late = 0;
+          v.traverseTo = (k, o) => { const n = ++window.__late;
+            if (n === 2) { const f = new Promise((_, rej) => (window.__refuse = () => rej(new Error("test: the traverse refused")))); f.catch(() => {}); return { committed: f, finished: f }; }
+            const late = new Promise((r) => (window.__land = r)); return { committed: late, finished: late.then(() => orig(k, o).finished) }; };
+          window.__navRestore = () => { delete v.traverseTo; }; return true; })()`);
+        await ev(`(window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} }), true)`);
+        const held = await until(`window.__k >= 2`, 10000);
+        await ev(`(async () => { window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }); window.__rel(); await new Promise((r) => setTimeout(r, 50)); history.go(-2); return 1; })()`);
+        const onC = await shownIs(fc);
+        // (the held return released: it lands, stale, and the take-back starts: the second traversal)
+        await ev(`(window.__land(), true)`);
+        const fenced = await until(`window.__late >= 2`, 10000);
+        const mid = await ev(`({ url: new URLSearchParams(location.search).get("tex"), at: history.state && history.state.sbTex, title: document.querySelector(".tex-title")?.textContent, ro: document.querySelector(".tex-src")?.readOnly })`);
+        await ev(`(history.go(-2), true)`);
+        // (the person's Back taken (A 0's entry), then the take-back refused)
+        const back = await until(`new URLSearchParams(location.search).get("tex") === ${JSON.stringify(fa)} && history.state && history.state.sbTex === 0`, 10000);
+        await sleep(500);
+        await ev(`(window.__refuse(), true)`);
+        const opened = await shownIs(fa); await sleep(1500);
+        const s = await stateOf(fa), fA = await textOf(fa);
+        await ev(`(window.__navRestore?.(), delete window.__navRestore, window.__obsB?.disconnect(), true)`); await writesWork();
+        check(nav && held && onC && fenced && back && mid.title === "c.tex" && mid.url === fa && mid.at === 2 && opened && s.url === fa && s.at === 0 && s.title === "a.tex" && s.shows && s.ro === false && s.pages === 1 && !s.saw && s.kept && fA.includes(mark),
+          "U8-RETURN (grader G6; Navigation API): the person's own Back while the fence's take-back is under way (the file shown current), the take-back then refused: the fence ends, and the file gone back to opens, editable, on its entry, its URL; B never shown", { nav, held, onC, fenced, back, mid, opened, s: { ...s, src: s.src.slice(-30) }, fileA: fA.slice(-30) });
+        // (back on A, entry 0: there)
+        await until(`history.state && history.state.sbTex === 0`, 20000); await shownIs(fa); await sleep(500);
+      }
+    }
+    // (SB_STOP_U8: the run ends here, after the switch and return cases: for mutant runs of those)
+    if (process.env.SB_STOP_U8) throw new Error("stopped after the U8 block (SB_STOP_U8)");
     // ---- (astra B5-R1-A1) the exact entry shown is the one gone back to, a fragment's entry between: A, A#section, B;
     // with unsaved B, Back one step and Back two steps, declined, stay on B (its entry, URL and text); accepted two
     // steps, A; with unsaved A, Forward two steps declined stays on A. With the Navigation API and, hidden, without it
@@ -285,11 +965,13 @@ try {
         const at = () => ({ url: new URLSearchParams(location.search).get("tex"), hash: location.hash, at: history.state && history.state.sbTex, title: document.querySelector(".tex-title")?.textContent, src: document.querySelector(".tex-src")?.value ?? "", pages: document.querySelectorAll(".tex-page").length });
         const edit = (m) => { const t = document.querySelector(".tex-src"); t.value += m; t.dispatchEvent(new Event("input")); };
         const out = { nav: typeof window.navigation?.traverseTo === "function" };
+        // (an edit, then its write failed: the one state that asks before leaving)
+        const failed = () => until(() => /^Not saved/.test(document.querySelector(".tex-savestate")?.textContent ?? ""));
         location.hash = "section"; await wait(300);
         out.hash = at();
         window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} }); await until(() => shows("File B here."));
         out.b = at();
-        edit("% unsaved in B\\n");
+        window.__failWrites = true; edit("% unsaved in B\\n"); await failed();
         let before = window.__asked; window.__answer = false;
         history.back(); await wait(1500);
         out.back1 = { asked: window.__asked - before, ...at() };
@@ -299,13 +981,14 @@ try {
         before = window.__asked; window.__answer = true;
         history.go(-2); await until(() => shows("File A here.")); await wait(300);
         out.back2yes = { asked: window.__asked - before, ...at() };
-        edit("% unsaved in A\\n");
+        await wait(300); edit("% unsaved in A\\n"); await failed();
         before = window.__asked; window.__answer = false;
         history.go(2); await wait(1500);
         out.fwd2 = { asked: window.__asked - before, ...at() };
-        // (leave A as saved, at its first entry, for what follows)
+        // (leave A saved, at its first entry, for what follows: writes work again)
         window.__answer = true; history.go(2); await until(() => shows("File B here.")); await wait(300);
         history.go(-2); await until(() => shows("File A here.")); await wait(300);
+        window.__failWrites = false; edit(""); await until(() => document.querySelector(".tex-savestate")?.textContent === "Saved ✓");
         out.end = at();
         if (!${withNav}) delete window.navigation;
         return out; })()`).catch((e) => ({ threw: String(e?.message ?? e).slice(0, 300) })) ?? { threw: "no result: the page's context ended (a reload or a navigation away)" };
@@ -316,7 +999,7 @@ try {
         && r.back2.asked === 1 && r.back2.url === fb && r.back2.hash === "" && r.back2.at === 2 && r.back2.title === "b.tex" && r.back2.src.includes("% unsaved in B")
         && r.back2yes.asked === 1 && r.back2yes.url === fa && r.back2yes.hash === "" && r.back2yes.at === 0 && r.back2yes.title === "a.tex"
         && r.fwd2.asked === 1 && r.fwd2.url === fa && r.fwd2.hash === "" && r.fwd2.at === 0 && r.fwd2.title === "a.tex" && r.fwd2.src.includes("% unsaved in A")
-        && r.end.url === fa && r.end.at === 0 && !r.end.src.includes("% unsaved");
+        && r.end.url === fa && r.end.at === 0;
       check(ok, `B5-R1-A1 (${withNav ? "Navigation API" : "no Navigation API"}): a fragment's entry between; Back one and two steps and Forward two steps, declined, stay on the exact entry shown, its URL and text; accepted, the other file`, r);
     }
     // ---- (astra B5-A2) a mount replaced while it waits stops there: A's read held, B opened and shown, then A's read
@@ -334,14 +1017,36 @@ try {
       const shownA = !!document.querySelector(".tex-preview")?.textContent.includes("File A here.");
       release?.(); await wait(2000);
       const out = { held, shownA, title: document.querySelector(".tex-title")?.textContent, doc: document.title, url: new URLSearchParams(location.search).get("tex"), pages: document.querySelectorAll(".tex-page").length, made: made.length, live: made.filter((w) => w.live).length };
+      window.__failWrites = true;
       const t = document.querySelector(".tex-src"); t.value += "% unsaved in A\\n"; t.dispatchEvent(new Event("input"));
+      for (let i = 0; i < 50 && !/^Not saved/.test(document.querySelector(".tex-savestate")?.textContent ?? ""); i++) await wait(100);
       const before = window.__asked; window.__answer = false;
       window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} }); await wait(300);
       out.asked = window.__asked - before; out.stays = !!document.querySelector(".tex-preview")?.textContent.includes("File A here.") && document.querySelector(".tex-src").value.includes("% unsaved in A");
       window.Worker = W0;
+      window.__failWrites = false; t.dispatchEvent(new Event("input"));
       return out; })()`);
     check(a2.held && a2.shownA && a2.title === "a.tex" && a2.doc.startsWith("a.tex") && a2.url === fa && a2.pages === 1 && a2.made === 1 && a2.live === 1 && a2.asked === 1 && a2.stays, "B5-A2: a mount replaced while its read waits stops: the newer file's title, one live worker, its unsaved text guarded", a2);
-    await ev(`localStorage.removeItem("sagebrush-files-sidebar"); true`);
+    await savedNow();
+    // ---- (astra U8-SWITCH-1) quick switches A -> B -> C while A's write is held: only the newest, C, is shown, now
+    // and after A's write lands (B, which waited for A's close, never replaces it); A's edit written
+    const sw1 = await ev(`(async () => {
+      const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+      let release; window.__sbTexSaveWrite = () => new Promise((r) => { release = r; });
+      const t = document.querySelector(".tex-src"); t.value += "% A before the switches\\n"; t.dispatchEvent(new Event("input"));
+      window.__sbTex({ path: "/sw/b.tex", fid: ${JSON.stringify(fb)} });
+      await wait(50);
+      window.__sbTex({ path: "/sw/c.tex", fid: ${JSON.stringify(fc)} });
+      for (let i = 0; i < 50 && !release; i++) await wait(100);
+      const held = !!release;
+      delete window.__sbTexSaveWrite; release?.();
+      for (let i = 0; i < 100 && !document.querySelector(".tex-preview")?.textContent.includes("File C here."); i++) await wait(100);
+      await wait(2500);
+      return { held, title: document.querySelector(".tex-title")?.textContent, c: !!document.querySelector(".tex-preview")?.textContent.includes("File C here."), b: !!document.querySelector(".tex-preview")?.textContent.includes("File B here."), pages: document.querySelectorAll(".tex-page").length };
+    })()`);
+    const aBytes = new TextDecoder().decode(new Uint8Array(await bytesOf("/sw/a.tex")));
+    check(sw1.held && sw1.title === "c.tex" && sw1.c && !sw1.b && sw1.pages === 1 && aBytes.includes("% A before the switches"), "U8-SWITCH-1: A -> B -> C quickly while A's write is held: C shown, then and after A's write lands; A's edit written", { ...sw1, a: aBytes.slice(-60) });
+    await ev(`localStorage.removeItem("sagebrush-files-sidebar"); delete window.__sbTexSaveWrite; delete window.__failWrites; true`);
   }
   // ---- comments on a document, end to end (plan latex-comments r4.2 §5): a person comments in the preview and the
   // source; an agent (this test, with the format's core, through the workspace: as the MCP tools will) lists them,
@@ -451,7 +1156,7 @@ try {
     const before = C.list(d5, TEX2, { all: true }).threads.find((t) => t.id === t3.id);
     await ev(`(() => { const t = document.querySelector(".tex-src"), i = t.value.indexOf("\\\\begin{document}") + 17; t.setRangeText("Inserted line.\\n\\n", i, i, "end"); t.dispatchEvent(new Event("input")); return true; })()`);
     await sleep(800);
-    await ctrlS(); await statusIs(/^Saved$/);
+    await ctrlS(); await savedNow();
     await sleep(1500);
     const TEX3 = await texNow(), after = C.list(await sideDoc(), TEX3, { all: true }).threads.find((t) => t.id === t3.id);
     const a3 = (await sideDoc()).threads.find((t) => t.id === t3.id).anchor.value;
@@ -592,20 +1297,25 @@ try {
       await until(`document.querySelectorAll(${BUB}).length === 2`, 20000);
       const side9 = async () => C.parse(new TextDecoder().decode(new Uint8Array(await bytesOf(S9))), {});
       const tex9 = async () => new TextDecoder().decode(new Uint8Array(await bytesOf("/cm/snap.tex")));
-      // (a) an edit above the anchors, saved; while the save's write is held, another edit before them
-      await ev(`(() => { const t = document.querySelector(".tex-src"), i = t.value.indexOf("Alpha"); t.setRangeText("Zero. ", i, i, "end"); t.dispatchEvent(new Event("input")); window.__held = new Promise((r) => (window.__releaseSave = r)); window.__sbTexSaveWrite = () => window.__held; return true; })()`);
+      // (a) an edit above the anchors, written; while that write is held, another edit before them (its own write held
+      // too, so the first write's anchors are seen alone)
+      await ev(`(() => { const t = document.querySelector(".tex-src"), i = t.value.indexOf("Alpha"); t.setRangeText("Zero. ", i, i, "end"); t.dispatchEvent(new Event("input"));
+        const hold = () => { let r; const p = new Promise((x) => (r = x)); return { p, r }; }; window.__h1 = hold(); window.__h2 = hold(); const q = [window.__h1.p, window.__h2.p];
+        window.__sbTexSaveWrite = () => q.shift(); return true; })()`);
       await ctrlS();
       await sleep(400);
-      await ev(`(() => { const t = document.querySelector(".tex-src"), i = t.value.indexOf("Zero"); t.setRangeText("MORE TEXT ", i, i, "end"); t.dispatchEvent(new Event("input")); window.__releaseSave(); delete window.__sbTexSaveWrite; return true; })()`);
-      await statusIs(/^Saved$/); await sleep(1500);
+      await ev(`(() => { const t = document.querySelector(".tex-src"), i = t.value.indexOf("Zero"); t.setRangeText("MORE TEXT ", i, i, "end"); t.dispatchEvent(new Event("input")); window.__h1.r(); return true; })()`);
+      for (let i = 0; i < 60; i++) { const tx = await tex9(), an = (await side9()).threads.find((t) => t.id === r9a.id)?.anchor.value; if (tx.includes("Zero. Alpha") && an?.textSha === C.sha256(tx)) break; await sleep(100); }
       const saved9 = await tex9(), a9 = (await side9()).threads.find((t) => t.id === r9a.id).anchor.value;
       check(!saved9.includes("MORE TEXT") && saved9.includes("Zero. Alpha") && a9.textSha === C.sha256(saved9) && saved9.slice(a9.start, a9.end) === "Beta words" && a9.quote === "Beta words", "comments: an edit while the save's .tex write is held: the anchors written are the saved text's, each on its own words", { quote: a9.quote, at: saved9.slice(a9.start, a9.end) });
-      // (b) save again (the MORE TEXT edit); the agent reattaches the gamma thread just before the page's anchor write
+      await ev(`(window.__h2.r(), delete window.__sbTexSaveWrite, true)`); await savedNow();
+      // (b) another edit written; the agent reattaches the gamma thread just before the page's anchor write
       const texAt = await ev(`document.querySelector(".tex-src").value`), gi = texAt.indexOf("A last line");
       const cur9 = await side9(), agentDoc = C.reattach(cur9, r9b.id, C.makeAnchor(texAt, gi, gi + 11), { author: "agent:claude" }).doc;
       await ev(`(() => { window.__raced9 = 0; window.__sbTexCommentsWrite = async () => { if (window.__raced9) return; window.__raced9 = 1;
-        const r = await ${W}.read(${J(S9)}); await ${W}.write(${J(S9)}, new TextEncoder().encode(${J(C.serialize(agentDoc))}), { base: r.entry.rev ?? 0 }); }; return true; })()`);
-      await ctrlS(); await statusIs(/^Saved$/); await sleep(2000);
+        const r = await ${W}.read(${J(S9)}); await ${W}.write(${J(S9)}, new TextEncoder().encode(${J(C.serialize(agentDoc))}), { base: r.entry.rev ?? 0 }); };
+        const t = document.querySelector(".tex-src"), i = t.value.indexOf("\\end{document}"); t.setRangeText("% (b)\\n", i, i, "end"); t.dispatchEvent(new Event("input")); return true; })()`);
+      await ctrlS(); await savedNow(); await sleep(2000);
       await ev(`(delete window.__sbTexCommentsWrite, true)`);
       const saved9b = await tex9(), f9 = await side9(), g9 = f9.threads.find((t) => t.id === r9b.id).anchor.value, b9 = f9.threads.find((t) => t.id === r9a.id).anchor.value;
       check(await ev(`window.__raced9`) === 1 && g9.quote === "A last line" && g9.by === undefined && f9.threads.find((t) => t.id === r9b.id).anchor.by === "agent:claude" && b9.textSha === C.sha256(saved9b) && saved9b.slice(b9.start, b9.end) === "Beta words", "comments: an agent's reattachment landing during the page's anchor write survives the retry (the page skips that thread), the other anchor written for the saved text", { g: g9.quote, by: f9.threads.find((t) => t.id === r9b.id).anchor.by, b: saved9b.slice(b9.start, b9.end) });
@@ -892,17 +1602,20 @@ try {
   check(await until(`document.querySelector(".tex-preview h2, .tex-preview h1")?.textContent.includes("Hello")`, 20000), "the preview renders the section");
   const cold = { requests: requests.length, bytes: [...sizes.values()].reduce((a, b) => a + b, 0), latex: [...sizes.entries()].filter(([u]) => /sagebrush-latex/.test(u)).reduce((a, [, b]) => a + b, 0) };
   console.log("cold first click (loopback, uncompressed; the gated number is the TIMING protocol's against DEV):", JSON.stringify(cold));
-  check(await page(`P.querySelector(".tex-banner").textContent.startsWith("LaTeX editor: an early prototype. Save (Ctrl/Cmd+S) overwrites the file.")`), "the banner says save overwrites");
-  check(await page(`P.querySelector(".tex-save").disabled === true && P.querySelector(".tex-dirty").hidden === true`), "Save disabled, nothing unsaved");
+  check(await page(`P.querySelector(".tex-banner").textContent.startsWith("LaTeX editor: an early prototype. Your edits are saved as you type.")`), "the banner says edits are saved as you type");
+  check(await page(`!P.querySelector(".tex-save") && !P.querySelector(".tex-dirty") && P.querySelector(".tex-savestate").textContent === "Saved ✓"`), "U8: no Save button, no Unsaved changes: Saved ✓");
   check(latexFetches().some((u) => /sagebrush-latex\.js/.test(u)) && latexFetches().some((u) => /sagebrush-latex-worker\.js/.test(u)), "the page and its worker fetched now", latexFetches());
   check(!latexFetches().some((u) => /sagebrush-latex-examples\.js/.test(u)), "…and not the examples' chunk: opening a .tex doesn't fetch it", latexFetches());
   const rev0 = await ev(`${W}.stat("/t/doc.tex").then((e) => e.rev ?? 0)`);
   await send("Runtime.evaluate", { expression: `document.querySelector(".tex-src").focus()` });
   await ctrlS();
-  check(await statusIs(/No changes to save/), "Ctrl+S on clean text: no write, said");
-  check((await ev(`${W}.stat("/t/doc.tex").then((e) => e.rev ?? 0)`)) === rev0, "…and the revision unchanged");
+  check(await savedNow(), "Ctrl+S on clean text: Saved ✓");
+  check((await ev(`${W}.stat("/t/doc.tex").then((e) => e.rev ?? 0)`)) === rev0, "…and no write (the revision unchanged)");
+  // (U8) typing is saved without a click: Edited, then Saved ✓ after the debounce, the bytes the text; and the browser's
+  // leave prompt not asked for while a write is merely pending
   await typeInto(DOC.replace("Some text", "Edited text"));
-  check(await page(`P.querySelector(".tex-dirty").hidden === false && P.querySelector(".tex-save").disabled === false`), "an edit: Unsaved changes, Save enabled");
+  const noPrompt = await ev(`(() => { const e = new Event("beforeunload", { cancelable: true }); window.dispatchEvent(e); return !e.defaultPrevented; })()`);
+  check(noPrompt, "U8: an edit pending: no leave prompt");
   // (plan r5 §6's marks, for the TIMING harness: an edit's input, request, reply, patch and paint carry its revision;
   // the highlighter's done mark carries its wall and busy ms)
   const marksOk = await until(`(() => { const m = (n) => performance.getEntriesByName(n); const inp = m("tex-input").at(-1); if (!inp) return false; const r = inp.detail.rev;
@@ -910,15 +1623,47 @@ try {
       && m("tex-highlight-done").some((e) => e.startTime >= inp.startTime && e.detail.wall >= e.detail.busy && e.detail.busy >= 0)
       && m("tex-mount").length === 1 && m("tex-read-done").length === 1; })()`, 10000);
   check(marksOk, "the §6 marks: an edit's input, request, parse, patch and paint by revision; the highlighter's wall and busy", await ev(`performance.getEntriesByType("mark").map((e) => [e.name, e.detail]).slice(-12)`));
-  await ctrlS();
-  check(await statusIs(/^Saved$/), "Ctrl+S: Saved");
+  check(await savedNow(), "U8: typing is saved by itself: Saved ✓");
   check(JSON.stringify(await bytesOf("/t/doc.tex")) === JSON.stringify(enc(DOC.replace("Some text", "Edited text"))), "…the bytes written are the text");
-  check(await page(`P.querySelector(".tex-dirty").hidden === true && P.querySelector(".tex-save").disabled === true`), "…and nothing unsaved after");
-  // the next keystroke after "Saved": the old message goes, beside "Unsaved changes" (board i1c01 U2)
+  // (Ctrl+S writes at once, before the debounce)
   await typeInto(DOC.replace("Some text", "Edited again"));
-  check(await page(`P.querySelector(".tex-status").textContent === "" && P.querySelector(".tex-dirty").hidden === false`), "an edit after Saved: the status cleared, Unsaved changes shown", await page(`P.querySelector(".tex-status").textContent`));
+  await ctrlS();
+  check(await savedNow(600) && JSON.stringify(await bytesOf("/t/doc.tex")) === JSON.stringify(enc(DOC.replace("Some text", "Edited again"))), "Ctrl+S: written at once, Saved ✓");
+  // (a failed write: the one state that keeps the leave prompt; the text stays; written again on the next edit)
+  await ev(`(window.__sbTexSaveWrite = () => { throw new Error("storage full (test)"); }, true)`);
+  await typeInto(DOC.replace("Some text", "Edited, failing"));
+  check(await saveStateIs(/^Not saved: storage full \(test\)/), "U8: a failed write: a persistent Not saved with the reason", await page(`P.querySelector(".tex-savestate").textContent`));
+  const prompt = await ev(`(() => { const e = new Event("beforeunload", { cancelable: true }); window.dispatchEvent(e); return e.defaultPrevented; })()`);
+  check(prompt, "U8: …and only then the leave prompt");
+  await ev(`(delete window.__sbTexSaveWrite, true)`);
   await typeInto(DOC.replace("Some text", "Edited text"));
-  check(await page(`P.querySelector(".tex-dirty").hidden === true`), "…typed back to the saved text: nothing unsaved");
+  check(await savedNow() && JSON.stringify(await bytesOf("/t/doc.tex")) === JSON.stringify(enc(DOC.replace("Some text", "Edited text"))), "U8: …written on the next edit: Saved ✓");
+  // (U8-CONFLICT-1) changed elsewhere while an edit is pending (its write held): the autosave's write refused, #599's
+  // bar shown, nothing written over it; Keep mine writes mine over the revision shown, the other text kept as a version
+  const conflictSetup = async (mine, theirs) => {
+    await ev(`(() => { window.__hc = new Promise((r) => (window.__hcr = r)); window.__sbTexSaveWrite = () => window.__hc; return true; })()`);
+    await typeInto(DOC.replace("Some text", mine)); await ctrlS(); await sleep(200);
+    await ev(`${W}.write("/t/doc.tex", new TextEncoder().encode(${JSON.stringify(DOC.replace("Some text", theirs))})).then(() => 1)`);
+    await ev(`(window.__hcr(), delete window.__sbTexSaveWrite, true)`);
+    return until(`!document.querySelector(".tex-conflict").hidden && /changed (this file|elsewhere)/.test(document.querySelector(".tex-conflict").textContent) && document.querySelector(".tex-savestate").textContent === "Not saved yet: changed elsewhere"`, 10000);
+  };
+  check(await conflictSetup("Mine one", "Theirs one") && JSON.stringify(await bytesOf("/t/doc.tex")) === JSON.stringify(enc(DOC.replace("Some text", "Theirs one"))), "U8: changed elsewhere with an edit pending: the choice shown, nothing written over the other text");
+  await ev(`(document.querySelector(".tex-mine").click(), true)`);
+  const versionsHave = (t) => ev(`(async () => { const h = await ${W}.history("/t/doc.tex"); for (let i = 0; i < h.length; i++) { const b = await ${W}.version("/t/doc.tex", i).catch(() => null); if (b && new TextDecoder().decode(b).includes(${JSON.stringify(t)})) return true; } return false; })()`);
+  check(await savedNow() && JSON.stringify(await bytesOf("/t/doc.tex")) === JSON.stringify(enc(DOC.replace("Some text", "Mine one"))) && await versionsHave("Theirs one") && await page(`P.querySelector(".tex-conflict").hidden`), "U8: Keep mine: mine written, theirs kept in the file's versions");
+  // (U8-CONFLICT-2) Use theirs (#599): mine kept first as "doc (mine).tex" beside it, then theirs in the editor
+  check(await conflictSetup("Mine two", "Theirs two"), "U8: a second conflict shown");
+  await ev(`(document.querySelector(".tex-theirs").click(), true)`);
+  check(await savedNow() && (await ev(`document.querySelector(".tex-src").value`)).includes("Theirs two") && JSON.stringify(await bytesOf("/t/doc (mine).tex")) === JSON.stringify(enc(DOC.replace("Some text", "Mine two"))) && JSON.stringify(await bytesOf("/t/doc.tex")) === JSON.stringify(enc(DOC.replace("Some text", "Theirs two"))), "U8: Use theirs: mine kept as doc (mine).tex, theirs in the editor, Saved ✓");
+  // (U8-DURABLE-1) the page goes away with an edit whose write never lands: on opening again, the exact text recovered
+  // and written
+  await ev(`(window.__sbTexSaveWrite = () => new Promise(() => {}), true)`);
+  await typeInto(DOC.replace("Some text", "Typed just before the tab went away"));
+  await ctrlS(); await sleep(300);
+  await go(base + "?tex=" + fid + "&latex=1");
+  check(await until(`document.querySelector(".tex-src")?.value.includes("Typed just before the tab went away")`, 20000) && await savedNow(15000), "U8: reloaded with a write in flight: the draft recovered into the editor, then saved");
+  check(JSON.stringify(await bytesOf("/t/doc.tex")) === JSON.stringify(enc(DOC.replace("Some text", "Typed just before the tab went away"))), "U8: …the file has the recovered text");
+  await typeInto(DOC.replace("Some text", "Edited text")); await savedNow();
 
   // ---- the byte rules, through the page: the fixtures saved after an edit and read back
   const BOM = [0xef, 0xbb, 0xbf];
@@ -926,17 +1671,17 @@ try {
   for (const [name, b, expect] of fixtures) {
     const f = await mk(`/t/${name}.tex`, b);
     await open(f);
-    // (the head, Save included, is drawn before the file is read; the source after it)
-    await until(`document.querySelector(".tex-save") && !document.querySelector(".tex-save").hidden && !!document.querySelector(".tex-src")`, 10000);
+    // (the head is drawn before the file is read; the source and the save state after it)
+    await until(`document.querySelector(".tex-savestate")?.textContent === "Saved ✓" && !!document.querySelector(".tex-src")`, 10000);
     const text = await ev(`document.querySelector(".tex-src").value`);
     await typeInto(text + "c\n"); await ctrlS();
-    await statusIs(/^Saved$/);
+    await savedNow();
     const got = await bytesOf(`/t/${name}.tex`), want = expect(text + "c\n");
     check(JSON.stringify(got) === JSON.stringify(want) && got.filter((x, i) => x === 0xef && got[i + 1] === 0xbb && got[i + 2] === 0xbf).length === (b[0] === 0xef ? 1 : 0), "fixture " + name + ": saved and read back exactly, one BOM at most", { got: got.slice(0, 12), want: want.slice(0, 12) });
   }
   const mixed = await mk("/t/mixed.tex", enc("a\r\nb\nc\n"));
   await open(mixed); await sleep(800);
-  check(await page(`P.querySelector(".tex-save").hidden === true && P.querySelector(".tex-banner").textContent.includes("mixes line endings")`), "mixed line endings: no Save, the banner says why");
+  check(await page(`P.querySelector(".tex-savestate").textContent === "Read-only" && P.querySelector(".tex-banner").textContent.includes("mixes line endings")`), "mixed line endings: read-only, the banner says why");
   const mrev = await ev(`${W}.stat("/t/mixed.tex").then((e) => e.rev ?? 0)`);
   await typeInto("changed\n"); await ctrlS(); await sleep(500);
   check((await ev(`${W}.stat("/t/mixed.tex").then((e) => e.rev ?? 0)`)) === mrev && (await statusIs(/can't be saved here/, 3000)), "…Ctrl+S writes nothing, says why");
@@ -950,22 +1695,31 @@ try {
   await open(f2); await sleep(500);
   await ev(`${W}.rename("/t/r.tex", "/t/moved.tex").then(() => 1)`);
   await typeInto(DOC + "% x\n"); await ctrlS();
-  check(await statusIs(/^Saved$/) && JSON.stringify(await bytesOf("/t/moved.tex")) === JSON.stringify(enc(DOC + "% x\n")), "a rename elsewhere: the save follows the file");
+  check(await savedNow() && JSON.stringify(await bytesOf("/t/moved.tex")) === JSON.stringify(enc(DOC + "% x\n")), "a rename elsewhere: the save follows the file");
   await ev(`${W}.remove("/t/moved.tex").then(() => 1)`);
   await typeInto(DOC + "% y\n"); await ctrlS();
-  check(await statusIs(/Not saved: this file isn't here any more/), "the file in Trash: not saved");
-  // (another tab's save, then this one's: no longer last write wins, the block "a change to the open file made
-  // elsewhere" below)
-  // beforeunload with unsaved edits
-  await typeInto(DOC + "% unsaved\n");
+  check(await saveStateIs(/Not saved: this file isn't here any more/), "the file in Trash: Not saved, with the reason");
+  // another tab's save while this one has no edits pending: this editor takes its text (U8); then mine written over it,
+  // the other kept as a version
+  const f3 = await mk("/t/lw.tex", enc(DOC));
+  await open(f3); await sleep(500);
+  await ev(`${W}.write("/t/lw.tex", new TextEncoder().encode("other tab\\n")).then(() => 1)`);
+  check(await until(`document.querySelector(".tex-src").value === "other tab\\n"`, 10000), "U8: another tab saved, nothing pending here: the editor shows its text");
+  await typeInto(DOC + "% mine\n"); await ctrlS(); await savedNow();
+  const hist = await ev(`${W}.history("/t/lw.tex").then((h) => h.length)`);
+  check(JSON.stringify(await bytesOf("/t/lw.tex")) === JSON.stringify(enc(DOC + "% mine\n")) && hist >= 2, "…then mine written over it, its bytes kept as a version", { hist });
+  // leaving right after an edit: no prompt (U8: William, "a user should never see 'Leave this file without saving
+  // your changes?'"); the edit written on the way out, or recovered from its draft
+  await typeInto(DOC + "% just typed\n");
   dialogs.length = 0;
   await send("Page.navigate", { url: base + "?latex=1" }); await sleep(1500);
-  check(dialogs.includes("beforeunload"), "unsaved edits: the browser asks before leaving", dialogs);
+  check(!dialogs.includes("beforeunload"), "U8: leaving right after an edit: the browser doesn't ask", dialogs);
 
   // ---- a change to the open file made elsewhere (William, Nov 3: an agent's write didn't show until the file was
   // opened again, "a critical thing to get right"; plan r2 5d9a0c2a): with nothing unsaved, the text follows it in
-  // place, the cursor and scroll kept, "Updated by …"; with unsaved edits, nothing replaced or written, the bar asks;
-  // Save writes only over the revision its text came from (S3). Agents write as sagebrush-mcp's do (forAgent).
+  // place, the cursor and scroll kept, "Updated by …"; with edits pending, nothing replaced or written, the bar asks;
+  // a write (the autosave's, U8) only over the revision its text came from (S3). Agents write as sagebrush-mcp's do
+  // (forAgent). (Each edit and the change made elsewhere come well within the autosave's 800 ms.)
   {
     const AG = `window.__sbTexWs.forAgent("agent:Claude-Code")`;
     const put = (p, bytes) => ev(`${AG}.write(${JSON.stringify(p)}, new Uint8Array(${JSON.stringify(bytes)})).then((r) => r.rev)`);
@@ -977,6 +1731,7 @@ try {
     const barShows = () => until(`document.querySelector(".tex-conflict")?.hidden === false`, 5000);
     const barText = () => page(`P.querySelector(".tex-conflict-t")?.textContent ?? null`);
     const status = () => page(`P.querySelector(".tex-status").textContent`);
+    const saveState = () => page(`P.querySelector(".tex-savestate").textContent`);
     const revOf = (p) => ev(`${W}.stat(${JSON.stringify(p)}).then((e) => e.rev ?? 0)`);
     const exists = (p) => ev(`${W}.stat(${JSON.stringify(p)}).then((e) => !!e && !e.trashed)`);
     const click = (sel) => page(`(P.querySelector(${JSON.stringify(sel)})?.click(), true)`);
@@ -1002,31 +1757,34 @@ try {
     const t1 = { text: await srcBecomes(LONG2), status: await statusIs(/^Updated by Claude Code$/, 3000) };
     t1.preview = await until(`[...document.querySelectorAll(".tex-preview h2")].some((h) => h.textContent.includes("Curves"))`, 15000);
     Object.assign(t1, await ev(`(() => { const t = document.querySelector(".tex-src"); return { a: t.selectionStart, b: t.selectionEnd, top: t.scrollTop }; })()`), { top0 });
-    t1.clean = await page(`P.querySelector(".tex-dirty").hidden && P.querySelector(".tex-conflict")?.hidden !== false`);
+    t1.clean = await page(`P.querySelector(".tex-savestate").textContent === "Saved ✓" && P.querySelector(".tex-conflict")?.hidden !== false`);
     check(t1.text && t1.status && t1.preview && t1.a === 40 && t1.b === 47 && top0 > 0 && Math.abs(t1.top - top0) <= 2 && t1.clean, "T1 a clean editor, the agent writes: shown in place, the cursor and scroll kept, \"Updated by Claude Code\", nothing unsaved", t1);
 
-    // T3: this editor's own Save: no reload, no "Updated by", no bar, its revision the next; a keystroke while the
-    // Save's own change is looked at stays unsaved, no bar
+    // T3: this editor's own write: no reload, no "Updated by", no bar, its revision the next; a keystroke while the
+    // write's own change is looked at is pending, no bar
     const r3 = await revOf("/x/curves.tex");
     await typeInto(LONG2 + "% mine\n");
     await hold("__sbTexCheckRead", "after");
     await ctrlS();
-    const t3 = { saved: await statusIs(/^Saved$/, 5000), held: await held("__sbTexCheckRead") };
+    const t3 = { saved: await savedNow(5000), held: await held("__sbTexCheckRead") };
     await typeInto(LONG2 + "% mine\n% more\n");
     await release("__sbTexCheckRead"); await sleep(400);
-    Object.assign(t3, { rev: (await revOf("/x/curves.tex")) - r3, bar: await barUp(), status: await status(), src: await srcIs(LONG2 + "% mine\n% more\n"), file: (await textOf("/x/curves.tex")) === LONG2 + "% mine\n", dirty: await page(`!P.querySelector(".tex-dirty").hidden`) });
-    check(t3.saved && t3.held && t3.rev === 1 && !t3.bar && !/Updated/.test(t3.status) && t3.src && t3.file && t3.dirty, "T3 the editor's own Save: no reload, no bar, its revision next; typing meanwhile stays unsaved", t3);
+    Object.assign(t3, { rev: (await revOf("/x/curves.tex")) - r3, bar: await barUp(), status: await status(), src: await srcIs(LONG2 + "% mine\n% more\n"), file: (await textOf("/x/curves.tex")) === LONG2 + "% mine\n", dirty: (await saveState()) !== "Saved ✓" });
+    check(t3.saved && t3.held && t3.rev === 1 && !t3.bar && !/Updated/.test(t3.status) && t3.src && t3.file && t3.dirty, "T3 the editor's own write: no reload, no bar, its revision next; typing meanwhile pending", t3);
+    // (…and that newer text written by the next write, by itself: Saved ✓, no bar)
+    const t3b = { saved: await savedNow(5000), file: (await textOf("/x/curves.tex")) === LONG2 + "% mine\n% more\n", bar: !(await barUp()) };
+    check(Object.values(t3b).every((v) => v === true), "T3 …the text typed meanwhile written next, by itself", t3b);
 
-    // T2: unsaved edits, the agent writes: the bar says who; nothing replaced, nothing written; Save refuses (S3); Use
+    // T2: edits pending, the agent writes: the bar says who; nothing replaced, nothing written; Ctrl+S refused (S3); Use
     // theirs keeps mine as "… (mine).tex" and shows theirs; Keep mine writes mine, theirs kept as a version
     const t2 = { bar: await conflicted("/x/b.tex"), text: await barText() };
     await ctrlS();
-    Object.assign(t2, { refused: await statusIs(/^Not saved: this file was changed elsewhere$/, 5000) });
+    Object.assign(t2, { refused: await saveStateIs(/^Not saved yet: changed elsewhere$/, 5000) });
     Object.assign(t2, { src: await srcIs(DOC + "% mine\n"), file: (await textOf("/x/b.tex")) === DOC + "% theirs\n", buttons: await page(`[P.querySelector(".tex-theirs")?.hidden === false, P.querySelector(".tex-mine")?.hidden === false]`) });
-    check(t2.bar && t2.text === "Claude Code changed this file while you were editing." && t2.refused && t2.src && t2.file && t2.buttons.join() === "true,true", "T2 unsaved edits, the agent writes: the bar names it; mine kept here, theirs in the file; Save refuses", t2);
+    check(t2.bar && t2.text === "Claude Code changed this file while you were editing." && t2.refused && t2.src && t2.file && t2.buttons.join() === "true,true", "T2 edits pending, the agent writes: the bar names it; mine kept here, theirs in the file; Ctrl+S writes nothing", t2);
     await click(".tex-theirs");
-    const t2b = { said: await statusIs(/^Your text is in b \(mine\)\.tex$/, 8000), copy: (await textOf("/x/b (mine).tex")) === DOC + "% mine\n", src: await srcIs(DOC + "% theirs\n"), bar: await barUp(), dirty: await page(`!P.querySelector(".tex-dirty").hidden`) };
-    check(t2b.said && t2b.copy && t2b.src && !t2b.bar && !t2b.dirty, "T2 Use theirs: mine in \"b (mine).tex\", theirs here, nothing unsaved", t2b);
+    const t2b = { said: await statusIs(/^Your text is in b \(mine\)\.tex$/, 8000), copy: (await textOf("/x/b (mine).tex")) === DOC + "% mine\n", src: await srcIs(DOC + "% theirs\n"), bar: await barUp(), saved: await savedNow(3000) };
+    check(t2b.said && t2b.copy && t2b.src && !t2b.bar && t2b.saved, "T2 Use theirs: mine in \"b (mine).tex\", theirs here, Saved ✓", t2b);
     const t2c = { bar0: await conflicted("/x/k.tex") };
     await click(".tex-mine");
     Object.assign(t2c, { said: await statusIs(/^Saved: yours kept, theirs is in TimeTravel$/, 8000), file: (await textOf("/x/k.tex")) === DOC + "% mine\n", bar: await barUp(),
@@ -1097,8 +1855,8 @@ try {
     await sleep(300); r3b.notInstalled = await srcIs(DOC);
     check(Object.values(r3b).every((v) => v === true), "R3b a keystroke typed and undone while the change is read: the bar, nothing replaced", r3b);
 
-    // R4: this Save and the agent's write: (a) the agent's lands while the Save waits: refused, the bar; (b) typing
-    // while a Save waits stays unsaved after it; a Save, then the agent's write: followed, said
+    // R4: this editor's write and the agent's: (a) the agent's lands while the write waits: refused, the bar; (b) typing
+    // while a write waits is written next; a write, then the agent's: followed, said
     await opened("/x/r4.tex");
     await typeInto(DOC + "% mine\n");
     await hold("__sbTexSaveWrite");
@@ -1106,10 +1864,10 @@ try {
     const r4 = { held: await held("__sbTexSaveWrite") };
     await agentWrite("/x/r4.tex", DOC + "% theirs\n");
     await release("__sbTexSaveWrite");
-    Object.assign(r4, { refused: await statusIs(/^Not saved: this file was changed elsewhere$/, 5000), bar: await barShows(), src: await srcIs(DOC + "% mine\n"), file: (await textOf("/x/r4.tex")) === DOC + "% theirs\n" });
-    check(Object.values(r4).every((v) => v === true), "R4a the agent's write lands while this Save waits: the Save refused, the bar, nothing written", r4);
-    // (grader X5: no check while this Save waits; the agent's change is looked at only once the Save is done. While
-    //  it is held, the status is still the Save's and no bar is up; then the Save is refused, and the bar shows)
+    Object.assign(r4, { refused: await saveStateIs(/^Not saved yet: changed elsewhere$/, 5000), bar: await barShows(), src: await srcIs(DOC + "% mine\n"), file: (await textOf("/x/r4.tex")) === DOC + "% theirs\n" });
+    check(Object.values(r4).every((v) => v === true), "R4a the agent's write lands while this Save waits: the write refused, the bar, nothing written", r4);
+    // (grader X5: no check while this write waits; the agent's change is looked at only once the write is done. While
+    //  it is held, the state is still Saving… and no bar is up; then the write is refused, and the bar shows)
     await opened("/x/r4d.tex");
     await typeInto(DOC + "% mine\n");
     await hold("__sbTexSaveWrite");
@@ -1117,10 +1875,10 @@ try {
     const r4d = { held: await held("__sbTexSaveWrite") };
     await agentWrite("/x/r4d.tex", DOC + "% theirs\n");
     await sleep(600);
-    Object.assign(r4d, { saving: (await status()) === "saving…", noBar: !(await barUp()) });
+    Object.assign(r4d, { saving: (await saveState()) === "Saving…", noBar: !(await barUp()) });
     await release("__sbTexSaveWrite");
-    Object.assign(r4d, { refused: await statusIs(/^Not saved: this file was changed elsewhere$/, 5000), bar: await barShows(), src: await srcIs(DOC + "% mine\n"), file: (await textOf("/x/r4d.tex")) === DOC + "% theirs\n" });
-    check(Object.values(r4d).every((v) => v === true), "R4d a change arriving while this Save waits is looked at only after it: no bar, the Save's status meanwhile", r4d);
+    Object.assign(r4d, { refused: await saveStateIs(/^Not saved yet: changed elsewhere$/, 5000), bar: await barShows(), src: await srcIs(DOC + "% mine\n"), file: (await textOf("/x/r4d.tex")) === DOC + "% theirs\n" });
+    check(Object.values(r4d).every((v) => v === true), "R4d a change arriving while this write waits is looked at only after it: no bar, Saving… meanwhile", r4d);
     await opened("/x/r4b.tex");
     await typeInto(DOC + "% mine\n");
     await hold("__sbTexSaveWrite");
@@ -1128,25 +1886,21 @@ try {
     const r4b = { held: await held("__sbTexSaveWrite") };
     await typeInto(DOC + "% mine\n% more\n");
     await release("__sbTexSaveWrite");
-    Object.assign(r4b, { saved: await statusIs(/^Saved$/, 5000), file: (await textOf("/x/r4b.tex")) === DOC + "% mine\n", dirty: await page(`!P.querySelector(".tex-dirty").hidden`) });
-    await agentWrite("/x/r4b.tex", DOC + "% theirs\n");
-    Object.assign(r4b, { bar: await barShows(), src: await srcIs(DOC + "% mine\n% more\n") });
-    await click(".tex-theirs"); await statusIs(/^Your text is in/, 8000);
-    await typeInto(DOC + "% saved again\n"); await ctrlS(); await statusIs(/^Saved$/, 5000);
+    Object.assign(r4b, { saved: await savedNow(5000), file: (await textOf("/x/r4b.tex")) === DOC + "% mine\n% more\n", bar: !(await barUp()) });
     await agentWrite("/x/r4b.tex", DOC + "% theirs after\n");
     Object.assign(r4b, { followed: await srcBecomes(DOC + "% theirs after\n"), said: await statusIs(/^Updated by Claude Code$/, 3000) });
-    // (c) a change being read when this Save begins (its read older than the Save): never shown over the Save's text
+    // (c) a change being read when this write begins (its read older than the write): never shown over its text
     await opened("/x/r4c.tex");
     await typeInto(DOC + "% mine\n");
     await hold("__sbTexCheckRead", "after");
     await ev(`${W}.rename("/x/r4c.tex", "/x/r4c2.tex").then(() => 1)`);
     const r4c = { held: await held("__sbTexCheckRead") };
     await ctrlS();
-    r4c.saved = await statusIs(/^Saved$/, 5000);
+    r4c.saved = await savedNow(5000);
     await release("__sbTexCheckRead"); await sleep(600);
-    Object.assign(r4c, { src: await srcIs(DOC + "% mine\n"), file: (await textOf("/x/r4c2.tex")) === DOC + "% mine\n", quiet: !/Updated/.test(await status()), bar: !(await barUp()), clean: await page(`P.querySelector(".tex-dirty").hidden`) });
-    check(Object.values(r4c).every((v) => v === true), "R4c a change read from before this Save, finished after it: never shown over the saved text", r4c);
-    check(Object.values(r4b).every((v) => v === true), "R4b typing while the Save waits stays unsaved (then the bar); a Save, then the agent's write: followed", r4b);
+    Object.assign(r4c, { src: await srcIs(DOC + "% mine\n"), file: (await textOf("/x/r4c2.tex")) === DOC + "% mine\n", quiet: !/Updated/.test(await status()), bar: !(await barUp()), clean: (await saveState()) === "Saved ✓" });
+    check(Object.values(r4c).every((v) => v === true), "R4c a change read from before this write, finished after it: never shown over the saved text", r4c);
+    check(Object.values(r4b).every((v) => v === true), "R4b typing while the write waits: written next, by itself; then the agent's write: followed", r4b);
 
     // R5: a keystroke while Use theirs's copy is made: the copy has the text up to then, the newer text stays here
     const r5 = { bar0: await conflicted("/x/r5.tex") };
@@ -1202,7 +1956,7 @@ try {
     r6.many = await srcBecomes(DOC + "% w39\n", 8000) && (await statusIs(/^Updated elsewhere$/, 3000));
     check(Object.values(r6).every((v) => v === true), "R6 a held earlier read never installs over a later change; two writers at once: \"Updated elsewhere\"", r6);
 
-    // T4: another tab, a person there: the same file open in a second page's editor, edited and saved there: followed
+    // T4: another tab, a person there: the same file open in a second page's editor, edited there (saved by itself): followed
     // here, "Updated by another tab"
     const t4f = await opened("/x/t4.tex");
     const tgt = await send("Target.createTarget", { url: base + "?tex=" + encodeURIComponent(t4f) + "&latex=1" });
@@ -1214,8 +1968,8 @@ try {
     const ev2 = (expression) => new Promise((r) => { const id = ++n2; wait2.set(id, r); ws2.send(JSON.stringify({ id, method: "Runtime.evaluate", params: { expression, awaitPromise: true, returnByValue: true } })); }).then((r) => r?.result?.value);
     let ready2 = false; for (let i = 0; i < 300 && !ready2; i++) { ready2 = !!(await ev2(`!!document.querySelector(".tex-src")`)); if (!ready2) await sleep(100); }
     await sleep(500);
-    const saved2 = await ev2(`(async () => { const t = document.querySelector(".tex-src"); t.value = ${JSON.stringify(DOC + "% from the other tab\n")}; t.dispatchEvent(new Event("input")); document.querySelector(".tex-save").click();
-      for (let i = 0; i < 100; i++) { if (document.querySelector(".tex-status").textContent === "Saved") return true; await new Promise((r) => setTimeout(r, 50)); } return false; })()`);
+    const saved2 = await ev2(`(async () => { const t = document.querySelector(".tex-src"); t.value = ${JSON.stringify(DOC + "% from the other tab\n")}; t.dispatchEvent(new Event("input"));
+      for (let i = 0; i < 100; i++) { await new Promise((r) => setTimeout(r, 50)); if (document.querySelector(".tex-savestate").textContent === "Saved ✓") return true; } return false; })()`);
     const t4 = { ready2, saved2, followed: await srcBecomes(DOC + "% from the other tab\n", 8000), said: await statusIs(/^Updated by another tab$/, 3000) };
     await send("Target.closeTarget", { targetId: tgt.targetId }); ws2.close();
     check(Object.values(t4).every((v) => v === true), "T4 the same file saved from another tab's editor: followed here, \"Updated by another tab\"", t4);
@@ -1258,7 +2012,7 @@ try {
     await sleep(2500);
     t5c.still = (await srcIs(DOC)) && !(await barUp());
     await ev(`window.__remote = false; true`);
-    Object.assign(t5c, { followed: await srcBecomes(DOC + "% synced remote\n", 6000), said: await statusIs(/^Updated by another device$/, 3000), save: await page(`!P.querySelector(".tex-save").hidden`) });
+    Object.assign(t5c, { followed: await srcBecomes(DOC + "% synced remote\n", 6000), said: await statusIs(/^Updated by another device$/, 3000), save: (await saveState()) === "Saved ✓" });
     await ev(`delete window.__sbTexWs.readUpTo; true`);
     check(Object.values(t5c).every((v) => v === true), "T5c a remote entry read while its bytes are on their way: this text kept, said; followed (and saveable) once local", t5c);
 
@@ -1292,24 +2046,38 @@ try {
 
     // E3: an editor that can't save (mixed line endings), unsaved edits, a change: only Use theirs; the copy has LF
     await opened("/x/e3.tex", enc("a\r\nb\nc\n"));
+    const rv3a = await revOf("/x/e3.tex");
     await typeInto("a\nb\nc\nmine\n");
+    await sleep(1200);
+    const e3a = { ro: (await saveState()) === "Read-only", none: (await revOf("/x/e3.tex")) === rv3a,
+      noPrompt: await ev(`(() => { const e = new Event("beforeunload", { cancelable: true }); window.dispatchEvent(e); return !e.defaultPrevented; })()`) };
+    check(Object.values(e3a).every((v) => v === true), "E3a a read-only editor, edited: Read-only, nothing written past the debounce, no prompt", e3a);
     await agentWrite("/x/e3.tex", DOC);
     const e3 = { bar: await barShows(), buttons: (await page(`[P.querySelector(".tex-theirs")?.hidden === false, P.querySelector(".tex-mine")?.hidden === false]`)).join() === "true,false" };
     await click(".tex-theirs");
-    Object.assign(e3, { said: await statusIs(/^Your text is in e3 \(mine\)\.tex$/, 8000), copy: JSON.stringify(await bytesOf("/x/e3 (mine).tex").catch(() => null)) === JSON.stringify(enc("a\nb\nc\nmine\n")), src: await srcIs(DOC), save: await page(`!P.querySelector(".tex-save").hidden`) });
+    Object.assign(e3, { said: await statusIs(/^Your text is in e3 \(mine\)\.tex$/, 8000), copy: JSON.stringify(await bytesOf("/x/e3 (mine).tex").catch(() => null)) === JSON.stringify(enc("a\nb\nc\nmine\n")), src: await srcIs(DOC), save: (await saveState()) === "Saved ✓" });
     check(Object.values(e3).every((v) => v === true), "E3 an unsaveable editor: the bar offers only Use theirs; the copy LF; theirs here, saveable", e3);
+    // (U8 r6, beyond the plan (@sagebrush, Nov 5: its own pin, for SEC and ENGINE): the editor opened read-only is
+    //  saved as you type once Use theirs made it saveable: an edit, no Ctrl/Cmd+S, the file has it, Saved ✓; before,
+    //  while it was read-only, nothing was written and nothing prompted)
+    const e3b = {};
+    const rv3 = await revOf("/x/e3.tex");
+    await typeInto(DOC + "% after Use theirs\n");
+    Object.assign(e3b, { written: await until(`(async () => new TextDecoder().decode((await ${W}.read("/x/e3.tex")).content) === ${JSON.stringify(DOC + "% after Use theirs\n")})()`, 8000), saved: await savedNow(5000), once: (await revOf("/x/e3.tex")) - rv3 === 1,
+      noPrompt: await ev(`(() => { const e = new Event("beforeunload", { cancelable: true }); window.dispatchEvent(e); return !e.defaultPrevented; })()`) });
+    check(Object.values(e3b).every((v) => v === true), "E3b read-only, then Use theirs: saveable, and an edit is saved by itself (no Ctrl/Cmd+S), Saved ✓, no prompt", e3b);
 
-    // E4: a clean editor; the file made binary elsewhere: this text kept, Save off, said; made mixed-ending: shown,
-    // Save off; nothing written after either
+    // E4: a clean editor; the file made binary elsewhere: this text kept, Read-only, said; made mixed-ending: shown,
+    // Read-only; nothing written after either
     await opened("/x/e4.tex");
     await put("/x/e4.tex", [0x61, 0, 0x62]);
-    const e4 = { said: await statusIs(/^Claude Code changed this file into one the editor can't show/, 5000), src: await srcIs(DOC), off: await page(`P.querySelector(".tex-save").hidden && P.querySelector(".tex-banner").textContent.includes("NUL")`) };
+    const e4 = { said: await statusIs(/^Claude Code changed this file into one the editor can't show/, 5000), src: await srcIs(DOC), off: await page(`P.querySelector(".tex-savestate").textContent === "Read-only" && P.querySelector(".tex-banner").textContent.includes("NUL")`) };
     const rv4 = await revOf("/x/e4.tex");
     await put("/x/e4.tex", enc("x\r\ny\nz\n"));
-    Object.assign(e4, { mixed: await srcBecomes("x\ny\nz\n"), off2: await page(`P.querySelector(".tex-save").hidden && P.querySelector(".tex-banner").textContent.includes("mixes line endings")`) });
+    Object.assign(e4, { mixed: await srcBecomes("x\ny\nz\n"), off2: await page(`P.querySelector(".tex-savestate").textContent === "Read-only" && P.querySelector(".tex-banner").textContent.includes("mixes line endings")`) });
     await sleep(500);
     e4.writes = (await revOf("/x/e4.tex")) - rv4 === 1;
-    check(Object.values(e4).every((v) => v === true), "E4 made binary elsewhere: the text kept, Save off; made mixed-ending: shown, Save off; nothing written after", e4);
+    check(Object.values(e4).every((v) => v === true), "E4 made binary elsewhere: the text kept, Read-only; made mixed-ending: shown, Read-only; nothing written after", e4);
     await ev(`window.onbeforeunload = null; true`);
   }
 

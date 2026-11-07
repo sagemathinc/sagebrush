@@ -1,8 +1,8 @@
 // The LaTeX editor page (DEV only, behind the flag: plan sbspace r5 + r6b). The page index.html hands itself to
 // mount() for /?tex=<fid>. It binds to the file's fid (Workspace.pathOfFile), reads the whole file (at most 4 MiB),
-// shows the source on the left and the live preview on the right, and saves only when asked (Ctrl/Cmd+S or Save),
-// only over the revision its text came from (a change made elsewhere is followed, or asked about), with the kept
-// minimums of save.ts. The preview comes from a module Worker
+// shows the source on the left and the live preview on the right, and saves as you type (autosave.ts, plan U8 r6:
+// durable drafts, no Save button), only over the revision its text came from (a change made elsewhere is followed,
+// or asked about), with the kept minimums of save.ts. The preview comes from a module Worker
 // (dist/sagebrush-latex-worker.js), whose replies are taken only for the request's own document/revision (gate.ts),
 // patched under a per-frame budget, a split chunk's pieces replaced as one unit (staged hidden, then swapped).
 // SECURITY: file names, paths and messages reach the page through textContent; preview HTML is the renderer's (its
@@ -12,6 +12,9 @@ import { nameOf, parentOf, join, safeName } from "../workspace/paths";
 import { openBytes, encodeText, EDIT_MAX } from "./save";
 import { imageCandidates, graphicsPathOf, notFoundWhy, sniffImage, admitImageBytes, IMAGE_BOUNDS, IMAGE_EXTS } from "./images";
 import { engineInputs, admitInput, type Known } from "./inputs";
+import { AutoSaver, type SaveState } from "./autosave";
+import { leaver } from "./leave";
+import { browserDrafts, newWriterId } from "./drafts";
 import { type Token } from "./gate";
 import { createEditor } from "./editor";
 import { PAGE_CSS } from "./style";
@@ -61,7 +64,7 @@ export { PATCH_BUDGET, FOLLOW_KEY } from "./editor";
 const RESULTS_MAX = 32 * 2 ** 20;
 export const FONT = { key: "sagebrush-latex-font", min: 9, max: 28, def: 13 };
 export const ZOOM = { key: "sagebrush-latex-zoom", min: 50, max: 200, def: 100, step: 10 };
-const BANNER = "LaTeX editor: an early prototype. Save (Ctrl/Cmd+S) overwrites the file. If the file changed elsewhere since you opened it (another tab, Python, a collaborator), Save replaces those changes; the file's versions keep the bytes it replaced. Nothing is saved automatically. It renders a subset of LaTeX as a web page (not a PDF); unsupported commands appear as gray tags.";
+const BANNER = "LaTeX editor: an early prototype. Your edits are saved as you type. If the file changes elsewhere while you edit (another tab, Python, an agent), nothing is written over it: you choose which text to keep. It renders a subset of LaTeX as a web page (not a PDF); unsupported commands appear as gray tags.";
 const BANNER_NO_SAVE = (why: string) => "LaTeX editor: an early prototype. This file can't be saved here: " + why + ". It renders a subset of LaTeX as a web page (not a PDF); unsupported commands appear as gray tags.";
 
 // (sandbox: the hosting page's runner and kernel classes, for Run, boot.ts; none, Run says why it can't run)
@@ -157,31 +160,138 @@ export async function newTex(ws: Workspace, open: (e: Entry) => unknown): Promis
 
 // the page mounted now: another .tex is opened in place (no reload: William's B2, the notebook no longer flashing by),
 // so the one shown is disposed of first (its worker, image blobs and listeners)
-let current: { dispose(): void; dirty(): boolean } | null = null;
+let current: { dispose(): void; close(): Promise<unknown>; dirty(): boolean; settle(): Promise<boolean>; hold(on: boolean): void } | null = null;
 // each mount's number: a mount whose number is no longer the last one's was replaced while it waited (a read, a path
 // lookup), and stops at its next step, before it sets the title, makes an editor or becomes current
 let mounts = 0;
+// (every editor closed goes through this one barrier, in order: a mount waits for all those closed before it, its
+//  number taken before it waits, and only the newest mount goes on (astra U8-SWITCH-1))
+let closing: Promise<unknown> = Promise.resolve();
+// (a controlled switch waits for the editor shown to settle first, held read-only, and only the newest intent goes on:
+//  leave.ts)
+const { intent, leaveOk } = leaver(() => current, (lost) => confirm(lost ? LEAVE_LOST : LEAVE));
 // the history entry shown, so a declined Back or Forward goes back to exactly it: its id (history.state.sbTexId), URL
 // and Navigation API key where there is one (traverseTo); else its position (history.state.sbTex: every entry this
 // page sees is numbered, from 0 at the first file, a fragment's entry too). Whether that return is under way: where it
 // lands is checked, and anywhere else the shown entry is pushed again, so the URL is always the file shown.
 let shownAt = 0, shownId = "", shownUrl = "", shownKey: string | undefined, returning = false;
+// (how the return under way goes: by the entry's key, which lands only on that entry, or by its position, which can
+//  land on another entry numbered the same, or on an unnumbered one, and is then pushed again)
+let returnBy: "key" | "go" = "key";
 const navApi = (): any => (globalThis as any).navigation;
 const entryId = () => Math.random().toString(36).slice(2, 12);
 const noteShown = () => { const st = history.state; shownAt = st.sbTex; shownId = st.sbTexId; shownUrl = location.href; shownKey = navApi()?.currentEntry?.key; };
-const LEAVE = "Leave this file without saving your changes?";
+// (a popstate while a return is under way: that return's landing, or a newer Back or Forward that goes on in its place
+//  (astra U8-SWITCH-6))
+const landsHere = (st: any) => history.state?.sbTexId === shownId && location.href === shownUrl
+  || returnBy === "go" && (typeof st?.sbTex !== "number" || st.sbTex === shownAt);
+// (a return superseded by a newer Back or Forward: its traversal, if it lands after all, is taken back to the entry
+//  shown instead of opening that file again. Known by the traversal itself, not by where it lands (astra U8-SWITCH-7:
+//  a Back or Forward of the person's own to that same entry goes on as asked): each return by key carries a token in
+//  its navigation's info, which the Navigation API's navigate event, fired before that traversal's popstate, hands
+//  back; a superseded return's token is stale. A return by position needs none: its history.go was queued before the
+//  Back or Forward that superseded it, so it has landed already. A traversal given up never lands: its token goes)
+let retTok = 0, retPending = 0, staleTok = 0, staleLanding = false, fenceHooked = false;
+// (the fence's own take-back (grader W8): it goes to the entry the stale traversal left, which is where the person
+//  last went: the entry shown, or a decided switch's whose mount hasn't taken it yet (the stale return went to the
+//  entry shown, so taking it back there would go nowhere, and no landing would ever come). Its landing is the fence's:
+//  it ends the return and runs what waited for it, nothing pushed or noted; until then a mount waits before it takes
+//  the entry the history is on for its own)
+let fenceTok = 0, fenceLanding = false, staleFrom: string | undefined, staleFromUrl: string | undefined, fencing = false;
+let fenceEnd = () => {}, fenceSettled: Promise<void> = Promise.resolve(), fenceWake: (() => void) | null = null;
+// (what waits for a return, dropped: set with fenceWake by the mount listening for the landing)
+let fenceOff: (() => void) | null = null;
+// (a file opened in place, as the latest mount opens one: for the navigation owner below)
+let openFile: ((fid: string) => void) | null = null;
+// (back to the entry shown by its key, or to `key`, the traversal tagged: its token)
+const traverseShown = (nav: any, failed: () => void, key = shownKey) => {
+  const tok = ++retTok; retPending = tok;
+  const gone = () => { if (staleTok === tok) staleTok = 0; if (retPending === tok) retPending = 0; };
+  try { nav.traverseTo(key, { info: { sbTexReturn: tok } }).finished?.catch(() => { gone(); failed(); }); } catch { gone(); failed(); }
+  return tok;
+};
+// (navigate comes before the traversal commits: the entry it leaves is still the current one)
+const onNavigate = (e: any) => {
+  if (e.navigationType !== "traverse") return;
+  const tok = e.info?.sbTexReturn;
+  staleLanding = !!staleTok && tok === staleTok;
+  fenceLanding = !staleLanding && !!fenceTok && tok === fenceTok;
+  if (staleLanding) { const c = navApi()?.currentEntry; staleFrom = c?.key; staleFromUrl = c?.url ?? undefined; }
+};
+const fenceDone = () => { fenceTok = 0; if (fencing) { fencing = false; fenceEnd(); } };
+const fenceStale = (ev: PopStateEvent) => {
+  if (fenceLanding) {
+    fenceLanding = false;
+    ev.stopImmediatePropagation();
+    returning = false; fenceDone();
+    const w = fenceWake; fenceWake = fenceOff = null; w?.();
+    return;
+  }
+  if (!staleLanding) {
+    // (the navigation owner, for the window past a switch's decision: no editor current, the next mount waiting on
+    //  the close or a take-back, no return landing but the fence's. Every untagged Back or Forward there is the
+    //  person's latest intent, taken here and by nothing else (astra R16-FENCE-2): a take-back under way given up
+    //  (marked stale: landing after all, it is taken back to this entry; refused, it does nothing), what waited for a
+    //  return dropped, the waiting mount superseded, and this entry's file opened, nothing asked)
+    if (current !== null || returning && !fencing) return;
+    ev.stopImmediatePropagation();
+    if (fenceTok) staleTok = fenceTok;
+    fenceTok = 0; retPending = 0; returning = false;
+    const off = fenceOff; fenceWake = fenceOff = null; off?.();
+    fenceDone(); intent();
+    const t = new URLSearchParams(location.search).get("tex");
+    if (t && openFile) openFile(t); else location.reload();
+    return;
+  }
+  staleLanding = false; staleTok = 0;
+  ev.stopImmediatePropagation();
+  const nav = navApi(), to = staleFrom ?? shownKey, toUrl = staleFrom && staleFromUrl ? staleFromUrl : shownUrl; staleFrom = staleFromUrl = undefined;
+  returning = true; returnBy = "key";
+  if (!fencing) { fencing = true; fenceSettled = new Promise<void>((r) => (fenceEnd = r)); }
+  // (the take-back impossible, or refused: the entry it went to pushed again, its URL: the entry shown, noted, or a
+  //  decided switch's, which its mount takes once the fence is done (astra, r16); then what waited for the return runs)
+  const fallback = () => {
+    if (returning) {
+      returning = false; history.pushState({ sbTex: shownAt + 1, sbTexId: entryId() }, "", toUrl);
+      if (toUrl === shownUrl) noteShown();
+      fenceDone(); const w = fenceWake; fenceWake = fenceOff = null; w?.();
+    } else fenceDone();
+  };
+  // (a traversal to the current entry goes nowhere and never lands: never one)
+  if (nav?.traverseTo && to && to !== nav.currentEntry?.key && nav.entries?.().some((x: any) => x.key === to)) {
+    const tok = retTok + 1; fenceTok = tok;
+    traverseShown(nav, () => { if (fenceTok === tok) fallback(); }, to);
+  } else fallback();
+};
+// (asked only when a write has actually failed: William, Nov 2, U8: never otherwise; the edits are kept in this
+// browser's drafts either way, and offered when the file is opened again)
+const LEAVE = "Your last changes couldn't be saved. Leave this file anyway? They're kept in this browser and offered when you open it again.";
+// (and when this browser couldn't keep them either: said as it is)
+const LEAVE_LOST = "Your last changes couldn't be saved, and this browser couldn't keep a copy of them. Leave this file anyway? They will be lost.";
 
 export async function mount(root: HTMLElement, host: Host): Promise<void> {
   mark("tex-mount", {});
-  current?.dispose();
+  // (the editor shown is closed first: its pending edits written, or durable in its drafts, before this file is read)
   const my = ++mounts;
+  // (the fence's listener: once, before any mount's own, so a stale landing it takes never reaches them)
+  if (!fenceHooked) { fenceHooked = true; window.addEventListener("popstate", fenceStale); navApi()?.addEventListener?.("navigate", onNavigate); }
+  const prev = current; current = null;
+  closing = closing.then(() => prev?.close()).catch(() => {});
+  await closing;
+  // (a fence's take-back under way: the history isn't back where the person went yet (grader W8))
+  while (fencing) await fenceSettled;
+  if (my !== mounts) return;
   const life = new AbortController(), on = { signal: life.signal };
   const live = () => my === mounts && !life.signal.aborted;
+  // (this mount's own entry in `current`: when `current` is another's, or none, a switch away from this file is under
+  //  way, past its decision; a Back or Forward then is the navigation owner's (above))
+  let mine: unknown = null;
   const st = history.state && typeof history.state === "object" ? history.state : {};
   if (typeof st.sbTex !== "number" || typeof st.sbTexId !== "string") history.replaceState({ ...st, sbTex: typeof st.sbTex === "number" ? st.sbTex : 0, sbTexId: entryId() }, "");
   noteShown();
   let dispose = () => { life.abort(); };
-  current = { dispose: () => dispose(), dirty: () => false };
+  current = { dispose: () => dispose(), close: async () => dispose(), dirty: () => false, settle: async () => true, hold: () => {} };
+  mine = current;
   if (!document.getElementById("sb-tex-style")) { const style = el("style"); style.id = "sb-tex-style"; style.textContent = PAGE_CSS + PRINT_CSS; document.head.appendChild(style); }
   if (!document.getElementById("sb-katex")) {
     const link = document.createElement("link"); link.rel = "stylesheet"; link.href = new URL("katex/katex.min.css", location.href).href; document.head.appendChild(link);
@@ -198,8 +308,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const pressedObs = new MutationObserver(pressed); pressedObs.observe(document.body, { attributes: true, attributeFilter: ["class"] }); pressed();
   life.signal.addEventListener("abort", () => pressedObs.disconnect());
   const title = el("span", "tex-title");
-  const dirty = el("span", "tex-dirty", "Unsaved changes"); dirty.hidden = true;
-  const save = el("button", "tex-save", "Save"); save.disabled = true;
+  // (the save state, as Google Docs shows it: Saving…, Saved ✓; a failed write stays shown, with its reason)
+  const saveState = el("span", "tex-savestate"); saveState.setAttribute("role", "status"); saveState.setAttribute("aria-live", "polite");
   const toggle = el("button", "tex-toggle", "Preview");
   const status = el("span", "tex-status"); status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
   // the source's font size and the preview's zoom, each remembered in this browser
@@ -244,7 +354,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   printBtn.onclick = () => printPreview();
   // Run (run-core.mjs): the document's SageTeX code, in page order, in Sage; shown once the preview has SageTeX items
   const runBtn = el("button", "tex-run", "Run"); runBtn.title = "Run the document's SageTeX code (Sage, in this browser)"; runBtn.hidden = true;
-  head.append(back, newBtn, title, dirty, save, toggle, runBtn, cmBtn, agentBtn, printBtn, presentBtn, status, tools);
+  head.append(back, newBtn, title, saveState, toggle, runBtn, cmBtn, agentBtn, printBtn, presentBtn, status, tools);
   // (a ?pair= link, or an agent this browser remembers: the pairing module mounted now, to connect or reconnect)
   if (new URLSearchParams(location.search).has("pair")) void pairAgent(host.ws).catch(agentFailed);
   else void host.ws.agentGrants().then((k) => { if (Object.keys(k ?? {}).length) void pairAgent(host.ws).catch(agentFailed); }, () => {});
@@ -284,13 +394,35 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // as before (boot.ts's hook); unsaved changes asked about first
   const g: any = globalThis, bootHook = (g.__sbTexBoot ??= g.__sbTex);
   const openHere = (fid: string) => { void mount(root, { ...host, fid }); };
+  openFile = openHere;
   g.__sbTex = (e: Entry, tab?: boolean) => {
     if (tab || !/\.tex$/i.test(e.path) || !e.fid) return bootHook(e, tab);
-    if (e.fid === host.fid) return true;
-    if (current?.dirty() && !confirm(LEAVE)) return true;
-    const q = new URLSearchParams(location.search); q.set("tex", e.fid);
-    history.pushState({ sbTex: shownAt + 1, sbTexId: entryId() }, "", "/?" + q.toString());
-    openHere(e.fid);
+    // (the file shown, asked for again: a newer intent, so a switch still settling does nothing; and if Back or
+    //  Forward had already moved the history away from it, it is taken back to the entry shown (daybreak3
+    //  DB3-U8-SWITCH-3), so the URL is this file's)
+    if (e.fid === host.fid) {
+      intent();
+      // (a switch past its decision: its mount superseded now; this file opened again only once the history is back
+      //  on its entry (DB3-U8-SWITCH-4): a mount started while the URL is still the other file's would take that
+      //  for its own)
+      if (current !== mine) { mounts++; returnToShown(() => openHere(host.fid)); } else returnToShown();
+      return true;
+    }
+    // (its entry after the one the history is on: numbered by position, so a return by history.go finds it)
+    const go = () => {
+      const q = new URLSearchParams(location.search); q.set("tex", e.fid!);
+      const at = typeof history.state?.sbTex === "number" ? history.state.sbTex : shownAt;
+      history.pushState({ sbTex: at + 1, sbTexId: entryId() }, "", "/?" + q.toString());
+      openHere(e.fid!);
+    };
+    // (a switch past its decision, its mount waiting on this editor's close: nothing of this mount is left to settle,
+    //  so the newest file asked for goes on, the waiting mount superseded, and a return still under way waits for it
+    //  instead of the stale one (astra U8-SWITCH-5): the file opened is the last one asked for)
+    if (current !== mine) { intent(); mounts++; whenBack(go); return true; }
+    void leaveOk().then((ok) => {
+      if (!ok || !live()) return;
+      whenBack(go);
+    });
     return true;
   };
   // Back and Forward among those entries: the same question first; declined, the history is taken back to the entry
@@ -298,30 +430,82 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // (the shown entry again, as a new one after this: when going back to it isn't possible or didn't land on it)
   const pushShown = () => { history.pushState({ sbTex: shownAt + 1, sbTexId: entryId() }, "", shownUrl); noteShown(); };
   const isShown = () => history.state?.sbTexId === shownId && location.href === shownUrl;
+  // (what waits for a return to the entry shown to land: one at a time, the newest)
+  let afterReturn: (() => void) | null = null, landOff: (() => void) | null = null;
+  const landed = () => { landOff?.(); landOff = null; const f = afterReturn; afterReturn = null; f?.(); };
+  // (back to the entry shown, wherever the history is now: by the Navigation API's key where there is one, else by
+  //  its position; as a new entry when neither lands on it)
+  // `then`: run once the history is on that entry: at once if it is already, else when the return's popstate lands (or
+  // its fallback has pushed the entry again)
+  // (a listener of its own for the landing, not this editor's: a fast close can dispose of this editor, and its
+  //  listeners, before the history lands; whichever sees the landing first runs what waits, once)
+  // (a newer Back or Forward than the return under way: the return given up, what waited for it dropped, and its
+  //  traversal, if it went by key, marked stale (astra U8-SWITCH-6, -7))
+  const supersede = () => { if (returnBy === "key" && retPending) staleTok = retPending; retPending = 0; returning = false; landOff?.(); landOff = null; afterReturn = null; intent(); };
+  const listenLand = () => {
+    landOff?.();
+    const onLand = (ev: PopStateEvent) => {
+      // (no editor of this mount left to take it (a fast close): the newer entry's file opened here)
+      if (returning && !landsHere(ev.state)) { supersede(); const t = new URLSearchParams(location.search).get("tex"); if (t) openHere(t); else location.reload(); return; }
+      if (returning) { returning = false; if (!isShown()) pushShown(); else noteShown(); }
+      landed();
+    };
+    // (or the fence's own take-back landing, which the fence takes: it wakes this instead)
+    const wake = () => landed(), drop = () => { landOff?.(); landOff = null; afterReturn = null; };
+    window.addEventListener("popstate", onLand, { once: true }); fenceWake = wake; fenceOff = drop;
+    landOff = () => { window.removeEventListener("popstate", onLand); if (fenceWake === wake) fenceWake = fenceOff = null; };
+  };
+  // (`go` once the history is back on the entry shown: at once when no return is under way, else when it lands, in
+  //  place of whatever waited for it: a newer intent replaces an older one (astra U8-SWITCH-5))
+  const whenBack = (go: () => void) => { if (!returning) { go(); return; } afterReturn = go; listenLand(); };
+  const returnToShown = (then?: () => void) => {
+    // (a fence's take-back under way: this return goes once it has landed, from where it lands)
+    if (fencing && returning) { whenBack(() => returnToShown(then)); return; }
+    // (whatever waited for an earlier return is stale now: this is the newest intent)
+    if (isShown()) { landOff?.(); landOff = null; afterReturn = null; then?.(); return; }
+    afterReturn = then ?? null;
+    if (then) listenLand();
+    const nav = navApi(), st = history.state, to = typeof st?.sbTex === "number" ? st.sbTex : null;
+    if (nav?.traverseTo && shownKey && nav.entries?.().some((x: any) => x.key === shownKey)) {
+      returning = true; returnBy = "key";
+      const failed = () => { if (returning) { returning = false; pushShown(); landed(); } };
+      traverseShown(nav, failed);
+    } else if (to !== null && to !== shownAt) { returning = true; returnBy = "go"; history.go(shownAt - to); }
+    else { pushShown(); landed(); }
+  };
   window.addEventListener("popstate", (ev) => {
     const t = new URLSearchParams(location.search).get("tex");
     const st = ev.state && typeof ev.state === "object" ? ev.state : null;
-    if (returning) { returning = false; if (!isShown()) pushShown(); else noteShown(); return; }
+    // (a return under way: its landing; or a newer Back or Forward, which goes on below in its place)
+    if (returning) {
+      if (landsHere(st)) { returning = false; if (!isShown()) pushShown(); else noteShown(); landed(); return; }
+      supersede();
+    }
     if (t === host.fid) {
+      // (back to the file shown: a newer intent than a switch still settling, which then does nothing)
+      intent();
       // (this file's own entries: a fragment's new entry, unnumbered, is the one after the shown one)
       if (typeof st?.sbTex !== "number" || typeof st?.sbTexId !== "string") history.replaceState({ ...(st ?? {}), sbTex: shownAt + 1, sbTexId: entryId() }, "");
       noteShown();
       return;
     }
-    if (current?.dirty() && !confirm(LEAVE)) {
+    void leaveOk().then((ok) => {
+    if (ok === null || !live()) return;
+    if (!ok) {
       const nav = navApi(), to = typeof st?.sbTex === "number" ? st.sbTex : null;
       if (nav?.traverseTo && shownKey && nav.entries?.().some((e: any) => e.key === shownKey)) {
-        returning = true;
+        returning = true; returnBy = "key";
         // (traverseTo's own failure: the entry pushed again, if the return didn't happen)
         const failed = () => { if (returning) { returning = false; pushShown(); } };
-        try { nav.traverseTo(shownKey).finished?.catch(failed); } catch { failed(); }
-      } else if (to !== null && to !== shownAt) { returning = true; history.go(shownAt - to); }
+        traverseShown(nav, failed);
+      } else if (to !== null && to !== shownAt) { returning = true; returnBy = "go"; history.go(shownAt - to); }
       else pushShown();
       return;
     }
     if (t) openHere(t); else { current?.dispose(); location.reload(); }
+    });
   }, on);
-  const gone = (t: string) => { main.textContent = ""; const m = el("div", "tex-gone", t); main.appendChild(m); save.hidden = true; toggle.hidden = true; tools.hidden = true; };
+  const gone = (t: string) => { main.textContent = ""; const m = el("div", "tex-gone", t); main.appendChild(m); saveState.hidden = true; toggle.hidden = true; tools.hidden = true; };
 
   // ---- binding and reading (r5 §1a, §4)
   const where = await host.ws.pathOfFile(host.fid);
@@ -348,12 +532,14 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // (the whole file only: the bytes read are the file's size, else no Save)
   let saveable: boolean = opened.saveable && read.content.length === (read.entry.size ?? -1) && !e0.remote;
   let whyNot = !opened.saveable ? opened.why : e0.remote ? "it is in the cloud: open it on the device that made it" : read.content.length !== (read.entry.size ?? -1) ? "the whole file couldn't be read" : "";
-  if (!saveable) { banner.textContent = BANNER_NO_SAVE(whyNot); save.hidden = true; }
+  if (!saveable) { banner.textContent = BANNER_NO_SAVE(whyNot); saveState.textContent = "Read-only"; saveState.title = whyNot; }
   let eol = opened.eol;
   let savedText = opened.text;
   // (the revision savedText was read or saved as, the Save's base; and the person's edits, counted: an await that
   //  saw the text clean knows whether it still is)
   let docRev = read.entry.rev ?? 0, edits = 0;
+  // (saving as you type, below; none for a file that can't be saved here)
+  let saver: AutoSaver | null = null;
 
   // ---- the editor and its preview (editor.ts); the images, the saving and the controls are this page's
   const images: Record<string, string | { why: string }> = {};
@@ -435,8 +621,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     workerUrl: new URL("sagebrush-latex-worker.js", location.href),
     onImageRefs: (refs, tok) => void resolveImages(refs, tok),
     inputs, onInputRefs: (refs, tok) => void readInputs(refs, tok),
-    // (an edit makes the last message ("Saved", "No changes to save", …) stale; a save under way keeps its own)
-    onEdit: () => { edits++; showDirty(); if (!saving) say(""); },
+    // (an edit: its draft durable now, its write scheduled (autosave.ts); the last message is stale)
+    onEdit: () => { edits++; saver?.edited(); if (!saving) say(""); },
   });
   const { src, gate, request } = E;
   // ---- the name at the top (William's M0, Nov 3): it follows this file renamed or moved elsewhere (the file panel,
@@ -637,18 +823,14 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     if (again) request();
   }, on);
 
-  // ---- editing
+  // ---- editing: Ctrl/Cmd+S writes what is pending now (and shows Saved ✓), never the browser's own Save dialog
   const isDirty = () => src.value !== savedText;
-  function showDirty() { const d = isDirty(); dirty.hidden = !d; save.disabled = !d || !saveable || saving || acting; }
-  src.addEventListener("keydown", (ev) => {
-    if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && ev.key.toLowerCase() === "s") { ev.preventDefault(); void doSave(); }
-  });
-  document.addEventListener("keydown", (ev) => {
-    if (ev.target !== src && (ev.ctrlKey || ev.metaKey) && !ev.altKey && ev.key.toLowerCase() === "s") { ev.preventDefault(); void doSave(); }
-  }, on);
-  save.onclick = () => void doSave();
+  const flushKey = (ev: KeyboardEvent) => { if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && ev.key.toLowerCase() === "s") { ev.preventDefault(); if (saveable) void saver?.flush(); else say("This file can't be saved here: " + whyNot + "."); } };
+  src.addEventListener("keydown", flushKey);
+  document.addEventListener("keydown", (ev) => { if (ev.target !== src) flushKey(ev); }, on);
   toggle.onclick = () => { const p = page.classList.toggle("show-preview"); toggle.textContent = p ? "Source" : "Preview"; };
-  window.addEventListener("beforeunload", (ev) => { if (isDirty()) { ev.preventDefault(); ev.returnValue = ""; } }, on);
+  // (the browser's own prompt on leaving only when a write has failed: William, Nov 2, "never" otherwise)
+  window.addEventListener("beforeunload", (ev) => { if (saver?.failed) { ev.preventDefault(); ev.returnValue = ""; } }, on);
   window.addEventListener("pagehide", dropImages, on);
   // ---- comments: paper.tex's in paper.tex.comments.json beside it, read and written with the workspace's base
   // (compare-and-swap: a conflict is merged and retried, comments-core.mjs)
@@ -683,41 +865,54 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const handle = { print: () => printPreview(), printMode: (on: boolean) => document.documentElement.classList.toggle("tex-print", !!on), fid: host.fid };
   sb.latex = handle;
   dispose = () => { life.abort(); E.destroy(); dropImages(); cm?.destroy(); if (sb.latex === handle) delete sb.latex; };
-  current = { dispose: () => dispose(), dirty: isDirty };
+  // (closing for another file: what is pending written first, then the editor disposed of)
+  // (held: read-only while a controlled switch settles and closes it; the saver's own read-only, for recovery, kept apart)
+  let held = false, roSaver = false;
+  current = { dispose: () => { void saver?.dispose(); dispose(); }, close: async () => { await saver?.dispose(); dispose(); }, dirty: () => !!saver?.failed, hold: (on: boolean) => { held = on; src.readOnly = on || roSaver; }, settle: () => saver ? saver.settle() : Promise.resolve(true) };
+  mine = current;
   // (the test build only: the page test tells this workspace an op as sync's view would; elsewhere this folds away)
   if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) { (globalThis as any).__sbTexWs = host.ws; (globalThis as any).__sbTexActor = () => actor; }
 
   // ---- saving (r6b E5): the opened file only, and only over the revision its text was read or saved as (base): a
-  // change made elsewhere since is never written over, the bar below asks
+  // change made elsewhere since is never written over, the bar below asks. Asked for by the saver (autosave.ts), as
+  // you type; "blocked" while the bar asks or a choice in it is under way; a refusal thrown, its message the reason
   let saving = false;
-  async function doSave() {
-    if (!saveable) { say("This file can't be saved here: " + whyNot + "."); return; }
-    if (saving || acting) { say("saving…"); return; }
-    if (!isDirty()) { say("No changes to save"); return; }
-    const text = src.value, base = docRev;
+  async function writeText(text: string): Promise<"saved" | "blocked" | "readonly"> {
+    if (!saveable) return "readonly";
+    if (conflict || acting) return "blocked";
+    const base = docRev;
     // (the comments' anchors with this text, taken now: before anything waits, an edit can't move them in between)
     const snap = cm?.snapshot();
     const bytes = encodeText(text, eol);
-    if (bytes.length > EDIT_MAX) { say("Not saved: over the prototype's 4 MiB limit"); return; }
-    saving = true; showDirty(); say("saving…");
+    if (bytes.length > EDIT_MAX) throw new Error("over the prototype's 4 MiB limit");
+    saving = true;
     try {
       const at = await host.ws.pathOfFile(host.fid);
-      if (!at.ok) { say("Not saved: this file isn't here any more"); goneSaid = true; return; }
-      if (at.entry.remote) { say("Not saved: this file is in the cloud"); return; }
-      // (the test build only: the page test can hold the .tex's write here; elsewhere this folds away)
+      if (!at.ok) { goneSaid = true; throw new Error("this file isn't here any more" + (at.why === "trashed" ? " (it's in the Trash: restore it)" : "")); }
+      if (at.entry.remote) throw new Error("this file is in the cloud: open it on the device that made it");
+      const path = at.path;
+      // (the test build only: the page test can hold the .tex's write here, or make it fail; elsewhere this folds away)
       if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) await (globalThis as any).__sbTexSaveWrite?.();
-      const w = await host.ws.write(at.path, bytes, { fid: host.fid, base });
-      savedText = text; docRev = w.rev;
+      let w: { rev?: number };
+      try { w = await host.ws.write(path, bytes, { fid: host.fid, base }); } catch (err) {
+        // (the workspace's own refusal, by its code: this module doesn't bundle the workspace's classes)
+        const c = (err as any)?.code === "conflict", other = c && /another file/.test(String((err as Error)?.message));
+        if (c && !other) { again = true; return "blocked"; }
+        throw other ? new Error("another file is at this path now") : err;
+      }
+      savedText = text; docRev = w.rev ?? 0;
       void cm?.saved(snap);
-      if (at.path !== where.path && !renamingTitle) showName(at.path);
-      say("Saved");
-    } catch (err) {
-      // (the workspace's own refusal, by its code: this module doesn't bundle the workspace's classes)
-      const other = (err as any)?.code === "conflict" && /another file/.test(String((err as Error)?.message));
-      if ((err as any)?.code === "conflict" && !other) { say("Not saved: this file was changed elsewhere"); again = true; }
-      else say(other ? "Not saved: another file is at this path now" : "Not saved: " + String((err as Error)?.message ?? err).slice(0, 200));
-    } finally { saving = false; showDirty(); if (again && live()) void check(); }
+      if (path !== where.path && !renamingTitle) showName(path);
+      return "saved";
+    } finally { saving = false; if (again && live()) void check(); }
   }
+  const showSave = (st: SaveState) => {
+    // (a file that can't be saved here: Read-only, never Saved ✓ or Edited)
+    if (!saveable && (st.k === "saved" || st.k === "edited")) st = { k: "readonly" };
+    saveState.classList.toggle("failed", st.k === "failed");
+    saveState.textContent = st.k === "saving" ? "Saving…" : st.k === "saved" ? "Saved ✓" : st.k === "edited" ? "Edited" : st.k === "blocked" ? "Not saved yet: changed elsewhere" : st.k === "readonly" ? "Read-only" : "Not saved: " + st.why;
+    saveState.title = st.k === "failed" ? "Your edits are kept in this browser; they are written again on the next edit or Ctrl/Cmd+S" : st.k === "readonly" ? whyNot : "";
+  };
 
   // ---- a change to this file made elsewhere (an agent through sagebrush-mcp, another tab, another device): with no
   // unsaved edits here, the text follows it in place, the cursor and scroll kept; with them, nothing is replaced or
@@ -741,7 +936,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     if (hit) { waits = 0; clearTimeout(checkTimer); checkTimer = setTimeout(() => void check(), 50); }
   });
   life.signal.addEventListener("abort", () => { unwatchDoc(); clearTimeout(checkTimer); });
-  const setSaveable = (ok: boolean, why: string) => { saveable = ok; whyNot = why; banner.textContent = ok ? BANNER : BANNER_NO_SAVE(why); save.hidden = !ok; };
+  const setSaveable = (ok: boolean, why: string) => { saveable = ok; whyNot = why; banner.textContent = ok ? BANNER : BANNER_NO_SAVE(why); if (!ok) { saveState.textContent = "Read-only"; saveState.title = why; } };
   // (a coherent read's saveability, as at opening: whole, text, written back exactly, not in the cloud)
   const judge = (r: { entry: Entry; content: Uint8Array }) => {
     const o = openBytes(r.content);
@@ -756,7 +951,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     src.setSelectionRange(Math.min(a, text.length), Math.min(b, text.length), d);
     src.scrollTop = top; src.scrollLeft = lft;
     savedText = text; docRev = rev; eol = nextEol; setSaveable(ok, why);
-    conflict = null; bar.hidden = true; showDirty();
+    conflict = null; bar.hidden = true; saver?.settled();
   };
   const showBar = (c: NonNullable<typeof conflict>) => {
     conflict = c;
@@ -764,6 +959,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     // (Keep mine only where this text can be saved; Use theirs only where theirs is text)
     keepMine.hidden = !saveable; useTheirs.hidden = !c.theirs;
     bar.hidden = false;
+    saver?.held();
   };
   // (another device's change, its bytes not here yet (readUpTo: "missing"; sync-fetch installs them without an op):
   //  nothing replaced, this text kept; looked at again every 2 s until they are (for 5 minutes; then at the next
@@ -818,13 +1014,13 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       showBar({ fid: r.entry.fid!, rev, theirs: j.o.kind === "text", by });
     } finally { checking = false; if (again && live()) void check(); }
   };
-  const barBusy = (b: boolean) => { acting = b; keepMine.disabled = useTheirs.disabled = b; showDirty(); };
+  const barBusy = (b: boolean) => { acting = b; keepMine.disabled = useTheirs.disabled = b; };
   // Keep mine: this text, written over exactly the revision the bar shows (its fid and rev, taken at the click);
   // a later change makes it a conflict again, nothing written, the bar shown for that one
   keepMine.onclick = async () => {
     const c = conflict;
     if (!c || acting || saving || !saveable) return;
-    const t = src.value, snap = cm?.snapshot(), bytes = encodeText(t, eol);
+    const t = src.value, g = saver?.gen, snap = cm?.snapshot(), bytes = encodeText(t, eol);
     barBusy(true); say("saving…");
     try {
       const at = await host.ws.pathOfFile(c.fid);
@@ -835,6 +1031,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       if (!live()) return;
       savedText = t; docRev = w.rev; void cm?.saved(snap);
       if (conflict === c) { conflict = null; bar.hidden = true; }
+      saver?.settled(g);
       say("Saved: yours kept, theirs is in TimeTravel");
     } catch (err) {
       if (!live()) return;
@@ -877,6 +1074,42 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       if (live()) say((made ? `Your text is in ${nameOf(made)}, but theirs couldn't be read: ` : "Not done: your text couldn't be kept as a copy (it is still here): ") + String((err as Error)?.message ?? err).slice(0, 160));
     } finally { if (live()) { barBusy(false); if (again) void check(); } }
   };
+
+  // ---- saving as you type (autosave.ts; plan U8 r6): each edit durable at once in this editor's own draft
+  // (drafts.ts), the file written by writeText above, 800 ms after the last edit and at once on Ctrl/Cmd+S, blur,
+  // hidden, pagehide and a switch. (For every text file: one that can't be saved here now may become saveable, its
+  // text replaced by a change made elsewhere; until then its edits are drafts, and it says Read-only)
+  {
+    saver = new AutoSaver({
+      write: writeText,
+      // (a recovered draft kept as a version of this file, never written over it: by its entry, checked to be this file)
+      keepVersion: async (text: string) => {
+        const at = await host.ws.pathOfFile(host.fid);
+        if (!at.ok || at.entry.fid !== host.fid) throw new Error("this file isn't here any more");
+        await host.ws.keepVersion(at.entry, encodeText(text, eol));
+      },
+    }, browserDrafts(), { fid: host.fid, writerId: newWriterId(), path: () => where.path }, {
+      text: () => src.value,
+      dirty: isDirty,
+      rev: () => docRev,
+      blocked: () => !!conflict || acting,
+      adopt: (t) => { E.setText(t); edits++; },
+      stale: () => showBar({ fid: host.fid, rev: docRev, theirs: true, by: "elsewhere" }),
+      readOnly: (ro) => { roSaver = ro; src.readOnly = ro || held; },
+      state: (st) => { if (live()) showSave(st); },
+    }, { set: (f, ms) => setTimeout(f, ms), clear: (h) => clearTimeout(h as any) });
+    const s = saver;
+    if (saveable) showSave({ k: "saved" });
+    src.addEventListener("blur", () => void s.flush(), on);
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") void s.flush(); }, on);
+    window.addEventListener("pagehide", () => void s.flush(), on);
+    // (edits this file had that never reached it: another tab's, or this browser's before it closed)
+    if (saveable) void s.recover(savedText).then((r) => {
+      if (!live()) return;
+      if (r.recovered) say("Recovered your unsaved edits");
+      else if (r.kept) say(r.kept + " unsaved drafts from other tabs were kept as versions of this file: open its history to compare them");
+    });
+  }
 
   // ---- source and preview in sync (editor.ts): Follow (remembered, on by default) and Show
   const showFollow = () => followBtn.setAttribute("aria-pressed", String(E.following()));
