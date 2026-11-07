@@ -635,9 +635,14 @@ fn num_str(n: &Num) -> (String, u8) {
                 P_ATOM
             }
         }
-        Num::Float(a, b) => {
+        Num::Float(a, b, _) => {
             // (+infinity is grouped as a factor, as Sage: (+infinity)*x)
-            if *b != 0.0 || *a == f64::INFINITY {
+            // (and an exponent with a sign, as Sage: (1e+20)*x, (1.00000000000000e-20)*x, but
+            // 1.00000000000000e20*x)
+            if *a == 0.0 && *b != 0.0 && !s.starts_with('-') && !s[1..].contains(['+', '-']) {
+                // a pure imaginary one is a product, as an exact one (Sage: 2.0*I*x)
+                P_MUL
+            } else if *b != 0.0 || *a == f64::INFINITY || s[1..].contains(['+', '-']) {
                 P_ADD
             } else if s.starts_with('-') {
                 P_NEG
@@ -815,7 +820,7 @@ fn print_mul(v: &[Expr]) -> (String, u8) {
         s.push('-');
     }
     let mut cstr = num_str(&c);
-    if neg_sign && matches!(c, Num::Float(a, b) if a == f64::INFINITY && b == 0.0) {
+    if neg_sign && matches!(c, Num::Float(a, b, _) if a == f64::INFINITY && b == 0.0) {
         // the sign pulled out of -infinity leaves no "+": Sage's -infinity*x
         cstr = ("infinity".to_string(), P_ATOM);
     }
@@ -1055,7 +1060,7 @@ fn latex_mul(v: &[Expr]) -> (String, u8) {
             }
             _ => (c.clone(), Num::one()),
         };
-        let cn_one_term = cn.is_real() || matches!(&cn, Num::Exact(a, _) if num_traits::Zero::is_zero(a)) || matches!(&cn, Num::Float(a, _) if *a == 0.0);
+        let cn_one_term = cn.is_real() || matches!(&cn, Num::Exact(a, _) if num_traits::Zero::is_zero(a)) || matches!(&cn, Num::Float(a, _, _) if *a == 0.0);
         // a lone sum numerator prints bare (\frac{x + 1}{x - 1}, as Sage)
         let top = if cn.is_one() && numer.len() == 1 && matches!(numer[0].kind, Kind::Add(_)) { latex(&numer[0]).0 } else { top };
         let top = if cn.is_one() { top } else if top == "1" { cn.latex() } else { format!("{} \\, {}", lparen((cn.latex(), if cn_one_term { P_ATOM } else { P_ADD }), P_MUL), top) };
@@ -1067,7 +1072,8 @@ fn latex_mul(v: &[Expr]) -> (String, u8) {
     }
     if !c.is_one() {
         // (a pure imaginary coefficient is one term: 10 i \, x, as Sage)
-        let one_term = c.is_real() || matches!(&c, Num::Exact(a, _) if num_traits::Zero::is_zero(a)) || matches!(&c, Num::Float(a, _) if *a == 0.0);
+        // (and a float whose exponent has a sign groups: \left(1 \times 10^{-20}\right) \, x, as Sage)
+        let one_term = (c.is_real() && !(!c.is_exact() && c.latex()[1..].contains(['+', '-']))) || matches!(&c, Num::Exact(a, _) if num_traits::Zero::is_zero(a)) || matches!(&c, Num::Float(a, _, _) if *a == 0.0);
         body = if body.is_empty() { c.latex() } else { format!("{} \\, {}", lparen((c.latex(), if one_term { P_ATOM } else { P_ADD }), P_MUL), body) };
     }
     (if neg_sign { format!("-{}", body) } else { body }, if neg_sign { P_NEG } else { P_MUL })
