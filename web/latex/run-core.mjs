@@ -12,6 +12,8 @@ import { MAX_RESULT, WRAPPER_VERSION, utf8len, whyRejected } from "./engine/sage
 
 export const RESULTS_FORMAT = "sagebrush-latex-results";
 export const RUN_LIMITS = { svg: 2 * 2 ** 20, msg: 4000 };   // (the CLI's SVG_MAX and MSG_MAX, src/latex-cli.ts)
+/** The .tex's folder a Run is given (its files, and their bytes): past either, Run says so and runs nothing. */
+export const FOLDER_LIMITS = { files: 500, bytes: 64 * 2 ** 20 };
 /** what starts each result line the session prints (a record separator: never in an item's own printing, which is kept apart) */
 export const MARK = "\u001eSBTX";
 
@@ -26,8 +28,13 @@ const b64 = (s) => {
  * preparsed, then exec'd (sagesilent, sageblock) or eval'd (\sage: its latex(); \sageplot: its SVG), in the session's
  * globals (Sage's var() defines its names there), put back first as they were before the first Run (a name from an
  * earlier Run is gone, a Sage name it redefined, x say, is Sage's again), in order; each result printed
- * as one line at once. `items`: [{mode, code}], the runnable ones. */
-export function driver(items) {
+ * as one line at once. `items`: [{mode, code}], the runnable ones. `dir`: the .tex's folder (its files given to the
+ * session by putFolder), the working folder and on sys.path last, as real SageTeX has it: `sage doc.sagetex.sage`,
+ * run in the document's folder, imports a helper.py beside the .tex, and its sys.path ends with that folder, so a
+ * statistics.py there doesn't hide the standard one (the CLI's own, src/latex-cli.ts). The previous Run's folder is
+ * taken off, and the modules imported from either dropped: a helper is imported afresh each Run, its edits seen, as by
+ * a fresh sage process; and a document in another folder imports its own. */
+export function driver(items, dir = null) {
   return `import json as _sbtx_json, io as _sbtx_io, sys as _sbtx_sys, traceback as _sbtx_tb, base64 as _sbtx_b64
 from sagebrush.preparse import preparse as _sbtx_pp
 # (each item compiled as Sage source by the runtime itself, so its code object keeps Sage's semantics when it
@@ -45,6 +52,38 @@ except NameError:
 for _sbtx_k in [k for k in _sbtx_g if k not in _sbtx_base and not k.startswith("_sbtx_")]:
     del _sbtx_g[_sbtx_k]
 _sbtx_g.update(_sbtx_base)
+_sbtx_os = __import__("os")
+_sbtx_il = __import__("importlib")
+_sbtx_d = _sbtx_json.loads(_sbtx_b64.b64decode("${b64(JSON.stringify(dir))}").decode("utf-8"))
+# (_sbtx_prev: the previous Run's folder, whose modules go too; _sbtx_added: the sys.path entry a Run appended, the only
+#  one taken off: "/" and the runtime's own entries, there before, stay where they are)
+try:
+    _sbtx_prev
+except NameError:
+    _sbtx_prev = None
+    _sbtx_added = None
+def _sbtx_under(f, d):
+    if not isinstance(f, str) or f.startswith("/$"):
+        return False
+    d = _sbtx_os.path.normpath(d)
+    f = _sbtx_os.path.normpath(f)
+    return f == d or f.startswith(d + "/") if d != "/" else f.startswith("/")
+for _sbtx_p in [p for p in (_sbtx_prev, _sbtx_d) if p is not None]:
+    for _sbtx_n in [n for n, m in list(_sbtx_sys.modules.items()) if _sbtx_under(getattr(m, "__file__", None), _sbtx_p) or any(_sbtx_under(q, _sbtx_p) for q in list(getattr(m, "__path__", None) or []))]:
+        del _sbtx_sys.modules[_sbtx_n]
+    _sbtx_pic = getattr(_sbtx_sys, "path_importer_cache", {})
+    for _sbtx_q in [q for q in list(_sbtx_pic) if _sbtx_under(q, _sbtx_p)]:
+        del _sbtx_pic[_sbtx_q]
+if _sbtx_added is not None and _sbtx_added in _sbtx_sys.path:
+    _sbtx_sys.path.remove(_sbtx_added)
+_sbtx_prev = _sbtx_d
+_sbtx_added = None
+if _sbtx_d is not None:
+    _sbtx_os.chdir(_sbtx_d)
+    if _sbtx_d not in _sbtx_sys.path:
+        _sbtx_sys.path.append(_sbtx_d)
+        _sbtx_added = _sbtx_d
+_sbtx_il.invalidate_caches()
 for _sbtx_it in _sbtx_json.loads(_sbtx_b64.b64decode("${b64(JSON.stringify(items))}").decode("utf-8")):
     _sbtx_buf = _sbtx_io.StringIO()
     _sbtx_old = _sbtx_sys.stdout
@@ -146,7 +185,16 @@ export function sessionOf(eng, startMs = SANDBOX_START_MS) {
   let start = null;
   const get = () => (start ??= (async () => {
     const mod = await eng.module();
-    const k = new mod.WorkerKernel({ createWorker: () => eng.worker(mod) });
+    // (first, before anything runs: the document's code changes no file (astra's LATEX-RUN-2), the page writing the
+    //  results file itself; and a new worker has none of the folder's files yet)
+    // (a worker started again (after a stop, say): given the last admitted folder again, so a Run admitted against it
+    //  never runs on an empty one)
+    const onStart = (w) => {
+      w.postMessage({ fsWritable: false });
+      get.sent.clear();
+      for (const [p, data] of get.snapshot) { w.postMessage({ fsPut: p, data }); get.sent.add(p); }
+    };
+    const k = new mod.WorkerKernel({ createWorker: () => eng.worker(mod), onStart });
     k.start();
     const ok = await new Promise((res) => {
       if (k.ready) return res(true);
@@ -160,7 +208,51 @@ export function sessionOf(eng, startMs = SANDBOX_START_MS) {
     return k;
   })().catch((e) => { start = null; throw e; }));
   get.kernel = null;
+  // (the folder's paths this session's worker was given, and the last folder admitted: putFolder)
+  get.sent = new Set();
+  get.snapshot = [];
+  // (one Run at a time in the session: its folder put in, its script run, then the next; a Run of another document,
+  //  or one started while another still runs, never changes the files or the folder under it (astra))
+  let turn = Promise.resolve();
+  get.serial = (fn) => { const r = turn.then(fn, fn); turn = r.catch(() => {}); return r; };
   return get;
+}
+
+/** The .tex's folder (`texPath`'s, recursively): its files not in Trash and here (not only in the cloud), with their
+ * bytes, for the session: {dir, files: [path, bytes][]}, or {msg} past FOLDER_LIMITS. Only the document's own folder:
+ * nothing else of the workspace reaches the session. */
+export async function folderFiles(ws, texPath, lim = FOLDER_LIMITS) {
+  const dir = texPath.slice(0, texPath.lastIndexOf("/")) || "/";
+  const big = { msg: `Not run: the .tex's folder is too large to give to Sage here (over ${lim.files} files or ${lim.bytes / 2 ** 20} MiB): move the .tex and what it uses into a folder of their own` };
+  const inside = (p) => dir === "/" ? p.startsWith("/") : p.startsWith(dir + "/");
+  const all = (await ws.list(dir, { recursive: true })).filter((e) => e.kind === "file" && !e.trashed && !e.remote && !e.path.startsWith("/Trash/") && inside(e.path));
+  if (all.length > lim.files) return big;
+  // (a complete snapshot, or none: a file that can't be read runs nothing, as one past the bound)
+  let bytes = 0;
+  const files = [];
+  for (const e of all) {
+    if (bytes + (e.size ?? 0) > lim.bytes) return big;
+    // (each read bounded by what is left (daybreak3): a file grown since it was listed is refused, never read whole)
+    let over = false;
+    const r = await ws.readUpTo(e.path, lim.bytes - bytes).catch((err) => { over = err?.code === "limit"; return null; });
+    if (over) return big;
+    if (!r) return { msg: `Not run: ${e.path} couldn't be read` };
+    bytes += r.content.length;
+    if (bytes > lim.bytes) return big;
+    files.push([e.path, r.content]);
+  }
+  return { dir, files };
+}
+/** The folder's files put in kernel `k`'s worker as they are now, all at once (no wait between them); every path it
+ * was given before and not in this folder now, another folder's included, deleted there. `s`: the session (sessionOf's
+ * get: its sent paths and snapshot, which a restarted worker is given again). */
+export function putFolder(k, files, s) {
+  const now = new Set(files.map(([p]) => p));
+  for (const p of s.sent) if (!now.has(p)) k.post({ fsPut: p, data: null });
+  for (const [p, data] of files) k.post({ fsPut: p, data });
+  s.sent.clear();
+  for (const p of now) s.sent.add(p);
+  s.snapshot = files;
 }
 /** The session's script run in kernel `k`: what it printed (bounded by `max`) and why it ended early, if it did. */
 export const runIn = (k, code, max) => new Promise((resolve) => {
@@ -181,14 +273,48 @@ export const runIn = (k, code, max) => new Promise((resolve) => {
 // read (base), and a new one only created, never written over (a create that finds one made meanwhile writes
 // nothing): a newer Run's results, another tab's, or a file put at that path, are never replaced by this one's.
 /** -> { ok: true, states, ms } | { stale: true } | { msg } (why nothing was written). `o`: { items (the worker's
- * check items), session (sessionOf), exec (runIn), ws, fid (the .tex's), current () => boolean, signal, max, now } */
+ * check items), session (sessionOf), exec (runIn), ws, fid (the .tex's), current () => boolean, signal, max, now,
+ * folder? () => folderFiles(...), store?, serial? (the session: sessionOf's get, and its get.serial), stop? (this Run's
+ * own Stop: waiting, it runs nothing; running, its script is interrupted and what ran is written) } */
 export async function runAndSave(o) {
   const stale = () => !o.current() || !!o.signal?.aborted;
   const t0 = o.now();
+  // (the .tex's folder, read first: one too large says so before Sage starts)
+  const f = o.folder ? await o.folder() : null;
+  if (stale()) return { stale: true };
+  if (f?.msg) return { msg: f.msg };
   const k = await o.session();
   if (stale()) return { stale: true };
-  const { out, stopped } = await o.exec(k, driver(runnable(o.items)), o.max);
-  if (stale()) return { stale: true };
+  const stopAsked = () => !!o.stop?.aborted;
+  const go = async () => {
+    // (the test build only: the page test can hold a Run here, its turn in the session taken, to queue another behind
+    //  it; elsewhere this folds away)
+    if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) await globalThis.__sbTexRunHold?.();
+    if (stale()) return null;
+    // (this Run stopped (its own Stop) while it waited: nothing runs (astra's LATEX-QUEUE-STOP-1))
+    if (stopAsked()) return { stoppedBefore: true };
+    // (the .tex still in the folder that was read: moved meanwhile, nothing runs)
+    if (f) {
+      const at = await o.ws.pathOfFile(o.fid);
+      if (stale()) return null;
+      if (stopAsked()) return { stoppedBefore: true };
+      if (!at.ok || (at.path.slice(0, at.path.lastIndexOf("/")) || "/") !== f.dir) return { moved: true };
+      putFolder(k, f.files, o.store);
+    }
+    // (this Run cancelled (its page gone) or stopped (its Stop) while its script runs: that script interrupted, only
+    //  it: the next Run's hasn't started. Stopped, what ran is still written, as before)
+    const cancel = () => k.interrupt?.();
+    o.signal?.addEventListener("abort", cancel);
+    o.stop?.addEventListener("abort", cancel);
+    try { return await o.exec(k, driver(runnable(o.items), f ? f.dir : null), o.max); }
+    finally { o.signal?.removeEventListener("abort", cancel); o.stop?.removeEventListener("abort", cancel); }
+  };
+  const ran = await (o.serial ? o.serial(go) : go());
+  if (!ran || stale()) return { stale: true };
+  if (ran.moved) return { msg: "Not run: the .tex was moved meanwhile: press Run again" };
+  // (a distinct mark: runIn's own `stopped` is why a Run that ran ended early, its results still written (astra))
+  if (ran.stoppedBefore === true) return { msg: "Stopped before it ran" };
+  const { out, stopped } = ran;
   const states = statesOf(o.items, parseOutput(out), stopped);
   const bytes = new TextEncoder().encode(resultsText(states));
   if (bytes.length > o.max) return { msg: "Not saved: the results are too large" };
