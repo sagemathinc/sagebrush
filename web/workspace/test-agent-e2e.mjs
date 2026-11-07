@@ -61,6 +61,16 @@ except Exception:  # (no built engine here: the two modules by path, as engine/p
         mod = importlib.util.module_from_spec(spec); sys.modules["sagebrush." + name] = mod; spec.loader.exec_module(mod)
     from sagebrush import pairing as P
 from sagebrush.workspace_tools import PageError, NotConnected
+import time
+# (test only: the server's reader made slow at a grant, so the old page's connection is seen closed late, as on a busy
+# machine; "slow" sets the seconds, 0 for none)
+SLOW = [0.0]
+_dispatch = P.Pairing._dispatch
+def _slow_dispatch(self, msg):
+    if SLOW[0] and isinstance(msg, dict) and msg.get("method") == "grant.changed":
+        time.sleep(SLOW[0])
+    return _dispatch(self, msg)
+P.Pairing._dispatch = _slow_dispatch
 p = P.Pairing({"name": "Test agent", "client": "test", "version": "0"})
 port, code = p.start()
 print(json.dumps({"port": port, "code": code}), flush=True)
@@ -71,6 +81,8 @@ for line in sys.stdin:
             print(json.dumps({"ok": p.request(m["method"], m["params"], timeout=10)}), flush=True)
         elif m["op"] == "code":
             port, code = p.start(); print(json.dumps({"port": port, "code": code}), flush=True)
+        elif m["op"] == "slow":
+            SLOW[0] = float(m["s"]); print(json.dumps({"ok": SLOW[0]}), flush=True)
         elif m["op"] == "status":
             s = p.status(); print(json.dumps({"ok": {"paired": s.get("paired"), "granted": s.get("granted")}}), flush=True)
     except NotConnected as e:
@@ -209,6 +221,9 @@ try {
   // hello without a session, so the grant kept on the first reconnect must keep the session in force, or the second
   // reload can't reconnect
   const fresh = await drive({ op: "code" });
+  // (from here the server's reader is slow at each grant: a reload then finds the old page's connection still
+  // registered for a moment, and its silent reconnect is answered "another page is paired" until it isn't)
+  await drive({ op: "slow", s: 0.6 });
   ok(await open(`?pair=${fresh.code}&port=${fresh.port}`), "a new code's link, to remember the agent");
   await click(".sbag-box button.primary");
   ok(await until(`[...document.querySelectorAll(".sbag-box h2")].some((h) => h.textContent === "Allow this agent?")`), "paired again: the grant dialog");
@@ -226,6 +241,7 @@ try {
     const kept = await ev(`T.ws.agentGrants().then((g) => Object.values(g).map((k) => k.session))`);
     ok(kept.length === 1 && kept[0] === kept0[0], `reload ${n}: the kept session is still the one in force (${kept[0] === undefined ? "lost" : kept[0] === kept0[0] ? "same" : "changed"})`);
   }
+  await drive({ op: "slow", s: 0 });
 } finally {
   try { py.kill(); } catch {}
   try { chrome.kill(); } catch {}
