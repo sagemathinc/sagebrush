@@ -250,7 +250,7 @@
   },
   "engine/lib/mod-io.src": {
    "exact": false,
-   "ceiling": 14972,
+   "ceiling": 15556,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -292,7 +292,7 @@
   },
   "engine/lib/mod-matplotlib.src": {
    "exact": false,
-   "ceiling": 37575,
+   "ceiling": 58265,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -437,6 +437,13 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/mod-pathlib.src": {
+   "exact": false,
+   "ceiling": 158732,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/mod-scipy-optimize.src": {
    "exact": false,
    "ceiling": 95774,
@@ -537,7 +544,7 @@
   },
   "engine/lib/mod-warnings.src": {
    "exact": false,
-   "ceiling": 6010,
+   "ceiling": 6625,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -600,7 +607,7 @@
   },
   "engine/lib/sage.src": {
    "exact": false,
-   "ceiling": 2949787,
+   "ceiling": 2947509,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -614,7 +621,7 @@
   },
   "engine/lib/sci.src": {
    "exact": false,
-   "ceiling": 403361,
+   "ceiling": 409078,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -773,6 +780,7 @@
    "engine/lib/mod-locale.src": 85045,
    "engine/lib/mod-marimo.src": 6464,
    "engine/lib/mod-matplotlib.src": 30314,
+   "engine/lib/mod-pathlib.src": 158668,
    "engine/lib/mod-pickle.src": 73650,
    "engine/lib/mod-platform.src": 571,
    "engine/lib/mod-png.src": 5970,

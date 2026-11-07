@@ -62,3 +62,45 @@ test("an assignment before any read replaces the getter with the value, as a pla
   assert.equal(libEmbedStats.decodes, before, "nothing decoded");
   assert.equal("__PYJS_LIB_GZ__" in g, false);
 });
+
+// (the lazy part, P3a: names whose files come from a second blob, decoded on the first read of one of them; grader's
+// r820 pins) a blob that isn't exactly the named files, one missing, one extra, or the same count with another
+// name, throws at that first read and settles nothing: every lazy name stays its getter, and a later read throws
+// again rather than finding a partial library; a name the eager part also has, or listed twice, is refused at install
+test("the lazy part: a blob that isn't exactly its named files throws at the first read and settles none of them", () => {
+  const eager = payloadOf({ "a.py": "1\n" });
+  const names = ["l1.py", "l2.py"];
+  const blobs: [string, Record<string, string>][] = [
+    ["a name missing", { "l1.py": "x\n" }],
+    ["an extra name", { "l1.py": "x\n", "l2.py": "y\n", "l3.py": "z\n" }],
+    ["the same count, another name", { "l1.py": "x\n", "lx.py": "y\n" }],
+  ];
+  for (const [what, files] of blobs) {
+    const g: any = {};
+    installEmbeddedLib(g, eager, payloadOf(files), names);
+    const lib = g.__PYJS_LIB__;
+    assert.equal(lib["a.py"], "1\n", `${what}: the eager part is there`);
+    for (const n of names) {
+      assert.throws(() => lib[n], /the embedded library's lazy part is not the files it names/, `${what}: reading ${n}`);
+      for (const m of names) assert.equal(typeof Object.getOwnPropertyDescriptor(lib, m)!.get, "function", `${what}: ${m} not settled after reading ${n}`);
+    }
+    assert.equal("lx.py" in lib || "l3.py" in lib, false, `${what}: no file of the bad blob installed`);
+  }
+  // (and the right blob settles both names as plain values, decoded once)
+  const g: any = {};
+  installEmbeddedLib(g, eager, payloadOf({ "l1.py": "x\n", "l2.py": "y\n" }), names);
+  const lib = g.__PYJS_LIB__, before = libEmbedStats.lazyDecodes;
+  assert.equal(lib["l2.py"], "y\n");
+  assert.equal(lib["l1.py"], "x\n");
+  assert.equal(libEmbedStats.lazyDecodes, before + 1, "decoded once");
+  for (const n of names) assert.equal(Object.getOwnPropertyDescriptor(lib, n)!.value, lib[n], `${n} a plain value`);
+});
+
+test("the lazy part: a name the eager part also has, or a name listed twice, is refused", () => {
+  const g: any = {};
+  installEmbeddedLib(g, payloadOf({ "a.py": "1\n" }), payloadOf({ "a.py": "2\n" }), ["a.py"]);
+  assert.throws(() => g.__PYJS_LIB__, /the embedded library names a\.py twice/);
+  const h: any = {};
+  installEmbeddedLib(h, payloadOf({ "a.py": "1\n" }), payloadOf({ "l.py": "2\n" }), ["l.py", "l.py"]);
+  assert.throws(() => h.__PYJS_LIB__, /the embedded library names l\.py twice/);
+});

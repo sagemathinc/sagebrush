@@ -24,6 +24,7 @@ import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { browser, runnerWorker, forge as forgeIn, refused as refusedBy, sleep, until, within, tally } from "./test-broker-lib.mjs";
 import { tamperedIndex } from "./test-tz-fixture.mjs";
+import { allowFiles } from "./test-allow.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const dist = join(here, "dist");
@@ -75,6 +76,7 @@ async function openPage(srv, { g14 = false } = {}) {
   await send("Page.navigate", { url: srv.base });
   const ready = await until(() => ev("document.querySelector('#status')?.textContent.startsWith('ready')"), 60000);
   if (!ready) throw new Error(`${srv.name}: the notebook page never got ready`);
+  await allowFiles(send, ev); // (G3 writes and reads a PNG: the person allows this notebook's file changes, as a person does)
   return { srv, wk: await runnerWorker(b, srv.name) };
 }
 async function run(code) {
