@@ -6,7 +6,7 @@
 
 Rill runs R, the statistics language, in Sagebrush: on the command line, in notebooks and Jupyter, and in documents. The first target is the R that students and teachers write: vectors, data frames, factors, summaries, distributions, tests, linear models and plots. Then R Markdown documents (`.Rmd`), then ggplot2, then dplyr.
 
-Rill is new code, written from R's documentation and checked against real R as a black box. It is a Python package that runs on Sagebrush's engine, as the Magma and MATLAB modes do.In the browser, other modes pay nothing: Rill is fetched only when a Rill session starts. (The CLI carries Rill's files, kept lazy and measured, §6.3.)
+Rill is new code, written from R's documentation and checked against real R as a black box. It is a Python package that runs on Sagebrush's engine, as the Magma and MATLAB modes do. In the browser, other modes pay nothing: Rill is fetched only when a Rill session starts. (The CLI carries Rill's files, kept lazy and measured, §6.3.)
 
 The feasibility spike (`/scratch/sagebrush-reviews/r-spike/REPORT.md`, branch `spike-r-mode` b7a1a1e7) matched R 4.5.3 byte for byte on 252 of 254 tuned cases, and on 95 of 110 held-out cases at the first attempt. This design turns that prototype into a product. The spike branch is not merged: its code is the starting point for the phased PRs, rewritten into the layout of §4.
 
@@ -444,7 +444,7 @@ Rill reaches files only through Sagebrush's Python file layer, so the existing p
 - `.Call`, `.External`, `.C`, `.Internal`, `.Primitive` lookups by string;
 - `get`/`mget`/`exists`, `as.environment`, `sys.function`, `environment()<-`.
 
-Escape-shaped calls that Rill doesn't support fail before any effect. Supported R introspection returns ordinary Rill values, as R does, and never a host object: `environment(sum)` and `attr(x, "__class__")` give `NULL`, as in R. A1 ships negative-control pins:
+Escape-shaped calls that Rill doesn't support fail before any effect. Supported R introspection, for example `environment(sum)` and `attr(x, "__class__")`, must return R's own values (recorded from the oracle in A1), never a host object. A1 ships negative-control pins:
 - unsupported entry points give an R error and leave the session unchanged, for example `.Call("x")`, `.External("x")`, `.Internal(f())`, and `get("__import__")` (no such R object);
 - legitimate introspection returns only R values, for example `environment(sum)`, `attr(x, "__class__")`, a crafted name in `as.name`, and `ls(environment(f))`.
 
