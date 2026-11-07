@@ -14,6 +14,14 @@ Factorization(P.1^2 - 2);
 [P.1, P.1^2];
 printf "%o\n", P.1 + 1;
 Sprint(P.1);
+// a scalar division stays in the ring; GCD and Factorization make monic results
+P.1/2;
+(P.1 + 1)/3;
+GCD(2*P.1^2 - 2, 4*P.1 - 4);
+Factorization(2*P.1^2 - 4);
+// a rational function is in another structure, which no global names
+(P.1 + 1)/(P.1 - 1);
+(P.1^2 - 1)/(P.1 - 1);
 K := NumberField(P.1^2 - 2);
 K;
 x := P.1;
@@ -26,6 +34,7 @@ x;
 X := PolynomialRing(Integers());
 y := X.1;
 y^2 + 2;
+(y + 1)/(y - 1);
 A := X;
 X := 3;
 A.1;
