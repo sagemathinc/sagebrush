@@ -44,7 +44,7 @@ import urllib.parse
 import urllib.request
 
 from sagebrush.remote import keys as _keys
-from sagebrush.remote.enroll import EnrollError, _post, check_origin
+from sagebrush.remote.enroll import USER_AGENT, EnrollError, _post, check_origin
 from sagebrush.remote.gateway import Gateway
 from sagebrush.remote.pair import GUID, PAIR_LIMITS, RealTimers, _close_status_ok, b64url, page_key_error, strict_json
 
@@ -493,9 +493,9 @@ async def open_leg(origin, key, on_text, on_end, post=_post, connect_ms=None):
         wskey = base64.b64encode(os.urandom(16)).decode("ascii")
         hostport = host if u.port is None else "%s:%d" % (host, u.port)
         writer.write(("GET %s HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
-                      "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\nUser-Agent: sagebrush-remote/1\r\n"
+                      "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\nUser-Agent: %s\r\n"
                       "x-sb-remote-challenge: %s\r\nx-sb-remote-signature: %s\r\n\r\n"
-                      % (RELAY_PATH, hostport, wskey, c, sig)).encode("ascii"))
+                      % (RELAY_PATH, hostport, wskey, USER_AGENT, c, sig)).encode("ascii"))
         head = b""
         while b"\r\n\r\n" not in head:
             chunk = await asyncio.wait_for(reader.read(4096), left())
@@ -748,7 +748,9 @@ class RelayRunner:
             return self._refuse(p, rid, "refused", "this is the relay")
         # (a page's purpose is its channel's: a kernel page pairs as a kernel, a terminal page as a terminal)
         if q.get("purpose") != p.chan:
-            return self._refuse(p, rid, "refused", "this is a %s's pairing (purpose \"%s\")" % (p.chan, p.chan))
+            other = "terminal" if p.chan == "kernel" else "kernel"
+            why = "this page is paired for a %s, not a %s" % (p.chan, other) if q.get("purpose") == other else "this page is paired for a %s" % p.chan
+            return self._refuse(p, rid, "refused", why)
         bad = page_key_error(q, self.stats)
         if bad:
             return self._refuse(p, rid, "refused", bad)
@@ -761,7 +763,8 @@ class RelayRunner:
             return p.send({"jsonrpc": "2.0", "id": rid, "result": {
                 "protocol": 1, "purpose": "terminal", "via": "relay", "token": p.token,
                 "nonce": self.gateway.current_nonce(), "limits": {"frame": TERMINAL_FRAME},
-                "incarnation": self.incarnation}})
+                # (the page's generation on this leg: its open's proof binds it (T5), and only the runner knows it)
+                "gen": p.gen, "incarnation": self.incarnation}})
         self.paired_conn = p
         self.gateway.socket_paired(p)
         self.err("A page is paired.\n")
