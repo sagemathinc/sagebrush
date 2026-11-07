@@ -3919,6 +3919,67 @@ def symbolic_sum(f, v, a, b, algorithm=None, hold=False):
         (x + y)^n
         sage: symbolic_sum(1/k^2, k, 1, oo), symbolic_sum(x^k/factorial(k), k, 0, oo)
         (1/6*pi^2, e^x)
+        sage: symbolic_sum((-1)^k/(2*k + 1), k, 0, oo), symbolic_sum((-1)^(k + 1)/k, k, 1, oo)
+        (1/4*pi, log(2))
+        sage: symbolic_sum(1/(k*(k + 1)), k, 1, oo), symbolic_sum((-1)^k*x^(2*k + 1)/factorial(2*k + 1), k, 0, oo)
+        (1, sin(x))
+        sage: symbolic_sum(1/k, k, 1, oo)
+        Traceback (most recent call last):
+        ...
+        ValueError: Sum is divergent.
+        sage: symbolic_sum(1/(k + 2001)^2, k, 1, oo)  # sagebrush only
+        sum(1/(k + 2001)^2, k, 1, +Infinity)
+        sage: symbolic_sum(1/(k + 1500)^2 + 1/(k + 1500)^3, k, 1, oo)  # sagebrush only
+        sum(1/(k + 1500)^2 + 1/(k + 1500)^3, k, 1, +Infinity)
+        sage: symbolic_sum(1/(k - 3)^2, k, 1, oo)  # sagebrush only
+        sum(1/(k - 3)^2, k, 1, +Infinity)
+        sage: symbolic_sum(1/(k + 10^12)^2, k, 1, oo)  # sagebrush only
+        sum(1/(k + 1000000000000)^2, k, 1, +Infinity)
+        sage: symbolic_sum((-1)^k/k^2, k, 10^12, oo)  # sagebrush only
+        sum((-1)^k/k^2, k, 1000000000000, +Infinity)
+
+    An alternating sum with a polynomial part is not available yet (Sage
+    10.10 gives und for this one, ind for (-1)^k*k^3 and "Sum is divergent."
+    for (-1)^k*(k + 1))::
+
+        sage: symbolic_sum((-1)^k*k^2/(k + 1), k, 1, oo)  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: the sum of an alternating series with a polynomial part is not available in sagebrush yet
+        sage: symbolic_sum((-1)^k*k, k, 1, oo)  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: the sum of an alternating series with a polynomial part is not available in sagebrush yet
+
+    So is an addition whose terms all alternate, with a polynomial part
+    (Sage 10.10 answers `und`, undefined, for both)::
+
+        sage: symbolic_sum((-1)^k*k + (-1)^k/k, k, 1, oo)  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: the sum of an alternating series with a polynomial part is not available in sagebrush yet
+        sage: symbolic_sum((-1)^k + (-1)^k/k, k, 1, oo)  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: the sum of an alternating series with a polynomial part is not available in sagebrush yet
+
+    An alternating constant diverges, however it is written; an addition
+    whose terms don't all alternate is summed as usual (divergent here, or
+    left unevaluated)::
+
+        sage: symbolic_sum((-1)^k*(k + 1) - (-1)^k*k, k, 1, oo)
+        Traceback (most recent call last):
+        ...
+        ValueError: Sum is divergent.
+        sage: symbolic_sum((-1)^k*(k + 1) - (-1)^k*k - (-1)^k, k, 1, oo)
+        0
+        sage: symbolic_sum(k + 1/k, k, 1, oo)
+        Traceback (most recent call last):
+        ...
+        ValueError: Sum is divergent.
+        sage: r = symbolic_sum((-1)^k*k + k, k, 1, oo)
+        sage: r.operands()[1:], bool(r.operands()[0] == (-1)^k*k + k)
+        ([k, 1, +Infinity], True)
     """
     import sage_all as _sa
     f, v = _expr(f), _expr(v)
@@ -3966,6 +4027,12 @@ def symbolic_sum(f, v, a, b, algorithm=None, hold=False):
         return ((fa * (q ** (b - a + 1) - 1)) / (q - 1)).simplify_rational()
     if inf and str(a) in ("0", "1"):
         r = _sum_special(f, v, a)
+        if r is not None:
+            return r
+    if inf and a.is_integer():
+        r = _sum_signed_rational(f, v, int(a))
+        if r is None and str(a) == "0":
+            r = _sum_trig_series(f, v)
         if r is not None:
             return r
     from _sage_expr import function as _fn
@@ -4051,15 +4118,25 @@ def _sum_special(f, v, a):
     """1/k^s (k >= 1) and x^k/k! (k >= 0)."""
     import sage_all as _sa
     vn = _var_name(v)
+    divergent = False
     # 1/k^s
     if str(a) == "1":
         lg = (f.subs({v: _sa.e}) if False else None)
         try:
             s_ = -(f.log().diff(v) * v).simplify_rational()
             if vn not in s_._names() and bool((f * v ** s_ - 1).simplify_rational() == 0):
-                return _sa.zeta(s_)
+                if s_.is_integer() and int(s_) <= 1:
+                    # (1/k and k^2 gave zeta(1) = Infinity and zeta(-2) = 0;
+                    # 1/sqrt(k) stays unevaluated, as in Sage)
+                    divergent = True
+                elif s_.is_numeric() and not bool(s_ > 1):
+                    return None
+                else:
+                    return _sa.zeta(s_)
         except Exception:
             pass
+        if divergent:
+            raise ValueError("Sum is divergent.")
     # c*x^k/k!: the ratio is x/(k+1)
     if str(a) == "0" and "factorial(" in str(f):
         q = _geom_ratio(f, v, allow_factorial=True)
@@ -4067,6 +4144,188 @@ def _sum_special(f, v, a):
             xk = (q * (v + 1)).simplify_rational()
             if vn not in xk._names():
                 return f.subs({v: 0}) * _sa.exp(xk)
+    return None
+
+
+def _sign_power(f, v, other_powers=False):
+    """(s, c, r) with f = c * s^v * r: s = 1 or -1 from a factor (-1)^(p v + q)
+    (p, q integers), c = +-1, r the other factors; None if a factor is
+    another power with v in its exponent (unless other_powers: then it is
+    one of r's)."""
+    vn = _var_name(v)
+    s, c, rest = 1, 1, []
+    for t in (f.operands() if f._op()[0] == "mul" else [f]):
+        if t._op()[0] == "pow" and vn in t.operands()[1]._names():
+            b, ex = t.operands()
+            if str(b) != "-1" and other_powers:
+                rest.append(t)
+                continue
+            if str(b) != "-1" or not ex.is_polynomial(v) or ex.degree(v) != 1:
+                return None
+            p, q = ex.coefficient(v, 1), ex.subs({v: 0})
+            if not (p.is_integer() and q.is_integer()):
+                return None
+            s, c = s * (-1) ** (int(p) % 2), c * (-1) ** (int(q) % 2)
+        else:
+            rest.append(t)
+    r = _expr(1)
+    for t in rest:
+        r = r * t
+    return s, c, r
+
+
+# the closed forms of _sum_signed_rational take at most this many prefix
+# terms (their shifts) in all, symbolic_sum's direct-sum bound: past it the
+# exact sum stays unevaluated (a strategy's reach, not an error)
+_SUM_SHIFT_LIMIT = 2000  # work limit of the shifted closed forms
+
+
+def _sum_signed_rational(f, v, a):
+    """sum_{v >= a} s^v r(v), s = 1 or -1 and r a rational function whose
+    poles are at integers or half-integers (as Sage 10.10 gives them).
+
+    Each partial fraction A/(c v + d)^m is a shifted sum_{i >= 0} s^i/(i +
+    delta)^m with delta 1 or 1/2: zeta(m), (2^m - 1) zeta(m), eta(m) =
+    (1 - 2^(1-m)) zeta(m) (log(2) for m = 1) or 2 beta(1) = pi/2, 2^3
+    beta(3) = pi^3/4.  For s = 1 the 1/(v + g) terms diverge one by one; their
+    coefficients must cancel, and then sum -A psi(g) (psi(1/2) - psi(1) =
+    -2 log(2)) telescopes.  None when a pole, a degree or a constant falls
+    outside these cases (the sum stays unevaluated).
+    """
+    import sage_all as _sa
+    vn = _var_name(v)
+    sp = _sign_power(f, v)
+    if f._op()[0] == "add":
+        # (-1)^k*k + (-1)^k/k is (-1)^k*(k + 1/k): every term alternating,
+        # with a polynomial part, is refused as below (other such sums stay
+        # unevaluated: their closed forms print in another order than Sage's)
+        tps = [_sign_power(t, v) for t in f.operands()]
+        if all(tp is not None and tp[0] == -1 for tp in tps):
+            rt = sum((tc * tr for _, tc, tr in tps), _expr(0)).simplify_rational()
+            if vn not in rt._names():
+                # ((-1)^k*(k + 1) - (-1)^k*k: (-1)^k times a constant, as Sage)
+                if rt.is_trivial_zero():
+                    return _expr(0)
+                raise ValueError("Sum is divergent.")
+            num, den = rt.numerator(), rt.denominator()
+            if num.is_polynomial(v) and den.is_polynomial(v) and num.degree(v) >= den.degree(v):
+                raise NotImplementedError("the sum of an alternating series with a polynomial part is not available in sagebrush yet")
+    if sp is None:
+        return None
+    s, c, r = sp
+    # (over a common denominator: a sum such as 1/k + 1/(k*(k + 1)) is its
+    # own numerator, with no denominator, and left this path: XE16)
+    rt = r.simplify_rational()
+    num, den = rt.numerator(), rt.denominator()
+    if not (num.is_polynomial(v) and den.is_polynomial(v)):
+        return None
+    if vn not in den._names() and (s == 1 or vn not in num._names()):
+        return None
+    if num.degree(v) >= den.degree(v):
+        # a polynomial part: its terms don't tend to 0, so the sum diverges,
+        # as Sage says; for an alternating one Sage's answer depends on the
+        # polynomial (ind, und or "Sum is divergent."), so it is refused
+        if s == 1:
+            raise ValueError("Sum is divergent.")
+        raise NotImplementedError("the sum of an alternating series with a polynomial part is not available in sagebrush yet")
+    terms = []  # (A, gamma, m): A/(v + gamma)^m
+    pf = r.partial_fraction(v)
+    for t in (pf.operands() if pf._op()[0] == "add" else [pf]):
+        A, base, m = _expr(1), None, 0
+        for u in (t.operands() if t._op()[0] == "mul" else [t]):
+            if vn not in u._names():
+                A = A * u
+            elif u._op()[0] == "pow" and u.operands()[1].is_integer() and int(u.operands()[1]) < 0 and base is None:
+                base, m = u.operands()[0], -int(u.operands()[1])
+            else:
+                return None
+        if base is None or not base.is_polynomial(v) or base.degree(v) != 1:
+            return None
+        cv, dv = base.coefficient(v, 1), base.subs({v: 0})
+        g = dv / cv
+        if not (g.is_numeric() and (2 * g).is_integer()):
+            return None
+        terms.append((A / cv ** m, g + a, m))
+    half = _sa.QQ(1) / 2
+    # the shifts n (each sum is its base sum less its first n terms), all
+    # admitted before any term is built: their total within the bound of a
+    # direct finite sum (symbolic_sum's 2000), or the sum stays unevaluated
+    # (a shift or a lower end of 10^12 reached range(10^12): the review's
+    # SUM-2)
+    shifts = []
+    for A, g, m in terms:
+        delta = 1 if g.is_integer() else half
+        n = int(g - delta)
+        if n < 0:
+            return None  # a pole at a summed v
+        shifts.append((A, delta, n, m))
+    if sum(n for _, _, n, _ in shifts) > _SUM_SHIFT_LIMIT:  # past the work limit: unevaluated
+        return None
+    total, divergent = _expr(0), []
+    for A, delta, n, m in shifts:
+        head = sum(_expr(s) ** i / (i + delta) ** m for i in range(n))
+        if s == 1 and m == 1:
+            divergent.append((A, delta, head))
+            continue
+        if s == 1:
+            T = _sa.zeta(m) if delta == 1 else (2 ** m - 1) * _sa.zeta(m)
+        elif delta == 1:
+            T = _sa.log(2) if m == 1 else (1 - _expr(2) ** (1 - m)) * _sa.zeta(m)
+        elif m == 1:
+            T = _sa.pi / 2
+        elif m == 3:
+            T = _sa.pi ** 3 / 4
+        else:
+            return None  # (Catalan's constant and the like)
+        # sum_{j >= 0} s^j/(j + delta + n)^m = s^-n (T - sum_{i < n} s^i/(i + delta)^m)
+        total = total + A * _expr(s) ** n * (T - head)
+    if divergent:
+        if not bool(sum(A for A, _, _ in divergent).simplify_rational() == 0):
+            raise ValueError("Sum is divergent.")
+        # sum_j sum_t A_t/(j + g_t) = -sum_t A_t psi(g_t); psi(n + delta) =
+        # psi(delta) + sum_{i < n} 1/(i + delta), and psi(1) cancels
+        for A, delta, head in divergent:
+            total = total - A * ((0 if delta == 1 else -2 * _sa.log(2)) + head)
+    # (s^v = s^a s^j for v = a + j)
+    return (c * _expr(s) ** a * total).expand()
+
+
+def _sum_trig_series(f, v):
+    """sum_{v >= 0} C s^v x^(2 v + q + j)/(2 v + q)!, s = 1 or -1, q = 0 or 1,
+    j >= 0: C x^j times cosh, sinh, cos or sin (x^k/k! is _sum_special's)."""
+    import sage_all as _sa
+    vn = _var_name(v)
+    sp = _sign_power(f, v, other_powers=True)
+    if sp is None:
+        return None
+    s, c, r = sp
+    C, x, e_pow, e_fact = _expr(1), None, None, None
+    for u in (r.operands() if r._op()[0] == "mul" else [r]):
+        if vn not in u._names():
+            C = C * u
+            continue
+        if u._op()[0] != "pow":
+            return None
+        b, ex = u.operands()
+        if str(ex) == "-1" and b._op()[0] == "fun:factorial" and e_fact is None:
+            e_fact = b.operands()[0]
+        elif vn not in b._names() and e_pow is None:
+            x, e_pow = b, ex
+        else:
+            return None
+    if e_fact is None or e_pow is None:
+        return None
+    j = (e_pow - e_fact).expand()
+    if not (j.is_integer() and int(j) >= 0) or not e_fact.is_polynomial(v) or e_fact.degree(v) != 1:
+        return None
+    C = C * x ** j
+    p, q = e_fact.coefficient(v, 1), e_fact.subs({v: 0})
+    if not (p.is_integer() and q.is_integer()):
+        return None
+    p, q = int(p), int(q)
+    if p == 2 and q in (0, 1):
+        fn = {(1, 0): _sa.cosh, (1, 1): _sa.sinh, (-1, 0): _sa.cos, (-1, 1): _sa.sin}[(s, q)]
+        return c * C * fn(x)
     return None
 
 
@@ -5166,6 +5425,12 @@ def integrate(f, *args, **kw):
         (1/3*x^3, log(x), (x - 1)*e^x)
         sage: integrate(sin(x), x, 0, pi), integral(exp(-x), x, 0, oo)
         (2, 1)
+        sage: integrate(1/x^2, x, 1, oo), integrate(1/(x^2 + x), x, 1, oo)
+        (1, log(2))
+        sage: integrate(1/x, x, 1, oo)
+        Traceback (most recent call last):
+        ...
+        ValueError: Integral is divergent.
     """
     if _callable(f):
         return f.integral(*args, **kw)
