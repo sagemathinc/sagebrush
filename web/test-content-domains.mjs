@@ -40,8 +40,10 @@ it("requires exact role origins, with a valid corresponding root", () => {
   }
 });
 it("refuses an origin whose root has not been configured", () => {
-  const c = empty(); c.dev.filesOrigin = "https://files.content-example.dev";
-  assert.deepEqual(checkContentDomains(c), [originProblem]);
+  for (const origin of ["https://files.content-example.dev", "https://files."]) {
+    const c = empty(); c.dev.filesOrigin = origin;
+    assert.deepEqual(checkContentDomains(c), [originProblem], origin);
+  }
 });
 it("reports a shared environment root as well as the suffix mismatch", () => {
   const c = empty(); c.dev.root = c.prod.root = "content-example.com";
