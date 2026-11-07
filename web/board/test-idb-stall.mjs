@@ -2,7 +2,7 @@
 // A board's code runs even when its outputs' cache never answers: an
 // IndexedDB open of "sagebrush-outputs" queued, for good, behind another
 // page's upgrade that waits on a connection never closed.  That is what kept
-// examples/live.json's code from ever running in test-export.mjs, from time
+// examples/live.board.json's code from ever running in test-export.mjs, from time
 // to time: the board waited on the cache's read before running anything
 // (web/board/code.ts, web/board/idb-open.ts).  Here the stall is made on
 // purpose, so it happens every time: tab A holds the database open (no
@@ -68,7 +68,7 @@ try {
   // tab B: an open of version 1 there gets no answer at all (the stall the board met)
   at = "tab B";
   const b = await tab(port);
-  await b.send("Page.navigate", { url: `${site}board/?doc=${encodeURIComponent("examples/live.json")}` });
+  await b.send("Page.navigate", { url: `${site}board/?doc=${encodeURIComponent("examples/live.board.json")}` });
   const silent = await b.ev(`new Promise((res) => { const o = indexedDB.open("sagebrush-outputs", 1); o.onsuccess = () => { o.result.close(); res("opened"); }; o.onerror = () => res("error"); o.onblocked = () => res("blocked"); setTimeout(() => res("no answer"), 2000); })`, 10000);
   ok(silent === "no answer", "(in tab B an open of the cache's database gets no answer: " + silent + ")");
   // ...and the board's code runs all the same, every item of it
