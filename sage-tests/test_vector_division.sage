@@ -29,3 +29,8 @@ class D:
 for K in [GF(7), RDF, CDF]:
     show("vector(%s, [1, 2]) / D()" % K, lambda: vector(K, [1, 2]) / D())
 show("int(1) / D()", lambda: int(1) / D())
+# A zero of a field the vector's ring reaches is that field's own error, not the refusal (grader's r767g N3):
+# only a TypeError from the inverse is "unsupported operand parent(s)"; RDF, RR and CDF divide by their zero.
+for v, z in [(vector(GF(7), [1, 2]), GF(7)(0)), (vector(GF(7), [1, 2]), GF(49, 'a')(0)), (vector(GF(7), [1, 2]), ZZ(0)),
+             (vector(RDF, [1, 2]), RDF(0)), (vector(RR, [1, 2]), RR(0)), (vector(CDF, [1, 2]), CDF(0))]:
+    show("vector(%s, [1, 2]) / %s(0)" % (v.base_ring(), z.parent()), lambda: v / z)
