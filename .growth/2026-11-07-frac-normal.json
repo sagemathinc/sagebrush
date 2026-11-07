@@ -1,11 +1,12 @@
 {
  "v": 1,
- "reason": "Fraction-field elements in Sage's normal forms (lib/_sage_frac.py, lib/_sage_mpoly.py MFraction, lib/_sage_poly.py, lib/_sage_ff.py, lib/_sage_nfpoly.py): Frac(ZZ[x]) with the gcd and content cancelled and signs kept, an exact polynomial quotient still a fraction, multivariate constants kept over a field, partial fractions by powers, Sage zero-division messages Re-measured with bun 1.4.4 (size-record.sh) on master ed001a7e vs head ae441808: cli/lib.gen.js +2176, cli/pyjs.cjs +3376, engine/lib/sage-more.src +258, engine/lib/sage.pre +24440, engine/lib/sage.src +6274; no other row moves. Markers: exact, except cli/pyjs.cjs 3408 (+3376 measured, plus 32 B of margin, as it moves with master).",
+ "reason": "Fraction-field elements in Sage's normal forms (lib/_sage_frac.py, lib/_sage_mpoly.py MFraction, lib/_sage_poly.py, lib/_sage_ff.py, lib/_sage_nfpoly.py): Frac(ZZ[x]) with the gcd and content cancelled and signs kept, an exact polynomial quotient still a fraction, multivariate constants kept over a field, partial fractions by powers, Sage zero-division messages; partial fractions and MFraction's normal form and hash in lib/_sage_frac_more.py, loaded on first use rather than at Sage's start Re-measured with bun 1.4.4 (size-record.sh) on master c32e38de vs head 4f5e53f5: cli/lib.gen.js +2680, cli/pyjs.cjs +3820, engine/lib/sage-more.src +3833, engine/lib/sage.pre +9862, engine/lib/sage.src +3555, engine/sagebrush-worker.js +33; no other row moves. Markers: exact, except cli/pyjs.cjs 3852 (+3820 measured, plus 32 B of margin, as it moves with master).",
  "bytes": {
-  "cli/lib.gen.js": 2176,
-  "cli/pyjs.cjs": 3408,
-  "engine/lib/sage-more.src": 258,
-  "engine/lib/sage.pre": 24440,
-  "engine/lib/sage.src": 6274
+  "cli/lib.gen.js": 2680,
+  "cli/pyjs.cjs": 3852,
+  "engine/lib/sage-more.src": 3833,
+  "engine/lib/sage.pre": 9862,
+  "engine/lib/sage.src": 3555,
+  "engine/sagebrush-worker.js": 33
  }
 }
