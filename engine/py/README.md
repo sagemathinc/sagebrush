@@ -83,9 +83,11 @@ kernel, then run the command it shows, on your computer:
 uvx sagebrush@latest remote --loopback
 ```
 
-It prints a link. Open it in the same browser, and the notebook's code runs
-on your computer, in that Python, with your files and permissions. It needs
-[uv](https://docs.astral.sh/uv/). On Windows, run it in WSL.
+It prints a link: open it in the same browser, or paste it into the page.
+The notebook's code then runs on your computer, in its own Python, with your
+files and permissions, until you press Ctrl-C there, which ends the page's
+access. It needs [uv](https://docs.astral.sh/uv/). Safari can't connect to
+your computer: use Chrome, Edge or Firefox. On Windows, run it in WSL.
 
 ## For AI agents: `sagebrush-mcp`
 
