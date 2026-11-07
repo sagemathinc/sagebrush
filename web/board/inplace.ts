@@ -661,7 +661,7 @@ export class InPlace {
   }
 
   private choosePicture() {
-    const input = Object.assign(document.createElement("input"), { type: "file", accept: "image/png,image/jpeg,image/gif,image/webp" });
+    const input = Object.assign(document.createElement("input"), { type: "file", accept: "image/png,image/jpeg,image/gif,image/webp,image/svg+xml" });
     input.className = "sb-fileinput";
     input.style.cssText = "position:fixed;left:-9999px";
     input.onchange = async () => {
