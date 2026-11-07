@@ -3203,23 +3203,9 @@ class MFraction:
         if not den._d:
             raise ZeroDivisionError("fraction field element division by zero")
         if reduce:
-            # as Sage: the gcd cancelled (over ZZ with its content, over a
-            # field only its monic part: 3*x/(6*x*y) is 3/(6*y) in
-            # Frac(QQ[x, y]), 1/(2*y) in Frac(ZZ[x, y])), and a unit
-            # denominator moved up (x*y/(-y) is -x); no other constant
-            # normalized
-            R = num._ring
-            dom = R._dom
-            zz = R._base is _sa().ZZ
-            g = _gcd(num, den)
-            if (g != 1) if zz else not g.is_constant():
-                num, den = _exact_div(num, g), _exact_div(den, g)
-            if den.is_constant():
-                c = den._leading()[1]
-                if not zz or c == -1:
-                    il = dom._inv(c)
-                    num = MPolynomial(R, {e: dom._mul(v, il) for e, v in num._d.items()})
-                    den = R.one()
+            # (Sage's normal form, in _sage_frac_more: loaded on first use)
+            import _sage_frac_more
+            num, den = _sage_frac_more.mfraction_reduce(num, den)
         self._num, self._den = num, den
 
     def numerator(self):

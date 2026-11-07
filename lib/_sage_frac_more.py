@@ -1,7 +1,8 @@
 """Fraction-field work loaded on first use rather than at Sage's start:
 partial fraction decomposition in a univariate fraction field
 (FractionFieldElement.partial_fraction_decomposition) and the hash of a
-multivariate fraction (MFraction.__hash__), as Sage."""
+multivariate fraction (MFraction.__hash__) and its normal form (MFraction's
+reduction), as Sage."""
 
 from fractions import Fraction as _F
 
@@ -68,3 +69,25 @@ def mfraction_hash(self):
         return hash((-n, -d) if c < 0 else (n, d))
     il = dom._inv(c)
     return hash((MPolynomial(R, {e: dom._mul(v, il) for e, v in n._d.items()}), MPolynomial(R, {e: dom._mul(v, il) for e, v in d._d.items()})))
+
+
+def mfraction_reduce(num, den):
+    from _sage_mpoly import MPolynomial, _sa, _gcd, _exact_div
+    # as Sage: the gcd cancelled (over ZZ with its content, over a
+    # field only its monic part: 3*x/(6*x*y) is 3/(6*y) in
+    # Frac(QQ[x, y]), 1/(2*y) in Frac(ZZ[x, y])), and a unit
+    # denominator moved up (x*y/(-y) is -x); no other constant
+    # normalized
+    R = num._ring
+    dom = R._dom
+    zz = R._base is _sa().ZZ
+    g = _gcd(num, den)
+    if (g != 1) if zz else not g.is_constant():
+        num, den = _exact_div(num, g), _exact_div(den, g)
+    if den.is_constant():
+        c = den._leading()[1]
+        if not zz or c == -1:
+            il = dom._inv(c)
+            num = MPolynomial(R, {e: dom._mul(v, il) for e, v in num._d.items()})
+            den = R.one()
+    return num, den
