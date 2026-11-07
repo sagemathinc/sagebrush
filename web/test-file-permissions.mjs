@@ -90,7 +90,7 @@ const check = (ok, what) => { checks++; console.log((ok ? "ok   " : "FAIL ") + w
   for (let i = 0; i < ALLOWS_KEPT + 500; i++) p.set("b" + i, "files", true);
   const q = createPermissions(); q.provenance("own", "person");
   check(p.may("own", "files") === false && q.may("own", "files") === false && q.may("d0", "files") === false, "an own notebook's \"don't allow\" survives thousands of later choices, a reload included: never evicted into its allow default");
-  check(Object.keys(JSON.parse(store.get("sagebrush-permissions"))).filter((k) => /^[ab]/.test(k)).length === ALLOWS_KEPT, "…the allows kept are bounded, the oldest gone first");
+  check(Object.keys(JSON.parse(store.get("sagebrush-permissions") ?? "{}")).filter((k) => /^[ab]/.test(k)).length === ALLOWS_KEPT, "…the allows kept are bounded, the oldest gone first");
   p.provenance("own2", "person"); failing = true;
   const kept = p.set("own2", "files", false);
   check(kept === false && p.may("own2", "files") === false && p.record("own2").files === false, "storage refusing the choice: set says it wasn't kept, and \"don't allow\" is in effect anyway");
@@ -153,11 +153,12 @@ const check = (ok, what) => { checks++; console.log((ok ? "ok   " : "FAIL ") + w
   const sp = createPermissions();
   sp.deny("p", "net", "c.org"); sp.grant("p", "net", "c.org", { once: true }); sp.deny("p", "net", "c.org"); sp.forgetDenials("p");
   check(sp.sessionCounts().docs === 0, "a document's session entry left empty is pruned");
-  // (stored denials, page-wide)
+  // (stored denials, page-wide: the record preloaded at its cap in one write, then one more denial: the oldest goes)
+  store.set("sagebrush-grants", JSON.stringify({ v: 1, seq: GRANT_CAPS.storedDenials, docs: Object.fromEntries(Array.from({ length: 50 }, (_, d) => ["big" + d, { denied: Array.from({ length: GRANT_CAPS.storedDenials / 50 }, (_, j) => ["net", `h${j * 50 + d}.org:443`, j * 50 + d + 1]), t: 1 }])) }));
   const sd = createPermissions();
-  for (let i = 0; i < GRANT_CAPS.storedDenials + 50; i++) sd.deny("big" + (i % 50), "net", "h" + i + ".org", { stored: true });
+  check(sd.deny("big0", "net", "new.org", { stored: true }), "(one more stored denial)");
   const kept2 = Object.values(JSON.parse(store.get("sagebrush-grants")).docs).reduce((n, e) => n + (e.denied?.length ?? 0), 0);
-  check(kept2 === GRANT_CAPS.storedDenials && !sd.grants("big0").denied.stored.some(([, h]) => h === "h0.org:443"), "stored denials are bounded at 20,000 page-wide, the oldest evicted: " + kept2);
+  check(kept2 === GRANT_CAPS.storedDenials && !sd.grants("big0").denied.stored.some(([, h]) => h === "h0.org:443") && sd.grants("big0").denied.stored.some(([, h]) => h === "new.org:443") && sd.grants("big1").denied.stored.some(([, h]) => h === "h1.org:443"), "stored denials are bounded at 20,000 page-wide, the oldest evicted: " + kept2);
   delete globalThis.localStorage;
 }
 const W = "window.sagebrush.workspace";
