@@ -4476,6 +4476,16 @@
   "owner": "Sage kernel",
   "reason": "the closed-form strategy's cutoff (symbolic_sum's direct-sum bound, 2000 prefix terms of shifts in all): past it the exact unevaluated sum is returned; not an error, a truncation or a limit on what can be represented (ruling LIMIT-1, #781)"
  },
+ "lib/_sage_expr.py :: _sum_signed_rational :: raise NotImplementedError(\"the sum of an alternating series with a polynomial part is not available in sagebrush yet\") #0": {
+  "class": "coverage",
+  "owner": "symbolic sums (@sagebrush-matlab)",
+  "reason": "an unsupported case (Sage 10.10 answers ind, und or divergent by the polynomial; @sagebrush's N8 ruling), not a cap"
+ },
+ "lib/_sage_expr.py :: _sum_signed_rational :: raise NotImplementedError(\"the sum of an alternating series with a polynomial part is not available in sagebrush yet\") #1": {
+  "class": "coverage",
+  "owner": "symbolic sums (@sagebrush-matlab)",
+  "reason": "an unsupported case (Sage 10.10 answers ind, und or divergent by the polynomial; @sagebrush's N8 ruling), not a cap"
+ },
  "lib/_sage_expr.py :: inverse_laplace :: except NotImplementedError: #0": {
   "class": "none",
   "owner": "Sage kernel (@sagebrush-sage2)",
@@ -4485,6 +4495,11 @@
   "class": "none",
   "owner": "Sage kernel (@sagebrush-sage2)",
   "reason": "catches the internal no-rule signal (or partial_fraction's refusal) to fall back to the unevaluated form or the per-term path; it refuses nothing"
+ },
+ "lib/_sage_expr.py :: symbolic_sum :: NotImplementedError: the sum of an alternating series with a polynomial part is not available in sagebrush yet #0": {
+  "class": "coverage",
+  "owner": "symbolic sums (@sagebrush-matlab)",
+  "reason": "the doctest's expected output for that refusal (the review's N8 pin), not a cap"
  },
  "lib/_sage_ff.py ::  :: CONWAY_WORK = _limits.finalize()[\"ff.conway_work\"] #0": {
   "class": "3",

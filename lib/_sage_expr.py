@@ -3921,12 +3921,14 @@ def symbolic_sum(f, v, a, b, algorithm=None, hold=False):
         sage: symbolic_sum((-1)^k/k^2, k, 10^12, oo)  # sagebrush only
         sum((-1)^k/k^2, k, 1000000000000, +Infinity)
 
-    An alternating sum whose terms don't tend to 0 stays unevaluated (Sage
-    10.10 gives und for this one, ind for (-1)^k*k and "Sum is divergent."
+    An alternating sum with a polynomial part is not available yet (Sage
+    10.10 gives und for this one, ind for (-1)^k*k^3 and "Sum is divergent."
     for (-1)^k*(k + 1))::
 
         sage: symbolic_sum((-1)^k*k^2/(k + 1), k, 1, oo)  # sagebrush only
-        sum(k^2*(-1)^k/(k + 1), k, 1, +Infinity)
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: the sum of an alternating series with a polynomial part is not available in sagebrush yet
     """
     import sage_all as _sa
     f, v = _expr(f), _expr(v)
@@ -4142,6 +4144,16 @@ def _sum_signed_rational(f, v, a):
     import sage_all as _sa
     vn = _var_name(v)
     sp = _sign_power(f, v)
+    if f._op()[0] == "add":
+        # (-1)^k*k + (-1)^k/k is (-1)^k*(k + 1/k): every term alternating,
+        # with a polynomial part, is refused as below (other such sums stay
+        # unevaluated: their closed forms print in another order than Sage's)
+        tps = [_sign_power(t, v) for t in f.operands()]
+        if all(tp is not None and tp[0] == -1 for tp in tps):
+            rt = sum((tc * tr for _, tc, tr in tps), _expr(0)).simplify_rational()
+            num, den = rt.numerator(), rt.denominator()
+            if num.is_polynomial(v) and den.is_polynomial(v) and vn in num._names() and num.degree(v) >= den.degree(v):
+                raise NotImplementedError("the sum of an alternating series with a polynomial part is not available in sagebrush yet")
     if sp is None:
         return None
     s, c, r = sp
@@ -4149,15 +4161,17 @@ def _sum_signed_rational(f, v, a):
     # own numerator, with no denominator, and left this path: XE16)
     rt = r.simplify_rational()
     num, den = rt.numerator(), rt.denominator()
-    if not (num.is_polynomial(v) and den.is_polynomial(v)) or vn not in den._names():
+    if not (num.is_polynomial(v) and den.is_polynomial(v)):
+        return None
+    if vn not in den._names() and (s == 1 or vn not in num._names()):
         return None
     if num.degree(v) >= den.degree(v):
         # a polynomial part: its terms don't tend to 0, so the sum diverges,
-        # as Sage says; an alternating one stays unevaluated (Sage's answers
-        # there vary with the polynomial: ind, und or "Sum is divergent.")
+        # as Sage says; for an alternating one Sage's answer depends on the
+        # polynomial (ind, und or "Sum is divergent."), so it is refused
         if s == 1:
             raise ValueError("Sum is divergent.")
-        return None
+        raise NotImplementedError("the sum of an alternating series with a polynomial part is not available in sagebrush yet")
     terms = []  # (A, gamma, m): A/(v + gamma)^m
     pf = r.partial_fraction(v)
     for t in (pf.operands() if pf._op()[0] == "add" else [pf]):
