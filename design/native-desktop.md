@@ -1,12 +1,13 @@
 # Native engines in the desktop app
 
-*Status: plan r4, for review. No code accompanies it, and nothing is built until it is reviewed and William
+*Status: plan r5, for review. No code accompanies it, and nothing is built until it is reviewed and William
 approves (his rule of Oct 30). Owner: @sagebrush-remote-compute. Reviewers: astra (SEC), daybreak3 (ENGINE), daybreak4
 (PERF), daybreak2 (SIZE), agents-ui (app). r3 (bb03eabb) was PLAN CLEAR in all five lanes for route B alone. r4
 answers William (Nov 7, about 6:33 AM PST): "there are two approaches to no wasm native: js runtime and napi; cpython
 and oxpy. we need to fully consider both options". r4 compares the two routes in full, on the same cells and the
 same version, and recommends one. Part B is r3's route-B plan, unchanged. Whether anything is closed is for its
-reviewer to say. Still open whatever the reviews say: N1's proofs and William's decisions (§5).*
+reviewer to say. r5 adds §A.2b, the control bridge for permission and Stop (astra's NATIVE-A-CONTROL-1,
+daybreak3's NATIVE-A-STOP-1). Still open whatever the reviews say: N1's proofs and William's decisions (§5).*
 
 ## In plain words
 
@@ -24,7 +25,8 @@ reviewer to say. Still open whatever the reviews say: N1's proofs and William's 
   - B starts in tens of milliseconds, A in about half a second (one second with the Sage library).
 - **A runs exactly the website's Python, Sage, Magma and MATLAB.** Its Python can't touch files or the network
   except through the page's own permission checks, as in the browser. So the operating-system sandbox is only the
-  outer wall, and **no change to the permission rules** is needed.
+  outer wall, and **no change to the permission rules** is needed, given the ordering of the control bridge
+  (§A.2b).
 - **B gives standard CPython** and, later, real C extensions such as numpy. But it is a second Python whose behaviour
   differs from the website's, and it needs new file machinery and two exceptions to the permission rules.
 - **Recommendation: A for the desktop app's native engines, with B as a later, separately planned option** for real C
@@ -133,14 +135,14 @@ guess** (to be settled in N1).
 | **Startup** | **Measured:** about 0.4 s to the first line, about 1.1 s with Sage. A snapshot could cut it (**guess**). | **Measured:** 23–25 ms; 53–65 ms with Sage. |
 | **Threads** | **Measured:** rayon in the add-on, all cores (`aplist` 43.6 ms against 99.2 with one thread). The interpreter is single-threaded, as on the web. | **Measured:** rayon in the wheel (32.1 against 88.9). Python threads exist, but the GIL limits them. |
 | **Memory** | 64-bit, so the engine has no 4 GB cap (from the code). V8's heap limit for JS objects is set by a flag (`--max-old-space-size`); the > 4 GB case is N1 (**guess** that it passes). | 64-bit, no cap (from the code). |
-| **Files and permissions** | **From the code:** pyjs has no raw file system. Python's files are the in-memory `web/shims/fs`: the page delivers `{files}`, Python's changes come back as `{fsChanged}`, and every write is checked at the call by `setWritable`, with `PermissionError`, exactly as in the browser. There is no shell process (`!cmd` is just-bash, in JS: web/shell). So **no reconciliation transaction, no freeze barrier, no disk journal, and neither of the two semantic exceptions** of Part B §3.1 and §3.5: refusals happen at the call, revoke is immediate (`fsWritable`), as on the web. | **From the code:** CPython code makes real system calls, so Part B §3.1's delivery and reconciliation, the freeze barrier, the journal and both William exceptions are needed. |
+| **Files and permissions** | **From the code:** pyjs has no raw file system. Python's files are the in-memory `web/shims/fs`: the page delivers `{files}`, Python's changes come back as `{fsChanged}`, and every write is checked at the call by `setWritable`, with `PermissionError`, as in the browser. There is no shell process (`!cmd` is just-bash, in JS: web/shell). So **no reconciliation transaction, no freeze barrier, no disk journal, and neither of the two semantic exceptions** of Part B §3.1 and §3.5: refusals happen at the call. A revoke closes the page's gate at once and reaches a running cell through the control bridge (§A.2b), within its acknowledgement window. | **From the code:** CPython code makes real system calls, so Part B §3.1's delivery and reconciliation, the freeze barrier, the journal and both William exceptions are needed. |
 | **The OS sandbox** | Still required: the runtime and the add-on are native code, and a pyjs or engine bug must not become the user's account. The policy can be **stricter than B's**: no writable file system at all (a private temp at most), no sockets, no child processes (fork and exec denied on every OS, so the descendant problem of NATIVE-OS-1 disappears). V8 needs JIT memory: on macOS the hardened runtime's `com.apple.security.cs.allow-jit` entitlement, and seccomp must allow executable mappings (**guess** that both fit; Chromium runs V8 under seccomp and Seatbelt). Node's own permission model is **not** a sandbox (its docs: "a seat belt" for trusted code), so it is not relied on. | Required, with Part B §3.3's table: files limited to the working directory, no sockets, and the descendant problem (PID namespace or Job, macOS open). CPython has no JIT, so the profiles are simpler. |
-| **IPC and WorkerKernel fit** | **From the code:** the child runs `notebookSession`, the same protocol the page's `WorkerKernel` already speaks (init, runs with sage/magma/matlab, files, `fsWritable`, interact, completion, check, live data). The `NativeKernelPort` is a framed pipe carrying those messages. `input()` and Stop keep their SharedArrayBuffer design **inside** the child (a worker thread runs the session; the child's main thread answers the buffer), so no signals and no Windows special case. NATIVE-IPC-1 and IPC-2 don't arise. IPC-3 (two views) stays. | **From the code:** a new adapter maps WorkerKernel to child.py's narrower protocol (Part B §1.3: IPC-1, IPC-2, IPC-3), plus `input()` and Stop by signal or control message (Part B §1.4). |
+| **IPC and WorkerKernel fit** | **From the code:** the child runs `notebookSession`, the same protocol the page's `WorkerKernel` already speaks (init, runs with sage/magma/matlab, files, `fsWritable`, interact, completion, check, live data). The `NativeKernelPort` is a framed pipe carrying those messages. `input()`, Stop, the permission word and progress keep their SharedArrayBuffer design **inside** the child. The session runs in a worker thread, and the child's main thread applies control frames to the buffers and to the add-on (§A.2b). So no signals and no Windows special case. NATIVE-IPC-1 and IPC-2 don't arise. IPC-3 (two views) stays. | **From the code:** a new adapter maps WorkerKernel to child.py's narrower protocol (Part B §1.3: IPC-1, IPC-2, IPC-3), plus `input()` and Stop by signal or control message (Part B §1.4). |
 | **Size** | **Measured** (Linux x86_64, xz -9e): Node v26.13.0 stripped 27.3 MB (Bun 24.8, Deno 30.9) plus the add-on 3.1 MB, about **+30 MB**. pyjs and lib/ are already in the app for the wasm worker. | **Measured:** uv's CPython 3.13 install, untrimmed, 21.2 MB, plus the wheel's `.so` 1.7 MB and Python files, about **+23–28 MB**. A trimmed build is smaller (**guess**). |
 | **Signing** | The app, the launcher, the Node binary (with the JIT entitlement on macOS) and the add-on. | The app, the launcher, `python`, every `.so`/`.pyd`/DLL of the runtime, and the wheel. |
 | **Maintenance** | **One Python implementation**, the one the web needs anyway. New: an N-API build of engine/web (the spike is 12 lines), later engine/nd and the SIMD kernels too, a Node entry for the session with the web's file shim, and a pinned Node with its security updates. | **Two Python implementations:** every behaviour difference between CPython and pyjs is a user-visible difference between desktop and web. Two engine binding layers (PyO3 and the JSON ABI). A pinned CPython. |
 | **Native C extensions** (numpy, scipy, pandas) | **Never** through pyjs: it isn't CPython and has no C API. numpy, scipy and pandas stay Sagebrush's own implementations, as on the web, made faster by native engine kernels. | **Possible later:** real wheels load into CPython. Each is arbitrary native code, so it runs only under the OS sandbox, and the app's size grows with each. |
-| **Risks** | V8 under each OS sandbox (JIT entitlement, seccomp, AppContainer): N1. pyjs's startup. Node's release cadence and CVEs. The engine's interrupt and memory limits are wasm-specific today: natively, the Stop flag must be a shared atomic the host sets (engine/interrupt's native mode installs a SIGINT handler, which would fight Node's), and the limits must be re-plumbed. pyjs's slow spots (dicts, big gcd) are shared with the web. | Semantic drift between two interpreters, forever. The larger security design of Part B §3 and its William exceptions. Magma, MATLAB and interact gaps. NAT-BIGINT-1. The macOS descendant question. |
+| **Risks** | V8 under each OS sandbox (JIT entitlement, seccomp, AppContainer): N1. pyjs's startup. Node's release cadence and CVEs. The engine's interrupt and memory limits are wasm-specific today. Natively, Stop needs §A.2b's bridge (engine/interrupt's native mode installs a SIGINT handler, which must not run in the child), and the limits must be re-plumbed. pyjs's slow spots (dicts, big gcd) are shared with the web. | Semantic drift between two interpreters, forever. The larger security design of Part B §3 and its William exceptions. Magma, MATLAB and interact gaps. NAT-BIGINT-1. The macOS descendant question. |
 
 ## 4. Recommendation
 
@@ -185,8 +187,8 @@ extensions and "your own Python".**
   Node runs any JavaScript.
 - **The child's entry** is a Node build of `web/worker.ts`'s session: `notebookSession` with **`web/shims/fs`** (the
   in-memory file system), not `sagebrush notebook`'s real files. It runs in a worker thread, so the SharedArrayBuffer
-  `input()` and interrupt designs work unchanged. The child's main thread relays framed messages between stdio and
-  that worker.
+  designs work between the child's main thread and that worker. The main thread relays data frames and applies
+  control frames (§A.2b).
 - Engine modules that have no native build yet keep running as **wasm inside the same child** (Node runs wasm too).
   So the change is incremental, and each module's native build is its own reviewed step. engine/web, which carries
   the hot paths measured here (modular symbols, a_p, factoring, exact linear algebra), is native from the first
@@ -202,12 +204,129 @@ extensions and "your own Python".**
   NATIVE-IPC-3 contract, unchanged.
 - No mode map is needed: Python, Sage, Magma and MATLAB are all the session's own modes.
 
+### A.2b The control bridge: permission, Stop, input, live data, progress (NATIVE-A-CONTROL-1, NATIVE-A-STOP-1)
+
+In the browser the page and the worker share memory. The page writes the files-permission word and the interrupt flag
+directly (worker-kernel.js `setWritable`, web/worker.ts `writableWord`, `R.INTR`), and the worker reads them **while a
+cell runs**, at its next write or check. A pipe carries values, not shared memory, and a message queued to a worker
+that is busy in a cell (or blocked in a synchronous engine call) isn't read until the cell ends. So route A defines
+the boundaries and what crosses each:
+
+| Boundary | What crosses it |
+|---|---|
+| Tauri host ↔ child process | framed messages only. **Two pipe pairs:** data (runs, files, output) and **control** (permission, Stop, input and live-data answers, acknowledgements), so a large file or output never delays a control frame. Both are length-bounded and validated; malformed framing retires the generation. |
+| child main thread ↔ session worker (worker_threads) | the **shared buffers, all child-local:** `WRITABLE`, `INTR` (pyjs's interrupt word), `RUN` (the active host request ID and a stop bit), the progress slots, and each `input()`/live-data answer buffer. The main thread creates them **before** it starts the worker and passes them in `workerData`. The Node entry is given them explicitly: no `crossOriginIsolated` test, and no fallback to the between-runs `fsWritable` message. A child without them **refuses to start**. |
+| child main thread ↔ Rust add-on | **add-on control exports** on a process-global word inside the add-on (below). The main thread never runs Python and never calls the engine, so it stays responsive while the worker is blocked in a call. |
+
+**The child main thread is the only receiver of control frames.** It applies each one to the shared buffers or the
+add-on and acknowledges it. It never forwards a control frame into the worker's message queue.
+
+#### Files permission (NATIVE-A-CONTROL-1)
+
+- **Version and authority:**
+  - The host keeps a **monotonic permission version** `pv` for each (document identity, generation).
+  - A change is sent as `{ctl: "writable", gen, pv, on}` on the control pipe.
+  - The child main thread applies it only if `gen` is its own and `pv` is greater than the last it applied: it does
+    `Atomics.store(WRITABLE, on)` and replies `{ack: "writable", gen, pv}`.
+  - An older or equal `pv` (a delayed earlier allow) and any other generation's frame are ignored. **A stale allow
+    can't reopen writes.**
+- **The durable fence is the page's, at once:**
+  - On revoke the page's gate closes immediately: the page admits a `fsChanged` only if `perms.may(owner, "files")`
+    holds at admission (web/index.html, the worker message handler). So no file reaches the person's storage after
+    the revoke, whatever the child does.
+  - The host also drops every `fsChanged` from a retired or older generation.
+- **When revoke completes:** at the child's acknowledgement of that `pv`. Until then the in-flight cell can still
+  write **in the child's memory** (the shim); those writes are refused at the page (the files bar shows, as for
+  `fsRefused`). The page then puts back the child's copy of each refused path, with an `fsPut` of the page's version.
+  - The browser has the same race for any change queued before a revoke and drained after it. Route A widens the
+    window from a memory store to a pipe round trip. N1 measures it, and the ack deadline below bounds it.
+  - So route A claims **no new permission exception**, provided this ordering holds. SEC rules on whether the
+    window is acceptable; if not, the fallback is to stop the run at revoke.
+- **Failure is closed:** if the acknowledgement doesn't arrive within a deadline fixed in N1 (proposed 250 ms), or the
+  control pipe closes, errors or carries a malformed frame, the host **retires the generation**: the tree is killed
+  and the kill confirmed, every later frame from it is dropped, and the document restarts with the current
+  permission.
+- **Startup:** the host's `init` carries the current `pv` and `on`. The child stores `WRITABLE` **before** it starts the
+  session worker, and `ready` echoes the `pv`. The page sends no run before `ready`.
+- **Allow:** a higher `pv` with `on`. Writes refused earlier aren't replayed (as today).
+
+#### Stop (NATIVE-A-STOP-1)
+
+- **The host validates first:** it checks `(generation, attachment ID, host request ID)` under NATIVE-IPC-3: the
+  request must be the attachment's own and **currently running**. Then it sends `{ctl: "stop", gen, req}` on the
+  control pipe and starts the hard-kill timer (today's 2-second bound).
+- **One token per run, in two words.** The token is the host request ID, unique for the kernel's life.
+  - **`RUN`**, child-local, read by pyjs: `token × 2 + stopbit`.
+  - **`ARMED`**, inside the add-on, read by the Rust engine: the same layout.
+  - When the session worker starts a run it stores `RUN = token × 2` and clears `INTR`.
+  - Around **every** add-on call (`call`, `symCall`, `mpCall`), the add-on stores `ARMED = token × 2` on entry and
+    sets it back to 0 on exit, by compare-and-swap on its own token only.
+- **Applying a Stop:** the child main thread does compare-and-swap on both words, setting the stop bit **only if the
+  token matches**. It then sets `INTR` (pyjs raises `KeyboardInterrupt` at its next check, as in the browser), wakes
+  any `input()` or live-data wait (`Atomics.notify`, as the browser's Stop does), and replies
+  `{ack: "stop", gen, req, applied}`.
+  - A late, duplicate or stale-generation Stop finds another token (or none) and is **inert**: `applied: false`.
+  - Ending a call clears only its own token, so it can't erase a Stop meant for a newer call.
+  - Each run starts clear.
+- **The engine side:** a new feature of `engine/interrupt`, `host-word`, alongside `wasm-host`.
+  - `check()` and `check_coarse()` read `ARMED`'s stop bit. Rayon helper threads read the same process-global word,
+    so a parallel call stops too.
+  - **No SIGINT handler** is installed: no `SigintGuard`. The launcher starts the child in its own session, with
+    SIGINT ignored, so no terminal or signal path reaches it.
+  - The add-on catches the `Interrupted` unwind (`sagebrush_interrupt::catch`) and returns an interrupted reply. The
+    runtime turns that into `KeyboardInterrupt`, and the add-on stays usable: no instance to retire, unlike wasm's
+    trap.
+- **Ordering:**
+  1. The host sends the Stop.
+  2. The child acknowledges it (`applied` true or false).
+  3. The run ends, and the worker emits its terminal `done` ("interrupted").
+  4. The host forwards that `done` to the origin view only.
+- **Hard kill:** if there is no terminal `done` for that request within the bound, the host:
+  - kills the tree and confirms it;
+  - fences the generation, so no later `done` from it is delivered;
+  - sends the origin view **one** terminal "interrupted: restarted" outcome;
+  - announces the restart to the other views (NATIVE-IPC-3 fanout).
+
+#### `input()`, live data and progress
+
+- **`input()` and live data:** the worker asks as today: `{id, input}` or `{id, liveData}`, with its child-local
+  buffer. The child main thread relays the request to the host on the data pipe.
+  - The answer comes back as `{ctl: "input" | "live", gen, req, …}`. It is accepted only for the active request of
+    that attachment. The main thread writes the buffer and wakes the worker.
+  - Stop, a deadline or a detach answers "aborted", as the browser's `live.abort()` and `retireInputs()` do. A late
+    answer writes nothing.
+- **Progress:** during a run the child main thread samples the progress slots, at most 10 times a second, and sends
+  the snapshots as data frames. The page shows snapshots instead of reading the shared slots.
+
+#### Controls (N1 shows the path; N2 pins it)
+
+- **N1:** the control path demonstrated **during a deliberately blocking add-on call**, not by the engine requesting
+  its own interrupt: Stop reaches the Rust check, and a permission change reaches a busy pure-Python cell.
+- **N2, permission pins:**
+  - a busy cell that writes a file in a loop observes revoke **at its next write after the acknowledgement**;
+  - a write between the revoke and the acknowledgement is refused at the page and the child's copy restored;
+  - a delayed old allow, and an old generation's acknowledgement, can't reopen writes;
+  - startup with writes off refuses the first write;
+  - a lost acknowledgement, a closed control pipe and a malformed control frame each retire the generation, with
+    nothing persisted after the revoke.
+- **N2, Stop pins:**
+  - Stop during each of `call`, `symCall` and `mpCall`, including one rayon-parallel call;
+  - a stopped call followed by a successful call in the same interpreter;
+  - Stop just before completion, and a late, duplicate or stale-generation Stop, none cancelling the next request;
+  - two attached views with colliding page IDs, where only the origin's active request stops;
+  - an uncooperative call reaching the hard-kill bound, with exactly one terminal outcome and no later `done` from
+    the retired generation;
+  - no SIGINT handler installed or changed in the child.
+- **N2, input and live-data pins:**
+  - a blocked `input()` or live-data wait answered, stopped and detached;
+  - a late answer writing nothing.
+
 ### A.3 Files and permissions
 
 - The page delivers the read scope as `{files}`, and later `{fsPut}`, as it does for the wasm worker.
 - Python's changes come back as `{fsChanged}` and enter `drainFiles()`, the queue wasm writes use, with today's
   semantics.
-- `{fsWritable}` turns writes on and off at once.
+- Permission changes follow §A.2b: the page's gate at once, the running cell after the acknowledgement.
 - Narrowing the read scope behaves as it does for the wasm worker today: files already delivered stay in the
   child's memory until it restarts. The confinement spec's existing worker semantics apply, unchanged.
 - **There is no working directory on disk, no reconciliation, no freeze, no journal.**
@@ -236,8 +355,8 @@ child process.
 | | What | Gate |
 |---|---|---|
 | **N0** | This plan, reviewed; William's choice of route and the decisions of §5 | all lanes; William |
-| **N1** | Spikes and measurements: **(1)** Node under §A.5's policy on macOS, Linux and Windows, with SEC's escape tests and the JIT under each sandbox. **(2)** daybreak4's measurements at one commit, A against W (in each OS's web view) and against B: the cells here, with the engine called directly (no shim), threads on and off, the > 4 GB case, startup with and without a V8 snapshot. **(3)** The framing (`v8.serialize` or JSON plus binary) by cost. **(4)** Size per OS and architecture: Node against an embedded V8 host (deno_core) against Bun, under Part B §4's budget (+40 MB compressed). **(5)** Native Stop: a host-set atomic flag polled by engine/interrupt (no SIGINT handler in the child). | SEC, ENGINE, PERF, SIZE |
-| **N2** | macOS and Linux: the add-on (engine/web; nd and the SIMD kernels as separate reviewed steps), the child entry with `web/shims/fs`, the port, the launcher, the engine's limits natively, broker-only network, the fallback (Part B §3.6), and the judges' native lines. **#822's option 1 ends** as in Part B's N2. | all lanes |
+| **N1** | Spikes and measurements: **(1)** Node under §A.5's policy on macOS, Linux and Windows, with SEC's escape tests and the JIT under each sandbox. **(2)** daybreak4's measurements at one commit, A against W (in each OS's web view) and against B: the cells here, with the engine called directly (no shim), threads on and off, the > 4 GB case, startup with and without a V8 snapshot. **(3)** The framing (`v8.serialize` or JSON plus binary) by cost. **(4)** Size per OS and architecture: Node against an embedded V8 host (deno_core) against Bun, under Part B §4's budget (+40 MB compressed). **(5)** The control bridge of §A.2b: Stop reaching the Rust check during a deliberately blocking add-on call, a permission change reaching a busy cell, and the acknowledgement window measured. | SEC, ENGINE, PERF, SIZE |
+| **N2** | macOS and Linux: the add-on (engine/web; nd and the SIMD kernels as separate reviewed steps), the child entry with `web/shims/fs`, the port, the control bridge with its pins (§A.2b), `engine/interrupt`'s `host-word` feature, the launcher, the engine's limits natively, broker-only network, the fallback (Part B §3.6), and the judges' native lines. **#822's option 1 ends** as in Part B's N2. | all lanes |
 | **N3** | Windows | all lanes |
 | **N4** | Native becomes the default. No interact or bigint gate is needed: both are the web's own. | William |
 | **N5** | Later, each planned separately: **route B** for real C extensions, native terminals, Android native, warm kernels | — |
