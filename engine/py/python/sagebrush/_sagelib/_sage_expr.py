@@ -3929,6 +3929,37 @@ def symbolic_sum(f, v, a, b, algorithm=None, hold=False):
         Traceback (most recent call last):
         ...
         NotImplementedError: the sum of an alternating series with a polynomial part is not available in sagebrush yet
+        sage: symbolic_sum((-1)^k*k, k, 1, oo)  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: the sum of an alternating series with a polynomial part is not available in sagebrush yet
+
+    So is an addition whose terms all alternate, with a polynomial part
+    (Sage 10.10: und for both)::
+
+        sage: symbolic_sum((-1)^k*k + (-1)^k/k, k, 1, oo)  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: the sum of an alternating series with a polynomial part is not available in sagebrush yet
+        sage: symbolic_sum((-1)^k + (-1)^k/k, k, 1, oo)  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: the sum of an alternating series with a polynomial part is not available in sagebrush yet
+
+    An alternating constant diverges, however written; terms that don't all
+    alternate are not refused::
+
+        sage: symbolic_sum((-1)^k*(k + 1) - (-1)^k*k, k, 1, oo)
+        Traceback (most recent call last):
+        ...
+        ValueError: Sum is divergent.
+        sage: symbolic_sum(k + 1/k, k, 1, oo)
+        Traceback (most recent call last):
+        ...
+        ValueError: Sum is divergent.
+        sage: r = symbolic_sum((-1)^k*k + k, k, 1, oo)
+        sage: r.operands()[1:], bool(r.operands()[0] == (-1)^k*k + k)
+        ([k, 1, +Infinity], True)
     """
     import sage_all as _sa
     f, v = _expr(f), _expr(v)
@@ -4151,8 +4182,13 @@ def _sum_signed_rational(f, v, a):
         tps = [_sign_power(t, v) for t in f.operands()]
         if all(tp is not None and tp[0] == -1 for tp in tps):
             rt = sum((tc * tr for _, tc, tr in tps), _expr(0)).simplify_rational()
+            if vn not in rt._names():
+                # ((-1)^k*(k + 1) - (-1)^k*k: (-1)^k times a constant, as Sage)
+                if rt.is_trivial_zero():
+                    return _expr(0)
+                raise ValueError("Sum is divergent.")
             num, den = rt.numerator(), rt.denominator()
-            if num.is_polynomial(v) and den.is_polynomial(v) and vn in num._names() and num.degree(v) >= den.degree(v):
+            if num.is_polynomial(v) and den.is_polynomial(v) and num.degree(v) >= den.degree(v):
                 raise NotImplementedError("the sum of an alternating series with a polynomial part is not available in sagebrush yet")
     if sp is None:
         return None

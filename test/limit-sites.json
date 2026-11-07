@@ -4501,6 +4501,21 @@
   "owner": "symbolic sums (@sagebrush-matlab)",
   "reason": "the doctest's expected output for that refusal (the review's N8 pin), not a cap"
  },
+ "lib/_sage_expr.py :: symbolic_sum :: NotImplementedError: the sum of an alternating series with a polynomial part is not available in sagebrush yet #1": {
+  "class": "coverage",
+  "owner": "symbolic sums (@sagebrush-matlab)",
+  "reason": "doctests' expected output for that refusal (the review's N11, N13, N15 pins), not a cap"
+ },
+ "lib/_sage_expr.py :: symbolic_sum :: NotImplementedError: the sum of an alternating series with a polynomial part is not available in sagebrush yet #2": {
+  "class": "coverage",
+  "owner": "symbolic sums (@sagebrush-matlab)",
+  "reason": "doctests' expected output for that refusal (the review's N11, N13, N15 pins), not a cap"
+ },
+ "lib/_sage_expr.py :: symbolic_sum :: NotImplementedError: the sum of an alternating series with a polynomial part is not available in sagebrush yet #3": {
+  "class": "coverage",
+  "owner": "symbolic sums (@sagebrush-matlab)",
+  "reason": "doctests' expected output for that refusal (the review's N11, N13, N15 pins), not a cap"
+ },
  "lib/_sage_ff.py ::  :: CONWAY_WORK = _limits.finalize()[\"ff.conway_work\"] #0": {
   "class": "3",
   "owner": "finite fields + configuration",
