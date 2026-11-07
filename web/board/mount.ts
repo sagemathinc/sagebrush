@@ -35,6 +35,7 @@
 // step(n), snapshot(), edit(f), run(), outputs(), versions(), version(i),
 // ...), and destroy().
 import { Board, type Camera, type CodeHost, type Edge, type Item, plainTitle } from "./board";
+import { isFlagMode } from "../../src/modes";
 import { renderFileMenu, fileMenuKey } from "../workspace/filemenu";
 import { boardFileText } from "./file-text";
 import { answered, asksOf, ASK_LIMITS } from "./ask";
@@ -1472,7 +1473,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   $("tidy").onclick = () => inEdit() && editor.commit((d) => { const p = pageOf(d, pageIx); Object.assign(p, tidy(p)); });
   // the language of the board's code (one per board): Python or Sage
   for (const b of root.querySelectorAll<HTMLButtonElement>("[data-sbb=lang] button")) {
-    b.onclick = () => inEdit() && editor.commit((d) => { const m = b.dataset.mode; if (m === "sage" || m === "magma" || m === "matlab") d.mode = m; else delete d.mode; });
+    b.onclick = () => inEdit() && editor.commit((d) => { const m = b.dataset.mode; if (isFlagMode(m)) d.mode = m; else delete d.mode; });
   }
   $("pgprev").onclick = () => go(() => page(pageIx - 1));
   $("pgnext").onclick = () => go(() => page(pageIx + 1));

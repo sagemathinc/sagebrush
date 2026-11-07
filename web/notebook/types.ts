@@ -4,6 +4,8 @@
 // IdbStore (stores.js); a CoCalc project kernel and a CoCalc syncdb store
 // implement the same interfaces.
 
+import type { DocumentMode } from "../../src/modes";
+
 /** Jupyter's output records, as in .ipynb files. */
 export type Output =
   | { output_type: "stream"; name: "stdout" | "stderr"; text: string }
@@ -28,7 +30,7 @@ export interface Cell {
 }
 
 export interface NotebookDoc {
-  mode: "python" | "sage" | "magma" | "matlab";
+  mode: DocumentMode;
   cells: Cell[];
   /** Anything else (name, id, updated, ...) is kept as it is. */
   [key: string]: unknown;
