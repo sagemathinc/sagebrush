@@ -14,17 +14,19 @@
 //   size changes are height messages, at most HEIGHT_HZ a second, the last always sent.
 // - The frame never navigates, opens, downloads, prints or asks the host to do work:
 //   the schema has no such message.
-import { BOUNDS, decode, encode } from "./protocol.js";
+import { LIMITS, decode, encode } from "./protocol.js";
 import { safeHtml } from "../safe-html.ts";
 import { safeSvg } from "../safe-svg.js";
 
-export const READY_MS = 3000; // (the font/picture readiness deadline: a measurement candidate)
-export const HEIGHT_HZ = 30; // (height messages a second, at most)
+// (readyMs: the font/picture readiness deadline, a measurement candidate; heightHz: height messages a second, at most)
+export const SHELL_LIMITS = Object.freeze({ readyMs: 3000, heightHz: 30 });
+export const READY_MS = SHELL_LIMITS.readyMs;
+export const HEIGHT_HZ = SHELL_LIMITS.heightHz;
 
 let port = null, gen = -1, area = "", committed = false;
 const root = document.getElementById("root");
 const post = (type, fields) => { if (port) port.postMessage(encode("to-host", type, fields)); };
-const measure = () => Math.min(BOUNDS.heightPx, Math.ceil(root.getBoundingClientRect().height));
+const measure = () => Math.min(LIMITS.heightPx, Math.ceil(root.getBoundingClientRect().height));
 
 addEventListener("message", function adopt(e) {
   if (port || e.source !== parent || !e.data || e.data.sbOutIso !== 1 || e.ports.length !== 1) return;

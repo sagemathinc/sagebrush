@@ -32,3 +32,29 @@ export async function buildOutputShell(build: (o: any) => Promise<any>, entry: s
     styleHash,
   };
 }
+
+/** The hosted shell's files for one environment's site: its page and the response headers the site serves it with. */
+export function hostedShellFiles(built: { hosted: string; scriptHash: string; styleHash: string }, ancestors: string[]): Record<string, string> {
+  const policy = outputShellPolicy([built.scriptHash], [built.styleHash], ancestors.length ? ancestors : ["'none'"]);
+  return {
+    "index.html": built.hosted,
+    // (Cloudflare Pages-style headers: the shell page alone; the site serves nothing else, sets no cookie, never redirects)
+    "_headers": [
+      "/",
+      `  Content-Security-Policy: ${policy}`,
+      "  Cross-Origin-Embedder-Policy: require-corp",
+      "  Cross-Origin-Resource-Policy: cross-origin",
+      "  X-Content-Type-Options: nosniff",
+      "  Referrer-Policy: no-referrer",
+      "  Cache-Control: public, max-age=0, must-revalidate, no-transform",
+      "/index.html",
+      `  Content-Security-Policy: ${policy}`,
+      "  Cross-Origin-Embedder-Policy: require-corp",
+      "  Cross-Origin-Resource-Policy: cross-origin",
+      "  X-Content-Type-Options: nosniff",
+      "  Referrer-Policy: no-referrer",
+      "  Cache-Control: public, max-age=0, must-revalidate, no-transform",
+      "",
+    ].join("\n"),
+  };
+}

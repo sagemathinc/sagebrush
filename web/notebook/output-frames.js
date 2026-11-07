@@ -27,12 +27,18 @@
 //
 // The bounds are phase-1 measurement candidates (frozen with their provenance from the
 // 50/200-area measurements, daybreak3's ruling, Nov 7), not approved defaults.
-import { BOUNDS, decode, encode } from "../output-shell/protocol.js";
+import { LIMITS, decode, encode } from "../output-shell/protocol.js";
 
-export const LOAD_MS = 10000; // (the shell must say ready within this)
-export const COMMIT_MS = 6000; // (a render must commit within this after it is sent)
-export const INITIAL_PX = 120; // (a placeholder's height before any commit)
-export const DEFAULT_CAP = 24; // (live frames a page: a candidate, measured in phase 1)
+// (loadMs: the shell must say ready within this; commitMs: a render must commit within this after it is sent;
+// initialPx: a placeholder's height before any commit; cap: live frames a page, derived from the dense 50/200
+// measurements, web/test-output-frames.mjs, with Firefox's and WebKit's figures to come)
+export const FRAME_LIMITS = Object.freeze({ loadMs: 10000, commitMs: 6000, initialPx: 120, cap: 24 });
+export const LOAD_MS = FRAME_LIMITS.loadMs;
+export const COMMIT_MS = FRAME_LIMITS.commitMs;
+export const INITIAL_PX = FRAME_LIMITS.initialPx;
+export const DEFAULT_CAP = FRAME_LIMITS.cap;
+// (the packaged shell page, web/output-shell/build.mts: every bundle's __SB_OUTPUT_SHELL__, web/build.ts)
+export const PACKAGED_SHELL = typeof __SB_OUTPUT_SHELL__ === "string" ? __SB_OUTPUT_SHELL__ : "";
 
 /**
  * `srcdoc`: the packaged shell page (or null); `url`: the hosted shell's pinned URL (or null): exactly one.
@@ -155,6 +161,7 @@ export function createOutputFrames({ srcdoc = null, url = null, cap = DEFAULT_CA
       if (a.ready) return;
       a.ready = true;
       clearTimeout(a.loadTimer);
+      onEvent({ type: "ready", area: a.id });
       a.port.postMessage(encode("to-frame", "theme", { theme }));
       return send(a);
     }
@@ -188,7 +195,7 @@ export function createOutputFrames({ srcdoc = null, url = null, cap = DEFAULT_CA
       const api = {
         /** Show these admitted outputs ([{id, kind, body}]): a new generation; an older one ends now. */
         render(outputs) {
-          if (!Array.isArray(outputs) || outputs.length > BOUNDS.outputsPerRender) throw new Error("output area: too many outputs");
+          if (!Array.isArray(outputs) || outputs.length > LIMITS.outputsPerRender) throw new Error("output area: too many outputs");
           if (a.pending) end(a, "error", "replaced");
           a.outputs = outputs.map((o) => ({ id: o.id, kind: o.kind, body: o.body }));
           a.generation++;

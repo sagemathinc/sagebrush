@@ -9,17 +9,14 @@
 // host -> frame:  render {generation, area, outputs: [{id, kind, body}]}, theme {theme}, dispose {}
 // frame -> host:  ready {}, committed {generation, area, ids, height}, height {generation, height}, error {generation, reason}
 //
-// The bounds below are phase-1 measurement candidates, not approved defaults
-// (astra, Nov 7): they are frozen, with their provenance, from the 50/200-area
-// measurements before rich rendering is enabled.
+// The limits below (in the limits census, test/limit-sites.json) are phase-1
+// measurement candidates, not approved defaults (astra, Nov 7): they are frozen,
+// with their provenance, from the 50/200-area measurements before rich rendering
+// is enabled.  messageChars: one message, serialized (its UTF-16 length, checked
+// before JSON.parse); outputsPerRender: the outputs of one cell area; heightPx: a
+// reported height (larger is refused).
 export const VERSION = 1;
-export const BOUNDS = Object.freeze({
-  messageChars: 4 * 1024 * 1024, // (one message, serialized: its UTF-16 length, checked before JSON.parse)
-  outputsPerRender: 64, // (the outputs of one cell area)
-  idChars: 64,
-  heightPx: 32768, // (a reported height: larger is refused)
-  reasonChars: 200,
-});
+export const LIMITS = Object.freeze({ messageChars: 4 * 1024 * 1024, outputsPerRender: 64, idChars: 64, heightPx: 32768, reasonChars: 200 });
 // (a render's output kinds: what the shell knows how to draw; phase 1 migrates no MIME)
 export const KINDS = Object.freeze(["html", "svg", "text"]);
 export const THEMES = Object.freeze(["light", "dark", "contrast"]);
@@ -38,15 +35,15 @@ const SHAPES = {
   },
 };
 
-const isId = (v) => typeof v === "string" && v.length > 0 && v.length <= BOUNDS.idChars && /^[A-Za-z0-9_.:-]+$/.test(v);
+const isId = (v) => typeof v === "string" && v.length > 0 && v.length <= LIMITS.idChars && /^[A-Za-z0-9_.:-]+$/.test(v);
 const CHECK = {
   gen: (v) => Number.isSafeInteger(v) && v >= 0,
   id: isId,
-  ids: (v) => Array.isArray(v) && v.length <= BOUNDS.outputsPerRender && v.every(isId) && new Set(v).size === v.length,
-  height: (v) => typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= BOUNDS.heightPx,
-  reason: (v) => typeof v === "string" && v.length <= BOUNDS.reasonChars,
+  ids: (v) => Array.isArray(v) && v.length <= LIMITS.outputsPerRender && v.every(isId) && new Set(v).size === v.length,
+  height: (v) => typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= LIMITS.heightPx,
+  reason: (v) => typeof v === "string" && v.length <= LIMITS.reasonChars,
   theme: (v) => THEMES.includes(v),
-  outputs: (v) => Array.isArray(v) && v.length <= BOUNDS.outputsPerRender && new Set(v.map((o) => o?.id)).size === v.length &&
+  outputs: (v) => Array.isArray(v) && v.length <= LIMITS.outputsPerRender && new Set(v.map((o) => o?.id)).size === v.length &&
     v.every((o) => o && typeof o === "object" && !Array.isArray(o) && Object.keys(o).length === 3 && isId(o.id) && KINDS.includes(o.kind) && typeof o.body === "string"),
 };
 
@@ -55,13 +52,13 @@ export function encode(dir, type, fields = {}) {
   const m = { v: VERSION, type, ...fields };
   if (!valid(dir, m)) throw new Error(`not a valid ${dir} ${type} message`);
   const s = JSON.stringify(m);
-  if (s.length > BOUNDS.messageChars) throw new Error(`a ${type} message over ${BOUNDS.messageChars} characters`);
+  if (s.length > LIMITS.messageChars) throw new Error(`a ${type} message over ${LIMITS.messageChars} characters`);
   return s;
 }
 
 /** The message `data` carries for `dir`, or null: not a string within the cap, not JSON, or not in the schema. */
 export function decode(dir, data) {
-  if (typeof data !== "string" || data.length > BOUNDS.messageChars) return null; // (before any parse)
+  if (typeof data !== "string" || data.length > LIMITS.messageChars) return null; // (before any parse)
   let m;
   try { m = JSON.parse(data); } catch { return null; }
   return valid(dir, m) ? m : null;
