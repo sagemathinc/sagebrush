@@ -287,6 +287,26 @@ async def test_L17_L19_retirement():
     assert c.closed and c.close_code == 1002
 
 
+@aio
+async def test_events_cancelled_before_their_stream():
+    """r3.1 R3-1, the page tunnel's case: an events request cancelled before its stream began streams nothing, and
+    `retired` is still its last frame (so the page's retired set empties, and the id no longer counts as open)."""
+    s, c, gw, p = await bound()
+    p.frame("g.run", {"b": "b1"}, run_body("r1", code="print(1)"))
+    await settle()
+    hold = asyncio.Event()
+
+    async def h(rid, conn):
+        await hold.wait()
+    gw.auth_hold = h
+    rid = p.frame("g.events", {"b": "b1", "r": "r1", "after": 0})
+    await asyncio.sleep(0)
+    gw.cancel(c, rid)
+    hold.set()
+    await settle()
+    assert p.answers(rid) == [{"id": rid, "retired": True}] and not gw._state(c).open and not c.closed, p.answers(rid)
+
+
 # ================= 4.5 streams
 
 @aio

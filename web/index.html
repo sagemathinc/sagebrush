@@ -401,7 +401,7 @@
       <ul id="docresults" role="listbox" aria-label="Matching functions" hidden></ul>
     </div>
     <select id="autorun" hidden aria-label="Automatic reruns" title="When a cell runs, the cells that depend on it rerun automatically while they fit in this time; slower ones wait, marked stale"><option value="2000">Auto-run: 2 s</option><option value="10000">Auto-run: 10 s</option><option value="always">Auto-run: always</option><option value="never">Auto-run: never</option></select>
-    <select id="kernelpick" hidden aria-label="Where code runs" title="Where this notebook's code runs: in this browser, or on remote compute (a preview: simulated)"><option value="local">This browser</option><option value="gpu">Remote compute (preview)</option></select>
+    <select id="kernelpick" hidden aria-label="Where code runs" title="Where this notebook's code runs: in this browser, on your own computer (paired), or on remote compute (a preview: simulated)"><option value="local">This browser</option><option value="paired" title="Runs on your own computer, with your files">Your computer (paired)</option><option value="gpu">Remote compute (preview)</option></select>
     <button id="wsfilesbtn" aria-pressed="false" aria-controls="wssidebar" title="Your notebooks, boards and files (in this browser)" hidden>Files</button>
     <select id="theme" aria-label="Color theme"><option value="system">◐ System</option><option value="light">☀ Light</option><option value="dark">☾ Dark</option></select>
   </div>
@@ -943,8 +943,22 @@ const analyzer = {
 // or choosing remote compute again ends whatever is pending or installed.  The module's own load is fenced the same way:
 // `remoteGen` is taken before its await, and changed by every leave.
 const REMOTE_PREVIEW = new URLSearchParams(location.search).get("remote") === "1";
+// "Your computer (paired)" (web/notebook/pair-tunnel.js; local-kernel plan r2 §6): offered with ?remote=1, or when the
+// page is opened from `sagebrush remote --loopback`'s link (?kpair=CODE&kport=PORT).  The code is a secret: it is
+// taken off the address at once (no history entry, no later Referer, no shared link keeps it), held in memory only,
+// and only prefills the pairing sheet; Connect is still the person's.
+const PAIR_PREFILL = (() => {
+  const q = new URLSearchParams(location.search);
+  if (!q.has("kpair") && !q.has("kport")) return null;
+  const code = q.get("kpair"), port = q.get("kport");
+  q.delete("kpair");
+  q.delete("kport");
+  history.replaceState(history.state, "", location.pathname + (q.size ? `?${q}` : "") + location.hash);
+  return /^[A-Za-z2-7]{26}$/.test(code ?? "") && /^[1-9]\d{0,4}$/.test(port ?? "") && Number(port) <= 65535 ? { code: code.toUpperCase(), port: Number(port) } : null;
+})();
+const PAIRED_OFFERED = REMOTE_PREVIEW || PAIR_PREFILL !== null;
 const kernelPick = $("#kernelpick");
-let remoteMod = null, remoteLoad = null, remoteSw = null, remoteGen = 0;
+let remoteMod = null, remoteLoad = null, remoteSw = null, pairedSw = null, pairedStart = null, remoteGen = 0, pairPrefill = PAIR_PREFILL;
 // The status line's actions for remote compute ([{label, run, disabled}]; [] removes them).  Real buttons, reachable by
 // keyboard; when one that has the focus goes, the focus goes to the notebook's active cell, not to the page.
 function remoteActions(list) {
@@ -974,18 +988,40 @@ function remoteActions(list) {
 function leaveRemote() {
   remoteGen++;
   remoteSw?.leave();
+  pairedSw?.leave();
   kernelPick.value = "local";
 }
 async function useRemote() {
   // (This browser: the notebook's own interpreter; useKernel ends remote compute and any pending attempt)
-  if (kernelPick.value !== "gpu") return useKernel(current.id);
+  const kind = kernelPick.value;
+  if (kind !== "gpu" && kind !== "paired") return useKernel(current.id);
   const gen = ++remoteGen, id = current.id;
   remoteSw?.leave(); // (an attempt begun before this one ends now, even while this one loads)
+  pairedSw?.leave();
   try {
     remoteLoad ??= import(new URL("sagebrush-remote.js", location.href).href);
     const mod = await remoteLoad;
-    if (gen !== remoteGen || current.id !== id || kernelPick.value !== "gpu") return;
+    if (gen !== remoteGen || current.id !== id || kernelPick.value !== kind) return;
     remoteMod = mod;
+    if (kind === "paired") {
+      pairedStart ??= mod.pairedStarter();
+      pairedSw ??= mod.remoteSwitch({
+        currentId: () => current.id,
+        picked: () => kernelPick.value,
+        pickLocal: () => { kernelPick.value = "local"; },
+        status: (t) => { statusEl.textContent = t; },
+        reactive: () => REACTIVE,
+        setKernel: (k) => nb.setKernel(k), // (another interpreter: every output is stale)
+        actions: remoteActions,
+        switchLocal: () => { kernelPick.value = "local"; kernelPick.dispatchEvent(new Event("change")); },
+      }, {
+        kind: "paired", label: mod.PAIRED.label, readyText: mod.PAIRED.ready, noLocal: true, start: pairedStart,
+        // (the link's code prefills the first sheet only: a code pairs once)
+        sheet: () => { const p = pairPrefill; pairPrefill = null; return mod.pairSheet(document, p); },
+      });
+      await pairedSw.connect(id);
+      return;
+    }
     remoteSw ??= mod.remoteSwitch({
       currentId: () => current.id,
       picked: () => kernelPick.value,
@@ -1003,10 +1039,11 @@ async function useRemote() {
     remoteLoad = null; // (a failed load is tried again next time)
     if (gen !== remoteGen) return;
     kernelPick.value = "local";
-    statusEl.textContent = `Remote compute (preview): ${e?.message ?? e}`;
+    statusEl.textContent = `${kind === "paired" ? "Your computer" : "Remote compute (preview)"}: ${e?.message ?? e}`;
   }
 }
-if (REMOTE_PREVIEW) {
+if (!REMOTE_PREVIEW) kernelPick.querySelector('option[value="gpu"]').remove();
+if (PAIRED_OFFERED) {
   kernelPick.hidden = false;
   kernelPick.addEventListener("change", useRemote);
 }
@@ -4026,6 +4063,11 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   await new Promise((resolve) => { requestAnimationFrame(() => setTimeout(resolve, 0)); setTimeout(resolve, 200); });
   kernelsMayStart = true;
   if (current.id) startKernel(kernelFor(current.id));
+  // (opened from `sagebrush remote --loopback`'s link: the pairing sheet, prefilled; nothing connects until Connect)
+  if (pairPrefill && current.id && kernelPick.value === "local") {
+    kernelPick.value = "paired";
+    kernelPick.dispatchEvent(new Event("change"));
+  }
   // background loading (web/preload.ts): at the next idle moment, the library files the open notebook's first Run
   // will fetch (its mode's groups, the groups its import lines name), and the LaTeX editor's two files where the
   // workspace has a .tex; bytes only, nothing run, and skipped on Save-Data, a slow connection or little storage
