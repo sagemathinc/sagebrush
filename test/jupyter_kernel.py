@@ -149,6 +149,11 @@ r, m = run(kc, "@interact\ndef pairing(u=slider(0,4,1,2), v=slider(0,4,1,1), k=[
 out = "".join(c["text"] for c in of(m, "stream") if c["name"] == "stdout")
 check("@interact: a note, then its run at the defaults", r["status"] == "ok" and out ==
       "[Jupyter shows no controls for this yet: pairing ran once with its default values: u=2, v=1, k='a', g=True]\n5/3 a True\n", (r["status"], out))
+# (the note is bounded: a name past 40 characters, a value past 60, and past 12 values, counted; astra's NOTE-NAME-1)
+r, m = run(kc, "interact(lambda **kw: None, **{'v' * 8192: checkbox(True, label=''), 's': input_box('w' * 500), **{'c%d' % i: True for i in range(20)}})")
+out = "".join(c["text"] for c in of(m, "stream") if c["name"] == "stdout")
+check("@interact: its note is bounded", r["status"] == "ok" and len(out) < 1200 and ("v" * 40 + "=True") in out and ("v" * 41) not in out
+      and "and 10 more]" in out and "s='" + "w" * 58 + "…," in out, (r["status"], len(out), out[:300]))
 r, m = run(kc, "@interact\ndef bad(u=slider(0,4,1,2)):\n    1/0")
 err = "".join(c["text"] for c in of(m, "stream") if c["name"] == "stderr")
 check("@interact whose function raises: its traceback, and the cell succeeds",

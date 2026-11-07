@@ -440,14 +440,19 @@ export function interactNote(spec: any): string {
     return q(String(v ?? ""));
   };
   const controls: any[] = Array.isArray(spec?.controls) ? spec.controls : [];
-  const shown = controls.flatMap((c) => {
+  // (at most 12 values, each named in at most 40 characters and shown in at most 60; the rest counted)
+  const values: string[] = [];
+  let more = 0;
+  for (const c of controls) {
+    if (values.length >= 12) { if (c?.kind !== "button" && c?.kind !== "text") more++; continue; }
     const t = text(c);
-    if (t === null) return [];
+    if (t === null) continue;
     const v = t.length > 60 ? t.slice(0, 59) + "…" : t;
     // (a widget with no description: its value alone)
-    return [c.label ? `${String(c.label).slice(0, 40)}=${v}` : /^_w\d+$/.test(c.name) ? v : `${c.name}=${v}`];
-  });
-  const values = shown.length > 12 ? [...shown.slice(0, 12), `and ${shown.length - 12} more`] : shown;
+    const name = String(c.label || c.name || "").slice(0, 40);
+    values.push(!c.label && /^_w\d+$/.test(c.name) ? v : `${name}=${v}`);
+  }
+  if (more) values.push(`and ${more} more`);
   const who = spec?.name === "widgets_changed" ? "these widgets keep their values" : `${String(spec?.name ?? "f").slice(0, 40)} ran once with its default values`;
   return `[Jupyter shows no controls for this yet: ${who}${values.length ? ": " + values.join(", ") : ""}]`;
 }
