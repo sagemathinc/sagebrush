@@ -265,6 +265,13 @@ fn poly_roots(p: &QPoly, bd: &Bounds, out: &mut Scan) {
     };
     let (lq, hq) = (end(&bd.qa, bd.lo, bd.la.1, &-rb.clone()), end(&bd.qb, bd.hi, bd.lb.0, &rb));
     let (lo2, hi2) = (end(&bd.qa, bd.lo, bd.la.0, &-rb.clone()), end(&bd.qb, bd.hi, bd.lb.1, &rb));
+    // an infinite end stands for the root bound (every real root is in
+    // [-rb, rb]), moved past the other end: that bound can lie before a
+    // finite end, an empty count and not an unknown one (1/x^2 on [1, oo):
+    // the root 0 bounds x by 0, and the integral stayed unevaluated)
+    let one = Q::from_integer(BigInt::from(1));
+    let (hq, hi2) = if bd.hi.is_finite() { (hq, hi2) } else { (hq.max(&lq + &one), hi2.max(&lo2 + &one)) };
+    let (lq, lo2) = if bd.lo.is_finite() { (lq, lo2) } else { (lq.min(&hq - &one), lo2.min(&hi2 - &one)) };
     if lq >= hq {
         out.unknown = true;
         return;
@@ -743,9 +750,15 @@ fn has_singular_parts(e: &Expr, x: &str) -> bool {
 /// F is unbounded there exactly when the integral diverges); unknown if a
 /// limit cannot be found or is undefined.
 fn endpoints(big_f: &Expr, x: &str, a: &Expr, b: &Expr, has_bad: &dyn Fn(&Expr) -> bool) -> Outcome {
-    // (a limit not found may be found with tan, sec, ... as sin and cos)
+    // (a limit not found may be found with tan, sec, ... as sin and cos, or
+    // with its logarithms joined: log(x) - log(x + 1) at oo, an oo - oo the
+    // limit does not resolve, is log(x/(x + 1)) there.  Joining changes F
+    // only when F has a logarithm, so only on definite()'s singular path,
+    // where a value off by a branch's 2 k pi I disagrees with the quadrature
+    // it is compared with, when that quadrature converges)
     let lim = |pt: &Expr, dir| {
         crate::limit::try_limit(big_f, x, pt, dir).or_else(|_| crate::limit::try_limit(&crate::simplify::trig_to_sincos(big_f), x, pt, dir))
+            .or_else(|_| crate::limit::try_limit(&crate::rewrite::simplify_log(big_f), x, pt, dir))
     };
     let (Ok(fb), Ok(fa)) = (lim(b, crate::limit::Dir::Minus), lim(a, crate::limit::Dir::Plus)) else {
         return Outcome::Unknown;
@@ -784,6 +797,23 @@ mod tests {
         let r = run(f, a, b);
         let got: f64 = r.parse().unwrap_or_else(|_| panic!("integral of {} on [{}, {}]: {}", f, a, b, r));
         assert!((got - v).abs() < 1e-9 * (1.0 + v.abs()), "integral of {} on [{}, {}]: {} != {}", f, a, b, got, v);
+    }
+
+    #[test]
+    fn improper_powers_on_half_lines() {
+        // a pole of f outside a half-line (Sage 10.10's values): the infinite
+        // end used to make the root scan unknown, and these stayed unevaluated
+        assert_eq!(exact("1/x^2", "1", "oo"), "1");
+        assert_eq!(exact("1/x^3", "1", "oo"), "1/2");
+        assert_eq!(exact("x^(-3/2)", "1", "oo"), "2");
+        assert_eq!(exact("1/x^2", "-oo", "-1"), "1");
+        assert_eq!(exact("1/(x + 2)^2", "-1", "oo"), "1");
+        // (F = log(x) - log(x + 1): its limit at oo by the joined logarithm)
+        assert_eq!(exact("1/(x^2 + x)", "1", "oo"), "log(2)");
+        assert_eq!(run("1/sqrt(x)", "1", "oo"), "divergent");
+        assert_eq!(run("1/x", "1", "oo"), "divergent");
+        assert_eq!(run("1/x^2", "-1", "oo"), "divergent");
+        assert_eq!(run("1/x^2", "-oo", "oo"), "divergent");
     }
 
     #[test]
