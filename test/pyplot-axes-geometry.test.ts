@@ -291,3 +291,27 @@ test("a colorbar on a GridSpec cell; datalim limits past the largest float: matp
     "L2v datalim, data (0, 1) (0, 1.7e+308) !! ValueError Axis limits cannot be NaN or Inf",
   ]);
 });
+
+// (a colorbar's shrink and anchor along its long side, on a subplot (its
+// GridSpec rows) and on an add_axes parent (Bbox.shrunk and anchored), before
+// and after drawing; each line matplotlib 3.11.1's own)
+test("colorbars shrunk and anchored, on subplots and add_axes parents: matplotlib 3.11.1's (#797 CB3, CB4)", () => {
+  const out = runIn("import matplotlib\nREAL = 'site-packages' in (getattr(matplotlib, '__file__', '') or '')\nif REAL:\n    matplotlib.use('Agg')\nimport matplotlib.pyplot as plt, warnings\nwarnings.simplefilter('ignore')\ndef r(v):\n    if isinstance(v, (tuple, list)):\n        return \"(\" + \", \".join(r(x) for x in v) + \")\"\n    if isinstance(v, float):\n        return \"%.6g\" % v\n    return str(v)\ndef show(label, f):\n    try:\n        print(label, \"=>\", r(f()))\n    except Exception as e:\n        print(label, \"!!\", type(e).__name__, str(e)[:100])\next = lambda ax: tuple(float(v) for v in ax.get_position().extents)\nfor kw in (dict(shrink=0.5, anchor=(0.0, 0.2)), dict(shrink=0.5, anchor=(0.0, 0.8)), dict(location='top', shrink=0.5, anchor=(0.2, 0.0))):\n    fig, ax = plt.subplots()\n    cb = fig.colorbar(ax.scatter([0, 1], [0, 1], c=[0, 1]), ax=ax, **kw)\n    show(\"CB3 subplot colorbar %s: x0 y0 x1 y1\" % r(sorted(kw.items())), lambda: ext(cb.ax))\n    fig.canvas.draw()\n    show(\"CB3 ... drawn\", lambda: ext(cb.ax))\n    plt.close(fig)\nfor kw in (dict(shrink=0.5), dict(shrink=0.5, anchor=(0.0, 0.2)), dict(location='bottom', shrink=0.5)):\n    fig = plt.figure()\n    ax = fig.add_axes([0.1, 0.2, 0.6, 0.5])\n    cb = fig.colorbar(ax.scatter([0, 1], [0, 1], c=[0, 1]), ax=ax, **kw)\n    show(\"CB4 add_axes colorbar %s: x0 y0 x1 y1\" % r(sorted(kw.items())), lambda: ext(cb.ax))\n    fig.canvas.draw()\n    show(\"CB4 ... drawn\", lambda: ext(cb.ax))\n    show(\"CB4 ... the parent\", lambda: ext(ax))\n    plt.close(fig)\n");
+  assert.deepEqual(out.trim().split("\n"), [
+    "CB3 subplot colorbar ((anchor, (0, 0.2)), (shrink, 0.5)): x0 y0 x1 y1 => (0.78375, 0.187, 0.9, 0.572)",
+    "CB3 ... drawn => (0.78375, 0.187, 0.798188, 0.572)",
+    "CB3 subplot colorbar ((anchor, (0, 0.8)), (shrink, 0.5)): x0 y0 x1 y1 => (0.78375, 0.418, 0.9, 0.803)",
+    "CB3 ... drawn => (0.78375, 0.418, 0.798188, 0.803)",
+    "CB3 subplot colorbar ((anchor, (0.2, 0)), (location, top), (shrink, 0.5)): x0 y0 x1 y1 => (0.2025, 0.7645, 0.59, 0.88)",
+    "CB3 ... drawn => (0.2025, 0.7645, 0.59, 0.790333)",
+    "CB4 add_axes colorbar ((shrink, 0.5)): x0 y0 x1 y1 => (0.61, 0.325, 0.7, 0.575)",
+    "CB4 ... drawn => (0.61, 0.325, 0.619375, 0.575)",
+    "CB4 ... the parent => (0.1, 0.2, 0.58, 0.7)",
+    "CB4 add_axes colorbar ((anchor, (0, 0.2)), (shrink, 0.5)): x0 y0 x1 y1 => (0.61, 0.25, 0.7, 0.5)",
+    "CB4 ... drawn => (0.61, 0.25, 0.619375, 0.5)",
+    "CB4 ... the parent => (0.1, 0.2, 0.58, 0.7)",
+    "CB4 add_axes colorbar ((location, bottom), (shrink, 0.5)): x0 y0 x1 y1 => (0.25, 0.2, 0.55, 0.275)",
+    "CB4 ... drawn => (0.25, 0.255, 0.55, 0.275)",
+    "CB4 ... the parent => (0.1, 0.35, 0.7, 0.7)",
+  ]);
+});
