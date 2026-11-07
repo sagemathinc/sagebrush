@@ -92,6 +92,11 @@ pub fn desc_region_of(desc: u64, words: usize, l: &Facts) -> Option<(u64, u64)> 
 
 /// Every boundary rule (above), from the descriptor's address and words.
 pub fn check(desc: u64, d: &[u32; DESC_WORDS], l: &Facts) -> Option<Job> {
+    layout(desc, d, l).map(|(j, _)| j)
+}
+
+/// [`check`], and the job's regions: the descriptor, the arena, A, B, C and the scratch.
+fn layout(desc: u64, d: &[u32; DESC_WORDS], l: &Facts) -> Option<(Job, [(u64, u64); 6])> {
     let rd = desc_region(desc, l)?;
     let [a, b, c, m, n, k, threads, s0, sstride, lo, hi] = d.map(u64::from);
     if threads == 0 || [a, b, c, s0, sstride].iter().any(|x| x % 8 != 0) || sstride < scratch_len() as u64 * 8 {
@@ -110,7 +115,56 @@ pub fn check(desc: u64, d: &[u32; DESC_WORDS], l: &Facts) -> Option<Job> {
         return None;
     }
     let u = |x: u64| usize::try_from(x).ok();
-    Some(Job { a: u(a)?, b: u(b)?, c: u(c)?, m: u(m)?, n: u(n)?, k: u(k)?, threads: u(threads)?, s0: u(s0)?, sstride: u(sstride)? })
+    let j = Job { a: u(a)?, b: u(b)?, c: u(c)?, m: u(m)?, n: u(n)?, k: u(k)?, threads: u(threads)?, s0: u(s0)?, sstride: u(sstride)? };
+    Some((j, [rd, arena, ra, rb, rc, rs]))
+}
+
+/// The thread pool's control words: [`CTL_BYTES`] bytes, 64-aligned, used by the host with atomics only.
+pub const CTL_BYTES: u64 = 64;
+/// The most participants a pool may have (the host's cap is lower: min(cores - 1, 8) helpers and the caller).
+pub const MAX_PARTICIPANTS: u64 = 16;
+
+/// A thread pool's layout (threads r2, contract 3), recorded once by the host (`nd_pool_init`) and immutable
+/// after: the control words at `ctl`; then `participants` stack slots of `slot` bytes each, contiguous from
+/// `stacks` (participant `id`'s is [stacks + id * slot, stacks + (id + 1) * slot)).
+#[derive(Clone, Copy)]
+pub struct Pool {
+    pub ctl: u64,
+    pub stacks: u64,
+    pub slot: u64,
+    pub participants: u64,
+}
+
+/// The pool's two regions, the control words and the stacks, if its layout is good: 2 to
+/// [`MAX_PARTICIPANTS`] participants; the control words 64-aligned, the stacks and the slot size 16-aligned
+/// and nonzero; each region in the host's part of memory (at or above the floor) and within memory, every size
+/// computed without overflow; and the two disjoint.
+pub fn pool_regions(p: &Pool, l: &Facts) -> Option<[(u64, u64); 2]> {
+    if !(2..=MAX_PARTICIPANTS).contains(&p.participants) || p.ctl % 64 != 0 || p.stacks % 16 != 0 || p.slot == 0 || p.slot % 16 != 0 {
+        return None;
+    }
+    let rc = region(p.ctl, CTL_BYTES, l)?;
+    let rs = span(p.stacks, p.slot.checked_mul(p.participants)?, l, l.mem)?;
+    (!overlap(rc, rs)).then_some([rc, rs])
+}
+
+/// [`check`] for participant `id` of a job: a job on more than one thread needs the recorded pool; its thread
+/// count at most the pool's participants, `id` one of them; the control words and every stack disjoint from
+/// the descriptor, the arena, A, B, C and the scratch; and the calling thread's frame in its own stack slot.
+/// (A one-thread job runs on the caller's stack, below the arena, as [`check`] has it, pool or not.)
+pub fn check_part(desc: u64, d: &[u32; DESC_WORDS], pool: Option<&Pool>, id: u64, l: &Facts) -> Option<Job> {
+    let (j, job) = layout(desc, d, l)?;
+    if j.threads == 1 {
+        return Some(j);
+    }
+    let p = pool?;
+    let [rc, rs] = pool_regions(p, l)?;
+    if j.threads as u64 > p.participants || id >= p.participants || job.iter().any(|&r| overlap(r, rc) || overlap(r, rs)) {
+        return None;
+    }
+    // (the slot's bounds cannot overflow: the stacks' end was computed without overflow)
+    let own = p.stacks + id * p.slot;
+    (own <= l.frame && l.frame < own + p.slot).then_some(j)
 }
 
 /// The solve descriptor (`nd_solve`), u32s at `desc` (4-aligned):
@@ -386,6 +440,102 @@ mod tests {
         e[3] = 0;
         e[5] = crate::chol::potrf_work_len(0).unwrap() as u32;
         assert!(check_potrf(DESC, &e, &L).is_some());
+    }
+
+    // a pool below the descriptor: the control words at 2 MiB, four 256 KiB stacks from 3 MiB
+    const SLOT: u64 = 256 << 10;
+    const POOL: Pool = Pool { ctl: 2 << 20, stacks: 3 << 20, slot: SLOT, participants: 4 };
+    // (participant id's frame, some way into its slot)
+    fn on(id: u64) -> Facts {
+        Facts { frame: POOL.stacks + id * SLOT + 1000, ..L }
+    }
+    // good()'s job on `threads` threads, the arena holding their scratch
+    fn job(threads: u32) -> [u32; DESC_WORDS] {
+        let mut d = good();
+        d[6] = threads;
+        d[10] = d[7] + threads * d[8];
+        d
+    }
+
+    #[test]
+    fn pool_layouts() {
+        assert!(pool_regions(&POOL, &L).is_some());
+        let refused = |what: &str, p: Pool| assert!(pool_regions(&p, &L).is_none(), "{what}");
+        let accepted = |what: &str, p: Pool| assert!(pool_regions(&p, &L).is_some(), "{what}");
+        refused("1 participant", Pool { participants: 1, ..POOL });
+        refused("17 participants", Pool { participants: 17, ..POOL });
+        accepted("16 participants", Pool { participants: 16, ..POOL });
+        refused("control words misaligned", Pool { ctl: POOL.ctl + 32, ..POOL });
+        refused("stacks misaligned", Pool { stacks: POOL.stacks + 8, ..POOL });
+        refused("slot misaligned", Pool { slot: SLOT + 8, ..POOL });
+        refused("slot 0", Pool { slot: 0, ..POOL });
+        refused("control words below the floor", Pool { ctl: L.floor - 64, ..POOL });
+        refused("stacks below the floor", Pool { stacks: L.floor - 16, ..POOL });
+        refused("control words at 0", Pool { ctl: 0, ..POOL });
+        refused("control words on the stacks", Pool { ctl: POOL.stacks + 3 * SLOT, ..POOL });
+        refused("the stacks' last slot on the control words", Pool { ctl: POOL.stacks + 4 * SLOT - 64, ..POOL });
+        accepted("control words just below the stacks", Pool { ctl: POOL.stacks - 64, ..POOL });
+        accepted("control words just after the stacks", Pool { ctl: POOL.stacks + 4 * SLOT, ..POOL });
+        // (overflow: slot * participants past u64; the largest stacks ending exactly at the memory's end, and 16 bytes more)
+        refused("slot * participants overflowing", Pool { slot: (u64::MAX / 2) & !15, ..POOL });
+        // (grader B7: 2^62 x 4 is 2^64, which a wrapping product would make 0, an empty and so acceptable region)
+        refused("slot * participants wrapping to 0", Pool { slot: 1 << 62, ..POOL });
+        let last = (L.mem - POOL.stacks) / 4 / 16 * 16;
+        let top = Pool { stacks: L.mem - 4 * last, slot: last, ..POOL };
+        accepted("stacks ending at the memory's end", top);
+        refused("stacks one slot-step past it", Pool { slot: last + 16, ..top });
+    }
+
+    #[test]
+    fn participant_layouts() {
+        // (a one-thread job: the old rule, with or without a pool; a threaded job needs the pool)
+        assert!(check_part(DESC, &job(1), None, 0, &L).is_some(), "1 thread, no pool");
+        assert!(check_part(DESC, &job(1), Some(&POOL), 0, &on(0)).is_some(), "1 thread, a pool");
+        assert!(check_part(DESC, &job(2), None, 0, &on(0)).is_none(), "2 threads, no pool");
+        for id in 0..4 {
+            assert!(check_part(DESC, &job(2), Some(&POOL), id, &on(id)).is_some(), "participant {id}");
+            assert!(check_part(DESC, &job(4), Some(&POOL), id, &on(id)).is_some(), "participant {id} of 4");
+        }
+        // (threads = participants accepted, one more refused; an id past the pool refused)
+        assert!(check_part(DESC, &job(5), Some(&POOL), 0, &on(0)).is_none(), "5 threads, a 4-participant pool");
+        assert!(check_part(DESC, &job(2), Some(&POOL), 4, &Facts { frame: POOL.stacks + 4 * SLOT + 1000, ..L }).is_none(), "id 4");
+        let bad = Pool { participants: 1, ..POOL };
+        assert!(check_part(DESC, &job(2), Some(&bad), 0, &on(0)).is_none(), "a bad pool");
+        // (the frame: its slot's first and last byte accepted; one past either end, or another's slot, refused)
+        for id in 0..4u64 {
+            let own = POOL.stacks + id * SLOT;
+            let at = |frame: u64| check_part(DESC, &job(2), Some(&POOL), id, &Facts { frame, ..L }).is_some();
+            assert!(at(own), "{id}: the slot's first byte");
+            assert!(at(own + SLOT - 1), "{id}: the slot's last byte");
+            assert!(!at(own + SLOT), "{id}: one past the slot");
+            assert!(!at(own - 1), "{id}: one below the slot");
+        }
+        assert!(check_part(DESC, &job(2), Some(&POOL), 1, &on(2)).is_none(), "participant 1 on participant 2's stack");
+        // (the control words, then the stacks, on each of the job's regions: refused; just next to them: accepted)
+        let d = job(4);
+        let places = [("the descriptor", DESC), ("the arena", d[9] as u64 + 512), ("A", d[0] as u64), ("B", d[1] as u64), ("C", d[2] as u64), ("the scratch", d[7] as u64)];
+        for (what, at) in places {
+            let ctl = at / 64 * 64;
+            assert!(check_part(DESC, &d, Some(&Pool { ctl, ..POOL }), 0, &on(0)).is_none(), "the control words on {what}");
+            let stacks = at / 16 * 16 - 3 * SLOT;
+            let p = Pool { stacks, ..POOL };
+            assert!(check_part(DESC, &d, Some(&p), 0, &Facts { frame: stacks + 1000, ..L }).is_none(), "the stacks on {what}");
+        }
+        accepted_adjacent(&d);
+    }
+
+    // control words ending where the descriptor starts, stacks ending where the arena starts (the frame in slot 0)
+    fn accepted_adjacent(d: &[u32; DESC_WORDS]) {
+        let p = Pool { ctl: DESC - 64, ..POOL };
+        assert!(check_part(DESC, d, Some(&p), 0, &on(0)).is_some(), "control words just below the descriptor");
+        let p = Pool { ctl: DESC + 64, ..POOL };
+        assert!(check_part(DESC, d, Some(&p), 0, &on(0)).is_some(), "control words just after the descriptor");
+        let stacks = d[9] as u64 - 4 * SLOT;
+        let p = Pool { stacks, ..POOL };
+        assert!(check_part(DESC, d, Some(&p), 0, &Facts { frame: stacks + 1000, ..L }).is_some(), "stacks just below the arena");
+        let p = Pool { stacks: d[10] as u64, ..POOL };
+        // (stacks just above the arena: disjoint, but the frame then lies above the arena, which check() refuses)
+        assert!(check_part(DESC, d, Some(&p), 0, &Facts { frame: d[10] as u64 + 1000, ..L }).is_none(), "a frame above the arena");
     }
 
     #[test]

@@ -85,6 +85,108 @@ export function dataUrl(src: string): { type: string; base64: string } | null {
   return m ? { type: "image/" + m[1].toLowerCase().replace("jpg", "jpeg"), base64: m[2] } : null;
 }
 
+// ---- SVG pictures (a board's, and a code item's stored preview: P9a) ------------------------------
+//
+// An SVG is a board picture only as an image: an <img>'s src, an SVG file's <image> href, a CSS
+// background, never put into a page (no innerHTML, no inline <svg>, no <object>, no navigation to it).
+// A browser shows an image-context SVG in its secure mode: no script, no interaction, nothing loaded
+// from elsewhere (SVG 2, section 2.3).  It is kept in one form, a base64 data: URL, within SVG_MAX_B64
+// characters encoded and SVG_MAX_BYTES decoded, checked before it is decoded; its text must be UTF-8.
+// Its size is read from its root <svg>'s width and height, both plain lengths (numbers, or px), the size a
+// browser gives it: that is layout, not a check of what it draws; one whose size can't be read so is refused.
+
+/** An SVG picture's bounds: base64 characters in its data: URL, and bytes of its text. */
+export const SVG_MAX_B64 = 2_800_000, SVG_MAX_BYTES = 2_000_000;
+const SVG_URL = /^data:image\/svg\+xml;base64,([A-Za-z0-9+/]*={0,2})$/;
+
+// (a length: a number, unitless or px; anything else, a percentage, another unit or a character
+// reference, is not read, and then the SVG is refused: a browser may size it otherwise, astra's SVG-SIZE-1)
+const svgLength = (v: string): number | null => {
+  const m = /^\s*(\d*\.?\d+(?:e[+-]?\d+)?)\s*(px)?\s*$/i.exec(v);
+  const x = m ? Number(m[1]) : NaN;
+  return Number.isFinite(x) && x > 0 ? x : null;
+};
+
+/** An SVG's size from its text: its root <svg>'s width and height, both there and plain lengths, rounded
+ * up; null if its root isn't an <svg> or it hasn't both.  (Never from its viewBox: a browser sizes such an
+ * SVG otherwise, 300 × 150 shaped by it, daybreak3's SVG-VIEWBOX-SIZE-1.) */
+export function svgSize(text: string): { w: number; h: number } | null {
+  // (before the root: a BOM, an XML declaration, comments and white space; a DOCTYPE is refused)
+  let t = text.replace(/^\uFEFF/, "").slice(0, 65536);
+  for (;;) {
+    const s = t.replace(/^\s+/, "");
+    if (s.startsWith("<?xml")) { const e = s.indexOf("?>"); if (e < 0) return null; t = s.slice(e + 2); continue; }
+    if (s.startsWith("<!--")) { const e = s.indexOf("-->"); if (e < 0) return null; t = s.slice(e + 3); continue; }
+    t = s;
+    break;
+  }
+  const m = /^<svg(?=[\s/>])((?:[^>"']|"[^"]*"|'[^']*')*)>/.exec(t);
+  if (!m) return null;
+  const attrs = new Map<string, string>();
+  for (const a of m[1].matchAll(/([\w:.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) if (!attrs.has(a[1])) attrs.set(a[1], a[2] ?? a[3]);
+  const aw = attrs.get("width"), ah = attrs.get("height");
+  const w = aw === undefined ? null : svgLength(aw), h = ah === undefined ? null : svgLength(ah);
+  if (!w || !h) return null;
+  const W = Math.ceil(w), H = Math.ceil(h);
+  return Number.isFinite(W) && Number.isFinite(H) ? { w: W, h: H } : null;
+}
+
+/** The bytes base64 of this length and padding decodes to, read before it is decoded. */
+export const b64Bytes = (b: string) => Math.floor((b.length * 3) / 4) - (b.endsWith("==") ? 2 : b.endsWith("=") ? 1 : 0);
+
+/** An SVG's text from its base64 (canonical), within the bounds and as UTF-8; null if not. */
+export function svgText(base64: string): string | null {
+  // (the bounds before it is decoded: its length, and the bytes that length decodes to)
+  if (base64.length > SVG_MAX_B64 || b64Bytes(base64) > SVG_MAX_BYTES || !/^[A-Za-z0-9+/]*={0,2}$/.test(base64)) return null;
+  try {
+    const bin = atob(base64);
+    // (its one form: the base64 its bytes encode to, so no other spelling of them, daybreak3's SVG-BASE64-CANON-1)
+    if (bin.length > SVG_MAX_BYTES || btoa(bin) !== base64) return null;
+    return new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)));
+  } catch {
+    return null;
+  }
+}
+
+/** A board picture's data: URL (a raster one, as dataUrl reads it, or an SVG one in its one form, base64,
+ * within the bounds): its type and base64, or null. */
+export function pictureUrl(src: string): { type: string; base64: string } | null {
+  const r = dataUrl(src);
+  if (r) return r;
+  if (src.length > SVG_MAX_B64 + 40) return null;
+  const m = SVG_URL.exec(src);
+  return m ? { type: "image/svg+xml", base64: m[1] } : null;
+}
+
+/** A board picture's size from its type and base64 (an SVG's from its root, as svgSize reads it). */
+export function pictureSize(type: string, base64: string): { w: number; h: number } | null {
+  if (type !== "image/svg+xml") return imageSize(type, base64);
+  const t = svgText(base64);
+  return t === null ? null : svgSize(t);
+}
+
+const b64utf8 = (t: string) => { const b = new TextEncoder().encode(t); let s = ""; for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000)); return btoa(s); };
+/** An SVG as a board picture's data: URL in its one form (base64), from its text or from a data: URL a
+ * browser takes (base64, or percent-encoded text, any case of the type); null if it isn't one, is past
+ * the bounds, or its size can't be read. */
+export function svgDataUrl(input: string): string | null {
+  let text: string | null;
+  if (input.length > 3 * SVG_MAX_BYTES + 64) return null;
+  const m = /^data:image\/svg\+xml(?:;charset=utf-8)?(;base64)?,([\s\S]*)$/i.exec(input);
+  if (!m) text = input;
+  else if (m[1]) {
+    // (base64 in another spelling of the same bytes, other pad bits or no padding: read in its one form)
+    const b = m[2].replace(/\s/g, "");
+    let c: string | null = null;
+    if (b.length <= SVG_MAX_B64 && b64Bytes(b) <= SVG_MAX_BYTES && /^[A-Za-z0-9+/]*={0,2}$/.test(b)) try { c = btoa(atob(b)); } catch { /* not base64 */ }
+    text = c === null ? null : svgText(c);
+  }
+  else { try { text = decodeURIComponent(m[2]); } catch { return null; } }
+  if (text === null || new TextEncoder().encode(text).length > SVG_MAX_BYTES || !svgSize(text)) return null;
+  const b = b64utf8(text);
+  return b.length <= SVG_MAX_B64 ? `data:image/svg+xml;base64,${b}` : null;
+}
+
 /** A picture's name, to count it once however often it is drawn: all of it
  * (a part could be the same for another picture, SEC-71A-1).  (The string
  * is the one already in memory: kept, not copied.) */
