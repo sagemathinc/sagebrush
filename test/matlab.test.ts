@@ -2220,25 +2220,33 @@ test("sum and prod 'native' of logical, sprintf's %s of character codes, strspli
 
 test("a workspace function giving no value refuses an assignment; exist needs an argument; repmat's counts, empty results and strings; round keeps its class and refuses options; mod and rem of complex refused", () => {
   const { execFileSync } = require("node:child_process");
+  const { mkdtempSync, readdirSync, rmSync } = require("node:fs");
+  // (in an empty directory: x = save must write nothing, here or anywhere)
+  const dir = mkdtempSync(require("node:path").join(require("node:os").tmpdir(), "sb-ws-"));
   const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
-    { encoding: "utf8" }).split("\n").map((s: string) => s.trim()).filter((s: string) => s !== "");
+    { encoding: "utf8", cwd: dir }).split("\n").map((s: string) => s.trim()).filter((s: string) => s !== "");
   const msg = (e: string) => `try, ${e}; disp('ran'), catch err, disp(err.message), end`;
   const tryIt = (e: string) => `try, ${e}; disp('ran'), catch, disp('refused'), end`;
   const show = (e: string) => `x = ${e}; disp([class(x) ' ' mat2str(size(x))])`;
-  assert.deepEqual(run([
-    msg("x = save"), msg("x = exist"), "y = 5; disp(exist('y'))",
-    show("repmat([1 2], 0, 1)"), show("repmat([1 2], -1, 1)"), show("repmat({1}, 0, 3)"), show("repmat('ab', 0, 1)"), show("repmat(\"ab\", 1, 2)"),
-    tryIt("repmat([1 2], 2.5)"), tryIt("repmat([1 2], [2 NaN])"), "disp(mat2str(repmat([1 2], 2, 1)))",
-    show("round(single(pi), 2)"), "disp(round(single(pi), 2) == single(3.14))", tryIt("round(int8(5), -1)"),
-    "disp(round(pi, 2, 'Significant'))", tryIt("round(2.5, 'TieBreaker', 'even')"), tryIt("round(pi, 2, 'foo')"), "disp(round(123.456, -1))",
-    tryIt("mod(1i, 2)"), tryIt("rem(2, 1i)"), "disp(mat2str(mod([5 7], 3)))",
-  ].join("\n")), [
-    "Too many output arguments.", "Not enough input arguments.", "1",
-    "double [0 2]", "double [0 2]", "cell [0 3]", "char [0 2]", "string [1 2]",
-    "refused", "refused", "[1 2;1 2]",
-    "single [1 1]", "1", "refused",
-    "3.1000", "refused", "refused", "120",
-    "refused", "refused", "[2 1]"]);
+  try {
+    assert.deepEqual(run([
+      msg("x = save"), msg("x = exist"), "y = 5; disp(exist('y'))",
+      show("repmat([1 2], 0, 1)"), show("repmat([1 2], -1, 1)"), show("repmat({1}, 0, 3)"), show("repmat('ab', 0, 1)"), show("repmat(\"ab\", 1, 2)"),
+      tryIt("repmat([1 2], 2.5)"), tryIt("repmat([1 2], [2 NaN])"), "disp(mat2str(repmat([1 2], 2, 1)))",
+      show("round(single(pi), 2)"), "disp(round(single(pi), 2) == single(3.14))", tryIt("round(int8(5), -1)"),
+      "disp(round(pi, 2, 'Significant'))", tryIt("round(2.5, 'TieBreaker', 'even')"), tryIt("round(pi, 2, 'foo')"), "disp(round(123.456, -1))",
+      tryIt("mod(1i, 2)"), tryIt("rem(2, 1i)"), "disp(mat2str(mod([5 7], 3)))",
+    ].join("\n")), [
+      "Too many output arguments.", "Not enough input arguments.", "1",
+      "double [0 2]", "double [0 2]", "cell [0 3]", "char [0 2]", "string [1 2]",
+      "refused", "refused", "[1 2;1 2]",
+      "single [1 1]", "1", "refused",
+      "3.1000", "refused", "refused", "120",
+      "refused", "refused", "[2 1]"]);
+    assert.deepEqual(readdirSync(dir), []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("repmat refuses a result past its limits (8 MiB numeric, 200,000 objects), at the boundary for complex and a one-axis repeat; a 16-million-cell result is refused before it is made (it would exhaust the 128 MiB heap)", () => {
