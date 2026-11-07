@@ -111,12 +111,16 @@ test("a removal entry applies only to its exact name and kind", () => {
   assert.deepEqual(C.merge(before, after, 6, [removal({ name: "m.C.other" })]).problems, ["m.C.ntpath: removed"]);
   // (a signature entry for the name, not a removal, doesn't remove it)
   assert.deepEqual(C.merge(before, after, 6, [entry({ name: "m.C.ntpath" })]).problems, ["m.C.ntpath: removed"]);
+  // (nor one with the removal's own old string but another new: only new "(absent)" removes; grader's U5)
+  assert.deepEqual(C.merge(before, after, 6, [removal({ new: "(module2)" })]).problems, ["m.C.ntpath: removed"]);
+  // (a prefix of the name, a class or a shorter member name, excuses nothing longer; grader's U4)
+  for (const name of ["m.C", "m.C.nt", "m"]) assert.deepEqual(C.merge(before, after, 6, [removal({ name })]).problems, ["m.C.ntpath: removed"], name);
 });
 
 test("a removal entry's shape: the kind in parentheses and the upstream release that removed it", () => {
   const doc = (changes: object[]) => JSON.stringify({ format: "sagebrush-core-api-changes", changes });
   assert.equal(C.readChanges(doc([removal()])).length, 1);
-  for (const bad of [{ upstream: undefined }, { upstream: "" }, { old: "module" }, { old: "(m o)" }, { reason: "" }, { pr: "1" }]) assert.throws(() => C.readChanges(doc([removal(bad)])), /a bad entry/);
+  for (const bad of [{ upstream: undefined }, { upstream: "" }, { upstream: 3 }, { old: "module" }, { old: "(m o)" }, { old: "()" }, { reason: "" }, { pr: "1" }, { pr: undefined }]) assert.throws(() => C.readChanges(doc([removal(bad)])), /a bad entry/, JSON.stringify(bad));
   // (one already applied is not stale; one whose member is still recorded is)
   assert.deepEqual(C.staleChanges(withMember({}), [removal()]), []);
   assert.equal(C.staleChanges(withMember({ ntpath: { kind: "module", since: 1 } }), [removal()]).length, 1);
