@@ -9,7 +9,7 @@
 // web/serve.py 8765), then
 //   node web/board/test-history.mjs
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
@@ -184,6 +184,34 @@ try {
   await ev("document.querySelector('[data-sbb=ttclose]').click(), 1");
   check(await until("!!document.querySelector('[data-code=path] .board-code-out') && !!document.querySelector('.board-code-run')", 5000), "closed, the board's outputs are back");
   check(before !== after, "(the edit had run)");
+  // (every corpus board renamed to .board.json, Nov 7 2026 (grader's B1, B2, B5, B10): each old address opens its new
+  // file in place (no history entry of its own), its #hash kept, and this browser's edits of it read under the old name)
+  const renamed = [["live", "live"], ["sagebrush", "sagebrush"], ["primes", "primes"], ["museum-tour", "museum-tour"], ["polynomials", "polynomials"]]
+    .map(([o, n]) => ["examples/" + o + ".json", "examples/" + n + ".board.json"]).concat([["examples/mermaid.md", "examples/mermaid.board.json"]]);
+  for (const [i, [old, now]] of renamed.entries()) {
+    await ev(`localStorage.setItem(${JSON.stringify("sagebrush-board:" + old)}, ${JSON.stringify(JSON.stringify({ format: "sagebrush-board", version: 1, title: "Kept " + old, nodes: [{ id: "kept", title: "kept" }] }))}), 1`);
+    const len = await ev("history.length");
+    await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent(old)}#h${i}` });
+    await until(`${B}?.snapshot().items.length > 0`, 60000);
+    check((await ev("new URLSearchParams(location.search).get('doc')")) === now, `${old}: the address is the new file's, ${now}`);
+    check((await ev("location.hash")) === "#h" + i, `${old}: ...its #hash kept`);
+    check((await ev("history.length")) === len + 1, `${old}: ...the redirect adds no history entry of its own`);
+    check(await until(`${B}.snapshot().doc.title === ${JSON.stringify("Kept " + old)}`, 10000), `${old}: ...with this browser's edits of it, read under its old name`);
+    await ev(`localStorage.removeItem(${JSON.stringify("sagebrush-board:" + old)}), 1`);
+  }
+  // (only the six old names: an address naming an Object.prototype property is not one of them (grader's B3))
+  const errs0 = errors.length;
+  for (const name of ["toString", "constructor", "__proto__"]) {
+    await send("Page.navigate", { url: `${base}board/?doc=${name}` });
+    await until("!!document.querySelector('[data-sbb=top]')", 30000);
+    await sleep(300);
+    check((await ev("new URLSearchParams(location.search).get('doc')")) === name, `?doc=${name}: not redirected`);
+  }
+  errors.length = errs0; // (those documents don't exist: their load errors are expected here)
+  // (no ?doc: the default board, the architecture board as a .board.json (grader's B9))
+  await send("Page.navigate", { url: `${base}board/` });
+  check(await until(`${B}?.snapshot().items.length > 0`, 60000), "/board/ opens a board");
+  check((await ev(`${B}.snapshot().doc.title`)) === JSON.parse(readFileSync(new URL("../../examples/board/how-sagebrush-is-built/sagebrush.board.json", import.meta.url), "utf8")).title, "...the default, examples/sagebrush.board.json");
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));

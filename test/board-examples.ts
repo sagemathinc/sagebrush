@@ -18,15 +18,15 @@ export function boardExample(file: string): string {
 }
 
 /** What makes the corpus's boards not native board files, one line each (none, as it should be): every
- * examples/board/<slug>/'s main a .board.json, listed in its files, with the format's header, in its canonical
- * text (William, Nov 6: the examples should all be .board.json files). */
-export function corpusProblems(): string[] {
+ * <dir>/<slug>/'s main a .board.json, listed in its files, with the format's header (William, Nov 6: the examples
+ * should all be .board.json files).  `dir` is the corpus, examples/board; the test gives it a broken one too. */
+export function corpusProblems(dir: string = root): string[] {
   const out: string[] = [];
-  for (const slug of readdirSync(root).sort()) {
-    const m = JSON.parse(readFileSync(join(root, slug, "example.json"), "utf8"));
+  for (const slug of readdirSync(dir).sort()) {
+    const m = JSON.parse(readFileSync(join(dir, slug, "example.json"), "utf8"));
     if (typeof m.main !== "string" || !m.main.endsWith(".board.json")) { out.push(`${slug}: its main, ${JSON.stringify(m.main)}, is not a .board.json file`); continue; }
     if (!Array.isArray(m.files) || !m.files.includes(m.main)) out.push(`${slug}: ${m.main} is not in its files`);
-    const d = JSON.parse(readFileSync(join(root, slug, m.main), "utf8"));
+    const d = JSON.parse(readFileSync(join(dir, slug, m.main), "utf8"));
     if (d.format !== "sagebrush-board" || d.version !== 1) out.push(`${slug}: ${m.main} has no "format": "sagebrush-board", "version": 1 header`);
   }
   return out;

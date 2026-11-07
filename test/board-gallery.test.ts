@@ -12,6 +12,12 @@ const cli = (args: string[]) => spawnSync(process.execPath, [__dirname + "/../sr
 
 test("every example board is a native board file: its main a .board.json with the format's header", () => {
   assert.deepEqual(corpusProblems(), []);
+  // (and each check is seen to fail: a corpus with one board wrong each way, and one right)
+  assert.deepEqual(corpusProblems(__dirname + "/../../test/fixtures/board-corpus-bad"), [
+    'a-main-not-board-json: its main, "a.json", is not a .board.json file',
+    "b-main-not-in-files: b.board.json is not in its files",
+    'c-version-2: c.board.json has no "format": "sagebrush-board", "version": 1 header',
+  ]);
 });
 
 test("the gallery: a board for each area, and one with every kind of item", () => {
