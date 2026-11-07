@@ -1,6 +1,6 @@
 // ci: web-browser/board-a order=10
-// ci: web-browser/board-a order=20 env=NO_EDIT=1 -- examples/primes.json
-// ci: web-browser/board-a order=30 env=NO_EDIT=1 -- examples/mermaid.md
+// ci: web-browser/board-a order=20 env=NO_EDIT=1 -- examples/primes.board.json
+// ci: web-browser/board-a order=30 env=NO_EDIT=1 -- examples/mermaid.board.json
 // ci: web-browser/board-a order=40 env=NO_EDIT=1 -- examples/source.json
 // ci: web-browser/board-a order=50 env=NO_EDIT=1 -- examples/integers.json
 // The board page with a document (examples/board/<slug>/, served as examples/<file>), in headless
@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "./test-port.mjs";
 
-const doc = process.argv[2] ?? "examples/sagebrush.json";
+const doc = process.argv[2] ?? "examples/sagebrush.board.json";
 const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
 const url = `${base}board/?doc=${encodeURIComponent(doc)}`;
 let port = Number(process.env.CDP_PORT) || 0;

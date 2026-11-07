@@ -92,7 +92,7 @@ try {
   for (const m of ["Page.enable", "Runtime.enable", "Network.enable"]) await send(m);
   await send("Network.setCacheDisabled", { cacheDisabled: true });
   await online(true);
-  await send("Page.navigate", { url: `${site}board/?runner=0&doc=${encodeURIComponent("examples/live.json")}` });
+  await send("Page.navigate", { url: `${site}board/?runner=0&doc=${encodeURIComponent("examples/live.board.json")}` });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
   await ev("localStorage.clear(), 1");
   // Download as HTML, for a board with code: the two choices first
@@ -162,7 +162,7 @@ try {
 
   // a Sage board with Python: the Sage library in the file too; Sage runs
   // offline, and 3D, its viewer from the file
-  await send("Page.navigate", { url: `${site}board/?runner=0&doc=${encodeURIComponent("examples/polynomials.json")}` });
+  await send("Page.navigate", { url: `${site}board/?runner=0&doc=${encodeURIComponent("examples/polynomials.board.json")}` });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
   const sageHtml = await ev("window.sagebrush.board.exportHtml({ python: true })");
   check(libSage.every((f) => parts(sageHtml).includes(f)), "a Sage board's file with Python carries Sage's compiled modules: " + parts(sageHtml).join());
@@ -192,7 +192,7 @@ try {
   overrides.clear();
 
   // the latest: another engine, if its api is the file's; else its own
-  await send("Page.navigate", { url: `${site}board/?runner=0&doc=${encodeURIComponent("examples/live.json")}` });
+  await send("Page.navigate", { url: `${site}board/?runner=0&doc=${encodeURIComponent("examples/live.board.json")}` });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
   // (in View, the choice is this download's only: the board is left as it is, View writes nothing, web/doc-mode.ts)
   await ev("document.querySelector('[data-sbb=html]').click(), 1");
@@ -239,7 +239,7 @@ try {
   // Outputs carried (design/outputs.md, section 3): a board's slow items'
   // outputs go in the file; opened, it shows them at once, marked as the
   // file's, and runs the rest; exported again, it carries them again
-  await send("Page.navigate", { url: `${site}board/?runner=0&doc=${encodeURIComponent("examples/live.json")}` });
+  await send("Page.navigate", { url: `${site}board/?runner=0&doc=${encodeURIComponent("examples/live.board.json")}` });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
   await ev("localStorage.clear(), 1");
   const slowStamp = "import time, os\nt0 = time.time()\nwhile time.time() - t0 < 2.3:\n    pass\nstamp = os.urandom(8).hex()\nprint('s ran:', stamp)";
