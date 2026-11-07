@@ -5,7 +5,6 @@
 # proposes it; Sagebrush is given it with --limits).
 import os
 import sys
-import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lib"))
 from fractions import Fraction as F
@@ -68,16 +67,14 @@ def finite():
 
 
 def minimum():
-    """Step 1: the working modulus alone.  N = 10^100 refused at once (under
-    10 ms, before the modulus and setup); the bound below the bytes of P
+    """Step 1: the working modulus alone.  N = 10^100 refused at once, before
+    the modulus and setup (the spies: no call; not a wall-clock bound, which
+    flaked under CI load on master 86d9f1c7); the bound below the bytes of P
     measured (CPython: sys.getsizeof); and a mutant with r2's J-based figure
     refusing a sparse case that the real bound admits past step 1."""
     heap(None)
-    attempt(5, 10 ** 100 + 1)
-    t = time.time()
     r = attempt(5, 10 ** 100 + 1)
-    dt = time.time() - t
-    print("min: N = 10^100: %s; step 1: %s; under 10 ms: %s" % (r[:52], "just its working modulus" in r and "RAN" not in r, dt < 0.01))
+    print("min: N = 10^100: %s; step 1: %s; before the modulus and setup: %s" % (r[:52], "just its working modulus" in r, calls == []))
     if sys.implementation.name == "cpython":
         ok = all(L._kd_min_bytes(p, N) <= sys.getsizeof(p ** L._kd_plan_fast(p, N)[1])
                  for p in (5, 97, 1009) for N in range(1, 31))
