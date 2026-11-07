@@ -638,10 +638,11 @@ function errorText(e: CellError, label: (id: string) => string, written: (n: str
   }
 }
 
-// (a display whose picture a preview can't hold here, an SVG plot: left
-// out, its text too, which says only "<Figure ...>"; the board shows the
-// picture once it runs)
-const KEPT = /^image\/(png|jpeg|webp)$/;
+// (a display whose picture a preview can't hold here: left out, its text
+// too, which says only "<Figure ...>"; the board shows the picture once it
+// runs.  An SVG plot is kept, as its text, within the bounds (preview.ts,
+// P9a): a board shows it only as an image, or as the notebook's cleaned SVG)
+const KEPT = /^image\/(png|jpeg|webp|svg\+xml)$/;
 const previewable = (list: any[]) => list.filter((o) => o.output_type !== "display_data" || !Object.keys(o.data ?? {}).some((t) => t.startsWith("image/")) || Object.keys(o.data).some((t) => KEPT.test(t)));
 
 // A picture kept as it is, if it fits a preview (no canvas here to draw it smaller).

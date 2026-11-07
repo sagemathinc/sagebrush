@@ -7028,6 +7028,14 @@
   "owner": "board",
   "row": "src-18"
  },
+ "src/board-check.ts ::  :: import { pictureSize, pictureUrl, PixelBudget, svgDataUrl } from \"../web/image-size\"; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "board",
+  "row": "src-18"
+ },
  "src/board-check.ts :: boardCheck :: const bytes = readBounded(file, FILE_MAX); #0": {
   "class": "1",
   "owner": "board",
@@ -7035,6 +7043,14 @@
  },
  "src/board-check.ts :: boardCheck :: if (bytes === null) { say(`${file}: too large for the board to open (at most ${FILE_MAX / 2 ** 20} MB)`); return 1; } #0": {
   "class": "1",
+  "owner": "board",
+  "row": "src-18"
+ },
+ "src/board-check.ts :: ref :: const size = pictureSize(u.type, u.base64), why = budget.take(size); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
   "owner": "board",
   "row": "src-18"
  },

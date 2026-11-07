@@ -6,16 +6,19 @@
 // close), the font the file names, so it is wrapped where it fits; math
 // typeset as SVG by the renderer the caller gives (`math`: the CLI's,
 // src/board-math.ts), else shown as its TeX; a picture whose bytes are in
-// the file (a raster data: URL) as an <image>, else as a box saying so; a
-// code item's outputs as its stored preview has them (text, and its one
-// raster picture), else a line saying they are on the board.
+// the file (a raster data: URL, or an SVG one) as an <image>, else as a box
+// saying so; a code item's outputs as its stored preview has them (text, and
+// its one picture), else a line saying they are not stored.
 //
 // Every text in a board is untrusted: it is only ever character data or a
 // quoted attribute, escaped, with characters XML does not allow dropped;
 // no element of the document's choosing, no link, no style, no
-// foreignObject.  A picture is an <image> whose href is a raster data: URL
-// only (PNG, JPEG, GIF or WebP, as image-size.ts reads it, within the
-// board's pixel budget): nothing in the file loads from anywhere.  Colors are the document's, which cleanDoc has made
+// foreignObject.  A picture is an <image> whose href is a data: URL only:
+// a raster one (PNG, JPEG, GIF or WebP, as image-size.ts reads it) or an
+// SVG one in its one form, base64 (pictureUrl), within the board's pixel
+// budget.  The SVG's text never enters this file's markup: as an <image>,
+// a viewer shows it in its secure mode (no script, nothing loaded from
+// elsewhere, SVG 2 section 2.3), so nothing in the file loads from anywhere.  Colors are the document's, which cleanDoc has made
 // colors.  Typeset math is the renderer's own paths, which it has checked.
 
 import { Lexer, type Token, type Tokens } from "marked";
@@ -25,7 +28,7 @@ import { inkPath } from "./ink";
 import { iconEmoji } from "./stickers";
 import type { Item } from "./board";
 import { previewLabel, type Preview } from "./preview";
-import { PixelBudget, dataUrl, imageSize, pictureKey } from "../image-size";
+import { PixelBudget, imageSize, pictureKey, pictureSize, pictureUrl, svgDataUrl } from "../image-size";
 
 // ---- text: its widths ------------------------------------------------------
 
@@ -259,6 +262,13 @@ function outputLines(p: Preview | undefined, w: number): Line[] {
       out.push({ runs: [], size: 11, lh: Math.round((dw * size.h) / size.w), indent: 0, gap: 6, pic: { src: `data:${type};base64,${o.data[type]}`, w: dw } });
       continue;
     }
+    // (an SVG picture, as a preview keeps it (its text): as an <image> of its base64 data: URL, never its markup)
+    const svg = typeof o.data["image/svg+xml"] === "string" ? svgDataUrl(o.data["image/svg+xml"]) : null, ss = svg ? pictureUrl(svg) : null, sz = ss ? pictureSize(ss.type, ss.base64) : null;
+    if (svg && sz) {
+      const dw = Math.min(w, sz.w);
+      out.push({ runs: [], size: 11, lh: Math.round((dw * sz.h) / sz.w), indent: 0, gap: 6, pic: { src: svg, w: dw } });
+      continue;
+    }
     const t = o.data["text/plain"] ?? o.data["text/markdown"] ?? o.data["text/latex"];
     if (typeof t === "string") text(t);
   }
@@ -307,10 +317,11 @@ const tspan = (r: Run) => (r.b || r.i || r.m ? `<tspan${r.b ? ' font-weight="bol
 
 // (the board's pictures drawn so far, within the pixel budget the board itself keeps: boardSvg sets it)
 let pixels = new PixelBudget();
-// whether a picture's source may be drawn: a raster data: URL whose header gives a size within the budget
+// whether a picture's source may be drawn: a raster data: URL whose header gives a size, or an SVG one in its one
+// form whose root does, within the budget
 function picOk(src: string): boolean {
-  const u = dataUrl(src);
-  return !!u && pixels.take(imageSize(u.type, u.base64), pictureKey(src)) === null;
+  const u = pictureUrl(src);
+  return !!u && pixels.take(pictureSize(u.type, u.base64), pictureKey(src)) === null;
 }
 function textBlock(ls: Line[], x: number, y: number, w: number, center: boolean): string {
   const out: string[] = [];

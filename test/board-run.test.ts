@@ -123,9 +123,9 @@ test("board run --store-previews: a copy with its items' outputs as previews, ne
     const p = Object.fromEntries(d.nodes.map((n: any) => [n.id, n.preview]));
     assert.deepEqual(p.a.outputs, [{ output_type: "stream", name: "stdout", text: "42\n" }]);
     assert.match(p.b.outputs[0].text, /ZeroDivisionError/);
-    // (a plot is an SVG, which a preview can't hold here: none, and the board runs it)
-    assert.equal(p.c, undefined);
-    for (const x of [p.a, p.b]) assert.deepEqual(cleanPreview(x), x, "a preview as the board reads it");
+    // (a plot is an SVG: kept as its text, which a board shows only as an image (P9a), within the bounds)
+    assert.match(p.c?.outputs?.[0]?.data?.["image/svg+xml"] ?? "", /^<svg /, JSON.stringify(p.c).slice(0, 300));
+    for (const x of [p.a, p.b, p.c]) assert.deepEqual(cleanPreview(x), x, "a preview as the board reads it");
     assert.equal(readFileSync(f, "utf8"), before, "the board itself untouched");
     assert.equal(run(["-", "--store-previews"], board([])).status, 2, "standard input needs -o");
   } finally {

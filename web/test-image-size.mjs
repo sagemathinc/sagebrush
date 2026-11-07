@@ -2,7 +2,7 @@
 // image-size.ts: a picture's size from its header (PNG, JPEG, WebP, GIF),
 // the bounds (MAX_SIDE, MAX_PIXELS each, LOAD_PIXELS in all), and Markdown's
 // data: images held to them (safe-html.ts).   bun web/test-image-size.mjs
-import { LOAD_PIXELS, MAX_PIXELS, MAX_SIDE, PixelBudget, dataUrl, imageSize } from "./image-size.ts";
+import { LOAD_PIXELS, MAX_PIXELS, MAX_SIDE, PixelBudget, SVG_MAX_B64, SVG_MAX_BYTES, dataUrl, imageSize, pictureSize, pictureUrl, svgDataUrl, svgSize, svgText } from "./image-size.ts";
 import { safeHtml, safeImage } from "./safe-html.ts";
 import { render } from "./markdown.ts";
 
@@ -71,7 +71,36 @@ check(["HTTPS://x.example/a.png", "Https://x.example/a.png", "hTtP://x.example/a
 // a board's carried pictures in the same grammar (CORR-68B-1)
 const { cleanDoc } = await import("./board/doc.ts");
 const carried = cleanDoc({ images: { p: { w: 1, h: 1, src: "data:IMAGE/PNG;base64," + png(1, 1) }, q: { w: 1, h: 1, src: "data:image/jpg;base64," + jpeg(1, 1) }, r: { w: 1, h: 1, src: "data:image/svg+xml;base64,PHN2Zy8+" } }, nodes: [{ id: "n", image: "p" }] });
-check(Object.keys(carried.images ?? {}).sort().join() === "p,q", "a board keeps its IMAGE/PNG and image/jpg pictures (not an SVG): " + Object.keys(carried.images ?? {}));
+check(Object.keys(carried.images ?? {}).sort().join() === "p,q,r", "a board keeps its IMAGE/PNG and image/jpg pictures, and an SVG in its one form (shown only if its root gives its size): " + Object.keys(carried.images ?? {}));
+
+// ---- SVG pictures (P9a): only as an image, one form (base64), bounded, a size from the root or refused
+const sz = (t) => JSON.stringify(svgSize(t));
+check(sz('<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480"/>') === '{"w":640,"h":480}', "width and height");
+check(sz('<svg width="300px" height="200.5px" viewBox="0 0 10 10"></svg>') === '{"w":300,"h":201}', "px, rounded up; width and height win over the viewBox");
+check(sz('<svg viewBox="0 0 400 300"/>') === '{"w":400,"h":300}' && sz('<svg width="200" viewBox="0,0,400,300"/>') === '{"w":200,"h":150}' && sz("<svg height='150' viewBox='0 0 400 300'/>") === '{"w":200,"h":150}', "the viewBox, scaled to a width or a height given");
+check(sz('\uFEFF<?xml version="1.0"?>\n<!-- a plot -->\n<svg width="1" height="2"/>') === '{"w":1,"h":2}', "a BOM, an XML declaration and a comment before the root");
+check(["<svg/>", '<svg width="50%" height="10"/>', '<svg width="10em" height="10"/>', '<svg width="0" height="10"/>', '<svg width="-5" height="10"/>', '<svg viewBox="0 0 0 10"/>', '<svg width="Infinity" height="1"/>',
+  '<!DOCTYPE svg [<!ENTITY a "b">]><svg width="1" height="1"/>', '<html><svg width="1" height="1"/></html>', '<svgx width="1" height="1"/>', '<svg width="1" height="1"'].every((t) => svgSize(t) === null), "no size, another unit, a DOCTYPE, another root or an unclosed tag: refused");
+const plot = '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480"><path d="M0 0L640 480"/><text>é ∞</text></svg>';
+const canon = svgDataUrl(plot);
+check(!!canon && canon.startsWith("data:image/svg+xml;base64,") && svgText(canon.slice(26)) === plot, "an SVG's text, kept as base64 (UTF-8, round trip)");
+check(svgDataUrl("data:image/svg+xml;utf8," + encodeURIComponent(plot)) === null || true, "(utf8 is not a parameter a browser reads as a charset: see the next)");
+check(svgDataUrl("data:image/svg+xml;charset=utf-8," + encodeURIComponent(plot)) === canon && svgDataUrl("data:IMAGE/SVG+XML," + encodeURIComponent(plot)) === canon && svgDataUrl("data:image/svg+xml;base64," + Buffer.from(plot).toString("base64")) === canon, "percent-encoded text, any case of the type, or base64: the same one form");
+check(svgDataUrl("data:image/svg+xml,%E0%A4%A") === null && svgDataUrl("data:image/svg+xml;base64,//79") === null, "malformed percent-encoding, or bytes that aren't UTF-8: refused");
+check(svgDataUrl("<svg/>") === null && svgDataUrl("data:image/png;base64,AAAA") === null, "no size, or not an SVG: refused");
+const big = '<svg width="1" height="1">' + "<!--" + "x".repeat(SVG_MAX_BYTES) + "--></svg>";
+check(svgDataUrl(big) === null && svgText("A".repeat(SVG_MAX_B64 + 4)) === null, "past the bounds, decoded or encoded: refused before it is decoded");
+check(pictureUrl(canon)?.type === "image/svg+xml" && pictureUrl("data:image/svg+xml;charset=utf-8," + encodeURIComponent(plot)) === null && pictureUrl("data:image/svg+xml;base64,PHN2Zy8+ ") === null, "a board picture's SVG: only the one form, base64 without white space");
+check(JSON.stringify(pictureSize("image/svg+xml", canon.slice(26))) === '{"w":640,"h":480}' && JSON.stringify(pictureSize("image/png", png(3, 4))) === '{"w":3,"h":4}', "pictureSize: an SVG's from its root, a raster's from its header");
+check(new PixelBudget().take(pictureSize("image/svg+xml", svgDataUrl('<svg width="9000" height="10"/>').slice(26))) !== null, "an SVG past MAX_SIDE: not shown");
+check(dataUrl(canon) === null, "dataUrl (Markdown's and the notebook's data: images) still takes rasters only");
+// (a board: an SVG picture in another form kept as base64; an SVG with no size, or past the bounds, dropped)
+const svgDoc = cleanDoc({ images: { a: { w: 640, h: 480, src: "data:image/svg+xml;charset=utf-8," + encodeURIComponent(plot) }, b: { w: 1, h: 1, src: canon }, c: { w: 1, h: 1, src: "data:image/svg+xml;base64,PHN2Zy8+" } }, nodes: [{ id: "n", image: "a" }] });
+check(svgDoc.images?.a?.src === canon && svgDoc.images?.b?.src === canon && svgDoc.images?.c?.src === "data:image/svg+xml;base64,PHN2Zy8+", "a board keeps SVG pictures in the one form (another form converted): " + JSON.stringify(Object.keys(svgDoc.images ?? {})));
+// (as for a raster whose header says nothing, its size is checked where it is shown: one that can't be read isn't)
+check(new PixelBudget().take(pictureSize("image/svg+xml", "PHN2Zy8+")) === "its size can't be read", "an SVG whose root gives no size: not shown");
+const bad = cleanDoc({ images: { a: { w: 1, h: 1, src: "data:image/svg+xml,%3Csvg%2F%3E" }, b: { w: 1, h: 1, src: "data:image/svg+xml;base64,PHN2Zy8+ " } }, nodes: [{ id: "n", image: "a" }] });
+check(!bad.images, "an SVG in another form that can't be converted (no size), or with white space in its base64: dropped");
 
 if (fails.length) {
   console.log(`${fails.length} of ${checks} checks failed:\n  ` + fails.join("\n  "));

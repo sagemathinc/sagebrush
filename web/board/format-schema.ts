@@ -1069,9 +1069,13 @@ export const BOARD_SCHEMA = {
       {
        "pattern": "^[dD][aA][tT][aA]:[iI][mM][aA][gG][eE]\\/([pP][nN][gG]|[jJ][pP][eE]?[gG]|[wW][eE][bB][pP]|[gG][iI][fF]);[bB][aA][sS][eE]64,([A-Za-z0-9+/=\\s]*)$",
        "description": "a data: URL of a PNG, JPEG, GIF or WebP picture (base64)"
+      },
+      {
+       "pattern": "^[dD][aA][tT][aA]:[iI][mM][aA][gG][eE]\\/[sS][vV][gG]\\+[xX][mM][lL](?:;[cC][hH][aA][rR][sS][eE][tT]=[uU][tT][fF]-8)?(;[bB][aA][sS][eE]64)?,([\\s\\S]*)$",
+       "description": "a data: URL of an SVG picture (base64, or its text percent-encoded; kept as base64), shown only as an image"
       }
      ],
-     "description": "its bytes, which a file needs to show the picture: a `data:` URL (PNG, JPEG, GIF or WebP), or an `https:` address"
+     "description": "its bytes, which a file needs to show the picture: a `data:` URL (PNG, JPEG, GIF, WebP or SVG), or an `https:` address"
     }
    },
    "required": [

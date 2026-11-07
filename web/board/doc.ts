@@ -6,7 +6,7 @@
 // keeps them (a person moved it), the rest are placed.
 
 import { capPreviews, cleanPreview, type Preview } from "./preview";
-import { dataUrl } from "../image-size";
+import { pictureUrl, svgDataUrl } from "../image-size";
 import type { Item, Edge } from "./board";
 import type { ImageInfo } from "./images";
 import { routeSteps, type Rect, type RouteRequest } from "./route";
@@ -510,7 +510,8 @@ export function getOwn<T>(o: Record<string, T> | null | undefined, k: string): T
 }
 // (data: URLs as image-size.ts reads them, any case of the type and jpg too: one grammar, CORR-68B-1)
 const IMAGE_SRC = /^https:\/\/[^\s"'<>\\]+$/;
-const imageSrc = (s: string) => IMAGE_SRC.test(s) || dataUrl(s) !== null;
+// (a board picture: a raster data: URL, an SVG one in its one form (image-size.ts pictureUrl), or an https: address)
+const imageSrc = (s: string) => IMAGE_SRC.test(s) || pictureUrl(s) !== null;
 function cleanImages(m: any): Record<string, ImageInfo> | undefined {
   if (!m || typeof m !== "object" || Array.isArray(m)) return undefined;
   const out: Record<string, ImageInfo> = {};
@@ -518,8 +519,12 @@ function cleanImages(m: any): Record<string, ImageInfo> | undefined {
     const w = num(v?.w), h = num(v?.h);
     if (!IMAGE_NAME.test(k) || !w || !h || w <= 0 || h <= 0) continue;
     // (a source that is not a raster image's data: URL or an https: address: the picture is dropped)
-    if (v.src !== undefined && !(typeof v.src === "string" && imageSrc(v.src))) continue;
-    setOwn(out, k, v.src !== undefined ? { w, h, src: v.src } : { w, h });
+    // (an SVG data: URL in another form a browser takes, percent-encoded text or base64 with a charset: kept in
+    // the one form, base64, if it is within the bounds and its size can be read; else dropped, as any other)
+    let src = v.src;
+    if (typeof src === "string" && /^data:image\/svg\+xml/i.test(src) && !pictureUrl(src)) src = svgDataUrl(src) ?? undefined;
+    if (v.src !== undefined && !(typeof src === "string" && imageSrc(src))) continue;
+    setOwn(out, k, src !== undefined ? { w, h, src } : { w, h });
   }
   return Object.keys(out).length ? out : undefined;
 }

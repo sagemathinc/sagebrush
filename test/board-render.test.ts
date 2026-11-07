@@ -192,6 +192,37 @@ test("board render: python's P9 reproduction, after board run --store-previews -
     const r = cli([join(dir, "basic.previews.board.json")]);
     assert.equal(r.status, 0, r.stderr);
     assert.match(r.stdout, />5<\/tspan>/, "the item's output, as stored");
+    // (and its plot, an SVG, kept as its text in the preview and drawn as an <image> of its base64 data: URL: P9a, part 2)
+    assert.match(r.stdout, /<image [^>]*href="data:image\/svg\+xml;base64,[A-Za-z0-9+/=]+"/, "the plot, as an <image>");
+    assert.ok(!r.stderr.includes("code's outputs"), r.stderr);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("board render and check: an SVG picture is drawn as an <image> of its one form, its markup never in the file; past the bounds, refused", () => {
+  // (hostile content: a script, an event handler, a remote image and a style import, which as an image does nothing)
+  const hostile = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="200" height="100" onload="alert(1)"><script>alert(2)</script>' +
+    '<style>@import url(https://example.com/x.css);</style><image href="https://example.com/x.png" width="10" height="10"/><a xlink:href="javascript:alert(3)"><text y="50">hi "there" &amp; &lt;b&gt;</text></a></svg>';
+  const doc = { format: "sagebrush-board", version: 1, images: { s: { w: 200, h: 100, src: "data:image/svg+xml;charset=utf-8," + encodeURIComponent(hostile) } }, nodes: [{ id: "a", image: "s", w: 220 }] };
+  const r = cli(["-"], JSON.stringify(doc));
+  assert.equal(r.status, 0, r.stderr);
+  const hrefs = [...r.stdout.matchAll(/<image [^>]*href="([^"]*)"/g)].map((m) => m[1]);
+  assert.equal(hrefs.length, 1);
+  assert.match(hrefs[0], /^data:image\/svg\+xml;base64,[A-Za-z0-9+/]+={0,2}$/, "the one form, base64");
+  assert.equal(Buffer.from(hrefs[0].slice(26), "base64").toString("utf8"), hostile, "the picture as it was, as data");
+  for (const bad of ["<script", "onload", "example.com", "javascript:", "@import"]) assert.ok(!r.stdout.includes(bad), `no ${bad} in the file's markup`);
+  assert.ok(!r.stderr.includes("pictures (shown as a box)"), r.stderr);
+  // (board check: the picture is one the board shows; one past MAX_SIDE is an error)
+  const dir = mkdtempSync(join(tmpdir(), "sb-svgpic-"));
+  try {
+    const f = join(dir, "s.board.json");
+    writeFileSync(f, JSON.stringify(doc));
+    const ok = spawnSync(process.execPath, [__dirname + "/../src/cli.js", "board", "check", f], { encoding: "utf8" });
+    assert.ok(!/won't show this picture/.test(ok.stdout + ok.stderr), ok.stdout + ok.stderr);
+    writeFileSync(f, JSON.stringify({ ...doc, images: { s: { w: 9000, h: 10, src: "data:image/svg+xml;charset=utf-8," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="9000" height="10"/>') } } }));
+    const big = spawnSync(process.execPath, [__dirname + "/../src/cli.js", "board", "check", f], { encoding: "utf8" });
+    assert.match(big.stdout + big.stderr, /won't show this picture: it is 9000 × 10 pixels/, big.stdout + big.stderr);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

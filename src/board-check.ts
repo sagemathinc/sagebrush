@@ -22,7 +22,7 @@ import { cleanDoc, formatError, isBoard, oneEmoji, VERSION, type DocAsk } from "
 import { cleanPreview } from "../web/board/preview";
 import { askProblems } from "../web/board/ask";
 import { BOARD_SCHEMA } from "../web/board/format-schema";
-import { dataUrl, imageSize, PixelBudget } from "../web/image-size";
+import { pictureSize, pictureUrl, PixelBudget, svgDataUrl } from "../web/image-size";
 import { SchemaValidator, didYouMean, step } from "./json-schema";
 import { CLI_READER } from "./board-cli";
 import { oneLine, textLines } from "./terminal-text";
@@ -206,9 +206,12 @@ export function checkText(text: string): { problems: Problem[]; doc: any } {
     if (!used.has(name)) warn(at, "not used by any note or background");
     if (v.src === undefined) { warn(at, "no `src`: a file needs the picture itself, a data: URL or an https: address, or the board shows an empty frame"); continue; }
     if (typeof v.src !== "string" || !v.src.toLowerCase().startsWith("data:")) continue;
-    const u = dataUrl(v.src);
+    // (an SVG in another form a browser takes: what the board keeps of it, its one form, or nothing, said; P9a)
+    const src = /^data:image\/svg\+xml/i.test(v.src) && !pictureUrl(v.src) ? svgDataUrl(v.src) : v.src;
+    if (src === null) { err(step(at, "src"), "the board won't show this picture: an SVG whose root gives no size (width and height, or a viewBox), past 2 MB, or not UTF-8"); continue; }
+    const u = pictureUrl(src);
     if (!u) continue; // (the schema says so)
-    const size = imageSize(u.type, u.base64), why = budget.take(size);
+    const size = pictureSize(u.type, u.base64), why = budget.take(size);
     if (why) err(step(at, "src"), `the board won't show this picture: ${why}`);
     else if (size && typeof v.w === "number" && typeof v.h === "number" && v.w > 0 && v.h > 0 && Math.abs(size.w / size.h - v.w / v.h) > 0.01 * (size.w / size.h))
       warn(at, `its w and h (${v.w} × ${v.h}) are not the picture's shape (${size.w} × ${size.h} pixels), so it is drawn stretched`);

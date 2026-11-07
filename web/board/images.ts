@@ -6,7 +6,7 @@
 // carries them in `images`, as data: URLs, and opening one puts them back.
 
 import type { BoardDoc, DocNode } from "./doc";
-import { PixelBudget, dataUrl, imageSize } from "../image-size";
+import { PixelBudget, pictureSize, pictureUrl, svgDataUrl, svgSize, svgText } from "../image-size";
 import { openDb } from "./idb-open";
 
 /** A picture a note shows, by its name in the document's `images`. */
@@ -15,13 +15,13 @@ export interface ImageInfo {
   w: number;
   /** required: its height in pixels */
   h: number;
-  /** its bytes, which a file needs to show the picture: a `data:` URL (PNG, JPEG, GIF or WebP), or an `https:` address */
+  /** its bytes, which a file needs to show the picture: a `data:` URL (PNG, JPEG, GIF, WebP or SVG), or an `https:` address */
   // (left out while it is in this browser's IndexedDB; a board that left the browser carries it)
   src?: string;
 }
 
 /** The pictures a board takes: raster images, as a browser shows them in <img>. */
-export const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp)$/;
+export const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp|svg\+xml)$/;
 /** How large a picture is kept: a larger one is scaled down on the way in. */
 const MAX_SIDE = 2400, MAX_BYTES = 2_000_000;
 
@@ -72,8 +72,8 @@ async function nameOf(blob: Blob): Promise<string> {
 }
 
 const toBlob = (src: string): Blob | null => {
-  // (the one grammar of data: pictures, image-size.ts: any case of the type, jpg too)
-  const d = dataUrl(src);
+  // (the one grammar of a board's data: pictures, image-size.ts: raster ones in any case of the type, jpg too; an SVG one as base64)
+  const d = pictureUrl(src);
   if (!d) return null;
   try {
     const bin = atob(d.base64.replace(/\s+/g, ""));
@@ -126,6 +126,13 @@ export function density(b: Uint8Array): number | null {
  */
 export async function prepare(file: Blob, opts: { paste?: boolean } = {}): Promise<{ blob: Blob; w: number; h: number; cssW: number } | null> {
   if (!IMAGE_TYPES.test(file.type)) return null;
+  // (an SVG: kept as it is, in the bounds and with a size image-size.ts reads (svgDataUrl), never drawn on a
+  // canvas; it is only ever shown as an image)
+  if (file.type === "image/svg+xml") {
+    if (file.size > 2 * 2_000_000) return null;
+    const url = svgDataUrl(await file.text()), text = url ? svgText(url.slice(url.indexOf(",") + 1)) : null, size = text ? svgSize(text) : null;
+    return url && text && size ? { blob: new Blob([text], { type: "image/svg+xml" }), w: size.w, h: size.h, cssW: size.w } : null;
+  }
   let bmp: ImageBitmap;
   try {
     bmp = await createImageBitmap(file);
@@ -240,7 +247,7 @@ export class Images {
     // document's pixels: image-size.ts; a picture past them is not taken)
     const pixels = budget ?? new PixelBudget();
     for (const [name, v] of carried) {
-      const u = dataUrl(v.src!), why = pixels.take(u ? imageSize(u.type, u.base64) : null);
+      const u = pictureUrl(v.src!), why = pixels.take(u ? pictureSize(u.type, u.base64) : null);
       const blob = why ? null : toBlob(v.src!);
       delete d.images![name];
       if (why) console.warn(`board: a picture not taken: ${why}`);
