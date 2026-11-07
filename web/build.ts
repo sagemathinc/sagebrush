@@ -274,7 +274,7 @@ for (const r of [result, consoleResult, mathResult, mystResult, graphResult, not
   const m = /<script id="app">([\s\S]*?)<\/script>/.exec(html)!;
   const tmp = join(here, "app.tmp.js"); // beside index.html: its imports are relative to web/
   // (without the LaTeX editor, its entry's import line is taken out first: its one use is in a branch the build drops)
-  const LATEX_IMPORT = 'import { latexBoot } from "./latex/boot.ts";\n';
+  const LATEX_IMPORT = 'import { latexBoot, latexOn, texNew } from "./latex/boot.ts";\n';
   if (m[1].split(LATEX_IMPORT).length !== 2) throw new Error("index.html must import the LaTeX editor's entry exactly once");
   writeFileSync(tmp, (LATEX ? m[1] : m[1].replace(LATEX_IMPORT, "")) + "\nexport {};\n"); // an ES module: Bun would wrap a script in an uncalled CommonJS shim
   // (SAGEBRUSH_MEASURE_IDS=keep: the size gate's identifier-stable measuring variant, never shipped: identifiers kept,

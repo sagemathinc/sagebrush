@@ -80,6 +80,10 @@ def colormap(t, name="viridis"):
     return "#%02x%02x%02x" % (round(r * 255), round(g * 255), round(b * 255))
 
 
+# (matplotlib's legend locations, by their codes)
+LEGEND_LOCS = ("best", "upper right", "upper left", "lower left", "lower right", "right", "center left", "center right",
+               "lower center", "upper center", "center")
+
 DASHES = {"-": None, "solid": None, "--": "6,4", "dashed": "6,4", ":": "1.5,3",
           "dotted": "1.5,3", "-.": "6,3,1.5,3", "dashdot": "6,3,1.5,3", "": None, "None": None}
 
@@ -125,19 +129,79 @@ _TEX_SYMBOLS = {
     "!": "", " ": " ", "quad": "\u2003", "qquad": "\u2003\u2003", "log": "log", "ln": "ln", "exp": "exp",
     "sin": "sin", "cos": "cos", "tan": "tan", "max": "max", "min": "min", "lim": "lim", "det": "det",
 }
+# (logic, sets, relations, operators and arrows: matplotlib 3.11.1's
+# characters for these names, as "name char" pairs)
+_more = ('neg ¬ wedge ∧ vee ∨ forall ∀ exists ∃ nexists ∄ Leftarrow ⇐ Leftrightarrow ⇔ leftrightarrow ↔ '
+         'Longrightarrow ⟹ Longleftarrow ⟸ Longleftrightarrow ⟺ longrightarrow ⟶ longleftarrow ⟵ '
+         'longleftrightarrow ⟷ mapsto ↦ longmapsto ⟼ hookrightarrow ↪ hookleftarrow ↩ uparrow ↑ downarrow ↓ '
+         'updownarrow ↕ Uparrow ⇑ Downarrow ⇓ nearrow ↗ searrow ↘ swarrow ↙ nwarrow ↖ rightleftharpoons ⇌ '
+         'leftrightarrows ⇆ rightharpoonup ⇀ leadsto ⇝ top ⊤ bot ⊥ vdash ⊢ dashv ⊣ models ⊧ cup ∪ cap ∩ '
+         'subset ⊂ subseteq ⊆ supset ⊃ supseteq ⊇ subsetneq ⊊ supsetneq ⊋ setminus ∖ smallsetminus ∖ emptyset '
+         '∅ varnothing ∅ notin ∉ ni ∋ sqcup ⊔ sqcap ⊓ sqsubseteq ⊑ sqsupseteq ⊒ uplus ⊎ ll ≪ gg ≫ prec ≺ succ '
+         '≻ preceq ≼ succeq ≽ cong ≅ perp ⟂ parallel ∥ mid ∣ nmid ∤ leqslant ⩽ geqslant ⩾ asymp ≍ doteq ≐ '
+         'lesssim ≲ gtrsim ≳ nleq ≰ ngeq ≱ nsim ≁ ncong ≇ nequiv ≢ oplus ⊕ otimes ⊗ ominus ⊖ odot ⊙ oslash ⊘ '
+         'ast ∗ star ⋆ bullet ∙ dagger † ddagger ‡ amalg ⨿ wr ≀ diamond ⋄ triangleleft ◁ triangleright ▷ '
+         'bigtriangleup △ bigtriangledown ▽ bigcup ⋃ bigcap ⋂ bigoplus ⨁ bigotimes ⨂ bigodot ⨀ bigsqcup ⨆ '
+         'biguplus ⨄ bigvee ⋁ bigwedge ⋀ coprod ∐ iint ∬ iiint ∭ oiint ∯ aleph ℵ beth ℶ gimel ℷ daleth ℸ wp ℘ '
+         'angle ∠ measuredangle ∡ triangle △ checkmark ✓ therefore ∴ because ∵ lfloor ⌊ rfloor ⌋ lceil ⌈ '
+         'rceil ⌉ lbrace { rbrace } vert | Vert ‖ backslash \\ imath ı jmath ȷ flat ♭ sharp ♯ natural ♮ '
+         'clubsuit ♣ diamondsuit ♢ heartsuit ♡ spadesuit ♠ S § P ¶ copyright © varkappa ϰ digamma ϝ mho ℧ '
+         'hslash ℏ Finv Ⅎ Game ⅁ complement ∁ ddots ⋱ vdots ⋮ colon : slash ∕ circledR ® blacksquare ■ lhd ◁ '
+         'rhd ▷ unlhd ⊴ unrhd ⊵ intercal ⊺ barwedge ⊼ veebar ⊻ pitchfork ⋔ bowtie ⋈ rightarrowtail ↣ '
+         'twoheadrightarrow ↠ circlearrowleft ↺ circlearrowright ↻ curvearrowleft ↶ curvearrowright ↷').split()
+_TEX_SYMBOLS.update(zip(_more[::2], _more[1::2]))
+del _more
 _TEX_FUNCS = {"log", "ln", "exp", "sin", "cos", "tan", "max", "min", "lim", "det"}
+# (relations and arrows, spaced as TeX spaces them; binary operators)
+_TEX_REL = set(('leq le geq ge neq ne approx sim simeq equiv propto to rightarrow in Leftarrow Leftrightarrow '
+                'Longleftarrow Longleftrightarrow Longrightarrow Rightarrow asymp cong dashv doteq geqslant gg '
+                'gtrsim hookleftarrow hookrightarrow leadsto leftarrow leftrightarrow leqslant lesssim ll '
+                'longleftarrow longleftrightarrow longmapsto longrightarrow mapsto mid models ncong nequiv ngeq ni '
+                'nleq nmid notin nsim parallel perp prec preceq rightleftharpoons sqsubseteq sqsupseteq subset '
+                'subseteq subsetneq succ succeq supset supseteq supsetneq vdash').split())
+_TEX_BIN = set(('pm mp times cdot div amalg ast barwedge bullet cap cup diamond lhd odot ominus oplus oslash otimes '
+                'rhd setminus smallsetminus sqcap sqcup star triangleleft triangleright unlhd unrhd uplus vee veebar '
+                'wedge wr').split())
+# (\mathbb, \mathcal, \mathscr, \mathfrak: Unicode's mathematical letters,
+# the first capital's, small letter's and digit's code points, and the letters
+# it has elsewhere)
+_TEX_ALPHABETS = {
+    "mathbb": (0x1D538, 0x1D552, 0x1D7D8, {"C": "ℂ", "H": "ℍ", "N": "ℕ", "P": "ℙ", "Q": "ℚ", "R": "ℝ", "Z": "ℤ"}),
+    "mathcal": (0x1D49C, 0x1D4B6, None, {"B": "ℬ", "E": "ℰ", "F": "ℱ", "H": "ℋ", "I": "ℐ", "L": "ℒ", "M": "ℳ", "R": "ℛ",
+                                         "e": "ℯ", "g": "ℊ", "o": "ℴ"}),
+    "mathfrak": (0x1D504, 0x1D51E, None, {"C": "ℭ", "H": "ℌ", "I": "ℑ", "R": "ℜ", "Z": "ℨ"}),
+}
+_TEX_ALPHABETS["mathscr"] = _TEX_ALPHABETS["mathcal"]
+
+
+def _tex_alphabet(s, font):
+    up, low, digit, other = _TEX_ALPHABETS[font]
+    out = []
+    for c in s:
+        if c in other:
+            out.append(other[c])
+        elif "A" <= c <= "Z":
+            out.append(chr(up + ord(c) - 65))
+        elif "a" <= c <= "z":
+            out.append(chr(low + ord(c) - 97))
+        elif digit and "0" <= c <= "9":
+            out.append(chr(digit + ord(c) - 48))
+        else:
+            out.append(c)
+    return "".join(out)
+
+
 # (single symbols: one factor, as a letter is)
 _TEX_ATOMS = {"alpha", "beta", "gamma", "delta", "epsilon", "varepsilon", "zeta", "eta", "theta", "vartheta", "iota", "kappa",
               "lambda", "mu", "nu", "xi", "pi", "varpi", "rho", "varrho", "sigma", "varsigma", "tau", "upsilon", "phi", "varphi",
               "chi", "psi", "omega", "Gamma", "Delta", "Theta", "Lambda", "Xi", "Pi", "Sigma", "Upsilon", "Phi", "Psi", "Omega",
-              "infty", "partial", "nabla", "ell", "hbar", "Re", "Im"}
+              "infty", "partial", "nabla", "ell", "hbar", "Re", "Im", "aleph", "wp", "emptyset", "varnothing", "imath", "jmath"}
 # (commands that take one argument)
 _TEX_ONE_ARG = {"mathrm", "rm", "text", "textrm", "operatorname", "mathsf", "mathbf", "bf", "textbf", "boldsymbol", "mathit",
-                "textit", "it", "overline", "bar", "widebar", "hat", "widehat", "tilde", "widetilde", "vec", "dot", "ddot", "sqrt"}
+                "textit", "it", "overline", "bar", "widebar", "hat", "widehat", "tilde", "widetilde", "vec", "dot", "ddot", "sqrt",
+                "mathbb", "mathcal", "mathscr", "mathfrak", "mathtt"}
 # (what may follow a fraction without grouping it: operators and relations)
-_TEX_AFTER_FRAC = set("+-=<>,;)]}|") | {"\\" + n for n in ("leq", "le", "geq", "ge", "neq", "ne", "approx", "sim", "simeq", "equiv",
-                                                         "propto", "to", "rightarrow", "in", "pm", "mp", "times", "cdot", "div",
-                                                         "right")}
+_TEX_AFTER_FRAC = set("+-=<>,;)]}|") | {"\\" + n for n in _TEX_REL | _TEX_BIN | {"right"}}
 # (spacing: invisible to a fraction's neighbours, which are looked for past it)
 _TEX_SPACING = {"\\" + n for n in (",", ";", ":", "!", " ", "quad", "qquad")} | {"~"}
 
@@ -268,7 +332,9 @@ def _tex_svg(tex):
     def piece(text, style):
         if not text:
             return ""
-        attrs = ""
+        if style.get("font") in _TEX_ALPHABETS:
+            text = _tex_alphabet(text, style["font"])
+        attrs = ' font-family="monospace"' if style.get("font") == "mathtt" else ""
         if style.get("it"):
             attrs += ' font-style="italic"'
         if style.get("bf"):
@@ -306,6 +372,8 @@ def _tex_svg(tex):
                     out.append(render(group(), dict(style, bf=True)))
                 elif name in ("mathit", "textit", "it"):
                     out.append(render(group(), dict(style, it=True)))
+                elif name in ("mathbb", "mathcal", "mathscr", "mathfrak", "mathtt"):
+                    out.append(render(group(), dict(style, it=False, font=name)))
                 elif name in ("overline", "bar", "widebar"):
                     out.append(render(group(), dict(style, over=True)))
                 elif name in ("hat", "widehat", "tilde", "widetilde", "vec", "dot", "ddot"):
@@ -339,9 +407,9 @@ def _tex_svg(tex):
                     continue
                 elif name in _TEX_FUNCS:
                     out.append(piece(name, dict(style, it=False)))
-                elif name in ("leq", "le", "geq", "ge", "neq", "ne", "approx", "sim", "simeq", "equiv", "propto", "to", "rightarrow", "in"):
+                elif name in _TEX_REL:
                     out.append("\u2004%s\u2004" % _TEX_SYMBOLS[name])
-                elif name in ("pm", "mp", "times", "cdot", "div"):
+                elif name in _TEX_BIN:
                     out.append("\u2005%s\u2005" % _TEX_SYMBOLS[name])
                 elif name in _TEX_SYMBOLS:
                     out.append(piece(_TEX_SYMBOLS[name], dict(style, it=style.get("it") and name[:1].islower() and name in (
@@ -766,6 +834,35 @@ class Segments(Primitive):
         return self.options.get("what") or "%d segments" % len(self.segs)
 
 
+# (a line of text, in em: matplotlib 3.11's font's ascent and descent, and
+# the line gap shared above and below each line when there are several)
+_ASCENT, _DESCENT, _GAP = 0.76, 0.24, 0.2
+
+
+def _anchor(P, x, y, o):
+    """A text's anchor in pixels: (x, y) in data coordinates, or in the
+    axes' or the figure's fractions or pixels (o["coords"]), moved by
+    o["offset"] pixels (y up), as matplotlib's annotate places them."""
+    c = o.get("coords")
+    if c is None:
+        p = P.map(x, y, clamp=False)
+    elif x is None or y is None:
+        return None
+    elif c == "axes fraction":
+        p = (P.left + x * P.w, P.top + (1 - y) * P.h)
+    elif c == "axes pixels":
+        p = (P.left + x, P.top + P.h - y)
+    else:
+        W, H = P.fig
+        p = (x * W, (1 - y) * H) if c == "figure fraction" else (x, H - y)
+    off = o.get("offset")
+    return (p[0] + off[0], p[1] - off[1]) if p and off else p
+
+
+def _inside(P, p):
+    return p is not None and P.left - 1e-9 <= p[0] <= P.left + P.w + 1e-9 and P.top - 1e-9 <= p[1] <= P.top + P.h + 1e-9
+
+
 class Text(Primitive):
     kind = "text"
     # pixels per unit of its fontsize when drawn: 1 for a size given in
@@ -789,32 +886,81 @@ class Text(Primitive):
         return None
 
     def svg(self, P):
-        p = P.map(self.x, self.y, clamp=False)
+        o = self.options
+        # (what matplotlib refuses when it draws the annotation: kept as a
+        # class and its arguments, a fresh exception each draw; "error"
+        # before annotation_clip's check, "later" after it)
+        if o.get("error") is not None:
+            raise o["error"][0](*o["error"][1:])
+        if o.get("only_inside") is not None and not _inside(P, _anchor(P, *o["only_inside"])):
+            return ""  # (an annotation of a point outside the axes, as matplotlib's annotation_clip)
+        if o.get("later") is not None:
+            raise o["later"][0](*o["later"][1:])
+        p = _anchor(P, self.x, self.y, o)
         if p is None:
             return ""
+        if o.get("box") or o.get("arrow"):
+            from matplotlib._annotations import annotation_svg  # (pyplot's bbox= and arrowprops=, loaded when used)
+            return annotation_svg(self, P, p)
+        return self._svg_at(P, p)
+
+    def _box(self, p):
+        """(baselines, top, bottom): the text's lines at the anchor p, in
+        pixels, as matplotlib lays them out: each line its font's ascent and
+        descent high (and the line gap, for several), the block aligned as a
+        whole, by its last line's baseline for "baseline"."""
+        o = self.options
+        n = self.string.count("\n") + 1
+        fs = self._px()
+        gap = _GAP if n > 1 else 0
+        a, d = (_ASCENT + gap / 2) * fs, (_DESCENT + gap / 2) * fs
+        h = n * (a + d)
+        top = {"top": p[1], "bottom": p[1] - h, "baseline": p[1] + d - h}.get(o.get("vertical_alignment", "center"), p[1] - h / 2)
+        return [top + a + i * (a + d) for i in range(n)], top, top + h
+
+    def _extent(self, p):
+        """(x0, y0, x1, y1): the box the text takes at the anchor p, in
+        pixels, its width estimated at 0.6 em a character (no text: the
+        anchor, as matplotlib's)."""
+        if not self.string:
+            return p[0], p[1], p[0], p[1]
+        o = self.options
+        fs = self._px()
+        _, top, bottom = self._box(p)
+        w = 0.6 * fs * max(len(_strip_tags(_rich(s))) for s in self.string.split("\n"))
+        x0 = {"left": p[0], "right": p[0] - w}.get(o.get("horizontal_alignment", "center"), p[0] - w / 2)
+        return x0, top, x0 + w, bottom
+
+    def _svg_at(self, P, p):
         o = self.options
         anchor = {"left": "start", "right": "end", "center": "middle"}.get(o.get("horizontal_alignment", "center"), "middle")
         base = {"top": "hanging", "bottom": "auto", "center": "middle", "baseline": "auto"}.get(o.get("vertical_alignment", "center"), "middle")
         color = to_color(o.get("color"))
         rot = o.get("rotation", 0)
+        fs = self._px()
+        rich = (lambda s: P.markup.svg(s, fs)) if getattr(P, "markup", None) else _rich
+        if "\n" in self.string:
+            # (several lines: each its own text, at its baseline)
+            texts = [(y, rich(s), "auto") for s, y in zip(self.string.split("\n"), self._box(p)[0])]
+        else:
+            texts = [(p[1], rich(self.string), base)]
         # (background_color: a box behind the text, as wide as its
         # characters at about 0.6 em each, placed by the same alignment and
         # turned by the same rotation, CORR-896-6)
         box = ""
         bg = to_color(o.get("background_color"))
         if bg:
-            fs = self._px()
             w, hh = 0.6 * fs * len(self.string) + 4, fs + 2
             x0 = {"start": p[0] - 2, "end": p[0] - w + 2}.get(anchor, p[0] - w / 2)
             y0 = {"hanging": p[1] - 1, "auto": p[1] - fs * 0.8 - 1}.get(base, p[1] - hh / 2)
             box = '<rect x="%s" y="%s" width="%s" height="%s" fill="%s"%s/>' % (
                 _fmt(x0), _fmt(y0), _fmt(w), _fmt(hh), _esc(bg),
                 ' transform="rotate(%s %s %s)"' % (_fmt(-float(rot)), _fmt(p[0]), _fmt(p[1])) if rot else "")
-        return box + '<text x="%s" y="%s" font-size="%s" text-anchor="%s" dominant-baseline="%s"%s%s>%s</text>' % (
-            _fmt(p[0]), _fmt(p[1]), _fmt(self._px()), anchor, base,
+        return box + "".join('<text x="%s" y="%s" font-size="%s" text-anchor="%s" dominant-baseline="%s"%s%s>%s</text>' % (
+            _fmt(p[0]), _fmt(y), _fmt(fs), anchor, base,
             ' fill="%s"' % _esc(color) if color else "",
-            ' transform="rotate(%s %s %s)"' % (_fmt(-float(rot)), _fmt(p[0]), _fmt(p[1])) if rot else "",
-            P.markup.svg(self.string, self._px()) if getattr(P, "markup", None) else _rich(self.string))
+            ' transform="rotate(%s %s %s)"' % (_fmt(-float(rot)), _fmt(p[0]), _fmt(p[1])) if rot else "", body)
+            for y, body, base in texts)
 
     def describe(self):
         return 'text "%s"' % self.string
@@ -1221,8 +1367,9 @@ class Panel:
         if o.get("yinvert"):
             ylo, yhi = yhi, ylo
         ar = o.get("aspect_ratio")
-        # (fit_aspect with all four limits set: the box takes the shape, the limits stay, as matplotlib's adjustable='box')
-        boxed = o.get("fit_aspect") and None not in (o.get("xmin"), o.get("xmax"), o.get("ymin"), o.get("ymax"))
+        # (fit_aspect: the box takes the shape, the limits stay, as
+        # matplotlib's adjustable='box'; autoscaled limits too, W04)
+        boxed = bool(o.get("fit_aspect"))
         if ar not in (None, "automatic", "auto") and not xlog and not ylog and not boxed:
             ar = float(ar)
             # (an inverted axis keeps its direction: the spans' signs)
@@ -1294,10 +1441,13 @@ class Panel:
             top = sub_h  # (except a subtitle's line: the title stays where it was)
         pw, ph = max(20, w - left - right), max(20, h - top - bottom)
         ar = o.get("aspect_ratio")
-        if o.get("fit_aspect") and ar not in (None, "automatic", "auto") and None not in (
-                o.get("xmin"), o.get("xmax"), o.get("ymin"), o.get("ymax")):
-            # keep the ranges and shrink the plot area to their shape instead
-            xr, yr = abs(float(o["xmax"]) - float(o["xmin"])), abs(float(o["ymax"]) - float(o["ymin"])) * float(ar)
+        if o.get("fit_aspect") and ar not in (None, "automatic", "auto"):
+            # keep the ranges (given or autoscaled) and shrink the plot area
+            # to their shape instead
+            # (a log axis in decades, as matplotlib's apply_aspect measures it)
+            bx = self.ranges(pw, ph)
+            span = lambda lo, hi, log: abs(math.log10(hi) - math.log10(lo)) if log and lo > 0 and hi > 0 else 0.0 if log else abs(hi - lo)
+            xr, yr = span(bx[0], bx[1], bx[4]), span(bx[2], bx[3], bx[5]) * float(ar)
             if xr > 0 and yr > 0:
                 k = min(pw / xr, ph / yr)
                 left += (pw - xr * k) / 2
@@ -1306,6 +1456,7 @@ class Panel:
         xlo, xhi, ylo, yhi, xlog, ylog = self.ranges(pw, ph)
         P = _Placed(x + left, y + top, pw, ph, xlo, xhi, ylo, yhi, xlog, ylog)
         P.markup = o.get("markup")
+        P.fig = getattr(self, "_fig", None) or (x + w, y + h)  # (the figure's size, for figure coordinates)
         # Sage's axes carry more ticks than matplotlib's frame
         dx, dy = (85, 55) if frame else (60, 45)
         xt = self.ticks(xlo, xhi, xlog, o.get("xticks"), o.get("xticklabels"), max(3, int(pw / dx)))
@@ -1315,8 +1466,12 @@ class Panel:
             xlo, xhi, ylo, yhi, _fmt(P.left), _fmt(P.top), _fmt(pw), _fmt(ph),
             ' data-xlog="1"' if xlog else "", ' data-ylog="1"' if ylog else "")]
         cid = "sbclip%d" % _next_id()
+        # (matplotlib clips to the Axes box itself, clip_exact: a line just
+        # past a limit drew in the margin, W51; Sage's figures keep a little
+        # room for markers and lines at the edges)
+        pad = 0 if o.get("clip_exact") else 4
         out.append('<clipPath id="%s"><rect x="%s" y="%s" width="%s" height="%s"/></clipPath>' % (
-            cid, _fmt(P.left - 4), _fmt(P.top - 4), _fmt(pw + 8), _fmt(ph + 8)))
+            cid, _fmt(P.left - pad), _fmt(P.top - pad), _fmt(pw + 2 * pad), _fmt(ph + 2 * pad)))
         if o.get("facecolor") not in (None, "none"):
             out.append('<rect x="%s" y="%s" width="%s" height="%s" fill="%s" stroke="none"/>' % (
                 _fmt(P.left), _fmt(P.top), _fmt(pw), _fmt(ph), _esc(o["facecolor"])))
@@ -1344,9 +1499,11 @@ class Panel:
         if show_axes:
             out.append(self._axes_svg(P, xt, yt, frame))
         out.append('<g clip-path="url(#%s)">' % cid)
+        free = []  # (what is drawn unclipped: matplotlib's text, unless clip_on=True)
         for p in self.primitives:
-            out.append(p.svg(P))
+            (free if p.options.get("clip") is False else out).append(p.svg(P))
         out.append("</g>")
+        out += free
         if grid and o.get("grid_above"):
             out.append(grid)
         if show_axes and frame and any(isinstance(p, Patches) for p in self.primitives):
@@ -1404,6 +1561,7 @@ class Panel:
             skip_x = xv if (P.ylo < 0 < P.yhi and xv == 0.0) else None
             skip_y = yv if (P.xlo < 0 < P.xhi and yv == 0.0) else None
         labels, ylabels, ytick = [], [], []
+        xrot = float(o.get("xtick_rotation") or 0) % 360
         for v, s in xt:
             p = P.map(v, P.ylo, clamp=False)
             if p is None:
@@ -1412,6 +1570,17 @@ class Panel:
             if skip_x is not None and abs(v - skip_x) < 1e-12:
                 continue
             ly = (P.top + P.h if frame else min(max(ax_y, P.top), P.top + P.h)) + ts * 1.43
+            if xrot:
+                # (turned as matplotlib's default rotation_mode places it:
+                # the turned label's box centred under the tick, its top
+                # where an upright label's top is; W41)
+                t = math.radians(xrot)
+                tw, th = 0.6 * ts * len(_strip_tags(s)), ts
+                H = tw * abs(math.sin(t)) + th * abs(math.cos(t))
+                cy = ly - ts * 0.8 + H / 2
+                labels.append('<text x="%s" y="%s" text-anchor="middle" dominant-baseline="central" transform="rotate(%s %s %s)">%s</text>' % (
+                    _fmt(p[0]), _fmt(cy), _fmt(-xrot), _fmt(p[0]), _fmt(cy), s))
+                continue
             labels.append('<text x="%s" y="%s" text-anchor="middle">%s</text>' % (_fmt(p[0]), _fmt(ly), s))
         for v, s in yt:
             p = P.map(P.xlo, v, clamp=False)
@@ -1455,9 +1624,15 @@ class Panel:
         h = len(items) * 18 + 8
         loc = o.get("legend_loc") or "upper right"
         if isinstance(loc, int):
-            loc = {1: "upper right", 2: "upper left", 3: "lower left", 4: "lower right"}.get(loc, "upper right")
-        lx = P.left + 8 if "left" in loc else P.left + P.w - w - 8
-        ly = P.top + P.h - h - 8 if "lower" in loc else P.top + 8
+            loc = LEGEND_LOCS[loc] if 1 <= loc < len(LEGEND_LOCS) else "upper right"
+        if isinstance(loc, tuple):  # (its lower left corner at axes fractions)
+            lx, ly = P.left + loc[0] * P.w, P.top + (1 - loc[1]) * P.h - h
+        else:
+            # (the legend centred on the axes in the directions its loc
+            # doesn't name: "center right" is halfway up, "upper center"
+            # halfway across)
+            lx = P.left + 8 if "left" in loc else P.left + P.w - w - 8 if "right" in loc else P.left + (P.w - w) / 2
+            ly = P.top + P.h - h - 8 if "lower" in loc else P.top + 8 if "upper" in loc else P.top + (P.h - h) / 2
         out = ['<g class="sb-legend"><rect x="%s" y="%s" width="%s" height="%s" rx="3" style="fill: var(--sb-legend-bg, #fff)" fill-opacity="0.85" stroke="currentColor" stroke-opacity="0.25"/>' % (
             _fmt(lx), _fmt(ly), _fmt(w), _fmt(h))]
         for i, (p, s) in enumerate(items):
@@ -1540,6 +1715,7 @@ def render_frame(panels, width=640, height=480, title=None, markup=None):
     top = 30 if title else 0
     body, descs = [], []
     for panel, (fx, fy, fw, fh) in panels:
+        panel._fig = (width, height)
         if panel.options.get("exact"):
             s, d = panel.svg(fx * width, top + fy * (height - top), fw * width, fh * (height - top))
         else:
