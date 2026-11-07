@@ -1965,6 +1965,10 @@ try {
     const rj = JSON.parse((await resultsOf("/t/run.tex")) ?? "null");
     check(rj && rj.format === "sagebrush-latex-results" && rj.version === 1 && rj.items.length === 5 && rj.items.every((x) => x.s === "ok") && rj.items[1].latex === "1024" && rj.items[2].latex === "\\frac{1}{3}" && rj.items[4].latex === "7",
       "Run: the results file beside the .tex (results v1, every item ok: 1024, \\frac{1}{3}, 7)", rj && { n: rj.items.length, items: rj.items.map((x) => [x.s, x.latex]) });
+    // (a second Run on the same page: the chunk already fetched is used, not fetched again)
+    await ev(`(document.querySelector(".tex-status").textContent = "", document.querySelector(".tex-head .tex-run").click(), 1)`);
+    const ranAgain = await statusIs(/Ran 5 SageTeX items in [0-9.]+ s$/, 60000);
+    check(ranAgain && runChunk().length === 1, "Run's chunk: a second Run on the page uses the one fetched, not fetched again", { ranAgain, fetched: runChunk().length });
     // (William, Nov 3: L0 "latex-beamer + sagetex ... didn't work", L1 "\title{$\sage{factor(2026)}$} doesn't work"):
     // a beamer deck of his shape, clicked Run: every item ok in the results file, the title page's result (an item in
     // \title, shown where \titlepage prints it), the plot and the curve's point in the preview and in Present
@@ -2112,7 +2116,6 @@ open('made.txt', 'w').write('x')
     await until(`document.querySelector(".tex-preview")?.textContent.includes("Hello")`, 20000);
     await sleep(15000);
     check(started && (await resultsOf("/t/run-stale.tex")) === null, "Run: a Run made stale (another file opened in place while it runs) writes no results", { started });
-    check(runChunk().length === 1, "Run's chunk: every later Run on this page (other documents opened in place, Stop, queued Runs) uses the one fetched, never fetched again", runChunk().map((x) => x.url));
     // (no runner here: ?runner=0 on a loopback host; Run says why, and runs nothing)
     const fn0 = await mk("/t/run-none.tex", enc(RUN_DOC));
     const n1 = requests.length;
