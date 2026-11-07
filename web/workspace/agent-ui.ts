@@ -73,6 +73,15 @@ export const BUSY_STEP_MS = 250;
 export const BUSY_FOR_MS = 2000;
 // (exactly the agent server's words, engine/py/python/sagebrush/pairing.py; not the remote computer's, which differ)
 const busy = (p: AgentPairing) => /^the agent refused: another page is paired with this agent$/.test(p.closeReason);
+// (whether to ask again: a wait of at most what is left of the window, then yes only if the window is still open and
+// the attempt still owns the page (`mine`: no other pairing has been adopted meanwhile, as a person's own Connect);
+// no attempt ever begins at or after the deadline, nor after it was superseded)
+async function again(deadline: number, mine: () => boolean): Promise<boolean> {
+  const left = deadline - Date.now();
+  if (left <= 0 || !mine()) return false;
+  await new Promise((r) => setTimeout(r, Math.min(BUSY_STEP_MS, left)));
+  return Date.now() < deadline && mine();
+}
 
 /** The page's pairing: a dialog to connect, a bar while connected.  Returns the button's handler. `reload` (A14) turns on
  * the reload record: its scope, and a callback for the restore's states; `quietLoss` leaves an involuntary loss to the
@@ -255,19 +264,25 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     const kept = (await ws.agentGrants()) as Record<string, Kept>;
     for (const [id, k] of Object.entries(kept)) {
       if (!k?.grant || !k.session || (k.grant.expires !== null && !(Date.now() < k.grant.expires))) { await ws.putAgentGrant(id, null); continue; }
-      const t0 = Date.now();
+      const deadline = Date.now() + BUSY_FOR_MS;
       for (;;) {
         let p: AgentPairing | null = null;
         try {
+          if (k.grant.expires !== null && !(Date.now() < k.grant.expires)) break; // (expired while it waited)
           p = make(k.port, { session: k.session, pairingId: id });
           watch(p);
           await p.paired();
+          // (superseded meanwhile by a pairing the person chose: this attempt goes, touching nothing of theirs)
+          if (pairing !== p) { p.drop(); return null; }
           await p.allow({ folders: k.grant.folders, write: k.grant.write, expires: k.grant.expires }, true);
+          if (pairing !== p) return null;
           showBar();
           return k.grant;
         } catch {
-          // (the old page's connection not yet seen closed: asked again, briefly)
-          if (p && busy(p) && Date.now() - t0 < BUSY_FOR_MS) { await new Promise((r) => setTimeout(r, BUSY_STEP_MS)); continue; }
+          // (the old page's connection not yet seen closed: asked again, briefly, while this attempt still owns the page)
+          const tried = p;
+          if (tried && busy(tried) && (await again(deadline, () => pairing === tried))) continue;
+          if (tried && pairing !== tried) return null;
           /* (the server restarted, or the agent is gone: a new code is needed; the grant stays until it expires or is revoked) */
           break;
         }
@@ -283,19 +298,24 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     if (r.grant.expires !== null && !(Date.now() < r.grant.expires)) return { res: "expired", p: null };
     let p: AgentPairing;
     const timeout = new Promise<"timeout">((res) => setTimeout(() => res("timeout"), RESTORE_MS));
-    const t0 = Date.now();
+    const deadline = Date.now() + BUSY_FOR_MS;
     let got: "paired" | "refused" | "unreachable" | "timeout";
     for (;;) {
+      if (r.grant.expires !== null && !(Date.now() < r.grant.expires)) return { res: "expired", p: null }; // (expired while it waited)
       try { p = make(r.port, { session: r.session, pairingId: r.pairingId, agent: r.agent }); } catch { return { res: "unreachable", p: null }; }
       watch(p);
       got = await Promise.race([p.paired().then(() => "paired" as const, (e) => (e instanceof AgentError && e.code !== "refused" ? "refused" : /^the agent refused/.test(p.closeReason) ? "refused" : "unreachable") as "refused" | "unreachable"), timeout]);
       // (the old page's connection not yet seen closed: asked again, briefly, within RESTORE_MS)
-      if (got === "refused" && busy(p) && Date.now() - t0 < BUSY_FOR_MS) { await new Promise((ok) => setTimeout(ok, BUSY_STEP_MS)); continue; }
+      const tried = p;
+      if (got === "refused" && busy(tried) && (await again(deadline, () => pairing === tried))) continue;
       break;
     }
+    // (superseded meanwhile by a pairing the person chose: the caller's current(p) says nothing and keeps nothing)
+    if (pairing !== p) { if (got === "paired") p.drop(); return { res: "unreachable", p }; }
     if (got === "timeout") { void p.revoke("no answer from the agent"); return { res: "unreachable", p }; }
     if (got !== "paired") return { res: got, p };
     if (r.grant.expires !== null && !(Date.now() < r.grant.expires)) { void p.revoke("the grant expired"); return { res: "expired", p }; }
+    if (pairing !== p) { p.drop(); return { res: "unreachable", p }; }
     try { await p.allow({ folders: r.grant.folders, write: r.grant.write, expires: r.grant.expires }, false); } catch { void p.revoke("the grant couldn't be given again"); return { res: "refused", p }; }
     showBar();
     return { res: "ok", p };
