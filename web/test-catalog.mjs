@@ -10,6 +10,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "./test-port.mjs";
+import { allowFiles } from "./test-allow.mjs";
 
 const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
 const root = new URL("..", import.meta.url).pathname;
@@ -66,6 +67,7 @@ try {
   await send("Runtime.enable");
   await send("Page.navigate", { url: new URL("./", base).href }, 60000);
   await until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000);
+  await allowFiles(send, ev); // (some examples write files: the person allows this notebook's file changes, as a person does)
   for (const [mode, es] of Object.entries(entries)) {
     if (!es.length) continue;
     // (the entries as base64 JSON in one cell; the worker answers with its outputs)

@@ -673,7 +673,7 @@ const perms = createPermissions();
 const NEEDS_RUNNER = window.__TAURI__
   // (the app has no sandbox: a notebook that may not change files can't run in it at all, @sagebrush's ruling)
   ? "This notebook can't run in the app while it may not change files: the app has no sandbox to run it in. Allow file changes (File menu) to run it.\n"
-  : "This notebook can't run here: it came from elsewhere, so it runs only in Sagebrush's sandbox, which didn't start in this browser. Allow changes for this notebook (File menu) to run it in this page's own interpreter.\n";
+  : "This notebook can't run here: it may not change your files, so it runs only in Sagebrush's sandbox, which didn't start in this browser. Allow changes for this notebook (File > Permissions…) to run it in this page's own interpreter.\n";
 class RefusingWorker {
   constructor(text) { this.text = text; this.onmessage = null; this.onerror = null; }
   postMessage(m) {

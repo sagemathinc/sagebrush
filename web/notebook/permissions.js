@@ -3,15 +3,15 @@
 // filesystem io. There's just two parameters"; plan-no-mutation r3, astra's CLEAR 5fe204ad). Named for what they do:
 // "File writes" and "Network", never "trust" (William, Nov 6, 9:15 PM PST).
 //
-// Two switches, unchanged by the confinement spec's phase 1a in what they decide and where they are kept:
-//   files    may change the person's files. On for a notebook the person made in this site's own UI (its workspace
-//            entry's `made: "person"`, which the host keeps and never reads from the document, a file or a URL) and for
-//            one the page made from its own bundled examples ("host"); off for any other (a remote URL, a share link,
-//            an upload, a copy of one, provenance unknown, the local server's, a disk file's). The person changes it
-//            with a trusted click (the bar's "Allow changes for this notebook", the Permissions panel), kept per
-//            document under its own key ("sagebrush-permissions", as before), and an explicit setting beats the default,
-//            a reopen included.
+// Two switches (the confinement spec's phase 1b, r3.2 §10; @sagebrush's ruling on the old key):
+//   files    may change the person's files: OFF for every document until the person allows it, their own notebooks
+//            and the bundled examples included (William's O1 and O6, Nov 6). It is the scoped record's write scope "/"
+//            (below): the bar's "Allow changes for this notebook" or the Permissions panel's switch (a trusted click
+//            only) stores a write grant of "/", its "Don't allow" a stored write denial of "/". Provenance still says
+//            how the page talks about a document, never what it may do.
 //   network  may reach the network: off for every document; nothing reads it yet.
+// The old switch's own key ("sagebrush-permissions", phase 1a and before) is read once, its explicit choices moved into
+// the scoped record (an allow to the grant, a "don't allow" to the denial), and then retired.
 // And the scoped grants of the confinement spec (r3.2 §2, §4.1; William approved the build Nov 6, 9:43 PM PST),
 // RECORDED here under their own key ("sagebrush-grants") but not yet enforced anywhere (phase 2 checks write trees,
 // phase 3 hosts, phase 4 read trees):
@@ -31,10 +31,6 @@
 const KEY = "sagebrush-permissions", GRANTS = "sagebrush-grants", HOST_MADE = "sagebrush-host-made";
 const read = (k, d) => { try { return JSON.parse(localStorage.getItem(k) ?? "null") ?? d; } catch { return d; } };
 const write = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } };
-// (the explicit choices kept: allows past ALLOWS_KEPT go, oldest first (a forgotten allow falls back to the default, never
-// more than it); a "don't allow" is never dropped to make room (astra's NM-DENY-2): past DENIALS_KEPT it is held in this
-// page and set() says it wasn't kept)
-export const ALLOWS_KEPT = 2000, DENIALS_KEPT = 20000;
 // (the scoped grants' bounds: confinement spec r3.2 §4.1)
 export const GRANT_CAPS = Object.freeze({ perKind: 32, pathChars: 1024, hostChars: 253, storedDenials: 20000, sessionDenialsPerDoc: 256, sessionDenialsPage: 4096, sessionDocs: 4096, docsKept: 2000 });
 export const GRANT_KINDS = Object.freeze(["write", "read", "net"]);
@@ -82,14 +78,14 @@ export function createPermissions() {
   const listeners = new Set();
   // (the switch choices this page couldn't keep in storage: they hold here, over what storage says, until it closes)
   const unkept = new Map(); // doc -> { files }
-  const explicit = () => read(KEY, {});
-  const choice = (doc) => unkept.get(doc) ?? explicit()[doc];
   const tell = (doc) => listeners.forEach((f) => f(doc));
   // ---- the scoped record: stored ({v, seq, docs: {doc: {write, read, net: [scope], denied: [[kind, scope, seq]], t}}})
   // and this page's session (doc -> {write, read, net: Set, denied: Map "kind\0scope" -> seq}, insertion = age)
   const session = new Map();
   let sessionSeq = 0, sessionDenials = 0;
   const stored = () => { const r = read(GRANTS, null); return r && r.v === 1 && r.docs && typeof r.docs === "object" ? r : { v: 1, seq: 0, docs: {} }; };
+  // (whether `doc`'s scoped record lets its code write anywhere: a write grant of "/", stored or once)
+  const writesAll = (doc) => (stored().docs[doc]?.write ?? []).includes("/") || !!session.get(doc)?.write.has("/");
   const key = (kind, s) => kind + "\u0000" + s;
   const empty = (x) => !x || (GRANT_KINDS.every((k) => !(x[k]?.length ?? x[k]?.size)) && !(x.denied?.length ?? x.denied?.size));
   // (a document's session entry, made only within GRANT_CAPS.sessionDocs: null past it; pruned when left empty)
@@ -124,6 +120,33 @@ export function createPermissions() {
     trim(r);
     return write(GRANTS, r);
   };
+  // (phase 1b, @sagebrush's ruling A: the old switch's explicit choices, read ONCE and moved into the scoped record,
+  // then the old key retired: an allow becomes a stored write grant of "/", a "don't allow" a stored write denial of
+  // "/"; an entry that isn't one of those moves nothing. The record's `migrated` mark keeps a later load (or an old
+  // tab writing the old key again) from reading it twice. If the record can't be written, the old choices hold in
+  // this page only and the next load tries again.)
+  const migrate = () => {
+    const raw = read(GRANTS, null);
+    if (raw && raw.v !== 1) return; // (a record of another version: not this code's to rewrite)
+    const r = stored();
+    if (r.migrated === 1) return;
+    let old = null;
+    try { old = JSON.parse(localStorage.getItem(KEY) ?? "null"); } catch {}
+    const choices = old && typeof old === "object" && !Array.isArray(old) ? Object.entries(old).filter(([d, v]) => d && v && typeof v === "object" && typeof v.files === "boolean") : [];
+    for (const [d, v] of choices) {
+      const e = (r.docs[d] ??= {});
+      e.write = (e.write ?? []).filter((x) => x !== "/");
+      e.denied = (e.denied ?? []).filter((x) => !(x[0] === "write" && x[1] === "/"));
+      if (v.files) e.write.push("/");
+      else e.denied.push(["write", "/", ++r.seq]);
+      e.t = ++r.seq;
+    }
+    r.migrated = 1;
+    trim(r);
+    if (write(GRANTS, r)) { try { localStorage.removeItem(KEY); } catch {} return; }
+    for (const [d, v] of choices) unkept.set(d, { files: v.files });
+  };
+  migrate();
   const api = {
     /** The host, as it opens `doc`: its provenance from its own metadata (absent: unknown, which counts as elsewhere). */
     provenance(doc, how) { made.set(doc, how === "person" || how === "host" ? how : "elsewhere"); tell(doc); },
@@ -131,28 +154,21 @@ export function createPermissions() {
     may(doc, perm) {
       if (perm === "network") return false;
       if (perm !== "files" || !doc) return false;
-      const set = choice(doc);
-      if (set && typeof set.files === "boolean") return set.files;
-      // (the page's own record of its bundled examples first: a reopen finds the workspace entry's "elsewhere" there)
-      const how = read(HOST_MADE, []).includes(doc) ? "host" : made.get(doc);
-      return how === "person" || how === "host";
+      const held = unkept.get(doc);
+      if (held) return held.files;
+      // (off unless the person allowed it: every document, their own and the bundled examples included (O1, O6))
+      return writesAll(doc);
     },
     /** The person's own choice for `doc` (the page's handlers, only for an isTrusted click): in effect at once, kept,
      * and told.  Returns whether it was kept in this browser's storage (false: it holds in this page only, the
      * caller says so). */
     set(doc, perm, on) {
       if (perm !== "files" || !doc) return true;
-      unkept.set(doc, { files: !!on }); // (in effect first, whatever storage does)
-      const all = explicit();
-      delete all[doc];
-      all[doc] = { files: !!on }; // (the latest choice last: the oldest allows go first)
-      const allows = Object.keys(all).filter((k) => all[k]?.files !== false);
-      for (const k of allows.slice(0, Math.max(0, allows.length - ALLOWS_KEPT))) delete all[k];
-      const denials = Object.keys(all).length - Math.min(allows.length, ALLOWS_KEPT);
-      let kept = denials <= DENIALS_KEPT || on;
-      if (!kept) delete all[doc];
-      kept = write(KEY, all) && kept;
+      // (the switch is the scoped record's write scope "/": on, a stored grant of it; off, a stored denial of it, which
+      // removes the grant, stored and once)
+      const kept = on ? api.grant(doc, "write", "/").ok : api.deny(doc, "write", "/", { stored: true });
       if (kept) unkept.delete(doc);
+      else unkept.set(doc, { files: !!on }); // (not kept: in effect in this page anyway, and the caller says so)
       tell(doc);
       return kept;
     },
@@ -265,14 +281,13 @@ export function createPermissions() {
     onChange(f) { listeners.add(f); return () => listeners.delete(f); },
     /** The record, read-only (the tests', and U11's adapter's): what it decides for `doc` now. */
     record(doc) {
-      const set = choice(doc) ?? null;
-      return { doc, provenance: read(HOST_MADE, []).includes(doc) ? "host" : made.get(doc) ?? "unknown", explicit: set, files: api.may(doc, "files"), network: false, grants: api.grants(doc) };
+      return { doc, provenance: read(HOST_MADE, []).includes(doc) ? "host" : made.get(doc) ?? "unknown", held: unkept.get(doc) ?? null, files: api.may(doc, "files"), network: false, grants: api.grants(doc) };
     },
   };
   return api;
 }
-/** A document the page made from its own bundled examples (the first visit's Welcome, the Examples dialog's): its code
- * is Sagebrush's, so it may change files as the person's own notebooks may. */
+/** A document the page made from its own bundled examples (the first visit's Welcome, the Examples dialog's): kept so
+ * the page can say so; like any other document it starts with file changes off (O6). */
 export function hostMade(id) {
   const l = read(HOST_MADE, []);
   if (!l.includes(id)) write(HOST_MADE, [...l, id].slice(-200));
