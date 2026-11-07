@@ -11,6 +11,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "./test-port.mjs";
+import { allowFiles } from "./test-allow.mjs";
 const base = (process.env.SB_URL ?? "http://127.0.0.1:8765/") + "?reactive";
 let port = Number(process.env.CDP_PORT) || 0; // (CDP_PORT: several agents' runs do not collide)
 const profile = mkdtempSync(join(tmpdir(), "sb-reactive-"));
@@ -39,6 +40,7 @@ const fileNew = async () => {
   await ev(`document.querySelector('#filebtn').click(); document.querySelector('[data-f="new"]').click(); true`);
   await until(`sagebrush.kernel.uid !== ${k} && sagebrush.kernel.ready`, 15000);
   await sleep(300);
+  await allowFiles(send, ev); // (some cells write files the others read: the person allows it, as a person does)
 };
 try {
   await send("Page.navigate", { url: base });
@@ -359,6 +361,10 @@ try {
 
   // second review, F5: away and back during a run: the output lands in the cell shown
   await fileNew();
+  // (allowed, as the person's own notebooks were before confinement 1b: a notebook not allowed gets a fresh interpreter
+  // when it's shown again, so its run in flight ends "interrupted", said in the PR for ENGINE)
+  await until(ready);
+  await allowFiles(send, ev);
   const idA5 = await ev("localStorage.getItem('sagebrush-current')");
   await set(["import time\ntime.sleep(1.5)\nx = 1\nprint('OLD')", "print(x)"]);
   await run([0, 1]);
@@ -510,7 +516,12 @@ try {
   // an old Resume link still works
   await send("Page.navigate", { url: base.replace("?reactive", "") + `?resume=${encodeURIComponent(target.id)}&at=${encodeURIComponent(target.time)}` });
   await until("window.sagebrush?.replayReport", 30000);
-  ok((await out(2)) === x0, "an old Resume from here link computes the version in a new notebook");
+  // (the new notebook starts with file changes off, like every notebook (confinement 1b): the person allows them, as
+  // a person does, and runs it again, so the version's file is written and read)
+  await until(ready);
+  await allowFiles(send, ev);
+  await ev("sagebrush.notebook.runAll().then(() => 1)");
+  ok((await out(2)) === x0, "an old Resume from here link computes the version in a new notebook, once its file changes are allowed");
   await until(ready);
 
   // Sage mode

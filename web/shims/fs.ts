@@ -26,7 +26,7 @@ export const __hooks = hooks;
 // it while the permission is off; /$pyjs is the runtime's own. Refused: a PermissionError saying why.
 let writable: () => boolean = () => true;
 export function setWritable(f: () => boolean) { writable = f; }
-export const NOT_WRITABLE = "this notebook can't change your files (it came from elsewhere): press Allow changes for this notebook";
+export const NOT_WRITABLE = "this notebook can't change your files until you allow it: press Allow changes for this notebook";
 const scratch = (r: string) => r === "/tmp" || r.startsWith("/tmp/") || r.startsWith("/$pyjs");
 function mayChange(r: string, what: string) {
   if (scratch(r) || writable()) return;
