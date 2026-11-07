@@ -1,0 +1,23 @@
+Q(3) | [3, 0]
+Q(m+2) | [2, 1]
+Q(0) | [0, 0]
+Q3(m) | [0, 1, 0]
+Q3(0) | [0, 0, 0]
+T0 gb | [0]
+T00 gb | [0]
+T[] gb | [0]
+Ta0 gb | [a]
+R ideal(0) gens | (0,)
+R ideal([]) gens | (0,)
+R ideal() gens | (0,)
+T ideal([]) gens | [0]
+GF5 0 coeffs dense | []
+QQ 0 coeffs dense | []
+ZZ 0 list | []
+QQ 0 list | []
+QQ 0 exponents | []
+T0 gens | [0]
+GF5 0 list | []
+R(0)[0] | 0
+R(0).constant_coefficient() | 0
+R(0).leading_coefficient() | 0

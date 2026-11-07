@@ -3653,10 +3653,11 @@ class Polynomial_ff:
 
         EXAMPLES::
 
-            sage: R.<x> = GF(5)[]; (2*x^2 + 3).list()
-            [3, 0, 2]
+            sage: R.<x> = GF(5)[]; (2*x^2 + 3).list(), R(0).list()
+            ([3, 0, 2], [])
         """
-        return list(self._c) if self._c else [self._ring._base.zero()]
+        # (the zero polynomial's list is empty, as Sage's)
+        return list(self._c)
 
     def coefficients(self, sparse=True):
         """The nonzero coefficients (sparse=False: all), constant first.

@@ -1,0 +1,33 @@
+diff(g,t,0) | 1/2*t^2 + 1
+g.diff(t,0) | 1/2*t^2 + 1
+derivative(g,t,0) | 1/2*t^2 + 1
+diff(g,t,1) | t
+diff(g,t,2) | 1
+diff(g,0) | 1/2*t^2 + 1
+diff(g,2) | 1
+diff(g,t,-1) | ERR ValueError 'derivative counts must be nonnegative'
+diff(h,t,0,t) | 2*t*y^3
+diff(h,t,0,y,1) | 3*t^2*y^2
+diff(h,t,1,0) | 2*t*y^3
+diff(h,t,2,y,0) | 2*y^3
+diff(h,0,t) | 2*t*y^3
+diff(h,t,y,0) | 2*t*y^3
+diff(h,0) | t^2*y^3
+poly diff(m,0) | m^3
+derivative(m^3,m,0) | m^3
+derivative(m^3,m,0) parent | Univariate Polynomial Ring in m over Rational Field
+callable f.diff(t,0) | t |--> t^3
+diff(f,t,0) | t |--> t^3
+diff(sin(t),t,0) | sin(t)
+diff(g,t,0,t,0) | 1/2*t^2 + 1
+diff(m^3, m) | 3*m^2
+diff(m^3,m) parent | Univariate Polynomial Ring in m over Rational Field
+diff(m^3, y) | ERR ValueError 'cannot differentiate with respect to y'
+diff(m^3, m, 2) | 6*m
+derivative(m^3) | 3*m^2
+diff(m^3, 2) | 6*m
+diff(a^2*b, a) | 2*a*b
+diff(a^2*b, a) parent | Multivariate Polynomial Ring in a, b over Rational Field
+diff(a^2*b, a, 0) | a^2*b
+diff(m^3, t) | ERR ValueError 'cannot differentiate with respect to t'
+diff(GF5 poly) | 3*z^2
