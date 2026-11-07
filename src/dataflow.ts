@@ -15,6 +15,7 @@ import { magmaToPython } from "./magma";
 import { matlabToPython } from "./matlab";
 import { ipythonSyntax } from "./help-syntax";
 import { expandMagics, codeParser } from "./magic-syntax";
+import { isTranslated, type DocumentMode } from "./modes";
 
 type Node = { _type: string; [field: string]: any };
 
@@ -475,12 +476,12 @@ class Visitor {
  * Magma cells after translation to Python, as they run.  In Sage, a top-level
  * `var('x y')` (or `function('f')`) defines its names, as running it does.
  */
-export function analyzeCell(source: string, cellId = "c", opts: { mode?: "python" | "sage" | "magma" | "matlab"; strict?: boolean } = {}): CellAnalysis {
+export function analyzeCell(source: string, cellId = "c", opts: { mode?: DocumentMode; strict?: boolean } = {}): CellAnalysis {
   // (marimo: some frontends send non-breaking spaces)
   source = source.replaceAll(" ", " ");
   // (IPython's obj? help lines and magics, as the notebook runs them: the
   // code %time and %timeit run is in the tree, %timeit's in its own function)
-  const ipython = opts.mode !== "magma" && opts.mode !== "matlab";
+  const ipython = !isTranslated(opts.mode);
   if (ipython) source = ipythonSyntax(source);
   if (opts.mode === "sage") source = preparse(source);
   // (the translation's `from _magma import *` brings Magma's functions, not the notebook's names)

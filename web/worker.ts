@@ -69,6 +69,7 @@ import { waitForLine } from "../src/stdin-wait";
 import { LIVE_DEADLINE_MS, LIVE_MAX_BYTES, waitForAnswer, type LiveAnswer } from "../src/live-data";
 import type { LiveRequest } from "../src/notebook-session";
 import { LIMITS_MAX_BYTES, utf8Bytes, type LimitsText } from "../src/limits";
+import { modeOfFlags } from "../src/modes";
 import { useSet, prefetchFor, onPkgUse, SetUnfetched } from "./pkgset-browser";
 
 // The files each run reads and writes (the reactive notebook's file edges):
@@ -293,7 +294,7 @@ self.onmessage = async (ev: MessageEvent) => {
   if (m.files) return loadFiles(m.files);
   if (m.fsPut !== undefined) return putFile(m.fsPut, m.data, typeof m.tok === "string" ? m.tok : undefined);
   if (m.mount) return mount(m.mount);
-  const mode = m.sage ? "sage" : m.magma ? "magma" : m.matlab ? "matlab" : null;
+  const mode = modeOfFlags(m);
   if (mode) {
     const p = prefetchMode(mode, fetchBytes, libLoading);
     // (a run, and the questions that load the language first: Tab, check, a

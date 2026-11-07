@@ -7168,6 +7168,31 @@
   "owner": "python (@sagebrush-python)",
   "reason": "the exception a file object without a descriptor raises (Sagebrush's), which skips the fsync; matched text that bounds nothing"
  },
+ "lib/shutil.py ::  :: XXX The functions here don't copy the resource fork or other metadata on Mac. #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "a comment in CPython 3.14.10's shutil, unchanged: no limit"
+ },
+ "lib/shutil.py :: _determine_linux_fastcopy_blocksize :: if sys.maxsize < 2 ** 32: #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14.10's shutil, unchanged: a 32-bit platform check for a copy block size; refuses nothing"
+ },
+ "lib/shutil.py :: _rmtree_unsafe :: raise NotImplementedError(\"dir_fd unavailable on this platform\") #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14.10's shutil, unchanged: rmtree(dir_fd=) where os has no dir_fd support (os.supports_dir_fd is empty here), CPython's own message"
+ },
+ "lib/shutil.py :: copystat :: except NotImplementedError: #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14.10's shutil, unchanged: copystat ignores a follow_symlinks the platform lacks; handles, refuses nothing"
+ },
+ "lib/shutil.py :: rmtree :: If it is unavailable, using it will raise a NotImplementedError. #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "a docstring line of CPython 3.14.10's shutil, unchanged"
+ },
  "lib/ssl.py :: SSLContext.load_cert_chain :: raise NotImplementedError(\"ssl: certificate files are not used by Sagebrush's replay-only network client\") #0": {
   "class": "coverage",
   "owner": "python"
@@ -9883,6 +9908,21 @@
   "owner": "python (@sagebrush-python)",
   "row": "src-7"
  },
+ "src/runtime/modules.ts :: cInt :: if (i > 2147483647 || i < -2147483648) raise(T.OverflowError, \"Python int too large to convert to C int\"); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython's own argument contract, not a Sagebrush cap: os's descriptors, flags, modes and lseek's how are C ints in CPython (Modules/posixmodule.c), and outside it CPython raises this same OverflowError; no value reaches the file system with bits dropped (astra's OPEN-FLAGS-1)"
+ },
+ "src/runtime/modules.ts :: cWide :: if (e?.unsupported) raise(T.NotImplementedError, String(e.message)); #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an os.open form the browser's virtual file system doesn't do (O_DIRECTORY, a folder, O_TRUNC read-only, unknown flags): NotImplementedError saying so, before any effect (P3b-2 design note, SEC cleared)"
+ },
+ "src/runtime/modules.ts :: cWide :: if (i > 9223372036854775807n || i < -9223372036854775808n) raise(T.OverflowError, `Python int too large to convert to C ${c}`); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython's own argument contract, not a Sagebrush cap: os.read's count is a ssize_t and os.lseek's offset a C long (off_t) in CPython, and outside them CPython raises this same OverflowError"
+ },
  "src/runtime/modules.ts :: chdir :: const READ_NOFOLLOW_MAX = 50_000_000; #0": {
   "class": "1",
   "disposition": {
@@ -9953,6 +9993,16 @@
   "class": "none",
   "owner": "memory guards' message (item D)"
  },
+ "src/runtime/modules.ts :: noDirFd :: if (dir_fd !== null) raise(T.NotImplementedError, \"dir_fd unavailable on this platform\"); #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "os.open/chmod/utime/access(dir_fd=): no directory descriptors here (supports_dir_fd is empty), refused with CPython's own message on a platform without dir_fd, before any effect"
+ },
+ "src/runtime/modules.ts :: noDirFd :: if (e?.unsupported) raise(T.NotImplementedError, String(e.message)); #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an os.open form the browser's virtual file system doesn't do (O_DIRECTORY, a folder, O_TRUNC read-only, unknown flags): NotImplementedError saying so, before any effect (P3b-2 design note, SEC cleared)"
+ },
  "src/runtime/modules.ts :: norm :: const e = callKw(getattr(importModule(\"_memguard\"), \"memory_guard\"), [what, norm(needBytes), norm(limitBytes), allowanceFor], [\"fixed\"], [fixed]); #0": {
   "class": "none",
   "owner": "memory guards' message (item D)"
@@ -10002,7 +10052,7 @@
   "owner": "python (@sagebrush-python)",
   "row": "src-7"
  },
- "src/runtime/modules.ts :: quiet :: EBUSY: \"Device or resource busy\", EINVAL: \"Invalid argument\", ELOOP: \"Too many levels of symbolic links\", #0": {
+ "src/runtime/modules.ts :: quiet :: EBUSY: \"Device or resource busy\", EINVAL: \"Invalid argument\", EFBIG: \"File too large\", ELOOP: \"Too many levels of symbolic links\", #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
   "reason": "the strerror table (CPython's messages for errno codes): the word resource in EBUSY's text, not a cap"
