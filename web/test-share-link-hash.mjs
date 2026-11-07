@@ -5,6 +5,8 @@
 //   - the notebook it replaced is kept (still in this browser, its cells as they were), and Run all runs the shared
 //     notebook's cells, not the old one's;
 //   - a fragment that is no share link (#notes) changes nothing; a damaged one (#z= whose bytes don't inflate) says so and changes nothing;
+//   - only the latest fragment counts (astra's SHARE-HASH-STALE-1): A held, then B, B wins; a held link dropped by a
+//     later non-link fragment; an explicit open meanwhile wins; a held damaged link's error isn't said after a newer one;
 //   - a control: the same link opened in a fresh load opens too.
 //   bun web/build.ts, then node web/test-share-link-hash.mjs
 import { spawn } from "node:child_process";
@@ -89,6 +91,54 @@ try {
   await setHash("#z=AAAAAAAA");
   check(await until("/could not open the share link/.test(document.querySelector('#status').textContent)", 10000), `a damaged share link says so (${await ev("document.querySelector('#status').textContent")})`);
   check(await current() === before && (await codes()).includes("OLD-CELL"), "…and changes nothing");
+
+  // ---- only the latest fragment counts (astra's SHARE-HASH-STALE-1): A's decode held (the page's shareTest seam), then
+  // B: B opens; A, released, opens nothing and says nothing
+  const A = await linkOf(["print('LINK-A')"], "m=sage&"), B = await linkOf(["print('LINK-B')"], "m=magma&");
+  const hold = (h) => ev(`(() => { const t = sagebrush.shareTest; t.beforeLinkDecode = (h) => h === ${JSON.stringify(h)} ? new Promise((r) => (window.__release = r)) : null; return 1; })()`);
+  const release = () => ev("(window.__release?.(), sagebrush.shareTest.beforeLinkDecode = null, 1)");
+  const hasCell = (t) => ev(`sagebrush.notebook.cells().some((c) => c.ta.value.includes(${JSON.stringify(t)}))`);
+  await go(base + "?nb=" + encodeURIComponent(oldId));
+  await hold(A);
+  await setHash(A);
+  await sleep(300);
+  await setHash(B);
+  check(await until(`sagebrush.notebook.cells().some((c) => c.ta.value.includes("LINK-B"))`, 30000) && (await ev("document.querySelector('#mode').value")) === "magma", "A held, then B: B opens, in B's language");
+  const bId = await current();
+  await release();
+  await sleep(2500);
+  check((await current()) === bId && (await hasCell("LINK-B")) && !(await hasCell("LINK-A")) && (await ev("document.querySelector('#mode').value")) === "magma", "…A, released after B, opens nothing: B stays, in its language");
+  // (a fragment that is no share link, after a held one: the held one is dropped)
+  await go(base + "?nb=" + encodeURIComponent(oldId));
+  await hold(A);
+  await setHash(A);
+  await sleep(300);
+  await setHash("#notes");
+  await release();
+  await sleep(2500);
+  check((await current()) === oldId && (await hasCell("OLD-CELL")) && !(await hasCell("LINK-A")), "a held link, then a fragment that is no share link: the held one is dropped");
+  // (an explicit open while a link is held: the open wins, and the released link doesn't replace it)
+  const other = await ev(`sagebrush.workspace.create("/other.ipynb", { content: { name: "other", mode: "python", cells: [{ id: "c1", type: "code", code: "print('OTHER-CELL')" }] } }).then((e) => e.ref)`);
+  await go(base + "?nb=" + encodeURIComponent(oldId));
+  await hold(A);
+  await setHash(A);
+  await sleep(300);
+  await ev(`sagebrush.open(${JSON.stringify(other)}).then(() => 1)`);
+  check(await until(`localStorage.getItem("sagebrush-current") === ${JSON.stringify(other)}`, 30000), "(an explicit open while a link is held)");
+  await release();
+  await sleep(2500);
+  check((await current()) === other && (await hasCell("OTHER-CELL")) && !(await hasCell("LINK-A")), "…the explicit open wins: the released link doesn't replace it");
+  // (a damaged link held, then a good one: the good one opens, and the damaged one's error, when released, isn't said)
+  await go(base + "?nb=" + encodeURIComponent(oldId));
+  await hold("#z=AAAAAAAA");
+  await setHash("#z=AAAAAAAA");
+  await sleep(300);
+  await setHash(B);
+  check(await until(`sagebrush.notebook.cells().some((c) => c.ta.value.includes("LINK-B"))`, 30000), "(a damaged link held, then B: B opens)");
+  await ev("(document.querySelector('#status').textContent = 'B-OPENED', 1)");
+  await release();
+  await sleep(2500);
+  check(!/could not open the share link/.test(await ev("document.querySelector('#status').textContent")), "…the damaged link's error, released after, doesn't overwrite the newer status");
 
   // ---- a control: the same link in a fresh load opens it too (the path at load)
   await go(base + link);

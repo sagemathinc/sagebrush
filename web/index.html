@@ -1768,17 +1768,17 @@ perms.onChange((doc) => {
   }
   if (doc === current.id) filesShown();
 });
-async function openDocument(doc, here = false, made = "elsewhere", guard = null) {
+async function openDocument(doc, here = false, made = "elsewhere", guard = null, intent = null) {
   const id = newId();
   // (Sagebrush's own (the first visit's Welcome, an example): host-made before its interpreter starts, so it never
   // starts as one that can't change files and is restarted (the app on Windows: still loading at the self-test's check))
   if (made === "host") { hostMade(id); perms.provenance(id, "host"); made = "elsewhere"; }
   madeAs.set(id, here ? "person" : made);
   const { here: _h, ...rest } = doc;
-  return open(await storeFor(id, { ...rest, ...(here ? { here: true } : {}), id, cells: (doc.cells ?? []).map((c) => (c.id ? c : { ...c, id: cellId() })) }), id, "browser", guard);
+  return open(await storeFor(id, { ...rest, ...(here ? { here: true } : {}), id, cells: (doc.cells ?? []).map((c) => (c.id ? c : { ...c, id: cellId() })) }), id, "browser", guard, intent);
 }
 // (here: a new notebook, written in this browser; else examples and share links)
-const openNew = (name, mode, codes, here = false, guard = null) => openDocument({ name, mode, cells: codes.map(asCell) }, here, undefined, guard);
+const openNew = (name, mode, codes, here = false, guard = null, intent = null) => openDocument({ name, mode, cells: codes.map(asCell) }, here, undefined, guard, intent);
 // (one of Sagebrush's own notebooks, made here from its bundled examples: permissions.js's "host")
 const openHostMade = (name, mode, codes) => openDocument({ name, mode, cells: codes.map(asCell) }, false, "host");
 /** `intent`: an automatic open's (awaitArrival), given to open() through either branch. */
@@ -4037,13 +4037,20 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   // here): only the fragment changes and nothing reloads, so it is opened here as it would be at load (run 13's
   // APP-share-link-same-tab: the old notebook stayed, and its Run all ran its own cells). Through open(), as File > Open:
   // the notebook left is kept (saved as it goes), and one whose saves can't be made yet stays open, saying why. A
-  // fragment that is no share link changes nothing; under `sagebrush notebook`'s one file, as at load, it isn't opened
+  // fragment that is no share link changes nothing; under `sagebrush notebook`'s one file, as at load, it isn't opened.
+  // Only the latest fragment counts (astra's SHARE-HASH-STALE-1): each is read once, numbered, and decoded; a decode a
+  // later fragment superseded (a link, or anything else) is dropped, its error unsaid; and it attaches only if no other
+  // notebook was attached here since it was asked for (an `intent`, checked by open() under the navigation lease: a
+  // File > Open meanwhile wins)
+  let linkSeq = 0;
   if (!LOCAL) addEventListener("hashchange", async () => {
+    const hash = location.hash, seq = ++linkSeq, intent = { attach: attachSeq };
     let codes = null;
-    try { codes = await fromLink(location.hash); } catch { statusEl.textContent = "could not open the share link: it is damaged or cut short"; return; }
-    if (!codes) return;
-    try { await openNew("Shared notebook", linkMode(location.hash), codes); }
-    catch (err) { if (!err?.navWon) statusEl.textContent = `could not open the share link: ${err?.message ?? err}`; }
+    try { await shareTest.beforeLinkDecode?.(hash); codes = await fromLink(hash); }
+    catch { if (seq === linkSeq) statusEl.textContent = "could not open the share link: it is damaged or cut short"; return; }
+    if (seq !== linkSeq || !codes) return;
+    try { await openNew("Shared notebook", linkMode(hash), codes, false, null, intent); }
+    catch (err) { if (!err?.navWon && seq === linkSeq) statusEl.textContent = `could not open the share link: ${err?.message ?? err}`; }
   });
   // ?openas=PATH&fid=FID: a file opened as a notebook from the board page (a Jupytext MyST .md sent there, which
   // offers it here instead: agents-ui's N-2), through openAs as the file browser's menu does; one replaced
