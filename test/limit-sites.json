@@ -4086,6 +4086,11 @@
   "class": "none",
   "owner": "memory guards' message (item D)"
  },
+ "lib/_os_lazy.py :: PathLike.__fspath__ :: raise NotImplementedError #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14's os.PathLike, copied: the abstract method's body, not a cap"
+ },
  "lib/_png.py ::  :: MAX_AXIS = 16384 #0": {
   "class": "1+2",
   "owner": "raster/image I/O",
@@ -6521,6 +6526,26 @@
   "owner": "python (@sagebrush-python)",
   "reason": "CPython 3.14's Lib/enum.py, copied unchanged: the census vocabulary matches max_bits (a padding width in enum.bin), \"unsupported operand\" (the TypeError CPython raises for a non-Flag in a Flag) and \"delimited\" (contains limit) in EnumType.__call__'s TypeError; none refuses for size"
  },
+ "lib/errno.py ::  :: 82: 'ELIBMAX', #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "errno's name ELIBMAX (CPython's value, generated): a constant, not a cap"
+ },
+ "lib/errno.py ::  :: ELIBMAX = 82 #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "errno's name ELIBMAX (CPython's value, generated): a constant, not a cap"
+ },
+ "lib/fnmatch.py ::  :: @functools.lru_cache(maxsize=32768, typed=True) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14's fnmatch, copied unchanged: the size of its compiled-pattern cache; every pattern still compiles, not a cap"
+ },
+ "lib/fnmatch.py ::  :: _re_escape = functools.lru_cache(maxsize=512)(re.escape) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14's fnmatch, copied unchanged: a cache's size, not a cap"
+ },
  "lib/fredapi.py :: _error :: if code == \"rate_limited\": #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
@@ -6530,6 +6555,26 @@
   "class": "none",
   "owner": "python (@sagebrush-python)",
   "reason": "live data's error vocabulary (no_key, rate_limited, ...) and yfinance's refusal text, relayed from upstream or the bridge: matched words that bound nothing here"
+ },
+ "lib/glob.py ::  :: @functools.lru_cache(maxsize=512) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14's glob, copied unchanged: a cache's size, not a cap"
+ },
+ "lib/glob.py :: _GlobberBase.concat_path :: raise NotImplementedError #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14's glob, copied unchanged: an abstract method's body, not a cap"
+ },
+ "lib/glob.py :: _GlobberBase.lexists :: raise NotImplementedError #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14's glob, copied unchanged: an abstract method's body, not a cap"
+ },
+ "lib/glob.py :: _GlobberBase.scandir :: raise NotImplementedError #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython 3.14's glob, copied unchanged: an abstract method's body, not a cap"
  },
  "lib/hashlib.py :: new :: raise ValueError(\"unsupported hash type \" + name) #0": {
   "class": "coverage",
@@ -9799,6 +9844,16 @@
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
+ "src/runtime/modules.ts :: lstatOf :: if (dir_fd !== null) raise(T.NotImplementedError, \"dir_fd unavailable on this platform\"); #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "os.stat(dir_fd=): this runtime has no directory descriptors, refused with CPython's own message on a platform without dir_fd; unsupported, not a cap"
+ },
+ "src/runtime/modules.ts :: lstatOf :: if (dir_fd !== null) raise(T.NotImplementedError, \"dir_fd unavailable on this platform\"); #1": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "os.lstat(dir_fd=): this runtime has no directory descriptors, refused with CPython's own message on a platform without dir_fd; unsupported, not a cap"
+ },
  "src/runtime/modules.ts :: memoryGuard :: export function memoryGuard(what: string, needBytes: number | bigint, limitBytes: number | bigint, allowanceFor: string, fixed = false): never { #0": {
   "class": "none",
   "owner": "memory guards' message (item D)"
@@ -9851,6 +9906,11 @@
   "class": "2+3",
   "owner": "python (@sagebrush-python)",
   "row": "src-7"
+ },
+ "src/runtime/modules.ts :: quiet :: EBUSY: \"Device or resource busy\", EINVAL: \"Invalid argument\", ELOOP: \"Too many levels of symbolic links\", #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "the strerror table (CPython's messages for errno codes): the word resource in EBUSY's text, not a cap"
  },
  "src/runtime/modules.ts :: quiet :: const buf = new Uint8Array(Math.min(limit, st.size) + 1); #0": {
   "class": "1",
