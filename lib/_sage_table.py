@@ -176,7 +176,12 @@ class table:
     # ---- the text form
     def _str_rows(self):
         # (columns as Sage counts them: as many as the shortest row has; a line zips its row with them)
-        rows = [[str(c) for c in r] for r in self._rows]
+        rows, last = [], max((i for i, r in enumerate(self._rows) if r), default=-1)
+        for i, r in enumerate(self._rows):
+            # (an empty row before a non-empty one: Sage's IndexError, the rows before it made strings first)
+            if not r and i < last:
+                raise IndexError("list index out of range")
+            rows.append([str(c) for c in r])
         widths = [max(len(c) for c in col) for col in zip(*rows)]
         return rows, widths
 
@@ -188,9 +193,6 @@ class table:
         # (an empty first row: nothing at all, whatever the options, as Sage's)
         if not self._rows[0]:
             return ""
-        # (an empty row before a non-empty one: Sage's IndexError)
-        if any(not r and any(self._rows[i:]) for i, r in enumerate(self._rows)):
-            raise IndexError("list index out of range")
         rows, widths = self._str_rows()
         o = self._options
         hcol, frame = o["header_column"], o["frame"]
