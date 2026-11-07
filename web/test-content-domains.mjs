@@ -8,17 +8,23 @@ const empty = () => ({ dev: { root: "", filesOrigin: "", runOrigin: "", renderOr
 const configured = () => ({ dev: { root: "content-example.dev", filesOrigin: "https://files.content-example.dev", runOrigin: "", renderOrigin: "" }, prod: { root: "content-example.com", filesOrigin: "https://files.content-example.com", runOrigin: "", renderOrigin: "" } });
 const rootProblem = "dev: choose a dedicated .dev content root";
 const originProblem = "dev: filesOrigin must be the exact https files origin under its content root";
-it("keeps deployed files routes and all hosted roles unchanged", () => {
+it("configures only the owned files hosts and retains legacy routes per environment", () => {
   assert.deepEqual(checkContentDomains(), []);
   assert.deepEqual(LEGACY_CONTENT_ROOTS, legacy);
-  for (const [env, root] of [["dev", legacy[1]], ["prod", legacy[0]]]) {
+  for (const [env, root, oldRoot] of [["dev", "sagebrushusercontent.dev", legacy[1]], ["prod", "sagebrushusercontent.com", legacy[0]]]) {
+    assert.deepEqual(CONTENT_DOMAINS[env], { root, filesOrigin: `https://files.${root}`, runOrigin: "", renderOrigin: "" });
     assert.equal(filesOrigin(env), `https://files.${root}`);
     assert.equal(filesHost(env), `files.${root}`);
-    assert.deepEqual(filesHosts(env), [`files.${root}`]);
+    assert.deepEqual(filesHosts(env), [`files.${oldRoot}`, `files.${root}`]);
   }
-  assert(Object.values(CONTENT_DOMAINS).every((c) => Object.values(c).every((v) => v === "")));
   assert(Object.values(SITES).every((s) => s.shell === ""));
   assert.deepEqual(checkSites(), []);
+});
+it("empty configuration still falls back to each environment's legacy host", () => {
+  for (const [env, root] of [["dev", legacy[1]], ["prod", legacy[0]]]) {
+    assert.equal(filesOrigin(env, empty()), `https://files.${root}`);
+    assert.deepEqual(filesHosts(env, empty()), [`files.${root}`]);
+  }
 });
 it("rejects the wrong environment suffix without another broken rule", () => {
   const c = empty(); c.dev.root = "content-example.com";
@@ -61,9 +67,9 @@ it("configured routes retain each environment's legacy host alongside its new on
   assert.deepEqual(filesHosts("prod", c), ["files.cocalcusercontent.com", "files.content-example.com"]);
 });
 it("legacy and pending content roots stay forbidden for hosted rendering", () => {
-  assert.deepEqual(forbiddenContentRoots(), legacy);
+  assert.deepEqual(forbiddenContentRoots(), [...legacy, "sagebrushusercontent.dev", "sagebrushusercontent.com"]);
   assert.deepEqual(forbiddenContentRoots(configured()), [...legacy, "content-example.dev", "content-example.com"]);
-  for (const root of legacy) {
+  for (const root of [...legacy, "sagebrushusercontent.dev", "sagebrushusercontent.com"]) {
     const problems = checkSites({ ...SITES, dev: { ...SITES.dev, shell: `https://render.${root}/` } });
     assert.deepEqual(problems, [`dev: the shell may not share the app's or the user-content site (${root})`]);
   }

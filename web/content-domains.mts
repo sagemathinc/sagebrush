@@ -1,12 +1,12 @@
 // Content-host configuration shared by the files Worker and its API binding.
-// William supplies the new names and performs DNS/deploys. Empty values keep
-// today's files routes; they do not enable hosted execution or rendering.
+// William owns the content roots and performs DNS/deploys. Files configuration
+// retains legacy hosts; run/render remain reserved and disabled.
 export type ContentEnvironment = "dev" | "prod";
 export const LEGACY_CONTENT_ROOTS = Object.freeze(["cocalcusercontent.com", "cocalcusercontent.dev"]);
 const legacyFiles = { dev: `https://files.${LEGACY_CONTENT_ROOTS[1]}`, prod: `https://files.${LEGACY_CONTENT_ROOTS[0]}` };
 export const CONTENT_DOMAINS = Object.freeze({
-  dev: { root: "", filesOrigin: "", runOrigin: "", renderOrigin: "" },
-  prod: { root: "", filesOrigin: "", runOrigin: "", renderOrigin: "" },
+  dev: { root: "sagebrushusercontent.dev", filesOrigin: "https://files.sagebrushusercontent.dev", runOrigin: "", renderOrigin: "" },
+  prod: { root: "sagebrushusercontent.com", filesOrigin: "https://files.sagebrushusercontent.com", runOrigin: "", renderOrigin: "" },
 });
 export type ContentDomains = typeof CONTENT_DOMAINS;
 
