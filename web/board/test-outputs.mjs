@@ -361,7 +361,6 @@ try {
   ] };
   // (in Edit: slow code keeps its preview in the board in Edit only; View writes nothing, web/doc-mode.ts)
   await ev("window.sagebrush.board.editing(true), 1");
-  await ev("window.__holdPut = 1, 1");
   await ev(`window.sagebrush.board.load(${JSON.stringify(swept)}).then(() => 1)`);
   const idSwept = await ev(`localStorage.getItem(${JSON.stringify(idKey)})`);
   await ev(`new Promise((res) => { const r = indexedDB.open('sagebrush-outputs'); r.onsuccess = () => { const db = r.result, t = db.transaction(['entries', 'docs'], 'readwrite'); for (let i = 0; i < 5; i++) t.objectStore('entries').put({ doc: ${JSON.stringify(idSwept)}, key: 'big-' + i, outputs: [], at: '2026-10-14T00:00:00.000Z', ms: 1, total: 1, bytes: 16000000, used: Date.now() + 1e9 }); t.objectStore('docs').put({ doc: ${JSON.stringify(idSwept)}, bytes: 80000000, used: Date.now() }); t.oncomplete = () => { db.close(); res(1); }; }; })`);
