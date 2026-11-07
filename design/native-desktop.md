@@ -179,7 +179,13 @@ r4's A-vs-B timings stay withdrawn: the PyPI wheel came from a different commit.
     - The download must be staged. Its length and hash must be checked before it is extracted or run, archive paths must be validated, and the verified executable must be installed atomically.
     - It must fail closed: missing or mismatched data must never fall back to running something unverified.
     - It reuses the engine updater's verification (§4.4), not a separate verification scheme.
-    - **Not covered by this verification:** the packages Tectonic itself fetches on first use come through Tectonic's own mechanism. That is a known limit, recorded here, not a claim.
+    - **Not covered by this verification, today:** Tectonic's later bundle and package downloads. Verifying the executable archive doesn't authenticate them.
+    - **Before N6 ships**, a separately reviewed bundle policy must:
+      - pin an approved bundle identity and source;
+      - authenticate fetched contents and any reuse of the cache before use;
+      - reject source overrides chosen by a document;
+      - define the consent, bounds and offline behaviour of package fetches.
+    - A failure must never use unverified data. A verified full local bundle with an offline-only path is also acceptable, if authenticated partial fetches can't be established. This is a requirement on the deferred work, not a claim that stock Tectonic provides it.
     - Signature keys and signing remain William's only. Agents use fixtures and mock metadata.
 - **The runtime is a packaging choice:** Bun (`bun build --compile`), Deno (`deno compile`) or a Node single executable. `scripts/build-cli.mjs` already builds all three (`--bun`, `--deno`, `--sea`).
   - The native Rust engine is loaded into that runtime, through N-API or the runtime's own FFI.
@@ -387,6 +393,7 @@ Wiring it into a workflow file stays William's or @sagebrush's.
 - an archive entry with `..`, an absolute path or a link outside the destination fails, including the Windows forms (`..\`, a drive letter such as `C:\`, and a UNC path `\\server\share`);
 - injected failures at each of four points (download, verify, extract, replace) leave the previous executable byte-identical (or still absent), run nothing unverified, and a retry starts from a clean staging area;
 - **offline, deterministically:** a network fixture that refuses connections and an injected deadline (no wall-clock assertion). The compile ends with the offline message, runs nothing, and leaves the previous state intact;
+- the bundle policy (§4.1): a changed bundle or index, a changed cached file, a changed source, and a missing package while offline each refuse deterministically, use no unverified data, and leave the previous verified cache intact;
 - the notices and the source offer are installed with the executable.
 
 ## 9. Questions for William: answered
