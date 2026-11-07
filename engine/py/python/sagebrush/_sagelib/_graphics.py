@@ -1367,8 +1367,9 @@ class Panel:
         if o.get("yinvert"):
             ylo, yhi = yhi, ylo
         ar = o.get("aspect_ratio")
-        # (fit_aspect with all four limits set: the box takes the shape, the limits stay, as matplotlib's adjustable='box')
-        boxed = o.get("fit_aspect") and None not in (o.get("xmin"), o.get("xmax"), o.get("ymin"), o.get("ymax"))
+        # (fit_aspect: the box takes the shape, the limits stay, as
+        # matplotlib's adjustable='box'; autoscaled limits too, W04)
+        boxed = bool(o.get("fit_aspect"))
         if ar not in (None, "automatic", "auto") and not xlog and not ylog and not boxed:
             ar = float(ar)
             # (an inverted axis keeps its direction: the spans' signs)
@@ -1440,10 +1441,13 @@ class Panel:
             top = sub_h  # (except a subtitle's line: the title stays where it was)
         pw, ph = max(20, w - left - right), max(20, h - top - bottom)
         ar = o.get("aspect_ratio")
-        if o.get("fit_aspect") and ar not in (None, "automatic", "auto") and None not in (
-                o.get("xmin"), o.get("xmax"), o.get("ymin"), o.get("ymax")):
-            # keep the ranges and shrink the plot area to their shape instead
-            xr, yr = abs(float(o["xmax"]) - float(o["xmin"])), abs(float(o["ymax"]) - float(o["ymin"])) * float(ar)
+        if o.get("fit_aspect") and ar not in (None, "automatic", "auto"):
+            # keep the ranges (given or autoscaled) and shrink the plot area
+            # to their shape instead
+            # (a log axis in decades, as matplotlib's apply_aspect measures it)
+            bx = self.ranges(pw, ph)
+            span = lambda lo, hi, log: abs(math.log10(hi) - math.log10(lo)) if log and lo > 0 and hi > 0 else 0.0 if log else abs(hi - lo)
+            xr, yr = span(bx[0], bx[1], bx[4]), span(bx[2], bx[3], bx[5]) * float(ar)
             if xr > 0 and yr > 0:
                 k = min(pw / xr, ph / yr)
                 left += (pw - xr * k) / 2
@@ -1462,8 +1466,12 @@ class Panel:
             xlo, xhi, ylo, yhi, _fmt(P.left), _fmt(P.top), _fmt(pw), _fmt(ph),
             ' data-xlog="1"' if xlog else "", ' data-ylog="1"' if ylog else "")]
         cid = "sbclip%d" % _next_id()
+        # (matplotlib clips to the Axes box itself, clip_exact: a line just
+        # past a limit drew in the margin, W51; Sage's figures keep a little
+        # room for markers and lines at the edges)
+        pad = 0 if o.get("clip_exact") else 4
         out.append('<clipPath id="%s"><rect x="%s" y="%s" width="%s" height="%s"/></clipPath>' % (
-            cid, _fmt(P.left - 4), _fmt(P.top - 4), _fmt(pw + 8), _fmt(ph + 8)))
+            cid, _fmt(P.left - pad), _fmt(P.top - pad), _fmt(pw + 2 * pad), _fmt(ph + 2 * pad)))
         if o.get("facecolor") not in (None, "none"):
             out.append('<rect x="%s" y="%s" width="%s" height="%s" fill="%s" stroke="none"/>' % (
                 _fmt(P.left), _fmt(P.top), _fmt(pw), _fmt(ph), _esc(o["facecolor"])))
@@ -1553,6 +1561,7 @@ class Panel:
             skip_x = xv if (P.ylo < 0 < P.yhi and xv == 0.0) else None
             skip_y = yv if (P.xlo < 0 < P.xhi and yv == 0.0) else None
         labels, ylabels, ytick = [], [], []
+        xrot = float(o.get("xtick_rotation") or 0) % 360
         for v, s in xt:
             p = P.map(v, P.ylo, clamp=False)
             if p is None:
@@ -1561,6 +1570,17 @@ class Panel:
             if skip_x is not None and abs(v - skip_x) < 1e-12:
                 continue
             ly = (P.top + P.h if frame else min(max(ax_y, P.top), P.top + P.h)) + ts * 1.43
+            if xrot:
+                # (turned as matplotlib's default rotation_mode places it:
+                # the turned label's box centred under the tick, its top
+                # where an upright label's top is; W41)
+                t = math.radians(xrot)
+                tw, th = 0.6 * ts * len(_strip_tags(s)), ts
+                H = tw * abs(math.sin(t)) + th * abs(math.cos(t))
+                cy = ly - ts * 0.8 + H / 2
+                labels.append('<text x="%s" y="%s" text-anchor="middle" dominant-baseline="central" transform="rotate(%s %s %s)">%s</text>' % (
+                    _fmt(p[0]), _fmt(cy), _fmt(-xrot), _fmt(p[0]), _fmt(cy), s))
+                continue
             labels.append('<text x="%s" y="%s" text-anchor="middle">%s</text>' % (_fmt(p[0]), _fmt(ly), s))
         for v, s in yt:
             p = P.map(P.xlo, v, clamp=False)

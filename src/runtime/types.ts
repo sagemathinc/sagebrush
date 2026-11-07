@@ -3921,13 +3921,17 @@ method(property, "__init__", (p: PyProperty, fget: any = null, fset: any = null,
 
 // Named tuples made by the runtime (sys.version_info, os.stat_result, ...).
 const structseqTypes = new Map<string, PyType>();
-export function structseq(name: string, fields: string[], values: any[]): any {
+// (`extra`: fields beyond the tuple, attributes only, as os.stat_result's st_*_ns are CPython's)
+export function structseq(name: string, fields: string[], values: any[], extra: string[] = [], extraValues: any[] = []): any {
   let cls = structseqTypes.get(name);
   if (cls === undefined) {
     const d = new Map<string, any>();
     cls = objectType(name.slice(name.lastIndexOf(".") + 1), [tupleType], d, name.includes(".") ? name.slice(0, name.lastIndexOf(".")) : "builtins");
     fields.forEach((f, i) => d.set(f, new GetSet(cls!, f, (o) => o[i])));
-    d.set("n_fields", fields.length);
+    // (an extra field of a tuple field's name is its attribute: stat_result's float st_atime over the tuple's int)
+    extra.forEach((f, i) => d.set(f, new GetSet(cls!, f, (o) => o.$extra[i])));
+    d.set("n_fields", fields.length + extra.length);
+    d.set("n_sequence_fields", fields.length);
     d.set("_fields", tuple(fields));
     const c = cls;
     method(c, "__repr__", (o: any) => `${name}(${fields.map((f, i) => `${f}=${repr(o[i])}`).join(", ")})`);
@@ -3935,6 +3939,7 @@ export function structseq(name: string, fields: string[], values: any[]): any {
   }
   const o = new cls.$ctor!();
   for (const v of values) o.push(v);
+  if (extra.length) Object.defineProperty(o, "$extra", { value: extraValues });
   return o;
 }
 
@@ -4078,7 +4083,7 @@ let unionOf: (a: any, b: any) => any;
   // (a GenericAlias member: equal by value, hashed by value)
   const same = (a: any, b: any) => a === b || (a instanceof PyGenericAlias && O.truth(O.eq(a, b)));
   method(unionType, "__eq__", (u: PyUnion, o: any) => (o instanceof PyUnion ? u.args.length === o.args.length && u.args.every((t) => o.args.some((x) => same(t, x))) : NotImplemented));
-  method(unionType, "__hash__", (u: PyUnion) => u.args.reduce((h, t) => h ^ (t instanceof PyGenericAlias ? O.hashExact(t) : O.id(t)), 0));
+  method(unionType, "__hash__", (u: PyUnion) => O.hashXor(u.args.map((t) => (t instanceof PyGenericAlias ? O.hashExact(t) : O.id(t)))));
   // (each member in order through the whole protocol, stopping at the
   // first that holds, as isinstance() with a tuple: an alias raises only
   // when it is reached)
@@ -4199,7 +4204,7 @@ T.GenericAlias = genericAliasType;
     if (a.starred !== o.starred) return false;
     return O.truth(O.eq(a.origin, o.origin)) && O.truth(O.eq(tuple(a.args), tuple(o.args)));
   });
-  method(ga, "__hash__", (a: PyGenericAlias) => O.hashExact(a.origin) ^ O.hashExact(tuple(a.args)));
+  method(ga, "__hash__", (a: PyGenericAlias) => O.hashXor([O.hashExact(a.origin), O.hashExact(tuple(a.args))]));
   method(ga, "__or__", (a: any, b: any) => unionOf(a, b));
   method(ga, "__ror__", (a: any, b: any) => unionOf(b, a));
   method(ga, "__instancecheck__", (_a: any, _o: any) => raise(T.TypeError, "isinstance() argument 2 cannot be a parameterized generic"));

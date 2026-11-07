@@ -318,6 +318,133 @@ def right_kernel(a):
     return FreeModule_(SR, n, [r for r in B if any(_nonzero(x) for x in r)])
 
 
+def _eigen(a):
+    """[(eigenvalue, multiplicity)] of a square matrix over SR.
+
+    Exact rational entries: the QQ matrix's factors of the characteristic
+    polynomial, in Sage's order, a factor of degree 2 or more by its roots
+    in solve's order (radicals, as Sage gives them over SR, where QQ gives
+    QQbar numbers).  Otherwise the roots of det(a - t I) (n <= 3), with
+    their multiplicities, in solve's order.  (Sage's own order is its
+    symbolic backend's solve order; where the two differ, the values and
+    multiplicities still agree: sage-tests/test_matrix_sr_eigen.deviations.md.)"""
+    import _sage_matrix
+    n = a.nrows()
+    if n != a.ncols():
+        raise ValueError("matrix must be square")
+    SR = _sa().SR
+    # the characteristic polynomial's variable: a name no entry uses (a
+    # fixed sbEigenT aliased an entry's own sbEigenT: diag(2*t, 2) gave
+    # [0, 2], the review's EIGEN-1)
+    used = {str(v) for r in a._rows for x in r for v in _sr(x).variables()}
+    name, i = "sbEigenT", 0
+    while name in used:
+        i += 1
+        name = "sbEigenT%d" % i
+    t = SR.var(name)
+    rows = [[_sage_matrix._sr_rational(x) for x in r] for r in a._rows]
+    out = []
+    if all(isinstance(x, int) or type(x).__name__ == "Rational" for r in rows for x in r):
+        q = Matrix(_sa().QQ, rows, n)
+        for g, e in q._eigen_factors():
+            if len(g) == 2:
+                out.append((_sr(g[0]) * -1 / g[1], e))
+            else:
+                p = sum(_sr(c) * t ** i for i, c in enumerate(g))
+                roots = _explicit_roots(p, t, len(g) - 1)
+                if roots is None:
+                    raise ArithmeticError("could not determine eigenvalues exactly using symbolic matrices; try using a different type of matrix via self.change_ring(), if possible")
+                out.extend((r, m * e) for r, m in roots)
+        return out
+    _sr_guard(n, n)
+    cp = det(_sr_matrix([[_sr(x) - (t if i == j else 0) for j, x in enumerate(r)] for i, r in enumerate(a._rows)], n)).expand()
+    out = _explicit_roots(cp, t, n)
+    if out is None:
+        raise NotImplementedError("the eigenvalues of this symbolic matrix are not available in sagebrush yet")
+    return out
+
+
+def _explicit_roots(p, t, degree):
+    """[(root, multiplicity)] of the polynomial p in t, when solve's roots
+    account for its whole degree; None otherwise.  (An implicit solution,
+    0 == t^5 - t - 1, counts once against a degree of at least 2: taken as a
+    root, it gave the eigenvalue t^5 - t - 1, the review's YS3/YS4.)"""
+    sols, mults = _sa().solve(p == 0, t, multiplicities=True)
+    if sum(int(m) for m in mults) != degree:
+        return None
+    return [(s.rhs(), int(m)) for s, m in zip(sols, mults)]
+
+
+def eigenvalues(a):
+    """The eigenvalues with multiplicity (_eigen).
+
+    EXAMPLES::
+
+        sage: var('a b')
+        (a, b)
+        sage: matrix(SR, [[a, b], [b, a]]).eigenvalues()
+        [a - b, a + b]
+        sage: matrix(SR, [[1, 2], [3, 4]]).eigenvalues()
+        [-1/2*sqrt(33) + 5/2, 1/2*sqrt(33) + 5/2]
+        sage: matrix(SR, [[SR(2), SR(1)], [SR(1), SR(2)]]).eigenvalues()
+        [3, 1]
+
+    A symbolic characteristic polynomial whose roots solve doesn't give
+    explicitly is refused, not answered with implicit roots (Sage gives this
+    cubic's roots by Cardano's formula)::
+
+        sage: matrix(SR, [[a, 1, 0], [0, 0, 1], [1, 1, 0]]).eigenvalues()  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        NotImplementedError: the eigenvalues of this symbolic matrix are not available in sagebrush yet
+    """
+    return [v for v, m in _eigen(a) for _ in range(m)]
+
+
+def eigenvectors(a, side):
+    """[(eigenvalue, [eigenvectors], multiplicity)]: each eigenspace's echelon
+    basis (right_kernel of a - lambda I, or of its transpose for the left).
+
+    EXAMPLES::
+
+        sage: var('a b')
+        (a, b)
+        sage: matrix(SR, [[a, b], [b, a]]).eigenvectors_right()
+        [(a - b, [(1, -1)], 1), (a + b, [(1, 1)], 1)]
+        sage: matrix(SR, [[1, 2], [3, 4]]).eigenvectors_right()
+        [(-1/2*sqrt(33) + 5/2, [(1, -1/4*sqrt(33) + 3/4)], 1), (1/2*sqrt(33) + 5/2, [(1, 1/4*sqrt(33) + 3/4)], 1)]
+
+    A matrix past the symbolic workspace bound is refused first, before any
+    eigenvalue work (that of the companion matrix of x^17 - x - 1 would
+    end in an ArithmeticError, as an irreducible factor has no exact
+    roots)::
+
+        sage: C = matrix(SR, 17, 17, lambda i, j: 1 if i == j + 1 or (j == 16 and i < 2) else 0)
+        sage: try:  # sagebrush only
+        ....:     C.eigenvectors_right()
+        ....: except Exception as e:
+        ....:     print(type(e).__name__)
+        SagebrushMemoryError
+    """
+    n = a.nrows()
+    # (each shifted matrix is a symbolic n x n workspace: admitted before
+    # any is built, as right_kernel admits its own)
+    _sr_guard(n, n)
+    rows = a._rows if side == "right" else a._raw_columns()
+    out = []
+    for lam, m in _eigen(a):
+        shifted = _sr_matrix([[_norm(_sr(x) - lam) if i == j else x for j, x in enumerate(r)] for i, r in enumerate(rows)], n)
+        basis = []
+        for r in right_kernel(shifted)._basis:
+            # (a quotient of radicals the elimination left, 2*(1/4*sqrt(33) -
+            # 3/4)/(1/2*sqrt(33) - 3/2), as the 1 it is: Sage's entries)
+            v = Vector(_sr(x).simplify_rational() if _sr(x)._op()[0] in ("mul", "pow") else _sr(x) for x in r)
+            v._ring = _sa().SR
+            basis.append(v)
+        out.append((lam, basis, m))
+    return out
+
+
 def left_kernel(a):
     """{v : v a = 0} (kernel() is this, as in Sage)."""
     m, n = a.nrows(), a.ncols()
