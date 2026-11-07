@@ -1,0 +1,772 @@
+[
+ {
+  "id": "h-1",
+  "code": "heights <- c(165, 172, 158, 180, 175, 169)\nmean(heights); sd(heights); length(heights)\n",
+  "stdout": "[1] 169.8333\n[1] 7.73089\n[1] 6\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-2",
+  "code": "x <- c(12.5, 14.1, 9.8, 11.2, 13.7)\nround(mean(x), 2); round(var(x), 3)\n",
+  "stdout": "[1] 12.26\n[1] 3.173\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-3",
+  "code": "scores <- c(78, 85, 92, 67, 88, 95, 72)\nscores[scores >= 80]\n",
+  "stdout": "[1] 85 92 88 95\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-4",
+  "code": "scores <- c(78, 85, 92, 67, 88, 95, 72)\nsum(scores >= 80) / length(scores)\n",
+  "stdout": "[1] 0.5714286\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-5",
+  "code": "x <- seq(2, 20, by = 2)\nx\n",
+  "stdout": " [1]  2  4  6  8 10 12 14 16 18 20\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-6",
+  "code": "z <- (c(60, 70, 80) - 70) / 10\nz\n",
+  "stdout": "[1] -1  0  1\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-7",
+  "code": "x <- c(3.2, 4.8, 5.1, 2.9, 6.3, 4.4)\nsummary(x)\n",
+  "stdout": "   Min. 1st Qu.  Median    Mean 3rd Qu.    Max. \n  2.900   3.500   4.600   4.450   5.025   6.300 \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-8",
+  "code": "quantile(c(2, 4, 6, 8, 10, 12, 14), 0.9)\n",
+  "stdout": " 90% \n12.8 \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-9",
+  "code": "x <- c(1, 3, 3, 5, 7, 7, 7, 9)\ntable(x)\n",
+  "stdout": "x\n1 3 5 7 9 \n1 2 1 3 1 \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-10",
+  "code": "names(which.max(table(c(\"red\", \"blue\", \"red\", \"green\", \"red\"))))\n",
+  "stdout": "[1] \"red\"\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-11",
+  "code": "prop.table(table(c(\"a\", \"b\", \"a\", \"a\")))\n",
+  "stdout": "\n   a    b \n0.75 0.25 \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-12",
+  "code": "x <- c(10, 20, 30, 40)\nx / sum(x)\n",
+  "stdout": "[1] 0.1 0.2 0.3 0.4\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-13",
+  "code": "1 - pbinom(7, 10, 0.6)\n",
+  "stdout": "[1] 0.1672898\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-14",
+  "code": "dbinom(0:3, 3, 0.2)\n",
+  "stdout": "[1] 0.512 0.384 0.096 0.008\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-15",
+  "code": "sum(dbinom(8:10, 10, 0.7))\n",
+  "stdout": "[1] 0.3827828\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-16",
+  "code": "pnorm(1) - pnorm(-1)\n",
+  "stdout": "[1] 0.6826895\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-17",
+  "code": "qnorm(0.95, mean = 500, sd = 100)\n",
+  "stdout": "[1] 664.4854\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-18",
+  "code": "round(pt(-2.1, 15) * 2, 4)\n",
+  "stdout": "[1] 0.0531\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-19",
+  "code": "qt(c(0.025, 0.975), df = 9)\n",
+  "stdout": "[1] -2.262157  2.262157\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-20",
+  "code": "x <- c(98.2, 98.6, 99.1, 97.9, 98.4, 98.8)\nxbar <- mean(x); s <- sd(x); n <- length(x)\nxbar + c(-1, 1) * qt(0.975, n - 1) * s / sqrt(n)\n",
+  "stdout": "[1] 98.04984 98.95016\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-21",
+  "code": "ppois(3, lambda = 2.5, lower.tail = FALSE)\n",
+  "stdout": "[1] 0.2424239\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-22",
+  "code": "punif(0.75, 0, 2) - punif(0.25, 0, 2)\n",
+  "stdout": "[1] 0.25\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-23",
+  "code": "pexp(2, rate = 0.5)\n",
+  "stdout": "[1] 0.6321206\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-24",
+  "code": "1 - pchisq(7.81, 3)\n",
+  "stdout": "[1] 0.05010606\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-25",
+  "code": "set.seed(1)\nx <- rnorm(100)\nround(mean(x), 4)\n",
+  "stdout": "[1] 0.1089\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-26",
+  "code": "set.seed(99)\nround(runif(4, 10, 20), 2)\n",
+  "stdout": "[1] 15.85 11.14 16.84 19.93\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-27",
+  "code": "set.seed(5)\nx <- rnorm(10, 50, 5)\nround(summary(x), 2)\n",
+  "stdout": "   Min. 1st Qu.  Median    Mean 3rd Qu.    Max. \n  43.72   46.86   48.11   49.61   50.61   58.56 \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-28",
+  "code": "x <- c(5, 7, 8, 9, 10, 12)\ny <- c(2, 4, 5, 4, 7, 9)\nround(cor(x, y), 4)\n",
+  "stdout": "[1] 0.945\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-29",
+  "code": "x <- c(5, 7, 8, 9, 10, 12)\ny <- c(2, 4, 5, 4, 7, 9)\nfit <- lm(y ~ x)\ncoef(fit)\n",
+  "stdout": "(Intercept)           x \n -3.0451977   0.9661017 \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-30",
+  "code": "x <- c(5, 7, 8, 9, 10, 12)\ny <- c(2, 4, 5, 4, 7, 9)\nsummary(lm(y ~ x))\n",
+  "stdout": "\nCall:\nlm(formula = y ~ x)\n\nResiduals:\n      1       2       3       4       5       6 \n 0.2147  0.2825  0.3164 -1.6497  0.3842  0.4520 \n\nCoefficients:\n            Estimate Std. Error t value Pr(>|t|)   \n(Intercept)  -3.0452     1.4689  -2.073  0.10685   \nx             0.9661     0.1672   5.778  0.00446 **\n---\nSignif. codes:  0 \u2018***\u2019 0.001 \u2018**\u2019 0.01 \u2018*\u2019 0.05 \u2018.\u2019 0.1 \u2018 \u2019 1\n\nResidual standard error: 0.9082 on 4 degrees of freedom\nMultiple R-squared:  0.893,\tAdjusted R-squared:  0.8662 \nF-statistic: 33.38 on 1 and 4 DF,  p-value: 0.004457\n\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-31",
+  "code": "x <- c(5, 7, 8, 9, 10, 12)\ny <- c(2, 4, 5, 4, 7, 9)\nfit <- lm(y ~ x)\npredict(fit, newdata = data.frame(x = 11))\n",
+  "stdout": "       1 \n7.581921 \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-32",
+  "code": "fit <- lm(mpg ~ hp, data = mtcars)\nsummary(fit)\n",
+  "stdout": "\nCall:\nlm(formula = mpg ~ hp, data = mtcars)\n\nResiduals:\n    Min      1Q  Median      3Q     Max \n-5.7121 -2.1122 -0.8854  1.5819  8.2360 \n\nCoefficients:\n            Estimate Std. Error t value Pr(>|t|)    \n(Intercept) 30.09886    1.63392  18.421  < 2e-16 ***\nhp          -0.06823    0.01012  -6.742 1.79e-07 ***\n---\nSignif. codes:  0 \u2018***\u2019 0.001 \u2018**\u2019 0.01 \u2018*\u2019 0.05 \u2018.\u2019 0.1 \u2018 \u2019 1\n\nResidual standard error: 3.863 on 30 degrees of freedom\nMultiple R-squared:  0.6024,\tAdjusted R-squared:  0.5892 \nF-statistic: 45.46 on 1 and 30 DF,  p-value: 1.788e-07\n\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-33",
+  "code": "fit <- lm(mpg ~ wt + qsec, data = mtcars)\ncoef(summary(fit))\n",
+  "stdout": "             Estimate Std. Error    t value     Pr(>|t|)\n(Intercept) 19.746223  5.2520617   3.759709 7.650466e-04\nwt          -5.047982  0.4839974 -10.429771 2.518948e-11\nqsec         0.929198  0.2650173   3.506179 1.499883e-03\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-34",
+  "code": "fit <- lm(Sepal.Length ~ Petal.Length, data = iris)\nfit\n",
+  "stdout": "\nCall:\nlm(formula = Sepal.Length ~ Petal.Length, data = iris)\n\nCoefficients:\n (Intercept)  Petal.Length  \n      4.3066        0.4089  \n\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-35",
+  "code": "round(summary(lm(Sepal.Length ~ Petal.Length, data = iris))$r.squared, 4)\n",
+  "stdout": "[1] 0.76\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-36",
+  "code": "fit <- lm(mpg ~ wt, data = mtcars)\nconfint(fit)\n",
+  "stdout": "                2.5 %    97.5 %\n(Intercept) 33.450500 41.119753\nwt          -6.486308 -4.202635\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-37",
+  "code": "t.test(mtcars$mpg, mu = 20)\n",
+  "stdout": "\n\tOne Sample t-test\n\ndata:  mtcars$mpg\nt = 0.08506, df = 31, p-value = 0.9328\nalternative hypothesis: true mean is not equal to 20\n95 percent confidence interval:\n 17.91768 22.26357\nsample estimates:\nmean of x \n 20.09062 \n\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-38",
+  "code": "t.test(mpg ~ am, data = mtcars)\n",
+  "stdout": "\n\tWelch Two Sample t-test\n\ndata:  mpg by am\nt = -3.7671, df = 18.332, p-value = 0.001374\nalternative hypothesis: true difference in means between group 0 and group 1 is not equal to 0\n95 percent confidence interval:\n -11.280194  -3.209684\nsample estimates:\nmean in group 0 mean in group 1 \n       17.14737        24.39231 \n\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-39",
+  "code": "a <- c(23, 25, 28, 30, 21); b <- c(30, 32, 29, 35, 33)\nt.test(a, b, alternative = \"less\")\n",
+  "stdout": "\n\tWelch Two Sample t-test\n\ndata:  a and b\nt = -3.2831, df = 6.8966, p-value = 0.006858\nalternative hypothesis: true difference in means is less than 0\n95 percent confidence interval:\n      -Inf -2.698435\nsample estimates:\nmean of x mean of y \n     25.4      31.8 \n\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-40",
+  "code": "a <- c(23, 25, 28, 30, 21); b <- c(30, 32, 29, 35, 33)\nround(t.test(a, b)$statistic, 3)\n",
+  "stdout": "     t \n-3.283 \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-41",
+  "code": "tab <- matrix(c(25, 15, 10, 30), nrow = 2)\nchisq.test(tab, correct = FALSE)\n",
+  "stdout": "\n\tPearson's Chi-squared test\n\ndata:  tab\nX-squared = 11.429, df = 1, p-value = 0.0007232\n\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-42",
+  "code": "observed <- c(30, 25, 45)\nchisq.test(observed, p = c(0.3, 0.3, 0.4))\n",
+  "stdout": "\n\tChi-squared test for given probabilities\n\ndata:  observed\nX-squared = 1.4583, df = 2, p-value = 0.4823\n\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-43",
+  "code": "binom.test(60, 100, p = 0.5)\n",
+  "stdout": "\n\tExact binomial test\n\ndata:  60 and 100\nnumber of successes = 60, number of trials = 100, p-value = 0.05689\nalternative hypothesis: true probability of success is not equal to 0.5\n95 percent confidence interval:\n 0.4972092 0.6967052\nsample estimates:\nprobability of success \n                   0.6 \n\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-44",
+  "code": "prop.test(30, 80, p = 0.5, correct = FALSE)\n",
+  "stdout": "\n\t1-sample proportions test without continuity correction\n\ndata:  30 out of 80, null probability 0.5\nX-squared = 5, df = 1, p-value = 0.02535\nalternative hypothesis: true p is not equal to 0.5\n95 percent confidence interval:\n 0.2769418 0.4845127\nsample estimates:\n    p \n0.375 \n\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-45",
+  "code": "cor.test(mtcars$mpg, mtcars$wt)\n",
+  "stdout": "\n\tPearson's product-moment correlation\n\ndata:  mtcars$mpg and mtcars$wt\nt = -9.559, df = 30, p-value = 1.294e-10\nalternative hypothesis: true correlation is not equal to 0\n95 percent confidence interval:\n -0.9338264 -0.7440872\nsample estimates:\n       cor \n-0.8676594 \n\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-46",
+  "code": "tapply(mtcars$hp, mtcars$gear, median)\n",
+  "stdout": "  3   4   5 \n180  94 175 \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-47",
+  "code": "aggregate(mpg ~ cyl, data = mtcars, FUN = mean)\n",
+  "stdout": "  cyl      mpg\n1   4 26.66364\n2   6 19.74286\n3   8 15.10000\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-48",
+  "code": "table(mtcars$am, mtcars$gear)\n",
+  "stdout": "   \n     3  4  5\n  0 15  4  0\n  1  0  8  5\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-49",
+  "code": "table(iris$Species)\n",
+  "stdout": "\n    setosa versicolor  virginica \n        50         50         50 \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-50",
+  "code": "colMeans(iris[, 1:4])\n",
+  "stdout": "Sepal.Length  Sepal.Width Petal.Length  Petal.Width \n    5.843333     3.057333     3.758000     1.199333 \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-51",
+  "code": "sapply(iris[1:4], mean)\n",
+  "stdout": "Sepal.Length  Sepal.Width Petal.Length  Petal.Width \n    5.843333     3.057333     3.758000     1.199333 \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-52",
+  "code": "round(sapply(mtcars[, c(\"mpg\", \"hp\")], sd), 2)\n",
+  "stdout": "  mpg    hp \n 6.03 68.56 \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-53",
+  "code": "nrow(subset(mtcars, mpg > 25))\n",
+  "stdout": "[1] 6\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-54",
+  "code": "mtcars[mtcars$mpg > 30, c(\"mpg\", \"cyl\")]\n",
+  "stdout": "                mpg cyl\nFiat 128       32.4   4\nHonda Civic    30.4   4\nToyota Corolla 33.9   4\nLotus Europa   30.4   4\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-55",
+  "code": "head(mtcars[order(-mtcars$mpg), \"mpg\"], 5)\n",
+  "stdout": "[1] 33.9 32.4 30.4 30.4 27.3\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-56",
+  "code": "df <- data.frame(student = c(\"A\", \"B\", \"C\", \"D\"), exam1 = c(80, 75, 92, 68), exam2 = c(85, 70, 95, 72))\ndf$avg <- (df$exam1 + df$exam2) / 2\ndf\n",
+  "stdout": "  student exam1 exam2  avg\n1       A    80    85 82.5\n2       B    75    70 72.5\n3       C    92    95 93.5\n4       D    68    72 70.0\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-57",
+  "code": "df <- data.frame(x = c(1, 2, 3), y = c(2.5, 5.1, 7.4))\ndf[2, ]\n",
+  "stdout": "  x   y\n2 2 5.1\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-58",
+  "code": "df <- data.frame(x = c(1, 2, 3), y = c(2.5, 5.1, 7.4))\ndf[df$y > 3, \"x\"]\n",
+  "stdout": "[1] 2 3\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-59",
+  "code": "df <- data.frame(g = factor(c(\"ctl\", \"trt\", \"ctl\", \"trt\")), w = c(4.17, 4.81, 5.58, 4.17))\nstr(df)\n",
+  "stdout": "'data.frame':\t4 obs. of  2 variables:\n $ g: Factor w/ 2 levels \"ctl\",\"trt\": 1 2 1 2\n $ w: num  4.17 4.81 5.58 4.17\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-60",
+  "code": "df <- data.frame(g = factor(c(\"ctl\", \"trt\", \"ctl\", \"trt\")), w = c(4.17, 4.81, 5.58, 4.17))\nsummary(df)\n",
+  "stdout": "   g           w        \n ctl:2   Min.   :4.170  \n trt:2   1st Qu.:4.170  \n         Median :4.490  \n         Mean   :4.683  \n         3rd Qu.:5.003  \n         Max.   :5.580  \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-61",
+  "code": "summary(iris)\n",
+  "stdout": "  Sepal.Length    Sepal.Width     Petal.Length    Petal.Width   \n Min.   :4.300   Min.   :2.000   Min.   :1.000   Min.   :0.100  \n 1st Qu.:5.100   1st Qu.:2.800   1st Qu.:1.600   1st Qu.:0.300  \n Median :5.800   Median :3.000   Median :4.350   Median :1.300  \n Mean   :5.843   Mean   :3.057   Mean   :3.758   Mean   :1.199  \n 3rd Qu.:6.400   3rd Qu.:3.300   3rd Qu.:5.100   3rd Qu.:1.800  \n Max.   :7.900   Max.   :4.400   Max.   :6.900   Max.   :2.500  \n       Species  \n setosa    :50  \n versicolor:50  \n virginica :50  \n                \n                \n                \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-62",
+  "code": "str(mtcars[, 1:3])\n",
+  "stdout": "'data.frame':\t32 obs. of  3 variables:\n $ mpg : num  21 21 22.8 21.4 18.7 18.1 14.3 24.4 22.8 19.2 ...\n $ cyl : num  6 6 4 6 8 6 8 4 4 6 ...\n $ disp: num  160 160 108 258 360 ...\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-63",
+  "code": "grades <- c(\"B\", \"A\", \"C\", \"A\", \"B\", \"A\")\nf <- factor(grades, levels = c(\"A\", \"B\", \"C\"))\ntable(f)\n",
+  "stdout": "f\nA B C \n3 2 1 \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-64",
+  "code": "f <- factor(c(\"low\", \"high\", \"med\", \"low\"), levels = c(\"low\", \"med\", \"high\"), ordered = TRUE)\nf\n",
+  "stdout": "[1] low  high med  low \nLevels: low < med < high\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-65",
+  "code": "f <- factor(c(\"low\", \"high\", \"med\", \"low\"), levels = c(\"low\", \"med\", \"high\"), ordered = TRUE)\nf < \"high\"\n",
+  "stdout": "[1]  TRUE FALSE  TRUE  TRUE\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-66",
+  "code": "ages <- c(23, 35, 47, 52, 61, 19)\ncut(ages, breaks = c(0, 30, 50, 100), labels = c(\"young\", \"middle\", \"old\"))\n",
+  "stdout": "[1] young  middle middle old    old    young \nLevels: young middle old\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-67",
+  "code": "x <- c(4, NA, 7, NA, 10)\nmean(x, na.rm = TRUE); sum(is.na(x))\n",
+  "stdout": "[1] 7\n[1] 2\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-68",
+  "code": "x <- c(4, NA, 7, NA, 10)\nx[is.na(x)] <- 0\nx\n",
+  "stdout": "[1]  4  0  7  0 10\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-69",
+  "code": "complete.cases(data.frame(a = c(1, NA, 3), b = c(\"x\", \"y\", NA)))\n",
+  "stdout": "[1]  TRUE FALSE FALSE\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-70",
+  "code": "v <- c(2, 4, 6)\nv * c(1, 10, 100)\n",
+  "stdout": "[1]   2  40 600\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-71",
+  "code": "m <- matrix(c(1, 2, 3, 4, 5, 6), nrow = 2, byrow = TRUE)\nm\n",
+  "stdout": "     [,1] [,2] [,3]\n[1,]    1    2    3\n[2,]    4    5    6\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-72",
+  "code": "A <- matrix(c(4, 2, 7, 6), 2)\nsolve(A) %*% A\n",
+  "stdout": "     [,1]         [,2]\n[1,]    1 6.661338e-16\n[2,]    0 1.000000e+00\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-73",
+  "code": "A <- matrix(c(2, 1, 1, 3), 2)\nb <- c(1, 2)\nsolve(A, b)\n",
+  "stdout": "[1] 0.2 0.6\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-74",
+  "code": "m <- matrix(1:6, 2)\ndim(t(m)); m * 2\n",
+  "stdout": "[1] 3 2\n     [,1] [,2] [,3]\n[1,]    2    6   10\n[2,]    4    8   12\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-75",
+  "code": "sq <- function(n) { result <- numeric(n); for (i in 1:n) result[i] <- i^2; result }\nsq(6)\n",
+  "stdout": "[1]  1  4  9 16 25 36\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-76",
+  "code": "fib <- numeric(10); fib[1:2] <- 1\nfor (i in 3:10) fib[i] <- fib[i - 1] + fib[i - 2]\nfib\n",
+  "stdout": " [1]  1  1  2  3  5  8 13 21 34 55\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-77",
+  "code": "grade <- function(s) if (s >= 90) \"A\" else if (s >= 80) \"B\" else \"C\"\nsapply(c(95, 85, 70), grade)\n",
+  "stdout": "[1] \"A\" \"B\" \"C\"\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-78",
+  "code": "cv <- function(x) sd(x) / mean(x) * 100\nround(cv(c(10, 12, 14, 16)), 2)\n",
+  "stdout": "[1] 19.86\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-79",
+  "code": "se <- function(x) sd(x) / sqrt(length(x))\nse(c(4, 6, 8, 10))\n",
+  "stdout": "[1] 1.290994\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-80",
+  "code": "paste(\"Mean:\", round(mean(c(1.234, 5.678)), 2))\n",
+  "stdout": "[1] \"Mean: 3.46\"\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-81",
+  "code": "cat(\"The answer is\", 42, \"\\n\")\n",
+  "stdout": "The answer is 42 \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-82",
+  "code": "cat(sprintf(\"%.3f\\n\", pi))\n",
+  "stdout": "3.142\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-83",
+  "code": "print(paste0(\"n = \", 10))\n",
+  "stdout": "[1] \"n = 10\"\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-84",
+  "code": "sprintf(\"%d of %d (%.1f%%)\", 7L, 20L, 35)\n",
+  "stdout": "[1] \"7 of 20 (35.0%)\"\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-85",
+  "code": "x <- c(a = 1.5, b = 2.25)\nx * 2\n",
+  "stdout": "  a   b \n3.0 4.5 \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-86",
+  "code": "seq(0, 100, length.out = 5)\n",
+  "stdout": "[1]   0  25  50  75 100\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-87",
+  "code": "rev(sort(c(3, 1, 4, 1, 5, 9, 2, 6)))[1:3]\n",
+  "stdout": "[1] 9 6 5\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-88",
+  "code": "cumsum(c(5, 10, 15)) / 1:3\n",
+  "stdout": "[1]  5.0  7.5 10.0\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-89",
+  "code": "round(exp(seq(0, 2, 0.5)), 3)\n",
+  "stdout": "[1] 1.000 1.649 2.718 4.482 7.389\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-90",
+  "code": "x <- 1:20\nx[x %% 3 == 0]\n",
+  "stdout": "[1]  3  6  9 12 15 18\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-91",
+  "code": "toupper(substr(\"statistics\", 1, 1))\n",
+  "stdout": "[1] \"S\"\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-92",
+  "code": "nchar(c(\"mean\", \"median\", \"mode\"))\n",
+  "stdout": "[1] 4 6 4\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-93",
+  "code": "any(is.na(c(1, 2, NA))); all(c(2, 4, 6) %% 2 == 0)\n",
+  "stdout": "[1] TRUE\n[1] TRUE\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-94",
+  "code": "length(unique(mtcars$cyl))\n",
+  "stdout": "[1] 3\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-95",
+  "code": "round(var(mtcars$mpg), 3)\n",
+  "stdout": "[1] 36.324\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-96",
+  "code": "x <- c(10, 15, 20, 25, 30)\n(x - mean(x)) / sd(x)\n",
+  "stdout": "[1] -1.2649111 -0.6324555  0.0000000  0.6324555  1.2649111\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-97",
+  "code": "boxplot.stats(c(1, 2, 3, 4, 100))$out\n",
+  "stdout": "[1] 100\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-98",
+  "code": "round(prop.table(table(mtcars$cyl)), 3)\n",
+  "stdout": "\n    4     6     8 \n0.344 0.219 0.438 \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-99",
+  "code": "mean(iris$Petal.Width[iris$Species == \"setosa\"])\n",
+  "stdout": "[1] 0.246\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-100",
+  "code": "with(iris, tapply(Sepal.Length, Species, mean))\n",
+  "stdout": "    setosa versicolor  virginica \n     5.006      5.936      6.588 \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-101",
+  "code": "glm(vs ~ mpg, data = mtcars, family = binomial)\n",
+  "stdout": "\nCall:  glm(formula = vs ~ mpg, family = binomial, data = mtcars)\n\nCoefficients:\n(Intercept)          mpg  \n    -8.8331       0.4304  \n\nDegrees of Freedom: 31 Total (i.e. Null);  30 Residual\nNull Deviance:\t    43.86 \nResidual Deviance: 25.53 \tAIC: 29.53\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-102",
+  "code": "round(coef(glm(vs ~ mpg, data = mtcars, family = binomial)), 4)\n",
+  "stdout": "(Intercept)         mpg \n    -8.8331      0.4304 \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-103",
+  "code": "x <- c(1, 2, 3, 4, 5, 6, 7, 8)\ny <- c(1.1, 1.9, 3.2, 3.9, 5.1, 5.8, 7.2, 7.9)\nanova(lm(y ~ x))\n",
+  "stdout": "Analysis of Variance Table\n\nResponse: y\n          Df Sum Sq Mean Sq F value    Pr(>F)    \nx          1 41.105  41.105  1504.5 1.962e-08 ***\nResiduals  6  0.164   0.027                      \n---\nSignif. codes:  0 \u2018***\u2019 0.001 \u2018**\u2019 0.01 \u2018*\u2019 0.05 \u2018.\u2019 0.1 \u2018 \u2019 1\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-104",
+  "code": "x <- list(name = \"Ann\", scores = c(90, 85))\nx$scores[2]\n",
+  "stdout": "[1] 85\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-105",
+  "code": "ifelse(c(-2, 0, 3) > 0, \"pos\", \"non-pos\")\n",
+  "stdout": "[1] \"non-pos\" \"non-pos\" \"pos\"    \n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-106",
+  "code": "max(c(4, 8, 2)) - min(c(4, 8, 2))\n",
+  "stdout": "[1] 6\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-107",
+  "code": "var(1:10) == sd(1:10)^2\n",
+  "stdout": "[1] FALSE\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-108",
+  "code": "seq(1, 2, by = 0.25)\n",
+  "stdout": "[1] 1.00 1.25 1.50 1.75 2.00\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-109",
+  "code": "c(0.5, 100, 2500.75)\n",
+  "stdout": "[1]    0.50  100.00 2500.75\n",
+  "stderr": "",
+  "rc": 0
+ },
+ {
+  "id": "h-110",
+  "code": "c(1e-3, 2e-3, 1)\n",
+  "stdout": "[1] 0.001 0.002 1.000\n",
+  "stderr": "",
+  "rc": 0
+ }
+]
