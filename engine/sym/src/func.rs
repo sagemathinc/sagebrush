@@ -427,8 +427,8 @@ fn exact(f: &Fun, a: &[Expr]) -> Option<Expr> {
                 return Some(match n {
                     Num::Exact(a, b) if b.is_zero() => qnum(a.abs()),
                     Num::Exact(a, b) => sqrt(&qnum(a * a + b * b)),
-                    // (over the real parent: abs(SR(CDF(3, 4))) is RDF's 5.0)
-                    Num::Float(a, b, k) => num(Num::Float((a * a + b * b).sqrt(), 0.0, k.to_real())),
+                    // (a float is float_eval's, which eval runs first)
+                    Num::Float(..) => return None,
                 });
             }
             if let Kind::Fun(Fun::Abs, _) = &x.kind {
@@ -583,7 +583,8 @@ fn exact(f: &Fun, a: &[Expr]) -> Option<Expr> {
             let n = x.as_num()?;
             Some(num(match n {
                 Num::Exact(a, b) => Num::Exact(a.clone(), -b.clone()),
-                Num::Float(a, b, k) => Num::Float(*a, -b, *k),
+                // (a float is float_eval's, which eval runs first)
+                Num::Float(..) => return None,
             }))
         }
         Fun::RealPart => {

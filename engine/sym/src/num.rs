@@ -166,17 +166,6 @@ impl Num {
             (None, None) => Fk::RR,
         }
     }
-    /// self as a float of parent k's family when it is exact (an exact number meeting a float
-    /// takes its parent), self when it is a float
-    pub fn with_fk(&self, k: Fk) -> Num {
-        match self {
-            Num::Exact(..) => {
-                let (a, b) = self.to_c64();
-                Num::fl(a, b, if b != 0.0 { k.to_complex() } else { k })
-            }
-            _ => self.clone(),
-        }
-    }
     pub fn i() -> Num {
         Num::Exact(Q::zero(), Q::one())
     }

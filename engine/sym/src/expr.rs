@@ -907,6 +907,20 @@ fn small_factor(n: &BigInt) -> Vec<(BigInt, u32)> {
 pub fn float_pow(b: &Num, x: &Num) -> Num {
     let (br, bi) = b.to_c64();
     let (xr, xi) = x.to_c64();
+    // a float zero base is exact, as Sage: SR(RDF(0))^SR(RDF(0)) is 1, to a
+    // positive (or NaN) exponent 0, to a negative real part division by zero
+    if br == 0.0 && bi == 0.0 {
+        if xr == 0.0 && xi == 0.0 {
+            return Num::rat(Q::one());
+        }
+        if xr < 0.0 {
+            value_error("power::eval(): division by zero");
+        }
+        if xr == 0.0 {
+            value_error("power::eval(): pow(0,I) is undefined");
+        }
+        return Num::rat(Q::zero());
+    }
     // (the operands' parent: SR(RDF(2))^3 is RDF's 8.0)
     let k = b.fk_with(x);
     if k.double() {
@@ -928,16 +942,10 @@ pub fn float_pow(b: &Num, x: &Num) -> Num {
 
 /// A power in RDF or CDF as Sage computes it: a real one exp(y log x) (2.0^0.5 is
 /// 1.414213562373095), a negative base only to an integral power; a complex one by GSL's
-/// formula, with its log |z|
+/// formula, with its log |z| (a zero base is float_pow's)
 fn double_pow(br: f64, bi: f64, xr: f64, xi: f64, k: crate::num::Fk) -> Num {
     if !k.complex() && bi == 0.0 && xi == 0.0 {
         let (x, y) = (br, xr);
-        if x == 0.0 {
-            if y < 0.0 {
-                crate::err::value_error("power::eval(): division by zero");
-            }
-            return Num::Float(if y == 0.0 { 1.0 } else { x }, 0.0, k);
-        }
         if !(x > 0.0) {
             if !y.is_finite() || y != y.floor() {
                 value_error("negative number cannot be raised to a fractional power".to_string());
@@ -949,9 +957,6 @@ fn double_pow(br: f64, bi: f64, xr: f64, xi: f64, k: crate::num::Fk) -> Num {
             return Num::Float(1.0, 0.0, k);
         }
         return Num::Float((y * x.ln()).exp(), 0.0, k);
-    }
-    if br == 0.0 && bi == 0.0 {
-        return Num::fl(0.0, 0.0, k.to_complex());
     }
     let (xa, ya) = (br.abs(), bi.abs());
     let (mx, u) = if xa >= ya { (xa, if xa != 0.0 { ya / xa } else { 0.0 }) } else { (ya, xa / ya) };

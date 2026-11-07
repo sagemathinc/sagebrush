@@ -1986,6 +1986,7 @@ class _SymbolicRing:
             names = tuple(names[0])
         if len(names) == 1 and isinstance(names[0], str):
             names = names[0].replace(",", " ").split()
+        _check_var_names(names)
         vs = tuple(Expression(_sym_s(n)) for n in names)
         if kw.get("latex_name") is not None:
             for n in names:
@@ -2910,6 +2911,19 @@ def _assume_rewrite(e):
     return e
 
 
+_PY_KEYWORDS = frozenset("False None True and as assert async await break class continue def del elif else except finally for from global if import in is lambda nonlocal not or pass raise return try while with yield".split())
+
+
+def _check_var_names(names):
+    """Sage's refusals of a variable name: none at all, or one that is not a
+    Python identifier (a keyword, 1a, a{b): var('for') is a ValueError."""
+    if not names:
+        raise ValueError("You need to specify the name of the new variable.")
+    for n in names:
+        if not (isinstance(n, str) and n.isidentifier()) or n in _PY_KEYWORDS:
+            raise ValueError("The name \"%s\" is not a valid Python identifier." % n)
+
+
 def var(*names, **kw):
     """var('x y') or var('x', 'y'): symbolic variables, also defined in __main__.
 
@@ -2924,9 +2938,7 @@ def var(*names, **kw):
         names = tuple(names[0])
     if len(names) == 1 and isinstance(names[0], str):
         names = names[0].replace(",", " ").split()
-    for n in names:
-        if not n.isidentifier():
-            raise ValueError("The name \"%s\" is not a valid Python identifier." % n)
+    _check_var_names(names)
     vs = tuple(Expression(_sym_s(n)) for n in names)
     if kw.get("latex_name") is not None:
         for n in names:
