@@ -509,10 +509,15 @@ export function analyzeCell(source: string, cellId = "c", opts: { mode?: "python
     defs.delete("ans");
     for (const n of ["ans", "globals", "locals", "BaseException"]) refs.delete(n);
   }
+  // (a Magma for loop's variable is the loop's own, a private i + U+02B9 + loop<n> in
+  // the translation, src/magma.ts forStmt: no cell's name)
+  const loopOwn = (n: string) => opts.mode === "magma" && /\u02b9loop\d+$/.test(n);
+  for (const n of [...defs]) if (loopOwn(n)) defs.delete(n);
+  for (const n of [...refs]) if (loopOwn(n)) refs.delete(n);
   return {
     defs,
     refs,
-    deleted: new Set([...v.refs].filter(([, rs]) => rs.some((r) => r.deleted)).map(([n]) => n)),
+    deleted: new Set([...v.refs].filter(([n, rs]) => !loopOwn(n) && rs.some((r) => r.deleted)).map(([n]) => n)),
     mutations: new Set([...mutated(tree)].filter((n) => refs.has(n) && !defs.has(n))),
     imports: new Map([...v.imported].filter((e): e is [string, string] => e[1] !== null && defs.has(e[0]))),
     unbinds: new Set([...handlers].filter((n) => !defs.has(n) && !isLocal(n))),
