@@ -530,6 +530,46 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
   check("runAndSave (through runIn): the printed results past the bound: what ran written, never \"Stopped before it ran\"", rL.ok === true && rL.states?.[0]?.latex === "2" && /the results are too large/.test(rL.states?.[1]?.msg ?? ""), rL);
 }
 
+// ---- (grader's Z2, Z3, Z7, Z9 on #794) a Run stopped while queued reads nothing (not even the .tex's recheck) and
+// runs nothing; one stopped while its recheck is under way stops there, before the folder goes in; a file whose
+// listed size alone is past the bound is refused unread; a file in the Trash isn't given
+{
+  const enc = (t) => new TextEncoder().encode(t);
+  let reads = 0, recheckHold = null, execs = 0;
+  const sZ = sessionOf({ module: async () => ({ WorkerKernel: class { constructor(o) { this.o = o; this.ready = false; } start() { this.worker = { postMessage() {} }; this.o.onStart(this.worker); this.ready = true; } post() {} on() { return () => {}; } } }), worker: () => null }, 1000);
+  const ws = { pathOfFile: async () => { reads++; if (recheckHold) await recheckHold; return { ok: true, path: "/Z/doc.tex" }; }, stat: async () => undefined, createByPerson: async () => ({}) };
+  const runZ = (stop) => runAndSave({ items: [item("silent", "x = 1")], ws, fid: "f", current: () => true, max: 1 << 20, now: () => 0, stop,
+    session: sZ, store: sZ, serial: sZ.serial, folder: async () => ({ dir: "/Z", files: [["/Z/doc.tex", enc("x")]] }), exec: async () => { execs++; return { out: "", stopped: "" }; } });
+  const within = (p, ms = 5000) => Promise.race([p, new Promise((r) => setTimeout(() => r({ timedOut: true }), ms))]);
+  // (Z2: a Run ahead holds the session's turn; this one, stopped while it waits, makes no read at all)
+  let releaseAhead;
+  const ahead = sZ.serial(() => new Promise((r) => (releaseAhead = r)));
+  const stopQ = new AbortController(), pQ = runZ(stopQ.signal);
+  await new Promise((r) => setTimeout(r, 20));
+  stopQ.abort();
+  const readsBefore = reads;
+  releaseAhead(); await ahead;
+  const rQ = await within(pQ);
+  check("Z2: a Run stopped while it waits for its turn reads nothing (not even the .tex's recheck) and runs nothing", /Stopped before it ran/.test(rQ.msg ?? "") && reads === readsBefore && execs === 0, { rQ, reads, readsBefore, execs });
+  // (Z3: stopped while its recheck is under way: it stops there; the folder isn't put in, the script isn't run)
+  let releaseRecheck;
+  recheckHold = new Promise((r) => (releaseRecheck = r));
+  const stopR = new AbortController(), pR = runZ(stopR.signal);
+  for (let i = 0; i < 50 && reads === readsBefore; i++) await new Promise((r) => setTimeout(r, 5));
+  stopR.abort(); recheckHold = null; releaseRecheck();
+  const rR = await within(pR);
+  check("Z3: a Run stopped while its .tex is being rechecked stops there: nothing put in, nothing run", /Stopped before it ran/.test(rR.msg ?? "") && execs === 0 && sZ.sent.size === 0, { rR, execs, sent: [...sZ.sent] });
+  // (Z7: a file whose listed size alone is past the bound: refused, never read)
+  let fileReads = 0;
+  const big = await folderFiles({ list: async () => [{ path: "/Z/doc.tex", kind: "file", size: 10 }, { path: "/Z/h.py", kind: "file", size: 500 }],
+    readUpTo: async (p, max) => { fileReads++; return { content: new Uint8Array(p.endsWith("h.py") ? 500 : 10) }; } }, "/Z/doc.tex", { files: 10, bytes: 100 });
+  check("Z7: a file whose listed size is past the bound is refused unread (only the .tex before it read)", !big.files && /too large/.test(big.msg ?? "") && fileReads === 1, { big, fileReads });
+  // (Z9: a helper.py in the Trash isn't given to the session, so it can't be imported)
+  const tr = await folderFiles({ list: async () => [{ path: "/Z/doc.tex", kind: "file", size: 1 }, { path: "/Z/helper.py", kind: "file", size: 1, trashed: true }],
+    readUpTo: async () => ({ content: new Uint8Array(1) }) }, "/Z/doc.tex");
+  check("Z9: a helper.py in the Trash isn't given to the session", JSON.stringify(tr.files?.map(([p]) => p)) === JSON.stringify(["/Z/doc.tex"]), tr);
+}
+
 const bad = results.filter(([, ok]) => !ok);
 console.log(`${results.length - bad.length}/${results.length} passed`);
 process.exit(bad.length ? 1 : 0);
