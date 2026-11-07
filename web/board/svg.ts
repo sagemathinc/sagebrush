@@ -240,7 +240,7 @@ const PREVIEW_IMAGES = ["image/png", "image/jpeg", "image/webp"];
 // picture at most as wide as the note, and when they were computed; without a preview, a
 // line saying they are on the board
 function outputLines(p: Preview | undefined, w: number): Line[] {
-  if (!p) return [{ runs: [{ t: "(its output: in the board)", i: true }], size: 11, lh: 16, indent: 0, gap: 4, color: "#667" }];
+  if (!p) return [{ runs: [{ t: "(output not stored)", i: true }], size: 11, lh: 16, indent: 0, gap: 4, color: "#667" }];
   const out: Line[] = [];
   const text = (t: string, color?: string) => {
     const body = t.replace(/\n$/, "");

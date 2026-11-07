@@ -133,7 +133,7 @@ test("board render: a code item's stored preview is drawn, its text and its rast
   const doc = { format: "sagebrush-board", version: 1, nodes: [{ id: "c", code: "print(2+3)", w: 300, preview }] };
   let r = cli(["-"], JSON.stringify(doc));
   assert.equal(r.status, 0, r.stderr);
-  assert.ok(!r.stdout.includes("its output: in the board"), "the output, not the placeholder");
+  assert.ok(!r.stdout.includes("output not stored"), "the output, not the placeholder");
   assert.match(r.stdout, />5<\/tspan>/, "the item's text output");
   assert.ok(r.stdout.includes("careful &lt;now&gt;") && !r.stdout.includes("<now>"), "stderr shown, escaped");
   assert.ok(r.stdout.includes(`<image `) && r.stdout.includes(`href="data:image/png;base64,${PNG}"`), "the preview's picture, as an <image> of its data: URL");
@@ -143,12 +143,29 @@ test("board render: a code item's stored preview is drawn, its text and its rast
   // (no preview: the placeholder, and how to store the outputs, said once)
   r = cli(["-"], JSON.stringify({ ...doc, nodes: [{ id: "c", code: "print(2+3)" }] }));
   assert.equal(r.status, 0);
-  assert.ok(r.stdout.includes("its output: in the board"));
+  assert.ok(r.stdout.includes("(output not stored)"));
   assert.ok(r.stderr.includes("shown only in part: code's outputs\n"), r.stderr);
-  assert.ok(r.stderr.includes("store them first: sagebrush board run FILE --store-previews --preview-ms 0"), r.stderr);
-  // (some stored, some not: said of those only, and no advice to store what was stored)
+  assert.ok(r.stderr.includes("code outputs aren't stored in this board, so they aren't drawn. To draw them, run\n  sagebrush board run FILE --store-previews --preview-ms 0\non the board's file, then render the .previews.board.json file it writes next to it.\n"), r.stderr);
+  // (some stored, some not: said of those only, and the same way to store the rest)
   r = cli(["-"], JSON.stringify({ ...doc, nodes: [{ id: "c", code: "print(2+3)", preview }, { id: "d", code: "1", x: 0, y: 400 }] }));
-  assert.ok(r.stderr.includes("code's outputs (of the items with no stored preview)") && !r.stderr.includes("store them first"), r.stderr);
+  assert.ok(r.stderr.includes("code's outputs (of the items with no stored preview)") && r.stderr.includes("some code outputs aren't stored in this board"), r.stderr);
+});
+
+test("board render: the way to store code's outputs names this file and the one it writes, the command on its own line", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sb-hint-"));
+  try {
+    const f = join(dir, "basic.board.json"), g = join(dir, "my plot.previews.board.json");
+    writeFileSync(f, JSON.stringify({ format: "sagebrush-board", version: 1, nodes: [{ id: "c", code: "1" }] }));
+    let r = cli([f, "-o", join(dir, "o.svg")]);
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(r.stderr.endsWith(`sagebrush board render: code outputs aren't stored in this file, so they aren't drawn. To draw them, run\n  sagebrush board run ${f} --store-previews --preview-ms 0\nthen render ${join(dir, "basic.previews.board.json")}, which that command writes next to it.\n`), r.stderr);
+    // (a .previews.board.json already: written over, with -o; a name with a space: quoted)
+    writeFileSync(g, JSON.stringify({ format: "sagebrush-board", version: 1, nodes: [{ id: "c", code: "1" }] }));
+    r = cli([g, "-o", join(dir, "o.svg")]);
+    assert.ok(r.stderr.includes(`  sagebrush board run '${g}' --store-previews --preview-ms 0 -o '${g}'\nthen render ${g} again.\n`), r.stderr);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("board render: a picture whose bytes are in the file is drawn as an <image>; an https: one stays a box and nothing in the file loads", () => {
