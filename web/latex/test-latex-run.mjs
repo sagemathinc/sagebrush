@@ -8,11 +8,11 @@
 // NameError and the rest still run, a plot as an SVG; and the parts alone: refused items, a session that stopped,
 // unreadable lines, bounds, a traceback without the script's frames.
 //   node scripts/build-cli.mjs && bun web/latex/test-latex-run.mjs
-import { mkdtempSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
-import { driver, runnable, parseOutput, statesOf, resultsText, msgOf, MARK, RUN_LIMITS, RESULTS_FORMAT, runAndSave, sessionOf, sandboxEngine, SANDBOX_FAILED } from "./run-core.mjs";
+import { driver, runnable, parseOutput, statesOf, resultsText, msgOf, MARK, RUN_LIMITS, RESULTS_FORMAT, runAndSave, sessionOf, sandboxEngine, SANDBOX_FAILED, folderFiles, runIn } from "./run-core.mjs";
 import { itemKey, savedStates, stateOf, WRAPPER_VERSION, MAX_RESULT } from "./engine/sagetex.mjs";
 
 const results = [];
@@ -329,6 +329,245 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
   const ran = typeof third === "object" ? await new Promise((res) => third.execute("1", { mode: "sage" }, { start() {}, out() {}, display() {}, interact() {}, clear() {}, done: (ms, o) => res(!o?.error), stopped: () => res(false), skipped: () => res(false) })) : false;
   check("RUN-2: code runs in that runner; still no plain worker", ran === true && made.workers === 0 && made.runners.every((o) => !o || o.fallback === undefined) && made.runners.length === 3, made);
   third?.worker?.terminate?.();
+}
+
+// ---- the .tex's folder (Codex friction: a helper beside the .tex): the working folder and last on sys.path, as real
+// SageTeX has it; each Run imports the folder's modules afresh (an edited helper, an edited package's child, a deleted
+// helper), and a Run in another folder doesn't see the first one's. Four Runs in one session (the script's runs one
+// after another, as the page's are), the files changed between them as putFolder changes them
+{
+  const root = mkdtempSync(join(tmpdir(), "sb-latex-folder-")), A = join(root, "a"), B = join(root, "b");
+  for (const d of [A, join(A, "pkg"), B]) mkdirSync(d, { recursive: true });
+  writeFileSync(join(A, "helper.py"), "def v():\n    return 1\n");
+  writeFileSync(join(A, "pkg", "__init__.py"), "");
+  writeFileSync(join(A, "pkg", "child.py"), "V = 10\n");
+  // (a module of the standard library's name beside the .tex: the standard one is imported, the folder being last)
+  writeFileSync(join(A, "statistics.py"), "SHADOW = 1\n");
+  writeFileSync(join(B, "other.py"), "W = 5\n");
+  // (B's own helper.py, of the same name as A's: B's is the one imported)
+  writeFileSync(join(B, "helper.py"), "def v():\n    return 7\n");
+  const py = (s) => `\n${s}\n`;
+  const runs = [
+    driver([
+      { mode: "silent", code: "import sys, os\nsys.modules.pop('statistics', None)\npre = 'statistics' in sys.modules\nimport statistics, helper, pkg.child" },
+      { mode: "sage", code: "(pre, hasattr(statistics, 'median'), hasattr(statistics, 'SHADOW'))" },
+      { mode: "sage", code: "(helper.v(), pkg.child.V)" },
+      { mode: "sage", code: `(os.getcwd() == ${JSON.stringify(A)}, sys.path[-1] == ${JSON.stringify(A)}, sys.path.count(${JSON.stringify(A)}))` },
+    ], A),
+    py(`open(${JSON.stringify(join(A, "helper.py"))}, "w").write("def v():\\n    return 2\\n")\nopen(${JSON.stringify(join(A, "pkg", "child.py"))}, "w").write("V = 20\\n")`),
+    driver([{ mode: "silent", code: "import helper, pkg.child" }, { mode: "sage", code: "(helper.v(), pkg.child.V)" }], A),
+    py(`import os as _o\n_o.remove(${JSON.stringify(join(A, "helper.py"))})`),
+    driver([{ mode: "silent", code: "import helper" }], A),
+    driver([
+      { mode: "silent", code: "import sys, os\nimport other, helper" },
+      { mode: "sage", code: `(other.W, os.getcwd() == ${JSON.stringify(B)}, sys.path.count(${JSON.stringify(A)}), sys.path[-1] == ${JSON.stringify(B)}, helper.v())` },
+      { mode: "silent", code: "import pkg.child" },
+    ], B),
+  ];
+  const r = await sage(runs.join("\n"));
+  const got = parseOutput(r.out);
+  rmSync(root, { recursive: true, force: true });
+  // (a tuple's LaTeX without Sage's \\left( \\right))
+  const lx = (i) => String(got[i]?.latex ?? got[i]?.msg ?? JSON.stringify(got[i])).replace(/\\left|\\right/g, "");
+  check("folder: the standard library's statistics wins over a statistics.py beside the .tex (imported cold: not vacuous)", /\\mathrm\{False\}, \\mathrm\{True\}, \\mathrm\{False\}/.test(lx(1)), { r1: lx(1), err: r.err.slice(-300) });
+  check("folder: a helper and a package's child beside the .tex are imported", /\(1, 10\)/.test(lx(2)), lx(2));
+  check("folder: the working folder is the .tex's, last on sys.path, once", /\\mathrm\{True\}, \\mathrm\{True\}, 1/.test(lx(3)), lx(3));
+  check("folder: the next Run imports them afresh (an edited helper, an edited package child)", /\(2, 20\)/.test(lx(5)), lx(5));
+  check("folder: a deleted helper is gone at the next Run", got[6]?.s === "error" && /No module named .?helper/.test(got[6]?.msg ?? ""), got[6]);
+  check("folder: a Run in another folder imports its own (its own helper.py of the same name), and not the first folder's (off sys.path, its modules dropped)", /\(5, \\mathrm\{True\}, 0, \\mathrm\{True\}, 7\)/.test(lx(8)) && got[9]?.s === "error" && /No module named .?pkg/.test(got[9]?.msg ?? ""), { r8: lx(8), r9: got[9] });
+}
+
+// ---- one Run at a time in the session (daybreak3, astra): a Run waiting for another puts nothing in the worker while
+// that one runs (the worker reads files between the messages of a run, its packages' fetch for one); the next one's
+// folder replaces the last one's whole (another folder's paths deleted); a Run cancelled while it waits runs nothing;
+// cancelling the one running stops only it; a worker started again is given, first, no right to change files, then the
+// admitted folder again. A kernel, worker and workspace of the test's own
+{
+  const posts = [], log = [];
+  let onStartFn = null, gen = 0;
+  const worker = () => { const g = ++gen; return { gen: g, postMessage: (m) => posts.push({ g, m }) }; };
+  class FakeKernel {
+    constructor(o) { onStartFn = o.onStart; this.ready = false; }
+    start() { this.worker = worker(); onStartFn(this.worker); this.ready = true; }
+    post(m) { this.worker?.postMessage(m); }
+    on() { return () => {}; }
+    interrupt() { log.push("interrupt " + running); }
+  }
+  let running = null;
+  const s = sessionOf({ module: async () => ({ WorkerKernel: FakeKernel }), worker: () => null }, 1000);
+  const tree = { a: { dir: "/A", files: [["/A/doc.tex", new Uint8Array([1])], ["/A/helper.py", new Uint8Array([2])]] }, b: { dir: "/B", files: [["/B/doc.tex", new Uint8Array([3])]] } };
+  const ws = { pathOfFile: async (fid) => ({ ok: true, path: tree[fid].dir + "/doc.tex" }), stat: async () => undefined, createByPerson: async () => ({}), write: async () => ({}) };
+  const holds = {};
+  const run = (fid, signal) => runAndSave({
+    items: [item("silent", "x = 1")], ws, fid, current: () => true, signal, max: 1 << 20, now: () => 0,
+    session: s, store: s, serial: s.serial, folder: async () => tree[fid],
+    exec: (k, code) => { running = fid; log.push("exec " + fid + " " + /"\/[AB]"/.test(Buffer.from(code.match(/b64decode\("([^"]*)"\)\.decode\("utf-8"\)\)\n# \(_sbtx_prev/)?.[1] ?? "", "base64").toString()) ); return new Promise((r) => (holds[fid] = () => { running = null; r({ out: "", stopped: "" }); })); },
+  });
+  // (each wait bounded: a Run that never ends fails its check here, not the whole test)
+  const within = (p, ms = 5000) => Promise.race([p, new Promise((r) => setTimeout(() => r({ timedOut: true }), ms))]);
+  const putsOf = (from) => posts.slice(from).filter((p) => p.m.fsPut !== undefined).map((p) => [p.m.fsPut, p.m.data === null ? null : "bytes"]);
+  const pA = run("a");
+  for (let i = 0; i < 50 && !holds.a; i++) await new Promise((r) => setTimeout(r, 5));
+  const afterA = posts.length, first = posts[0]?.m;
+  const pB = run("b");
+  await new Promise((r) => setTimeout(r, 30));
+  const whileA = putsOf(afterA);
+  const abC = new AbortController(), pC = run("a", abC.signal);
+  await new Promise((r) => setTimeout(r, 10));
+  abC.abort();
+  holds.a();
+  const rA = await within(pA);
+  for (let i = 0; i < 50 && !holds.b; i++) await new Promise((r) => setTimeout(r, 5));
+  const forB = putsOf(afterA);
+  // (B running: its own Run cancelled stops it, and only it)
+  const abB = new AbortController();
+  const nowLog = log.length;
+  check("serial: the worker's first message is no right to change files", first && first.fsWritable === false, first);
+  check("serial: a Run waiting for another puts nothing in the worker while that one runs", whileA.length === 0, whileA);
+  check("serial: the next folder replaces the last whole: the other folder's paths deleted, its own put", JSON.stringify(forB) === JSON.stringify([["/A/doc.tex", null], ["/A/helper.py", null], ["/B/doc.tex", "bytes"]]), forB);
+  holds.b?.();
+  const rB = await within(pB), rC = await within(pC);
+  check("serial: a Run cancelled while it waits runs nothing", rC.stale === true && log.filter((l) => l.startsWith("exec")).length === 2, { rC, log });
+  check("serial: each script given its own folder", log.filter((l) => l.startsWith("exec")).every((l) => l.endsWith("true")) && rA.ok && rB.ok, { log, rA, rB });
+  // (cancelling the Run whose script runs: interrupt, only while it runs)
+  const pD = run("a", abB.signal);
+  for (let i = 0; i < 50 && running !== "a"; i++) await new Promise((r) => setTimeout(r, 5));
+  abB.abort();
+  holds.a();
+  await within(pD);
+  check("serial: cancelling the Run whose script runs stops that script, once", log.slice(nowLog).filter((l) => l.startsWith("interrupt")).join(",") === "interrupt a", log.slice(nowLog));
+  // (the worker started again: no right to change files first, then the admitted folder (A's, the last), nothing else)
+  const before = posts.length, w2 = worker();
+  onStartFn(w2);
+  const again = posts.slice(before).filter((p) => p.g === w2.gen).map((p) => p.m.fsWritable === false ? "ro" : p.m.fsPut);
+  check("restart: a new worker is given no right to change files, then the last admitted folder", JSON.stringify(again) === JSON.stringify(["ro", "/A/doc.tex", "/A/helper.py"]), again);
+}
+
+// ---- the folder read (folderFiles): only the .tex's folder (a sibling whose name starts the same isn't in it), its
+// files' bytes all read or none (one unreadable: nothing runs), within its bounds (the count, the bytes as read); and a
+// .tex moved to another folder while its Run waited: nothing runs
+{
+  const bytes = (n) => new Uint8Array(n);
+  // (`grown`: a file's bytes now, larger than when it was listed)
+  const mkws = (entries, unreadable = null, grown = {}) => ({
+    list: async () => entries.map(([path, size]) => ({ path, kind: "file", size })),
+    readUpTo: async (p, max) => {
+      if (p === unreadable) throw new Error("gone");
+      const n = grown[p] ?? entries.find((e) => e[0] === p)[1];
+      if (n > max) throw Object.assign(new Error(p + " is larger than " + max + " bytes"), { code: "limit" });
+      return { content: bytes(n) };
+    },
+  });
+  const ok = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/sub/h.py", 2], ["/Ab/x.py", 1]]), "/A/doc.tex");
+  check("folderFiles: the .tex's folder only, a sibling of a like name not in it", ok.dir === "/A" && JSON.stringify(ok.files.map(([p]) => p)) === JSON.stringify(["/A/doc.tex", "/A/sub/h.py"]), ok);
+  const unread = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/h.py", 2]], "/A/h.py"), "/A/doc.tex");
+  check("folderFiles: a file that can't be read: nothing runs (no partial folder)", !unread.files && /couldn't be read/.test(unread.msg ?? ""), unread);
+  const many = await folderFiles(mkws([["/A/doc.tex", 1], ["/A/a", 1], ["/A/b", 1]]), "/A/doc.tex", { files: 2, bytes: 100 });
+  const heavy = await folderFiles(mkws([["/A/doc.tex", 60], ["/A/a", 60]]), "/A/doc.tex", { files: 10, bytes: 100 });
+  const grownWs = mkws([["/A/doc.tex", 10], ["/A/a", 10]], null, { "/A/a": 500 });
+  const grown = await folderFiles(grownWs, "/A/doc.tex", { files: 10, bytes: 100 });
+  check("folderFiles: a file grown past the bound since it was listed: refused by the bounded read, nothing runs", !grown.files && /too large/.test(grown.msg ?? ""), grown);
+  check("folderFiles: past the count or the bytes, nothing runs", !many.files && /too large/.test(many.msg ?? "") && !heavy.files && /too large/.test(heavy.msg ?? ""), { many, heavy });
+  // (moved while its Run waited for the session: refused, nothing run)
+  let moved = false, execd = 0;
+  const s2 = sessionOf({ module: async () => ({ WorkerKernel: class { constructor(o) { this.o = o; this.ready = false; } start() { this.worker = { postMessage() {} }; this.o.onStart(this.worker); this.ready = true; } post() {} on() { return () => {}; } } }), worker: () => null }, 1000);
+  const r = await runAndSave({
+    items: [item("silent", "x = 1")], current: () => true, max: 1 << 20, now: () => 0, fid: "f",
+    ws: { pathOfFile: async () => ({ ok: true, path: moved ? "/B/doc.tex" : "/A/doc.tex" }), stat: async () => undefined, createByPerson: async () => ({}) },
+    session: async () => { const k = await s2(); moved = true; return k; }, store: s2, serial: s2.serial, folder: async () => ({ dir: "/A", files: [] }),
+    exec: async () => { execd++; return { out: "", stopped: "" }; },
+  });
+  check("runAndSave: the .tex moved to another folder while its Run waited: nothing runs, it says so", execd === 0 && /moved/.test(r.msg ?? ""), { r, execd });
+}
+
+// ---- a Run's own Stop (astra's LATEX-QUEUE-STOP-1): stopped while it waits for another Run, it runs nothing, and the
+// one running isn't interrupted; stopped while its script runs, that script is interrupted, once, and what ran written
+{
+  const log = [];
+  let running = null;
+  class K { constructor(o) { this.o = o; this.ready = false; } start() { this.worker = { postMessage() {} }; this.o.onStart(this.worker); this.ready = true; } post() {} on() { return () => {}; } interrupt() { log.push("interrupt " + running); } }
+  const s = sessionOf({ module: async () => ({ WorkerKernel: K }), worker: () => null }, 1000);
+  const ws = { pathOfFile: async () => ({ ok: true, path: "/Q/doc.tex" }), stat: async () => undefined, createByPerson: async () => ({}) };
+  const holds = {};
+  const within = (p, ms = 5000) => Promise.race([p, new Promise((r) => setTimeout(() => r({ timedOut: true }), ms))]);
+  const run = (tag, stop) => runAndSave({ items: [item("silent", "x = 1")], ws, fid: "f", current: () => true, max: 1 << 20, now: () => 0, stop,
+    session: s, store: s, serial: s.serial, folder: async () => ({ dir: "/Q", files: [] }),
+    exec: () => { running = tag; log.push("exec " + tag); return new Promise((r) => (holds[tag] = () => { running = null; r({ out: "", stopped: "" }); })); } });
+  const pA = run("A");
+  for (let i = 0; i < 50 && !holds.A; i++) await new Promise((r) => setTimeout(r, 5));
+  const stopB = new AbortController(), pB = run("B", stopB.signal);
+  await new Promise((r) => setTimeout(r, 20));
+  stopB.abort();
+  const afterStop = log.slice();
+  holds.A();
+  const rA = await within(pA), rB = await within(pB);
+  check("Stop: a Run stopped while it waits runs nothing, and the Run running isn't interrupted", !afterStop.includes("interrupt A") && !log.includes("exec B") && /Stopped before it ran/.test(rB.msg ?? "") && rA.ok, { log, rA, rB });
+  // (through runIn itself (astra's LATEX-STOP-RESULT-1, daybreak3): the kernel's callbacks as a real session calls them,
+  //  one item's result printed and then the run ended early: interrupted (this Run's Stop), the session's error, the
+  //  results past the bound: what ran is written, the rest not run, never "Stopped before it ran")
+  const two = [item("sage", "1 + 1"), item("sage", "2 + 2")];
+  const ranOne = MARK + JSON.stringify({ s: "ok", latex: "2" }) + "\n";
+  K.prototype.execute = function (code, opts, cb) { running = "C"; log.push("exec C"); holds.C = (outcome, extra = "") => { running = null; cb.out(ranOne + extra, false); cb.done(0, outcome); }; };
+  const runTwo = (stop, max = 1 << 20) => runAndSave({ items: two, ws, fid: "f", current: () => true, max, now: () => 0, stop,
+    session: s, store: s, serial: s.serial, folder: async () => ({ dir: "/Q", files: [] }), exec: runIn });
+  const stopC = new AbortController(), pC = runTwo(stopC.signal);
+  for (let i = 0; i < 50 && running !== "C"; i++) await new Promise((r) => setTimeout(r, 5));
+  stopC.abort();
+  holds.C({ interrupted: true });
+  const rC = await within(pC);
+  check("Stop (through runIn): a Run stopped while its script runs: that script interrupted, once; what ran written, the rest not run", log.filter((l) => l === "interrupt C").length === 1 && rC.ok === true && rC.states?.[0]?.s === "ok" && rC.states?.[0]?.latex === "2" && rC.states?.[1]?.s === "error" && /the run was stopped/.test(rC.states?.[1]?.msg ?? ""), { log, rC });
+  const pE = runTwo(undefined);
+  for (let i = 0; i < 50 && running !== "C"; i++) await new Promise((r) => setTimeout(r, 5));
+  holds.C({ error: true });
+  const rE = await within(pE);
+  check("runAndSave (through runIn): the session's error after one item: what ran written, never \"Stopped before it ran\"", rE.ok === true && rE.states?.[0]?.latex === "2" && /the session stopped with an error/.test(rE.states?.[1]?.msg ?? ""), rE);
+  // (the printed results past runIn's bound: the bound is the results file's too, so one big enough for the file and
+  //  smaller than what was printed)
+  const pL = runTwo(undefined, 4096);
+  for (let i = 0; i < 50 && running !== "C"; i++) await new Promise((r) => setTimeout(r, 5));
+  holds.C({}, "x".repeat(5000));
+  const rL = await within(pL);
+  check("runAndSave (through runIn): the printed results past the bound: what ran written, never \"Stopped before it ran\"", rL.ok === true && rL.states?.[0]?.latex === "2" && /the results are too large/.test(rL.states?.[1]?.msg ?? ""), rL);
+}
+
+// ---- (grader's Z2, Z3, Z7, Z9 on #794) a Run stopped while queued reads nothing (not even the .tex's recheck) and
+// runs nothing; one stopped while its recheck is under way stops there, before the folder goes in; a file whose
+// listed size alone is past the bound is refused unread; a file in the Trash isn't given
+{
+  const enc = (t) => new TextEncoder().encode(t);
+  let reads = 0, recheckHold = null, execs = 0;
+  const sZ = sessionOf({ module: async () => ({ WorkerKernel: class { constructor(o) { this.o = o; this.ready = false; } start() { this.worker = { postMessage() {} }; this.o.onStart(this.worker); this.ready = true; } post() {} on() { return () => {}; } } }), worker: () => null }, 1000);
+  const ws = { pathOfFile: async () => { reads++; if (recheckHold) await recheckHold; return { ok: true, path: "/Z/doc.tex" }; }, stat: async () => undefined, createByPerson: async () => ({}) };
+  const runZ = (stop) => runAndSave({ items: [item("silent", "x = 1")], ws, fid: "f", current: () => true, max: 1 << 20, now: () => 0, stop,
+    session: sZ, store: sZ, serial: sZ.serial, folder: async () => ({ dir: "/Z", files: [["/Z/doc.tex", enc("x")]] }), exec: async () => { execs++; return { out: "", stopped: "" }; } });
+  const within = (p, ms = 5000) => Promise.race([p, new Promise((r) => setTimeout(() => r({ timedOut: true }), ms))]);
+  // (Z2: a Run ahead holds the session's turn; this one, stopped while it waits, makes no read at all)
+  let releaseAhead;
+  const ahead = sZ.serial(() => new Promise((r) => (releaseAhead = r)));
+  const stopQ = new AbortController(), pQ = runZ(stopQ.signal);
+  await new Promise((r) => setTimeout(r, 20));
+  stopQ.abort();
+  const readsBefore = reads;
+  releaseAhead(); await ahead;
+  const rQ = await within(pQ);
+  check("Z2: a Run stopped while it waits for its turn reads nothing (not even the .tex's recheck) and runs nothing", /Stopped before it ran/.test(rQ.msg ?? "") && reads === readsBefore && execs === 0, { rQ, reads, readsBefore, execs });
+  // (Z3: stopped while its recheck is under way: it stops there; the folder isn't put in, the script isn't run)
+  let releaseRecheck;
+  recheckHold = new Promise((r) => (releaseRecheck = r));
+  const stopR = new AbortController(), pR = runZ(stopR.signal);
+  for (let i = 0; i < 50 && reads === readsBefore; i++) await new Promise((r) => setTimeout(r, 5));
+  stopR.abort(); recheckHold = null; releaseRecheck();
+  const rR = await within(pR);
+  check("Z3: a Run stopped while its .tex is being rechecked stops there: nothing put in, nothing run", /Stopped before it ran/.test(rR.msg ?? "") && execs === 0 && sZ.sent.size === 0, { rR, execs, sent: [...sZ.sent] });
+  // (Z7: a file whose listed size alone is past the bound: refused, never read)
+  let fileReads = 0;
+  const big = await folderFiles({ list: async () => [{ path: "/Z/doc.tex", kind: "file", size: 10 }, { path: "/Z/h.py", kind: "file", size: 500 }],
+    readUpTo: async (p, max) => { fileReads++; return { content: new Uint8Array(p.endsWith("h.py") ? 500 : 10) }; } }, "/Z/doc.tex", { files: 10, bytes: 100 });
+  check("Z7: a file whose listed size is past the bound is refused unread (only the .tex before it read)", !big.files && /too large/.test(big.msg ?? "") && fileReads === 1, { big, fileReads });
+  // (Z9: a helper.py in the Trash isn't given to the session, so it can't be imported)
+  const tr = await folderFiles({ list: async () => [{ path: "/Z/doc.tex", kind: "file", size: 1 }, { path: "/Z/helper.py", kind: "file", size: 1, trashed: true }],
+    readUpTo: async () => ({ content: new Uint8Array(1) }) }, "/Z/doc.tex");
+  check("Z9: a helper.py in the Trash isn't given to the session", JSON.stringify(tr.files?.map(([p]) => p)) === JSON.stringify(["/Z/doc.tex"]), tr);
 }
 
 const bad = results.filter(([, ok]) => !ok);
