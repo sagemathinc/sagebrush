@@ -78,7 +78,11 @@ CLASSES = {"1", "2", "3", "1+2", "1+3", "2+3", "1+2+3", "coverage", "none"}
 # mirrored (r9 §0, §3, §6.4) and whose attempts bound is r9 §6.2's: class 1)
 # and the LaTeX editor's Run (run-core.mjs), whose bounds on the .tex's folder given to Sage (FOLDER_LIMITS) and on
 # what a Run's results hold (RUN_LIMITS) protect the page and its session: class 1)
-WEB = {"web/workspace/sync-ledger.ts", "web/notebook/text-overlap.ts", "web/stall-fetch.js", "web/workspace/checkpoint.ts", "web/latex/run-core.mjs"}
+# and the isolated output renderer (OUT-ISO phase 1): the message schema's bounds (protocol.js BOUNDS: a message's size, checked
+# before it is parsed, the outputs a render, an id, a height, a reason), the shell's readiness wait and height rate, and the
+# host's deadlines and live-frame cap, with their measurements (web/test-output-frames.mjs): class 1)
+WEB = {"web/workspace/sync-ledger.ts", "web/notebook/text-overlap.ts", "web/stall-fetch.js", "web/workspace/checkpoint.ts", "web/latex/run-core.mjs",
+       "web/output-shell/protocol.js", "web/output-shell/shell.js", "web/notebook/output-frames.js"}
 
 
 def short(key):

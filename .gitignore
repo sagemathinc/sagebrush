@@ -6,3 +6,4 @@ build/
 packages/sagebrush/dist/
 web/app.tmp.js
 dist-test/
+web/dist-output-shell/

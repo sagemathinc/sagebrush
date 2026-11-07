@@ -130,13 +130,27 @@ console.log(`library: ${LIB_CHUNKS.length} chunks; ` + Object.entries(libManifes
   const list = runnerFetchList(engineSha256, rasterSha256, ndSha256, libChunkFiles.keys(), tz.ref);
   writeFileSync(join(here, "dist", "runner-fetch.json"), JSON.stringify(list) + "\n");
   const build0 = Bun.build.bind(Bun);
+  // (the isolated output renderer, OUT-ISO phase 1: its packaged form is every bundle's __SB_OUTPUT_SHELL__, and its
+  // hosted form one directory per environment's own site, web/dist-output-shell/<env>, never this site's dist; the
+  // environments' shell URLs are empty until that site exists: web/output-shell/sites.mts)
+  const { buildOutputShell, hostedShellFiles } = await import("./output-shell/build.mts");
+  const { SITES, checkSites } = await import("./output-shell/sites.mts");
+  const siteProblems = checkSites();
+  if (siteProblems.length) throw new Error("web/output-shell/sites.mts: " + siteProblems.join("; "));
+  const outputShell = await buildOutputShell(build0, join(here, "output-shell", "shell.js"));
+  rmSync(join(here, "dist-output-shell"), { recursive: true, force: true });
+  for (const [env, s] of Object.entries(SITES)) {
+    mkdirSync(join(here, "dist-output-shell", env), { recursive: true });
+    for (const [f, text] of Object.entries(hostedShellFiles(outputShell, s.ancestors))) writeFileSync(join(here, "dist-output-shell", env, f), text);
+  }
+  console.log(`output shell: ${outputShell.srcdoc.length} B packaged, ${Object.keys(SITES).length} hosted configs (shell URLs: ${Object.values(SITES).filter((s) => s.shell).length} set)`);
   // (and the editors' old example lists, web/examples/legacy.ts: in a bundle, its lists as literals, never its file
   // reading code)
   const { legacySource } = await import("./examples/legacy.ts");
   const legacy = legacySource();
   const examplesLegacyPlugin = { name: "examples-legacy", setup(b: any) { b.onLoad({ filter: /[\\/]web[\\/]examples[\\/]legacy\.ts$/ }, () => ({ contents: legacy, loader: "js" })); } };
   (Bun as any).build = async (o: any) => {
-    const r = await build0({ ...o, plugins: [...(o.plugins ?? []), examplesLegacyPlugin], define: { ...(o.define ?? {}), __SB_RUNNER_FETCH__: JSON.stringify(list) } });
+    const r = await build0({ ...o, plugins: [...(o.plugins ?? []), examplesLegacyPlugin], define: { ...(o.define ?? {}), __SB_RUNNER_FETCH__: JSON.stringify(list), __SB_OUTPUT_SHELL__: JSON.stringify(outputShell.srcdoc) } });
     if (r.success) checkRunnerDefine(String(o.entrypoints?.[0] ?? "a bundle"), Object.keys(r.metafile?.inputs ?? {}), await Promise.all(r.outputs.map((x: any) => x.text())));
     return r;
   };
