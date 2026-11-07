@@ -5,6 +5,7 @@
   "pages": [
     {
       "title": "Running a cell",
+      "intro": "Open a `.mmd` file, or Markdown with ```` ```mermaid ```` blocks (a page per diagram), or paste one with *Import Mermaid…*: the board lays the diagram out itself and routes every edge around the boxes, so labels do not overlap.",
       "layout": "graph",
       "direction": "LR",
       "nodes": [
@@ -128,6 +129,7 @@
     },
     {
       "title": "Mermaid's own flowchart code",
+      "intro": "From the Mermaid repository (MIT): [docs/diagrams/flowchart-code-flow.mmd](https://github.com/mermaid-js/mermaid/blob/develop/docs/diagrams/flowchart-code-flow.mmd).",
       "layout": "graph",
       "direction": "TB",
       "nodes": [
