@@ -449,9 +449,11 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
 {
   const bytes = (n) => new Uint8Array(n);
   // (`grown`: a file's bytes now, larger than when it was listed)
+  const bounds = [];
   const mkws = (entries, unreadable = null, grown = {}) => ({
-    list: async () => entries.map(([path, size]) => ({ path, kind: "file", size })),
+    list: async () => entries.map(([path, size, remote]) => ({ path, kind: "file", size, ...(remote ? { remote: true } : {}) })),
     readUpTo: async (p, max) => {
+      bounds.push(max);
       if (p === unreadable) throw new Error("gone");
       const n = grown[p] ?? entries.find((e) => e[0] === p)[1];
       if (n > max) throw Object.assign(new Error(p + " is larger than " + max + " bytes"), { code: "limit" });
@@ -459,7 +461,13 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
     },
   });
   const ok = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/sub/h.py", 2], ["/Ab/x.py", 1]]), "/A/doc.tex");
+  const okBounds = bounds.splice(0);
+  check("folderFiles: each read bounded by what is left of the bound (grader's Z5: never unbounded)", JSON.stringify(okBounds) === JSON.stringify([64 * 2 ** 20, 64 * 2 ** 20 - 3]), okBounds);
   check("folderFiles: the .tex's folder only, a sibling of a like name not in it", ok.dir === "/A" && JSON.stringify(ok.files.map(([p]) => p)) === JSON.stringify(["/A/doc.tex", "/A/sub/h.py"]), ok);
+  // (a file only in the cloud: not given to Sage, not read, counted (board's COPY advisory: so the Run can say so))
+  const cloud = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/h.py", 2, true], ["/A/sub/g.py", 2, true]]), "/A/doc.tex");
+  const cloudReads = bounds.splice(0);
+  check("folderFiles: files only in the cloud aren't given or read, and are counted", JSON.stringify(cloud.files?.map(([p]) => p)) === JSON.stringify(["/A/doc.tex"]) && cloud.remote === 2 && ok.remote === 0 && cloudReads.length === 1, { cloud, ok: ok.remote, cloudReads });
   const unread = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/h.py", 2]], "/A/h.py"), "/A/doc.tex");
   check("folderFiles: a file that can't be read: nothing runs (no partial folder)", !unread.files && /couldn't be read/.test(unread.msg ?? ""), unread);
   const many = await folderFiles(mkws([["/A/doc.tex", 1], ["/A/a", 1], ["/A/b", 1]]), "/A/doc.tex", { files: 2, bytes: 100 });
@@ -467,7 +475,7 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
   const grownWs = mkws([["/A/doc.tex", 10], ["/A/a", 10]], null, { "/A/a": 500 });
   const grown = await folderFiles(grownWs, "/A/doc.tex", { files: 10, bytes: 100 });
   check("folderFiles: a file grown past the bound since it was listed: refused by the bounded read, nothing runs", !grown.files && /too large/.test(grown.msg ?? ""), grown);
-  check("folderFiles: past the count or the bytes, nothing runs", !many.files && /too large/.test(many.msg ?? "") && !heavy.files && /too large/.test(heavy.msg ?? ""), { many, heavy });
+  check("folderFiles: past the count or the bytes, nothing runs, the bound named", !many.files && /too large to give to Sage here, over 2 files with its subfolders; move/.test(many.msg ?? "") && !heavy.files && /too large to give to Sage here, over [0-9.]+ MiB with its subfolders; move/.test(heavy.msg ?? ""), { many, heavy });
   // (moved while its Run waited for the session: refused, nothing run)
   let moved = false, execd = 0;
   const s2 = sessionOf({ module: async () => ({ WorkerKernel: class { constructor(o) { this.o = o; this.ready = false; } start() { this.worker = { postMessage() {} }; this.o.onStart(this.worker); this.ready = true; } post() {} on() { return () => {}; } } }), worker: () => null }, 1000);
@@ -478,6 +486,15 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
     exec: async () => { execd++; return { out: "", stopped: "" }; },
   });
   check("runAndSave: the .tex moved to another folder while its Run waited: nothing runs, it says so", execd === 0 && /moved/.test(r.msg ?? ""), { r, execd });
+  // (the folder's files only in the cloud: the Run's result counts them, for the status line)
+  moved = false;
+  const rc = await runAndSave({
+    items: [item("silent", "x = 1")], current: () => true, max: 1 << 20, now: () => 0, fid: "f",
+    ws: { pathOfFile: async () => ({ ok: true, path: "/A/doc.tex" }), stat: async () => undefined, createByPerson: async () => ({}) },
+    session: s2, store: s2, serial: s2.serial, folder: async () => ({ dir: "/A", files: [], remote: 2 }),
+    exec: async () => ({ out: MARK + JSON.stringify({ s: "ok" }) + "\n", stopped: "" }),
+  });
+  check("runAndSave: the folder's files only in the cloud counted in the result", rc.ok && rc.remote === 2, rc);
 }
 
 // ---- a Run's own Stop (astra's LATEX-QUEUE-STOP-1): stopped while it waits for another Run, it runs nothing, and the
