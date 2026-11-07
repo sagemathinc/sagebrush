@@ -18,7 +18,7 @@ import { join } from "node:path";
 const run = (program: string) => {
   const dir = mkdtempSync(join(tmpdir(), "sb-text-"));
   try {
-    return execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", program], { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    return execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", program], { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 120000 });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -273,5 +273,52 @@ test("\\mathbb, \\mathcal, multi-line text and a text box in a saved SVG (W29, W
     "O_K True True False",
     "lines 1 1 False",
     "box True",
+  ]);
+});
+
+test("arrows of huge, infinite and NaN coordinates: drawn as matplotlib 3.11.1 draws the finite ones; none for the others (ANNOT-LOOP-1)", () => {
+  // (matplotlib draws not a pixel of a curve arrow with an infinite or NaN
+  // point, refuses a "simple" one with a ValueError and an infinite xytext
+  // with a StopIteration; Sagebrush draws no arrow)
+  const out = run("import matplotlib.pyplot as plt\nimport math\nimport re\n\nCASES = [\n    ('ordinary', dict(xy=(1.5, 1.6), xytext=(0.3, 0.4)), dict(arrowstyle='->')),\n    ('huge xy', dict(xy=(1e300, 1.6), xytext=(0.3, 0.4), annotation_clip=False), dict(arrowstyle='->')),\n    ('huge xy text', dict(xy=(1e300, 1.6), xytext=(0.3, 0.4), annotation_clip=False, text='T'), dict(arrowstyle='->')),\n    ('huge both', dict(xy=(1e300, 1e300), xytext=(-1e300, -1e300), annotation_clip=False), dict(arrowstyle='->')),\n    ('huge simple', dict(xy=(1e300, 1.6), xytext=(0.3, 0.4), annotation_clip=False), dict(arrowstyle='simple')),\n    ('huge default', dict(xy=(1e300, 1.6), xytext=(0.3, 0.4), annotation_clip=False), dict()),\n    ('1e17 offset', dict(xy=(1e17, 1.6), xytext=(1e17 + 1, 0.4), annotation_clip=False), dict(arrowstyle='->')),\n    ('same point', dict(xy=(1, 1), xytext=(1, 1)), dict(arrowstyle='->')),\n    ('inf xy', dict(xy=(math.inf, 1.6), xytext=(0.3, 0.4), annotation_clip=False), dict(arrowstyle='->')),\n    ('nan xy', dict(xy=(math.nan, 1.6), xytext=(0.3, 0.4), annotation_clip=False), dict(arrowstyle='->')),\n    ('inf xytext', dict(xy=(1.5, 1.6), xytext=(math.inf, 0.4)), dict(arrowstyle='->')),\n    ('nan rad', dict(xy=(1.5, 1.6), xytext=(0.3, 0.4)), dict(arrowstyle='->', connectionstyle='arc3,rad=nan')),\n    ('huge rad', dict(xy=(1.5, 1.6), xytext=(0.3, 0.4)), dict(arrowstyle='->', connectionstyle='arc3,rad=1e300')),\n]\nfor name, kw, ap in CASES:\n    fig = plt.figure()\n    ax = fig.add_axes([0.125, 0.11, 0.775, 0.77])\n    ax.set_xlim(0, 2); ax.set_ylim(0, 2)\n    kw = dict(kw)\n    text = kw.pop('text', '')\n    try:\n        ax.annotate(text, arrowprops=ap, **kw)\n        fig.savefig('t_loop.svg')\n        svg = open('t_loop.svg').read()\n        paths = re.findall(r'<path d=\"([^\"]*)\"[^>]*stroke-linejoin=\"round\"', svg)\n        if not paths:\n            print(name, '=> no arrow')\n            continue\n        vs = []\n        for d in paths:\n            nums = re.findall(r'-?[0-9.]+(?:e[-+]?[0-9]+)?|nan|inf', d)\n            n = len(nums) // 2 + (1 if d.endswith('Z') and 'Q' in d else 0)\n            vs.append(n)\n            fin = all(v not in ('nan', 'inf') for v in nums)\n        print(name, '=> drawn, %d vertices, all finite: %s' % (sum(vs), fin))\n    except Exception as e:\n        print(name, '!!', type(e).__name__, (str(e).splitlines() or [''])[0][:100])\n    plt.close(fig)\n");
+  assert.deepEqual(out.trim().split("\n"), [
+    "ordinary => drawn, 6 vertices, all finite: True",
+    "huge xy => drawn, 6 vertices, all finite: True",
+    "huge xy text => drawn, 6 vertices, all finite: True",
+    "huge both => drawn, 6 vertices, all finite: True",
+    "huge simple => drawn, 12 vertices, all finite: True",
+    "huge default => drawn, 12 vertices, all finite: True",
+    "1e17 offset => drawn, 6 vertices, all finite: True",
+    "same point => drawn, 3 vertices, all finite: True",
+    "inf xy => no arrow",
+    "nan xy => no arrow",
+    "inf xytext => no arrow",
+    "nan rad => no arrow",
+    "huge rad => drawn, 6 vertices, all finite: True",
+  ]);
+});
+
+test("the bisection ends where halving no longer moves the point (ANNOT-LOOP-1)", () => {
+  const out = run("from matplotlib._annotations import _clip_parts\n# (at 1e300 halving the parameter soon stops moving the point, though the\n# ends are still far apart: the bisection stops there, as matplotlib's)\nleft, right = _clip_parts([(0.0, 0.0), (1e300, 0.0), (2e300, 0.0)], lambda x, y: x < 1e300 + 1)\nprint(left[2] == right[0], 9e299 < left[2][0] < 1.1e300)\n");
+  assert.deepEqual(out.trim().split("\n"), ["True True"]);
+});
+
+test("style names, parameters and annotate's arguments refused as matplotlib 3.11.1 refuses them (ANNOT-STYLE-PARAM-1, ANNOT-SIGNATURE-1)", () => {
+  const out = run("import matplotlib\nif 'site-packages' in (getattr(matplotlib, '__file__', '') or ''):\n    matplotlib.use('Agg')\nimport matplotlib.pyplot as plt\nfig = plt.figure()\nax = fig.add_axes([0.125, 0.11, 0.775, 0.77])\n\n\ndef t(label, f):\n    try:\n        f()\n        fig.savefig('t_err.svg')\n        print(label, 'ok')\n    except Exception as e:\n        print(label, '!!', type(e).__name__, str(e)[:200])\n    for a in list(ax.texts) if hasattr(ax, 'texts') else []:\n        a.remove()\n\n\nt('arc3,foo=1', lambda: ax.annotate('', (1, 1), (0, 0), arrowprops=dict(arrowstyle='->', connectionstyle='arc3,foo=1')))\nt('->,foo=1', lambda: ax.annotate('', (1, 1), (0, 0), arrowprops=dict(arrowstyle='->,foo=1')))\nt('->,widthA=2', lambda: ax.annotate('', (1, 1), (0, 0), arrowprops=dict(arrowstyle='->,widthA=2')))\nt('simple,foo=1', lambda: ax.annotate('', (1, 1), (0, 0), arrowprops=dict(arrowstyle='simple,foo=1')))\nt('round,foo=1', lambda: ax.text(0, 0, 'x', bbox=dict(boxstyle='round,foo=1')))\nt('square,foo=1', lambda: ax.text(0, 0, 'x', bbox=dict(boxstyle='square,foo=1')))\nt('round,rounding_size=0.2', lambda: ax.text(0, 0, 'x', bbox=dict(boxstyle='round,rounding_size=0.2')))\nt('arrowstyle zz', lambda: ax.annotate('', (1, 1), (0, 0), arrowprops=dict(arrowstyle='zz')))\nt('connectionstyle zz', lambda: ax.annotate('', (1, 1), (0, 0), arrowprops=dict(arrowstyle='->', connectionstyle='zz')))\nt('boxstyle zz', lambda: ax.text(0, 0, 'x', bbox=dict(boxstyle='zz')))\nt('->,head_length=x', lambda: ax.annotate('', (1, 1), (0, 0), arrowprops=dict(arrowstyle='->,head_length=x')))\nt('8 positional', lambda: ax.annotate('t', (1, 1), (0, 0), 'data', 'data', None, None))\ntry:\n    ax.annotate('t', (1, 1), (0, 0), 'data', 'data', None, None, 12)\n    print('9 positional ok')\nexcept TypeError:\n    print('9 positional !! TypeError')\nt('fontsize keyword', lambda: ax.annotate('t', (1, 1), fontsize=12))\n");
+  assert.deepEqual(out.trim().split("\n"), [
+    "arc3,foo=1 !! TypeError ConnectionStyle.Arc3.__init__() got an unexpected keyword argument 'foo'",
+    "->,foo=1 !! TypeError ArrowStyle._Curve.__init__() got an unexpected keyword argument 'foo'",
+    "->,widthA=2 ok",
+    "simple,foo=1 !! TypeError ArrowStyle.Simple.__init__() got an unexpected keyword argument 'foo'",
+    "round,foo=1 !! TypeError BoxStyle.Round.__init__() got an unexpected keyword argument 'foo'",
+    "square,foo=1 !! TypeError BoxStyle.Square.__init__() got an unexpected keyword argument 'foo'",
+    "round,rounding_size=0.2 ok",
+    "arrowstyle zz !! ValueError Unknown style: 'zz'",
+    "connectionstyle zz !! ValueError Unknown style: 'zz'",
+    "boxstyle zz !! ValueError Unknown style: 'zz,pad=0.30'",
+    "->,head_length=x !! ValueError Incorrect style argument: '->,head_length=x'",
+    "8 positional ok",
+    "9 positional !! TypeError",
+    "fontsize keyword ok",
   ]);
 });

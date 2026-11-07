@@ -11,8 +11,8 @@
   {
    "name": "matplotlib.pyplot.Axes.annotate",
    "old": "(self, text, xy, xytext=, arrowprops=, fontsize=, ha=, **kw=)",
-   "new": "(self, text, xy, xytext=, xycoords=, textcoords=, arrowprops=, annotation_clip=, fontsize=, **kw=)",
-   "reason": "Matplotlib's own annotate signature (3.11.1): xycoords, textcoords and annotation_clip are its parameters, xycoords the fourth; the recorded order put arrowprops fourth, where Matplotlib reads a positional argument as xycoords. ha is read from **kw, as Matplotlib's Text keywords are.",
+   "new": "(self, text, xy, xytext=, xycoords=, textcoords=, arrowprops=, annotation_clip=, **kw=)",
+   "reason": "Matplotlib's own annotate signature (3.11.1): xycoords, textcoords and annotation_clip are its parameters, xycoords the fourth; the recorded order put arrowprops fourth, where Matplotlib reads a positional argument as xycoords. ha and fontsize are read from **kwargs, as Matplotlib's Text keywords are: a ninth positional argument is refused, as in Matplotlib.",
    "pr": 801
   }
  ]

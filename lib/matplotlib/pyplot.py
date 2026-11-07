@@ -758,11 +758,10 @@ class Axes:
     def transAxes(self):
         return _AxesFraction()
 
-    def annotate(self, text, xy, xytext=None, xycoords="data", textcoords=None, arrowprops=None, annotation_clip=None,
-                 fontsize=10, **kw):
+    def annotate(self, text, xy, xytext=None, xycoords="data", textcoords=None, arrowprops=None, annotation_clip=None, **kw):
         # (its coordinates, box and arrow: matplotlib._annotations)
         from matplotlib._annotations import annotation
-        size = kw.get("size", fontsize)
+        size = kw.get("size", kw.get("fontsize", 10))
         size_pt = _size_px(size, 10) / PT
         return _Artist(self._add(annotation(
             text, xy, xytext, xycoords, textcoords, arrowprops, annotation_clip, kw, size_pt, fontsize=size_pt * PT,

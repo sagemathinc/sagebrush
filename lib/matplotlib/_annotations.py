@@ -11,9 +11,13 @@ from width, headwidth, headlength and shrink).  The geometry follows
 matplotlib's (patches.ArrowStyle, bezier), in display coordinates (y up)."""
 
 import math
+import re
 from _graphics import Text, _anchor, _fmt, _esc, to_color, DASHES
 
 PT = 100 / 72  # pixels per point at 100 dpi
+# (a bisection's steps: past the 1075 halvings that bring two doubles in [0, 1]
+# together, so never reached; it only bounds the loop)
+_HALVINGS = 2200
 
 # coordinates: (for _anchor, pixels per unit, whether an offset from xy)
 _COORDS = {"data": (None, 1, False), "axes fraction": ("axes fraction", 1, False),
@@ -38,15 +42,42 @@ def _coords(c, size_pt, textcoords):
     return r if r[1] is not None else (None, size_pt * PT, True)
 
 
-def _style(s, what):
-    """A style string 'name,key=value,...' as (name, {key: float})."""
+# (matplotlib's style names, and the parameters each class takes)
+_CURVE_PARAMS = ("head_length", "head_width", "widthA", "widthB", "lengthA", "lengthB", "angleA", "angleB", "scaleA", "scaleB")
+_STYLES = {
+    "arrowstyle": ("- <- -> <-> <|- -|> <|-|> ]- -[ ]-[ |-| ]-> <-[ simple fancy wedge",
+                   {"simple": ("ArrowStyle.Simple", ("head_length", "head_width", "tail_width"))}),
+    "connectionstyle": ("arc3 angle3 angle arc bar", {"arc3": ("ConnectionStyle.Arc3", ("rad",))}),
+    "boxstyle": ("square circle ellipse larrow rarrow darrow round round4 sawtooth roundtooth",
+                 {"square": ("BoxStyle.Square", ("pad",)), "round": ("BoxStyle.Round", ("pad", "rounding_size"))}),
+}
+
+
+def _style(s, what, supported):
+    """A style string 'name,key=value,...' as (name, {key: float}), checked
+    as matplotlib checks it (an unknown name, a bad value, a parameter its
+    class doesn't take); a style of matplotlib's not in `supported` is
+    refused as not implemented here."""
     if not isinstance(s, str):
-        raise NotImplementedError("annotate: a %s object is not implemented in Sagebrush; use its name" % what)
+        raise NotImplementedError("a %s object is not implemented in Sagebrush; give the style as a string, such as %s"
+                                  % (what, {"arrowstyle": "'->'", "connectionstyle": "'arc3,rad=0.2'"}.get(what, "'round,pad=0.3'")))
     name, *rest = [p.strip() for p in s.split(",")]
+    names, classes = _STYLES[what]
+    if name not in names.split():
+        raise ValueError("Unknown style: %r" % s)
     params = {}
-    for p in rest:
-        k, _, v = p.partition("=")
-        params[k.strip()] = float(v)
+    try:
+        for p in rest:
+            k, _, v = p.partition("=")
+            params[k.strip()] = float(v)
+    except ValueError:
+        raise ValueError("Incorrect style argument: %r" % s) from None
+    if name not in supported:
+        raise NotImplementedError("the %s %r is not implemented in Sagebrush" % (what, name))
+    cls, allowed = classes.get(name, ("ArrowStyle._Curve", _CURVE_PARAMS))
+    for k in params:
+        if k not in allowed:
+            raise TypeError("%s.__init__() got an unexpected keyword argument %r" % (cls, k))
     return name, params
 
 
@@ -87,11 +118,11 @@ def text_box(props, size_pt):
         style, pad = "square", (4 if pad is None else pad) / size_pt
     elif pad is None:
         pad = 0.3
-    name, params = _style(style, "boxstyle")
-    if name not in ("square", "round"):
-        raise NotImplementedError("bbox: the boxstyle %r is not implemented in Sagebrush" % name)
-    # (matplotlib writes the pad into the style with two decimals)
-    pad = params.get("pad", round(pad, 2))
+    # (matplotlib writes the pad into the style, with two decimals)
+    if isinstance(style, str) and "pad" not in style:
+        style += ",pad=%0.2f" % pad
+    name, params = _style(style, "boxstyle", ("square", "round"))
+    pad = params["pad"] if "pad" in params else pad
     b = _paint(props, "bbox")
     b.update(style=name, pad=pad * size_pt * PT, rounding=params.get("rounding_size", pad) * size_pt * PT)
     return b
@@ -108,7 +139,7 @@ def _paint(props, what):
     alpha = props.pop("alpha", None)
     extra = sorted(k for k in props if k not in _IGNORED)
     if extra:
-        raise NotImplementedError("%s: %s not implemented in Sagebrush" % (what, ", ".join(extra)))
+        raise NotImplementedError("%s: not implemented in Sagebrush: %s" % (what, ", ".join(extra)))
     none = lambda c: c is None or (isinstance(c, str) and c.lower() == "none")
     return {"fc": None if none(fc) else to_color(fc), "ec": None if none(ec) or not lw else to_color(ec),
             "lw": float(lw or 0) * PT, "dash": DASHES.get(ls), "alpha": alpha}
@@ -121,9 +152,7 @@ def _arrow_options(props, end, size_pt):
     relpos = props.pop("relpos", (0.5, 0.5))
     rad = 0.0
     cs = props.pop("connectionstyle", "arc3")
-    name, params = _style(cs, "connectionstyle")
-    if name != "arc3":
-        raise NotImplementedError("annotate: the connectionstyle %r is not implemented in Sagebrush" % name)
+    name, params = _style(cs, "connectionstyle", ("arc3",))
     rad = params.get("rad", 0.0)
     if style is None:  # (matplotlib's YAArrow look-alike)
         a = dict(style="simple", yaarrow=True, shrink=float(props.pop("shrink", 0.0)),
@@ -131,14 +160,14 @@ def _arrow_options(props, end, size_pt):
                  tail_width=props.pop("width", 4) / ms)
         props.pop("shrinkA", None), props.pop("shrinkB", None)
     else:
-        name, params = _style(style, "arrowstyle")
+        name, params = _style(style, "arrowstyle", ("simple",) + tuple(_CURVES))
         if name == "simple":
             a = dict(style="simple", head_length=params.get("head_length", 0.5), head_width=params.get("head_width", 0.5),
                      tail_width=params.get("tail_width", 0.2))
         elif name in _CURVES:
             a = dict(style=name, head_length=params.get("head_length", 0.4), head_width=params.get("head_width", 0.2))
-        else:
-            raise NotImplementedError("annotate: the arrowstyle %r is not implemented in Sagebrush" % name)
+        else:  # (not reached: _style refused it)
+            raise NotImplementedError("the arrowstyle %r is not implemented in Sagebrush" % name)
         a.update(shrinkA=float(props.pop("shrinkA", 2)) * PT, shrinkB=float(props.pop("shrinkB", 2)) * PT)
     a.update(_paint(props, "arrowprops"), end=end, ms=ms * PT, rad=float(rad), relpos=tuple(relpos))
     return a
@@ -179,6 +208,12 @@ def _paint_svg(a, fill):
 
 
 def _arrow_svg(a, P, ext, rect, string):
+    s = _arrow_paths(a, P, ext, rect, string)
+    # (a point that overflowed on the way, inf - inf: no arrow either)
+    return "" if any(not math.isfinite(float(v)) for d in re.findall(r' d="([^"]*)"', s) for v in re.findall(r'[-+]?(?:[0-9.]+(?:e[-+]?[0-9]+)?|nan|inf)', d)) else s
+
+
+def _arrow_paths(a, P, ext, rect, string):
     end = _anchor(P, a["end"][0], a["end"][1], {"coords": a["end"][2]})
     if end is None:
         return ""
@@ -196,6 +231,8 @@ def _arrow_svg(a, P, ext, rect, string):
     X0, Y0 = x0 + (x1 - x0) * relpos[0], -y1 + (y1 - y0) * relpos[1]
     # the arc3 connection: the control point off the middle by rad times the length
     bez = [(X0, Y0), ((X0 + X1) / 2 + a["rad"] * (Y1 - Y0), (Y0 + Y1) / 2 - a["rad"] * (X1 - X0)), (X1, Y1)]
+    if not all(math.isfinite(v) for q in bez for v in q):
+        return ""  # (an arrow with an infinite or NaN point: none; matplotlib draws nothing of such a curve arrow, and refuses a "simple" one)
     # clipped at the text's box (the bbox, or the text padded 2 points), then shrunk
     if rect is None and string:
         q = 2 * PT
@@ -205,10 +242,10 @@ def _arrow_svg(a, P, ext, rect, string):
         bez = _clip(bez, lambda x, y: r[0] <= x <= r[2] and r[1] <= y <= r[3], True)
     if shrinkA:
         c = bez[0]
-        bez = _clip(bez, lambda x, y: (x - c[0]) ** 2 + (y - c[1]) ** 2 < shrinkA ** 2, True)
+        bez = _clip(bez, lambda x, y: (x - c[0]) * (x - c[0]) + (y - c[1]) * (y - c[1]) < shrinkA * shrinkA, True)
     if shrinkB:
         c = bez[2]
-        bez = _clip(bez, lambda x, y: (x - c[0]) ** 2 + (y - c[1]) ** 2 < shrinkB ** 2, False)
+        bez = _clip(bez, lambda x, y: (x - c[0]) * (x - c[0]) + (y - c[1]) * (y - c[1]) < shrinkB * shrinkB, False)
     ms, lw = a["ms"], a["lw"]
     if a["style"] == "simple":
         d = _simple(bez, a["head_length"] * ms, a["head_width"] * ms, a["tail_width"] * ms)
@@ -330,7 +367,7 @@ def _simple(bez, head_length, head_width, tail_width):
     """The "simple" arrow's outline (matplotlib's ArrowStyle.Simple)."""
     x2, y2 = bez[2]
     tail = None
-    inside = lambda x, y: (x - x2) ** 2 + (y - y2) ** 2 < head_length ** 2
+    inside = lambda x, y: (x - x2) * (x - x2) + (y - y2) * (y - y2) < head_length * head_length
     if inside(*bez[0]) != inside(*bez[2]):
         tail, head = _clip_parts(bez, inside)
     else:  # (shorter than its head: a straight head, head_length long)
@@ -349,16 +386,28 @@ def _simple(bez, head_length, head_width, tail_width):
 
 def _clip_parts(bez, inside):
     """bez split where it crosses the region's edge, found by bisection to
-    0.01 pixels (matplotlib's split_bezier_intersecting_with_closedpath)."""
+    0.01 pixels, as matplotlib's split_bezier_intersecting_with_closedpath:
+    it also stops when the middle point is an end's (huge coordinates, where
+    halving no longer moves the point), so that the interval always shrinks;
+    and after _HALVINGS steps at most, more than a double's parameter can be
+    halved."""
     t0, t1 = 0.0, 1.0
     s, e = _point(bez, t0), _point(bez, t1)
     s_in = inside(*s)
-    while math.hypot(s[0] - e[0], s[1] - e[1]) >= 0.01:
+    for _ in range(_HALVINGS):
+        if math.hypot(s[0] - e[0], s[1] - e[1]) < 0.01:
+            break
         tm = (t0 + t1) / 2
         m = _point(bez, tm)
         m_in = inside(*m)
         if s_in != m_in:
-            t1, e = tm, m
+            t1 = tm
+            if e == m:
+                break
+            e = m
         else:
-            t0, s, s_in = tm, m, m_in
+            t0 = tm
+            if s == m:
+                break
+            s, s_in = m, m_in
     return _split(bez, (t0 + t1) / 2)
