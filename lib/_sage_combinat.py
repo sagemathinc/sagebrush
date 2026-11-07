@@ -454,6 +454,18 @@ class Set_object_enumerated:
     def __repr__(self):
         return "{" + ", ".join(repr(v) for v in self._sorted()) + "}"
 
+    def _latex_(self):
+        """LaTeX, as Sage writes a set: \left\{2, 3, 5\right\}, each
+        element in its own LaTeX.
+
+        EXAMPLES::
+
+            sage: latex(Set([2, 3, 5])), latex(Set([]))
+            (\left\{2, 3, 5\right\}, \left\{\right\})
+        """
+        from sage_all import latex
+        return "\\left\\{" + ", ".join(str(latex(v)) for v in self._sorted()) + "\\right\\}"
+
     def __iter__(self):
         return iter(self._sorted())
 
@@ -545,7 +557,43 @@ def Set(X=()):
     """
     if isinstance(X, Set_object_enumerated):
         return X
+    if not isinstance(X, (list, tuple, set, frozenset, range, dict, str)) and hasattr(X, "characteristic") and not hasattr(X, "order"):
+        # a ring with no finite order (ZZ, QQ, RR, a polynomial ring): the
+        # set of its elements, not enumerated (Set(ZZ) enumerated without end)
+        return Set_object_parent(X)
     return Set_object_enumerated(X)
+
+
+class Set_object_parent:
+    """The set of the elements of an infinite parent, as Sage's Set(ZZ).
+
+    EXAMPLES::
+
+        sage: S = Set(ZZ); S, latex(S), 3 in S, 1/2 in S
+        (Set of elements of Integer Ring, \Bold{Z}, True, False)
+    """
+
+    def __init__(self, X):
+        self._X = X
+
+    def __repr__(self):
+        return "Set of elements of %r" % (self._X,)
+
+    def _latex_(self):
+        from sage_all import latex
+        return str(latex(self._X))
+
+    def __contains__(self, v):
+        return v in self._X
+
+    def __eq__(self, other):
+        return isinstance(other, Set_object_parent) and other._X == self._X
+
+    def __hash__(self):
+        return hash(("Set", repr(self._X)))
+
+    def is_finite(self):
+        return False
 
 
 class Subsets:

@@ -1,0 +1,19 @@
+\left\{2, 3, 5\right\}
+str(Set) | {2, 3, 5}
+Set big | {1, 2, 3, 4, 5, 7, 10}
+latex Set big | \left\{1, 2, 3, 4, 5, 7, 10\right\}
+list Set big | [1, 2, 3, 4, 5, 7, 10]
+Set sym | {sqrt(2), pi}
+latex Set sym | \left\{\sqrt{2}, \pi\right\}
+Set ZZ | Set of elements of Integer Ring
+latex Set ZZ | \Bold{Z}
+Set QQ ring | Set of elements of Rational Field
+latex Set QQ ring | \Bold{Q}
+3 in Set(ZZ) | True
+1/2 in Set(ZZ) | False
+Set GF5 | {0, 1, 2, 3, 4}
+latex Set GF5 | \left\{0, 1, 2, 3, 4\right\}
+latex Set empty | \left\{\right\}
+latex Set of Sets | \left\{\left\{1\right\}, \left\{2, 3\right\}\right\}
+latex Set range | \left\{0, 1, 2, 3\right\}
+latex Set one tuple | \left\{\left(1, 2\right)\right\}
