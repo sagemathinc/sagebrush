@@ -1148,10 +1148,12 @@ def _eig(np, a):
 
 def _no_generalized(args, kwds):
     # A v = lambda B v (Sage: LAPACK's generalized problem) is refused rather
-    # than B ignored: eigenmatrix_right(B) gave the eigenvalues of A alone
+    # than B ignored: eigenmatrix_right(B) gave the eigenvalues of A alone;
+    # the refusal in _sage_matrix_more, loaded on first use
     other = args[0] if args else kwds.get("other")
     if other is not None:
-        raise NotImplementedError("the generalized eigenvalue problem (other=B) over RDF and CDF is not available in sagebrush yet")
+        import _sage_matrix_more
+        _sage_matrix_more.refuse_generalized_numeric()
 
 
 def _eigenvalues(M, *args, **kwds):

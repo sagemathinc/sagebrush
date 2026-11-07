@@ -831,9 +831,11 @@ def _select(k, n, err="matrix index out of range"):
 
 def _no_generalized(m, other):
     # A v = lambda B v: Sage solves it only over RDF and CDF (an exact
-    # matrix's eigenmatrix_right(B) ignored B and gave a wrong answer)
+    # matrix's eigenmatrix_right(B) ignored B and gave a wrong answer); the
+    # refusal in _sage_matrix_more, loaded on first use
     if other is not None:
-        raise NotImplementedError("generalized eigenvector decomposition is implemented for RDF and CDF, but not for %s" % (m.base_ring(),))
+        import _sage_matrix_more
+        _sage_matrix_more.refuse_generalized(m)
 
 
 class Matrix:
