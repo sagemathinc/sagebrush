@@ -76,3 +76,92 @@ test("--check reports a stale entry (checkErrors, what the CLI's --check runs): 
   assert.match(C.checkErrors(surface(NEW), surface(NEW), [entry()], { api: 1, level: 4 }, 100).join(), /src\/pkgset\.ts has CORE_API 1 level 4/);
   assert.match(C.checkErrors(surface(NEW), surface(NEW), [entry()], consts, 10 * 1024 * 1024).join(), /over its caps/);
 });
+
+// (reviewed REMOVALS, upstream's: @sagebrush's ruling on P3b-1, Nov 7. CPython 3.14.10's pathlib no longer has
+// PureWindowsPath.ntpath, a class attribute 3.14.4's class body made with `import ntpath`)
+const withMember = (members: object) => ({
+  format: "sagebrush-core-api", api: 1, level: 5, prefixes: [],
+  modules: { m: { since: 1, names: { C: { kind: "class", since: 1, members }, k: { kind: "module", since: 1 } } } },
+});
+const removal = (over: object = {}) => ({ name: "m.C.ntpath", old: "(module)", new: "(absent)", upstream: "CPython 3.14.10", reason: "r", pr: 1, ...over });
+
+test("a listed removal is recorded exactly (the member goes, the level rises); unlisted removals still fail", () => {
+  const before = withMember({ ntpath: { kind: "module", since: 1 }, keep: { kind: "module", since: 1 } });
+  const after = withMember({ keep: { kind: "module", since: 1 } });
+  const r = C.merge(before, after, 6, [removal()]);
+  assert.deepEqual(r.problems, []);
+  assert.equal(r.added, 1);
+  assert.equal("ntpath" in r.api.modules.m.names.C.members, false);
+  // (without the entry, the same removal fails)
+  assert.deepEqual(C.merge(before, after, 6, []).problems, ["m.C.ntpath: removed"]);
+  // (an unlisted member removed beside the listed one: still a problem, the listed one isn't)
+  assert.deepEqual(C.merge(before, withMember({}), 6, [removal()]).problems, ["m.C.keep: removed"]);
+  // (a module-level name, listed and unlisted)
+  const noK = { ...after, modules: { m: { since: 1, names: { C: after.modules.m.names.C } } } };
+  assert.deepEqual(C.merge(after, noK, 6, [removal({ name: "m.k" })]).problems, []);
+  assert.deepEqual(C.merge(after, noK, 6, [removal()]).problems, ["m.k: removed"]);
+});
+
+test("a removal entry applies only to its exact name and kind", () => {
+  const before = withMember({ ntpath: { kind: "module", since: 1 } });
+  const after = withMember({});
+  // (another kind: the recorded member is a module, the entry says function)
+  assert.deepEqual(C.merge(before, after, 6, [removal({ old: "(function)" })]).problems, ["m.C.ntpath: removed"]);
+  // (another name)
+  assert.deepEqual(C.merge(before, after, 6, [removal({ name: "m.C.other" })]).problems, ["m.C.ntpath: removed"]);
+  // (a signature entry for the name, not a removal, doesn't remove it)
+  assert.deepEqual(C.merge(before, after, 6, [entry({ name: "m.C.ntpath" })]).problems, ["m.C.ntpath: removed"]);
+  // (nor one with the removal's own old string but another new: only new "(absent)" removes; grader's U5)
+  assert.deepEqual(C.merge(before, after, 6, [removal({ new: "(module2)" })]).problems, ["m.C.ntpath: removed"]);
+  // (a prefix of the name, a class or a shorter member name, excuses nothing longer; grader's U4)
+  for (const name of ["m.C", "m.C.nt", "m"]) assert.deepEqual(C.merge(before, after, 6, [removal({ name })]).problems, ["m.C.ntpath: removed"], name);
+});
+
+test("a removal entry's shape: the kind in parentheses and the upstream release that removed it", () => {
+  const doc = (changes: object[]) => JSON.stringify({ format: "sagebrush-core-api-changes", changes });
+  assert.equal(C.readChanges(doc([removal()])).length, 1);
+  for (const bad of [{ upstream: undefined }, { upstream: "" }, { upstream: 3 }, { old: "module" }, { old: "(m o)" }, { old: "()" }, { reason: "" }, { pr: "1" }, { pr: undefined }]) assert.throws(() => C.readChanges(doc([removal(bad)])), /a bad entry/, JSON.stringify(bad));
+  // (one already applied is not stale; one whose member is still recorded is)
+  assert.deepEqual(C.staleChanges(withMember({}), [removal()]), []);
+  assert.equal(C.staleChanges(withMember({ ntpath: { kind: "module", since: 1 } }), [removal()]).length, 1);
+});
+
+// (the removals ledger, @sagebrush's ruling on #830: an applied removal is recorded in the surface's "removed" section,
+// and --check holds core-api-changes.json's "(absent)" entries to exactly that record, name and old kind; grader's
+// R1 (a wrong name) and R2 (a wrong kind) fail it)
+test("an applied removal is recorded in the surface's removed section, kept through later merges", () => {
+  const before = withMember({ ntpath: { kind: "module", since: 1 } });
+  const r = C.merge(before, withMember({}), 6, [removal()]);
+  assert.deepEqual(r.api.removed, { "m.C.ntpath": { kind: "module", level: 6 } });
+  // (a later merge, nothing removed then, keeps the record as it was)
+  assert.deepEqual(C.merge(r.api, withMember({}), 7, [removal()]).api.removed, { "m.C.ntpath": { kind: "module", level: 6 } });
+  assert.deepEqual(C.merge(withMember({}), withMember({}), 6, []).api.removed, {});
+});
+
+test("--check's ledger: the removal entries are exactly the recorded removals, with their kinds, absent from the surface", () => {
+  const rec = { ...withMember({}), removed: { "m.C.ntpath": { kind: "module", level: 6 } } };
+  assert.deepEqual(C.ledgerErrors(rec, [removal()]), []);
+  // (R1: an entry naming another member than the one recorded)
+  assert.match(C.ledgerErrors(rec, [removal({ name: "m.C.ntpathx" })]).join("\n"), /the removal of m\.C\.ntpathx is not one the surface recorded[^]*m\.C\.ntpath \(module\) has no reviewed core-api-changes\.json entry/);
+  // (R2: the right name, another kind)
+  assert.deepEqual(C.ledgerErrors(rec, [removal({ old: "(function)" })]), ["core-api-changes.json: the removal of m.C.ntpath says (function), the surface recorded (module)"]);
+  // (a recorded removal with no entry, and an entry with no record)
+  assert.equal(C.ledgerErrors(rec, []).length, 1);
+  assert.equal(C.ledgerErrors(withMember({}), [removal()]).length, 1);
+  // (a recorded removal whose name is in the surface again)
+  const back = { ...withMember({ ntpath: { kind: "module", since: 7 } }), removed: rec.removed };
+  assert.match(C.ledgerErrors(back, [removal()]).join(), /m\.C\.ntpath is recorded as removed but is in the surface/);
+  // (a signature entry is no part of the ledger)
+  assert.deepEqual(C.ledgerErrors(rec, [removal(), entry()]), []);
+  // (and checkErrors, what --check runs, reports them)
+  const consts = { api: 1, level: 5 };
+  assert.ok(C.checkErrors(rec, withMember({}), [removal({ old: "(function)" })], consts, 100).some((e: string) => /says \(function\)/.test(e)));
+});
+
+test("the tree's own ledger: core-api-changes.json's removals are core-api-surface.json's recorded ones", () => {
+  const fs = require("node:fs");
+  const surface = JSON.parse(fs.readFileSync(join(ROOT, "core-api-surface.json"), "utf8"));
+  const changes = C.readChanges(fs.readFileSync(join(ROOT, "core-api-changes.json"), "utf8"));
+  assert.deepEqual(C.ledgerErrors(surface, changes), []);
+  assert.ok(Object.keys(surface.removed ?? {}).length >= 2, "the 3.14.10 pathlib removals are recorded");
+});

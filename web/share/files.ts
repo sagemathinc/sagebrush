@@ -1,4 +1,4 @@
-// The user-content domain (files.cocalcusercontent.com): files of shared
+// The user-content domain (the configured files host): files of shared
 // collections, and nothing else.  A file is read through its collection,
 // /c/<collection>/<sha256>, and only if a version of that collection has it:
 // a hash alone reads nothing (not another collection's files, not an upload

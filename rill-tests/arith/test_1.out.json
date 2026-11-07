@@ -1,0 +1,169 @@
+{
+ "cases": [
+  {
+   "id": "arith-1",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 3\n"
+  },
+  {
+   "id": "arith-2",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1024\n"
+  },
+  {
+   "id": "arith-3",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] -4\n"
+  },
+  {
+   "id": "arith-4",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 3\n[1] 1\n[1] -4\n[1] 1\n"
+  },
+  {
+   "id": "arith-5",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 2.5\n"
+  },
+  {
+   "id": "arith-6",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.3333333\n"
+  },
+  {
+   "id": "arith-7",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 3.142857\n"
+  },
+  {
+   "id": "arith-8",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1e+06\n"
+  },
+  {
+   "id": "arith-9",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1e+05\n"
+  },
+  {
+   "id": "arith-10",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 123456789\n"
+  },
+  {
+   "id": "arith-11",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1e-05\n"
+  },
+  {
+   "id": "arith-12",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.3\n"
+  },
+  {
+   "id": "arith-13",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] Inf\n[1] -Inf\n[1] NaN\n"
+  },
+  {
+   "id": "arith-14",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1.414214\n"
+  },
+  {
+   "id": "arith-15",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 2.718282\n"
+  },
+  {
+   "id": "arith-16",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 31415926536\n"
+  },
+  {
+   "id": "arith-17",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 2147483647\n"
+  },
+  {
+   "id": "arith-18",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 2.5\n"
+  },
+  {
+   "id": "arith-19",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1.50 2.00 3.25\n"
+  },
+  {
+   "id": "arith-20",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1e-03 1e+03\n"
+  },
+  {
+   "id": "arith-21",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1e-10 1e+00\n"
+  },
+  {
+   "id": "arith-22",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 123456.0      0.1\n"
+  },
+  {
+   "id": "arith-23",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 21  6 NA 14\n"
+  },
+  {
+   "id": "arith-24",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 3.14\n[1] 120000\n[1] -2\n[1] 0\n[1] 2\n"
+  },
+  {
+   "id": "arith-25",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 4.60517\n[1] 3\n[1] 3\n[1] 10\n[1] 0\n"
+  },
+  {
+   "id": "arith-26",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 3 2 1 0 1 2 3\n"
+  },
+  {
+   "id": "arith-27",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] -3\n[1] 3\n[1] -2\n"
+  }
+ ],
+ "file": "rill-tests/arith/test_1.R",
+ "format": "rill-out",
+ "v": 1
+}

@@ -60,7 +60,7 @@ pub fn real_everywhere(e: &Expr, x: &str) -> bool {
 pub fn real_const(c: &Expr) -> bool {
     match &c.kind {
         Kind::Num(crate::num::Num::Exact(_, im)) => im.is_zero(),
-        Kind::Num(crate::num::Num::Float(_, im)) => *im == 0.0,
+        Kind::Num(crate::num::Num::Float(_, im, _)) => *im == 0.0,
         Kind::Const(Const::Pi | Const::E | Const::EulerGamma) => true,
         Kind::Add(v) | Kind::Mul(v) => v.iter().all(real_const),
         Kind::Pow(b, n) if b.is_const(Const::E) => real_const(n),

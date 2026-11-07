@@ -8,7 +8,7 @@
 // SECURITY: the items' code reaches the session only as base64 inside the script (never spliced into it as text); what
 // the session prints is parsed, never evaluated, and each result is checked here as the CLI checks it (the LaTeX's
 // size, the plot's SVG), and again where it is shown (sagetex.mjs).
-import { MAX_RESULT, WRAPPER_VERSION, utf8len, whyRejected } from "./engine/sagetex.mjs";
+import { MAX_RESULT, WRAPPER_VERSION, utf8len, whyRejected, safeRel, sha256hex, DEPS_MAX } from "./engine/sagetex.mjs";
 
 export const RESULTS_FORMAT = "sagebrush-latex-results";
 export const RUN_LIMITS = { svg: 2 * 2 ** 20, msg: 4000 };   // (the CLI's SVG_MAX and MSG_MAX, src/latex-cli.ts)
@@ -16,6 +16,8 @@ export const RUN_LIMITS = { svg: 2 * 2 ** 20, msg: 4000 };   // (the CLI's SVG_M
 export const FOLDER_LIMITS = { files: 500, bytes: 64 * 2 ** 20 };
 /** what starts each result line the session prints (a record separator: never in an item's own printing, which is kept apart) */
 export const MARK = "\u001eSBTX";
+/** what starts the line the session prints last: the modules its Run imported from the .tex's folder (Codex W01) */
+export const DEPS_MARK = MARK + "D";
 
 const b64 = (s) => {
   const u = new TextEncoder().encode(s);
@@ -84,6 +86,19 @@ if _sbtx_d is not None:
         _sbtx_sys.path.append(_sbtx_d)
         _sbtx_added = _sbtx_d
 _sbtx_il.invalidate_caches()
+# (the modules imported from the .tex's folder so far: printed with each item, before its result (daybreak3's
+#  ENGINE-DEPS-PARTIAL-1: a Run stopped later still records what its earlier results used; astra's DEP-PARTIAL-COMMIT-1:
+#  a result printed is always after a line naming what it used), the last line counting; the results file records
+#  them with their hashes, so an edited helper's old results are never used (Codex W01))
+def _sbtx_deps_line():
+    if _sbtx_d is None:
+        return
+    _sbtx_dl = set()
+    for _sbtx_m in list(_sbtx_sys.modules.values()):
+        _sbtx_f = getattr(_sbtx_m, "__file__", None)
+        if _sbtx_under(_sbtx_f, _sbtx_d):
+            _sbtx_dl.add(_sbtx_os.path.normpath(_sbtx_f)[len(_sbtx_d.rstrip("/")) + 1:])
+    print("\\x1eSBTXD" + _sbtx_json.dumps(sorted(_sbtx_dl)))
 for _sbtx_it in _sbtx_json.loads(_sbtx_b64.b64decode("${b64(JSON.stringify(items))}").decode("utf-8")):
     _sbtx_buf = _sbtx_io.StringIO()
     _sbtx_old = _sbtx_sys.stdout
@@ -105,6 +120,7 @@ for _sbtx_it in _sbtx_json.loads(_sbtx_b64.b64decode("${b64(JSON.stringify(items
         _sbtx_r = {"s": "error", "msg": _sbtx_tb.format_exc()}
     finally:
         _sbtx_sys.stdout = _sbtx_old
+    _sbtx_deps_line()
     print("\\x1eSBTX" + _sbtx_json.dumps(_sbtx_r))
 `;
 }
@@ -116,7 +132,7 @@ export const runnable = (items) => items.filter((it) => !it.err && typeof it.cod
 export function parseOutput(out) {
   const got = [];
   for (const line of String(out).split("\n")) {
-    if (!line.startsWith(MARK)) continue;
+    if (!line.startsWith(MARK) || line.startsWith(DEPS_MARK)) continue;
     try { const r = JSON.parse(line.slice(MARK.length)); if (r && typeof r === "object") got.push(r); else got.push({ s: "error", msg: "an unreadable result" }); }
     catch { got.push({ s: "error", msg: "an unreadable result" }); }
   }
@@ -159,8 +175,35 @@ export function statesOf(items, got, stopped) {
   return states;
 }
 
+// (the results file checked against the files its Run imported: results-check.mjs, a module of its own so the page
+//  reads results without fetching Run's chunk (#824); re-exported for Run's callers)
+export { wsReader, seenOf, checkedResults } from "./results-check.mjs";
+
 /** The results file's text. */
-export const resultsText = (states) => JSON.stringify({ format: RESULTS_FORMAT, version: 1, wrapper: WRAPPER_VERSION, generator: "sagebrush editor", items: states }) + "\n";
+export const resultsText = (states, deps = []) => JSON.stringify({ format: RESULTS_FORMAT, version: 1, wrapper: WRAPPER_VERSION, generator: "sagebrush editor", items: states, ...(deps === "incomplete" || deps.length ? { deps } : {}) }) + "\n";
+/** The modules the session's Run imported from the .tex's folder (its last line's), paths relative to the folder:
+ * only safe relative ones, at most DEPS_MAX; [] if it printed none. */
+export function parseDeps(out) {
+  // (the last line counts; none at all, one not of the shape (a path not safe, too many), or a result with no line of
+  //  its own before it (astra's DEP-PARTIAL-COMMIT-1: what it used not named): null, the record incomplete: never read
+  //  as an older results file's no record)
+  let got = null, fresh = false;
+  for (const line of String(out).split("\n")) {
+    if (line.startsWith(DEPS_MARK)) { try { const a = JSON.parse(line.slice(DEPS_MARK.length)); got = Array.isArray(a) ? a : "bad"; } catch { got = "bad"; } fresh = true; }
+    else if (line.startsWith(MARK)) { if (!fresh) return null; fresh = false; }
+  }
+  if (!Array.isArray(got) || got.length > DEPS_MAX || !got.every(safeRel)) return null;
+  return got;
+}
+/** Those modules with their hashes, from the bytes the session was given (`files`, the folder's snapshot, `dir` its
+ * folder: the exact input of the Run): [[rel, sha256]], the results file's `deps`; "incomplete" if `rels` is null or
+ * one of them wasn't in the snapshot (a file the session had otherwise: not trusted). */
+export async function depsWith(rels, files, dir) {
+  if (!rels) return "incomplete";
+  const byPath = new Map(files), base = dir === "/" ? "" : dir, out = [];
+  for (const rel of rels) { const b = byPath.get(base + "/" + rel); if (!b) return "incomplete"; out.push([rel, await sha256hex(b)]); }
+  return out;
+}
 
 // ---- the session: in the runner, the opaque-origin sandbox, only (astra's LATEX-RUN-2)
 // The board's siteEngine gives the runner a fallback, a plain worker of the page's own origin, for a frame that
@@ -316,7 +359,10 @@ export async function runAndSave(o) {
   if (ran.stoppedBefore === true) return { msg: "Stopped before it ran" };
   const { out, stopped } = ran;
   const states = statesOf(o.items, parseOutput(out), stopped);
-  const bytes = new TextEncoder().encode(resultsText(states));
+  // (no results printed at all: nothing ran, nothing to record)
+  const deps = !f ? [] : parseOutput(out).length ? await depsWith(parseDeps(out), f.files, f.dir) : [];
+  if (stale()) return { stale: true };
+  const bytes = new TextEncoder().encode(resultsText(states, deps));
   if (bytes.length > o.max) return { msg: "Not saved: the results are too large" };
   // (the .tex where it is now, by its id, as Save finds it)
   const at = await o.ws.pathOfFile(o.fid);

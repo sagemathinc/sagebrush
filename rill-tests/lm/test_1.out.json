@@ -1,0 +1,79 @@
+{
+ "cases": [
+  {
+   "id": "lm-1",
+   "status": 0,
+   "stderr": "",
+   "stdout": "\nCall:\nlm(formula = y ~ x)\n\nCoefficients:\n(Intercept)            x  \n       0.05         1.99  \n\n"
+  },
+  {
+   "id": "lm-2",
+   "status": 0,
+   "stderr": "",
+   "stdout": "(Intercept)           x \n       0.05        1.99 \n"
+  },
+  {
+   "id": "lm-3",
+   "status": 0,
+   "stderr": "",
+   "stdout": "\nCall:\nlm(formula = y ~ x)\n\nResiduals:\n    1     2     3     4     5 \n 0.06 -0.13  0.18 -0.21  0.10 \n\nCoefficients:\n            Estimate Std. Error t value Pr(>|t|)    \n(Intercept)  0.05000    0.19807   0.252    0.817    \nx            1.99000    0.05972  33.321 5.94e-05 ***\n---\nSignif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1\n\nResidual standard error: 0.1889 on 3 degrees of freedom\nMultiple R-squared:  0.9973,\tAdjusted R-squared:  0.9964 \nF-statistic:  1110 on 1 and 3 DF,  p-value: 5.942e-05\n\n"
+  },
+  {
+   "id": "lm-4",
+   "status": 0,
+   "stderr": "",
+   "stdout": "\nCall:\nlm(formula = mpg ~ wt, data = mtcars)\n\nCoefficients:\n(Intercept)           wt  \n     37.285       -5.344  \n\n"
+  },
+  {
+   "id": "lm-5",
+   "status": 0,
+   "stderr": "",
+   "stdout": "\nCall:\nlm(formula = mpg ~ wt, data = mtcars)\n\nResiduals:\n    Min      1Q  Median      3Q     Max \n-4.5432 -2.3647 -0.1252  1.4096  6.8727 \n\nCoefficients:\n            Estimate Std. Error t value Pr(>|t|)    \n(Intercept)  37.2851     1.8776  19.858  < 2e-16 ***\nwt           -5.3445     0.5591  -9.559 1.29e-10 ***\n---\nSignif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1\n\nResidual standard error: 3.046 on 30 degrees of freedom\nMultiple R-squared:  0.7528,\tAdjusted R-squared:  0.7446 \nF-statistic: 91.38 on 1 and 30 DF,  p-value: 1.294e-10\n\n"
+  },
+  {
+   "id": "lm-6",
+   "status": 0,
+   "stderr": "",
+   "stdout": "\nCall:\nlm(formula = mpg ~ wt + hp, data = mtcars)\n\nResiduals:\n   Min     1Q Median     3Q    Max \n-3.941 -1.600 -0.182  1.050  5.854 \n\nCoefficients:\n            Estimate Std. Error t value Pr(>|t|)    \n(Intercept) 37.22727    1.59879  23.285  < 2e-16 ***\nwt          -3.87783    0.63273  -6.129 1.12e-06 ***\nhp          -0.03177    0.00903  -3.519  0.00145 ** \n---\nSignif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1\n\nResidual standard error: 2.593 on 29 degrees of freedom\nMultiple R-squared:  0.8268,\tAdjusted R-squared:  0.8148 \nF-statistic: 69.21 on 2 and 29 DF,  p-value: 9.109e-12\n\n"
+  },
+  {
+   "id": "lm-7",
+   "status": 0,
+   "stderr": "",
+   "stdout": "    Mazda RX4 Mazda RX4 Wag    Datsun 710 \n      -2.2826       -0.9198       -2.0860 \n    Mazda RX4 Mazda RX4 Wag    Datsun 710 \n       23.283        21.920        24.886 \n"
+  },
+  {
+   "id": "lm-8",
+   "status": 0,
+   "stderr": "",
+   "stdout": "       1        2 \n21.25171 15.90724 \n"
+  },
+  {
+   "id": "lm-9",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.7528328\n             Estimate Std. Error   t value     Pr(>|t|)\n(Intercept) 37.285126   1.877627 19.857575 8.241799e-19\nwt          -5.344472   0.559101 -9.559044 1.293959e-10\n"
+  },
+  {
+   "id": "lm-10",
+   "status": 0,
+   "stderr": "",
+   "stdout": "\nCall:\nlm(formula = y ~ x + I(x^2))\n\nCoefficients:\n(Intercept)            x       I(x^2)  \n          0            0            1  \n\n"
+  },
+  {
+   "id": "lm-11",
+   "status": 0,
+   "stderr": "",
+   "stdout": " (Intercept) factor(cyl)6 factor(cyl)8 \n   26.663636    -6.920779   -11.563636 \n"
+  },
+  {
+   "id": "lm-12",
+   "status": 0,
+   "stderr": "",
+   "stdout": "Analysis of Variance Table\n\nResponse: mpg\n          Df Sum Sq Mean Sq F value    Pr(>F)    \nwt         1 847.73  847.73  91.375 1.294e-10 ***\nResiduals 30 278.32    9.28                      \n---\nSignif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1\n"
+  }
+ ],
+ "file": "rill-tests/lm/test_1.R",
+ "format": "rill-out",
+ "v": 1
+}

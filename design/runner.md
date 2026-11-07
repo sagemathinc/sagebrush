@@ -57,7 +57,7 @@ In headless Chromium (web/test-runner.mjs):
 ## Next
 
 1. **Bound every message from the runner** on the page side: everything from the runner is untrusted. Outputs already are (design/security.md, rules 1–4).
-2. **The user-content domain** (`run.cocalcusercontent.com`): a second wall. A different site adds process isolation and partitions the HTTP cache. This needs:
+2. **The user-content domain** (the pending `runOrigin` in `web/content-domains.mts`): a second wall. A different site adds process isolation and partitions the HTTP cache. This needs:
    - the page's `frame-src` widened to it;
    - the runner's `frame-ancestors` set to the sites that may embed it.
 3. **Startup without V8's code cache:** a `blob:` worker compiles its script afresh each time. It is about 330 ms to ready, against 165 ms for a plain worker.

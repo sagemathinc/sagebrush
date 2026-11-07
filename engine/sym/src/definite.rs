@@ -495,7 +495,7 @@ fn complex_argument(e: &Expr, x: &str) -> bool {
 fn contains_i(e: &Expr) -> bool {
     let complex = match &e.kind {
         Kind::Num(crate::num::Num::Exact(_, im)) => !im.is_zero(),
-        Kind::Num(crate::num::Num::Float(_, im)) => *im != 0.0,
+        Kind::Num(crate::num::Num::Float(_, im, _)) => *im != 0.0,
         _ => false,
     };
     complex || e.children().iter().any(contains_i)

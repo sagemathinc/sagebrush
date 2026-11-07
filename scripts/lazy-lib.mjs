@@ -4,7 +4,7 @@
 // its modules, once). The browser's worker needs no list: a file no start uses is a chunk group of its own
 // (web/lib-chunks.mts), fetched on import already.
 // (an entry ending in "/" is a package: every file under it)
-export const LAZY_LIB = ["pathlib/", "glob.py", "fnmatch.py", "stat.py", "ntpath.py", "genericpath.py", "errno.py", "_os_lazy.py"];
+export const LAZY_LIB = ["pathlib/", "glob.py", "fnmatch.py", "stat.py", "ntpath.py", "genericpath.py", "errno.py", "_os_lazy.py", "difflib.py"];
 
 /** Is library path `p` (relative to lib/) lazily embedded? */
 export function isLazyLib(p) {

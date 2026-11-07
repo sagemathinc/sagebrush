@@ -77,6 +77,32 @@ export function runnerPolicy(scriptHashes: string[] = []): string {
   ].join("; ");
 }
 
+// The isolated output renderer's (web/output-shell; OUT-ISO plan r3): a notebook's
+// rich output in a frame sandboxed with allow-scripts only.  Only its own script and
+// style run, by their hashes; the sanitized output's style attributes are kept
+// (style-src-attr), never a style element or sheet it brings.  No network at all:
+// no fetch, worker, frame, object, form or base; pictures and fonts only as data: or
+// blob: (what the host admitted and sent).  Hosted, it also names the pages that may
+// show it (frame-ancestors, a header only: `ancestors`); as a srcdoc this policy is
+// in a meta tag, and the parent's policy applies too.
+export function outputShellPolicy(scriptHashes: string[], styleHashes: string[], ancestors: string[] = []): string {
+  return [
+    "default-src 'none'",
+    ["script-src", ...scriptHashes].join(" "),
+    ["style-src", ...styleHashes].join(" "),
+    "style-src-attr 'unsafe-inline'",
+    "img-src data: blob:",
+    "font-src data: blob:",
+    "connect-src 'none'",
+    "worker-src 'none'",
+    "frame-src 'none'",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'none'",
+    ...(ancestors.length ? [["frame-ancestors", ...ancestors].join(" ")] : []),
+  ].join("; ");
+}
+
 // The frame other sites show a board in (/frame/board/; design/frame.md): a
 // downloaded board's page, served by this site, sandboxed without
 // allow-same-origin, so that it has an opaque origin however a page embeds

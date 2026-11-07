@@ -21,7 +21,7 @@ pub enum SymError {
 impl fmt::Display for SymError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            SymError::DivisionByZero => write!(f, "Symbolic division by zero"),
+            SymError::DivisionByZero => write!(f, "symbolic division by zero"),
             SymError::Value(s) => write!(f, "{}", s),
             SymError::NotImplemented(s) => write!(f, "{}", s),
             SymError::Internal(s) => write!(f, "{}", s),

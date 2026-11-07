@@ -61,13 +61,21 @@ fn enc(e: &Expr, s: &mut String) {
                 s.push(';');
             }
         }
-        Kind::Num(Num::Float(a, b)) => {
-            if *b == 0.0 {
+        // f: RR, g: CC, d: RDF, h: CDF (a complex parent's number stays complex with im 0)
+        Kind::Num(Num::Float(a, b, k)) => match k {
+            crate::num::Fk::RR => {
                 let _ = write!(s, "f{:x};", a.to_bits());
-            } else {
+            }
+            crate::num::Fk::RDF => {
+                let _ = write!(s, "d{:x};", a.to_bits());
+            }
+            crate::num::Fk::CC => {
                 let _ = write!(s, "g{:x},{:x};", a.to_bits(), b.to_bits());
             }
-        }
+            crate::num::Fk::CDF => {
+                let _ = write!(s, "h{:x},{:x};", a.to_bits(), b.to_bits());
+            }
+        },
         Kind::Sym(n) => {
             let _ = write!(s, "s{}:{}", n.len(), n);
         }
@@ -204,15 +212,17 @@ impl<'a> Dec<'a> {
                 let b = self.q();
                 raw(Kind::Num(Num::Exact(a, b)))
             }
-            b'f' => {
+            c @ (b'f' | b'd') => {
                 let h = self.until(b';');
-                raw(Kind::Num(Num::Float(f64::from_bits(u64::from_str_radix(h, 16).unwrap_or_else(|_| bad())), 0.0)))
+                let k = if c == b'f' { crate::num::Fk::RR } else { crate::num::Fk::RDF };
+                raw(Kind::Num(Num::Float(f64::from_bits(u64::from_str_radix(h, 16).unwrap_or_else(|_| bad())), 0.0, k)))
             }
-            b'g' => {
+            c @ (b'g' | b'h') => {
                 let h = self.until(b';');
                 let (a, b) = h.split_once(',').unwrap_or_else(|| bad());
                 let p = |t: &str| f64::from_bits(u64::from_str_radix(t, 16).unwrap_or_else(|_| bad()));
-                raw(Kind::Num(Num::Float(p(a), p(b))))
+                let k = if c == b'g' { crate::num::Fk::CC } else { crate::num::Fk::CDF };
+                raw(Kind::Num(Num::Float(p(a), p(b), k)))
             }
             b's' => raw(Kind::Sym(self.name().into())),
             b'c' => raw(Kind::Const(match self.next() {
@@ -348,7 +358,7 @@ fn dispatch(op: &str, a: &[&str]) -> Vec<String> {
             one_(qnum(Q::new(n, q)))
         }
         "float" => one_(float(arg(0).parse::<f64>().unwrap_or_else(|_| bad()))),
-        "complex" => one_(num(Num::Float(arg(0).parse().unwrap_or_else(|_| bad()), arg(1).parse().unwrap_or_else(|_| bad())))),
+        "complex" => one_(num(Num::fl(arg(0).parse().unwrap_or_else(|_| bad()), arg(1).parse().unwrap_or_else(|_| bad()), crate::num::Fk::CC))),
         "const" => one_(match arg(0) {
             "pi" => pi(),
             "e" => e(),
@@ -406,7 +416,8 @@ fn dispatch(op: &str, a: &[&str]) -> Vec<String> {
             match e.as_num() {
                 Some(Num::Exact(a, b)) if num_traits::Zero::is_zero(b) => vec!["q".into(), format!("{}/{}", a.numer(), a.denom())],
                 Some(Num::Exact(a, b)) => vec!["z".into(), format!("{}/{}", a.numer(), a.denom()), format!("{}/{}", b.numer(), b.denom())],
-                Some(Num::Float(x, y)) => vec!["f".into(), format!("{:e}", x), format!("{:e}", y)],
+                // (the parent as a fourth field: RR, CC, RDF or CDF)
+                Some(Num::Float(x, y, k)) => vec!["f".into(), format!("{:e}", x), format!("{:e}", y), format!("{:?}", k)],
                 None => vec!["".into()],
             }
         }

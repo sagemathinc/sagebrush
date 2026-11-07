@@ -1,0 +1,115 @@
+{
+ "cases": [
+  {
+   "id": "df-1",
+   "status": 0,
+   "stderr": "",
+   "stdout": "  x y\n1 1 a\n2 2 b\n3 3 c\n"
+  },
+  {
+   "id": "df-2",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 90.5 85.0\n[1] 2\n[1] 2\n[1] \"name\"  \"score\"\n"
+  },
+  {
+   "id": "df-3",
+   "status": 0,
+   "stderr": "",
+   "stdout": "     a     b\n1 1.50  TRUE\n2 2.25 FALSE\n3 3.00    NA\n"
+  },
+  {
+   "id": "df-4",
+   "status": 0,
+   "stderr": "",
+   "stdout": "  g v\n2 y 2\n3 x 3\n"
+  },
+  {
+   "id": "df-5",
+   "status": 0,
+   "stderr": "",
+   "stdout": "       x           y     \n Min.   :1   Min.   : 2  \n 1st Qu.:2   1st Qu.: 4  \n Median :3   Median : 6  \n Mean   :3   Mean   : 6  \n 3rd Qu.:4   3rd Qu.: 8  \n Max.   :5   Max.   :10  \n"
+  },
+  {
+   "id": "df-6",
+   "status": 0,
+   "stderr": "",
+   "stdout": "  x z\n1 1 1\n2 2 4\n3 3 9\n"
+  },
+  {
+   "id": "df-7",
+   "status": 0,
+   "stderr": "",
+   "stdout": "  x\n1 1\n2 2\n3 3\n"
+  },
+  {
+   "id": "df-8",
+   "status": 0,
+   "stderr": "",
+   "stdout": "'data.frame':\t2 obs. of  2 variables:\n $ a: int  1 2\n $ b: int  3 4\n"
+  },
+  {
+   "id": "df-9",
+   "status": 0,
+   "stderr": "",
+   "stdout": "  x y\n2 1 a\n3 2 b\n1 3 c\n"
+  },
+  {
+   "id": "df-10",
+   "status": 0,
+   "stderr": "",
+   "stdout": "  g v\n1 a 2\n2 b 5\n"
+  },
+  {
+   "id": "df-11",
+   "status": 0,
+   "stderr": "",
+   "stdout": "                   mpg cyl disp  hp drat    wt  qsec vs am gear carb\nMazda RX4         21.0   6  160 110 3.90 2.620 16.46  0  1    4    4\nMazda RX4 Wag     21.0   6  160 110 3.90 2.875 17.02  0  1    4    4\nDatsun 710        22.8   4  108  93 3.85 2.320 18.61  1  1    4    1\nHornet 4 Drive    21.4   6  258 110 3.08 3.215 19.44  1  0    3    1\nHornet Sportabout 18.7   8  360 175 3.15 3.440 17.02  0  0    3    2\nValiant           18.1   6  225 105 2.76 3.460 20.22  1  0    3    1\n"
+  },
+  {
+   "id": "df-12",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 20.09062\n\n 4  6  8 \n11  7 14 \n"
+  },
+  {
+   "id": "df-13",
+   "status": 0,
+   "stderr": "",
+   "stdout": "x y \n2 5 \n        x         y \n\"integer\" \"integer\" \n"
+  },
+  {
+   "id": "df-14",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"p\" \"q\"\n[1] 2\n"
+  },
+  {
+   "id": "df-15",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 150   5\n[1] \"setosa\"     \"versicolor\" \"virginica\" \n"
+  },
+  {
+   "id": "df-16",
+   "status": 0,
+   "stderr": "",
+   "stdout": "       4        6        8 \n26.66364 19.74286 15.10000 \n"
+  },
+  {
+   "id": "df-17",
+   "status": 0,
+   "stderr": "",
+   "stdout": "  a b\n3 3 7\n4 4 8\n"
+  },
+  {
+   "id": "df-18",
+   "status": 0,
+   "stderr": "",
+   "stdout": "      x\n1 -1.50\n2 22.25\n3  3.00\n"
+  }
+ ],
+ "file": "rill-tests/df/test_1.R",
+ "format": "rill-out",
+ "v": 1
+}
