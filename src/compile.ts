@@ -463,7 +463,7 @@ function namespacePackage(name: string, portions: string[]): any {
   m.__package__ = name;
   m.__path__ = portions;
   // (what its portions are recomputed from: the parent's path or sys.path, as last seen, and the list it fills)
-  const st = { parent: name.includes(".") ? name.slice(0, name.lastIndexOf(".")) : null, leaf: name.slice(name.lastIndexOf(".") + 1), path: portions, last: [] as string[] };
+  const st = { parent: name.includes(".") ? name.slice(0, name.lastIndexOf(".")) : null, leaf: name.slice(name.lastIndexOf(".") + 1), path: portions, last: [] as string[], epoch: R.importEpoch.n };
   st.last = nsParentDirs(st);
   m.$ns = st;
   R.dictSet(R.sysModules, name, m);
@@ -476,15 +476,17 @@ function nsParentDirs(st: { parent: string | null }): string[] {
   return p?.__path__ ? R.toArray(p.__path__).slice() : [];
 }
 // A namespace package's __path__ follows its parent's path (sys.path at the top), as CPython's _NamespacePath does:
-// before a submodule is searched for, if that path has changed since last seen, its portions are recomputed in the
+// before a submodule is searched for, if that path has changed since last seen (or importlib.invalidate_caches() has
+// been called since), its portions are recomputed in the
 // path's order, into the same list; kept as they are if a module or package of the name has appeared there since or
 // none is left; and not at all once the package's __path__ has been replaced by another object (CPython's then a list)
 function nsRefresh(m: any): void {
   const st = m.$ns;
   if (m.__path__ !== st.path) return;
   const dirs = nsParentDirs(st);
-  if (dirs.length === st.last.length && dirs.every((d, i) => d === st.last[i])) return;
+  if (st.epoch === R.importEpoch.n && dirs.length === st.last.length && dirs.every((d, i) => d === st.last[i])) return;
   st.last = dirs;
+  st.epoch = R.importEpoch.n;
   const now = nsPortions(dirs, st.leaf);
   if (now !== null && now.length) st.path.splice(0, st.path.length, ...now);
 }
