@@ -38,7 +38,7 @@ The order is least complex first, and each phase is useful on its own. A phase i
 | **A3 Base and stats** | About 300 functions: vectors, strings, regex, factors, `table`, apply family, `Reduce`/`Map`, dates, data frames (`merge`, `aggregate`, `subset`, `with`, `transform`), summaries, distributions (d/p/q/r for the common families), the RNG (fitted, §5.4), `read.csv`/`write.csv` through the file gate (§9), the `datasets` values | The intro-stats corpus is exact |
 | **A4 Models and tests** | `lm`/`glm` with `model.frame`, NA handling and interactions; a pivoting QR, with aliased coefficients as `NA`; `summary`, `anova`, `aov`, `TukeyHSD`, `predict` (intervals), `confint`; t/chi-squared/prop/binom/cor/wilcox/shapiro tests | The models corpus is exact |
 | **A5 Base graphics** | `plot`, `hist`, `boxplot`, `barplot`, `lines`, `points`, `abline`, `legend`, `curve`, `qqnorm`/`qqline`, `par(mfrow)`, on Sagebrush's SVG renderer (§5.5) | The computed values match R; the SVG descriptions are snapshot-tested |
-| **B `.Rmd` documents** | knitr-like chunks in a source-and-preview editor on the LaTeX editor's code-item model (§5.7); inline `r expr`; chunk options; render to HTML. Also `\rill{}`/`rillcode`/`rillblock` in `.tex`, the same model as `\matlab{}` | A teaching handout knits; William's "similar to sagetex and knitr" |
+| **B `.Rmd` documents** | knitr-like chunks in a source-and-preview editor on the LaTeX editor's code-item model (§5.7); inline `r expr`; chunk options; render to HTML first, then to PDF through Sagebrush's LaTeX pipeline (William, Nov 7: "PDF (via our LaTeX)"). Also `\rill{}`/`rillcode`/`rillblock` in `.tex`, the same model as `\matlab{}` | A teaching handout knits; William's "similar to sagetex and knitr" |
 | **C ggplot2** | The grammar: `ggplot`, `aes`, the common geoms, stats, scales, facets, themes, `labs`; rendered on the same SVG renderer | `ggplot_build`-style data matches R (§7.3) |
 | **D dplyr** | Verbs (`filter`, `select`, `mutate`, `summarise`, `group_by`, `arrange`, `join`s); the `|>` and `%>%` pipes; tidy evaluation for the verbs' data masking; tibble printing | The dplyr corpus is exact, including `# A tibble:` printing |
 
@@ -149,7 +149,7 @@ William: "similar to sagetex and knitr". An `.Rmd` is a source document whose ch
 The Rmd editor reuses that machinery with Markdown in place of TeX:
 - **Items:** ```` ```{r label, opt = value} ```` chunks and inline `` `r expr` ``. One Rill session per document, chunks in order, as knitr runs them.
 - **Chunk options, first set:** `echo`, `eval`, `include`, `results` ("markup", "asis", "hide"), `message`, `warning`, `error`, `collapse`, `comment` (default `"##"`, as knitr prefixes output lines), `fig.width`, `fig.height`, `fig.cap`, `label`. An unknown option is kept and reported; it is never silently ignored. Options that would select another engine, a hook, a renderer or a destination are refused, and the chunk doesn't run (§9, RILL-SEC-2).
-- **YAML front matter:** `title`, `author`, `date` and `output` (`html_document`, plus later `pdf_document`/`beamer_presentation` through the LaTeX pipeline, for William's "presentation"). It is read by a closed grammar, as `web/notebook/myst-head.ts` reads MyST's.
+- **YAML front matter:** `title`, `author`, `date` and `output` (`html_document` first, then `pdf_document` through Sagebrush's LaTeX pipeline, which William chose as the next output on Nov 7; slides such as `beamer_presentation` later). It is read by a closed grammar, as `web/notebook/myst-head.ts` reads MyST's.
 - **Preview and render:** HTML through `web/markdown.ts`, with its sanitiser and `remote: false`. Plots are inline SVG.
 - **Also:** "Open as notebook", which makes a notebook copy, as MyST `.md` files have today.
 
@@ -408,7 +408,7 @@ Rill reaches files only through Sagebrush's Python file layer, so the existing p
 - Nothing in Rill opens a network connection. When the network permission gains a first feature, these route through it.
 
 **Processes.**
-- `system()`, `system2()` and `shell()` are refused in phases A–D. Later they may use the same ShellHost as Python's `os.system` (just-bash), under the files permission, if William wants it (§12, question 2).
+- `system()` and `system2()` will route through just-bash, the same shell as Python's `os.system` and `!cmd`, under the same Files and Network permissions (William, Nov 7: "Route through just-bash, like Python"). They stay refused until the PR that wires them, which gets its own SEC review. `shell()` (a Windows function in R) stays refused.
 - `Sys.setenv` affects only the session.
 
 **Output.**
@@ -497,8 +497,8 @@ The plan, measured in each PR and always within §8's rules:
 ## 12. Open questions
 
 1. **Oracle packages: approved by @sagebrush (Nov 7).** When phases B–D start, `r-knitr`, `r-rmarkdown`, `r-ggplot2`, `r-dplyr` and `r-tibble` go into VM4 `~/sbm-r` only (micromamba, home only, as R itself). They stay black boxes: their source is never read or printed. Before installing, run the VM checklist (no QUARANTINE marker, `lsof -w`, `df` on the exact path). Their versions are recorded in `rill-tests/` provenance.
-2. **`system()` (for William; @sagebrush has asked).** Should R's `system()` use the just-bash ShellHost, as Python's `os.system` does? Until he answers it stays refused, the least complex default.
-3. **Rmd output formats (for William; @sagebrush has asked).** Beyond HTML, which comes first: PDF through the LaTeX pipeline, or slides (`beamer_presentation` or HTML slides)?
+2. **`system()`: answered by William (Nov 7, ~12:46 PM PST): "Route through just-bash, like Python".** R's `system()`/`system2()` use the same just-bash shell as Python's `os.system` and `!cmd`, under the same Files and Network permissions. They stay refused until the PR that wires them (after A3's builtins), which gets SEC review.
+3. **Rmd output formats: answered by William (Nov 7, ~12:46 PM PST).** After HTML, the next output is "PDF (via our LaTeX)": phase B renders HTML, then PDF through Sagebrush's LaTeX pipeline. Slides come later.
 4. **Order of A2 and A3 (lanes).** A2 (in the product) comes before the bulk of builtins, so teachers can try Rill early. The conditions given in the design verdicts are folded in:
    - daybreak2: A1 already sets the final routing and budget names, and A2 keeps a minimal, measured first-cell start;
    - daybreak3: A1's corpus and §8's invariants are green, the registry lands alone first, and no eager Rill import or unmeasured core cost is added;
