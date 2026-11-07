@@ -1,0 +1,10 @@
+{
+ "v": 1,
+ "reason": "MATLAB: x = save, x = clear and x = clearvars raise 'Too many output arguments.' before they run, as MATLAB's (MathWorks documents no outputs for them): before, save wrote matlab.mat into the working directory and clear cleared variables, then raised. One check in _matlab.ws_call. Measured (bun 1.4.4, size-record.sh) on a probe merge into master 7f7f6c65: cli/lib.gen.js +92, cli/pyjs.cjs +188, matlab.pre +526, matlab.src +259. Markers exact but cli/pyjs.cjs 252 (+64).",
+ "bytes": {
+  "cli/lib.gen.js": 92,
+  "cli/pyjs.cjs": 252,
+  "engine/lib/matlab.pre": 526,
+  "engine/lib/matlab.src": 259
+ }
+}
