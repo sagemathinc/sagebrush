@@ -1,7 +1,7 @@
 // ci: web-browser/board-c order=130
 // mountBoard's destroy() leaves nothing behind (web/board/mount.ts), in
 // headless Chromium on the board page with its own host: a board with code
-// (examples/live.json: its engine, the runner's frame and workers, the
+// (examples/live.board.json: its engine, the runner's frame and workers, the
 // analyzer) is mounted, run, edited in place, looked at in TimeTravel, and
 // destroyed, 20 times.  Afterwards the page has the elements, frames,
 // workers and listeners (on window and document) it had before.  (What a page
@@ -73,8 +73,8 @@ try {
   // a document loaded while the page's store is still opening its own (its
   // file held, through CDP): it stays; the store's, arriving later, is not
   // shown over it (the start of several tests, on CI)
-  await send("Fetch.enable", { patterns: [{ urlPattern: "*examples/primes.json*" }] });
-  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/primes.json")}` });
+  await send("Fetch.enable", { patterns: [{ urlPattern: "*examples/primes.board.json*" }] });
+  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/primes.board.json")}` });
   await until("!!window.sagebrush?.board?.load", 60000);
   for (let i = 0; i < 100 && !held.length; i++) await sleep(20);
   const wasHeld = held.length > 0;
@@ -83,7 +83,7 @@ try {
   await send("Fetch.disable");
   await sleep(1500);
   check(wasHeld && (await ev("window.sagebrush.board.snapshot().doc.title")) === "Loaded meanwhile", "a document loaded while the store opens its own stays: " + await ev("window.sagebrush.board.snapshot().doc.title"));
-  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.json")}` });
+  await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.board.json")}` });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
   await ev("localStorage.clear()");
   check(await until("window.sagebrush.board.outputs().then((os) => os.length === 5 && os.every((o) => o.state === ''))", 90000), "the page's board ran its code");
