@@ -48,6 +48,11 @@ const warnings = []; // the fallback's warnings: {sessionId, executionContextId,
 const FALLBACK = /the runner did not start/;
 const FALLBACK_TEXT = "sagebrush: the runner did not start; Python runs in a plain worker";
 let phase = "main";
+const stuckLog = []; // the stuck case's console: {at, session, text}
+// the stuck case's library requests (lib/...), by session and request id: when sent, answered, finished or failed, and
+// whether a service worker answered; every session's (the page's, its workers', the service worker's), to name the
+// request a hung run waits for and the hop that holds it (grader's investigation, step 1)
+const stuckNet = new Map();
 let mainFrameId, stuckCtx, lastRunnerFrameId;
 // (the library chunks the page fetches, web/lib-chunks.mts: lib/<group>.src.<hash>.json)
 const libFetched = [];
@@ -69,6 +74,7 @@ ws.onmessage = (e) => {
     if (m.params.targetInfo.type === "iframe") frames.push(sid);
     const ti = m.params.targetInfo;
     attached.set(sid, { sessionId: sid, targetId: ti.targetId, type: ti.type, url: ti.url, title: ti.title, parentFrameId: ti.parentFrameId, parentSession: m.sessionId, order: ++attachOrder, detached: false, phase });
+    if (phase === "stuck") ws.send(JSON.stringify({ id: ++n, method: "Network.enable", params: {}, sessionId: sid }));
     for (const [method, params] of [["Runtime.enable", {}], ["Log.enable", {}], ["Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: true, flatten: true }], ["Runtime.runIfWaitingForDebugger", {}]]) ws.send(JSON.stringify({ id: ++n, method, params, sessionId: sid }));
   }
   if (m.method === "Log.entryAdded" && /Content Security Policy/.test(m.params.entry.text)) violations.push(m.params.entry.text);
@@ -84,6 +90,21 @@ ws.onmessage = (e) => {
     warnings.push(w);
     console.log(`warn [${m.sessionId ? m.sessionId.slice(0, 6) : "page"} ctx ${w.executionContextId}] ${m.params.args[0].value}`);
   }
+  // (the stuck case's console, every session's (the page's, the plain worker's), for its failure report)
+  if (phase === "stuck" && (m.method === "Runtime.consoleAPICalled" || m.method === "Runtime.exceptionThrown" || m.method === "Log.entryAdded") && stuckLog.length < 400)
+    stuckLog.push({ at: m.params.timestamp ?? m.params.entry?.timestamp ?? Date.now(), session: m.sessionId ? m.sessionId.slice(0, 6) : "page", text: m.method === "Runtime.exceptionThrown" ? "exception: " + (m.params.exceptionDetails?.exception?.description ?? m.params.exceptionDetails?.text) : m.method === "Log.entryAdded" ? `log ${m.params.entry.level}: ${m.params.entry.text}` : `${m.params.type}: ${(m.params.args ?? []).map((a) => a.value ?? a.description ?? a.type).join(" ")}` });
+  if (phase === "stuck" && m.method?.startsWith("Network.")) {
+    const p = m.params, key = (m.sessionId ?? "page").slice(0, 6) + ":" + p.requestId;
+    if (m.method === "Network.requestWillBeSent" && /\/lib\/[^/]+\.json(\?|$)/.test(p.request.url) && stuckNet.size < 200)
+      stuckNet.set(key, { session: (m.sessionId ?? "page").slice(0, 6), url: p.request.url.replace(/^.*\/lib\//, "lib/"), sent: Date.now() });
+    const r = stuckNet.get(key);
+    if (r && m.method === "Network.responseReceived") Object.assign(r, { answered: Date.now(), status: p.response.status, sw: !!p.response.fromServiceWorker, len: p.response.headers?.["content-length"] ?? p.response.headers?.["Content-Length"] });
+    if (r && m.method === "Network.dataReceived") r.bytes = (r.bytes ?? 0) + (p.dataLength ?? 0);
+    if (r && m.method === "Network.loadingFinished") r.finished = Date.now();
+    if (r && m.method === "Network.loadingFailed") Object.assign(r, { failed: Date.now(), error: p.errorText });
+  }
+  // (a service worker, in the stuck case: attached so its own requests are seen too)
+  if (phase === "stuck" && m.method === "Target.targetCreated" && m.params.targetInfo.type === "service_worker") ws.send(JSON.stringify({ id: ++n, method: "Target.attachToTarget", params: { targetId: m.params.targetInfo.targetId, flatten: true } }));
   if (process.env.RUNNER_DEBUG && (m.method === "Log.entryAdded" || m.method === "Runtime.exceptionThrown" || m.method === "Runtime.consoleAPICalled")) console.log("  [" + (m.sessionId ?? "page").slice(0, 6) + "]", JSON.stringify(m.params).slice(0, 600));
 };
 const send = (method, params = {}, sessionId) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })); });
@@ -185,6 +206,66 @@ function selectFrameContext(cs, frameId) {
 const eligible = (w, ctx) => w.sessionId === undefined && ctx !== undefined && w.executionContextId === ctx;
 const rootWarnings = () => warnings.filter((w) => w.sessionId === undefined);
 const said = (ws) => JSON.stringify(ws.map((w) => ({ ctx: w.executionContextId, emittedAt: w.emittedAt, receivedAt: w.receivedAt, phase: w.receivedPhase })));
+
+// The stuck case's diagnostics (test-only; the grader's investigation): on the page, each Worker it makes, with when
+// it was made, the kinds of what it was sent and said (keys only), its first message, its ready, error and
+// messageerror events; and #status as it changes. Only in the top page: the runner's frame is left alone.
+const STUCK_DIAG = `(() => {
+  if (window.top !== window || !window.Worker) return;
+  const d = (window.__sbStuckDiag = { workers: [], status: [] });
+  const kinds = (m) => (m && typeof m === "object" ? Object.keys(m).slice(0, 4).join(",") : typeof m);
+  const W = window.Worker;
+  window.Worker = class extends W {
+    constructor(u, o) {
+      super(u, o);
+      // (said and sent: the last 20 of each, beside their totals; ids: every message carrying an id, each way, so a
+      // run's id,code and id,start show however many startup messages came first: sync-docs' review)
+      const r = { url: String(u).slice(-60), at: Date.now(), first: null, ready: null, n: 0, nSent: 0, said: [], sent: [], ids: [], errors: [], messageerrors: 0 };
+      d.workers.push(r);
+      const keep = (a, x) => { a.push(x); if (a.length > 20) a.shift(); };
+      const id = (way, m) => { if (m && typeof m === "object" && m.id !== undefined && r.ids.length < 200) r.ids.push({ at: Date.now(), way, id: m.id, kinds: kinds(m) }); };
+      this.addEventListener("message", (e) => { r.n++; r.first ??= Date.now(); if (e.data?.ready) r.ready ??= Date.now(); keep(r.said, kinds(e.data)); id("said", e.data); });
+      this.addEventListener("error", (e) => { if (r.errors.length < 5) r.errors.push({ at: Date.now(), message: String(e.message || e.type).slice(0, 200) }); });
+      this.addEventListener("messageerror", () => r.messageerrors++);
+      const post = W.prototype.postMessage;
+      this.postMessage = (m, t) => { r.nSent++; keep(r.sent, { at: Date.now(), kinds: kinds(m) }); id("sent", m); return t === undefined ? post.call(this, m) : post.call(this, m, t); };
+    }
+  };
+  const watch = () => {
+    const s = document.querySelector("#status");
+    if (!s) return void setTimeout(watch, 50);
+    const rec = () => d.status.length < 60 && d.status.push({ at: Date.now(), text: s.textContent.slice(0, 100) });
+    rec();
+    new MutationObserver(rec).observe(s, { childList: true, characterData: true, subtree: true });
+  };
+  watch();
+})();`;
+// what the stuck case's failure shows: where it stopped (times are ms after the page was opened)
+async function reportStuck({ navAt, runAt }) {
+  const at = (x) => (typeof x === "number" ? Math.round(x - navAt) : x);
+  const fell = warnings.find((w) => eligible(w, stuckCtx));
+  console.log(`  stuck: the fallback warning at ${fell ? at(fell.emittedAt) : "(none)"}, the run asked at ${at(runAt)}`);
+  const r = await evWithin(5000, "the stuck page's diagnostics", `JSON.stringify({ diag: window.__sbStuckDiag ?? null, kernel: (() => { const k = window.sagebrush?.kernel; return k ? { ready: k.ready, startDone: k.startDone, startError: k.startError ? String(k.startError?.message ?? k.startError).slice(0, 200) : null, queued: k.queued, pending: [...(k.pending?.keys?.() ?? [])].slice(0, 10), runs: [...(k.runs?.keys?.() ?? [])].slice(0, 10), inner: !!k.worker?.inner, alive: k.worker?.alive ?? null, held: k.worker?.queue?.length ?? null } : null; })(), cells: [...document.querySelectorAll(".cell")].map((c) => ({ classes: c.className, n: c.querySelector(".n")?.textContent, out: c.querySelector(".out")?.textContent.slice(0, 200) })) })`);
+  if (r.fail) return console.log("  stuck: diagnostics unavailable (" + r.fail + ")");
+  const v = JSON.parse(r.value);
+  for (const w of v.diag?.workers ?? [])
+    console.log("  stuck worker: " + JSON.stringify({ ...w, at: at(w.at), first: at(w.first), ready: at(w.ready), sent: w.sent.map((x) => `${at(x.at)}:${x.kinds}`), ids: w.ids.slice(-40).map((x) => `${at(x.at)}:${x.way}:${x.id}:${x.kinds}`), errors: w.errors.map((e) => `${at(e.at)}:${e.message}`) }).slice(0, 2500));
+  if (!v.diag) console.log("  stuck: no diagnostics on the page (the script didn't run)");
+  console.log("  stuck #status: " + JSON.stringify((v.diag?.status ?? []).map((x) => `${at(x.at)}:${x.text}`)).slice(0, 1500));
+  // (sync-docs: the run still pending in the kernel, its start barrier, the runner's own state)
+  console.log("  stuck kernel: " + JSON.stringify(v.kernel).slice(0, 800));
+  console.log("  stuck cells: " + JSON.stringify(v.cells).slice(0, 1500));
+  // (each library request: ms after the page opened; one never finished nor failed is what a hung run waits for)
+  for (const r of stuckNet.values())
+    console.log(`  stuck net [${r.session}] ${r.url.slice(0, 70)} sent ${at(r.sent)} answered ${at(r.answered) ?? "-"} (${r.status ?? "-"}${r.sw ? ", service worker" : ""}, ${r.bytes ?? 0}/${r.len ?? "?"} B) ${r.finished ? "finished " + at(r.finished) : r.failed ? "FAILED " + at(r.failed) + " " + r.error : "NEVER FINISHED"}`);
+  if (!stuckNet.size) console.log("  stuck net: no library requests seen");
+  // (the service worker's serving budget, web/sw.js reserve(): what it holds and who waits, read in its own session)
+  for (const t of [...attached.values()].filter((t) => t.type === "service_worker" && !t.detached)) {
+    const b = await evWithin(3000, "the service worker's budget", `(() => { try { return JSON.stringify({ used: budgetUsed, peak: budgetPeak, waiting: waiters.map((w) => ({ n: w.n, serve: w.serve })) }); } catch (e) { return "unreadable: " + e.message; } })()`, t.sessionId);
+    console.log(`  stuck sw [${t.sessionId.slice(0, 6)}] budget: ${b.fail ?? b.value}`);
+  }
+  for (const l of stuckLog.slice(-60)) console.log(`  stuck console [${l.session} ${at(Math.round(l.at))}] ${String(l.text).slice(0, 300)}`);
+}
 
 // the one sandboxed frame's frame id, from the element itself (in whichever process the frame is)
 let domOn = false;
@@ -475,15 +556,34 @@ try {
     const oldWarn = (await untilWithin(3000, "C-warn-old's record", async () => warnings.slice(seen).find((w) => w.sessionId === undefined && w.executionContextId === oldCtx) ?? null)).value;
     ok(!!oldWarn, "C-warn-old: the detector recorded the old page's warning, after the switch: " + (oldWarn ? `ctx ${oldWarn.executionContextId}` : cw.fail ?? "not seen"));
     await send("Fetch.enable", { patterns: [{ urlPattern: "*runner*", requestStage: "Request" }] });
+    // (test-only diagnostics for the grader's open investigation of this case's timeouts, #488 and #552: on the stuck
+    // page, each Worker the page makes (the plain worker) with what it was sent and said, and #status as it changes)
+    // (Page.enable first: without it the script is accepted, an identifier returned, and never run)
+    // (STUCK_DIAG=0: without the probe, which wraps the very Worker under suspicion: the grader's observer-effect batch)
+    let diag = null;
+    if (process.env.STUCK_DIAG !== "0") {
+      await send("Page.enable");
+      diag = await send("Page.addScriptToEvaluateOnNewDocument", { source: STUCK_DIAG });
+    }
+    if (process.env.STUCK_DIAG !== "0") {
+      await send("Target.setDiscoverTargets", { discover: true });
+      // (a service worker already running: attached now)
+      const sws = ((await send("Target.getTargets"))?.targetInfos ?? []).filter((t) => t.type === "service_worker" && !t.attached);
+      for (const t of sws) await sendWithin(3000, "attach the service worker", "Target.attachToTarget", { targetId: t.targetId, flatten: true });
+    }
     const ctxBefore = contexts.length;
+    const navAt = Date.now();
     await send("Page.navigate", { url: new URL("./", base).href });
     stuckCtx = (await untilWithin(10000, "the stuck page's context", async () => contexts.slice(ctxBefore).find((c) => c.sessionId === undefined && c.auxData?.isDefault && c.auxData?.frameId === mainFrameId && c.id !== oldCtx) ?? null)).value?.id;
     ok(stuckCtx !== undefined, "the stuck page's own context: " + (stuckCtx ?? "it never appeared"));
     await sleep(500);
-    await until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000).catch(() => {});
+    const readyWait = await until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000).then(() => "ready", () => "NOT ready (timed out)");
+    console.log(`     the stuck page: #status ${readyWait} ${((Date.now() - navAt) / 1000).toFixed(1)} s after it was opened`);
     const t = Date.now();
     const out = (await run("6 * 7").catch((e) => e.message)).trim();
     ok(out === "42", `a runner whose worker doesn't start: the code runs in a plain worker instead (${out}, after ${((Date.now() - t) / 1000).toFixed(1)} s)`);
+    if (out !== "42") await reportStuck({ navAt, runAt: t });
+    if (diag?.identifier) await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: diag.identifier });
     ok(!!oldWarn && !eligible(oldWarn, stuckCtx), "C-warn-old: a warning from the old page doesn't count for the stuck page");
     const newWarn = (await untilWithin(3000, "the stuck page's warning", async () => warnings.find((w) => eligible(w, stuckCtx)) ?? null)).value;
     ok(!!newWarn, "C-warn-new: the stuck page said it fell back: " + (newWarn ? said([newWarn]) : "no warning from its own context " + said(warnings)));
