@@ -1,13 +1,14 @@
 # Native engines in the desktop app
 
-*Status: plan r5, for review. No code accompanies it, and nothing is built until it is reviewed and William
+*Status: plan r6, for review. No code accompanies it, and nothing is built until it is reviewed and William
 approves (his rule of Oct 30). Owner: @sagebrush-remote-compute. Reviewers: astra (SEC), daybreak3 (ENGINE), daybreak4
 (PERF), daybreak2 (SIZE), agents-ui (app). r3 (bb03eabb) was PLAN CLEAR in all five lanes for route B alone. r4
 answers William (Nov 7, about 6:33 AM PST): "there are two approaches to no wasm native: js runtime and napi; cpython
 and oxpy. we need to fully consider both options". r4 compares the two routes in full, on the same cells and the
 same version, and recommends one. Part B is r3's route-B plan, unchanged. Whether anything is closed is for its
 reviewer to say. r5 adds §A.2b, the control bridge for permission and Stop (astra's NATIVE-A-CONTROL-1,
-daybreak3's NATIVE-A-STOP-1). Still open whatever the reviews say: N1's proofs and William's decisions (§5).*
+daybreak3's NATIVE-A-STOP-1). r6 adds the Stop linearization (NATIVE-A-STOP-2) and astra's r5
+notes. Still open whatever the reviews say: N1's proofs and William's decisions (§5).*
 
 ## In plain words
 
@@ -238,6 +239,9 @@ add-on and acknowledges it. It never forwards a control frame into the worker's 
 - **When revoke completes:** at the child's acknowledgement of that `pv`. Until then the in-flight cell can still
   write **in the child's memory** (the shim); those writes are refused at the page (the files bar shows, as for
   `fsRefused`). The page then puts back the child's copy of each refused path, with an `fsPut` of the page's version.
+    That restore is conditional: it is sent only if the generation and `pv` are still current and the page's
+    revision of that path is still the one the refusal saw. A newer page revision, run or grant is never
+    overwritten by it; the newer revision reaches the child by its own `fsPut`.
   - The browser has the same race for any change queued before a revoke and drained after it. Route A widens the
     window from a memory store to a pipe round trip. N1 measures it, and the ack deadline below bounds it.
   - So route A claims **no new permission exception**, provided this ordering holds. SEC rules on whether the
@@ -261,11 +265,19 @@ add-on and acknowledges it. It never forwards a control frame into the worker's 
   - When the session worker starts a run it stores `RUN = token × 2` and clears `INTR`.
   - Around **every** add-on call (`call`, `symCall`, `mpCall`), the add-on stores `ARMED = token × 2` on entry and
     sets it back to 0 on exit, by compare-and-swap on its own token only.
-- **Applying a Stop:** the child main thread does compare-and-swap on both words, setting the stop bit **only if the
-  token matches**. It then sets `INTR` (pyjs raises `KeyboardInterrupt` at its next check, as in the browser), wakes
-  any `input()` or live-data wait (`Atomics.notify`, as the browser's Stop does), and replies
-  `{ack: "stop", gen, req, applied}`.
-  - A late, duplicate or stale-generation Stop finds another token (or none) and is **inert**: `applied: false`.
+- **Applying a Stop: one linearization point, the `RUN` compare-and-swap** (NATIVE-A-STOP-2's child half).
+  - The child main thread compare-and-swaps `RUN` from `token × 2` to `token × 2 + 1`.
+  - **Only if that succeeds** does it do anything else, in this order:
+    1. set the stop bit in `ARMED` by compare-and-swap on the same token (it may fail if no engine call is active;
+       that is fine);
+    2. set `INTR`, so pyjs raises `KeyboardInterrupt` at its next check, as in the browser;
+    3. wake any `input()` or live-data wait (`Atomics.notify`), answering it "aborted", as the browser's Stop does.
+
+    Then it replies `{ack: "stop", gen, req, applied: true}`.
+  - **If the `RUN` swap fails** (another token, or none), it replies `applied: false` and does **nothing else**: no
+    `ARMED`, no `INTR`, no wakeup, no aborted answer. So a late, duplicate or stale-generation Stop has **no
+    observable effect** on a newer run, whether that run is in pyjs, in `input()`, in a live-data wait or in an
+    engine call.
   - Ending a call clears only its own token, so it can't erase a Stop meant for a newer call.
   - Each run starts clear.
 - **The engine side:** a new feature of `engine/interrupt`, `host-word`, alongside `wasm-host`.
@@ -276,16 +288,32 @@ add-on and acknowledges it. It never forwards a control frame into the worker's 
   - The add-on catches the `Interrupted` unwind (`sagebrush_interrupt::catch`) and returns an interrupted reply. The
     runtime turns that into `KeyboardInterrupt`, and the add-on stays usable: no instance to retire, unlike wasm's
     trap.
-- **Ordering:**
-  1. The host sends the Stop.
-  2. The child acknowledges it (`applied` true or false).
-  3. The run ends, and the worker emits its terminal `done` ("interrupted").
-  4. The host forwards that `done` to the origin view only.
-- **Hard kill:** if there is no terminal `done` for that request within the bound, the host:
-  - kills the tree and confirms it;
-  - fences the generation, so no later `done` from it is delivered;
-  - sends the origin view **one** terminal "interrupted: restarted" outcome;
-  - announces the restart to the other views (NATIVE-IPC-3 fanout).
+- **Stop against `done`, at the host (NATIVE-A-STOP-2).** Data and control travel on separate pipes, so arrival order
+  across them means nothing. The host keeps one state per `(generation, host request ID)`: `running`, then
+  `stop-pending`, then `terminal`. It moves to `terminal` exactly **once**, by one compare-and-set shared by every
+  path.
+  - **`done` first:** a `done` that arrives while the request is `running` commits it as terminal and is forwarded.
+    A Stop for it is then refused at the host and never sent.
+  - **Stop first:** accepting a Stop moves the request to `stop-pending` before the control frame is sent. A `done`
+    that arrives while `stop-pending` is **held**, not forwarded, until the matching acknowledgement:
+    - `applied: true`: the run was stopped. The `done` the worker sends (normally "interrupted") commits as terminal
+      and is forwarded.
+    - `applied: false`: the run had already ended in the child before the Stop reached it. **The original completion
+      wins:** the held (or still arriving) `done` commits unchanged. The Stop is reported to the view as having
+      arrived too late, and nothing was interrupted. This matches the browser: when WorkerKernel's Stop races
+      a run that has already finished in the worker, that run's `done` still arrives and settles it as completed
+      (worker-kernel.js `interrupt()`; only runs still pending at 2 s cause a restart).
+  - **Hard kill:** if the request isn't terminal within the bound, the host takes the same compare-and-set to
+    terminal "interrupted: restarted". In order, it then:
+    1. **fences the generation** first, so every later frame from it (a held or late `done`, a late
+       acknowledgement) is dropped;
+    2. kills the tree;
+    3. waits for confirmation;
+    4. announces the restart to the other views (NATIVE-IPC-3 fanout).
+
+    A buffered `done` or a late acknowledgement can never produce a second terminal outcome.
+  - Tokens are fixed-width and atomic in both Node and Rust (a 64-bit word: `BigInt64Array` and `AtomicU64`). The
+    generation retires before its token counter could wrap.
 
 #### `input()`, live data and progress
 
@@ -308,11 +336,16 @@ add-on and acknowledges it. It never forwards a control frame into the worker's 
   - a delayed old allow, and an old generation's acknowledgement, can't reopen writes;
   - startup with writes off refuses the first write;
   - a lost acknowledgement, a closed control pipe and a malformed control frame each retire the generation, with
-    nothing persisted after the revoke.
+    nothing persisted after the revoke;
+  - a restore of a refused path skipped when the page's revision has moved on.
 - **N2, Stop pins:**
   - Stop during each of `call`, `symCall` and `mpCall`, including one rayon-parallel call;
   - a stopped call followed by a successful call in the same interpreter;
-  - Stop just before completion, and a late, duplicate or stale-generation Stop, none cancelling the next request;
+  - **the race, deterministically:** the Stop control frame held while `done` reaches the host, then released.
+    The result is the single terminal outcome chosen above: the original completion when `applied: false`. Also
+    the reverse order, and the hard kill racing a held `done`;
+  - a late, duplicate or stale-generation Stop delivered while a **newer** request is blocked in pyjs, in
+    `input()`, in a live-data wait and in an engine call, causing **no observable change** to any of them;
   - two attached views with colliding page IDs, where only the origin's active request stops;
   - an uncooperative call reaching the hard-kill bound, with exactly one terminal outcome and no later `done` from
     the retired generation;
