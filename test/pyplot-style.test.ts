@@ -151,7 +151,9 @@ for k, v in [("axes.grid", "yes"), ("grid.linewidth", "1.5"), ("figure.figsize",
 
 // The shared renderer's new options are pyplot's only: Sage mode's SVG is
 // byte for byte what it was before them (the sha256 and size of this
-// program's output on master fe52515e).
+// program's output on master fe52515e; since the friction fixes W03, text('hi')
+// is drawn as Sage draws it, 10 points at 100 dpi (13.89 px) and blue, the
+// only change: 9911 bytes, 66241ac9635ec66c before).
 test("Sage mode's plots are unchanged by the style options (byte-identical SVG)", () => {
   const out = execFileSync(process.execPath, [__dirname + "/../src/cli.js", "--sage", "-c", `
 p1 = plot(sin(x), (x, 0, 6), frame=True, gridlines=True, axes_labels=['x', 'y'], title='t')
@@ -159,8 +161,8 @@ p2 = plot(cos(x), (x, -3, 3)) + point((1, 1), color='red') + text('hi', (0, 0.5)
 print(p1._repr_svg_())
 print(p2._repr_svg_())
 `], { encoding: "utf8" });
-  assert.equal(Buffer.byteLength(out), 9911);
-  assert.equal(createHash("sha256").update(out).digest("hex").slice(0, 16), "66241ac9635ec66c");
+  assert.equal(Buffer.byteLength(out), 9929);
+  assert.equal(createHash("sha256").update(out).digest("hex").slice(0, 16), "c5df696dece12788");
 });
 
 test("importing pyplot does not import warnings or contextlib (they would join every scientific start's code); style's warnings and context still work", () => {

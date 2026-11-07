@@ -2,9 +2,8 @@
 loopback address, paired with a sagebrush.space page exactly as `sagebrush
 notebook --pair` is (src/notebook-pair.ts, whose contract this ports; design
 remote-v1 §11 (a)).  A page that speaks that contract connects here unchanged;
-the code runs in this computer's own CPython (gateway.py, child.py).  (The
-sagebrush.space page's side of the pairing is not built yet: the tests, and
-a terminal client, play the page.)
+the code runs in this computer's own CPython (gateway.py, child.py).  The
+page's side is web/notebook/pair-tunnel.js and remote-ui.js ("Your computer").
 
 The contract (the agent pairing's, design/workspace-agent-protocol.md §2, at its own path):
   - a WebSocket on 127.0.0.1 only, at GET /sagebrush-kernel (any other path: 400, before any WebSocket);
@@ -714,7 +713,7 @@ async def run_loopback(port=0, dev_origin=None, out=None, err=None, cwd=None):
     await server.listen(port)
     err("sagebrush %s (Python %s at %s)\n" % (VERSION, sys.version.split()[0], sys.executable))
     out(server.link() + "\n")
-    err("The link above is for a sagebrush.space page that pairs with this computer (that page is not released yet).\n"
+    err("The link above is for a sagebrush.space page that pairs with this computer.\n"
         "Pairing code: %s (single use, for 5 minutes). Code you run there will run on this computer, in this Python "
         "(%s), with your files and permissions.\n" % (server.code, sys.executable))
     stop = asyncio.Event()
