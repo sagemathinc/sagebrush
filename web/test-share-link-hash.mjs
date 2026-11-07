@@ -7,7 +7,8 @@
 //   - a fragment that is no share link (#notes) changes nothing; a damaged one (#z= whose bytes don't inflate) says so and changes nothing;
 //   - only the latest fragment counts (astra's SHARE-HASH-STALE-1): A held, then B, B wins; a held link dropped by a
 //     later non-link fragment; an explicit open meanwhile wins; a held damaged link's error isn't said after a newer one;
-//   - a control: the same link opened in a fresh load opens too.
+//   - a control: the same link opened in a fresh load opens too;
+//   - under `sagebrush notebook`'s one local file, a share link pasted in opens nothing (as at load).
 //   bun web/build.ts, then node web/test-share-link-hash.mjs
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -29,7 +30,8 @@ for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
 await new Promise((r) => (ws.onopen = r));
 let n = 0; const waiting = new Map();
-ws.onmessage = (ev) => { const m = JSON.parse(ev.data); if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); } };
+let onPaused = null;
+ws.onmessage = (ev) => { const m = JSON.parse(ev.data); if (m.method === "Fetch.requestPaused") onPaused?.(m.params); if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); } };
 const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
 const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400)); return r.result?.value; };
 const until = async (expr, ms = 30000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(200); } return false; };
@@ -51,6 +53,9 @@ const linkOf = (cells, mode = "") => ev(`(async () => {
 })()`);
 // (the address bar's fragment changed, as pasting a link there does: the page isn't reloaded, hashchange fires)
 const setHash = (h) => ev(`(location.hash = ${JSON.stringify(h)}, 1)`);
+// (every text #status shows from now on, so a message overwritten a moment later is still seen)
+const watchStatus = () => ev(`(() => { window.__said = []; window.__sayObs?.disconnect(); const s = document.querySelector('#status'); window.__sayObs = new MutationObserver(() => window.__said.push(s.textContent)); window.__sayObs.observe(s, { childList: true, characterData: true, subtree: true }); return 1; })()`);
+const saidLink = () => ev("(window.__said ?? []).some((t) => /could not open the share link/.test(t)) || /could not open the share link/.test(document.querySelector('#status').textContent)");
 
 try {
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
@@ -83,9 +88,11 @@ try {
 
   // ---- a fragment that is no share link: nothing changes
   const before = await current();
+  await watchStatus();
   await setHash("#notes");
   await sleep(2500);
   check(await current() === before && (await codes()).includes("OLD-CELL"), "a fragment that is no share link (#notes) changes nothing");
+  check(!(await saidLink()), "…and says nothing about a share link");
 
   // ---- a damaged share link: said, and nothing changes
   await setHash("#z=AAAAAAAA");
@@ -136,9 +143,11 @@ try {
   await sleep(300);
   await ev(`sagebrush.open(${JSON.stringify(other)}).then(() => 1)`);
   check(await until(`localStorage.getItem("sagebrush-current") === ${JSON.stringify(other)}`, 30000), "(an explicit open while a link is held)");
+  await watchStatus();
   await release();
   await sleep(2500);
   check((await current()) === other && (await hasCell("OTHER-CELL")) && !(await hasCell("LINK-A")), "…the explicit open wins: the released link doesn't replace it");
+  check(!(await saidLink()), "…and the link that lost says nothing");
   // (a damaged link held, then a good one: the good one opens, and the damaged one's error, when released, isn't said)
   await go(base + "?nb=" + encodeURIComponent(oldId));
   await hold("#z=AAAAAAAA");
@@ -154,6 +163,23 @@ try {
   // ---- a control: the same link in a fresh load opens it too (the path at load)
   await go(base + link);
   check(await until("document.querySelector('#nbname').value === 'Shared notebook'", 30000) && (await codes()).includes("SHARED-CELL"), "(control: the same link in a fresh load opens it)");
+
+  // ---- under `sagebrush notebook`'s one local file (window.__SAGEBRUSH_LOCAL__, as src/notebook.ts serves it; its
+  // api/file served here), a share link pasted in opens nothing, as at load (grader's H13)
+  const LOCALNB = JSON.stringify({ nbformat: 4, nbformat_minor: 5, metadata: {}, cells: [{ cell_type: "code", source: "print('LOCAL-CELL')", metadata: {}, outputs: [], execution_count: null }] });
+  onPaused = (p) => {
+    if (/\/api\/file\?/.test(p.request.url)) send("Fetch.fulfillRequest", { requestId: p.requestId, responseCode: 200, responseHeaders: [{ name: "content-type", value: "text/plain" }], body: Buffer.from(p.request.method === "GET" ? LOCALNB : "").toString("base64") });
+    else send("Fetch.continueRequest", { requestId: p.requestId });
+  };
+  await send("Fetch.enable", { patterns: [{ urlPattern: "*api/file*", requestStage: "Request" }] });
+  const { identifier: localScript } = await send("Page.addScriptToEvaluateOnNewDocument", { source: `window.__SAGEBRUSH_LOCAL__ = { path: "local.ipynb", name: "local.ipynb" };` });
+  await send("Page.navigate", { url: base });
+  check(await until(`sagebrush.notebook.cells().some((c) => c.ta.value.includes("LOCAL-CELL"))`, 60000), "(the page as `sagebrush notebook` serves one local file)");
+  await setHash(A);
+  await sleep(3000);
+  check((await hasCell("LOCAL-CELL")) && !(await hasCell("LINK-A")) && (await ev("document.querySelector('#nbname').value")) !== "Shared notebook", "under `sagebrush notebook`'s one local file, a share link pasted in opens nothing");
+  await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: localScript });
+  await send("Fetch.disable");
 } catch (e) {
   check(false, "the test ran: " + String(e?.stack ?? e).slice(0, 400));
 } finally {
