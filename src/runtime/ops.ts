@@ -2710,6 +2710,9 @@ export function bytearrayDel(o: PyByteArray, k: any): void {
     const fix = (v: number | null, dflt: number) => (v === null ? dflt : v < 0 ? Math.max(v + len, lo) : Math.min(v, hi));
     const start = fix(start0, step < 0 ? hi : lo), stop = fix(stop0, step < 0 ? lo : hi);
     const n = (step > 0 ? start < stop : start > stop) ? Math.floor((stop - start - (step > 0 ? 1 : -1)) / step) + 1 : 0;
+    // (an extended slice is refused under an export even when it is empty, as CPython's; a linear one only
+    // when it deletes something)
+    if (step !== 1) checkResizable(o);
     if (n === 0) return;
     checkResizable(o);
     const r = new Uint8Array(o.n - n);

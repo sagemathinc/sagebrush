@@ -373,3 +373,147 @@ stringio.truncate None 3 abc 3 []
 stringio.truncate '2' TypeError: argument should be integer or None, not 'str' abcdef 3 []
 stringio.truncate True 1 a 3 []
 stringio.truncate 7 7 abcdef 3 []
+-- r3 (TESTS): a non-final chunk's held tails, UTF-32's, a lone BOM at EOF, a raw stream's lengths, BlockingIOError's counts, a detached wrapper (@sagebrush-grader's probes)
+-- U: an invalid UTF-8 tail at a chunk's end is decoded at once, not held
+b'\xe0\x80' strict ("UnicodeDecodeError: 'utf-8' codec can't decode byte 0xe0 in position 2: invalid continuation byte", 1)
+b'\xe0\x80' replace ("'ok�'", 1)
+b'\xe0\x80' surrogatepass ("UnicodeDecodeError: 'utf-8' codec can't decode byte 0xe0 in position 2: invalid continuation byte", 1)
+b'\xed\xa0' strict ("UnicodeDecodeError: 'utf-8' codec can't decode byte 0xed in position 0: invalid continuation byte", 2)
+b'\xed\xa0' replace ("'ok�'", 2)
+b'\xed\xa0' surrogatepass ("'ok\\ud800x'", 2)
+b'\xed\xbf' strict ("UnicodeDecodeError: 'utf-8' codec can't decode byte 0xed in position 0: invalid continuation byte", 2)
+b'\xed\xbf' replace ("'ok�'", 2)
+b'\xed\xbf' surrogatepass ("'ok\\udfc0x'", 2)
+b'\xed\x9f' strict ("UnicodeDecodeError: 'utf-8' codec can't decode bytes in position 0-1: invalid continuation byte", 2)
+b'\xed\x9f' replace ("'ok�'", 2)
+b'\xed\x9f' surrogatepass ("'okퟀx'", 2)
+b'\xf0\x80' strict ("UnicodeDecodeError: 'utf-8' codec can't decode byte 0xf0 in position 2: invalid continuation byte", 1)
+b'\xf0\x80' replace ("'ok�'", 1)
+b'\xf0\x80' surrogatepass ("UnicodeDecodeError: 'utf-8' codec can't decode byte 0xf0 in position 2: invalid continuation byte", 1)
+b'\xf4\x90' strict ("UnicodeDecodeError: 'utf-8' codec can't decode byte 0xf4 in position 2: invalid continuation byte", 1)
+b'\xf4\x90' replace ("'ok�'", 1)
+b'\xf4\x90' surrogatepass ("UnicodeDecodeError: 'utf-8' codec can't decode byte 0xf4 in position 2: invalid continuation byte", 1)
+b'\xc0' strict ("UnicodeDecodeError: 'utf-8' codec can't decode byte 0xc0 in position 2: invalid start byte", 1)
+b'\xc0' replace ("'ok�'", 1)
+b'\xc0' surrogatepass ("UnicodeDecodeError: 'utf-8' codec can't decode byte 0xc0 in position 2: invalid start byte", 1)
+b'\xc1' strict ("UnicodeDecodeError: 'utf-8' codec can't decode byte 0xc1 in position 2: invalid start byte", 1)
+b'\xc1' replace ("'ok�'", 1)
+b'\xc1' surrogatepass ("UnicodeDecodeError: 'utf-8' codec can't decode byte 0xc1 in position 2: invalid start byte", 1)
+b'\xf5' strict ("UnicodeDecodeError: 'utf-8' codec can't decode byte 0xf5 in position 2: invalid start byte", 1)
+b'\xf5' replace ("'ok�'", 1)
+b'\xf5' surrogatepass ("UnicodeDecodeError: 'utf-8' codec can't decode byte 0xf5 in position 2: invalid start byte", 1)
+b'\xf7' strict ("UnicodeDecodeError: 'utf-8' codec can't decode byte 0xf7 in position 2: invalid start byte", 1)
+b'\xf7' replace ("'ok�'", 1)
+b'\xf7' surrogatepass ("UnicodeDecodeError: 'utf-8' codec can't decode byte 0xf7 in position 2: invalid start byte", 1)
+b'\xe0\x9f' strict ("UnicodeDecodeError: 'utf-8' codec can't decode byte 0xe0 in position 2: invalid continuation byte", 1)
+b'\xe0\x9f' replace ("'ok�'", 1)
+b'\xe0\x9f' surrogatepass ("UnicodeDecodeError: 'utf-8' codec can't decode byte 0xe0 in position 2: invalid continuation byte", 1)
+b'\xf0\x8f\x80' strict ("UnicodeDecodeError: 'utf-8' codec can't decode byte 0xf0 in position 2: invalid continuation byte", 1)
+b'\xf0\x8f\x80' replace ("'ok�'", 1)
+b'\xf0\x8f\x80' surrogatepass ("UnicodeDecodeError: 'utf-8' codec can't decode byte 0xf0 in position 2: invalid continuation byte", 1)
+-- W4: utf-32-le holds len % 4
+("'a'", 1) ("'ab'", 2)
+("UnicodeDecodeError: 'utf-32-be' codec can't decode bytes in position 0-3: code point not in range(0x110000)", 1)
+-- X1: a lone BOM prefix at EOF is the codec's truncated-data error
+utf-16 b'\xff' strict UnicodeDecodeError: 'utf-16-le' codec can't decode byte 0xff in position 0: truncated data
+utf-16 b'\xff' replace '�'
+utf-16 b'\xfe' strict UnicodeDecodeError: 'utf-16-le' codec can't decode byte 0xfe in position 0: truncated data
+utf-16 b'\xfe' replace '�'
+utf-32 b'\xff\xfe' strict UnicodeDecodeError: 'utf-32-le' codec can't decode bytes in position 0-1: truncated data
+utf-32 b'\xff\xfe' replace '�'
+utf-32 b'\x00\x00\xfe' strict UnicodeDecodeError: 'utf-32-le' codec can't decode bytes in position 0-2: truncated data
+utf-32 b'\x00\x00\xfe' replace '�'
+utf-32 b'\xff' strict UnicodeDecodeError: 'utf-32-le' codec can't decode byte 0xff in position 0: truncated data
+utf-32 b'\xff' replace '�'
+-- B5: a raw write() returning a negative length
+[-1] OSError: raw write() returned invalid length -1 (should have been between 0 and 8) [b'abcdefgh']
+[-1] 3 OSError: raw write() returned invalid length -1 (should have been between 0 and 3) [b'abc']
+[-5] OSError: raw write() returned invalid length -5 (should have been between 0 and 8) [b'abcdefgh']
+[-5] 3 OSError: raw write() returned invalid length -5 (should have been between 0 and 3) [b'abc']
+[100] OSError: raw write() returned invalid length 100 (should have been between 0 and 8) [b'abcdefgh']
+[100] 3 OSError: raw write() returned invalid length 100 (should have been between 0 and 3) [b'abc']
+-- B6: BlockingIOError's characters_written
+[None] BlockingIOError (0, 'write could not complete without blocking', 4) 4 [b'abcdefghijkl']
+[None] after ab BlockingIOError (0, 'write could not complete without blocking', 2) 2 [b'ab']
+[2, None] BlockingIOError (0, 'write could not complete without blocking', 6) 6 [b'abcdefghijkl', b'cdefghijkl']
+[2, None] after ab BlockingIOError (0, 'write could not complete without blocking', 4) 4 [b'ab', b'cdefghij']
+[3, 1, None] BlockingIOError (0, 'write could not complete without blocking', 8) 8 [b'abcdefghijkl', b'defghijkl', b'efghijkl']
+[3, 1, None] after ab OSError raw write() returned invalid length 3 (should have been between 0 and 2) [b'ab']
+[4, None] BlockingIOError (0, 'write could not complete without blocking', 8) 8 [b'abcdefghijkl', b'efghijkl']
+[4, None] after ab OSError raw write() returned invalid length 4 (should have been between 0 and 2) [b'ab']
+-- M1: flush of a closed BufferedWriter
+ValueError: flush of closed file ValueError: write to closed file
+-- M7/M8: a detached TextIOWrapper
+ValueError: underlying buffer has been detached
+TypeError: reconfigure() argument 'errors' must be str or None, not int
+TypeError: reconfigure() argument 'newline' must be str or None, not int
+ValueError: underlying buffer has been detached
+ValueError: underlying buffer has been detached
+TypeError: write() argument must be str, not int
+TypeError: write() argument must be str, not bytes
+-- r3 (TESTS): del of an exported bytearray, b2a_base64's newline __bool__ running while the buffer is exported
+-- D2/D4: del of an exported bytearray (b2a_base64's newline __bool__ runs with the buffer exported)
+0 b'YWJjZA==' ['BufferError: Existing exports of data: object cannot be re-sized'] b'abcd'
+-1 b'YWJjZA==' ['BufferError: Existing exports of data: object cannot be re-sized'] b'abcd'
+3 b'YWJjZA==' ['BufferError: Existing exports of data: object cannot be re-sized'] b'abcd'
+slice(0, 1, None) b'YWJjZA==' ['BufferError: Existing exports of data: object cannot be re-sized'] b'abcd'
+slice(1, 1, None) b'YWJjZA==' ['deleted'] b'abcd'
+slice(3, 3, None) b'YWJjZA==' ['deleted'] b'abcd'
+slice(None, None, 2) b'YWJjZA==' ['BufferError: Existing exports of data: object cannot be re-sized'] b'abcd'
+slice(5, 1, 2) b'YWJjZA==' ['BufferError: Existing exports of data: object cannot be re-sized'] b'abcd'
+slice(0, 0, -1) b'YWJjZA==' ['BufferError: Existing exports of data: object cannot be re-sized'] b'abcd'
+slice(1, 1, 3) b'YWJjZA==' ['BufferError: Existing exports of data: object cannot be re-sized'] b'abcd'
+9 b'YWJjZA==' ['IndexError: bytearray index out of range'] b'abcd'
+b'bcd'
+-- r3: BufferedWriter when the raw stream would block (C's buffering and counts), or raises
+4 b'' b'abcd' [] | 4 [b'abcd'] | None [] UnsupportedOperation: seek '-'
+4 b'' b'abcde' [] | 5 [b'abcde'] | None [] UnsupportedOperation: seek '-'
+4 b'ab' b'cd' [] | 2 [] | None [b'abcd'] UnsupportedOperation: seek '-'
+4 b'ab' b'cdef' [] | 4 [b'ab', b'cdef'] | None [] UnsupportedOperation: seek '-'
+4 b'' b'abcde' [None] | BlockingIOError: [Errno 0] write could not complete without blocking 4 [b'abcde'] | None [b'abcd'] UnsupportedOperation: seek '-'
+4 b'' b'abcd' [None] | 4 [b'abcd'] | None [b'abcd'] UnsupportedOperation: seek '-'
+4 b'' b'abcdefgh' [3, None] | BlockingIOError: [Errno 0] write could not complete without blocking 7 [b'abcdefgh', b'defgh'] | None [b'defg'] UnsupportedOperation: seek '-'
+4 b'' b'abcdefgh' [4, None] | 8 [b'abcdefgh', b'efgh'] | None [b'efgh'] UnsupportedOperation: seek '-'
+4 b'ab' b'c' [None] | 1 [] | None [b'abc'] UnsupportedOperation: seek '-'
+4 b'ab' b'cdef' [None] | BlockingIOError: [Errno 0] write could not complete without blocking 2 [b'ab'] | None [b'abcd'] UnsupportedOperation: seek '-'
+4 b'ab' b'cdef' [1, None] | BlockingIOError: [Errno 0] write could not complete without blocking 3 [b'ab', b'b'] | None [b'bcde'] UnsupportedOperation: seek '-'
+4 b'abc' b'de' [1, None] | 2 [b'abc', b'bc'] | None [b'bcde'] UnsupportedOperation: seek '-'
+4 b'ab' b'cdefgh' [BlockingIOError(11, 'x', 1)] | BlockingIOError: [Errno 0] write could not complete without blocking 2 [b'ab'] | None [b'abcd'] UnsupportedOperation: seek '-'
+4 b'' b'abcdefgh' [BlockingIOError(11, 'x', 1)] | BlockingIOError: [Errno 11] x 1 [b'abcdefgh'] | None [] UnsupportedOperation: seek '-'
+4 b'' b'abcdefgh' [BlockingIOError(11, 'x')] | BlockingIOError: [Errno 11] x '-' [b'abcdefgh'] | None [] UnsupportedOperation: seek '-'
+4 b'ab' b'cdefgh' [BlockingIOError(11, 'x')] | BlockingIOError: [Errno 0] write could not complete without blocking 2 [b'ab'] | None [b'abcd'] UnsupportedOperation: seek '-'
+4 b'ab' b'cdefgh' [ValueError('v')] | ValueError: v '-' [b'ab'] | None [b'ab'] UnsupportedOperation: seek '-'
+flush blocked BlockingIOError: [Errno 0] write could not complete without blocking 0 None [b'ab', b'ab']
+flush partial BlockingIOError: [Errno 0] write could not complete without blocking 0 [b'abc', b'bc', b'bc'] None [b'abc', b'bc', b'bc']
+-- r3: a detached or closed wrapper: C's order of checks
+{'newline': 'x'} ValueError: illegal newline value: x
+{'encoding': 1} TypeError: reconfigure() argument 'encoding' must be str or None, not int
+{'encoding': 'klingon'} ValueError: underlying buffer has been detached
+{'line_buffering': 2.0} TypeError: 'float' object cannot be interpreted as an integer
+{'write_through': 's'} TypeError: 'str' object cannot be interpreted as an integer
+{'errors': 1, 'newline': 1} TypeError: reconfigure() argument 'errors' must be str or None, not int
+{'newline': 1, 'encoding': 1} TypeError: reconfigure() argument 'encoding' must be str or None, not int
+{'line_buffering': 1180591620717411303424} OverflowError: Python int too large to convert to C long
+TypeError: argument should be integer or None, not 'str'
+TypeError: argument should be integer or None, not 'float'
+TypeError: 'str' object cannot be interpreted as an integer
+ValueError: underlying buffer has been detached
+TypeError: 'str' object cannot be interpreted as an integer
+ValueError: underlying buffer has been detached
+{'encoding': 1, 'errors': 1} | read: TypeError: reconfigure() argument 'encoding' must be str or None, not int | detached: TypeError: reconfigure() argument 'encoding' must be str or None, not int
+{'errors': 1, 'encoding': 1} | read: TypeError: reconfigure() argument 'encoding' must be str or None, not int | detached: TypeError: reconfigure() argument 'encoding' must be str or None, not int
+{'encoding': 'x', 'line_buffering': 2.0} | read: UnsupportedOperation: It is not possible to set the encoding or newline of stream after the first read | detached: TypeError: 'float' object cannot be interpreted as an integer
+{'newline': 'x', 'line_buffering': 2.0} | read: UnsupportedOperation: It is not possible to set the encoding or newline of stream after the first read | detached: ValueError: illegal newline value: x
+{'newline': 1} | read: TypeError: reconfigure() argument 'newline' must be str or None, not int | detached: TypeError: reconfigure() argument 'newline' must be str or None, not int
+{'newline': 'x', 'encoding': 1} | read: TypeError: reconfigure() argument 'encoding' must be str or None, not int | detached: TypeError: reconfigure() argument 'encoding' must be str or None, not int
+{'errors': 1, 'newline': 'x'} | read: TypeError: reconfigure() argument 'errors' must be str or None, not int | detached: TypeError: reconfigure() argument 'errors' must be str or None, not int
+{'encoding': 'x', 'newline': 'x'} | read: UnsupportedOperation: It is not possible to set the encoding or newline of stream after the first read | detached: ValueError: illegal newline value: x
+{'line_buffering': 2.0, 'write_through': 's'} | read: TypeError: 'float' object cannot be interpreted as an integer | detached: TypeError: 'float' object cannot be interpreted as an integer
+{'encoding': 'klingon', 'line_buffering': 2.0} | read: UnsupportedOperation: It is not possible to set the encoding or newline of stream after the first read | detached: TypeError: 'float' object cannot be interpreted as an integer
+TypeError: reconfigure() argument 'newline' must be str or None, not int ValueError: I/O operation on closed file. ValueError: I/O operation on closed file. ValueError: I/O operation on closed file.
+TypeError: argument should be integer or None, not 'str' TypeError: 'str' object cannot be interpreted as an integer TypeError: write() argument must be str, not int OverflowError: cannot fit 'int' into an index-sized integer TypeError: argument should be integer or None, not 'str' UnsupportedOperation: not readable ValueError: I/O operation on closed file. ValueError: I/O operation on closed file.
+ValueError: I/O operation on closed file. ValueError: I/O operation on closed file. ValueError: I/O operation on closed file. ValueError: I/O operation on closed file. ValueError: I/O operation on closed file. ValueError: I/O operation on closed file. ValueError: I/O operation on closed file.
+ValueError: I/O operation on closed file. ValueError: I/O operation on closed file.
+ValueError: I/O operation on closed file. ValueError: I/O operation on closed file. ValueError: I/O operation on closed file.
+OSError: telling position disabled by next() call
+ValueError: I/O operation on closed file.

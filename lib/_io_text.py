@@ -179,7 +179,8 @@ class BufferedIncrementalDecoder(IncrementalDecoder):
 
 def _utf8_held(b):
     """How many trailing bytes of b a non-final UTF-8 decode keeps back: a valid but incomplete sequence
-    (Unicode's Table 3-7 well-formed prefixes), else 0, so an invalid tail is decoded, and reported, now."""
+    (Unicode's Table 3-7 well-formed prefixes, and a surrogate's ED A0..BF), else 0, so an invalid tail is
+    decoded, and reported, now."""
     n = len(b)
     for k in (1, 2, 3):
         if k > n:
@@ -200,10 +201,10 @@ def _utf8_held(b):
         tail = b[n - k + 1:]
         if tail:
             lo, hi = 0x80, 0xBF
+            # (ED's A0..BF, a surrogate's, is held too, as CPython's decoder holds it: surrogatepass may
+            # complete it in the next chunk)
             if lead == 0xE0:
                 lo = 0xA0
-            elif lead == 0xED:
-                hi = 0x9F
             elif lead == 0xF0:
                 lo = 0x90
             elif lead == 0xF4:
@@ -673,24 +674,34 @@ class BufferedWriter(_BufferedIOMixin):
             if n <= self.buffer_size - len(self._write_buf) and n < self.buffer_size:
                 self._write_buf.extend(data)
                 return n
-            self._flush_unlocked()
+            try:
+                self._flush_unlocked()
+            except BlockingIOError:
+                # (C's: the flush would block, the raw stream's own BlockingIOError included; the buffer keeps
+                # what wasn't written, takes as much of the data as fits, and says how much that was)
+                avail = self.buffer_size - len(self._write_buf)
+                if n <= avail:
+                    self._write_buf.extend(data)
+                    return n
+                self._write_buf.extend(data[:avail])
+                raise BlockingIOError(0, "write could not complete without blocking", avail) from None
             written = 0
             while n - written >= self.buffer_size:
                 k = self._raw_write(data[written:])
                 if k is None:
-                    raise BlockingIOError(
-                        11,  # (errno.EAGAIN)
-                        "write could not complete without blocking", written)
+                    # (C's: the raw stream would block; buffer_size bytes are buffered when more than that
+                    # remain, and the BlockingIOError counts them; else the rest is buffered, all written)
+                    if n - written > self.buffer_size:
+                        self._write_buf.extend(data[written:written + self.buffer_size])
+                        raise BlockingIOError(0, "write could not complete without blocking",
+                                              written + self.buffer_size)
+                    break
                 written += k
             self._write_buf.extend(data[written:])
             return n
 
     def _raw_write(self, data):
-        try:
-            n = self.raw.write(data)
-        except BlockingIOError:
-            raise RuntimeError("self.raw should implement RawIOBase: it "
-                               "should not raise BlockingIOError")
+        n = self.raw.write(data)  # (C's: an exception the raw stream raises, BlockingIOError too, as it is)
         if n is None:
             return None
         # (C's PyNumber_AsSsize_t: a result that isn't an integer, or overflows, is -1, then reported as invalid)
@@ -721,9 +732,7 @@ class BufferedWriter(_BufferedIOMixin):
         while self._write_buf:
             n = self._raw_write(self._write_buf)
             if n is None:
-                raise BlockingIOError(
-                    11,  # (errno.EAGAIN)
-                    "write could not complete without blocking", 0)
+                raise BlockingIOError(0, "write could not complete without blocking", 0)  # (C's errno, 0)
             del self._write_buf[:n]
 
     def tell(self):
@@ -1032,18 +1041,27 @@ class TextIOWrapper(TextIOBase):  # (Sagebrush: io's TextIOBase)
 
         This also flushes the stream.
         """
-        self._checkAttached()  # (Sagebrush: C's)
-        # (Sagebrush: C's order, the arguments' types checked first, with its messages)
-        if errors is not None and not isinstance(errors, str):
-            raise TypeError("reconfigure() argument 'errors' must be str or None, not %s" % type(errors).__name__)
+        # (Sagebrush: C's order: the arguments' types, encoding's, errors' and newline's, with its messages; the
+        # first-read refusal; newline's value; the two flags; and only then flush, which refuses a detached or
+        # closed stream)
         if encoding is not None and not isinstance(encoding, str):
             raise TypeError("reconfigure() argument 'encoding' must be str or None, not %s" % type(encoding).__name__)
+        if errors is not None and not isinstance(errors, str):
+            raise TypeError("reconfigure() argument 'errors' must be str or None, not %s" % type(errors).__name__)
+        if newline is not Ellipsis and newline is not None and not isinstance(newline, str):
+            raise TypeError("reconfigure() argument 'newline' must be str or None, not %s" % type(newline).__name__)
         if (self._decoder is not None
                 and (encoding is not None or errors is not None
                      or newline is not Ellipsis)):
             raise UnsupportedOperation(
                 "It is not possible to set the encoding or newline of stream "
                 "after the first read")
+        if newline is not Ellipsis:
+            self._check_newline(newline)
+        line_buffering = None if line_buffering is None else bool(_c_long_arg(line_buffering))
+        write_through = None if write_through is None else bool(_c_long_arg(write_through))
+
+        self.flush()
 
         if errors is None:
             if encoding is None:
@@ -1059,13 +1077,11 @@ class TextIOWrapper(TextIOBase):  # (Sagebrush: io's TextIOBase)
 
         if newline is Ellipsis:
             newline = self._readnl
-        self._check_newline(newline)
+        if line_buffering is None:
+            line_buffering = self.line_buffering
+        if write_through is None:
+            write_through = self.write_through
 
-        # (Sagebrush: C's convert_optional_bool, a C long; then the encoding looked up before anything changes)
-        line_buffering = self.line_buffering if line_buffering is None else bool(_c_long_arg(line_buffering))
-        write_through = self.write_through if write_through is None else bool(_c_long_arg(write_through))
-
-        self.flush()
         _check_text_encoding(encoding)
         self._configure(encoding, errors, newline,
                         line_buffering, write_through)
@@ -1117,11 +1133,11 @@ class TextIOWrapper(TextIOBase):  # (Sagebrush: io's TextIOBase)
 
     def write(self, s):
         'Write data, where s is a str'
+        if not isinstance(s, str):  # (Sagebrush: C's, the argument's type first)
+            raise TypeError("write() argument must be str, not %s" % s.__class__.__name__)
         self._checkAttached()  # (Sagebrush: C's)
         if self.closed:
             raise ValueError("I/O operation on closed file.")  # (Sagebrush: C's messages and its writable check)
-        if not isinstance(s, str):
-            raise TypeError("write() argument must be str, not %s" % s.__class__.__name__)
         if not self.writable():
             raise UnsupportedOperation("not writable")
         length = len(s)
@@ -1248,6 +1264,8 @@ class TextIOWrapper(TextIOBase):  # (Sagebrush: io's TextIOBase)
 
     def tell(self):
         self._checkAttached()  # (Sagebrush: C's)
+        if self.closed:
+            raise ValueError("I/O operation on closed file.")  # (Sagebrush: C's, before the other refusals)
         if not self._seekable:
             raise UnsupportedOperation("underlying stream is not seekable")
         if not self._telling:
@@ -1439,8 +1457,7 @@ class TextIOWrapper(TextIOBase):  # (Sagebrush: io's TextIOBase)
         return cookie
 
     def read(self, size=None):
-        self._checkAttached()  # (Sagebrush: C's)
-        self._checkReadable()
+        # (Sagebrush: C's order, the argument converted first)
         if size is None:
             size = -1
         else:
@@ -1453,6 +1470,8 @@ class TextIOWrapper(TextIOBase):  # (Sagebrush: io's TextIOBase)
                 size = _index(size)  # (Sagebrush: its __index__ once, the result checked; C's Py_ssize_t)
                 if not -(1 << 63) <= size < (1 << 63):
                     raise OverflowError("cannot fit 'int' into an index-sized integer")
+        self._checkAttached()  # (Sagebrush: C's)
+        self._checkReadable()
         decoder = self._decoder or self._get_decoder()
         if size < 0:
             chunk = self.buffer.read()
@@ -1485,13 +1504,14 @@ class TextIOWrapper(TextIOBase):  # (Sagebrush: io's TextIOBase)
         return line
 
     def readline(self, size=-1):  # (Sagebrush: C's default)
-        self._checkAttached()  # (Sagebrush: C's)
-        if self.closed:
-            raise ValueError("read from closed file")
-        # (Sagebrush: C's readline takes an integer, None included in the refusal; __index__ once, checked)
+        # (Sagebrush: C's readline takes an integer, None included in the refusal; __index__ once, checked; and
+        # first, as C's argument conversion)
         size = _index(size)
         if not -(1 << 63) <= size < (1 << 63):
             raise OverflowError("Python int too large to convert to C ssize_t")
+        self._checkAttached()  # (Sagebrush: C's)
+        if self.closed:
+            raise ValueError("I/O operation on closed file.")  # (Sagebrush: C's message)
 
         # Grab all the decoded text (we will rewind any extra bits later).
         line = self._get_decoded_chars()

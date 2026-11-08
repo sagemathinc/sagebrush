@@ -650,3 +650,197 @@ class X:
 for v in (X(), 2.0, 2**70, 2**63, -1, None, "2", True, 7):
     b = io.StringIO("abcdef"); b.read(3); log.clear()
     print("stringio.truncate", repr(v)[:10], t(lambda: b.truncate(v)), b.getvalue(), b.tell(), log)
+
+
+print("-- r3 (TESTS): a non-final chunk's held tails, UTF-32's, a lone BOM at EOF, a raw stream's lengths, BlockingIOError's counts, a detached wrapper (@sagebrush-grader's probes)")
+import io
+
+def t(f):
+    try:
+        return repr(f())
+    except Exception as e:
+        return "%s: %s" % (type(e).__name__, e)
+
+class Src(io.BufferedIOBase):
+    # (a buffer handing out given chunks, one per read1; counts the calls)
+    def __init__(self, chunks):
+        self.c = list(chunks); self.n = 0
+    def readable(self): return True
+    def read1(self, size=-1):
+        self.n += 1
+        return self.c.pop(0) if self.c else b""
+    def read(self, size=-1):
+        out = b"".join(self.c); self.c = []; self.n += 1
+        return out
+
+def rd(chunks, k, enc="utf-8", errors="strict"):
+    s = Src(chunks)
+    tw = io.TextIOWrapper(s, encoding=enc, errors=errors)
+    return t(lambda: tw.read(k)), s.n
+
+print("-- U: an invalid UTF-8 tail at a chunk's end is decoded at once, not held")
+for tail in (b"\xe0\x80", b"\xed\xa0", b"\xed\xbf", b"\xed\x9f", b"\xf0\x80", b"\xf4\x90", b"\xc0", b"\xc1", b"\xf5", b"\xf7", b"\xe0\x9f", b"\xf0\x8f\x80"):
+    for errors in ("strict", "replace"):
+        print(tail, errors, rd([b"ok" + tail, b"x"], 3, "utf-8", errors))
+    print(tail, "surrogatepass", rd([b"ok" + tail, b"\x80x"], 4, "utf-8", "surrogatepass"))
+print("-- W4: utf-32-le holds len % 4")
+print(rd([b"a\x00\x00\x00b\x00", b"\x00\x00"], 1, "utf-32-le"), rd([b"a\x00\x00\x00b\x00", b"\x00\x00"], 2, "utf-32-le"))
+print(rd([b"a\x00\x00\x00\x00\x00", b"b\x00"], 1, "utf-32-be"))
+print("-- X1: a lone BOM prefix at EOF is the codec's truncated-data error")
+for enc, raw in (("utf-16", b"\xff"), ("utf-16", b"\xfe"), ("utf-32", b"\xff\xfe"), ("utf-32", b"\x00\x00\xfe"), ("utf-32", b"\xff")):
+    for errors in ("strict", "replace"):
+        print(enc, raw, errors, t(lambda: io.TextIOWrapper(io.BytesIO(raw), encoding=enc, errors=errors).read()))
+
+class RawW(io.RawIOBase):
+    def __init__(self, rets):
+        self.rets = list(rets); self.got = []
+    def writable(self): return True
+    def write(self, b):
+        self.got.append(bytes(b))
+        return self.rets.pop(0) if self.rets else len(b)
+
+print("-- B5: a raw write() returning a negative length")
+for rets in ([-1], [-5], [100]):
+    r = RawW(rets); bw = io.BufferedWriter(r, 4)
+    print(rets, t(lambda: bw.write(b"abcdefgh")), r.got)
+    r.rets = []
+    r = RawW(rets); bw = io.BufferedWriter(r, 8)
+    print(rets, t(lambda: bw.write(b"abc")), t(bw.flush), r.got)
+    r.rets = []
+
+print("-- B6: BlockingIOError's characters_written")
+for rets in ([None], [2, None], [3, 1, None], [4, None]):
+    r = RawW(rets); bw = io.BufferedWriter(r, 4)
+    try:
+        print(rets, bw.write(b"abcdefghijkl"), r.got)
+    except BlockingIOError as e:
+        print(rets, "BlockingIOError", e.args, e.characters_written, r.got)
+    r.rets = []
+    r = RawW(rets); bw = io.BufferedWriter(r, 4)
+    bw.write(b"ab")
+    try:
+        print(rets, "after ab", bw.write(b"cdefghij"), r.got)
+    except BlockingIOError as e:
+        print(rets, "after ab BlockingIOError", e.args, e.characters_written, r.got)
+    except Exception as e:
+        print(rets, "after ab", type(e).__name__, e, r.got)
+    r.rets = []
+
+print("-- M1: flush of a closed BufferedWriter")
+bw = io.BufferedWriter(io.BytesIO()); bw.close()
+print(t(bw.flush), t(lambda: bw.write(b"x")))
+print("-- M7/M8: a detached TextIOWrapper")
+for call in (lambda tw: tw.reconfigure(), lambda tw: tw.reconfigure(errors=1), lambda tw: tw.reconfigure(newline=1),
+             lambda tw: tw.reconfigure(line_buffering=True), lambda tw: tw.write("x"), lambda tw: tw.write(1), lambda tw: tw.write(b"x")):
+    tw = io.TextIOWrapper(io.BytesIO(), encoding="utf-8"); tw.detach()
+    print(t(lambda: call(tw)))
+
+
+print("-- r3 (TESTS): del of an exported bytearray, b2a_base64's newline __bool__ running while the buffer is exported")
+import binascii
+
+def t(f):
+    try:
+        return repr(f())
+    except Exception as e:
+        return "%s: %s" % (type(e).__name__, e)
+
+print("-- D2/D4: del of an exported bytearray (b2a_base64's newline __bool__ runs with the buffer exported)")
+for k in (0, -1, 3, slice(0, 1), slice(1, 1), slice(3, 3), slice(None, None, 2), slice(5, 1, 2), slice(0, 0, -1), slice(1, 1, 3), 9):
+    ba = bytearray(b"abcd")
+    seen = []
+    class N:
+        def __bool__(self):
+            try:
+                del ba[k]
+                seen.append("deleted")
+            except Exception as e:
+                seen.append("%s: %s" % (type(e).__name__, e))
+            return False
+    print(k, t(lambda: binascii.b2a_base64(ba, newline=N())), seen, bytes(ba))
+ba = bytearray(b"abcd"); del ba[0]; del ba[5:1:2]; del ba[1:1]; print(bytes(ba))
+
+
+print("-- r3: BufferedWriter when the raw stream would block (C's buffering and counts), or raises")
+import io
+def t(f):
+    try: return repr(f())
+    except BaseException as e: return "%s: %s %r" % (type(e).__name__, e, getattr(e, "characters_written", "-"))
+class RawW(io.RawIOBase):
+    def __init__(self, rets): self.rets = list(rets); self.got = []
+    def writable(self): return True
+    def write(self, b):
+        self.got.append(bytes(b))
+        r = self.rets.pop(0) if self.rets else len(b)
+        if isinstance(r, BaseException): raise r
+        return r
+for bs, pre, data, rets in [(4, b"", b"abcd", []), (4, b"", b"abcde", []), (4, b"ab", b"cd", []), (4, b"ab", b"cdef", []),
+        (4, b"", b"abcde", [None]), (4, b"", b"abcd", [None]), (4, b"", b"abcdefgh", [3, None]), (4, b"", b"abcdefgh", [4, None]),
+        (4, b"ab", b"c", [None]), (4, b"ab", b"cdef", [None]), (4, b"ab", b"cdef", [1, None]), (4, b"abc", b"de", [1, None]),
+        (4, b"ab", b"cdefgh", [BlockingIOError(11, "x", 1)]), (4, b"", b"abcdefgh", [BlockingIOError(11, "x", 1)]),
+        (4, b"", b"abcdefgh", [BlockingIOError(11, "x")]), (4, b"ab", b"cdefgh", [BlockingIOError(11, "x")]), (4, b"ab", b"cdefgh", [ValueError("v")])]:
+    r = RawW([]); bw = io.BufferedWriter(r, bs)
+    if pre: bw.write(pre)
+    r.rets = list(rets)
+    a = t(lambda: bw.write(data))
+    g = list(r.got); r.rets = []
+    print(bs, pre, data, rets, "|", a, g, "|", t(bw.flush), r.got[len(g):], t(bw.tell))
+r = RawW([None]); bw = io.BufferedWriter(r, 4); bw.write(b"ab")
+print("flush blocked", t(bw.flush), t(bw.flush), r.got)
+r = RawW([1, None]); bw = io.BufferedWriter(r, 4); bw.write(b"abc")
+print("flush partial", t(bw.flush), r.got, t(bw.flush), r.got)
+
+
+print("-- r3: a detached or closed wrapper: C's order of checks")
+import io
+def t(f):
+    try: return repr(f())
+    except BaseException as e: return "%s: %s" % (type(e).__name__, e)
+for kw in ({"newline": "x"}, {"encoding": 1}, {"encoding": "klingon"}, {"line_buffering": 2.0}, {"write_through": "s"}, {"errors": 1, "newline": 1}, {"newline": 1, "encoding": 1}, {"line_buffering": 2**70}):
+    tw = io.TextIOWrapper(io.BytesIO(), encoding="utf-8"); tw.detach()
+    print(kw, t(lambda: tw.reconfigure(**kw)))
+tw = io.TextIOWrapper(io.BytesIO(), encoding="utf-8"); tw.detach()
+for f in (lambda: tw.read("x"), lambda: tw.read(1.5), lambda: tw.readline("x"), lambda: tw.seek("x"), lambda: tw.seek(0, "x"), lambda: tw.truncate("x")):
+    print(t(f))
+
+import io
+def t(f):
+    try: return repr(f())
+    except BaseException as e: return "%s: %s" % (type(e).__name__, e)
+def rd():
+    tw = io.TextIOWrapper(io.BytesIO(b"abc"), encoding="utf-8"); tw.read(1); return tw
+def det():
+    tw = io.TextIOWrapper(io.BytesIO(b"abc"), encoding="utf-8"); tw.detach(); return tw
+for kw in ({"encoding": 1, "errors": 1}, {"errors": 1, "encoding": 1}, {"encoding": "x", "line_buffering": 2.0}, {"newline": "x", "line_buffering": 2.0},
+           {"newline": 1}, {"newline": "x", "encoding": 1}, {"errors": 1, "newline": "x"}, {"encoding": "x", "newline": "x"}, {"line_buffering": 2.0, "write_through": "s"}, {"encoding": "klingon", "line_buffering": 2.0}):
+    print(kw, "| read:", t(lambda: rd().reconfigure(**kw)), "| detached:", t(lambda: det().reconfigure(**kw)))
+c = io.TextIOWrapper(io.BytesIO(b"abc"), encoding="utf-8"); c.close()
+print(t(lambda: c.reconfigure(newline=1)), t(lambda: c.reconfigure(line_buffering=True)), t(lambda: c.reconfigure(encoding="latin-1")), t(lambda: c.reconfigure()))
+
+import io
+def t(f):
+    try: return repr(f())
+    except BaseException as e: return "%s: %s" % (type(e).__name__, e)
+c = io.TextIOWrapper(io.BytesIO(b"abc"), encoding="utf-8"); c.close()
+w = io.TextIOWrapper(io.BufferedWriter(io.BytesIO()), encoding="utf-8")
+print(t(lambda: c.read("x")), t(lambda: c.readline("x")), t(lambda: c.write(1)), t(lambda: c.read(2**70)), t(lambda: w.read("x")), t(lambda: w.read(1)), t(lambda: c.read()), t(lambda: c.readline()))
+
+import io
+def t(f):
+    try: return repr(f())
+    except BaseException as e: return "%s: %s" % (type(e).__name__, e)
+c = io.TextIOWrapper(io.BytesIO(b"abc\n"), encoding="utf-8"); c.close()
+print(t(lambda: next(c)), t(lambda: c.readlines()), t(lambda: list(c)), t(lambda: c.readline(-1)), t(lambda: c.read(2)), t(lambda: c.tell()), t(lambda: c.seek(0)))
+c = io.TextIOWrapper(io.BytesIO(b"abc\n"), encoding="utf-8"); c.readline(); c.buffer.close()
+print(t(lambda: c.readline()), t(lambda: next(c)))
+
+import io
+def t(f):
+    try: return repr(f())
+    except BaseException as e: return "%s: %s" % (type(e).__name__, e)
+class NS(io.BytesIO):
+    def seekable(self): return False
+c = io.TextIOWrapper(NS(b"abc\n"), encoding="utf-8"); c.close()
+print(t(lambda: c.tell()), t(lambda: c.seek(0)), t(lambda: c.truncate()))
+c = io.TextIOWrapper(io.BytesIO(b"abc\nd\n"), encoding="utf-8"); next(c)
+print(t(lambda: c.tell())); c.close(); print(t(lambda: c.tell()))
