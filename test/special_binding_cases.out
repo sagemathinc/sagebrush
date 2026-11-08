@@ -183,3 +183,11 @@ b'[by]' b'by' [0, 0]
 17
 None ('kw', 'CKW', 1, [('y', 4)]) ('kw', 'CKW', 0, [('z', 5)]) [('CKW', 1, [('x', 2)]), ('CKW', 0, []), ('CKW', 0, [])]
 'B200' [200001]
+-- r2 TESTS pins (grader): P166, T140, R1c, R7b, R6b, R1b (__float__ called once)
+P166 meta __getattr__ __radd__
+P166 'B.__radd__'
+T140 'GM2' [3]
+R1c '7.000000'
+R7b '2.500000' '1.500000'
+R6b {'s': 1} [0]
+R1b '2.500000' '2.500000e+00' [0, 0]

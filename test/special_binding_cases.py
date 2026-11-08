@@ -670,3 +670,75 @@ class Rec200:
 r200 = Rec200()
 B200 = type("B200", (), {"__init__": r200.m})
 print(t(lambda: type(B200(*range(200000))).__name__), r200.n)
+
+print("-- r2 TESTS pins (grader): P166, T140, R1c, R7b, R6b, R1b (__float__ called once)")
+
+
+class GRG:
+    def ga(self, name):
+        print("P166 meta __getattr__", name)
+        raise AttributeError(name)
+
+
+grgx = GRG()
+
+
+class GM1(type):
+    __getattr__ = grgx.ga
+
+
+class GA1(metaclass=GM1):
+    def __add__(self, o):
+        return "A.__add__"
+
+
+class GB1(GA1):
+    def __radd__(self, o):
+        return "B.__radd__"
+
+
+print("P166", t(lambda: GA1() + GB1()))
+gri = Rec(None)
+
+
+class GM2(type):
+    __init__ = gri.m
+
+
+class GB2(metaclass=GM2):
+    pass
+
+
+gri.calls.clear()
+print("T140", t(lambda: type(type("GC2", (GB2,), {})).__name__), gri.calls)
+
+
+class GCall:
+    def __init__(self, v):
+        self.v = v
+
+    def __call__(self, *a):
+        return self.v
+
+
+GPX = type("GPX", (), {"__index__": GCall(7)})
+print("R1c", t(lambda: "%f" % GPX()))
+GPY = type("GPY", (), {"__float__": GCall(2.5)})
+print("R7b", t(lambda: "%f" % GPY()), t(lambda: format(type("GIY", (int,), {"__float__": GCall(1.5)})(2), "f")))
+grgk, grst = Rec(((3,), {"k": 4})), Rec({"s": 1})
+GKS = type("GKS", (), {"__getnewargs_ex__": grgk.m, "__getstate__": grst.m})
+print("R6b", t(lambda: GKS().__reduce_ex__(2)[2]), grst.calls)
+
+
+class GFS(float):
+    pass
+
+
+grfs = Rec(GFS(2.5))
+GPZ = type("GPZ", (), {"__float__": grfs.m})
+import warnings
+
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore")
+    # (R1b also pins "called once": a float subclass result, which the old code called again)
+    print("R1b", t(lambda: "%f" % GPZ()), t(lambda: "%e" % GPZ()), grfs.calls)
