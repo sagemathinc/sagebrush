@@ -892,7 +892,7 @@ for nbase in (int, float, object):
     for nname in ("__float__", "__index__", "__int__"):
         NC = type(nbase.__name__ + "N" + nname, (nbase,), {nname: None})
         no = NC(2) if nbase is not object else NC()
-        print(nbase.__name__, nname, "|", " | ".join(tb(lambda: f % no) for f in ("%f", "%d", "%x", "%c", "%e")), "| bytes", " | ".join(tb(lambda: f % no) for f in (b"%f", b"%d", b"%c")), "| format", tb(lambda: format(no, "f")), tb(lambda: format(no, "d")) if nbase is int else "")
+        print(nbase.__name__, nname, "|", " | ".join(tb(lambda: f % no) for f in ("%f", "%d", "%x", "%c", "%e")), "| bytes", " | ".join(tb(lambda: f % no) for f in (b"%f", b"%d", b"%c")), "| format", tb(lambda: format(no, "f")), *([tb(lambda: format(no, "d"))] if nbase is int else []))
 for nbase in (object, float):
     for iv, xv in ((7, 8), ("s", 8), (7, "s"), (None, 8), (7, None)):
         nd = {"__int__": None if iv is None else (lambda self, v=iv: v), "__index__": None if xv is None else (lambda self, v=xv: v)}
