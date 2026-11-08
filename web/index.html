@@ -1389,16 +1389,24 @@ const presence = (() => {
 // ------------------------------------------------------------ the console
 let consoleUi = null, consoleKernel = null, consoleNb = null;
 const consoleEl = $("#console"), consoleBtn = $("#consolebtn");
-// (the console and the terminal on your computer share the page's bottom: the one chosen or touched last is in front)
+// (the console, the terminal on your computer and the Terminal share the page's bottom: the one chosen or touched last
+// is in front (z-index 40), above every other panel and below the menus (41); the rest keep their own order
+// (the Terminal 39, the remote terminal 6, the console 5) (plan-term-xterm r2.7 PR 2))
+let shellTerm = null;
 function panelToFront(el) {
-  for (const p of [consoleEl, rterm?.el]) if (p) p.style.zIndex = p === el ? "6" : "5";
+  for (const p of [consoleEl, rterm?.el, shellTerm?.root]) if (p) p.style.zIndex = p === el ? "40" : "";
 }
 consoleEl.addEventListener("pointerdown", () => panelToFront(consoleEl));
-// (room below the notebook for whichever bottom panel is open, the taller of the two: its last cells stay reachable)
+// (room below the notebook for whichever bottom panels are open, the tallest: its last cells stay reachable; the
+// Terminal's height includes its lift above the page's bottom notices, web/shell/panel.ts place())
 function bottomRoom() {
-  const h = Math.max(consoleEl.hidden ? 0 : consoleEl.offsetHeight, rterm?.el?.offsetHeight ?? 0);
-  document.body.style.paddingBottom = h ? h + "px" : "";
+  const t = shellTerm?.shown ? parseFloat(getComputedStyle(document.body).getPropertyValue("--sb-term-h")) || shellTerm.root.offsetHeight : 0;
+  const h = Math.max(consoleEl.hidden ? 0 : consoleEl.offsetHeight, rterm?.el?.offsetHeight ?? 0, t);
+  const v = h ? h + "px" : "";
+  // (only a change: the Terminal re-places itself on the body's style changes)
+  if (document.body.style.paddingBottom !== v) document.body.style.paddingBottom = v;
 }
+addEventListener("sb-term-place", bottomRoom);
 async function toggleConsole(show = consoleEl.hidden) {
   consoleEl.hidden = !show;
   if (show) panelToFront(consoleEl);
@@ -2834,12 +2842,15 @@ $("#boardbtn").onclick = () => toBoard("/board/?recent=" + encodeURIComponent(nb
       let openTerminal;
       try { ({ openTerminal } = await import(mod)); } catch (e) { savedEl.textContent = "the terminal didn't load: " + (e?.message ?? e); return; }
       if (term) return term.toggle();
-      term = openTerminal({ ws: w, S, open: openPath, here, tab: TAB });
-      term.onEnd = () => { term = null; window.__sbTerm = null; };
+      term = shellTerm = openTerminal({ ws: w, S, open: openPath, here, tab: TAB });
+      term.onEnd = () => { term = shellTerm = null; window.__sbTerm = null; bottomRoom(); };
+      term.root.addEventListener("pointerdown", () => panelToFront(term?.root));
       // (the tests' handle, on a local host only: web/shell/test-panel-page.mjs)
       if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) window.__sbTerm = term;
     }
     term.toggle();
+    if (term.shown) panelToFront(term.root);
+    bottomRoom();
   };
 }
 // (to the board once this notebook is saved, every change of it; not saved:

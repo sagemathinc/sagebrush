@@ -1,18 +1,21 @@
 // ci: none (not run by CI before test discovery, Nov 2 2026: a wiring candidate)
-// The terminal panel's main-thread gates (plan-bash-shell r8c E5.5), in headless Chromium against web/dist built with
-// SAGEBRUSH_TERMINAL=1: from "the command finished" (its outcome in) to the first and the last slice's paint (the
-// animation frame after it), over 20 runs of each control, with no Long Task over 50 ms and every slice <= 50 ms.
-//   C1: 1 MiB of alternating recognised SGR styles (reaches the 20 000-run cap)
-//   C2: 1 MiB of dense visible controls and unknown escapes, as ONE line (no line end): its pages of 4 Ki units
-//   C3: 1 MiB of plain text in 5 000+ lines
+// The terminal panel's main-thread gates (plan-bash-shell r8c E5.5, kept unchanged for the Terminal on xterm: plan-term-
+// xterm r2.7, daybreak4 P1), in headless Chromium against web/dist: from "the command finished" (its outcome in) to the
+// first and the last paint (the animation frame after the first 8 KiB drawn, and after all of it), over 20 runs of each
+// control, with no Long Task over 50 ms and every write (one 64 KiB piece, to xterm's callback) <= 50 ms.
+//   C1: 1 MiB of alternating recognised SGR styles
+//   C2: 1 MiB of dense controls and escapes, as ONE line (no line end)
+//   C3: 1 MiB of plain text in 5 000+ lines (past the 6 000-row scrollback with the rows before it)
 //   C4: a small command (the common case)
+//   C5: C2 again with the window resized during the run (xterm reflows its rows); C6: C3 run twice back to back (repeated output)
 // The controls are written into the workspace once, through the shell (untimed); each timed run is `cat` of one, with
-// `clear` between runs.  The parser (sb-term:parse), the patcher (sb-term:patch) and the paint path (first-paint,
-// last-paint) are reported separately: web/shell/panel.ts's performance measures.
-//   SAGEBRUSH_TERMINAL=1 bun web/build.ts && bun web/shell/test-panel-gates.mjs [--runs N]
+// `clear` between runs.  The writes (sb-term:write) and the paint path (first-paint, last-paint) are reported
+// separately: web/shell/panel.ts's and term-writer.ts's performance measures.  screenReaderMode on is the shipping
+// configuration and the binding arm; SRM=0 runs the paired diagnostic arm with it off.
+//   bun web/build.ts && bun web/shell/test-panel-gates.mjs [--runs N] [--only C2]
 //   GATES=enforce: exit 1 on a gate miss (the granted timing box, recorded hardware); otherwise a report only.
 // CI does not run this script (N-326-1): shared runners' timings decide nothing, and E5.5's gates are judged on the
-// timing box.  CI runs the panel's behaviour (test-panel-render.mjs, test-panel-page.mjs, test-panel-pages-copy.mjs).
+// timing box.  CI runs the panel's behaviour (test-panel-page.mjs, test-panel-pages-copy.mjs and the unit tests).
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { cpus, totalmem, tmpdir } from "node:os";
@@ -77,21 +80,25 @@ try {
   if (!(await until(`(() => { const b = document.querySelector("#termbtn"); return !!b && !b.hidden; })()`))) throw new Error("no ⋯ ▸ Terminal");
   await evaluate(`document.querySelector("#termbtn").click()`);
   if (!(await until(`!!document.querySelector(".sb-term") && document.querySelector(".sb-term").dataset.startMs !== undefined`))) throw new Error("the shell didn't start");
-  // one command: Enter, then wait until it is done and its last paint is measured
+  if (process.env.SRM === "0") await evaluate(`window.__sbTerm.term.options.screenReaderMode = false`);
+  // one command: the line, Enter (the panel's own key path), then wait until it is done and its last paint is measured
   const run = (cmd) => evaluate(`(async () => {
-    const ta = document.querySelector(".sb-term textarea");
+    const t = window.__sbTerm;
     document.querySelector(".sb-term-status").textContent = "";
     const n0 = performance.getEntriesByName("sb-term:last-paint").length;
-    ta.value = ${JSON.stringify(cmd)};
-    ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    t.editor.reset(${JSON.stringify(cmd)});
+    t.onKey({ key: "Enter" }, null);
     for (let i = 0; i < 1200 && !(document.querySelector(".sb-term-status").textContent && performance.getEntriesByName("sb-term:last-paint").length > n0); i++) await new Promise((r) => setTimeout(r, 50));
+    // (then the writer's own barrier: the prompt and any redraw queued after the output drawn too, so a run's
+    // measures and Long Tasks are collected only once all its work is on the screen; daybreak4)
+    await Promise.race([t.writer.idle(), new Promise((r) => setTimeout(r, 60000))]);
+    if (t.writer.writing) return "timeout (the writer didn't drain in 60 s)";
     return performance.getEntriesByName("sb-term:last-paint").length > n0 ? document.querySelector(".sb-term-status").textContent : "timeout (no last paint in 60 s)";
   })()`);
   // (clear, and wait until it has: no command shown and none running, so a timed run never collides with it)
   const clear = async () => {
-    await evaluate(`(() => { const ta = document.querySelector(".sb-term textarea"); ta.value = "clear";
-      ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })); })()`);
-    if (!(await until(`document.querySelectorAll(".sb-term-cmd").length === 0 && !document.querySelector(".sb-term").classList.contains("running")`, 10000))) throw new Error("clear didn't clear");
+    await evaluate(`(() => { const t = window.__sbTerm; t.editor.reset("clear"); t.onKey({ key: "Enter" }, null); })()`);
+    if (!(await until(`!window.__sbTerm.writer.writing && !document.querySelector(".sb-term").classList.contains("running")`, 10000))) throw new Error("clear didn't clear");
   };
   // the controls, written once (untimed)
   const MiB = 1048576;
@@ -104,13 +111,14 @@ try {
   await run("mkdir -p /gate");
   for (const [c, cmd] of Object.entries(controls).filter(([c]) => !ONLY || c === ONLY)) {
     const st = await run(cmd);
-    const size = await run(`wc -c < /gate/${c.toLowerCase()}.txt`).then(() => evaluate(`[...document.querySelectorAll(".sb-term-cmd")].at(-1).querySelector(".sb-term-out").textContent.trim()`));
+    const size = await run(`wc -c < /gate/${c.toLowerCase()}.txt`).then(() => evaluate(`window.__sbTerm.screenText.split("\\n").at(-2).trim()`));
     console.log(`control ${c}: written (${st}), ${size} bytes`);
     if (!(Number(size) >= MiB * 0.95)) fails.push(`control ${c} is ${size} bytes, not about 1 MiB`);
   }
   await evaluate(`window.__long = []; new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__long.push([e.startTime, e.duration]); }).observe({ type: "longtask", buffered: false })`);
   const pct = (xs, p) => { const s = [...xs].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.ceil((p / 100) * s.length) - 1)]; };
-  for (const [c, cmd] of [["C1", "cat /gate/c1.txt"], ["C2", "cat /gate/c2.txt"], ["C3", "cat /gate/c3.txt"], ["C4", "echo hi"]].filter(([c]) => !ONLY || c === ONLY)) {
+  const resize = async (w) => send("Emulation.setDeviceMetricsOverride", { width: w, height: 800, deviceScaleFactor: 1, mobile: false });
+  for (const [c, cmd] of [["C1", "cat /gate/c1.txt"], ["C2", "cat /gate/c2.txt"], ["C3", "cat /gate/c3.txt"], ["C4", "echo hi"], ["C5", "cat /gate/c2.txt"], ["C6", "cat /gate/c3.txt; cat /gate/c3.txt"]].filter(([c]) => !ONLY || c === ONLY)) {
     const first = [], last = [], parse = [], patch = [], longs = [];
     for (let i = 0; i < RUNS; i++) {
       if (Date.now() > DEADLINE) {
@@ -119,13 +127,16 @@ try {
       }
       await clear();
       await evaluate(`performance.clearMeasures(); window.__long = []; window.__t0 = performance.now()`);
-      const st = await run(cmd);
+      const p = run(cmd);
+      // (C5: the window narrowed during the run, then back: xterm reflows its rows meanwhile)
+      if (c === "C5") await new Promise((r) => setTimeout(r, 30)).then(() => resize(700)).then(() => new Promise((r) => setTimeout(r, 100))).then(() => resize(1100));
+      const st = await p;
       if (st !== "done") {
         fails.push(`${c} run ${i}: status ${st}`);
         continue;
       }
       const m = await evaluate(`(() => { const g = (n) => performance.getEntriesByName(n).map((e) => e.duration);
-        return { first: g("sb-term:first-paint"), last: g("sb-term:last-paint"), parse: g("sb-term:parse"), patch: g("sb-term:patch"),
+        return { first: g("sb-term:first-paint"), last: g("sb-term:last-paint"), parse: g("sb-term:write"), patch: [],
                  longs: window.__long.filter(([t]) => t >= window.__t0).map(([, d]) => d) }; })()`);
       first.push(m.first.at(-1));
       last.push(m.last.at(-1));
@@ -162,8 +173,8 @@ try {
   rmSync(profile, { recursive: true, force: true });
 }
 {
-  console.log(`\nE5.5 gates, ${RUNS} runs per control; ${browser}; ${cpus().length} x ${cpus()[0]?.model}, ${(totalmem() / 2 ** 30).toFixed(0)} GiB`);
-  console.log("control | first paint p50/p95/max ms | last paint p50/p95/max ms | slices/run | parse max | patch max | slice max | long tasks (max ms)");
+  console.log(`\nE5.5 gates, ${RUNS} runs per control; screenReaderMode ${process.env.SRM === "0" ? "off (the diagnostic arm)" : "on (the binding arm)"}; ${browser}; ${cpus().length} x ${cpus()[0]?.model}, ${(totalmem() / 2 ** 30).toFixed(0)} GiB`);
+  console.log("control | first paint p50/p95/max ms | last paint p50/p95/max ms | writes/run | write max | - | slice max | long tasks (max ms)");
   for (const r of rows) {
     const f = (a) => a.map((v) => v.toFixed(1)).join(" / ");
     console.log(`${r.control} | ${f(r.first)} | ${f(r.last)} | ${r.slicesPerRun.toFixed(1)} | ${r.parseMax.toFixed(1)} | ${r.patchMax.toFixed(1)} | ${r.sliceMax.toFixed(1)} | ${r.longtasks} (${r.longMax.toFixed(1)})`);
