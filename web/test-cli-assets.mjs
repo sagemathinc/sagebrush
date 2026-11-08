@@ -46,8 +46,8 @@ try {
   // every sagebrush-*.js the page names, KaTeX's stylesheet, the notices
   const names = [...new Set(page.match(/sagebrush-[a-z0-9]+\.js\b/g) ?? [])].filter((n) => !["sagebrush-worker.js", "sagebrush-notebook.js"].includes(n));
   // (and the files the page names only through its code, lazily: the export's chunk and its worker, whose hyphenated
-  // name the pattern above can't catch (grader's N-1 on E1); each must be served)
-  for (const f of ["sagebrush-export.js", "sagebrush-export-worker.js"]) if (!names.includes(f)) names.push(f);
+  // name the pattern above can't catch (grader's N-1 on E1); each must be served; and the terminal on your computer's, T-3)
+  for (const f of ["sagebrush-export.js", "sagebrush-export-worker.js", "sagebrush-remote-terminal.js"]) if (!names.includes(f)) names.push(f);
   // (each app-only file must be one the page names: otherwise its 404 proves nothing)
   for (const n of APP_ONLY) {
     const named = names.includes(n);

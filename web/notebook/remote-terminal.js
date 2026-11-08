@@ -4,7 +4,8 @@
 // view is any object with
 //
 //   write(bytes: Uint8Array, done: () => void)   bytes in arrival order; done() once they are on screen
-//   reset?()                                      optional; the replay's own leading reset (\x1bc) clears it anyway
+//   reset?()                                      optional, at the replay; its own leading reset (\x1bc) clears it anyway
+//   live?()                                       optional, at the end of the replay: what follows is live output
 //
 // so xterm (whichever build) sits behind a thin adapter and this module is tested without it.
 //
@@ -20,6 +21,8 @@
 //   rest waits here, in the page, never in the runner.
 // - "elsewhere": another page opened this session; this page's grant has ended.
 
+import { b64url, jwkThumbprint } from "./remote-client.js";
+
 export const TERMINAL = {
   inFrame: 16_384,        // decoded bytes in one input frame (TERMINAL_LIMITS["in"])
   inPending: 64 * 1024,   // sent but not inacked (terminal_output.IN_PENDING)
@@ -29,13 +32,35 @@ export const TERMINAL = {
 export const SYNTHETIC_BASE = "https://local.sagebrush.invalid/api/compute/v1";
 const OUT_TYPES = new Set(["replay", "out", "live", "inack", "exit", "opened", "error"]);
 
-const b64u = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-
 /** The URL an open's proof is made over (terminal.py open_htu). */
 export async function openHtu(remoteId, gen, body, subtle = globalThis.crypto.subtle) {
   const digest = new Uint8Array(await subtle.digest("SHA-256", new TextEncoder().encode(body)));
-  const q = new URLSearchParams({ remote: remoteId, gen: String(gen), body: b64u(digest) });
+  const q = new URLSearchParams({ remote: remoteId, gen: String(gen), body: b64url(digest) });
   return `${SYNTHETIC_BASE}/terminal/open?${q}`;
+}
+
+/**
+ * The page's DPoP key for its terminals: a new non-extractable P-256 pair, its public JWK and thumbprint, and
+ * proof(htm, htu, token, nonce).  Unlike RemoteClient.proof, the htu is signed whole, query included: the open's
+ * URL binds the remote, the generation and the body in its query (T5).
+ */
+export async function terminalKey(subtle = globalThis.crypto.subtle) {
+  const pair = await subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, ["sign", "verify"]);
+  const { kty, crv, x, y } = await subtle.exportKey("jwk", pair.publicKey);
+  const jwk = { kty, crv, x, y };
+  const enc = new TextEncoder();
+  const part = (o) => b64url(enc.encode(JSON.stringify(o)));
+  return {
+    jwk,
+    jkt: await jwkThumbprint(jwk),
+    async proof(htm, htu, token, nonce) {
+      const ath = b64url(await subtle.digest("SHA-256", enc.encode(token)));
+      const claims = { jti: b64url(globalThis.crypto.getRandomValues(new Uint8Array(16))), htm, htu, iat: Math.floor(Date.now() / 1000), ath, ...(nonce ? { nonce } : {}) };
+      const input = `${part({ typ: "dpop+jwt", alg: "ES256", jwk })}.${part(claims)}`;
+      // (WebCrypto's ECDSA signature is r || s, 64 bytes: JWS's ES256 form)
+      return `${input}.${b64url(await subtle.sign({ name: "ECDSA", hash: "SHA-256" }, pair.privateKey, enc.encode(input)))}`;
+    },
+  };
 }
 
 /** Canonical base64 of bytes (chunked so a 16 KiB frame doesn't overflow an argument list). */
@@ -143,6 +168,7 @@ export class RemoteTerminal {
       case "replay":
         return this.o.view.reset?.();
       case "live":
+        this.o.view.live?.();
         return this._emit({ t: "live" });
       case "out": {
         const bytes = fromB64(m.b);

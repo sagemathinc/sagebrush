@@ -67,7 +67,7 @@ RELAY_LIMITS = {
     "outTotal": PAIR_LIMITS["outTotal"],
 }
 _SAFE = 2 ** 53 - 1
-CHANNELS = ("kernel", "terminal")  # (terminal addendum T1.4 §T2; terminal pages served only when asked, until T-1b)
+CHANNELS = ("kernel", "terminal")  # (terminal addendum T1.4 §T2; terminal pages served by default since T-3)
 TERMINAL_FRAME = 65_536  # (a terminal message's whole serialization, either way: T2's terminal row, T12-CAP-1)
 _GEN_PREFIX = re.compile(r"([1-9][0-9]{0,15})\n")
 _CONN = re.compile(r"[A-Za-z0-9_-]{1,64}")

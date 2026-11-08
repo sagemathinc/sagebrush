@@ -1,7 +1,7 @@
 """Terminals on a runner (terminal addendum T1.4, build steps T-1 and T-1b): the sessions, their PTYs and lifecycle,
 the attachment contract (T5), and each attachment's output and input paths (T3: credit, coalescing, replay, chunked
-input; terminal_output.py).  The runner's hello doesn't list the `terminal` channel yet (relay.py serves terminal
-pages only when asked) until the page's terminal (T-3) lands.
+input; terminal_output.py).  The runner's hello lists the `terminal` channel (relay.py serves terminal pages by
+default since T-3, the page's terminal: web/notebook/remote-terminal.js).
 
 A terminal page (channel `terminal`, its own generation on the peer leg) pairs with a hello like a kernel page's,
 purpose "terminal": its DPoP key, no code.  Then, on that page:

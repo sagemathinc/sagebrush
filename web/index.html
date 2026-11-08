@@ -446,6 +446,7 @@
   <button role="menuitem" id="boardbtn" title="Your latest whiteboard in this notebook's language (a new one if there is none); this notebook stays saved">Whiteboard</button>
   <button role="menuitem" id="ttbtn" aria-pressed="false" aria-controls="timetravel" title="Every past version of this notebook: look at one, or go back to it">TimeTravel</button>
   <button role="menuitem" id="termbtn" title="A bash shell on your workspace's files">Terminal</button>
+  <button role="menuitem" id="rtermbtn" hidden title="A shell on one of your own computers, set up with sagebrush remote login (preview)">Terminal on your computer…</button>
   <hr>
   <button role="menuitem" id="keysbtn" title="Keyboard shortcuts (H in command mode)">Keyboard shortcuts<kbd>H</kbd></button>
   <button role="menuitem" id="installbtn" hidden title="Sagebrush as an app on this computer: it opens in its own window and works offline">Install as an app…</button>
@@ -1058,6 +1059,20 @@ if (!REMOTE_PREVIEW) kernelPick.querySelector('option[value="gpu"]').remove();
 if (PAIRED_OFFERED) {
   kernelPick.hidden = false;
   kernelPick.addEventListener("change", useRemote);
+}
+// A terminal on one of your computers (terminals T-3; web/notebook/remote-terminal-view.ts, its own bundle
+// sagebrush-remote-terminal.js, loaded on first use): offered only with ?remote=1, as a preview.  One panel at a time;
+// choosing it again while it is open goes back to it.
+let rterm = null;
+if (REMOTE_PREVIEW) {
+  const rtermBtn = $("#rtermbtn");
+  rtermBtn.hidden = false;
+  rtermBtn.onclick = async () => {
+    if (rterm) return rterm.focus();
+    let mod;
+    try { mod = await import(new URL("sagebrush-remote-terminal.js", location.href).href); } catch (e) { savedEl.textContent = "the terminal didn't load: " + (e?.message ?? e); return; }
+    rterm ??= mod.openRemoteTerminal({ onEnd: () => { rterm = null; } });
+  };
 }
 const nb = createNotebook($("#cells"), { kernel: null, staleOnLoad: true, analyzer, reactive: REACTIVE, remoteGate: (k, page) => remoteMod?.gateFor(k, page), mystBook: () => bookAcc.mystBook() });
 const blobDbReady = openBlobDb();
