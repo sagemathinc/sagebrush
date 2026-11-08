@@ -10,7 +10,7 @@
   "baseSwGzip": 43602,
   "topology": "inventory-3span",
   "baseTopology": "legacy-2span",
-  "swRaw": 222579,
-  "swGzip": 54711,
-  "transition": "shutil (P3b-2, one lazy chunk mod-shutil, fetched on import): measured on its branch merged with master 6e1fc873, with bun 1.4.4 and node v24.21.0: sw.js raw 222515 (the group's manifest entry), over 222267, so swRaw = exact + 64 = 222579; normalized gzip-9 54647, over 54643, so swGzip = exact + 64 = 54711"
+  "swRaw": 223468,
+  "swGzip": 54908,
+  "transition": "Rill A1.1 (#847 r2): the rill lazy chunks in LAZY and DIGESTS, the hidden R (Rill) item in the inventory, and sw.js's inventory() dropping hidden items (@sagebrush's ruling: Rill is invisible on the page until A2): measured on its branch merged with master 6aa08ee5, with bun 1.4.4 and node v24.21.0: sw.js raw 223404, over 222579, so swRaw = exact + 64 = 223468; normalized gzip-9 54844, over 54711, so swGzip = exact + 64 = 54908"
 }
