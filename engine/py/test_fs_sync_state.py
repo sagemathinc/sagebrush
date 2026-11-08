@@ -69,7 +69,7 @@ def test_one_run_per_pair():
             St.Base.open(d, *IDENT)
             raise AssertionError("a second run of the same pair was let in")
         except St.Refused as e:
-            assert e.code == 1 and e.message == "another fs-sync of this folder is running", e.message
+            assert e.code == 1 and e.message == "Another fs-sync of this folder is running. Wait for it to finish, then run it again.", e.message
         other = St.Base.open(d, "acct", "grant1", "/home/x/thesis", "/Other")       # another pair: fine
         other.close()
         b.close()
@@ -194,6 +194,7 @@ def test_damaged_or_foreign_is_set_aside():
             else:
                 other = os.path.join(os.path.dirname(path), St.pair_id(*IDENT[:3], "/Other") + ".sqlite")
                 shutil.copyfile(path, other)
+                os.chmod(other, 0o600)                                  # (private, as fs-sync makes its records)
                 path = other
             ident = IDENT if kind != "foreign" else IDENT[:3] + ("/Other",)
             b = St.Base.open(d, *ident)
@@ -208,6 +209,36 @@ def test_damaged_or_foreign_is_set_aside():
                 b.close()
         finally:
             shutil.rmtree(d)
+
+
+def test_only_the_latest_set_aside_base_is_kept():
+    # (@sagebrush's ruling on sync-client's D1) a version flip-flop sets a base aside every run: only the latest stays
+    d = tmp()
+    try:
+        pairs = os.path.join(d, "pairs")
+        os.makedirs(pairs, mode=0o700)
+        bystander = os.path.join(pairs, St.pair_id(*IDENT[:3], "/Other") + ".sqlite.damaged-1")
+        with open(bystander, "wb") as f:
+            f.write(b"another pair's")
+        for i in range(3):
+            b = St.Base.open(d, *IDENT)
+            b.record("a%d" % i, row(i))
+            path = b.path
+            b.close()
+            with open(path + "-wal", "wb") as f:              # (its log goes aside with it, under the same name)
+                f.write(b"stale")
+            c = sqlite3.connect(path)
+            c.execute("UPDATE meta SET v = '999' WHERE k = 'version'")
+            c.commit()
+            c.close()
+            St.Base.open(d, *IDENT).close()
+            aside = sorted(n for n in os.listdir(pairs) if n.startswith(os.path.basename(path) + ".damaged-"))
+            assert len([n for n in aside if n[-1].isdigit()]) == 1, aside             # one base (the -wal beside it)
+            stamp = aside[0].split(".damaged-")[1].split("-")[0]
+            assert all(n.split(".damaged-")[1].split("-")[0] == stamp for n in aside), aside   # one name for all its files
+        assert os.path.exists(bystander)
+    finally:
+        shutil.rmtree(d)
 
 
 def test_cap_and_wal():
@@ -279,7 +310,7 @@ def test_links_and_a_failed_open():
         os.symlink(elsewhere, path)
         b = St.Base.open(d, *IDENT)
         try:
-            assert b.damaged == "its record isn't a plain file" and b.rows() == {}, b.damaged
+            assert b.damaged == "its record isn't a plain file of yours" and b.rows() == {}, b.damaged
             assert not os.path.islink(path)
         finally:
             b.close()
@@ -291,8 +322,8 @@ def test_links_and_a_failed_open():
             try:
                 opener(link)
                 raise AssertionError("followed a link: %r" % opener)
-            except OSError:
-                pass
+            except (OSError, St.Refused) as e:
+                assert not isinstance(e, St.Refused) or "isn't a plain file of yours" in e.message, e.message
             assert not os.path.exists(os.path.join(d, "target"))
         # an open that fails after taking the lock releases it
         saved = St.Base._init
@@ -305,6 +336,227 @@ def test_links_and_a_failed_open():
         finally:
             St.Base._init = saved
         St.Base.open(d, *IDENT).close()                                             # not left locked
+        # (astra S3) a connection half set up is closed before the lock goes: in _connect's setup and after _init's BEGIN
+        real_connect, made = sqlite3.connect, []
+
+        def tracking(*a, **k):
+            made.append(real_connect(*a, **k))
+            return made[-1]
+        saved_cap = St.DB_CAP_BYTES
+        for fail in ("connect", "init"):
+            made.clear()
+            St.sqlite3.connect = tracking
+            if fail == "connect":
+                St.DB_CAP_BYTES = None                       # (the last PRAGMA's arithmetic fails, after the others)
+            else:
+                St.Base._init = staticmethod(lambda conn, ident: (conn.execute("BEGIN IMMEDIATE"),
+                                                                  (_ for _ in ()).throw(RuntimeError("boom"))))
+            try:
+                St.Base.open(d, *IDENT)
+                raise AssertionError("no failure")
+            except (TypeError, RuntimeError):
+                pass
+            finally:
+                St.sqlite3.connect, St.DB_CAP_BYTES, St.Base._init = real_connect, saved_cap, saved
+            opened = made[-1]
+            try:
+                opened.execute("SELECT 1")
+                raise AssertionError("left open after a failed %s" % fail)
+            except sqlite3.ProgrammingError:
+                pass
+            St.Lock(os.path.join(pairs, St.pair_id(*IDENT) + ".lock")).release()   # and the lock is free
+    finally:
+        shutil.rmtree(d)
+
+
+def test_folder_chain_policy():
+    # (astra, @sagebrush) who may change a folder above fs-sync's own: decided on the folder's owner, mode and group
+    import grp
+    import pwd
+    from types import SimpleNamespace as NS
+    me, uid = pwd.getpwuid(os.getuid()).pw_name, os.getuid()
+    real_getgrgid, real_getpwall = grp.getgrgid, pwd.getpwall
+    groups = {500: ["someone"], 501: [], 502: [me]}
+    others = [NS(pw_name="other", pw_uid=uid + 1, pw_gid=501)]
+    grp.getgrgid = lambda g: NS(gr_mem=groups[g])                       # (KeyError for an unknown group)
+    pwd.getpwall = lambda: [NS(pw_name=me, pw_uid=uid, pw_gid=502)] + others
+    try:
+        ok = lambda mode, owner=uid, gid=502: St._unchangeable(NS(st_mode=stat.S_IFDIR | mode, st_uid=owner, st_gid=gid))
+        assert ok(0o755) and ok(0o755, owner=0)                         # ours or root's, writable by no one else
+        assert ok(0o775, gid=502)                                       # group write, a group private to us
+        assert not ok(0o775, gid=500)                                   # a group with another member
+        assert not ok(0o775, gid=501)                                   # another account's primary group
+        assert not ok(0o775, gid=503)                                   # a group that can't be looked up
+        assert ok(0o1777, owner=0) and not ok(0o777, owner=0)           # other write: only root's and sticky (/tmp)
+        assert not ok(0o1777)                                           # sticky but ours: not trusted for others' write
+        assert not ok(0o755, owner=uid + 1)                             # someone else's
+        assert not St._unchangeable(NS(st_mode=stat.S_IFLNK | 0o755, st_uid=uid, st_gid=502))   # not a folder
+        # the records: plain files of ours, private
+        f = lambda mode, owner=uid: St._private_file(NS(st_mode=mode, st_uid=owner))
+        assert f(stat.S_IFREG | 0o600) and not f(stat.S_IFREG | 0o640) and not f(stat.S_IFREG | 0o600, owner=uid + 1)
+        assert not f(stat.S_IFLNK | 0o600) and not f(stat.S_IFIFO | 0o600)
+    finally:
+        grp.getgrgid, pwd.getpwall = real_getgrgid, real_getpwall
+
+
+def test_folder_chain_on_disk():
+    d = tmp()
+    try:
+        # missing folders are made one level at a time, 0700
+        state = os.path.join(d, "x", "y", "state")
+        St.Base.open(state, *IDENT).close()
+        for p in (os.path.join(d, "x"), os.path.join(d, "x", "y"), state, os.path.join(state, "pairs")):
+            assert stat.S_IMODE(os.stat(p).st_mode) == 0o700, p
+        # an ancestor others can write to (not sticky): refused, naming it
+        open_dir = os.path.join(d, "open")
+        os.mkdir(open_dir)
+        os.chmod(open_dir, 0o757)
+        try:
+            St.Base.open(os.path.join(open_dir, "state"), *IDENT)
+            raise AssertionError("an ancestor others can write to was trusted")
+        except St.Refused as e:
+            assert e.message == "%s isn't a folder of yours: fs-sync keeps its records there." % St._home_short(open_dir), e.message
+        assert not os.path.exists(os.path.join(open_dir, "state"))
+        # a link among the ancestors, from a checked folder: its real path is checked too
+        good, link = os.path.join(d, "good"), os.path.join(d, "via")
+        os.mkdir(good, 0o700)
+        os.symlink(good, link)
+        St.Base.open(os.path.join(link, "state"), *IDENT).close()
+        assert os.path.isdir(os.path.join(good, "state", "pairs"))
+        os.unlink(link)
+        os.symlink(open_dir, link)                                   # to a folder others can write to: refused
+        try:
+            St.Base.open(os.path.join(link, "state"), *IDENT)
+            raise AssertionError("a link to a folder others can write to was trusted")
+        except St.Refused as e:
+            assert "isn't a folder of yours" in e.message
+        os.unlink(link)
+        os.symlink(os.path.join(d, "nowhere"), link)                 # a link to nothing: refused, not a crash
+        try:
+            St.Base.open(os.path.join(link, "state"), *IDENT)
+            raise AssertionError("a dangling link was trusted")
+        except St.Refused as e:
+            assert "isn't a folder of yours" in e.message
+        assert not os.path.exists(os.path.join(d, "nowhere"))
+        # fs-sync's own folders are exactly 0700, whatever they were (looser, or tighter)
+        for mode in (0o711, 0o500):
+            os.chmod(state, mode)
+            St.Base.open(state, *IDENT).close()
+            assert stat.S_IMODE(os.stat(state).st_mode) == 0o700, oct(mode)
+        # "/" is checked like every other folder (a seam: "/" taken as changeable by others)
+        saved, root_ino = St._unchangeable, os.lstat("/").st_ino
+        St._unchangeable = lambda st: st.st_ino != root_ino and saved(st)
+        try:
+            St.Base.open(state, *IDENT)
+            raise AssertionError("/ wasn't checked")
+        except St.Refused as e:
+            assert e.message.startswith("/ isn't a folder of yours"), e.message
+        finally:
+            St._unchangeable = saved
+        # one of fs-sync's own folders someone else owns (a seam past the chain): refused by its own check
+        saved_anc, saved_uid = St._ancestors, os.getuid
+        St._ancestors = lambda p: os.path.abspath(p)
+        os.getuid = lambda: saved_uid() + 1
+        try:
+            St.Base.open(state, *IDENT)
+            raise AssertionError("someone else's state folder was used")
+        except St.Refused as e:
+            assert e.message == "%s isn't a folder of yours: fs-sync keeps its records there." % St._home_short(state), e.message
+        finally:
+            St._ancestors, os.getuid = saved_anc, saved_uid
+    finally:
+        os.chmod(os.path.join(d, "open"), 0o700) if os.path.isdir(os.path.join(d, "open")) else None
+        shutil.rmtree(d)
+
+
+def test_records_must_be_private_plain_files():
+    d = tmp()
+    try:
+        b = St.Base.open(d, *IDENT)
+        b.record("a", row(1))
+        path = b.path
+        b.close()
+        pairs = os.path.dirname(path)
+        target = os.path.join(d, "target")
+        # a sidecar that is a link (each of -wal, -shm, -journal): the base is set aside, the link never followed
+        for suffix in ("-wal", "-shm", "-journal"):
+            with open(target, "wb") as f:
+                f.write(b"keep")
+            os.symlink(target, path + suffix)
+            b = St.Base.open(d, *IDENT)
+            try:
+                assert b.damaged == "its record isn't a plain file of yours", (suffix, b.damaged)
+            finally:
+                b.close()
+            with open(target, "rb") as f:
+                assert f.read() == b"keep"
+            for n in os.listdir(pairs):                              # (start the next case clean)
+                if ".damaged-" in n:
+                    os.unlink(os.path.join(pairs, n))
+        # a record readable by others: not private, set aside
+        os.chmod(path, 0o644)
+        b = St.Base.open(d, *IDENT)
+        assert b.damaged == "its record isn't a plain file of yours", b.damaged
+        b.close()
+        # sidecars left without their database: removed (fs-sync's own), a link among them not followed
+        os.unlink(path)
+        for suffix in ("-wal", "-shm"):
+            if os.path.lexists(path + suffix):
+                os.unlink(path + suffix)
+        for suffix in ("-wal", "-shm", "-journal"):
+            os.symlink(target, path + suffix)
+        St.Base.open(d, *IDENT).close()
+        for suffix in ("-wal", "-shm"):                              # (SQLite would open these through the link)
+            assert not os.path.islink(path + suffix), suffix
+        assert not os.path.lexists(path + "-journal")
+        with open(target, "rb") as f:
+            assert f.read() == b'keep'
+        # the lock: a folder there is refused, saying what to do
+        lock = path[:-len(".sqlite")] + ".lock"
+        os.unlink(lock)
+        os.mkdir(lock)
+        try:
+            St.Base.open(d, *IDENT)
+            raise AssertionError("a folder was taken as the lock")
+        except St.Refused as e:
+            assert e.code == 1 and e.message == ("%s isn't a plain file of yours: fs-sync keeps this folder pair's lock "
+                                                 "there. Remove it, then run it again." % St._home_short(lock)), e.message
+        os.rmdir(lock)
+        # a lock readable by others, or a FIFO there: refused the same way (checked through the open handle)
+        for make in (lambda: (open(lock, "wb").close(), os.chmod(lock, 0o644)), lambda: os.mkfifo(lock, 0o600)):
+            make()
+            try:
+                St.Base.open(d, *IDENT)
+                raise AssertionError("a lock that isn't a private plain file was used")
+            except St.Refused as e:
+                assert "isn't a plain file of yours" in e.message, e.message
+            os.unlink(lock)
+        # (astra) metadata that isn't JSON: can't be read, so a first run
+        St.Base.open(d, *IDENT).close()
+        c = sqlite3.connect(path)
+        c.execute("UPDATE meta SET v = '{not json' WHERE k = 'ident'")
+        c.commit()
+        c.close()
+        b = St.Base.open(d, *IDENT)
+        assert b.damaged == "its record can't be read", b.damaged
+        b.close()
+    finally:
+        shutil.rmtree(d)
+
+
+def test_state_path_with_uri_characters():
+    # (astra) the read-only check's URI is quoted: a state folder named with ? # % is the folder used
+    d = tmp()
+    try:
+        state = os.path.join(d, "a?b#c%41")
+        b = St.Base.open(state, *IDENT)
+        b.record("a", row(1))
+        b.close()
+        b = St.Base.open(state, *IDENT)
+        try:
+            assert b.damaged is None and "a" in b.rows(), b.damaged
+        finally:
+            b.close()
     finally:
         shutil.rmtree(d)
 
