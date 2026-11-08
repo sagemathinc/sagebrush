@@ -66,7 +66,8 @@ try {
       fire(k, e) { for (const f of this.h[k]) f(e); }
       send(t) {
         const m = JSON.parse(t); leg.sent.push(m);
-        if (m.method === "hello") setTimeout(() => this.fire("message", { data: JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { purpose: "terminal", token: "tok-" + leg.legs.length, nonce: "n0", gen: leg.legs.length, incarnation: "i1", channels: ["kernel", "terminal"] } }) }), 0);
+        if (m.method === "hello" && leg.refuse) setTimeout(() => this.fire("message", { data: JSON.stringify({ jsonrpc: "2.0", id: m.id, error: { code: -32000, message: leg.refuse } }) }), 0);
+        else if (m.method === "hello") setTimeout(() => this.fire("message", { data: JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { purpose: "terminal", token: "tok-" + leg.legs.length, nonce: "n0", gen: leg.legs.length, incarnation: "i1", channels: ["kernel", "terminal"] } }) }), 0);
         if (m.t === "open") leg.opens.push(m);
       }
       close(code, why) { this.closed = [code, why]; }
@@ -263,6 +264,13 @@ try {
   await push({ t: "error", error: "unknown_session" });
   await until("__leg.opens.length === 2 && __leg.legs.length === 2");
   ok(!("session" in JSON.parse(await ev("__leg.opens[1].body"))) && (await ev("__leg.legs[0].closed !== null")), "a session gone from the computer: a new one, on a new leg");
+  // (a computer whose Sagebrush doesn't take terminals: its hello refused, said in words, nothing opened)
+  await ev("document.querySelector('#rterm .rhead button[aria-label=\"Close the terminal\"]').click(), true");
+  await ev(FAKE);
+  await ev("__leg.refuse = 'no terminal channel', true");
+  await ev("document.querySelector('#rtermbtn').click(), true");
+  await until("/didn't accept/.test(document.querySelector('#rterm .rstatus')?.textContent ?? '')");
+  ok((await status()) === "box didn't accept a terminal. Its Sagebrush may predate terminals: update it, then Reconnect. (no terminal channel)" && (await ev("__leg.opens.length")) === 0, `a refused hello is said: ${JSON.stringify(await status())}`);
   await goto(base + "?phone=0");
 } catch (e) {
   ok(false, "the test stopped: " + (e?.stack ?? e));

@@ -101,6 +101,17 @@ export function webLinksIn(line: string): { start: number; text: string }[] {
   return out;
 }
 
+// (the runner's errors, terminal.py, and the client's own, remote-terminal.js, in words: after the computer's name)
+const ERRORS: Record<string, string> = {
+  hello: "didn't accept a terminal. Its Sagebrush may predate terminals: update it, then Reconnect.",
+  protocol: "sent something unexpected. Reconnect starts afresh.",
+  sessions: "already runs 4 terminals. End one there, then Reconnect.",
+  spawn: "couldn't start a shell.",
+  refused: "refused to open the terminal.",
+  not_open: "has no terminal open on this connection. Reconnect.",
+  expired: "ended this session.",
+};
+
 const SESSION_KEY = (remoteId: string) => "sagebrush-rterm:" + remoteId;
 
 export interface RemoteTerminalPanel {
@@ -201,7 +212,8 @@ export function openRemoteTerminal(o: { onEnd?: () => void; fetch?: typeof fetch
             connect();
           } else if (e.t === "error") {
             errored = true;
-            say(`${r.name}: ${e.error}${e.reason ? ` (${String(e.reason).slice(0, 200)})` : ""}`);
+            const why = e.reason ? ` (${String(e.reason).slice(0, 200)})` : "";
+            say(ERRORS[e.error] ? `${r.name} ${ERRORS[e.error]}${why}` : `${r.name}: ${String(e.error).slice(0, 60)}${why}`);
           } else if (e.t === "closed" && !t.exited && !t.closedFor) {
             endB.hidden = true;
             reconnectB.textContent = "Reconnect";
