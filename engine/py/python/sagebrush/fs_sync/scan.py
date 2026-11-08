@@ -273,6 +273,7 @@ def read_ignore_file(root_fd):
         st = os.fstat(fd)
         if not stat.S_ISREG(st.st_mode):
             raise Refused(_NOT_PLAIN, 1)
+        before = (st.st_size, st.st_mtime_ns, st.st_ctime_ns, st.st_ino, st.st_dev)
         # (one pass of at most 1 MiB + 1 byte, stopping at the first byte of a 10,001st line, whichever comes first:
         # any byte after the 10,000th newline begins a 10,001st line)
         too_many = Refused("Stopped before planning: %s has more than %s lines (the limit)."
@@ -299,7 +300,16 @@ def read_ignore_file(root_fd):
             n += len(b)
         if n > MAX_IGNORE_BYTES:
             raise Refused("Stopped before planning: %s is over 1 MiB (the limit)." % IGNORE_FILE, 1)
-        return b"".join(data).decode("utf-8", "replace").splitlines()
+        st2 = os.fstat(fd)
+        if (st2.st_size, st2.st_mtime_ns, st2.st_ctime_ns, st2.st_ino, st2.st_dev) != before or n != st.st_size:
+            raise Refused("Stopped before planning: %s couldn't be read (it changed while being read)." % IGNORE_FILE, 1)
+        # (lines are LF-separated, as counted above; a CR before an LF is dropped, so CRLF files read the same; a lone
+        # CR is part of its line)
+        text = b"".join(data).decode("utf-8", "replace")
+        lines = text.split("\n")
+        if lines and lines[-1] == "":
+            lines.pop()
+        return [line[:-1] if line.endswith("\r") else line for line in lines]
     finally:
         os.close(fd)
 
@@ -414,6 +424,7 @@ def scan(root, workspace_path="/", known=None, limits=None):
             raise Refused("Stopped before planning: %s couldn't be listed (%s)." % (shown, err.strerror or err), 1)
         for p in [p for p in out.files if p.startswith(rel_dir + "/")]:
             del out.files[p]
+        out.skipped[:] = [(p, why) for p, why in out.skipped if not p.startswith(rel_dir + "/")]
         out.skipped.append((rel_dir + "/", UNREADABLE))
 
     def walk(dfd, rel_dir, raw_dir, depth, ignore):

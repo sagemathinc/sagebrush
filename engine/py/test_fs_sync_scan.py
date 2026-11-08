@@ -364,6 +364,39 @@ def test_ignore_lines_at_a_read_boundary():
             shutil.rmtree(root)
 
 
+def test_ignore_file_lines_and_stability():
+    # (astra a) lines are LF-separated, for the limit and for the rules alike: CRLF reads as LF, a lone CR is in its line
+    root = tmp()
+    try:
+        tree(root, {"keep.txt": b"k", "a.log": b"x", "b.tmp": b"x", S.IGNORE_FILE: b"*.log\r\n*.tmp\r\n"})
+        r = S.scan(S.refuse_overlap(root, []))
+        assert "a.log" not in r.files and "b.tmp" not in r.files and "keep.txt" in r.files, sorted(r.files)
+        tree(root, {S.IGNORE_FILE: b"#c\r" * (S.MAX_IGNORE_LINES + 5)})       # CR only: one line, not 10,005
+        assert "keep.txt" in S.scan(S.refuse_overlap(root, [])).files
+        assert S.Ignore(["a\rb"]).ignored("a\rb", False)
+        # (astra b) a change while it is read: refused before any rule is used
+        tree(root, {S.IGNORE_FILE: b"#" * 200000 + b"\n*.txt\n"})
+        real_read, calls = os.read, [0]
+
+        def changing_read(fd, n):
+            calls[0] += 1
+            b = real_read(fd, n)
+            if calls[0] == 1:
+                with open(os.path.join(root, S.IGNORE_FILE), "ab") as f:
+                    f.write(b"more\n")
+            return b
+        os.read = changing_read
+        try:
+            S.scan(S.refuse_overlap(root, []))
+            raise AssertionError("an ignore file changed while read was used")
+        except S.Refused as e:
+            assert e.code == 1 and e.message == "Stopped before planning: .sagebrushignore couldn't be read (it changed while being read).", e.message
+        finally:
+            os.read = real_read
+    finally:
+        shutil.rmtree(root)
+
+
 def test_ignore_syntax_edges():
     ig = S.Ignore(["[z-a]x", "\\#lit", "\\!bang", "a\\*b", "[unclosed", "#comment", "a*c", "a?d", "sp.txt   ", "esc\\ "])
     assert not ig.ignored("#comment", False)                                    # (grader I1) a comment is no rule
@@ -553,7 +586,7 @@ def test_listing_fails_partway():
     real = os.scandir
     try:
         tree(root, {"sub/a.txt": b"a", "sub/b.txt": b"b", "sub/boom": b"x", "sub/z.txt": b"z", "sub/deeper/c.txt": b"c",
-                    "other.txt": b"o"})
+                    "sub/a.swp": b"s", "sub/deeper/x.swp": b"s", "other.txt": b"o"})
 
         class Failing:
             def __init__(self, it):
@@ -580,7 +613,7 @@ def test_listing_fails_partway():
         finally:
             os.scandir = real
         assert not [p for p in r.files if p.startswith("sub/")], sorted(r.files)
-        assert [p for p, w in r.skipped if w == S.UNREADABLE] == ["sub/"], r.skipped
+        assert [p for p, w in r.skipped if p.startswith("sub")] == ["sub/"], r.skipped   # (daybreak3) nothing else under it
         assert "other.txt" in r.files
         # the root unlistable: stop before planning
         os.scandir = lambda fd: (_ for _ in ()).throw(OSError(13, "Permission denied"))
