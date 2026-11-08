@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
 <title>How to connect your agent to Sagebrush</title>
-<meta name="description" content="Five ways to use an AI agent with Sagebrush: what each one runs, what it touches on your computer, and what isn't ready yet.">
+<meta name="description" content="Five ways to connect an agent, your computer or a chat app to Sagebrush: what each one runs, what it touches on your computer, and what isn't ready yet.">
 <style>
   :root { --ink: #24231f; --muted: #6b6a63; --line: #e3e0d6; --bg: #faf9f5; --card: #fff; --accent: #c2410c; --code: #f4f2ec; --no: #8a3a2a; --yes: #2f6b36; }
   * { box-sizing: border-box; }
@@ -40,7 +40,7 @@
 
 <div class="pick">
   <p><b>To chat with Claude in your browser while Claude runs on your computer:</b> use <a href="#localhost">option 2, <code>sagebrush-agent</code></a>. It doesn't use your Claude Code setup, so it works even if your Claude Code is sandboxed.</p>
-  <p><b>To give an agent you already run (Claude Code, Codex, Cursor) Sagebrush's math tools:</b> use <a href="#mcp">option 3, <code>sagebrush-mcp</code></a>. Your agent must be able to load MCP servers.</p>
+  <p><b>To give an agent you already run (Claude Code, or another agent that loads MCP servers) Sagebrush's math tools:</b> use <a href="#mcp">option 3, <code>sagebrush-mcp</code></a>. Your agent must be able to load MCP servers.</p>
   <p><b>To run a notebook's code in your computer's Python:</b> use <a href="#remote">option 1, <code>sagebrush remote</code></a>. It isn't an agent connection: it decides where code runs.</p>
 </div>
 
@@ -49,7 +49,7 @@
   <tr><th></th><th>Where it works today</th><th>What you install</th><th>With a sandboxed Claude Code</th></tr>
   <tr><td><a href="#remote">1. <code>sagebrush remote</code></a></td><td>dev.sagebrush.space only (testing). Not yet on sagebrush.space</td><td>PyPI <code>sagebrush</code> 0.9.0</td><td>Not an agent connection: Claude isn't involved</td></tr>
   <tr><td><a href="#localhost">2. <code>sagebrush-agent</code></a></td><td>The Agents page, at <a href="/agents/">/agents</a> on this site. Claude only; Codex not yet</td><td><code>sagebrush-agent</code> 0.3.0 (a download, not on npm)</td><td>Works: it never uses your Claude Code session</td></tr>
-  <tr><td><a href="#mcp">3. <code>sagebrush-mcp</code></a></td><td>Math tools anywhere; your Sagebrush files from the LaTeX editor and boards only</td><td>PyPI <code>sagebrush-mcp</code> 0.9.0</td><td>Doesn't work: it needs MCP</td></tr>
+  <tr><td><a href="#mcp">3. <code>sagebrush-mcp</code></a></td><td>Math tools anywhere; your Sagebrush files from the LaTeX editor and boards only</td><td>PyPI <code>sagebrush-mcp</code> 0.9.0</td><td>Only if your Claude Code can load MCP servers</td></tr>
   <tr><td><a href="#cocalc">4. A cocalc.ai agent</a></td><td class="no">Not yet</td><td>—</td><td>—</td></tr>
   <tr><td><a href="#cdn">5. claude.ai or ChatGPT artifacts</a></td><td>In the chat app's artifact; no Sagebrush files</td><td>Nothing: npm <code>sagebrush-web</code> 0.6.5 from a CDN</td><td>Not affected: it runs in the chat app in your browser</td></tr>
 </table>
@@ -92,8 +92,8 @@ uvx sagebrush@latest remote</code></pre>
   <li>The browser asks once whether this site may reach apps on this computer; its wording depends on the browser's version. Click Allow, then Connect again if it asks.</li>
   <li>Choose the folders Claude may use.</li>
 </ol>
-<p>Without <code>SAGEBRUSH_AGENT_PAGE</code> (or on Windows), the printed link opens a preview site instead. Open the <a href="/agents/">Agents page</a> here, click “Connect Claude”, and type the code and the port the program printed.</p>
-<p>If you clicked Block by mistake: click the icon at the left of the address bar, open Site settings, set the permission for apps on this device to Allow, and reload the page.</p>
+<p>Without <code>SAGEBRUSH_AGENT_PAGE</code> (for example on Windows, where the commands above don't set it), the printed link opens a preview site instead. Open the <a href="/agents/">Agents page</a> here, click “Connect Claude”, and type the code and the port the program printed.</p>
+<p>If you clicked Block by mistake: click the icon at the left of the address bar, open Site settings, allow that permission, and reload the page.</p>
 <h3>What it touches</h3>
 <ul>
   <li><b>On your computer:</b> one Node process under your account. It works in an empty temporary folder, loads none of your Claude settings or MCP servers, and listens on 127.0.0.1 only. It accepts only sagebrush.space, the preview site and any <code>--origin</code> you add, only with the one-time code (used once, valid 5 minutes), and one page at a time.</li>
@@ -102,7 +102,7 @@ uvx sagebrush@latest remote</code></pre>
   <li><b>On disk:</b> while it runs, each conversation's transcript is saved under <code>~/.claude/projects/</code>, as Claude Code does, including the contents of files Claude read. Ctrl+C stops it and deletes this run's transcripts and its temporary folder; if it can't, it says what's left. If the program is killed or crashes, the transcripts stay until you delete them.</li>
 </ul>
 <h3>With a sandboxed Claude Code</h3>
-<p>It works: it's a separate program and never uses your Claude Code session, sandbox settings or MCP configuration. It needs the program itself to reach Anthropic, and your browser to reach 127.0.0.1. If a policy on your computer blocks programs' outbound network, it can't work, and neither can options 1 or 3; option 5 still might.</p>
+<p>It works: it's a separate program and never uses your Claude Code session, sandbox settings or MCP configuration. It needs the program itself to reach Anthropic, and your browser to reach 127.0.0.1. If a policy on your computer blocks programs' outbound network, it can't work. Option 3's math tools and option 1's <code>--loopback</code> need no outbound network once installed; option 5 might also work.</p>
 <h3>Not yet</h3>
 <ul>
   <li>Codex.</li>
