@@ -5,7 +5,7 @@
 // and their units), never decremented, a new generation before a fragment would pass a budget, a fragment over a
 // budget on its own cut first; the reset after each output; stale callbacks and dispose.  Budgets small and injected.
 //   bun web/shell/test-term-writer.mjs
-import { TermWriter, BUDGET, SLICE, PIECE, RESET, LEAVE_ALT, CUT_NOTE } from "./term-writer.ts";
+import { TermWriter, BUDGET, SLICE, PIECE, RESET, LEAVE_ALT, CUT_NOTE, MAX_ITEMS } from "./term-writer.ts";
 
 let checks = 0, fails = 0;
 const ok = (c, what) => { checks++; if (!c) fails++; console.log(`${c ? "ok  " : "FAIL"} ${what}`); };
@@ -172,6 +172,67 @@ function rig(budget = BUDGET, { auto = true } = {}) {
   const { w: w2, r: r2 } = rig();
   await w2.write("\x1b[2Jx\x1b[2J\x1b[44m\x1b[2J\x1b[K\x1b[2J", "output");
   ok((r2.text().match(/\x1b\[2J/g) || []).length === 4 && r2.text().includes("\x1b[44m\x1b[2J"), `text, a style change or another sequence between keeps each erase, the style written before it: ${JSON.stringify(r2.text())}`);
+}
+
+// idle() is a barrier: it settles only after every earlier write's last callback (ENGINE E1, PERF P2)
+{
+  const { w, r } = rig(BUDGET, { auto: false });
+  void w.write("a".repeat(100), "output");
+  let settled = false;
+  const p = w.idle().then(() => (settled = true));
+  await new Promise((s) => setTimeout(s, 0));
+  ok(!settled && r.pending.length === 1, "idle() waits while a write is in flight");
+  r.pending.shift()();
+  await p;
+  ok(settled, "and settles after its last callback");
+  const { w: wd } = rig(BUDGET, { auto: false });
+  void wd.write("x", "ui");
+  const pd = wd.idle();
+  wd.dispose();
+  await pd;
+  ok(true, "dispose lets a waiting idle() go");
+}
+
+// the queue is finite (ENGINE E3, SEC T854-3, PERF P1): a blocked sink, 10 000 redraws and 10 000 small writes
+{
+  const { w, r } = rig(BUDGET, { auto: false });
+  void w.write("first", "ui");
+  await new Promise((s) => setTimeout(s, 0));
+  let made = 0;
+  const ps = [];
+  for (let i = 0; i < 10000; i++) ps.push(w.writeLazy(() => (made++, "R" + i), "redraw"));
+  for (let i = 0; i < 10000; i++) ps.push(w.write("o" + i + "\n", "output"));
+  ok(w.queueMax <= MAX_ITEMS, `queued items stay within ${MAX_ITEMS} (${w.queueMax})`);
+  while (r.pending.length) { r.pending.shift()(); await new Promise((s) => setTimeout(s, 0)); }
+  await Promise.all(ps);
+  ok(made === 1 && r.text().includes("R9999") && !r.text().includes("R9998"), `redraws waiting are replaced: the last one runs, once (${made})`);
+  ok(r.text().includes("o0\n") && r.text().includes("o9999\n"), "every small write still arrives, merged, in order");
+  ok(ps.length === 20000, "and every caller's promise settles");
+}
+
+// the panel's own text is admitted too (SEC T854-1): its marks capped per cell and charged; no style cap on it
+{
+  const small = { ...BUDGET, combining: 10, styleRuns: 2 };
+  const { w, r } = rig(small);
+  await w.write("x" + M.repeat(20), "ui");
+  ok(w.charges.combining === 8 && (r.text().match(/\u0301/g) || []).length === 8, `marks in the panel's own text: at most 8, and charged (${w.charges.combining})`);
+  await w.writeLazy(() => "y" + M.repeat(20));
+  ok(w.charges.combining === 8 && r.gens === 1, "a lazy write is admitted too (the second run passes the budget: a new generation)");
+  const { w: w2, r: r2 } = rig(small);
+  await w2.write("\x1b[1ma\x1b[0m \x1b[1mb\x1b[0m \x1b[1mc\x1b[0m", "ui");
+  ok((r2.text().match(/\x1b\[1m/g) || []).length === 3, "the panel's own styles aren't counted against S2's cap");
+}
+
+// the generation notice is written through the writer, before the fragment that started the generation
+{
+  const small = { ...BUDGET, links: 1 };
+  const link = (u) => `\x1b]8;;${u}\x1b\\x\x1b]8;;\x1b\\`;
+  const r = { writes: [] };
+  const sinks = [{ write: (d, cb) => (r.writes.push([0, d]), setTimeout(cb, 0)) }];
+  const w = new TermWriter(() => sinks[sinks.length - 1], zw, () => { sinks.push({ write: (d, cb) => (r.writes.push([1, d]), setTimeout(cb, 0)) }); return "NOTICE\r\n"; }, small);
+  await w.write(link("https://a/1"), "output");
+  await w.write(link("https://a/2"), "output");
+  ok(r.writes.find(([g]) => g === 1)?.[1].startsWith("NOTICE\r\n"), "the new generation's notice comes first, on the new screen, through the writer");
 }
 
 // stale callbacks, dispose, the generation fence

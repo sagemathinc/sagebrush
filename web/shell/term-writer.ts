@@ -33,6 +33,10 @@ export const PIECE = 8 * 1024;
 export const RESET = "\x18\x1b[!p\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l";
 export const LEAVE_ALT = "\x1b[?1049l";
 export const CUT_NOTE = "(Some combining characters or links in this output were left out to save memory.)";
+/** the queue's bound (ENGINE E3, SEC T854-3, PERF P1): queued writes of one kind merge up to a 64 KiB fragment, a
+ * redraw or a refresh replaces the one still waiting (the last wins), and past this many items a write merges into the
+ * last one whatever its size: the producers' own bounds (S1 per command, the line's) then bound the bytes */
+export const MAX_ITEMS = 64;
 
 export interface Sink {
   write(data: string, done: () => void): void;
@@ -60,7 +64,9 @@ export class TermWriter {
   colourCut = false;
   private inflightN = 0;
   private lex: Lex = { st: "ground", osc: "", afterBase: -1, drop: false };
-  private queue: { data: string; kind: "output" | "ui" | "reset" | "lazy"; make?: () => string; done: () => void }[] = [];
+  private queue: { data: string; kind: "output" | "ui" | "reset" | "lazy"; make?: () => string; key?: string; dones: (() => void)[] }[] = [];
+  /** items waiting, at most (the tests' high-water mark) */
+  queueMax = 0;
   private pumping = false;
   private dead = false;
   private inflight: (() => void) | null = null;
@@ -68,7 +74,9 @@ export class TermWriter {
   constructor(
     private sink: () => Sink,
     private zeroWidth: (cp: number) => boolean,
-    private newGeneration: () => void | Promise<void>,
+    /** a new generation's start: the caller replaces the xterm instance; what it returns is written first, through
+     * this writer (the panel's notice) */
+    private newGeneration: () => string | void | Promise<string | void>,
     private budget: Budget = BUDGET,
     /** whether the screen is in its alternate buffer now (xterm's buffer.active.type) */
     private inAlt: () => boolean = () => false,
@@ -89,18 +97,33 @@ export class TermWriter {
       // (never between a surrogate pair)
       if (j < text.length && (text.charCodeAt(j) & 0xfc00) === 0xdc00) j--;
       const data = text.slice(i, j);
-      parts.push(new Promise((done) => this.queue.push({ data, kind, done })));
+      parts.push(new Promise((done) => {
+        const tail = this.queue[this.queue.length - 1];
+        // (merged into the waiting write of the same kind while it stays a fragment, or always past MAX_ITEMS)
+        if (tail && tail.kind === kind && (tail.data.length + data.length <= SLICE || this.queue.length >= MAX_ITEMS)) (tail.data += data), tail.dones.push(done);
+        else this.push({ data, kind, dones: [done] });
+      }));
       i = j;
     }
     void this.pump();
     return Promise.all(parts).then(() => {});
   }
 
+  private push(item: (typeof this.queue)[number]): void {
+    this.queue.push(item);
+    this.queueMax = Math.max(this.queueMax, this.queue.length);
+  }
+
   /** The panel's own text, made when its turn comes (after every earlier write is drawn, so it can read where the
    * cursor is): a redraw of the line, a move back over a block. */
-  writeLazy(make: () => string): Promise<void> {
+  writeLazy(make: () => string, key?: string): Promise<void> {
     if (this.dead) return Promise.resolve();
-    const p = new Promise<void>((done) => this.queue.push({ data: "", kind: "lazy", make, done }));
+    const p = new Promise<void>((done) => {
+      // (a keyed write still waiting is replaced: a redraw or a refresh superseded before it ran; the last wins)
+      const same = key ? this.queue.find((q) => q.kind === "lazy" && q.key === key) : undefined;
+      if (same) (same.make = make), same.dones.push(done);
+      else this.push({ data: "", kind: "lazy", make, key, dones: [done] });
+    });
     void this.pump();
     return p;
   }
@@ -108,20 +131,20 @@ export class TermWriter {
   /** The end of a logical output: the reset, and the lexer back to ground with no base to attach to. */
   endOutput(): Promise<void> {
     if (this.dead) return Promise.resolve();
-    const p = new Promise<void>((done) => this.queue.push({ data: RESET, kind: "reset", done }));
+    const p = new Promise<void>((done) => this.push({ data: RESET, kind: "reset", dones: [done] }));
     void this.pump();
     return p;
   }
 
-  /** All queued writes drawn. */
+  /** All writes queued before it drawn: a barrier at the end of the queue (the last callback, then this). */
   idle(): Promise<void> {
-    return this.write("");
+    return this.writeLazy(() => "");
   }
 
   /** ✕: nothing more is written; whatever waits is let go, and a late callback does nothing. */
   dispose(): void {
     this.dead = true;
-    for (const q of this.queue.splice(0)) q.done();
+    for (const q of this.queue.splice(0)) q.dones.forEach((d) => d());
     this.inflight?.();
     this.inflight = null;
   }
@@ -133,16 +156,18 @@ export class TermWriter {
       while (this.queue.length && !this.dead) {
         const item = this.queue.shift()!;
         let data = item.data;
-        if (item.kind === "output") data = await this.admit(data);
+        // (every write goes through admission: output with S2's cap, the panel's own text without it)
+        if (item.kind === "output") data = await this.admit(data, true);
+        else if (item.kind === "ui") data = await this.admit(data, false);
         else if (item.kind === "reset") {
           this.lex = { st: "ground", osc: "", afterBase: -1, drop: false };
           this.colourCut = false;
           data = this.inAlt() ? "\x18" + LEAVE_ALT + RESET.slice(1) : RESET;
         }
-        else if (item.kind === "lazy") data = item.make!();
-        if (this.dead) return item.done();
+        else if (item.kind === "lazy") data = await this.admit(item.make!(), false);
+        if (this.dead) return item.dones.forEach((d) => d());
         await this.put(data);
-        item.done();
+        item.dones.forEach((d) => d());
       }
     } finally {
       this.pumping = false;
@@ -174,7 +199,12 @@ export class TermWriter {
   }
 
   /** A fragment's charges measured before it is written; a new generation first if they would pass a budget. */
-  private async admit(data: string): Promise<string> {
+  /** S2's cap applies to the current admission (output's), not to the panel's own text */
+  private styled = true;
+
+  private async admit(data: string, styled = true): Promise<string> {
+    if (data === "") return "";
+    this.styled = styled;
     const left = (c: Charges): Charges => ({ combining: this.budget.combining - c.combining, links: this.budget.links - c.links, linkUnits: this.budget.linkUnits - c.linkUnits });
     let r = this.filter(data, { ...this.lex }, left(this.charges));
     if (r.cut && (this.charges.combining || this.charges.links || this.charges.linkUnits)) {
@@ -182,10 +212,11 @@ export class TermWriter {
       this.gen++;
       this.stats.generations++;
       this.charges = { combining: 0, links: 0, linkUnits: 0 };
-      await this.newGeneration();
+      const notice = (await this.newGeneration()) ?? "";
       // (the new terminal's parser starts at ground: the rest of a sequence open across the change is dropped)
       const lex: Lex = { ...this.lex, drop: this.lex.st !== "ground", osc: "", afterBase: -1 };
       r = this.filter(data, lex, left(this.charges));
+      r.out = notice + r.out;
     }
     this.lex = r.lex;
     this.charges.combining += r.charged.combining;
@@ -302,7 +333,7 @@ export class TermWriter {
           const seq = lex.csi;
           lex.csi = "";
           toGround();
-          if (fin === 0x6d && this.budget.styleRuns !== undefined) {
+          if (fin === 0x6d && this.styled && this.budget.styleRuns !== undefined) {
             // (a style change: held until text or another sequence follows it; past the cap, left out)
             if (!lex.drop && !this.colourCut) lex.pend = (lex.pend ?? "") + "\x1b[" + seq;
             break;
@@ -359,7 +390,7 @@ export class TermWriter {
    * goes on plain (one reset at the cap).  Returns what to write before the text. */
   private styleGate(lex: Lex, text = true): string {
     const cap = this.budget.styleRuns;
-    if (cap === undefined) return "";
+    if (cap === undefined || !this.styled) return "";
     const pend = lex.pend ?? "";
     if (lex.runs === undefined || lex.runs === 0) {
       if (!text && pend === "") return "";

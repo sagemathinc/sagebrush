@@ -131,6 +131,18 @@ const fresh = (max = 1 << 20, hist = new History()) => new LineEditor(max, hist)
   ok(e2.insert("é€", "pasted").t === "refused" && utf8Len("é€") === 5, "the bound is UTF-8 bytes, not characters");
 }
 
+// every way the line can change is bounded (ENGINE E2, SEC T854-2): a completion's replacement, the search query, history
+{
+  const ed = fresh(10, new History(HISTORY, ["short", "much longer than ten"]));
+  ok(ed.load("0123456789").t === "redraw" && ed.load("0123456789x").t === "refused" && ed.buf === "0123456789", "a replacement (a Tab completion) past maxBytes is refused whole, the line kept");
+  ed.reset("");
+  keys(ed, { key: "r", ctrl: true });
+  for (const c of "abcdefghij") ed.key({ key: c });
+  ok(ed.key({ key: "k" }).t === "refused" && ed.search.q === "abcdefghij", "the search query is bounded as the line is");
+  keys(ed, { key: "g", ctrl: true });
+  ok(ed.key({ key: "ArrowUp" }).t === "refused" && ed.buf === "", "a history entry past the bound isn't loaded");
+}
+
 // work: linear per operation, no whole-history scan per key
 {
   const measure = (n) => {

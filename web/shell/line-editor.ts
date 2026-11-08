@@ -90,6 +90,14 @@ export class LineEditor {
     this.bytes = utf8Len(text);
   }
 
+  /** The line replaced whole (a Tab completion's result): refused whole past maxBytes, the line kept as it was. */
+  load(text: string, cur = text.length): Act {
+    if (utf8Len(text) > this.maxBytes) return { t: "refused", how: "typed" };
+    this.search = null;
+    this.set(text, Math.min(cur, text.length));
+    return { t: "redraw" };
+  }
+
   /** Text typed or pasted at the cursor; refused whole past maxBytes. */
   insert(text: string, how: "pasted" | "typed" = "typed"): Act {
     if (this.search) this.accept();
@@ -148,6 +156,8 @@ export class LineEditor {
     }
     if (k.ctrl && k.key.toLowerCase() === "c") return { t: "interrupt" };
     if (k.key.length === 1 && !k.ctrl && !k.meta && !k.alt) {
+      // (the query is bounded as the line is)
+      if (utf8Len(s.q) + utf8Len(k.key) > this.maxBytes) return { t: "refused", how: "typed" };
       s.q += k.key;
       const i = this.find(s.q, s.failed ? -1 : s.at >= 0 ? s.at : this.history.entries.length - 1);
       if (i >= 0) (s.at = i), (s.failed = false);
@@ -236,6 +246,8 @@ export class LineEditor {
           return { t: "redraw" };
         }
         if (this.hpos === 0) return { t: "none" };
+        // (an entry past the line's bound (a smaller configured bash.source_bytes) isn't loaded)
+        if (utf8Len(this.history.entries[this.hpos - 1]) > this.maxBytes) return { t: "refused", how: "typed" };
         if (this.hpos === this.history.entries.length) this.draft = buf;
         this.hpos--;
         this.set(this.history.entries[this.hpos]);
@@ -249,6 +261,7 @@ export class LineEditor {
           return { t: "redraw" };
         }
         if (this.hpos >= this.history.entries.length) return { t: "none" };
+        if (this.hpos + 1 < this.history.entries.length && utf8Len(this.history.entries[this.hpos + 1]) > this.maxBytes) return { t: "refused", how: "typed" };
         this.hpos++;
         this.set(this.hpos === this.history.entries.length ? this.draft : this.history.entries[this.hpos]);
         return { t: "redraw" };

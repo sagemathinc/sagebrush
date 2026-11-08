@@ -306,7 +306,15 @@ try {
   await until(`!${T}.writer.writing`, 5000);
   const rs = await evaluate(`window.__lines(window.__cursorLine(), window.__cursorLine() + 1)[0]`);
   await realKey("Escape");
-  check(/^\(reverse-i-search\)'hist': echo hist-1$/.test(rs) && (await evaluate(`${T}.editor.buf`)) === "echo hist-1", `Ctrl-R: the search drawn on the line, Escape keeps the match: ${JSON.stringify(rs)}`);
+  check(/^\(reverse-i-search\)`hist': echo hist-1$/.test(rs) && (await evaluate(`${T}.editor.buf`)) === "echo hist-1", `Ctrl-R: bash's search prompt drawn on the line, Escape keeps the match: ${JSON.stringify(rs)}`);
+  // (no match: bash's failed form)
+  await realKey("u", { ctrl: true });
+  await realKey("r", { ctrl: true });
+  await type("echz");
+  await until(`!${T}.writer.writing`, 5000);
+  const rf = await evaluate(`window.__lines(window.__cursorLine(), window.__cursorLine() + 1)[0]`);
+  await realKey("g", { ctrl: true });
+  check(/^\(failed reverse-i-search\)`echz': /.test(rf), `Ctrl-R with no match: bash's failed prompt: ${JSON.stringify(rf)}`);
   await realKey("u", { ctrl: true });
   // (the screen-reader order: the polite status changes only after the last output is on the screen)
   await evaluate(`window.__seen = null; window.__mo = new MutationObserver(() => { if (window.__seen === null && document.querySelector(".sb-term-status").textContent) window.__seen = window.__lines(0, ${T}.term.buffer.active.length).includes("3000"); });
@@ -430,29 +438,6 @@ try {
   const fp = await evaluate(`({ fp: performance.getEntriesByName("sb-term:first-paint").length, lp: performance.getEntriesByName("sb-term:last-paint").length,
     order: (performance.getEntriesByName("sb-term:first-paint").at(-1)?.duration ?? 1e9) <= (performance.getEntriesByName("sb-term:last-paint").at(-1)?.duration ?? -1) })`);
   check(r?.status === "done" && fp.fp === 1 && fp.lp === 1 && fp.order, `E5.5's measures: one first paint, then one last paint, for stderr-heavy output: ${JSON.stringify(fp)}`);
-  // ---- the front order and the room below the page (plan PR 2): the console and the Terminal share the bottom
-  await evaluate(`document.querySelector("#consolebtn").click()`);
-  await until(`!document.querySelector("#console").hidden`, 10000);
-  const z = (sel) => evaluate(`+getComputedStyle(document.querySelector("${sel}")).zIndex`);
-  check((await z("#console")) > (await z(".sb-term")), `the console, chosen after, is in front of the Terminal (${await z("#console")} > ${await z(".sb-term")})`);
-  await evaluate(`document.querySelector("#termbtn").click(); document.querySelector("#termbtn").click()`);
-  await until(`!document.querySelector(".sb-term").hidden`, 5000);
-  check((await z(".sb-term")) > (await z("#console")), "the Terminal chosen again is in front of the console");
-  await evaluate(`(() => { const r = document.querySelector("#console").getBoundingClientRect(); document.querySelector("#console").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientX: r.x + 5, clientY: r.y + 5 })); })()`);
-  check((await z("#console")) > (await z(".sb-term")), "a touch on the console brings it in front");
-  const room = await evaluate(`({ pad: parseFloat(getComputedStyle(document.body).paddingBottom), t: document.querySelector(".sb-term").getBoundingClientRect().height, c: document.querySelector("#console").offsetHeight })`);
-  check(room.pad >= Math.max(room.t, room.c) - 1, `the room below the page is the tallest open panel's: ${JSON.stringify(room)}`);
-  await evaluate(`document.querySelector("#consolebtn").click()`);
-  // (the theme follows the page's)
-  const bg = () => evaluate(`${T}.term.options.theme.background`);
-  await evaluate(`document.documentElement.dataset.theme = "light"`);
-  await pause(100);
-  const light = await bg();
-  await evaluate(`document.documentElement.dataset.theme = "dark"`);
-  await pause(100);
-  const dark = await bg();
-  check(light && dark && light !== dark && dark === (await evaluate(`getComputedStyle(document.documentElement).getPropertyValue("--sb-term-bg").trim()`)), `the screen's colours follow the page's theme: light ${light}, dark ${dark}`);
-  await evaluate(`delete document.documentElement.dataset.theme`);
   // (hide keeps the session; ✕ ends it)
   const kept = await evaluate(`${T}.screenText`);
   await evaluate(`document.querySelector(".sb-term-hide").click()`);
@@ -544,6 +529,31 @@ try {
   }
   await evaluate(`document.querySelector("#consolebtn").click()`);
   await send("Emulation.clearDeviceMetricsOverride");
+  // ---- the front order and the room below the page (plan PR 2): the console and the Terminal share the bottom
+  // (after the menus' checks: the console's own status line, once loaded, sits above the toolbar)
+  if (await evaluate(`document.querySelector(".sb-term").hidden`)) await evaluate(`document.querySelector("#termbtn").click()`);
+  await evaluate(`document.querySelector("#consolebtn").click()`);
+  await until(`!document.querySelector("#console").hidden`, 10000);
+  const z = (sel) => evaluate(`+getComputedStyle(document.querySelector("${sel}")).zIndex`);
+  check((await z("#console")) > (await z(".sb-term")), `the console, chosen after, is in front of the Terminal (${await z("#console")} > ${await z(".sb-term")})`);
+  await evaluate(`document.querySelector("#termbtn").click(); document.querySelector("#termbtn").click()`);
+  await until(`!document.querySelector(".sb-term").hidden`, 5000);
+  check((await z(".sb-term")) > (await z("#console")), "the Terminal chosen again is in front of the console");
+  await evaluate(`(() => { const r = document.querySelector("#console").getBoundingClientRect(); document.querySelector("#console").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientX: r.x + 5, clientY: r.y + 5 })); })()`);
+  check((await z("#console")) > (await z(".sb-term")), "a touch on the console brings it in front");
+  const room = await evaluate(`({ pad: parseFloat(getComputedStyle(document.body).paddingBottom), t: document.querySelector(".sb-term").getBoundingClientRect().height, c: document.querySelector("#console").offsetHeight })`);
+  check(room.pad >= Math.max(room.t, room.c) - 1, `the room below the page is the tallest open panel's: ${JSON.stringify(room)}`);
+  await evaluate(`document.querySelector("#consolebtn").click()`);
+  // (the theme follows the page's)
+  const bg = () => evaluate(`${T}.term.options.theme.background`);
+  await evaluate(`document.documentElement.dataset.theme = "light"`);
+  await pause(100);
+  const light = await bg();
+  await evaluate(`document.documentElement.dataset.theme = "dark"`);
+  await pause(100);
+  const dark = await bg();
+  check(light && dark && light !== dark && dark === (await evaluate(`getComputedStyle(document.documentElement).getPropertyValue("--sb-term-bg").trim()`)), `the screen's colours follow the page's theme: light ${light}, dark ${dark}`);
+  await evaluate(`delete document.documentElement.dataset.theme`);
   // ---- the board page's dock (TP-5): ⋯ ▸ Terminal there too, placed as on the notebook page, with ps listing the board
   await evaluate(`document.querySelector(".sb-term-end")?.click()`);
   await send("Page.navigate", { url: url + "board/?new=python" });

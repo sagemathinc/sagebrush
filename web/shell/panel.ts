@@ -321,12 +321,18 @@ export class TerminalPanel {
       if (text) this.act(this.editor.insert(text, "pasted"));
     }, true);
     // (an input method's text, and a phone keyboard's, read from the DOM event, never from xterm's onData)
+    // (a composition's text arrives once: some browsers follow compositionend with an insertText of the same text)
+    let composed: string | null = null;
     ta.addEventListener("compositionend", (e) => {
+      composed = e.data || null;
       if (e.data) this.act(this.editor.insert(e.data, "typed"));
+      setTimeout(() => (composed = null), 0);
     });
     ta.addEventListener("input", (e) => {
       const ie = e as InputEvent;
+      if (ie.inputType === "insertText" && ie.data && ie.data === composed) return void (composed = null);
       if (this.key229 && ie.inputType === "insertText" && !ie.isComposing && ie.data) this.act(this.editor.insert(ie.data, "typed"));
+      this.key229 = false;
     });
     this.term = term;
     this.fit = fit;
@@ -351,17 +357,17 @@ export class TerminalPanel {
     } catch {}
   }
 
-  /** A new generation (term-writer.ts, a budget reached): the old xterm and all it holds released, a fresh one shown. */
-  private newGeneration(): void {
+  /** A new generation (term-writer.ts, a budget reached): the old xterm and all it holds released, a fresh one shown;
+   * its first line, the notice, returned for the writer to write first. */
+  private newGeneration(): string {
     const old = this.term;
     this.start?.dispose();
     this.start = null;
     old.dispose();
     this.body.replaceChildren();
     this.makeTerm();
-    // (its own first line, before the output that follows: written directly, nothing is in flight now)
-    this.term.write(DIM("Earlier output was cleared to save memory in this tab.") + "\r\n");
     if (this.shown) this.term.focus();
+    return DIM("Earlier output was cleared to save memory in this tab.") + "\r\n";
   }
 
   private watch: MutationObserver;
@@ -537,7 +543,8 @@ export class TerminalPanel {
     }
     if (ed.search) {
       const s = ed.search, match = s.at >= 0 ? ed.history.entries[s.at] : "";
-      const p = `(${s.failed ? "failed " : ""}reverse-i-search)'${visible(s.q)}': `;
+      // (bash's own prompt: a backtick opens the query, an apostrophe closes it)
+      const p = `(${s.failed ? "failed " : ""}reverse-i-search)\`${visible(s.q)}': `;
       const text = this.small(match) ? visible(match) : this.summary(match);
       return { lines: [[p, text]], at: [0, text.length] };
     }
@@ -602,12 +609,13 @@ export class TerminalPanel {
   /** The line drawn again in place (an edit, a resize). */
   private redraw(): void {
     if (!this.editing) return;
+    // (keyed: a redraw still waiting is replaced, so keys typed while the screen is busy cost one redraw)
     void this.writer.writeLazy(() => {
       if (!this.editing || !this.start || this.start.isDisposed) return "";
       const b = this.term.buffer.active;
       const up = b.baseY + b.cursorY - this.start.line;
       return (up > 0 ? `\x1b[${up}A` : "") + "\r\x1b[J" + this.drawing();
-    });
+    }, "redraw");
   }
 
   /** The line left as it is (`line`, a submission's; else the editor's now), the cursor after it, a new line begun. */
@@ -682,11 +690,7 @@ export class TerminalPanel {
     return {
       get value() { return ed.buf; },
       get caret() { return ed.cur; },
-      set: (line, caret) => {
-        ed.reset(line);
-        ed.cur = Math.min(caret, line.length);
-        this.redraw();
-      },
+      set: (line, caret) => this.act(ed.load(line, caret)),
       show: (text) => {
         // (a candidate block, bash's way: under the line, then the line again; the names shown as visible text)
         this.leave();
@@ -799,7 +803,7 @@ export class TerminalPanel {
     let drawnFrom: { line: number; isDisposed: boolean; dispose(): void } | null = null;
     // (S1 for a page command too: at most 1 MiB of its writes shown, the rest counted for the omission line; a
     // replace's text is capped on its own, as the latest output)
-    let shown = 0, omitted = 0, last = "";
+    let shown = 0, omitted = 0, last = "", latest = "";
     const fit = (text: string): string => {
       const kept = cutUtf8(text, Math.max(0, OUTPUT.inBytes - shown));
       const k = utf8Len(kept);
@@ -815,9 +819,11 @@ export class TerminalPanel {
         if (t) (last = t), void this.writer.write(err ? "\x1b[31m" + t + "\x1b[39m" : t, "output");
       },
       replace: (text) => {
-        shown = 0;
-        omitted = 0;
+        // (one keyed write: a refresh still waiting is replaced by the newest, so a fast refresher costs one draw)
+        latest = text;
         void this.writer.writeLazy(() => {
+          shown = 0;
+          omitted = 0;
           const b = this.term.buffer.active;
           let pre = "";
           if (drawnFrom && !drawnFrom.isDisposed && b.baseY + b.cursorY - drawnFrom.line < this.term.rows) {
@@ -827,11 +833,10 @@ export class TerminalPanel {
             drawnFrom?.dispose();
             drawnFrom = this.term.registerMarker(0) ?? null;
           }
-          return pre;
-        });
-        const t = fit(text);
-        last = t;
-        void this.writer.write(t, "output");
+          const t = fit(latest);
+          last = t;
+          return pre + t;
+        }, "replace");
       },
     };
     let code = 0;
