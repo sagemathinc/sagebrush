@@ -258,9 +258,15 @@ def test_folders_and_clashes():
         pl = P.plan({"d": Local(A)}, rem, {"d": Base(A, F1)}, P.BOTH, "lap")
         assert [s.kind for s in pl.steps if s.path == "d"] == [P.TYPE_CLASH], pl.steps
         assert not pl.of(P.DELETE_THERE, P.UPLOAD, P.DELETE_HERE), pl.steps
-    # a workspace file where this computer has a folder: the same
-    pl = P.plan({"d/x.txt": Local(A)}, {"d": Remote("file", F1, B_)}, {}, P.BOTH, "lap")
-    assert [(s.kind, s.path) for s in pl.steps] == [(P.TYPE_CLASH, "d"), (P.UPLOAD, "d/x.txt")], pl.steps
+    # a workspace file where this computer has a folder: the same, and nothing under the clash is acted on (daybreak3)
+    pl = P.plan({"d/x.txt": Local(A), "d/e/y.txt": Local(C), "other.txt": Local(D)}, {"d": Remote("file", F1, B_)}, {}, P.BOTH, "lap")
+    assert [(s.kind, s.path) for s in pl.steps] == [(P.TYPE_CLASH, "d"), (P.UPLOAD, "other.txt")], pl.steps
+    # a local file where the workspace has files under that path: no download under it either
+    pl = P.plan({"d": Local(A)}, {"d/x.txt": Remote("file", F1, B_), "d/e/y.txt": Remote("file", F2, C)}, {}, P.BOTH, "lap")
+    assert [(s.kind, s.path) for s in pl.steps] == [(P.TYPE_CLASH, "d")], pl.steps
+    # even with base rows under it (no delete under a clash)
+    pl = P.plan({"d": Local(A)}, {"d/x.txt": Remote("file", F1, B_)}, {"d/x.txt": Base(B_, F1), "d/z.txt": Base(C, F2)}, P.BOTH, "lap")
+    assert [(s.kind, s.path) for s in pl.steps] == [(P.TYPE_CLASH, "d")], pl.steps
     # a workspace document where this computer has a folder
     pl = P.plan({"n.ipynb/x": Local(A)}, {"n.ipynb": Remote("notebook", F1, revision="r")}, {}, P.BOTH, "lap")
     assert [s.kind for s in pl.steps if s.path == "n.ipynb"] == [P.TYPE_CLASH], pl.steps

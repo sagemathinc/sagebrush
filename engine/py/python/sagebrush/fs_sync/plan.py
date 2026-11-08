@@ -275,12 +275,26 @@ def plan(local, remote, base, mode=BOTH, computer=None, case_insensitive=False, 
         for p in remote:
             groups.setdefault(p.casefold(), []).append(p)
         case_clash = {p for g in groups.values() if len(g) > 1 for p in g}
+    # (a file on one side where the other has a folder: that path is a clash root, listed, and nothing at or under it
+    # is acted on, since every action there would go through a parent that is a file on one side)
+    clash_roots = {p for p in local if p in remote_dirs} | {p for p in remote if p in local_dirs}
+
+    def under_clash(p):
+        q = p
+        while "/" in q:
+            q = q.rsplit("/", 1)[0]
+            if q in clash_roots:
+                return True
+        return False
+
     for p in sorted(set(local) | set(remote) | set(base) | (folders & set(local))):
         loc, rem, row = local.get(p), remote.get(p), base.get(p)
+        if under_clash(p):
+            continue
         if p in case_clash:
             out.steps.append(Step(CASE_CLASH, p, local=loc.sha256 if loc else None, fid=rem.fid if rem else None))
             continue
-        if (loc is not None and p in remote_dirs) or (rem is not None and p in local_dirs):
+        if p in clash_roots:
             out.steps.append(Step(TYPE_CLASH, p, local=loc.sha256 if loc else None, fid=rem.fid if rem else None))
             continue
         # (a snapshot row keeps a path under the snapshot rules even if its name or kind changed since: it never uploads)
