@@ -97,23 +97,26 @@ Delete on this computer, to the holding folder (1 file; restore with fs-sync --r
   - figures/old.png                    210 KB   deleted in the workspace since the last sync
 Conflicts, both kept (1 file)
   ! main.tex    changed on both sides: this computer's copy becomes "main (conflict, laptop).tex", on both sides
-Download only: notebooks, boards and chats as files (2 files, 64 KB)
+Download only: notebooks, boards and chats as files (3 files, 76 KB)
   ↓ Notes.ipynb                        58 KB   the notebook as it is now in the workspace
   ↓ plan.board.json                     6 KB   the board as it is now
-Not uploaded: edited here (1 file)
-  · Seminar.ipynb       changed here since fs-sync wrote it; left as it is, not uploaded and not replaced
+  ↓ Talk.ipynb                         12 KB   written again (you deleted it here; add it to .sagebrushignore to stop this)
+Not uploaded (fs-sync doesn't upload notebooks, boards or chats yet) (2 files)
+  · Seminar.ipynb       changed here since fs-sync wrote it; left as it is
+  · Draft.ipynb         new here; left as it is
 Skipped (2)
   · build/                ignored (.sagebrushignore)
   · lecture.mp4           624 MiB, over the 95 MiB limit for one file (until large uploads are available)
 
-Cost: 9 requests, 1.2 MB up, 72 KB down (left today: 98.8 MB up, 192 MB down)
+Cost: 10 requests, 1.2 MB up, 84 KB down (left today: 98.8 MB up, 192 MB down)
 Apply? [y/N]
 ```
 
 - **Notebooks, boards and chats** (§3.2) are written here as files, the way the workspace saves them when downloaded: `.ipynb`, `.board.json`, and the chat's file. They go only one way, from the workspace to this computer (William, Nov 8: "download only; a local edit to one is reported, not uploaded").
   - Each run writes a snapshot again when the document changed in the workspace.
-  - If the person edited that file here since fs-sync wrote it, fs-sync leaves it as it is: it doesn't replace it, delete it or upload it. It lists it under "Not uploaded: edited here", every run, until the person deletes or renames their edited copy. Then the next run writes a fresh snapshot.
-  - A notebook, board or chat file made here, such as a new `.ipynb`, isn't uploaded either (§3.4). It's listed under the same heading: "Draft.ipynb  made here; notebooks, boards and chats go only from the workspace to this computer for now".
+  - If the person edited that file here since fs-sync wrote it, fs-sync leaves it as it is: it doesn't replace it, delete it or upload it. It lists it under "Not uploaded (fs-sync doesn't upload notebooks, boards or chats yet)" as "changed here since fs-sync wrote it; left as it is", every run, until the person deletes or renames their edited copy. Then the next run writes a fresh snapshot.
+  - A notebook, board or chat file made here, such as a new `.ipynb`, isn't uploaded either (§3.4). It's listed under the same heading as "new here; left as it is".
+  - A snapshot the person deleted here is written again, and the plan says so: "↓ Talk.ipynb  written again (you deleted it here; add it to .sagebrushignore to stop this)".
   - A listed edited snapshot alone doesn't make the run exit 1. Snapshots are download-only by design, so "in sync" (exit 0) means every file other than these matches.
 - **A first run** (no base) has no delete section, and says why: "First sync of this pair: nothing will be deleted."
 - **The answer must be `y` or `yes`.** Anything else, including Enter, end of input or Ctrl+C, applies nothing (exit 1).
