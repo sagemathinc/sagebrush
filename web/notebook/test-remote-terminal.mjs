@@ -332,6 +332,8 @@ for (const [what, text] of [
   await tick();
   check(t.state === "ended" && events.some((e) => e.t === "error" && e.error === "protocol") && relayMsgs(leg).length === 0 && timers.live === 0,
     `a relay control with ${what} ends the page, unacked`);
+  // (a negative upto is malformed, not merely out of order: grader's N1 on #853)
+  if (what === "a negative upto") check(events.some((e) => e.t === "error" && e.reason === "an unknown relay control"), "a negative upto is refused as malformed, not as out of order");
 }
 {
   // (pings: every pingMs; a pong resets the count; 2 unanswered and the leg is dead)
