@@ -102,7 +102,7 @@ uvx sagebrush@latest remote</code></pre>
   <li><b>On disk:</b> while it runs, each conversation's transcript is saved under <code>~/.claude/projects/</code>, as Claude Code does, including the contents of files Claude read. Ctrl+C stops it and deletes this run's transcripts and its temporary folder; if it can't, it says what's left. If the program is killed or crashes, the transcripts stay until you delete them.</li>
 </ul>
 <h3>With a sandboxed Claude Code</h3>
-<p>It works: it's a separate program and never uses your Claude Code session, sandbox settings or MCP configuration. It needs the program itself to reach Anthropic, and your browser to reach 127.0.0.1. If a policy on your computer blocks programs' outbound network, it can't work. Option 3's math tools and option 1's <code>--loopback</code> need no outbound network once installed; option 5 might also work.</p>
+<p>It works: it's a separate program and never uses your Claude Code session, sandbox settings or MCP configuration. It needs the program itself to reach Anthropic, and your browser to reach 127.0.0.1. If a policy on your computer blocks programs' outbound network, it can't work. Option 3's math tools need no outbound network once installed; option 5 might also work.</p>
 <h3>Not yet</h3>
 <ul>
   <li>Codex.</li>
