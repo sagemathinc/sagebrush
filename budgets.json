@@ -614,7 +614,7 @@
   },
   "engine/lib/rill.src": {
    "exact": false,
-   "ceiling": 89514,
+   "ceiling": 89512,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -853,7 +853,7 @@
    "engine/lib/pkg-scipy-io.pre": 61258,
    "engine/lib/pkg-scipy-io.src": 12963,
    "engine/lib/rill.pre": 329013,
-   "engine/lib/rill.src": 81377,
+   "engine/lib/rill.src": 81375,
    "engine/lib/sage-more.src": 395935,
    "engine/lib/sage.pre": 13662741,
    "engine/lib/sage.src": 2888811,
