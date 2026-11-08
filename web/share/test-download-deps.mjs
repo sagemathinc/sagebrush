@@ -236,6 +236,19 @@ try {
     await sleep(300);
     ok(!(await ev("window.__zip")), `closing the dialog during the download hands nothing over: ${await result()}`);
   }
+  // ---- the same, with the dialog's "close" event not yet run when the read ends (close() clears `open` at once and only
+  // queues the event): the read itself sees the dialog closed, so nothing is handed over whatever the order (grader's
+  // web-export flake: here the event is swallowed once, so this order is certain)
+  {
+    await openDialog();
+    await hold("/data/points.csv");
+    await download({ wait: false });
+    ok(await until("window.__held === '/data/points.csv'"), "(the read of data/points.csv is held)");
+    await ev("window.__zip = null; const dl = document.querySelector('#dldepsdlg'); dl.addEventListener('close', (e) => e.stopImmediatePropagation(), { capture: true, once: true }); dl.close(); window.__go(); 1");
+    await until(`!${D}.busy`);
+    await sleep(300);
+    ok(!(await ev("window.__zip")) && /Stopped: nothing was downloaded\./.test(await result()), `a read that ends after close() but before its "close" event hands nothing over: ${await result()}`);
+  }
 
   // ---- the names: the notebook's folder is the root when every file is inside it
   {
