@@ -169,6 +169,41 @@ for v in [UnpackTuple((1, 2)), UnpackList([1, 2]), UnpackRaises((1, 2)), UnpackS
     show("override starred from %s" % type(v).__name__, lambda: starred(v))
 
 
+class LateIterTuple(tuple):
+    pass
+
+
+a, b = LateIterTuple((1, 2))
+print("warm", a, b)
+
+
+def late_iter(self):
+    print("late __iter__")
+    return iter((7, 8))
+
+
+LateIterTuple.__iter__ = late_iter
+a, b = LateIterTuple((1, 2))
+print("after set", a, b)
+a, *b = LateIterTuple((1, 2))
+print("starred after set", a, b)
+del LateIterTuple.__iter__
+a, b = LateIterTuple((1, 2))
+print("after del", a, b)
+
+
+class LateIterChild(LateIterTuple):
+    pass
+
+
+LateIterTuple.__iter__ = late_iter
+a, b = LateIterChild((3, 4))
+print("child after parent set", a, b)
+Point = collections.namedtuple("Point", "x y")
+x, y = Point(5, 6)
+print("namedtuple", x, y)
+
+
 class NoIter:
     pass
 
