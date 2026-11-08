@@ -7,7 +7,7 @@
 ## In plain words
 
 - **Files can live in the cloud only.** Every device lists every file, but a device downloads a file's bytes only when it's opened, or when the person asks to keep it. A phone with little space can still see a large workspace.
-- **"Keep on this device"** keeps a file's bytes on this device, so it opens offline. Other files may be removed from this device to make room, but only once the cloud holds every byte of them and has checked the whole file against its hash.
+- **"Keep on this device"** keeps a file's bytes on this device, so it opens offline. Other files may be removed from this device to make room, but only once the cloud has every byte of them and has checked that its copy is complete and correct.
 - **Each file shows where it is:** on this device, in the cloud only, downloading, or waiting to go up. The Storage panel shows how much is on this device and how much is in the cloud.
 - **Large files sync in pieces.** Today a file over 95 MiB can't sync. In pieces, files up to the workspace's 200 MiB limit sync, an interrupted upload resumes where it stopped, and repeated data is stored once.
 - **Nothing that hasn't reached the cloud is ever removed from a device.** A file with changes still waiting to go up stays, whatever the space.
