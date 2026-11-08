@@ -118,8 +118,8 @@ def main(argv):
     if argv[:1] in (["-h"], ["--help"]):
         # (the usage, on stdout; nothing enrolled, nothing sent)
         sys.stdout.write("usage: sagebrush remote login [--origin URL] [--name NAME] [--force]\n"
-                         "  (enroll this computer with your account, at https://sagebrush.space or --origin; --force:\n"
-                         "   again, replacing this computer's key)\n")
+                         "  (enroll this computer with your account at https://sagebrush.space, or at --origin URL;\n"
+                         "   --force: enroll it again, replacing this computer's key)\n")
         return 0
     i = 0
     while i < len(argv):
