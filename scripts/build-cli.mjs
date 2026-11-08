@@ -56,9 +56,14 @@ const buildId = computeBuildId(root, lib);
 // (the library itself gzipped, base64: src/lib-embed.ts decodes it once, when src/compile.ts first reads
 // __PYJS_LIB__ at startup; a quarter of the bundle otherwise)
 // (and the files scripts/lazy-lib.mjs lists in a second one, decoded on the first import of one of them)
-const { isLazyLib } = await import("./lazy-lib.mjs");
-const eagerLib = {}, lazyLib = {};
-for (const [k, v] of Object.entries(lib)) (isLazyLib(k) ? lazyLib : eagerLib)[k] = v;
+// (and each keyed family, design/rill.md §6.3, in a blob of its own: scripts/lazy-lib.mjs LAZY_FAMILIES)
+const { isLazyLib, familyOf } = await import("./lazy-lib.mjs");
+const eagerLib = {}, lazyLib = {}, familyLibs = {};
+for (const [k, v] of Object.entries(lib)) {
+  const fam = familyOf(k);
+  if (fam !== null) (familyLibs[fam] ??= {})[k] = v;
+  else (isLazyLib(k) ? lazyLib : eagerLib)[k] = v;
+}
 const gzipLib = (files) => {
   const bytes = gzipSync(Buffer.from(JSON.stringify(files), "utf8"), { level: 9 });
   // (deterministic: node's gzip header has no file name (FLG 0) and MTIME 0; asserted, as no option sets them)
@@ -68,10 +73,13 @@ const gzipLib = (files) => {
 const libGz = gzipLib(eagerLib);
 const lazyNames = Object.keys(lazyLib);
 const lazyGz = lazyNames.length ? gzipLib(lazyLib) : null;
-const lazyArgs = lazyGz === null ? "" : `, ${JSON.stringify(lazyGz)}, ${JSON.stringify(lazyNames)}`;
+const families = Object.fromEntries(Object.keys(familyLibs).sort().map((k) => [k, [gzipLib(familyLibs[k]), Object.keys(familyLibs[k])]]));
+const famArg = Object.keys(families).length ? `, ${JSON.stringify(families)}` : "";
+const lazyArgs = lazyGz === null ? (famArg ? `, undefined, undefined${famArg}` : "") : `, ${JSON.stringify(lazyGz)}, ${JSON.stringify(lazyNames)}${famArg}`;
 // (the split, for the size marker's reason: daybreak2's P3a requirement)
 const srcBytes = (files) => Object.values(files).reduce((n, t) => n + Buffer.byteLength(t, "utf8"), 0);
 console.log(`lib.gen.js: eager ${Object.keys(eagerLib).length} files, ${libGz.length} B base64; lazy ${lazyNames.length} files, ${lazyGz?.length ?? 0} B base64 (${srcBytes(lazyLib)} B of source), names list ${JSON.stringify(lazyNames).length} B`);
+for (const [k, [gz, names]] of Object.entries(families)) console.log(`lib.gen.js: family ${k}: ${names.length} files, ${gz.length} B base64 (${srcBytes(familyLibs[k])} B of source)`);
 writeFileSync(join(out, "lib.gen.js"), `import { installEmbeddedLib } from "../../src/lib-embed";\nglobalThis.__SAGEBRUSH_BUILD_ID__ = ${JSON.stringify(buildId)};\nglobalThis.__SAGEBRUSH_VERSION__ = ${JSON.stringify(version)};\ninstallEmbeddedLib(globalThis, ${JSON.stringify(libGz)}${lazyArgs});\nglobalThis.__SAGEBRUSH_NOTICES__ = ${JSON.stringify(notices)};\n`);
 // (the same without the library, for the browser's worker, which fetches it
 // in chunks: web/lib-lazy.ts)

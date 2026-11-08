@@ -1,0 +1,145 @@
+{
+ "cases": [
+  {
+   "id": "nest-parens-40",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1\n"
+  },
+  {
+   "id": "nest-parens-49",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1\n"
+  },
+  {
+   "id": "nest-parens-50",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1\n"
+  },
+  {
+   "id": "nest-parens-51",
+   "status": 1,
+   "stderr": "Error: contextstack overflow (<input>:1:51)\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "nest-parens-60",
+   "status": 1,
+   "stderr": "Error: contextstack overflow (<input>:1:51)\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "nest-parens-200",
+   "status": 1,
+   "stderr": "Error: contextstack overflow (<input>:1:51)\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "nest-parens-5000",
+   "status": 1,
+   "stderr": "Error: contextstack overflow (<input>:1:51)\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "nest-unary-minus-100",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1\n"
+  },
+  {
+   "id": "nest-unary-minus-1000",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1\n"
+  },
+  {
+   "id": "nest-unary-minus-10000",
+   "status": 1,
+   "stderr": "Error: out of memory while parsing\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "nest-unary-minus-100000",
+   "status": 1,
+   "stderr": "Error: out of memory while parsing\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "nest-braces-50",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1\n"
+  },
+  {
+   "id": "nest-braces-51",
+   "status": 1,
+   "stderr": "Error: contextstack overflow (<input>:1:51)\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "nest-braces-200",
+   "status": 1,
+   "stderr": "Error: contextstack overflow (<input>:1:51)\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "nest-braces-5000",
+   "status": 1,
+   "stderr": "Error: contextstack overflow (<input>:1:51)\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "nest-plus-chain-1000",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1000\n"
+  },
+  {
+   "id": "nest-plus-chain-10000",
+   "status": 1,
+   "stderr": "Error: evaluation nested too deeply: infinite recursion / options(expressions=)?\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "nest-calls-50",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1\n"
+  },
+  {
+   "id": "nest-calls-51",
+   "status": 1,
+   "stderr": "Error: contextstack overflow (<input>:1:102)\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "nest-calls-200",
+   "status": 1,
+   "stderr": "Error: contextstack overflow (<input>:1:102)\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "nest-pow-1000",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1\n"
+  },
+  {
+   "id": "nest-pow-5000",
+   "status": 1,
+   "stderr": "Error: out of memory while parsing\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "nest-pow-20000",
+   "status": 1,
+   "stderr": "Error: out of memory while parsing\nExecution halted\n",
+   "stdout": ""
+  }
+ ],
+ "file": "rill-tests/parse/test_4.R",
+ "format": "rill-out",
+ "v": 1
+}

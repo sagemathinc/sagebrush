@@ -1,0 +1,499 @@
+{
+ "cases": [
+  {
+   "id": "prec-unary-pow",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] -4\n"
+  },
+  {
+   "id": "prec-unary-colon",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] -1  0  1  2  3\n"
+  },
+  {
+   "id": "prec-pow-right",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 512\n"
+  },
+  {
+   "id": "prec-pow-neg",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.5\n"
+  },
+  {
+   "id": "prec-colon-times",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 2 4 6\n"
+  },
+  {
+   "id": "prec-plus-colon",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 2 3 4\n"
+  },
+  {
+   "id": "prec-not-cmp",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] TRUE\n"
+  },
+  {
+   "id": "prec-and-or",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] TRUE\n"
+  },
+  {
+   "id": "prec-mod-times",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 2\n"
+  },
+  {
+   "id": "prec-intdiv",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 4\n"
+  },
+  {
+   "id": "prec-in",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] TRUE\n"
+  },
+  {
+   "id": "prec-unary-minus-mod",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 2\n"
+  },
+  {
+   "id": "assign-right",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 3\n"
+  },
+  {
+   "id": "assign-right-super",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 4\n"
+  },
+  {
+   "id": "assign-chain",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 8\n"
+  },
+  {
+   "id": "assign-eq",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 5\n"
+  },
+  {
+   "id": "assign-eq-chain",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 36\n"
+  },
+  {
+   "id": "num-hex",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 31\n"
+  },
+  {
+   "id": "num-hex-int",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 17\n"
+  },
+  {
+   "id": "num-exp",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1000\n"
+  },
+  {
+   "id": "num-exp-neg",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.0025\n"
+  },
+  {
+   "id": "num-hexfloat",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 16\n"
+  },
+  {
+   "id": "num-dot",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1.5\n"
+  },
+  {
+   "id": "num-int-max",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 2147483647\n"
+  },
+  {
+   "id": "num-L-decimal",
+   "status": 0,
+   "stderr": "Warning message:\ninteger literal 1.5L contains decimal; using numeric value \n",
+   "stdout": "[1] 1.5\n"
+  },
+  {
+   "id": "num-L-big",
+   "status": 0,
+   "stderr": "Warning message:\nnon-integer value 3000000000L qualified with L; using numeric value \n",
+   "stdout": "[1] 3e+09\n"
+  },
+  {
+   "id": "num-L-exp",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1000\n"
+  },
+  {
+   "id": "num-imaginary",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0+2i\n"
+  },
+  {
+   "id": "str-escapes",
+   "status": 0,
+   "stderr": "",
+   "stdout": "a\tb\\c\"d'e\n"
+  },
+  {
+   "id": "str-single-quotes",
+   "status": 0,
+   "stderr": "",
+   "stdout": "it's \"fine\"\n"
+  },
+  {
+   "id": "str-unicode",
+   "status": 1,
+   "stderr": "Error: mixing Unicode and octal/hex escapes in a string is not allowed (<input>:1:35)\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "str-unicode-braces",
+   "status": 0,
+   "stderr": "",
+   "stdout": "é😀\n"
+  },
+  {
+   "id": "str-raw",
+   "status": 0,
+   "stderr": "",
+   "stdout": "C:\\path\\n \n"
+  },
+  {
+   "id": "str-raw-dashes",
+   "status": 0,
+   "stderr": "",
+   "stdout": "a)\" \n"
+  },
+  {
+   "id": "str-raw-braces",
+   "status": 0,
+   "stderr": "",
+   "stdout": "x \n"
+  },
+  {
+   "id": "str-bad-escape",
+   "status": 1,
+   "stderr": "Error: '\\q' is an unrecognized escape in character string (<input>:1:3)\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "str-newline-inside",
+   "status": 0,
+   "stderr": "",
+   "stdout": "a\nb\n"
+  },
+  {
+   "id": "str-hash-inside",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"a # not a comment\"\n"
+  },
+  {
+   "id": "backtick-name",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 6\n"
+  },
+  {
+   "id": "backtick-op",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 5\n"
+  },
+  {
+   "id": "semicolons",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1\n[1] 2\n"
+  },
+  {
+   "id": "newline-in-paren",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 3\n"
+  },
+  {
+   "id": "newline-after-op",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 3\n"
+  },
+  {
+   "id": "newline-in-bracket",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 20\n"
+  },
+  {
+   "id": "if-else-in-brace",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 2\n"
+  },
+  {
+   "id": "if-else-in-paren",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 3\n"
+  },
+  {
+   "id": "err-else-top",
+   "status": 1,
+   "stderr": "Error: unexpected 'else' in \"else\"\nExecution halted\n",
+   "stdout": "[1] 1\n"
+  },
+  {
+   "id": "err-symbol",
+   "status": 1,
+   "stderr": "Error: unexpected symbol in \"x y\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "err-number",
+   "status": 1,
+   "stderr": "Error: unexpected numeric constant in \"1 2\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "err-string",
+   "status": 1,
+   "stderr": "Error: unexpected string constant in \"\"a\" \"b\"\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "err-close-paren",
+   "status": 1,
+   "stderr": "Error: unexpected ')' in \"1 + )\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "err-close-brace",
+   "status": 1,
+   "stderr": "Error: unexpected '}' in \"}\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "err-comma",
+   "status": 1,
+   "stderr": "Error: unexpected end of input\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "err-incomplete",
+   "status": 1,
+   "stderr": "Error: unexpected end of input\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "err-incomplete-call",
+   "status": 1,
+   "stderr": "Error: unexpected end of input\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "err-unterminated-string",
+   "status": 1,
+   "stderr": "Error: unexpected end of input\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "err-assign-target",
+   "status": 1,
+   "stderr": "Error in 1 <- 2 : invalid (do_set) left-hand side to assignment\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "err-equals-in-if",
+   "status": 1,
+   "stderr": "Error: unexpected '=' in \"if (x =\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "pipe",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 6\n"
+  },
+  {
+   "id": "pipe-placeholder",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"a\" \"a\" \"a\"\n"
+  },
+  {
+   "id": "pipe-err-nocall",
+   "status": 1,
+   "stderr": "Error in sqrt : \n  The pipe operator requires a function call as RHS (<input>:1:6)\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "pipe-err-placeholder-unnamed",
+   "status": 1,
+   "stderr": "Error in rep(\"a\", \"_\") : \n  pipe placeholder can only be used as a named argument (<input>:1:6)\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "lambda",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 3\n"
+  },
+  {
+   "id": "function-newline-body",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 8\n"
+  },
+  {
+   "id": "dots-index",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 6\n"
+  },
+  {
+   "id": "ns-double-colon",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 10\n"
+  },
+  {
+   "id": "ns-triple-colon",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 5\n"
+  },
+  {
+   "id": "formula-print",
+   "status": 0,
+   "stderr": "",
+   "stdout": "y ~ x + z\n"
+  },
+  {
+   "id": "formula-one-sided",
+   "status": 0,
+   "stderr": "",
+   "stdout": "~x\n"
+  },
+  {
+   "id": "unary-chain",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 3\n"
+  },
+  {
+   "id": "not-not",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] TRUE\n"
+  },
+  {
+   "id": "dollar-string",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 3\n"
+  },
+  {
+   "id": "bracket-missing",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 3 4\n"
+  },
+  {
+   "id": "arg-empty-name",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] TRUE\n"
+  },
+  {
+   "id": "keyword-as-name-err",
+   "status": 1,
+   "stderr": "Error in TRUE <- 1 : invalid (do_set) left-hand side to assignment\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "keyword-in-backticks",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"y\"\n"
+  },
+  {
+   "id": "comment-only",
+   "status": 0,
+   "stderr": "",
+   "stdout": ""
+  },
+  {
+   "id": "trailing-comment",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 2\n"
+  },
+  {
+   "id": "quote-deparse",
+   "status": 0,
+   "stderr": "",
+   "stdout": "-(1 + 2) * x[[i]]$y\n"
+  },
+  {
+   "id": "quote-function",
+   "status": 0,
+   "stderr": "",
+   "stdout": "function(x, y = 2) x + y\n"
+  },
+  {
+   "id": "quote-if",
+   "status": 0,
+   "stderr": "",
+   "stdout": "if (a) b else c\n"
+  },
+  {
+   "id": "quote-assign-right",
+   "status": 0,
+   "stderr": "",
+   "stdout": "x <- 1\n"
+  }
+ ],
+ "file": "rill-tests/parse/test_1.R",
+ "format": "rill-out",
+ "v": 1
+}

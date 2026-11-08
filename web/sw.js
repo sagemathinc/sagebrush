@@ -517,6 +517,9 @@ async function invGet() {
 }
 const inventory = () => (invP ??= invGet().then((r) => r.json()).then((inv) => {
   if (inv?.format !== "sagebrush-offline-1" || !Array.isArray(inv.items)) throw 0;
+  // (an item the page can't use yet is dropped here, the one place the inventory is read: not listed, never in
+  // "download all" or a "new item", never fetched; the build's controls still count it, web/offline-inventory.mts)
+  inv.items = inv.items.filter((it) => it.hidden !== true);
   return inv;
 }).catch((e) => { invP = null; throw new Error("inventory"); }));
 function itemPaths(it) {

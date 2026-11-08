@@ -32,6 +32,19 @@ ok(inv.items.every((it) => it.stored === stored[it.id]), "K3: each item's stored
 ok(inv.totals.files === LAZY.length && inv.totals.stored === Object.values(stored).reduce((a, b) => a + b, 0), "K3: the totals are the sums");
 ok(!/lib\/|\.json|\?h=|[0-9a-f]{16}/.test(invText), "K3: the inventory names no path and no hash");
 
+// Hidden items (@sagebrush's ruling on #847, Nov 8; agents-ui's three points): the Rill item is in the inventory, so
+// every control above counts it, but it is hidden until the page can run Rill (A2), and the service worker drops a
+// hidden item where it loads the inventory, so it is never listed, in "download all", or named as a new item
+const hidden = inv.items.filter((it) => it.hidden === true);
+ok(hidden.length === 1 && hidden[0].id === "rill" && hidden[0].groups.length > 0 && hidden[0].groups.every((g) => /^rill(-|$)/.test(g)), "hidden: only the Rill item, which still owns its rill groups: " + JSON.stringify(hidden.map((it) => [it.id, it.groups])));
+ok(inv.totals.files === inv.items.reduce((t, it) => t + it.files, 0), "hidden: the totals (and so the caps) still count the hidden item");
+ok(/const inventory = \(\) => \(invP \?\?= invGet\(\)[\s\S]{0,400}inv\.items = inv\.items\.filter\(\(it\) => it\.hidden !== true\);/.test(sw), "hidden: sw.js's inventory() drops hidden items as it loads the inventory");
+ok((sw.match(/\binvGet\(\)\./g) ?? []).length === 1 && (sw.match(/\binvGet\(/g) ?? []).length === 2, "hidden: inventory() is the one reader of the inventory in sw.js (ids(\"all\"), the keep record's new list, fetch and remove all go through it)");
+const visible = inv.items.filter((it) => it.hidden !== true);
+const allPaths = LAZY.filter((_, i) => visible.some((it) => it.id === owners[i][0]));
+ok(allPaths.length > 0 && !allPaths.some((p) => /^lib\/rill/.test(p)), `hidden: "download all" over the visible items fetches no rill path (${allPaths.length} paths)`);
+ok(!visible.some((it) => it.id === "rill"), "hidden: a new-items list over the visible items can't name Rill");
+
 // K2: a group no rule places, and each cap exceeded, are refused by the build
 ok(refuses(() => itemOfGroup("brand-new-group"), /belongs to no item/), "K2: a library group no rule places is refused");
 ok(itemOfGroup("core") === "python" && itemOfGroup("sci") === "scientific" && itemOfGroup("sage-x") === "sage" && itemOfGroup("pkg-foo") === "pkg-foo" && itemOfGroup("mod-bar") === "modules", "K2: the rules place the known groups");

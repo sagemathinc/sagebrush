@@ -198,8 +198,17 @@ test("control: an option recorded with another value is caught, option by option
 });
 
 test("control: a corpus below its floor is caught", () => {
+  // (every visible area's files removed but arith's: below the floor however the corpus has grown since A0)
   const b = copyCorpus();
-  for (const f of ["test_1.R", "test_1.out.json"]) rmSync(join(b, "rill-tests", "homework", f));
-  provEdit(b, (j) => { delete j.files["rill-tests/homework/test_1.R"]; });
+  const gone: string[] = [];
+  for (const area of readdirSync(join(b, "rill-tests"))) {
+    const dir = join(b, "rill-tests", area);
+    if (area === "arith" || area === "heldout" || !statSync(dir).isDirectory()) continue;
+    for (const f of readdirSync(dir)) if (/^test_\d+\.(R|out\.json)$/.test(f)) {
+      rmSync(join(dir, f));
+      if (f.endsWith(".R")) gone.push(`rill-tests/${area}/${f}`);
+    }
+  }
+  provEdit(b, (j) => { for (const f of gone) delete j.files[f]; });
   has(checkCorpus(b), /fewer than its floor of 450/);
 });

@@ -1,0 +1,103 @@
+{
+ "cases": [
+  {
+   "id": "call-plus-10",
+   "status": 1,
+   "stderr": "Error in 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + \"a\" : \n  non-numeric argument to binary operator\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "call-plus-20",
+   "status": 1,
+   "stderr": "Error in 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 +  : \n  non-numeric argument to binary operator\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "call-plus-25",
+   "status": 1,
+   "stderr": "Error in 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 +  : \n  non-numeric argument to binary operator\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "call-plus-30",
+   "status": 1,
+   "stderr": "Error in 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 +  : \n  non-numeric argument to binary operator\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "call-plus-40",
+   "status": 1,
+   "stderr": "Error in 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 +  : \n  non-numeric argument to binary operator\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "call-plus-60",
+   "status": 1,
+   "stderr": "Error in 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 +  : \n  non-numeric argument to binary operator\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "call-plus-100",
+   "status": 1,
+   "stderr": "Error in 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 +  : \n  non-numeric argument to binary operator\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "call-plus-1000",
+   "status": 1,
+   "stderr": "Error in 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 +  : \n  non-numeric argument to binary operator\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "call-plus-4000",
+   "status": 1,
+   "stderr": "Error in 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 +  : \n  non-numeric argument to binary operator\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "call-c-long",
+   "status": 1,
+   "stderr": "Error in c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17,  : \n  non-numeric argument to binary operator\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "call-c-60",
+   "status": 1,
+   "stderr": "Error in c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17,  : \n  non-numeric argument to binary operator\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "call-string-long",
+   "status": 1,
+   "stderr": "Error in \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\" +  : \n  non-numeric argument to binary operator\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "call-nested-unary",
+   "status": 1,
+   "stderr": "Error in -\"a\" : invalid argument to unary operator\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "call-parens-long",
+   "status": 1,
+   "stderr": "Error in 1 + \"a\" : non-numeric argument to binary operator\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "warn-call-long",
+   "status": 0,
+   "stderr": "Warning message:\nIn 1L + 1L + 1L + 1L + 1L + 1L + 1L + 1L + 1L + 1L + 1L + 1L + 1L +  :\n  NAs produced by integer overflow\n",
+   "stdout": "[1] NA\n"
+  },
+  {
+   "id": "cat-file-effect",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 2\n"
+  }
+ ],
+ "file": "rill-tests/core/test_2.R",
+ "format": "rill-out",
+ "v": 1
+}

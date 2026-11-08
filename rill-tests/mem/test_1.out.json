@@ -1,0 +1,67 @@
+{
+ "cases": [
+  {
+   "id": "alloc-numeric-huge",
+   "status": 1,
+   "stderr": "Error: cannot allocate vector of size 745.1 Gb\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "alloc-numeric-80gb",
+   "status": 1,
+   "stderr": "Error: cannot allocate vector of size 74.5 Gb\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "alloc-integer-huge",
+   "status": 1,
+   "stderr": "Error: cannot allocate vector of size 372.5 Gb\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "alloc-character-huge",
+   "status": 1,
+   "stderr": "Error: cannot allocate vector of size 745.1 Gb\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "alloc-logical-huge",
+   "status": 1,
+   "stderr": "Error: cannot allocate vector of size 745.1 Gb\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "alloc-in-function",
+   "status": 1,
+   "stderr": "Error: cannot allocate vector of size 745.1 Gb\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "alloc-assign",
+   "status": 1,
+   "stderr": "Error: cannot allocate vector of size 745.1 Gb\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "alloc-rep",
+   "status": 1,
+   "stderr": "Error: cannot allocate vector of size 745.1 Gb\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "alloc-arith-recycle",
+   "status": 1,
+   "stderr": "Error: cannot allocate vector of size 745.1 Gb\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "alloc-tb",
+   "status": 1,
+   "stderr": "Error: cannot allocate vector of size 11175.9 Gb\nExecution halted\n",
+   "stdout": ""
+  }
+ ],
+ "file": "rill-tests/mem/test_1.R",
+ "format": "rill-out",
+ "v": 1
+}

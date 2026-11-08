@@ -1,0 +1,361 @@
+{
+ "cases": [
+  {
+   "id": "tok-right-super",
+   "status": 1,
+   "stderr": "Error: unexpected '->' in \"1 ->> ->>\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-lt",
+   "status": 1,
+   "stderr": "Error: unexpected '<' in \"1 < <\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-ge",
+   "status": 1,
+   "stderr": "Error: unexpected '>=' in \"1 >= >=\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-or",
+   "status": 1,
+   "stderr": "Error: unexpected '|' in \"1 | |\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-ns-int",
+   "status": 1,
+   "stderr": "Error: unexpected ':::' in \"base ::: :::\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-placeholder-after",
+   "status": 1,
+   "stderr": "Error: unexpected input in \"1 _\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-placeholder-alone",
+   "status": 1,
+   "stderr": "Error in \"_\" : invalid use of pipe placeholder (<input>:1:0)\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-placeholder-in-call",
+   "status": 1,
+   "stderr": "Error in f(\"_\") : invalid use of pipe placeholder (<input>:1:0)\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-placeholder-pipe-extract",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 5\n"
+  },
+  {
+   "id": "tok-placeholder-twice",
+   "status": 1,
+   "stderr": "Error in rep(x = \"_\", times = \"_\") : \n  pipe placeholder may only appear once (<input>:1:6)\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-lambda-only",
+   "status": 1,
+   "stderr": "Error: unexpected end of line in \"\\\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-colon-eq",
+   "status": 1,
+   "stderr": "Error in `:=`(x, 1) : could not find function \":=\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-int-decimal-zero",
+   "status": 0,
+   "stderr": "Warning message:\ninteger literal 1.0L contains unnecessary decimal point \n",
+   "stdout": "[1] 1\n"
+  },
+  {
+   "id": "tok-int-negative-exp",
+   "status": 0,
+   "stderr": "Warning message:\nnon-integer value 1e-3L qualified with L; using numeric value \n",
+   "stdout": "[1] 0.001\n"
+  },
+  {
+   "id": "tok-hex-big-L",
+   "status": 0,
+   "stderr": "Warning message:\nnon-integer value 0xFFFFFFFFL qualified with L; using numeric value \n",
+   "stdout": "[1] 4294967295\n"
+  },
+  {
+   "id": "tok-hex-float-L",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 4\n"
+  },
+  {
+   "id": "tok-hex-frac",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 3\n"
+  },
+  {
+   "id": "tok-hex-no-digits",
+   "status": 1,
+   "stderr": "Error: unexpected input in \"0x\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-exp-no-digits",
+   "status": 1,
+   "stderr": "Error: unexpected input in \"1e\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-double-dot-number",
+   "status": 1,
+   "stderr": "Error: unexpected numeric constant in \"1.2.3\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-imaginary-int",
+   "status": 1,
+   "stderr": "Error: unexpected symbol in \"3Li\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-string-x-no-hex",
+   "status": 1,
+   "stderr": "Error: '\\x' used without hex digits in character string (<input>:1:3)\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-string-nul",
+   "status": 1,
+   "stderr": "Error: nul character not allowed (<input>:1:4)\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-string-u-too-big",
+   "status": 1,
+   "stderr": "Error: invalid \\U{xxxxxxxx} value 110000 (<input>:1:11)\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-string-escape-space",
+   "status": 0,
+   "stderr": "",
+   "stdout": "a b\n"
+  },
+  {
+   "id": "tok-string-escape-newline",
+   "status": 0,
+   "stderr": "",
+   "stdout": "a\nb\n"
+  },
+  {
+   "id": "tok-string-backtick-escape",
+   "status": 0,
+   "stderr": "",
+   "stdout": "`x`\n"
+  },
+  {
+   "id": "tok-string-bell-etc",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 5\n"
+  },
+  {
+   "id": "tok-raw-unterminated",
+   "status": 1,
+   "stderr": "Error: unexpected end of input\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-raw-bad-open",
+   "status": 1,
+   "stderr": "Error: malformed raw string literal (<input>:1:3)\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-backtick-empty",
+   "status": 1,
+   "stderr": "Error: attempt to use zero-length variable name\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-backtick-escape",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1\n"
+  },
+  {
+   "id": "tok-backtick-unterminated",
+   "status": 1,
+   "stderr": "Error: unexpected end of input\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-context-leading-space",
+   "status": 1,
+   "stderr": "Error: unexpected symbol in \"   x y\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-context-after-semicolon",
+   "status": 1,
+   "stderr": "Error: unexpected symbol in \"   x y\"\nExecution halted\n",
+   "stdout": "[1] 1\n"
+  },
+  {
+   "id": "tok-context-three-lines",
+   "status": 1,
+   "stderr": "Error: unexpected symbol in:\n\"  1\n  a b\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-context-comment",
+   "status": 1,
+   "stderr": "Error: unexpected symbol in:\n\"{ # start\n  a b\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-formals-dup",
+   "status": 1,
+   "stderr": "Error: repeated formal argument 'x' (<input>:1:18)\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-formals-number",
+   "status": 1,
+   "stderr": "Error: unexpected numeric constant in \"f <- function(1\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-formals-dots-default",
+   "status": 0,
+   "stderr": "",
+   "stdout": ""
+  },
+  {
+   "id": "tok-for-number-var",
+   "status": 1,
+   "stderr": "Error: unexpected numeric constant in \"for (1\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-for-missing-in",
+   "status": 1,
+   "stderr": "Error: unexpected numeric constant in \"for (i 1\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-if-missing-paren",
+   "status": 1,
+   "stderr": "Error: unexpected numeric constant in \"if TRUE\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-function-no-paren",
+   "status": 1,
+   "stderr": "Error: unexpected symbol in \"function x\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-call-unclosed-bracket",
+   "status": 1,
+   "stderr": "Error: unexpected end of input\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-bb-close-single",
+   "status": 1,
+   "stderr": "Error: unexpected end of input\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-unmatched-close-bb",
+   "status": 1,
+   "stderr": "Error: unexpected ']' in \" x[1]]\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-eq-in-call-chain",
+   "status": 1,
+   "stderr": "Error: unexpected '=' in \"c(a = b =\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-assign-in-for-cond",
+   "status": 0,
+   "stderr": "",
+   "stdout": ""
+  },
+  {
+   "id": "tok-while-eq",
+   "status": 1,
+   "stderr": "Error: unexpected '=' in \"while (i =\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-paren-eq",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 5\n"
+  },
+  {
+   "id": "tok-function-body-eq",
+   "status": 0,
+   "stderr": "",
+   "stdout": ""
+  },
+  {
+   "id": "tok-if-body-eq",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 3\n"
+  },
+  {
+   "id": "tok-arrow-in-arg",
+   "status": 1,
+   "stderr": "Error: object 'x' not found\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-empty-program",
+   "status": 0,
+   "stderr": "",
+   "stdout": ""
+  },
+  {
+   "id": "tok-only-semicolon-newline",
+   "status": 1,
+   "stderr": "Error: unexpected ';' in \";\"\nExecution halted\n",
+   "stdout": "[1] 1\n"
+  },
+  {
+   "id": "tok-trailing-semicolon",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1\n"
+  },
+  {
+   "id": "tok-leading-semicolon",
+   "status": 1,
+   "stderr": "Error: unexpected ';' in \";\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-cr",
+   "status": 0,
+   "stderr": "",
+   "stdout": ""
+  }
+ ],
+ "file": "rill-tests/parse/test_3.R",
+ "format": "rill-out",
+ "v": 1
+}

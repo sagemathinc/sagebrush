@@ -71,6 +71,8 @@ const STARTS: Record<string, string[]> = {
   sage: ["--sage", "-c", "pass"],
   matlab: ["--matlab", "-c", "1;"],
   magma: ["--magma", "-c", "1;"],
+  // (Rill's start, after the existing modes: design/rill.md §6.1)
+  rill: ["--rill", "-c", "1"],
 };
 const recDir = mkdtempSync(join(tmpdir(), "sagebrush-precompile-"));
 const recordings: Record<string, any> = {};

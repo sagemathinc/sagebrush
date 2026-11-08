@@ -1,0 +1,259 @@
+{
+ "cases": [
+  {
+   "id": "and-short",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] FALSE\n"
+  },
+  {
+   "id": "or-short",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] TRUE\n"
+  },
+  {
+   "id": "and-long",
+   "status": 1,
+   "stderr": "Error: object 'undefined_name' not found\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "or-long",
+   "status": 1,
+   "stderr": "Error: object 'undefined_name' not found\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "T-assign",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 5\n"
+  },
+  {
+   "id": "F-assign",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0\n"
+  },
+  {
+   "id": "pi-assign",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 3\n"
+  },
+  {
+   "id": "T-base",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] TRUE\n"
+  },
+  {
+   "id": "int-min",
+   "status": 0,
+   "stderr": "Warning message:\nIn -2147483647L - 1L : NAs produced by integer overflow\n",
+   "stdout": "[1] NA\n"
+  },
+  {
+   "id": "int-min-2",
+   "status": 0,
+   "stderr": "Warning message:\nIn -2147483647L - 2L : NAs produced by integer overflow\n",
+   "stdout": "[1] NA\n"
+  },
+  {
+   "id": "int-min-ok",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] -2147483647\n"
+  },
+  {
+   "id": "intdiv-neg",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] -4\n"
+  },
+  {
+   "id": "intdiv-negdiv",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] -4\n"
+  },
+  {
+   "id": "intdiv-int",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] -4\n"
+  },
+  {
+   "id": "intdiv-frac",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] -4\n"
+  },
+  {
+   "id": "collate-a-A",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] TRUE\n"
+  },
+  {
+   "id": "collate-B-a",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] TRUE\n"
+  },
+  {
+   "id": "collate-A-b",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] TRUE\n"
+  },
+  {
+   "id": "collate-ab-AB",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] TRUE TRUE TRUE\n"
+  },
+  {
+   "id": "colon-fuzz-below",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1 2 3\n"
+  },
+  {
+   "id": "colon-fuzz-far",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1 2 3\n"
+  },
+  {
+   "id": "colon-fuzz-above",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1 2 3\n"
+  },
+  {
+   "id": "colon-fuzz-window",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1 2\n"
+  },
+  {
+   "id": "colon-fuzz-window-3",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1 2 3\n"
+  },
+  {
+   "id": "div-negzero",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] -Inf\n"
+  },
+  {
+   "id": "div-negzero-neg",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] Inf\n"
+  },
+  {
+   "id": "div-zero",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1]  Inf -Inf\n"
+  },
+  {
+   "id": "tab-print",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"a\\tb\"\n"
+  },
+  {
+   "id": "tab-cat",
+   "status": 0,
+   "stderr": "",
+   "stdout": "a\tb\n"
+  },
+  {
+   "id": "ctrl-print",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"\\001\" \"\\037\" \"\\177\"\n"
+  },
+  {
+   "id": "deparse-15",
+   "status": 1,
+   "stderr": "Error in 0.123456789012346 + \"a\" : \n  non-numeric argument to binary operator\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "deparse-third",
+   "status": 1,
+   "stderr": "Error in 0.333333333333333 + \"a\" : \n  non-numeric argument to binary operator\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "deparse-7-exact",
+   "status": 1,
+   "stderr": "Error in 0.1234567 + \"a\" : non-numeric argument to binary operator\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "exp-100",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1e+100\n"
+  },
+  {
+   "id": "exp-neg-100",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1e-100\n"
+  },
+  {
+   "id": "exp-99",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1e+99\n"
+  },
+  {
+   "id": "exp-mixed",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1e+100  1e+00\n"
+  },
+  {
+   "id": "exp-mixed-neg",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1e-100 1e+100\n"
+  },
+  {
+   "id": "depth-minus-4998",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1\n"
+  },
+  {
+   "id": "depth-minus-4999",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] -1\n"
+  },
+  {
+   "id": "depth-minus-5000",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1\n"
+  },
+  {
+   "id": "depth-minus-5001",
+   "status": 1,
+   "stderr": "Error: evaluation nested too deeply: infinite recursion / options(expressions=)?\nExecution halted\n",
+   "stdout": ""
+  }
+ ],
+ "file": "rill-tests/core/test_3.R",
+ "format": "rill-out",
+ "v": 1
+}

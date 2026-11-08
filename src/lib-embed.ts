@@ -9,17 +9,19 @@
 // decodes that blob once and settles all of them as plain values; a start that imports none of them never decodes it.
 import { gunzipSync } from "zlib";
 
-/** (tests) how many times the library was decoded: the production decoder's own count. */
-export const libEmbedStats = { decodes: 0, lazyDecodes: 0 };
+/** (tests) how many times the library was decoded: the production decoder's own count (lazyDecodes is pathlib's
+ * blob; families, each keyed family's, design/rill.md §6.3). */
+export const libEmbedStats = { decodes: 0, lazyDecodes: 0, families: {} as Record<string, number> };
 
 const decode = (payload: string): Record<string, string> => JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(gunzipSync(Buffer.from(payload, "base64"))));
 const plain = (o: any, k: string, value: unknown) => Object.defineProperty(o, k, { value, writable: true, enumerable: true, configurable: true });
 
 // The lazy files on `lib`: getters, until the first read of one decodes `payload` and settles them all. A failed
 // decode, or a blob whose files aren't exactly `names`, throws and settles nothing.
-function installLazy(lib: Record<string, string>, payload: string, names: string[]) {
+function installLazy(lib: Record<string, string>, payload: string, names: string[], family?: string) {
   const load = (): Record<string, string> => {
-    libEmbedStats.lazyDecodes++;
+    if (family === undefined) libEmbedStats.lazyDecodes++;
+    else libEmbedStats.families[family] = (libEmbedStats.families[family] ?? 0) + 1;
     const files = decode(payload);
     const got = Object.keys(files).sort(), want = [...names].sort();
     if (got.length !== want.length || got.some((k, i) => k !== want[i])) throw new Error("the embedded library's lazy part is not the files it names");
@@ -38,8 +40,9 @@ function installLazy(lib: Record<string, string>, payload: string, names: string
 }
 
 /** `globalThis.__PYJS_LIB__` on `g`, decoded from `payload` (base64 of the gzip of the library's JSON) on first read;
- * the files `lazyNames`, from `lazy` (the same form), on the first read of one of them. */
-export function installEmbeddedLib(g: any, payload: string, lazy?: string, lazyNames?: string[]) {
+ * the files `lazyNames`, from `lazy` (the same form), on the first read of one of them; and each keyed family's files
+ * (`families`: key -> [payload, names]) on the first read of one of that family's, independently of the others. */
+export function installEmbeddedLib(g: any, payload: string, lazy?: string, lazyNames?: string[], families?: Record<string, [string, string[]]>) {
   g.__PYJS_LIB_GZ__ = payload;
   // (the flags of a plain global assignment, `globalThis.x = v`: writable, enumerable, configurable)
   const settle = (value: unknown) => {
@@ -53,6 +56,7 @@ export function installEmbeddedLib(g: any, payload: string, lazy?: string, lazyN
       libEmbedStats.decodes++;
       const lib = decode(g.__PYJS_LIB_GZ__);
       if (lazy !== undefined) installLazy(lib, lazy, lazyNames ?? []);
+      for (const [key, [p, names]] of Object.entries(families ?? {})) installLazy(lib, p, names, key);
       settle(lib);
       return lib;
     },

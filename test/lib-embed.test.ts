@@ -104,3 +104,34 @@ test("the lazy part: a name the eager part also has, or a name listed twice, is 
   installEmbeddedLib(h, payloadOf({ "a.py": "1\n" }), payloadOf({ "l.py": "2\n" }), ["l.py", "l.py"]);
   assert.throws(() => h.__PYJS_LIB__, /the embedded library names l\.py twice/);
 });
+
+// (keyed family blobs, design/rill.md §6.3 and daybreak2's ruling for Rill A1.1) each family decodes only on the first
+// read of one of its own files, independently of pathlib's blob and of the other families, and is counted per key
+test("keyed families: each decodes on the first read of its own files only, counted per key", () => {
+  const g: any = {};
+  installEmbeddedLib(g, payloadOf({ "a.py": "1\n" }), payloadOf({ "p.py": "p\n" }), ["p.py"], {
+    rill: [payloadOf({ "_rill/__init__.py": "r\n", "_rill/lex.py": "l\n" }), ["_rill/__init__.py", "_rill/lex.py"]],
+    other: [payloadOf({ "o.py": "o\n" }), ["o.py"]],
+  });
+  const lib = g.__PYJS_LIB__;
+  const before = { lazy: libEmbedStats.lazyDecodes, rill: libEmbedStats.families.rill ?? 0, other: libEmbedStats.families.other ?? 0 };
+  assert.equal(lib["a.py"], "1\n");
+  assert.deepEqual(Object.keys(lib).sort(), ["_rill/__init__.py", "_rill/lex.py", "a.py", "o.py", "p.py"], "every name visible before any decode");
+  assert.equal(libEmbedStats.families.rill ?? 0, before.rill, "no family decoded by the eager read");
+  assert.equal(lib["_rill/lex.py"], "l\n");
+  assert.equal(lib["_rill/__init__.py"], "r\n");
+  assert.equal(libEmbedStats.families.rill, before.rill + 1, "rill decoded once for both its files");
+  assert.equal(libEmbedStats.lazyDecodes, before.lazy, "pathlib's blob not decoded by rill's files");
+  assert.equal(libEmbedStats.families.other ?? 0, before.other, "the other family not decoded");
+  assert.equal(lib["p.py"], "p\n");
+  assert.equal(libEmbedStats.lazyDecodes, before.lazy + 1);
+  assert.equal(lib["o.py"], "o\n");
+  assert.equal(libEmbedStats.families.other, before.other + 1);
+  // (a family whose blob isn't exactly its names throws, as pathlib's does; a name in two families is refused)
+  const h: any = {};
+  installEmbeddedLib(h, payloadOf({ "a.py": "1\n" }), undefined, undefined, { rill: [payloadOf({ "_rill/x.py": "x\n" }), ["_rill/y.py"]] });
+  assert.throws(() => h.__PYJS_LIB__["_rill/y.py"], /the embedded library's lazy part is not the files it names/);
+  const k: any = {};
+  installEmbeddedLib(k, payloadOf({ "a.py": "1\n" }), undefined, undefined, { one: [payloadOf({ "s.py": "1\n" }), ["s.py"]], two: [payloadOf({ "s.py": "2\n" }), ["s.py"]] });
+  assert.throws(() => k.__PYJS_LIB__, /the embedded library names s\.py twice/);
+});
