@@ -180,6 +180,11 @@ daybreak2's requirement: cloud-only, downloading, local, kept, waiting to go up,
 ### 3.2 The cache budget
 
 - **One budget per device:** "Keep up to", with a **high mark** (start removing) and a **low mark** (stop), and a **free-space floor** always left for the browser (hysteresis, so removal doesn't loop: daybreak2, point 6).
+- **Admission, against the whole site's storage** (daybreak2, LIMIT-TF-1). The browser's quota covers everything the site keeps (versions, notebooks, the index, IndexedDB's own overhead), not only cached files. So before any install, whether for an open, a keep or a prefetch, the client requires
+  $$u + r \le q - f,$$
+  where $u$ is the site's estimated usage and $q$ its estimated quota (`navigator.storage.estimate()`), $r$ is this transfer's reserved install bytes (L2), and $f$ is the free-space floor. The estimate is taken at most 60 s before, and again after each install.
+  - The person's "Keep up to" is clamped to what is left for the cache: at most $q - f - (u - c)$, where $c$ is the cache total (§3.1). The panel shows the clamped figure.
+  - **If the estimate is unavailable or older than 60 s,** background caching (prefetch, keeping a folder) stops until a fresh one is taken. An open is checked against the last estimate, and refused with "There isn't room…" (§1.3) if it doesn't fit.
 - Kept files count against the budget, but are never removed for it. If kept files alone pass the budget, nothing more is cached, and the panel says "Kept files use more than this device's limit".
 - **What is removed first:** not kept, fully in the cloud, oldest opened first.
 - Defaults are in the limits table (§6).
@@ -243,7 +248,7 @@ If any fails, the removal is refused with its reason (§1.3), and the cache budg
 - a device never re-chunks a file whose manifest it has;
 - test vectors (inputs and their boundaries) are JSON, run by the client and the reference server alike, as the reducer's are.
 
-An insertion in the middle of a file moves one or two chunk boundaries, so an edit re-uploads about one or two chunks.
+An insertion in the middle of a file typically moves one or two chunk boundaries, so an edit typically re-uploads one or two chunks. That is FastCDC's usual locality, not a bound: the bound is the manifest's 256 chunks (§6a).
 
 **The manifest:**
 ```
@@ -258,7 +263,7 @@ An insertion in the middle of a file moves one or two chunk boundaries, so an ed
 **Uploading, resumable at every step, nothing charged twice:**
 1. The client chunks and hashes the file. It holds one chunk and the gear state at a time, reading the file's bytes from fileBytes once, under the reservation (L2). On a phone this runs in a Worker, one file at a time.
 2. `POST /blobs/check` with the chunks' hashes, at most 1,000 a request.
-3. `PUT /blob/<chunk sha256>` for each missing chunk. This is today's endpoint and its reservation, at most 8 MiB each and 4 at once per account. A retry of a stored chunk is idempotent (sync-server §5.4, step 3).
+3. `PUT /blob/<chunk sha256>` for each missing chunk. This is today's endpoint and its reservation, at most 8 MiB each. The client sends at most 2 at once (L2's uploads); the server's own limit of 4 PUTs at once per account (sync-server §8) is a separate ceiling above it. A retry of a stored chunk is idempotent (sync-server §5.4, step 3).
 4. **`POST /api/sync/v1/manifest`** (new). In one transaction, the account object:
    - checks the manifest's form and limits;
    - checks that every chunk is held, and refuses with `missing` naming the absent hashes otherwise;
@@ -387,13 +392,15 @@ Chunks and packs are ordinary `holdings` rows: one per R2 object, with `refs`.
 | Pack size, target / max | client builds, server checks | 8 / 16 MiB, at most 4,096 members | 16 MiB | `limit` | no |
 | Pack compaction | server | under 50% live, one pack a step | 16 MiB extra at once | — | no |
 | Index entries | both | 100,000 per account, 10,000 per folder | same | `limit` | no |
-| Device cache budget, computer | client | 25% of the estimated quota, at most 10 GB (sync-client proposal) | browser quota minus floor | removal | person |
-| Device cache budget, phone | client | 25% of the estimated quota, at most 2 GB (sync-client proposal) | browser quota minus floor | removal | person |
+| Device cache budget, computer | client | 25% of the estimated quota, at most 10 GiB (sync-client proposal) | clamped to $q - f - (u - c)$ (§3.2) | removal | person |
+| Device cache budget, phone | client | 25% of the estimated quota, at most 2 GiB (sync-client proposal) | clamped to $q - f - (u - c)$ (§3.2) | removal | person |
 | Cache high / low marks | client | 100% / 85% of budget | — | — | no |
-| Free-space floor | client | 500 MB on a computer, 200 MB on a phone (sync-client proposal) | — | caching stops | no |
+| Free-space floor $f$ | client | 500 MiB on a computer, 200 MiB on a phone (sync-client proposal) | — | no install unless $u + r \le q - f$ (§3.2) | no |
+| Storage estimate age | client | 60 s | 60 s | background caching stops; an open is checked against the last estimate | no |
 | Removal pass | client | 100 files a transaction; at most every 10 minutes; not within 1 hour of an install for an open | — | — | no |
 | Prefetch share of the read budget | client | stops at 80% used (§2.1) | 80% | prefetch pauses | no |
 | Concurrent chunk uploads / downloads | client | 2 / 4 (as L2) | — | queued | no |
+| Blob PUTs at once | server | 4 per account (sync-server §8) | 4 | 429 | no |
 | Daily read budget | server | `sync.read_bytes_per_day` (CoCalc) | CoCalc's | `rate` | yes (CoCalc) |
 | Account storage | server | `storage_bytes` (CoCalc) | CoCalc's | `storage_full` | yes (CoCalc) |
 
@@ -404,12 +411,12 @@ Every list, check and GC endpoint stays paged. The index's bounds don't depend o
 (sync-client) In operations, not dollars, which change:
 - **A cold open of a chunked file** of $n$ chunks: one manifest read (SQLite, no R2), $n$ signed URLs and $n$ R2 reads, $n \le 256$. For example, 150 MiB at about 4 MiB a chunk is about 38 of each.
 - **Uploading it:** $\lceil n/1000 \rceil$ checks, $m$ PUTs for its $m$ missing chunks, one commit, then the op.
-- **A random edit of a few bytes in a 200 MiB file:** one or two chunks change (4 to 16 MiB), so that is uploaded and stored. Without chunks it would be 200 MiB, and today it can't sync at all.
+- **A random edit of a few bytes in a 200 MiB file, typically:** one or two chunks change (about 4 to 16 MiB), so that is uploaded and stored. Without chunks it would be 200 MiB, and today it can't sync at all.
 - **Repeated data** (a copy, or a version differing at the end): only the new chunks are uploaded and stored. The first chunk-identical file costs one commit and no PUTs.
-- **Many tiny files:** 20,000 files of 4 KiB cost 20,000 PUTs and 20,000 reads singly, but 10 PUTs in 8 MiB packs. Each is still one ranged read when opened, since reads are per file.
+- **Many tiny files:** 20,000 files of 4 KiB cost 20,000 PUTs and 20,000 reads singly, but about 10 PUTs in packs targeting 8 MiB (fewer bytes than 10 full packs once the indexes and partly filled packs are counted; the exact count depends on how packs fill). Each is still one ranged read when opened, since reads are per file.
 - **The worst case for packs:** members deleted one at a time cost nothing until the pack is under 50% live. Then one compaction runs: one read and one write, at most 16 MiB.
-- **The worst case for chunking:** a file just over 8 MiB that changes completely each time. That is one or two chunks a write, as costly as a single blob and no worse.
-- **The read budget** is debited the bytes served: a whole blob, a chunk, or a member's range. A signed URL is for exactly one object or range, and a retry within its 5 minutes reads at most that again, so a Range retry can't escape the budget by more than the URL's own bytes (as today, L1).
+- **The worst case for chunking:** a 200 MiB file that changes completely. Every chunk is new, so 200 MiB is uploaded (no more bytes than the file itself), in up to 200 PUTs at the 1 MiB minimum chunk (the manifest's 256 is the format's ceiling). A single blob would be one PUT, but couldn't sync at all above 95 MiB.
+- **The read budget** keeps sync-server §5.4's policy unchanged (astra, TF5): what is metered is the bytes **authorized when a URL is issued**: a whole blob, a chunk, or a member's range. A device's URL is for exactly one object or range, and is reusable for its 5 minutes. Fetches within that time are outside the budget, bounded by the URL's expiry and the files Worker's per-IP rate, not by the budget. A grant's URL stays single-use. A hard limit on bytes delivered would be a separate protocol change, not something this note provides.
 
 ## 7. The PR sequence
 
