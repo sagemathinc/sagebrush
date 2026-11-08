@@ -1,7 +1,7 @@
 // repr(), str(), format() and `str % args`.
 
 import { T, markRaised, FloatBox, PyDict, typeOf, lookupType, raise, isType, dictKeyOf, dictGet, hooks, Ellipsis, NotImplemented, PyBytes, PyByteArray, StrLayout, PrimBox, typeName, isinstance, toPyExc } from "./object";
-import { PySet, setItems, isPyInt, fv, strFormatOpHook, id, index, normBig, PySlice, pollInterrupt, bitLengthSmallCopies, bitLengthSmallCopiesSigned } from "./ops";
+import { PySet, setItems, isPyInt, fv, lookupSpecial, specialOf, strFormatOpHook, id, index, normBig, PySlice, pollInterrupt, bitLengthSmallCopies, bitLengthSmallCopiesSigned } from "./ops";
 import { heapLimit } from "./heap";
 import * as FD from "./fdlibm";
 import * as SP from "./strpos";
@@ -377,7 +377,7 @@ export function repr(x: any): string {
         const m = (x as any).$meta;
         if (m !== undefined) {
           const f = lookupType(m, "__repr__");
-          if (f !== T.type.$dict.get("__repr__")) return f(x);
+          if (f !== T.type.$dict.get("__repr__")) return lookupSpecial(x, "__repr__")(x);
         }
         // __module__ as CPython reads it: the class dict's (assigned or set
         // in the body), else where the class was made
@@ -399,8 +399,7 @@ export function repr(x: any): string {
   if (x === Ellipsis) return "Ellipsis";
   if (x === NotImplemented) return "NotImplemented";
   if (Array.isArray(x) && (x as any).$cls === undefined) return seqRepr(x);
-  const t = typeOf(x);
-  const f = lookupType(t, "__repr__");
+  const f = lookupSpecial(x, "__repr__");
   if (f !== undefined) {
     const r = f(x);
     // a str subclass is a string (CPython accepts it)
@@ -487,8 +486,7 @@ export function str(x: any): string {
   }
   if (x === null) return "None";
   if (x instanceof FloatBox) return floatRepr(x.v);
-  const t = typeOf(x);
-  const f = lookupType(t, "__str__");
+  const f = lookupSpecial(x, "__str__");
   if (f !== undefined) {
     const r = f(x);
     // a str subclass is a string (CPython accepts it)
@@ -724,7 +722,7 @@ export function format(v: any, spec: string): string {
     if (spec === "") return floatRepr(x);
     return formatFloat(x, parseSpec(spec, "float"));
   }
-  const f = lookupType(typeOf(v), "__format__");
+  const f = lookupSpecial(v, "__format__");
   if (f !== undefined) {
     const r = f(v, spec);
     if (typeof r !== "string") raise(T.TypeError, "__format__ must return a str");
@@ -782,7 +780,7 @@ export function percentFormat(fmtStr: string, args: any, bytesMode = false): str
     for (const name of needIndex ? ["__index__"] : ["__index__", "__int__"]) {
       const f = lookupType(typeOf(v), name);
       if (f !== undefined) {
-        const r = f(v);
+        const r = specialOf(v, f, name)(v);
         return BigInt(typeof r === "boolean" ? +r : r);
       }
     }
@@ -869,7 +867,7 @@ export function percentFormat(fmtStr: string, args: any, bytesMode = false): str
           else {
             const f = lookupType(typeOf(v), "__bytes__");
             if (f === undefined) raise(T.TypeError, `%b requires a bytes-like object, or an object that implements __bytes__, not '${typeOf(v).$name}'`);
-            const r = f(v);
+            const r = lookupSpecial(v, "__bytes__")(v);
             body = Buffer.from(r.a.subarray(0, r.n)).toString("latin1");
           }
         } else if (type === "b") raise(T.ValueError, `unsupported format character 'b' (0x62) at index ${i - 1}`);
@@ -926,9 +924,13 @@ export function percentFormat(fmtStr: string, args: any, bytesMode = false): str
         if (x === undefined) {
           if (isPyInt(v) || typeof v === "boolean") x = Number(v);
           else {
-            const f = lookupType(typeOf(v), "__float__") ?? lookupType(typeOf(v), "__index__");
+            let name = "__float__";
+            let f = lookupType(typeOf(v), name);
+            if (f === undefined) f = lookupType(typeOf(v), (name = "__index__"));
             if (f === undefined) raise(T.TypeError, `must be real number, not ${typeOf(v).$name}`);
-            x = Number(fv(f(v)) ?? f(v));
+            // (called once, as CPython's PyFloat_AsDouble)
+            const r = specialOf(v, f, name)(v);
+            x = Number(fv(r) ?? r);
           }
         }
         const sp: Spec = { fill: zero ? "0" : " ", align: left ? "<" : zero ? "=" : ">", sign: sign || "-", z: false, alt: flags.includes("#"), zero: false, width, grouping: "", precision: precision < 0 ? 6 : precision, type };
@@ -952,7 +954,7 @@ function getitemMapping(m: any, k: string): any {
     if (v === undefined) throw markRaised(T.KeyError(k));
     return v;
   }
-  return lookupType(typeOf(m), "__getitem__")(m, k);
+  return lookupSpecial(m, "__getitem__")(m, k);
 }
 
 strFormatOpHook.f = percentFormat;

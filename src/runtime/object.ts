@@ -192,7 +192,7 @@ export function setTypeAttr(cls: PyType, name: string, value: any) {
   // __qualname__, or a metaclass's property), as CPython's type.__setattr__
   const d = lookupType(typeOf(cls), name);
   if (d !== undefined && d !== null && typeof d === "object") {
-    const set = lookupType(typeOf(d), "__set__");
+    const set = dunderOf(lookupType(typeOf(d), "__set__"));
     if (set !== undefined) {
       set(d, cls, value);
       bumpVersion(cls);
@@ -213,7 +213,7 @@ export function delTypeAttr(cls: PyType, name: string) {
     // (type's own writable ones without a deleter, __name__ or __doc__:
     // CPython's check_set_special_type_attr)
     if (typeOf(d) === T.getset_descriptor && d.owner === T.type && d.set !== null && d.del === null) raise(T.TypeError, `cannot delete '${name}' attribute of immutable type '${cls.$name}'`);
-    const del = lookupType(typeOf(d), "__delete__");
+    const del = dunderOf(lookupType(typeOf(d), "__delete__"));
     if (del !== undefined) {
       del(d, cls);
       bumpVersion(cls);
@@ -384,6 +384,37 @@ function callSlot(c: any, f: any): any {
   return get !== undefined ? callObj(get, [c, f, typeOf(f)]) : c;
 }
 
+// Whether a function found on a type by a special-method lookup binds to the
+// instance, as CPython's vectorcall_method binds only a descriptor: a Python
+// function, or a builtin type's method (method_descriptor, wrapper_descriptor).
+// A bound method, a builtin function and a type are not descriptors: CPython
+// calls them without self (iterparse's `__next__ = gen.__next__`, `__call__ =
+// len`).
+// (typeOf's function cases without typeOf: this is on the per-call paths,
+// callObj's __call__ and hash())
+export function bindsAsDunder(f: any): boolean {
+  return f.$pyfn === true && f.$self === undefined && f.$dict === undefined;
+}
+const NON_DESCRIPTOR = new WeakMap<any, any>();
+// A function found by a special-method lookup, callable as f(self, ...args):
+// itself when the call binds it; otherwise bound as CPython binds the rest,
+// through its type's __get__ when it has one (a bound method's gives the
+// method itself), else called with the arguments alone.  One wrapper per
+// function, so a class and its subclass see the same one.
+export function dunderFn(f: any): any {
+  if (bindsAsDunder(f)) return f;
+  let w = NON_DESCRIPTOR.get(f);
+  if (w === undefined) {
+    w = (self: any, ...args: any[]) => callObj(callSlot(f, self), args);
+    w.$kw = (pos: any[], names: string[], values: any[]) => callKw(callSlot(f, pos[0]), pos.slice(1), names, values);
+    w.$kwPos = true;
+    NON_DESCRIPTOR.set(f, w);
+  }
+  return w;
+}
+// dunderFn for a lookup's result that may be absent or not a function
+export const dunderOf = (f: any): any => (typeof f === "function" ? dunderFn(f) : f);
+
 // A call with this many positional arguments or more is never spread into a
 // JS call: V8 puts spread arguments on the stack, so f(*xs) of a few hundred
 // thousand items was a RecursionError where CPython takes it.  It goes
@@ -393,8 +424,8 @@ export const BIG_CALL = 2048;
 export function callObj(f: any, args: any[]): any {
   if (args.length >= BIG_CALL) return callKw(f, args, [], []);
   if (typeof f === "function") return f(...args);
-  const c = lookupType(typeOf(f), "__call__");
-  if (c !== undefined) return typeof c === "function" ? c(f, ...args) : callObj(callSlot(c, f), args);
+  const c = hooks.special(f, "__call__");
+  if (c !== undefined) return c(f, ...args);
   raise(T.TypeError, `'${typeName(f)}' object is not callable`);
 }
 
@@ -429,7 +460,7 @@ export function callKw(f: any, pos: any[], names: string[], values: any[]): any 
     raise(T.TypeError, `${f.$builtinMethod && f.__qualname__ ? f.__qualname__ : (f.__name__ ?? f.$name ?? f.name)}() takes no keyword arguments`);
   }
   const c = lookupType(typeOf(f), "__call__");
-  if (c !== undefined) return typeof c === "function" ? callKw(c, [f, ...pos], names, values) : callKw(callSlot(c, f), pos, names, values);
+  if (c !== undefined) return typeof c === "function" && bindsAsDunder(c) ? callKw(c, [f, ...pos], names, values) : callKw(callSlot(c, f), pos, names, values);
   raise(T.TypeError, `'${typeName(f)}' object is not callable`);
 }
 
@@ -438,7 +469,7 @@ export function callKw(f: any, pos: any[], names: string[], values: any[]): any 
 // Instances of a metaclass that overrides __call__ are created by it.
 function metaCall(cls: any): any {
   const call = lookupType(cls.$meta, "__call__");
-  return call === hooks.typeCall ? undefined : call;
+  return call === hooks.typeCall ? undefined : dunderOf(call);
 }
 
 function construct(cls: PyType, args: any[]): any {
@@ -452,7 +483,7 @@ function construct(cls: PyType, args: any[]): any {
 export function constructPlain(cls: PyType, args: any[]): any {
   if (cls.$ctor === null) return cls(...args);
   let c = (cls as any).$ni;
-  if (c === undefined || c.ver !== cls.$ver) c = (cls as any).$ni = { ver: cls.$ver, nw: effectiveNew(lookupType(cls, "__new__")), init: lookupType(cls, "__init__") };
+  if (c === undefined || c.ver !== cls.$ver) c = (cls as any).$ni = { ver: cls.$ver, nw: effectiveNew(lookupType(cls, "__new__")), init: dunderOf(lookupType(cls, "__init__")) };
   let nw = c.nw;
   let o: any;
   let init = c.init;
@@ -493,7 +524,7 @@ function tpNew(t: any): any {
   return base === undefined ? objectNew : tpNew(base);
 }
 function subclassInit(t: any): { init: any; nw: any; sub: any } {
-  return { init: lookupType(t, "__init__"), nw: tpNew(t), sub: t };
+  return { init: dunderOf(lookupType(t, "__init__")), nw: tpNew(t), sub: t };
 }
 // arguments object.__init__ can't take: CPython's object_new's message, or,
 // for a returned subclass (its __new__ already ran), object_init's
@@ -505,7 +536,7 @@ export function constructPlainKw(cls: PyType, pos: any[], names: string[], value
   if (cls.$ctor === null) return callKw(cls, pos, names, values);
   let nw = effectiveNew(lookupType(cls, "__new__"));
   let o: any;
-  let init = lookupType(cls, "__init__");
+  let init = dunderOf(lookupType(cls, "__init__"));
   let sub: any = null;
   if (nw !== undefined && nw !== objectNew) {
     o = callKw(nw, [cls, ...pos], names, values);
@@ -625,6 +656,7 @@ function descrGet(d: any, o: any, t: PyType): any {
 // __getattr__(o, name); with a default (getattr(o, name, dflt)) an
 // AttributeError from it gives the default, as in CPython.
 function callGetattrHook(gf: any, o: any, name: string, dflt: any): any {
+  if (typeof gf === "function") gf = dunderFn(gf);
   if (dflt === undefined) return gf(o, name);
   try {
     return gf(o, name);
@@ -669,7 +701,7 @@ export function getattr(o: any, name: string, dflt?: any): any {
   }
   const t = typeOf(o);
   if (t.$customGet) {
-    const ga = lookupType(t, "__getattribute__");
+    const ga = dunderOf(lookupType(t, "__getattribute__"));
     if (ga !== undefined) {
       try {
         return ga(o, name);
@@ -739,7 +771,7 @@ function descrGetOrGetattr(d: any, o: any, t: PyType, name: string): any {
     return descrGet(d, o, t);
   } catch (e) {
     if (!isinstance(e, T.AttributeError)) throw e;
-    return gf(o, name);
+    return callGetattrHook(gf, o, name, undefined);
   }
 }
 
@@ -747,7 +779,7 @@ function descrGetOrGetattr(d: any, o: any, t: PyType, name: string): any {
 // the class, a descriptor bound through its __get__, another callable with
 // the name alone)
 function metaHookCall(f: any, cls: any, meta: any, name: string): any {
-  if (typeof f === "function") return f(cls, name);
+  if (typeof f === "function" && bindsAsDunder(f)) return f(cls, name);
   const get = lookupType(typeOf(f), "__get__");
   return get !== undefined ? callObj(get(f, cls, meta), [name]) : callObj(f, [name]);
 }
@@ -898,7 +930,7 @@ export function genericSetattr(o: any, name: string, v: any, t: PyType) {
   if (o !== null && implField(o, name)) reservedAttr(o, name);
   const d = lookupType(t, name);
   if (d !== undefined && d !== null && typeof d === "object") {
-    const s = lookupType(typeOf(d), "__set__");
+    const s = dunderOf(lookupType(typeOf(d), "__set__"));
     if (s !== undefined) {
       s(d, o, v);
       return;
@@ -994,7 +1026,7 @@ export function genericDelattr(o: any, name: string, t: PyType): void {
   }
   const d = lookupType(t, name);
   if (d !== undefined && d !== null && typeof d === "object") {
-    const del = lookupType(typeOf(d), "__delete__");
+    const del = dunderOf(lookupType(typeOf(d), "__delete__"));
     if (del !== undefined) {
       del(d, o);
       return;
@@ -1447,7 +1479,7 @@ function keyHash(d: PyDict, k: any): number {
     return hooks.hash(k);
   } catch (e: any) {
     if (e === null || typeof e !== "object" || e.$cls !== T.TypeError) throw e;
-    const msg = callObj(lookupType(typeOf(e), "__str__"), [e]);
+    const msg = dunderFn(lookupType(typeOf(e), "__str__"))(e);
     return raise(T.TypeError, `cannot use '${typeName(k)}' as a ${(d as any).$elem === true ? "set element" : "dict key"} (${msg})`);
   }
 }
@@ -1550,7 +1582,7 @@ export function newDict(): PyDict {
 }
 
 // Hooks filled in by ops.ts (hash and equality need the full operator set).
-export const hooks: { hash: (x: any) => number; eq: (a: any, b: any) => boolean; repr: (x: any) => string; primProxy: (base: PyType) => PyType; typeCall: any; importModule: (name: string) => any; callerModule: () => string; excResumed: (e: any) => void; excThrown: (e: any) => void; genRaised: (e: any) => void; isinstance: (x: any, spec: any) => boolean; issubclass: (c: any, spec: any) => boolean } = {
+export const hooks: { hash: (x: any) => number; special: (o: any, name: string) => any; eq: (a: any, b: any) => boolean; repr: (x: any) => string; primProxy: (base: PyType) => PyType; typeCall: any; importModule: (name: string) => any; callerModule: () => string; excResumed: (e: any) => void; excThrown: (e: any) => void; genRaised: (e: any) => void; isinstance: (x: any, spec: any) => boolean; issubclass: (c: any, spec: any) => boolean } = {
   typeCall: null,
   // (isinstance() and issubclass()'s whole protocol, builtins.ts; never
   // through the replaceable builtins)
@@ -1564,6 +1596,9 @@ export const hooks: { hash: (x: any) => number; eq: (a: any, b: any) => boolean;
   importModule: () => null,
   callerModule: () => "__main__",
   hash: () => 0,
+  // (ops.ts's special(): a special method of o's type through its per-class
+  // cache, bound as CPython binds it)
+  special: () => undefined,
   eq: (a, b) => a === b,
   repr: (x) => String(x),
   primProxy: (b) => b,

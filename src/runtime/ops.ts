@@ -4,7 +4,7 @@
 
 import * as SP from "./strpos";
 import {
-  T, markRaised, FloatBox, DONE, NotImplemented, PyDict, PyType, typeOf, typeName, lookupType, raise, isType, tuple, callObj, getattr, typeGetattr, isinstance,
+  T, markRaised, FloatBox, DONE, NotImplemented, PyDict, PyType, typeOf, typeName, lookupType, raise, isType, tuple, callObj, dunderFn, bindsAsDunder, getattr, typeGetattr, isinstance,
   dictGet, dictSet, dictDelete, dictKeyOf, dictMeta, DictMeta, hooks, PyBytes, PyByteArray, checkResizable, PrimBox, table, handledExceptions,
 } from "./object";
 import { glibcPow } from "./libm";
@@ -87,7 +87,7 @@ function special(o: any, name: string): any {
   if (v !== undefined) return v === MISSING ? undefined : v;
   let f = lookupType(t, name);
   if (f !== null && typeof f === "object" && f.asDunder !== undefined) f = f.asDunder();
-  if (f !== undefined && typeof f !== "function") f = nonFunctionDunder(f, name);
+  if (f !== undefined) f = typeof f === "function" ? dunderFn(f) : nonFunctionDunder(f, name);
   c[name] = f === undefined ? MISSING : f;
   return f;
 }
@@ -96,13 +96,19 @@ const MISSING = {};
 // bound as Python binds one (a descriptor's __get__, a property, a callable
 // object), callable as f(o, ...args)
 export const lookupSpecial = special;
+// lookupSpecial(x, name) for a site that already holds f, the raw
+// lookupType(typeOf(x), name): a function bound as special() binds it, with
+// no cache lookup; anything else through special()
+export function specialOf(x: any, f: any, name: string): any {
+  return typeof f === "function" ? dunderFn(f) : special(x, name);
+}
 
 // The special method name of type t, normalized as special() does (for the
 // lookups made on a type rather than on an object).
 function typeDunder(t: any, name: string): any {
   let f = lookupType(t, name);
   if (f !== null && typeof f === "object" && f.asDunder !== undefined) f = f.asDunder();
-  if (f !== undefined && typeof f !== "function") f = nonFunctionDunder(f, name);
+  if (f !== undefined) f = typeof f === "function" ? dunderFn(f) : nonFunctionDunder(f, name);
   return f;
 }
 
@@ -163,7 +169,7 @@ function nonFunctionDunder(g: any, name: string): any {
 const ABSENT = {};
 function metaHook(meta: any, name: string): any {
   const f = lookupType(meta, name);
-  return f === undefined || typeof f === "function" ? f : nonFunctionDunder(f, name);
+  return f === undefined ? f : typeof f === "function" ? dunderFn(f) : nonFunctionDunder(f, name);
 }
 function classAttrOpt(cls: any, name: string): any {
   const meta = cls.$meta ?? T.type;
@@ -1397,7 +1403,7 @@ export function lengthHint(x: any): void {
     if (f === undefined) return;
     // (a Python function: $pyfn, but not a builtin type's method, which has
     // $pyfn too, with $builtinMethod and its $owner)
-    const pyfn = typeof f === "function" && f.$pyfn === true && f.$builtinMethod !== true && f.$owner === undefined;
+    const pyfn = typeof f === "function" && f.$pyfn === true && f.$builtinMethod !== true && f.$owner === undefined && bindsAsDunder(f);
     let method = builtinSlot(tn, "__length_hint__") || pyfn;
     if (f !== null && typeof f === "object" && f.asDunder !== undefined) {
       f = f.asDunder();
@@ -1454,6 +1460,19 @@ function hashIntExact(x: number | bigint): bigint {
 
 // hash() as CPython computes it, exactly (dict internals use hashAny,
 // which may round large values to doubles).
+// special(x, "__hash__") for x of type t, cached in two fields of t for the
+// class version (hash() and every dict key; special()'s by-name cache costs a
+// dictionary lookup more).  __hash__ = None is special()'s None wrapper;
+// object's __hash__ binds, so it is objectHash itself.
+function hashSlot(x: any, t: any): any {
+  const v = t.$hashVer;
+  if (v !== undefined && v === t.$ver) return t.$hashFn;
+  const f = special(x, "__hash__");
+  t.$hashFn = f;
+  t.$hashVer = t.$ver;
+  return f;
+}
+
 export function hashExact(x: any): any {
   if (typeof x === "boolean") return +x;
   if (isPyInt(x)) return normBig(hashIntExact(x));
@@ -1467,8 +1486,9 @@ export function hashExact(x: any): any {
   // TYPE-HASH-ROUND-1, a metaclass's result was rounded)
   const cls = x !== null && typeof x === "object" && x.$cls !== undefined && !(x instanceof PySet) ? x.$cls : typeof x === "function" && x.$dict !== undefined && x.$meta !== undefined ? x.$meta : undefined;
   if (cls !== undefined) {
-    const f = lookupType(cls, "__hash__");
-    if (f !== undefined && f !== null && f !== objectHash) {
+    // (cls is typeOf(x))
+    const f = hashSlot(x, cls);
+    if (f !== undefined && f !== objectHash && f !== NONE_WRAPPED.__hash__) {
       const r = f(x);
       // (as CPython's slot_tp_hash: a result in the hash's 64-bit range is the hash, -1 made -2; a larger one is hashed)
       if (typeof r === "bigint") return inHash64(r) ? normBig(r === -1n ? -2n : r) : normBig(hashIntExact(r));
@@ -1556,10 +1576,9 @@ export function hashAny(x: any): number {
     return hashTuple(x);
   }
   if (x instanceof PySet && x.$frozen) return Number(hashFrozensetExact(x));
-  const t = typeOf(x);
-  const f = lookupType(t, "__hash__");
-  if (f === null) raise(T.TypeError, `unhashable type: '${t.$name}'`);
+  const f = hashSlot(x, typeOf(x));
   if (f !== undefined && f !== objectHash) {
+    if (f === NONE_WRAPPED.__hash__) raise(T.TypeError, `unhashable type: '${typeOf(x).$name}'`);
     const r = f(x);
     if (typeof r === "number" && isInt(r)) return r;
     if (typeof r === "boolean") return +r;
@@ -1637,6 +1656,7 @@ export const objectNe = markPy(function __ne__(self: any, other: any) {
 }, "__ne__");
 
 hooks.hash = hashAny;
+hooks.special = special;
 hooks.eq = eqBool;
 
 // ------------------------------------------------------------------ iteration
@@ -2014,7 +2034,7 @@ export class ProtoIter {
   constructor(public o: any) {
     const f = lookupType(typeOf(o), "__next__");
     if (f === undefined) raise(T.TypeError, `iter() returned non-iterator of type '${typeName(o)}'`);
-    this.nx = f;
+    this.nx = typeof f === "function" ? dunderFn(f) : f;
   }
   $next(): any {
     try {
