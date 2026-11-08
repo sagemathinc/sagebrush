@@ -12,7 +12,8 @@
 - **It deletes only what it knows you deleted.** The first sync of a folder pair never deletes anything. Later, a file is deleted on one side only if it was there at the last sync and you deleted it on the other. Deleted workspace files go to the workspace's Trash; deleted local files go to a holding folder you can restore from for 30 days.
 - **Stopping halfway loses nothing.** Run it again and it picks up from what is actually on both sides.
 - **Not on native Windows yet** (it runs in WSL). And for a folder on another disk, such as a USB drive, fs-sync deletes or replaces files there only once its holding folder is on that disk too; until then it says so and leaves them.
-- **Some things are listed, not synced:** notebooks, boards and chats, files over 95 MiB, and symlinks.
+- **Notebooks, boards and chats come down as files, but don't go up yet:** fs-sync writes each one's current version to this computer (a `.ipynb`, `.board.json` or `.chat` file). If you edit one here, fs-sync says so and leaves your edit alone; it doesn't upload it. Two-way sync for them comes later.
+- **Some things are listed, not synced:** files over 95 MiB (until chunked uploads exist), and symlinks.
 - **Each workspace folder is paired once:** the first run for a folder asks you to approve it on sagebrush.space, and it can then change only that folder.
 
 ---
@@ -237,7 +238,7 @@ Through the agent endpoint's verbs (design/agent-endpoint.md §4), with the two 
   - `remove(path, {fid, sha256})` removes only if the entry at `path` is still that data file with that hash, else 409 `conflict`. So a delete-there can't remove a file changed or replaced since the plan.
 - **Checking an absence:** `stat(path)`, answering the entry or "none", is called at apply time before a delete here (§4.1).
 
-Only data files are synced. Notebooks, boards and chats are documents (patch logs, design/sync-server.md §4), not files; the plan lists them as skipped, both ways, in this first version. Syncing a notebook as an `.ipynb` file is a later question (§7).
+Data files sync both ways. Notebooks, boards and chats are documents (patch logs, design/sync-server.md §4), not files: they come down as download-only snapshots (§3.4), and never go up in this version.
 
 ### 3.3 Limits it lives within
 
@@ -247,7 +248,7 @@ fs-sync adds no limit of its own on the server; it is bounded by the grant's and
   - **one read meter and one write meter for the whole account,** shared atomically by all its grants, so they also bound the churn of many grants together;
   - each is CoCalc's tier value (`sync.grant_read_bytes_per_day`, `sync.grant_write_bytes_per_day`), clamped: read to at most the account's `sync.read_bytes_per_day` and 64 GiB, write to at most `storage_bytes` and 64 GiB;
   - 200 MB / 100 MB only when a limits object CoCalc sent omits the field; an outage keeps the last good limits; zero means zero.
-- **Per file:** at most 95 MiB (the single-PUT limit) until a grant may upload chunked files. design/tiered-files.md §4 lifts it to 200 MiB for a person's device sessions only, so larger files are skipped and listed, not split.
+- **Per file:** at most 95 MiB (the single-PUT limit) until chunked upload exists. Then fs-sync uses it, up to 200 MiB (William, Nov 8: "(a) Recommended: yes, as soon as chunked upload exists (tiered-files PR 3), with no extra design"): design/tiered-files.md §4.4's "manifests and packs come from a person's device session only" then includes an agent grant's chunked upload, under the same verification (§4.1 there) and the grant's write budget. Until then, larger files are skipped and listed, not split.
 - **The index:** 100,000 entries per account and 10,000 per folder.
 
 **The plan states its cost before it runs** (daybreak2), counted from the protocol, with an exact upper bound per action:
@@ -265,6 +266,20 @@ fs-sync adds no limit of its own on the server; it is bounded by the grant's and
 | a failed request (a transport error, not a 409 or 429) | retried at most twice, each attempt counted | |
 
 The plan shows the total and the bound with retries. fs-sync paces itself to 60 requests a minute, so that limit only slows it. Before applying, it checks the plan against what is left of the 1,000 an hour and of the day's bytes up and down, and applies only the prefix of the plan that fits all three. If it doesn't fit, the plan says how much fits now and when a rerun continues (in an hour, or tomorrow); under `--yes` it applies what fits and exits 1, "not all applied; run again", saying why (§1). A 429 mid-run stops the run cleanly (§4.1) with the `retry_after`.
+
+### 3.4 Notebooks, boards and chats: download-only snapshots
+
+William, Nov 8: "(a) Recommended: v1 writes a current .ipynb / .board.json / chat file to your computer (download only; a local edit to one is reported, not uploaded). Two-way sync comes next as its own PR."
+- **How a snapshot is made:** the agent endpoint's `read` of a document (design/agent-endpoint.md §4) answers its current value, computed in the Worker from its latest snapshot and the batches since. fs-sync writes that value as the file's bytes: a notebook as `.ipynb` JSON, a board as `.board.json`, a chat as its `.chat` file. A document over the endpoint's 8 MB of value is skipped and listed. Each read debits the value's size from the grant read budget (§3.3) and counts as one request.
+- **Where it lands:** at the document's own path under `LOCAL_DIR`, like any downloaded file, by the same move-aside and no-replace install (§4.1).
+- **What the base records:** the snapshot's SHA-256 (of the bytes written) and the document's head (`head_seq`), marked as a snapshot.
+- **The next run:**
+  - **the document changed** (another head) **and the local file is the snapshot as written** (its hash is the base's): a new snapshot replaces it, as a download that replaces a file (§4.1, so the old one goes to the holding folder);
+  - **the local file was edited** (its hash isn't the base's): it is **never overwritten, deleted or uploaded**. The plan lists it under "Edited here, not uploaded (fs-sync doesn't upload notebooks yet)", the base is unchanged, and the run exits 1 so a script notices. A newer version in the workspace isn't written either, until the person moves or deletes their edited copy;
+  - **the document was deleted in the workspace** and the local snapshot is unedited: a delete here, to the holding folder, as for a data file; if edited, it is kept and listed;
+  - **the local snapshot was deleted:** nothing happens in the workspace. The base forgets it, and the next run writes it again, saying so; to stop that, list it in `.sagebrushignore`;
+  - **a new local `.ipynb`, `.board.json` or `.chat` file** with no document at that path is listed as "not uploaded (fs-sync doesn't upload notebooks yet)".
+- **Under `--up`:** snapshots are neither written nor checked. Under `--down`: as above.
 
 ## 4. Running the plan: every action checks first (sync-client)
 
@@ -335,6 +350,7 @@ Against the agent endpoint on the reference server (Miniflare), a real local fol
 - **(astra) Links:** a folder inside `LOCAL_DIR` replaced by a symlink to outside during apply: the operation fails, nothing outside is read or written.
 - **(astra) One direction:** a conflict under `--up` and under `--down`: neither side changes, the base doesn't advance, exit 1.
 - **Names:** a symlink pointing outside the folder (skipped, nothing read through it), ignored paths on both sides, a name the workspace refuses, NFD vs NFC names, and two workspace names differing only in case on a case-insensitive filesystem.
+- **Snapshots (§3.4):** a notebook, a board and a chat written as files; the document changed and the snapshot unedited (replaced, the old one held); the snapshot edited here (never overwritten, deleted or uploaded; listed; exit 1), and then the document changed too (still not written); the document deleted (unedited: held; edited: kept); the snapshot deleted here (written again, and not again once ignored); a new local `.ipynb` (listed, not uploaded); a document over 8 MB of value (skipped); `--up` (snapshots untouched).
 - **The tier budgets (daybreak2):** the grant read and write meters at the limit and one byte over; a field omitted (200 MB / 100 MB), an explicit 0 (nothing read or written), a negative, fractional or overflowing value (the whole limits object malformed: the last good one kept); a CoCalc outage and a stale cache (the last good value, never the fallback); a plan notice that lowers a tier mid-day; the clamp to the account's read budget, `storage_bytes` and 64 GiB; two grants at once at the shared boundary (one fits, the other gets `rate`).
 - **Limits:** a plan larger than the grant's daily write budget (partial apply, the right exit code, the rest the next day); a 429 mid-run; a file over 95 MiB (skipped and listed); a revoked token (401, pairs again).
 - **The base:** a base for another account, grant or folder is never used; two runs of the same pair at once (the second refused); a run killed while holding the lock (the OS releases a `flock`, so the next run isn't blocked); a damaged base (treated as no base: no deletes); a crash between batch commits (the lagging rows are recorded by the next run, with no extra action).
@@ -364,5 +380,5 @@ Against the agent endpoint on the reference server (Miniflare), a real local fol
 ## 7. Open questions
 
 - **Larger syncs: decided** (William, Nov 8, ~1:49 PM PST): "This should be a function of the membership tier. 100MB was a parameter we probably chose when our AMBITION was much less about what we might store on R2." A grant's daily read and write budgets come from the tier, with today's 200 MB / 100 MB only as the fallback when CoCalc sends none, under a hard ceiling (§3.3). The plan still says how long a large first sync will take at the tier's rate.
-- **Notebooks as `.ipynb`:** sync documents as their file form, read-only or both ways? (Proposed: later; skipped and listed for now.)
-- **Files over 95 MiB:** let a grant upload chunked files (design/tiered-files.md §4.4 limits that to device sessions today)? (Proposed: later, with its own review.)
+- **Notebooks, boards and chats: decided** (William, Nov 8, ~1:52 PM PST): "(a) Recommended: v1 writes a current .ipynb / .board.json / chat file to your computer (download only; a local edit to one is reported, not uploaded). Two-way sync comes next as its own PR." (§3.4).
+- **Files over 95 MiB: decided** (William, Nov 8, ~1:52 PM PST): "(a) Recommended: yes, as soon as chunked upload exists (tiered-files PR 3), with no extra design" (§3.3).
