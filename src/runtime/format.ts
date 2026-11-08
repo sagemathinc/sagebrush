@@ -757,6 +757,14 @@ export function fmt(v: any, conv: string | null, spec: string): string {
 // A %e/%f/%g argument that is not a number: CPython's PyFloat_AsDouble, its
 // special method called once and the result checked (__float__'s a float, a
 // subclass with its DeprecationWarning; __index__'s an int, converted)
+// (an exception raised by Python code or the runtime, not a JS failure)
+const isPyException = (e: any): boolean => e !== null && typeof e === "object" && e.$cls !== undefined && isinstance(e, T.BaseException);
+// An int subclass whose __float__ is its own, not int's
+function intSubclassFloat(v: any): boolean {
+  if (!(v instanceof PrimBox) || !isPyInt(v.$v)) return false;
+  const f = lookupType(typeOf(v), "__float__");
+  return f !== undefined && f.$unboxing !== true && f !== T.int.$dict.get("__float__");
+}
 function floatOfArg(v: any): number {
   let name = "__float__";
   let f = lookupType(typeOf(v), name);
@@ -956,15 +964,18 @@ export function percentFormat(fmtStr: string, args: any, bytesMode = false): str
       }
       case "e": case "E": case "f": case "F": case "g": case "G": {
         const v = nextArg();
-        let x = fv(v);
+        // (an int subclass with its own __float__ is converted through it, as
+        // PyFloat_AsDouble; a float subclass is its value)
+        let x = intSubclassFloat(v) ? undefined : fv(v);
         if (x === undefined) {
           if (isPyInt(v) || typeof v === "boolean") x = Number(v);
           else if (bytesMode) {
-            // (bytes' formatfloat: PyFloat_AsDouble, any error replaced)
+            // (bytes' formatfloat: PyFloat_AsDouble, any Python exception
+            // replaced, BaseException's too; an internal failure is not one)
             try {
               x = floatOfArg(v);
             } catch (e: any) {
-              if (!isinstance(toPyExc(e), T.Exception)) throw e;
+              if (!isPyException(e)) throw e;
               raise(T.TypeError, `float argument required, not ${typeName(v)}`);
             }
           } else x = floatOfArg(v);

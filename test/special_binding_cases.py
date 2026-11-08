@@ -808,3 +808,79 @@ for o in (PBig(), PTE(), PVE()):
 for o in (True, 3, 3.5, "s", b"x", b"xy", b"", bytearray(b"x"), bytearray(b"xy"), 300, -1, PIS(7), [1]):
     print(type(o).__name__, repr(o), "|", tw(lambda: b"%c" % o), "|", tw(lambda: b"%f" % o))
 print("object |", tw(lambda: b"%c" % object()), "|", tw(lambda: b"%f" % object()))
+
+print("-- #860 r2 (daybreak3's pins): bytes %f replaces BaseException too; an int subclass's own __float__")
+
+
+class K:
+    def __float__(self):
+        raise KeyboardInterrupt("k")
+
+
+def tb(f):
+    try:
+        return repr(f())
+    except BaseException as e:
+        return type(e).__name__ + ": " + str(e)
+
+
+print(tb(lambda: "%f" % K()))
+print(tb(lambda: b"%f" % K()))
+
+
+class KS:
+    def __float__(self):
+        raise SystemExit("s")
+
+
+print(tb(lambda: "%f" % KS()), tb(lambda: b"%f" % KS()))
+calls = []
+
+
+class I(int):
+    def __float__(self):
+        calls.append(0)
+        return 9.5
+
+
+print("%f" % I(2))
+print(b"%f" % I(2))
+print(calls)
+fcalls = []
+
+
+class FSub(float):
+    def __float__(self):
+        fcalls.append(0)
+        return 9.5
+
+
+print("%f" % FSub(2.0), b"%f" % FSub(2.0), "%e" % FSub(2.0), fcalls)
+print("-- int and float subclasses overriding each conversion, and BaseExceptions in each, str and bytes")
+xcalls = []
+
+
+def xsub(base, name, val):
+    def m(self):
+        xcalls.append(name)
+        return val
+
+    return type(base.__name__ + "_" + name, (base,), {name: m})
+
+
+for base, name, val in ((int, "__float__", 9.5), (int, "__index__", 7), (int, "__int__", 8), (float, "__float__", 9.5), (float, "__index__", 7)):
+    xo = xsub(base, name, val)(2)
+    for fmt in ("%f", "%d", "%x", "%c", "%e"):
+        xcalls.clear()
+        a = tw(lambda: fmt % xo)
+        ca = list(xcalls)
+        xcalls.clear()
+        b = tw(lambda: fmt.encode() % xo)
+        print(base.__name__, name, fmt, "|", a, ca, "|", b, list(xcalls))
+for exc in (KeyboardInterrupt, SystemExit, GeneratorExit, StopIteration, MemoryError, RecursionError):
+    for name in ("__float__", "__index__"):
+        def xm(self, exc=exc):
+            raise exc("x")
+
+        xo = type("XK", (), {name: xm})()
+        print(exc.__name__, name, "|", " | ".join(tb(lambda: f % xo) for f in ("%f", "%d", "%c")), "| bytes", " | ".join(tb(lambda: f % xo) for f in (b"%f", b"%d", b"%c")))
