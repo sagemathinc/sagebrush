@@ -67,7 +67,7 @@ RELAY_LIMITS = {
     "outTotal": PAIR_LIMITS["outTotal"],
 }
 _SAFE = 2 ** 53 - 1
-CHANNELS = ("kernel", "terminal")  # (terminal addendum T1.4 §T2; terminal pages served only when asked, until T-1b)
+CHANNELS = ("kernel", "terminal")  # (terminal addendum T1.4 §T2; terminal pages served by default since T-3)
 TERMINAL_FRAME = 65_536  # (a terminal message's whole serialization, either way: T2's terminal row, T12-CAP-1)
 _GEN_PREFIX = re.compile(r"([1-9][0-9]{0,15})\n")
 _CONN = re.compile(r"[A-Za-z0-9_-]{1,64}")
@@ -578,10 +578,11 @@ class RelayRunner:
     """The gateway's host on the relay: its pages, its leg, and dialing again."""
 
     def __init__(self, key, timers=None, cwd=None, err=None, post=_post, rnd=random.random, sleep=asyncio.sleep, port=None,
-                 terminals=False):
+                 terminals=True):
         self.key = key
-        # (terminal pages (terminal.py): served only when asked, until T-1b's output path; otherwise refused at once,
-        # with no PTY opened, as before)
+        # (terminal pages (terminal.py): on by default (terminal addendum T6, William Nov 6: a kernel on this runner can
+        # already run any shell command as the box user, so a terminal adds no capability); terminals=False refuses
+        # them at once, with no PTY opened)
         self.serve_terminals = terminals
         self.terms = None
         self.cwd = cwd
@@ -764,13 +765,17 @@ class RelayRunner:
                 "protocol": 1, "purpose": "terminal", "via": "relay", "token": p.token,
                 "nonce": self.gateway.current_nonce(), "limits": {"frame": TERMINAL_FRAME},
                 # (the page's generation on this leg: its open's proof binds it (T5), and only the runner knows it)
-                "gen": p.gen, "incarnation": self.incarnation}})
+                "gen": p.gen, "incarnation": self.incarnation, "channels": self.channels()}})
         self.paired_conn = p
         self.gateway.socket_paired(p)
         self.err("A page is paired.\n")
         p.send({"jsonrpc": "2.0", "id": rid, "result": {
             "protocol": 1, "purpose": "kernel", "via": "relay", "token": p.token, "nonce": self.gateway.current_nonce(),
-            "limits": {"frame": PAIR_LIMITS["frame"]}, "incarnation": self.incarnation}})
+            "limits": {"frame": PAIR_LIMITS["frame"]}, "incarnation": self.incarnation, "channels": self.channels()}})
+
+    def channels(self):
+        """The page channels this runner serves (T6: the page offers Terminal when it is listed)."""
+        return ["kernel", "terminal"] if self.serve_terminals else ["kernel"]
 
     # ---- the leg's life
     def on_end(self, code, reason):

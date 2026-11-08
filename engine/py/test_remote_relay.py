@@ -468,8 +468,8 @@ async def test_forged_controls_never_act():
 
 @aio
 async def test_channels_and_page_map():
-    """T1.4 §T2 at the runner (b3c): a terminal page is ended at once with close {gen} (terminals are b5), the leg
-    kept; every answer carries its page's generation; a newer kernel page replaces the older, whose late messages do
+    """T1.4 §T2 at the runner (b3c): on a runner not serving terminals (terminals=False; they are on by default since
+    T-3), a terminal page is ended at once with close {gen}, the leg kept; every answer carries its page's generation; a newer kernel page replaces the older, whose late messages do
     nothing and whose page-close is accepted; a message for a page the runner never held, or without its prefix, is
     refused (1008)."""
     if NODE is None:
@@ -479,6 +479,8 @@ async def test_channels_and_page_map():
     t = await Run().start()
     try:
         leg = await t.relay.leg()
+        assert t.runner.serve_terminals and t.runner.channels() == ["kernel", "terminal"]  # (on by default, T6)
+        t.runner.serve_terminals = False
         leg.control(relay="page-open", conn="c1", kind="runner", chan="terminal", gen=1)
         await asyncio.sleep(0.2)
         assert {"relay": "close", "gen": 1} in leg.controls and 1 not in t.runner.pages and not t.runner.leg.closed

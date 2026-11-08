@@ -386,6 +386,36 @@
    "kind": "renderer",
    "owner": "renderer"
   },
+  "web/notebook/remote-terminal-view.ts ::  :: import css from \"@xterm/xterm/css/xterm.css\" with { type: \"text\" }; #0": {
+   "kind": "rich",
+   "owner": "terminal",
+   "readers": []
+  },
+  "web/notebook/remote-terminal-view.ts ::  :: import { FitAddon } from \"@xterm/addon-fit\"; #0": {
+   "kind": "rich",
+   "owner": "terminal",
+   "readers": []
+  },
+  "web/notebook/remote-terminal-view.ts ::  :: import { Terminal } from \"@xterm/xterm\"; #0": {
+   "kind": "rich",
+   "owner": "terminal",
+   "readers": []
+  },
+  "web/notebook/remote-terminal-view.ts :: start :: term = new Terminal({ #0": {
+   "kind": "rich",
+   "owner": "terminal",
+   "readers": []
+  },
+  "web/notebook/remote-terminal-view.ts :: start :: term.loadAddon(fit); #0": {
+   "kind": "rich",
+   "owner": "terminal",
+   "readers": []
+  },
+  "web/notebook/remote-terminal-view.ts :: start :: term.registerLinkProvider({ #0": {
+   "kind": "rich",
+   "owner": "terminal",
+   "readers": []
+  },
   "web/notebook/runner-worker.js :: say :: f.srcdoc = FILES_RUNNER; #0": {
    "kind": "host",
    "owner": "host"
