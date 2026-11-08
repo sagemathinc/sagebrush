@@ -13,7 +13,7 @@
 - **Stopping halfway loses nothing.** Run it again and it picks up from what is actually on both sides.
 - **Not on native Windows yet** (it runs in WSL). And for a folder on another disk, such as a USB drive, fs-sync deletes or replaces files there only once its holding folder is on that disk too; until then it says so and leaves them.
 - **Notebooks, boards and chats come down as files, but don't go up yet:** fs-sync writes each one's current version to this computer (a `.ipynb`, `.board.json` or `.chat` file). If you edit one here, fs-sync says so and leaves your edit alone; it doesn't upload it. Two-way sync for them comes later.
-- **Some things are listed, not synced:** files over 95 MiB (until chunked uploads exist), and symlinks.
+- **Some things are listed, not synced:** files over 95 MiB (until large uploads are available), and symlinks.
 - **Each workspace folder is paired once:** the first run for a folder asks you to approve it on sagebrush.space, and it can then change only that folder.
 
 ---
@@ -275,10 +275,10 @@ William, Nov 8: "(a) Recommended: v1 writes a current .ipynb / .board.json / cha
 - **What the base records:** the snapshot's SHA-256 (of the bytes written) and the document's head (`head_seq`), marked as a snapshot.
 - **The rules,** which in §2.2's terms are: a snapshot row never uploads, and never deletes or replaces a file whose hash isn't its row's. **The next run:**
   - **the document changed** (another head) **and the local file is the snapshot as written** (its hash is the base's): a new snapshot replaces it, as a download that replaces a file (§4.1, so the old one goes to the holding folder);
-  - **the local file was edited** (its hash isn't the base's): it is **never overwritten, deleted or uploaded**. "Edited here" means its hash differs from the snapshot hash in its base row. The plan lists it under §1.2's "Not uploaded: edited here", every run, and the base is unchanged. That alone doesn't make the run exit 1 (§1.3), since this version can never upload it. A newer version in the workspace isn't written either, until the person deletes or renames their edited copy; the next run then writes a fresh one;
+  - **the local file was edited** (its hash isn't the base's): it is **never overwritten, deleted or uploaded**. "Edited here" means its hash differs from the snapshot hash in its base row. The plan lists it in §1.2's "Not uploaded" list as changed here, every run, and the base is unchanged. That alone doesn't make the run exit 1 (§1.3), since this version can never upload it. A newer version in the workspace isn't written either, until the person deletes or renames their edited copy; the next run then writes a fresh one;
   - **the document was deleted in the workspace** and the local snapshot is unedited: a delete here, to the holding folder, as for a data file; if edited, it is kept and listed;
   - **the local snapshot was deleted:** nothing happens in the workspace. The base forgets it, and the next run writes it again, saying so; to stop that, list it in `.sagebrushignore`;
-  - **a new local `.ipynb`, `.board.json` or `.chat` file** with no document at that path is listed as "not uploaded (fs-sync doesn't upload notebooks yet)".
+  - **a new local `.ipynb`, `.board.json` or `.chat` file** with no document at that path is listed in §1.2's "Not uploaded" list as new here, and left as it is.
 - **Under `--up`:** snapshots are neither written nor checked. Under `--down`: as above.
 
 ## 4. Running the plan: every action checks first (sync-client)
