@@ -234,7 +234,12 @@ Only data files are synced. Notebooks, boards and chats are documents (patch log
 ### 3.3 Limits it lives within
 
 fs-sync adds no limit of its own on the server; it is bounded by the grant's and the account's (design/agent-endpoint.md §7, design/sync-server.md §8):
-- **Per grant:** 60 requests a minute and 1,000 an hour; 200 MB a day read (authorized at URL issue); 100 MB a day written; each write at most 32 MB inline, larger as a blob up to `max_file_bytes`.
+- **Per grant:** 60 requests a minute and 1,000 an hour; each write at most 32 MB inline, larger as a blob up to `max_file_bytes`.
+- **A grant's daily bytes come from the membership tier** (William, Nov 8: "This should be a function of the membership tier. 100MB was a parameter we probably chose when our AMBITION was much less about what we might store on R2."):
+  - CoCalc sends them with the account's other limits, as it sends `storage_bytes` and `sync.read_bytes_per_day`: `sync.grant_read_bytes_per_day` (authorized at URL issue) and `sync.grant_write_bytes_per_day`;
+  - **when CoCalc sends none,** the first values of design/agent-endpoint.md §7 apply: 200 MB a day read and 100 MB a day written;
+  - **a hard ceiling,** whatever CoCalc sends: a grant reads at most the account's own `sync.read_bytes_per_day` and 64 GiB a day, and writes at most the account's `storage_bytes` and 64 GiB a day. A grant's reads also count in the account's own read budget, which bounds all grants together, as today.
+  - This changes agent-endpoint.md §7's fixed numbers into these tier values for every grant, not only fs-sync's; it is proposed here for that design, as the two verb additions are (§3.2).
 - **Per file:** at most 95 MiB (the single-PUT limit) until a grant may upload chunked files. design/tiered-files.md §4 lifts it to 200 MiB for a person's device sessions only, so larger files are skipped and listed, not split.
 - **The index:** 100,000 entries per account and 10,000 per folder.
 
@@ -243,7 +248,7 @@ fs-sync adds no limit of its own on the server; it is bounded by the grant's and
 | Step | Grant requests (at most) | Also |
 |---|---|---|
 | listing $n$ workspace entries | $\lceil n/1000 \rceil$ (one page of at most 1,000 entries per request; the endpoint's "10,000 a call" is not used) | |
-| upload, at most 32 MB | 1 (`write`) | the bytes, against the 100 MB a day written |
+| upload, at most 32 MB | 1 (`write`) | the bytes, against the grant's daily write budget |
 | upload, over 32 MB | 3 (the blob's upload step, its PUT, then the `write`), as the agent endpoint's blob write | the bytes |
 | download | 1 (`read`, which issues the single-use URL and debits the 200 MB a day read) | 1 GET to the files Worker, outside the grant's request meter (the files Worker's 600 a minute per IP applies) |
 | folder made in the workspace | 1 (`mkdir`) | |
@@ -350,6 +355,6 @@ Against the agent endpoint on the reference server (Miniflare), a real local fol
 
 ## 7. Open questions
 
-- **Larger syncs:** the grant's 100 MB a day written makes a first upload of a large folder take days. Is that acceptable for now, or should a person be able to make a grant with a larger write budget for fs-sync? (Proposed: acceptable for the first version; the plan says how long it will take.)
+- **Larger syncs: decided** (William, Nov 8, ~1:49 PM PST): "This should be a function of the membership tier. 100MB was a parameter we probably chose when our AMBITION was much less about what we might store on R2." A grant's daily read and write budgets come from the tier, with today's 200 MB / 100 MB only as the fallback when CoCalc sends none, under a hard ceiling (§3.3). The plan still says how long a large first sync will take at the tier's rate.
 - **Notebooks as `.ipynb`:** sync documents as their file form, read-only or both ways? (Proposed: later; skipped and listed for now.)
 - **Files over 95 MiB:** let a grant upload chunked files (design/tiered-files.md §4.4 limits that to device sessions today)? (Proposed: later, with its own review.)
