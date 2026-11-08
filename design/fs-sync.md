@@ -54,6 +54,8 @@ uvx sagebrush@latest fs-sync --forget [--origin URL]
 
 **It runs once and exits.** No watcher, no daemon and no schedule. To sync again, run it again.
 
+**Windows is not supported in v1** (§4.4). On native Windows, fs-sync refuses at once, before pairing or reading anything (exit 2), as `sagebrush remote` does: "fs-sync doesn't run on native Windows yet. Use it from WSL (Windows Subsystem for Linux)." It runs inside WSL as on Linux.
+
 ### 1.1 Signing in
 
 The first run for a site pairs, by the agent endpoint's pairing (§3.1, design/agent-endpoint.md §2):
@@ -115,6 +117,7 @@ Apply? [y/N]
   - Over a scan limit (§4.5), it stops before planning (exit 1): "Stopped before planning: ~/thesis has more than 200,000 entries (the limit for one sync)." The other limits use the same form ("… is more than 64 folders deep", "… has a path longer than 1,024 bytes").
   - Not enough room for fs-sync's own records: the pair's database is capped at 1 GiB, and the state folder's filesystem needs 1.1 GiB free before scanning (§4.5). Otherwise it exits 1 having read nothing: "Not enough free space for fs-sync's records: it needs 1.1 GiB free in ~/.local/state, and 300 MB is free. Free some space and run it again."
   - A download that doesn't fit stays pending, and nothing of it is written. Its target filesystem needs the file's bytes plus 256 MiB free. The plan lists it under "Not applied: not enough free space on /home (needs 2.1 GiB, 900 MiB free)", and the run exits 1.
+  - Before each action that deletes or replaces a file (on either side), the state folder's filesystem must have 64 MiB free, so the base can be committed (§2.5). Otherwise the action stays pending and nothing of it is done: "Not applied: fs-sync keeps 64 MiB free in ~/.local/state to record deletions safely, and 20 MiB is free." The run exits 1.
   - **The holding folder must be on the same filesystem as `LOCAL_DIR`** (§2.4). When it isn't (for example, `LOCAL_DIR` on a USB disk), actions that would replace or delete a file here aren't applied, and the plan says why: "Not applied: deleting or replacing files on /media/usb needs fs-sync's holding folder on the same disk, and it is on /home. Set XDG_STATE_HOME to a folder on /media/usb outside the synced folder to allow it." Uploads and new downloads still go ahead.
   - Over the hour's request budget (§3.3): "This hour's requests cover 41 of these 120 files; run fs-sync again in an hour for the rest. Apply those 41? [y/N]". The day's budget uses the over-budget line below.
 - **While it applies,** each action prints one line when done.
@@ -126,7 +129,7 @@ Apply? [y/N]
 |---|---|
 | 0 | in sync: the whole plan was applied, or there was nothing to do (with `--dry-run`: the plan is empty) |
 | 1 | not all applied: declined, no terminal, a refused many-deletions plan, `--dry-run` with a non-empty plan, actions skipped, actions or conflicts pending in a `--up`/`--down` run, or stopped by the daily budget or a 429. The output says which; running it again continues |
-| 2 | usage: an unknown argument, `LOCAL_DIR` missing or overlapping fs-sync's own folders, `--dry-run` with `--yes` |
+| 2 | usage: an unknown argument, `LOCAL_DIR` missing or overlapping fs-sync's own folders, `--dry-run` with `--yes`, or native Windows |
 | 3 | not signed in and can't pair (no terminal), or the grant was refused |
 | 4 | the site couldn't be reached, or answered with an error that isn't about one action |
 
