@@ -318,7 +318,7 @@ def test_state_folder_refusals():
             St.Base.open(state, *IDENT)
             raise AssertionError("another user's state folder was used")
         except St.Refused as e:
-            assert "isn't a folder of yours" in e.message
+            assert e.message.startswith("Other users can change "), e.message
         finally:
             os.getuid = saved
     finally:
@@ -444,7 +444,9 @@ def test_folder_chain_on_disk():
             St.Base.open(os.path.join(open_dir, "state"), *IDENT)
             raise AssertionError("an ancestor others can write to was trusted")
         except St.Refused as e:
-            assert e.message == "%s isn't a folder of yours: fs-sync keeps its records there." % St._home_short(open_dir), e.message
+            assert e.message == ("Other users can change %s, which is on the way to fs-sync's records (%s). Make it "
+                                 "writable only by you or root, or set XDG_STATE_HOME to a folder only you can change."
+                                 % (St._home_short(open_dir), St._home_short(os.path.join(open_dir, "state")))), e.message
         assert not os.path.exists(os.path.join(open_dir, "state"))
         # a link among the ancestors, from a checked folder: its real path is checked too
         good, link = os.path.join(d, "good"), os.path.join(d, "via")
@@ -458,14 +460,78 @@ def test_folder_chain_on_disk():
             St.Base.open(os.path.join(link, "state"), *IDENT)
             raise AssertionError("a link to a folder others can write to was trusted")
         except St.Refused as e:
-            assert "isn't a folder of yours" in e.message
+            assert e.message.startswith("Other users can change %s," % St._home_short(open_dir)), e.message
         os.unlink(link)
         os.symlink(os.path.join(d, "nowhere"), link)                 # a link to nothing: refused, not a crash
         try:
             St.Base.open(os.path.join(link, "state"), *IDENT)
             raise AssertionError("a dangling link was trusted")
         except St.Refused as e:
-            assert "isn't a folder of yours" in e.message
+            assert e.message == "%s is a link to nothing, on the way to fs-sync's records." % St._home_short(link), e.message
+        # (astra, @sagebrush) every link on the way, at every hop, must be ours or root's, checked before it is read
+        os.unlink(link)
+        os.symlink(good, link)
+        real_lstat, real_readlink = os.lstat, os.readlink
+        owners, read = {}, []
+
+        def seamed_lstat(path, *a, **k):
+            st = real_lstat(path, *a, **k)
+            if path not in owners:
+                return st
+            return os.stat_result((st.st_mode, st.st_ino, st.st_dev, st.st_nlink, owners[path], st.st_gid,
+                                   st.st_size, st.st_atime, st.st_mtime, st.st_ctime))
+
+        def tracked_readlink(path, *a, **k):
+            read.append(path)
+            return real_readlink(path, *a, **k)
+
+        def opens(where):
+            os.lstat, os.readlink = seamed_lstat, tracked_readlink
+            try:
+                St.Base.open(where, *IDENT).close()
+                return None
+            except St.Refused as e:
+                return e.message
+            finally:
+                os.lstat, os.readlink = real_lstat, real_readlink
+        others = "Other users can change %s, which is on the way to fs-sync's records (%s). Make it writable only by " \
+                 "you or root, or set XDG_STATE_HOME to a folder only you can change."
+        # a link someone else owns: refused, naming it, and never read
+        owners.clear(); read.clear(); owners[link] = os.getuid() + 1
+        where = os.path.join(link, "state2")
+        assert opens(where) == others % (St._home_short(link), St._home_short(where))
+        assert link not in read and not os.path.exists(os.path.join(good, "state2"))
+        # a link of ours whose target passes through someone else's link: refused at that hop, naming it
+        hop = os.path.join(d, "hop")
+        os.symlink(good, hop)
+        os.unlink(link)
+        os.symlink(hop, link)
+        owners.clear(); read.clear(); owners[hop] = os.getuid() + 1
+        assert opens(where) == others % (St._home_short(hop), St._home_short(where))
+        assert read == [link] and not os.path.exists(os.path.join(good, "state2"))
+        # root's links are followed, as macOS's /tmp -> /private/tmp; and ours: both hops read
+        owners.clear(); read.clear(); owners[hop] = 0
+        assert opens(where) is None and read == [link, hop] and os.path.isdir(os.path.join(good, "state2", "pairs"))
+        # a loop: refused as leading nowhere, naming the link it started from
+        loop_a, loop_b = os.path.join(d, "loop_a"), os.path.join(d, "loop_b")
+        os.symlink(loop_b, loop_a)
+        os.symlink(loop_a, loop_b)
+        owners.clear()
+        assert opens(os.path.join(loop_a, "state")) == ("%s is a link to nothing, on the way to fs-sync's records."
+                                                        % St._home_short(loop_a))
+        # a relative link with ".." in it resolves from where the link is
+        rel = os.path.join(good, "rel")
+        os.symlink(os.path.join("..", "good"), rel)
+        assert opens(os.path.join(rel, "state3")) is None and os.path.isdir(os.path.join(good, "state3", "pairs"))
+        # a plain file where a folder should be
+        blocker = os.path.join(d, "blocker")
+        open(blocker, "wb").close()
+        try:
+            St.Base.open(os.path.join(blocker, "state"), *IDENT)
+            raise AssertionError("a file on the way was passed")
+        except St.Refused as e:
+            assert e.message == ("%s isn't a folder, and it is on the way to fs-sync's records (%s)."
+                                 % (St._home_short(blocker), St._home_short(os.path.join(blocker, "state")))), e.message
         assert not os.path.exists(os.path.join(d, "nowhere"))
         # fs-sync's own folders are exactly 0700, whatever they were (looser, or tighter)
         for mode in (0o711, 0o500):
@@ -479,12 +545,12 @@ def test_folder_chain_on_disk():
             St.Base.open(state, *IDENT)
             raise AssertionError("/ wasn't checked")
         except St.Refused as e:
-            assert e.message.startswith("/ isn't a folder of yours"), e.message
+            assert e.message.startswith("Other users can change /, "), e.message
         finally:
             St._unchangeable = saved
         # one of fs-sync's own folders someone else owns (a seam past the chain): refused by its own check
         saved_anc, saved_uid = St._ancestors, os.getuid
-        St._ancestors = lambda p: os.path.abspath(p)
+        St._ancestors = lambda p, records: os.path.abspath(p)
         os.getuid = lambda: saved_uid() + 1
         try:
             St.Base.open(state, *IDENT)

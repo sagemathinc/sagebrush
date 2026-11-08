@@ -98,7 +98,24 @@ def pair_id(account_hash, grant_id, local_dir, workspace_path):
 # checked.
 
 def _not_yours(p):
+    """One of fs-sync's own folders (the state folder, `pairs`) isn't a real folder of ours."""
     return Refused("%s isn't a folder of yours: fs-sync keeps its records there." % _home_short(p), 1)
+
+
+OTHERS = object()
+
+
+def _on_the_way(p, st, records):
+    """A folder above fs-sync's own that fails the rule (`st` its lstat, None for a link to nothing, OTHERS for a link
+    someone else owns): what is wrong with it, and what to do."""
+    if st is None:
+        return Refused("%s is a link to nothing, on the way to fs-sync's records." % _home_short(p), 1)
+    if st is not OTHERS and not stat.S_ISDIR(st.st_mode):
+        return Refused("%s isn't a folder, and it is on the way to fs-sync's records (%s)."
+                       % (_home_short(p), _home_short(records)), 1)
+    return Refused("Other users can change %s, which is on the way to fs-sync's records (%s). Make it writable only by "
+                   "you or root, or set XDG_STATE_HOME to a folder only you can change."
+                   % (_home_short(p), _home_short(records)), 1)
 
 
 def _unchangeable(st):
@@ -125,39 +142,50 @@ def _private_group(gid):
         return False
 
 
-def _check_real(real):
-    """Every folder of a real (link-free) path, from the root down, unchangeable by others."""
-    p = os.sep
-    for part in [""] + [c for c in real.split(os.sep) if c]:
-        p = os.path.join(p, part)
-        try:
-            st = os.lstat(p)
-        except OSError:                     # (a link to nothing)
-            raise _not_yours(p)
-        if not _unchangeable(st):
-            raise _not_yours(p)
+MAX_LINK_HOPS = 40
 
 
-def _ancestors(path):
-    """The folders down to `path` checked one level at a time, the missing ones made 0700. A link among them is followed
-    only from a folder that passed, and its real path is checked the same way."""
-    p = os.sep
-    _check_real(p)
-    for part in [c for c in os.path.abspath(path).split(os.sep) if c]:
+def _ancestors(path, records):
+    """The folders down to `path`, resolved one component at a time from `/` (never by os.path.realpath, which would
+    pass over the links between): each folder must be unchangeable by others; each link must be ours or root's, and is
+    followed by readlink, where it leads checked the same way, at most 40 hops; a link to nothing, or one that loops,
+    is refused, naming the link. Missing folders of `path` itself are made 0700. Returns the real path."""
+    st = os.lstat(os.sep)
+    if not _unchangeable(st):
+        raise _on_the_way(os.sep, st, records)
+    todo = [(c, None) for c in path.split(os.sep) if c]          # (component, the link it came from, if any)
+    p, hops = os.sep, 0
+    while todo:
+        part, via = todo.pop(0)
+        if part == ".":
+            continue
+        if part == "..":
+            p = os.path.dirname(p)                                # (p is real: no link in it, so its parent is real)
+            continue
         nxt = os.path.join(p, part)
         try:
             st = os.lstat(nxt)
         except FileNotFoundError:
+            if via is not None:
+                raise _on_the_way(via, None, records)
             try:
                 os.mkdir(nxt, 0o700)
             except FileExistsError:
                 pass
             st = os.lstat(nxt)
         if stat.S_ISLNK(st.st_mode):
-            nxt = os.path.realpath(nxt)
-            _check_real(nxt)
-        elif not _unchangeable(st):
-            raise _not_yours(nxt)
+            if st.st_uid not in (0, os.getuid()):                # (someone else's link, as in a sticky /tmp: never followed)
+                raise _on_the_way(nxt, OTHERS, records)
+            hops += 1
+            if hops > MAX_LINK_HOPS:
+                raise _on_the_way(via or nxt, None, records)      # (a loop leads nowhere)
+            target = os.readlink(nxt)
+            if os.path.isabs(target):
+                p = os.sep
+            todo[:0] = [(c, via or nxt) for c in target.split(os.sep) if c]
+            continue
+        if not _unchangeable(st):
+            raise _on_the_way(nxt, st, records)
         p = nxt
     return p
 
@@ -185,7 +213,8 @@ def _own_dir(path):
 
 def _state_dirs(state_dir):
     """The checked chain down to `state_dir`, and its `pairs` folder: (state_dir, pairs)."""
-    state_dir = os.path.join(_ancestors(os.path.dirname(os.path.abspath(state_dir))), os.path.basename(state_dir))
+    state_dir = os.path.abspath(state_dir)
+    state_dir = os.path.join(_ancestors(os.path.dirname(state_dir), state_dir), os.path.basename(state_dir))
     _own_dir(state_dir)
     return state_dir, _own_dir(os.path.join(state_dir, "pairs"))
 
