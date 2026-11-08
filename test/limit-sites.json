@@ -3040,12 +3040,12 @@
   "owner": "python (@sagebrush-python)",
   "reason": "io's TextIOWrapper/BufferedWriter (lib/_io_text.py, CPython 3.14.10's _pyio) and BufferedIOBase's defaults: CPython's io semantics and messages, an abstract codec base, an import; refuses nothing of Sagebrush's"
  },
- "lib/_io_text.py :: BufferedWriter.__init__ :: raise UnsupportedOperation(\"File or stream is not writable.\") #0": {
+ "lib/_io_text.py :: BufferedWriter._init :: raise UnsupportedOperation(\"File or stream is not writable.\") #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
   "reason": "io's TextIOWrapper/BufferedWriter (lib/_io_text.py, CPython 3.14.10's _pyio) and BufferedIOBase's defaults: CPython's io semantics and messages, an abstract codec base, an import; refuses nothing of Sagebrush's"
  },
- "lib/_io_text.py :: BufferedWriter.seek :: raise ValueError(\"whence value %r unsupported\" % (whence,)) #0": {
+ "lib/_io_text.py :: BufferedWriter.seek :: raise ValueError(\"whence value %d unsupported\" % whence) #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
   "reason": "io's TextIOWrapper/BufferedWriter (lib/_io_text.py, CPython 3.14.10's _pyio) and BufferedIOBase's defaults: CPython's io semantics and messages, an abstract codec base, an import; refuses nothing of Sagebrush's"
@@ -3061,6 +3061,11 @@
   "reason": "io's TextIOWrapper/BufferedWriter (lib/_io_text.py, CPython 3.14.10's _pyio) and BufferedIOBase's defaults: CPython's io semantics and messages, an abstract codec base, an import; refuses nothing of Sagebrush's"
  },
  "lib/_io_text.py :: TextIOWrapper._checkReadable :: raise UnsupportedOperation(\"not readable\") #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "io's TextIOWrapper/BufferedWriter (lib/_io_text.py, CPython 3.14.10's _pyio) and BufferedIOBase's defaults: CPython's io semantics and messages, an abstract codec base, an import; refuses nothing of Sagebrush's"
+ },
+ "lib/_io_text.py :: TextIOWrapper.readline :: raise OverflowError(\"Python int too large to convert to C ssize_t\") #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
   "reason": "io's TextIOWrapper/BufferedWriter (lib/_io_text.py, CPython 3.14.10's _pyio) and BufferedIOBase's defaults: CPython's io semantics and messages, an abstract codec base, an import; refuses nothing of Sagebrush's"
@@ -3091,6 +3096,11 @@
   "reason": "io's TextIOWrapper/BufferedWriter (lib/_io_text.py, CPython 3.14.10's _pyio) and BufferedIOBase's defaults: CPython's io semantics and messages, an abstract codec base, an import; refuses nothing of Sagebrush's"
  },
  "lib/_io_text.py :: TextIOWrapper.write :: raise UnsupportedOperation(\"not writable\") #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "io's TextIOWrapper/BufferedWriter (lib/_io_text.py, CPython 3.14.10's _pyio) and BufferedIOBase's defaults: CPython's io semantics and messages, an abstract codec base, an import; refuses nothing of Sagebrush's"
+ },
+ "lib/_io_text.py :: _c_int_arg :: raise OverflowError(\"Python int too large to convert to C int\") #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
   "reason": "io's TextIOWrapper/BufferedWriter (lib/_io_text.py, CPython 3.14.10's _pyio) and BufferedIOBase's defaults: CPython's io semantics and messages, an abstract codec base, an import; refuses nothing of Sagebrush's"
