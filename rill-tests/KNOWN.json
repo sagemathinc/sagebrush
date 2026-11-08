@@ -1,0 +1,250 @@
+{
+ "format": 1,
+ "cases": {
+  "rill-tests/core/test_1.R#colon-chr-bad": {
+   "class": "not-implemented",
+   "reason": "warnings reported after an error, 'In addition:' (A1.4)",
+   "sha256": "0e1ace60880761d57c6bdaa37f08c8f4675223cf4f19bfc22b399ca7a04c0cc7"
+  },
+  "rill-tests/core/test_1.R#recycle-zero": {
+   "class": "not-implemented",
+   "reason": "the builtin integer (A1.2)",
+   "sha256": "cb3ea07f092f7e19afcb88239f6589a47b5d5d8175749572b508d4b4e32dec37"
+  },
+  "rill-tests/parse/test_1.R#arg-empty-name": {
+   "class": "not-implemented",
+   "reason": "closures and control flow (A1.3)",
+   "sha256": "96c52fe39ca65608693c3ea50caf0cdaf007333786211b9acb3022142cc4c4b1"
+  },
+  "rill-tests/parse/test_1.R#bracket-missing": {
+   "class": "not-implemented",
+   "reason": "lists and matrices (A1.6)",
+   "sha256": "d023e58adae18602366101c849a725461a3edb2e7e1323804c4aaec3266ba34d"
+  },
+  "rill-tests/parse/test_1.R#dollar-string": {
+   "class": "not-implemented",
+   "reason": "lists and matrices (A1.6)",
+   "sha256": "2c6e30982046e5df8981674c49d22a8ef8b6013f34c99667f9b1bd4ad1675590"
+  },
+  "rill-tests/parse/test_1.R#dots-index": {
+   "class": "not-implemented",
+   "reason": "closures and control flow (A1.3)",
+   "sha256": "96c52fe39ca65608693c3ea50caf0cdaf007333786211b9acb3022142cc4c4b1"
+  },
+  "rill-tests/parse/test_1.R#err-else-top": {
+   "class": "not-implemented",
+   "reason": "closures and control flow (A1.3)",
+   "sha256": "2721b417d91554f248fab63832fc589e9ef4055e30a0b993d76c7bbf2b0b86bb"
+  },
+  "rill-tests/parse/test_1.R#formula-one-sided": {
+   "class": "not-implemented",
+   "reason": "formulas, printed by their class (A1.6)",
+   "sha256": "8e3833453005bf568085fb256d89b3521f6280bf8029570c77a0b979f8cb3a4e"
+  },
+  "rill-tests/parse/test_1.R#formula-print": {
+   "class": "not-implemented",
+   "reason": "formulas, printed by their class (A1.6)",
+   "sha256": "fb92658ac50cf9c4306b003a055bcb60da48bf90b3726f4e503c63eaee384fcc"
+  },
+  "rill-tests/parse/test_1.R#function-newline-body": {
+   "class": "not-implemented",
+   "reason": "closures and control flow (A1.3)",
+   "sha256": "96c52fe39ca65608693c3ea50caf0cdaf007333786211b9acb3022142cc4c4b1"
+  },
+  "rill-tests/parse/test_1.R#if-else-in-brace": {
+   "class": "not-implemented",
+   "reason": "closures and control flow (A1.3)",
+   "sha256": "2721b417d91554f248fab63832fc589e9ef4055e30a0b993d76c7bbf2b0b86bb"
+  },
+  "rill-tests/parse/test_1.R#if-else-in-paren": {
+   "class": "not-implemented",
+   "reason": "closures and control flow (A1.3)",
+   "sha256": "2721b417d91554f248fab63832fc589e9ef4055e30a0b993d76c7bbf2b0b86bb"
+  },
+  "rill-tests/parse/test_1.R#keyword-in-backticks": {
+   "class": "not-implemented",
+   "reason": "closures and control flow (A1.3)",
+   "sha256": "2721b417d91554f248fab63832fc589e9ef4055e30a0b993d76c7bbf2b0b86bb"
+  },
+  "rill-tests/parse/test_1.R#lambda": {
+   "class": "not-implemented",
+   "reason": "closures and control flow (A1.3)",
+   "sha256": "632f469c0c1a07f1b4d2d66188963ed0ce484684d0e06b43cceff74c5f85ee0b"
+  },
+  "rill-tests/parse/test_1.R#newline-in-bracket": {
+   "class": "not-implemented",
+   "reason": "the builtin [ (A1.2)",
+   "sha256": "fbe73106d34abacf0c38f89e6671d3d90841b8a544d0ec071ffb071c803c848f"
+  },
+  "rill-tests/parse/test_1.R#ns-double-colon": {
+   "class": "not-implemented",
+   "reason": "closures and control flow (A1.3)",
+   "sha256": "632f469c0c1a07f1b4d2d66188963ed0ce484684d0e06b43cceff74c5f85ee0b"
+  },
+  "rill-tests/parse/test_1.R#ns-triple-colon": {
+   "class": "not-implemented",
+   "reason": "closures and control flow (A1.3)",
+   "sha256": "632f469c0c1a07f1b4d2d66188963ed0ce484684d0e06b43cceff74c5f85ee0b"
+  },
+  "rill-tests/parse/test_1.R#num-imaginary": {
+   "class": "not-implemented",
+   "reason": "complex numbers (A1.2)",
+   "sha256": "e823d2a0fb9447f7f0a0f25a57ba8284a20ce6cb553f52051adfa705e96208d6"
+  },
+  "rill-tests/parse/test_1.R#pipe": {
+   "class": "not-implemented",
+   "reason": "the builtin sum (A1.2)",
+   "sha256": "0dc3a6e900c55a349fb849ee62f1bd143202c28746033ace6ee7f35c01800045"
+  },
+  "rill-tests/parse/test_1.R#pipe-placeholder": {
+   "class": "not-implemented",
+   "reason": "the builtin rep (A1.2)",
+   "sha256": "947c6963a4811915e950d8e0947ccc04157574ba0922a73f4790caa82924a096"
+  },
+  "rill-tests/parse/test_1.R#prec-in": {
+   "class": "not-implemented",
+   "reason": "the builtin %in% (A1.2)",
+   "sha256": "fbebb689e42813ab26855f666a06f94dd95f05fdf36005b70cefc2ba9c152376"
+  },
+  "rill-tests/parse/test_2.R#tok-arg-name-backtick": {
+   "class": "not-implemented",
+   "reason": "closures and control flow (A1.3)",
+   "sha256": "96c52fe39ca65608693c3ea50caf0cdaf007333786211b9acb3022142cc4c4b1"
+  },
+  "rill-tests/parse/test_2.R#tok-arg-name-null": {
+   "class": "not-implemented",
+   "reason": "names (A1.2)",
+   "sha256": "fa42452c370d6a276d98bd1a02e18cc43e195f0d5218bd09bb59ef17bed2a995"
+  },
+  "rill-tests/parse/test_2.R#tok-arg-name-string": {
+   "class": "not-implemented",
+   "reason": "closures and control flow (A1.3)",
+   "sha256": "96c52fe39ca65608693c3ea50caf0cdaf007333786211b9acb3022142cc4c4b1"
+  },
+  "rill-tests/parse/test_2.R#tok-assign-in-arg": {
+   "class": "not-implemented",
+   "reason": "closures and control flow (A1.3)",
+   "sha256": "96c52fe39ca65608693c3ea50caf0cdaf007333786211b9acb3022142cc4c4b1"
+  },
+  "rill-tests/parse/test_2.R#tok-bracket-chain": {
+   "class": "not-implemented",
+   "reason": "lists and matrices (A1.6)",
+   "sha256": "ad3d905780795fe4c238aa0e66f148a2da7f8cd278a6d0ed15c86935ef991720"
+  },
+  "rill-tests/parse/test_2.R#tok-dollar-call": {
+   "class": "not-implemented",
+   "reason": "lists and matrices (A1.6)",
+   "sha256": "d268e048fabe723067787046d055ba0ad671f092078afb3903babbca37c8b51f"
+  },
+  "rill-tests/parse/test_2.R#tok-else-in-function": {
+   "class": "not-implemented",
+   "reason": "closures and control flow (A1.3)",
+   "sha256": "96c52fe39ca65608693c3ea50caf0cdaf007333786211b9acb3022142cc4c4b1"
+  },
+  "rill-tests/parse/test_2.R#tok-for-in-paren-newline": {
+   "class": "not-implemented",
+   "reason": "closures and control flow (A1.3)",
+   "sha256": "df4dc0ee5d5e44ba917e12e95b4d0f4ed91741d95b766117923d82b52f9c7a89"
+  },
+  "rill-tests/parse/test_2.R#tok-if-else-chain": {
+   "class": "not-implemented",
+   "reason": "closures and control flow (A1.3)",
+   "sha256": "2721b417d91554f248fab63832fc589e9ef4055e30a0b993d76c7bbf2b0b86bb"
+  },
+  "rill-tests/parse/test_2.R#tok-nested-function-default": {
+   "class": "not-implemented",
+   "reason": "closures and control flow (A1.3)",
+   "sha256": "96c52fe39ca65608693c3ea50caf0cdaf007333786211b9acb3022142cc4c4b1"
+  },
+  "rill-tests/parse/test_2.R#tok-pipe-lambda": {
+   "class": "not-implemented",
+   "reason": "closures and control flow (A1.3)",
+   "sha256": "632f469c0c1a07f1b4d2d66188963ed0ce484684d0e06b43cceff74c5f85ee0b"
+  },
+  "rill-tests/parse/test_2.R#tok-question": {
+   "class": "help-system",
+   "reason": "R's help system (help.search): Rill's help is its own, from A2's docsearch",
+   "sha256": "c1eb58f9c1392100c4bc200aafdf2be068196401c9c816b783f206c1bf4555a9"
+  },
+  "rill-tests/parse/test_2.R#tok-repeat-break": {
+   "class": "not-implemented",
+   "reason": "closures and control flow (A1.3)",
+   "sha256": "fcb0c935182af6930e9bd764e481a73632cc1c7994946557ca6f8727a9512d59"
+  },
+  "rill-tests/parse/test_2.R#tok-while-next": {
+   "class": "not-implemented",
+   "reason": "closures and control flow (A1.3)",
+   "sha256": "a738a84738afe3e563d178a304bf11aadd3021f5eb2ed0d874d5f34c3aed1f60"
+  },
+  "rill-tests/parse/test_3.R#tok-arrow-in-arg": {
+   "class": "not-implemented",
+   "reason": "closures and control flow (A1.3)",
+   "sha256": "96c52fe39ca65608693c3ea50caf0cdaf007333786211b9acb3022142cc4c4b1"
+  },
+  "rill-tests/parse/test_3.R#tok-assign-in-for-cond": {
+   "class": "not-implemented",
+   "reason": "closures and control flow (A1.3)",
+   "sha256": "df4dc0ee5d5e44ba917e12e95b4d0f4ed91741d95b766117923d82b52f9c7a89"
+  },
+  "rill-tests/parse/test_3.R#tok-bb-close-single": {
+   "class": "not-implemented",
+   "reason": "lists and matrices (A1.6)",
+   "sha256": "6e3e0d17cc570452d8fe50d690faf4f443894c3f458d802765d979ab09b833e0"
+  },
+  "rill-tests/parse/test_3.R#tok-formals-dots-default": {
+   "class": "not-implemented",
+   "reason": "closures and control flow (A1.3)",
+   "sha256": "96c52fe39ca65608693c3ea50caf0cdaf007333786211b9acb3022142cc4c4b1"
+  },
+  "rill-tests/parse/test_3.R#tok-function-body-eq": {
+   "class": "not-implemented",
+   "reason": "closures and control flow (A1.3)",
+   "sha256": "96c52fe39ca65608693c3ea50caf0cdaf007333786211b9acb3022142cc4c4b1"
+  },
+  "rill-tests/parse/test_3.R#tok-if-body-eq": {
+   "class": "not-implemented",
+   "reason": "closures and control flow (A1.3)",
+   "sha256": "2721b417d91554f248fab63832fc589e9ef4055e30a0b993d76c7bbf2b0b86bb"
+  },
+  "rill-tests/parse/test_3.R#tok-placeholder-in-call": {
+   "class": "not-implemented",
+   "reason": "closures and control flow (A1.3)",
+   "sha256": "96c52fe39ca65608693c3ea50caf0cdaf007333786211b9acb3022142cc4c4b1"
+  },
+  "rill-tests/parse/test_3.R#tok-placeholder-pipe-extract": {
+   "class": "not-implemented",
+   "reason": "the builtin $ (A1.2)",
+   "sha256": "f21fb219bfc415e19de6ba19593cf92500a4129c1a6f37a6cb8a7d58dd5cf58a"
+  },
+  "rill-tests/parse/test_3.R#tok-string-bell-etc": {
+   "class": "not-implemented",
+   "reason": "the builtin nchar (A1.2)",
+   "sha256": "c7927cd0e24502a886b7dbad93e4716a60e76962825712483d39e5e5503f56e1"
+  },
+  "rill-tests/parse/test_3.R#tok-unmatched-close-bb": {
+   "class": "not-implemented",
+   "reason": "lists and matrices (A1.6)",
+   "sha256": "6e3e0d17cc570452d8fe50d690faf4f443894c3f458d802765d979ab09b833e0"
+  },
+  "rill-tests/parse/test_5.R#depth-for-4996": {
+   "class": "not-implemented",
+   "reason": "closures and control flow (A1.3)",
+   "sha256": "2721b417d91554f248fab63832fc589e9ef4055e30a0b993d76c7bbf2b0b86bb"
+  },
+  "rill-tests/parse/test_5.R#depth-function-1999": {
+   "class": "not-implemented",
+   "reason": "closures and control flow (A1.3)",
+   "sha256": "96c52fe39ca65608693c3ea50caf0cdaf007333786211b9acb3022142cc4c4b1"
+  },
+  "rill-tests/parse/test_5.R#depth-if-4998": {
+   "class": "not-implemented",
+   "reason": "closures and control flow (A1.3)",
+   "sha256": "2721b417d91554f248fab63832fc589e9ef4055e30a0b993d76c7bbf2b0b86bb"
+  },
+  "rill-tests/parse/test_5.R#depth-ifelse-2498": {
+   "class": "not-implemented",
+   "reason": "closures and control flow (A1.3)",
+   "sha256": "2721b417d91554f248fab63832fc589e9ef4055e30a0b993d76c7bbf2b0b86bb"
+  }
+ }
+}

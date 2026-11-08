@@ -37,7 +37,7 @@ def _warning_lines(warnings):
     """R's report of a statement's warnings (A1.1: one warning; A1.4 the rest)."""
     from . import fmt
     if len(warnings) > 1:
-        raise NotSupported("several warnings in one statement (they come in A1.4)")
+        raise NotSupported("several warnings in one statement")
     call, message = warnings[0]
     if call is None:
         return "Warning message:\n%s \n" % message

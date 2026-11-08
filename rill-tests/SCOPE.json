@@ -1,0 +1,12 @@
+{
+ "format": 1,
+ "note": "The case files the Rill corpus replay covers (design/rill.md §7; grader's conditions, Nov 7): whole files, never a held-out one; the scope only grows, and a removal needs a stated reason in its PR.",
+ "files": [
+  "rill-tests/parse/test_1.R",
+  "rill-tests/parse/test_2.R",
+  "rill-tests/parse/test_3.R",
+  "rill-tests/parse/test_4.R",
+  "rill-tests/parse/test_5.R",
+  "rill-tests/core/test_1.R"
+ ]
+}

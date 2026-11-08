@@ -31,7 +31,7 @@ def _vec(v):
 def _check_attrs(*vs):
     for v in vs:
         if v.attrs:
-            raise NotSupported("operands with attributes (names come in A1.2)")
+            raise NotSupported("operands with attributes")
 
 
 def _lengths(x, y, call, sess):
@@ -162,7 +162,7 @@ def arith(sess, call, args):
     if x.type == "character" or y.type == "character":
         raise RError("non-numeric argument to binary operator", call)
     if x.type == "complex" or y.type == "complex":
-        raise NotSupported("complex arithmetic (it comes in A1.2)")
+        raise NotSupported("complex arithmetic")
     if op in ("/", "^") or x.type == "double" or y.type == "double":
         rtype = "double"
     else:
@@ -199,7 +199,7 @@ def unary(sess, call, op, x):
     if x.type == "character":
         raise RError("invalid argument to unary operator", call)
     if x.type == "complex":
-        raise NotSupported("complex arithmetic (it comes in A1.2)")
+        raise NotSupported("complex arithmetic")
     rtype = "integer" if x.type in ("logical", "integer") else "double"
     with mem.reserve(len(x.data), rtype):
         data = coerce(x, rtype)
@@ -319,9 +319,9 @@ def combine(sess, call, args):
         if v is NULL:
             continue
         if not isinstance(v, Vector):
-            raise NotSupported("c() of this type (lists come in A1.6)")
+            raise NotSupported("c() of this type")
         if name is not None or v.attrs:
-            raise NotSupported("c() with names (it comes in A1.2)")
+            raise NotSupported("c() with names")
         vals.append(v)
     if not vals:
         return NULL

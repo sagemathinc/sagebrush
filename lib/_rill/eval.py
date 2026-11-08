@@ -67,12 +67,12 @@ class Session:
         if name in self.values:
             return self.values[name]
         if name in self.builtins:
-            raise NotSupported("a function as a value (it comes in A1.3)")
+            raise NotSupported("a function as a value")
         raise RError("object '%s' not found" % name)
 
     def function(self, name, call):
         if name in LATER:
-            raise NotSupported("'%s' (it comes in %s)" % (name, LATER[name]))
+            raise NotSupported("'%s'" % name)
         f = self.builtins.get(name)
         if f is None:
             raise RError('could not find function "%s"' % name, call)
@@ -160,7 +160,7 @@ class Session:
         if not isinstance(fn, Sym):
             if isinstance(fn, Vector) or fn is NULL:
                 raise RError("attempt to apply non-function")
-            raise NotSupported("calling a function value (closures come in A1.3)")
+            raise NotSupported("calling a function value")
         name = fn.name
         args = e.args
         if name == "quote":
@@ -176,7 +176,7 @@ class Session:
             elif isinstance(target, Vector) and target.type == "character" and len(target.data) == 1:
                 tname = target.data[0]
             elif isinstance(target, Lang):
-                raise NotSupported("replacement assignment such as x[i] <- v (it comes in A1.5)")
+                raise NotSupported("replacement assignment such as x[i] <- v")
             else:
                 raise RError("invalid (do_set) left-hand side to assignment", e)
             konts.append(("assign", e, tname, name == "<<-"))
