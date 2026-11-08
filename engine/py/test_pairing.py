@@ -931,5 +931,5 @@ if __name__ == "__main__":
                         "test_remote_gateway.py", "test_remote_pair.py", "test_remote_enroll.py",
                         "test_remote_relay.py", "test_remote_terminal.py",
                         # (fs-sync's planner, design/fs-sync.md: here for the same reason, until ci.yml lists it)
-                        "test_fs_sync_plan.py"):
+                        "test_fs_sync_plan.py", "test_fs_sync_scan.py"):
         runpy.run_path(os.path.join(HERE, remote_test), run_name="__main__")
