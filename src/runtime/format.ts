@@ -399,10 +399,9 @@ export function repr(x: any): string {
   if (x === Ellipsis) return "Ellipsis";
   if (x === NotImplemented) return "NotImplemented";
   if (Array.isArray(x) && (x as any).$cls === undefined) return seqRepr(x);
-  const t = typeOf(x);
-  const f = lookupType(t, "__repr__");
+  const f = lookupSpecial(x, "__repr__");
   if (f !== undefined) {
-    const r = lookupSpecial(x, "__repr__")(x);
+    const r = f(x);
     // a str subclass is a string (CPython accepts it)
     if (r instanceof StrLayout) return r.$v;
     if (typeof r !== "string") raise(T.TypeError, `__repr__ returned non-string (type ${typeOf(r).$name})`);
@@ -487,10 +486,9 @@ export function str(x: any): string {
   }
   if (x === null) return "None";
   if (x instanceof FloatBox) return floatRepr(x.v);
-  const t = typeOf(x);
-  const f = lookupType(t, "__str__");
+  const f = lookupSpecial(x, "__str__");
   if (f !== undefined) {
-    const r = lookupSpecial(x, "__str__")(x);
+    const r = f(x);
     // a str subclass is a string (CPython accepts it)
     if (r instanceof StrLayout) return r.$v;
     if (typeof r !== "string") raise(T.TypeError, `__str__ returned non-string (type ${typeOf(r).$name})`);
@@ -724,9 +722,9 @@ export function format(v: any, spec: string): string {
     if (spec === "") return floatRepr(x);
     return formatFloat(x, parseSpec(spec, "float"));
   }
-  const f = lookupType(typeOf(v), "__format__");
+  const f = lookupSpecial(v, "__format__");
   if (f !== undefined) {
-    const r = lookupSpecial(v, "__format__")(v, spec);
+    const r = f(v, spec);
     if (typeof r !== "string") raise(T.TypeError, "__format__ must return a str");
     return r;
   }

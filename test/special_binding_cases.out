@@ -139,3 +139,15 @@ None [0]
 'c' 'c' [((1,), [('y', 3)]), ((), [('z', 4)])]
 'made' [((5,), [('w', 6)])]
 'ok' [(('>3',), [])]
+-- hash() and dict keys through the per-class lookup (None, object's, a metaclass's, builtins)
+TypeError: unhashable type: 'HN' TypeError: cannot use 'HN' as a dict key (unhashable type: 'HN')
+True 2
+12 1
+TypeError: unhashable type: 'HD' 5 1
+TypeError: hash() takes exactly one argument (0 given) TypeError: cannot use 'HB' as a dict key (hash() takes exactly one argument (0 given))
+9 1 [0, 0]
+after HN.__hash__ is set: 3
+after it is deleted: True
+-- __call__ = None and a later __call__
+TypeError: 'NoneType' object is not callable
+2

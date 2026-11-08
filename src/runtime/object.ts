@@ -390,8 +390,10 @@ function callSlot(c: any, f: any): any {
 // A bound method, a builtin function and a type are not descriptors: CPython
 // calls them without self (iterparse's `__next__ = gen.__next__`, `__call__ =
 // len`).
+// (typeOf's function cases without typeOf: this is on the per-call paths,
+// callObj's __call__ and hash())
 export function bindsAsDunder(f: any): boolean {
-  return f.$dict === undefined && f.$self === undefined && typeOf(f) !== T.builtin_function_or_method;
+  return f.$pyfn === true && f.$self === undefined && f.$dict === undefined;
 }
 const NON_DESCRIPTOR = new WeakMap<any, any>();
 // A function found by a special-method lookup, callable as f(self, ...args):
@@ -422,8 +424,8 @@ export const BIG_CALL = 2048;
 export function callObj(f: any, args: any[]): any {
   if (args.length >= BIG_CALL) return callKw(f, args, [], []);
   if (typeof f === "function") return f(...args);
-  const c = lookupType(typeOf(f), "__call__");
-  if (c !== undefined) return typeof c === "function" && bindsAsDunder(c) ? c(f, ...args) : callObj(callSlot(c, f), args);
+  const c = hooks.special(f, "__call__");
+  if (c !== undefined) return c(f, ...args);
   raise(T.TypeError, `'${typeName(f)}' object is not callable`);
 }
 
@@ -1580,7 +1582,7 @@ export function newDict(): PyDict {
 }
 
 // Hooks filled in by ops.ts (hash and equality need the full operator set).
-export const hooks: { hash: (x: any) => number; eq: (a: any, b: any) => boolean; repr: (x: any) => string; primProxy: (base: PyType) => PyType; typeCall: any; importModule: (name: string) => any; callerModule: () => string; excResumed: (e: any) => void; excThrown: (e: any) => void; genRaised: (e: any) => void; isinstance: (x: any, spec: any) => boolean; issubclass: (c: any, spec: any) => boolean } = {
+export const hooks: { hash: (x: any) => number; special: (o: any, name: string) => any; eq: (a: any, b: any) => boolean; repr: (x: any) => string; primProxy: (base: PyType) => PyType; typeCall: any; importModule: (name: string) => any; callerModule: () => string; excResumed: (e: any) => void; excThrown: (e: any) => void; genRaised: (e: any) => void; isinstance: (x: any, spec: any) => boolean; issubclass: (c: any, spec: any) => boolean } = {
   typeCall: null,
   // (isinstance() and issubclass()'s whole protocol, builtins.ts; never
   // through the replaceable builtins)
@@ -1594,6 +1596,9 @@ export const hooks: { hash: (x: any) => number; eq: (a: any, b: any) => boolean;
   importModule: () => null,
   callerModule: () => "__main__",
   hash: () => 0,
+  // (ops.ts's special(): a special method of o's type through its per-class
+  // cache, bound as CPython binds it)
+  special: () => undefined,
   eq: (a, b) => a === b,
   repr: (x) => String(x),
   primProxy: (b) => b,

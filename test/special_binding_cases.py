@@ -396,3 +396,64 @@ print(t(lambda: KK(5, w=6)), rk3.calls)
 rk4 = RK("ok")
 KF = type("KF", (), {"__format__": rk4.m})
 print(t(lambda: f"{KF():>3}"), rk4.calls)
+
+print("-- hash() and dict keys through the per-class lookup (None, object's, a metaclass's, builtins)")
+
+
+class HN:
+    __hash__ = None
+
+
+class HO:
+    pass
+
+
+class HM(type):
+    def __hash__(cls):
+        return 12
+
+
+class HC(metaclass=HM):
+    pass
+
+
+class HD(dict):
+    pass
+
+
+class HI(int):
+    pass
+
+
+import builtins
+
+
+class HB:
+    __hash__ = builtins.hash  # a builtin function: called without self
+
+
+hr = Rec(9)
+HRB = type("HRB", (), {"__hash__": hr.m})
+print(t(lambda: hash(HN())), t(lambda: {HN(): 1}))
+ho = HO()
+print(t(lambda: hash(ho) == hash(ho) == object.__hash__(ho)), t(lambda: len({HO(): 1, HO(): 2})))
+print(t(lambda: hash(HC)), t(lambda: {HC: 1}[HC]))
+print(t(lambda: hash(HD())), t(lambda: hash(HI(5))), t(lambda: {HI(5): 1}[5]))
+print(t(lambda: hash(HB())), t(lambda: {HB(): 1}))
+print(t(lambda: hash(HRB())), t(lambda: len({HRB(): 1})), hr.calls)
+HN.__hash__ = lambda self: 3
+print("after HN.__hash__ is set:", t(lambda: hash(HN())))
+del HN.__hash__
+hn = HN()
+print("after it is deleted:", t(lambda: hash(hn) == object.__hash__(hn)))
+
+print("-- __call__ = None and a later __call__")
+
+
+class CN:
+    __call__ = None
+
+
+print(t(lambda: CN()()))
+CN.__call__ = len
+print(t(lambda: CN()([1, 2])))

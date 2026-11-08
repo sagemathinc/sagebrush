@@ -1768,9 +1768,9 @@ const S = builtinType("str", [object], (x: any = "", encoding: any = undefined, 
   // (a __str__ returning a str subclass instance gives that instance, as
   // CPython's PyObject_Str; str's own __str__ gives an exact copy)
   if (x !== null && typeof x === "object" && !(x instanceof FloatBox)) {
-    const f = lookupType(typeOf(x), "__str__");
+    const f = O.lookupSpecial(x, "__str__");
     if (f !== undefined) {
-      const r = O.lookupSpecial(x, "__str__")(x);
+      const r = f(x);
       if (typeof r === "string" || r instanceof StrLayout) return r;
       raise(T.TypeError, `__str__ returned non-string (type ${typeName(r)})`);
     }

@@ -1467,9 +1467,10 @@ export function hashExact(x: any): any {
   // TYPE-HASH-ROUND-1, a metaclass's result was rounded)
   const cls = x !== null && typeof x === "object" && x.$cls !== undefined && !(x instanceof PySet) ? x.$cls : typeof x === "function" && x.$dict !== undefined && x.$meta !== undefined ? x.$meta : undefined;
   if (cls !== undefined) {
-    const f = lookupType(cls, "__hash__");
-    if (f !== undefined && f !== null && f !== objectHash) {
-      const r = typeof f === "function" ? dunderFn(f)(x) : special(x, "__hash__")(x);
+    // (cls is typeOf(x): special()'s per-class cache, as hashAny)
+    const f = special(x, "__hash__");
+    if (f !== undefined && f !== objectHash && f !== NONE_WRAPPED.__hash__) {
+      const r = f(x);
       // (as CPython's slot_tp_hash: a result in the hash's 64-bit range is the hash, -1 made -2; a larger one is hashed)
       if (typeof r === "bigint") return inHash64(r) ? normBig(r === -1n ? -2n : r) : normBig(hashIntExact(r));
       if (typeof r === "boolean") return +r;
@@ -1556,11 +1557,12 @@ export function hashAny(x: any): number {
     return hashTuple(x);
   }
   if (x instanceof PySet && x.$frozen) return Number(hashFrozensetExact(x));
-  const t = typeOf(x);
-  const f = lookupType(t, "__hash__");
-  if (f === null) raise(T.TypeError, `unhashable type: '${t.$name}'`);
+  // (special()'s per-class cache: __hash__ = None is its None wrapper, object's
+  // __hash__ binds so it is objectHash itself)
+  const f = special(x, "__hash__");
   if (f !== undefined && f !== objectHash) {
-    const r = typeof f === "function" ? dunderFn(f)(x) : special(x, "__hash__")(x);
+    if (f === NONE_WRAPPED.__hash__) raise(T.TypeError, `unhashable type: '${typeOf(x).$name}'`);
+    const r = f(x);
     if (typeof r === "number" && isInt(r)) return r;
     if (typeof r === "boolean") return +r;
     if (typeof r === "bigint") return inHash64(r) ? Number(r) : hashInt(r);
@@ -1637,6 +1639,7 @@ export const objectNe = markPy(function __ne__(self: any, other: any) {
 }, "__ne__");
 
 hooks.hash = hashAny;
+hooks.special = special;
 hooks.eq = eqBool;
 
 // ------------------------------------------------------------------ iteration
