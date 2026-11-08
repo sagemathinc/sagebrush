@@ -75,6 +75,7 @@ Before an entry can be staged:
 ### 2.2 Limits
 
 Each enforced, with at-limit and one-over tests in PR 2:
+- **The tree the page sends:** read with a cap of 16 MiB + 1 byte, whatever `Content-Length` says, before any parsing. Its shape is fixed: `{"sha": <40 hex>, "rows": [[mode, id, path], …]}`, where mode is one of `100644`, `100755`, `120000`, `160000`, id is 40 hex, and path is a string of at most 1,024 UTF-16 units; folders are not sent; anything else is refused. At most 10,000 rows, counted before any path check; row 10,001 refuses. 16 MiB holds 10,000 rows with paths of over 1,500 bytes each, far past real repositories. Over the cap: `Can't copy owner/repo: its list of files is too large (the limit for a git project).`
 - **Entries:** at most 10,000, counted as each is read from the zip's directory, before ignores or skips. Over it: `Can't copy owner/repo: it has more than 10,000 files (the limit for a git project).`
 - **Staging:** the download reads at most 1 GiB + 1 byte, whatever `Content-Length` says. Over it, the staging object is deleted: `Can't copy owner/repo: GitHub's archive of it is over 1 GiB (the limit for a git project).` This bounds service cost. The staging object is also a reservation in the person's storage until it is deleted.
 - **A file:** at most 95 MiB (`too_large` beyond). Inflating stops at the entry's declared size + 1 byte or 95 MiB + 1 byte, whichever is less, so a highly compressed or mislabelled entry can't produce more.
