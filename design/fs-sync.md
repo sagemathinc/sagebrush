@@ -250,7 +250,7 @@ fs-sync adds no limit of its own on the server; it is bounded by the grant's and
 | listing $n$ workspace entries | $\lceil n/1000 \rceil$ (one page of at most 1,000 entries per request; the endpoint's "10,000 a call" is not used) | |
 | upload, at most 32 MB | 1 (`write`) | the bytes, against the grant's daily write budget |
 | upload, over 32 MB | 3 (the blob's upload step, its PUT, then the `write`), as the agent endpoint's blob write | the bytes |
-| download | 1 (`read`, which issues the single-use URL and debits the 200 MB a day read) | 1 GET to the files Worker, outside the grant's request meter (the files Worker's 600 a minute per IP applies) |
+| download | 1 (`read`, which issues the single-use URL and debits the grant's daily read budget) | 1 GET to the files Worker, outside the grant's request meter (the files Worker's 600 a minute per IP applies) |
 | folder made in the workspace | 1 (`mkdir`) | |
 | delete there | 1 (`remove`) | |
 | delete here | 1 (`stat`) | |
