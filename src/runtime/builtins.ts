@@ -428,7 +428,10 @@ function isinstanceImpl(x: any, spec: any): boolean {
   const mc = metaCheck(spec, "__instancecheck__");
   if (mc !== undefined) return O.truth(mc(spec, x));
   if (t.$mro.includes(spec) || spec === T.object) return true;
-  return subclassHook(spec, t);
+  if (subclassHook(spec, t)) return true;
+  const advertised = getattr(x, "__class__", null);
+  if (!isType(advertised)) return false;
+  return advertised === spec || advertised.$mro.includes(spec);
 }
 // ABC-style structural checks: a class's __subclasshook__ classmethod,
 // looked up once per class version.
