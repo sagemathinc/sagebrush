@@ -610,3 +610,5 @@ slice(-10, 3, 2) b'bd'
 slice(-10, -10, None) b'abcd'
 slice(10, -10, -1) b''
 slice(-10, 10, 3) b'bc'
+-- r5 (TESTS): a raw stream's position past an offset, named by its type (@sagebrush-grader's RP3)
+ValueError: cannot fit 'Big' into an offset-sized integer ValueError: cannot fit 'Big' into an offset-sized integer

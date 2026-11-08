@@ -1013,3 +1013,32 @@ for k in (slice(-10, 2), slice(-10, None), slice(-10, 3, 2), slice(-10, -10), sl
     b = bytearray(b"abcd")
     del b[k]
     print(k, bytes(b))
+
+
+print("-- r5 (TESTS): a raw stream's position past an offset, named by its type (@sagebrush-grader's RP3)")
+
+
+class Big:
+    def __index__(self):
+        return 1 << 70
+
+
+class RBig(io.RawIOBase):
+    def writable(self):
+        return True
+
+    def write(self, b):
+        return len(b)
+
+    def seekable(self):
+        return True
+
+    def tell(self):
+        return Big()
+
+    def seek(self, p, w=0):
+        return Big()
+
+
+bw = io.BufferedWriter(RBig())
+print(t(bw.tell), t(lambda: bw.seek(0)))
