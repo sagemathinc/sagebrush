@@ -20,6 +20,10 @@ export const TIERED = {
   verifyChunks: 8,
   /** verification bytes a day per account when CoCalc sends none (§6, daybreak2's LIMIT-TF-8) */
   verifyBytesPerDay: 16 * 1024 * MiB,
+  /** the least a verify call debits from the daily verification meter, whatever it streams: so the calls an account can
+   * start a day are at most verify_bytes_per_day / this (256 at 16 GiB), each with at most 8 R2 gets (the coordinator's
+   * final #880 ruling) */
+  verifyDebitFloor: 64 * MiB,
   /** how long an unused registration is held (§4.3): renewed by registering again */
   holdMs: 86400_000,
   /** rows the alarm retires a step (§5.1) */

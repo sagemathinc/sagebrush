@@ -13,8 +13,8 @@
 //
 //   POST /api/sync/v1/manifest                   {manifest} -> {state, position, chunks}
 //   POST /api/sync/v1/manifest/<sha256>/verify   one step of the server's check -> {state, position}
-//     (a client aborts a verify request after 150 s: that ends the request's Worker invocation and any R2 get it
-//     awaits, so outstanding verification gets are bounded as design/tiered-files.md §6 states)
+//     (each call debits at least 64 MiB from the day's verification meter, so at most verify_bytes_per_day / 64 MiB
+//     calls start a day, each with at most 8 R2 gets; the cross-day assumption and its production gate: design/tiered-files.md §6)
 //   GET  /api/sync/v1/manifest/<sha256>          a verified file's manifest
 //
 // and, on the user-content Worker (web/files), /p/<key>: a signed read (§5.4).
@@ -639,11 +639,21 @@ async function verifyStep(env: Env, stub: ReturnType<NonNullable<Env["SYNC_ACCOU
     await stub.verifyRelease({ sha256, attempt: step.attempt });
     return err(503, "busy", { message: "this verification step took too long; verify again" });
   };
+  // (a get or read that fails leaves nothing outstanding: the step frees its own slot, daybreak3's r4 note)
+  const failed = async () => {
+    await stub.verifyRelease({ sha256, attempt: step.attempt });
+    return err(503, "busy", { message: "a chunk's bytes couldn't be read; try again" });
+  };
   try {
     for (const c of step.chunks) {
       if (Date.now() > deadline) return await stop();
-      const got = testMode(env) && gateOn(env, "verify-get-stall") ? stalledGet(env, env.SHARE_BUCKET!.get(c.key)) : env.SHARE_BUCKET!.get(c.key);
-      const o = await Promise.race([got, expiry]);
+      const got = testMode(env) && (gateOn(env, "verify-get-stall") || gateOn(env, "verify-get-fail")) ? stalledGet(env, env.SHARE_BUCKET!.get(c.key)) : env.SHARE_BUCKET!.get(c.key);
+      let o: Awaited<typeof got> | typeof LATE;
+      try {
+        o = await Promise.race([got, expiry]);
+      } catch {
+        return await failed();
+      }
       if (o === LATE) return await stop(got);
       if (!o) {
         await stub.verifyRelease({ sha256, attempt: step.attempt });
@@ -657,7 +667,13 @@ async function verifyStep(env: Env, stub: ReturnType<NonNullable<Env["SYNC_ACCOU
           await reader.cancel().catch(() => {});
           return await stop();
         }
-        const r = await Promise.race([reader.read(), expiry]);
+        let r: ReadableStreamReadResult<Uint8Array> | typeof LATE;
+        try {
+          r = await Promise.race([reader.read(), expiry]);
+        } catch {
+          await reader.cancel().catch(() => {});
+          return await failed();
+        }
         if (r === LATE) {
           await reader.cancel().catch(() => {});
           return await stop();
@@ -685,6 +701,7 @@ async function verifyStep(env: Env, stub: ReturnType<NonNullable<Env["SYNC_ACCOU
 /** Tests only: an R2 get that answers only once the "verify-get-stall" gate is cleared, as a stalled get. */
 async function stalledGet<T>(env: Env, got: Promise<T>): Promise<T> {
   while (gateOn(env, "verify-get-stall")) await new Promise((r) => setTimeout(r, 20));
+  if (gateOn(env, "verify-get-fail")) throw new Error("test: the get failed");
   return got;
 }
 /** Tests only: whether verify's R2 reads stall (the "verify-read-stall" gate), and how many stalled reads were cancelled. */

@@ -100,6 +100,7 @@ const B = "a1a1a1a1-0002-4a1a-8a1a-a1a1a1a1a102"; // a small verification budget
 const R = "a1a1a1a1-0003-4a1a-8a1a-a1a1a1a1a103"; // the randomized state machine
 const E = "a1a1a1a1-0005-4a1a-8a1a-a1a1a1a1a105"; // CoCalc sends a malformed verify_bytes_per_day
 const Z = "a1a1a1a1-0006-4a1a-8a1a-a1a1a1a1a106"; // CoCalc sends verify_bytes_per_day 0
+const F2 = "a1a1a1a1-0007-4a1a-8a1a-a1a1a1a1a107"; // 128 MiB of verification a day (the debit floor)
 const C = "a1a1a1a1-0004-4a1a-8a1a-a1a1a1a1a104"; // storage exactly full after one registration (daybreak3's #880 finding)
 const SITE = "https://sagebrush.test";
 const script = execFileSync("bun", ["build", join(here, "test-entry.ts"), "--format", "esm", "--target", "browser", "--external", "cloudflare:workers"], { encoding: "utf8" });
@@ -119,7 +120,7 @@ const objects = { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, S
 const ratelimits = (id) => ({ SYNC_PREAUTH: { namespace_id: id, simple: { limit: 1_000_000, period: 60 } } });
 const mf = new Miniflare(convertV4MiniflareOptions({
   workers: [
-    { ...base, name: "on", bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A},${B},${R},${C},${E},${Z}`, SYNC_TIERED: "1", SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["sagebrush.test/*"], outboundService: cocalc, ratelimits: ratelimits("2001") },
+    { ...base, name: "on", bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A},${B},${R},${C},${E},${Z},${F2}`, SYNC_TIERED: "1", SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["sagebrush.test/*"], outboundService: cocalc, ratelimits: ratelimits("2001") },
     { ...base, name: "off", bindings: { ...shareBindings, SYNC_ACCOUNTS: A, SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["off.test/*"], outboundService: cocalc, ratelimits: ratelimits("2002") },
   ],
 }));
@@ -420,7 +421,37 @@ for (const c of [c1, c2, c3]) ok((await put(sa, c)).status === 201, "a chunk upl
   const t3 = await acct.testFiles({ sha256: g3.sha256, verifyMs: 0 });
   ok(sr.status === 503 && t3.slot === null && t3.row.position === 0, "once the get settles, the late call answers 503, records nothing, and frees its slot");
   ok((await verifyAll(sa, g3.sha256)).pop().state === "verified", "then the next call verifies it");
+  // a get that fails leaves nothing outstanding: the call frees its own slot at once (daybreak3's r4 note)
+  const g4 = fileOf([randomBytes(5 * MiB), randomBytes(5 * MiB)]);
+  for (const c of [g4.bytes.subarray(0, 5 * MiB), g4.bytes.subarray(5 * MiB)]) await put(sa, c);
+  await register(sa, g4.manifest);
+  await gate("verify-get-fail", true);
+  const failedGet = await verify(sa, g4.sha256);
+  await gate("verify-get-fail", false);
+  const t4 = await acct.testFiles({ sha256: g4.sha256 });
+  ok(failedGet.status === 503 && t4.slot === null && t4.row.position === 0, "a failed get answers 503, records nothing and frees its slot (" + failedGet.status + ")");
   ok((await verifyAll(sa, f.sha256)).pop().state === "verified", "and the next call verifies");
+}
+
+// ---- each verify call debits at least 64 MiB (the coordinator's final #880 ruling): with 128 MiB a day, two calls of a
+// 10 MiB file are admitted and the third is refused, however little they stream
+{
+  plans.set(F2, limits(128 * MiB));
+  const sf = await signIn(F2);
+  ok((await post(sf, "/api/sync/v1/enable", {})).status === 200, "(floor) sync on");
+  const af = await account(F2);
+  const parts = [randomBytes(5 * MiB), randomBytes(5 * MiB)];
+  for (const c of parts) await put(sf, c);
+  const f = fileOf(parts);
+  await register(sf, f.manifest);
+  const c1 = await af.verifyBegin({ account: F2, sha256: f.sha256 });
+  await af.testFiles({ endLease: true });
+  const c2 = await af.verifyBegin({ account: F2, sha256: f.sha256 });
+  await af.testFiles({ endLease: true });
+  const c3 = await af.verifyBegin({ account: F2, sha256: f.sha256 });
+  ok(c1.ok?.attempt !== undefined && c2.ok?.attempt !== undefined, "two 10 MiB calls are admitted under 128 MiB a day");
+  ok(c3.error?.code === "rate" && c3.error.detail?.limit === "verify_bytes_per_day", "the third is refused: each debited 64 MiB, not its 10 MiB");
+  await af.testFiles({ endLease: true });
 }
 
 // ---- CoCalc's verify_bytes_per_day: malformed keeps nothing new (an outage, not the fallback); 0 is 0 (astra's #880 SEC 2)

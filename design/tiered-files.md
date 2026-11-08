@@ -578,7 +578,7 @@ Tests: the account or generation switched during an upload, a verification and a
 | Pack size, target / max | client builds, server checks | 8 / 16 MiB, prefix and index included; at most 4,096 members | 16 MiB | `limit`, before anything is reserved | no |
 | Pack index encoded size | server | 512 KiB | 512 KiB | `limit`, from the prefix, before the index is read | no |
 | Manifest verification | server | one call at a time per account; at most 8 chunks (64 MiB) a call; `sync.verify_bytes_per_day` 16 GiB per account, debited before each call's stream (§4.1) | CoCalc's; 16 GiB if CoCalc sends none | `rate`, with `retry_after` | yes (CoCalc) |
-| Verify calls outstanding (R2 gets) | server, with the client's timeout | each call's bytes are debited from `sync.verify_bytes_per_day` before any R2 work, so an account starts at most $\lfloor \text{verify\_bytes\_per\_day} / 64\ \text{MiB} \rfloor$ verification gets a day (256 at 16 GiB), and at most that many can be outstanding. A slot is freed by its owner only once its last R2 get has settled, or reclaimed 10 minutes after its end for a Worker that died. The client aborts a verify request after 150 s, which ends that request's Worker invocation and its get. | $\lfloor$ verify_bytes_per_day / 64 MiB $\rfloor$ a day | `rate` | no |
+| Verify calls and their R2 gets | server | each call debits at least 64 MiB from `sync.verify_bytes_per_day` (the greater of 64 MiB and the bytes it will stream), before any R2 work: so an account starts at most $\lfloor \text{verify\_bytes\_per\_day} / 64\ \text{MiB} \rfloor$ calls a day (256 at 16 GiB), each with at most 8 R2 gets, one at a time. A slot is freed by its owner once its last get has settled or failed (attempt-fenced), or reclaimed 10 minutes after its end for a Worker that died. **Across days, an assumption, not a proof:** a verify request its caller holds open for more than a day keeps its get, so each such day can add at most 256 more calls' gets. The client aborts a verify request after 150 s (PR 3). Settling the server-side lifetime of a disconnected verify invocation is a gate before `SYNC_TIERED` is turned on in production (§7, §8). | 256 calls a day at 16 GiB | `rate`, with `retry_after` | no |
 | Repair reports | server | 60 an hour per account, at most one per hash per device a day; a duplicate or over-rate report uses only its request and starts no check; one check per hash at a time, sharing the one-verification-at-a-time slot; checks metered by `sync.verify_bytes_per_day`; a healthy result suppresses reports about the same representation for 1 hour; a repair's staging row is held at most 1 day, its pieces reserved like any upload | 60 an hour | 429, with `retry_after` | no |
 | Unused manifest hold | server | `hold_until` a day after registration or its renewal | renewable 1-day TTL; — | retired (§4.3) | no |
 | Compaction reservation | server | one per account, at most 16 MiB, allowed above the storage cap; not usable by uploads | 16 MiB | waits its turn | no |
@@ -618,6 +618,7 @@ Every list, check and GC endpoint stays paged. The index's bounds don't depend o
 | 1 | This design (docs only) | no | board + sync-client |
 | 2 | Schema and protocol: manifests, chunk holdings, inert limits, with at-limit and one-over tests | no | sync-client |
 | 3 | Chunked upload and read behind a flag (lifts 95 MiB to 200 MiB) | no (flag) | sync-client |
+| — | **Production gate for chunked files:** before `SYNC_TIERED` is turned on in production, measure and settle the server-side lifetime of a verify invocation whose client has disconnected (§6, "Verify calls and their R2 gets") | no | sync-client |
 | 4 | Fetch on open, and the prefetch rule; the states in the file browser (§1.1) | yes: screenshots to William first | sync-client + board (UI) |
 | 5 | Keep on this device, Remove from this device, the cache budget, "Free up space" (§3) | yes: screenshots first | sync-client + board (UI) |
 | 6 | Packs and their compaction (§4.2), **only after a benchmark shows they're needed** (§4.2 states the measurement) | no | sync-client |
@@ -626,6 +627,8 @@ Every list, check and GC endpoint stays paged. The index's bounds don't depend o
 Each PR carries its at-limit and one-over tests, and operation-count assertions (daybreak2, point 10).
 
 ## 8. Decisions and open questions
+
+- **Open, a production gate (tracked):** the server-side lifetime of a disconnected verify invocation and its pending R2 get (§6). Measure it, and settle the bound, before `SYNC_TIERED` is on in production. On DEV, the stated per-day bound with its cross-day assumption is accepted (@sagebrush, Nov 8).
 
 **Decided by William (Nov 8, about 1:05 PM PST):**
 - **The cache defaults** in §6: "(a) Recommended: yes, ship these as first values and tune later". A phone is chosen in the Storage panel, with a default from the screen (§2.1).

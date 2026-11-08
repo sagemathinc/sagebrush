@@ -1850,8 +1850,11 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       const day = Math.floor(now / 86400_000);
       const budget = l?.sync.verify_bytes_per_day ?? TIERED.verifyBytesPerDay;
       const used = Number(this.one("SELECT bytes FROM reads WHERE day = ? AND who = 'verify'", day)?.bytes ?? 0);
-      if (used + bytes > budget) throw new SyncError("rate", "today's verification budget is used up", { limit: "verify_bytes_per_day", max: budget, retry_after: (day + 1) * 86400_000 - now });
-      this.sql.exec("INSERT INTO reads (day, who, bytes) VALUES (?, 'verify', ?) ON CONFLICT(day, who) DO UPDATE SET bytes = bytes + excluded.bytes", day, bytes);
+      // (each call debits at least TIERED.verifyDebitFloor, however short its step: a hard bound on the calls, so on the
+      // R2 gets, an account can start a day, the coordinator's final #880 ruling)
+      const debit = Math.max(bytes, TIERED.verifyDebitFloor);
+      if (used + debit > budget) throw new SyncError("rate", "today's verification budget is used up", { limit: "verify_bytes_per_day", max: budget, retry_after: (day + 1) * 86400_000 - now });
+      this.sql.exec("INSERT INTO reads (day, who, bytes) VALUES (?, 'verify', ?) ON CONFLICT(day, who) DO UPDATE SET bytes = bytes + excluded.bytes", day, debit);
       this.sql.exec("DELETE FROM reads WHERE day < ?", day - 1);
       const slot = { sha256: a.sha256, attempt: randomHex(16), until: now + this.verifyMs(), hold: now + this.verifyMs() + this.slotHoldMs() };
       this.set("verify_slot", JSON.stringify(slot));
