@@ -467,7 +467,7 @@ def test_folder_chain_on_disk():
             St.Base.open(os.path.join(link, "state"), *IDENT)
             raise AssertionError("a dangling link was trusted")
         except St.Refused as e:
-            assert e.message == "%s is a link to nothing, on the way to fs-sync's records." % St._home_short(link), e.message
+            assert e.message == "%s is a link that leads nowhere, on the way to fs-sync's records." % St._home_short(link), e.message
         # (astra, @sagebrush) every link on the way, at every hop, must be ours or root's, checked before it is read
         os.unlink(link)
         os.symlink(good, link)
@@ -517,7 +517,7 @@ def test_folder_chain_on_disk():
         os.symlink(loop_b, loop_a)
         os.symlink(loop_a, loop_b)
         owners.clear()
-        assert opens(os.path.join(loop_a, "state")) == ("%s is a link to nothing, on the way to fs-sync's records."
+        assert opens(os.path.join(loop_a, "state")) == ("%s is a link that leads nowhere, on the way to fs-sync's records."
                                                         % St._home_short(loop_a))
         # a relative link with ".." in it resolves from where the link is
         rel = os.path.join(good, "rel")

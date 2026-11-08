@@ -109,7 +109,7 @@ def _on_the_way(p, st, records):
     """A folder above fs-sync's own that fails the rule (`st` its lstat, None for a link to nothing, OTHERS for a link
     someone else owns): what is wrong with it, and what to do."""
     if st is None:
-        return Refused("%s is a link to nothing, on the way to fs-sync's records." % _home_short(p), 1)
+        return Refused("%s is a link that leads nowhere, on the way to fs-sync's records." % _home_short(p), 1)
     if st is not OTHERS and not stat.S_ISDIR(st.st_mode):
         return Refused("%s isn't a folder, and it is on the way to fs-sync's records (%s)."
                        % (_home_short(p), _home_short(records)), 1)
