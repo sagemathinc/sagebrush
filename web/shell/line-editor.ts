@@ -183,6 +183,16 @@ export class LineEditor {
     return { t: "submit", line };
   }
 
+  /** A submission taken back (the panel refused to start it): the line restored, its history entry removed. */
+  unsubmit(line: string): void {
+    const e = this.history.entries;
+    if (e[e.length - 1] === line) {
+      e.pop();
+      this.history.bytes -= utf8Len(line);
+    }
+    this.reset(line);
+  }
+
   key(k: Key): Act {
     if (this.search) return this.searchKey(k);
     const { buf, cur } = this;

@@ -23,6 +23,8 @@
 //   screen is the same, and output that erases thousands of times costs one erase (daybreak4 P1, C2).
 
 export const BUDGET = Object.freeze({ marksPerBase: 8, combining: 1 << 20, links: 4096, linkUnits: 1 << 20, styleRuns: 20000 });
+/** the most one write hands to xterm, in UTF-8 bytes (so in UTF-16 units too): every item, merged or made late, with
+ * all admission adds to it (r4 invariant 3, 5, 9) */
 export const SLICE = 64 * 1024;
 /** a write is handed to xterm in pieces of this size, back to back, its callback on the last: xterm parses each piece
  * whole and yields only between pieces, so a dense 64 KiB write never becomes one long task (daybreak4 P1) */
@@ -33,32 +35,78 @@ export const PIECE = 8 * 1024;
 export const RESET = "\x18\x1b[!p\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l";
 export const LEAVE_ALT = "\x1b[?1049l";
 export const CUT_NOTE = "(Some combining characters or links in this output were left out to save memory.)";
-/** the queue's bound (ENGINE E3, SEC T854-3, PERF P1), whatever the calls: at most this many items wait, each with one
- * shared completion (a call returns its item's promise, so nothing is kept per call).  Queued writes of one kind merge
- * up to a 64 KiB fragment; a keyed write (the line's redraw, top's refresh) replaces the one waiting (the last wins).
- * At the bound, output still merges into a waiting output (its bytes bounded by S1, one command at a time), a keyed
- * write still replaces, a barrier joins the last item, and the end of an output (one per command, awaited) is still
- * queued; any other write is dropped and counted.  The panel stops producing before then (its `busy` note). */
+/** what the lexer holds across fragments at most, in UTF-16 units: an OSC string and a CSI sequence (longer ones are
+ * left out whole), and style changes waiting for text (past it they are written, counted as a run) */
+export const HOLD = Object.freeze({ osc: 2048, csi: 64, pend: 256 });
+/** what admission may add to an item's own text, in UTF-8 bytes: the held sequences (3 bytes a unit at most, 7.3 KiB),
+ * a generation's notice and the cut note.  The ledger keeps it reserved for the one write in flight. */
+export const HEADROOM = 8 * 1024;
+/** an item's own text at most (UTF-8 bytes), so that what is written of it stays within SLICE */
+export const ITEM_MAX = SLICE - HEADROOM;
+const NOTICE_UNITS = 80;
+/** The ledger's two caps (r4 invariant 2, 9), whatever the calls: every item waiting or in flight, and every byte they
+ * hold or have reserved, counted once from its reservation to its release.  Past either, a write is dropped whole and
+ * counted; a command's output dropped is counted in its end's "[… N more bytes not shown]". */
 export const MAX_ITEMS = 64;
-// (plus at most one waiting item per key, two keys, and one end of output per command)
-/** and at most this many bytes wait in all: past it, a write is dropped and counted, output included */
 export const MAX_QUEUED = 2 << 20;
+/** a command's end: its marker and the reset at most (UTF-8 bytes), reserved with its item when the command starts */
+export const END_MAX = 256;
+/** the lazy writes' keys, a closed set: one slot each (the line's redraw, top's refresh) */
+export const KEYS: readonly string[] = Object.freeze(["redraw", "replace"]);
+export type LazyKey = "redraw" | "replace";
 
 export interface Sink {
   write(data: string, done: () => void): void;
 }
 /** what a dropped or empty write returns: one settled promise, shared */
 const SETTLED: Promise<void> = Promise.resolve();
-type Item = { data: string; kind: "output" | "ui" | "reset" | "lazy"; make?: () => string; key?: string; styled?: boolean; done: Promise<void>; settle: () => void };
-const item = (data: string, kind: Item["kind"], make?: () => string, key?: string, styled = false): Item => {
+const ENC = new TextEncoder();
+/** encodeInto's target: measuring and cutting at ITEM_MAX bytes without a copy */
+const BUF = new Uint8Array(ITEM_MAX);
+type Kind = "output" | "ui" | "lazy" | "end";
+type Item = {
+  kind: Kind;
+  data: string;
+  /** what it holds reserved in the ledger (UTF-8 bytes): its text's, a lazy's SLICE (refunded when made), an end's END_MAX */
+  bytes: number;
+  make?: () => string;
+  key?: LazyKey;
+  /** a lazy's text is a command's output (S2's cap, and its cut counted as omitted) */
+  styled: boolean;
+  /** a lazy's text size (UTF-8 bytes), counted as omitted if it is dropped */
+  size: number;
+  done: Promise<void>;
+  settle: () => void;
+  released: boolean;
+};
+const item = (kind: Kind, data: string, bytes: number, make?: () => string, key?: LazyKey, styled = false, size = 0): Item => {
   let settle!: () => void;
   const done = new Promise<void>((r) => (settle = r));
-  return { data, kind, make, key, styled, done, settle };
+  return { kind, data, bytes, make, key, styled, size, done, settle, released: false };
+};
+/** the bytes of `s` that fit in `max` UTF-8 bytes, never splitting a character: [units read, bytes written] */
+const fit = (s: string, max: number): [number, number] => {
+  let m = max;
+  if (s.length > m && (s.charCodeAt(m) & 0xfc00) === 0xdc00) m--;
+  const r = ENC.encodeInto(s.length > m ? s.slice(0, m) : s, max === BUF.length ? BUF : BUF.subarray(0, max));
+  return [r.read!, r.written!];
+};
+/** UTF-8 bytes, counted (a cut's omitted rest) */
+const utf8Bytes = (s: string): number => {
+  let n = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c < 0x80) n += 1;
+    else if (c < 0x800) n += 2;
+    else if ((c & 0xfc00) === 0xd800 && i + 1 < s.length && (s.charCodeAt(i + 1) & 0xfc00) === 0xdc00) (n += 4), i++;
+    else n += 3;
+  }
+  return n;
 };
 
 type Budget = { marksPerBase: number; combining: number; links: number; linkUnits: number; styleRuns?: number };
 type Charges = { combining: number; links: number; linkUnits: number };
-type Lex = { st: "ground" | "esc" | "escI" | "csi" | "osc" | "oscEsc" | "str" | "strEsc"; osc: string; afterBase: number; drop: boolean; csi?: string; pend?: string; runs?: number; clean?: boolean };
+type Lex = { st: "ground" | "esc" | "escI" | "csi" | "osc" | "oscEsc" | "str" | "strEsc"; osc: string; afterBase: number; drop: boolean; csi?: string; big?: boolean; pend?: string; runs?: number; clean?: boolean };
 
 const MARKISH = /^[\p{Mn}\p{Me}\p{Cf}]$/u;
 
@@ -73,18 +121,30 @@ export class TermWriter {
   /** the terminal generation: a new one replaces the xterm instance */
   gen = 0;
   charges: Charges = { combining: 0, links: 0, linkUnits: 0 };
-  /** written so far, by kind (the tests') */
-  stats = { writes: 0, maxWrite: 0, generations: 0, cuts: 0, dropped: 0, inflightMax: 0 };
+  /** written so far, by kind (the tests'); droppedBytes: output dropped outside any command */
+  stats = { writes: 0, maxWrite: 0, generations: 0, cuts: 0, dropped: 0, droppedBytes: 0, inflightMax: 0 };
   /** the current logical output passed the style-run cap (reset with the output) */
   colourCut = false;
   private inflightN = 0;
   private lex: Lex = { st: "ground", osc: "", afterBase: -1, drop: false };
   private queue: Item[] = [];
-  /** items waiting, at most (the tests' high-water mark) */
+  /** the ledger: items waiting, in flight or reserved for a command's end, and their bytes (HEADROOM held always) */
+  private items = 0;
+  private bytes = HEADROOM;
+  /** items in the ledger, at most (the tests' high-water mark) */
   queueMax = 0;
+  bytesMax = HEADROOM;
   private pumping = false;
   private dead = false;
+  private current: Item | null = null;
   private inflight: (() => void) | null = null;
+  /** the one admitted command: its end's reservation (then its item), and its output's omitted bytes */
+  private cmd: { id: number; omitted: number; end: Item | null } | null = null;
+  private nextId = 1;
+  /** the shared completion of idle(): settled when nothing waits or is in flight */
+  private drain: { done: Promise<void>; settle: () => void } | null = null;
+  /** whether the last text written ended a line (the omission marker starts on a line of its own) */
+  private atLineStart = true;
 
   constructor(
     private sink: () => Sink,
@@ -102,101 +162,178 @@ export class TermWriter {
     return this.pumping || this.queue.length > 0;
   }
 
+  /** the ledger now (the tests' and the panel's) */
+  get ledger(): { items: number; bytes: number } {
+    return { items: this.items, bytes: this.bytes };
+  }
+
+  /** items in the ledger now */
+  get backlog(): number {
+    return this.items;
+  }
+
+  /** near either cap: the panel starts no command and queues no new action (its "still drawing" note) */
+  get pressed(): boolean {
+    return this.items >= MAX_ITEMS - 8 || this.bytes >= MAX_QUEUED / 2;
+  }
+
+  private reserve(bytes: number): boolean {
+    if (this.items + 1 > MAX_ITEMS || this.bytes + bytes > MAX_QUEUED) return false;
+    this.items++;
+    this.bytes += bytes;
+    this.queueMax = Math.max(this.queueMax, this.items);
+    this.bytesMax = Math.max(this.bytesMax, this.bytes);
+    return true;
+  }
+
+  private release(it: Item): void {
+    if (it.released) return;
+    it.released = true;
+    this.items--;
+    this.bytes -= it.bytes;
+  }
+
+  /** dropped whole and counted; a command's output, in its end's marker */
+  private drop(bytes: number, output: boolean): void {
+    this.stats.dropped++;
+    if (output) this.omit(bytes);
+  }
+
+  /** a command's output not shown: counted for its end's marker (outside a command, in stats) */
+  private omit(bytes: number): void {
+    if (this.cmd && !this.dead) this.cmd.omitted += bytes;
+    else this.stats.droppedBytes += bytes;
+  }
+
   /** Text into xterm, in order: "output" is a command's (filtered and charged), "ui" the panel's own (its prompt,
-   * the editor's line, status lines: already made safe by the panel, passed as is). */
+   * the editor's line, status lines: already made safe by the panel, passed as is).  Split first into items of at
+   * most ITEM_MAX bytes; one merges into the waiting item of its kind only while that stays within ITEM_MAX and the
+   * ledger's caps. */
   write(text: string, kind: "output" | "ui" = "ui"): Promise<void> {
     if (this.dead || text === "") return SETTLED;
     let last: Promise<void> = SETTLED;
     for (let i = 0; i < text.length; ) {
-      let j = Math.min(text.length, i + SLICE);
-      // (never between a surrogate pair)
-      if (j < text.length && (text.charCodeAt(j) & 0xfc00) === 0xdc00) j--;
-      const data = text.slice(i, j);
-      i = j;
+      let end = Math.min(text.length, i + ITEM_MAX);
+      if (end < text.length && (text.charCodeAt(end) & 0xfc00) === 0xdc00) end--;
+      const piece = i === 0 && end === text.length ? text : text.slice(i, end);
+      const [read, n] = fit(piece, ITEM_MAX);
+      const data = read === piece.length ? piece : piece.slice(0, read);
+      i += read;
       const tail = this.queue[this.queue.length - 1];
-      const full = this.queue.length >= MAX_ITEMS;
-      if (this.queuedBytes() + data.length > MAX_QUEUED) {
-        this.stats.dropped++;
-        continue;
-      }
-      // (merged into the waiting write of the same kind while it stays a fragment; at the bound, output merges anyway)
-      if (tail && tail.kind === kind && (tail.data.length + data.length <= SLICE || (full && kind === "output"))) {
+      if (tail && tail.kind === kind && tail.bytes + n <= ITEM_MAX && this.bytes + n <= MAX_QUEUED) {
         tail.data += data;
+        tail.bytes += n;
+        this.bytes += n;
+        this.bytesMax = Math.max(this.bytesMax, this.bytes);
         last = tail.done;
-      } else if (full) {
-        this.stats.dropped++;
-      } else {
-        const it = item(data, kind);
-        this.push(it);
+      } else if (this.reserve(n)) {
+        const it = item(kind, data, n);
+        this.queue.push(it);
         last = it.done;
-      }
+      } else this.drop(n, kind === "output");
     }
     void this.pump();
     return last;
   }
 
-  private queuedBytes(): number {
-    let n = 0;
-    for (const q of this.queue) n += q.data.length;
-    return n;
-  }
-
-  /** items waiting now (the panel's backpressure reads it) */
-  get backlog(): number {
-    return this.queue.length;
-  }
-
-  private push(it: Item): void {
-    this.queue.push(it);
-    this.queueMax = Math.max(this.queueMax, this.queue.length);
-  }
-
   /** The panel's own text, made when its turn comes (after every earlier write is drawn, so it can read where the
-   * cursor is): a redraw of the line, a move back over a block. */
-  /** `output`: what `make` returns is a command's output, admitted as output is (S2's cap); else the panel's own. */
-  writeLazy(make: () => string, key?: string, output = false): Promise<void> {
-    if (this.dead) return Promise.resolve();
-    // (a keyed write still waiting is replaced: a redraw or a refresh superseded before it ran; the last wins)
-    const same = key ? this.queue.find((q) => q.kind === "lazy" && q.key === key) : undefined;
-    if (same) {
-      same.make = make;
-      return same.done;
+   * cursor is): a redraw of the line, a move back over a block.  It reserves an item and SLICE bytes; what `make`
+   * returns is cut to ITEM_MAX bytes (the rest of a command's output counted as omitted) and the rest refunded.
+   * `make` reads the panel's own bounded state: it captures no text of its own.
+   * `key`: one of KEYS; a keyed write still waiting has its `make` replaced (the last wins), so one slot each.
+   * `output`: what `make` returns is a command's output, admitted as output is (S2's cap), and `size` its bytes. */
+  writeLazy(make: () => string, key?: LazyKey, output = false, size = 0): Promise<void> {
+    if (key !== undefined && !KEYS.includes(key)) throw new Error(`term-writer: unknown lazy key ${JSON.stringify(key)}`);
+    if (this.dead) return SETTLED;
+    if (key) {
+      const same = this.queue.find((q) => q.key === key);
+      if (same) {
+        same.make = make;
+        same.size = size;
+        return same.done;
+      }
     }
-    // (a keyed write takes its one item even at the bound: there are two keys, the line's redraw and a refresh)
-    if (!key && this.queue.length >= MAX_ITEMS) {
-      this.stats.dropped++;
-      return this.queue[this.queue.length - 1].done;
+    if (!this.reserve(SLICE)) {
+      this.drop(size, output);
+      return SETTLED;
     }
-    const it = item("", "lazy", make, key, output);
-    this.push(it);
+    const it = item("lazy", "", SLICE, make, key, output, size);
+    this.queue.push(it);
     void this.pump();
     return it.done;
   }
 
-  /** The end of a logical output: the reset, and the lexer back to ground with no base to attach to. */
-  endOutput(): Promise<void> {
-    if (this.dead) return Promise.resolve();
-    // (queued even at the bound: one per command, and the panel awaits it before the next)
-    const it = item(RESET, "reset");
-    this.push(it);
-    void this.pump();
-    return it.done;
+  /** A command starts (the panel's one admission): its end's item and END_MAX bytes reserved now, so its end is
+   * always written.  null (nothing reserved) while another command is active or the ledger is pressed. */
+  tryStartCommand(): number | null {
+    if (this.dead || this.cmd || this.pressed || !this.reserve(END_MAX)) return null;
+    this.cmd = { id: this.nextId++, omitted: 0, end: null };
+    return this.cmd.id;
   }
 
-  /** All writes queued before it drawn: a barrier at the end of the queue (the last callback, then this). */
+  /** The end of command `id`'s output (`omitted`: its bytes the panel left out, S1's): the reset, the lexer back to
+   * ground with no base to attach to, and one "[… N more bytes not shown]" for all its omitted bytes.  A repeat while
+   * it waits shares its completion; any other id is refused. */
+  endOutput(id: number, omitted = 0): Promise<void> {
+    if (this.dead) return SETTLED;
+    const c = this.cmd;
+    if (!c || c.id !== id) return Promise.reject(new Error(`term-writer: command ${id} isn't the active one`));
+    c.omitted += omitted;
+    if (c.end) return c.end.done;
+    // (its item and bytes were reserved when the command started)
+    c.end = item("end", "", END_MAX);
+    this.queue.push(c.end);
+    void this.pump();
+    return c.end.done;
+  }
+
+  /** All writes queued before it drawn: no item of its own; every caller shares one completion, settled when
+   * nothing waits or is in flight. */
   idle(): Promise<void> {
-    if (this.dead) return Promise.resolve();
-    // (at the bound, the last item's own completion is the same barrier)
-    if (this.queue.length >= MAX_ITEMS) return this.queue[this.queue.length - 1].done;
-    return this.writeLazy(() => "");
+    if (this.dead || (!this.pumping && !this.queue.length)) return SETTLED;
+    if (!this.drain) {
+      let settle!: () => void;
+      const done = new Promise<void>((r) => (settle = r));
+      this.drain = { done, settle };
+    }
+    return this.drain.done;
   }
 
-  /** ✕: nothing more is written; whatever waits is let go, and a late callback does nothing. */
+  private drained(): void {
+    const d = this.drain;
+    this.drain = null;
+    d?.settle();
+  }
+
+  /** ✕: nothing more is written; whatever waits is let go and released, and a late callback does nothing. */
   dispose(): void {
+    if (this.dead) return;
     this.dead = true;
-    for (const q of this.queue.splice(0)) q.settle();
+    for (const q of this.queue.splice(0)) this.release(q), q.settle();
+    if (this.current) this.release(this.current), this.current.settle();
+    if (this.cmd && !this.cmd.end) (this.items--, (this.bytes -= END_MAX));
+    this.cmd = null;
     this.inflight?.();
     this.inflight = null;
+    this.drained();
+  }
+
+  /** a lazy item's text: made now, cut to ITEM_MAX bytes (a cut command output's rest counted), the rest refunded */
+  private made(it: Item): string {
+    let s = it.make!();
+    it.make = undefined;
+    let [read, n] = fit(s, ITEM_MAX);
+    if (read < s.length) {
+      // (cut: CAN ends any sequence left open at the cut)
+      [read, n] = fit(s, ITEM_MAX - 1);
+      if (it.styled) this.omit(utf8Bytes(s) - n);
+      this.stats.cuts++;
+      s = s.slice(0, read) + "\x18";
+      n++;
+    }
+    this.bytes -= it.bytes - n;
+    it.bytes = n;
+    return s;
   }
 
   private async pump(): Promise<void> {
@@ -205,23 +342,30 @@ export class TermWriter {
     try {
       while (this.queue.length && !this.dead) {
         const item = this.queue.shift()!;
-        let data = item.data;
-        // (every write goes through admission: output with S2's cap, the panel's own text without it)
-        if (item.kind === "output") data = await this.admit(data, true);
-        else if (item.kind === "ui") data = await this.admit(data, false);
-        else if (item.kind === "reset") {
+        this.current = item;
+        let data: string;
+        if (item.kind === "end") {
           this.lex = { st: "ground", osc: "", afterBase: -1, drop: false };
           this.colourCut = false;
-          data = this.inAlt() ? "\x18" + LEAVE_ALT + RESET.slice(1) : RESET;
-        }
-        else if (item.kind === "lazy") data = await this.admit(item.make!(), !!item.styled);
+          const n = this.cmd?.end === item ? this.cmd.omitted : 0;
+          data = (this.inAlt() ? "\x18" + LEAVE_ALT + RESET.slice(1) : RESET) + (n ? (this.atLineStart ? "" : "\r\n") + `\x1b[2;3m[… ${n} more bytes not shown]\x1b[0m\r\n` : "");
+        } else if (item.kind === "lazy") data = await this.admit(this.made(item), item.styled);
+        else data = await this.admit(item.data, item.kind === "output");
+        item.data = "";
         if (this.dead) return item.settle();
         await this.put(data);
+        if (data) this.atLineStart = /\n(?:\x1b\[[0-9;]*m)*$/.test(data.slice(-64));
+        this.release(item);
+        this.current = null;
+        // (a command's end settles it: the next may start)
+        if (item.kind === "end" && this.cmd?.end === item) this.cmd = null;
         item.settle();
       }
     } finally {
       this.pumping = false;
+      this.current = null;
     }
+    if (!this.queue.length) this.drained();
   }
 
   private put(data: string): Promise<void> {
@@ -262,7 +406,8 @@ export class TermWriter {
       this.gen++;
       this.stats.generations++;
       this.charges = { combining: 0, links: 0, linkUnits: 0 };
-      const notice = (await this.newGeneration()) ?? "";
+      // (the notice within its share of HEADROOM)
+      const notice = String((await this.newGeneration()) ?? "").slice(0, NOTICE_UNITS);
       // (the new terminal's parser starts at ground: the rest of a sequence open across the change is dropped)
       const lex: Lex = { ...this.lex, drop: this.lex.st !== "ground", osc: "", afterBase: -1 };
       r = this.filter(data, lex, left(this.charges));
@@ -377,18 +522,24 @@ export class TermWriter {
             const c = data.charCodeAt(k++);
             if ((c >= 0x40 && c <= 0x7e) || c === 0x18 || c === 0x1a) { fin = c; break; }
           }
-          lex.csi = (lex.csi ?? "") + data.slice(i - ch.length, k);
+          // (held within HOLD.csi: a longer sequence is left out whole)
+          if (!lex.big) lex.csi = (lex.csi ?? "") + data.slice(i - ch.length, k);
+          if (lex.csi!.length > HOLD.csi) (lex.big = true), (lex.csi = "");
           i = k;
           if (fin < 0) break;
-          const seq = lex.csi;
+          const seq = lex.csi!, drop = lex.drop || !!lex.big;
           lex.csi = "";
+          lex.big = false;
           toGround();
+          if (drop) break;
           if (fin === 0x6d && this.styled && this.budget.styleRuns !== undefined) {
-            // (a style change: held until text or another sequence follows it; past the cap, left out)
-            if (!lex.drop && !this.colourCut) lex.pend = (lex.pend ?? "") + "\x1b[" + seq;
+            // (a style change: held until text or another sequence follows it; past the cap, left out; held changes
+            // past HOLD.pend are written first, as a run of their own)
+            if (this.colourCut) break;
+            if ((lex.pend ?? "").length + seq.length + 2 > HOLD.pend) out += this.styleGate(lex);
+            if (!this.colourCut) lex.pend = (lex.pend ?? "") + "\x1b[" + seq;
             break;
           }
-          if (lex.drop) break;
           const flushed = this.styleGate(lex, false);
           const ed2 = seq === "2J";
           if (ed2 && lex.clean && flushed === "") break; // (an erase of an erased screen)
@@ -420,7 +571,7 @@ export class TermWriter {
           // (an OSC past any budget can never be admitted: it is dropped whole, ending as usual)
           if (!lex.drop) {
             lex.osc += ch;
-            if (lex.osc.length > this.budget.linkUnits + 16) (lex.drop = true), (lex.osc = "");
+            if (lex.osc.length > HOLD.osc) (lex.drop = true), (lex.osc = "");
           }
           lex.st = cp === 0x1b ? "oscEsc" : "osc";
           break;

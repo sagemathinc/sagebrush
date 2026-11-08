@@ -12,7 +12,7 @@ import css from "./panel.css" with { type: "text" };
 import type { HostOutcome, ShellHost } from "./host.ts";
 import { FitAddon, Terminal, KEYS, TOOLBAR_CSS, BUTTON_CSS, ensureXtermCss, extraKeysRow, safeTerminal } from "../term/xterm-view.ts";
 import { LineEditor, History, HISTORY, utf8Len, type Act, type Key } from "./line-editor.ts";
-import { TermWriter, zeroWidthOf, MAX_ITEMS } from "./term-writer.ts";
+import { TermWriter, zeroWidthOf, ITEM_MAX } from "./term-writer.ts";
 
 const MIN_H = 120;
 /** xterm's retained rows (wrapped rows count) and the screen's largest size (daybreak3 E1) */
@@ -22,6 +22,11 @@ export const MAX_COLS = 500, MAX_ROWS = 200;
 export const OUTPUT = Object.freeze({ inBytes: 1 << 20, errReserve: 65536 });
 // (the editor's line is drawn in full up to this size; past it, as one summary line)
 const SHOW_UNITS = 4096, SHOW_LINES = 100;
+/** an exit line's text at most (UTF-16 units): a shell's reason included */
+const EXIT_UNITS = 512;
+/** top's block at most (UTF-8 bytes): one lazy write's room (term-writer.ts ITEM_MAX) less its moves */
+const REPLACE_MAX = ITEM_MAX - 64;
+const BUSY = "The screen is still drawing: try again in a moment.";
 // E5.3's 16 colours: web/shell/palette.ts, xterm's ANSI palette, read back from the CSS variables it injects, so the
 // theme follows the page's
 import { palette } from "./palette.ts";
@@ -52,9 +57,19 @@ export const visible = (s: string) => s.replace(/[\x00-\x09\x0b-\x1f\x7f\x80-\x9
 const enc = typeof TextEncoder === "undefined" ? null : new TextEncoder();
 export function cutUtf8(s: string, room: number): string {
   if (s.length * 3 <= room) return s;
-  // (the platform's encoder stops before the first character that doesn't fit: its `read` is the cut, in code units)
-  if (enc) return s.slice(0, enc.encodeInto(s, new Uint8Array(Math.max(0, room))).read);
-  if (utf8Len(s) <= room) return s;
+  return s.slice(0, fitUtf8(s, room)[0]);
+}
+
+/** The code units of `s` that fit in `room` UTF-8 bytes (at a character's edge) and their bytes: one pass of the
+ * platform's encoder into one reused S1-sized buffer (no copy of the text; E5.5's first paint, daybreak4 r3). */
+let capBuf: Uint8Array | null = null;
+function fitUtf8(s: string, room: number): [number, number] {
+  room = Math.max(0, Math.min(room, OUTPUT.inBytes));
+  if (enc) {
+    capBuf ??= new Uint8Array(OUTPUT.inBytes);
+    const r = enc.encodeInto(s, capBuf.subarray(0, room));
+    return [r.read!, r.written!];
+  }
   let b = 0, i = 0;
   for (const ch of s) {
     const n = utf8Len(ch);
@@ -62,17 +77,21 @@ export function cutUtf8(s: string, room: number): string {
     b += n;
     i += ch.length;
   }
-  return s.slice(0, i);
+  return [i, b];
 }
 
-/** The output kept within S1: stdout then stderr, stderr's reserve held for it, cut at a character's edge. */
+/** The output kept within S1: stdout then stderr, stderr's reserve held for it, cut at a character's edge; the bytes
+ * left out counted.  Text within S1 is measured once and never copied. */
 export function capOutput(stdout: string, stderr: string): { out: string; err: string; omitted: number } {
-  const errB = utf8Len(stderr), outB = utf8Len(stdout);
-  const outRoom = OUTPUT.inBytes - Math.min(errB, OUTPUT.errReserve);
-  const cut = cutUtf8;
-  const out = cut(stdout, Math.max(0, outRoom));
-  const err = cut(stderr, OUTPUT.inBytes - utf8Len(out));
-  return { out, err, omitted: outB + errB - utf8Len(out) - utf8Len(err) };
+  const [er0, eb0] = fitUtf8(stderr, OUTPUT.errReserve);
+  const outRoom = OUTPUT.inBytes - (er0 === stderr.length ? eb0 : OUTPUT.errReserve);
+  const [or, ob] = fitUtf8(stdout, outRoom);
+  const [er, eb] = er0 === stderr.length ? [er0, eb0] : fitUtf8(stderr, OUTPUT.inBytes - ob);
+  void eb;
+  const out = or === stdout.length ? stdout : stdout.slice(0, or);
+  const err = er === stderr.length ? stderr : stderr.slice(0, er);
+  const omitted = (or < stdout.length ? utf8Len(stdout.slice(or)) : 0) + (er < stderr.length ? utf8Len(stderr.slice(er)) : 0);
+  return { out, err, omitted };
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls = "", text = ""): HTMLElementTagNameMap[K] {
@@ -622,14 +641,19 @@ export class TerminalPanel {
   private leave(mark = "", line?: string): void {
     if (!this.editing) return;
     this.editing = false;
-    const body = this.drawing(false, line);
+    // (the panel's one left line, bounded as drawn (SHOW_UNITS, else its summary): at most one waits, as `editing`
+    // comes back only with the next prompt; the lazy write reads it, capturing nothing)
+    this.leaving = this.drawing(false, line) + mark;
     void this.writer.writeLazy(() => {
-      if (!this.start || this.start.isDisposed) return mark + "\r\n";
+      const body = this.leaving;
+      this.leaving = "";
+      if (!this.start || this.start.isDisposed) return "\r\n";
       const b = this.term.buffer.active;
       const up = b.baseY + b.cursorY - this.start.line;
-      return (up > 0 ? `\x1b[${up}A` : "") + "\r\x1b[J" + body + mark + "\r\n";
+      return (up > 0 ? `\x1b[${up}A` : "") + "\r\x1b[J" + body + "\r\n";
     });
   }
+  private leaving = "";
 
   // ---------------------------------------------------------------- keys (E5.2)
   /** A key from the keyboard (or the extra keys row): the editor's, or the panel's (Ctrl-C, Enter while running). */
@@ -641,11 +665,19 @@ export class TerminalPanel {
     if ((k.ctrl || k.meta) && !k.shift && !k.alt && lower === "c" && this.term.hasSelection()) return;
     // (Ctrl-V and Cmd-V: the browser's paste, which the paste listener takes)
     if ((k.ctrl || k.meta) && lower === "v") return;
-    if (k.key === "Enter" && !k.shift && !k.ctrl && !k.meta && !k.alt && this.running && !this.editor.search) {
+    // (Enter, in the line or in a reverse search: the one admission, before the editor takes the line)
+    let id: number | null = null;
+    if (k.key === "Enter" && !k.shift) {
       e?.preventDefault();
-      return this.say("A command is running: Stop it first.");
+      const why = this.admission();
+      if (why) return this.say(why);
+      id = this.writer.tryStartCommand();
+      if (id === null) return this.say(BUSY);
+      this.cmd = id;
     }
     const a = this.editor.key(k);
+    // (an Enter the editor didn't submit (a match past the bound): its admission let go, the end written)
+    if (id !== null && a.t !== "submit") this.end_();
     if (a.t === "pass") return; // (the browser's own: no preventDefault)
     if (a.t === "tab") {
       const taken = !this.running && !!this.opts.tab?.key(this.tabInput(), this.root, () => ({ busy: !!this.running, cwd: this.cwd, ended: this.ended }));
@@ -656,14 +688,37 @@ export class TerminalPanel {
     this.act(a);
   }
 
-  /** the writer's queue near its bound (term-writer.ts MAX_ITEMS): actions that would queue more wait, said once */
+  /** the writer's ledger near a cap (term-writer.ts): actions that would queue more wait, said once */
   private get busy_(): boolean {
-    return this.writer.backlog >= MAX_ITEMS - 8;
+    return this.writer.pressed;
+  }
+
+  /** the command admitted (its writer id), from its Enter until its end; null between commands */
+  private cmd: number | null = null;
+
+  /** Why a command can't start now (a command admitted or running, the shell starting for one, the screen drawing),
+   * or "": the one check for Enter and Ctrl-R Enter, made before the editor takes the line, so a refusal keeps it. */
+  private admission(): string {
+    if (this.ended) return "The terminal has ended.";
+    if (this.cmd !== null || this.running) return "A command is running: Stop it first.";
+    if (this.busy_) return BUSY;
+    return "";
+  }
+
+  /** the admitted command's end (once): the writer's reset and its omission marker, `omitted` the panel's own */
+  private end_(omitted = 0): Promise<void> {
+    const id = this.cmd;
+    this.cmd = null;
+    return id === null ? Promise.resolve() : this.writer.endOutput(id, omitted);
   }
 
   private act(a: Act): void {
-    if ((a.t === "submit" || a.t === "clear" || (a.t === "interrupt" && !this.running)) && this.busy_) {
-      return this.say("The screen is still drawing: try again in a moment.");
+    if ((a.t === "clear" || (a.t === "interrupt" && !this.running)) && this.busy_) return this.say(BUSY);
+    if (a.t === "submit" && this.cmd === null) {
+      // (never reached: Enter is admitted first in onKey; kept so no other path starts a command unadmitted)
+      this.editor.unsubmit(a.line);
+      this.redraw();
+      return this.say("A command is running: Stop it first.");
     }
     switch (a.t) {
       case "redraw":
@@ -733,8 +788,9 @@ export class TerminalPanel {
     this.leave("", line);
     this.say("");
     const word = line.trim();
-    if (word === "") return this.prompt();
+    if (word === "") return void this.end_(), this.prompt();
     if (word === "clear" || word === "reset") {
+      void this.end_();
       // (the panel's own: clear = Ctrl-L; reset also starts a fresh shell, keeping the cwd and the history, for when
       // something was pasted by mistake)
       this.clear();
@@ -763,6 +819,8 @@ export class TerminalPanel {
   }
 
   private async finish(status: string) {
+    // (every path ends its command first; this only makes sure no admission outlives its command)
+    if (this.cmd !== null) void this.end_();
     clearInterval(this.running!.timer);
     this.timeEl.textContent = "";
     this.stopBtn.hidden = true;
@@ -782,26 +840,30 @@ export class TerminalPanel {
    * performance measures, from the outcome's arrival: sb-term:first-paint (the first 2 KiB drawn and a frame after it)
    * and sb-term:last-paint (all of it drawn and a frame after).
    */
-  private async output(stdout: string, stderr: string): Promise<void> {
+  private async output(stdout: string, stderr: string): Promise<number> {
     const t0 = performance.now();
-    const c = capOutput(stdout, stderr);
-    const all = c.out + (c.err ? "\x1b[31m" + c.err + "\x1b[39m" : "");
-    let k = Math.min(all.length, 2048);
-    if (k < all.length && (all.charCodeAt(k) & 0xfc00) === 0xdc00) k--;
     const frame = () => (document.hidden ? Promise.resolve() : new Promise<void>((r) => { requestAnimationFrame(() => r()); setTimeout(r, 100); }));
-    if (all) {
-      await this.writer.write(all.slice(0, k), "output");
+    const head = (s: string) => {
+      let k = Math.min(s.length, 2048);
+      if (k < s.length && (s.charCodeAt(k) & 0xfc00) === 0xdc00) k--;
+      return s.slice(0, k);
+    };
+    // (stdout's first 2 KiB is always within S1 (stdout's room is at least 960 KiB): it is written first, and S1's
+    // cut measured over the rest after, so the first paint never waits for that pass; stderr alone: cut first)
+    let c = stdout ? null : capOutput(stdout, stderr);
+    const red = (e: string) => (e ? "\x1b[31m" + e + "\x1b[39m" : "");
+    const first = c ? head(red(c.err)) : head(stdout);
+    if (first) {
+      await this.writer.write(first, "output");
       await frame();
       performance.measure("sb-term:first-paint", { start: t0, end: performance.now() });
-      await this.writer.write(all.slice(k), "output");
     }
-    if (c.omitted) await this.omission(c.omitted, all);
+    c ??= capOutput(stdout, stderr);
+    await this.writer.write(stdout ? c.out.slice(first.length) + red(c.err) : red(c.err).slice(first.length), "output");
     await frame();
     performance.measure("sb-term:last-paint", { start: t0, end: performance.now() });
-  }
-
-  private omission(n: number, before: string): Promise<void> {
-    return this.writer.write((before === "" || before.endsWith("\n") ? "" : "\r\n") + DIM(`[… ${n} more bytes not shown]`) + "\r\n");
+    // (S1's omitted bytes: the writer's end marker counts them with any it dropped)
+    return c.omitted;
   }
 
   /** open, ps and top: run in the page, Stop-able (top). */
@@ -810,9 +872,9 @@ export class TerminalPanel {
     // (a page command's output goes through the writer as it comes; top's replace redraws its own block: up over the
     // rows it drew last and erase below, or anew if they have scrolled past the screen)
     let drawnFrom: { line: number; isDisposed: boolean; dispose(): void } | null = null;
-    // (S1 for a page command too: at most 1 MiB of its writes shown, the rest counted for the omission line; a
-    // replace's text is capped on its own, as the latest output)
-    let shown = 0, omitted = 0, last = "", latest = "";
+    // (S1 for a page command too: at most 1 MiB of its writes shown, the rest counted for the end's marker; a
+    // replace's block is capped on its own at REPLACE_MAX, the newest block's cut counted)
+    let shown = 0, omitted = 0, latest = "", latestCut = 0;
     const fit = (text: string): string => {
       const kept = cutUtf8(text, Math.max(0, OUTPUT.inBytes - shown));
       const k = utf8Len(kept);
@@ -825,14 +887,14 @@ export class TerminalPanel {
       signal: ctl.signal,
       write: (text, err = false) => {
         const t = fit(text);
-        if (t) (last = t), void this.writer.write(err ? "\x1b[31m" + t + "\x1b[39m" : t, "output");
+        if (t) void this.writer.write(err ? "\x1b[31m" + t + "\x1b[39m" : t, "output");
       },
       replace: (text) => {
-        // (one keyed write: a refresh still waiting is replaced by the newest, so a fast refresher costs one draw)
-        latest = cutUtf8(text, OUTPUT.inBytes);
+        // (one keyed write: a refresh still waiting is replaced by the newest, so a fast refresher costs one draw; it
+        // reads `latest`, the one bounded block, capturing nothing)
+        latest = cutUtf8(text, REPLACE_MAX);
+        latestCut = utf8Len(text) - utf8Len(latest);
         void this.writer.writeLazy(() => {
-          shown = 0;
-          omitted = 0;
           const b = this.term.buffer.active;
           let pre = "";
           if (drawnFrom && !drawnFrom.isDisposed && b.baseY + b.cursorY - drawnFrom.line < this.term.rows) {
@@ -842,10 +904,8 @@ export class TerminalPanel {
             drawnFrom?.dispose();
             drawnFrom = this.term.registerMarker(0) ?? null;
           }
-          const t = fit(latest);
-          last = t;
-          return pre + t;
-        }, "replace", true);
+          return pre + latest;
+        }, "replace", true, utf8Len(latest));
       },
     };
     let code = 0;
@@ -856,15 +916,22 @@ export class TerminalPanel {
       code = 1;
     }
     drawnFrom?.dispose();
-    if (omitted) await this.omission(omitted, last);
-    await this.writer.endOutput();
+    await this.end_(omitted + latestCut);
     if (code) await this.exitLine(`exit ${code}`);
     await this.finish(code ? `exit ${code}` : "done");
   }
 
   private exitLine(text: string, err = false): Promise<void> {
-    return this.writer.writeLazy(() => (this.term.buffer.active.cursorX ? "\r\n" : "") + (err ? `\x1b[31m${visible(text)}\x1b[39m` : DIM(visible(text))) + "\r\n");
+    // (one per command, awaited: the lazy write reads the panel's field, at most EXIT_UNITS, capturing nothing)
+    const t = visible(text.slice(0, EXIT_UNITS));
+    this.exitText = err ? `\x1b[31m${t}\x1b[39m` : DIM(t);
+    return this.writer.writeLazy(() => {
+      const t = this.exitText;
+      this.exitText = "";
+      return (this.term.buffer.active.cursorX ? "\r\n" : "") + t + "\r\n";
+    });
   }
+  private exitText = "";
 
   /** `script` runs; `line`, what was typed (help NAME's), is what history keeps. */
   private async submit(line: string, script = line) {
@@ -893,19 +960,19 @@ export class TerminalPanel {
         }
       }
       if (script === line && this.opts.tab) out = await this.opts.tab.colour(line, out, this.cwd);
-      await this.output(out, r.stderr);
-      await this.writer.endOutput();
+      await this.end_(await this.output(out, r.stderr));
       if (r.code !== 0) await this.exitLine(`exit ${r.code}`);
       status = r.code === 0 ? "done" : `exit ${r.code}`;
     } else if (r.kind === "interrupted") {
+      await this.end_();
       await this.exitLine("^C (stopped)");
       status = "stopped";
     } else if (r.kind === "limit") {
-      await this.output("", r.stderr);
-      await this.writer.endOutput();
+      await this.end_(await this.output("", r.stderr));
       await this.exitLine(`exit ${r.code} (limit ${r.key})`);
       status = `exit ${r.code}`;
     } else {
+      await this.end_();
       await this.exitLine(`the shell is unavailable: ${r.reason}`, true);
       status = "unavailable";
     }

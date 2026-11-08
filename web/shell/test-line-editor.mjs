@@ -198,5 +198,77 @@ const fresh = (max = 1 << 20, hist = new History()) => new LineEditor(max, hist)
   ok(s2.per <= 2.1 * s1.per, "and its work doubles with the history, no more");
 }
 
+// grader's r3 survivors (#854 TESTS interim): each pinned against its mutant
+{
+  // L17: a paste in a search whose match is past the bound: refused, the line unchanged
+  const e1 = fresh(8, new History(HISTORY, ["x".repeat(40)]));
+  e1.reset("ab");
+  keys(e1, { key: "r", ctrl: true }, "x");
+  ok(e1.insert("zz", "pasted").t === "refused" && e1.buf === "ab", "L17: a paste under a search with an over-bound match is refused, the line unchanged");
+  // L15: Alt is the browser's
+  ok(fresh().key({ key: "x", alt: true }).t === "pass", "L15: an Alt key passes to the browser");
+  // L7, L20, L21, L22: in a many-line script, line-wise kills and Home stop at the line's edge
+  const m = fresh();
+  m.reset("one\ntwo");
+  keys(m, { key: "w", ctrl: true });
+  ok(m.buf === "one\n", `L7: Ctrl-W kills the word on line 2 (${JSON.stringify(m.buf)})`);
+  keys(m, { key: "w", ctrl: true });
+  ok(m.buf === "one\n", "L7: and never crosses the newline");
+  m.reset("one\ntwo");
+  keys(m, "ArrowLeft", { key: "u", ctrl: true });
+  ok(m.buf === "one\no" && m.cur === 4, `L20: Ctrl-U kills to line 2's start, not the script's (${JSON.stringify(m.buf)})`);
+  m.reset("one\ntwo");
+  keys(m, "ArrowUp", "ArrowLeft", { key: "k", ctrl: true });
+  ok(m.buf === "on\ntwo", `L21: Ctrl-K kills to line 1's end, not the script's (${JSON.stringify(m.buf)})`);
+  m.reset("one\ntwo");
+  keys(m, "Home");
+  ok(m.cur === 4, `L22: Home goes to line 2's start (${m.cur})`);
+  // L11: Down clamps at a shorter middle line
+  const d = fresh();
+  d.reset("aaaa\nb\ncccc");
+  d.cur = 3;
+  keys(d, "ArrowDown");
+  ok(d.cur === 6, `L11: Down from column 3 to the one-character line: its end (${d.cur})`);
+  // L13, L14: in a search, Backspace searches again for the shorter query; a longer query keeps a match that still fits
+  const h = new History(HISTORY, ["make test", "git status", "make build"]);
+  const r = fresh(1 << 20, h);
+  keys(r, { key: "r", ctrl: true });
+  type(r, "make");
+  keys(r, { key: "r", ctrl: true });
+  ok(h.entries[r.search.at] === "make test", "(the older match)");
+  type(r, " t");
+  ok(h.entries[r.search.at] === "make test" && !r.search.failed, "L14: a longer query that still matches keeps the current match");
+  keys(r, "Backspace", "Backspace");
+  ok(r.search.q === "make" && h.entries[r.search.at] === "make build", `L13: Backspace shortens the query and searches again from the newest (${r.search.q}, ${h.entries[r.search.at]})`);
+  // L6: Ctrl-G restores the cursor too
+  const g = fresh(1 << 20, h);
+  type(g, "draft");
+  keys(g, "ArrowLeft", "ArrowLeft", { key: "r", ctrl: true });
+  type(g, "git");
+  keys(g, { key: "g", ctrl: true });
+  ok(g.buf === "draft" && g.cur === 3, `L6: Ctrl-G restores the line and its cursor (${g.cur})`);
+  // L2: an entry of exactly entryMax bytes is kept
+  const hb = new History({ entries: 3, bytes: 100, entryMax: 6 });
+  hb.push("abcdef");
+  hb.push("abcdefg");
+  ok(JSON.stringify(hb.entries) === JSON.stringify(["abcdef"]), "L2: an entry of exactly entryMax is kept, one byte more isn't");
+  // L16: an astral character is 4 bytes at the bound
+  const a4 = fresh(4);
+  ok(a4.insert("😀").t === "redraw" && a4.insert("x").t === "refused", "L16: an astral character counts 4 bytes: it fills a 4-byte line exactly");
+  const a5 = fresh(4);
+  a5.insert("a");
+  ok(a5.insert("😀").t === "refused" && utf8Len("a😀") === 5, "L16: and one byte more is refused");
+}
+
+// r4 (SEC T854-5, ENGINE E4): a submission the panel refuses is taken back: the line restored, its history entry gone
+{
+  const h = new History();
+  const ed = fresh(1 << 20, h);
+  type(ed, "echo again");
+  const a = keys(ed, "Enter")[0];
+  ed.unsubmit(a.line);
+  ok(ed.buf === "echo again" && h.entries.length === 0 && h.bytes === 0, "unsubmit: the line back, the history as it was");
+}
+
 console.log(`${checks - fails}/${checks} checks passed`);
 if (fails) process.exit(1);

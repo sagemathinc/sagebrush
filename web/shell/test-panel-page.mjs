@@ -250,6 +250,18 @@ try {
   await realKey("Enter");
   check((await evaluate(`window.__execs`)) === exQ && (await evaluate(`${T}.editor.buf`)) === "echo queued" && (await evaluate(`document.querySelector(".sb-term-note").textContent`)) === "A command is running: Stop it first.",
     "Enter while running: nothing submitted or queued, the typed-ahead line kept, the note shown");
+  // (r4 12, astra T854-5, daybreak3 E4: Ctrl-R, a match, Enter while a command runs: refused by the one admission
+  // before the editor takes the line; the search stays as it was, nothing submitted, the history untouched)
+  await evaluate(`document.querySelector(".sb-term-note").textContent = ""`);
+  const hQ = await evaluate(`${T}.editor.history.entries.length`);
+  await realKey("r", { ctrl: true });
+  await type("i=0");
+  await realKey("Enter");
+  const rsQ = await evaluate(`({ s: !!${T}.editor.search, q: ${T}.editor.search?.q, h: ${T}.editor.history.entries.length, x: window.__execs, note: document.querySelector(".sb-term-note").textContent })`);
+  check(rsQ.s && rsQ.q === "i=0" && rsQ.h === hQ && rsQ.x === exQ && rsQ.note === "A command is running: Stop it first.",
+    `Ctrl-R Enter while running: refused before the editor takes the match; the search kept, nothing run, history as it was: ${JSON.stringify(rsQ)}`);
+  await realKey("g", { ctrl: true });
+  check((await evaluate(`${T}.editor.buf`)) === "echo queued" && (await running()) === true, "Ctrl-G leaves the search: the typed-ahead line back, the command still running");
   // (Ctrl-C with a selection on the screen: the browser's copy, the command keeps running.  The note just shown
   // shortens the screen, and xterm drops a selection when it is resized: the selection is made once that refit is done)
   await pause(300);
@@ -268,6 +280,20 @@ try {
   check((await evaluate(`window.__lines(0, window.__cursorLine())`)).includes("^C (stopped)"), "the stopped command says so");
   check((await evaluate(`${T}.editor.buf`)) === "echo queued", "the typed-ahead line is at the next prompt");
   await realKey("u", { ctrl: true });
+  // (r4 11, 12: the screen still drawing (the writer's ledger pressed): Enter refused before the editor takes the line;
+  // the line and the history kept, nothing run.  The pressure is simulated: the writer's own caps are pinned in
+  // test-term-writer.mjs)
+  await type("echo unsent");
+  const hB = await evaluate(`${T}.editor.history.entries.length`), exB = await evaluate(`window.__execs`);
+  await evaluate(`Object.defineProperty(${T}.writer, "pressed", { get: () => true, configurable: true }), 1`);
+  await realKey("Enter");
+  const busyB = await evaluate(`({ buf: ${T}.editor.buf, h: ${T}.editor.history.entries.length, x: window.__execs, note: document.querySelector(".sb-term-note").textContent })`);
+  await evaluate(`delete ${T}.writer.pressed, 1`);
+  await evaluate(`document.querySelector(".sb-term-status").textContent = ""`);
+  check(busyB.buf === "echo unsent" && busyB.h === hB && busyB.x === exB && busyB.note === "The screen is still drawing: try again in a moment.",
+    `Enter while the screen is drawing: the line and history kept, nothing run, the note: ${JSON.stringify(busyB)}`);
+  await realKey("Enter");
+  check(!!(await until(`document.querySelector(".sb-term-status").textContent === "done"`, 10000)) && (await evaluate(`window.__execs`)) === exB + 1, "and once it has drawn, the same Enter runs the kept line");
   // (Stop by the button)
   await start(LOOP);
   await until(`document.querySelector(".sb-term").classList.contains("running")`, 10000);

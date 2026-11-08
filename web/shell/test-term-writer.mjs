@@ -5,13 +5,16 @@
 // and their units), never decremented, a new generation before a fragment would pass a budget, a fragment over a
 // budget on its own cut first; the reset after each output; stale callbacks and dispose.  Budgets small and injected.
 //   bun web/shell/test-term-writer.mjs
-import { TermWriter, BUDGET, SLICE, PIECE, RESET, LEAVE_ALT, CUT_NOTE, MAX_ITEMS, MAX_QUEUED } from "./term-writer.ts";
+import { TermWriter, BUDGET, SLICE, PIECE, RESET, LEAVE_ALT, CUT_NOTE, MAX_ITEMS, MAX_QUEUED, ITEM_MAX, HEADROOM, HOLD, END_MAX } from "./term-writer.ts";
 
 let checks = 0, fails = 0;
 const ok = (c, what) => { checks++; if (!c) fails++; console.log(`${c ? "ok  " : "FAIL"} ${what}`); };
 // (zero width as xterm's v6 table has it for these: combining marks, ZWJ, variation selectors)
 const zw = (cp) => (cp >= 0x300 && cp <= 0x36f) || cp === 0x200d || (cp >= 0xfe00 && cp <= 0xfe0f);
 const M = "́"; // (a combining acute)
+
+/** a command's end: the writer's one admission, then its end */
+const end = (w, omitted = 0) => w.endOutput(w.tryStartCommand(), omitted);
 
 /** A writer over a recording sink; `auto` calls each callback on a later turn (as xterm does). */
 function rig(budget = BUDGET, { auto = true } = {}) {
@@ -63,7 +66,7 @@ function rig(budget = BUDGET, { auto = true } = {}) {
   // an output boundary ends the run
   const { w: w3, r: r3 } = rig();
   await w3.write("e" + M, "output");
-  await w3.endOutput();
+  await end(w3);
   await w3.write(M + "f", "output");
   ok(r3.text() === "e" + M + RESET + "f", "a mark at the start of the next output (after the reset) is dropped");
   // ZWJ and variation selectors count as combining
@@ -76,20 +79,20 @@ function rig(budget = BUDGET, { auto = true } = {}) {
 {
   const { w, r } = rig();
   await w.write("\x1b]0;title-never-ended", "output");
-  await w.endOutput();
+  await end(w);
   await w.write("next", "output");
   ok(r.text().startsWith(RESET) && r.text().endsWith("next"), "an unterminated OSC is held and dropped; the reset (CAN first) follows");
   ok(RESET.startsWith("\x18") && !RESET.includes(LEAVE_ALT) && RESET.includes("\x1b[!p"), "the reset: CAN and a soft reset; no buffer switch in the normal buffer (it would restore a saved cursor)");
   let alt = true;
   const sinkA = { writes: [], write(d, done) { this.writes.push(d); setTimeout(done, 0); } };
   const wa = new TermWriter(() => sinkA, zw, () => {}, BUDGET, () => alt);
-  await wa.endOutput();
+  await end(wa);
   alt = false;
-  await wa.endOutput();
+  await end(wa);
   ok(sinkA.writes[0] === "\x18" + LEAVE_ALT + RESET.slice(1) && sinkA.writes[1] === RESET, "in the alternate buffer the reset leaves it, CAN still first");
   const { w: w2, r: r2 } = rig();
   await w2.write("\x1bP1$qm", "output");
-  await w2.endOutput();
+  await end(w2);
   ok(r2.text() === "\x1bP1$qm" + RESET, "an open DCS is written as is and aborted by the reset's CAN");
 }
 
@@ -111,7 +114,7 @@ function rig(budget = BUDGET, { auto = true } = {}) {
   const { w: wc, r: rc } = rig(small);
   await wc.write(link("https://c.example/1") + link("https://c.example/2") + link("https://c.example/3"), "output");
   const t = rc.text();
-  ok(wc.charges.links === 2 && !t.includes("c.example/3") && t.includes(CUT_NOTE), "a fragment over a budget on its own: cut at it, with the note");
+  ok(wc.charges.links === 2 && !t.includes("c.example/3") && t.includes(CUT_NOTE) && rc.gens === 0, "a fragment over a budget on its own: cut at it, with the note, and no needless new generation (W11)");
   ok((t.match(/\x1b\]8;/g) || []).length === (t.match(/\x1b\\/g) || []).length, "no half link sequence is ever written");
   // id and other parameters count as units
   const { w: wi } = rig(small);
@@ -136,7 +139,7 @@ function rig(budget = BUDGET, { auto = true } = {}) {
   // the alternate buffer stays charged
   const { w: wa } = rig(small);
   await wa.write("\x1b[?1049h" + "e" + M.repeat(8), "output");
-  await wa.endOutput();
+  await end(wa);
   ok(wa.charges.combining === 8, "marks written in the alternate buffer stay charged after leaving it");
 }
 
@@ -155,7 +158,7 @@ function rig(budget = BUDGET, { auto = true } = {}) {
   await w3.write(runs(3), "output");
   await w3.write(runs(3), "output");
   ok(w3.colourCut, "the count carries across writes of one output");
-  await w3.endOutput();
+  await end(w3);
   await w3.write(runs(2), "output");
   ok(!w3.colourCut && r3.text().endsWith("\x1b[32mb"), "and starts again with the next output");
   ok(BUDGET.styleRuns === 20000, "the shipped cap: S2's 20,000");
@@ -216,16 +219,16 @@ function rig(budget = BUDGET, { auto = true } = {}) {
   const { w, r } = rig(BUDGET, { auto: false });
   void w.write("first", "ui");
   await new Promise((s) => setTimeout(s, 0));
+  const k = new Set();
+  for (let i = 0; i < 1000; i++) k.add(w.writeLazy(() => "k" + i, "redraw"));
+  ok(k.size === 1 && w.backlog === 2, "1 000 keyed replacements: one item, one completion, nothing kept per call");
   const ps = new Set();
   for (let i = 0; i < 10000; i++) {
     ps.add(w.write("o" + i, "output"));
     ps.add(w.write("u" + i, "ui"));
   }
-  ok(w.queueMax <= MAX_ITEMS && w.backlog <= MAX_ITEMS && w.stats.dropped > 0, `alternating kinds: at most ${MAX_ITEMS} items wait (${w.queueMax}), the rest dropped and counted (${w.stats.dropped})`);
-  ok(ps.size <= MAX_ITEMS + 2, `calls share their items' completions: ${ps.size} distinct promises for 20 000 calls`);
-  const k = new Set();
-  for (let i = 0; i < 1000; i++) k.add(w.writeLazy(() => "k" + i, "redraw"));
-  ok(k.size === 1 && w.backlog <= MAX_ITEMS + 2, "1 000 keyed replacements: one item, one completion, nothing kept per call");
+  ok(w.queueMax <= MAX_ITEMS && w.backlog <= MAX_ITEMS && w.stats.dropped > 0, `alternating kinds: at most ${MAX_ITEMS} items in the ledger (${w.queueMax}), the rest dropped and counted (${w.stats.dropped})`);
+  ok(ps.size <= MAX_ITEMS + 1, `calls share their items' completions: ${ps.size} distinct promises for 20 000 calls`);
   while (r.pending.length) { r.pending.shift()(); await new Promise((s) => setTimeout(s, 0)); }
   await Promise.all([...ps, ...k]);
   ok(r.text().includes("k999") && !r.text().includes("k998"), "the last keyed write wins, and every completion settles");
@@ -283,6 +286,240 @@ function rig(budget = BUDGET, { auto = true } = {}) {
   r.pending[0](); // (the late callback: a no-op)
   await w.write("after", "ui");
   ok(r.writes.length === 1, "nothing is written after dispose");
+}
+
+// ---- r4 invariant pins (the 13-line contract, ENGINE/PERF/SEC; daybreak3's and astra's r3 probes)
+const turn = () => new Promise((s) => setTimeout(s, 0));
+const flush = async (r) => { while (r.pending.length) { r.pending.shift()(); await turn(); } };
+const u8 = (s) => new TextEncoder().encode(s).length;
+/** a rig whose every put's text (its pieces joined) is recorded, to check each against SLICE */
+function putRig(budget = BUDGET, opts) {
+  const x = rig(budget, opts);
+  x.puts = () => {
+    const out = [];
+    let cur = "";
+    // (pieces of one put are written back to back; its callback is on the last: the recorded order joins them)
+    for (const p of x.r.writes) cur += p.data, (p.data.length < PIECE && (out.push(cur), (cur = "")));
+    if (cur) out.push(cur);
+    return out;
+  };
+  return x;
+}
+
+// 2, 9: one ledger, items and bytes, whatever the mix; released exactly once, back to empty
+{
+  const { w, r } = rig(BUDGET, { auto: false });
+  void w.write("first", "ui");
+  await turn();
+  const id = w.tryStartCommand();
+  let maxItems = 0, maxBytes = 0;
+  const look = () => ((maxItems = Math.max(maxItems, w.ledger.items)), (maxBytes = Math.max(maxBytes, w.ledger.bytes)));
+  for (let i = 0; i < 2000; i++) {
+    void w.write("o".repeat(i % 50000) + i, "output"), look();
+    void w.write("u" + i, "ui"), look();
+    void w.writeLazy(() => "L" + i), look();
+    void w.writeLazy(() => "R", i % 2 ? "redraw" : "replace"), look();
+    void w.idle(), look();
+    void w.endOutput(id), look();
+  }
+  ok(maxItems <= MAX_ITEMS && maxBytes <= MAX_QUEUED && w.queueMax <= MAX_ITEMS && w.bytesMax <= MAX_QUEUED, `mixed kinds, keys, lazies, idles and ends: the ledger stays within ${MAX_ITEMS} items (${maxItems}) and ${MAX_QUEUED} bytes (${maxBytes})`);
+  await flush(r);
+  await w.idle();
+  ok(w.ledger.items === 0 && w.ledger.bytes === HEADROOM, `drained: every reservation released once (${JSON.stringify(w.ledger)})`);
+}
+
+// 3: write splits first; a merge never makes an item past ITEM_MAX (so no write past SLICE), at the caps too (E3 r3)
+{
+  const { w, r, puts } = putRig(BUDGET, { auto: false });
+  void w.write("first", "ui");
+  await turn();
+  for (let i = 0; i < 63; i++) void w.writeLazy(() => "");
+  for (let i = 0; i < 40; i++) void w.write("z".repeat(SLICE), "output");
+  ok(w.ledger.items <= MAX_ITEMS, "full ledger: output past it is dropped, never merged into a larger item");
+  await flush(r);
+  const big = puts().reduce((m, p) => Math.max(m, u8(p)), 0);
+  ok(w.stats.maxWrite <= SLICE && big <= SLICE, `every write within SLICE (${w.stats.maxWrite} units, ${big} bytes)`);
+  const { w: w2, r: r2, puts: puts2 } = putRig();
+  await w2.write("€".repeat(100000) + "😀".repeat(20000), "output");
+  const big2 = puts2().reduce((m, p) => Math.max(m, u8(p)), 0);
+  ok(big2 <= ITEM_MAX && r2.text() === "€".repeat(100000) + "😀".repeat(20000), `3- and 4-byte text: each write within ITEM_MAX bytes (${big2}), all of it in order`);
+}
+
+// 4, 5: a lazy write reserves an item and SLICE, made late, cut to ITEM_MAX bytes, the rest refunded; a command's
+// output cut there is counted in its marker
+{
+  const { w, r } = rig(BUDGET, { auto: false });
+  void w.write("first", "ui");
+  await turn();
+  const before = w.ledger.bytes;
+  const huge = "h".repeat(4 << 20);
+  const id = w.tryStartCommand();
+  const p = w.writeLazy(() => huge, "replace", true, huge.length);
+  ok(w.ledger.bytes === before + END_MAX + SLICE, `a lazy write reserves SLICE before it is made (${w.ledger.bytes - before - END_MAX})`);
+  void w.endOutput(id);
+  await flush(r);
+  await p;
+  const t = r.text();
+  const cut = t.indexOf("\x18") - "first".length;
+  ok(cut > 0 && cut <= ITEM_MAX && w.stats.maxWrite <= SLICE, `a 4 MiB lazy text is cut within ITEM_MAX (${cut}), CAN after the cut`);
+  ok(t.includes(`[… ${huge.length - (ITEM_MAX - 1)} more bytes not shown]`), "its rest is counted exactly in the command's marker");
+  ok(w.ledger.items === 0 && w.ledger.bytes === HEADROOM, "and its reservation released");
+  // the panel's lazy writes capture nothing: pinned in test-panel-page.mjs (leave, exitLine, replace read panel fields)
+}
+
+// 6: keys are a closed set
+{
+  const { w } = rig(BUDGET, { auto: false });
+  let thrown = 0;
+  for (let i = 0; i < 1000; i++) try { w.writeLazy(() => "", "k" + i); } catch { thrown++; }
+  ok(thrown === 1000 && w.ledger.items === 0, `1 000 unknown keys: each a programming error, no slot made (${thrown}, ${w.ledger.items} items)`);
+  void w.write("in flight", "ui");
+  const a = w.writeLazy(() => "1", "redraw"), b = w.writeLazy(() => "2", "redraw"), c = w.writeLazy(() => "3", "replace");
+  ok(a === b && a !== c && w.ledger.items === 3, "redraw and replace: one slot each, replacement reuses it");
+}
+
+// 7: ends belong to the one admitted command: repeats share it, stale and foreign ids are refused, nothing kept after
+{
+  const { w, r } = rig(BUDGET, { auto: false });
+  void w.write("first", "ui");
+  await turn();
+  const id = w.tryStartCommand();
+  ok(id !== null && w.tryStartCommand() === null, "one command at a time");
+  const n0 = w.ledger.items;
+  const ends = new Set();
+  for (let i = 0; i < 1000; i++) ends.add(w.endOutput(id));
+  ok(ends.size === 1 && w.ledger.items === n0, `1 000 ends for it: one item (reserved at its start), one completion (${ends.size}, ${w.ledger.items - n0} more items)`);
+  let foreign = false;
+  await w.endOutput(id + 1).catch(() => (foreign = true));
+  ok(foreign, "a foreign id is refused");
+  await flush(r);
+  await [...ends][0];
+  let stale = false;
+  await w.endOutput(id).catch(() => (stale = true));
+  ok(stale && w.ledger.items === 0, "after its end, its id is stale: refused, nothing kept");
+  const id2 = w.tryStartCommand();
+  ok(id2 !== null && id2 !== id, "and the next command may start");
+}
+
+// 8: idle adds no item; its callers share one completion; dispose settles it
+{
+  const { w, r } = rig(BUDGET, { auto: false });
+  void w.write("first", "ui");
+  await turn();
+  const n0 = w.ledger.items;
+  const ids = new Set();
+  for (let i = 0; i < 1000; i++) ids.add(w.idle());
+  ok(ids.size === 1 && w.ledger.items === n0, `1 000 idles: no item (${w.ledger.items - n0}), one completion (${ids.size})`);
+  await flush(r);
+  await [...ids][0];
+  ok(w.idle() === w.idle(), "an idle writer: settled at once");
+  const { w: wd } = rig(BUDGET, { auto: false });
+  void wd.write("x", "ui");
+  const pd = wd.idle();
+  wd.dispose();
+  await pd;
+  ok(wd.ledger.items === 0, "dispose settles it and releases the ledger");
+}
+
+// 9: held sequences within HOLD: no write past SLICE from a long OSC, CSI or style run
+{
+  const { w } = rig();
+  await w.write("\x1b]8;;https://x/" + "u".repeat(HOLD.osc * 4) + "\x1b\\x\x1b]8;;\x1b\\", "output");
+  await w.write("\x1b[" + "1;".repeat(HOLD.csi * 40) + "m" + "y", "output");
+  await w.write("\x1b[31m".repeat(50000) + "z", "output");
+  ok(w.stats.maxWrite <= SLICE && w.charges.links === 0, `a long OSC or CSI is left out whole, held style changes stay bounded (${w.stats.maxWrite})`);
+  const { w: wn, r: rn } = rig({ ...BUDGET, links: 1 });
+  const wn2 = new TermWriter(() => ({ write: (d, cb) => (rn.writes.push({ g: 9, data: d }), setTimeout(cb, 0)) }), zw, () => "N".repeat(100000), { ...BUDGET, links: 1 });
+  const link = (u) => `\x1b]8;;${u}\x1b\\x\x1b]8;;\x1b\\`;
+  await wn2.write(link("https://a/1"), "output");
+  await wn2.write(link("https://a/2"), "output");
+  ok(wn2.stats.maxWrite <= SLICE && !rn.text(9).includes("N".repeat(100)), "a generation's notice is held to its share of HEADROOM");
+  void wn;
+}
+
+// 10: at a cap, drop whole and count; a command's dropped output is in its one marker, exactly
+{
+  const { w, r } = rig(BUDGET, { auto: false });
+  void w.write("first", "ui");
+  await turn();
+  const id = w.tryStartCommand();
+  let sent = 0;
+  for (let i = 0; i < 60; i++) void w.write("d".repeat(ITEM_MAX), "output"), (sent += ITEM_MAX);
+  const dropped = w.stats.dropped;
+  void w.endOutput(id, 1234);
+  await flush(r);
+  const shown = (r.text().match(/d/g) || []).length;
+  ok(dropped > 0 && r.text().includes(`[… ${sent - shown + 1234} more bytes not shown]`), `dropped output and the panel's own omitted bytes: one marker, exact (${sent - shown} + 1234)`);
+  ok((r.text().match(/more bytes not shown/g) || []).length === 1, "one marker for the command");
+}
+
+// 11: the start reserves the end; a pressed ledger starts nothing
+{
+  const { w } = rig(BUDGET, { auto: false });
+  void w.write("first", "ui");
+  for (let i = 0; i < MAX_ITEMS - 8; i++) void w.writeLazy(() => "");
+  ok(w.pressed && w.tryStartCommand() === null, "pressed: no command starts, nothing reserved for it");
+  const { w: w2 } = rig(BUDGET, { auto: false });
+  const n = w2.ledger;
+  const id = w2.tryStartCommand();
+  ok(w2.ledger.items === n.items + 1 && w2.ledger.bytes === n.bytes + END_MAX, "a start reserves its end's item and END_MAX bytes");
+  for (let i = 0; i < 200; i++) void w2.write("q".repeat(ITEM_MAX), "output");
+  ok(w2.endOutput(id) instanceof Promise && w2.ledger.items <= MAX_ITEMS, "a full ledger still has its end");
+}
+
+// grader's r3 survivors (#854 TESTS interim): each pinned against its mutant
+{
+  // W25: no mark passes directly after an escape sequence (no BS before it)
+  const { w, r } = rig();
+  await w.write("a" + M.repeat(8) + "b\x1b[1D" + M.repeat(8), "output");
+  ok((r.text().match(/\u0301/g) || []).length === 8, `W25: marks right after a CSI never reach a cell (${(r.text().match(/\u0301/g) || []).length})`);
+  // W21: 8-bit CSI SGRs count toward S2; 8-bit erases coalesce
+  const { w: w2, r: r2 } = rig({ ...BUDGET, styleRuns: 3 });
+  await w2.write("\x9b31ma\x9b32mb\x9b33mc\x9b34md\x9b35me\x9b36mf", "output");
+  ok(w2.colourCut && (r2.text().match(/\x1b\[3\dm/g) || []).length === 2, `W21: 8-bit SGRs are runs for S2's cap (${JSON.stringify(r2.text())})`);
+  const { w: w3, r: r3 } = rig();
+  await w3.write("\x9b2J\x9b2J\x9b2J", "output");
+  ok((r3.text().match(/\x1b\[2J/g) || []).length === 1 && !r3.text().includes("\x9b"), "W21: 8-bit erases coalesce, written in the 7-bit form");
+  // W12: a sequence open across a new generation: none of it reaches the new screen
+  const { w: w4, r: r4 } = rig({ ...BUDGET, links: 1 });
+  await w4.write("\x1b]8;;https://a/1\x1b\\x\x1b]8;;\x1b\\", "output");
+  await w4.write("\x1b]8;;https://a/2", "output");
+  await w4.write("\x1b\\y\x1b]8;;\x1b\\", "output");
+  ok(r4.gens === 1 && !r4.text(1).includes("a/2") && r4.text(1).includes("y"), `W12: the rest of an OSC open across the change is dropped (${JSON.stringify(r4.text(1))})`);
+  // W33: unkeyed lazy writes past the cap are dropped
+  const { w: w5 } = rig(BUDGET, { auto: false });
+  void w5.write("first", "ui");
+  await turn();
+  for (let i = 0; i < 100; i++) void w5.writeLazy(() => "l" + i);
+  ok(w5.backlog <= MAX_ITEMS && w5.stats.dropped > 0, `W33: 100 unkeyed lazy writes on a blocked sink: at most ${MAX_ITEMS} (${w5.backlog})`);
+  w5.dispose();
+  // W40: the shipped literals
+  ok(MAX_ITEMS === 64 && MAX_QUEUED === 2 << 20 && SLICE === 65536 && PIECE === 8192 && HEADROOM === 8192 && ITEM_MAX === 57344 && END_MAX === 256 && HOLD.osc === 2048 && HOLD.csi === 64 && HOLD.pend === 256,
+    "W40: the shipped bounds: 64 items, 2 MiB, 64 KiB writes in 8 KiB pieces, 8 KiB headroom, 256-byte ends, HOLD 2048/64/256");
+  // W27: the combining budget's exact boundary
+  const { w: w6, r: r6 } = rig({ marksPerBase: 8, combining: 20, links: 10, linkUnits: 1000 });
+  await w6.write("e" + M.repeat(8) + "e" + M.repeat(8) + "e" + M.repeat(4), "output");
+  ok(w6.charges.combining === 20 && r6.gens === 0, `W27: a budget of 20 admits 20 (${w6.charges.combining}, ${r6.gens})`);
+  await w6.write("e" + M, "output");
+  ok(r6.gens === 1, "W27: and the 21st starts a new generation");
+  // W1: only a write's last piece's callback lets the next write start
+  const { w: w7, r: r7 } = rig(BUDGET, { auto: false });
+  void w7.write("p".repeat(PIECE * 3), "ui");
+  void w7.write("q".repeat(ITEM_MAX), "output");
+  await turn();
+  ok(r7.pending.length === 3, "(three pieces handed to xterm)");
+  r7.pending.shift()();
+  r7.pending.shift()();
+  await turn();
+  ok(r7.writes.length === 3, `W1: the earlier pieces' callbacks release nothing (${r7.writes.length} pieces written)`);
+  r7.pending.shift()();
+  await turn();
+  ok(r7.writes.length > 3 && r7.writes[3].data[0] === "q", "W1: the last piece's callback starts the next write");
+  w7.dispose();
+  // W22: 8-bit DCS content is a string, not ground text
+  const { w: w8, r: r8 } = rig();
+  await w8.write("\x90a" + M.repeat(10) + "\x9c", "output");
+  ok(r8.text() === "\x90a" + M.repeat(10) + "\x9c", "W22: an 8-bit DCS passes whole");
 }
 
 console.log(`${checks - fails}/${checks} checks passed`);
