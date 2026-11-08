@@ -6,7 +6,19 @@
 // (an entry ending in "/" is a package: every file under it)
 export const LAZY_LIB = ["pathlib/", "glob.py", "fnmatch.py", "stat.py", "ntpath.py", "genericpath.py", "errno.py", "_os_lazy.py", "difflib.py", "shutil.py"];
 
-/** Is library path `p` (relative to lib/) lazily embedded? */
+/** Is library path `p` (relative to lib/) in pathlib's lazy blob? */
 export function isLazyLib(p) {
   return LAZY_LIB.some((e) => (e.endsWith("/") ? p.startsWith(e) : p === e));
+}
+
+// The keyed family blobs beyond pathlib's (design/rill.md §6.3, daybreak2's ruling for Rill A1.1): each family is a
+// blob of its own, decoded only by the first read of one of its files, so a Python or Sage start decodes none and a
+// Rill start only Rill's. A family is listed here only once it has files (rill-more, rill-ggplot2, rill-dplyr and
+// rill-data join as their first files land); its files are exactly those its entries name.
+export const LAZY_FAMILIES = { rill: ["_rill/"] };
+
+/** The keyed family of library path `p`, or null (pathlib's blob, isLazyLib, is the unkeyed one). */
+export function familyOf(p) {
+  for (const [key, entries] of Object.entries(LAZY_FAMILIES)) if (entries.some((e) => (e.endsWith("/") ? p.startsWith(e) : p === e))) return key;
+  return null;
 }

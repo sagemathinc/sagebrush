@@ -26,6 +26,7 @@ import { runNotebookServer, notebookWorker } from "./notebook";
 import { takeLimitsOption, launcherLimits, startLimits, setSessionLimits, type LimitsText } from "./limits";
 import { selectLimits } from "./limits-file";
 import { setDataRoot } from "./runtime/modules";
+import { rillRefusal, rillSource } from "./rill";
 import type { ReplMode, TranslatedMode } from "./modes";
 
 const VERSION = `sagebrush ${(globalThis as any).__SAGEBRUSH_VERSION__ ?? "dev"} (Python 3.14 language on a JavaScript runtime)`;
@@ -322,6 +323,8 @@ R.host = {
 let sage = false;
 let magma = false;
 let matlab = false;
+// --rill: R (src/rill.ts), hidden until design/rill.md's A1.7
+let rill = false;
 // .m is both Magma's and MATLAB's: looksLikeMagma decides (src/matlab.ts)
 const mFileIsMagma = (f: string) => {
   try {
@@ -620,6 +623,7 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
     else if (a === "--sage") sage = true;
     else if (a === "--magma") magma = true;
     else if (a === "--matlab") matlab = true;
+    else if (a === "--rill") rill = true;
     else if (a === "--pkgset") {
       // (an optional package set for this run: src/pkgcache.ts)
       argv.shift();
@@ -686,6 +690,15 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
     }
     argv.shift();
   }
+  // (--rill runs only -c until design/rill.md's A1.7: refused before any file is opened)
+  if (rill) {
+    const why = rillRefusal({ cmd, file, mod, inspect, emit });
+    if (why !== null) {
+      process.stderr.write(`sagebrush: ${why}\n`);
+      process.exitCode = 2;
+      return;
+    }
+  }
   // (fixed before any Python runs: a program can't move it, replay-layer r2 §2.2)
   setDataRoot(dataRootArg ?? process.cwd());
   // (a file that can't be read: CPython's message and exit status, not a stack trace)
@@ -741,7 +754,10 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
   let code: number | null = null;
   let main: any = null;
   const interactive = (file === null && cmd === null && mod === null && process.stdin.isTTY) || inspect;
-  if (cmd !== null && isMatlab(null)) {
+  if (cmd !== null && rill) {
+    main = mainModule("<string>");
+    code = guarded(() => R.loader.exec(rillSource(cmd!), main, "exec", "<string>", opts()));
+  } else if (cmd !== null && isMatlab(null)) {
     main = mainModule("<string>");
     const py = matlabSource(cmd, "<string>");
     // (a syntax error, reported: exit status 1)

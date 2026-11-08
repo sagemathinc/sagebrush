@@ -1,0 +1,529 @@
+{
+ "cases": [
+  {
+   "id": "pow-star",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 8\n"
+  },
+  {
+   "id": "pow-star-chain",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 512\n"
+  },
+  {
+   "id": "octal-1",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"0\"\n"
+  },
+  {
+   "id": "octal-3",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"A\"\n"
+  },
+  {
+   "id": "octal-4",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"A2\"\n"
+  },
+  {
+   "id": "hex-1",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"\\004\"\n"
+  },
+  {
+   "id": "hex-2",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"A\"\n"
+  },
+  {
+   "id": "hex-3",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"A4\"\n"
+  },
+  {
+   "id": "surrogate-u",
+   "status": 0,
+   "stderr": "Warning messages:\n1: unpaired surrogate Unicode point d800 \n2: unpaired surrogate Unicode point d800 \n",
+   "stdout": "[1] \"\\xed\\xa0\\x80\"\n"
+  },
+  {
+   "id": "surrogate-u-low",
+   "status": 0,
+   "stderr": "Warning messages:\n1: unpaired surrogate Unicode point dfff \n2: unpaired surrogate Unicode point dfff \n",
+   "stdout": "[1] \"\\xed\\xbf\\xbf\"\n"
+  },
+  {
+   "id": "surrogate-U",
+   "status": 0,
+   "stderr": "Warning messages:\n1: unpaired surrogate Unicode point d800 \n2: unpaired surrogate Unicode point d800 \n",
+   "stdout": "[1] \"\\xed\\xa0\\x80\"\n"
+  },
+  {
+   "id": "surrogate-u-brace",
+   "status": 0,
+   "stderr": "Warning messages:\n1: unpaired surrogate Unicode point d800 \n2: unpaired surrogate Unicode point d800 \n",
+   "stdout": "[1] \"\\xed\\xa0\\x80\"\n"
+  },
+  {
+   "id": "rassign-chain",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1\n[1] 1\n"
+  },
+  {
+   "id": "rassign-chain-values",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 2 2\n"
+  },
+  {
+   "id": "else-newline",
+   "status": 1,
+   "stderr": "Error: unexpected 'else' in \"else\"\nExecution halted\n",
+   "stdout": "[1] 1\n"
+  },
+  {
+   "id": "else-newline-brace",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1\n"
+  },
+  {
+   "id": "c-trailing-empty",
+   "status": 1,
+   "stderr": "Error in c(1, ) : argument 2 is empty\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "c-leading-empty",
+   "status": 1,
+   "stderr": "Error in c(, 1) : argument 1 is empty\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "capacity-unary-close-9997",
+   "status": 1,
+   "stderr": "Error: unexpected ')' in \" - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "capacity-unary-close-9998",
+   "status": 1,
+   "stderr": "Error: unexpected ')' in \" - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "capacity-unary-close-9999",
+   "status": 1,
+   "stderr": "Error: out of memory while parsing\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "capacity-pow-close-4998",
+   "status": 1,
+   "stderr": "Error: unexpected ')' in \"^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "capacity-pow-close-4999",
+   "status": 1,
+   "stderr": "Error: unexpected ')' in \"^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1^1\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "capacity-pow-close-5000",
+   "status": 1,
+   "stderr": "Error: out of memory while parsing\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "capacity-unary-else-9998",
+   "status": 1,
+   "stderr": "Error: unexpected 'else' in \" - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-name-188",
+   "status": 1,
+   "stderr": "Error: unexpected ')' in \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx + )\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-name-190",
+   "status": 1,
+   "stderr": "Error: unexpected ')' in \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx +\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-chain-40",
+   "status": 1,
+   "stderr": "Error: unexpected ')' in \"v0 + v1 + v2 + v3 + v4 + v5 + v6 + v7 + v8 + v9 + v10 + v11 + v12 + v13 + v14 + v15 + v16 + v17 + v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 \"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-chain-45",
+   "status": 1,
+   "stderr": "Error: unexpected ')' in \"v1 + v2 + v3 + v4 + v5 + v6 + v7 + v8 + v9 + v10 + v11 + v12 + v13 + v14 + v15 + v16 + v17 + v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-chain-50",
+   "status": 1,
+   "stderr": "Error: unexpected ')' in \"v7 + v8 + v9 + v10 + v11 + v12 + v13 + v14 + v15 + v16 + v17 + v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-second-statement",
+   "status": 1,
+   "stderr": "Error: unexpected ')' in \" + v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-short-statement-first",
+   "status": 1,
+   "stderr": "Error: unexpected ')' in \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-in-brace",
+   "status": 1,
+   "stderr": "Error: unexpected ')' in \" + v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-split",
+   "status": 1,
+   "stderr": "Error: unexpected ')' in:\n\" v16 + v17 + v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 +\nv0 + v1 + v2 + v3 + v4 + v5 + v6 + v7 + v8 + v9 + v10 + v11 + v12 + v13 + v14 + v15 + v16 + v17 + v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + )\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-two-lines-long-second",
+   "status": 1,
+   "stderr": "Error: unexpected ')' in:\n\"x <- 1 +\nv0 + v1 + v2 + v3 + v4 + v5 + v6 + v7 + v8 + v9 + v10 + v11 + v12 + v13 + v14 + v15 + v16 + v17 + v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 \"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-two-lines-window-one",
+   "status": 1,
+   "stderr": "Error: unexpected ')' in \"v1 + v2 + v3 + v4 + v5 + v6 + v7 + v8 + v9 + v10 + v11 + v12 + v13 + v14 + v15 + v16 + v17 + v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-two-lines-long-first",
+   "status": 1,
+   "stderr": "Error: unexpected ')' in:\n\"+ v111 + v112 + v113 + v114 + v115 + v116 + v117 + v118 + v119 + v120 + v121 + v122 + v123 + v124 + v125 + v126 + v127 + v128 + v129 + v130 + v131 + v132 + v133 + v134 + v135 + v136 + v137 + v\nv0 + v1 + v2 + v3 + v4 + v5 + v6 + v7 + v8 + v9 + )\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-three-lines",
+   "status": 1,
+   "stderr": "Error: unexpected ')' in \"v1 + v2 + v3 + v4 + v5 + v6 + v7 + v8 + v9 + v10 + v11 + v12 + v13 + v14 + v15 + v16 + v17 + v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-sym",
+   "status": 1,
+   "stderr": "Error: unexpected symbol in \"7 + v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v4\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-num",
+   "status": 1,
+   "stderr": "Error: unexpected numeric constant in \"7 + v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v4\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-int",
+   "status": 1,
+   "stderr": "Error: unexpected numeric constant in \"7 + v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v4\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-cplx",
+   "status": 1,
+   "stderr": "Error: unexpected numeric constant in \"7 + v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v4\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-str",
+   "status": 1,
+   "stderr": "Error: unexpected string constant in \" + v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-sstr",
+   "status": 1,
+   "stderr": "Error: unexpected string constant in \" + v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-in",
+   "status": 1,
+   "stderr": "Error: unexpected 'in' in \" + v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-else",
+   "status": 1,
+   "stderr": "Error: unexpected 'else' in \" v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49 +\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-function",
+   "status": 1,
+   "stderr": "Error: unexpected 'function' in \" + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49 + v50\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-if",
+   "status": 1,
+   "stderr": "Error: unexpected 'if' in \" + v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-true",
+   "status": 1,
+   "stderr": "Error: unexpected numeric constant in \" v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49 +\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-null",
+   "status": 1,
+   "stderr": "Error: unexpected 'NULL' in \" v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49 +\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-bq",
+   "status": 1,
+   "stderr": "Error: unexpected symbol in \" + v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-hex",
+   "status": 1,
+   "stderr": "Error: unexpected numeric constant in \" v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49 +\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-dbl",
+   "status": 1,
+   "stderr": "Error: unexpected numeric constant in \"v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49 + \"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-rparen",
+   "status": 1,
+   "stderr": "Error: unexpected ')' in \" + v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-rbrack",
+   "status": 1,
+   "stderr": "Error: unexpected ']' in \" + v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-rbrace",
+   "status": 1,
+   "stderr": "Error: unexpected '}' in \" + v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-comma",
+   "status": 1,
+   "stderr": "Error: unexpected ',' in \" + v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-star",
+   "status": 1,
+   "stderr": "Error: unexpected '*' in \"+ v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49 \"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-starstar",
+   "status": 1,
+   "stderr": "Error: unexpected '^' in \"+ v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49 \"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-slash",
+   "status": 1,
+   "stderr": "Error: unexpected '/' in \" + v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-caret",
+   "status": 1,
+   "stderr": "Error: unexpected '^' in \" + v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-lt",
+   "status": 1,
+   "stderr": "Error: unexpected '<' in \"+ v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49 \"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-le",
+   "status": 1,
+   "stderr": "Error: unexpected '<=' in \"+ v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49 \"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-larrow",
+   "status": 1,
+   "stderr": "Error: unexpected assignment in \"+ v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49 \"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-llarrow",
+   "status": 1,
+   "stderr": "Error: unexpected assignment in \" v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49 +\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-eqeq",
+   "status": 1,
+   "stderr": "Error: unexpected '==' in \"+ v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49 \"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-eq",
+   "status": 1,
+   "stderr": "Error: unexpected '=' in \"+ v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49 \"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-andand",
+   "status": 1,
+   "stderr": "Error: unexpected '&&' in \"+ v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49 \"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-and",
+   "status": 1,
+   "stderr": "Error: unexpected '&' in \"+ v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49 \"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-oror",
+   "status": 1,
+   "stderr": "Error: unexpected '||' in \"+ v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49 \"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-or",
+   "status": 1,
+   "stderr": "Error: unexpected '|' in \"+ v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49 \"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-pipe",
+   "status": 1,
+   "stderr": "Error: unexpected '|>' in \"+ v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49 \"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-pct",
+   "status": 1,
+   "stderr": "Error: unexpected SPECIAL in \"v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49 + \"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-colon",
+   "status": 1,
+   "stderr": "Error: unexpected ':' in \"+ v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49 \"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-dcolon",
+   "status": 1,
+   "stderr": "Error: unexpected '::' in \" v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49 +\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-gt",
+   "status": 1,
+   "stderr": "Error: unexpected '>' in \"+ v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49 \"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-ge",
+   "status": 1,
+   "stderr": "Error: unexpected '>=' in \"+ v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49 \"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-rarrow",
+   "status": 1,
+   "stderr": "Error: unexpected '->' in \" v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49 +\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-neq",
+   "status": 1,
+   "stderr": "Error: unexpected '!=' in \"+ v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49 \"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-lbrack",
+   "status": 1,
+   "stderr": "Error: unexpected '[' in \"+ v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49 \"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-dbrack",
+   "status": 1,
+   "stderr": "Error: unexpected '[[' in \"+ v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49 \"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-dollar",
+   "status": 1,
+   "stderr": "Error: unexpected '$' in \" + v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-at",
+   "status": 1,
+   "stderr": "Error: unexpected '@' in \" + v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-semi",
+   "status": 1,
+   "stderr": "Error: unexpected ';' in \" + v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-tilde-ok",
+   "status": 1,
+   "stderr": "Error: unexpected end of input\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-sym-tight",
+   "status": 1,
+   "stderr": "Error: unexpected symbol in \"7 + v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v4\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "context-token-lt-tight",
+   "status": 1,
+   "stderr": "Error: unexpected '<' in \"+ v18 + v19 + v20 + v21 + v22 + v23 + v24 + v25 + v26 + v27 + v28 + v29 + v30 + v31 + v32 + v33 + v34 + v35 + v36 + v37 + v38 + v39 + v40 + v41 + v42 + v43 + v44 + v45 + v46 + v47 + v48 + v49 \"\nExecution halted\n",
+   "stdout": ""
+  }
+ ],
+ "file": "rill-tests/parse/test_6.R",
+ "format": "rill-out",
+ "v": 1
+}
