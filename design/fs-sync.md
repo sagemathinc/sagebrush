@@ -96,15 +96,23 @@ Delete on this computer, to the holding folder (1 file; restore with fs-sync --r
   - figures/old.png                    210 KB   deleted in the workspace since the last sync
 Conflicts, both kept (1 file)
   ! main.tex    changed on both sides: this computer's copy becomes "main (conflict, laptop).tex", on both sides
-Skipped (3)
+Download only: notebooks, boards and chats as files (2 files, 64 KB)
+  ↓ Notes.ipynb                        58 KB   the notebook as it is now in the workspace
+  ↓ plan.board.json                     6 KB   the board as it is now
+Not uploaded: edited here (1 file)
+  · Seminar.ipynb       changed here since fs-sync wrote it; left as it is, not uploaded and not replaced
+Skipped (2)
   · build/                ignored (.sagebrushignore)
-  · lecture.mp4           624 MiB, over the 95 MiB limit for one file
-  · Notes.ipynb           a notebook (fs-sync doesn't sync notebooks yet)
+  · lecture.mp4           624 MiB, over the 95 MiB limit for one file (until large uploads are available)
 
-Cost: 7 requests, 1.2 MB up, 8.0 KB down (left today: 98.8 MB up, 192 MB down)
+Cost: 9 requests, 1.2 MB up, 72 KB down (left today: 98.8 MB up, 192 MB down)
 Apply? [y/N]
 ```
 
+- **Notebooks, boards and chats** (§3.2) are written here as files, the way the workspace saves them when downloaded: `.ipynb`, `.board.json`, and the chat's file. They go only one way, from the workspace to this computer (William, Nov 8: "download only; a local edit to one is reported, not uploaded").
+  - Each run writes a snapshot again when the document changed in the workspace.
+  - If the person edited that file here since fs-sync wrote it, fs-sync leaves it as it is: it doesn't replace it, delete it or upload it. It lists it under "Not uploaded: edited here", every run, until the person deletes or renames their edited copy. Then the next run writes a fresh snapshot.
+  - A listed edited snapshot alone doesn't make the run exit 1. Snapshots are download-only by design, so "in sync" (exit 0) means every file other than these matches.
 - **A first run** (no base) has no delete section, and says why: "First sync of this pair: nothing will be deleted."
 - **The answer must be `y` or `yes`.** Anything else, including Enter, end of input or Ctrl+C, applies nothing (exit 1).
 - **No terminal:** if standard input isn't a terminal and `--yes` isn't given, fs-sync prints the plan and exits 1 without applying, rather than wait for an answer that can't come.
@@ -128,7 +136,7 @@ Apply? [y/N]
 
 | Code | Meaning |
 |---|---|
-| 0 | in sync: the whole plan was applied, or there was nothing to do (with `--dry-run`: the plan is empty) |
+| 0 | in sync: the whole plan was applied, or there was nothing to do (with `--dry-run`: the plan is empty). Edited snapshots of notebooks, boards and chats, which are never uploaded, don't count |
 | 1 | not all applied: declined, no terminal, a refused many-deletions plan, `--dry-run` with a non-empty plan, actions skipped, actions or conflicts pending in a `--up`/`--down` run, or stopped by the daily budget or a 429. The output says which; running it again continues |
 | 2 | usage: an unknown argument, `LOCAL_DIR` missing or overlapping fs-sync's own folders, `--dry-run` with `--yes`, or native Windows |
 | 3 | not signed in and can't pair (no terminal), or the grant was refused |
