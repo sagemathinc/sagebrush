@@ -129,9 +129,9 @@ So a script can run `fs-sync --dry-run` to ask "is anything out of sync?" (0 or 
 
 - **Files:** only under `LOCAL_DIR`. It follows no symlink (§4.4).
 - **Network:** HTTPS to the site's origin, and the signed download URLs it hands out.
-- **Its own state:** under `$XDG_STATE_HOME/sagebrush/fs-sync/` (default `~/.local/state/sagebrush/fs-sync/`), mode 0700. That holds the bases, one file per folder pair (§2.5), the lock files, the run journals and the holding folder for local deletions (§2.4). Deleting a pair's base makes its next run a first run, with no deletions.
+- **Its own state:** under `$XDG_STATE_HOME/sagebrush/fs-sync/` (default `~/.local/state/sagebrush/fs-sync/`), mode 0700. That holds one SQLite database per folder pair (the base, §2.5), the lock files, the run journals and the holding folder (§2.4, at most 20 GiB). Deleting a pair's database makes its next run a first run, with no deletions.
 - **The token:** in the config folder (§1.1).
-- **Downloads:** written to a temporary file in the target's folder, then renamed into place (§4.1), so no file is left half written.
+- **Downloads:** written to a temporary file in the target's folder, then renamed into place without replacing anything (§4.1), so no file is left half written. A file a download replaces is first moved to the holding folder, restorable with `--restore` for 30 days.
 
 ## 2. The plan: a three-way comparison (sync-client)
 
