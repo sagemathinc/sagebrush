@@ -208,7 +208,13 @@ const workflowOrBuild = matches(workflowOrBuildPaths);
 const runtime = matches(runtimePaths);
 const webChange = matches(webPaths);
 const modeChange = matches(modePaths);
-const engineChange = matches(enginePaths);
+// (the CPython package's own Python, its sources under engine/py/python/ and its tests engine/py/test_*.py, is
+// built and run by engine-cpython alone (cpythonPaths): a change to only those compiles nothing the engine's Rust,
+// wasm, NEON or interrupt jobs build or run, so it doesn't select them.  The files stay known paths (enginePaths),
+// never the fallback; anything else under engine/ (Rust, manifests, build.rs, the pyo3 crate's engine/py/src)
+// still selects them.  #862 changed only those and ran engine-rust for 624 s.)
+const enginePythonOnlyPaths = [/^engine\/py\/python\//, /^engine\/py\/test_[^/]*\.py$/];
+const engineChange = files.some((file) => enginePaths.some((p) => p.test(file)) && !enginePythonOnlyPaths.some((p) => p.test(file)));
 const appOnly = !full && every(appPaths);
 const optionalOnly = !full && every(optionalPaths);
 

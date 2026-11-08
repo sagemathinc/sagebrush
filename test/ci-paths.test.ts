@@ -92,6 +92,26 @@ test("the growth gate's own inputs are never docs-only (plan-growth-budget-r5 §
   assert.equal(classify([".github/workflows/optional.yml"]).node, "false");
 });
 
+test("the CPython package's own Python selects engine-cpython, not the engine's Rust jobs (#862's 624 s engine-rust)", () => {
+  const o = (files: string[]) => { const r = classify(files); return { engine_smoke: r.engine_smoke, engine_cpython: r.engine_cpython, node: r.node }; };
+  // (its sources and its tests: engine-cpython only, and no fallback)
+  for (const f of ["engine/py/python/sagebrush/cli.py", "engine/py/python/sagebrush/remote/pair.py", "engine/py/test_remote_pair.py"])
+    assert.deepEqual(o([f]), { engine_smoke: "false", engine_cpython: "true", node: "false" }, f);
+  // (#862 exactly: those, and web notebook files)
+  const pr862 = ["engine/py/python/sagebrush/remote/enroll.py", "engine/py/python/sagebrush/remote/pair.py", "engine/py/test_remote_pair.py",
+    "web/notebook/remote-terminal-view.ts", "web/notebook/test-remote-terminal.mjs", "web/test-remote-terminal-page.mjs"];
+  assert.equal(classify(pr862).engine_smoke, "false");
+  assert.equal(classify(pr862).engine_cpython, "true");
+  // (anything the engine compiles still selects them, alone or beside the package's Python)
+  for (const f of ["engine/py/src/lib.rs", "engine/py/Cargo.toml", "engine/hmf/src/definite.rs", "engine/hmf/build.rs", "Cargo.lock", "Cargo.toml"])
+    assert.equal(classify([f]).engine_smoke, "true", f);
+  assert.equal(classify(["engine/py/python/sagebrush/cli.py", "engine/py/src/lib.rs"]).engine_smoke, "true");
+  // (a Python file elsewhere under engine/ is not the package's: still the engine's)
+  assert.equal(classify(["engine/modsym/examples/gen.py"]).engine_smoke, "true");
+  // (and the full tier still runs everything)
+  assert.equal(classify(["engine/py/python/sagebrush/cli.py"], "full-ci").engine_smoke, "true");
+});
+
 test("engine-cpython runs on pull requests that touch the CPython package's inputs (#113 -> #132)", () => {
   const cp = (files: string[]) => classify(files).engine_cpython;
   for (const f of ["lib/_sage_nf.py", "engine/py/test_audit.py", "engine/classgroup/src/proof.rs", "engine/py/python/sagebrush/nf.py", "sage-tests/test_numberfield.sage", "test/limit-sites.json", "scripts/sync-python-package.sh", "engine/Cargo.lock", ".github/workflows/ci.yml", "somewhere/new.txt"])
