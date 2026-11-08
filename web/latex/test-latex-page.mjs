@@ -3024,6 +3024,21 @@ $P = \sage{g[0]}$
       await pkey("Escape", "Escape", 27);
       await until(`!${P}`, 5000);
       check(p1 && p2 && p3, "Run, beamer: Present shows the title page's result, the plot and the point", { p1, p2, p3 });
+      // ---- printed as beamer makes its PDF (plan PR 2, gap G5): a page for each frame, the class's paper (128 x 96 mm for
+      // 4:3), no slide split, each frame's title on it (the site's print rule hides every <header>; the slide's isn't)
+      await ev(`(window.sagebrush.latex.printMode(true), 1)`);
+      await send("Emulation.setEmulatedMedia", { media: "print" });
+      const paper = await ev(`document.getElementById("sb-tex-slide-page")?.textContent ?? ""`);
+      const titles = await ev(`[...document.querySelectorAll(".tex-preview .ch:not([hidden]) section.slide header.slide-title")].map((h) => getComputedStyle(h).display !== "none" && h.getBoundingClientRect().height > 0 ? h.textContent : null)`);
+      const pdfB = await send("Page.printToPDF", { printBackground: true, preferCSSPageSize: true });
+      await send("Emulation.setEmulatedMedia", { media: "" });
+      await ev(`(window.sagebrush.latex.printMode(false), 1)`);
+      const pb = Buffer.from(pdfB?.data ?? "", "base64").toString("latin1");
+      const boxes = [...pb.matchAll(/\/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)\s*\]/g)].map((m) => [+m[1], +m[2]]);
+      const mm = (pt) => (pt * 25.4) / 72;
+      const gone = await ev(`!document.getElementById("sb-tex-slide-page")`);
+      check(pb.startsWith("%PDF-") && boxes.length === 3 && boxes.every(([w, h]) => Math.abs(mm(w) - 128) < 0.5 && Math.abs(mm(h) - 96) < 0.5) && paper === "@page { size: 128mm 96mm; margin: 0; }" && JSON.stringify(titles) === JSON.stringify(["Computed", "Curve"]) && gone,
+        "Print, beamer: one 128 x 96 mm page for each of the 3 frames, the frames' titles shown; the page size gone after", { boxes: boxes.map(([w, h]) => [mm(w).toFixed(1), mm(h).toFixed(1)]), paper, titles, gone });
     }
     // (Codex friction P5, the editor's half: a helper .py beside the .tex, imported by the document's code as by real
     //  SageTeX run in the document's folder. The .tex's folder is given to Sage, read-only, at each Run, as it is then:
