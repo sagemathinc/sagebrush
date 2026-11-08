@@ -1135,6 +1135,18 @@ def test_help():
     assert r.returncode == 2 and "unknown argument --bogus" in r.stderr, (r.returncode, r.stderr)
 
 
+def test_version_flag():
+    # (`sagebrush --version` and `-V`: the runner's own first line, on stdout, exit 0; it used to print the help)
+    import subprocess
+    want = "sagebrush %s (Python %s at %s)\n" % (P.VERSION, sys.version.split()[0], sys.executable)
+    for flag in ("--version", "-V"):
+        r = subprocess.run([sys.executable, "-m", "sagebrush.cli", flag], capture_output=True, text=True, timeout=60)
+        assert r.returncode == 0 and r.stdout == want and not r.stderr, (flag, r.returncode, r.stdout[:200], r.stderr[:200])
+    # (and the help still lists it, and a bare unknown argument still gets the help and exit 2)
+    r = subprocess.run([sys.executable, "-m", "sagebrush.cli", "--bogus"], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 2 and "sagebrush --version" in r.stdout, (r.returncode, r.stdout[:300])
+
+
 def test_install_script():
     """scripts/install.sh (the future https://sagebrush.space/install.sh), offline with stubs: with uvx it runs the
     latest sagebrush's runner, passing its arguments; with only uv, `uv tool run`; with neither, it installs uv with
