@@ -356,17 +356,23 @@ Tests (astra's TF1): correct chunks in the wrong order; a wrong whole-file hash;
 
 **Repairing a corrupt file** (@sagebrush, item 6), instead of leaving it broken until the file changes. This is the least complex form (@sagebrush, astra): a repair never patches stored pieces in place. A device with good bytes uploads the whole file again as a **fresh replacement**, through the normal upload path. The server verifies it and then swaps it in, in one transaction. Entries, versions and pins keep pointing at the same `sha256` throughout; only the stored bytes behind it change.
 
-1. **The report:** `POST /api/sync/v1/repair/<sha256>` from the device that saw the mismatch. A duplicate report (a check already running or done for that hash), or one over the rate (§6), uses up only its request and starts nothing.
-2. **The check:** the account object re-reads what stores that hash (a blob, a packed member, or a `files` row's chunks) and checks the whole hash. It uses the verify step's streaming and metering, with its own random, never-reused check id `cid`, and checkpoints by compare-and-swap on `cid`. It never retires a row or releases a reference.
+1. **The report:** `POST /api/sync/v1/repair/<sha256>` from the device that saw the mismatch. The `repairs` row for the hash records the **representation** it is about, `rep`: the blob holding's key, the `packed` row's place, or the `files` row's `reg`, as they are now.
+   - **A duplicate:** a report about the same `rep` while a check of it is running, or within an hour of that `rep` checking out healthy.
+   - **Over the rate** (§6).
+
+   Either uses up only its request and starts nothing. Any other report starts a new check, so a healthy result never hides a later real corruption: after an hour, or once `rep` has changed, a report checks again.
+2. **The check:** the account object re-reads that representation and checks the whole hash. It uses the verify step's streaming and metering, with its own random, never-reused check id `cid`, and checkpoints by compare-and-swap on `cid` and `rep` together. A check held across a replacement finds `rep` changed and does nothing: it never marks, clears or bumps anything for a representation it didn't read. It never retires a row or releases a reference.
    - **The bytes check out:** the fault was on the reporting device's side. The hash's `repair_gen` goes up, and that device fetches once more. If that fails too, it stays `fetchFailed: corrupt` and logs both.
-   - **They don't:** the representation is marked **damaged**, durably, on the record that stores it: the blob's holding, the member's `packed` row, or the `files` row. The mark is by `sha256`, so it covers every entry, version and pin with that hash, current or not. The account's log gets a `damage {sha256}` op, so every device learns of it in order through its confirmed cursor (C3); the log is never truncated, so no notice is dropped.
-3. **The replacement, from any device whose local bytes have that `sha256`** (its fileBytes, a version or a pin). It uploads the file as a new copy, cut by its own `cdc` (any version will do, since only the whole hash counts):
-   - **8 MiB or less:** a `PUT /blob/<sha256>`. For a damaged hash the finalize is the swap below. A packed member's replacement becomes a blob holding; its `packed` row goes, carrying its references over.
-   - **chunked:** the chunks, then `POST /manifest` with `repair: true`. This registers the manifest under a **separate staging identity**, a `repair_files` row keyed by its own random `reg`, not in `files`, so the one-manifest-per-hash rule and its `conflict` stay as they are. It is verified exactly as §4.1, step 5 (a failure retires only this staging row).
-4. **The swap, in one transaction,** only after that verification (or the blob's R2-checked PUT):
-   - compare-and-swap on what was captured when the damage was marked: the damaged holding's key, the `packed` row's place, or the `files` row's `reg`, and that it is still marked damaged;
-   - the record takes the new bytes: a new key, or the new manifest, keys and `reg`, with references added to the new chunks;
-   - it keeps its own `refs` and every owner of them;
+   - **They don't:** the representation is marked **damaged**, with a new repair incarnation `rid`, durably, on the record that stores it: the blob's holding, the member's `packed` row, or the `files` row. The mark is by `sha256`, so it covers every entry, version and pin with that hash, current or not. The account's log gets a `damage {sha256}` op, so every device learns of it in order through its confirmed cursor (C3); the log is never truncated, so no notice is dropped.
+3. **The replacement, from any device whose local bytes have that `sha256`** (its fileBytes, a version or a pin). It uploads the whole file again, cut by its own `cdc` (any version will do, since only the whole hash counts), into **fresh staging keys that dedup against nothing** (astra's A). A repair never uses `blobs/check` or an existing holding, so it can't reuse the bad bytes it is replacing, even with the same `cdc`.
+   - **Staging:** `POST /api/sync/v1/repair/<sha256>/stage {rid, manifest?}` makes a `repair_files` row with its own random `reg`, the `rid` it repairs, and `hold_until` a day away. It is a separate staging identity, not in `files`, so the one-manifest-per-hash rule and its `conflict` stay as they are.
+   - **Uploading:** each piece goes with `PUT /api/sync/v1/repair/<reg>/piece/<i>`: the whole file if it is 8 MiB or less, else each chunk in the manifest's order. Each piece gets a new random key and its own reservation, as any PUT, and R2 checks its hash. The key belongs to the staging row only; no holding is made or touched.
+   - **Verifying:** a chunked replacement is verified exactly as §4.1, step 5, over the staging row's own keys. A single piece is checked by R2 at its PUT.
+   - **Cleanup:** a staging row that fails, is superseded (its `rid` no longer current) or passes `hold_until` is deleted, its keys go to the outbox and its reservations are released, all in one transaction. Doing that twice is harmless.
+4. **The swap, in one transaction,** only after that verification:
+   - compare-and-swap on the `repairs` row's `rid` and `rep`, and that the representation is still marked damaged;
+   - **adoption of the staged keys:** for each distinct piece hash, if a holding for it exists, its key becomes the staged key and the old key goes to the outbox with the 10-minute `not_before` (§4.2), with its `refs` and their owners unchanged; if none exists, a holding is made with the staged key. A packed member's replacement becomes a blob holding, its `packed` row going and its references moving over. Staged keys left over (a hash listed twice) go to the outbox. Existing outbox rows aren't touched;
+   - a `files` row takes the new manifest and a new `reg`, adds references to the new chunk set, and keeps its own `refs` and every owner of them;
    - only then, in the same transaction, are the old pieces' references released (to the outbox as usual, §5.1), the mark cleared, a `repaired {sha256}` op logged, and `repair_gen` bumped.
 
    A stale or second replacement finds the capture changed and is discarded like any unused upload.
@@ -389,7 +395,10 @@ Tests:
 - every chunk intact but the whole hash wrong;
 - no device holding the bytes (no loop);
 - a report when the server's bytes are fine (one more fetch);
-- duplicate and over-rate reports (no check started).
+- duplicate and over-rate reports (no check started);
+- (astra) a same-`cdc` repair while the bad chunk is still held (the staged fresh key is adopted; the bad key goes to the outbox);
+- a healthy report, then real storage corruption and a new report an hour later (checked again, and marked);
+- a report's check held across a successful replacement (it finds `rep` changed and does nothing).
 
 **Assembly memory, honestly:** fileBytes stores a file as one value, so a 200 MiB file is assembled whole in memory under its reservation (`size × COPIES`, L2), as a 200 MiB download would be today. Storing files by chunk on the device (so a phone never holds 200 MiB at once, and local versions share chunks) is a later change, outside this note.
 
@@ -455,8 +464,8 @@ packed(sha256 PRIMARY KEY, pack, offset, length, refs, created)   a member: wher
 compactions(id PRIMARY KEY, pack, key, members, new_key, reservation)   at most one per account (§4.2)
 compact(pack PRIMARY KEY, queued)                  packs under 50% live
 outbox(key PRIMARY KEY, created, not_before)       gains not_before (§4.2, step 4)
-repairs(sha256 PRIMARY KEY, cid, state, captured, repair_gen)   a repair check, the damage mark and what it captured (§4.1)
-repair_files(reg PRIMARY KEY, sha256, manifest, keys, state, position, sha_state, hold_until)   a replacement's staging row (§4.1)
+repairs(sha256 PRIMARY KEY, rep, cid, rid, state, checked_at, repair_gen)   the representation, its check, its damage mark (§4.1)
+repair_files(reg PRIMARY KEY, sha256, rid, manifest, keys, reservations, state, position, sha_state, hold_until)   a replacement's staging row (§4.1)
 ```
 Chunks and packs are ordinary `holdings` rows: one per R2 object, with `refs`.
 
@@ -497,6 +506,7 @@ Chunks and packs are ordinary `holdings` rows: one per R2 object, with `refs`.
 - **After every await,** the transaction that acts checks again that the account is the same generation and `active` (a verification step, a pack's finalize), or, for a compaction's swap, the same generation and not `deleting`, since compaction only gives space back and runs on a `readonly` account too. A generation retired during a stream finalizes nothing.
 - **Rates:** the per-account limits of sync-server §8 apply: a pack `PUT` counts as one blob upload (4 at once), a manifest registration and a verify call each count as a request, and each signed URL counts against 600 a minute.
 - **Who may write:** in step 3, manifests and packs come from a person's device session only. An agent's grant writes data files as today (design/agent-endpoint.md), as single blobs.
+- **Repairs** (`POST /repair/<sha256>`, `POST /repair/<sha256>/stage`, `PUT /repair/<reg>/piece/<i>`) are writes under every rule above: a person's device session only, never a grant; `Origin`; the account and generation headers; refused on a `readonly` or `deleting` account; the generation and `active` checked again in each transaction after an await (the check's checkpoints, the staging row's verification, the swap).
 - **Who may read, as a device:** a person's session may read any manifest and any member of its own account, as it may read any of its blobs today.
 - **Who may read, as an agent:** a grant never names a hash. It asks for a file by path. The account object checks the path against the grant's scope, with read access, in the index as it is now, and only then looks up that entry's `sha256` and its manifest. Each chunk URL is asked for by the path and the chunk's index in that manifest, so a grant can't reach a chunk or member outside a file it may read. The URLs are the grant's as today: single use, with a nonce redeemed by the files Worker, the same response headers, and each debiting the grant's daily budget by its bytes (sync-server §5.4).
 
@@ -560,7 +570,7 @@ Tests: the account or generation switched during an upload, a verification and a
 | Pack size, target / max | client builds, server checks | 8 / 16 MiB, prefix and index included; at most 4,096 members | 16 MiB | `limit`, before anything is reserved | no |
 | Pack index encoded size | server | 512 KiB | 512 KiB | `limit`, from the prefix, before the index is read | no |
 | Manifest verification | server | one call at a time per account; at most 8 chunks (64 MiB) a call; `sync.verify_bytes_per_day` 16 GiB per account, debited before each call's stream (§4.1) | CoCalc's; 16 GiB if CoCalc sends none | `rate`, with `retry_after` | yes (CoCalc) |
-| Repair reports | server | 60 an hour per account, at most one per hash per device a day; a duplicate or over-rate report uses only its request and starts no check; one check per hash at a time, sharing the one-verification-at-a-time slot; checks metered by `sync.verify_bytes_per_day` | 60 an hour | 429, with `retry_after` | no |
+| Repair reports | server | 60 an hour per account, at most one per hash per device a day; a duplicate or over-rate report uses only its request and starts no check; one check per hash at a time, sharing the one-verification-at-a-time slot; checks metered by `sync.verify_bytes_per_day`; a healthy result suppresses reports about the same representation for 1 hour; a repair's staging row is held at most 1 day, its pieces reserved like any upload | 60 an hour | 429, with `retry_after` | no |
 | Unused manifest hold | server | `hold_until` a day after registration or its renewal | renewable 1-day TTL; — | retired (§4.3) | no |
 | Compaction reservation | server | one per account, at most 16 MiB, allowed above the storage cap; not usable by uploads | 16 MiB | waits its turn | no |
 | Pack compaction | server | under 50% live; one at a time; at most one every 30 minutes (48 a day: 48 reads ≤ 768 MiB, 48 writes ≤ 408 MiB, 48 deletes) | 16 MiB extra at once, a failed compaction's object included | waits its turn | no |
