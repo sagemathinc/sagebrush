@@ -223,8 +223,10 @@ def test_one_handle_per_level():
         tree(root, {"wide/d%03d/f.txt" % i: b"%d" % i for i in range(120)})
         tree(root, {"deep/" + "/".join("l%d" % i for i in range(30)) + "/end.txt": b"end"})
         # (two descriptors per level: the folder's handle and the copy os.scandir(fd) makes of it; 30 levels plus the
-        # root fit in 2 * 31 + a margin, while 120 sibling folders opened at once would not)
-        resource.setrlimit(resource.RLIMIT_NOFILE, (2 * 31 + 16, hard))
+        # root fit in 2 * 31 + a margin, while 120 sibling folders opened at once would not. The limit counts from the
+        # highest descriptor already open: under test_pairing.py's runpy, earlier suites hold many.)
+        top = max(int(n) for n in os.listdir("/dev/fd"))
+        resource.setrlimit(resource.RLIMIT_NOFILE, (top + 1 + 2 * 31 + 16, hard))
         r = S.scan(S.refuse_overlap(root, []))
         resource.setrlimit(resource.RLIMIT_NOFILE, (soft, hard))
         assert not [p for p, why in r.skipped if why == S.UNREADABLE], r.skipped[:5]
