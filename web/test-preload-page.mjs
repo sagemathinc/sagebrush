@@ -1,4 +1,4 @@
-// ci: web-browser/notebook order=245
+// ci: web-browser/preload
 // Background loading (web/preload.ts) on the notebook page, in headless Chromium against web/dist as built, behind
 // a proxy that records each /lib/ path asked and the bytes served for it. Each case is a first visit (a fresh
 // profile) opening a notebook by ?open=:
