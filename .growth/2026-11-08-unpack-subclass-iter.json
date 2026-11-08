@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "Assignment unpacking honors tuple/list-subclass __iter__ overrides (#876), while a versioned type-level iterator check retains direct array unpacking for exact values and layout-equivalent subclasses such as namedtuple. Paired local build against master bb6b4e82 measured engine/sagebrush-worker.js +252 B; marker exact, pending the binding pinned Bun 1.4.4 / Node 24.21.0 gate.",
+ "bytes": {
+  "engine/sagebrush-worker.js": 252
+ }
+}

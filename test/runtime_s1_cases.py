@@ -133,8 +133,8 @@ print("isinstance events", isinstance_events)
 
 
 # Assignment unpacking uses the iterator protocol even when a tuple/list
-# subclass has a backing array.  Only exact list/tuple values keep the direct
-# array fast path; a subclass's effective __iter__ must be observed.
+# subclass has a backing array.  Exact values and subclasses that retain the
+# base iterator keep the direct array path; an effective override is observed.
 class UnpackTuple(tuple):
     def __iter__(self):
         print("UnpackTuple.__iter__")
