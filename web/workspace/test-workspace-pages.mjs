@@ -478,6 +478,13 @@ try {
   const rngOf = (seed) => { let r = seed; return () => ((r = (r * 1103515245 + 12345) % 2147483648) / 2147483648); };
   const seeds = process.env.WS_SEED ? [Number(process.env.WS_SEED)] : [...Array(30).keys()].map((k) => k + 1).concat([1000 + Math.floor(Math.random() * 100000)]);
   const lost = [];
+  // (every board's title, read after a fresh list: a board moved between the list and its read (the page's rename on a
+  // title, which waits on the same save queue) is a "missing" read: listed and read again, bounded by rounds, never
+  // time; any other error still fails.  `afterList`, the pin's: runs once, between the first list and its reads)
+  const TITLES = `(async (afterList) => { const w = ${W}; for (let round = 0; round < 10; round++) {
+    const l = (await w.list("/")).filter((e) => e.kind === "board"); if (afterList) await afterList(l), (afterList = null);
+    try { return { round, titles: await Promise.all(l.map((e) => w.read(e.path).then((r) => r.content.title))) }; }
+    catch (e) { if (e?.code !== "missing") throw e; } } throw new Error("the boards were still moving after 10 rounds"); })`;
   await go(base + "board/?doc=local:" + id);
   await until(`!!${B}?.snapshot()`, 60000);
   for (const seed of seeds) {
@@ -504,13 +511,20 @@ try {
     // never a fixed sleep: grader's root cause, the boards were read while the queue still wrote)
     const drained = await ev(`(async () => { for (let i = 0; i < 1000; i++) { const q = window.sagebrush.wsFlush(); await q.catch(() => {}); if (window.sagebrush.wsFlush() === q) return true; } return false; })()`);
     if (!drained) lost.push(`seed ${seed}: the page's save queue never settled`);
-    const titles = await ev(`${W}.list("/").then((l) => Promise.all(l.filter((e) => e.kind === "board").map((e) => ${W}.read(e.path).then((r) => r.content.title))))`);
+    const { titles } = await ev(`${TITLES}()`);
     const kept = (t) => titles.some((x) => x === t || x === t + " (your changes, made while it changed elsewhere)");
     // (a writer's last write may be gone only if the other wrote after it, with CAS: it read that write, or it couldn't have written)
     if (lastPage && !kept(lastPage) && !(lastAgentK > lastPageK)) lost.push(`seed ${seed}: the page's last save "${lastPage}" is in no board; log ${JSON.stringify((await ev(`window.sagebrush.saveLog?.()`)).slice(-30))}`);
     if (lastAgent && !kept(lastAgent) && !(lastPageK > lastAgentK)) lost.push(`seed ${seed}: the agent's last write "${lastAgent}" is gone`);
   }
   check(lost.length === 0, `random interleavings, seeds ${seeds.join(",")}: nothing lost` + (lost.length ? "\n    " + lost.join("\n    ") : ""));
+  // (the pin: a board renamed between the list and its read is listed and read again, its title still found)
+  // (a rename retitles a board whose title was its name: the title is read at the new path, and the old one checked
+  // back after the rename back)
+  const moved = await ev(`(async () => { const w = ${W}; let from = "", to = "", orig = "";
+    const r = await ${TITLES}(async (l) => { from = l[0].path; to = from.replace(/\.board\.json$/, " (moved).board.json"); orig = (await w.read(from)).content.title; await w.rename(from, to); });
+    const title = (await w.read(to)).content.title; await w.rename(to, from); return { round: r.round, found: r.titles.includes(title), back: (await w.read(from)).content.title === orig }; })()`);
+  check(moved.round === 1 && moved.found && moved.back, `a board moved between the titles' list and its read: listed and read again, its title found: ${JSON.stringify(moved)}`);
   // a board only a pending copy holds: brought in (CORR-12C-3)
   const lone = "fedcba987654", loneText = "dddddddddddddddd:1:0\n" + JSON.stringify({ title: "Only pending", nodes: [] });
   await ev(`localStorage.setItem("sagebrush-workspace-pending:${lone}", ${JSON.stringify(loneText)}); 1`);
