@@ -349,6 +349,9 @@ try {
     const watchB = () => ev(`(() => { window.__sawB = false; window.__obsB?.disconnect(); window.__obsB = new MutationObserver(() => { if (document.querySelector(".tex-preview")?.textContent.includes("File B here.") || document.querySelector(".tex-title")?.textContent === "b.tex") window.__sawB = true; }); window.__obsB.observe(document.body, { childList: true, subtree: true, characterData: true }); return true; })()`);
     const endState = () => ev(`({ url: new URLSearchParams(location.search).get("tex"), title: document.querySelector(".tex-title")?.textContent, a: !!document.querySelector(".tex-preview")?.textContent.includes("File A here."), ro: document.querySelector(".tex-src")?.readOnly, src: document.querySelector(".tex-src")?.value ?? "", pages: document.querySelectorAll(".tex-page").length, sawB: window.__sawB, kept: window.__noReload === true, save: document.querySelector(".tex-savestate")?.textContent ?? "", bar: (() => { const b = document.querySelector(".tex-conflict"); return b && !b.hidden ? b.textContent.slice(0, 80) : ""; })() })`);
     const aText = () => ev(`${W}.read("/sw/a.tex").then((r) => new TextDecoder().decode(r.content))`);
+    // (a record of every text the save state is given from now on, each as it was set, even one replaced at once)
+    const recordSave = () => ev(`(() => { window.__said = []; window.__obsS?.disconnect(); window.__obsS = new MutationObserver((rs) => { for (const r of rs) if (r.target.classList?.contains("tex-savestate")) for (const n of r.addedNodes) window.__said.push(n.textContent); }); window.__obsS.observe(document.body, { childList: true, subtree: true }); return true; })()`);
+    const saidSoFar = () => ev(`(window.__obsS?.disconnect(), window.__said ?? [])`);
     // ---- (astra U8-SWITCH-2, the final barrier) Forward to B decided (A's write failed, its draft durable; accepted),
     // B's mount waiting on A's final close (its last write held); Back to A meanwhile: once the close ends, A is open
     // again and editable under its own URL, its edit written; B never shown
@@ -396,8 +399,14 @@ try {
         window.__sbTexSaveWrite = () => { const k = window.__k++; if (k === 0) throw new Error("test: the write failed"); if (k === 1) return window.__hold; }; return true; })()`);
       await ev(`(() => { const t = document.querySelector(".tex-src"); t.value += "% late history ${withNav ? "nav" : "go"}\\n"; t.dispatchEvent(new Event("input")); return true; })()`);
       await saveStateIs(/^Not saved: test: the write failed/);
+      await recordSave();
       await ev(`(window.__k = 0, history.forward(), true)`);
       const held = await until(`window.__k >= 2`, 10000);
+      // (#551's follow-up: the closing editor, its last write held, says so, not its earlier "Not saved", nor in its
+      //  failed style; and the record of the save state's texts sees it, as the saved and read-only cases below rely on)
+      const closingSaid = await ev(`document.querySelector(".tex-savestate")?.textContent ?? ""`);
+      const closingFailed = await ev(`!!document.querySelector(".tex-savestate")?.classList.contains("failed")`);
+      const recorded = (await saidSoFar()).includes("Saving before switching…");
       const nav = await ev(`(() => {
         if (${withNav}) { const n = window.navigation; if (!n?.traverseTo) return false; const orig = n.traverseTo.bind(n);
           n.traverseTo = (k, o) => { const late = new Promise((r) => setTimeout(r, 300)); return { committed: late, finished: late.then(() => orig(k, o).finished) }; }; window.__navRestore = () => { delete n.traverseTo; }; }
@@ -414,8 +423,8 @@ try {
       const lateWrite = reopened ? null : await until(`${W}.read("/sw/a.tex").then((r) => new TextDecoder().decode(r.content).includes(${JSON.stringify(`% late history ${withNav ? "nav" : "go"}`)}))`, 60000);
       await ev(`(window.__navRestore?.(), delete window.__navRestore, window.__sbTexSaveWrite = () => { if (window.__failWrites) throw new Error("test: the write failed"); }, window.__answer = false, window.__obsB?.disconnect(), window.__asked = 4, true)`);
       const mark = `% late history ${withNav ? "nav" : "go"}`;
-      check(held && nav !== false && reopened && s4.url === fa && at4 === 0 && s4.title === "a.tex" && s4.a && s4.ro === false && s4.src.includes(mark) && f4.includes(mark) && s4.pages === 1 && !s4.sawB && s4.kept,
-        `DB3-U8-SWITCH-4 (${withNav ? "Navigation API, its traverse late" : "no Navigation API: history.go"}): A asked for and A's close released at once: A open again only on A's entry, editable, its URL and edit; B never shown`, { held, nav, reopened, reopenMs, lateWrite, s4: { ...s4, src: s4.src.slice(-30) }, at4, file: f4.slice(-30) });
+      check(held && closingSaid === "Saving before switching…" && !closingFailed && recorded && nav !== false && reopened && s4.url === fa && at4 === 0 && s4.title === "a.tex" && s4.a && s4.ro === false && s4.src.includes(mark) && f4.includes(mark) && s4.pages === 1 && !s4.sawB && s4.kept,
+        `DB3-U8-SWITCH-4 (${withNav ? "Navigation API, its traverse late" : "no Navigation API: history.go"}): A asked for and A's close released at once: while the close's write is held, "Saving before switching…", not in the failed style; A open again only on A's entry, editable, its URL and edit; B never shown`, { held, closingSaid, closingFailed, recorded, nav, reopened, reopenMs, lateWrite, s4: { ...s4, src: s4.src.slice(-30) }, at4, file: f4.slice(-30) });
     }
     // ---- (astra U8-SWITCH-5) the newest file asked for wins over a switch past its decision and a return still under
     // way: the file shown's close held (its write failed, then its last write held), a switch to X decided, then...
@@ -1065,6 +1074,30 @@ try {
     })()`);
     const aBytes = new TextDecoder().decode(new Uint8Array(await bytesOf("/sw/a.tex")));
     check(sw1.held && sw1.title === "c.tex" && sw1.c && !sw1.b && sw1.pages === 1 && aBytes.includes("% A before the switches"), "U8-SWITCH-1: A -> B -> C quickly while A's write is held: C shown, then and after A's write lands; A's edit written", { ...sw1, a: aBytes.slice(-60) });
+    // ---- (#841, grader L3 and L4) "Saving before switching…" only when there is something to write: a switch from a
+    // saved document, and from one that can't be saved here (mixed line endings) with an edit kept as a draft, never
+    // says it (the record of the save state's texts sees it when it is said: DB3-U8-SWITCH-4)
+    {
+      const shown = (name) => until(`!!document.querySelector(".tex-src") && document.querySelector(".tex-title")?.textContent === ${JSON.stringify(name)} && document.querySelector(".tex-preview")?.textContent.includes(${JSON.stringify("File " + name[0].toUpperCase() + " here.")})`, 20000);
+      const saved = await savedNow();
+      await recordSave();
+      await ev(`(window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }), true)`);
+      const toA = await shown("a.tex"); await sleep(500);
+      const said3 = await saidSoFar();
+      check(saved && toA && !said3.includes("Saving before switching…"), "#841 L3: a switch from a saved document never says \"Saving before switching…\"", { saved, toA, said: said3 });
+      const fr = await mk("/sw/r.tex", enc("\\documentclass{article}\r\n\\begin{document}\nFile R here.\n\\end{document}\n"));
+      await ev(`(window.__sbTex({ path: "/sw/r.tex", fid: ${JSON.stringify(fr)} }), true)`);
+      const toR = await shown("r.tex") && await saveStateIs(/^Read-only$/);
+      await ev(`(() => { const t = document.querySelector(".tex-src"); t.value += "% kept as a draft in R\\n"; t.dispatchEvent(new Event("input")); return true; })()`);
+      await sleep(1500);
+      const ro = await ev(`document.querySelector(".tex-savestate")?.textContent ?? ""`);
+      await recordSave();
+      await ev(`(window.__answer = true, window.__sbTex({ path: "/sw/a.tex", fid: ${JSON.stringify(fa)} }), true)`);
+      const fromR = await shown("a.tex"); await sleep(500);
+      const said4 = await saidSoFar();
+      await ev(`(window.__answer = false, Object.keys(localStorage).filter((k) => k.startsWith("sb-tex-draft:" + ${JSON.stringify(fr)} + ":")).forEach((k) => localStorage.removeItem(k)), true)`);
+      check(toR && ro === "Read-only" && fromR && !said4.includes("Saving before switching…"), "#841 L4: a switch from a document that can't be saved here, edited, never says \"Saving before switching…\"", { toR, ro, fromR, said: said4 });
+    }
     await ev(`localStorage.removeItem("sagebrush-files-sidebar"); delete window.__sbTexSaveWrite; delete window.__failWrites; true`);
   }
   // ---- comments on a document, end to end (plan latex-comments r4.2 §5): a person comments in the preview and the
