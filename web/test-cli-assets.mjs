@@ -29,7 +29,9 @@ const APP_ONLY = ["sagebrush-selftest.js"];
 // (and the site-only: the LaTeX editor's page module, which the page names but only fetches on the site's own hosts
 // (web/latex/boot.ts latexOn, web/build.ts: sagebrush.space, dev.sagebrush.space), never on the CLI's 127.0.0.1, where
 // the editor is off; the CLI doesn't carry it, so it must be 404 here, as an app-only file is)
-const SITE_ONLY = ["sagebrush-latex.js"];
+// (and the terminal on your computer, T-3: it talks to a relay through the site's session, which the CLI's page can't
+// reach; the site and the app carry it, web/build.ts SITE_FILES and app/build-frontend.mjs)
+const SITE_ONLY = ["sagebrush-latex.js", "sagebrush-remote-terminal.js"];
 const verdict = (name, status) => (APP_ONLY.includes(name) || SITE_ONLY.includes(name) ? status === 404 : status === 200);
 // (the verdict's own control: an app-only file served, or a page file
 // missing, must fail)
@@ -46,7 +48,8 @@ try {
   // every sagebrush-*.js the page names, KaTeX's stylesheet, the notices
   const names = [...new Set(page.match(/sagebrush-[a-z0-9]+\.js\b/g) ?? [])].filter((n) => !["sagebrush-worker.js", "sagebrush-notebook.js"].includes(n));
   // (and the files the page names only through its code, lazily: the export's chunk and its worker, whose hyphenated
-  // name the pattern above can't catch (grader's N-1 on E1); each must be served; and the terminal on your computer's, T-3)
+  // name the pattern above can't catch (grader's N-1 on E1); each must be served; and the terminal on your computer's
+  // chunk, T-3, site-only below: named here so its 404 is checked)
   for (const f of ["sagebrush-export.js", "sagebrush-export-worker.js", "sagebrush-remote-terminal.js"]) if (!names.includes(f)) names.push(f);
   // (each app-only file must be one the page names: otherwise its 404 proves nothing)
   for (const n of APP_ONLY) {

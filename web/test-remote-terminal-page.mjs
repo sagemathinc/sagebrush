@@ -213,6 +213,35 @@ try {
   const rs = await ev("__leg.sent.filter((m) => m.t === 'resize').at(-1)");
   ok(rs.cols < body.cols && Number.isInteger(rs.rows), `a resize (${rs.rows}x${rs.cols})`);
 
+  // 8b. the console and this panel share the bottom: the one chosen last is in front (agents-ui A1)
+  const z = (sel) => ev(`Number(getComputedStyle(document.querySelector(${JSON.stringify(sel)})).zIndex)`);
+  await ev("document.querySelector('#consolebtn').click(), true");
+  await until("!document.querySelector('#console').hidden");
+  ok((await z("#console")) > (await z("#rterm")), "the console, chosen after, is in front of the terminal");
+  await ev("document.querySelector('#rtermbtn').click(), true");
+  await until(`Number(getComputedStyle(document.querySelector('#rterm')).zIndex) > Number(getComputedStyle(document.querySelector('#console')).zIndex)`);
+  ok(true, "choosing the terminal again brings it in front");
+  await ev("document.querySelector('#consolebtn').click(), true"); // (the console closed again)
+  await until("document.querySelector('#console').hidden");
+  // 8c. the page's theme reaches the terminal (agents-ui A2): its background is the page's --code, before and after
+  const bg = () => ev(`(() => {
+    const probe = Object.assign(document.createElement("div"), { style: "background: var(--code)" });
+    document.body.append(probe);
+    const want = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    // (xterm 6 paints the theme's background on its scrollable element)
+    return [want, getComputedStyle(document.querySelector('#rterm .xterm-scrollable-element')).backgroundColor];
+  })()`);
+  const setTheme = (t) => ev(`(() => { const s = document.querySelector('#theme'); s.value = ${JSON.stringify(t)}; s.dispatchEvent(new Event('change')); return true; })()`);
+  await setTheme("light");
+  await sleep(100);
+  const [wantL, gotL] = await bg();
+  await setTheme("dark");
+  await sleep(100);
+  const [wantD, gotD] = await bg();
+  ok(wantL !== wantD && gotL === wantL && gotD === wantD, `the theme follows the page: light ${gotL} (${wantL}), dark ${gotD} (${wantD})`);
+  await setTheme("system");
+
   // 9. the leg lost: said, with Reconnect; Reconnect reattaches to the session with a fresh hello and proof
   await ev("__leg.drop(1006, 'runner not connected'), true");
   await until("/Not connected to box/.test(document.querySelector('#rterm .rstatus').textContent)");
@@ -271,6 +300,15 @@ try {
   await ev("document.querySelector('#rtermbtn').click(), true");
   await until("/didn't accept/.test(document.querySelector('#rterm .rstatus')?.textContent ?? '')");
   ok((await status()) === "box didn't accept a terminal. Its Sagebrush may predate terminals: update it, then Reconnect. (no terminal channel)" && (await ev("__leg.opens.length")) === 0, `a refused hello is said: ${JSON.stringify(await status())}`);
+  // (a computer at its session limit: the runner's own number in the sentence)
+  await ev("document.querySelector('#rterm .rhead button[aria-label=\"Close the terminal\"]').click(), true");
+  await ev(FAKE);
+  await ev("sessionStorage.removeItem('sagebrush-rterm:r-box'), true");
+  await ev("document.querySelector('#rtermbtn').click(), true");
+  await until("__leg.opens.length === 1");
+  await push({ t: "error", error: "sessions", limit: 3 });
+  await until("/already runs/.test(document.querySelector('#rterm .rstatus')?.textContent ?? '')");
+  ok((await status()) === "box already runs 3 terminals. End one there, then Reconnect.", `the session limit is the runner's: ${JSON.stringify(await status())}`);
   await goto(base + "?phone=0");
 } catch (e) {
   ok(false, "the test stopped: " + (e?.stack ?? e));

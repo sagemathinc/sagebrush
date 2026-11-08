@@ -196,7 +196,7 @@ export class RemoteTerminal {
           this.closedFor = "elsewhere";
           return this._emit({ t: "elsewhere" });
         }
-        return this._emit({ t: "error", error: m.error, reason: m.reason });
+        return this._emit({ t: "error", error: m.error, reason: m.reason, ...(Number.isInteger(m.limit) && m.limit > 0 ? { limit: m.limit } : {}) });
     }
     return undefined;
   }

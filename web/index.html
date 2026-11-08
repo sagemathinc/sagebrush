@@ -1068,10 +1068,14 @@ if (REMOTE_PREVIEW) {
   const rtermBtn = $("#rtermbtn");
   rtermBtn.hidden = false;
   rtermBtn.onclick = async () => {
-    if (rterm) return rterm.focus();
+    if (rterm) return (panelToFront(rterm.el), rterm.focus());
     let mod;
     try { mod = await import(new URL("sagebrush-remote-terminal.js", location.href).href); } catch (e) { savedEl.textContent = "the terminal didn't load: " + (e?.message ?? e); return; }
-    rterm ??= mod.openRemoteTerminal({ onEnd: () => { rterm = null; } });
+    if (!rterm) {
+      rterm = mod.openRemoteTerminal({ onEnd: () => { rterm = null; } });
+      rterm.el.addEventListener("pointerdown", () => panelToFront(rterm?.el));
+    }
+    panelToFront(rterm.el);
   };
 }
 const nb = createNotebook($("#cells"), { kernel: null, staleOnLoad: true, analyzer, reactive: REACTIVE, remoteGate: (k, page) => remoteMod?.gateFor(k, page), mystBook: () => bookAcc.mystBook() });
@@ -1384,8 +1388,14 @@ const presence = (() => {
 // ------------------------------------------------------------ the console
 let consoleUi = null, consoleKernel = null, consoleNb = null;
 const consoleEl = $("#console"), consoleBtn = $("#consolebtn");
+// (the console and the terminal on your computer share the page's bottom: the one chosen or touched last is in front)
+function panelToFront(el) {
+  for (const p of [consoleEl, rterm?.el]) if (p) p.style.zIndex = p === el ? "6" : "5";
+}
+consoleEl.addEventListener("pointerdown", () => panelToFront(consoleEl));
 async function toggleConsole(show = consoleEl.hidden) {
   consoleEl.hidden = !show;
+  if (show) panelToFront(consoleEl);
   consoleBtn.setAttribute("aria-pressed", String(show));
   document.body.style.paddingBottom = show ? consoleEl.offsetHeight + "px" : "";
   if (!show) return consoleBtn.focus();
@@ -1449,9 +1459,10 @@ function setTheme(t) {
   else document.documentElement.dataset.theme = t;
   try { localStorage.setItem("sagebrush-theme", t); } catch {}
   consoleUi?.setTheme();
+  rterm?.setTheme();
 }
 themeEl.onchange = () => setTheme(themeEl.value);
-matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => consoleUi?.setTheme());
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { consoleUi?.setTheme(); rterm?.setTheme(); });
 themeEl.value = document.documentElement.dataset.theme || "system";
 const setMode = (mode) => nb.setMode(mode);
 

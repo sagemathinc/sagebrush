@@ -1,6 +1,6 @@
 // A terminal on one of your computers (terminal addendum T1.4, build step T-3): its own chunk,
 // sagebrush-remote-terminal.js (web/build.ts), loaded by the notebook page only when ⋯ ▸ Terminal on your computer…
-// is chosen (offered with ?remote=1).  It lists your enrolled computers (GET /api/remote/v1/peers, kind "runner"),
+// is chosen (offered with ?remote=1).  The site and the app serve it; the CLI's page doesn't (it can't reach a relay).  It lists your enrolled computers (GET /api/remote/v1/peers, kind "runner"),
 // and draws one's shell in xterm (the @xterm/xterm 6.0 the console already ships, with @xterm/addon-fit), over the
 // relay's terminal page leg (remote-terminal.js: the protocol, the page's DPoP key and proofs, credit and acks).
 //
@@ -105,7 +105,6 @@ export function webLinksIn(line: string): { start: number; text: string }[] {
 const ERRORS: Record<string, string> = {
   hello: "didn't accept a terminal. Its Sagebrush may predate terminals: update it, then Reconnect.",
   protocol: "sent something unexpected. Reconnect starts afresh.",
-  sessions: "already runs 4 terminals. End one there, then Reconnect.",
   spawn: "couldn't start a shell.",
   refused: "refused to open the terminal.",
   not_open: "has no terminal open on this connection. Reconnect.",
@@ -115,7 +114,11 @@ const ERRORS: Record<string, string> = {
 const SESSION_KEY = (remoteId: string) => "sagebrush-rterm:" + remoteId;
 
 export interface RemoteTerminalPanel {
+  /** the panel (the page puts it in front of, or behind, the console) */
+  el: HTMLElement;
   focus(): void;
+  /** the page's theme again (it changed): the console's colors, as web/console.ts setTheme */
+  setTheme(): void;
   close(): void;
 }
 
@@ -213,7 +216,9 @@ export function openRemoteTerminal(o: { onEnd?: () => void; fetch?: typeof fetch
           } else if (e.t === "error") {
             errored = true;
             const why = e.reason ? ` (${String(e.reason).slice(0, 200)})` : "";
-            say(ERRORS[e.error] ? `${r.name} ${ERRORS[e.error]}${why}` : `${r.name}: ${String(e.error).slice(0, 60)}${why}`);
+            // (the session limit is the runner's own number, terminal.py TERMINAL_LIMITS)
+            const text = e.error === "sessions" ? `already runs ${e.limit ?? "its most"} terminals. End one there, then Reconnect.` : ERRORS[e.error];
+            say(text ? `${r.name} ${text}${why}` : `${r.name}: ${String(e.error).slice(0, 60)}${why}`);
           } else if (e.t === "closed" && !t.exited && !t.closedFor) {
             endB.hidden = true;
             reconnectB.textContent = "Reconnect";
@@ -226,7 +231,7 @@ export function openRemoteTerminal(o: { onEnd?: () => void; fetch?: typeof fetch
       client = t;
       replaying = false;
       t.start();
-    }, (err) => say(`The terminal's key couldn't be made: ${err?.message ?? err}`));
+    }, (err) => say(`The terminal couldn't start in this browser: ${err?.message ?? err}`));
   }
   reconnectB.addEventListener("click", () => connect());
   endB.addEventListener("click", () => client?.kill());
@@ -317,6 +322,8 @@ export function openRemoteTerminal(o: { onEnd?: () => void; fetch?: typeof fetch
   }, (e) => { if (!ended) say(`Your computers: ${e?.message ?? e}`); });
 
   return {
+    el: panel,
+    setTheme: () => { if (term) term.options.theme = themeFromCss(); },
     focus: () => { term ? term.focus() : (panel.querySelector(".rpick button") as HTMLElement | null)?.focus(); },
     close,
   };
