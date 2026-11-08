@@ -141,7 +141,7 @@ The base is a file on this computer, one per folder pair (§2.5). Without a base
 - **No base, no deletes:** with $B$ absent, "deleted" can't be told from "never there", so the first sync only uploads, downloads and reports conflicts.
 - **Comparing by hash, not time:** $L$ is recomputed only when a file's size, `mtime_ns` or inode differ from what the base recorded for it, so a second run of a large, unchanged folder reads no file contents.
 - **Folders:** made on the side that lacks them. A folder is removed only when the plan removes every file in it and it was in the base, and it is then empty.
-- `--up-only` drops the download and delete-here rows; `--down-only` drops the upload and delete-there rows. Conflicts are still detected and still never overwrite.
+- `--up` drops the download and delete-here rows; `--down` drops the upload and delete-there rows. Conflicts are still detected and still never overwrite.
 
 ### 2.3 Conflicts: keep both, never overwrite
 
@@ -155,12 +155,12 @@ So the workspace's copy keeps the name, the local change survives under the conf
 ### 2.4 Deletions
 
 - **There:** `remove`, which the agent endpoint makes a move to the workspace's Trash, restorable by the person (design/agent-endpoint.md §1).
-- **Here:** never `unlink`. The file is moved to `<data dir>/sagebrush/fs-sync/trash/<run id>/<relative path>` on the same filesystem when possible (a rename), else copied there and then removed. The holding folder keeps a run's files for 30 days. `sagebrush fs-sync --restore <run id>` puts them back.
-- **Many deletions need a second word:** a plan that deletes more than 50 files, or more than 25% of the files in the base, on either side, is refused under `--yes` unless `--delete-many` is given too, and asks twice without `--yes`. It is the usual sign of a wrong folder pair.
+- **Here:** never `unlink`. The file is moved to `$XDG_STATE_HOME/sagebrush/fs-sync/trash/<run id>/<relative path>` on the same filesystem when possible (a rename), else copied there and then removed. The holding folder keeps a run's files for 30 days. `sagebrush fs-sync --restore <run id>` puts them back.
+- **Many deletions need a second word:** a plan that deletes more than 50 files, or more than 25% of the files in the base, on either side, needs the number confirmed (§1): typed after "y", or given as `--yes --allow-deletes N`, which applies only if the plan has exactly $N$ deletions. It is the usual sign of a wrong folder pair.
 
 ### 2.5 The base, and where it lives
 
-- **One file per folder pair,** in the CLI's data directory (`~/.local/share/sagebrush/fs-sync/` on Linux, the platform's equivalent elsewhere), named by the SHA-256 of `(account hash, grant id, absolute LOCAL_DIR, WORKSPACE_PATH)`. Never inside `LOCAL_DIR`, so it can't itself be synced, committed to git or deleted with the folder's contents.
+- **One file per folder pair,** under `$XDG_STATE_HOME/sagebrush/fs-sync/` (default `~/.local/state/…`, mode 0700), with the locks, run journals and holding folder (§1), named by the SHA-256 of `(account hash, grant id, absolute LOCAL_DIR, WORKSPACE_PATH)`. Never inside `LOCAL_DIR`, so it can't itself be synced, committed to git or deleted with the folder's contents.
 - **Contents:** for each path, `{sha256, size, mtime_ns, inode, fid}`, where `fid` is the workspace entry's identity, and the workspace path and account it belongs to.
 - **It advances per action, not per run:** each action that succeeds updates its path in the base, written atomically (a temporary file, `fsync`, rename). So an interrupted run leaves a base that is true for what was done and old for the rest, which the next run's plan handles by the same rules (§4).
 - **A base for another account or folder** is never used: the account hash and paths are in its name and checked inside it.
@@ -175,7 +175,7 @@ fs-sync acts with an **agent grant** of the agent endpoint (design/agent-endpoin
 - **Every change is credited** to `agent:fs-sync on <computer>` in the workspace's history, so the person can see and undo what a sync did.
 - **Not the remote-compute key:** `sagebrush remote login` enrolls this computer for the remote relay only. Teaching the sync service to accept it would be a new kind of credential for the account object; a grant needs none.
 
-The token is kept in the CLI's config directory, in a file readable only by the person (mode 0600), one per account. It is never printed or logged; `sagebrush fs-sync --forget` deletes it, and the person can revoke it on the site at any time. A revoked or expired token answers 401, and the next run pairs again.
+The token is kept in the CLI's config directory, in `$XDG_CONFIG_HOME/sagebrush/fs-sync/grant-<origin hash>.json`, readable only by the person (mode 0600), one per site, with the account recorded inside (§1). A `WORKSPACE_PATH` outside the grant's scope pairs again. It is never printed or logged; `sagebrush fs-sync --forget` deletes it, and the person can revoke it on the site at any time. A revoked or expired token answers 401, and the next run pairs again.
 
 ### 3.2 What it calls
 
@@ -194,7 +194,7 @@ fs-sync adds no limit of its own on the server; it is bounded by the grant's and
 - **Per file:** at most 95 MiB (the single-PUT limit) until a grant may upload chunked files. design/tiered-files.md §4 lifts it to 200 MiB for a person's device sessions only, so larger files are skipped and listed, not split.
 - **The index:** 100,000 entries per account and 10,000 per folder.
 
-**The plan states its cost before it runs:** its requests, bytes up and bytes down, against what the grant has left today. If it doesn't fit, the plan says how much fits now and that a rerun tomorrow continues; under `--yes` it applies what fits and exits with a distinct code (§1). A 429 mid-run stops the run cleanly (§4.1) with the `retry_after`.
+**The plan states its cost before it runs:** its requests, bytes up and bytes down, against what the grant has left today. If it doesn't fit, the plan says how much fits now and that a rerun tomorrow continues; under `--yes` it applies what fits and exits 1, "not all applied; run again", saying why (§1). A 429 mid-run stops the run cleanly (§4.1) with the `retry_after`.
 
 ## 4. Running the plan safely (sync-client)
 
@@ -216,7 +216,7 @@ The person may edit a file in the browser while fs-sync runs. That edit is an op
 A crash, Ctrl-C or a lost connection at any point leaves:
 - each finished action recorded in the base (§2.5), and each unfinished one not;
 - at most one temporary download file per action, named `.<name>.sagebrush-tmp-<run id>`, which the next run deletes first;
-- a run journal (`<data dir>/sagebrush/fs-sync/runs/<run id>.json`, appended and flushed per action) for the report, never needed for correctness.
+- a run journal (`$XDG_STATE_HOME/sagebrush/fs-sync/runs/<run id>.json`, appended and flushed per action) for the report, never needed for correctness.
 
 The next run plans afresh. A finished action is now "equal" or already in the base; an unfinished one is planned again. There is no resume of an old plan, so a plan is never applied to a state it wasn't made from. Only one run per folder pair at a time: a lock file next to the base (`flock`), refused with "another fs-sync of this folder is running".
 
@@ -239,7 +239,7 @@ The next run plans afresh. A finished action is now "equal" or already in the ba
 ## 5. Tests (sync-client; grader to review)
 
 Against the agent endpoint on the reference server (Miniflare), a real local folder, and the real CLI:
-- **Each row of §2.2's table,** with and without a base, and with `--up-only` and `--down-only`: the plan, then the result on both sides, then a second run's plan is empty.
+- **Each row of §2.2's table,** with and without a base, and with `--up` and `--down`: the plan, then the result on both sides, then a second run's plan is empty.
 - **The first run never deletes:** a folder pair with files only here, only there, and different on both; no delete in the plan.
 - **Conflicts:** both changed; the conflict name already taken; the result is the same on both sides, and both versions exist.
 - **Deletions:** each way, the Trash and the holding folder contents, `--restore`; the many-deletions guard at 50 and 51 files and at 25%.
