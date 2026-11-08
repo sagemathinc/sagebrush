@@ -442,7 +442,11 @@ export function seqRepr(x: any[]): string {
 
 export function defaultRepr(x: any): string {
   const t = typeOf(x);
-  return `<${t.$module === "builtins" ? "" : t.$module + "."}${t.$qualname} object at ${hex(id(x))}>`;
+  // (the module as CPython's object.__repr__ reads it, type_module: the class dict's __module__, assigned in
+  // the body or later, else where the class was made; a non-str one shows no module)
+  const dm = t.$dict?.get("__module__");
+  const mod = dm === undefined ? t.$module : typeof dm === "string" ? dm : "builtins";
+  return `<${mod === "builtins" ? "" : mod + "."}${t.$qualname} object at ${hex(id(x))}>`;
 }
 
 export function dictRepr(d: PyDict): string {

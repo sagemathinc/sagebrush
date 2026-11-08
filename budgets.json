@@ -255,9 +255,16 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/mod-io-text.src": {
+   "exact": false,
+   "ceiling": 63229,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/mod-io.src": {
    "exact": false,
-   "ceiling": 15556,
+   "ceiling": 17948,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -705,7 +712,7 @@
   },
   "engine/sagebrush-notebook.js": {
    "exact": false,
-   "ceiling": 239714,
+   "ceiling": 239798,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -733,7 +740,7 @@
   },
   "engine/sagebrush-worker.js": {
    "exact": false,
-   "ceiling": 1664151,
+   "ceiling": 1665415,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -808,6 +815,7 @@
    "engine/lib/mod-hmac.src": 10123,
    "engine/lib/mod-html.src": 85615,
    "engine/lib/mod-importlib.src": 3604,
+   "engine/lib/mod-io-text.src": 63165,
    "engine/lib/mod-io.src": 14908,
    "engine/lib/mod-ipaddress.src": 84439,
    "engine/lib/mod-ipython.src": 6801,

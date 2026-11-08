@@ -3088,6 +3088,7 @@ method(bytesType, "__hash__", (b: PyBytes) => O.hashAny(decode(b, "latin1")) ^ 0
 method(bytesType, "__getnewargs__", (b: PyBytes) => tuple([new PyBytes(b.a.slice(0, b.n))]));
 bytearray.$dict.set("__hash__", null);
 method(bytearray, "__setitem__", (b: PyByteArray, k: any, v: any) => (O.setitem(b, k, v), null));
+method(bytearray, "__delitem__", (b: PyByteArray, k: any) => (O.bytearrayDel(b, k), null));
 const grow = (b: PyByteArray, extra: number) => {
   if (b.n + extra > b.a.length) {
     const a = new Uint8Array(Math.max(16, (b.n + extra) * 2));
