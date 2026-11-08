@@ -1,9 +1,9 @@
 {
  "v": 1,
- "reason": "P3c-1: pyexpat and xml.parsers.expat (a Python port of expat 2.9.0, CPython 3.14.10's; lazy: lib.gen.js's lazy blob, and the browser group mod-xml, a new row: ceiling measured + 64, epoch = measured 172166). Measured with bun 1.4.4 (size-record.sh) on master 6aa08ee5 vs its probe merge: cli/lib.gen.js +49231 (pyexpat.py and xml/ in the lazy blob, the names list); cli/pyjs.cjs +52150 (+64 slack); engine/sagebrush-worker.js +2287 (the libexpat MIT notice in the embedded license text, mod-xml's manifest entries; ceiling renewed to measured + 64 = 1661793); engine/sagebrush-notebook.js +40 (the manifest entry; ceiling renewed to measured + 64 = 239680).",
+ "reason": "P3c-1: pyexpat and xml.parsers.expat (a Python port of expat 2.9.0, CPython 3.14.10's; lazy: lib.gen.js's lazy blob, and the browser group mod-xml, a new row: ceiling measured + 64, epoch = measured 187231). Measured with bun 1.4.4 (size-record.sh) on master dc0fb5a6 vs its probe merge (#849 r2): cli/lib.gen.js +54427 (pyexpat.py and xml/ in the lazy blob, the names list); cli/pyjs.cjs +57518 (+64 slack); engine/sagebrush-worker.js +2287 (the libexpat MIT notice in the embedded license text, mod-xml's manifest entries; ceiling renewed to measured + 64 = 1661855); engine/sagebrush-notebook.js +40 (the manifest entry; ceiling renewed to measured + 64 = 239680).",
  "bytes": {
-  "cli/lib.gen.js": 49231,
-  "cli/pyjs.cjs": 52214,
+  "cli/lib.gen.js": 54427,
+  "cli/pyjs.cjs": 57582,
   "engine/sagebrush-notebook.js": 40,
   "engine/sagebrush-worker.js": 2287
  }
