@@ -26,11 +26,17 @@ uvx sagebrush@latest fs-sync --forget [--origin URL]
 
 - **The arguments:**
   - `LOCAL_DIR` is a folder on this computer. It must exist; fs-sync never creates it.
+    - It may not overlap fs-sync's own folders, the config folder (§1.1) and the state folder (§1.4).
+    - fs-sync resolves `LOCAL_DIR` and both of those to real paths, through any symlinks. If `LOCAL_DIR` is one of them, contains one, or is inside one, it exits 2 before pairing or reading any file: "~ can't be synced: it contains fs-sync's own files (~/.config/sagebrush/fs-sync). Choose a folder that doesn't."
+    - So the token, the bases, the journals and the holding folder are never scanned, uploaded or deleted. That holds even for `fs-sync ~ /Home`.
   - `WORKSPACE_PATH` is a folder in the person's workspace, such as `/Thesis`. If it doesn't exist, the plan says it will be made.
 - **Direction:**
   - With no direction flag, changes go both ways.
-  - `--up` applies only actions that change the workspace (§2.2's upload and delete-there rows), and `--down` only those that change this computer.
-  - Either way, actions in the other direction are listed under "not applied (`--up`)" or "not applied (`--down`)", so nothing is skipped silently. Conflicts are still detected and never overwrite.
+  - `--up` applies only the actions that change the workspace and nothing on this computer: §2.2's upload and delete-there rows. `--down` applies only those that change this computer and nothing in the workspace.
+  - **A conflict needs both sides changed** (§2.3), so a one-direction run doesn't apply it. It is listed under "Conflicts, not applied (`--up`)", with "run fs-sync without --up to keep both".
+  - The other direction's actions are listed under "Pending, not applied (`--up`)" (or `--down`), so nothing is skipped silently.
+  - **The base** of a path advances only when an action leaves both sides equal. A pending or unapplied conflict path keeps its old base, so the next run in both directions sees it exactly as before.
+  - A run that leaves anything pending exits 1 (§1.3). A one-direction run reports "not in sync" whenever it is.
 - **The default is: show the plan, then ask.** Nothing changes before the answer.
   - `--dry-run` shows the plan and exits, never asking; nothing changes and the base isn't touched. It shows the first 20 lines of each kind; `--verbose` shows them all.
   - `--yes` applies without asking, for scripts.
@@ -44,7 +50,12 @@ uvx sagebrush@latest fs-sync --forget [--origin URL]
 ### 1.1 Signing in
 
 The first run for a site pairs, by the agent endpoint's pairing (§3.1, design/agent-endpoint.md §2):
-- It prints a URL (`https://sagebrush.space/agents/pair`) and a code, and waits.
+- It prints a URL and a code, and waits:
+  ```
+  This computer isn't signed in to sagebrush.space for /Thesis yet.
+  Open https://sagebrush.space/agents/pair and enter the code WXYZ-1234
+  to let fs-sync on laptop read and write /Thesis. Waiting… (the code expires in 10 minutes; Ctrl+C to stop)
+  ```
 - The person opens the URL signed in, enters the code, and approves a grant scoped to `WORKSPACE_PATH` with write access. The page names it `fs-sync on <computer>`.
 - The CLI receives the token once, saves it, and goes on to the plan.
 
@@ -52,7 +63,7 @@ Where the token lives:
 - **The file:** `$XDG_CONFIG_HOME/sagebrush/fs-sync/grant-<origin hash>.json` (default `~/.config/…`), one per site. Its account is recorded inside.
 - **Its rules:** the same as the remote key's (`remote/keys.py`): mode 0600 in a 0700 folder, and a file that is a symlink, not the person's, or readable by others is refused, not used or repaired. The token is never printed or logged.
 - **Another folder:** a later run naming a `WORKSPACE_PATH` outside the grant's scope pairs again for that folder. A grant is per folder, by design.
-- **Revoked or expired** (401): the run pairs again. Under `--yes` with no terminal it can't, so it exits 3, saying to run it once by hand.
+- **Revoked or expired** (401): the run pairs again. Under `--yes` with no terminal it can't, so it exits 3: "This computer isn't signed in to sagebrush.space for /Thesis. Run fs-sync once in a terminal to pair it."
 
 `<computer>` is the name given to `sagebrush remote login --name` if this computer is enrolled, else the hostname. The remote key itself isn't used (§3.1).
 
@@ -71,14 +82,16 @@ Download (1 file, 8.0 KB)
   ~ refs.bib                            8.0 KB   changed in the workspace
 Delete in the workspace, to its Trash (1 file)
   - old/draft1.tex                               deleted here since the last sync
+Delete on this computer, to the holding folder (1 file; restore with fs-sync --restore 20261108-1402 for 30 days)
+  - figures/old.png                    210 KB   deleted in the workspace since the last sync
 Conflicts, both kept (1 file)
-  ! main.tex    changed on both sides: yours becomes "main (conflict, laptop).tex", on both sides
+  ! main.tex    changed on both sides: this computer's copy becomes "main (conflict, laptop).tex", on both sides
 Skipped (3)
   · build/                ignored (.sagebrushignore)
-  · lecture.mp4           624 MB, over the 95 MiB file limit
-  · Notes.ipynb           a notebook (documents aren't synced yet)
+  · lecture.mp4           624 MiB, over the 95 MiB limit for one file
+  · Notes.ipynb           a notebook (fs-sync doesn't sync notebooks yet)
 
-Cost: 6 requests, 1.2 MB up, 8.0 KB down (today's budget left: 98.8 MB up)
+Cost: 7 requests, 1.2 MB up, 8.0 KB down (left today: 98.8 MB up, 192 MB down)
 Apply? [y/N]
 ```
 
@@ -86,8 +99,10 @@ Apply? [y/N]
 - **The answer must be `y` or `yes`.** Anything else, including Enter, end of input or Ctrl+C, applies nothing (exit 1).
 - **No terminal:** if standard input isn't a terminal and `--yes` isn't given, fs-sync prints the plan and exits 1 without applying, rather than wait for an answer that can't come.
 - **Many deletions** (§2.4: more than 50 files, or more than 25% of the base, on either side):
-  - Without `--yes`, after `y` it asks the person to type the number of deletions.
-  - `--yes` alone refuses such a plan (exit 1). `--yes --allow-deletes N` applies it only if the plan has exactly N deletions, so a script can't delete more than it was written for.
+  - Without `--yes`, after `y` it asks: "This deletes 63 files (31% of the last sync). Type 63 to delete them, or anything else to stop:". Anything but the number applies nothing (exit 1).
+  - `--yes` alone refuses such a plan (exit 1): "Not applied: this plan deletes 63 files (31% of the last sync). If that's intended, run again with --yes --allow-deletes 63."
+  - `--yes --allow-deletes N` applies the plan only if it has exactly N deletions, so a script can't delete more than it was written for.
+- **Over today's budget** (§3.3): the plan's last line before the question says "Today's budget covers 41 of these 120 files (98 MB of 310 MB up). Apply those now; run fs-sync again tomorrow for the rest. Apply? [y/N]".
 - **While it applies,** each action prints one line when done.
 - **A skipped action** (the file changed here, or the workspace refused the write because the file changed there, §4.1–4.2) is listed, and the run goes on with the rest. At the end it prints what was done and what was skipped, and "Run it again to sync the rest."
 
@@ -96,8 +111,8 @@ Apply? [y/N]
 | Code | Meaning |
 |---|---|
 | 0 | in sync: the whole plan was applied, or there was nothing to do (with `--dry-run`: the plan is empty) |
-| 1 | not all applied: declined, no terminal, a refused many-deletions plan, `--dry-run` with a non-empty plan, actions skipped, or stopped by the daily budget or a 429. The output says which; running it again continues |
-| 2 | usage: an unknown argument, `LOCAL_DIR` missing, `--dry-run` with `--yes` |
+| 1 | not all applied: declined, no terminal, a refused many-deletions plan, `--dry-run` with a non-empty plan, actions skipped, actions or conflicts pending in a `--up`/`--down` run, or stopped by the daily budget or a 429. The output says which; running it again continues |
+| 2 | usage: an unknown argument, `LOCAL_DIR` missing or overlapping fs-sync's own folders, `--dry-run` with `--yes` |
 | 3 | not signed in and can't pair (no terminal), or the grant was refused |
 | 4 | the site couldn't be reached, or answered with an error that isn't about one action |
 
