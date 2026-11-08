@@ -1496,4 +1496,3 @@ class TextIOWrapper(TextIOBase):  # (Sagebrush: io's TextIOBase)
 BufferedWriter.__module__ = "_io"
 IncrementalNewlineDecoder.__module__ = "_io"
 TextIOWrapper.__module__ = "_io"
-
