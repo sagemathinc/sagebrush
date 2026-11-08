@@ -266,25 +266,30 @@ export function sessionOf(eng, startMs = SANDBOX_START_MS) {
  * nothing else of the workspace reaches the session. */
 export async function folderFiles(ws, texPath, lim = FOLDER_LIMITS) {
   const dir = texPath.slice(0, texPath.lastIndexOf("/")) || "/";
-  const big = { msg: `Not run: the .tex's folder is too large to give to Sage here (over ${lim.files} files or ${lim.bytes / 2 ** 20} MiB): move the .tex and what it uses into a folder of their own` };
+  // (which bound, and that its subfolders count (board's COPY advisory))
+  const big = (what) => ({ msg: `Not run: the .tex's folder is too large to give to Sage here, ${what} with its subfolders; move the .tex and what it uses into a folder of their own` });
+  const many = big(`over ${lim.files} files`), heavy = big(`over ${lim.bytes / 2 ** 20} MiB`);
   const inside = (p) => dir === "/" ? p.startsWith("/") : p.startsWith(dir + "/");
-  const all = (await ws.list(dir, { recursive: true })).filter((e) => e.kind === "file" && !e.trashed && !e.remote && !e.path.startsWith("/Trash/") && inside(e.path));
-  if (all.length > lim.files) return big;
+  const listed = (await ws.list(dir, { recursive: true })).filter((e) => e.kind === "file" && !e.trashed && !e.path.startsWith("/Trash/") && inside(e.path));
+  // (files only in the cloud aren't given to Sage: counted, so the Run can say so (board's COPY advisory: a helper not
+  //  on this device is otherwise a bare ModuleNotFoundError))
+  const all = listed.filter((e) => !e.remote), remote = listed.length - all.length;
+  if (all.length > lim.files) return many;
   // (a complete snapshot, or none: a file that can't be read runs nothing, as one past the bound)
   let bytes = 0;
   const files = [];
   for (const e of all) {
-    if (bytes + (e.size ?? 0) > lim.bytes) return big;
+    if (bytes + (e.size ?? 0) > lim.bytes) return heavy;
     // (each read bounded by what is left (daybreak3): a file grown since it was listed is refused, never read whole)
     let over = false;
     const r = await ws.readUpTo(e.path, lim.bytes - bytes).catch((err) => { over = err?.code === "limit"; return null; });
-    if (over) return big;
+    if (over) return heavy;
     if (!r) return { msg: `Not run: ${e.path} couldn't be read` };
     bytes += r.content.length;
-    if (bytes > lim.bytes) return big;
+    if (bytes > lim.bytes) return heavy;
     files.push([e.path, r.content]);
   }
-  return { dir, files };
+  return { dir, files, remote };
 }
 /** The folder's files put in kernel `k`'s worker as they are now, all at once (no wait between them); every path it
  * was given before and not in this folder now, another folder's included, deleted there. `s`: the session (sessionOf's
@@ -354,7 +359,7 @@ export async function runAndSave(o) {
   };
   const ran = await (o.serial ? o.serial(go) : go());
   if (!ran || stale()) return { stale: true };
-  if (ran.moved) return { msg: "Not run: the .tex was moved meanwhile: press Run again" };
+  if (ran.moved) return { msg: "Not run: the .tex was moved meanwhile; press Run again" };
   // (a distinct mark: runIn's own `stopped` is why a Run that ran ended early, its results still written (astra))
   if (ran.stoppedBefore === true) return { msg: "Stopped before it ran" };
   const { out, stopped } = ran;
@@ -373,9 +378,9 @@ export async function runAndSave(o) {
   if (stale()) return { stale: true };
   const STALE = "stale run";
   const admit = () => { if (stale()) throw Object.assign(new Error(STALE), { code: STALE }); };
-  const changed = { msg: "Not saved: the results file changed meanwhile (another tab or Run): press Run again" };
+  const changed = { msg: "Not saved: the results file changed meanwhile (another tab or Run); press Run again" };
   try {
-    if (e && e.trashed) return { msg: "Not saved: the results file is in the Trash: restore or delete it, then press Run" };
+    if (e && e.trashed) return { msg: "Not saved: the results file is in the Trash; restore or delete it, then press Run" };
     if (e) await o.ws.write(rp, bytes, { fid: e.fid, base: e.rev ?? 0, admit });
     else await o.ws.createByPerson(rp, { content: bytes, signal: o.signal });
   } catch (err) {
@@ -383,5 +388,5 @@ export async function runAndSave(o) {
     if (err?.code === "conflict" || err?.code === "exists") return changed;
     throw err;
   }
-  return { ok: true, states, ms: o.now() - t0 };
+  return { ok: true, states, ms: o.now() - t0, remote: f?.remote ?? 0 };
 }
