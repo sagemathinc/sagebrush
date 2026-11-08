@@ -6976,20 +6976,20 @@
   "owner": "python (@sagebrush-python)",
   "reason": "pyexpat (P3c-1): external entities, external DTDs, parameter entity parsing and element content models are not supported (the parser reads no file); NotImplementedError before any effect"
  },
- "lib/pyexpat.py :: xmlparser.Parse :: if not self._xml_parse(raw[:_MAX_CHUNK_SIZE], False): #0": {
+ "lib/pyexpat.py :: xmlparser.Parse :: a += _MAX_CHUNK_SIZE #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
-  "reason": "pyexpat (P3c-1): CPython's pyexpat feeds expat at most 1 MiB a call, and its threshold setters' argument conversion error; a chunking and an argument check, refuses nothing"
+  "reason": "pyexpat (P3c-1): CPython's pyexpat feeds expat at most 1 MiB a call (r2: each chunk copied from the caller's object as it is fed, never the remaining tail); a chunking, refuses nothing"
  },
- "lib/pyexpat.py :: xmlparser.Parse :: raw = raw[_MAX_CHUNK_SIZE:] #0": {
+ "lib/pyexpat.py :: xmlparser.Parse :: if not self._feed(raw, a, a + _MAX_CHUNK_SIZE, False): #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
-  "reason": "pyexpat (P3c-1): CPython's pyexpat feeds expat at most 1 MiB a call, and its threshold setters' argument conversion error; a chunking and an argument check, refuses nothing"
+  "reason": "pyexpat (P3c-1): CPython's pyexpat feeds expat at most 1 MiB a call (r2: each chunk copied from the caller's object as it is fed, never the remaining tail); a chunking, refuses nothing"
  },
- "lib/pyexpat.py :: xmlparser.Parse :: while len(raw) > _MAX_CHUNK_SIZE: #0": {
+ "lib/pyexpat.py :: xmlparser.Parse :: while n - a > _MAX_CHUNK_SIZE: #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
-  "reason": "pyexpat (P3c-1): CPython's pyexpat feeds expat at most 1 MiB a call, and its threshold setters' argument conversion error; a chunking and an argument check, refuses nothing"
+  "reason": "pyexpat (P3c-1): CPython's pyexpat feeds expat at most 1 MiB a call (r2: each chunk copied from the caller's object as it is fed, never the remaining tail); a chunking, refuses nothing"
  },
  "lib/pyexpat.py :: xmlparser.SetAllocTrackerActivationThreshold :: def SetAllocTrackerActivationThreshold(self, threshold, /): #0": {
   "class": "1",
