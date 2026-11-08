@@ -10,9 +10,9 @@ and `index.html` is a small notebook UI:
 - A dependency-free syntax highlighter (a transparent textarea over a
   highlighted `<pre>`).
 - **Console**: an interactive prompt in xterm.js (`console.ts`, its own
-  356 kB file loaded only when opened) sharing `__main__` with the notebook:
-  history, Tab completion (the CLI's, from `src/interactive.ts`),
-  auto-indent, paste, Ctrl+C.
+  356 kB file loaded only when opened) with its own fresh interpreter, not
+  the notebook's `__main__`: history, Tab completion (the CLI's, from
+  `src/interactive.ts`), auto-indent, paste, Ctrl+C.
 - Plots and `@interact` (see [../PLOTTING.md](../PLOTTING.md)): SVG
   pictures from Python (sanitized before they are inserted), coordinates
   under the mouse, controls whose changes rerun the function in ~10–30 ms;
