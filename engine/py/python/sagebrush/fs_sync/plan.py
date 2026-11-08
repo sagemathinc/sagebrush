@@ -223,19 +223,21 @@ def _doc_version(rem):
 
 def _snapshot_step(p, loc, rem, row):
     """§3.4 for a notebook, board or chat path: download-only, and never replacing or deleting a file whose hash isn't
-    fs-sync's own last snapshot's."""
+    fs-sync's own last snapshot's. The name is only the never-upload rule: how a copy comes down follows the workspace
+    entry's actual kind, a document's snapshot (SNAPSHOT) or a data file's bytes (DOWNLOAD), under the same rules."""
     l = loc.sha256 if loc else None
     snap = row if row is not None and row.snapshot else None
+    write = SNAPSHOT if rem is not None and rem.kind != "file" else DOWNLOAD
     if rem is not None:
         if l is None:
             # (an absent path: written, new or again)
-            return Step(SNAPSHOT, p, fid=rem.fid, remote=_doc_version(rem)[1], why="again" if snap else "new")
+            return Step(write, p, fid=rem.fid, remote=_doc_version(rem)[1], why="again" if snap else "new")
         if snap is None:
             return Step(NOT_UPLOADED_OCCUPIED, p, local=l)
         if l != snap.sha256:
             return Step(NOT_UPLOADED_CHANGED, p, local=l)
-        if (snap.fid, snap.revision) != _doc_version(rem):
-            return Step(SNAPSHOT, p, local=l, fid=rem.fid, remote=_doc_version(rem)[1], replaces=True, why="changed")
+        if (snap.fid, snap.revision if snap.revision is not None else snap.sha256) != _doc_version(rem):
+            return Step(write, p, local=l, fid=rem.fid, remote=_doc_version(rem)[1], replaces=True, why="changed")
         return None
     if l is None:
         return Step(FORGET, p) if row is not None else None
@@ -255,8 +257,10 @@ def _parents(paths):
     return out
 
 
-def plan(local, remote, base, mode=BOTH, computer="this computer", case_insensitive=False, room=MAX_PATH):
-    """`room`: the longest relative path the workspace takes under the synced folder (MAX_PATH less the folder's own
+def plan(local, remote, base, mode=BOTH, computer=None, case_insensitive=False, room=MAX_PATH):
+    """`computer`: this computer's name for conflict copies (§2.3); the CLI passes the `remote login --name` name or
+    the hostname. Without one, the label is "computer".
+    `room`: the longest relative path the workspace takes under the synced folder (MAX_PATH less the folder's own
     path and its slash). A conflict whose copy can't be named within it is listed as not applied (why="no-name")."""
     if mode not in MODES:
         raise ValueError("mode is one of %s" % (MODES,))

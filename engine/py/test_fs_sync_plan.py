@@ -164,6 +164,22 @@ def test_snapshots():
     assert snap(remote_rev="r1", mode=P.DOWN).kind == P.SNAPSHOT
 
 
+def test_snapshot_name_on_a_data_file():
+    # (daybreak3) a workspace data file with a document's name: still download-only and never uploaded, but it comes
+    # down as a file's bytes (DOWNLOAD), not through the document snapshot read, under the same proof rules
+    rem = lambda sha: {"x.ipynb": Remote("file", F1, sha256=sha)}
+    row = {"x.ipynb": Base(A, F1, snapshot=True, revision=None)}
+    s = P.plan({}, rem(A), {}, P.BOTH, "lap").steps[0]
+    assert s.kind == P.DOWNLOAD and not s.replaces and s.rkind == "file" and s.why == "new", s
+    assert P.plan({"x.ipynb": Local(B_)}, rem(A), {}, P.BOTH, "lap").steps[0].kind == P.NOT_UPLOADED_OCCUPIED
+    s = P.plan({"x.ipynb": Local(A)}, rem(C), row, P.BOTH, "lap").steps[0]                  # unedited, changed there
+    assert s.kind == P.DOWNLOAD and s.replaces and s.remote == C, s
+    assert P.plan({"x.ipynb": Local(A)}, rem(A), row, P.BOTH, "lap").steps == []              # unchanged
+    assert P.plan({"x.ipynb": Local(B_)}, rem(C), row, P.BOTH, "lap").steps[0].kind == P.NOT_UPLOADED_CHANGED
+    # and a document becomes a SNAPSHOT step
+    assert P.plan({}, {"x.ipynb": Remote("notebook", F1, revision="r")}, {}, P.BOTH, "lap").steps[0].kind == P.SNAPSHOT
+
+
 def test_snapshot_names_never_upload():
     for name in ("a.ipynb", "A.IPYNB", "b.board.json", "B.Board.JSON", "c.chat", "d/e/C.CHAT"):
         assert P.is_snapshot_name(name), name
@@ -197,6 +213,8 @@ def test_computer_label():
     assert P.computer_label("a\\b\nc\x00d") == "a-b-c-d"
     assert P.computer_label("  ") == "computer" and P.computer_label(None) == "computer"
     assert P._units(P.computer_label("é" * 500)) == P.MAX_LABEL
+    pl = P.plan({"a.txt": Local(B_)}, {"a.txt": Remote("file", F1, C)}, {"a.txt": Base(A, F1)})    # no name given
+    assert pl.steps[0].copy == "a (conflict, computer).txt", pl.steps
     assert P._units(P.computer_label("😀" * 100)) <= P.MAX_LABEL
     # the conflict copy stays one name in the same folder, at most 255 units, whatever the label
     for label in ("../../etc", "a/b", "x" * 1000, "😀" * 300, "‮ evil"):
