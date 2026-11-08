@@ -8,6 +8,7 @@ import {
   isinstance, getattr, genericGetattr, setattr, genericSetattr, delattr, objectInit, objectNew, objectSetattr, selfChecked, unboundFunction,
   bindMethod, bindArgs, genericDelattr, callKw, callObj, captureTraceback, dictGet, dictKeyHash, dictSet, dictDelete, dictKeyOf, dictClear, hasOwn, hasInstanceDict, Signature,
   hooks, unbox, toPyExc, instanceDict, detachInstanceDict, attrNames, PrimBox, NS_DICT, NS_GLOBALS, globalsDict, IntLayout, FloatLayout, StrLayout, TypeLayout, constructPlain, constructPlainKw, positionalArray, bumpVersion, typeGetattr, typeSetattr, typeDelattr, notForType, slotArgs, noKeywords,
+  dunderFn, dunderOf,
 } from "./object";
 import * as O from "./ops";
 import * as UC from "./unicodecs";
@@ -136,7 +137,7 @@ function typeMake(name: any, bases: any, ns: any, names: string[], values: any[]
     ? callKw(getattr(winner, "__new__"), [winner, name, bases, ns], names, values)
     : typeNewImpl(type, name, bases, ns, new Map(names.map((n, i) => [n, values[i]])));
   if (isinstance(obj, type)) {
-    const init = lookupType(typeOf(obj), "__init__");
+    const init = dunderOf(lookupType(typeOf(obj), "__init__"));
     const r = init === typeInit ? null : callKw(init, [obj, name, bases, ns], names, values);
     if (r !== null) raise(T.TypeError, `__init__() should return None, not '${typeName(r)}'`);
   }
@@ -1005,7 +1006,7 @@ function buildClass(name: string, bases: any[], ns: Map<string, any>, module: st
   // __set_name__ hooks see the original namespace even if one changes it.
   for (const [k, v] of [...ns]) {
     if (v !== null && typeof v === "object") {
-      const sn = lookupType(typeOf(v), "__set_name__");
+      const sn = dunderOf(lookupType(typeOf(v), "__set_name__"));
       if (sn !== undefined) sn(v, cls, k);
     }
   }
@@ -1767,7 +1768,7 @@ const S = builtinType("str", [object], (x: any = "", encoding: any = undefined, 
   // (a __str__ returning a str subclass instance gives that instance, as
   // CPython's PyObject_Str; str's own __str__ gives an exact copy)
   if (x !== null && typeof x === "object" && !(x instanceof FloatBox)) {
-    const f = lookupType(typeOf(x), "__str__");
+    const f = O.lookupSpecial(x, "__str__");
     if (f !== undefined) {
       const r = f(x);
       if (typeof r === "string" || r instanceof StrLayout) return r;
@@ -2955,7 +2956,7 @@ function toBytes(x: any, encoding: any = undefined, errors: any = undefined, arr
   const buf = O.bufferOf(x);
   if (buf !== undefined) return buf.slice();
   if (typeof x === "object" && x !== null && Ty_lookup(x, "__bytes__") !== undefined) {
-    const r = Ty_lookup(x, "__bytes__")(x);
+    const r = O.lookupSpecial(x, "__bytes__")(x);
     if (!(r instanceof PyBytes)) raise(T.TypeError, `__bytes__ returned non-bytes (type ${typeName(r)})`);
     return r.a.slice(0, r.n);
   }
@@ -3327,7 +3328,7 @@ iteratorType("reversed", ReversedIter, (sequence: any) => {
   // also occur in existing native errors for non-callable hooks.
   const r = lookupType(typeOf(sequence), "__reversed__");
   if (r === null) raise(T.TypeError, `'${typeName(sequence)}' object is not reversible`);
-  if (r !== undefined) return r(sequence);
+  if (r !== undefined) return O.lookupSpecial(sequence, "__reversed__")(sequence);
   const gi = lookupType(typeOf(sequence), "__getitem__");
   if (gi === undefined) raise(T.TypeError, `'${typeName(sequence)}' object is not reversible`);
   if (typeof sequence === "string") {
@@ -3335,7 +3336,8 @@ iteratorType("reversed", ReversedIter, (sequence: any) => {
     const codePoints = [...sequence];
     return new ReversedIter(codePoints, codePoints.length - 1, (index) => codePoints[index], () => codePoints.length);
   }
-  return new ReversedIter(sequence, O.len(sequence) - 1, (index) => gi(sequence, index), () => O.len(sequence));
+  const getitem = O.specialOf(sequence, gi, "__getitem__");
+  return new ReversedIter(sequence, O.len(sequence) - 1, (index) => getitem(sequence, index), () => O.len(sequence));
 });
 // (CPython's reversed_len and listreviter_len: the index taken first; 0
 // once ended, without asking the sequence; else the items left, the
@@ -3420,7 +3422,7 @@ export function dir(x: any = undefined): any[] {
   if (!isType(x)) {
     const f = lookupType(typeOf(x), "__dir__");
     if (f !== undefined && f !== objectDir) {
-      const r = O.toArray(f(x));
+      const r = O.toArray(O.lookupSpecial(x, "__dir__")(x));
       return r.sort((a, b) => (O.truth(O.lt(a, b)) ? -1 : O.truth(O.lt(b, a)) ? 1 : 0));
     }
   }
@@ -3439,6 +3441,7 @@ function defaultDir(x: any): any[] {
 // Helpers for builtin modules.
 export function lookupDunder(x: any, name: string): any {
   const f = lookupType(typeOf(x), name);
+  if (typeof f === "function") return dunderFn(f);
   return f !== null && typeof f === "object" && f.asDunder !== undefined ? f.asDunder() : f;
 }
 // float(x) for objects with __float__/__index__, or undefined: the hooks
@@ -3822,7 +3825,7 @@ hooks.primProxy = (base: PyType): PyType => {
     d.set("__format__", unboxing(f0));
     const fmtW = pyfn((self: any, spec: string) => {
       const fl = lookupType(typeOf(self), "__float__");
-      if (typeof spec === "string" && /[eEfFgG%]$/.test(spec) && fl !== undefined && fl.$unboxing !== true) return format(fl(self), spec);
+      if (typeof spec === "string" && /[eEfFgG%]$/.test(spec) && fl !== undefined && fl.$unboxing !== true) return format(O.specialOf(self, fl, "__float__")(self), spec);
       return f0(unbox(self), spec);
     }, "__format__");
     (fmtW as any).$builtinMethod = true;
@@ -4286,17 +4289,17 @@ T.GenericAlias = genericAliasType;
     let args: any[] = [];
     const gna = lookupType(cls, "__getnewargs_ex__");
     if (gna !== undefined) {
-      const [a, kw] = gna(self);
+      const [a, kw] = O.specialOf(self, gna, "__getnewargs_ex__")(self);
       if (kw instanceof PyDict && kw.$m.size) {
-        const st = lookupType(cls, "__getstate__")(self);
+        const st = O.specialOf(self, lookupType(cls, "__getstate__"), "__getstate__")(self);
         return tuple([getattr(copyreg(), "__newobj_ex__"), tuple([cls, a, kw]), st, null, null]);
       }
       args = O.toArray(a);
     } else {
       const gn = lookupType(cls, "__getnewargs__");
-      if (gn !== undefined) args = O.toArray(gn(self));
+      if (gn !== undefined) args = O.toArray(O.specialOf(self, gn, "__getnewargs__")(self));
     }
-    const state = lookupType(cls, "__getstate__")(self);
+    const state = O.specialOf(self, lookupType(cls, "__getstate__"), "__getstate__")(self);
     const listitems = Array.isArray(self) && !(self as any).$t ? O.iter(self) : null;
     const dictitems = self instanceof PyDict ? O.iter(callObj(getattr(self, "items"), [])) : null;
     return tuple([getattr(copyreg(), "__newobj__"), tuple([cls, ...args]), state, listitems, dictitems]);
