@@ -178,6 +178,57 @@ def test_snapshot_names_never_upload():
         assert not P.is_snapshot_name(name), name
 
 
+def test_snapshot_row_keeps_snapshot_rules():
+    # (astra) a path whose base row is a snapshot stays under the snapshot rules even if its name or the workspace
+    # entry's kind no longer says document: it never uploads or deletes in the workspace
+    row = {"plain.txt": Base(A, F1, snapshot=True, revision="r1")}
+    for loc in ({"plain.txt": Local(A)}, {"plain.txt": Local(B_)}, {}):
+        for rem in ({}, {"plain.txt": Remote("file", F1, sha256=A)}, {"plain.txt": Remote("file", F2, sha256=C)}):
+            pl = P.plan(loc, rem, row, P.BOTH, "lap")
+            assert not pl.of(P.UPLOAD, P.DELETE_THERE, P.CONFLICT), (loc, rem, pl.steps)
+    # the workspace entry gone and the local copy unedited: a delete here, as for any snapshot
+    pl = P.plan({"plain.txt": Local(A)}, {}, row, P.BOTH, "lap")
+    assert [s.kind for s in pl.steps] == [P.DELETE_HERE], pl.steps
+
+
+def test_computer_label():
+    t = lambda p: False
+    assert P.computer_label("lap/../x") == "lap-..-x"
+    assert P.computer_label("a\\b\nc\x00d") == "a-b-c-d"
+    assert P.computer_label("  ") == "computer" and P.computer_label(None) == "computer"
+    assert P._units(P.computer_label("é" * 500)) == P.MAX_LABEL
+    assert P._units(P.computer_label("😀" * 100)) <= P.MAX_LABEL
+    # the conflict copy stays one name in the same folder, at most 255 units, whatever the label
+    for label in ("../../etc", "a/b", "x" * 1000, "😀" * 300, "‮ evil"):
+        n = P.conflict_name("d/notes.tex", label, t)
+        assert n.startswith("d/") and "/" not in n[2:] and P._units(n[2:]) <= P.MAX_NAME, (label, n)
+        assert n.endswith(").tex"), n
+
+
+def test_conflict_path_room():
+    # the copy's path must fit what the workspace has left under the synced folder: else the conflict is listed
+    p = "d/" + "n" * 240 + ".txt"
+    pl = P.plan({p: Local(B_)}, {p: Remote("file", F1, C)}, {p: Base(A, F1)}, P.BOTH, "lap", room=260)
+    s = pl.steps[0]
+    assert s.kind == P.CONFLICT and P._units(s.copy) <= 260 and s.copy.startswith("d/"), s
+    pl = P.plan({p: Local(B_)}, {p: Remote("file", F1, C)}, {p: Base(A, F1)}, P.BOTH, "lap", room=250)
+    s = pl.steps[0]
+    assert s.kind == P.CONFLICT_NOT_APPLIED and s.why == "no-name", s
+    # (nothing is changed on either side for it)
+    assert not pl.of(P.UPLOAD, P.DOWNLOAD, P.CONFLICT)
+
+
+def test_steps_keep_remote_kind():
+    # (astra) the planned workspace kind travels with its fid, for the read check at apply time
+    pl = P.plan({}, {"n.ipynb": Remote("notebook", F1, revision="r"), "a.txt": Remote("file", F2, A)}, {}, P.BOTH, "lap")
+    assert {(s.path, s.rkind, s.fid) for s in pl.steps} == {("n.ipynb", "notebook", F1), ("a.txt", "file", F2)}, pl.steps
+    s = one(A, B_, A, P.UP)
+    assert s.kind == P.PENDING and s.rkind == "file" and s.replaces          # a pending step keeps what it planned
+    s = one(B_, C, A, P.UP)
+    assert s.kind == P.CONFLICT_NOT_APPLIED and s.rkind == "file"
+    assert one(B_, C, A).rkind == "file" and one(A, None, None).rkind is None
+
+
 def test_folders_and_clashes():
     folder = Remote("folder", F2)
     # a workspace folder is never planned as a file or a document

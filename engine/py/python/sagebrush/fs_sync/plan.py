@@ -16,7 +16,8 @@ touched). Folders themselves aren't planned here: an upload or download makes th
 applied. With `case_insensitive` (this computer's filesystem, detected by the scan, §4.4), workspace names that differ
 only in case can't both exist here: all of them are listed as a clash and none is downloaded or acted on."""
 
-from dataclasses import dataclass, field
+import unicodedata
+from dataclasses import dataclass, field, replace
 
 BOTH, UP, DOWN = "both", "up", "down"
 MODES = (BOTH, UP, DOWN)
@@ -31,6 +32,11 @@ DELETE_CONFIRM_SHARE = 0.25
 
 #: the workspace's longest name, in UTF-16 code units, as web/workspace/paths.ts (MAX_NAME)
 MAX_NAME = 255
+#: and its longest path (web/workspace/paths.ts MAX_PATH); this module's paths are relative, so the workspace folder's
+#: own path counts against it too: a conflict copy is checked against what is left (`plan(..., room=...)`)
+MAX_PATH = 1024
+#: the longest computer label put in a conflict copy's name, in UTF-16 code units
+MAX_LABEL = 64
 
 # the actions (what a run does) ...
 UPLOAD = "upload"               # write the local file to the workspace: with base (the entry's sha256 and fid), or create-only
@@ -89,6 +95,8 @@ class Step:
     local: str = None
     fid: str = None
     remote: str = None
+    #: the workspace entry's kind as planned ("file", "notebook", …), checked with its fid at apply time (§3.4)
+    rkind: str = None
     #: a download or snapshot that replaces a local file (so it goes through the holding folder, §4.1, §2.4)
     replaces: bool = False
     #: an upload's base: the workspace hash it replaces, or None for create-only (§3.2)
@@ -146,16 +154,29 @@ def _fit(base, tail):
     return "".join(out) + tail
 
 
-def conflict_name(path, computer, taken):
+def computer_label(name):
+    """`name` as it may appear in a conflict copy's name: no path separators or control characters, trimmed, at most
+    MAX_LABEL UTF-16 units (never cut through a surrogate pair); "computer" if nothing is left."""
+    out = "".join("-" if ch in "/\\" or unicodedata.category(ch)[0] == "C" else ch for ch in str(name or "")).strip()
+    while _units(out) > MAX_LABEL:
+        out = out[:-1]
+    return out.strip() or "computer"
+
+
+def conflict_name(path, computer, taken, room=MAX_PATH):
     """The conflict copy's path beside `path`: `name (conflict, <computer>).ext`, then `… (2)`, … while taken, as the
     reducer names a conflict copy (web/workspace/sync-reduce.ts). `taken(path)` says whether a path is in use on
     either side (or by an earlier conflict copy of this plan)."""
     folder, _, name = path.rpartition("/")
     base, ext = split_ext(name)
-    tag = " (conflict, %s)" % computer
+    tag = " (conflict, %s)" % computer_label(computer)
     for i in range(1, 10001):
         n = _fit(base, tag + ("" if i == 1 else " (%d)" % i) + ext)
+        if "/" in n or _units(n) > MAX_NAME:
+            raise ValueError("a conflict name must be one name in the same folder: %r" % n)   # (never, given the label)
         p = folder + "/" + n if folder else n
+        if _units(p) > room:
+            raise ValueError("no conflict name beside %s fits the workspace's path limit" % path)
         if not taken(p):
             return p
     raise ValueError("no free conflict name beside %s" % path)
@@ -234,7 +255,9 @@ def _parents(paths):
     return out
 
 
-def plan(local, remote, base, mode=BOTH, computer="this computer", case_insensitive=False):
+def plan(local, remote, base, mode=BOTH, computer="this computer", case_insensitive=False, room=MAX_PATH):
+    """`room`: the longest relative path the workspace takes under the synced folder (MAX_PATH less the folder's own
+    path and its slash). A conflict whose copy can't be named within it is listed as not applied (why="no-name")."""
     if mode not in MODES:
         raise ValueError("mode is one of %s" % (MODES,))
     out = Plan(mode=mode, first=not base)
@@ -256,7 +279,8 @@ def plan(local, remote, base, mode=BOTH, computer="this computer", case_insensit
         if (loc is not None and p in remote_dirs) or (rem is not None and p in local_dirs):
             out.steps.append(Step(TYPE_CLASH, p, local=loc.sha256 if loc else None, fid=rem.fid if rem else None))
             continue
-        if is_snapshot_name(p) or (rem is not None and rem.kind != "file"):
+        # (a snapshot row keeps a path under the snapshot rules even if its name or kind changed since: it never uploads)
+        if is_snapshot_name(p) or (rem is not None and rem.kind != "file") or (row is not None and row.snapshot):
             if mode == UP:
                 continue                        # snapshots are neither written nor checked under --up (§3.4)
             step = _snapshot_step(p, loc, rem, row)
@@ -265,15 +289,22 @@ def plan(local, remote, base, mode=BOTH, computer="this computer", case_insensit
                               row.sha256 if row else None, rem)
         if step is None:
             continue
+        if rem is not None:
+            step = replace(step, rkind=rem.kind)
         if step.kind == CONFLICT:
             if mode != BOTH:
-                step = Step(CONFLICT_NOT_APPLIED, p, local=step.local, fid=step.fid, remote=step.remote)
+                step = Step(CONFLICT_NOT_APPLIED, p, local=step.local, fid=step.fid, remote=step.remote, rkind=step.rkind)
             else:
-                copy = conflict_name(p, computer, lambda q: q.casefold() in taken_keys)
+                try:
+                    copy = conflict_name(p, computer, lambda q: q.casefold() in taken_keys, room)
+                except ValueError:
+                    out.steps.append(Step(CONFLICT_NOT_APPLIED, p, local=step.local, fid=step.fid, remote=step.remote,
+                                          rkind=step.rkind, why="no-name"))
+                    continue
                 taken_keys.add(copy.casefold())
-                step = Step(CONFLICT, p, local=step.local, fid=step.fid, remote=step.remote, copy=copy)
+                step = Step(CONFLICT, p, local=step.local, fid=step.fid, remote=step.remote, rkind=step.rkind, copy=copy)
         elif (mode == UP and step.kind in _CHANGES_HERE) or (mode == DOWN and step.kind in _CHANGES_WORKSPACE):
-            step = Step(PENDING, p, local=step.local, fid=step.fid, remote=step.remote, action=step.kind)
+            step = replace(step, kind=PENDING, action=step.kind)
         out.steps.append(step)
     return out
 
