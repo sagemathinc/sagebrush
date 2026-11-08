@@ -151,6 +151,64 @@ _TOK_TRAILING_RSQB, _TOK_NONE, _TOK_TRAILING_CR, _TOK_PARTIAL_CHAR, _TOK_PARTIAL
 
 # (the most one synchronous scan examines: a longer run is scanned in windows, Sagebrush's Stop checked between them)
 _WINDOW = 1 << 20
+# (test/expat_rules.py's spy: told of every string scan below and its span; None otherwise)
+_SPY = None
+
+
+def _find(t, sub, a, b):
+    """t.find(sub, a, b), in windows of at most _WINDOW characters, each overlapping the last by len(sub) - 1"""
+    k = len(sub) - 1
+    while a < b:
+        lim = min(b, a + _WINDOW)
+        if _SPY is not None:
+            _SPY("find", lim - a)
+        j = t.find(sub, a, lim)
+        if j >= 0:
+            return j
+        if lim >= b:
+            return -1
+        a = max(lim - k, a + 1)
+    return -1
+
+
+def _count(t, sub, a, b):
+    """t.count(sub, a, b), in windows of at most _WINDOW characters: each counts what starts in it"""
+    k = len(sub) - 1
+    n = 0
+    while a < b:
+        lim = min(b, max(a + 1, a + _WINDOW - k))
+        stop = min(b, lim + k)
+        if _SPY is not None:
+            _SPY("count", stop - a)
+        n += t.count(sub, a, stop)
+        a = lim
+    return n
+
+
+def _last_line_end(t, a, b):
+    """The index of the last CR or LF in t[a:b], or -1: windows of at most _WINDOW characters, from the end"""
+    while b > a:
+        lo = max(a, b - _WINDOW)
+        if _SPY is not None:
+            _SPY("rfind", b - lo)
+            _SPY("rfind", b - lo)
+        j = max(t.rfind("\n", lo, b), t.rfind("\r", lo, b))
+        if j >= 0:
+            return j
+        b = lo
+    return -1
+
+
+def _u8_span(t, a, b):
+    """The UTF-8 bytes of t[a:b] (lone surrogates three each), counted a window at a time"""
+    n = 0
+    while a < b:
+        lim = min(b, a + _WINDOW)
+        if _SPY is not None:
+            _SPY("encode", lim - a)
+        n += len(t[a:lim].encode("utf-8", "surrogatepass"))
+        a = lim
+    return n
 
 
 class _Chars:
@@ -196,15 +254,21 @@ class _Tok:
     """expat's tokenizer (xmltok_impl.c) over a decoded text: each scanner returns (token, next index). `pc` is the
     index of a partial character at the final end (its bytes are incomplete), or -1."""
 
-    __slots__ = ("s", "n", "pc", "c", "odd", "atts")
+    __slots__ = ("s", "n", "pc", "c", "odd", "atts", "ledger")
 
-    def __init__(self, s, n, pc, chars, odd=False):
+    def __init__(self, s, n, pc, chars, odd=False, ledger=None):
         self.s = s
         self.n = n
         self.pc = pc
         self.c = chars
         self.odd = odd
         self.atts = None            # (the attributes of the start tag just scanned, when the fast path read them)
+        self.ledger = ledger        # (the parser whose owned memory pays for those entries, each before it is added)
+
+    def _drop_atts(self, atts):
+        """The fast path's entries, given up: their charge released"""
+        if atts and self.ledger is not None:
+            self.ledger._release(len(atts) * _ENTRY_COST)
 
     def bt(self, i):
         if i == self.pc:
@@ -692,15 +756,18 @@ class _Tok:
         while True:
             m = c.att_fast.match(t, i, min(self.n, end, i + _WINDOW))
             if m is None:
+                self._drop_atts(atts)
                 self.atts = None
                 return self.scan_atts(i + 1, end)
-            eq = t.index("=", i)
+            eq = _find(t, "=", i, m.end())
             name_end = eq
             while t[name_end - 1] in " \t\r\n":
                 name_end -= 1
             ve = m.end() - 1
-            vs = t.index(t[ve], eq) + 1
+            vs = _find(t, t[ve], eq, ve) + 1
             normalized = not (vs < ve and (t[vs] == " " or t[ve - 1] == " " or c.not_normal.search(t, vs, ve)))
+            if self.ledger is not None:
+                self.ledger._charge(_ENTRY_COST)
             atts.append([i, name_end, vs, ve, normalized])
             j = m.end()
             while True:
@@ -709,6 +776,7 @@ class _Tok:
                 if j < lim or lim == min(self.n, end):
                     break
             if j >= end or j >= self.n:
+                self._drop_atts(atts)
                 return self._partial(j)
             ch = t[j]
             if ch == ">":
@@ -716,9 +784,14 @@ class _Tok:
                 return (_TOK_START_TAG_WITH_ATTS, j + 1)
             if ch == "/":
                 r = self._sol(j, end, _TOK_EMPTY_ELEMENT_WITH_ATTS)
-                self.atts = atts if r[0] > 0 else None
+                if r[0] > 0:
+                    self.atts = atts
+                else:
+                    self._drop_atts(atts)
+                    self.atts = None
                 return r
             if j == m.end():
+                self._drop_atts(atts)
                 self.atts = None
                 return (_TOK_INVALID, j)
             i = j
@@ -1794,11 +1867,23 @@ _CONTEXT_BYTES = 1024          # (XML_CONTEXT_BYTES: what expat's buffer keeps o
 _INIT_BUFFER_SIZE = 1024
 _BUFFER_SIZE = 8192            # (pyexpat's character data buffer)
 
-# the parser's own memory accounting (design note r3 section 4.3): a held string costs 2 l + 64 bytes, a container
-# entry 96, an element-stack or entity-stack frame 256; charged before what it pays for is built
+# the parser's memory accounting (design note r3 section 4.3): a string costs 2 l + 64 bytes, a container entry 96,
+# an element-stack or entity-stack frame 256, each charged before what it pays for is built and released when it is
+# dropped. Two ledgers, as expat keeps them apart:
+#   - owned (_acc[2]): what expat allocates through its tracked allocator (names, the DTD's tables and values, the
+#     attribute arrays and value pools, the tag and entity stacks, bindings); past the activation threshold, more
+#     than the maximum amplification over the direct input is expat's error 1, "out of memory";
+#   - buffers (_acc[3]): the input on its way in (Parse's chunks, the parts waiting for an attempt, the joined and
+#     decoded input, the text not yet consumed), pyexpat's character-data buffer, and each token's transient
+#     copies. Counted the same way and never refused, as expat 2.9.0 leaves them (XML_GetBuffer: "We are avoiding
+#     MALLOC(..) here to leave limiting the input size to the application using Expat"); test/expat_rules.py pins
+#     them linear in the input not yet consumed, and zero after the end.
+# (_led: what the buffers ledger holds now, by slot: [the parts, the joined input, the text, the character buffer,
+# the current token's copies])
 _STR_COST = 64
 _ENTRY_COST = 96
 _FRAME_COST = 256
+_TOKEN_COPIES = 4             # a token's slice, its encoding for the accounting, and up to two strings made from it
 
 
 def _str_cost(n):
@@ -1861,7 +1946,8 @@ class xmlparser:
         # indirect bytes, the parser's own memory]; a list's item, unlike an attribute, isn't set through
         # __setattr__)
         self._ev = [0, 0]
-        self._acc = [0, 0, 0]
+        self._acc = [0, 0, 0, 0]
+        self._led = [0, 0, 0, 0, 0]
         self._bytes_fed = 0
         self._held = 0            # undecoded bytes held by the decoder (an incomplete character)
         self._buf_cap = 0         # expat's buffer, in bytes: capacity, parse position, end (for reparse deferral)
@@ -2030,24 +2116,61 @@ class xmlparser:
         isfinal = args[1] if len(args) > 1 else False
         if self._in_callback:
             raise RuntimeError("cannot call Parse() from within a handler")
+        # (the input, fed to expat at most _MAX_CHUNK_SIZE bytes a call, as pyexpat feeds it: each chunk is copied
+        # from the caller's object when it is fed, never the remaining tail; a str is encoded whole first, as
+        # CPython's pyexpat encodes it, the encoding counted among the buffers before it is made)
+        conv = 0
         if isinstance(data, str):
-            raw = data.encode("utf-8")
+            conv = _str_cost(4 * len(data))
+            self._acc[3] += conv
+            try:
+                raw = _encode_utf8(data)
+            except BaseException:
+                self._acc[3] -= conv
+                raise
+            self._work[2] += len(raw)
             if not self._started:
                 self._protocol_enc = "utf-8"
+        elif isinstance(data, bytes):
+            raw = data
         else:
             try:
-                raw = bytes(memoryview(data))
+                raw = memoryview(data)
             except TypeError:
                 raise TypeError(f"a bytes-like object is required, not '{type(data).__name__}'") from None
+            if raw.ndim != 1 or raw.itemsize != 1:
+                raw = raw.cast("B")
         final = _truth(isfinal)
-        while len(raw) > _MAX_CHUNK_SIZE:
-            if not self._xml_parse(raw[:_MAX_CHUNK_SIZE], False):
+        try:
+            n = len(raw)
+            a = 0
+            while n - a > _MAX_CHUNK_SIZE:
+                if not self._feed(raw, a, a + _MAX_CHUNK_SIZE, False):
+                    return self._fail()
+                a += _MAX_CHUNK_SIZE
+            if not self._feed(raw, a, n, final):
                 return self._fail()
-            raw = raw[_MAX_CHUNK_SIZE:]
-        if not self._xml_parse(raw, final):
-            return self._fail()
+        finally:
+            self._acc[3] -= conv
         self._flush()
         return 1
+
+    def _feed(self, raw, a, b, final):
+        """One XML_Parse call on raw[a:b]: its copy counted among the buffers before it is made, as a part waiting
+        for an attempt (a string and a list entry)"""
+        if self._processor == "error" or self._finished:
+            return self._xml_parse(None, b - a, final, 0)
+        c = _str_cost(b - a) + _ENTRY_COST
+        self._acc[3] += c
+        try:
+            chunk = raw[a:b] if a or b < len(raw) or type(raw) is not bytes else raw
+            if type(chunk) is not bytes:
+                chunk = bytes(chunk)
+        except BaseException:
+            self._acc[3] -= c
+            raise
+        self._work[2] += b - a
+        return self._xml_parse(chunk, b - a, final, c)
 
     def ParseFile(self, file, /):
         """Parse XML data from file-like object."""
@@ -2058,7 +2181,8 @@ class xmlparser:
             data = read(2048)
             if not isinstance(data, (bytes, bytearray, str)):
                 raise TypeError(f"read() did not return a bytes object (type={type(data).__name__})")
-            if not self._xml_parse(data.encode("utf-8") if isinstance(data, str) else bytes(data), len(data) == 0):
+            raw = data.encode("utf-8") if isinstance(data, str) else data
+            if not self._feed(raw, 0, len(raw), len(data) == 0):
                 return self._fail()
             if len(data) == 0:
                 break
@@ -2161,13 +2285,23 @@ class xmlparser:
     def _flush(self):
         if not self._buffer_used:
             return
+        acc = self._acc
+        led = self._led
+        join = _str_cost(self._buffer_used)
+        acc[3] += join
         data = "".join(self._buffer)
-        self._release(_str_cost(self._buffer_used))
+        self._work[2] += self._buffer_used
+        # (the fragments, as they were charged, and their list, then the join once delivered)
+        acc[3] -= led[3]
+        led[3] = 0
         self._buffer = []
         self._buffer_used = 0
-        h = self.CharacterDataHandler
-        if h is not None:
-            self._call(h, (data,))
+        try:
+            h = self.CharacterDataHandler
+            if h is not None:
+                self._call(h, (data,))
+        finally:
+            acc[3] -= join
 
     def _call(self, h, args):
         self._in_callback = True
@@ -2198,7 +2332,9 @@ class xmlparser:
                 if self.CharacterDataHandler is None:
                     return
             if n <= self._buffer_size - self._buffer_used:
-                self._charge(_str_cost(n))
+                c = _str_cost(n) + _ENTRY_COST
+                self._acc[3] += c
+                self._led[3] += c
                 self._buffer.append(s)
                 self._buffer_used += n
                 return
@@ -2219,24 +2355,25 @@ class xmlparser:
         """(line, column), both from 0, of text index idx; positions only move forward, as expat's do"""
         if idx < self._posidx:
             return (self._line, self._col)
-        t = self._text
-        seg = t[self._posidx:idx]
-        if seg:
-            nl = seg.count("\n") + seg.count("\r") - seg.count("\r\n")
-            if nl:
-                k = max(seg.rfind("\n"), seg.rfind("\r"))
-                self._line += nl
-                self._col = len(seg) - k - 1
-            else:
-                self._col += len(seg)
+        a = self._posidx
+        if idx > a:
+            self._line, self._col = _advance_in(self._text, a, idx, self._line, self._col)
         self._posidx = idx
         return (self._line, self._col)
 
-    def _blen(self, seg):
-        """Bytes of a document segment in the input's encoding"""
-        if seg.isascii() or self._unknown_map is not None:
-            return len(seg) * self._unit
-        return len(seg.encode(self._enc_name(), "surrogateescape"))
+    def _blen_span(self, t, a, b):
+        """Bytes of t[a:b], a stretch of the document, in the input's encoding (a window at a time)"""
+        if self._unknown_map is not None:
+            return (b - a) * self._unit
+        n = 0
+        while a < b:
+            lim = min(b, a + _WINDOW)
+            if _SPY is not None:
+                _SPY("encode", lim - a)
+            seg = t[a:lim]
+            n += len(seg) * self._unit if seg.isascii() else len(seg.encode(self._enc_name(), "surrogateescape"))
+            a = lim
+        return n
 
     def _enc_name(self):
         enc = self._enc or "utf-8"
@@ -2247,7 +2384,8 @@ class xmlparser:
     def _byte_index(self, idx):
         if not self._started:
             return -1
-        return self._bytes_fed - self._held - len(self._raw) - self._raw_pending - self._blen(self._text[idx:])
+        return (self._bytes_fed - self._held - len(self._raw) - self._raw_pending
+                - self._blen_span(self._text, idx, len(self._text)))
 
     # ------------------------------------------------------------------ accounting
     def _account(self, nbytes, direct):
@@ -2291,8 +2429,12 @@ class xmlparser:
         self._last_error_at = (line + 1, col, self._byte_index(at) if self._started else -1)
         # (what a later Parse reports again: expat counts the span from its buffer's start once more)
         self._error_pos = (line, col)
+        # (the span kept for that, among the buffers, admitted before it is made; the rest released)
+        span = _str_cost(at) if at >= start and at > 0 else 0
+        self._acc[3] += span
         self._error_span = self._text[:at] if at >= start else None
         self._drop(False)
+        self._led[2] = span
 
     def _drop(self, keep_text):
         """The end of the parse (an error, the final Parse, or an exception in a handler): what the parser holds is
@@ -2304,10 +2446,19 @@ class xmlparser:
         self._raw = b""
         self._raw_parts = []
         self._raw_pending = 0
+        led = self._led
+        self._acc[3] -= led[0] + led[1] + led[4]
+        led[0] = led[1] = led[4] = 0
         if not keep_text:
             self._text = ""
             self._posidx = 0
             self._ev[0] = self._ev[1] = 0
+            # (an error or an exception: the text, and the character data buffered in this call, which pyexpat
+            # never delivers after either)
+            self._buffer = []
+            self._buffer_used = 0
+            self._acc[3] -= led[2] + led[3]
+            led[2] = led[3] = 0
     def _after_end(self):
         """Parse after the final one, or after an exception in a handler: parsing finished (36)"""
         self._error_code = 36
@@ -2317,21 +2468,27 @@ class xmlparser:
         self._last_error_at = self._end_at
         return False
 
-    def _xml_parse(self, raw, final):
+    def _xml_parse(self, raw, n, final, charged):
+        """XML_Parse on raw (n bytes), already counted among the buffers as charged (the parts' slot owns it from
+        here: whatever ends the parse releases it with them)"""
+        self._led[0] += charged
         if self._processor == "error":
+            self._led[0] -= charged
+            self._acc[3] -= charged
             if self._finished:
                 return self._after_end()
-            self._bytes_fed += len(raw)
+            self._bytes_fed += n
             if self._error_span is not None:
                 line, col = _advance(self._error_pos, self._error_span)
                 self._error_pos = (line, col)
                 self._last_error_at = (line + 1, col, self._last_error_at[2])
             return False
         if self._finished:
+            self._led[0] -= charged
+            self._acc[3] -= charged
             return self._after_end()
         self._started = True
         self._last_error_at = None
-        n = len(raw)
         # (XML_GetBuffer: expat's buffer, in bytes, for the reparse deferral's second trigger)
         self._last_request = n
         if n > self._buf_cap - self._buf_end or self._buf_cap == 0:
@@ -2357,7 +2514,6 @@ class xmlparser:
         self._bytes_fed += n
         self._final = final
         try:
-            self._charge(2 * n)
             self._raw_parts.append(raw)
             self._raw_pending += n
             have_now = self._buf_end - self._buf_ptr
@@ -2388,6 +2544,56 @@ class xmlparser:
             self._drop(True)
         return True
 
+    def _decode_to_text(self, raw, final):
+        """raw decoded and appended to the text: the decoded piece (at most a character a byte) and the longer text
+        each admitted to the buffers before it is made, the old text and the piece released after"""
+        acc = self._acc
+        led = self._led
+        dec = _str_cost(len(raw))
+        acc[3] += dec
+        try:
+            # (a window of bytes at a time; the pieces joined, admitted as one more decoded copy)
+            pieces = []
+            n = len(raw)
+            if n > _WINDOW:
+                acc[3] += dec
+            for a in range(0, n, _WINDOW):
+                b = min(n, a + _WINDOW)
+                if _SPY is not None:
+                    _SPY("decode", b - a)
+                piece = raw[a:b] if n > _WINDOW else raw
+                if self._decoder is None:
+                    pieces.append(piece.decode("latin-1").translate(self._unknown_map))
+                    self._work[2] += b - a
+                else:
+                    pieces.append(self._decoder.decode(piece, final and b == n))
+            if not n and self._decoder is not None:
+                pieces.append(self._decoder.decode(raw, final))
+            s = pieces[0] if len(pieces) == 1 else "".join(pieces)
+            if n > _WINDOW:
+                acc[3] -= dec
+            self._work[3] += len(raw)
+            self._work[2] += len(s)
+            m = len(self._text) + len(s)
+            new = _str_cost(m) if m else 0
+            acc[3] += new
+            self._text += s
+            self._work[2] += len(self._text)
+            acc[3] -= led[2]
+            led[2] = new
+        finally:
+            acc[3] -= dec
+        return s
+
+    def _set_raw(self, raw, a):
+        """The undecoded input becomes raw[a:]: admitted before it is made, the old released after"""
+        new = _str_cost(len(raw) - a) if a < len(raw) else 0
+        self._acc[3] += new
+        self._raw = raw[a:] if a else raw
+        self._work[2] += len(raw) - a if a else 0
+        self._acc[3] -= self._led[1]
+        self._led[1] = new
+
     def _decode_pending(self, final):
         """Decode the bytes fed so far, once the encoding is known; returns False while it isn't."""
         if self._enc is None:
@@ -2397,14 +2603,8 @@ class xmlparser:
             return True
         if self._raw and not self._decl_phase:
             raw = self._raw
-            self._raw = b""
-            if self._decoder is None:
-                s = raw.decode("latin-1").translate(self._unknown_map)
-            else:
-                s = self._decoder.decode(raw, final)
-            self._work[3] += len(raw)
-            self._text += s
-            self._work[2] += len(self._text)
+            self._decode_to_text(raw, final)
+            self._set_raw(b"", 0)
         if self._decoder is not None:
             self._held = self._decoder.held
         if final and self._held:
@@ -2418,12 +2618,20 @@ class xmlparser:
         """callProcessor: run the processors over what is buffered; True if anything was consumed."""
         work = self._work
         work[1] += 1
+        acc = self._acc
+        led = self._led
         if self._raw_parts:
+            # (the joined input admitted before it is built, the parts and the old joined input released after)
+            new = _str_cost(len(self._raw) + self._raw_pending)
+            acc[3] += new
             joined = b"".join(self._raw_parts)
             self._raw = self._raw + joined if self._raw else joined
             work[2] += len(self._raw)
             self._raw_parts = []
             self._raw_pending = 0
+            acc[3] -= led[0] + led[1]
+            led[0] = 0
+            led[1] = new
         if not self._decode_pending(final):
             if final:
                 # (too little to tell the encoding: what a well-formed document can't be)
@@ -2434,17 +2642,24 @@ class xmlparser:
             else:
                 return False
         work[0] += len(self._text)
-        k = self._run(final)
+        try:
+            k = self._run(final)
+        finally:
+            acc[3] -= led[4]
+            led[4] = 0
         # (expat's buffer position: what is left unparsed, in bytes)
-        rest = self._blen(self._text[k:]) + self._held + len(self._raw)
+        rest = self._blen_span(self._text, k, len(self._text)) + self._held + len(self._raw)
         consumed = (self._buf_end - rest) != self._buf_ptr
         self._buf_ptr = self._buf_end - rest
         # (positions up to what is consumed, then the consumed text dropped)
         self._pos_at(k)
         if k:
-            self._release(2 * k)
+            new = _str_cost(len(self._text) - k) if k < len(self._text) else 0
+            acc[3] += new
             self._text = self._text[k:]
             work[2] += len(self._text)
+            acc[3] -= led[2]
+            led[2] = new
             self._posidx -= k
             self._ev[0] = max(0, self._ev[0] - k)
             if self._pc >= 0:
@@ -2453,10 +2668,12 @@ class xmlparser:
 
     def _work_counts(self):
         """The work done so far (design note r3 section 4a): characters the processors could examine (the text at
-        each attempt), attempts, characters and bytes copied or joined, bytes decoded; and the parser's own memory
-        as its accounting has it now (section 4.3)"""
+        each attempt), attempts, characters and bytes copied (Parse's chunks and encoding, the joins, decodings,
+        concatenations and slices of the input and the character buffer), bytes decoded; and the two ledgers now:
+        owned (expat's tracked memory) and buffers (the input on its way in, pyexpat's buffer, token copies)"""
         scanned, attempts, copied, decoded = self._work
-        return {"scanned": scanned, "attempts": attempts, "copied": copied, "decoded": decoded, "owned": self._acc[2]}
+        return {"scanned": scanned, "attempts": attempts, "copied": copied, "decoded": decoded, "owned": self._acc[2],
+                "buffers": self._acc[3], "slots": list(self._led)}
 
     def _run(self, final):
         """The processors in turn, as expat's re-entering callProcessor loop runs them; returns the text index
@@ -2471,7 +2688,7 @@ class xmlparser:
             pc = len(self._text)
         while True:
             p = self._processor
-            self._scan = _Tok(self._text, len(self._text), pc, self._chars, self._odd)
+            self._scan = _Tok(self._text, len(self._text), pc, self._chars, self._odd, self)
             if p == "init" or p == "prolog":
                 i, again = self._do_prolog(i, have_more)
             elif p == "content":
@@ -2520,8 +2737,8 @@ class xmlparser:
                 return False
             if raw[2:3] == b"\xbf":
                 # (the BOM is a token of its own, consumed at once, as expat's)
-                self._text += self._decoder.decode(raw[:3], False)
-                self._raw = raw[3:]
+                self._decode_to_text(raw[:3], False)
+                self._set_raw(raw, 3)
         self._await_decl = True
         return True
 
@@ -2533,15 +2750,15 @@ class xmlparser:
             return False
         self._await_decl = False
         if body.startswith(b"<?xml") and body[5:6] in (b" ", b"\t", b"\r", b"\n", b"?"):
-            close = body.find(b"?>", 5)
+            close = _find(body, b"?>", 5, len(body))
             if close < 0:
                 if not final:
                     self._await_decl = True
                     return False
             else:
                 cut = close + 2
-                self._text += self._decoder.decode(body[:cut], False)
-                self._raw = body[cut:]
+                self._decode_to_text(body[:cut], False)
+                self._set_raw(body, cut)
                 self._decl_phase = True
         return True
 
@@ -2566,7 +2783,7 @@ class xmlparser:
 
     # ------------------------------------------------------------------ the prolog (doProlog)
     def _tok_bytes(self, a, b):
-        return self._blen(self._text[a:b])
+        return self._blen_span(self._text, a, b)
 
     def _do_prolog(self, s, have_more):
         """doProlog over the document: returns (next index, run again?)"""
@@ -2581,6 +2798,9 @@ class xmlparser:
             else:
                 tok, nxt = sc.prolog_tok(s, end)
             self._ev[1] = nxt
+            h = _TOKEN_COPIES * _str_cost(nxt - s) if nxt > s else 0
+            self._acc[3] += h - self._led[4]
+            self._led[4] = h
             if tok > 0:
                 self._bom_pending = False
             if self._processor == "init":
@@ -2693,7 +2913,8 @@ class xmlparser:
             elif role == _ROLE_DEFAULT_ATTRIBUTE_VALUE or role == _ROLE_FIXED_ATTRIBUTE_VALUE:
                 if dtd.keep_processing:
                     value = self._store_attribute_value(self._decl_att_cdata, text, s + 1, nxt - 1, None, True)
-                    self._define_attribute(self._decl_element, self._decl_att, self._decl_att_cdata, False, value)
+                    self._define_attribute(self._decl_element, self._decl_att, self._decl_att_cdata, False, value,
+                                           True)
                     if self.AttlistDeclHandler is not None and self._decl_att_type is not None:
                         typ = self._decl_att_type
                         if typ[:1] == "(" or typ[:2] == "NO":
@@ -2707,8 +2928,10 @@ class xmlparser:
                     # error is)
                     value, err = self._store_entity_value(text, s + 1, nxt - 1)
                     ent = self._decl_entity
-                    if ent is not None:
-                        self._charge(_str_cost(len(value)) + _ENTRY_COST)
+                    if ent is None:
+                        self._release(_str_cost(len(value)))
+                    else:
+                        self._charge(_ENTRY_COST)
                         ent.text = value
                         if self.EntityDeclHandler is not None:
                             self._report("EntityDeclHandler", ent.name, 1 if ent.is_param else 0, value, self._base,
@@ -2904,15 +3127,11 @@ class xmlparser:
         elif enc is None and self._decoder is None and self._unknown_map is None:
             self._set_codec("utf-8")
         raw = self._raw
-        self._raw = b""
         if raw:
-            if self._decoder is None:
-                s = raw.decode("latin-1").translate(self._unknown_map)
-            else:
-                s = self._decoder.decode(raw, self._final)
+            self._decode_to_text(raw, self._final)
+            self._set_raw(b"", 0)
+            if self._decoder is not None:
                 self._held = self._decoder.held
-            self._charge(2 * len(s))
-            self._text += s
             if self._final and self._held:
                 if self._decoder.partial_char:
                     self._pc = len(self._text)
@@ -2928,7 +3147,7 @@ class xmlparser:
             et = _ElementType(name)
             self._dtd.element_types[name] = et
             if self._ns:
-                k = name.find(":")
+                k = _find(name, ":", 0, len(name))
                 if k >= 0:
                     et.prefix = self._prefix(name[:k])
         return et
@@ -2954,18 +3173,22 @@ class xmlparser:
                 a.prefix = self._dtd.default_prefix if len(name) == 5 else self._prefix(name[6:])
                 a.xmlns = True
             else:
-                k = name.find(":")
+                k = _find(name, ":", 0, len(name))
                 if k >= 0:
                     a.prefix = self._prefix(name[:k])
         return a
 
-    def _define_attribute(self, et, att, is_cdata, is_id, value):
+    def _define_attribute(self, et, att, is_cdata, is_id, value, charged=False):
+        """defineAttribute; a value storeAttributeValue built is already charged (charged): kept with the
+        declaration, or released if the declaration is a repeat"""
         if value is not None or is_id:
             if att.name in et.default_for_name:
+                if charged:
+                    self._release(_str_cost(len(value)))
                 return
             if is_id and et.id_att is None and not att.xmlns:
                 et.id_att = att
-        self._charge(_ENTRY_COST + (_str_cost(len(value)) if value is not None else 0))
+        self._charge(_ENTRY_COST + (_str_cost(len(value)) if value is not None and not charged else 0))
         et.default_for_name[att.name] = len(et.default_atts)
         et.default_atts.append([att, value, is_cdata])
         if not is_cdata:
@@ -2974,8 +3197,11 @@ class xmlparser:
     # ------------------------------------------------------------------ values
     def _store_attribute_value(self, is_cdata, text, a, b, direct, in_prolog):
         """storeAttributeValue and appendAttributeValue: the value text[a:b] normalized, entities expanded (an
-        explicit stack of open entities, never recursion)"""
+        explicit stack of open entities, never recursion). Owned memory: each piece (a string and its list entry) and
+        the joined value are charged before they are made; the pieces are released after the join, and the value's
+        charge, _str_cost(len(value)), is left for the caller to release."""
         out = []
+        pieces = [0]
         stack = [[None, text, a, b, _Tok(text, b, -1, self._chars) if text is not self._text else self._scan, direct]]
         doc = text is self._text
         dtd = self._dtd
@@ -3003,7 +3229,7 @@ class xmlparser:
                     run = t[i:k]
                     ok = True
                     if acc is not None:
-                        nb = self._blen(run)
+                        nb = self._blen_span(run, 0, len(run))
                         a0 = self._acc
                         before = a0[0] + a0[1]
                         ok = before + nb < self._amp_act or (
@@ -3017,12 +3243,12 @@ class xmlparser:
                             if run[:1] == " " and (not out or out[-1][-1:] == " "):
                                 run = run[1:]
                         if run:
-                            out.append(run)
+                            self._piece(out, run, pieces)
                         frame[2] = k
                         continue
             tok, nxt = sc.attribute_value_tok(i, e)
             if tok not in (_TOK_INVALID, _TOK_PARTIAL, _TOK_PARTIAL_CHAR, _TOK_NONE) and acc is not None:
-                self._account(self._blen(t[i:nxt]) if ent is None else len(t[i:nxt].encode("utf-8", "surrogatepass")),
+                self._account(self._blen_span(t, i, nxt) if ent is None else _u8_span(t, i, nxt),
                               acc)
             if tok == _TOK_INVALID:
                 raise _Error(4, nxt if (ent is None and doc) else None)
@@ -3035,22 +3261,22 @@ class xmlparser:
                 if not is_cdata and n == 0x20 and (not out or out[-1][-1:] == " "):
                     frame[2] = nxt
                     continue
-                out.append(chr(n))
+                self._piece(out, chr(n), pieces)
             elif tok == _TOK_DATA_CHARS:
-                out.append(t[i:nxt])
+                self._piece_of(out, t, i, nxt, pieces)
             elif tok in (_TOK_TRAILING_CR, _TOK_ATTRIBUTE_VALUE_S, _TOK_DATA_NEWLINE):
                 if tok == _TOK_TRAILING_CR:
                     nxt = i + 1
                 if not is_cdata and (not out or out[-1][-1:] == " "):
                     frame[2] = nxt
                     continue
-                out.append(" ")
+                self._piece(out, " ", pieces)
             elif tok == _TOK_ENTITY_REF:
                 name = t[i + 1:nxt - 1]
                 ch = _PREDEFINED.get(name)
                 if ch is not None:
                     self._acc[1] += 1
-                    out.append(ch)
+                    self._piece(out, ch, pieces)
                     frame[2] = nxt
                     continue
                 entity = dtd.general.get(name)
@@ -3085,23 +3311,48 @@ class xmlparser:
             else:
                 raise _Error(23)
             frame[2] = nxt
+        n = sum(len(x) for x in out)
+        self._charge(_str_cost(n))
         value = "".join(out)
+        self._release(pieces[0])
         if not is_cdata and value[-1:] == " ":
+            self._charge(_str_cost(n - 1))
             value = value[:-1]
+            self._release(_str_cost(n))
         return value
+
+    def _piece_of(self, out, t, i, j, pieces):
+        """t[i:j] as a piece of a value being built: charged before the slice is made"""
+        c = _str_cost(j - i) + _ENTRY_COST
+        self._charge(c)
+        pieces[0] += c
+        out.append(t[i:j])
+
+    def _piece(self, out, x, pieces):
+        """A piece of a value being built: charged (its string and list entry) before it is added"""
+        c = _str_cost(len(x)) + _ENTRY_COST
+        self._charge(c)
+        pieces[0] += c
+        out.append(x)
 
     def _store_entity_value(self, text, a, b):
         """storeEntityValue, for the internal subset: references to general entities kept as they are, character
         references resolved, line ends normalized; a parameter entity reference is an error here: (the value, None),
-        or (the value up to an error, the error)"""
+        or (the value up to an error, the error). Owned memory as storeAttributeValue's: the pieces and the joined
+        value charged before they are made, the pieces released after; the value's charge is left with it."""
         out = []
+        pieces = [0]
+        err = None
         try:
-            self._entity_value_runs(self._scan, text, a, b, out)
+            self._entity_value_runs(self._scan, text, a, b, out, pieces)
         except _Error as e:
-            return "".join(out), e
-        return "".join(out), None
+            err = e
+        self._charge(_str_cost(sum(len(x) for x in out)))
+        value = "".join(out)
+        self._release(pieces[0])
+        return value, err
 
-    def _entity_value_runs(self, sc, text, i, b, out):
+    def _entity_value_runs(self, sc, text, i, b, out, pieces):
         while i < b:
             tok, nxt = sc.entity_value_tok(i, b)
             if tok == _TOK_PARAM_ENTITY_REF:
@@ -3109,16 +3360,16 @@ class xmlparser:
             if tok == _TOK_NONE:
                 break
             if tok == _TOK_ENTITY_REF or tok == _TOK_DATA_CHARS:
-                out.append(text[i:nxt])
+                self._piece_of(out, text, i, nxt, pieces)
             elif tok == _TOK_TRAILING_CR or tok == _TOK_DATA_NEWLINE:
                 if tok == _TOK_TRAILING_CR:
                     nxt = i + 1
-                out.append("\n")
+                self._piece(out, "\n", pieces)
             elif tok == _TOK_CHAR_REF:
                 n = _char_ref_number(text, i)
                 if n < 0:
                     raise _Error(14, i)
-                out.append(chr(n))
+                self._piece(out, chr(n), pieces)
             elif tok == _TOK_PARTIAL:
                 raise _Error(4, i)
             elif tok == _TOK_INVALID:
@@ -3191,11 +3442,14 @@ class xmlparser:
             tok, nxt = sc.content_tok(s, end)
             if doc:
                 self._ev[1] = nxt
+            h = _TOKEN_COPIES * _str_cost(nxt - s) if nxt > s else 0
+            self._acc[3] += h - self._led[4]
+            self._led[4] = h
             if tok not in (_TOK_INVALID, _TOK_PARTIAL, _TOK_PARTIAL_CHAR, _TOK_NONE):
                 after = nxt
                 if tok == _TOK_TRAILING_RSQB or tok == _TOK_TRAILING_CR:
                     after = s if have_more else (end if self._pc < 0 or not doc else len(t))
-                self._account(self._blen(t[s:after]) if doc else len(t[s:after].encode("utf-8", "surrogatepass")),
+                self._account(self._blen_span(t, s, after) if doc else _u8_span(t, s, after),
                               doc)
             if tok == _TOK_TRAILING_CR:
                 if have_more:
@@ -3263,7 +3517,7 @@ class xmlparser:
                     self._charge(_FRAME_COST)
                     entity.open = True
                     etext = entity.text
-                    self._open.append([entity, etext, 0, self._tag_level, _Tok(etext, len(etext), -1, self._chars),
+                    self._open.append([entity, etext, 0, self._tag_level, _Tok(etext, len(etext), -1, self._chars, False, self),
                                        True])
                     self._processor = "entity"
                     return (nxt, "reenter")
@@ -3413,8 +3667,11 @@ class xmlparser:
             tok, nxt = sc.cdata_section_tok(s, end)
             if doc:
                 self._ev[1] = nxt
+            h = _TOKEN_COPIES * _str_cost(nxt - s) if nxt > s else 0
+            self._acc[3] += h - self._led[4]
+            self._led[4] = h
             if tok not in (_TOK_INVALID, _TOK_PARTIAL, _TOK_PARTIAL_CHAR, _TOK_NONE):
-                self._account(self._blen(t[s:nxt]) if doc else len(t[s:nxt].encode("utf-8", "surrogatepass")), doc)
+                self._account(self._blen_span(t, s, nxt) if doc else _u8_span(t, s, nxt), doc)
             if tok == _TOK_CDATA_SECT_CLOSE:
                 if self.EndCdataSectionHandler is not None:
                     self._report("EndCdataSectionHandler")
@@ -3456,8 +3713,11 @@ class xmlparser:
             self._ev[0] = s
             tok, nxt = sc.prolog_tok(s, end)
             self._ev[1] = nxt
+            h = _TOKEN_COPIES * _str_cost(nxt - s) if nxt > s else 0
+            self._acc[3] += h - self._led[4]
+            self._led[4] = h
             if tok not in (_TOK_INVALID, _TOK_PARTIAL, _TOK_PARTIAL_CHAR, _TOK_NONE):
-                self._account(self._blen(t[s:nxt]), True)
+                self._account(self._blen_span(t, s, nxt), True)
             if tok == -_TOK_PROLOG_S:
                 self._default_text(t, s, nxt)
                 return (nxt, False)
@@ -3484,16 +3744,53 @@ class xmlparser:
             s = nxt
 
     # ------------------------------------------------------------------ attributes and namespaces (storeAtts)
+    def _get_atts(self, t, i, end):
+        """getAtts over a start tag the tokenizer accepted, from just after its element name to its end: [name
+        start, name end, value start, value end, normalized] for each attribute, each entry charged before it is
+        added. A stateful scan: every match ends at most _WINDOW characters after it starts, and none reads past the
+        tag."""
+        atts = []
+        while True:
+            j = _run_to(_WS_RUN, t, i, end)
+            if j == i:
+                return atts
+            k = _run_to(_ANAME_RUN, t, j, end)
+            if k == j:
+                return atts
+            e = _run_to(_WS_RUN, t, k, end)
+            if e >= end or t[e] != "=":
+                return atts
+            q = _run_to(_WS_RUN, t, e + 1, end)
+            if q >= end or (t[q] != "'" and t[q] != '"'):
+                return atts
+            vs = q + 1
+            ve = _run_to(_VALUE_RUN[t[q]], t, vs, end)
+            if ve >= end:
+                return atts
+            self._charge(_ENTRY_COST)
+            atts.append([j, k, vs, ve, _is_normal(t, vs, ve)])
+            i = ve + 1
+
     def _store_atts(self, sc, t, s, nxt, raw_name, bindings, account_direct, doc):
         """storeAtts: the element's name (expanded) and its attributes, as the start handler gets them"""
         dtd = self._dtd
         et = self._element_type(raw_name)
-        atts = sc.atts if sc.atts is not None and sc.s is t else _get_atts(t, s + 1 + len(raw_name), self._chars)
+        if sc.atts is not None and sc.s is t:
+            atts = sc.atts
+        else:
+            if sc.atts is not None:
+                sc._drop_atts(sc.atts)
+            atts = self._get_atts(t, s + 1 + len(raw_name), nxt)
         sc.atts = None
-        cost = 0
+        # (each attribute: its span entry (charged when it was found), its name, a normalized value's string, and
+        # its entries in the tables built here; an expanded value and an expanded name are charged as they are
+        # built, below; all of it released when the start handler has its arguments)
+        cost = len(atts) * _ENTRY_COST
+        add = 0
         for na, nb, va, vb, normalized in atts:
-            cost += _str_cost(nb - na) + _str_cost(vb - va) + _ENTRY_COST
-        self._charge(cost)
+            add += _str_cost(nb - na) + 3 * _ENTRY_COST + (_str_cost(vb - va) if normalized else 0)
+        self._charge(add)
+        cost += add
         try:
             seen = {}
             app = []
@@ -3510,6 +3807,8 @@ class xmlparser:
                         if k is not None:
                             is_cdata = et.default_atts[k][2]
                     value = self._store_attribute_value(is_cdata, t, va, vb, account_direct, False)
+                    c = _str_cost(len(value))
+                    cost += c
                 else:
                     value = t[va:vb]
                 if att.prefix is not None:
@@ -3522,6 +3821,8 @@ class xmlparser:
             n_specified = len(app)
             for att, value, is_cdata in et.default_atts:
                 if att not in seen and value is not None:
+                    self._charge(3 * _ENTRY_COST)
+                    cost += 3 * _ENTRY_COST
                     if att.prefix is not None:
                         if att.xmlns:
                             self._add_binding(att.prefix, att, value, bindings)
@@ -3538,7 +3839,10 @@ class xmlparser:
                     b = att.prefix.binding
                     if b is None:
                         raise _Error(27)
-                    uname = b.uri + att.name[att.name.index(":") + 1:]
+                    c = _str_cost(len(b.uri) + len(att.name) + len(self._sep) + len(b.prefix.name or ""))
+                    self._charge(c)
+                    cost += c
+                    uname = b.uri + att.name[_find(att.name, ":", 0, len(att.name)) + 1:]
                     if uname in expanded:
                         raise _Error(8)
                     expanded.add(uname)
@@ -3554,7 +3858,7 @@ class xmlparser:
                     b = et.prefix.binding
                     if b is None:
                         raise _Error(27)
-                    local = raw_name[raw_name.index(":") + 1:]
+                    local = raw_name[_find(raw_name, ":", 0, len(raw_name)) + 1:]
                 elif dtd.default_prefix.binding is not None:
                     b = dtd.default_prefix.binding
                     local = raw_name
@@ -3641,8 +3945,12 @@ def _name_length(t, a, chars):
         i = j
 
 
-_ATT_EXTRACT = _re.compile("[\\t\\n\\r ]+([^\\t\\n\\r =]+)[\\t\\n\\r ]*=[\\t\\n\\r ]*(?:\"([^\"]*)\"|'([^']*)')")
+# (getAtts over a start tag the tokenizer accepted, step by step, each match ending at most _WINDOW characters on)
+_WS_RUN = _re.compile("[\\t\\n\\r ]*")
+_ANAME_RUN = _re.compile("[^\\t\\n\\r =]*")
+_VALUE_RUN = {"'": _re.compile("[^']*"), '"': _re.compile('[^"]*')}
 _NOT_NORMAL = _re.compile("[&\\t\\r\\n]|  ")
+_DIGITS = _re.compile("[0-9]*")
 # (an attribute value's run of data, spaces and line ends; its line ends and tabs, each one space; and, for a
 # tokenized type, its runs of spaces)
 _ATT_PLAIN = _re.compile("[^&<" + _INVALID + "]*")
@@ -3650,20 +3958,31 @@ _ATT_LINE_END = _re.compile("\\r\\n?|[\\n\\t]")
 _SPACES = _re.compile("  +")
 
 
-def _get_atts(t, i, chars):
-    """getAtts over a well-formed start tag from just after its element name: [name start, name end, value start,
-    value end, normalized] for each attribute; a value is normalized if it has no reference, line end or tab, no
-    leading or trailing space, and no two spaces in a row"""
-    atts = []
+def _run_to(r, t, i, end):
+    """The end of the run of r (a starred class) from i, before end: matched in windows of at most _WINDOW
+    characters"""
     while True:
-        m = _ATT_EXTRACT.match(t, i)
-        if m is None:
-            return atts
-        g = 2 if m.group(2) is not None else 3
-        vs, ve = m.start(g), m.end(g)
-        normalized = not (vs < ve and (t[vs] == " " or t[ve - 1] == " " or _NOT_NORMAL.search(t, vs, ve)))
-        atts.append([m.start(1), m.end(1), vs, ve, normalized])
-        i = m.end()
+        lim = min(end, i + _WINDOW)
+        j = r.match(t, i, lim).end()
+        if j < lim or lim >= end:
+            return j
+        i = j
+
+
+def _is_normal(t, vs, ve):
+    """An attribute value needs no normalization: no reference, line end or tab, no leading or trailing space and no
+    two spaces in a row (searched in windows of at most _WINDOW characters, each overlapping the last by one)"""
+    if vs < ve and (t[vs] == " " or t[ve - 1] == " "):
+        return False
+    a = vs
+    while a < ve:
+        lim = min(ve, a + _WINDOW)
+        if _NOT_NORMAL.search(t, a, lim) is not None:
+            return False
+        if lim >= ve:
+            break
+        a = max(lim - 1, a + 1)
+    return True
 
 
 def _char_ref_number(t, s):
@@ -3694,7 +4013,7 @@ def _char_ref_number(t, s):
 
 
 def _normalize_lines(s):
-    if "\r" not in s:
+    if _find(s, "\r", 0, len(s)) < 0:
         return s
     return s.replace("\r\n", "\n").replace("\r", "\n")
 
@@ -3776,15 +4095,14 @@ def _parse_xml_decl(t, s, nxt):
     version = None
     encname = None
     standalone = -1
-    if t[na:nb] != "version":
+    if nb - na != 7 or t[na:nb] != "version":
         return (None, None, -1, na)
     vend = i2 - 1
     if va == vend:
         return (None, None, -1, va)
-    v = t[va:vend]
-    if not (len(v) >= 3 and v[:2] == "1." and v[2:].isdigit() and v[2:].isascii()):
+    if not (vend - va >= 3 and t[va:va + 2] == "1." and _run_to(_DIGITS, t, va + 2, vend) == vend):
         return (None, None, -1, va)
-    version = v
+    version = t[va:vend]
     i = i2
     ok, na, nb, va, i2 = _pseudo_attribute(t, i, end)
     if not ok:
@@ -3851,14 +4169,36 @@ def ParserCreate(*args, **kwargs):
     return XMLParserType(_CREATE, encoding, namespace_separator, intern)
 
 
+def _encode_utf8(data):
+    """data.encode("utf-8"), a window of characters at a time (CPython's exception, from the whole, if one fails)"""
+    n = len(data)
+    if n <= _WINDOW:
+        if _SPY is not None:
+            _SPY("encode", n)
+        return data.encode("utf-8")
+    pieces = []
+    for a in range(0, n, _WINDOW):
+        if _SPY is not None:
+            _SPY("encode", min(n, a + _WINDOW) - a)
+        try:
+            pieces.append(data[a:a + _WINDOW].encode("utf-8"))
+        except UnicodeEncodeError:
+            data.encode("utf-8")
+            raise
+    return b"".join(pieces)
+
+
 def _advance(pos, seg):
     """(line, column) after seg from pos, as expat's XmlUpdatePosition counts: CR LF, CR and LF each one line"""
-    line, col = pos
-    nl = seg.count("\n") + seg.count("\r") - seg.count("\r\n")
+    return _advance_in(seg, 0, len(seg), pos[0], pos[1])
+
+
+def _advance_in(t, a, b, line, col):
+    """(line, column) after t[a:b] from (line, col), counted a window at a time"""
+    nl = _count(t, "\n", a, b) + _count(t, "\r", a, b) - _count(t, "\r\n", a, b)
     if nl:
-        k = max(seg.rfind("\n"), seg.rfind("\r"))
-        return (line + nl, len(seg) - k - 1)
-    return (line, col + len(seg))
+        return (line + nl, b - _last_line_end(t, a, b) - 1)
+    return (line, col + b - a)
 
 
 def _unmap(table, text):

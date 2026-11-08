@@ -190,6 +190,26 @@ ATTRIBUTE_VALUES = [
     "<!DOCTYPE r [<!ENTITY e ' p\tq '><!ATTLIST r a NMTOKENS #IMPLIED>]><r a=' &e; x &#32; &#9; y&e;' c=' &e; '/>",
     "<!DOCTYPE r [<!ATTLIST r a NMTOKENS ' x\t y\n'>]><r/>",
 ]
+# (r2: an attribute the fast path leaves to getAtts, then text with an "=" after the tag; and the boundaries the
+# review's mutants found unpinned: grader's N3, R3, R5, R6, R9)
+R2_DOCS = [
+    "<r><a x='&amp;' />b='2'</r>", "<r><a x='&amp;' >b='2' c=\"3\"</a></r>", "<r><a x='&#9;y'\n/>z='1'</r>",
+    "<a p:x='1'/>", "<a xmlns:q='urn:q' q:y='1' p:x='1'/>",
+    "<a>&#x1E;</a>", "<a>&#x1F;</a>", "<a>&#x20;&#x9;&#xA;&#xD;</a>", "<a b='&#x1F;'/>", "<a b='&#x20;&#x1E;'/>",
+    "<a><!-- x\ry\r\nz\r --><?p a\rb\r\nc\r?></a>", "<!-- c\r --><?q d\r?><a/><!-- e\r -->",
+    "<!DOCTYPE a PUBLIC \"a  b\n c\t\" \"x.dtd\"><a/>",
+    "<!DOCTYPE a [<!ENTITY e PUBLIC \" p  q \r\n r \" \"s\"><!NOTATION n PUBLIC \"  m\n n \">]><a/>",
+    "<a x='&u;'/>", "<!DOCTYPE a [<!ENTITY e '&u;'>]><a x='&e;'/>", "<!DOCTYPE a [<!ATTLIST a x CDATA '&u;'>]><a/>",
+    "<!DOCTYPE a [<!ENTITY e 'v'><!ATTLIST a x CDATA '&e;&u;'>]><a/>",
+    "<!DOCTYPE a SYSTEM 'a.dtd' [<!ENTITY e '&u;'>]><a x='&e;'/>",
+]
+# (grader's B1: text that fills pyexpat's 8192-character buffer exactly, one under and one over, in fragments)
+BUFFER_RECIPES = [[["<a>", 1], ["x", n], ["&amp;", 1], ["y", k - n - 1], ["</a>", 1]] for k in (8191, 8192, 8193)
+                  for n in (0, 4095, k - 1)]
+BUFFER_RECIPES += [[["<a>", 1], ["x", k], ["</a>", 1]] for k in (8191, 8192, 8193, 16384, 16385)]
+# (grader's D4: expat's XML_CONTEXT_BYTES (1024) in the reparse deferral's growth trigger, as chunk sizes reach it)
+CONTEXT_RECIPES = [([["<r>", 1], ["<a/>", 800], ["<!--", 1], ["c", 6000], ["-->", 1], ["<b/>", 50], ["</r>", 1]], (256, 512, 700)),
+                   ([["<r>", 1], ["<a/>", 300], ["<!--", 1], ["c", 6000], ["-->", 1], ["<b/>", 50], ["</r>", 1]], (1500, 3000))]
 MULTILINE_ATTRIBUTE = [["<svg><path d='", 1], ["M 10 20\n\t\tL 30 40 C 1  2\r\n", 10000], ["'/></svg>", 1]]
 
 
@@ -284,6 +304,22 @@ def record():
     for d in ATTRIBUTE_VALUES:
         add("well-formed", d, configs=(("all", dict(ET_CONFIG, extra=True)),))
     add_long("long", MULTILINE_ATTRIBUTE, build(MULTILINE_ATTRIBUTE)[:40], handlers=None)
+    # (r2)
+    for d in R2_DOCS:
+        add("r2", d, configs=(("all", dict(ET_CONFIG, extra=True)), ("raw", dict(RAW_CONFIG, extra=True))))
+    for recipe in BUFFER_RECIPES:
+        add_long("buffer", recipe, f"{len(build(recipe))} chars, & at {build(recipe).find('&')}", handlers=None)
+    for recipe, sizes in CONTEXT_RECIPES:
+        doc = build(recipe)
+        for size in sizes:
+            cut = list(range(size, len(doc), size))
+            chunks = [doc[a:b] for a, b in zip([0] + cut, cut + [len(doc)])]
+            for deferral in (True, False):
+                kw = dict(ET_CONFIG, deferral=deferral)
+                cases.append({"group": "context", "label": f"{doc[:20]}… every {size}", "config": "et",
+                              "chunking": f"{size}", "deferral": deferral, "recipe": recipe, "cuts": cut, "bytes": False,
+                              "options": {k: v for k, v in kw.items() if k != "deferral"},
+                              "result": trace(expat, chunks, **kw)})
     return cases
 
 
