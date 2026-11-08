@@ -1175,6 +1175,7 @@ function hiddenHost(threadId: string, a: Artifact) {
 
 function mountPairing(ws: Workspace) {
   agentUi = mountAgentPairing(ws, {
+    program: "sagebrush-agent",
     button: $("#connect"),
     notebookEdit: editNotebook,
     reload: {
