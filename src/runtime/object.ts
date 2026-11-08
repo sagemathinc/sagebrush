@@ -625,7 +625,11 @@ export function putAttr(o: any, name: string, v: any): void {
   // instance's __dict__ and its assignment, import *)
   if (implField(o, name)) reservedAttr(o, name);
   if (arraySlot(o, name)) raise(T.AttributeError, `'${typeName(o)}' object attribute '${name}' is not supported`);
-  if (!hasOwn.call(o, name)) Object.defineProperty(o, name, { value: v, writable: true, enumerable: true, configurable: true });
+  // Namespace proxies must take their set trap: defining on the proxy would
+  // put the name on its empty JavaScript target instead of in the Python
+  // mapping.  (import * writes through both the exact-dict and layered forms.)
+  if (o[NS_DICT] !== undefined || o[NS_GLOBALS] !== undefined) o[name] = v;
+  else if (!hasOwn.call(o, name)) Object.defineProperty(o, name, { value: v, writable: true, enumerable: true, configurable: true });
   else o[name] = v;
 }
 
