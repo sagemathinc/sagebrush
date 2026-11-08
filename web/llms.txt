@@ -16,7 +16,7 @@ Sagebrush notebooks are **reactive, but they are not marimo**: in Python and Sag
 
 ## Using the page
 
-- Cells run in a Web Worker in the visitor's browser; variables persist between cells and are shared with the Console (an interactive prompt).
+- Cells run in a Web Worker in the visitor's browser; variables persist between cells. The Console (an interactive prompt in the ⋯ menu) is a separate, fresh session: it doesn't see the notebook's variables.
 - Cells are code or Markdown (text with headings, lists, tables, links, images and LaTeX math `$...$`/`$$...$$`, rendered with KaTeX), as in Jupyter; the WebMCP tool `add_markdown` adds one.
 - Notebooks and their output are saved in the browser (IndexedDB) as you work; File opens, duplicates, deletes, downloads and uploads `.ipynb` (and `.py`). Python's `open()`, `os.listdir` etc. work on files kept in the browser; the Files panel uploads, downloads and deletes them.
 - Examples: File > Examples… (also New > From an example…) opens the examples gallery (/examples/: notebooks, boards and LaTeX documents, each with a preview); Open a copy puts one into your workspace, in a new folder of its own, inside the Examples folder of your files.
