@@ -81,7 +81,8 @@ const shimOps = (fs: any): FileOps => {
 // (the descriptor calls for an fs: Node's, or the web build's shim; the
 // tests use it with the shim itself)
 export function fileOpsFor(fs: any): FileOps {
-  return typeof fs.openSync === "function" ? nodeOps(fs) : shimOps(fs);
+  // (the shim is known by its onceOpen: it has an openSync too now, os.open's descriptors, P3b-2, but not node's)
+  return typeof fs.onceOpen === "function" ? shimOps(fs) : nodeOps(fs);
 }
 
 // errno, strerror and the OSError subclass CPython makes of that errno

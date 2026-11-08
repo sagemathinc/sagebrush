@@ -12,7 +12,7 @@ relay of test_remote_relay.py, with the page's key a real WebCrypto P-256 key (r
   gone after a kill, an exit and the runner's stop;
 - grants: a takeover ends the older page's grant ("elsewhere", close {gen}); a late message from an ended grant
   changes nothing; a page-close detaches (the shell goes on); a lost leg ends every grant and a new leg needs a
-  fresh proof; `in` and `ack` are not served yet (T-1b);
+  fresh proof;
 - a terminal message over 65,536 bytes closes its page (1009).
 
     python engine/py/test_remote_terminal.py
@@ -125,14 +125,24 @@ class Run:
         self.relay.stop()
 
 
-async def recv(leg, timeout=10):
-    """The next application message the runner sent, with its page's generation: (gen, obj), or ("closed", code)."""
+STREAM = ("replay", "out", "live", "inack")
+
+
+async def recv(leg, timeout=10, stream=False):
+    """The next application message the runner sent, with its page's generation: (gen, obj), or ("closed", code).
+    Unless `stream`, the output stream's messages (replay, out, live, inack) are set aside in leg.streams[gen]."""
     while True:
         kind, v = await leg.next(timeout)
         if kind == "text":
             i = getattr(leg, "_ti", 0)
             leg._ti = i + 1
-            return leg.got_gens[i], json.loads(v)
+            g, m = leg.got_gens[i], json.loads(v)
+            if not stream and isinstance(m, dict) and m.get("t") in STREAM:
+                if not hasattr(leg, "streams"):
+                    leg.streams = {}
+                leg.streams.setdefault(g, []).append(m)
+                continue
+            return g, m
         if kind in ("close", "eof"):
             return "closed", v
 
@@ -339,10 +349,6 @@ async def test_session_lifecycle():
         p.send({"t": "resize", "rows": 30, "cols": 100})
         assert await until(lambda: "30 100" in ring_text(s)), ring_text(s)
         # (malformed resizes close the page; they change nothing)
-        # (in and ack: not served yet)
-        p.send({"t": "in", "b": "eA=="})
-        g, m = await recv(leg)
-        assert m == {"t": "error", "error": "not_yet"}, m
         # (kill names its own session only: another id closes the page, nothing stopped)
         p2 = await tpaired(t, leg, sg, 2)
         m2 = await p2.open()
@@ -629,7 +635,8 @@ async def test_flooding_producer_bounded():
                 # (work bounded: at most the rate per second, plus the final drain of one ring)
                 assert t.terms.stats["outBytes"] <= T.TERMINAL_LIMITS["rate"] * (elapsed + 1) + T.TERMINAL_LIMITS["ring"], \
                     (t.terms.stats["outBytes"], elapsed)
-                assert len(s.ring.buf) <= T.TERMINAL_LIMITS["ring"] and t.terms.stats["ratePauses"] >= 1
+                # (the page never acks: its credit, not the rate ceiling, may be what held the reads back (T-1b))
+                assert len(s.ring.buf) <= T.TERMINAL_LIMITS["ring"]
             finally:
                 await t.end()
     finally:
