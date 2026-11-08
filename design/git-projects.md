@@ -44,11 +44,9 @@ git_base                one row per path in base_commit's tree
 
 **v1 copies public repositories only.** No token is involved at any step. Private repositories need their own short addendum (§7).
 
-1. **Ask.** The person ("Copy from GitHub" on the Files page, or the terminal's `git clone`, §5) names a repository, a branch and a new folder name. The request is the person's signed-in session, from Sagebrush's own origin. An agent grant can't start, cancel or finish an import. The server:
-   - resolves the branch to a commit sha once, through `api.github.com`, and uses only that sha from then on;
-   - reads the commit's tree (`/git/trees/{sha}?recursive=1`). If GitHub answers `truncated`, it stops: `Can't copy owner/repo: GitHub lists it in parts (it has too many files for one listing).`;
-   - creates the import's row (below), and takes reservations (§2.2).
-2. **Fetch once.** The server downloads `/repos/{owner}/{repo}/zipball/{sha}` into one R2 staging object. GitHub answers with a redirect: the server follows exactly one, and only to `https://codeload.github.com/`; anything else is refused and its body cancelled. A zip archive, not a tar one, so later batches can read their files by range.
+1. **Ask, from the page.** The person ("Copy from GitHub" on the Files page, or the terminal's `git clone`, §5, which runs in the page) names a repository, a branch and a new folder name. The page, not the server, calls `api.github.com`: it resolves the branch to a commit sha, and reads that commit's tree (`/git/trees/{sha}?recursive=1`). GitHub's limits for those calls are then the person's own (60 an hour without a token, or their token's, which stays on the device), not a limit shared by every Sagebrush server. If GitHub answers `truncated`: `Can't copy owner/repo: GitHub lists it in parts (it has too many files for one listing).` If GitHub refuses for its rate limit: `GitHub is busy; try again in a few minutes.`
+   The page sends the server the sha and the tree (paths, modes and blob ids), on the person's signed-in session, from Sagebrush's own origin. An agent grant can't start, cancel or finish an import. The tree is the person's claim, used only to sort their own import's entries (step 3): every entry still passes §2.1, and `git_base`'s ids are computed from the bytes, never copied from the claim. A false tree can only make the person's own files listed as `differs` or missing. The server creates the import's row (below), and takes reservations (§2.2).
+2. **Fetch once.** The server downloads `https://codeload.github.com/{owner}/{repo}/zip/{sha}` (GitHub's archive host, which isn't the rate-limited API) into one R2 staging object. It follows no redirect: any answer but 200 is refused and its body cancelled. A zip archive, not a tar one, so later batches can read their files by range.
 3. **Import in batches,** from a durable cursor. Each batch reads one contiguous byte range of the zip (entries are stored in order) and, per entry:
    - validates its path (§2.1) and matches it to the tree;
    - inflates it as a stream, computing its SHA-256 and git blob id;
@@ -68,8 +66,8 @@ git_base                one row per path in base_commit's tree
 
 Before an entry can be staged:
 - the archive's one top folder (GitHub's `owner-repo-sha/`) is removed; an entry outside it is refused;
-- the rest must pass the workspace's path rules (design/fs-sync.md §4.4): no absolute path, no `.` or `..` component, no control character or forbidden separator, at most 1,024 bytes and 64 folders deep;
-- two entries with the same NFC name, or that differ only by case, or a file where another entry needs a folder: both are excluded as `invalid_name`;
+- the rest must pass the workspace's own path rules (normPath, as #882's `workspace_refuses` implements them): no absolute path, no `.` or `..` component, no control character or forbidden separator, at most 32 folders deep, 1,024 UTF-16 units for the path and 255 for a name;
+- two entries with the same NFC name, or a file where another entry needs a folder: both are excluded as `invalid_name`. Names that differ only by case are both kept, as the workspace allows (fs-sync handles them on a case-insensitive disk);
 - links (tree mode 120000) and submodules (160000) are known from the tree, not the zip, and are never written: `link`, `submodule`;
 - fs-sync's mandatory ignores (§4.4) give `ignored`; a tree path missing from the archive is listed;
 - a malformed or truncated zip (a bad entry header, a CRC or length mismatch, an entry outside the staged object) stops the import, and nothing appears.
@@ -112,9 +110,9 @@ Each enforced, with at-limit and one-over tests in PR 2:
 
 William, Nov 8 2026 (about 3:05 PM PST): "for really everything else I do, it would be via api calls to the remote git server… `git checkout branch`, worktree stuff too… all uses this 'kung fu' approach of not even doing the work."
 
-- **`git checkout <branch>`** is §4 against another branch's commit, refused while the folder has changes not yet proposed (`git checkout: commit or discard your changes first, or copy the branch into another folder.`). The server compares the two commits' trees by git blob id: a path whose id is unchanged keeps its SHA-256 from `git_base`, so only files that actually differ are fetched (one GitHub blob request each, at most 500 per batch; a large difference falls back to the zip of §2). Then `ref` changes.
+- **`git checkout <branch>`** is §4 against another branch's commit, refused while the folder has changes not yet proposed (`git checkout: this folder has changes not yet proposed. Propose or discard them first, or use git worktree add to put the branch in another folder.`). It is §2's zip of the other commit, then §4's join: one path, nothing new. Bytes already held are never stored again (blobs are by SHA-256), so a checkout pays only the download, and stores only the files that differ. Then `ref` changes.
 - **A worktree** is another folder following another branch: `git clone` again, or `git worktree add <folder> <branch>`. Bytes the two share are stored once (blobs are by SHA-256), so a second folder costs little more than its rows.
-- **Other hosts:** everything here is a few calls (resolve a branch, list a tree, fetch an archive or a blob, create a ref and a pull request). GitLab and Gitea have the same calls, so a second host is a second implementation of that small list. v1 is GitHub only.
+- **Other hosts:** everything here is a few calls (resolve a branch, list a tree, fetch an archive, create a ref and a pull request). GitLab and Gitea have the same calls, so a second host is a second implementation of that small list. v1 is GitHub only.
 
 ## 5. A small `git` we own, in the terminal
 
@@ -145,10 +143,10 @@ The `/git` prototype's flow:
 | # | PR | Visible? | Owner | Tests it must carry, besides at-limit and one-over |
 |---|---|---|---|---|
 | 1 | This design (docs only) | no | sagebrush | |
-| 2 | Server: tables, the public import (§2), behind a DEV flag | no (flag) | sync-client | §2.1's malformed, collision, link and type cases; `differs` and a missing tree path; redirect to another host refused; cancel, reset and deadline during the fetch, between batches and before the final transaction, with nothing visible; quota declined mid-import; a finish twice; garbage collection during an import leaves its bytes |
+| 2 | Server: tables, the public import (§2), behind a DEV flag | no (flag) | sync-client | §2.1's malformed, collision, link and type cases; `differs` and a missing tree path; an answer other than 200 refused; a false tree only lists the person's own files as `differs`; GitHub's rate-limit refusal shown; cancel, reset and deadline during the fetch, between batches and before the final transaction, with nothing visible; quota declined mid-import; a finish twice; garbage collection during an import leaves its bytes |
 | 3 | Device: what changed, diffs, the frozen proposal, the send (§3) | yes: screenshots to William first | sagebrush + board (UI) | an edit after review withdraws the proposal; a cloud-only change fetched and checked; notebook outputs never sent; a branch name taken; a conflict copy refuses; an agent grant and `git push` can't send |
 | 4 | "Update from GitHub" (§4) | yes: screenshots first | sync-client | each §4 row, including a file that becomes `excluded`, and an edit landing between staging and the final transaction |
 | 5 | The terminal's `git` (§5), and the agent review flow from `git-proto` (§6) | yes | sagebrush | each command, and an unsupported one |
-| 6 | `git checkout` and `git worktree add` (§4.1) | yes | sync-client | unchanged ids reuse bytes with no fetch; checkout refused with changes; the fallback to the zip |
+| 6 | `git checkout` and `git worktree add` (§4.1) | yes | sync-client | bytes already held not stored again; checkout refused with changes |
 
 **Not before tiered-files PR 4.** Until fetch-on-open ships, every device downloads every file, so an 8,573-file import would download everywhere. PRs 2 and 3 stay behind the DEV flag until then.
