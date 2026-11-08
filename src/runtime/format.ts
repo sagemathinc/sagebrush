@@ -759,11 +759,12 @@ export function fmt(v: any, conv: string | null, spec: string): string {
 // subclass with its DeprecationWarning; __index__'s an int, converted)
 // (an exception raised by Python code or the runtime, not a JS failure)
 const isPyException = (e: any): boolean => e !== null && typeof e === "object" && e.$cls !== undefined && isinstance(e, T.BaseException);
-// An int subclass whose __float__ is its own, not int's
+// An int subclass whose __float__ is its own, not int's (None too: called,
+// it is CPython's TypeError)
 function intSubclassFloat(v: any): boolean {
   if (!(v instanceof PrimBox) || !isPyInt(v.$v)) return false;
   const f = lookupType(typeOf(v), "__float__");
-  return f !== undefined && f.$unboxing !== true && f !== T.int.$dict.get("__float__");
+  return f !== undefined && (f === null || (f.$unboxing !== true && f !== T.int.$dict.get("__float__")));
 }
 function floatOfArg(v: any): number {
   let name = "__float__";
@@ -798,8 +799,11 @@ export function percentFormat(fmtStr: string, args: any, bytesMode = false): str
     // an int subclass: its exact value (fv would round it through a double,
     // changing 2^53 + 1: the fifth review's V1)
     if (v instanceof PrimBox && isPyInt(v.$v)) return BigInt(v.$v);
-    if (!needIndex && fv(v) !== undefined) return BigInt(Math.trunc(fv(v)!));
-    for (const name of needIndex ? ["__index__"] : ["__index__", "__int__"]) {
+    // (an exact float; a float subclass's own __index__ or __int__ is used, as
+    // mainformatlong's PyNumber_Index / PyNumber_Long)
+    if (!needIndex && fv(v) !== undefined && !(v instanceof PrimBox)) return BigInt(Math.trunc(fv(v)!));
+    // (%o %x %X %c: PyNumber_Index; %d %i %u: PyNumber_Long, __int__ before __index__)
+    for (const name of needIndex ? ["__index__"] : ["__int__", "__index__"]) {
       const f = lookupType(typeOf(v), name);
       if (f !== undefined) {
         // (as CPython's mainformatlong: the result checked as PyNumber_Index's

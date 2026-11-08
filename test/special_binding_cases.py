@@ -887,3 +887,16 @@ for exc in (KeyboardInterrupt, SystemExit, GeneratorExit, StopIteration, MemoryE
 print("-- bytes %c's range (grader's C5): 255, 256 and -1, as ints and through __index__")
 for k in (255, 256, -1):
     print(k, tb(lambda: b"%c" % k), tb(lambda: b"%c" % type("CI", (), {"__index__": lambda self: k})()))
+print("-- #860 r3: a None slot (astra), and %d's PyNumber_Long order (__int__ before __index__)")
+for nbase in (int, float, object):
+    for nname in ("__float__", "__index__", "__int__"):
+        NC = type(nbase.__name__ + "N" + nname, (nbase,), {nname: None})
+        no = NC(2) if nbase is not object else NC()
+        print(nbase.__name__, nname, "|", " | ".join(tb(lambda: f % no) for f in ("%f", "%d", "%x", "%c", "%e")), "| bytes", " | ".join(tb(lambda: f % no) for f in (b"%f", b"%d", b"%c")), "| format", tb(lambda: format(no, "f")), tb(lambda: format(no, "d")) if nbase is int else "")
+for nbase in (object, float):
+    for iv, xv in ((7, 8), ("s", 8), (7, "s"), (None, 8), (7, None)):
+        nd = {"__int__": None if iv is None else (lambda self, v=iv: v), "__index__": None if xv is None else (lambda self, v=xv: v)}
+        no = type("NB", (nbase,), nd)(*((2.5,) if nbase is float else ()))
+        print(nbase.__name__, repr(iv), repr(xv), "|", " | ".join(tb(lambda: f % no) for f in ("%d", "%i", "%u", "%x", "%o", "%c", "%f")), "| bytes", " | ".join(tb(lambda: f % no) for f in (b"%d", b"%x", b"%c", b"%f")))
+no = type("NP", (float,), {})(2.5)
+print("plain float subclass |", " | ".join(tb(lambda: f % no) for f in ("%f", "%d", "%x", "%c")), "| bytes", " | ".join(tb(lambda: f % no) for f in (b"%d", b"%c")))
