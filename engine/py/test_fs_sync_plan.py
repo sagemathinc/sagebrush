@@ -180,6 +180,29 @@ def test_snapshot_name_on_a_data_file():
     assert P.plan({}, {"x.ipynb": Remote("notebook", F1, revision="r")}, {}, P.BOTH, "lap").steps[0].kind == P.SNAPSHOT
 
 
+def test_grader_pins():
+    # P32: a document is routed by its kind, not only its name: a chat at a path with no snapshot suffix
+    chat = {"notes": Remote("chat", F1, revision="r1")}
+    s = P.plan({"notes": Local(A)}, chat, {}, P.BOTH, "lap").steps
+    assert [x.kind for x in s] == [P.NOT_UPLOADED_OCCUPIED], s
+    s = P.plan({"notes": Local(A)}, chat, {"notes": Base(A, F1)}, P.BOTH, "lap").steps     # a data-file row: no proof
+    assert [x.kind for x in s] == [P.NOT_UPLOADED_OCCUPIED], s
+    # P21: a copy that fits `room` exactly is still named
+    p = "a.txt"
+    want = "a (conflict, lap).txt"
+    pl = P.plan({p: Local(B_)}, {p: Remote("file", F1, C)}, {p: Base(A, F1)}, P.BOTH, "lap", room=P._units(want))
+    assert pl.steps[0].kind == P.CONFLICT and pl.steps[0].copy == want, pl.steps
+    # P24: two conflicts whose names differ only in case get different copies
+    loc = {"A.txt": Local(B_), "a.txt": Local(B_)}
+    rem = {"A.txt": Remote("file", F1, C), "a.txt": Remote("file", F2, C)}
+    base = {"A.txt": Base(A, F1), "a.txt": Base(A, F2)}
+    copies = [s.copy for s in P.plan(loc, rem, base, P.BOTH, "lap").of(P.CONFLICT)]
+    assert copies == ["A (conflict, lap).txt", "a (conflict, lap) (2).txt"], copies
+    # P28: a snapshot-named data file with no revision records its hash as the version
+    s = P.plan({}, {"x.chat": Remote("file", F1, sha256=A)}, {}, P.BOTH, "lap").steps[0]
+    assert s.kind == P.DOWNLOAD and s.remote == A, s
+
+
 def test_snapshot_names_never_upload():
     for name in ("a.ipynb", "A.IPYNB", "b.board.json", "B.Board.JSON", "c.chat", "d/e/C.CHAT"):
         assert P.is_snapshot_name(name), name
