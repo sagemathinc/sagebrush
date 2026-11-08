@@ -18,19 +18,24 @@ import { mkdtempSync, readFileSync, readdirSync, statSync, rmSync } from "node:f
 import { createServer, request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { devtoolsPort, freePort } from "./test-port.mjs";
+import { devtoolsPort, startServe } from "./test-port.mjs";
 
 const here = new URL(".", import.meta.url).pathname;
 const dist = join(here, "dist");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let failures = 0;
 const ok = (cond, name) => { console.log((cond ? "ok   " : "FAIL ") + name); if (!cond) failures++; };
-setTimeout(() => { console.log("FAIL the test did not end within 600 s"); process.exit(1); }, 600_000).unref();
+// (where the test is, named in a deadline's or a signal's FAIL: a case and its step. Its own deadline fires inside its CI
+// job's 15 min (about 115 s here, after about 8 min of the job's other suites), so a hang is a named FAIL, not a cancel)
+let phase = "the build's table";
+setTimeout(() => { console.log(`FAIL the test did not end within 240 s (stuck in: ${phase})`); process.exit(1); }, 240_000).unref();
+// (every wait has an end: a promise not settled within `ms` rejects, naming what it waited for)
+const bounded = (p, ms, what) => { let timer; return Promise.race([p, new Promise((_, no) => { timer = setTimeout(() => no(new Error(`${what}: no end within ${ms / 1000} s`)), ms); })]).finally(() => clearTimeout(timer)); };
 // (every browser and server this test starts, killed however it ends: a failed case or the deadline's exit leaves none,
 // the grader's note on a17c3f58)
 const children = new Set();
 process.on("exit", () => { for (const c of children) try { c.kill("SIGKILL"); } catch {} });
-for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { console.log(`FAIL stopped by ${sig}`); process.exit(1); });
+for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { console.log(`FAIL stopped by ${sig} (in: ${phase})`); process.exit(1); });
 
 // the build's table, as the page has it (web/build.ts PRELOAD, in index.html's script)
 const html = readFileSync(join(dist, "index.html"), "utf8");
@@ -66,11 +71,14 @@ const DOCS = {
   "pandas-matlab.ipynb": NB("matlab", ["import pandas"]),
 };
 
-// web/dist behind a recording proxy; /t/<name> serves the notebooks above; `slow`: a path served at 256 KB/s
+// web/dist behind a recording proxy; /t/<name> serves the notebooks above; `slow`: a path served at 256 KB/s. serve.py
+// picks its own port and says it once listening (startServe, web/test-port.mjs: bounded), so no other listener can take
+// a port chosen for it first (freePort's port, closed, could be the proxy's own listen(0): the proxy then asked itself)
 async function site(slow = null, alter = null) {
-  const upstream = await freePort();
-  const server = spawn("python3", [join(here, "serve.py"), String(upstream)], { stdio: "ignore" });
+  const serve = startServe(() => spawn("python3", [join(here, "serve.py"), "0"], { stdio: ["ignore", "pipe", "pipe"] }));
+  const server = serve.child;
   children.add(server);
+  const upstream = await serve.port;
   const asked = [], bytes = new Map();
   const front = createServer((req, res) => {
     const path = new URL(req.url, "http://x").pathname;
@@ -95,8 +103,7 @@ async function site(slow = null, alter = null) {
     req.pipe(up);
   });
   await new Promise((r) => front.listen(0, "127.0.0.1", r));
-  for (let i = 0; i < 100; i++) { try { await fetch(`http://127.0.0.1:${upstream}/`); break; } catch { await sleep(100); } }
-  const stop = () => new Promise((r) => { server.kill(); front.closeAllConnections?.(); front.close(() => r()); });
+  const stop = () => bounded(new Promise((r) => { server.kill(); front.closeAllConnections?.(); front.close(() => r()); }), 10000, "the site's stop (the proxy's close)");
   return { url: `http://127.0.0.1:${front.address().port}/`, asked, bytes, stop };
 }
 
@@ -111,13 +118,22 @@ async function chromium(init = "") {
   const port = await devtoolsPort(profile, undefined, { child: chrome });
   const cdp = `http://127.0.0.1:${port}`;
   let target;
-  for (let i = 0; i < 300 && !target; i++) { try { target = (await (await fetch(cdp + "/json")).json()).find((t) => t.type === "page"); } catch { await sleep(100); } }
+  for (let i = 0; i < 300 && !target; i++) {
+    try { target = (await (await fetch(cdp + "/json", { signal: AbortSignal.timeout(5000) })).json()).find((t) => t.type === "page"); } catch {}
+    if (!target) await sleep(100);
+  }
+  if (!target) throw new Error("Chromium showed no page target");
   const ws = new WebSocket(target.webSocketDebuggerUrl);
-  await new Promise((r) => (ws.onopen = r));
+  await bounded(new Promise((r, no) => { ws.onopen = r; ws.onerror = ws.onclose = () => no(new Error("the DevTools socket closed before it opened")); }), 10000, "the DevTools socket's open");
+  // (a call answered, or rejected: at the socket's close, or after 30 s, naming its method and expression)
   let n = 0;
   const waiting = new Map();
-  ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); } };
-  const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
+  ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.id && waiting.has(m.id)) { waiting.get(m.id).r(m.result ?? m.error); waiting.delete(m.id); } };
+  ws.onerror = ws.onclose = () => { for (const [id, w] of waiting) { waiting.delete(id); w.no(new Error(`the DevTools socket closed during ${w.what}`)); } };
+  const send = (method, params = {}) => {
+    const id = ++n, what = method + (params.expression ? " " + JSON.stringify(params.expression.slice(0, 80)) : "");
+    return bounded(new Promise((r, no) => { waiting.set(id, { r, no, what }); ws.send(JSON.stringify({ id, method, params })); }), 30000, what).finally(() => waiting.delete(id));
+  };
   const ev = async (expression) => (await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true })).result?.value;
   const until = async (expr, ms = 30000) => { for (let i = 0; i < ms / 100; i++) { if (await ev(expr)) return true; await sleep(100); } return false; };
   await send("Page.enable");
@@ -138,14 +154,25 @@ async function chromium(init = "") {
 
 const count = (asked, f) => asked.filter((p) => p === f).length;
 const size = (f) => statSync(join(dist, f)).size;
-// (a case: a fresh site and browser, the notebook opened, `body` given them)
+// (a case: a fresh site and browser, the notebook opened, `body` given them; each step named in `phase`, and an error
+// keeps the step it was thrown in, as the close and the stop that follow it rename `phase`)
+let cases = 0;
+const thrownIn = (e) => { if (e && typeof e === "object" && !("phase" in e)) e.phase = phase; return e; };
 async function kase(doc, body, { init = "", slow = null, alter = null } = {}) {
-  const s = await site(slow, alter), { t, close } = await chromium(init);
+  const name = `case ${++cases} (${doc})`;
+  phase = `${name}: the site`;
+  const s = await site(slow, alter);
   try {
-    t.href = `${s.url}?open=${encodeURIComponent(s.url + "t/" + doc)}`;
-    ok(await t.open(t.href), `(${doc}: the page is ready)`);
-    await body(t, s);
-  } finally { await close(); await s.stop(); }
+    phase = `${name}: Chromium`;
+    const { t, close } = await chromium(init);
+    try {
+      phase = `${name}: the page's open`;
+      t.href = `${s.url}?open=${encodeURIComponent(s.url + "t/" + doc)}`;
+      ok(await t.open(t.href), `(${doc}: the page is ready)`);
+      phase = `${name}: its checks`;
+      await body(t, s);
+    } catch (e) { throw thrownIn(e); } finally { phase = `${name}: Chromium's close`; await close(); }
+  } catch (e) { throw thrownIn(e); } finally { phase = `${name}: the site's stop`; await s.stop(); }
 }
 
 try {
@@ -270,7 +297,7 @@ try {
     ok(SCI.every((f) => after.some((k) => k.endsWith(" " + f))) && SCI.every((f) => !s.asked.slice(at).includes(f)), "...sci's two files then kept by the service worker (at the Run), neither downloaded again: " + JSON.stringify({ after, asked: s.asked.slice(at) }));
   });
 } catch (e) {
-  ok(false, "the test threw: " + (e?.stack ?? e));
+  ok(false, `the test threw (in: ${e?.phase ?? phase}): ` + (e?.stack ?? e));
 }
 if (failures) { console.log(`${failures} failed`); process.exit(1); }
 console.log("all passed");
