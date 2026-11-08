@@ -60,7 +60,7 @@ A row's ⋯ menu gains one item, which reads as what it will do:
   Move to Trash
 ```
 
-- "Remove from this device" is shown greyed, with its reason, when it can't be done (§3.4's checks): "Has changes not yet in the cloud", "Is being downloaded", "Is a conflict copy", "Is open in a tab", "Is kept on this device: stop keeping it first", "Sync isn't running". It never removes bytes the cloud doesn't have.
+- "Remove from this device" is shown greyed, with its reason, when it can't be done (§3.4's checks): "Has changes not yet in the cloud", "Is being downloaded", "Is a conflict copy", "Is open in a tab", "Is kept on this device: stop keeping it first", "Sync isn't running", "Is needed to repair the copy in the cloud". It never removes bytes the cloud doesn't have.
 - On a folder, "Keep on this device" keeps everything in it, including what's added later: files saved into it on this device (offline too), moved or copied into it, or added from another device (William: "like OneDrive"; the rule and its tests are in §3.1).
 
 The Storage panel, with the new block on top of today's:
@@ -106,7 +106,9 @@ Opening a file that's in the cloud, while offline:
   - while it downloads, in place of the content: "Downloading: 12 of 140 MB" (§2);
   - no room for it on this device: "There isn't room on this device for <name> (140 MB). Free up space in the Storage panel." (§2);
   - the daily read budget spent: "Daily download limit: resumes at 14:00" (as today, L1);
-  - a download whose bytes didn't match: ⚠ "The download didn't match the file in the cloud, so it wasn't saved on this device. It will download again when the file changes." (§4.1: a single damaged piece is simply fetched again, unseen; this message is for a whole file that doesn't match);
+  - a download whose bytes didn't match: ⚠ "The download didn't match the file in the cloud, so it wasn't saved on this device. It will download again once the cloud copy has been checked, and repaired if needed." (§4.1's repair: a single damaged piece is simply fetched again, unseen; this message is for a whole file that doesn't match);
+  - no device can repair it: ⚠ "The copy of <name> in the cloud is damaged, and none of your devices has a good copy, so it can't be downloaded." (§4.1);
+  - a removal refused while a repair may need this device's copy: "Is needed to repair the copy in the cloud" (§3.4 check 2);
   - kept files over the budget: "Kept files use more than this device's limit" (§3.2);
   - what holds the space: "120 MB here haven't reached the cloud yet; 300 MB are kept on this device." (§5.3);
   - persistent storage refused: "This browser hasn't agreed to keep Sagebrush's storage. If it clears it to free space, changes not yet in the cloud go with it." (§3.3);
@@ -359,7 +361,7 @@ Tests (astra's TF1): correct chunks in the wrong order; a wrong whole-file hash;
 4. **Any device whose local bytes have that `sha256`** (from its fileBytes, a version or a pin) re-chunks the file and uploads the damaged chunks again. A `PUT` for a hash whose holding is `damaged` is accepted as a replacement: it gets a new random key, R2 checks its hash as for any PUT, and the finalize swaps the holding to the new key (the old key goes to the outbox). Then the server verifies the row again, from the start; on success, `damaged` clears, `repair_gen` goes up, and the hash leaves the repair list.
 5. **Devices with `fetchFailed: corrupt` retry only when `repair_gen` changes,** never on a timer. So there is still no retry loop: one fetch per repair, and none while nothing has changed.
 
-While a hash is on the repair list, no device removes its local copy of a file with that hash: §3.4 adds it to check 2's pending set, since that copy may be the one the repair needs. A file whose cloud bytes went bad after every device had removed its copy can't be repaired this way. That loss would be the storage's, not sync's, and is reported to the person as such ("The copy in the cloud is damaged, and no device has it.": board's words to come).
+While a hash is on the repair list, no device removes its local copy of a file with that hash: §3.4 adds it to check 2's pending set, since that copy may be the one the repair needs. A file whose cloud bytes went bad after every device had removed its copy can't be repaired this way. That loss would be the storage's, not sync's, and is reported to the person as such (§1.3's "The copy of <name> in the cloud is damaged, and none of your devices has a good copy, so it can't be downloaded.").
 
 Tests: a chunk's stored bytes flipped in the test R2, then a download (reported, re-verified, marked damaged, repaired from a second device, fetched again once); the same with no device holding the bytes (stays corrupt, reported, no loop); a report when the server's bytes are fine (one more fetch, no more); a removal attempted on a device holding a hash on the repair list (refused).
 
