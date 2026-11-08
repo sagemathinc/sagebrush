@@ -7,7 +7,7 @@
 ## In plain words
 
 - **Files can live in the cloud only.** Every device lists every file, but a device downloads a file's bytes only when it's opened, or when the person asks to keep it. A phone with little space can still see a large workspace.
-- **"Keep on this device"** keeps a file's bytes on this device, so it opens offline. Other files may be removed from this device to make room, but only once the cloud has accepted every byte of them.
+- **"Keep on this device"** keeps a file's bytes on this device, so it opens offline. Other files may be removed from this device to make room, but only once the cloud holds every byte of them and has checked the whole file against its hash.
 - **Each file shows where it is:** on this device, in the cloud only, downloading, or waiting to go up. The Storage panel shows how much is on this device and how much is in the cloud.
 - **Large files sync in pieces.** Today a file over 95 MiB can't sync. In pieces, files up to the workspace's 200 MiB limit sync, an interrupted upload resumes where it stopped, and repeated data is stored once.
 - **Nothing that hasn't reached the cloud is ever removed from a device.** A file with changes still waiting to go up stays, whatever the space.
@@ -59,7 +59,7 @@ A row's ⋯ menu gains one item, which reads as what it will do:
   Move to Trash
 ```
 
-- "Remove from this device" is shown greyed, with its reason, when it can't be done (§3.4's checks): "Has changes not yet in the cloud", "Is being downloaded", "Is a conflict copy", "Is open in another tab", "Is kept on this device: stop keeping it first". It never removes bytes the cloud doesn't have.
+- "Remove from this device" is shown greyed, with its reason, when it can't be done (§3.4's checks): "Has changes not yet in the cloud", "Is being downloaded", "Is a conflict copy", "Is open in a tab", "Is kept on this device: stop keeping it first", "Sync isn't running". It never removes bytes the cloud doesn't have.
 - On a folder, "Keep on this device" keeps everything in it, including what's added later.
 
 The Storage panel, with the new block on top of today's:
@@ -97,8 +97,8 @@ Opening a file that's in the cloud, while offline:
 ### 1.3 The words people see (COPY)
 
 - **The names:** "On this device", "Kept on this device", "In the cloud", "Downloading", "Waiting to go up". Used the same way in the row titles, the ⋯ menu, the Storage panel and help.
-- **Never** a word that promises more than is true: not "safe", "secure", "backed up" or "unlimited", and none of the house's other banned words. Say what is true: "fully in the cloud" means the server has accepted every byte (§3.4's test), and nothing more.
-- **Refusals name their reason** (daybreak2, point 7): "Can't remove lattice-points.sage from this device: it has changes not yet in the cloud."
+- **Never** a word that promises more than is true: not "safe", "secure", "backed up" or "unlimited", and none of the house's other banned words. Say what is true: "fully in the cloud" means the server holds every byte and has checked the whole file against its hash (§4.1's verification; §3.4's check 1), and nothing more.
+- **Refusals name their reason** (daybreak2, point 7): "Can't remove lattice-points.sage from this device: it has changes not yet in the cloud." With sync off, signed out, between accounts or while sync rebuilds its index (§3.4's check 0): "Can't remove lattice-points.sage from this device: sync isn't running, so it can't be checked against the cloud."
 - **Numbers are this device's or the account's,** and labelled so.
 - **The messages, word for word** (each used where its section says):
   - opening a file in the cloud while offline: "<name> is in the cloud, and this device is offline. It will open when you're back online." (§1.2, §2);
@@ -226,7 +226,7 @@ The transaction's scope covers every store these read (meta, `syncIndex`, the ou
 **The read lock, named (astra's TF3).** There is no open-file lease in the page today; this note adds one, and eviction and every reader share it:
 - **The lock** is the Web Lock `sagebrush-file:<workspace id>:<fid>`. A reader holds it in `shared` mode for as long as it relies on the file's bytes being on this device: an editor or notebook view while it's open, an export while it reads, a notebook's `open()` stream until it's closed, a workspace agent's read until it returns.
 - **A read made in a single IndexedDB transaction needs no lock.** IndexedDB orders it against the removal's readwrite transaction, so it sees either the bytes or `remote: true`, and a `remote` entry sends it down the open path (§2). Only a reader that reads across more than one transaction takes the lock, and it takes it before its first read.
-- **Removal asks for it `exclusive` with `ifAvailable`,** after the workspace lock and while holding it, and runs its transaction inside. If a reader holds it, the removal is refused ("Is open in another tab"), never waits. A reader that asks after the removal began waits for the removal's transaction, then finds `remote` and fetches. So no reader slips between check 6 and the deletion. The order is always workspace lock, then file lock, and only removal takes both; with `ifAvailable` it never waits, so the two can't deadlock.
+- **Removal asks for it `exclusive` with `ifAvailable`,** after the workspace lock and while holding it, and runs its transaction inside. If a reader holds it, the removal is refused ("Is open in a tab"), never waits. A reader that asks after the removal began waits for the removal's transaction, then finds `remote` and fetches. So no reader slips between check 6 and the deletion. The order is always workspace lock, then file lock, and only removal takes both; with `ifAvailable` it never waits, so the two can't deadlock.
 - **A suspended tab** keeps its locks, so its files aren't removed until it's closed or resumes and releases them. A tab that closes or crashes loses its locks with it, and with them the reader that needed the bytes.
 - **A browser without Web Locks** can't make workspace changes today (web/workspace/api.ts refuses them), and removal is one. Where exclusion can't be proved, nothing is removed.
 
@@ -400,7 +400,7 @@ Chunks and packs are ordinary `holdings` rows: one per R2 object, with `refs`.
 
 ### 4.4 Who may call the new endpoints (astra's TF4)
 
-(sync-client) Every new endpoint inherits sync-server §2 and §5.4 unchanged, in this order, and nothing new is trusted:
+(sync-client) Every new endpoint inherits sync-server §2 and §5.4 unchanged, in this order, and nothing new is taken on the client's word:
 - **At the Worker, before any object:** the per-IP pre-authentication limit (`SYNC_PREAUTH`), then the session cookie (a person's device) or the grant token's tag (an agent). State-changing requests (manifest `POST`, verify, pack `PUT`) must carry `Origin` equal to the site.
 - **The binding:** a device's requests carry `x-sync-account` and `x-sync-generation`. If either isn't the account object's, the request is refused (403 `forbidden`, 409 `conflict`) before anything is reserved, read or answered (CORR-PR58-1).
 - **The account's state:** `readonly` refuses manifest registration, verification and pack uploads with `readonly`, and still allows manifest reads, as every read is allowed then. `deleting` refuses everything but the purge.
@@ -520,4 +520,4 @@ Each PR carries its at-limit and one-over tests, and operation-count assertions 
 - Notebooks and boards: their content is patches (sync-server §4), not blobs. Do they stay always local in these steps? (Proposed: yes; they're small.)
 - Should the Storage panel show the cloud's breakdown per folder? (Not in these steps.)
 - (sync-client, for daybreak2) The proposed cache budgets and floor (§6).
-- Answered by the reviews, and now in the text: the client's whole-file hash is no longer trusted: the server verifies each manifest before an op can use it (§4.1, astra's TF1). The `deleting` mark is replaced by deleting the holding's row when its delete begins (§5.1, TF2). The pack's streaming check stays, with its bounds and nothing visible before the finalize (§4.2, TF4). The compaction pace is one every 30 minutes (§4.2, daybreak2's LIMIT-TF-5).
+- Answered by the reviews, and now in the text: the client's whole-file hash is no longer taken on its word: the server verifies each manifest before an op can use it (§4.1, astra's TF1). The `deleting` mark is replaced by deleting the holding's row when its delete begins (§5.1, TF2). The pack's streaming check stays, with its bounds and nothing visible before the finalize (§4.2, TF4). The compaction pace is one every 30 minutes (§4.2, daybreak2's LIMIT-TF-5).
