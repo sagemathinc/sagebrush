@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { appendFileSync, cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -69,26 +69,48 @@ test("§9: names reach only R's variables and Rill's builtins, never the host's"
   }
 });
 
-test("§9: an escape attempt leaves the session as it was", () => {
+// (grader's T-a, astra's R1) each escape as written, with an assignment as its first argument, and with an output
+// as its first argument: a refusal before any argument runs leaves x as it was and prints nothing
+const effectful = (src: string) => [src, src.replace("(", "(x <- 2, "), src.replace("(", '(cat("out"), ')];
+const VARIANTS = ESCAPES.flatMap(effectful).concat(['cat(x <- 2, file = "made-by-rill")', 'cat(cat("out"), file = "made-by-rill")']);
+
+test("§9: no escape, in any variant, changes the session or prints anything", () => {
   const got = py(`
 import json, _rill
 from _rill.eval import Session, RError, NotSupported
 from _rill.parse import parse
 from _rill import mem
-s = Session(lambda t: None, lambda t: None)
-s.evaluate(parse("x <- c(1, 2)")[0])
+out = []
+s = Session(out.append, out.append)
+s.evaluate(parse("x <- 1")[0])
 before = (sorted(s.globals), s.globals["x"].data)
 results = []
-for src in ${JSON.stringify(ESCAPES.slice(0, 20))}:
+for src in ${JSON.stringify(VARIANTS)}:
     try:
         s.evaluate(parse(src)[0])
-        results.append("ran")
+        results.append("ran: " + src)
     except (RError, NotSupported):
-        results.append("refused")
-print(json.dumps({"results": results, "same": (sorted(s.globals), s.globals["x"].data) == before, "open": mem.open_bytes(), "depth": s.depth}))
+        pass
+    if (sorted(s.globals), s.globals["x"].data) != before:
+        results.append("changed: " + src)
+print(json.dumps({"problems": results, "printed": "".join(out), "open": mem.open_bytes(), "depth": s.depth}))
 `);
-  assert.ok(got.results.every((r: string) => r === "refused"), JSON.stringify(got.results));
-  assert.deepEqual([got.same, got.open, got.depth], [true, 0, 0]);
+  assert.deepEqual(got, { problems: [], printed: "", open: 0, depth: 0 });
+});
+
+test("§9: through the CLI too, each variant prints nothing to stdout and makes no file", () => {
+  const dir = mkdtempSync(join(tmpdir(), "rill-variants-"));
+  try {
+    const hostRoutes = /cat\(|system|file|writeLines|sink|png|download|source|url\(|setwd|Sys\.setenv/;
+    for (const src of VARIANTS.filter((v) => (v.includes("x <- 2") || v.includes('cat("out")')) && hostRoutes.test(v))) {
+      const r = rill("x <- 1; " + src + "; x", dir);
+      assert.equal(r.status, 1, `${src}: refused (${JSON.stringify(r)})`);
+      assert.equal(r.stdout, "", `${src}: nothing printed`);
+      assert.deepEqual(readdirSync(dir), [], `${src}: no file made`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("§8.5: a vector past the allowance is refused with R's message and Sagebrush's sentence", () => {
@@ -139,6 +161,78 @@ except KeyboardInterrupt:
 print(json.dumps(r))
 `);
   assert.deepEqual(got, { at: 64 << 20, past: [(64 << 20) + 1, 64 << 20], after: 0, unmeasured: [true, "no memory figure"], stop: 0 });
+});
+
+// (grader's T-b, astra's and daybreak3's R2) each caller reserves its operation's whole peak (result, coerced
+// operands, element strings) before allocating: the peak, exactly, from the measured costs written out here
+// (integer 32, double 64, logical 8, string 136 bytes), admitted at the boundary and refused one byte short
+test("§8.5: each builtin reserves its whole peak first: admitted at the boundary, refused one byte short", () => {
+  const got = py(`
+import json
+from _rill import mem
+from _rill.eval import Session, RError, NotSupported
+from _rill.parse import parse
+import _memguard
+s = Session(lambda t: None, lambda t: None)
+s.evaluate(parse("x <- 1:50")[0])
+s.evaluate(parse("y <- 51:100")[0])
+mem.SMALL_BYTES = 0
+cases = {
+  "1:100": 100 * 32,
+  "c(x, y)": 100 * 32 + 50 * 32,
+  "x + y": 50 * 32 * 3,
+  'x == "a"': 50 * 8 + 50 * 136 + 136,
+  "-x": 50 * 32 * 2,
+  "!x": 50 * 8 * 2,
+  "x & y": 50 * 8 * 3,
+  "cat(x)": 50 * 136 + 24 * 50 + 50,
+  "print(x)": 50 * 136 + 2 * (24 * 50) + 8 * 50,
+}
+peak = [0]
+real_enter = mem.Reservation.__enter__
+def spy(self):
+    r = real_enter(self)
+    peak[0] = max(peak[0], mem.open_bytes())
+    return r
+mem.Reservation.__enter__ = spy
+out = {}
+for src, want in cases.items():
+    peak[0] = 0
+    mem._allowance = lambda: (want - mem.open_bytes(), None)
+    s.evaluate(parse(src)[0])
+    at = peak[0]
+    mem._allowance = lambda: (want - 1 - mem.open_bytes(), None)
+    try:
+        s.evaluate(parse(src)[0])
+        short = "admitted"
+    except _memguard.SagebrushMemoryError as e:
+        short = [e.need_bytes, e.limit_bytes]
+    out[src] = [want, at, short, mem.open_bytes()]
+print(json.dumps(out))
+`);
+  for (const [src, [want, at, short, open]] of Object.entries<any>(got)) {
+    assert.equal(at, want, `${src}: the whole peak reserved (${at} of ${want})`);
+    assert.deepEqual(short, [want, want - 1], `${src}: refused one byte short`);
+    assert.equal(open, 0, `${src}: nothing left reserved`);
+  }
+});
+
+test("§8.5: the parser's tokens and tree are reserved for the source's size while a program runs", () => {
+  const got = py(`
+import json, _rill
+from _rill import mem
+import _memguard
+mem.SMALL_BYTES = 0
+src = "1 + 1\\n" * 100
+need = len(src) * 256
+mem._allowance = lambda: (need - 1 - mem.open_bytes(), None)
+err = []
+st = _rill.run(src, lambda t: None, err.append)
+print(json.dumps({"status": st, "err": "".join(err).split("\\n")[0], "open": mem.open_bytes(), "need": need}))
+`);
+  assert.equal(got.status, 1);
+  assert.match(got.err, /^Error: cannot allocate vector of size \d+\.\d Kb$/);
+  assert.equal(got.open, 0);
 });
 
 test("§8: Stop propagates out of the evaluator and the parser, giving back what it held", () => {
@@ -203,4 +297,78 @@ test("§9: the gate inventory lists every route in lib/_rill, each with its deci
   const inventory = JSON.parse(readFileSync(join(ROOT, "scripts", "rill-gates.json"), "utf8")).routes;
   for (const k of Object.keys(inventory)) assert.ok(!/^call:(open|exec|eval|compile|__import__|setattr|delattr|globals|locals|vars|input|breakpoint)$/.test(k), `${k}: Rill calls no such host builtin`);
   for (const k of Object.keys(inventory)) assert.ok(!/^import:(os|io|subprocess|socket|shutil|pathlib|builtins|importlib|ctypes|js)$/.test(k), `${k}: Rill imports no host module of files, processes or the network in A1.1`);
+});
+
+// (astra's R3) the census fails closed: each mutant plants one spelling in a copy of lib/_rill, and the census must
+// either list a new route or report a problem, never return the same 36 routes and no problem
+test("§9: the gate census catches every planted route spelling (mutants)", async () => {
+  const { census } = await import(join(ROOT, "scripts", "rill-gates.mjs"));
+  const base = census(ROOT);
+  assert.deepEqual(base.problems, []);
+  const MUTANTS: [string, string, RegExp][] = [
+    ["mem.py", "import sys as s\n", /import the census can't read|`as`/],
+    ["mem.py", "from sys import stdout\n", /absolute `from … import`/],
+    ["mem.py", "import sys\nout = sys\n", /host module sys used as a value/],
+    ["mem.py", "import os\nos.system('x')\n", /^host:os\.system$|^import:os$/],
+    ["base.py", "BUILTINS['evil'] = cat\n", /BUILTINS used in a form/],
+    ["base.py", "BUILTINS.update(evil=cat)\n", /BUILTINS used in a form/],
+    ["base.py", "VALUES.setdefault('x', 1)\n", /VALUES used in a form/],
+    ["eval.py", "x = (1).__class__\n", /introspection attribute __class__/],
+    ["eval.py", "g = run.__globals__\n", /introspection attribute __globals__/],
+    ["eval.py", "f = open('x')\n", /^call:open$/],
+    ["eval.py", "e = eval('1')\n", /^call:eval$/],
+    ["base.py", 'BUILTINS["evil"] = cat\n', /^builtin:evil$/],
+  ];
+  for (const [file, code, want] of MUTANTS) {
+    const dir = mkdtempSync(join(tmpdir(), "rill-census-"));
+    try {
+      cpSync(join(ROOT, "lib", "_rill"), join(dir, "lib", "_rill"), { recursive: true });
+      appendFileSync(join(dir, "lib", "_rill", file), "\n" + code);
+      const got = census(dir);
+      const newRoutes = [...got.routes.keys()].filter((k: string) => !base.routes.has(k));
+      const caught = got.problems.some((p: string) => want.test(p)) || newRoutes.some((k: string) => want.test(k));
+      assert.ok(caught, `${file} + ${JSON.stringify(code)}: not caught (problems ${JSON.stringify(got.problems)}, new routes ${JSON.stringify(newRoutes)})`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});
+
+// (daybreak3) Stop through the CLI launcher, for real: SIGINT during a long evaluation and during a long parse; each
+// must still be running when the signal arrives, then stop within 5 s, with nothing printed and no host traceback
+function interrupted(args: string[], cwd: string): Promise<{ alive: boolean; ms: number; code: number | null; signal: string | null; stdout: string; stderr: string }> {
+  const { spawn } = require("node:child_process");
+  return new Promise((resolve) => {
+    const p = spawn(process.execPath, [CLI, ...args], { cwd });
+    let stdout = "", stderr = "", done = false, t1 = 0;
+    p.stdout.on("data", (d: Buffer) => (stdout += d));
+    p.stderr.on("data", (d: Buffer) => (stderr += d));
+    const timer = setTimeout(() => {
+      const alive = !done;
+      t1 = Date.now();
+      p.kill("SIGINT");
+      setTimeout(() => !done && p.kill("SIGKILL"), 5000);
+      p.on("close", (code: number | null, signal: string | null) => resolve({ alive, ms: Date.now() - t1, code, signal, stdout, stderr }));
+    }, 2000);
+    p.on("exit", () => (done = true, t1 === 0 && clearTimeout(timer)));
+  });
+}
+
+test("§8: Stop (SIGINT) ends a long evaluation and a long parse promptly, through the CLI", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "rill-sigint-"));
+  try {
+    const ev = await interrupted(["--rill", "-c", "x <- 1:1000000\n" + "y <- x + x\n".repeat(400)], dir);
+    assert.ok(ev.alive, "the evaluation was still running at the signal");
+    assert.ok(ev.ms < 5000 && ev.signal !== "SIGKILL", `stopped promptly (${ev.ms} ms, ${ev.signal ?? ev.code})`);
+    assert.equal(ev.stdout, "");
+    assert.doesNotMatch(ev.stderr, /Traceback|File "/);
+    writeFileSync(join(dir, "big.R"), new Array(2000000).fill("1").join(" + "));
+    const pa = await interrupted(["-c", "import _rill\n_rill.run(open('big.R').read())\n"], dir);
+    assert.ok(pa.alive, "the parse was still running at the signal");
+    assert.ok(pa.ms < 5000 && pa.signal !== "SIGKILL", `stopped promptly (${pa.ms} ms, ${pa.signal ?? pa.code})`);
+    assert.equal(pa.stdout, "");
+    assert.doesNotMatch(pa.stderr, /Traceback|File "/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

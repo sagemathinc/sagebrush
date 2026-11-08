@@ -13,6 +13,7 @@ import sys
 
 import _memguard
 
+from . import mem
 from .eval import NotSupported, RError, Session
 from .parse import ParseError, Parser
 
@@ -26,7 +27,7 @@ def _error_text(message, call):
     from . import fmt
     if call is None:
         return "Error: " + message
-    head = "Error in %s : " % fmt.deparse(call)
+    head = "Error in %s : " % fmt.deparse_call_line(call)
     first = message.split("\n", 1)[0]
     if len(head) + len(first) > ERROR_LINE:
         return head + "\n  " + message
@@ -41,7 +42,7 @@ def _warning_lines(warnings):
     call, message = warnings[0]
     if call is None:
         return "Warning message:\n%s \n" % message
-    head = "In %s : " % fmt.deparse(call)
+    head = "In %s : " % fmt.deparse_call_line(call)
     if len(head) + len(message) > 77:
         return "Warning message:\n%s\n  %s\n" % (head.rstrip(), message)
     return "Warning message:\n%s%s\n" % (head, message)
@@ -56,6 +57,15 @@ def run(src, write_out=None, write_err=None):
     write_out = write_out or sys.stdout.write
     write_err = write_err or sys.stderr.write
     sess = Session(write_out, write_err)
+    try:
+        with mem.reserve(0, "character", extra_bytes=len(src) * mem.PARSE_BYTES_PER_CHAR):
+            return _run(sess, src, write_err)
+    except _memguard.SagebrushMemoryError as e:
+        write_err(_memory_text(e) + "\n")
+        return 1
+
+
+def _run(sess, src, write_err):
     parser = Parser(src)
     while True:
         try:

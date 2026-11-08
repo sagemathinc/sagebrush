@@ -15,6 +15,11 @@
    "out_sha256": "b00e849f0c63a0082936f6b86aa1e1b89f6d31686a414f6d797370860f8c7477",
    "r_sha256": "5e07c57b407a8baff0b6d99134e9be7a2ef2a17109c389adf1ec6d43d5f34013"
   },
+  "rill-tests/core/test_2.R": {
+   "cases": 16,
+   "out_sha256": "b5b15eb8241dd44823c0c85175e8be029c60f33e04462782f0b2669d4cf48060",
+   "r_sha256": "802a2fc993dd9f6ef18b978fde8e17db6bf5eb3d1ff422494d0a21d38d98dc85"
+  },
   "rill-tests/ctrl/test_1.R": {
    "cases": 10,
    "out_sha256": "e41b7f955402a7eb2b61547be1cffcd8c6ceb44d346f114a160d6001f9c8e826",

@@ -110,6 +110,13 @@ class Parser:
             return ParseError('unexpected %s in:\n"%s"' % (what, "\n".join(lines[-2:])))
         return ParseError('unexpected %s in "%s"' % (what, text))
 
+    def push(self, units):
+        """Hold `units` more of R's parser stack, refusing as R does before passing its capacity: the check is
+        the leaf's (the units plus the operand still to come), made before the frame grows (daybreak3)."""
+        if self.units + units + 1 > PARSER_CAPACITY:
+            raise ParseError("out of memory while parsing")
+        self.units += units
+
     def expect(self, text):
         """The punctuation the grammar needs next.  A statement-ending newline
         before it is R's "unexpected end of line" (as after a lone `\\`)."""
@@ -173,11 +180,11 @@ class Parser:
             k = t.kind
             if t.kind == "OP" and t.text in UNARY:
                 frames.append(("unary", t, rbp, eq_ok))
-                self.units += 1
+                self.push(1)
                 rbp = UNARY[t.text]
                 continue
             if k in ("IF", "WHILE"):
-                self.units += 2
+                self.push(2)
                 self.expect("(")
                 cond = self.expr(LOWEST, False)
                 self.expect(")")
@@ -185,7 +192,7 @@ class Parser:
                 rbp, eq_ok = LOWEST, True
                 continue
             if k == "FOR":
-                self.units += 4
+                self.push(4)
                 self.expect("(")
                 var = self.peek()
                 if var.kind != "SYMBOL":
@@ -201,14 +208,14 @@ class Parser:
                 rbp, eq_ok = LOWEST, True
                 continue
             if k == "REPEAT":
-                self.units += 1
+                self.push(1)
                 frames.append(("repeat", None, rbp, eq_ok))
                 rbp, eq_ok = LOWEST, True
                 continue
             if k == "FUNCTION" or t.is_op("\\"):
-                self.units += 2
+                self.push(2)
                 formals = self.formals()
-                self.units += 3
+                self.push(3)
                 frames.append(("function", formals, rbp, eq_ok))
                 rbp, eq_ok = LOWEST, True
                 continue
@@ -233,7 +240,7 @@ class Parser:
                         if not (power < rbp or (power == rbp and assoc == "left")):
                             self.take()
                             frames.append(("binary", (t, left, self.peek()), rbp, eq_ok))
-                            self.units += 2
+                            self.push(2)
                             rbp = power if assoc == "left" else power - 1
                             break
                 if not frames:
@@ -251,7 +258,7 @@ class Parser:
                     t2 = self.peek()
                     if t2.kind == "ELSE" and (not t2.nl or t2.ctx == "{"):
                         self.take()
-                        self.units += 2
+                        self.push(2)
                         frames.append(("else", (data, left), rbp, eq_ok))
                         rbp, eq_ok = LOWEST, True
                         break
@@ -319,13 +326,13 @@ class Parser:
         if k in ("BREAK", "NEXT"):
             return Lang(sym(t.text), [])
         if t.is_op("("):
-            self.units += 1
+            self.push(1)
             e = self.expr(LOWEST, True)
             self.expect(")")
             self.units -= 1
             return Lang(sym("("), [(None, e)])
         if t.is_op("{"):
-            self.units += 1
+            self.push(1)
             e = self.braces()
             self.units -= 1
             return e
@@ -395,7 +402,7 @@ class Parser:
     def postfix(self, t, left):
         op = t.text
         if op in ("(", "[", "[["):
-            self.units += 2
+            self.push(2)
             args = self.args({"(": ")", "[": "]", "[[": "]]"}[op])
             self.units -= 2
             return Lang(left, args) if op == "(" else Lang(sym(op), [(None, left)] + args)

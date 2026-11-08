@@ -46,6 +46,7 @@ class Session:
         self.globals = {}
         self.builtins = base.BUILTINS
         self.values = base.VALUES
+        self.preflight = base.PREFLIGHT
         self.options = {"expressions": 5000, "digits": 7, "scipen": 0, "width": 80}
         self.warnings = []      # (call or None, message), printed after the statement
         self.write_out = write_out
@@ -146,10 +147,7 @@ class Session:
             self.depth = depth0
 
     def _arg(self, e, i):
-        v = e.args[i][1]
-        if v is MISSING:
-            raise NotSupported("an empty argument")
-        return v
+        return e.args[i][1]
 
     def _enter(self, e, konts):
         """Start evaluating call e: (mode, expr, val) for the loop."""
@@ -195,6 +193,13 @@ class Session:
             konts.append(("andand", e, 1, None))
             return "eval", args[0][1], None
         f = self.function(name, e)
+        # (a call's shape is checked before any argument is evaluated, so a refusal has no effect: design §9)
+        for _, v in args:
+            if v is MISSING:
+                raise NotSupported("an empty argument")
+        check = self.preflight.get(name)
+        if check is not None:
+            check(e)
         if not args:
             return "return", None, self._apply_now(f, e, [], konts)
         konts.append(("args", e, f, [], 1))

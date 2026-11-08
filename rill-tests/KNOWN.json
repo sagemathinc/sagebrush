@@ -11,6 +11,11 @@
    "reason": "the builtin integer (A1.2)",
    "sha256": "cb3ea07f092f7e19afcb88239f6589a47b5d5d8175749572b508d4b4e32dec37"
   },
+  "rill-tests/core/test_2.R#cat-file-effect": {
+   "class": "not-implemented",
+   "reason": "files: cat(file =) is refused until Rill's files go through the file gate (A1.7)",
+   "sha256": "edf4b5f6a469f742e6bf8c35f6fee42d44e23108b80eeb02f898a5672e966310"
+  },
   "rill-tests/parse/test_1.R#arg-empty-name": {
    "class": "not-implemented",
    "reason": "closures and control flow (A1.3)",

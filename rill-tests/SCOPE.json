@@ -7,6 +7,7 @@
   "rill-tests/parse/test_3.R",
   "rill-tests/parse/test_4.R",
   "rill-tests/parse/test_5.R",
-  "rill-tests/core/test_1.R"
+  "rill-tests/core/test_1.R",
+  "rill-tests/core/test_2.R"
  ]
 }

@@ -25,6 +25,9 @@ export type OfflineItem = {
   rule?: "engine" | "docs" | "myst" | "tzdata";
   /** other items this one needs to be useful offline (shown, never fetched automatically) */
   needs?: string[];
+  /** an item the page can't use yet: counted by every control and cap here, but the service worker drops it when it
+   * loads the inventory, so nothing lists it, "download all" never fetches it and no "new item" names it (web/sw.js) */
+  hidden?: true;
   files: number;
   /** decoded bytes on this device (exact) */
   stored: number;
@@ -37,14 +40,15 @@ export type OfflineInventory = {
   totals: { files: number; stored: number; transfer: number; maxEntry: number };
 };
 
-const MODES: { id: string; title: string; prefix: string; exact?: string; needs?: string[] }[] = [
+const MODES: { id: string; title: string; prefix: string; exact?: string; needs?: string[]; hidden?: true }[] = [
   { id: "python", title: "Python", prefix: "", exact: "core" },
   { id: "scientific", title: "Scientific Python (numpy, matplotlib, k3d, ipywidgets)", prefix: "", exact: "sci" },
   { id: "sage", title: "Sage", prefix: "sage", needs: ["python"] },
   { id: "matlab", title: "MATLAB", prefix: "matlab", needs: ["python", "scientific"] },
   { id: "magma", title: "Magma", prefix: "magma", needs: ["python", "sage"] },
-  // (every Rill group is named rill-*, so this item owns them all: design/rill.md §6.1)
-  { id: "rill", title: "R (Rill)", prefix: "rill", needs: ["python"] },
+  // (every Rill group is named rill-*, so this item owns them all: design/rill.md §6.1. Hidden until the page can
+  // run Rill, A2's worker, which removes the flag: @sagebrush's ruling on #847, Nov 8)
+  { id: "rill", title: "R (Rill)", prefix: "rill", needs: ["python"], hidden: true },
 ];
 
 /** a library group's item id, by rule; a group no rule covers fails the build (each new group is placed on purpose) */
@@ -100,7 +104,7 @@ export function offlineInventory(lazy: string[], stored: Map<string, number>, tr
     byItem.delete(it.id);
   };
   add({ id: "engine", kind: "engine", title: "The Sagebrush engine", rule: "engine" });
-  for (const m of MODES) add({ id: m.id, kind: "mode", title: m.title, groups: [...(groupsOf.get(m.id) ?? [])].sort(), ...(m.needs ? { needs: m.needs } : {}) });
+  for (const m of MODES) add({ id: m.id, kind: "mode", title: m.title, groups: [...(groupsOf.get(m.id) ?? [])].sort(), ...(m.needs ? { needs: m.needs } : {}), ...(m.hidden ? { hidden: true as const } : {}) });
   for (const id of [...byItem.keys()].filter((k) => k.startsWith("pkg-")).sort()) add({ id, kind: "package", title: packageTitles[id] ?? id.slice(4), groups: [...groupsOf.get(id)!].sort() });
   add({ id: "modules", kind: "modules", title: "Other Python modules", groups: [...(groupsOf.get("modules") ?? [])].sort() });
   add({ id: "docs", kind: "docs", title: "Documentation search", rule: "docs" });

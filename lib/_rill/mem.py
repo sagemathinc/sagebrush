@@ -21,21 +21,23 @@ SMALL_BYTES = 1 << 20
 # the cap per operation where the host's memory can't be observed (no capacity figure)
 UNMEASURED_OPERATION_BYTES = 1 << 28
 
-# the host's bytes per element of each type, for reservations: an engine list slot plus a boxed
-# value; strings add their characters (see element_bytes)
-ELEMENT_BYTES = {"logical": 8, "integer": 32, "double": 32, "complex": 64, "character": 64}
+# the host's bytes per element of each type, for reservations, measured on the CLI's engine (Node 24.21.0): the
+# resident growth of a list of 10^6 elements, two runs (doubles 44.8 and 59.4 B, integers 27.8 and 31.1, logicals
+# about 2 plus their 8-byte slot, short strings 125.1 and 129.0, None 8.1), rounded up; a complex is two doubles
+ELEMENT_BYTES = {"logical": 8, "integer": 32, "double": 64, "complex": 128, "character": 136}
+# the parser's tokens and tree per character of source, held while a program runs (an upper bound: at most one
+# token per character, each with its tree node)
+PARSE_BYTES_PER_CHAR = 256
 # R's bytes per element, for R's message
 R_ELEMENT_BYTES = {"logical": 4, "integer": 4, "double": 8, "complex": 16, "character": 8}
 
 _open = [0]     # the bytes reserved by operations still running in this session
-_capacity = None
 
 
 def _allowance():
-    """(bytes, unmeasured reason or None) available to a new reservation now."""
-    global _capacity
-    if _capacity is None:
-        import _capacity
+    """(bytes, unmeasured reason or None) available to a new reservation now (the memory figure's module is
+    imported here, on the first reservation above SMALL_BYTES, never at Rill's start)."""
+    import _capacity
     rec = _capacity.capacity()
     g = _capacity.effective_guard_bytes(rec)
     if g is None:
@@ -83,13 +85,21 @@ class Reservation:
         return False
 
 
-def reserve(n, type, extra_bytes=0):
-    """A reservation for an n-element vector of `type` (n is a Python int)."""
+NOUNS = {"logical": "logical values", "integer": "integers", "double": "numbers", "complex": "complex numbers",
+         "character": "strings"}
+
+
+def reserve(n, type, *temporaries, extra_bytes=0):
+    """A reservation for an operation's whole peak: its n-element result of `type`, and each temporary
+    (count, type) it holds at the same time (coerced copies of its operands, element strings), plus extra_bytes
+    (counts are Python ints).  R's message names the result's size, as R would allocate it."""
     n = max(0, int(n))
     nbytes = n * ELEMENT_BYTES[type] + int(extra_bytes)
-    noun = {"logical": "logical values", "integer": "integers", "double": "numbers",
-            "complex": "complex numbers", "character": "strings"}[type]
-    return Reservation(nbytes, n * R_ELEMENT_BYTES[type], "A vector of %d %s" % (n, noun))
+    for count, t in temporaries:
+        nbytes += max(0, int(count)) * ELEMENT_BYTES[t]
+    # (R's message names the result vector; an operation without one, cat or print, names its whole need)
+    return Reservation(nbytes, n * R_ELEMENT_BYTES[type] if n else nbytes, "A vector of %d %s" % (n, NOUNS[type]) if n
+                       else "Formatting %d bytes of output" % nbytes)
 
 
 def open_bytes():

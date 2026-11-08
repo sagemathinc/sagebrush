@@ -194,8 +194,31 @@ def deparse_constant(v):
     return None
 
 
-def deparse(e):
-    """One line of R source for a language object (A1.1: what error messages need)."""
+# deparse breaks a line after an operator or a comma once it is longer than this (R 4.5.3: an error's call is the
+# first line of its deparse, rill-tests/core/test_2.R)
+DEPARSE_CUTOFF = 60
+BREAK = object()       # a place deparse may break a line
+
+
+def _pieces(e):
+    """e's deparse as text pieces and BREAK marks, from an explicit stack (a call's tree can be thousands deep)."""
+    out = []
+    stack = [e]
+    while stack:
+        x = stack.pop()
+        if isinstance(x, str) or x is BREAK:
+            out.append(x)
+            continue
+        parts = _expand(x)
+        if isinstance(parts, str):
+            out.append(parts)
+        else:
+            stack.extend(reversed(parts))
+    return out
+
+
+def _expand(e):
+    """One node: its text, or its parts (text, BREAK and child nodes) in order."""
     if isinstance(e, Sym):
         return deparse_symbol(e.name)
     if isinstance(e, Placeholder):
@@ -203,48 +226,76 @@ def deparse(e):
     if isinstance(e, Missing):
         return ""
     if isinstance(e, Vector) or e is NULL:
-        s = deparse_constant(e)
-        return s if s is not None else "<vector>"
-    if isinstance(e, Lang):
-        return _deparse_call(e)
-    return "<object>"
-
-
-def _args(args):
-    out = []
-    for name, v in args:
-        s = deparse(v)
-        out.append(s if name is None else "%s = %s" % (deparse_symbol(name), s))
-    return ", ".join(out)
-
-
-def _deparse_call(e):
+        c = deparse_constant(e)
+        return c if c is not None else "<vector>"
+    if not isinstance(e, Lang):
+        return "<object>"
     fn, args = e.fn, e.args
     if isinstance(fn, Sym):
         f = fn.name
         n = len(args)
         if n == 2 and all(a[0] is None for a in args):
-            a, b = deparse(args[0][1]), deparse(args[1][1])
-            if f in BINARY_SPACED:
-                return "%s %s %s" % (a, f, b)
+            a, b = args[0][1], args[1][1]
+            if f in BINARY_SPACED or (f.startswith("%") and f.endswith("%") and len(f) > 1):
+                return [a, " %s " % f, BREAK, b]
             if f in BINARY_TIGHT:
-                return "%s%s%s" % (a, f, b)
-            if f.startswith("%") and f.endswith("%") and len(f) > 1:
-                return "%s %s %s" % (a, f, b)
+                return [a, f, b]
         if n == 1 and args[0][0] is None and f in UNARY:
-            return "%s%s" % (f, deparse(args[0][1]))
+            return [f, args[0][1]]
         if f == "(" and n == 1:
-            return "(%s)" % deparse(args[0][1])
+            return ["(", args[0][1], ")"]
         if f in ("[", "[[") and n >= 1:
-            close = "]" if f == "[" else "]]"
-            return "%s%s%s%s" % (deparse(args[0][1]), f, _args(args[1:]), close)
+            return [args[0][1], f] + _arg_parts(args[1:]) + ["]" if f == "[" else "]]"]
         if f == "if" and n in (2, 3):
-            s = "if (%s) %s" % (deparse(args[0][1]), deparse(args[1][1]))
-            return s + (" else %s" % deparse(args[2][1]) if n == 3 else "")
+            parts = ["if (", args[0][1], ") ", args[1][1]]
+            return parts + ([" else ", args[2][1]] if n == 3 else [])
         if f == "function" and n >= 2 and isinstance(args[0][1], Formals):
-            formals = ", ".join(nm if d is MISSING else "%s = %s" % (nm, deparse(d)) for nm, d in args[0][1].items)
-            return "function(%s) %s" % (formals, deparse(args[1][1]))
+            parts = ["function("]
+            for i, (nm, d) in enumerate(args[0][1].items):
+                if i:
+                    parts += [", ", BREAK]
+                parts += [nm] if d is MISSING else [nm, " = ", d]
+            return parts + [") ", args[1][1]]
         head = deparse_symbol(f)
     else:
-        head = deparse(fn)
-    return "%s(%s)" % (head, _args(args))
+        head = fn
+    return [head, "("] + _arg_parts(args) + [")"]
+
+
+def _arg_parts(args):
+    parts = []
+    for i, (name, v) in enumerate(args):
+        if i:
+            parts += [", ", BREAK]
+        if name is not None:
+            parts += [deparse_symbol(name), " = "]
+        parts.append(v)
+    return parts
+
+
+def deparse_lines(e, cutoff=DEPARSE_CUTOFF, first_only=False):
+    """e's deparse as lines, broken as R breaks them (continuation lines indented by four spaces)."""
+    lines, cur = [], []
+    width = 0
+    for p in _pieces(e):
+        if p is BREAK:
+            if width > cutoff:
+                lines.append("".join(cur))
+                if first_only:
+                    return lines
+                cur, width = ["    "], 4
+            continue
+        cur.append(p)
+        width += len(p)
+    lines.append("".join(cur))
+    return lines
+
+
+def deparse(e):
+    """R source for a language object, its lines joined."""
+    return "\n".join(deparse_lines(e))
+
+
+def deparse_call_line(e):
+    """The first line of a call's deparse: what R prints in "Error in <call> :" and "In <call> :"."""
+    return deparse_lines(e, first_only=True)[0]

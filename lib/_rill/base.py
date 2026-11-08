@@ -168,7 +168,7 @@ def arith(sess, call, args):
     else:
         rtype = "integer"
     n = _lengths(x, y, call, sess)
-    with mem.reserve(n, rtype):
+    with mem.reserve(n, rtype, (len(x.data), rtype), (len(y.data), rtype)):
         nx, ny = len(x.data), len(y.data)
         out = [None] * n
         if rtype == "integer":
@@ -201,7 +201,7 @@ def unary(sess, call, op, x):
     if x.type == "complex":
         raise NotSupported("complex arithmetic")
     rtype = "integer" if x.type in ("logical", "integer") else "double"
-    with mem.reserve(len(x.data), rtype):
+    with mem.reserve(len(x.data), rtype, (len(x.data), rtype)):
         data = coerce(x, rtype)
         if op == "-":
             data = [None if e is None else -e for e in data]
@@ -226,7 +226,7 @@ def compare(sess, call, args):
     if t == "logical":
         t = "integer"
     n = _lengths(x, y, call, sess)
-    with mem.reserve(n, "logical"):
+    with mem.reserve(n, "logical", (len(x.data), t), (len(y.data), t)):
         xd, yd = coerce(x, t), coerce(y, t)
         nx, ny = len(xd), len(yd)
         out = [None] * n
@@ -257,7 +257,7 @@ def logic(sess, call, args):
         _check_attrs(x)
         if x.type not in ("logical", "integer", "double"):
             raise RError("invalid argument type", call)
-        with mem.reserve(len(x.data), "logical"):
+        with mem.reserve(len(x.data), "logical", (len(x.data), "logical")):
             return Vector("logical", [None if e is None else not e for e in _logical_data(x)])
     x, y = _vec(args[0][1]), _vec(args[1][1])
     _check_attrs(x, y)
@@ -265,7 +265,7 @@ def logic(sess, call, args):
         if v.type not in ("logical", "integer", "double"):
             raise RError("operations are possible only for numeric, logical or complex types", call)
     n = _lengths(x, y, call, sess)
-    with mem.reserve(n, "logical"):
+    with mem.reserve(n, "logical", (len(x.data), "logical"), (len(y.data), "logical")):
         xd, yd = _logical_data(x), _logical_data(y)
         nx, ny = len(xd), len(yd)
         out = [None] * n
@@ -320,14 +320,14 @@ def combine(sess, call, args):
             continue
         if not isinstance(v, Vector):
             raise NotSupported("c() of this type")
-        if name is not None or v.attrs:
-            raise NotSupported("c() with names")
+        if v.attrs:
+            raise NotSupported("c() of values with attributes")
         vals.append(v)
     if not vals:
         return NULL
     t = max((v.type for v in vals), key=RANK.get)
     n = sum(len(v.data) for v in vals)
-    with mem.reserve(n, t):
+    with mem.reserve(n, t, (max(len(v.data) for v in vals), t)):
         out = []
         for v in vals:
             out.extend(coerce(v, t))
@@ -337,8 +337,6 @@ def combine(sess, call, args):
 # ---------------------------------------------------------------- printing
 
 def print_(sess, call, args):
-    if len(args) != 1 or args[0][0] is not None:
-        raise NotSupported("print() with these arguments")
     v = args[0][1]
     print_value(sess, v)
     sess.visible = False
@@ -350,8 +348,22 @@ def print_value(sess, v):
     if is_language(v):
         sess.write_out(fmt.deparse(v) + "\n")
         return
-    if fmt.print_value(v, sess.write_out) is None:
-        raise NotSupported("printing this value")
+    with _print_reservation(v):
+        if fmt.print_value(v, sess.write_out) is None:
+            raise NotSupported("printing this value")
+
+
+def _print_reservation(v):
+    """print's peak: an element string per element and the lines they are laid out in (numbers at most 24
+    characters, logicals 5, strings four times their length with their quotes, for escapes), reserved first."""
+    if not isinstance(v, Vector):
+        return mem.reserve(0, "character")
+    n = len(v.data)
+    if v.type == "character":
+        chars = sum(4 * len(e) + 2 for e in v.data if e is not None) + 2 * n
+    else:
+        chars = (5 if v.type == "logical" else 24) * n
+    return mem.reserve(0, "character", (n, "character"), extra_bytes=2 * chars + 8 * n)
 
 
 def invisible(sess, call, args):
@@ -360,7 +372,29 @@ def invisible(sess, call, args):
     return v
 
 
+def _cat_reservation(args, sep):
+    """cat's peak: an element string per element (numbers at most 24 characters, strings their own length) and
+    the output they are joined into, reserved before either is built (§8.5)."""
+    count, chars = 0, 0
+    for name, v in args:
+        if name is None and isinstance(v, Vector):
+            count += len(v.data)
+            chars += sum(len(e) for e in v.data if e is not None) if v.type == "character" else 24 * len(v.data)
+    return mem.reserve(0, "character", (count, "character"), extra_bytes=chars + count * len(sep))
+
+
 def cat(sess, call, args):
+    sep = " "
+    for name, v in args:
+        if name == "sep" and isinstance(v, Vector) and v.type == "character" and len(v.data) == 1:
+            sep = v.data[0]
+    with _cat_reservation(args, sep):
+        _cat(sess, args)
+    sess.visible = False
+    return NULL
+
+
+def _cat(sess, args):
     sep = " "
     items = []
     for name, v in args:
@@ -368,11 +402,6 @@ def cat(sess, call, args):
             if not (isinstance(v, Vector) and v.type == "character" and len(v.data) == 1):
                 raise NotSupported("cat(sep =) other than one string")
             sep = v.data[0]
-        elif name == "file":
-            # gate: cat(file =) refused (a file route, until Rill's files go through the file gate: design §9)
-            raise RError("cat(file =) is not available in Rill yet: Rill doesn't write files", call)
-        elif name is not None:
-            raise NotSupported("cat(%s =)" % name)
         elif v is not NULL:
             if not isinstance(v, Vector) or v.type == "complex":
                 raise NotSupported("cat() of this type")
@@ -385,15 +414,31 @@ def cat(sess, call, args):
                     items.append("TRUE" if e else "FALSE")
                 else:
                     items.append(str(e))
-    sess.visible = False
-    out = []
-    for i, s in enumerate(items):
-        if i:
-            out.append(sep)
-        out.append(s)
-    sess.write_out("".join(out))
-    return NULL
+    sess.write_out(sep.join(items))
 
+
+# the shapes of calls A1.1 refuses, checked before any argument is evaluated (Session._enter): a refusal never
+# follows an argument's effect (astra's R1)
+def _preflight_cat(call):
+    for name, _ in call.args:
+        if name == "file":
+            # gate: cat(file =) refused (a file route, until Rill's files go through the file gate: design §9)
+            raise NotSupported("cat(file =)")
+        if name not in (None, "sep"):
+            raise NotSupported("cat(%s =)" % name)
+
+
+def _preflight_print(call):
+    if len(call.args) != 1 or call.args[0][0] is not None:
+        raise NotSupported("print() with these arguments")
+
+
+def _preflight_c(call):
+    if any(name is not None for name, _ in call.args):
+        raise NotSupported("c() with names")
+
+
+PREFLIGHT = {"cat": _preflight_cat, "print": _preflight_print, "c": _preflight_c}
 
 BUILTINS = {}
 for _op in ("+", "-", "*", "/", "^", "%%", "%/%"):
