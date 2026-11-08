@@ -12,6 +12,7 @@
 - **Large files sync in pieces.** Today a file over 95 MiB can't sync. In pieces, files up to the workspace's 200 MiB limit sync, an interrupted upload resumes where it stopped, and repeated data is stored once.
 - **Nothing that hasn't reached the cloud is ever removed from a device.** A file with changes still waiting to go up stays, whatever the space.
 - **Notebook outputs aren't saved by default.** They show while you work. A notebook's "Keep outputs" switch saves them with it, and notebooks that already have saved outputs keep them.
+- **A browser may clear what Sagebrush stores, and Sagebrush says so.** Where the browser hasn't agreed to keep it, the Storage panel says that changes not yet in the cloud could be lost, and points to the Sagebrush app, which keeps them on the device. On phones this matters most.
 
 ---
 
@@ -111,7 +112,10 @@ Opening a file that's in the cloud, while offline:
   - a removal refused while a repair may need this device's copy: "Is needed to repair the copy in the cloud" (§3.4 check 2);
   - kept files over the budget: "Kept files use more than this device's limit" (§3.2);
   - what holds the space: "120 MB here haven't reached the cloud yet; 300 MB are kept on this device." (§5.3);
-  - persistent storage refused: "This browser hasn't agreed to keep Sagebrush's storage. If it clears it to free space, changes not yet in the cloud go with it." (§3.3);
+  - persistent storage refused, in the Storage panel: "This browser hasn't agreed to keep Sagebrush's storage. It may clear it, and changes not yet in the cloud would go with it. In the Sagebrush app, changes stay on this device until they're in the cloud." (§3.3);
+  - persistent storage refused and changes waiting to go up, as a line under the file list: ⚠ "3 files have changes not yet in the cloud, and this browser may clear them. Once they're in the cloud they can't be lost this way. In the Sagebrush app, they stay on this device until then." (§3.3);
+  - the same on a phone: ⚠ "3 files have changes not yet in the cloud, and this phone's browser may clear them, for example while Sagebrush is in the background. Install the Sagebrush app to keep them on this phone." (§3.3);
+  - each of the three ends with a link, "Get the Sagebrush app". Where there is no app yet for this device, the sentence about the app and the link are left out: the words never point to an app that can't be installed (§3.3);
   - "Free up space" done: "Removed 31 files (250 MB) from this device. They're still in the cloud." (§1.2).
   - the notebook switch: "Keep outputs", and when it's turned off: "Outputs won't be saved with this notebook. They still show while you work." (§1.4).
 
@@ -233,6 +237,9 @@ If any check fails, nothing changes, and the reason is returned.
 - **C2's pins need nothing new:** a file whose bytes are pinned is waiting to go up, which §3.4 already refuses.
 - **The automatic pass** (§3.2) removes at most 100 files and at most 64 MiB a transaction (daybreak2's LIMIT-TF-2), at most once every 10 minutes. A file over 64 MiB (up to the 200 MiB file limit) is removed in a transaction of its own. Each transaction also stays within PINS.slice's request bound (400). Tests: 100 files totalling exactly 64 MiB in one transaction; a 101st file, or one byte more, goes to the next; one 200 MiB file alone. It doesn't remove a file within an hour of an install for an open (`min_resident`). Kept, unsynced, open and conflict files are never candidates, so a cache full of them stops the pass rather than looping.
 - **The browser's own eviction** is a different thing: under pressure a browser may drop a whole site's storage. When sync is turned on, the page asks for persistent storage (`navigator.storage.persist()`). Where that is refused (Safari, some phones), the Storage panel says so, since a whole-site eviction would also take files waiting to go up.
+  - **What the page must say, and when (William, Nov 8):** there is no way for the page to stop this, so it must say it plainly and point to the app (§1.3's three messages). The Storage panel's message shows whenever `persist()` was refused or isn't available. The line under the file list shows only while files are waiting to go up as well, and goes when the count reaches 0. It is shown once per session, not as a dialog, and isn't dismissed for good: a new change waiting to go up brings it back in the next session. "Phone" is decided by the same screen rule as §2.1's default.
+  - **The app's half of the promise:** in the Sagebrush app, files waiting to go up must be stored where the operating system doesn't clear them on its own (not a cache directory), so that "changes stay on this device until they're in the cloud" is true. Until an app does that on a platform, the messages leave the app sentence out there, as for a device with no app.
+  - **Never claimed:** the words don't say the app is sandboxed or "safe", and don't say a browser *will* clear storage, only that it may. No protocol change: this is words and one check of `navigator.storage.persisted()`.
 
 ### 3.4 Never removing the only copy (the hardest invariant)
 
@@ -622,6 +629,7 @@ Each PR carries its at-limit and one-over tests, and operation-count assertions 
 **Decided by William (Nov 8, about 1:05 PM PST):**
 - **The cache defaults** in §6: "(a) Recommended: yes, ship these as first values and tune later". A phone is chosen in the Storage panel, with a default from the screen (§2.1).
 - **Notebooks and boards stay on every device** in these steps: "(a) yes, but with the caveat that we enforce 'do not store outputs by default'". And: "(a) outputs aren't saved into the synced notebook by default. They show while you work, and each notebook has a 'Keep outputs' switch" (§1.4).
+- **Browser storage that may be cleared:** "There's no choice right now except to communicate this clearly to the user and use it as _motivation_ for them to install the native app." On phones especially, since a browser may reset a web app in the background (§1.3, §3.3).
 - **"Keep on this device" on a folder covers files added later:** "(a) yes, like OneDrive. This includes files saved on this device into the folder" (§1.2, §3.1).
 
 **Still open:**
