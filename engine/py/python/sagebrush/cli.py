@@ -10,6 +10,7 @@
     sagebrush remote --loopback [--port N]
                               this computer as a paired page's runner,
                               over 127.0.0.1, in this Python
+    sagebrush --version       this sagebrush's version, and its Python
 
 Sage files run with python -m sagebrush FILE.sage; the MCP server is
 sagebrush-mcp."""
@@ -19,6 +20,12 @@ import sys
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] in (["--version"], ["-V"]):
+        # (the runner's own first line: William's `sagebrush --version` printed the help instead)
+        from .remote.pair import VERSION
+
+        print("sagebrush %s (Python %s at %s)" % (VERSION, sys.version.split()[0], sys.executable))
+        return 0
     if argv and argv[0] == "bench":
         from .bench import main as bench
 
