@@ -1,7 +1,7 @@
 """Terminals on a runner (terminal addendum T1.4, build steps T-1 and T-1b): the sessions, their PTYs and lifecycle,
 the attachment contract (T5), and each attachment's output and input paths (T3: credit, coalescing, replay, chunked
-input; terminal_output.py).  The runner's hello doesn't list the `terminal` channel yet (relay.py serves terminal
-pages only when asked) until the page's terminal (T-3) lands.
+input; terminal_output.py).  The runner's hello lists the `terminal` channel (relay.py serves terminal pages by
+default since T-3, the page's terminal: web/notebook/remote-terminal.js).
 
 A terminal page (channel `terminal`, its own generation on the peer leg) pairs with a hello like a kernel page's,
 purpose "terminal": its DPoP key, no code.  Then, on that page:
@@ -13,6 +13,7 @@ purpose "terminal": its DPoP key, no code.  Then, on that page:
   runner -> page   {"t":"opened","session":id,"nonce":n}   {"t":"replay"}  {"t":"out","b":"<base64>"}...  {"t":"live"}
                    {"t":"out","b":"<base64>"}   {"t":"inack","upto":n}
                    {"t":"exit","code":n|null,"signal":s|null}   {"t":"error","error":e}
+                   ("sessions" also carries "limit": n, the running sessions allowed)
 
 The proof (T5): P is a DPoP proof (RFC 9449, dpop.check, as a kernel request's) by the page's key over method POST
 and the URL SYNTHETIC_BASE + "/terminal/open?remote=<remote_id>&gen=<page generation>&body=<b64url sha256 of B's
@@ -562,7 +563,7 @@ class Terminals:
         # ---- the proof holds: the effects
         if sid is None:
             if len(self.running) >= TERMINAL_LIMITS["sessions"]:
-                return self._error(p, "sessions")
+                return self._error(p, "sessions", limit=TERMINAL_LIMITS["sessions"])  # (the page says the number)
             s = Session(self, new_session_id(), b["rows"], b["cols"])
             try:
                 s.spawn(self.cwd, dict(os.environ))

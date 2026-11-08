@@ -43,7 +43,8 @@
    "license": "MIT",
    "path": "node_modules/.pnpm/@xterm+addon-fit@0.11.0/node_modules/@xterm/addon-fit",
    "in": [
-    "the console"
+    "the console",
+    "the terminal on your computer"
    ]
   },
   {
@@ -52,7 +53,8 @@
    "license": "MIT",
    "path": "node_modules/.pnpm/@xterm+xterm@6.0.0/node_modules/@xterm/xterm",
    "in": [
-    "the console"
+    "the console",
+    "the terminal on your computer"
    ]
   },
   {

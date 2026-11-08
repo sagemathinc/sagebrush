@@ -446,6 +446,7 @@
   <button role="menuitem" id="boardbtn" title="Your latest whiteboard in this notebook's language (a new one if there is none); this notebook stays saved">Whiteboard</button>
   <button role="menuitem" id="ttbtn" aria-pressed="false" aria-controls="timetravel" title="Every past version of this notebook: look at one, or go back to it">TimeTravel</button>
   <button role="menuitem" id="termbtn" title="A bash shell on your workspace's files">Terminal</button>
+  <button role="menuitem" id="rtermbtn" hidden title="A shell on one of your own computers, set up with sagebrush remote login (preview)">Terminal on your computer…</button>
   <hr>
   <button role="menuitem" id="keysbtn" title="Keyboard shortcuts (H in command mode)">Keyboard shortcuts<kbd>H</kbd></button>
   <button role="menuitem" id="installbtn" hidden title="Sagebrush as an app on this computer: it opens in its own window and works offline">Install as an app…</button>
@@ -1059,6 +1060,24 @@ if (PAIRED_OFFERED) {
   kernelPick.hidden = false;
   kernelPick.addEventListener("change", useRemote);
 }
+// A terminal on one of your computers (terminals T-3; web/notebook/remote-terminal-view.ts, its own bundle
+// sagebrush-remote-terminal.js, loaded on first use): offered only with ?remote=1, as a preview.  One panel at a time;
+// choosing it again while it is open goes back to it.
+let rterm = null;
+if (REMOTE_PREVIEW) {
+  const rtermBtn = $("#rtermbtn");
+  rtermBtn.hidden = false;
+  rtermBtn.onclick = async () => {
+    if (rterm) return (panelToFront(rterm.el), rterm.focus());
+    let mod;
+    try { mod = await import(new URL("sagebrush-remote-terminal.js", location.href).href); } catch (e) { savedEl.textContent = "the terminal didn't load: " + (e?.message ?? e); return; }
+    if (!rterm) {
+      rterm = mod.openRemoteTerminal({ onEnd: () => { rterm = null; } });
+      rterm.el.addEventListener("pointerdown", () => panelToFront(rterm?.el));
+    }
+    panelToFront(rterm.el);
+  };
+}
 const nb = createNotebook($("#cells"), { kernel: null, staleOnLoad: true, analyzer, reactive: REACTIVE, remoteGate: (k, page) => remoteMod?.gateFor(k, page), mystBook: () => bookAcc.mystBook() });
 const blobDbReady = openBlobDb();
 let textHashFn = null;
@@ -1369,8 +1388,14 @@ const presence = (() => {
 // ------------------------------------------------------------ the console
 let consoleUi = null, consoleKernel = null, consoleNb = null;
 const consoleEl = $("#console"), consoleBtn = $("#consolebtn");
+// (the console and the terminal on your computer share the page's bottom: the one chosen or touched last is in front)
+function panelToFront(el) {
+  for (const p of [consoleEl, rterm?.el]) if (p) p.style.zIndex = p === el ? "6" : "5";
+}
+consoleEl.addEventListener("pointerdown", () => panelToFront(consoleEl));
 async function toggleConsole(show = consoleEl.hidden) {
   consoleEl.hidden = !show;
+  if (show) panelToFront(consoleEl);
   consoleBtn.setAttribute("aria-pressed", String(show));
   document.body.style.paddingBottom = show ? consoleEl.offsetHeight + "px" : "";
   if (!show) return consoleBtn.focus();
@@ -1434,9 +1459,10 @@ function setTheme(t) {
   else document.documentElement.dataset.theme = t;
   try { localStorage.setItem("sagebrush-theme", t); } catch {}
   consoleUi?.setTheme();
+  rterm?.setTheme();
 }
 themeEl.onchange = () => setTheme(themeEl.value);
-matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => consoleUi?.setTheme());
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { consoleUi?.setTheme(); rterm?.setTheme(); });
 themeEl.value = document.documentElement.dataset.theme || "system";
 const setMode = (mode) => nb.setMode(mode);
 
