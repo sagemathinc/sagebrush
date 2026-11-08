@@ -42,6 +42,10 @@ c("ab", "Ab", "aB") < "AB"
 1:(3 - 1e-8)
 #-- colon-fuzz-above
 1:(3 + 1e-12)
+#-- colon-fuzz-window
+1:1.9999999
+#-- colon-fuzz-window-3
+1:(3 - 1e-7)
 #-- div-negzero
 1/-0
 #-- div-negzero-neg

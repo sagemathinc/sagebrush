@@ -133,6 +133,18 @@
    "stdout": "[1] 1 2 3\n"
   },
   {
+   "id": "colon-fuzz-window",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1 2\n"
+  },
+  {
+   "id": "colon-fuzz-window-3",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1 2 3\n"
+  },
+  {
    "id": "div-negzero",
    "status": 0,
    "stderr": "",
