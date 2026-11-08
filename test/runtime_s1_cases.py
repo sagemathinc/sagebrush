@@ -44,6 +44,94 @@ for v in [[1], (1,), "a", iter([1]), {1: 0}, L([1])]:
     show("unpack 2 from %s" % type(v).__name__, lambda: two(v))
 
 
+isinstance_events = []
+
+
+class IsC:
+    pass
+
+
+class Advertised(IsC):
+    pass
+
+
+class IsProperty:
+    @property
+    def __class__(self):
+        isinstance_events.append("property")
+        return IsC
+
+
+class IsGetattribute:
+    def __getattribute__(self, name):
+        if name == "__class__":
+            isinstance_events.append("getattribute")
+            return Advertised
+        return object.__getattribute__(self, name)
+
+
+class IsBad:
+    @property
+    def __class__(self):
+        isinstance_events.append("bad")
+        return 17
+
+
+class IsRaises:
+    @property
+    def __class__(self):
+        isinstance_events.append("raises")
+        raise RuntimeError("class boom")
+
+
+class IsMissing:
+    def __getattribute__(self, name):
+        if name == "__class__":
+            isinstance_events.append("missing")
+            raise AttributeError("hidden class")
+        return object.__getattribute__(self, name)
+
+
+class IsReal(IsC):
+    @property
+    def __class__(self):
+        isinstance_events.append("real-property")
+        raise RuntimeError("must not touch")
+
+
+for v in [IsProperty(), IsGetattribute(), IsBad(), IsRaises(), IsMissing(), IsReal()]:
+    isinstance_events.clear()
+    show("dynamic __class__ from %s" % type(v).__name__, lambda: isinstance(v, IsC))
+    print("isinstance events", isinstance_events)
+
+
+class IsMeta(type):
+    def __instancecheck__(cls, obj):
+        isinstance_events.append("instancecheck")
+        return False
+
+
+class IsMetaTarget(metaclass=IsMeta):
+    pass
+
+
+class IsMetaAdvertised:
+    @property
+    def __class__(self):
+        isinstance_events.append("meta-property")
+        return IsMetaTarget
+
+
+isinstance_events.clear()
+show("metaclass before advertised class", lambda: isinstance(IsMetaAdvertised(), IsMetaTarget))
+print("isinstance events", isinstance_events)
+
+
+isinstance_events.clear()
+show("tuple short circuit", lambda: isinstance(IsReal(), (IsC, 17)))
+print("isinstance events", isinstance_events)
+
+
 class NoIter:
     pass
 
