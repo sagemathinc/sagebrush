@@ -605,6 +605,20 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/rill.pre": {
+   "exact": false,
+   "ceiling": 361914,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/rill.src": {
+   "exact": false,
+   "ceiling": 89514,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/sage-more.src": {
    "exact": false,
    "ceiling": 481028,
@@ -684,7 +698,7 @@
   },
   "engine/sagebrush-notebook.js": {
    "exact": false,
-   "ceiling": 239593,
+   "ceiling": 239714,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -712,7 +726,7 @@
   },
   "engine/sagebrush-worker.js": {
    "exact": false,
-   "ceiling": 1659519,
+   "ceiling": 1660002,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -838,6 +852,8 @@
    "engine/lib/pkg-pypi-tabulate.src": 68887,
    "engine/lib/pkg-scipy-io.pre": 61258,
    "engine/lib/pkg-scipy-io.src": 12963,
+   "engine/lib/rill.pre": 329013,
+   "engine/lib/rill.src": 81377,
    "engine/lib/sage-more.src": 395935,
    "engine/lib/sage.pre": 13662741,
    "engine/lib/sage.src": 2888811,
