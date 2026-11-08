@@ -198,8 +198,8 @@ For daybreak2. Every limit is per grant, inside the account's own limits (design
 | What | Per grant |
 |---|---|
 | Requests | 60 a minute, 1,000 an hour |
-| Read | 200 MB a day of bytes **authorized**: a signed URL debits the blob's whole size when it is issued, and a document read debits its value's size. A grant's URL is used once (design/sync-server.md §5.4), so the bytes it can transfer are at most what was debited. |
-| Written | 100 MB a day; each write at most 32 MB (larger: as a blob, at most `max_file_bytes`) |
+| Read | the account's grant read budget, shared by all its grants (design/sync-server.md §6: the membership tier's `sync.grant_read_bytes_per_day`, 200 MB a day if CoCalc omits it, never more than the account's own read budget or 64 GiB), of bytes **authorized**: a signed URL debits the blob's whole size when it is issued, and a document read debits its value's size. A grant's URL is used once (design/sync-server.md §5.4), so the bytes it can transfer are at most what was debited. |
+| Written | the account's grant write budget, shared by all its grants (design/sync-server.md §6: the tier's `sync.grant_write_bytes_per_day`, 100 MB a day if omitted, never more than `storage_bytes` or 64 GiB), debited when a write or blob upload is admitted; each write at most 32 MB (larger: as a blob, at most `max_file_bytes`) |
 | `list` | 1,000 entries a page, at most 10,000 in a call |
 | Document reads and writes | 8 MB of value; 2,000 batches since the snapshot (§4) |
 | Runs | 1 at a time, 60 an hour; each bounded by the runner's own time and memory limits |
