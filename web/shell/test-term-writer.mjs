@@ -743,5 +743,25 @@ function putRig(budget = BUDGET, opts) {
   ok(w.ledger.items === 0 && w.ledger.bytes === HEADROOM && w.tryStartCommand() !== null, "and every reservation is released");
 }
 
+// r8 (grader R8d): r8's own race window: command 1's end drawn while command 2 runs, its end not yet asked for.
+// Command 2 stays the active one: no third command starts, and its own end still writes its marker
+{
+  const { w, r } = rig(BUDGET, { auto: false });
+  void w.write("first", "ui");
+  await turn();
+  const id1 = w.tryStartCommand();
+  const e1 = w.endOutput(id1, 5);
+  const id2 = w.tryStartCommand();
+  // (command 1's end drawn; command 2 still running)
+  while (r.pending.length) { r.pending.shift()(); await turn(); }
+  await e1;
+  const id3 = w.tryStartCommand();
+  ok(id2 !== null && id3 === null, `command 1's end drawn while command 2 runs: no third command starts (${id2}, ${id3})`);
+  const e2 = w.endOutput(id2, 9).then(() => "resolved", () => "rejected");
+  while (r.pending.length) { r.pending.shift()(); await turn(); }
+  const st = await e2;
+  ok(st === "resolved" && r.text().includes("[\u2026 9 more bytes not shown]"), `and command 2's end still resolves with its own marker (${st})`);
+}
+
 console.log(`${checks - fails}/${checks} checks passed`);
 if (fails) process.exit(1);
