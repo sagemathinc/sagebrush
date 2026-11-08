@@ -1421,6 +1421,8 @@ jobs:
           python3 engine/py/test_workspace_tools.py
           python3 engine/py/test_latex_comments.py
           python3 engine/py/test_pairing.py
+          python3 engine/py/test_remote_pair.py
+          python3 engine/py/test_remote_enroll.py
           python3 engine/py/test_chat.py
           python3 engine/py/test_limits.py
           python3 engine/py/test_engine_errors.py
