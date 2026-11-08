@@ -225,7 +225,7 @@ for (const c of [c1, c2, c3]) ok((await put(sa, c)).status === 201, "a chunk upl
 {
   const f = fileOf([c1, c2]);
   // registration
-  let r = await register(sa, { ...f.manifest, chunks: [[sha(c1), c1.length], [sha(c3) .replace(/./, "0"), 3 * MiB]] });
+  let r = await register(sa, { ...f.manifest, chunks: [[sha(c1), c1.length], [(sha(c3)[0] === "0" ? "1" : "0") + sha(c3).slice(1), 3 * MiB]] });
   let b = await r.json();
   ok(r.status === 404 && b.error === "missing" && b.missing?.length === 1, "a manifest naming a chunk not held: missing, naming it: " + JSON.stringify(b));
   r = await register(sa, { ...f.manifest, chunks: [[sha(c1), c1.length], [sha(c3), 3 * MiB]] });
