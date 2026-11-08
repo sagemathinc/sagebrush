@@ -1454,6 +1454,19 @@ function hashIntExact(x: number | bigint): bigint {
 
 // hash() as CPython computes it, exactly (dict internals use hashAny,
 // which may round large values to doubles).
+// special(x, "__hash__") for x of type t, cached in two fields of t for the
+// class version (hash() and every dict key; special()'s by-name cache costs a
+// dictionary lookup more).  __hash__ = None is special()'s None wrapper;
+// object's __hash__ binds, so it is objectHash itself.
+function hashSlot(x: any, t: any): any {
+  const v = t.$hashVer;
+  if (v !== undefined && v === t.$ver) return t.$hashFn;
+  const f = special(x, "__hash__");
+  t.$hashFn = f;
+  t.$hashVer = t.$ver;
+  return f;
+}
+
 export function hashExact(x: any): any {
   if (typeof x === "boolean") return +x;
   if (isPyInt(x)) return normBig(hashIntExact(x));
@@ -1467,8 +1480,8 @@ export function hashExact(x: any): any {
   // TYPE-HASH-ROUND-1, a metaclass's result was rounded)
   const cls = x !== null && typeof x === "object" && x.$cls !== undefined && !(x instanceof PySet) ? x.$cls : typeof x === "function" && x.$dict !== undefined && x.$meta !== undefined ? x.$meta : undefined;
   if (cls !== undefined) {
-    // (cls is typeOf(x): special()'s per-class cache, as hashAny)
-    const f = special(x, "__hash__");
+    // (cls is typeOf(x))
+    const f = hashSlot(x, cls);
     if (f !== undefined && f !== objectHash && f !== NONE_WRAPPED.__hash__) {
       const r = f(x);
       // (as CPython's slot_tp_hash: a result in the hash's 64-bit range is the hash, -1 made -2; a larger one is hashed)
@@ -1557,9 +1570,7 @@ export function hashAny(x: any): number {
     return hashTuple(x);
   }
   if (x instanceof PySet && x.$frozen) return Number(hashFrozensetExact(x));
-  // (special()'s per-class cache: __hash__ = None is its None wrapper, object's
-  // __hash__ binds so it is objectHash itself)
-  const f = special(x, "__hash__");
+  const f = hashSlot(x, typeOf(x));
   if (f !== undefined && f !== objectHash) {
     if (f === NONE_WRAPPED.__hash__) raise(T.TypeError, `unhashable type: '${typeOf(x).$name}'`);
     const r = f(x);
