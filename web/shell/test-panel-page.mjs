@@ -229,6 +229,8 @@ try {
   await focusTerm();
   await realKey("Enter");
   const a4 = await evaluate(`({ cmd: ${T}.cmd, note: document.querySelector(".sb-term-note").textContent })`);
+  // (the panel's admission let go at once, before the next Enter: #854 r8)
+  check(a4.cmd === null && /^Not typed:/.test(a4.note), `A4: the refused Enter's admission is let go at once: ${JSON.stringify(a4)}`);
   await evaluate(`(() => { const t = ${T}; t.editor.history.entries.pop(); t.editor.search = null; t.editor.reset(""); return 1; })()`);
   r = await run("echo a4");
   check(a4.cmd === null && /^Not typed:/.test(a4.note) && r?.out === "a4\n", `A4: a refused Ctrl-R Enter lets its admission go; the next command runs: ${JSON.stringify(a4)} ${JSON.stringify(r?.out)}`);

@@ -64,6 +64,8 @@ const ENC = new TextEncoder();
 /** encodeInto's target: measuring and cutting at ITEM_MAX bytes without a copy */
 const BUF = new Uint8Array(ITEM_MAX);
 type Kind = "output" | "ui" | "lazy" | "end";
+/** a command's end state: its id, its omitted bytes, its end item once asked for, and whether its marker is made */
+type Cmd = { id: number; omitted: number; end: Item | null; written?: boolean };
 type Item = {
   kind: Kind;
   data: string;
@@ -77,6 +79,8 @@ type Item = {
   size: number;
   /** an idle() frontier: nothing merges into it after, so a later write never extends that wait */
   sealed?: boolean;
+  /** an end item's command (its marker's count read from it when it is made) */
+  cmd?: Cmd;
   done: Promise<void>;
   settle: () => void;
   released: boolean;
@@ -141,7 +145,7 @@ export class TermWriter {
   private current: Item | null = null;
   private inflight: (() => void) | null = null;
   /** the one admitted command: its end's reservation (then its item), and its output's omitted bytes */
-  private cmd: { id: number; omitted: number; end: Item | null; written?: boolean } | null = null;
+  private cmd: Cmd | null = null;
   private nextId = 1;
   /** whether the last text written ended a line (the omission marker starts on a line of its own) */
   private atLineStart = true;
@@ -265,9 +269,11 @@ export class TermWriter {
   }
 
   /** A command starts (the panel's one admission): its end's item and END_MAX bytes reserved now, so its end is
-   * always written.  null (nothing reserved) while another command is active or the ledger is pressed. */
+   * always written.  null (nothing reserved) while another command is active or the ledger is pressed.  A command
+   * whose end has been asked for is over: the next may start while that end still waits to be drawn (its item keeps
+   * its own count; #854 r8, the A4 race). */
   tryStartCommand(): number | null {
-    if (this.dead || this.cmd || this.pressed || !this.reserve(END_MAX)) return null;
+    if (this.dead || (this.cmd && !this.cmd.end) || this.pressed || !this.reserve(END_MAX)) return null;
     this.cmd = { id: this.nextId++, omitted: 0, end: null };
     return this.cmd.id;
   }
@@ -285,6 +291,7 @@ export class TermWriter {
     if (c.end) return c.end.done;
     // (its item and bytes were reserved when the command started)
     c.end = item("end", "", END_MAX);
+    c.end.cmd = c;
     this.queue.push(c.end);
     void this.pump();
     return c.end.done;
@@ -343,7 +350,7 @@ export class TermWriter {
           if (item.kind === "end") {
             this.lex = { st: "ground", osc: "", afterBase: -1, drop: false };
             this.colourCut = false;
-            const c = this.cmd?.end === item ? this.cmd : null;
+            const c = item.cmd ?? null;
             if (c) c.written = true;
             const n = c ? c.omitted : 0;
             data = (this.inAlt() ? "\x18" + LEAVE_ALT + RESET.slice(1) : RESET) + (n ? (this.atLineStart ? "" : "\r\n") + `\x1b[2;3m[\u2026 ${n} more bytes not shown]\x1b[0m\r\n` : "");
@@ -363,7 +370,8 @@ export class TermWriter {
           item.data = "";
           this.release(item);
           this.current = null;
-          if (item.kind === "end" && this.cmd?.end === item) this.cmd = null;
+          if (item.kind === "end" && item.cmd && this.cmd === item.cmd) this.cmd = null;
+          item.cmd = undefined;
           item.settle();
         }
       }

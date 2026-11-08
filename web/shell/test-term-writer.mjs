@@ -722,5 +722,26 @@ function putRig(budget = BUDGET, opts) {
   ok(typeof go === "function" && writes.length === n, `R13: dispose during admission: no sink write after it (${writes.length - n})`);
 }
 
+// r8 (#854 r7's A4 race, CI job 128669533449): a command whose end was asked for no longer blocks the next start,
+// even while that end still waits to be drawn; each end keeps its own exact count
+{
+  const { w, r } = rig(BUDGET, { auto: false });
+  void w.write("first", "ui");
+  await turn();
+  const id1 = w.tryStartCommand();
+  const e1 = w.endOutput(id1, 5);
+  const id2 = w.tryStartCommand();
+  ok(id1 !== null && id2 !== null && id2 !== id1, `the next command starts while the last one's end waits (${id1}, ${id2})`);
+  ok(w.tryStartCommand() === null, "and still one active command at a time");
+  const st = await Promise.race([w.endOutput(id1, 1).then(() => "shared", () => "stale"), turn().then(() => "waiting")]);
+  ok(st === "stale", `the earlier command's id is stale once the next has started (${st})`);
+  const e2 = id2 === null ? Promise.resolve() : w.endOutput(id2, 9);
+  while (r.pending.length) { r.pending.shift()(); await turn(); }
+  await Promise.all([e1, e2]);
+  const t = r.text();
+  ok(t.includes("[\u2026 5 more bytes not shown]") && t.includes("[\u2026 9 more bytes not shown]") && t.indexOf("5 more") < t.indexOf("9 more"), "each end writes its own marker, exact, in order");
+  ok(w.ledger.items === 0 && w.ledger.bytes === HEADROOM && w.tryStartCommand() !== null, "and every reservation is released");
+}
+
 console.log(`${checks - fails}/${checks} checks passed`);
 if (fails) process.exit(1);
