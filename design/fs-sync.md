@@ -16,18 +16,100 @@
 
 ## 1. The command (remote-compute)
 
-*Proposal, to be rewritten by @sagebrush-remote-compute.*
+`fs-sync` is a subcommand of the `sagebrush` CLI on PyPI, run with `uvx` like `sagebrush remote`. There is no separate program.
+
+```sh
+uvx sagebrush@latest fs-sync LOCAL_DIR WORKSPACE_PATH [--up | --down] [--dry-run [--verbose] | --yes [--allow-deletes N]] [--origin URL]
+uvx sagebrush@latest fs-sync --restore RUN_ID
+uvx sagebrush@latest fs-sync --forget [--origin URL]
+```
+
+- **The arguments:**
+  - `LOCAL_DIR` is a folder on this computer. It must exist; fs-sync never creates it.
+  - `WORKSPACE_PATH` is a folder in the person's workspace, such as `/Thesis`. If it doesn't exist, the plan says it will be made.
+- **Direction:**
+  - With no direction flag, changes go both ways.
+  - `--up` applies only actions that change the workspace (§2.2's upload and delete-there rows), and `--down` only those that change this computer.
+  - Either way, actions in the other direction are listed under "not applied (`--up`)" or "not applied (`--down`)", so nothing is skipped silently. Conflicts are still detected and never overwrite.
+- **The default is: show the plan, then ask.** Nothing changes before the answer.
+  - `--dry-run` shows the plan and exits, never asking; nothing changes and the base isn't touched. It shows the first 20 lines of each kind; `--verbose` shows them all.
+  - `--yes` applies without asking, for scripts.
+  - `--dry-run` with `--yes` is refused (exit 2).
+- `--origin URL` names the Sagebrush site, as `sagebrush remote login --origin` does. The default is https://sagebrush.space.
+- **Other flags:** `--restore RUN_ID` puts back the local files a run deleted (§2.4), and `--forget` deletes this computer's token for that site (§3.1).
+- `--help` (or `-h`) prints the usage on stdout and exits 0. Like `sagebrush remote --help` since #862, it doesn't sign in, read a folder or send anything.
+
+**It runs once and exits.** No watcher, no daemon and no schedule. To sync again, run it again.
+
+### 1.1 Signing in
+
+The first run for a site pairs, by the agent endpoint's pairing (§3.1, design/agent-endpoint.md §2):
+- It prints a URL (`https://sagebrush.space/agents/pair`) and a code, and waits.
+- The person opens the URL signed in, enters the code, and approves a grant scoped to `WORKSPACE_PATH` with write access. The page names it `fs-sync on <computer>`.
+- The CLI receives the token once, saves it, and goes on to the plan.
+
+Where the token lives:
+- **The file:** `$XDG_CONFIG_HOME/sagebrush/fs-sync/grant-<origin hash>.json` (default `~/.config/…`), one per site. Its account is recorded inside.
+- **Its rules:** the same as the remote key's (`remote/keys.py`): mode 0600 in a 0700 folder, and a file that is a symlink, not the person's, or readable by others is refused, not used or repaired. The token is never printed or logged.
+- **Another folder:** a later run naming a `WORKSPACE_PATH` outside the grant's scope pairs again for that folder. A grant is per folder, by design.
+- **Revoked or expired** (401): the run pairs again. Under `--yes` with no terminal it can't, so it exits 3, saying to run it once by hand.
+
+`<computer>` is the name given to `sagebrush remote login --name` if this computer is enrolled, else the hostname. The remote key itself isn't used (§3.1).
+
+### 1.2 The plan, as shown
+
+One line per action, grouped by kind, with sizes; then the totals and the cost against the grant's budget for today (§3.3). Paths are relative to the two folders.
 
 ```
-sagebrush fs-sync LOCAL_DIR WORKSPACE_PATH [--yes] [--dry-run] [--up-only | --down-only] [--delete-many]
+sagebrush fs-sync ~/thesis → /Thesis   (both ways; last synced Nov 8, 13:40)
+
+Upload (3 files, 1.2 MB)
+  + notes/intro.tex                     4.1 KB   new here
+  ~ hecke.sage                         12.0 KB   changed here
+  ~ data/table.csv                      1.2 MB   changed here
+Download (1 file, 8.0 KB)
+  ~ refs.bib                            8.0 KB   changed in the workspace
+Delete in the workspace, to its Trash (1 file)
+  - old/draft1.tex                               deleted here since the last sync
+Conflicts, both kept (1 file)
+  ! main.tex    changed on both sides: yours becomes "main (conflict, laptop).tex", on both sides
+Skipped (3)
+  · build/                ignored (.sagebrushignore)
+  · lecture.mp4           624 MB, over the 95 MiB file limit
+  · Notes.ipynb           a notebook (documents aren't synced yet)
+
+Cost: 6 requests, 1.2 MB up, 8.0 KB down (today's budget left: 98.8 MB up)
+Apply? [y/N]
 ```
 
-- **Default:** scan, compare, print the plan, and ask "Apply? [y/N]". Nothing changes before the answer.
-- `--dry-run`: print the plan and exit, never asking. Exit 0 if the plan is empty, 1 if not (so a script can tell).
-- `--yes`: apply without asking, except a plan that deletes many files (§2.4) still needs `--delete-many`.
-- `--up-only`: only local → workspace actions; `--down-only`: only workspace → local. Each still detects conflicts and refuses to overwrite.
-- **Signing in:** the first run pairs, as the agent endpoint's pairing (design/agent-endpoint.md §2): the CLI prints a URL and a code, the person approves a grant scoped to `WORKSPACE_PATH` with write access, and the token is kept on this computer (§3.1).
-- Runs through `uvx sagebrush fs-sync …`, like every `sagebrush` command.
+- **A first run** (no base) has no delete section, and says why: "First sync of this pair: nothing will be deleted."
+- **The answer must be `y` or `yes`.** Anything else, including Enter, end of input or Ctrl+C, applies nothing (exit 1).
+- **No terminal:** if standard input isn't a terminal and `--yes` isn't given, fs-sync prints the plan and exits 1 without applying, rather than wait for an answer that can't come.
+- **Many deletions** (§2.4: more than 50 files, or more than 25% of the base, on either side):
+  - Without `--yes`, after `y` it asks the person to type the number of deletions.
+  - `--yes` alone refuses such a plan (exit 1). `--yes --allow-deletes N` applies it only if the plan has exactly N deletions, so a script can't delete more than it was written for.
+- **While it applies,** each action prints one line when done.
+- **A skipped action** (the file changed here, or the workspace refused the write because the file changed there, §4.1–4.2) is listed, and the run goes on with the rest. At the end it prints what was done and what was skipped, and "Run it again to sync the rest."
+
+### 1.3 Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | in sync: the whole plan was applied, or there was nothing to do (with `--dry-run`: the plan is empty) |
+| 1 | not all applied: declined, no terminal, a refused many-deletions plan, `--dry-run` with a non-empty plan, actions skipped, or stopped by the daily budget or a 429. The output says which; running it again continues |
+| 2 | usage: an unknown argument, `LOCAL_DIR` missing, `--dry-run` with `--yes` |
+| 3 | not signed in and can't pair (no terminal), or the grant was refused |
+| 4 | the site couldn't be reached, or answered with an error that isn't about one action |
+
+So a script can run `fs-sync --dry-run` to ask "is anything out of sync?" (0 or 1), and `fs-sync --yes` exits 0 only when both sides match.
+
+### 1.4 What it touches on this computer
+
+- **Files:** only under `LOCAL_DIR`. It follows no symlink (§4.4).
+- **Network:** HTTPS to the site's origin, and the signed download URLs it hands out.
+- **Its own state:** under `$XDG_STATE_HOME/sagebrush/fs-sync/` (default `~/.local/state/sagebrush/fs-sync/`), mode 0700. That holds the bases, one file per folder pair (§2.5), the lock files, the run journals and the holding folder for local deletions (§2.4). Deleting a pair's base makes its next run a first run, with no deletions.
+- **The token:** in the config folder (§1.1).
+- **Downloads:** written to a temporary file in the target's folder, then renamed into place (§4.1), so no file is left half written.
 
 ## 2. The plan: a three-way comparison (sync-client)
 
