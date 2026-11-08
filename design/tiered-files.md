@@ -181,10 +181,11 @@ daybreak2's requirement: cloud-only, downloading, local, kept, waiting to go up,
 
 - **One budget per device:** "Keep up to", with a **high mark** (start removing) and a **low mark** (stop), and a **free-space floor** always left for the browser (hysteresis, so removal doesn't loop: daybreak2, point 6).
 - **Admission, against the whole site's storage** (daybreak2, LIMIT-TF-1). The browser's quota covers everything the site keeps (versions, notebooks, the index, IndexedDB's own overhead), not only cached files. So before any install, whether for an open, a keep or a prefetch, the client requires
-  $$u + r \le q - f,$$
-  where $u$ is the site's estimated usage and $q$ its estimated quota (`navigator.storage.estimate()`), $r$ is this transfer's reserved install bytes (L2), and $f$ is the free-space floor. The estimate is taken at most 60 s before, and again after each install.
-  - The person's "Keep up to" is clamped to what is left for the cache: at most $q - f - (u - c)$, where $c$ is the cache total (§3.1). The panel shows the clamped figure.
-  - **If the estimate is unavailable or older than 60 s,** background caching (prefetch, keeping a folder) stops until a fresh one is taken. An open is checked against the last estimate, and refused with "There isn't room…" (§1.3) if it doesn't fit.
+  $$u + R + r \le q - f,$$
+  where $u$ is the site's estimated usage and $q$ its estimated quota (`navigator.storage.estimate()`), $r$ is this transfer's reserved install bytes (L2), $R$ is the sum of every install already admitted whose bytes aren't yet reflected in $u$, and $f$ is the free-space floor.
+  - **Admission is one step:** the check and the addition of $r$ to $R$ are made together, so four downloads starting at once can't all pass on the same $u$. $R$ loses $r$ when the install finishes (and a fresh estimate is taken) or fails. Test: four simultaneous opens at the edge admit only the prefix that fits.
+  - **The estimate must be at most 60 s old.** If none that fresh can be had, nothing is admitted: background caching (prefetch, keeping a folder) stops, and an open is refused with "There isn't room…" (§1.3) before any URL is asked for. An older estimate may be shown in the panel, but never admits anything.
+  - The person's "Keep up to" is clamped to what is left for the cache: at most $\max(0,\ q - f - (u - c))$, where $c$ is the cache total (§3.1), so the panel never shows a negative limit. The panel shows the clamped figure.
 - Kept files count against the budget, but are never removed for it. If kept files alone pass the budget, nothing more is cached, and the panel says "Kept files use more than this device's limit".
 - **What is removed first:** not kept, fully in the cloud, oldest opened first.
 - Defaults are in the limits table (§6).
@@ -392,11 +393,11 @@ Chunks and packs are ordinary `holdings` rows: one per R2 object, with `refs`.
 | Pack size, target / max | client builds, server checks | 8 / 16 MiB, at most 4,096 members | 16 MiB | `limit` | no |
 | Pack compaction | server | under 50% live, one pack a step | 16 MiB extra at once | — | no |
 | Index entries | both | 100,000 per account, 10,000 per folder | same | `limit` | no |
-| Device cache budget, computer | client | 25% of the estimated quota, at most 10 GiB (sync-client proposal) | clamped to $q - f - (u - c)$ (§3.2) | removal | person |
-| Device cache budget, phone | client | 25% of the estimated quota, at most 2 GiB (sync-client proposal) | clamped to $q - f - (u - c)$ (§3.2) | removal | person |
+| Device cache budget, computer | client | 25% of the estimated quota, at most 10 GiB (sync-client proposal) | clamped to $\max(0, q - f - (u - c))$ (§3.2) | removal | person |
+| Device cache budget, phone | client | 25% of the estimated quota, at most 2 GiB (sync-client proposal) | clamped to $\max(0, q - f - (u - c))$ (§3.2) | removal | person |
 | Cache high / low marks | client | 100% / 85% of budget | — | — | no |
-| Free-space floor $f$ | client | 500 MiB on a computer, 200 MiB on a phone (sync-client proposal) | — | no install unless $u + r \le q - f$ (§3.2) | no |
-| Storage estimate age | client | 60 s | 60 s | background caching stops; an open is checked against the last estimate | no |
+| Free-space floor $f$ | client | 500 MiB on a computer, 200 MiB on a phone (sync-client proposal) | — | no install unless $u + R + r \le q - f$ (§3.2) | no |
+| Storage estimate age | client | 60 s | 60 s | nothing admitted: background caching stops, an open is refused ("There isn't room…") | no |
 | Removal pass | client | 100 files a transaction; at most every 10 minutes; not within 1 hour of an install for an open | — | — | no |
 | Prefetch share of the read budget | client | stops at 80% used (§2.1) | 80% | prefetch pauses | no |
 | Concurrent chunk uploads / downloads | client | 2 / 4 (as L2) | — | queued | no |
