@@ -245,6 +245,36 @@ print(json.dumps({"peak": peak[0], "printed": len("".join(out))}))
   assert.ok(got.peak >= 2 * got.printed + 100 * 136, `reserved ${got.peak} for ${got.printed} characters of output, held twice, and 100 element strings`);
 });
 
+// (astra's R2 admission order) a refused print never starts formatting: the reservation is admitted, or refused,
+// before any element string or line exists
+test("§8.5: a print refused for memory formats nothing first", () => {
+  const got = py(`
+import json
+from _rill import mem, fmt
+from _rill.eval import Session
+from _rill.parse import parse
+import _memguard
+out = []
+s = Session(out.append, out.append)
+s.evaluate(parse("x <- 1:100")[0])
+calls = [0]
+real = fmt.format_elements
+def counting(*a, **k):
+    calls[0] += 1
+    return real(*a, **k)
+fmt.format_elements = counting
+mem.SMALL_BYTES = 0
+mem._allowance = lambda: (100 - mem.open_bytes(), None)
+try:
+    s.evaluate(parse("print(x)")[0])
+    r = "printed"
+except _memguard.SagebrushMemoryError:
+    r = "refused"
+print(json.dumps({"result": r, "formatted": calls[0], "printed": "".join(out), "open": mem.open_bytes()}))
+`);
+  assert.deepEqual(got, { result: "refused", formatted: 0, printed: "", open: 0 });
+});
+
 test("§8.5: the parser's tokens and tree are reserved for the source's size while a program runs", () => {
   const got = py(`
 import json, _rill

@@ -361,14 +361,21 @@ def _print_reservation(v):
     if not isinstance(v, Vector):
         return mem.reserve(0, "character")
     n = len(v.data)
+    # (the widest element and the total, as running scalars: nothing proportional to the vector exists before
+    # the reservation is admitted; astra's R2)
     if v.type == "character":
-        widths = [2 if e is None else 4 * len(e) + 2 for e in v.data]
+        w = total = 0
+        for e in v.data:
+            x = 2 if e is None else 4 * len(e) + 2
+            total += x
+            if x > w:
+                w = x
     else:
-        widths = [5 if v.type == "logical" else 24] * n
-    w = max(widths) if widths else 0
+        w = (5 if v.type == "logical" else 24) if n else 0
+        total = w * n
     label = len("[%d]" % n) + 1
     laid_out = n * (w + 1) + n * label
-    return mem.reserve(0, "character", (n, "character"), extra_bytes=sum(widths) + 2 * laid_out)
+    return mem.reserve(0, "character", (n, "character"), extra_bytes=total + 2 * laid_out)
 
 
 def invisible(sess, call, args):
