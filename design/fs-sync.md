@@ -1,6 +1,6 @@
 # fs-sync: syncing a local folder with a Sagebrush folder, once, when asked
 
-*Status: design, docs only, nothing built. Authors: @sagebrush-remote-compute (§1, the CLI) and @sagebrush-sync-client (§2–§6). Reviews: astra (correctness), daybreak2 (limits), grader (tests), board (COPY). Commissioned by William, Nov 8 2026 (~1:24 PM PST): "you run `sagebrush fs-sync ...` ... scan the local files and the state in sagebrush for a folder, compare them, make a plan, get confirmation, etc. It's basically what reflect-sync does periodically."*
+*Status: design, docs only, nothing built. Authors: @sagebrush-remote-compute (§1, the CLI) and @sagebrush-sync-client (§2–§7). Reviews: astra (correctness), daybreak2 (limits), grader (tests), board (COPY). Commissioned by William, Nov 8 2026 (~1:24 PM PST): "you run `sagebrush fs-sync ...` ... scan the local files and the state in sagebrush for a folder, compare them, make a plan, get confirmation, etc. It's basically what reflect-sync does periodically."*
 
 *Built on design/agent-endpoint.md (grants, pairing, the verbs and their limits) and design/sync-server.md (the index, ops with a base hash, blobs by SHA-256). It needs the agent endpoint to be built and on; until then this note is a plan only. Out of scope: anything automatic or periodic (a watcher, a daemon), and the lazy "in the cloud" files of design/tiered-files.md.*
 
@@ -8,9 +8,11 @@
 
 - **You run it; it never runs by itself.** `sagebrush fs-sync ~/thesis /Thesis` compares a folder on this computer with a folder in your workspace, shows what it would do, and does it only when you say yes.
 - **It remembers the last sync.** So it can tell a file you changed here from one changed in the workspace, and a file you deleted from one that was never there.
-- **It never overwrites a change.** When both sides changed the same file, you get both: the workspace's copy keeps the name, and yours is kept beside it as a conflict copy, on both sides.
-- **It deletes only what it knows you deleted.** The first sync of a folder pair never deletes anything. Later, a file is deleted on one side only if it was there at the last sync and you deleted it on the other. Deleted workspace files go to the workspace's Trash; deleted local files go to a holding folder you can restore from.
-- **Stopping halfway is safe.** Run it again and it picks up from what is actually on both sides.
+- **It never overwrites a change.** When both sides changed the same file, you get both: the workspace's copy keeps the name, and this computer's copy is kept beside it as a conflict copy, on both sides.
+- **It deletes only what it knows you deleted.** The first sync of a folder pair never deletes anything. Later, a file is deleted on one side only if it was there at the last sync and you deleted it on the other. Deleted workspace files go to the workspace's Trash; deleted local files go to a holding folder you can restore from for 30 days.
+- **Stopping halfway loses nothing.** Run it again and it picks up from what is actually on both sides.
+- **Some things are listed, not synced:** notebooks, boards and chats, files over 95 MiB, and symlinks.
+- **Each workspace folder is paired once:** the first run for a folder asks you to approve it on sagebrush.space, and it can then change only that folder.
 
 ---
 
@@ -159,9 +161,9 @@ The base is a file on this computer, one per folder pair (§2.5). Without a base
 | | new (no $B$), $L$ absent | **download** |
 
 - **No base, no deletes:** with $B$ absent, "deleted" can't be told from "never there", so the first sync only uploads, downloads and reports conflicts.
-- **Comparing by hash, not time:** $L$ is recomputed only when a file's size, `mtime_ns` or inode differ from what the base recorded for it, so a second run of a large, unchanged folder reads no file contents.
+- **Comparing by hash, not time:** for planning, $L$ is recomputed only when a file's `(size, mtime_ns, ctime_ns, inode, device)` differ from what the base recorded, so a second run of a large, unchanged folder reads no file contents. Any write changes `ctime_ns`, which ordinary programs can't set back, so a changed file is very rarely taken for unchanged. And this shortcut is never what allows a local file to be replaced or deleted: those actions hash the file itself at apply time (§4.1). At worst a missed change isn't uploaded this run; it is never lost.
 - **Folders:** made on the side that lacks them. A folder is removed only when the plan removes every file in it and it was in the base, and it is then empty.
-- `--up` drops the download and delete-here rows; `--down` drops the upload and delete-there rows. Conflicts are still detected and still never overwrite.
+- **One direction** (§1): `--up` applies only the upload and delete-there rows, `--down` only the download and delete-here rows. A conflict needs both sides changed, so a one-direction run applies **no** step of it, on either side: it is listed as not applied. The other direction's rows are listed as pending. Neither advances the base, and either makes the run exit 1.
 
 ### 2.3 Conflicts: keep both, never overwrite
 
@@ -175,14 +177,19 @@ So the workspace's copy keeps the name, the local change survives under the conf
 ### 2.4 Deletions
 
 - **There:** `remove`, which the agent endpoint makes a move to the workspace's Trash, restorable by the person (design/agent-endpoint.md §1).
-- **Here:** never `unlink`. The file is moved to `$XDG_STATE_HOME/sagebrush/fs-sync/trash/<run id>/<relative path>` on the same filesystem when possible (a rename), else copied there and then removed. The holding folder keeps a run's files for 30 days. `sagebrush fs-sync --restore <run id>` puts them back.
+- **Here:** never `unlink`. The file is moved to `$XDG_STATE_HOME/sagebrush/fs-sync/trash/<run id>/<relative path>` on the same filesystem when possible (a rename), else copied there and then removed. The holding folder keeps a run's files for 30 days. `sagebrush fs-sync --restore <run id>` puts them back, each by a no-replace rename, only inside that run's `LOCAL_DIR`: an occupied path is left as it is and its file stays in the holding folder, listed (§1).
+- **The holding folder is bounded** (daybreak2): at most 20 GiB and 200,000 files in all, and 10 GiB and 100,000 files from one run.
+  - **Cleanup:** at the start of every run, runs older than 30 days are removed, oldest first. Nothing younger is ever removed to make room.
+  - **Admission:** before applying, fs-sync adds up the bytes the run would move there (delete-here files, and files replaced by downloads, §4.1). If they don't fit under those bounds, or, when the holding folder is on another filesystem than `LOCAL_DIR` (a copy, not a rename), the free space there is less than those bytes plus 1 GiB, those actions are left pending. The source files stay where they are, and the run exits 1 saying why.
 - **Many deletions need a second word:** a plan that deletes more than 50 files, or more than 25% of the files in the base, on either side, needs the number confirmed (§1): typed after "y", or given as `--yes --allow-deletes N`, which applies only if the plan has exactly $N$ deletions. It is the usual sign of a wrong folder pair.
 
 ### 2.5 The base, and where it lives
 
-- **One file per folder pair,** under `$XDG_STATE_HOME/sagebrush/fs-sync/` (default `~/.local/state/…`, mode 0700), with the locks, run journals and holding folder (§1), named by the SHA-256 of `(account hash, grant id, absolute LOCAL_DIR, WORKSPACE_PATH)`. Never inside `LOCAL_DIR`, so it can't itself be synced, committed to git or deleted with the folder's contents.
-- **Contents:** for each path, `{sha256, size, mtime_ns, inode, fid}`, where `fid` is the workspace entry's identity, and the workspace path and account it belongs to.
-- **It advances per action, not per run:** each action that succeeds updates its path in the base, written atomically (a temporary file, `fsync`, rename). So an interrupted run leaves a base that is true for what was done and old for the rest, which the next run's plan handles by the same rules (§4).
+- **One SQLite database per folder pair,** under `$XDG_STATE_HOME/sagebrush/fs-sync/` (default `~/.local/state/…`, mode 0700), with the locks, run journals and holding folder (§1), named by the SHA-256 of `(account hash, grant id, absolute LOCAL_DIR, WORKSPACE_PATH)`. It can't be inside `LOCAL_DIR`, because §1 refuses a `LOCAL_DIR` that overlaps fs-sync's own folders, before pairing or reading anything.
+- **Contents:** for each path, `{sha256, size, mtime_ns, ctime_ns, inode, device, fid}`, where `fid` is the workspace entry's identity, and the workspace path and account it belongs to.
+- **It advances per action, committed in batches** (daybreak2): each action that succeeds updates its path's row. The rows are committed in one transaction every 1,000 actions or 5 seconds, whichever comes first, and at the end. So a run of 100,000 actions makes at most about 100 commits, each one `fsync`, and never rewrites the whole base. The database uses SQLite's write-ahead log, so a crash leaves it as of its last commit.
+- **A base that lags is harmless:** an action whose row wasn't committed left both sides equal, and the next run's first rule ($L = R$: nothing, the base takes $L$) records it then. A lagging base never causes a delete, since every delete needs both $B$ present and a fresh check at apply time (§4.1).
+- **A damaged base** (SQLite's integrity check fails, or the version is unknown) is treated as no base: the run is a first run, with no deletions, and says so.
 - **A base for another account or folder** is never used: the account hash and paths are in its name and checked inside it.
 
 ## 3. The protocol: what it calls, and as whom (sync-client)
@@ -199,11 +206,15 @@ The token is kept in the CLI's config directory, in `$XDG_CONFIG_HOME/sagebrush/
 
 ### 3.2 What it calls
 
-All through the agent endpoint's verbs (design/agent-endpoint.md §4), nothing new on the server:
-- **The remote state:** `list(WORKSPACE_PATH, recursive)`, paged (1,000 entries a page, at most 10,000 a call), giving each entry's path, kind, `fid`, `sha256` and `size`.
+Through the agent endpoint's verbs (design/agent-endpoint.md §4), with the two small additions below:
+- **The remote state:** `list(WORKSPACE_PATH, recursive)`, paged (1,000 entries a page, at most 10,000 a call), giving each entry's path, kind, `fid`, `sha256` and `size`. Every page must arrive; a listing that fails part way plans nothing. The pages aren't one consistent snapshot, so the listing is only a plan: every action re-checks the workspace at apply time (§4.1), and an absence in the listing never authorizes a delete by itself.
 - **Download:** `read`, which for a data file answers a signed URL (single use for a grant), then a GET of the bytes, checked against the SHA-256 before anything is written.
-- **Upload:** `write(path, content, {base})`, with `base` the `sha256` the plan saw in the workspace (absent for a new file). It is a compare-and-swap: if the entry moved meanwhile, it answers 409 `conflict` and changes nothing (§4.2).
-- **Create, folders, delete, rename:** `create`, `mkdir`, `remove`, `rename`, each an op with the grant's credit.
+- **Upload:** `write(path, content, {base, fid})`, with `base` the `sha256` and `fid` the identity the plan saw in the workspace. It is a compare-and-swap: if the entry at `path` isn't that data file with that hash, it answers 409 `conflict` and changes nothing (§4.2).
+- **Create, folders, delete:** `mkdir` and `remove`, each an op with the grant's credit.
+- **The two additions** fs-sync needs from the agent endpoint, proposed here for that design's review (each a precondition checked in the op's own transaction, as `write`'s `base` already is):
+  - `write(path, content, {base: null})` means **create only**: refused with 409 `conflict` if anything is at `path`, so a new upload can't replace a file that appeared meanwhile;
+  - `remove(path, {fid, sha256})` removes only if the entry at `path` is still that data file with that hash, else 409 `conflict`. So a delete-there can't remove a file changed or replaced since the plan.
+- **Checking an absence:** `stat(path)`, answering the entry or "none", is called at apply time before a delete here (§4.1).
 
 Only data files are synced. Notebooks, boards and chats are documents (patch logs, design/sync-server.md §4), not files; the plan lists them as skipped, both ways, in this first version. Syncing a notebook as an `.ipynb` file is a later question (§7).
 
@@ -214,16 +225,39 @@ fs-sync adds no limit of its own on the server; it is bounded by the grant's and
 - **Per file:** at most 95 MiB (the single-PUT limit) until a grant may upload chunked files. design/tiered-files.md §4 lifts it to 200 MiB for a person's device sessions only, so larger files are skipped and listed, not split.
 - **The index:** 100,000 entries per account and 10,000 per folder.
 
-**The plan states its cost before it runs:** its requests, bytes up and bytes down, against what the grant has left today. If it doesn't fit, the plan says how much fits now and that a rerun tomorrow continues; under `--yes` it applies what fits and exits 1, "not all applied; run again", saying why (§1). A 429 mid-run stops the run cleanly (§4.1) with the `retry_after`.
+**The plan states its cost before it runs** (daybreak2), counted from the protocol, with an exact upper bound per action:
 
-## 4. Running the plan safely (sync-client)
+| Step | Grant requests (at most) | Also |
+|---|---|---|
+| listing $n$ workspace entries | $\lceil n/1000 \rceil$ (one page of at most 1,000 entries per request; the endpoint's "10,000 a call" is not used) | |
+| upload, at most 32 MB | 1 (`write`) | the bytes, against the 100 MB a day written |
+| upload, over 32 MB | 3 (the blob's upload step, its PUT, then the `write`), as the agent endpoint's blob write | the bytes |
+| download | 1 (`read`, which issues the single-use URL and debits the 200 MB a day read) | 1 GET to the files Worker, outside the grant's request meter (the files Worker's 600 a minute per IP applies) |
+| folder made in the workspace | 1 (`mkdir`) | |
+| delete there | 1 (`remove`) | |
+| delete here | 1 (`stat`) | |
+| conflict | 1 or 3 (the conflict copy's upload) + 1 (the download) | the bytes of both |
+| a failed request (a transport error, not a 409 or 429) | retried at most twice, each attempt counted | |
+
+The plan shows the total and the bound with retries. fs-sync paces itself to 60 requests a minute, so that limit only slows it. Before applying, it checks the plan against what is left of the 1,000 an hour and of the day's bytes up and down, and applies only the prefix of the plan that fits all three. If it doesn't fit, the plan says how much fits now and when a rerun continues (in an hour, or tomorrow); under `--yes` it applies what fits and exits 1, "not all applied; run again", saying why (§1). A 429 mid-run stops the run cleanly (§4.1) with the `retry_after`.
+
+## 4. Running the plan: every action checks first (sync-client)
 
 ### 4.1 Every action checks before it acts
 
-The plan is a list of actions, each with the state it was planned from: the local file's `(size, mtime_ns, inode, sha256)` and the workspace entry's `sha256`. Applying an action first checks that state again:
-- **Upload:** the local file is re-hashed as it is read; if it isn't the planned hash, the action is skipped as "changed here during the sync". The write's `base` is the planned remote hash, so a workspace change meanwhile is refused by the server (409).
-- **Download:** the bytes go to a temporary file in the same folder, are checked against the hash, and then replace the target by rename, only if the target still has its planned `(size, mtime_ns, inode)`, re-hashed if any differ. A local edit meanwhile skips the action.
-- **Delete here / there:** the same checks, and `remove` names the planned `sha256`.
+The plan is a list of actions, each with the state it was planned from: on this computer the file's stat key and `sha256` (or its absence), and in the workspace the entry's path, kind, `fid` and `sha256` (or its absence). Applying an action checks that state again, on both sides, and acts only if it still holds:
+- **Upload:** the local file is hashed as it is read; if it isn't the planned hash, the action is skipped ("changed here during the sync"). The write carries the planned `base` and `fid`, or `base: null` for a new file, so the server refuses any workspace change meanwhile (409).
+- **Download:** the bytes go to a temporary file in the same folder and are checked against the planned hash. Then the existing file is replaced in three steps, so that no write to it can be lost:
+  1. it is **moved aside** by rename into the holding folder (§2.4), and hashed there. If that isn't the planned hash, it is moved back (without replacing anything that appeared meanwhile) and the action is skipped;
+  2. the new file is renamed into place **without replacing**: if anything has appeared at that name meanwhile, the new file is kept beside it as a conflict copy and the action is skipped;
+  3. the moved-aside copy stays in the holding folder, restorable for 30 days.
+  A new file (nothing there before) is installed by the same no-replace rename.
+- **Delete here:** first `stat` in the workspace confirms the entry is still absent (or no longer that `fid`); then the file is moved aside into the holding folder and hashed, and moved back if it isn't the planned hash. So the delete rests on a fresh answer from the workspace and on the file's own bytes, never on the listing or the stat cache.
+- **Delete there:** `remove` with the planned `fid` and `sha256` (§3.2).
+
+**What fs-sync promises other programs writing in `LOCAL_DIR` meanwhile:** it doesn't stop them, and it never loses their bytes. A file it replaces or deletes is first moved aside and checked; a write that lands after that check goes either into a new file at the original name, which the no-replace rename never overwrites, or (through a handle opened earlier) into the moved-aside copy in the holding folder, which is kept 30 days.
+
+**No path outside `LOCAL_DIR`:** `LOCAL_DIR` is resolved once to its real path and opened as a directory. Every later file operation is relative to an open directory handle (`openat`, `renameat`, `fstatat`) with no-follow (`O_NOFOLLOW`, `AT_SYMLINK_NOFOLLOW`), one path component at a time. So a folder replaced by a symlink during the run makes that operation fail, never escape. The no-replace rename is `renameat2(RENAME_NOREPLACE)` on Linux, `renameatx_np(RENAME_EXCL)` on macOS and `MoveFileEx` without `MOVEFILE_REPLACE_EXISTING` on Windows. On Windows, no-follow is a check for reparse points before each step, which leaves a small race window; this is stated in the CLI's help there.
 
 A skipped action leaves both sides and its base entry as they were. The run finishes the other actions, reports the skipped ones, and exits with a code that says "run again" (§1). The next run plans from what is there then.
 
@@ -233,7 +267,7 @@ The person may edit a file in the browser while fs-sync runs. That edit is an op
 
 ### 4.3 Interrupted runs
 
-A crash, Ctrl-C or a lost connection at any point leaves:
+A crash, Ctrl+C or a lost connection at any point leaves:
 - each finished action recorded in the base (§2.5), and each unfinished one not;
 - at most one temporary download file per action, named `.<name>.sagebrush-tmp-<run id>`, which the next run deletes first;
 - a run journal (`$XDG_STATE_HOME/sagebrush/fs-sync/runs/<run id>.json`, appended and flushed per action) for the report, never needed for correctness.
@@ -251,10 +285,10 @@ The next run plans afresh. A finished action is now "equal" or already in the ba
 
 ### 4.5 Plan bounds
 
-- **The scan:** at most 100,000 local files (the account's index maximum). Over it, fs-sync stops before planning and says so.
+- **The scan:** visits at most 200,000 directory entries of any kind (files, folders, links, special files; an ignored folder counts once and isn't entered), at most 64 folders deep, with paths of at most 1,024 bytes in UTF-8 (the workspace's own limit). It keeps at most 100,000 files (the account's index maximum). Over any of these, fs-sync stops before planning and says which. A deeper or longer path is skipped and listed.
 - **The plan:** at most 100,000 actions. Shown summarized (counts and bytes per kind, and the first 20 of each), with `--dry-run --verbose` for all of it.
-- **Memory:** the base and the two listings are held as maps of path to a few fields, about 200 bytes an entry, so at most about 60 MB at 100,000 files on each side.
-- **Hashing:** one pass over a file to hash it, at most 4 files at a time.
+- **Memory, by streaming rather than maps** (daybreak2): the scan and the workspace listing are written as rows into two temporary tables of the pair's SQLite database as they arrive, and the plan is a join of those tables with the base, read in path order. So memory is SQLite's page cache, set to 64 MiB, plus the hashing buffers below; disk is at most about 400 MB for 100,000 entries on each side at the longest paths, freed at the end of the run.
+- **Hashing:** a file over the 95 MiB limit is skipped from its `stat`, never opened. Others are hashed streaming, in 1 MiB reads, at most 4 at a time. Open files are at most the 4 being hashed plus one directory handle per level of the current path (at most 64).
 
 ## 5. Tests (sync-client; grader to review)
 
@@ -263,17 +297,38 @@ Against the agent endpoint on the reference server (Miniflare), a real local fol
 - **The first run never deletes:** a folder pair with files only here, only there, and different on both; no delete in the plan.
 - **Conflicts:** both changed; the conflict name already taken; the result is the same on both sides, and both versions exist.
 - **Deletions:** each way, the Trash and the holding folder contents, `--restore`; the many-deletions guard at 50 and 51 files and at 25%.
-- **Crash mid-apply:** the CLI killed after each action kind, and between a download's temporary file and its rename; the next run cleans up, plans only what's left, and the end state is what an uninterrupted run gives.
+- **Crash mid-apply:** the CLI killed after each action kind, after a move-aside, and between a download's temporary file and its rename; the next run cleans up, plans only what's left, and the end state is what an uninterrupted run gives.
 - **A browser edit during apply:** a write to the same file through the page between the plan and the upload: the upload is refused (409), nothing is overwritten, and the next run plans it as changed there (or a conflict).
-- **A local edit during apply:** between the plan and a download or upload: skipped, and planned again next run.
+- **A local edit during apply:** between the plan and a download or upload, and between the move-aside's check and the no-replace rename (a new file at the name): skipped, nothing overwritten, and planned again next run.
+- **(astra) The stat cache:** a local write that keeps size and mtime: never overwritten or deleted (the apply-time hash catches it).
+- **(astra) The remote listing:** an entry missing from a listing (a page served before a concurrent rename): no delete here (the apply-time `stat` finds it); a file created or replaced in the workspace between plan and apply: the create-only write and the `remove` precondition refuse (409).
+- **(astra) Links:** a folder inside `LOCAL_DIR` replaced by a symlink to outside during apply: the operation fails, nothing outside is read or written.
+- **(astra) One direction:** a conflict under `--up` and under `--down`: neither side changes, the base doesn't advance, exit 1.
 - **Names:** a symlink pointing outside the folder (skipped, nothing read through it), ignored paths on both sides, a name the workspace refuses, NFD vs NFC names, and two workspace names differing only in case on a case-insensitive filesystem.
 - **Limits:** a plan larger than the grant's daily write budget (partial apply, the right exit code, the rest the next day); a 429 mid-run; a file over 95 MiB (skipped and listed); a revoked token (401, pairs again).
-- **The base:** a base for another account, grant or folder is never used; two runs of the same pair at once (the second refused).
+- **The base:** a base for another account, grant or folder is never used; two runs of the same pair at once (the second refused); a run killed while holding the lock (the OS releases a `flock`, so the next run isn't blocked); a damaged base (treated as no base: no deletes); a crash between batch commits (the lagging rows are recorded by the next run, with no extra action).
+- **Bounds (daybreak2):** the holding folder at its bounds and one byte or one file over (those actions pending, sources untouched, exit 1); cross-filesystem holding with too little free space; the scan's 200,000 entries, 64 levels and 1,024-byte paths, each at the limit and one over; a 96 MiB file never opened; the request bound of a plan checked against the hour's remaining requests (only the fitting prefix applied). Every bound is a constant the tests can lower, so these run on small folders.
+
+**Seams, not timing** (grader). The apply loop has named test hooks, each a point where a test can change a side and then let the run continue: `before_check(action)`, `after_tmp_written(action)`, `after_move_aside(action)`, `before_install(action)`, `after_base_commit(batch)`. The browser-edit, local-edit and crash tests use these, never sleeps or timed signals.
+
+**More cases** (grader):
+- the stat key: an edit that keeps size and restores mtime (`touch -r`): `ctime_ns` changes, so it is hashed and planned; an inode reused by a new file;
+- the deletion guard per side, at 50 and 51 files and at 25% and 33% of small bases; `--allow-deletes` with $N - 1$, $N$ and $N + 1$;
+- folder removal, and a folder still holding an ignored file (kept, and listed);
+- conflict names with no extension, a dotfile, several dots, and a name `normPath` refuses (the conflict copy is named by the reducer's own function, run on its own test vectors);
+- a download whose bytes don't match the hash (discarded, skipped, exit 1);
+- a 401 mid-run (stops; the next run pairs again); every exit code of §1.3;
+- a second run of an unchanged folder reads no file contents (a read counter);
+- the case-insensitive rows run on a macOS CI runner (case-insensitive by default), and on Linux as unit tests of the plan with the filesystem's case rule injected;
+- `--restore` onto an occupied path (left as it is, the file kept in the holding folder, exit 1).
+- **At implementation,** the table of §2.2 is a pure function `plan(L, R, B, mode)` with a unit test per row and mode, for the grader's mutation tests.
+
+**The overlap refusal (astra's F1, §1):** `LOCAL_DIR` equal to the home folder, to an XDG parent, and to the exact state and config folders, each refused with exit 2 before pairing; XDG overrides that put fs-sync's files under the chosen folder (refused the same way); every mode including `--restore`; and, with a synthetic token, no token bytes in any upload.
 
 ## 6. What it costs
 
 - **A run with nothing to do:** one local scan (`stat` only, no hashing), $\lceil n/1000 \rceil$ `list` requests for $n$ workspace entries, and no writes.
-- **A change of $k$ files:** about $k$ requests plus one blob URL per download, and the bytes of those files, within the grant's daily budgets (§3.3).
+- **A change of $k$ files:** at most the sum of §3.3's per-step bounds, and the bytes of those files, within the grant's hourly request and daily byte budgets (§3.3).
 
 ## 7. Open questions
 
