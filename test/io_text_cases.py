@@ -556,6 +556,9 @@ class R(io.RawIOBase):
         return self.s
 
     def write(self, b):
+        self.n = getattr(self, "n", 0) + 1
+        if self.n > 50:  # (a regression that loops on a raw stream fails here, fast)
+            raise RuntimeError("raw write() called over 50 times")
         return len(b) if self.w is None else self.w
 
 
@@ -697,6 +700,8 @@ class RawW(io.RawIOBase):
     def writable(self): return True
     def write(self, b):
         self.got.append(bytes(b))
+        if len(self.got) > 50:  # (a regression that loops on a raw stream fails here, fast)
+            raise RuntimeError("raw write() called over 50 times")
         return self.rets.pop(0) if self.rets else len(b)
 
 print("-- B5: a raw write() returning a negative length")
@@ -771,6 +776,8 @@ class RawW(io.RawIOBase):
     def writable(self): return True
     def write(self, b):
         self.got.append(bytes(b))
+        if len(self.got) > 50:  # (a regression that loops on a raw stream fails here, fast)
+            raise RuntimeError("raw write() called over 50 times")
         r = self.rets.pop(0) if self.rets else len(b)
         if isinstance(r, BaseException): raise r
         return r
