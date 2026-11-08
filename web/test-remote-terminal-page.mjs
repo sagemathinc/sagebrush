@@ -142,6 +142,9 @@ try {
   ok((await ev("__leg.ins()")) === "q", "xterm's answer to the replay's query is not sent");
   ok(await ev("sessionStorage.getItem('sagebrush-rterm:r-box') === 's-1'"), "the session is remembered in this tab");
   ok(await ev("/old line/.test(document.querySelector('#rterm .xterm-rows').textContent)"), "the replay is on the screen");
+  // (room below the notebook for the panel, so its last cells stay reachable: agents-ui's n1)
+  const pad = () => ev("[document.body.style.paddingBottom, (document.getElementById('rterm')?.offsetHeight ?? 0) + 'px', document.querySelector('#console').hidden ? 0 : document.querySelector('#console').offsetHeight]");
+  { const [p, h] = await pad(); ok(p === h && h !== "0px", `the page makes room below the notebook for the panel (${p})`); }
   await out("\x1b[c");
   await until("__leg.ins().startsWith('q\\x1b[?')");
   ok(true, "a live query's answer goes to the computer");
@@ -218,6 +221,10 @@ try {
   await ev("document.querySelector('#consolebtn').click(), true");
   await until("!document.querySelector('#console').hidden");
   ok((await z("#console")) > (await z("#rterm")), "the console, chosen after, is in front of the terminal");
+  { const [p, h, c] = await pad(); ok(p === Math.max(parseInt(h), c) + "px", `both open: room for the taller (${p}; terminal ${h}, console ${c}px)`); }
+  // (the console made the taller, with its own grip: the room follows it)
+  await ev(`(() => { const g = document.querySelector('#console .grip'); for (let i = 0; i < 6; i++) g.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true })); return true; })()`);
+  { const [p, h, c] = await pad(); ok(c > parseInt(h) && p === c + "px", `the console made taller: room for it (${p}; terminal ${h}, console ${c}px)`); }
   await ev("document.querySelector('#rtermbtn').click(), true");
   await until(`Number(getComputedStyle(document.querySelector('#rterm')).zIndex) > Number(getComputedStyle(document.querySelector('#console')).zIndex)`);
   ok(true, "choosing the terminal again brings it in front");
@@ -265,6 +272,7 @@ try {
   // 11. ✕: the panel and its leg go
   await ev("document.querySelector('#rterm .rhead button[aria-label=\"Close the terminal\"]').click(), true");
   ok(await ev("!document.getElementById('rterm') && __leg.sock.closed !== null"), "✕ removes the panel and closes its leg");
+  ok((await ev("document.body.style.paddingBottom")) === "", "and the room below the notebook goes with it");
 
   // 12. a phone: the extra-keys row (CoCalc's); one computer is opened at once; a remembered session is reattached
   await send("Emulation.setDeviceMetricsOverride", { width: 420, height: 800, deviceScaleFactor: 1, mobile: true });
@@ -315,6 +323,12 @@ try {
   await push({ t: "error", error: "sessions", limit: 3 });
   await until("/already runs/.test(document.querySelector('#rterm .rstatus')?.textContent ?? '')");
   ok((await status()) === "box already runs 3 terminals. End one there, then Reconnect.", `the session limit is the runner's: ${JSON.stringify(await status())}`);
+  await push({ t: "error", error: "sessions", limit: 1 });
+  await until("/1 terminal\\./.test(document.querySelector('#rterm .rstatus')?.textContent ?? '')");
+  ok((await status()) === "box already runs 1 terminal. End one there, then Reconnect.", `a limit of 1, singular: ${JSON.stringify(await status())}`);
+  await push({ t: "error", error: "sessions" });
+  await until("/as many/.test(document.querySelector('#rterm .rstatus')?.textContent ?? '')");
+  ok((await status()) === "box already runs as many terminals as it allows. End one there, then Reconnect.", `no limit sent: ${JSON.stringify(await status())}`);
   await goto(base + "?phone=0");
 } catch (e) {
   ok(false, "the test stopped: " + (e?.stack ?? e));
