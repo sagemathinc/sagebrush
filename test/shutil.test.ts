@@ -47,6 +47,16 @@ test("os: supports_fd and supports_dir_fd empty, dir_fd refused (open, chmod, ut
   ].join("\n"));
 });
 
+test("os.supports_follow_symlinks can be assigned before its first read, as CPython", () => {
+  const code = [
+    "import os",
+    "os.supports_follow_symlinks = 1",
+    "print(os.supports_follow_symlinks, vars(os)['supports_follow_symlinks'])",
+  ].join("\n");
+  const want = execFileSync("python3", ["-c", code], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+  assert.equal(execFileSync(process.execPath, [CLI, "-c", code], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }), want);
+});
+
 // The web build's fs itself (web/shims/fs.ts, its types stripped and its SHA-256 import stubbed, as file-once.test
 // runs it): every bound holds before any effect, whatever os passes (astra's OPEN-FLAGS-1: flags with a bit above 31
 // made the file; design note §Allocations: a descriptor's file is at most a bytes object's 2**32 - 1 bytes)
