@@ -423,6 +423,13 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/mod-xml.src": {
+   "exact": false,
+   "ceiling": 189253,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/mod-special-ibeta.src": {
    "exact": false,
    "ceiling": 27589,
@@ -726,7 +733,7 @@
   },
   "engine/sagebrush-worker.js": {
    "exact": false,
-   "ceiling": 1660002,
+   "ceiling": 1662351,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -846,6 +853,7 @@
    "engine/lib/mod-uuid.src": 39564,
    "engine/lib/mod-viewer3d.src": 94924,
    "engine/lib/mod-warnings.src": 5464,
+   "engine/lib/mod-xml.src": 189189,
    "engine/lib/mod-zoneinfo.src": 84951,
    "engine/lib/pkg-cremona-small.src": 137656,
    "engine/lib/pkg-pypi-sortedcontainers.src": 126368,

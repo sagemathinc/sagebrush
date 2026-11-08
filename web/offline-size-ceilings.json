@@ -10,7 +10,7 @@
   "baseSwGzip": 43602,
   "topology": "inventory-3span",
   "baseTopology": "legacy-2span",
-  "swRaw": 223468,
+  "swRaw": 223775,
   "swGzip": 54908,
-  "transition": "Rill A1.1 (#847 r2): the rill lazy chunks in LAZY and DIGESTS, the hidden R (Rill) item in the inventory, and sw.js's inventory() dropping hidden items (@sagebrush's ruling: Rill is invisible on the page until A2): measured on its branch merged with master 6aa08ee5, with bun 1.4.4 and node v24.21.0: sw.js raw 223404, over 222579, so swRaw = exact + 64 = 223468; normalized gzip-9 54844, over 54711, so swGzip = exact + 64 = 54908"
+  "transition": "Rill A1.1 (#847 r2): the rill lazy chunks in LAZY and DIGESTS, the hidden R (Rill) item in the inventory, and sw.js's inventory() dropping hidden items (@sagebrush's ruling: Rill is invisible on the page until A2): measured on its branch merged with master 6aa08ee5, with bun 1.4.4 and node v24.21.0: sw.js raw 223404, over 222579, so swRaw = exact + 64 = 223468; normalized gzip-9 54844, over 54711, so swGzip = exact + 64 = 54908; then pyexpat (P3c-1, #849, one lazy chunk mod-xml, fetched on import): measured on its branch merged with master db93ab2e, with bun 1.4.4 and node v24.21.0: sw.js raw 223711, over 223468, so swRaw = exact + 64 = 223775; normalized gzip-9 54890, under swGzip 54908 (unchanged)"
 }
