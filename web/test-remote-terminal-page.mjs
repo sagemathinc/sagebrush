@@ -35,11 +35,16 @@ try {
   const waiting = new Map();
   // (the peers list the next request gets, and how many were asked)
   let peers = { peers: [] }, peersAsked = 0;
+  // (a dialog the page opens, dismissed and counted: xterm's own OSC 8 handling, without the page's, asks with confirm())
+  const dialogs = [];
   const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
   ws.onmessage = (e) => {
     const m = JSON.parse(e.data);
     if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
-    else if (m.method === "Fetch.requestPaused") {
+    else if (m.method === "Page.javascriptDialogOpening") {
+      dialogs.push(m.params.message);
+      send("Page.handleJavaScriptDialog", { accept: false });
+    } else if (m.method === "Fetch.requestPaused") {
       peersAsked++;
       const get = m.params.request.method === "GET";
       send("Fetch.fulfillRequest", { requestId: m.params.requestId, responseCode: get ? 200 : 405, responseHeaders: [{ name: "Content-Type", value: "application/json" }], body: Buffer.from(JSON.stringify(peers)).toString("base64") });
@@ -193,6 +198,7 @@ try {
   const o2 = await ev("__leg.opened.at(-1) ?? null");
   ok(JSON.stringify(o2) === JSON.stringify(["https://example.org/plain", "_blank", "noopener,noreferrer"]), `a plain web address opens on a click, without the sentence's period: ${JSON.stringify(o2)}`);
   ok((await ev("__leg.opened.length")) === 2, "nothing opened without a click");
+  ok(dialogs.length === 0, `no dialog (${JSON.stringify(dialogs).slice(0, 120)})`);
   // (the module's own check, under xterm's OSC 8 filter: http(s) only, whatever the link came from)
   const hrefs = await ev(`(async () => {
     const m = await import(new URL("sagebrush-remote-terminal.js", location.href).href);
