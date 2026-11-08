@@ -487,7 +487,7 @@ async def test_limits_idle_and_stop():
             sid = (await p.open())["session"]
             sessions.append(t.terms.running[sid])
         p5 = await tpaired(t, leg, sg, 5)
-        assert await p5.open() == {"t": "error", "error": "sessions"}
+        assert await p5.open() == {"t": "error", "error": "sessions", "limit": 4}
         assert t.terms.stats["spawned"] == 4
         # (a terminal message over 65,536 bytes closes its page (1009); the leg goes on)
         p5.send({"t": "resize", "pad": "x" * 70_000})
