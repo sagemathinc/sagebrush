@@ -116,7 +116,7 @@ try {
     const from = await evaluate(`(() => { document.querySelector(".sb-term-status").textContent = ""; ${T}.editor.reset(${JSON.stringify(cmd)}); return window.__cursorLine(); })()`);
     await realKey("Enter");
     if (/^\s*(?:clear|reset)\s*$/.test(cmd)) {
-      await until(`!${T}.writer.writing`, 10000);
+      await until(`!${T}.writer.writing && ${T}.cmd === null`, 10000);
       await pause(100);
       return { status: await evaluate(`document.querySelector(".sb-term-status").textContent`), cwd: await evaluate(`document.querySelector(".sb-term-cwd").textContent`) };
     }
@@ -197,6 +197,21 @@ try {
   await run("reset");
   r = await run("pwd");
   check(r?.out === "/tdir\n" && r?.status === "done", `after reset a fresh shell runs, in the same directory: ${JSON.stringify(r)}`);
+  // (r5, ENGINE E3: reset while a start is under way: the start adopted and finished first, never cleared or
+  // overlapped; the admission held meanwhile, so another Enter is refused with the line kept)
+  await evaluate(`(() => { const t = ${T}, h = t.opts.host; window.__ends = 0; const e0 = h.endShell.bind(h); h.endShell = (w) => (window.__ends++, e0(w));
+    t.ready = false; t.starting = new Promise((r) => (window.__startGo = () => { t.ready = true; r(); })); return 1; })()`);
+  await focusTerm();
+  await evaluate(`${T}.editor.reset("reset"), 1`);
+  await realKey("Enter");
+  await pause(200);
+  await evaluate(`${T}.editor.reset("echo early"), 1`);
+  await realKey("Enter");
+  const e3 = await evaluate(`({ ends: window.__ends, held: ${T}.cmd !== null, buf: ${T}.editor.buf, note: document.querySelector(".sb-term-note").textContent })`);
+  check(e3.ends === 0 && e3.held && e3.buf === "echo early" && e3.note === "A command is running: Stop it first.", `reset during a start: the start not ended, the admission held, another Enter refused with its line kept: ${JSON.stringify(e3)}`);
+  await evaluate(`window.__startGo(), 1`);
+  check(!!(await until(`${T}.cmd === null && ${T}.ready && window.__ends === 1`, 20000)), "and once that start is done: one end, one fresh start, the admission let go");
+  await evaluate(`${T}.editor.reset(""), 1`);
   // open, ps, top: the panel's own (William's P1)
   r = await run("cd /");
   r = await run("ps");
@@ -280,6 +295,23 @@ try {
   check((await evaluate(`window.__lines(0, window.__cursorLine())`)).includes("^C (stopped)"), "the stopped command says so");
   check((await evaluate(`${T}.editor.buf`)) === "echo queued", "the typed-ahead line is at the next prompt");
   await realKey("u", { ctrl: true });
+  // (r4 5, SEC/PERF on e8153082: a reverse search's query past SHOW_UNITS is drawn as its summary, bounded before
+  // the redraw is made: nothing cut after; then Ctrl-G back)
+  const cuts0 = await evaluate(`${T}.writer.stats.cuts`);
+  await evaluate(`(() => { const t = ${T}; t.editor.search = { q: "q".repeat(196608), at: -1, failed: true, saved: "", savedCur: 0 }; t.redraw(); return 1; })()`);
+  await until(`!${T}.writer.writing`, 5000);
+  const rsBig = await evaluate(`window.__lines(window.__cursorLine(), window.__cursorLine() + 1)[0]`);
+  check(rsBig.startsWith("(failed reverse-i-search)`[1 line, 196608 bytes") && (await evaluate(`${T}.writer.stats.cuts`)) === cuts0 && (await evaluate(`${T}.writer.stats.maxWrite`)) <= 65536,
+    `a 192 KiB query is drawn as its summary, nothing made past its room: ${JSON.stringify(rsBig.slice(0, 80))}`);
+  await realKey("g", { ctrl: true });
+  // (and the prompt's cwd: its last 256 units after an ellipsis, however long the directory)
+  const cwdWas = await evaluate(`${T}.cwd`);
+  await evaluate(`(() => { const t = ${T}; t.setCwd("/" + "d".repeat(100000)); t.redraw(); return 1; })()`);
+  await until(`!${T}.writer.writing`, 5000);
+  const cwdLine = await evaluate(`window.__lines(window.__cursorLine() - 3, window.__cursorLine() + 1).join("")`);
+  check(cwdLine.includes("\u2026" + "d".repeat(50)) && !cwdLine.includes("d".repeat(300)) && (await evaluate(`${T}.writer.stats.cuts`)) === cuts0, `a 100 000-unit cwd is drawn as its last 256 units, nothing cut after: ${cwdLine.length} units on screen`);
+  await evaluate(`${T}.setCwd(${JSON.stringify(cwdWas)}), ${T}.redraw(), 1`);
+  await until(`!${T}.writer.writing`, 5000);
   // (r4 11, 12: the screen still drawing (the writer's ledger pressed): Enter refused before the editor takes the line;
   // the line and the history kept, nothing run.  The pressure is simulated: the writer's own caps are pinned in
   // test-term-writer.mjs)

@@ -522,5 +522,95 @@ function putRig(budget = BUDGET, opts) {
   ok(r8.text() === "\x90a" + M.repeat(10) + "\x9c", "W22: an 8-bit DCS passes whole");
 }
 
+// r4 (SEC, PERF on e8153082): a throw anywhere (a lazy callback, the generation's start, the sink) drops that item:
+// released and settled once, counted, and the writer goes on; dispose after it leaves nothing held
+{
+  const { w, r } = rig();
+  const p1 = w.writeLazy(() => { throw new Error("make"); });
+  const p2 = w.write("after", "ui");
+  await Promise.all([p1, p2]);
+  ok(w.stats.failed === 1 && r.text() === "after" && w.ledger.items === 0 && w.ledger.bytes === HEADROOM, `a lazy callback that throws: dropped, its reservation released, its promise settled, the next write drawn (${JSON.stringify(w.ledger)})`);
+  const wg = new TermWriter(() => ({ write: (d, cb) => setTimeout(cb, 0) }), zw, () => { throw new Error("gen"); }, { ...BUDGET, links: 1 });
+  const link = (u) => `\x1b]8;;${u}\x1b\\x\x1b]8;;\x1b\\`;
+  await wg.write(link("https://a/1"), "output");
+  await wg.write(link("https://a/2"), "output");
+  await wg.write("z", "ui");
+  ok(wg.stats.failed === 1 && wg.ledger.items === 0 && wg.ledger.bytes === HEADROOM, "a generation's start that throws: that item dropped, the ledger back to empty");
+  let n = 0;
+  const ws = new TermWriter(() => ({ write: (d, cb) => { if (n++ === 0) throw new Error("sink"); setTimeout(cb, 0); } }), zw, () => {});
+  const id = ws.tryStartCommand();
+  await ws.write("one", "output");
+  await ws.write("two", "output");
+  await ws.endOutput(id);
+  ok(ws.stats.failed === 1 && ws.ledger.items === 0 && ws.tryStartCommand() !== null, "a sink that throws: that write failed and released; the command's end still settles and frees it");
+  const { w: wd, r: rd } = rig(BUDGET, { auto: false });
+  const pd = wd.writeLazy(() => "held");
+  await turn();
+  wd.dispose();
+  rd.pending.forEach((f) => f());
+  await pd;
+  ok(wd.ledger.items === 0 && wd.ledger.bytes === HEADROOM, "dispose with a write in flight, then its late callback: released once, nothing held");
+}
+
+// r5 (ENGINE E2, PERF): idle() waits for its own frontier only; a later write never extends it
+{
+  const { w, r } = rig(BUDGET, { auto: false });
+  void w.write("before", "ui");
+  await turn();
+  let done = false;
+  const p = w.idle().then(() => (done = true));
+  void w.write("after", "ui");
+  r.pending.shift()();
+  await turn();
+  await turn();
+  ok(done && r.writes.some((x) => x.data === "after") && r.pending.length === 1, "E2: idle() at an in-flight write settles at its callback, a later write still pending");
+  await p;
+  const { w: w2, r: r2 } = rig(BUDGET, { auto: false });
+  void w2.write("x", "ui");
+  await turn();
+  void w2.write("b", "output");
+  let done2 = false;
+  const p2 = w2.idle().then(() => (done2 = true));
+  void w2.write("c", "output");
+  r2.pending.shift()();
+  await turn();
+  r2.pending.shift()();
+  await turn();
+  await turn();
+  ok(done2 && r2.writes.map((x) => x.data).join("|") === "x|b|c", `E2: a later write never merges into an idle() frontier (${r2.writes.map((x) => x.data).join("|")})`);
+  await p2;
+}
+
+// r5 (ENGINE E5): a repeated end before its marker is made joins it; after, more omitted bytes are refused
+{
+  const { w, r } = rig(BUDGET, { auto: false });
+  void w.write("first", "ui");
+  await turn();
+  const id = w.tryStartCommand();
+  void w.endOutput(id, 7);
+  void w.endOutput(id, 100);
+  r.pending.shift()();
+  await turn();
+  ok(r.writes.at(-1).data.includes("[\u2026 107 more bytes not shown]"), "E5: repeats while the end waits: one marker, their counts added (107)");
+  let refused = false;
+  await w.endOutput(id, 5).catch(() => (refused = true));
+  const same = w.endOutput(id, 0);
+  r.pending.shift()();
+  await same;
+  ok(refused && (r.text().match(/more bytes not shown/g) || []).length === 1 && w.ledger.items === 0, "E5: once the marker is made, more omitted bytes are refused (never lost silently); a plain repeat shares the end");
+  const { w: w2, r: r2 } = rig(BUDGET, { auto: false });
+  void w2.write("first", "ui");
+  await turn();
+  const id2 = w2.tryStartCommand();
+  void w2.endOutput(id2, 7);
+  r2.pending.shift()();
+  await turn();
+  let lost = false;
+  await w2.endOutput(id2, 100).catch(() => (lost = true));
+  r2.pending.shift()();
+  await turn();
+  ok(lost && r2.text().includes("[\u2026 7 more bytes not shown]") && !r2.text().includes("107"), "E5: daybreak3's probe: 7, the end made, then +100: refused, the marker exact at 7");
+}
+
 console.log(`${checks - fails}/${checks} checks passed`);
 if (fails) process.exit(1);

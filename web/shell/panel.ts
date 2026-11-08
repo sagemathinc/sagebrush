@@ -24,6 +24,8 @@ export const OUTPUT = Object.freeze({ inBytes: 1 << 20, errReserve: 65536 });
 const SHOW_UNITS = 4096, SHOW_LINES = 100;
 /** an exit line's text at most (UTF-16 units): a shell's reason included */
 const EXIT_UNITS = 512;
+/** the prompt's cwd at most (UTF-16 units): its end, after an ellipsis */
+const PATH_UNITS = 256;
 /** top's block at most (UTF-8 bytes): one lazy write's room (term-writer.ts ITEM_MAX) less its moves */
 const REPLACE_MAX = ITEM_MAX - 64;
 const BUSY = "The screen is still drawing: try again in a moment.";
@@ -554,7 +556,9 @@ export class TerminalPanel {
 
   /** The prompt and the editor's line as drawn: lines of [prefix, text], and the cursor's line and offset. */
   private view(line?: string): { lines: [string, string][]; at: [number, number] } {
-    const ed = this.editor, ps = `${this.cwd} $ `;
+    // (every part bounded before it is drawn: the cwd's last PATH_UNITS, the line or query within SHOW_UNITS, else its
+    // summary; so a redraw is made within its lazy write's room, never cut after: SEC r4 materialization)
+    const ed = this.editor, ps = `${this.cwd.length > PATH_UNITS ? "\u2026" + this.cwd.slice(-PATH_UNITS) : this.cwd} $ `;
     if (line !== undefined) {
       const text = this.small(line) ? line : this.summary(line);
       const parts = text.split("\n");
@@ -563,7 +567,7 @@ export class TerminalPanel {
     if (ed.search) {
       const s = ed.search, match = s.at >= 0 ? ed.history.entries[s.at] : "";
       // (bash's own prompt: a backtick opens the query, an apostrophe closes it)
-      const p = `(${s.failed ? "failed " : ""}reverse-i-search)\`${visible(s.q)}': `;
+      const p = `(${s.failed ? "failed " : ""}reverse-i-search)\`${this.small(s.q) ? visible(s.q) : this.summary(s.q)}': `;
       const text = this.small(match) ? visible(match) : this.summary(match);
       return { lines: [[p, text]], at: [0, text.length] };
     }
@@ -789,23 +793,27 @@ export class TerminalPanel {
     this.say("");
     const word = line.trim();
     if (word === "") return void this.end_(), this.prompt();
-    if (word === "clear" || word === "reset") {
-      void this.end_();
-      // (the panel's own: clear = Ctrl-L; reset also starts a fresh shell, keeping the cwd and the history, for when
-      // something was pasted by mistake)
-      this.clear();
-      if (word === "reset") {
-        this.opts.host.endShell("reset");
-        this.ready = false;
-        this.starting = null;
-        void this.warm();
-      }
-      return this.prompt();
-    }
+    // (the panel's own: clear = Ctrl-L; reset also starts a fresh shell, keeping the cwd and the history, for when
+    // something was pasted by mistake)
+    if (word === "clear") return void this.end_(), this.clear(), this.prompt();
+    if (word === "reset") return void this.reset();
     const argv = words(word), via = this.opts.tab?.route(argv, line);
     if (via) return void this.submit(line, via);
     if (argv && argv.length && Object.hasOwn(this.opts.commands ?? {}, argv[0])) return void this.builtin(line, argv);
     void this.submit(line);
+  }
+
+  /** `reset`: a fresh shell.  It holds the command's admission until the new shell is up, and a start already under
+   * way (show()'s own) is adopted and finished first: never cleared or overlapped by a second (ENGINE E3). */
+  private async reset(): Promise<void> {
+    this.clear();
+    if (this.starting) await this.starting;
+    this.opts.host.endShell("reset");
+    this.ready = false;
+    this.starting = null;
+    await this.warm();
+    await this.end_();
+    this.prompt();
   }
 
   private begin(): AbortController {

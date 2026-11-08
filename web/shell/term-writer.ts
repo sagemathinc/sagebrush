@@ -75,6 +75,8 @@ type Item = {
   styled: boolean;
   /** a lazy's text size (UTF-8 bytes), counted as omitted if it is dropped */
   size: number;
+  /** an idle() frontier: nothing merges into it after, so a later write never extends that wait */
+  sealed?: boolean;
   done: Promise<void>;
   settle: () => void;
   released: boolean;
@@ -122,7 +124,7 @@ export class TermWriter {
   gen = 0;
   charges: Charges = { combining: 0, links: 0, linkUnits: 0 };
   /** written so far, by kind (the tests'); droppedBytes: output dropped outside any command */
-  stats = { writes: 0, maxWrite: 0, generations: 0, cuts: 0, dropped: 0, droppedBytes: 0, inflightMax: 0 };
+  stats = { writes: 0, maxWrite: 0, generations: 0, cuts: 0, dropped: 0, droppedBytes: 0, failed: 0, inflightMax: 0 };
   /** the current logical output passed the style-run cap (reset with the output) */
   colourCut = false;
   private inflightN = 0;
@@ -139,10 +141,8 @@ export class TermWriter {
   private current: Item | null = null;
   private inflight: (() => void) | null = null;
   /** the one admitted command: its end's reservation (then its item), and its output's omitted bytes */
-  private cmd: { id: number; omitted: number; end: Item | null } | null = null;
+  private cmd: { id: number; omitted: number; end: Item | null; written?: boolean } | null = null;
   private nextId = 1;
-  /** the shared completion of idle(): settled when nothing waits or is in flight */
-  private drain: { done: Promise<void>; settle: () => void } | null = null;
   /** whether the last text written ended a line (the omission marker starts on a line of its own) */
   private atLineStart = true;
 
@@ -201,7 +201,7 @@ export class TermWriter {
 
   /** a command's output not shown: counted for its end's marker (outside a command, in stats) */
   private omit(bytes: number): void {
-    if (this.cmd && !this.dead) this.cmd.omitted += bytes;
+    if (this.cmd && !this.cmd.written && !this.dead) this.cmd.omitted += bytes;
     else this.stats.droppedBytes += bytes;
   }
 
@@ -220,7 +220,7 @@ export class TermWriter {
       const data = read === piece.length ? piece : piece.slice(0, read);
       i += read;
       const tail = this.queue[this.queue.length - 1];
-      if (tail && tail.kind === kind && tail.bytes + n <= ITEM_MAX && this.bytes + n <= MAX_QUEUED) {
+      if (tail && tail.kind === kind && !tail.sealed && tail.bytes + n <= ITEM_MAX && this.bytes + n <= MAX_QUEUED) {
         tail.data += data;
         tail.bytes += n;
         this.bytes += n;
@@ -273,11 +273,13 @@ export class TermWriter {
 
   /** The end of command `id`'s output (`omitted`: its bytes the panel left out, S1's): the reset, the lexer back to
    * ground with no base to attach to, and one "[… N more bytes not shown]" for all its omitted bytes.  A repeat while
-   * it waits shares its completion; any other id is refused. */
+   * it waits shares its completion (its count joining the marker's); once the marker is made, a repeat with more
+   * omitted bytes is refused (one marker, exact), and any other id is refused. */
   endOutput(id: number, omitted = 0): Promise<void> {
     if (this.dead) return SETTLED;
     const c = this.cmd;
     if (!c || c.id !== id) return Promise.reject(new Error(`term-writer: command ${id} isn't the active one`));
+    if (c.written && omitted > 0) return Promise.reject(new Error(`term-writer: command ${id}'s marker is already written`));
     c.omitted += omitted;
     if (c.end) return c.end.done;
     // (its item and bytes were reserved when the command started)
@@ -287,22 +289,15 @@ export class TermWriter {
     return c.end.done;
   }
 
-  /** All writes queued before it drawn: no item of its own; every caller shares one completion, settled when
-   * nothing waits or is in flight. */
+  /** All writes queued before it drawn: no item of its own.  Its frontier is the last item waiting (or the one in
+   * flight): callers at one frontier share that item's completion, and the item is sealed, so no later write merges
+   * into it and extends the wait. */
   idle(): Promise<void> {
-    if (this.dead || (!this.pumping && !this.queue.length)) return SETTLED;
-    if (!this.drain) {
-      let settle!: () => void;
-      const done = new Promise<void>((r) => (settle = r));
-      this.drain = { done, settle };
-    }
-    return this.drain.done;
-  }
-
-  private drained(): void {
-    const d = this.drain;
-    this.drain = null;
-    d?.settle();
+    if (this.dead) return SETTLED;
+    const at = this.queue[this.queue.length - 1] ?? this.current;
+    if (!at) return SETTLED;
+    at.sealed = true;
+    return at.done;
   }
 
   /** ✕: nothing more is written; whatever waits is let go and released, and a late callback does nothing. */
@@ -315,7 +310,6 @@ export class TermWriter {
     this.cmd = null;
     this.inflight?.();
     this.inflight = null;
-    this.drained();
   }
 
   /** a lazy item's text: made now, cut to ITEM_MAX bytes (a cut command output's rest counted), the rest refunded */
@@ -343,29 +337,39 @@ export class TermWriter {
       while (this.queue.length && !this.dead) {
         const item = this.queue.shift()!;
         this.current = item;
-        let data: string;
-        if (item.kind === "end") {
-          this.lex = { st: "ground", osc: "", afterBase: -1, drop: false };
-          this.colourCut = false;
-          const n = this.cmd?.end === item ? this.cmd.omitted : 0;
-          data = (this.inAlt() ? "\x18" + LEAVE_ALT + RESET.slice(1) : RESET) + (n ? (this.atLineStart ? "" : "\r\n") + `\x1b[2;3m[… ${n} more bytes not shown]\x1b[0m\r\n` : "");
-        } else if (item.kind === "lazy") data = await this.admit(this.made(item), item.styled);
-        else data = await this.admit(item.data, item.kind === "output");
-        item.data = "";
-        if (this.dead) return item.settle();
-        await this.put(data);
-        if (data) this.atLineStart = /\n(?:\x1b\[[0-9;]*m)*$/.test(data.slice(-64));
-        this.release(item);
-        this.current = null;
-        // (a command's end settles it: the next may start)
-        if (item.kind === "end" && this.cmd?.end === item) this.cmd = null;
-        item.settle();
+        try {
+          let data: string;
+          if (item.kind === "end") {
+            this.lex = { st: "ground", osc: "", afterBase: -1, drop: false };
+            this.colourCut = false;
+            const c = this.cmd?.end === item ? this.cmd : null;
+            if (c) c.written = true;
+            const n = c ? c.omitted : 0;
+            data = (this.inAlt() ? "\x18" + LEAVE_ALT + RESET.slice(1) : RESET) + (n ? (this.atLineStart ? "" : "\r\n") + `\x1b[2;3m[\u2026 ${n} more bytes not shown]\x1b[0m\r\n` : "");
+          } else if (item.kind === "lazy") data = await this.admit(this.made(item), item.styled);
+          else data = await this.admit(item.data, item.kind === "output");
+          item.data = "";
+          if (!this.dead) {
+            await this.put(data);
+            if (data) this.atLineStart = /\n(?:\x1b\[[0-9;]*m)*$/.test(data.slice(-64));
+          }
+        } catch {
+          // (a callback, the generation's start or the sink threw: the item is dropped and counted, the rest goes on)
+          this.stats.failed++;
+        } finally {
+          // (every item, written, failed or let go by dispose: released once, settled once; a command's end frees it)
+          item.make = undefined;
+          item.data = "";
+          this.release(item);
+          this.current = null;
+          if (item.kind === "end" && this.cmd?.end === item) this.cmd = null;
+          item.settle();
+        }
       }
     } finally {
       this.pumping = false;
       this.current = null;
     }
-    if (!this.queue.length) this.drained();
   }
 
   private put(data: string): Promise<void> {
@@ -374,20 +378,25 @@ export class TermWriter {
     this.stats.maxWrite = Math.max(this.stats.maxWrite, data.length);
     const gen = this.gen, t0 = typeof performance === "undefined" ? 0 : performance.now();
     this.stats.inflightMax = Math.max(this.stats.inflightMax, ++this.inflightN);
-    return new Promise((res) => {
+    return new Promise((res, rej) => {
       let fired = false;
       // (E5.5's slice measure: one write, from its start to xterm's callback for it)
       const fin = () => { if (!fired) (fired = true), this.inflightN--, (this.inflight = null), t0 && performance.measure("sb-term:write", { start: t0, end: performance.now() }), res(); };
       this.inflight = fin;
       // (a callback from a generation since replaced, or after ✕, is a no-op: fin runs once)
-      const sink = this.sink();
-      for (let k = 0; k < data.length; ) {
-        let e = Math.min(data.length, k + PIECE);
-        if (e < data.length && (data.charCodeAt(e) & 0xfc00) === 0xdc00) e--;
-        const last = e >= data.length;
-        if (last) sink.write(data.slice(k), () => { if (this.gen === gen) fin(); });
-        else sink.write(data.slice(k, e), () => {});
-        k = e;
+      try {
+        const sink = this.sink();
+        for (let k = 0; k < data.length; ) {
+          let e = Math.min(data.length, k + PIECE);
+          if (e < data.length && (data.charCodeAt(e) & 0xfc00) === 0xdc00) e--;
+          const last = e >= data.length;
+          if (last) sink.write(data.slice(k), () => { if (this.gen === gen) fin(); });
+          else sink.write(data.slice(k, e), () => {});
+          k = e;
+        }
+      } catch (err) {
+        // (a sink that throws: this write ends now, failed; no callback is waited for)
+        if (!fired) (fired = true), this.inflightN--, (this.inflight = null), rej(err);
       }
     });
   }

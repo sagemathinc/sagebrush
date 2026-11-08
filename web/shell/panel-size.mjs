@@ -9,10 +9,10 @@ import { readFileSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 
-// (daybreak2 rules the ceilings from the landing measurement with CI's bun 1.4.4: PR 2 r3 measured 456 001 B raw and
-// 126 381 B gzip -9 (Node 24.21.0's zlib); r1's approved 455 400 / 126 250 were for 454 038 / 125 845; these keep that
-// headroom, about 0.3%, as a proposal for the ruling on r3)
-const LIMIT_RAW = 457400, LIMIT_GZIP = 126790;
+// (daybreak2 rules the ceilings from the landing measurement with CI's bun 1.4.4: PR 2 r4 (e8153082) measured 459 209 B
+// raw and 127 554 B gzip -9 (Node 24.21.0's zlib); daybreak2 approved 460 600 / 127 970 on r4, headroom 1 391 / 416,
+// about 0.3%.  r3's were 457 400 / 126 790 for 456 001 / 126 381)
+const LIMIT_RAW = 460600, LIMIT_GZIP = 127970;
 const root = join(import.meta.dir, "..", "..");
 const dist = join(root, "web", "dist");
 const fails = [];
