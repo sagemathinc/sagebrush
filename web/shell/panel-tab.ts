@@ -1,25 +1,22 @@
 // The terminal's Tab completion, `help NAME` routing and `ls` colours (plan-term-help-tab r3.1 §2T, §2H, §2C), given
-// to the panel by the page (web/shell/terminal.ts, as panel-commands.ts is), so the panel's own code (E5.6's figure,
-// web/shell/panel-size.mjs) carries only the calls.  The logic is web/shell/complete.ts's pure functions; the only
+// to the panel by the page (web/shell/terminal.ts, as panel-commands.ts is), so the panel's own code carries only the
+// calls.  The logic is web/shell/complete.ts's pure functions; the only
 // listing is ShellHost.complete, the shell's own checks, read-only, never an invocation.
 import type { ShellHost } from "./host.ts";
-import { words, type PanelTab, type TabState } from "./panel.ts";
+import { words, type PanelTab, type TabInput, type TabState } from "./panel.ts";
 import { tabAction, tabWord, complete, matches, splitPath, candidateBlock, commandNames, compgen, lsColourable, colourLs, SHELL_COMMANDS, BUILTINS, PANEL_COMMANDS, type Cand } from "./complete.ts";
 import { absPath } from "./panel-commands.ts";
 
 const PERSON = { kind: "person" } as const;
-const CSS = ".sb-term-cands{padding:2px 8px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:30%;overflow:auto;color:var(--sb-term-c7)}";
 
 export function panelTab(host: ShellHost): PanelTab & { requests: number } {
   let ctl: AbortController | null = null;
   // (each reset (an edit, a cd, a run, reset, end) starts a new generation: an answer from an older one is stale)
   let gen = 0;
-  let block: HTMLElement | null = null;
   let lastTab: string | null = null;
   let root0: HTMLElement | null = null;
-  // (the inputs whose other keys are watched: any key but Tab (history's Up/Down, Ctrl-C, Enter, an edit) supersedes
-  // what a Tab has in flight, so an Up then Down back to the same text can't revive it: astra TH-C3)
-  const watched = new WeakSet<HTMLTextAreaElement>();
+  // (any key but Tab (history's Up/Down, Ctrl-C, Enter, an edit) supersedes what a Tab has in flight: the panel calls
+  // reset() for each, so an Up then Down back to the same text can't revive it: astra TH-C3)
   const self = {
     /** the listings asked of the host (the tests' counter, E5) */
     requests: 0,
@@ -29,31 +26,25 @@ export function panelTab(host: ShellHost): PanelTab & { requests: number } {
       if (ctl && !ctl.signal.aborted && root0) root0.dataset.tabAborts = String(Number(root0.dataset.tabAborts ?? 0) + 1);
       ctl?.abort();
       ctl = null;
-      block?.remove();
-      block = null;
     },
-    key(input: HTMLTextAreaElement, root: HTMLElement, state: () => TabState): boolean {
+    key(input: TabInput, root: HTMLElement, state: () => TabState): boolean {
       const st = state();
       // (completion only at a word's end, nothing selected, nothing running, and a literal word: otherwise the
       // browser's own Tab, which moves focus; Shift-Tab never reaches here: no keyboard trap)
       root0 = root;
-      if (!watched.has(input)) {
-        watched.add(input);
-        input.addEventListener("keydown", (e) => { if (e.key !== "Tab") self.reset(); }, true);
-      }
-      if (tabAction(input.value, input.selectionStart, input.selectionEnd, st.busy) !== "complete") return false;
-      const w = tabWord(input.value, input.selectionStart);
+      if (tabAction(input.value, input.caret, input.caret, st.busy) !== "complete") return false;
+      const w = tabWord(input.value, input.caret);
       if (!w) return false;
       ctl?.abort();
       const mine = (ctl = new AbortController());
       const g = gen;
-      const snap = { value: input.value, caret: input.selectionStart, cwd: st.cwd };
+      const snap = { value: input.value, caret: input.caret, cwd: st.cwd };
       // (the answer is still for what is on screen: this Tab's listing, the same generation, input, caret and cwd,
       // nothing running, the session not ended)
       const fresh = () => {
         const s = state();
         return !mine.signal.aborted && ctl === mine && g === gen && !s.busy && !s.ended && s.cwd === snap.cwd &&
-          input.value === snap.value && input.selectionStart === snap.caret && input.selectionEnd === snap.caret;
+          input.value === snap.value && input.caret === snap.caret;
       };
       void (async () => {
         const lit = w.literal!;
@@ -70,7 +61,7 @@ export function panelTab(host: ShellHost): PanelTab & { requests: number } {
           if (delay) await new Promise((r) => setTimeout(r, delay));
           const r = await host.complete(PERSON, folder, mine.signal);
           if (!("entries" in r)) {
-            if ("tooMany" in r && fresh()) show(root, input, "Too many entries here to complete.");
+            if ("tooMany" in r && fresh()) input.show("Too many entries here to complete.");
             return;
           }
           cands = r.entries.map((x) => ({ name: x.name, dir: x.kind === "folder" }));
@@ -80,15 +71,12 @@ export function panelTab(host: ShellHost): PanelTab & { requests: number } {
         if (res === null) return;
         if (res === "list") {
           // (bash's way: the first Tab with nothing new does nothing, the second lists)
-          if (lastTab === snap.value) show(root, input, candidateBlock(matches(cands, name, !dir, atTop).map((c) => c.name + (c.dir ? "/" : ""))));
+          if (lastTab === snap.value) input.show(candidateBlock(matches(cands, name, !dir, atTop).map((c) => c.name + (c.dir ? "/" : ""))));
           lastTab = snap.value;
           return;
         }
         lastTab = null;
-        input.value = res.line;
-        input.setSelectionRange(res.caret, res.caret);
-        // (the panel's own input handling: it grows the input, and puts away this Tab's state)
-        input.dispatchEvent(new Event("input"));
+        input.set(res.line, res.caret);
       })();
       return true;
     },
@@ -107,19 +95,6 @@ export function panelTab(host: ShellHost): PanelTab & { requests: number } {
     async colour(line: string, out: string, cwd: string): Promise<string> {
       return colourOf(host, line, out, cwd);
     },
-  };
-  // (one candidate block or note under the log, replaced by the next; its text only, bounded by candidateBlock)
-  const show = (root: HTMLElement, input: HTMLTextAreaElement, text: string) => {
-    if (!document.getElementById("sb-term-tab-css")) {
-      const st = document.head.appendChild(document.createElement("style"));
-      st.id = "sb-term-tab-css";
-      st.textContent = CSS;
-    }
-    block?.remove();
-    block = document.createElement("div");
-    block.className = "sb-term-cands";
-    block.textContent = text;
-    root.insertBefore(block, input.parentElement);
   };
   return self;
 }

@@ -1,40 +1,79 @@
-// The terminal panel (plan-bash-shell r8c E5; step 6): a bottom dock on the notebook page that runs one command at a
-// time through the page's ShellHost with the person principal.  From scratch: no emulator, no innerHTML from data
-// (text nodes and class names from a fixed table only); the output is rendered in slices (web/shell/panel-render.ts).
-// A preview: the page shows it on preview and DEV hosts only (web/index.html), until E5.5's timing gates are met.
+// The terminal panel (plan-bash-shell r8c E5; plan-term-xterm r2.7 PR 2): a bottom dock on the notebook and board
+// pages that runs one command at a time through the page's ShellHost with the person principal.  The screen is xterm
+// (web/term/xterm-view.ts: the page's shared setup and its OUT-ISO rules), the line is web/shell/line-editor.ts's, and
+// every byte reaches xterm through web/shell/term-writer.ts, in order, filtered and charged.
+//
+// Input (plan §2, astra TX1): xterm's onData is never an input source, so nothing a command prints (a cursor-position
+// query's answer, a mouse report) can become a command.  Keys come from the keyboard event itself (xterm's custom key
+// handler, which then lets xterm do nothing with them); a paste from the paste event; an input method's text from
+// compositionend; a phone keyboard's from the textarea's insertText input after a 229 keydown.  A submitted command is
+// always the editor's line, never text read back from the screen.
 import css from "./panel.css" with { type: "text" };
-import { Render, SLICE, FIRST, SCROLLBACK, dropMarker, evictCount, type Run } from "./panel-render.ts";
 import type { HostOutcome, ShellHost } from "./host.ts";
+import { FitAddon, Terminal, KEYS, TOOLBAR_CSS, BUTTON_CSS, ensureXtermCss, extraKeysRow, safeTerminal } from "../term/xterm-view.ts";
+import { LineEditor, History, HISTORY, utf8Len, type Act, type Key } from "./line-editor.ts";
+import { TermWriter, zeroWidthOf } from "./term-writer.ts";
 
-export { SCROLLBACK };
-const HISTORY_MAX = 500;
 const MIN_H = 120;
-// (a prompt line shows at most this much of a long or pasted input)
-const PROMPT_LINES = 100, PROMPT_UNITS = 4096;
-// E5.3's 16 colours, light and dark (each >= 4.5:1 on its theme's background: min 4.91 light, 6.15 dark), and their
-// fixed class table: sb-fg-N, sb-bg-N, and sb-fga-N (a background alone: the theme's bg reads best on all 16)
-const LIGHT = "1f2328 b3261e 116329 7a4a00 0550ae 8250df 0e6e74 59636e 424a53 c9271b 1a7f37 8a5300 0969da 9e45d6 0b7a80 59636e";
-const DARK = "c9d1d9 ff7b72 3fb950 d29922 58a6ff bc8cff 39c5cf b1bac4 8b949e ffa198 56d364 e3b341 79c0ff d2a8ff 56d4dd f0f6fc";
-export function palette(): string {
-  const vars = (p: string, fg: string, bg: string) => p.split(" ").map((c, i) => `--sb-term-c${i}:#${c}`).join(";") + `;--sb-term-fg:#${fg};--sb-term-bg:#${bg}`;
-  const dark = vars(DARK, "e6edf3", "0d1117");
-  let out = `:root{${vars(LIGHT, "1f2328", "ffffff")}}:root[data-theme=dark]{${dark}}@media (prefers-color-scheme:dark){:root:not([data-theme=light]){${dark}}}`;
-  for (let i = 0; i < 16; i++) out += `.sb-fg-${i}{color:var(--sb-term-c${i})}.sb-bg-${i}{background:var(--sb-term-c${i})}.sb-fga-${i}{color:var(--sb-term-bg)}`;
-  return out;
+/** xterm's retained rows (wrapped rows count) and the screen's largest size (daybreak3 E1) */
+export const SCROLLBACK = 6000;
+export const MAX_COLS = 500, MAX_ROWS = 200;
+/** S1 (E5.4), kept: UTF-8 bytes of a command's output shown, stdout then stderr, with 64 KiB kept for stderr */
+export const OUTPUT = Object.freeze({ inBytes: 1 << 20, errReserve: 65536 });
+// (the editor's line is drawn in full up to this size; past it, as one summary line)
+const SHOW_UNITS = 4096, SHOW_LINES = 100;
+// E5.3's 16 colours: web/shell/palette.ts, xterm's ANSI palette, read back from the CSS variables it injects, so the
+// theme follows the page's
+import { palette } from "./palette.ts";
+export { palette };
+const ANSI = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white", "brightBlack", "brightRed", "brightGreen", "brightYellow", "brightBlue", "brightMagenta", "brightCyan", "brightWhite"];
+/** xterm's theme from the palette's variables, as the page's theme has them now */
+export function termTheme(): Record<string, string> {
+  const cs = getComputedStyle(document.documentElement);
+  const v = (n: string) => cs.getPropertyValue(n).trim();
+  const t: Record<string, string> = { background: v("--sb-term-bg"), foreground: v("--sb-term-fg"), cursor: v("--sb-term-fg"), selectionBackground: v("--sb-term-c12") + "55" };
+  ANSI.forEach((name, i) => (t[name] = v(`--sb-term-c${i}`)));
+  return t;
 }
-// (the page's fixed bottom overlays, found by layout, not by name: the site's early-alpha notice, a hosted preview's
-// notice gutter and its pill; any direct child of body fixed along the window's lower edge, wide or at the bottom)
+
 // (the person's text runs as one eval of a quoted word, so a continuation, an open quote or heredoc, or a parse error
 // stays inside it (its errors keep its own line numbers); then its exit status, and its final directory after a
 // record separator, so `cd` carries to the next command; a script that exits early keeps the directory it began in)
 export const wrap = (script: string) => `eval -- '${script.replace(/'/g, "'\\''")}'\n__sb_s=$?; printf '\\036'; pwd; exit $__sb_s`;
 
-type Cmd = { el: HTMLElement; out: HTMLElement; units: number; lines: number; spans: number };
+/** Text of the panel's own making that holds the person's text (the editor's line, a path, a listing): controls shown
+ * as visible symbols, never interpreted (ESC as U+241B, C0 as U+2400+c, DEL as U+2421). */
+export const visible = (s: string) => s.replace(/[\x00-\x09\x0b-\x1f\x7f\x80-\x9f]/g, (c) => {
+  const n = c.charCodeAt(0);
+  return n === 0x7f ? "\u2421" : n < 0x20 ? String.fromCharCode(0x2400 + n) : "\ufffd";
+});
 
-// (up to FRAME ms of slices between frames, after the first slice (panel-render.ts FIRST) and its frame)
-const FRAME = 12;
-const yieldNow = (): Promise<void> =>
-  (globalThis as any).scheduler?.yield ? (globalThis as any).scheduler.yield() : new Promise((r) => setTimeout(r, 0));
+/** `s` cut to at most `room` UTF-8 bytes, at a character's edge. */
+const enc = typeof TextEncoder === "undefined" ? null : new TextEncoder();
+export function cutUtf8(s: string, room: number): string {
+  if (s.length * 3 <= room) return s;
+  // (the platform's encoder stops before the first character that doesn't fit: its `read` is the cut, in code units)
+  if (enc) return s.slice(0, enc.encodeInto(s, new Uint8Array(Math.max(0, room))).read);
+  if (utf8Len(s) <= room) return s;
+  let b = 0, i = 0;
+  for (const ch of s) {
+    const n = utf8Len(ch);
+    if (b + n > room) break;
+    b += n;
+    i += ch.length;
+  }
+  return s.slice(0, i);
+}
+
+/** The output kept within S1: stdout then stderr, stderr's reserve held for it, cut at a character's edge. */
+export function capOutput(stdout: string, stderr: string): { out: string; err: string; omitted: number } {
+  const errB = utf8Len(stderr), outB = utf8Len(stdout);
+  const outRoom = OUTPUT.inBytes - Math.min(errB, OUTPUT.errReserve);
+  const cut = cutUtf8;
+  const out = cut(stdout, Math.max(0, outRoom));
+  const err = cut(stderr, OUTPUT.inBytes - utf8Len(out));
+  return { out, err, omitted: outB + errB - utf8Len(out) - utf8Len(err) };
+}
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls = "", text = ""): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -54,12 +93,21 @@ export interface TerminalOptions {
   intro?: string;
   /** Tab completion, help NAME's routing and ls colours (web/shell/panel-tab.ts), the page's like `commands` */
   tab?: PanelTab;
+  /** the largest line the editor takes (UTF-8 bytes): the shell's bash.source_bytes */
+  maxBytes?: number;
 }
 export interface TabState { busy: boolean; cwd: string; ended: boolean }
+/** What a Tab sees of the line, and how it answers: a new line and caret, or a block of text under the prompt. */
+export interface TabInput {
+  readonly value: string;
+  readonly caret: number;
+  set(line: string, caret: number): void;
+  show(text: string): void;
+}
 export interface PanelTab {
-  /** a Tab in the input: true if it is the completion's (the panel then prevents the browser's own) */
-  key(input: HTMLTextAreaElement, root: HTMLElement, state: () => TabState): boolean;
-  /** an edit, a cd, a run, reset, end: what a Tab has in flight is superseded, its block put away */
+  /** a Tab: true if it is the completion's (the panel then prevents the browser's own, a focus move) */
+  key(input: TabInput, root: HTMLElement, state: () => TabState): boolean;
+  /** an edit, a cd, a run, reset, end: what a Tab has in flight is superseded */
   reset(): void;
   /** what bash runs for a typed line the page's commands would otherwise take or answer (help NAME, compgen's other forms), or null */
   route(argv: string[] | null, line: string): string | null;
@@ -110,32 +158,42 @@ export function words(line: string): string[] | null {
   return out;
 }
 
+// (the extra keys' bytes, as the editor's keys)
+const EXTRA: Record<string, Key> = { Escape: { key: "Escape" }, Tab: { key: "Tab" }, "Control+C": { key: "c", ctrl: true }, Backtick: { key: "`" }, "Left arrow": { key: "ArrowLeft" }, "Up arrow": { key: "ArrowUp" }, "Down arrow": { key: "ArrowDown" }, "Right arrow": { key: "ArrowRight" } };
+const DIM = (s: string) => `\x1b[2;3m${s}\x1b[0m`;
+
 export class TerminalPanel {
   readonly root: HTMLElement;
-  private log: HTMLElement;
+  private body: HTMLElement;
   private status: HTMLElement;
-  private input: HTMLTextAreaElement;
-  private inputLabel: HTMLLabelElement;
   private note: HTMLElement;
   private cwdEl: HTMLElement;
   private timeEl: HTMLElement;
+  private titleEl: HTMLElement;
   private stopBtn: HTMLButtonElement;
   private cwd = "/";
-  private history: string[] = [];
-  private hpos = 0; // (== history.length: the draft)
-  private draft = "";
-  private cmds: Cmd[] = [];
-  private dropped = 0;
-  private dropMark: HTMLElement | null = null;
-  private running: { ctl: AbortController; t0: number; timer: number; cmd: Cmd } | null = null;
+  private running: { ctl: AbortController; t0: number; timer: number } | null = null;
   private ended = false;
+  /** the screen: replaced whole at a new generation (term-writer.ts) */
+  term!: Terminal;
+  private fit!: FitAddon;
+  private observer: ResizeObserver | null = null;
+  readonly editor: LineEditor;
+  readonly writer: TermWriter;
+  /** where the prompt being edited starts (an xterm marker: it follows the line through reflow and scrolling) */
+  private start: { line: number; isDisposed: boolean; dispose(): void } | null = null;
+  /** the prompt is on screen and the editor's line is drawn after it */
+  private editing = false;
+  private key229 = false;
 
   constructor(private opts: TerminalOptions) {
     if (!document.getElementById("sb-term-css")) {
       const st = document.head.appendChild(el("style"));
       st.id = "sb-term-css";
-      st.textContent = css + palette();
+      st.textContent = css + palette() + `.sb-term-keys{${TOOLBAR_CSS} flex:none}.sb-term-keys button{${BUTTON_CSS}}`;
     }
+    ensureXtermCss();
+    this.editor = new LineEditor(opts.maxBytes ?? 1 << 20, new History(HISTORY));
     const root = (this.root = el("section", "sb-term"));
     root.setAttribute("aria-label", "Terminal");
     root.hidden = true;
@@ -159,6 +217,8 @@ export class TerminalPanel {
     const head = root.appendChild(el("div", "sb-term-head"));
     head.appendChild(el("span", "sb-term-set", opts.label));
     this.cwdEl = head.appendChild(el("span", "sb-term-cwd", this.cwd));
+    // (a title a command sets (OSC 0/2): text only, capped (xterm-view.ts))
+    this.titleEl = head.appendChild(el("span", "sb-term-title"));
     head.appendChild(el("span", "sb-term-sp"));
     this.timeEl = head.appendChild(el("span", "sb-term-time"));
     this.stopBtn = head.appendChild(el("button", "sb-term-stop", "Stop"));
@@ -173,29 +233,11 @@ export class TerminalPanel {
     end.setAttribute("aria-label", "End the terminal session");
     end.onclick = () => this.end();
 
-    this.log = root.appendChild(el("div", "sb-term-log"));
-    this.log.setAttribute("role", "log");
-    this.log.setAttribute("aria-live", "off");
-    this.log.tabIndex = 0;
-    this.status = root.appendChild(el("div", "sb-term-status"));
-    this.status.setAttribute("role", "status");
-    this.status.setAttribute("aria-live", "polite");
-
-    // (the intro: a static line above the prompt, once per tab, named by the input; not live, not a dialog: T358-3;
-    // in each tab's first terminal until its "Got it", which this device then keeps, as the site keeps its other
-    // preferences: localStorage, sagebrush-*; William, Oct 30)
+    // (the intro: a static line above the screen, once per tab, describing the terminal's input; not live, not a
+    // dialog: T358-3; in each tab's first terminal until its "Got it", which this device then keeps, as the site keeps
+    // its other preferences: localStorage, sagebrush-*; William, Oct 30)
     const intro = this.opts.intro && !localStorage.getItem("sagebrush-term-intro") && !sessionStorage.getItem("sb-term-intro") && root.appendChild(el("div", "sb-term-intro"));
-    const form = root.appendChild(el("div", "sb-term-in"));
-    this.inputLabel = form.appendChild(el("label", "sb-term-prompt"));
-    this.input = el("textarea");
-    this.input.rows = 1;
-    this.input.spellcheck = false;
-    this.input.autocapitalize = "off";
-    this.input.setAttribute("autocomplete", "off");
-    this.input.id = "sb-term-input";
-    this.input.setAttribute("aria-describedby", intro ? "sb-term-intro sb-term-note" : "sb-term-note");
     if (intro) {
-      // (the text alone names the input; the button beside it, described by the text too: board's N386-1)
       intro.appendChild(el("span", "", this.opts.intro)).id = "sb-term-intro";
       sessionStorage.setItem("sb-term-intro", "1");
       const ok = intro.appendChild(el("button", "", "Got it"));
@@ -203,29 +245,125 @@ export class TerminalPanel {
       // (put away first, kept after: a storage that refuses the write still lets the intro go, N386-2)
       ok.onclick = () => {
         intro.remove();
-        this.input.setAttribute("aria-describedby", "sb-term-note");
-        this.input.focus();
+        this.term?.textarea?.setAttribute("aria-describedby", "sb-term-note");
+        this.term?.focus();
         localStorage.setItem("sagebrush-term-intro", "1");
       };
     }
-    this.inputLabel.htmlFor = this.input.id;
-    form.appendChild(this.input);
-    // (the note under the input: polite, apart from the log, which is never live; the input names it: TP-6)
+    const row = extraKeysRow("sb-term-keys", (data) => {
+      const k = KEYS.find((x) => x.data === data);
+      if (k && EXTRA[k.title]) this.onKey(EXTRA[k.title], null);
+    }, () => this.term?.focus());
+    if (row) root.appendChild(row);
+    this.body = root.appendChild(el("div", "sb-term-body"));
+    // (the note under the screen: polite; the screen's input names it: TP-6)
     this.note = root.appendChild(el("div", "sb-term-note"));
     this.note.hidden = true;
     this.note.id = "sb-term-note";
     this.note.setAttribute("aria-live", "polite");
-    this.input.addEventListener("keydown", (e) => this.key(e));
-    this.input.addEventListener("input", () => (this.grow(), this.opts.tab?.reset()));
-    root.addEventListener("keydown", (e) => this.globalKey(e));
-    this.setCwd("/");
+    this.status = root.appendChild(el("div", "sb-term-status"));
+    this.status.setAttribute("role", "status");
+    this.status.setAttribute("aria-live", "polite");
     document.body.appendChild(root);
+    this.writer = new TermWriter(() => this.term, (cp) => this.zw(cp), () => this.newGeneration(), undefined, () => this.term.buffer.active.type === "alternate");
+    this.makeTerm(!!intro);
+    this.setCwd("/");
     // (above the site's fixed alpha notice while it shows: web/alpha-banner.js; it can be dismissed at any time)
     this.place = this.place.bind(this);
     addEventListener("resize", this.place);
     this.watch = new MutationObserver(this.place);
     this.watch.observe(document.body, { childList: true, subtree: false, attributes: true, attributeFilter: ["style", "class"] });
+    // (the page's theme, chosen or the system's: the screen's colours follow, on every page that has the Terminal)
+    this.setTheme = this.setTheme.bind(this);
+    this.themeWatch = new MutationObserver(this.setTheme);
+    this.themeWatch.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    this.dark.addEventListener("change", this.setTheme);
+    this.prompt();
   }
+  private zw: (cp: number) => boolean = () => false;
+  private themeWatch: MutationObserver;
+  private dark = matchMedia("(prefers-color-scheme: dark)");
+
+  /** A fresh xterm in the dock (the first, or a new generation's): the shared OUT-ISO setup, this panel's input. */
+  private makeTerm(intro = false): void {
+    // (a title, as text, at most once a frame: output that sets it on every line costs one header update a frame)
+    let title: string | null = null;
+    const term = safeTerminal({ scrollback: SCROLLBACK, onTitle: (t) => {
+      if (title === null) requestAnimationFrame(() => { this.titleEl.textContent = title ?? ""; title = null; });
+      title = t;
+    } });
+    term.options.theme = termTheme();
+    term.options.convertEol = true;
+    term.options.screenReaderMode = true;
+    term.options.fontSize = 13;
+    // (the keyboard: the event itself; xterm does nothing with a key (false), and nothing it sends is read)
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.type !== "keydown") return false;
+      if (e.isComposing || e.keyCode === 229) {
+        this.key229 = true;
+        return false;
+      }
+      this.key229 = false;
+      this.onKey({ key: e.key, ctrl: e.ctrlKey, alt: e.altKey, meta: e.metaKey, shift: e.shiftKey }, e);
+      return false;
+    });
+    const fit = new FitAddon();
+    term.loadAddon(fit);
+    term.open(this.body);
+    const ta = term.textarea!;
+    ta.setAttribute("aria-label", `Command, in ${this.cwd}`);
+    ta.setAttribute("aria-describedby", intro || document.getElementById("sb-term-intro") ? "sb-term-intro sb-term-note" : "sb-term-note");
+    // (a paste: from the event, the panel's alone; xterm's own paste handling never runs)
+    ta.addEventListener("paste", (e) => {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      const text = (e.clipboardData?.getData("text/plain") ?? "").replace(/\r\n?/g, "\n");
+      if (text) this.act(this.editor.insert(text, "pasted"));
+    }, true);
+    // (an input method's text, and a phone keyboard's, read from the DOM event, never from xterm's onData)
+    ta.addEventListener("compositionend", (e) => {
+      if (e.data) this.act(this.editor.insert(e.data, "typed"));
+    });
+    ta.addEventListener("input", (e) => {
+      const ie = e as InputEvent;
+      if (this.key229 && ie.inputType === "insertText" && !ie.isComposing && ie.data) this.act(this.editor.insert(ie.data, "typed"));
+    });
+    this.term = term;
+    this.fit = fit;
+    this.zw = zeroWidthOf(term);
+    this.observer?.disconnect();
+    this.observer = new ResizeObserver(() => this.refit());
+    this.observer.observe(this.body);
+    this.refit();
+  }
+
+  /** The screen fitted to the dock, within MAX_COLS × MAX_ROWS; the line drawn again after a reflow. */
+  private refit(): void {
+    if (this.root.hidden || !this.term) return;
+    try {
+      const d = this.fit.proposeDimensions();
+      if (!d || !(d.cols > 0) || !(d.rows > 0)) return;
+      const cols = Math.min(MAX_COLS, d.cols), rows = Math.min(MAX_ROWS, d.rows);
+      if (cols !== this.term.cols || rows !== this.term.rows) {
+        this.term.resize(cols, rows);
+        if (this.editing) this.redraw();
+      }
+    } catch {}
+  }
+
+  /** A new generation (term-writer.ts, a budget reached): the old xterm and all it holds released, a fresh one shown. */
+  private newGeneration(): void {
+    const old = this.term;
+    this.start?.dispose();
+    this.start = null;
+    old.dispose();
+    this.body.replaceChildren();
+    this.makeTerm();
+    // (its own first line, before the output that follows: written directly, nothing is in flight now)
+    this.term.write(DIM("Earlier output was cleared to save memory in this tab.") + "\r\n");
+    if (this.shown) this.term.focus();
+  }
+
   private watch: MutationObserver;
   /** Stacks the dock above the page's fixed bottom overlays (the alpha notice, a preview's notice and its pill), so
    * none covers the prompt: the dock's bottom is the highest top edge among them. */
@@ -244,6 +382,8 @@ export class TerminalPanel {
     this.root.style.bottom = `${b}px`;
     // (the page keeps its last lines reachable above the dock)
     if (!this.root.hidden) document.body.style.setProperty("--sb-term-h", `${Math.round(this.root.getBoundingClientRect().height) + b}px`);
+    // (the page's other bottom panels share the room below its content: web/index.html bottomRoom)
+    dispatchEvent(new Event("sb-term-place"));
   }
 
   get shown() {
@@ -255,16 +395,18 @@ export class TerminalPanel {
     if (!this.root.contains(document.activeElement)) this.opener = document.activeElement;
     this.root.hidden = false;
     this.place();
-    requestAnimationFrame(() => this.place());
-    this.warm();
+    requestAnimationFrame(() => (this.place(), this.refit()));
+    this.refit();
+    void this.warm();
     document.body.classList.add("sb-term-open");
-    this.input.focus();
+    this.term.focus();
   }
   /** Hiding keeps the session, its history and its scrollback (E5.1). */
   hide() {
     const back = this.root.contains(document.activeElement);
     this.root.hidden = true;
     document.body.classList.remove("sb-term-open");
+    dispatchEvent(new Event("sb-term-place"));
     // (focus goes back where it came from: TP-7)
     // (an opener that can't take focus (a menu item hidden since): the ⋯ button instead: TP-7-R2)
     const o = this.opener as HTMLElement | null;
@@ -277,6 +419,13 @@ export class TerminalPanel {
     if (this.shown) this.hide();
     else this.show();
   }
+  focus() {
+    if (this.shown) this.term.focus();
+  }
+  /** The page's theme changed: the screen's colours follow (the console's and the remote terminal's do too). */
+  setTheme() {
+    if (this.term) this.term.options.theme = termTheme();
+  }
   /** ✕ ends the session: a running command is stopped first; the scrollback and history are dropped. */
   end() {
     this.stop();
@@ -285,6 +434,12 @@ export class TerminalPanel {
     this.hide();
     removeEventListener("resize", this.place);
     this.watch.disconnect();
+    this.themeWatch.disconnect();
+    this.dark.removeEventListener("change", this.setTheme);
+    this.observer?.disconnect();
+    this.writer.dispose();
+    this.start?.dispose();
+    this.term.dispose();
     this.root.remove();
     // (the shell's worker too: the panel's own, so a page's onEnd can't drop it: TP-1)
     this.opts.host.endShell("the terminal was ended");
@@ -295,13 +450,7 @@ export class TerminalPanel {
   private setCwd(d: string) {
     this.cwd = d;
     this.cwdEl.textContent = d;
-    this.inputLabel.textContent = `${d} $`;
-    this.input.setAttribute("aria-label", `Command, in ${d}`);
-  }
-
-  private grow() {
-    this.input.style.height = "auto";
-    this.input.style.height = `${Math.min(this.input.scrollHeight, 240)}px`;
+    this.term?.textarea?.setAttribute("aria-label", `Command, in ${d}`);
   }
 
   private grip: HTMLElement;
@@ -342,7 +491,7 @@ export class TerminalPanel {
   private warm(): Promise<void> {
     if (this.ready) return Promise.resolve();
     if (this.starting) return this.starting;
-    // (in the header, beside the cwd: not in the scrollback, whose every line is charged to its caps)
+    // (in the header, beside the cwd: not on the screen)
     this.loadingEl ??= this.cwdEl.insertAdjacentElement("afterend", el("span", "sb-term-loading", "Starting the shell\u2026")) as HTMLElement;
     this.root.classList.add("loading");
     const t0 = performance.now();
@@ -372,171 +521,193 @@ export class TerminalPanel {
     this.note.hidden = !text;
   }
 
+  // ---------------------------------------------------------------- drawing the line
+  private width(s: string): number {
+    const svc = (this.term as any)?._core?.unicodeService;
+    return svc ? svc.getStringCellWidth(s) : [...s].length;
+  }
+
+  /** The prompt and the editor's line as drawn: lines of [prefix, text], and the cursor's line and offset. */
+  private view(line?: string): { lines: [string, string][]; at: [number, number] } {
+    const ed = this.editor, ps = `${this.cwd} $ `;
+    if (line !== undefined) {
+      const text = this.small(line) ? line : this.summary(line);
+      const parts = text.split("\n");
+      return { lines: parts.map((t, i) => [i === 0 ? ps : "> ", visible(t)] as [string, string]), at: [parts.length - 1, visible(parts[parts.length - 1]).length] };
+    }
+    if (ed.search) {
+      const s = ed.search, match = s.at >= 0 ? ed.history.entries[s.at] : "";
+      const p = `(${s.failed ? "failed " : ""}reverse-i-search)'${visible(s.q)}': `;
+      const text = this.small(match) ? visible(match) : this.summary(match);
+      return { lines: [[p, text]], at: [0, text.length] };
+    }
+    if (!this.small(ed.buf)) {
+      const text = this.summary(ed.buf);
+      return { lines: [[ps, text]], at: [0, text.length] };
+    }
+    const parts = ed.buf.split("\n");
+    const lines = parts.map((t, i) => [i === 0 ? ps : "> ", visible(t)] as [string, string]);
+    const before = ed.buf.slice(0, ed.cur).split("\n");
+    return { lines, at: [before.length - 1, visible(before[before.length - 1]).length] };
+  }
+  private small(s: string): boolean {
+    if (s.length > SHOW_UNITS) return false;
+    let n = 0;
+    for (let i = s.indexOf("\n"); i >= 0; i = s.indexOf("\n", i + 1)) if (++n >= SHOW_LINES) return false;
+    return true;
+  }
+  private summary(s: string): string {
+    const lines = s.split("\n").length;
+    return `[${lines} line${lines === 1 ? "" : "s"}, ${utf8Len(s)} bytes: Enter runs it, Ctrl-C clears it]`;
+  }
+
+  /** The drawn line's text, from the prompt's start, and the moves that put the cursor where the editor has it. */
+  private drawing(position = true, line?: string): string {
+    const cols = this.term.cols;
+    const { lines, at } = this.view(line);
+    let s = "", row = 0, endRow = 0, curRow = 0, curCol = 0;
+    lines.forEach(([p, t], i) => {
+      const w = this.width(p) + this.width(t);
+      if (i) s += "\r\n";
+      s += (i === 0 ? `\x1b[1m${visible(p)}\x1b[0m` : DIM(p)) + t;
+      if (i === at[0]) {
+        const cw = this.width(p) + this.width(t.slice(0, at[1]));
+        curRow = row + Math.floor(cw / cols);
+        curCol = cw % cols;
+      }
+      const rows = Math.max(1, Math.ceil(w / cols));
+      endRow = row + Math.floor(w / cols);
+      // (a line ending exactly at the edge: leave xterm's pending-wrap state, as web/console.ts does)
+      if (i === lines.length - 1 && w > 0 && w % cols === 0) s += " \r\x1b[K";
+      row += rows;
+    });
+    if (!position) return s;
+    if (endRow > curRow) s += `\x1b[${endRow - curRow}A`;
+    s += `\x1b[${curCol + 1}G`;
+    return s;
+  }
+
+  /** A fresh prompt: on a line of its own, its start marked, the editor's line after it. */
+  private prompt(): void {
+    this.editing = false;
+    void this.writer.writeLazy(() => (this.term.buffer.active.cursorX ? "\r\n" : ""));
+    void this.writer.writeLazy(() => {
+      this.start?.dispose();
+      this.start = this.term.registerMarker(0) ?? null;
+      this.editing = true;
+      return this.drawing();
+    });
+  }
+
+  /** The line drawn again in place (an edit, a resize). */
+  private redraw(): void {
+    if (!this.editing) return;
+    void this.writer.writeLazy(() => {
+      if (!this.editing || !this.start || this.start.isDisposed) return "";
+      const b = this.term.buffer.active;
+      const up = b.baseY + b.cursorY - this.start.line;
+      return (up > 0 ? `\x1b[${up}A` : "") + "\r\x1b[J" + this.drawing();
+    });
+  }
+
+  /** The line left as it is (`line`, a submission's; else the editor's now), the cursor after it, a new line begun. */
+  private leave(mark = "", line?: string): void {
+    if (!this.editing) return;
+    this.editing = false;
+    const body = this.drawing(false, line);
+    void this.writer.writeLazy(() => {
+      if (!this.start || this.start.isDisposed) return mark + "\r\n";
+      const b = this.term.buffer.active;
+      const up = b.baseY + b.cursorY - this.start.line;
+      return (up > 0 ? `\x1b[${up}A` : "") + "\r\x1b[J" + body + mark + "\r\n";
+    });
+  }
+
   // ---------------------------------------------------------------- keys (E5.2)
-  private globalKey(e: KeyboardEvent) {
-    const mod = e.ctrlKey || e.metaKey;
-    if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "c") {
-      // (a selection anywhere: copy, even while a command runs)
-      const sel = getSelection();
-      const inInput = document.activeElement === this.input && this.input.selectionStart !== this.input.selectionEnd;
-      if ((sel && sel.toString() !== "") || inInput) return;
-      e.preventDefault();
-      if (this.running) this.stop();
-      else {
-        this.echo(`${this.cwd} $ ${this.input.value}`, "^C");
-        this.input.value = "";
-        this.grow();
-      }
-    } else if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "l") {
-      e.preventDefault();
-      this.clear();
+  /** A key from the keyboard (or the extra keys row): the editor's, or the panel's (Ctrl-C, Enter while running). */
+  private onKey(k: Key, e: KeyboardEvent | null): void {
+    if (this.ended) return;
+    const lower = k.key.length === 1 ? k.key.toLowerCase() : k.key;
+    if (lower !== "Tab") this.opts.tab?.reset();
+    // (a selection on the screen: Ctrl-C (or Cmd-C) copies it, the browser's own copy, even while a command runs)
+    if ((k.ctrl || k.meta) && !k.shift && !k.alt && lower === "c" && this.term.hasSelection()) return;
+    // (Ctrl-V and Cmd-V: the browser's paste, which the paste listener takes)
+    if ((k.ctrl || k.meta) && lower === "v") return;
+    if (k.key === "Enter" && !k.shift && !k.ctrl && !k.meta && !k.alt && this.running && !this.editor.search) {
+      e?.preventDefault();
+      return this.say("A command is running: Stop it first.");
     }
+    const a = this.editor.key(k);
+    if (a.t === "pass") return; // (the browser's own: no preventDefault)
+    if (a.t === "tab") {
+      const taken = !this.running && !!this.opts.tab?.key(this.tabInput(), this.root, () => ({ busy: !!this.running, cwd: this.cwd, ended: this.ended }));
+      if (taken) e?.preventDefault();
+      return;
+    }
+    e?.preventDefault();
+    this.act(a);
   }
 
-  private key(e: KeyboardEvent) {
-    // (an input method's Enter confirms its composition: never a submit: TP-4)
-    if (e.isComposing || e.keyCode === 229) return;
-    const ta = this.input;
-    if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
-      e.preventDefault();
-      this.opts.tab?.reset();
-      if (this.running) return this.say("A command is running: Stop it first.");
-      const s = ta.value;
-      if (s.trim() === "") {
-        this.echo(`${this.cwd} $`, "");
-        return;
-      }
-      const word = s.trim();
-      if (word === "clear" || word === "reset") {
-        // (the panel's own: clear = Ctrl-L; reset also drops the input and starts a fresh shell, keeping the cwd
-        // and the history, for when something was pasted by mistake)
-        this.remember(s);
-        ta.value = "";
-        this.grow();
-        this.clear();
+  private act(a: Act): void {
+    switch (a.t) {
+      case "redraw":
         this.say("");
-        if (word === "reset") {
-          this.opts.host.endShell("reset");
-          this.ready = false;
-          this.starting = null;
-          void this.warm();
-        }
+        if (!this.running) this.redraw();
         return;
+      case "refused": {
+        const max = this.editor.maxBytes;
+        const fig = max % (1 << 20) === 0 ? `${max >> 20} MiB` : max % 1024 === 0 ? `${max >> 10} KiB` : `${max} bytes`;
+        return this.say(`Not ${a.how}: it's longer than the Terminal accepts at once (${fig}).`);
       }
-      const argv = words(word), via = this.opts.tab?.route(argv, s);
-      if (via) return void this.submit(s, via);
-      if (argv && argv.length && Object.hasOwn(this.opts.commands ?? {}, argv[0])) {
-        void this.builtin(s, argv);
+      case "interrupt":
+        if (this.running) return this.stop();
+        this.leave("^C");
+        this.editor.reset();
+        this.prompt();
         return;
-      }
-      void this.submit(s);
-    } else if (e.key === "ArrowUp" && !e.shiftKey && !ta.value.slice(0, ta.selectionStart).includes("\n")) {
-      if (this.hpos === 0) return;
-      if (this.hpos === this.history.length) this.draft = ta.value;
-      e.preventDefault();
-      this.hpos--;
-      ta.value = this.history[this.hpos];
-      this.grow();
-    } else if (e.key === "ArrowDown" && !e.shiftKey && !ta.value.slice(ta.selectionEnd).includes("\n")) {
-      if (this.hpos >= this.history.length) return;
-      e.preventDefault();
-      this.hpos++;
-      ta.value = this.hpos === this.history.length ? this.draft : this.history[this.hpos];
-      this.grow();
-    } else if (e.key === "Tab" && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
-      // (the page's completion takes it only at a word's end; otherwise Tab moves focus as usual: no keyboard trap)
-      if (this.opts.tab?.key(ta, this.root, () => ({ busy: !!this.running, cwd: this.cwd, ended: this.ended }))) e.preventDefault();
+      case "clear":
+        return this.clear();
+      case "submit":
+        return this.enter(a.line);
+      case "eof":
+      case "none":
+      case "tab":
+      case "pass":
+        return;
     }
   }
 
-  private remember(s: string) {
-    if (this.history[this.history.length - 1] !== s) this.history.push(s);
-    if (this.history.length > HISTORY_MAX) this.history.shift();
-    this.hpos = this.history.length;
-    this.draft = "";
+  private tabInput(): TabInput {
+    const ed = this.editor;
+    return {
+      get value() { return ed.buf; },
+      get caret() { return ed.cur; },
+      set: (line, caret) => {
+        ed.reset(line);
+        ed.cur = Math.min(caret, line.length);
+        this.redraw();
+      },
+      show: (text) => {
+        // (a candidate block, bash's way: under the line, then the line again; the names shown as visible text)
+        this.leave();
+        void this.writer.write(visible(text).replace(/\n/g, "\r\n") + "\r\n");
+        this.prompt();
+      },
+    };
   }
 
-  /** Ctrl-L: clears the scrollback; during a run only the earlier commands, so its output still appears. */
+  /** Ctrl-L: clears the screen and its scrollback, keeping the line being edited; during a run its output still comes. */
   clear() {
-    for (const c of this.cmds) if (c !== this.running?.cmd) c.el.remove();
-    this.cmds = this.running ? [this.running.cmd] : [];
-    this.dropMark?.remove();
-    this.dropMark = null;
-    this.dropped = 0;
+    void this.writer.writeLazy(() => {
+      this.term.clear();
+      return "";
+    });
+    if (this.editing) this.redraw();
   }
 
   stop() {
     this.running?.ctl.abort();
   }
-
-  // ---------------------------------------------------------------- a command
-  private atBottom() {
-    return this.log.scrollHeight - this.log.scrollTop - this.log.clientHeight < 4;
-  }
-
-  private newCmd(prompt: string): Cmd {
-    // (a long or many-line input shows its start: the prompt line is charged like content, before it goes in)
-    let shown = prompt;
-    const nl = shown.split("\n");
-    if (nl.length > PROMPT_LINES) shown = nl.slice(0, PROMPT_LINES).join("\n");
-    if (shown.length > PROMPT_UNITS) shown = shown.slice(0, PROMPT_UNITS);
-    if (shown !== prompt) shown += " \u2026";
-    const t = { units: shown.length, lines: shown.split("\n").length, spans: 1 };
-    this.makeRoomNew(t);
-    const c = el("div", "sb-term-cmd");
-    c.appendChild(el("div", "sb-term-pl", shown));
-    const out = c.appendChild(el("pre", "sb-term-out"));
-    const cmd = { el: c, out, ...t };
-    this.log.appendChild(c);
-    this.cmds.push(cmd);
-    // (a command just entered: the view goes to it, as a terminal's does; its output then sticks only if still there)
-    this.log.scrollTop = this.log.scrollHeight;
-    return cmd;
-  }
-
-  private echo(prompt: string, text: string) {
-    const c = this.newCmd(prompt);
-    if (text) this.addLine(c, text, "sb-term-echo");
-  }
-
-  /** A synthetic line under a command (its exit, a status, the loading note, an echo): room made in the scrollback
-   * before it goes in, and charged to the command (E5.4: every live representation charged before insertion). */
-  private addLine(cmd: Cmd, text: string, cls: string): HTMLElement {
-    const t = { units: text.length, lines: 1, spans: 1 };
-    this.makeRoom(t.units, t.lines, t.spans);
-    const e = cmd.el.appendChild(el("div", cls, text));
-    cmd.units += t.units, cmd.lines += t.lines, cmd.spans += t.spans;
-    const stick = this.atBottom();
-    if (stick) this.log.scrollTop = this.log.scrollHeight;
-    return e;
-  }
-
-  /** Room for a new command's prompt line: any of the commands shown may be dropped (the new one isn't in yet). */
-  private makeRoomNew(t: { units: number; lines: number; spans: number }) {
-    this.makeRoom(t.units, t.lines, t.spans, true);
-  }
-
-
-  /** Before a slice goes into the newest command: the oldest commands dropped, whole, until it and the drop marker
-   * fit the scrollback's caps (E5.4, panel-render.ts evictCount); the marker charged like content. */
-  private makeRoom(units: number, lines: number, spans: number, fresh = false) {
-    const k = evictCount(fresh ? [...this.cmds, { units: 0, lines: 0, spans: 0 }] : this.cmds, { units, lines, spans }, this.dropped);
-    for (const c of this.cmds.splice(0, k)) c.el.remove();
-    this.dropped += k;
-    if (this.dropped) {
-      if (!this.dropMark) this.dropMark = this.log.insertBefore(el("div", "sb-term-drop"), this.log.firstChild);
-      this.dropMark.textContent = dropMarker(this.dropped);
-    }
-  }
-
-  /** The scrollback's totals as shown, the drop marker included (the tests' figure). */
-  get scrollbackTotals() {
-    const t = { units: 0, lines: 0, spans: 0 };
-    for (const c of this.cmds) (t.units += c.units), (t.lines += c.lines), (t.spans += c.spans);
-    if (this.dropMark) (t.units += this.dropMark.textContent!.length), t.lines++, t.spans++;
-    return t;
-  }
-
 
   /** this session, as `ps` lists it */
   readonly since = Date.now();
@@ -544,92 +715,152 @@ export class TerminalPanel {
     return !!this.running;
   }
 
-  /** open, ps and top: run in the page, shown like any command, Stop-able (top). */
-  private async builtin(line: string, argv: string[]) {
-    this.remember(line);
+  /** A submitted line: the panel's own words, a page command, or bash. */
+  private enter(line: string) {
+    this.leave("", line);
     this.say("");
-    this.input.value = "";
-    this.grow();
-    const cmd = this.newCmd(`${this.cwd} $ ${line}`);
+    const word = line.trim();
+    if (word === "") return this.prompt();
+    if (word === "clear" || word === "reset") {
+      // (the panel's own: clear = Ctrl-L; reset also starts a fresh shell, keeping the cwd and the history, for when
+      // something was pasted by mistake)
+      this.clear();
+      if (word === "reset") {
+        this.opts.host.endShell("reset");
+        this.ready = false;
+        this.starting = null;
+        void this.warm();
+      }
+      return this.prompt();
+    }
+    const argv = words(word), via = this.opts.tab?.route(argv, line);
+    if (via) return void this.submit(line, via);
+    if (argv && argv.length && Object.hasOwn(this.opts.commands ?? {}, argv[0])) return void this.builtin(line, argv);
+    void this.submit(line);
+  }
+
+  private begin(): AbortController {
     const ctl = new AbortController();
     const t0 = performance.now();
     const timer = window.setInterval(() => (this.timeEl.textContent = `${((performance.now() - t0) / 1000).toFixed(1)} s`), 100);
-    this.running = { ctl, t0, timer, cmd };
+    this.running = { ctl, t0, timer };
     this.stopBtn.hidden = false;
     this.root.classList.add("running");
-    // (a page command's output goes through the same capped, sliced rendering as a shell's: its text is kept as
-    // stdout and stderr, and the command's output is painted again from them, coalesced, as they change)
-    let outBuf = "", errBuf = "", painting: Promise<void> | null = null, dirty = false;
-    const base = { units: cmd.units, lines: cmd.lines, spans: cmd.spans };
-    const repaint = () => {
-      if (painting) return void (dirty = true);
-      painting = (async () => {
-        do {
-          dirty = false;
-          await Promise.resolve();
-          cmd.out.textContent = "";
-          Object.assign(cmd, base);
-          await this.paint(cmd, outBuf, errBuf, ctl.signal);
-        } while (dirty);
-        painting = null;
-      })();
+    return ctl;
+  }
+
+  private async finish(status: string) {
+    clearInterval(this.running!.timer);
+    this.timeEl.textContent = "";
+    this.stopBtn.hidden = true;
+    this.root.classList.remove("running");
+    this.running = null;
+    this.say("");
+    // (after the output is in: the polite status says only "done" or "exit N")
+    this.status.textContent = "";
+    this.status.textContent = status;
+    this.prompt();
+    await this.writer.idle();
+    if (this.shown) this.term.focus();
+  }
+
+  /**
+   * A command's output into the screen: stdout, then stderr in the theme's red, within S1.  E5.5's gates read two
+   * performance measures, from the outcome's arrival: sb-term:first-paint (the first 2 KiB drawn and a frame after it)
+   * and sb-term:last-paint (all of it drawn and a frame after).
+   */
+  private async output(stdout: string, stderr: string): Promise<void> {
+    const t0 = performance.now();
+    const c = capOutput(stdout, stderr);
+    const all = c.out + (c.err ? "\x1b[31m" + c.err + "\x1b[39m" : "");
+    let k = Math.min(all.length, 2048);
+    if (k < all.length && (all.charCodeAt(k) & 0xfc00) === 0xdc00) k--;
+    const frame = () => (document.hidden ? Promise.resolve() : new Promise<void>((r) => { requestAnimationFrame(() => r()); setTimeout(r, 100); }));
+    if (all) {
+      await this.writer.write(all.slice(0, k), "output");
+      await frame();
+      performance.measure("sb-term:first-paint", { start: t0, end: performance.now() });
+      await this.writer.write(all.slice(k), "output");
+    }
+    if (c.omitted) await this.omission(c.omitted, all);
+    await frame();
+    performance.measure("sb-term:last-paint", { start: t0, end: performance.now() });
+  }
+
+  private omission(n: number, before: string): Promise<void> {
+    return this.writer.write((before === "" || before.endsWith("\n") ? "" : "\r\n") + DIM(`[… ${n} more bytes not shown]`) + "\r\n");
+  }
+
+  /** open, ps and top: run in the page, Stop-able (top). */
+  private async builtin(line: string, argv: string[]) {
+    const ctl = this.begin();
+    // (a page command's output goes through the writer as it comes; top's replace redraws its own block: up over the
+    // rows it drew last and erase below, or anew if they have scrolled past the screen)
+    let drawnFrom: { line: number; isDisposed: boolean; dispose(): void } | null = null;
+    // (S1 for a page command too: at most 1 MiB of its writes shown, the rest counted for the omission line; a
+    // replace's text is capped on its own, as the latest output)
+    let shown = 0, omitted = 0, last = "";
+    const fit = (text: string): string => {
+      const kept = cutUtf8(text, Math.max(0, OUTPUT.inBytes - shown));
+      const k = utf8Len(kept);
+      omitted += utf8Len(text) - k;
+      shown += k;
+      return kept;
     };
-    const write = (text: string, err = false) => {
-      if (err) errBuf += text;
-      else outBuf += text;
-      repaint();
-    };
-    let code = 0;
     const io: CommandIO = {
       cwd: this.cwd,
       signal: ctl.signal,
-      write,
+      write: (text, err = false) => {
+        const t = fit(text);
+        if (t) (last = t), void this.writer.write(err ? "\x1b[31m" + t + "\x1b[39m" : t, "output");
+      },
       replace: (text) => {
-        outBuf = text;
-        errBuf = "";
-        repaint();
+        shown = 0;
+        omitted = 0;
+        void this.writer.writeLazy(() => {
+          const b = this.term.buffer.active;
+          let pre = "";
+          if (drawnFrom && !drawnFrom.isDisposed && b.baseY + b.cursorY - drawnFrom.line < this.term.rows) {
+            const up = b.baseY + b.cursorY - drawnFrom.line;
+            pre = (up > 0 ? `\x1b[${up}A` : "") + "\r\x1b[J";
+          } else {
+            drawnFrom?.dispose();
+            drawnFrom = this.term.registerMarker(0) ?? null;
+          }
+          return pre;
+        });
+        const t = fit(text);
+        last = t;
+        void this.writer.write(t, "output");
       },
     };
+    let code = 0;
     try {
       code = await this.opts.commands![argv[0]](argv.slice(1), io);
     } catch (e) {
-      write(`${argv[0]}: ${String((e as Error)?.message ?? e)}\n`, true);
+      io.write(`${argv[0]}: ${String((e as Error)?.message ?? e)}\n`, true);
       code = 1;
-    } finally {
-      while (painting) await painting;
-      clearInterval(timer);
-      this.timeEl.textContent = "";
-      this.stopBtn.hidden = true;
-      this.root.classList.remove("running");
-      this.running = null;
-      this.say("");
-      if (code) this.addLine(cmd, `exit ${code}`, "sb-term-exit");
-      this.status.textContent = "";
-      this.status.textContent = code ? `exit ${code}` : "done";
-      if (this.shown) this.input.focus();
     }
+    drawnFrom?.dispose();
+    if (omitted) await this.omission(omitted, last);
+    await this.writer.endOutput();
+    if (code) await this.exitLine(`exit ${code}`);
+    await this.finish(code ? `exit ${code}` : "done");
   }
 
-  /** `script` runs; `line`, what was typed (help NAME's), is what the prompt shows and history keeps. */
+  private exitLine(text: string, err = false): Promise<void> {
+    return this.writer.writeLazy(() => (this.term.buffer.active.cursorX ? "\r\n" : "") + (err ? `\x1b[31m${visible(text)}\x1b[39m` : DIM(visible(text))) + "\r\n");
+  }
+
+  /** `script` runs; `line`, what was typed (help NAME's), is what history keeps. */
   private async submit(line: string, script = line) {
-    this.remember(line);
-    this.say("");
-    this.input.value = "";
-    this.grow();
-    const cmd = this.newCmd(`${this.cwd} $ ${line}`);
     if (!this.ready) {
       // (the first command while bash loads: says so, under its prompt, until the shell is up)
-      const wait = this.addLine(cmd, "Starting the shell\u2026", "sb-term-loading");
+      void this.writer.write(DIM("Starting the shell\u2026"));
       await this.warm();
-      wait.remove();
-      cmd.units -= "Starting the shell\u2026".length, cmd.lines--, cmd.spans--;
+      void this.writer.write("\r\x1b[2K");
     }
-    const ctl = new AbortController();
-    const t0 = performance.now();
-    const timer = window.setInterval(() => (this.timeEl.textContent = `${((performance.now() - t0) / 1000).toFixed(1)} s`), 100);
-    this.running = { ctl, t0, timer, cmd };
-    this.stopBtn.hidden = false;
-    this.root.classList.add("running");
+    const ctl = this.begin();
     let r: HostOutcome;
     try {
       r = await this.opts.host.exec({ kind: "person" }, wrap(script), { cwd: this.cwd, signal: ctl.signal });
@@ -637,8 +868,6 @@ export class TerminalPanel {
       r = { kind: "unavailable", row: 2, reason: String((e as Error)?.message ?? e), ops: [] };
     }
     let status: string;
-    // (the closing lines below keep the view at the bottom if the output left it there)
-    const end = (text: string, cls = "") => void this.addLine(cmd, text, "sb-term-exit" + cls);
     if (r.kind === "exit") {
       let out = r.stdout;
       const k = out.lastIndexOf("\x1e");
@@ -650,156 +879,36 @@ export class TerminalPanel {
         }
       }
       if (script === line && this.opts.tab) out = await this.opts.tab.colour(line, out, this.cwd);
-      await this.paint(cmd, out, r.stderr, ctl.signal);
-      if (r.code !== 0) end(`exit ${r.code}`);
+      await this.output(out, r.stderr);
+      await this.writer.endOutput();
+      if (r.code !== 0) await this.exitLine(`exit ${r.code}`);
       status = r.code === 0 ? "done" : `exit ${r.code}`;
     } else if (r.kind === "interrupted") {
-      end("^C (stopped)");
+      await this.exitLine("^C (stopped)");
       status = "stopped";
     } else if (r.kind === "limit") {
-      await this.paint(cmd, "", r.stderr, ctl.signal);
-      end(`exit ${r.code} (limit ${r.key})`);
+      await this.output("", r.stderr);
+      await this.writer.endOutput();
+      await this.exitLine(`exit ${r.code} (limit ${r.key})`);
       status = `exit ${r.code}`;
     } else {
-      end(`the shell is unavailable: ${r.reason}`, " sb-term-err");
+      await this.exitLine(`the shell is unavailable: ${r.reason}`, true);
       status = "unavailable";
     }
-    clearInterval(timer);
-    this.timeEl.textContent = "";
-    this.stopBtn.hidden = true;
-    this.root.classList.remove("running");
-    this.running = null;
-    this.say("");
-    // (after the output is in: the polite status says only "done" or "exit N"; the log itself is never live)
-    this.status.textContent = "";
-    this.status.textContent = status;
-    if (this.shown) this.input.focus();
+    await this.finish(status);
   }
 
-  /** The output, rendered in slices (E5.5): each slice's runs go in as one fragment, then the page yields. */
-  /**
-   * The output, rendered in slices (E5.5): each slice's runs go in as one fragment, then the page yields.  E5.5's gates
-   * read performance measures: sb-term:first-paint and sb-term:last-paint (from the command's finishing, its outcome
-   * in, to the animation frame after its first and last slices), and each slice's sb-term:parse and sb-term:patch.
-   */
-  private async paint(cmd: Cmd, stdout: string, stderr: string, signal: AbortSignal) {
-    const t0 = performance.now();
-    const r = new Render(stdout, stderr);
-    let first = true;
-    // (no layout is forced in a slice: the view follows the output once per frame, in the frame, while the person has
-    // not scrolled away from where it last put it; work goes on for at most FRAME ms, then the frame is painted)
-    let stick = this.atBottom(), top = -1, f0 = t0;
-    // (a hidden tab paints no frames: its slices only yield, and a frame awaited when the tab hides ends after 100 ms)
-    const frame = (m?: string) =>
-      document.hidden
-        ? yieldNow()
-        : new Promise((res) => {
-            let done = 0;
-            const go = () => {
-              if (done++) return;
-              if (m) performance.measure(m, { start: t0, end: performance.now() });
-              if (stick && (top < 0 || this.log.scrollTop >= top - 4)) {
-                this.log.scrollTop = this.log.scrollHeight;
-                top = this.log.scrollTop;
-              } else stick = false;
-              setTimeout(res);
-            };
-            requestAnimationFrame(go);
-            setTimeout(go, 100);
-          });
-    // (the open line's top-level nodes, its page boxes included: what a later lone \r takes back; the line's current page)
-    let open: Node[] = [];
-    let page: HTMLElement | null = null;
-    // (the slice's chunk, from its first line start: the parent of its line-level nodes)
-    let box: HTMLElement | null = null;
-    // (a page box's charge: itself, and each node in it)
-    const cost = (nd: Node) => [nd.textContent!.length, 1 + ((nd as HTMLElement).classList?.contains("sb-term-page") ? nd.childNodes.length : 0)];
-    for (;;) {
-      const p0 = performance.now();
-      const runs = r.next(first ? FIRST : SLICE);
-      if (!runs) break;
-      // (a slice with no runs yet, stderr's reservation scanned in slices: nothing to paint, and the first output keeps
-      // the first slice's budget and its first-paint measure: DB2-LL-337-4)
-      if (!runs.length) {
-        await yieldNow();
-        continue;
-      }
-      const p1 = performance.now();
-      if (signal.aborted && this.running?.cmd !== cmd) return;
-      const f = document.createDocumentFragment();
-      box = null;
-      // (nodes for a page box already on screen: put in after the slice is charged, never before)
-      let pf: DocumentFragment | null = null, pfPage: HTMLElement | null = null;
-      let units = 0, lines = 0, spans = 0;
-      for (const run of runs) {
-        if (run.restart) {
-          // (a lone \r over this line's earlier slices: their nodes and page boxes go, uncharged: TP-2, B-LL-3)
-          if (pf) (units -= pf.textContent!.length), (spans -= pf.childNodes.length), (pf = pfPage = null);
-          for (const nd of open) {
-            const [u, n] = cost(nd);
-            if (f.contains(nd)) (units -= u), (spans -= n);
-            else (cmd.units -= u), (cmd.spans -= n);
-            (nd as ChildNode).remove();
-          }
-          open = [];
-          page = null;
-          continue;
-        }
-        if (run.chunk) {
-          box = f.appendChild(el("span", "sb-term-chunk"));
-          spans++;
-          continue;
-        }
-        if (run.page) {
-          // (a join: the line goes on in an inline-block box of its own, charged as a run)
-          page = el("span", "sb-term-page");
-          (box ?? f).appendChild(page);
-          open.push(page);
-          spans++;
-          continue;
-        }
-        units += run.text.length;
-        spans++;
-        for (let i = run.text.indexOf("\n"); i >= 0; i = run.text.indexOf("\n", i + 1)) lines++;
-        // (in a page box, the line's end and anything after it go after the box, so the box holds no empty last row
-        // and no later line: the omission line's run starts with its line end)
-        const node = (s: string) => (run.cls === "" && !run.err ? document.createTextNode(s) : el("span", (run.err ? "sb-err " : "") + run.cls, s));
-        const nl = page ? run.text.indexOf("\n") : -1;
-        const text = nl < 0 ? run.text : run.text.slice(0, nl);
-        if (text) {
-          const nd = node(text);
-          if (!page) {
-            (box ?? f).appendChild(nd);
-            open.push(nd);
-          } else if (f.contains(page)) page.appendChild(nd);
-          else {
-            if (pfPage !== page) (pf = document.createDocumentFragment()), (pfPage = page);
-            pf!.appendChild(nd);
-          }
-        }
-        if (nl >= 0) {
-          if (text) spans++;
-          (box ?? f).appendChild(node(run.text.slice(nl)));
-        }
-        // (a line end closes the line: only the omission line's run has text after its line end, and nothing follows it)
-        if (run.text.includes("\n")) (open = []), (page = null);
-      }
-      this.makeRoom(units, lines, spans);
-      cmd.out.appendChild(f);
-      if (pf && pfPage) pfPage.appendChild(pf);
-      cmd.units += units;
-      cmd.lines += lines;
-      cmd.spans += spans;
-      const p2 = performance.now();
-      performance.measure("sb-term:parse", { start: p0, end: p1 });
-      performance.measure("sb-term:patch", { start: p1, end: p2 });
-      if (first || p2 - f0 > FRAME) {
-        await frame(first ? "sb-term:first-paint" : "");
-        first = false;
-        f0 = performance.now();
-      } else await yieldNow();
+  /** The screen's text as shown (the tests' read: the buffer's lines, trailing spaces trimmed). */
+  get screenText(): string {
+    const b = this.term.buffer.active, out: string[] = [];
+    for (let i = 0; i < b.length; i++) {
+      const l = b.getLine(i);
+      if (!l) continue;
+      const t = l.translateToString(true);
+      if (l.isWrapped && out.length) out[out.length - 1] += t;
+      else out.push(t);
     }
-    await frame("sb-term:last-paint");
+    while (out.length && out[out.length - 1] === "") out.pop();
+    return out.join("\n");
   }
-
 }

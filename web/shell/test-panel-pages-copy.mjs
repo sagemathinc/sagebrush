@@ -1,11 +1,10 @@
 // ci: web-browser/terminal.2 order=10
 // ci: inline (ci.yml)
-// A long line's pages and the clipboard (the long-line design: pages; board's B-LL-4): with the panel's own CSS, a
-// line of 16 pages as web/shell/panel.ts paints it (the first 4 Ki inline, then inline-block page boxes, the line end
-// after the last box), between two short lines.  Selecting the output must give the long line as ONE line, every
-// character in order: no break at any join.  And a slice's chunks (board's R4-2), most off screen in a short log
-// (content-visibility): plain lines, chunks of whole lines, a chunk ending inside a line that goes on in page boxes,
-// then another chunk: the selection copies exactly the text.  No shell needed, so it runs in every engine:
+// A long line and the clipboard (the long-line design's B-LL-4, kept for the Terminal on xterm: plan-term-xterm r2.7
+// PR 2): the screen the Terminal uses (upstream @xterm/xterm 6.0, the lockfile's, with the panel's own CSS), a line of
+// 16 pages of 4 096 characters (combining marks and visible-escape glyphs included) written between two short lines,
+// wrapping over hundreds of rows.  The screen's selection must give the long line as ONE line, every character in
+// order: no break where a row wraps.  No shell needed, so it runs in every engine:
 //   node web/shell/test-panel-pages-copy.mjs                                  (Chromium, CHROME=... for the browser)
 //   BROWSER=webkit|firefox PLAYWRIGHT=<playwright's dir> node web/shell/test-panel-pages-copy.mjs   (CI: WebKit)
 import { spawn } from "node:child_process";
@@ -16,40 +15,29 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const css = readFileSync(join(here, "panel.css"), "utf8");
+const root = join(here, "..", "..");
+const css = readFileSync(join(here, "panel.css"), "utf8") + readFileSync(join(root, "node_modules", "@xterm", "xterm", "css", "xterm.css"), "utf8");
+const xterm = readFileSync(join(root, "node_modules", "@xterm", "xterm", "lib", "xterm.mjs")).toString("base64");
 const ENGINE = process.env.BROWSER ?? "chromium";
 const PAGE = 4096;
-const html = `<!doctype html><meta charset="utf-8"><style>${css}</style><div class="sb-term-log" style="width:900px"><pre class="sb-term-out"></pre></div><div class="sb-term-log" style="width:900px;height:200px;overflow:auto"><pre class="sb-term-out" id="ck"></pre></div>`;
-// (the probe, in the page: the long line built as the painter builds it, then the selection's text)
-const probe = `(() => {
-  const out = document.querySelector(".sb-term-out");
-  const ck = document.getElementById("ck");
-  const box = (cls, t) => { const b = document.createElement("span"); b.className = cls; b.textContent = t; return b; };
-  const ls = (k, n) => Array.from({ length: n }, (_, i) => k + i + " " + "z".repeat(i % 70) + "\\n").join("");
-  const long = "q\\u0301".repeat(3 * ${PAGE});
-  const want = ls("plain", 40) + ls("chunk-a", 300) + ls("chunk-b", 200) + long + "\\n" + ls("chunk-c", 300);
-  ck.appendChild(document.createTextNode(ls("plain", 40)));
-  ck.appendChild(box("sb-term-chunk", ls("chunk-a", 300)));
-  ck.appendChild(box("sb-term-chunk", ls("chunk-b", 200) + long.slice(0, ${PAGE})));
-  for (let i = 1; i < 6; i++) ck.appendChild(box("sb-term-page", long.slice(i * ${PAGE}, (i + 1) * ${PAGE})));
-  ck.appendChild(document.createTextNode("\\n"));
-  ck.appendChild(box("sb-term-chunk", ls("chunk-c", 300)));
-  const s2 = getSelection(); s2.selectAllChildren(ck); const c2 = s2.toString(); s2.removeAllRanges();
-  const chunked = { same: c2.replace(/\\n$/, "") === want.replace(/\\n$/, ""), len: c2.length, want: want.length,
-    at: (() => { for (let i = 0; i < want.length; i++) if (c2[i] !== want[i]) return i; return -1; })() };
-  const glyphs = "\\u241b[2J\\u2401x\\u00e9"; // (visible escapes and a 2-byte scalar)
-  const line = glyphs.repeat(Math.ceil(16 * ${PAGE} / glyphs.length)).slice(0, 16 * ${PAGE});
-  out.appendChild(document.createTextNode("before\\n" + line.slice(0, ${PAGE})));
-  for (let i = 1; i < 16; i++) {
-    const p = document.createElement("span");
-    p.className = "sb-term-page";
-    p.textContent = line.slice(i * ${PAGE}, (i + 1) * ${PAGE});
-    out.appendChild(p);
-  }
-  out.appendChild(document.createTextNode("\\nafter\\n"));
-  const sel = getSelection(); sel.selectAllChildren(out); const copied = sel.toString(); sel.removeAllRanges();
-  const lines = copied.replace(/\\n$/, "").split("\\n");
-  return { lines: lines.length, before: lines[0], after: lines[2], same: lines[1] === line, len: (lines[1] || "").length, want: line.length, chunked };
+const html = `<!doctype html><meta charset="utf-8"><style>${css}</style><div id="t" style="width:900px;height:400px"></div>
+<script type="module">import { Terminal } from "data:text/javascript;base64,${xterm}"; window.__Terminal = Terminal;</script>`;
+// (the probe, in the page: the line written to the screen as the Terminal writes output, then the selection's text)
+const probe = `(async () => {
+  for (let i = 0; i < 100 && !window.__Terminal; i++) await new Promise((r) => setTimeout(r, 50));
+  const t = new window.__Terminal({ cols: 80, rows: 24, scrollback: 6000, convertEol: true });
+  t.open(document.getElementById("t"));
+  const glyphs = "\\u241b[2J\\u2401x\\u00e9q\\u0301";
+  const cells = [...glyphs.matchAll(/.\\u0301?/gu)].map((m) => m[0]);
+  let line = "";
+  for (let i = 0; line.length < 16 * ${PAGE}; i++) line += cells[i % cells.length];
+  await new Promise((r) => t.write("before\\n" + line + "\\nafter\\n", r));
+  t.selectAll();
+  const copied = t.getSelection();
+  t.dispose();
+  const lines = copied.replace(/\\n+$/, "").split("\\n");
+  const at = (() => { const c = lines[1] || ""; for (let i = 0; i < line.length; i++) if (c[i] !== line[i]) return i; return -1; })();
+  return { lines: lines.length, before: lines[0], after: lines[2], same: lines[1] === line, len: (lines[1] || "").length, want: line.length, at };
 })()`;
 
 let result, chrome = null, browser = null, profile = null;
@@ -68,7 +56,7 @@ try {
     const send = (method, params = {}) => new Promise((r) => { const id = ++seq; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
     const tree = await send("Page.getFrameTree");
     await send("Page.setDocumentContent", { frameId: tree.result.frameTree.frame.id, html });
-    const ev = (await send("Runtime.evaluate", { expression: probe, returnByValue: true })).result;
+    const ev = (await send("Runtime.evaluate", { expression: probe, returnByValue: true, awaitPromise: true })).result;
     if (ev?.exceptionDetails) console.log("probe threw:", JSON.stringify(ev.exceptionDetails).slice(0, 400));
     result = ev?.result?.value;
     ws.close();
@@ -86,7 +74,5 @@ try {
   if (profile) rmSync(profile, { recursive: true, force: true });
 }
 const ok = result && result.lines === 3 && result.before === "before" && result.after === "after" && result.same;
-console.log(`${ok ? "ok" : "FAIL"} ${ENGINE}: a 16-page line copies as one line, every character in order (${JSON.stringify({ ...result, chunked: undefined })})`);
-const ok2 = result?.chunked?.same === true;
-console.log(`${ok2 ? "ok" : "FAIL"} ${ENGINE}: chunks, most off screen, and a line going on from a chunk into pages copy exactly the text (${JSON.stringify(result?.chunked)})`);
-process.exit(ok && ok2 ? 0 : 1);
+console.log(`${ok ? "ok" : "FAIL"} ${ENGINE}: a 16-page line on the Terminal's screen copies as one line, every character in order (${JSON.stringify(result)})`);
+process.exit(ok ? 0 : 1);
