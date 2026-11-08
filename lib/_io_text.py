@@ -30,6 +30,27 @@ def _c_int_arg(v):
     return n
 
 
+_U64 = (1 << 64) - 1
+
+
+def _c_long_arg(v):
+    # (an argument C converts to a C long: __index__ once, then its range)
+    n = _index(v)
+    if not -(1 << 63) <= n < (1 << 63):
+        raise OverflowError("Python int too large to convert to C long")
+    return n
+
+
+def _raw_pos(v):
+    # (a raw stream's position, as C's buffered I/O converts it: an offset, never negative)
+    n = _index(v)
+    if not -(1 << 63) <= n < (1 << 63):
+        raise ValueError("cannot fit 'int' into an offset-sized integer")
+    if n < 0:
+        raise OSError("Raw stream returned invalid position %d" % n)
+    return int(n)
+
+
 def _c_off_arg(v):
     # (a position C converts to Py_off_t, PyNumber_AsOff_t with ValueError)
     n = _index(v)
@@ -501,16 +522,10 @@ class _BufferedIOMixin(BufferedIOBase):  # (Sagebrush: io's BufferedIOBase)
     ### Positioning ###
 
     def seek(self, pos, whence=0):
-        new_position = self.raw.seek(pos, whence)
-        if new_position < 0:
-            raise OSError("seek() returned an invalid position")
-        return new_position
+        return _raw_pos(self.raw.seek(pos, whence))  # (Sagebrush: C's conversion of the raw result)
 
     def tell(self):
-        pos = self.raw.tell()
-        if pos < 0:
-            raise OSError("tell() returned an invalid position")
-        return pos
+        return _raw_pos(self.raw.tell())  # (Sagebrush: C's conversion of the raw result)
 
     def truncate(self, pos=None):
         self._checkClosed()
@@ -638,6 +653,11 @@ class BufferedWriter(_BufferedIOMixin):
         self.buffer_size = buffer_size
         self._write_buf = bytearray()
         self._write_lock = _NoLock()
+        # (C's _buffered_init asks the raw stream for its position once, ignoring any error)
+        try:
+            _raw_pos(raw.tell())
+        except Exception:
+            pass
 
     def writable(self):
         self._checkAttachedRaw()
@@ -671,9 +691,18 @@ class BufferedWriter(_BufferedIOMixin):
         except BlockingIOError:
             raise RuntimeError("self.raw should implement RawIOBase: it "
                                "should not raise BlockingIOError")
-        if n is not None and (n > len(data) or n < 0):
+        if n is None:
+            return None
+        # (C's PyNumber_AsSsize_t: a result that isn't an integer, or overflows, is -1, then reported as invalid)
+        try:
+            n = _index(n)
+        except TypeError:
+            n = -1
+        if not -(1 << 63) <= n < (1 << 63):
+            n = -1
+        if n > len(data) or n < 0:
             raise OSError("raw write() returned invalid length %d (should have been between 0 and %d)" % (n, len(data)))
-        return n
+        return int(n)
 
     def truncate(self, pos=None):
         self._checkAttachedRaw()
@@ -745,7 +774,7 @@ class IncrementalNewlineDecoder(IncrementalDecoder):  # (Sagebrush: the codecs b
 
     def _init(self, decoder, translate, errors='strict'):
         IncrementalDecoder.__init__(self, errors=errors)
-        self.translate = translate
+        self.translate = bool(translate)  # (Sagebrush: C's, truth-tested once)
         self.decoder = decoder
         self.seennl = 0
         self.pendingcr = False
@@ -756,6 +785,8 @@ class IncrementalNewlineDecoder(IncrementalDecoder):  # (Sagebrush: the codecs b
             output = input
         else:
             output = self.decoder.decode(input, final=final)
+            if not isinstance(output, str):  # (Sagebrush: C's check)
+                raise TypeError("decoder should return a string result, not '%s'" % type(output).__name__)
         if self.pendingcr and (output or final):
             output = "\r" + output
             self.pendingcr = False
@@ -786,14 +817,31 @@ class IncrementalNewlineDecoder(IncrementalDecoder):  # (Sagebrush: the codecs b
             buf = b""
             flag = 0
         else:
-            buf, flag = self.decoder.getstate()
-        flag <<= 1
+            # (Sagebrush: C's, a 2-tuple whose flag is an unsigned 64-bit integer, masked)
+            state = self.decoder.getstate()
+            if not isinstance(state, tuple) or len(state) != 2:
+                raise TypeError("illegal decoder state")
+            buf, flag = state
+            try:
+                flag = _index(flag) & _U64
+            except TypeError:
+                raise TypeError("illegal decoder state") from None
+        flag = (flag << 1) & _U64
         if self.pendingcr:
             flag |= 1
         return buf, flag
 
     def setstate(self, state):
+        # (Sagebrush: C's, a 2-tuple, the flag masked to 64 bits)
+        if not isinstance(state, tuple):
+            raise TypeError("state argument must be a tuple")
+        if len(state) != 2:
+            raise TypeError("setstate(): illegal state argument")
         buf, flag = state
+        try:
+            flag = _index(flag) & _U64
+        except TypeError:
+            raise TypeError("setstate(): illegal state argument") from None
         self.pendingcr = bool(flag & 1)
         if self.decoder is not None:
             self.decoder.setstate((buf, flag >> 1))
@@ -869,6 +917,9 @@ class TextIOWrapper(TextIOBase):  # (Sagebrush: io's TextIOBase)
 
     def _init(self, buffer, encoding=None, errors=None, newline=None,
               line_buffering=False, write_through=False):
+        # (Sagebrush: C's, each truth-tested once, stored as a bool)
+        line_buffering = bool(line_buffering)
+        write_through = bool(write_through)
         self._check_newline(newline)
         encoding = text_encoding(encoding)
 
@@ -1010,12 +1061,12 @@ class TextIOWrapper(TextIOBase):  # (Sagebrush: io's TextIOBase)
             newline = self._readnl
         self._check_newline(newline)
 
-        if line_buffering is None:
-            line_buffering = self.line_buffering
-        if write_through is None:
-            write_through = self.write_through
+        # (Sagebrush: C's convert_optional_bool, a C long; then the encoding looked up before anything changes)
+        line_buffering = self.line_buffering if line_buffering is None else bool(_c_long_arg(line_buffering))
+        write_through = self.write_through if write_through is None else bool(_c_long_arg(write_through))
 
         self.flush()
+        _check_text_encoding(encoding)
         self._configure(encoding, errors, newline,
                         line_buffering, write_through)
 
@@ -1298,8 +1349,7 @@ class TextIOWrapper(TextIOBase):  # (Sagebrush: io's TextIOBase)
     def truncate(self, pos=None):
         self._checkAttached()  # (Sagebrush: C's)
         self.flush()
-        if pos is None:
-            pos = self.tell()
+        # (Sagebrush: C's, pos to the buffer as it is, None too)
         return self.buffer.truncate(pos)
 
     def detach(self):

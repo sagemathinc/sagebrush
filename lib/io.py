@@ -343,7 +343,16 @@ class BytesIO(BufferedIOBase):
 
     def truncate(self, size=None):
         self._check()
-        size = self._pos if size is None else size
+        # (CPython's: the size converted as a C long, __index__ once, and a negative one refused)
+        if size is None:
+            size = self._pos
+        elif type(size) is not int:
+            from operator import index
+            size = index(size)
+        if not -(1 << 63) <= size < (1 << 63):
+            raise OverflowError("Python int too large to convert to C long")
+        if size < 0:
+            raise ValueError("negative size value %d" % size)
         del self._buf[size:]
         return size
 
@@ -483,8 +492,20 @@ class StringIO(TextIOBase):
 
     def truncate(self, size=None):
         self._check()
+        # (CPython's: the size converted as a Py_ssize_t, __index__ once, and a negative one refused)
+        if size is None:
+            size = self._pos
+        else:
+            if type(size) is not int:
+                if not hasattr(type(size), "__index__"):
+                    raise TypeError("argument should be integer or None, not '%s'" % type(size).__name__)
+                from operator import index
+                size = index(size)
+            if not -(1 << 63) <= size < (1 << 63):
+                raise OverflowError("cannot fit 'int' into an index-sized integer")
+            if size < 0:
+                raise ValueError("Negative size value %d" % size)
         v = self._value()
-        size = self._pos if size is None else size
         self._parts = [v[:size]]
         self._len = len(self._parts[0])
         return size

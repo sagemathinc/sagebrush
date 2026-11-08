@@ -468,3 +468,185 @@ class MR3:
 MR3.__module__ = 5
 for o in (MR1(), MR2(), MR3(), io.IncrementalNewlineDecoder(None, True)):
     print(re.sub(r" at 0x[0-9a-f]+", " at ADDR", repr(o)))
+
+
+print("-- r3: truncate, the bool flags, a raw stream's results, the decoder's contracts, reconfigure(encoding=)")
+import io
+
+
+def t(f):
+    try:
+        r = f()
+        return repr(r) if not hasattr(r, "read") else type(r).__name__
+    except BaseException as e:
+        return type(e).__name__ + ": " + str(e)
+
+
+calls = []
+
+
+class X:
+    def __init__(self, v):
+        self.v = v
+
+    def __index__(self):
+        calls.append("i")
+        return self.v
+
+
+class Flip:
+    def __init__(self):
+        self.n = 0
+
+    def __bool__(self):
+        self.n += 1
+        calls.append("b")
+        return self.n % 2 == 1
+
+
+def tw(data=b"abcdef"):
+    return io.TextIOWrapper(io.BytesIO(data), encoding="utf-8")
+
+
+print("-- 4: truncate(pos)")
+for v in (X(2), 2.0, 2**70, 2**63, -1, None, "2", True):
+    w = tw()
+    calls.clear()
+    r = t(lambda: w.truncate(v))
+    print(repr(v) if not isinstance(v, X) else "X(2)", "|", r, calls, w.buffer.getvalue() if not w.closed else "")
+
+print("-- 5: line_buffering / write_through / translate")
+calls.clear()
+f = Flip()
+w = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", line_buffering=f, write_through=Flip())
+print(repr(w.line_buffering), repr(w.write_through), calls)
+w.write("a\n")
+w.write("b\n")
+print(calls)
+for v in (X(1), X(0), 2.0, 2**70, 2**63, -1, "x", None, 5, True):
+    w = tw()
+    calls.clear()
+    r1 = t(lambda: w.reconfigure(line_buffering=v))
+    r1v = t(lambda: w.line_buffering)
+    w2 = tw()
+    r2 = t(lambda: w2.reconfigure(write_through=v))
+    print(repr(v) if not isinstance(v, X) else "X(%d)" % v.v, "|", r1, r1v, "|", r2, t(lambda: w2.write_through), calls)
+calls.clear()
+d = io.IncrementalNewlineDecoder(None, Flip())
+print([d.decode(s) for s in ("a\r\n", "b\r\n", "c\r")], calls)
+print(t(lambda: io.IncrementalNewlineDecoder(None, 2).decode("x\r\ny")), t(lambda: io.IncrementalNewlineDecoder(None, "").decode("x\r\ny")))
+
+print("-- 6: BufferedWriter raw results")
+
+
+class R(io.RawIOBase):
+    def __init__(self, tell=0, seek=0, write=None):
+        self.t, self.s, self.w = tell, seek, write
+
+    def writable(self):
+        return True
+
+    def seekable(self):
+        return True
+
+    def tell(self):
+        return self.t
+
+    def seek(self, p, wh=0):
+        return self.s
+
+    def write(self, b):
+        return len(b) if self.w is None else self.w
+
+
+for v in (X(3), 3.0, "3", 2**70, -1, None, True):
+    calls.clear()
+    a = t(lambda: io.BufferedWriter(R(tell=v)).tell())
+    b = t(lambda: io.BufferedWriter(R(seek=v)).seek(0))
+    print("tell/seek", repr(v) if not isinstance(v, X) else "X(3)", "|", a, "|", b, calls)
+for v in (X(2), 2.0, "2", 2**70, -1, 99, None, True):
+    calls.clear()
+    bw = io.BufferedWriter(R(write=v), 4)
+    a = t(lambda: bw.write(b"abcdefgh"))
+    bw2 = io.BufferedWriter(R(write=v), 4)
+    bw2.write(b"ab")
+    b = t(lambda: bw2.flush())
+    print("write", repr(v) if not isinstance(v, X) else "X(2)", "|", a, "|", b, calls)
+    bw.raw.w = bw2.raw.w = None  # (each finalizer's flush then succeeds, as quietly as CPython's)
+
+print("-- 7: IncrementalNewlineDecoder's decoder contracts")
+
+
+class Dec:
+    def __init__(self, out=None, state=(b"", 0)):
+        self.out, self.state = out, state
+        self.set = []
+
+    def decode(self, b, final=False):
+        return self.out
+
+    def getstate(self):
+        return self.state
+
+    def setstate(self, s):
+        self.set.append(s)
+
+    def reset(self):
+        pass
+
+
+for out in (b"x", None, 5, "ok\r", ["a"]):
+    print("decode", repr(out), t(lambda: io.IncrementalNewlineDecoder(Dec(out=out), True).decode(b"z")))
+for st in ((b"", 0), [b"", 0], (b"",), (b"", 0, 1), (b"", X(3)), (b"", 1.5), (b"", -1), (b"", 2**70), (b"", 2**64 + 5), "xy", (b"x", "s")):
+    calls.clear()
+    print("getstate", repr(st) if not isinstance(st, tuple) or not any(isinstance(z, X) for z in st) else "(b'', X(3))", t(lambda: io.IncrementalNewlineDecoder(Dec(state=st), True).getstate()), calls)
+for st in ((b"", 0), (b"", 1), (b"", 6), [b"", 0], (b"",), (b"", X(5)), (b"", 1.5), (b"", -1), (b"", 2**70), (b"", -2**70), "xy", 5):
+    calls.clear()
+    d = Dec()
+    r = t(lambda: io.IncrementalNewlineDecoder(d, True).setstate(st))
+    print("setstate", repr(st) if not isinstance(st, tuple) or not any(isinstance(z, X) for z in st) else "(b'', X(5))", r, d.set, calls)
+nd = io.IncrementalNewlineDecoder(None, True)
+for st in ((b"", 1), (b"", -1), (b"x", 0), [b"", 0], (b"", 2**70)):
+    print("setstate None", repr(st)[:20], t(lambda: nd.setstate(st)), t(lambda: nd.getstate()))
+
+print("-- 8: reconfigure(encoding=...)")
+for enc in ("klingon", "latin-1", "utf-16"):
+    w = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
+    print(enc, t(lambda: w.reconfigure(encoding=enc)), t(lambda: w.encoding), t(lambda: w.write("é")))
+w = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
+print(t(lambda: w.reconfigure(errors="bogus-handler")), t(lambda: w.errors), t(lambda: w.write("x")))
+
+print("-- r3: BufferedWriter's construction asks the raw stream's position; BytesIO.truncate; truncate() after a readline")
+import io
+def t(f):
+    try: return repr(f())
+    except BaseException as e: return type(e).__name__ + ": " + str(e)
+log = []
+class R(io.RawIOBase):
+    def __init__(self, tellv=0, seekable=True): self.tv, self.sk = tellv, seekable
+    def writable(self): return True
+    def seekable(self): log.append("seekable"); return self.sk
+    def tell(self): log.append("tell"); return self.tv
+    def write(self, b): return len(b)
+for tv in (0, -1, "x"):
+    log.clear(); r = t(lambda: io.BufferedWriter(R(tv)) and "made"); print("init", repr(tv), r, log)
+log.clear(); print(t(lambda: io.BufferedWriter(R(0, False)) and "made"), log)
+class X:
+    def __index__(self): log.append("i"); return 2
+for v in (X(), 2.0, 2**70, 2**63, -1, None, "2", True, 7):
+    b = io.BytesIO(b"abcdef"); b.read(3); log.clear()
+    print("bytesio.truncate", repr(v)[:10], t(lambda: b.truncate(v)), b.getvalue(), b.tell(), log)
+w = io.TextIOWrapper(io.BytesIO(b"abc\ndef\nghi\n"), encoding="utf-8"); w.readline()
+print("tw truncate None after readline", t(lambda: w.truncate()), w.buffer.getvalue(), t(lambda: w.tell()))
+
+print("-- r3: StringIO.truncate")
+import io
+def t(f):
+    try: return repr(f())
+    except BaseException as e: return type(e).__name__ + ": " + str(e)
+log = []
+class X:
+    def __index__(self): log.append("i"); return 2
+for v in (X(), 2.0, 2**70, 2**63, -1, None, "2", True, 7):
+    b = io.StringIO("abcdef"); b.read(3); log.clear()
+    print("stringio.truncate", repr(v)[:10], t(lambda: b.truncate(v)), b.getvalue(), b.tell(), log)

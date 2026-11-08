@@ -268,3 +268,108 @@ ValueError: seek of closed file ValueError: whence value 7 unsupported ValueErro
 <elsewhere.MR2 object at ADDR>
 <MR3 object at ADDR>
 <_io.IncrementalNewlineDecoder object at ADDR>
+-- r3: truncate, the bool flags, a raw stream's results, the decoder's contracts, reconfigure(encoding=)
+-- 4: truncate(pos)
+X(2) | 2 ['i'] b'ab'
+2.0 | TypeError: 'float' object cannot be interpreted as an integer [] b'abcdef'
+1180591620717411303424 | OverflowError: Python int too large to convert to C long [] b'abcdef'
+9223372036854775808 | OverflowError: Python int too large to convert to C long [] b'abcdef'
+-1 | ValueError: negative size value -1 [] b'abcdef'
+None | 0 [] b''
+'2' | TypeError: 'str' object cannot be interpreted as an integer [] b'abcdef'
+True | 1 [] b'a'
+-- 5: line_buffering / write_through / translate
+True True ['b', 'b']
+['b', 'b']
+X(1) | None True | None True ['i', 'i']
+X(0) | None False | None False ['i', 'i']
+2.0 | TypeError: 'float' object cannot be interpreted as an integer False | TypeError: 'float' object cannot be interpreted as an integer False []
+1180591620717411303424 | OverflowError: Python int too large to convert to C long False | OverflowError: Python int too large to convert to C long False []
+9223372036854775808 | OverflowError: Python int too large to convert to C long False | OverflowError: Python int too large to convert to C long False []
+-1 | None True | None True []
+'x' | TypeError: 'str' object cannot be interpreted as an integer False | TypeError: 'str' object cannot be interpreted as an integer False []
+None | None False | None False []
+5 | None True | None True []
+True | None True | None True []
+['a\n', 'b\n', 'c'] ['b']
+'x\ny' 'x\r\ny'
+-- 6: BufferedWriter raw results
+tell/seek X(3) | 3 | 3 ['i', 'i', 'i']
+tell/seek 3.0 | TypeError: 'float' object cannot be interpreted as an integer | TypeError: 'float' object cannot be interpreted as an integer []
+tell/seek '3' | TypeError: 'str' object cannot be interpreted as an integer | TypeError: 'str' object cannot be interpreted as an integer []
+tell/seek 1180591620717411303424 | ValueError: cannot fit 'int' into an offset-sized integer | ValueError: cannot fit 'int' into an offset-sized integer []
+tell/seek -1 | OSError: Raw stream returned invalid position -1 | OSError: Raw stream returned invalid position -1 []
+tell/seek None | TypeError: 'NoneType' object cannot be interpreted as an integer | TypeError: 'NoneType' object cannot be interpreted as an integer []
+tell/seek True | 1 | 1 []
+write X(2) | 8 | None ['i', 'i', 'i', 'i']
+write 2.0 | OSError: raw write() returned invalid length -1 (should have been between 0 and 8) | OSError: raw write() returned invalid length -1 (should have been between 0 and 2) []
+write '2' | OSError: raw write() returned invalid length -1 (should have been between 0 and 8) | OSError: raw write() returned invalid length -1 (should have been between 0 and 2) []
+write 1180591620717411303424 | OSError: raw write() returned invalid length -1 (should have been between 0 and 8) | OSError: raw write() returned invalid length -1 (should have been between 0 and 2) []
+write -1 | OSError: raw write() returned invalid length -1 (should have been between 0 and 8) | OSError: raw write() returned invalid length -1 (should have been between 0 and 2) []
+write 99 | OSError: raw write() returned invalid length 99 (should have been between 0 and 8) | OSError: raw write() returned invalid length 99 (should have been between 0 and 2) []
+write None | 8 | None []
+write True | 8 | None []
+-- 7: IncrementalNewlineDecoder's decoder contracts
+decode b'x' TypeError: decoder should return a string result, not 'bytes'
+decode None TypeError: decoder should return a string result, not 'NoneType'
+decode 5 TypeError: decoder should return a string result, not 'int'
+decode 'ok\r' 'ok'
+decode ['a'] TypeError: decoder should return a string result, not 'list'
+getstate (b'', 0) (b'', 0) []
+getstate [b'', 0] TypeError: illegal decoder state []
+getstate (b'',) TypeError: illegal decoder state []
+getstate (b'', 0, 1) TypeError: illegal decoder state []
+getstate (b'', X(3)) (b'', 6) ['i']
+getstate (b'', 1.5) TypeError: illegal decoder state []
+getstate (b'', -1) (b'', 18446744073709551614) []
+getstate (b'', 1180591620717411303424) (b'', 0) []
+getstate (b'', 18446744073709551621) (b'', 10) []
+getstate 'xy' TypeError: illegal decoder state []
+getstate (b'x', 's') TypeError: illegal decoder state []
+setstate (b'', 0) None [(b'', 0)] []
+setstate (b'', 1) None [(b'', 0)] []
+setstate (b'', 6) None [(b'', 3)] []
+setstate [b'', 0] TypeError: state argument must be a tuple [] []
+setstate (b'',) TypeError: setstate(): illegal state argument [] []
+setstate (b'', X(5)) None [(b'', 2)] ['i']
+setstate (b'', 1.5) TypeError: setstate(): illegal state argument [] []
+setstate (b'', -1) None [(b'', 9223372036854775807)] []
+setstate (b'', 1180591620717411303424) None [(b'', 0)] []
+setstate (b'', -1180591620717411303424) None [(b'', 0)] []
+setstate 'xy' TypeError: state argument must be a tuple [] []
+setstate 5 TypeError: state argument must be a tuple [] []
+setstate None (b'', 1) None (b'', 1)
+setstate None (b'', -1) None (b'', 1)
+setstate None (b'x', 0) None (b'', 0)
+setstate None [b'', 0] TypeError: state argument must be a tuple (b'', 0)
+setstate None (b'', 11805916207174 None (b'', 0)
+-- 8: reconfigure(encoding=...)
+klingon LookupError: unknown encoding: klingon 'utf-8' 1
+latin-1 None 'latin-1' 1
+utf-16 None 'utf-16' 1
+None 'bogus-handler' 1
+-- r3: BufferedWriter's construction asks the raw stream's position; BytesIO.truncate; truncate() after a readline
+init 0 'made' ['tell']
+init -1 'made' ['tell']
+init 'x' 'made' ['tell']
+'made' ['tell']
+bytesio.truncate <__main__. 2 b'ab' 3 ['i']
+bytesio.truncate 2.0 TypeError: 'float' object cannot be interpreted as an integer b'abcdef' 3 []
+bytesio.truncate 1180591620 OverflowError: Python int too large to convert to C long b'abcdef' 3 []
+bytesio.truncate 9223372036 OverflowError: Python int too large to convert to C long b'abcdef' 3 []
+bytesio.truncate -1 ValueError: negative size value -1 b'abcdef' 3 []
+bytesio.truncate None 3 b'abc' 3 []
+bytesio.truncate '2' TypeError: 'str' object cannot be interpreted as an integer b'abcdef' 3 []
+bytesio.truncate True 1 b'a' 3 []
+bytesio.truncate 7 7 b'abcdef' 3 []
+tw truncate None after readline 12 b'abc\ndef\nghi\n' 4
+-- r3: StringIO.truncate
+stringio.truncate <__main__. 2 ab 3 ['i']
+stringio.truncate 2.0 TypeError: argument should be integer or None, not 'float' abcdef 3 []
+stringio.truncate 1180591620 OverflowError: cannot fit 'int' into an index-sized integer abcdef 3 []
+stringio.truncate 9223372036 OverflowError: cannot fit 'int' into an index-sized integer abcdef 3 []
+stringio.truncate -1 ValueError: Negative size value -1 abcdef 3 []
+stringio.truncate None 3 abc 3 []
+stringio.truncate '2' TypeError: argument should be integer or None, not 'str' abcdef 3 []
+stringio.truncate True 1 a 3 []
+stringio.truncate 7 7 abcdef 3 []
