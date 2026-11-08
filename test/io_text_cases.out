@@ -185,3 +185,86 @@ b'\xff\xfea\x00\r\x00\n\x00b\x00\xe9\x00\xac \r\x00\n\x00'
 'a\n' True False
 'x\ny\n' 4
 'x\ny\n'
+-- r3: __index__ results (once, checked), Py_ssize_t overflow, bytearray deletion under a re-sizing __index__, the constructors C argument errors
+X TypeError: __index__ returned non-int (type float) 1 | TypeError: __index__ returned non-int (type float) 1 | TypeError: __index__ returned non-int (type float) 1
+B <_io.BufferedWriter> 1 | 'a' 1 | 'a' 1
+['__index__ returned non-int (type bool). ', '__index__ returned non-int (type bool). ', '__index__ returned non-int (type bool). ']
+1180591620717411303424 | OverflowError: cannot fit 'int' into an index-sized integer | OverflowError: Python int too large to convert to C ssize_t | OverflowError: Python int too large to convert to C ssize_t
+-1180591620717411303424 | OverflowError: cannot fit 'int' into an index-sized integer | OverflowError: Python int too large to convert to C ssize_t | OverflowError: Python int too large to convert to C ssize_t
+9223372036854775808 | OverflowError: cannot fit 'int' into an index-sized integer | OverflowError: Python int too large to convert to C ssize_t | OverflowError: Python int too large to convert to C ssize_t
+9223372036854775807 | 'abc\ndef' | 'abc\n'
+-9223372036854775808 | 'abc\ndef' | 'abc\n' | ValueError: buffer size must be strictly positive
+-9223372036854775809 | OverflowError: cannot fit 'int' into an index-sized integer | OverflowError: Python int too large to convert to C ssize_t | OverflowError: Python int too large to convert to C ssize_t
+index IndexError bytearray index out of range bytearray(b'') ['i']
+slice bytearray(b'') ['start']
+step bytearray(b'') ['step', 'start', 'stop']
+stop bytearray(b'') ['stop']
+bytearray(b'abcdefghXY')
+[0, 1, 3, 4, 6, 7, 9]
+[]
+[1, 2, 3, 5, 6, 7, 9]
+TW() | TypeError: TextIOWrapper() missing required argument 'buffer' (pos 1)
+TW 7 | TypeError: 'bytearray' object is not callable
+TW foo= | TypeError: 'bytearray' object is not callable
+TW buffer dup | TypeError: 'bytearray' object is not callable
+TW encoding dup | TypeError: 'bytearray' object is not callable
+TW kw only | TypeError: 'bytearray' object is not callable
+TW 2 unexpected | TypeError: 'bytearray' object is not callable
+BW() | TypeError: BufferedWriter() missing required argument 'raw' (pos 1)
+BW 3 | TypeError: 'bytearray' object is not callable
+BW foo= | TypeError: 'bytearray' object is not callable
+BW raw dup | TypeError: 'bytearray' object is not callable
+BW kw | TypeError: 'bytearray' object is not callable
+ND() | TypeError: IncrementalNewlineDecoder() missing required argument 'decoder' (pos 1)
+ND 1 | TypeError: IncrementalNewlineDecoder() missing required argument 'translate' (pos 2)
+ND 4 | TypeError: IncrementalNewlineDecoder() takes at most 3 arguments (4 given)
+ND dup | TypeError: argument for IncrementalNewlineDecoder() given by name ('decoder') and position (1)
+ND foo= | TypeError: IncrementalNewlineDecoder() got an unexpected keyword argument 'foo'
+ND kw | ok
+ND translate kw missing | TypeError: IncrementalNewlineDecoder() missing required argument 'translate' (pos 2)
+sub TypeError: 'bytearray' object is not callable TypeError: TextIOWrapper() missing required argument 'buffer' (pos 1)
+-- r3: seek, whence as a C int and pos as an offset (TextIOWrapper, BufferedWriter)
+TextIOWrapper X(0) | 0 1
+TextIOWrapper X(1) | 0 1
+TextIOWrapper X(2) | 3 1
+TextIOWrapper X(5) | ValueError: invalid whence (5, should be 0, 1 or 2) 1
+TextIOWrapper 0.0 | TypeError: 'float' object cannot be interpreted as an integer 0
+TextIOWrapper 1180591620717411303424 | OverflowError: Python int too large to convert to C int 0
+TextIOWrapper -1180591620717411303424 | OverflowError: Python int too large to convert to C int 0
+TextIOWrapper 2147483648 | OverflowError: Python int too large to convert to C int 0
+TextIOWrapper 2147483647 | ValueError: invalid whence (2147483647, should be 0, 1 or 2) 0
+TextIOWrapper -2147483648 | ValueError: invalid whence (-2147483648, should be 0, 1 or 2) 0
+TextIOWrapper -2147483649 | OverflowError: Python int too large to convert to C int 0
+TextIOWrapper '0' | TypeError: 'str' object cannot be interpreted as an integer 0
+TextIOWrapper None | TypeError: 'NoneType' object cannot be interpreted as an integer 0
+TextIOWrapper True | 0 0
+TextIOWrapper cookie X | TypeError: '<' not supported between instances of 'X' and 'int' 0
+BufferedWriter X(0) | 0 1
+BufferedWriter X(1) | 0 1
+BufferedWriter X(2) | 0 1
+BufferedWriter X(5) | ValueError: whence value 5 unsupported 1
+BufferedWriter 0.0 | TypeError: 'float' object cannot be interpreted as an integer 0
+BufferedWriter 1180591620717411303424 | OverflowError: Python int too large to convert to C int 0
+BufferedWriter -1180591620717411303424 | OverflowError: Python int too large to convert to C int 0
+BufferedWriter 2147483648 | OverflowError: Python int too large to convert to C int 0
+BufferedWriter 2147483647 | ValueError: whence value 2147483647 unsupported 0
+BufferedWriter -2147483648 | ValueError: whence value -2147483648 unsupported 0
+BufferedWriter -2147483649 | OverflowError: Python int too large to convert to C int 0
+BufferedWriter '0' | TypeError: 'str' object cannot be interpreted as an integer 0
+BufferedWriter None | TypeError: 'NoneType' object cannot be interpreted as an integer 0
+BufferedWriter True | 0 0
+BufferedWriter cookie X | 0 1
+TypeError: 'float' object cannot be interpreted as an integer ValueError: I/O operation on closed file.
+118059162071 ValueError: cannot fit 'int' into an offset-sized integer
+-11805916207 ValueError: cannot fit 'int' into an offset-sized integer
+922337203685 ValueError: cannot fit 'int' into an offset-sized integer
+1.5 TypeError: 'float' object cannot be interpreted as an integer
+'1' TypeError: 'str' object cannot be interpreted as an integer
+None TypeError: 'NoneType' object cannot be interpreted as an integer
+True 0
+ValueError: seek of closed file ValueError: whence value 7 unsupported ValueError: seek of closed file
+-- an instance's repr names its class's __module__ (CPython's object.__repr__), the io classes' _io too
+<_io.MR1 object at ADDR>
+<elsewhere.MR2 object at ADDR>
+<MR3 object at ADDR>
+<_io.IncrementalNewlineDecoder object at ADDR>

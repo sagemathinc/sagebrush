@@ -341,3 +341,130 @@ print(t(lambda: io.TextIOWrapper(fraw, encoding="utf-8").read()))
 fraw.close()
 os.remove(fp)
 os.rmdir(fd_dir)
+
+print("-- r3: __index__ results (once, checked), Py_ssize_t overflow, bytearray deletion under a re-sizing __index__, the constructors C argument errors")
+import io, warnings
+def t(f):
+    try: return repr(f())
+    except BaseException as e: return type(e).__name__ + ": " + str(e)
+calls = []
+class X:
+    def __index__(self): calls.append(1); return 1.5
+class B:
+    def __index__(self): calls.append(1); return True
+w = lambda: io.TextIOWrapper(io.BytesIO(b"abc\ndef"), encoding="utf-8")
+with warnings.catch_warnings(record=True) as ws:
+    warnings.simplefilter("always")
+    for o in (X, B):
+        calls.clear(); a = t(lambda: io.BufferedWriter(io.BytesIO(), o())); n1 = len(calls)
+        calls.clear(); b = t(lambda: w().read(o())); n2 = len(calls)
+        calls.clear(); c = t(lambda: w().readline(o())); n3 = len(calls)
+        print(o.__name__, a, n1, "|", b, n2, "|", c, n3)
+    print([str(x.message)[:40] for x in ws])
+for v in (2**70, -2**70, 2**63, 2**63 - 1, -2**63, -2**63 - 1):
+    print(v, "|", t(lambda: w().read(v)), "|", t(lambda: w().readline(v)), *(["|", t(lambda: io.BufferedWriter(io.BytesIO(), v))] if v != 2**63 - 1 else []))
+for mode in ("index", "slice", "step", "stop"):
+    b = bytearray(b"abcd")
+    order = []
+    class I:
+        def __init__(self, v, tag): self.v, self.tag = v, tag
+        def __index__(self):
+            order.append(self.tag); b[:] = b""; return self.v
+    try:
+        if mode == "index": del b[I(1, "i")]
+        elif mode == "slice": del b[I(1, "start"):3]
+        elif mode == "step": del b[I(0, "start"):I(4, "stop"):I(2, "step")]
+        else: del b[:I(2, "stop")]
+        print(mode, repr(b), order)
+    except Exception as e:
+        print(mode, type(e).__name__, e, repr(b), order)
+b2 = bytearray(b"abcdefgh")
+class Grow:
+    def __index__(self): b2.extend(b"XYZ"); return -1
+del b2[Grow()]
+print(b2)
+b3 = bytearray(range(10))
+del b3[8:1:-3]; print(list(b3))
+b4 = bytearray(range(10)); del b4[::-1]; print(list(b4))
+b5 = bytearray(range(10)); del b5[-2::-4]; print(list(b5))
+cases = [
+ ("TW()", lambda: io.TextIOWrapper()),
+ ("TW 7", lambda: io.TextIOWrapper(b(), "utf-8", None, None, False, False, 1)),
+ ("TW foo=", lambda: io.TextIOWrapper(b(), foo=1)),
+ ("TW buffer dup", lambda: io.TextIOWrapper(b(), buffer=b())),
+ ("TW encoding dup", lambda: io.TextIOWrapper(b(), "utf-8", encoding="utf-8")),
+ ("TW kw only", lambda: io.TextIOWrapper(buffer=b(), encoding="utf-8")),
+ ("TW 2 unexpected", lambda: io.TextIOWrapper(b(), foo=1, bar=2)),
+ ("BW()", lambda: io.BufferedWriter()),
+ ("BW 3", lambda: io.BufferedWriter(b(), 8, 9)),
+ ("BW foo=", lambda: io.BufferedWriter(b(), foo=1)),
+ ("BW raw dup", lambda: io.BufferedWriter(b(), raw=b())),
+ ("BW kw", lambda: io.BufferedWriter(raw=b(), buffer_size=4)),
+ ("ND()", lambda: io.IncrementalNewlineDecoder()),
+ ("ND 1", lambda: io.IncrementalNewlineDecoder(None)),
+ ("ND 4", lambda: io.IncrementalNewlineDecoder(None, 1, "strict", 4)),
+ ("ND dup", lambda: io.IncrementalNewlineDecoder(None, True, decoder=None)),
+ ("ND foo=", lambda: io.IncrementalNewlineDecoder(None, True, foo=1)),
+ ("ND kw", lambda: io.IncrementalNewlineDecoder(decoder=None, translate=True, errors="replace")),
+ ("ND translate kw missing", lambda: io.IncrementalNewlineDecoder(decoder=None)),
+]
+for name, f in cases:
+    r = t(f)
+    print(name, "|", "ok" if r.startswith("<") else r)
+class Sub(io.TextIOWrapper):
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+print("sub", t(lambda: Sub(b(), encoding="utf-8")), t(lambda: Sub()))
+
+print("-- r3: seek, whence as a C int and pos as an offset (TextIOWrapper, BufferedWriter)")
+def t(f):
+    try: return repr(f())
+    except Exception as e: return type(e).__name__ + ": " + str(e)
+calls = []
+class X:
+    def __init__(self, v): self.v = v
+    def __index__(self): calls.append(1); return self.v
+tw = lambda: io.TextIOWrapper(io.BytesIO(b"abc"), encoding="utf-8")
+class Raw(io.RawIOBase):
+    def writable(self): return True
+    def write(self, b): return len(b)
+    def seekable(self): return True
+    def seek(self, p, w=0): return 0
+    def tell(self): return 0
+bw = lambda: io.BufferedWriter(Raw())
+for name, mk in (("TextIOWrapper", tw), ("BufferedWriter", bw)):
+    for wv in (X(0), X(1), X(2), X(5), 0.0, 2**70, -2**70, 2**31, 2**31 - 1, -2**31, -2**31 - 1, "0", None, True):
+        calls.clear()
+        r = t(lambda: mk().seek(0, wv))
+        print(name, repr(wv) if not isinstance(wv, X) else "X(%d)" % wv.v, "|", r, len(calls))
+    calls.clear()
+    print(name, "cookie X |", t(lambda: mk().seek(X(0))), len(calls))
+c = io.TextIOWrapper(io.BytesIO(b"abc"), encoding="utf-8"); c.close()
+print(t(lambda: c.seek(0, 0.0)), t(lambda: c.seek(0, X(0))))
+for v in (2**70, -2**70, 2**63, 1.5, "1", None, True):
+    print(repr(v)[:12], t(lambda: bw().seek(v)))
+cb = bw(); cb.close()
+print(t(lambda: cb.seek(0)), t(lambda: cb.seek(0, 7)), t(lambda: cb.seek(1.5)))
+
+print("-- an instance's repr names its class's __module__ (CPython's object.__repr__), the io classes' _io too")
+import re
+
+
+class MR1:
+    __module__ = "_io"
+
+
+class MR2:
+    pass
+
+
+MR2.__module__ = "elsewhere"
+
+
+class MR3:
+    pass
+
+
+MR3.__module__ = 5
+for o in (MR1(), MR2(), MR3(), io.IncrementalNewlineDecoder(None, True)):
+    print(re.sub(r" at 0x[0-9a-f]+", " at ADDR", repr(o)))

@@ -2435,6 +2435,16 @@ export function sliceIndices(s: PySlice, len: number): [number, number, number] 
 }
 
 export function seqIndex(i: any, len: number, what: string): number {
+  return seqIndexIn(seqIndexRaw(i, what), len, what);
+}
+// seqIndex in two steps: the index converted (a user __index__ called, once), then range-checked against a
+// length read after it, as CPython's PyNumber_AsSsize_t and then the bounds check do
+export function seqIndexIn(j: number, len: number, what: string): number {
+  if (j < 0) j += len;
+  if (j < 0 || j >= len) raise(T.IndexError, `${what} index out of range`);
+  return j;
+}
+export function seqIndexRaw(i: any, what: string): number {
   let j: number;
   if (typeof i === "number" && isInt(i)) j = i;
   else if (typeof i === "boolean") j = +i;
@@ -2449,8 +2459,6 @@ export function seqIndex(i: any, len: number, what: string): number {
     const r = intResult("__index__", f(i));
     j = typeof r === "bigint" ? (r < 0n ? -Infinity : Infinity) : r;
   }
-  if (j < 0) j += len;
-  if (j < 0 || j >= len) raise(T.IndexError, `${what} index out of range`);
   return j;
 }
 
@@ -2691,7 +2699,17 @@ export function delitem(o: any, k: any): void {
 // re-sizes, so an export of the buffer refuses it (BufferError); deleting nothing doesn't
 export function bytearrayDel(o: PyByteArray, k: any): void {
   if (k instanceof PySlice) {
-    const [start, step, n] = sliceIndices(k, o.n);
+    // (the slice's step, start and stop converted first, each a user __index__ that may re-size o, as
+    // PySlice_Unpack; then adjusted to o's length as it is now, PySlice_AdjustIndices)
+    const step = k.step === null ? 1 : sliceIndex(k.step, 1);
+    if (step === 0) raise(T.ValueError, "slice step cannot be zero");
+    const start0 = k.start === null ? null : sliceIndex(k.start, 0);
+    const stop0 = k.stop === null ? null : sliceIndex(k.stop, 0);
+    const len = o.n;
+    const lo = step < 0 ? -1 : 0, hi = step < 0 ? len - 1 : len;
+    const fix = (v: number | null, dflt: number) => (v === null ? dflt : v < 0 ? Math.max(v + len, lo) : Math.min(v, hi));
+    const start = fix(start0, step < 0 ? hi : lo), stop = fix(stop0, step < 0 ? lo : hi);
+    const n = (step > 0 ? start < stop : start > stop) ? Math.floor((stop - start - (step > 0 ? 1 : -1)) / step) + 1 : 0;
     if (n === 0) return;
     checkResizable(o);
     const r = new Uint8Array(o.n - n);
@@ -2699,16 +2717,21 @@ export function bytearrayDel(o: PyByteArray, k: any): void {
       r.set(o.a.subarray(0, start), 0);
       r.set(o.a.subarray(start + n, o.n), start);
     } else {
-      // (the kept bytes, in order: every index but start, start + step, ... n of them)
-      const gone = new Set<number>();
-      for (let i = 0, j = start; i < n; i++, j += step) gone.add(j);
-      for (let i = 0, j = 0; i < o.n; i++) if (!gone.has(i)) r[j++] = o.a[i];
+      // (the kept bytes, in order: i is deleted when (i - start) / step is an integer q in [0, n), either sign
+      // of step; no set of the deleted indices)
+      for (let i = 0, j = 0; i < o.n; i++) {
+        const d = i - start;
+        const q = d / step;
+        if (d % step === 0 && q >= 0 && q < n) continue;
+        r[j++] = o.a[i];
+      }
     }
     o.a = r;
     o.n = r.length;
     return;
   }
-  const i = seqIndex(k, o.n, "bytearray");
+  // (the index converted first, a user __index__ that may re-size o; then checked against o's length now)
+  const i = seqIndexIn(seqIndexRaw(k, "bytearray"), o.n, "bytearray");
   checkResizable(o);
   const r = new Uint8Array(o.n - 1);
   r.set(o.a.subarray(0, i), 0);

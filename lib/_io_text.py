@@ -19,13 +19,49 @@ _MISSING = object()
 from io import _bytes_like  # (a bytes-like object's bytes, or C's TypeError)
 
 
+from operator import index as _index  # (PyNumber_Index: __index__ called once, its result checked)
+
+
+def _c_int_arg(v):
+    # (an argument C converts to a C int, Argument Clinic's: __index__ once, then its range)
+    n = _index(v)
+    if not -(1 << 31) <= n < (1 << 31):
+        raise OverflowError("Python int too large to convert to C int")
+    return n
+
+
+def _c_off_arg(v):
+    # (a position C converts to Py_off_t, PyNumber_AsOff_t with ValueError)
+    n = _index(v)
+    if not -(1 << 63) <= n < (1 << 63):
+        raise ValueError("cannot fit 'int' into an offset-sized integer")
+    return int(n)
+
+
+def _c_args(name, names, required, args, kwargs):
+    # (a C constructor's argument parsing, Argument Clinic's, and its messages: the positional count, then each
+    # parameter in order (given twice, or required and missing), then an unexpected keyword)
+    if len(args) > len(names):
+        raise TypeError("%s() takes at most %d argument%s (%d given)" % (name, len(names), "" if len(names) == 1 else "s", len(args)))
+    bound = {}
+    for i, nm in enumerate(names):
+        if i < len(args):
+            if nm in kwargs:
+                raise TypeError("argument for %s() given by name ('%s') and position (%d)" % (name, nm, i + 1))
+            bound[nm] = args[i]
+        elif nm in kwargs:
+            bound[nm] = kwargs[nm]
+        elif i < required:
+            raise TypeError("%s() missing required argument '%s' (pos %d)" % (name, nm, i + 1))
+    for k in kwargs:
+        if k not in names:
+            raise TypeError("%s() got an unexpected keyword argument '%s'" % (name, k))
+    return bound
+
+
 def _ssize_arg(v):
     # (an argument C converts to Py_ssize_t, with its messages)
-    try:
-        index = v.__index__
-    except AttributeError:
-        raise TypeError("'%s' object cannot be interpreted as an integer" % type(v).__name__)
-    n = index()
+    n = _index(v)
     if not -(1 << 63) <= n < (1 << 63):
         raise OverflowError("Python int too large to convert to C ssize_t")
     return n
@@ -588,9 +624,10 @@ class BufferedWriter(_BufferedIOMixin):
     # rest is buffered; data of buffer_size bytes or more is never buffered first. C's argument checks and
     # messages too.)
 
-    def __init__(self, raw=_MISSING, buffer_size=DEFAULT_BUFFER_SIZE):
-        if raw is _MISSING:
-            raise TypeError("BufferedWriter() missing required argument 'raw' (pos 1)")
+    def __init__(self, *args, **kwargs):  # (C's argument parsing and messages)
+        self._init(**_c_args("BufferedWriter", ("raw", "buffer_size"), 1, args, kwargs))
+
+    def _init(self, raw, buffer_size=DEFAULT_BUFFER_SIZE):
         buffer_size = _ssize_arg(buffer_size)
         if not raw.writable():
             raise UnsupportedOperation("File or stream is not writable.")
@@ -665,9 +702,14 @@ class BufferedWriter(_BufferedIOMixin):
         return _BufferedIOMixin.tell(self) + len(self._write_buf)
 
     def seek(self, pos, whence=0):
+        # (C's order: whence converted as a C int, checked; closed; then pos converted, as an offset)
+        whence = _c_int_arg(whence)
         self._checkAttachedRaw()
         if whence not in valid_seek_flags:
-            raise ValueError("whence value %r unsupported" % (whence,))
+            raise ValueError("whence value %d unsupported" % whence)
+        if self.closed:
+            raise ValueError("seek of closed file")
+        pos = _c_off_arg(pos)
         with self._write_lock:
             self._flush_unlocked()
             return _BufferedIOMixin.seek(self, pos, whence)
@@ -698,14 +740,10 @@ class IncrementalNewlineDecoder(IncrementalDecoder):  # (Sagebrush: the codecs b
     translate=False, it ensures that the newline sequence is returned in
     one piece.
     """
-    def __init__(self, decoder=_MISSING, translate=_MISSING, errors='strict', *extra):
-        # (Sagebrush: C's argument errors)
-        if extra:
-            raise TypeError("IncrementalNewlineDecoder() takes at most 3 arguments (%d given)" % (3 + len(extra)))
-        if decoder is _MISSING:
-            raise TypeError("IncrementalNewlineDecoder() missing required argument 'decoder' (pos 1)")
-        if translate is _MISSING:
-            raise TypeError("IncrementalNewlineDecoder() missing required argument 'translate' (pos 2)")
+    def __init__(self, *args, **kwargs):  # (Sagebrush: C's argument parsing and messages)
+        self._init(**_c_args("IncrementalNewlineDecoder", ("decoder", "translate", "errors"), 2, args, kwargs))
+
+    def _init(self, decoder, translate, errors='strict'):
         IncrementalDecoder.__init__(self, errors=errors)
         self.translate = translate
         self.decoder = decoder
@@ -826,8 +864,11 @@ class TextIOWrapper(TextIOBase):  # (Sagebrush: io's TextIOBase)
     # The write_through argument has no effect here since this
     # implementation always writes through.  The argument is present only
     # so that the signature can match the signature of the C version.
-    def __init__(self, buffer, encoding=None, errors=None, newline=None,
-                 line_buffering=False, write_through=False):
+    def __init__(self, *args, **kwargs):  # (Sagebrush: C's argument parsing and messages)
+        self._init(**_c_args("TextIOWrapper", ("buffer", "encoding", "errors", "newline", "line_buffering", "write_through"), 1, args, kwargs))
+
+    def _init(self, buffer, encoding=None, errors=None, newline=None,
+              line_buffering=False, write_through=False):
         self._check_newline(newline)
         encoding = text_encoding(encoding)
 
@@ -1271,6 +1312,7 @@ class TextIOWrapper(TextIOBase):  # (Sagebrush: io's TextIOBase)
         return buffer
 
     def seek(self, cookie, whence=0):
+        whence = _c_int_arg(whence)  # (Sagebrush: C's argument conversion, first)
         self._checkAttached()  # (Sagebrush: C's)
         def _reset_encoder(position):
             """Reset the encoder (merely useful for proper BOM handling)"""
@@ -1358,7 +1400,9 @@ class TextIOWrapper(TextIOBase):  # (Sagebrush: io's TextIOBase)
                 # (Sagebrush: C's message)
                 raise TypeError("argument should be integer or None, not '%s'" % type(size).__name__)
             else:
-                size = size_index()
+                size = _index(size)  # (Sagebrush: its __index__ once, the result checked; C's Py_ssize_t)
+                if not -(1 << 63) <= size < (1 << 63):
+                    raise OverflowError("cannot fit 'int' into an index-sized integer")
         decoder = self._decoder or self._get_decoder()
         if size < 0:
             chunk = self.buffer.read()
@@ -1394,13 +1438,10 @@ class TextIOWrapper(TextIOBase):  # (Sagebrush: io's TextIOBase)
         self._checkAttached()  # (Sagebrush: C's)
         if self.closed:
             raise ValueError("read from closed file")
-        # (Sagebrush: C's readline takes an integer, None included in the refusal)
-        try:
-            size_index = size.__index__
-        except AttributeError:
-            raise TypeError("'%s' object cannot be interpreted as an integer" % type(size).__name__)
-        else:
-            size = size_index()
+        # (Sagebrush: C's readline takes an integer, None included in the refusal; __index__ once, checked)
+        size = _index(size)
+        if not -(1 << 63) <= size < (1 << 63):
+            raise OverflowError("Python int too large to convert to C ssize_t")
 
         # Grab all the decoded text (we will rewind any extra bits later).
         line = self._get_decoded_chars()
