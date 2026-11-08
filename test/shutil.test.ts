@@ -47,14 +47,27 @@ test("os: supports_fd and supports_dir_fd empty, dir_fd refused (open, chmod, ut
   ].join("\n"));
 });
 
-test("os.supports_follow_symlinks can be assigned before its first read, as CPython", () => {
-  const code = [
-    "import os",
-    "os.supports_follow_symlinks = 1",
-    "print(os.supports_follow_symlinks, vars(os)['supports_follow_symlinks'])",
-  ].join("\n");
-  const want = execFileSync("python3", ["-c", code], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-  assert.equal(execFileSync(process.execPath, [CLI, "-c", code], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }), want);
+test("os.supports_follow_symlinks has CPython's writable lazy-data lifecycle", () => {
+  const cases = [
+    [
+      "import os",
+      "os.supports_follow_symlinks = 1",
+      "os.supports_follow_symlinks = 2",
+      "print(os.supports_follow_symlinks, 'supports_follow_symlinks' in vars(os))",
+      "del os.supports_follow_symlinks",
+      "print(hasattr(os, 'supports_follow_symlinks'))",
+    ].join("\n"),
+    [
+      "import os",
+      "a = os.supports_follow_symlinks",
+      "print(a is os.supports_follow_symlinks, os.stat in a)",
+      "os.supports_follow_symlinks = 5",
+      "os.supports_follow_symlinks = 6",
+      "print(os.supports_follow_symlinks)",
+    ].join("\n"),
+  ];
+  const run = (cmd: string, prefix: string[], code: string) => execFileSync(cmd, [...prefix, "-c", code], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+  for (const code of cases) assert.equal(run(process.execPath, [CLI], code), run("python3", [], code));
 });
 
 // The web build's fs itself (web/shims/fs.ts, its types stripped and its SHA-256 import stubbed, as file-once.test
