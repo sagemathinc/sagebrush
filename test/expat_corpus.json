@@ -157464,11 +157464,7665 @@ null,
 "sha256": "d91a7f33cb144abc5d76536fd86e49fc6bc15e7afb02f25545a3db88a09c06b3"
 }
 }
+},
+{
+"bytes": false,
+"chunking": "whole",
+"chunks": [
+"<!DOCTYPE r [<!ENTITY x 'ab %'>]><r/>"
+],
+"config": "all",
+"deferral": true,
+"group": "malformed",
+"label": "<!DOCTYPE r [<!ENTITY x 'ab %'>]><r/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": {
+"byte": 28,
+"code": 4,
+"column": 28,
+"line": 1,
+"lineno": 1,
+"msg": "not well-formed (invalid token): line 1, column 28",
+"offset": 28,
+"type": "ExpatError"
+},
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"ED",
+"x",
+0,
+"ab ",
+null,
+null,
+null,
+null
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "unit",
+"chunks": [
+"<",
+"!",
+"D",
+"O",
+"C",
+"T",
+"Y",
+"P",
+"E",
+" ",
+"r",
+" ",
+"[",
+"<",
+"!",
+"E",
+"N",
+"T",
+"I",
+"T",
+"Y",
+" ",
+"x",
+" ",
+"'",
+"a",
+"b",
+" ",
+"%",
+"'",
+">",
+"]",
+">",
+"<",
+"r",
+"/",
+">"
+],
+"config": "all",
+"deferral": true,
+"group": "malformed",
+"label": "<!DOCTYPE r [<!ENTITY x 'ab %'>]><r/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": {
+"byte": 28,
+"code": 4,
+"column": 28,
+"line": 1,
+"lineno": 1,
+"msg": "not well-formed (invalid token): line 1, column 28",
+"offset": 28,
+"type": "ExpatError"
+},
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"P",
+15
+],
+[
+"ED",
+"x",
+0,
+"ab ",
+null,
+null,
+null,
+null
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "unit",
+"chunks": [
+"<",
+"!",
+"D",
+"O",
+"C",
+"T",
+"Y",
+"P",
+"E",
+" ",
+"r",
+" ",
+"[",
+"<",
+"!",
+"E",
+"N",
+"T",
+"I",
+"T",
+"Y",
+" ",
+"x",
+" ",
+"'",
+"a",
+"b",
+" ",
+"%",
+"'",
+">",
+"]",
+">",
+"<",
+"r",
+"/",
+">"
+],
+"config": "all",
+"deferral": false,
+"group": "malformed",
+"label": "<!DOCTYPE r [<!ENTITY x 'ab %'>]><r/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": {
+"byte": 28,
+"code": 4,
+"column": 28,
+"line": 1,
+"lineno": 1,
+"msg": "not well-formed (invalid token): line 1, column 28",
+"offset": 28,
+"type": "ExpatError"
+},
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"P",
+12
+],
+[
+"ED",
+"x",
+0,
+"ab ",
+null,
+null,
+null,
+null
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "seeded",
+"chunks": [
+"<!DOCTYPE",
+" r ",
+"[<!ENTITY x 'ab %",
+"'>]><r/>"
+],
+"config": "all",
+"deferral": true,
+"group": "malformed",
+"label": "<!DOCTYPE r [<!ENTITY x 'ab %'>]><r/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": {
+"byte": 28,
+"code": 4,
+"column": 28,
+"line": 1,
+"lineno": 1,
+"msg": "not well-formed (invalid token): line 1, column 28",
+"offset": 28,
+"type": "ExpatError"
+},
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"P",
+2
+],
+[
+"ED",
+"x",
+0,
+"ab ",
+null,
+null,
+null,
+null
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "seeded",
+"chunks": [
+"<!DOCTYPE",
+" r ",
+"[<!ENTITY x 'ab %",
+"'>]><r/>"
+],
+"config": "all",
+"deferral": false,
+"group": "malformed",
+"label": "<!DOCTYPE r [<!ENTITY x 'ab %'>]><r/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": {
+"byte": 28,
+"code": 4,
+"column": 28,
+"line": 1,
+"lineno": 1,
+"msg": "not well-formed (invalid token): line 1, column 28",
+"offset": 28,
+"type": "ExpatError"
+},
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"P",
+2
+],
+[
+"ED",
+"x",
+0,
+"ab ",
+null,
+null,
+null,
+null
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "whole",
+"chunks": [
+"<!DOCTYPE r [<!ENTITY x 'ab %\"'>]><r/>"
+],
+"config": "all",
+"deferral": true,
+"group": "malformed",
+"label": "<!DOCTYPE r [<!ENTITY x 'ab %\"'>]><r/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": {
+"byte": 29,
+"code": 4,
+"column": 29,
+"line": 1,
+"lineno": 1,
+"msg": "not well-formed (invalid token): line 1, column 29",
+"offset": 29,
+"type": "ExpatError"
+},
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"ED",
+"x",
+0,
+"ab ",
+null,
+null,
+null,
+null
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "unit",
+"chunks": [
+"<",
+"!",
+"D",
+"O",
+"C",
+"T",
+"Y",
+"P",
+"E",
+" ",
+"r",
+" ",
+"[",
+"<",
+"!",
+"E",
+"N",
+"T",
+"I",
+"T",
+"Y",
+" ",
+"x",
+" ",
+"'",
+"a",
+"b",
+" ",
+"%",
+"\"",
+"'",
+">",
+"]",
+">",
+"<",
+"r",
+"/",
+">"
+],
+"config": "all",
+"deferral": true,
+"group": "malformed",
+"label": "<!DOCTYPE r [<!ENTITY x 'ab %\"'>]><r/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": {
+"byte": 29,
+"code": 4,
+"column": 29,
+"line": 1,
+"lineno": 1,
+"msg": "not well-formed (invalid token): line 1, column 29",
+"offset": 29,
+"type": "ExpatError"
+},
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"P",
+15
+],
+[
+"ED",
+"x",
+0,
+"ab ",
+null,
+null,
+null,
+null
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "unit",
+"chunks": [
+"<",
+"!",
+"D",
+"O",
+"C",
+"T",
+"Y",
+"P",
+"E",
+" ",
+"r",
+" ",
+"[",
+"<",
+"!",
+"E",
+"N",
+"T",
+"I",
+"T",
+"Y",
+" ",
+"x",
+" ",
+"'",
+"a",
+"b",
+" ",
+"%",
+"\"",
+"'",
+">",
+"]",
+">",
+"<",
+"r",
+"/",
+">"
+],
+"config": "all",
+"deferral": false,
+"group": "malformed",
+"label": "<!DOCTYPE r [<!ENTITY x 'ab %\"'>]><r/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": {
+"byte": 29,
+"code": 4,
+"column": 29,
+"line": 1,
+"lineno": 1,
+"msg": "not well-formed (invalid token): line 1, column 29",
+"offset": 29,
+"type": "ExpatError"
+},
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"P",
+12
+],
+[
+"ED",
+"x",
+0,
+"ab ",
+null,
+null,
+null,
+null
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "seeded",
+"chunks": [
+"<!DOCTYPE r",
+" [<!",
+"ENT",
+"ITY x 'ab %\"'>]><r/>"
+],
+"config": "all",
+"deferral": true,
+"group": "malformed",
+"label": "<!DOCTYPE r [<!ENTITY x 'ab %\"'>]><r/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": {
+"byte": 29,
+"code": 4,
+"column": 29,
+"line": 1,
+"lineno": 1,
+"msg": "not well-formed (invalid token): line 1, column 29",
+"offset": 29,
+"type": "ExpatError"
+},
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"P",
+1
+],
+[
+"ED",
+"x",
+0,
+"ab ",
+null,
+null,
+null,
+null
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "seeded",
+"chunks": [
+"<!DOCTYPE r",
+" [<!",
+"ENT",
+"ITY x 'ab %\"'>]><r/>"
+],
+"config": "all",
+"deferral": false,
+"group": "malformed",
+"label": "<!DOCTYPE r [<!ENTITY x 'ab %\"'>]><r/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": {
+"byte": 29,
+"code": 4,
+"column": 29,
+"line": 1,
+"lineno": 1,
+"msg": "not well-formed (invalid token): line 1, column 29",
+"offset": 29,
+"type": "ExpatError"
+},
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"P",
+1
+],
+[
+"ED",
+"x",
+0,
+"ab ",
+null,
+null,
+null,
+null
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "whole",
+"chunks": [
+"<!DOCTYPE r [<!ENTITY x 'ab% c'>]><r/>"
+],
+"config": "all",
+"deferral": true,
+"group": "malformed",
+"label": "<!DOCTYPE r [<!ENTITY x 'ab% c'>]><r/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": {
+"byte": 28,
+"code": 4,
+"column": 28,
+"line": 1,
+"lineno": 1,
+"msg": "not well-formed (invalid token): line 1, column 28",
+"offset": 28,
+"type": "ExpatError"
+},
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"ED",
+"x",
+0,
+"ab",
+null,
+null,
+null,
+null
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "unit",
+"chunks": [
+"<",
+"!",
+"D",
+"O",
+"C",
+"T",
+"Y",
+"P",
+"E",
+" ",
+"r",
+" ",
+"[",
+"<",
+"!",
+"E",
+"N",
+"T",
+"I",
+"T",
+"Y",
+" ",
+"x",
+" ",
+"'",
+"a",
+"b",
+"%",
+" ",
+"c",
+"'",
+">",
+"]",
+">",
+"<",
+"r",
+"/",
+">"
+],
+"config": "all",
+"deferral": true,
+"group": "malformed",
+"label": "<!DOCTYPE r [<!ENTITY x 'ab% c'>]><r/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": {
+"byte": 28,
+"code": 4,
+"column": 28,
+"line": 1,
+"lineno": 1,
+"msg": "not well-formed (invalid token): line 1, column 28",
+"offset": 28,
+"type": "ExpatError"
+},
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"P",
+15
+],
+[
+"ED",
+"x",
+0,
+"ab",
+null,
+null,
+null,
+null
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "unit",
+"chunks": [
+"<",
+"!",
+"D",
+"O",
+"C",
+"T",
+"Y",
+"P",
+"E",
+" ",
+"r",
+" ",
+"[",
+"<",
+"!",
+"E",
+"N",
+"T",
+"I",
+"T",
+"Y",
+" ",
+"x",
+" ",
+"'",
+"a",
+"b",
+"%",
+" ",
+"c",
+"'",
+">",
+"]",
+">",
+"<",
+"r",
+"/",
+">"
+],
+"config": "all",
+"deferral": false,
+"group": "malformed",
+"label": "<!DOCTYPE r [<!ENTITY x 'ab% c'>]><r/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": {
+"byte": 28,
+"code": 4,
+"column": 28,
+"line": 1,
+"lineno": 1,
+"msg": "not well-formed (invalid token): line 1, column 28",
+"offset": 28,
+"type": "ExpatError"
+},
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"P",
+12
+],
+[
+"ED",
+"x",
+0,
+"ab",
+null,
+null,
+null,
+null
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "seeded",
+"chunks": [
+"<!DOCT",
+"YPE r ",
+"[<!ENT",
+"ITY x 'ab% c'>]><r/>"
+],
+"config": "all",
+"deferral": true,
+"group": "malformed",
+"label": "<!DOCTYPE r [<!ENTITY x 'ab% c'>]><r/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": {
+"byte": 28,
+"code": 4,
+"column": 28,
+"line": 1,
+"lineno": 1,
+"msg": "not well-formed (invalid token): line 1, column 28",
+"offset": 28,
+"type": "ExpatError"
+},
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"P",
+2
+],
+[
+"ED",
+"x",
+0,
+"ab",
+null,
+null,
+null,
+null
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "seeded",
+"chunks": [
+"<!DOCT",
+"YPE r ",
+"[<!ENT",
+"ITY x 'ab% c'>]><r/>"
+],
+"config": "all",
+"deferral": false,
+"group": "malformed",
+"label": "<!DOCTYPE r [<!ENTITY x 'ab% c'>]><r/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": {
+"byte": 28,
+"code": 4,
+"column": 28,
+"line": 1,
+"lineno": 1,
+"msg": "not well-formed (invalid token): line 1, column 28",
+"offset": 28,
+"type": "ExpatError"
+},
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"P",
+2
+],
+[
+"ED",
+"x",
+0,
+"ab",
+null,
+null,
+null,
+null
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "whole",
+"chunks": [
+"<!DOCTYPE r [<!ENTITY x 'a&#0;b'>]><r/>"
+],
+"config": "all",
+"deferral": true,
+"group": "malformed",
+"label": "<!DOCTYPE r [<!ENTITY x 'a&#0;b'>]><r/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": {
+"byte": 26,
+"code": 14,
+"column": 26,
+"line": 1,
+"lineno": 1,
+"msg": "reference to invalid character number: line 1, column 26",
+"offset": 26,
+"type": "ExpatError"
+},
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"ED",
+"x",
+0,
+"a",
+null,
+null,
+null,
+null
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "unit",
+"chunks": [
+"<",
+"!",
+"D",
+"O",
+"C",
+"T",
+"Y",
+"P",
+"E",
+" ",
+"r",
+" ",
+"[",
+"<",
+"!",
+"E",
+"N",
+"T",
+"I",
+"T",
+"Y",
+" ",
+"x",
+" ",
+"'",
+"a",
+"&",
+"#",
+"0",
+";",
+"b",
+"'",
+">",
+"]",
+">",
+"<",
+"r",
+"/",
+">"
+],
+"config": "all",
+"deferral": true,
+"group": "malformed",
+"label": "<!DOCTYPE r [<!ENTITY x 'a&#0;b'>]><r/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": {
+"byte": 26,
+"code": 14,
+"column": 26,
+"line": 1,
+"lineno": 1,
+"msg": "reference to invalid character number: line 1, column 26",
+"offset": 26,
+"type": "ExpatError"
+},
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"P",
+15
+],
+[
+"ED",
+"x",
+0,
+"a",
+null,
+null,
+null,
+null
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "unit",
+"chunks": [
+"<",
+"!",
+"D",
+"O",
+"C",
+"T",
+"Y",
+"P",
+"E",
+" ",
+"r",
+" ",
+"[",
+"<",
+"!",
+"E",
+"N",
+"T",
+"I",
+"T",
+"Y",
+" ",
+"x",
+" ",
+"'",
+"a",
+"&",
+"#",
+"0",
+";",
+"b",
+"'",
+">",
+"]",
+">",
+"<",
+"r",
+"/",
+">"
+],
+"config": "all",
+"deferral": false,
+"group": "malformed",
+"label": "<!DOCTYPE r [<!ENTITY x 'a&#0;b'>]><r/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": {
+"byte": 26,
+"code": 14,
+"column": 26,
+"line": 1,
+"lineno": 1,
+"msg": "reference to invalid character number: line 1, column 26",
+"offset": 26,
+"type": "ExpatError"
+},
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"P",
+12
+],
+[
+"ED",
+"x",
+0,
+"a",
+null,
+null,
+null,
+null
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "seeded",
+"chunks": [
+"<!DOCT",
+"YPE r [<!E",
+"NTITY ",
+"x 'a&#0;b'>]><r/>"
+],
+"config": "all",
+"deferral": true,
+"group": "malformed",
+"label": "<!DOCTYPE r [<!ENTITY x 'a&#0;b'>]><r/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": {
+"byte": 26,
+"code": 14,
+"column": 26,
+"line": 1,
+"lineno": 1,
+"msg": "reference to invalid character number: line 1, column 26",
+"offset": 26,
+"type": "ExpatError"
+},
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"P",
+1
+],
+[
+"ED",
+"x",
+0,
+"a",
+null,
+null,
+null,
+null
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "seeded",
+"chunks": [
+"<!DOCT",
+"YPE r [<!E",
+"NTITY ",
+"x 'a&#0;b'>]><r/>"
+],
+"config": "all",
+"deferral": false,
+"group": "malformed",
+"label": "<!DOCTYPE r [<!ENTITY x 'a&#0;b'>]><r/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": {
+"byte": 26,
+"code": 14,
+"column": 26,
+"line": 1,
+"lineno": 1,
+"msg": "reference to invalid character number: line 1, column 26",
+"offset": 26,
+"type": "ExpatError"
+},
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"P",
+1
+],
+[
+"ED",
+"x",
+0,
+"a",
+null,
+null,
+null,
+null
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "whole",
+"chunks": [
+"<!DOCTYPE r [<!ENTITY x 'ab\r\n%p;'>]><r/>"
+],
+"config": "all",
+"deferral": true,
+"group": "malformed",
+"label": "<!DOCTYPE r [<!ENTITY x 'ab\r\n%p;'>]><r/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": {
+"byte": 29,
+"code": 10,
+"column": 0,
+"line": 2,
+"lineno": 2,
+"msg": "illegal parameter entity reference: line 2, column 0",
+"offset": 0,
+"type": "ExpatError"
+},
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"ED",
+"x",
+0,
+"ab\n",
+null,
+null,
+null,
+null
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "unit",
+"chunks": [
+"<",
+"!",
+"D",
+"O",
+"C",
+"T",
+"Y",
+"P",
+"E",
+" ",
+"r",
+" ",
+"[",
+"<",
+"!",
+"E",
+"N",
+"T",
+"I",
+"T",
+"Y",
+" ",
+"x",
+" ",
+"'",
+"a",
+"b",
+"\r",
+"\n",
+"%",
+"p",
+";",
+"'",
+">",
+"]",
+">",
+"<",
+"r",
+"/",
+">"
+],
+"config": "all",
+"deferral": true,
+"group": "malformed",
+"label": "<!DOCTYPE r [<!ENTITY x 'ab\r\n%p;'>]><r/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": {
+"byte": 29,
+"code": 10,
+"column": 0,
+"line": 2,
+"lineno": 2,
+"msg": "illegal parameter entity reference: line 2, column 0",
+"offset": 0,
+"type": "ExpatError"
+},
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"P",
+15
+],
+[
+"ED",
+"x",
+0,
+"ab\n",
+null,
+null,
+null,
+null
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "unit",
+"chunks": [
+"<",
+"!",
+"D",
+"O",
+"C",
+"T",
+"Y",
+"P",
+"E",
+" ",
+"r",
+" ",
+"[",
+"<",
+"!",
+"E",
+"N",
+"T",
+"I",
+"T",
+"Y",
+" ",
+"x",
+" ",
+"'",
+"a",
+"b",
+"\r",
+"\n",
+"%",
+"p",
+";",
+"'",
+">",
+"]",
+">",
+"<",
+"r",
+"/",
+">"
+],
+"config": "all",
+"deferral": false,
+"group": "malformed",
+"label": "<!DOCTYPE r [<!ENTITY x 'ab\r\n%p;'>]><r/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": {
+"byte": 29,
+"code": 10,
+"column": 0,
+"line": 2,
+"lineno": 2,
+"msg": "illegal parameter entity reference: line 2, column 0",
+"offset": 0,
+"type": "ExpatError"
+},
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"P",
+12
+],
+[
+"ED",
+"x",
+0,
+"ab\n",
+null,
+null,
+null,
+null
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "seeded",
+"chunks": [
+"<!DOCTYPE r ",
+"[<!ENTITY x 'ab",
+"\r\n%p;'>]><r/",
+">"
+],
+"config": "all",
+"deferral": true,
+"group": "malformed",
+"label": "<!DOCTYPE r [<!ENTITY x 'ab\r\n%p;'>]><r/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": {
+"byte": 29,
+"code": 10,
+"column": 0,
+"line": 2,
+"lineno": 2,
+"msg": "illegal parameter entity reference: line 2, column 0",
+"offset": 0,
+"type": "ExpatError"
+},
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"P",
+1
+],
+[
+"ED",
+"x",
+0,
+"ab\n",
+null,
+null,
+null,
+null
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "seeded",
+"chunks": [
+"<!DOCTYPE r ",
+"[<!ENTITY x 'ab",
+"\r\n%p;'>]><r/",
+">"
+],
+"config": "all",
+"deferral": false,
+"group": "malformed",
+"label": "<!DOCTYPE r [<!ENTITY x 'ab\r\n%p;'>]><r/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": {
+"byte": 29,
+"code": 10,
+"column": 0,
+"line": 2,
+"lineno": 2,
+"msg": "illegal parameter entity reference: line 2, column 0",
+"offset": 0,
+"type": "ExpatError"
+},
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"P",
+1
+],
+[
+"ED",
+"x",
+0,
+"ab\n",
+null,
+null,
+null,
+null
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "whole",
+"chunks": [
+"<!DOCTYPE r [<!ENTITY % p 'ab %q;'>]><r/>"
+],
+"config": "all",
+"deferral": true,
+"group": "malformed",
+"label": "<!DOCTYPE r [<!ENTITY % p 'ab %q;'>]><r/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": {
+"byte": 30,
+"code": 10,
+"column": 30,
+"line": 1,
+"lineno": 1,
+"msg": "illegal parameter entity reference: line 1, column 30",
+"offset": 30,
+"type": "ExpatError"
+},
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"ED",
+"p",
+1,
+"ab ",
+null,
+null,
+null,
+null
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "unit",
+"chunks": [
+"<",
+"!",
+"D",
+"O",
+"C",
+"T",
+"Y",
+"P",
+"E",
+" ",
+"r",
+" ",
+"[",
+"<",
+"!",
+"E",
+"N",
+"T",
+"I",
+"T",
+"Y",
+" ",
+"%",
+" ",
+"p",
+" ",
+"'",
+"a",
+"b",
+" ",
+"%",
+"q",
+";",
+"'",
+">",
+"]",
+">",
+"<",
+"r",
+"/",
+">"
+],
+"config": "all",
+"deferral": true,
+"group": "malformed",
+"label": "<!DOCTYPE r [<!ENTITY % p 'ab %q;'>]><r/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": {
+"byte": 30,
+"code": 10,
+"column": 30,
+"line": 1,
+"lineno": 1,
+"msg": "illegal parameter entity reference: line 1, column 30",
+"offset": 30,
+"type": "ExpatError"
+},
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"P",
+15
+],
+[
+"ED",
+"p",
+1,
+"ab ",
+null,
+null,
+null,
+null
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "unit",
+"chunks": [
+"<",
+"!",
+"D",
+"O",
+"C",
+"T",
+"Y",
+"P",
+"E",
+" ",
+"r",
+" ",
+"[",
+"<",
+"!",
+"E",
+"N",
+"T",
+"I",
+"T",
+"Y",
+" ",
+"%",
+" ",
+"p",
+" ",
+"'",
+"a",
+"b",
+" ",
+"%",
+"q",
+";",
+"'",
+">",
+"]",
+">",
+"<",
+"r",
+"/",
+">"
+],
+"config": "all",
+"deferral": false,
+"group": "malformed",
+"label": "<!DOCTYPE r [<!ENTITY % p 'ab %q;'>]><r/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": {
+"byte": 30,
+"code": 10,
+"column": 30,
+"line": 1,
+"lineno": 1,
+"msg": "illegal parameter entity reference: line 1, column 30",
+"offset": 30,
+"type": "ExpatError"
+},
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"P",
+12
+],
+[
+"ED",
+"p",
+1,
+"ab ",
+null,
+null,
+null,
+null
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "seeded",
+"chunks": [
+"<",
+"!DOCTYPE r [<!ENTITY % p 'a",
+"b %q;'>]><",
+"r/>"
+],
+"config": "all",
+"deferral": true,
+"group": "malformed",
+"label": "<!DOCTYPE r [<!ENTITY % p 'ab %q;'>]><r/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": {
+"byte": 30,
+"code": 10,
+"column": 30,
+"line": 1,
+"lineno": 1,
+"msg": "illegal parameter entity reference: line 1, column 30",
+"offset": 30,
+"type": "ExpatError"
+},
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"P",
+1
+],
+[
+"ED",
+"p",
+1,
+"ab ",
+null,
+null,
+null,
+null
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "seeded",
+"chunks": [
+"<",
+"!DOCTYPE r [<!ENTITY % p 'a",
+"b %q;'>]><",
+"r/>"
+],
+"config": "all",
+"deferral": false,
+"group": "malformed",
+"label": "<!DOCTYPE r [<!ENTITY % p 'ab %q;'>]><r/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": {
+"byte": 30,
+"code": 10,
+"column": 30,
+"line": 1,
+"lineno": 1,
+"msg": "illegal parameter entity reference: line 1, column 30",
+"offset": 30,
+"type": "ExpatError"
+},
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"P",
+1
+],
+[
+"ED",
+"p",
+1,
+"ab ",
+null,
+null,
+null,
+null
+]
+]
+}
+},
+{
+"bytes": true,
+"chunking": "whole",
+"chunks": [
+"3c723e615dc3a95d5dc3a95d0dc3a90d0a3c2f723e"
+],
+"config": "et",
+"deferral": true,
+"group": "encoded",
+"label": "] before a split character",
+"options": {
+"buffer_text": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": null,
+"events": [
+[
+"SE",
+"r",
+[]
+],
+[
+"CD",
+"a]\u00e9]]\u00e9]\n\u00e9\n"
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+0
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": true,
+"chunking": "unit",
+"chunks": [
+"3c",
+"72",
+"3e",
+"61",
+"5d",
+"c3",
+"a9",
+"5d",
+"5d",
+"c3",
+"a9",
+"5d",
+"0d",
+"c3",
+"a9",
+"0d",
+"0a",
+"3c",
+"2f",
+"72",
+"3e"
+],
+"config": "et",
+"deferral": true,
+"group": "encoded",
+"label": "] before a split character",
+"options": {
+"buffer_text": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": null,
+"events": [
+[
+"SE",
+"r",
+[]
+],
+[
+"CD",
+"a"
+],
+[
+"P",
+3
+],
+[
+"CD",
+"]"
+],
+[
+"P",
+5
+],
+[
+"CD",
+"\u00e9"
+],
+[
+"P",
+6
+],
+[
+"CD",
+"]]\u00e9"
+],
+[
+"P",
+10
+],
+[
+"CD",
+"]"
+],
+[
+"P",
+12
+],
+[
+"CD",
+"\n"
+],
+[
+"P",
+13
+],
+[
+"CD",
+"\u00e9"
+],
+[
+"P",
+14
+],
+[
+"CD",
+"\n"
+],
+[
+"P",
+16
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+20
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": true,
+"chunking": "unit",
+"chunks": [
+"3c",
+"72",
+"3e",
+"61",
+"5d",
+"c3",
+"a9",
+"5d",
+"5d",
+"c3",
+"a9",
+"5d",
+"0d",
+"c3",
+"a9",
+"0d",
+"0a",
+"3c",
+"2f",
+"72",
+"3e"
+],
+"config": "et",
+"deferral": false,
+"group": "encoded",
+"label": "] before a split character",
+"options": {
+"buffer_text": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": null,
+"events": [
+[
+"SE",
+"r",
+[]
+],
+[
+"P",
+2
+],
+[
+"CD",
+"a"
+],
+[
+"P",
+3
+],
+[
+"CD",
+"]"
+],
+[
+"P",
+5
+],
+[
+"CD",
+"\u00e9"
+],
+[
+"P",
+6
+],
+[
+"CD",
+"]]"
+],
+[
+"P",
+9
+],
+[
+"CD",
+"\u00e9"
+],
+[
+"P",
+10
+],
+[
+"CD",
+"]"
+],
+[
+"P",
+12
+],
+[
+"CD",
+"\n"
+],
+[
+"P",
+13
+],
+[
+"CD",
+"\u00e9"
+],
+[
+"P",
+14
+],
+[
+"CD",
+"\n"
+],
+[
+"P",
+16
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+20
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": true,
+"chunking": "seeded",
+"chunks": [
+"3c72",
+"3e615dc3a95d5dc3a95d0dc3a9",
+"0d0a3c",
+"2f723e"
+],
+"config": "et",
+"deferral": true,
+"group": "encoded",
+"label": "] before a split character",
+"options": {
+"buffer_text": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": null,
+"events": [
+[
+"SE",
+"r",
+[]
+],
+[
+"CD",
+"a]\u00e9]]\u00e9]\n\u00e9"
+],
+[
+"P",
+1
+],
+[
+"CD",
+"\n"
+],
+[
+"P",
+2
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+3
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": true,
+"chunking": "seeded",
+"chunks": [
+"3c72",
+"3e615dc3a95d5dc3a95d0dc3a9",
+"0d0a3c",
+"2f723e"
+],
+"config": "et",
+"deferral": false,
+"group": "encoded",
+"label": "] before a split character",
+"options": {
+"buffer_text": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": null,
+"events": [
+[
+"SE",
+"r",
+[]
+],
+[
+"CD",
+"a]\u00e9]]\u00e9]\n\u00e9"
+],
+[
+"P",
+1
+],
+[
+"CD",
+"\n"
+],
+[
+"P",
+2
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+3
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": true,
+"chunking": "whole",
+"chunks": [
+"3c723e615dc3a95d5dc3a95d0dc3a90d0a3c2f723e"
+],
+"config": "raw",
+"deferral": true,
+"group": "encoded",
+"label": "] before a split character",
+"options": {
+"buffer_text": false,
+"ordered": false,
+"sep": null
+},
+"result": {
+"error": null,
+"events": [
+[
+"SE",
+"r",
+[]
+],
+[
+"CD",
+"a]\u00e9]]\u00e9]"
+],
+[
+"CD",
+"\n"
+],
+[
+"CD",
+"\u00e9"
+],
+[
+"CD",
+"\n"
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+0
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": true,
+"chunking": "unit",
+"chunks": [
+"3c",
+"72",
+"3e",
+"61",
+"5d",
+"c3",
+"a9",
+"5d",
+"5d",
+"c3",
+"a9",
+"5d",
+"0d",
+"c3",
+"a9",
+"0d",
+"0a",
+"3c",
+"2f",
+"72",
+"3e"
+],
+"config": "raw",
+"deferral": true,
+"group": "encoded",
+"label": "] before a split character",
+"options": {
+"buffer_text": false,
+"ordered": false,
+"sep": null
+},
+"result": {
+"error": null,
+"events": [
+[
+"SE",
+"r",
+[]
+],
+[
+"CD",
+"a"
+],
+[
+"P",
+3
+],
+[
+"CD",
+"]"
+],
+[
+"P",
+5
+],
+[
+"CD",
+"\u00e9"
+],
+[
+"P",
+6
+],
+[
+"CD",
+"]]\u00e9"
+],
+[
+"P",
+10
+],
+[
+"CD",
+"]"
+],
+[
+"P",
+12
+],
+[
+"CD",
+"\n"
+],
+[
+"P",
+13
+],
+[
+"CD",
+"\u00e9"
+],
+[
+"P",
+14
+],
+[
+"CD",
+"\n"
+],
+[
+"P",
+16
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+20
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": true,
+"chunking": "unit",
+"chunks": [
+"3c",
+"72",
+"3e",
+"61",
+"5d",
+"c3",
+"a9",
+"5d",
+"5d",
+"c3",
+"a9",
+"5d",
+"0d",
+"c3",
+"a9",
+"0d",
+"0a",
+"3c",
+"2f",
+"72",
+"3e"
+],
+"config": "raw",
+"deferral": false,
+"group": "encoded",
+"label": "] before a split character",
+"options": {
+"buffer_text": false,
+"ordered": false,
+"sep": null
+},
+"result": {
+"error": null,
+"events": [
+[
+"SE",
+"r",
+[]
+],
+[
+"P",
+2
+],
+[
+"CD",
+"a"
+],
+[
+"P",
+3
+],
+[
+"CD",
+"]"
+],
+[
+"P",
+5
+],
+[
+"CD",
+"\u00e9"
+],
+[
+"P",
+6
+],
+[
+"CD",
+"]]"
+],
+[
+"P",
+9
+],
+[
+"CD",
+"\u00e9"
+],
+[
+"P",
+10
+],
+[
+"CD",
+"]"
+],
+[
+"P",
+12
+],
+[
+"CD",
+"\n"
+],
+[
+"P",
+13
+],
+[
+"CD",
+"\u00e9"
+],
+[
+"P",
+14
+],
+[
+"CD",
+"\n"
+],
+[
+"P",
+16
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+20
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": true,
+"chunking": "seeded",
+"chunks": [
+"3c723e61",
+"5dc3a95d",
+"5dc3a95d",
+"0dc3a90d0a3c2f723e"
+],
+"config": "raw",
+"deferral": true,
+"group": "encoded",
+"label": "] before a split character",
+"options": {
+"buffer_text": false,
+"ordered": false,
+"sep": null
+},
+"result": {
+"error": null,
+"events": [
+[
+"SE",
+"r",
+[]
+],
+[
+"CD",
+"a"
+],
+[
+"P",
+0
+],
+[
+"CD",
+"]\u00e9"
+],
+[
+"P",
+1
+],
+[
+"CD",
+"]]\u00e9"
+],
+[
+"P",
+2
+],
+[
+"CD",
+"]"
+],
+[
+"CD",
+"\n"
+],
+[
+"CD",
+"\u00e9"
+],
+[
+"CD",
+"\n"
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+3
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": true,
+"chunking": "seeded",
+"chunks": [
+"3c723e61",
+"5dc3a95d",
+"5dc3a95d",
+"0dc3a90d0a3c2f723e"
+],
+"config": "raw",
+"deferral": false,
+"group": "encoded",
+"label": "] before a split character",
+"options": {
+"buffer_text": false,
+"ordered": false,
+"sep": null
+},
+"result": {
+"error": null,
+"events": [
+[
+"SE",
+"r",
+[]
+],
+[
+"CD",
+"a"
+],
+[
+"P",
+0
+],
+[
+"CD",
+"]\u00e9"
+],
+[
+"P",
+1
+],
+[
+"CD",
+"]]\u00e9"
+],
+[
+"P",
+2
+],
+[
+"CD",
+"]"
+],
+[
+"CD",
+"\n"
+],
+[
+"CD",
+"\u00e9"
+],
+[
+"CD",
+"\n"
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+3
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": true,
+"chunking": "whole",
+"chunks": [
+"3c723e3c215b43444154415b5dc3a95d5dc3a95d5d5dc3a95d5d3e3c2f723e"
+],
+"config": "et",
+"deferral": true,
+"group": "encoded",
+"label": "] in CDATA before a split character",
+"options": {
+"buffer_text": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": null,
+"events": [
+[
+"SE",
+"r",
+[]
+],
+[
+"DH",
+"<![CDATA["
+],
+[
+"CD",
+"]\u00e9]]\u00e9]]]\u00e9"
+],
+[
+"DH",
+"]]>"
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+0
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": true,
+"chunking": "unit",
+"chunks": [
+"3c",
+"72",
+"3e",
+"3c",
+"21",
+"5b",
+"43",
+"44",
+"41",
+"54",
+"41",
+"5b",
+"5d",
+"c3",
+"a9",
+"5d",
+"5d",
+"c3",
+"a9",
+"5d",
+"5d",
+"5d",
+"c3",
+"a9",
+"5d",
+"5d",
+"3e",
+"3c",
+"2f",
+"72",
+"3e"
+],
+"config": "et",
+"deferral": true,
+"group": "encoded",
+"label": "] in CDATA before a split character",
+"options": {
+"buffer_text": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": null,
+"events": [
+[
+"SE",
+"r",
+[]
+],
+[
+"P",
+3
+],
+[
+"DH",
+"<![CDATA["
+],
+[
+"CD",
+"]\u00e9]]\u00e9"
+],
+[
+"P",
+18
+],
+[
+"CD",
+"]]]"
+],
+[
+"P",
+22
+],
+[
+"CD",
+"\u00e9"
+],
+[
+"P",
+23
+],
+[
+"DH",
+"]]>"
+],
+[
+"P",
+27
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+30
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": true,
+"chunking": "unit",
+"chunks": [
+"3c",
+"72",
+"3e",
+"3c",
+"21",
+"5b",
+"43",
+"44",
+"41",
+"54",
+"41",
+"5b",
+"5d",
+"c3",
+"a9",
+"5d",
+"5d",
+"c3",
+"a9",
+"5d",
+"5d",
+"5d",
+"c3",
+"a9",
+"5d",
+"5d",
+"3e",
+"3c",
+"2f",
+"72",
+"3e"
+],
+"config": "et",
+"deferral": false,
+"group": "encoded",
+"label": "] in CDATA before a split character",
+"options": {
+"buffer_text": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": null,
+"events": [
+[
+"SE",
+"r",
+[]
+],
+[
+"P",
+2
+],
+[
+"DH",
+"<![CDATA["
+],
+[
+"P",
+11
+],
+[
+"CD",
+"]"
+],
+[
+"P",
+13
+],
+[
+"CD",
+"\u00e9"
+],
+[
+"P",
+14
+],
+[
+"CD",
+"]]"
+],
+[
+"P",
+17
+],
+[
+"CD",
+"\u00e9"
+],
+[
+"P",
+18
+],
+[
+"CD",
+"]"
+],
+[
+"P",
+21
+],
+[
+"CD",
+"]]"
+],
+[
+"P",
+22
+],
+[
+"CD",
+"\u00e9"
+],
+[
+"P",
+23
+],
+[
+"DH",
+"]]>"
+],
+[
+"P",
+26
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+30
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": true,
+"chunking": "seeded",
+"chunks": [
+"3c",
+"723e3c215b43444154415b5dc3a95d5dc3a95d5d",
+"5dc3a95d5d3e3c2f",
+"723e"
+],
+"config": "et",
+"deferral": true,
+"group": "encoded",
+"label": "] in CDATA before a split character",
+"options": {
+"buffer_text": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": null,
+"events": [
+[
+"SE",
+"r",
+[]
+],
+[
+"DH",
+"<![CDATA["
+],
+[
+"CD",
+"]\u00e9]]\u00e9"
+],
+[
+"P",
+1
+],
+[
+"CD",
+"]]]\u00e9"
+],
+[
+"DH",
+"]]>"
+],
+[
+"P",
+2
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+3
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": true,
+"chunking": "seeded",
+"chunks": [
+"3c",
+"723e3c215b43444154415b5dc3a95d5dc3a95d5d",
+"5dc3a95d5d3e3c2f",
+"723e"
+],
+"config": "et",
+"deferral": false,
+"group": "encoded",
+"label": "] in CDATA before a split character",
+"options": {
+"buffer_text": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": null,
+"events": [
+[
+"SE",
+"r",
+[]
+],
+[
+"DH",
+"<![CDATA["
+],
+[
+"CD",
+"]\u00e9]]\u00e9"
+],
+[
+"P",
+1
+],
+[
+"CD",
+"]]]\u00e9"
+],
+[
+"DH",
+"]]>"
+],
+[
+"P",
+2
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+3
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": true,
+"chunking": "whole",
+"chunks": [
+"3c723e3c215b43444154415b5dc3a95d5dc3a95d5d5dc3a95d5d3e3c2f723e"
+],
+"config": "raw",
+"deferral": true,
+"group": "encoded",
+"label": "] in CDATA before a split character",
+"options": {
+"buffer_text": false,
+"ordered": false,
+"sep": null
+},
+"result": {
+"error": null,
+"events": [
+[
+"SE",
+"r",
+[]
+],
+[
+"DH",
+"<![CDATA["
+],
+[
+"CD",
+"]\u00e9"
+],
+[
+"CD",
+"]"
+],
+[
+"CD",
+"]\u00e9"
+],
+[
+"CD",
+"]"
+],
+[
+"CD",
+"]"
+],
+[
+"CD",
+"]\u00e9"
+],
+[
+"DH",
+"]]>"
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+0
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": true,
+"chunking": "unit",
+"chunks": [
+"3c",
+"72",
+"3e",
+"3c",
+"21",
+"5b",
+"43",
+"44",
+"41",
+"54",
+"41",
+"5b",
+"5d",
+"c3",
+"a9",
+"5d",
+"5d",
+"c3",
+"a9",
+"5d",
+"5d",
+"5d",
+"c3",
+"a9",
+"5d",
+"5d",
+"3e",
+"3c",
+"2f",
+"72",
+"3e"
+],
+"config": "raw",
+"deferral": true,
+"group": "encoded",
+"label": "] in CDATA before a split character",
+"options": {
+"buffer_text": false,
+"ordered": false,
+"sep": null
+},
+"result": {
+"error": null,
+"events": [
+[
+"SE",
+"r",
+[]
+],
+[
+"P",
+3
+],
+[
+"DH",
+"<![CDATA["
+],
+[
+"CD",
+"]\u00e9"
+],
+[
+"CD",
+"]"
+],
+[
+"CD",
+"]\u00e9"
+],
+[
+"P",
+18
+],
+[
+"CD",
+"]"
+],
+[
+"CD",
+"]"
+],
+[
+"CD",
+"]"
+],
+[
+"P",
+22
+],
+[
+"CD",
+"\u00e9"
+],
+[
+"P",
+23
+],
+[
+"DH",
+"]]>"
+],
+[
+"P",
+27
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+30
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": true,
+"chunking": "unit",
+"chunks": [
+"3c",
+"72",
+"3e",
+"3c",
+"21",
+"5b",
+"43",
+"44",
+"41",
+"54",
+"41",
+"5b",
+"5d",
+"c3",
+"a9",
+"5d",
+"5d",
+"c3",
+"a9",
+"5d",
+"5d",
+"5d",
+"c3",
+"a9",
+"5d",
+"5d",
+"3e",
+"3c",
+"2f",
+"72",
+"3e"
+],
+"config": "raw",
+"deferral": false,
+"group": "encoded",
+"label": "] in CDATA before a split character",
+"options": {
+"buffer_text": false,
+"ordered": false,
+"sep": null
+},
+"result": {
+"error": null,
+"events": [
+[
+"SE",
+"r",
+[]
+],
+[
+"P",
+2
+],
+[
+"DH",
+"<![CDATA["
+],
+[
+"P",
+11
+],
+[
+"CD",
+"]"
+],
+[
+"P",
+13
+],
+[
+"CD",
+"\u00e9"
+],
+[
+"P",
+14
+],
+[
+"CD",
+"]"
+],
+[
+"CD",
+"]"
+],
+[
+"P",
+17
+],
+[
+"CD",
+"\u00e9"
+],
+[
+"P",
+18
+],
+[
+"CD",
+"]"
+],
+[
+"P",
+21
+],
+[
+"CD",
+"]"
+],
+[
+"CD",
+"]"
+],
+[
+"P",
+22
+],
+[
+"CD",
+"\u00e9"
+],
+[
+"P",
+23
+],
+[
+"DH",
+"]]>"
+],
+[
+"P",
+26
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+30
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": true,
+"chunking": "seeded",
+"chunks": [
+"3c723e3c215b4344415441",
+"5b",
+"5dc3a95d5dc3a95d",
+"5d5dc3a95d5d3e3c2f723e"
+],
+"config": "raw",
+"deferral": true,
+"group": "encoded",
+"label": "] in CDATA before a split character",
+"options": {
+"buffer_text": false,
+"ordered": false,
+"sep": null
+},
+"result": {
+"error": null,
+"events": [
+[
+"SE",
+"r",
+[]
+],
+[
+"P",
+0
+],
+[
+"DH",
+"<![CDATA["
+],
+[
+"P",
+1
+],
+[
+"CD",
+"]\u00e9"
+],
+[
+"CD",
+"]"
+],
+[
+"CD",
+"]\u00e9"
+],
+[
+"P",
+2
+],
+[
+"CD",
+"]"
+],
+[
+"CD",
+"]"
+],
+[
+"CD",
+"]\u00e9"
+],
+[
+"DH",
+"]]>"
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+3
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": true,
+"chunking": "seeded",
+"chunks": [
+"3c723e3c215b4344415441",
+"5b",
+"5dc3a95d5dc3a95d",
+"5d5dc3a95d5d3e3c2f723e"
+],
+"config": "raw",
+"deferral": false,
+"group": "encoded",
+"label": "] in CDATA before a split character",
+"options": {
+"buffer_text": false,
+"ordered": false,
+"sep": null
+},
+"result": {
+"error": null,
+"events": [
+[
+"SE",
+"r",
+[]
+],
+[
+"P",
+0
+],
+[
+"DH",
+"<![CDATA["
+],
+[
+"P",
+1
+],
+[
+"CD",
+"]\u00e9"
+],
+[
+"CD",
+"]"
+],
+[
+"CD",
+"]\u00e9"
+],
+[
+"P",
+2
+],
+[
+"CD",
+"]"
+],
+[
+"CD",
+"]"
+],
+[
+"CD",
+"]\u00e9"
+],
+[
+"DH",
+"]]>"
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+3
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": true,
+"chunking": "whole",
+"chunks": [
+"fffe3c0072003e005d003dd800de5d005d003dd800de0d003dd800de3c002f0072003e00"
+],
+"config": "et",
+"deferral": true,
+"group": "encoded",
+"label": "] before a split utf-16 pair",
+"options": {
+"buffer_text": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": null,
+"events": [
+[
+"SE",
+"r",
+[]
+],
+[
+"CD",
+"]\ud83d\ude00]]\ud83d\ude00\n\ud83d\ude00"
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+0
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": true,
+"chunking": "unit",
+"chunks": [
+"ff",
+"fe",
+"3c",
+"00",
+"72",
+"00",
+"3e",
+"00",
+"5d",
+"00",
+"3d",
+"d8",
+"00",
+"de",
+"5d",
+"00",
+"5d",
+"00",
+"3d",
+"d8",
+"00",
+"de",
+"0d",
+"00",
+"3d",
+"d8",
+"00",
+"de",
+"3c",
+"00",
+"2f",
+"00",
+"72",
+"00",
+"3e",
+"00"
+],
+"config": "et",
+"deferral": true,
+"group": "encoded",
+"label": "] before a split utf-16 pair",
+"options": {
+"buffer_text": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": null,
+"events": [
+[
+"SE",
+"r",
+[]
+],
+[
+"P",
+9
+],
+[
+"CD",
+"]\ud83d\ude00"
+],
+[
+"P",
+13
+],
+[
+"CD",
+"]]\ud83d\ude00"
+],
+[
+"P",
+21
+],
+[
+"CD",
+"\n"
+],
+[
+"P",
+25
+],
+[
+"CD",
+"\ud83d\ude00"
+],
+[
+"P",
+29
+],
+[
+"EE",
+"r"
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": true,
+"chunking": "unit",
+"chunks": [
+"ff",
+"fe",
+"3c",
+"00",
+"72",
+"00",
+"3e",
+"00",
+"5d",
+"00",
+"3d",
+"d8",
+"00",
+"de",
+"5d",
+"00",
+"5d",
+"00",
+"3d",
+"d8",
+"00",
+"de",
+"0d",
+"00",
+"3d",
+"d8",
+"00",
+"de",
+"3c",
+"00",
+"2f",
+"00",
+"72",
+"00",
+"3e",
+"00"
+],
+"config": "et",
+"deferral": false,
+"group": "encoded",
+"label": "] before a split utf-16 pair",
+"options": {
+"buffer_text": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": null,
+"events": [
+[
+"SE",
+"r",
+[]
+],
+[
+"P",
+7
+],
+[
+"CD",
+"]"
+],
+[
+"P",
+11
+],
+[
+"CD",
+"\ud83d\ude00"
+],
+[
+"P",
+13
+],
+[
+"CD",
+"]]"
+],
+[
+"P",
+19
+],
+[
+"CD",
+"\ud83d\ude00"
+],
+[
+"P",
+21
+],
+[
+"CD",
+"\n"
+],
+[
+"P",
+25
+],
+[
+"CD",
+"\ud83d\ude00"
+],
+[
+"P",
+27
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+35
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": true,
+"chunking": "seeded",
+"chunks": [
+"fffe3c0072003e",
+"005d003d",
+"d800de5d005d003dd800de0d003dd800de3c002f0072003e",
+"00"
+],
+"config": "et",
+"deferral": true,
+"group": "encoded",
+"label": "] before a split utf-16 pair",
+"options": {
+"buffer_text": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": null,
+"events": [
+[
+"SE",
+"r",
+[]
+],
+[
+"P",
+1
+],
+[
+"CD",
+"]\ud83d\ude00]]\ud83d\ude00\n\ud83d\ude00"
+],
+[
+"P",
+2
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+3
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": true,
+"chunking": "seeded",
+"chunks": [
+"fffe3c0072003e",
+"005d003d",
+"d800de5d005d003dd800de0d003dd800de3c002f0072003e",
+"00"
+],
+"config": "et",
+"deferral": false,
+"group": "encoded",
+"label": "] before a split utf-16 pair",
+"options": {
+"buffer_text": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": null,
+"events": [
+[
+"SE",
+"r",
+[]
+],
+[
+"P",
+1
+],
+[
+"CD",
+"]\ud83d\ude00]]\ud83d\ude00\n\ud83d\ude00"
+],
+[
+"P",
+2
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+3
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": true,
+"chunking": "whole",
+"chunks": [
+"fffe3c0072003e005d003dd800de5d005d003dd800de0d003dd800de3c002f0072003e00"
+],
+"config": "raw",
+"deferral": true,
+"group": "encoded",
+"label": "] before a split utf-16 pair",
+"options": {
+"buffer_text": false,
+"ordered": false,
+"sep": null
+},
+"result": {
+"error": null,
+"events": [
+[
+"SE",
+"r",
+[]
+],
+[
+"CD",
+"]\ud83d\ude00]]\ud83d\ude00"
+],
+[
+"CD",
+"\n"
+],
+[
+"CD",
+"\ud83d\ude00"
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+0
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": true,
+"chunking": "unit",
+"chunks": [
+"ff",
+"fe",
+"3c",
+"00",
+"72",
+"00",
+"3e",
+"00",
+"5d",
+"00",
+"3d",
+"d8",
+"00",
+"de",
+"5d",
+"00",
+"5d",
+"00",
+"3d",
+"d8",
+"00",
+"de",
+"0d",
+"00",
+"3d",
+"d8",
+"00",
+"de",
+"3c",
+"00",
+"2f",
+"00",
+"72",
+"00",
+"3e",
+"00"
+],
+"config": "raw",
+"deferral": true,
+"group": "encoded",
+"label": "] before a split utf-16 pair",
+"options": {
+"buffer_text": false,
+"ordered": false,
+"sep": null
+},
+"result": {
+"error": null,
+"events": [
+[
+"SE",
+"r",
+[]
+],
+[
+"P",
+9
+],
+[
+"CD",
+"]\ud83d\ude00"
+],
+[
+"P",
+13
+],
+[
+"CD",
+"]]\ud83d\ude00"
+],
+[
+"P",
+21
+],
+[
+"CD",
+"\n"
+],
+[
+"P",
+25
+],
+[
+"CD",
+"\ud83d\ude00"
+],
+[
+"P",
+29
+],
+[
+"EE",
+"r"
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": true,
+"chunking": "unit",
+"chunks": [
+"ff",
+"fe",
+"3c",
+"00",
+"72",
+"00",
+"3e",
+"00",
+"5d",
+"00",
+"3d",
+"d8",
+"00",
+"de",
+"5d",
+"00",
+"5d",
+"00",
+"3d",
+"d8",
+"00",
+"de",
+"0d",
+"00",
+"3d",
+"d8",
+"00",
+"de",
+"3c",
+"00",
+"2f",
+"00",
+"72",
+"00",
+"3e",
+"00"
+],
+"config": "raw",
+"deferral": false,
+"group": "encoded",
+"label": "] before a split utf-16 pair",
+"options": {
+"buffer_text": false,
+"ordered": false,
+"sep": null
+},
+"result": {
+"error": null,
+"events": [
+[
+"SE",
+"r",
+[]
+],
+[
+"P",
+7
+],
+[
+"CD",
+"]"
+],
+[
+"P",
+11
+],
+[
+"CD",
+"\ud83d\ude00"
+],
+[
+"P",
+13
+],
+[
+"CD",
+"]]"
+],
+[
+"P",
+19
+],
+[
+"CD",
+"\ud83d\ude00"
+],
+[
+"P",
+21
+],
+[
+"CD",
+"\n"
+],
+[
+"P",
+25
+],
+[
+"CD",
+"\ud83d\ude00"
+],
+[
+"P",
+27
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+35
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": true,
+"chunking": "seeded",
+"chunks": [
+"fffe3c0072003e005d003dd800de",
+"5d005d003dd800de0d",
+"00",
+"3dd800de3c002f0072003e00"
+],
+"config": "raw",
+"deferral": true,
+"group": "encoded",
+"label": "] before a split utf-16 pair",
+"options": {
+"buffer_text": false,
+"ordered": false,
+"sep": null
+},
+"result": {
+"error": null,
+"events": [
+[
+"SE",
+"r",
+[]
+],
+[
+"CD",
+"]\ud83d\ude00"
+],
+[
+"P",
+0
+],
+[
+"CD",
+"]]\ud83d\ude00"
+],
+[
+"P",
+1
+],
+[
+"CD",
+"\n"
+],
+[
+"CD",
+"\ud83d\ude00"
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+3
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": true,
+"chunking": "seeded",
+"chunks": [
+"fffe3c0072003e005d003dd800de",
+"5d005d003dd800de0d",
+"00",
+"3dd800de3c002f0072003e00"
+],
+"config": "raw",
+"deferral": false,
+"group": "encoded",
+"label": "] before a split utf-16 pair",
+"options": {
+"buffer_text": false,
+"ordered": false,
+"sep": null
+},
+"result": {
+"error": null,
+"events": [
+[
+"SE",
+"r",
+[]
+],
+[
+"CD",
+"]\ud83d\ude00"
+],
+[
+"P",
+0
+],
+[
+"CD",
+"]]\ud83d\ude00"
+],
+[
+"P",
+1
+],
+[
+"CD",
+"\n"
+],
+[
+"CD",
+"\ud83d\ude00"
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+3
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": true,
+"chunking": "whole",
+"chunks": [
+"3c21444f43545950452072205b3c21454e544954592078202776273e5dc3a93e3c722f3e"
+],
+"config": "et",
+"deferral": true,
+"group": "encoded",
+"label": "prolog ] before a split character",
+"options": {
+"buffer_text": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": {
+"byte": 29,
+"code": 2,
+"column": 29,
+"line": 1,
+"lineno": 1,
+"msg": "syntax error: line 1, column 29",
+"offset": 29,
+"type": "ExpatError"
+},
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"DH",
+"<!ENTITY"
+],
+[
+"DH",
+" "
+],
+[
+"DH",
+"x"
+],
+[
+"DH",
+" "
+],
+[
+"DH",
+"'v'"
+],
+[
+"DH",
+">"
+]
+]
+}
+},
+{
+"bytes": true,
+"chunking": "unit",
+"chunks": [
+"3c",
+"21",
+"44",
+"4f",
+"43",
+"54",
+"59",
+"50",
+"45",
+"20",
+"72",
+"20",
+"5b",
+"3c",
+"21",
+"45",
+"4e",
+"54",
+"49",
+"54",
+"59",
+"20",
+"78",
+"20",
+"27",
+"76",
+"27",
+"3e",
+"5d",
+"c3",
+"a9",
+"3e",
+"3c",
+"72",
+"2f",
+"3e"
+],
+"config": "et",
+"deferral": true,
+"group": "encoded",
+"label": "prolog ] before a split character",
+"options": {
+"buffer_text": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": {
+"byte": 29,
+"code": 2,
+"column": 29,
+"line": 1,
+"lineno": 1,
+"msg": "syntax error: line 1, column 29",
+"offset": 29,
+"type": "ExpatError"
+},
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"P",
+15
+],
+[
+"DH",
+"<!ENTITY"
+],
+[
+"DH",
+" "
+],
+[
+"DH",
+"x"
+],
+[
+"DH",
+" "
+],
+[
+"DH",
+"'v'"
+],
+[
+"DH",
+">"
+],
+[
+"P",
+28
+]
+]
+}
+},
+{
+"bytes": true,
+"chunking": "unit",
+"chunks": [
+"3c",
+"21",
+"44",
+"4f",
+"43",
+"54",
+"59",
+"50",
+"45",
+"20",
+"72",
+"20",
+"5b",
+"3c",
+"21",
+"45",
+"4e",
+"54",
+"49",
+"54",
+"59",
+"20",
+"78",
+"20",
+"27",
+"76",
+"27",
+"3e",
+"5d",
+"c3",
+"a9",
+"3e",
+"3c",
+"72",
+"2f",
+"3e"
+],
+"config": "et",
+"deferral": false,
+"group": "encoded",
+"label": "prolog ] before a split character",
+"options": {
+"buffer_text": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": {
+"byte": 29,
+"code": 2,
+"column": 29,
+"line": 1,
+"lineno": 1,
+"msg": "syntax error: line 1, column 29",
+"offset": 29,
+"type": "ExpatError"
+},
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"P",
+12
+],
+[
+"DH",
+"<!ENTITY"
+],
+[
+"DH",
+" "
+],
+[
+"P",
+21
+],
+[
+"DH",
+"x"
+],
+[
+"DH",
+" "
+],
+[
+"P",
+23
+],
+[
+"DH",
+"'v'"
+],
+[
+"DH",
+">"
+],
+[
+"P",
+27
+]
+]
+}
+},
+{
+"bytes": true,
+"chunking": "seeded",
+"chunks": [
+"3c21",
+"444f43545950452072205b3c21",
+"454e5449",
+"54592078202776273e5dc3a93e3c722f3e"
+],
+"config": "et",
+"deferral": true,
+"group": "encoded",
+"label": "prolog ] before a split character",
+"options": {
+"buffer_text": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": {
+"byte": 29,
+"code": 2,
+"column": 29,
+"line": 1,
+"lineno": 1,
+"msg": "syntax error: line 1, column 29",
+"offset": 29,
+"type": "ExpatError"
+},
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"P",
+1
+],
+[
+"DH",
+"<!ENTITY"
+],
+[
+"DH",
+" "
+],
+[
+"DH",
+"x"
+],
+[
+"DH",
+" "
+],
+[
+"DH",
+"'v'"
+],
+[
+"DH",
+">"
+]
+]
+}
+},
+{
+"bytes": true,
+"chunking": "seeded",
+"chunks": [
+"3c21",
+"444f43545950452072205b3c21",
+"454e5449",
+"54592078202776273e5dc3a93e3c722f3e"
+],
+"config": "et",
+"deferral": false,
+"group": "encoded",
+"label": "prolog ] before a split character",
+"options": {
+"buffer_text": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": {
+"byte": 29,
+"code": 2,
+"column": 29,
+"line": 1,
+"lineno": 1,
+"msg": "syntax error: line 1, column 29",
+"offset": 29,
+"type": "ExpatError"
+},
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"P",
+1
+],
+[
+"DH",
+"<!ENTITY"
+],
+[
+"DH",
+" "
+],
+[
+"DH",
+"x"
+],
+[
+"DH",
+" "
+],
+[
+"DH",
+"'v'"
+],
+[
+"DH",
+">"
+]
+]
+}
+},
+{
+"bytes": true,
+"chunking": "whole",
+"chunks": [
+"3c21444f43545950452072205b3c21454e544954592078202776273e5dc3a93e3c722f3e"
+],
+"config": "raw",
+"deferral": true,
+"group": "encoded",
+"label": "prolog ] before a split character",
+"options": {
+"buffer_text": false,
+"ordered": false,
+"sep": null
+},
+"result": {
+"error": {
+"byte": 29,
+"code": 2,
+"column": 29,
+"line": 1,
+"lineno": 1,
+"msg": "syntax error: line 1, column 29",
+"offset": 29,
+"type": "ExpatError"
+},
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"DH",
+"<!ENTITY"
+],
+[
+"DH",
+" "
+],
+[
+"DH",
+"x"
+],
+[
+"DH",
+" "
+],
+[
+"DH",
+"'v'"
+],
+[
+"DH",
+">"
+]
+]
+}
+},
+{
+"bytes": true,
+"chunking": "unit",
+"chunks": [
+"3c",
+"21",
+"44",
+"4f",
+"43",
+"54",
+"59",
+"50",
+"45",
+"20",
+"72",
+"20",
+"5b",
+"3c",
+"21",
+"45",
+"4e",
+"54",
+"49",
+"54",
+"59",
+"20",
+"78",
+"20",
+"27",
+"76",
+"27",
+"3e",
+"5d",
+"c3",
+"a9",
+"3e",
+"3c",
+"72",
+"2f",
+"3e"
+],
+"config": "raw",
+"deferral": true,
+"group": "encoded",
+"label": "prolog ] before a split character",
+"options": {
+"buffer_text": false,
+"ordered": false,
+"sep": null
+},
+"result": {
+"error": {
+"byte": 29,
+"code": 2,
+"column": 29,
+"line": 1,
+"lineno": 1,
+"msg": "syntax error: line 1, column 29",
+"offset": 29,
+"type": "ExpatError"
+},
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"P",
+15
+],
+[
+"DH",
+"<!ENTITY"
+],
+[
+"DH",
+" "
+],
+[
+"DH",
+"x"
+],
+[
+"DH",
+" "
+],
+[
+"DH",
+"'v'"
+],
+[
+"DH",
+">"
+],
+[
+"P",
+28
+]
+]
+}
+},
+{
+"bytes": true,
+"chunking": "unit",
+"chunks": [
+"3c",
+"21",
+"44",
+"4f",
+"43",
+"54",
+"59",
+"50",
+"45",
+"20",
+"72",
+"20",
+"5b",
+"3c",
+"21",
+"45",
+"4e",
+"54",
+"49",
+"54",
+"59",
+"20",
+"78",
+"20",
+"27",
+"76",
+"27",
+"3e",
+"5d",
+"c3",
+"a9",
+"3e",
+"3c",
+"72",
+"2f",
+"3e"
+],
+"config": "raw",
+"deferral": false,
+"group": "encoded",
+"label": "prolog ] before a split character",
+"options": {
+"buffer_text": false,
+"ordered": false,
+"sep": null
+},
+"result": {
+"error": {
+"byte": 29,
+"code": 2,
+"column": 29,
+"line": 1,
+"lineno": 1,
+"msg": "syntax error: line 1, column 29",
+"offset": 29,
+"type": "ExpatError"
+},
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"P",
+12
+],
+[
+"DH",
+"<!ENTITY"
+],
+[
+"DH",
+" "
+],
+[
+"P",
+21
+],
+[
+"DH",
+"x"
+],
+[
+"DH",
+" "
+],
+[
+"P",
+23
+],
+[
+"DH",
+"'v'"
+],
+[
+"DH",
+">"
+],
+[
+"P",
+27
+]
+]
+}
+},
+{
+"bytes": true,
+"chunking": "seeded",
+"chunks": [
+"3c",
+"2144",
+"4f43545950452072205b3c21454e544954592078202776273e5d",
+"c3a93e3c722f3e"
+],
+"config": "raw",
+"deferral": true,
+"group": "encoded",
+"label": "prolog ] before a split character",
+"options": {
+"buffer_text": false,
+"ordered": false,
+"sep": null
+},
+"result": {
+"error": {
+"byte": 29,
+"code": 2,
+"column": 29,
+"line": 1,
+"lineno": 1,
+"msg": "syntax error: line 1, column 29",
+"offset": 29,
+"type": "ExpatError"
+},
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"DH",
+"<!ENTITY"
+],
+[
+"DH",
+" "
+],
+[
+"DH",
+"x"
+],
+[
+"DH",
+" "
+],
+[
+"DH",
+"'v'"
+],
+[
+"DH",
+">"
+],
+[
+"P",
+2
+]
+]
+}
+},
+{
+"bytes": true,
+"chunking": "seeded",
+"chunks": [
+"3c",
+"2144",
+"4f43545950452072205b3c21454e544954592078202776273e5d",
+"c3a93e3c722f3e"
+],
+"config": "raw",
+"deferral": false,
+"group": "encoded",
+"label": "prolog ] before a split character",
+"options": {
+"buffer_text": false,
+"ordered": false,
+"sep": null
+},
+"result": {
+"error": {
+"byte": 29,
+"code": 2,
+"column": 29,
+"line": 1,
+"lineno": 1,
+"msg": "syntax error: line 1, column 29",
+"offset": 29,
+"type": "ExpatError"
+},
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"DH",
+"<!ENTITY"
+],
+[
+"DH",
+" "
+],
+[
+"DH",
+"x"
+],
+[
+"DH",
+" "
+],
+[
+"DH",
+"'v'"
+],
+[
+"DH",
+">"
+],
+[
+"P",
+2
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "whole",
+"chunks": [
+"<r a=' x\t\ty \r\n z\r ' b=\"\n\n\"/>"
+],
+"config": "all",
+"deferral": true,
+"group": "well-formed",
+"label": "<r a=' x\t\ty \r\n z\r ' b=\"\n\n\"/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": null,
+"events": [
+[
+"SE",
+"r",
+[
+"a",
+" x  y   z  ",
+"b",
+"  "
+]
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+0
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "unit",
+"chunks": [
+"<",
+"r",
+" ",
+"a",
+"=",
+"'",
+" ",
+"x",
+"\t",
+"\t",
+"y",
+" ",
+"\r",
+"\n",
+" ",
+"z",
+"\r",
+" ",
+"'",
+" ",
+"b",
+"=",
+"\"",
+"\n",
+"\n",
+"\"",
+"/",
+">"
+],
+"config": "all",
+"deferral": true,
+"group": "well-formed",
+"label": "<r a=' x\t\ty \r\n z\r ' b=\"\n\n\"/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": null,
+"events": [
+[
+"SE",
+"r",
+[
+"a",
+" x  y   z  ",
+"b",
+"  "
+]
+],
+[
+"EE",
+"r"
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "unit",
+"chunks": [
+"<",
+"r",
+" ",
+"a",
+"=",
+"'",
+" ",
+"x",
+"\t",
+"\t",
+"y",
+" ",
+"\r",
+"\n",
+" ",
+"z",
+"\r",
+" ",
+"'",
+" ",
+"b",
+"=",
+"\"",
+"\n",
+"\n",
+"\"",
+"/",
+">"
+],
+"config": "all",
+"deferral": false,
+"group": "well-formed",
+"label": "<r a=' x\t\ty \r\n z\r ' b=\"\n\n\"/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": null,
+"events": [
+[
+"SE",
+"r",
+[
+"a",
+" x  y   z  ",
+"b",
+"  "
+]
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+27
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "seeded",
+"chunks": [
+"<",
+"r a=' x\t",
+"\ty \r\n z\r ' b=\"",
+"\n\n\"/>"
+],
+"config": "all",
+"deferral": true,
+"group": "well-formed",
+"label": "<r a=' x\t\ty \r\n z\r ' b=\"\n\n\"/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": null,
+"events": [
+[
+"SE",
+"r",
+[
+"a",
+" x  y   z  ",
+"b",
+"  "
+]
+],
+[
+"EE",
+"r"
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "seeded",
+"chunks": [
+"<",
+"r a=' x\t",
+"\ty \r\n z\r ' b=\"",
+"\n\n\"/>"
+],
+"config": "all",
+"deferral": false,
+"group": "well-formed",
+"label": "<r a=' x\t\ty \r\n z\r ' b=\"\n\n\"/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": null,
+"events": [
+[
+"SE",
+"r",
+[
+"a",
+" x  y   z  ",
+"b",
+"  "
+]
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+3
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "whole",
+"chunks": [
+"<!DOCTYPE r [<!ATTLIST r a NMTOKENS #IMPLIED b ID #IMPLIED>]><r a='  x\t\ty \r\n z\r ' b='\t\tid\n'/>"
+],
+"config": "all",
+"deferral": true,
+"group": "well-formed",
+"label": "<!DOCTYPE r [<!ATTLIST r a NMTOKENS #IMPLIED b ID #IMPLIED>]><r a='  x\t\ty \r\n z\r ' b='\t\tid\n'/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": null,
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"AD",
+"r",
+"a",
+"NMTOKENS",
+null,
+0
+],
+[
+"AD",
+"r",
+"b",
+"ID",
+null,
+0
+],
+[
+"DE"
+],
+[
+"SE",
+"r",
+[
+"a",
+"x y z",
+"b",
+"id"
+]
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+0
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "unit",
+"chunks": [
+"<",
+"!",
+"D",
+"O",
+"C",
+"T",
+"Y",
+"P",
+"E",
+" ",
+"r",
+" ",
+"[",
+"<",
+"!",
+"A",
+"T",
+"T",
+"L",
+"I",
+"S",
+"T",
+" ",
+"r",
+" ",
+"a",
+" ",
+"N",
+"M",
+"T",
+"O",
+"K",
+"E",
+"N",
+"S",
+" ",
+"#",
+"I",
+"M",
+"P",
+"L",
+"I",
+"E",
+"D",
+" ",
+"b",
+" ",
+"I",
+"D",
+" ",
+"#",
+"I",
+"M",
+"P",
+"L",
+"I",
+"E",
+"D",
+">",
+"]",
+">",
+"<",
+"r",
+" ",
+"a",
+"=",
+"'",
+" ",
+" ",
+"x",
+"\t",
+"\t",
+"y",
+" ",
+"\r",
+"\n",
+" ",
+"z",
+"\r",
+" ",
+"'",
+" ",
+"b",
+"=",
+"'",
+"\t",
+"\t",
+"i",
+"d",
+"\n",
+"'",
+"/",
+">"
+],
+"config": "all",
+"deferral": true,
+"group": "well-formed",
+"label": "<!DOCTYPE r [<!ATTLIST r a NMTOKENS #IMPLIED b ID #IMPLIED>]><r a='  x\t\ty \r\n z\r ' b='\t\tid\n'/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": null,
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"P",
+15
+],
+[
+"AD",
+"r",
+"a",
+"NMTOKENS",
+null,
+0
+],
+[
+"P",
+51
+],
+[
+"AD",
+"r",
+"b",
+"ID",
+null,
+0
+],
+[
+"DE"
+],
+[
+"P",
+61
+],
+[
+"SE",
+"r",
+[
+"a",
+"x y z",
+"b",
+"id"
+]
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+92
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "unit",
+"chunks": [
+"<",
+"!",
+"D",
+"O",
+"C",
+"T",
+"Y",
+"P",
+"E",
+" ",
+"r",
+" ",
+"[",
+"<",
+"!",
+"A",
+"T",
+"T",
+"L",
+"I",
+"S",
+"T",
+" ",
+"r",
+" ",
+"a",
+" ",
+"N",
+"M",
+"T",
+"O",
+"K",
+"E",
+"N",
+"S",
+" ",
+"#",
+"I",
+"M",
+"P",
+"L",
+"I",
+"E",
+"D",
+" ",
+"b",
+" ",
+"I",
+"D",
+" ",
+"#",
+"I",
+"M",
+"P",
+"L",
+"I",
+"E",
+"D",
+">",
+"]",
+">",
+"<",
+"r",
+" ",
+"a",
+"=",
+"'",
+" ",
+" ",
+"x",
+"\t",
+"\t",
+"y",
+" ",
+"\r",
+"\n",
+" ",
+"z",
+"\r",
+" ",
+"'",
+" ",
+"b",
+"=",
+"'",
+"\t",
+"\t",
+"i",
+"d",
+"\n",
+"'",
+"/",
+">"
+],
+"config": "all",
+"deferral": false,
+"group": "well-formed",
+"label": "<!DOCTYPE r [<!ATTLIST r a NMTOKENS #IMPLIED b ID #IMPLIED>]><r a='  x\t\ty \r\n z\r ' b='\t\tid\n'/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": null,
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"P",
+12
+],
+[
+"AD",
+"r",
+"a",
+"NMTOKENS",
+null,
+0
+],
+[
+"P",
+44
+],
+[
+"AD",
+"r",
+"b",
+"ID",
+null,
+0
+],
+[
+"P",
+58
+],
+[
+"DE"
+],
+[
+"P",
+60
+],
+[
+"SE",
+"r",
+[
+"a",
+"x y z",
+"b",
+"id"
+]
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+92
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "seeded",
+"chunks": [
+"<!",
+"DOCTYPE r [<!ATTLIST r a NMTOKENS #IMPLIED b ID #IMP",
+"LIED>]><r a='  x\t\ty \r\n z",
+"\r ' b='\t\tid\n'/>"
+],
+"config": "all",
+"deferral": true,
+"group": "well-formed",
+"label": "<!DOCTYPE r [<!ATTLIST r a NMTOKENS #IMPLIED b ID #IMPLIED>]><r a='  x\t\ty \r\n z\r ' b='\t\tid\n'/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": null,
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"AD",
+"r",
+"a",
+"NMTOKENS",
+null,
+0
+],
+[
+"P",
+1
+],
+[
+"AD",
+"r",
+"b",
+"ID",
+null,
+0
+],
+[
+"DE"
+],
+[
+"P",
+2
+],
+[
+"SE",
+"r",
+[
+"a",
+"x y z",
+"b",
+"id"
+]
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+3
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "seeded",
+"chunks": [
+"<!",
+"DOCTYPE r [<!ATTLIST r a NMTOKENS #IMPLIED b ID #IMP",
+"LIED>]><r a='  x\t\ty \r\n z",
+"\r ' b='\t\tid\n'/>"
+],
+"config": "all",
+"deferral": false,
+"group": "well-formed",
+"label": "<!DOCTYPE r [<!ATTLIST r a NMTOKENS #IMPLIED b ID #IMPLIED>]><r a='  x\t\ty \r\n z\r ' b='\t\tid\n'/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": null,
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"AD",
+"r",
+"a",
+"NMTOKENS",
+null,
+0
+],
+[
+"P",
+1
+],
+[
+"AD",
+"r",
+"b",
+"ID",
+null,
+0
+],
+[
+"DE"
+],
+[
+"P",
+2
+],
+[
+"SE",
+"r",
+[
+"a",
+"x y z",
+"b",
+"id"
+]
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+3
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "whole",
+"chunks": [
+"<!DOCTYPE r [<!ENTITY e ' p\tq '><!ATTLIST r a NMTOKENS #IMPLIED>]><r a=' &e; x &#32; &#9; y&e;' c=' &e; '/>"
+],
+"config": "all",
+"deferral": true,
+"group": "well-formed",
+"label": "<!DOCTYPE r [<!ENTITY e ' p\tq '><!ATTLIST r a NMTOKENS #IMPLIED>]><r a=' &e; x &#32; &#9; y&e;' c=' &e; '/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": null,
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"ED",
+"e",
+0,
+" p\tq ",
+null,
+null,
+null,
+null
+],
+[
+"AD",
+"r",
+"a",
+"NMTOKENS",
+null,
+0
+],
+[
+"DE"
+],
+[
+"SE",
+"r",
+[
+"a",
+"p q x \t y p q",
+"c",
+"  p q  "
+]
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+0
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "unit",
+"chunks": [
+"<",
+"!",
+"D",
+"O",
+"C",
+"T",
+"Y",
+"P",
+"E",
+" ",
+"r",
+" ",
+"[",
+"<",
+"!",
+"E",
+"N",
+"T",
+"I",
+"T",
+"Y",
+" ",
+"e",
+" ",
+"'",
+" ",
+"p",
+"\t",
+"q",
+" ",
+"'",
+">",
+"<",
+"!",
+"A",
+"T",
+"T",
+"L",
+"I",
+"S",
+"T",
+" ",
+"r",
+" ",
+"a",
+" ",
+"N",
+"M",
+"T",
+"O",
+"K",
+"E",
+"N",
+"S",
+" ",
+"#",
+"I",
+"M",
+"P",
+"L",
+"I",
+"E",
+"D",
+">",
+"]",
+">",
+"<",
+"r",
+" ",
+"a",
+"=",
+"'",
+" ",
+"&",
+"e",
+";",
+" ",
+"x",
+" ",
+"&",
+"#",
+"3",
+"2",
+";",
+" ",
+"&",
+"#",
+"9",
+";",
+" ",
+"y",
+"&",
+"e",
+";",
+"'",
+" ",
+"c",
+"=",
+"'",
+" ",
+"&",
+"e",
+";",
+" ",
+"'",
+"/",
+">"
+],
+"config": "all",
+"deferral": true,
+"group": "well-formed",
+"label": "<!DOCTYPE r [<!ENTITY e ' p\tq '><!ATTLIST r a NMTOKENS #IMPLIED>]><r a=' &e; x &#32; &#9; y&e;' c=' &e; '/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": null,
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"P",
+15
+],
+[
+"ED",
+"e",
+0,
+" p\tq ",
+null,
+null,
+null,
+null
+],
+[
+"P",
+35
+],
+[
+"AD",
+"r",
+"a",
+"NMTOKENS",
+null,
+0
+],
+[
+"DE"
+],
+[
+"P",
+70
+],
+[
+"SE",
+"r",
+[
+"a",
+"p q x \t y p q",
+"c",
+"  p q  "
+]
+],
+[
+"EE",
+"r"
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "unit",
+"chunks": [
+"<",
+"!",
+"D",
+"O",
+"C",
+"T",
+"Y",
+"P",
+"E",
+" ",
+"r",
+" ",
+"[",
+"<",
+"!",
+"E",
+"N",
+"T",
+"I",
+"T",
+"Y",
+" ",
+"e",
+" ",
+"'",
+" ",
+"p",
+"\t",
+"q",
+" ",
+"'",
+">",
+"<",
+"!",
+"A",
+"T",
+"T",
+"L",
+"I",
+"S",
+"T",
+" ",
+"r",
+" ",
+"a",
+" ",
+"N",
+"M",
+"T",
+"O",
+"K",
+"E",
+"N",
+"S",
+" ",
+"#",
+"I",
+"M",
+"P",
+"L",
+"I",
+"E",
+"D",
+">",
+"]",
+">",
+"<",
+"r",
+" ",
+"a",
+"=",
+"'",
+" ",
+"&",
+"e",
+";",
+" ",
+"x",
+" ",
+"&",
+"#",
+"3",
+"2",
+";",
+" ",
+"&",
+"#",
+"9",
+";",
+" ",
+"y",
+"&",
+"e",
+";",
+"'",
+" ",
+"c",
+"=",
+"'",
+" ",
+"&",
+"e",
+";",
+" ",
+"'",
+"/",
+">"
+],
+"config": "all",
+"deferral": false,
+"group": "well-formed",
+"label": "<!DOCTYPE r [<!ENTITY e ' p\tq '><!ATTLIST r a NMTOKENS #IMPLIED>]><r a=' &e; x &#32; &#9; y&e;' c=' &e; '/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": null,
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"P",
+12
+],
+[
+"ED",
+"e",
+0,
+" p\tq ",
+null,
+null,
+null,
+null
+],
+[
+"P",
+31
+],
+[
+"AD",
+"r",
+"a",
+"NMTOKENS",
+null,
+0
+],
+[
+"P",
+63
+],
+[
+"DE"
+],
+[
+"P",
+65
+],
+[
+"SE",
+"r",
+[
+"a",
+"p q x \t y p q",
+"c",
+"  p q  "
+]
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+106
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "seeded",
+"chunks": [
+"<!DOCTYPE r [<!ENTITY e ' p\tq '",
+"><!ATTLIST r a ",
+"NMTOKENS #IMPLIED>]><r a=' &e; x &#32; &#9",
+"; y&e;' c=' &e; '/>"
+],
+"config": "all",
+"deferral": true,
+"group": "well-formed",
+"label": "<!DOCTYPE r [<!ENTITY e ' p\tq '><!ATTLIST r a NMTOKENS #IMPLIED>]><r a=' &e; x &#32; &#9; y&e;' c=' &e; '/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": null,
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"P",
+0
+],
+[
+"ED",
+"e",
+0,
+" p\tq ",
+null,
+null,
+null,
+null
+],
+[
+"P",
+1
+],
+[
+"AD",
+"r",
+"a",
+"NMTOKENS",
+null,
+0
+],
+[
+"DE"
+],
+[
+"P",
+2
+],
+[
+"SE",
+"r",
+[
+"a",
+"p q x \t y p q",
+"c",
+"  p q  "
+]
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+3
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "seeded",
+"chunks": [
+"<!DOCTYPE r [<!ENTITY e ' p\tq '",
+"><!ATTLIST r a ",
+"NMTOKENS #IMPLIED>]><r a=' &e; x &#32; &#9",
+"; y&e;' c=' &e; '/>"
+],
+"config": "all",
+"deferral": false,
+"group": "well-formed",
+"label": "<!DOCTYPE r [<!ENTITY e ' p\tq '><!ATTLIST r a NMTOKENS #IMPLIED>]><r a=' &e; x &#32; &#9; y&e;' c=' &e; '/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": null,
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"P",
+0
+],
+[
+"ED",
+"e",
+0,
+" p\tq ",
+null,
+null,
+null,
+null
+],
+[
+"P",
+1
+],
+[
+"AD",
+"r",
+"a",
+"NMTOKENS",
+null,
+0
+],
+[
+"DE"
+],
+[
+"P",
+2
+],
+[
+"SE",
+"r",
+[
+"a",
+"p q x \t y p q",
+"c",
+"  p q  "
+]
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+3
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "whole",
+"chunks": [
+"<!DOCTYPE r [<!ATTLIST r a NMTOKENS ' x\t y\n'>]><r/>"
+],
+"config": "all",
+"deferral": true,
+"group": "well-formed",
+"label": "<!DOCTYPE r [<!ATTLIST r a NMTOKENS ' x\t y\n'>]><r/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": null,
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"AD",
+"r",
+"a",
+"NMTOKENS",
+"x y",
+0
+],
+[
+"DE"
+],
+[
+"SE",
+"r",
+[
+"a",
+"x y"
+]
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+0
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "unit",
+"chunks": [
+"<",
+"!",
+"D",
+"O",
+"C",
+"T",
+"Y",
+"P",
+"E",
+" ",
+"r",
+" ",
+"[",
+"<",
+"!",
+"A",
+"T",
+"T",
+"L",
+"I",
+"S",
+"T",
+" ",
+"r",
+" ",
+"a",
+" ",
+"N",
+"M",
+"T",
+"O",
+"K",
+"E",
+"N",
+"S",
+" ",
+"'",
+" ",
+"x",
+"\t",
+" ",
+"y",
+"\n",
+"'",
+">",
+"]",
+">",
+"<",
+"r",
+"/",
+">"
+],
+"config": "all",
+"deferral": true,
+"group": "well-formed",
+"label": "<!DOCTYPE r [<!ATTLIST r a NMTOKENS ' x\t y\n'>]><r/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": null,
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"P",
+15
+],
+[
+"AD",
+"r",
+"a",
+"NMTOKENS",
+"x y",
+0
+],
+[
+"DE"
+],
+[
+"SE",
+"r",
+[
+"a",
+"x y"
+]
+],
+[
+"EE",
+"r"
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "unit",
+"chunks": [
+"<",
+"!",
+"D",
+"O",
+"C",
+"T",
+"Y",
+"P",
+"E",
+" ",
+"r",
+" ",
+"[",
+"<",
+"!",
+"A",
+"T",
+"T",
+"L",
+"I",
+"S",
+"T",
+" ",
+"r",
+" ",
+"a",
+" ",
+"N",
+"M",
+"T",
+"O",
+"K",
+"E",
+"N",
+"S",
+" ",
+"'",
+" ",
+"x",
+"\t",
+" ",
+"y",
+"\n",
+"'",
+">",
+"]",
+">",
+"<",
+"r",
+"/",
+">"
+],
+"config": "all",
+"deferral": false,
+"group": "well-formed",
+"label": "<!DOCTYPE r [<!ATTLIST r a NMTOKENS ' x\t y\n'>]><r/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": null,
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"P",
+12
+],
+[
+"AD",
+"r",
+"a",
+"NMTOKENS",
+"x y",
+0
+],
+[
+"P",
+44
+],
+[
+"DE"
+],
+[
+"P",
+46
+],
+[
+"SE",
+"r",
+[
+"a",
+"x y"
+]
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+50
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "seeded",
+"chunks": [
+"<!DOCTYPE r [<!AT",
+"TLIST r a NMTOKENS ' x\t",
+" y\n'>",
+"]><r/>"
+],
+"config": "all",
+"deferral": true,
+"group": "well-formed",
+"label": "<!DOCTYPE r [<!ATTLIST r a NMTOKENS ' x\t y\n'>]><r/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": null,
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"P",
+0
+],
+[
+"AD",
+"r",
+"a",
+"NMTOKENS",
+"x y",
+0
+],
+[
+"P",
+2
+],
+[
+"DE"
+],
+[
+"SE",
+"r",
+[
+"a",
+"x y"
+]
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+3
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "seeded",
+"chunks": [
+"<!DOCTYPE r [<!AT",
+"TLIST r a NMTOKENS ' x\t",
+" y\n'>",
+"]><r/>"
+],
+"config": "all",
+"deferral": false,
+"group": "well-formed",
+"label": "<!DOCTYPE r [<!ATTLIST r a NMTOKENS ' x\t y\n'>]><r/>",
+"options": {
+"buffer_text": true,
+"extra": true,
+"ordered": true,
+"sep": "}"
+},
+"result": {
+"error": null,
+"events": [
+[
+"SD",
+"r",
+null,
+null,
+1
+],
+[
+"P",
+0
+],
+[
+"AD",
+"r",
+"a",
+"NMTOKENS",
+"x y",
+0
+],
+[
+"P",
+2
+],
+[
+"DE"
+],
+[
+"SE",
+"r",
+[
+"a",
+"x y"
+]
+],
+[
+"EE",
+"r"
+],
+[
+"P",
+3
+],
+[
+"F"
+]
+]
+}
+},
+{
+"bytes": false,
+"chunking": "whole",
+"config": "et",
+"cuts": [],
+"deferral": true,
+"group": "long",
+"label": "<svg><path d='M 10 20\n\t\tL 30 40 C 1  2\r\n",
+"options": {
+"buffer_text": true,
+"digest": true,
+"ordered": true,
+"sep": "}"
+},
+"recipe": [
+[
+"<svg><path d='",
+1
+],
+[
+"M 10 20\n\t\tL 30 40 C 1  2\r\n",
+10000
+],
+[
+"'/></svg>",
+1
+]
+],
+"result": {
+"error": null,
+"events": {
+"n": 6,
+"sha256": "4e780131b46c080580603d7fba4c2cd62ab05da29df8e3ff2a2e9241175a96a7"
+}
+}
+},
+{
+"bytes": false,
+"chunking": "64k",
+"config": "et",
+"cuts": [
+65536,
+131072,
+196608
+],
+"deferral": true,
+"group": "long",
+"label": "<svg><path d='M 10 20\n\t\tL 30 40 C 1  2\r\n",
+"options": {
+"buffer_text": true,
+"digest": true,
+"ordered": true,
+"sep": "}"
+},
+"recipe": [
+[
+"<svg><path d='",
+1
+],
+[
+"M 10 20\n\t\tL 30 40 C 1  2\r\n",
+10000
+],
+[
+"'/></svg>",
+1
+]
+],
+"result": {
+"error": null,
+"events": {
+"n": 7,
+"sha256": "5d2abc5e74689a21991733b65ba64879afc98242bbd4a90212825de992533197"
+}
+}
+},
+{
+"bytes": false,
+"chunking": "4k",
+"config": "et",
+"cuts": [
+4096,
+8192,
+12288,
+16384,
+20480,
+24576,
+28672,
+32768,
+36864,
+40960,
+45056,
+49152,
+53248,
+57344,
+61440,
+65536,
+69632,
+73728,
+77824,
+81920,
+86016,
+90112,
+94208,
+98304,
+102400,
+106496,
+110592,
+114688,
+118784,
+122880,
+126976,
+131072,
+135168,
+139264,
+143360,
+147456,
+151552,
+155648,
+159744,
+163840,
+167936,
+172032,
+176128,
+180224,
+184320,
+188416,
+192512,
+196608,
+200704,
+204800,
+208896,
+212992,
+217088,
+221184,
+225280,
+229376,
+233472,
+237568,
+241664,
+245760,
+249856,
+253952,
+258048
+],
+"deferral": true,
+"group": "long",
+"label": "<svg><path d='M 10 20\n\t\tL 30 40 C 1  2\r\n",
+"options": {
+"buffer_text": true,
+"digest": true,
+"ordered": true,
+"sep": "}"
+},
+"recipe": [
+[
+"<svg><path d='",
+1
+],
+[
+"M 10 20\n\t\tL 30 40 C 1  2\r\n",
+10000
+],
+[
+"'/></svg>",
+1
+]
+],
+"result": {
+"error": null,
+"events": {
+"n": 6,
+"sha256": "fc0d4714ae7d34b8c3f4a6298eb3d9e16c544dfa57862a5a718c1b754e04f9d5"
+}
+}
+},
+{
+"bytes": false,
+"chunking": "4k",
+"config": "et",
+"cuts": [
+4096,
+8192,
+12288,
+16384,
+20480,
+24576,
+28672,
+32768,
+36864,
+40960,
+45056,
+49152,
+53248,
+57344,
+61440,
+65536,
+69632,
+73728,
+77824,
+81920,
+86016,
+90112,
+94208,
+98304,
+102400,
+106496,
+110592,
+114688,
+118784,
+122880,
+126976,
+131072,
+135168,
+139264,
+143360,
+147456,
+151552,
+155648,
+159744,
+163840,
+167936,
+172032,
+176128,
+180224,
+184320,
+188416,
+192512,
+196608,
+200704,
+204800,
+208896,
+212992,
+217088,
+221184,
+225280,
+229376,
+233472,
+237568,
+241664,
+245760,
+249856,
+253952,
+258048
+],
+"deferral": false,
+"group": "long",
+"label": "<svg><path d='M 10 20\n\t\tL 30 40 C 1  2\r\n",
+"options": {
+"buffer_text": true,
+"digest": true,
+"ordered": true,
+"sep": "}"
+},
+"recipe": [
+[
+"<svg><path d='",
+1
+],
+[
+"M 10 20\n\t\tL 30 40 C 1  2\r\n",
+10000
+],
+[
+"'/></svg>",
+1
+]
+],
+"result": {
+"error": null,
+"events": {
+"n": 7,
+"sha256": "e3f1305dc7ad0e914674020e4b5d83ad99c813bc3d1a6d54d8ee324c2d3ebecd"
+}
+}
+},
+{
+"bytes": false,
+"chunking": "seeded",
+"config": "et",
+"cuts": [
+16538,
+92446,
+201090
+],
+"deferral": true,
+"group": "long",
+"label": "<svg><path d='M 10 20\n\t\tL 30 40 C 1  2\r\n",
+"options": {
+"buffer_text": true,
+"digest": true,
+"ordered": true,
+"sep": "}"
+},
+"recipe": [
+[
+"<svg><path d='",
+1
+],
+[
+"M 10 20\n\t\tL 30 40 C 1  2\r\n",
+10000
+],
+[
+"'/></svg>",
+1
+]
+],
+"result": {
+"error": null,
+"events": {
+"n": 7,
+"sha256": "5d2abc5e74689a21991733b65ba64879afc98242bbd4a90212825de992533197"
+}
+}
 }
 ],
 "provenance": {
 "expat": "expat_2.9.0",
-"generator_sha256": "f383d2bfdf8159c428a258498b09828a4d36e50a11bbc30147572083915cbf70",
+"generator_sha256": "e527a795d80c5d9480ceda92a8f7f3d7715ef047be5a26fdbbae4c35939547b1",
 "python": "3.14.10 (main, Nov  7 2026, 17:28:14) [GCC 15.2.0]",
 "trace_sha256": "a99bce78160aec55969e7cef7ecb1b0b75ca5624de377194ea3621e9fcc38f7f"
 },

@@ -6014,6 +6014,112 @@
   "owner": "real/complex arithmetic",
   "row": "inv-17"
  },
+ "lib/_sage_rpoly.py :: PolynomialInexact.__pow__ :: raise NotImplementedError(\"a power of a polynomial over %r by %r is not available in sagebrush yet\" % (self._ring._base, n)) #0": {
+  "class": "coverage",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "the fraction field of a polynomial ring over an inexact field (negative powers, division by a polynomial) and powers by a non-integer: 1b stage 2, not a cap"
+ },
+ "lib/_sage_rpoly.py :: PolynomialInexact.__pow__ :: raise NotImplementedError(\"the fraction field of %r is not available in sagebrush yet\" % (self._ring,)) #0": {
+  "class": "coverage",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "the fraction field of a polynomial ring over an inexact field (negative powers, division by a polynomial) and powers by a non-integer: 1b stage 2, not a cap"
+ },
+ "lib/_sage_rpoly.py :: PolynomialInexact.__rtruediv__ :: raise NotImplementedError(\"the fraction field of %r is not available in sagebrush yet\" % (self._ring,)) #0": {
+  "class": "coverage",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "the fraction field of a polynomial ring over an inexact field (negative powers, division by a polynomial) and powers by a non-integer: 1b stage 2, not a cap"
+ },
+ "lib/_sage_rpoly.py :: PolynomialInexact.__truediv__ :: raise NotImplementedError(\"the fraction field of %r is not available in sagebrush yet\" % (self._ring,)) #0": {
+  "class": "coverage",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "the fraction field of a polynomial ring over an inexact field (negative powers, division by a polynomial) and powers by a non-integer: 1b stage 2, not a cap"
+ },
+ "lib/_sage_rpoly.py :: PolynomialInexact._refuse_parents :: raise TypeError(\"unsupported operand parent(s) for %s: '%r' and '%r'\" % (sym, a, b)) #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "Sage's coercion refusal (TypeError) for polynomials over an inexact field with another ring or a Python complex, in Sage's text; refuses nothing for size"
+ },
+ "lib/_sage_rpoly.py :: PolynomialRingInexact.__call__ :: Converting an expression of degree 1048577 to a dense polynomial needs about 8.4 MB, but Sagebrush has a fixed limit of about 8.3 MB for one polynomial. #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "docstring text and examples of the dense coefficient bound; refuses nothing"
+ },
+ "lib/_sage_rpoly.py :: PolynomialRingInexact.__call__ :: conversion (a fixed limit of 2^20 coefficients):: #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "docstring text and examples of the dense coefficient bound; refuses nothing"
+ },
+ "lib/_sage_rpoly.py :: PolynomialRingInexact.__call__ :: sage: _sage_poly._MAX_DENSE_COEFFS = cap # sagebrush only #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "docstring text and examples of the dense coefficient bound; refuses nothing"
+ },
+ "lib/_sage_rpoly.py :: PolynomialRingInexact.__call__ :: sage: import _sage_poly; cap = _sage_poly._MAX_DENSE_COEFFS; _sage_poly._MAX_DENSE_COEFFS = 11 # sagebrush only #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "docstring text and examples of the dense coefficient bound; refuses nothing"
+ },
+ "lib/_sage_rpoly.py :: _admit :: cap = _sage_poly._MAX_DENSE_COEFFS #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "the dense coefficient bound of the exact polynomials (_sage_poly._MAX_DENSE_COEFFS, 2^20), admitted before a polynomial over an inexact field is built: SR conversion, product, square, power, shift (astra's RPOLY-ALLOC-1)",
+  "row": "inv-13"
+ },
+ "lib/_sage_rpoly.py :: _admit :: exact polynomials' _MAX_DENSE_COEFFS coefficients (the memory guard's error, at 8 bytes a #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "docstring text and examples of the dense coefficient bound; refuses nothing"
+ },
+ "lib/_sage_rpoly.py :: _admit :: if n > cap: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "the dense coefficient bound of the exact polynomials (_sage_poly._MAX_DENSE_COEFFS, 2^20), admitted before a polynomial over an inexact field is built: SR conversion, product, square, power, shift (astra's RPOLY-ALLOC-1)",
+  "row": "inv-13"
+ },
+ "lib/_sage_rpoly.py :: _admit :: raise _memguard.memory_guard(what, n * 8, cap * 8, \"one polynomial\", fixed=True) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "the dense coefficient bound of the exact polynomials (_sage_poly._MAX_DENSE_COEFFS, 2^20), admitted before a polynomial over an inexact field is built: SR conversion, product, square, power, shift (astra's RPOLY-ALLOC-1)",
+  "row": "inv-13"
+ },
+ "lib/_sage_rpoly.py :: _refuse_foreign :: raise TypeError(\"unsupported operand parent(s) for %s: '%s' and '%s'\" % (sym, a, b)) #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "Sage's coercion refusal (TypeError) for polynomials over an inexact field with another ring or a Python complex, in Sage's text; refuses nothing for size"
+ },
+ "lib/_sage_rpoly.py :: _refuse_foreign :: raise TypeError(\"unsupported operand type(s) for /: '%s' and '%s'\" % (ca, cb)) #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "Sage's coercion refusal (TypeError) for polynomials over an inexact field with another ring or a Python complex, in Sage's text; refuses nothing for size"
+ },
+ "lib/_sage_rpoly.py :: _refuse_mixed :: raise NotImplementedError(\"arithmetic with %s and %s together is not available in sagebrush yet\" % (a, b)) #0": {
+  "class": "coverage",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "polynomials over an inexact field with a number field that has an embedding (Sage computes in the common ring): L33, not a cap"
+ },
+ "lib/_sage_rpoly.py :: _refuse_types :: raise TypeError(\"unsupported operand type(s) for /: '%s' and '%s'\" % (ca, cb)) #0": {
+  "class": "none",
+  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
+  "reason": "Sage's coercion refusal (TypeError) for polynomials over an inexact field with another ring or a Python complex, in Sage's text; refuses nothing for size"
+ },
  "lib/_sage_series.py :: PowerSeriesRing :: raise NotImplementedError(\"multivariate power series rings are not available in sagebrush yet\") #0": {
   "class": "coverage",
   "owner": "series rings (@sagebrush-sage2)",
@@ -6830,6 +6936,237 @@
   "class": "none",
   "owner": "python (@sagebrush-python)",
   "reason": "refuses nothing: CHAR_MAX is the C locale's 'no value' constant (127) in lib/_locale.py and CPython's unchanged locale.py; _locale's docstring text; calendar.weekday's MINYEAR..MAXYEAR test (CPython's unchanged calendar.py) only maps an out-of-range year into the 400-year cycle"
+ },
+ "lib/pyexpat.py ::  :: (\"XML_AT_MAX_AMP\", 100), (\"XML_AT_ACT_THRES\", 67108864)] #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "pyexpat (P3c-1): expat 2.9.0's own billion-laughs and allocation-tracker protections, CPython 3.14.10's defaults and setters (pinned, not a Sagebrush cap): parser protection, refuses only the document"
+ },
+ "lib/pyexpat.py ::  :: (\"XML_ERROR_AMPLIFICATION_LIMIT_BREACH\", \"limit on input amplification factor (from DTD and entities) breached\"), #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "pyexpat (P3c-1): expat 2.9.0's own billion-laughs and allocation-tracker protections, CPython 3.14.10's defaults and setters (pinned, not a Sagebrush cap): parser protection, refuses only the document"
+ },
+ "lib/pyexpat.py ::  :: (\"XML_NS\", 0), (\"XML_BLAP_MAX_AMP\", 100), (\"XML_BLAP_ACT_THRES\", 8388608), (\"XML_GE\", 0), #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "pyexpat (P3c-1): expat 2.9.0's own billion-laughs and allocation-tracker protections, CPython 3.14.10's defaults and setters (pinned, not a Sagebrush cap): parser protection, refuses only the document"
+ },
+ "lib/pyexpat.py ::  :: _MAX_CHUNK_SIZE = 1 << 20 # (pyexpat feeds expat at most this much a call) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "pyexpat (P3c-1): CPython's pyexpat feeds expat at most 1 MiB a call, and its threshold setters' argument conversion error; a chunking and an argument check, refuses nothing"
+ },
+ "lib/pyexpat.py ::  :: _UNSUPPORTED_HANDLERS = frozenset((\"ExternalEntityRefHandler\", \"ElementDeclHandler\")) #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "pyexpat (P3c-1): external entities, external DTDs, parameter entity parsing and element content models are not supported (the parser reads no file); NotImplementedError before any effect"
+ },
+ "lib/pyexpat.py :: xmlparser.ExternalEntityParserCreate :: raise NotImplementedError(\"external entity parsers are not supported in Sagebrush: the parser reads no \" #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "pyexpat (P3c-1): external entities, external DTDs, parameter entity parsing and element content models are not supported (the parser reads no file); NotImplementedError before any effect"
+ },
+ "lib/pyexpat.py :: xmlparser.Parse :: if not self._xml_parse(raw[:_MAX_CHUNK_SIZE], False): #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "pyexpat (P3c-1): CPython's pyexpat feeds expat at most 1 MiB a call, and its threshold setters' argument conversion error; a chunking and an argument check, refuses nothing"
+ },
+ "lib/pyexpat.py :: xmlparser.Parse :: raw = raw[_MAX_CHUNK_SIZE:] #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "pyexpat (P3c-1): CPython's pyexpat feeds expat at most 1 MiB a call, and its threshold setters' argument conversion error; a chunking and an argument check, refuses nothing"
+ },
+ "lib/pyexpat.py :: xmlparser.Parse :: while len(raw) > _MAX_CHUNK_SIZE: #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "pyexpat (P3c-1): CPython's pyexpat feeds expat at most 1 MiB a call, and its threshold setters' argument conversion error; a chunking and an argument check, refuses nothing"
+ },
+ "lib/pyexpat.py :: xmlparser.SetAllocTrackerActivationThreshold :: def SetAllocTrackerActivationThreshold(self, threshold, /): #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "pyexpat (P3c-1): expat 2.9.0's own billion-laughs and allocation-tracker protections, CPython 3.14.10's defaults and setters (pinned, not a Sagebrush cap): parser protection, refuses only the document"
+ },
+ "lib/pyexpat.py :: xmlparser.SetAllocTrackerActivationThreshold :: self._set_threshold(\"_at_act\", threshold) #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "pyexpat (P3c-1): expat 2.9.0's own billion-laughs and allocation-tracker protections, CPython 3.14.10's defaults and setters (pinned, not a Sagebrush cap): parser protection, refuses only the document"
+ },
+ "lib/pyexpat.py :: xmlparser.SetAllocTrackerMaximumAmplification :: \"\"\"Sets the maximum amplification factor between direct input and bytes of dynamic memory allocated.\"\"\" #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "pyexpat (P3c-1): expat 2.9.0's own billion-laughs and allocation-tracker protections, CPython 3.14.10's defaults and setters (pinned, not a Sagebrush cap): parser protection, refuses only the document"
+ },
+ "lib/pyexpat.py :: xmlparser.SetAllocTrackerMaximumAmplification :: def SetAllocTrackerMaximumAmplification(self, max_factor, /): #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "pyexpat (P3c-1): expat 2.9.0's own billion-laughs and allocation-tracker protections, CPython 3.14.10's defaults and setters (pinned, not a Sagebrush cap): parser protection, refuses only the document"
+ },
+ "lib/pyexpat.py :: xmlparser.SetAllocTrackerMaximumAmplification :: self._set_factor(\"_at_max\", max_factor) #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "pyexpat (P3c-1): expat 2.9.0's own billion-laughs and allocation-tracker protections, CPython 3.14.10's defaults and setters (pinned, not a Sagebrush cap): parser protection, refuses only the document"
+ },
+ "lib/pyexpat.py :: xmlparser.SetBillionLaughsAttackProtectionActivationThreshold :: def SetBillionLaughsAttackProtectionActivationThreshold(self, threshold, /): #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "pyexpat (P3c-1): expat 2.9.0's own billion-laughs and allocation-tracker protections, CPython 3.14.10's defaults and setters (pinned, not a Sagebrush cap): parser protection, refuses only the document"
+ },
+ "lib/pyexpat.py :: xmlparser.SetBillionLaughsAttackProtectionActivationThreshold :: self._set_threshold(\"_amp_act\", threshold) #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "pyexpat (P3c-1): expat 2.9.0's own billion-laughs and allocation-tracker protections, CPython 3.14.10's defaults and setters (pinned, not a Sagebrush cap): parser protection, refuses only the document"
+ },
+ "lib/pyexpat.py :: xmlparser.SetBillionLaughsAttackProtectionMaximumAmplification :: \"\"\"Sets the maximum tolerated amplification factor for protection against billion laughs attacks.\"\"\" #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "pyexpat (P3c-1): expat 2.9.0's own billion-laughs and allocation-tracker protections, CPython 3.14.10's defaults and setters (pinned, not a Sagebrush cap): parser protection, refuses only the document"
+ },
+ "lib/pyexpat.py :: xmlparser.SetBillionLaughsAttackProtectionMaximumAmplification :: def SetBillionLaughsAttackProtectionMaximumAmplification(self, max_factor, /): #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "pyexpat (P3c-1): expat 2.9.0's own billion-laughs and allocation-tracker protections, CPython 3.14.10's defaults and setters (pinned, not a Sagebrush cap): parser protection, refuses only the document"
+ },
+ "lib/pyexpat.py :: xmlparser.SetBillionLaughsAttackProtectionMaximumAmplification :: self._set_factor(\"_amp_max\", max_factor) #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "pyexpat (P3c-1): expat 2.9.0's own billion-laughs and allocation-tracker protections, CPython 3.14.10's defaults and setters (pinned, not a Sagebrush cap): parser protection, refuses only the document"
+ },
+ "lib/pyexpat.py :: xmlparser.SetParamEntityParsing :: raise NotImplementedError(\"parameter entity parsing is not supported in Sagebrush: the parser reads no \" #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "pyexpat (P3c-1): external entities, external DTDs, parameter entity parsing and element content models are not supported (the parser reads no file); NotImplementedError before any effect"
+ },
+ "lib/pyexpat.py :: xmlparser.UseForeignDTD :: raise NotImplementedError(\"UseForeignDTD is not supported in Sagebrush: the parser reads no external DTD\") #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "pyexpat (P3c-1): external entities, external DTDs, parameter entity parsing and element content models are not supported (the parser reads no file); NotImplementedError before any effect"
+ },
+ "lib/pyexpat.py :: xmlparser.__init__ :: self._amp_max = 100.0 #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "pyexpat (P3c-1): expat 2.9.0's own billion-laughs and allocation-tracker protections, CPython 3.14.10's defaults and setters (pinned, not a Sagebrush cap): parser protection, refuses only the document"
+ },
+ "lib/pyexpat.py :: xmlparser.__init__ :: self._at_max = 100.0 #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "pyexpat (P3c-1): expat 2.9.0's own billion-laughs and allocation-tracker protections, CPython 3.14.10's defaults and setters (pinned, not a Sagebrush cap): parser protection, refuses only the document"
+ },
+ "lib/pyexpat.py :: xmlparser.__setattr__ :: if name in _UNSUPPORTED_HANDLERS and value is not None: #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "pyexpat (P3c-1): external entities, external DTDs, parameter entity parsing and element content models are not supported (the parser reads no file); NotImplementedError before any effect"
+ },
+ "lib/pyexpat.py :: xmlparser.__setattr__ :: raise NotImplementedError(f\"pyexpat.xmlparser.{name} is not supported in Sagebrush: the parser \" #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "pyexpat (P3c-1): external entities, external DTDs, parameter entity parsing and element content models are not supported (the parser reads no file); NotImplementedError before any effect"
+ },
+ "lib/pyexpat.py :: xmlparser._account :: \"\"\"accountingDiffTolerated: the bytes a token adds; error 43 once the output is at the activation threshold #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "pyexpat (P3c-1): expat 2.9.0's own billion-laughs and allocation-tracker protections, CPython 3.14.10's defaults and setters (pinned, not a Sagebrush cap): parser protection, refuses only the document"
+ },
+ "lib/pyexpat.py :: xmlparser._account :: and its amplification over the direct input exceeds the maximum\"\"\" #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "pyexpat (P3c-1): expat 2.9.0's own billion-laughs and allocation-tracker protections, CPython 3.14.10's defaults and setters (pinned, not a Sagebrush cap): parser protection, refuses only the document"
+ },
+ "lib/pyexpat.py :: xmlparser._account :: if factor > self._amp_max: #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "pyexpat (P3c-1): expat 2.9.0's own billion-laughs and allocation-tracker protections, CPython 3.14.10's defaults and setters (pinned, not a Sagebrush cap): parser protection, refuses only the document"
+ },
+ "lib/pyexpat.py :: xmlparser._charge :: activation threshold, more than the maximum amplification over the direct input is expat's out of memory\"\"\" #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "pyexpat (P3c-1): expat 2.9.0's own billion-laughs and allocation-tracker protections, CPython 3.14.10's defaults and setters (pinned, not a Sagebrush cap): parser protection, refuses only the document"
+ },
+ "lib/pyexpat.py :: xmlparser._charge :: if self._acc[0] == 0 or total / self._acc[0] > self._at_max: #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "pyexpat (P3c-1): expat 2.9.0's own billion-laughs and allocation-tracker protections, CPython 3.14.10's defaults and setters (pinned, not a Sagebrush cap): parser protection, refuses only the document"
+ },
+ "lib/pyexpat.py :: xmlparser._set_factor :: raise ExpatError(\"'max_factor' must be at least 1.0\") #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "pyexpat (P3c-1): expat 2.9.0's own billion-laughs and allocation-tracker protections, CPython 3.14.10's defaults and setters (pinned, not a Sagebrush cap): parser protection, refuses only the document"
+ },
+ "lib/pyexpat.py :: xmlparser._set_threshold :: raise OverflowError(\"Python int too large for C unsigned long long\") #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "pyexpat (P3c-1): CPython's pyexpat feeds expat at most 1 MiB a call, and its threshold setters' argument conversion error; a chunking and an argument check, refuses nothing"
+ },
+ "lib/pyexpat.py :: xmlparser._store_attribute_value :: a0[0] > 0 and before >= self._amp_act and before / a0[0] <= self._amp_max) #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "pyexpat (P3c-1): expat 2.9.0's own billion-laughs and allocation-tracker protections, CPython 3.14.10's defaults and setters (pinned, not a Sagebrush cap): parser protection, refuses only the document"
  },
  "lib/sage_all.py ::  :: _CF_MAX_BITS = 10**6 #0": {
   "class": "2+3",
@@ -11290,111 +11627,5 @@
  "web/workspace/sync-ledger.ts :: waitSync :: if (t !== undefined && (!Number.isSafeInteger(t) || t < 1 || t > WAIT.timeoutMax)) throw Object.assign(new WorkspaceError(\"invalid\", `timeoutMs is an integer from 1 to ${WAIT.timeoutMax}`), { max: WAIT.timeoutMax }); #0": {
   "class": "1",
   "owner": "sync client"
- },
- "lib/_sage_rpoly.py :: PolynomialInexact.__pow__ :: raise NotImplementedError(\"a power of a polynomial over %r by %r is not available in sagebrush yet\" % (self._ring._base, n)) #0": {
-  "class": "coverage",
-  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
-  "reason": "the fraction field of a polynomial ring over an inexact field (negative powers, division by a polynomial) and powers by a non-integer: 1b stage 2, not a cap"
- },
- "lib/_sage_rpoly.py :: PolynomialInexact.__pow__ :: raise NotImplementedError(\"the fraction field of %r is not available in sagebrush yet\" % (self._ring,)) #0": {
-  "class": "coverage",
-  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
-  "reason": "the fraction field of a polynomial ring over an inexact field (negative powers, division by a polynomial) and powers by a non-integer: 1b stage 2, not a cap"
- },
- "lib/_sage_rpoly.py :: PolynomialInexact.__rtruediv__ :: raise NotImplementedError(\"the fraction field of %r is not available in sagebrush yet\" % (self._ring,)) #0": {
-  "class": "coverage",
-  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
-  "reason": "the fraction field of a polynomial ring over an inexact field (negative powers, division by a polynomial) and powers by a non-integer: 1b stage 2, not a cap"
- },
- "lib/_sage_rpoly.py :: PolynomialInexact.__truediv__ :: raise NotImplementedError(\"the fraction field of %r is not available in sagebrush yet\" % (self._ring,)) #0": {
-  "class": "coverage",
-  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
-  "reason": "the fraction field of a polynomial ring over an inexact field (negative powers, division by a polynomial) and powers by a non-integer: 1b stage 2, not a cap"
- },
- "lib/_sage_rpoly.py :: PolynomialInexact._refuse_parents :: raise TypeError(\"unsupported operand parent(s) for %s: '%r' and '%r'\" % (sym, a, b)) #0": {
-  "class": "none",
-  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
-  "reason": "Sage's coercion refusal (TypeError) for polynomials over an inexact field with another ring or a Python complex, in Sage's text; refuses nothing for size"
- },
- "lib/_sage_rpoly.py :: PolynomialRingInexact.__call__ :: Converting an expression of degree 1048577 to a dense polynomial needs about 8.4 MB, but Sagebrush has a fixed limit of about 8.3 MB for one polynomial. #0": {
-  "class": "none",
-  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
-  "reason": "docstring text and examples of the dense coefficient bound; refuses nothing"
- },
- "lib/_sage_rpoly.py :: PolynomialRingInexact.__call__ :: conversion (a fixed limit of 2^20 coefficients):: #0": {
-  "class": "none",
-  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
-  "reason": "docstring text and examples of the dense coefficient bound; refuses nothing"
- },
- "lib/_sage_rpoly.py :: PolynomialRingInexact.__call__ :: sage: _sage_poly._MAX_DENSE_COEFFS = cap # sagebrush only #0": {
-  "class": "none",
-  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
-  "reason": "docstring text and examples of the dense coefficient bound; refuses nothing"
- },
- "lib/_sage_rpoly.py :: PolynomialRingInexact.__call__ :: sage: import _sage_poly; cap = _sage_poly._MAX_DENSE_COEFFS; _sage_poly._MAX_DENSE_COEFFS = 11 # sagebrush only #0": {
-  "class": "none",
-  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
-  "reason": "docstring text and examples of the dense coefficient bound; refuses nothing"
- },
- "lib/_sage_rpoly.py :: _admit :: cap = _sage_poly._MAX_DENSE_COEFFS #0": {
-  "class": "2",
-  "disposition": {
-   "2": {
-    "route": "memguard"
-   }
-  },
-  "explained": true,
-  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
-  "reason": "the dense coefficient bound of the exact polynomials (_sage_poly._MAX_DENSE_COEFFS, 2^20), admitted before a polynomial over an inexact field is built: SR conversion, product, square, power, shift (astra's RPOLY-ALLOC-1)",
-  "row": "inv-13"
- },
- "lib/_sage_rpoly.py :: _admit :: exact polynomials' _MAX_DENSE_COEFFS coefficients (the memory guard's error, at 8 bytes a #0": {
-  "class": "none",
-  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
-  "reason": "docstring text and examples of the dense coefficient bound; refuses nothing"
- },
- "lib/_sage_rpoly.py :: _admit :: if n > cap: #0": {
-  "class": "2",
-  "disposition": {
-   "2": {
-    "route": "memguard"
-   }
-  },
-  "explained": true,
-  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
-  "reason": "the dense coefficient bound of the exact polynomials (_sage_poly._MAX_DENSE_COEFFS, 2^20), admitted before a polynomial over an inexact field is built: SR conversion, product, square, power, shift (astra's RPOLY-ALLOC-1)",
-  "row": "inv-13"
- },
- "lib/_sage_rpoly.py :: _admit :: raise _memguard.memory_guard(what, n * 8, cap * 8, \"one polynomial\", fixed=True) #0": {
-  "class": "2",
-  "disposition": {
-   "2": {
-    "route": "memguard"
-   }
-  },
-  "explained": true,
-  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
-  "reason": "the dense coefficient bound of the exact polynomials (_sage_poly._MAX_DENSE_COEFFS, 2^20), admitted before a polynomial over an inexact field is built: SR conversion, product, square, power, shift (astra's RPOLY-ALLOC-1)",
-  "row": "inv-13"
- },
- "lib/_sage_rpoly.py :: _refuse_foreign :: raise TypeError(\"unsupported operand parent(s) for %s: '%s' and '%s'\" % (sym, a, b)) #0": {
-  "class": "none",
-  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
-  "reason": "Sage's coercion refusal (TypeError) for polynomials over an inexact field with another ring or a Python complex, in Sage's text; refuses nothing for size"
- },
- "lib/_sage_rpoly.py :: _refuse_foreign :: raise TypeError(\"unsupported operand type(s) for /: '%s' and '%s'\" % (ca, cb)) #0": {
-  "class": "none",
-  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
-  "reason": "Sage's coercion refusal (TypeError) for polynomials over an inexact field with another ring or a Python complex, in Sage's text; refuses nothing for size"
- },
- "lib/_sage_rpoly.py :: _refuse_mixed :: raise NotImplementedError(\"arithmetic with %s and %s together is not available in sagebrush yet\" % (a, b)) #0": {
-  "class": "coverage",
-  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
-  "reason": "polynomials over an inexact field with a number field that has an embedding (Sage computes in the common ring): L33, not a cap"
- },
- "lib/_sage_rpoly.py :: _refuse_types :: raise TypeError(\"unsupported operand type(s) for /: '%s' and '%s'\" % (ca, cb)) #0": {
-  "class": "none",
-  "owner": "polynomials over inexact fields (@sagebrush-sage2)",
-  "reason": "Sage's coercion refusal (TypeError) for polynomials over an inexact field with another ring or a Python complex, in Sage's text; refuses nothing for size"
  }
 }

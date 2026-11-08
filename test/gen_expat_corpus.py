@@ -173,6 +173,25 @@ AMPLIFICATION = [
                               "SetBillionLaughsAttackProtectionMaximumAmplification": 1.0}),
 ]
 
+ENTITY_VALUE_ERRORS = [
+    "<!DOCTYPE r [<!ENTITY x 'ab %'>]><r/>", "<!DOCTYPE r [<!ENTITY x 'ab %\"'>]><r/>",
+    "<!DOCTYPE r [<!ENTITY x 'ab% c'>]><r/>", "<!DOCTYPE r [<!ENTITY x 'a&#0;b'>]><r/>",
+    "<!DOCTYPE r [<!ENTITY x 'ab\r\n%p;'>]><r/>", "<!DOCTYPE r [<!ENTITY % p 'ab %q;'>]><r/>",
+]
+LOOKAHEAD = [
+    ("] before a split character", "<r>a]é]]é]\ré\r\n</r>".encode("utf-8")),
+    ("] in CDATA before a split character", "<r><![CDATA[]é]]é]]]é]]></r>".encode("utf-8")),
+    ("] before a split utf-16 pair", "﻿<r>]\U0001F600]]\U0001F600\r\U0001F600</r>".encode("utf-16-le")),
+    ("prolog ] before a split character", "<!DOCTYPE r [<!ENTITY x 'v'>]é><r/>".encode("utf-8")),
+]
+ATTRIBUTE_VALUES = [
+    "<r a=' x\t\ty \r\n z\r ' b=\"\n\n\"/>",
+    "<!DOCTYPE r [<!ATTLIST r a NMTOKENS #IMPLIED b ID #IMPLIED>]><r a='  x\t\ty \r\n z\r ' b='\t\tid\n'/>",
+    "<!DOCTYPE r [<!ENTITY e ' p\tq '><!ATTLIST r a NMTOKENS #IMPLIED>]><r a=' &e; x &#32; &#9; y&e;' c=' &e; '/>",
+    "<!DOCTYPE r [<!ATTLIST r a NMTOKENS ' x\t y\n'>]><r/>",
+]
+MULTILINE_ATTRIBUTE = [["<svg><path d='", 1], ["M 10 20\n\t\tL 30 40 C 1  2\r\n", 10000], ["'/></svg>", 1]]
+
 
 def chunkings(doc, rnd):
     whole = [doc]
@@ -255,6 +274,16 @@ def record():
         add_long("amplification-defaults", recipe, label, handlers={"SE", "EE"})
     for recipe in LONG:
         add_long("long", recipe, build(recipe)[:40], handlers=None)
+    # (P3c-1 r2, found by differential fuzzing: an entity value's error comes after its declaration is reported, with
+    # the value up to the error; a character whose bytes are incomplete is there for a lookahead past ] or a CR;
+    # attribute values of spaces, tabs and line ends, CDATA and tokenized)
+    for d in ENTITY_VALUE_ERRORS:
+        add("malformed", d, configs=(("all", dict(ET_CONFIG, extra=True)),))
+    for label, b in LOOKAHEAD:
+        add("encoded", b, label=label)
+    for d in ATTRIBUTE_VALUES:
+        add("well-formed", d, configs=(("all", dict(ET_CONFIG, extra=True)),))
+    add_long("long", MULTILINE_ATTRIBUTE, build(MULTILINE_ATTRIBUTE)[:40], handlers=None)
     return cases
 
 

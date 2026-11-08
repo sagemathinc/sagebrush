@@ -169,7 +169,15 @@ class _Chars:
         self.cdata_run = _re.compile("[^\\]\\r\\n" + _INVALID + "]+")
         # (attribute and entity values, comments, PIs, literals: any valid character but the ones each scanner stops at)
         self.att_run = _re.compile("[^<&\\t\\n\\r '\"" + _INVALID + "]+")
-        self.plain_run = _re.compile("[^\\-?\\]'\"<&%\\t\\n\\r " + _INVALID + "]+")
+        # (a start tag's quoted value, as scanAtts reads it: anything valid up to its quote, a < or an &)
+        self.value_run = {_BT_QUOT: _re.compile("[^\"<&" + _INVALID + "]+"),
+                          _BT_APOS: _re.compile("[^'<&" + _INVALID + "]+")}
+        # (a comment's, a processing instruction's, a literal's and an entity value's runs: each up to the next
+        # character its scanner looks at)
+        self.comment_run = _re.compile("[^\\-" + _INVALID + "]+")
+        self.pi_run = _re.compile("[^?" + _INVALID + "]+")
+        self.lit_run = _re.compile("[^'\"" + _INVALID + "]+")
+        self.entity_value_run = _re.compile("[^&%\\r\\n" + _INVALID + "]+")
         self.colon_bt = _BT_COLON if ns else _BT_NMSTRT
         # (an attribute in one match, the common case: a name, =, a quoted value of plain characters, and what must
         # follow it; anything else is left to scan_atts, character by character, and its exact errors)
@@ -261,7 +269,7 @@ class _Tok:
                 return (_TOK_INVALID, i)
             i += 1
             while i < end:
-                r = self.c.plain_run.match(self.s, i, min(self.n, end, i + _WINDOW))
+                r = self.c.comment_run.match(self.s, i, min(self.n, end, i + _WINDOW))
                 if r is not None and r.end() > i:
                     i = r.end()
                     continue
@@ -357,7 +365,7 @@ class _Tok:
                     return (_TOK_INVALID, i)
                 i += 1
                 while i < end:
-                    r = self.c.plain_run.match(self.s, i, min(self.n, end, i + _WINDOW))
+                    r = self.c.pi_run.match(self.s, i, min(self.n, end, i + _WINDOW))
                     if r is not None and r.end() > i:
                         i = r.end()
                         continue
@@ -610,10 +618,11 @@ class _Tok:
                     return (_TOK_INVALID, i)
                 i += 1
                 # in the attribute value
+                value_run = self.c.value_run[opn]
                 while True:
                     if not i < end:
                         return self._partial(i)
-                    r = self.c.att_run.match(self.s, i, min(self.n, end, i + _WINDOW))
+                    r = value_run.match(self.s, i, min(self.n, end, i + _WINDOW))
                     if r is not None and r.end() > i:
                         i = r.end()
                         continue
@@ -693,7 +702,12 @@ class _Tok:
             vs = t.index(t[ve], eq) + 1
             normalized = not (vs < ve and (t[vs] == " " or t[ve - 1] == " " or c.not_normal.search(t, vs, ve)))
             atts.append([i, name_end, vs, ve, normalized])
-            j = c.space_run.match(t, m.end()).end()
+            j = m.end()
+            while True:
+                lim = min(self.n, end, j + _WINDOW)
+                j = c.space_run.match(t, j, lim).end()
+                if j < lim or lim == min(self.n, end):
+                    break
             if j >= end or j >= self.n:
                 return self._partial(j)
             ch = t[j]
@@ -897,7 +911,7 @@ class _Tok:
 
     def scan_lit(self, opn, i, end):
         while i < end:
-            r = self.c.plain_run.match(self.s, i, min(self.n, end, i + _WINDOW))
+            r = self.c.lit_run.match(self.s, i, min(self.n, end, i + _WINDOW))
             if r is not None and r.end() > i:
                 i = r.end()
                 continue
@@ -1121,7 +1135,7 @@ class _Tok:
                         i += 1
                     return (_TOK_DATA_NEWLINE, i)
                 return (_TOK_DATA_CHARS, i)
-            r = self.c.plain_run.match(self.s, i, min(end, i + _WINDOW))
+            r = self.c.entity_value_run.match(self.s, i, min(end, i + _WINDOW))
             i = r.end() if r is not None and r.end() > i else i + 1
         return (_TOK_DATA_CHARS, i)
 
@@ -2449,9 +2463,15 @@ class xmlparser:
         consumed to."""
         have_more = not final
         i = 0
+        # (a character whose bytes are incomplete, held by the decoder, is there for expat's tokenizer before the
+        # final end too: a lookahead past ] or a CR sees a character that isn't > or LF, and a run of data ends
+        # before it)
+        pc = self._pc
+        if pc < 0 and self._held and self._decoder is not None and self._decoder.partial_char:
+            pc = len(self._text)
         while True:
             p = self._processor
-            self._scan = _Tok(self._text, len(self._text), self._pc, self._chars, self._odd)
+            self._scan = _Tok(self._text, len(self._text), pc, self._chars, self._odd)
             if p == "init" or p == "prolog":
                 i, again = self._do_prolog(i, have_more)
             elif p == "content":
@@ -2683,7 +2703,9 @@ class xmlparser:
                         handle_default = False
             elif role == _ROLE_ENTITY_VALUE:
                 if dtd.keep_processing:
-                    value = self._store_entity_value(text, s + 1, nxt - 1)
+                    # (as expat's: the value stored up to an error in it is the entity's, and reported, before the
+                    # error is)
+                    value, err = self._store_entity_value(text, s + 1, nxt - 1)
                     ent = self._decl_entity
                     if ent is not None:
                         self._charge(_str_cost(len(value)) + _ENTRY_COST)
@@ -2692,6 +2714,8 @@ class xmlparser:
                             self._report("EntityDeclHandler", ent.name, 1 if ent.is_param else 0, value, self._base,
                                          None, None, None)
                             handle_default = False
+                    if err is not None:
+                        raise err
             elif role == _ROLE_DOCTYPE_SYSTEM_ID:
                 dtd.has_param_entity_refs = True
                 if self.StartDoctypeDeclHandler is not None and self._doctype is not None:
@@ -2964,6 +2988,38 @@ class xmlparser:
                     ent.open = False
                     self._release(_FRAME_COST)
                 continue
+            if ent is None and acc is not False:
+                # (a run without a reference, a < or an invalid character is only data, spaces and line ends, one
+                # token each in expat: taken whole, as those tokens would add it, when the accounting can't fire
+                # inside it: the output stays under the activation threshold, or it is past it with the
+                # amplification within the maximum, which a run of direct bytes only lowers)
+                lim = min(e, i + _WINDOW)
+                if i <= sc.pc < lim:
+                    lim = sc.pc
+                k = _ATT_PLAIN.match(t, i, lim).end()
+                if k < e and t[k - 1:k + 1] == "\r\n":
+                    k -= 1              # (a CR LF is one line end: never split between two runs)
+                if k > i:
+                    run = t[i:k]
+                    ok = True
+                    if acc is not None:
+                        nb = self._blen(run)
+                        a0 = self._acc
+                        before = a0[0] + a0[1]
+                        ok = before + nb < self._amp_act or (
+                            a0[0] > 0 and before >= self._amp_act and before / a0[0] <= self._amp_max)
+                        if ok:
+                            self._account(nb, acc)
+                    if ok:
+                        run = _ATT_LINE_END.sub(" ", run)
+                        if not is_cdata:
+                            run = _SPACES.sub(" ", run)
+                            if run[:1] == " " and (not out or out[-1][-1:] == " "):
+                                run = run[1:]
+                        if run:
+                            out.append(run)
+                        frame[2] = k
+                        continue
             tok, nxt = sc.attribute_value_tok(i, e)
             if tok not in (_TOK_INVALID, _TOK_PARTIAL, _TOK_PARTIAL_CHAR, _TOK_NONE) and acc is not None:
                 self._account(self._blen(t[i:nxt]) if ent is None else len(t[i:nxt].encode("utf-8", "surrogatepass")),
@@ -3036,10 +3092,16 @@ class xmlparser:
 
     def _store_entity_value(self, text, a, b):
         """storeEntityValue, for the internal subset: references to general entities kept as they are, character
-        references resolved, line ends normalized; a parameter entity reference is an error here"""
-        sc = self._scan
+        references resolved, line ends normalized; a parameter entity reference is an error here: (the value, None),
+        or (the value up to an error, the error)"""
         out = []
-        i = a
+        try:
+            self._entity_value_runs(self._scan, text, a, b, out)
+        except _Error as e:
+            return "".join(out), e
+        return "".join(out), None
+
+    def _entity_value_runs(self, sc, text, i, b, out):
         while i < b:
             tok, nxt = sc.entity_value_tok(i, b)
             if tok == _TOK_PARAM_ENTITY_REF:
@@ -3064,7 +3126,6 @@ class xmlparser:
             else:
                 raise _Error(23, i)
             i = nxt
-        return "".join(out)
 
     # ------------------------------------------------------------------ comments and processing instructions
     def _report_pi(self, s, nxt, t=None):
@@ -3582,6 +3643,11 @@ def _name_length(t, a, chars):
 
 _ATT_EXTRACT = _re.compile("[\\t\\n\\r ]+([^\\t\\n\\r =]+)[\\t\\n\\r ]*=[\\t\\n\\r ]*(?:\"([^\"]*)\"|'([^']*)')")
 _NOT_NORMAL = _re.compile("[&\\t\\r\\n]|  ")
+# (an attribute value's run of data, spaces and line ends; its line ends and tabs, each one space; and, for a
+# tokenized type, its runs of spaces)
+_ATT_PLAIN = _re.compile("[^&<" + _INVALID + "]*")
+_ATT_LINE_END = _re.compile("\\r\\n?|[\\n\\t]")
+_SPACES = _re.compile("  +")
 
 
 def _get_atts(t, i, chars):
