@@ -124,7 +124,7 @@ Opening a file that's in the cloud, while offline:
 2. **when it is kept** (§3.1), on the file, or on every file under a kept folder, 500 entries a transaction, from a durable cursor;
 3. **by the prefetch rule** (§2.1).
 
-A remote op that replaces a file's hash moves `fetch` to the new hash only if the file was local or kept. Otherwise it stays "In the cloud", with its new hash.
+A remote op that replaces a file's hash moves `fetch` to the new hash only if the file was local or kept. Otherwise it stays "In the cloud", with its new hash. A remote op that creates a file under a kept folder, or moves one there, sets `fetch` too (§3.1).
 
 **The open path.** A read of a `remote` file (open in an editor, export, a notebook's `open()`, a local agent's read through the workspace):
 - sets `fetch` if it isn't set, and puts the file at the front: an in-memory priority list (at most 8 files) that the fetch loop serves before the durable queue;
@@ -174,6 +174,14 @@ daybreak2's requirement: cloud-only, downloading, local, kept, waiting to go up,
 
 - **An evicted file is an "In the cloud" file, exactly:** `remote: true` again, with its name, hash and size. Nothing else is recorded, so there is no third kind of absence to get wrong.
 - **`keep` is per device and never synced:** a meta record `keep:<fid>`, for a file or a folder. A file is kept if it or any folder above it is in `keep`. The walk up is bounded by the path's depth (a path is at most 1,024 bytes). A file added later to a kept folder is kept, by the same walk, with no extra record.
+- **Every way a file can arrive in a kept folder is kept** (William, Nov 8: "yes, like OneDrive. This includes files saved on this device into the folder"). Because "kept" is decided by walking up from the file's current place each time it's asked, never recorded per file when it arrives, there is no arrival path that can miss it:
+  - **saved on this device** into the folder, as a new file, including an editor's save by a temporary name then a rename into place, and a save made offline;
+  - **moved or copied** into the folder, or into a folder below it, on this device;
+  - **arriving from another device** (a remote create, move or write under the folder): the same walk sets `fetch`, so the bytes come down as for any kept file (§2's rule 2, the rule for remote ops extended from "local or kept" files to files under a kept folder);
+  - a new folder made inside a kept folder, and everything later saved in it.
+
+  A file moved **out** of every kept folder stops being kept by the same walk, and becomes an ordinary cached file. Renaming or moving the kept folder itself keeps its `keep:<fid>`, since the record is by the folder's identity, not its path.
+- Tests (William's OneDrive case): a new file saved offline into a kept folder, then synced, then a removal pass run with the cache over its high mark: it is never removed. The same for a save by temporary name and rename; a file moved into a kept subfolder; a subfolder made inside a kept folder; a kept folder renamed; a file from another device created in a kept folder (fetched, then kept). And the converse: a file moved out of the kept folder becomes removable.
 - **"Recently opened"** is `opened:<fid>` in meta, written at most once an hour per file. A file never opened sorts by its `updated` time.
 - **The cache total** (the bytes of local data files, kept and not) is a meta counter kept in the same transaction as each install, removal and write, and recounted daily, never a scan.
 
@@ -214,7 +222,7 @@ A file's bytes may be removed from a device only if **all** of these hold, check
 
    Old confirmed data (an earlier namespace's, an index being rebuilt, or one kept after sign-out) is never proof that the current account has the bytes. So with sync off, signed out, between accounts or during a rebuild, nothing is removed: the reason is "Sync isn't running". These are C2's and step 4's own fences, not a new notion of synced;
 1. **the active confirmed index has this identity at this `sha256`** (C3): the server accepted the op that made these bytes this file's current ones, so its holding is referenced by this very entry. The same hash under some other identity, in an older confirmed state, or under another index generation, doesn't count. For a chunked file, the server accepts an op only for a manifest it has verified against the whole SHA-256 (§4.1), so this check also means the cloud's chunks rebuild these exact bytes;
-2. **nothing about this identity is pending, at any stage.** None of these names it: an outbox record; the C2 summary's `latest` beyond the confirmed seq, or `byNs[ns]`'s `allocated`, `held`, `collapsed` or `successor` not yet settled; a pin (`sync:cur:<fid>` and `pins` by identity); the reissue journal; the undrained adoption journal; a local op not yet scanned (its `seq` above the scan watermark). Each is an O(1) lookup by identity or a comparison with a stored watermark, never a scan. This is the complete pending summary the view itself uses (sync-client C3, "What the person sees": the outbox, the adoption journal, held writes, unscanned local ops), so a stage the view counts can't be missed here (astra's TF3);
+2. **nothing about this identity is pending, at any stage.** None of these names it: an outbox record; the C2 summary's `latest` beyond the confirmed seq, or `byNs[ns]`'s `allocated`, `held`, `collapsed` or `successor` not yet settled; a pin (`sync:cur:<fid>` and `pins` by identity); the reissue journal; the undrained adoption journal; a local op not yet scanned (its `seq` above the scan watermark); the server's repair list naming the file's `sha256` (§4.1, "Repairing a corrupt file"). Each is an O(1) lookup by identity or a comparison with a stored watermark, never a scan. This is the complete pending summary the view itself uses (sync-client C3, "What the person sees": the outbox, the adoption journal, held writes, unscanned local ops), so a stage the view counts can't be missed here (astra's TF3);
 3. it isn't a conflict copy waiting for the person;
 4. no download or upload of it is in flight;
 5. (sync-client) it isn't kept, by itself or a folder above it;
@@ -242,6 +250,12 @@ If any fails, the removal is refused with its reason (§1.3), and the cache budg
 - a removal and a new reader racing for the file's lock, in both orders: the reader gets the bytes, or waits and then fetches; never a missing file;
 - a crash in the middle: the removal is one transaction, so after a reload the file is either local with its bytes, or "In the cloud" without them, never a local entry with no bytes;
 - the scale: 100,000 entries, a pass over a full cache, every transaction within PINS.slice's request bound.
+
+(sync-client) **The randomized state-machine test** (@sagebrush, from William's outside review). The tests above each hold one step. This one runs many seeded random interleavings of every action that can touch a file's copies:
+- **Actions:** a local write (new file, overwrite, save into a kept folder, delete, move); a remote write from a second simulated device; a sync step (send, ack, echo, refusal); a download; a removal by hand and by the automatic pass; keeping and un-keeping a file or folder; a second tab opening and closing a file; sign-out, account switch, sync off and on, and a rebuild; a network failure at any request; a crash (the database kept as of its last committed transaction, everything in memory lost).
+- **Against:** the real client code over a real IndexedDB (fake-indexeddb in Node), and the reference server (Miniflare) with its R2, through a network that can drop, delay or duplicate any request.
+- **The invariant, checked after every step:** for every file version that the person has written on any device and not since replaced or deleted on purpose, at least one recoverable copy exists: bytes on some device (with its pending record or pin), or a held, verified holding on the server that a confirmed op points at. A removal never takes the last such copy. Also checked each step: §3.1's states are consistent (no local entry without bytes, no `remote` entry with bytes), and the cache total equals the sum of local bytes.
+- **Size:** 10,000 sequences of 200 steps on each PR that touches §3 or §4, and many more nightly. A failure prints its seed and its shortest failing sequence (by removing steps while it still fails), and that sequence becomes a fixed test.
 
 ## 4. Step 3: large files in chunks, and small files in packs
 
@@ -279,6 +293,14 @@ An insertion in the middle of a file typically moves one or two chunk boundaries
 - **The file's identity stays its whole SHA-256:** the entry, the op, `base`, conflict copies and versions are all unchanged. A chunked file and an unchunked one with the same bytes are the same file.
 
 **Uploading, resumable at every step, nothing charged twice:**
+
+**First, is the whole file already there?** (@sagebrush, item 5.) Before chunking, the client sends the file's whole `sha256` in `POST /blobs/check`, which now answers for a whole file too: `held` (a blob, a packed member, or a `files` row `verified` or `live`), `verifying` (a row for it is being verified), or `missing`.
+- `held`: the client skips every step below and sends the op. The bytes are the same whatever chunker made them, so a client never registers a second manifest for a hash already verified, and never needs to: a manifest under another `cdc` name for the same bytes is simply not made.
+- `verifying`: the client doesn't register its own manifest (it would get `conflict`). It drives the existing row's verification with the verify call below, which works the same whoever registered it, then sends the op.
+- `missing`: the steps below.
+
+Tests: two clients with different `cdc` names upload the same bytes, one after the other (the second makes no PUT and no manifest) and at once (one registers, the other gets `verifying` or `conflict`, drives the same row, and both ops are accepted); an old client reads a file whose manifest was made by a newer `cdc`, and the reverse (reads never re-chunk, so both work).
+
 1. The client chunks and hashes the file. It holds one chunk and the gear state at a time, reading the file's bytes from fileBytes once, under the reservation (L2). On a phone this runs in a Worker, one file at a time.
 2. `POST /blobs/check` with the chunks' hashes, at most 1,000 a request.
 3. `PUT /blob/<chunk sha256>` for each missing chunk. This is today's endpoint and its reservation, at most 8 MiB each. The client sends at most 2 at once (L2's uploads); the server's own limit of 4 PUTs at once per account (sync-server §8) is a separate ceiling above it. A retry of a stored chunk is idempotent (sync-server §5.4, step 3).
@@ -308,11 +330,27 @@ Tests (astra's TF1): correct chunks in the wrong order; a wrong whole-file hash;
 
 **Two checks, two outcomes:**
 - **Each chunk is checked against its own hash as it arrives.** A chunk that doesn't match is a transfer error: it is dropped and fetched again, like any failed fetch (L3's backoff, with its kept signed URL).
-- **The whole file is checked once every chunk has passed.** Since the server verified the manifest before any op could use it, a mismatch here means stored bytes or a server defect, not a client's wrong manifest, and fetching again would get the same bytes. So it is final: `fetchFailed: corrupt`, with no retry, until the file's hash changes (a new write from another device clears it, as any new hash does).
+- **The whole file is checked once every chunk has passed.** Since the server verified the manifest before any op could use it, a mismatch here means stored bytes went bad (or a server defect), not a client's wrong manifest, and fetching again would get the same bytes. So the device doesn't retry: it marks the file `fetchFailed: corrupt` and reports it. The same holds for a chunk that fails its own hash again from a fresh URL, and for a single blob.
+
+**Repairing a corrupt file** (@sagebrush, item 6), instead of leaving it broken until the file changes:
+1. **The report:** `POST /api/sync/v1/repair/<sha256>` from the device that saw it. The account object re-runs the verification of §4.1, step 5, from the start, metered as usual (for a single blob, one streamed hash check of the blob). A device's report is accepted at most once per hash per day.
+2. **If the server's bytes check out,** the fault was on the reporting device's side: the row's `repair_gen` goes up, and that device fetches once more. If its second whole-file check fails too, it stays `fetchFailed: corrupt` and logs both.
+3. **If they don't,** each holding whose stored bytes don't hash to its name is marked `damaged`, and the hash goes on the account's repair list (in `welcome` and the `index` stream, at most 100 entries, oldest dropped from the list but not from the marks).
+4. **Any device whose local bytes have that `sha256`** (from its fileBytes, a version or a pin) re-chunks the file and uploads the damaged chunks again. A `PUT` for a hash whose holding is `damaged` is accepted as a replacement: it gets a new random key, R2 checks its hash as for any PUT, and the finalize swaps the holding to the new key (the old key goes to the outbox). Then the server verifies the row again, from the start; on success, `damaged` clears, `repair_gen` goes up, and the hash leaves the repair list.
+5. **Devices with `fetchFailed: corrupt` retry only when `repair_gen` changes,** never on a timer. So there is still no retry loop: one fetch per repair, and none while nothing has changed.
+
+While a hash is on the repair list, no device removes its local copy of a file with that hash: §3.4 adds it to check 2's pending set, since that copy may be the one the repair needs. A file whose cloud bytes went bad after every device had removed its copy can't be repaired this way. That loss would be the storage's, not sync's, and is reported to the person as such ("The copy in the cloud is damaged, and no device has it.": board's words to come).
+
+Tests: a chunk's stored bytes flipped in the test R2, then a download (reported, re-verified, marked damaged, repaired from a second device, fetched again once); the same with no device holding the bytes (stays corrupt, reported, no loop); a report when the server's bytes are fine (one more fetch, no more); a removal attempted on a device holding a hash on the repair list (refused).
 
 **Assembly memory, honestly:** fileBytes stores a file as one value, so a 200 MiB file is assembled whole in memory under its reservation (`size × COPIES`, L2), as a 200 MiB download would be today. Storing files by chunk on the device (so a phone never holds 200 MiB at once, and local versions share chunks) is a later change, outside this note.
 
 ### 4.2 Packs
+
+**After a benchmark, not part of the core plan** (@sagebrush, item 4). Packs only help with the first upload of many small files; R2's per-operation cost there is small, so the case for them is latency. They are built only if this measurement says so:
+- **The measurement:** the first sync of a workspace of 20,000 files of 4 KiB, single blobs, with the client's 2 uploads at once (L2), from a computer and a phone, on a connection with about 50 ms and about 150 ms round trips. Recorded: the wall time to "Synced", the requests made, and the server's per-account rates hit. Each upload is a reservation, a PUT and a finalize, so at 2 at once and 150 ms a round trip this could take tens of minutes.
+- **First, the cheaper fix:** the same run with more uploads at once for small files (for example 8 under 64 KiB, within the server's 4 PUTs per account raised for small bodies), and with `blobs/check` batching. If that brings the first sync under 10 minutes on the 150 ms connection, packs aren't built.
+- **Otherwise,** packs as below, and the same measurement repeated with them, to show the gain before PR 6 merges.
 
 - Only small immutable blobs (proposal: ≤ 64 KiB) go into packs (proposal: target 8 MiB, hard maximum 16 MiB). A pack is immutable, with a bounded index of offset and length, read by Range (daybreak2, point 4).
 - A pack is never rewritten when one member changes. A partly dead pack is compacted by GC, one pack per step, when its live share falls below a threshold.
@@ -470,6 +508,7 @@ Tests: the account or generation switched during an upload, a verification and a
 | Pack size, target / max | client builds, server checks | 8 / 16 MiB, prefix and index included; at most 4,096 members | 16 MiB | `limit`, before anything is reserved | no |
 | Pack index encoded size | server | 512 KiB | 512 KiB | `limit`, from the prefix, before the index is read | no |
 | Manifest verification | server | one call at a time per account; at most 8 chunks (64 MiB) a call; `sync.verify_bytes_per_day` 16 GiB per account, debited before each call's stream (§4.1) | CoCalc's; 16 GiB if CoCalc sends none | `rate`, with `retry_after` | yes (CoCalc) |
+| Repair reports | server | one per hash per device a day; the repair list in `welcome` at most 100 hashes; each report's re-verification metered by `sync.verify_bytes_per_day` | same | `rate` | no |
 | Unused manifest hold | server | `hold_until` a day after registration or its renewal | renewable 1-day TTL; — | retired (§4.3) | no |
 | Compaction reservation | server | one per account, at most 16 MiB, allowed above the storage cap; not usable by uploads | 16 MiB | waits its turn | no |
 | Pack compaction | server | under 50% live; one at a time; at most one every 30 minutes (48 a day: 48 reads ≤ 768 MiB, 48 writes ≤ 408 MiB, 48 deletes) | 16 MiB extra at once, a failed compaction's object included | waits its turn | no |
