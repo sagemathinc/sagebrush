@@ -105,7 +105,7 @@ Opening a file that's in the cloud, while offline:
   - while it downloads, in place of the content: "Downloading: 12 of 140 MB" (§2);
   - no room for it on this device: "There isn't room on this device for <name> (140 MB). Free up space in the Storage panel." (§2);
   - the daily read budget spent: "Daily download limit: resumes at 14:00" (as today, L1);
-  - a download whose bytes didn't match: ⚠ "The download didn't match the file in the cloud, so it wasn't saved on this device." (§4.1; whether to retry is sync-client's call there);
+  - a download whose bytes didn't match: ⚠ "The download didn't match the file in the cloud, so it wasn't saved on this device. It will download again when the file changes." (§4.1: a single damaged piece is simply fetched again, unseen; this message is for a whole file that doesn't match);
   - kept files over the budget: "Kept files use more than this device's limit" (§3.2);
   - what holds the space: "120 MB here haven't reached the cloud yet; 300 MB are kept on this device." (§5.3);
   - persistent storage refused: "This browser hasn't agreed to keep Sagebrush's storage. If it clears it to free space, changes not yet in the cloud go with it." (§3.3);
