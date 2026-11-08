@@ -101,8 +101,8 @@ Each enforced, with at-limit and one-over tests in PR 2:
 "Update from GitHub" stages the branch's newest commit as §2 does, and then plans and applies in the final transaction, as one SQL join of the folder (L), the staged commit (R) and `git_base` (B), so nothing changes between plan and apply. fs-sync §2.2's rules, applied per path:
 - changed on GitHub only: replaced (and "in the cloud" unless kept or open);
 - changed here only: kept;
-- changed in both: the folder's version keeps the name; GitHub's version is added as `name (conflict, GitHub).ext`, with `conflict_of` set. This matches fs-sync §2.3: the workspace's copy keeps the name;
-- deleted on GitHub, unchanged here: removed (GitHub keeps it, so no confirmation). Deleted on GitHub, changed here: kept;
+- changed in both: the folder's version keeps the name; GitHub's version is added as `name (conflict, GitHub).ext`, with `conflict_of` set (a conflict name already taken gets ` 2`, ` 3`, …, as fs-sync does; nothing is overwritten). This matches fs-sync §2.3: the workspace's copy keeps the name;
+- deleted on GitHub, unchanged here: removed (GitHub keeps it, so no confirmation). Deleted on GitHub, changed here: kept, and its `git_base` row is removed, so it shows as added;
 - a path that becomes `excluded` (too large, a link, `differs`…): the folder's file is kept untouched, and its row becomes `excluded`, so it is never proposed as a deletion;
 - the folder's own state is checked against what L read, by entry id and hash, in the same transaction;
 - `base_commit` and `git_base` move to the new commit.
@@ -149,5 +149,13 @@ The `/git` prototype's flow:
 | 4 | "Update from GitHub" (§4) | yes: screenshots first | sync-client | each §4 row, including a file that becomes `excluded`, and an edit landing between staging and the final transaction |
 | 5 | The terminal's `git` (§5), and the agent review flow from `git-proto` (§6) | yes | sagebrush | each command, and an unsupported one |
 | 6 | `git checkout` and `git worktree add` (§4.1) | yes | sync-client | bytes already held not stored again; checkout refused with changes |
+
+**More tests each PR must carry (grader):**
+- **How races are driven:** cancel, reset and the deadline (during the fetch, between batches, before the final transaction), and an edit between staging and the final transaction, are driven through named test gates (as tiered files' `gateOn`), never by timing; the deadline by a test clock.
+- **PR 2:** one refusal per tree-claim rule (a mode outside the four, an id not 40 hex, a folder row, an extra key, a path not a string, a body larger than its `Content-Length` says; and the same lying header for the 1 GiB staging cap); any 3xx from codeload, even to codeload, refused and not followed; an entry inflating past its declared size stops at declared size + 1 byte with nothing visible (bytes counted); a batch that dies after staging some rows and is retried from the cursor leaves no duplicate rows and takes no second reservation; an import of bytes the account already holds stores nothing new, and cancelling it deletes no referenced blob and returns used bytes exactly to their value before; the final transaction refused, with nothing visible, for a destination name taken meanwhile, a staged blob no longer held, the index at exactly 100,000 files and one over, and a changed account generation; an agent grant can't start, cancel or finish an import; ops carry `github:<import id>` even if the request names another device. The two measurements (a 64–95 MiB one-file batch; the final transaction at exactly 10,000) are recorded in the PR's evidence, never as time assertions in CI.
+- **PR 3:** against a fake GitHub with `sagebrush/<name>` and `-2` taken, no update or force call is made and `-3` is created; excluded and unchanged paths are absent from the new tree, a removal is a deletion and nothing else is deleted; no request to Sagebrush's origin carries the token (a network log).
+- **PR 4:** a conflict copy whose name is taken gets ` 2` and overwrites nothing; deleted on GitHub and changed here is kept and shows as added.
+- **PR 5:** `git push` makes no GitHub write from the terminal path.
+- **PR 6:** stored bytes grow by exactly the differing files (holdings and bytes before and after).
 
 **Not before tiered-files PR 4.** Until fetch-on-open ships, every device downloads every file, so an 8,573-file import would download everywhere. PRs 2 and 3 stay behind the DEV flag until then.
