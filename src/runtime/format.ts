@@ -1,7 +1,7 @@
 // repr(), str(), format() and `str % args`.
 
 import { T, markRaised, FloatBox, PyDict, typeOf, lookupType, raise, isType, dictKeyOf, dictGet, hooks, Ellipsis, NotImplemented, PyBytes, PyByteArray, StrLayout, PrimBox, typeName, isinstance, toPyExc } from "./object";
-import { PySet, setItems, isPyInt, fv, lookupSpecial, strFormatOpHook, id, index, normBig, PySlice, pollInterrupt, bitLengthSmallCopies, bitLengthSmallCopiesSigned } from "./ops";
+import { PySet, setItems, isPyInt, fv, lookupSpecial, specialOf, strFormatOpHook, id, index, normBig, PySlice, pollInterrupt, bitLengthSmallCopies, bitLengthSmallCopiesSigned } from "./ops";
 import { heapLimit } from "./heap";
 import * as FD from "./fdlibm";
 import * as SP from "./strpos";
@@ -778,8 +778,9 @@ export function percentFormat(fmtStr: string, args: any, bytesMode = false): str
     if (v instanceof PrimBox && isPyInt(v.$v)) return BigInt(v.$v);
     if (!needIndex && fv(v) !== undefined) return BigInt(Math.trunc(fv(v)!));
     for (const name of needIndex ? ["__index__"] : ["__index__", "__int__"]) {
-      if (lookupType(typeOf(v), name) !== undefined) {
-        const r = lookupSpecial(v, name)(v);
+      const f = lookupType(typeOf(v), name);
+      if (f !== undefined) {
+        const r = specialOf(v, f, name)(v);
         return BigInt(typeof r === "boolean" ? +r : r);
       }
     }
@@ -923,10 +924,12 @@ export function percentFormat(fmtStr: string, args: any, bytesMode = false): str
         if (x === undefined) {
           if (isPyInt(v) || typeof v === "boolean") x = Number(v);
           else {
-            const name = lookupType(typeOf(v), "__float__") !== undefined ? "__float__" : "__index__";
-            if (lookupType(typeOf(v), name) === undefined) raise(T.TypeError, `must be real number, not ${typeOf(v).$name}`);
+            let name = "__float__";
+            let f = lookupType(typeOf(v), name);
+            if (f === undefined) f = lookupType(typeOf(v), (name = "__index__"));
+            if (f === undefined) raise(T.TypeError, `must be real number, not ${typeOf(v).$name}`);
             // (called once, as CPython's PyFloat_AsDouble)
-            const r = lookupSpecial(v, name)(v);
+            const r = specialOf(v, f, name)(v);
             x = Number(fv(r) ?? r);
           }
         }

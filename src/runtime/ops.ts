@@ -96,6 +96,12 @@ const MISSING = {};
 // bound as Python binds one (a descriptor's __get__, a property, a callable
 // object), callable as f(o, ...args)
 export const lookupSpecial = special;
+// lookupSpecial(x, name) for a site that already holds f, the raw
+// lookupType(typeOf(x), name): a function bound as special() binds it, with
+// no cache lookup; anything else through special()
+export function specialOf(x: any, f: any, name: string): any {
+  return typeof f === "function" ? dunderFn(f) : special(x, name);
+}
 
 // The special method name of type t, normalized as special() does (for the
 // lookups made on a type rather than on an object).
