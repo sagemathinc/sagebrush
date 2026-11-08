@@ -176,6 +176,18 @@ try {
   check((await evaluate(`window.__execs`)) === ex4 && (await evaluate(`${T}.editor.buf`)) === "echo 日本", "TP-4: Enter while composing runs nothing and keeps the line");
   await evaluate(`${TA}.dispatchEvent(new CompositionEvent("compositionend", { data: "語", bubbles: true })), 1`);
   check((await evaluate(`${T}.editor.buf`)) === "echo 日本語", "an input method's text arrives from compositionend");
+  // (grader X5: a browser that follows compositionend with an insertText of the same text: the text arrives once)
+  await evaluate(`(() => { ${TA}.dispatchEvent(new CompositionEvent("compositionend", { data: "本", bubbles: true })); ${TA}.dispatchEvent(new InputEvent("input", { inputType: "insertText", data: "本", bubbles: true })); return 1; })()`);
+  check((await evaluate(`${T}.editor.buf`)) === "echo 日本語本", `X5: compositionend then the same insertText: inserted once: ${JSON.stringify(await evaluate(`${T}.editor.buf`))}`);
+  // (grader X7: a phone keyboard: keydown 229, not composing, then insertText: inserted once; its Enter (229, then
+  // insertLineBreak) never submits)
+  await evaluate(`${T}.editor.reset("echo ")`);
+  const ex7 = await evaluate(`window.__execs`);
+  await evaluate(`(() => { const k = (key) => { const e = new KeyboardEvent("keydown", { key, keyCode: 229, isComposing: false, bubbles: true, cancelable: true }); Object.defineProperty(e, "keyCode", { get: () => 229 }); ${TA}.dispatchEvent(e); };
+    k("Unidentified"); ${TA}.dispatchEvent(new InputEvent("input", { inputType: "insertText", data: "ph", bubbles: true }));
+    k("Enter"); ${TA}.dispatchEvent(new InputEvent("input", { inputType: "insertLineBreak", bubbles: true })); return 1; })()`);
+  await pause(200);
+  check((await evaluate(`${T}.editor.buf`)) === "echo ph" && (await evaluate(`window.__execs`)) === ex7, `X7: a phone keyboard's text inserted once, its 229 Enter never submits: ${JSON.stringify(await evaluate(`${T}.editor.buf`))}`);
   await evaluate(`${T}.editor.reset("")`);
 
   // ---- OUT-ISO on the shell's output (the rules of web/term/xterm-view.ts, shared with the remote terminal)
@@ -211,6 +223,15 @@ try {
   check(e3.ends === 0 && e3.held && e3.buf === "echo early" && e3.note === "A command is running: Stop it first.", `reset during a start: the start not ended, the admission held, another Enter refused with its line kept: ${JSON.stringify(e3)}`);
   await evaluate(`window.__startGo(), 1`);
   check(!!(await until(`${T}.cmd === null && ${T}.ready && window.__ends === 1`, 20000)), "and once that start is done: one end, one fresh start, the admission let go");
+  // (grader A4: an Enter the editor refuses (a reverse search's match past the bound) lets its admission go: the next
+  // command runs)
+  await evaluate(`(() => { const t = ${T}, h = t.editor.history; h.entries.push("y".repeat(t.editor.maxBytes + 1)); t.editor.search = { q: "y", at: h.entries.length - 1, failed: false, saved: "", savedCur: 0 }; return 1; })()`);
+  await focusTerm();
+  await realKey("Enter");
+  const a4 = await evaluate(`({ cmd: ${T}.cmd, note: document.querySelector(".sb-term-note").textContent })`);
+  await evaluate(`(() => { const t = ${T}; t.editor.history.entries.pop(); t.editor.search = null; t.editor.reset(""); return 1; })()`);
+  r = await run("echo a4");
+  check(a4.cmd === null && /^Not typed:/.test(a4.note) && r?.out === "a4\n", `A4: a refused Ctrl-R Enter lets its admission go; the next command runs: ${JSON.stringify(a4)} ${JSON.stringify(r?.out)}`);
   // (r6: the start it waits on fails instead: the reset still ends cleanly with a fresh start, the admission let go)
   await evaluate(`(() => { const t = ${T}; t.ready = false; t.starting = new Promise((_, j) => (window.__startNo = () => j(new Error("start failed")))); return 1; })()`);
   await evaluate(`${T}.editor.reset("reset"), 1`);
@@ -726,8 +747,21 @@ try {
   const bsheet = await evaluate(`(() => { const r = document.querySelector(".sb-term").getBoundingClientRect(); return { top: r.top, h: r.height, ih: innerHeight }; })()`);
   check(bsheet && bsheet.top <= 1 && bsheet.h >= bsheet.ih * 0.85, `board: under 700 px the dock is a full-height sheet: ${JSON.stringify(bsheet)}`);
   await send("Emulation.clearDeviceMetricsOverride");
+  // (grader T4, astra's ask: the first command while the shell starts, then ✕, then the start resolves: no exec, nothing
+  // drawn)
+  await evaluate(`(() => { const t = ${T}, h = t.opts.host; window.__x4 = 0; const x0 = h.exec.bind(h); h.exec = (...a) => (window.__x4++, x0(...a));
+    t.ready = false; t.starting = new Promise((r) => (window.__go4 = () => { t.ready = true; r(); })); window.__t4 = t; return 1; })()`);
+  await focusTerm();
+  await evaluate(`${T}.editor.reset("echo t4"), 1`);
+  await realKey("Enter");
+  await pause(100);
+  const w4 = await evaluate(`window.__t4.writer.stats.writes`);
   await evaluate(`document.querySelector(".sb-term-end").click()`);
   check((await evaluate(`document.querySelectorAll(".sb-term").length`)) === 0, "board: ✕ ends the session (the dock is gone)");
+  await evaluate(`window.__go4(), 1`);
+  await pause(500);
+  const t4 = await evaluate(`({ execs: window.__x4, writes: window.__t4.writer.stats.writes - ${w4}, running: !!window.__t4.running })`);
+  check(t4.execs === 0 && t4.writes === 0 && !t4.running, `T4: ✕ while the first command waits on the shell's start: once it resolves, no exec and nothing drawn: ${JSON.stringify(t4)}`);
   if (process.argv[2]) {
     const shot = await send("Page.captureScreenshot", { format: "png" });
     writeFileSync(process.argv[2], Buffer.from(shot.result.data, "base64"));

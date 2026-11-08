@@ -39,7 +39,7 @@ function rig(budget = BUDGET, { auto = true } = {}) {
 // order, one in flight, 64 KiB pieces, never inside a surrogate pair
 {
   const { w, r } = rig();
-  const big = "a".repeat(SLICE - 1) + "😀" + "b".repeat(SLICE * 2);
+  const big = "a".repeat(ITEM_MAX - 1) + "😀" + "b".repeat(SLICE * 2);
   const p1 = w.write(big, "output");
   const p2 = w.write("tail", "ui");
   await Promise.all([p1, p2]);
@@ -61,7 +61,7 @@ function rig(budget = BUDGET, { auto = true } = {}) {
   ok(w.charges.combining === 9, `every passed mark charged (${w.charges.combining})`);
   // a run split across two slices counts once
   const { w: w2, r: r2 } = rig();
-  await w2.write("a".repeat(SLICE - 4) + "e" + M.repeat(3) + M.repeat(7), "output");
+  await w2.write("a".repeat(ITEM_MAX - 4) + "e" + M.repeat(3) + M.repeat(7), "output");
   ok(w2.stats.writes === 2 && (r2.text().match(/́/g) || []).length === 8, `a run split across slices: 8 marks in all (${(r2.text().match(/́/g) || []).length})`);
   // an output boundary ends the run
   const { w: w3, r: r3 } = rig();
@@ -483,9 +483,9 @@ function putRig(budget = BUDGET, opts) {
   // W12: a sequence open across a new generation: none of it reaches the new screen
   const { w: w4, r: r4 } = rig({ ...BUDGET, links: 1 });
   await w4.write("\x1b]8;;https://a/1\x1b\\x\x1b]8;;\x1b\\", "output");
-  await w4.write("\x1b]8;;https://a/2", "output");
-  await w4.write("\x1b\\y\x1b]8;;\x1b\\", "output");
-  ok(r4.gens === 1 && !r4.text(1).includes("a/2") && r4.text(1).includes("y"), `W12: the rest of an OSC open across the change is dropped (${JSON.stringify(r4.text(1))})`);
+  await w4.write("\x1b]8;;https://a/", "output");
+  await w4.write("2-long\x1b\\y\x1b]8;;\x1b\\", "output");
+  ok(r4.gens === 1 && !r4.text(1).includes("2-long") && !r4.text(1).includes("a/") && r4.text(1).includes("y"), `W12: the rest of an OSC open across the change is dropped (${JSON.stringify(r4.text(1))})`);
   // W33: unkeyed lazy writes past the cap are dropped
   const { w: w5 } = rig(BUDGET, { auto: false });
   void w5.write("first", "ui");
@@ -624,6 +624,102 @@ function putRig(budget = BUDGET, opts) {
   while (r.pending.length) { r.pending.shift()(); await turn(); }
   await Promise.all([p1, p2]);
   ok(r.text() === "heldbeforeafter", `both drawn, in order: ${JSON.stringify(r.text())}`);
+}
+
+// grader's TESTS pins on ba2182e1 (blocking items 5-8, 10-12, 15; items 3-4 are the drift fixes above)
+{
+  // 5 (W28b): a merge never takes the ledger past MAX_QUEUED
+  const { w, r } = rig(BUDGET, { auto: false });
+  void w.write("held", "ui");
+  await turn();
+  void w.write("u".repeat(MAX_QUEUED - HEADROOM - 4 - 10 - 1), "ui");
+  void w.write("x", "output");
+  const before = w.ledger.bytes;
+  void w.write("y".repeat(100), "output");
+  ok(before === MAX_QUEUED - 10 && w.bytesMax <= MAX_QUEUED && w.ledger.bytes === before && w.stats.dropped === 1, `W28b: a merge that would pass MAX_QUEUED is dropped, not merged (${before}, max ${w.bytesMax})`);
+  w.dispose();
+  void r;
+}
+{
+  // 6 (W34b): idle's frontier is the last item waiting, not the first
+  const { w, r } = rig(BUDGET, { auto: false });
+  void w.write("held", "ui");
+  await turn();
+  void w.write("a", "ui");
+  void w.write("b", "output");
+  let done = false;
+  const p = w.idle().then(() => (done = true));
+  r.pending.shift()();
+  await turn();
+  r.pending.shift()();
+  await turn();
+  await turn();
+  ok(!done && r.writes.at(-1).data === "b", "W34b: idle() waits past the first queued item");
+  r.pending.shift()();
+  await p;
+  ok(done, "W34b: and settles after the last");
+}
+{
+  // 7 (W41): a queued write's promise settles on dispose too
+  const { w } = rig(BUDGET, { auto: false });
+  void w.write("held", "ui");
+  await turn();
+  const q = w.write("queued", "output");
+  w.dispose();
+  const settled = await Promise.race([q.then(() => true), new Promise((s) => setTimeout(() => s(false), 500))]);
+  ok(settled, "W41: dispose settles a queued (not in-flight) write's promise");
+}
+{
+  // 8 (N4): a lazy write cut at ITEM_MAX ends with CAN, on its own write
+  const { w, r } = rig();
+  await w.writeLazy(() => "h".repeat(ITEM_MAX + 10));
+  const lazyText = r.writes.map((x) => x.data).join("");
+  ok(lazyText.length === ITEM_MAX && lazyText.endsWith("\x18") && lazyText.indexOf("\x18") === ITEM_MAX - 1, `N4: the cut lazy write ends with CAN (${lazyText.length} units)`);
+}
+{
+  // 10 (N10): pressed at exactly MAX_ITEMS - 8 items
+  const { w } = rig(BUDGET, { auto: false });
+  let k = 0;
+  while (w.ledger.items < MAX_ITEMS - 9) void w.write("i" + k, k++ % 2 ? "ui" : "output");
+  ok(w.ledger.items === MAX_ITEMS - 9 && !w.pressed, `N10: ${MAX_ITEMS - 9} items: not pressed`);
+  void w.write("i" + k, k % 2 ? "ui" : "output");
+  ok(w.ledger.items === MAX_ITEMS - 8 && w.pressed, `N10: ${MAX_ITEMS - 8} items: pressed`);
+  w.dispose();
+}
+{
+  // 11 (N15): dispose with an active command (started, never ended) leaves nothing held
+  const { w } = rig(BUDGET, { auto: false });
+  void w.write("held", "ui");
+  ok(w.tryStartCommand() !== null && w.ledger.items === 2, "(a command started: its end reserved)");
+  w.dispose();
+  ok(w.ledger.items === 0 && w.ledger.bytes === HEADROOM, `N15: dispose with an active command: the ledger back to empty (${JSON.stringify(w.ledger)})`);
+}
+{
+  // 12 (N18, N21): HOLD.csi's exact edge: a 64-unit sequence is written, a 65-unit one left out whole, text after kept
+  const seq = (n) => "\x1b[" + "1;".repeat((n - 2) / 2) + "1H";
+  ok(seq(64).length - 2 === HOLD.csi, "(a sequence of exactly HOLD.csi units after its CSI)");
+  const { w, r } = rig();
+  await w.write(seq(64) + "after", "output");
+  ok(r.text() === seq(64) + "after", "N18: a CSI of exactly HOLD.csi units is written whole");
+  const { w: w2, r: r2 } = rig();
+  await w2.write("\x1b[" + "1;".repeat(31) + "12H" + "after", "output");
+  ok(r2.text() === "after", `N21: one unit more: left out whole, the text after kept (${JSON.stringify(r2.text().slice(0, 20))})`);
+}
+{
+  // 15 (R13): dispose while an item is in admission (a generation's start awaited): nothing is written after
+  let go;
+  const writes = [];
+  const w = new TermWriter(() => ({ write: (d, cb) => (writes.push(d), setTimeout(cb, 0)) }), zw, () => new Promise((r) => (go = r)), { ...BUDGET, links: 1 });
+  const link = (u) => `\x1b]8;;${u}\x1b\\x\x1b]8;;\x1b\\`;
+  await w.write(link("https://a/1"), "output");
+  const p = w.write(link("https://a/2"), "output");
+  await turn();
+  const n = writes.length;
+  w.dispose();
+  go("NOTICE\r\n");
+  await p;
+  await turn();
+  ok(typeof go === "function" && writes.length === n, `R13: dispose during admission: no sink write after it (${writes.length - n})`);
 }
 
 console.log(`${checks - fails}/${checks} checks passed`);

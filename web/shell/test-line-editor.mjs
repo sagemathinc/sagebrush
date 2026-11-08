@@ -230,14 +230,14 @@ const fresh = (max = 1 << 20, hist = new History()) => new LineEditor(max, hist)
   keys(d, "ArrowDown");
   ok(d.cur === 6, `L11: Down from column 3 to the one-character line: its end (${d.cur})`);
   // L13, L14: in a search, Backspace searches again for the shorter query; a longer query keeps a match that still fits
-  const h = new History(HISTORY, ["make test", "git status", "make build"]);
+  const h = new History(HISTORY, ["make test", "git status", "make tags", "make build"]);
   const r = fresh(1 << 20, h);
   keys(r, { key: "r", ctrl: true });
   type(r, "make");
-  keys(r, { key: "r", ctrl: true });
-  ok(h.entries[r.search.at] === "make test", "(the older match)");
+  keys(r, { key: "r", ctrl: true }, { key: "r", ctrl: true });
+  ok(h.entries[r.search.at] === "make test", "(two older matches back)");
   type(r, " t");
-  ok(h.entries[r.search.at] === "make test" && !r.search.failed, "L14: a longer query that still matches keeps the current match");
+  ok(h.entries[r.search.at] === "make test" && !r.search.failed, "L14: a longer query that still matches keeps the current match (not the newer \"make tags\", which matches too)");
   keys(r, "Backspace", "Backspace");
   ok(r.search.q === "make" && h.entries[r.search.at] === "make build", `L13: Backspace shortens the query and searches again from the newest (${r.search.q}, ${h.entries[r.search.at]})`);
   // L6: Ctrl-G restores the cursor too
