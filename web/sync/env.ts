@@ -62,6 +62,10 @@ export async function gate(env: SyncEnv, name: string): Promise<void> {
   if (!testMode(env)) return;
   for (let i = 0; gates.has(name) && i < 1500; i++) await new Promise((r) => setTimeout(r, 20));
 }
+/** Tests only: whether a named gate is set (off outside test mode). */
+export function gateOn(env: SyncEnv, name: string): boolean {
+  return testMode(env) && gates.has(name);
+}
 export function setGate(env: SyncEnv, name: string, on: boolean): void {
   if (!testMode(env)) return;
   if (on) gates.add(name);

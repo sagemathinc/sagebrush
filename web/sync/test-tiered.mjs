@@ -385,6 +385,23 @@ for (const c of [c1, c2, c3]) ok((await put(sa, c)).status === 201, "a chunk upl
   const hr = await held;
   t = await acct.testFiles({ sha256: f.sha256, verifyMs: 0 });
   ok(hr.status === 503 && t.row.position === 0, "a call held past its slot's end stops and records nothing (" + hr.status + ")");
+  // a read already pending when the deadline comes is cancelled at it, before the slot ends (daybreak3's r2 note)
+  const g2 = fileOf([randomBytes(5 * MiB), randomBytes(5 * MiB)]);
+  for (const c of [g2.bytes.subarray(0, 5 * MiB), g2.bytes.subarray(5 * MiB)]) await put(sa, c);
+  await register(sa, g2.manifest);
+  await acct.testFiles({ verifyMs: 600 });
+  const before = (await (await at(SITE, "/__test/stall-cancels")).json()).n;
+  await gate("verify-read-stall", true);
+  const t0 = Date.now();
+  const stalled = await verify(sa, g2.sha256);
+  const took = Date.now() - t0;
+  const cancels = (await (await at(SITE, "/__test/stall-cancels")).json()).n - before;
+  const slotNow = (await acct.testFiles({ sha256: g2.sha256 })).slot;
+  await gate("verify-read-stall", false);
+  ok(stalled.status === 503 && cancels === 1 && took < 600, `a read stalled across the deadline is cancelled at it, before the slot ends (${stalled.status}, ${cancels} cancelled, ${took} ms)`);
+  ok(slotNow !== null && slotNow.until > Date.now() - 1000, "and its slot is still held (nobody else streamed meanwhile) until it ends");
+  await acct.testFiles({ endLease: true, verifyMs: 0 });
+  ok((await verifyAll(sa, g2.sha256)).pop().state === "verified", "then the next call verifies it");
   ok((await verifyAll(sa, f.sha256)).pop().state === "verified", "and the next call verifies");
 }
 

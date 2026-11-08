@@ -24,7 +24,7 @@
 import { adminLength, bindPurge, sessionOf, signedWith, type ShareEnv } from "../share/server.ts";
 import { parseRange } from "../share/files.ts";
 import { accountHash, fields, hmacHex, isNat, isSha, same, LIMITS, URL_MS, SyncError, type Result } from "../sync-protocol/protocol.ts";
-import { allowed, gate, testMode, tieredOn, type SyncEnv } from "./env.ts";
+import { allowed, gate, gateOn, testMode, tieredOn, type SyncEnv } from "./env.ts";
 import { TIERED } from "./manifest.ts";
 import { Sha256 } from "./sha256.ts";
 import type { SyncAccount } from "./account.ts";
@@ -623,36 +623,70 @@ async function verifyStep(env: Env, stub: ReturnType<NonNullable<Env["SYNC_ACCOU
   await gate(env, "verify-stream");
   const h = Sha256.from(step.sha_state);
   let short = false;
-  // (the work stops at its slot's end, a margin before it: the object records nothing from a call past its end, astra's #880 SEC 1)
-  const late = () => Date.now() > step.until - (testMode(env) ? 200 : 5000);
+  // (the work stops at its slot's end, a margin before it: the object records nothing from a call past its end, astra's
+  // #880 SEC 1.  Every R2 get and every pending read is raced with that deadline, and at it the body is cancelled, so a
+  // stalled read can't outlive the slot and overlap the next call's work, daybreak3's r2 note)
+  const deadline = step.until - (testMode(env) ? 200 : 5000);
+  const LATE = Symbol("late");
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expiry = new Promise<typeof LATE>((r) => (timer = setTimeout(() => r(LATE), Math.max(0, deadline - Date.now()))));
   const tooLong = () => err(503, "busy", { message: "this verification step took too long; verify again" });
-  for (const c of step.chunks) {
-    if (late()) return tooLong();
-    const o = await env.SHARE_BUCKET!.get(c.key);
-    if (!o) return err(503, "busy", { message: "a chunk's bytes couldn't be read; try again" });
-    let n = 0;
-    const reader = (o.body as ReadableStream<Uint8Array>).getReader();
-    for (;;) {
-      if (late()) {
-        await reader.cancel().catch(() => {});
+  try {
+    for (const c of step.chunks) {
+      if (Date.now() > deadline) return tooLong();
+      const got = env.SHARE_BUCKET!.get(c.key);
+      const o = await Promise.race([got, expiry]);
+      if (o === LATE) {
+        // (a get that answers later has its body cancelled unread)
+        got.then((x) => x?.body.cancel().catch(() => {})).catch(() => {});
         return tooLong();
       }
-      const { done, value } = await reader.read();
-      if (done) break;
-      n += value.length;
-      if (n > c.size) break;
-      h.update(value);
+      if (!o) return err(503, "busy", { message: "a chunk's bytes couldn't be read; try again" });
+      const body = testMode(env) && stallReads(env) ? stalling(o.body as ReadableStream<Uint8Array>) : (o.body as ReadableStream<Uint8Array>);
+      const reader = body.getReader();
+      let n = 0;
+      for (;;) {
+        if (Date.now() > deadline) {
+          await reader.cancel().catch(() => {});
+          return tooLong();
+        }
+        const r = await Promise.race([reader.read(), expiry]);
+        if (r === LATE) {
+          await reader.cancel().catch(() => {});
+          return tooLong();
+        }
+        if (r.done) break;
+        n += r.value.length;
+        if (n > c.size) break;
+        h.update(r.value);
+      }
+      if (n !== c.size) {
+        await reader.cancel().catch(() => {});
+        short = true;
+        break;
+      }
     }
-    if (n !== c.size) {
-      await reader.cancel().catch(() => {});
-      short = true;
-      break;
-    }
+  } finally {
+    clearTimeout(timer);
   }
   const e = await stub.verifyEnd({ account, sha256, reg: step.reg, vinc: step.vinc, mdigest: step.mdigest, attempt: step.attempt, from: step.position, to: step.to, keys: step.chunks.map((c) => c.key), sha_state: h.save(), short, bind });
   if ("error" in e) return answer(e, json);
   if (e.ok.state === "invalid") return err(400, "invalid", { message: "the chunks don't make this file", reason: e.ok.reason });
   return json({ state: e.ok.state, position: e.ok.position, chunks: step.count });
+}
+
+/** Tests only: whether verify's R2 reads stall (the "verify-read-stall" gate), and how many stalled reads were cancelled. */
+const stallReads = (env: Env) => testMode(env) && gateOn(env, "verify-read-stall");
+export const stallCancels = { n: 0 };
+/** Tests only: a body whose first read never answers until it is cancelled, as an R2 read stalled mid-body. */
+function stalling(body: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
+  return new ReadableStream<Uint8Array>({
+    pull: () => new Promise(() => {}),
+    cancel: () => {
+      stallCancels.n++;
+      body.cancel().catch(() => {});
+    },
+  });
 }
 
 /**

@@ -3,7 +3,7 @@
 // turns the test seams on (web/sync/env.ts testMode); no deployed entry does.
 (globalThis as { __SAGEBRUSH_SYNC_TEST__?: boolean }).__SAGEBRUSH_SYNC_TEST__ = true;
 import { handleShare } from "../share/server.ts";
-import { handleSync, handleSyncFiles, register, syncScheduled, type Env } from "./server.ts";
+import { handleSync, handleSyncFiles, register, stallCancels, syncScheduled, type Env } from "./server.ts";
 import { accountHash } from "../sync-protocol/protocol.ts";
 import { setGate } from "./env.ts";
 export { SyncAccount } from "./account.ts";
@@ -29,6 +29,8 @@ export default {
       setGate(env, url.searchParams.get("name") ?? "", url.searchParams.get("on") === "1");
       return Response.json({ ok: true });
     }
+    // (tests only: how many stalled verify reads were cancelled at their deadline)
+    if (url.pathname === "/__test/stall-cancels") return Response.json({ n: stallCancels.n });
     if (url.hostname.endsWith("files.test")) return (await handleSyncFiles(req, env)) ?? new Response("not found", { status: 404 });
     return (await handleSync(req, env)) ?? (await handleShare(req, env, ctx)) ?? new Response("not the API", { status: 404 });
   },
