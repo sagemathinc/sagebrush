@@ -211,6 +211,13 @@ try {
   check(e3.ends === 0 && e3.held && e3.buf === "echo early" && e3.note === "A command is running: Stop it first.", `reset during a start: the start not ended, the admission held, another Enter refused with its line kept: ${JSON.stringify(e3)}`);
   await evaluate(`window.__startGo(), 1`);
   check(!!(await until(`${T}.cmd === null && ${T}.ready && window.__ends === 1`, 20000)), "and once that start is done: one end, one fresh start, the admission let go");
+  // (r6: the start it waits on fails instead: the reset still ends cleanly with a fresh start, the admission let go)
+  await evaluate(`(() => { const t = ${T}; t.ready = false; t.starting = new Promise((_, j) => (window.__startNo = () => j(new Error("start failed")))); return 1; })()`);
+  await evaluate(`${T}.editor.reset("reset"), 1`);
+  await realKey("Enter");
+  await pause(100);
+  await evaluate(`window.__startNo(), 1`);
+  check(!!(await until(`${T}.cmd === null && ${T}.ready && window.__ends === 2`, 20000)), "a reset whose awaited start fails: one end, one fresh start, the admission let go");
   await evaluate(`${T}.editor.reset(""), 1`);
   // open, ps, top: the panel's own (William's P1)
   r = await run("cd /");
@@ -304,6 +311,16 @@ try {
   check(rsBig.startsWith("(failed reverse-i-search)`[1 line, 196608 bytes") && (await evaluate(`${T}.writer.stats.cuts`)) === cuts0 && (await evaluate(`${T}.writer.stats.maxWrite`)) <= 65536,
     `a 192 KiB query is drawn as its summary, nothing made past its room: ${JSON.stringify(rsBig.slice(0, 80))}`);
   await realKey("g", { ctrl: true });
+  // (SEC T854-6 on c783715a: the summary of a 192 KiB many-line line is counted in constant space: while it is drawn,
+  // no split and no encode of anything past SHOW_UNITS)
+  const spy = await evaluate(`(async () => { const t = ${T}, big = ("a\\n").repeat(98304);
+    const sp = String.prototype.split, en = TextEncoder.prototype.encode, seen = { split: 0, encode: 0 };
+    String.prototype.split = function (...a) { if (this.length > 4096) seen.split++; return sp.apply(this, a); };
+    TextEncoder.prototype.encode = function (x) { if (x && x.length > 4096) seen.encode++; return en.call(this, x); };
+    try { t.editor.reset(big); t.redraw(); await t.writer.idle(); } finally { String.prototype.split = sp; TextEncoder.prototype.encode = en; }
+    const l = window.__lines(window.__cursorLine(), window.__cursorLine() + 1)[0]; t.editor.reset(""); t.redraw(); await t.writer.idle();
+    return { ...seen, line: l.slice(0, 60) }; })()`);
+  check(spy.split === 0 && spy.encode === 0 && spy.line.includes("[98305 lines, 196608 bytes"), `a 192 KiB line's summary: no split or encode of it while drawn: ${JSON.stringify(spy)}`);
   // (and the prompt's cwd: its last 256 units after an ellipsis, however long the directory)
   const cwdWas = await evaluate(`${T}.cwd`);
   await evaluate(`(() => { const t = ${T}; t.setCwd("/" + "d".repeat(100000)); t.redraw(); return 1; })()`);
@@ -504,8 +521,21 @@ try {
   check((await evaluate(`document.querySelector(".sb-term").hidden`)) === true, "hide hides the dock");
   await evaluate(`document.querySelector("#termbtn").click()`);
   check((await evaluate(`document.querySelector(".sb-term").hidden`)) === false && (await evaluate(`${T}.screenText`)) === kept, "⋯ ▸ Terminal again: the same session, its screen kept");
+  // (r6, SEC T854-8: a reset waiting on a start when ✕ ends the session: once that start resolves, no fresh start, no
+  // end of the shell for reset, no exec and no prompt)
+  await evaluate(`(() => { const t = ${T}, h = t.opts.host; window.__starts = 0; window.__execs8 = 0; const s0 = h.shellFor.bind(h), x0 = h.exec.bind(h);
+    h.shellFor = () => (window.__starts++, s0()); h.exec = (...a) => (window.__execs8++, x0(...a));
+    t.ready = false; t.starting = new Promise((r) => (window.__startGo8 = r)); window.__t8 = t; return 1; })()`);
+  await focusTerm();
+  await evaluate(`${T}.editor.reset("reset"), 1`);
+  await realKey("Enter");
+  await pause(100);
   await evaluate(`document.querySelector(".sb-term-end").click()`);
   check((await evaluate(`document.querySelectorAll(".sb-term").length`)) === 0, "✕ ends the session (the dock is gone)");
+  await evaluate(`window.__startGo8(), 1`);
+  await pause(500);
+  const t8 = await evaluate(`({ starts: window.__starts, execs: window.__execs8, prompt: window.__t8.editing, ended: window.__t8.ended })`);
+  check(t8.starts === 0 && t8.execs === 0 && t8.ended && !t8.prompt, `✕ during a reset's wait on a start: once the start resolves, no fresh start, exec or prompt: ${JSON.stringify(t8)}`);
   check((await evaluate(`window.__term`)) === 2, `TP-1: ✕ ends the shell's worker too (terminate calls: ${await evaluate(`window.__term`)}, after reset's 1)`);
   await evaluate(`document.querySelector("#termbtn").click()`);
   await until(`!!document.querySelector(".sb-term") && !document.querySelector(".sb-term").hidden && !!${T}`, 10000);

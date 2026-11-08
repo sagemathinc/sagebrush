@@ -586,8 +586,10 @@ export class TerminalPanel {
     for (let i = s.indexOf("\n"); i >= 0; i = s.indexOf("\n", i + 1)) if (++n >= SHOW_LINES) return false;
     return true;
   }
+  /** a long line's summary, counted in constant space (no split, no encoded copy): SEC T854-6 */
   private summary(s: string): string {
-    const lines = s.split("\n").length;
+    let lines = 1;
+    for (let i = s.indexOf("\n"); i >= 0; i = s.indexOf("\n", i + 1)) lines++;
     return `[${lines} line${lines === 1 ? "" : "s"}, ${utf8Len(s)} bytes: Enter runs it, Ctrl-C clears it]`;
   }
 
@@ -807,12 +809,16 @@ export class TerminalPanel {
    * way (show()'s own) is adopted and finished first: never cleared or overlapped by a second (ENGINE E3). */
   private async reset(): Promise<void> {
     this.clear();
-    if (this.starting) await this.starting;
+    if (this.starting) await this.starting.catch(() => {});
+    // (after every wait: an ended panel starts, ends or draws nothing more: SEC T854-8)
+    if (this.ended) return;
     this.opts.host.endShell("reset");
     this.ready = false;
     this.starting = null;
     await this.warm();
+    if (this.ended) return;
     await this.end_();
+    if (this.ended) return;
     this.prompt();
   }
 
@@ -947,6 +953,8 @@ export class TerminalPanel {
       // (the first command while bash loads: says so, under its prompt, until the shell is up)
       void this.writer.write(DIM("Starting the shell\u2026"));
       await this.warm();
+      // (ended while the shell started: nothing runs or is drawn: SEC T854-8)
+      if (this.ended) return;
       void this.writer.write("\r\x1b[2K");
     }
     const ctl = this.begin();

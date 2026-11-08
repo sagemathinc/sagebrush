@@ -12,10 +12,9 @@
 export const HISTORY = Object.freeze({ entries: 500, bytes: 4 << 20, entryMax: 256 << 10 });
 
 /** UTF-8 bytes of `s` (a lone surrogate counts 3, as the encoder's replacement character). */
-const enc = typeof TextEncoder === "undefined" ? null : new TextEncoder();
 export function utf8Len(s: string): number {
-  // (a long string: the platform's encoder, native and linear; a lone surrogate is its replacement character, 3 bytes, as below)
-  if (enc && s.length > 4096) return enc.encode(s).length;
+  // (counted in constant space, whatever the length: no encoded copy is made just to measure; a lone surrogate counts
+  // 3, as the encoder's replacement character)
   let n = 0;
   for (let i = 0; i < s.length; i++) {
     const c = s.charCodeAt(i);

@@ -246,7 +246,8 @@ export class TermWriter {
     if (key !== undefined && !KEYS.includes(key)) throw new Error(`term-writer: unknown lazy key ${JSON.stringify(key)}`);
     if (this.dead) return SETTLED;
     if (key) {
-      const same = this.queue.find((q) => q.key === key);
+      // (an item sealed as an idle() frontier is never replaced: a later write takes a slot of its own after it)
+      const same = this.queue.find((q) => q.key === key && !q.sealed);
       if (same) {
         same.make = make;
         same.size = size;

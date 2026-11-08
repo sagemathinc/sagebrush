@@ -612,5 +612,19 @@ function putRig(budget = BUDGET, opts) {
   ok(lost && r2.text().includes("[\u2026 7 more bytes not shown]") && !r2.text().includes("107"), "E5: daybreak3's probe: 7, the end made, then +100: refused, the marker exact at 7");
 }
 
+// r6 (ENGINE E2 residual): a keyed write never replaces an item sealed as an idle() frontier
+{
+  const { w, r } = rig(BUDGET, { auto: false });
+  void w.write("held", "ui");
+  await turn();
+  const p0 = w.writeLazy(() => "before", "redraw");
+  const p1 = w.idle();
+  const p2 = w.writeLazy(() => "after", "redraw");
+  ok(p0 === p1 && p2 !== p1 && w.ledger.items === 3, "the frontier redraw keeps its slot; the later one takes its own");
+  while (r.pending.length) { r.pending.shift()(); await turn(); }
+  await Promise.all([p1, p2]);
+  ok(r.text() === "heldbeforeafter", `both drawn, in order: ${JSON.stringify(r.text())}`);
+}
+
 console.log(`${checks - fails}/${checks} checks passed`);
 if (fails) process.exit(1);
