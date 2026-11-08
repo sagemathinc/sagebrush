@@ -98,12 +98,18 @@ const arg = (name, d) => {
 const A = "a1a1a1a1-0001-4a1a-8a1a-a1a1a1a1a101"; // the deterministic cases
 const B = "a1a1a1a1-0002-4a1a-8a1a-a1a1a1a1a102"; // a small verification budget
 const R = "a1a1a1a1-0003-4a1a-8a1a-a1a1a1a1a103"; // the randomized state machine
+const E = "a1a1a1a1-0005-4a1a-8a1a-a1a1a1a1a105"; // CoCalc sends a malformed verify_bytes_per_day
+const Z = "a1a1a1a1-0006-4a1a-8a1a-a1a1a1a1a106"; // CoCalc sends verify_bytes_per_day 0
+const C = "a1a1a1a1-0004-4a1a-8a1a-a1a1a1a1a104"; // storage exactly full after one registration (daybreak3's #880 finding)
 const SITE = "https://sagebrush.test";
 const script = execFileSync("bun", ["build", join(here, "test-entry.ts"), "--format", "esm", "--target", "browser", "--external", "cloudflare:workers"], { encoding: "utf8" });
 const base = { modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET"] };
 const shareBindings = { SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOKEN: "dev-token", COCALC_ORIGIN: "https://cocalc.test", COCALC_CLIENT_SECRET: "client-secret" };
-const limits = (verify) => ({ storage_bytes: 1 << 30, max_file_bytes: 200 * MiB, sync: { enabled: true, version_bytes: 1 << 20, read_bytes_per_day: 1 << 30, ...(verify ? { verify_bytes_per_day: verify } : {}) } });
-const plans = new Map([[A, limits()], [B, limits(10 * MiB)], [R, limits()]]);
+const limits = (verify) => ({ storage_bytes: 1 << 30, max_file_bytes: 200 * MiB, sync: { enabled: true, version_bytes: 1 << 20, read_bytes_per_day: 1 << 30, ...(verify !== undefined ? { verify_bytes_per_day: verify } : {}) } });
+// (C's storage: its two chunks and one manifest, exactly)
+const capA = Buffer.alloc(8 * MiB, 1), capB = Buffer.alloc(2 * MiB, 2);
+const capManifestBytes = (m) => Buffer.byteLength(canonical(m));
+const plans = new Map([[A, limits()], [B, limits(10 * MiB)], [R, limits()], [E, limits(-1)], [Z, limits(0)]]);
 const cocalc = async (req) => {
   const u = new URL(req.url);
   const l = plans.get(u.searchParams.get("account_id"));
@@ -113,7 +119,7 @@ const objects = { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, S
 const ratelimits = (id) => ({ SYNC_PREAUTH: { namespace_id: id, simple: { limit: 1_000_000, period: 60 } } });
 const mf = new Miniflare(convertV4MiniflareOptions({
   workers: [
-    { ...base, name: "on", bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A},${B},${R}`, SYNC_TIERED: "1", SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["sagebrush.test/*"], outboundService: cocalc, ratelimits: ratelimits("2001") },
+    { ...base, name: "on", bindings: { ...shareBindings, SYNC_ACCOUNTS: `${A},${B},${R},${C},${E},${Z}`, SYNC_TIERED: "1", SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["sagebrush.test/*"], outboundService: cocalc, ratelimits: ratelimits("2001") },
     { ...base, name: "off", bindings: { ...shareBindings, SYNC_ACCOUNTS: A, SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["off.test/*"], outboundService: cocalc, ratelimits: ratelimits("2002") },
   ],
 }));
@@ -350,6 +356,75 @@ for (const c of [c1, c2, c3]) ok((await put(sa, c)).status === 201, "a chunk upl
   const r = await verify(sb, f.sha256);
   const b = await r.json();
   ok(r.status === 429 && b.limit === "verify_bytes_per_day" && b.max === 10 * MiB, "a call whose chunks exceed today's verification budget is refused before streaming: " + JSON.stringify(b));
+}
+
+// ---- the verify slot is owned by one attempt (astra's #880 SEC 1)
+{
+  const parts = [randomBytes(5 * MiB), randomBytes(5 * MiB)];
+  for (const c of parts) await put(sa, c);
+  const f = fileOf(parts);
+  await register(sa, f.manifest);
+  await acct.testFiles({ verifyMs: 60 });
+  const b1 = await acct.verifyBegin({ account: A, sha256: f.sha256 });
+  await new Promise((r) => setTimeout(r, 120));
+  await acct.testFiles({ verifyMs: 0 });
+  const b2 = await acct.verifyBegin({ account: A, sha256: f.sha256 });
+  ok(b1.ok?.attempt && b2.ok?.attempt && b1.ok.attempt !== b2.ok.attempt, "after a slot's end, a new call takes the slot with its own attempt id");
+  const e1 = await acct.verifyEnd({ account: A, sha256: f.sha256, reg: b1.ok.reg, vinc: b1.ok.vinc, mdigest: b1.ok.mdigest, attempt: b1.ok.attempt, from: 0, to: 2, keys: b1.ok.chunks.map((c) => c.key), sha_state: { h: "0".repeat(64), n: 0, rest: "" } });
+  let t = await acct.testFiles({ sha256: f.sha256 });
+  ok(e1.error?.code === "conflict" && t.slot?.attempt === b2.ok.attempt && t.row.position === 0, "the expired call's completion records nothing and doesn't free the newer call's slot");
+  const b3 = await acct.verifyBegin({ account: A, sha256: f.sha256 });
+  ok(b3.error?.code === "rate" && b3.error.detail?.limit === "verify_at_once", "so a third call still gets rate while the newer call owns the slot (daybreak3's pin)");
+  await acct.testFiles({ endLease: true });
+  // the Worker stops at its slot's end: a stream held past it is not recorded
+  await acct.testFiles({ verifyMs: 600 });
+  await gate("verify-stream", true);
+  const held = verify(sa, f.sha256);
+  await new Promise((r) => setTimeout(r, 900));
+  await gate("verify-stream", false);
+  const hr = await held;
+  t = await acct.testFiles({ sha256: f.sha256, verifyMs: 0 });
+  ok(hr.status === 503 && t.row.position === 0, "a call held past its slot's end stops and records nothing (" + hr.status + ")");
+  ok((await verifyAll(sa, f.sha256)).pop().state === "verified", "and the next call verifies");
+}
+
+// ---- CoCalc's verify_bytes_per_day: malformed keeps nothing new (an outage, not the fallback); 0 is 0 (astra's #880 SEC 2)
+{
+  const se = await signIn(E);
+  const r = await post(se, "/api/sync/v1/enable", {});
+  ok(r.status === 503, "a malformed verify_bytes_per_day makes CoCalc's limits malformed: treated as an outage, not the 16 GiB fallback (" + r.status + ")");
+  const sz = await signIn(Z);
+  ok((await post(sz, "/api/sync/v1/enable", {})).status === 200, "(zero) sync on");
+  const parts = [randomBytes(5 * MiB), randomBytes(5 * MiB)];
+  for (const c of parts) await put(sz, c);
+  const f = fileOf(parts);
+  await register(sz, f.manifest);
+  const v = await verify(sz, f.sha256);
+  const b = await v.json();
+  ok(v.status === 429 && b.max === 0, "verify_bytes_per_day 0: no verification at all (" + JSON.stringify(b) + ")");
+}
+
+// ---- registration at the storage cap (daybreak3's #880 finding): a resent or competing manifest, or one with missing
+// chunks, is answered without asking for room; only a new row needs it
+{
+  const capFile = fileOf([capA, capB]);
+  const total = capA.length + capB.length + capManifestBytes(capFile.manifest);
+  plans.set(C, { ...limits(), storage_bytes: total });
+  const sc = await signIn(C);
+  ok((await post(sc, "/api/sync/v1/enable", {})).status === 200, "(cap) sync on");
+  for (const c of [capA, capB]) ok((await put(sc, c)).status === 201, "(cap) a chunk uploads");
+  let r = await register(sc, capFile.manifest);
+  ok(r.status === 200 && (await r.json()).state === "verifying", "(cap) the manifest registers, filling the storage exactly");
+  r = await register(sc, capFile.manifest);
+  let b = await r.json();
+  ok(r.status === 200 && b.state === "verifying", "(cap) the same manifest again, at the cap: the existing row, not storage_full: " + JSON.stringify(b));
+  r = await register(sc, { ...fileOf([capB, capA]).manifest, sha256: capFile.sha256 });
+  ok(r.status === 409, "(cap) a competing manifest at the cap: conflict, not storage_full (" + r.status + ")");
+  r = await register(sc, { ...capFile.manifest, sha256: "d".repeat(64), chunks: [[sha(capA), capA.length], ["e".repeat(64), capB.length]] });
+  b = await r.json();
+  ok(r.status === 404 && b.error === "missing", "(cap) a manifest with a missing chunk at the cap: missing, not storage_full (" + r.status + ")");
+  r = await register(sc, { ...fileOf([capB, capA]).manifest });
+  ok(r.status === 507 || (r.status === 503 && (await r.clone().json()).error === "busy"), "(cap) a new manifest when no room is left: refused for room (" + r.status + ")");
 }
 
 // ---- the randomized state machine

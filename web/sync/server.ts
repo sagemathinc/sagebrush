@@ -623,12 +623,20 @@ async function verifyStep(env: Env, stub: ReturnType<NonNullable<Env["SYNC_ACCOU
   await gate(env, "verify-stream");
   const h = Sha256.from(step.sha_state);
   let short = false;
+  // (the work stops at its slot's end, a margin before it: the object records nothing from a call past its end, astra's #880 SEC 1)
+  const late = () => Date.now() > step.until - (testMode(env) ? 200 : 5000);
+  const tooLong = () => err(503, "busy", { message: "this verification step took too long; verify again" });
   for (const c of step.chunks) {
+    if (late()) return tooLong();
     const o = await env.SHARE_BUCKET!.get(c.key);
     if (!o) return err(503, "busy", { message: "a chunk's bytes couldn't be read; try again" });
     let n = 0;
     const reader = (o.body as ReadableStream<Uint8Array>).getReader();
     for (;;) {
+      if (late()) {
+        await reader.cancel().catch(() => {});
+        return tooLong();
+      }
       const { done, value } = await reader.read();
       if (done) break;
       n += value.length;
@@ -641,7 +649,7 @@ async function verifyStep(env: Env, stub: ReturnType<NonNullable<Env["SYNC_ACCOU
       break;
     }
   }
-  const e = await stub.verifyEnd({ account, sha256, reg: step.reg, vinc: step.vinc, mdigest: step.mdigest, from: step.position, to: step.to, keys: step.chunks.map((c) => c.key), sha_state: h.save(), short, bind });
+  const e = await stub.verifyEnd({ account, sha256, reg: step.reg, vinc: step.vinc, mdigest: step.mdigest, attempt: step.attempt, from: step.position, to: step.to, keys: step.chunks.map((c) => c.key), sha_state: h.save(), short, bind });
   if ("error" in e) return answer(e, json);
   if (e.ok.state === "invalid") return err(400, "invalid", { message: "the chunks don't make this file", reason: e.ok.reason });
   return json({ state: e.ok.state, position: e.ok.position, chunks: step.count });
