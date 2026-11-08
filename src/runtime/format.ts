@@ -1,7 +1,7 @@
 // repr(), str(), format() and `str % args`.
 
 import { T, markRaised, FloatBox, PyDict, typeOf, lookupType, raise, isType, dictKeyOf, dictGet, hooks, Ellipsis, NotImplemented, PyBytes, PyByteArray, StrLayout, PrimBox, typeName, isinstance, toPyExc } from "./object";
-import { PySet, setItems, isPyInt, fv, lookupSpecial, specialOf, strFormatOpHook, id, index, normBig, PySlice, pollInterrupt, bitLengthSmallCopies, bitLengthSmallCopiesSigned } from "./ops";
+import { PySet, setItems, isPyInt, fv, lookupSpecial, specialOf, intResult, floatResult, bigToFloat, strFormatOpHook, id, index, normBig, PySlice, pollInterrupt, bitLengthSmallCopies, bitLengthSmallCopiesSigned } from "./ops";
 import { heapLimit } from "./heap";
 import * as FD from "./fdlibm";
 import * as SP from "./strpos";
@@ -754,6 +754,20 @@ export function fmt(v: any, conv: string | null, spec: string): string {
 // Follows CPython's unicode_format_arg_parse: a non-tuple mapping (anything
 // with __getitem__) is both the single positional argument and the source
 // of %(key) lookups; after a key lookup the looked-up value is the argument.
+// A %e/%f/%g argument that is not a number: CPython's PyFloat_AsDouble, its
+// special method called once and the result checked (__float__'s a float, a
+// subclass with its DeprecationWarning; __index__'s an int, converted)
+function floatOfArg(v: any): number {
+  let name = "__float__";
+  let f = lookupType(typeOf(v), name);
+  if (f === undefined) f = lookupType(typeOf(v), (name = "__index__"));
+  if (f === undefined) raise(T.TypeError, `must be real number, not ${typeOf(v).$name}`);
+  const r = specialOf(v, f, name)(v);
+  if (name === "__float__") return floatResult(v, r);
+  const k = intResult(name, r);
+  return typeof k === "bigint" ? bigToFloat(k) : k;
+}
+
 export function percentFormat(fmtStr: string, args: any, bytesMode = false): string {
   const isTuple = Array.isArray(args) && (args as any).$t === true;
   const dict = !isTuple && typeof args !== "string" && (args instanceof PyDict || Array.isArray(args) || (args !== null && typeof args === "object" && lookupType(typeOf(args), "__getitem__") !== undefined)) ? args : null;
@@ -780,8 +794,15 @@ export function percentFormat(fmtStr: string, args: any, bytesMode = false): str
     for (const name of needIndex ? ["__index__"] : ["__index__", "__int__"]) {
       const f = lookupType(typeOf(v), name);
       if (f !== undefined) {
-        const r = specialOf(v, f, name)(v);
-        return BigInt(typeof r === "boolean" ? +r : r);
+        // (as CPython's mainformatlong: the result checked as PyNumber_Index's
+        // or PyNumber_Long's, a bool or int subclass with its DeprecationWarning,
+        // and any TypeError on the way is the format's own)
+        try {
+          return BigInt(intResult(name, specialOf(v, f, name)(v)));
+        } catch (e) {
+          if (!isinstance(toPyExc(e), T.TypeError)) throw e;
+        }
+        break;
       }
     }
     raise(T.TypeError, `%${type} format: ${needIndex ? "an integer" : "a real number"} is required, not ${typeOf(v).$name}`);
@@ -880,9 +901,24 @@ export function percentFormat(fmtStr: string, args: any, bytesMode = false): str
         const v = nextArg();
         let c: string;
         if (bytesMode) {
-          if (v instanceof PyBytes && v.n === 1) c = String.fromCharCode(v.a[0]);
-          else if (isPyInt(v) && Number(v) >= 0 && Number(v) < 256) c = String.fromCharCode(Number(v));
-          else raise(isPyInt(v) ? T.OverflowError : T.TypeError, isPyInt(v) ? "%c arg not in range(256)" : "%c requires an integer in range(256) or a single byte");
+          if ((v instanceof PyBytes || v instanceof PyByteArray) && v.n === 1) c = String.fromCharCode(v.a[0]);
+          else {
+            // (CPython's byte_converter: a 1-byte bytes, else PyNumber_Index,
+            // whose errors are raised, then the range)
+            let k: number | bigint;
+            if (isPyInt(v) || typeof v === "boolean") k = typeof v === "boolean" ? +v : (v as any);
+            else if (v instanceof PrimBox && isPyInt(v.$v)) k = v.$v;
+            else {
+              const f = lookupType(typeOf(v), "__index__");
+              if (f === undefined) {
+                const what = v instanceof PyBytes || v instanceof PyByteArray ? `a ${typeName(v)} object of length ${v.n}` : typeName(v);
+                raise(T.TypeError, `%c requires an integer in range(256) or a single byte, not ${what}`);
+              }
+              k = intResult("__index__", specialOf(v, f, "__index__")(v));
+            }
+            if (!(Number(k) >= 0 && Number(k) < 256)) raise(T.OverflowError, "%c arg not in range(256)");
+            c = String.fromCharCode(Number(k));
+          }
         } else if (typeof v === "string") {
           if ([...v].length !== 1) raise(T.TypeError, `%c requires an int or a unicode character, not a string of length ${[...v].length}`);
           c = v;
@@ -923,15 +959,15 @@ export function percentFormat(fmtStr: string, args: any, bytesMode = false): str
         let x = fv(v);
         if (x === undefined) {
           if (isPyInt(v) || typeof v === "boolean") x = Number(v);
-          else {
-            let name = "__float__";
-            let f = lookupType(typeOf(v), name);
-            if (f === undefined) f = lookupType(typeOf(v), (name = "__index__"));
-            if (f === undefined) raise(T.TypeError, `must be real number, not ${typeOf(v).$name}`);
-            // (called once, as CPython's PyFloat_AsDouble)
-            const r = specialOf(v, f, name)(v);
-            x = Number(fv(r) ?? r);
-          }
+          else if (bytesMode) {
+            // (bytes' formatfloat: PyFloat_AsDouble, any error replaced)
+            try {
+              x = floatOfArg(v);
+            } catch (e: any) {
+              if (!isinstance(toPyExc(e), T.Exception)) throw e;
+              raise(T.TypeError, `float argument required, not ${typeName(v)}`);
+            }
+          } else x = floatOfArg(v);
         }
         const sp: Spec = { fill: zero ? "0" : " ", align: left ? "<" : zero ? "=" : ">", sign: sign || "-", z: false, alt: flags.includes("#"), zero: false, width, grouping: "", precision: precision < 0 ? 6 : precision, type };
         body = formatFloat(x, sp);

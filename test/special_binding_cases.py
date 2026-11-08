@@ -740,5 +740,71 @@ import warnings
 
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
-    # (R1b also pins "called once": a float subclass result, which the old code called again)
+    # (a float subclass result: fv accepts it, so this is one call either way; the non-float
+    # results below pin "called once")
     print("R1b", t(lambda: "%f" % GPZ()), t(lambda: "%e" % GPZ()), grfs.calls)
+
+print("-- %-format's conversion results, as CPython checks them (PyFloat_AsDouble, mainformatlong, byte_converter)")
+import warnings
+
+
+def tw(f):
+    try:
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            r = repr(f())
+        return r + ("" if not w else " W:" + w[0].category.__name__ + ":" + str(w[0].message)[:60])
+    except Exception as e:
+        return type(e).__name__ + ": " + str(e)
+
+
+class PFS(float):
+    pass
+
+
+class PIS(int):
+    pass
+
+
+rpc = []
+
+
+def pmk(name, val):
+    def m(self):
+        rpc.append(name)
+        return val
+
+    return type("P_" + type(val).__name__, (), {name: m})()
+
+
+for name in ("__float__", "__index__", "__int__"):
+    for val in (3, 2.5, PFS(1.5), True, PIS(4), "s", None):
+        o = pmk(name, val)
+        rpc.clear()
+        print(name, type(val).__name__, "|", tw(lambda: "%f" % o), "|", tw(lambda: "%d" % o), "|", tw(lambda: "%x" % o), "|", tw(lambda: "%c" % o), "| calls", len(rpc))
+        rpc.clear()
+        print(name, type(val).__name__, "bytes |", tw(lambda: b"%f" % o), "|", tw(lambda: b"%d" % o), "|", tw(lambda: b"%c" % o), "| calls", len(rpc))
+
+
+class PBig:
+    def __index__(self):
+        return 10 ** 400
+
+
+class PTE:
+    def __index__(self):
+        raise TypeError("inner")
+
+
+class PVE:
+    def __index__(self):
+        raise ValueError("inner")
+
+
+for o in (PBig(), PTE(), PVE()):
+    n = type(o).__name__
+    print(n, "|", tw(lambda: "%f" % o), "|", tw(lambda: len("%d" % o)), "|", tw(lambda: "%c" % o))
+    print(n, "bytes |", tw(lambda: b"%f" % o), "|", tw(lambda: len(b"%d" % o)), "|", tw(lambda: b"%c" % o))
+for o in (True, 3, 3.5, "s", b"x", b"xy", b"", bytearray(b"x"), bytearray(b"xy"), 300, -1, PIS(7), [1]):
+    print(type(o).__name__, repr(o), "|", tw(lambda: b"%c" % o), "|", tw(lambda: b"%f" % o))
+print("object |", tw(lambda: b"%c" % object()), "|", tw(lambda: b"%f" % object()))
