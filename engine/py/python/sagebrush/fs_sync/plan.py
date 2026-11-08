@@ -10,7 +10,11 @@ listing and the base are gathered before it, and every action is checked again w
 a plan, never an authority.
 
 Paths are relative, `/`-separated, and already normalized (NFC) by the caller; ignored paths are left out by the
-caller. Folders aren't planned here: an upload or download makes the folders its path needs when it is applied."""
+caller. `local` has files only. `remote` may include folder entries (kind "folder"): they are never planned as files
+or documents, only used to find a file on one side where the other side has a folder (listed as a clash, neither side
+touched). Folders themselves aren't planned here: an upload or download makes the folders its path needs when it is
+applied. With `case_insensitive` (this computer's filesystem, detected by the scan, §4.4), workspace names that differ
+only in case can't both exist here: all of them are listed as a clash and none is downloaded or acted on."""
 
 from dataclasses import dataclass, field
 
@@ -43,9 +47,12 @@ CONFLICT_NOT_APPLIED = "conflict-not-applied"   # a conflict under --up or --dow
 NOT_UPLOADED_CHANGED = "not-uploaded-changed"   # a snapshot edited here: left as it is (§3.4)
 NOT_UPLOADED_NEW = "not-uploaded-new"           # a notebook, board or chat file new here: left as it is
 NOT_UPLOADED_OCCUPIED = "not-uploaded-occupied"  # a file at a snapshot's path that fs-sync can't show it wrote
+TYPE_CLASH = "type-clash"                       # a file on one side, a folder at that path on the other
+CASE_CLASH = "case-clash"                       # workspace names differing only in case, on a case-insensitive filesystem
 
 ACTIONS = (UPLOAD, DOWNLOAD, CONFLICT, DELETE_THERE, DELETE_HERE, SNAPSHOT, RECORD, FORGET)
-LISTINGS = (PENDING, CONFLICT_NOT_APPLIED, NOT_UPLOADED_CHANGED, NOT_UPLOADED_NEW, NOT_UPLOADED_OCCUPIED)
+LISTINGS = (PENDING, CONFLICT_NOT_APPLIED, NOT_UPLOADED_CHANGED, NOT_UPLOADED_NEW, NOT_UPLOADED_OCCUPIED, TYPE_CLASH,
+            CASE_CLASH)
 
 #: which actions change which side: the direction flags apply only their own (§1, §2.2)
 _CHANGES_WORKSPACE = (UPLOAD, DELETE_THERE)
@@ -218,13 +225,37 @@ def _snapshot_step(p, loc, rem, row):
     return Step(DELETE_HERE, p, local=l)                            # the document was deleted, the snapshot unedited
 
 
-def plan(local, remote, base, mode=BOTH, computer="this computer"):
+def _parents(paths):
+    out = set()
+    for p in paths:
+        while "/" in p:
+            p = p.rsplit("/", 1)[0]
+            out.add(p)
+    return out
+
+
+def plan(local, remote, base, mode=BOTH, computer="this computer", case_insensitive=False):
     if mode not in MODES:
         raise ValueError("mode is one of %s" % (MODES,))
     out = Plan(mode=mode, first=not base)
     taken_keys = {p.casefold() for p in list(local) + list(remote)}
-    for p in sorted(set(local) | set(remote) | set(base)):
+    folders = {p for p, r in remote.items() if r.kind == "folder"}
+    remote = {p: r for p, r in remote.items() if r.kind != "folder"}
+    local_dirs, remote_dirs = _parents(local), _parents(remote) | folders
+    case_clash = set()
+    if case_insensitive:
+        groups = {}
+        for p in remote:
+            groups.setdefault(p.casefold(), []).append(p)
+        case_clash = {p for g in groups.values() if len(g) > 1 for p in g}
+    for p in sorted(set(local) | set(remote) | set(base) | (folders & set(local))):
         loc, rem, row = local.get(p), remote.get(p), base.get(p)
+        if p in case_clash:
+            out.steps.append(Step(CASE_CLASH, p, local=loc.sha256 if loc else None, fid=rem.fid if rem else None))
+            continue
+        if (loc is not None and p in remote_dirs) or (rem is not None and p in local_dirs):
+            out.steps.append(Step(TYPE_CLASH, p, local=loc.sha256 if loc else None, fid=rem.fid if rem else None))
+            continue
         if is_snapshot_name(p) or (rem is not None and rem.kind != "file"):
             if mode == UP:
                 continue                        # snapshots are neither written nor checked under --up (§3.4)

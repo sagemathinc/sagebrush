@@ -178,6 +178,38 @@ def test_snapshot_names_never_upload():
         assert not P.is_snapshot_name(name), name
 
 
+def test_folders_and_clashes():
+    folder = Remote("folder", F2)
+    # a workspace folder is never planned as a file or a document
+    pl = P.plan({}, {"d": folder, "d/a.txt": Remote("file", F1, A)}, {}, P.BOTH, "lap")
+    assert [(s.kind, s.path) for s in pl.steps] == [(P.DOWNLOAD, "d/a.txt")], pl.steps
+    assert P.plan({}, {"nb": Remote("folder", F2)}, {}, P.BOTH, "lap").steps == []
+    # a local file where the workspace has a folder (named, or implied by a path under it): listed, not acted on
+    for rem in ({"d": folder}, {"d/x.txt": Remote("file", F1, A)}):
+        pl = P.plan({"d": Local(A)}, rem, {"d": Base(A, F1)}, P.BOTH, "lap")
+        assert [s.kind for s in pl.steps if s.path == "d"] == [P.TYPE_CLASH], pl.steps
+        assert not pl.of(P.DELETE_THERE, P.UPLOAD, P.DELETE_HERE), pl.steps
+    # a workspace file where this computer has a folder: the same
+    pl = P.plan({"d/x.txt": Local(A)}, {"d": Remote("file", F1, B_)}, {}, P.BOTH, "lap")
+    assert [(s.kind, s.path) for s in pl.steps] == [(P.TYPE_CLASH, "d"), (P.UPLOAD, "d/x.txt")], pl.steps
+    # a workspace document where this computer has a folder
+    pl = P.plan({"n.ipynb/x": Local(A)}, {"n.ipynb": Remote("notebook", F1, revision="r")}, {}, P.BOTH, "lap")
+    assert [s.kind for s in pl.steps if s.path == "n.ipynb"] == [P.TYPE_CLASH], pl.steps
+
+
+def test_case_clash():
+    rem = {"A.txt": Remote("file", F1, A), "a.txt": Remote("file", F2, B_), "b.txt": Remote("file", F1, C)}
+    # a case-insensitive filesystem: both names listed, neither downloaded; others as usual
+    pl = P.plan({}, rem, {}, P.BOTH, "lap", case_insensitive=True)
+    assert [(s.kind, s.path) for s in pl.steps] == [(P.CASE_CLASH, "A.txt"), (P.CASE_CLASH, "a.txt"), (P.DOWNLOAD, "b.txt")], pl.steps
+    # even with a base and a local file at one of them: nothing is replaced or deleted there
+    pl = P.plan({"a.txt": Local(D)}, rem, {"a.txt": Base(D, F2)}, P.BOTH, "lap", case_insensitive=True)
+    assert [s.kind for s in pl.steps if s.path in ("a.txt", "A.txt")] == [P.CASE_CLASH, P.CASE_CLASH], pl.steps
+    # a case-sensitive filesystem: two ordinary downloads
+    pl = P.plan({}, rem, {}, P.BOTH, "lap")
+    assert [s.kind for s in pl.steps] == [P.DOWNLOAD] * 3
+
+
 def test_delete_guard():
     def guard(n_here, n_there, base_files):
         loc, rem, base = {}, {}, {}
