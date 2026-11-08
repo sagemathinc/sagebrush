@@ -250,7 +250,9 @@ try {
   await realKey("Enter");
   check((await evaluate(`window.__execs`)) === exQ && (await evaluate(`${T}.editor.buf`)) === "echo queued" && (await evaluate(`document.querySelector(".sb-term-note").textContent`)) === "A command is running: Stop it first.",
     "Enter while running: nothing submitted or queued, the typed-ahead line kept, the note shown");
-  // (Ctrl-C with a selection on the screen: the browser's copy, the command keeps running)
+  // (Ctrl-C with a selection on the screen: the browser's copy, the command keeps running.  The note just shown
+  // shortens the screen, and xterm drops a selection when it is resized: the selection is made once that refit is done)
+  await pause(300);
   await evaluate(`${T}.term.selectAll(), 1`);
   await realKey("c", { ctrl: true });
   check((await running()) === true && (await evaluate(`${T}.term.hasSelection()`)) === true, "Ctrl-C with a selection is the copy, and the command keeps running");

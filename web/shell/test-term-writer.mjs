@@ -5,7 +5,7 @@
 // and their units), never decremented, a new generation before a fragment would pass a budget, a fragment over a
 // budget on its own cut first; the reset after each output; stale callbacks and dispose.  Budgets small and injected.
 //   bun web/shell/test-term-writer.mjs
-import { TermWriter, BUDGET, SLICE, PIECE, RESET, LEAVE_ALT, CUT_NOTE, MAX_ITEMS } from "./term-writer.ts";
+import { TermWriter, BUDGET, SLICE, PIECE, RESET, LEAVE_ALT, CUT_NOTE, MAX_ITEMS, MAX_QUEUED } from "./term-writer.ts";
 
 let checks = 0, fails = 0;
 const ok = (c, what) => { checks++; if (!c) fails++; console.log(`${c ? "ok  " : "FAIL"} ${what}`); };
@@ -208,6 +208,42 @@ function rig(budget = BUDGET, { auto = true } = {}) {
   ok(made === 1 && r.text().includes("R9999") && !r.text().includes("R9998"), `redraws waiting are replaced: the last one runs, once (${made})`);
   ok(r.text().includes("o0\n") && r.text().includes("o9999\n"), "every small write still arrives, merged, in order");
   ok(ps.length === 20000, "and every caller's promise settles");
+}
+
+// the bound holds whatever the calls (ENGINE E3, SEC T854-3, PERF P1): alternating kinds, repeated keyed replacement,
+// large merges, a blocked sink
+{
+  const { w, r } = rig(BUDGET, { auto: false });
+  void w.write("first", "ui");
+  await new Promise((s) => setTimeout(s, 0));
+  const ps = new Set();
+  for (let i = 0; i < 10000; i++) {
+    ps.add(w.write("o" + i, "output"));
+    ps.add(w.write("u" + i, "ui"));
+  }
+  ok(w.queueMax <= MAX_ITEMS && w.backlog <= MAX_ITEMS && w.stats.dropped > 0, `alternating kinds: at most ${MAX_ITEMS} items wait (${w.queueMax}), the rest dropped and counted (${w.stats.dropped})`);
+  ok(ps.size <= MAX_ITEMS + 2, `calls share their items' completions: ${ps.size} distinct promises for 20 000 calls`);
+  const k = new Set();
+  for (let i = 0; i < 1000; i++) k.add(w.writeLazy(() => "k" + i, "redraw"));
+  ok(k.size === 1 && w.backlog <= MAX_ITEMS + 2, "1 000 keyed replacements: one item, one completion, nothing kept per call");
+  while (r.pending.length) { r.pending.shift()(); await new Promise((s) => setTimeout(s, 0)); }
+  await Promise.all([...ps, ...k]);
+  ok(r.text().includes("k999") && !r.text().includes("k998"), "the last keyed write wins, and every completion settles");
+  const { w: wb, r: rb } = rig(BUDGET, { auto: false });
+  void wb.write("first", "ui");
+  await new Promise((s) => setTimeout(s, 0));
+  for (let i = 0; i < 40; i++) void wb.write("b".repeat(SLICE), "output");
+  ok(wb.stats.dropped > 0, `queued bytes stay within ${MAX_QUEUED}: past it a write is dropped (${wb.stats.dropped})`);
+  wb.dispose();
+  void rb;
+}
+
+// a command's refresh written lazily is admitted as output: S2's cap applies (SEC T854-4)
+{
+  const small = { ...BUDGET, styleRuns: 2 };
+  const { w, r } = rig(small);
+  await w.writeLazy(() => "\x1b[31ma\x1b[32mb\x1b[33mc", "replace", true);
+  ok(w.colourCut && (r.text().match(/\x1b\[3\dm/g) || []).length === 1, `a lazy output write keeps S2's cap (${JSON.stringify(r.text())})`);
 }
 
 // the panel's own text is admitted too (SEC T854-1): its marks capped per cell and charged; no style cap on it

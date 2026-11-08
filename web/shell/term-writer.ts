@@ -33,14 +33,29 @@ export const PIECE = 8 * 1024;
 export const RESET = "\x18\x1b[!p\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l";
 export const LEAVE_ALT = "\x1b[?1049l";
 export const CUT_NOTE = "(Some combining characters or links in this output were left out to save memory.)";
-/** the queue's bound (ENGINE E3, SEC T854-3, PERF P1): queued writes of one kind merge up to a 64 KiB fragment, a
- * redraw or a refresh replaces the one still waiting (the last wins), and past this many items a write merges into the
- * last one whatever its size: the producers' own bounds (S1 per command, the line's) then bound the bytes */
+/** the queue's bound (ENGINE E3, SEC T854-3, PERF P1), whatever the calls: at most this many items wait, each with one
+ * shared completion (a call returns its item's promise, so nothing is kept per call).  Queued writes of one kind merge
+ * up to a 64 KiB fragment; a keyed write (the line's redraw, top's refresh) replaces the one waiting (the last wins).
+ * At the bound, output still merges into a waiting output (its bytes bounded by S1, one command at a time), a keyed
+ * write still replaces, a barrier joins the last item, and the end of an output (one per command, awaited) is still
+ * queued; any other write is dropped and counted.  The panel stops producing before then (its `busy` note). */
 export const MAX_ITEMS = 64;
+// (plus at most one waiting item per key, two keys, and one end of output per command)
+/** and at most this many bytes wait in all: past it, a write is dropped and counted, output included */
+export const MAX_QUEUED = 2 << 20;
 
 export interface Sink {
   write(data: string, done: () => void): void;
 }
+/** what a dropped or empty write returns: one settled promise, shared */
+const SETTLED: Promise<void> = Promise.resolve();
+type Item = { data: string; kind: "output" | "ui" | "reset" | "lazy"; make?: () => string; key?: string; styled?: boolean; done: Promise<void>; settle: () => void };
+const item = (data: string, kind: Item["kind"], make?: () => string, key?: string, styled = false): Item => {
+  let settle!: () => void;
+  const done = new Promise<void>((r) => (settle = r));
+  return { data, kind, make, key, styled, done, settle };
+};
+
 type Budget = { marksPerBase: number; combining: number; links: number; linkUnits: number; styleRuns?: number };
 type Charges = { combining: number; links: number; linkUnits: number };
 type Lex = { st: "ground" | "esc" | "escI" | "csi" | "osc" | "oscEsc" | "str" | "strEsc"; osc: string; afterBase: number; drop: boolean; csi?: string; pend?: string; runs?: number; clean?: boolean };
@@ -64,7 +79,7 @@ export class TermWriter {
   colourCut = false;
   private inflightN = 0;
   private lex: Lex = { st: "ground", osc: "", afterBase: -1, drop: false };
-  private queue: { data: string; kind: "output" | "ui" | "reset" | "lazy"; make?: () => string; key?: string; dones: (() => void)[] }[] = [];
+  private queue: Item[] = [];
   /** items waiting, at most (the tests' high-water mark) */
   queueMax = 0;
   private pumping = false;
@@ -90,61 +105,96 @@ export class TermWriter {
   /** Text into xterm, in order: "output" is a command's (filtered and charged), "ui" the panel's own (its prompt,
    * the editor's line, status lines: already made safe by the panel, passed as is). */
   write(text: string, kind: "output" | "ui" = "ui"): Promise<void> {
-    if (this.dead || text === "") return Promise.resolve();
-    const parts: Promise<void>[] = [];
+    if (this.dead || text === "") return SETTLED;
+    let last: Promise<void> = SETTLED;
     for (let i = 0; i < text.length; ) {
       let j = Math.min(text.length, i + SLICE);
       // (never between a surrogate pair)
       if (j < text.length && (text.charCodeAt(j) & 0xfc00) === 0xdc00) j--;
       const data = text.slice(i, j);
-      parts.push(new Promise((done) => {
-        const tail = this.queue[this.queue.length - 1];
-        // (merged into the waiting write of the same kind while it stays a fragment, or always past MAX_ITEMS)
-        if (tail && tail.kind === kind && (tail.data.length + data.length <= SLICE || this.queue.length >= MAX_ITEMS)) (tail.data += data), tail.dones.push(done);
-        else this.push({ data, kind, dones: [done] });
-      }));
       i = j;
+      const tail = this.queue[this.queue.length - 1];
+      const full = this.queue.length >= MAX_ITEMS;
+      if (this.queuedBytes() + data.length > MAX_QUEUED) {
+        this.stats.dropped++;
+        continue;
+      }
+      // (merged into the waiting write of the same kind while it stays a fragment; at the bound, output merges anyway)
+      if (tail && tail.kind === kind && (tail.data.length + data.length <= SLICE || (full && kind === "output"))) {
+        tail.data += data;
+        last = tail.done;
+      } else if (full) {
+        this.stats.dropped++;
+      } else {
+        const it = item(data, kind);
+        this.push(it);
+        last = it.done;
+      }
     }
     void this.pump();
-    return Promise.all(parts).then(() => {});
+    return last;
   }
 
-  private push(item: (typeof this.queue)[number]): void {
-    this.queue.push(item);
+  private queuedBytes(): number {
+    let n = 0;
+    for (const q of this.queue) n += q.data.length;
+    return n;
+  }
+
+  /** items waiting now (the panel's backpressure reads it) */
+  get backlog(): number {
+    return this.queue.length;
+  }
+
+  private push(it: Item): void {
+    this.queue.push(it);
     this.queueMax = Math.max(this.queueMax, this.queue.length);
   }
 
   /** The panel's own text, made when its turn comes (after every earlier write is drawn, so it can read where the
    * cursor is): a redraw of the line, a move back over a block. */
-  writeLazy(make: () => string, key?: string): Promise<void> {
+  /** `output`: what `make` returns is a command's output, admitted as output is (S2's cap); else the panel's own. */
+  writeLazy(make: () => string, key?: string, output = false): Promise<void> {
     if (this.dead) return Promise.resolve();
-    const p = new Promise<void>((done) => {
-      // (a keyed write still waiting is replaced: a redraw or a refresh superseded before it ran; the last wins)
-      const same = key ? this.queue.find((q) => q.kind === "lazy" && q.key === key) : undefined;
-      if (same) (same.make = make), same.dones.push(done);
-      else this.push({ data: "", kind: "lazy", make, key, dones: [done] });
-    });
+    // (a keyed write still waiting is replaced: a redraw or a refresh superseded before it ran; the last wins)
+    const same = key ? this.queue.find((q) => q.kind === "lazy" && q.key === key) : undefined;
+    if (same) {
+      same.make = make;
+      return same.done;
+    }
+    // (a keyed write takes its one item even at the bound: there are two keys, the line's redraw and a refresh)
+    if (!key && this.queue.length >= MAX_ITEMS) {
+      this.stats.dropped++;
+      return this.queue[this.queue.length - 1].done;
+    }
+    const it = item("", "lazy", make, key, output);
+    this.push(it);
     void this.pump();
-    return p;
+    return it.done;
   }
 
   /** The end of a logical output: the reset, and the lexer back to ground with no base to attach to. */
   endOutput(): Promise<void> {
     if (this.dead) return Promise.resolve();
-    const p = new Promise<void>((done) => this.push({ data: RESET, kind: "reset", dones: [done] }));
+    // (queued even at the bound: one per command, and the panel awaits it before the next)
+    const it = item(RESET, "reset");
+    this.push(it);
     void this.pump();
-    return p;
+    return it.done;
   }
 
   /** All writes queued before it drawn: a barrier at the end of the queue (the last callback, then this). */
   idle(): Promise<void> {
+    if (this.dead) return Promise.resolve();
+    // (at the bound, the last item's own completion is the same barrier)
+    if (this.queue.length >= MAX_ITEMS) return this.queue[this.queue.length - 1].done;
     return this.writeLazy(() => "");
   }
 
   /** ✕: nothing more is written; whatever waits is let go, and a late callback does nothing. */
   dispose(): void {
     this.dead = true;
-    for (const q of this.queue.splice(0)) q.dones.forEach((d) => d());
+    for (const q of this.queue.splice(0)) q.settle();
     this.inflight?.();
     this.inflight = null;
   }
@@ -164,10 +214,10 @@ export class TermWriter {
           this.colourCut = false;
           data = this.inAlt() ? "\x18" + LEAVE_ALT + RESET.slice(1) : RESET;
         }
-        else if (item.kind === "lazy") data = await this.admit(item.make!(), false);
-        if (this.dead) return item.dones.forEach((d) => d());
+        else if (item.kind === "lazy") data = await this.admit(item.make!(), !!item.styled);
+        if (this.dead) return item.settle();
         await this.put(data);
-        item.dones.forEach((d) => d());
+        item.settle();
       }
     } finally {
       this.pumping = false;

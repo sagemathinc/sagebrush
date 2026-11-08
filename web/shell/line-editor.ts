@@ -100,7 +100,7 @@ export class LineEditor {
 
   /** Text typed or pasted at the cursor; refused whole past maxBytes. */
   insert(text: string, how: "pasted" | "typed" = "typed"): Act {
-    if (this.search) this.accept();
+    if (this.search && !this.accept()) return { t: "refused", how };
     const add = utf8Len(text);
     if (this.bytes + add > this.maxBytes) return { t: "refused", how };
     this.work += this.buf.length + text.length;
@@ -111,11 +111,13 @@ export class LineEditor {
   }
 
   /** The line shown in the search's place, kept for editing (Esc, an arrow): bash's accept. */
-  private accept(): void {
+  private accept(): boolean {
     const s = this.search!;
+    if (!s.failed && s.at >= 0 && utf8Len(this.history.entries[s.at]) > this.maxBytes) return false;
     this.search = null;
-    if (s.failed || s.at < 0) return;
+    if (s.failed || s.at < 0) return true;
     this.set(this.history.entries[s.at]);
+    return true;
   }
 
   private find(q: string, from: number): number {
@@ -151,7 +153,8 @@ export class LineEditor {
       return { t: "redraw" };
     }
     if (k.key === "Enter" && !k.shift) {
-      this.accept();
+      // (a match past the line's bound is never accepted, so never submitted)
+      if (!this.accept()) return { t: "refused", how: "typed" };
       return this.submit();
     }
     if (k.ctrl && k.key.toLowerCase() === "c") return { t: "interrupt" };
@@ -165,13 +168,15 @@ export class LineEditor {
       return { t: "redraw" };
     }
     // (Esc, an arrow, Home, End or any other key: the match stays in the line, and the key then acts on it)
-    this.accept();
+    if (!this.accept()) return { t: "refused", how: "typed" };
     if (k.key === "Escape") return { t: "redraw" };
     const a = this.key(k);
     return a.t === "none" || a.t === "pass" ? { t: "redraw" } : a;
   }
 
   private submit(): Act {
+    // (the central guard: whatever path filled the line, nothing past the bound is ever submitted)
+    if (utf8Len(this.buf) > this.maxBytes) return { t: "refused", how: "typed" };
     const line = this.buf;
     this.history.push(line);
     this.reset();

@@ -12,7 +12,7 @@ import css from "./panel.css" with { type: "text" };
 import type { HostOutcome, ShellHost } from "./host.ts";
 import { FitAddon, Terminal, KEYS, TOOLBAR_CSS, BUTTON_CSS, ensureXtermCss, extraKeysRow, safeTerminal } from "../term/xterm-view.ts";
 import { LineEditor, History, HISTORY, utf8Len, type Act, type Key } from "./line-editor.ts";
-import { TermWriter, zeroWidthOf } from "./term-writer.ts";
+import { TermWriter, zeroWidthOf, MAX_ITEMS } from "./term-writer.ts";
 
 const MIN_H = 120;
 /** xterm's retained rows (wrapped rows count) and the screen's largest size (daybreak3 E1) */
@@ -656,7 +656,15 @@ export class TerminalPanel {
     this.act(a);
   }
 
+  /** the writer's queue near its bound (term-writer.ts MAX_ITEMS): actions that would queue more wait, said once */
+  private get busy_(): boolean {
+    return this.writer.backlog >= MAX_ITEMS - 8;
+  }
+
   private act(a: Act): void {
+    if ((a.t === "submit" || a.t === "clear" || (a.t === "interrupt" && !this.running)) && this.busy_) {
+      return this.say("The screen is still drawing: try again in a moment.");
+    }
     switch (a.t) {
       case "redraw":
         this.say("");
@@ -693,6 +701,7 @@ export class TerminalPanel {
       set: (line, caret) => this.act(ed.load(line, caret)),
       show: (text) => {
         // (a candidate block, bash's way: under the line, then the line again; the names shown as visible text)
+        if (this.busy_) return;
         this.leave();
         void this.writer.write(visible(text).replace(/\n/g, "\r\n") + "\r\n");
         this.prompt();
@@ -820,7 +829,7 @@ export class TerminalPanel {
       },
       replace: (text) => {
         // (one keyed write: a refresh still waiting is replaced by the newest, so a fast refresher costs one draw)
-        latest = text;
+        latest = cutUtf8(text, OUTPUT.inBytes);
         void this.writer.writeLazy(() => {
           shown = 0;
           omitted = 0;
@@ -836,7 +845,7 @@ export class TerminalPanel {
           const t = fit(latest);
           last = t;
           return pre + t;
-        }, "replace");
+        }, "replace", true);
       },
     };
     let code = 0;

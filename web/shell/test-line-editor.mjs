@@ -143,6 +143,22 @@ const fresh = (max = 1 << 20, hist = new History()) => new LineEditor(max, hist)
   ok(ed.key({ key: "ArrowUp" }).t === "refused" && ed.buf === "", "a history entry past the bound isn't loaded");
 }
 
+// Ctrl-R's accept is bounded too (SEC T854-2 residual, ENGINE E2): a match past the line's bound is never accepted or
+// submitted, by Enter, Escape or an arrow; and submission itself refuses a line past the bound
+{
+  const h = new History(HISTORY, ["x".repeat(40)]);
+  const ed = fresh(8, h);
+  for (const k of [{ key: "Enter" }, { key: "Escape" }, { key: "ArrowLeft" }]) {
+    ed.reset("");
+    keys(ed, { key: "r", ctrl: true }, "x");
+    const a = keys(ed, k)[0];
+    ok(a.t === "refused" && ed.buf === "", `Ctrl-R, then ${k.key}: a 40-byte match on an 8-byte line is refused, nothing submitted or loaded`);
+  }
+  const e2 = fresh(8);
+  e2.buf = "y".repeat(40);
+  ok(keys(e2, "Enter")[0].t === "refused", "the central guard: a line past the bound is never submitted, however it was filled");
+}
+
 // work: linear per operation, no whole-history scan per key
 {
   const measure = (n) => {
