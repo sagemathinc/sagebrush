@@ -101,7 +101,7 @@ Download only: notebooks, boards and chats as files (3 files, 76 KB)
   ↓ Notes.ipynb                        58 KB   the notebook as it is now in the workspace
   ↓ plan.board.json                     6 KB   the board as it is now
   ↓ Talk.ipynb                         12 KB   written again (you deleted it here; add it to .sagebrushignore to stop this)
-Not uploaded (fs-sync doesn't upload notebooks, boards or chats yet) (2 files)
+Not uploaded (notebooks, boards and chats go only from the workspace to this computer for now) (2 files)
   · Seminar.ipynb       changed here since fs-sync wrote it; left as it is
   · Draft.ipynb         new here; left as it is
 Skipped (2)
@@ -114,7 +114,7 @@ Apply? [y/N]
 
 - **Notebooks, boards and chats** (§3.2) are written here as files, the way the workspace saves them when downloaded: `.ipynb`, `.board.json`, and the chat's file. They go only one way, from the workspace to this computer (William, Nov 8: "download only; a local edit to one is reported, not uploaded").
   - Each run writes a snapshot again when the document changed in the workspace.
-  - If the person edited that file here since fs-sync wrote it, fs-sync leaves it as it is: it doesn't replace it, delete it or upload it. It lists it under "Not uploaded (fs-sync doesn't upload notebooks, boards or chats yet)" as "changed here since fs-sync wrote it; left as it is", every run, until the person deletes or renames their edited copy. Then the next run writes a fresh snapshot.
+  - If the person edited that file here since fs-sync wrote it, fs-sync leaves it as it is: it doesn't replace it, delete it or upload it. It lists it under "Not uploaded (notebooks, boards and chats go only from the workspace to this computer for now)" as "changed here since fs-sync wrote it; left as it is", every run, until the person deletes or renames their edited copy. Then the next run writes a fresh snapshot.
   - A notebook, board or chat file made here, such as a new `.ipynb`, isn't uploaded either (§3.4). It's listed under the same heading as "new here; left as it is".
   - A snapshot the person deleted here is written again, and the plan says so: "↓ Talk.ipynb  written again (you deleted it here; add it to .sagebrushignore to stop this)".
   - A listed edited snapshot alone doesn't make the run exit 1. Snapshots are download-only by design, so "in sync" (exit 0) means every file other than these matches.
