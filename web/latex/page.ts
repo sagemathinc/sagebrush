@@ -786,7 +786,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // Run under way is left alone (the button's second click is its Stop, never the key's). Whether the document has
   // SageTeX code is the text's now, never the last render's (daybreak3, #874): the preview caught up, its items decide
   // (none: the source's Shift+Enter is a newline, as before); behind (an edit just made), the key waits for this text's
-  // render, then runs, or, with no code, puts the newline where it was asked for if the text is still as it was
+  // render, then runs, or, with no code, puts the newline where it was asked for. Only for the text it was pressed on:
+  // the text changed before that render, the key does nothing (astra, #874: never a Run of code typed after it)
   const hasCode = (c: any) => Array.isArray(c?.sage) && c.sage.length > 0;
   const runKey = (fromSource: boolean): boolean => {
     if (running) return true;
@@ -794,12 +795,13 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     if (c) { if (!hasCode(c)) return false; runBtn.click(); return true; }
     const text = src.value, a = src.selectionStart, b = src.selectionEnd;
     const off = E.onRendered(() => {
+      if (src.value !== text) { off(); return; }
       const now = E.lastCheck();
       if (!now) return;
       off();
       if (!live() || running) return;
       if (hasCode(now)) runBtn.click();
-      else if (fromSource && src.value === text) { src.setRangeText("\n", a, b, "end"); src.dispatchEvent(new Event("input")); }
+      else if (fromSource) { src.setRangeText("\n", a, b, "end"); src.dispatchEvent(new Event("input")); }
     });
     return true;
   };

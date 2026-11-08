@@ -3095,6 +3095,14 @@ $P = \sage{g[0]}$
       await sleep(500);
       const st2 = await ev(`document.querySelector(".tex-status")?.textContent ?? ""`);
       check(k2.prevented && back && !/^(Ran|Starting|Running)/.test(st2), "Shift+Enter right after the last SageTeX item is removed (the preview behind): no Run, the newline where it was asked for", { k2, back, status: st2, src: JSON.stringify((await srcNow()).slice(0, 120)) });
+      // (astra, #874: Shift+Enter on text with no code, the preview behind, then a SageTeX item added before the render:
+      //  the key was for the text it was pressed on, so nothing at all: no Run of the later code, no newline)
+      await until(`!!document.querySelector(".tex-head .tex-run")?.hidden`, 10000);
+      const later = await ev(`(() => { const t = document.querySelector(".tex-src"); t.value = ${JSON.stringify(plain)}; t.dispatchEvent(new Event("input")); t.focus(); t.setSelectionRange(${atP}, ${atP}); document.querySelector(".tex-status").textContent = ""; const e = new KeyboardEvent("keydown", { key: "Enter", shiftKey: true, bubbles: true, cancelable: true }); t.dispatchEvent(e); t.value = ${JSON.stringify(withSage)}; t.dispatchEvent(new Event("input")); return e.defaultPrevented; })()`);
+      await until(`!document.querySelector(".tex-head .tex-run")?.hidden`, 10000);
+      await sleep(3000);
+      const st3 = await ev(`document.querySelector(".tex-status")?.textContent ?? ""`);
+      check(later && !/^(Ran|Starting|Running)/.test(st3) && (await srcNow()) === withSage, "Shift+Enter pressed on one text, the text changed before its render: nothing (no Run of the later code, no newline)", { later, status: st3, src: JSON.stringify((await srcNow()).slice(0, 120)) });
     }
     // (Codex friction P5, the editor's half: a helper .py beside the .tex, imported by the document's code as by real
     //  SageTeX run in the document's folder. The .tex's folder is given to Sage, read-only, at each Run, as it is then:
