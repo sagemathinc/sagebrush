@@ -17,6 +17,7 @@ const dist = join(web, "dist", "agents");
 ok(existsSync(dist) && FILES.every((f) => existsSync(join(dist, f)) && statSync(join(dist, f)).size > 0), "the default build (no flags) built the Agents page: dist/agents/index.html and agents.js, and connect.html");
 const html = existsSync(join(dist, "index.html")) ? readFileSync(join(dist, "index.html"), "utf8") : "";
 ok(/<script[^>]+src="\/agents\/agents\.js"/.test(html), "its page loads its own script, /agents/agents.js");
+ok(/<a href="\/agents\/connect">/.test(html), "its help box links to \"How to connect your agent\", /agents/connect");
 
 // (the site, as web/site-dir.mts decides it: web/site present and SAGEBRUSH_NO_SITE not 1)
 const site = join(web, "site");

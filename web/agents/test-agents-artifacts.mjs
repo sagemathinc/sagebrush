@@ -327,6 +327,19 @@ async function pair() {
   while (!notes.some((m) => m.method === "grant.changed") && Date.now() - t < 10000) await sleep(50);
   await until(`document.querySelector('#connect').textContent === 'Connected'`);
 }
+/** A Connect to a port nothing listens on, from a ?pair= link: the dialog's failure text, as the person reads it. */
+async function failedConnect() {
+  const net = await import("node:net");
+  const closed = await new Promise((r) => { const sv = net.createServer(); sv.listen(0, "127.0.0.1", () => { const p = sv.address().port; sv.close(() => r(p)); }); });
+  const before = loads;
+  await send("Page.navigate", { url: `${site}/agents/?pair=123-456&port=${closed}` });
+  const t1 = Date.now();
+  while (loads === before && Date.now() - t1 < 20000) await sleep(50);
+  await until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Connect' && b.offsetParent)`, 20000);
+  await ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Connect' && b.offsetParent).click()`);
+  await until(`/connection failed/.test([...document.querySelectorAll('.sbag-dlg .err')].at(-1)?.textContent ?? "")`, 15000);
+  return ev(`[...document.querySelectorAll('.sbag-dlg .err')].at(-1)?.textContent ?? ""`);
+}
 /** A fresh page with nothing of the notebook loaded: an empty chat is made current first (a reload reopens the
  * current chat's last artifact), then the page is loaded and paired again. */
 async function freshPage() {
@@ -358,6 +371,9 @@ async function openNotebook(path, o = {}) {
 }
 
 try {
+  // ======================================================================== a failed Connect names the page's program
+  const failText = await failedConnect();
+  ok(/^the connection failed \(is sagebrush-agent running,/.test(failText) && /such as sagebrush-agent\./.test(failText) && !/sagebrush-mcp|agent's sagebrush-agent|undefined/.test(failText), "a failed Connect names sagebrush-agent, in the failure and in Chrome's note (no sagebrush-mcp, no \"your agent's\", no undefined)", failText);
   // ======================================================================== the page, paired; lazy loading
   await pair();
   const grant = notes.find((m) => m.method === "grant.changed")?.params;
