@@ -9,6 +9,12 @@
 //   PUT  /api/sync/v1/blob/<sha256>      the bytes (R2 checks the hash)
 //   GET  /api/sync/v1/blob/<sha256>      303 to a signed URL on the user-content domain
 //
+// and, with chunked files on (SYNC_TIERED, DEV only; design/tiered-files.md §4.1):
+//
+//   POST /api/sync/v1/manifest                   {manifest} -> {state, position, chunks}
+//   POST /api/sync/v1/manifest/<sha256>/verify   one step of the server's check -> {state, position}
+//   GET  /api/sync/v1/manifest/<sha256>          a verified file's manifest
+//
 // and, on the user-content Worker (web/files), /p/<key>: a signed read (§5.4).
 //
 // Without the sync bindings (production today), every route is a 404:
@@ -18,7 +24,9 @@
 import { adminLength, bindPurge, sessionOf, signedWith, type ShareEnv } from "../share/server.ts";
 import { parseRange } from "../share/files.ts";
 import { accountHash, fields, hmacHex, isNat, isSha, same, LIMITS, URL_MS, SyncError, type Result } from "../sync-protocol/protocol.ts";
-import { allowed, gate, testMode, type SyncEnv } from "./env.ts";
+import { allowed, gate, testMode, tieredOn, type SyncEnv } from "./env.ts";
+import { TIERED } from "./manifest.ts";
+import { Sha256 } from "./sha256.ts";
 import type { SyncAccount } from "./account.ts";
 
 export interface RateLimit { limit(o: { key: string }): Promise<{ success: boolean }> }
@@ -221,7 +229,27 @@ export async function handleSync(req: Request, env: Env): Promise<Response | nul
     } catch (e) {
       return err(e instanceof SyncError && e.code === "limit" ? 413 : 400, e instanceof SyncError ? e.code : "invalid");
     }
-    return answer(await stub.missing({ account: who.id, blobs, bind }), (missing) => json({ missing }));
+    return answer(await stub.missing({ account: who.id, blobs, bind }), (v) => json(v.verifying.length ? v : { missing: v.missing }));
+  }
+  // chunked files (design/tiered-files.md §4.1, §4.4): a 404 while the switch is off, as every sync route is without its flag
+  if (p.startsWith("/api/sync/v1/manifest")) {
+    if (!tieredOn(env)) return err(404, "not found");
+    if (p === "/api/sync/v1/manifest" && m === "POST") {
+      if (!/^application\/json\b/.test(req.headers.get("content-type") ?? "")) return err(415, "JSON only");
+      const text = await readBounded(req, 2 * TIERED.manifestBytes);
+      if (text === null) return err(413, "limit", { limit: "manifest_bytes", max: TIERED.manifestBytes });
+      let body: { manifest?: unknown };
+      try {
+        body = fields(JSON.parse(text), ["manifest"], "body") as { manifest?: unknown };
+      } catch {
+        return err(400, "invalid");
+      }
+      return answer(await stub.registerManifest({ account: who.id, manifest: body.manifest, bind }), json);
+    }
+    const mv = p.match(/^\/api\/sync\/v1\/manifest\/([0-9a-f]{64})(\/verify)?$/);
+    if (mv && !mv[2] && m === "GET") return answer(await stub.getManifest({ account: who.id, sha256: mv[1], bind }), json);
+    if (mv && mv[2] && m === "POST") return verifyStep(env, stub, who.id, mv[1], bind);
+    return err(404, "not found");
   }
   const g = p.match(/^\/api\/sync\/v1\/blob\/([0-9a-f]{64})$/);
   if (g && m === "PUT") return putBlob(req, env, stub, who.id, g[1], bind);
@@ -577,6 +605,46 @@ async function putBlob(req: Request, env: Env, stub: ReturnType<NonNullable<Env[
   // when it can, CORR-5E2-2)
   if ("error" in f && !(testMode(env) && env.SYNC_TEST_NO_WORKER_DELETE)) await env.SHARE_BUCKET!.delete(key).catch(() => {});
   return answer(f, (v) => json(v, 201));
+}
+
+/**
+ * One verify call (design/tiered-files.md §4.1, step 5): the account object hands out the next chunks' keys and the
+ * saved SHA-256 state (and debits the verification budget); this Worker streams those exact objects from R2 in order,
+ * through the resumable SHA-256, checking each one's length; then the object checks everything again and saves the
+ * new position, or decides.  Nothing here is trusted by the object beyond the bytes it hashed: the captured
+ * registration, incarnation, position and keys are compared in its transaction.
+ */
+async function verifyStep(env: Env, stub: ReturnType<NonNullable<Env["SYNC_ACCOUNT"]>["get"]>, account: string, sha256: string, bind: { account?: string; generation?: number }): Promise<Response> {
+  const b = await stub.verifyBegin({ account, sha256, bind });
+  if ("error" in b) return answer(b, json);
+  if (!("reg" in b.ok)) return json({ state: b.ok.state });
+  const step = b.ok;
+  // (tests: held here, between the two halves, so a test can change the row or a key meanwhile)
+  await gate(env, "verify-stream");
+  const h = Sha256.from(step.sha_state);
+  let short = false;
+  for (const c of step.chunks) {
+    const o = await env.SHARE_BUCKET!.get(c.key);
+    if (!o) return err(503, "busy", { message: "a chunk's bytes couldn't be read; try again" });
+    let n = 0;
+    const reader = (o.body as ReadableStream<Uint8Array>).getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      n += value.length;
+      if (n > c.size) break;
+      h.update(value);
+    }
+    if (n !== c.size) {
+      await reader.cancel().catch(() => {});
+      short = true;
+      break;
+    }
+  }
+  const e = await stub.verifyEnd({ account, sha256, reg: step.reg, vinc: step.vinc, mdigest: step.mdigest, from: step.position, to: step.to, keys: step.chunks.map((c) => c.key), sha_state: h.save(), short, bind });
+  if ("error" in e) return answer(e, json);
+  if (e.ok.state === "invalid") return err(400, "invalid", { message: "the chunks don't make this file", reason: e.ok.reason });
+  return json({ state: e.ok.state, position: e.ok.position, chunks: step.count });
 }
 
 /**

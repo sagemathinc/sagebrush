@@ -16,7 +16,9 @@ import {
   parseMessage, PERSON_ONLY, attempt, attemptAsync, randomHex, TICKET_MS, LIMITS_TTL_MS, isSha, type Batch, type DocKind, type Head, type Result,
 } from "../sync-protocol/protocol.ts";
 import { patchRef, unwrap, type BatchOut } from "./doc.ts";
-import { allowed, gate, testMode, type SyncEnv } from "./env.ts";
+import { allowed, gate, testMode, tieredOn, type SyncEnv } from "./env.ts";
+import { TIERED, canonical, checkManifest, sha256Hex, type Manifest } from "./manifest.ts";
+import { Sha256, type ShaState } from "./sha256.ts";
 import { MAX_PUT, SHARING_USED, nowSeconds } from "../share/server.ts";
 
 type Row = Record<string, ArrayBuffer | string | number | null>;
@@ -76,7 +78,7 @@ const MAX_HOLDS = LIMITS.liveBatches;
 
 /** The limits CoCalc gives an account (design/sync-server.md §6), as this service reads them. */
 /** (one storage_bytes for sharing and sync together, §6.1: sync has no storage limit of its own) */
-export interface Limits { storage_bytes: number; max_file_bytes: number; sync: { enabled: boolean; version_bytes: number; read_bytes_per_day: number; retention_days?: number }; issued?: number }
+export interface Limits { storage_bytes: number; max_file_bytes: number; sync: { enabled: boolean; version_bytes: number; read_bytes_per_day: number; retention_days?: number; verify_bytes_per_day?: number }; issued?: number }
 /** Dev deployments with no CoCalc to ask (SHARE_DEV=1): small, fixed limits. */
 /** After CoCalc couldn't say an account's plan, how long before it's asked again (LIMIT-SYNC-STATUS-1). */
 const PLAN_RETRY_MS = 5000;
@@ -485,8 +487,14 @@ export class SyncAccount extends DurableObject<SyncEnv> {
           // (a session acts for the person; "agent:<name>" from a session is an agent in the person's page, design/agent-endpoint.md §9.2)
           if (PERSON_ONLY.has(op.op) && op.by !== "person") throw new SyncError("forbidden", "only a person may " + op.op);
           // (a data file's bytes are uploaded before the op that names them, and the entry holds them, §3)
+          // (or, with chunked files on, a manifest the server has verified: a row still verifying is `missing`, so no op
+          // makes an unverified file an entry's bytes, design/tiered-files.md §4.1 step 6)
+          let chunked = false;
           if (op.kind === "file" && op.sha256 !== undefined) {
-            if (!this.one("SELECT 1 AS x FROM holdings WHERE sha256 = ?", op.sha256)) throw new SyncError("missing", "upload the file's bytes before the op");
+            if (!this.one("SELECT 1 AS x FROM holdings WHERE sha256 = ?", op.sha256)) {
+              chunked = tieredOn(this.env) && this.hasFiles() && this.one("SELECT 1 AS x FROM files WHERE sha256 = ? AND state IN ('verified', 'live')", op.sha256) !== undefined;
+              if (!chunked) throw new SyncError("missing", "upload the file's bytes before the op");
+            }
           }
           this.sql.exec(
             'INSERT INTO ops (device, dseq, t, by, op, path, "to", kind, ref, fid, sha256, size, base, recv, parent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
@@ -494,7 +502,8 @@ export class SyncAccount extends DurableObject<SyncEnv> {
           );
           out.push({ dseq, seq: Number(this.one("SELECT last_insert_rowid() AS n")!.n) });
           // (the reference an entry holds; it is given back when the reducer replaces the entry's bytes)
-          if (op.kind === "file" && op.sha256 !== undefined) this.sql.exec("UPDATE holdings SET refs = refs + 1 WHERE sha256 = ?", op.sha256);
+          if (chunked) this.sql.exec("UPDATE files SET refs = refs + 1, state = 'live' WHERE sha256 = ?", op.sha256);
+          else if (op.kind === "file" && op.sha256 !== undefined) this.sql.exec("UPDATE holdings SET refs = refs + 1 WHERE sha256 = ?", op.sha256);
         } catch (e) {
           if (!(e instanceof SyncError)) throw e;
           if (refusedCount() >= LIMITS.refusalsPerDevice) throw new SyncError("invalid", "too many refused ops: rebuild from the server's log");
@@ -1650,12 +1659,251 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
 
   /** Which of these blobs this account must upload (advisory, §5.4). */
-  async missing(a: { account: string; blobs: string[]; bind?: { account?: string; generation?: number } }): Promise<Result<string[]>> {
+  async missing(a: { account: string; blobs: string[]; bind?: { account?: string; generation?: number } }): Promise<Result<{ missing: string[]; verifying: string[] }>> {
     return attempt(() => {
       this.admit(a.account, false);
       this.bound(a.bind?.account, a.bind?.generation);
-      return a.blobs.filter((sha) => !this.one("SELECT 1 AS x FROM holdings WHERE sha256 = ?", sha));
+      // (with chunked files on, a whole file's hash is answered too, design/tiered-files.md §4.1 "First, is the whole
+      // file already there?": held as a verified manifest, or being verified, which the client then drives)
+      const files = tieredOn(this.env) && this.hasFiles();
+      const missing: string[] = [], verifying: string[] = [];
+      for (const sha of a.blobs) {
+        if (this.one("SELECT 1 AS x FROM holdings WHERE sha256 = ?", sha)) continue;
+        const f = files ? this.one("SELECT state FROM files WHERE sha256 = ?", sha) : undefined;
+        if (f && f.state !== "verifying") continue;
+        if (f) verifying.push(sha);
+        missing.push(sha);
+      }
+      return { missing, verifying };
     });
+  }
+
+  // ---- chunked files (design/tiered-files.md §4.1, §4.3, §5.1), behind tieredOn (DEV only)
+
+  /** The files table: made the first time it is needed, so no account's schema changes while the switch is off. */
+  private ensureFiles() {
+    this.sql.exec("CREATE TABLE IF NOT EXISTS files (sha256 TEXT PRIMARY KEY, reg TEXT NOT NULL, mdigest TEXT NOT NULL, vinc TEXT NOT NULL, size INTEGER NOT NULL, manifest TEXT NOT NULL, keys TEXT NOT NULL, state TEXT NOT NULL, position INTEGER NOT NULL, sha_state TEXT, hold_until INTEGER NOT NULL, refs INTEGER NOT NULL DEFAULT 0, created INTEGER NOT NULL)");
+    this.sql.exec("CREATE INDEX IF NOT EXISTS files_hold ON files (hold_until) WHERE refs <= 0 AND state <> 'live'");
+  }
+  private hasFiles(): boolean {
+    return this.one("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'files'") !== undefined;
+  }
+  private holdMs(): number {
+    return testMode(this.env) && this.testHold > 0 ? this.testHold : TIERED.holdMs;
+  }
+  /** The distinct chunks of a manifest, in their first order. */
+  private static distinct(m: Manifest): string[] {
+    return [...new Set(m.chunks.map((c) => c[0]))];
+  }
+  /** Retire a files row (§4.3): the row goes, and each distinct chunk loses the one reference the row held, in the caller's transaction. */
+  private retireFile(sha: string) {
+    const r = this.one("SELECT manifest FROM files WHERE sha256 = ?", sha);
+    if (!r) return;
+    const m = JSON.parse(String(r.manifest)) as Manifest;
+    this.sql.exec("DELETE FROM files WHERE sha256 = ?", sha);
+    for (const c of SyncAccount.distinct(m)) this.sql.exec("UPDATE holdings SET refs = refs - 1 WHERE sha256 = ?", c);
+    this.addUsed(-new TextEncoder().encode(String(r.manifest)).length);
+  }
+
+  /**
+   * Register a chunked file's manifest (§4.1, step 4): its form and limits, every chunk held as its own holding at its
+   * listed size, then the row in state `verifying`, with a registration id never reused and one reference to each
+   * distinct chunk, owned by the row.  The same manifest again renews the hold and answers the row as it is; another
+   * manifest for the same hash is `conflict` while a row exists.  The manifest's bytes count in usage (§4.3).
+   */
+  async registerManifest(a: { account: string; manifest: unknown; bind?: { account?: string; generation?: number } }): Promise<Result<{ state: string; position: number; chunks: number }>> {
+    if (!tieredOn(this.env)) return { error: { code: "unavailable", message: "chunked files are off here" } };
+    if (!this.exists()) return { error: { code: "forbidden", message: "turn on sync first" } };
+    const l = await this.limits();
+    const pre = attempt(() => {
+      this.admit(a.account, true);
+      this.bound(a.bind?.account, a.bind?.generation);
+      if (!l) throw new SyncError("busy", "this account's limits aren't known yet; try again");
+      return checkManifest(a.manifest, l.max_file_bytes);
+    });
+    if ("error" in pre) return pre;
+    const m = pre.ok;
+    const text = canonical(m);
+    const mdigest = await sha256Hex(text);
+    const bytes = new TextEncoder().encode(text).length;
+    const room = await attemptAsync(() => this.room(bytes, "file"));
+    if ("error" in room) return room;
+    return attempt(() => this.ctx.storage.transactionSync(() => {
+      this.admit(a.account, true);
+      this.bound(a.bind?.account, a.bind?.generation);
+      this.ensureFiles();
+      const now = Date.now();
+      const had = this.one("SELECT mdigest, state, position FROM files WHERE sha256 = ?", m.sha256);
+      if (had) {
+        if (had.mdigest !== mdigest) throw new SyncError("conflict", "another manifest for this file is registered", { state: had.state });
+        if (had.state !== "live") this.sql.exec("UPDATE files SET hold_until = ? WHERE sha256 = ?", now + this.holdMs(), m.sha256);
+        return { state: String(had.state), position: Number(had.position), chunks: m.chunks.length };
+      }
+      const absent: string[] = [], wrong: string[] = [];
+      const keyOf = new Map<string, string>();
+      for (const [c, n] of m.chunks) {
+        if (keyOf.has(c)) continue;
+        const h = this.one("SELECT key, size FROM holdings WHERE sha256 = ?", c);
+        if (!h) absent.push(c);
+        else if (Number(h.size) !== n) wrong.push(c);
+        else keyOf.set(c, String(h.key));
+      }
+      if (absent.length) throw new SyncError("missing", "upload these chunks first", { missing: absent.slice(0, TIERED.chunks) });
+      if (wrong.length) throw new SyncError("invalid", "these chunks' sizes aren't their stored sizes", { sizes: wrong.slice(0, TIERED.chunks) });
+      if (!this.fits(bytes, "file")) throw new SyncError("busy", "try again", { retry_after: 200 });
+      const keys = m.chunks.map(([c]) => keyOf.get(c)!);
+      this.sql.exec(
+        "INSERT INTO files (sha256, reg, mdigest, vinc, size, manifest, keys, state, position, sha_state, hold_until, refs, created) VALUES (?, ?, ?, ?, ?, ?, ?, 'verifying', 0, NULL, ?, 0, ?)",
+        m.sha256, randomHex(16), mdigest, randomHex(16), m.size, text, JSON.stringify(keys), now + this.holdMs(), now,
+      );
+      for (const c of keyOf.keys()) this.sql.exec("UPDATE holdings SET refs = refs + 1 WHERE sha256 = ?", c);
+      this.addUsed(bytes);
+      this.wakeBy(now + this.holdMs() + 1);
+      return { state: "verifying", position: 0, chunks: m.chunks.length };
+    }));
+  }
+
+  /** The one verify call an account may have running (§4.1 step 5, §6): its file and when its claim ends. */
+  private verifyLease: { sha256: string; vinc: string; until: number } | null = null;
+
+  /**
+   * The first half of a verify call (§4.1, step 5): the row's registration, digest, incarnation, position and saved
+   * SHA-256 state, and the next chunks' keys, at most TIERED.verifyChunks of them.  If a chunk's holding has another key
+   * than the one captured (a repair elsewhere rekeyed it), the verification restarts from zero with the keys captured
+   * afresh and a new incarnation, keeping the registration and every reference.  The chunks' bytes are debited from
+   * today's verification budget before anything is streamed, so work later discarded is still counted (LIMIT-TF-8).
+   */
+  async verifyBegin(a: { account: string; sha256: string; bind?: { account?: string; generation?: number } }): Promise<Result<{ state: string } | { reg: string; vinc: string; mdigest: string; position: number; to: number; count: number; size: number; sha_state: ShaState | null; chunks: { sha256: string; size: number; key: string }[] }>> {
+    if (!tieredOn(this.env)) return { error: { code: "unavailable", message: "chunked files are off here" } };
+    if (!this.exists()) return { error: { code: "forbidden", message: "turn on sync first" } };
+    const l = await this.limits();
+    return attempt(() => this.ctx.storage.transactionSync(() => {
+      this.admit(a.account, true);
+      this.bound(a.bind?.account, a.bind?.generation);
+      const r = this.hasFiles() ? this.one("SELECT reg, mdigest, vinc, size, manifest, keys, state, position, sha_state FROM files WHERE sha256 = ?", a.sha256) : undefined;
+      if (!r) throw new SyncError("missing", "register this file's manifest first");
+      if (r.state !== "verifying") return { state: String(r.state) };
+      const now = Date.now();
+      if (this.verifyLease && this.verifyLease.until > now) throw new SyncError("rate", "another verification is running", { limit: "verify_at_once", max: 1, retry_after: this.verifyLease.until - now });
+      const m = JSON.parse(String(r.manifest)) as Manifest;
+      let keys = JSON.parse(String(r.keys)) as string[];
+      let position = Number(r.position), vinc = String(r.vinc), shaState = r.sha_state === null ? null : (JSON.parse(String(r.sha_state)) as ShaState);
+      const keyNow = (i: number) => String(this.one("SELECT key FROM holdings WHERE sha256 = ?", m.chunks[i][0])?.key ?? "");
+      if (keys.some((k, i) => keyNow(i) !== k)) {
+        // (a rekey: discard the partial hash and start again, astra's c085569f note)
+        keys = m.chunks.map((_, i) => keyNow(i));
+        if (keys.some((k) => !k)) throw new SyncError("missing", "a chunk of this file is no longer held");
+        position = 0;
+        shaState = null;
+        vinc = randomHex(16);
+        this.sql.exec("UPDATE files SET keys = ?, position = 0, sha_state = NULL, vinc = ? WHERE sha256 = ?", JSON.stringify(keys), vinc, a.sha256);
+      }
+      const to = Math.min(m.chunks.length, position + TIERED.verifyChunks);
+      const chunks = m.chunks.slice(position, to).map(([c, n], j) => ({ sha256: c, size: n, key: keys[position + j] }));
+      const bytes = chunks.reduce((t, c) => t + c.size, 0);
+      const day = Math.floor(now / 86400_000);
+      const budget = l?.sync.verify_bytes_per_day ?? TIERED.verifyBytesPerDay;
+      const used = Number(this.one("SELECT bytes FROM reads WHERE day = ? AND who = 'verify'", day)?.bytes ?? 0);
+      if (used + bytes > budget) throw new SyncError("rate", "today's verification budget is used up", { limit: "verify_bytes_per_day", max: budget, retry_after: (day + 1) * 86400_000 - now });
+      this.sql.exec("INSERT INTO reads (day, who, bytes) VALUES (?, 'verify', ?) ON CONFLICT(day, who) DO UPDATE SET bytes = bytes + excluded.bytes", day, bytes);
+      this.verifyLease = { sha256: a.sha256, vinc, until: now + (testMode(this.env) ? 5000 : 120_000) };
+      return { reg: String(r.reg), vinc, mdigest: String(r.mdigest), position, to, count: m.chunks.length, size: Number(r.size), sha_state: shaState, chunks };
+    }));
+  }
+
+  /**
+   * The second half (§4.1, step 5): one transaction that checks the account's generation, the row's registration,
+   * digest, incarnation, state and position, and each streamed chunk's holding key, all as captured: a call that
+   * finds any of them changed changes nothing.  Then the new position and SHA-256 state; after the last chunk, the
+   * total length and digest decide: `verified`, or the row retired at once (the one exception to its hold) and
+   * `invalid`.  A streamed chunk whose length wasn't its listed size retires the row too.
+   */
+  async verifyEnd(a: { account: string; sha256: string; reg: string; vinc: string; mdigest: string; from: number; to: number; keys: string[]; sha_state: ShaState; short?: boolean; bind?: { account?: string; generation?: number } }): Promise<Result<{ state: string; position: number; reason?: string }>> {
+    if (!tieredOn(this.env)) return { error: { code: "unavailable", message: "chunked files are off here" } };
+    if (!this.exists()) return { error: { code: "forbidden", message: "turn on sync first" } };
+    return attempt(() => this.ctx.storage.transactionSync(() => {
+      if (this.verifyLease?.sha256 === a.sha256 && this.verifyLease.vinc === a.vinc) this.verifyLease = null;
+      this.admit(a.account, true);
+      this.bound(a.bind?.account, a.bind?.generation);
+      const r = this.hasFiles() ? this.one("SELECT reg, mdigest, vinc, size, manifest, keys, state, position FROM files WHERE sha256 = ?", a.sha256) : undefined;
+      const stale = () => new SyncError("conflict", "this file's verification changed meanwhile; verify again");
+      if (!r || r.reg !== a.reg || r.mdigest !== a.mdigest || r.vinc !== a.vinc || r.state !== "verifying" || Number(r.position) !== a.from) throw stale();
+      const m = JSON.parse(String(r.manifest)) as Manifest;
+      const keys = JSON.parse(String(r.keys)) as string[];
+      if (!(a.to > a.from && a.to <= m.chunks.length && a.keys.length === a.to - a.from)) throw new SyncError("invalid", "verify: range");
+      for (let i = a.from; i < a.to; i++) {
+        if (a.keys[i - a.from] !== keys[i] || this.one("SELECT key FROM holdings WHERE sha256 = ?", m.chunks[i][0])?.key !== keys[i]) throw stale();
+      }
+      if (a.short) {
+        this.retireFile(a.sha256);
+        return { state: "invalid", position: a.from, reason: "size" };
+      }
+      const h = Sha256.from(a.sha_state);
+      const expect = m.chunks.slice(0, a.to).reduce((t, c) => t + c[1], 0);
+      if (h.length !== expect) throw new SyncError("invalid", "verify: the hashed length isn't the chunks' sizes");
+      if (a.to < m.chunks.length) {
+        this.sql.exec("UPDATE files SET position = ?, sha_state = ? WHERE sha256 = ?", a.to, JSON.stringify(h.save()), a.sha256);
+        return { state: "verifying", position: a.to };
+      }
+      if (h.length !== Number(r.size) || h.hexDigest() !== a.sha256) {
+        this.retireFile(a.sha256);
+        return { state: "invalid", position: a.to, reason: "order or hash" };
+      }
+      this.sql.exec("UPDATE files SET state = 'verified', position = ?, sha_state = NULL, hold_until = ? WHERE sha256 = ?", a.to, Date.now() + this.holdMs(), a.sha256);
+      return { state: "verified", position: a.to };
+    }));
+  }
+
+  /** A verified file's manifest (§4.1, "Reading"), for the account's own devices. */
+  async getManifest(a: { account: string; sha256: string; bind?: { account?: string; generation?: number } }): Promise<Result<{ manifest: Manifest; state: string }>> {
+    if (!tieredOn(this.env)) return { error: { code: "unavailable", message: "chunked files are off here" } };
+    if (!this.exists()) return { error: { code: "forbidden", message: "turn on sync first" } };
+    return attempt(() => {
+      this.admit(a.account, false);
+      this.bound(a.bind?.account, a.bind?.generation);
+      const r = this.hasFiles() ? this.one("SELECT manifest, state FROM files WHERE sha256 = ?", a.sha256) : undefined;
+      if (!r || r.state === "verifying") throw new SyncError("missing", "no verified manifest for this file");
+      return { manifest: JSON.parse(String(r.manifest)) as Manifest, state: String(r.state) };
+    });
+  }
+
+  /** Retire unused registrations whose hold has passed (§4.3), a page at a time; true if a full page was done. */
+  private retireExpired(now: number): boolean {
+    if (!this.hasFiles()) return false;
+    const rows = this.sql.exec("SELECT sha256 FROM files WHERE refs <= 0 AND state <> 'live' AND hold_until < ? LIMIT ?", now, TIERED.retirePage).toArray() as Row[];
+    this.ctx.storage.transactionSync(() => {
+      for (const f of rows) {
+        // (checked again in the transaction: an op that refers to it meanwhile keeps it)
+        if (this.one("SELECT 1 AS x FROM files WHERE sha256 = ? AND refs <= 0 AND state <> 'live' AND hold_until < ?", f.sha256, now)) this.retireFile(String(f.sha256));
+      }
+    });
+    return rows.length === TIERED.retirePage;
+  }
+
+  /** Tests only: a shorter hold (ms), a files row as stored, and a retirement step now. */
+  private testHold = 0;
+  async testFiles(a: { holdMs?: number; sha256?: string; retire?: boolean; endLease?: boolean; rekey?: string }): Promise<{ row: Row | null; retiredPage: boolean; refs: Record<string, number> } | null> {
+    if (!testMode(this.env)) return null;
+    if (a.holdMs !== undefined) this.testHold = a.holdMs;
+    if (a.endLease) this.verifyLease = null;
+    // (a holding's bytes copied to a new key and the holding moved to it, as a repair's adoption will do)
+    if (a.rekey && this.exists()) {
+      const h = this.one("SELECT key FROM holdings WHERE sha256 = ?", a.rekey);
+      const bucket = this.env.SHARE_BUCKET;
+      if (h && bucket) {
+        const o = await bucket.get(String(h.key));
+        if (o) {
+          const key = `s/${this.get("account_hash")!.slice(0, 32)}/${randomHex(18)}`;
+          await bucket.put(key, await new Response(o.body as ReadableStream).arrayBuffer());
+          this.sql.exec("UPDATE holdings SET key = ? WHERE sha256 = ?", key, a.rekey);
+        }
+      }
+    }
+    const retiredPage = a.retire && this.exists() ? this.retireExpired(Date.now()) : false;
+    const row = a.sha256 && this.exists() && this.hasFiles() ? ((this.one("SELECT reg, mdigest, vinc, size, state, position, hold_until, refs, keys FROM files WHERE sha256 = ?", a.sha256) as Row | undefined) ?? null) : null;
+    const refs: Record<string, number> = {};
+    if (this.exists()) for (const h of this.sql.exec("SELECT sha256, refs FROM holdings").toArray() as Row[]) refs[String(h.sha256)] = Number(h.refs);
+    return { row, retiredPage, refs };
   }
 
   /**
@@ -1903,6 +2151,9 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     if (res !== null && res !== undefined) t.push(Number(res));
     const idle = this.one("SELECT MIN(created) AS t FROM holdings WHERE refs <= 0")?.t;
     if (idle !== null && idle !== undefined) t.push(Number(idle) + IDLE_HOLDING_MS);
+    // (an unused chunked file's registration, at the end of its hold, design/tiered-files.md §4.3)
+    const hold = this.hasFiles() ? this.one("SELECT MIN(hold_until) AS t FROM files WHERE refs <= 0 AND state <> 'live'")?.t : null;
+    if (hold !== null && hold !== undefined) t.push(Number(hold) + 1);
     // (a read-only account's deadline, §6.2)
     const d = this.state() === "readonly" ? this.purgeAt() : null;
     if (d !== null) t.push(d);
@@ -1959,6 +2210,8 @@ export class SyncAccount extends DurableObject<SyncEnv> {
         this.addUsed(-Number(h.size));
       }
     });
+    // unused chunked-file registrations past their hold (§4.3 of design/tiered-files.md): a page a step
+    if (this.retireExpired(now)) this.wakeBy(Date.now() + 1);
     // the outbox: R2 first, the row only once R2 has deleted it; a key that fails waits its own backoff
     const bucket = this.env.SHARE_BUCKET;
     if (bucket)
@@ -1998,7 +2251,7 @@ export function checkLimits(v: unknown): Limits {
   if (!s || typeof s !== "object" || typeof s.enabled !== "boolean" || !n(s.version_bytes) || !n(s.read_bytes_per_day)) throw new Error("bad limits");
   // (a sync.storage_bytes CoCalc may still send is ignored: storage_bytes is the one budget, §6.1)
   // (how long synced data is kept read-only after a membership ends, §6.2: CoCalc's, 90 days if it says nothing)
-  const sync = { enabled: s.enabled, version_bytes: s.version_bytes, read_bytes_per_day: s.read_bytes_per_day, ...(n(s.retention_days) ? { retention_days: s.retention_days } : {}) };
+  const sync = { enabled: s.enabled, version_bytes: s.version_bytes, read_bytes_per_day: s.read_bytes_per_day, ...(n(s.retention_days) ? { retention_days: s.retention_days } : {}), ...(n(s.verify_bytes_per_day) ? { verify_bytes_per_day: s.verify_bytes_per_day } : {}) };
   return { storage_bytes: o.storage_bytes, max_file_bytes: o.max_file_bytes, sync, ...(n(o.issued) ? { issued: o.issued } : {}) };
 }
 

@@ -35,6 +35,8 @@ export interface SyncEnv {
   SYNC_TEST_ACCOUNTS?: string;
   /** signs blob URLs (§5.4); tickets are nonces, signed by nothing */
   SYNC_URL_KEY?: string;
+  /** design/tiered-files.md step 3 (chunked files): "1" turns it on, and only where SHARE_DEV is "1" (DEV); unset, off */
+  SYNC_TIERED?: string;
   COCALC_ORIGIN?: string;
   COCALC_CLIENT_SECRET?: string;
   SHARE_DEV?: string;
@@ -64,6 +66,12 @@ export function setGate(env: SyncEnv, name: string, on: boolean): void {
   if (!testMode(env)) return;
   if (on) gates.add(name);
   else gates.delete(name);
+}
+
+/** Whether chunked files are on (design/tiered-files.md §7, PR 2): SYNC_TIERED "1" on DEV only (SHARE_DEV "1"), so a
+ * stray binding in production turns nothing on: the code's gate, as allowed()'s test list is. */
+export function tieredOn(env: SyncEnv): boolean {
+  return env.SYNC_TIERED === "1" && env.SHARE_DEV === "1";
 }
 
 /** Whether `account` may sync here (§11): only those listed, in SYNC_ACCOUNTS or, on DEV only (SHARE_DEV 1),
