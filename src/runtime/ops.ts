@@ -2158,10 +2158,7 @@ export function pollInterrupt() {
 }
 
 export function toArray(x: any): any[] {
-  if (Array.isArray(x)) {
-    const c = (x as any).$cls;
-    if (c === undefined || plainSubclassUnpackArr(c, (x as any).$t === true)) return x.slice();
-  }
+  if (Array.isArray(x)) return x.slice();
   const it = iter(x);
   if (it instanceof DictIter) return it.rest();
   const out: any[] = [];
@@ -2197,7 +2194,16 @@ export function unpack(x: any, n: number): any[] {
 }
 // `a, *b, c = x` -> [a, [b...], c]
 export function unpackEx(x: any, before: number, after: number): any[] {
-  const all = toArray(x);
+  let all: any[];
+  if (Array.isArray(x)) {
+    const c = (x as any).$cls;
+    if (c === undefined || plainSubclassUnpackArr(c, (x as any).$t === true)) all = x.slice();
+    else {
+      const it = iter(x);
+      all = [];
+      for (let v = it.$next(); v !== DONE; v = it.$next()) all.push(v);
+    }
+  } else all = toArray(x);
   if (all.length < before + after) raise(T.ValueError, `not enough values to unpack (expected at least ${before + after}, got ${all.length})`);
   return [...all.slice(0, before), all.slice(before, all.length - after), ...all.slice(all.length - after)];
 }
