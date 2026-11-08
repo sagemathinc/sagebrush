@@ -11,6 +11,7 @@
 - **Each file shows where it is:** on this device, in the cloud only, downloading, or waiting to go up. The Storage panel shows how much is on this device and how much is in the cloud.
 - **Large files sync in pieces.** Today a file over 95 MiB can't sync. In pieces, files up to the workspace's 200 MiB limit sync, an interrupted upload resumes where it stopped, and repeated data is stored once.
 - **Nothing that hasn't reached the cloud is ever removed from a device.** A file with changes still waiting to go up stays, whatever the space.
+- **Notebook outputs aren't saved by default.** They show while you work. A notebook's "Keep outputs" switch saves them with it, and notebooks that already have saved outputs keep them.
 
 ---
 
@@ -60,7 +61,7 @@ A row's ⋯ menu gains one item, which reads as what it will do:
 ```
 
 - "Remove from this device" is shown greyed, with its reason, when it can't be done (§3.4's checks): "Has changes not yet in the cloud", "Is being downloaded", "Is a conflict copy", "Is open in a tab", "Is kept on this device: stop keeping it first", "Sync isn't running". It never removes bytes the cloud doesn't have.
-- On a folder, "Keep on this device" keeps everything in it, including what's added later.
+- On a folder, "Keep on this device" keeps everything in it, including what's added later: files saved into it on this device (offline too), moved or copied into it, or added from another device (William: "like OneDrive"; the rule and its tests are in §3.1).
 
 The Storage panel, with the new block on top of today's:
 
@@ -110,6 +111,25 @@ Opening a file that's in the cloud, while offline:
   - what holds the space: "120 MB here haven't reached the cloud yet; 300 MB are kept on this device." (§5.3);
   - persistent storage refused: "This browser hasn't agreed to keep Sagebrush's storage. If it clears it to free space, changes not yet in the cloud go with it." (§3.3);
   - "Free up space" done: "Removed 31 files (250 MB) from this device. They're still in the cloud." (§1.2).
+  - the notebook switch: "Keep outputs", and when it's turned off: "Outputs won't be saved with this notebook. They still show while you work." (§1.4).
+
+### 1.4 Notebook outputs: not saved by default (William's decision, Nov 8)
+
+William: "outputs aren't saved into the synced notebook by default. They show while you work, and each notebook has a 'Keep outputs' switch". This is why notebooks and boards can stay on every device in these steps (§8): without outputs they're small.
+
+**What a person sees:**
+- While you work, outputs show as they do today.
+- What is saved, and so synced, is the code and text. Opened on another device, a notebook shows no outputs until its cells are run there.
+- Each notebook's ⋯ menu has **"Keep outputs"**, off for a new notebook. Turned on, the outputs are saved with the notebook and sync like the rest of it.
+
+```
+  ⋯ (notebook)
+  ✓ Keep outputs        saved with the notebook, on every device
+```
+
+**Notebooks that already have saved outputs** (proposal): they start with "Keep outputs" on, so nothing already saved is dropped, whether or not the notebook is edited again. Turning the switch off removes the saved outputs at the next save, and the page says so once: "Outputs won't be saved with this notebook. They still show while you work." (The alternative @sagebrush proposed, leaving them untouched until the next edit and then dropping them, would remove outputs the person never chose to remove.)
+
+**Where it's built:** a separate notebook PR, not one of the six storage PRs in §7. It changes what the notebook saves, not how files are stored.
 
 ## 2. Step 1: "in the cloud" files
 
@@ -345,6 +365,8 @@ Tests: a chunk's stored bytes flipped in the test R2, then a download (reported,
 
 **Assembly memory, honestly:** fileBytes stores a file as one value, so a 200 MiB file is assembled whole in memory under its reservation (`size × COPIES`, L2), as a 200 MiB download would be today. Storing files by chunk on the device (so a phone never holds 200 MiB at once, and local versions share chunks) is a later change, outside this note.
 
+**Later: chunked storage on the device, and streaming reads** (no design yet). Today the device keeps each file whole (fileBytes), so a 200 MiB file is assembled, installed and read as one value. Storing files on the device by chunk, keyed by the chunk's hash as the server's are, would let a phone avoid holding a large file at once, let local versions and copies share chunks, let removal (§3.3) free space chunk by chunk, and let a reader stream a file instead of waiting for all of it. It needs its own design note: a migration of fileBytes, a count of references per local chunk, and C2's pins and C5's install restated for chunks. Nothing in steps 1–3 depends on it, and the manifest (§4.1) already carries what it would need.
+
 ### 4.2 Packs
 
 **After a benchmark, not part of the core plan** (@sagebrush, item 4). Packs only help with the first upload of many small files; R2's per-operation cost there is small, so the case for them is latency. They are built only if this measurement says so:
@@ -549,15 +571,19 @@ Every list, check and GC endpoint stays paged. The index's bounds don't depend o
 | 3 | Chunked upload and read behind a flag (lifts 95 MiB to 200 MiB) | no (flag) | sync-client |
 | 4 | Fetch on open, and the prefetch rule; the states in the file browser (§1.1) | yes: screenshots to William first | sync-client + board (UI) |
 | 5 | Keep on this device, Remove from this device, the cache budget, "Free up space" (§3) | yes: screenshots first | sync-client + board (UI) |
-| 6 | Packs and their compaction (§4.2) | no | sync-client |
+| 6 | Packs and their compaction (§4.2), **only after a benchmark shows they're needed** (§4.2 states the measurement) | no | sync-client |
+| — | Separate from the six: notebook outputs not saved by default, the "Keep outputs" switch (§1.4) | yes: screenshots first | the notebook's owner, named by @sagebrush |
 
 Each PR carries its at-limit and one-over tests, and operation-count assertions (daybreak2, point 10).
 
-## 8. Open questions
+## 8. Decisions and open questions
 
-- The cache budget defaults (computer, phone): §6 has sync-client's proposal. A phone is chosen in the Storage panel, with a default from the screen (§2.1).
-- Does "Keep on this device" on a folder include files added to it later? (Proposed: yes.)
-- Notebooks and boards: their content is patches (sync-server §4), not blobs. Do they stay always local in these steps? (Proposed: yes; they're small.)
+**Decided by William (Nov 8, about 1:05 PM PST):**
+- **The cache defaults** in §6: "(a) Recommended: yes, ship these as first values and tune later". A phone is chosen in the Storage panel, with a default from the screen (§2.1).
+- **Notebooks and boards stay on every device** in these steps: "(a) yes, but with the caveat that we enforce 'do not store outputs by default'". And: "(a) outputs aren't saved into the synced notebook by default. They show while you work, and each notebook has a 'Keep outputs' switch" (§1.4).
+- **"Keep on this device" on a folder covers files added later:** "(a) yes, like OneDrive. This includes files saved on this device into the folder" (§1.2, §3.1).
+
+**Still open:**
 - Should the Storage panel show the cloud's breakdown per folder? (Not in these steps.)
 - (sync-client, for daybreak2) The proposed cache budgets and floor (§6).
 - Answered by the reviews, and now in the text: the client's whole-file hash is no longer taken on its word: the server verifies each manifest before an op can use it (§4.1, astra's TF1). The `deleting` mark is replaced by deleting the holding's row when its delete begins (§5.1, TF2). The pack's streaming check stays, with its bounds and nothing visible before the finalize (§4.2, TF4). The compaction pace is one every 30 minutes (§4.2, daybreak2's LIMIT-TF-5).
