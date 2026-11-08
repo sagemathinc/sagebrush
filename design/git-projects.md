@@ -4,15 +4,15 @@
 
 *William's direction, Nov 8 2026: "we would not even try to do something like that [a real `git clone`]. The functionality won't exist at all, since real git doesn't. However, we may at least consider having a lightweight 'we own it' git command in our terminal and/or UI, where we own what 'git clone' does… What we really want is to just support what is needed for a agent/human lightweight PR workflow like we prototyped under `/git`."*
 
-*Built on design/tiered-files.md (files "in the cloud", chunks, manifests), design/sync-server.md (the account object, ops, R2 blobs by SHA-256), design/agent-endpoint.md (server-side writes as ops, grants), design/fs-sync.md (its three-way rules and its ignores) and web/gitpush (the branch rules, the token handling).*
+*Built on design/tiered-files.md (files "in the cloud"), design/sync-server.md (the account object, ops, reservations, R2 blobs by SHA-256), design/agent-endpoint.md (server-side writers with their own identity), design/fs-sync.md (its three-way rules, its ignores, its name rules) and web/gitpush (the branch rules, the notebook export).*
 
 ## In plain words
 
-- **A GitHub repository can become a Sagebrush folder.** Sagebrush's servers copy the repository's current files, not its history, straight from GitHub into the cloud. Every device then lists every file at once, "in the cloud", and downloads a file only when it's opened.
-- **There is no `.git` folder, and no real git.** Sagebrush keeps a small record of which GitHub commit the folder came from. That is enough to show what changed and to propose those changes.
-- **Changes go back as a pull request.** "Propose changes" sends the changed files to a new branch named `sagebrush/…` and opens a pull request. It never pushes to `main`, and never force-pushes. Your GitHub token never leaves your device when you propose changes. To copy a private repository, it's sent once for that one download and never stored.
-- **Agents work the way the `/git` prototype showed.** An agent edits files in the folder, and you review its changes file by file before they are proposed.
-- **History comes from GitHub when asked.** A file's history, or an older version, is read from GitHub on demand. Nothing about history is stored in Sagebrush.
+- **A public GitHub repository can become a Sagebrush folder.** Sagebrush's servers copy the repository's current files, not its history, straight from GitHub into the cloud. Every device lists every file at once, "in the cloud", and downloads a file only when it's opened.
+- **There is no `.git` folder, and no real git.** Sagebrush keeps a record of which GitHub commit the folder came from. That is enough to show what changed and to propose those changes.
+- **Changes go back as a pull request.** "Propose changes" shows exactly what will be sent, and after you confirm, sends it to a new branch named `sagebrush/…` and opens a pull request. It never pushes to `main`, and your GitHub token never leaves your device.
+- **Agents work the way the `/git` prototype showed.** You review an agent's changes file by file before they are proposed.
+- **Some files aren't copied, and are listed with why:** links, submodules, files over 95 MiB, and files whose bytes GitHub changes when it makes the archive. A repository with more than 10,000 files, or over 1 GiB as GitHub's archive, can't be copied yet. Private repositories come later.
 
 For scale, William's example: cloning the sagebrush repository with real git transfers 76,406 objects (404.86 MiB) and leaves 8,573 files. A git project copies only the 8,573 current files. Their bytes are stored once in the cloud, and a device downloads only the files it opens.
 
@@ -20,106 +20,126 @@ For scale, William's example: cloning the sagebrush repository with real git tra
 
 ## 1. What a git project is
 
-A git project is an ordinary synced folder plus one row on the server:
+An ordinary synced folder, plus rows in the account object:
 
 ```
 git_projects
-  account       the owning account
-  folder_fid    the folder (design/sync-server.md §3's entry id); a rename or move keeps the link
-  owner, repo   GitHub names, checked by web/gitpush/rules.ts's parseRepo and SEGMENT
-  ref           the branch it follows (GIT_BRANCH)
-  base_commit   the GitHub commit the folder's files last matched
-  base          per path: the SHA-256 and git blob id of the file at base_commit (a side table, one row per file)
+  account, folder_fid   the folder (design/sync-server.md §3's entry id); a rename or move keeps the link
+  owner, repo           GitHub names, checked by web/gitpush/rules.ts's parseRepo and SEGMENT
+  ref                   the branch it follows (GIT_BRANCH)
+  base_commit           the GitHub commit the folder last matched (a 40-hex sha, never a branch name)
+git_base                one row per path in base_commit's tree
+  path, kind            kind: file | excluded
+  sha256, gitid         for a file: its SHA-256 and git blob id
+  reason                for excluded: link, submodule, too_large, differs, ignored, invalid_name
+  conflict_of           set on a conflict copy made by §4 (the path it is a copy of)
 ```
 
-- **The base is what makes everything else cheap.** A file changed since `base_commit` is one whose current SHA-256 differs from its `base` row. A device can list every change without downloading anything, because it already holds every file's SHA-256 (the index).
-- Removing the row (Settings, "Stop following GitHub") leaves the files as an ordinary folder.
+- **What changed is a comparison with `git_base`,** with no download: a `file` row whose current SHA-256 differs is changed; a `file` row with no file is removed; a file with no row is added. An `excluded` row is never compared: its path is neither proposed nor deleted (§3).
+- `git_base` is fixed for a given `base_commit`, so devices read it once, by a paged GET, and keep it.
+- SHA-1 is only git's id here; SHA-256 stays the file's identity.
+- "Stop following GitHub" (Settings) deletes the rows and leaves the files as an ordinary folder.
 
 ## 2. Copying a repository in (the server)
 
-1. **Ask.** The person (the Files page, "Copy from GitHub", or the terminal's `git clone`, §5) names a repository and a branch. The server reads the branch's commit and the repository's size from GitHub's API. If the size is over the account's free storage quota (design/sync-server.md), it refuses before anything is copied. GitHub's size is an estimate, so each batch checks the quota again and stops the import at it.
-2. **Fetch once.** The server downloads GitHub's zip archive of that commit (`/repos/{owner}/{repo}/zipball/{commit}`) into one R2 staging object. A zip archive, not a tar one: its directory at the end lets each later batch read its own files by range, so the work splits into batches with a cursor and resumes after an interruption.
-3. **Import in batches.** Each batch (at most 500 files, from a durable cursor) reads its files from the staging object, applies the mandatory ignores (§2.1), computes each file's SHA-256 and git blob id, and stores bytes that aren't already held (blobs by SHA-256; a file over 95 MiB as chunks with a verified manifest, design/tiered-files.md §4.1).
-4. **Appear at once.** When every batch is done, one transaction in the account object creates the folder and all its entries, and writes the `git_projects` row and its `base`. Devices see the whole folder at once, every file "in the cloud". If the import fails or is cancelled, nothing appears. The staged bytes are unreferenced, and design/tiered-files.md §5.1's garbage collection removes them.
-5. **Report.** Files not copied are listed with a reason, the same skip-and-list rule as design/fs-sync.md §4.5.
+**v1 copies public repositories only.** No token is involved at any step. Private repositories need their own short addendum (§7).
 
-### 2.1 What is not copied, and why
+1. **Ask.** The person ("Copy from GitHub" on the Files page, or the terminal's `git clone`, §5) names a repository, a branch and a new folder name. The request is the person's signed-in session, from Sagebrush's own origin. An agent grant can't start, cancel or finish an import. The server:
+   - resolves the branch to a commit sha once, through `api.github.com`, and uses only that sha from then on;
+   - reads the commit's tree (`/git/trees/{sha}?recursive=1`). If GitHub answers `truncated`, it stops: `Can't copy owner/repo: GitHub lists it in parts (it has too many files for one listing).`;
+   - creates the import's row (below), and takes reservations (§2.2).
+2. **Fetch once.** The server downloads `/repos/{owner}/{repo}/zipball/{sha}` into one R2 staging object. GitHub answers with a redirect: the server follows exactly one, and only to `https://codeload.github.com/`; anything else is refused and its body cancelled. A zip archive, not a tar one, so later batches can read their files by range.
+3. **Import in batches,** from a durable cursor. Each batch reads one contiguous byte range of the zip (entries are stored in order) and, per entry:
+   - validates its path (§2.1) and matches it to the tree;
+   - inflates it as a stream, computing its SHA-256 and git blob id;
+   - imports it only if its git blob id equals the tree's (otherwise `differs`: GitHub's archive applies `.gitattributes`, which can drop, rewrite or re-end lines in files, and those bytes must never be proposed back as edits);
+   - stores bytes not already held as a blob (at most 95 MiB: single blobs only, no chunks), under the import's reservation;
+   - writes a row to the import's staging table (path, sha256, gitid, size, or excluded and why).
+4. **Appear at once.** One transaction in the account object:
+   - checks the import is still this account's, in progress and not cancelled, that the destination folder name is still free, that every staged blob is still held, and that the account's index stays within its 100,000-file maximum;
+   - turns the staging rows into the folder's entries and ops (`INSERT … SELECT`), the `git_projects` row and `git_base`, and the reservations into holdings;
+   - marks the import done.
+   Devices then see the whole folder, every file "in the cloud", through the index's existing paging. If any check fails, nothing appears. A finish that arrives twice finds the import done and changes nothing.
+5. **Report.** Every path not imported is listed with its reason (fs-sync §4.5's skip-and-list form), for example `· docs/build.sh   differs from the repository's copy (a .gitattributes rule changed it)`.
 
-- Anything fs-sync's mandatory ignores exclude (design/fs-sync.md §4.4). There is no `.git` in GitHub's archive anyway.
-- Symbolic links, and submodules (the archive holds an empty folder for each): listed.
-- A file over the workspace's 200 MiB limit: listed. Until tiered-files PR 3 (chunks) has shipped, a file over 95 MiB too.
-- Git LFS files arrive as GitHub's pointer files, not their contents: listed with that reason.
+**The import's row** holds: an import id; the account and the account's generation when it began; owner, repo and the commit sha; the destination name; the staging object's key; the cursor; its reservations; a deadline (24 hours). Every batch and the final transaction check the row, the account generation and that the import isn't cancelled, after every await. A cancel, an account reset or the deadline marks the import cancelled first, then at once releases every reservation it holds, deletes the staging object and table, and queues the blobs it stored that nothing else references for deletion. A batch still running finds the import cancelled at its next check, so it can't commit, re-reserve or restore anything, and nothing late can appear. Ops written by an import carry the device `github:<import id>`, set by the server.
 
-### 2.2 Limits (daybreak2)
+### 2.1 Archive entries are input, not paths
 
-These are enforced, each with at-limit and one-over tests in PR 2:
-- **Entries:** at most 10,000 archive entries, counted as each is read from the zip's directory, before ignores or skips, so a flood of ignored entries is bounded too. Entry 10,001 refuses the import.
-- **Staging:** the download reads at most 1 GiB + 1 byte, whatever `Content-Length` says. Over 1 GiB, the staging object is deleted and the import refused. This bounds service cost; it is separate from the person's storage quota.
-- **A batch:** at most 500 files and at most 256 MiB of uncompressed bytes (a file is at most 200 MiB, so one always fits). Each file is inflated and hashed as a stream, never the whole batch in memory. A file's inflated bytes are counted as they come, and inflating stops at its declared size + 1 byte or 200 MiB + 1 byte, whichever is less, so a highly compressed or mislabelled entry can't exceed them. PR 2 measures that a batch at these limits fits a Worker's memory and CPU, and lowers them if it doesn't.
-- **Quota:** every new blob or chunk an import stores is reserved through the account object's serialized file reservation (design/sync-server.md §6.1), the same path as ordinary writes, and re-checked after each await. When room can't be reserved, the import stops before its next file. So an import and ordinary writes together can't overshoot the quota.
-- **One at a time:** at most one copy or update in progress per account. A second is refused with the first's progress. An import unfinished for 24 hours is cancelled, and its staging object deleted.
-- **The final transaction** (§2 step 4) creates up to 10,000 entries and 10,000 `base` rows at once. PR 2 measures it at exactly 10,000 files before it merges. If it doesn't fit a transaction's limits, the rows go into bounded staging tables first and one `INSERT … SELECT` makes them visible, or the entry limit is lowered. One over the limit is refused with nothing visible.
+Before an entry can be staged:
+- the archive's one top folder (GitHub's `owner-repo-sha/`) is removed; an entry outside it is refused;
+- the rest must pass the workspace's path rules (design/fs-sync.md §4.4): no absolute path, no `.` or `..` component, no control character or forbidden separator, at most 1,024 bytes and 64 folders deep;
+- two entries with the same NFC name, or that differ only by case, or a file where another entry needs a folder: both are excluded as `invalid_name`;
+- links (tree mode 120000) and submodules (160000) are known from the tree, not the zip, and are never written: `link`, `submodule`;
+- fs-sync's mandatory ignores (§4.4) give `ignored`; a tree path missing from the archive is listed;
+- a malformed or truncated zip (a bad entry header, a CRC or length mismatch, an entry outside the staged object) stops the import, and nothing appears.
 
-### 2.3 The token for a private repository
+### 2.2 Limits
 
-A public repository needs no token. For a private one, the person's GitHub token is sent with the "Copy from GitHub" request and used for exactly one call, step 2's download. It is never stored and never logged, the same rule as web/gitpush/worker.mjs. Whether a GitHub App would be better than a personal token is open (§7).
+Each enforced, with at-limit and one-over tests in PR 2:
+- **Entries:** at most 10,000, counted as each is read from the zip's directory, before ignores or skips. Over it: `Can't copy owner/repo: it has more than 10,000 files (the limit for a git project).`
+- **Staging:** the download reads at most 1 GiB + 1 byte, whatever `Content-Length` says. Over it, the staging object is deleted: `Can't copy owner/repo: GitHub's archive of it is over 1 GiB (the limit for a git project).` This bounds service cost. The staging object is also a reservation in the person's storage until it is deleted.
+- **A file:** at most 95 MiB (`too_large` beyond). Inflating stops at the entry's declared size + 1 byte or 95 MiB + 1 byte, whichever is less, so a highly compressed or mislabelled entry can't produce more.
+- **A batch:** at most 500 files, 64 MiB of compressed bytes read and 64 MiB inflated, but always at least one file; so a file of 64–95 MiB is a batch of its own. PR 2 measures that one-file case against a Worker's CPU and memory before it merges, and lowers the file limit if it doesn't fit.
+- **Quota:** each batch takes sync-server's existing reservations (design/sync-server.md §6.1) for its new bytes before storing them, re-checked after each await. When room can't be reserved, the import stops and is cancelled: `Stopped copying owner/repo: your storage is full. Nothing was added. Free some space and copy again.`
+- **One at a time:** one copy or update in progress per account. A second: `Another copy from GitHub is in progress (owner/repo: 3,200 of 8,573 files). Wait for it to finish, or cancel it, then try again.`
+- **Deadline:** `Copying owner/repo was cancelled: it didn't finish within a day. Nothing was added.`
+- **The final transaction** creates up to 10,000 entries and 10,000 `git_base` rows. PR 2 measures it at exactly 10,000 before it merges, and lowers the entry limit if it doesn't fit.
 
 ## 3. Proposing changes (the device, not the server)
 
-- **What changed** is §1's comparison: added, changed and removed files since `base_commit`, listed with no download. Each file's diff is shown in its own terms, as in the `/git` prototype (notebooks cell by cell, without outputs; boards item by item; LaTeX as source or marked rendering).
-- **"Propose changes"** runs in the person's page, with their token, straight against GitHub's REST API (it allows browser requests, so no proxy is needed):
-  - one blob per changed file (a changed file is on the device, since it was edited there or arrived from another device that did);
-  - one tree on `base_commit`'s tree, removals as deletions;
-  - one commit, a new branch `sagebrush/<name>` (web/gitpush/rules.ts's BRANCH: never `main`, never an existing branch it didn't make), and a pull request.
-- Files over GitHub's 100 MB limit are listed and left out (gitpush's MAX_FILE rule).
-- The token never reaches Sagebrush's servers for this.
-
-**After the pull request merges,** "Update from GitHub" (§4) brings the folder to the new commit.
+1. **What changed** is §1's comparison, with each file's diff shown in its own terms, as in the `/git` prototype. A change that is "in the cloud" on this device is fetched and checked by hash first, as opening does.
+2. **One export, used everywhere.** A notebook is compared, shown and sent as web/gitpush's `stripOutputs` text, without outputs; boards and chats as their files. The same bytes are used for the diff and for the commit.
+3. **The proposal is frozen.** The person sees a list: repository, `base_commit`, and each path with the SHA-256 of the exact bytes to send. Nothing is sent until they confirm that list. If any listed file changes before the send, the proposal is withdrawn and shown again.
+4. **Refusals, before anything is sent:**
+   - while a conflict copy exists (`conflict_of`): `Propose changes is waiting: resolve or delete notes (conflict, GitHub).tex first, then try again.`;
+   - a file over 50 MiB (gitpush's MAX_FILE) is listed and left out.
+5. **The send** runs in the person's page, with their token, against `api.github.com` (it allows browser requests): one blob per changed file, one tree on `base_commit`'s tree (removals as deletions; `excluded` paths untouched), one commit, then **creating** a new ref `sagebrush/<name>` (BRANCH). Creating fails if the ref exists: then a new name is chosen (`sagebrush/<name>-2`, …), never an existing branch updated. Then the pull request.
+6. **Never automatic.** No timer pushes (unlike gitpush's M3). Agent grants and the terminal can't reach this path; `git push` only opens step 3's list.
 
 ## 4. Updating from GitHub
 
-"Update from GitHub" copies the branch's newest commit in as §2 does, into staging, and then applies design/fs-sync.md §2.2's three-way rules, with `base` as the base:
-
-- changed on GitHub only: replaced (and stays "in the cloud" unless kept or open);
+"Update from GitHub" stages the branch's newest commit as §2 does, and then plans and applies in the final transaction, as one SQL join of the folder (L), the staged commit (R) and `git_base` (B), so nothing changes between plan and apply. fs-sync §2.2's rules, applied per path:
+- changed on GitHub only: replaced (and "in the cloud" unless kept or open);
 - changed here only: kept;
-- changed in both: both kept, the GitHub one under fs-sync §2.3's conflict name;
-- then `base_commit` and `base` move to the new commit, in the same transaction.
+- changed in both: the folder's version keeps the name; GitHub's version is added as `name (conflict, GitHub).ext`, with `conflict_of` set. This matches fs-sync §2.3: the workspace's copy keeps the name;
+- deleted on GitHub, unchanged here: removed (GitHub keeps it, so no confirmation). Deleted on GitHub, changed here: kept;
+- a path that becomes `excluded` (too large, a link, `differs`…): the folder's file is kept untouched, and its row becomes `excluded`, so it is never proposed as a deletion;
+- the folder's own state is checked against what L read, by entry id and hash, in the same transaction;
+- `base_commit` and `git_base` move to the new commit.
 
 ## 5. A small `git` we own, in the terminal
 
-The terminal's just-bash gets a `git` command that does only what Sagebrush supports:
-
 | Command | Does |
 |---|---|
-| `git clone <github url> [folder]` | §2, and waits with progress |
+| `git clone <github url> [folder]` | §2, with progress |
 | `git status`, `git diff [path]` | §3's list and diffs |
-| `git log [path]` | the branch's history, read from GitHub's API |
+| `git log [path]` | the branch's history, read from GitHub's API in the page |
 | `git pull` | §4 |
-| `git push` | opens §3's "Propose changes" in the page (it needs the person's token and review) |
+| `git push` | opens §3's list in the page, and prints `Opened Propose changes in the page: review and confirm it there.` |
 
-Anything else prints one line: `This is Sagebrush's git: it supports clone, status, diff, log, pull and push. There is no .git folder here.` It never pretends to be real git.
+Anything else: `git <command>: not supported. This is Sagebrush's git: it supports clone, status, diff, log, pull and push. There is no .git folder here.`
 
 ## 6. Agents
 
-The `/git` prototype's flow, kept as it was:
-
-- An agent works in its own copy of the folder (`/Branches/<agent>/…`), through the workspace verbs and its grant (design/agent-endpoint.md).
-- The person reviews its changes file by file, with a note, and accepts some, all or none. Accepted files are copied into the git project, and the agent sees the decision through its `git_status` tool.
-- An agent never proposes to GitHub itself. Only the person's page holds the token.
+The `/git` prototype's flow:
+- an agent works in its own copy (`/Branches/<agent>/…`), through the workspace verbs and its grant (design/agent-endpoint.md);
+- the person reviews its changes file by file, with a note, and accepts some, all or none; accepted files are copied into the git project, and the agent sees the decision through `git_status`;
+- an agent never proposes to GitHub, and never sees the token.
 
 ## 7. Open questions
 
-- **Private repositories:** the person's token for one request (§2.3), or a GitHub App installation, whose short-lived tokens are GitHub's recommended way for a server? The token is simpler to build now; the App is a better long-term fit if many people use this. Proposal: the token now, the App later if needed.
-- **Branches:** v1 follows one branch per folder. Switching branches is copying again into another folder.
+- **Private repositories,** after v1, in a short addendum covering: where metadata calls are authorized, the token's single in-memory use on the server or a GitHub App's short-lived tokens, the signed archive link as a credential (never logged or stored), and the redirect rules. Proposal: decide after PR 3, when there's use to learn from.
+- **Branches:** v1 follows one branch per folder. Another branch is another copy.
 
 ## 8. The PR sequence
 
-| # | PR | Visible? | Owner |
-|---|---|---|---|
-| 1 | This design (docs only) | no | sagebrush |
-| 2 | Server: `git_projects`, the import (§2) from public repositories, behind a DEV flag | no (flag) | sync-client |
-| 3 | Device: what changed, diffs, "Propose changes" (§3) | yes: screenshots to William first | sagebrush + board (UI) |
-| 4 | "Update from GitHub" (§4), and private repositories (after §7's answer) | yes: screenshots first | sync-client |
-| 5 | The terminal's `git` (§5), and the agent review flow from `git-proto` (§6) | yes | sagebrush |
+| # | PR | Visible? | Owner | Tests it must carry, besides at-limit and one-over |
+|---|---|---|---|---|
+| 1 | This design (docs only) | no | sagebrush | |
+| 2 | Server: tables, the public import (§2), behind a DEV flag | no (flag) | sync-client | §2.1's malformed, collision, link and type cases; `differs` and a missing tree path; redirect to another host refused; cancel, reset and deadline during the fetch, between batches and before the final transaction, with nothing visible; quota declined mid-import; a finish twice; garbage collection during an import leaves its bytes |
+| 3 | Device: what changed, diffs, the frozen proposal, the send (§3) | yes: screenshots to William first | sagebrush + board (UI) | an edit after review withdraws the proposal; a cloud-only change fetched and checked; notebook outputs never sent; a branch name taken; a conflict copy refuses; an agent grant and `git push` can't send |
+| 4 | "Update from GitHub" (§4) | yes: screenshots first | sync-client | each §4 row, including a file that becomes `excluded`, and an edit landing between staging and the final transaction |
+| 5 | The terminal's `git` (§5), and the agent review flow from `git-proto` (§6) | yes | sagebrush | each command, and an unsupported one |
 
-**Not before tiered-files PR 4.** Until fetch-on-open ships, every device downloads every file, so an 8,573-file import would download everywhere. PRs 2 and 3 stay behind the DEV flag until then. Each PR carries at-limit and one-over tests, and operation counts.
+**Not before tiered-files PR 4.** Until fetch-on-open ships, every device downloads every file, so an 8,573-file import would download everywhere. PRs 2 and 3 stay behind the DEV flag until then.
