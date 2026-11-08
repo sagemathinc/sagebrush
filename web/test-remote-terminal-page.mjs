@@ -272,8 +272,14 @@ try {
   peers = { peers: [{ remote_id: "r-box", kind: "runner", name: "box", jwk: {}, jkt: "c", created: 3 }] };
   await ev(FAKE);
   await ev("sessionStorage.setItem('sagebrush-rterm:r-box', 's-9'), true");
+  // (the console open first: a terminal opened now comes in front of it)
+  await ev("document.querySelector('#consolebtn').click(), true");
+  await until("!document.querySelector('#console').hidden");
   await ev("document.querySelector('#rtermbtn').click(), true");
   await until("__leg.opens.length === 1");
+  ok((await z("#rterm")) > (await z("#console")), "a terminal opened while the console is open comes in front of it");
+  await ev("document.querySelector('#consolebtn').click(), true");
+  await until("document.querySelector('#console').hidden");
   ok(JSON.parse(await ev("__leg.opens[0].body")).session === "s-9", "one computer: opened at once, reattaching to this tab's session");
   const keys = await ev("[...document.querySelectorAll('#rterm .rkeys button')].map((b) => b.textContent + '|' + b.title)");
   ok(JSON.stringify(keys) === JSON.stringify(["Esc|Escape", "Tab|Tab", "^C|Control+C", "`|Backtick", "←|Left arrow", "↑|Up arrow", "↓|Down arrow", "→|Right arrow"]), `the extra-keys row: ${keys.join(" ")}`);

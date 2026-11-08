@@ -99,7 +99,7 @@ export class RemoteTerminal {
   constructor(o) {
     this.o = o;
     this.WS = o.WebSocket ?? globalThis.WebSocket;
-    this.state = "new";          // new -> hello -> opening -> attached -> ended
+    this.state = "new";          // new -> hello -> proving (the open's proof being made) -> opening -> attached -> ended
     this.session = o.session ?? null;
     this.received = 0;           // decoded out bytes received at this open
     this.acked = 0;              // ... and drawn (acked)
@@ -156,6 +156,8 @@ export class RemoteTerminal {
       return this._fail("not JSON");
     }
     if (this.state === "hello") return this._helloAnswer(m);
+    // (nothing comes from the runner before it has the open)
+    if (this.state === "proving") return this._fail("a message before the open");
     if (!m || typeof m !== "object" || !OUT_TYPES.has(m.t)) return this._fail("an unknown message");
     if (this.exited) return this._fail("a message after the exit");
     switch (m.t) {
@@ -211,12 +213,13 @@ export class RemoteTerminal {
     this.token = r.token;
     this.nonce = r.nonce;
     this.gen = r.gen;
-    this.state = "opening";
+    this.state = "proving";
     const b = this.session ? { session: this.session, rows: this.o.rows, cols: this.o.cols } : { rows: this.o.rows, cols: this.o.cols };
     const body = JSON.stringify(b);
     const htu = await openHtu(this.o.remoteId, this.gen, body, this.o.subtle);
     const dpop = await this.o.key.proof("POST", htu, this.token, this.nonce);
-    if (this.state !== "opening") return undefined;
+    if (this.state !== "proving") return undefined;
+    this.state = "opening";
     this._send({ t: "open", body, auth: "DPoP " + this.token, dpop });
     return undefined;
   }
