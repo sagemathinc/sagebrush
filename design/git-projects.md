@@ -10,7 +10,7 @@
 
 - **A GitHub repository can become a Sagebrush folder.** Sagebrush's servers copy the repository's current files, not its history, straight from GitHub into the cloud. Every device then lists every file at once, "in the cloud", and downloads a file only when it's opened.
 - **There is no `.git` folder, and no real git.** Sagebrush keeps a small record of which GitHub commit the folder came from. That is enough to show what changed and to propose those changes.
-- **Changes go back as a pull request.** "Propose changes" sends the changed files to a new branch named `sagebrush/…` and opens a pull request. It never pushes to `main`, and never force-pushes. Your GitHub token stays on your device.
+- **Changes go back as a pull request.** "Propose changes" sends the changed files to a new branch named `sagebrush/…` and opens a pull request. It never pushes to `main`, and never force-pushes. Your GitHub token never leaves your device when you propose changes. To copy a private repository, it's sent once for that one download and never stored.
 - **Agents work the way the `/git` prototype showed.** An agent edits files in the folder, and you review its changes file by file before they are proposed.
 - **History comes from GitHub when asked.** A file's history, or an older version, is read from GitHub on demand. Nothing about history is stored in Sagebrush.
 
