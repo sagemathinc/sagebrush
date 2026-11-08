@@ -191,3 +191,137 @@ R1c '7.000000'
 R7b '2.500000' '1.500000'
 R6b {'s': 1} [0]
 R1b '2.500000' '2.500000e+00' [0, 0]
+-- %-format's conversion results, as CPython checks them (PyFloat_AsDouble, mainformatlong, byte_converter)
+__float__ int | TypeError: P_int.__float__ returned non-float (type int) | TypeError: %d format: a real number is required, not P_int | TypeError: %x format: an integer is required, not P_int | TypeError: %c requires an int or a unicode character, not P_int | calls 1
+__float__ int bytes | TypeError: float argument required, not P_int | TypeError: %d format: a real number is required, not P_int | TypeError: %c requires an integer in range(256) or a single byte, not P_int | calls 1
+__float__ float | '2.500000' | TypeError: %d format: a real number is required, not P_float | TypeError: %x format: an integer is required, not P_float | TypeError: %c requires an int or a unicode character, not P_float | calls 1
+__float__ float bytes | b'2.500000' | TypeError: %d format: a real number is required, not P_float | TypeError: %c requires an integer in range(256) or a single byte, not P_float | calls 1
+__float__ PFS | '1.500000' W:DeprecationWarning:P_PFS.__float__ returned non-float (type PFS).  The ability  | TypeError: %d format: a real number is required, not P_PFS | TypeError: %x format: an integer is required, not P_PFS | TypeError: %c requires an int or a unicode character, not P_PFS | calls 1
+__float__ PFS bytes | b'1.500000' W:DeprecationWarning:P_PFS.__float__ returned non-float (type PFS).  The ability  | TypeError: %d format: a real number is required, not P_PFS | TypeError: %c requires an integer in range(256) or a single byte, not P_PFS | calls 1
+__float__ bool | TypeError: P_bool.__float__ returned non-float (type bool) | TypeError: %d format: a real number is required, not P_bool | TypeError: %x format: an integer is required, not P_bool | TypeError: %c requires an int or a unicode character, not P_bool | calls 1
+__float__ bool bytes | TypeError: float argument required, not P_bool | TypeError: %d format: a real number is required, not P_bool | TypeError: %c requires an integer in range(256) or a single byte, not P_bool | calls 1
+__float__ PIS | TypeError: P_PIS.__float__ returned non-float (type PIS) | TypeError: %d format: a real number is required, not P_PIS | TypeError: %x format: an integer is required, not P_PIS | TypeError: %c requires an int or a unicode character, not P_PIS | calls 1
+__float__ PIS bytes | TypeError: float argument required, not P_PIS | TypeError: %d format: a real number is required, not P_PIS | TypeError: %c requires an integer in range(256) or a single byte, not P_PIS | calls 1
+__float__ str | TypeError: P_str.__float__ returned non-float (type str) | TypeError: %d format: a real number is required, not P_str | TypeError: %x format: an integer is required, not P_str | TypeError: %c requires an int or a unicode character, not P_str | calls 1
+__float__ str bytes | TypeError: float argument required, not P_str | TypeError: %d format: a real number is required, not P_str | TypeError: %c requires an integer in range(256) or a single byte, not P_str | calls 1
+__float__ NoneType | TypeError: P_NoneType.__float__ returned non-float (type NoneType) | TypeError: %d format: a real number is required, not P_NoneType | TypeError: %x format: an integer is required, not P_NoneType | TypeError: %c requires an int or a unicode character, not P_NoneType | calls 1
+__float__ NoneType bytes | TypeError: float argument required, not P_NoneType | TypeError: %d format: a real number is required, not P_NoneType | TypeError: %c requires an integer in range(256) or a single byte, not P_NoneType | calls 1
+__index__ int | '3.000000' | '3' | '3' | '\x03' | calls 4
+__index__ int bytes | b'3.000000' | b'3' | b'\x03' | calls 3
+__index__ float | TypeError: __index__ returned non-int (type float) | TypeError: %d format: a real number is required, not P_float | TypeError: %x format: an integer is required, not P_float | TypeError: %c requires an int or a unicode character, not P_float | calls 4
+__index__ float bytes | TypeError: float argument required, not P_float | TypeError: %d format: a real number is required, not P_float | TypeError: __index__ returned non-int (type float) | calls 3
+__index__ PFS | TypeError: __index__ returned non-int (type PFS) | TypeError: %d format: a real number is required, not P_PFS | TypeError: %x format: an integer is required, not P_PFS | TypeError: %c requires an int or a unicode character, not P_PFS | calls 4
+__index__ PFS bytes | TypeError: float argument required, not P_PFS | TypeError: %d format: a real number is required, not P_PFS | TypeError: __index__ returned non-int (type PFS) | calls 3
+__index__ bool | '1.000000' W:DeprecationWarning:__index__ returned non-int (type bool).  The ability to retu | '1' W:DeprecationWarning:__index__ returned non-int (type bool).  The ability to retu | '1' W:DeprecationWarning:__index__ returned non-int (type bool).  The ability to retu | '\x01' W:DeprecationWarning:__index__ returned non-int (type bool).  The ability to retu | calls 4
+__index__ bool bytes | b'1.000000' W:DeprecationWarning:__index__ returned non-int (type bool).  The ability to retu | b'1' W:DeprecationWarning:__index__ returned non-int (type bool).  The ability to retu | b'\x01' W:DeprecationWarning:__index__ returned non-int (type bool).  The ability to retu | calls 3
+__index__ PIS | '4.000000' W:DeprecationWarning:__index__ returned non-int (type PIS).  The ability to retur | '4' W:DeprecationWarning:__index__ returned non-int (type PIS).  The ability to retur | '4' W:DeprecationWarning:__index__ returned non-int (type PIS).  The ability to retur | '\x04' W:DeprecationWarning:__index__ returned non-int (type PIS).  The ability to retur | calls 4
+__index__ PIS bytes | b'4.000000' W:DeprecationWarning:__index__ returned non-int (type PIS).  The ability to retur | b'4' W:DeprecationWarning:__index__ returned non-int (type PIS).  The ability to retur | b'\x04' W:DeprecationWarning:__index__ returned non-int (type PIS).  The ability to retur | calls 3
+__index__ str | TypeError: __index__ returned non-int (type str) | TypeError: %d format: a real number is required, not P_str | TypeError: %x format: an integer is required, not P_str | TypeError: %c requires an int or a unicode character, not P_str | calls 4
+__index__ str bytes | TypeError: float argument required, not P_str | TypeError: %d format: a real number is required, not P_str | TypeError: __index__ returned non-int (type str) | calls 3
+__index__ NoneType | TypeError: __index__ returned non-int (type NoneType) | TypeError: %d format: a real number is required, not P_NoneType | TypeError: %x format: an integer is required, not P_NoneType | TypeError: %c requires an int or a unicode character, not P_NoneType | calls 4
+__index__ NoneType bytes | TypeError: float argument required, not P_NoneType | TypeError: %d format: a real number is required, not P_NoneType | TypeError: __index__ returned non-int (type NoneType) | calls 3
+__int__ int | TypeError: must be real number, not P_int | '3' | TypeError: %x format: an integer is required, not P_int | TypeError: %c requires an int or a unicode character, not P_int | calls 1
+__int__ int bytes | TypeError: float argument required, not P_int | b'3' | TypeError: %c requires an integer in range(256) or a single byte, not P_int | calls 1
+__int__ float | TypeError: must be real number, not P_float | TypeError: %d format: a real number is required, not P_float | TypeError: %x format: an integer is required, not P_float | TypeError: %c requires an int or a unicode character, not P_float | calls 1
+__int__ float bytes | TypeError: float argument required, not P_float | TypeError: %d format: a real number is required, not P_float | TypeError: %c requires an integer in range(256) or a single byte, not P_float | calls 1
+__int__ PFS | TypeError: must be real number, not P_PFS | TypeError: %d format: a real number is required, not P_PFS | TypeError: %x format: an integer is required, not P_PFS | TypeError: %c requires an int or a unicode character, not P_PFS | calls 1
+__int__ PFS bytes | TypeError: float argument required, not P_PFS | TypeError: %d format: a real number is required, not P_PFS | TypeError: %c requires an integer in range(256) or a single byte, not P_PFS | calls 1
+__int__ bool | TypeError: must be real number, not P_bool | '1' W:DeprecationWarning:__int__ returned non-int (type bool).  The ability to return | TypeError: %x format: an integer is required, not P_bool | TypeError: %c requires an int or a unicode character, not P_bool | calls 1
+__int__ bool bytes | TypeError: float argument required, not P_bool | b'1' W:DeprecationWarning:__int__ returned non-int (type bool).  The ability to return | TypeError: %c requires an integer in range(256) or a single byte, not P_bool | calls 1
+__int__ PIS | TypeError: must be real number, not P_PIS | '4' W:DeprecationWarning:__int__ returned non-int (type PIS).  The ability to return  | TypeError: %x format: an integer is required, not P_PIS | TypeError: %c requires an int or a unicode character, not P_PIS | calls 1
+__int__ PIS bytes | TypeError: float argument required, not P_PIS | b'4' W:DeprecationWarning:__int__ returned non-int (type PIS).  The ability to return  | TypeError: %c requires an integer in range(256) or a single byte, not P_PIS | calls 1
+__int__ str | TypeError: must be real number, not P_str | TypeError: %d format: a real number is required, not P_str | TypeError: %x format: an integer is required, not P_str | TypeError: %c requires an int or a unicode character, not P_str | calls 1
+__int__ str bytes | TypeError: float argument required, not P_str | TypeError: %d format: a real number is required, not P_str | TypeError: %c requires an integer in range(256) or a single byte, not P_str | calls 1
+__int__ NoneType | TypeError: must be real number, not P_NoneType | TypeError: %d format: a real number is required, not P_NoneType | TypeError: %x format: an integer is required, not P_NoneType | TypeError: %c requires an int or a unicode character, not P_NoneType | calls 1
+__int__ NoneType bytes | TypeError: float argument required, not P_NoneType | TypeError: %d format: a real number is required, not P_NoneType | TypeError: %c requires an integer in range(256) or a single byte, not P_NoneType | calls 1
+PBig | OverflowError: int too large to convert to float | 401 | OverflowError: %c arg not in range(0x110000)
+PBig bytes | TypeError: float argument required, not PBig | 401 | OverflowError: %c arg not in range(256)
+PTE | TypeError: inner | TypeError: %d format: a real number is required, not PTE | TypeError: %c requires an int or a unicode character, not PTE
+PTE bytes | TypeError: float argument required, not PTE | TypeError: %d format: a real number is required, not PTE | TypeError: inner
+PVE | ValueError: inner | ValueError: inner | ValueError: inner
+PVE bytes | TypeError: float argument required, not PVE | ValueError: inner | ValueError: inner
+bool True | b'\x01' | b'1.000000'
+int 3 | b'\x03' | b'3.000000'
+float 3.5 | TypeError: %c requires an integer in range(256) or a single byte, not float | b'3.500000'
+str 's' | TypeError: %c requires an integer in range(256) or a single byte, not str | TypeError: float argument required, not str
+bytes b'x' | b'x' | TypeError: float argument required, not bytes
+bytes b'xy' | TypeError: %c requires an integer in range(256) or a single byte, not a bytes object of length 2 | TypeError: float argument required, not bytes
+bytes b'' | TypeError: %c requires an integer in range(256) or a single byte, not a bytes object of length 0 | TypeError: float argument required, not bytes
+bytearray bytearray(b'x') | b'x' | TypeError: float argument required, not bytearray
+bytearray bytearray(b'xy') | TypeError: %c requires an integer in range(256) or a single byte, not a bytearray object of length 2 | TypeError: float argument required, not bytearray
+int 300 | OverflowError: %c arg not in range(256) | b'300.000000'
+int -1 | OverflowError: %c arg not in range(256) | b'-1.000000'
+PIS 7 | b'\x07' | b'7.000000'
+list [1] | TypeError: %c requires an integer in range(256) or a single byte, not list | TypeError: float argument required, not list
+object | TypeError: %c requires an integer in range(256) or a single byte, not object | TypeError: float argument required, not object
+-- #860 r2 (daybreak3's pins): bytes %f replaces BaseException too; an int subclass's own __float__
+KeyboardInterrupt: k
+TypeError: float argument required, not K
+SystemExit: s TypeError: float argument required, not KS
+9.500000
+b'9.500000'
+[0, 0]
+2.000000 b'2.000000' 2.000000e+00 []
+-- int and float subclasses overriding each conversion, and BaseExceptions in each, str and bytes
+int __float__ %f | '9.500000' ['__float__'] | b'9.500000' ['__float__']
+int __float__ %d | '2' [] | b'2' []
+int __float__ %x | '2' [] | b'2' []
+int __float__ %c | '\x02' [] | b'\x02' []
+int __float__ %e | '9.500000e+00' ['__float__'] | b'9.500000e+00' ['__float__']
+int __index__ %f | '2.000000' [] | b'2.000000' []
+int __index__ %d | '2' [] | b'2' []
+int __index__ %x | '2' [] | b'2' []
+int __index__ %c | '\x02' [] | b'\x02' []
+int __index__ %e | '2.000000e+00' [] | b'2.000000e+00' []
+int __int__ %f | '2.000000' [] | b'2.000000' []
+int __int__ %d | '2' [] | b'2' []
+int __int__ %x | '2' [] | b'2' []
+int __int__ %c | '\x02' [] | b'\x02' []
+int __int__ %e | '2.000000e+00' [] | b'2.000000e+00' []
+float __float__ %f | '2.000000' [] | b'2.000000' []
+float __float__ %d | '2' [] | b'2' []
+float __float__ %x | TypeError: %x format: an integer is required, not float___float__ [] | TypeError: %x format: an integer is required, not float___float__ []
+float __float__ %c | TypeError: %c requires an int or a unicode character, not float___float__ [] | TypeError: %c requires an integer in range(256) or a single byte, not float___float__ []
+float __float__ %e | '2.000000e+00' [] | b'2.000000e+00' []
+float __index__ %f | '2.000000' [] | b'2.000000' []
+float __index__ %d | '2' [] | b'2' []
+float __index__ %x | '7' ['__index__'] | b'7' ['__index__']
+float __index__ %c | '\x07' ['__index__'] | b'\x07' ['__index__']
+float __index__ %e | '2.000000e+00' [] | b'2.000000e+00' []
+KeyboardInterrupt __float__ | KeyboardInterrupt: x | TypeError: %d format: a real number is required, not XK | TypeError: %c requires an int or a unicode character, not XK | bytes TypeError: float argument required, not XK | TypeError: %d format: a real number is required, not XK | TypeError: %c requires an integer in range(256) or a single byte, not XK
+KeyboardInterrupt __index__ | KeyboardInterrupt: x | KeyboardInterrupt: x | KeyboardInterrupt: x | bytes TypeError: float argument required, not XK | KeyboardInterrupt: x | KeyboardInterrupt: x
+SystemExit __float__ | SystemExit: x | TypeError: %d format: a real number is required, not XK | TypeError: %c requires an int or a unicode character, not XK | bytes TypeError: float argument required, not XK | TypeError: %d format: a real number is required, not XK | TypeError: %c requires an integer in range(256) or a single byte, not XK
+SystemExit __index__ | SystemExit: x | SystemExit: x | SystemExit: x | bytes TypeError: float argument required, not XK | SystemExit: x | SystemExit: x
+GeneratorExit __float__ | GeneratorExit: x | TypeError: %d format: a real number is required, not XK | TypeError: %c requires an int or a unicode character, not XK | bytes TypeError: float argument required, not XK | TypeError: %d format: a real number is required, not XK | TypeError: %c requires an integer in range(256) or a single byte, not XK
+GeneratorExit __index__ | GeneratorExit: x | GeneratorExit: x | GeneratorExit: x | bytes TypeError: float argument required, not XK | GeneratorExit: x | GeneratorExit: x
+StopIteration __float__ | StopIteration: x | TypeError: %d format: a real number is required, not XK | TypeError: %c requires an int or a unicode character, not XK | bytes TypeError: float argument required, not XK | TypeError: %d format: a real number is required, not XK | TypeError: %c requires an integer in range(256) or a single byte, not XK
+StopIteration __index__ | StopIteration: x | StopIteration: x | StopIteration: x | bytes TypeError: float argument required, not XK | StopIteration: x | StopIteration: x
+MemoryError __float__ | MemoryError: x | TypeError: %d format: a real number is required, not XK | TypeError: %c requires an int or a unicode character, not XK | bytes TypeError: float argument required, not XK | TypeError: %d format: a real number is required, not XK | TypeError: %c requires an integer in range(256) or a single byte, not XK
+MemoryError __index__ | MemoryError: x | MemoryError: x | MemoryError: x | bytes TypeError: float argument required, not XK | MemoryError: x | MemoryError: x
+RecursionError __float__ | RecursionError: x | TypeError: %d format: a real number is required, not XK | TypeError: %c requires an int or a unicode character, not XK | bytes TypeError: float argument required, not XK | TypeError: %d format: a real number is required, not XK | TypeError: %c requires an integer in range(256) or a single byte, not XK
+RecursionError __index__ | RecursionError: x | RecursionError: x | RecursionError: x | bytes TypeError: float argument required, not XK | RecursionError: x | RecursionError: x
+-- bytes %c's range (grader's C5): 255, 256 and -1, as ints and through __index__
+255 b'\xff' b'\xff'
+256 OverflowError: %c arg not in range(256) OverflowError: %c arg not in range(256)
+-1 OverflowError: %c arg not in range(256) OverflowError: %c arg not in range(256)
+-- #860 r3: a None slot (astra), and %d's PyNumber_Long order (__int__ before __index__)
+int __float__ | TypeError: 'NoneType' object is not callable | '2' | '2' | '\x02' | TypeError: 'NoneType' object is not callable | bytes TypeError: float argument required, not intN__float__ | b'2' | b'\x02' | format TypeError: 'NoneType' object is not callable '2'
+int __index__ | '2.000000' | '2' | '2' | '\x02' | '2.000000e+00' | bytes b'2.000000' | b'2' | b'\x02' | format '2.000000' '2'
+int __int__ | '2.000000' | '2' | '2' | '\x02' | '2.000000e+00' | bytes b'2.000000' | b'2' | b'\x02' | format '2.000000' '2'
+float __float__ | '2.000000' | '2' | TypeError: %x format: an integer is required, not floatN__float__ | TypeError: %c requires an int or a unicode character, not floatN__float__ | '2.000000e+00' | bytes b'2.000000' | b'2' | TypeError: %c requires an integer in range(256) or a single byte, not floatN__float__ | format '2.000000'
+float __index__ | '2.000000' | '2' | TypeError: %x format: an integer is required, not floatN__index__ | TypeError: %c requires an int or a unicode character, not floatN__index__ | '2.000000e+00' | bytes b'2.000000' | b'2' | TypeError: 'NoneType' object is not callable | format '2.000000'
+float __int__ | '2.000000' | TypeError: %d format: a real number is required, not floatN__int__ | TypeError: %x format: an integer is required, not floatN__int__ | TypeError: %c requires an int or a unicode character, not floatN__int__ | '2.000000e+00' | bytes b'2.000000' | TypeError: %d format: a real number is required, not floatN__int__ | TypeError: %c requires an integer in range(256) or a single byte, not floatN__int__ | format '2.000000'
+object __float__ | TypeError: 'NoneType' object is not callable | TypeError: %d format: a real number is required, not objectN__float__ | TypeError: %x format: an integer is required, not objectN__float__ | TypeError: %c requires an int or a unicode character, not objectN__float__ | TypeError: 'NoneType' object is not callable | bytes TypeError: float argument required, not objectN__float__ | TypeError: %d format: a real number is required, not objectN__float__ | TypeError: %c requires an integer in range(256) or a single byte, not objectN__float__ | format TypeError: unsupported format string passed to objectN__float__.__format__
+object __index__ | TypeError: 'NoneType' object is not callable | TypeError: %d format: a real number is required, not objectN__index__ | TypeError: %x format: an integer is required, not objectN__index__ | TypeError: %c requires an int or a unicode character, not objectN__index__ | TypeError: 'NoneType' object is not callable | bytes TypeError: float argument required, not objectN__index__ | TypeError: %d format: a real number is required, not objectN__index__ | TypeError: 'NoneType' object is not callable | format TypeError: unsupported format string passed to objectN__index__.__format__
+object __int__ | TypeError: must be real number, not objectN__int__ | TypeError: %d format: a real number is required, not objectN__int__ | TypeError: %x format: an integer is required, not objectN__int__ | TypeError: %c requires an int or a unicode character, not objectN__int__ | TypeError: must be real number, not objectN__int__ | bytes TypeError: float argument required, not objectN__int__ | TypeError: %d format: a real number is required, not objectN__int__ | TypeError: %c requires an integer in range(256) or a single byte, not objectN__int__ | format TypeError: unsupported format string passed to objectN__int__.__format__
+object 7 8 | '7' | '7' | '7' | '8' | '10' | '\x08' | '8.000000' | bytes b'7' | b'8' | b'\x08' | b'8.000000'
+object 's' 8 | TypeError: %d format: a real number is required, not NB | TypeError: %i format: a real number is required, not NB | TypeError: %u format: a real number is required, not NB | '8' | '10' | '\x08' | '8.000000' | bytes TypeError: %d format: a real number is required, not NB | b'8' | b'\x08' | b'8.000000'
+object 7 's' | '7' | '7' | '7' | TypeError: %x format: an integer is required, not NB | TypeError: %o format: an integer is required, not NB | TypeError: %c requires an int or a unicode character, not NB | TypeError: __index__ returned non-int (type str) | bytes b'7' | TypeError: %x format: an integer is required, not NB | TypeError: __index__ returned non-int (type str) | TypeError: float argument required, not NB
+object None 8 | TypeError: %d format: a real number is required, not NB | TypeError: %i format: a real number is required, not NB | TypeError: %u format: a real number is required, not NB | '8' | '10' | '\x08' | '8.000000' | bytes TypeError: %d format: a real number is required, not NB | b'8' | b'\x08' | b'8.000000'
+object 7 None | '7' | '7' | '7' | TypeError: %x format: an integer is required, not NB | TypeError: %o format: an integer is required, not NB | TypeError: %c requires an int or a unicode character, not NB | TypeError: 'NoneType' object is not callable | bytes b'7' | TypeError: %x format: an integer is required, not NB | TypeError: 'NoneType' object is not callable | TypeError: float argument required, not NB
+float 7 8 | '7' | '7' | '7' | '8' | '10' | '\x08' | '2.500000' | bytes b'7' | b'8' | b'\x08' | b'2.500000'
+float 's' 8 | TypeError: %d format: a real number is required, not NB | TypeError: %i format: a real number is required, not NB | TypeError: %u format: a real number is required, not NB | '8' | '10' | '\x08' | '2.500000' | bytes TypeError: %d format: a real number is required, not NB | b'8' | b'\x08' | b'2.500000'
+float 7 's' | '7' | '7' | '7' | TypeError: %x format: an integer is required, not NB | TypeError: %o format: an integer is required, not NB | TypeError: %c requires an int or a unicode character, not NB | '2.500000' | bytes b'7' | TypeError: %x format: an integer is required, not NB | TypeError: __index__ returned non-int (type str) | b'2.500000'
+float None 8 | TypeError: %d format: a real number is required, not NB | TypeError: %i format: a real number is required, not NB | TypeError: %u format: a real number is required, not NB | '8' | '10' | '\x08' | '2.500000' | bytes TypeError: %d format: a real number is required, not NB | b'8' | b'\x08' | b'2.500000'
+float 7 None | '7' | '7' | '7' | TypeError: %x format: an integer is required, not NB | TypeError: %o format: an integer is required, not NB | TypeError: %c requires an int or a unicode character, not NB | '2.500000' | bytes b'7' | TypeError: %x format: an integer is required, not NB | TypeError: 'NoneType' object is not callable | b'2.500000'
+plain float subclass | '2.500000' | '2' | TypeError: %x format: an integer is required, not NP | TypeError: %c requires an int or a unicode character, not NP | bytes b'2' | TypeError: %c requires an integer in range(256) or a single byte, not NP

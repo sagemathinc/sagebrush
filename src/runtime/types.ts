@@ -3825,7 +3825,7 @@ hooks.primProxy = (base: PyType): PyType => {
     d.set("__format__", unboxing(f0));
     const fmtW = pyfn((self: any, spec: string) => {
       const fl = lookupType(typeOf(self), "__float__");
-      if (typeof spec === "string" && /[eEfFgG%]$/.test(spec) && fl !== undefined && fl.$unboxing !== true) return format(O.specialOf(self, fl, "__float__")(self), spec);
+      if (typeof spec === "string" && /[eEfFgG%]$/.test(spec) && fl !== undefined && (fl === null || fl.$unboxing !== true)) return format(O.specialOf(self, fl, "__float__")(self), spec);
       return f0(unbox(self), spec);
     }, "__format__");
     (fmtW as any).$builtinMethod = true;

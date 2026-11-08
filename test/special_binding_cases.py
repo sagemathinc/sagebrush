@@ -740,5 +740,163 @@ import warnings
 
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
-    # (R1b also pins "called once": a float subclass result, which the old code called again)
+    # (a float subclass result: fv accepts it, so this is one call either way; the non-float
+    # results below pin "called once")
     print("R1b", t(lambda: "%f" % GPZ()), t(lambda: "%e" % GPZ()), grfs.calls)
+
+print("-- %-format's conversion results, as CPython checks them (PyFloat_AsDouble, mainformatlong, byte_converter)")
+import warnings
+
+
+def tw(f):
+    try:
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            r = repr(f())
+        return r + ("" if not w else " W:" + w[0].category.__name__ + ":" + str(w[0].message)[:60])
+    except Exception as e:
+        return type(e).__name__ + ": " + str(e)
+
+
+class PFS(float):
+    pass
+
+
+class PIS(int):
+    pass
+
+
+rpc = []
+
+
+def pmk(name, val):
+    def m(self):
+        rpc.append(name)
+        return val
+
+    return type("P_" + type(val).__name__, (), {name: m})()
+
+
+for name in ("__float__", "__index__", "__int__"):
+    for val in (3, 2.5, PFS(1.5), True, PIS(4), "s", None):
+        o = pmk(name, val)
+        rpc.clear()
+        print(name, type(val).__name__, "|", tw(lambda: "%f" % o), "|", tw(lambda: "%d" % o), "|", tw(lambda: "%x" % o), "|", tw(lambda: "%c" % o), "| calls", len(rpc))
+        rpc.clear()
+        print(name, type(val).__name__, "bytes |", tw(lambda: b"%f" % o), "|", tw(lambda: b"%d" % o), "|", tw(lambda: b"%c" % o), "| calls", len(rpc))
+
+
+class PBig:
+    def __index__(self):
+        return 10 ** 400
+
+
+class PTE:
+    def __index__(self):
+        raise TypeError("inner")
+
+
+class PVE:
+    def __index__(self):
+        raise ValueError("inner")
+
+
+for o in (PBig(), PTE(), PVE()):
+    n = type(o).__name__
+    print(n, "|", tw(lambda: "%f" % o), "|", tw(lambda: len("%d" % o)), "|", tw(lambda: "%c" % o))
+    print(n, "bytes |", tw(lambda: b"%f" % o), "|", tw(lambda: len(b"%d" % o)), "|", tw(lambda: b"%c" % o))
+for o in (True, 3, 3.5, "s", b"x", b"xy", b"", bytearray(b"x"), bytearray(b"xy"), 300, -1, PIS(7), [1]):
+    print(type(o).__name__, repr(o), "|", tw(lambda: b"%c" % o), "|", tw(lambda: b"%f" % o))
+print("object |", tw(lambda: b"%c" % object()), "|", tw(lambda: b"%f" % object()))
+
+print("-- #860 r2 (daybreak3's pins): bytes %f replaces BaseException too; an int subclass's own __float__")
+
+
+class K:
+    def __float__(self):
+        raise KeyboardInterrupt("k")
+
+
+def tb(f):
+    try:
+        return repr(f())
+    except BaseException as e:
+        return type(e).__name__ + ": " + str(e)
+
+
+print(tb(lambda: "%f" % K()))
+print(tb(lambda: b"%f" % K()))
+
+
+class KS:
+    def __float__(self):
+        raise SystemExit("s")
+
+
+print(tb(lambda: "%f" % KS()), tb(lambda: b"%f" % KS()))
+calls = []
+
+
+class I(int):
+    def __float__(self):
+        calls.append(0)
+        return 9.5
+
+
+print("%f" % I(2))
+print(b"%f" % I(2))
+print(calls)
+fcalls = []
+
+
+class FSub(float):
+    def __float__(self):
+        fcalls.append(0)
+        return 9.5
+
+
+print("%f" % FSub(2.0), b"%f" % FSub(2.0), "%e" % FSub(2.0), fcalls)
+print("-- int and float subclasses overriding each conversion, and BaseExceptions in each, str and bytes")
+xcalls = []
+
+
+def xsub(base, name, val):
+    def m(self):
+        xcalls.append(name)
+        return val
+
+    return type(base.__name__ + "_" + name, (base,), {name: m})
+
+
+for base, name, val in ((int, "__float__", 9.5), (int, "__index__", 7), (int, "__int__", 8), (float, "__float__", 9.5), (float, "__index__", 7)):
+    xo = xsub(base, name, val)(2)
+    for fmt in ("%f", "%d", "%x", "%c", "%e"):
+        xcalls.clear()
+        a = tw(lambda: fmt % xo)
+        ca = list(xcalls)
+        xcalls.clear()
+        b = tw(lambda: fmt.encode() % xo)
+        print(base.__name__, name, fmt, "|", a, ca, "|", b, list(xcalls))
+for exc in (KeyboardInterrupt, SystemExit, GeneratorExit, StopIteration, MemoryError, RecursionError):
+    for name in ("__float__", "__index__"):
+        def xm(self, exc=exc):
+            raise exc("x")
+
+        xo = type("XK", (), {name: xm})()
+        print(exc.__name__, name, "|", " | ".join(tb(lambda: f % xo) for f in ("%f", "%d", "%c")), "| bytes", " | ".join(tb(lambda: f % xo) for f in (b"%f", b"%d", b"%c")))
+print("-- bytes %c's range (grader's C5): 255, 256 and -1, as ints and through __index__")
+for k in (255, 256, -1):
+    print(k, tb(lambda: b"%c" % k), tb(lambda: b"%c" % type("CI", (), {"__index__": lambda self: k})()))
+print("-- #860 r3: a None slot (astra), and %d's PyNumber_Long order (__int__ before __index__)")
+for nbase in (int, float, object):
+    for nname in ("__float__", "__index__", "__int__"):
+        NC = type(nbase.__name__ + "N" + nname, (nbase,), {nname: None})
+        no = NC(2) if nbase is not object else NC()
+        print(nbase.__name__, nname, "|", " | ".join(tb(lambda: f % no) for f in ("%f", "%d", "%x", "%c", "%e")), "| bytes", " | ".join(tb(lambda: f % no) for f in (b"%f", b"%d", b"%c")), "| format", tb(lambda: format(no, "f")), *([tb(lambda: format(no, "d"))] if nbase is int else []))
+for nbase in (object, float):
+    for iv, xv in ((7, 8), ("s", 8), (7, "s"), (None, 8), (7, None)):
+        nd = {"__int__": None if iv is None else (lambda self, v=iv: v), "__index__": None if xv is None else (lambda self, v=xv: v)}
+        no = type("NB", (nbase,), nd)(*((2.5,) if nbase is float else ()))
+        print(nbase.__name__, repr(iv), repr(xv), "|", " | ".join(tb(lambda: f % no) for f in ("%d", "%i", "%u", "%x", "%o", "%c", "%f")), "| bytes", " | ".join(tb(lambda: f % no) for f in (b"%d", b"%x", b"%c", b"%f")))
+no = type("NP", (float,), {})(2.5)
+print("plain float subclass |", " | ".join(tb(lambda: f % no) for f in ("%f", "%d", "%x", "%c")), "| bytes", " | ".join(tb(lambda: f % no) for f in (b"%d", b"%c")))
