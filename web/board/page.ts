@@ -1669,6 +1669,7 @@ if (ws && local) {
 
 (window as any).board = mounted.board;
 (window as any).boardBench = mounted.bench;
-(window as any).sagebrush = { ...(window as any).sagebrush, leaving: () => held, board: mounted.agent, ...(ws ? { workspace: ws.forAgent("agent:page"), saveLog: () => wsLog.slice() } : {}),
+(window as any).sagebrush = { ...(window as any).sagebrush, leaving: () => held, board: mounted.agent, ...(ws ? { workspace: ws.forAgent("agent:page"), saveLog: () => wsLog.slice(), wsFlush } : {}),
+  // (wsFlush: the page's save queue, for tests to await until it stops changing: test-workspace-pages.mjs)
   // (the board journal's store, for tests: test-board-journal-page.mjs)
   ...(journalOn ? { boardJournal: () => jstore, boardJournalHook: BOARD_PAGE_HOOK } : {}) };
