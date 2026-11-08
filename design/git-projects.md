@@ -108,6 +108,14 @@ Each enforced, with at-limit and one-over tests in PR 2:
 - the folder's own state is checked against what L read, by entry id and hash, in the same transaction;
 - `base_commit` and `git_base` move to the new commit.
 
+### 4.1 Switching branches, and more than one branch
+
+William, Nov 8 2026 (about 3:05 PM PST): "for really everything else I do, it would be via api calls to the remote git server… `git checkout branch`, worktree stuff too… all uses this 'kung fu' approach of not even doing the work."
+
+- **`git checkout <branch>`** is §4 against another branch's commit, refused while the folder has changes not yet proposed (`git checkout: commit or discard your changes first, or copy the branch into another folder.`). The server compares the two commits' trees by git blob id: a path whose id is unchanged keeps its SHA-256 from `git_base`, so only files that actually differ are fetched (one GitHub blob request each, at most 500 per batch; a large difference falls back to the zip of §2). Then `ref` changes.
+- **A worktree** is another folder following another branch: `git clone` again, or `git worktree add <folder> <branch>`. Bytes the two share are stored once (blobs are by SHA-256), so a second folder costs little more than its rows.
+- **Other hosts:** everything here is a few calls (resolve a branch, list a tree, fetch an archive or a blob, create a ref and a pull request). GitLab and Gitea have the same calls, so a second host is a second implementation of that small list. v1 is GitHub only.
+
 ## 5. A small `git` we own, in the terminal
 
 | Command | Does |
@@ -116,9 +124,10 @@ Each enforced, with at-limit and one-over tests in PR 2:
 | `git status`, `git diff [path]` | §3's list and diffs |
 | `git log [path]` | the branch's history, read from GitHub's API in the page |
 | `git pull` | §4 |
+| `git checkout <branch>`, `git worktree add <folder> <branch>` | §4.1 |
 | `git push` | opens §3's list in the page, and prints `Opened Propose changes in the page: review and confirm it there.` |
 
-Anything else: `git <command>: not supported. This is Sagebrush's git: it supports clone, status, diff, log, pull and push. There is no .git folder here.`
+Anything else: `git <command>: not supported. This is Sagebrush's git: it supports clone, status, diff, log, pull, checkout, worktree add and push. There is no .git folder here.`
 
 ## 6. Agents
 
@@ -130,7 +139,6 @@ The `/git` prototype's flow:
 ## 7. Open questions
 
 - **Private repositories,** after v1, in a short addendum covering: where metadata calls are authorized, the token's single in-memory use on the server or a GitHub App's short-lived tokens, the signed archive link as a credential (never logged or stored), and the redirect rules. Proposal: decide after PR 3, when there's use to learn from.
-- **Branches:** v1 follows one branch per folder. Another branch is another copy.
 
 ## 8. The PR sequence
 
@@ -141,5 +149,6 @@ The `/git` prototype's flow:
 | 3 | Device: what changed, diffs, the frozen proposal, the send (§3) | yes: screenshots to William first | sagebrush + board (UI) | an edit after review withdraws the proposal; a cloud-only change fetched and checked; notebook outputs never sent; a branch name taken; a conflict copy refuses; an agent grant and `git push` can't send |
 | 4 | "Update from GitHub" (§4) | yes: screenshots first | sync-client | each §4 row, including a file that becomes `excluded`, and an edit landing between staging and the final transaction |
 | 5 | The terminal's `git` (§5), and the agent review flow from `git-proto` (§6) | yes | sagebrush | each command, and an unsupported one |
+| 6 | `git checkout` and `git worktree add` (§4.1) | yes | sync-client | unchanged ids reuse bytes with no fetch; checkout refused with changes; the fallback to the zip |
 
 **Not before tiered-files PR 4.** Until fetch-on-open ships, every device downloads every file, so an 8,573-file import would download everywhere. PRs 2 and 3 stay behind the DEV flag until then.
