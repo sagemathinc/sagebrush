@@ -365,40 +365,41 @@ test("§9: the gate census catches every planted route spelling (mutants)", asyn
   }
 });
 
-// (daybreak3) Stop through the CLI launcher, for real: SIGINT during a long evaluation and during a long parse; each
-// must still be running when the signal arrives, then stop within 5 s, with nothing printed and no host traceback
-function interrupted(args: string[], cwd: string): Promise<{ alive: boolean; ms: number; code: number | null; signal: string | null; stdout: string; stderr: string }> {
+// (daybreak3) Stop through the CLI launcher, for real: SIGINT during a long evaluation and during a long parse.
+// What is asserted is the outcome, never a latency (@sagebrush, Nov 8: latency belongs in the PERF packet): each was
+// still running at the signal; the process ends by SIGINT; the work after the signal is bounded, since the program's
+// last step (a marker printed at its end, or the error its parse would lead to) never happens; nothing is printed
+// and there is no host traceback.  The kill after 120 s only keeps a hang from stalling the suite; a hang fails it.
+function interrupted(args: string[], cwd: string): Promise<{ alive: boolean; code: number | null; signal: string | null; stdout: string; stderr: string }> {
   const { spawn } = require("node:child_process");
   return new Promise((resolve) => {
     const p = spawn(process.execPath, [CLI, ...args], { cwd });
-    let stdout = "", stderr = "", done = false, t1 = 0;
+    let stdout = "", stderr = "", exited = false;
     p.stdout.on("data", (d: Buffer) => (stdout += d));
     p.stderr.on("data", (d: Buffer) => (stderr += d));
-    const timer = setTimeout(() => {
-      const alive = !done;
-      t1 = Date.now();
+    p.on("exit", () => (exited = true));
+    setTimeout(() => {
+      const alive = !exited;
       p.kill("SIGINT");
-      setTimeout(() => !done && p.kill("SIGKILL"), 5000);
-      p.on("close", (code: number | null, signal: string | null) => resolve({ alive, ms: Date.now() - t1, code, signal, stdout, stderr }));
+      const guard = setTimeout(() => p.kill("SIGKILL"), 120000);
+      p.on("close", (code: number | null, signal: string | null) => (clearTimeout(guard), resolve({ alive, code, signal, stdout, stderr })));
     }, 2000);
-    p.on("exit", () => (done = true, t1 === 0 && clearTimeout(timer)));
   });
 }
 
-test("§8: Stop (SIGINT) ends a long evaluation and a long parse promptly, through the CLI", async () => {
+test("§8: Stop (SIGINT) ends a long evaluation and a long parse, and nothing after it runs, through the CLI", async () => {
   const dir = mkdtempSync(join(tmpdir(), "rill-sigint-"));
   try {
-    const ev = await interrupted(["--rill", "-c", "x <- 1:1000000\n" + "y <- x + x\n".repeat(400)], dir);
+    const ev = await interrupted(["--rill", "-c", "x <- 1:1000000\n" + "y <- x + x\n".repeat(400) + 'cat("finished")\n'], dir);
     assert.ok(ev.alive, "the evaluation was still running at the signal");
-    assert.ok(ev.ms < 5000 && ev.signal !== "SIGKILL", `stopped promptly (${ev.ms} ms, ${ev.signal ?? ev.code})`);
-    assert.equal(ev.stdout, "");
+    assert.equal(ev.signal, "SIGINT", `ended by the interrupt (${ev.signal ?? ev.code})`);
+    assert.equal(ev.stdout, "", "its last step never ran, and nothing was printed");
     assert.doesNotMatch(ev.stderr, /Traceback|File "/);
     writeFileSync(join(dir, "big.R"), new Array(2000000).fill("1").join(" + "));
     const pa = await interrupted(["-c", "import _rill\n_rill.run(open('big.R').read())\n"], dir);
     assert.ok(pa.alive, "the parse was still running at the signal");
-    assert.ok(pa.ms < 5000 && pa.signal !== "SIGKILL", `stopped promptly (${pa.ms} ms, ${pa.signal ?? pa.code})`);
-    assert.equal(pa.stdout, "");
-    assert.doesNotMatch(pa.stderr, /Traceback|File "/);
+    assert.equal(pa.signal, "SIGINT", `ended by the interrupt (${pa.signal ?? pa.code})`);
+    assert.equal(pa.stdout + pa.stderr, "", "the parse never finished: no evaluation, no error, nothing printed");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
