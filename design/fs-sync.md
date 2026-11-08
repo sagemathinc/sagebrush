@@ -113,6 +113,7 @@ Apply? [y/N]
 - **Notebooks, boards and chats** (§3.2) are written here as files, the way the workspace saves them when downloaded: `.ipynb`, `.board.json`, and the chat's file. They go only one way, from the workspace to this computer (William, Nov 8: "download only; a local edit to one is reported, not uploaded").
   - Each run writes a snapshot again when the document changed in the workspace.
   - If the person edited that file here since fs-sync wrote it, fs-sync leaves it as it is: it doesn't replace it, delete it or upload it. It lists it under "Not uploaded: edited here", every run, until the person deletes or renames their edited copy. Then the next run writes a fresh snapshot.
+  - A notebook, board or chat file made here, such as a new `.ipynb`, isn't uploaded either (§3.4). It's listed under the same heading: "Draft.ipynb  made here; notebooks, boards and chats go only from the workspace to this computer for now".
   - A listed edited snapshot alone doesn't make the run exit 1. Snapshots are download-only by design, so "in sync" (exit 0) means every file other than these matches.
 - **A first run** (no base) has no delete section, and says why: "First sync of this pair: nothing will be deleted."
 - **The answer must be `y` or `yes`.** Anything else, including Enter, end of input or Ctrl+C, applies nothing (exit 1).
