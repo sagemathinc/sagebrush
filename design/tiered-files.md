@@ -129,7 +129,7 @@ William: "outputs aren't saved into the synced notebook by default. They show wh
   ✓ Keep outputs        saved with the notebook, on every device
 ```
 
-**Notebooks that already have saved outputs** (proposal): they start with "Keep outputs" on, so nothing already saved is dropped, whether or not the notebook is edited again. Turning the switch off removes the saved outputs at the next save, and the page says so once: "Outputs won't be saved with this notebook. They still show while you work." (The alternative @sagebrush proposed, leaving them untouched until the next edit and then dropping them, would remove outputs the person never chose to remove.)
+**Notebooks that already have saved outputs** (confirmed by @sagebrush, Nov 8): they start with "Keep outputs" on, so nothing already saved is dropped, whether or not the notebook is edited again. Turning the switch off removes the saved outputs at the next save, and the page says so once: "Outputs won't be saved with this notebook. They still show while you work." Nothing already saved is ever dropped without the person turning the switch off.
 
 **Where it's built:** a separate notebook PR, not one of the six storage PRs in §7. It changes what the notebook saves, not how files are stored.
 
@@ -574,7 +574,7 @@ Every list, check and GC endpoint stays paged. The index's bounds don't depend o
 | 4 | Fetch on open, and the prefetch rule; the states in the file browser (§1.1) | yes: screenshots to William first | sync-client + board (UI) |
 | 5 | Keep on this device, Remove from this device, the cache budget, "Free up space" (§3) | yes: screenshots first | sync-client + board (UI) |
 | 6 | Packs and their compaction (§4.2), **only after a benchmark shows they're needed** (§4.2 states the measurement) | no | sync-client |
-| — | Separate from the six: notebook outputs not saved by default, the "Keep outputs" switch (§1.4) | yes: screenshots first | the notebook's owner, named by @sagebrush |
+| — | Separate from the six: notebook outputs not saved by default, the "Keep outputs" switch (§1.4) | yes: screenshots first | @sagebrush-sync-docs |
 
 Each PR carries its at-limit and one-over tests, and operation-count assertions (daybreak2, point 10).
 
