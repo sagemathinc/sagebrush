@@ -607,14 +607,14 @@
   },
   "engine/lib/rill.pre": {
    "exact": false,
-   "ceiling": 400232,
+   "ceiling": 400798,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
   },
   "engine/lib/rill.src": {
    "exact": false,
-   "ceiling": 99077,
+   "ceiling": 99474,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -852,8 +852,8 @@
    "engine/lib/pkg-pypi-tabulate.src": 68887,
    "engine/lib/pkg-scipy-io.pre": 61258,
    "engine/lib/pkg-scipy-io.src": 12963,
-   "engine/lib/rill.pre": 363848,
-   "engine/lib/rill.src": 90070,
+   "engine/lib/rill.pre": 364362,
+   "engine/lib/rill.src": 90431,
    "engine/lib/sage-more.src": 395935,
    "engine/lib/sage.pre": 13662741,
    "engine/lib/sage.src": 2888811,
