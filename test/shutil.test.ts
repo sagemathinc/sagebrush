@@ -52,6 +52,7 @@ test("os.supports_follow_symlinks has CPython's writable lazy-data lifecycle", (
     [
       "import os",
       "os.supports_follow_symlinks = 1",
+      "print(os.supports_follow_symlinks)",
       "os.supports_follow_symlinks = 2",
       "print(os.supports_follow_symlinks, 'supports_follow_symlinks' in vars(os))",
       "del os.supports_follow_symlinks",
