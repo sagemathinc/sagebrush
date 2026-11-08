@@ -13,6 +13,8 @@
 //
 //   POST /api/sync/v1/manifest                   {manifest} -> {state, position, chunks}
 //   POST /api/sync/v1/manifest/<sha256>/verify   one step of the server's check -> {state, position}
+//     (a client aborts a verify request after 150 s: that ends the request's Worker invocation and any R2 get it
+//     awaits, so outstanding verification gets are bounded as design/tiered-files.md §6 states)
 //   GET  /api/sync/v1/manifest/<sha256>          a verified file's manifest
 //
 // and, on the user-content Worker (web/files), /p/<key>: a signed read (§5.4).
