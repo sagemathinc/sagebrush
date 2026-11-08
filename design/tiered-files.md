@@ -274,6 +274,10 @@ An insertion in the middle of a file moves one or two chunk boundaries, so an ed
 
 **Reading:** `GET /api/sync/v1/manifest/<sha256>` (new) answers the manifest from SQLite. The client then fetches each chunk by `GET /blob/<chunk>`, each with its own signed URL and its own debit, a few at a time. It copies, rather than fetches, any chunk it already holds in an earlier version of the file. Then it assembles, checks the whole hash, and installs. An interrupted download resumes chunk by chunk.
 
+**Two checks, two outcomes:**
+- **Each chunk is checked against its own hash as it arrives.** A chunk that doesn't match is a transfer error: it is dropped and fetched again, like any failed fetch (L3's backoff, with its kept signed URL).
+- **The whole file is checked once every chunk has passed.** A mismatch then means the manifest itself is wrong, and fetching again would get the same bytes. So it is final: `fetchFailed: corrupt`, with no retry, until the file's hash changes (a new write from another device clears it, as any new hash does).
+
 **Assembly memory, honestly:** fileBytes stores a file as one value, so a 200 MiB file is assembled whole in memory under its reservation (`size × COPIES`, L2), as a 200 MiB download would be today. Storing files by chunk on the device (so a phone never holds 200 MiB at once, and local versions share chunks) is a later change, outside this note.
 
 ### 4.2 Packs
