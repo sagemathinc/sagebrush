@@ -1,0 +1,115 @@
+{
+ "cases": [
+  {
+   "id": "error-wrap-72",
+   "status": 1,
+   "stderr": "Error in aaaaaaaaaaaaaaa + \"a\" : non-numeric argument to binary operator\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "error-wrap-73",
+   "status": 1,
+   "stderr": "Error in aaaaaaaaaaaaaaaa + \"a\" : non-numeric argument to binary operator\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "error-wrap-74",
+   "status": 1,
+   "stderr": "Error in aaaaaaaaaaaaaaaaa + \"a\" : \n  non-numeric argument to binary operator\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "error-wrap-75",
+   "status": 1,
+   "stderr": "Error in aaaaaaaaaaaaaaaaaa + \"a\" : \n  non-numeric argument to binary operator\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "warning-recycle-74",
+   "status": 0,
+   "stderr": "Warning message:\nIn x + y : longer object length is not a multiple of shorter object length\n",
+   "stdout": "[1] 2 4 4\n"
+  },
+  {
+   "id": "warning-recycle-75",
+   "status": 0,
+   "stderr": "Warning message:\nIn x + yy : longer object length is not a multiple of shorter object length\n",
+   "stdout": "[1] 2 4 4\n"
+  },
+  {
+   "id": "warning-recycle-76",
+   "status": 0,
+   "stderr": "Warning message:\nIn x + yyy :\n  longer object length is not a multiple of shorter object length\n",
+   "stdout": "[1] 2 4 4\n"
+  },
+  {
+   "id": "warning-recycle-77",
+   "status": 0,
+   "stderr": "Warning message:\nIn x + yyyy :\n  longer object length is not a multiple of shorter object length\n",
+   "stdout": "[1] 2 4 4\n"
+  },
+  {
+   "id": "warning-recycle-78",
+   "status": 0,
+   "stderr": "Warning message:\nIn x + yyyyy :\n  longer object length is not a multiple of shorter object length\n",
+   "stdout": "[1] 2 4 4\n"
+  },
+  {
+   "id": "warning-recycle-79",
+   "status": 0,
+   "stderr": "Warning message:\nIn x + yyyyyy :\n  longer object length is not a multiple of shorter object length\n",
+   "stdout": "[1] 2 4 4\n"
+  },
+  {
+   "id": "warning-recycle-80",
+   "status": 0,
+   "stderr": "Warning message:\nIn x + yyyyyyy :\n  longer object length is not a multiple of shorter object length\n",
+   "stdout": "[1] 2 4 4\n"
+  },
+  {
+   "id": "warning-overflow-74",
+   "status": 0,
+   "stderr": "Warning message:\nIn zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz + 1L : NAs produced by integer overflow\n",
+   "stdout": "[1] NA\n"
+  },
+  {
+   "id": "warning-overflow-75",
+   "status": 0,
+   "stderr": "Warning message:\nIn zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz + 1L : NAs produced by integer overflow\n",
+   "stdout": "[1] NA\n"
+  },
+  {
+   "id": "warning-overflow-76",
+   "status": 0,
+   "stderr": "Warning message:\nIn zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz + 1L :\n  NAs produced by integer overflow\n",
+   "stdout": "[1] NA\n"
+  },
+  {
+   "id": "warning-overflow-77",
+   "status": 0,
+   "stderr": "Warning message:\nIn zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz + 1L :\n  NAs produced by integer overflow\n",
+   "stdout": "[1] NA\n"
+  },
+  {
+   "id": "warning-overflow-78",
+   "status": 0,
+   "stderr": "Warning message:\nIn zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz + 1L :\n  NAs produced by integer overflow\n",
+   "stdout": "[1] NA\n"
+  },
+  {
+   "id": "warning-overflow-79",
+   "status": 0,
+   "stderr": "Warning message:\nIn zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz + 1L :\n  NAs produced by integer overflow\n",
+   "stdout": "[1] NA\n"
+  },
+  {
+   "id": "warning-overflow-80",
+   "status": 0,
+   "stderr": "Warning message:\nIn zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz + 1L :\n  NAs produced by integer overflow\n",
+   "stdout": "[1] NA\n"
+  }
+ ],
+ "file": "rill-tests/errfmt/test_2.R",
+ "format": "rill-out",
+ "v": 1
+}

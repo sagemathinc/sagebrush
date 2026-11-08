@@ -79,5 +79,28 @@ const fe = ec.manifest.files;
 ok(fe["_sage_ec_ff.py"] === "mod-sage-ec-ff", "_sage_ec_ff: mod-sage-ec-ff");
 ok(["_sage_ec.py", "_sage_ec_cubic.py", "_sage_lazy.py"].every((f) => fe[f] === "sage-more") && fe["sage_all.py"] === "sage", "the other Sage extras stay in sage-more, sage_all in sage: " + JSON.stringify(fe));
 ok(ec.manifest.chunks["mod-sage-ec-ff"]?.src && !ec.manifest.chunks["mod-sage-ec-ff"].pre && !ec.manifest.modes.sage.includes("mod-sage-ec-ff"), "mod-sage-ec-ff: sources only, and Sage mode's start doesn't fetch it");
+// (Rill's routing, design/rill.md §6.1 and §6.5: Rill's start is checked last, so a file another start uses stays in
+// core, sci or sage; the start's own files are rill; Rill's other files go by family, never mod-rill; no other mode's
+// start fetches a Rill group; and the offline inventory's Rill item owns every rill-* group)
+const rl = libChunks({ "core.py": "", "shared.py": "", "sage_all.py": "", "_sage_shared.py": "", "_rill/__init__.py": "", "_rill/eval.py": "",
+  "_rill/stats/lm.py": "", "_rill/base/strings.py": "", "_rill/ggplot2/geom.py": "", "_rill/dplyr/verbs.py": "", "_rill/tibble.py": "",
+  "_rill/data/mtcars.py": "", "_rill/graphics.py": "" }, {
+  py: rec({ "py|core": mod("core.py"), "py|shared": mod("shared.py") }),
+  sage: rec({ "py|core": mod("core.py"), "py|sage_all": mod("sage_all.py"), "py|_sage_shared": mod("_sage_shared.py") }),
+  rill: rec({ "py|core": mod("core.py"), "py|shared": mod("shared.py"), "py|_sage_shared": mod("_sage_shared.py"), "py|_rill": mod("_rill/__init__.py"), "py|_rill.eval": mod("_rill/eval.py") }),
+}, "b");
+const fr = rl.manifest.files;
+ok(fr["_rill/__init__.py"] === "rill" && fr["_rill/eval.py"] === "rill", "Rill's start's own files: rill");
+ok(fr["shared.py"] === "core" && fr["_sage_shared.py"] === "sage", "a file another start uses stays in core or sage, never rill: " + JSON.stringify([fr["shared.py"], fr["_sage_shared.py"]]));
+ok(fr["_rill/ggplot2/geom.py"] === "rill-ggplot2", "_rill/ggplot2/**: rill-ggplot2");
+ok(fr["_rill/dplyr/verbs.py"] === "rill-dplyr" && fr["_rill/tibble.py"] === "rill-dplyr", "_rill/dplyr/** and _rill/tibble.py: rill-dplyr");
+ok(fr["_rill/data/mtcars.py"] === "rill-data", "_rill/data/**: rill-data");
+ok(["_rill/stats/lm.py", "_rill/base/strings.py", "_rill/graphics.py"].every((f) => fr[f] === "rill-more"), "any other _rill/** file: rill-more");
+ok(!Object.values(fr).includes("mod-rill"), "no file is mod-rill");
+ok(JSON.stringify(rl.manifest.modes.rill) === JSON.stringify(["core", "sage", "rill"]), "Rill's start fetches its start group and the groups it shares, in START_ORDER: " + JSON.stringify(rl.manifest.modes.rill));
+ok(Object.entries(rl.manifest.modes).every(([m, gs]) => m === "rill" || !gs.some((g) => g.startsWith("rill"))), "no other mode's start includes a Rill group: " + JSON.stringify(rl.manifest.modes));
+ok(rl.manifest.chunks.rill?.pre && ["rill-more", "rill-ggplot2", "rill-dplyr", "rill-data"].every((g) => rl.manifest.chunks[g]?.src && !rl.manifest.chunks[g].pre), "rill has its compiled code; the families no start uses, sources only");
+const { itemOfGroup } = await import("./offline-inventory.mts");
+ok(["rill", "rill-more", "rill-ggplot2", "rill-dplyr", "rill-data"].every((g) => itemOfGroup(g) === "rill"), "the offline inventory's Rill item owns every Rill group");
 console.log(`${checks - fails}/${checks} checks passed`);
 process.exit(fails ? 1 : 0);

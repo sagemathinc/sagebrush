@@ -15,6 +15,8 @@
 //   sage    Sage mode's start (Magma's too)
 //   matlab  MATLAB mode's start
 //   magma   Magma mode's start
+//   rill    Rill's (R's) start, checked last, so a file another start uses stays
+//           in theirs (design/rill.md §6.1)
 // that it is in; files no start uses are grouped by family (sage-more,
 // matlab-more, magma-more; MATLAB's sparse LU, _matlab_lu and _matlab_colamd,
 // is matlab-lu) or are a group of their own (mod-<name>: a
@@ -49,7 +51,7 @@ export type LibManifest = {
 };
 export type Packages = { registry: { packages: Record<string, { dir: string }> }; files: Record<string, string> };
 
-export const START_ORDER = ["core", "sci", "sage", "matlab", "magma"] as const;
+export const START_ORDER = ["core", "sci", "sage", "matlab", "magma", "rill"] as const;
 
 // (the mod- groups groupOf gives several top-level names on purpose, which the clash check below lets through)
 const SHARED_MOD_GROUPS = new Set(["mod-live-data", "mod-pathlib", "mod-xml"]);
@@ -63,8 +65,16 @@ const XML_FAMILY = new Set(["xml", "pyexpat"]);
 
 export function groupOf(path: string, sets: Record<string, Set<string>>): string {
   if (sets.py?.has(path) || (sets.sci?.has(path) && sets.sage?.has(path))) return "core";
-  for (const g of ["sci", "sage", "matlab", "magma"]) if (sets[g]?.has(path)) return g;
+  for (const g of ["sci", "sage", "matlab", "magma", "rill"]) if (sets[g]?.has(path)) return g;
   const top = path.split("/")[0].replace(/\.py$/, "");
+  // (Rill's files no start uses, by family, before the generic mod- fallback so none is ever mod-rill: the final
+  // routing from A1's first file, so no later phase renames or removes a group, design/rill.md §6.1)
+  if (top === "_rill") {
+    if (/^_rill\/ggplot2\//.test(path)) return "rill-ggplot2";
+    if (/^_rill\/(dplyr\/|tibble\.py$)/.test(path)) return "rill-dplyr";
+    if (/^_rill\/data\//.test(path)) return "rill-data";
+    return "rill-more";
+  }
   if (PATHLIB_FAMILY.has(top)) return "mod-pathlib";
   if (XML_FAMILY.has(top)) return "mod-xml";
   // (elliptic curves over GF(p), imported only by EllipticCurve() over a
@@ -151,7 +161,7 @@ export function libChunks(lib: Record<string, string>, recordings: Record<string
   // (a mode's start: the library's groups in START_ORDER, then the packages' it imported)
   const rank = (g: string) => (g.startsWith("pkg-") ? START_ORDER.length : START_ORDER.indexOf(g as any));
   const modes: Record<string, string[]> = {};
-  for (const m of ["sage", "matlab", "magma"]) {
+  for (const m of ["sage", "matlab", "magma", "rill"]) {
     if (!sets[m]) continue;
     const gs = new Set([...sets[m]].map(groupOfPath).filter((g): g is string => g !== undefined));
     modes[m] = [...gs].sort((a, b) => rank(a) - rank(b));

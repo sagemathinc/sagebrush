@@ -1,0 +1,475 @@
+{
+ "cases": [
+  {
+   "id": "tok-left-assign",
+   "status": 1,
+   "stderr": "Error: unexpected assignment in \"x <- <-\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-super-assign",
+   "status": 1,
+   "stderr": "Error: unexpected assignment in \"x <<- <<-\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-right-assign",
+   "status": 1,
+   "stderr": "Error: unexpected '->' in \"1 -> ->\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-eq-assign",
+   "status": 1,
+   "stderr": "Error: unexpected '=' in \"x = =\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-special",
+   "status": 1,
+   "stderr": "Error: unexpected SPECIAL in \"1 %in% %in%\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-pipe",
+   "status": 1,
+   "stderr": "Error: unexpected '|>' in \"1 |> |>\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-null",
+   "status": 1,
+   "stderr": "Error: unexpected 'NULL' in \"NULL NULL\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-true",
+   "status": 1,
+   "stderr": "Error: unexpected numeric constant in \"TRUE TRUE\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-na",
+   "status": 1,
+   "stderr": "Error: unexpected numeric constant in \"NA NA\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-inf",
+   "status": 1,
+   "stderr": "Error: unexpected numeric constant in \"Inf Inf\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-function",
+   "status": 1,
+   "stderr": "Error: unexpected 'function' in \"f function\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-if",
+   "status": 1,
+   "stderr": "Error: unexpected 'if' in \"1 if\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-for",
+   "status": 1,
+   "stderr": "Error: unexpected 'for' in \"1 for\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-while",
+   "status": 1,
+   "stderr": "Error: unexpected 'while' in \"1 while\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-repeat",
+   "status": 1,
+   "stderr": "Error: unexpected 'repeat' in \"1 repeat\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-break",
+   "status": 1,
+   "stderr": "Error: unexpected 'break' in \"1 break\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-in",
+   "status": 1,
+   "stderr": "Error: unexpected 'in' in \"in\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-and",
+   "status": 1,
+   "stderr": "Error: unexpected '&' in \"1 & &\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-and2",
+   "status": 1,
+   "stderr": "Error: unexpected '&&' in \"1 && &&\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-or2",
+   "status": 1,
+   "stderr": "Error: unexpected '||' in \"1 || ||\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-gt",
+   "status": 1,
+   "stderr": "Error: unexpected '>' in \"1 > >\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-le",
+   "status": 1,
+   "stderr": "Error: unexpected '<=' in \"1 <= <=\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-eq",
+   "status": 1,
+   "stderr": "Error: unexpected '==' in \"1 == ==\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-ne",
+   "status": 1,
+   "stderr": "Error: unexpected '!=' in \"1 != !=\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-star",
+   "status": 1,
+   "stderr": "Error: unexpected '*' in \"1 * *\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-slash",
+   "status": 1,
+   "stderr": "Error: unexpected '/' in \"1 / /\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-caret",
+   "status": 1,
+   "stderr": "Error: unexpected '^' in \"1 ^ ^\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-colon",
+   "status": 1,
+   "stderr": "Error: unexpected ':' in \"1 : :\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-tilde-binary",
+   "status": 1,
+   "stderr": "Error: unexpected end of input\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-dollar",
+   "status": 1,
+   "stderr": "Error: unexpected '$' in \"x $ $\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-at",
+   "status": 1,
+   "stderr": "Error: unexpected '@' in \"x @ @\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-ns",
+   "status": 1,
+   "stderr": "Error: unexpected '::' in \"base :: ::\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-lbracket",
+   "status": 1,
+   "stderr": "Error: unexpected '[' in \"[\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-lbb",
+   "status": 1,
+   "stderr": "Error: unexpected '[[' in \"[[\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-rbracket",
+   "status": 1,
+   "stderr": "Error: unexpected ']' in \"1 ]\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-lbrace-after",
+   "status": 1,
+   "stderr": "Error: unexpected '{' in \"1 {\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-comma",
+   "status": 1,
+   "stderr": "Error: unexpected ',' in \"1 ,\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-semicolon-only",
+   "status": 1,
+   "stderr": "Error: unexpected ';' in \";\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-question",
+   "status": 1,
+   "stderr": "Error in help.search(\"2\", fields = \"1\", package = NULL) : \n  incorrect field specification\nCalls: ? -> eval -> eval -> help.search\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-backslash",
+   "status": 1,
+   "stderr": "Error: unexpected '\\\\' in \"1 \\\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-bad-char",
+   "status": 1,
+   "stderr": "Error: unexpected '@' in \"2 @@\"\nExecution halted\n",
+   "stdout": "[1] 1\n"
+  },
+  {
+   "id": "tok-input",
+   "status": 1,
+   "stderr": "Error: unexpected '$' in \"x <- 1 $$\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-unicode-ident",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 3\n"
+  },
+  {
+   "id": "tok-dot-ident",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 3\n"
+  },
+  {
+   "id": "tok-underscore-start",
+   "status": 1,
+   "stderr": "Error: unexpected symbol in \"_x\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-digit-ident",
+   "status": 1,
+   "stderr": "Error: unexpected symbol in \"2x\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-context-later-line",
+   "status": 1,
+   "stderr": "Error: unexpected numeric constant in \"y <- 2 3\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-context-indented",
+   "status": 1,
+   "stderr": "Error: unexpected symbol in:\n\"{\n    a b\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-context-long",
+   "status": 1,
+   "stderr": "Error: unexpected symbol in \"aaaaaaaaaa <- bbbbbbbbbb + cccccccccc * dddddddddd - eeeeeeeeee / ffffffffff gggg\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-context-multiline-expr",
+   "status": 1,
+   "stderr": "Error: unexpected numeric constant in:\n\"f(1,\n  2 3\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-double-semicolon",
+   "status": 1,
+   "stderr": "Error: unexpected ';' in \";\"\nExecution halted\n",
+   "stdout": "[1] 1\n"
+  },
+  {
+   "id": "tok-else-in-function",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1\n"
+  },
+  {
+   "id": "tok-function-missing-body",
+   "status": 1,
+   "stderr": "Error: unexpected end of input\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-number-forms",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1.000000e-02 1.000000e+02 2.550000e+02 1.710000e+02 1.000000e+02\n[6] 1.000000e+05 1.000000e+05 1.234568e+11\n"
+  },
+  {
+   "id": "tok-int-forms",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1]   1 127 100\n"
+  },
+  {
+   "id": "tok-string-in-formals",
+   "status": 1,
+   "stderr": "Error: unexpected string constant in \"f <- function(\"a\"\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-call-on-number",
+   "status": 1,
+   "stderr": "Error: attempt to apply non-function\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-empty-parens",
+   "status": 1,
+   "stderr": "Error: unexpected ')' in \"()\"\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "tok-empty-braces",
+   "status": 0,
+   "stderr": "",
+   "stdout": "NULL\n"
+  },
+  {
+   "id": "tok-nested-function-default",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 3\n"
+  },
+  {
+   "id": "tok-arg-name-string",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 3\n"
+  },
+  {
+   "id": "tok-arg-name-backtick",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 4\n"
+  },
+  {
+   "id": "tok-arg-name-null",
+   "status": 0,
+   "stderr": "",
+   "stdout": "NULL \n   1 \n"
+  },
+  {
+   "id": "tok-unary-not-low",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] FALSE\n"
+  },
+  {
+   "id": "tok-tilde-low",
+   "status": 0,
+   "stderr": "",
+   "stdout": "a ~ b || c\n"
+  },
+  {
+   "id": "tok-question-low",
+   "status": 0,
+   "stderr": "",
+   "stdout": "`?`(a <- b, c)\n"
+  },
+  {
+   "id": "tok-assign-in-arg",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 3\n"
+  },
+  {
+   "id": "tok-eq-in-braces",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 4\n"
+  },
+  {
+   "id": "tok-pipe-precedence",
+   "status": 0,
+   "stderr": "",
+   "stdout": "a + f(b)\n"
+  },
+  {
+   "id": "tok-pipe-lambda",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 40\n"
+  },
+  {
+   "id": "tok-colon-unary",
+   "status": 0,
+   "stderr": "",
+   "stdout": "-a:b\n"
+  },
+  {
+   "id": "tok-pow-unary",
+   "status": 0,
+   "stderr": "",
+   "stdout": "-a^b\n"
+  },
+  {
+   "id": "tok-dollar-call",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 9\n"
+  },
+  {
+   "id": "tok-bracket-chain",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 3\n"
+  },
+  {
+   "id": "tok-if-else-chain",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"b\"\n"
+  },
+  {
+   "id": "tok-repeat-break",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 3\n"
+  },
+  {
+   "id": "tok-while-next",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 13\n"
+  },
+  {
+   "id": "tok-for-in-paren-newline",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1\n[1] 2\n"
+  }
+ ],
+ "file": "rill-tests/parse/test_2.R",
+ "format": "rill-out",
+ "v": 1
+}

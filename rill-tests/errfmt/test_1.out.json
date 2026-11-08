@@ -1,0 +1,169 @@
+{
+ "cases": [
+  {
+   "id": "error-len-70",
+   "status": 1,
+   "stderr": "Error in f() : xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "error-len-71",
+   "status": 1,
+   "stderr": "Error in f() : xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "error-len-72",
+   "status": 1,
+   "stderr": "Error in f() : xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "error-len-73",
+   "status": 1,
+   "stderr": "Error in f() : xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "error-len-74",
+   "status": 1,
+   "stderr": "Error in f() : \n  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "error-len-75",
+   "status": 1,
+   "stderr": "Error in f() : \n  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "error-len-76",
+   "status": 1,
+   "stderr": "Error in f() : \n  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "error-len-77",
+   "status": 1,
+   "stderr": "Error in f() : \n  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "error-len-78",
+   "status": 1,
+   "stderr": "Error in f() : \n  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "error-len-79",
+   "status": 1,
+   "stderr": "Error in f() : \n  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "error-len-80",
+   "status": 1,
+   "stderr": "Error in f() : \n  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "error-len-81",
+   "status": 1,
+   "stderr": "Error in f() : \n  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "warning-len-67",
+   "status": 0,
+   "stderr": "Warning message:\nIn f() : wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww\n",
+   "stdout": ""
+  },
+  {
+   "id": "warning-len-68",
+   "status": 0,
+   "stderr": "Warning message:\nIn f() : wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww\n",
+   "stdout": ""
+  },
+  {
+   "id": "warning-len-69",
+   "status": 0,
+   "stderr": "Warning message:\nIn f() : wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww\n",
+   "stdout": ""
+  },
+  {
+   "id": "warning-len-70",
+   "status": 0,
+   "stderr": "Warning message:\nIn f() : wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww\n",
+   "stdout": ""
+  },
+  {
+   "id": "warning-len-71",
+   "status": 0,
+   "stderr": "Warning message:\nIn f() : wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww\n",
+   "stdout": ""
+  },
+  {
+   "id": "warning-len-72",
+   "status": 0,
+   "stderr": "Warning message:\nIn f() : wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww\n",
+   "stdout": ""
+  },
+  {
+   "id": "warning-len-73",
+   "status": 0,
+   "stderr": "Warning message:\nIn f() : wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww\n",
+   "stdout": ""
+  },
+  {
+   "id": "warning-len-74",
+   "status": 0,
+   "stderr": "Warning message:\nIn f() : wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww\n",
+   "stdout": ""
+  },
+  {
+   "id": "warning-len-75",
+   "status": 0,
+   "stderr": "Warning message:\nIn f() : wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww\n",
+   "stdout": ""
+  },
+  {
+   "id": "warning-len-76",
+   "status": 0,
+   "stderr": "Warning message:\nIn f() : wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww\n",
+   "stdout": ""
+  },
+  {
+   "id": "warning-len-77",
+   "status": 0,
+   "stderr": "Warning message:\nIn f() : wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww\n",
+   "stdout": ""
+  },
+  {
+   "id": "warning-len-78",
+   "status": 0,
+   "stderr": "Warning message:\nIn f() : wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww\n",
+   "stdout": ""
+  },
+  {
+   "id": "error-long-call",
+   "status": 1,
+   "stderr": "Error in long_function_name_for_testing(1, 2) : short\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "error-no-call",
+   "status": 1,
+   "stderr": "Error: yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "error-multiline-message",
+   "status": 1,
+   "stderr": "Error in f() : first line\nsecond line\nExecution halted\n",
+   "stdout": ""
+  }
+ ],
+ "file": "rill-tests/errfmt/test_1.R",
+ "format": "rill-out",
+ "v": 1
+}

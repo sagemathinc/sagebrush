@@ -10,6 +10,21 @@
    "out_sha256": "a31e78d56e98f6699b75f106877aedd4877ba9ae18f1609a2bcac9c50cb804d0",
    "r_sha256": "ad025b1ee03dd686a8d773350f1bd5976b23dc2b9ec7f2f476f518eb11aa6fc8"
   },
+  "rill-tests/core/test_1.R": {
+   "cases": 103,
+   "out_sha256": "b00e849f0c63a0082936f6b86aa1e1b89f6d31686a414f6d797370860f8c7477",
+   "r_sha256": "5e07c57b407a8baff0b6d99134e9be7a2ef2a17109c389adf1ec6d43d5f34013"
+  },
+  "rill-tests/core/test_2.R": {
+   "cases": 16,
+   "out_sha256": "b5b15eb8241dd44823c0c85175e8be029c60f33e04462782f0b2669d4cf48060",
+   "r_sha256": "802a2fc993dd9f6ef18b978fde8e17db6bf5eb3d1ff422494d0a21d38d98dc85"
+  },
+  "rill-tests/core/test_3.R": {
+   "cases": 42,
+   "out_sha256": "5baa246f10ab0a4c2ad0c831fba98babf31a6b44548dd2c723791bac5674e60a",
+   "r_sha256": "f7c0e8e0cd72f8a80d2ce9c047318d8b7847459c87217d68ff505a1c73fee532"
+  },
   "rill-tests/ctrl/test_1.R": {
    "cases": 10,
    "out_sha256": "e41b7f955402a7eb2b61547be1cffcd8c6ceb44d346f114a160d6001f9c8e826",
@@ -24,6 +39,16 @@
    "cases": 16,
    "out_sha256": "39a6884b75da176db1d973a6b78bbe565caf90b39c019fb9fd3ee3a544ffdc66",
    "r_sha256": "4e6977fd6f5bb8ae7297802c22b6e955f4fd3767271aaac0013846dc01b2860e"
+  },
+  "rill-tests/errfmt/test_1.R": {
+   "cases": 27,
+   "out_sha256": "01fe9a0f549888373f588c600eeae158ee99190e954fa2f683da4fbf541b449e",
+   "r_sha256": "4b7d566d5f1c6734038bfeaee904132c72ec4170a8dc7522636d4c9a2485e53d"
+  },
+  "rill-tests/errfmt/test_2.R": {
+   "cases": 18,
+   "out_sha256": "c459a57cdcaedaef9ad3b6cfe8ad92d44b0b26a8b41f38ec3be71d9ecee3969a",
+   "r_sha256": "b78ae146bf65988dd61cc650a351d226c0a4dd614865c7e7b24835598f87b3fd"
   },
   "rill-tests/fac/test_1.R": {
    "cases": 12,
@@ -70,6 +95,11 @@
    "out_sha256": "d8a8461d91e7dd0187e7200a04c01b076ef51dac4e0fe0779f53844e1d0673fb",
    "r_sha256": "916ef904507babcd9bd9e55b7a0dcb0924d0491e1bba629ba7c9eee40195f278"
   },
+  "rill-tests/mem/test_1.R": {
+   "cases": 10,
+   "out_sha256": "3b46abaf9c4d063d7b27faf2f8e2e84a3a4bc1d1178e2cb9127acd304899a1d3",
+   "r_sha256": "73077187712fd594c54c7a97cc707ef701fa44e705eef310f3ae690cd560de18"
+  },
   "rill-tests/misc/test_1.R": {
    "cases": 28,
    "out_sha256": "3417dcd33df6e61dbc58fdf8c58849e9988e9128025bf9673a73c33e767fd254",
@@ -79,6 +109,36 @@
    "cases": 7,
    "out_sha256": "de83564e01d2d62d60b4b9e87808a3a682d7e5d5b4d77e11b20012c2275d2cc6",
    "r_sha256": "2dba47bab5b49393e19a1877deaeb36bd6ab0fb1ee468accaecc828e85d68c02"
+  },
+  "rill-tests/parse/test_1.R": {
+   "cases": 82,
+   "out_sha256": "750d7cecc347316683128c6e29a70e6c238fe773e8348edcffa982baa119bbb4",
+   "r_sha256": "3165128076b66138a4ff8977ae5c069966ed903b13b62b466ec82ad6f28b920b"
+  },
+  "rill-tests/parse/test_2.R": {
+   "cases": 78,
+   "out_sha256": "cb571d98da4777c63d5788be5a9b433e2544efa17195b75e87e542938071dd09",
+   "r_sha256": "4aa551b876a2c046f8fb8c8ff90be7d32c3a36609d85a91a76016877ae71c47d"
+  },
+  "rill-tests/parse/test_3.R": {
+   "cases": 59,
+   "out_sha256": "e94c94933e62f27b65a14fcddab6e7ff59f95c523d546c8a6fc054578df77a58",
+   "r_sha256": "bde29bf17c458ff21315b1245987d65e1b22f402ea8b9431d38b3e9dc02f8cef"
+  },
+  "rill-tests/parse/test_4.R": {
+   "cases": 23,
+   "out_sha256": "f6c4950df7d9eee5b63548dd8b47fb6bc34671a59a7575d9694d3ea231743581",
+   "r_sha256": "ee0b377c8d3b7b2dd31148751886dc7fc8d6ed56c1eb058abe125f7187ef2ac0"
+  },
+  "rill-tests/parse/test_5.R": {
+   "cases": 16,
+   "out_sha256": "f5f6f2886443b9a0d49023817f26462e2555663ccf6607e71dad778152aafe8e",
+   "r_sha256": "716fde5678be0262fd30cd3aaacbb56b13dee2457a2968479afa772db4697470"
+  },
+  "rill-tests/parse/test_6.R": {
+   "cases": 87,
+   "out_sha256": "65526a9bf9ce16a47c7d4e4e4cce9e4a0a1305a40427d9422ae36f867961d601",
+   "r_sha256": "72a1921ab3b10dfbaeff94c406cda638ccd27d1233f50a12356729719cc27782"
   },
   "rill-tests/rng/test_1.R": {
    "cases": 7,
@@ -137,7 +197,7 @@
    "timezone": "UTC"
   },
   "rscript": "~/sbm-r/env/bin/Rscript",
-  "run_py_sha256": "f69ef8e32bfe006d81099befaf3b8918d16ca25a2e7827a3e9acc9a4c10a770f"
+  "run_py_sha256": "801d4e7f415a7040120b639bc38ce72c6b4b669dd5f399243dce82db4b0135d4"
  },
  "v": 1
 }
