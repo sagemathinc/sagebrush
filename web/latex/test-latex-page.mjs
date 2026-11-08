@@ -3024,6 +3024,51 @@ $P = \sage{g[0]}$
       await pkey("Escape", "Escape", 27);
       await until(`!${P}`, 5000);
       check(p1 && p2 && p3, "Run, beamer: Present shows the title page's result, the plot and the point", { p1, p2, p3 });
+      // ---- the code changed since the Run: its values kept, marked stale (@sagebrush's Q3 ruling, Nov 8: never "…");
+      // Shift+Enter in the source runs (William, Nov 3), no newline; in Present it runs and the slide stays, updated
+      // (frame 2 by its number, in the chunks shown: the page's own rule, slidesNow; a hidden chunk's copy never counts)
+      const S2 = `document.querySelector('.tex-preview .ch:not([hidden]) section.slide[data-frame="2"]')`, srcNow = () => ev(`document.querySelector(".tex-src").value`);
+      const deriv = (c) => `${S2}.textContent.includes(${JSON.stringify("3 \\, x^{2} - " + c)})`;
+      const edit = async (from, to) => { const t = await srcNow(); await typeInto(t.replace(from, to)); return t.replace(from, to); };
+      await edit("f(x) = x^3 - 2*x", "f(x) = x^3 - 3*x");
+      const kept = await until(`!!${S2}.querySelector(".sagestale") && ${deriv(2)} && !!${S2}.querySelector("img.sageplot.sagestale") && !${S2}.querySelector(".sagechip") && getComputedStyle(${S2}.querySelector(".sagestale")).opacity === "0.5"`, 10000);
+      const saidStale = await statusIs(/^\d+ values? out of date: Shift\+Enter runs$/, 5000);
+      check(kept && saidStale, "stale: after an edit, the slide keeps its last values and plot, marked stale (faded; no \"…\", no chip); the status says so",
+        { kept, status: await ev(`document.querySelector(".tex-status")?.textContent ?? ""`), slide: await ev(`${S2}.innerHTML.slice(0, 300)`) });
+      const before = await srcNow(), at = before.indexOf("3*x") + 3;
+      await ev(`(() => { const t = document.querySelector(".tex-src"); t.focus(); t.setSelectionRange(${at}, ${at}); document.querySelector(".tex-status").textContent = ""; return true; })()`);
+      await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, modifiers: 8, text: "\r" });
+      await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, modifiers: 8 });
+      const ranKey = await statusIs(/^Ran 6 SageTeX items in [0-9.]+ s$/, 120000);
+      const fresh2 = await until(`${deriv(3)} && !${S2}.querySelector(".sagestale")`, 10000);
+      check(ranKey && fresh2 && (await srcNow()) === before, "Shift+Enter in the source runs the code (no newline): the new values, nothing stale",
+        { ranKey, fresh2, status: await ev(`document.querySelector(".tex-status")?.textContent ?? ""`), added: (await srcNow()).length - before.length });
+      await edit("f(x) = x^3 - 3*x", "f(x) = x^3 - 4*x");
+      await until(`!!${S2}.querySelector(".sagestale")`, 10000);
+      await ev(`(document.querySelector(".tex-status").textContent = "", document.querySelector(".tex-present-btn").click(), 1)`);
+      await until(`!!${P}`, 15000);
+      await pkey("Home", "Home", 36);
+      await until(`${P}.dataset.frame === "1"`, 5000);
+      await pkey("ArrowRight", "ArrowRight", 39);
+      const on2 = await until(`${P}.dataset.frame === "2" && !!${P}.querySelector(".tp-stage .sagestale")`, 5000);
+      await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, modifiers: 8, text: "\r" });
+      await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, modifiers: 8 });
+      const ranP = await statusIs(/^Ran 6 SageTeX items in [0-9.]+ s$/, 120000);
+      const upd = await until(`${P}.dataset.frame === "2" && ${P}.querySelector(".tp-stage").textContent.includes(${JSON.stringify("3 \\, x^{2} - 4")}) && !${P}.querySelector(".tp-stage .sagestale")`, 10000);
+      const stayed = await ev(`${P}?.dataset.frame`);
+      await pkey("Escape", "Escape", 27);
+      await until(`!${P}`, 5000);
+      check(on2 && ranP && upd && stayed === "2", "Present: Shift+Enter runs the code; the slide stays (2), its values updated, nothing stale",
+        { on2, ranP, upd, stayed, status: await ev(`document.querySelector(".tex-status")?.textContent ?? ""`) });
+      // (a document with no SageTeX code: Shift+Enter is a newline, as before)
+      await open(await mk("/t/no-sage.tex", enc("\\documentclass{article}\n\\begin{document}\nHi\n\\end{document}\n")));
+      await until(`document.querySelector(".tex-preview")?.textContent.includes("Hi") && document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
+      const plain = await srcNow(), pat = plain.indexOf("Hi") + 2;
+      await ev(`(() => { const t = document.querySelector(".tex-src"); t.focus(); t.setSelectionRange(${pat}, ${pat}); return true; })()`);
+      await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, modifiers: 8, text: "\r" });
+      await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, modifiers: 8 });
+      const nl = await until(`document.querySelector(".tex-src").value === ${JSON.stringify(plain.slice(0, pat) + "\n" + plain.slice(pat))}`, 5000);
+      check(nl, "Shift+Enter in a document with no SageTeX code is a newline", { src: JSON.stringify(await srcNow()) });
     }
     // (Codex friction P5, the editor's half: a helper .py beside the .tex, imported by the document's code as by real
     //  SageTeX run in the document's folder. The .tex's folder is given to Sage, read-only, at each Run, as it is then:

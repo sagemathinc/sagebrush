@@ -191,20 +191,49 @@ export function plotOptions(opts) {
 }
 // a results file's states (`sagebrush latex run`: [{key, s, latex?, src?, msg?}]) for these items, in order, as long
 // as each is for the very item at its place (its key) and every one before it is too; only ok, error and blocked
-// states, with the fields the renderer shows (each checked again where it is shown: inlineHtml, mathPart)
+// states, with the fields the renderer shows (each checked again where it is shown: inlineHtml, mathPart).
+// Past that prefix (code changed since the Run), an item keeps its last value, "stale" (@sagebrush's Q3 ruling, Nov 8:
+// the last values, marked stale, never "…" while the code is stale): the saved ok result of the same code, in order
+// (an item whose code is unchanged, after an edit above it), or else the one at its place if that is of the same kind
+// and its code is in the document no more (an item edited in place). A new item, or one whose last Run failed, is
+// not run.
 export function savedStates(items, saved) {
   const out = [];
-  for (let k = 0; k < items.length && k < saved.length; k++) {
+  let k = 0;
+  for (; k < items.length && k < saved.length; k++) {
     const x = saved[k];
     if (!x || typeof x !== "object" || x.key !== itemKey(items[k]) || !["ok", "error", "blocked"].includes(x.s)) break;
-    const st = { key: x.key, s: x.s };
-    if (typeof x.latex === "string") st.latex = x.latex;
-    if (typeof x.src === "string") st.src = x.src;
-    if (typeof x.msg === "string") st.msg = x.msg.slice(0, 4000);
-    out.push(st);
+    out.push(shown(x, x.s));
+  }
+  const keys = items.map(itemKey), now = new Set(keys), unused = new Map();
+  for (let j = k; j < saved.length; j++) {
+    const x = saved[j];
+    if (x && typeof x === "object" && x.s === "ok" && typeof x.key === "string") { if (!unused.has(x.key)) unused.set(x.key, []); unused.get(x.key).push(j); }
+  }
+  const taken = new Set();
+  for (let i = k; i < items.length; i++) {
+    let j = (unused.get(keys[i]) ?? []).find((q) => !taken.has(q));
+    if (j === undefined && i < saved.length && !taken.has(i) && saved[i]?.s === "ok" && typeof saved[i].key === "string" && !now.has(saved[i].key) && sameKind(saved[i].key, items[i])) j = i;
+    if (j === undefined) continue;
+    taken.add(j);
+    out[i] = { ...shown(saved[j], "stale"), key: keys[i] };
   }
   return out;
 }
+// (a saved state, only the fields the renderer shows)
+function shown(x, s) {
+  const st = { key: x.key, s };
+  if (typeof x.latex === "string") st.latex = x.latex;
+  if (typeof x.src === "string") st.src = x.src;
+  if (typeof x.msg === "string") st.msg = x.msg.slice(0, 4000);
+  return st;
+}
+// (a saved key's item of the same kind as `it`: its mode, and the same wrapper)
+function sameKind(key, it) {
+  try { const a = JSON.parse(key); return Array.isArray(a) && a[0] === it.mode && a[4] === WRAPPER_VERSION; } catch { return false; }
+}
+/** What a stale value's mark says (its title). */
+export const STALE_TITLE = "Changed since the last Run: Shift+Enter or Run updates it";
 export function stateOf(states, n, it) {
   if (it.err) return { s: "error", msg: whyRejected(it) };
   const s = states && states[n];
@@ -213,8 +242,9 @@ export function stateOf(states, n, it) {
 }
 
 // inside a math region (plan r4 section 6): the placeholder this item contributes to the region's TeX string
+// (a stale value is its last one; the renderer marks the whole region stale: render.mjs mathStale)
 export function mathPart(st, it) {
-  if (st.s === "ok" && it.mode === "sage" && typeof st.latex === "string" && utf8len(st.latex) <= MAX_RESULT) return "{" + st.latex + "}";
+  if ((st.s === "ok" || st.s === "stale") && it.mode === "sage" && typeof st.latex === "string" && utf8len(st.latex) <= MAX_RESULT) return "{" + st.latex + "}";
   if (st.s === "pending" || st.s === "notrun") return "{\\text{…}}";
   return "{\\boxed{\\text{?}}}";
 }
@@ -232,20 +262,22 @@ function chip(st, esc, inline, n) {
   const last = lines.length > 1 && /^\(/.test(lines[lines.length - 1]) ? lines.slice(-2).join(" ") : lines.pop() || "";
   return '<span class="' + cls + '" title="' + esc(who + msg) + '">' + esc((who + (st.s === "error" ? "error: " + last : msg)).slice(0, 600)) + "</span>";
 }
-// outside math: \sage as standalone inline math (math: the renderer's KaTeX call), \sageplot as an image
+// outside math: \sage as standalone inline math (math: the renderer's KaTeX call), \sageplot as an image; a stale
+// one is its last value, marked (class sagestale, its title saying why)
 export function inlineHtml(st, it, esc, math, n) {
-  if (st.s === "ok" && it.mode === "sage" && typeof st.latex === "string" && utf8len(st.latex) <= MAX_RESULT) return math(st.latex);
-  if (st.s === "ok" && it.mode === "plot" && typeof st.src === "string" && DATA_SVG.test(st.src)) {
+  const stale = st.s === "stale", ok = st.s === "ok" || stale;
+  if (ok && it.mode === "sage" && typeof st.latex === "string" && utf8len(st.latex) <= MAX_RESULT) return stale ? '<span class="sagestale" title="' + esc(STALE_TITLE) + '">' + math(st.latex) + "</span>" : math(st.latex);
+  if (ok && it.mode === "plot" && typeof st.src === "string" && DATA_SVG.test(st.src)) {
     const o = plotOptions(it.opts);
     if (o.ignored.length) return chip({ s: "error", msg: whyRejected({ err: "plotopts", name: o.ignored.join(", ") }) }, esc, true, n);
-    return '<img class="sageplot" alt="a plot" src="' + st.src + '"' + (o.style ? ' style="' + esc(o.style) + '"' : "") + ">";
+    return '<img class="sageplot' + (stale ? ' sagestale" title="' + esc(STALE_TITLE) : "") + '" alt="a plot" src="' + st.src + '"' + (o.style ? ' style="' + esc(o.style) + '"' : "") + ">";
   }
-  return chip(st.s === "ok" ? { s: "error", msg: "the result can't be shown" } : st, esc, true, n);
+  return chip(ok ? { s: "error", msg: "the result can't be shown" } : st, esc, true, n);
 }
 // a code block: sageblock shows its code (as SageTeX typesets it), sagesilent nothing; both show a failed or
-// not-yet-run state
+// not-yet-run state (a stale one, which ran, none: it has no value to keep)
 export function blockHtml(st, it, esc, n) {
   let h = it.mode === "block" ? '<pre class="verbatim code sageblock">' + esc(it.shown || "") + "</pre>" : "";
-  if (st.s !== "ok") h += '<div class="sagestate">' + chip(st, esc, false, n) + "</div>";
+  if (st.s !== "ok" && st.s !== "stale") h += '<div class="sagestate">' + chip(st, esc, false, n) + "</div>";
   return h;
 }
