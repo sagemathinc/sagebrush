@@ -60,13 +60,24 @@ export function createDownloadDialog(h: DownloadDialogHost) {
       const notebookPath = "/" + (where ?? nb.path), folder = notebookPath.slice(0, notebookPath.lastIndexOf("/") + 1);
       const inside = folder !== "/" && snap.every((r) => r.notebook || r.path.startsWith(folder));
       const nameOf = (p: string) => p.slice(inside ? folder.length : 1);
+      // (before and after every read: the notebook it was opened for, still, never another's files with this one's; and
+      // the dialog still open.  close() clears `open` at once but only queues its "close" event, so a read that ends
+      // between the two stops the download itself: nothing is handed over once the dialog is closed (grader, web-export))
+      const still = () => {
+        if (h.notebookId() !== nbId) throw new Error("the notebook changed");
+        if (!d.open) {
+          ac.abort();
+          throw new Error("cancelled");
+        }
+      };
       await h.zip({
         picks: snap.map((r) => ({
           name: nameOf(r.notebook ? notebookPath : r.path),
           read: async () => {
-            // (the notebook it was opened for, still: never another's files with this one's)
-            if (h.notebookId() !== nbId) throw new Error("the notebook changed");
-            return r.notebook ? nb.data : h.readFile(r);
+            still();
+            const bytes = r.notebook ? nb.data : await h.readFile(r);
+            still();
+            return bytes;
           },
         })),
         name: nb.path.slice(nb.path.lastIndexOf("/") + 1).replace(/\.ipynb$/i, "") + ".zip",
