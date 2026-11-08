@@ -89,6 +89,10 @@ try {
     t.editor.reset(${JSON.stringify(cmd)});
     t.onKey({ key: "Enter" }, null);
     for (let i = 0; i < 1200 && !(document.querySelector(".sb-term-status").textContent && performance.getEntriesByName("sb-term:last-paint").length > n0); i++) await new Promise((r) => setTimeout(r, 50));
+    // (then the writer's own barrier: the prompt and any redraw queued after the output drawn too, so a run's
+    // measures and Long Tasks are collected only once all its work is on the screen; daybreak4)
+    await Promise.race([t.writer.idle(), new Promise((r) => setTimeout(r, 60000))]);
+    if (t.writer.writing) return "timeout (the writer didn't drain in 60 s)";
     return performance.getEntriesByName("sb-term:last-paint").length > n0 ? document.querySelector(".sb-term-status").textContent : "timeout (no last paint in 60 s)";
   })()`);
   // (clear, and wait until it has: no command shown and none running, so a timed run never collides with it)
