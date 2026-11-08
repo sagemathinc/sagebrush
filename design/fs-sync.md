@@ -27,7 +27,7 @@ uvx sagebrush@latest fs-sync --forget [--origin URL]
 - **The arguments:**
   - `LOCAL_DIR` is a folder on this computer. It must exist; fs-sync never creates it.
     - It may not overlap fs-sync's own folders, the config folder (§1.1) and the state folder (§1.4).
-    - fs-sync resolves `LOCAL_DIR` and both of those to real paths, through any symlinks. If `LOCAL_DIR` is one of them, contains one, or is inside one, it exits 2 before pairing or reading any file: "~ can't be synced: it contains fs-sync's own files (~/.config/sagebrush/fs-sync). Choose a folder that doesn't."
+    - In every mode (a sync, `--dry-run`, `--restore`), fs-sync resolves `LOCAL_DIR` and both of those to real paths, through any symlinks. If `LOCAL_DIR` is one of them, contains one, or is inside one, it exits 2 before pairing or reading any file: "~ can't be synced: it contains fs-sync's own files (~/.config/sagebrush/fs-sync). Choose a folder that doesn't."
     - So the token, the bases, the journals and the holding folder are never scanned, uploaded or deleted. That holds even for `fs-sync ~ /Home`.
   - `WORKSPACE_PATH` is a folder in the person's workspace, such as `/Thesis`. If it doesn't exist, the plan says it will be made.
 - **Direction:**
@@ -42,7 +42,12 @@ uvx sagebrush@latest fs-sync --forget [--origin URL]
   - `--yes` applies without asking, for scripts.
   - `--dry-run` with `--yes` is refused (exit 2).
 - `--origin URL` names the Sagebrush site, as `sagebrush remote login --origin` does. The default is https://sagebrush.space.
-- **Other flags:** `--restore RUN_ID` puts back the local files a run deleted (§2.4), and `--forget` deletes this computer's token for that site (§3.1).
+- **Other flags:**
+  - `--restore RUN_ID` puts back the local files a run deleted (§2.4), into that run's `LOCAL_DIR`.
+    - It applies the same overlap refusal first (below), and restores only paths that resolve inside `LOCAL_DIR`.
+    - **It never overwrites:** a path that is occupied now is left as it is. Its file stays in the holding folder and is listed ("not restored: notes/a.tex exists"), and the run exits 1.
+    - It changes nothing in the workspace. The next sync sees restored files as "new here" or "changed here".
+  - `--forget` deletes this computer's token for that site (§3.1).
 - `--help` (or `-h`) prints the usage on stdout and exits 0. Like `sagebrush remote --help` since #862, it doesn't sign in, read a folder or send anything.
 
 **It runs once and exits.** No watcher, no daemon and no schedule. To sync again, run it again.
