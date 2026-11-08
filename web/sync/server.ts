@@ -624,36 +624,41 @@ async function verifyStep(env: Env, stub: ReturnType<NonNullable<Env["SYNC_ACCOU
   const h = Sha256.from(step.sha_state);
   let short = false;
   // (the work stops at its slot's end, a margin before it: the object records nothing from a call past its end, astra's
-  // #880 SEC 1.  Every R2 get and every pending read is raced with that deadline, and at it the body is cancelled, so a
-  // stalled read can't outlive the slot and overlap the next call's work, daybreak3's r2 note)
+  // #880 SEC 1.  Every R2 get and every pending read is raced with that deadline, and a read is cancelled at it
+  // (daybreak3's r2 note).  An R2 get can't be aborted, so a step that stops waits for its get to settle (cancelling its
+  // body unread) and only then frees its slot: the slot stays owned while any R2 operation of this call is outstanding
+  // (astra's b012addb note); a Worker that died holds none, and its slot is admitted again after the object's hold)
   const deadline = step.until - (testMode(env) ? 200 : 5000);
   const LATE = Symbol("late");
   let timer: ReturnType<typeof setTimeout> | undefined;
   const expiry = new Promise<typeof LATE>((r) => (timer = setTimeout(() => r(LATE), Math.max(0, deadline - Date.now()))));
-  const tooLong = () => err(503, "busy", { message: "this verification step took too long; verify again" });
+  const stop = async (pending?: Promise<unknown>) => {
+    if (pending) await pending.then((x) => (x as { body?: ReadableStream } | null)?.body?.cancel().catch(() => {})).catch(() => {});
+    await stub.verifyRelease({ sha256, attempt: step.attempt });
+    return err(503, "busy", { message: "this verification step took too long; verify again" });
+  };
   try {
     for (const c of step.chunks) {
-      if (Date.now() > deadline) return tooLong();
-      const got = env.SHARE_BUCKET!.get(c.key);
+      if (Date.now() > deadline) return await stop();
+      const got = testMode(env) && gateOn(env, "verify-get-stall") ? stalledGet(env, env.SHARE_BUCKET!.get(c.key)) : env.SHARE_BUCKET!.get(c.key);
       const o = await Promise.race([got, expiry]);
-      if (o === LATE) {
-        // (a get that answers later has its body cancelled unread)
-        got.then((x) => x?.body.cancel().catch(() => {})).catch(() => {});
-        return tooLong();
+      if (o === LATE) return await stop(got);
+      if (!o) {
+        await stub.verifyRelease({ sha256, attempt: step.attempt });
+        return err(503, "busy", { message: "a chunk's bytes couldn't be read; try again" });
       }
-      if (!o) return err(503, "busy", { message: "a chunk's bytes couldn't be read; try again" });
       const body = testMode(env) && stallReads(env) ? stalling(o.body as ReadableStream<Uint8Array>) : (o.body as ReadableStream<Uint8Array>);
       const reader = body.getReader();
       let n = 0;
       for (;;) {
         if (Date.now() > deadline) {
           await reader.cancel().catch(() => {});
-          return tooLong();
+          return await stop();
         }
         const r = await Promise.race([reader.read(), expiry]);
         if (r === LATE) {
           await reader.cancel().catch(() => {});
-          return tooLong();
+          return await stop();
         }
         if (r.done) break;
         n += r.value.length;
@@ -675,6 +680,11 @@ async function verifyStep(env: Env, stub: ReturnType<NonNullable<Env["SYNC_ACCOU
   return json({ state: e.ok.state, position: e.ok.position, chunks: step.count });
 }
 
+/** Tests only: an R2 get that answers only once the "verify-get-stall" gate is cleared, as a stalled get. */
+async function stalledGet<T>(env: Env, got: Promise<T>): Promise<T> {
+  while (gateOn(env, "verify-get-stall")) await new Promise((r) => setTimeout(r, 20));
+  return got;
+}
 /** Tests only: whether verify's R2 reads stall (the "verify-read-stall" gate), and how many stalled reads were cancelled. */
 const stallReads = (env: Env) => testMode(env) && gateOn(env, "verify-read-stall");
 export const stallCancels = { n: 0 };

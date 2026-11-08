@@ -1784,9 +1784,17 @@ export class SyncAccount extends DurableObject<SyncEnv> {
    * free the slot (verifyEnd compares it first), and a call past its end records nothing; the Worker stops streaming
    * by then too (astra's #880 SEC 1).
    */
-  private slot(): { sha256: string; attempt: string; until: number } | null {
+  private slot(): { sha256: string; attempt: string; until: number; hold: number } | null {
     const v = this.get("verify_slot");
-    return v ? (JSON.parse(v) as { sha256: string; attempt: string; until: number }) : null;
+    return v ? (JSON.parse(v) as { sha256: string; attempt: string; until: number; hold: number }) : null;
+  }
+  /**
+   * How long past its recording deadline a slot stays owned if its call never frees it (astra's b012addb note): an R2
+   * get can't be aborted, so the Worker frees the slot itself (verifyEnd, or verifyRelease) only once its last R2
+   * operation has settled.  A Worker that died holds no R2 operation, and its slot is admitted again after this.
+   */
+  private slotHoldMs(): number {
+    return testMode(this.env) ? (this.testSlotHold || 3000) : 10 * 60_000;
   }
   private verifyMs(): number {
     return testMode(this.env) ? (this.testVerifyMs || 5000) : 120_000;
@@ -1817,7 +1825,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       if (r.state !== "verifying") return { state: String(r.state) };
       const now = Date.now();
       const held = this.slot();
-      if (held && held.until > now) throw new SyncError("rate", "another verification is running", { limit: "verify_at_once", max: 1, retry_after: held.until - now });
+      if (held && held.hold > now) throw new SyncError("rate", "another verification is running", { limit: "verify_at_once", max: 1, retry_after: Math.max(1, Math.min(held.hold, Math.max(held.until, now + 1)) - now) });
       const m = JSON.parse(String(r.manifest)) as Manifest;
       let keys = JSON.parse(String(r.keys)) as string[];
       let position = Number(r.position), vinc = String(r.vinc), shaState = r.sha_state === null ? null : (JSON.parse(String(r.sha_state)) as ShaState);
@@ -1845,7 +1853,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       if (used + bytes > budget) throw new SyncError("rate", "today's verification budget is used up", { limit: "verify_bytes_per_day", max: budget, retry_after: (day + 1) * 86400_000 - now });
       this.sql.exec("INSERT INTO reads (day, who, bytes) VALUES (?, 'verify', ?) ON CONFLICT(day, who) DO UPDATE SET bytes = bytes + excluded.bytes", day, bytes);
       this.sql.exec("DELETE FROM reads WHERE day < ?", day - 1);
-      const slot = { sha256: a.sha256, attempt: randomHex(16), until: now + this.verifyMs() };
+      const slot = { sha256: a.sha256, attempt: randomHex(16), until: now + this.verifyMs(), hold: now + this.verifyMs() + this.slotHoldMs() };
       this.set("verify_slot", JSON.stringify(slot));
       return { reg: String(r.reg), vinc, mdigest: String(r.mdigest), attempt: slot.attempt, until: slot.until, position, to, count: m.chunks.length, size: Number(r.size), sha_state: shaState, chunks };
     }));
@@ -1903,6 +1911,15 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     }));
   }
 
+  /** A verify call that records nothing frees its own slot, once its last R2 operation has settled (never another's). */
+  async verifyRelease(a: { sha256: string; attempt: string }): Promise<void> {
+    if (!tieredOn(this.env) || !this.exists()) return;
+    this.ctx.storage.transactionSync(() => {
+      const slot = this.slot();
+      if (slot && slot.attempt === a.attempt && slot.sha256 === a.sha256) this.sql.exec("DELETE FROM meta WHERE k = 'verify_slot'");
+    });
+  }
+
   /** A verified file's manifest (§4.1, "Reading"), for the account's own devices. */
   async getManifest(a: { account: string; sha256: string; bind?: { account?: string; generation?: number } }): Promise<Result<{ manifest: Manifest; state: string }>> {
     if (!tieredOn(this.env)) return { error: { code: "unavailable", message: "chunked files are off here" } };
@@ -1932,10 +1949,12 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   /** Tests only: a shorter hold (ms), a files row as stored, and a retirement step now. */
   private testHold = 0;
   private testVerifyMs = 0;
-  async testFiles(a: { holdMs?: number; verifyMs?: number; sha256?: string; retire?: boolean; endLease?: boolean; rekey?: string }): Promise<{ row: Row | null; retiredPage: boolean; refs: Record<string, number>; slot: { sha256: string; attempt: string; until: number } | null } | null> {
+  private testSlotHold = 0;
+  async testFiles(a: { holdMs?: number; verifyMs?: number; slotHoldMs?: number; sha256?: string; retire?: boolean; endLease?: boolean; rekey?: string }): Promise<{ row: Row | null; retiredPage: boolean; refs: Record<string, number>; slot: { sha256: string; attempt: string; until: number; hold: number } | null } | null> {
     if (!testMode(this.env)) return null;
     if (a.holdMs !== undefined) this.testHold = a.holdMs;
     if (a.verifyMs !== undefined) this.testVerifyMs = a.verifyMs;
+    if (a.slotHoldMs !== undefined) this.testSlotHold = a.slotHoldMs;
     if (a.endLease && this.exists()) this.sql.exec("DELETE FROM meta WHERE k = 'verify_slot'");
     // (a holding's bytes copied to a new key and the holding moved to it, as a repair's adoption will do)
     if (a.rekey && this.exists()) {

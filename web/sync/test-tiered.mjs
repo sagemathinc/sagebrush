@@ -364,10 +364,10 @@ for (const c of [c1, c2, c3]) ok((await put(sa, c)).status === 201, "a chunk upl
   for (const c of parts) await put(sa, c);
   const f = fileOf(parts);
   await register(sa, f.manifest);
-  await acct.testFiles({ verifyMs: 60 });
+  await acct.testFiles({ verifyMs: 60, slotHoldMs: 1 });
   const b1 = await acct.verifyBegin({ account: A, sha256: f.sha256 });
   await new Promise((r) => setTimeout(r, 120));
-  await acct.testFiles({ verifyMs: 0 });
+  await acct.testFiles({ verifyMs: 0, slotHoldMs: 0 });
   const b2 = await acct.verifyBegin({ account: A, sha256: f.sha256 });
   ok(b1.ok?.attempt && b2.ok?.attempt && b1.ok.attempt !== b2.ok.attempt, "after a slot's end, a new call takes the slot with its own attempt id");
   const e1 = await acct.verifyEnd({ account: A, sha256: f.sha256, reg: b1.ok.reg, vinc: b1.ok.vinc, mdigest: b1.ok.mdigest, attempt: b1.ok.attempt, from: 0, to: 2, keys: b1.ok.chunks.map((c) => c.key), sha_state: { h: "0".repeat(64), n: 0, rest: "" } });
@@ -398,10 +398,28 @@ for (const c of [c1, c2, c3]) ok((await put(sa, c)).status === 201, "a chunk upl
   const cancels = (await (await at(SITE, "/__test/stall-cancels")).json()).n - before;
   const slotNow = (await acct.testFiles({ sha256: g2.sha256 })).slot;
   await gate("verify-read-stall", false);
-  ok(stalled.status === 503 && cancels === 1 && took < 600, `a read stalled across the deadline is cancelled at it, before the slot ends (${stalled.status}, ${cancels} cancelled, ${took} ms)`);
-  ok(slotNow !== null && slotNow.until > Date.now() - 1000, "and its slot is still held (nobody else streamed meanwhile) until it ends");
+  ok(stalled.status === 503 && cancels === 1, `a read stalled across the deadline is cancelled at it (${stalled.status}, ${cancels} cancelled, ${took} ms)`);
+  ok(slotNow === null, "and, its read cancelled and nothing of it outstanding, it frees its own slot");
   await acct.testFiles({ endLease: true, verifyMs: 0 });
   ok((await verifyAll(sa, g2.sha256)).pop().state === "verified", "then the next call verifies it");
+  // an R2 get that can't be aborted: the slot stays owned until it settles, so no other call's R2 work starts meanwhile
+  // (astra's and daybreak3's b012addb note; the get's lifetime is bounded by its Worker invocation)
+  const g3 = fileOf([randomBytes(5 * MiB), randomBytes(5 * MiB)]);
+  for (const c of [g3.bytes.subarray(0, 5 * MiB), g3.bytes.subarray(5 * MiB)]) await put(sa, c);
+  await register(sa, g3.manifest);
+  await acct.testFiles({ verifyMs: 600, endLease: true });
+  await gate("verify-get-stall", true);
+  let settled = false;
+  const stalledGet = verify(sa, g3.sha256).then((r) => ((settled = true), r));
+  await new Promise((r) => setTimeout(r, 1000));
+  const meanwhile = await verify(sa, g3.sha256);
+  const mb = await meanwhile.json();
+  ok(!settled && meanwhile.status === 429 && mb.limit === "verify_at_once", "past its deadline, a call whose R2 get is still outstanding keeps the slot: another call gets rate, and starts no R2 work (" + meanwhile.status + ")");
+  await gate("verify-get-stall", false);
+  const sr = await stalledGet;
+  const t3 = await acct.testFiles({ sha256: g3.sha256, verifyMs: 0 });
+  ok(sr.status === 503 && t3.slot === null && t3.row.position === 0, "once the get settles, the late call answers 503, records nothing, and frees its slot");
+  ok((await verifyAll(sa, g3.sha256)).pop().state === "verified", "then the next call verifies it");
   ok((await verifyAll(sa, f.sha256)).pop().state === "verified", "and the next call verifies");
 }
 
