@@ -601,10 +601,12 @@ export function isDataDescriptor(d: any): boolean {
 
 // Python must never reach JavaScript objects (design/security.md).  Names
 // starting with `$` are the runtime's own slots ($cls, $m, ...), so Python
-// attribute access never sees them; and `__proto__` is stored as an own data
-// property, since assignment would run JavaScript's prototype setter on
-// instances whose layout inherits from Object.prototype (subclasses of list,
-// dict, int, ...).
+// attribute access never sees them. A new attribute is defined as an own data
+// property: besides making `__proto__` safe on layouts that inherit
+// Object.prototype, this keeps a module in V8's fast-property representation
+// when Python adds globals after its compiled body has run; one generic
+// `o[name] = value` store otherwise normalizes a sufficiently large module to
+// dictionary properties.
 export const reservedName = (name: string): boolean => name.charCodeAt(0) === 36;
 /** A lookup table with no prototype: only its own entries are ever found
  * (a Python-chosen key like "constructor" is not in it), design/security.md rule 6. */
@@ -623,7 +625,11 @@ export function putAttr(o: any, name: string, v: any): void {
   // instance's __dict__ and its assignment, import *)
   if (implField(o, name)) reservedAttr(o, name);
   if (arraySlot(o, name)) raise(T.AttributeError, `'${typeName(o)}' object attribute '${name}' is not supported`);
-  if (name === "__proto__") Object.defineProperty(o, name, { value: v, writable: true, enumerable: true, configurable: true });
+  // Namespace proxies must take their set trap: defining on the proxy would
+  // put the name on its empty JavaScript target instead of in the Python
+  // mapping.  (import * writes through both the exact-dict and layered forms.)
+  if (o[NS_DICT] !== undefined || o[NS_GLOBALS] !== undefined) o[name] = v;
+  else if (!hasOwn.call(o, name)) Object.defineProperty(o, name, { value: v, writable: true, enumerable: true, configurable: true });
   else o[name] = v;
 }
 

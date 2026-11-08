@@ -75,6 +75,23 @@ for (const [name, lines] of Object.entries(fromlistSnippets))
     assert.equal(execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", code], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }), want);
   });
 
+// putAttr's fast-property path is for real module/instance objects.  An
+// import-star destination can instead be an exact-dict namespace proxy or a
+// layered globals/locals proxy; those writes must reach the Python mapping.
+test("from-import-* writes through exact-dict and layered namespace proxies", () => {
+  const code = [
+    "import sys, types",
+    "m = types.ModuleType('_putattr_proxy_test')",
+    "m.answer = 42",
+    "sys.modules[m.__name__] = m",
+    "g = {}; exec('from _putattr_proxy_test import *', g)",
+    "front = {}; exec('from _putattr_proxy_test import *', {'__builtins__': __builtins__}, front)",
+    "print(g['answer'], front['answer'])",
+  ].join("\n");
+  const want = execFileSync("python3", ["-c", code], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+  assert.equal(execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", code], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }), want);
+});
+
 // sum() of a list subclass with its own __iter__ reads the items it yields,
 // as CPython's (the engine summed the stored items: a QQ vector's integral
 // entries summed in ZZ)
