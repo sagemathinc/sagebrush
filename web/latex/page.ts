@@ -793,15 +793,17 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   };
   src.addEventListener("keydown", (ev) => { if (ev.key === "Enter" && ev.shiftKey && !ev.ctrlKey && !ev.metaKey && !ev.altKey && !ev.isComposing && runKey()) ev.preventDefault(); });
   // (values kept from the last Run while their code has changed, shown marked stale, sagetex.mjs savedStates: said
-  //  once, when their number changes, so the status after a Run stays until the next edit)
+  //  once, when their number changes, so the status after a Run stays until the next edit. A Run's fresh results,
+  //  none stale, count even while it is still finishing, so the next edit is said again whatever its number
+  //  (daybreak3, #874); a number while a Run is under way waits for an edit after it)
   let staleSaid = 0;
   E.onRendered(() => {
     const c = E.lastCheck();
-    if (!c || running) return;
+    if (!c) return;
     const n = (Array.isArray(c.sage) ? c.sage : []).filter((x: any) => x.s === "stale").length;
-    if (n === staleSaid) return;
+    if (n === staleSaid || (running && n)) return;
     staleSaid = n;
-    if (n) say(`${n} value${n === 1 ? "" : "s"} out of date: Shift+Enter runs`);
+    if (n) say(`${n} value${n === 1 ? "" : "s"} out of date: Shift+Enter updates ${n === 1 ? "it" : "them"}`);
   });
   const agentTarget = { file: () => where.path, text: () => src.value, lastCheck: E.lastCheck, current: E.posCurrent, preview, images, css: PAGE_CSS, refresh: loadResults };
   registerLatexTools(); setTarget(agentTarget);

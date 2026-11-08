@@ -3032,7 +3032,7 @@ $P = \sage{g[0]}$
       const edit = async (from, to) => { const t = await srcNow(); await typeInto(t.replace(from, to)); return t.replace(from, to); };
       await edit("f(x) = x^3 - 2*x", "f(x) = x^3 - 3*x");
       const kept = await until(`!!${S2}.querySelector(".sagestale") && ${deriv(2)} && !!${S2}.querySelector("img.sageplot.sagestale") && !${S2}.querySelector(".sagechip") && getComputedStyle(${S2}.querySelector(".sagestale")).opacity === "0.5"`, 10000);
-      const saidStale = await statusIs(/^\d+ values? out of date: Shift\+Enter runs$/, 5000);
+      const saidStale = await statusIs(/^(1 value out of date: Shift\+Enter updates it|\d+ values out of date: Shift\+Enter updates them)$/, 5000);
       check(kept && saidStale, "stale: after an edit, the slide keeps its last values and plot, marked stale (faded; no \"…\", no chip); the status says so",
         { kept, status: await ev(`document.querySelector(".tex-status")?.textContent ?? ""`), slide: await ev(`${S2}.innerHTML.slice(0, 300)`) });
       const before = await srcNow(), at = before.indexOf("3*x") + 3;
@@ -3045,6 +3045,9 @@ $P = \sage{g[0]}$
         { ranKey, fresh2, status: await ev(`document.querySelector(".tex-status")?.textContent ?? ""`), added: (await srcNow()).length - before.length });
       await edit("f(x) = x^3 - 3*x", "f(x) = x^3 - 4*x");
       await until(`!!${S2}.querySelector(".sagestale")`, 10000);
+      // (an edit after a Run, as many values stale as the edit before it: said again (daybreak3, #874))
+      const saidAgain = await statusIs(/^(1 value out of date: Shift\+Enter updates it|\d+ values out of date: Shift\+Enter updates them)$/, 5000);
+      check(saidAgain, "stale: an edit after a Run says so again, as many values stale as before it", { status: await ev(`document.querySelector(".tex-status")?.textContent ?? ""`) });
       await ev(`(document.querySelector(".tex-status").textContent = "", document.querySelector(".tex-present-btn").click(), 1)`);
       await until(`!!${P}`, 15000);
       await pkey("Home", "Home", 36);
