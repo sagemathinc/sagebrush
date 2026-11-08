@@ -517,3 +517,89 @@ ValueError: I/O operation on closed file. ValueError: I/O operation on closed fi
 ValueError: I/O operation on closed file. ValueError: I/O operation on closed file. ValueError: I/O operation on closed file.
 OSError: telling position disabled by next() call
 ValueError: I/O operation on closed file.
+-- r4: an __index__ looked up on the type, as CPython's (not the instance's or the metaclass's __getattribute__), at every conversion; the types in the overflow messages
+tw.read RI 1 | 'a' ['CALL']
+tw.read MI 1 | 'a' ['CALL']
+tw.read RI 1180591620717411303424 | OverflowError: cannot fit 'RI' into an index-sized integer ['CALL']
+tw.read MI -1 | 'abc\ndef\n' ['CALL']
+tw.readline RI 1 | 'a' ['CALL']
+tw.readline MI 1 | 'a' ['CALL']
+tw.readline RI 1180591620717411303424 | OverflowError: Python int too large to convert to C ssize_t ['CALL']
+tw.readline MI -1 | 'abc\n' ['CALL']
+tw.seek whence RI 1 | 0 ['CALL']
+tw.seek whence MI 1 | 0 ['CALL']
+tw.seek whence RI 1180591620717411303424 | OverflowError: Python int too large to convert to C int ['CALL']
+tw.seek whence MI -1 | ValueError: invalid whence (-1, should be 0, 1 or 2) ['CALL']
+tw.seek pos RI 1 | TypeError: '<' not supported between instances of 'RI' and 'int' []
+tw.seek pos MI 1 | TypeError: '<' not supported between instances of 'MI' and 'int' []
+tw.seek pos RI 1180591620717411303424 | TypeError: '<' not supported between instances of 'RI' and 'int' []
+tw.seek pos MI -1 | TypeError: '<' not supported between instances of 'MI' and 'int' []
+tw.truncate RI 1 | 1 ['CALL']
+tw.truncate MI 1 | 1 ['CALL']
+tw.truncate RI 1180591620717411303424 | OverflowError: Python int too large to convert to C long ['CALL']
+tw.truncate MI -1 | ValueError: negative size value -1 ['CALL']
+tw.reconfigure lb RI 1 | None ['CALL']
+tw.reconfigure lb MI 1 | None ['CALL']
+tw.reconfigure lb RI 1180591620717411303424 | OverflowError: Python int too large to convert to C long ['CALL']
+tw.reconfigure lb MI -1 | None ['CALL']
+bw ctor RI 1 | <_io.BufferedWriter> ['CALL']
+bw ctor MI 1 | <_io.BufferedWriter> ['CALL']
+bw ctor RI 1180591620717411303424 | OverflowError: Python int too large to convert to C ssize_t ['CALL']
+bw ctor MI -1 | ValueError: buffer size must be strictly positive ['CALL']
+bw.seek pos RI 1 | 0 ['CALL']
+bw.seek pos MI 1 | 0 ['CALL']
+bw.seek pos RI 1180591620717411303424 | ValueError: cannot fit 'RI' into an offset-sized integer ['CALL']
+bw.seek pos MI -1 | 0 ['CALL']
+bw.seek whence RI 1 | 0 ['CALL']
+bw.seek whence MI 1 | 0 ['CALL']
+bw.seek whence RI 1180591620717411303424 | OverflowError: Python int too large to convert to C int ['CALL']
+bw.seek whence MI -1 | ValueError: whence value -1 unsupported ['CALL']
+bytesio.truncate RI 1 | 1 ['CALL']
+bytesio.truncate MI 1 | 1 ['CALL']
+bytesio.truncate RI 1180591620717411303424 | OverflowError: Python int too large to convert to C long ['CALL']
+bytesio.truncate MI -1 | ValueError: negative size value -1 ['CALL']
+stringio.truncate RI 1 | 1 ['CALL']
+stringio.truncate MI 1 | 1 ['CALL']
+stringio.truncate RI 1180591620717411303424 | OverflowError: cannot fit 'RI' into an index-sized integer ['CALL']
+stringio.truncate MI -1 | ValueError: Negative size value -1 ['CALL']
+ind setstate RI 1 | None ['CALL']
+ind setstate MI 1 | None ['CALL']
+ind setstate RI 1180591620717411303424 | None ['CALL']
+ind setstate MI -1 | None ['CALL']
+getstate TS (b'x', 4) []
+D_SET tuple (b'x', 1)
+setstate TS None []
+setstate None TS None []
+getstate TS TypeError: illegal decoder state []
+setstate TS TypeError: setstate(): illegal state argument []
+setstate None TS TypeError: setstate(): illegal state argument []
+getstate TS TypeError: illegal decoder state []
+setstate TS TypeError: setstate(): illegal state argument []
+setstate None TS TypeError: setstate(): illegal state argument []
+getstate Fake TypeError: illegal decoder state []
+setstate Fake TypeError: state argument must be a tuple []
+setstate None Fake TypeError: state argument must be a tuple []
+-- r4: @sagebrush-daybreak3's probe (TextIOWrapper.read, StringIO.truncate, a tuple subclass's state)
+-- tw read structural index
+READ_CALLINDEX
+OK str 'a'
+-- stringio truncate structural index
+TRUNC_CALLINDEX
+OK int 2
+-- tw ctor tell result
+B_TELL
+V_EQ 0
+OK TextIOWrapper <_io.TextIOWrapper encoding='utf-8'>
+-- tw tell result
+B_TELL
+V_EQ 0
+B_TELL
+OK V <__main__.V object at ADDR>
+-- ind getstate tuple subclass
+OK tuple (b'x', 4)
+-- ind setstate tuple subclass
+D_SET (b'x', 1)
+OK NoneType None
+-- r4: a strict int subclass returned by __index__ (bool's too): CPython's DeprecationWarning
+['abc'] 2 ab
+[('__index__ returned non-int (type bool).  The ability to return an instance of a strict subclass of int is deprecated, and may be removed in a future version of Python.', 'DeprecationWarning'), ('__index__ returned non-int (type I).  The ability to return an instance of a strict subclass of int is deprecated, and may be removed in a future version of Python.', 'DeprecationWarning'), ('__index__ returned non-int (type I).  The ability to return an instance of a strict subclass of int is deprecated, and may be removed in a future version of Python.', 'DeprecationWarning')]

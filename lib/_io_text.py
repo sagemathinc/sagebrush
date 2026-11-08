@@ -45,7 +45,7 @@ def _raw_pos(v):
     # (a raw stream's position, as C's buffered I/O converts it: an offset, never negative)
     n = _index(v)
     if not -(1 << 63) <= n < (1 << 63):
-        raise ValueError("cannot fit 'int' into an offset-sized integer")
+        raise ValueError("cannot fit '%s' into an offset-sized integer" % type(v).__name__)  # (the result's type)
     if n < 0:
         raise OSError("Raw stream returned invalid position %d" % n)
     return int(n)
@@ -55,7 +55,7 @@ def _c_off_arg(v):
     # (a position C converts to Py_off_t, PyNumber_AsOff_t with ValueError)
     n = _index(v)
     if not -(1 << 63) <= n < (1 << 63):
-        raise ValueError("cannot fit 'int' into an offset-sized integer")
+        raise ValueError("cannot fit '%s' into an offset-sized integer" % type(v).__name__)  # (the argument's type)
     return int(n)
 
 
@@ -828,9 +828,10 @@ class IncrementalNewlineDecoder(IncrementalDecoder):  # (Sagebrush: the codecs b
         else:
             # (Sagebrush: C's, a 2-tuple whose flag is an unsigned 64-bit integer, masked)
             state = self.decoder.getstate()
-            if not isinstance(state, tuple) or len(state) != 2:
+            # (C's PyTuple_Check and its raw items: a tuple subclass's __len__, __iter__ or __getitem__ isn't called)
+            if not issubclass(type(state), tuple) or tuple.__len__(state) != 2:
                 raise TypeError("illegal decoder state")
-            buf, flag = state
+            buf, flag = tuple.__getitem__(state, 0), tuple.__getitem__(state, 1)
             try:
                 flag = _index(flag) & _U64
             except TypeError:
@@ -842,11 +843,12 @@ class IncrementalNewlineDecoder(IncrementalDecoder):  # (Sagebrush: the codecs b
 
     def setstate(self, state):
         # (Sagebrush: C's, a 2-tuple, the flag masked to 64 bits)
-        if not isinstance(state, tuple):
+        # (C's PyTuple_Check and its raw items: a tuple subclass's __len__, __iter__ or __getitem__ isn't called)
+        if not issubclass(type(state), tuple):
             raise TypeError("state argument must be a tuple")
-        if len(state) != 2:
+        if tuple.__len__(state) != 2:
             raise TypeError("setstate(): illegal state argument")
-        buf, flag = state
+        buf, flag = tuple.__getitem__(state, 0), tuple.__getitem__(state, 1)
         try:
             flag = _index(flag) & _U64
         except TypeError:
@@ -1458,18 +1460,11 @@ class TextIOWrapper(TextIOBase):  # (Sagebrush: io's TextIOBase)
 
     def read(self, size=None):
         # (Sagebrush: C's order, the argument converted first)
+        # (Sagebrush: C's _Py_convert_optional_to_ssize_t, io's: __index__ looked up on the type, called once, its
+        # result checked, with C's messages)
+        size = io._index_hint(size, "argument should be integer or None, not '%s'")
         if size is None:
             size = -1
-        else:
-            try:
-                size_index = size.__index__
-            except AttributeError:
-                # (Sagebrush: C's message)
-                raise TypeError("argument should be integer or None, not '%s'" % type(size).__name__)
-            else:
-                size = _index(size)  # (Sagebrush: its __index__ once, the result checked; C's Py_ssize_t)
-                if not -(1 << 63) <= size < (1 << 63):
-                    raise OverflowError("cannot fit 'int' into an index-sized integer")
         self._checkAttached()  # (Sagebrush: C's)
         self._checkReadable()
         decoder = self._decoder or self._get_decoder()

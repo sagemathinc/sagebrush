@@ -84,6 +84,12 @@ def _index_hint(hint, msg):
         v = f()
         if not isinstance(v, int):
             raise TypeError("__index__ returned non-int (type %s)" % type(v).__name__)
+        if type(v) is not int:
+            # (a strict subclass's instance, bool's too: CPython 3.14's DeprecationWarning, at the caller's line)
+            import warnings
+            warnings.warn("__index__ returned non-int (type %s).  The ability to return an instance of a strict "
+                          "subclass of int is deprecated, and may be removed in a future version of Python."
+                          % type(v).__name__, DeprecationWarning, stacklevel=3)
         v = int.__index__(v)
     if not -_SSIZE_MAX - 1 <= v <= _SSIZE_MAX:
         raise OverflowError("cannot fit '%s' into an index-sized integer" % type(hint).__name__)
@@ -492,17 +498,11 @@ class StringIO(TextIOBase):
 
     def truncate(self, size=None):
         self._check()
-        # (CPython's: the size converted as a Py_ssize_t, __index__ once, and a negative one refused)
+        # (CPython's: the size converted as a Py_ssize_t, _Py_convert_optional_to_ssize_t, and a negative one refused)
         if size is None:
             size = self._pos
         else:
-            if type(size) is not int:
-                if not hasattr(type(size), "__index__"):
-                    raise TypeError("argument should be integer or None, not '%s'" % type(size).__name__)
-                from operator import index
-                size = index(size)
-            if not -(1 << 63) <= size < (1 << 63):
-                raise OverflowError("cannot fit 'int' into an index-sized integer")
+            size = _index_hint(size, "argument should be integer or None, not '%s'")
             if size < 0:
                 raise ValueError("Negative size value %d" % size)
         v = self._value()

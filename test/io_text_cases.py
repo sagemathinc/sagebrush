@@ -844,3 +844,158 @@ c = io.TextIOWrapper(NS(b"abc\n"), encoding="utf-8"); c.close()
 print(t(lambda: c.tell()), t(lambda: c.seek(0)), t(lambda: c.truncate()))
 c = io.TextIOWrapper(io.BytesIO(b"abc\nd\n"), encoding="utf-8"); next(c)
 print(t(lambda: c.tell())); c.close(); print(t(lambda: c.tell()))
+
+
+print("-- r4: an __index__ looked up on the type, as CPython's (not the instance's or the metaclass's __getattribute__), at every conversion; the types in the overflow messages")
+import io, sys
+def t(f):
+    try: return repr(f())
+    except BaseException as e: return "%s: %s" % (type(e).__name__, e)
+log = []
+class RI:
+    def __init__(self, v=1): object.__setattr__(self, "v", v)
+    def __getattribute__(self, name):
+        if name == "__index__": log.append("GET"); raise RuntimeError("instance lookup touched")
+        return object.__getattribute__(self, name)
+    def __index__(self): log.append("CALL"); return object.__getattribute__(self, "v")
+class Meta(type):
+    def __getattribute__(cls, name):
+        if name in ("__index__", "__bool__", "__len__"): log.append("META"); raise RuntimeError("metaclass lookup touched")
+        return type.__getattribute__(cls, name)
+class MI(metaclass=Meta):
+    def __init__(self, v=1): self.v = v
+    def __index__(self): log.append("CALL"); return self.v
+def tw(b=b"abc\ndef\n"): return io.TextIOWrapper(io.BytesIO(b), encoding="utf-8")
+class Raw(io.RawIOBase):
+    def writable(self): return True
+    def write(self, b): return len(b)
+    def seek(self, p, w=0): return 0
+    def tell(self): return 0
+    def seekable(self): return True
+sites = [
+ ("tw.read", lambda o: tw().read(o)), ("tw.readline", lambda o: tw().readline(o)),
+ ("tw.seek whence", lambda o: tw().seek(0, o)), ("tw.seek pos", lambda o: tw().seek(o)),
+ ("tw.truncate", lambda o: tw().truncate(o)), ("tw.reconfigure lb", lambda o: tw().reconfigure(line_buffering=o)),
+ ("bw ctor", lambda o: io.BufferedWriter(Raw(), o)), ("bw.seek pos", lambda o: io.BufferedWriter(Raw()).seek(o)),
+ ("bw.seek whence", lambda o: io.BufferedWriter(Raw()).seek(0, o)),
+ ("bytesio.truncate", lambda o: io.BytesIO(b"abcdef").truncate(o)), ("stringio.truncate", lambda o: io.StringIO("abcdef").truncate(o)),
+ ("ind setstate", lambda o: io.IncrementalNewlineDecoder(None, True).setstate((b"", o))),
+]
+for name, f in sites:
+    for mk in (lambda: RI(1), lambda: MI(1), lambda: RI(2**70), lambda: MI(-1)):
+        o = mk(); log.clear(); r = t(lambda: f(o)); print(name, type(o).__name__, object.__getattribute__(o, "v") if type(o) is RI else o.v, "|", r, log)
+class TS(tuple):
+    def __len__(self): log.append("LEN"); raise RuntimeError("len")
+    def __iter__(self): log.append("ITER"); raise RuntimeError("iter")
+    def __getitem__(self, k): log.append("GET"); raise RuntimeError("getitem")
+class D:
+    def __init__(self, st): self.st = st
+    def getstate(self): return self.st
+    def setstate(self, s): print("D_SET", type(s).__name__, tuple.__repr__(s))
+    def decode(self, d, final=False): return ""
+    def reset(self): pass
+class Fake:
+    __class__ = tuple
+for st in (TS((b"x", 2)), TS((b"x",)), TS((b"x", 2, 3)), Fake()):
+    log.clear(); print("getstate", type(st).__name__, t(lambda: io.IncrementalNewlineDecoder(D(st), False).getstate()), log)
+    log.clear(); print("setstate", type(st).__name__, t(lambda: io.IncrementalNewlineDecoder(D(None), False).setstate(st)), log)
+    log.clear(); print("setstate None", type(st).__name__, t(lambda: io.IncrementalNewlineDecoder(None, False).setstate(st)), log)
+
+
+print("-- r4: @sagebrush-daybreak3's probe (TextIOWrapper.read, StringIO.truncate, a tuple subclass's state)")
+import re
+import io
+
+def run(label, f):
+    print("--", label)
+    try:
+        v = f()
+        print("OK", type(v).__name__, re.sub(r" at 0x[0-9a-f]+", " at ADDR", repr(v)))
+    except Exception as e:
+        print("ERR", type(e).__name__, str(e))
+
+class V:
+    def __index__(self):
+        print("V_INDEX")
+        return 0
+    def __eq__(self, other):
+        print("V_EQ", other)
+        return False
+    def __or__(self, other):
+        print("V_OR", other)
+        return 0
+
+class ReadIndex:
+    def __getattribute__(self, name):
+        if name == "__index__":
+            print("READ_GETINDEX")
+            raise RuntimeError("instance lookup touched")
+        return object.__getattribute__(self, name)
+    def __index__(self):
+        print("READ_CALLINDEX")
+        return 1
+
+run("tw read structural index", lambda: io.TextIOWrapper(io.BytesIO(b"abc"), encoding="utf-8").read(ReadIndex()))
+
+class Meta(type):
+    def __getattribute__(cls, name):
+        if name == "__index__":
+            print("META_GETINDEX")
+            raise RuntimeError("metaclass lookup touched")
+        return type.__getattribute__(cls, name)
+
+class TruncIndex(metaclass=Meta):
+    def __index__(self):
+        print("TRUNC_CALLINDEX")
+        return 2
+
+def stringio_truncate():
+    s = io.StringIO("abcd")
+    return s.truncate(TruncIndex())
+run("stringio truncate structural index", stringio_truncate)
+
+class B(io.BytesIO):
+    def tell(self):
+        print("B_TELL")
+        return V()
+
+run("tw ctor tell result", lambda: io.TextIOWrapper(B(), encoding="utf-8"))
+
+def tw_tell():
+    t = io.TextIOWrapper(B(b"abc"), encoding="utf-8")
+    return t.tell()
+run("tw tell result", tw_tell)
+
+class TS(tuple):
+    def __len__(self):
+        print("TS_LEN")
+        raise RuntimeError("len touched")
+    def __iter__(self):
+        print("TS_ITER")
+        raise RuntimeError("iter touched")
+    def __getitem__(self, key):
+        print("TS_GET", key)
+        raise RuntimeError("getitem touched")
+
+class D:
+    def getstate(self): return TS((b"x", 2))
+    def setstate(self, state): print("D_SET", state)
+    def decode(self, data, final=False): return ""
+    def reset(self): pass
+
+run("ind getstate tuple subclass", lambda: io.IncrementalNewlineDecoder(D(), False).getstate())
+run("ind setstate tuple subclass", lambda: io.IncrementalNewlineDecoder(D(), False).setstate(TS((b"x", 2))))
+
+
+print("-- r4: a strict int subclass returned by __index__ (bool's too): CPython's DeprecationWarning")
+import io, warnings
+class B:
+    def __index__(self): return True
+class I(int): pass
+class C:
+    def __index__(self): return I(2)
+with warnings.catch_warnings(record=True) as ws:
+    warnings.simplefilter("always")
+    print(io.StringIO("abc").readlines(B()), io.StringIO("abcd").truncate(C()), io.TextIOWrapper(io.BytesIO(b"abc"), encoding="utf-8").read(C()))
+    import sys
+    print([(str(w.message), w.category.__name__) for w in ws])
