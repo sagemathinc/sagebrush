@@ -28,6 +28,9 @@ OPERATORS = [
     "+", "-", "*", "/", "^", "<", ">", "!", "&", "|", "~", "?", ":", "=", "$", "@",
     "(", ")", "{", "}", "[", "]", ",", ";", "\\",
 ]
+# operators that begin a longer one: R's lexer ends them by reading the next character, and gives it back
+# (it shows in an "unexpected" message's window: rill-tests/parse/test_6.R)
+EXTENDABLE = frozenset(op for op in OPERATORS if any(o != op and o.startswith(op) for o in OPERATORS))
 OP_KIND = {"<-": "LEFT_ASSIGN", "<<-": "LEFT_ASSIGN", ":=": "LEFT_ASSIGN", "->": "RIGHT_ASSIGN",
            "->>": "RIGHT_ASSIGN", "=": "EQ_ASSIGN", "|>": "PIPE"}
 
@@ -64,6 +67,16 @@ class Tok:
         if self.text == "\\":
             return "'\\\\'"  # R doubles a lone backslash here
         return "'%s'" % self.text
+
+    def lookahead(self, src):
+        """How many characters past this token R's lexer read to end it (0 or 1): a name, keyword or number
+        (but not one ending in L or i), or an operator that begins a longer one; never past the source's end."""
+        if self.end >= len(src) or self.kind in ("STR_CONST", "SPECIAL", "PLACEHOLDER", "ERROR", "EOF"):
+            return 0
+        text = src[self.start:self.end]
+        if text.startswith("`") or (self.kind == "NUM_CONST" and text[-1] in "Li"):
+            return 0
+        return 1 if _ident_char(text[-1]) or text in EXTENDABLE else 0
 
     def is_op(self, text):
         return self.kind not in ("SYMBOL", "STR_CONST", "NUM_CONST", "ERROR", "EOF") and self.text == text
@@ -374,8 +387,12 @@ def string(src, i):
             if braced and (k >= n or src[k] != "}"):
                 return k, None, ("invalid \\%s{%s} sequence" % (e, "x" * lim), k)
             v = int(digits, 16)
-            if v > 0x10FFFF or 0xD800 <= v <= 0xDFFF:
+            if v > 0x10FFFF:
                 return k, None, ("invalid \\%s{%s} value %s" % (e, "x" * lim, digits), k)
+            if 0xD800 <= v <= 0xDFFF:
+                # R 4.5.3 keeps the bytes, with two warnings (rill-tests/parse/test_6.R): refused when reached
+                from .eval import NotSupported
+                return k, None, (NotSupported("an unpaired surrogate escape"), j)
             if v == 0:
                 return k, None, ("nul character not allowed", j)
             buf.append(chr(v))

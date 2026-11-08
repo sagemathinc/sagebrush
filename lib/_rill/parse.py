@@ -39,6 +39,10 @@ UNARY = {"?": 10, "~": 50, "!": 80, "-": 140, "+": 140}
 POSTFIX = 160          # ( [ [[ $ @
 # R's parser stack holds 9998 units (rill-tests/parse/test_5.R)
 PARSER_CAPACITY = 9998
+# "unexpected X in ...": R quotes the statement's last 256 bytes up to the token, its last two lines, at most
+# 192 bytes of each (R 4.5.3, rill-tests/parse/test_6.R)
+CONTEXT_BYTES = 256
+CONTEXT_LINE_BYTES = 192
 NAMESPACE = 170        # :: :::
 LOWEST = 0
 
@@ -100,20 +104,30 @@ class Parser:
         if t.kind == "EOF":
             return Incomplete()
         if t.kind == "ERROR" and t.error:
+            if isinstance(t.error[0], Exception):
+                return t.error[0]
             return ParseError(_located(*t.error))
-        return self._context_error(t.describe(), t.end)
+        return self._context_error(t.describe(), t.end, t.lookahead(self.src))
 
-    def _context_error(self, what, end):
-        text = self.src[self.stmt_start:end]
-        lines = text.split("\n")
+    def _context_error(self, what, end, lookahead=0):
+        # (the character the lexer read past the token counts toward the 256 bytes, then is given back)
+        window = self.src[self.stmt_start:end + lookahead].encode("utf-8")[-CONTEXT_BYTES:]
+        if lookahead:
+            window = window[:len(window) - len(self.src[end:end + lookahead].encode("utf-8"))]
+        try:
+            lines = [line[:CONTEXT_LINE_BYTES].decode("utf-8") for line in window.split(b"\n")[-2:]]
+        except UnicodeDecodeError:
+            from .eval import NotSupported
+            return NotSupported("a parse error quoting part of a character")
         if len(lines) > 1:
-            return ParseError('unexpected %s in:\n"%s"' % (what, "\n".join(lines[-2:])))
-        return ParseError('unexpected %s in "%s"' % (what, text))
+            return ParseError('unexpected %s in:\n"%s"' % (what, "\n".join(lines)))
+        return ParseError('unexpected %s in "%s"' % (what, lines[0]))
 
     def push(self, units):
-        """Hold `units` more of R's parser stack, refusing as R does before passing its capacity: the check is
-        the leaf's (the units plus the operand still to come), made before the frame grows (daybreak3)."""
-        if self.units + units + 1 > PARSER_CAPACITY:
+        """Hold `units` more of R's parser stack, refusing as R does when it would pass its capacity, before the
+        frame grows (daybreak3).  The operand still to come is checked when it arrives (expr): a chain at capacity
+        ended by a token that can't follow is R's "unexpected", not out of memory (rill-tests/parse/test_6.R)."""
+        if self.units + units > PARSER_CAPACITY:
             raise ParseError("out of memory while parsing")
         self.units += units
 

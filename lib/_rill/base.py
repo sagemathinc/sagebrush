@@ -16,6 +16,7 @@ from .eval import NotSupported, RError
 from .values import NULL, RVector
 
 INT_MAX = 2147483647
+COLON_FUZZ = 2.0 ** -23  # `:`'s length allowance, single precision's epsilon (R 4.5.3, rill-tests/core/test_3.R)
 RANK = {"logical": 0, "integer": 1, "double": 2, "complex": 3, "character": 4}
 
 
@@ -301,7 +302,7 @@ def colon(sess, call, args):
     b = _colon_end(args[1][1], call, sess)
     if a is None or b is None or a != a or b != b:
         raise RError("NA/NaN argument", call)
-    n = int(math.floor(abs(b - a) + 1e-10)) + 1
+    n = int(math.floor(abs(b - a) + COLON_FUZZ)) + 1
     step = 1 if b >= a else -1
     last = a + step * (n - 1)
     as_int = a == int(a) and -INT_MAX <= a <= INT_MAX and -INT_MAX <= last <= INT_MAX

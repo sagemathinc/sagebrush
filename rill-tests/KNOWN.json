@@ -250,6 +250,46 @@
    "class": "not-implemented",
    "reason": "closures and control flow (A1.3)",
    "sha256": "2721b417d91554f248fab63832fc589e9ef4055e30a0b993d76c7bbf2b0b86bb"
+  },
+  "rill-tests/parse/test_6.R#c-leading-empty": {
+   "class": "not-implemented",
+   "reason": "empty arguments, with argument matching: closures and control flow (A1.3)",
+   "sha256": "63956289c0de498bda10deee64fce48344b4169c183a26ce7d069bee75086a34"
+  },
+  "rill-tests/parse/test_6.R#c-trailing-empty": {
+   "class": "not-implemented",
+   "reason": "empty arguments, with argument matching: closures and control flow (A1.3)",
+   "sha256": "63956289c0de498bda10deee64fce48344b4169c183a26ce7d069bee75086a34"
+  },
+  "rill-tests/parse/test_6.R#else-newline": {
+   "class": "not-implemented",
+   "reason": "closures and control flow (A1.3)",
+   "sha256": "2721b417d91554f248fab63832fc589e9ef4055e30a0b993d76c7bbf2b0b86bb"
+  },
+  "rill-tests/parse/test_6.R#else-newline-brace": {
+   "class": "not-implemented",
+   "reason": "closures and control flow (A1.3)",
+   "sha256": "2721b417d91554f248fab63832fc589e9ef4055e30a0b993d76c7bbf2b0b86bb"
+  },
+  "rill-tests/parse/test_6.R#surrogate-U": {
+   "class": "not-implemented",
+   "reason": "strings holding invalid UTF-8 and several warnings in one statement (A1.4)",
+   "sha256": "1a37b5debf4a08a2b385e3f8686ce8844deb2afa834dea00da07b56f529f628e"
+  },
+  "rill-tests/parse/test_6.R#surrogate-u": {
+   "class": "not-implemented",
+   "reason": "strings holding invalid UTF-8 and several warnings in one statement (A1.4)",
+   "sha256": "1a37b5debf4a08a2b385e3f8686ce8844deb2afa834dea00da07b56f529f628e"
+  },
+  "rill-tests/parse/test_6.R#surrogate-u-brace": {
+   "class": "not-implemented",
+   "reason": "strings holding invalid UTF-8 and several warnings in one statement (A1.4)",
+   "sha256": "1a37b5debf4a08a2b385e3f8686ce8844deb2afa834dea00da07b56f529f628e"
+  },
+  "rill-tests/parse/test_6.R#surrogate-u-low": {
+   "class": "not-implemented",
+   "reason": "strings holding invalid UTF-8 and several warnings in one statement (A1.4)",
+   "sha256": "1a37b5debf4a08a2b385e3f8686ce8844deb2afa834dea00da07b56f529f628e"
   }
  }
 }

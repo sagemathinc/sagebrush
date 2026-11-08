@@ -176,6 +176,7 @@ import _memguard
 s = Session(lambda t: None, lambda t: None)
 s.evaluate(parse("x <- 1:50")[0])
 s.evaluate(parse("y <- 51:100")[0])
+s.evaluate(parse("z <- x + 0.5")[0])
 mem.SMALL_BYTES = 0
 cases = {
   "1:100": 100 * 32,
@@ -187,6 +188,11 @@ cases = {
   "x & y": 50 * 8 * 3,
   "cat(x)": 50 * 136 + 24 * 50 + 50,
   "print(x)": 50 * 136 + 24 * 50 + 2 * (50 * (24 + 1) + 50 * len("[50] ")),
+  # (grader's M5) doubles at their own cost: the result and both operands coerced
+  "z + z": 50 * 64 * 3,
+  "x + 0.5": 50 * 64 + 50 * 64 + 64,
+  "-z": 50 * 64 * 2,
+  "z < 1": 50 * 8 + 50 * 64 + 64,
 }
 peak = [0]
 real_enter = mem.Reservation.__enter__
@@ -218,16 +224,18 @@ print(json.dumps(out))
 });
 
 // (astra's R2 residual) print pads every element to the widest: one long string among short ones must be reserved
-// for the padded layout, not the strings' own lengths
-test("§8.5: print reserves its padded layout: a skewed-width vector's output fits its reservation", () => {
-  const got = py(`
+// for the padded layout, not the strings' own lengths; and a string of control characters prints four characters
+// for each (grader's R7b: "\001" prints as "\001")
+for (const [what, long] of [["plain", '"a" * 1000'], ["escaped", '"\\\\001" * 250']]) {
+  test(`§8.5: print reserves its padded layout: a skewed-width vector's output fits its reservation (${what})`, () => {
+    const got = py(`
 import json
 from _rill import mem
 from _rill.eval import Session
 from _rill.parse import parse
 out = []
 s = Session(out.append, out.append)
-src = 'c("' + "a" * 1000 + '", ' + ", ".join(['"b"'] * 99) + ')'
+src = 'c("' + ${long} + '", ' + ", ".join(['"b"'] * 99) + ')'
 s.evaluate(parse("x <- " + src)[0])
 mem.SMALL_BYTES = 0
 peak = [0]
@@ -240,9 +248,51 @@ mem.Reservation.__enter__ = spy
 mem._allowance = lambda: (10 ** 9, None)
 s.evaluate(parse("print(x)")[0])
 print(json.dumps({"peak": peak[0], "printed": len("".join(out))}))
+    `);
+    assert.ok(got.printed > 100000, `the layout pads every row (${got.printed} characters)`);
+    assert.ok(got.peak >= 2 * got.printed + 100 * 136, `reserved ${got.peak} for ${got.printed} characters of output, held twice, and 100 element strings`);
+  });
+}
+
+// (grader's M4) R's size wording past 1 Gb, from a refusal under a small allowance: 402653184 integers are R's
+// 1.5 Gb (1:2e8 is its 762.9 Mb, rill-tests/mem/)
+test("§8.5: a refusal states R's size in Mb or Gb", () => {
+  const got = py(`
+import json, _rill
+from _rill import mem
+mem._allowance = lambda: (1 << 20, None)
+r = {}
+for src in ("x <- 1:2e8", "x <- 1:402653184"):
+    err = []
+    _rill.run(src, lambda t: None, err.append)
+    r[src] = "".join(err).split("\\n")[0]
+print(json.dumps(r))
 `);
-  assert.ok(got.printed > 100000, `the layout pads every row (${got.printed} characters)`);
-  assert.ok(got.peak >= 2 * got.printed + 100 * 136, `reserved ${got.peak} for ${got.printed} characters of output, held twice, and 100 element strings`);
+  assert.deepEqual(got, {
+    "x <- 1:2e8": "Error: cannot allocate vector of size 762.9 Mb",
+    "x <- 1:402653184": "Error: cannot allocate vector of size 1.5 Gb",
+  });
+});
+
+// (grader's P7) at top level a newline ends `if (TRUE) 1`, so an `else` on the next line is R's error; in braces it
+// continues the if.  A1.1 doesn't run `if` (parse/test_6.R#else-newline is known until A1.3), so the parser is
+// pinned here, to R's recorded text
+test("parse: an else after a newline is R's error at top level and continues the if inside braces", () => {
+  const rec = JSON.parse(readFileSync(join(ROOT, "rill-tests", "parse", "test_6.out.json"), "utf8"));
+  const want = rec.cases.find((c: any) => c.id === "else-newline").stderr.replace(/Execution halted\n$/, "");
+  const got = py(`
+import json
+from _rill.parse import parse, ParseError
+r = {}
+try:
+    parse("if (TRUE) 1\\nelse 2")
+    r["top"] = "parsed"
+except ParseError as e:
+    r["top"] = "Error: " + e.message + "\\n"
+r["brace"] = [len(parse("{ if (TRUE) 1\\nelse 2 }")[0].args[0][1].args)]
+print(json.dumps(r))
+`);
+  assert.deepEqual(got, { top: want, brace: [3] });
 });
 
 // (astra's R2 admission order) a refused print never starts formatting: the reservation is admitted, or refused,

@@ -20,6 +20,8 @@ from .parse import ParseError, Parser
 # "Error in <call> : <message>" stays on one line up to this many characters (R 4.5.3,
 # rill-tests/errfmt/test_1.R); longer, the message goes on the next line, indented
 ERROR_LINE = 73
+# "In <call> : <message>", a warning's line, the same up to this many (rill-tests/errfmt/test_2.R)
+WARNING_LINE = 75
 
 
 def _error_text(message, call):
@@ -43,7 +45,7 @@ def _warning_lines(warnings):
     if call is None:
         return "Warning message:\n%s \n" % message
     head = "In %s : " % fmt.deparse_call_line(call)
-    if len(head) + len(message) > 77:
+    if len(head) + len(message) > WARNING_LINE:
         return "Warning message:\n%s\n  %s\n" % (head.rstrip(), message)
     return "Warning message:\n%s%s\n" % (head, message)
 
@@ -72,6 +74,9 @@ def _run(sess, src, write_err):
             expr = parser.statement()
         except ParseError as e:
             write_err(_error_text(e.message, e.call) + "\n")
+            return 1
+        except NotSupported as e:
+            write_err(_not_supported(e.what) + "\n")
             return 1
         if expr is None:
             return 0
