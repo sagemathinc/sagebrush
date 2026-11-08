@@ -187,7 +187,9 @@ class Ignore:
             neg = line.startswith("!")
             if neg:
                 line = line[1:]
-            dir_only = line.endswith("/") and not line.endswith("\\/")
+            if line.endswith("\\/"):
+                continue                    # (an escaped "/" is a "/" within a name, which no name has: like git, no match)
+            dir_only = line.endswith("/")
             line = line.rstrip("/")
             if not line:
                 continue

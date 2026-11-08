@@ -396,6 +396,61 @@ def test_ignore_file_lines_and_stability():
             assert e.code == 1 and e.message == "Stopped before planning: .sagebrushignore couldn't be read (it changed while being read).", e.message
         finally:
             os.read = real_read
+        # (grader G11) a same-size rewrite between reads: only its times show it, and it still stops
+        p = os.path.join(root, S.IGNORE_FILE)
+        tree(root, {S.IGNORE_FILE: b"#" * 200000 + b"\n*.txt\n"})
+        calls[0] = 0
+
+        def rewriting_read(fd, n):
+            calls[0] += 1
+            b = real_read(fd, n)
+            if calls[0] == 1:
+                st = os.stat(p)
+                with open(p, "r+b") as f:
+                    f.write(b"!")
+                os.utime(p, ns=(st.st_atime_ns, st.st_mtime_ns - 10**10))   # (a time apart, whatever the clock's grain)
+                assert os.stat(p).st_size == st.st_size
+            return b
+        os.read = rewriting_read
+        try:
+            S.scan(S.refuse_overlap(root, []))
+            raise AssertionError("a same-size rewrite while read was used")
+        except S.Refused as e:
+            assert e.code == 1 and e.message.endswith("(it changed while being read)."), e.message
+        finally:
+            os.read = real_read
+        # (grader G1) an ignore file far over the limit: never more than 1 MiB + 1 byte read
+        tree(root, {S.IGNORE_FILE: b"#" * (S.MAX_IGNORE_BYTES + 300000)})
+        got = [0]
+
+        def counting_read(fd, n):
+            b = real_read(fd, n)
+            got[0] += len(b)
+            return b
+        os.read = counting_read
+        try:
+            S.scan(S.refuse_overlap(root, []))
+            raise AssertionError("an ignore file over 1 MiB was used")
+        except S.Refused as e:
+            assert e.message.endswith("is over 1 MiB (the limit)."), e.message
+        finally:
+            os.read = real_read
+        assert got[0] <= S.MAX_IGNORE_BYTES + 1, got[0]
+    finally:
+        shutil.rmtree(root)
+
+
+def test_local_dir_a_file():
+    # (grader S6) a plain file given as LOCAL_DIR: §1's words, exit 2
+    root = tmp()
+    try:
+        p = os.path.join(root, "notes.txt")
+        tree(root, {"notes.txt": b"x"})
+        try:
+            S.refuse_overlap(p, [])
+            raise AssertionError("a file was taken as LOCAL_DIR")
+        except S.Refused as e:
+            assert e.code == 2 and e.message == "%s isn't a folder on this computer." % S._home_short(p), e.message
     finally:
         shutil.rmtree(root)
 
@@ -449,6 +504,9 @@ def test_ignore_syntax_edges():
     assert ig.ignored("#lit", False) and ig.ignored("!bang", False)
     assert ig.ignored("a*b", False) and not ig.ignored("axb", False)
     assert ig.ignored("[unclosed", False)
+    # (grader G9) an escaped trailing slash names a "/" within a name: it matches nothing, file or folder
+    ig = S.Ignore(["foo\\/"])
+    assert not [n for n in ("foo", "foo\\") for d in (False, True) if ig.ignored(n, d)]
     # the defaults can't be un-ignored
     root = tmp()
     try:
@@ -627,17 +685,19 @@ def test_listing_fails_partway():
     real = os.scandir
     try:
         tree(root, {"sub/a.txt": b"a", "sub/b.txt": b"b", "sub/boom": b"x", "sub/z.txt": b"z", "sub/deeper/c.txt": b"c",
-                    "sub/a.swp": b"s", "sub/deeper/x.swp": b"s", "other.txt": b"o"})
+                    "sub/a.swp": b"s", "sub/deeper/x.swp": b"s", "other.txt": b"o", "sub2/x.txt": b"x"})
+        os.symlink("x.txt", os.path.join(root, "sub2", "link"))    # (grader U4/U7) a sibling sharing the prefix, walked first
 
         class Failing:
             def __init__(self, it):
-                self.it = it
+                self.real = it
+                self.it = iter(sorted(it, key=lambda e: e.name, reverse=True))   # (sub2 before sub, every time)
 
             def __enter__(self):
                 return self
 
             def __exit__(self, *a):
-                return self.it.__exit__(*a)
+                return self.real.__exit__(*a)
 
             def __iter__(self):
                 return self
@@ -662,8 +722,9 @@ def test_listing_fails_partway():
         finally:
             os.scandir = real
         assert not [p for p in r.files if p.startswith("sub/")], sorted(r.files)
-        assert [p for p, w in r.skipped if p.startswith("sub")] == ["sub/"], r.skipped   # (daybreak3) nothing else under it
+        assert [p for p, w in r.skipped if p.startswith("sub/")] == ["sub/"], r.skipped   # (daybreak3) nothing else under it
         assert "other.txt" in r.files
+        assert "sub2/x.txt" in r.files and [p for p, w in r.skipped if p.startswith("sub2")] == ["sub2/link"], r.skipped
         # the root unlistable: stop before planning
         os.scandir = lambda fd: (_ for _ in ()).throw(OSError(13, "Permission denied"))
         try:
