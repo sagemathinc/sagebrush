@@ -201,19 +201,34 @@ If any check fails, nothing changes, and the reason is returned.
 
 - **Versions are never removed by this.** In phase 1 a device's own versions of a file aren't uploaded (sync-server §3), so they may be the only copy. They count in "On this device", shown apart ("Versions on this device: 40 MB"), and are dropped only by the person's own `dropVersions`.
 - **C2's pins need nothing new:** a file whose bytes are pinned is waiting to go up, which §3.4 already refuses.
-- **The automatic pass** (§3.2) removes at most 100 files a transaction, at most once every 10 minutes. It doesn't remove a file within an hour of an install for an open (`min_resident`). Kept, unsynced, open and conflict files are never candidates, so a cache full of them stops the pass rather than looping.
+- **The automatic pass** (§3.2) removes at most 100 files and at most 64 MiB a transaction (daybreak2's LIMIT-TF-2), at most once every 10 minutes. A file over 64 MiB (up to the 200 MiB file limit) is removed in a transaction of its own. Each transaction also stays within PINS.slice's request bound (400). Tests: 100 files totalling exactly 64 MiB in one transaction; a 101st file, or one byte more, goes to the next; one 200 MiB file alone. It doesn't remove a file within an hour of an install for an open (`min_resident`). Kept, unsynced, open and conflict files are never candidates, so a cache full of them stops the pass rather than looping.
 - **The browser's own eviction** is a different thing: under pressure a browser may drop a whole site's storage. When sync is turned on, the page asks for persistent storage (`navigator.storage.persist()`). Where that is refused (Safari, some phones), the Storage panel says so, since a whole-site eviction would also take files waiting to go up.
 
 ### 3.4 Never removing the only copy (the hardest invariant)
 
 A file's bytes may be removed from a device only if **all** of these hold, checked in the same transaction that removes them:
-1. **the confirmed index has this identity at this `sha256`** (C3): the server accepted the op that made these bytes this file's current ones, so its holding is referenced by this very entry. The same hash under some other identity, or in an older confirmed state, doesn't count;
-2. no outbox record, C2 summary (`allocated`), pin (`sync:cur:<fid>` and `pins` by identity) or reissue-journal record names this identity. Each of these is an O(1) lookup by identity, never a scan;
+0. (sync-client, astra's TF3) **the lifecycle is the one the decision was made in, and is synced now.** The transaction reads, and compares with what the decision recorded:
+   - the lease `sync:current`: on (not `off`), the same namespace `ns` (account hash, server generation, device) and the same lease generation;
+   - the lifecycle epoch `sync:epoch` (C2: it moves on turning sync off, sign-out and a namespace switch);
+   - the active confirmed-index generation `sync:<ns>:indexGen`, with no rebuild staged or flagged (`sync:<ns>:rebuild` absent; sync-client step 4's `stage`…`done` not running).
+
+   Old confirmed data (an earlier namespace's, an index being rebuilt, or one kept after sign-out) is never proof that the current account has the bytes. So with sync off, signed out, between accounts or during a rebuild, nothing is removed: the reason is "Sync isn't running". These are C2's and step 4's own fences, not a new notion of synced;
+1. **the active confirmed index has this identity at this `sha256`** (C3): the server accepted the op that made these bytes this file's current ones, so its holding is referenced by this very entry. The same hash under some other identity, in an older confirmed state, or under another index generation, doesn't count. For a chunked file, the server accepts an op only for a manifest it has verified against the whole SHA-256 (§4.1), so this check also means the cloud's chunks rebuild these exact bytes;
+2. **nothing about this identity is pending, at any stage.** None of these names it: an outbox record; the C2 summary's `latest` beyond the confirmed seq, or `byNs[ns]`'s `allocated`, `held`, `collapsed` or `successor` not yet settled; a pin (`sync:cur:<fid>` and `pins` by identity); the reissue journal; the undrained adoption journal; a local op not yet scanned (its `seq` above the scan watermark). Each is an O(1) lookup by identity or a comparison with a stored watermark, never a scan. This is the complete pending summary the view itself uses (sync-client C3, "What the person sees": the outbox, the adoption journal, held writes, unscanned local ops), so a stage the view counts can't be missed here (astra's TF3);
 3. it isn't a conflict copy waiting for the person;
 4. no download or upload of it is in flight;
 5. (sync-client) it isn't kept, by itself or a folder above it;
-6. (sync-client) it isn't open in an editor or a notebook in any tab (the open-file lease the page already holds);
-7. (sync-client) its revision is the one the removal was decided on: a compare-and-swap, as C5 does for an install, so a write that lands between the decision and the transaction stops it.
+6. (sync-client) **no reader holds it,** by the file's read lock (below);
+7. (sync-client) its revision and bytes are the ones the removal was decided on: the entry's identity, `sha256`, revision and the presence of `fileBytes[fid]` are compared, as C5 does for an install, so a write that lands between the decision and the transaction stops it.
+
+The transaction's scope covers every store these read (meta, `syncIndex`, the outbox, pins, the journals, entries and fileBytes), all in the workspace's one IndexedDB database, so the checks and the removal are one atomic step. A refused removal changes no bytes and no entry.
+
+**The read lock, named (astra's TF3).** There is no open-file lease in the page today; this note adds one, and eviction and every reader share it:
+- **The lock** is the Web Lock `sagebrush-file:<workspace id>:<fid>`. A reader holds it in `shared` mode for as long as it relies on the file's bytes being on this device: an editor or notebook view while it's open, an export while it reads, a notebook's `open()` stream until it's closed, a workspace agent's read until it returns.
+- **A read made in a single IndexedDB transaction needs no lock.** IndexedDB orders it against the removal's readwrite transaction, so it sees either the bytes or `remote: true`, and a `remote` entry sends it down the open path (§2). Only a reader that reads across more than one transaction takes the lock, and it takes it before its first read.
+- **Removal asks for it `exclusive` with `ifAvailable`,** after the workspace lock and while holding it, and runs its transaction inside. If a reader holds it, the removal is refused ("Is open in another tab"), never waits. A reader that asks after the removal began waits for the removal's transaction, then finds `remote` and fetches. So no reader slips between check 6 and the deletion. The order is always workspace lock, then file lock, and only removal takes both; with `ifAvailable` it never waits, so the two can't deadlock.
+- **A suspended tab** keeps its locks, so its files aren't removed until it's closed or resumes and releases them. A tab that closes or crashes loses its locks with it, and with them the reader that needed the bytes.
+- **A browser without Web Locks** can't make workspace changes today (web/workspace/api.ts refuses them), and removal is one. Where exclusion can't be proved, nothing is removed.
 
 If any fails, the removal is refused with its reason (§1.3), and the cache budget simply goes over until it can proceed. A local save is never refused for the cache's sake: the device's copy stays authoritative, and the panel says the cache is blocked (daybreak2, point 7).
 
@@ -223,6 +238,8 @@ If any fails, the removal is refused with its reason (§1.3), and the cache budg
 - the server refuses the op (`missing`): the record is removed and the bytes stay local (check 2, then check 1 still fails);
 - a remote write to the same file arrives meanwhile (check 1: the confirmed hash moved);
 - a conflict copy (3), a kept folder above (5), the file open in another tab (6), a fetch of a newer hash in flight (4);
+- (astra's TF3) held across: sign-out, turning sync off, a namespace switch, a generation change after "Delete my synced data", a rebuild staged and then published (check 0); an unscanned local save, a held or collapsed write, an adoption still in the journal (check 2); a folder made kept, and a move into a kept folder (check 5); a second tab's open, export and `open()` stream starting just before and just after the decision (check 6). Each is refused, and changes no bytes and no entry state;
+- a removal and a new reader racing for the file's lock, in both orders: the reader gets the bytes, or waits and then fetches; never a missing file;
 - a crash in the middle: the removal is one transaction, so after a reload the file is either local with its bytes, or "In the cloud" without them, never a local entry with no bytes;
 - the scale: 100,000 entries, a pass over a full cache, every transaction within PINS.slice's request bound.
 
@@ -236,7 +253,7 @@ If any fails, the removal is refused with its reason (§1.3), and the cache budg
 
 - Content-defined chunking: the algorithm and its parameters are **named and versioned in the manifest**, and a client's output is deterministic (daybreak2, point 3). Proposal to evaluate: minimum / target / maximum 1 / 4 / 8 MiB.
 - A file's identity stays its whole-file SHA-256 (the op's `sha256`). Its **manifest** lists its chunks (hash, size), in order. It is kept in the account object's SQLite, not as a blob (below).
-- **Upload and resume:** `blobs/check` for the missing chunks, idempotent PUTs, then the manifest, then the op. The op is accepted only when every chunk is held. No rechunking on the server.
+- **Upload and resume:** `blobs/check` for the missing chunks, idempotent PUTs, then the manifest, which the server verifies against the whole-file hash, then the op. The op is accepted only for a verified manifest. No rechunking on the server.
 - **Read:** the manifest, then each chunk (or a Range of it).
 (sync-client)
 
@@ -265,24 +282,33 @@ An insertion in the middle of a file typically moves one or two chunk boundaries
 1. The client chunks and hashes the file. It holds one chunk and the gear state at a time, reading the file's bytes from fileBytes once, under the reservation (L2). On a phone this runs in a Worker, one file at a time.
 2. `POST /blobs/check` with the chunks' hashes, at most 1,000 a request.
 3. `PUT /blob/<chunk sha256>` for each missing chunk. This is today's endpoint and its reservation, at most 8 MiB each. The client sends at most 2 at once (L2's uploads); the server's own limit of 4 PUTs at once per account (sync-server §8) is a separate ceiling above it. A retry of a stored chunk is idempotent (sync-server §5.4, step 3).
-4. **`POST /api/sync/v1/manifest`** (new). In one transaction, the account object:
-   - checks the manifest's form and limits;
-   - checks that every chunk is held, and refuses with `missing` naming the absent hashes otherwise;
-   - records the `files` row with `refs = 0`;
-   - adds one reference to each distinct chunk.
+4. **`POST /api/sync/v1/manifest`** (new): registers it. In one transaction, the account object:
+   - checks the manifest's form and limits, and that `size` is at most `max_file_bytes`;
+   - checks that every chunk is held as its own holding (a chunk is never a packed member), and that each listed size equals its holding's stored size. Otherwise it refuses with `missing` (naming the absent hashes) or `invalid` (naming the wrong sizes);
+   - records the `files` row in state `verifying`, with the chunks' R2 keys as they are now, a verification position of 0, and `hold_until` a day away;
+   - adds one reference to each distinct chunk holding, owned by this row (so none of them can be released or deleted while it verifies).
 
-   The same manifest again changes nothing. A different manifest for the same `sha256` is refused with `conflict`, so a hash has one manifest.
-5. Then the op, as today. Its check "a referenced blob is held" becomes "held as a blob, a packed member, or a `files` row".
+   The same manifest again changes nothing but `hold_until` (a day from now), and answers the row's state and position, so a lost answer is simply asked again, with no second reference. A different manifest for the same `sha256` is refused with `conflict` while a row for it exists, in any state, so a hash has one manifest at a time.
+5. **The server verifies it** (astra's TF1): `POST /api/sync/v1/manifest/<sha256>/verify`, repeated until it answers `verified`. Each call:
+   - reads the row's position, its saved SHA-256 state, and the next chunks' keys;
+   - streams at most 8 chunks (at most 64 MiB) from R2 by those exact keys, in the manifest's order, through a SHA-256 whose state can be saved (FIPS 180-4, implemented from the standard: eight 32-bit words, the length, and at most 63 bytes not yet in a block). Each chunk's streamed length must equal its listed size;
+   - then, in one transaction: rechecks the account's generation and `state = 'active'`, the row's state and position (a compare-and-swap: of two calls racing, one wins, and the other's work is discarded), and that each chunk's holding still has the captured key. It saves the new position and SHA-256 state;
+   - after the last chunk, the transaction compares the total length with `size` and the digest with `sha256`. If both match, the row becomes `verified`. If not, the row is retired at once (its chunk references released, as in §5.1) and the answer is `invalid` with the reason (`order or hash`, `size`). A client that gets `invalid` never sends the op, and its upload pin isn't released: the file stays "Waiting to go up", with ⚠ and the error logged.
 
-**C2's pins cover a chunked file unchanged:** they pin the file's bytes on the device (by `sha256`), and the chunks are cut from those bytes at upload. Nothing per chunk is pinned on the device.
+   Verification reads each chunk once inside Cloudflare (one R2 read per chunk, no egress to the person), and debits nothing from the person's read budget. It is bounded per account: one verification call at a time, and `sync.verify_bytes_per_day` (§6). Over it: `rate`, with `retry_after`. A verified row is never verified again: the same manifest registered again is a no-op.
+6. Then the op, as today. Its check "a referenced blob is held" becomes "held as a blob, a packed member, or a `files` row in state `verified` or `live`". An op naming a row still `verifying` is refused `missing`, like an unheld blob. So no op can make an unverified file this entry's current bytes, and the file can't be confirmed (C3) or removed from a device (§3.4, check 1) on an unverified manifest.
 
-**What the server can't check, and who does:** the server doesn't read the chunks back, so it can't check that they concatenate to `sha256`. The downloading device does: after assembling, it checks the whole SHA-256 before the C5 install. On a mismatch it installs nothing, marks the file `fetchFailed: corrupt` (shown), and logs it. A wrong manifest can only come from the account's own client and spoil only that account's file. (For astra: acceptable, or refuse the commit until a Worker has streamed the chunks once, at one R2 read per chunk?)
+**C2's pins cover a chunked file unchanged:** they pin the file's bytes on the device (by `sha256`), and the chunks are cut from those bytes at upload. Nothing per chunk is pinned on the device. A pin is released only when the op is confirmed (C3), which step 6 makes impossible before verification.
 
-**Reading:** `GET /api/sync/v1/manifest/<sha256>` (new) answers the manifest from SQLite. The client then fetches each chunk by `GET /blob/<chunk>`, each with its own signed URL and its own debit, a few at a time. It copies, rather than fetches, any chunk it already holds in an earlier version of the file. Then it assembles, checks the whole hash, and installs. An interrupted download resumes chunk by chunk.
+**Why the server verifies, rather than the downloading device only** (astra's TF1): a faulty client could upload valid chunks and commit them in the wrong order, or under a wrong whole-file hash. If only the downloading device checked, the device that wrote the file could already have removed its correct copy (§3.4) before anyone found out. A blob's PUT already has its hash checked by R2 (sync-server §5.4); verification gives a chunked file the same property before any op can use it.
+
+Tests (astra's TF1): correct chunks in the wrong order; a wrong whole-file hash; a listed size that differs from the held chunk's; a second, competing manifest for the same hash during verification; verification interrupted after each chunk and resumed, and two verify calls racing; the generation switched between the stream and its transaction. In none of them is the file usable by an op, or its upload pin released as a completed upload.
+
+**Reading:** `GET /api/sync/v1/manifest/<sha256>` (new) answers the manifest from SQLite, only for a row `verified` or `live` (§4.4 says who may ask). The client then fetches each chunk by `GET /blob/<chunk>`, each with its own signed URL and its own debit, a few at a time. It copies, rather than fetches, any chunk it already holds in an earlier version of the file. Then it assembles, checks the whole hash, and installs. An interrupted download resumes chunk by chunk.
 
 **Two checks, two outcomes:**
 - **Each chunk is checked against its own hash as it arrives.** A chunk that doesn't match is a transfer error: it is dropped and fetched again, like any failed fetch (L3's backoff, with its kept signed URL).
-- **The whole file is checked once every chunk has passed.** A mismatch then means the manifest itself is wrong, and fetching again would get the same bytes. So it is final: `fetchFailed: corrupt`, with no retry, until the file's hash changes (a new write from another device clears it, as any new hash does).
+- **The whole file is checked once every chunk has passed.** Since the server verified the manifest before any op could use it, a mismatch here means stored bytes or a server defect, not a client's wrong manifest, and fetching again would get the same bytes. So it is final: `fetchFailed: corrupt`, with no retry, until the file's hash changes (a new write from another device clears it, as any new hash does).
 
 **Assembly memory, honestly:** fileBytes stores a file as one value, so a 200 MiB file is assembled whole in memory under its reservation (`size × COPIES`, L2), as a 200 MiB download would be today. Storing files by chunk on the device (so a phone never holds 200 MiB at once, and local versions share chunks) is a later change, outside this note.
 
@@ -295,20 +321,36 @@ An insertion in the middle of a file typically moves one or two chunk boundaries
 
 **Who builds packs: the client,** at upload. The server never repacks a member, and only compacts (below).
 
-**What goes in:** blobs of at most 64 KiB. A pack targets 8 MiB, with at most 16 MiB and 4,096 members.
+**What goes in:** whole small files of at most 64 KiB, never chunks. A pack targets 8 MiB, with at most 16 MiB and 4,096 members.
 
-**The format:** a length-prefixed JSON index `[[member sha256, offset, length], …]`, then the members back to back. It goes up with `PUT /api/sync/v1/pack/<pack sha256>` (new). The Worker hashes each member as it streams to R2, and keeps nothing unless every member's hash and the pack's own match. On success, in one transaction, the pack is a holding (its key, its whole size), and each member gets a row `packed(sha256, pack, offset, length)` and counts as held.
+**The format:** a 4-byte big-endian length $L$, then a JSON index of $L$ bytes, `[[member sha256, offset, length], …]`, then the members back to back. It goes up with `PUT /api/sync/v1/pack/<pack sha256>` (new). The bounds, all checked by the server (daybreak2's LIMIT-TF-3, astra's TF4):
+- **The whole pack, prefix and index included, is at most 16 MiB:** `Content-Length` is required and checked first.
+- **The index is at most 512 KiB** ($L \le 524288$), checked from the prefix before a byte of the index is read. (4,096 members at about 90 bytes each is about 360 KiB.)
+- **The index is canonical:** lowercase 64-hex hashes, all distinct; offsets and lengths are JSON integers (no sign, fraction or exponent); 1 to 4,096 members; each length 1 to 65,536. The first member starts at $4 + L$, each next one where the previous ends, and the last ends at `Content-Length`. So there are no gaps, overlaps or bytes outside a member.
+
+**The order of the upload, and nothing visible before its end:**
+1. Before anything: the session, `x-sync-account` and `x-sync-generation` (§4.4), `Content-Length` at most 16 MiB, then the prefix and the index, read into memory and checked whole. A refusal here (`limit`, `invalid`) reserves and stores nothing.
+2. The account object reserves `Content-Length` bytes, with a random key, as a blob's PUT does (sync-server §5.4, step 1).
+3. The Worker streams the body to R2 under that key, with the pack's SHA-256 for R2 to check, and hashes each member as it passes; a member whose hash differs from its index entry ends the stream.
+4. **Finalizing, in one transaction,** only if every member and the whole pack matched: the generation and `state = 'active'` are checked again, the reservation is released, the pack becomes a holding (its key, its whole size), and each member gets a `packed` row, except a member already held (as a blob or in another pack: two devices racing), whose copy here is dead bytes from the start.
+
+A failed or cancelled stream, or a refused finalize, leaves no `packed` row and no holding. Its reservation is reaped and its key goes to the outbox, exactly as a blob upload that dies (sync-server §5.4, step 4), and doing that twice is harmless. A member's references are counted by the server from the ops, versions and pins that name it, never from anything the client declared about packing.
 
 **Reading a member:** `GET /blob/<member>` answers with a signed URL for exactly its byte range of the pack. The URL carries the range, and the files Worker serves only that, so a retry within the URL's 5 minutes can't read more of the pack. **The debit is the member's length,** the bytes served (daybreak2, point 8).
 
 **A member that changes isn't rewritten in place.** Its new bytes go up as a new blob, or in a new pack, and the old member loses its reference.
 
-**Compaction,** by the account object's alarm, one pack a step:
-1. A pack whose live bytes fall under 50% of its size is read.
-2. Its live members are written to a new pack.
-3. In one transaction, their `packed` rows move to the new pack, and the old pack goes to the outbox.
+**Compaction,** by the account object's alarm, one pack at a time (astra's TF2 for the steps, daybreak2's LIMIT-TF-5 for the pace):
+1. **Capture, in one transaction:** take the oldest pack on the `compact` queue (one row, never a page). Record a compaction `{id, pack, its key, the live members' (sha256, offset, length), new key}`, add one temporary reference to the source pack (so it can't be released while it is read), and reserve the new pack's size, with its random key.
+2. **Stream:** one R2 read of the source pack, writing only the captured members, with a new index, to the new key.
+3. **Swap, in one transaction:** check the generation, the compaction record and that the source pack still has the captured key. Then, for each captured member, only if its `packed` row still points at the source pack at the captured offset, move it to the new pack. A member released during the stream isn't moved, and its bytes are dead in the new pack. A member that gained references meanwhile is moved with them, since references belong to the `packed` row, not to a location. A member uploaded again elsewhere meanwhile already has its own row and isn't touched. So nothing is resurrected, lost or charged twice. The new pack becomes a holding with the moved members; the temporary reference and the reservation are released; and the source pack, now without live members, goes to the outbox.
+4. **The source's delete waits 10 minutes** in the outbox (`not_before`), longer than a signed URL's 5 minutes, so a URL issued for a member's range before the swap still reads the old pack until it expires.
 
-At most one compaction runs per account, so the extra storage at any time is at most 16 MiB.
+**A failed compaction** (an R2 error, a crash, a failed swap check) drops its record, its temporary reference and its reservation, and queues only its own new key, never published, for deletion. Doing that twice is harmless. The next compaction starts only once that key's delete has finished, so the extra storage at any time stays at most 16 MiB.
+
+**The pace:** at most one compaction every 30 minutes per account, so at most 48 a day. Each is one R2 read of at most 16 MiB, one R2 write of at most 8.5 MiB (under 50% of 16 MiB live, plus at most 512 KiB of index) and, later, one R2 delete. So a day's compaction is at most 48 reads (768 MiB), 48 writes (408 MiB) and 48 deletes per account. The `compact` queue has at most one row per pack. A pack queued behind the pace keeps counting whole in usage until it's compacted (§4.3), so a slow queue costs the account space, never correctness.
+
+Tests (astra's TF2): a member's last reference released during the stream; a new reference to a member during the stream; the same bytes uploaded again during the stream; a signed URL for a member issued before the swap and used after it; a crash after each step, and the retry.
 
 **Direct small blobs stay allowed** under pressure or failure: packing is an optimization the client may skip, and the server accepts either.
 
@@ -319,24 +361,56 @@ At most one compaction runs per account, so the extra storage at any time is at 
 
 **New tables in the account object:**
 ```
-files(sha256 PRIMARY KEY, size, manifest TEXT, chunks, refs, created)   a chunked file and its manifest
-packed(sha256 PRIMARY KEY, pack, offset, length)                         a member and where it is
+files(sha256 PRIMARY KEY, size, manifest TEXT, chunks, keys, state, position,
+      sha_state, hold_until, refs, created)        a chunked file: its manifest and its verification (§4.1)
+packed(sha256 PRIMARY KEY, pack, offset, length, refs, created)   a member: where it is, and its references
+compactions(id PRIMARY KEY, pack, key, members, new_key, reservation)   at most one per account (§4.2)
+compact(pack PRIMARY KEY, queued)                  packs under 50% live
+outbox(key PRIMARY KEY, created, not_before)       gains not_before (§4.2, step 4)
 ```
 Chunks and packs are ordinary `holdings` rows: one per R2 object, with `refs`.
 
 **The references:**
 - an entry, version or pin refers to a blob holding, a packed member, or a `files` row;
-- a `files` row refers once to each distinct chunk holding;
-- a pack holding's `refs` is its count of live members.
+- a `files` row refers once to each distinct chunk holding, from its registration until it is retired;
+- a pack holding's `refs` is its count of `packed` rows, plus a compaction's temporary reference while it reads the pack; its live bytes are a column kept with it.
+
+**A `files` row's states** (astra's TF2), each change in one account-object transaction:
+
+| State | Means | Satisfies an op? | Leaves when |
+|---|---|---|---|
+| `verifying` | registered; its chunks referenced by it | no (`missing`) | verified → `verified`; mismatch → retired; `hold_until` passes → retired |
+| `verified` | the chunks rebuild `sha256`; no op refers to it yet | yes | an op refers to it → `live`; `hold_until` passes with `refs = 0` → retired |
+| `live` | `refs > 0`: entries, versions or pins refer to it | yes | its last reference goes → retired |
+| retired | the row is deleted, and each chunk loses its one reference, in the same transaction | — | — |
+
+- **An op that refers to a row** adds to `refs` in the op's own transaction. **Retirement** is decided in a transaction that rechecks `refs = 0` and, for a row not yet `live`, that `hold_until` has passed. The Durable Object runs one transaction at a time, so an op and a retirement can't both win.
+- **A lost answer:** registering again returns the row as it is, with no second reference; verifying again goes on from the saved position. A client whose row expired is told `missing` and registers again, with fresh references. An expired row never stays behind pointing at released chunks, since its deletion and their release are one transaction.
+- The same chunk listed twice in a manifest is referenced once by that row; a chunk in two manifests has one reference from each.
 
 **Usage** (`used_bytes`, sync-server §3) is physical:
 - each chunk, pack and blob holding counts once while something refers to it, never once per reference;
-- a `files` row adds its manifest's bytes;
+- a `files` row adds its manifest's bytes, in every state, so registering and verifying are charged from the start;
+- chunks referenced only by a `verifying` row count too: a staged upload holds quota until it's used or retired;
 - a pack counts whole while any member is live, so packing never claims a saving the pack doesn't make. Compaction is what gives the space back.
 
 **Fitting sync-server §6.1** (one budget for sharing and sync): nothing changes in the claim or the caps.
 - Uploads reserve physical bytes per PUT, chunk or pack, exactly as a blob's PUT does, against `blob_cap` and `max_file_bytes`. A chunk is at most 8 MiB, under any `max_file_bytes`. The whole file is checked against `max_file_bytes` at the manifest's commit.
 - The commit takes no reservation of its own: it only adds references to holdings that are already counted.
+
+### 4.4 Who may call the new endpoints (astra's TF4)
+
+(sync-client) Every new endpoint inherits sync-server §2 and §5.4 unchanged, in this order, and nothing new is trusted:
+- **At the Worker, before any object:** the per-IP pre-authentication limit (`SYNC_PREAUTH`), then the session cookie (a person's device) or the grant token's tag (an agent). State-changing requests (manifest `POST`, verify, pack `PUT`) must carry `Origin` equal to the site.
+- **The binding:** a device's requests carry `x-sync-account` and `x-sync-generation`. If either isn't the account object's, the request is refused (403 `forbidden`, 409 `conflict`) before anything is reserved, read or answered (CORR-PR58-1).
+- **The account's state:** `readonly` refuses manifest registration, verification and pack uploads with `readonly`, and still allows manifest reads, as every read is allowed then. `deleting` refuses everything but the purge.
+- **After every await,** the transaction that acts checks again that the account is the same generation and `active`: a verification step, a pack's finalize, a compaction's swap. A generation retired during a stream finalizes nothing.
+- **Rates:** the per-account limits of sync-server §8 apply: a pack `PUT` counts as one blob upload (4 at once), a manifest registration and a verify call each count as a request, and each signed URL counts against 600 a minute.
+- **Who may write:** in step 3, manifests and packs come from a person's device session only. An agent's grant writes data files as today (design/agent-endpoint.md), as single blobs.
+- **Who may read, as a device:** a person's session may read any manifest and any member of its own account, as it may read any of its blobs today.
+- **Who may read, as an agent:** a grant never names a hash. It asks for a file by path. The account object checks the path against the grant's scope, with read access, in the index as it is now, and only then looks up that entry's `sha256` and its manifest. Each chunk URL is asked for by the path and the chunk's index in that manifest, so a grant can't reach a chunk or member outside a file it may read. The URLs are the grant's as today: single use, with a nonce redeemed by the files Worker, the same response headers, and each debiting the grant's daily budget by its bytes (sync-server §5.4).
+
+Tests: the account or generation switched during an upload, a verification and a finalize; a grant asking for an unrelated file's manifest or chunk; a grant asking for a chunk index past the manifest's end; a pack index malformed at each bound (the prefix, the length, an offset, a duplicate, a gap, an overlap, past the end); a failure after the last member but before the whole-pack check, and after the whole-pack check but before the finalize.
 
 ## 5. The hard parts, named
 
@@ -351,13 +425,16 @@ Chunks and packs are ordinary `holdings` rows: one per R2 object, with `refs`.
 **Answers (sync-client):**
 - **A shared chunk** has one holding, with one reference per `files` row that lists it. Two versions of a 150 MiB file that differ in one chunk cost about 154 MiB, not 300.
 - **A reference moves only in the decided op's transaction.** A write that replaces a chunked file keeps the old one as a server version, in the same transaction (sync-server §3). The old `files` row loses its reference only when that version is dropped.
-- **A `files` row at 0 references** releases its chunks in the same transaction: at most 256 rows, so the transaction is bounded. A chunk at 0 goes to the outbox, as a blob does today. The alarm empties the outbox as now (bounded steps, sync-server §6.2's LIMIT-445-1).
-- **A pack's dead members** are found without a scan: a pack's `refs` counts its live members, and its live bytes are a column kept with it. A pack under 50% live is put on a small `compact` queue in the transaction that crosses the line. The alarm takes one pack a step, so at most 16 MiB is extra at a time.
-- **The new ordering rule (for astra).** The alarm deletes a holding's R2 object first, then its row. So a manifest commit that names a chunk in the outbox must not revive it if its delete may already be in flight.
-  - A holding being deleted carries `deleting`, set before the R2 call.
-  - A commit that meets `deleting` refuses with `missing`, so the client uploads that chunk again.
-  - A commit that meets a holding merely queued in the outbox (not yet `deleting`) takes it back out, in the same transaction.
-- **Grace:** an unreferenced holding goes after a day (sync-server §3). That already covers chunks whose manifest commit was lost. A client that comes back later is told `missing` and uploads them again.
+- **A `files` row is retired** by the state machine in §4.3: a `live` row when its last reference goes; a `verifying` or `verified` row only once `hold_until` has passed with no reference (so a manifest awaiting its op isn't released the moment it's registered). Retirement releases its chunks in the same transaction: at most 256 rows, so the transaction is bounded. A chunk at 0 goes to the outbox, as a blob does today. The alarm empties the outbox as now (bounded steps, sync-server §6.2's LIMIT-445-1), and retires expired rows a page of 16 at a time.
+- **A pack's dead members** are found without a scan: a pack's `refs` counts its live members, and its live bytes are a column kept with it. A pack under 50% live is put on a small `compact` queue in the transaction that crosses the line. The alarm takes one pack at a time, at most one every 30 minutes, so at most 16 MiB is extra at a time (§4.2).
+- **A delete in flight can't be revived (astra's TF2).** The first draft's `deleting` mark is replaced by a simpler rule, an amendment to sync-server §3's order ("deletes the R2 object, and only then the row"):
+  - **Queued:** a holding at `refs = 0` with its key in the outbox still has its row. Anything that refers to it (below) takes it back: `refs` goes up and its outbox row goes, in the same transaction.
+  - **Begun:** the alarm's step that begins a delete deletes the holding's row, in a transaction that checks again that `refs = 0` and the key is the holding's. Only the outbox row, keyed by the R2 key, remains. Then the R2 delete, then the outbox row, by that key.
+  - So once a delete has begun, there is no holding for that hash. Every path that creates a reference looks the hash up in `holdings` (or `packed`, or `files`) in its own transaction, finds nothing, and answers `missing`: an op, a version kept by a write, a document's pin, a manifest's registration, and a pack member's `packed` row. No path can refer to a key being deleted.
+  - **A new upload of the same bytes** gets a new random key (sync-server §1) and a new holding row. The old delete's completion removes only its own outbox row and R2 object, by the old key, and can never touch the new holding.
+  - A crash between the steps leaves the outbox row, so the delete is retried; deleting an R2 key twice is harmless.
+- **Grace:** an unreferenced holding goes after a day (sync-server §3), and a packed member with no reference a day after its pack's upload loses its `packed` row the same way. That already covers chunks whose manifest registration was lost. A client that comes back later is told `missing` and uploads them again.
+- Tests (astra's TF2): a delete begun, then a reupload and its finalize, then the delete's completion; a delete begun during a manifest's registration and during an op; a crash at every registration, verification, reference and retirement step; the same chunk twice in one manifest, and in two manifests; a lost registration answer, then the same manifest again.
 - **Quota doesn't wait for GC:** usage drops in the transaction where a holding's last reference goes, not when R2 deletes it. The outbox and the daily inventory (sync-server §9) only clean up.
 
 ### 5.2 Quota accounting
@@ -390,15 +467,19 @@ Chunks and packs are ordinary `holdings` rows: one per R2 object, with `refs`.
 | Chunks per manifest | server | 256 | 256, raised only with the file limit | `limit` | no |
 | Manifest encoded size | server | 32 KiB | 32 KiB | `limit` | no |
 | Packed member size | client | 64 KiB | 64 KiB | sent unpacked | no |
-| Pack size, target / max | client builds, server checks | 8 / 16 MiB, at most 4,096 members | 16 MiB | `limit` | no |
-| Pack compaction | server | under 50% live, one pack a step | 16 MiB extra at once | — | no |
+| Pack size, target / max | client builds, server checks | 8 / 16 MiB, prefix and index included; at most 4,096 members | 16 MiB | `limit`, before anything is reserved | no |
+| Pack index encoded size | server | 512 KiB | 512 KiB | `limit`, from the prefix, before the index is read | no |
+| Manifest verification | server | one call at a time per account; at most 8 chunks (64 MiB) a call; `sync.verify_bytes_per_day` 16 GiB per account | 16 GiB a day | `rate`, with `retry_after` | no |
+| Unused manifest hold | server | `hold_until` a day after registration, renewed by registering again | 1 day | retired (§4.3) | no |
+| Pack compaction | server | under 50% live; one at a time; at most one every 30 minutes (48 a day: 48 reads ≤ 768 MiB, 48 writes ≤ 408 MiB, 48 deletes) | 16 MiB extra at once, a failed compaction's object included | waits its turn | no |
+| A compacted pack's delete | server | 10 minutes after the swap | — | — | no |
 | Index entries | both | 100,000 per account, 10,000 per folder | same | `limit` | no |
 | Device cache budget, computer | client | 25% of the estimated quota, at most 10 GiB (sync-client proposal) | clamped to $\max(0, q - f - (u - c))$ (§3.2) | removal | person |
 | Device cache budget, phone | client | 25% of the estimated quota, at most 2 GiB (sync-client proposal) | clamped to $\max(0, q - f - (u - c))$ (§3.2) | removal | person |
 | Cache high / low marks | client | 100% / 85% of budget | — | — | no |
 | Free-space floor $f$ | client | 500 MiB on a computer, 200 MiB on a phone (sync-client proposal) | — | no install unless $u + R + r \le q - f$ (§3.2) | no |
 | Storage estimate age | client | 60 s | 60 s | nothing admitted: background caching stops, an open is refused ("There isn't room…") | no |
-| Removal pass | client | 100 files a transaction; at most every 10 minutes; not within 1 hour of an install for an open | — | — | no |
+| Removal pass | client | 100 files and 64 MiB a transaction (one larger file alone), within PINS.slice's 400 requests; at most every 10 minutes; not within 1 hour of an install for an open | 100 files, 64 MiB (200 MiB for one file) | the next transaction | no |
 | Prefetch share of the read budget | client | stops at 80% used (§2.1) | 80% | prefetch pauses | no |
 | Concurrent chunk uploads / downloads | client | 2 / 4 (as L2) | — | queued | no |
 | Blob PUTs at once | server | 4 per account (sync-server §8) | 4 | 429 | no |
@@ -411,7 +492,7 @@ Every list, check and GC endpoint stays paged. The index's bounds don't depend o
 
 (sync-client) In operations, not dollars, which change:
 - **A cold open of a chunked file** of $n$ chunks: one manifest read (SQLite, no R2), $n$ signed URLs and $n$ R2 reads, $n \le 256$. For example, 150 MiB at about 4 MiB a chunk is about 38 of each.
-- **Uploading it:** $\lceil n/1000 \rceil$ checks, $m$ PUTs for its $m$ missing chunks, one commit, then the op.
+- **Uploading it:** $\lceil n/1000 \rceil$ checks, $m$ PUTs for its $m$ missing chunks, one registration, $\lceil n/8 \rceil$ verify calls (together $n$ R2 reads of the whole file inside Cloudflare, no egress, nothing debited from the read budget), then the op.
 - **A random edit of a few bytes in a 200 MiB file, typically:** one or two chunks change (about 4 to 16 MiB), so that is uploaded and stored. Without chunks it would be 200 MiB, and today it can't sync at all.
 - **Repeated data** (a copy, or a version differing at the end): only the new chunks are uploaded and stored. The first chunk-identical file costs one commit and no PUTs.
 - **Many tiny files:** 20,000 files of 4 KiB cost 20,000 PUTs and 20,000 reads singly, but about 10 PUTs in packs targeting 8 MiB (fewer bytes than 10 full packs once the indexes and partly filled packs are counted; the exact count depends on how packs fill). Each is still one ranged read when opened, since reads are per file.
@@ -438,7 +519,5 @@ Each PR carries its at-limit and one-over tests, and operation-count assertions 
 - Does "Keep on this device" on a folder include files added to it later? (Proposed: yes.)
 - Notebooks and boards: their content is patches (sync-server §4), not blobs. Do they stay always local in these steps? (Proposed: yes; they're small.)
 - Should the Storage panel show the cloud's breakdown per folder? (Not in these steps.)
-- (sync-client, for astra) Accepting the client's whole-file hash unchecked at a manifest's commit, given that the downloading device checks it (§4.1).
-- (sync-client, for astra) The `deleting` mark against a commit racing the outbox (§5.1).
-- (sync-client, for astra) The pack's streaming check, member by member (§4.2).
-- (sync-client, for daybreak2) The proposed cache budgets and floor (§6), and the compaction pace.
+- (sync-client, for daybreak2) The proposed cache budgets and floor (§6).
+- Answered by the reviews, and now in the text: the client's whole-file hash is no longer trusted: the server verifies each manifest before an op can use it (§4.1, astra's TF1). The `deleting` mark is replaced by deleting the holding's row when its delete begins (§5.1, TF2). The pack's streaming check stays, with its bounds and nothing visible before the finalize (§4.2, TF4). The compaction pace is one every 30 minutes (§4.2, daybreak2's LIMIT-TF-5).
