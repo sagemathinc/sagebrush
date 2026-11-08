@@ -546,6 +546,56 @@ def test_nfc_clash_folders():
         shutil.rmtree(root)
 
 
+def test_listing_fails_partway():
+    # (sync-client S-a) a folder whose listing fails after some entries is skipped whole: nothing under it in files,
+    # listed once as "folder/"; the root's listing failing stops the run
+    root = tmp()
+    real = os.scandir
+    try:
+        tree(root, {"sub/a.txt": b"a", "sub/b.txt": b"b", "sub/boom": b"x", "sub/z.txt": b"z", "sub/deeper/c.txt": b"c",
+                    "other.txt": b"o"})
+
+        class Failing:
+            def __init__(self, it):
+                self.it = it
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return self.it.__exit__(*a)
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                e = next(self.it)
+                if e.name == "boom":
+                    raise OSError(5, "Input/output error")
+                return e
+
+        os.scandir = lambda fd: Failing(real(fd))
+        try:
+            r = S.scan(S.refuse_overlap(root, []))
+        finally:
+            os.scandir = real
+        assert not [p for p in r.files if p.startswith("sub/")], sorted(r.files)
+        assert [p for p, w in r.skipped if w == S.UNREADABLE] == ["sub/"], r.skipped
+        assert "other.txt" in r.files
+        # the root unlistable: stop before planning
+        os.scandir = lambda fd: (_ for _ in ()).throw(OSError(13, "Permission denied"))
+        try:
+            S.scan(S.refuse_overlap(root, []))
+            raise AssertionError("an unlistable root was scanned")
+        except S.Refused as e:
+            assert e.code == 1 and e.message.endswith("couldn't be listed (Permission denied)."), e.message
+        finally:
+            os.scandir = real
+    finally:
+        os.scandir = real
+        shutil.rmtree(root)
+
+
 def test_hash_shortcut_and_ctime_guard():
     root = tmp()
     try:

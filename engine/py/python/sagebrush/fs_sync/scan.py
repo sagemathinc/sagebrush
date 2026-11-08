@@ -406,13 +406,23 @@ def scan(root, workspace_path="/", known=None, limits=None):
         out.skipped.append((rel, NFC_CLASH))
         out.skipped.append((rel, NFC_CLASH))
 
+    def unlistable(rel_dir, err):
+        """A folder whose listing failed, at its start or partway: skipped whole (listed once as `folder/`, and
+        whatever it already added dropped), so the plan leaves everything under it alone (§2.2, §4.4). LOCAL_DIR
+        itself unlistable stops the run: with nothing read, every recorded file would look deleted here."""
+        if not rel_dir:
+            raise Refused("Stopped before planning: %s couldn't be listed (%s)." % (shown, err.strerror or err), 1)
+        for p in [p for p in out.files if p.startswith(rel_dir + "/")]:
+            del out.files[p]
+        out.skipped.append((rel_dir + "/", UNREADABLE))
+
     def walk(dfd, rel_dir, raw_dir, depth, ignore):
         # (streamed: nothing is sorted and no folder's listing is held; a subfolder is entered as soon as it is read,
         # while this folder's listing waits, so the open handles are one per level of the current path)
         try:
             it = os.scandir(dfd)
-        except OSError:
-            out.skipped.append((rel_dir or ".", UNREADABLE))
+        except OSError as err:
+            unlistable(rel_dir, err)
             return
         with it:
             while True:
@@ -420,8 +430,8 @@ def scan(root, workspace_path="/", known=None, limits=None):
                     e = next(it)
                 except StopIteration:
                     break
-                except OSError:
-                    out.skipped.append((rel_dir or ".", UNREADABLE))
+                except OSError as err:
+                    unlistable(rel_dir, err)
                     return
                 visited[0] += 1
                 if visited[0] > lim["entries"]:
