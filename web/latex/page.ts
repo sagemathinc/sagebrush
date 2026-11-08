@@ -897,7 +897,11 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // (closing for another file: what is pending written first, then the editor disposed of)
   // (held: read-only while a controlled switch settles and closes it; the saver's own read-only, for recovery, kept apart)
   let held = false, roSaver = false;
-  current = { dispose: () => { void saver?.dispose(); dispose(); }, close: async () => { await saver?.dispose(); dispose(); }, dirty: () => !!saver?.failed, hold: (on: boolean) => { held = on; src.readOnly = on || roSaver; }, settle: () => saver ? saver.settle() : Promise.resolve(true) };
+  // (closing for a switch: this editor no longer shows its saver's states (they're the next file's to show), so while
+  //  its last write is under way it says so, rather than leaving an older state shown: a slow close write read as a
+  //  failure (#551's DB3 follow-up))
+  const closingSaid = () => { if (saver && saver.state.k !== "saved" && saver.state.k !== "readonly") { saveState.classList.remove("failed"); saveState.textContent = "Saving before switching…"; } };
+  current = { dispose: () => { void saver?.dispose(); dispose(); }, close: async () => { closingSaid(); await saver?.dispose(); dispose(); }, dirty: () => !!saver?.failed, hold: (on: boolean) => { held = on; src.readOnly = on || roSaver; }, settle: () => saver ? saver.settle() : Promise.resolve(true) };
   mine = current;
   // (the test build only: the page test tells this workspace an op as sync's view would; elsewhere this folds away)
   if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) { (globalThis as any).__sbTexWs = host.ws; (globalThis as any).__sbTexActor = () => actor; }
