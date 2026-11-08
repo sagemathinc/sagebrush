@@ -778,9 +778,8 @@ export function percentFormat(fmtStr: string, args: any, bytesMode = false): str
     if (v instanceof PrimBox && isPyInt(v.$v)) return BigInt(v.$v);
     if (!needIndex && fv(v) !== undefined) return BigInt(Math.trunc(fv(v)!));
     for (const name of needIndex ? ["__index__"] : ["__index__", "__int__"]) {
-      const f = lookupType(typeOf(v), name);
-      if (f !== undefined) {
-        const r = f(v);
+      if (lookupType(typeOf(v), name) !== undefined) {
+        const r = lookupSpecial(v, name)(v);
         return BigInt(typeof r === "boolean" ? +r : r);
       }
     }
@@ -924,9 +923,11 @@ export function percentFormat(fmtStr: string, args: any, bytesMode = false): str
         if (x === undefined) {
           if (isPyInt(v) || typeof v === "boolean") x = Number(v);
           else {
-            const f = lookupType(typeOf(v), "__float__") ?? lookupType(typeOf(v), "__index__");
-            if (f === undefined) raise(T.TypeError, `must be real number, not ${typeOf(v).$name}`);
-            x = Number(fv(f(v)) ?? f(v));
+            const name = lookupType(typeOf(v), "__float__") !== undefined ? "__float__" : "__index__";
+            if (lookupType(typeOf(v), name) === undefined) raise(T.TypeError, `must be real number, not ${typeOf(v).$name}`);
+            // (called once, as CPython's PyFloat_AsDouble)
+            const r = lookupSpecial(v, name)(v);
+            x = Number(fv(r) ?? r);
           }
         }
         const sp: Spec = { fill: zero ? "0" : " ", align: left ? "<" : zero ? "=" : ">", sign: sign || "-", z: false, alt: flags.includes("#"), zero: false, width, grouping: "", precision: precision < 0 ? 6 : precision, type };
@@ -950,7 +951,7 @@ function getitemMapping(m: any, k: string): any {
     if (v === undefined) throw markRaised(T.KeyError(k));
     return v;
   }
-  return lookupType(typeOf(m), "__getitem__")(m, k);
+  return lookupSpecial(m, "__getitem__")(m, k);
 }
 
 strFormatOpHook.f = percentFormat;

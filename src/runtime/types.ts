@@ -3336,7 +3336,8 @@ iteratorType("reversed", ReversedIter, (sequence: any) => {
     const codePoints = [...sequence];
     return new ReversedIter(codePoints, codePoints.length - 1, (index) => codePoints[index], () => codePoints.length);
   }
-  return new ReversedIter(sequence, O.len(sequence) - 1, (index) => gi(sequence, index), () => O.len(sequence));
+  const getitem = O.lookupSpecial(sequence, "__getitem__");
+  return new ReversedIter(sequence, O.len(sequence) - 1, (index) => getitem(sequence, index), () => O.len(sequence));
 });
 // (CPython's reversed_len and listreviter_len: the index taken first; 0
 // once ended, without asking the sequence; else the items left, the
@@ -3824,7 +3825,7 @@ hooks.primProxy = (base: PyType): PyType => {
     d.set("__format__", unboxing(f0));
     const fmtW = pyfn((self: any, spec: string) => {
       const fl = lookupType(typeOf(self), "__float__");
-      if (typeof spec === "string" && /[eEfFgG%]$/.test(spec) && fl !== undefined && fl.$unboxing !== true) return format(fl(self), spec);
+      if (typeof spec === "string" && /[eEfFgG%]$/.test(spec) && fl !== undefined && fl.$unboxing !== true) return format(O.lookupSpecial(self, "__float__")(self), spec);
       return f0(unbox(self), spec);
     }, "__format__");
     (fmtW as any).$builtinMethod = true;
@@ -4288,17 +4289,17 @@ T.GenericAlias = genericAliasType;
     let args: any[] = [];
     const gna = lookupType(cls, "__getnewargs_ex__");
     if (gna !== undefined) {
-      const [a, kw] = gna(self);
+      const [a, kw] = O.lookupSpecial(self, "__getnewargs_ex__")(self);
       if (kw instanceof PyDict && kw.$m.size) {
-        const st = lookupType(cls, "__getstate__")(self);
+        const st = O.lookupSpecial(self, "__getstate__")(self);
         return tuple([getattr(copyreg(), "__newobj_ex__"), tuple([cls, a, kw]), st, null, null]);
       }
       args = O.toArray(a);
     } else {
       const gn = lookupType(cls, "__getnewargs__");
-      if (gn !== undefined) args = O.toArray(gn(self));
+      if (gn !== undefined) args = O.toArray(O.lookupSpecial(self, "__getnewargs__")(self));
     }
-    const state = lookupType(cls, "__getstate__")(self);
+    const state = O.lookupSpecial(self, "__getstate__")(self);
     const listitems = Array.isArray(self) && !(self as any).$t ? O.iter(self) : null;
     const dictitems = self instanceof PyDict ? O.iter(callObj(getattr(self, "items"), [])) : null;
     return tuple([getattr(copyreg(), "__newobj__"), tuple([cls, ...args]), state, listitems, dictitems]);

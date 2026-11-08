@@ -151,3 +151,35 @@ after it is deleted: True
 -- __call__ = None and a later __call__
 TypeError: 'NoneType' object is not callable
 2
+-- r2: %-format, int's float format, %(key) mappings, reversed() and __reduce_ex__, each a bound method
+'2.500000|2.500000e+00|2.5' [0, 0, 0]
+'7.000000 7 7 7 \x07' [0, 0, 0, 0, 0]
+'9' TypeError: must be real number, not PN [0]
+'1.250000' '125.0%' '2' [0, 0]
+'ok 2' KeyError: 'z'
+'v-v' [1, 1]
+['c', 'b', 'a'] [1, 1, 1]
+(1, 2) [0]
+(3,) [0]
+((3,), {'k': 4}) [0]
+{'s': 1} {'s': 1} [0, 0]
+() {'s': 1} () [0, 0]
+-- r2 (grader's gaps): each path with a bound method as its special method
+True False [1] [1]
+'<MR>' '<MR>' [0, 0]
+S! 'S!' 'S!' 'S!' [0, 0, 0, 0]
+b'[by]' b'by' [0, 0]
+'dd' 'dd' [2] [1]
+'NB' 'NB' [2, 1]
+'from getattr' 'from getattr' [1, 1]
+'meta getattr' 'meta getattr' [1, 1]
+[1, 2] bytearray(b'\x01\x02') [0]
+'MI' TypeError: CMJ.__init_subclass__() takes no keyword arguments [3]
+-- r2: a class as a special method, its metaclass's __get__ binding it (lookup_maybe_method)
+('got', 'CG', 2) ('got', 'CG', 1)
+-- r2: a bound method as __init__ and __call__, called with 3000 arguments (past the spread limit)
+'BI' 5 [3000] [3000]
+-- r2: daybreak3's pins: a metaclass __get__ returning lambda: 17 (W1); 200000 arguments through a bound __init__ (W3)
+17
+None ('kw', 'CKW', 1, [('y', 4)]) ('kw', 'CKW', 0, [('z', 5)]) [('CKW', 1, [('x', 2)]), ('CKW', 0, []), ('CKW', 0, [])]
+'B200' [200001]

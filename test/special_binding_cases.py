@@ -457,3 +457,216 @@ class CN:
 print(t(lambda: CN()()))
 CN.__call__ = len
 print(t(lambda: CN()([1, 2])))
+
+print("-- r2: %-format, int's float format, %(key) mappings, reversed() and __reduce_ex__, each a bound method")
+rf = Rec(2.5)
+PF = type("PF", (), {"__float__": rf.m})
+print(t(lambda: "%f|%e|%g" % (PF(), PF(), PF())), rf.calls)
+ri = Rec(7)
+PI = type("PI", (), {"__index__": ri.m})
+print(t(lambda: "%f %d %x %o %c" % (PI(), PI(), PI(), PI(), PI())), ri.calls)
+rn = Rec(9)
+PN = type("PN", (), {"__int__": rn.m})
+print(t(lambda: "%d" % PN()), t(lambda: "%f" % PN()), rn.calls)
+rfi = Rec(1.25)
+IF = type("IF", (int,), {"__float__": rfi.m})
+print(t(lambda: format(IF(2), "f")), t(lambda: format(IF(2), ".1%")), t(lambda: format(IF(2), "d")), rfi.calls)
+MG = type("MG", (), {"__getitem__": {"x": "ok", "y": 2}.__getitem__})
+print(t(lambda: "%(x)s %(y)d" % MG()), t(lambda: "%(z)s" % MG()))
+rm = Rec("v")
+MR = type("MR", (), {"__getitem__": rm.m})
+print(t(lambda: "%(a)s-%(b)s" % MR()), rm.calls)
+rg = Rec(lambda i: "abc"[i])
+RV = type("RV", (), {"__getitem__": rg.m, "__len__": [1, 2, 3].__len__})
+print(t(lambda: list(reversed(RV()))), rg.calls)
+rgn = Rec((1, 2))
+GN = type("GN", (), {"__getnewargs__": rgn.m})
+print(t(lambda: GN().__reduce_ex__(2)[1][1:]), rgn.calls)
+rgx = Rec(((3,), {}))
+GX = type("GX", (), {"__getnewargs_ex__": rgx.m})
+print(t(lambda: GX().__reduce_ex__(2)[1][1:]), rgx.calls)
+rgk = Rec(((3,), {"k": 4}))
+GK = type("GK", (), {"__getnewargs_ex__": rgk.m})
+print(t(lambda: GK().__reduce_ex__(2)[1][1:]), rgk.calls)
+rs = Rec({"s": 1})
+GS = type("GS", (), {"__getstate__": rs.m})
+print(t(lambda: GS().__reduce_ex__(2)[2]), t(lambda: GS().__reduce_ex__(4)[2]), rs.calls)
+import copy, pickle
+
+
+class GA:
+    def __init__(self, *a):
+        self.a = a
+
+
+rga = Rec((1, 2))
+GA.__getnewargs__ = rga.m
+GA.__module__ = "__main__"
+print(t(lambda: copy.copy(GA()).a), t(lambda: copy.copy(GS()).__dict__), t(lambda: pickle.loads(pickle.dumps(GA())).a), rga.calls)
+
+print("-- r2 (grader's gaps): each path with a bound method as its special method")
+# isinstance()/issubclass() with an instance (not a type) as the class: its type's checks
+ric = Rec(True)
+rsc = Rec(False)
+ICK = type("ICK", (), {"__instancecheck__": ric.m, "__subclasscheck__": rsc.m})
+print(t(lambda: isinstance(1, ICK())), t(lambda: issubclass(int, ICK())), ric.calls, rsc.calls)
+# repr() of a class whose metaclass's __repr__ is a bound method
+rmr = Rec("<MR>")
+MRM = type("MRM", (type,), {"__repr__": rmr.m})
+CMR = MRM("CMR", (), {})
+print(t(lambda: repr(CMR)), t(lambda: str(CMR)), rmr.calls)
+# str() inside print, %s and !s
+rst = Rec("S!")
+ST = type("ST", (), {"__str__": rst.m})
+print(ST(), t(lambda: "%s" % ST()), t(lambda: f"{ST()!s}"), t(lambda: "{}".format(ST())), rst.calls)
+# b"%b" with __bytes__
+rby = Rec(b"by")
+BY = type("BY", (), {"__bytes__": rby.m})
+print(t(lambda: b"[%b]" % BY()), t(lambda: bytes(BY())), rby.calls)
+# a class attribute set and deleted through the metaclass's data descriptor
+rds = Rec(None)
+rdd = Rec(None)
+DD = type("DD", (), {"__get__": lambda self, o, t=None: "dd", "__set__": rds.m, "__delete__": rdd.m})
+MD = type("MD", (type,), {"x": DD()})
+CD = MD("CD", (), {})
+
+
+def _cd_set():
+    CD.x = 5
+    return CD.x
+
+
+def _cd_del():
+    del CD.x
+    return CD.x
+
+
+print(t(_cd_set), t(_cd_del), rds.calls, rdd.calls)
+# __new__ returning an instance of a subclass whose __init__ is a bound method
+rsi = Rec(None)
+
+
+class NA:
+    def __new__(cls, *a):
+        return object.__new__(NB)
+
+
+NB = type("NB", (NA,), {"__init__": rsi.m})
+print(t(lambda: type(NA(1, 2)).__name__), t(lambda: type(NA(3)).__name__), rsi.calls)
+# __getattr__ after a property raises AttributeError
+rga2 = Rec("from getattr")
+
+
+def _no(self):
+    raise AttributeError("p")
+
+
+PG = type("PG", (), {"p": property(_no), "__getattr__": rga2.m})
+print(t(lambda: PG().p), t(lambda: PG().q), rga2.calls)
+# a metaclass's __getattr__ for a missing class attribute
+rmg = Rec("meta getattr")
+MGA = type("MGA", (type,), {"__getattr__": rmg.m})
+CGA = MGA("CGA", (), {})
+print(t(lambda: CGA.missing), t(lambda: getattr(CGA, "other", "dflt")), rmg.calls)
+# __length_hint__, asked by list() and bytearray() of an iterator (ops.lengthHint)
+rlh = Rec(4)
+
+
+class LHIt:
+    def __init__(self):
+        self.n = 0
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        self.n += 1
+        if self.n > 2:
+            raise StopIteration
+        return self.n
+
+
+LH = type("LH", (LHIt,), {"__length_hint__": rlh.m})
+print(t(lambda: list(LH())), t(lambda: bytearray(LH())), rlh.calls)
+# the 3-argument type call through a metaclass whose __init__ is a bound method
+rmi = Rec(None)
+MI = type("MI", (type,), {"__init__": rmi.m})
+print(t(lambda: type(MI("CMI", (), {})).__name__), t(lambda: MI("CMJ", (), {}, kw=1)), rmi.calls)
+
+print("-- r2: a class as a special method, its metaclass's __get__ binding it (lookup_maybe_method)")
+
+
+class MGT(type):
+    def __get__(cls, obj, owner=None):
+        return lambda *a: ("got", type(obj).__name__, len(a))
+
+
+class GT(metaclass=MGT):
+    pass
+
+
+CG = type("CG", (), {"__call__": GT, "__getitem__": GT})
+print(t(lambda: CG()(1, 2)), t(lambda: CG()[0]))
+
+print("-- r2: a bound method as __init__ and __call__, called with 3000 arguments (past the spread limit)")
+rbi = Rec(None)
+BI = type("BI", (), {"__init__": rbi.m})
+rbc = Rec(5)
+BC = type("BC", (), {"__call__": rbc.m})
+print(t(lambda: type(BI(*range(3000))).__name__), t(lambda: BC()(*range(3000))), rbi.calls, rbc.calls)
+
+print("-- r2: daybreak3's pins: a metaclass __get__ returning lambda: 17 (W1); 200000 arguments through a bound __init__ (W3)")
+
+
+class Meta17(type):
+    def __get__(cls, obj, owner=None):
+        return lambda: 17
+
+
+class Hook(metaclass=Meta17):
+    pass
+
+
+class A17:
+    __len__ = Hook
+
+
+print(t(lambda: len(A17())))
+
+
+class MKW(type):
+    def __get__(cls, obj, owner=None):
+        return lambda *a, **k: ("kw", type(obj).__name__, len(a), sorted(k.items()))
+
+
+class HKW(metaclass=MKW):
+    pass
+
+
+rkw = []
+
+
+class MKI(type):
+    def __get__(cls, obj, owner=None):
+        return lambda *a, **k: rkw.append((type(obj).__name__, len(a), sorted(k.items())))
+
+
+class HKI(metaclass=MKI):
+    pass
+
+
+CKW = type("CKW", (), {"__call__": HKW, "__init__": HKI})
+print(t(lambda: CKW(1, x=2) and None), t(lambda: CKW()(3, y=4)), t(lambda: CKW()(**{"z": 5})), rkw)
+
+
+class Rec200:
+    def __init__(self):
+        self.n = []
+
+    def m(*a):
+        a[0].n.append(len(a))
+
+
+r200 = Rec200()
+B200 = type("B200", (), {"__init__": r200.m})
+print(t(lambda: type(B200(*range(200000))).__name__), r200.n)
