@@ -132,6 +132,43 @@ show("tuple short circuit", lambda: isinstance(IsReal(), (IsC, 17)))
 print("isinstance events", isinstance_events)
 
 
+# Assignment unpacking uses the iterator protocol even when a tuple/list
+# subclass has a backing array.  Only exact list/tuple values keep the direct
+# array fast path; a subclass's effective __iter__ must be observed.
+class UnpackTuple(tuple):
+    def __iter__(self):
+        print("UnpackTuple.__iter__")
+        return iter((7, 8, 9))
+
+
+class UnpackList(list):
+    def __iter__(self):
+        print("UnpackList.__iter__")
+        return iter((4, 5, 6))
+
+
+class UnpackRaises(tuple):
+    def __iter__(self):
+        print("UnpackRaises.__iter__")
+        raise RuntimeError("iter boom")
+
+
+class UnpackShort(list):
+    def __iter__(self):
+        print("UnpackShort.__iter__")
+        return iter((4,))
+
+
+def starred(v):
+    a, *b = v
+    return a, b
+
+
+for v in [UnpackTuple((1, 2)), UnpackList([1, 2]), UnpackRaises((1, 2)), UnpackShort([1, 2])]:
+    show("override unpack 2 from %s" % type(v).__name__, lambda: two(v))
+    show("override starred from %s" % type(v).__name__, lambda: starred(v))
+
+
 class NoIter:
     pass
 

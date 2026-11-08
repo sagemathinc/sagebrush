@@ -2147,7 +2147,7 @@ export function pollInterrupt() {
 }
 
 export function toArray(x: any): any[] {
-  if (Array.isArray(x)) return x.slice();
+  if (Array.isArray(x) && (x as any).$cls === undefined) return x.slice();
   const it = iter(x);
   if (it instanceof DictIter) return it.rest();
   const out: any[] = [];
@@ -2163,7 +2163,7 @@ const tooMany = (x: any, n: number) => {
   return raise(T.ValueError, `too many values to unpack (expected ${n}${known})`);
 };
 export function unpack(x: any, n: number): any[] {
-  if (Array.isArray(x)) {
+  if (Array.isArray(x) && (x as any).$cls === undefined) {
     if (x.length === n) return x;
     if (x.length < n) raise(T.ValueError, `not enough values to unpack (expected ${n}, got ${x.length})`);
     tooMany(x, n);
