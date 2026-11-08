@@ -150,6 +150,11 @@ try {
   ok(true, "a live query's answer goes to the computer");
   await until(`__leg.acks().at(-1) === ${replay.length + 3}`);
   ok(true, "live output acked, counting from this open");
+  // (the relay's receipt, as relay.ts sends it: the page acks its token at once, and stays)
+  await ev(`__leg.sock.fire("message", { data: '{"relay":"receipt","r":"Rr0123456789abcdefgh_-","upto":262400}' }), true`);
+  await until("__leg.sent.some((m) => m.relay === 'ack')");
+  ok((await ev("JSON.stringify(__leg.sent.filter((m) => 'relay' in m && m.relay !== 'ping'))")) === JSON.stringify([{ relay: "ack", r: "Rr0123456789abcdefgh_-" }]) && (await ev("__leg.sock.closed === null")),
+    "the relay's receipt is acked with its token; the page stays");
 
   // 5. typing
   await ev("document.querySelector('#rterm .xterm-helper-textarea').focus(), true");

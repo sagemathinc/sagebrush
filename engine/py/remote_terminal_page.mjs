@@ -4,7 +4,9 @@
 // to the runner, "E <json>" for a client event, "D <base64>" for bytes drawn.
 //   bun engine/py/remote_terminal_page.mjs <remote_id> <scenario> [session]
 import { createInterface } from "node:readline";
-import { RemoteTerminal, terminalKey, toB64 } from "../../web/notebook/remote-terminal.js";
+import { RemoteTerminal, TERMINAL, terminalKey, toB64 } from "../../web/notebook/remote-terminal.js";
+// (PING_MS: a shorter ping interval, for the give-up test)
+if (process.env.PING_MS) TERMINAL.pingMs = Number(process.env.PING_MS);
 
 const [remoteId, scenario, session] = process.argv.slice(2);
 const say = (kind, o) => process.stdout.write(kind + " " + (typeof o === "string" ? o : JSON.stringify(o)) + "\n");

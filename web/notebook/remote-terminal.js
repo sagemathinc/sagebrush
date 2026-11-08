@@ -20,6 +20,11 @@
 // - input: {"t":"in","b":<base64>} frames of at most 16,384 bytes, with at most 64 KiB sent but not yet inacked; the
 //   rest waits here, in the page, never in the runner.
 // - "elsewhere": another page opened this session; this page's grant has ended.
+// - the relay's own controls on this leg (cloud web/remote/relay.ts, PAGE_OPS): every {"relay":"receipt","r","upto"}
+//   is acked at once with {"relay":"ack","r"} (the relay sends one per min(1 MiB, window/4) it forwards, and closes a
+//   leg that leaves its tokens unacked); the page pings {"relay":"ping"} every 15 s (the relay counts a leg with no
+//   valid ping for 40 s dead), and gives up after 2 pings unanswered, as the runner does (relay.py pinger).  Any other
+//   control, or one not in its exact serialization, ends the page.
 
 import { b64url, jwkThumbprint } from "./remote-client.js";
 
@@ -28,8 +33,11 @@ export const TERMINAL = {
   inPending: 64 * 1024,   // sent but not inacked (terminal_output.IN_PENDING)
   frame: 65_536,          // a terminal message's whole serialization (relay.py TERMINAL_FRAME)
   helloMs: 10_000,
+  pingMs: 15_000,         // between the page's pings to the relay (relay.py RELAY_LIMITS["pingMs"])
+  missedPongs: 2,         // pings unanswered: the leg is dead (relay.py RELAY_LIMITS["missedPongs"])
 };
 export const SYNTHETIC_BASE = "https://local.sagebrush.invalid/api/compute/v1";
+const RELAY_CONTROL = '{"relay":"';
 const OUT_TYPES = new Set(["replay", "out", "live", "inack", "exit", "opened", "error"]);
 
 /** The URL an open's proof is made over (terminal.py open_htu). */
@@ -95,6 +103,7 @@ export class RemoteTerminal {
    * @param o.on         (event) => void: {t:"opened",session} {t:"live"} {t:"exit",code,signal} {t:"elsewhere"}
    *                     {t:"error",error,reason?} {t:"closed",code,why}
    * @param o.WebSocket  injectable
+   * @param o.timers     { setInterval, clearInterval } (injectable; default the global ones): the relay pings
    */
   constructor(o) {
     this.o = o;
@@ -111,14 +120,22 @@ export class RemoteTerminal {
     this.gen = null;
     this.token = null;
     this.nonce = null;
+    this.timers = o.timers ?? globalThis;
+    this.pinger = null;          // the ping interval, from the leg's open to any close
+    this.missedPongs = 0;        // pings sent since the last pong
+    this.receiptUpto = -1;       // the last receipt's upto: each next one must be higher (cumulative, never repeated)
   }
 
   start() {
     if (this.state !== "new") throw new Error("RemoteTerminal.start: already started");
     this.state = "hello";
     const ws = (this.ws = new this.WS(this.o.url));
-    ws.addEventListener("open", () => this._send({ jsonrpc: "2.0", id: "t1", method: "hello",
-      params: { protocol: 1, purpose: "terminal", jwk: this.o.key.jwk, jkt: this.o.key.jkt } }));
+    ws.addEventListener("open", () => {
+      if (this.state === "ended") return;
+      this._send({ jsonrpc: "2.0", id: "t1", method: "hello",
+        params: { protocol: 1, purpose: "terminal", jwk: this.o.key.jwk, jkt: this.o.key.jkt } });
+      this.pinger = this.timers.setInterval(() => this._ping(), TERMINAL.pingMs);
+    });
     ws.addEventListener("message", (e) => this._message(e.data));
     ws.addEventListener("close", (e) => this._closed(e.code, e.reason || ""));
     ws.addEventListener("error", () => {});
@@ -147,8 +164,54 @@ export class RemoteTerminal {
     this.close(4000, why);
   }
 
+  /** The relay's ping, every pingMs: after missedPongs unanswered, the leg is dead and this page ends. */
+  _ping() {
+    if (this.state === "ended") return this._stopPinger();
+    if (this.missedPongs >= TERMINAL.missedPongs) {
+      this._emit({ t: "error", error: "relay", reason: "no pong" });
+      return this.close(4002, "no pong");
+    }
+    this.missedPongs++;
+    this._send({ relay: "ping" });
+  }
+
+  _stopPinger() {
+    if (this.pinger !== null) this.timers.clearInterval(this.pinger);
+    this.pinger = null;
+  }
+
+  /**
+   * A relay control on this leg (cloud relay.ts sends pages receipt and pong), strictly: the exact serialization, the
+   * keys in order.  receipt {r: 22 base64url characters, upto: an integer above the last receipt's} is acked at once
+   * with {"relay":"ack","r"}; pong resets the missed pings.  A duplicate or out-of-order receipt (upto not above the
+   * last), or any other control, ends the page.
+   */
+  _relayControl(text) {
+    let o;
+    try {
+      o = JSON.parse(text);
+    } catch {
+      return this._fail("a malformed relay control");
+    }
+    if (!o || typeof o !== "object" || Array.isArray(o) || JSON.stringify(o) !== text) return this._fail("a malformed relay control");
+    const keys = Object.keys(o).join();
+    if (o.relay === "receipt" && keys === "relay,r,upto" && typeof o.r === "string" && /^[A-Za-z0-9_-]{22}$/.test(o.r)
+        && Number.isSafeInteger(o.upto) && o.upto >= 0) {
+      if (o.upto <= this.receiptUpto) return this._fail("a receipt out of order");
+      this.receiptUpto = o.upto;
+      this._send({ relay: "ack", r: o.r });
+      return undefined;
+    }
+    if (o.relay === "pong" && keys === "relay") {
+      this.missedPongs = 0;
+      return undefined;
+    }
+    return this._fail("an unknown relay control");
+  }
+
   async _message(data) {
     if (this.state === "ended") return;
+    if (typeof data === "string" && data.startsWith(RELAY_CONTROL)) return this._relayControl(data);
     let m;
     try {
       m = JSON.parse(typeof data === "string" ? data : new TextDecoder().decode(data));
@@ -261,6 +324,7 @@ export class RemoteTerminal {
   }
 
   close(code = 1000, why = "") {
+    this._stopPinger();
     if (this.state === "ended") return;
     this.state = "ended";
     try {
@@ -272,6 +336,7 @@ export class RemoteTerminal {
   }
 
   _closed(code, why) {
+    this._stopPinger();
     if (this.state === "ended") return;
     this.state = "ended";
     this._emit({ t: "closed", code, why });
