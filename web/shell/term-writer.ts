@@ -75,8 +75,6 @@ type Item = {
   key?: LazyKey;
   /** a lazy's text is a command's output (S2's cap, and its cut counted as omitted) */
   styled: boolean;
-  /** a lazy's text size (UTF-8 bytes), counted as omitted if it is dropped */
-  size: number;
   /** an idle() frontier: nothing merges into it after, so a later write never extends that wait */
   sealed?: boolean;
   /** an end item's command (its marker's count read from it when it is made) */
@@ -85,10 +83,10 @@ type Item = {
   settle: () => void;
   released: boolean;
 };
-const item = (kind: Kind, data: string, bytes: number, make?: () => string, key?: LazyKey, styled = false, size = 0): Item => {
+const item = (kind: Kind, data: string, bytes: number, make?: () => string, key?: LazyKey, styled = false): Item => {
   let settle!: () => void;
   const done = new Promise<void>((r) => (settle = r));
-  return { kind, data, bytes, make, key, styled, size, done, settle, released: false };
+  return { kind, data, bytes, make, key, styled, done, settle, released: false };
 };
 /** the bytes of `s` that fit in `max` UTF-8 bytes, never splitting a character: [units read, bytes written] */
 const fit = (s: string, max: number): [number, number] => {
@@ -254,7 +252,6 @@ export class TermWriter {
       const same = this.queue.find((q) => q.key === key && !q.sealed);
       if (same) {
         same.make = make;
-        same.size = size;
         return same.done;
       }
     }
@@ -262,7 +259,7 @@ export class TermWriter {
       this.drop(size, output);
       return SETTLED;
     }
-    const it = item("lazy", "", SLICE, make, key, output, size);
+    const it = item("lazy", "", SLICE, make, key, output);
     this.queue.push(it);
     void this.pump();
     return it.done;

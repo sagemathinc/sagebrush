@@ -188,6 +188,16 @@ try {
     k("Enter"); ${TA}.dispatchEvent(new InputEvent("input", { inputType: "insertLineBreak", bubbles: true })); return 1; })()`);
   await pause(200);
   check((await evaluate(`${T}.editor.buf`)) === "echo ph" && (await evaluate(`window.__execs`)) === ex7, `X7: a phone keyboard's text inserted once, its 229 Enter never submits: ${JSON.stringify(await evaluate(`${T}.editor.buf`))}`);
+  // (#854 follow-up X6: text the browser inserts with no keydown at all (the OS emoji picker, dictation) is inserted
+  // once; a key the panel takes is still inserted once, not again by its input event)
+  await evaluate(`${T}.editor.reset("echo ")`);
+  await evaluate(`${TA}.dispatchEvent(new InputEvent("input", { inputType: "insertText", data: "\u{1F600}", bubbles: true })), 1`);
+  await pause(100);
+  const x6 = await evaluate(`${T}.editor.buf`);
+  await focusTerm();
+  await type("z");
+  await pause(100);
+  check(x6 === "echo \u{1F600}" && (await evaluate(`${T}.editor.buf`)) === "echo \u{1F600}z", `X6: an emoji picker's text (no keydown) inserted once, and a typed key after it once: ${JSON.stringify(await evaluate(`${T}.editor.buf`))}`);
   await evaluate(`${T}.editor.reset("")`);
 
   // ---- OUT-ISO on the shell's output (the rules of web/term/xterm-view.ts, shared with the remote terminal)
@@ -441,6 +451,18 @@ try {
   check(r?.status === "done" && /\[\u2026 1048576 more bytes not shown\]\n$/.test(r.out) && r.out.length < 1048576 + 200, `a page command's 2 MiB write: 1 MiB shown, then the omission line (${(r?.out ?? "").slice(-40)})`);
   r = await run("bigreplace");
   check(r?.status === "done" && r.out.endsWith("s\n") && !r.out.includes("r\n") , `a page command's replace: the latest text (${(r?.out ?? "").slice(-10)})`);
+  // (#854 follow-up O3: a refresh past the writer's room is cut in the panel at REPLACE_MAX (57 280 bytes), before the
+  // writer sees it: no cut there, and the rest counted in the command's one marker)
+  await evaluate(`(() => { ${T}.opts.commands.hugereplace = async (a, io) => { io.replace("h".repeat(70000)); await new Promise((r) => setTimeout(r, 50)); return 0; }; return 1; })()`);
+  const cutsO3 = await evaluate(`${T}.writer.stats.cuts`);
+  r = await run("hugereplace");
+  check(r?.status === "done" && /\[\u2026 12720 more bytes not shown\]\n$/.test(r.out) && (await evaluate(`${T}.writer.stats.cuts`)) === cutsO3,
+    `O3: a 70 000-byte refresh: 57 280 shown, the panel's cut counted (12 720), no cut in the writer: ${JSON.stringify((r?.out ?? "").slice(-40))}`);
+  // (#854 follow-up O4: an exit line's text is cut at EXIT_UNITS (512), a shell's long reason included)
+  await evaluate(`(() => { const h = ${T}.opts.host, x0 = h.exec; h.exec = async () => { h.exec = x0; return { kind: "unavailable", row: 2, reason: "R".repeat(2000), ops: [] }; }; return 1; })()`);
+  await run("echo o4");
+  const o4 = await evaluate(`${T}.screenText`);
+  check(o4.includes("the shell is unavailable: " + "R".repeat(486)) && !o4.includes("R".repeat(487)), `O4: a 2 000-unit reason: the exit line cut at 512 units (${(o4.match(/R+/g) ?? []).map((x) => x.length).join(",")})`);
   await focusTerm();
   for (let i = 0; i < 300; i++) await evaluate(`${T}.editor.reset(""), 1`), await realKey("Enter");
   await until(`!${T}.writer.writing`, 20000);
@@ -513,6 +535,14 @@ try {
   await realKey("Enter", { text: "\r" });
   const kb = await evaluate(`({ hidden: document.querySelector(".sb-term").hidden, focus: document.activeElement?.id || document.activeElement?.tagName })`);
   check(reopened && kb.hidden === true && kb.focus === "morebtn", `TP-7-R2: reopened from the ⋯ menu by keyboard, hidden by keyboard: focus on the ⋯ button (${JSON.stringify(kb)})`);
+  // (#852 V11, grader X4: an opener still in the page and focusable gets focus back, not the ⋯ fallback)
+  await evaluate(`(() => { const b = document.createElement("button"); b.id = "x4opener"; b.textContent = "x4"; document.body.appendChild(b); b.focus(); ${T}.show(); return 1; })()`);
+  await until(`!document.querySelector(".sb-term").hidden`, 5000);
+  const x4in = await evaluate(`document.querySelector(".sb-term").contains(document.activeElement)`);
+  await evaluate(`document.querySelector(".sb-term-hide").click()`);
+  const x4 = await evaluate(`document.activeElement?.id || document.activeElement?.tagName`);
+  await evaluate(`document.getElementById("x4opener").remove(), 1`);
+  check(x4in && x4 === "x4opener", `X4: hiding returns focus to the visible opener, not the ⋯ button (${x4})`);
   await evaluate(`document.querySelector("#termbtn").click()`);
   await until(`!document.querySelector(".sb-term").hidden`, 5000);
   // (TP-1: ✕ ends the shell's worker: counted, with reset as the control that fires)

@@ -205,7 +205,6 @@ export class TerminalPanel {
   private start: { line: number; isDisposed: boolean; dispose(): void } | null = null;
   /** the prompt is on screen and the editor's line is drawn after it */
   private editing = false;
-  private key229 = false;
 
   constructor(private opts: TerminalOptions) {
     if (!document.getElementById("sb-term-css")) {
@@ -320,11 +319,8 @@ export class TerminalPanel {
     // (the keyboard: the event itself; xterm does nothing with a key (false), and nothing it sends is read)
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== "keydown") return false;
-      if (e.isComposing || e.keyCode === 229) {
-        this.key229 = true;
-        return false;
-      }
-      this.key229 = false;
+      // (a composition's or a phone keyboard's key (229): its text comes from the input events below)
+      if (e.isComposing || e.keyCode === 229) return false;
       this.onKey({ key: e.key, ctrl: e.ctrlKey, alt: e.altKey, meta: e.metaKey, shift: e.shiftKey }, e);
       return false;
     });
@@ -349,11 +345,12 @@ export class TerminalPanel {
       if (e.data) this.act(this.editor.insert(e.data, "typed"));
       setTimeout(() => (composed = null), 0);
     });
+    // (text the browser inserts with no key the panel took: a phone keyboard's (after a 229 keydown), the OS emoji
+    // picker's or dictation's (no keydown at all: X6); a key the panel takes is prevented, so it never arrives here too)
     ta.addEventListener("input", (e) => {
       const ie = e as InputEvent;
       if (ie.inputType === "insertText" && ie.data && ie.data === composed) return void (composed = null);
-      if (this.key229 && ie.inputType === "insertText" && !ie.isComposing && ie.data) this.act(this.editor.insert(ie.data, "typed"));
-      this.key229 = false;
+      if (!this.ended && ie.inputType === "insertText" && !ie.isComposing && ie.data) this.act(this.editor.insert(ie.data, "typed"));
     });
     this.term = term;
     this.fit = fit;
