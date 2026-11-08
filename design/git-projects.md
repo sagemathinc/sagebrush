@@ -50,7 +50,17 @@ git_projects
 - A file over the workspace's 200 MiB limit: listed. Until tiered-files PR 3 (chunks) has shipped, a file over 95 MiB too.
 - Git LFS files arrive as GitHub's pointer files, not their contents: listed with that reason.
 
-### 2.2 The token for a private repository
+### 2.2 Limits (daybreak2)
+
+These are enforced, each with at-limit and one-over tests in PR 2:
+- **Entries:** at most 10,000 archive entries, counted as each is read from the zip's directory, before ignores or skips, so a flood of ignored entries is bounded too. Entry 10,001 refuses the import.
+- **Staging:** the download reads at most 1 GiB + 1 byte, whatever `Content-Length` says. Over 1 GiB, the staging object is deleted and the import refused. This bounds service cost; it is separate from the person's storage quota.
+- **A batch:** at most 500 files and at most 256 MiB of uncompressed bytes (a file is at most 200 MiB, so one always fits). Each file is inflated and hashed as a stream, never the whole batch in memory. A file's inflated bytes are counted as they come, and inflating stops at its declared size + 1 byte or 200 MiB + 1 byte, whichever is less, so a highly compressed or mislabelled entry can't exceed them. PR 2 measures that a batch at these limits fits a Worker's memory and CPU, and lowers them if it doesn't.
+- **Quota:** every new blob or chunk an import stores is reserved through the account object's serialized file reservation (design/sync-server.md §6.1), the same path as ordinary writes, and re-checked after each await. When room can't be reserved, the import stops before its next file. So an import and ordinary writes together can't overshoot the quota.
+- **One at a time:** at most one copy or update in progress per account. A second is refused with the first's progress. An import unfinished for 24 hours is cancelled, and its staging object deleted.
+- **The final transaction** (§2 step 4) creates up to 10,000 entries and 10,000 `base` rows at once. PR 2 measures it at exactly 10,000 files before it merges. If it doesn't fit a transaction's limits, the rows go into bounded staging tables first and one `INSERT … SELECT` makes them visible, or the entry limit is lowered. One over the limit is refused with nothing visible.
+
+### 2.3 The token for a private repository
 
 A public repository needs no token. For a private one, the person's GitHub token is sent with the "Copy from GitHub" request and used for exactly one call, step 2's download. It is never stored and never logged, the same rule as web/gitpush/worker.mjs. Whether a GitHub App would be better than a personal token is open (§7).
 
@@ -99,8 +109,7 @@ The `/git` prototype's flow, kept as it was:
 
 ## 7. Open questions
 
-- **Private repositories:** the person's token for one request (§2.2), or a GitHub App installation, whose short-lived tokens are GitHub's recommended way for a server? The token is simpler to build now; the App is a better long-term fit if many people use this. Proposal: the token now, the App later if needed.
-- **Limits,** for daybreak2: the file count (proposal: 10,000, matching gitpush's COPY_FILES), the staging object's size (proposal: 1 GiB), and the Workers limits on one batch, measured before PR 2 merges.
+- **Private repositories:** the person's token for one request (§2.3), or a GitHub App installation, whose short-lived tokens are GitHub's recommended way for a server? The token is simpler to build now; the App is a better long-term fit if many people use this. Proposal: the token now, the App later if needed.
 - **Branches:** v1 follows one branch per folder. Switching branches is copying again into another folder.
 
 ## 8. The PR sequence
