@@ -369,7 +369,7 @@ def cat(sess, call, args):
                 raise NotSupported("cat(sep =) other than one string")
             sep = v.data[0]
         elif name == "file":
-            # a file route: refused until Rill's files go through the file gate (design §9)
+            # gate: cat(file =) refused (a file route, until Rill's files go through the file gate: design §9)
             raise RError("cat(file =) is not available in Rill yet: Rill doesn't write files", call)
         elif name is not None:
             raise NotSupported("cat(%s =)" % name)

@@ -14,8 +14,8 @@ does.
 """
 
 from .lex import lex
-from .values import (MISSING, NULL, Formals, Lang, Placeholder, Sym, chr_, cplx, dbl, int_, lgl,
-                     sym)
+from .values import (MISSING, NULL, Formals, Lang, Placeholder, Sym, Vector, chr_, cplx, dbl, int_,
+                     lgl, sym)
 
 # binding powers (?Syntax, lowest first); a left-associative operator stops at an
 # equal power, a right-associative one continues
@@ -462,7 +462,7 @@ class Parser:
 
 
 def _is_string(x):
-    return getattr(x, "type", None) == "character"
+    return isinstance(x, Vector) and x.type == "character"
 
 
 def _extraction_head(rhs):

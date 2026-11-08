@@ -1,0 +1,150 @@
+{
+ "format": 1,
+ "note": "Rill's gate inventory (design/rill.md §9): every route scripts/rill-gates.mjs finds in lib/_rill, each with a reviewed decision; a PR that adds a route lists it here.",
+ "routes": {
+  "builtin:!": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:!=": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:%%": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:%/%": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:&": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:*": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:+": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:-": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:/": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin::": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:<": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:<=": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:==": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:>": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:>=": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:^": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:c": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:cat": {
+   "decision": "internal",
+   "why": "writes to the session's output only; its file = argument is refused (gate:cat(file =))"
+  },
+  "builtin:invisible": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "builtin:print": {
+   "decision": "internal",
+   "why": "writes to the session's output only"
+  },
+  "builtin:|": {
+   "decision": "internal",
+   "why": "computes on R values only: no host effect"
+  },
+  "call:getattr": {
+   "decision": "internal",
+   "why": "reads the memory guard's own r_bytes field by a constant name, never a name from R code"
+  },
+  "gate:cat(file =)": {
+   "decision": "refused",
+   "why": "a file route: an R error before any effect until Rill's files go through the page's and the CLI's file gates (test/rill.test.ts)"
+  },
+  "host:_capacity.capacity": {
+   "decision": "internal",
+   "why": "reads the host's free-memory figure, for §8.5's reservations"
+  },
+  "host:_capacity.effective_guard_bytes": {
+   "decision": "internal",
+   "why": "the allowance from that figure, for §8.5's reservations"
+  },
+  "host:_memguard.SagebrushMemoryError": {
+   "decision": "internal",
+   "why": "the memory guard's refusal type, reported as R's allocation error"
+  },
+  "host:_memguard.memory_guard": {
+   "decision": "internal",
+   "why": "words a memory refusal (Sagebrush's sentence)"
+  },
+  "host:sys.stderr.write": {
+   "decision": "internal",
+   "why": "the session's error output (R's stderr), as print and errors write it"
+  },
+  "host:sys.stdout.write": {
+   "decision": "internal",
+   "why": "the session's output (R's stdout)"
+  },
+  "import:_capacity": {
+   "decision": "internal",
+   "why": "the memory figure (imported only above mem.SMALL_BYTES)"
+  },
+  "import:_memguard": {
+   "decision": "internal",
+   "why": "the memory guard's refusal and wording"
+  },
+  "import:math": {
+   "decision": "internal",
+   "why": "arithmetic only"
+  },
+  "import:sys": {
+   "decision": "internal",
+   "why": "the output streams only (host:sys.*)"
+  },
+  "value:F": {
+   "decision": "internal",
+   "why": "a constant R value"
+  },
+  "value:T": {
+   "decision": "internal",
+   "why": "a constant R value"
+  },
+  "value:pi": {
+   "decision": "internal",
+   "why": "a constant R value"
+  }
+ }
+}
