@@ -113,7 +113,9 @@ const COUNTER = `(() => { window.__warms = []; const count = (m) => { if (m && m
 // a Chrome with a fresh profile, one tab; `init`: a script run before the page's own
 async function chromium(init = "") {
   const profile = mkdtempSync(join(tmpdir(), "sb-preload-chrome-"));
-  const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], { stdio: ["ignore", "ignore", "pipe"], detached: true });
+  // (--password-store=basic: no OS keyring, whose absence stalls a fresh profile's first fetch 25 s on a host with a
+  // desktop session bus; the grader's note on 3f7a00c3)
+  const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--password-store=basic", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], { stdio: ["ignore", "ignore", "pipe"], detached: true });
   children.add({ kill: (sig) => { try { process.kill(-chrome.pid, sig); } catch {} } });
   const port = await devtoolsPort(profile, undefined, { child: chrome });
   const cdp = `http://127.0.0.1:${port}`;
@@ -155,11 +157,15 @@ async function chromium(init = "") {
 const count = (asked, f) => asked.filter((p) => p === f).length;
 const size = (f) => statSync(join(dist, f)).size;
 // (a case: a fresh site and browser, the notebook opened, `body` given them; each step named in `phase`, and an error
-// keeps the step it was thrown in, as the close and the stop that follow it rename `phase`)
+// keeps the step it was thrown in, as the close and the stop that follow it rename `phase`. Every step after a failed one
+// that cleans up still runs, and the FIRST error is the one thrown: a later one, from the close or the stop, is only
+// said, so it can't hide what failed first (latex's note on 3f7a00c3))
 let cases = 0;
 const thrownIn = (e) => { if (e && typeof e === "object" && !("phase" in e)) e.phase = phase; return e; };
 async function kase(doc, body, { init = "", slow = null, alter = null } = {}) {
   const name = `case ${++cases} (${doc})`;
+  let first = null;
+  const keep = (e) => { if (first) console.log(`  (then, in ${phase}: ${e?.message ?? e})`); else first = thrownIn(e); };
   phase = `${name}: the site`;
   const s = await site(slow, alter);
   try {
@@ -171,8 +177,13 @@ async function kase(doc, body, { init = "", slow = null, alter = null } = {}) {
       ok(await t.open(t.href), `(${doc}: the page is ready)`);
       phase = `${name}: its checks`;
       await body(t, s);
-    } catch (e) { throw thrownIn(e); } finally { phase = `${name}: Chromium's close`; await close(); }
-  } catch (e) { throw thrownIn(e); } finally { phase = `${name}: the site's stop`; await s.stop(); }
+    } catch (e) { keep(e); }
+    phase = `${name}: Chromium's close`;
+    try { await close(); } catch (e) { keep(e); }
+  } catch (e) { keep(e); }
+  phase = `${name}: the site's stop`;
+  try { await s.stop(); } catch (e) { keep(e); }
+  if (first) throw first;
 }
 
 try {
@@ -251,7 +262,7 @@ try {
     const pkg = s.asked.filter((p) => p.startsWith("/pkg/"));
     ok(JSON.stringify([...new Set(pkg)].sort()) === JSON.stringify([...PANDAS].sort()) && PANDAS.every((f) => count(s.asked, f) === 1 && s.bytes.get(f) === size(f)), "a pandas notebook: exactly the set's chunks pandas needs, each once, at idle: " + JSON.stringify(pkg));
     ok((await t.ev("window.__warms.length")) === 0 && (await t.ev("sagebrush.notebook.meta.pkgset")) === undefined, "...nothing ran, nothing pinned (its metadata names no set)");
-    const out = await t.run(0, 240000);
+    const out = await t.run(0);
     ok(out.includes("(2, 1)"), "its Run: " + JSON.stringify(out));
     ok(PANDAS.every((f) => count(s.asked, f) === 1 && s.bytes.get(f) === size(f)), "...fetched none of them again: " + JSON.stringify(s.asked.filter((p) => p.startsWith("/pkg/"))));
     ok((await t.ev("sagebrush.notebook.meta.pkgset")) === S, "...and pinned the set it used at the Run: the latest, the one prefetched");
