@@ -354,16 +354,21 @@ def print_value(sess, v):
 
 
 def _print_reservation(v):
-    """print's peak: an element string per element and the lines they are laid out in (numbers at most 24
-    characters, logicals 5, strings four times their length with their quotes, for escapes), reserved first."""
+    """print's peak, reserved first: an element string per element (each at most w characters: numbers 24,
+    logicals 5, a string four times its length plus its quotes, for escapes), and the laid-out output, every
+    element padded to the widest, with its line labels, held twice (the lines and their join).  The width is
+    the widest element's bound, so a single long string pads every row (astra's R2)."""
     if not isinstance(v, Vector):
         return mem.reserve(0, "character")
     n = len(v.data)
     if v.type == "character":
-        chars = sum(4 * len(e) + 2 for e in v.data if e is not None) + 2 * n
+        widths = [2 if e is None else 4 * len(e) + 2 for e in v.data]
     else:
-        chars = (5 if v.type == "logical" else 24) * n
-    return mem.reserve(0, "character", (n, "character"), extra_bytes=2 * chars + 8 * n)
+        widths = [5 if v.type == "logical" else 24] * n
+    w = max(widths) if widths else 0
+    label = len("[%d]" % n) + 1
+    laid_out = n * (w + 1) + n * label
+    return mem.reserve(0, "character", (n, "character"), extra_bytes=sum(widths) + 2 * laid_out)
 
 
 def invisible(sess, call, args):

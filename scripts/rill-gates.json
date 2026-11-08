@@ -134,6 +134,18 @@
    "decision": "internal",
    "why": "the output streams only (host:sys.*)"
   },
+  "preflight:c": {
+   "decision": "internal",
+   "why": "c() with names refused before its arguments are evaluated"
+  },
+  "preflight:cat": {
+   "decision": "refused",
+   "why": "cat's file = and any argument name but sep, refused before any argument is evaluated (gate:cat(file =))"
+  },
+  "preflight:print": {
+   "decision": "internal",
+   "why": "print with anything but one value refused before its arguments are evaluated"
+  },
   "value:F": {
    "decision": "internal",
    "why": "a constant R value"

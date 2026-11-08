@@ -186,7 +186,7 @@ cases = {
   "!x": 50 * 8 * 2,
   "x & y": 50 * 8 * 3,
   "cat(x)": 50 * 136 + 24 * 50 + 50,
-  "print(x)": 50 * 136 + 2 * (24 * 50) + 8 * 50,
+  "print(x)": 50 * 136 + 24 * 50 + 2 * (50 * (24 + 1) + 50 * len("[50] ")),
 }
 peak = [0]
 real_enter = mem.Reservation.__enter__
@@ -215,6 +215,34 @@ print(json.dumps(out))
     assert.deepEqual(short, [want, want - 1], `${src}: refused one byte short`);
     assert.equal(open, 0, `${src}: nothing left reserved`);
   }
+});
+
+// (astra's R2 residual) print pads every element to the widest: one long string among short ones must be reserved
+// for the padded layout, not the strings' own lengths
+test("§8.5: print reserves its padded layout: a skewed-width vector's output fits its reservation", () => {
+  const got = py(`
+import json
+from _rill import mem
+from _rill.eval import Session
+from _rill.parse import parse
+out = []
+s = Session(out.append, out.append)
+src = 'c("' + "a" * 1000 + '", ' + ", ".join(['"b"'] * 99) + ')'
+s.evaluate(parse("x <- " + src)[0])
+mem.SMALL_BYTES = 0
+peak = [0]
+real_enter = mem.Reservation.__enter__
+def spy(self):
+    r = real_enter(self)
+    peak[0] = max(peak[0], mem.open_bytes())
+    return r
+mem.Reservation.__enter__ = spy
+mem._allowance = lambda: (10 ** 9, None)
+s.evaluate(parse("print(x)")[0])
+print(json.dumps({"peak": peak[0], "printed": len("".join(out))}))
+`);
+  assert.ok(got.printed > 100000, `the layout pads every row (${got.printed} characters)`);
+  assert.ok(got.peak >= 2 * got.printed + 100 * 136, `reserved ${got.peak} for ${got.printed} characters of output, held twice, and 100 element strings`);
 });
 
 test("§8.5: the parser's tokens and tree are reserved for the source's size while a program runs", () => {
@@ -318,6 +346,9 @@ test("§9: the gate census catches every planted route spelling (mutants)", asyn
     ["eval.py", "f = open('x')\n", /^call:open$/],
     ["eval.py", "e = eval('1')\n", /^call:eval$/],
     ["base.py", 'BUILTINS["evil"] = cat\n', /^builtin:evil$/],
+    ["base.py", 'BUILTINS = {"probe_print": print_}\n', /BUILTINS assigned more than once|^builtin:probe_print$/],
+    ["base.py", 'VALUES = {"probe": 1}\n', /VALUES assigned more than once|^value:probe$/],
+    ["base.py", 'PREFLIGHT = {"cat": print_}\n', /PREFLIGHT assigned more than once/],
   ];
   for (const [file, code, want] of MUTANTS) {
     const dir = mkdtempSync(join(tmpdir(), "rill-census-"));

@@ -179,8 +179,8 @@ class Parser:
             t = self.take()
             k = t.kind
             if t.kind == "OP" and t.text in UNARY:
-                frames.append(("unary", t, rbp, eq_ok))
                 self.push(1)
+                frames.append(("unary", t, rbp, eq_ok))
                 rbp = UNARY[t.text]
                 continue
             if k in ("IF", "WHILE"):
@@ -239,8 +239,8 @@ class Parser:
                         power, assoc = BINARY[key]
                         if not (power < rbp or (power == rbp and assoc == "left")):
                             self.take()
-                            frames.append(("binary", (t, left, self.peek()), rbp, eq_ok))
                             self.push(2)
+                            frames.append(("binary", (t, left, self.peek()), rbp, eq_ok))
                             rbp = power if assoc == "left" else power - 1
                             break
                 if not frames:

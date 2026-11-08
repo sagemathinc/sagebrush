@@ -34,6 +34,7 @@ function pyFiles(dir) {
 }
 
 const TABLES = ["BUILTINS", "VALUES", "PREFLIGHT"];
+const TABLE_ROUTE = { BUILTINS: "builtin", VALUES: "value", PREFLIGHT: "preflight" };
 const DUNDERS = ["__dict__", "__class__", "__globals__", "__subclasses__", "__builtins__"];
 
 /** The routes in lib/_rill (route -> the files it appears in), and the problems: spellings it can't read. */
@@ -42,6 +43,7 @@ export function census(root = ROOT) {
   const problems = [];
   const add = (key, file) => (routes.get(key) ?? routes.set(key, new Set()).get(key)).add(relative(root, file));
   const problem = (file, n, what) => problems.push(`${relative(root, file)}:${n}: ${what}`);
+  const tableInits = new Map();
   for (const file of pyFiles(join(root, "lib", "_rill"))) {
     const lines = readFileSync(file, "utf8").split("\n");
     let inDoc = false;
@@ -65,6 +67,16 @@ export function census(root = ROOT) {
         else if (/\bas\b/.test(code)) problem(file, n, "an import with `as`");
       }
       for (const h of HOST) if (new RegExp(`(?<![\\w.])${h}(?![\\w.])`).test(code) && !/^\s*import\b/.test(code)) problem(file, n, `the host module ${h} used as a value`);
+      // (a table's one initialization, `NAME = {…}` on one line: each literal key is a route, and a second
+      // assignment of the same table anywhere is a problem; astra's R3 residual)
+      for (const t of TABLES) {
+        const init = new RegExp(`^\\s*${t}\\s*=\\s*\\{(.*)\\}\\s*$`).exec(code);
+        if (!init) continue;
+        tableInits.set(t, (tableInits.get(t) ?? 0) + 1);
+        if (tableInits.get(t) > 1) problem(file, n, `${t} assigned more than once`);
+        for (const k of init[1].matchAll(/(?:^|[,{]\s*)(["'])([^"']*)\1\s*:/g)) add(`${TABLE_ROUTE[t]}:${k[2]}`, file);
+        if (/[^\s]/.test(init[1]) && !/^\s*(?:"[^"]+"\s*:\s*[^,]+(?:,\s*"[^"]+"\s*:\s*[^,]+)*)?\s*,?\s*$/.test(init[1].replace(/Vector\([^)]*\)/g, "V"))) problem(file, n, `${t}'s initialization in a form the census can't read`);
+      }
       for (const t of TABLES) if (new RegExp(`(?<![\\w.])${t}\\b`).test(code)) {
         const ok = new RegExp(`^\\s*${t}\\[(?:"[^"]+"|_op)\\]\\s*=\\s*\\w+\\s*$|^\\s*${t}\\s*=\\s*(?:\\{\\}|\\{.*\\})\\s*$`).test(code) || new RegExp(`=\\s*(?:base\\.)?${t}\\s*$`).test(code) || new RegExp(`\\b${t}\\.get\\(`).test(code) || new RegExp(`in\\s+(?:self\\.)?${t}\\b`).test(code);
         if (!ok) problem(file, n, `${t} used in a form the census can't read`);
@@ -78,8 +90,6 @@ export function census(root = ROOT) {
       const text = lines.join("\n");
       for (const b of text.matchAll(/BUILTINS\["([^"]+)"\]\s*=/g)) add("builtin:" + b[1], file);
       for (const loop of text.matchAll(/for _op in \(([^)]*)\):\n\s+BUILTINS\[_op\]/g)) for (const op of loop[1].matchAll(/"([^"]+)"/g)) add("builtin:" + op[1], file);
-      const values = /VALUES = \{([^}]*)\}/.exec(text);
-      if (values) for (const v of values[1].matchAll(/"([^"]+)":/g)) add("value:" + v[1], file);
     }
   }
   return { routes, problems };
