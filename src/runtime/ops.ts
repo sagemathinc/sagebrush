@@ -19,6 +19,17 @@ const MAXB = 9007199254740991n;
 // prototype; plain values take the fast paths.
 export const plainArr = (o: any): boolean => o.$cls === undefined;
 
+// Assignment unpacking may read an array layout directly only when Python's
+// type-level iterator is still the list/tuple implementation.  This retains
+// the namedtuple/layout-equivalent fast path while observing an override.
+const plainSubclassUnpackArr = (c: any, tupleLayout: boolean): boolean => {
+  if (c.$unpackIterVer !== c.$ver) {
+    c.$unpackIterVer = c.$ver;
+    c.$unpackIterPlain = lookupType(c, "__iter__") === lookupType(tupleLayout ? T.tuple : T.list, "__iter__");
+  }
+  return c.$unpackIterPlain;
+};
+
 const LAYOUT_DUNDERS = ["__len__", "__getitem__", "__setitem__", "__delitem__", "__iter__", "__contains__", "__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__", "__add__", "__mul__", "__bool__", "__hash__", "__repr__"];
 // A subclass of list/tuple/dict/set that overrides none of the base type's
 // dunders behaves exactly like its base for the operator fast paths.
@@ -2164,9 +2175,12 @@ const tooMany = (x: any, n: number) => {
 };
 export function unpack(x: any, n: number): any[] {
   if (Array.isArray(x)) {
-    if (x.length === n) return x;
-    if (x.length < n) raise(T.ValueError, `not enough values to unpack (expected ${n}, got ${x.length})`);
-    tooMany(x, n);
+    const c = (x as any).$cls;
+    if (c === undefined || plainSubclassUnpackArr(c, (x as any).$t === true)) {
+      if (x.length === n) return x;
+      if (x.length < n) raise(T.ValueError, `not enough values to unpack (expected ${n}, got ${x.length})`);
+      tooMany(x, n);
+    }
   }
   const it = iter(x);
   const out: any[] = [];
@@ -2180,7 +2194,16 @@ export function unpack(x: any, n: number): any[] {
 }
 // `a, *b, c = x` -> [a, [b...], c]
 export function unpackEx(x: any, before: number, after: number): any[] {
-  const all = toArray(x);
+  let all: any[];
+  if (Array.isArray(x)) {
+    const c = (x as any).$cls;
+    if (c === undefined || plainSubclassUnpackArr(c, (x as any).$t === true)) all = x.slice();
+    else {
+      const it = iter(x);
+      all = [];
+      for (let v = it.$next(); v !== DONE; v = it.$next()) all.push(v);
+    }
+  } else all = toArray(x);
   if (all.length < before + after) raise(T.ValueError, `not enough values to unpack (expected at least ${before + after}, got ${all.length})`);
   return [...all.slice(0, before), all.slice(before, all.length - after), ...all.slice(all.length - after)];
 }
