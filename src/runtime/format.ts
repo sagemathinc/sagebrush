@@ -804,13 +804,14 @@ export function percentFormat(fmtStr: string, args: any, bytesMode = false): str
     if (!needIndex && fv(v) !== undefined && !(v instanceof PrimBox)) return BigInt(Math.trunc(fv(v)!));
     // (%o %x %X %c: PyNumber_Index; %d %i %u: PyNumber_Long, __int__ before __index__)
     for (const name of needIndex ? ["__index__"] : ["__int__", "__index__"]) {
-      const f = lookupType(typeOf(v), name);
+      // (special()'s per-class cache: a miss, __int__ before __index__, is not an MRO walk)
+      const f = lookupSpecial(v, name);
       if (f !== undefined) {
         // (as CPython's mainformatlong: the result checked as PyNumber_Index's
         // or PyNumber_Long's, a bool or int subclass with its DeprecationWarning,
         // and any TypeError on the way is the format's own)
         try {
-          return BigInt(intResult(name, specialOf(v, f, name)(v)));
+          return BigInt(intResult(name, f(v)));
         } catch (e) {
           if (!isinstance(toPyExc(e), T.TypeError)) throw e;
         }
