@@ -523,6 +523,11 @@
    "kind": "host",
    "owner": "host"
   },
+  "web/shell/panel.ts :: makeTerm :: term.loadAddon(fit); #0": {
+   "kind": "rich",
+   "owner": "terminal",
+   "readers": []
+  },
   "web/term/xterm-view.ts ::  :: export { FitAddon } from \"@xterm/addon-fit\"; #0": {
    "kind": "rich",
    "owner": "terminal",

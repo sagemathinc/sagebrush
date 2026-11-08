@@ -1,67 +1,48 @@
-// The terminal panel's size (plan-bash-shell r8c E5.6): the panel's own code (web/shell/panel.ts and what it alone
-// brings: panel-render.ts and panel.css, which it imports as text; the page's commands, panel-commands.ts and
-// presence.ts, are the page's, charged by the size gate's marker) bundled and minified as ESM, then gzipped
-// at level 9 with a fixed mtime; fails above LIMIT (below).  The bundler is bun's (the repository builds with bun,
-// pinned in CI and budgets.json; it has no esbuild), with the options E5.6 names: --bundle --minify --format=esm.
-// Conservative: the CSS is counted as panel.ts embeds it (unminified text).
-// The dependency census: every bundled input is one of the panel's own files (relative, in web/shell/), and no
-// import is bare (no npm specifier); host.ts is a type-only import, erased.
-//   bun web/shell/panel-size.mjs        (prints the figures; exit 1 on a failure)
-import { gzipSync } from "node:zlib";
-import { join, relative } from "node:path";
+// The Terminal's size gate (plan-term-xterm r2.7 §4, daybreak2's ruling): the actual built web/dist/shell/terminal.js,
+// as web/build.ts made it (CI's pinned bun), never a synthetic bundle: its raw bytes and Node's gzip -9 bytes, each
+// under its own absolute ceiling.  It replaces E5.6's figure for the panel's own code, which stopped meaning anything
+// once the chunk carries xterm.  Also pinned: the chunk is a lazy module of its own (index.html only names it for a
+// dynamic import, at the Terminal's first open, never at first paint), the site serves the same bytes, and the CLI's
+// embedded page doesn't carry it.
+//   bun web/build.ts && bun web/shell/panel-size.mjs        (prints the figures; exit 1 on a failure)
+import { readFileSync, existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { join } from "node:path";
 
-// (E5.6's 8 192 B, raised to 9 216 B by daybreak2's ruling on #326 r2 (terminal-panel-pr326-r2-daybreak2.md,
-// 3b9176e9): the 274 B over the old ceiling are the r1 reviews' required fixes only, no new features); raised to
-// 9 344 B by daybreak2's rulings on #337 r3 (terminal-longline-pr337-r3-size-ruling-daybreak2.md, 423988e6; set at
-// 9 344 by DB2-LL-337-3, terminal-longline-pr337-r3-daybreak2.md, 96f6bf15: bun 1.4.4, CI's pin, measures 9 281):
-// "DB2-LL-337-2 exact UAX regional-indicator parity across retained windows, plus scalar-safe slice hold."; raised to
-// 9 600 B by daybreak2's size ruling on #337 r4 (bun 1.4.4 measured 9 585 B, +304 over r3b): the E5.5 batching (the
-// first slice and frame pacing, chunk runs, PAGE_RUNS, content-visibility), DB2-LL-337-4 and board's R4-1; raised to
-// 9 728 B by daybreak2's ruling DB2-T358-3 on #358 (bun 1.4.4 measured 9 667 B, +68): the first-open notice, the
-// static aria-describedby line about what commands do to your files, required safety context for the terminal on
-// every host (its text in terminal.ts, outside these inputs); raised to 9 792 B by daybreak2's E5.6 ceiling ruling on
-// the dismissible intro (terminal-intro-dismiss-e56-size-ruling-daybreak2.md, 38b3b43a; bun 1.4.4 measured 9 741 B,
-// +74): its "Got it" (William, Oct 30: "it needs to be dismissible"), kept per device in the site's localStorage
-// preferences, the input's description corrected and its focus restored, and the button's font and margin; raised to
-// 9 856 B by daybreak2's E5.6 ceiling ruling on the terminal's help/Tab (terminal-help-tab-e56-size-ruling-daybreak2.md;
-// bun 1.4.4 measured base 9 756 B, candidate 280e0b58 9 820 B, +64): only the panel's integration surface (the `tab`
-// option's calls: Tab, the input and Enter resets, help NAME's route, the ls colour call); Tab completion, help,
-// compgen and the colours themselves are web/shell/complete.ts and panel-tab.ts, outside these inputs
-const LIMIT = 9856;
-const here = import.meta.dir;
-const root = join(here, "..", "..");
-const ALLOWED = new Set(["web/shell/panel.ts", "web/shell/panel-render.ts", "web/shell/panel.css"]);
+// (daybreak2 rules the ceilings from the landing measurement with CI's bun 1.4.4: PR 2 r4 (e8153082) measured 459 209 B
+// raw and 127 554 B gzip -9 (Node 24.21.0's zlib); daybreak2 approved 460 600 / 127 970 on r4, headroom 1 391 / 416,
+// about 0.3%.  r3's were 457 400 / 126 790 for 456 001 / 126 381)
+const LIMIT_RAW = 460600, LIMIT_GZIP = 127970;
+const root = join(import.meta.dir, "..", "..");
+const dist = join(root, "web", "dist");
 const fails = [];
-
-const r = await Bun.build({ entrypoints: [join(here, "panel.ts")], target: "browser", format: "esm", minify: true, metafile: true });
-if (!r.success) {
-  console.log("panel-size: the bundle failed:\n" + r.logs.map(String).join("\n"));
+const chunk = join(dist, "shell", "terminal.js");
+if (!existsSync(chunk)) {
+  console.log("panel-size: FAIL\n  web/dist/shell/terminal.js is missing: run bun web/build.ts first");
   process.exit(1);
 }
-// (E5.6's figure: the JS with panel.css's text taken out, then panel.css minified on its own, the two concatenated)
-const cssBuild = await Bun.build({ entrypoints: [join(here, "panel.css")], minify: true });
-const css = Buffer.from(await cssBuild.outputs[0].arrayBuffer());
-const noCss = await Bun.build({ entrypoints: [join(here, "panel.ts")], target: "browser", format: "esm", minify: true,
-  plugins: [{ name: "css-out", setup(b) { b.onLoad({ filter: /panel\.css$/ }, () => ({ contents: "", loader: "text" })); } }] });
-const jsOnly = Buffer.from(await noCss.outputs[0].arrayBuffer());
-const specGz = gzipSync(Buffer.concat([jsOnly, css]), { level: 9 });
-console.log(`panel-size: E5.6 figure: ${jsOnly.length} B JS + ${css.length} B CSS minified = ${specGz.length} B gzipped`);
-const js = Buffer.from(await r.outputs[0].arrayBuffer());
-const inputs = Object.keys(r.metafile?.inputs ?? {}).map((p) => relative(root, join(root, p)).replace(/^(\.\.\/)+/, ""));
-for (const p of inputs) {
-  const rel = relative(root, p.startsWith("/") ? p : join(process.cwd(), p));
-  const norm = ALLOWED.has(p) ? p : rel;
-  if (!ALLOWED.has(norm)) fails.push(`an input outside the panel's own files: ${p}`);
+const js = readFileSync(chunk);
+// (gzip by Node's zlib, level 9, as the binding figures are: this script may run under bun, whose zlib differs)
+const gz = Number(execFileSync("node", ["-e", "process.stdout.write(String(require('zlib').gzipSync(require('fs').readFileSync(process.argv[1]), { level: 9 }).length))", chunk], { encoding: "utf8" }));
+console.log(`panel-size: web/dist/shell/terminal.js: ${js.length} B raw (ceiling ${LIMIT_RAW}), ${gz} B gzip -9 by Node (ceiling ${LIMIT_GZIP})`);
+if (js.length > LIMIT_RAW) fails.push(`${js.length} B raw is over ${LIMIT_RAW}`);
+if (!(gz > 0) || gz > LIMIT_GZIP) fails.push(`${gz} B gzipped is over ${LIMIT_GZIP}`);
+if (!/export\s*\{[^}]*\bopenTerminal\b/.test(js.toString("utf8"))) fails.push("the chunk doesn't export openTerminal");
+
+// lazy: the page names the chunk only as a dynamic import's specifier, never as a script or a static import
+const page = readFileSync(join(dist, "index.html"), "utf8");
+if (!page.includes('"./shell/terminal.js"')) fails.push("index.html no longer names ./shell/terminal.js for its dynamic import");
+if (/<script[^>]*src=["']?\.?\/?shell\/terminal\.js/.test(page) || /import\s[^;(]*from\s*["']\.?\/?shell\/terminal\.js/.test(page) || /<link[^>]*shell\/terminal\.js/.test(page))
+  fails.push("index.html loads shell/terminal.js at first paint (a script, a static import or a preload)");
+// the site serves the same bytes (a site build only)
+const site = join(root, "web", "site", "public", "shell", "terminal.js");
+if (existsSync(join(root, "web", "site", "public", "index.html"))) {
+  if (!existsSync(site) || !readFileSync(site).equals(js)) fails.push("web/site/public/shell/terminal.js isn't the built chunk");
 }
-for (const [p, info] of Object.entries(r.metafile?.inputs ?? {})) {
-  for (const imp of info.imports ?? []) {
-    if (!/^\.{1,2}\//.test(imp.original ?? imp.path) && !(imp.path ?? "").startsWith("/")) fails.push(`a bare import in ${p}: ${imp.original ?? imp.path}`);
-  }
-}
-// (gzip, level 9, fixed mtime: zlib's gzip header has mtime 0 and no name; deterministic for the same input)
-const gz = gzipSync(js, { level: 9 });
-console.log(`panel-size: as shipped (CSS embedded unminified): ${js.length} B minified, ${gz.length} B gzipped; inputs: ${inputs.join(", ")}`);
-if (specGz.length > LIMIT) fails.push(`${specGz.length} B gzipped (E5.6's figure) is over ${LIMIT}`);
+// the CLI's embedded page doesn't carry it (the CLI's page has no Terminal)
+const webGen = join(root, "build", "cli", "web.gen.js");
+if (existsSync(webGen) && /["']shell\/terminal\.js["']\s*:/.test(readFileSync(webGen, "utf8"))) fails.push("the CLI's embedded assets carry shell/terminal.js");
+
 if (fails.length) {
   console.log("panel-size: FAIL\n  " + fails.join("\n  "));
   process.exit(1);

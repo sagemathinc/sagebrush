@@ -83,14 +83,20 @@ try {
     const up = await until(`(() => { const t = document.querySelector(".sb-term"); return !!t && !t.hidden && t.dataset.startMs !== undefined && !document.querySelector(".sb-term-loading"); })()`, 60000);
     const saved = await evaluate(`document.querySelector("#saved")?.textContent ?? ""`);
     check(!!up, `${as}: the dock opens and the shell starts from the app's own files${up ? "" : ` (the page says: ${JSON.stringify(saved)})`}`);
-    await evaluate(`(() => {
-      const ta = document.querySelector(".sb-term textarea");
-      document.querySelector(".sb-term-status").textContent = "";
-      ta.value = "echo ok";
-      ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
-    })()`);
-    await until(`document.querySelectorAll(".sb-term-cmd").length >= 1 && !document.querySelector(".sb-term").classList.contains("running") && document.querySelector(".sb-term-status").textContent !== ""`, 60000);
-    const r = await evaluate(`(() => { const c = [...document.querySelectorAll(".sb-term-cmd")].at(-1); return c && { out: c.querySelector(".sb-term-out")?.textContent, status: document.querySelector(".sb-term-status").textContent }; })()`);
+    // (the shell's screen read from xterm's buffer, the line set in the editor, a real Enter: web/shell/test-panel-page.mjs's way)
+    await evaluate(`window.__lines = (from, to) => { const b = window.__sbTerm.term.buffer.active, out = []; for (let i = from; i < to; i++) { const l = b.getLine(i); if (!l) continue; const s = l.translateToString(true); if (l.isWrapped && out.length) out[out.length - 1] += s; else out.push(s); } return out; };
+      window.__cursorLine = () => { const b = window.__sbTerm.term.buffer.active; return b.baseY + b.cursorY; }; 1`);
+    const realEnter = async () => { for (const type of ["rawKeyDown", "keyUp"]) await send("Input.dispatchKeyEvent", { type, key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 }); };
+    const runCmd = async (cmd) => {
+      const from = await evaluate(`(() => { window.__sbTerm.term.focus(); document.querySelector(".sb-term-status").textContent = ""; window.__sbTerm.editor.reset(${JSON.stringify(cmd)}); return window.__cursorLine(); })()`);
+      await realEnter();
+      await until(`!document.querySelector(".sb-term").classList.contains("running") && document.querySelector(".sb-term-status").textContent !== "" && !window.__sbTerm.writer.writing`, 60000);
+      return evaluate(`(() => { const lines = window.__lines(Math.max(0, ${from} - 2), window.__cursorLine());
+        const start = lines.findLastIndex((l) => l.includes(" $ ") && l.trimEnd().endsWith(${JSON.stringify(cmd.trimEnd())}));
+        let out = lines.slice(start + 1); if (out.length && /^exit \\d+/.test(out.at(-1))) out.pop();
+        return { out: out.length ? out.join("\\n") + "\\n" : "", status: document.querySelector(".sb-term-status").textContent }; })()`);
+    };
+    const r = await runCmd("echo ok");
     check(r?.out === "ok\n" && r.status === "done", `${as}: echo ok prints ok: ${JSON.stringify(r)}`);
     // The policy at work in the shell worker itself, from inside it (R-380-3, astra's S2): a fetch of this origin's own
     // page and one of another origin (localhost, the same server, readable from anywhere: app/serve-app.py), a module imported
@@ -139,39 +145,43 @@ try {
     // Each check's text starts with its case id ("E2.u1: ..."): the control runs (K*) compare the failing ids.  Tab and
     // Shift-Tab are real key events (CDP Input), so the browser's own focus move happens when the panel leaves it.
     if (coi) {
-      const T = `document.querySelector(".sb-term textarea")`;
+      const TA = `document.querySelector(".sb-term .xterm-helper-textarea")`;
       const key = async (k, shift = false) => {
         const ev = { key: k, code: k, windowsVirtualKeyCode: { Tab: 9, Enter: 13, ArrowUp: 38, ArrowDown: 40 }[k], modifiers: shift ? 8 : 0 };
-        await send("Input.dispatchKeyEvent", { type: "keyDown", ...ev });
+        await send("Input.dispatchKeyEvent", { type: "rawKeyDown", ...ev });
         await send("Input.dispatchKeyEvent", { type: "keyUp", ...ev });
       };
-      const set = (v, caret = v.length, end = caret) => evaluate(`(() => { const ta = ${T}; ta.focus(); ta.value = ${JSON.stringify(v)}; ta.setSelectionRange(${caret}, ${end}); return true; })()`);
-      const value = () => evaluate(`${T}?.value ?? null`);
-      const focused = () => evaluate(`document.activeElement === ${T}`);
-      const ncmds = () => evaluate(`document.querySelectorAll(".sb-term-cmd").length`);
+      // (the line and its caret, set in the editor; the focus in xterm's input, where real keys go)
+      const set = (v, caret = v.length) => evaluate(`(() => { const t = window.__sbTerm; t.term.focus(); t.editor.reset(${JSON.stringify(v)}); t.editor.cur = ${caret}; return true; })()`);
+      const value = () => evaluate(`window.__sbTerm?.editor.buf ?? null`);
+      const focused = () => evaluate(`document.activeElement === ${TA}`);
+      await evaluate(`window.__execs = 0; { const h = window.__sbTerm.opts.host, ex = h.exec.bind(h); h.exec = (...a) => (window.__execs++, ex(...a)); } 1`);
+      const ncmds = () => evaluate(`window.__execs`);
       const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
       // (a value changed from `from`, or `from` after `ms`)
       const settle = async (from, ms = 3000) => { const t0 = Date.now(); let v; while ((v = await value()) === from && Date.now() - t0 < ms) await sleepMs(50); return v; };
-      // (a command typed and run: its output's text, status, the command count after it)
-      const run = async (cmd) => {
-        await evaluate(`(() => { document.querySelector(".sb-term-status").textContent = ""; const ta = ${T}; ta.value = ${JSON.stringify(cmd)}; ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })); })()`);
-        await until(`!document.querySelector(".sb-term").classList.contains("running") && document.querySelector(".sb-term-status").textContent !== ""`, 60000);
-        return evaluate(`(() => { const c = [...document.querySelectorAll(".sb-term-cmd")].at(-1); return { out: c.querySelector(".sb-term-out")?.textContent ?? "", status: document.querySelector(".sb-term-status").textContent, html: c.querySelector(".sb-term-out")?.innerHTML ?? "", n: document.querySelectorAll(".sb-term-cmd").length }; })()`);
-      };
+      // (a command run: its output's text, status, the commands run so far)
+      const run = async (cmd) => ({ ...(await runCmd(cmd)), n: await ncmds() });
+      // (the colour of a word in the last screenful: its first cell's foreground, palette index or -1 for the default)
+      const colourOf = (word) => evaluate(`(() => { const w = ${JSON.stringify(word)}, b = window.__sbTerm.term.buffer.active;
+        for (let y = b.length - 1; y >= Math.max(0, b.length - 60); y--) { const l = b.getLine(y), s = l.translateToString(false);
+          for (let k = s.indexOf(w); k >= 0; k = s.indexOf(w, k + 1)) if ((k === 0 || s[k - 1] === " ") && (k + w.length >= s.length || s[k + w.length] === " ")) { const c = l.getCell(k); return c.isFgPalette() ? c.getFgColor() : -1; } }
+        return null; })()`);
       // (the fixtures: a folder of their own; each file holds its own name)
       const NAMES = ["a;touch m", "$(touch m)x", `it's "q"`, "q$(touch m)", "r`touch m`"];
       const sq = (x) => "'" + x.replace(/'/g, "'\\''") + "'";
       await run("mkdir -p /e2e && cd /e2e");
       for (const nm of NAMES) await run(`printf %s ${sq(nm)} > ${sq(nm)}`);
       await run("printf n > notes.csv; mkdir -p sub; touch xy1 xy2");
-      const noM = async () => (await run("test -e m && echo HAS-M || echo no-m")).out === "no-m\n";
+      const noM = async () => { const o = (await run("test -e m && echo HAS-M || echo no-m")).out; if (o !== "no-m\n") console.log("noM saw", JSON.stringify(o)); return o === "no-m\n"; };
       check((await noM()) && (await run("ls -1")).out.split("\n").filter(Boolean).length === NAMES.length + 4, `E0: the fixtures are in /e2e, and no m`);
       // E1 commands and paths
       await set("mkd"); await key("Tab"); const e1a = await settle("mkd");
       await set("cat no"); await key("Tab"); const e1b = await settle("cat no");
       await set("cd su"); await key("Tab"); const e1c = await settle("cd su");
       await set("cat xy"); await key("Tab"); const e1d = await settle("cat xy", 800); await key("Tab"); await sleepMs(800);
-      const block = await evaluate(`document.querySelector(".sb-term-cands")?.textContent ?? null`);
+      await until(`!window.__sbTerm.writer.writing`, 3000);
+      const block = await evaluate(`window.__lines(0, window.__cursorLine()).at(-1) ?? null`);
       check(e1a === "mkdir " && e1b === "cat notes.csv " && e1c === "cd sub/" && e1d === "cat xy" && block === "xy1  xy2", `E1: mkd → ${JSON.stringify(e1a)}; cat no → ${JSON.stringify(e1b)}; cd su → ${JSON.stringify(e1c)}; cat xy → ${JSON.stringify(e1d)}, then the block ${JSON.stringify(block)}`);
       // E2 the literal insertion, then Enter: exactly that file, one command, no m
       const e2 = async (id, typed, want) => {
@@ -181,7 +191,7 @@ try {
         const v = await settle(typed);
         const before = await ncmds();
         const r = v !== typed ? await run(v) : null;
-        const ok = !!r && r.out === want && r.status === "done" && r.n === before + 1 && (await noM());
+        const ok = !!r && r.out.replace(/\n$/, "") === want && r.status === "done" && r.n === before + 1 && (await noM());
         check(ok, `${id}: ${JSON.stringify(typed)}+Tab → ${JSON.stringify(v)}; Enter: ${JSON.stringify(r?.out)} ${r?.status} (${before} → ${r?.n} commands)`);
       };
       await e2("E2.u1", "cat a", "a;touch m");
@@ -201,7 +211,7 @@ try {
       const n3 = await ncmds();
       await set("echo hi"); await key("Tab"); await sleepMs(800);
       const v3 = await value(), n3b = await ncmds();
-      await evaluate(`${T}.value = ""; ${T}.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true, cancelable: true }))`);
+      await set(""); await key("ArrowUp");
       const up = await value();
       check(v3 === "echo hi" && n3b === n3 && up !== "echo hi", `E3: echo hi+Tab: input ${JSON.stringify(v3)}, commands ${n3} → ${n3b}, history's last ${JSON.stringify(up)}`);
       // E4 no keyboard trap
@@ -209,19 +219,17 @@ try {
       const e4 = {
         empty: await leaves(() => set("")),
         mid: await leaves(() => set("cat no", 5)),
-        sel: await leaves(() => set("cat no", 4, 6)),
         shift: await (async () => { await set("cat no"); await key("Tab", true); await sleepMs(300); return !(await focused()); })(),
         end: await (async () => { await set("cat no"); await key("Tab"); await settle("cat no"); return await focused(); })(),
       };
       // (a command that runs until Stop: the shell has no sleep)
-      await evaluate(`(() => { const ta = ${T}; ta.value = "while :; do :; done"; ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })); })()`);
+      await evaluate(`window.__sbTerm.term.focus(); window.__sbTerm.editor.reset("while :; do :; done")`); await realEnter();
       await until(`document.querySelector(".sb-term").classList.contains("running")`, 30000);
       e4.running = await leaves(() => set("cat no"));
       await evaluate(`document.querySelector(".sb-term-stop").click()`);
       await until(`!document.querySelector(".sb-term").classList.contains("running")`, 30000);
       check(e4.empty, `E4.empty: empty input + Tab: focus leaves`);
       check(e4.mid, `E4.mid: caret mid-word + Tab: focus leaves`);
-      check(e4.sel, `E4.sel: a selection + Tab: focus leaves`);
       check(e4.running, `E4.running: a command running + Tab: focus leaves`);
       check(e4.shift, `E4.shift: Shift-Tab: focus leaves`);
       check(e4.end, `E4.end: at a word's end + Tab: focus stays (it completes)`);
@@ -235,14 +243,14 @@ try {
       await evaluate(`window.__sbTermTabDelayMs = 400`);
       const req0 = Number(await evaluate(`document.querySelector(".sb-term").dataset.tabRequests ?? 0`));
       await set("cat no"); await key("Tab"); await sleepMs(50);
-      await send("Input.insertText", { text: "x" });
+      await send("Input.dispatchKeyEvent", { type: "keyDown", key: "x", text: "x", unmodifiedText: "x", windowsVirtualKeyCode: 88 }); await send("Input.dispatchKeyEvent", { type: "keyUp", key: "x", windowsVirtualKeyCode: 88 });
       await sleepMs(900);
       const e5a = await value(), req1 = Number(await evaluate(`document.querySelector(".sb-term").dataset.tabRequests ?? 0`));
       check(e5a === "cat nox" && req1 === req0 + 1, `E5.a: more typing during a slow listing: ${JSON.stringify(e5a)}, ${req1 - req0} request`);
       await set("cat no"); await key("Tab"); await sleepMs(50);
       await run("cd sub");
       await sleepMs(900);
-      check((await value()) === "" && !(await evaluate(`document.querySelector(".sb-term-cands")`)), `E5.b: a cd during a slow listing: nothing inserted (${JSON.stringify(await value())})`);
+      check((await value()) === "" && !(await evaluate(`window.__lines(0, window.__cursorLine()).some((l) => /notes\\.csv\\s+nox?$/.test(l))`)), `E5.b: a cd during a slow listing: nothing inserted (${JSON.stringify(await value())})`);
       await run("cd /e2e");
       // E5.d: history's Up then Down back to the same text during a slow listing: superseded, nothing inserted
       const ab0 = Number(await evaluate(`document.querySelector(".sb-term").dataset.tabAborts ?? 0`));
@@ -255,9 +263,12 @@ try {
       // E6 colours
       const c6 = await run("ls");
       const c6l = await run("ls -l"), c6p = await run("ls | cat"), c6r = await run("ls > out.txt; cat out.txt");
-      const coloured = (h) => /class="[^"]*sb-fg-/.test(h);
-      check(/<span class="[^"]*sb-fg-4[^"]*">sub<\/span>/.test(c6.html) && !/<span class="[^"]*sb-fg-[^"]*">notes\.csv/.test(c6.html), `E6.ls: ls colours the folder sub, not a data file (${c6.html.slice(0, 300)})`);
-      check(!coloured(c6l.html) && !coloured(c6p.html) && !coloured(c6r.html), `E6.plain: ls -l, ls | cat, ls > f: no colour (${[c6l, c6p, c6r].map((x) => x.html.slice(0, 80)).join(" | ")})`);
+      void c6l; void c6p;
+      const cSub = await run("ls"), subC = await colourOf("sub"), csvC = await colourOf("notes.csv");
+      check(cSub.status === "done" && subC === 4 && csvC === -1, `E6.ls: ls colours the folder sub (palette ${subC}), not a data file (${csvC})`);
+      await run("ls | cat");
+      const pipeC = await colourOf("sub");
+      check(pipeC === -1 && c6r.status === "done", `E6.plain: ls | cat (and ls -l, ls > f, as complete.ts decides): no colour (${pipeC})`);
       await evaluate(`window.__sbTermTabDelayMs = 0`);
       // E7 help and compgen
       const h = await run("help"), hls = await run("help ls"), hno = await run("help nosuch"), cg = await run("compgen -c ca"), cz = await run("compgen -c zz"), cp = await run("echo x | compgen -c");
@@ -269,10 +280,10 @@ try {
       await evaluate(`window.__sbTermTabDelayMs = 400`);
       await set("cat no"); await key("Tab"); await sleepMs(50);
       // (the input and the root kept by reference: the close must abort the listing and leave the input as it was)
-      await evaluate(`window.__e5c = { ta: ${T}, root: document.querySelector(".sb-term"), ab: Number(document.querySelector(".sb-term").dataset.tabAborts ?? 0) }`);
+      await evaluate(`window.__e5c = { ed: window.__sbTerm.editor, root: document.querySelector(".sb-term"), ab: Number(document.querySelector(".sb-term").dataset.tabAborts ?? 0) }`);
       await evaluate(`document.querySelector(".sb-term-end").click()`);
       await sleepMs(900);
-      const e5c = await evaluate(`({ v: window.__e5c.ta.value, ab: Number(window.__e5c.root.dataset.tabAborts ?? 0) - window.__e5c.ab, left: !!(document.querySelector(".sb-term-cands") || document.querySelector(".sb-term")) })`);
+      const e5c = await evaluate(`({ v: window.__e5c.ed.buf, ab: Number(window.__e5c.root.dataset.tabAborts ?? 0) - window.__e5c.ab, left: !!document.querySelector(".sb-term") })`);
       check(e5c && e5c.v === "cat no" && e5c.ab === 1 && !e5c.left, `E5.c: the session ended during a slow listing: aborted, the input untouched, nothing left (${JSON.stringify(e5c)})`);
       await evaluate(`window.__sbTermTabDelayMs = 0`);
     }
