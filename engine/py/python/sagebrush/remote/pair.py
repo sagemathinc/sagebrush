@@ -739,8 +739,20 @@ async def run_loopback(port=0, dev_origin=None, out=None, err=None, cwd=None):
     return 0
 
 
+USAGE = ("usage: sagebrush remote\n"
+         "       sagebrush remote login [--origin URL] [--name NAME] [--force]\n"
+         "       sagebrush remote --loopback [--port N]\n"
+         "  (this computer as a runner for your sagebrush.space notebooks, in this Python: through the\n"
+         "   cloud relay, enrolling it first if needed; login: enroll it again; --loopback: a paired\n"
+         "   page's runner, over 127.0.0.1)\n")
+
+
 def main(argv):
     """`sagebrush remote` (the relay), `sagebrush remote login ...`, or `sagebrush remote --loopback [--port N]`."""
+    if argv[:1] in (["-h"], ["--help"]):
+        # (the usage, on stdout, and nothing started: no relay, no port, no enrollment)
+        sys.stdout.write(USAGE)
+        return 0
     if argv[:1] == ["login"]:
         from sagebrush.remote.enroll import main as login_main
         return login_main(argv[1:])
@@ -776,11 +788,6 @@ def main(argv):
         sys.stderr.write("sagebrush remote: --port takes a port number (0 to 65535)\n")
         return 2
     if not loopback:
-        sys.stderr.write("usage: sagebrush remote\n"
-                         "       sagebrush remote login [--origin URL] [--name NAME] [--force]\n"
-                         "       sagebrush remote --loopback [--port N]\n"
-                         "  (this computer as a runner for your sagebrush.space notebooks, in this Python: through the\n"
-                         "   cloud relay, enrolling it first if needed; login: enroll it again; --loopback: a paired\n"
-                         "   page's runner, over 127.0.0.1)\n")
+        sys.stderr.write(USAGE)
         return 2
     return asyncio.run(run_loopback(port, dev_origin=os.environ.get("SAGEBRUSH_KERNEL_DEV_ORIGIN") or None))

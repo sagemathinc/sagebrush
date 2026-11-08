@@ -334,6 +334,17 @@ try {
   await push({ t: "error", error: "sessions" });
   await until("/as many/.test(document.querySelector('#rterm .rstatus')?.textContent ?? '')");
   ok((await status()) === "box already runs as many terminals as it allows. End one there, then Reconnect.", `no limit sent: ${JSON.stringify(await status())}`);
+  // (the relay stops answering pings: the page gives up with its own sentence, no reason after it, and offers Reconnect;
+  // the page's 15 s ping interval runs at 30 ms here, and this fake leg never answers a ping)
+  await ev("document.querySelector('#rterm .rhead button[aria-label=\"Close the terminal\"]').click(), true");
+  await ev(FAKE);
+  await ev("(() => { const si = window.setInterval; window.__si = si; window.setInterval = (f, ms, ...a) => si(f, ms === 15000 ? 30 : ms, ...a); return true; })()");
+  await ev("document.querySelector('#rtermbtn').click(), true");
+  await until("/isn't answering/.test(document.querySelector('#rterm .rstatus')?.textContent ?? '')");
+  ok((await status()) === "box isn't answering: the connection went quiet. Reconnect.", `the relay gone quiet: the sentence alone, no "(no pong)": ${JSON.stringify(await status())}`);
+  ok(await ev("[...document.querySelectorAll('#rterm .rhead button')].some((b) => b.textContent === 'Reconnect' && !b.hidden) && __leg.sent.filter((m) => m.relay === 'ping').length === 2 && __leg.sock.closed?.[0] === 4002"),
+    "two pings unanswered: the leg closed 4002, Reconnect offered");
+  await ev("window.setInterval = window.__si, true");
   await goto(base + "?phone=0");
 } catch (e) {
   ok(false, "the test stopped: " + (e?.stack ?? e));
