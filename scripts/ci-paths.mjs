@@ -289,6 +289,9 @@ const groupSources = { latex: [/^web\/board\/page\.ts$/] };
 const testedBy = (group) => matches(groupSources[group]);
 const webGroups = [
   ["notebook", webRuntime || suiteGroups.has("notebook")],
+  // (background loading's page test, about 2 min: its own group beside notebook's, selected as notebook is, so the
+  // notebook group stays inside PR CI's 10 min (#862's run: notebook 632 s, 114 s of it this test))
+  ["preload", webRuntime || suiteGroups.has("preload")],
   // (the LaTeX editor's page and agent tools, on a build with the editor on loopback hosts: web/latex/ is the core)
   ["latex", webRuntime || suiteGroups.has("latex") || testedBy("latex")],
   ["board-a", webRuntime || inArea("board") || suiteGroups.has("board-a")],

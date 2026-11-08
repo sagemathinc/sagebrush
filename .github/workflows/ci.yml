@@ -951,7 +951,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # (the groups a change selects, scripts/ci-paths.mjs webGroups: all of notebook, latex, board-a, board-b, board-c,
+        # (the groups a change selects, scripts/ci-paths.mjs webGroups: all of notebook, preload, latex, board-a, board-b, board-c,
         # board-unit, terminal and remote-preview on the full tier, a core web, runtime or workflow change)
         group: ${{ fromJSON(needs.changes.outputs.web_groups) }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
@@ -1003,6 +1003,11 @@ jobs:
               # (the bash shell's loader and its worker's own policy: plan-bash-shell r3 step 1)
               # (ShellHost, the mediator, over a real workspace: step 2)
               node scripts/web-tests.mjs run web-browser/notebook
+              ;;
+            preload)
+              # (background loading on the notebook page, web/preload.ts: its own group, about 2 min, so notebook's
+              # stays inside PR CI's 10 min; selected exactly as notebook is, scripts/ci-paths.mjs webGroups)
+              node scripts/web-tests.mjs run web-browser/preload
               ;;
             terminal)
               # (the terminal panel, plan-bash-shell r8c step 6: a group of its own, since its page test needs a flagged
