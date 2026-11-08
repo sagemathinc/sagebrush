@@ -116,6 +116,7 @@ Apply? [y/N]
   - Each run writes a snapshot again when the document changed in the workspace.
   - If the person edited that file here since fs-sync wrote it, fs-sync leaves it as it is: it doesn't replace it, delete it or upload it. It lists it under "Not uploaded (notebooks, boards and chats go only from the workspace to this computer for now)" as "changed here since fs-sync wrote it; left as it is", every run, until the person deletes or renames their edited copy. Then the next run writes a fresh snapshot.
   - A notebook, board or chat file made here, such as a new `.ipynb`, isn't uploaded either (§3.4). It's listed under the same heading as "new here; left as it is".
+  - If a file is already at a snapshot's path and fs-sync can't show it wrote that file (the first sync, a lost or damaged base, or an interrupted replacement, §3.4), fs-sync leaves it as it is. It's listed under the same heading: "Notes.ipynb  already here before fs-sync wrote it; left as it is (rename it to get the workspace's version)". This doesn't make the run exit 1 either.
   - A snapshot the person deleted here is written again, and the plan says so: "↓ Talk.ipynb  written again (you deleted it here; add it to .sagebrushignore to stop this)".
   - A listed edited snapshot alone doesn't make the run exit 1. Snapshots are download-only by design, so "in sync" (exit 0) means every file other than these matches.
 - **A first run** (no base) has no delete section, and says why: "First sync of this pair: nothing will be deleted."
