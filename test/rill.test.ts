@@ -275,6 +275,24 @@ print(json.dumps({"result": r, "formatted": calls[0], "printed": "".join(out), "
   assert.deepEqual(got, { result: "refused", formatted: 0, printed: "", open: 0 });
 });
 
+// (astra's R2 admission order, daybreak3) before an operation's reservation is admitted, nothing proportional to its
+// operands is built: the bodies of the reservation helpers hold only running scalars (no comprehension, list
+// repetition, list(), or append; a generator into sum() or max() is a scan); fails on a helper that builds widths
+test("§8.5: the reservation helpers compute their figures in constant space, before admission", () => {
+  const src = readFileSync(join(ROOT, "lib", "_rill", "base.py"), "utf8");
+  for (const name of ["_print_reservation", "_cat_reservation"]) {
+    const start = src.indexOf(`def ${name}(`);
+    assert.ok(start >= 0, name);
+    // (the body from its docstring to its last reservation, the one that admits the operation)
+    const next = src.indexOf("\ndef ", start + 1);
+    const fn = src.slice(start, next < 0 ? undefined : next);
+    const body = fn.slice(fn.indexOf('"""', fn.indexOf('"""') + 3) + 3, fn.lastIndexOf("return mem.reserve("));
+    assert.doesNotMatch(body, /\[[^\]\n]*\bfor\b/, `${name}: a list built by a comprehension before admission`);
+    assert.doesNotMatch(body, /\]\s*\*\s*\w/, `${name}: a list repeated before admission`);
+    assert.doesNotMatch(body, /\blist\(|\.append\(|\bsorted\(|\{[^}\n]*\bfor\b/, `${name}: a collection built before admission`);
+  }
+});
+
 test("§8.5: the parser's tokens and tree are reserved for the source's size while a program runs", () => {
   const got = py(`
 import json, _rill
