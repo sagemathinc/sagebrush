@@ -257,14 +257,14 @@
   },
   "engine/lib/mod-io-text.src": {
    "exact": false,
-   "ceiling": 63065,
+   "ceiling": 63229,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
   },
   "engine/lib/mod-io.src": {
    "exact": false,
-   "ceiling": 17784,
+   "ceiling": 17948,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -815,7 +815,7 @@
    "engine/lib/mod-hmac.src": 10123,
    "engine/lib/mod-html.src": 85615,
    "engine/lib/mod-importlib.src": 3604,
-   "engine/lib/mod-io-text.src": 63001,
+   "engine/lib/mod-io-text.src": 63165,
    "engine/lib/mod-io.src": 14908,
    "engine/lib/mod-ipaddress.src": 84439,
    "engine/lib/mod-ipython.src": 6801,
