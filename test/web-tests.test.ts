@@ -304,3 +304,19 @@ for (const [signal, code] of [["SIGTERM", 143], ["SIGINT", 130]] as const)
     assert.doesNotMatch(stdout, /START web-runner: node web\/test-[45]\.mjs/);
     assert.doesNotMatch(stdout, /web-tests: ran/);
   });
+
+// (the background-loading page is one run, in its own group, web-browser/preload: its ~114 s are spent once, never
+// in the notebook group as well; this repository's own headers, as `plan` reads them)
+test("web-tests plan: web/test-preload-page.mjs has exactly one run, web-browser/preload, and none in web-browser/notebook", () => {
+  const root = join(__dirname, "..", "..");
+  const plan = (...target: string[]) => {
+    const r = spawnSync(process.execPath, [script, "plan", ...target], { cwd: root, encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    return r.stdout.split("\n").filter(Boolean).map((line) => line.split("\t"));
+  };
+  const runs = plan().filter(([, cmd]) => cmd.split(" ").includes("web/test-preload-page.mjs"));
+  assert.deepEqual(runs.map(([target]) => target), ["web-browser/preload"]);
+  const notebook = plan("web-browser/notebook");
+  assert.ok(notebook.length > 0, "the notebook group still has its suites");
+  assert.deepEqual(notebook.filter(([, cmd]) => cmd.includes("test-preload-page")), []);
+});
