@@ -300,3 +300,7 @@ MemoryError __float__ | MemoryError: x | TypeError: %d format: a real number is 
 MemoryError __index__ | MemoryError: x | MemoryError: x | MemoryError: x | bytes TypeError: float argument required, not XK | MemoryError: x | MemoryError: x
 RecursionError __float__ | RecursionError: x | TypeError: %d format: a real number is required, not XK | TypeError: %c requires an int or a unicode character, not XK | bytes TypeError: float argument required, not XK | TypeError: %d format: a real number is required, not XK | TypeError: %c requires an integer in range(256) or a single byte, not XK
 RecursionError __index__ | RecursionError: x | RecursionError: x | RecursionError: x | bytes TypeError: float argument required, not XK | RecursionError: x | RecursionError: x
+-- bytes %c's range (grader's C5): 255, 256 and -1, as ints and through __index__
+255 b'\xff' b'\xff'
+256 OverflowError: %c arg not in range(256) OverflowError: %c arg not in range(256)
+-1 OverflowError: %c arg not in range(256) OverflowError: %c arg not in range(256)

@@ -909,7 +909,7 @@ export function percentFormat(fmtStr: string, args: any, bytesMode = false): str
         const v = nextArg();
         let c: string;
         if (bytesMode) {
-          if ((v instanceof PyBytes || v instanceof PyByteArray) && v.n === 1) c = String.fromCharCode(v.a[0]);
+          if (v instanceof PyBytes && v.n === 1) c = String.fromCharCode(v.a[0]); // (a bytearray too: PyByteArray extends PyBytes)
           else {
             // (CPython's byte_converter: a 1-byte bytes, else PyNumber_Index,
             // whose errors are raised, then the range)
@@ -919,7 +919,7 @@ export function percentFormat(fmtStr: string, args: any, bytesMode = false): str
             else {
               const f = lookupType(typeOf(v), "__index__");
               if (f === undefined) {
-                const what = v instanceof PyBytes || v instanceof PyByteArray ? `a ${typeName(v)} object of length ${v.n}` : typeName(v);
+                const what = v instanceof PyBytes ? `a ${typeName(v)} object of length ${v.n}` : typeName(v);
                 raise(T.TypeError, `%c requires an integer in range(256) or a single byte, not ${what}`);
               }
               k = intResult("__index__", specialOf(v, f, "__index__")(v));

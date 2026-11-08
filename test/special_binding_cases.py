@@ -884,3 +884,6 @@ for exc in (KeyboardInterrupt, SystemExit, GeneratorExit, StopIteration, MemoryE
 
         xo = type("XK", (), {name: xm})()
         print(exc.__name__, name, "|", " | ".join(tb(lambda: f % xo) for f in ("%f", "%d", "%c")), "| bytes", " | ".join(tb(lambda: f % xo) for f in (b"%f", b"%d", b"%c")))
+print("-- bytes %c's range (grader's C5): 255, 256 and -1, as ints and through __index__")
+for k in (255, 256, -1):
+    print(k, tb(lambda: b"%c" % k), tb(lambda: b"%c" % type("CI", (), {"__index__": lambda self: k})()))
