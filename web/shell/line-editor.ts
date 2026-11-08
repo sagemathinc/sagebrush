@@ -33,13 +33,15 @@ export class History {
   constructor(readonly limits: { entries: number; bytes: number; entryMax: number } = HISTORY, saved: string[] = []) {
     for (const s of saved) this.push(s);
   }
-  push(s: string): void {
-    if (s.trim() === "" || this.entries[this.entries.length - 1] === s) return;
+  /** Kept at the end, oldest out past the bounds; false when it isn't kept (blank, a repeat, past entryMax). */
+  push(s: string): boolean {
+    if (s.trim() === "" || this.entries[this.entries.length - 1] === s) return false;
     const b = utf8Len(s);
-    if (b > this.limits.entryMax) return;
+    if (b > this.limits.entryMax) return false;
     this.entries.push(s);
     this.bytes += b;
     while (this.entries.length > this.limits.entries || this.bytes > this.limits.bytes) this.bytes -= utf8Len(this.entries.shift()!);
+    return true;
   }
 }
 
@@ -177,18 +179,22 @@ export class LineEditor {
     // (the central guard: whatever path filled the line, nothing past the bound is ever submitted)
     if (utf8Len(this.buf) > this.maxBytes) return { t: "refused", how: "typed" };
     const line = this.buf;
-    this.history.push(line);
+    this.pushed = this.history.push(line);
     this.reset();
     return { t: "submit", line };
   }
+  /** whether the last submission added its own history entry (a repeat or a blank line adds none) */
+  private pushed = false;
 
-  /** A submission taken back (the panel refused to start it): the line restored, its history entry removed. */
+  /** A submission taken back (the panel refused to start it): the line restored, and its history entry removed only if
+   * it added one (after a repeat, the earlier entry stays: grader E2). */
   unsubmit(line: string): void {
     const e = this.history.entries;
-    if (e[e.length - 1] === line) {
+    if (this.pushed && e[e.length - 1] === line) {
       e.pop();
       this.history.bytes -= utf8Len(line);
     }
+    this.pushed = false;
     this.reset(line);
   }
 

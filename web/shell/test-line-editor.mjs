@@ -270,5 +270,20 @@ const fresh = (max = 1 << 20, hist = new History()) => new LineEditor(max, hist)
   ok(ed.buf === "echo again" && h.entries.length === 0 && h.bytes === 0, "unsubmit: the line back, the history as it was");
 }
 
+// #854 follow-up (grader E2): unsubmit removes only an entry its own submission added
+{
+  const h = new History(HISTORY, ["echo a"]);
+  const ed = fresh(1 << 20, h);
+  type(ed, "echo a");
+  const a = keys(ed, "Enter")[0];
+  ed.unsubmit(a.line);
+  ok(ed.buf === "echo a" && JSON.stringify(h.entries) === JSON.stringify(["echo a"]) && h.bytes === 6, `E2: after a repeat (no entry added), the earlier entry stays (${JSON.stringify(h.entries)})`);
+  type(ed, "x");
+  const b = keys(ed, "Enter")[0];
+  ed.unsubmit(b.line);
+  ok(JSON.stringify(h.entries) === JSON.stringify(["echo a"]) && h.bytes === 6, "E2: a new line's own entry is removed");
+  ok(h.push("echo a") === false && h.push(" ") === false && h.push("new") === true, "push says whether it kept the entry");
+}
+
 console.log(`${checks - fails}/${checks} checks passed`);
 if (fails) process.exit(1);

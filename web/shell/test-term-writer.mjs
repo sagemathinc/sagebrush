@@ -763,5 +763,61 @@ function putRig(budget = BUDGET, opts) {
   ok(st === "resolved" && r.text().includes("[\u2026 9 more bytes not shown]"), `and command 2's end still resolves with its own marker (${st})`);
 }
 
+// #854 follow-up (grader's deferred items N2, N26, R6, N7)
+{
+  // N2: a lazy item's SLICE reservation is refunded once it is made: while it is in flight, it holds its text's bytes only
+  const { w, r } = rig(BUDGET, { auto: false });
+  void w.write("first", "ui");
+  await turn();
+  void w.writeLazy(() => "abc");
+  ok(w.ledger.bytes === HEADROOM + 5 + SLICE, `N2: queued, the lazy write holds SLICE (${w.ledger.bytes - HEADROOM - 5})`);
+  r.pending.shift()();
+  await turn();
+  ok(r.writes.at(-1).data === "abc" && w.ledger.items === 1 && w.ledger.bytes === HEADROOM + 3, `N2: made and in flight, it holds its 3 bytes (${w.ledger.bytes - HEADROOM})`);
+  r.pending.shift()();
+  await turn();
+}
+{
+  // N26: a keyed lazy write dropped at the cap counts the size its call gave (the only place a lazy's size is read: a
+  // queued item keeps no size, so replacing one has nothing to update)
+  const { w } = rig(BUDGET, { auto: false });
+  void w.write("first", "ui");
+  await turn();
+  for (let i = 0; i < MAX_ITEMS - 1; i++) void w.writeLazy(() => "");
+  const before = w.stats.droppedBytes;
+  void w.writeLazy(() => "x".repeat(77), "replace", true, 77);
+  ok(w.ledger.bytes + SLICE > MAX_QUEUED && w.stats.droppedBytes - before === 77, `N26: a keyed output lazy dropped at the cap counts its size (${w.stats.droppedBytes - before})`);
+  w.dispose();
+}
+{
+  // R6: output dropped once a command's marker is made goes to stats.droppedBytes, never into that marker
+  const { w, r } = rig(BUDGET, { auto: false });
+  void w.write("first", "ui");
+  await turn();
+  const id = w.tryStartCommand();
+  void w.endOutput(id, 3);
+  r.pending.shift()();
+  await turn();
+  const endData = r.writes.at(-1).data;
+  ok(endData.includes("[\u2026 3 more bytes not shown]"), "(the end is made, its marker counting 3)");
+  for (let i = 0; i < 70; i++) void w.write("q".repeat(ITEM_MAX), "output");
+  ok(w.stats.droppedBytes > 0, `R6: output dropped after the marker is made is counted in stats.droppedBytes (${w.stats.droppedBytes})`);
+  while (r.pending.length) { r.pending.shift()(); await turn(); }
+  ok((r.text().match(/more bytes not shown/g) || []).length === 1 && r.text().includes("[\u2026 3 more bytes not shown]"), "R6: and the one marker still says 3");
+}
+{
+  // N7: the marker starts on a line of its own after output that didn't end one, and adds no blank line after one that did
+  const { w, r } = rig();
+  let id = w.tryStartCommand();
+  await w.write("abc", "output");
+  await w.endOutput(id, 5);
+  ok(r.text().includes("abc" + RESET + "\r\n\x1b[2;3m[\u2026 5 more bytes not shown]"), "N7: after \"abc\", the marker starts on a new line");
+  const { w: w2, r: r2 } = rig();
+  id = w2.tryStartCommand();
+  await w2.write("abc\n", "output");
+  await w2.endOutput(id, 5);
+  ok(r2.text().includes("abc\n" + RESET + "\x1b[2;3m[\u2026 5 more bytes not shown]"), "N7: after a line end, no extra line");
+}
+
 console.log(`${checks - fails}/${checks} checks passed`);
 if (fails) process.exit(1);
