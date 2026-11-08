@@ -13,17 +13,17 @@ import math
 
 from . import fmt, mem
 from .eval import NotSupported, RError
-from .values import NULL, Vector
+from .values import NULL, RVector
 
 INT_MAX = 2147483647
 RANK = {"logical": 0, "integer": 1, "double": 2, "complex": 3, "character": 4}
 
 
 def _vec(v):
-    """An operand as a Vector (NULL is a zero-length logical)."""
+    """An operand as a RVector (NULL is a zero-length logical)."""
     if v is NULL:
-        return Vector("logical", [])
-    if isinstance(v, Vector):
+        return RVector("logical", [])
+    if isinstance(v, RVector):
         return v
     raise NotSupported("this operand type")
 
@@ -191,7 +191,7 @@ def arith(sess, call, args):
                     out[i] = None
                 else:
                     out[i] = _dbl_op(op, a, b)
-        return Vector(rtype, out)
+        return RVector(rtype, out)
 
 
 def unary(sess, call, op, x):
@@ -205,7 +205,7 @@ def unary(sess, call, op, x):
         data = coerce(x, rtype)
         if op == "-":
             data = [None if e is None else -e for e in data]
-        return Vector(rtype, list(data))
+        return RVector(rtype, list(data))
 
 
 # ---------------------------------------------------------------- comparison and logic
@@ -237,7 +237,7 @@ def compare(sess, call, args):
             if t == "character" and op not in ("==", "!="):
                 a, b = _collate_key(a), _collate_key(b)
             out[i] = {"==": a == b, "!=": a != b, "<": a < b, ">": a > b, "<=": a <= b, ">=": a >= b}[op]
-        return Vector("logical", out)
+        return RVector("logical", out)
 
 
 def _logical_data(v):
@@ -258,7 +258,7 @@ def logic(sess, call, args):
         if x.type not in ("logical", "integer", "double"):
             raise RError("invalid argument type", call)
         with mem.reserve(len(x.data), "logical", (len(x.data), "logical")):
-            return Vector("logical", [None if e is None else not e for e in _logical_data(x)])
+            return RVector("logical", [None if e is None else not e for e in _logical_data(x)])
     x, y = _vec(args[0][1]), _vec(args[1][1])
     _check_attrs(x, y)
     for v in (x, y):
@@ -275,7 +275,7 @@ def logic(sess, call, args):
                 out[i] = False if (a is False or b is False) else (None if (a is None or b is None) else True)
             else:
                 out[i] = True if (a is True or b is True) else (None if (a is None or b is None) else False)
-        return Vector("logical", out)
+        return RVector("logical", out)
 
 
 # ---------------------------------------------------------------- : and c
@@ -309,8 +309,8 @@ def colon(sess, call, args):
     with mem.reserve(n, rtype):
         if as_int:
             a = int(a)
-            return Vector("integer", list(range(a, a + step * n, step)))
-        return Vector("double", [a + step * i for i in range(n)])
+            return RVector("integer", list(range(a, a + step * n, step)))
+        return RVector("double", [a + step * i for i in range(n)])
 
 
 def combine(sess, call, args):
@@ -318,7 +318,7 @@ def combine(sess, call, args):
     for name, v in args:
         if v is NULL:
             continue
-        if not isinstance(v, Vector):
+        if not isinstance(v, RVector):
             raise NotSupported("c() of this type")
         if v.attrs:
             raise NotSupported("c() of values with attributes")
@@ -331,7 +331,7 @@ def combine(sess, call, args):
         out = []
         for v in vals:
             out.extend(coerce(v, t))
-        return Vector(t, out)
+        return RVector(t, out)
 
 
 # ---------------------------------------------------------------- printing
@@ -358,7 +358,7 @@ def _print_reservation(v):
     logicals 5, a string four times its length plus its quotes, for escapes), and the laid-out output, every
     element padded to the widest, with its line labels, held twice (the lines and their join).  The width is
     the widest element's bound, so a single long string pads every row (astra's R2)."""
-    if not isinstance(v, Vector):
+    if not isinstance(v, RVector):
         return mem.reserve(0, "character")
     n = len(v.data)
     # (the widest element and the total, as running scalars: nothing proportional to the vector exists before
@@ -389,7 +389,7 @@ def _cat_reservation(args, sep):
     the output they are joined into, reserved before either is built (§8.5)."""
     count, chars = 0, 0
     for name, v in args:
-        if name is None and isinstance(v, Vector):
+        if name is None and isinstance(v, RVector):
             count += len(v.data)
             chars += sum(len(e) for e in v.data if e is not None) if v.type == "character" else 24 * len(v.data)
     return mem.reserve(0, "character", (count, "character"), extra_bytes=chars + count * len(sep))
@@ -398,7 +398,7 @@ def _cat_reservation(args, sep):
 def cat(sess, call, args):
     sep = " "
     for name, v in args:
-        if name == "sep" and isinstance(v, Vector) and v.type == "character" and len(v.data) == 1:
+        if name == "sep" and isinstance(v, RVector) and v.type == "character" and len(v.data) == 1:
             sep = v.data[0]
     with _cat_reservation(args, sep):
         _cat(sess, args)
@@ -411,11 +411,11 @@ def _cat(sess, args):
     items = []
     for name, v in args:
         if name == "sep":
-            if not (isinstance(v, Vector) and v.type == "character" and len(v.data) == 1):
+            if not (isinstance(v, RVector) and v.type == "character" and len(v.data) == 1):
                 raise NotSupported("cat(sep =) other than one string")
             sep = v.data[0]
         elif v is not NULL:
-            if not isinstance(v, Vector) or v.type == "complex":
+            if not isinstance(v, RVector) or v.type == "complex":
                 raise NotSupported("cat() of this type")
             for e in v.data:
                 if e is None:
@@ -466,4 +466,4 @@ BUILTINS["invisible"] = invisible
 BUILTINS["cat"] = cat
 
 # base's constants (values, not functions)
-VALUES = {"pi": Vector("double", [math.pi]), "T": Vector("logical", [True]), "F": Vector("logical", [False])}
+VALUES = {"pi": RVector("double", [math.pi]), "T": RVector("logical", [True]), "F": RVector("logical", [False])}

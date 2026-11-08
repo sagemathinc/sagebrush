@@ -13,7 +13,7 @@ Nothing here catches Stop (KeyboardInterrupt) or any exception it doesn't
 name (design §8.1).
 """
 
-from .values import MISSING, NULL, Formals, Lang, Placeholder, Sym, Vector, chr_
+from .values import MISSING, NULL, Formals, Lang, Placeholder, Sym, RVector, chr_
 
 NESTED_TOO_DEEPLY = "evaluation nested too deeply: infinite recursion / options(expressions=)?"
 # A1.3 evaluates these (closures and control flow); A1.1 says so
@@ -90,7 +90,7 @@ class Session:
             while True:
                 if mode == "eval":
                     e = expr
-                    if isinstance(e, Vector) or e is NULL:
+                    if isinstance(e, RVector) or e is NULL:
                         val, self.visible, mode = e, True, "return"
                     elif isinstance(e, Sym):
                         val, self.visible, mode = self.lookup(e.name), True, "return"
@@ -129,7 +129,7 @@ class Session:
                     if stage == 1:
                         x = self._flag(val, "x", op, e)
                         if (op == "&&" and x is False) or (op == "||" and x is True):
-                            val = Vector("logical", [x])
+                            val = RVector("logical", [x])
                         else:
                             konts.append(("andand", e, 2, x))
                             expr, mode = e.args[1][1], "eval"
@@ -140,7 +140,7 @@ class Session:
                             r = False if (left is False or y is False) else (None if (left is None or y is None) else True)
                         else:
                             r = True if (left is True or y is True) else (None if (left is None or y is None) else False)
-                        val = Vector("logical", [r])
+                        val = RVector("logical", [r])
                     self.visible = True
                 self.depth -= 1
         finally:
@@ -156,7 +156,7 @@ class Session:
             raise RError(NESTED_TOO_DEEPLY)
         fn = e.fn
         if not isinstance(fn, Sym):
-            if isinstance(fn, Vector) or fn is NULL:
+            if isinstance(fn, RVector) or fn is NULL:
                 raise RError("attempt to apply non-function")
             raise NotSupported("calling a function value")
         name = fn.name
@@ -171,7 +171,7 @@ class Session:
             target = args[0][1]
             if isinstance(target, Sym):
                 tname = target.name
-            elif isinstance(target, Vector) and target.type == "character" and len(target.data) == 1:
+            elif isinstance(target, RVector) and target.type == "character" and len(target.data) == 1:
                 tname = target.data[0]
             elif isinstance(target, Lang):
                 raise NotSupported("replacement assignment such as x[i] <- v")
@@ -216,7 +216,7 @@ class Session:
 
     def _flag(self, v, which, op, call):
         """&&'s and ||'s operand as True, False or None (NA), with R's errors."""
-        if isinstance(v, Vector) and v.type in ("logical", "integer", "double"):
+        if isinstance(v, RVector) and v.type in ("logical", "integer", "double"):
             if len(v.data) > 1:
                 raise RError("'length = %d' in coercion to 'logical(1)'" % len(v.data), call)
             if len(v.data) == 0:

@@ -9,7 +9,7 @@ A1.2 and A1.6 add the rest.
 
 import math
 
-from .values import MISSING, NULL, Formals, Lang, Missing, Placeholder, Sym, Vector
+from .values import MISSING, NULL, Formals, Lang, Missing, Placeholder, Sym, RVector
 
 OPTIONS = {"digits": 7, "scipen": 0, "width": 80}
 
@@ -120,7 +120,7 @@ def print_value(v, write):
     if v is NULL:
         write("NULL\n")
         return True
-    if not isinstance(v, Vector) or v.attrs or v.type == "complex":
+    if not isinstance(v, RVector) or v.attrs or v.type == "complex":
         return None
     if not v.data:
         write(EMPTY[v.type] + "\n")
@@ -225,7 +225,7 @@ def _expand(e):
         return '"_"'
     if isinstance(e, Missing):
         return ""
-    if isinstance(e, Vector) or e is NULL:
+    if isinstance(e, RVector) or e is NULL:
         c = deparse_constant(e)
         return c if c is not None else "<vector>"
     if not isinstance(e, Lang):

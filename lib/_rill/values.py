@@ -24,7 +24,7 @@ class RNull:
 NULL = RNull()
 
 
-class Vector:
+class RVector:
     """An atomic vector: its type, its elements (None is NA) and its attributes."""
     __slots__ = ("type", "data", "attrs")
 
@@ -37,27 +37,27 @@ class Vector:
         return len(self.data)
 
     def __repr__(self):
-        return "Vector(%s, %r)" % (self.type, self.data)
+        return "RVector(%s, %r)" % (self.type, self.data)
 
 
 def lgl(data, attrs=None):
-    return Vector("logical", data, attrs)
+    return RVector("logical", data, attrs)
 
 
 def int_(data, attrs=None):
-    return Vector("integer", data, attrs)
+    return RVector("integer", data, attrs)
 
 
 def dbl(data, attrs=None):
-    return Vector("double", data, attrs)
+    return RVector("double", data, attrs)
 
 
 def cplx(data, attrs=None):
-    return Vector("complex", data, attrs)
+    return RVector("complex", data, attrs)
 
 
 def chr_(data, attrs=None):
-    return Vector("character", data, attrs)
+    return RVector("character", data, attrs)
 
 
 class Sym:
