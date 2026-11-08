@@ -44,7 +44,7 @@ uvx sagebrush@latest fs-sync --forget [--origin URL]
 - `--origin URL` names the Sagebrush site, as `sagebrush remote login --origin` does. The default is https://sagebrush.space.
 - **Other flags:**
   - `--restore RUN_ID` puts back the local files a run deleted (§2.4), into that run's `LOCAL_DIR`.
-    - It applies the same overlap refusal first (below), and restores only paths that resolve inside `LOCAL_DIR`.
+    - It applies the same overlap refusal first (above), and restores only paths that resolve inside `LOCAL_DIR`.
     - **It never overwrites:** a path that is occupied now is left as it is. Its file stays in the holding folder and is listed ("not restored: notes/a.tex exists"), and the run exits 1.
     - It changes nothing in the workspace. The next sync sees restored files as "new here" or "changed here".
   - `--forget` deletes this computer's token for that site (§3.1).
