@@ -110,6 +110,12 @@ Apply? [y/N]
   - `--yes` alone refuses such a plan (exit 1): "Not applied: this plan deletes 63 files (31% of the last sync). If that's intended, run again with --yes --allow-deletes 63."
   - `--yes --allow-deletes N` applies the plan only if it has exactly N deletions, so a script can't delete more than it was written for.
 - **Over today's budget** (§3.3): the plan's last line before the question says "Today's budget covers 41 of these 120 files (98 MB of 310 MB up); run fs-sync again tomorrow for the rest. Apply those 41? [y/N]".
+- **Other outcomes, word for word:**
+  - A damaged base (§2.5) is treated as no base, and the run goes on: "The last-sync record for this folder pair is damaged, so this run is treated as a first sync: nothing will be deleted."
+  - Over a scan limit (§4.5), it stops before planning (exit 1): "Stopped before planning: ~/thesis has more than 200,000 entries (the limit for one sync)." The other limits use the same form ("… is more than 64 folders deep", "… has a path longer than 1,024 bytes").
+  - Not enough room for fs-sync's own records: they're capped at 1 GiB, checked against the state folder's free space before scanning (§4.5). It exits 1 having read nothing: "Not enough free space for fs-sync's records: it needs up to 1 GiB in ~/.local/state, and 300 MB is free. Free some space and run it again."
+  - An action that doesn't fit the free space on its target filesystem stays pending, and nothing of it is applied. The plan lists it under "Not applied: not enough free space on /home (needs 2.1 GB, 900 MB free)", and the run exits 1.
+  - Over the hour's request budget (§3.3): "This hour's requests cover 41 of these 120 files; run fs-sync again in an hour for the rest. Apply those 41? [y/N]". The day's budget uses the over-budget line below.
 - **While it applies,** each action prints one line when done.
 - **A skipped action** (the file changed here, or the workspace refused the write because the file changed there, §4.1–4.2) is listed, and the run goes on with the rest. At the end it prints what was done and what was skipped, and "Run it again to sync the rest."
 
