@@ -328,6 +328,7 @@ adm["attribute expansion"] = admitted(b"<!DOCTYPE r [<!ENTITY e '" + b"v" * 300 
                                       4096, 1.0)
 adm["entity value"] = admitted(b"<!DOCTYPE r [<!ENTITY e '" + b"v" * 5000 + b"'>]><r/>", 4096, 1.0)
 adm["many pieces"] = admitted(b"<!DOCTYPE r [<!ENTITY e 'a'>]><r a='" + b"&e;" * 200 + b"'/>", 8000, 1.0)
+adm["many character references"] = admitted(b"<r a='" + b"&#97;" * 200 + b"'/>", 8000, 1.0)
 adm["many attributes"] = admitted(b"<r " + b" ".join(b"a%d='1'" % i for i in range(200)) + b"/>", 8192, 1.0)
 adm["fallback attributes"] = admitted(b"<r " + b" ".join(b"a%d='&amp;'" % i for i in range(200)) + b"/>", 8192, 1.0)
 out["admission"] = adm

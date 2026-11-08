@@ -89,6 +89,7 @@ test("expat_rules.py: the allocation tracker refuses past its limits, before the
     "attribute expansion": [1, [["ED", "e", 300]], 0],
     "entity value": [1, [["ED", "e", 0]], 0],
     "many pieces": [1, [["ED", "e", 1]], 0],
+    "many character references": [1, [], 0],
     "many attributes": [1, [], 0],
     "fallback attributes": [1, [], 0],
   });
