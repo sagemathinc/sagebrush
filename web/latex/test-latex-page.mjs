@@ -3032,9 +3032,16 @@ $P = \sage{g[0]}$
       const edit = async (from, to) => { const t = await srcNow(); await typeInto(t.replace(from, to)); return t.replace(from, to); };
       await edit("f(x) = x^3 - 2*x", "f(x) = x^3 - 3*x");
       const kept = await until(`!!${S2}.querySelector(".sagestale") && ${deriv(2)} && !!${S2}.querySelector("img.sageplot.sagestale") && !${S2}.querySelector(".sagechip") && getComputedStyle(${S2}.querySelector(".sagestale")).opacity === "0.5"`, 10000);
-      const saidStale = await statusIs(/^(1 value out of date: Shift\+Enter updates it|\d+ values out of date: Shift\+Enter updates them)$/, 5000);
+      const saidStale = await statusIs(/^(1 SageTeX item out of date: Shift\+Enter runs it again|\d+ SageTeX items out of date: Shift\+Enter runs them again)$/, 5000);
       check(kept && saidStale, "stale: after an edit, the slide keeps its last values and plot, marked stale (faded; no \"…\", no chip); the status says so",
         { kept, status: await ev(`document.querySelector(".tex-status")?.textContent ?? ""`), slide: await ev(`${S2}.innerHTML.slice(0, 300)`) });
+      // (a second edit, as many items stale: each edit empties the status, and it is said again (daybreak3, #874))
+      const said1 = await ev(`document.querySelector(".tex-status")?.textContent ?? ""`);
+      await edit("f(x) = x^3 - 3*x", "f(x) = x^3 - 3*x ");
+      const said2 = await until(`document.querySelector(".tex-src").value.includes("3*x \\n") && document.querySelector(".tex-status")?.textContent === ${JSON.stringify(said1)}`, 5000);
+      check(said2, "stale: a second edit, as many items stale, still says so", { said1, now: await ev(`document.querySelector(".tex-status")?.textContent ?? ""`) });
+      await edit("f(x) = x^3 - 3*x ", "f(x) = x^3 - 3*x");
+      await statusIs(/out of date/, 5000);
       const before = await srcNow(), at = before.indexOf("3*x") + 3;
       await ev(`(() => { const t = document.querySelector(".tex-src"); t.focus(); t.setSelectionRange(${at}, ${at}); document.querySelector(".tex-status").textContent = ""; return true; })()`);
       await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, modifiers: 8, text: "\r" });
@@ -3046,7 +3053,7 @@ $P = \sage{g[0]}$
       await edit("f(x) = x^3 - 3*x", "f(x) = x^3 - 4*x");
       await until(`!!${S2}.querySelector(".sagestale")`, 10000);
       // (an edit after a Run, as many values stale as the edit before it: said again (daybreak3, #874))
-      const saidAgain = await statusIs(/^(1 value out of date: Shift\+Enter updates it|\d+ values out of date: Shift\+Enter updates them)$/, 5000);
+      const saidAgain = await statusIs(/^(1 SageTeX item out of date: Shift\+Enter runs it again|\d+ SageTeX items out of date: Shift\+Enter runs them again)$/, 5000);
       check(saidAgain, "stale: an edit after a Run says so again, as many values stale as before it", { status: await ev(`document.querySelector(".tex-status")?.textContent ?? ""`) });
       await ev(`(document.querySelector(".tex-status").textContent = "", document.querySelector(".tex-present-btn").click(), 1)`);
       await until(`!!${P}`, 15000);
@@ -3072,6 +3079,22 @@ $P = \sage{g[0]}$
       await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, modifiers: 8 });
       const nl = await until(`document.querySelector(".tex-src").value === ${JSON.stringify(plain.slice(0, pat) + "\n" + plain.slice(pat))}`, 5000);
       check(nl, "Shift+Enter in a document with no SageTeX code is a newline", { src: JSON.stringify(await srcNow()) });
+      // (the preview behind the text (daybreak3, #874): the text changed and Shift+Enter pressed in one task, before the
+      //  worker's render; the text decides, not the last render's button. The first item added: it runs, no newline;
+      //  the last one removed: no Run, the newline given back where it was asked for)
+      await until(`!!document.querySelector(".tex-head .tex-run")?.hidden`, 10000);
+      const keyNow = (text, at) => ev(`(() => { const t = document.querySelector(".tex-src"); t.value = ${JSON.stringify(text)}; t.dispatchEvent(new Event("input")); t.focus(); t.setSelectionRange(${at}, ${at}); document.querySelector(".tex-status").textContent = ""; const e = new KeyboardEvent("keydown", { key: "Enter", shiftKey: true, bubbles: true, cancelable: true }); t.dispatchEvent(e); return { prevented: e.defaultPrevented }; })()`);
+      const withSage = plain.replace("Hi\n", "Hi $\\sage{1+1}$\n"), atS = withSage.indexOf("Hi") + 2;
+      const k1 = await keyNow(withSage, atS);
+      const ranFirst = await statusIs(/^Ran 1 SageTeX item in [0-9.]+ s$/, 120000);
+      check(k1.prevented && ranFirst && (await srcNow()) === withSage, "Shift+Enter right after the first SageTeX item is added (the preview behind): it runs, no newline", { k1, ranFirst, status: await ev(`document.querySelector(".tex-status")?.textContent ?? ""`), src: JSON.stringify((await srcNow()).slice(0, 120)) });
+      await until(`!document.querySelector(".tex-head .tex-run")?.hidden`, 10000);
+      const atP = plain.indexOf("Hi") + 2;
+      const k2 = await keyNow(plain, atP);
+      const back = await until(`document.querySelector(".tex-src").value === ${JSON.stringify(plain.slice(0, atP) + "\n" + plain.slice(atP))}`, 10000);
+      await sleep(500);
+      const st2 = await ev(`document.querySelector(".tex-status")?.textContent ?? ""`);
+      check(k2.prevented && back && !/^(Ran|Starting|Running)/.test(st2), "Shift+Enter right after the last SageTeX item is removed (the preview behind): no Run, the newline where it was asked for", { k2, back, status: st2, src: JSON.stringify((await srcNow()).slice(0, 120)) });
     }
     // (Codex friction P5, the editor's half: a helper .py beside the .tex, imported by the document's code as by real
     //  SageTeX run in the document's folder. The .tex's folder is given to Sage, read-only, at each Run, as it is then:

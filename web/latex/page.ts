@@ -727,7 +727,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   let presenting: { stop(): void } | null = null;
   presentBtn.onclick = () => void loadPresent().then((m) => {
     if (!live() || presenting) return;
-    presenting = m.present({ slides: slidesNow, onRendered: E.onRendered, onRun: () => { runKey(); }, start: frameInView(), onExit: () => { presenting = null; presentBtn.focus(); } });
+    presenting = m.present({ slides: slidesNow, onRendered: E.onRendered, onRun: () => { runKey(false); }, start: frameInView(), onExit: () => { presenting = null; presentBtn.focus(); } });
   }, () => say("Couldn't load the presenter. Check the network, then click Present to try again."));
   E.onRendered(() => { presentBtn.hidden = slidesNow().length === 0; });
   life.signal.addEventListener("abort", () => presenting?.stop());
@@ -783,27 +783,40 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     } finally { life.signal.removeEventListener("abort", stop); if (live()) runIdle(); else running = false; }
   };
   // Shift+Enter runs, as Run does (William, Nov 3: "make 'shift+enter' run the code"), in the source and in Present. A
-  // Run under way is left alone (the button's second click is its Stop, never the key's); a document with no SageTeX
-  // code keeps Shift+Enter's newline; the preview not caught up with the text yet, the Run waits for its next render
-  const runKey = (): boolean => {
-    if (runBtn.hidden || running) return !runBtn.hidden;
-    if (E.lastCheck()) { runBtn.click(); return true; }
-    const off = E.onRendered(() => { off(); if (live() && !running && !runBtn.hidden) runBtn.click(); });
+  // Run under way is left alone (the button's second click is its Stop, never the key's). Whether the document has
+  // SageTeX code is the text's now, never the last render's (daybreak3, #874): the preview caught up, its items decide
+  // (none: the source's Shift+Enter is a newline, as before); behind (an edit just made), the key waits for this text's
+  // render, then runs, or, with no code, puts the newline where it was asked for if the text is still as it was
+  const hasCode = (c: any) => Array.isArray(c?.sage) && c.sage.length > 0;
+  const runKey = (fromSource: boolean): boolean => {
+    if (running) return true;
+    const c = E.lastCheck();
+    if (c) { if (!hasCode(c)) return false; runBtn.click(); return true; }
+    const text = src.value, a = src.selectionStart, b = src.selectionEnd;
+    const off = E.onRendered(() => {
+      const now = E.lastCheck();
+      if (!now) return;
+      off();
+      if (!live() || running) return;
+      if (hasCode(now)) runBtn.click();
+      else if (fromSource && src.value === text) { src.setRangeText("\n", a, b, "end"); src.dispatchEvent(new Event("input")); }
+    });
     return true;
   };
-  src.addEventListener("keydown", (ev) => { if (ev.key === "Enter" && ev.shiftKey && !ev.ctrlKey && !ev.metaKey && !ev.altKey && !ev.isComposing && runKey()) ev.preventDefault(); });
-  // (values kept from the last Run while their code has changed, shown marked stale, sagetex.mjs savedStates: said
-  //  once, when their number changes, so the status after a Run stays until the next edit. A Run's fresh results,
-  //  none stale, count even while it is still finishing, so the next edit is said again whatever its number
-  //  (daybreak3, #874); a number while a Run is under way waits for an edit after it)
+  src.addEventListener("keydown", (ev) => { if (ev.key === "Enter" && ev.shiftKey && !ev.ctrlKey && !ev.metaKey && !ev.altKey && !ev.isComposing && runKey(true)) ev.preventDefault(); });
+  // (the items kept from the last Run while their code has changed, their values shown marked stale, sagetex.mjs
+  //  savedStates: said when their number changes, or the status is empty, as each edit leaves it (daybreak3, #874),
+  //  so a Run's "Ran ..." stays until the next edit, and the count stays shown while one is edited; never while a Run
+  //  is under way, whose own results come next)
   let staleSaid = 0;
   E.onRendered(() => {
     const c = E.lastCheck();
     if (!c) return;
     const n = (Array.isArray(c.sage) ? c.sage : []).filter((x: any) => x.s === "stale").length;
-    if (n === staleSaid || (running && n)) return;
+    if (running && n) return;
+    const was = staleSaid;
     staleSaid = n;
-    if (n) say(`${n} value${n === 1 ? "" : "s"} out of date: Shift+Enter updates ${n === 1 ? "it" : "them"}`);
+    if (n && (n !== was || !status.textContent)) say(`${n} SageTeX item${n === 1 ? "" : "s"} out of date: Shift+Enter runs ${n === 1 ? "it" : "them"} again`);
   });
   const agentTarget = { file: () => where.path, text: () => src.value, lastCheck: E.lastCheck, current: E.posCurrent, preview, images, css: PAGE_CSS, refresh: loadResults };
   registerLatexTools(); setTarget(agentTarget);

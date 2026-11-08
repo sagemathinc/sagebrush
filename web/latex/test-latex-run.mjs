@@ -85,6 +85,26 @@ const item = (mode, code, extra = {}) => { const it = real(mode, code, extra); r
   check("stale: in math, the last value", mathPart(stateOf(st1, 1, B), B) === "{9}", null);
   check("stale: a stale plot's src is still checked (only a base64 SVG data URL)", !/<img/.test(inlineHtml({ key: itemKey(P), s: "stale", src: "javascript:1" }, P, esc, (l) => l, 3)), null);
 }
+// (the mapping's rules one by one, grader's #874 probe scenarios, each with head's value: by key once per saved result,
+//  in order; by position only for an ok result of the same kind and wrapper whose code is gone)
+{
+  const r = (mode, code) => ({ mode, code, opts: [] });
+  const ok = (it, f = {}) => ({ key: itemKey(it), s: "ok", ...f });
+  const show = (st, its) => its.map((it, k) => { const s = stateOf(st, k, it); return s.s + (s.latex ? ":" + s.latex : ""); }).join(" ");
+  const A = r("sage", "a"), B = r("sage", "b"), C = r("sage", "c"), N = r("sage", "new"), X = r("sage", "x"), Pl = r("plot", "p");
+  const cases = [
+    ["an unchanged item whose last Run failed, after an edit above it: not run (an error is no value)", [C, B], [ok(A, { latex: "1" }), { key: itemKey(B), s: "error", msg: "E" }], "stale:1 notrun"],
+    ["the same code twice after an insert: each saved result used once, in order", [N, X, X], [ok(X, { latex: "x1" }), ok(X, { latex: "x2" })], "notrun stale:x1 stale:x2"],
+    ["by position only when the old code is gone (it is still here: kept for its own item)", [C, A], [ok(A, { latex: "1" }), ok(B, { latex: "2" })], "notrun stale:1"],
+    ["more copies than saved results: the extra one is not run", [N, X, X, X], [ok(X, { latex: "x1" }), ok(X, { latex: "x2" })], "notrun stale:x1 stale:x2 notrun"],
+    ["an item edited in place, after an unchanged one: the old value by position", [A, C], [ok(A, { latex: "1" }), ok(B, { latex: "2" })], "ok:1 stale:2"],
+    ["a result in the current prefix is never taken again by a later copy", [A, N, A], [ok(A, { latex: "1" }), ok(B, { latex: "2" })], "ok:1 stale:2 notrun"],
+    ["by position from an errored result: not run", [C], [{ key: itemKey(A), s: "error", msg: "E" }], "notrun"],
+    ["by position from another kind: not run", [Pl], [ok(A, { latex: "1" })], "notrun"],
+    ["by position from another wrapper: not run", [C], [{ ...ok(A, { latex: "1" }), key: JSON.stringify(["sage", "a", [], null, "sbtx-wrapper-1"]) }], "notrun"],
+  ];
+  for (const [what, its, saved, want] of cases) { const got = show(savedStates(its, saved), its); check("stale: " + what, got === want, { got, want }); }
+}
 
 // ---- the script in Sage (the CLI's own: build/cli/pyjs.cjs --sage)
 const CLI = new URL("../../build/cli/pyjs.cjs", import.meta.url).pathname;
