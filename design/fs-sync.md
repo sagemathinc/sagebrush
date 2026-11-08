@@ -27,7 +27,7 @@ uvx sagebrush@latest fs-sync --forget [--origin URL]
 - **The arguments:**
   - `LOCAL_DIR` is a folder on this computer. It must exist; fs-sync never creates it.
     - It may not overlap fs-sync's own folders, the config folder (§1.1) and the state folder (§1.4).
-    - In every mode (a sync, `--dry-run`, `--restore`), fs-sync resolves `LOCAL_DIR` and both of those to real paths, through any symlinks. If `LOCAL_DIR` is one of them, contains one, or is inside one, it exits 2 before pairing or reading any file: "~ can't be synced: it contains fs-sync's own files (~/.config/sagebrush/fs-sync). Choose a folder that doesn't."
+    - In every mode (a sync, `--dry-run`, `--restore`), fs-sync resolves `LOCAL_DIR` and both of those to real paths, through any symlinks. If `LOCAL_DIR` is one of them, contains one, or is inside one, it exits 2 before pairing or reading any file, with one of two messages: "~ can't be synced: it contains fs-sync's own files (~/.config/sagebrush/fs-sync). Choose a folder that doesn't." or "~/.local/state/sagebrush/fs-sync/trash can't be synced: it is inside fs-sync's own files. Choose a folder outside ~/.local/state/sagebrush/fs-sync."
     - So the token, the bases, the journals and the holding folder are never scanned, uploaded or deleted. That holds even for `fs-sync ~ /Home`.
   - `WORKSPACE_PATH` is a folder in the person's workspace, such as `/Thesis`. If it doesn't exist, the plan says it will be made.
 - **Direction:**
@@ -107,7 +107,7 @@ Apply? [y/N]
   - Without `--yes`, after `y` it asks: "This deletes 63 files (31% of the last sync). Type 63 to delete them, or anything else to stop:". Anything but the number applies nothing (exit 1).
   - `--yes` alone refuses such a plan (exit 1): "Not applied: this plan deletes 63 files (31% of the last sync). If that's intended, run again with --yes --allow-deletes 63."
   - `--yes --allow-deletes N` applies the plan only if it has exactly N deletions, so a script can't delete more than it was written for.
-- **Over today's budget** (§3.3): the plan's last line before the question says "Today's budget covers 41 of these 120 files (98 MB of 310 MB up). Apply those now; run fs-sync again tomorrow for the rest. Apply? [y/N]".
+- **Over today's budget** (§3.3): the plan's last line before the question says "Today's budget covers 41 of these 120 files (98 MB of 310 MB up); run fs-sync again tomorrow for the rest. Apply those 41? [y/N]".
 - **While it applies,** each action prints one line when done.
 - **A skipped action** (the file changed here, or the workspace refused the write because the file changed there, §4.1–4.2) is listed, and the run goes on with the rest. At the end it prints what was done and what was skipped, and "Run it again to sync the rest."
 
