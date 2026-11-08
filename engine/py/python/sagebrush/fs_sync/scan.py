@@ -178,7 +178,7 @@ class Ignore:
     def __init__(self, lines):
         self.rules = []
         for raw in lines:
-            line = raw.rstrip("\n").rstrip("\r")
+            line = raw.rstrip("\n")         # (CRs are the reader's: only one just before an LF is dropped)
             if not line.strip() or line.startswith("#"):
                 continue
             # (trailing spaces are dropped unless escaped)
@@ -303,15 +303,17 @@ def read_ignore_file(root_fd):
         st2 = os.fstat(fd)
         if (st2.st_size, st2.st_mtime_ns, st2.st_ctime_ns, st2.st_ino, st2.st_dev) != before or n != st.st_size:
             raise Refused("Stopped before planning: %s couldn't be read (it changed while being read)." % IGNORE_FILE, 1)
-        # (lines are LF-separated, as counted above; Ignore drops a CR before an LF, so CRLF files read the same; a lone
-        # CR is part of its line)
+        # (lines end at LF only, as counted above: one CR just before an LF is dropped, so CRLF files read the same;
+        # any other CR, a lone one or one ending a last line with no LF, is part of its line: §4.4)
         try:
             text = b"".join(data).decode("utf-8")      # (strict: a rule changed by decoding would silently match nothing)
         except UnicodeDecodeError:
             raise Refused("Stopped before planning: %s couldn't be read (it isn't UTF-8 text)." % IGNORE_FILE, 1)
         lines = text.split("\n")
-        if lines and lines[-1] == "":
-            lines.pop()
+        last = lines.pop()                              # (what follows the last LF: "" if the file ends in one)
+        lines = [line[:-1] if line.endswith("\r") else line for line in lines]
+        if last:
+            lines.append(last)
         return lines
     finally:
         os.close(fd)

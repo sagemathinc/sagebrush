@@ -416,6 +416,28 @@ def test_ignore_file_must_be_utf8():
         shutil.rmtree(root)
 
 
+def test_ignore_cr_exactly_as_designed():
+    # (@sagebrush's ruling, sync-client) one CR just before an LF is dropped; any other CR stays in its line (§4.4)
+    root = tmp()
+    try:
+        tree(root, {"x": b""})
+        cases = ((b"a\r\n", ["a"]), (b"a\r\r\n", ["a\r"]), (b"a\r", ["a\r"]),
+                 (b"a\nb", ["a", "b"]), (b"a\n\n", ["a", ""]), (b"", []))
+        for data, want in cases:
+            tree(root, {S.IGNORE_FILE: data})
+            fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                got = S.read_ignore_file(fd)
+            finally:
+                os.close(fd)
+            assert got == want, (data, got, want)
+        # and a CR the reader kept is part of its rule: "a\r" matches only a name ending in a CR
+        ig = S.Ignore(["a\r"])
+        assert ig.ignored("a\r", False) and not ig.ignored("a", False)
+    finally:
+        shutil.rmtree(root)
+
+
 def test_ignore_syntax_edges():
     ig = S.Ignore(["[z-a]x", "\\#lit", "\\!bang", "a\\*b", "[unclosed", "#comment", "a*c", "a?d", "sp.txt   ", "esc\\ "])
     assert not ig.ignored("#comment", False)                                    # (grader I1) a comment is no rule
