@@ -361,8 +361,12 @@ try {
 
 
   // two savers: a commit never drops a newer save's pending copy (CORR-12C-1)
-  const hold = (tag) => ev(`(() => { navigator.locks.request("sagebrush-workspace", () => new Promise((r) => (window.__release${tag} = r))); return 1; })()`);
-  const release = (tag) => ev(`(() => { window.__release${tag}?.(); return 1; })()`);
+  // (a hold answers once the lock is granted, never before: a hold asked for while the lock is busy and released
+  // before its grant would be granted later with no one to release it, and every workspace call after it would wait
+  // on the lock for good (the "s9 agent 7" hang: master fb990271, #856 job 128686160673); a release forgets its
+  // resolver, so a stale one is never called again)
+  const hold = (tag) => ev(`new Promise((granted) => navigator.locks.request("sagebrush-workspace", () => new Promise((r) => { window.__release${tag} = r; granted(1); })))`);
+  const release = (tag) => ev(`(() => { const r = window.__release${tag}; delete window.__release${tag}; r?.(); return 1; })()`);
   await go(base + "board/?doc=local:" + id);
   await until(`${B}?.snapshot()?.doc?.title === "Pending"`, 60000);
   await hold("A");
@@ -473,6 +477,15 @@ try {
   await sleep(1500);
   check((await ev(`window.__agentZ`)) === "ok" && (await ev(`${W}.read(${JSON.stringify(copy3)}).then((r) => r.content.title)`)) === "Z on the copy", "an agent's write to the conflict's copy stays: " + (await ev(`window.__agentZ`)));
   check(await ev(`${W}.list("/").then((l) => Promise.all(l.filter((e) => e.kind === "board").map((e) => ${W}.read(e.path).then((r) => r.content.title)))).then((t) => t.includes("C3 typed (your changes, made while it changed elsewhere)"))`), "…and the page's later save goes to a new copy");
+  // (the pin: a hold asked for while the lock is busy waits for its grant; released after it, the lock is free again)
+  await ev(`(() => { navigator.locks.request("sagebrush-workspace", () => new Promise((r) => { window.__heldH = true; window.__releaseH = r; })); return 1; })()`);
+  await until(`window.__heldH === true`);
+  const heldP = hold("P");
+  const early = await Promise.race([heldP.then(() => "granted"), sleep(300).then(() => "waiting")]);
+  await release("H");
+  await heldP;
+  await release("P");
+  check(early === "waiting" && (await ev(`${W}.read("/Old board.board.json").then(() => true)`, 5000)), `a hold asked for while the lock is busy waits for its grant, and once released the workspace answers (${early})`);
   // random interleavings of the page's saves and an agent's writes (30 fixed seeds and one random, CORR-105-2): nothing either
   // wrote last is lost, unless the other wrote after it, which CAS lets only a writer that read it do
   const rngOf = (seed) => { let r = seed; return () => ((r = (r * 1103515245 + 12345) % 2147483648) / 2147483648); };
