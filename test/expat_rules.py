@@ -78,8 +78,12 @@ class Probe:
         self.unbounded = 0
         self.bt = 0
         self.examined = 0
+        self.kinds = {}
 
     def note(self, kind, span, examined=None):
+        k = self.kinds.setdefault(kind, [0, 0])
+        k[0] += 1
+        k[1] += span
         self.calls += 1
         self.span += span
         self.examined += span if examined is None else examined
@@ -215,8 +219,16 @@ try:
     pp = pyexpat.ParserCreate()
     pp.Parse(small, True)
     # (r2.1: a str with lone surrogates, its error built from windows; a comment's and a PI's line ends at every seam)
-    lone = "ab" + chr(0xDC00) + chr(0xDFFF) + "x" * 20 + chr(0xD800)
-    seam = "x" * 6 + chr(0xDC00) + chr(0xDC01) + chr(0xDC02) + "y" * 10     # (a run across the window's seam)
+    class _Watched(str):
+        """A str that records an encode of itself whole (its windows, sliced, are plain str)"""
+        whole = []
+
+        def encode(self, *a, **k):
+            _Watched.whole.append(len(self))
+            return str.encode(self, *a, **k)
+
+    lone = _Watched("ab" + chr(0xDC00) + chr(0xDFFF) + "x" * 20 + chr(0xD800))
+    seam = _Watched("x" * 6 + chr(0xDC00) + chr(0xDC01) + chr(0xDC02) + "y" * 10)     # (a run across the seam)
     enc = []
     for text in (lone, seam):
         try:
@@ -224,12 +236,16 @@ try:
             enc.append(None)
         except UnicodeEncodeError as e:
             enc.append([e.start, e.end, e.object is text, str(e)])
+    whole_encodes = list(_Watched.whole)
     seams = "a\r\nb\r" * 5 + "\r\r\nc\n\r" * 4 + "\r"
     got = []
     pp = pyexpat.ParserCreate()
     pp.CommentHandler = lambda c: got.append(c)
     pp.ProcessingInstructionHandler = lambda target, d: got.append(d)
+    before = list(probe.kinds.get("replace", [0, 0]))
     pp.Parse(("<r><!--" + seams + "--><?p " + seams + "?></r>").encode(), True)
+    after = probe.kinds.get("replace", [0, 0])
+    replaced = after[1] - before[1]
 finally:
     pyexpat._WINDOW = saved
 want_enc = []
@@ -239,7 +255,10 @@ for text in (lone, seam):
     except UnicodeEncodeError as e:
         want_enc.append([e.start, e.end, True, str(e)])
 want_seams = seams.replace("\r\n", "\n").replace("\r", "\n")
-out["window_7_extras"] = [enc == want_enc, enc, got == [want_seams, want_seams]]
+# (and the work behind them: no encode of either string whole; the comment's and the PI's line ends replaced a window at
+# a time over their whole length, twice each (CR LF, then CR), every call seen by the spy)
+out["window_7_extras"] = [enc == want_enc, enc, got == [want_seams, want_seams], whole_encodes,
+                          replaced >= 4 * len(seams)]
 out["window_7"] = [r["cases"], r["mismatch_count"], r["mismatches"][:2], r["stated_but_same"], r["stated_but_other"],
                    probe.numbers()]
 

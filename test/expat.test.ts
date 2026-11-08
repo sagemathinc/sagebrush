@@ -159,9 +159,11 @@ test("expat_rules.py: no pattern or string scan examines more than the window, a
   assert.equal(spy.max, 7);
   // (r2.1, astra's X3b and daybreak3's E3: a str's encoding error is CPython's, built from windows, never the whole
   // string encoded again; a comment's and a PI's line ends normalized a window at a time, every seam right)
-  const [encSame, enc, seams] = r.window_7_extras;
+  const [encSame, enc, seams, wholeEncodes, replacedWhole] = r.window_7_extras;
   assert.ok(encSame, JSON.stringify(enc));
   assert.equal(seams, true);
+  assert.deepEqual(wholeEncodes, [], "no encode of the whole string");
+  assert.equal(replacedWhole, true, "the line ends replaced a window at a time, every call seen");
 });
 
 test("expat_rules.py: the work is linear: examined characters and steps, calls and copies, against their lower controls", () => {
