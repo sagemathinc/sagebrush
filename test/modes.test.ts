@@ -137,7 +137,10 @@ test("the board format: its mode, Python by default and not written; a code item
   assert.match(doc, /^const MODES = \["sage", "magma", "matlab"\] as const, ITEM_MODES = \["python", "sage", "magma", "matlab"\] as const;$/m);
   assert.match(text("web/board/mount.ts"), /const m = b\.dataset\.mode; if \(m === "sage" \|\| m === "magma" \|\| m === "matlab"\) d\.mode = m; else delete d\.mode;/);
   assert.match(text("web/board/page.ts"), /^const LOCAL_LIST = "sagebrush-boards", MODES = \["python", "sage", "magma", "matlab"\];$/m);
-  for (const f of readdirSync(join(repo, "web", "board")).filter((f) => f.endsWith(".ts"))) assert.doesNotMatch(text(`web/board/${f}`), /from "\.\.\/\.\.\/src\//, f);
+  // (any import form: `from "../../src/…"`, a bare `import "../../src/…"`, or a dynamic `import("../../src/…")`;
+  // grader's #842 note, widened in Rill A1.1)
+  for (const f of readdirSync(join(repo, "web", "board")).filter((f) => f.endsWith(".ts")))
+    assert.doesNotMatch(text(`web/board/${f}`), /(?:\bfrom\s*|\bimport\s*\(?\s*)["'](?:\.\.\/)+src\//, f);
   assert.deepEqual([FLAG_MODES, DOCUMENT_MODES], [["sage", "magma", "matlab"], ["python", "sage", "magma", "matlab"]]);
   const schema = BOARD_SCHEMA as any;
   assert.deepEqual(schema.properties.mode.enum, DOCUMENT_MODES);
