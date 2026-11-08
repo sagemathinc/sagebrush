@@ -277,8 +277,11 @@ def test_open_root_checks_identity():
         # the folder itself replaced by another of the same name: its identity differs
         os.unlink(a)
         os.rename(a + ".moved", a)
-        shutil.rmtree(os.path.join(a, "sub"))
+        # (the old folder kept, renamed, while its replacement is made: deleted first, its inode number could be given
+        # straight back, as on CI, and an equal identity is rightly taken as the same folder)
+        os.rename(os.path.join(a, "sub"), os.path.join(a, "sub.old"))
         os.makedirs(os.path.join(a, "sub"))
+        assert os.stat(os.path.join(a, "sub")).st_ino != os.stat(os.path.join(a, "sub.old")).st_ino
         try:
             S.scan(accepted)
             raise AssertionError("a replaced folder was scanned")
