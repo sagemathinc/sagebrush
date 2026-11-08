@@ -234,6 +234,18 @@ for (const msg of [{ t: "opened", session: "S".repeat(22), nonce: "N2" }, { t: "
   leg.runner({ t: "live" });
   await tick();
   check(t.state === "attached" && leg.of("ack").at(-1)?.upto === 2 && leg.closed === null, "a handler that throws: the out, ack and live sequence goes on");
+  // (and where it matters: a failure still closes the leg after its event, which throws)
+  leg.runner({ t: "wat" });
+  await tick();
+  check(t.state === "ended" && leg.closed !== null, "a handler that throws on a protocol failure's event: the leg is still closed");
+}
+{
+  const t = new RemoteTerminal({ url: "wss://x.invalid/p", remoteId: "R1", key, view: new View(), rows: 24, cols: 80,
+    on: () => { throw new Error("the page's own bug"); }, WebSocket: FakeLeg }).start();
+  await tick();
+  FakeLeg.last.runner({ jsonrpc: "2.0", id: "t1", error: { code: -32000, message: "no" } });
+  await tick();
+  check(t.state === "ended" && FakeLeg.last.closed !== null, "a handler that throws on a refused hello's event: the leg is still closed");
 }
 // (the page's key: non-extractable, as generated; its private half can't be exported)
 {
