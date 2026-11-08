@@ -603,3 +603,10 @@ OK NoneType None
 -- r4: a strict int subclass returned by __index__ (bool's too): CPython's DeprecationWarning
 ['abc'] 2 ab
 [('__index__ returned non-int (type bool).  The ability to return an instance of a strict subclass of int is deprecated, and may be removed in a future version of Python.', 'DeprecationWarning'), ('__index__ returned non-int (type I).  The ability to return an instance of a strict subclass of int is deprecated, and may be removed in a future version of Python.', 'DeprecationWarning'), ('__index__ returned non-int (type I).  The ability to return an instance of a strict subclass of int is deprecated, and may be removed in a future version of Python.', 'DeprecationWarning')]
+-- r4 (TESTS): del of a slice whose start is clamped below 0 (@sagebrush-grader's N1)
+slice(-10, 2, None) b'cd'
+slice(-10, None, None) b''
+slice(-10, 3, 2) b'bd'
+slice(-10, -10, None) b'abcd'
+slice(10, -10, -1) b''
+slice(-10, 10, 3) b'bc'

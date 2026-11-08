@@ -999,3 +999,10 @@ with warnings.catch_warnings(record=True) as ws:
     print(io.StringIO("abc").readlines(B()), io.StringIO("abcd").truncate(C()), io.TextIOWrapper(io.BytesIO(b"abc"), encoding="utf-8").read(C()))
     import sys
     print([(str(w.message), w.category.__name__) for w in ws])
+
+
+print("-- r4 (TESTS): del of a slice whose start is clamped below 0 (@sagebrush-grader's N1)")
+for k in (slice(-10, 2), slice(-10, None), slice(-10, 3, 2), slice(-10, -10), slice(10, -10, -1), slice(-10, 10, 3)):
+    b = bytearray(b"abcd")
+    del b[k]
+    print(k, bytes(b))
