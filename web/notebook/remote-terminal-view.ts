@@ -5,37 +5,19 @@
 // relay's terminal page leg (remote-terminal.js: the protocol, the page's DPoP key and proofs, credit and acks).
 //
 // xterm renders the runner's bytes as text into its own DOM in this page, so its escape-sequence parser is the trust
-// boundary (terminals build plan r1, OUT-ISO).  Therefore:
-// - no image or graphics addons (sixel, iTerm): only addon-fit, and the version is the lockfile's (6.0.0);
-// - OSC 52 (clipboard writes) is swallowed: nothing in the output can write the clipboard;
-// - a title (OSC 0/2) is text in the panel's header (textContent), never markup;
-// - links, OSC 8 or a plain web address, are http(s) only, opened only on a click, in a new tab with noopener and
-//   noreferrer (the page's own way to open a tab: board/page.ts, code/boot.ts);
-// - nothing in the output is evaluated or set as HTML.
-import { Terminal } from "@xterm/xterm";
-import { FitAddon } from "@xterm/addon-fit";
-import css from "@xterm/xterm/css/xterm.css" with { type: "text" };
+// boundary (terminals build plan r1, OUT-ISO): the rules are web/term/xterm-view.ts's, shared with the page's other
+// terminals (no image addons; OSC 52 swallowed; the title as text in the panel's header; links http(s) only, on a click).
+import { Terminal, FitAddon, TOOLBAR_CSS, BUTTON_CSS, ensureXtermCss, extraKeysRow, safeTerminal, themeFromCss } from "../term/xterm-view.ts";
 import { RemoteTerminal, terminalKey } from "./remote-terminal.js";
+
+// (the module's own check of a link, under xterm's OSC 8 filter: the page test imports it from this chunk)
+export { webHref, webLinksIn } from "../term/xterm-view.ts";
 
 // Ported from CoCalc packages/frontend/frame-editors/terminal-editor/connected-terminal.ts (SageMath, Inc.; relicensed by the copyright owner, Nov 7 2026)
 // (lines 73-74 @2265acac; the other two constants there, the local history and the auto-response buffer, have no
 // use here: the runner keeps the history and replays it)
 const SCROLLBACK = 5000;
 
-// Ported from CoCalc packages/frontend/frame-editors/terminal-editor/mobile-terminal-toolbar.tsx (SageMath, Inc.; relicensed by the copyright owner, Nov 7 2026)
-// (KEYS, lines 35-44, and TOOLBAR_STYLE and BUTTON_STYLE, lines 16-33 @2265acac, as CSS)
-const KEYS: { label: string; title: string; data: string }[] = [
-  { label: "Esc", title: "Escape", data: "\x1b" },
-  { label: "Tab", title: "Tab", data: "\x09" },
-  { label: "^C", title: "Control+C", data: "\x03" },
-  { label: "`", title: "Backtick", data: "`" },
-  { label: "←", title: "Left arrow", data: "\x1b[D" },
-  { label: "↑", title: "Up arrow", data: "\x1b[A" },
-  { label: "↓", title: "Down arrow", data: "\x1b[B" },
-  { label: "→", title: "Right arrow", data: "\x1b[C" },
-];
-const TOOLBAR_CSS = "align-items: center; background: rgba(248, 248, 248, 0.96); border-bottom: 1px solid #d9d9d9; display: flex; gap: 4px; min-height: 34px; overflow-x: auto; padding: 3px 6px; -webkit-overflow-scrolling: touch;";
-const BUTTON_CSS = "flex: 0 0 auto; min-width: 34px; padding-left: 6px; padding-right: 6px;";
 
 const PANEL_CSS = `
 #rterm { position: fixed; left: 0; right: 0; bottom: 0; height: 42vh; min-height: 160px; display: flex; flex-direction: column; background: var(--code); border-top: 1px solid var(--line); box-shadow: 0 -4px 18px rgba(0,0,0,.12); z-index: 6; }
@@ -75,31 +57,6 @@ export function pageLegUrl(remoteId: string, loc: { protocol: string; host: stri
   return `${loc.protocol === "https:" ? "wss:" : "ws:"}//${loc.host}/api/remote/v1/page?${new URLSearchParams({ remote: remoteId, chan: "terminal" })}`;
 }
 
-/** An http(s) URL, as the absolute href to open, or null for anything else (javascript:, data:, file:, …). */
-export function webHref(text: string): string | null {
-  try {
-    const u = new URL(text);
-    return u.protocol === "http:" || u.protocol === "https:" ? u.href : null;
-  } catch {
-    return null;
-  }
-}
-
-function openWeb(text: string): void {
-  const href = webHref(text);
-  if (href) window.open(href, "_blank", "noopener,noreferrer");
-}
-
-// (plain web addresses in a line of the buffer: the link provider below; the closing punctuation of a sentence isn't part of one)
-const WEB_RE = /https?:\/\/[^\s"'<>`]+/g;
-export function webLinksIn(line: string): { start: number; text: string }[] {
-  const out: { start: number; text: string }[] = [];
-  for (const m of line.matchAll(WEB_RE)) {
-    const text = m[0].replace(/[.,;:!?)\]}]+$/, "");
-    if (webHref(text)) out.push({ start: m.index!, text });
-  }
-  return out;
-}
 
 // (the runner's errors, terminal.py, and the client's own, remote-terminal.js, in words: after the computer's name)
 const ERRORS: Record<string, string> = {
@@ -127,10 +84,7 @@ export interface RemoteTerminalPanel {
  * (the session keeps running on the computer, and this tab reattaches to it next time); End session stops it.
  */
 export function openRemoteTerminal(o: { onEnd?: () => void; fetch?: typeof fetch; WebSocket?: any } = {}): RemoteTerminalPanel {
-  if (!document.getElementById("xterm-css")) {
-    const style = Object.assign(document.createElement("style"), { id: "xterm-css", textContent: css });
-    document.head.appendChild(style);
-  }
+  ensureXtermCss();
   if (!document.getElementById("rterm-css")) document.head.appendChild(Object.assign(document.createElement("style"), { id: "rterm-css", textContent: PANEL_CSS }));
   const el = (tag: string, props: Record<string, any> = {}) => Object.assign(document.createElement(tag), props);
   const panel = el("section", { id: "rterm" });
@@ -240,44 +194,9 @@ export function openRemoteTerminal(o: { onEnd?: () => void; fetch?: typeof fetch
     runner = r;
     label.textContent = `Terminal · ${r.name}`;
     body.replaceChildren();
-    if (matchMedia("(pointer: coarse)").matches || document.documentElement.classList.contains("phone")) {
-      const row = el("div", { className: "rkeys" });
-      row.setAttribute("role", "toolbar");
-      row.setAttribute("aria-label", "Extra keys");
-      for (const k of KEYS) {
-        const b = el("button", { type: "button", textContent: k.label, title: k.title });
-        b.setAttribute("aria-label", k.title);
-        b.dataset.key = k.title;
-        // (the button never takes the focus from the terminal, so a phone's keyboard stays up)
-        b.addEventListener("pointerdown", (e: Event) => e.preventDefault());
-        b.addEventListener("click", () => { client?.input(k.data); term?.focus(); });
-        row.append(b);
-      }
-      panel.insertBefore(row, body);
-    }
-    term = new Terminal({
-      fontFamily: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace',
-      fontSize: 14,
-      cursorBlink: true,
-      scrollback: SCROLLBACK,
-      theme: themeFromCss(),
-      // (OSC 8: http(s) only (allowNonHttpProtocols is false), opened on a click)
-      linkHandler: { activate: (_e: MouseEvent, text: string) => openWeb(text), allowNonHttpProtocols: false },
-    });
-    // OSC 52, a clipboard write: swallowed (handled, so xterm does nothing more with it)
-    term.parser.registerOscHandler(52, () => true);
-    term.onTitleChange((t: string) => { title.textContent = t.slice(0, 120); });
-    term.registerLinkProvider({
-      provideLinks: (y: number, cb: (links: any[] | undefined) => void) => {
-        const line = term!.buffer.active.getLine(y - 1)?.translateToString(true) ?? "";
-        const links = webLinksIn(line).map((l) => ({
-          text: l.text,
-          range: { start: { x: l.start + 1, y }, end: { x: l.start + l.text.length, y } },
-          activate: (_e: MouseEvent, text: string) => openWeb(text),
-        }));
-        cb(links.length ? links : undefined);
-      },
-    });
+    const row = extraKeysRow("rkeys", (data) => client?.input(data), () => term?.focus());
+    if (row) panel.insertBefore(row, body);
+    term = safeTerminal({ scrollback: SCROLLBACK, onTitle: (t) => { title.textContent = t; } });
     // Ported from CoCalc packages/frontend/frame-editors/terminal-editor/connected-terminal.ts (SageMath, Inc.; relicensed by the copyright owner, Nov 7 2026)
     // (onKey / onData, lines 527-548 @2265acac: while output is being drawn, keys still go through onKey, or typing
     // "123456789" across the number row drops a "4".  There, it is while any output renders, because CoCalc's
@@ -326,20 +245,5 @@ export function openRemoteTerminal(o: { onEnd?: () => void; fetch?: typeof fetch
     setTheme: () => { if (term) term.options.theme = themeFromCss(); },
     focus: () => { term ? term.focus() : (panel.querySelector(".rpick button") as HTMLElement | null)?.focus(); },
     close,
-  };
-}
-
-// (the console's colors: web/console.ts)
-function themeFromCss() {
-  const v = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  const dark = v("--scheme") === "dark";
-  return {
-    background: v("--code"),
-    foreground: v("--fg"),
-    cursor: v("--fg"),
-    selectionBackground: dark ? "#3d4a3f" : "#cfe0c8",
-    red: v("--err"),
-    green: v("--accent"),
-    ...(dark ? {} : { brightBlack: "#5d645f", white: "#5d645f" }),
   };
 }

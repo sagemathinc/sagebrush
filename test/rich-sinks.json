@@ -386,32 +386,7 @@
    "kind": "renderer",
    "owner": "renderer"
   },
-  "web/notebook/remote-terminal-view.ts ::  :: import css from \"@xterm/xterm/css/xterm.css\" with { type: \"text\" }; #0": {
-   "kind": "rich",
-   "owner": "terminal",
-   "readers": []
-  },
-  "web/notebook/remote-terminal-view.ts ::  :: import { FitAddon } from \"@xterm/addon-fit\"; #0": {
-   "kind": "rich",
-   "owner": "terminal",
-   "readers": []
-  },
-  "web/notebook/remote-terminal-view.ts ::  :: import { Terminal } from \"@xterm/xterm\"; #0": {
-   "kind": "rich",
-   "owner": "terminal",
-   "readers": []
-  },
-  "web/notebook/remote-terminal-view.ts :: start :: term = new Terminal({ #0": {
-   "kind": "rich",
-   "owner": "terminal",
-   "readers": []
-  },
   "web/notebook/remote-terminal-view.ts :: start :: term.loadAddon(fit); #0": {
-   "kind": "rich",
-   "owner": "terminal",
-   "readers": []
-  },
-  "web/notebook/remote-terminal-view.ts :: start :: term.registerLinkProvider({ #0": {
    "kind": "rich",
    "owner": "terminal",
    "readers": []
@@ -547,6 +522,31 @@
   "web/share-client/list-view.ts :: rowEl :: el.innerHTML = `<label><input type=\"checkbox\"><span class=\"name\"></span><span class=\"size\"></span></label><div class=\"why\"></div>`; #0": {
    "kind": "host",
    "owner": "host"
+  },
+  "web/term/xterm-view.ts ::  :: export { FitAddon } from \"@xterm/addon-fit\"; #0": {
+   "kind": "rich",
+   "owner": "terminal",
+   "readers": []
+  },
+  "web/term/xterm-view.ts ::  :: import css from \"@xterm/xterm/css/xterm.css\" with { type: \"text\" }; #0": {
+   "kind": "rich",
+   "owner": "terminal",
+   "readers": []
+  },
+  "web/term/xterm-view.ts ::  :: import { Terminal } from \"@xterm/xterm\"; #0": {
+   "kind": "rich",
+   "owner": "terminal",
+   "readers": []
+  },
+  "web/term/xterm-view.ts :: safeTerminal :: const term = new Terminal({ #0": {
+   "kind": "rich",
+   "owner": "terminal",
+   "readers": []
+  },
+  "web/term/xterm-view.ts :: safeTerminal :: term.registerLinkProvider({ #0": {
+   "kind": "rich",
+   "owner": "terminal",
+   "readers": []
   },
   "web/threads/page.ts :: env :: $(\"env\").innerHTML = rows.map(([k, v]) => `<tr><th>${k}</th><td>${v.replace(/&/g, \"&amp;\").replace(/</g, \"&lt;\")}</td></tr>`).join(\"\"); #0": {
    "kind": "host",
