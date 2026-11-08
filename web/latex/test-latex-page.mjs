@@ -3112,6 +3112,18 @@ open('made.txt', 'w').write('x')
       await ev(`${W}.remove("/ex-b/helper.py").then(() => 1)`);
       const b3 = await runB();
       check(b3?.items?.[0]?.s === "error" && /No module named .?helper/.test(L(b3, 0)), "Run (Codex P5): the helper deleted, the next Run can't import it", { got: L(b3, 0).slice(-160) });
+      // (grader's #812 P1: files of the folder only in the cloud aren't given to Sage, and the Run's status line says how
+      //  many: one, then two (the listing marks them so, as the cloud's entries are))
+      await mk("/ex-b/data.txt", enc("1\n"));
+      await ev(`(() => { const ws = window.__sbTexWs, real = ws.list; window.__cloud = []; ws.list = async function (...a) { const r = await real.apply(this, a); return r.map((e) => window.__cloud.includes(e.path) ? { ...e, remote: true } : e); }; window.__cloudRestore = () => { ws.list = real; }; return 1; })()`);
+      const statusNow = () => ev(`document.querySelector(".tex-status")?.textContent ?? ""`);
+      await ev(`(window.__cloud = ["/ex-b/statistics.py"], 1)`);
+      await runB(); const one = await statusNow();
+      await ev(`(window.__cloud = ["/ex-b/statistics.py", "/ex-b/data.txt"], 1)`);
+      await runB(); const two = await statusNow();
+      await ev(`(window.__cloudRestore(), delete window.__cloudRestore, delete window.__cloud, 1)`);
+      check(/^Ran 6 SageTeX items in [0-9.]+ s(; [0-9]+ failed)?; 1 file in its folder is only in the cloud, not given to Sage$/.test(one) && /^Ran 6 SageTeX items in [0-9.]+ s(; [0-9]+ failed)?; 2 files in its folder are only in the cloud, not given to Sage$/.test(two),
+        "Run (#812 P1): the folder's files only in the cloud: the status line says how many weren't given to Sage (1 file is, 2 files are)", { one, two });
       // (a folder past the bound: 501 files; Run says so, starts nothing and writes no results file)
       const fbig = await mk("/ex-big/doc.tex", enc("\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n$\\sage{1+1}$\n\\end{document}\n"));
       await ev(`(async () => { for (let i = 0; i < 500; i++) await ${W}.create("/ex-big/f" + i + ".txt", { content: new Uint8Array([120]) }); return 1; })()`);
