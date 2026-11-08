@@ -22,6 +22,13 @@ print(pyexpat.ErrorString(7), pyexpat.ErrorString(999), pyexpat.ErrorString(0), 
 print(pyexpat.ExpatError is pyexpat.error, pyexpat.ExpatError.__module__, pyexpat.ExpatError.__mro__[1:],
       pyexpat.XMLParserType.__name__, t(lambda: pyexpat.xmlparser), t(lambda: pyexpat.XMLParserType()))
 print(expat.ErrorString is pyexpat.ErrorString, expat.ParserCreate is pyexpat.ParserCreate)
+# (the submodules by name, as the C module registers them, and xml.parsers.expat's own names for them)
+import sys  # noqa: E402
+import pyexpat.errors  # noqa: E402
+import pyexpat.model  # noqa: E402
+import xml.parsers.expat.errors  # noqa: E402
+print(sys.modules["pyexpat.errors"] is pyexpat.errors is xml.parsers.expat.errors, sys.modules["pyexpat.model"] is expat.model,
+      sys.modules["xml.parsers.expat.model"] is expat.model)
 print(pyexpat.XML_PARAM_ENTITY_PARSING_NEVER, pyexpat.XML_PARAM_ENTITY_PARSING_UNLESS_STANDALONE,
       pyexpat.XML_PARAM_ENTITY_PARSING_ALWAYS)
 

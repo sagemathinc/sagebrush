@@ -9,7 +9,8 @@
 # (test/expat_corpus.json, recorded by test/gen_expat_corpus.py).
 #
 # It reads nothing and writes nothing: no file, network or host capability, no external entity or DTD is ever
-# fetched (there is no resolver), and it imports only re and types (pinned by an import census).
+# fetched (there is no resolver), and it imports only re, types and sys, sys for sys.modules alone (pinned by an
+# import census).
 #
 # libexpat's notice (MIT), for the logic ported from it and the name tables derived from its nametab.h:
 #
@@ -35,6 +36,7 @@
 #   USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import re as _re
+import sys as _sys
 import types as _types
 
 EXPAT_VERSION = "expat_2.9.0"
@@ -98,6 +100,9 @@ for _name, _value in (("XML_CTYPE_EMPTY", 1), ("XML_CTYPE_ANY", 2), ("XML_CTYPE_
                       ("XML_CQUANT_REP", 2), ("XML_CQUANT_PLUS", 3)):
     setattr(model, _name, _value)
 del _code, _name, _message, _value
+# (as CPython's pyexpat: the submodules are importable by name, `import pyexpat.errors`)
+_sys.modules[errors.__name__] = errors
+_sys.modules[model.__name__] = model
 
 
 class ExpatError(Exception):

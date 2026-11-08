@@ -16,7 +16,7 @@ import { join } from "node:path";
 //   - test/expat_api_cases.py, the module's interface, prints what CPython prints, line for line;
 //   - test/expat_rules.py, what is Sagebrush's own: the allocation tracker, the work bounds, the scan window, no I/O,
 //     the stated interface refusals;
-//   - lib/pyexpat.py imports re and types only and calls nothing that reaches a file or runs code.
+//   - lib/pyexpat.py imports re, types and sys (sys.modules alone) and calls nothing that reaches a file or runs code.
 // (The browser worker: web/test-expat-worker.mjs, the whole-document cases and the interface lines.)
 const ROOT = join(__dirname, "..", "..");
 const CLI = join(__dirname, "..", "src", "cli.js");
@@ -100,7 +100,7 @@ test("expat_rules.py: the allocation tracker, linear work, the scan window, no I
   ]);
 });
 
-test("lib/pyexpat.py imports re and types only, and names nothing that reaches a file or runs code", () => {
+test("lib/pyexpat.py imports re, types and sys (for sys.modules alone), and names nothing that reaches a file or runs code", () => {
   const census = JSON.parse(py(["-c", [
     "import ast, json, sys",
     "tree = ast.parse(open(sys.argv[1], encoding='utf-8').read())",
@@ -108,7 +108,9 @@ test("lib/pyexpat.py imports re and types only, and names nothing that reaches a
     "bad = {'open', 'exec', 'eval', 'compile', '__import__', 'globals', 'vars', 'breakpoint', 'input', 'importlib', 'io', 'os', 'sys', 'urllib', 'socket'}",
     // (names only: the modules it can reach are its two imports; re's compile and an entity's open flag are attributes)
     "named = sorted({n.id for n in ast.walk(tree) if isinstance(n, ast.Name) and n.id in bad})",
-    "print(json.dumps([imports, named]))",
+    // (sys for sys.modules alone: the submodules registered by name, as the C module does)
+    "uses_sys = sorted({n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id == '_sys'})",
+    "print(json.dumps([imports, named, uses_sys]))",
   ].join("\n"), join(ROOT, "lib", "pyexpat.py")]));
-  assert.deepEqual(census, [["re", "types"], []]);
+  assert.deepEqual(census, [["re", "sys", "types"], [], ["modules"]]);
 });
