@@ -1072,10 +1072,11 @@ if (REMOTE_PREVIEW) {
     let mod;
     try { mod = await import(new URL("sagebrush-remote-terminal.js", location.href).href); } catch (e) { savedEl.textContent = "the terminal didn't load: " + (e?.message ?? e); return; }
     if (!rterm) {
-      rterm = mod.openRemoteTerminal({ onEnd: () => { rterm = null; } });
+      rterm = mod.openRemoteTerminal({ onEnd: () => { rterm = null; bottomRoom(); } });
       rterm.el.addEventListener("pointerdown", () => panelToFront(rterm?.el));
     }
     panelToFront(rterm.el);
+    bottomRoom();
   };
 }
 const nb = createNotebook($("#cells"), { kernel: null, staleOnLoad: true, analyzer, reactive: REACTIVE, remoteGate: (k, page) => remoteMod?.gateFor(k, page), mystBook: () => bookAcc.mystBook() });
@@ -1393,11 +1394,16 @@ function panelToFront(el) {
   for (const p of [consoleEl, rterm?.el]) if (p) p.style.zIndex = p === el ? "6" : "5";
 }
 consoleEl.addEventListener("pointerdown", () => panelToFront(consoleEl));
+// (room below the notebook for whichever bottom panel is open, the taller of the two: its last cells stay reachable)
+function bottomRoom() {
+  const h = Math.max(consoleEl.hidden ? 0 : consoleEl.offsetHeight, rterm?.el?.offsetHeight ?? 0);
+  document.body.style.paddingBottom = h ? h + "px" : "";
+}
 async function toggleConsole(show = consoleEl.hidden) {
   consoleEl.hidden = !show;
   if (show) panelToFront(consoleEl);
   consoleBtn.setAttribute("aria-pressed", String(show));
-  document.body.style.paddingBottom = show ? consoleEl.offsetHeight + "px" : "";
+  bottomRoom();
   if (!show) return consoleBtn.focus();
   if (consoleUi) return consoleUi.focus();
   statusEl.textContent = "loading console…";
@@ -1440,7 +1446,7 @@ $("#closeconsole").onclick = () => toggleConsole(false);
   const grip = consoleEl.querySelector(".grip");
   const setH = (h) => {
     consoleEl.style.height = Math.max(120, Math.min(innerHeight - 60, h)) + "px";
-    document.body.style.paddingBottom = consoleEl.offsetHeight + "px";
+    bottomRoom();
   };
   grip.addEventListener("pointerdown", (e) => {
     grip.setPointerCapture(e.pointerId);

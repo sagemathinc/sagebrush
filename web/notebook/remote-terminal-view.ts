@@ -217,7 +217,7 @@ export function openRemoteTerminal(o: { onEnd?: () => void; fetch?: typeof fetch
             errored = true;
             const why = e.reason ? ` (${String(e.reason).slice(0, 200)})` : "";
             // (the session limit is the runner's own number, terminal.py TERMINAL_LIMITS)
-            const text = e.error === "sessions" ? `already runs ${e.limit ?? "its most"} terminals. End one there, then Reconnect.` : ERRORS[e.error];
+            const text = e.error === "sessions" ? `already runs ${e.limit == null ? "as many terminals as it allows" : e.limit === 1 ? "1 terminal" : `${e.limit} terminals`}. End one there, then Reconnect.` : ERRORS[e.error];
             say(text ? `${r.name} ${text}${why}` : `${r.name}: ${String(e.error).slice(0, 60)}${why}`);
           } else if (e.t === "closed" && !t.exited && !t.closedFor) {
             endB.hidden = true;
