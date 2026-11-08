@@ -6,6 +6,8 @@
 //     gives CPython's result, through test/expat_run.py --whole, except the cases test/expat_divergences.json states,
 //     which give the result stated there;
 //   - test/expat_api_cases.py, the module's interface, prints what CPython prints, line for line;
+//   - a cold program fetches no XML code: the group mod-xml is fetched at the first import, once (the worker's
+//     requests, seen through the DevTools protocol);
 //   - xml.dom and xml.sax are not here (P3c's scope: @sagebrush's ruling), ModuleNotFoundError.
 //   bun web/build.ts, then node web/test-expat-worker.mjs
 import { execFileSync, spawn } from "node:child_process";
@@ -49,14 +51,25 @@ const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebugge
 await new Promise((r) => (ws.onopen = r));
 let n = 0;
 const waiting = new Map();
+// (the requests of the Python worker, attached as its own session: the group's fetch is seen once there, and again
+// in the service worker's session, which serves it)
+const requests = [];
+const workerSessions = new Set();
 ws.onmessage = (ev) => {
   const m = JSON.parse(ev.data);
+  if (m.method === "Network.requestWillBeSent" && workerSessions.has(m.sessionId)) requests.push(m.params.request.url);
+  if (m.method === "Target.attachedToTarget") {
+    const sessionId = m.params.sessionId;
+    if (m.params.targetInfo.type === "worker") workerSessions.add(sessionId);
+    for (const [method, params] of [["Network.enable", {}], ["Runtime.runIfWaitingForDebugger", {}]]) ws.send(JSON.stringify({ id: ++n, method, params, sessionId }));
+  }
   if (m.id && waiting.has(m.id)) {
     waiting.get(m.id)(m.result ?? m.error);
     waiting.delete(m.id);
   }
 };
 const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
+const xmlFetches = () => requests.filter((u) => /\/lib\/mod-xml\./.test(u)).length;
 const ev = async (expression) => {
   const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
   if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400));
@@ -99,14 +112,23 @@ const firstDiff = (want, got) => {
 const ranOk = (r, what) => check(!r.timeout && r.error === null && r.stderr === "", `${what} ran (${r.timeout ? "timed out" : r.error ?? "no error"}${r.stderr ? ": " + r.stderr.slice(-300) : ""})`);
 
 try {
-  for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
+  for (const m of ["Page.enable", "Runtime.enable", "Network.enable"]) await send(m);
+  await send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: true, flatten: true });
   await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
   await sleep(1500);
   await start();
 
+  // ---- a cold start fetches no XML: the group mod-xml comes with the first import, once
+  const cold = await run("import sys\nprint(1 + 1, 'pyexpat' in sys.modules, 'xml' in sys.modules)");
+  ranOk(cold, "a cold program");
+  check(cold.stdout === "2 False False\n" && xmlFetches() === 0, `a cold program: no XML module loaded, mod-xml not fetched (${JSON.stringify(cold.stdout)}, ${xmlFetches()} fetches)`);
+  const first = await run("import pyexpat, xml.parsers.expat\nprint(pyexpat.EXPAT_VERSION)");
+  check(first.stdout === "expat_2.9.0\n" && xmlFetches() === 1, `the first import fetches mod-xml once (${JSON.stringify(first.stdout)}, ${xmlFetches()} fetches)`);
+
   // ---- the whole-document cases, as CPython 3.14.10's pyexpat gives them
   const c = await run("import sys\nsys.path.insert(0, '/xt')\nimport expat_run\nexpat_run.main(['expat_run.py', '--sagebrush', '--whole'])");
   ranOk(c, "expat_run.py --sagebrush --whole");
+  check(xmlFetches() === 1, `mod-xml still fetched once (${xmlFetches()})`);
   let r = null;
   try {
     r = JSON.parse(c.stdout);
