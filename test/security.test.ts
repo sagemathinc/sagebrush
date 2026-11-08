@@ -427,6 +427,45 @@ print(out)
   assert.equal(run(src), "['TypeError', 'TypeError', 'absent', 'TypeError', 'AttributeError', 'TypeError', 'module', 'module', [1], 2]\n");
 });
 
+// PERF/SEC: putAttr defines every new Python name as an own data property,
+// rather than taking V8's generic dynamic-store path (which normalizes a
+// populated module to dictionary properties).  Pin the Python-visible side of
+// that representation choice, including every inherited JavaScript name that
+// motivated the old __proto__ special case.
+test("late module and instance attributes are live own dict entries through create, overwrite, delete and recreate", () => {
+  const src = `
+import types
+
+class C: pass
+names = ("__proto__", "constructor", "toString", "hasOwnProperty")
+out = []
+for make in (lambda: types.ModuleType("m"), C):
+    o = make()
+    d = vars(o)
+    for i, name in enumerate(names):
+        setattr(o, name, i)
+    out.append(([name for name in d if name in names], [getattr(o, name) for name in names]))
+    for i, name in enumerate(names):
+        d[name] = i + 10
+    out.append([getattr(o, name) for name in names])
+    for i, name in enumerate(names):
+        if i % 2:
+            delattr(o, name)
+            d[name] = i + 20
+        else:
+            del d[name]
+            setattr(o, name, i + 20)
+    out.append(([d[name] for name in names], [name in d for name in names]))
+    fresh = make()
+    out.append([hasattr(fresh, name) for name in names])
+print(out)
+`;
+  assert.equal(
+    run(src),
+    "[(['__proto__', 'constructor', 'toString', 'hasOwnProperty'], [0, 1, 2, 3]), [10, 11, 12, 13], ([20, 21, 22, 23], [True, True, True, True]), [False, False, False, False], (['__proto__', 'constructor', 'toString', 'hasOwnProperty'], [0, 1, 2, 3]), [10, 11, 12, 13], ([20, 21, 22, 23], [True, True, True, True]), [False, False, False, False]]\n",
+  );
+});
+
 // sagebrush-daybreak's full SEC-18F-1 chain (report on 18f5216), as written:
 // it printed 42 (JavaScript's Function); CPython raises AttributeError.
 test("SEC-18F-1: the forged-layout cache chain never reaches JavaScript", () => {

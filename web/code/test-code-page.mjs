@@ -266,6 +266,10 @@ try {
   // files, as boot.ts mounts it)
   await go(base);
   await until(`!!${W}`, 60000);
+  // (the host page's own first document opened, its title set, before the code pages are mounted: the notebook page
+  // opens it (a first visit's Welcome) after the workspace is ready and sets document.title then, so a mount before it
+  // has its title overwritten: master 733522e0's red, run 42511787585.  Its <title> before then doesn't end so)
+  check(await until(`/ (—|·) Sagebrush$/.test(document.title)`, 60000), "(the host page's first document open, its title set: " + JSON.stringify(await ev("document.title")) + ")");
   const c18 = await ev(`(async () => {
     const m = await import("/sagebrush-code.js");
     const files = { a: { path: "/c18a.py", text: "a\\n", rev: 1 }, b: { path: "/c18b.py", text: "b\\n", rev: 1 } };
