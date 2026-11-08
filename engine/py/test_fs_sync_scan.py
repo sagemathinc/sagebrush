@@ -374,6 +374,9 @@ def test_ignore_file_lines_and_stability():
         tree(root, {S.IGNORE_FILE: b"#c\r" * (S.MAX_IGNORE_LINES + 5)})       # CR only: one line, not 10,005
         assert "keep.txt" in S.scan(S.refuse_overlap(root, [])).files
         assert S.Ignore(["a\rb"]).ignored("a\rb", False)
+        tree(root, {S.IGNORE_FILE: b"a.log\rb.tmp\n"})                       # a lone CR: one rule
+        r = S.scan(S.refuse_overlap(root, []))
+        assert "a.log" in r.files and "b.tmp" in r.files, sorted(r.files)
         # (astra b) a change while it is read: refused before any rule is used
         tree(root, {S.IGNORE_FILE: b"#" * 200000 + b"\n*.txt\n"})
         real_read, calls = os.read, [0]
@@ -393,6 +396,22 @@ def test_ignore_file_lines_and_stability():
             assert e.code == 1 and e.message == "Stopped before planning: .sagebrushignore couldn't be read (it changed while being read).", e.message
         finally:
             os.read = real_read
+    finally:
+        shutil.rmtree(root)
+
+
+def test_ignore_file_must_be_utf8():
+    # (@sagebrush's ruling; astra, sync-client) a malformed byte: refused, never a rule silently changed by decoding
+    root = tmp()
+    try:
+        tree(root, {"keep.txt": b"k", "secret\xe9.txt": b"s", S.IGNORE_FILE: b"*.log\nsecret\xe9.txt\n"})
+        try:
+            S.scan(S.refuse_overlap(root, []))
+            raise AssertionError("an ignore file that isn't UTF-8 was used")
+        except S.Refused as e:
+            assert e.code == 1 and e.message == "Stopped before planning: .sagebrushignore couldn't be read (it isn't UTF-8 text).", e.message
+        tree(root, {S.IGNORE_FILE: "café.tmp\n".encode("utf-8")})                # valid UTF-8: read
+        assert "keep.txt" in S.scan(S.refuse_overlap(root, [])).files
     finally:
         shutil.rmtree(root)
 
@@ -602,10 +621,18 @@ def test_listing_fails_partway():
                 return self
 
             def __next__(self):
-                e = next(self.it)
+                # (sub's listing fails at its end, after every entry, skipped ones included, has been handled)
+                try:
+                    e = next(self.it)
+                except StopIteration:
+                    if self.boom:
+                        raise OSError(5, "Input/output error")
+                    raise
                 if e.name == "boom":
-                    raise OSError(5, "Input/output error")
+                    self.boom = True
                 return e
+
+            boom = False
 
         os.scandir = lambda fd: Failing(real(fd))
         try:
