@@ -106,7 +106,7 @@ Opening a file that's in the cloud, while offline:
   - while it downloads, in place of the content: "Downloading: 12 of 140 MB" (§2);
   - no room for it on this device: "There isn't room on this device for <name> (140 MB). Free up space in the Storage panel." (§2);
   - the daily read budget spent: "Daily download limit: resumes at 14:00" (as today, L1);
-  - a download whose bytes didn't match: ⚠ "The download didn't match the file in the cloud, so it wasn't saved on this device. It will download again once the cloud copy has been checked, and repaired if needed." (§4.1's repair: a single damaged piece is simply fetched again, unseen; this message is for a whole file that doesn't match);
+  - a download whose bytes didn't match: ⚠ "The download didn't match the file in the cloud, so it wasn't saved on this device. It will download again once the copy in the cloud has been checked, and replaced if needed from a device that has the file." (§4.1's repair: a single damaged piece is simply fetched again, unseen; this message is for a whole file that doesn't match);
   - no device can repair it: ⚠ "The copy of <name> in the cloud is damaged, and none of your devices has a good copy, so it can't be downloaded." (§4.1);
   - a removal refused while a repair may need this device's copy: "Is needed to repair the copy in the cloud" (§3.4 check 2);
   - kept files over the budget: "Kept files use more than this device's limit" (§3.2);
