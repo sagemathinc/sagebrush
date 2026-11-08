@@ -88,6 +88,7 @@ test("expat_rules.py: the allocation tracker refuses past its limits, before the
   assert.deepEqual(r.admission, {
     "attribute expansion": [1, [["ED", "e", 300]], 0],
     "entity value": [1, [["ED", "e", 0]], 0],
+    "many pieces": [1, [["ED", "e", 1]], 0],
     "many attributes": [1, [], 0],
     "fallback attributes": [1, [], 0],
   });
@@ -118,8 +119,9 @@ test("expat_rules.py: the two ledgers: flushes leave the same state, parts are c
   // (X1: 100 one-byte parts waiting, 24 of them not yet joined: each a string and a list entry, 2 + 64 + 96)
   assert.deepEqual(l.parts, [24, [484, 4112, [24 * 162, 0, 224, 0, 0]]]);
   assert.deepEqual(l.parts_end, [[0, 0, [0, 0, 0, 0, 0]], 0, 0, 0]);
-  // (grader's B2: the buffered fragments "ab", "&", "cd", each a string and an entry, as each token is accounted)
-  assert.deepEqual(l.fragments, [0, 0, 164, 326, 490]);
+  // (grader's B2: the buffered fragments "ab", "&", "cd", each a string and an entry, as each token is accounted;
+  // and each token's own copies, four strings of its length: <r>, ab, &amp;, cd, </r>)
+  assert.deepEqual(l.fragments, [[0, 280], [0, 272], [164, 296], [326, 272], [490, 288]]);
   // (every Parse's return, fed in pieces: the buffers ledger is exactly its slots, never more than four times what
   // waits plus its parts' overhead, and both ledgers are empty at the end)
   for (const [i, x] of l.invariants.entries()) {

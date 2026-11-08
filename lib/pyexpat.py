@@ -244,8 +244,8 @@ class _Chars:
             qname = f"[{start}][{rest}]*(?::[{start}][{rest}]*)?"
         else:
             qname = f"[{nmstrt}][{name}]*"
-        self.att_fast = _re.compile(qname + "[\\t\\n\\r ]*=[\\t\\n\\r ]*(?:\"[^\"<&" + _INVALID + "]*\"|'[^'<&" + _INVALID +
-                                    "]*')(?=[\\t\\n\\r />])")
+        self.att_fast = _re.compile("(" + qname + ")[\\t\\n\\r ]*=[\\t\\n\\r ]*(?:\"([^\"<&" + _INVALID + "]*)\"|'([^'<&" +
+                                    _INVALID + "]*)')(?=[\\t\\n\\r />])")
         self.space_run = _re.compile("[\\t\\n\\r ]*")
         self.not_normal = _re.compile("[\\t\\r\\n]|  ")
 
@@ -759,12 +759,12 @@ class _Tok:
                 self._drop_atts(atts)
                 self.atts = None
                 return self.scan_atts(i + 1, end)
-            eq = _find(t, "=", i, m.end())
-            name_end = eq
-            while t[name_end - 1] in " \t\r\n":
-                name_end -= 1
+            # (the name, and the value inside its quotes, from the match's groups)
+            name_end = m.end(1)
+            vs = m.start(2)
+            if vs < 0:
+                vs = m.start(3)
             ve = m.end() - 1
-            vs = _find(t, t[ve], eq, ve) + 1
             normalized = not (vs < ve and (t[vs] == " " or t[ve - 1] == " " or c.not_normal.search(t, vs, ve)))
             if self.ledger is not None:
                 self.ledger._charge(_ENTRY_COST)

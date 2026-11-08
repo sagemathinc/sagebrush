@@ -188,7 +188,8 @@ out["span_default"] = measured(big)
 work = {}
 for label, make, chunk in (
         ("tabs attribute", lambda k: b"<a x='" + b"v\t" * k + b"'/>", None),
-        ("fallback attribute", lambda k: b"<a x='" + b"x" * (2 * k) + b"&amp;' y='" + b"z \n" * k + b"'/>", None),
+        ("fallback attribute", lambda k: b"<a x='" + b"x" * (2 * k) + b"&amp;' y='" + b"z \n" * k + b"' w=\""
+         + b"q \t" * k + b"\"/>", None),
         ("comment, 1-byte feeds", lambda k: b"<a><!--" + b"c" * (2 * k) + b"--></a>", 1),
         ("attribute, 1-byte feeds", lambda k: b"<a x='" + b"v" * (2 * k) + b"'/>", 1),
         ("tokens", lambda k: b"<a>" + b"<b x='1'>t</b>" * (k // 8) + b"</a>", None),
@@ -249,7 +250,7 @@ _account = pyexpat.XMLParserType._account
 
 
 def _sampled(self, nbytes, direct):
-    samples.append(self._led[3])
+    samples.append([self._led[3], self._led[4]])
     return _account(self, nbytes, direct)
 
 
@@ -326,6 +327,7 @@ adm = {}
 adm["attribute expansion"] = admitted(b"<!DOCTYPE r [<!ENTITY e '" + b"v" * 300 + b"'>]><r a='&e;&e;&e;&e;&e;&e;'/>",
                                       4096, 1.0)
 adm["entity value"] = admitted(b"<!DOCTYPE r [<!ENTITY e '" + b"v" * 5000 + b"'>]><r/>", 4096, 1.0)
+adm["many pieces"] = admitted(b"<!DOCTYPE r [<!ENTITY e 'a'>]><r a='" + b"&e;" * 200 + b"'/>", 8000, 1.0)
 adm["many attributes"] = admitted(b"<r " + b" ".join(b"a%d='1'" % i for i in range(200)) + b"/>", 8192, 1.0)
 adm["fallback attributes"] = admitted(b"<r " + b" ".join(b"a%d='&amp;'" % i for i in range(200)) + b"/>", 8192, 1.0)
 out["admission"] = adm
