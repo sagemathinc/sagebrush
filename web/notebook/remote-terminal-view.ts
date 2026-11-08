@@ -66,6 +66,8 @@ const ERRORS: Record<string, string> = {
   refused: "refused to open the terminal.",
   not_open: "has no terminal open on this connection. Reconnect.",
   expired: "ended this session.",
+  // (remote-terminal.js: 2 pings to the relay unanswered)
+  relay: "isn't answering: the connection went quiet. Reconnect.",
 };
 
 const SESSION_KEY = (remoteId: string) => "sagebrush-rterm:" + remoteId;

@@ -28,9 +28,10 @@ class FakeLeg {
   }
   addEventListener(k, f) { this.handlers[k].push(f); }
   fire(k, e) { for (const f of this.handlers[k]) f(e); }
-  send(t) { this.sent.push(JSON.parse(t)); }
+  send(t) { this.sent.push(JSON.parse(t)); (this.texts ??= []).push(t); }
   close(code, why) { this.closed = { code, why }; }
   runner(obj) { this.fire("message", { data: JSON.stringify(obj) }); }
+  raw(text) { this.fire("message", { data: text }); }
   of(t) { return this.sent.filter((m) => m.t === t); }
 }
 
@@ -260,6 +261,99 @@ for (const msg of [{ t: "opened", session: "S".repeat(22), nonce: "N2" }, { t: "
   check(calls.length === 1 && calls[0][1] === false && calls[0][0].namedCurve === "P-256", "terminalKey: a P-256 pair generated with extractable false");
   check(!exported, "a pair made that way: its private key can't be exported");
   check(k.jwk && !("d" in k.jwk) && Object.keys(k.jwk).sort().join(",") === "crv,kty,x,y", "the JWK sent is the public key only");
+}
+
+// ================= the relay's controls on this leg (cloud relay.ts PAGE_OPS): receipts acked, pings, pongs
+const R22 = "Rr0123456789abcdefgh_-";
+class Timers {
+  constructor() { this.fns = new Map(); this.next = 1; this.cleared = 0; }
+  setInterval(f) { const id = this.next++; this.fns.set(id, f); return id; }
+  clearInterval(id) { if (this.fns.delete(id)) this.cleared++; }
+  fire() { for (const f of [...this.fns.values()]) f(); }
+  get live() { return this.fns.size; }
+}
+async function relayLeg({ key: k = key, view = new View(), timers = new Timers(), events = [] } = {}) {
+  const t = new RemoteTerminal({ url: "wss://x.invalid/p", remoteId: "R1", key: k, view, rows: 24, cols: 80, timers,
+    on: (e) => events.push(e), WebSocket: FakeLeg }).start();
+  const live0 = timers.live;
+  await tick();
+  const leg = FakeLeg.last;
+  return { t, leg, view, timers, events, live0 };
+}
+const relayMsgs = (leg) => leg.sent.filter((m) => "relay" in m);
+{
+  const { t, leg, timers, events, live0 } = await relayLeg();
+  check(live0 === 0 && timers.live === 1, "the ping timer starts at the leg's open, not before");
+  leg.runner({ jsonrpc: "2.0", id: "t1", result: { protocol: 1, purpose: "terminal", token: "TOK", nonce: "N1", gen: 7 } });
+  await tick(20);
+  leg.runner({ t: "opened", session: "S".repeat(22), nonce: "N2" });
+  leg.runner({ t: "replay" });
+  leg.runner({ t: "out", b: toB64(new Uint8Array([65])) });
+  leg.raw(`{"relay":"receipt","r":"${R22}","upto":262400}`);
+  leg.runner({ t: "out", b: toB64(new Uint8Array([66])) });
+  await tick();
+  const acks = relayMsgs(leg);
+  check(JSON.stringify(acks) === JSON.stringify([{ relay: "ack", r: R22 }]) && JSON.stringify(leg.sent.at(-1)) === JSON.stringify({ t: "ack", upto: 2 }) && t.state === "attached",
+    "a receipt is acked at once with {relay:ack, r}; the stream goes on");
+  // (the ack's exact text: what the relay strict-parses)
+  check(leg.texts.includes(`{"relay":"ack","r":"${R22}"}`), "the ack's exact serialization, as the relay strict-parses it");
+  leg.raw(`{"relay":"receipt","r":"${R22.replace("R", "Q")}","upto":524800}`);
+  await tick();
+  check(relayMsgs(leg).length === 2 && t.state === "attached", "a later receipt (upto higher) is acked too");
+  leg.raw(`{"relay":"receipt","r":"${R22.replace("R", "P")}","upto":524800}`);
+  await tick();
+  check(t.state === "ended" && events.some((e) => e.t === "error" && e.reason === "a receipt out of order") && timers.live === 0,
+    "a duplicate or out-of-order receipt (upto not above the last) ends the page; the timer is cleared");
+}
+{
+  // (a receipt while the open's proof is still being made: acked, and the open still goes)
+  const slowKey = { ...key, proof: () => new Promise((r) => setTimeout(() => r("late-proof"), 50)) };
+  const { t, leg } = await relayLeg({ key: slowKey });
+  leg.runner({ jsonrpc: "2.0", id: "t1", result: { protocol: 1, purpose: "terminal", token: "TOK", nonce: "N1", gen: 7 } });
+  await tick();
+  leg.raw(`{"relay":"receipt","r":"${R22}","upto":300}`);
+  await tick(80);
+  check(relayMsgs(leg).length === 1 && leg.of("open").length === 1 && t.state === "opening", "a receipt during the proof: acked, and the open still sent");
+}
+for (const [what, text] of [
+  ["an extra key", `{"relay":"receipt","r":"${R22}","upto":1,"x":1}`],
+  ["the keys in another order", `{"relay":"receipt","upto":1,"r":"${R22}"}`],
+  ["an r of 21 characters", `{"relay":"receipt","r":"${R22.slice(1)}","upto":1}`],
+  ["an r with another character", `{"relay":"receipt","r":"${R22.slice(1)}=","upto":1}`],
+  ["a negative upto", `{"relay":"receipt","r":"${R22}","upto":-1}`],
+  ["a fractional upto", `{"relay":"receipt","r":"${R22}","upto":1.5}`],
+  ["whitespace (not the one serialization)", `{"relay":"receipt", "r":"${R22}","upto":1}`],
+  ["a ping (an op the relay never sends a page)", `{"relay":"ping"}`],
+  ["an unknown op", `{"relay":"wat"}`],
+  ["not JSON", `{"relay":"receipt"`],
+]) {
+  const { t, leg, events, timers } = await relayLeg();
+  leg.raw(text);
+  await tick();
+  check(t.state === "ended" && events.some((e) => e.t === "error" && e.error === "protocol") && relayMsgs(leg).length === 0 && timers.live === 0,
+    `a relay control with ${what} ends the page, unacked`);
+}
+{
+  // (pings: every pingMs; a pong resets the count; 2 unanswered and the leg is dead)
+  const { t, leg, timers, events } = await relayLeg();
+  timers.fire(); timers.fire();
+  check(relayMsgs(leg).filter((m) => m.relay === "ping").length === 2 && t.state === "hello", "two pings sent, one per interval");
+  leg.raw(`{"relay":"pong"}`);
+  await tick();
+  timers.fire(); timers.fire();
+  check(t.state === "hello" && relayMsgs(leg).length === 4, "a pong resets the missed count: two more pings, still alive");
+  timers.fire();
+  check(t.state === "ended" && events.some((e) => e.t === "error" && e.error === "relay" && e.reason === "no pong") && events.some((e) => e.t === "closed" && e.code === 4002)
+    && leg.closed?.code === 4002 && timers.live === 0, "2 pings unanswered: the page ends (no pong, 4002) and the timer is cleared");
+  timers.fire();
+  check(relayMsgs(leg).length === 4, "no ping after the end");
+}
+{
+  // (every other close path clears the timer: the page's close, the socket's close, a protocol failure)
+  const a = await relayLeg(); a.t.close();
+  const b = await relayLeg(); b.leg.fire("close", { code: 1006, reason: "" });
+  const c = await relayLeg(); c.leg.runner({ t: "wat" }); await tick();
+  check([a, b, c].every((x) => x.timers.live === 0 && x.timers.cleared === 1), "the ping timer is cleared on close(), on the socket's close and on a failure");
 }
 
 check(spied.fetch === 0 && spied.xhr === 0, "zero network besides the relay leg");
