@@ -3,7 +3,7 @@
 import { writeSync, readSync } from "fs";
 import {
   T, PyType, FloatBox, PyDict, DONE, NotImplemented, Ellipsis, typeOf, typeName, lookupType, isType, raise, builtin, sig, tuple, hooks,
-  isinstance, getattr, setattr, delattr, callObj, callKw, bindArgs, dictSet, dictGet, hasInstanceDict, PyBytes, builtinType, checkArity, unbox,
+  isinstance, getattr, setattr, delattr, callObj, callKw, bindArgs, dunderOf, dictSet, dictGet, hasInstanceDict, PyBytes, builtinType, checkArity, unbox,
 } from "./object";
 import * as O from "./ops";
 import { consumeCtrlC } from "./interrupt";
@@ -404,8 +404,8 @@ function roundImpl(x: any, nd: any = null): any {
     if (Math.abs(q - Math.trunc(q)) === 0.5) r = 2 * Math.round(q / 2);
     return O.mkfloat(r * p);
   }
-  const f = lookupType(typeOf(x), "__round__");
-  if (f === undefined) raise(T.TypeError, `type ${typeName(x)} doesn't define __round__ method`);
+  if (lookupType(typeOf(x), "__round__") === undefined) raise(T.TypeError, `type ${typeName(x)} doesn't define __round__ method`);
+  const f = O.lookupSpecial(x, "__round__");
   return nd === null ? f(x) : f(x, nd);
 }
 
@@ -414,12 +414,12 @@ function metaCheck(spec: any, name: string): any {
   const m = spec.$meta;
   if (m === undefined) return undefined;
   const f = lookupType(m, name);
-  return f === T.type.$dict.get(name) ? undefined : f;
+  return f === T.type.$dict.get(name) ? undefined : dunderOf(f);
 }
 function isinstanceImpl(x: any, spec: any): boolean {
   if (Array.isArray(spec)) return spec.some((s) => isinstanceImpl(x, s));
   if (!isType(spec)) {
-    const ic = lookupType(typeOf(spec), "__instancecheck__");
+    const ic = dunderOf(lookupType(typeOf(spec), "__instancecheck__"));
     if (ic !== undefined) return O.truth(ic(spec, x));
     raise(T.TypeError, "isinstance() arg 2 must be a type, a tuple of types, or a union");
   }
@@ -444,7 +444,7 @@ function issubclassImpl(c: any, spec: any): boolean {
   if (Array.isArray(spec)) return spec.some((s) => issubclassImpl(c, s));
   if (!isType(c) && (isType(spec) || lookupType(typeOf(spec), "__subclasscheck__") === undefined)) raise(T.TypeError, "issubclass() arg 1 must be a class");
   if (!isType(spec)) {
-    const sc = lookupType(typeOf(spec), "__subclasscheck__");
+    const sc = dunderOf(lookupType(typeOf(spec), "__subclasscheck__"));
     if (sc !== undefined) return O.truth(sc(spec, c));
     raise(T.TypeError, "issubclass() arg 2 must be a class, a tuple of classes, or a union");
   }

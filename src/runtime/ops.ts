@@ -4,7 +4,7 @@
 
 import * as SP from "./strpos";
 import {
-  T, markRaised, FloatBox, DONE, NotImplemented, PyDict, PyType, typeOf, typeName, lookupType, raise, isType, tuple, callObj, getattr, typeGetattr, isinstance,
+  T, markRaised, FloatBox, DONE, NotImplemented, PyDict, PyType, typeOf, typeName, lookupType, raise, isType, tuple, callObj, dunderFn, bindsAsDunder, getattr, typeGetattr, isinstance,
   dictGet, dictSet, dictDelete, dictKeyOf, dictMeta, DictMeta, hooks, PyBytes, PyByteArray, checkResizable, PrimBox, table, handledExceptions,
 } from "./object";
 import { glibcPow } from "./libm";
@@ -87,7 +87,7 @@ function special(o: any, name: string): any {
   if (v !== undefined) return v === MISSING ? undefined : v;
   let f = lookupType(t, name);
   if (f !== null && typeof f === "object" && f.asDunder !== undefined) f = f.asDunder();
-  if (f !== undefined && typeof f !== "function") f = nonFunctionDunder(f, name);
+  if (f !== undefined) f = typeof f === "function" ? dunderFn(f) : nonFunctionDunder(f, name);
   c[name] = f === undefined ? MISSING : f;
   return f;
 }
@@ -102,7 +102,7 @@ export const lookupSpecial = special;
 function typeDunder(t: any, name: string): any {
   let f = lookupType(t, name);
   if (f !== null && typeof f === "object" && f.asDunder !== undefined) f = f.asDunder();
-  if (f !== undefined && typeof f !== "function") f = nonFunctionDunder(f, name);
+  if (f !== undefined) f = typeof f === "function" ? dunderFn(f) : nonFunctionDunder(f, name);
   return f;
 }
 
@@ -163,7 +163,7 @@ function nonFunctionDunder(g: any, name: string): any {
 const ABSENT = {};
 function metaHook(meta: any, name: string): any {
   const f = lookupType(meta, name);
-  return f === undefined || typeof f === "function" ? f : nonFunctionDunder(f, name);
+  return f === undefined ? f : typeof f === "function" ? dunderFn(f) : nonFunctionDunder(f, name);
 }
 function classAttrOpt(cls: any, name: string): any {
   const meta = cls.$meta ?? T.type;
@@ -1397,7 +1397,7 @@ export function lengthHint(x: any): void {
     if (f === undefined) return;
     // (a Python function: $pyfn, but not a builtin type's method, which has
     // $pyfn too, with $builtinMethod and its $owner)
-    const pyfn = typeof f === "function" && f.$pyfn === true && f.$builtinMethod !== true && f.$owner === undefined;
+    const pyfn = typeof f === "function" && f.$pyfn === true && f.$builtinMethod !== true && f.$owner === undefined && bindsAsDunder(f);
     let method = builtinSlot(tn, "__length_hint__") || pyfn;
     if (f !== null && typeof f === "object" && f.asDunder !== undefined) {
       f = f.asDunder();
@@ -1469,7 +1469,7 @@ export function hashExact(x: any): any {
   if (cls !== undefined) {
     const f = lookupType(cls, "__hash__");
     if (f !== undefined && f !== null && f !== objectHash) {
-      const r = f(x);
+      const r = typeof f === "function" ? dunderFn(f)(x) : special(x, "__hash__")(x);
       // (as CPython's slot_tp_hash: a result in the hash's 64-bit range is the hash, -1 made -2; a larger one is hashed)
       if (typeof r === "bigint") return inHash64(r) ? normBig(r === -1n ? -2n : r) : normBig(hashIntExact(r));
       if (typeof r === "boolean") return +r;
@@ -1560,7 +1560,7 @@ export function hashAny(x: any): number {
   const f = lookupType(t, "__hash__");
   if (f === null) raise(T.TypeError, `unhashable type: '${t.$name}'`);
   if (f !== undefined && f !== objectHash) {
-    const r = f(x);
+    const r = typeof f === "function" ? dunderFn(f)(x) : special(x, "__hash__")(x);
     if (typeof r === "number" && isInt(r)) return r;
     if (typeof r === "boolean") return +r;
     if (typeof r === "bigint") return inHash64(r) ? Number(r) : hashInt(r);
@@ -2014,7 +2014,7 @@ export class ProtoIter {
   constructor(public o: any) {
     const f = lookupType(typeOf(o), "__next__");
     if (f === undefined) raise(T.TypeError, `iter() returned non-iterator of type '${typeName(o)}'`);
-    this.nx = f;
+    this.nx = typeof f === "function" ? dunderFn(f) : f;
   }
   $next(): any {
     try {

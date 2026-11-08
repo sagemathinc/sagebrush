@@ -1,0 +1,141 @@
+-- a recorder's bound method as each dunder (CPython: called without self)
+__len__ 3 [0]
+__bool__ False [0]
+__hash__ 7 [0]
+__repr__ 'r!' [0]
+__str__ 's!' [0]
+__format__ 'f!' [1]
+__int__ 4 [0]
+__float__ 1.5 [0]
+__index__ 30 [0]
+__complex__ 1j [0]
+__neg__ 'neg' [0]
+__pos__ 'pos' [0]
+__abs__ 'abs' [0]
+__invert__ 'inv' [0]
+__round__ 'rnd' [0]
+__add__ 'add' [1]
+__radd__ 'radd' [1]
+__iadd__ 'iadd' [1]
+__mul__ 'mul' [1]
+__eq__ 'eq' [1]
+__lt__ 'lt' [1]
+__contains__ True [1]
+__getitem__ 'gi' [1]
+__setitem__ 'set' [2]
+__delitem__ 'deleted' [1]
+__iter__ [1, 2] [0]
+__next__ 9 [0]
+__call__ 'called' [2]
+__getattr__ 'ga' [1]
+__length_hint__ [1, 2] [0]
+__reversed__ [2, 1] [0]
+__enter__ 'entered' [0]
+__fspath__ '/p' [0]
+-- a plain function as each dunder (the control: called with self)
+__len__ 3 [('C', 0)]
+__bool__ False [('C', 0)]
+__hash__ 7 [('C', 0)]
+__repr__ 'r!' [('C', 0)]
+__str__ 's!' [('C', 0)]
+__format__ 'f!' [('C', 1)]
+__int__ 4 [('C', 0)]
+__float__ 1.5 [('C', 0)]
+__index__ 30 [('C', 0)]
+__complex__ 1j [('C', 0)]
+__neg__ 'neg' [('C', 0)]
+__pos__ 'pos' [('C', 0)]
+__abs__ 'abs' [('C', 0)]
+__invert__ 'inv' [('C', 0)]
+__round__ 'rnd' [('C', 0)]
+__add__ 'add' [('C', 1)]
+__radd__ 'radd' [('C', 1)]
+__iadd__ 'iadd' [('C', 1)]
+__mul__ 'mul' [('C', 1)]
+__eq__ 'eq' [('C', 1)]
+__lt__ 'lt' [('C', 1)]
+__contains__ True [('C', 1)]
+__getitem__ 'gi' [('C', 1)]
+__setitem__ 'set' [('C', 2)]
+__delitem__ 'deleted' [('C', 1)]
+__iter__ [1, 2] [('C', 0)]
+__next__ 9 [('C', 0)]
+__call__ 'called' [('C', 2)]
+__getattr__ 'ga' [('C', 1)]
+__length_hint__ [1, 2] [('C', 0)]
+__reversed__ [2, 1] [('C', 0)]
+__enter__ 'entered' [('C', 0)]
+__fspath__ '/p' [('C', 0)]
+-- the seven shapes
+gen.__next__ as __next__ 1 [2]
+[].__len__ as __len__ 3
+bound Python method as __len__ TypeError: 'tuple' object cannot be interpreted as an integer
+bound Python method as __call__ ('m', (1,))
+dict.__getitem__ bound as __getitem__ 'y' KeyError: 2
+str.__str__ bound as __repr__ 'fixed' 'fixed' 'fixed'
+len as __call__ 3 TypeError: len() takes exactly one argument (0 given)
+set.__contains__ bound as __contains__ True False
+-- a type as a dunder (not a descriptor: called without self)
+list as __call__ ['a', 'b']
+list as __iter__ TypeError: iter() returned non-iterator of type 'list'
+str as __repr__ ''
+int as __len__ 0
+-- iterparse's shape: a class body holding gen.__next__, an Iterator subclass
+1 [2] StopIteration: 
+-- set and replaced after the class is made (the per-class cache)
+1
+4
+5
+TypeError: object of type 'D' has no len()
+-- inherited by a subclass
+2 'c'
+-- a metaclass's dunder as a bound method (called on the class)
+6 'v'
+-- staticmethod and classmethod stay descriptors
+11 ('SM', 3)
+-- more call sites, each dunder a recorder's bound method
+__bytes__ b'b' [0]
+__trunc__ 3 [0]
+__floor__ 3 [0]
+__ceil__ 3 [0]
+__divmod__ (1, 2) [1]
+__pow__ 'pow' [1]
+__rpow__ 'rpow' [1]
+__matmul__ 'mm' [1]
+__truediv__ 'td' [1]
+__and__ 'and' [1]
+__lshift__ 'ls' [1]
+__ne__ 'ne' [1]
+__ge__ 'ge' [1]
+__missing__ 'miss' [1]
+__dir__ ['a', 'b'] [0]
+__index__ range(0, 2) [0]
+__index__ '0x2' [0]
+__bool__ 'no' [0]
+__len__ 'no' [0]
+__iter__ ['x', 'y'] [0]
+__iter__ 'xy' [0]
+__contains__ True [1]
+__getitem__ ['x', 'y', 'z'] [1, 1, 1, 1]
+__exit__ 'after' [3]
+__init__ 'C' [0]
+__getattribute__ 'gab' [1]
+__setattr__ 'set' [2]
+__delattr__ 'deleted' [1]
+__set_name__ 'Owner' [2]
+-- the descriptor protocol's own dunders as bound methods
+__get__ 'got' [3]
+__set__ 'assigned' [2]
+__delete__ 'deleted' [1]
+-- a metaclass's checks as bound methods
+True True [1, 1]
+'made' [2]
+-- async dunders as bound methods
+None [0]
+'entered' [0]
+[] [0]
+-- keywords through a bound method as __init__ and __call__
+'KI' [((1,), [('x', 2)])]
+'c' 'c' [((1,), [('y', 3)]), ((), [('z', 4)])]
+'made' [((5,), [('w', 6)])]
+'ok' [(('>3',), [])]

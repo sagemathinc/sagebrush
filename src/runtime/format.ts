@@ -1,7 +1,7 @@
 // repr(), str(), format() and `str % args`.
 
 import { T, markRaised, FloatBox, PyDict, typeOf, lookupType, raise, isType, dictKeyOf, dictGet, hooks, Ellipsis, NotImplemented, PyBytes, PyByteArray, StrLayout, PrimBox, typeName, isinstance, toPyExc } from "./object";
-import { PySet, setItems, isPyInt, fv, strFormatOpHook, id, index, normBig, PySlice, pollInterrupt, bitLengthSmallCopies, bitLengthSmallCopiesSigned } from "./ops";
+import { PySet, setItems, isPyInt, fv, lookupSpecial, strFormatOpHook, id, index, normBig, PySlice, pollInterrupt, bitLengthSmallCopies, bitLengthSmallCopiesSigned } from "./ops";
 import { heapLimit } from "./heap";
 import * as FD from "./fdlibm";
 import * as SP from "./strpos";
@@ -377,7 +377,7 @@ export function repr(x: any): string {
         const m = (x as any).$meta;
         if (m !== undefined) {
           const f = lookupType(m, "__repr__");
-          if (f !== T.type.$dict.get("__repr__")) return f(x);
+          if (f !== T.type.$dict.get("__repr__")) return lookupSpecial(x, "__repr__")(x);
         }
         // __module__ as CPython reads it: the class dict's (assigned or set
         // in the body), else where the class was made
@@ -402,7 +402,7 @@ export function repr(x: any): string {
   const t = typeOf(x);
   const f = lookupType(t, "__repr__");
   if (f !== undefined) {
-    const r = f(x);
+    const r = lookupSpecial(x, "__repr__")(x);
     // a str subclass is a string (CPython accepts it)
     if (r instanceof StrLayout) return r.$v;
     if (typeof r !== "string") raise(T.TypeError, `__repr__ returned non-string (type ${typeOf(r).$name})`);
@@ -490,7 +490,7 @@ export function str(x: any): string {
   const t = typeOf(x);
   const f = lookupType(t, "__str__");
   if (f !== undefined) {
-    const r = f(x);
+    const r = lookupSpecial(x, "__str__")(x);
     // a str subclass is a string (CPython accepts it)
     if (r instanceof StrLayout) return r.$v;
     if (typeof r !== "string") raise(T.TypeError, `__str__ returned non-string (type ${typeOf(r).$name})`);
@@ -726,7 +726,7 @@ export function format(v: any, spec: string): string {
   }
   const f = lookupType(typeOf(v), "__format__");
   if (f !== undefined) {
-    const r = f(v, spec);
+    const r = lookupSpecial(v, "__format__")(v, spec);
     if (typeof r !== "string") raise(T.TypeError, "__format__ must return a str");
     return r;
   }
@@ -869,7 +869,7 @@ export function percentFormat(fmtStr: string, args: any, bytesMode = false): str
           else {
             const f = lookupType(typeOf(v), "__bytes__");
             if (f === undefined) raise(T.TypeError, `%b requires a bytes-like object, or an object that implements __bytes__, not '${typeOf(v).$name}'`);
-            const r = f(v);
+            const r = lookupSpecial(v, "__bytes__")(v);
             body = Buffer.from(r.a.subarray(0, r.n)).toString("latin1");
           }
         } else if (type === "b") raise(T.ValueError, `unsupported format character 'b' (0x62) at index ${i - 1}`);
