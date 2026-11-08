@@ -59,7 +59,7 @@ A row's ⋯ menu gains one item, which reads as what it will do:
   Move to Trash
 ```
 
-- "Remove from this device" is shown greyed, with its reason, when it can't be done: "Has changes not yet in the cloud", "Is being downloaded", "Is a conflict copy". It never removes bytes the cloud doesn't have (§3.4).
+- "Remove from this device" is shown greyed, with its reason, when it can't be done (§3.4's checks): "Has changes not yet in the cloud", "Is being downloaded", "Is a conflict copy", "Is open in another tab", "Is kept on this device: stop keeping it first". It never removes bytes the cloud doesn't have.
 - On a folder, "Keep on this device" keeps everything in it, including what's added later.
 
 The Storage panel, with the new block on top of today's:
@@ -68,12 +68,14 @@ The Storage panel, with the new block on top of today's:
 ┌ Storage ─────────────────────────────────────────┐
 │ On this device                                    │
 │   ▓▓▓▓▓▓▓▓▓░░░░░░░░░░  410 MB of 1 GB             │
-│   kept: 120 MB · other cached: 290 MB             │
+│   kept: 120 MB · other cached: 250 MB             │
+│   versions on this device: 40 MB                  │
 │   [ Free up space ]   Keep up to: [ 1 GB ▾ ]      │
 │                                                   │
 │ In the cloud (your account)                       │
 │   1.2 GB of 10 GB, for sharing and sync together  │
-│   files 1.1 GB · notebooks and boards 90 MB       │
+│   files 1.4 GB, stored as 1.1 GB · notebooks and  │
+│   boards 90 MB                                    │
 │                                                   │
 │ Sync this workspace: on · Synced · 2 min ago      │
 └───────────────────────────────────────────────────┘
@@ -95,19 +97,28 @@ Opening a file that's in the cloud, while offline:
 ### 1.3 The words people see (COPY)
 
 - **The names:** "On this device", "Kept on this device", "In the cloud", "Downloading", "Waiting to go up". Used the same way in the row titles, the ⋯ menu, the Storage panel and help.
-- **Never:** "safe", "secure", "backed up" as a promise, "trust", or "unlimited". Say what is true: "fully in the cloud" means the server has accepted every byte (§3.4's test), and nothing more.
+- **Never** a word that promises more than is true: not "safe", "secure", "backed up" or "unlimited", and none of the house's other banned words. Say what is true: "fully in the cloud" means the server has accepted every byte (§3.4's test), and nothing more.
 - **Refusals name their reason** (daybreak2, point 7): "Can't remove lattice-points.sage from this device: it has changes not yet in the cloud."
 - **Numbers are this device's or the account's,** and labelled so.
+- **The messages, word for word** (each used where its section says):
+  - opening a file in the cloud while offline: "<name> is in the cloud, and this device is offline. It will open when you're back online." (§1.2, §2);
+  - while it downloads, in place of the content: "Downloading: 12 of 140 MB" (§2);
+  - no room for it on this device: "There isn't room on this device for <name> (140 MB). Free up space in the Storage panel." (§2);
+  - the daily read budget spent: "Daily download limit: resumes at 14:00" (as today, L1);
+  - a download whose bytes didn't match: ⚠ "The download didn't match the file in the cloud, so it wasn't saved on this device." (§4.1; whether to retry is sync-client's call there);
+  - kept files over the budget: "Kept files use more than this device's limit" (§3.2);
+  - what holds the space: "120 MB here haven't reached the cloud yet; 300 MB are kept on this device." (§5.3);
+  - persistent storage refused: "This browser hasn't agreed to keep Sagebrush's storage. If it clears it to free space, changes not yet in the cloud go with it." (§3.3);
+  - "Free up space" done: "Removed 31 files (250 MB) from this device. They're still in the cloud." (§1.2).
 
 ## 2. Step 1: "in the cloud" files
-
-*Outline by board, from the sync designs; sync-client corrects it against the as-built code and writes the protocol details.*
 
 **What already exists:** a synced data file arriving from another device is listed at once, marked `remote` until its bytes are fetched (sync-client §3, "What comes down"; sync-view.ts). The fetch queue is durable, checked by hash and installed by compare-and-swap (C5), and debits the daily read budget (L1). Today every device fetches every file in the background. "In the cloud" mostly means **not** fetching in the background, and fetching on open instead.
 
 **Client changes:**
 - A per-device rule decides what is fetched in the background (the prefetch rule, §2.1). Everything else stays `remote` (shown "In the cloud") until opened.
 - Opening a `remote` file fetches it first, through the existing queue, ahead of background work.
+
 **The one rule that changes.** An entry is in the durable fetch queue when its `fetch` field is set (the hash to fetch, read through the sparse `byFetch` index: web/workspace/sync-fetch.ts). Today the view sets `fetch` on every remote file (sync-view.ts), and that one line is what makes every device download everything. In step 1, `fetch` is set only:
 1. **when the file is opened** (below);
 2. **when it is kept** (§3.1), on the file, or on every file under a kept folder, 500 entries a transaction, from a durable cursor;
@@ -117,21 +128,21 @@ A remote op that replaces a file's hash moves `fetch` to the new hash only if th
 
 **The open path.** A read of a `remote` file (open in an editor, export, a notebook's `open()`, a local agent's read through the workspace):
 - sets `fetch` if it isn't set, and puts the file at the front: an in-memory priority list (at most 8 files) that the fetch loop serves before the durable queue;
-- waits on the install, a promise keyed by `fid` and hash, with progress (bytes received of `size`). The editor shows "Downloading 12 of 140 MB" in place of the content;
+- waits on the install, a promise keyed by `fid` and hash, with progress (bytes received of `size`). The editor shows "Downloading: 12 of 140 MB" in place of the content (§1.3);
 - closing the view doesn't cancel the download: the file was asked for, and it will be on this device.
 
 **Everything below the open is the existing path:** the reservation and quota preflight (L2), then the signed URL, which debits the read budget (L1), then the fetch, the hash check and the compare-and-swap install (C5). If the file changes on another device meanwhile, that is C5's case: the stale bytes are discarded, and the newer hash is fetched and waited for.
 
 **An open that can't be served is refused with its reason,** never hangs:
-- `offline`: "This file is in the cloud, and this device is offline" (§1.2). Its `fetch` stays set, so it downloads at the next connection.
+- `offline`: §1.3's offline message. Its `fetch` stays set, so it downloads at the next connection.
 - `rate`: the daily read budget is spent; worded as L1 ("Daily download limit: resumes at 14:00").
-- `storage_full`: it doesn't fit in this browser's free space, refused before the URL is asked for, so nothing is debited.
+- `storage_full`: it doesn't fit in this browser's free space (§1.3's "There isn't room…"), refused before the URL is asked for, so nothing is debited.
 
 **Server changes:** none for step 1. `GET /blob/<sha256>` already serves any held hash. (The endpoint's agent reads files on the server, so it is unaffected.)
 
 ### 2.1 Prefetch rule
 
-*(sync-client and board to settle; first proposal:)*
+*(Proposal, settled by board and sync-client; daybreak2 to review the numbers.)*
 - On a computer (default cache budget large): fetch everything, as today, until the budget's high mark.
 - On a phone: fetch only what's kept, plus files under a size (proposal 1 MiB) in folders opened recently, until the budget's high mark.
 - Never prefetch past the daily read budget (L1): background fetches stop before the budget's last 20%, which is left for opens.
@@ -218,7 +229,7 @@ If any fails, the removal is refused with its reason (§1.3), and the cache budg
 ### 4.1 Chunks
 
 - Content-defined chunking: the algorithm and its parameters are **named and versioned in the manifest**, and a client's output is deterministic (daybreak2, point 3). Proposal to evaluate: minimum / target / maximum 1 / 4 / 8 MiB.
-- A file's identity stays its whole-file SHA-256 (the op's `sha256`). Its **manifest** lists its chunks (hash, size), in order, and is itself a blob.
+- A file's identity stays its whole-file SHA-256 (the op's `sha256`). Its **manifest** lists its chunks (hash, size), in order. It is kept in the account object's SQLite, not as a blob (below).
 - **Upload and resume:** `blobs/check` for the missing chunks, idempotent PUTs, then the manifest, then the op. The op is accepted only when every chunk is held. No rechunking on the server.
 - **Read:** the manifest, then each chunk (or a Range of it).
 (sync-client)
@@ -411,11 +422,11 @@ Each PR carries its at-limit and one-over tests, and operation-count assertions 
 
 ## 8. Open questions
 
-- The cache budget defaults (computer, phone), and whether a phone is detected or chosen.
+- The cache budget defaults (computer, phone): §6 has sync-client's proposal. A phone is chosen in the Storage panel, with a default from the screen (§2.1).
 - Does "Keep on this device" on a folder include files added to it later? (Proposed: yes.)
 - Notebooks and boards: their content is patches (sync-server §4), not blobs. Do they stay always local in these steps? (Proposed: yes; they're small.)
 - Should the Storage panel show the cloud's breakdown per folder? (Not in these steps.)
-- (sync-client, for astra) Trusting the client's whole-file hash at a manifest's commit, given that the downloading device checks it (§4.1).
+- (sync-client, for astra) Accepting the client's whole-file hash unchecked at a manifest's commit, given that the downloading device checks it (§4.1).
 - (sync-client, for astra) The `deleting` mark against a commit racing the outbox (§5.1).
 - (sync-client, for astra) The pack's streaming check, member by member (§4.2).
 - (sync-client, for daybreak2) The proposed cache budgets and floor (§6), and the compaction pace.
