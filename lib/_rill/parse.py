@@ -110,15 +110,18 @@ class Parser:
         return self._context_error(t.describe(), t.end, t.lookahead(self.src))
 
     def _context_error(self, what, end, lookahead=0):
-        # (the character the lexer read past the token counts toward the 256 bytes, then is given back)
-        window = self.src[self.stmt_start:end + lookahead].encode("utf-8")[-CONTEXT_BYTES:]
+        # (the character the lexer read past the token counts toward the 256 bytes, then is given back).  The
+        # last 256 bytes lie within the last 256 characters, so only those are copied and encoded, whatever the
+        # statement's length (astra's R4)
+        stop = end + lookahead
+        window = self.src[max(self.stmt_start, stop - CONTEXT_BYTES):stop].encode("utf-8")[-CONTEXT_BYTES:]
         if lookahead:
-            window = window[:len(window) - len(self.src[end:end + lookahead].encode("utf-8"))]
+            window = window[:len(window) - len(self.src[end:stop].encode("utf-8"))]
         try:
             lines = [line[:CONTEXT_LINE_BYTES].decode("utf-8") for line in window.split(b"\n")[-2:]]
         except UnicodeDecodeError:
             from .eval import NotSupported
-            return NotSupported("a parse error quoting part of a character")
+            return NotSupported("showing this syntax error")
         if len(lines) > 1:
             return ParseError('unexpected %s in:\n"%s"' % (what, "\n".join(lines)))
         return ParseError('unexpected %s in "%s"' % (what, lines[0]))

@@ -274,6 +274,62 @@ print(json.dumps(r))
   });
 });
 
+// (astra's R4) a syntax error's quoted window is R's last 256 bytes, so its staging is bounded too: the parser copies
+// at most 257 characters of the source for it (the window and the lexer's lookahead), whatever the statement's
+// length, and gives the same message (or refusal, for a window that would cut a character) as the whole statement's
+// bytes would
+test("parse: a syntax error's window is staged in bounded work, with the whole statement's message", () => {
+  const got = py(`
+import json
+from _rill.parse import Parser, ParseError, CONTEXT_BYTES, CONTEXT_LINE_BYTES
+from _rill.eval import NotSupported
+seen = []
+class Rec(str):
+    def __getitem__(self, k):
+        if isinstance(k, slice):
+            seen.append(len(range(*k.indices(len(self)))))
+        return str.__getitem__(self, k)
+def reference(src, end, la):
+    w = src[:end + la].encode("utf-8")[-CONTEXT_BYTES:]
+    if la:
+        w = w[:len(w) - len(src[end:end + la].encode("utf-8"))]
+    try:
+        lines = [l[:CONTEXT_LINE_BYTES].decode("utf-8") for l in w.split(b"\\n")[-2:]]
+    except UnicodeDecodeError:
+        return "refused"
+    return lines
+out = []
+for n in (1024, 4096, 65536):
+    for name in ("v", "\\u00e9"):
+        for pad in ("", " "):
+            for tail, la in ((" )", 0), (" x", 1)):
+                terms, size = [], 0
+                while size < n:
+                    terms.append(name + str(len(terms)))
+                    size += len(terms[-1]) + 3
+                src = " + ".join(terms) + pad + tail + "\\n"
+                p = Parser(src)
+                p.src = Rec(src)
+                del seen[:]
+                try:
+                    p.statement()
+                    msg = "parsed"
+                except (ParseError, NotSupported) as e:
+                    msg = "refused" if isinstance(e, NotSupported) else e.message
+                end = len(src) - 1
+                ref = reference(src, end, la)
+                want = "refused" if ref == "refused" else 'unexpected %s in "%s"' % ("')'" if la == 0 else "symbol", ref[-1])
+                out.append([len(src), max(seen or [0]), msg == want, msg == "refused"])
+print(json.dumps(out))
+`);
+  for (const [n, staged, same] of got) {
+    assert.ok(staged <= 257, `a ${n}-character statement staged ${staged} characters for its error`);
+    assert.ok(same, `a ${n}-character statement's message matches the whole statement's window`);
+  }
+  assert.ok(got.some((r: any) => r[3]), "a window cutting a character is among the cases (the refusal)");
+  assert.ok(got.some((r: any) => !r[3]), "and windows that don't are too");
+});
+
 // (grader's P7) at top level a newline ends `if (TRUE) 1`, so an `else` on the next line is R's error; in braces it
 // continues the if.  A1.1 doesn't run `if` (parse/test_6.R#else-newline is known until A1.3), so the parser is
 // pinned here, to R's recorded text

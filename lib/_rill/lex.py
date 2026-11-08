@@ -71,12 +71,15 @@ class Tok:
     def lookahead(self, src):
         """How many characters past this token R's lexer read to end it (0 or 1): a name, keyword or number
         (but not one ending in L or i), or an operator that begins a longer one; never past the source's end."""
+        # (reads the token's first and last characters only: a token may be long; operators are at most 3)
         if self.end >= len(src) or self.kind in ("STR_CONST", "SPECIAL", "PLACEHOLDER", "ERROR", "EOF"):
             return 0
-        text = src[self.start:self.end]
-        if text.startswith("`") or (self.kind == "NUM_CONST" and text[-1] in "Li"):
+        last = src[self.end - 1]
+        if src[self.start] == "`" or (self.kind == "NUM_CONST" and last in "Li"):
             return 0
-        return 1 if _ident_char(text[-1]) or text in EXTENDABLE else 0
+        if _ident_char(last):
+            return 1
+        return 1 if self.end - self.start <= 3 and src[self.start:self.end] in EXTENDABLE else 0
 
     def is_op(self, text):
         return self.kind not in ("SYMBOL", "STR_CONST", "NUM_CONST", "ERROR", "EOF") and self.text == text
