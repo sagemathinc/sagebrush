@@ -3030,6 +3030,86 @@
   "owner": "matplotlib mathtext (@sagebrush-matlab)",
   "reason": "\"cap\" is TeX's \\cap, the set intersection symbol (∩) in the mathtext tables, not a cap: nothing is refused"
  },
+ "lib/_io_text.py ::  :: from io import (BufferedIOBase, TextIOBase, UnsupportedOperation, SEEK_SET, SEEK_CUR, SEEK_END, #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "io.TextIOWrapper, BufferedWriter and IncrementalNewlineDecoder (lib/_io_text.py, CPython 3.14.10's _pyio with C's behaviour) and BufferedIOBase's defaults: CPython's io semantics and messages (an unsupported operation, an argument's conversion), an abstract codec base, an import; refuses nothing of Sagebrush's"
+ },
+ "lib/_io_text.py :: BufferedIncrementalDecoder._buffer_decode :: raise NotImplementedError #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "io.TextIOWrapper, BufferedWriter and IncrementalNewlineDecoder (lib/_io_text.py, CPython 3.14.10's _pyio with C's behaviour) and BufferedIOBase's defaults: CPython's io semantics and messages (an unsupported operation, an argument's conversion), an abstract codec base, an import; refuses nothing of Sagebrush's"
+ },
+ "lib/_io_text.py :: BufferedWriter.__init__ :: raise UnsupportedOperation(\"File or stream is not writable.\") #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "io.TextIOWrapper, BufferedWriter and IncrementalNewlineDecoder (lib/_io_text.py, CPython 3.14.10's _pyio with C's behaviour) and BufferedIOBase's defaults: CPython's io semantics and messages (an unsupported operation, an argument's conversion), an abstract codec base, an import; refuses nothing of Sagebrush's"
+ },
+ "lib/_io_text.py :: BufferedWriter.seek :: raise ValueError(\"whence value %r unsupported\" % (whence,)) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "io.TextIOWrapper, BufferedWriter and IncrementalNewlineDecoder (lib/_io_text.py, CPython 3.14.10's _pyio with C's behaviour) and BufferedIOBase's defaults: CPython's io semantics and messages (an unsupported operation, an argument's conversion), an abstract codec base, an import; refuses nothing of Sagebrush's"
+ },
+ "lib/_io_text.py :: IncrementalDecoder.decode :: raise NotImplementedError #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "io.TextIOWrapper, BufferedWriter and IncrementalNewlineDecoder (lib/_io_text.py, CPython 3.14.10's _pyio with C's behaviour) and BufferedIOBase's defaults: CPython's io semantics and messages (an unsupported operation, an argument's conversion), an abstract codec base, an import; refuses nothing of Sagebrush's"
+ },
+ "lib/_io_text.py :: IncrementalEncoder.encode :: raise NotImplementedError #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "io.TextIOWrapper, BufferedWriter and IncrementalNewlineDecoder (lib/_io_text.py, CPython 3.14.10's _pyio with C's behaviour) and BufferedIOBase's defaults: CPython's io semantics and messages (an unsupported operation, an argument's conversion), an abstract codec base, an import; refuses nothing of Sagebrush's"
+ },
+ "lib/_io_text.py :: TextIOWrapper._checkReadable :: raise UnsupportedOperation(\"not readable\") #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "io.TextIOWrapper, BufferedWriter and IncrementalNewlineDecoder (lib/_io_text.py, CPython 3.14.10's _pyio with C's behaviour) and BufferedIOBase's defaults: CPython's io semantics and messages (an unsupported operation, an argument's conversion), an abstract codec base, an import; refuses nothing of Sagebrush's"
+ },
+ "lib/_io_text.py :: TextIOWrapper.reconfigure :: raise UnsupportedOperation( #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "io.TextIOWrapper, BufferedWriter and IncrementalNewlineDecoder (lib/_io_text.py, CPython 3.14.10's _pyio with C's behaviour) and BufferedIOBase's defaults: CPython's io semantics and messages (an unsupported operation, an argument's conversion), an abstract codec base, an import; refuses nothing of Sagebrush's"
+ },
+ "lib/_io_text.py :: TextIOWrapper.seek :: raise UnsupportedOperation(\"can't do nonzero cur-relative seeks\") #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "io.TextIOWrapper, BufferedWriter and IncrementalNewlineDecoder (lib/_io_text.py, CPython 3.14.10's _pyio with C's behaviour) and BufferedIOBase's defaults: CPython's io semantics and messages (an unsupported operation, an argument's conversion), an abstract codec base, an import; refuses nothing of Sagebrush's"
+ },
+ "lib/_io_text.py :: TextIOWrapper.seek :: raise UnsupportedOperation(\"can't do nonzero end-relative seeks\") #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "io.TextIOWrapper, BufferedWriter and IncrementalNewlineDecoder (lib/_io_text.py, CPython 3.14.10's _pyio with C's behaviour) and BufferedIOBase's defaults: CPython's io semantics and messages (an unsupported operation, an argument's conversion), an abstract codec base, an import; refuses nothing of Sagebrush's"
+ },
+ "lib/_io_text.py :: TextIOWrapper.seek :: raise UnsupportedOperation(\"underlying stream is not seekable\") #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "io.TextIOWrapper, BufferedWriter and IncrementalNewlineDecoder (lib/_io_text.py, CPython 3.14.10's _pyio with C's behaviour) and BufferedIOBase's defaults: CPython's io semantics and messages (an unsupported operation, an argument's conversion), an abstract codec base, an import; refuses nothing of Sagebrush's"
+ },
+ "lib/_io_text.py :: TextIOWrapper.tell :: raise UnsupportedOperation(\"underlying stream is not seekable\") #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "io.TextIOWrapper, BufferedWriter and IncrementalNewlineDecoder (lib/_io_text.py, CPython 3.14.10's _pyio with C's behaviour) and BufferedIOBase's defaults: CPython's io semantics and messages (an unsupported operation, an argument's conversion), an abstract codec base, an import; refuses nothing of Sagebrush's"
+ },
+ "lib/_io_text.py :: TextIOWrapper.write :: raise UnsupportedOperation(\"not writable\") #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "io.TextIOWrapper, BufferedWriter and IncrementalNewlineDecoder (lib/_io_text.py, CPython 3.14.10's _pyio with C's behaviour) and BufferedIOBase's defaults: CPython's io semantics and messages (an unsupported operation, an argument's conversion), an abstract codec base, an import; refuses nothing of Sagebrush's"
+ },
+ "lib/_io_text.py :: _check_readable :: raise UnsupportedOperation(\"File or stream is not readable.\") #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "io.TextIOWrapper, BufferedWriter and IncrementalNewlineDecoder (lib/_io_text.py, CPython 3.14.10's _pyio with C's behaviour) and BufferedIOBase's defaults: CPython's io semantics and messages (an unsupported operation, an argument's conversion), an abstract codec base, an import; refuses nothing of Sagebrush's"
+ },
+ "lib/_io_text.py :: _check_writable :: raise UnsupportedOperation(\"File or stream is not writable.\") #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "io.TextIOWrapper, BufferedWriter and IncrementalNewlineDecoder (lib/_io_text.py, CPython 3.14.10's _pyio with C's behaviour) and BufferedIOBase's defaults: CPython's io semantics and messages (an unsupported operation, an argument's conversion), an abstract codec base, an import; refuses nothing of Sagebrush's"
+ },
+ "lib/_io_text.py :: _ssize_arg :: raise OverflowError(\"Python int too large to convert to C ssize_t\") #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "io.TextIOWrapper, BufferedWriter and IncrementalNewlineDecoder (lib/_io_text.py, CPython 3.14.10's _pyio with C's behaviour) and BufferedIOBase's defaults: CPython's io semantics and messages (an unsupported operation, an argument's conversion), an abstract codec base, an import; refuses nothing of Sagebrush's"
+ },
  "lib/_limits.py ::  :: \"ff.conway_work\": (UNLIMITED, 10 ** 6, 653528895), #0": {
   "class": "3",
   "owner": "finite fields + configuration"
@@ -6761,6 +6841,31 @@
   "class": "none",
   "owner": "python (@sagebrush-python)",
   "reason": "CPython's code, no size bound: _compare_digest's TypeError for operands neither two str nor buffers (CPython's message); hmac.py's except clauses for OpenSSL's UnsupportedDigestmodError, unreachable here (no _hashlib)"
+ },
+ "lib/io.py :: BufferedIOBase.detach :: self._unsupported(\"detach\") #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "io.TextIOWrapper, BufferedWriter and IncrementalNewlineDecoder (lib/_io_text.py, CPython 3.14.10's _pyio with C's behaviour) and BufferedIOBase's defaults: CPython's io semantics and messages (an unsupported operation, an argument's conversion), an abstract codec base, an import; refuses nothing of Sagebrush's"
+ },
+ "lib/io.py :: BufferedIOBase.read :: self._unsupported(\"read\") #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "io.TextIOWrapper, BufferedWriter and IncrementalNewlineDecoder (lib/_io_text.py, CPython 3.14.10's _pyio with C's behaviour) and BufferedIOBase's defaults: CPython's io semantics and messages (an unsupported operation, an argument's conversion), an abstract codec base, an import; refuses nothing of Sagebrush's"
+ },
+ "lib/io.py :: BufferedIOBase.read1 :: self._unsupported(\"read1\") #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "io.TextIOWrapper, BufferedWriter and IncrementalNewlineDecoder (lib/_io_text.py, CPython 3.14.10's _pyio with C's behaviour) and BufferedIOBase's defaults: CPython's io semantics and messages (an unsupported operation, an argument's conversion), an abstract codec base, an import; refuses nothing of Sagebrush's"
+ },
+ "lib/io.py :: BufferedIOBase.readinto :: self._unsupported(\"read\") #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "io.TextIOWrapper, BufferedWriter and IncrementalNewlineDecoder (lib/_io_text.py, CPython 3.14.10's _pyio with C's behaviour) and BufferedIOBase's defaults: CPython's io semantics and messages (an unsupported operation, an argument's conversion), an abstract codec base, an import; refuses nothing of Sagebrush's"
+ },
+ "lib/io.py :: BufferedIOBase.write :: self._unsupported(\"write\") #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "io.TextIOWrapper, BufferedWriter and IncrementalNewlineDecoder (lib/_io_text.py, CPython 3.14.10's _pyio with C's behaviour) and BufferedIOBase's defaults: CPython's io semantics and messages (an unsupported operation, an argument's conversion), an abstract codec base, an import; refuses nothing of Sagebrush's"
  },
  "lib/ipaddress.py :: IPv4Network.__init__ :: elif self._prefixlen == (self.max_prefixlen): #0": {
   "class": "none",
