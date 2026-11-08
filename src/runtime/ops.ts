@@ -2679,12 +2679,42 @@ export function delitem(o: any, k: any): void {
     if (!dictDelete(o, k)) throw markRaised(T.KeyError(k));
     return;
   }
+  if (o instanceof PyByteArray && (o as any).$cls === undefined) return bytearrayDel(o, k);
   const f = special(o, "__delitem__");
   if (f !== undefined) {
     f(o, k);
     return;
   }
   raise(T.TypeError, `'${typeName(o)}' object doesn't support item deletion`);
+}
+// del b[k] of a bytearray, an index or a slice (CPython's bytearray_ass_subscript with no value): a deletion
+// re-sizes, so an export of the buffer refuses it (BufferError); deleting nothing doesn't
+export function bytearrayDel(o: PyByteArray, k: any): void {
+  if (k instanceof PySlice) {
+    const [start, step, n] = sliceIndices(k, o.n);
+    if (n === 0) return;
+    checkResizable(o);
+    const r = new Uint8Array(o.n - n);
+    if (step === 1) {
+      r.set(o.a.subarray(0, start), 0);
+      r.set(o.a.subarray(start + n, o.n), start);
+    } else {
+      // (the kept bytes, in order: every index but start, start + step, ... n of them)
+      const gone = new Set<number>();
+      for (let i = 0, j = start; i < n; i++, j += step) gone.add(j);
+      for (let i = 0, j = 0; i < o.n; i++) if (!gone.has(i)) r[j++] = o.a[i];
+    }
+    o.a = r;
+    o.n = r.length;
+    return;
+  }
+  const i = seqIndex(k, o.n, "bytearray");
+  checkResizable(o);
+  const r = new Uint8Array(o.n - 1);
+  r.set(o.a.subarray(0, i), 0);
+  r.set(o.a.subarray(i + 1, o.n), i);
+  o.a = r;
+  o.n = r.length;
 }
 export function arrDel(o: any[], k: any): void {
   {

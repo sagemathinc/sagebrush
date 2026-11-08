@@ -228,7 +228,21 @@ class RawIOBase(IOBase):
 
 
 class BufferedIOBase(IOBase):
-    pass
+    # (CPython's defaults: a buffered stream's read and write it doesn't define are UnsupportedOperation, by name)
+    def read(self, size=-1):
+        self._unsupported("read")
+
+    def read1(self, size=-1):
+        self._unsupported("read1")
+
+    def readinto(self, b):
+        self._unsupported("read")
+
+    def write(self, b):
+        self._unsupported("write")
+
+    def detach(self):
+        self._unsupported("detach")
 
 
 class TextIOBase(IOBase):
@@ -274,6 +288,10 @@ class BytesIO(BufferedIOBase):
         return b
 
     read1 = read
+
+    def read1(self, size=-1):
+        # (CPython's BytesIO.read1: read)
+        return self.read(size)
 
     def readinto(self, b):
         data = self.read(len(b))
@@ -509,3 +527,21 @@ def text_encoding(encoding, stacklevel=2):
 # this module's classes)
 import builtins as _builtins
 open = _builtins.open
+
+
+# (TextIOWrapper, BufferedWriter and IncrementalNewlineDecoder: CPython's pure-Python ones, in _io_text, which
+# loads on first use, so a program that never wraps a binary stream never reads it)
+_LAZY_NAMES = ("TextIOWrapper", "BufferedWriter", "IncrementalNewlineDecoder")
+
+
+def __getattr__(name):
+    if name in _LAZY_NAMES:
+        import _io_text
+        value = getattr(_io_text, name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module 'io' has no attribute '{name}'")
+
+
+def __dir__():
+    return sorted(set(globals()) | set(_LAZY_NAMES))

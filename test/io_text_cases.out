@@ -1,0 +1,187 @@
+-- writing: encodings, BOMs, errors
+utf-8 b'a\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80\nb\r\nc\r'
+UTF8 b'a\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80\nb\r\nc\r'
+utf-8-sig b'\xef\xbb\xbfa\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80\nb\r\nc\r'
+utf-16 b'\xff\xfea\x00\xe9\x00\xac =\xd8\x00\xde\n\x00b\x00\r\x00\n\x00c\x00\r\x00'
+utf-16-le b'a\x00\xe9\x00\xac =\xd8\x00\xde\n\x00b\x00\r\x00\n\x00c\x00\r\x00'
+utf-16-be b'\x00a\x00\xe9 \xac\xd8=\xde\x00\x00\n\x00b\x00\r\x00\n\x00c\x00\r'
+utf-32 b'\xff\xfe\x00\x00a\x00\x00\x00\xe9\x00\x00\x00\xac \x00\x00\x00\xf6\x01\x00\n\x00\x00\x00b\x00\x00\x00\r\x00\x00\x00\n\x00\x00\x00c\x00\x00\x00\r\x00\x00\x00'
+utf-32-le b'a\x00\x00\x00\xe9\x00\x00\x00\xac \x00\x00\x00\xf6\x01\x00\n\x00\x00\x00b\x00\x00\x00\r\x00\x00\x00\n\x00\x00\x00c\x00\x00\x00\r\x00\x00\x00'
+latin-1 b'a\xe9??\nb\r\nc\r'
+ascii b'a???\nb\r\nc\r'
+cp1252 b'a\xe9\x80?\nb\r\nc\r'
+strict UnicodeEncodeError: 'ascii' codec can't encode characters in position 1-3: ordinal not in range(128)
+replace b'a???\nb\r\nc\r'
+ignore b'a\nb\r\nc\r'
+xmlcharrefreplace b'a&#233;&#8364;&#128512;\nb\r\nc\r'
+backslashreplace b'a\\xe9\\u20ac\\U0001f600\nb\r\nc\r'
+surrogateescape UnicodeEncodeError: 'ascii' codec can't encode characters in position 1-3: ordinal not in range(128)
+LookupError: unknown encoding: klingon TypeError: TextIOWrapper() argument 'encoding' must be str or None, not int TypeError: TextIOWrapper() argument 'errors' must be str or None, not int ValueError: illegal newline value: x TypeError: TextIOWrapper() argument 'newline' must be str or None, not int
+UnicodeEncodeError: 'utf-8' codec can't encode character '\ud800' in position 0: surrogates not allowed b'\xed\xa0\x80'
+-- writing: newline translation
+None b'a\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80\nb\r\nc\r'
+'' b'a\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80\nb\r\nc\r'
+'\n' b'a\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80\nb\r\nc\r'
+'\r' b'a\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80\rb\r\rc\r'
+'\r\n' b'a\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80\r\nb\r\r\nc\r'
+-- a BOM once: several writes, empty writes, a seek away from 0
+0 1 1
+b'\xff\xfea\x00b\x00'
+b'xxz\x00'
+b'\xef\xbb\xbfy'
+-- reading: read, read(n), readline, iteration, universal newlines, newlines
+None ['line1\n', 'line2\n', 'line3\n', 'last é€😀', ''] ('\r', '\n', '\r\n')
+'' ['line1\n', 'line2\r\n', 'line3\r', 'last é€😀', ''] ('\r', '\n', '\r\n')
+'\n' ['line1\n', 'line2\r\n', 'line3\rlast é€😀', '', ''] None
+'\r' ['line1\nline2\r', '\nline3\r', 'last é€😀', '', ''] None
+'\r\n' ['line1\nline2\r\n', 'line3\rlast é€😀', '', '', ''] None
+'lin' '' 'e1' '\n' 'line2\nline3\nlast é€😀' ''
+['line1\n', 'line2\n', 'line3\n', 'last é€😀']
+['line1\n', 'line2\n', 'line3\n', 'last é€😀']
+['line1\n', 'line2\n']
+TypeError: argument should be integer or None, not 'str' TypeError: 'NoneType' object cannot be interpreted as an integer
+-- reading other encodings, BOMs, and multibyte sequences split across 2048-byte chunks
+utf-8 10006 5805 é€😀xé€😀xé€😀x zz
+end True
+utf-8-sig 10009 5805 é€😀xé€😀xé€😀x zz
+end True
+utf-16 13014 5805 é€😀xé€😀xé€😀x zz
+end True
+utf-16-le 13012 5805 é€😀xé€😀xé€😀x zz
+end True
+utf-16-be 13012 5805 é€😀xé€😀xé€😀x zz
+end True
+utf-32 23228 5805 é€😀xé€😀xé€😀x zz
+end True
+latin-1 5806 5805 é??xé??xé??x zz
+end True
+cp1252 5806 5805 é€?xé€?xé€?x zz
+end True
+b'\xef\xbb\xbfhello' UnicodeDecodeError: 'utf-16' codec can't decode bytes in position 0-1: Stream does not start with BOM 'hello'
+b'\xff\xfeh\x00i\x00' 'hi' UnicodeDecodeError: 'utf-8' codec can't decode byte 0xff in position 0: invalid start byte
+b'\xfe\xff\x00h\x00i' 'hi' UnicodeDecodeError: 'utf-8' codec can't decode byte 0xfe in position 0: invalid start byte
+b'h\x00i\x00' UnicodeDecodeError: 'utf-16' codec can't decode bytes in position 0-1: Stream does not start with BOM 'h\x00i\x00'
+-- decoding errors: where, and the errors handlers
+b'ok\xffok' strict UnicodeDecodeError: 'utf-8' codec can't decode byte 0xff in position 2: invalid start byte
+b'ok\xffok' replace 'ok�ok'
+b'ok\xffok' ignore 'okok'
+b'ok\xffok' surrogateescape 'ok\udcffok'
+b'ok\xffok' backslashreplace 'ok\\xffok'
+b'ok\xc3' strict UnicodeDecodeError: 'utf-8' codec can't decode byte 0xc3 in position 2: unexpected end of data
+b'ok\xc3' replace 'ok�'
+b'ok\xc3' ignore 'ok'
+b'ok\xc3' surrogateescape 'ok\udcc3'
+b'ok\xc3' backslashreplace 'ok\\xc3'
+b'ok\xe0\x80x' strict UnicodeDecodeError: 'utf-8' codec can't decode byte 0xe0 in position 2: invalid continuation byte
+b'ok\xe0\x80x' replace 'ok��x'
+b'ok\xe0\x80x' ignore 'okx'
+b'ok\xe0\x80x' surrogateescape 'ok\udce0\udc80x'
+b'ok\xe0\x80x' backslashreplace 'ok\\xe0\\x80x'
+b'ok\xed\xa0\x80x' strict UnicodeDecodeError: 'utf-8' codec can't decode byte 0xed in position 2: invalid continuation byte
+b'ok\xed\xa0\x80x' replace 'ok���x'
+b'ok\xed\xa0\x80x' ignore 'okx'
+b'ok\xed\xa0\x80x' surrogateescape 'ok\udced\udca0\udc80x'
+b'ok\xed\xa0\x80x' backslashreplace 'ok\\xed\\xa0\\x80x'
+b'\xf0\x9f\x98' strict UnicodeDecodeError: 'utf-8' codec can't decode bytes in position 0-2: unexpected end of data
+b'\xf0\x9f\x98' replace '�'
+b'\xf0\x9f\x98' ignore ''
+b'\xf0\x9f\x98' surrogateescape '\udcf0\udc9f\udc98'
+b'\xf0\x9f\x98' backslashreplace '\\xf0\\x9f\\x98'
+b'a\x00\xd8' strict UnicodeDecodeError: 'utf-16-le' codec can't decode byte 0xd8 in position 2: truncated data
+b'a\x00\xd8' replace 'a�'
+b'a\x00\xd8' ignore 'a'
+b'a\x00\xd8' surrogateescape 'a\udcd8'
+b'a\x00\xd8' backslashreplace 'a\\xd8'
+-- tell and seek (opaque cookies, as CPython's)
+utf-8 [(0, 'ab\n'), (3, 'é€😀\n'), (13, 'xyz\n'), (17, '')]
+   0 True   3 True   13 True   17 True
+   'ab\né' 5 '€😀' 12
+   '\nxyz\n'
+utf-16 [(0, 'ab\n'), (8, 'é€😀\n'), (18, 'xyz\n'), (26, '')]
+   0 True   8 True   18 True   26 True
+   'ab\né' 10 '€😀' 16
+   '\nxyz\n'
+latin-1 [(0, 'ab\n'), (3, 'é??\n'), (7, 'xyz\n'), (11, '')]
+   0 True   3 True   7 True   11 True
+   'ab\né' 4 '??' 6
+   '\nxyz\n'
+utf-8-sig [(0, 'ab\n'), (6, 'é€😀\n'), (16, 'xyz\n'), (20, '')]
+   0 True   6 True   16 True   20 True
+   'ab\né' 8 '€😀' 15
+   '\nxyz\n'
+UnsupportedOperation: can't do nonzero cur-relative seeks UnsupportedOperation: can't do nonzero end-relative seeks ValueError: negative seek position -1 ValueError: invalid whence (3, should be 0, 1 or 2) 8 8
+OSError: telling position disabled by next() call
+0
+-- attributes, repr, closing, detach, reconfigure
+latin-1 replace True False True True True True False False
+<_io.TextIOWrapper encoding='latin-1'> True True TextIOWrapper
+b'x\r\ny'
+None None utf-8
+b'x\r\ny\xc3\xa9\n'
+True ValueError: underlying buffer has been detached ValueError: underlying buffer has been detached 'utf-8' ValueError: underlying buffer has been detached
+True ValueError: I/O operation on closed file. ValueError: I/O operation on closed file. ValueError: I/O operation on closed file. ValueError: I/O operation on closed file. None
+True
+UnsupportedOperation: It is not possible to set the encoding or newline of stream after the first read TypeError: reconfigure() argument 'errors' must be str or None, not int None True
+UnsupportedOperation: fileno False
+TypeError: write() argument must be str, not bytes None
+3
+UnsupportedOperation: not writable 'x'
+-- line_buffering and write_through
+0 1 2 b'no newlinewith\ncr\r'
+-- BufferedWriter over a RawIOBase
+3 [3, 8] 3 8 [3, 8] 1 [3, 8]
+[3, 8, 1] b'abcdefghijk!' True True True BufferedWriter
+TypeError: a bytes-like object is required, not 'str' ValueError: buffer size must be strictly positive ValueError: buffer size must be strictly positive
+UnsupportedOperation: read ValueError: whence value 5 unsupported True ValueError: raw stream has been detached ValueError: raw stream has been detached
+UnsupportedOperation: File or stream is not writable.
+b'\xff\xfeh\x00\xe9\x00'
+-- IncrementalNewlineDecoder
+['a', '\nb', '\nc\n', ''] '\n' ('\r', '\n', '\r\n') (b'', 0)
+['a', '\r\nb', '\rc\n'] ('\r', '\n', '\r\n') (b'', 0)
+None (b'', 0)
+(b'', 1) '\r\ny'
+TypeError: IncrementalNewlineDecoder() missing required argument 'decoder' (pos 1) True
+-- the io module
+True True
+True BufferedWriter AttributeError: module 'io' has no attribute 'NoSuchThing'
+-- the wrappers ElementTree's writer makes (its pins come with xml.etree): xmlcharrefreplace, newline '\n'
+us-ascii b'<a x="&#233;">t&#8364;\n&#128512;</a>' True False
+utf-8 b'<a x="\xc3\xa9">t\xe2\x82\xac\n\xf0\x9f\x98\x80</a>' True False
+iso-8859-1 b'<a x="\xe9">t&#8364;\n&#128512;</a>' True False
+utf-16 b'\xff\xfe<\x00a\x00 \x00x\x00=\x00"\x00\xe9\x00"\x00>\x00t\x00\xac \n\x00=\xd8\x00\xde<\x00/\x00a\x00>\x00' True False
+b'\xc3\xa9\xe2\x82\xac' [5]
+[b'x\ny']
+-- bytearray deletion (BufferedWriter's buffer)
+bytearray(b'eg') IndexError: bytearray index out of range TypeError: bytearray indices must be integers or slices, not str
+bytearray(b'abce')
+bytearray(b'')
+BA(b'xz') BA
+2 b'ab' b'ab' b'a'
+UnsupportedOperation: read UnsupportedOperation: read1 UnsupportedOperation: read UnsupportedOperation: write UnsupportedOperation: detach UnsupportedOperation: detach
+-- BufferedWriter: C's behaviour and messages
+[2, 8, 1, 5] [2, 8, 1, 5]
+[2, 8, 1, 5] b'abcdefghijklmnop'
+10 [10, 7, 4] b'abcdefghi'
+[10, 7, 4, 1] b'abcdefghij'
+ValueError: write to closed file ValueError: flush of closed file UnsupportedOperation: seek None True
+ValueError: raw stream has been detached ValueError: raw stream has been detached ValueError: raw stream has been detached None '<_io.BufferedWriter>'
+TypeError: 'str' object cannot be interpreted as an integer TypeError: 'float' object cannot be interpreted as an integer OverflowError: Python int too large to convert to C ssize_t
+TypeError: a bytes-like object is required, not 'int' 2 TypeError: a bytes-like object is required, not 'list'
+False UnsupportedOperation: read1 UnsupportedOperation: read UnsupportedOperation: truncate
+<_io.BufferedWriter> UnsupportedOperation: read UnsupportedOperation: write UnsupportedOperation: detach UnsupportedOperation: read1 UnsupportedOperation: read
+TypeError: BufferedWriter() missing required argument 'raw' (pos 1) TypeError: IncrementalNewlineDecoder() missing required argument 'translate' (pos 2) TypeError: IncrementalNewlineDecoder() takes at most 3 arguments (4 given)
+4 1 4 None [] [1, 4] [1, 4]
+4 1 3 None [] [] [4]
+4 2 5 None [] [2, 5] [2, 5]
+4 0 5 3 [] [5] [5, 2]
+4 0 6 3 [] [6] [6, 3]
+4 3 9 2 [] [3, 1, 9, 7, 5] [3, 1, 9, 7, 5, 3, 1]
+8 0 9 1 [] [9, 8] [9, 8, 7, 6, 5, 4, 3, 2, 1]
+4 0 4 1 [] [4] [4, 3, 2, 1]
+4 1 8 5 [] [1, 8] [1, 8, 3]
+-- over a real file (open(..., 'rb'/'wb'/'w+b'); no paths printed)
+b'\xff\xfea\x00\r\x00\n\x00b\x00\xe9\x00\xac \r\x00\n\x00'
+'a\n' 8 'bé€\n' '\r\n'
+'a\n' True False
+'x\ny\n' 4
+'x\ny\n'
