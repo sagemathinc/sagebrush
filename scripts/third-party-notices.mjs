@@ -41,6 +41,7 @@ function section(start) {
 const artistic = readFileSync(join(root, "LICENSE-Artistic-2.0.txt"), "utf8");
 const PARTS = {
   cpython: () => section("CPython"),
+  expat: () => section("libexpat"),
   numpy: () => section("NumPy"),
   scipy: () => section("SciPy"),
   matplotlib: () => section("matplotlib"),
@@ -66,11 +67,11 @@ const PYPI_PARTS = PYPI.map((_, i) => "pypi-" + i);
 
 const PACKAGES = [
   { file: "engine/py/THIRD-PARTY-NOTICES.txt", what: "the Python package (wheel and sdist of `sagebrush`)", crates: ["sagebrush-py"], parts: ["matplotlib", "smalljac", "psage", "cremona", "dejavu"], artistic: "engine/py" },
-  { file: "cdn/THIRD-PARTY-NOTICES.txt", what: "the npm package `sagebrush-web`", crates: ["sagebrush-web"], parts: ["smalljac", "psage", "cpython"] },
+  { file: "cdn/THIRD-PARTY-NOTICES.txt", what: "the npm package `sagebrush-web`", crates: ["sagebrush-web"], parts: ["smalljac", "psage", "cpython", "expat"] },
   // the desktop app's native code (app/src-tauri: Tauri, Wry, Tao, its
   // plugins, the platforms' bindings); its page carries the notebook's notices
   { file: "app/THIRD-PARTY-NOTICES-native.txt", what: "the desktop app's native code (app/src-tauri)", manifest: "app/src-tauri", crates: ["sagebrush-app"], parts: [], mpl: true, native: true },
-  { file: "packages/sagebrush/THIRD-PARTY-NOTICES.txt", what: "the npm package `sagebrush`, its standalone executables, the notebook page (sagebrush.space, the desktop app)", crates: ["sagebrush-web", "sagebrush-raster"], parts: ["cpython", "numpy", "dragon4", "scipy", "matplotlib", "arm", "fdlibm", "marimo", "smalljac", "psage", "cremona", "turbo", "dejavu", ...PYPI_PARTS], artistic: "packages/sagebrush", web: true },
+  { file: "packages/sagebrush/THIRD-PARTY-NOTICES.txt", what: "the npm package `sagebrush`, its standalone executables, the notebook page (sagebrush.space, the desktop app)", crates: ["sagebrush-web", "sagebrush-raster"], parts: ["cpython", "expat", "numpy", "dragon4", "scipy", "matplotlib", "arm", "fdlibm", "marimo", "smalljac", "psage", "cremona", "turbo", "dejavu", ...PYPI_PARTS], artistic: "packages/sagebrush", web: true },
 ];
 
 const metas = new Map();

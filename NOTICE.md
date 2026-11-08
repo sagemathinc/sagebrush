@@ -26,6 +26,8 @@ Copyright (c) 2001 Python Software Foundation. See
 
 - `lib/`: standard-library modules copied unchanged from CPython 3.14, each
   marked "Copied unchanged from CPython 3.14" in its first line.
+- `lib/pyexpat.py`: CPython 3.14's `pyexpat` module, a C module there (`Modules/pyexpat.c`): its interface, messages,
+  error object and character data buffering, ported to Python over the parser described under libexpat below.
 - `lib/statistics.py`: CPython 3.14's `Lib/statistics.py`, changed (the PSF License's clause 3 on derivative
   works): when the `decimal` module is missing, as it is in Sagebrush, `Decimal` is a placeholder class that no
   value is an instance of.
@@ -141,6 +143,31 @@ Copyright (c) 2001 Python Software Foundation. See
 - `src/unparse.ts`: an expression as text, ported from CPython 3.14's
   `Python/ast_unparse.c` (its precedence levels and the spelling of each
   node), for the annotations of `from __future__ import annotations`.
+
+### libexpat (MIT)
+
+Copyright (c) 1997-2000 Thai Open Source Software Center Ltd\
+Copyright (c) 2000      Clark Cooper <coopercc@users.sourceforge.net>\
+Copyright (c) 2001-2025 Expat maintainers
+
+- `lib/pyexpat.py`: the XML parser under `xml.parsers.expat` and `xml.etree`. Its tokenizer (`xmltok_impl.c`), the
+  prolog's role machine (`xmlrole.c`) and its processing (`xmlparse.c`: the prolog and content processors,
+  attributes and namespaces, attribute and entity values, the amplification accounting and the buffer's reparse
+  deferral) are ported to Python from libexpat 2.9.0, as CPython 3.14.10 bundles it (`Modules/expat`); its name
+  character tables are derived from `nametab.h`. The file carries this notice.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the Software without restriction, including without limitation the
+rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit
+persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the
+Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ### NumPy (BSD 3-Clause)
 

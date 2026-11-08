@@ -1,0 +1,325 @@
+{
+ "cases": [
+  {
+   "key": "encoded|shift_jis decl|et|whole|d",
+   "reason": "Sagebrush's runtime has no shift_jis codec, so the unknown-encoding handler's lookup raises LookupError before it can find the encoding multi-byte (CPython's ValueError 'multi-byte encodings are not supported'); neither parses the document.",
+   "sagebrush": {
+    "error": {
+     "msg": "unknown encoding: shift_jis",
+     "type": "LookupError"
+    },
+    "events": [
+     [
+      "DH",
+      "<?xml version='1.0' encoding='shift_jis'?>"
+     ]
+    ]
+   }
+  },
+  {
+   "key": "encoded|shift_jis decl|et|unit|d",
+   "reason": "Sagebrush's runtime has no shift_jis codec, so the unknown-encoding handler's lookup raises LookupError before it can find the encoding multi-byte (CPython's ValueError 'multi-byte encodings are not supported'); neither parses the document.",
+   "sagebrush": {
+    "error": {
+     "msg": "unknown encoding: shift_jis",
+     "type": "LookupError"
+    },
+    "events": [
+     [
+      "DH",
+      "<?xml version='1.0' encoding='shift_jis'?>"
+     ]
+    ]
+   }
+  },
+  {
+   "key": "encoded|shift_jis decl|et|unit|n",
+   "reason": "Sagebrush's runtime has no shift_jis codec, so the unknown-encoding handler's lookup raises LookupError before it can find the encoding multi-byte (CPython's ValueError 'multi-byte encodings are not supported'); neither parses the document.",
+   "sagebrush": {
+    "error": {
+     "msg": "unknown encoding: shift_jis",
+     "type": "LookupError"
+    },
+    "events": [
+     [
+      "DH",
+      "<?xml version='1.0' encoding='shift_jis'?>"
+     ]
+    ]
+   }
+  },
+  {
+   "key": "encoded|shift_jis decl|et|seeded|d",
+   "reason": "Sagebrush's runtime has no shift_jis codec, so the unknown-encoding handler's lookup raises LookupError before it can find the encoding multi-byte (CPython's ValueError 'multi-byte encodings are not supported'); neither parses the document.",
+   "sagebrush": {
+    "error": {
+     "msg": "unknown encoding: shift_jis",
+     "type": "LookupError"
+    },
+    "events": [
+     [
+      "DH",
+      "<?xml version='1.0' encoding='shift_jis'?>"
+     ]
+    ]
+   }
+  },
+  {
+   "key": "encoded|shift_jis decl|et|seeded|n",
+   "reason": "Sagebrush's runtime has no shift_jis codec, so the unknown-encoding handler's lookup raises LookupError before it can find the encoding multi-byte (CPython's ValueError 'multi-byte encodings are not supported'); neither parses the document.",
+   "sagebrush": {
+    "error": {
+     "msg": "unknown encoding: shift_jis",
+     "type": "LookupError"
+    },
+    "events": [
+     [
+      "DH",
+      "<?xml version='1.0' encoding='shift_jis'?>"
+     ]
+    ]
+   }
+  },
+  {
+   "key": "encoded|shift_jis decl|raw|whole|d",
+   "reason": "Sagebrush's runtime has no shift_jis codec, so the unknown-encoding handler's lookup raises LookupError before it can find the encoding multi-byte (CPython's ValueError 'multi-byte encodings are not supported'); neither parses the document.",
+   "sagebrush": {
+    "error": {
+     "msg": "unknown encoding: shift_jis",
+     "type": "LookupError"
+    },
+    "events": [
+     [
+      "DH",
+      "<?xml version='1.0' encoding='shift_jis'?>"
+     ]
+    ]
+   }
+  },
+  {
+   "key": "encoded|shift_jis decl|raw|unit|d",
+   "reason": "Sagebrush's runtime has no shift_jis codec, so the unknown-encoding handler's lookup raises LookupError before it can find the encoding multi-byte (CPython's ValueError 'multi-byte encodings are not supported'); neither parses the document.",
+   "sagebrush": {
+    "error": {
+     "msg": "unknown encoding: shift_jis",
+     "type": "LookupError"
+    },
+    "events": [
+     [
+      "DH",
+      "<?xml version='1.0' encoding='shift_jis'?>"
+     ]
+    ]
+   }
+  },
+  {
+   "key": "encoded|shift_jis decl|raw|unit|n",
+   "reason": "Sagebrush's runtime has no shift_jis codec, so the unknown-encoding handler's lookup raises LookupError before it can find the encoding multi-byte (CPython's ValueError 'multi-byte encodings are not supported'); neither parses the document.",
+   "sagebrush": {
+    "error": {
+     "msg": "unknown encoding: shift_jis",
+     "type": "LookupError"
+    },
+    "events": [
+     [
+      "DH",
+      "<?xml version='1.0' encoding='shift_jis'?>"
+     ]
+    ]
+   }
+  },
+  {
+   "key": "encoded|shift_jis decl|raw|seeded|d",
+   "reason": "Sagebrush's runtime has no shift_jis codec, so the unknown-encoding handler's lookup raises LookupError before it can find the encoding multi-byte (CPython's ValueError 'multi-byte encodings are not supported'); neither parses the document.",
+   "sagebrush": {
+    "error": {
+     "msg": "unknown encoding: shift_jis",
+     "type": "LookupError"
+    },
+    "events": [
+     [
+      "DH",
+      "<?xml version='1.0' encoding='shift_jis'?>"
+     ]
+    ]
+   }
+  },
+  {
+   "key": "encoded|shift_jis decl|raw|seeded|n",
+   "reason": "Sagebrush's runtime has no shift_jis codec, so the unknown-encoding handler's lookup raises LookupError before it can find the encoding multi-byte (CPython's ValueError 'multi-byte encodings are not supported'); neither parses the document.",
+   "sagebrush": {
+    "error": {
+     "msg": "unknown encoding: shift_jis",
+     "type": "LookupError"
+    },
+    "events": [
+     [
+      "DH",
+      "<?xml version='1.0' encoding='shift_jis'?>"
+     ]
+    ]
+   }
+  },
+  {
+   "key": "encoded|koi8-r decl|et|whole|d",
+   "reason": "Sagebrush's runtime has no koi8-r codec (bytes.decode raises LookupError), so pyexpat's unknown-encoding handler raises CPython's LookupError for it, as CPython would for a codec it lacks; the parser is not involved.",
+   "sagebrush": {
+    "error": {
+     "msg": "unknown encoding: koi8-r",
+     "type": "LookupError"
+    },
+    "events": [
+     [
+      "DH",
+      "<?xml version='1.0' encoding='koi8-r'?>"
+     ]
+    ]
+   }
+  },
+  {
+   "key": "encoded|koi8-r decl|et|unit|d",
+   "reason": "Sagebrush's runtime has no koi8-r codec (bytes.decode raises LookupError), so pyexpat's unknown-encoding handler raises CPython's LookupError for it, as CPython would for a codec it lacks; the parser is not involved.",
+   "sagebrush": {
+    "error": {
+     "msg": "unknown encoding: koi8-r",
+     "type": "LookupError"
+    },
+    "events": [
+     [
+      "DH",
+      "<?xml version='1.0' encoding='koi8-r'?>"
+     ]
+    ]
+   }
+  },
+  {
+   "key": "encoded|koi8-r decl|et|unit|n",
+   "reason": "Sagebrush's runtime has no koi8-r codec (bytes.decode raises LookupError), so pyexpat's unknown-encoding handler raises CPython's LookupError for it, as CPython would for a codec it lacks; the parser is not involved.",
+   "sagebrush": {
+    "error": {
+     "msg": "unknown encoding: koi8-r",
+     "type": "LookupError"
+    },
+    "events": [
+     [
+      "DH",
+      "<?xml version='1.0' encoding='koi8-r'?>"
+     ]
+    ]
+   }
+  },
+  {
+   "key": "encoded|koi8-r decl|et|seeded|d",
+   "reason": "Sagebrush's runtime has no koi8-r codec (bytes.decode raises LookupError), so pyexpat's unknown-encoding handler raises CPython's LookupError for it, as CPython would for a codec it lacks; the parser is not involved.",
+   "sagebrush": {
+    "error": {
+     "msg": "unknown encoding: koi8-r",
+     "type": "LookupError"
+    },
+    "events": [
+     [
+      "DH",
+      "<?xml version='1.0' encoding='koi8-r'?>"
+     ]
+    ]
+   }
+  },
+  {
+   "key": "encoded|koi8-r decl|et|seeded|n",
+   "reason": "Sagebrush's runtime has no koi8-r codec (bytes.decode raises LookupError), so pyexpat's unknown-encoding handler raises CPython's LookupError for it, as CPython would for a codec it lacks; the parser is not involved.",
+   "sagebrush": {
+    "error": {
+     "msg": "unknown encoding: koi8-r",
+     "type": "LookupError"
+    },
+    "events": [
+     [
+      "DH",
+      "<?xml version='1.0' encoding='koi8-r'?>"
+     ]
+    ]
+   }
+  },
+  {
+   "key": "encoded|koi8-r decl|raw|whole|d",
+   "reason": "Sagebrush's runtime has no koi8-r codec (bytes.decode raises LookupError), so pyexpat's unknown-encoding handler raises CPython's LookupError for it, as CPython would for a codec it lacks; the parser is not involved.",
+   "sagebrush": {
+    "error": {
+     "msg": "unknown encoding: koi8-r",
+     "type": "LookupError"
+    },
+    "events": [
+     [
+      "DH",
+      "<?xml version='1.0' encoding='koi8-r'?>"
+     ]
+    ]
+   }
+  },
+  {
+   "key": "encoded|koi8-r decl|raw|unit|d",
+   "reason": "Sagebrush's runtime has no koi8-r codec (bytes.decode raises LookupError), so pyexpat's unknown-encoding handler raises CPython's LookupError for it, as CPython would for a codec it lacks; the parser is not involved.",
+   "sagebrush": {
+    "error": {
+     "msg": "unknown encoding: koi8-r",
+     "type": "LookupError"
+    },
+    "events": [
+     [
+      "DH",
+      "<?xml version='1.0' encoding='koi8-r'?>"
+     ]
+    ]
+   }
+  },
+  {
+   "key": "encoded|koi8-r decl|raw|unit|n",
+   "reason": "Sagebrush's runtime has no koi8-r codec (bytes.decode raises LookupError), so pyexpat's unknown-encoding handler raises CPython's LookupError for it, as CPython would for a codec it lacks; the parser is not involved.",
+   "sagebrush": {
+    "error": {
+     "msg": "unknown encoding: koi8-r",
+     "type": "LookupError"
+    },
+    "events": [
+     [
+      "DH",
+      "<?xml version='1.0' encoding='koi8-r'?>"
+     ]
+    ]
+   }
+  },
+  {
+   "key": "encoded|koi8-r decl|raw|seeded|d",
+   "reason": "Sagebrush's runtime has no koi8-r codec (bytes.decode raises LookupError), so pyexpat's unknown-encoding handler raises CPython's LookupError for it, as CPython would for a codec it lacks; the parser is not involved.",
+   "sagebrush": {
+    "error": {
+     "msg": "unknown encoding: koi8-r",
+     "type": "LookupError"
+    },
+    "events": [
+     [
+      "DH",
+      "<?xml version='1.0' encoding='koi8-r'?>"
+     ]
+    ]
+   }
+  },
+  {
+   "key": "encoded|koi8-r decl|raw|seeded|n",
+   "reason": "Sagebrush's runtime has no koi8-r codec (bytes.decode raises LookupError), so pyexpat's unknown-encoding handler raises CPython's LookupError for it, as CPython would for a codec it lacks; the parser is not involved.",
+   "sagebrush": {
+    "error": {
+     "msg": "unknown encoding: koi8-r",
+     "type": "LookupError"
+    },
+    "events": [
+     [
+      "DH",
+      "<?xml version='1.0' encoding='koi8-r'?>"
+     ]
+    ]
+   }
+  }
+ ],
+ "comment": "Stated divergences of Sagebrush's pyexpat from CPython 3.14.10's on test/expat_corpus.json (P3c-1; grader's X2), enforced both ways by test/expat_run.py: each must still differ from CPython's recorded result and give exactly the result here; every case not listed must give CPython's. Interface divergences (no case here) are pinned by test/expat.test.ts."
+}
