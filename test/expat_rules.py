@@ -214,8 +214,32 @@ try:
     small = b"<r a='" + b"x" * 100 + b"&amp;' b='p\tq'>" + b"t" * 50 + b"<!--" + b"c" * 40 + b"--></r>"
     pp = pyexpat.ParserCreate()
     pp.Parse(small, True)
+    # (r2.1: a str with lone surrogates, its error built from windows; a comment's and a PI's line ends at every seam)
+    lone = "ab" + chr(0xDC00) + chr(0xDFFF) + "x" * 20 + chr(0xD800)
+    seam = "x" * 6 + chr(0xDC00) + chr(0xDC01) + chr(0xDC02) + "y" * 10     # (a run across the window's seam)
+    enc = []
+    for text in (lone, seam):
+        try:
+            pyexpat.ParserCreate().Parse(text, True)
+            enc.append(None)
+        except UnicodeEncodeError as e:
+            enc.append([e.start, e.end, e.object is text, str(e)])
+    seams = "a\r\nb\r" * 5 + "\r\r\nc\n\r" * 4 + "\r"
+    got = []
+    pp = pyexpat.ParserCreate()
+    pp.CommentHandler = lambda c: got.append(c)
+    pp.ProcessingInstructionHandler = lambda target, d: got.append(d)
+    pp.Parse(("<r><!--" + seams + "--><?p " + seams + "?></r>").encode(), True)
 finally:
     pyexpat._WINDOW = saved
+want_enc = []
+for text in (lone, seam):
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError as e:
+        want_enc.append([e.start, e.end, True, str(e)])
+want_seams = seams.replace("\r\n", "\n").replace("\r", "\n")
+out["window_7_extras"] = [enc == want_enc, enc, got == [want_seams, want_seams]]
 out["window_7"] = [r["cases"], r["mismatch_count"], r["mismatches"][:2], r["stated_but_same"], r["stated_but_other"],
                    probe.numbers()]
 
@@ -303,6 +327,34 @@ try:
     p.Parse(b"<r>" + b"x" * 5000, False)
 except KeyError:
     led["exception"] = [ledger(p), p._raw_parts, p._text, p._buffer]
+# (r2.1: isfinal raising before anything is charged; an exception in the flush at a Parse call's end: stopped, as an
+# exception in any handler stops it, everything released)
+class _BadBool:
+    def __bool__(self):
+        raise ZeroDivisionError("isfinal")
+
+
+p = pyexpat.ParserCreate()
+for a in [(b"<r/>", _BadBool()), ("<r/>", _BadBool())]:
+    try:
+        p.Parse(*a)
+    except ZeroDivisionError:
+        pass
+led["bad_isfinal"] = ledger(p)
+p = pyexpat.ParserCreate()
+p.buffer_text = True
+
+
+def _raising(text):
+    raise KeyError("in the handler")
+
+
+p.CharacterDataHandler = _raising
+try:
+    p.Parse(b"<r>text", False)
+except KeyError:
+    pass
+led["end_flush_exception"] = [ledger(p), p._raw_parts, p._text, p._buffer, p._finished]
 out["ledger"] = led
 
 
@@ -331,6 +383,52 @@ adm["many pieces"] = admitted(b"<!DOCTYPE r [<!ENTITY e 'a'>]><r a='" + b"&e;" *
 adm["many character references"] = admitted(b"<r a='" + b"&#97;" * 200 + b"'/>", 8000, 1.0)
 adm["many attributes"] = admitted(b"<r " + b" ".join(b"a%d='1'" % i for i in range(200)) + b"/>", 8192, 1.0)
 adm["fallback attributes"] = admitted(b"<r " + b" ".join(b"a%d='&amp;'" % i for i in range(200)) + b"/>", 8192, 1.0)
+# (grader's L5: getAtts's span entries, each charged before it is added. The charges recorded with no limit; then the
+# activation threshold set to the total at the fifth entry's charge: refused at exactly that entry (four admitted),
+# and one byte over it: the fifth admitted)
+fdoc = b"<r " + b" ".join(b"a%d='&amp;'" % i for i in range(10)) + b"/>"
+recorded = []
+_charge0 = pyexpat.XMLParserType._charge
+
+
+def _recording(self, n):
+    recorded.append([n, self._acc[2] + n])
+    return _charge0(self, n)
+
+
+pyexpat.XMLParserType._charge = _recording
+try:
+    pyexpat.ParserCreate().Parse(fdoc, True)
+finally:
+    pyexpat.XMLParserType._charge = _charge0
+entries = [i for i, (n, _) in enumerate(recorded) if n == pyexpat._ENTRY_COST]
+fifth = recorded[entries[4]][1]
+
+
+def entries_admitted(act):
+    seen = []
+
+    def counting(self, n):
+        _charge0(self, n)
+        if n == pyexpat._ENTRY_COST:
+            seen.append(n)
+
+    pyexpat.XMLParserType._charge = counting
+    try:
+        q = pyexpat.ParserCreate()
+        q.SetAllocTrackerActivationThreshold(act)
+        q.SetAllocTrackerMaximumAmplification(1.0)
+        try:
+            q.Parse(fdoc, True)
+            return [None, len(seen)]
+        except pyexpat.ExpatError as e:
+            return [e.code, len(seen)]
+    finally:
+        pyexpat.XMLParserType._charge = _charge0
+
+
+adm["getAtts entries"] = [entries[:10] == list(range(entries[0], entries[0] + 10)), entries_admitted(fifth),
+                          entries_admitted(fifth + 1)]
 out["admission"] = adm
 
 

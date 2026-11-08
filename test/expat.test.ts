@@ -92,6 +92,9 @@ test("expat_rules.py: the allocation tracker refuses past its limits, before the
     "many character references": [1, [], 0],
     "many attributes": [1, [], 0],
     "fallback attributes": [1, [], 0],
+    // (grader's L5: getAtts's ten span entries charged one after another, before each is added; at a threshold equal
+    // to the total at the fifth: refused there, four admitted; one byte over: the fifth admitted, the sixth refused)
+    "getAtts entries": [true, [1, 4], [1, 5]],
   });
 });
 
@@ -133,6 +136,10 @@ test("expat_rules.py: the two ledgers: flushes leave the same state, parts are c
   // (an error: the objects gone, the span kept for the positions charged; an exception in a handler: all gone)
   assert.deepEqual(l.error, [7, [0, 90, [0, 0, 90, 0, 0]], [], "", [], 13]);
   assert.deepEqual(l.exception, [[0, 0, [0, 0, 0, 0, 0]], [], "", []]);
+  // (r2.1, astra's X1b and X2b: isfinal raising leaves nothing charged; an exception in the end-of-call flush stops
+  // the parser, its objects and both ledgers released)
+  assert.deepEqual(l.bad_isfinal, [0, 0, [0, 0, 0, 0, 0]]);
+  assert.deepEqual(l.end_flush_exception, [[0, 0, [0, 0, 0, 0, 0]], [], "", [], true]);
 });
 
 test("expat_rules.py: no pattern or string scan examines more than the window, at the shipped 1 MiB and at 7 characters", () => {
@@ -150,6 +157,11 @@ test("expat_rules.py: no pattern or string scan examines more than the window, a
   assert.deepEqual([same, other], [[], []]);
   assert.equal(spy.unbounded, 0);
   assert.equal(spy.max, 7);
+  // (r2.1, astra's X3b and daybreak3's E3: a str's encoding error is CPython's, built from windows, never the whole
+  // string encoded again; a comment's and a PI's line ends normalized a window at a time, every seam right)
+  const [encSame, enc, seams] = r.window_7_extras;
+  assert.ok(encSame, JSON.stringify(enc));
+  assert.equal(seams, true);
 });
 
 test("expat_rules.py: the work is linear: examined characters and steps, calls and copies, against their lower controls", () => {

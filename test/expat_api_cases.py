@@ -128,3 +128,38 @@ d = pyexpat.ParserCreate()
 d.DefaultHandler = lambda s: None
 d.DefaultHandlerExpand = None
 print(d.DefaultHandler is not None, d.DefaultHandlerExpand)
+
+# (#849 r2.1) Parse's isfinal is converted before its data; an exception in CharacterDataHandler during the flush at
+# a Parse call's end stops the parser; a str with lone surrogates fails as str.encode does, for the whole string
+class _BadBool:
+    def __bool__(self):
+        raise ZeroDivisionError("isfinal")
+
+
+bb = pyexpat.ParserCreate()
+print([t(lambda: bb.Parse(*a)) for a in [(b"<r/>", _BadBool()), (12, _BadBool()), ("<r/>", _BadBool())]])
+
+
+def _raising(text):
+    raise KeyError("in the handler")
+
+
+for doc in (b"<r>text", b"<r>text<a", b"<r>t\nx<!--c", "<r>ét"):
+    fl = pyexpat.ParserCreate()
+    fl.buffer_text = True
+    fl.CharacterDataHandler = _raising
+    first = t(lambda: fl.Parse(doc, False))
+    later = []
+    for more in (b"</r>", b"x"):
+        try:
+            fl.Parse(more, True)
+            later.append("ok")
+        except pyexpat.ExpatError as e:
+            later.append((e.code, e.lineno, e.offset, fl.ErrorByteIndex, fl.CurrentByteIndex))
+    print(first, later)
+for lone in ("ab" + chr(0xDC00) + chr(0xDFFF) + "x" * 20 + chr(0xD800),
+             "x" * 6 + chr(0xDC00) + chr(0xDC01) + chr(0xDC02) + "y" * 10):
+    try:
+        pyexpat.ParserCreate().Parse(lone, True)
+    except UnicodeEncodeError as e:
+        print(type(e).__name__, e, e.start, e.end, e.object is lone)

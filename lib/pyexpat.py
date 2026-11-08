@@ -2113,7 +2113,8 @@ class xmlparser:
         if len(args) > 2:
             raise TypeError(f"Parse() takes at most 2 arguments ({len(args)} given)")
         data = args[0]
-        isfinal = args[1] if len(args) > 1 else False
+        # (isfinal is converted first, as CPython's argument clinic converts it, before the data is looked at)
+        final = _truth(args[1]) if len(args) > 1 else False
         if self._in_callback:
             raise RuntimeError("cannot call Parse() from within a handler")
         # (the input, fed to expat at most _MAX_CHUNK_SIZE bytes a call, as pyexpat feeds it: each chunk is copied
@@ -2140,7 +2141,6 @@ class xmlparser:
                 raise TypeError(f"a bytes-like object is required, not '{type(data).__name__}'") from None
             if raw.ndim != 1 or raw.itemsize != 1:
                 raw = raw.cast("B")
-        final = _truth(isfinal)
         try:
             n = len(raw)
             a = 0
@@ -2152,8 +2152,22 @@ class xmlparser:
                 return self._fail()
         finally:
             self._acc[3] -= conv
-        self._flush()
+        self._end_flush()
         return 1
+
+    def _end_flush(self):
+        """The flush at the end of a Parse call: an exception in CharacterDataHandler stops the parser (pyexpat's
+        flag_error, XML_StopParser), so a later Parse is "parsing finished" at the position reached"""
+        try:
+            self._flush()
+        except BaseException:
+            if not self._finished:
+                self._error_code = 35
+                self._finished = True
+                self._processor = "error"
+                self._end_at = (self._line + 1, self._col, self._byte_index(self._posidx))
+                self._drop(False)
+            raise
 
     def _feed(self, raw, a, b, final):
         """One XML_Parse call on raw[a:b]: its copy counted among the buffers before it is made, as a part waiting
@@ -2181,12 +2195,17 @@ class xmlparser:
             data = read(2048)
             if not isinstance(data, (bytes, bytearray, str)):
                 raise TypeError(f"read() did not return a bytes object (type={type(data).__name__})")
-            raw = data.encode("utf-8") if isinstance(data, str) else data
-            if not self._feed(raw, 0, len(raw), len(data) == 0):
-                return self._fail()
+            conv = _str_cost(4 * len(data)) if isinstance(data, str) else 0
+            self._acc[3] += conv
+            try:
+                raw = _encode_utf8(data) if isinstance(data, str) else data
+                if not self._feed(raw, 0, len(raw), len(data) == 0):
+                    return self._fail()
+            finally:
+                self._acc[3] -= conv
             if len(data) == 0:
                 break
-        self._flush()
+        self._end_flush()
         return 1
 
     def SetBase(self, base, /):
@@ -3951,6 +3970,7 @@ _ANAME_RUN = _re.compile("[^\\t\\n\\r =]*")
 _VALUE_RUN = {"'": _re.compile("[^']*"), '"': _re.compile('[^"]*')}
 _NOT_NORMAL = _re.compile("[&\\t\\r\\n]|  ")
 _DIGITS = _re.compile("[0-9]*")
+_SURROGATE_RUN = _re.compile("[\\ud800-\\udfff]*")
 # (an attribute value's run of data, spaces and line ends; its line ends and tabs, each one space; and, for a
 # tokenized type, its runs of spaces)
 _ATT_PLAIN = _re.compile("[^&<" + _INVALID + "]*")
@@ -4013,9 +4033,24 @@ def _char_ref_number(t, s):
 
 
 def _normalize_lines(s):
-    if _find(s, "\r", 0, len(s)) < 0:
+    """A comment's or PI's line ends, CR LF and CR, each LF: a window of at most _WINDOW characters at a time, a CR at
+    a window's end left for the next (the pair is never split)"""
+    n = len(s)
+    if _find(s, "\r", 0, n) < 0:
         return s
-    return s.replace("\r\n", "\n").replace("\r", "\n")
+    pieces = []
+    a = 0
+    while a < n:
+        b = min(n, a + _WINDOW)
+        if b < n and s[b - 1] == "\r":
+            # (a window of one CR alone, W = 1: it takes its LF with it)
+            b = b - 1 if b - 1 > a else (b + 1 if s[b] == "\n" else b)
+        if _SPY is not None:
+            _SPY("replace", b - a)
+            _SPY("replace", b - a)
+        pieces.append(s[a:b].replace("\r\n", "\n").replace("\r", "\n"))
+        a = b
+    return "".join(pieces)
 
 
 def _normalize_public_id(s):
@@ -4182,9 +4217,12 @@ def _encode_utf8(data):
             _SPY("encode", min(n, a + _WINDOW) - a)
         try:
             pieces.append(data[a:a + _WINDOW].encode("utf-8"))
-        except UnicodeEncodeError:
-            data.encode("utf-8")
-            raise
+        except UnicodeEncodeError as e:
+            # (CPython's error for the whole string: the run of surrogates from the first, which may go on past
+            # this window, found a window at a time; never the whole string encoded again)
+            start = a + e.start
+            end = _run_to(_SURROGATE_RUN, data, start, n)
+            raise UnicodeEncodeError("utf-8", data, start, end, e.reason) from None
     return b"".join(pieces)
 
 
