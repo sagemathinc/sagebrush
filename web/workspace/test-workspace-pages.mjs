@@ -500,7 +500,10 @@ try {
       }
       await sleep(Math.floor(rand() * 120));
     }
-    await sleep(1200);
+    // (the page's saves drained: its save queue awaited until it stops changing, a save queued meanwhile awaited too;
+    // never a fixed sleep: grader's root cause, the boards were read while the queue still wrote)
+    const drained = await ev(`(async () => { for (let i = 0; i < 1000; i++) { const q = window.sagebrush.wsFlush(); await q.catch(() => {}); if (window.sagebrush.wsFlush() === q) return true; } return false; })()`);
+    if (!drained) lost.push(`seed ${seed}: the page's save queue never settled`);
     const titles = await ev(`${W}.list("/").then((l) => Promise.all(l.filter((e) => e.kind === "board").map((e) => ${W}.read(e.path).then((r) => r.content.title))))`);
     const kept = (t) => titles.some((x) => x === t || x === t + " (your changes, made while it changed elsewhere)");
     // (a writer's last write may be gone only if the other wrote after it, with CAS: it read that write, or it couldn't have written)
