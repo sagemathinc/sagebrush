@@ -56,15 +56,6 @@ function h<K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLEle
   return e;
 }
 
-/** A small "Connect an agent" button in a page's corner, for a page with no menu of its own to put it in. */
-export function floatingButton(): HTMLElement {
-  const b = document.createElement("button");
-  b.textContent = "Connect an agent";
-  b.style.cssText = "position:fixed;right:12px;bottom:calc(12px + var(--sb-alpha-banner, 0px));z-index:998;font:13px system-ui,sans-serif;border:1px solid #cfd5c8;background:#fff;border-radius:16px;padding:5px 12px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.12)";
-  document.body.append(b);
-  return b;
-}
-
 /** Where a reload restore stands (A14): the page shows it (its bar, its status line, its composer). `canReconnect`: a
  * record this page may still use with one click (the same scope and identity, not expired). */
 export type RestoreState =
