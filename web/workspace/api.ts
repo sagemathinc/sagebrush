@@ -462,6 +462,12 @@ const subtree = (p: string) => (p === "/" ? undefined : IDBKeyRange.bound(p + "/
 /** pathOfFile reads at most this many entries with one identity (normally one); more is "ambiguous", unread. */
 export const PATH_OF_FILE_MAX = 64;
 
+/** A notebook's document as written (web/notebook/nbformat.js: Jupyter's nbformat made Sagebrush's), what it can't
+ * convert (a heading level not 1 to 6) refused as invalid. */
+function nbDoc(content: unknown): unknown {
+  try { return fromNbformat(content); } catch (err) { throw new WorkspaceError("invalid", (err as Error)?.message ?? String(err)); }
+}
+
 export class Workspace {
   private subs = new Set<(c: Change) => void>();
   private channel: BroadcastChannel | null = null;
@@ -1476,10 +1482,13 @@ export class Workspace {
       if (e.kind === "notebook") {
         if (!this.main) throw new WorkspaceError("storage", "this browser has no storage for notebooks");
         // (written as Jupyter's nbformat, as agents do: its cells made Sagebrush's, or the page shows them empty)
-        const doc = fromNbformat(content) as any;
+        const doc = nbDoc(content) as any;
         if (!doc || typeof doc !== "object" || !Array.isArray(doc.cells)) throw new WorkspaceError("invalid", "a notebook is {cells: [...]}");
         const { id: _i, rev: _r, updated: _u, ...rest } = doc;
-        const out = await new IdbStore(this.main, e.ref!).save({ ...rest, name: splitExt(nameOf(e.path))[0], ...(opts.base !== undefined ? { baseRev: opts.base } : {}) }, { lockHeld: true });
+        // (one that names no mode, as nbformat's doesn't, keeps the notebook's: the save replaces the whole record
+        // (daybreak3, #928))
+        const mode = rest.mode ?? (await this.mainTx("notebooks", "readonly", (st) => st.get(e.ref!)))?.mode ?? e.mode;
+        const out = await new IdbStore(this.main, e.ref!).save({ ...rest, ...(mode !== undefined ? { mode } : {}), name: splitExt(nameOf(e.path))[0], ...(opts.base !== undefined ? { baseRev: opts.base } : {}) }, { lockHeld: true });
         if (typeof out === "string") throw new WorkspaceError("storage", out);
         if (out.conflict) throw new WorkspaceError("conflict", `${e.path} was changed elsewhere`, out.conflict);
         rev = out.rev;
@@ -3090,7 +3099,7 @@ export class Workspace {
     if (kind === "notebook") {
       if (!this.main) throw new WorkspaceError("storage", "this browser has no storage for notebooks");
       // (made as Jupyter's nbformat, as agents do: its cells made Sagebrush's, its mode its kernel's)
-      const given = fromNbformat(content ?? {}) as any;
+      const given = nbDoc(content ?? {}) as any;
       if (typeof given !== "object" || (given.cells !== undefined && !Array.isArray(given.cells))) throw new WorkspaceError("invalid", "a notebook is {cells: [...]}");
       const { id: _i, rev: _r, updated: _u, baseRev: _b, ...doc } = given;
       ref = crypto.randomUUID();

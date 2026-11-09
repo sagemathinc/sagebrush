@@ -42,6 +42,18 @@ for (const v of [null, undefined, 5, "x", [], { cells: "no" }, { title: "a board
 // (a cell whose code isn't text, but with nbformat's source: nbformat's)
 check(cellOf({ source: "s" }).type === "raw" && fromNbformat({ cells: [{ source: "s", code: 5 }] }).cells[0].code === "s", "a cell with source and no code text: nbformat's (raw when it names no kind)", null);
 
+// (nbformat 3's heading cells: a level 1 to 6 (none given, 1), anything else refused before any text is made, by fromFile
+// and the workspace alike: astra's NBF928-1)
+const head = (level) => fromNbformat({ cells: [{ cell_type: "heading", source: "T", ...(level === undefined ? {} : { level }) }] }).cells[0];
+check(head(undefined).type === "markdown" && head(undefined).code === "# T" && head(3).code === "### T" && head(6).code === "###### T", "a heading cell: Markdown, its level's #s (none given: 1)", [head(undefined), head(3)]);
+const refused = (f) => { try { f(); return false; } catch (e) { return e instanceof Error && /^a heading cell's level is 1 to 6, not /.test(e.message); } };
+check(head(null).code === "# T", "…a level of null (JSON's none): 1", head(null));
+for (const level of [NaN, Infinity]) check(refused(() => fromNbformat({ cells: [{ cell_type: "heading", source: "T", level }] })), `a heading level of ${level} (not in JSON, but in a page's own call): refused`, null);
+for (const level of [0, 7, 1e9, -1, 2.5, "3"]) {
+  check(refused(() => fromNbformat({ cells: [{ cell_type: "heading", source: "T", level }] })) && refused(() => fromFile("h.ipynb", JSON.stringify({ worksheets: [{ cells: [{ cell_type: "heading", source: "T", level }] }], nbformat: 3 }))),
+    `a heading level of ${String(level)}${typeof level === "string" ? " (text)" : ""}: refused, by the workspace's conversion and fromFile alike`, null);
+}
+
 // (the mode a kernel names, or none; round trip: written as .ipynb, read back as the same cells)
 check(kernelMode(nb) === "python" && kernelMode({ metadata: { kernelspec: { name: "sagemath" } } }) === "sage" && kernelMode({ metadata: { language_info: { name: "octave" } } }) === "matlab" && kernelMode({ metadata: {} }) === undefined && kernelMode({ cells: [] }) === undefined && kernelMode(null) === undefined,
   "kernelMode: the mode a document's kernel names (sage, matlab, python), none when it names none", null);

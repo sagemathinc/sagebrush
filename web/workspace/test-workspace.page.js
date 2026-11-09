@@ -117,6 +117,16 @@ async function nbformatWrites() {
   const c2 = (await ag.read(e.path)).content;
   check(J(c2.cells.map((x) => [x.type ?? "code", x.code])) === J([["code", "1 + 1"], ["markdown", "*mine*"]]) && c2.cells[1].id === "s1",
     "an nbformat write too: its cells made Sagebrush's, a Sagebrush cell beside them kept as it is");
+  // (a write naming no mode, as nbformat's doesn't, keeps the notebook's: stored, and the entry's (daybreak3, #928))
+  check(c2.mode === "sage" && (await ag.stat(e.path)).mode === "sage", "…and the notebook keeps its mode (sage), stored and listed: " + J([c2.mode, (await ag.stat(e.path)).mode]));
+  const r2 = await ag.read(e.path);
+  await ag.write(e.path, { cells: [{ id: "p1", code: "2" }], mode: "python" }, { base: r2.rev });
+  check((await ag.read(e.path)).content.mode === "python", "a write that names its mode: that mode (Sagebrush's own, as before)");
+  // (a heading level not 1 to 6: refused as invalid, nothing made or written (astra's NBF928-1))
+  const badHead = { cells: [{ cell_type: "heading", source: "T", level: 1e9 }] };
+  const r3 = await ag.read(e.path);
+  check(await fails(ag.create("/sim/bad.ipynb", { content: badHead }), "invalid") && !(await ag.stat("/sim/bad.ipynb")) && await fails(ag.write(e.path, badHead, { base: r3.rev }), "invalid") && (await ag.read(e.path)).rev === r3.rev,
+    "a heading level of 1e9: create and write refused as invalid, nothing made or written");
   const own = { cells: [{ id: "a1", code: "x = 1", outputs: [] }, { id: "a2", type: "markdown", code: "hi" }] };
   const e2 = await ag.create("/own.ipynb", { content: own });
   const c3 = (await ag.read(e2.path)).content;
