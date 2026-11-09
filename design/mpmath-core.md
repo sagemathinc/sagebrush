@@ -309,8 +309,7 @@ Every target is a ratio to a baseline measured at the same time on the same mach
    - the sign of a zero result lost;
    - `bc` off by one with `man` unchanged;
    - the kernel fast path's carry dropped (mantissas up to 64 bits, §4.1);
-   - `normalize` not stripping trailing zeros.
-
+   - `normalize` not stripping trailing zeros;
    - in the limb path, which Phase 1 already ships: a carry or borrow dropped at a limb boundary, or the Karatsuba/Toom split off by one at its threshold. The fuzzer's CI subset pins rows at the multiplication threshold, one limb below it and one limb above it.
 
    A planted fault that passes means the oracle is too weak, and the phase doesn't ship until it isn't. TESTS also mutates each phase's kernels independently.
