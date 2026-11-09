@@ -5,7 +5,8 @@
 //   - ⋯ offers "Connect an agent…" once the workspace is open; no button floats over the board;
 //   - it opens Connect; Cancel gives the focus back to ⋯;
 //   - a ?pair= link connects, the person allows a folder, the bar shows the agent, and the agent lists the board;
-//   - a remembered grant reconnects on the next load by itself; Revoke ends it.
+//   - a remembered grant reconnects on the next load by itself; Revoke ends it;
+//   - a board saved as a file and the desktop app (window.__TAURI__) offer no agent and mount nothing.
 //   bun web/build.ts && CHROME=chromium node web/workspace/test-board-agent-e2e.mjs
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -80,9 +81,19 @@ try {
     if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m); waiting.delete(m.id); }
     if (m.method === "Network.requestWillBeSent") requests.push(m.params.request.url);
     if (m.method === "Log.entryAdded" || m.method === "Runtime.consoleAPICalled") console_.push(JSON.stringify(m.params).slice(0, 300));
-    if (m.method === "Fetch.requestPaused") send(failChunk ? "Fetch.failRequest" : "Fetch.continueRequest", failChunk ? { requestId: m.params.requestId, errorReason: "InternetDisconnected" } : { requestId: m.params.requestId });
+    if (m.method === "Fetch.requestPaused" && m.params.responseStatusCode !== undefined && asFile) void asSavedFile(m.params);
+    else if (m.method === "Fetch.requestPaused") send(failChunk ? "Fetch.failRequest" : "Fetch.continueRequest", failChunk ? { requestId: m.params.requestId, errorReason: "InternetDisconnected" } : { requestId: m.params.requestId });
   };
-  let failChunk = false;
+  let failChunk = false, asFile = false;
+  // (the board's page as a board saved as a file has it: its document embedded, script#sb-doc (board/export.ts embedded()),
+  //  made from the served page in flight, its headers kept)
+  const asSavedFile = async (pp) => {
+    const b = await send("Fetch.getResponseBody", { requestId: pp.requestId });
+    const html = b.result.base64Encoded ? Buffer.from(b.result.body, "base64").toString("utf8") : b.result.body;
+    const doc = '<script type="application/json" id="sb-doc">{"title":"Saved","nodes":[{"id":"a","text":"saved as a file"}]}</script>';
+    const body = html.replace(/<body([^>]*)>/i, (x) => x + doc);
+    send("Fetch.fulfillRequest", { requestId: pp.requestId, responseCode: pp.responseStatusCode, responseHeaders: pp.responseHeaders, body: Buffer.from(body).toString("base64") });
+  };
   const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); sock.send(JSON.stringify({ id, method, params })); });
   const ev = async (expr) => { const r = await send("Runtime.evaluate", { expression: expr, awaitPromise: true, returnByValue: true }); if (!r.result || r.result.exceptionDetails) throw new Error(JSON.stringify(r.result?.exceptionDetails ?? r.error ?? r).slice(0, 400)); return r.result.result?.value; };
   const until = async (expr, ms = 20000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(100); } return false; };
@@ -141,6 +152,32 @@ try {
   await ev(`([...document.querySelectorAll(".sbag-bar button")].find((b) => b.textContent === "Revoke")?.click(), true)`);
   ok(await until(`!document.querySelector(".sbag-bar")`), "Revoke: the bar goes");
   ok(await goBoard(`?doc=${encodeURIComponent(doc)}`) && (await sleep(3000), !(await ev(`!!document.querySelector(".sbag-bar") || !!document.querySelector(".sbag-box")`))), "after Revoke, the next load connects nothing");
+
+  // the two exclusions (grader's #929 rows): a board saved as a file, and the desktop app, offer no agent and mount no
+  // pairing, whatever the address says (pages the agent's program doesn't accept)
+  const quiet = async (what) => {
+    const shown = await until(`!!document.querySelector('#board [data-sbb="menubtn"]')`, 60000);
+    await sleep(3000);
+    const st = await ev(`({ item: !!${item} && !${item}.hidden, box: !!document.querySelector(".sbag-box"), bar: !!document.querySelector(".sbag-bar") })`);
+    ok(shown && !st.item && !st.box && !st.bar, what, st);
+  };
+  const c2 = await drive({ op: "code" });
+  asFile = true;
+  await send("Fetch.enable", { patterns: [{ urlPattern: origin + "/board/*", resourceType: "Document", requestStage: "Response" }] });
+  await ev("window.__old = 1").catch(() => {});
+  await send("Page.navigate", { url: origin + `/board/?pair=${c2.code}&port=${c2.port}` });
+  await sleep(300);
+  ok(await until(`!window.__old && !!document.getElementById("sb-doc")`, 30000), "(the board page as a board saved as a file: its document embedded)");
+  await quiet("a board saved as a file: no Connect an agent… in ⋯, and its ?pair= link mounts nothing (no dialog, no bar)");
+  await send("Fetch.disable");
+  asFile = false;
+  const tauri = await send("Page.addScriptToEvaluateOnNewDocument", { source: "window.__TAURI__ = window.__TAURI__ || {};" });
+  await ev("window.__old = 1").catch(() => {});
+  await send("Page.navigate", { url: origin + `/board/?doc=${encodeURIComponent(doc)}&pair=${c2.code}&port=${c2.port}` });
+  await sleep(300);
+  ok(await until(`!window.__old && "__TAURI__" in window`, 30000), "(the board page with window.__TAURI__ defined before it loads, as the desktop app has it)");
+  await quiet("the desktop app: no Connect an agent… in ⋯, and a ?pair= link mounts nothing (no dialog, no bar)");
+  await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: tauri.result.identifier });
 } catch (e) {
   ok(false, "threw: " + (e?.stack ?? e));
 } finally {
