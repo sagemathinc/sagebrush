@@ -130,6 +130,18 @@ function messagePart(turn: Turn, id: string) {
   return undefined;
 }
 
+// What an event may carry into the thread, checked as it's applied (turn events come from the agent's side): the kinds
+// and states the view knows, an artifact's language as a short name, counts as numbers. A field outside its set is
+// replaced by its safe value, or the event is left out.
+export const TOOL_STATUSES = ["running", "ok", "error", "unknown"] as const;
+export const ATTENTION_STATES = ["open", "approved", "denied"] as const;
+export const ARTIFACT_KINDS = ["markdown", "code", "diff", "notebook"] as const;
+const OUTCOMES: readonly TurnOutcome[] = ["completed", "interrupted", "error"];
+const oneOf = <T extends string>(v: unknown, xs: readonly T[]): v is T => typeof v === "string" && (xs as readonly string[]).includes(v);
+/** An artifact's language as a name the view can show: letters, digits and "+#._-", at most 32; anything else, none. */
+export const langOf = (v: unknown): string | undefined => (typeof v === "string" && /^[A-Za-z0-9+#._-]{1,32}$/.test(v) ? v : undefined);
+const count = (v: unknown): number | undefined => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : undefined);
+
 // Applies one event. A duplicate (seq <= applied_seq) is dropped; a gap
 // means the caller must ask for a reset (returns false).
 export function apply(thread: Thread, e: TurnEvent, time = Date.now()): boolean {
@@ -182,21 +194,23 @@ export function apply(thread: Thread, e: TurnEvent, time = Date.now()): boolean 
     case "tool_call_finished": {
       const tool = turn.tools[e.call];
       if (!tool) break;
-      tool.status = e.status;
+      tool.status = oneOf(e.status, TOOL_STATUSES) && e.status !== "running" ? e.status : "unknown";
       if (e.summary != null) tool.summary = e.summary;
       if (e.body != null) tool.output = e.body;
       tool.body_cut = e.body_cut;
-      tool.duration_ms = e.duration_ms;
+      tool.duration_ms = count(e.duration_ms);
       tool.diff = e.diff;
       break;
     }
     case "attention":
+      if (!oneOf(e.state, ATTENTION_STATES)) break;
       if (!turn.attention[e.id]) turn.parts.push({ kind: "attention", id: e.id });
       turn.attention[e.id] = { id: e.id, kind: e.kind, state: e.state, title: e.title, summary: e.summary, detail: e.detail };
       break;
     case "artifact": {
+      if (!oneOf(e.kind, ARTIFACT_KINDS)) break;
       const existing = thread.artifacts.find((a) => a.id === e.id);
-      const value: Artifact = { id: e.id, kind: e.kind, title: e.title, lang: e.lang, body: e.body, turn_id: e.turn_id, ...(e.path ? { path: e.path } : {}) };
+      const value: Artifact = { id: e.id, kind: e.kind, title: e.title, lang: langOf(e.lang), body: e.body, turn_id: e.turn_id, ...(e.path ? { path: e.path } : {}) };
       if (existing) Object.assign(existing, value);
       else {
         thread.artifacts.push(value);
@@ -205,14 +219,14 @@ export function apply(thread: Thread, e: TurnEvent, time = Date.now()): boolean 
       break;
     }
     case "turn_usage":
-      turn.usage = e.usage;
+      if (count(e.usage?.output_tokens) !== undefined) turn.usage = e.usage;
       break;
     case "turn_error":
       turn.error = { code: e.code, message: e.message };
       break;
     case "turn_finished":
-      turn.outcome = e.outcome;
-      turn.state = e.outcome;
+      turn.outcome = OUTCOMES.includes(e.outcome) ? e.outcome : "error";
+      turn.state = turn.outcome;
       turn.finished = time;
       for (const tool of Object.values(turn.tools)) if (tool.status === "running") tool.status = "unknown";
       break;
