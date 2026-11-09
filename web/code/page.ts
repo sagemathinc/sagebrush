@@ -78,7 +78,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const head = el("div", "code-head"), bar = el("div", "code-bar"), body = el("div", "code-body");
   bar.hidden = true;
   page.append(head, bar, body);
-  const files = el("button", "", "Files"); files.setAttribute("aria-controls", "wssidebar");
+  const files = el("button", "code-files", "Files"); files.setAttribute("aria-controls", "wssidebar");
   files.onclick = () => { const b = document.getElementById("wsfilesbtn"); if (b) b.click(); else location.assign("/"); };
   const name = el("span", "code-name"), lang = el("span", "code-lang"), status = el("span", "code-status");
   status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");

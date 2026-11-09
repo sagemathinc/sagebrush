@@ -2440,14 +2440,14 @@ try {
   const fu = await mk("/t/ux.tex", enc(UXDOC));
   await open(fu);
   await until(`!document.getElementById("wssidebar").hidden && !!document.querySelector(".tex-src")`, 20000);
-  const lay = () => ev(`(() => { const s = document.getElementById("wssidebar"), P = document.querySelector(".tex-page"), fb = P.querySelector(".tex-back"), b = fb.getBoundingClientRect();
-    return { shown: !s.hidden, sideRight: s.hidden ? 0 : Math.round(s.getBoundingClientRect().right), left: Math.round(P.getBoundingClientRect().left), top: document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2) === fb, pressed: fb.getAttribute("aria-pressed"), text: P.querySelector(".tex-src")?.value }; })()`);
+  const lay = () => ev(`(() => { const s = document.getElementById("wssidebar"), P = document.querySelector(".tex-page"), fb = document.querySelector(".sb-files-toggle") ?? P.querySelector(".tex-back"), b = fb.getBoundingClientRect();
+    return { shown: !s.hidden, sideRight: s.hidden ? 0 : Math.round(s.getBoundingClientRect().right), left: Math.round(P.getBoundingClientRect().left), top: fb.contains(document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2)), pressed: fb.getAttribute("aria-pressed"), text: P.querySelector(".tex-src")?.value }; })()`);
   const l1 = await lay();
   check(l1.shown && l1.left >= l1.sideRight - 1 && l1.top && l1.pressed === "true", "A1: files shown: the page starts right of them, its Files button not covered and pressed", l1);
-  await page(`(P.querySelector(".tex-back").click(), true)`); await sleep(300);
+  await page(`((document.querySelector(".sb-files-toggle") ?? P.querySelector(".tex-back")).click(), true)`); await sleep(300);
   const l2 = await lay();
   check(!l2.shown && l2.left === 0 && l2.pressed === "false" && l2.text === UXDOC, "A7: Files: the files hidden, the page full width, the same document open", { ...l2, text: l2.text?.length });
-  await page(`(P.querySelector(".tex-back").click(), true)`); await sleep(300);
+  await page(`((document.querySelector(".sb-files-toggle") ?? P.querySelector(".tex-back")).click(), true)`); await sleep(300);
   const l3 = await lay();
   check(l3.shown && l3.left >= l3.sideRight - 1 && l3.pressed === "true" && l3.text === UXDOC, "A7: Files again: the files shown beside it, the document still open", { ...l3, text: l3.text?.length });
   // A5: a long line wraps, in the textarea and in the lines drawn behind it alike (no part of it cut off at the right)
