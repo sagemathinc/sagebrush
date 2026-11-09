@@ -410,6 +410,179 @@ pub fn mpf_sqrt(s: &Mpf, prec: u64, rnd: Rnd) -> Result<Mpf, Fail> {
     from_man_exp(0, root, (exp - shift).div_euclid(2), prec, rnd)
 }
 
+impl Rnd {
+    /// reciprocal_rnd: the direction that rounds a reciprocal's input.
+    pub fn reciprocal(self) -> Rnd {
+        match self {
+            Rnd::Down => Rnd::Up,
+            Rnd::Up => Rnd::Down,
+            Rnd::Floor => Rnd::Ceiling,
+            Rnd::Ceiling => Rnd::Floor,
+            Rnd::Nearest => Rnd::Nearest,
+        }
+    }
+}
+
+pub fn fone() -> Mpf {
+    Mpf { sign: 0, man: Nat::from_u64(1), exp: 0, bc: 1 }
+}
+
+/// mpf_pos: s rounded to prec (prec 0: s itself).
+pub fn mpf_pos(s: &Mpf, prec: u64, rnd: Rnd) -> Result<Mpf, Fail> {
+    if prec != 0 {
+        if s.man.is_zero() && s.exp != 0 {
+            return Ok(s.clone());
+        }
+        return normalize1(s.sign, s.man.clone(), s.exp, s.bc, prec, rnd);
+    }
+    Ok(s.clone())
+}
+
+/// from_int: sign and magnitude; prec 0 is exact (int_cache holds exactly
+/// what from_man_exp gives, so it needs no port of its own).
+pub fn from_int(sign: u32, n: Nat, prec: u64, rnd: Rnd) -> Result<Mpf, Fail> {
+    from_man_exp(sign, n, 0, prec, rnd)
+}
+
+fn mul_exp(e: i64, n: i64) -> Result<i64, Fail> {
+    e.checked_mul(n).ok_or(Fail::Exponent)
+}
+
+/// python_mpf_mul_int: s times the integer (-1)^nsign * n.
+pub fn mpf_mul_int(s: &Mpf, nsign: u32, n: &Nat, prec: u64, rnd: Rnd) -> Result<Mpf, Fail> {
+    if s.man.is_zero() {
+        return mpf_mul(s, &from_int(nsign, n.clone(), 0, rnd)?, prec, rnd);
+    }
+    if n.is_zero() {
+        return Ok(fzero());
+    }
+    let sign = s.sign ^ nsign;
+    let man = s.man.mul(n)?;
+    let mut bc = s.bc + n.bits() as i64 - 1;
+    let top = man.shr(bc.max(0) as u64)?;
+    bc += top.to_u64().and_then(|x| i64::try_from(x).ok()).ok_or(Fail::Exponent)?;
+    normalize(sign, man, s.exp, bc, prec, rnd)
+}
+
+/// The bctable lookups in the binary powering loops: the bit count of a
+/// small integer (the reference indexes a 1024-entry table).
+fn small_bits(x: &Nat) -> Result<i64, Fail> {
+    match x.to_u64() {
+        Some(v) if v < 1024 => Ok(64 - v.leading_zeros() as i64),
+        _ => Err(Fail::Exponent),
+    }
+}
+
+/// mpf_pow_int: s^n for an integer n (the glue keeps n within i64).
+pub fn mpf_pow_int(s: &Mpf, n: i64, prec: u64, rnd: Rnd) -> Result<Mpf, Fail> {
+    if s.man.is_zero() && s.exp != 0 {
+        if s.is_finf() {
+            if n > 0 {
+                return Ok(s.clone());
+            }
+            if n == 0 {
+                return Ok(fnan());
+            }
+            return Ok(fzero());
+        }
+        if s.is_fninf() {
+            if n > 0 {
+                return Ok(if n & 1 == 1 { fninf() } else { finf() });
+            }
+            if n == 0 {
+                return Ok(fnan());
+            }
+            return Ok(fzero());
+        }
+        return Ok(fnan());
+    }
+    if n == 0 {
+        return Ok(fone());
+    }
+    if n == 1 {
+        return mpf_pos(s, prec, rnd);
+    }
+    if n == 2 {
+        if s.man.is_zero() {
+            return Ok(fzero());
+        }
+        let man = s.man.mul(&s.man)?;
+        let exp = add_exp(s.exp, s.exp)?;
+        if man.to_u64() == Some(1) {
+            return Ok(Mpf { sign: 0, man, exp, bc: 1 });
+        }
+        let mut bc = s.bc + s.bc - 2;
+        bc += small_bits(&man.shr(bc as u64)?)?;
+        return normalize1(0, man, exp, bc, prec, rnd);
+    }
+    if n == -1 {
+        return mpf_div(&fone(), s, prec, rnd);
+    }
+    if n < 0 {
+        let inverse = mpf_pow_int(s, n.checked_neg().ok_or(Fail::Exponent)?, prec + 5, rnd.reciprocal())?;
+        return mpf_div(&fone(), &inverse, prec, rnd);
+    }
+    let result_sign = s.sign & (n & 1) as u32;
+    if s.man.to_u64() == Some(1) {
+        return Ok(Mpf { sign: result_sign, man: Nat::from_u64(1), exp: mul_exp(s.exp, n)?, bc: 1 });
+    }
+    if s.bc.saturating_mul(n) < 1000 {
+        let mut man = Nat::from_u64(1);
+        for _ in 0..n {
+            man = man.mul(&s.man)?;
+        }
+        let bc = man.bits() as i64;
+        return normalize1(result_sign, man, mul_exp(s.exp, n)?, bc, prec, rnd);
+    }
+    let rounds_down = rnd == Rnd::Nearest || rnd.shifts_down(result_sign);
+    let nbits = 64 - (n as u64).leading_zeros() as u64;
+    let workprec = (prec + 4 * nbits + 4) as i64;
+    let cut = |x: &Nat, k: u64| -> Result<Nat, Fail> {
+        if rounds_down {
+            x.shr(k)
+        } else {
+            let away = x.low_nonzero(k);
+            let q = x.shr(k)?;
+            if away {
+                q.add_u64(1)
+            } else {
+                Ok(q)
+            }
+        }
+    };
+    let (mut man, mut exp, mut bc) = (s.man.clone(), s.exp, s.bc);
+    let (mut pm, mut pe, mut pbc) = (Nat::from_u64(1), 0i64, 1i64);
+    let mut n = n;
+    loop {
+        if n & 1 == 1 {
+            pm = pm.mul(&man)?;
+            pe = add_exp(pe, exp)?;
+            pbc += bc - 2;
+            pbc += small_bits(&pm.shr(pbc as u64)?)?;
+            if pbc > workprec {
+                pm = cut(&pm, (pbc - workprec) as u64)?;
+                pe = add_exp(pe, pbc - workprec)?;
+                pbc = workprec;
+            }
+            n -= 1;
+            if n == 0 {
+                break;
+            }
+        }
+        man = man.mul(&man)?;
+        exp = add_exp(exp, exp)?;
+        bc = bc + bc - 2;
+        bc += small_bits(&man.shr(bc as u64)?)?;
+        if bc > workprec {
+            man = cut(&man, (bc - workprec) as u64)?;
+            exp = add_exp(exp, bc - workprec)?;
+            bc = workprec;
+        }
+        n /= 2;
+    }
+    normalize(result_sign, pm, pe, pbc, prec, rnd)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
