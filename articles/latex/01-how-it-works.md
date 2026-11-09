@@ -83,7 +83,7 @@ Run draws its controls where the block is, at their defaults, with what
 the function prints and shows for them. A printed page or PDF shows the
 same, marked "Interactive in Sagebrush". This is an extension:
 real LaTeX with SageTeX and Sage 10.10 stop at it, because `interact`
-exists only in Sage's Jupyter kernel (`NameError: name 'interact' is not
+isn't defined outside Sage's notebook interfaces (`NameError: name 'interact' is not
 defined`). Keep it out of documents that must also build with `pdflatex`.
 
 **For agents and the command line.** `sagebrush latex check FILE.tex`

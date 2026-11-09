@@ -157,7 +157,7 @@ const sage = (code) => new Promise((res) => {
   check("interact: what it showed (a plot, as a base64 SVG data URL)", h?.shows?.length === 1 && /^data:image\/svg\+xml;base64,/.test(h.shows[0].src ?? ""), h?.shows?.map((x) => String(x.src ?? x.text).slice(0, 60)));
   check("interact: an item without one has none; the next interact is its own item's", !st[1].interacts && st[1].latex === "2" && st[2].interacts?.[0]?.name === "g" && st[2].interacts[0].controls[0].kind === "selector" && st[2].interacts[0].out === "red\n", st.slice(1, 3));
   check("interact: the runtime's own host and display are back after the Run", /HOSTBACK True True/.test(r.out), r.out.split("\n").filter((l) => l.startsWith("HOSTBACK")));
-  // (the session's output is untrusted: interactsOf keeps only known kinds and fields, bounded; a "plot" that isn't an
+  // (the session's output is unchecked input: interactsOf keeps only known kinds and fields, bounded; a "plot" that isn't an
   //  SVG is never an image)
   const bad = interactsOf([{ spec: { id: 1, name: "f", controls: [{ kind: "script", name: "x" }, { kind: "slider", name: "n", value: 3, min: 0, max: "9;evil" }] }, out: "x".repeat(INTERACT_LIMITS.text + 10), shows: [{ svg: "<script>alert(1)</script>" }, { text: 7 }] }, ...Array(20).fill({ spec: {} })]);
   check("interact: only known control kinds, numeric bounds only; text bounded; a non-SVG show is no image; at most INTERACT_LIMITS.n", bad.length === INTERACT_LIMITS.n && bad[0].controls.length === 1 && bad[0].controls[0].max === undefined && bad[0].out.length === INTERACT_LIMITS.text && !bad[0].shows[0].src && bad[0].shows[1].text === "", bad[0]);
