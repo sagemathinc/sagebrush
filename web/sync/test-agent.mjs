@@ -2,7 +2,7 @@
 // Agents' grants and their requests on the sync server (design/agent-endpoint.md §1-§3, §7, §8; fs-sync step 1a):
 // the person's grants from a session, the token's form and tag checked by the Worker before any object, no Origin,
 // the grant's check, its rates and the account's, scope on whole segments, and the access log.  Every verb answers
-// 404 not_built (list and stat after their scope): the index they read is step 1a2.  Behind the SYNC_AGENT switch,
+// 404 not_built, but list and stat, which read the server's index (step 1a2, test-index.mjs).  Behind the SYNC_AGENT switch,
 // DEV only.  In Miniflare with real Durable Objects (SQLite).
 //
 //   node web/sync/test-agent.mjs
@@ -241,9 +241,9 @@ await section("before any object: the Worker", async () => {
 
 await section("the grant's check, scope, and the verbs (not built)", async () => {
   const st = await answer(await agent(tA, "stat", { path: "/Algebra/x.tex" }));
-  ok(st.status === 404 && st.error === "not_built", "stat in scope passes every check, and answers not_built (1a2 builds it): " + JSON.stringify(st));
+  ok(st.status === 200 && st.entry === null, "stat in scope passes every check, and answers from the index (nothing there): " + JSON.stringify(st));
   const ls = await answer(await agent(tA, "list", { folder: "/Notes" }));
-  ok(ls.status === 404 && ls.error === "not_built", "list of a read scope, too");
+  ok(ls.status === 404 && ls.error === "missing", "list of a read scope too, of a folder the index doesn't have: missing");
   const out = await answer(await agent(tA, "stat", { path: "/Algebra2" }));
   ok(out.status === 403 && out.error === "scope" && out.path === "/Algebra2" && out.access === "read", "/Algebra doesn't cover /Algebra2: 403 scope, with the path and the access needed");
   ok((await answer(await agent(tA, "list", { folder: "/" }))).error === "scope", "nor the folder above it");
@@ -253,7 +253,7 @@ await section("the grant's check, scope, and the verbs (not built)", async () =>
   ok((await answer(await agent(tA, "stat", { path: "/Algebra/x", extra: true }))).status === 400, "stat with a field the schema doesn't have is refused");
   ok((await answer(await agent(tA, "list", { folder: "/Notes", recursive: "yes" }))).status === 400, "list with recursive not a boolean is refused");
   ok((await answer(await agent(tA, "list", { folder: "/Notes", cursor: 5 }))).status === 400, "list with cursor not a string is refused");
-  ok((await answer(await agent(tA, "list", { folder: "/Notes", recursive: true, cursor: "c" }))).error === "not_built", "list with both options well typed passes to not_built");
+  ok((await answer(await agent(tA, "list", { folder: "/Notes", recursive: true, cursor: "c" }))).error === "missing", "list with both options well typed passes its checks (to missing)");
   ok((await answer(await agent(tA, "stat", { path: "/Algebra2", extra: 1 }))).status === 400, "the schema is checked before scope (a bad call out of scope is 400, not 403)");
   for (const v of ["read", "write", "mkdir", "remove", "rename", "history"]) ok((await answer(await agent(tA, v, { path: "/Algebra/x" }))).error === "not_built", v + " isn't built: not_built");
   const u = await answer(await agent(tA, "frob", {}));
@@ -279,7 +279,7 @@ await section("the grant's check, scope, and the verbs (not built)", async () =>
   await seam(A, { expire: g2.grant.id });
   bodies.push(JSON.stringify(await answer(await agent(g2.token, "stat", { path: "/Algebra/x" }))));
   const g3 = await make(sA, [{ path: "/Algebra", access: "read" }]);
-  ok((await answer(await agent(g3.token, "stat", { path: "/Algebra/x" }))).error === "not_built", "a grant works before it is revoked");
+  ok((await answer(await agent(g3.token, "stat", { path: "/Algebra/x" }))).status === 200, "a grant works before it is revoked");
   const rv = await answer(await post(sA, `/api/sync/v1/grants/${g3.grant.id}/revoke`, {}));
   ok(rv.status === 200 && rv.grant.revoked !== null && rv.grant.revoked_reason === "person", "the person revokes it");
   bodies.push(JSON.stringify(await answer(await agent(g3.token, "stat", { path: "/Algebra/x" }))));
@@ -289,7 +289,7 @@ await section("the grant's check, scope, and the verbs (not built)", async () =>
   // rotation: the old token stops at once
   const ro = await answer(await post(sA, `/api/sync/v1/grants/${gA.id}/rotate`, {}));
   ok(ro.status === 200 && ro.token !== tA && parts(ro.token)[2] === gA.id, "\"New token\" makes another secret for the same grant");
-  ok((await agent(tA, "stat", { path: "/Algebra/x" })).status === 401 && (await answer(await agent(ro.token, "stat", { path: "/Algebra/x" }))).error === "not_built", "the old token stops at once; the new one works");
+  ok((await agent(tA, "stat", { path: "/Algebra/x" })).status === 401 && (await answer(await agent(ro.token, "stat", { path: "/Algebra/x" }))).status === 200, "the old token stops at once; the new one works");
   tA = ro.token;
   ok((await post(sA, `/api/sync/v1/grants/${g3.grant.id}/rotate`, {})).status === 409 && (await post(sA, `/api/sync/v1/grants/${g2.grant.id}/rotate`, {})).status === 409, "a revoked or expired grant isn't rotated");
   const list = await (await get(sA, "/api/sync/v1/grants")).json();
@@ -306,7 +306,7 @@ await section("50 live grants at most", async () => {
   }
   ok(ids.every(Boolean), "50 grants are made");
   // (the first one makes a request, so it has rate rows; it is also the first revoked, so the first trimmed)
-  ok((await answer(await agent(made[0].token, "stat", { path: "/f0/x" }))).error === "not_built", "(the first grant makes a request)");
+  ok((await answer(await agent(made[0].token, "stat", { path: "/f0/x" }))).status === 200, "(the first grant makes a request)");
   ok((await (await seam(L, {})).json()).rates === 3, "(its two buckets and the account's)");
   const over = await make(s, [{ path: "/x", access: "read" }]);
   ok(over.status === 413 && over.limit === "grants" && over.max === 50, "a 51st is refused: " + over.status);
@@ -377,9 +377,9 @@ await section("rates: the grant's, then the account's", async () => {
   for (let i = 0; i < 5; i++) await agent(["sbg1", ...parts(g1.token).slice(1, 3), b64url(Buffer.alloc(32, i)), parts(g1.token)[4]].join("."), "stat", { path: "/x" });
   const r = [];
   for (let i = 0; i < 4; i++) r.push(await answer(await agent(g1.token, "stat", { path: "/x" })));
-  ok(r.slice(0, 3).every((x) => x.error === "not_built"), "wrong secrets don't use the grant's requests (each is refused before its rates)");
+  ok(r.slice(0, 3).every((x) => x.status === 200), "wrong secrets don't use the grant's requests (each is refused before its rates)");
   ok(r[3].status === 429 && r[3].error === "rate" && r[3].limit === "requests_per_minute" && r[3].retry_after > 0, "the 4th in a minute, with 3 a minute: 429 requests_per_minute, with retry_after: " + JSON.stringify(r[3]));
-  ok((await answer(await agent(g2.token, "stat", { path: "/x" }))).error === "not_built", "another grant has its own");
+  ok((await answer(await agent(g2.token, "stat", { path: "/x" }))).status === 200, "another grant has its own");
   // (grader's P3) making or revoking another grant trims only removed grants' rows: the spent bucket stays spent
   const g3 = await make(s, [{ path: "/", access: "read" }]);
   ok((await answer(await agent(g1.token, "stat", { path: "/x" }))).limit === "requests_per_minute", "a spent grant stays refused after another grant is made");
@@ -392,10 +392,10 @@ await section("rates: the grant's, then the account's", async () => {
   ok(after.status === 429 && after.limit === "requests_per_minute" && after.retry_after > 0, "after the object restarts, the spent minute is still spent: " + JSON.stringify(after));
   await seam(RT, { minuteMs: 600 });
   await new Promise((res) => setTimeout(res, 400));
-  ok((await answer(await agent(g1.token, "stat", { path: "/x" }))).error === "not_built", "and it refills as time passes (3 a 0.6 s window here)");
+  ok((await answer(await agent(g1.token, "stat", { path: "/x" }))).status === 200, "and it refills as time passes (3 a 0.6 s window here)");
   // (grader S4b) both the minute and the hour spent: the answer names the first in §7's order, the minute
   await seam(RT, { perMinute: 1, perHour: 1, accountPerMinute: 1000, minuteMs: 60_000, resetRates: true });
-  ok((await answer(await agent(g1.token, "stat", { path: "/x" }))).error === "not_built", "(one request spends both)");
+  ok((await answer(await agent(g1.token, "stat", { path: "/x" }))).status === 200, "(one request spends both)");
   ok((await answer(await agent(g1.token, "stat", { path: "/x" }))).limit === "requests_per_minute", "with the minute and the hour both spent, the refusal names the minute's limit");
   // (grader S4c) retry_after is the time until one request refills: 2 a 2 s window here, so about 1 s after the second
   await seam(RT, { perMinute: 2, perHour: 1000, minuteMs: 2000, resetRates: true });
@@ -418,7 +418,7 @@ await section("rates: the grant's, then the account's", async () => {
   await seam(RT, { perMinute: 100, perHour: 1000, accountPerMinute: 3, resetRates: true });
   const a = [];
   for (const t of [g1.token, g2.token, g1.token, g2.token]) a.push(await answer(await agent(t, "stat", { path: "/x" })));
-  ok(a.slice(0, 3).every((x) => x.error === "not_built") && a[3].status === 429 && a[3].limit === "account_requests_per_minute", "all of an account's grants together: " + JSON.stringify(a[3]));
+  ok(a.slice(0, 3).every((x) => x.status === 200) && a[3].status === 429 && a[3].limit === "account_requests_per_minute", "all of an account's grants together: " + JSON.stringify(a[3]));
   const ab = (await (await seam(RT, {})).json()).rateRows;
   ok((await answer(await agent(g1.token, "stat", { path: "/x" }))).limit === "account_requests_per_minute" && (await (await seam(RT, {})).json()).rateRows === ab, "the account's refusal leaves the grant's own buckets as they were (astra S4)");
   await restart(RT);
@@ -438,7 +438,7 @@ await section("10 failed authentications a minute per IP", async () => {
   ok(codes.slice(0, 10).every((c) => c === 401) && codes[10] === 429, "10 failures a minute from one IP get 401, the 11th 429: " + codes);
   const r = await answer(await agent(wrongSecret, "stat", { path: "/x" }, {}, F));
   ok(r.status === 429 && r.limit === "failed_auth_per_ip", "past it, a failure says which limit: " + JSON.stringify(r));
-  ok((await answer(await agent(g.token, "stat", { path: "/x" }, {}, F))).error === "not_built", "a request that authenticates is never refused by it");
+  ok((await answer(await agent(g.token, "stat", { path: "/x" }, {}, F))).status === 200, "a request that authenticates is never refused by it");
 });
 
 await section("the access log", async () => {
@@ -456,7 +456,7 @@ await section("the access log", async () => {
   const l = await logOf(s);
   const mine = l.rows.filter((r) => r.grant_id === g.grant.id).reverse();
   ok(mine.length === 4, "a row for each request of the grant, and one for its ten refusals in a minute, across a restart of the object: " + mine.length);
-  ok(mine[0].verb === "stat" && mine[0].paths === '["/A/x"]' && mine[0].result === "not_built" && mine[0].agent === "Claude Code on laptop", "a row says the verb, its path, the answer and the agent");
+  ok(mine[0].verb === "stat" && mine[0].paths === '["/A/x"]' && mine[0].result === "ok" && mine[0].agent === "Claude Code on laptop", "a row says the verb, its path, the answer and the agent");
   ok(mine[1].result === "scope" && mine[1].paths === '["/B"]' && mine[2].verb === "mkdir" && mine[2].paths === null && mine[3].result === "unauthorized", "a refusal of scope, a verb not built, and a refused secret are rows too");
   const all = JSON.stringify(l);
   ok(!all.includes(parts(g.token)[3]) && !all.includes(parts(wrong)[3]) && !all.includes(g.token.slice(0, 40)), "the log never holds a token or a secret");
@@ -510,7 +510,7 @@ await section("the access log", async () => {
 await section("a deleted account's grants", async () => {
   const s = await enabled(DL);
   const g = await make(s, [{ path: "/", access: "read" }]);
-  ok((await answer(await agent(g.token, "stat", { path: "/x" }))).error === "not_built", "the grant works");
+  ok((await answer(await agent(g.token, "stat", { path: "/x" }))).status === 200, "the grant works");
   const gen = (await (await get(s, "/api/sync/v1/status")).json()).generation;
   const ns = await mf.getDurableObjectNamespace("SYNC_ACCOUNT", "on");
   const acct = ns.get(ns.idFromName("acct:" + hashOf(DL)));
@@ -564,7 +564,7 @@ await section("a read-only account: reads pass, writes are refused", async () =>
     const r = await answer(await agent(g.token, v, { path: "/x" }));
     ok(r.status === 409 && r.error === "readonly" && r.message === "this account's sync is read-only now", `${v} on a read-only account: 409 readonly: ${JSON.stringify(r)}`);
   }
-  ok((await answer(await agent(g.token, "list", { folder: "/" }))).error === "not_built" && (await answer(await agent(g.token, "stat", { path: "/x" }))).error === "not_built", "list and stat still pass");
+  ok((await answer(await agent(g.token, "list", { folder: "/" }))).status === 200 && (await answer(await agent(g.token, "stat", { path: "/x" }))).status === 200, "list and stat still pass");
 });
 
 // (an account taken off the allow list after its grant was made: the same storage, a Worker whose SYNC_ACCOUNTS no
@@ -590,7 +590,7 @@ await section("an account taken off the allow list", async () => {
     ok((await go("/api/sync/v1/enable", { method: "POST", headers: hdr, body: "{}" })).status === 200, "(allow) sync on");
     const g = await (await go("/api/sync/v1/grants", { method: "POST", headers: hdr, body: JSON.stringify({ agent: "a", scopes: [{ path: "/", access: "read" }] }) })).json();
     const call = (mm) => dispatch(mm, AT + "/api/agent/v1/stat", { method: "POST", headers: { authorization: "Bearer " + g.token, "content-type": "application/json" }, body: JSON.stringify({ path: "/x" }) });
-    ok((await answer(await call(m))).error === "not_built", "the grant works while the account is allowed");
+    ok((await answer(await call(m))).status === 200, "the grant works while the account is allowed");
     await m.dispose();
     m = one("someone-else");
     const r2 = await answer(await call(m));

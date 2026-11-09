@@ -82,8 +82,11 @@ CLASSES = {"1", "2", "3", "1+2", "1+3", "2+3", "1+2+3", "coverage", "none"}
 # and the isolated output renderer (OUT-ISO phase 1): the message schema's bounds (protocol.js BOUNDS: a message's size, checked
 # before it is parsed, the outputs a render, an id, a height, a reason), the shell's readiness wait and height rate, and the
 # host's deadlines and live-frame cap, with their measurements (web/test-output-frames.mjs): class 1)
+# and the sync server's agents' index (fs-sync 1a2, web/sync/entries.ts): its host bounds, each its own IX_*_MAX line, and
+# its work meter (the Budget and its charges): class 1, interim until #904's slice 2 (LIMITS on #913), never membership)
 WEB = {"web/workspace/sync-ledger.ts", "web/notebook/text-overlap.ts", "web/stall-fetch.js", "web/workspace/checkpoint.ts", "web/latex/run-core.mjs",
-       "web/latex/results-check.mjs", "web/output-shell/protocol.js", "web/output-shell/shell.js", "web/notebook/output-frames.js"}
+       "web/latex/results-check.mjs", "web/output-shell/protocol.js", "web/output-shell/shell.js", "web/notebook/output-frames.js",
+       "web/sync/entries.ts"}
 
 
 def short(key):
