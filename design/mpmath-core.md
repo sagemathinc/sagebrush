@@ -8,7 +8,7 @@
 - mpmath's own interface stays the same: its names, its conventions, and its test suite, which runs unchanged as the oracle at every step.
 - The rule is **one implementation per precision tier**. Double-precision code (`lib/_special.py`, numpy's linear algebra, scipy) is a different tier with different algorithms. It is not merged into the multiprecision core, because that would make it many times slower.
 - Measured today, mpmath on Sagebrush takes 5.25 s on the benchmark, against 6.82 s for Pyodide and 1.31 s for CPython with gmpy. Most of Sagebrush's time goes to running mpmath's Python code for each small operation, not to big-number arithmetic. So the first phase moves mpmath's number type and basic arithmetic into the core; just making the integers faster would not be enough.
-- There are seven phases. Each has its own speed target, its own size budget, its oracle and its way back. Phase 0 is a measurement spike with a go/no-go line, and nothing ships in it.
+- There are five shipping phases (numbered 1, 3, 4, 5 and 6) after a measurement spike (Phase 0, done). Each has its own speed target, its own size budget, its oracle and its way back. The spike showed that the win comes from a native number type, not from replacing mpmath's arithmetic functions alone, so the first shipping phase is the native type with its arithmetic and elementary functions (r5: the former Phases 1 and 2, merged).
 - SymPy's API on the same core is the long-term plan. Its design waits until the mpmath phases have real numbers.
 
 ---
@@ -107,7 +107,7 @@ Every result's radius is rounded upward. The domain rules match what `engine/bal
 
 The crate is MIT OR Apache-2.0, like the other engine crates. It has no C dependencies, and the same Rust runs in the browser's WebAssembly, natively and in the Node CLI. It owns:
 - **The number type and its arithmetic:**
-  - mantissa and exponent on `sagebrush-bigint`, with an inline fast path for mantissas up to 64 bits;
+  - mantissa and exponent on `sagebrush-bigint`, with a **kernel fast path** for mantissas up to 64 bits (inside the core's arithmetic; not to be confused with the hybrid number's storage edge at 2^53, §4.6), and the **limb path** above it;
   - the five rounding modes;
   - correctly rounded `add sub mul div sqrt`, plus `pow_int`, `ldexp` and conversions;
   - the text conversions that mpmath and Sage need, with exactly mpmath's digit rules.
@@ -146,7 +146,7 @@ Every other mpmath module stays the upstream Python, now running on fast primiti
 - **No silent fallback.** If the core can't load, `import mpmath` raises. A limit or an error inside the core raises to the caller. Neither falls back to the Python backend. Only the explicit rollback setting (§6) selects the Python backend. It takes effect in a fresh session, never by a retry inside a running one, and never after a resource, cancellation or numerical failure.
 - **No impersonation.** Nothing is registered as `gmpy2`, `gmpy` or `sage.*`. Doing so would make `import gmpy2` succeed in user code with a partial API, poison other packages' feature probes, and make the system misreport what it runs. A test asserts that `import gmpy2` and `import sage` still raise ImportError, and that `mpmath.libmp.BACKEND` reports `'sagebrush'`.
 - **The backend value is `'sagebrush'`, never `'sage'`.** `backend.py` reads `SAGEBRUSH_MPMATH_BACKEND` once, at first import. Once Phase 1 ships, it defaults to `sagebrush`. An unknown value raises at import, never falling through to `python`. The session option (§6) sets the same value before the first import, and the Phase 1 PR names where that option lives. The gmpy branches stay untouched and never run, because pyjs has no gmpy.
-- **Mantissas stay Python ints.** The `'sage'` branch also sets `MPZ = sage.Integer`, and the pickling helpers branch on it. The `'sagebrush'` branch leaves `MPZ = int`, so `MPZ_TYPE` is `int`. That keeps `mpf.man`, the raw tuples' mantissas, pickles and `isinstance(man, int)` exactly as upstream's python backend has them, which SymPy's evalf, user code and §6.1's tuple comparator rely on. Pickles made in Sagebrush must load in CPython's mpmath 1.3.0, and the other way round; Phase 2's conformance list checks both directions.
+- **Mantissas stay Python ints.** The `'sage'` branch also sets `MPZ = sage.Integer`, and the pickling helpers branch on it. The `'sagebrush'` branch leaves `MPZ = int`, so `MPZ_TYPE` is `int`. That keeps `mpf.man`, the raw tuples' mantissas, pickles and `isinstance(man, int)` exactly as upstream's python backend has them, which SymPy's evalf, user code and §6.1's tuple comparator rely on. Pickles made in Sagebrush must load in CPython's mpmath 1.3.0, and the other way round; the merged Phase 1's conformance list (§4.6) checks both directions.
 - **What ships is the effective source.** pypi-import applies the patch when the package is imported into the tree (`packages/pypi-mpmath/py`) and records the three hash sets, and `--check` re-derives them. The runtime never patches anything. Whether the patch file itself ships is a size question (python's view: it doesn't need to).
 - **Where the ABI comes from.** The ABI that `_sagebrush_mpcore` implements is derived only from mpmath's own BSD-licensed call sites in these branches and its pure-Python reference functions. Sage's `sage/libs/mpmath` (GPL) is never read for signatures or semantics; Sage is a black-box oracle only.
 - **Ownership.** python's lane owns the overlay mechanism as a Phase 0/1 deliverable: the patch file, the wheel, patch and effective-source hashes, `pypi-import --check`, failing closed (@sagebrush's ruling). The patch lives in `packages/pypi-mpmath/` next to the wheel pin, and its hashes are recorded in the package's `sagebrush.json`. A new upstream version means the patch is reviewed again, never applied with fuzz.
@@ -163,7 +163,7 @@ The exact ABI and the numeric thresholds are Phase 0 decisions. These invariants
 1. **Sizes are checked before allocation.** Precision, exponent, matrix dimension and limb count are each checked against the session's limits, and the arithmetic that sizes a buffer is checked for overflow, before anything is allocated. A request over a limit is refused with the limits' usual error.
 2. **Every allocation is charged and bounded.** WebAssembly linear memory, native heap and retained caches (constants per precision, quadrature nodes, Bernoulli numbers) are charged to the session's memory accounting. Each cache is per session, with a stated bound and an eviction rule.
 3. **Ownership.**
-   - Handles to core-resident numbers are owned: each has exactly one owner, and is freed when that owner is collected or the session ends.
+   - Handles to core-resident numbers are owned: each has exactly one owner, and is freed when that owner is collected or the session ends. A `FinalizationRegistry` may free them earlier, but it isn't the release mechanism the contract relies on: session end frees everything.
    - Every buffer span passed across the boundary is validated (offset, length, alignment, inside linear memory) on the core's side before use.
    - A stale or forged handle is an error, never a read.
 4. **Cancellation everywhere.** The interrupt flag is polled in every loop that can run long. That includes conversions (text to number at a million digits), series summation, quadrature and Ziv's retries in the CR policy. Cancellation also reaches the long loops that stay in Python: hypsum's retries at higher working precision go through the same interrupt check.
@@ -174,19 +174,23 @@ These invariants get tests in the same PR as the code they govern: a refusal at 
 ### 4.6 The boundary between Python and Rust, phase by phase
 
 Results stay bit-identical (§6) because each phase moves only code whose observable contract can be stated and tested exactly:
-- **Phase 1: `libmp` functions, one for one.** Same names, signatures, raw-tuple arguments and return values, rounding modes, and exceptions (types and messages). Their Python callers don't change.
-- **Phase 2: the context and the `mpf` and `mpc` types.**
+- **Phase 1 (merged in r5), part 1: `libmp` functions, one for one.** Same names, signatures, raw-tuple arguments and return values, rounding modes, and exceptions (types and messages). Their Python callers don't change.
+- **Phase 1 (merged in r5), part 2: the context and the `mpf` and `mpc` types.**
   - The contract is `PythonMPContext`'s observable behaviour: the attributes (`_mpf_`, `_mpc_`, `man`, `exp`, `real`, `imag` and the rest), and the precision and rounding read from the context at each operation.
   - Every result has the same type (`mpf`, `mpc`, `constant`, or `NotImplemented` for foreign operands), and errors raise the same exceptions.
   - Pickling, hashing (equal hashes with equal `int`, `float` and `Fraction` values), and comparison with other types all behave the same.
-  - A conformance list generated from `ctx_mp_python`'s public surface is checked alongside the suite.
+  - A conformance list generated from `ctx_mp_python`'s public surface is checked alongside the suite. It gates the merged Phase 1; it isn't deferred.
+  - **The hybrid number (Phase 0's finding).** The predicate is on the raw tuple's mantissa, which is unsigned (the sign is the tuple's separate `sign`, and `mpf.man` is `_mpf_[1]`): a number with `0 <= man < 2^53` is held inline, and one with `man >= 2^53` as an owned handle to a number resident in the core (§4.5). The sign never decides the storage, and the fuzzer pins both signs at mantissas 2^53 - 1, 2^53 and 2^53 + 1 (§6.1). Storage is never observable (python's R1):
+    - every observable value (`mpf.man`, `._mpf_`, `mpc._mpc_`, the `libmp` raw tuples, pickles) is a plain Python `int` tuple, identical to the python backend's;
+    - `type(x.man) is int`;
+    - `x._mpf_ is x._mpf_` holds, as upstream's: the tuple is materialized once per object and kept.
 - **Phase 3: `hypsum_internal`.** It is pure numerics, with no callbacks. It replaces the summators that `libhyper` generates, one for one: the same arguments, the same `(result, magnitude)` and the same `NoConvergence`.
 - **Phase 4: calculus.** User functions are callbacks, so **every loop that calls user code stays in mpmath's Python**. That covers quadrature's levels and intervals, `findroot`'s iterations, and `nsum`'s and `nprod`'s term loops. They call `f` at the same points, in the same order, under the same precision context, and exceptions propagate unchanged. The core takes only the callback-free parts:
   - tanh-sinh and Gauss-Legendre nodes and weights;
   - the weighted sums of values already computed (`fdot`, `fsum`);
   - the extrapolation tables (Richardson, Shanks, Levin) over numeric sequences.
 
-  The core is never re-entered from a callback in the middle of a kernel. `findroot` moves nothing into the core and gets faster from Phases 1 and 2 alone.
+  The core is never re-entered from a callback in the middle of a kernel. `findroot` moves nothing into the core and gets faster from Phase 1 alone.
 - **Phase 5: matrices.** There are no callbacks.
   - **The kernel's job.** The kernel takes a dense snapshot of a matrix's entries as raw tuples. It runs the same sequence of operations, in the same order and at the same working precision, as mpmath's Python, operation for operation (the precedent is `kernels/src/eigen.rs`), and returns tuples.
   - **What stays in mpmath's Python.** The wrappers keep their signatures, the `_LU` cache, and the exact exceptions, such as `ZeroDivisionError('matrix is numerically singular')`.
@@ -205,8 +209,8 @@ SymPy's numerics reach mpmath through `mpmath.libmp`'s raw functions and the `mp
 
 | Today | Size | Tier | Lands in the core as | Deleted |
 |---|---|---|---|---|
-| mpmath `libmp/` (`libmpf`, `libmpc`, `libelefun`, `libintmath`, `gammazeta`, `libhyper`, `libmpi`) | 8,705 lines of Python | MP, interval | number type, arithmetic, elementary functions, series, gamma and zeta | the backend branches stop running from Phase 1 (the Python stays as the rollback path); the modules leave the tree in Phase 6 |
-| mpmath `ctx_mp_python.py` (`mpf`, `mpc`, `PythonMPContext`) | 1,149 lines | MP | the native `Context` (Phase 2) | Phase 6 |
+| mpmath `libmp/` (`libmpf`, `libmpc`, `libelefun`, `libintmath`, `gammazeta`, `libhyper`, `libmpi`) | 8,705 lines of Python | MP, interval | number type, arithmetic and elementary functions (`libmpf`, `libmpc`, `libelefun`, `libintmath`) in Phase 1; series, gamma and zeta (`libhyper`, `gammazeta`) in Phase 3; intervals (`libmpi`) in Phase 6 | each module's backend branches stop running in its phase (the Python stays as the rollback path); the modules leave the tree in Phase 6 |
+| mpmath `ctx_mp_python.py` (`mpf`, `mpc`, `PythonMPContext`) | 1,149 lines | MP | the native `Context` (Phase 1, merged in r5) | Phase 6 |
 | mpmath `calculus/`, `matrices/`, `functions/` | 6,711 + 5,012 + 10,652 lines | MP | inner loops in Phases 3 to 5; the rest is ported as our Python API in Phase 6 | the duplicated loops leave the tree in Phase 6 |
 | `lib/_sage_real.py`: `RealField`, `ComplexField`, `RealIntervalField`, `N()` | 4,927 lines in all, including about 330 of fixed-point elementary functions and constants, 130 of gamma, 200 of rounding, and 1,415 in the `RealNumberMP` class | CR, BALL | Sage's elements wrap the core's number type; their functions use the CR policy (Ziv) over the core's kernels | Phase 3: the fixed-point functions, gamma, Bernoulli, the rounding helpers, and the arithmetic inside `RealNumberMP`. Sage's printing, parsing and coercion stay, because they are Sage semantics, not numerics |
 | `engine/ball` (`Ball`, `Mag`, ball elementary functions, Li2, Ti2, Bernoulli) | 2,149 lines of Rust | BALL | the core's BALL policy; the dilogarithm and inverse tangent integral become core kernels with proven bounds | Phase 6, once `engine/ap`'s heights and the certificates call the core |
@@ -255,7 +259,7 @@ These are not this design's work, and they need a ruling of their own:
   - Each system's documented outputs (error estimates, evaluation counts, warnings) must stay its own.
   - The shared rule tables and the iteration step could be one implementation under three front ends.
 
-I propose a separate, short "F64 tier" design. Its main question is whether the no-WebAssembly fallback (`SAGEBRUSH_NO_WASM`) is still needed. If it isn't, each twin can go.
+I propose a separate, short "F64 tier" design. William's O2 decision (§10) settles its main question: the no-WebAssembly fallback (`SAGEBRUSH_NO_WASM`) isn't needed, so each twin can go.
 
 ## 6. Phases
 
@@ -272,12 +276,11 @@ Every phase has these, in addition to its own targets:
 
 | Phase | What | Targets: ratios of medians to a named paired baseline (§6.3): `SB` is Sagebrush at the phase's base master, `CG` is CPython 3.14 with mpmath 1.3.0 and gmpy, `PY` is Pyodide; seconds from the Nov 9 report only for orientation | Size budget | Go / kill |
 |---|---|---|---|---|
-| **0. Spike** (nothing ships) | The crate's skeleton with `mpf_add`/`mpf_mul`, and three bindings measured on the per-operation microbenchmark: (i) direct wasm exports with an i64 fast path and limbs in memory; (ii) handles to wasm-resident numbers; (iii) today. The benchmark harness's browser driver is repaired, so that Sagebrush has a Chromium column next to Pyodide's. | Small operations: `mpf + mpf` and `mpf * mpf` at dps 15 and 30, called from mpmath's Python, at most 1.5 microseconds each, absolute (today 6.18 and 3.74 at dps 15), in Node **and** in Chromium. The high-precision multiply at dps 1000 (limbs) has its own gate: at most 1.25 times paired CPython + gmpy's median (about 2.48 microseconds there) and at most 1.0 times paired Sagebrush's. Every case includes allocation, handle lifetime and the transfer of operands and results | none shipped | **GO** only if both gates pass. For the small operations at dps 15 and 30: between 1.5 and 2.5 microseconds means **redesign**, and no Phase 1 ships; above 2.5, the per-operation WebAssembly approach is killed (§7, risk 1). A failed dps 1000 gate means **redesign** of the limb path only
-| **1. Arithmetic** | `normalize`, `from_man_exp`, `mpf_add/sub/mul/div/sqrt`, `mpc` arithmetic, and the integer helpers on the core, behind the overlay hook (O1) | Ratios to paired Sagebrush (`SB`): arith loop at most 0.33 x `SB` (about 0.10 s); complex loop at most 0.40 x `SB` (about 0.05 s); suite at most 0.70 x `SB` (about 150 s); every row at most 1.0 x `SB` | core +120 KB raw / +50 KB gzip (§6.2) | **Stop and rethink** if the macro isn't at most 0.67 x `SB` (about 3.5 s)
-| **2. Context and elementary functions** | The native `Context` with `mpf` and `mpc`; `mpf_exp/log/cos/sin/pow`, `exp_fixed`, `cos_sin_fixed` and the cached constants | arith loop at most 1.0 x paired CPython + gmpy (`CG`; about 0.07 s); `fp` loop at most 1.0 x `SB` (F64, unchanged); pi at 100k digits at most 0.65 x `SB` (about 0.04 s); macro at most 0.48 x `SB` (about 2.5 s) | +60 KB raw / +25 KB gzip (§6.2) | |
-| **3. Series, gamma, zeta; Sage CR** | `hypsum_internal`, gamma and log-gamma, zeta and Hurwitz zeta, Bernoulli numbers, the Riemann-Siegel kernels. Sage's `RealField` and `ComplexField` move onto the core, with proven bounds for the CR functions they use | hyp2f1 at most 1.0 x `CG` (about 0.015 s); gamma(1/3) at 1000 digits at most 1.0 x `CG` (about 0.68 s); zetazero(100) at most 1.0 x `CG` (about 0.10 s); Sage's `zeta(3).n(100)` agrees with the oracle | +80 KB raw / +35 KB gzip, net of its own deletions (§6.2) | **Stop** if any Sage pin changes its printed digits |
-| **4. Calculus** | Quadrature nodes and weights, weighted sums, extrapolation tables. The loops that call user functions stay in Python (§4.6) | quad at dps=50 at most 1.0 x `CG` (about 0.04 s); suite at most 0.37 x `SB` (about 80 s) | +40 KB raw / +17 KB gzip (§6.2) | |
-| **5. Matrices** | MP LU, QR, eigenproblems, SVD and inverse, operation for operation (§4.6) | 30x30 inverse at dps=30 at most 1.0 x `CG` (about 0.10 s) | +60 KB raw / +25 KB gzip, net of its own deletions (§6.2) | |
+| **0. Spike** (nothing ships; done, §6.4) | The crate's skeleton with `mpf_add`/`mpf_mul`, and three bindings measured on the per-operation microbenchmark: (i) direct wasm exports with an i64 fast path and limbs in memory; (ii) handles to wasm-resident numbers; (iii) today. The benchmark harness's browser driver is repaired, so that Sagebrush has a Chromium column next to Pyodide's. | Small operations: `mpf + mpf` and `mpf * mpf` at dps 15 and 30, called from mpmath's Python, at most 1.5 microseconds each, absolute (today 6.18 and 3.74 at dps 15), in Node **and** in Chromium. The high-precision multiply at dps 1000 (limbs) has its own gate: at most 1.25 times paired CPython + gmpy's median (about 2.48 microseconds there) and at most 1.0 times paired Sagebrush's. Every case includes allocation, handle lifetime and the transfer of operands and results | none shipped | Two separate gates. **Small operations (dps 15 and 30) gate Phase 1:** at most 1.5 microseconds is GO; between 1.5 and 2.5, **redesign**, and no Phase 1 ships; above 2.5, the per-operation WebAssembly approach is killed (§7, risk 1). **The dps 1000 multiply gates Phase 3 only:** failing it means **redesign** of the limb path, which must pass before Phase 3 starts (§6.4); it doesn't block Phase 1. Outcome (§6.4): small operations GO; the dps 1000 multiply failed and goes to the redesign
+| **1. Native types, arithmetic and elementary functions** (r5: the former Phases 1 and 2, merged by @sagebrush's Phase 0 ruling) | The native `Context` with the `mpf` and `mpc` types, holding the hybrid number (§4.6); `normalize`, `from_man_exp`, `mpf_add/sub/mul/div/sqrt`, `mpc` arithmetic and the integer helpers; `mpf_exp/log/cos/sin/pow`, `exp_fixed`, `cos_sin_fixed`, `log_int_fixed` and the cached constants; all behind python's overlay of the seven files (O1) | arith loop at most 1.0 x `CG` (about 0.07 s); complex loop at most 1.0 x `CG` (about 0.04 s); `fp` loop at most 1.0 x `SB` (F64, unchanged); pi at 100k digits at most 0.65 x `SB`; suite at most 0.70 x `SB`; macro at most 0.48 x `SB`; every row at most 1.0 x `SB`; `import mpmath` at most 1.0 x `SB` | core +80 KiB raw / +32 KiB gzip-9; glue at most 12 / 5 KiB; both hard no-ship ceilings (§6.2) | **Stop and rethink** if the macro isn't at most 0.67 x `SB`, or if the arith loop isn't at most 2.0 x `CG` |
+| **3. Series, gamma, zeta; Sage CR** | `hypsum_internal`, gamma and log-gamma, zeta and Hurwitz zeta, Bernoulli numbers, the Riemann-Siegel kernels. Sage's `RealField` and `ComplexField` move onto the core, with proven bounds for the CR functions they use | hyp2f1 at most 1.0 x `CG` (about 0.015 s); gamma(1/3) at 1000 digits at most 1.0 x `CG` (about 0.68 s); zetazero(100) at most 1.0 x `CG` (about 0.10 s); Sage's `zeta(3).n(100)` agrees with the oracle | +80 KiB raw / +35 KiB gzip, net of its own deletions (§6.2) | **Stop** if any Sage pin changes its printed digits |
+| **4. Calculus** | Quadrature nodes and weights, weighted sums, extrapolation tables. The loops that call user functions stay in Python (§4.6) | quad at dps=50 at most 1.0 x `CG` (about 0.04 s); suite at most 0.37 x `SB` (about 80 s) | +40 KiB raw / +17 KiB gzip (§6.2) | |
+| **5. Matrices** | MP LU, QR, eigenproblems, SVD and inverse, operation for operation (§4.6) | 30x30 inverse at dps=30 at most 1.0 x `CG` (about 0.10 s) | +60 KiB raw / +25 KiB gzip, net of its own deletions (§6.2) | |
 | **6. Our own mpmath** | The wheel is retired. The remaining high-level Python is ported (BSD notice kept) and compiled lazily; `engine/ball` and `libmpi` move onto the BALL policy | **Macro time at most 0.90 of paired CPython + gmpy's median** in Node, a measured win rather than a tie. In Chromium, at least 3 times faster than paired Pyodide. Suite time no slower than paired CPython + gmpy's (at worst, no regression from Phase 4). `import mpmath` no slower than paired Pyodide's | every row at most #927's baseline, everything counted (§6.2) | rollback is reverting the PR |
 
 Every target is a ratio to a baseline measured at the same time on the same machine (§6.3). The seconds in the table apply those ratios to the Nov 9 report, only for orientation: that report's total isn't a valid gate (§6.3, P2). PERF (daybreak4) owns the measurement.
@@ -297,18 +300,24 @@ Every target is a ratio to a baseline measured at the same time on the same mach
    Each run is its own sharded job of at most 10 minutes, like `pypi-tests/mpmath`. If the suite on the Python backend doesn't fit, it is split into shards rather than given a longer timeout.
 3. **The fuzzer.**
    - **The reference** is CPython with mpmath 1.3.0 on the **python** backend (not gmpy), pinned, with both versions recorded with every run.
-   - **The inputs** cover every operation the phase replaces, crossed with the five rounding modes and with precisions 2, 3, 53, 54, 113, 1000 and random ones up to 10^4 bits. Operands include exact ties at the rounding bit, +0 and -0, huge and tiny exponents, cancellation (a - b with a close to b), mantissas around 64 bits (the edge of the inline fast path), and the specials inf and nan.
+   - **The inputs** cover every operation the phase replaces, crossed with the five rounding modes and with precisions 2, 3, 53, 54, 113, 1000 and random ones up to 10^4 bits. Operands include exact ties at the rounding bit, +0 and -0, huge and tiny exponents, cancellation (a - b with a close to b), mantissas around 2^64 (the edge of the kernel fast path, §4.1), mantissas around 2^53 (the edge of the hybrid number's storage, §4.6), and the specials inf and nan.
    - **The runs.** A fixed-seed subset (about 10^4 cases, about a minute) runs in PR CI. The long run is nightly on sbpool and gates on correctness and case counts only.
    - **Failures.** Every failure is stored with its seed and a minimized case, which becomes a permanent pinned row.
-4. **Negative controls, before Phase 1's first kernel ships.** The suite plus the fuzzer's CI subset must catch each of these planted faults:
+4. **Negative controls, before Phase 1's first kernel ships.** The suite plus the fuzzer's CI subset must catch each of these planted faults, planted in **the binding that ships** (the type-level binding of §4.6, which bypasses more of mpmath's Python than a `libmp` swap), not only in the kernel. (Phase 0 ran the first one, floor and ceiling swapped, against the kernel: §6.4.)
    - one rounding mode swapped (floor and ceiling);
    - round-half-even off by one at a tie;
    - the sign of a zero result lost;
    - `bc` off by one with `man` unchanged;
-   - the inline 64-bit path's carry dropped;
-   - `normalize` not stripping trailing zeros.
+   - the kernel fast path's carry dropped (mantissas up to 64 bits, §4.1);
+   - `normalize` not stripping trailing zeros;
+   - in the limb path, which Phase 1 already ships: a carry or borrow dropped at a limb boundary, or the Karatsuba/Toom split off by one at its threshold. The fuzzer's CI subset pins rows at the multiplication threshold, one limb below it and one limb above it.
 
    A planted fault that passes means the oracle is too weak, and the phase doesn't ship until it isn't. TESTS also mutates each phase's kernels independently.
+   - **What the merged Phase 1 adds to the fuzzer and the suite's coverage:**
+     - `mpf` and `mpc` construction;
+     - the methods the native type takes over: `__add__`, `__mul__` and the rest of the arithmetic, comparisons, hashing, and pickling in both directions;
+     - the hybrid number's boundary: mantissas of exactly 2^53 - 1, 2^53 and 2^53 + 1, with both signs, as operands and as results;
+     - handle lifetime: results kept and dropped across collections and the `FinalizationRegistry`, a stale handle refused, and everything freed at session end (§4.5).
 5. **CR and BALL have oracles of their own.**
    - **CR (Phase 3 on):** results are compared with the Sage oracle (MPFR) in every rounding direction. The points are random and adversarial, including the published hardest-to-round cases for exp, log and sin.
    - **BALL (Phase 6):** containment is checked against an MP evaluation at twice the precision and against Sage's `RealIntervalField`. The radius must stay within a stated factor of the true error.
@@ -316,10 +325,12 @@ Every target is a ratio to a baseline measured at the same time on the same mach
 6. **Interrupt and limits.** That `mp.dps = 10**7` can be stopped is pinned with the deterministic Stop seam, never by elapsed time. Each long loop's limit refusal is registered in the limits census (§4.5).
 7. **Speed and determinism.**
    - perf.py's targets are measured and reported by PERF and never asserted in CI. The go/kill lines are read from PERF's reports.
-   - Determinism (§7.5) is a test: the fuzzer's CI subset also runs in Chromium, one Chromium job per box, and its tuples must be byte-identical to Node's.
+   - Determinism (§7.5) is a test: the fuzzer's CI subset also runs in Chromium, one Chromium job per box, and its tuples must be byte-identical to Node's. The fixed differential corpus (Phase 0's 49,989 cases, regenerated from mpmath 1.3.0) runs in both as well.
 8. **No self-comparison.** The MP core is never compared with its own earlier output. Every phase's oracle is CPython's mpmath, plus Sage for CR, and never the previous phase's Sagebrush results. Likewise, the F64 tier's oracle stays upstream mpmath on CPython (§5.2).
 
 ### 6.2 Size budgets (SIZE)
+
+Every size in this section is in KiB (1 KiB = 1,024 bytes), raw or gzip-9 as stated.
 
 **The baseline, B927.** These are #927's shipped rows. They come from #927's growth marker, measured with bun 1.4.4 on master 0291bcd9, and from the browser chunk built at 4ebb525b:
 - the browser's lazy chunk `pkg-pypi-mpmath.src`: 2,005,054 bytes raw, 495,350 gzip-9;
@@ -328,7 +339,7 @@ Every target is a ratio to a baseline measured at the same time on the same mach
 - `engine/sagebrush-notebook.js`: +48;
 - `cli/lib.gen.js`: +2,153.
 
-Phase 0 re-records all of B927 with the size gate's own tools (raw and gzip for every row, plus the offline inventory and the CLI's install size), at the same path and with the same toolchain. Every cap below is checked against that record.
+B927 is re-recorded with the size gate's own tools (raw and gzip for every row, plus the offline inventory and the CLI's install size), at the same path and with the same toolchain. This is the last Phase 0 item: a pre-implementation input, due before the merged Phase 1's PR opens (@sagebrush's explicit ruling on r6). Every cap below is checked against that record.
 
 **What ships.**
 - **One core asset.** It is content-addressed and lazy, shared by the web editor, the CLI and the offline inventory. The native packaging compiles the same crate. A check fails the build if the asset is copied into more than one web chunk, or embedded in the worker's or the notebook's startup.
@@ -338,12 +349,20 @@ Phase 0 re-records all of B927 with the size gate's own tools (raw and gzip for 
 
 | Phase | Core asset (phase / cumulative), raw / gzip | Glue, cumulative raw / gzip | Worker / notebook (phase, cumulative) |
 |---|---|---|---|
-| 1 | +120 / +50 KB (120 / 50) | 10 / 4 KB | at most +1 KB each in the phase, +3 KB each cumulatively |
-| 2 | +60 / +25 KB (180 / 75) | 12 / 5 KB | the same |
-| 3 | +80 / +35 KB (260 / 110) | 14 / 5 KB | the same |
-| 4 | +40 / +17 KB (300 / 127) | 15 / 6 KB | the same |
-| 5 | +60 / +25 KB (360 / 152) | 16 / 6 KB | the same |
+| 1 (merged) | +80 / +32 KiB (80 / 32) | 12 / 5 KiB | at most +1 KiB each in the phase, +3 KiB each cumulatively |
+| 3 | +80 / +35 KiB (160 / 67) | 14 / 5 KiB | the same |
+| 4 | +40 / +17 KiB (200 / 84) | 15 / 6 KiB | the same |
+| 5 | +60 / +25 KiB (260 / 109) | 16 / 6 KiB | the same |
 | 6 | see below | | |
+
+**Why the merged Phase 1's numbers, and not the old ones.** r4 allowed Phase 1 120 / 50 KiB and Phase 2 60 / 25 KiB, 180 / 75 KiB together. r5 doesn't inherit that sum: it is one cap, set from Phase 0's measurements.
+- **Arithmetic.** The spike's module, measured, is 42,999 bytes raw and 16,829 gzip-9. That covers the arithmetic (u128 and limb paths, the 28-bit SIMD product) plus the handle store and a profiling export that won't ship.
+- **Elementary functions and constants.** `exp`, `log`, `cos`/`sin`, `atan`, `pow` and the constants are ported from `libelefun` (1,428 lines of Python). They are estimated at no more than 35 KiB raw.
+- **The cap.** 80 / 32 KiB covers both with the slack of one estimate, not two.
+- **Hard no-ship ceilings** (@sagebrush's ruling on r6): the merged Phase 1's core cap (80 KiB raw / 32 KiB gzip-9) and its glue cap (12 KiB raw / 5 KiB gzip-9) are ceilings, not estimates. If the measured Phase 1 PR exceeds either one, raw or gzip-9, the phase doesn't ship. It either cuts to fit, or a new design PR re-justifies the cap with measurements.
+- **The glue.** The spike's runtime binding is 5,796 bytes raw and 2,083 gzip for add, sub and mul plus the handles. The native type adds comparisons, hashing, conversions, pickling and `mpc`, so the glue keeps r4's cumulative 12 / 5 KiB as a ceiling, not an entitlement.
+
+Each later phase keeps its r4 increment. Their cumulative totals drop by the 100 / 43 KiB that the merge took out.
 
 **Each phase's gate reports:**
 - the core asset's raw and gzip size;
@@ -355,9 +374,9 @@ Phase 0 re-records all of B927 with the size gate's own tools (raw and gzip for 
 
 **The temporary duplicate stack, through Phase 5.** The pinned wheel keeps its own pure-Python `libmp` while the core replaces it. That is an explicit, time-bounded exception to the one-implementation rule:
 - **Cost.** The rollback adds no bytes of its own: it is the wheel, which ships anyway until Phase 6, because mpmath's high-level Python needs it.
-- **Maximum footprint.** The most the stack can reach is B927 + 360 KB raw / 152 KB gzip of core + 16 KB / 6 KB of glue.
+- **Maximum footprint.** The most the stack can reach is B927 + 260 KiB raw / 109 KiB gzip of core + 16 KiB / 6 KiB of glue.
 - **Retirement point.** The exception ends with Phase 6, which deletes the wheel and with it the Python `libmp`.
-- **Stop condition.** If Phase 6 hasn't merged within 10 weeks of Phase 1's merge, the migration stops. @sagebrush then rules between landing a reduced Phase 6 (retiring the Python `libmp` alone, with a pinned overlay of the remaining modules) and reverting Phases 1 to 5.
+- **Stop condition.** If Phase 6 hasn't merged within 10 weeks of the merged Phase 1's merge (the clock starts there, and no earlier), the migration stops. @sagebrush then rules between landing a reduced Phase 6 (retiring the Python `libmp` alone, with a pinned overlay of the remaining modules) and reverting Phases 1 to 5.
 
 **The Phase 6 final cap.** Everything is counted: the replacement Python module, the shared core, the bindings, the notices and every packaged copy (web chunk, CLI blob, offline inventory). The total must be **at most B927 in every row, raw and gzip**, with a target of 15% below. The upstream tests move to a test-only chunk that users never load. The deletions of Sage's and the ball code's duplicates (§5.1) come on top of this cap, never instead of it.
 
@@ -384,6 +403,25 @@ Phase 0 re-records all of B927 with the size gate's own tools (raw and gzip for 
 
    The final import target is at most paired Pyodide's: the Nov 9 report has `import mpmath` at 1.6 s on Sagebrush against 0.59 s on Pyodide.
 
+### 6.4 Phase 0: what the spike showed (done)
+
+The packet is frozen at `/scratch/sage2-notes/mpcore/phase0-packet`. PERF's paired re-measurement on an idle VM is frozen at `/scratch/sagebrush-reviews/phase0-perf-a0e2a0aa-daybreak4/`. Nothing from the spike ships.
+
+- **Exactness.** The spike's Rust port of `normalize`, `mpf_add`, `mpf_sub` and `mpf_mul` gave raw tuples bit-identical to CPython's mpmath 1.3.0 (python backend) on 49,989 random cases in all five rounding modes. A planted floor/ceiling swap was caught (4,748 mismatches).
+- **Small operations: GO.**
+  - A native `mpf.__add__`/`__mul__` calling the WebAssembly core: PERF's worst median was 1.03 µs (Chromium, dps 30 multiply).
+  - Handles: at most 0.75 µs.
+  - All under the 1.5 µs line in Node and Chromium.
+- **What doesn't reach the line.** Replacing only the `libmp` functions gave about 2.3 µs per add, because most of today's cost is mpmath's Python `mpf.__add__` and object creation. That is why r5 merges Phases 1 and 2 (@sagebrush's ruling).
+- **The dps 1000 multiply: redesign the limb path, no kill.**
+  - PERF measured 6.51 to 6.60 µs with handles, against paired `CG` at 2.11 to 2.15 µs: about 3.09 `CG`. It fails the 1.25 `CG` gate and passes 1.0 `SB` (0.76 in Node, about 0.97 in Chromium).
+  - WebAssembly has no 64x64-to-128-bit multiply, so the spike's SIMD product works on 28-bit digits, and its fixed-size number type made Karatsuba slower, not faster.
+  - **A gate before Phase 3:** the real crate's limb path (allocation-free buffers, in-place Karatsuba or Toom-3 with scratch, a tuned SIMD basecase) is re-measured by PERF against the 1.25 `CG` and 1.0 `SB` gates at dps 1000. Phase 3 doesn't start until it passes, or until @sagebrush rules on a reported shortfall. Phase 1 already runs the limb path (elementary functions at high precision, pi to 100k digits), but only against its own gates: correctness, limits, interrupts, and ratios to `SB`. Phase 3 has the first rows with a `CG`-relative target at 1000 digits (gamma and zeta), and those need the redesigned path.
+- **Still due from Phase 0, before r5 merges:**
+  - the `perf.py` repair (PR #942);
+  - the like-for-like Pyodide column: Pyodide 314.0.7 in the same Chromium, with mpmath 1.3.0 loaded from Sagebrush's pinned copy. Its driver and a first, loaded-host run are frozen at `/scratch/sage2-notes/mpcore/phase0-addendum` (every `perf.py` digest identical on both), for PERF to measure on an idle VM.
+- **Due before the merged Phase 1's PR opens:** B927 re-recorded (§6.2).
+
 ## 7. Risks
 
 1. **The cost of crossing into wasm.** If no binding reaches Phase 0's line, per-operation arithmetic can't live in WebAssembly. The fallback is to put the number type in the pyjs runtime itself (TypeScript on its own BigInt ints), with Rust taking only whole loops (Phases 3 to 5). That would be a binding, not a second implementation of the algorithms. Even so, it needs William's OK, because it puts numerics in TypeScript.
@@ -406,8 +444,7 @@ ENGINE (daybreak3), SEC (astra), TESTS (grader), PERF (daybreak4), SIZE (daybrea
 ## 10. Open questions
 
 - **O1.** Ruled by @sagebrush on Nov 9: a pinned overlay of the seven guarded files under the Sagebrush-owned `_sagebrush_mpcore`, with no impersonation (§4.3). python owns the mechanism. The full hunk list is part of Phase 1's PR, for python and SEC.
-- **O2.** Whether the no-WebAssembly fallback is still needed. This is with William. The design fits either answer:
-  - **No:** the MP core has no fallback at all, and the F64 twins in §5.3 can go.
-  - **Yes:** without WebAssembly, mpmath runs on the upstream Python backend, which is selected at startup exactly as the rollback is (§4.3), and Sage's and Magma's reals keep working through it. No second implementation of the core is written.
-    - **This is not a silent fallback.** Choosing the Python backend here is a capability decision, taken before any attempt to load the core (this host has no WebAssembly), and it is visible: `mpmath.libmp.BACKEND == 'python'`. A core that fails to load on a host that has WebAssembly still raises (§4.3).
+- **O2.** Decided by William on Nov 9 (afternoon, PST): there is no pure mode without WebAssembly or a native module. In his words: "you can always use wasm or n-api." So:
+  - **The MP core has no fallback implementation.** In the browser and the Node CLI it runs as WebAssembly; natively it runs through N-API or `sagebrush._native`. The upstream Python backend remains only as the time-bounded rollback through Phase 5 (§4.3, §6.2), selected explicitly in a fresh session, never as a capability fallback.
+  - **The F64 twins that exist only so results are identical with and without WebAssembly** (§5.3: `src/runtime/numpy_linalg.ts` against `kernels/src/eigen.rs`, and the JavaScript side of each `kernels/` kernel) can go. That cleanup belongs to the separate F64-tier design (§5.3), not to this one.
 - **O3.** Whether `mpmath.fp`, mpmath's double-precision context, should call `lib/_special.py` so that the F64 tier also has one implementation. Today `fp` runs mpmath's own double-precision Python. This would change last bits against upstream, so it belongs after Phase 5.

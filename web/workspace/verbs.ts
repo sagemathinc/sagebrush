@@ -23,7 +23,7 @@ export const MAX_HISTORY = 100;
 const path = { type: "string", minLength: 1, maxLength: 1024, pattern: "^/", description: "A workspace path: absolute, \"/\"-separated" };
 // a document's content (a notebook's {cells, ...} or a board's JSON), or a data file's bytes as text or base64
 const content = {
-  description: "A notebook's document ({cells: [...]}) or a board's JSON as {json}; a data file's bytes as {text} (UTF-8) or {base64}",
+  description: "A notebook's document ({cells: [{code, type?: \"markdown\" | \"raw\"}]}; Jupyter nbformat cells are converted) or a board's JSON as {json}; a data file's bytes as {text} (UTF-8) or {base64}",
   oneOf: [
     { type: "object", required: ["json"], properties: { json: { type: "object" } }, additionalProperties: false },
     { type: "object", required: ["text"], properties: { text: { type: "string" } }, additionalProperties: false },
