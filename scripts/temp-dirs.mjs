@@ -5,7 +5,10 @@
 // variable made from one; the repository (import.meta, __dirname, process.cwd(), or a variable made from one); or
 // unknown (a parameter, say), which the census can't place and counts.  A call rooted in the repository fails unless
 // it is an allowance: its file, its dir's name prefix, and why it must be in the tree.  Each allowance is dot-named,
-// so d11's copy skips it, and each must still match a call (a stale one fails).
+// so d11's copy skips it, and each must still match a call (a stale one fails).  The calls are found by name and
+// through the file's node:fs and node:fs/promises bindings (import or require: a named alias, a namespace or default,
+// .promises); a use of such a binding the census can't follow (passed on, aliased, indexed, a bare require("fs"))
+// fails, so a refactor can't hide a call from it.
 //   node scripts/temp-dirs.mjs        (prints the census; exits 1 on a problem)
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -45,7 +48,46 @@ export const UNPLACED = {
 // (the web/ tests: test-*.mjs/js/ts and *.test.*, helpers named test-* included)
 export const isTest = (f) => /^web\//.test(f) && /(^|\/)(test-[^/]*|[^/]*\.test)\.(mjs|js|ts|mts)$/.test(f);
 
+const DIR = ["mkdtempSync", "mkdtemp", "mkdirSync", "mkdir"], PDIR = ["mkdtemp", "mkdir"];
 const CALL = /(?<![\w$.])(?:(?:fs|fsp|promises)\.)?(mkdtempSync|mkdtemp|mkdirSync|mkdir)\s*\(/g;
+const FS = /^(?:node:)?fs(\/promises)?$/, ID = /^[A-Za-z_$][\w$]*$/;
+// (comments and template literals blanked (`blank(src, false)`), or every string too (`blank(src, true)`); line
+// numbers and offsets kept)
+const LEX = /\/\*[\s\S]*?\*\/|\/\/[^\n]*|`(?:[^`\\]|\\.)*`|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g;
+const blank = (src, strings) => src.replace(LEX, (m) => (strings || m[0] === "/" || m[0] === "`" ? m.replace(/[^\n]/g, " ") : m));
+
+// (the file's node:fs bindings: names: local -> the operation; ns: namespaces and defaults of node:fs; pns: of
+// node:fs/promises, and node:fs's promises; decls: the spans of the declarations themselves)
+export function fsBindings(src) {
+  const code = blank(src, false), names = new Map(), ns = new Set(), pns = new Set(), decls = [];
+  const bind = (whole, promises) => (whole ? (promises ? pns : ns).add(whole) : null);
+  const named = (list, promises, sep) => {
+    for (const part of list.split(",").map((x) => x.trim()).filter(Boolean)) {
+      const [name, local = name] = part.split(sep).map((x) => x.trim());
+      if (!ID.test(local)) continue;
+      if (!promises && name === "promises") pns.add(local);
+      else if ((promises ? PDIR : DIR).includes(name)) names.set(local, name);
+    }
+  };
+  for (const m of code.matchAll(/\bimport\s+([\w$\s,*{}]*?)\s*from\s*["']([^"']+)["']/g)) {
+    const f = FS.exec(m[2]);
+    if (!f) continue;
+    decls.push([m.index, m.index + m[0].length]);
+    const clause = m[1], braces = /\{([^}]*)\}/.exec(clause), star = /\*\s*as\s+([\w$]+)/.exec(clause), def = /^\s*([\w$]+)\s*(?:,|$)/.exec(clause);
+    if (braces) named(braces[1], !!f[1], /\s+as\s+/);
+    if (star) bind(star[1], !!f[1]);
+    if (def) bind(def[1], !!f[1]);
+  }
+  for (const m of code.matchAll(/\b(?:const|let|var)\s+(\{[^}]*\}|[\w$]+)\s*=\s*(?:await\s+)?(?:require|import)\(\s*["']([^"']+)["']\s*\)/g)) {
+    const f = FS.exec(m[2]);
+    if (!f) continue;
+    decls.push([m.index, m.index + m[0].length]);
+    if (m[1].startsWith("{")) named(m[1].slice(1, -1), !!f[1], /\s*:\s*/);
+    else bind(m[1], !!f[1]);
+  }
+  return { names, ns, pns, decls };
+}
+
 const TMP = [/^(?:os\.)?tmpdir\(\)/, /^process\.env\.TMPDIR\s*\|\|\s*(?:os\.)?tmpdir\(\)/, /^["'`]\/tmp\//, /^(?:join|resolve)\(\s*(?:os\.)?tmpdir\(\)/,
   /^(?:join|resolve)\(\s*process\.env\.TMPDIR\s*\|\|\s*(?:os\.)?tmpdir\(\)/];
 // (the repository: an expression that reaches import.meta, __dirname or process.cwd())
@@ -93,20 +135,46 @@ export function classify(src) {
       if (k === "repo" && !repo.has(v) && !tmp.has(v)) (repo.add(v), changed = true);
     }
   }
-  const calls = [];
-  for (const m of code.matchAll(CALL)) {
-    const arg = firstArg(code, m.index + m[0].length), line = code.slice(0, m.index).split("\n").length;
-    calls.push({ fn: m[1], line, arg, kind: kind(arg) });
+  const calls = [], at = new Set(), lineOf = (i) => code.slice(0, i).split("\n").length;
+  const push = (fn, i, open) => {
+    if (at.has(i)) return;
+    at.add(i);
+    const arg = firstArg(code, open);
+    calls.push({ fn, line: lineOf(i), arg, kind: kind(arg) });
+  };
+  for (const m of code.matchAll(CALL)) push(m[1], m.index, m.index + m[0].length);
+  // (through the file's node:fs bindings: a named alias, ns.op(, ns.promises.op(, pns.op()
+  const { names, ns, pns, decls } = fsBindings(src), esc = (x) => x.replace(/\$/g, "\\$");
+  for (const [local, fn] of names) for (const m of code.matchAll(new RegExp(`(?<![\\w$.])${esc(local)}\\s*\\(`, "g"))) push(fn, m.index, m.index + m[0].length);
+  for (const n of ns) for (const m of code.matchAll(new RegExp(`(?<![\\w$.])${esc(n)}\\s*\\.\\s*(?:(${DIR.join("|")})|promises\\s*\\.\\s*(${PDIR.join("|")}))\\s*\\(`, "g"))) push(m[1] ?? m[2], m.index, m.index + m[0].length);
+  for (const n of pns) for (const m of code.matchAll(new RegExp(`(?<![\\w$.])${esc(n)}\\s*\\.\\s*(${PDIR.join("|")})\\s*\\(`, "g"))) push(m[1], m.index, m.index + m[0].length);
+  // (fail closed: a use of a binding that isn't a call or a member (ns.x, ns.promises.x, pns.x), outside strings and
+  // its own declaration, and a require("fs")/import("fs") that isn't a declaration the census reads)
+  const bare = blank(src, true), inDecl = (i) => decls.some(([a, b]) => i >= a && i < b);
+  const opaque = (i, what) => calls.push({ fn: "fs", line: lineOf(i), arg: what, kind: "opaque" });
+  for (const local of names.keys()) for (const m of bare.matchAll(new RegExp(`(?<![\\w$.])${esc(local)}(?![\\w$])(?!\\s*\\()`, "g"))) if (!inDecl(m.index)) opaque(m.index, `${local}, not called`);
+  for (const n of ns) for (const m of bare.matchAll(new RegExp(`(?<![\\w$.])${esc(n)}(?![\\w$])(?!\\s*\\.\\s*(?!promises(?![\\w$]))[\\w$]|\\s*\\.\\s*promises\\s*\\.\\s*[\\w$])`, "g"))) if (!inDecl(m.index)) opaque(m.index, `${n}, not a member`);
+  for (const n of pns) for (const m of bare.matchAll(new RegExp(`(?<![\\w$.])${esc(n)}(?![\\w$])(?!\\s*\\.\\s*[\\w$])`, "g"))) if (!inDecl(m.index)) opaque(m.index, `${n}, not a member`);
+  // (an inline load, (await import("node:fs")).x or require("fs").x, is read as a namespace's member)
+  for (const m of blank(src, false).matchAll(/\b(?:require|import)\(\s*["'](?:node:)?fs(\/promises)?["']\s*\)/g)) {
+    if (inDecl(m.index)) continue;
+    const tail = /^(?:\s*\))?\s*\.\s*([\w$]+)(?:\s*\.\s*([\w$]+))?\s*(\()?/.exec(code.slice(m.index + m[0].length)), end = m.index + m[0].length;
+    if (!tail) { opaque(m.index, m[0]); continue; }
+    const [whole, a, b, open] = tail, ops = m[1] ? PDIR : DIR;
+    if (ops.includes(a) && !b && open) push(a, m.index, end + whole.length);
+    else if (!m[1] && a === "promises" && PDIR.includes(b) && open) push(b, m.index, end + whole.length);
+    else if (a === "promises" && !m[1] && !b) opaque(m.index, m[0] + ".promises");
   }
-  return calls;
+  return calls.sort((a, b) => a.line - b.line);
 }
 
 export function census(files, read = (f) => readFileSync(join(ROOT, f), "utf8"), allowances = ALLOWANCES, unplaced = UNPLACED) {
-  const problems = [], used = new Set(), seen = new Set(), counts = { tmp: 0, repo: 0, unknown: 0, allowed: 0 };
+  const problems = [], used = new Set(), seen = new Set(), counts = { tmp: 0, repo: 0, unknown: 0, allowed: 0, opaque: 0 };
   for (const a of allowances) if (!/^\./.test(a.prefix) || !a.reason) problems.push(`allowance ${a.file} ${a.prefix}: must be dot-named (so d11's copy skips it) and give its reason`);
   for (const f of files) {
     for (const c of classify(read(f))) {
       if (c.kind === "tmp") { counts.tmp++; continue; }
+      if (c.kind === "opaque") { counts.opaque++; problems.push(`${f}:${c.line}: ${c.arg}: a node:fs binding the census can't follow (call it directly: name(...), ns.name(...), ns.promises.name(...))`); continue; }
       if (c.kind === "unknown") {
         const key = `${f} :: ${c.fn}(${c.arg})`;
         counts.unknown++, seen.add(key);
