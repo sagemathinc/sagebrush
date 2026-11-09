@@ -274,6 +274,7 @@
   html.phone .bar #runall, html.phone .bar #stop { flex: 1 0 auto; }
   /* (File and ⋯ always in view; what doesn't fit scrolls: the stale-cells button last) */
   html.phone .bar #add { order: 1; } html.phone .bar #filebtn { order: 2; } html.phone .bar #morebtn { order: 3; }
+  html.phone .bar #agentbtn { display: none; }
   html.phone .bar #wsfilesbtn { order: 4; } html.phone .bar #runstale { order: 5; }
   html.phone.typing .bar { display: none; }
   html.phone #writerbar, html.phone #timetravel .tthead { top: 0; }
@@ -391,6 +392,7 @@
     <button id="runstale" hidden title="Run the cells that are stale (left by the time limit, or manual)">Run stale</button>
     <span class="sp"></span>
     <select id="mode" aria-label="Language" title="Python mode: Python as it is, 2**3 is 8 and 2/3 is 0.666…"><option value="python">Python</option><option value="sage">Sage</option><option value="magma">Magma</option><option value="matlab">MATLAB</option></select>
+    <button id="agentbtn" hidden title="Connect an agent on this computer (Claude Code, Codex, …) to files you choose">Agent</button>
     <button id="filebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="filemenu" title="New, open, examples, download, upload and share notebooks">File ▾</button>
     <button id="morebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="moremenu" title="Text cells, the interpreter, files, console, TimeTravel, keys" aria-label="More">⋯</button>
   </div>
@@ -527,6 +529,9 @@
 // notebooks and files kept in this browser, the console, documentation search
 // and tools for agents.  web/build.ts bundles it, with web/notebook, into one
 // classic script, so the cells exist before the first paint.
+// (a ?pair= link, as an agent on this computer prints it: taken out of the address bar first, before anything reads
+// or reports the URL; the agent chunk, loaded later, is handed it)
+import { pairLink } from "./workspace/pair-link.ts";
 import { createNotebook, esc } from "./notebook/notebook.js";
 import { anchorOf, restoreAnchor } from "./notebook/anchor.js";
 import { DOC_INDEX, docHead, docWords, entryExamples, prepareIndex, searchIndex, searchIndexes } from "./docsearch.ts";
@@ -3872,6 +3877,25 @@ filesResize(wsSidebar);
 // (the LaTeX editor's split between its source and preview, for the editor this page hosts (latex/page.ts): from here,
 // so it isn't in the LaTeX bundles, which have a budget of their own)
 globalThis.__sbTexSplit = texSplit;
+// "Agent": an agent on this computer (Claude Code, Codex, … with sagebrush-mcp or sagebrush-agent) connected to this
+// page, to read and change the files the person allows: workspace/agent-ui.ts, in a chunk of its own
+// (/sagebrush-agent.js), fetched when Agent is pressed, a ?pair= link opened, or an agent remembered.  Not in the
+// desktop app or the CLI's page (a page on this computer, which the agent's program doesn't accept)
+const agentBtn = $("#agentbtn");
+let agentPairing = null, agentTries = 0;
+const pairAgent = (w) => (agentPairing ??= import(new URL("sagebrush-agent.js", location.href).href + (agentTries++ ? `?try=${agentTries}` : ""))
+  .then((m) => m.mountAgentPairing(w)))
+  .catch((e) => { agentPairing = null; throw e; });
+const agentFailed = () => { statusEl.textContent = "Couldn't load the agent connection. Press Agent to try again, or reload the page."; };
+// (started once the page knows it shows a notebook, not the LaTeX or code editor, which has its own: one pairing per
+// page; an early ?pair= link goes to the editor shown, pair-link.ts)
+const startNotebookAgent = () => { if (!LOCAL && !window.__TAURI__) void wsReady.then((w) => {
+  if (!w) return;
+  agentBtn.hidden = false;
+  agentBtn.onclick = () => void pairAgent(w).then((p) => p.connect(undefined, undefined, agentBtn), agentFailed);
+  if (pairLink()) void pairAgent(w).catch(agentFailed);
+  else void w.agentGrants().then((k) => { if (Object.keys(k ?? {}).length) void pairAgent(w).catch(agentFailed); }, () => {});
+}); };
 let wsBrowser = null;
 // (the notebook open here marked again: one opened, or listed)
 function wsTrackCurrent() { wsBrowser?.refresh(); }
@@ -4029,6 +4053,7 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && (await latexBoot(ws, RUNNER ? { WorkerKernel, RunnerWorker } : null))) return;
   // (a code or text file's own page, /?code=<fid> (1a): web/code/boot.ts; its hooks for the file browser and the preview either way)
   if (await codeBoot(ws, (e, how) => openEntry(e, how))) return;
+  startNotebookAgent();
   let mode = "python";
   try { mode = localStorage.getItem("sagebrush-mode") || mode; } catch {}
   // a shared link opens as a new notebook; else the last one; else the welcome

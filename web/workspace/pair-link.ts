@@ -19,7 +19,11 @@ function take(): PairLink | null {
   return link;
 }
 
-const link = take();
+// (one link per page: a chunk with its own copy of this module (the LaTeX editor's agent chunk, the notebook page's)
+// gets the link the page took first, by this key, as the URL no longer has it)
+const KEY = Symbol.for("sagebrush.pairLink");
+const g = globalThis as any;
+const link: PairLink | null = KEY in g ? g[KEY] : (g[KEY] = take());
 
 /** The pairing link this page was opened with, if any (the URL no longer shows it). */
 export function pairLink(): PairLink | null {

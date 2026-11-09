@@ -575,11 +575,16 @@ export class IdbStore {
     if (out.marked) return { marked: true };
     if (out.conflict) return { conflict: out.conflict };
     getChannel()?.postMessage({ from: tabId, id: this.id, doc: out.rec });
+    // (and to this tab's other stores of the notebook: a write through the workspace (an agent paired with this page,
+    // workspace.write) reaches the notebook shown here as another tab's would; never the store that saved it)
+    // (each on its own: one that throws is said and the rest still told; the save, already committed, still succeeds)
+    for (const f of channelSubs) if (f.store !== this) try { f({ from: tabId, id: this.id, doc: out.rec }); } catch (e) { console.warn("notebook store:", e); }
     return { saved: "saved in this browser", rev: out.rec.rev };
   }
   subscribe(f) {
     if (!getChannel()) return () => {};
     const g = (m) => { if (m.id === this.id) f(m.doc); };
+    g.store = this;
     channelSubs.add(g);
     return () => channelSubs.delete(g);
   }
