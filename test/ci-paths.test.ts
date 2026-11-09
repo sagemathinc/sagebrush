@@ -458,6 +458,24 @@ test("the full-tier-only jobs ci-paths promotes for are the jobs ci.yml gates on
   assert.deepEqual([...listed].sort(), gated.sort());
 });
 
+test("web_share: the share dialog's shard runs on a pull request that changes sharing or has the full-ci label, and always on master, the schedule and a dispatch", () => {
+  for (const f of ["web/share/files.ts", "web/share/test-share-dialog.mjs", "web/share-client/upload.ts"]) assert.equal(classify([f]).web_share, "true", f);
+  // (the full tier for another reason: no share dialog on the pull request)
+  for (const f of ["web/sync/doc.ts", "web/build.ts", "web/workspace/agent-ui.ts"]) {
+    assert.equal(classify([f]).full, "true", f);
+    assert.equal(classify([f]).web_share, "false", f);
+  }
+  assert.equal(classify(["web/sync/doc.ts"], "full-ci").web_share, "true");
+  // (the fast tier: never)
+  assert.equal(classify(["web/index.html"]).web_share, "false");
+  for (const [event, ref] of [["push", "refs/heads/master"], ["schedule", "refs/heads/master"], ["workflow_dispatch", "refs/heads/x"]]) {
+    const list = join(mkdtempSync(join(tmpdir(), "ci-paths-")), "files");
+    writeFileSync(list, "README.md\n");
+    const r = spawnSync(process.execPath, [script], { encoding: "utf8", env: { ...process.env, CI_PATHS_FILES: list, GITHUB_EVENT_NAME: event, GITHUB_REF: ref } });
+    assert.match(r.stdout, /^web_share=true$/m, event);
+  }
+});
+
 test("slow_tests: the slow node tests (test/slow-tests.ts) run for the full-ci label, a dispatch, the schedule and the paths they test, not on a master push or another change", () => {
   for (const f of ["tsconfig.json", "package.json", "pnpm-lock.yaml", "scripts/arraybuffer-sites.mjs", "scripts/arraybuffer-sites-parity.mjs",
     "test/arraybuffer-sites.json", "test/arraybuffer-sites-parity.test.ts", "test/arraybuffer-sites.test.ts",
