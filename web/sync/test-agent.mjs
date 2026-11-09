@@ -514,7 +514,7 @@ await section("a deleted account's grants", async () => {
 
 await section("the first logged row arms the alarm", async () => {
   // (grader's R3) a fresh account with no alarm due: its first logged request alone has the alarm set for when that row
-  // ages out (t + 90 days + 1 ms)
+  // ages out (t + 7 days + 1 ms: the log's fixed bound, #904; a literal here, not the code's own constant)
   const s = await enabled(FA);
   const g = await make(s, [{ path: "/", access: "read" }]);
   ok((await (await seam(FA, { clearAlarm: true })).json()).alarm === null, "(no alarm due)");
@@ -522,7 +522,7 @@ await section("the first logged row arms the alarm", async () => {
   await agent(g.token, "stat", { path: "/x" });
   const t1 = Date.now();
   const al = (await (await seam(FA, {})).json()).alarm;
-  const days = U.AGENT.logDays * 86400_000;
+  const days = 7 * 86400_000;
   ok(al !== null && al >= t0 + days && al <= t1 + days + 1, "the first logged row sets the alarm to its own age-out: " + (al === null ? null : al - t0 - days));
 });
 

@@ -2420,7 +2420,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       if (a.before !== undefined && !isNat(a.before)) throw new SyncError("invalid", "before");
       if (!this.hasGrants()) return { rows: [], more: false };
       const before = (a.before as number | undefined) ?? Number.MAX_SAFE_INTEGER;
-      // (only rows within the log's 90 days, whether or not the alarm has deleted the older ones yet)
+      // (only rows within the log's 7 days, whether or not the alarm has deleted the older ones yet)
       const since = Date.now() - this.agentBounds.logMs;
       const rows = (a.grant === undefined
         ? this.sql.exec("SELECT id, t, grant_id, agent, verb, paths, result, bytes FROM access_log WHERE id < ? AND t >= ? ORDER BY id DESC LIMIT ?", before, since, this.agentBounds.logPage + 1)
@@ -2430,7 +2430,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     });
   }
 
-  /** One row of the access log (§8), in the caller's transaction, and the log kept to 90 days and its row bound. */
+  /** One row of the access log (§8), in the caller's transaction, and the log kept to 7 days and its row bound. */
   private logRow(t: number, g: Row, verb: string, paths: string[] | null, result: string) {
     this.sql.exec("INSERT INTO access_log (t, grant_id, agent, verb, paths, result) VALUES (?, ?, ?, ?, ?, ?)", t, g.id, g.agent, verb, paths ? JSON.stringify(paths) : null, result);
     const id = Number(this.one("SELECT last_insert_rowid() AS n")!.n);
@@ -2602,7 +2602,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     });
     // unused chunked-file registrations past their hold (§4.3 of design/tiered-files.md): a page a step
     if (this.retireExpired(now)) this.wakeBy(Date.now() + 1);
-    // the access log's rows past its 90 days (design/agent-endpoint.md §8): a page a step, and arm() below sets the next
+    // the access log's rows past its 7 days (design/agent-endpoint.md §8): a page a step, and arm() below sets the next
     // step at once while any is left
     this.sweepLog(now);
     // grants that expired since: the newest AGENT.deadGrants dead ones kept (daybreak2 L1), with nothing else needed
