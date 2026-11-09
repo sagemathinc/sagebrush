@@ -29,7 +29,7 @@ const sha256 = (b) => createHash("sha256").update(b).digest("hex");
 const MODES = new Set(["python", "sage", "matlab", "magma"]);
 const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
 // (beside the code, not pinned: the manifest, a README, licenses and notices)
-const DOCS = /^(sagebrush\.json|README\.md|LICENSE[^/]*|NOTICE[^/]*|known\.json)$/;
+const DOCS = /^(sagebrush\.json|README\.md|LICENSE[^/]*|NOTICE[^/]*|known\.json|overlay\.patch)$/;
 // (a relative path inside the package: no "..", no absolute or odd names)
 const safePath = (p) => typeof p === "string" && p !== "" && !p.startsWith("/") && p.split("/").every((s) => s !== "" && s !== "." && s !== ".." && /^[A-Za-z0-9_.-]+$/.test(s));
 
