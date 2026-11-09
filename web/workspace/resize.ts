@@ -103,7 +103,7 @@ export function filesResize(side: HTMLElement, changed?: () => void) {
   // (only a change is passed on: the board redraws on "resize", which the edge also listens to)
   let last = 0;
   edge(handle, FILES_W, {
-    label: "Resize the files", unit: " px", step: 16,
+    label: "Resize the files panel", unit: " px", step: 16,
     // (the page keeps at least 320 px beside them)
     max: () => innerWidth - 320,
     measure: (x) => x - side.getBoundingClientRect().left,

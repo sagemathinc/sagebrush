@@ -222,7 +222,7 @@ export class TerminalPanel {
     grip.setAttribute("aria-orientation", "horizontal");
     grip.setAttribute("aria-label", "Resize the terminal");
     grip.tabIndex = 0;
-    grip.title = "Drag, or use the arrow keys, to resize";
+    grip.title = "Drag to resize; double-click to reset";
     grip.addEventListener("pointerdown", (e) => this.drag(e));
     // (the non-drag way: Up/Down by 24 px, with Shift by 96: TP-8)
     grip.addEventListener("keydown", (e) => {
