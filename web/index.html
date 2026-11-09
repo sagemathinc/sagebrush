@@ -3884,16 +3884,18 @@ globalThis.__sbTexSplit = texSplit;
 const agentBtn = $("#agentbtn");
 let agentPairing = null, agentTries = 0;
 const pairAgent = (w) => (agentPairing ??= import(new URL("sagebrush-agent.js", location.href).href + (agentTries++ ? `?try=${agentTries}` : ""))
-  .then((m) => m.mountAgentPairing(w, { link: pairLink() })))
+  .then((m) => m.mountAgentPairing(w)))
   .catch((e) => { agentPairing = null; throw e; });
 const agentFailed = () => { statusEl.textContent = "Couldn't load the agent connection. Press Agent to try again, or reload the page."; };
-if (!LOCAL && !window.__TAURI__) wsReady.then((w) => {
+// (started once the page knows it shows a notebook, not the LaTeX or code editor, which has its own: one pairing per
+// page; an early ?pair= link goes to the editor shown, pair-link.ts)
+const startNotebookAgent = () => { if (!LOCAL && !window.__TAURI__) void wsReady.then((w) => {
   if (!w) return;
   agentBtn.hidden = false;
   agentBtn.onclick = () => void pairAgent(w).then((p) => p.connect(undefined, undefined, agentBtn), agentFailed);
   if (pairLink()) void pairAgent(w).catch(agentFailed);
   else void w.agentGrants().then((k) => { if (Object.keys(k ?? {}).length) void pairAgent(w).catch(agentFailed); }, () => {});
-});
+}); };
 let wsBrowser = null;
 // (the notebook open here marked again: one opened, or listed)
 function wsTrackCurrent() { wsBrowser?.refresh(); }
@@ -4051,6 +4053,7 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && (await latexBoot(ws, RUNNER ? { WorkerKernel, RunnerWorker } : null))) return;
   // (a code or text file's own page, /?code=<fid> (1a): web/code/boot.ts; its hooks for the file browser and the preview either way)
   if (await codeBoot(ws, (e, how) => openEntry(e, how))) return;
+  startNotebookAgent();
   let mode = "python";
   try { mode = localStorage.getItem("sagebrush-mode") || mode; } catch {}
   // a shared link opens as a new notebook; else the last one; else the welcome

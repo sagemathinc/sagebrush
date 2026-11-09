@@ -1,4 +1,5 @@
 // ci: web-runner order=181 chrome
+// ci: web-browser/latex order=46 chrome env=EXPECT_LATEX=1
 // An agent paired with the notebook page, end to end: the page (web/dist, served by web/serve.py with the site's
 // headers, its CSP included) and the REAL pairing server (engine/py/python/sagebrush/pairing.py, as sagebrush-mcp
 // runs it), its requests made as an agent's tools make them:
@@ -8,6 +9,9 @@
 //     at once, with no reload and no "changed elsewhere" copy;
 //   - the person then edits it: their edit and the agent's cell are both kept;
 //   - a grant "until the page closes" ends with the page.
+//   - in a build with the LaTeX editor (CI's web-browser/latex, EXPECT_LATEX=1: there it must run): one pairing per page.
+//     An early ?pair= link on /?tex= is the LaTeX editor's only (its chunk, not the notebook page's); a remembered
+//     grant reconnects there once, one bar, and the editor's Agent shows that bar, not an empty Connect.
 //   bun web/build.ts && CHROME=chromium node web/workspace/test-notebook-agent-e2e.mjs
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -42,7 +46,9 @@ print(json.dumps({"port": port, "code": code}), flush=True)
 for line in sys.stdin:
     m = json.loads(line)
     try:
-        if m["op"] == "req":
+        if m["op"] == "code":
+            port, code = p.start(); print(json.dumps({"port": port, "code": code}), flush=True)
+        elif m["op"] == "req":
             print(json.dumps({"ok": p.request(m["method"], m["params"], timeout=10)}), flush=True)
         elif m["op"] == "status":
             s = p.status(); print(json.dumps({"ok": {"paired": s.get("paired"), "granted": s.get("granted")}}), flush=True)
@@ -105,8 +111,10 @@ try {
   // next press fetches it again
   await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-agent.js*" }] });
   failChunk = true;
+  // (the status line is the page's, which other messages replace: every text it shows is kept here)
+  await ev(`(() => { const st = document.querySelector("#status"); window.__said = []; new MutationObserver(() => window.__said.push(st.textContent)).observe(st, { childList: true, characterData: true, subtree: true }); return true; })()`);
   await ev(`(document.querySelector("#agentbtn").click(), true)`);
-  ok(await until(`document.querySelector("#status")?.textContent === "Couldn't load the agent connection. Press Agent to try again, or reload the page."`) && !(await ev(`!!document.querySelector(".sbag-box")`)), "the chunk's fetch failing: the page says so in one line");
+  ok(await until(`window.__said.includes("Couldn't load the agent connection. Press Agent to try again, or reload the page.")`) && !(await ev(`!!document.querySelector(".sbag-box")`)), "the chunk's fetch failing: the page says so in one line", await ev(`window.__said`).catch(() => null));
   failChunk = false;
   await send("Fetch.disable");
   await ev(`(document.querySelector("#agentbtn").click(), true)`);
@@ -170,6 +178,80 @@ try {
   ok(await go(""), "the page again");
   const st = await drive({ op: "status" });
   ok(st.ok?.paired === false || st.ok?.granted === false, "the grant ended with the page", st);
+
+  // a remembered grant: the next load of the notebook page fetches the chunk by itself and reconnects
+  const c1 = await drive({ op: "code" });
+  ok(await go(`?pair=${c1.code}&port=${c1.port}`) && await until(`!!document.querySelector(".sbag-box button.primary")`), "another ?pair= link: Connect");
+  await ev(`(document.querySelector(".sbag-box button.primary").click(), true)`);
+  ok(await until(`[...document.querySelectorAll(".sbag-box h2")].some((h) => h.textContent === "Allow this agent?")`), "the grant dialog asks");
+  await ev(`(() => {
+    const b = document.querySelector(".sbag-box");
+    const all = b.querySelector(".folders input"); if (!all.checked) all.click();
+    const [write, remember] = [...b.querySelectorAll("input[type=checkbox]")].filter((c) => !c.closest(".folders"));
+    if (!write.checked) write.click();
+    const s = b.querySelector("select"); s.value = "3600000"; s.dispatchEvent(new Event("change"));
+    if (!remember.checked) remember.click();
+    return true;
+  })()`);
+  await ev(`([...document.querySelectorAll(".sbag-box button.primary")].pop().click(), true)`);
+  ok(await until(`!!document.querySelector(".sbag-bar")`), "allowed for 1 hour, remembered: the bar shows");
+  const beforeR = requests.length;
+  ok(await go(""), "the notebook page again, nothing pressed");
+  ok(await until(`!!document.querySelector(".sbag-bar")`, 20000) && requests.slice(beforeR).some(chunk), "the remembered agent: the chunk loads by itself and it reconnects", requests.slice(beforeR).filter((u) => /agent/.test(u)));
+  ok(await ev(`document.querySelectorAll(".sbag-bar").length`) === 1 && !(await ev(`!!document.querySelector(".sbag-box")`)), "one bar, no dialog");
+  await ev(`([...document.querySelectorAll(".sbag-bar button")].find((b) => b.textContent === "Revoke")?.click(), true)`);
+  ok(await until(`!document.querySelector(".sbag-bar")`), "Revoke: the bar goes (and the remembered grant with it)");
+
+  // the CLI's own page (window.__SAGEBRUSH_LOCAL__, a page on this computer, which the agent's program doesn't accept):
+  // no Agent, and the chunk never fetched
+  const localScript = await send("Page.addScriptToEvaluateOnNewDocument", { source: `window.__SAGEBRUSH_LOCAL__ = { path: "local.ipynb", name: "local.ipynb" };` });
+  const beforeL = requests.length;
+  ok(await go(""), "the page as the CLI serves it (LOCAL)");
+  await sleep(3000);
+  ok(await ev(`!!window.__SAGEBRUSH_LOCAL__ && document.querySelector("#agentbtn").hidden`) && !requests.slice(beforeL).some(chunk), "LOCAL: Agent isn't offered and the chunk isn't fetched", requests.slice(beforeL).filter((u) => /agent/.test(u)));
+  await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: localScript.result.identifier });
+
+  // ---- one pairing per page, in a build with the LaTeX editor
+  // (the editor opens on this host only in a build made with SAGEBRUSH_LATEX_PREVIEW=test, as CI's web-browser/latex)
+  const fid = await ev(`${W}.create("/paper.tex", { content: new TextEncoder().encode("Hello.\\n") }).then((e) => e.fid)`);
+  const texOn = typeof fid === "string" && await go(`?tex=${encodeURIComponent(fid)}&latex=1`) && await until(`!!document.querySelector(".tex-agent")`, 30000);
+  if (process.env.EXPECT_LATEX === "1") ok(texOn, "LaTeX build: the LaTeX editor opens, so the checks below run (none skipped)");
+  if (texOn) {
+    const c2 = await drive({ op: "code" });
+    const before = requests.length;
+    ok(await go(`?tex=${encodeURIComponent(fid)}&latex=1&pair=${c2.code}&port=${c2.port}`), "an early ?pair= link on /?tex= opens the LaTeX editor");
+    ok(await until(`!!document.querySelector(".tex-agent") && !!document.querySelector(".sbag-box button.primary")`), "its Connect dialog shows");
+    ok(await ev(`[...document.querySelectorAll(".sbag-box input")].some((i) => i.value === ${JSON.stringify(c2.code)})`) && await ev(`document.querySelectorAll(".sbag-box").length`) === 1, "one dialog, with the link's code: the link went to the LaTeX editor");
+    const since = () => requests.slice(before);
+    ok(since().some((u) => /sagebrush-latex-agent\.js/.test(u)) && !since().some(chunk), "only the LaTeX editor's agent chunk is fetched, not the notebook page's", since().filter((u) => /agent/.test(u)));
+    ok(await ev(`document.querySelector("#agentbtn")?.hidden !== false`), "the notebook page's Agent isn't offered over the LaTeX editor");
+    await ev(`(document.querySelector(".sbag-box button.primary").click(), true)`);
+    ok(await until(`[...document.querySelectorAll(".sbag-box h2")].some((h) => h.textContent === "Allow this agent?")`), "paired from the LaTeX editor: the grant dialog asks");
+    // (Everything, read and write, for 1 hour, remembered)
+    await ev(`(() => {
+      const b = document.querySelector(".sbag-box");
+      const all = b.querySelector(".folders input"); if (!all.checked) all.click();
+      const [write, remember] = [...b.querySelectorAll("input[type=checkbox]")].filter((c) => !c.closest(".folders"));
+      if (!write.checked) write.click();
+      const s = b.querySelector("select"); s.value = "3600000"; s.dispatchEvent(new Event("change"));
+      if (!remember.checked) remember.click();
+      return true;
+    })()`);
+    await ev(`([...document.querySelectorAll(".sbag-box button.primary")].pop().click(), true)`);
+    ok(await until(`!!document.querySelector(".sbag-bar")`), "allowed, remembered: the bar shows");
+    // the remembered grant, on the next load of /?tex=: reconnected once, by the LaTeX editor
+    const before2 = requests.length;
+    ok(await go(`?tex=${encodeURIComponent(fid)}&latex=1`), "the LaTeX editor again (the agent remembered)");
+    ok(await until(`!!document.querySelector(".sbag-bar")`, 20000), "the remembered agent reconnects", await ev(`document.querySelector(".sbag-box")?.textContent ?? ""`).catch(() => ""));
+    await sleep(1500);
+    const since2 = requests.slice(before2);
+    ok(since2.some((u) => /sagebrush-latex-agent\.js/.test(u)) && !since2.some(chunk), "only the LaTeX editor's agent chunk is fetched", since2.filter((u) => /agent/.test(u)));
+    ok(await ev(`document.querySelectorAll(".sbag-bar").length`) === 1 && !(await ev(`!!document.querySelector(".sbag-box")`)), "one bar, and no Connect dialog");
+    await ev(`(document.querySelector(".tex-agent").click(), true)`);
+    await sleep(500);
+    ok(await ev(`document.querySelectorAll(".sbag-bar").length`) === 1 && !(await ev(`!!document.querySelector(".sbag-box")`)), "the editor's Agent shows that one bar, not an empty Connect");
+    await ev(`([...document.querySelectorAll(".sbag-bar button")].find((b) => b.textContent === "Revoke")?.click(), true)`);
+  }
 } catch (e) {
   ok(false, "threw: " + (e?.stack ?? e));
 } finally {
