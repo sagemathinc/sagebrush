@@ -4,12 +4,9 @@
 
 import { isMarimo, fromMarimo } from "./marimo.js";
 import { looksLikeMagma } from "../../src/m-file.ts";
-export const joinText = (t) => (Array.isArray(t) ? t.join("") : t ?? "");
+import { joinText, cellId, modeOf, cellOf } from "./nbformat.js";
+export { joinText, cellId };
 const lines = (t) => t.split(/(?<=\n)/);
-
-/** A new cell id: nbformat's [a-zA-Z0-9-_]{1,64}. */
-export const cellId = () => (crypto.randomUUID?.() ?? Date.now().toString(36) + Math.random().toString(36).slice(2)).replace(/-/g, "").slice(0, 12);
-const validId = (id) => typeof id === "string" && /^[a-zA-Z0-9_-]{1,64}$/.test(id);
 
 const KERNELSPEC = {
   python: { name: "python3", display_name: "Python 3", language: "python" },
@@ -17,14 +14,6 @@ const KERNELSPEC = {
   magma: { name: "magma", display_name: "Magma", language: "magma" },
   matlab: { name: "matlab", display_name: "MATLAB", language: "matlab" },
 };
-/** The mode a notebook's metadata says (its kernel). */
-function modeOf(metadata) {
-  const k = metadata?.kernelspec ?? {};
-  const lang = `${k.name ?? ""} ${k.language ?? ""} ${metadata?.language_info?.name ?? ""}`;
-  // (MATLAB: the MathWorks kernel's notebooks too, jupyter_matlab_kernel, and Octave's)
-  return /magma/i.test(lang) ? "magma" : /matlab|octave/i.test(lang) ? "matlab" : /sage/i.test(lang) ? "sage" : "python";
-}
-
 /** The .ipynb text of a document.  What Sagebrush does not use (notebook and
  * cell metadata: widgets, tags, ...; raw cells) is written back as it was
  * read; the kernelspec is the original one unless the mode changed. */
@@ -61,23 +50,7 @@ export function fromFile(name, text, mode = "python") {
     const j = JSON.parse(text);
     if (!j || typeof j !== "object" || !(Array.isArray(j.cells) || Array.isArray(j.worksheets))) throw new Error(`${name} is not a Jupyter notebook`);
     // nbformat 3: the cells of every worksheet, in order (not only the first)
-    const cells = (j.cells ?? (j.worksheets ?? []).flatMap((w) => w?.cells ?? [])).map((c) => {
-      const src = joinText(c.source ?? c.input), id = validId(c.id) ? c.id : cellId();
-      let md = c.metadata, ms = null;
-      // (a code cell's last run time: metadata.sagebrush.ms, taken out of the metadata)
-      if (c.cell_type === "code" && typeof md?.sagebrush?.ms === "number" && md.sagebrush.ms >= 0) {
-        ms = md.sagebrush.ms;
-        const { ms: _ms, ...sb } = md.sagebrush;
-        const { sagebrush: _sb, ...others } = md;
-        md = Object.keys(sb).length ? { ...others, sagebrush: sb } : others;
-      }
-      const metadata = md && Object.keys(md).length ? { metadata: md } : {};
-      if (c.cell_type === "code") return { id, code: src, outputs: c.outputs ?? [], n: c.execution_count ?? c.prompt_number ?? null, ...(ms != null ? { ms } : {}), ...metadata };
-      if (c.cell_type === "markdown") return { id, type: "markdown", code: src, attachments: c.attachments ?? null, ...metadata };
-      // nbformat 3's heading cells are Markdown headings
-      if (c.cell_type === "heading") return { id, type: "markdown", code: "#".repeat(c.level ?? 1) + " " + src, ...metadata };
-      return { id, type: "raw", code: src, ...metadata };
-    });
+    const cells = (j.cells ?? (j.worksheets ?? []).flatMap((w) => w?.cells ?? [])).map(cellOf);
     const extra = j.metadata && Object.keys(j.metadata).length ? { metadata: j.metadata } : {};
     return { name: base, mode: modeOf(j.metadata), cells, ...extra, ...(j.nbformat === 4 && j.nbformat_minor > 5 ? { nbformat_minor: j.nbformat_minor } : {}) };
   }

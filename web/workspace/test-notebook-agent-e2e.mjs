@@ -9,6 +9,7 @@
 //   - the agent reads the notebook shown and writes it (workspace.write with its base): the page shows the new cell
 //     at once, with no reload and no "changed elsewhere" copy;
 //   - the person then edits it: their edit and the agent's cell are both kept;
+//   - the agent writes Jupyter's nbformat cells (as agents do): the page shows them with their text, not empty;
 //   - a grant "until the page closes" ends with the page.
 //   - in a build with the LaTeX editor (CI's web-browser/latex, EXPECT_LATEX=1: there it must run): one pairing per page.
 //     An early ?pair= link on /?tex= is the LaTeX editor's only (its chunk, not the notebook page's); a remembered
@@ -174,6 +175,16 @@ try {
   ok(srcs.includes("x = 2") && srcs.includes(MARK), "the person's later edit and the agent's cell are both saved", srcs);
   const copies = await ev(`${W}.list("/", { recursive: true }).then((l) => l.filter((e) => /changed elsewhere/.test(e.path)).map((e) => e.path))`);
   ok(copies.length === 0, "no \"changed elsewhere\" copy was made", copies);
+
+  // the agent writes it as Jupyter's nbformat ({cell_type, source}, as both agents did in the sim, F1): the page shows
+  // those cells with their text, a code cell and a Markdown one, not empty cells
+  const rd3 = await drive({ op: "req", method: "workspace.read", params: { path } });
+  const NBF = "print('nbformat', 6 * 7)";
+  const wr3 = await drive({ op: "req", method: "workspace.write", params: { path, content: { json: { cells: [...rd3.ok.content.json.cells, { cell_type: "code", metadata: {}, execution_count: null, outputs: [], source: ["print(", "'nbformat', 6 * 7)"] }, { cell_type: "markdown", metadata: {}, source: "## From Jupyter\n\nSome text." }] } }, base: rd3.ok?.rev } });
+  ok(!!wr3.ok, "the agent writes nbformat cells", wr3);
+  ok(await until(`${sources}.includes(${JSON.stringify(NBF)}) && window.sagebrush.notebook.snapshot().cells.some((c) => c.type === "markdown" && c.code.startsWith("## From Jupyter"))`, 10000), "the page shows them: the code cell's text, and a Markdown cell with its own", { sources: await ev(sources).catch(() => null), cells: await ev(`window.sagebrush.notebook.snapshot().cells.map((c) => [c.type ?? "code", c.code])`).catch(() => null) });
+  const rd4 = await drive({ op: "req", method: "workspace.read", params: { path } });
+  ok((rd4.ok?.content?.json?.cells ?? []).every((c) => typeof c.code === "string" && c.cell_type === undefined), "…kept in Sagebrush's shape: read back, every cell has its code", rd4.ok?.content?.json?.cells);
 
   // a grant "until the page closes" ends with the page
   ok(await go(""), "the page again");

@@ -94,7 +94,7 @@
             "description": "A workspace path: absolute, \"/\"-separated"
           },
           "content": {
-            "description": "A notebook's document ({cells: [...]}) or a board's JSON as {json}; a data file's bytes as {text} (UTF-8) or {base64}",
+            "description": "A notebook's document ({cells: [{code, type?: \"markdown\" | \"raw\"}]}; Jupyter nbformat cells are converted) or a board's JSON as {json}; a data file's bytes as {text} (UTF-8) or {base64}",
             "oneOf": [
               {
                 "type": "object",
@@ -162,7 +162,7 @@
             "description": "A workspace path: absolute, \"/\"-separated"
           },
           "content": {
-            "description": "A notebook's document ({cells: [...]}) or a board's JSON as {json}; a data file's bytes as {text} (UTF-8) or {base64}",
+            "description": "A notebook's document ({cells: [{code, type?: \"markdown\" | \"raw\"}]}; Jupyter nbformat cells are converted) or a board's JSON as {json}; a data file's bytes as {text} (UTF-8) or {base64}",
             "oneOf": [
               {
                 "type": "object",
