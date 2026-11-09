@@ -1,0 +1,17 @@
+[package]
+name = "sagebrush-mp"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Sagebrush's multiprecision core (design/mpmath-core.md): mpmath's arithmetic and elementary functions, bit-identical to mpmath 1.3.0's pure-Python reference; a wasm32 module of its own, loaded the first time mpmath is imported"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# The WebAssembly heap: dlmalloc over our own system layer, which bounds the
+# pages the heap may grow by (src/wasm.rs, as engine/raster's)
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+dlmalloc = { version = "=0.2.14", default-features = false }
+
+[lints]
+workspace = true
