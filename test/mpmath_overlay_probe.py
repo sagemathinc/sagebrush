@@ -14,6 +14,7 @@ mp.prec = 113
 x, y, z = mpmath.mpf(2) / 3, mpmath.mpf("1.5e-7"), mpmath.mpc(1, 2)
 print("arith", (x + y)._mpf_, (x - y)._mpf_, (x * y)._mpf_, (x / y)._mpf_, mpmath.sqrt(x)._mpf_)
 print("elem", mpmath.exp(x)._mpf_, mpmath.log(x)._mpf_, mpmath.cos(x)._mpf_, mpmath.sin(x)._mpf_, (x ** y)._mpf_)
+print("const", mpmath.pi._mpf_, mpmath.e._mpf_, mpmath.ln2._mpf_, mpmath.gamma(mpmath.mpf(1) / 3)._mpf_, mpmath.zeta(3)._mpf_)
 print("mpc", mpmath.exp(z)._mpc_, mpmath.sqrt(z)._mpc_)
 E, I, F = libmp.libelefun, libmp.libintmath, libmp.libmpf
 print("fixed", E.exp_fixed(1 << 100, 100), E.cos_sin_fixed(1 << 99, 100), E.log_int_fixed(7, 100))
