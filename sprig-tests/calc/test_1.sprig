@@ -1,0 +1,85 @@
+(* calculus: derivatives, integrals, limits, series, sums; from the Nov 6 spike's corpora unless noted *)
+(*-- calc-1 *)
+D[Sin[x]^2, x]
+(*-- calc-2 *)
+D[x^3 y^2, x, y]
+(*-- calc-3 *)
+D[Exp[2 x], {x, 3}]
+(*-- calc-4 *)
+D[ArcTan[x], x]
+(*-- calc-5 *)
+D[x^n, x]
+(*-- calc-6 *)
+D[f[x] g[x], x]
+(*-- calc-7 *)
+D[Sin[x y], y]
+(*-- calc-8 *)
+Integrate[x Exp[x], x]
+(*-- calc-9 *)
+Integrate[Sin[x], {x, 0, Pi}]
+(*-- calc-10 *)
+Integrate[1/(1 + x^2), x]
+(*-- calc-11 *)
+Integrate[x^2 Sin[x], x]
+(*-- calc-12 *)
+Integrate[Log[x], x]
+(*-- calc-13 *)
+Integrate[Exp[-x^2], {x, -Infinity, Infinity}]
+(*-- calc-14 *)
+Integrate[Sqrt[1 - x^2], {x, -1, 1}]
+(*-- calc-15 *)
+Integrate[1/x, x]
+(*-- calc-16 *)
+Integrate[Sin[x]^3, x]
+(*-- calc-17 *)
+Integrate[Exp[x] Sin[x], x]
+(*-- calc-18 *)
+Integrate[1/(x^3 + 1), x]
+(*-- calc-19 *)
+Integrate[x y, {x, 0, 1}, {y, 0, x}]
+(*-- calc-20 *)
+Integrate[1/x^2, {x, 1, Infinity}]
+(*-- calc-21 *)
+D[Integrate[Exp[-t^2], {t, 0, x}], x]
+(*-- calc-22 *)
+Limit[Sin[x]/x, x -> 0]
+(*-- calc-23 *)
+Limit[(1 + 1/n)^n, n -> Infinity]
+(*-- calc-24 *)
+Limit[(x^2 - 4)/(x - 2), x -> 2]
+(*-- calc-25 *)
+Limit[x Log[x], x -> 0]
+(*-- calc-26 *)
+Limit[1/x, x -> 0, Direction -> -1]
+(*-- calc-27 *)
+Limit[(Sin[x] - x)/x^3, x -> 0]
+(*-- calc-28 *)
+Series[Exp[x], {x, 0, 4}]
+(*-- calc-29 *)
+Series[Sin[x], {x, 0, 7}]
+(*-- calc-30 *)
+Normal[Series[Cos[x], {x, 0, 4}]]
+(*-- calc-31 *)
+Series[Log[1 + x], {x, 0, 5}]
+(*-- calc-32 *)
+Series[1/(1 - x), {x, 0, 3}]
+(*-- calc-33 *)
+Series[Exp[x], {x, 1, 2}]
+(*-- calc-34 *)
+Series[Tan[x], {x, 0, 5}]
+(*-- calc-35 *)
+Sum[1/k^2, {k, 1, Infinity}]
+(*-- calc-36 *)
+Sum[k^2, {k, 1, 10}]
+(*-- calc-37 *)
+Sum[k, {k, 1, n}]
+(*-- calc-38 *)
+Sum[x^k/k!, {k, 0, Infinity}]
+(*-- calc-39 *)
+Sum[(-1)^k/(2 k + 1), {k, 0, Infinity}]
+(*-- calc-40 *)
+Sum[1/2^k, {k, 0, Infinity}]
+(*-- calc-41 *)
+Product[k, {k, 1, 6}]
+(*-- calc-42 *)
+NIntegrate[Exp[-x^2], {x, 0, 1}]

@@ -1,0 +1,37 @@
+(* algebraic simplification; from the Nov 6 spike's corpora unless noted *)
+(*-- algebra-1 *)
+Expand[(x + 1)^3]
+(*-- algebra-2 *)
+Expand[(x + y)^2]
+(*-- algebra-3 *)
+Factor[x^2 - 1]
+(*-- algebra-4 *)
+Factor[x^3 - 6 x^2 + 11 x - 6]
+(*-- algebra-5 *)
+Simplify[Sin[x]^2 + Cos[x]^2]
+(*-- algebra-6 *)
+Simplify[(x^2 - 1)/(x - 1)]
+(*-- algebra-7 *)
+Together[1/x + 1/y]
+(*-- algebra-8 *)
+Apart[1/(x^2 - 1)]
+(*-- algebra-9 *)
+Simplify[Sqrt[x^2]]
+(*-- algebra-10 *)
+Simplify[Sqrt[x^2], x > 0]
+(*-- algebra-11 *)
+Simplify[(x^3 - 1)/(x - 1)]
+(*-- algebra-12 *)
+Expand[(a + b)^5]
+(*-- algebra-13 *)
+Factor[x^4 - 1]
+(*-- algebra-14 *)
+Collect[x y + x z + y, x]
+(*-- algebra-15 *)
+Coefficient[(x + 2)^3, x, 2]
+(*-- algebra-16 *)
+TrigExpand[Sin[2 x]]
+(*-- algebra-17 *)
+TrigReduce[Sin[x]^2]
+(*-- algebra-18 *)
+Expand[(1 + x)^2] /. x -> 1/2

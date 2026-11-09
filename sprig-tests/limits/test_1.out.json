@@ -1,0 +1,69 @@
+{
+ "cases": [
+  {
+   "fullform": "200",
+   "id": "limits-1",
+   "messages": [],
+   "output": "",
+   "result": "200"
+  },
+  {
+   "fullform": "4096",
+   "id": "limits-2",
+   "messages": [],
+   "output": "",
+   "result": "4096"
+  },
+  {
+   "fullform": "{RuleDelayed[MaxIterations, 65535]}",
+   "id": "limits-3",
+   "messages": [],
+   "output": "",
+   "result": "{MaxIterations ⧴ 65535}"
+  },
+  {
+   "fullform": "Plus[65535, x]",
+   "id": "limits-4",
+   "messages": [],
+   "output": "",
+   "result": "65535 + x"
+  },
+  {
+   "fullform": "Plus[10, x]",
+   "id": "limits-5",
+   "messages": [],
+   "output": "",
+   "result": "10 + x"
+  },
+  {
+   "fullform": "$Aborted",
+   "id": "limits-6",
+   "messages": [
+    "$IterationLimit::itlim: Iteration limit of 4096 exceeded."
+   ],
+   "output": "$IterationLimit::itlim: Iteration limit of 4096 exceeded.\n",
+   "result": "$Aborted"
+  },
+  {
+   "fullform": "4096",
+   "id": "limits-7",
+   "messages": [
+    "$IterationLimit::limset: Cannot set $IterationLimit to Infinity; value must be an integer between 20 and Infinity."
+   ],
+   "output": "$IterationLimit::limset: Cannot set $IterationLimit to Infinity; value must be an integer between 20 and Infinity.\n",
+   "result": "4096"
+  },
+  {
+   "fullform": "200",
+   "id": "limits-8",
+   "messages": [
+    "$RecursionLimit::limset: Cannot set $RecursionLimit to Infinity; value must be an integer between 20 and 512; use the MATHICS_MAX_RECURSION_DEPTH environment variable to allow higher limits."
+   ],
+   "output": "$RecursionLimit::limset: Cannot set $RecursionLimit to Infinity; value must be an integer between 20 and 512; use the MATHICS_MAX_RECURSION_DEPTH environment variable to allow higher limits.\n",
+   "result": "200"
+  }
+ ],
+ "file": "sprig-tests/limits/test_1.sprig",
+ "format": "sprig-out",
+ "v": 1
+}

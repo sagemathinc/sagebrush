@@ -498,4 +498,8 @@ test("slow_tests: the slow node tests (test/slow-tests.ts) run for the full-ci l
 test("Rill's recorded outputs select the node suite, which checks their provenance (design/rill.md §7.5)", () => {
   // (runtime paths, not an unknown path: the engine's smoke test isn't selected)
   assert.deepEqual(suites(classify(["rill-tests/arith/test_1.out.json", "rill-tests/PROVENANCE.json"])), { node: "true", web: "true", modes: "true", engine_smoke: "false", docs_only: "false" });
+
+test("Sprig's recorded outputs and checker controls select the node suite, which checks them (design/sprig-mvp.md §7.5)", () => {
+  assert.deepEqual(suites(classify(["sprig-tests/calc/test_1.out.json", "sprig-tests/PROVENANCE.json", "sprig-tests/checker-controls.json"])), { node: "true", web: "true", modes: "true", engine_smoke: "false", docs_only: "false" });
+});
 });

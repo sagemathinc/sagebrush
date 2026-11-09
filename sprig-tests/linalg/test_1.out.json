@@ -1,0 +1,133 @@
+{
+ "cases": [
+  {
+   "fullform": "-2",
+   "id": "linalg-1",
+   "messages": [],
+   "output": "",
+   "result": "-2"
+  },
+  {
+   "fullform": "{{-2, 1}, {Rational[3, 2], Rational[-1, 2]}}",
+   "id": "linalg-2",
+   "messages": [],
+   "output": "",
+   "result": "{{-2, 1}, {3/2, -1/2}}"
+  },
+  {
+   "fullform": "{{1, 3}, {2, 4}}",
+   "id": "linalg-3",
+   "messages": [],
+   "output": "",
+   "result": "{{1, 3}, {2, 4}}"
+  },
+  {
+   "fullform": "{{7, 10}, {15, 22}}",
+   "id": "linalg-4",
+   "messages": [],
+   "output": "",
+   "result": "{{7, 10}, {15, 22}}"
+  },
+  {
+   "fullform": "32",
+   "id": "linalg-5",
+   "messages": [],
+   "output": "",
+   "result": "32"
+  },
+  {
+   "fullform": "{3, 1}",
+   "id": "linalg-6",
+   "messages": [],
+   "output": "",
+   "result": "{3, 1}"
+  },
+  {
+   "fullform": "{{1, 1}, {-1, 1}}",
+   "id": "linalg-7",
+   "messages": [],
+   "output": "",
+   "result": "{{1, 1}, {-1, 1}}"
+  },
+  {
+   "fullform": "{{1, 0, -1}, {0, 1, 2}}",
+   "id": "linalg-8",
+   "messages": [],
+   "output": "",
+   "result": "{{1, 0, -1}, {0, 1, 2}}"
+  },
+  {
+   "fullform": "1",
+   "id": "linalg-9",
+   "messages": [],
+   "output": "",
+   "result": "1"
+  },
+  {
+   "fullform": "{2, 1}",
+   "id": "linalg-10",
+   "messages": [],
+   "output": "",
+   "result": "{2, 1}"
+  },
+  {
+   "fullform": "{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}",
+   "id": "linalg-11",
+   "messages": [],
+   "output": "",
+   "result": "{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}"
+  },
+  {
+   "fullform": "{0, 0, 1}",
+   "id": "linalg-12",
+   "messages": [],
+   "output": "",
+   "result": "{0, 0, 1}"
+  },
+  {
+   "fullform": "Plus[Times[a, d], Times[-1, b, c]]",
+   "id": "linalg-13",
+   "messages": [],
+   "output": "",
+   "result": "a*d - b*c"
+  },
+  {
+   "fullform": "{{-2, 1}}",
+   "id": "linalg-14",
+   "messages": [],
+   "output": "",
+   "result": "{{-2, 1}}"
+  },
+  {
+   "fullform": "{Plus[Rational[5, 2], Times[Rational[1, 2], Power[33, Rational[1, 2]]]], Plus[Rational[5, 2], Times[Rational[-1, 2], Power[33, Rational[1, 2]]]]}",
+   "id": "linalg-15",
+   "messages": [],
+   "output": "",
+   "result": "{5/2 + Sqrt[33]/2, 5/2 - Sqrt[33]/2}"
+  },
+  {
+   "fullform": "{Plus[a, b], Plus[a, Times[-1, b]]}",
+   "id": "linalg-16",
+   "messages": [],
+   "output": "",
+   "result": "{a + b, a - b}"
+  },
+  {
+   "fullform": "-3",
+   "id": "linalg-17",
+   "messages": [],
+   "output": "",
+   "result": "-3"
+  },
+  {
+   "fullform": "CharacteristicPolynomial[{{1, 2}, {3, 4}}, x]",
+   "id": "linalg-18",
+   "messages": [],
+   "output": "",
+   "result": "CharacteristicPolynomial[{{1, 2}, {3, 4}}, x]"
+  }
+ ],
+ "file": "sprig-tests/linalg/test_1.sprig",
+ "format": "sprig-out",
+ "v": 1
+}

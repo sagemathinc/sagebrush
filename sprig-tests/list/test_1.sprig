@@ -1,0 +1,41 @@
+(* lists and functional programming; from the Nov 6 spike's corpora unless noted *)
+(*-- list-1 *)
+Table[i^2, {i, 5}]
+(*-- list-2 *)
+Table[i + j, {i, 2}, {j, 3}]
+(*-- list-3 *)
+Range[2, 10, 3]
+(*-- list-4 *)
+Map[#^2 &, {1, 2, 3}]
+(*-- list-5 *)
+f /@ {a, b}
+(*-- list-6 *)
+Apply[Plus, {1, 2, 3}]
+(*-- list-7 *)
+Total[{1, 2, 3, 4}]
+(*-- list-8 *)
+Length[{a, b, c}]
+(*-- list-9 *)
+{a, b, c}[[2]]
+(*-- list-10 *)
+Select[Range[10], EvenQ]
+(*-- list-11 *)
+Sort[{3, 1, 2}]
+(*-- list-12 *)
+Flatten[{{1, 2}, {3, {4}}}]
+(*-- list-13 *)
+Nest[f, x, 3]
+(*-- list-14 *)
+NestList[f, x, 3]
+(*-- list-15 *)
+Table[Prime[n], {n, 10}]
+(*-- list-16 *)
+Table[If[EvenQ[k], k, -k], {k, 6}]
+(*-- list-17 *)
+Total[Range[100]]
+(*-- list-18 *)
+Max[{3, 1, 4, 1, 5}]
+(*-- list-19 *)
+Part[{{1, 2}, {3, 4}}, 2, 1]
+(*-- list-20 *)
+Dimensions[{{1, 2, 3}, {4, 5, 6}}]

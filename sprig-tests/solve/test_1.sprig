@@ -1,0 +1,25 @@
+(* equations and differential equations; from the Nov 6 spike's corpora unless noted *)
+(*-- solve-1 *)
+Solve[x^2 - 3 x + 2 == 0, x]
+(*-- solve-2 *)
+Solve[{x + y == 3, x - y == 1}, {x, y}]
+(*-- solve-3 *)
+Solve[x^2 + 1 == 0, x]
+(*-- solve-4 *)
+FindRoot[Cos[x] == x, {x, 1}]
+(*-- solve-5 *)
+DSolve[y'[x] == y[x], y[x], x]
+(*-- solve-6 *)
+Solve[x^3 - 2 == 0, x]
+(*-- solve-7 *)
+Solve[a x + b == 0, x]
+(*-- solve-8 *)
+Solve[x^2 + y^2 == 1 && x == y, {x, y}]
+(*-- solve-9 *)
+NSolve[x^3 - x - 1 == 0, x]
+(*-- solve-10 *)
+DSolve[y''[x] + y[x] == 0, y[x], x]
+(*-- solve-11 *)
+DSolve[{y'[x] == 2 y[x], y[0] == 1}, y[x], x]
+(*-- solve-12 *)
+x /. Solve[x^2 == 4, x]

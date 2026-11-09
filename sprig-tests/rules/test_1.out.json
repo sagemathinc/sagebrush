@@ -1,0 +1,84 @@
+{
+ "cases": [
+  {
+   "fullform": "{1, b, 3}",
+   "id": "rules-1",
+   "messages": [],
+   "output": "",
+   "result": "{1, b, 3}"
+  },
+  {
+   "fullform": "10",
+   "id": "rules-2",
+   "messages": [],
+   "output": "",
+   "result": "10"
+  },
+  {
+   "fullform": "10",
+   "id": "rules-3",
+   "messages": [],
+   "output": "",
+   "result": "10"
+  },
+  {
+   "fullform": "Plus[1, Power[Plus[a, b], 2]]",
+   "id": "rules-4",
+   "messages": [],
+   "output": "",
+   "result": "1 + (a + b)^2"
+  },
+  {
+   "fullform": "610",
+   "id": "rules-5",
+   "messages": [],
+   "output": "",
+   "result": "610"
+  },
+  {
+   "fullform": "{4, h[z]}",
+   "id": "rules-6",
+   "messages": [],
+   "output": "",
+   "result": "{4, h[z]}"
+  },
+  {
+   "fullform": "Times[2, t]",
+   "id": "rules-7",
+   "messages": [],
+   "output": "",
+   "result": "2*t"
+  },
+  {
+   "fullform": "Times[2, t]",
+   "id": "rules-8",
+   "messages": [],
+   "output": "",
+   "result": "2*t"
+  },
+  {
+   "fullform": "6",
+   "id": "rules-9",
+   "messages": [],
+   "output": "",
+   "result": "6"
+  },
+  {
+   "fullform": "25",
+   "id": "rules-10",
+   "messages": [],
+   "output": "",
+   "result": "25"
+  },
+  {
+   "fullform": "x",
+   "id": "rules-11",
+   "messages": [],
+   "output": "",
+   "result": "x"
+  }
+ ],
+ "file": "sprig-tests/rules/test_1.sprig",
+ "format": "sprig-out",
+ "v": 1
+}

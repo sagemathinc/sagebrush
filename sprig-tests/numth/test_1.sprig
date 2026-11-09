@@ -1,0 +1,21 @@
+(* number theory, statistics and strings; from the Nov 6 spike's corpora unless noted *)
+(*-- numth-1 *)
+Prime[10]
+(*-- numth-2 *)
+PrimeQ[97]
+(*-- numth-3 *)
+FactorInteger[360]
+(*-- numth-4 *)
+GCD[12, 18]
+(*-- numth-5 *)
+Mod[17, 5]
+(*-- numth-6 *)
+Binomial[10, 3]
+(*-- numth-7 *)
+Divisors[12]
+(*-- numth-8 *)
+Mean[{1, 2, 3, 4}]
+(*-- numth-9 *)
+StringJoin["ab", "cd"]
+(*-- numth-10 *)
+StringLength["hello"]
