@@ -6,6 +6,21 @@
    "class": "not-implemented",
    "reason": "Print's output form (x ^ 2): Sprig prints InputForm text until S1.3",
    "sha256": "eb40bac233510e2ff27204c775216ffdd904df2700ada3e43263b1d4249bc9d9"
+  },
+  "sprig-tests/core/test_1.sprig#core-230": {
+   "class": "term-order",
+   "reason": "the same sum: Sprig orders Indeterminate with the symbols, alphabetically; the oracle puts it last (S5's canonical order may revisit)",
+   "sha256": "12a86a06aa2040e602b85eeab99f0ed81b22e2625158cde47a18799013834a05"
+  },
+  "sprig-tests/core/test_1.sprig#core-235": {
+   "class": "not-implemented",
+   "reason": "a rational power of a negative number, 2 (-1)^(1/3): radicals and complex numbers are S2's",
+   "sha256": "b02d506240f9796c55f1a6b9033c89848dd370622498ba47976230d970fff1bc"
+  },
+  "sprig-tests/core/test_1.sprig#core-236": {
+   "class": "not-implemented",
+   "reason": "the square root of a negative number, 2 I: complex numbers are S2's",
+   "sha256": "535061b3842cc72352b851d01fe10d17915d8f5cb89aff843a768acb3a26ab33"
   }
  }
 }

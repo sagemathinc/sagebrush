@@ -274,14 +274,15 @@ class Session:
         return ("eval", req[1])
 
     def _thread(self, head, args):
-        """head threaded over the lists among args, all of one length; None when there are none, or their
-        lengths differ (left as it is: the message for that is S1.3's)."""
+        """head threaded over the lists among args, all of one length; None when there are none, or when their
+        lengths differ (left as it is, with Thread::tdlen)."""
         n = None
         for x in args:
             if type(x) is Expr and x.head is LIST:
                 if n is None:
                     n = len(x.args)
                 elif len(x.args) != n:
+                    self.message("Thread", "tdlen")
                     return None
         if n is None:
             return None

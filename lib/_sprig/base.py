@@ -35,6 +35,7 @@ MESSAGES = {
     ("Power", "indet"): "Indeterminate expression `1` encountered.",
     ("Infinity", "indet"): "Indeterminate expression `1` encountered.",
     ("Set", "wrsym"): "Symbol `1` is Protected.",
+    ("Thread", "tdlen"): "Objects of unequal length cannot be combined.",
     ("Symbol", "symname"): "The string `1` cannot be used for a symbol name. A symbol name must start with a letter "
                            "followed by letters and numbers.",
     ("Syntax", "sntxf"): "\"`1`\" cannot be followed by \"`2`\" (line `3` of \"`4`\").",
@@ -144,7 +145,8 @@ def _with_int_reservation(bits, name, f):
 
 def _plus(sess, e):
     args = e.args
-    if any(x is INDETERMINATE for x in args):
+    # (Indeterminate absorbs numbers, as the oracle's does; with a symbol it stays a term, x + Indeterminate)
+    if any(x is INDETERMINATE for x in args) and all(x is INDETERMINATE or is_number(x) for x in args):
         return INDETERMINATE
     infs = [x for x in args if _is_cinf(x)]
     if infs:
@@ -241,7 +243,7 @@ def _times(sess, e):
             sess.message("Infinity", "indet", "0 ComplexInfinity")
             return INDETERMINATE
         return COMPLEX_INFINITY
-    if coeff == 0:
+    if coeff == 0 and (type(coeff) is not float or not rest):
         return num(coeff) if type(coeff) is not float else 0.0
     bases = {}
     order = []

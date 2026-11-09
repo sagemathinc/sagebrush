@@ -48,7 +48,7 @@ test("§8.4: each mechanism reserves its peak first: admitted at the boundary, r
   const got = py(`
 import json, _sprig
 from fractions import Fraction
-from _sprig import mem
+from _sprig import mem, base
 from _sprig.eval import Session
 from _sprig.parse import parse
 from _sprig.expr import Expr, Sym
@@ -92,6 +92,9 @@ probe("literal", mem.int_bytes(bits), lambda err: len(parse("1*^20000")))
 big = 2 ** 9000
 probe("sum", chunk + mem.int_bytes(9002), lambda err: _sprig.input_form(s.evaluate(Expr("Plus", big, big)))[:3])
 probe("root", chunk + mem.int_bytes(2 * (big + 1).bit_length()), lambda err: _sprig.input_form(s.evaluate(Expr("Power", big + 1, Fraction(1, 2))))[:3])
+# (grader's A10) a product of two exact numbers, reserved before it is computed: its bound, the operands' bits + 1
+p1, p2 = 3 ** 300000, 7 ** 200000
+probe("times", chunk + mem.int_bytes(base.result_bits("*", p1, p2)), lambda err: _sprig.input_form(s.evaluate(Expr("Times", p1, p2)))[:3])
 # a Listable call threaded over lists
 probe("thread", chunk + 3 * 2 * mem.NODE_BYTES, lambda err: _sprig.input_form(s.evaluate(Expr("Plus", Expr("List", 1, 2, 3), 1))))
 print(json.dumps(out))

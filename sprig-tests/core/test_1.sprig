@@ -457,3 +457,31 @@ True == False
 x = 2; y := x + 1; x = 5; y
 (*-- core-229 *)
 Symbol["a b"]
+(*-- core-230 *)
+Indeterminate + x
+(*-- core-231 *)
+x + 0
+(*-- core-232 *)
+0 + x + 0
+(*-- core-233 *)
+2 x - 2 x + y
+(*-- core-234 *)
+0. x
+(*-- core-235 *)
+(-8)^(1/3)
+(*-- core-236 *)
+(-4)^(1/2)
+(*-- core-237 *)
+1 < 1
+(*-- core-238 *)
+1 <= 1
+(*-- core-239 *)
+2 > 2
+(*-- core-240 *)
+And[False, Print["no"]]
+(*-- core-241 *)
+Or[True, Print["no"]]
+(*-- core-242 *)
+{1, 2} + {1, 2, 3}
+(*-- core-243 *)
+x = x; x
