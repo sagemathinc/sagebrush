@@ -373,7 +373,7 @@ async function openNotebook(path, o = {}) {
 try {
   // ======================================================================== a failed Connect names the page's program
   const failText = await failedConnect();
-  ok(/^the connection failed \(is sagebrush-agent running,/.test(failText) && /such as sagebrush-agent\./.test(failText) && !/sagebrush-mcp|agent's sagebrush-agent|undefined/.test(failText), "a failed Connect names sagebrush-agent, in the failure and in Chrome's note (no sagebrush-mcp, no \"your agent's\", no undefined)", failText);
+  ok(/^the connection failed \(is sagebrush-agent running,/.test(failText) && /choose Allow/.test(failText) && /Learn more$/.test(failText) && !/sagebrush-mcp|agent's sagebrush-agent|undefined/.test(failText), "a failed Connect names sagebrush-agent, in the failure and in Chrome's note (no sagebrush-mcp, no \"your agent's\", no undefined)", failText);
   // ======================================================================== the page, paired; lazy loading
   await pair();
   const grant = notes.find((m) => m.method === "grant.changed")?.params;

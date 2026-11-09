@@ -25,7 +25,10 @@ ok(/<a href="\/agents\/connect\/">/.test(html), "its help box links to \"How to 
 const conn0 = existsSync(join(dist, "connect", "index.html")) ? readFileSync(join(dist, "connect", "index.html"), "utf8") : "";
 const release = (t) => ({ v: [...new Set([...t.matchAll(/sagebrush-agent(?:-|(?:<\/code>)?\s+)(\d+\.\d+\.\d+)/g)].map((m) => m[1]))], sha: [...new Set([...t.matchAll(/\b[0-9a-f]{64}\b/g)].map((m) => m[0]))] });
 const rh = release(html), rc = release(conn0);
-ok(rh.v.length === 1 && rh.sha.length === 1 && JSON.stringify(rh) === JSON.stringify(rc), `the help box and the connect page name the same one release and sha256: ${JSON.stringify(rh)} / ${JSON.stringify(rc)}`);
+ok(rh.v.length === 1 && rc.sha.length === 1 && JSON.stringify(rh.v) === JSON.stringify(rc.v) && rh.sha.every((x) => rc.sha.includes(x)), `the help box and the connect page name the same one release, and the connect page its sha256 (the help box no other): ${JSON.stringify(rh)} / ${JSON.stringify(rc)}`);
+// (William, Nov 8: no wall of text in the app: the help box is one short line, its command, and Learn more)
+const helpText = (/<div id="help"[^>]*>([\s\S]*?)<\/div>/.exec(html)?.[1] ?? "").replace(/<pre>[\s\S]*?<\/pre>/g, "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+ok(helpText.length > 0 && helpText.length <= 100 && /Learn more/.test(helpText), `the help box is one short line with Learn more (${helpText.length} characters): ${helpText}`);
 // (the connect page's option-2 commands, exactly: sagebrush.space's is the plain npx line (0.3.1 prints the
 // sagebrush.space link itself); DEV's sets the printed link and adds DEV's origin)
 const tgz = `https://agents.sagebrush.cloud/agents/sagebrush-agent-${rc.v[0]}.tgz`;

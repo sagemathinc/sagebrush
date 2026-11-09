@@ -193,8 +193,11 @@ try {
   await click(".sbag-box button.primary");
   ok(await until(`/connection failed/.test(document.querySelector(".sbag-box .err")?.textContent ?? "")`), "a failed connection is said in the dialog");
   const failText = await ev(`document.querySelector(".sbag-box .err").textContent`);
-  ok(/access apps on this device/.test(failText) && /Choose Allow/.test(failText) && !/[\u201c\u201d"]/.test(failText.slice(failText.indexOf("Chrome"))) && /Site settings/.test(failText) && !/Safari/.test(failText) && /^the connection failed/.test(failText), `in Chrome, it says to Allow its prompt and how to undo a block (${failText.slice(0, 60)}…)`);
-  ok(/is the agent's sagebrush-mcp running/.test(failText) && /such as your agent's sagebrush-mcp/.test(failText) && !/undefined|sagebrush-agent/.test(failText), "a page without its own program keeps naming the agent's sagebrush-mcp (and never \"undefined\")");
+  // (one short line on what Chrome asks, and Learn more for the rest, such as undoing a block: William, Nov 8, no wall of text)
+  const hint = failText.split("\n\n")[1] ?? "";
+  const learn = await ev(`(() => { const a = document.querySelector(".sbag-box .err a"); return a ? { text: a.textContent, href: a.getAttribute("href"), target: a.target } : null; })()`);
+  ok(/reach apps on this computer/.test(hint) && /choose Allow/.test(hint) && hint.length <= 130 && !/[\u201c\u201d"]/.test(hint) && !/Safari/.test(failText) && /^the connection failed/.test(failText) && learn?.text === "Learn more" && learn.href === "/agents/connect/" && learn.target === "_blank", `in Chrome, one line says to Allow its prompt, then Learn more (${hint.length} characters: ${hint.slice(0, 80)}…; ${JSON.stringify(learn)})`);
+  ok(/is the agent's sagebrush-mcp running/.test(failText) && !/undefined|sagebrush-agent/.test(failText), "a page without its own program keeps naming the agent's sagebrush-mcp (and never \"undefined\")");
   ok((await drive({ op: "status" })).ok.paired === false, "the code is still unused after the failed connection");
 
   // the right code, through the dialog, then the grant: /A, read and write, until the page closes

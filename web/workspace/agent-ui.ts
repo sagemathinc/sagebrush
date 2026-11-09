@@ -17,11 +17,14 @@ export type PairingWorkspace = GrantStore & {
   stat(p: string): Promise<{ trashed?: { from: string } } | null | undefined>;
 };
 
-export const SAFARI = "Safari doesn't let a web page reach a program on this computer. Use Chrome or Firefox, or the Sagebrush desktop app.";
+export const SAFARI = "Safari can't reach a program on this computer: use Chrome or Firefox.";
 // (Chrome asks once, per site, before a page may reach a program on this computer (Chrome 149: its "loopback network"
 // permission); headless or blocked, the socket fails with ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS.  A paraphrase, not
 // Chrome's exact label, which hasn't been seen in a headed browser yet)
-export const CHROME_ALLOW = "Chrome may ask whether this site can access apps on this device. Choose Allow, then Connect again: that lets this site connect to programs on this computer, such as your agent's sagebrush-mcp. If it was blocked: click the icon at the left of the address bar, open Site settings, allow that permission, and reload this page.";
+export const CHROME_ALLOW = "Chrome asks once to let this site reach apps on this computer: choose Allow, then Connect again.";
+/** Where the longer explanations are (William, Nov 8: one short line in the app, the rest behind "Learn more"). */
+export const CONNECT_DOCS = "/agents/connect/";
+const learnMore = () => { const a = document.createElement("a"); a.href = CONNECT_DOCS; a.target = "_blank"; a.rel = "noopener"; a.textContent = "Learn more"; return a; };
 export const isChromium = (ua = navigator.userAgent) => /chrome|chromium|crios|edg/i.test(ua);
 export const isSafari = (ua = navigator.userAgent) => /safari/i.test(ua) && !/chrome|chromium|crios|fxios|android|edg/i.test(ua);
 
@@ -196,7 +199,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
   /** The Connect dialog. `back` (A14 §3): where focus returns if it closes without connecting (the page's bar button). */
   function connect(code = "", port = "", back?: HTMLElement) {
     if (isSafari()) {
-      dialog("Connect an agent", (box, close) => { const okb = h("button", { className: "primary", textContent: "OK" }); okb.onclick = close; box.append(h("div", { textContent: SAFARI }), h("div", { className: "row" }, okb)); });
+      dialog("Connect an agent", (box, close) => { const okb = h("button", { className: "primary", textContent: "OK" }); okb.onclick = close; box.append(h("div", { textContent: SAFARI }, " ", learnMore()), h("div", { className: "row" }, okb)); });
       return;
     }
     if (pairing && pairing.state !== "closed") { showBar(); return; }
@@ -243,7 +246,8 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
           go.disabled = false;
           const m = String((e as Error).message ?? e);
           const failed = /^the connection failed/.test(m); // (nothing answered: not a refusal by the agent)
-          err.textContent = (/^refused|^protocol/.test(String((e as any)?.code)) && !failed && !/^the agent refused/i.test(m) ? "The agent refused: " : "") + named(m) + (/failed/.test(String((e as Error).message)) ? "\n\n" + (isChromium() ? named(CHROME_ALLOW) : SAFARI.replace(/^Safari/, "If this is Safari: Safari")) : "");
+          err.textContent = (/^refused|^protocol/.test(String((e as any)?.code)) && !failed && !/^the agent refused/i.test(m) ? "The agent refused: " : "") + named(m) + (/failed/.test(String((e as Error).message)) ? "\n\n" + (isChromium() ? CHROME_ALLOW : SAFARI) : "");
+          if (/failed/.test(String((e as Error).message))) err.append(" ", learnMore());
         }
       };
       box.append(h("div", { className: "note", textContent: o.program ? `Start ${o.program} in a terminal on this computer: it prints a code and a port (and a link that fills them in).` : "In your agent (Claude Code, Codex, …) with sagebrush-mcp, ask it to connect to Sagebrush: it gives a code and a port." }),
