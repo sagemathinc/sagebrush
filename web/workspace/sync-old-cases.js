@@ -91,10 +91,10 @@ async function shown(w, srv = fakeServer({ available: true, state: "off" })) {
     el.remove();
   }
 }
-const isOld = (v) => v.s.state === "off" && v.s.reason === W.OLD_SYNC_REASON && !v.client && v.line === "Sync off: " + W.OLD_SYNC_REASON && J(v.buttons) === J(["[x] Turn on sync…"]) && v.text.includes(W.OLD_SYNC_MESSAGE);
-const isClean = (v) => v.s.reason !== W.OLD_SYNC_REASON && J(v.buttons) === J(["Turn on sync…"]) && !v.text.includes(W.OLD_SYNC_MESSAGE);
+const isOld = (v) => v.s.state === "off" && v.s.reason === W.OLD_SYNC_REASON && !v.client && v.line === "Sync off: " + W.OLD_SYNC_REASON && J(v.buttons) === J(["[x] Turn on sync…"]) && v.text.includes(W.OLD_SYNC_LINE);
+const isClean = (v) => v.s.reason !== W.OLD_SYNC_REASON && J(v.buttons) === J(["Turn on sync…"]) && !v.text.includes(W.OLD_SYNC_LINE);
 // (R-DET-1: a read that failed, or an unexpected schema: off and refused the same, said without any clear-data advice)
-const isUnreadable = (v) => v.s.state === "off" && v.s.reason === W.UNREADABLE_REASON && !v.client && v.line === "Sync off: " + W.UNREADABLE_REASON && J(v.buttons) === J(["[x] Turn on sync…"]) && v.text.includes(W.UNREADABLE_MESSAGE) && !v.text.includes(W.OLD_SYNC_MESSAGE) && !/clear this site|site data|deletes/i.test(v.text);
+const isUnreadable = (v) => v.s.state === "off" && v.s.reason === W.UNREADABLE_REASON && !v.client && v.line === "Sync off: " + W.UNREADABLE_REASON && J(v.buttons) === J(["[x] Turn on sync…"]) && v.text.includes(W.UNREADABLE_MESSAGE) && !v.text.includes(W.OLD_SYNC_LINE) && !/clear this site|site data|deletes/i.test(v.text);
 const brief = (v) => J({ s: v.s, client: v.client, line: v.line, buttons: v.buttons });
 // (the panel's enable, through its button, against `srv` (enable answers generation 1): whether a lease was written)
 async function enableVia(w, srv = fakeServer({ available: true, state: "off" })) {
@@ -105,10 +105,10 @@ async function enableVia(w, srv = fakeServer({ available: true, state: "off" }))
     await until(() => buttons(el).includes("Turn on sync…"), 3000);
     const b = [...el.querySelectorAll("button")].find((x) => x.textContent === "Turn on sync…" && !x.disabled);
     b?.click();
-    const saidAny = () => el.textContent.includes(W.OLD_SYNC_MESSAGE) || el.textContent.includes(W.UNREADABLE_MESSAGE);
+    const saidAny = () => el.textContent.includes(W.OLD_SYNC_LINE) || el.textContent.includes(W.UNREADABLE_MESSAGE);
     await until(async () => srv.posts.length > 0 || (await meta(w, "sync:current")) || saidAny(), 3000);
     await until(async () => !!(await meta(w, "sync:current")) || saidAny(), 1500);
-    return { clicked: !!b, posts: [...srv.posts], lease: await meta(w, "sync:current"), proto: await meta(w, W.PROTO_KEY), said: el.textContent.includes(W.OLD_SYNC_MESSAGE), saidUnreadable: el.textContent.includes(W.UNREADABLE_MESSAGE) };
+    return { clicked: !!b, posts: [...srv.posts], lease: await meta(w, "sync:current"), proto: await meta(w, W.PROTO_KEY), said: el.textContent.includes(W.OLD_SYNC_LINE), saidUnreadable: el.textContent.includes(W.UNREADABLE_MESSAGE) };
   } finally {
     sec.dispose();
     el.remove();

@@ -355,11 +355,11 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   agentBtn.onclick = () => void pairAgent(host.ws).then((p) => p.connect(), agentFailed);
   // Present (present.ts, a chunk of its own, /sagebrush-latex-present.js): a beamer document's slides full screen,
   // step by step through their overlays; shown once the preview has slides
-  const presentBtn = el("button", "tex-present-btn", "Present"); presentBtn.title = "Present the slides full screen (arrow keys; Escape stops)"; presentBtn.hidden = true;
+  const presentBtn = el("button", "tex-present-btn", "Present"); presentBtn.title = "Present the slides full screen (arrow keys; Shift+Enter runs the code; Escape stops)"; presentBtn.hidden = true;
   // (Print / Save as PDF, William Nov 2: "an easy PDF download, so a person can print out something or archive it": File ▸
   // Print or save as PDF…, as in the notebook and board; the browser prints the rendered preview only, PRINT_CSS)
   // Run (run-core.mjs): the document's SageTeX code, in page order, in Sage; shown once the preview has SageTeX items
-  const runBtn = el("button", "tex-run", "Run"); runBtn.title = "Run the document's SageTeX code (Sage, in this browser)"; runBtn.hidden = true;
+  const runBtn = el("button", "tex-run", "Run"); runBtn.title = "Run the document's SageTeX code (Sage, in this browser): Shift+Enter"; runBtn.hidden = true;
   head.append(back, fileBtn, title, saveState, toggle, runBtn, cmBtn, agentBtn, presentBtn, status, tools);
   page.appendChild(fileMenu);
   // (a ?pair= link, or an agent this browser remembers: the pairing module mounted now, to connect or reconnect)
@@ -730,7 +730,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   let presenting: { stop(): void } | null = null;
   presentBtn.onclick = () => void loadPresent().then((m) => {
     if (!live() || presenting) return;
-    presenting = m.present({ slides: slidesNow, onRendered: E.onRendered, start: frameInView(), onExit: () => { presenting = null; presentBtn.focus(); } });
+    presenting = m.present({ slides: slidesNow, onRendered: E.onRendered, onRun: () => { runKey(false); }, start: frameInView(), onExit: () => { presenting = null; presentBtn.focus(); } });
   }, () => say("Couldn't load the presenter. Check the network, then click Present to try again."));
   E.onRendered(() => { presentBtn.hidden = slidesNow().length === 0; });
   life.signal.addEventListener("abort", () => presenting?.stop());
@@ -744,7 +744,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   //  another Run in the session, it runs nothing; running, its script is interrupted)
   let runStop: AbortController | null = null;
   E.onRendered(() => { const c = E.lastCheck(); if (c) runBtn.hidden = !(Array.isArray(c.sage) && c.sage.length); });
-  const runIdle = () => { running = false; runBtn.textContent = "Run"; runBtn.title = "Run the document's SageTeX code (Sage, in this browser)"; };
+  const runIdle = () => { running = false; runBtn.textContent = "Run"; runBtn.title = "Run the document's SageTeX code (Sage, in this browser): Shift+Enter"; };
   runBtn.onclick = async () => {
     if (running) { runStop?.abort(); say("stopping…"); return; }
     let rc: typeof import("./run-core.mjs");
@@ -785,6 +785,40 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       if (current()) say(String((err as Error)?.message ?? err).slice(0, 200));
     } finally { life.signal.removeEventListener("abort", stop); if (live()) runIdle(); else running = false; }
   };
+  // Shift+Enter runs, as Run does (William, Nov 3: "make 'shift+enter' run the code"), in the source and in Present. A
+  // Run under way is left alone (the button's second click is its Stop, never the key's). Whether the document has
+  // SageTeX code is the text's now, never the last render's (daybreak3, #874): the preview caught up, its items decide
+  // (none: the source's Shift+Enter is a newline, as before); behind (an edit just made), the key waits for this text's
+  // render, then runs, or, with no code, puts the newline where it was asked for. Only for the text it was pressed on:
+  // the text changed before that render, the key does nothing (astra, #874: never a Run of code typed after it)
+  const hasCode = (c: any) => Array.isArray(c?.sage) && c.sage.length > 0;
+  const runKey = (fromSource: boolean): boolean => {
+    if (running) return true;
+    const c = E.lastCheck();
+    if (c) { if (!hasCode(c)) return false; runBtn.click(); return true; }
+    const text = src.value, a = src.selectionStart, b = src.selectionEnd;
+    const off = E.onRendered(() => {
+      if (src.value !== text) { off(); return; }
+      const now = E.lastCheck();
+      if (!now) return;
+      off();
+      if (!live() || running) return;
+      if (hasCode(now)) runBtn.click();
+      else if (fromSource) { src.setRangeText("\n", a, b, "end"); src.dispatchEvent(new Event("input")); }
+    });
+    return true;
+  };
+  src.addEventListener("keydown", (ev) => { if (ev.key === "Enter" && ev.shiftKey && !ev.ctrlKey && !ev.metaKey && !ev.altKey && !ev.isComposing && runKey(true)) ev.preventDefault(); });
+  // (the items kept from the last Run while their code has changed, their values shown marked stale, sagetex.mjs
+  //  savedStates: said after a render when the status is empty, as every edit leaves it (daybreak3, #874), so the
+  //  count follows the edits; never over another message (a Run's "Ran ...", until the next edit), and never while a
+  //  Run is under way, whose own results come next)
+  E.onRendered(() => {
+    const c = E.lastCheck();
+    if (!c || running || status.textContent) return;
+    const n = (Array.isArray(c.sage) ? c.sage : []).filter((x: any) => x.s === "stale").length;
+    if (n) say(`${n} SageTeX item${n === 1 ? "" : "s"} out of date: Shift+Enter runs ${n === 1 ? "it" : "them"} again`);
+  });
   const agentTarget = { file: () => where.path, text: () => src.value, lastCheck: E.lastCheck, current: E.posCurrent, preview, images, css: PAGE_CSS, refresh: loadResults };
   registerLatexTools(); setTarget(agentTarget);
   life.signal.addEventListener("abort", () => clearTarget(agentTarget));
