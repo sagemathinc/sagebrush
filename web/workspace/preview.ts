@@ -10,6 +10,7 @@ import { migrationState, type MigrationState } from "./migrator";
 import { LIMITS, WorkspaceError, type Entry, type Version, type Workspace } from "./api";
 import { TRASH, nameOf, splitExt } from "./paths";
 import { syncSection } from "./sync-panel";
+import { learnMore } from "../docs-link";
 import { restoreServerVersion, serverVersionBytes, serverVersions } from "./server-versions";
 // (the LaTeX editor's define: true only in a build with it, web/build.ts; false or absent, its hook folds away)
 declare const __SB_LATEX__: boolean | undefined;
@@ -84,6 +85,11 @@ const STYLE = `
 .sbfprev .pb .note, .sbfprev .note { color: #5d645f; font-size: 12.5px; margin: 6px 0; }
 .sbfprev .note.remind { color: #7a5a12; }
 .sbfprev .note.remind button { background: none; border: 0; padding: 0; color: inherit; font: inherit; text-decoration: underline; cursor: pointer; }
+.sbfprev .export { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 10px 0; }
+.sbfprev .export .note { margin: 0; }
+.sbfprev a.learn { color: #5d645f; font-size: 12.5px; }
+.sbfprev p.learn { margin: 12px 0 0; text-align: right; }
+.sbfprev dl > button { justify-self: end; }
 .sbfprev .pa { display: flex; gap: 8px; padding: 8px 14px; border-top: 1px solid #e2e1d9; align-items: center; flex-wrap: wrap; }
 .sbfprev .pa .sp { flex: 1; }
 .sbfprev .pv { border-top: 1px solid #e2e1d9; padding: 8px 14px 12px; max-height: 34vh; overflow: auto; }
@@ -419,7 +425,8 @@ export function startGitpushAuto(w: Workspace, url: (file: string) => string): v
   }, delay);
 }
 
-/** The Storage panel (§6.3). */
+/** The Storage panel (§6.3): the usage bar, four rows, Export, and the Sync line; one short line each, every
+ * explanation in the docs (/docs/storage, web/docs/storage.md) behind "Learn more" (William, Nov 8: no wall of text). */
 export async function openStorage(w: Workspace, host: StorageHost): Promise<void> {
   const { box, close, onClose } = panel("Storage");
   const x = button("✕", close, "x");
@@ -437,11 +444,23 @@ export async function openStorage(w: Workspace, host: StorageHost): Promise<void
       (async () => { try { return await (globalThis.navigator as any)?.storage?.persisted?.(); } catch { return undefined; } })(),
     ]);
     body.replaceChildren();
-    if (est) {
-      body.append(h("div", { className: "use", textContent: `${fmtSize(est.usage)} used of ${fmtSize(est.quota)} this browser allows` }));
-      const m = h("div", { className: "meter" }, h("i", { style: `width:${Math.min(100, (100 * est.usage) / Math.max(1, est.quota)).toFixed(1)}%` }));
-      body.append(m);
-    } else body.append(h("p", { className: "note", textContent: "This browser doesn't say how much it holds." }));
+    // (the usage line, ending with whether this browser keeps the storage: "kept", or Keep to ask it; why: the docs)
+    const use0 = h("div", { className: "use", textContent: est ? `${fmtSize(est.usage)} used of ${fmtSize(est.quota)}` : "This browser doesn't say how much it holds" });
+    const keep = h("span", { className: "keep" });
+    if (kept === true) keep.textContent = " · kept";
+    else {
+      const ask = button("Keep", async () => {
+        let ok = false;
+        try { ok = !!(await (globalThis.navigator as any)?.storage?.persist?.()); } catch {}
+        host.say(ok ? "This browser will keep it" : "This browser didn't agree to keep it");
+        draw();
+      });
+      ask.title = "Ask this browser not to clear your files when space runs short";
+      keep.append(" · ", ask);
+    }
+    use0.append(keep);
+    body.append(use0);
+    if (est) body.append(h("div", { className: "meter" }, h("i", { style: `width:${Math.min(100, (100 * est.usage) / Math.max(1, est.quota)).toFixed(1)}%` })));
     const dl = h("dl");
     const line = (label: string, value: string, act?: HTMLElement, cls = "") => { const dd = h("dd", { textContent: value }); dd.className = cls; dl.append(h("dt", { textContent: label }), dd, act ?? h("span")); };
     holds = use.documents + use.files.count > 0;
@@ -450,39 +469,26 @@ export async function openStorage(w: Workspace, host: StorageHost): Promise<void
     line("Data files", `${use.files.count} · ${fmtSize(use.files.bytes)}`);
     let free: HTMLElement | undefined;
     if (use.versions.count && w.actor === "person") {
-      free = button(`Free ${fmtSize(use.versions.bytes)} of old versions…`, async () => {
+      free = button("Free…", async () => {
         if (!confirm(`Delete all ${use.versions.count} earlier versions of data files (${fmtSize(use.versions.bytes)})? The files as they are now stay. This can't be undone.`)) return;
         // (none newer than the newest shown, kept since: CORR-AC5-1)
         try { const n = await w.dropVersions("/", { expect: { maxId: use.versions.maxId } }); host.say(`${fmtSize(n)} of old versions deleted`); } catch (err) { host.fail(err); }
         draw();
       }, "danger");
       free.className += " free";
+      free.title = `Delete ${fmtSize(use.versions.bytes)} of old versions`;
     }
-    line("Earlier versions of files", `${use.versions.count} · ${fmtSize(use.versions.bytes)}`, free);
+    line("Old versions", `${use.versions.count} · ${fmtSize(use.versions.bytes)}`, free);
     const trashBtns = h("span", {}, button("Show", () => { close(); host.showTrash(); }));
-    if (use.trash.count) trashBtns.append(" ", button("Empty Trash…", async () => { await host.emptyTrash(); draw(); }, "danger"));
+    if (use.trash.count) trashBtns.append(" ", button("Empty…", async () => { await host.emptyTrash(); draw(); }, "danger"));
     line("Trash", `${use.trash.count} item${use.trash.count === 1 ? "" : "s"}${use.trash.bytes ? ` · ${fmtSize(use.trash.bytes)} of files` : ""}`, trashBtns);
     // (files kept the old way, being moved beside the index: capabilities §2b; read where they are meanwhile)
     const mig = await migrationState(w).catch(() => ({}) as MigrationState);
-    if (mig.paused) line("Moving your files' storage", "paused: storage is full. Your files are all still readable; free some space (empty Trash, delete old versions) and it goes on.", undefined, "warn");
+    if (mig.paused) line("Moving your files' storage", "paused: storage is full. Free some space to go on.", undefined, "warn");
     // (names in one folder that look the same, made before that was refused: listed so they can be told apart; capabilities §3)
     if (use.lookalikes.length) line("Names that look the same", use.lookalikes.slice(0, 3).map((g) => g.map((p) => `${p} (${[...nameOf(p)].map((c) => "U+" + c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")).slice(0, 40).join(" ")})`).join(" · ")).join("; ") + (use.lookalikes.length > 3 || use.lookalikesMore.groups ? `; and ${use.lookalikes.length - 3 + use.lookalikesMore.groups} more` : ""), undefined, "warn");
     else if (use.migration.left) line("Moving your files' storage", `${use.migration.left} file${use.migration.left === 1 ? "" : "s"} left (read where they are meanwhile)`);
-    body.append(dl);
-    const keep = h("p", { className: "keep" });
-    if (kept === true) keep.textContent = "Kept: this browser won't clear it when space runs short.";
-    else {
-      keep.textContent = kept === false ? "This browser may clear it when space runs short. " : "This browser doesn't say whether it keeps it when space runs short. ";
-      const ask = button("Ask the browser to keep it", async () => {
-        let ok = false;
-        try { ok = !!(await (globalThis.navigator as any)?.storage?.persist?.()); } catch {}
-        host.say(ok ? "This browser will keep it" : "This browser didn't agree to keep it (it may when the site is used more, or installed)");
-        draw();
-      });
-      keep.append(ask);
-    }
-    body.append(keep, h("p", { className: "note", textContent: "Nothing of yours is cleared without asking: only caches the page can fetch or compute again. Old versions and Trash go only when you delete them here." }));
-    body.append(exportBox, gitBox, syncBox);
+    body.append(dl, exportBox, gitBox, syncBox, h("p", { className: "learn" }, learnMore("storage", "Learn more about storage")));
   };
   // (Export all current files: its own section, kept across draw(); its flow is the lazy chunk's, loaded on a click)
   const exportBox = h("div", { className: "export" });
@@ -512,7 +518,7 @@ export async function openStorage(w: Workspace, host: StorageHost): Promise<void
       } catch (err) { host.fail(err); } finally { running = false; go.disabled = false; }
     };
     const go = button("Export all current files (.zip)", () => void start());
-    exportBox.append(go, h("p", { className: "note", textContent: "Includes the current notebooks, boards, data files and folders. TimeTravel, old file versions, Trash, and this device's settings are not included." }), status, flow);
+    exportBox.append(go, status, flow);
     void stamp();
     if (host.startExport) void start();
   }

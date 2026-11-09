@@ -276,7 +276,8 @@ try {
   // ---- 0. the panel: the button, its line, the status before any export; the chunk not loaded before the click
   await ev(`(() => { document.querySelector("#wssidebar .fmeter").click(); return 1; })()`);
   check(await until(`/Export all current files \\(\\.zip\\)/.test(${P}?.textContent ?? "")`), "the Storage panel offers Export all current files (.zip)");
-  check(/TimeTravel, old file versions, Trash, and this device's settings are not included/.test(await panelText()), "…with what isn't included, in one line");
+  // (what isn't included is the docs' (/docs/storage#export, web/test-build-docs.mjs): the panel says no paragraph, and links there)
+  check(!/not included/.test(await panelText()) && (await ev(`!!document.querySelector('.sbfprev a.learn[href$="/docs/storage"]')`)), "…what isn't included: in the docs, linked from the panel");
   // (the workspace holds files and none was exported on this device: the status line is the gentle reminder)
   check(/No export yet · Export now/.test(await panelText()), "…and no export prepared yet: the reminder in the status line's place");
   check(!(await ev(`[...performance.getEntriesByType("resource")].some((r) => /sagebrush-export/.test(r.name))`)), "the export's chunk isn't loaded before the click");

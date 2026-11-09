@@ -16,13 +16,13 @@ import { req } from "./db";
 import { switchToIf } from "./sync-outbox";
 import { readLife, sameLife, syncOffIf, type LifeMark } from "./sync-pins";
 import { SyncOwner } from "./sync-owner";
-import { DOC_SYNC_NOTE, docSyncOrigin } from "./doc-sync-switch";
 import { accountHash } from "../sync-protocol/protocol";
 import { openHistoryDb } from "../notebook/stores.js";
 import { readDebt, unackedDocs } from "../journal/rows.js";
 import { CLIENT, type Refusal } from "./sync-client";
 import { listedSummary } from "./sync-view";
-import { OLD_SYNC_MESSAGE, OLD_SYNC_REASON, UNREADABLE_MESSAGE, UNREADABLE_REASON, OldSyncError } from "./sync-old";
+import { OLD_SYNC_REASON, UNREADABLE_MESSAGE, UNREADABLE_REASON, OldSyncError } from "./sync-old";
+import { learnMore } from "../docs-link";
 
 export const PANEL = {
   /** the server's delay, clamped to this range */
@@ -150,6 +150,10 @@ export async function askStatus(f: Fetch, signal: AbortSignal): Promise<Answer> 
   }
 }
 
+/** The panel's line for old sync state here: short; what to do (OLD_SYNC_MESSAGE's words) is in the docs,
+ * /docs/storage#sync-off. */
+export const OLD_SYNC_LINE = "Sync is off here: this browser synced with an older version of Sagebrush.";
+
 export type SectionHost = { say(text: string): void; fail(e: unknown): void; usage(): Promise<{ files: { count: number; bytes: number } }>; confirm?: (text: string) => boolean; prompt?: (text: string) => string | null };
 
 /** The Sync section, drawn into `into`; dispose() (the panel's close) ends its poll and its subscription. */
@@ -235,19 +239,23 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
     if (!st.available && st.reason === "not_allowlisted") return;
     sec.append(h("h4", { textContent: "Sync" }));
     if (note) sec.append(h("p", { className: "note", textContent: note }));
+    // (one short line, and what it means or what to do in the docs: /docs/storage, web/docs/storage.md)
+    const line = (text: string, doc: string, cls = "note") => sec.append(h("p", { className: cls }, text + " ", learnMore(doc)));
     // (EXACT-ONLY: old sync state here: sync can't be turned on, and the page says what to do; its sync data
     // unreadable (R-DET-1): off the same, without advice to clear anything)
     const why = owner.view().s.reason;
     if (why === OLD_SYNC_REASON || why === UNREADABLE_REASON) {
       const sw = btn("Turn on sync…", () => {});
       sw.disabled = true;
-      sec.append(sw, h("p", { className: "note", textContent: why === OLD_SYNC_REASON ? OLD_SYNC_MESSAGE : UNREADABLE_MESSAGE }));
+      sec.append(sw);
+      line(why === OLD_SYNC_REASON ? OLD_SYNC_LINE : UNREADABLE_MESSAGE, "storage#sync-off");
       return;
     }
     if (!st.available) {
       const sw = btn("Turn on sync…", () => {});
       sw.disabled = true;
-      sec.append(sw, h("p", { className: "note", textContent: st.message ?? fallback[st.reason ?? ""] ?? "Sync isn't available" }));
+      sec.append(sw);
+      line(st.message ?? fallback[st.reason ?? ""] ?? "Sync isn't available", "storage#sync");
       return;
     }
     if (deleting || st.state === "deleting") {
@@ -261,12 +269,11 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
     const here = owner.client !== null || v.s.state !== "off";
     if (!on || !here) {
       sec.append(btn("Turn on sync…", () => void enable()));
-      if (on) sec.append(h("p", { className: "note", textContent: "Sync is on for your account, not in this browser." }));
+      line(on ? "Sync is on for your account, not in this browser." : "Sync your notebooks between your own devices.", "storage#sync");
     } else {
-      // (the foot: its count of refused changes not yet looked at is added by the details' read, below)
-      sec.append(h("p", { className: "sync-foot", textContent: `Sync is on: ${foot(v.s)}` }), btn("Turn off sync here", () => void off()));
-      // (DEV's switch for notebooks' contents: what it does and doesn't do yet, and that it lasts in this browser)
-      if (docSyncOrigin(location.origin)) sec.append(h("ul", { className: "note" }, ...DOC_SYNC_NOTE.map((t) => h("li", { textContent: t }))));
+      // (the foot: its count of refused changes not yet looked at is added by the details' read, below; what sync does
+      // and doesn't do yet is the docs', behind the link after the switch)
+      sec.append(h("p", { className: "sync-foot", textContent: `Sync is on: ${foot(v.s)}` }), btn("Turn off sync here", () => void off()), " ", learnMore("storage#sync"));
     }
     const lim = owner.limit;
     if (lim && lim.limit_bytes !== null) sec.append(h("p", { className: "note", textContent: `Your plan's storage: ${fmt(lim.used_bytes)} of ${fmt(lim.limit_bytes)} used` }));
