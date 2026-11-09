@@ -942,7 +942,9 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const sb = ((globalThis as any).sagebrush ??= {});
   const handle = { print: () => printPreview(), printMode: (on: boolean) => { document.documentElement.classList.toggle("tex-print", !!on); slidePages(!!on); }, fid: host.fid };
   sb.latex = handle;
-  dispose = () => { life.abort(); E.destroy(); dropImages(); cm?.destroy(); if (sb.latex === handle) delete sb.latex; };
+  // (left in its print layout, by an agent's printMode(true) then the page left or another file opened: put back, as
+  //  the layout hides all but this preview, and the slide page would stay the next page's paper)
+  dispose = () => { life.abort(); E.destroy(); dropImages(); cm?.destroy(); if (sb.latex === handle) { handle.printMode(false); delete sb.latex; } };
   // (closing for another file: what is pending written first, then the editor disposed of)
   // (held: read-only while a controlled switch settles and closes it; the saver's own read-only, for recovery, kept apart)
   let held = false, roSaver = false;

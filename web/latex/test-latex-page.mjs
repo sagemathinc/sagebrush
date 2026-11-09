@@ -3220,6 +3220,16 @@ $P = \sage{g[0]}$
       const p141 = await pageOf({ path: "/t/print-141.tex", sel: "section.slide", text: "\\documentclass[aspectratio=141]{beamer}\n\\begin{document}\n\\begin{frame}{A}\nx\n\\end{frame}\n\\end{document}\n" });
       const pArt = await pageOf({ path: "/t/print-article.tex", sel: ".p", text: "\\documentclass{article}\n\\begin{document}\nSome text.\n\\end{document}\n" });
       check(p141 === "@page { size: 148.5mm 105mm; margin: 0; }" && pArt === null, "Print: a beamer deck at aspectratio=141 gets its 148.5 x 105 mm page; an article gets no slide page", { p141, pArt });
+      // (#888's dispose note: a page left in its print layout (printMode(true)) and another file opened: the layout and the
+      //  slide page put back, not left on the next page)
+      await open(await mk("/t/print-left.tex", enc("\\documentclass{beamer}\n\\begin{document}\n\\begin{frame}{L}\nx\n\\end{frame}\n\\end{document}\n")));
+      await until(`!!document.querySelector(".tex-preview .ch:not([hidden]) section.slide")`, 20000);
+      const leftOn = await ev(`(window.sagebrush.latex.printMode(true), !!document.getElementById("sb-tex-slide-page") && document.documentElement.classList.contains("tex-print"))`);
+      const fNext = await mk("/t/print-next.tex", enc("\\documentclass{article}\n\\begin{document}\nNext.\n\\end{document}\n"));
+      await ev(`(window.__noReload = true, window.__sbTex({ path: "/t/print-next.tex", fid: ${JSON.stringify(fNext)} }), 1)`);
+      await until(`document.querySelector(".tex-preview")?.textContent.includes("Next.")`, 20000);
+      const leftAfter = await ev(`({ kept: window.__noReload === true, cls: document.documentElement.classList.contains("tex-print"), page: !!document.getElementById("sb-tex-slide-page") })`);
+      check(leftOn && leftAfter.kept && !leftAfter.cls && !leftAfter.page, "Print: a page left in its print layout, another file opened: the layout and its slide page put back", { leftOn, ...leftAfter });
     }
     // ---- @interact (a Sagebrush extension, William Nov 8; the Beamer plan's PR 3): a Run keeps an interact with its item,
     // and the preview draws it (the interact chunk, /sagebrush-latex-interact.js, fetched only now: no document before
