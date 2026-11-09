@@ -27,7 +27,7 @@ const statics = [];
   const copy = /st\.put\(\{ nb: id, time: row\.time, env: row\.env \}\)/.test(src["index.html"] ?? ""), imp = /st\.put\(\{ nb: id, time: env\.time, env \}\)/.test(src["notebook/bundle.js"] ?? "");
   statics.push([copy && imp, "Resume's copy and an import write {nb, time, env} rows alone"]);
 }
-const site = mkdtempSync(join(tmpdir(), "sb-nbj-site-")), src = mkdtempSync(join(here, ".test-journal-"));
+const site = mkdtempSync(join(tmpdir(), "sb-nbj-site-")), src = mkdtempSync(join(tmpdir(), "sb-nbj-src-"));
 let code = 1;
 // (one bundle, so the page, the workspace and the journal share one copy of the notebook's stores)
 writeFileSync(join(src, "entry.js"), [

@@ -42,7 +42,7 @@ export async function buildFailure(build) {
  * ("" the site's root).  Resolves {origin, stop}. */
 export async function serve(roots) {
   for (const d of Object.values(roots)) if (!d || !existsSync(join(d, "board", "index.html"))) throw new Error(`no built site at ${d} (web/dist: bun web/build.ts)`);
-  const site = mkdtempSync(join(tmpdir(), "sb-bjp-site-")), src = mkdtempSync(join(here, ".test-board-journal-page-"));
+  const site = mkdtempSync(join(tmpdir(), "sb-bjp-site-")), src = mkdtempSync(join(tmpdir(), "sb-bjp-src-"));
   writeFileSync(join(src, "entry.js"), `export * as W from ${JSON.stringify(join(here, "../workspace/index.ts"))};\nexport * as A from ${JSON.stringify(join(here, "../workspace/api.ts"))};\n`);
   const built = await buildFailure(() => Bun.build({ entrypoints: [join(src, "entry.js")], outdir: site, naming: "all.js", target: "browser", format: "esm" }));
   rmSync(src, { recursive: true, force: true });

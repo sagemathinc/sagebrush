@@ -8,7 +8,7 @@
 import { spawn } from "node:child_process";
 import { copyFileSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
 import { buildFailure, closeChrome, bounded, track, unlessEnding, inFlight } from "./test-board-journal-lib.mjs";
 // (the example boards are the corpus's, examples/board/<slug>/: file name -> path)
@@ -39,7 +39,13 @@ const statics = [];
   }
   statics.push([bad.length === 0, "no example board has a top-level rev, j, hash, unjournaled, stampOf, baseRev or id: " + J(bad)]);
 }
-const site = mkdtempSync(join(tmpdir(), "sb-bj-site-")), src = mkdtempSync(join(here, ".test-board-journal-"));
+// (both temp dirs outside the repository: a test writes nothing into web/, where a suite copying the tree
+// (test-history-d11.mjs) could list a dir this one is deleting)
+const site = mkdtempSync(join(tmpdir(), "sb-bj-site-")), src = mkdtempSync(join(tmpdir(), "sb-bj-src-"));
+{
+  const web = resolve(here, ".."), inside = (d) => !relative(web, resolve(d)).startsWith("..");
+  statics.push([!inside(src) && !inside(site), `its temp dirs are outside web/: ${J({ src, site })}`]);
+}
 let code = 1, server = null, profile = null;
 // (its own bound, 540 s, under the VM step's 600 s, and SIGTERM/SIGINT/SIGHUP: one FAIL line, its
 // Chrome closed (track, below), its server stopped and its dirs removed)

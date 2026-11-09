@@ -244,6 +244,8 @@ test("the limits census runs on engine-only, lib and src changes even when the n
   // the unsafe boundary's inputs select it too (scripts/unsafe-inventory.mjs runs in the census job)
   for (const f of ["scripts/unsafe-inventory.mjs", "test/unsafe-allow-inventory.json", ".cargo/config.toml", "engine/.cargo/config.toml", ".github/workflows/pypi.yml", "web/package.json"])
     assert.equal(classify([f]).census, "true", f);
+  // the temp-dir census's tool and suite too (scripts/test-temp-dirs.mjs runs in the census job)
+  for (const f of ["scripts/temp-dirs.mjs", "scripts/test-temp-dirs.mjs"]) assert.equal(classify([f]).census, "true", f);
   // and not for files the census does not read
   for (const f of ["design/plan.md", "app/src/main.ts", "optional/x/README.md"])
     assert.equal(classify([f]).census, "false", f);
