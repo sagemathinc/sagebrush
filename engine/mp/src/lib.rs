@@ -7,6 +7,7 @@
 //! - `mpf`: the raw mpf tuples and their arithmetic (libmpf's normalize,
 //!   from_man_exp, mpf_add/sub/mul/div/sqrt).
 
+pub mod mpc;
 pub mod mpf;
 pub mod nat;
 
