@@ -74,6 +74,8 @@ await section("units", async () => {
     }
   };
   const s = (path, access = "read") => ({ path, access });
+  // (the shipped bounds of the access log, as literals: every other row lowers them through the seam)
+  ok(U.AGENT.logDays === 7 && U.AGENT.logRows === 100_000, "the access log is kept 7 days and at most 100,000 rows: " + U.AGENT.logDays + ", " + U.AGENT.logRows);
   ok(sc([]) === "refused" && sc(Array.from({ length: 33 }, (_, i) => s("/f" + i))) === "refused" && Array.isArray(sc(Array.from({ length: 32 }, (_, i) => s("/f" + i)))), "1 to 32 scopes: 32 pass, 0 and 33 are refused");
   ok(sc([{ path: "/A", access: "admin" }]) === "refused" && sc([{ path: "/A" }]) === "refused" && sc([{ path: "/A", access: "read", x: 1 }]) === "refused" && sc(["/A"]) === "refused", "a scope is exactly {path, access}, access read or write");
   ok(sc([s("/A/../B")]) === "refused" && sc([s("A")]) === "refused" && sc([s("/A/./B")]) === "refused" && sc([s("/A\u0000")]) === "refused", "a path normPath refuses is refused (.., relative, ., NUL)");
@@ -472,7 +474,7 @@ await section("the access log", async () => {
   ok([...q1.rows, ...q2.rows, ...q3.rows].map((r) => r.id).join() === kept.rows.map((r) => r.id).join(), "the pages together are the log, in order");
   await seam(LG, { logPage: 100 });
   ok((await get(s, "/api/sync/v1/grants/log?before=abc")).status === 400 && (await get(s, "/api/sync/v1/grants/log?before=1234567890123456")).status === 400, "before= that isn't a number, or has 16 digits, is refused");
-  // rows older than the log's days (90; here 0.2 s): never shown, with no new request; and deleted by the alarm, 3 a step
+  // rows older than the log's days (7; here 0.2 s): never shown, with no new request; and deleted by the alarm, 3 a step
   // here, so the 5 rows take two steps
   // (the age lowered without arming the alarm: the rows are still stored when read, so only the read's own filter
   // can hide them)
@@ -494,6 +496,14 @@ await section("the access log", async () => {
   const aged = await logOf(s);
   ok(aged.rows.length === 1 && aged.rows[0].paths === '["/new"]', "a new row is shown: " + aged.rows.length);
   ok((await get(s, "/api/sync/v1/grants/log?before=x")).status === 400 && (await get(s, "/api/sync/v1/grants/log?grant=../x")).status === 400, "a bad page or grant is refused");
+  // one sweep step deletes one page, not every aged row: 5 rows (made at the full age, so no alarm is due for them),
+  // then aged without arming one, then single steps of 3
+  await seam(LG, { logMs: 7 * 86400_000, logSweep: 3 });
+  for (let i = 0; i < 4; i++) await agent(g2.token, "stat", { path: "/s" + i });
+  await seam(LG, { logMs: 200, noArm: true, clearAlarm: true });
+  await new Promise((res) => setTimeout(res, 300));
+  const n0 = (await (await seam(LG, {})).json()).log, n1 = (await (await seam(LG, { sweepNow: true })).json()).log, n2 = (await (await seam(LG, { sweepNow: true })).json()).log;
+  ok(n0 === 5 && n1 === 2 && n2 === 0, `an alarm step sweeps one page of aged rows (3 here): ${n0}, then ${n1}, then ${n2}`);
 });
 
 await section("a deleted account's grants", async () => {

@@ -2524,7 +2524,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
 
   /** Tests only: lower the agents' bounds, or expire a grant now. */
-  async testAgent(a: { perMinute?: number; perHour?: number; accountPerMinute?: number; logRows?: number; logMs?: number; logSweep?: number; logPage?: number; readonly?: boolean; noArm?: boolean; expireLive?: boolean; dayMs?: number; expireIn?: { id: string; ms: number }; clearAlarm?: boolean; minuteMs?: number; hourMs?: number; resetRates?: boolean; expire?: string }): Promise<{ log: number; grants: number; rates: number; rateRows: string; alarm: number | null }> {
+  async testAgent(a: { perMinute?: number; perHour?: number; accountPerMinute?: number; logRows?: number; logMs?: number; logSweep?: number; logPage?: number; readonly?: boolean; noArm?: boolean; expireLive?: boolean; dayMs?: number; expireIn?: { id: string; ms: number }; clearAlarm?: boolean; sweepNow?: boolean; minuteMs?: number; hourMs?: number; resetRates?: boolean; expire?: string }): Promise<{ log: number; grants: number; rates: number; rateRows: string; alarm: number | null }> {
     if (!testMode(this.env)) return { log: 0, grants: 0, rates: 0, rateRows: "", alarm: null };
     const b = this.agentBounds;
     if (a.perMinute !== undefined) b.perMinute = a.perMinute;
@@ -2553,6 +2553,8 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       await this.ctx.storage.deleteAlarm();
       this.alarmAt = null;
     }
+    // (one sweep step, as one alarm would run it: a page of aged rows)
+    if (a.sweepNow) this.sweepLog(Date.now());
     const due = a.logMs !== undefined && !a.noArm ? this.logDue() : null;
     if (due !== null) this.wakeBy(due);
     const count = (table: string) => (this.hasGrants() ? Number(this.one(`SELECT COUNT(*) AS n FROM ${table}`)!.n) : 0);
