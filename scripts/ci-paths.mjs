@@ -307,6 +307,10 @@ const webRunner = web && (webRuntime || inArea("board") || inArea("workspace") |
 const webWorkspace = web && (allWeb || inArea("workspace"));
 const webExport = webWorkspace || (web && suiteJobs.has("web-export"));
 const webLookalike = webWorkspace || (web && suiteJobs.has("web-lookalike"));
+// The share dialog's browser suite (web-sync.3, about 8.5 min alone, its own web-sync shard): in the full tier, but on a
+// pull request only when it changes sharing (web/share/, web/share-client/, the suite among them) or has the full-ci
+// label; a master push, the schedule and a dispatch always run it (grader's web-sync CI-time plan, Nov 9: PR CI <= 10 min)
+const webShare = full && (event !== "pull_request" || labels.includes("full-ci") || matches([/^web\/share\//, /^web\/share-client\//]));
 
 // The slow node tests (test/slow-tests.ts: skipped in place unless SAGEBRUSH_SLOW_TESTS=1; William, Nov 4, his pick
 // of option B): they run nightly and on a dispatch (test/slow-tests.ts reads the event itself), with the full-ci label,
@@ -353,6 +357,7 @@ const outputs = {
   web_runner: webRunner,
   web_export: webExport,
   web_lookalike: webLookalike,
+  web_share: webShare,
   census,
   unsafe_sweep: unsafeSweep,
   slow_tests: slowTests,
