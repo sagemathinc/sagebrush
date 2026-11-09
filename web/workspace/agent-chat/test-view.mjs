@@ -51,6 +51,52 @@ check(!bad(kh) && /class="attention other"/.test(kh) && /0 tokens/.test(kh), "a 
 const u = userNode({ kind: "user", id: "u", mode: HOSTILE, text: "hi" }, hooks.md);
 check(u.className === "user other", "a kept message with a hostile mode: class other", u.className);
 
+// ---- an agent's ids are keys, never a prototype's (daybreak3's E932-1): "__proto__" and "constructor" as a tool's call
+// and a prompt's id, in a turn made here and in one kept from before (an ordinary object, as JSON.parse makes it)
+{
+  const p = newThread("p", "P");
+  let n = 0;
+  const pe = (e) => apply(p, { seq: ++n, turn_id: "v1", ...e }, 1000);
+  pe({ type: "turn_started" });
+  for (const id of ["__proto__", "constructor"]) {
+    pe({ type: "tool_call_started", call: id, tool: "terminal", name: "sh", summary: id });
+    pe({ type: "attention", id, kind: "approval", state: "open", title: "Q " + id });
+  }
+  pe({ type: "tool_output", call: "toString", text: "x" });
+  pe({ type: "turn_finished", outcome: "completed" });
+  const pt = p.entries.find((e) => e.kind === "turn");
+  const tools = Object.values(pt.tools), atts = Object.values(pt.attention);
+  check(Object.getPrototypeOf(pt.tools) === null && Object.getPrototypeOf(pt.attention) === null && tools.length === 2 && atts.length === 2 && tools.every((x) => x.status === "unknown") && pt.parts.filter((x) => x.kind === "attention").length === 2 && Object.getPrototypeOf({}) === Object.prototype && !("summary" in Object.prototype),
+    "ids __proto__ and constructor: ordinary entries (each tool ended unknown with the turn, each prompt a part); no prototype changed; an unknown call's output dropped", { tools, atts: atts.map((x) => x.id) });
+  const ph = turnNode(p, pt, hooks).innerHTML;
+  check((ph.match(/<details class="tool/g) ?? []).length === 2 && (ph.match(/data-attention=/g) ?? []).length === 2, "…both drawn, tools and prompts", ph.slice(0, 300));
+  // (a kept turn: JSON's ordinary objects; an own "__proto__" key is data, and a part naming an id with no entry draws nothing)
+  const keptP = JSON.parse('{"kind":"turn","turn_id":"w","state":"completed","outcome":"completed","parts":[{"kind":"tool","call":"__proto__"},{"kind":"tool","call":"toString"},{"kind":"attention","id":"constructor"}],"tools":{"__proto__":{"call":"__proto__","tool":"terminal","name":"sh","summary":"s","status":"ok","output":""}},"attention":{},"started":0}');
+  const kph = turnNode({ ...newThread("w", "w"), entries: [keptP] }, keptP, hooks).innerHTML;
+  check((kph.match(/<details class="tool/g) ?? []).length === 1 && !/data-attention=/.test(kph), "a kept turn: its own __proto__ tool drawn; an inherited toString or constructor never", kph.slice(0, 300));
+}
+// ---- usage and durations: finite, not negative, numbers (daybreak3's E932-2), as applied and again where drawn
+{
+  const q = newThread("q", "Q");
+  let n = 0;
+  const qe = (e) => apply(q, { seq: ++n, turn_id: "w1", ...e }, 1000);
+  qe({ type: "turn_started" });
+  qe({ type: "turn_usage", usage: { output_tokens: 5, input_tokens: HOSTILE, extra: HOSTILE } });
+  const qt = q.entries.find((e) => e.kind === "turn");
+  check(JSON.stringify(qt.usage) === '{"input_tokens":0,"output_tokens":5}', "usage: a fresh object of the two counts, a bad one 0, nothing else kept", qt.usage);
+  for (const v of [-1, Infinity, NaN, "7"]) {
+    qe({ type: "turn_usage", usage: { output_tokens: v, input_tokens: 1 } });
+  }
+  check(qt.usage.output_tokens === 5, "…an output count that is negative, infinite, NaN or text changes nothing", qt.usage);
+  const draw = (usage, dur) => {
+    const k = { kind: "turn", turn_id: "z", state: "completed", outcome: "completed", parts: [{ kind: "tool", call: "c" }], tools: { c: { call: "c", tool: "terminal", name: "sh", summary: "s", status: "error", output: "", duration_ms: dur } }, attention: {}, usage, started: 0, finished: 0 };
+    return turnNode({ ...newThread("z", "z"), entries: [k] }, k, hooks).innerHTML;
+  };
+  const shown = [["12", "9"], [-3, -5], [Infinity, Infinity], [1e400, NaN]].map(([u, d]) => draw({ output_tokens: u }, d));
+  check(shown.every((x) => /0 tokens/.test(x) && !/ s<|NaN|Infinity|-/.test(x.replace(/data-[a-z-]+/g, ""))), "a kept turn's usage and a tool's duration that aren't finite, non-negative numbers: 0 tokens, no duration", shown.map((x) => x.slice(-120)));
+  check(/12 tokens/.test(draw({ output_tokens: 12 }, 1500)) && /1\.5 s/.test(draw({ output_tokens: 12 }, 1500)), "…and good ones shown", draw({ output_tokens: 12 }, 1500).slice(-200));
+}
+
 const failed = results.filter(([ok]) => !ok);
 if (failed.length) { console.log(`FAIL: ${failed.length} of ${results.length}`); process.exit(1); }
 console.log(`ok: the agents chat's view and its checks, ${results.length} checks`);

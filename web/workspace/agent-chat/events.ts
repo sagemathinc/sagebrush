@@ -120,7 +120,7 @@ function turnOf(thread: Thread, turn_id: string, time: number): Turn {
     const e = thread.entries[i];
     if (e.kind === "turn" && e.turn_id === turn_id) return e;
   }
-  const turn: Turn = { kind: "turn", turn_id, state: "running", parts: [], tools: {}, attention: {}, started: time };
+  const turn: Turn = { kind: "turn", turn_id, state: "running", parts: [], tools: Object.create(null), attention: Object.create(null), started: time };
   thread.entries.push(turn);
   return turn;
 }
@@ -132,7 +132,9 @@ function messagePart(turn: Turn, id: string) {
 
 // What an event may carry into the thread, checked as it's applied (turn events come from the agent's side): the kinds
 // and states the view knows, an artifact's language as a short name, counts as numbers. A field outside its set is
-// replaced by its safe value, or the event is left out.
+// replaced by its fallback value, or the event is left out. A tool's or a prompt's id is the agent's: its record is
+// read and written as an own property only (own, put), so an id like "__proto__" or "constructor" is an ordinary key, in
+// a turn made here (null prototype) and in one kept from before (JSON's, an ordinary object) alike.
 export const TOOL_STATUSES = ["running", "ok", "error", "unknown"] as const;
 export const ATTENTION_STATES = ["open", "approved", "denied"] as const;
 export const ARTIFACT_KINDS = ["markdown", "code", "diff", "notebook"] as const;
@@ -140,7 +142,11 @@ const OUTCOMES: readonly TurnOutcome[] = ["completed", "interrupted", "error"];
 const oneOf = <T extends string>(v: unknown, xs: readonly T[]): v is T => typeof v === "string" && (xs as readonly string[]).includes(v);
 /** An artifact's language as a name the view can show: letters, digits and "+#._-", at most 32; anything else, none. */
 export const langOf = (v: unknown): string | undefined => (typeof v === "string" && /^[A-Za-z0-9+#._-]{1,32}$/.test(v) ? v : undefined);
-const count = (v: unknown): number | undefined => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : undefined);
+/** A count or a duration as a number the view can show: finite and not negative; anything else, none. */
+export const count = (v: unknown): number | undefined => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : undefined);
+/** A record's own entry for `k`, never one inherited (an id like "__proto__" or "toString"). */
+export const own = <T,>(rec: Record<string, T> | undefined, k: string): T | undefined => (rec && Object.hasOwn(rec, k) ? rec[k] : undefined);
+const put = <T,>(rec: Record<string, T>, k: string, v: T) => { Object.defineProperty(rec, k, { value: v, writable: true, enumerable: true, configurable: true }); };
 
 // Applies one event. A duplicate (seq <= applied_seq) is dropped; a gap
 // means the caller must ask for a reset (returns false).
@@ -183,16 +189,16 @@ export function apply(thread: Thread, e: TurnEvent, time = Date.now()): boolean 
       else turn.parts.push({ kind: "thinking", text: e.text });
       break;
     case "tool_call_started":
-      turn.tools[e.call] = { call: e.call, tool: e.tool, name: e.name, summary: e.summary, status: "running", output: "" };
+      put(turn.tools, e.call, { call: e.call, tool: e.tool, name: e.name, summary: e.summary, status: "running", output: "" });
       turn.parts.push({ kind: "tool", call: e.call });
       break;
     case "tool_output": {
-      const tool = turn.tools[e.call];
+      const tool = own(turn.tools, e.call);
       if (tool) tool.output += e.text;
       break;
     }
     case "tool_call_finished": {
-      const tool = turn.tools[e.call];
+      const tool = own(turn.tools, e.call);
       if (!tool) break;
       tool.status = oneOf(e.status, TOOL_STATUSES) && e.status !== "running" ? e.status : "unknown";
       if (e.summary != null) tool.summary = e.summary;
@@ -204,8 +210,8 @@ export function apply(thread: Thread, e: TurnEvent, time = Date.now()): boolean 
     }
     case "attention":
       if (!oneOf(e.state, ATTENTION_STATES)) break;
-      if (!turn.attention[e.id]) turn.parts.push({ kind: "attention", id: e.id });
-      turn.attention[e.id] = { id: e.id, kind: e.kind, state: e.state, title: e.title, summary: e.summary, detail: e.detail };
+      if (!own(turn.attention, e.id)) turn.parts.push({ kind: "attention", id: e.id });
+      put(turn.attention, e.id, { id: e.id, kind: e.kind, state: e.state, title: e.title, summary: e.summary, detail: e.detail });
       break;
     case "artifact": {
       if (!oneOf(e.kind, ARTIFACT_KINDS)) break;
@@ -219,7 +225,8 @@ export function apply(thread: Thread, e: TurnEvent, time = Date.now()): boolean 
       break;
     }
     case "turn_usage":
-      if (count(e.usage?.output_tokens) !== undefined) turn.usage = e.usage;
+      // (a fresh object of the two counts, each finite and not negative; without an output count, none)
+      if (count(e.usage?.output_tokens) !== undefined) turn.usage = { input_tokens: count(e.usage.input_tokens) ?? 0, output_tokens: count(e.usage.output_tokens)! };
       break;
     case "turn_error":
       turn.error = { code: e.code, message: e.message };
