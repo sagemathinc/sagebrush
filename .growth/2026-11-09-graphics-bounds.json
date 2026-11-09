@@ -1,10 +1,10 @@
 {
  "v": 1,
- "reason": "Sage's Graphics.xmin/xmax/ymin/ymax (lib/sage_plot.py: the range set for the axis, else the extent of the primitives; set with a value). Re-measured with bun 1.4.4 (size-record.sh) on master ad8de03c vs head fcfe34e5 (the code measured; the commits after it change only this marker, budgets.json and synced or generated files): cli/lib.gen.js +628, cli/pyjs.cjs +2176, engine/lib/sage.pre +5445, engine/lib/sage.src +1865; no other row moves. Markers: exact, except cli/pyjs.cjs 2240 (+2176 measured, plus 64 B of margin, as it moves with master). Ceiling (rule 4): engine/lib/sage.src 2980758 -> 2982623, the measured head 2982559 + 64.",
+ "reason": "Sage's Graphics.xmin/xmax/ymin/ymax (lib/sage_plot.py: the range set for the axis, else the extent of the primitives; set with a value; lib/_sage_graph.py: a graph's picture carries that range). Re-measured with bun 1.4.4 (size-record.sh) on master f45586af vs head 4fa97e70 (the head measured; only this marker and budgets.json follow it): cli/lib.gen.js +700, cli/pyjs.cjs +2324, engine/lib/sage.pre +6231, engine/lib/sage.src +2080; no other row moves. Markers: exact, except cli/pyjs.cjs 2388 (+2324 measured, plus 64 B of margin, as it moves with master). Ceiling (rule 4): engine/lib/sage.src 2980967 -> 2983047, the measured head 2982983 + 64.",
  "bytes": {
-  "cli/lib.gen.js": 628,
-  "cli/pyjs.cjs": 2240,
-  "engine/lib/sage.pre": 5445,
-  "engine/lib/sage.src": 1865
+  "cli/lib.gen.js": 700,
+  "cli/pyjs.cjs": 2388,
+  "engine/lib/sage.pre": 6231,
+  "engine/lib/sage.src": 2080
  }
 }
