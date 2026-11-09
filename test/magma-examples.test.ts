@@ -102,7 +102,10 @@ test("every Magma index example prints what it shows, in a fresh session", { ski
 test(`a fixed sample of ${PR_SAMPLE} Magma index examples prints what each shows, in a fresh session (every pull request)`, { skip: sampleSkip }, async () => {
   const names = Object.keys(examples).sort();
   assert.ok(names.length >= 158, `${names.length} examples`);
-  await checkExamples(prSample(names, PR_SAMPLE));
+  // (the sample is PR_SAMPLE distinct examples: an empty or repeated sample would pass without checking them)
+  const sample = prSample(names, PR_SAMPLE);
+  assert.equal(new Set(sample).size, PR_SAMPLE, sample.join(" "));
+  await checkExamples(sample);
 });
 
 test("Magma 2.18 prints the same for every example but the listed ones", () => {

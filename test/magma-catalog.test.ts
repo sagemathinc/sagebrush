@@ -58,5 +58,8 @@ test("catalog gate 3: every Magma example prints exactly its expected output, in
 test(`catalog gate 3, a fixed sample of ${PR_SAMPLE} Magma examples: each prints exactly its expected output, in a fresh session (every pull request)`, { skip: sampleSkip }, async () => {
   const examples = allExamples();
   assert.ok(examples.length >= 40, `${examples.length} examples`);
-  await checkExamples(prSample(examples, PR_SAMPLE));
+  // (PR_SAMPLE distinct examples: an empty or repeated sample would pass without checking them)
+  const sample = prSample(examples, PR_SAMPLE);
+  assert.equal(new Set(sample).size, PR_SAMPLE);
+  await checkExamples(sample);
 });
