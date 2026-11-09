@@ -80,7 +80,9 @@ try {
     if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m); waiting.delete(m.id); }
     if (m.method === "Network.requestWillBeSent") requests.push(m.params.request.url);
     if (m.method === "Log.entryAdded" || m.method === "Runtime.consoleAPICalled") console_.push(JSON.stringify(m.params).slice(0, 300));
+    if (m.method === "Fetch.requestPaused") send(failChunk ? "Fetch.failRequest" : "Fetch.continueRequest", failChunk ? { requestId: m.params.requestId, errorReason: "InternetDisconnected" } : { requestId: m.params.requestId });
   };
+  let failChunk = false;
   const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); sock.send(JSON.stringify({ id, method, params })); });
   const ev = async (expr) => { const r = await send("Runtime.evaluate", { expression: expr, awaitPromise: true, returnByValue: true }); if (!r.result || r.result.exceptionDetails) throw new Error(JSON.stringify(r.result?.exceptionDetails ?? r.error ?? r).slice(0, 400)); return r.result.result?.value; };
   const until = async (expr, ms = 20000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(100); } return false; };
@@ -98,8 +100,17 @@ try {
   ok(await until(`!document.querySelector("#agentbtn").hidden`), "the page offers Agent");
   ok(!requests.some(chunk), "the agent chunk isn't fetched before it's wanted");
   await shot("1-agent-button");
+  ok(await ev(`document.querySelector("#agentbtn").title`) === "Connect an agent on this computer (Claude Code, Codex, …) to files you choose", "its title says the person chooses the files");
+  // the chunk's fetch failing (the network down, or the site updated since the page loaded): said in one line, and the
+  // next press fetches it again
+  await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-agent.js*" }] });
+  failChunk = true;
   await ev(`(document.querySelector("#agentbtn").click(), true)`);
-  ok(await until(`!!document.querySelector(".sbag-box")`) && requests.some(chunk), "Agent fetches the chunk and opens Connect");
+  ok(await until(`document.querySelector("#status")?.textContent === "Couldn't load the agent connection. Press Agent to try again, or reload the page."`) && !(await ev(`!!document.querySelector(".sbag-box")`)), "the chunk's fetch failing: the page says so in one line");
+  failChunk = false;
+  await send("Fetch.disable");
+  await ev(`(document.querySelector("#agentbtn").click(), true)`);
+  ok(await until(`!!document.querySelector(".sbag-box")`) && requests.some(chunk), "the next press fetches the chunk again and opens Connect", requests.filter(chunk));
   await shot("2-connect");
   await ev(`(document.activeElement?.blur(), document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })), [...document.querySelectorAll(".sbag-box button")].find((b) => b.textContent === "Cancel")?.click(), true)`);
   ok(await until(`!document.querySelector(".sbag-box")`), "Cancel closes it");

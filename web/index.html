@@ -392,7 +392,7 @@
     <button id="runstale" hidden title="Run the cells that are stale (left by the time limit, or manual)">Run stale</button>
     <span class="sp"></span>
     <select id="mode" aria-label="Language" title="Python mode: Python as it is, 2**3 is 8 and 2/3 is 0.666…"><option value="python">Python</option><option value="sage">Sage</option><option value="magma">Magma</option><option value="matlab">MATLAB</option></select>
-    <button id="agentbtn" hidden title="Connect an agent on this computer (Claude Code, Codex, …) to this notebook's files">Agent</button>
+    <button id="agentbtn" hidden title="Connect an agent on this computer (Claude Code, Codex, …) to files you choose">Agent</button>
     <button id="filebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="filemenu" title="New, open, examples, download, upload and share notebooks">File ▾</button>
     <button id="morebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="moremenu" title="Text cells, the interpreter, files, console, TimeTravel, keys" aria-label="More">⋯</button>
   </div>
@@ -3886,7 +3886,7 @@ let agentPairing = null, agentTries = 0;
 const pairAgent = (w) => (agentPairing ??= import(new URL("sagebrush-agent.js", location.href).href + (agentTries++ ? `?try=${agentTries}` : ""))
   .then((m) => m.mountAgentPairing(w, { link: pairLink() })))
   .catch((e) => { agentPairing = null; throw e; });
-const agentFailed = () => { statusEl.textContent = "Couldn't load the agent connection. Check the network, then press Agent to try again."; };
+const agentFailed = () => { statusEl.textContent = "Couldn't load the agent connection. Press Agent to try again, or reload the page."; };
 if (!LOCAL && !window.__TAURI__) wsReady.then((w) => {
   if (!w) return;
   agentBtn.hidden = false;
