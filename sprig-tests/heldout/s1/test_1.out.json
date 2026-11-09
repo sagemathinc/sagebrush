@@ -1,0 +1,462 @@
+{
+ "cases": [
+  {
+   "fullform": "14",
+   "id": "s1-1",
+   "messages": [],
+   "output": "",
+   "result": "14"
+  },
+  {
+   "fullform": "-4",
+   "id": "s1-2",
+   "messages": [],
+   "output": "",
+   "result": "-4"
+  },
+  {
+   "fullform": "4",
+   "id": "s1-3",
+   "messages": [],
+   "output": "",
+   "result": "4"
+  },
+  {
+   "fullform": "512",
+   "id": "s1-4",
+   "messages": [],
+   "output": "",
+   "result": "512"
+  },
+  {
+   "fullform": "Rational[1, 2]",
+   "id": "s1-5",
+   "messages": [],
+   "output": "",
+   "result": "1/2"
+  },
+  {
+   "fullform": "1",
+   "id": "s1-6",
+   "messages": [],
+   "output": "",
+   "result": "1"
+  },
+  {
+   "fullform": "5",
+   "id": "s1-7",
+   "messages": [],
+   "output": "",
+   "result": "5"
+  },
+  {
+   "fullform": "Times[5, x]",
+   "id": "s1-8",
+   "messages": [],
+   "output": "",
+   "result": "5*x"
+  },
+  {
+   "fullform": "Times[Power[x, 2], y]",
+   "id": "s1-9",
+   "messages": [],
+   "output": "",
+   "result": "x^2*y"
+  },
+  {
+   "fullform": "Power[x, 5]",
+   "id": "s1-10",
+   "messages": [],
+   "output": "",
+   "result": "x^5"
+  },
+  {
+   "fullform": "b",
+   "id": "s1-11",
+   "messages": [],
+   "output": "",
+   "result": "b"
+  },
+  {
+   "fullform": "2.`",
+   "id": "s1-12",
+   "messages": [],
+   "output": "",
+   "result": "2."
+  },
+  {
+   "fullform": "Rational[1, 100]",
+   "id": "s1-13",
+   "messages": [],
+   "output": "",
+   "result": "1/100"
+  },
+  {
+   "fullform": "2",
+   "id": "s1-14",
+   "messages": [],
+   "output": "",
+   "result": "2"
+  },
+  {
+   "fullform": "21",
+   "id": "s1-15",
+   "messages": [],
+   "output": "",
+   "result": "21"
+  },
+  {
+   "fullform": "True",
+   "id": "s1-16",
+   "messages": [],
+   "output": "",
+   "result": "True"
+  },
+  {
+   "fullform": "True",
+   "id": "s1-17",
+   "messages": [],
+   "output": "",
+   "result": "True"
+  },
+  {
+   "fullform": "False",
+   "id": "s1-18",
+   "messages": [],
+   "output": "",
+   "result": "False"
+  },
+  {
+   "fullform": "False",
+   "id": "s1-19",
+   "messages": [],
+   "output": "",
+   "result": "False"
+  },
+  {
+   "fullform": "{11, 22}",
+   "id": "s1-20",
+   "messages": [],
+   "output": "",
+   "result": "{11, 22}"
+  },
+  {
+   "fullform": "{2, 4, 6}",
+   "id": "s1-21",
+   "messages": [],
+   "output": "",
+   "result": "{2, 4, 6}"
+  },
+  {
+   "fullform": "{1, 4, 9}",
+   "id": "s1-22",
+   "messages": [],
+   "output": "",
+   "result": "{1, 4, 9}"
+  },
+  {
+   "fullform": "f[1, 2][3]",
+   "id": "s1-23",
+   "messages": [],
+   "output": "",
+   "result": "f[1, 2][3]"
+  },
+  {
+   "fullform": "Hold[Plus[1, 1]]",
+   "id": "s1-24",
+   "messages": [],
+   "output": "",
+   "result": "Hold[1 + 1]"
+  },
+  {
+   "fullform": "HoldForm[Plus[2, 2]]",
+   "id": "s1-25",
+   "messages": [],
+   "output": "",
+   "result": "2 + 2"
+  },
+  {
+   "fullform": "120",
+   "id": "s1-26",
+   "messages": [],
+   "output": "",
+   "result": "120"
+  },
+  {
+   "fullform": "2",
+   "id": "s1-27",
+   "messages": [],
+   "output": "",
+   "result": "2"
+  },
+  {
+   "fullform": "{2, -2.5`, p[a]}",
+   "id": "s1-28",
+   "messages": [],
+   "output": "",
+   "result": "{2, -2.5, p[a]}"
+  },
+  {
+   "fullform": "{4, q[-2]}",
+   "id": "s1-29",
+   "messages": [],
+   "output": "",
+   "result": "{4, q[-2]}"
+  },
+  {
+   "fullform": "4",
+   "id": "s1-30",
+   "messages": [],
+   "output": "",
+   "result": "4"
+  },
+  {
+   "fullform": "Integer",
+   "id": "s1-31",
+   "messages": [],
+   "output": "",
+   "result": "Integer"
+  },
+  {
+   "fullform": "{11, 3}",
+   "id": "s1-32",
+   "messages": [],
+   "output": "",
+   "result": "{11, 3}"
+  },
+  {
+   "fullform": "{a, x, c}",
+   "id": "s1-33",
+   "messages": [],
+   "output": "",
+   "result": "{a, x, c}"
+  },
+  {
+   "fullform": "{1, 4, g[3]}",
+   "id": "s1-34",
+   "messages": [],
+   "output": "",
+   "result": "{1, 4, g[3]}"
+  },
+  {
+   "fullform": "{b, a}",
+   "id": "s1-35",
+   "messages": [],
+   "output": "",
+   "result": "{b, a}"
+  },
+  {
+   "fullform": "Plus[1, b]",
+   "id": "s1-36",
+   "messages": [],
+   "output": "",
+   "result": "1 + b"
+  },
+  {
+   "fullform": "Power[Plus[1, y], 2]",
+   "id": "s1-37",
+   "messages": [],
+   "output": "",
+   "result": "(1 + y)^2"
+  },
+  {
+   "fullform": "{1, 0, 3, 0}",
+   "id": "s1-38",
+   "messages": [],
+   "output": "",
+   "result": "{1, 0, 3, 0}"
+  },
+  {
+   "fullform": "x",
+   "id": "s1-39",
+   "messages": [],
+   "output": "",
+   "result": "x"
+  },
+  {
+   "fullform": "x",
+   "id": "s1-40",
+   "messages": [],
+   "output": "",
+   "result": "x"
+  },
+  {
+   "fullform": "Null",
+   "id": "s1-41",
+   "messages": [],
+   "output": "",
+   "result": "Null"
+  },
+  {
+   "fullform": "If[x, a, b]",
+   "id": "s1-42",
+   "messages": [],
+   "output": "",
+   "result": "If[x, a, b]"
+  },
+  {
+   "fullform": "2",
+   "id": "s1-43",
+   "messages": [],
+   "output": "",
+   "result": "2"
+  },
+  {
+   "fullform": "Null",
+   "id": "s1-44",
+   "messages": [],
+   "output": "1\n2\n3\n",
+   "result": "Null"
+  },
+  {
+   "fullform": "5",
+   "id": "s1-45",
+   "messages": [],
+   "output": "",
+   "result": "5"
+  },
+  {
+   "fullform": "Null",
+   "id": "s1-46",
+   "messages": [],
+   "output": "0\n1\n2\n",
+   "result": "Null"
+  },
+  {
+   "fullform": "4",
+   "id": "s1-47",
+   "messages": [],
+   "output": "",
+   "result": "4"
+  },
+  {
+   "fullform": "4",
+   "id": "s1-48",
+   "messages": [],
+   "output": "",
+   "result": "4"
+  },
+  {
+   "fullform": "7",
+   "id": "s1-49",
+   "messages": [],
+   "output": "",
+   "result": "7"
+  },
+  {
+   "fullform": "5",
+   "id": "s1-50",
+   "messages": [],
+   "output": "",
+   "result": "5"
+  },
+  {
+   "fullform": "Null",
+   "id": "s1-51",
+   "messages": [],
+   "output": "a1x\n",
+   "result": "Null"
+  },
+  {
+   "fullform": "Rational",
+   "id": "s1-52",
+   "messages": [],
+   "output": "",
+   "result": "Rational"
+  },
+  {
+   "fullform": "Real",
+   "id": "s1-53",
+   "messages": [],
+   "output": "",
+   "result": "Real"
+  },
+  {
+   "fullform": "String",
+   "id": "s1-54",
+   "messages": [],
+   "output": "",
+   "result": "String"
+  },
+  {
+   "fullform": "Symbol",
+   "id": "s1-55",
+   "messages": [],
+   "output": "",
+   "result": "Symbol"
+  },
+  {
+   "fullform": "f",
+   "id": "s1-56",
+   "messages": [],
+   "output": "",
+   "result": "f"
+  },
+  {
+   "fullform": "FullForm[Plus[a, Times[-1, b]]]",
+   "id": "s1-57",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[a - b]"
+  },
+  {
+   "fullform": "FullForm[Times[a, Power[b, -1]]]",
+   "id": "s1-58",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[a/b]"
+  },
+  {
+   "fullform": "InputForm[Plus[1, Power[x, 2]]]",
+   "id": "s1-59",
+   "messages": [],
+   "output": "",
+   "result": "1 + x^2"
+  },
+  {
+   "fullform": "DirectedInfinity[]",
+   "id": "s1-60",
+   "messages": [
+    "Power::infy: Infinite expression 1 / 0 encountered."
+   ],
+   "output": "Power::infy: Infinite expression 1 / 0 encountered.\n",
+   "result": "ComplexInfinity"
+  },
+  {
+   "fullform": "Indeterminate",
+   "id": "s1-61",
+   "messages": [
+    "Power::infy: Infinite expression 1 / 0 encountered.",
+    "Infinity::indet: Indeterminate expression 0 ComplexInfinity encountered."
+   ],
+   "output": "Power::infy: Infinite expression 1 / 0 encountered.\nInfinity::indet: Indeterminate expression 0 ComplexInfinity encountered.\n",
+   "result": "Indeterminate"
+  },
+  {
+   "fullform": "Null",
+   "id": "s1-62",
+   "messages": [
+    "f::oops: bad 3"
+   ],
+   "output": "f::oops: bad 3\n",
+   "result": "Null"
+  },
+  {
+   "fullform": "x",
+   "id": "s1-63",
+   "messages": [],
+   "output": "",
+   "result": "x"
+  },
+  {
+   "fullform": "3",
+   "id": "s1-64",
+   "messages": [],
+   "output": "",
+   "result": "3"
+  }
+ ],
+ "file": "sprig-tests/heldout/s1/test_1.sprig",
+ "format": "sprig-out",
+ "v": 1
+}

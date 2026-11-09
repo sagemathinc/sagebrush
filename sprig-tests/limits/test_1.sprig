@@ -1,0 +1,17 @@
+(* the language's own limits (design/sprig-mvp.md §5.2): new in S0, recorded from the oracle *)
+(*-- limits-1 *)
+$RecursionLimit
+(*-- limits-2 *)
+$IterationLimit
+(*-- limits-3 *)
+Options[ReplaceRepeated]
+(*-- limits-4 *)
+x //. x -> x + 1
+(*-- limits-5 *)
+ReplaceRepeated[x, x -> x + 1, MaxIterations -> 10]
+(*-- limits-6 *)
+r[x_] := r[x + 1]; r[1]
+(*-- limits-7 *)
+$IterationLimit = Infinity; $IterationLimit
+(*-- limits-8 *)
+$RecursionLimit = Infinity; $RecursionLimit

@@ -1,0 +1,142 @@
+{
+ "cases": [
+  {
+   "fullform": "Rational[1, 2]",
+   "id": "arith-1",
+   "messages": [],
+   "output": "",
+   "result": "1/2"
+  },
+  {
+   "fullform": "1267650600228229401496703205376",
+   "id": "arith-2",
+   "messages": [],
+   "output": "",
+   "result": "1267650600228229401496703205376"
+  },
+  {
+   "fullform": "Complex[0, 2]",
+   "id": "arith-3",
+   "messages": [],
+   "output": "",
+   "result": "2*I"
+  },
+  {
+   "fullform": "Times[2, Power[2, Rational[1, 2]]]",
+   "id": "arith-4",
+   "messages": [],
+   "output": "",
+   "result": "2*Sqrt[2]"
+  },
+  {
+   "fullform": "3.14159265358979323846`20.",
+   "id": "arith-5",
+   "messages": [],
+   "output": "",
+   "result": "3.14159265358979323846`20."
+  },
+  {
+   "fullform": "1.414213562373095`",
+   "id": "arith-6",
+   "messages": [],
+   "output": "",
+   "result": "1.414213562373095"
+  },
+  {
+   "fullform": "3628800",
+   "id": "arith-7",
+   "messages": [],
+   "output": "",
+   "result": "3628800"
+  },
+  {
+   "fullform": "Rational[1, 2]",
+   "id": "arith-8",
+   "messages": [],
+   "output": "",
+   "result": "1/2"
+  },
+  {
+   "fullform": "Times[Rational[1, 2], Pi]",
+   "id": "arith-9",
+   "messages": [],
+   "output": "",
+   "result": "Pi/2"
+  },
+  {
+   "fullform": "-1",
+   "id": "arith-10",
+   "messages": [],
+   "output": "",
+   "result": "-1"
+  },
+  {
+   "fullform": "2",
+   "id": "arith-11",
+   "messages": [],
+   "output": "",
+   "result": "2"
+  },
+  {
+   "fullform": "Complex[0, 2]",
+   "id": "arith-12",
+   "messages": [],
+   "output": "",
+   "result": "2*I"
+  },
+  {
+   "fullform": "3",
+   "id": "arith-13",
+   "messages": [],
+   "output": "",
+   "result": "3"
+  },
+  {
+   "fullform": "2",
+   "id": "arith-14",
+   "messages": [],
+   "output": "",
+   "result": "2"
+  },
+  {
+   "fullform": "2",
+   "id": "arith-15",
+   "messages": [],
+   "output": "",
+   "result": "2"
+  },
+  {
+   "fullform": "True",
+   "id": "arith-16",
+   "messages": [],
+   "output": "",
+   "result": "True"
+  },
+  {
+   "fullform": "DirectedInfinity[]",
+   "id": "arith-17",
+   "messages": [
+    "Power::infy: Infinite expression 1 / 0 encountered."
+   ],
+   "output": "Power::infy: Infinite expression 1 / 0 encountered.\n",
+   "result": "ComplexInfinity"
+  },
+  {
+   "fullform": "2.718281828459045235360287471353`30.",
+   "id": "arith-18",
+   "messages": [],
+   "output": "",
+   "result": "2.718281828459045235360287471353`30."
+  },
+  {
+   "fullform": "0.3333333333333333`",
+   "id": "arith-19",
+   "messages": [],
+   "output": "",
+   "result": "0.3333333333333333"
+  }
+ ],
+ "file": "sprig-tests/arith/test_1.sprig",
+ "format": "sprig-out",
+ "v": 1
+}
