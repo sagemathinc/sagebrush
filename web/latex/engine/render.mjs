@@ -11,7 +11,7 @@ let renderToString = null;
 export function setKatex(f) { renderToString = f; }
 import { CAT, isCs, catOf, codeOf, depthOf } from "./demo-machine.mjs";
 import { TEXT_SYMBOLS, ACCENTS, SIZES, COLORS } from "./symbols.mjs";
-import { itemOf, isCodeEnv, UNSUPPORTED_ENVS, stateOf, savedStates, mathPart, inlineHtml, blockHtml, mathFailHtml, whyRejected } from "./sagetex.mjs";
+import { itemOf, isCodeEnv, UNSUPPORTED_ENVS, stateOf, savedStates, mathPart, inlineHtml, blockHtml, mathFailHtml, whyRejected, STALE_TITLE } from "./sagetex.mjs";
 
 // ------------------------------------------------------------------ helpers
 const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" };
@@ -344,6 +344,7 @@ class Renderer {
           const st = stateOf(this.sageStates, n.n, n.it);
           this.sageSeen(n.n);
           if (st.s === "error" || st.s === "blocked") this.mathFails.push({ st, n: n.n + 1 });
+          else if (st.s === "stale" && n.it.mode === "sage") this.mathStale = true;
           s += mathPart(st, n.it); break;
         }
         default: break;
@@ -355,9 +356,12 @@ class Renderer {
   math(src, display) {
     const h = texMath(src, display, this.macros, this.macroSig, this.stats);
     if (h.includes("katex-error")) this.problem("math", String(src).slice(0, 120));
-    if (!this.mathFails.length) return h;
+    // (a region holding a stale \sage value: the whole of it marked stale, as one value can't be marked inside KaTeX)
+    const marked = this.mathStale ? '<span class="sagestale" title="' + esc(STALE_TITLE) + '">' + h + "</span>" : h;
+    this.mathStale = false;
+    if (!this.mathFails.length) return marked;
     const f = this.mathFails; this.mathFails = [];
-    return h + mathFailHtml(f, esc);
+    return marked + mathFailHtml(f, esc);
   }
 
   // ---- the walk
@@ -968,7 +972,7 @@ class Renderer {
   run(events, I) {
     this.I = I;
     this.sageItems = []; this.sageStates = (this.opts.sage && Array.isArray(this.opts.sage.states)) ? this.opts.sage.states : [];
-    this.sageShown = new Set(); this.mathFails = [];
+    this.sageShown = new Set(); this.mathFails = []; this.mathStale = false;
     const nodes = buildTree(events, this.sageItems);
     // (saved results, `sagebrush latex run`'s file: item n's counts while it and every item before it are the code that
     //  was run, the code running in order in one session; sagetex.mjs savedStates)
