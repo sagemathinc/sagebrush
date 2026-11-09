@@ -17,4 +17,12 @@ export async function allowFiles(send, ev) {
   await click("#filesperm");
   for (const type of ["keyDown", "keyUp"]) await send("Input.dispatchKeyEvent", { type, key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
   if (!(await ev("window.sagebrush?.permissions?.()?.files === true"))) throw new Error("allowFiles: the notebook's file changes are still off");
+  // (a widening reaches the notebook through the person's next Run, which starts a new interpreter (confinement phase
+  // 2): that moment, as the page's onExplicitRun has it, since a suite's own runs go through the notebook's API; then
+  // the new interpreter, ready)
+  // (the interpreter restarts in the same kernel: its worker is a new one)
+  if (!(await ev("(() => { const s = window.sagebrush; window.__allowWorker = s.kernel?.worker; return s.kernels.get(s.permissions()?.doc)?.rotateIfWidened?.() === true; })()"))) return;
+  for (let t = Date.now(); Date.now() - t < 60_000; await new Promise((ok) => setTimeout(ok, 100)))
+    if (await ev("window.sagebrush.kernel?.worker !== window.__allowWorker && window.sagebrush.kernel?.ready === true")) return;
+  throw new Error("allowFiles: no new interpreter after the widening");
 }
