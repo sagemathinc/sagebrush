@@ -232,7 +232,9 @@ export class TerminalPanel {
       this.setHeight(this.root.getBoundingClientRect().height + d * (e.shiftKey ? 96 : 24), true);
     });
     // (the remembered height, clamped on read; else the default: the grip's value is set either way: TP-8)
-    this.setHeight(Number(sessionStorage.getItem("sb-term-h")) || 280, false);
+    this.setHeight(Number((() => { try { return localStorage.getItem("sb-term-h"); } catch { return null; } })()) || 280, false);
+    // (a double-click puts the default height back, as every panel's edge does: workspace/resize.ts)
+    grip.addEventListener("dblclick", (e) => { e.preventDefault(); this.setHeight(280, false); try { localStorage.removeItem("sb-term-h"); } catch {} });
 
     const head = root.appendChild(el("div", "sb-term-head"));
     head.appendChild(el("span", "sb-term-set", opts.label));
@@ -478,7 +480,7 @@ export class TerminalPanel {
   }
 
   private grip: HTMLElement;
-  /** The dock's height, within 120 px and 80% of the window (E5.1), remembered for the session. */
+  /** The dock's height, within 120 px and 80% of the window (E5.1), remembered on this device. */
   setHeight(h: number, keep: boolean) {
     const max = Math.round(innerHeight * 0.8);
     h = Math.round(Math.max(MIN_H, Math.min(max, h)));
@@ -486,7 +488,7 @@ export class TerminalPanel {
     this.grip.setAttribute("aria-valuemin", String(MIN_H));
     this.grip.setAttribute("aria-valuemax", String(max));
     this.grip.setAttribute("aria-valuenow", String(h));
-    if (keep) sessionStorage.setItem("sb-term-h", String(h));
+    if (keep) try { localStorage.setItem("sb-term-h", String(h)); } catch {}
     this.place();
   }
 

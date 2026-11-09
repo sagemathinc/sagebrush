@@ -553,6 +553,7 @@ import { toIpynb, toScript, fromFile, cellId } from "./notebook/ipynb.js";
 import { fromMyst } from "./notebook/myst.js";
 import { bookAccess } from "./workspace/book-cap.ts";
 import { filesToggle } from "./workspace/files-toggle.ts";
+import { filesResize } from "./workspace/resize.ts";
 import { notebookFileText } from "./workspace/file-bytes.ts";
 import { toMarimo } from "./notebook/marimo.js";
 import { shareStatus, signInUrl, uploadCollection, AttemptError } from "./share-client/upload.ts";
@@ -3866,6 +3867,8 @@ async function wsFile(path, data, opts = {}) {
 const wsSidebar = $("#wssidebar"), wsFilesBtn = $("#wsfilesbtn");
 // (Files: in the window's top-left corner, always there once the workspace is open: workspace/files-toggle.ts)
 filesToggle(wsFilesBtn, () => wsShowFiles(wsSidebar.hidden), () => !wsSidebar.hidden);
+// (their width: the edge at their right, remembered on this device: workspace/resize.ts)
+filesResize(wsSidebar);
 let wsBrowser = null;
 // (the notebook open here marked again: one opened, or listed)
 function wsTrackCurrent() { wsBrowser?.refresh(); }

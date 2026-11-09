@@ -9,6 +9,7 @@
 // own escaping, KaTeX trust:false); images only as <img> from blob: URLs made of bytes checked by images.ts.
 import type { Workspace, Entry } from "../workspace/api";
 import { nameOf, parentOf, join, safeName } from "../workspace/paths";
+import { texSplit } from "../workspace/resize";
 import { openBytes, encodeText, EDIT_MAX } from "./save";
 import { imageCandidates, graphicsPathOf, notFoundWhy, sniffImage, admitImageBytes, IMAGE_BOUNDS, IMAGE_EXTS } from "./images";
 import { engineInputs, admitInput, type Known } from "./inputs";
@@ -370,6 +371,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const preview = el("div", "page tex-preview");
   right.appendChild(preview);
   main.append(left, right);
+  // (the source's and the preview's widths: the edge between them, remembered on this device: workspace/resize.ts)
+  texSplit(main, left);
   // (the bar for a change made elsewhere while this text had unsaved edits: one at a time, below)
   const bar = el("div", "tex-conflict"); bar.hidden = true; bar.setAttribute("role", "alert");
   const barText = el("span", "tex-conflict-t");
