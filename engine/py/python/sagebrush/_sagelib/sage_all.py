@@ -37,7 +37,7 @@ __all__ = [
     "Rational", "Integer", "ZZ", "QQ", "RR", "factor", "Factorization",
     "PolynomialRing", "polygen", "parent",
     "is_prime", "is_prime_power", "is_square", "is_squarefree", "next_prime", "previous_prime", "nth_prime",
-    "prime_range", "primes", "primes_first_n", "prime_pi", "divisors", "number_of_divisors",
+    "prime_range", "prime_powers", "primes", "primes_first_n", "prime_pi", "divisors", "number_of_divisors",
     "sigma", "euler_phi", "moebius", "gcd", "lcm", "xgcd", "inverse_mod", "power_mod", "crt",
     "prime_divisors", "prime_factors", "random_prime", "Primes", "randrange", "choice", "sample",
     "kronecker_symbol", "kronecker", "legendre_symbol", "jacobi_symbol",
@@ -2155,6 +2155,40 @@ def prime_range(start, stop=None):
                 keep[first::p] = bytes(len(range(first, stop - start, p)))
     return [start + i for i, v in enumerate(keep) if v]
 
+
+
+def prime_powers(start, stop=None):
+    """The prime powers q = p^k (k >= 1) with start <= q < stop, or with
+    q < start when there is one argument; 1 is not one.
+
+    EXAMPLES::
+
+        sage: prime_powers(20)
+        [2, 3, 4, 5, 7, 8, 9, 11, 13, 16, 17, 19]
+        sage: prime_powers(8, 30)
+        [8, 9, 11, 13, 16, 17, 19, 23, 25, 27, 29]
+    """
+    if stop is None:
+        start, stop = None, start
+    if stop is None:
+        return []
+    # (both bounds as Sage reads them: integers, by ZZ, with its errors)
+    start = 0 if start is None else int(ZZ(start))
+    stop = int(ZZ(stop))
+    lo = max(start, 2)
+    if stop <= lo:
+        return []
+    # the primes in the window (prime_range's segmented sieve and its
+    # admission), then the higher powers of the primes up to the square root
+    out = prime_range(lo, stop)
+    for p in prime_range(_math.isqrt(stop - 1) + 1):
+        q = p * p
+        while q < stop:
+            if q >= lo:
+                out.append(q)
+            q *= p
+    out.sort()
+    return [ZZ(q) for q in out]
 
 # A prime sieve takes at most this share of the heap: its cells (the window
 # and the primes up to the square root of its end, a byte each) and its
