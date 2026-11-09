@@ -173,7 +173,7 @@ function batch(doc, epoch, patches, extra = {}) {
 }
 let fidN = 0;
 const fid = () => "e" + String(++fidN).padStart(15, "0");
-const mkdir = (path) => ({ op: "mkdir", path, kind: "folder", fid: fid() });
+const mkdirOp = (path) => ({ op: "mkdir", path, kind: "folder", fid: fid() });
 const board = (path) => ({ op: "create", path, kind: "board", ref: (++fidN).toString(16).padStart(12, "0") });
 /** Everything list gives under `folder`, recursively, page by page. */
 async function listAll(t, folder) {
@@ -193,8 +193,8 @@ const view = (e) => ({ path: e.path, kind: e.kind, id: e.fid ?? e.ref });
 await section("backfill in bounded steps, then the same index as the reducer's; live ops after", async () => {
   const s = await enabled(BF);
   const ws = await socket(s, "b1b1b1b1b1b1b1b1");
-  const dirs = Array.from({ length: 12 }, (_, i) => mkdir(`/d${i}`));
-  ok((await ws.ops([...dirs, board("/d0/n.board.json"), mkdir("/d1/sub")])).every((a) => Number.isInteger(a.seq)), "(14 ops accepted)");
+  const dirs = Array.from({ length: 12 }, (_, i) => mkdirOp(`/d${i}`));
+  ok((await ws.ops([...dirs, board("/d0/n.board.json"), mkdirOp("/d1/sub")])).every((a) => Number.isInteger(a.seq)), "(14 ops accepted)");
   const [d2] = [dirs[2]];
   ok((await ws.ops([{ op: "rename", path: "/d2", to: "/d3/moved", kind: "folder", fid: d2.fid }, { op: "remove", path: "/d4", to: "/Trash/d4", kind: "folder", fid: dirs[4].fid }, { op: "forget", path: "/d5", kind: "folder", fid: dirs[5].fid }])).every((a) => Number.isInteger(a.seq)), "(a rename, a remove and a forget accepted)");
   // (5 ops a step here: the cursor moves 5 at a time)
@@ -225,7 +225,7 @@ await section("backfill in bounded steps, then the same index as the reducer's; 
   ok((await agent(t, "stat", { path: "/d2" })).entry === null && (await agent(t, "stat", { path: "/d5" })).entry === null, "and nothing where it left");
   ok(mem.gone.size >= 1 && (await ix(BF)).gone === mem.gone.size, "its tombstones are the reducer's: " + mem.gone.size);
   // live: an op accepted is in the index at once
-  const live = mkdir("/live");
+  const live = mkdirOp("/live");
   const a = await ws.ops([live]);
   const st = await agent(t, "stat", { path: "/live" });
   ok(Number.isInteger(a[0].seq) && st.status === 200 && st.entry?.fid === live.fid, "an op accepted when the index is ready is in it at once: " + JSON.stringify(st).slice(0, 120));
@@ -236,7 +236,7 @@ await section("backfill in bounded steps, then the same index as the reducer's; 
 await section("one step at a time: 503 while it builds; one budget, the ops and bytes bounds a step; a single-flight rebuild", async () => {
   const s = await enabled(MS);
   const ws = await socket(s, "b7b7b7b7b7b7b7b7");
-  await ws.ops(Array.from({ length: 12 }, (_, i) => mkdir(`/m${i}`)));
+  await ws.ops(Array.from({ length: 12 }, (_, i) => mkdirOp(`/m${i}`)));
   // (the alarm leaves it alone: each step is the test's)
   await ix(MS, { manual: true, bounds: { visits: 40 } });
   const t = await grant(s, [{ path: "/", access: "read" }]);
@@ -267,12 +267,12 @@ await section("one step at a time: 503 while it builds; one budget, the ops and 
 await section("never ready behind the log: a live batch past a step's ops, ops accepted with no live update; the counts kept across ops", async () => {
   const s = await enabled(LB);
   const ws = await socket(s, "b8b8b8b8b8b8b8b8");
-  await ws.ops([mkdir("/l0"), mkdir("/l1"), mkdir("/l2")]);
+  await ws.ops([mkdirOp("/l0"), mkdirOp("/l1"), mkdirOp("/l2")]);
   const t = await grant(s, [{ path: "/", access: "read" }]);
   ok((await until(LB, "ready")).state === "ready", "(ready)");
   // (the alarm left alone, and 2 ops a step: a batch of 5 is more than one live update applies)
   await ix(LB, { manual: true, bounds: { ops: 2 } });
-  await ws.ops([0, 1, 2, 3, 4].map((i) => mkdir(`/n${i}`)));
+  await ws.ops([0, 1, 2, 3, 4].map((i) => mkdirOp(`/n${i}`)));
   const b = await ix(LB);
   ok(b.state === "building" && b.cursor === 5 && b.max === 8, "a live batch longer than a step's ops: building, never ready behind the log: " + JSON.stringify(b));
   ok((await agent(t, "stat", { path: "/n4" })).error === "index_building", "and a read is 503 index_building");
@@ -280,7 +280,7 @@ await section("never ready behind the log: a live batch past a step's ops, ops a
   ok((await until(LB, "ready")).cursor === 8 && (await agent(t, "stat", { path: "/n4" })).entry?.path === "/n4", "the alarm catches up: ready, and the batch's last op is in it");
   // ops accepted with no live update (as while agents are off): ready, but behind the log
   await ix(LB, { manual: true, noLive: true });
-  await ws.ops([mkdir("/late")]);
+  await ws.ops([mkdirOp("/late")]);
   const c = await ix(LB);
   ok(c.state === "ready" && c.cursor === 8 && c.max === 9, "(an op accepted with no live update: ready, behind) " + JSON.stringify(c));
   const r = await agent(t, "stat", { path: "/late" });
@@ -291,9 +291,9 @@ await section("never ready behind the log: a live batch past a step's ops, ops a
   // the counts are kept from op to op: the bound is the live entries now, plus one
   const n = (await ix(LB)).entries;
   await ix(LB, { bounds: { entries: n + 1 } });
-  await ws.ops([mkdir("/c1")]);
+  await ws.ops([mkdirOp("/c1")]);
   ok((await ix(LB)).state === "ready", "(one more entry: at the bound, ready)");
-  await ws.ops([mkdir("/c2")]);
+  await ws.ops([mkdirOp("/c2")]);
   const f = await ix(LB);
   ok(f.state === "failed" && f.reason === "entries", "a second, in its own op: past the bound counted across ops, failed (entries): " + JSON.stringify(f));
   ws.close();
@@ -303,7 +303,7 @@ await section("reads: a folder's own range, a file isn't a folder, NFD finds NFC
   const s = await enabled(RX);
   const ws = await socket(s, "b9b9b9b9b9b9b9b9");
   const nfc = "/café", nfd = "/café";
-  await ws.ops([mkdir("/a"), mkdir("/a/x"), mkdir("/a/x/y"), mkdir("/b"), mkdir("/b/z"), mkdir(nfc), mkdir(nfc + "/k"), board("/a/f.board.json")]);
+  await ws.ops([mkdirOp("/a"), mkdirOp("/a/x"), mkdirOp("/a/x/y"), mkdirOp("/b"), mkdirOp("/b/z"), mkdirOp(nfc), mkdirOp(nfc + "/k"), board("/a/f.board.json")]);
   const t = await grant(s, [{ path: "/", access: "read" }]);
   ok((await until(RX, "ready")).state === "ready", "(ready)");
   const a = await listAll(t, "/a");
@@ -339,9 +339,9 @@ await section("a rebuild is the person's: an account without sync is refused", a
 await section("the visit budget: an op too big for one step is applied as a job over the steps after; one too big even alone fails the index, sticky; the person rebuilds", async () => {
   const s = await enabled(BU);
   const ws = await socket(s, "b2b2b2b2b2b2b2b2");
-  const top = mkdir("/top");
+  const top = mkdirOp("/top");
   await ws.ops([top]);
-  await ws.ops(Array.from({ length: 30 }, (_, i) => mkdir(`/top/c${i}`)));
+  await ws.ops(Array.from({ length: 30 }, (_, i) => mkdirOp(`/top/c${i}`)));
   await ws.ops([{ op: "rename", path: "/top", to: "/top2", kind: "folder", fid: top.fid }]);
   // (40 visits: each mkdir fits, the slice is cut at the budget and goes on next step; the rename of a 30-child folder
   // can't fit 40 alone: a job, 4 rows a page)
@@ -374,7 +374,7 @@ await section("the visit budget: an op too big for one step is applied as a job 
   const r = await agent(t, "list", { folder: "/" });
   ok(r.status === 503 && r.error === "index_failed" && r.reason === "visits", "reads answer 503 index_failed, with the reason");
   await ix(BU, { bounds: { visits: 100_000 } });
-  const a = await ws.ops([mkdir("/later")]);
+  const a = await ws.ops([mkdirOp("/later")]);
   await sleep(300);
   ok(Number.isInteger(a[0].seq) && (await ix(BU)).state === "failed", "an op accepted later is accepted, and the index stays failed (no automatic rebuild)");
   // the person's rebuild, through the same big op again as a job; a second request adds nothing
@@ -391,9 +391,9 @@ await section("a job's bounds: a folder, tombstones and entries, each past by th
   const s = await enabled(JB);
   const ws = await socket(s, "b4b4b4b4b4b4b4b4");
   const big = async (name, n) => {
-    const top = mkdir(name);
+    const top = mkdirOp(name);
     await ws.ops([top]);
-    const kids = Array.from({ length: n }, (_, i) => mkdir(`${name}/c${i}`));
+    const kids = Array.from({ length: n }, (_, i) => mkdirOp(`${name}/c${i}`));
     await ws.ops(kids);
     return { top, kids };
   };
@@ -441,8 +441,8 @@ await section("a job's bounds: a folder, tombstones and entries, each past by th
 await section("a rebuild's reset: the old index deleted a page a step, reads 503 meanwhile, across a restart", async () => {
   const s = await enabled(RS);
   const ws = await socket(s, "b6b6b6b6b6b6b6b7");
-  await ws.ops([mkdir("/r")]);
-  await ws.ops(Array.from({ length: 12 }, (_, i) => mkdir(`/r/k${i}`)));
+  await ws.ops([mkdirOp("/r")]);
+  await ws.ops(Array.from({ length: 12 }, (_, i) => mkdirOp(`/r/k${i}`)));
   const t = await grant(s, [{ path: "/", access: "read" }]);
   ok((await until(RS, "ready")).state === "ready", "(ready)");
   const R = (await ix(RS)).rows;
@@ -475,8 +475,8 @@ await section("a rebuild's reset: the old index deleted a page a step, reads 503
 await section("list cursors: deleted with their grant, and by the alarm once expired, a page a step, across a restart", async () => {
   const s = await enabled(CU);
   const ws = await socket(s, "b7b7b7b7b7b7b7b8");
-  await ws.ops([mkdir("/c")]);
-  await ws.ops(Array.from({ length: 5 }, (_, i) => mkdir(`/c/k${i}`)));
+  await ws.ops([mkdirOp("/c")]);
+  await ws.ops(Array.from({ length: 5 }, (_, i) => mkdirOp(`/c/k${i}`)));
   const make = async () => (await (await post(s, "/api/sync/v1/grants", { agent: "fs-sync", scopes: [{ path: "/", access: "read" }] })).json());
   const gA = await make(), gB = await make();
   ok((await until(CU, "ready")).state === "ready", "(ready)");
@@ -564,9 +564,9 @@ await section("a document's revision: list and stat give its epoch.head_seq, and
 await section("a job survives a restart in each of its phases", async () => {
   const s = await enabled(JR);
   const ws = await socket(s, "b3b3b3b3b3b3b3b3");
-  const top = mkdir("/r");
+  const top = mkdirOp("/r");
   await ws.ops([top]);
-  await ws.ops(Array.from({ length: 6 }, (_, i) => mkdir(`/r/d${i}`)));
+  await ws.ops(Array.from({ length: 6 }, (_, i) => mkdirOp(`/r/d${i}`)));
   await ws.ops(Array.from({ length: 18 }, (_, i) => board(`/r/d${i % 6}/b${i}.board.json`)));
   const t = await grant(s, [{ path: "/", access: "read" }]);
   ok((await until(JR, "ready")).state === "ready", "(ready)");
@@ -613,11 +613,11 @@ await section("the bounds: live entries, tombstones and a folder's children, eac
   ok((await until(CP, "ready")).state === "ready", "(an empty log: ready at once)");
   // a folder of 3 at most: 3 children fit, the 4th fails the index
   await ix(CP, { bounds: { perFolder: 3, entries: 100_000, gone: 100_000 } });
-  await ws.ops([mkdir("/f"), mkdir("/f/a"), mkdir("/f/b")]);
+  await ws.ops([mkdirOp("/f"), mkdirOp("/f/a"), mkdirOp("/f/b")]);
   ok((await ix(CP)).state === "ready", "3 in one folder (root has 1, /f 2... at the bound): ready");
-  await ws.ops([mkdir("/f/c")]);
+  await ws.ops([mkdirOp("/f/c")]);
   ok((await ix(CP)).state === "ready", "a folder of exactly 3: ready");
-  await ws.ops([mkdir("/f/d")]);
+  await ws.ops([mkdirOp("/f/d")]);
   const f1 = await ix(CP);
   ok(f1.state === "failed" && f1.reason === "folder", "a 4th in it: failed (folder): " + JSON.stringify(f1));
   // entries: 4 at most (the log has 5: 4 fit, the 5th is one past)
@@ -640,11 +640,11 @@ await section("the bounds: live entries, tombstones and a folder's children, eac
 await section("ops appended while it builds; a restart while it builds", async () => {
   const s = await enabled(CA);
   const ws = await socket(s, "b4b4b4b4b4b4b4b4");
-  await ws.ops(Array.from({ length: 10 }, (_, i) => mkdir(`/a${i}`)));
+  await ws.ops(Array.from({ length: 10 }, (_, i) => mkdirOp(`/a${i}`)));
   await ix(CA, { bounds: { ops: 1 } });
   const t = await grant(s, [{ path: "/", access: "read" }]);
   // (appended while it builds: ready only once the cursor reaches the log's end as it is then)
-  const late = mkdir("/late");
+  const late = mkdirOp("/late");
   await ws.ops([late]);
   await restart(CA);
   await ix(CA, { bounds: { ops: 1 } });
@@ -660,12 +660,12 @@ await section("a live op too big for one update: accepted, the index builds it a
   const t = await grant(s, [{ path: "/", access: "read" }]);
   ok((await until(LV, "ready")).state === "ready", "(ready)");
   await ix(LV, { bounds: { visits: 30, jobPage: 4 } });
-  const top = mkdir("/t");
+  const top = mkdirOp("/t");
   await ws.ops([top]);
   // (one budget for a whole live batch: 20 small ops, each within 30 visits, pass 30 together, so none is kept live; the
   // alarm held, to see it)
   await ix(LV, { manual: true });
-  await ws.ops(Array.from({ length: 20 }, (_, i) => mkdir(`/t/k${i}`)));
+  await ws.ops(Array.from({ length: 20 }, (_, i) => mkdirOp(`/t/k${i}`)));
   const held = await ix(LV);
   ok(held.state === "building" && held.cursor === 1 && held.max === 21, "a live batch past one budget together (20 small ops, 30 visits): nothing kept live, building: " + JSON.stringify({ state: held.state, cursor: held.cursor, max: held.max }));
   await ix(LV, { manual: false });
@@ -680,9 +680,9 @@ await section("a live op too big for one update: accepted, the index builds it a
   ok(done.cursor === before.cursor + 1 && (await agent(t, "stat", { path: "/u/k19" })).entry?.kind === "folder" && (await agent(t, "stat", { path: "/t/k0" })).entry === null, "the alarm applies it as a job: ready, the whole rename in it: " + JSON.stringify(done));
   ok((await ws.log()).some((o) => o.op === "rename" && o.to === "/u"), "and the op is in the log every device pulls");
   // two big subtree ops in one message (PERF P1): one budget for both, none kept live; the alarm's jobs take each whole
-  const p1 = mkdir("/p"), q1 = mkdir("/q");
+  const p1 = mkdirOp("/p"), q1 = mkdirOp("/q");
   await ws.ops([p1, q1]);
-  await ws.ops([...Array.from({ length: 15 }, (_, i) => mkdir(`/p/k${i}`)), ...Array.from({ length: 15 }, (_, i) => mkdir(`/q/k${i}`))]);
+  await ws.ops([...Array.from({ length: 15 }, (_, i) => mkdirOp(`/p/k${i}`)), ...Array.from({ length: 15 }, (_, i) => mkdirOp(`/q/k${i}`))]);
   ok((await until(LV, "ready")).state === "ready", "(ready)");
   const pre = await ix(LV);
   await ws.ops([{ op: "rename", path: "/p", to: "/p2", kind: "folder", fid: p1.fid }, { op: "rename", path: "/q", to: "/q2", kind: "folder", fid: q1.fid }]);
@@ -696,10 +696,10 @@ await section("a live op too big for one update: accepted, the index builds it a
 await section("reads: scope, Trash by where it came from, pages, the examined bound, cursors", async () => {
   const s = await enabled(RD);
   const ws = await socket(s, "b5b5b5b5b5b5b5b5");
-  const z = mkdir("/A/z"), w = mkdir("/B/w");
-  await ws.ops([mkdir("/A"), mkdir("/B"), mkdir("/A/x"), z, w, mkdir("/B/y")]);
+  const z = mkdirOp("/A/z"), w = mkdirOp("/B/w");
+  await ws.ops([mkdirOp("/A"), mkdirOp("/B"), mkdirOp("/A/x"), z, w, mkdirOp("/B/y")]);
   await ws.ops([{ op: "remove", path: "/A/z", to: "/Trash/z", kind: "folder", fid: z.fid }, { op: "remove", path: "/B/w", to: "/Trash/w", kind: "folder", fid: w.fid }]);
-  for (let i = 0; i < 6; i++) await ws.ops([mkdir(`/B/q${i}`)]);
+  for (let i = 0; i < 6; i++) await ws.ops([mkdirOp(`/B/q${i}`)]);
   const t = await grant(s, [{ path: "/A", access: "read" }]);
   ok((await until(RD, "ready")).state === "ready", "(ready)");
   const tr = await agent(t, "list", { folder: "/Trash" });
