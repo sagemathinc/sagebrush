@@ -31,6 +31,7 @@ import { IdbStore, bytesHash, openDb as openMainDb, openHistoryDb, openBoardHist
 import { dropRows } from "../notebook/journal-rows.js";
 import { SYNC_NB } from "../notebook/sync-rows.js";
 import { isBoard } from "../board/doc";
+import { fromNbformat, kernelMode } from "../notebook/nbformat.js";
 import { reserve, tryReserve, type Release } from "./reserve";
 import { lowestWatermark } from "./sync-outbox";
 import { syncState as ledgerState, waitSync as ledgerWait, type SyncAnswer, type SyncLevel, type WaitResult } from "./sync-ledger";
@@ -460,6 +461,12 @@ const subtree = (p: string) => (p === "/" ? undefined : IDBKeyRange.bound(p + "/
 
 /** pathOfFile reads at most this many entries with one identity (normally one); more is "ambiguous", unread. */
 export const PATH_OF_FILE_MAX = 64;
+
+/** A notebook's document as written (web/notebook/nbformat.js: Jupyter's nbformat made Sagebrush's), what it can't
+ * convert (a heading level not 1 to 6) refused as invalid. */
+function nbDoc(content: unknown): unknown {
+  try { return fromNbformat(content); } catch (err) { throw new WorkspaceError("invalid", (err as Error)?.message ?? String(err)); }
+}
 
 export class Workspace {
   private subs = new Set<(c: Change) => void>();
@@ -1474,10 +1481,14 @@ export class Workspace {
       let rev: number;
       if (e.kind === "notebook") {
         if (!this.main) throw new WorkspaceError("storage", "this browser has no storage for notebooks");
-        const doc = content as any;
+        // (written as Jupyter's nbformat, as agents do: its cells made Sagebrush's, or the page shows them empty)
+        const doc = nbDoc(content) as any;
         if (!doc || typeof doc !== "object" || !Array.isArray(doc.cells)) throw new WorkspaceError("invalid", "a notebook is {cells: [...]}");
         const { id: _i, rev: _r, updated: _u, ...rest } = doc;
-        const out = await new IdbStore(this.main, e.ref!).save({ ...rest, name: splitExt(nameOf(e.path))[0], ...(opts.base !== undefined ? { baseRev: opts.base } : {}) }, { lockHeld: true });
+        // (one that names no mode, as nbformat's doesn't, keeps the notebook's: the save replaces the whole record
+        // (daybreak3, #928))
+        const mode = rest.mode ?? (await this.mainTx("notebooks", "readonly", (st) => st.get(e.ref!)))?.mode ?? e.mode;
+        const out = await new IdbStore(this.main, e.ref!).save({ ...rest, ...(mode !== undefined ? { mode } : {}), name: splitExt(nameOf(e.path))[0], ...(opts.base !== undefined ? { baseRev: opts.base } : {}) }, { lockHeld: true });
         if (typeof out === "string") throw new WorkspaceError("storage", out);
         if (out.conflict) throw new WorkspaceError("conflict", `${e.path} was changed elsewhere`, out.conflict);
         rev = out.rev;
@@ -3087,11 +3098,12 @@ export class Workspace {
     let ref: string, size: number | undefined, undo: () => Promise<unknown>, fileBytes: Uint8Array | undefined, sha256: string | undefined;
     if (kind === "notebook") {
       if (!this.main) throw new WorkspaceError("storage", "this browser has no storage for notebooks");
-      const given = (content ?? {}) as any;
+      // (made as Jupyter's nbformat, as agents do: its cells made Sagebrush's, its mode its kernel's)
+      const given = nbDoc(content ?? {}) as any;
       if (typeof given !== "object" || (given.cells !== undefined && !Array.isArray(given.cells))) throw new WorkspaceError("invalid", "a notebook is {cells: [...]}");
       const { id: _i, rev: _r, updated: _u, baseRev: _b, ...doc } = given;
       ref = crypto.randomUUID();
-      mode = mode ?? doc.mode ?? "python";
+      mode = mode ?? doc.mode ?? kernelMode(doc) ?? "python";
       // (with the journal active (the notebooks' fence says "journal": plan-sync-slice2-client r4 §1a), the record is
       // written as the journal's own store leaves a save whose T1 isn't made yet: marked unjournaled, with no j, so the
       // notebook's first writer load takes it into the journal (recovery's catch-up, 2c-1d-iii §3); a plain store's

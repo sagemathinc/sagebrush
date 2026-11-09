@@ -107,10 +107,12 @@ test("engineCall: an ASCII request makes no copy outside wasm memory; a non-ASCI
   const ascii = req("a"), other = req("é\u{1F600}");
   assert.ok(ascii.length > 20_000_000);
   const encode = TextEncoder.prototype.encode;
-  let encodes = 0;
+  let encodes = 0, encoded = -1;
   TextEncoder.prototype.encode = function (this: TextEncoder, s?: string) {
     encodes++;
-    return encode.call(this, s);
+    const b = encode.call(this, s);
+    encoded = b.length;
+    return b;
   };
   try {
     // (the first call grows the engine's memory to this request's peak;
@@ -120,26 +122,19 @@ test("engineCall: an ASCII request makes no copy outside wasm memory; a non-ASCI
     // of a full-rank square matrix)
     assert.match(first, /^\{"ok":\{"pivots":"0","det":"\d+"\}\}$/);
     (globalThis as any).gc?.();
-    let before = process.memoryUsage();
+    const before = process.memoryUsage();
     assert.equal(engineCall(ascii), first);
-    let after = process.memoryUsage();
+    const after = process.memoryUsage();
     const asciiExternal = after.external - before.external;
     assert.equal(encodes, 0, "the ASCII requests were not encoded");
-    (globalThis as any).gc?.();
-    before = process.memoryUsage();
     assert.equal(engineCall(other), first);
-    after = process.memoryUsage();
-    const otherExternal = after.external - before.external;
     assert.equal(encodes, 1, "the non-ASCII request took the encoder path");
-    console.log(`engineCall 1024 x 1024 (${ascii.length} bytes): external growth ${asciiExternal} (ASCII), ${otherExternal} (non-ASCII)`);
+    console.log(`engineCall 1024 x 1024 (${ascii.length} bytes): external growth ${asciiExternal} (ASCII); the encoder's copy ${encoded} bytes (non-ASCII)`);
     assert.ok(asciiExternal <= 1 << 20, `ASCII: external grew by ${asciiExternal}`);
-    // (the encoder's copy is the request's UTF-8, ascii.length + 5 bytes;
-    // process.memoryUsage().external moves by a few bytes besides (CI saw
-    // 20971623 for a 20971642-byte request, a local run 20971647), so the
-    // copy is asked within 64 KiB of its size: the copy is about 320x that
-    // tolerance, and the bound it proves, about 20 MB, is about 20x the 1 MiB
-    // ASCII ceiling above)
-    assert.ok(otherExternal >= ascii.length - 65536, `non-ASCII: external grew by ${otherExternal}, less than the ${ascii.length}-byte copy less 64 KiB (the copy unseen?)`);
+    // (the encoder's copy is the request's whole UTF-8, ascii.length + 5 bytes ("é" and U+1F600 are 2 and 4 bytes
+    // where "a" is 1), seen at the encoder itself: process.memoryUsage().external can't show it, since a collection
+    // inside the window, with no gc exposed in CI, frees as much (first in #932's CI))
+    assert.equal(encoded, ascii.length + 5, `non-ASCII: the encoder's copy is ${encoded} bytes, not the request's ${ascii.length + 5}`);
   } finally {
     TextEncoder.prototype.encode = encode;
   }

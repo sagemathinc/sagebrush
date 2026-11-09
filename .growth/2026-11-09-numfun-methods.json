@@ -1,0 +1,12 @@
+{
+ "v": 1,
+ "reason": "Sage's moebius.range and prime_pi.plot (lib/_sage_numfun.py, a lazy module; sage_all attaches them to moebius and prime_pi; moebius(0) is 0). Re-measured with bun 1.4.4 (size-record.sh) on master d34023b8 vs head 22545ce7 (the head measured; only this marker and budgets.json follow it): cli/lib.gen.js +2424, cli/pyjs.cjs +2476, engine/lib/sage-more.src +4594, engine/lib/sage.pre +882, engine/lib/sage.src +301, engine/sagebrush-worker.js +30; no other row moves. Markers: exact, except cli/pyjs.cjs 2540 (+2476 measured, plus 64 B of margin, as it moves with master). Ceiling (rule 4): engine/lib/sage-more.src 491890 -> 496484, the measured head 496420 + 64. Ceiling (rule 4): engine/lib/sage.src 2984732 -> 2985033, the measured head 2984969 + 64.",
+ "bytes": {
+  "cli/lib.gen.js": 2424,
+  "cli/pyjs.cjs": 2540,
+  "engine/lib/sage-more.src": 4594,
+  "engine/lib/sage.pre": 882,
+  "engine/lib/sage.src": 301,
+  "engine/sagebrush-worker.js": 30
+ }
+}

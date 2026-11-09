@@ -5,10 +5,12 @@
 // runs it), its requests made as an agent's tools make them:
 //   - the page offers Agent once its workspace is open; the agent chunk (/sagebrush-agent.js) isn't fetched before;
 //   - Agent opens Connect; a ?pair= link connects, the person allows a folder, the bar shows the agent;
-//   - a code file's page (/?code=) has no agent: no Agent, no chunk, no Connect, remembered agent or ?pair= link;
+//   - a code file's page (/?code=) has no Agent of the notebook's over it: File ▸ Connect an agent… is the page's one
+//     pairing there (nothing fetched before it's wanted); a ?pair= link connects there; a remembered agent reconnects there;
 //   - the agent reads the notebook shown and writes it (workspace.write with its base): the page shows the new cell
 //     at once, with no reload and no "changed elsewhere" copy;
 //   - the person then edits it: their edit and the agent's cell are both kept;
+//   - the agent writes Jupyter's nbformat cells (as agents do): the page shows them with their text, not empty;
 //   - a grant "until the page closes" ends with the page.
 //   - in a build with the LaTeX editor (CI's web-browser/latex, EXPECT_LATEX=1: there it must run): one pairing per page.
 //     An early ?pair= link on /?tex= is the LaTeX editor's only (its chunk, not the notebook page's); a remembered
@@ -115,7 +117,7 @@ try {
   // (the status line is the page's, which other messages replace: every text it shows is kept here)
   await ev(`(() => { const st = document.querySelector("#status"); window.__said = []; new MutationObserver(() => window.__said.push(st.textContent)).observe(st, { childList: true, characterData: true, subtree: true }); return true; })()`);
   await ev(`(document.querySelector("#agentbtn").click(), true)`);
-  ok(await until(`window.__said.includes("Couldn't load the agent connection. Press Agent to try again, or reload the page.")`) && !(await ev(`!!document.querySelector(".sbag-box")`)), "the chunk's fetch failing: the page says so in one line", await ev(`window.__said`).catch(() => null));
+  ok(await until(`window.__said.includes("Couldn't load the agent connection. Try Agent or ⋯ ▸ Connect an agent… again, or reload the page.")`) && !(await ev(`!!document.querySelector(".sbag-box")`)), "the chunk's fetch failing: the page says so in one line", await ev(`window.__said`).catch(() => null));
   failChunk = false;
   await send("Fetch.disable");
   await ev(`(document.querySelector("#agentbtn").click(), true)`);
@@ -175,6 +177,16 @@ try {
   const copies = await ev(`${W}.list("/", { recursive: true }).then((l) => l.filter((e) => /changed elsewhere/.test(e.path)).map((e) => e.path))`);
   ok(copies.length === 0, "no \"changed elsewhere\" copy was made", copies);
 
+  // the agent writes it as Jupyter's nbformat ({cell_type, source}, as both agents did in the sim, F1): the page shows
+  // those cells with their text, a code cell and a Markdown one, not empty cells
+  const rd3 = await drive({ op: "req", method: "workspace.read", params: { path } });
+  const NBF = "print('nbformat', 6 * 7)";
+  const wr3 = await drive({ op: "req", method: "workspace.write", params: { path, content: { json: { cells: [...rd3.ok.content.json.cells, { cell_type: "code", metadata: {}, execution_count: null, outputs: [], source: ["print(", "'nbformat', 6 * 7)"] }, { cell_type: "markdown", metadata: {}, source: "## From Jupyter\n\nSome text." }] } }, base: rd3.ok?.rev } });
+  ok(!!wr3.ok, "the agent writes nbformat cells", wr3);
+  ok(await until(`${sources}.includes(${JSON.stringify(NBF)}) && window.sagebrush.notebook.snapshot().cells.some((c) => c.type === "markdown" && c.code.startsWith("## From Jupyter"))`, 10000), "the page shows them: the code cell's text, and a Markdown cell with its own", { sources: await ev(sources).catch(() => null), cells: await ev(`window.sagebrush.notebook.snapshot().cells.map((c) => [c.type ?? "code", c.code])`).catch(() => null) });
+  const rd4 = await drive({ op: "req", method: "workspace.read", params: { path } });
+  ok((rd4.ok?.content?.json?.cells ?? []).every((c) => typeof c.code === "string" && c.cell_type === undefined), "…kept in Sagebrush's shape: read back, every cell has its code", rd4.ok?.content?.json?.cells);
+
   // a grant "until the page closes" ends with the page
   ok(await go(""), "the page again");
   const st = await drive({ op: "status" });
@@ -200,19 +212,6 @@ try {
   ok(await go(""), "the notebook page again, nothing pressed");
   ok(await until(`!!document.querySelector(".sbag-bar")`, 20000) && requests.slice(beforeR).some(chunk), "the remembered agent: the chunk loads by itself and it reconnects", requests.slice(beforeR).filter((u) => /agent/.test(u)));
   ok(await ev(`document.querySelectorAll(".sbag-bar").length`) === 1 && !(await ev(`!!document.querySelector(".sbag-box")`)), "one bar, no dialog");
-  // (a code file's page (/?code=, code/boot.ts) has no agent: with the agent remembered, and with a ?pair= link, it
-  // offers no Agent, fetches no agent chunk and opens no Connect; then the notebook page again, reconnected)
-  const pyFid = await ev(`${W}.create("/t/agent-code.py", { content: "print(1)\\n" }).then((e) => e.fid)`);
-  const beforeC = requests.length;
-  ok(await go(`?code=${encodeURIComponent(pyFid)}`) && await until(`!!window.sagebrush?.code`, 30000), "a code file's page opens (the agent remembered)");
-  await sleep(3000);
-  ok(await ev(`document.querySelector("#agentbtn")?.hidden !== false && !document.querySelector(".sbag-bar") && !document.querySelector(".sbag-box")`) && !requests.slice(beforeC).some(chunk), "a code file's page: no Agent, no agent chunk, no reconnect", requests.slice(beforeC).filter((u) => /agent/.test(u)));
-  const c3 = await drive({ op: "code" });
-  const beforeP = requests.length;
-  ok(await go(`?code=${encodeURIComponent(pyFid)}&pair=${c3.code}&port=${c3.port}`) && await until(`!!window.sagebrush?.code`, 30000), "a code file's page with a ?pair= link");
-  await sleep(3000);
-  ok(!(await ev(`!!document.querySelector(".sbag-box")`)) && !requests.slice(beforeP).some(chunk), "…no Connect dialog and no agent chunk there either", requests.slice(beforeP).filter((u) => /agent/.test(u)));
-  ok(await go("") && await until(`!!document.querySelector(".sbag-bar")`, 20000), "the notebook page again: the remembered agent reconnects");
   await ev(`([...document.querySelectorAll(".sbag-bar button")].find((b) => b.textContent === "Revoke")?.click(), true)`);
   ok(await until(`!document.querySelector(".sbag-bar")`), "Revoke: the bar goes (and the remembered grant with it)");
 
@@ -224,6 +223,85 @@ try {
   await sleep(3000);
   ok(await ev(`!!window.__SAGEBRUSH_LOCAL__ && document.querySelector("#agentbtn").hidden`) && !requests.slice(beforeL).some(chunk), "LOCAL: Agent isn't offered and the chunk isn't fetched", requests.slice(beforeL).filter((u) => /agent/.test(u)));
   await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: localScript.result.identifier });
+
+  // ⋯ ▸ Connect an agent… (the same pairing; on a phone, where Agent itself is hidden, the way to it)
+  ok(await go(""), "the notebook page again");
+  ok(await until(`!document.querySelector("#moreagent").hidden`) && await ev(`document.querySelector("#moreagent").textContent`) === "Connect an agent…", "⋯ offers Connect an agent…");
+  await ev(`(document.querySelector("#morebtn").click(), document.querySelector("#moreagent").click(), true)`);
+  ok(await until(`!!document.querySelector(".sbag-box")`) && await ev(`document.querySelector("#moremenu").hidden`), "it opens Connect, and the menu closes");
+  await ev(`([...document.querySelectorAll(".sbag-box button")].find((b) => b.textContent === "Cancel").click(), true)`);
+  ok(await until(`!document.querySelector(".sbag-box")`), "Cancel closes it");
+
+  // the code page (/?code=<fid>): no pairing of its own, the page's, from File ▸ Connect an agent…; a remembered agent
+  // reconnects there too
+  const pyFid = await ev(`${W}.create("/agent-code.py", { content: new TextEncoder().encode("print(1)\\n") }).then((e) => e.fid)`);
+  const beforeC = requests.length;
+  ok(typeof pyFid === "string" && await go(`?code=${encodeURIComponent(pyFid)}`) && await until(`!!document.querySelector('.code-filemenu [data-f="c-agent"]')`), "the code page's File menu offers Connect an agent…");
+  ok(!requests.slice(beforeC).some(chunk) && await ev(`document.querySelector("#agentbtn").hidden`), "nothing fetched before it's wanted, and the notebook's Agent isn't shown over it");
+  // (a ?pair= link on the code page whose chunk can't load: said in the code page's own status line; board's N1 on #935)
+  const cf = await drive({ op: "code" });
+  await send("Network.setCacheDisabled", { cacheDisabled: true });
+  await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-agent.js*" }] });
+  failChunk = true;
+  ok(await go(`?code=${encodeURIComponent(pyFid)}&pair=${cf.code}&port=${cf.port}`) && await until(`(document.querySelector(".code-status")?.textContent ?? "") === "Couldn't load the agent connection. Choose Connect an agent… again, or reload the page."`, 20000), "a ?pair= link on the code page whose chunk can't load: the code page's status line says so", await ev(`document.querySelector(".code-status")?.textContent ?? null`).catch(() => null));
+  failChunk = false;
+  await send("Fetch.disable");
+  await send("Network.setCacheDisabled", { cacheDisabled: false });
+  ok(await go(`?code=${encodeURIComponent(pyFid)}`) && await until(`!!document.querySelector('.code-filemenu [data-f="c-agent"]')`), "(the code page again)");
+  await ev(`(document.querySelector('.code-filemenu [data-f="c-agent"]').click(), true)`);
+  ok(await until(`!!document.querySelector(".sbag-box")`) && requests.slice(beforeC).some(chunk), "it fetches the page's chunk and opens Connect");
+  const c3 = await drive({ op: "code" });
+  ok(await go(`?code=${encodeURIComponent(pyFid)}&pair=${c3.code}&port=${c3.port}`) && await until(`[...document.querySelectorAll(".sbag-box input")].some((i) => i.value === ${JSON.stringify(c3.code)})`), "a ?pair= link on the code page: Connect, its code filled in");
+  await ev(`(document.querySelector(".sbag-box button.primary").click(), true)`);
+  ok(await until(`[...document.querySelectorAll(".sbag-box h2")].some((h) => h.textContent === "Allow this agent?")`), "the grant dialog asks");
+  await ev(`(() => {
+    const b = document.querySelector(".sbag-box");
+    const all = b.querySelector(".folders input"); if (!all.checked) all.click();
+    const [write, remember] = [...b.querySelectorAll("input[type=checkbox]")].filter((c) => !c.closest(".folders"));
+    if (!write.checked) write.click();
+    const s = b.querySelector("select"); s.value = "3600000"; s.dispatchEvent(new Event("change"));
+    if (!remember.checked) remember.click();
+    return true;
+  })()`);
+  await ev(`([...document.querySelectorAll(".sbag-box button.primary")].pop().click(), true)`);
+  ok(await until(`!!document.querySelector(".sbag-bar")`), "allowed, remembered: the bar shows on the code page");
+  ok(await go(`?code=${encodeURIComponent(pyFid)}`) && await until(`!!document.querySelector(".sbag-bar")`, 20000), "the code page again: the remembered agent reconnects by itself");
+  ok(await ev(`document.querySelectorAll(".sbag-bar").length`) === 1 && !(await ev(`!!document.querySelector(".sbag-box")`)), "one bar, no dialog");
+  await ev(`([...document.querySelectorAll(".sbag-bar button")].find((b) => b.textContent === "Revoke")?.click(), true)`);
+  ok(await until(`!document.querySelector(".sbag-bar")`), "Revoke: the bar goes");
+
+  // (grader's rows on #935 r2) the code page's File ▸ Connect an agent…: the menu closes, Cancel gives the focus back to
+  // File; with the chunk's fetch failing, the code page's status line says so
+  const fileBtn = `document.querySelector(".code-menu-wrap > button")`;
+  ok(await go(`?code=${encodeURIComponent(pyFid)}`) && await until(`!!document.querySelector('.code-filemenu [data-f="c-agent"]')`), "(the code page)");
+  await ev(`(${fileBtn}.click(), document.querySelector('.code-filemenu [data-f="c-agent"]').click(), true)`);
+  ok(await until(`!!document.querySelector(".sbag-box")`) && await ev(`document.querySelector(".code-filemenu").hidden`), "File ▸ Connect an agent… opens Connect, and the File menu closes");
+  await ev(`([...document.querySelectorAll(".sbag-box button")].find((b) => b.textContent === "Cancel").click(), true)`);
+  ok(await until(`!document.querySelector(".sbag-box") && document.activeElement === ${fileBtn}`), "Cancel closes it, and the focus goes back to File");
+  await send("Network.setCacheDisabled", { cacheDisabled: true });
+  ok(await go(`?code=${encodeURIComponent(pyFid)}`) && await until(`!!document.querySelector('.code-filemenu [data-f="c-agent"]')`), "(the code page, afresh)");
+  await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-agent.js*" }] });
+  failChunk = true;
+  await ev(`(${fileBtn}.click(), document.querySelector('.code-filemenu [data-f="c-agent"]').click(), true)`);
+  ok(await until(`(document.querySelector(".code-status")?.textContent ?? "") === "Couldn't load the agent connection. Choose Connect an agent… again, or reload the page."`, 20000) && !(await ev(`!!document.querySelector(".sbag-box")`)), "File ▸ Connect an agent… with the chunk's fetch failing: the code page's status line says so", await ev(`document.querySelector(".code-status")?.textContent ?? null`).catch(() => null));
+  failChunk = false;
+  await send("Fetch.disable");
+  await send("Network.setCacheDisabled", { cacheDisabled: false });
+  // (the desktop app (window.__TAURI__): the code page offers no Connect an agent…, and a ?pair= link mounts nothing)
+  const ct = await drive({ op: "code" });
+  // (a stand-in for the app's bridge, enough for the page to start: no startup files, no self-test, no events)
+  const tauri = await send("Page.addScriptToEvaluateOnNewDocument", { source: `window.__TAURI__ = { core: { invoke: async (c) => (c === "startup_files" ? [] : null) }, event: { listen: async () => () => {} }, window: { getCurrentWindow: () => ({ setTitle: async () => {} }) }, fs: {}, dialog: {} };` });
+  ok(await go(`?code=${encodeURIComponent(pyFid)}&pair=${ct.code}&port=${ct.port}`) && await until(`!!window.sagebrush?.code`, 30000), "(the code page in the desktop app, with a ?pair= link)");
+  await sleep(3000);
+  ok(!(await ev(`!!document.querySelector('.code-filemenu [data-f="c-agent"]') || !!document.querySelector(".sbag-box") || !!document.querySelector(".sbag-bar")`)), "the desktop app: the code page offers no Connect an agent…, and its ?pair= link mounts nothing");
+  await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: tauri.result.identifier });
+  // (the notebook page on a phone, where Agent is hidden: ⋯ ▸ Connect an agent…, and Cancel gives the focus back to ⋯)
+  ok(await go("?phone=1") && await until(`document.documentElement.classList.contains("phone") && !document.querySelector("#moreagent").hidden && !document.querySelector("#agentbtn").offsetParent`), "(the notebook page on a phone: Agent hidden, ⋯ offers Connect an agent…)");
+  await ev(`(document.querySelector("#morebtn").click(), document.querySelector("#moreagent").click(), true)`);
+  ok(await until(`!!document.querySelector(".sbag-box")`), "on a phone, ⋯ ▸ Connect an agent… opens Connect");
+  await ev(`([...document.querySelectorAll(".sbag-box button")].find((b) => b.textContent === "Cancel").click(), true)`);
+  ok(await until(`!document.querySelector(".sbag-box") && document.activeElement === document.querySelector("#morebtn")`), "…and Cancel gives the focus back to ⋯ (Agent isn't shown)");
+  ok(await go("?phone=0"), "(the phone layout off again)");
 
   // ---- one pairing per page, in a build with the LaTeX editor
   // (the editor opens on this host only in a build made with SAGEBRUSH_LATEX_PREVIEW=test, as CI's web-browser/latex)

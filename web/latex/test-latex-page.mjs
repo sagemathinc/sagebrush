@@ -3220,6 +3220,95 @@ $P = \sage{g[0]}$
       const p141 = await pageOf({ path: "/t/print-141.tex", sel: "section.slide", text: "\\documentclass[aspectratio=141]{beamer}\n\\begin{document}\n\\begin{frame}{A}\nx\n\\end{frame}\n\\end{document}\n" });
       const pArt = await pageOf({ path: "/t/print-article.tex", sel: ".p", text: "\\documentclass{article}\n\\begin{document}\nSome text.\n\\end{document}\n" });
       check(p141 === "@page { size: 148.5mm 105mm; margin: 0; }" && pArt === null, "Print: a beamer deck at aspectratio=141 gets its 148.5 x 105 mm page; an article gets no slide page", { p141, pArt });
+      // (#888's dispose note: a page left in its print layout (printMode(true)) and another file opened: the layout and the
+      //  slide page put back, not left on the next page)
+      await open(await mk("/t/print-left.tex", enc("\\documentclass{beamer}\n\\begin{document}\n\\begin{frame}{L}\nx\n\\end{frame}\n\\end{document}\n")));
+      await until(`!!document.querySelector(".tex-preview .ch:not([hidden]) section.slide")`, 20000);
+      const leftOn = await ev(`(window.sagebrush.latex.printMode(true), !!document.getElementById("sb-tex-slide-page") && document.documentElement.classList.contains("tex-print"))`);
+      const fNext = await mk("/t/print-next.tex", enc("\\documentclass{article}\n\\begin{document}\nNext.\n\\end{document}\n"));
+      await ev(`(window.__noReload = true, window.__sbTex({ path: "/t/print-next.tex", fid: ${JSON.stringify(fNext)} }), 1)`);
+      await until(`document.querySelector(".tex-preview")?.textContent.includes("Next.")`, 20000);
+      const leftAfter = await ev(`({ kept: window.__noReload === true, cls: document.documentElement.classList.contains("tex-print"), page: !!document.getElementById("sb-tex-slide-page") })`);
+      check(leftOn && leftAfter.kept && !leftAfter.cls && !leftAfter.page, "Print: a page left in its print layout, another file opened: the layout and its slide page put back", { leftOn, ...leftAfter });
+    }
+    // ---- @interact (a Sagebrush extension, William Nov 8; the Beamer plan's PR 3): a Run keeps an interact with its item,
+    // and the preview draws it (the interact chunk, /sagebrush-latex-interact.js, fetched only now: no document before
+    // this one had an interact) with its controls at their defaults, not live, what its function printed and showed,
+    // and "Interactive in Sagebrush"; so does Present, and the print layout (William's Q2); an edit marks it stale
+    {
+      const interactFetches = () => requests.filter((u) => /sagebrush-latex-interact\.js/.test(u)).length;
+      const before = interactFetches();
+      const IA = String.raw`\documentclass{beamer}
+\usepackage{sagetex}
+\begin{document}
+\begin{frame}{A widget}
+\begin{sagesilent}
+@interact
+def h(k=slider(1, 5, 1, 2)):
+    print('k^2 =', k^2)
+    show(plot(sin(k*x), (x, 0, pi)))
+\end{sagesilent}
+\end{frame}
+\end{document}
+`;
+      await open(await mk("/t/interact.tex", enc(IA)));
+      await until(`document.querySelectorAll(".tex-preview section.slide").length === 1 && !document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
+      await ev(`(document.querySelector(".tex-head .tex-run").click(), 1)`);
+      const ranI = await statusIs(/^Ran 1 SageTeX item in [0-9.]+ s$/, 120000);
+      const W1 = `document.querySelector('.tex-preview .ch:not([hidden]) section.slide .sageinteract')`;
+      const drawn = await until(`!!${W1} && !!${W1}.querySelector('input[type=range][disabled][value="2"]') && ${W1}.querySelector(".si-out")?.textContent === "k^2 = 4\\n" && !!${W1}.querySelector("img.sageplot") && ${W1}.querySelector(".si-note")?.textContent === "Interactive in Sagebrush"`, 20000);
+      check(before === 0 && ranI && drawn && interactFetches() === 1, "@interact: a Run keeps it; the preview draws it (its slider at 2, its output, its plot, the note), the interact chunk fetched only now, once",
+        { before, ranI, drawn, fetched: interactFetches(), slide: await ev(`(document.querySelector(".tex-preview section.slide")?.innerHTML ?? "").slice(0, 400)`) });
+      const Pi = `document.querySelector(".tex-present")`;
+      await ev(`(document.querySelector(".tex-present-btn").click(), 1)`);
+      const inPresent = await until(`!!${Pi} && !!${Pi}.querySelector(".tp-stage .sageinteract input[type=range]") && !!${Pi}.querySelector(".tp-stage .sageinteract img.sageplot")`, 15000);
+      await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+      await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
+      await until(`!${Pi}`, 5000);
+      await ev(`(window.sagebrush.latex.printMode(true), 1)`);
+      await send("Emulation.setEmulatedMedia", { media: "print" });
+      const printed = await ev(`(() => { const w = ${W1}; if (!w) return null; const r = w.getBoundingClientRect(); return { shown: getComputedStyle(w).display !== "none" && r.height > 0, note: w.querySelector(".si-note")?.textContent }; })()`);
+      await send("Emulation.setEmulatedMedia", { media: "" });
+      await ev(`(window.sagebrush.latex.printMode(false), 1)`);
+      check(inPresent && printed?.shown && printed.note === "Interactive in Sagebrush", "@interact: Present shows it, and the print layout, with its note", { inPresent, printed });
+      const t = await ev(`document.querySelector(".tex-src").value`);
+      await typeInto(t.replace("slider(1, 5, 1, 2)", "slider(1, 5, 1, 3)"));
+      const stale = await until(`!!document.querySelector('.tex-preview .ch:not([hidden]) .sageinteract.sagestale')`, 10000);
+      check(stale, "@interact: its code edited, the interact kept, marked stale", null);
+      // (Shift+Enter while presenting: the Run's interact drawn after the slide was shown, and the slide shown again with it)
+      await ev(`(document.querySelector(".tex-status").textContent = "", document.querySelector(".tex-present-btn").click(), 1)`);
+      await until(`!!${Pi} && !!${Pi}.querySelector(".tp-stage .sageinteract.sagestale")`, 15000);
+      await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, modifiers: 8, text: "\r" });
+      await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, modifiers: 8 });
+      const reran = await statusIs(/^Ran 1 SageTeX item in [0-9.]+ s$/, 120000);
+      const fresh3 = await until(`!!${Pi}.querySelector('.tp-stage .sageinteract:not(.sagestale) input[type=range][value="3"]') && ${Pi}.querySelector(".tp-stage .si-out")?.textContent === "k^2 = 9\\n"`, 15000);
+      await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+      await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
+      await until(`!${Pi}`, 5000);
+      check(reran && fresh3, "@interact: Shift+Enter while presenting runs it again; the slide shows the new interact (at 3, k^2 = 9), nothing stale", { reran, fresh3 });
+      // (grader's #926 I9: a drawn widget is marked, so a later render draws nothing again)
+      const again = await ev(`(() => { const u = performance.getEntriesByType("resource").map((e) => e.name).find((n) => /sagebrush-latex-interact\\.js/.test(n)); return import(u).then((m) => m.draw(document.querySelector(".tex-preview"))); })()`);
+      check(again === 0, "@interact: drawn once: drawing the preview again draws nothing", { again });
+      // (grader's #926 P1: the interact chunk's load refused once (the page opened again, its results file's widget to
+      //  draw): the widget waits, and the next render loads the chunk by a URL of its own (?try=) and draws it)
+      let iaRefused = 0;
+      onPaused = (p) => { if (!iaRefused++) send("Fetch.failRequest", { requestId: p.requestId, errorReason: "ConnectionFailed" }); else send("Fetch.continueRequest", { requestId: p.requestId }); };
+      await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-latex-interact.js*" }] });
+      await send("Network.setCacheDisabled", { cacheDisabled: true });
+      const n0 = requests.length;
+      await open(await ev(`new URLSearchParams(location.search).get("tex")`));
+      const waits = await until(`!!document.querySelector('.tex-preview .ch:not([hidden]) .sageinteract-at:not([data-drawn])')`, 20000);
+      await sleep(1000);
+      const notYet = await ev(`!document.querySelector('.tex-preview .ch:not([hidden]) .sageinteract')`);
+      const t3 = await ev(`document.querySelector(".tex-src").value`);
+      await typeInto(t3 + "%\n");
+      const drawnLater = await until(`!!document.querySelector('.tex-preview .ch:not([hidden]) .sageinteract input[type=range][value="3"]')`, 20000);
+      await send("Fetch.disable");
+      await send("Network.setCacheDisabled", { cacheDisabled: false });
+      onPaused = null;
+      const iaUrls = requests.slice(n0).filter((u) => /sagebrush-latex-interact\.js/.test(u));
+      check(iaRefused >= 2 && waits && notYet && drawnLater && iaUrls.length >= 2 && !/\?try=/.test(iaUrls[0]) && /\?try=\d+$/.test(iaUrls[iaUrls.length - 1]),
+        "@interact: the interact chunk's load refused once: the widget waits; the next render loads it by a URL of its own (?try=) and draws it", { iaRefused, waits, notYet, drawnLater, iaUrls });
     }
     // (Codex friction P5, the editor's half: a helper .py beside the .tex, imported by the document's code as by real
     //  SageTeX run in the document's folder. The .tex's folder is given to Sage, read-only, at each Run, as it is then:

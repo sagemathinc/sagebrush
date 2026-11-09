@@ -642,7 +642,7 @@
   },
   "engine/lib/sage-more.src": {
    "exact": false,
-   "ceiling": 491890,
+   "ceiling": 496484,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -656,7 +656,7 @@
   },
   "engine/lib/sage.src": {
    "exact": false,
-   "ceiling": 2982652,
+   "ceiling": 2985033,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -733,7 +733,7 @@
   },
   "engine/sagebrush-notebook.js": {
    "exact": false,
-   "ceiling": 240300,
+   "ceiling": 240594,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
