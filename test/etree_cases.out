@@ -1,0 +1,165 @@
+-- fromstring, attributes, text and tail
+'a' [('x', '1'), ('y', '2')] 'text' None
+  'b' [] 'in b' 'tail of b'
+  'c' [] None 'tail of c'
+1 None dflt ['x', 'y'] [('x', '1'), ('y', '2')]
+2 ['b', 'c'] b c ['c']
+b'<a x="1" y="2">text<b>in b</b>tail of b<c />tail of c</a>' '<a x="1" y="2">text<b>in b</b>tail of b<c />tail of c</a>'
+-- the friction shapes: an SVG read by tag with namespaces
+{http://www.w3.org/2000/svg}svg {'width': '100', 'height': '50', 'viewBox': '0 0 100 50'}
+['{http://www.w3.org/2000/svg}svg', '{http://www.w3.org/2000/svg}defs', '{http://www.w3.org/2000/svg}path', '{http://www.w3.org/2000/svg}g', '{http://www.w3.org/2000/svg}rect', '{http://www.w3.org/2000/svg}use', '{http://www.w3.org/2000/svg}text', '{http://www.w3.org/2000/svg}g', '{http://www.w3.org/2000/svg}path']
+['figure_1', 'axes_1']
+['M 0 0 L 10 10', 'M 1 2 C 3 4 5 6 7 8 Z']
+['#p0']
+'\n  \n  \n  \n    \n    \n    Résumé & <tags> αβ\n    \n  \n'
+Résumé & <tags> αβ Résumé & <tags> αβ
+{'x': '0', 'y': '0', 'width': '100', 'height': '50', 'style': 'fill:#ffffff'} ['{http://www.w3.org/2000/svg}g']
+True ['{http://www.w3.org/2000/svg}path', '{http://www.w3.org/2000/svg}path']
+-- ElementPath
+'i' [('i', '1'), ('i', '2'), ('i', '3')]
+'./i' [('i', '1'), ('i', '2'), ('i', '3')]
+'.//i' [('i', '1'), ('i', '2'), ('i', '3'), ('i', '4')]
+'i[@k]' [('i', '1'), ('i', '2')]
+"i[@k='a']" [('i', '1')]
+".//i[@k='a']" [('i', '1'), ('i', '4')]
+'i[1]' [('i', '1')]
+'i[last()]' [('i', '3')]
+'i[last()-1]' [('i', '2')]
+'i[j]' [('i', '2')]
+"i[j='y']" [('i', '2')]
+'*' [('i', '1'), ('i', '2'), ('i', '3'), ('g', None)]
+'.//*' [('i', '1'), ('i', '2'), ('j', None), ('i', '3'), ('g', None), ('i', '4')]
+'g/i' [('i', '4')]
+'..' []
+'.' [('r', None)]
+"i[.='x']" [('i', '1')]
+"i[@n!='2']" [('i', '1'), ('i', '3')]
+'.//j/..' [('i', '2')]
+'i[2]/j' [('j', None)]
+'1' 'x' 'dflt'
+TypeError: 'NoneType' object is not callable SyntaxError: cannot use absolute path on element
+'4'
+-- building trees, SubElement, mutation
+'<a x="1" y="2" w="4"><!-- c1 --><b z="3">bee</b><c />after c<?pi data here?></a>'
+'<a x="1" y="2" w="4"><!-- c1 --><c />after c<?pi data here?></a>' 3
+['e0'] ValueError: Element.remove(x): element not found
+'<a />' {}
+TypeError: attrib must be dict, not int AttributeError: 'NoneType' object has no attribute 'makeelement'
+r {'s': 't'} True False
+-- serialization: tostring, methods, encodings, xml_declaration, short_empty_elements, escaping
+[] b'<a b="&lt;&amp;&quot; &#09;x"><c />t &lt; &gt; &amp; "q" \'a\'<d /></a>'
+[('encoding', 'unicode')] '<a b="&lt;&amp;&quot; &#09;x"><c />t &lt; &gt; &amp; "q" \'a\'<d /></a>'
+[('encoding', 'us-ascii')] b'<a b="&lt;&amp;&quot; &#09;x"><c />t &lt; &gt; &amp; "q" \'a\'<d /></a>'
+[('encoding', 'utf-8')] b'<a b="&lt;&amp;&quot; &#09;x"><c />t &lt; &gt; &amp; "q" \'a\'<d /></a>'
+[('encoding', 'UTF-8')] b'<a b="&lt;&amp;&quot; &#09;x"><c />t &lt; &gt; &amp; "q" \'a\'<d /></a>'
+[('encoding', 'iso-8859-1')] b'<?xml version=\'1.0\' encoding=\'iso-8859-1\'?>\n<a b="&lt;&amp;&quot; &#09;x"><c />t &lt; &gt; &amp; "q" \'a\'<d /></a>'
+[('encoding', 'utf-16')] b'\xff\xfe<\x00?\x00x\x00m\x00l\x00 \x00v\x00e\x00r\x00s\x00i\x00o\x00n\x00=\x00\'\x001\x00.\x000\x00\'\x00 \x00e\x00n\x00c\x00o\x00d\x00i\x00n\x00g\x00=\x00\'\x00u\x00t\x00f\x00-\x001\x006\x00\'\x00?\x00>\x00\n\x00<\x00a\x00 \x00b\x00=\x00"\x00&\x00l\x00t\x00;\x00&\x00a\x00m\x00p\x00;\x00&\x00q\x00u\x00o\x00t\x00;\x00 \x00&\x00#\x000\x009\x00;\x00x\x00"\x00>\x00<\x00c\x00 \x00/\x00>\x00t\x00 \x00&\x00l\x00t\x00;\x00 \x00&\x00g\x00t\x00;\x00 \x00&\x00a\x00m\x00p\x00;\x00 \x00"\x00q\x00"\x00 \x00\'\x00a\x00\'\x00<\x00d\x00 \x00/\x00>\x00<\x00/\x00a\x00>\x00'
+[('method', 'html')] b'<a b="<&amp;&quot; \tx"><c></c>t &lt; &gt; &amp; "q" \'a\'<d></d></a>'
+[('method', 'text')] b't < > & "q" \'a\''
+[('short_empty_elements', False)] b'<a b="&lt;&amp;&quot; &#09;x"><c></c>t &lt; &gt; &amp; "q" \'a\'<d></d></a>'
+[('xml_declaration', True)] b'<?xml version=\'1.0\' encoding=\'us-ascii\'?>\n<a b="&lt;&amp;&quot; &#09;x"><c />t &lt; &gt; &amp; "q" \'a\'<d /></a>'
+[('encoding', 'unicode'), ('xml_declaration', True)] '<?xml version=\'1.0\' encoding=\'utf-8\'?>\n<a b="&lt;&amp;&quot; &#09;x"><c />t &lt; &gt; &amp; "q" \'a\'<d /></a>'
+[('default_namespace', 'urn:d')] ValueError: cannot use non-qualified names with default_namespace option
+[('encoding', 'utf-8'), ('xml_declaration', False)] b'<a b="&lt;&amp;&quot; &#09;x"><c />t &lt; &gt; &amp; "q" \'a\'<d /></a>'
+['<a', ' b="&lt;&amp;&quot; &#09;x"', '>', '<c', ' />', 't &lt; &gt; &amp; "q" \'a\'', '<d', ' />', '</a>']
+b'<u>&#252;&#8364;&#128512;\r\n</u>' '<u>ü€😀\r\n</u>' b"<?xml version='1.0' encoding='ascii'?>\n<u>&#252;&#8364;&#128512;\r\n</u>"
+'<html><head><script>if (a < b && c) {}</script><style>p > q {}</style></head><body><br><p>x<img src="i"></p><textarea></textarea></body></html>'
+-- namespaces in output: register_namespace, prefixes, default_namespace
+'<my:root xmlns:my="urn:mine" xmlns:ns1="urn:other" xmlns:ns2="urn:third"><my:kid ns1:attr="v" plain="p" /><ns2:x /></my:root>'
+ValueError: cannot use non-qualified names with default_namespace option
+ValueError: Prefix format reserved for internal use None
+'<ns1:plain xmlns="urn:other" xmlns:ns1="urn:z" />'
+-- indent
+'<a>\n  <b>\n    <c>t</c>\n    <d />\n  </b>\n  <e>  </e>\n  <f />\n</a>'
+'<a>\n\t\t<b>\n\t\t\t<c>t</c>\n\t\t\t<d />\n\t\t</b>\n\t\t<e>  </e>\n\t\t<f />\n\t</a>'
+ValueError: Initial indentation level must be >= 0, got -1
+'<a>\n<b>\n<c>t</c>\n<d />\n</b>\n<e>  </e>\n<f />\n</a>'
+-- iterparse and XMLPullParser events
+None [('end', '{urn:a}y'), ('end', '{urn:p}x'), ('end', '{urn:a}r')]
+('start',) [('start', '{urn:a}r'), ('start', '{urn:p}x'), ('start', '{urn:a}y')]
+('end',) [('end', '{urn:a}y'), ('end', '{urn:p}x'), ('end', '{urn:a}r')]
+('start', 'end') [('start', '{urn:a}r'), ('start', '{urn:p}x'), ('start', '{urn:a}y'), ('end', '{urn:a}y'), ('end', '{urn:p}x'), ('end', '{urn:a}r')]
+('start', 'end', 'start-ns', 'end-ns', 'comment', 'pi') [('start-ns', ('', 'urn:a')), ('start-ns', ('p', 'urn:p')), ('start', '{urn:a}r'), ('comment', 'c'), ('pi', True, 'pi d'), ('start', '{urn:p}x'), ('start', '{urn:a}y'), ('end', '{urn:a}y'), ('end', '{urn:p}x'), ('end', '{urn:a}r'), ('end-ns', None), ('end-ns', None)]
+b None a None StopIteration:  a
+ParseError: mismatched tag: line 1, column 8 ValueError: unknown event 'bogus'
+[('start-ns', ('q', 'urn:q')), ('start', 'r')]
+[('start', '{urn:q}a')]
+[('end', '{urn:q}a')]
+[('start', 'b'), ('end', 'b'), ('end', 'r'), ('end-ns', None)]
+[]
+ParseError: no element found: line 1, column 3
+['b']
+-- XMLParser, TreeBuilder, targets
+('doctype', 'html', '-//W3C//DTD XHTML 1.0//EN', 'http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd')
+('start_ns', 'n', 'urn:n')
+('start', 'r', [])
+('data', 'a')
+('comment', 'c')
+('pi', 'p', 'q')
+('start', '{urn:n}e', [('k', 'v')])
+('data', 'b&c')
+('end', '{urn:n}e')
+('end', 'r')
+('end_ns', 'n')
+[('Comment', 'x'), ('ProcessingInstruction', 'y z')]
+Expat 2.9.0 LookupError: unknown encoding: klingon
+'é'
+'é'
+'a' ParseError: not well-formed (invalid token): line 1, column 3
+{'b': '1'} dict_keys(['1', '2'])
+['b']
+-- ParseError: code, position and message
+'<a>' ParseError 3 (1, 3) no element found: line 1, column 3
+'<a></b>' ParseError 7 (1, 5) mismatched tag: line 1, column 5
+'<a x="1" x="2"/>' ParseError 8 (1, 9) duplicate attribute: line 1, column 9
+'<a>&foo;</a>' ParseError 11 (1, 3) undefined entity: line 1, column 3
+'' ParseError 3 (1, 0) no element found: line 1, column 0
+'   ' ParseError 3 (1, 3) no element found: line 1, column 3
+'<a/><b/>' ParseError 9 (1, 4) junk after document element: line 1, column 4
+'<a' ParseError 5 (1, 0) unclosed token: line 1, column 0
+'<a>\n  <b>\n</a>' ParseError 7 (3, 2) mismatched tag: line 3, column 2
+"<?xml version='1.0'?><?xml version='1.0'?><a/>" ParseError 17 (1, 21) XML or text declaration not at start of entity: line 1, column 21
+'<a>&#0;</a>' ParseError 14 (1, 3) reference to invalid character number: line 1, column 3
+'<a>&#xD800;</a>' ParseError 14 (1, 3) reference to invalid character number: line 1, column 3
+'<a b=c/>' ParseError 4 (1, 5) not well-formed (invalid token): line 1, column 5
+'<1a/>' ParseError 4 (1, 1) not well-formed (invalid token): line 1, column 1
+'<a><![CDATA[x]]</a>' ParseError 20 (1, 19) unclosed CDATA section: line 1, column 19
+"<!DOCTYPE a [<!ENTITY e SYSTEM 'x'>]><a>&e;</a>" ParseError 11 (1, 40) undefined entity &e;: line 1, column 40
+'<a>\x01</a>' ParseError 4 (1, 3) not well-formed (invalid token): line 1, column 3
+'<a:b/>' ParseError 27 (1, 0) unbound prefix: line 1, column 0
+"<x:a xmlns:x='u'><y:b/></x:a>" ParseError 27 (1, 17) unbound prefix: line 1, column 17
+'text' ParseError 2 (1, 0) syntax error: line 1, column 0
+'<a>]]></a>' ParseError 4 (1, 5) not well-formed (invalid token): line 1, column 5
+SyntaxError None None mismatched tag: line 2, column 5 (2, 5) 7
+-- entities, CDATA, whitespace, line ends
+'Hello World! World & A <raw> &  😀' {'a': 'World'}
+'\n line\nnext\n' '  ' '\t'
+{'a': '  x  y  ', 'b': '\n\t'}
+-- canonicalize (C14N 2.0)
+'<root xmlns="urn:r"><b a="2" z="1">  t  <c></c></b><?pi x?></root>'
+'<root xmlns="urn:r"><!--c--><b a="2" z="1">  t  <c></c></b><?pi x?></root>'
+'<root xmlns="urn:r"><b a="2" z="1">t<c></c></b><?pi x?></root>'
+'<n0:root xmlns:n0="urn:r"><n0:b xmlns:n1="" a="2" z="1">  t  <n0:c></n0:c></n0:b><?pi x?></n0:root>'
+'<root xmlns="urn:r"><b a="2" z="1">  t  </b><?pi x?></root>'
+'<root xmlns="urn:r"><b a="2">  t  <c></c></b><?pi x?></root>'
+'<root xmlns="urn:r"><b a="2" z="1">  t  <c></c></b><?pi x?></root>'
+ValueError: Either 'xml_data' or 'from_file' must be provided as input '<a></a>'
+-- ElementTree: write to a file object, parse a file object
+[] b'<a><b>&#233;</b></a>'
+[('encoding', 'unicode')] '<a><b>é</b></a>'
+[('encoding', 'utf-8'), ('xml_declaration', True)] b"<?xml version='1.0' encoding='utf-8'?>\n<a><b>\xc3\xa9</b></a>"
+[('encoding', 'unicode'), ('method', 'text')] 'é'
+'y' 'x'
+'é' 'b' FutureWarning: This search is broken in 1.3 and earlier, and will be fixed in a future version.  If you rely on the current behaviour, change it to './b'
+None TypeError: expected an Element, not str
+-- ElementInclude with a loader (no file is opened)
+'<doc><part>p</part>plain text</doc>'
+FatalIncludeError: recursive include of self.xml
+FatalIncludeError: unknown parse type in xi:include tag ('bogus')
+-- the module's surface
+['C14NWriterTarget', 'Comment', 'Element', 'ElementTree', 'PI', 'ParseError', 'ProcessingInstruction', 'QName', 'SubElement', 'TreeBuilder', 'VERSION', 'XML', 'XMLID', 'XMLParser', 'XMLPullParser', 'canonicalize', 'dump', 'fromstring', 'fromstringlist', 'indent', 'iselement', 'iterparse', 'parse', 'register_namespace', 'tostring', 'tostringlist']
+1.3.0 SyntaxError xml.etree.ElementTree xml.etree.ElementTree
+'xml' True
+DeprecationWarning: Testing an element's truth value will always return True in future versions.  Use specific 'len(elem)' or 'elem is not None' test instead. AttributeError: 'Element' object has no attribute 'getchildren'
+(True, False, 't', 'changed')
+a {'k': 'v'} t
