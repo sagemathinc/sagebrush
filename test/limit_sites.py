@@ -91,6 +91,20 @@ def short(key):
     return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
 
 
+# (nested library packages in the census, by prefix: Sprig's (design/sprig-mvp.md §5.2, daybreak2's LIMITS ruling).
+# The other nested directories of lib/ are excluded, as stated: the stand-ins and vendored pieces of other libraries
+# (matplotlib, numpy, scipy, IPython, json, zoneinfo, urllib, xml, pathlib, importlib, html, encodings and the
+# like, whose limits are their originals'), sagebrush/ (the package's API, audited with its modules), and lib/_rill/,
+# whose owner adds it with its sites registered)
+NESTED = ("lib/_sprig/",)
+
+
+def in_lib_census(path):
+    """Whether a library file is in the census: lib/*.py, and every .py file under a NESTED package."""
+    return re.fullmatch(r"lib/[^/]+\.py", path) is not None or \
+        (path.endswith(".py") and any(path.startswith(d) for d in NESTED))
+
+
 def tracked(rev=None):
     """The census's files, at REV (git) or in the working tree."""
     if rev is None:
@@ -99,7 +113,7 @@ def tracked(rev=None):
         out = subprocess.run(["git", "ls-tree", "-r", "--name-only", rev], cwd=ROOT, capture_output=True, text=True, check=True).stdout
     keep = []
     for p in out.split("\n"):
-        if re.fullmatch(r"lib/[^/]+\.py", p) or (p.startswith("engine/") and p.endswith(".rs") and "/target/" not in p) \
+        if in_lib_census(p) or (p.startswith("engine/") and p.endswith(".rs") and "/target/" not in p) \
                 or (p.startswith("src/") and p.endswith(".ts")) or p in WEB:
             keep.append(p)
     return sorted(keep)

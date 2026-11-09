@@ -1,0 +1,1533 @@
+{
+ "cases": [
+  {
+   "fullform": "FullForm[Hold[Times[-1, x]]]",
+   "id": "core-1",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[-x]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Optional[Pattern[x, Blank[]], 10]]]",
+   "id": "core-2",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[x_ : 10]]"
+  },
+  {
+   "fullform": "FullForm[Hold[CompoundExpression[a, b, Null]]]",
+   "id": "core-3",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[a ; b ; Null]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Plus[1, -2]]]",
+   "id": "core-4",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[1 - 2]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Times[-1, Power[2, 2]]]]",
+   "id": "core-5",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[-2^2]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Times[a, Power[b, -1], Power[c, -1]]]]",
+   "id": "core-6",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[a/(b*c)]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Power[a, Power[b, c]]]]",
+   "id": "core-7",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[a^b^c]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Dot[a, b, c]]]",
+   "id": "core-8",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[a . b . c]]"
+  },
+  {
+   "fullform": "FullForm[Hold[f[g[x]]]]",
+   "id": "core-9",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[f[g[x]]]]"
+  },
+  {
+   "fullform": "FullForm[Hold[g[f[x]]]]",
+   "id": "core-10",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[g[f[x]]]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Rule[a, Rule[b, c]]]]",
+   "id": "core-11",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[a ⇾ b ⇾ c]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Function[Plus[Slot[1], 1]]]]",
+   "id": "core-12",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[#1 + 1&]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Derivative[1][f][x]]]",
+   "id": "core-13",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[Derivative[1][f][x]]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Derivative[2][f][x]]]",
+   "id": "core-14",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[Derivative[2][f][x]]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Times[a, b, c]]]",
+   "id": "core-15",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[a*b*c]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Times[Times[a, b], c]]]",
+   "id": "core-16",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[a*b*c]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Plus[a, Times[-1, b], Times[-1, c]]]]",
+   "id": "core-17",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[a - b - c]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Times[2, Power[x, 2]]]]",
+   "id": "core-18",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[2*x^2]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Factorial[x]]]",
+   "id": "core-19",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[x!]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Equal[a, b, c]]]",
+   "id": "core-20",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[a ⩵ b ⩵ c]]"
+  },
+  {
+   "fullform": "FullForm[Hold[And[Not[a], b]]]",
+   "id": "core-21",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[!a ∧ b]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Times[-1, a, b]]]",
+   "id": "core-22",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[-a*b]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Plus[a, Times[-1, -1, b]]]]",
+   "id": "core-23",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[a - -b]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Times[1, Power[2, -1]]]]",
+   "id": "core-24",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[1/2]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Times[-1, Power[2, -1]]]]",
+   "id": "core-25",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[-1/2]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Span[a, b]]]",
+   "id": "core-26",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[a ;; b]]"
+  },
+  {
+   "fullform": "FullForm[Hold[PatternTest[Pattern[x, Blank[Integer]], EvenQ]]]",
+   "id": "core-27",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[x_Integer ? EvenQ]]"
+  },
+  {
+   "fullform": "FullForm[Hold[SetDelayed[f[Pattern[x, Blank[]]], Condition[x, Greater[x, 0]]]]]",
+   "id": "core-28",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[f[x_] := x /; x > 0]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Alternatives[a, b, c]]]",
+   "id": "core-29",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[a ❘ b ❘ c]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Increment[i]]]",
+   "id": "core-30",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[i++]]"
+  },
+  {
+   "fullform": "FullForm[Hold[PreIncrement[i]]]",
+   "id": "core-31",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[++i]]"
+  },
+  {
+   "fullform": "FullForm[Hold[StringJoin[a, b, c]]]",
+   "id": "core-32",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[a <> b <> c]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Part[a, 1, 2]]]",
+   "id": "core-33",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[Part[a, 1, 2]]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Or[And[a, b], c]]]",
+   "id": "core-34",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[a ∧ b ∨ c]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Set[x, Set[y, 3]]]]",
+   "id": "core-35",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[x = y = 3]]"
+  },
+  {
+   "fullform": "FullForm[Hold[-2.5`]]",
+   "id": "core-36",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[-2.5]]"
+  },
+  {
+   "fullform": "FullForm[Hold[1000]]",
+   "id": "core-37",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[1000]]"
+  },
+  {
+   "fullform": "FullForm[Hold[x]]",
+   "id": "core-38",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[x]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Function[Plus[Slot[2], SlotSequence[1]]]]]",
+   "id": "core-39",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[#2 + ##1&]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Apply[a, b]]]",
+   "id": "core-40",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[a @@ b]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Map[f, a]]]",
+   "id": "core-41",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[f /@ a]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Apply[a, b, {1}]]]",
+   "id": "core-42",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[Apply[a, b, {1}]]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Inequality[a, Less, b, Greater, c]]]",
+   "id": "core-43",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[Inequality[a, Less, b, Greater, c]]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Times[-1, Times[a, b]]]]",
+   "id": "core-44",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[-(a*b)]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Plus[a, Times[-1, Times[b, c]]]]]",
+   "id": "core-45",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[a - b*c]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Unset[x]]]",
+   "id": "core-46",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[x=.]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Plus[StringJoin[a, b], c]]]",
+   "id": "core-47",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[a <> b + c]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Optional[Pattern[x, Blank[]]]]]",
+   "id": "core-48",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[(x_.)]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Pattern[x, BlankSequence[]]]]",
+   "id": "core-49",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[x__]]"
+  },
+  {
+   "fullform": "FullForm[Hold[BlankNullSequence[h]]]",
+   "id": "core-50",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[___h]]"
+  },
+  {
+   "fullform": "FullForm[Hold[RuleDelayed[a, b]]]",
+   "id": "core-51",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[a ⧴ b]]"
+  },
+  {
+   "fullform": "FullForm[Hold[ReplaceAll[x, Rule[a, b]]]]",
+   "id": "core-52",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[x /. a ⇾ b]]"
+  },
+  {
+   "fullform": "FullForm[Hold[ReplaceRepeated[x, Rule[a, b]]]]",
+   "id": "core-53",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[x //. a ⇾ b]]"
+  },
+  {
+   "fullform": "FullForm[Hold[AddTo[x, 2]]]",
+   "id": "core-54",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[x += 2]]"
+  },
+  {
+   "fullform": "FullForm[Hold[f[a][b, c]]]",
+   "id": "core-55",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[f[a][b, c]]]"
+  },
+  {
+   "fullform": "FullForm[Hold[{}]]",
+   "id": "core-56",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[{}]]"
+  },
+  {
+   "fullform": "FullForm[Hold[f[]]]",
+   "id": "core-57",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[f[]]]"
+  },
+  {
+   "fullform": "FullForm[Hold[{{1, 2}, {3}}]]",
+   "id": "core-58",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[{{1, 2}, {3}}]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Times[2, Plus[a, b]]]]",
+   "id": "core-59",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[2*(a + b)]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Times[a, b]]]",
+   "id": "core-60",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[a*b]]"
+  },
+  {
+   "fullform": "FullForm[Hold[\"a\\\"b\"]]",
+   "id": "core-61",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[\"a\\\"b\"]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Power[x, -2]]]",
+   "id": "core-62",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[1/x^2]]"
+  },
+  {
+   "fullform": "FullForm[Hold[SameQ[a, b]]]",
+   "id": "core-63",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[a === b]]"
+  },
+  {
+   "fullform": "FullForm[Hold[UnsameQ[a, b]]]",
+   "id": "core-64",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[a =!= b]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Unequal[a, b]]]",
+   "id": "core-65",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[a ≠ b]]"
+  },
+  {
+   "fullform": "FullForm[Hold[Inequality[a, LessEqual, b, GreaterEqual, c]]]",
+   "id": "core-66",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[Hold[Inequality[a, LessEqual, b, GreaterEqual, c]]]"
+  },
+  {
+   "fullform": "14",
+   "id": "core-67",
+   "messages": [],
+   "output": "",
+   "result": "14"
+  },
+  {
+   "fullform": "Rational[1, 3]",
+   "id": "core-68",
+   "messages": [],
+   "output": "",
+   "result": "1/3"
+  },
+  {
+   "fullform": "Rational[-1, 3]",
+   "id": "core-69",
+   "messages": [],
+   "output": "",
+   "result": "-1/3"
+  },
+  {
+   "fullform": "1267650600228229401496703205376",
+   "id": "core-70",
+   "messages": [],
+   "output": "",
+   "result": "1267650600228229401496703205376"
+  },
+  {
+   "fullform": "Rational[1, 8]",
+   "id": "core-71",
+   "messages": [],
+   "output": "",
+   "result": "1/8"
+  },
+  {
+   "fullform": "Rational[4, 9]",
+   "id": "core-72",
+   "messages": [],
+   "output": "",
+   "result": "4/9"
+  },
+  {
+   "fullform": "Rational[9, 4]",
+   "id": "core-73",
+   "messages": [],
+   "output": "",
+   "result": "9/4"
+  },
+  {
+   "fullform": "0",
+   "id": "core-74",
+   "messages": [],
+   "output": "",
+   "result": "0"
+  },
+  {
+   "fullform": "1",
+   "id": "core-75",
+   "messages": [],
+   "output": "",
+   "result": "1"
+  },
+  {
+   "fullform": "2",
+   "id": "core-76",
+   "messages": [],
+   "output": "",
+   "result": "2"
+  },
+  {
+   "fullform": "2",
+   "id": "core-77",
+   "messages": [],
+   "output": "",
+   "result": "2"
+  },
+  {
+   "fullform": "Rational[2, 3]",
+   "id": "core-78",
+   "messages": [],
+   "output": "",
+   "result": "2/3"
+  },
+  {
+   "fullform": "9",
+   "id": "core-79",
+   "messages": [],
+   "output": "",
+   "result": "9"
+  },
+  {
+   "fullform": "Times[2, x]",
+   "id": "core-80",
+   "messages": [],
+   "output": "",
+   "result": "2*x"
+  },
+  {
+   "fullform": "0",
+   "id": "core-81",
+   "messages": [],
+   "output": "",
+   "result": "0"
+  },
+  {
+   "fullform": "x",
+   "id": "core-82",
+   "messages": [],
+   "output": "",
+   "result": "x"
+  },
+  {
+   "fullform": "Power[x, 2]",
+   "id": "core-83",
+   "messages": [],
+   "output": "",
+   "result": "x^2"
+  },
+  {
+   "fullform": "x",
+   "id": "core-84",
+   "messages": [],
+   "output": "",
+   "result": "x"
+  },
+  {
+   "fullform": "Power[x, -2]",
+   "id": "core-85",
+   "messages": [],
+   "output": "",
+   "result": "1/x^2"
+  },
+  {
+   "fullform": "Times[2, a, b]",
+   "id": "core-86",
+   "messages": [],
+   "output": "",
+   "result": "2*a*b"
+  },
+  {
+   "fullform": "Times[Power[x, 2], Power[y, 2]]",
+   "id": "core-87",
+   "messages": [],
+   "output": "",
+   "result": "x^2*y^2"
+  },
+  {
+   "fullform": "Power[x, 6]",
+   "id": "core-88",
+   "messages": [],
+   "output": "",
+   "result": "x^6"
+  },
+  {
+   "fullform": "1",
+   "id": "core-89",
+   "messages": [],
+   "output": "",
+   "result": "1"
+  },
+  {
+   "fullform": "1",
+   "id": "core-90",
+   "messages": [],
+   "output": "",
+   "result": "1"
+  },
+  {
+   "fullform": "x",
+   "id": "core-91",
+   "messages": [],
+   "output": "",
+   "result": "x"
+  },
+  {
+   "fullform": "Plus[Times[2, a], Times[2, b]]",
+   "id": "core-92",
+   "messages": [],
+   "output": "",
+   "result": "2*a + 2*b"
+  },
+  {
+   "fullform": "Plus[a, b, c]",
+   "id": "core-93",
+   "messages": [],
+   "output": "",
+   "result": "a + b + c"
+  },
+  {
+   "fullform": "Times[x, y, z]",
+   "id": "core-94",
+   "messages": [],
+   "output": "",
+   "result": "x*y*z"
+  },
+  {
+   "fullform": "Plus[1, x, Power[x, 2]]",
+   "id": "core-95",
+   "messages": [],
+   "output": "",
+   "result": "1 + x + x^2"
+  },
+  {
+   "fullform": "Plus[1, x, Power[x, 2], Power[x, 3]]",
+   "id": "core-96",
+   "messages": [],
+   "output": "",
+   "result": "1 + x + x^2 + x^3"
+  },
+  {
+   "fullform": "Times[x, Power[y, 2]]",
+   "id": "core-97",
+   "messages": [],
+   "output": "",
+   "result": "x*y^2"
+  },
+  {
+   "fullform": "Times[-1, x]",
+   "id": "core-98",
+   "messages": [],
+   "output": "",
+   "result": "-x"
+  },
+  {
+   "fullform": "Plus[Times[-1, x], Times[-1, y]]",
+   "id": "core-99",
+   "messages": [],
+   "output": "",
+   "result": "-x - y"
+  },
+  {
+   "fullform": "Plus[x, Times[-1, y]]",
+   "id": "core-100",
+   "messages": [],
+   "output": "",
+   "result": "x - y"
+  },
+  {
+   "fullform": "Times[2, Power[x, -1]]",
+   "id": "core-101",
+   "messages": [],
+   "output": "",
+   "result": "2/x"
+  },
+  {
+   "fullform": "Times[Rational[1, 2], x]",
+   "id": "core-102",
+   "messages": [],
+   "output": "",
+   "result": "x/2"
+  },
+  {
+   "fullform": "Times[Rational[-1, 2], x]",
+   "id": "core-103",
+   "messages": [],
+   "output": "",
+   "result": "-x/2"
+  },
+  {
+   "fullform": "Times[x, Power[y, -1], Power[z, -1]]",
+   "id": "core-104",
+   "messages": [],
+   "output": "",
+   "result": "x/(y*z)"
+  },
+  {
+   "fullform": "Times[x, y, Power[z, -1]]",
+   "id": "core-105",
+   "messages": [],
+   "output": "",
+   "result": "x*y/z"
+  },
+  {
+   "fullform": "Plus[Times[a, Power[b, -1]], c]",
+   "id": "core-106",
+   "messages": [],
+   "output": "",
+   "result": "a/b + c"
+  },
+  {
+   "fullform": "Times[-1, Power[x, -1]]",
+   "id": "core-107",
+   "messages": [],
+   "output": "",
+   "result": "-1/x"
+  },
+  {
+   "fullform": "Power[x, -2]",
+   "id": "core-108",
+   "messages": [],
+   "output": "",
+   "result": "1/x^2"
+  },
+  {
+   "fullform": "Times[Power[c, -1], Plus[a, b]]",
+   "id": "core-109",
+   "messages": [],
+   "output": "",
+   "result": "(a + b)/c"
+  },
+  {
+   "fullform": "Times[c, Plus[a, b]]",
+   "id": "core-110",
+   "messages": [],
+   "output": "",
+   "result": "c*(a + b)"
+  },
+  {
+   "fullform": "Power[Plus[a, b], 2]",
+   "id": "core-111",
+   "messages": [],
+   "output": "",
+   "result": "(a + b)^2"
+  },
+  {
+   "fullform": "Power[a, Plus[b, c]]",
+   "id": "core-112",
+   "messages": [],
+   "output": "",
+   "result": "a^(b + c)"
+  },
+  {
+   "fullform": "Power[a, Times[2, b]]",
+   "id": "core-113",
+   "messages": [],
+   "output": "",
+   "result": "a^(2*b)"
+  },
+  {
+   "fullform": "2.`",
+   "id": "core-114",
+   "messages": [],
+   "output": "",
+   "result": "2."
+  },
+  {
+   "fullform": "0.3`",
+   "id": "core-115",
+   "messages": [],
+   "output": "",
+   "result": "0.3"
+  },
+  {
+   "fullform": "0.3333333333333333`",
+   "id": "core-116",
+   "messages": [],
+   "output": "",
+   "result": "0.3333333333333333"
+  },
+  {
+   "fullform": "Times[2.5`, x]",
+   "id": "core-117",
+   "messages": [],
+   "output": "",
+   "result": "2.5*x"
+  },
+  {
+   "fullform": "1.`*^20",
+   "id": "core-118",
+   "messages": [],
+   "output": "",
+   "result": "1.*^20"
+  },
+  {
+   "fullform": "1.`*^21",
+   "id": "core-119",
+   "messages": [],
+   "output": "",
+   "result": "1.*^21"
+  },
+  {
+   "fullform": "0.00001`",
+   "id": "core-120",
+   "messages": [],
+   "output": "",
+   "result": "0.00001"
+  },
+  {
+   "fullform": "1.`*^-6",
+   "id": "core-121",
+   "messages": [],
+   "output": "",
+   "result": "1.*^-6"
+  },
+  {
+   "fullform": "1.5`*^10",
+   "id": "core-122",
+   "messages": [],
+   "output": "",
+   "result": "1.5*^10"
+  },
+  {
+   "fullform": "-2.5`",
+   "id": "core-123",
+   "messages": [],
+   "output": "",
+   "result": "-2.5"
+  },
+  {
+   "fullform": "3.`",
+   "id": "core-124",
+   "messages": [],
+   "output": "",
+   "result": "3."
+  },
+  {
+   "fullform": "1.23456789123`*^8",
+   "id": "core-125",
+   "messages": [],
+   "output": "",
+   "result": "1.23456789123*^8"
+  },
+  {
+   "fullform": "1.414213562373095`",
+   "id": "core-126",
+   "messages": [],
+   "output": "",
+   "result": "1.414213562373095"
+  },
+  {
+   "fullform": "DirectedInfinity[]",
+   "id": "core-127",
+   "messages": [
+    "Power::infy: Infinite expression 1 / 0 encountered."
+   ],
+   "output": "Power::infy: Infinite expression 1 / 0 encountered.\n",
+   "result": "ComplexInfinity"
+  },
+  {
+   "fullform": "Indeterminate",
+   "id": "core-128",
+   "messages": [
+    "Power::infy: Infinite expression 1 / 0 encountered.",
+    "Infinity::indet: Indeterminate expression 0 ComplexInfinity encountered."
+   ],
+   "output": "Power::infy: Infinite expression 1 / 0 encountered.\nInfinity::indet: Indeterminate expression 0 ComplexInfinity encountered.\n",
+   "result": "Indeterminate"
+  },
+  {
+   "fullform": "Indeterminate",
+   "id": "core-129",
+   "messages": [
+    "Power::indet: Indeterminate expression 0 ^ 0 encountered."
+   ],
+   "output": "Power::indet: Indeterminate expression 0 ^ 0 encountered.\n",
+   "result": "Indeterminate"
+  },
+  {
+   "fullform": "Indeterminate",
+   "id": "core-130",
+   "messages": [
+    "Power::infy: Infinite expression 1 / 0 encountered.",
+    "Power::infy: Infinite expression 1 / 0 encountered.",
+    "Infinity::indet: Indeterminate expression ComplexInfinity + ComplexInfinity encountered."
+   ],
+   "output": "Power::infy: Infinite expression 1 / 0 encountered.\nPower::infy: Infinite expression 1 / 0 encountered.\nInfinity::indet: Indeterminate expression ComplexInfinity + ComplexInfinity encountered.\n",
+   "result": "Indeterminate"
+  },
+  {
+   "fullform": "Indeterminate",
+   "id": "core-131",
+   "messages": [
+    "Power::infy: Infinite expression 1 / 0 encountered.",
+    "Infinity::indet: Indeterminate expression 0 ComplexInfinity encountered."
+   ],
+   "output": "Power::infy: Infinite expression 1 / 0 encountered.\nInfinity::indet: Indeterminate expression 0 ComplexInfinity encountered.\n",
+   "result": "Indeterminate"
+  },
+  {
+   "fullform": "{11, 22}",
+   "id": "core-132",
+   "messages": [],
+   "output": "",
+   "result": "{11, 22}"
+  },
+  {
+   "fullform": "{3, 8}",
+   "id": "core-133",
+   "messages": [],
+   "output": "",
+   "result": "{3, 8}"
+  },
+  {
+   "fullform": "{1, 4}",
+   "id": "core-134",
+   "messages": [],
+   "output": "",
+   "result": "{1, 4}"
+  },
+  {
+   "fullform": "{2, 4, 8}",
+   "id": "core-135",
+   "messages": [],
+   "output": "",
+   "result": "{2, 4, 8}"
+  },
+  {
+   "fullform": "{Plus[1, a], Plus[1, b]}",
+   "id": "core-136",
+   "messages": [],
+   "output": "",
+   "result": "{1 + a, 1 + b}"
+  },
+  {
+   "fullform": "{{2, 3}, {4, 5}}",
+   "id": "core-137",
+   "messages": [],
+   "output": "",
+   "result": "{{2, 3}, {4, 5}}"
+  },
+  {
+   "fullform": "{1, 2, 3, 4, 5}",
+   "id": "core-138",
+   "messages": [],
+   "output": "",
+   "result": "{1, 2, 3, 4, 5}"
+  },
+  {
+   "fullform": "{2, 3, 4, 5, 6}",
+   "id": "core-139",
+   "messages": [],
+   "output": "",
+   "result": "{2, 3, 4, 5, 6}"
+  },
+  {
+   "fullform": "{1, 4, 7, 10}",
+   "id": "core-140",
+   "messages": [],
+   "output": "",
+   "result": "{1, 4, 7, 10}"
+  },
+  {
+   "fullform": "{0, Rational[1, 4], Rational[1, 2], Rational[3, 4], 1}",
+   "id": "core-141",
+   "messages": [],
+   "output": "",
+   "result": "{0, 1/4, 1/2, 3/4, 1}"
+  },
+  {
+   "fullform": "{}",
+   "id": "core-142",
+   "messages": [],
+   "output": "",
+   "result": "{}"
+  },
+  {
+   "fullform": "{}",
+   "id": "core-143",
+   "messages": [],
+   "output": "",
+   "result": "{}"
+  },
+  {
+   "fullform": "True",
+   "id": "core-144",
+   "messages": [],
+   "output": "",
+   "result": "True"
+  },
+  {
+   "fullform": "False",
+   "id": "core-145",
+   "messages": [],
+   "output": "",
+   "result": "False"
+  },
+  {
+   "fullform": "True",
+   "id": "core-146",
+   "messages": [],
+   "output": "",
+   "result": "True"
+  },
+  {
+   "fullform": "True",
+   "id": "core-147",
+   "messages": [],
+   "output": "",
+   "result": "True"
+  },
+  {
+   "fullform": "Equal[x, y]",
+   "id": "core-148",
+   "messages": [],
+   "output": "",
+   "result": "x ⩵ y"
+  },
+  {
+   "fullform": "True",
+   "id": "core-149",
+   "messages": [],
+   "output": "",
+   "result": "True"
+  },
+  {
+   "fullform": "False",
+   "id": "core-150",
+   "messages": [],
+   "output": "",
+   "result": "False"
+  },
+  {
+   "fullform": "True",
+   "id": "core-151",
+   "messages": [],
+   "output": "",
+   "result": "True"
+  },
+  {
+   "fullform": "False",
+   "id": "core-152",
+   "messages": [],
+   "output": "",
+   "result": "False"
+  },
+  {
+   "fullform": "True",
+   "id": "core-153",
+   "messages": [],
+   "output": "",
+   "result": "True"
+  },
+  {
+   "fullform": "True",
+   "id": "core-154",
+   "messages": [],
+   "output": "",
+   "result": "True"
+  },
+  {
+   "fullform": "True",
+   "id": "core-155",
+   "messages": [],
+   "output": "",
+   "result": "True"
+  },
+  {
+   "fullform": "False",
+   "id": "core-156",
+   "messages": [],
+   "output": "",
+   "result": "False"
+  },
+  {
+   "fullform": "True",
+   "id": "core-157",
+   "messages": [],
+   "output": "",
+   "result": "True"
+  },
+  {
+   "fullform": "False",
+   "id": "core-158",
+   "messages": [],
+   "output": "",
+   "result": "False"
+  },
+  {
+   "fullform": "True",
+   "id": "core-159",
+   "messages": [],
+   "output": "",
+   "result": "True"
+  },
+  {
+   "fullform": "True",
+   "id": "core-160",
+   "messages": [],
+   "output": "",
+   "result": "True"
+  },
+  {
+   "fullform": "x",
+   "id": "core-161",
+   "messages": [],
+   "output": "",
+   "result": "x"
+  },
+  {
+   "fullform": "x",
+   "id": "core-162",
+   "messages": [],
+   "output": "",
+   "result": "x"
+  },
+  {
+   "fullform": "False",
+   "id": "core-163",
+   "messages": [],
+   "output": "",
+   "result": "False"
+  },
+  {
+   "fullform": "x",
+   "id": "core-164",
+   "messages": [],
+   "output": "",
+   "result": "x"
+  },
+  {
+   "fullform": "6",
+   "id": "core-165",
+   "messages": [],
+   "output": "",
+   "result": "6"
+  },
+  {
+   "fullform": "3",
+   "id": "core-166",
+   "messages": [],
+   "output": "",
+   "result": "3"
+  },
+  {
+   "fullform": "Hold[a]",
+   "id": "core-167",
+   "messages": [],
+   "output": "",
+   "result": "Hold[a]"
+  },
+  {
+   "fullform": "4",
+   "id": "core-168",
+   "messages": [],
+   "output": "",
+   "result": "4"
+  },
+  {
+   "fullform": "3",
+   "id": "core-169",
+   "messages": [],
+   "output": "",
+   "result": "3"
+  },
+  {
+   "fullform": "4",
+   "id": "core-170",
+   "messages": [],
+   "output": "",
+   "result": "4"
+  },
+  {
+   "fullform": "b",
+   "id": "core-171",
+   "messages": [],
+   "output": "",
+   "result": "b"
+  },
+  {
+   "fullform": "Null",
+   "id": "core-172",
+   "messages": [],
+   "output": "",
+   "result": "Null"
+  },
+  {
+   "fullform": "3",
+   "id": "core-173",
+   "messages": [],
+   "output": "",
+   "result": "3"
+  },
+  {
+   "fullform": "Integer",
+   "id": "core-174",
+   "messages": [],
+   "output": "",
+   "result": "Integer"
+  },
+  {
+   "fullform": "Rational",
+   "id": "core-175",
+   "messages": [],
+   "output": "",
+   "result": "Rational"
+  },
+  {
+   "fullform": "Real",
+   "id": "core-176",
+   "messages": [],
+   "output": "",
+   "result": "Real"
+  },
+  {
+   "fullform": "String",
+   "id": "core-177",
+   "messages": [],
+   "output": "",
+   "result": "String"
+  },
+  {
+   "fullform": "Symbol",
+   "id": "core-178",
+   "messages": [],
+   "output": "",
+   "result": "Symbol"
+  },
+  {
+   "fullform": "f",
+   "id": "core-179",
+   "messages": [],
+   "output": "",
+   "result": "f"
+  },
+  {
+   "fullform": "f[x]",
+   "id": "core-180",
+   "messages": [],
+   "output": "",
+   "result": "f[x]"
+  },
+  {
+   "fullform": "List",
+   "id": "core-181",
+   "messages": [],
+   "output": "",
+   "result": "List"
+  },
+  {
+   "fullform": "Plus",
+   "id": "core-182",
+   "messages": [],
+   "output": "",
+   "result": "Plus"
+  },
+  {
+   "fullform": "3",
+   "id": "core-183",
+   "messages": [],
+   "output": "",
+   "result": "3"
+  },
+  {
+   "fullform": "2",
+   "id": "core-184",
+   "messages": [],
+   "output": "",
+   "result": "2"
+  },
+  {
+   "fullform": "0",
+   "id": "core-185",
+   "messages": [],
+   "output": "",
+   "result": "0"
+  },
+  {
+   "fullform": "0",
+   "id": "core-186",
+   "messages": [],
+   "output": "",
+   "result": "0"
+  },
+  {
+   "fullform": "Hold[Plus[1, 1]]",
+   "id": "core-187",
+   "messages": [],
+   "output": "",
+   "result": "Hold[1 + 1]"
+  },
+  {
+   "fullform": "HoldForm[Plus[1, 1]]",
+   "id": "core-188",
+   "messages": [],
+   "output": "",
+   "result": "1 + 1"
+  },
+  {
+   "fullform": "FullForm[Plus[1, Power[x, 2]]]",
+   "id": "core-189",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[1 + x^2]"
+  },
+  {
+   "fullform": "InputForm[Plus[1, Power[x, 2]]]",
+   "id": "core-190",
+   "messages": [],
+   "output": "",
+   "result": "1 + x^2"
+  },
+  {
+   "fullform": "FullForm[{a, {b}}]",
+   "id": "core-191",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[{a, {b}}]"
+  },
+  {
+   "fullform": "FullForm[Plus[Rational[1, 2], x]]",
+   "id": "core-192",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[1/2 + x]"
+  },
+  {
+   "fullform": "FullForm[\"s\"]",
+   "id": "core-193",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[\"s\"]"
+  },
+  {
+   "fullform": "FullForm[1.5`]",
+   "id": "core-194",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[1.5]"
+  },
+  {
+   "fullform": "Null",
+   "id": "core-195",
+   "messages": [],
+   "output": "2\n",
+   "result": "Null"
+  },
+  {
+   "fullform": "Null",
+   "id": "core-196",
+   "messages": [],
+   "output": "ab\n",
+   "result": "Null"
+  },
+  {
+   "fullform": "Null",
+   "id": "core-197",
+   "messages": [],
+   "output": "x ^ 2\n",
+   "result": "Null"
+  },
+  {
+   "fullform": "Null",
+   "id": "core-198",
+   "messages": [],
+   "output": "x = 3\n",
+   "result": "Null"
+  },
+  {
+   "fullform": "3",
+   "id": "core-199",
+   "messages": [],
+   "output": "1\n2\n",
+   "result": "3"
+  },
+  {
+   "fullform": "abc",
+   "id": "core-200",
+   "messages": [],
+   "output": "",
+   "result": "abc"
+  },
+  {
+   "fullform": "Symbol",
+   "id": "core-201",
+   "messages": [],
+   "output": "",
+   "result": "Symbol"
+  },
+  {
+   "fullform": "3",
+   "id": "core-202",
+   "messages": [],
+   "output": "",
+   "result": "3"
+  },
+  {
+   "fullform": "16",
+   "id": "core-203",
+   "messages": [],
+   "output": "",
+   "result": "16"
+  },
+  {
+   "fullform": "4",
+   "id": "core-204",
+   "messages": [],
+   "output": "",
+   "result": "4"
+  },
+  {
+   "fullform": "Power[x, Rational[1, 2]]",
+   "id": "core-205",
+   "messages": [],
+   "output": "",
+   "result": "Sqrt[x]"
+  },
+  {
+   "fullform": "x",
+   "id": "core-206",
+   "messages": [],
+   "output": "",
+   "result": "x"
+  },
+  {
+   "fullform": "Power[x, Rational[-1, 2]]",
+   "id": "core-207",
+   "messages": [],
+   "output": "",
+   "result": "1/Sqrt[x]"
+  },
+  {
+   "fullform": "Rational[1, 2]",
+   "id": "core-208",
+   "messages": [],
+   "output": "",
+   "result": "1/2"
+  },
+  {
+   "fullform": "f[1, 2][3]",
+   "id": "core-209",
+   "messages": [],
+   "output": "",
+   "result": "f[1, 2][3]"
+  },
+  {
+   "fullform": "{1, 2, 3}",
+   "id": "core-210",
+   "messages": [],
+   "output": "",
+   "result": "{1, 2, 3}"
+  },
+  {
+   "fullform": "{}",
+   "id": "core-211",
+   "messages": [],
+   "output": "",
+   "result": "{}"
+  },
+  {
+   "fullform": "f[]",
+   "id": "core-212",
+   "messages": [],
+   "output": "",
+   "result": "f[]"
+  },
+  {
+   "fullform": "\"text\"",
+   "id": "core-213",
+   "messages": [],
+   "output": "",
+   "result": "\"text\""
+  },
+  {
+   "fullform": "Rule[x, 1]",
+   "id": "core-214",
+   "messages": [],
+   "output": "",
+   "result": "x ⇾ 1"
+  },
+  {
+   "fullform": "RuleDelayed[x, 1]",
+   "id": "core-215",
+   "messages": [],
+   "output": "",
+   "result": "x ⧴ 1"
+  },
+  {
+   "fullform": "{Rule[x, 1], Rule[y, 2]}",
+   "id": "core-216",
+   "messages": [],
+   "output": "",
+   "result": "{x ⇾ 1, y ⇾ 2}"
+  }
+ ],
+ "file": "sprig-tests/core/test_1.sprig",
+ "format": "sprig-out",
+ "v": 1
+}

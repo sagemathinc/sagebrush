@@ -1,0 +1,322 @@
+{
+ "format": 1,
+ "note": "Sprig's gate inventory (design/sprig-mvp.md §9): every route scripts/sprig-gates.mjs finds in lib/_sprig, each with a reviewed decision; a PR that adds a route lists it here.",
+ "routes": {
+  "builtin:And": {
+   "decision": "internal",
+   "why": "computes on Sprig expressions only: no host effect"
+  },
+  "builtin:CompoundExpression": {
+   "decision": "internal",
+   "why": "computes on Sprig expressions only: no host effect"
+  },
+  "builtin:CopyFile": {
+   "decision": "refused",
+   "why": "a file function: refused before its arguments are evaluated (General::notyet; General::noprocess for a \"!cmd\" pipe, General::nonetwork for a URL) until S1.4 routes files through the Python file layer's gate"
+  },
+  "builtin:CreateDirectory": {
+   "decision": "refused",
+   "why": "a file function: refused before its arguments are evaluated (General::notyet; General::noprocess for a \"!cmd\" pipe, General::nonetwork for a URL) until S1.4 routes files through the Python file layer's gate"
+  },
+  "builtin:DeleteDirectory": {
+   "decision": "refused",
+   "why": "a file function: refused before its arguments are evaluated (General::notyet; General::noprocess for a \"!cmd\" pipe, General::nonetwork for a URL) until S1.4 routes files through the Python file layer's gate"
+  },
+  "builtin:DeleteFile": {
+   "decision": "refused",
+   "why": "a file function: refused before its arguments are evaluated (General::notyet; General::noprocess for a \"!cmd\" pipe, General::nonetwork for a URL) until S1.4 routes files through the Python file layer's gate"
+  },
+  "builtin:Directory": {
+   "decision": "refused",
+   "why": "a file function: refused before its arguments are evaluated (General::notyet; General::noprocess for a \"!cmd\" pipe, General::nonetwork for a URL) until S1.4 routes files through the Python file layer's gate"
+  },
+  "builtin:Environment": {
+   "decision": "refused",
+   "why": "a program, the environment or the process: refused before its arguments are evaluated (General::noprocess)"
+  },
+  "builtin:Equal": {
+   "decision": "internal",
+   "why": "computes on Sprig expressions only: no host effect"
+  },
+  "builtin:Exit": {
+   "decision": "refused",
+   "why": "a program, the environment or the process: refused before its arguments are evaluated (General::noprocess)"
+  },
+  "builtin:Export": {
+   "decision": "refused",
+   "why": "a file function: refused before its arguments are evaluated (General::notyet; General::noprocess for a \"!cmd\" pipe, General::nonetwork for a URL) until S1.4 routes files through the Python file layer's gate"
+  },
+  "builtin:FileExistsQ": {
+   "decision": "refused",
+   "why": "a file function: refused before its arguments are evaluated (General::notyet; General::noprocess for a \"!cmd\" pipe, General::nonetwork for a URL) until S1.4 routes files through the Python file layer's gate"
+  },
+  "builtin:FileNames": {
+   "decision": "refused",
+   "why": "a file function: refused before its arguments are evaluated (General::notyet; General::noprocess for a \"!cmd\" pipe, General::nonetwork for a URL) until S1.4 routes files through the Python file layer's gate"
+  },
+  "builtin:Get": {
+   "decision": "refused",
+   "why": "a file function: refused before its arguments are evaluated (General::notyet; General::noprocess for a \"!cmd\" pipe, General::nonetwork for a URL) until S1.4 routes files through the Python file layer's gate"
+  },
+  "builtin:Greater": {
+   "decision": "internal",
+   "why": "computes on Sprig expressions only: no host effect"
+  },
+  "builtin:GreaterEqual": {
+   "decision": "internal",
+   "why": "computes on Sprig expressions only: no host effect"
+  },
+  "builtin:Head": {
+   "decision": "internal",
+   "why": "computes on Sprig expressions only: no host effect"
+  },
+  "builtin:Import": {
+   "decision": "refused",
+   "why": "a file function: refused before its arguments are evaluated (General::notyet; General::noprocess for a \"!cmd\" pipe, General::nonetwork for a URL) until S1.4 routes files through the Python file layer's gate"
+  },
+  "builtin:Inequality": {
+   "decision": "internal",
+   "why": "computes on Sprig expressions only: no host effect"
+  },
+  "builtin:Install": {
+   "decision": "refused",
+   "why": "a file function: refused before its arguments are evaluated (General::notyet; General::noprocess for a \"!cmd\" pipe, General::nonetwork for a URL) until S1.4 routes files through the Python file layer's gate"
+  },
+  "builtin:KillProcess": {
+   "decision": "refused",
+   "why": "a program, the environment or the process: refused before its arguments are evaluated (General::noprocess)"
+  },
+  "builtin:Length": {
+   "decision": "internal",
+   "why": "computes on Sprig expressions only: no host effect"
+  },
+  "builtin:Less": {
+   "decision": "internal",
+   "why": "computes on Sprig expressions only: no host effect"
+  },
+  "builtin:LessEqual": {
+   "decision": "internal",
+   "why": "computes on Sprig expressions only: no host effect"
+  },
+  "builtin:LinkLaunch": {
+   "decision": "refused",
+   "why": "a program, the environment or the process: refused before its arguments are evaluated (General::noprocess)"
+  },
+  "builtin:Needs": {
+   "decision": "refused",
+   "why": "a file function: refused before its arguments are evaluated (General::notyet; General::noprocess for a \"!cmd\" pipe, General::nonetwork for a URL) until S1.4 routes files through the Python file layer's gate"
+  },
+  "builtin:Not": {
+   "decision": "internal",
+   "why": "computes on Sprig expressions only: no host effect"
+  },
+  "builtin:OpenAppend": {
+   "decision": "refused",
+   "why": "a file function: refused before its arguments are evaluated (General::notyet; General::noprocess for a \"!cmd\" pipe, General::nonetwork for a URL) until S1.4 routes files through the Python file layer's gate"
+  },
+  "builtin:OpenRead": {
+   "decision": "refused",
+   "why": "a file function: refused before its arguments are evaluated (General::notyet; General::noprocess for a \"!cmd\" pipe, General::nonetwork for a URL) until S1.4 routes files through the Python file layer's gate"
+  },
+  "builtin:OpenWrite": {
+   "decision": "refused",
+   "why": "a file function: refused before its arguments are evaluated (General::notyet; General::noprocess for a \"!cmd\" pipe, General::nonetwork for a URL) until S1.4 routes files through the Python file layer's gate"
+  },
+  "builtin:Or": {
+   "decision": "internal",
+   "why": "computes on Sprig expressions only: no host effect"
+  },
+  "builtin:Plus": {
+   "decision": "internal",
+   "why": "computes on Sprig expressions only: no host effect"
+  },
+  "builtin:Power": {
+   "decision": "internal",
+   "why": "computes on Sprig expressions only: no host effect"
+  },
+  "builtin:Print": {
+   "decision": "internal",
+   "why": "writes to the session's own output"
+  },
+  "builtin:Put": {
+   "decision": "refused",
+   "why": "a file function: refused before its arguments are evaluated (General::notyet; General::noprocess for a \"!cmd\" pipe, General::nonetwork for a URL) until S1.4 routes files through the Python file layer's gate"
+  },
+  "builtin:PutAppend": {
+   "decision": "refused",
+   "why": "a file function: refused before its arguments are evaluated (General::notyet; General::noprocess for a \"!cmd\" pipe, General::nonetwork for a URL) until S1.4 routes files through the Python file layer's gate"
+  },
+  "builtin:Quit": {
+   "decision": "refused",
+   "why": "a program, the environment or the process: refused before its arguments are evaluated (General::noprocess)"
+  },
+  "builtin:Range": {
+   "decision": "internal",
+   "why": "computes on Sprig expressions only: no host effect"
+  },
+  "builtin:Read": {
+   "decision": "refused",
+   "why": "a file function: refused before its arguments are evaluated (General::notyet; General::noprocess for a \"!cmd\" pipe, General::nonetwork for a URL) until S1.4 routes files through the Python file layer's gate"
+  },
+  "builtin:ReadList": {
+   "decision": "refused",
+   "why": "a file function: refused before its arguments are evaluated (General::notyet; General::noprocess for a \"!cmd\" pipe, General::nonetwork for a URL) until S1.4 routes files through the Python file layer's gate"
+  },
+  "builtin:ReadString": {
+   "decision": "refused",
+   "why": "a file function: refused before its arguments are evaluated (General::notyet; General::noprocess for a \"!cmd\" pipe, General::nonetwork for a URL) until S1.4 routes files through the Python file layer's gate"
+  },
+  "builtin:RenameFile": {
+   "decision": "refused",
+   "why": "a file function: refused before its arguments are evaluated (General::notyet; General::noprocess for a \"!cmd\" pipe, General::nonetwork for a URL) until S1.4 routes files through the Python file layer's gate"
+  },
+  "builtin:Run": {
+   "decision": "refused",
+   "why": "a program, the environment or the process: refused before its arguments are evaluated (General::noprocess)"
+  },
+  "builtin:RunProcess": {
+   "decision": "refused",
+   "why": "a program, the environment or the process: refused before its arguments are evaluated (General::noprocess)"
+  },
+  "builtin:SameQ": {
+   "decision": "internal",
+   "why": "computes on Sprig expressions only: no host effect"
+  },
+  "builtin:SendMail": {
+   "decision": "refused",
+   "why": "the network: refused before its arguments are evaluated (General::nonetwork), never a connection"
+  },
+  "builtin:Set": {
+   "decision": "internal",
+   "why": "computes on Sprig expressions only: no host effect"
+  },
+  "builtin:SetDelayed": {
+   "decision": "internal",
+   "why": "computes on Sprig expressions only: no host effect"
+  },
+  "builtin:SetDirectory": {
+   "decision": "refused",
+   "why": "a file function: refused before its arguments are evaluated (General::notyet; General::noprocess for a \"!cmd\" pipe, General::nonetwork for a URL) until S1.4 routes files through the Python file layer's gate"
+  },
+  "builtin:SetEnvironment": {
+   "decision": "refused",
+   "why": "a program, the environment or the process: refused before its arguments are evaluated (General::noprocess)"
+  },
+  "builtin:SocketConnect": {
+   "decision": "refused",
+   "why": "the network: refused before its arguments are evaluated (General::nonetwork), never a connection"
+  },
+  "builtin:SocketOpen": {
+   "decision": "refused",
+   "why": "the network: refused before its arguments are evaluated (General::nonetwork), never a connection"
+  },
+  "builtin:Sqrt": {
+   "decision": "internal",
+   "why": "computes on Sprig expressions only: no host effect"
+  },
+  "builtin:StartProcess": {
+   "decision": "refused",
+   "why": "a program, the environment or the process: refused before its arguments are evaluated (General::noprocess)"
+  },
+  "builtin:Symbol": {
+   "decision": "internal",
+   "why": "a Sprig symbol from a string: a key in Sprig's own tables, never a Python name"
+  },
+  "builtin:Times": {
+   "decision": "internal",
+   "why": "computes on Sprig expressions only: no host effect"
+  },
+  "builtin:ToExpression": {
+   "decision": "internal",
+   "why": "parses and evaluates Sprig inside Sprig only: names stay Sprig symbols (§9's negative controls)"
+  },
+  "builtin:URLDownload": {
+   "decision": "refused",
+   "why": "the network: refused before its arguments are evaluated (General::nonetwork), never a connection"
+  },
+  "builtin:URLExecute": {
+   "decision": "refused",
+   "why": "the network: refused before its arguments are evaluated (General::nonetwork), never a connection"
+  },
+  "builtin:URLFetch": {
+   "decision": "refused",
+   "why": "the network: refused before its arguments are evaluated (General::nonetwork), never a connection"
+  },
+  "builtin:URLRead": {
+   "decision": "refused",
+   "why": "the network: refused before its arguments are evaluated (General::nonetwork), never a connection"
+  },
+  "builtin:URLSubmit": {
+   "decision": "refused",
+   "why": "the network: refused before its arguments are evaluated (General::nonetwork), never a connection"
+  },
+  "builtin:Unequal": {
+   "decision": "internal",
+   "why": "computes on Sprig expressions only: no host effect"
+  },
+  "builtin:UnsameQ": {
+   "decision": "internal",
+   "why": "computes on Sprig expressions only: no host effect"
+  },
+  "builtin:Write": {
+   "decision": "refused",
+   "why": "a file function: refused before its arguments are evaluated (General::notyet; General::noprocess for a \"!cmd\" pipe, General::nonetwork for a URL) until S1.4 routes files through the Python file layer's gate"
+  },
+  "builtin:WriteString": {
+   "decision": "refused",
+   "why": "a file function: refused before its arguments are evaluated (General::notyet; General::noprocess for a \"!cmd\" pipe, General::nonetwork for a URL) until S1.4 routes files through the Python file layer's gate"
+  },
+  "host:_capacity.capacity": {
+   "decision": "internal",
+   "why": "reads this host's memory figure for the ledger's allowance (§8.4); no effect"
+  },
+  "host:_capacity.effective_guard_bytes": {
+   "decision": "internal",
+   "why": "reads this host's memory figure for the ledger's allowance (§8.4); no effect"
+  },
+  "host:_memguard.SagebrushMemoryError": {
+   "decision": "internal",
+   "why": "words a memory refusal (§8.4); no effect"
+  },
+  "host:_memguard.memory_guard": {
+   "decision": "internal",
+   "why": "words a memory refusal (§8.4); no effect"
+  },
+  "host:sys.stderr.flush": {
+   "decision": "internal",
+   "why": "the session's own output and messages, each line as it is printed"
+  },
+  "host:sys.stderr.write": {
+   "decision": "internal",
+   "why": "the session's own output and messages"
+  },
+  "host:sys.stdout.flush": {
+   "decision": "internal",
+   "why": "the session's own output and messages, each line as it is printed"
+  },
+  "host:sys.stdout.write": {
+   "decision": "internal",
+   "why": "the session's own output and messages"
+  },
+  "import:_capacity": {
+   "decision": "internal",
+   "why": "reads this host's memory figure for the ledger's allowance (§8.4); no effect"
+  },
+  "import:_memguard": {
+   "decision": "internal",
+   "why": "words a memory refusal (§8.4); no effect"
+  },
+  "import:fractions": {
+   "decision": "internal",
+   "why": "a standard module used on Sprig's own data (exact numbers, text patterns, the output streams)"
+  },
+  "import:re": {
+   "decision": "internal",
+   "why": "a standard module used on Sprig's own data (exact numbers, text patterns, the output streams)"
+  },
+  "import:sys": {
+   "decision": "internal",
+   "why": "a standard module used on Sprig's own data (exact numbers, text patterns, the output streams)"
+  }
+ }
+}

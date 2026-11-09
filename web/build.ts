@@ -73,6 +73,8 @@ const STARTS: Record<string, string[]> = {
   magma: ["--magma", "-c", "1;"],
   // (Rill's start, after the existing modes: design/rill.md §6.1)
   rill: ["--rill", "-c", "1"],
+  // (Sprig's start, last: design/sprig-mvp.md §6.1)
+  sprig: ["--sprig", "-c", "1"],
 };
 const recDir = mkdtempSync(join(tmpdir(), "sagebrush-precompile-"));
 const recordings: Record<string, any> = {};

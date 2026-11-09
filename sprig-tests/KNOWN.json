@@ -1,5 +1,11 @@
 {
  "format": 1,
  "note": "Sprig's listed differences from the oracle (design/sprig-mvp.md §7.3): each entry has a class, a reason and the sha256 of Sprig's output, and every class but not-implemented and oracle-host-limit is checked as a value by sprig-tests/checkers.py. Empty until S1 adds Sprig.",
- "cases": {}
+ "cases": {
+  "sprig-tests/core/test_1.sprig#core-197": {
+   "class": "not-implemented",
+   "reason": "Print's output form (x ^ 2): Sprig prints InputForm text until S1.3",
+   "sha256": "eb40bac233510e2ff27204c775216ffdd904df2700ada3e43263b1d4249bc9d9"
+  }
+ }
 }
