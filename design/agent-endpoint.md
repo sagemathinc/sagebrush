@@ -200,26 +200,25 @@ Every authenticated product capacity comes from the account's required `sync.age
 |---|---|
 | request/operation pacing | `requests_per_minute`, `requests_per_hour`, `ops_per_minute` |
 | bytes and one file | `read_bytes_per_day`, `write_bytes_per_day`, `max_file_bytes` |
-| listing and index reads | `list_page_entries`, `list_call_entries`, `list_examined_rows` |
 | small-file batches | `batch_files`, `batch_bytes`, `batch_concurrency` |
 | blob/URL concurrency and pacing | `blob_concurrency`, `signed_urls_per_minute` |
-| workspace/index populations | `workspace_entries`, `folder_entries`, `index_entries`, `index_tombstones` |
+| workspace populations | `workspace_entries`, `folder_entries` |
 | document materialization | `document_bytes`, `document_batches` |
 | runs, sockets and confirmations | `runs_concurrent`, `runs_per_hour`, `sockets`, `confirmations` |
 | grant population, scope count and expiry | `live_grants`, `scopes_per_grant`, `grant_days_max` |
 | access-log retention | `access_log_rows`, `access_log_days` |
 | Inbox item, queue and sender/day capacities | `inbox_item_bytes`, `inbox_waiting_items`, `inbox_items_per_sender_per_day` |
 
-Read bytes are debited when authorized: a signed URL debits the whole blob and is single-use for a grant; a document read debits its value. Write bytes are reserved before a body or blob is retained. A `files.batch` call uses one request token but charges every item and byte (design/fs-sync-scale.md §2).
+Listing page/call sizes and examined rows are advertised server capabilities, clamped to host safety ceilings rather than membership benefits. Read bytes are debited when authorized: a signed URL debits the whole blob and is single-use for a grant; a document read debits its value. Write bytes are reserved before a body or blob is retained. A newly admitted `files.batch` uses one request token in both request buckets, reserves every item's operation and logical bytes before work, and never debits product meters again for its idempotent retries (design/fs-sync-scale.md §2).
 
 Over a product value, the answer is the structured 429/413 of design/fs-sync-scale.md §1.2, including the current tier and the least membership that raises it. Exact COPY is shared by the CLI and site. An unauthenticated abuse or structural safety refusal never advertises an upgrade.
 
-Every check and reservation precedes its write. For a batch, that guarantee is per item, with stable idempotent results; no item is half published.
+Every check and reservation precedes its write. For a batch, admission reserves the whole ledger, publication splits beneath the host's 500-ops internal-message capability under one durable identity, and each item has stable idempotent results; no item is half published. A batch read returns the same `epoch.head_seq` revision token as list/stat and never exceeds `document_bytes` for a document value.
 
 ## 8. The access log
 
 - **One row per request,** in the account object: time, grant, agent, verb, path (or paths), result, bytes, and for a run, the code's SHA-256. A request's arguments and contents are never logged.
-- **Kept for the membership's `access_log_days`, and at most `access_log_rows` per account.** The oldest go first. Lowering either value trims old rows; it never changes whether a request is admitted.
+- **Kept for `AUDIT_MIN_DAYS = pending William; proposed 90`, or the membership's longer `access_log_days`.** A zero or downgrade cannot shorten that promise. `access_log_rows` retains additional oldest-first capacity only after the promised age has passed; sustained traffic cannot evict a younger row. Append and cleanup are bounded. William's ruling replaces only this named placeholder.
 - **Who may read it:** the person, in "Agents with access", per grant or all together. An agent can't read the log, its own entries included.
 - **It is the person's data.** It is deleted with their synced data, by "Delete my synced data" and by the purge (design/sync-server.md §7). Sagebrush's operators have no view of it.
 - **"Undo this agent's changes"** uses TimeTravel's attribution, which every op and patch carries (§4), not the log. The log says what an agent asked for, and the history what it changed.

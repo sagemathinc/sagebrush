@@ -648,7 +648,7 @@ For daybreak2's review. Each is enforced by the server, and each has a test. The
 | A batch | 1 MiB of body, 2,000 patches; 8 parents per patch | `limit` |
 | One patch inline | 256 KiB (larger: a blob, §5.3) | `limit` |
 | Ops in one message | 500; a path 1,024 bytes, a name 255 | `limit` |
-| The index | membership `sync.agent.workspace_entries` and `folder_entries`; the agent index also uses `index_entries` and `index_tombstones` (design/fs-sync-scale.md §3) | `limit` with tier/upgrade fields; existing rows stay readable after a downgrade |
+| Workspace population | membership `sync.agent.workspace_entries` and `folder_entries`, checked when an operation could grow them; index construction has a separate host safety ceiling and resumable work slices (design/fs-sync-scale.md §3) | `limit` with tier/upgrade fields for growth; existing rows stay readable after a downgrade |
 | Documents per account | 100,000 | `limit` |
 | Requests unanswered per socket | 8 | `busy` |
 | Before authentication (§2) | 60 requests a minute per IP on `/api/sync/` and `/api/agent/` | 429, at the Worker |
@@ -662,7 +662,7 @@ For daybreak2's review. Each is enforced by the server, and each has a test. The
 | Batches per account | 20 a second, sustained 4 a second | `rate`, with `retry_after` |
 | Ops from authenticated agents | membership `sync.agent.ops_per_minute`, each op counted, resent or new | `rate` with tier/upgrade fields, the whole message |
 | Other device ops per account | 2,000 a minute, each op counted, resent or new (LIMIT-321-2) | `rate`, the whole message |
-| Agent blob uploads | membership `sync.agent.blob_concurrency`; effective one-file bound is the lesser of top-level and agent `max_file_bytes` | 429/413 with tier/upgrade fields |
+| Agent blob uploads | membership `sync.agent.blob_concurrency`; effective one-file bound is the lesser of the route capability and agent `max_file_bytes` | 429/413 with tier/upgrade fields only when membership binds; otherwise a safety refusal |
 | Other blob uploads | 4 at once per account; top-level `max_file_bytes` each | 429, 413 |
 | Agent signed URLs | membership `sync.agent.signed_urls_per_minute`; each debits the grant's read meter (§5.4) | 429 with tier/upgrade fields |
 | Other signed URLs | 600 a minute per account; each debits `sync.read_bytes_per_day` (§5.4) | 429, `rate` |
