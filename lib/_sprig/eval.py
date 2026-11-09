@@ -94,7 +94,7 @@ class Session:
         n = mem.SYM_BYTES + mem.SYM_BYTES_PER_CHAR * len(name)
         if self.name_bytes + n > self.name_reserved:
             size = max(mem.NAME_CHUNK, n)
-            r = mem.reserve(size, "Names of %d characters" % len(name), "Symbol")
+            r = mem.reserve(size, "A name of %d character%s" % (len(name), "" if len(name) == 1 else "s"), "Symbol")
             r.acquire()
             self.names.append(r)
             self.name_reserved += size
