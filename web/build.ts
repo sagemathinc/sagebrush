@@ -686,14 +686,15 @@ if (hasSite) rmSync(join(siteDir, "public", "agents"), { recursive: true, force:
     for (const l of r.logs) console.error(l);
     process.exit(1);
   }
-  copyFileSync(join(here, "agents", "index.html"), join(here, "dist", "agents", "index.html"));
+  // (and "How to connect your agent to Sagebrush", a static page without scripts: /agents/connect)
+  for (const f of ["index.html", "connect.html"]) copyFileSync(join(here, "agents", f), join(here, "dist", "agents", f));
   // (the reviewed sagebrush-agent tarball the help box points to: not committed; placed in web/agents by the publisher)
   for (const f of readdirSync(join(here, "agents"))) if (/^sagebrush-agent-\d+\.\d+\.\d+\.tgz$/.test(f)) copyFileSync(join(here, "agents", f), join(here, "dist", "agents", f));
-  // (the site's copy: the page and its script; the help box points at the reviewed tarball's own immutable URL, so
+  // (the site's copy: the pages and the script; the help box points at the reviewed tarball's own immutable URL, so
   // no tarball is served from the site)
   if (hasSite) {
     mkdirSync(join(siteDir, "public", "agents"), { recursive: true });
-    for (const f of ["index.html", "agents.js"]) copyFileSync(join(here, "dist", "agents", f), join(siteDir, "public", "agents", f));
+    for (const f of ["index.html", "agents.js", "connect.html"]) copyFileSync(join(here, "dist", "agents", f), join(siteDir, "public", "agents", f));
   }
 }
 // the numerics core's browser-threads demo (web/threads, numerics-core r4.2 milestone M0): a dense product on 1 and N

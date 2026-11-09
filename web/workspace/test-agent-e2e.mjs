@@ -194,6 +194,7 @@ try {
   ok(await until(`/connection failed/.test(document.querySelector(".sbag-box .err")?.textContent ?? "")`), "a failed connection is said in the dialog");
   const failText = await ev(`document.querySelector(".sbag-box .err").textContent`);
   ok(/access apps on this device/.test(failText) && /Choose Allow/.test(failText) && !/[\u201c\u201d"]/.test(failText.slice(failText.indexOf("Chrome"))) && /Site settings/.test(failText) && !/Safari/.test(failText) && /^the connection failed/.test(failText), `in Chrome, it says to Allow its prompt and how to undo a block (${failText.slice(0, 60)}…)`);
+  ok(/is the agent's sagebrush-mcp running/.test(failText) && /such as your agent's sagebrush-mcp/.test(failText) && !/undefined|sagebrush-agent/.test(failText), "a page without its own program keeps naming the agent's sagebrush-mcp (and never \"undefined\")");
   ok((await drive({ op: "status" })).ok.paired === false, "the code is still unused after the failed connection");
 
   // the right code, through the dialog, then the grant: /A, read and write, until the page closes
