@@ -5,8 +5,8 @@ move.py; this decides whether a run may move anything there, and removes old run
   so two runs, of any pairs, never share one; a second in the same second gets `-2` … `-9`.
 - **Bounds, in entries** (files and folders alike): at most 20 GiB and 200,000 entries in the holding folder in all,
   and 10 GiB and 100,000 entries from one run. Every bound is a constant here, so tests can lower it.
-- **Counting** (`usage`): a streaming depth-first walk of trash/, a fresh handle and its listing per level (so at most
-  2 x HOLD_LEVELS open), no link followed, every entry counted. HOLD_LEVELS = 66 is the handle-level form of the
+- **Counting** (`usage`): a streaming depth-first walk of trash/, a handle and its listing's copy per level, trash/'s
+  own handle being the first (so at most 2 x HOLD_LEVELS open, exactly), no link followed, every entry counted. HOLD_LEVELS = 66 is the handle-level form of the
   product bound: trash/, the run folder, and its mirror of at most the scan's 64 LOCAL_DIR folders. A walk that can't
   finish within the bounds (too many entries, too deep, an entry not ours, or any error) raises Uncountable: never a
   partial total.
@@ -101,16 +101,14 @@ def usage(state_dir):
     streaming depth-first walk with no link followed (see the module docstring). Raises Uncountable if the walk can't
     finish within TOTAL_ENTRIES and HOLD_LEVELS, meets an entry not ours, or fails part way."""
     total, entries = 0, 0
-    trash = _trash(state_dir)
-    stack = []
+    trash = _trash(state_dir)                               # (level 1: a handle just opened, so it lists afresh)
     try:
-        fd = os.open(".", _DIR_FLAGS, dir_fd=trash)            # (a fresh handle: one held long can list as empty)
-        try:
-            listing = os.scandir(fd)
-        except BaseException:
-            os.close(fd)
-            raise
-        stack.append((fd, listing))
+        listing = os.scandir(trash)
+    except BaseException:
+        os.close(trash)
+        raise
+    stack = [(trash, listing)]                              # (each level: its handle and its listing's copy)
+    try:
         while stack:
             fd, it = stack[-1]
             e = next(it, None)
@@ -143,7 +141,6 @@ def usage(state_dir):
         for fd, it in stack:
             it.close()
             os.close(fd)
-        os.close(trash)
     return total, entries
 
 
@@ -165,7 +162,7 @@ class Admission:
     #                                 entries are past a bound, uncounted), "holding-unreadable" or "busy" when not ok
     detail: str = None              # what stopped the count, when it didn't finish
     bytes: int = 0                  # what the run would move there
-    entries: int = 0                # its files and the folders it would make for them
+    entries: int = 0                # its own: files, the folders it would make for them, and its run folder
     held_bytes: int = 0             # what is held already
     held_entries: int = 0
 
@@ -174,15 +171,17 @@ def admit(state_dir, moves):
     """Whether a run may move these files into the holding folder (`moves`: (relative path, planned size) pairs):
     all of them, or none (§2.4)."""
     moves = list(moves)
-    run_bytes, entries = sum(size for _, size in moves), run_entries([rel for rel, _ in moves])
-    a = dict(bytes=run_bytes, entries=entries)
+    run_bytes, new = sum(size for _, size in moves), run_entries([rel for rel, _ in moves])
+    # (the run's own entries include its run folder, §2.4; it already exists, made by new_run, so the total counts it
+    # among the held entries, and only the run's own count adds it)
+    a = dict(bytes=run_bytes, entries=new + 1)
     try:
         held_bytes, held_entries = usage(state_dir)
     except Uncountable as e:
         return Admission(False, "total-entries" if e.bound else "holding-unreadable", detail=e.detail, **a)
     a.update(held_bytes=held_bytes, held_entries=held_entries)
-    for reason, over in (("run-entries", entries > RUN_ENTRIES), ("run-bytes", run_bytes > RUN_BYTES),
-                         ("total-entries", held_entries + entries > TOTAL_ENTRIES),
+    for reason, over in (("run-entries", new + 1 > RUN_ENTRIES), ("run-bytes", run_bytes > RUN_BYTES),
+                         ("total-entries", held_entries + new > TOTAL_ENTRIES),
                          ("total-bytes", held_bytes + run_bytes > TOTAL_BYTES)):
         if over:
             return Admission(False, reason, **a)
@@ -190,7 +189,7 @@ def admit(state_dir, moves):
 
 
 def not_applied(admission, local, trash):
-    """board's words (design §2.4) for an admission refused because another run holds the lock, or because the
+    """Design §2.4's words for an admission refused because another run holds the lock, or because the
     holding folder couldn't be measured; `local` and `trash` as shown to the person (~/thesis,
     ~/.local/state/sagebrush/fs-sync/trash). None for the other reasons, which the apply step words."""
     if admission.reason == "busy":

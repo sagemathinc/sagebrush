@@ -137,25 +137,25 @@ def test_depth_is_the_scans_64_below_the_run():
 
 
 def test_walk_holds_handles_by_depth_not_width():
+    # (daybreak2) at most 2 descriptors per level, trash/'s own handle the first: exactly 2 x levels at the deepest
     d, s = state()
     try:
         trash = os.path.join(s, "trash")
-        for i in range(60):                                            # a wide tree, two levels deep
+        for i in range(60):                                            # a wide tree: trash/, run, w00..w59 = 3 levels
             put(os.path.join(trash, "run", "w%02d" % i, "f.txt"), b"f")
         before, peak = open_fds(), [0]
-        real_open = os.open
+        real_scandir = os.scandir
 
-        def counting_open(*a, **k):
-            fd = real_open(*a, **k)
-            peak[0] = max(peak[0], open_fds())
-            return fd
-        os.open = counting_open
+        def sampling(fd):
+            it = real_scandir(fd)                                      # (its copy of the handle is open now)
+            peak[0] = max(peak[0], open_fds())                         # (/dev/fd's own handle is in `before` too)
+            return it
+        os.scandir = sampling
         try:
             assert H.usage(s)[1] == 1 + 60 * 2
         finally:
-            os.open = real_open
-        # trash/'s own handle, plus a handle and its listing per level (3 levels): never one per sibling
-        assert peak[0] - before <= 1 + 2 * 3 + 2, (before, peak[0])
+            os.scandir = real_scandir
+        assert peak[0] - before == 2 * 3, (before, peak[0])            # never one per sibling, never one extra
         assert open_fds() == before                                    # and all closed after
     finally:
         shutil.rmtree(d)
@@ -214,9 +214,10 @@ def test_admission_counts_files_and_new_folders():
     d, s = state()
     try:
         put(os.path.join(s, "trash", "held", "h.txt"), b"h" * 40)      # 40 bytes, 2 entries held
-        with Lowered(RUN_BYTES=50, RUN_ENTRIES=4, TOTAL_BYTES=100, TOTAL_ENTRIES=10):
-            ok = H.admit(s, [("a/x.txt", 20), ("a/y.txt", 20), ("z.txt", 10)])        # 3 files + folder a = 4
-            assert ok.ok and (ok.bytes, ok.entries, ok.held_bytes, ok.held_entries) == (50, 4, 40, 2), ok
+        with Lowered(RUN_BYTES=50, RUN_ENTRIES=5, TOTAL_BYTES=100, TOTAL_ENTRIES=10):
+            # (sync-client) the run's bound counts its run folder: 3 files + folder a + the run folder = 5, at the bound
+            ok = H.admit(s, [("a/x.txt", 20), ("a/y.txt", 20), ("z.txt", 10)])
+            assert ok.ok and (ok.bytes, ok.entries, ok.held_bytes, ok.held_entries) == (50, 5, 40, 2), ok
             assert H.admit(s, [("a/x.txt", 20), ("a/y.txt", 20), ("z.txt", 11)]).reason == "run-bytes"
             # one more folder makes one entry too many, with no more files (astra)
             assert H.admit(s, [("a/x.txt", 1), ("b/y.txt", 1), ("z.txt", 1)]).reason == "run-entries"
@@ -249,6 +250,22 @@ def test_the_words():
     for reason in ("total-entries", "total-bytes", "run-entries", "run-bytes"):
         assert H.not_applied(H.Admission(False, reason), local, trash) is None
     assert H.not_applied(H.Admission(True), local, trash) is None
+
+
+def test_the_run_folder_counts_in_the_runs_own_bound():
+    # (astra, sync-client, @sagebrush) with a real new_run: its folder is one of the run's own entries, and the total
+    # counts it once (as held)
+    d, s = state()
+    try:
+        h = H.new_run(s, NOW)
+        h.close()
+        with Lowered(RUN_ENTRIES=4, TOTAL_ENTRIES=4):
+            at = H.admit(s, [("x/a", 1), ("x/b", 1)])                  # 2 files + folder x + the run folder = 4
+            assert at.ok and at.entries == 4 and at.held_entries == 1, at
+            over = H.admit(s, [("x/a", 1), ("x/b", 1), ("x/c", 1)])    # one more: 5
+            assert over.reason == "run-entries" and over.entries == 5, over
+    finally:
+        shutil.rmtree(d)
 
 
 def test_one_run_at_a_time():
