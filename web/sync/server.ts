@@ -17,6 +17,15 @@
 //     calls start a day, each with at most 8 R2 gets; the cross-day assumption and its production gate: design/tiered-files.md §6)
 //   GET  /api/sync/v1/manifest/<sha256>          a verified file's manifest
 //
+// and, with agents on (SYNC_AGENT, DEV only; design/agent-endpoint.md, fs-sync step 1a):
+//
+//   GET  /api/sync/v1/grants                     the person's grants (session)
+//   POST /api/sync/v1/grants                     {agent, scopes, days} -> {grant, token}, the token shown once
+//   POST /api/sync/v1/grants/<id>/revoke|rotate  revoke, or a new token for the same grant
+//   GET  /api/sync/v1/grants/log                 the access log, newest first (?grant=, ?before=)
+//   POST /api/agent/v1/<verb>                    an agent's request, Authorization: Bearer sbg1… (no session, no
+//                                                Origin); every verb answers 404 not_built until step 1a2
+//
 // and, on the user-content Worker (web/files), /p/<key>: a signed read (§5.4).
 //
 // Without the sync bindings (production today), every route is a 404:
@@ -26,7 +35,8 @@
 import { adminLength, bindPurge, sessionOf, signedWith, type ShareEnv } from "../share/server.ts";
 import { parseRange } from "../share/files.ts";
 import { accountHash, fields, hmacHex, isNat, isSha, same, LIMITS, URL_MS, SyncError, type Result } from "../sync-protocol/protocol.ts";
-import { allowed, gate, gateOn, testMode, tieredOn, type SyncEnv } from "./env.ts";
+import { agentOn, allowed, gate, gateOn, testMode, tieredOn, type SyncEnv } from "./env.ts";
+import { AGENT, tokenOf } from "./agent-token.ts";
 import { TIERED } from "./manifest.ts";
 import { Sha256 } from "./sha256.ts";
 import type { SyncAccount } from "./account.ts";
@@ -106,6 +116,35 @@ const answer = <T>(r: Result<T>, ok: (v: T) => Response) => ("error" in r ? err(
 
 const STATUS: Partial<Record<SyncError["code"], number>> = { conflict: 409, forbidden: 403, deleting: 409, readonly: 409, invalid: 400, limit: 413, rate: 429, busy: 503, missing: 404, storage_full: 507 };
 
+/**
+ * An agent's request, `POST /api/agent/v1/<verb>` with `Authorization: Bearer sbg1…` (design/agent-endpoint.md §3;
+ * fs-sync step 1a, behind SYNC_AGENT on DEV).  Before any object: the IP's pre-authentication limit; a request with
+ * an Origin header refused (a page can't use these routes, and no cookie is ever read here); then the token's exact
+ * form and its tag (agent-token.ts), so a made-up or altered token gets 401 here and reaches no object.  Only then is
+ * the body read, at most AGENT.bodyBytes, and the account object named by the token's hash.
+ */
+async function handleAgent(req: Request, env: Env): Promise<Response> {
+  if (!agentOn(env) || !env.SYNC_ACCOUNT || !env.SYNC_PREAUTH) return err(404, "not found");
+  if (!(await env.SYNC_PREAUTH.limit({ key: req.headers.get("cf-connecting-ip") ?? "unknown" })).success) return err(429, "too many requests", { retry_after: 60_000 });
+  if (req.headers.get("origin") !== null) return err(403, "cross-site request");
+  const v = new URL(req.url).pathname.match(/^\/api\/agent\/v1\/([a-z]{1,16})$/);
+  if (!v) return err(404, "not found");
+  if (req.method !== "POST") return err(405, "POST only");
+  const t = await tokenOf(req.headers.get("authorization"), env.GRANT_TAG_KEY!);
+  if (!t) return err(401, "unauthorized");
+  if (!/^application\/json\b/.test(req.headers.get("content-type") ?? "")) return err(415, "JSON only");
+  const text = await readBounded(req, AGENT.bodyBytes);
+  if (text === null) return err(413, "limit", { limit: "body_bytes", max: AGENT.bodyBytes });
+  let params: unknown;
+  try {
+    params = JSON.parse(text);
+  } catch {
+    return err(400, "invalid", { message: "a JSON object" });
+  }
+  const r = await env.SYNC_ACCOUNT.get(env.SYNC_ACCOUNT.idFromName("acct:" + t.hash)).agentCall({ hash: t.hash, id: t.id, secret: t.secret, verb: v[1], params });
+  return json(r.body, r.status);
+}
+
 /** The sync API's response to req, or null if req is not for it. */
 export async function handleSync(req: Request, env: Env): Promise<Response | null> {
   const url = new URL(req.url);
@@ -144,6 +183,7 @@ export async function handleSync(req: Request, env: Env): Promise<Response | nul
   if (sr && req.method === "GET") return (await adminGate(req, env)) ?? adminSyncRetention(req, env, sr[1]);
   const sp = p.match(/^\/api\/admin\/sync-purge\/([0-9a-f-]{8,64})(?:\/([0-9a-f-]{8,100}))?$/i);
   if (sp && req.method === "GET") return (await adminGate(req, env)) ?? adminSyncPurgeStatus(req, env, sp[1], sp[2]);
+  if (p.startsWith("/api/agent/")) return handleAgent(req, env);
   if (!p.startsWith("/api/sync/")) return null;
   // (the pre-authentication limit is part of the flag: without it, sync is off, LIMIT-321-1)
   if (!env.SYNC_ACCOUNT || !env.SYNC_DOC || !env.SHARE_DB || !env.SYNC_PREAUTH) return err(404, "sync is not enabled here");
@@ -232,6 +272,32 @@ export async function handleSync(req: Request, env: Env): Promise<Response | nul
       return err(e instanceof SyncError && e.code === "limit" ? 413 : 400, e instanceof SyncError ? e.code : "invalid");
     }
     return answer(await stub.missing({ account: who.id, blobs, bind }), (v) => json(v.verifying.length ? v : { missing: v.missing }));
+  }
+  // agents' grants, from the person's session (design/agent-endpoint.md §2, the grant dialog's calls; §8, the log): a
+  // 404 while the switch is off
+  if (p === "/api/sync/v1/grants" || p.startsWith("/api/sync/v1/grants/")) {
+    if (!agentOn(env)) return err(404, "not found");
+    if (p === "/api/sync/v1/grants" && m === "GET") return answer(await stub.grantList({ account: who.id }), json);
+    if (p === "/api/sync/v1/grants/log" && m === "GET") {
+      const g = url.searchParams.get("grant"), b = url.searchParams.get("before");
+      if (b !== null && !/^\d{1,15}$/.test(b)) return err(400, "invalid", { message: "before" });
+      return answer(await stub.grantLog({ account: who.id, ...(g !== null ? { grant: g } : {}), ...(b !== null ? { before: Number(b) } : {}) }), json);
+    }
+    if (p === "/api/sync/v1/grants" && m === "POST") {
+      if (!/^application\/json\b/.test(req.headers.get("content-type") ?? "")) return err(415, "JSON only");
+      const text = await readBounded(req, 8 << 10);
+      if (text === null) return err(413, "limit", { limit: "body_bytes", max: 8 << 10 });
+      let b: Record<string, unknown>;
+      try {
+        b = fields(JSON.parse(text), ["agent", "scopes", "days"], "grant");
+      } catch {
+        return err(400, "invalid", { message: "send {agent, scopes: [{path, access}], days}" });
+      }
+      return answer(await stub.grantMake({ account: who.id, agent: b.agent, scopes: b.scopes, ...("days" in b ? { days: b.days } : {}) }), (v) => json(v, 201));
+    }
+    const gm = p.match(/^\/api\/sync\/v1\/grants\/([a-z2-7]{12})\/(revoke|rotate)$/);
+    if (gm && m === "POST") return answer(gm[2] === "revoke" ? await stub.grantRevoke({ account: who.id, id: gm[1] }) : await stub.grantRotate({ account: who.id, id: gm[1] }), json);
+    return err(404, "not found");
   }
   // chunked files (design/tiered-files.md §4.1, §4.4): a 404 while the switch is off, as every sync route is without its flag
   if (p.startsWith("/api/sync/v1/manifest")) {
