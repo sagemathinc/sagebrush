@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "Connect an agent on the notebook page (William, Nov 8: agent connections first): its Agent button and the code that fetches the pairing chunk (/sagebrush-agent.js, not in the CLI) when pressed, on a ?pair= link or for a remembered agent; pair-link.ts, imported first so the code leaves the address bar before anything reads it; and notebook/stores.js handing a save to this tab's other stores of the notebook, so an agent's write appears at once. The CLI embeds the notebook page's script, so cli/pyjs.cjs grows. Measured locally (bun 1.4.4, the CLI rebuilt after the web build, base ad8de03c at the same path): cli/pyjs.cjs +1672. Marker: +1672 with the usual 64 B slack; the binding size-gate decides.",
+ "bytes": {
+  "cli/pyjs.cjs": 1736
+ }
+}

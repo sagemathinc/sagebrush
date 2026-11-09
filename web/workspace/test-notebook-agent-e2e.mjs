@@ -10,7 +10,7 @@
 //   - a grant "until the page closes" ends with the page.
 //   bun web/build.ts && CHROME=chromium node web/workspace/test-notebook-agent-e2e.mjs
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -88,6 +88,8 @@ try {
   for (const m of ["Page.enable", "Runtime.enable", "Network.enable", "Log.enable"]) await send(m);
   const W = "window.sagebrush.workspace";
   const chunk = (u) => /sagebrush-agent\.js/.test(u);
+  // (SHOT_DIR: screenshots for a review, at the moments below)
+  const shot = async (name) => { if (!process.env.SHOT_DIR) return; const r = await send("Page.captureScreenshot", { format: "png" }); writeFileSync(join(process.env.SHOT_DIR, name + ".png"), Buffer.from(r.result.data, "base64")); };
   // (the notebook shown: its workspace path, by the id the page keeps for it)
   const shownPath = `(async () => { const id = localStorage.getItem("sagebrush-current"); return (await ${W}.list("/", { recursive: true })).find((e) => e.kind === "notebook" && e.ref === id)?.path ?? null; })()`;
   const sources = `[...document.querySelectorAll(".ed textarea")].map((t) => t.value)`;
@@ -95,8 +97,10 @@ try {
   ok(await go(""), "the notebook page opens its workspace");
   ok(await until(`!document.querySelector("#agentbtn").hidden`), "the page offers Agent");
   ok(!requests.some(chunk), "the agent chunk isn't fetched before it's wanted");
+  await shot("1-agent-button");
   await ev(`(document.querySelector("#agentbtn").click(), true)`);
   ok(await until(`!!document.querySelector(".sbag-box")`) && requests.some(chunk), "Agent fetches the chunk and opens Connect");
+  await shot("2-connect");
   await ev(`(document.activeElement?.blur(), document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })), [...document.querySelectorAll(".sbag-box button")].find((b) => b.textContent === "Cancel")?.click(), true)`);
   ok(await until(`!document.querySelector(".sbag-box")`), "Cancel closes it");
 
@@ -138,6 +142,8 @@ try {
   ok(!!wr.ok, "the agent writes it (its base)", wr);
   ok(await until(`${sources}.includes(${JSON.stringify(MARK)})`, 10000), "the page shows the agent's cell at once, without a reload", await ev(sources).catch(() => null));
   ok(await ev(`${sources}.some((s) => s === "x = 1")`), "the person's cell is still there");
+  await ev(`(document.querySelector(".ed textarea:last-of-type"), [...document.querySelectorAll(".ed textarea")].pop().scrollIntoView({ block: "center" }), true)`);
+  await shot("3-agent-cell");
 
   // the person edits after it: both kept, and no "changed elsewhere" copy
   await ev(`(() => { const t = [...document.querySelectorAll(".ed textarea")].find((t) => t.value === "x = 1"); t.value = "x = 2"; t.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`);
