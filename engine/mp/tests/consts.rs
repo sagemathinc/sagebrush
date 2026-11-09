@@ -13,7 +13,7 @@ fn hex_nat(s: &str) -> Nat {
         limbs.push(u64::from_str_radix(&s[start..end], 16).unwrap());
         end = start;
     }
-    Nat::from_limbs(&limbs).unwrap()
+    Nat::from_limbs(&limbs)
 }
 
 #[test]
@@ -30,8 +30,7 @@ fn consts() {
             "ln2" => ln2_fixed(p),
             "e" => e_fixed(p),
             f => panic!("{}", f),
-        }
-        .unwrap();
+        };
         n += 1;
         if got != hex_nat(w[2]) {
             bad += 1;

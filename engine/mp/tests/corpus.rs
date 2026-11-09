@@ -5,6 +5,8 @@
 
 use sagebrush_mp::mpf::{from_man_exp, mpf_add, mpf_div, mpf_mul, mpf_mul_int, mpf_pow_int, mpf_sqrt, Rnd};
 
+use sagebrush_mp::fail::checked;
+
 mod common;
 use common::*;
 
@@ -20,7 +22,7 @@ fn corpus() {
         let s = parse(&w[3..7]);
         let t = parse(&w[7..11]);
         let want = w[11..].join(" ");
-        let got = match w[0] {
+        let got = checked(|| match w[0] {
             "add" => mpf_add(&s, &t, prec, rnd, false),
             "sub" => mpf_add(&s, &t, prec, rnd, true),
             "mul" => mpf_mul(&s, &t, prec, rnd),
@@ -33,7 +35,7 @@ fn corpus() {
             "muli" => mpf_mul_int(&s, t.sign, &t.man, prec, rnd),
             "fme" => from_man_exp(s.sign, s.man.clone(), s.exp.clone(), prec, rnd),
             op => panic!("op {}", op),
-        };
+        });
         n += 1;
         if show(&got) != want {
             bad += 1;

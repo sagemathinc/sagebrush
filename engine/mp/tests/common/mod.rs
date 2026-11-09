@@ -15,7 +15,7 @@ pub fn hex_nat(s: &str) -> Nat {
         limbs.push(u64::from_str_radix(&s[start..end], 16).unwrap());
         end = start;
     }
-    Nat::from_limbs(&limbs).unwrap()
+    Nat::from_limbs(&limbs)
 }
 
 pub fn nat_hex(n: &Nat) -> String {
@@ -40,7 +40,7 @@ pub fn parse_exp(s: &str) -> Exp {
     };
     let mut mag = Nat::zero();
     for ch in digits.bytes() {
-        mag = mag.mul_u64(10).unwrap().add_u64((ch - b'0') as u64).unwrap();
+        mag = mag.mul_u64(10).add_u64((ch - b'0') as u64);
     }
     Exp::from_parts(neg, mag)
 }
@@ -54,7 +54,7 @@ pub fn show_exp(e: &Exp) -> String {
             let mut m = mag.clone();
             let ten = Nat::from_u64(10);
             while !m.is_zero() {
-                let (q, r) = m.divmod(&ten).unwrap();
+                let (q, r) = m.divmod(&ten);
                 digits.push((b'0' + r.to_u64().unwrap() as u8) as char);
                 m = q;
             }

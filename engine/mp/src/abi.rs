@@ -15,6 +15,7 @@
 
 use crate::consts::{e_fixed, ln2_fixed, pi_fixed};
 use crate::elefun;
+use crate::fail::checked;
 use crate::exp::Exp;
 use crate::int::Int;
 use crate::intmath::sqrtrem_python;
@@ -160,7 +161,7 @@ impl Core {
 
     fn io_nat(&self, at: usize, n: usize) -> Result<Nat, Fail> {
         let src = self.io.get(at..at + n).ok_or(Fail::Limit { limbs: n as u64 })?;
-        Nat::from_limbs(src)
+        checked(|| Nat::from_limbs(src))
     }
 
     // ---- loading operands
@@ -408,9 +409,11 @@ impl Core {
         if !(prec >= 0.0 && prec.fract() == 0.0 && prec < EXACT) {
             return code::BAD_CALL;
         }
-        match self.dispatch(op, prec as u64, rnd_v, rnd) {
-            Ok(n) => n,
-            Err(f) => {
+        // (the operation's own failure is sticky, fail.rs; a register of the
+        // wrong kind is the dispatch's)
+        match checked(|| self.dispatch(op, prec as u64, rnd_v, rnd)) {
+            Ok(Ok(n)) => n,
+            Ok(Err(f)) | Err(f) => {
                 self.out = Default::default();
                 fail(self, f)
             }
@@ -431,75 +434,75 @@ impl Core {
         let p = prec as i64;
         match op {
             op::ADD | op::SUB => {
-                let r = mpf::mpf_add(self.f(0)?, self.f(1)?, prec, rnd, op == op::SUB)?;
+                let r = mpf::mpf_add(self.f(0)?, self.f(1)?, prec, rnd, op == op::SUB);
                 self.put(Val::F(r))
             }
             op::MUL => {
-                let r = mpf::mpf_mul(self.f(0)?, self.f(1)?, prec, rnd)?;
+                let r = mpf::mpf_mul(self.f(0)?, self.f(1)?, prec, rnd);
                 self.put(Val::F(r))
             }
             op::DIV => {
-                let r = mpf::mpf_div(self.f(0)?, self.f(1)?, prec, rnd)?;
+                let r = mpf::mpf_div(self.f(0)?, self.f(1)?, prec, rnd);
                 self.put(Val::F(r))
             }
             op::SQRT => {
-                let r = mpf::mpf_sqrt(self.f(0)?, prec, rnd)?;
+                let r = mpf::mpf_sqrt(self.f(0)?, prec, rnd);
                 self.put(Val::F(r))
             }
             op::EXP => {
-                let r = elefun::mpf_exp(self.f(0)?, prec, rnd)?;
+                let r = elefun::mpf_exp(self.f(0)?, prec, rnd);
                 self.put(Val::F(r))
             }
             op::LOG => {
-                let r = elefun::mpf_log(self.f(0)?, prec, rnd)?;
+                let r = elefun::mpf_log(self.f(0)?, prec, rnd);
                 self.put(Val::F(r))
             }
             op::COS => {
-                let r = elefun::mpf_cos(self.f(0)?, prec, rnd)?;
+                let r = elefun::mpf_cos(self.f(0)?, prec, rnd);
                 self.put(Val::F(r))
             }
             op::SIN => {
-                let r = elefun::mpf_sin(self.f(0)?, prec, rnd)?;
+                let r = elefun::mpf_sin(self.f(0)?, prec, rnd);
                 self.put(Val::F(r))
             }
             op::POW => {
-                let r = elefun::mpf_pow(self.f(0)?, self.f(1)?, prec, rnd)?;
+                let r = elefun::mpf_pow(self.f(0)?, self.f(1)?, prec, rnd);
                 self.put(Val::F(r))
             }
             op::NORMALIZE | op::NORMALIZE1 => {
                 let s = self.f(0)?.clone();
                 let r = if op == op::NORMALIZE {
-                    mpf::normalize(s.sign, s.man, s.exp, s.bc, prec, rnd)?
+                    mpf::normalize(s.sign, s.man, s.exp, s.bc, prec, rnd)
                 } else {
-                    mpf::normalize1(s.sign, s.man, s.exp, s.bc, prec, rnd)?
+                    mpf::normalize1(s.sign, s.man, s.exp, s.bc, prec, rnd)
                 };
                 self.put(Val::F(r))
             }
             op::FROM_MAN_EXP => {
                 let (m, e) = (self.i(0)?.clone(), Exp::from_int(self.i(1)?));
-                let r = mpf::from_man_exp(m.is_neg() as u32, m.mag, e, prec, rnd)?;
+                let r = mpf::from_man_exp(m.is_neg() as u32, m.mag, e, prec, rnd);
                 self.put(Val::F(r))
             }
             op::MPC_EXP | op::MPC_SQRT => {
                 let z: Mpc = (self.f(0)?.clone(), self.f(1)?.clone());
-                let (a, b) = if op == op::MPC_EXP { elefun::mpc_exp(&z, prec, rnd)? } else { elefun::mpc_sqrt(&z, prec, rnd)? };
+                let (a, b) = if op == op::MPC_EXP { elefun::mpc_exp(&z, prec, rnd) } else { elefun::mpc_sqrt(&z, prec, rnd) };
                 self.put2(Val::F(a), Val::F(b))
             }
             op::EXP_FIXED => {
-                let r = elefun::exp_fixed(self.i(0)?, p, self.opt_i(1))?;
+                let r = elefun::exp_fixed(self.i(0)?, p, self.opt_i(1));
                 self.put(Val::I(r))
             }
             op::COS_SIN_FIXED => {
-                let (c, s) = elefun::cos_sin_fixed(self.i(0)?, p, self.opt_i(1))?;
+                let (c, s) = elefun::cos_sin_fixed(self.i(0)?, p, self.opt_i(1));
                 self.put2(Val::I(c), Val::I(s))
             }
             op::LOG_INT_FIXED => {
-                let r = elefun::log_int_fixed(self.i(0)?, p, self.opt_i(1))?;
+                let r = elefun::log_int_fixed(self.i(0)?, p, self.opt_i(1));
                 self.put(Val::I(r))
             }
-            op::PI_FIXED => self.put(Val::I(Int::from(pi_fixed(p)?))),
-            op::LN2_FIXED => self.put(Val::I(Int::from(ln2_fixed(p)?))),
-            op::E_FIXED => self.put(Val::I(Int::from(e_fixed(p)?))),
+            op::PI_FIXED => self.put(Val::I(Int::from(pi_fixed(p)))),
+            op::LN2_FIXED => self.put(Val::I(Int::from(ln2_fixed(p)))),
+            op::E_FIXED => self.put(Val::I(Int::from(e_fixed(p)))),
             op::BITCOUNT => {
                 // python_bitcount: the bit length of a positive n, else 0
                 let n = self.i(0)?;
@@ -518,7 +521,7 @@ impl Core {
                 if x.is_neg() {
                     return Err(Fail::KeyError);
                 }
-                let (y, r) = sqrtrem_python(&x.mag)?;
+                let (y, r) = sqrtrem_python(&x.mag);
                 if op == op::ISQRT {
                     self.put(Val::I(Int::from(y)))
                 } else {
@@ -527,7 +530,7 @@ impl Core {
             }
             op::IFAC => {
                 let n = self.i(0)?.clone();
-                let r = self.ifac(&n, flag == 1)?;
+                let r = self.ifac(&n, flag == 1);
                 self.put(Val::I(r))
             }
             _ => Err(Fail::KeyError),
@@ -538,12 +541,15 @@ impl Core {
     /// memo or past it (which extends the memo up to MAX_FACTORIAL_CACHE);
     /// below it, a negative n or a float's floor n (`fraction`: n was not
     /// integral) returns the memo's last value, (len(memo) - 1)!.
-    fn ifac(&mut self, n: &Int, fraction: bool) -> Result<Int, Fail> {
+    fn ifac(&mut self, n: &Int, fraction: bool) -> Int {
         let len = self.ifac_len;
         let m = match n.to_i64() {
             Some(m) => m,
             None if n.is_neg() => return factorial(len - 1),
-            None => return Err(Fail::Limit { limbs: u64::MAX }),
+            None => {
+                crate::fail::too_big();
+                return Int::zero();
+            }
         };
         // (n in the memo: an integral n with 0 <= n < len)
         if !fraction && (0..len).contains(&m) {
@@ -553,18 +559,24 @@ impl Core {
         if m < len {
             return factorial(len - 1);
         }
-        let r = factorial(m)?;
-        self.ifac_len = len.max(m.min(MAX_FACTORIAL_CACHE) + 1);
-        Ok(r)
+        let r = factorial(m);
+        if !crate::fail::failed() {
+            self.ifac_len = len.max(m.min(MAX_FACTORIAL_CACHE) + 1);
+        }
+        r
     }
 }
 
-fn factorial(n: i64) -> Result<Int, Fail> {
+fn factorial(n: i64) -> Int {
     let mut p = Nat::from_u64(1);
     for k in 2..=n.max(1) as u64 {
-        p = p.mul_u64(k)?;
+        // (a refused product ends the loop: n may be far past what fits)
+        if crate::fail::failed() {
+            break;
+        }
+        p = p.mul_u64(k);
     }
-    Ok(Int::from(p))
+    Int::from(p)
 }
 
 #[cfg(test)]

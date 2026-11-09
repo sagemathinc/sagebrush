@@ -11,6 +11,8 @@ use sagebrush_mp::int::Int;
 use sagebrush_mp::mpf::{Mpf, Rnd};
 use sagebrush_mp::Fail;
 
+use sagebrush_mp::fail::checked;
+
 mod common;
 use common::*;
 
@@ -47,19 +49,19 @@ fn elefun_corpus() {
         let t = parse(&w[7..11]);
         let si = Int::new(s.sign == 1, s.man.clone());
         let got = match w[0] {
-            "exp" => show(&mpf_exp(&s, prec, rnd)),
-            "log" => show(&mpf_log(&s, prec, rnd)),
-            "cos" => show(&mpf_cos(&s, prec, rnd)),
-            "sin" => show(&mpf_sin(&s, prec, rnd)),
-            "pow" => show(&mpf_pow(&s, &t, prec, rnd)),
-            "cexp" => show_pair(mpc_exp(&(s, t), prec, rnd)),
-            "csqrt" => show_pair(mpc_sqrt(&(s, t), prec, rnd)),
-            "expfix" => match exp_fixed(&si, prec as i64, None) {
+            "exp" => show(&checked(|| mpf_exp(&s, prec, rnd))),
+            "log" => show(&checked(|| mpf_log(&s, prec, rnd))),
+            "cos" => show(&checked(|| mpf_cos(&s, prec, rnd))),
+            "sin" => show(&checked(|| mpf_sin(&s, prec, rnd))),
+            "pow" => show(&checked(|| mpf_pow(&s, &t, prec, rnd))),
+            "cexp" => show_pair(checked(|| mpc_exp(&(s, t), prec, rnd))),
+            "csqrt" => show_pair(checked(|| mpc_sqrt(&(s, t), prec, rnd))),
+            "expfix" => match checked(|| exp_fixed(&si, prec as i64, None)) {
                 Ok(v) => show_int(&v),
                 Err(e) => show(&Err(e)),
             },
-            "csfix" => show_ints(cos_sin_fixed(&si, prec as i64, None)),
-            "logint" => match log_int_fixed(&si, prec as i64, None) {
+            "csfix" => show_ints(checked(|| cos_sin_fixed(&si, prec as i64, None))),
+            "logint" => match checked(|| log_int_fixed(&si, prec as i64, None)) {
                 Ok(v) => show_int(&v),
                 Err(e) => show(&Err(e)),
             },

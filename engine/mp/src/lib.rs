@@ -10,6 +10,7 @@
 
 pub mod abi;
 pub mod exp;
+pub mod fail;
 pub mod consts;
 pub mod elefun;
 pub mod glibm;
@@ -22,7 +23,7 @@ pub mod nat;
 mod wasm;
 
 /// How a call failed: the outcomes the host tells apart.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Fail {
     /// A number over the call's limb limit (the session's limits): the
     /// host's limit error, before anything was allocated.

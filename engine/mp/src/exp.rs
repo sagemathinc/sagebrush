@@ -6,8 +6,8 @@
 //! separate things: an exponent's size is its own value's, never a
 //! mantissa's.)
 
+use crate::fail::too_big;
 use crate::nat::Nat;
-use crate::Fail;
 use core::cmp::Ordering;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -86,62 +86,62 @@ impl Exp {
         }
     }
 
-    pub fn neg(&self) -> Result<Exp, Fail> {
+    pub fn neg(&self) -> Exp {
         match self {
             Exp::S(x) => match x.checked_neg() {
-                Some(y) => Ok(Exp::S(y)),
-                None => Ok(Exp::from_parts(false, Nat::from_u64(1u64 << 63))),
+                Some(y) => Exp::S(y),
+                None => Exp::from_parts(false, Nat::from_u64(1u64 << 63)),
             },
-            Exp::B { neg, mag } => Ok(Exp::from_parts(!neg, mag.clone())),
+            Exp::B { neg, mag } => Exp::from_parts(!neg, mag.clone()),
         }
     }
 
-    pub fn add(&self, o: &Exp) -> Result<Exp, Fail> {
+    pub fn add(&self, o: &Exp) -> Exp {
         if let (Exp::S(a), Exp::S(b)) = (self, o) {
             if let Some(c) = a.checked_add(*b) {
-                return Ok(Exp::S(c));
+                return Exp::S(c);
             }
         }
         let (an, am) = self.parts();
         let (bn, bm) = o.parts();
         if an == bn {
-            return Ok(Exp::from_parts(an, am.add(&bm)?));
+            return Exp::from_parts(an, am.add(&bm));
         }
-        Ok(match am.cmp_mag(&bm) {
-            Ordering::Less => Exp::from_parts(bn, bm.sub(&am)?),
-            _ => Exp::from_parts(an, am.sub(&bm)?),
-        })
+        match am.cmp_mag(&bm) {
+            Ordering::Less => Exp::from_parts(bn, bm.sub(&am)),
+            _ => Exp::from_parts(an, am.sub(&bm)),
+        }
     }
 
-    pub fn add_i64(&self, n: i64) -> Result<Exp, Fail> {
+    pub fn add_i64(&self, n: i64) -> Exp {
         self.add(&Exp::S(n))
     }
 
-    pub fn sub(&self, o: &Exp) -> Result<Exp, Fail> {
-        self.add(&o.neg()?)
+    pub fn sub(&self, o: &Exp) -> Exp {
+        self.add(&o.neg())
     }
 
-    pub fn mul_i64(&self, n: i64) -> Result<Exp, Fail> {
+    pub fn mul_i64(&self, n: i64) -> Exp {
         if let Exp::S(a) = self {
             if let Some(c) = a.checked_mul(n) {
-                return Ok(Exp::S(c));
+                return Exp::S(c);
             }
         }
         let (an, am) = self.parts();
-        let prod = am.mul(&Nat::from_u64(n.unsigned_abs()))?;
-        Ok(Exp::from_parts(an != (n < 0) && !prod.is_zero(), prod))
+        let prod = am.mul(&Nat::from_u64(n.unsigned_abs()));
+        Exp::from_parts(an != (n < 0) && !prod.is_zero(), prod)
     }
 
     /// self * n for an integer n of any size.
-    pub fn mul_int(&self, n: &crate::int::Int) -> Result<Exp, Fail> {
+    pub fn mul_int(&self, n: &crate::int::Int) -> Exp {
         if let (Exp::S(a), Some(b)) = (self, n.to_i64()) {
             if let Some(c) = a.checked_mul(b) {
-                return Ok(Exp::S(c));
+                return Exp::S(c);
             }
         }
         let (an, am) = self.parts();
-        let prod = am.mul(&n.mag)?;
-        Ok(Exp::from_parts(an != n.neg && !prod.is_zero(), prod))
+        let prod = am.mul(&n.mag);
+        Exp::from_parts(an != n.neg && !prod.is_zero(), prod)
     }
 
     /// The exponent of an integer value.
@@ -156,15 +156,15 @@ impl Exp {
     }
 
     /// Python's floor division by 2.
-    pub fn floor_div2(&self) -> Result<Exp, Fail> {
+    pub fn floor_div2(&self) -> Exp {
         match self {
-            Exp::S(x) => Ok(Exp::S(x.div_euclid(2))),
+            Exp::S(x) => Exp::S(x.div_euclid(2)),
             Exp::B { neg, mag } => {
-                let h = mag.shr(1)?;
+                let h = mag.shr(1);
                 if *neg && mag.is_odd() {
-                    Ok(Exp::from_parts(true, h.add_u64(1)?))
+                    Exp::from_parts(true, h.add_u64(1))
                 } else {
-                    Ok(Exp::from_parts(*neg, h))
+                    Exp::from_parts(*neg, h)
                 }
             }
         }
@@ -194,11 +194,17 @@ impl Exp {
     /// A nonnegative value as a shift distance or count; past u64 it is a
     /// number too large for the call (the mantissa it would size could never
     /// be allocated): the limit refusal, before any allocation.
-    pub fn as_shift(&self) -> Result<u64, Fail> {
+    pub fn as_shift(&self) -> u64 {
         match self {
-            Exp::S(x) if *x >= 0 => Ok(*x as u64),
-            Exp::B { neg: false, mag } => mag.to_u64().ok_or(Fail::Limit { limbs: u64::MAX }),
-            _ => Err(Fail::Limit { limbs: u64::MAX }),
+            Exp::S(x) if *x >= 0 => *x as u64,
+            Exp::B { neg: false, mag } => mag.to_u64().unwrap_or_else(|| {
+                too_big();
+                0
+            }),
+            _ => {
+                too_big();
+                0
+            }
         }
     }
 }
@@ -212,20 +218,20 @@ mod tests {
         counter::take();
         let max = Exp::S(i64::MAX);
         assert_eq!(counter::take(), 0);
-        let one_past = max.add_i64(1).unwrap();
+        let one_past = max.add_i64(1);
         assert!(matches!(one_past, Exp::B { neg: false, .. }));
         assert_eq!(counter::take(), 1);
-        assert_eq!(one_past.add_i64(-1).unwrap(), Exp::S(i64::MAX));
+        assert_eq!(one_past.add_i64(-1), Exp::S(i64::MAX));
         let min = Exp::S(i64::MIN);
-        assert!(matches!(min.add_i64(-1).unwrap(), Exp::B { neg: true, .. }));
-        assert_eq!(min.neg().unwrap().add_i64(-1).unwrap(), Exp::S(i64::MAX));
+        assert!(matches!(min.add_i64(-1), Exp::B { neg: true, .. }));
+        assert_eq!(min.neg().add_i64(-1), Exp::S(i64::MAX));
         // a product of two in-range values that leaves i64
-        let p = Exp::S(1 << 62).mul_i64(2).unwrap();
+        let p = Exp::S(1 << 62).mul_i64(2);
         assert!(matches!(p, Exp::B { neg: false, .. }));
-        assert_eq!(Exp::S(1 << 62).mul_i64(-2).unwrap(), Exp::S(i64::MIN));
-        assert_eq!(Exp::S(-7).floor_div2().unwrap(), Exp::S(-4));
-        let big_odd_neg = Exp::S(i64::MIN).add_i64(-3).unwrap();
-        let h = big_odd_neg.floor_div2().unwrap();
+        assert_eq!(Exp::S(1 << 62).mul_i64(-2), Exp::S(i64::MIN));
+        assert_eq!(Exp::S(-7).floor_div2(), Exp::S(-4));
+        let big_odd_neg = Exp::S(i64::MIN).add_i64(-3);
+        let h = big_odd_neg.floor_div2();
         // (-(2^63) - 3) // 2 = -(2^62) - 2
         assert_eq!(h, Exp::S(-(1i64 << 62) - 2));
         assert_eq!(Exp::S(5).cmp(&one_past), Ordering::Less);
