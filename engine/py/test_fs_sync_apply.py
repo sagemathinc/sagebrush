@@ -1366,6 +1366,179 @@ def test_room_unmeasurable_fails_closed():
         p.close()
 
 
+# ---- r4: grader's gaps (B5, E8, R6, P6, C3, C6, H9/H10, C7)
+
+def test_all_names_taken_after_a_move_aside_keeps_held():
+    # (B5) a replacing download whose install finds every conflict name taken: the old copy is in replaced/, said so
+    p = Pair({"main.tex": b"old"})
+    try:
+        p.sync()
+        p.ws.put("main.tex", b"new")
+        real = M.conflict_name
+
+        def racing(path, computer, taken):
+            name = real(path, computer, taken)
+            p.write(name, b"taken meanwhile")
+            return name
+        M.conflict_name = racing
+        try:
+            p.sync(hooks={"before_install": lambda s: p.write("main.tex", b"newcomer")})
+        finally:
+            M.conflict_name = real
+        where = p.held(RID, "replaced", "main.tex")
+        o = p.report.outcomes[0]
+        assert (o.result, o.why, o.held) == (A.PENDING, A.NO_CONFLICT_NAME, where), o
+        assert "main.tex" not in p.base.rows()
+        assert p.lines()[1].endswith("rename or remove some, then run it again; this computer's previous copy is kept "
+                                     "for 30 days in %s" % where), p.lines()
+    finally:
+        p.close()
+
+
+def test_other_filesystem_met_while_moving():
+    # (E8) EXDEV from the move aside itself: held back, with §1.2's other-disk line
+    p = Pair({"a": b"a"})
+    try:
+        p.sync()
+        del p.ws.files["a"]
+        real = M.rename_noreplace
+
+        def exdev(*args):
+            raise M.NoReplace("it is on another filesystem")
+        M.rename_noreplace = exdev
+        try:
+            p.sync()
+        finally:
+            M.rename_noreplace = real
+        assert p.kinds() == [(P.DELETE_HERE, "a", A.PENDING, A.HELD_BACK)]
+        assert p.report.run_lines == [A._other_disk_line(p.local, p.state)]
+        assert p.read("a") == b"a" and p.base.rows_one("a") is not None
+    finally:
+        p.close()
+
+
+def test_restore_journal_not_json():
+    # (R6) a journal that isn't JSON (or isn't UTF-8) refuses, never crashes
+    for data in (b"{not json", b"\xff\xfe", b"[1, 2]"):
+        p = Pair({"a": b"a"})
+        try:
+            p.sync()
+            del p.ws.files["a"]
+            p.sync()
+            os.chmod(p.held(RID, "journal.json"), 0o600)
+            with open(p.held(RID, "journal.json"), "wb") as f:
+                f.write(data)
+            try:
+                restore(p)
+                raise AssertionError("restored with journal %r" % data)
+            except A.NotRestorable as e:
+                assert e.why in ("no-journal", "other-folder"), (data, e.why)
+            assert not os.path.exists(p.path("a"))
+        finally:
+            p.close()
+
+
+def test_conflict_counted_in_room():
+    # (P6) a conflict downloads too: if it doesn't fit, nothing is renamed or uploaded
+    p = conflicted()
+    try:
+        p.sync(free_space=lambda fd: (os.fstat(fd).st_dev, A.DOWNLOAD_HEADROOM + 1))
+        assert p.kinds() == [(P.CONFLICT, "main.tex", A.PENDING, A.NO_ROOM)]
+        assert os.listdir(p.local) == ["main.tex"] and p.read("main.tex") == b"mine"
+        assert ("write", "main (conflict, laptop).tex") not in p.ws.calls
+    finally:
+        p.close()
+
+
+def test_upload_read_capped():
+    # (C3) a file that grows while it is read: never more than its planned size + 1 bytes read
+    p = Pair({"a": b"x" * 10})
+    try:
+        plan = p.plan()
+        real, got = os.read, [0]
+
+        def read(fd, n):
+            if os.readlink("/proc/self/fd/%d" % fd).endswith("/thesis/a"):
+                if got[0] == 0:
+                    with open(p.path("a"), "ab") as f:
+                        f.write(b"y" * 100000)
+                b = real(fd, n)
+                got[0] += len(b)
+                return b
+            return real(fd, n)
+        os.read = read
+        try:
+            p.sync(plan)
+        finally:
+            os.read = real
+        assert p.kinds() == [(P.UPLOAD, "a", A.SKIPPED, A.CHANGED_HERE)] and got[0] <= 11, got
+        assert p.ws.files == {}
+    finally:
+        p.close()
+
+
+def test_download_read_capped():
+    # (C6) a workspace file larger than planned: the read asks for at most size + 1 bytes, and it is skipped
+    p = Pair({}, {"r.txt": b"x" * 10})
+    try:
+        plan = p.plan()
+        p.ws.sent["r.txt"] = b"y" * 100000
+        real, delivered = p.ws.read, []
+
+        def read(path, writer, limit):
+            got = []
+            entry, n = real(path, lambda b: (got.append(len(b)), writer(b)), limit)
+            delivered.append((limit, sum(got)))
+            return entry, n
+        p.ws.read = read
+        p.sync(plan)
+        assert delivered == [(11, 11)], delivered
+        assert p.kinds() == [(P.DOWNLOAD, "r.txt", A.SKIPPED, A.CHANGED_THERE)] and os.listdir(p.local) == []
+    finally:
+        p.close()
+
+
+def test_admission_counts_both_parts():
+    # (H9, H10) a delete here and a replacing download: deleted/, a, replaced/, b, the journal and the run folder: 6
+    for bound, ok in ((6, True), (5, False)):
+        p = Pair({"a": b"a", "b": b"b1"})
+        try:
+            p.sync()
+            del p.ws.files["a"]
+            p.ws.put("b", b"b2")
+            saved = H.RUN_ENTRIES
+            H.RUN_ENTRIES = bound
+            try:
+                p.sync()
+            finally:
+                H.RUN_ENTRIES = saved
+            assert (p.report.admission.ok, p.report.admission.entries) == (ok, 6), (bound, p.report.admission)
+        finally:
+            p.close()
+
+
+def test_temp_synced_before_install():
+    # (C7) the downloaded bytes reach the disk before the rename that makes them the file
+    p = Pair({}, {"r.txt": b"theirs"})
+    try:
+        real, synced, at_install = os.fsync, [], []
+
+        def fsync(fd):
+            try:
+                synced.append(os.readlink("/proc/self/fd/%d" % fd))
+            except OSError:
+                pass
+            return real(fd)
+        os.fsync = fsync
+        try:
+            p.sync(hooks={"before_install": lambda s: at_install.append(list(synced))})
+        finally:
+            os.fsync = real
+        assert any(".sagebrush-tmp-" in path for path in at_install[0]), at_install
+    finally:
+        p.close()
+
+
 def test_fake_refuses_bytes_other_than_named():
     ws = Fake()
     try:
