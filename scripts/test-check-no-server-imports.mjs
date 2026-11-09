@@ -162,6 +162,33 @@ expectCloud("the listed text in another file", "web/workspace/other.mjs", `const
   }
 }
 
+// web/build.ts's shape (daybreak3's structural control): every Bun.build there runs through the checked build0.  The one
+// raw Bun.build is bound in a top-level block, build0 checks its metafile with cloudInputs, the global Bun.build is
+// replaced by a wrapper calling build0 in that same block, and every other Bun.build( call comes after that.
+{
+  const { readFileSync } = await import("node:fs");
+  const lines = readFileSync(new URL("../web/build.ts", import.meta.url), "utf8").split("\n");
+  const at = (re) => lines.findIndex((l) => re.test(l));
+  const all = (re) => lines.flatMap((l, i) => (re.test(l) ? [i] : []));
+  const bind = at(/^  const bunBuild = Bun\.build\.bind\(Bun\);$/);
+  const def = at(/^  const build0 = async \(o: any\) => \{$/);
+  const wrap = at(/^  \(Bun as any\)\.build = async \(o: any\) => \{$/);
+  let open = bind - 1;
+  while (open >= 0 && !/^\S/.test(lines[open])) open--;
+  const problems = [];
+  if (bind < 0 || def < bind || wrap < def) problems.push("the bind, build0 and the global wrapper, in that order");
+  if (open < 0 || lines[open] !== "{") problems.push("they sit in a top-level block (not under if/for/try)");
+  if (!lines.slice(def, def + 6).join("\n").includes("cloudInputs(Object.keys(r.metafile?.inputs ?? {}))") || !lines.slice(def, def + 6).join("\n").includes("metafile: true")) problems.push("build0 forces a metafile and checks it");
+  if (!/await build0\(/.test(lines[wrap + 1] ?? "")) problems.push("the wrapper calls build0");
+  if (all(/Bun\.build\.bind\(/).length !== 1 || all(/\bBun\.build\s*=|\(Bun as any\)\.build\s*=/).length !== 1) problems.push("one raw bind and one replacement");
+  const early = all(/\bBun\.build\(/).filter((i) => i < wrap);
+  if (early.length) problems.push(`Bun.build( before the wrapper, line ${early.map((i) => i + 1).join(", ")}`);
+  if (problems.length) {
+    failures++;
+    console.log("FAIL web/build.ts's bundles must all pass build0: " + problems.join("; "));
+  }
+}
+
 // main, the step CI runs: a temporary repository, its verdict and exit code (grader's C16-C18; daybreak3's E2)
 {
   const { mkdtempSync, writeFileSync, mkdirSync, chmodSync, rmSync, symlinkSync } = await import("node:fs");
