@@ -269,7 +269,7 @@ try {
   await forged(`{ fsRename: { from: "/proj/r/q", to: "/proj/r/m4", changes: [["/proj/r/m4/../../../elsewhere/b.txt", new Uint8Array([1])]] } }`);
   await settle();
   const leaked = [];
-  for (const p of ["/proj/r/shape.txt", "/elsewhere/shape.txt", "/elsewhere/up.txt", "/proj/r/dbl.txt", "/proj/r/dot.txt", "/proj/r/rel.txt", "/proj/r/str.txt", "/proj/r/arr.txt", "/proj/r/m2/a.txt", "/proj/r/m3/a.txt", "/elsewhere/b.txt"]) if (await stat(p)) leaked.push(p);
+  for (const p of ["/proj/r/shape.txt", "/elsewhere/shape.txt", "/elsewhere/up.txt", "/proj/r/dbl.txt", "/proj/r/dot.txt", "/proj/r/rel.txt", "/proj/r/trail", "/proj/r/str.txt", "/proj/r/arr.txt", "/proj/r/m2/a.txt", "/proj/r/m3/a.txt", "/elsewhere/b.txt"]) if (await stat(p)) leaked.push(p);
   check(leaked.length === 0, "an interpreter's malformed changes are kept nowhere: batch-shaped data, non-canonical paths, bytes that aren't bytes, a rename with a non-canonical or outside from or member: " + JSON.stringify(leaked));
   await forged(`{ fsRename: { from: "/proj/r/f.txt", to: "/proj/r/h.txt", changes: [["/proj/r/f.txt", null], ["/proj/r/h.txt", new Uint8Array([104])]] } }`);
   await settle();
