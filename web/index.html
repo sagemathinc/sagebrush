@@ -569,7 +569,7 @@ import { mountBrowser } from "./workspace/browser.ts";
 // (the LaTeX editor's entry; a build without it takes this line out before bundling: web/build.ts)
 import { latexBoot, latexOn, texNew } from "./latex/boot.ts";
 import { codeBoot } from "./code/boot.ts";
-import { createPermissions, hostMade } from "./notebook/permissions.js";
+import { createPermissions, hostMade, canonicalScope } from "./notebook/permissions.js";
 import { covers, stateOf, meetTrees, sameTrees, EPOCH_MAX } from "./notebook/confine.js";
 import { renderFileMenu, fileMenuKey } from "./workspace/filemenu.ts";
 import { recordOpened, recentOpened, recentLabel, openFilesDialog } from "./workspace/fileopen.ts";
@@ -797,6 +797,10 @@ function makeKernel(owner) {
   // the epoch last sent to it and the trees it was sent)
   let cap = owner === null ? ["/"] : perms.writeTrees(owner), epoch = 0, sentTrees = [];
   const ceilings = new Map(); // generation -> its trees
+  // ("Allow once" (SESSION934-4): a once grant takes effect in the interpreter that starts after it (the Run it needs)
+  // and ends with that interpreter: each once scope is bound to the first generation that starts with it, and expires
+  // at any later start; the document closed ends them all, with its session's denials)
+  const onceAt = new Map(); // once scope -> the generation it took effect in
   // (whether sender `w` may change `path` now: the document's current interpreter, of that generation, and both its
   // ceiling and the document's trees now cover it; asked as a change arrives and again at its final admission)
   const admit = (w, path) => {
@@ -820,6 +824,16 @@ function makeKernel(owner) {
     // (a resumed session: the files it had, from the journal)
     onStart: async (w) => {
       gens.set(w, ++gen);
+      if (owner !== null) {
+        const once = perms.onceScopes(owner, "write");
+        for (const s of [...onceAt.keys()]) if (!once.includes(s)) onceAt.delete(s);
+        for (const s of once) {
+          const at = onceAt.get(s);
+          if (at === undefined) onceAt.set(s, gen);
+          else if (at !== gen) { perms.expireOnce(owner, "write", s); onceAt.delete(s); }
+        }
+        if (owner === current.id) filesShown();
+      }
       // (first: what this document may change, before its files or any run: its ceiling, which only the person's Run
       // widens (rotateIfWidened set `cap`); any other start keeps the last ceiling, narrowed by what is allowed now)
       // (not under `sagebrush notebook`, whose interpreter is the computer's own Python behind the local server: a
@@ -878,18 +892,26 @@ function makeKernel(owner) {
       // the other interpreters; asked again at its final admission, in the queue)
       const scratchPath = (p) => /^\/(tmp|\$pyjs)(\/|$)/.test(p);
       const refusedAt = (p) => { if (owner === current.id && !scratchPath(p)) filesPrompt(owner, gens.get(sender), p, false); };
+      // (what an interpreter sends is input: a path only in its one canonical form (the workspace's, as a write grant's:
+      // absolute, no empty, "." or ".." segment, not "/"), and a change's bytes a Uint8Array or null; anything else is
+      // kept nowhere (astra's Q934-1, daybreak3))
+      const canon = (p) => typeof p === "string" && p !== "/" && canonicalScope("write", p) === p;
+      const bytes = (d) => d === null || d instanceof Uint8Array;
       if (m.fsRename !== undefined) {
-        // (a rename, every path it moves, as one change: admitted whole or not at all, now and at its final admission)
+        // (a rename, every path it moves, as one change: admitted whole or not at all, now and at its final admission;
+        // its from, its to and each member, each admitted)
         const r = m.fsRename, ch = r && Array.isArray(r.changes) ? r.changes : null;
-        if (!ch || !ch.length || ch.length > RENAME_MAX || !ch.every((x) => Array.isArray(x) && x.length === 2 && typeof x[0] === "string" && (x[1] === null || x[1] instanceof Uint8Array))) return true;
-        const out = ch.find(([p]) => !admit(sender, p));
-        if (out) { refusedAt(out[0]); return true; }
-        const may = () => ch.every(([p]) => admit(sender, p));
+        if (!ch || !ch.length || ch.length > RENAME_MAX || !canon(r.from) || !canon(r.to) || !ch.every((x) => Array.isArray(x) && x.length === 2 && canon(x[0]) && bytes(x[1]))) return true;
+        // (from and to, which change nothing themselves, admitted too, but for scratch: a rename out of /tmp is a write)
+        const all = [...[r.from, r.to].filter((p) => !scratchPath(p)), ...ch.map(([p]) => p)];
+        const out = all.find((p) => !admit(sender, p));
+        if (out) { refusedAt(out); return true; }
+        const may = () => all.every((p) => admit(sender, p));
         if (diskFile) for (const [p, d] of ch) if (d && /^\/[^/]+$/.test(p)) writeDisk(diskFile.dir + diskFile.sep + p.slice(1), d, may);
         fileBatch(ch, owner, may, k);
         return true;
       }
-      if (typeof m.fsChanged !== "string") return true;
+      if (!canon(m.fsChanged) || !bytes(m.data)) return true;
       if (owner !== null && !admit(sender, m.fsChanged)) { refusedAt(m.fsChanged); return true; }
       // in the app, a file Python wrote in its top folder goes to the notebook's folder
       const may = () => admit(sender, m.fsChanged);
@@ -958,6 +980,7 @@ function kernelFor(id) {
     o.kernel.close();
     o.stopRunnerInfo();
     kernels.delete(oid);
+    perms.endSession(oid); // (its "once" grants and this session's denials end with it: SESSION934-4)
   }
   return e;
 }
@@ -1890,6 +1913,10 @@ function filesBar(on) {
 // takes only a fresh trusted press that begins after that (a press begun before, a held or repeating key, an
 // untrusted event: nothing); an answer is bound to the request, and any change of context closes it unanswered.
 const FB_ARM = 500;
+// (each document's permission revision: any change of its record, here or in another tab, counts, so a prompt or a press
+// made before one, even a change and its undoing, answers nothing: PROMPT934-3)
+const permRev = new Map();
+const revOf = (doc) => permRev.get(doc) ?? 0;
 function filesPrompt(doc, generation, path, changed) {
   if (doc !== current.id || fbReq?.open) return; // (one at a time: further refusals only error)
   const now = perms.writeTrees(doc);
@@ -1906,7 +1933,7 @@ function filesPrompt(doc, generation, path, changed) {
     return say(changed ? "This notebook's permissions changed while it ran: run it again." : `Allowed: run it again to use it (the interpreter restarts).`, []);
   }
   if (perms.deniedWrite(doc, path)) return; // (Don't allow: silent for the rest of the session)
-  const req = { open: true, id: ++fbSeq, doc, generation, path, folder, trees: now.join("\n"), armedAt: performance.now() + FB_ARM, pressed: null };
+  const req = { open: true, id: ++fbSeq, doc, generation, path, folder, trees: now.join("\n"), rev: revOf(doc), armedAt: performance.now() + FB_ARM, pressed: null };
   fbReq = req;
   if (folder === "/") return say(`This notebook wants to change ${shown(path)}, at the top of your files. To allow that, use`, ["fbperms", "fbdeny"]);
   $("#fballow").textContent = `Allow in ${shown(folder)}, then run again (restarts)`;
@@ -1916,15 +1943,19 @@ function filesPrompt(doc, generation, path, changed) {
 // opened, from a fresh trusted press on this same button that began after arming)
 function fbCurrent(req) {
   const e = kernels.get(req.doc);
-  return req === fbReq && req.open && req.doc === current.id && e?.generation?.() === req.generation && perms.writeTrees(req.doc).join("\n") === req.trees;
+  return req === fbReq && req.open && req.doc === current.id && e?.generation?.() === req.generation && revOf(req.doc) === req.rev && perms.writeTrees(req.doc).join("\n") === req.trees;
 }
 for (const id of ["fballow", "fbonce", "fbdeny", "fbperms"]) {
   const b = $("#" + id);
-  b.addEventListener("pointerdown", (e) => { if (fbReq && e.isTrusted && performance.now() >= fbReq.armedAt) fbReq.pressed = id; });
-  b.addEventListener("keydown", (e) => { if (fbReq && e.isTrusted && !e.repeat && (e.key === "Enter" || e.key === " ") && performance.now() >= fbReq.armedAt) fbReq.pressed = id; });
+  // (a press: this button, this request, this revision; let go of on cancel, leaving the button, losing focus)
+  const press = () => { if (fbReq?.open) fbReq.pressed = { id, req: fbReq.id, rev: revOf(fbReq.doc) }; };
+  const release = () => { if (fbReq?.pressed?.id === id) fbReq.pressed = null; };
+  b.addEventListener("pointerdown", (e) => { if (fbReq && e.isTrusted && performance.now() >= fbReq.armedAt) press(); });
+  b.addEventListener("keydown", (e) => { if (fbReq && e.isTrusted && !e.repeat && (e.key === "Enter" || e.key === " ") && performance.now() >= fbReq.armedAt) press(); });
+  for (const ev of ["pointercancel", "pointerleave", "blur"]) b.addEventListener(ev, release);
   b.addEventListener("click", (e) => {
-    const req = fbReq;
-    if (!req || !e.isTrusted || req.pressed !== id) return;
+    const req = fbReq, p = req?.pressed;
+    if (!req || !e.isTrusted || !p || p.id !== id || p.req !== req.id || p.rev !== revOf(req.doc)) return;
     req.pressed = null;
     if (!fbCurrent(req)) { filesBar(false); return; }
     req.open = false;
@@ -1937,9 +1968,11 @@ for (const id of ["fballow", "fbonce", "fbdeny", "fbperms"]) {
 }
 function filesShown() {
   const on = !!current.id && perms.may(current.id, "files");
+  // (confinement phase 2: allowed in some folders only, named; the switch then allows everywhere)
+  const only = current.id && !on ? perms.writeTrees(current.id) : [];
   const fp = document.getElementById("filesperm"); // (the Permissions panel's)
-  if (fp) fp.textContent = on ? "Don't allow file changes" : "Allow file changes";
-  $("#permsfiles").textContent = !current.id ? "" : on ? "Allowed: this notebook's code may change your files." : "Not allowed: this notebook's code can't change your files.";
+  if (fp) fp.textContent = on ? "Don't allow file changes" : "Allow file changes anywhere";
+  $("#permsfiles").textContent = !current.id ? "" : on ? "Allowed: this notebook's code may change your files." : only.length ? `Allowed only in ${only.join(", ")}: this notebook's code can't change files anywhere else.` : "Not allowed: this notebook's code can't change your files.";
   $("#permsfor").textContent = current.id ? `For "${docName()}".` : "";
   if (on) filesBarEl.hidden = true;
 }
@@ -1960,10 +1993,19 @@ const setFiles = (e, on) => {
 // (confinement phase 2: a narrowing reaches its interpreter at once, a widening the person's next Run; and an open
 // prompt whose trees changed is closed unanswered)
 // (a choice made in another tab: a narrowing reaches this tab's interpreters at once too)
-window.addEventListener("storage", (e) => { if (e.key === null || e.key === "sagebrush-grants") for (const x of kernels.values()) x.policyChanged?.(); });
+window.addEventListener("storage", (e) => {
+  if (e.key !== null && e.key !== "sagebrush-grants") return;
+  for (const [doc, x] of kernels) { permRev.set(doc, revOf(doc) + 1); x.policyChanged?.(); }
+  if (fbReq?.doc !== undefined) { permRev.set(fbReq.doc, revOf(fbReq.doc) + 1); filesBar(false); }
+  if (current.id) filesShown();
+});
+// (a press held while the window loses focus or the page is hidden: let go of; PROMPT934-3)
+window.addEventListener("blur", () => { if (fbReq) fbReq.pressed = null; });
+document.addEventListener("visibilitychange", () => { if (document.hidden && fbReq) fbReq.pressed = null; });
 perms.onChange((doc) => {
+  permRev.set(doc, revOf(doc) + 1);
   kernels.get(doc)?.policyChanged?.();
-  if (fbReq && fbReq.doc === doc && fbReq.trees !== perms.writeTrees(doc).join("\n")) filesBar(false);
+  if (fbReq && fbReq.doc === doc) filesBar(false);
   if (doc === current.id) filesShown();
 });
 async function openDocument(doc, here = false, made = "elsewhere", guard = null, intent = null) {
@@ -3250,7 +3292,10 @@ let fileQueueBytes = 0, fileDraining = null, fileQueueRefused = 0, renameSeq = 0
 // in its place in the order (confinement phase 2, daybreak3's condition))
 const RENAME_KEY = "\u0000rename:";
 const RENAME_MAX = 10000; // (paths one rename may move: a directory's files)
-const isBatch = (v) => !!v && typeof v === "object" && Array.isArray(v.changes);
+// (a rename's batch is the queue's own: marked here, where fileBatch makes it, never recognised by its shape, so no change
+// an interpreter sends can pass for one (astra's Q934-1))
+const batches = new WeakSet();
+const isBatch = (v) => !!v && typeof v === "object" && batches.has(v);
 const queuedBytes = (d) => (isBatch(d) ? d.changes.reduce((n, [, x]) => n + (x ? x.length : 0), 0) : d ? d.length : 0);
 // (`doc`: whose interpreter made the change; `may`: its authority (confinement phase 2: that interpreter's generation
 // still the document's, and its ceiling and the document's trees now covering the path), asked as the queue takes it
@@ -3275,9 +3320,10 @@ function fileChanged(path, data, doc = null, may = () => true, from = null) {
 // member path queued before it stays before it, one after it goes after it, so nothing is split, dropped or reordered)
 function fileBatch(changes, doc, may, from) {
   const batch = { changes: changes.map(([p, d]) => [p, d]) };
+  batches.add(batch);
   if (fileQueueBytes + queuedBytes(batch) > FILE_QUEUE_MAX) {
     fileQueueRefused++;
-    statusEl.textContent = `${changes[0][0]}: the rename isn't saved in this browser: too much is waiting to be saved (it is still in Python's files)`;
+    statusEl.textContent = `${changes[0][0]}: the rename isn't saved in this browser, because too much is waiting to be saved (it is still in Python's files)`;
     return;
   }
   const key = RENAME_KEY + ++renameSeq;

@@ -32,7 +32,7 @@ export const __hooks = hooks;
 export type Refusal = "refused" | "changed";
 let allowed: (path: string) => true | Refusal = () => true;
 export function setWritable(f: (path: string) => true | Refusal) { allowed = f; }
-export const NOT_WRITABLE = "this notebook isn't allowed to change this file: allow it in the bar above the notebook, then run it again";
+export const NOT_WRITABLE = "this notebook isn't allowed to change this file: allow its folder when the bar asks, or in File > Permissions…, then run it again";
 export const PERMS_CHANGED = "this notebook's permissions changed while it ran: run it again";
 /** Scratch: /tmp and /$pyjs and what is below them, by path segment (/tmpfile and /tmp2 are ordinary paths). */
 export const scratch = (r: string) => r === "/tmp" || r.startsWith("/tmp/") || r === "/$pyjs" || r.startsWith("/$pyjs/");

@@ -283,7 +283,12 @@ export function createPermissions() {
       tell(doc);
       return true;
     },
-    /** The end of `doc`'s session (its interpreter restarted, the document closed): its "once" grants and session
+    /** The scopes `doc` has "once" (this page's session only), canonical. */
+    onceScopes(doc, kind) { return [...(session.get(doc)?.[kind] ?? [])]; },
+    /** A "once" grant ended (confinement phase 2: the interpreter it took effect in ended; daybreak3's Q934-2), told to
+     * no one: the page computes the starting interpreter's policy itself. Its denials stay. */
+    expireOnce(doc, kind, scope) { session.get(doc)?.[kind]?.delete(scope); prune(doc); },
+    /** The end of `doc`'s session (the document closed, its interpreter given up): its "once" grants and session
      * denials go. */
     endSession(doc) {
       const ss = session.get(doc);

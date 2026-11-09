@@ -69,7 +69,7 @@ try {
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
   await go(base + "?runner=1");
   await until(`!!${W}`, 60000);
-  for (const d of ["out", "other", "outx", "w2", "r", "q", "d"]) await ev(`${W}.create("/proj/${d}/keep.txt", { content: new TextEncoder().encode("k") }).then(() => 1)`);
+  for (const d of ["out", "other", "outx", "w2", "r", "q", "d", "once"]) await ev(`${W}.create("/proj/${d}/keep.txt", { content: new TextEncoder().encode("k") }).then(() => 1)`);
   await ev(`(() => { document.querySelector('#filebtn')?.click(); document.querySelector('#filemenu [data-group="new"]')?.click(); document.querySelector('#filemenu [data-f="new"]').click(); return 1; })()`);
   await until("sagebrush.notebook.cells().length === 1 && !sagebrush.notebook.cells()[0].ta.value", 20000);
   await sleep(800);
@@ -98,8 +98,29 @@ try {
   await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
   await sleep(200);
   check(JSON.stringify(await trees()) === "[]", "a repeating Enter: nothing allowed");
+  // (a press bound to its button, its request and the permissions' revision (astra's PROMPT934-3): one that leaves the
+  // button before its release answers nothing; one held across a change of the permissions, even a change and its undoing,
+  // answers nothing, and the prompt closes)
+  await mouse("mousePressed", pa);
+  await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: pa.x + 300, y: pa.y + 200, button: "left" });
+  await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: pa.x, y: pa.y, button: "left" });
+  await mouse("mouseReleased", pa);
+  await sleep(200);
+  check(JSON.stringify(await trees()) === "[]" && !!(await prompt()), "a press that left the button before its release: nothing allowed, the prompt still open");
+  await mouse("mousePressed", pa);
+  await otherTab(`(e) => { e.write = [...new Set([...(e.write ?? []), "/proj/zz9"])]; }`);
+  await otherTab(`(e) => { e.write = (e.write ?? []).filter((x) => x !== "/proj/zz9"); }`);
+  await mouse("mouseReleased", pa);
+  await sleep(200);
+  check(JSON.stringify(await trees()) === "[]" && !(await prompt()), "a press held across a change of the permissions and its undoing: nothing allowed, the prompt closed");
+  // (the next refusal asks again; a fresh press answers it)
+  await runAll();
+  check(await until("!!sagebrush.filesPrompt()", 10000), "(the next run's refusal asks again)");
+  await sleep(700);
   await trusted("#fballow");
   check(JSON.stringify(await trees()) === '["/proj/out"]' && !(await prompt()), "a fresh trusted click after it armed: /proj/out allowed, the prompt closed");
+  // (File > Permissions… names the folders, and its switch allows everywhere: board's B3 on #934)
+  check(await until(`document.querySelector('#permsfiles').textContent === "Allowed only in /proj/out: this notebook's code can't change files anywhere else." && document.querySelector('#filesperm').textContent === "Allow file changes anywhere"`, 5000), "File > Permissions…: allowed only in /proj/out, said so; its switch allows file changes anywhere: " + JSON.stringify(await ev("[document.querySelector('#permsfiles').textContent, document.querySelector('#filesperm').textContent]")));
 
   // ---- a widening doesn't reach the interpreter running; the next explicit run starts one that may
   await forged(`{ fsChanged: "/proj/out/forged.txt", data: new Uint8Array([1]) }`);
@@ -236,6 +257,20 @@ try {
   await forged(`{ fsRename: { from: "/proj/r/f.txt", to: "/elsewhere/f.txt", changes: [["/proj/r/f.txt", null], ["/elsewhere/f.txt", new Uint8Array([1])]] } }`);
   await settle();
   check((await stat("/proj/r/f.txt")) && !(await stat("/elsewhere/f.txt")), "a rename with one path outside its folders (forged) is kept nowhere, wholly: the file stays where it was");
+  // (what an interpreter sends is input (astra's Q934-1, daybreak3): a change shaped like the queue's rename batch, inside
+  // a folder it may change, carrying a member outside; paths not in their one canonical form; bytes that aren't bytes; a
+  // rename whose from, to or a member isn't canonical, or whose from is outside: each kept nowhere)
+  await forged(`{ fsChanged: "/proj/r/shape.txt", data: { changes: [["/elsewhere/shape.txt", new Uint8Array([1])]] } }`);
+  for (const p of ["/proj/r/../elsewhere/up.txt", "/proj/r//dbl.txt", "/proj/r/./dot.txt", "proj/r/rel.txt", "/proj/r/trail/", "/"]) await forged(`{ fsChanged: ${JSON.stringify(p)}, data: new Uint8Array([1]) }`);
+  await forged(`{ fsChanged: "/proj/r/str.txt", data: "not bytes" }`);
+  await forged(`{ fsChanged: "/proj/r/arr.txt", data: [1, 2] }`);
+  await forged(`{ fsRename: { from: "/proj/r/../elsewhere", to: "/proj/r/m2", changes: [["/proj/r/m2/a.txt", new Uint8Array([1])]] } }`);
+  await forged(`{ fsRename: { from: "/elsewhere/src", to: "/proj/r/m3", changes: [["/proj/r/m3/a.txt", new Uint8Array([1])]] } }`);
+  await forged(`{ fsRename: { from: "/proj/r/q", to: "/proj/r/m4", changes: [["/proj/r/m4/../../../elsewhere/b.txt", new Uint8Array([1])]] } }`);
+  await settle();
+  const leaked = [];
+  for (const p of ["/proj/r/shape.txt", "/elsewhere/shape.txt", "/elsewhere/up.txt", "/proj/r/dbl.txt", "/proj/r/dot.txt", "/proj/r/rel.txt", "/proj/r/str.txt", "/proj/r/arr.txt", "/proj/r/m2/a.txt", "/proj/r/m3/a.txt", "/elsewhere/b.txt"]) if (await stat(p)) leaked.push(p);
+  check(leaked.length === 0, "an interpreter's malformed changes are kept nowhere: batch-shaped data, non-canonical paths, bytes that aren't bytes, a rename with a non-canonical or outside from or member: " + JSON.stringify(leaked));
   await forged(`{ fsRename: { from: "/proj/r/f.txt", to: "/proj/r/h.txt", changes: [["/proj/r/f.txt", null], ["/proj/r/h.txt", new Uint8Array([104])]] } }`);
   await settle();
   check(!(await stat("/proj/r/f.txt")) && (await stat("/proj/r/h.txt")), "one wholly inside is kept, both of its changes");
@@ -277,6 +312,22 @@ try {
   await ev("(window.__keep(), 1)");
   await settle();
   check((await stat("/proj/r/h.txt")) && !(await stat("/proj/r/y.txt")), "taken away after the final check, before the first change is kept: nothing of the rename kept");
+
+  // ---- "Allow once" (SESSION934-4): it takes effect in the interpreter its Run starts, and ends with it
+  await dismiss();
+  await setCode("import os\n" + TRY("/proj/once/o.txt", "O"));
+  await runAll();
+  check(await outHas("/O:refused/") && await until("sagebrush.filesPrompt()?.folder === '/proj/once'", 10000), "a write into /proj/once is refused, and the prompt asks for /proj/once");
+  await sleep(700);
+  await trusted("#fbonce");
+  check((await ev("sagebrush.permissions().grants.write.once")).includes("/proj/once"), "Allow once: /proj/once allowed for now");
+  await runAll();
+  check(await outHas("/O:ok/"), "…the next run (a new interpreter) writes there");
+  await ev("(sagebrush.kernel.restart(), 1)");
+  await until("sagebrush.kernel.ready", 30000);
+  await runAll();
+  check(await outHas("/O:refused/") && !(await ev("sagebrush.permissions().grants.write.once")).includes("/proj/once"), "…and after the interpreter restarts, the once grant is gone: refused again");
+  await dismiss();
 
   // ---- no shared memory, and the epoch's end: a narrowing restarts the interpreter instead
   await otherTab(`(e) => { e.write = [...new Set([...(e.write ?? []), "/proj/r", "/proj/out"])]; }`);
