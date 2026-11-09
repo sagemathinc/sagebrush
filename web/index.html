@@ -449,6 +449,7 @@
   <button role="menuitem" id="ttbtn" aria-pressed="false" aria-controls="timetravel" title="Every past version of this notebook: look at one, or go back to it">TimeTravel</button>
   <button role="menuitem" id="termbtn" title="A bash shell on your workspace's files">Terminal</button>
   <button role="menuitem" id="rtermbtn" hidden title="A shell on one of your own computers, set up with sagebrush remote login (preview)">Terminal on your computer…</button>
+  <button role="menuitem" id="moreagent" hidden title="Connect an agent on this computer (Claude Code, Codex, …) to files you choose">Connect an agent…</button>
   <hr>
   <button role="menuitem" id="keysbtn" title="Keyboard shortcuts (H in command mode)">Keyboard shortcuts<kbd>H</kbd></button>
   <button role="menuitem" id="installbtn" hidden title="Sagebrush as an app on this computer: it opens in its own window and works offline">Install as an app…</button>
@@ -3886,16 +3887,27 @@ let agentPairing = null, agentTries = 0;
 const pairAgent = (w) => (agentPairing ??= import(new URL("sagebrush-agent.js", location.href).href + (agentTries++ ? `?try=${agentTries}` : ""))
   .then((m) => m.mountAgentPairing(w)))
   .catch((e) => { agentPairing = null; throw e; });
-const agentFailed = () => { statusEl.textContent = "Couldn't load the agent connection. Press Agent to try again, or reload the page."; };
-// (started once the page knows it shows a notebook, not the LaTeX or code editor, which has its own: one pairing per
-// page; an early ?pair= link goes to the editor shown, pair-link.ts)
-const startNotebookAgent = () => { if (!LOCAL && !window.__TAURI__) void wsReady.then((w) => {
+const agentFailed = () => { statusEl.textContent = "Couldn't load the agent connection. Try Agent or ⋯ ▸ Connect an agent… again, or reload the page."; };
+// (where Agent is offered: not in the desktop app or the CLI's page, pages on this computer the agent's program doesn't accept)
+const agentHere = !LOCAL && !window.__TAURI__;
+// (a ?pair= link, or an agent this browser remembers: the chunk mounted now, to connect or reconnect)
+const restoreAgent = (w, failed) => {
+  if (pairLink()) void pairAgent(w).catch(failed);
+  else void w.agentGrants().then((k) => { if (Object.keys(k ?? {}).length) void pairAgent(w).catch(failed); }, () => {});
+};
+// (started once the page knows it shows a notebook, not the LaTeX editor, which has its own: one pairing per page; an
+// early ?pair= link goes to the editor shown, pair-link.ts.  The code page has none of its own: it uses this one)
+const startNotebookAgent = () => { if (agentHere) void wsReady.then((w) => {
   if (!w) return;
   agentBtn.hidden = false;
-  agentBtn.onclick = () => void pairAgent(w).then((p) => p.connect(undefined, undefined, agentBtn), agentFailed);
-  if (pairLink()) void pairAgent(w).catch(agentFailed);
-  else void w.agentGrants().then((k) => { if (Object.keys(k ?? {}).length) void pairAgent(w).catch(agentFailed); }, () => {});
+  $("#moreagent").hidden = false;
+  const connect = () => void pairAgent(w).then((p) => p.connect(undefined, undefined, agentBtn.offsetParent ? agentBtn : $("#morebtn")), agentFailed);
+  agentBtn.onclick = connect;
+  $("#moreagent").onclick = connect;
+  restoreAgent(w, agentFailed);
 }); };
+// (the code page's File ▸ Connect an agent…: this page's pairing; a failed load is the code page's to say)
+const codeAgent = (w) => (back) => pairAgent(w).then((p) => p.connect(undefined, undefined, back));
 let wsBrowser = null;
 // (the notebook open here marked again: one opened, or listed)
 function wsTrackCurrent() { wsBrowser?.refresh(); }
@@ -4052,7 +4064,11 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   // without it has none of this: web/latex/boot.ts, web/build.ts SAGEBRUSH_LATEX_PREVIEW)
   if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && (await latexBoot(ws, RUNNER ? { WorkerKernel, RunnerWorker } : null))) return;
   // (a code or text file's own page, /?code=<fid> (1a): web/code/boot.ts; its hooks for the file browser and the preview either way)
-  if (await codeBoot(ws, (e, how) => openEntry(e, how))) return;
+  if (await codeBoot(ws, (e, how) => openEntry(e, how), agentHere && ws ? codeAgent(ws) : null)) {
+    // (a ?pair= link or a remembered agent whose chunk didn't load: said in the code page's own status line)
+    if (agentHere && ws) restoreAgent(ws, () => window.sagebrush?.code?.say?.("Couldn't load the agent connection. Choose Connect an agent… again, or reload the page."));
+    return;
+  }
   startNotebookAgent();
   let mode = "python";
   try { mode = localStorage.getItem("sagebrush-mode") || mode; } catch {}

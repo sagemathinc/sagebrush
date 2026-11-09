@@ -29,6 +29,8 @@ export type Host = {
   openFiles(): void;
   examples(): Promise<boolean>;
   renderFileMenu: typeof renderFileMenu;
+  /** File ▸ Connect an agent…: the hosting page's pairing (null where it isn't offered: the app, the CLI's page) */
+  agent?: ((back: HTMLElement) => Promise<unknown>) | null;
 };
 const LANG_LABEL: Record<Lang, string> = { python: "Python", sage: "Sage", matlab: "MATLAB", magma: "Magma", js: "JavaScript", json: "JSON", text: "Text" };
 
@@ -301,13 +303,20 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     downloads: [{ key: "c-download", label: nameOf(path) }],
     chosen: () => { menu.hidden = true; },
   });
+  if (host.agent) {
+    const b = el("button", "", "Connect an agent…");
+    b.setAttribute("data-f", "c-agent"); b.setAttribute("role", "menuitem");
+    b.title = "Connect an agent on this computer (Claude Code, Codex, …) to files you choose";
+    actions["c-agent"] = () => { menu.hidden = true; return host.agent!(fileBtn).catch(() => say("Couldn't load the agent connection. Choose Connect an agent… again, or reload the page.")); };
+    menu.append(el("hr"), b);
+  }
   menu.addEventListener("click", (ev) => { const k = (ev.target as HTMLElement).closest("button")?.getAttribute("data-f"); const f = k ? actions[k] : null; if (f) Promise.resolve(f()).catch((err) => say(String((err as Error)?.message ?? err).slice(0, 200))); });
   fileBtn.onclick = (ev) => { ev.stopPropagation(); menu.hidden = !menu.hidden; };
   addEventListener("click", (ev) => { if (!menu.hidden && !menuWrap.contains(ev.target as Node)) menu.hidden = true; }, { signal: life.signal });
 
   // ---- for agents and tests: the file as this page has it
   const sb = ((globalThis as any).sagebrush ??= {});
-  const handle = { fid: host.fid, get path() { return path; }, lang: lg, text: () => (mode === "edit" ? ta.value : text), mode: () => mode, setMode, flush, editable: () => editable, stopped: () => stopped };
+  const handle = { fid: host.fid, say, get path() { return path; }, lang: lg, text: () => (mode === "edit" ? ta.value : text), mode: () => mode, setMode, flush, editable: () => editable, stopped: () => stopped };
   sb.code = handle;
   current = { dispose: () => { life.abort(); if (sb.code === handle) delete sb.code; } };
   showMode();
