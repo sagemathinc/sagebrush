@@ -1,0 +1,61 @@
+// The Files button in the top-left corner of every page (William, Nov 8: "file side panel needs to be ridiculously
+// easy to show no matter what ... PUT A BUTTON IN THE UPPER LEFT TO SHOW THE SIDEBAR"): the page's own Files button
+// (the notebook page's #wsfilesbtn, the board's), moved out of its toolbar to the window's corner, where it stays
+// whatever is open (a notebook, a board, the LaTeX or code editor over the notebook page) and whatever the width.
+// One click or Ctrl+B (Cmd+B) shows and hides the files; the page remembers the choice as before
+// (localStorage "sagebrush-files-sidebar").  While the files are hidden, each view's top bar starts right of the button
+// (body.sbft:not(.wsfiles)); while they are shown, the button sits at the left of their header, beside "Files".
+
+const ICON = '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M6 2.5v11" stroke="currentColor" stroke-width="1.3"/><path d="M3 5h1.5M3 7h1.5M3 9h1.5" stroke="currentColor" stroke-width="1.1"/></svg>';
+
+/** The corner button's style, and the room each view's top bar leaves for it (--sbft-w: the button and its margins). */
+export const FILES_TOGGLE_CSS = `
+body.sbft { --sbft-w: 96px; }
+.sb-files-toggle { position: fixed; top: 8px; left: 8px; z-index: 1000; display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 11px; border: 1px solid #c3c8c0; border-radius: 8px; background: #fff; color: #1f2421; font: 14px/1 system-ui, -apple-system, "Segoe UI", sans-serif; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.sb-files-toggle:hover { background: #f1f3ef; }
+.sb-files-toggle:focus-visible { outline: 2px solid #4a6b49; outline-offset: 2px; }
+.sb-files-toggle[aria-pressed="true"] { background: #e3ecdf; border-color: #93ac8d; }
+.sb-files-toggle svg { width: 16px; height: 16px; flex: none; }
+.sb-files-toggle[hidden] { display: none; }
+body.sbft .sbfiles .fh { padding-left: calc(var(--sbft-w) + 4px); padding-top: 8px; min-height: 40px; box-sizing: border-box; }
+/* (the button says Files: the header's own word kept as the spacer only) */
+body.sbft .sbfiles .fh > b { font-size: 0; }
+body.sbft:not(.wsfiles) .tex-head, body.sbft:not(.wsfiles) .code-page .code-head, body.sbft:not(.wsfiles) [data-sbb="top"] { padding-left: calc(var(--sbft-w) + 4px) !important; }
+body.sbft .tex-back, body.sbft .code-files { display: none !important; }
+/* (a message a page puts at the top of the window, such as "This file isn't here any more") */
+body.sbft:not(.wsfiles) > p:first-child, body.sbft:not(.wsfiles) > .sb-files-toggle + p { margin-left: calc(var(--sbft-w) + 12px); }
+@media (max-width: 1180px) { body.sbft:not(.wsfiles) > header { padding-left: calc(var(--sbft-w) + 4px); } }
+@media (max-width: 640px) {
+  body.sbft { --sbft-w: 52px; }
+  .sb-files-toggle { padding: 0 8px; }
+  .sb-files-toggle .sbft-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+}
+@media print { .sb-files-toggle { display: none !important; } }
+`;
+
+/** Make `btn` the corner Files button: `toggle` shows or hides the files, `shown` says whether they are shown now. */
+export function filesToggle(btn: HTMLButtonElement, toggle: () => void, shown: () => boolean) {
+  if (!document.getElementById("sb-files-toggle-css")) {
+    const st = document.createElement("style");
+    st.id = "sb-files-toggle-css";
+    st.textContent = FILES_TOGGLE_CSS;
+    document.head.append(st);
+  }
+  btn.classList.add("sb-files-toggle");
+  btn.innerHTML = ICON + '<span class="sbft-label">Files</span>';
+  btn.setAttribute("aria-label", "Files");
+  btn.setAttribute("aria-controls", "wssidebar");
+  const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+  btn.title = `Show or hide your files (${mac ? "⌘B" : "Ctrl+B"})`;
+  btn.setAttribute("aria-keyshortcuts", mac ? "Meta+B" : "Control+B");
+  document.body.prepend(btn);
+  document.body.classList.add("sbft");
+  addEventListener("keydown", (ev) => {
+    if (ev.defaultPrevented || ev.altKey || ev.shiftKey || !(ev.ctrlKey || ev.metaKey) || ev.key.toLowerCase() !== "b" || btn.hidden) return;
+    // (bold, where a rich-text editor has it)
+    if ((ev.target as HTMLElement | null)?.closest?.("[contenteditable=''],[contenteditable='true']")) return;
+    ev.preventDefault();
+    toggle();
+    if (!shown()) btn.focus();
+  });
+}

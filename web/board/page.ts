@@ -59,6 +59,7 @@ import { IdbPatchStore, openBoardHistoryDb, openHistoryDb, openBlobDb, onHistory
 // would keep it in the frame's and exports' build without sync)
 import { Workspace, LIMITS, registerJournalWriter, stripBoard, type Entry } from "../workspace/api";
 import { migrate } from "../workspace/migrate";
+import { filesToggle } from "../workspace/files-toggle";
 import { freePath, nameOf, parentOf, splitExt, safeName } from "../workspace/paths";
 import { startMigrator } from "../workspace/migrator";
 import { showReloadNotice, showLossNotice, showBusyNotice, hideBusyNotice, showStaleNotice, showHistoryNotice } from "../workspace/notice";
@@ -1597,9 +1598,9 @@ export { mountBoard, host, mounted };
 export { cachedStore, IdbDocCache, merge3, docHash } from "./cached";
 
 // The file browser (design §4): a sidebar on the left, over the board's
-// left edge (which moves aside), shown and hidden by Files in the top bar,
-// remembered with the notebook page's
-if (ws && local) {
+// left edge (which moves aside), shown and hidden by Files in the window's top-left corner (workspace/files-toggle.ts),
+// remembered with the notebook page's; on every board the workspace is open for, this browser's or not
+if (ws) {
   const side = document.createElement("div");
   side.id = "wssidebar";
   side.style.cssText = "position:fixed;left:0;top:0;bottom:0;width:272px;border-right:1px solid #d4d4cb;z-index:30";
@@ -1610,13 +1611,13 @@ if (ws && local) {
   btn.title = "Your notebooks, boards and files (in this browser)";
   btn.setAttribute("aria-pressed", "false");
   btn.dataset.sbb = "files";
-  document.querySelector('[data-sbb="top"] [data-sbb="home"]')?.after(btn);
   const boardEl = document.getElementById("board")!;
   let browser: ReturnType<typeof mountBrowser> | null = null;
   exportAllHere = () => { show(true); browser?.exportAll(); };
   const phone = () => matchMedia("(max-width: 640px)").matches;
   const show = (on: boolean) => {
     side.hidden = !on;
+    document.body.classList.toggle("wsfiles", on);
     boardEl.style.left = on && !phone() ? "272px" : "";
     side.style.width = phone() ? "" : "272px";
     side.style.right = phone() ? "0" : "";
@@ -1625,7 +1626,7 @@ if (ws && local) {
     dispatchEvent(new Event("resize"));
     if (on && !browser) browser = mountBrowser(side, {
       ws,
-      current: () => ({ kind: "board", ref: source.slice(6) }),
+      current: () => (local ? { kind: "board", ref: source.slice(6) } : undefined),
       open: openEntry,
       openFile: (e: Entry, tab: boolean) => openTex(e, tab) || openCode(e, tab),
       ...(newLatexHere ? { newLatex: (folder: string) => void newLatexHere(folder) } : {}),
@@ -1662,6 +1663,7 @@ if (ws && local) {
     });
   };
   btn.onclick = () => show(side.hidden !== false);
+  filesToggle(btn, () => show(side.hidden !== false), () => !side.hidden);
   let pref: string | null = null;
   try { pref = localStorage.getItem("sagebrush-files-sidebar"); } catch {}
   if (pref === "1") show(true);
