@@ -315,11 +315,14 @@ try {
 
   // ---- a prompt closed unanswered at Stop and at a restart, and the next refusal asks again (PROMPT934-3)
   await dismiss();
-  await setCode("import os\n" + TRY("/proj/life/l.txt", "L"));
-  await runAll();
-  check(await until("sagebrush.filesPrompt()?.folder === '/proj/life'", 10000), "(a refusal asks about /proj/life)");
+  // (Stop while the cell that was refused still runs: the prompt it raised closes)
+  await setCode("import os, time\n" + TRY("/proj/life/l.txt", "L") + "\nfor i in range(80):\n    print('k', i, flush=True); time.sleep(0.25)");
+  await ev("(sagebrush.notebook.runAll(), 1)");
+  check(await until("sagebrush.filesPrompt()?.folder === '/proj/life'", 10000) && await outHas("/k 2/", 20000), "(a refusal asks about /proj/life, its cell still running)");
   await ev("(document.querySelector('#stop').click(), 1)");
-  check(await until("!sagebrush.filesPrompt()", 5000), "Stop closes the open prompt unanswered");
+  check(await until("!sagebrush.filesPrompt()", 5000), "Stop (the cell still running) closes the open prompt unanswered");
+  await until("sagebrush.kernel.ready", 30000);
+  await setCode("import os\n" + TRY("/proj/life/l.txt", "L"));
   await runAll();
   check(await until("sagebrush.filesPrompt()?.folder === '/proj/life'", 10000), "…and the next refusal asks again");
   await ev("(sagebrush.kernel.restart(), 1)");
@@ -328,8 +331,9 @@ try {
   await runAll();
   check(await until("sagebrush.filesPrompt()?.folder === '/proj/life'", 10000), "…and the next interpreter's refusal asks again");
   await dismiss();
-  // (a refusal the interpreter reports with a path not in its canonical form: no prompt)
-  for (const p of ["/proj/life/../x.txt", "/proj/life//y.txt", "/proj/life/z\u007f.txt"]) await forged(`{ fsRefused: ${JSON.stringify(p)}, what: "open" }`);
+  // (a refusal the interpreter reports with a path not in its canonical form, or past the workspace's own path rules: no
+  // prompt; in a folder never refused, so a prompt could show)
+  for (const p of ["/proj/fresh/../x.txt", "/proj/fresh//y.txt", "/proj/fresh/z\u007f.txt", "/proj/fresh/" + "n".repeat(256), "/proj/fresh/" + Array(40).fill("d").join("/")]) await forged(`{ fsRefused: ${JSON.stringify(p)}, what: "open" }`);
   await sleep(500);
   check(!(await prompt()), "a reported refusal with a non-canonical path asks nothing");
 
