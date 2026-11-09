@@ -5,7 +5,8 @@
 // runs it), its requests made as an agent's tools make them:
 //   - the page offers Agent once its workspace is open; the agent chunk (/sagebrush-agent.js) isn't fetched before;
 //   - Agent opens Connect; a ?pair= link connects, the person allows a folder, the bar shows the agent;
-//   - a code file's page (/?code=) has no agent: no Agent, no chunk, no Connect, remembered agent or ?pair= link;
+//   - a code file's page (/?code=) has no Agent of the notebook's over it: File ▸ Connect an agent… is the page's one
+//     pairing there (nothing fetched before it's wanted); a ?pair= link connects there; a remembered agent reconnects there;
 //   - the agent reads the notebook shown and writes it (workspace.write with its base): the page shows the new cell
 //     at once, with no reload and no "changed elsewhere" copy;
 //   - the person then edits it: their edit and the agent's cell are both kept;
@@ -200,19 +201,6 @@ try {
   ok(await go(""), "the notebook page again, nothing pressed");
   ok(await until(`!!document.querySelector(".sbag-bar")`, 20000) && requests.slice(beforeR).some(chunk), "the remembered agent: the chunk loads by itself and it reconnects", requests.slice(beforeR).filter((u) => /agent/.test(u)));
   ok(await ev(`document.querySelectorAll(".sbag-bar").length`) === 1 && !(await ev(`!!document.querySelector(".sbag-box")`)), "one bar, no dialog");
-  // (a code file's page (/?code=, code/boot.ts) has no agent: with the agent remembered, and with a ?pair= link, it
-  // offers no Agent, fetches no agent chunk and opens no Connect; then the notebook page again, reconnected)
-  const pyFid = await ev(`${W}.create("/t/agent-code.py", { content: "print(1)\\n" }).then((e) => e.fid)`);
-  const beforeC = requests.length;
-  ok(await go(`?code=${encodeURIComponent(pyFid)}`) && await until(`!!window.sagebrush?.code`, 30000), "a code file's page opens (the agent remembered)");
-  await sleep(3000);
-  ok(await ev(`document.querySelector("#agentbtn")?.hidden !== false && !document.querySelector(".sbag-bar") && !document.querySelector(".sbag-box")`) && !requests.slice(beforeC).some(chunk), "a code file's page: no Agent, no agent chunk, no reconnect", requests.slice(beforeC).filter((u) => /agent/.test(u)));
-  const c3 = await drive({ op: "code" });
-  const beforeP = requests.length;
-  ok(await go(`?code=${encodeURIComponent(pyFid)}&pair=${c3.code}&port=${c3.port}`) && await until(`!!window.sagebrush?.code`, 30000), "a code file's page with a ?pair= link");
-  await sleep(3000);
-  ok(!(await ev(`!!document.querySelector(".sbag-box")`)) && !requests.slice(beforeP).some(chunk), "…no Connect dialog and no agent chunk there either", requests.slice(beforeP).filter((u) => /agent/.test(u)));
-  ok(await go("") && await until(`!!document.querySelector(".sbag-bar")`, 20000), "the notebook page again: the remembered agent reconnects");
   await ev(`([...document.querySelectorAll(".sbag-bar button")].find((b) => b.textContent === "Revoke")?.click(), true)`);
   ok(await until(`!document.querySelector(".sbag-bar")`), "Revoke: the bar goes (and the remembered grant with it)");
 
