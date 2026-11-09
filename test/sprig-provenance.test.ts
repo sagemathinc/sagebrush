@@ -11,7 +11,11 @@ import { join, relative } from "node:path";
 // Outputs come only from the oracle: a hand-edited output no longer matches its recorded hash. (The same checks as
 // run.py --verify; the corpus replay itself is S1's.)
 const root = join(__dirname, "..", "..");
-const RECORD_KEYS = ["version", "versions", "orderless", "limits"];
+const RECORD_KEYS = ["version", "versions", "orderless", "limits", "argv"];
+/** The oracle's exact arguments after its path (oracle.py's ARGS), and the recorder's own files, whose hashes
+ * PROVENANCE.json records: a changed driver or recorder means the corpus must be re-recorded. */
+const ORACLE_ARGV = ["<program>", "-q", "--no-readline", "--colors", "NoColor"];
+const TOOLS: [string, string][] = [["oracle.py", "oracle_py_sha256"], ["run.py", "run_py_sha256"]];
 /** The oracle's facts the design rests on (§5.2, §7.3): its version, its Orderless heads and its limits. */
 const PINNED = {
   version: /^Mathics3 10\.0\.1$/,
@@ -49,6 +53,11 @@ export function checkCorpus(base: string): string[] {
   if (record.version !== undefined && !PINNED.version.test(record.version)) problems.push(`the oracle is ${record.version}, not the pinned Mathics3 10.0.1`);
   if (record.orderless !== undefined && record.orderless !== PINNED.orderless) problems.push(`the oracle's Orderless heads are ${record.orderless}, not the pinned ${PINNED.orderless}`);
   if (record.limits !== undefined && record.limits !== PINNED.limits) problems.push(`the oracle's limits are ${record.limits}, not the pinned ${PINNED.limits}`);
+  if (record.argv !== undefined && JSON.stringify(record.argv) !== JSON.stringify(ORACLE_ARGV)) problems.push(`the oracle ran with arguments ${JSON.stringify(record.argv)}, not ${JSON.stringify(ORACLE_ARGV)}`);
+  if (!prov?.oracle?.path) problems.push("the oracle's program path is not recorded");
+  for (const [name, key] of TOOLS) {
+    if (prov?.oracle?.[key] !== sha256(join(dir, name))) problems.push(`sprig-tests/${name} differs from the one that recorded the corpus`);
+  }
   const total = Object.values((prov.files ?? {}) as Record<string, { cases: number }>).reduce((n, e) => n + (e.cases ?? 0), 0);
   if (total < MIN_CASES) problems.push(`the corpus has ${total} cases, fewer than its floor of ${MIN_CASES}`);
   const files = caseFiles(dir).map((p) => relative(base, p).split("\\").join("/"));
@@ -194,4 +203,20 @@ test("control: a corpus below its floor is caught", () => {
   }
   provEdit(b, (j) => { for (const f of gone) delete j.files[f]; });
   has(checkCorpus(b), /fewer than its floor of 229/);
+});
+
+test("control: a changed oracle driver or recorder is caught, each by its own hash", () => {
+  for (const [name] of TOOLS) {
+    const b = copyCorpus();
+    edit(join(b, "sprig-tests", name), (s) => s + "\n# changed\n");
+    has(checkCorpus(b), new RegExp(`sprig-tests/${name.replace(".", "\\.")} differs from the one that recorded the corpus`));
+  }
+});
+
+test("control: other oracle arguments, or no recorded program path, are caught", () => {
+  const b = copyCorpus();
+  provEdit(b, (j) => { j.oracle.record.argv = ["<program>", "-q"]; delete j.oracle.path; });
+  const p = checkCorpus(b);
+  has(p, /the oracle ran with arguments/);
+  has(p, /program path is not recorded/);
 });

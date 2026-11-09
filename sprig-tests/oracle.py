@@ -12,6 +12,9 @@ marked lines around it. What a case recorded:
 - "output":   everything printed while it ran, Print output and messages, in order;
 - "messages": the lines of "output" that are messages ("Tag::name: text").
 
+Any nonzero exit of the oracle, for a case, `--version` or the limits probe,
+is refused: oracle.py exits 1 and prints nothing, so run.py records nothing.
+
 Every run also prints the oracle's environment record (the same in every run):
 Mathics3's version line and its dependencies' versions (`--version`), the heads
 that are Orderless, and the language's limits as the oracle sets them. Nothing
@@ -25,6 +28,8 @@ import subprocess
 import sys
 
 MARK = "@@@SPRIG@@@"
+# (the exact arguments every oracle run uses, after the program's path; PROVENANCE.json records them)
+ARGS = ["-q", "--no-readline", "--colors", "NoColor"]
 MESSAGE = re.compile(r"^[A-Za-z$][A-Za-z0-9$`]*::[A-Za-z0-9$]+: ")
 ORDERLESS_PROBE = ["Plus", "Times", "Max", "Min", "GCD", "LCM", "Xor", "And", "Or", "Equal", "Union"]
 
@@ -45,9 +50,16 @@ def program(code):
     ])
 
 
+def oracle(argv, what, **kw):
+    """Run the oracle; any nonzero exit is refused, whatever it printed."""
+    p = subprocess.run(argv, capture_output=True, text=True, timeout=600, **kw)
+    if p.returncode != 0:
+        raise SystemExit("the oracle exited %d (%s): nothing is recorded\n%s" % (p.returncode, what, p.stderr[-2000:]))
+    return p
+
+
 def run_case(mathics, case):
-    p = subprocess.run([mathics, "-q", "--no-readline", "--colors", "NoColor"], input=program(case["code"]),
-                       capture_output=True, text=True, timeout=600)
+    p = oracle([mathics] + ARGS, "case %s#%s" % (case["file"], case["id"]), input=program(case["code"]))
     lines = p.stdout.split("\n")
     # (the CLI echoes its prompt, "In[n]:= ", before each input line's first output)
     lines = [re.sub(r"^In\[\d+\]:= ", "", l) for l in lines]
@@ -75,19 +87,29 @@ def run_case(mathics, case):
 
 
 def environment(mathics):
-    v = subprocess.run([mathics, "--version"], capture_output=True, text=True).stdout.strip().split("\n")
+    v = oracle([mathics, "--version"], "--version").stdout.strip().split("\n")
     limits = 'Print["%s LIMITS ", ToString[InputForm[{$RecursionLimit, $IterationLimit, Options[ReplaceRepeated]}]]]\n' % MARK
-    p = subprocess.run([mathics, "-q", "--no-readline", "--colors", "NoColor"], input=limits, capture_output=True, text=True)
+    p = oracle([mathics] + ARGS, "the limits probe", input=limits)
     lim = [re.sub(r"^In\[\d+\]:= ", "", l) for l in p.stdout.split("\n")]
     lim = [l[len(MARK + " LIMITS "):] for l in lim if l.startswith(MARK + " LIMITS ")]
-    return {"version": v[0], "versions": v, "limits": lim[0] if lim else None}
+    return {"version": v[0], "versions": v, "limits": lim[0] if lim else None, "argv": ["<program>"] + ARGS}
 
 
 if __name__ == "__main__":
     mathics, cj = sys.argv[1], sys.argv[2]
     cases = json.load(open(cj, encoding="utf-8"))
     with cf.ThreadPoolExecutor(max_workers=int(os.environ.get("SPRIG_ORACLE_JOBS", "8"))) as ex:
-        results = list(ex.map(lambda c: run_case(mathics, c), cases))
+        futures = [ex.submit(run_case, mathics, c) for c in cases]
+        results = []
+        for f in futures:
+            try:
+                results.append(f.result())
+            except SystemExit as e:
+                # (a refused run fails the whole recording: stdout stays empty, so run.py writes nothing)
+                for g in futures:
+                    g.cancel()
+                sys.stderr.write("%s\n" % e)
+                sys.exit(1)
     env = environment(mathics)
     orderless = set(r.pop("orderless") for r in results)
     if len(orderless) != 1:

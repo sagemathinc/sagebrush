@@ -38,7 +38,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 PROV = os.path.join(HERE, "PROVENANCE.json")
 MATHICS = os.environ.get("SPRIG_ORACLE", "/scratch/matlab-tmp/mathics/venv/bin/mathics")
-RECORD_KEYS = ["version", "versions", "orderless", "limits"]
+RECORD_KEYS = ["version", "versions", "orderless", "limits", "argv"]
+# (the oracle's exact arguments after its path, as oracle.py runs it; checked against the record)
+ORACLE_ARGV = ["<program>", "-q", "--no-readline", "--colors", "NoColor"]
 SEPARATOR = re.compile(r"^\(\*-- (\S+) \*\)\s*$")
 
 
@@ -150,7 +152,7 @@ def regen(paths, everything):
         f = rel(p)
         write_json(out_path(p), {"format": "sprig-out", "v": 1, "file": f, "cases": by_file[f]})
         prov["files"][f] = {"sprig_sha256": sha256(p), "out_sha256": sha256(out_path(p)), "cases": len(by_file[f])}
-    prov["oracle"] = {"program": "Mathics3, run as a black box (oracle.py)", "record": record,
+    prov["oracle"] = {"program": "Mathics3, run as a black box (oracle.py)", "path": MATHICS, "record": record,
                       "oracle_py_sha256": sha256(os.path.join(HERE, "oracle.py")),
                       "run_py_sha256": sha256(os.path.abspath(__file__))}
     write_json(PROV, prov)
@@ -163,6 +165,15 @@ def verify():
     problems = []
     if not prov.get("oracle") or any(not prov["oracle"].get("record", {}).get(k) for k in RECORD_KEYS):
         problems.append("PROVENANCE.json: the oracle's environment record is missing or incomplete")
+    else:
+        o = prov["oracle"]
+        if o["record"].get("argv") != ORACLE_ARGV:
+            problems.append("PROVENANCE.json: the oracle ran with arguments %r, not %r" % (o["record"].get("argv"), ORACLE_ARGV))
+        if not o.get("path"):
+            problems.append("PROVENANCE.json: the oracle's program path is not recorded")
+        for name, key in (("oracle.py", "oracle_py_sha256"), ("run.py", "run_py_sha256")):
+            if o.get(key) != sha256(os.path.join(HERE, name)):
+                problems.append("sprig-tests/%s differs from the one that recorded the corpus (re-record with --regen --all)" % name)
     files = {rel(p) for p in case_files()}
     for f in sorted(files | set(prov["files"])):
         p = os.path.join(ROOT, f)
