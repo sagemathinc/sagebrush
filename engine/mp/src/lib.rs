@@ -10,6 +10,7 @@
 
 pub mod exp;
 pub mod consts;
+pub mod elefun;
 pub mod glibm;
 pub mod int;
 pub mod intmath;

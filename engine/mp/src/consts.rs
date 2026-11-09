@@ -71,9 +71,14 @@ fn bsp_acot(q: &Int, a: i64, b: i64, hyperbolic: bool) -> Result<(Int, Int, Int)
     Ok((q2.mul(&p1)?.add(&r1.mul(&p2)?)?, q1.mul(&q2)?, r1.mul(&r2)?))
 }
 
+/// acot_fixed's term count, int(0.35*prec/math.log(a)+20) (pinned).
+pub fn acot_terms(a: i64, prec: i64) -> i64 {
+    (0.35 * prec as f64 / glibm::log(a as f64) + 20.0) as i64
+}
+
 /// acot_fixed(a, prec, hyperbolic)
 fn acot_fixed(a: i64, prec: i64, hyperbolic: bool) -> Result<Int, Fail> {
-    let n = (0.35 * prec as f64 / glibm::log(a as f64) + 20.0) as i64;
+    let n = acot_terms(a, prec);
     let ai = Int::from_i64(a);
     let (p, q, _r) = bsp_acot(&ai, 0, n, hyperbolic)?;
     p.add(&q)?.shl(prec as u64)?.floordiv(&q.mul(&ai)?)
@@ -127,7 +132,7 @@ fn bs_chudnovsky(a: i64, b: i64) -> Result<(Int, Int, Int), Fail> {
 }
 
 fn pi_raw(prec: i64) -> Result<Nat, Fail> {
-    let n = (prec as f64 / 3.3219280948 / 14.181647462 + 2.0) as i64;
+    let n = pi_terms(prec);
     let (_g, p, q) = bs_chudnovsky(0, n)?;
     let sqrt_c = Int::from(isqrt_fast_python(&Nat::from_u64(CHUD_C as u64).shl(2 * prec as u64)?)?);
     let num = p.mul_i64(CHUD_C)?.mul(&sqrt_c)?;
@@ -151,8 +156,18 @@ fn bspe(a: i64, b: i64) -> Result<(Nat, Nat), Fail> {
     Ok((p1.mul(&q2)?.add(&p2)?, q1.mul(&q2)?))
 }
 
+/// pi_fixed's term count, int(prec/3.3219280948/14.181647462+2) (pinned).
+pub fn pi_terms(prec: i64) -> i64 {
+    (prec as f64 / 3.3219280948 / 14.181647462 + 2.0) as i64
+}
+
+/// e_fixed's term count, int(1.1*prec/math.log(prec)+20) (pinned).
+pub fn e_terms(prec: i64) -> i64 {
+    (1.1 * prec as f64 / glibm::log(prec as f64) + 20.0) as i64
+}
+
 fn e_raw(prec: i64) -> Result<Nat, Fail> {
-    let n = (1.1 * prec as f64 / glibm::log(prec as f64) + 20.0) as i64;
+    let n = e_terms(prec);
     let (p, q) = bspe(0, n)?;
     Ok(p.add(&q)?.shl(prec as u64)?.divmod(&q)?.0)
 }
