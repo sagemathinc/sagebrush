@@ -14,7 +14,7 @@
 import { spawn } from "node:child_process";
 import { copyFileSync, cpSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
 
 const here = new URL(".", import.meta.url).pathname, root = join(here, "../..");
@@ -24,6 +24,9 @@ const build = async (entry, naming) => {
   const b = await Bun.build({ entrypoints: [entry], outdir: site, naming, target: "browser", format: "esm" });
   if (!b.success) die(b.logs.join("\n"));
 };
+// (what the copy of web/ takes: not node_modules, and no dot-named entry but the tracked .gitignore files, so a
+// suite's in-tree temp dir (scripts/test-temp-dirs.mjs's allowances, all dot-named), made or removed meanwhile, isn't copied)
+const copyable = (p) => !/node_modules/.test(p) && !/^\.(?!gitignore$)/.test(basename(p));
 // (each mutant: exact patches of one or more files of a copy of web/, each applying exactly once, else the run fails)
 const PUB = "      if (await historyActive(tx0)) {\n";
 const MUTANTS = {
@@ -38,7 +41,7 @@ const MUTANTS = {
 for (const [name, patches] of Object.entries(MUTANTS)) {
   const dir = mkdtempSync(join(tmpdir(), `sb-hd11-${name}-`));
   copies.push(dir);
-  cpSync(join(root, "web"), join(dir, "web"), { recursive: true, filter: (p) => !/node_modules/.test(p) });
+  cpSync(join(root, "web"), join(dir, "web"), { recursive: true, filter: copyable });
   cpSync(join(root, "src"), join(dir, "src"), { recursive: true });
   symlinkSync(join(root, "node_modules"), join(dir, "node_modules"));
   for (const [file, a, b] of patches) {

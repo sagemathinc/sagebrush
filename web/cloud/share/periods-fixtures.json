@@ -1,0 +1,137 @@
+{
+ "about": "F-ISO (active-users plan r2 \u00a75.1): instants and their UTC day, ISO week and month bounds (seconds), computed with Python's ISO calendar, independently of periods.ts",
+ "rows": [
+  {
+   "at": "2025-12-28T23:59:59Z",
+   "t": 1766966399,
+   "day": "2025-12-28",
+   "isoWeek": "2025-W52",
+   "dayStart": 1766880000,
+   "weekStart": 1766361600,
+   "monthStart": 1764547200,
+   "nextDay": 1766966400,
+   "nextWeek": 1766966400,
+   "nextMonth": 1767225600
+  },
+  {
+   "at": "2025-12-29T00:00:00Z",
+   "t": 1766966400,
+   "day": "2025-12-29",
+   "isoWeek": "2026-W01",
+   "dayStart": 1766966400,
+   "weekStart": 1766966400,
+   "monthStart": 1764547200,
+   "nextDay": 1767052800,
+   "nextWeek": 1767571200,
+   "nextMonth": 1767225600
+  },
+  {
+   "at": "2026-10-31T23:30:00Z",
+   "t": 1793489400,
+   "day": "2026-10-31",
+   "isoWeek": "2026-W44",
+   "dayStart": 1793404800,
+   "weekStart": 1792972800,
+   "monthStart": 1790812800,
+   "nextDay": 1793491200,
+   "nextWeek": 1793577600,
+   "nextMonth": 1793491200
+  },
+  {
+   "at": "2026-11-01T00:30:00Z",
+   "t": 1793493000,
+   "day": "2026-11-01",
+   "isoWeek": "2026-W44",
+   "dayStart": 1793491200,
+   "weekStart": 1792972800,
+   "monthStart": 1793491200,
+   "nextDay": 1793577600,
+   "nextWeek": 1793577600,
+   "nextMonth": 1796083200
+  },
+  {
+   "at": "2026-12-31T23:59:59Z",
+   "t": 1798761599,
+   "day": "2026-12-31",
+   "isoWeek": "2026-W53",
+   "dayStart": 1798675200,
+   "weekStart": 1798416000,
+   "monthStart": 1796083200,
+   "nextDay": 1798761600,
+   "nextWeek": 1799020800,
+   "nextMonth": 1798761600
+  },
+  {
+   "at": "2027-01-01T00:00:00Z",
+   "t": 1798761600,
+   "day": "2027-01-01",
+   "isoWeek": "2026-W53",
+   "dayStart": 1798761600,
+   "weekStart": 1798416000,
+   "monthStart": 1798761600,
+   "nextDay": 1798848000,
+   "nextWeek": 1799020800,
+   "nextMonth": 1801440000
+  },
+  {
+   "at": "2027-01-04T00:00:00Z",
+   "t": 1799020800,
+   "day": "2027-01-04",
+   "isoWeek": "2027-W01",
+   "dayStart": 1799020800,
+   "weekStart": 1799020800,
+   "monthStart": 1798761600,
+   "nextDay": 1799107200,
+   "nextWeek": 1799625600,
+   "nextMonth": 1801440000
+  },
+  {
+   "at": "2028-02-28T23:59:59Z",
+   "t": 1835395199,
+   "day": "2028-02-28",
+   "isoWeek": "2028-W09",
+   "dayStart": 1835308800,
+   "weekStart": 1835308800,
+   "monthStart": 1832976000,
+   "nextDay": 1835395200,
+   "nextWeek": 1835913600,
+   "nextMonth": 1835481600
+  },
+  {
+   "at": "2028-02-29T00:00:00Z",
+   "t": 1835395200,
+   "day": "2028-02-29",
+   "isoWeek": "2028-W09",
+   "dayStart": 1835395200,
+   "weekStart": 1835308800,
+   "monthStart": 1832976000,
+   "nextDay": 1835481600,
+   "nextWeek": 1835913600,
+   "nextMonth": 1835481600
+  },
+  {
+   "at": "2028-03-01T00:00:00Z",
+   "t": 1835481600,
+   "day": "2028-03-01",
+   "isoWeek": "2028-W09",
+   "dayStart": 1835481600,
+   "weekStart": 1835308800,
+   "monthStart": 1835481600,
+   "nextDay": 1835568000,
+   "nextWeek": 1835913600,
+   "nextMonth": 1838160000
+  },
+  {
+   "at": "2026-03-29T01:30:00Z",
+   "t": 1774747800,
+   "day": "2026-03-29",
+   "isoWeek": "2026-W13",
+   "dayStart": 1774742400,
+   "weekStart": 1774224000,
+   "monthStart": 1772323200,
+   "nextDay": 1774828800,
+   "nextWeek": 1774828800,
+   "nextMonth": 1775001600
+  }
+ ]
+}
