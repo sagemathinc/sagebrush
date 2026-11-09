@@ -621,7 +621,8 @@ def format_bytes(items):
 
 def _print(sess, e):
     # (the whole line's peak, every argument's text and the joined line, reserved once and held through the write)
-    with mem.reserve(format_bytes(e.args), "Formatting %d items" % len(e.args), "Print"):
+    n = len(e.args)
+    with mem.reserve(format_bytes(e.args), "Formatting %d item%s" % (n, "" if n == 1 else "s"), "Print"):
         sess.write_out("".join(text_of(x) for x in e.args) + "\n")
     return NULL
 
