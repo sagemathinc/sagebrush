@@ -1,9 +1,9 @@
 {
  "v": 1,
- "reason": "P3c-2: xml.etree (CPython 3.14.10's ElementTree, ElementPath, ElementInclude and cElementTree, unchanged but for a header line each) in the existing mod-xml group, lazy as P3c-1 made it; and open() writing a text file with its errors= handler (lib/_pyjs_open.py, the mod-pyjs-open group). Measured with bun 1.4.4 (size-record.sh) on master 4b151e5f vs this head merged with it: engine/lib/mod-xml.src +101646 (the row grown in place, as daybreak2's SIZE design clear has it; ceiling renewed to measured + 64 = 290899); cli/lib.gen.js +30812 (xml/etree in the lazy blob); cli/pyjs.cjs +30832 (+64 slack); engine/lib/mod-pyjs-open.src +228; engine/sagebrush-worker.js +186 (mod-xml's manifest entry; ceiling renewed to measured + 64 = 1683135).",
+ "reason": "P3c-2: xml.etree (CPython 3.14.10's ElementTree, ElementPath, ElementInclude and cElementTree, unchanged but for a header line each) in the existing mod-xml group, lazy as P3c-1 made it; and open() writing a text file with its errors= handler (lib/_pyjs_open.py, the mod-pyjs-open group). Measured with bun 1.4.4 (size-record.sh) on master 279d14a9 vs this head merged with it: engine/lib/mod-xml.src +101646 (the row grown in place, as daybreak2's SIZE design clear has it; ceiling renewed to measured + 64 = 290899); cli/lib.gen.js +30812 (xml/etree in the lazy blob); cli/pyjs.cjs +30816 (+64 slack); engine/lib/mod-pyjs-open.src +228; engine/sagebrush-worker.js +186 (mod-xml's manifest entry; ceiling renewed to measured + 64 = 1683135).",
  "bytes": {
   "cli/lib.gen.js": 30812,
-  "cli/pyjs.cjs": 30896,
+  "cli/pyjs.cjs": 30880,
   "engine/lib/mod-pyjs-open.src": 228,
   "engine/lib/mod-xml.src": 101646,
   "engine/sagebrush-worker.js": 186
