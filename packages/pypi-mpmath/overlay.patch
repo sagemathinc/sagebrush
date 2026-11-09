@@ -1,0 +1,157 @@
+--- a/py/mpmath/libmp/backend.py
++++ b/py/mpmath/libmp/backend.py
+@@ -91,6 +91,38 @@
+     except:
+         pass
+ 
++# Sagebrush's backend (packages/pypi-mpmath/overlay.patch; design/mpmath-core.md,
++# section 4.3): chosen once, here, by SAGEBRUSH_MPMATH_BACKEND, 'python' (the
++# default) or 'sagebrush'; any other value is refused. Nothing is registered as
++# gmpy or sage, and mantissas stay Python ints.
++_sagebrush_backend = os.environ.get('SAGEBRUSH_MPMATH_BACKEND', 'python')
++if _sagebrush_backend == 'sagebrush':
++    import _sagebrush_mpcore
++    gmpy = sage = sage_utils = None
++    BACKEND = 'sagebrush'
++    MPZ = int
++elif _sagebrush_backend != 'python':
++    raise ImportError("SAGEBRUSH_MPMATH_BACKEND is %r: it must be 'python' or "
++                      "'sagebrush'" % (_sagebrush_backend,))
++
++# Every name a 'sagebrush' branch takes from _sagebrush_mpcore, as (module,
++# name): ctx_mp.py checks them all once the backend is chosen, so that a
++# partial integration is an error, not a mix.
++SAGEBRUSH_HOOKS = (
++    ('libmpf', '_normalize'), ('libmpf', '_normalize1'),
++    ('libmpf', 'from_man_exp'), ('libmpf', 'mpf_add'), ('libmpf', 'mpf_sub'),
++    ('libmpf', 'mpf_mul'), ('libmpf', 'mpf_div'), ('libmpf', 'mpf_sqrt'),
++    ('libelefun', 'mpf_sqrt'), ('libelefun', 'mpf_exp'),
++    ('libelefun', 'mpf_log'), ('libelefun', 'mpf_cos'),
++    ('libelefun', 'mpf_sin'), ('libelefun', 'mpf_pow'),
++    ('libelefun', 'exp_fixed'), ('libelefun', 'cos_sin_fixed'),
++    ('libelefun', 'log_int_fixed'),
++    ('libmpc', 'mpc_exp'), ('libmpc', 'mpc_sqrt'),
++    ('libintmath', 'bitcount'), ('libintmath', 'trailing'),
++    ('libintmath', 'isqrt'), ('libintmath', 'sqrtrem'),
++    ('libintmath', 'ifac'),
++)
++
+ if 'MPMATH_STRICT' in os.environ:
+     STRICT = True
+ else:
+--- a/py/mpmath/ctx_mp.py
++++ b/py/mpmath/ctx_mp.py
+@@ -49,6 +49,18 @@
+     from sage.libs.mpmath.ext_main import Context as BaseMPContext
+     # pickle hack
+     import sage.libs.mpmath.ext_main as _mpf_module
++elif BACKEND == 'sagebrush':
++    import _sagebrush_mpcore
++    BaseMPContext = _sagebrush_mpcore.Context
++    # (pickles name mpmath.ctx_mp_python's types, as the python backend's do)
++    from . import ctx_mp_python as _mpf_module
++    # (every hook is the core's, or importing fails: no partial integration)
++    from .libmp import backend as _backend
++    for _m, _n in _backend.SAGEBRUSH_HOOKS:
++        if getattr(getattr(_backend.sys.modules[__package__ + '.libmp'], _m), _n)                 is not getattr(_sagebrush_mpcore, _n):
++            raise ImportError("mpmath's backend 'sagebrush': %s.%s is not "
++                              "_sagebrush_mpcore's" % (_m, _n))
++    del _backend, _m, _n
+ else:
+     from .ctx_mp_python import PythonMPContext as BaseMPContext
+     from . import ctx_mp_python as _mpf_module
+--- a/py/mpmath/libmp/libmpf.py
++++ b/py/mpmath/libmp/libmpf.py
+@@ -276,6 +276,10 @@
+ 
+ if BACKEND == 'sage':
+     _normalize = _normalize1 = sage_utils.normalize
++elif BACKEND == 'sagebrush':
++    import _sagebrush_mpcore
++    _normalize = _sagebrush_mpcore._normalize
++    _normalize1 = _sagebrush_mpcore._normalize1
+ 
+ if STRICT:
+     normalize = strict_normalize
+@@ -326,6 +330,8 @@
+ 
+ if BACKEND == 'sage':
+     from_man_exp = sage_utils.from_man_exp
++elif BACKEND == 'sagebrush':
++    from_man_exp = _sagebrush_mpcore.from_man_exp
+ 
+ def from_int(n, prec=0, rnd=round_fast):
+     """Create a raw mpf from an integer. If no precision is specified,
+@@ -1412,3 +1418,9 @@
+         mpf_sqrt = ext_lib.mpf_sqrt
+     except ImportError:
+         pass
++elif BACKEND == 'sagebrush':
++    mpf_add = _sagebrush_mpcore.mpf_add
++    mpf_sub = _sagebrush_mpcore.mpf_sub
++    mpf_mul = _sagebrush_mpcore.mpf_mul
++    mpf_div = _sagebrush_mpcore.mpf_div
++    mpf_sqrt = _sagebrush_mpcore.mpf_sqrt
+--- a/py/mpmath/libmp/libelefun.py
++++ b/py/mpmath/libmp/libelefun.py
+@@ -1426,3 +1426,14 @@
+         log_int_fixed = _lbmp.log_int_fixed
+     except (ImportError, AttributeError):
+         print("Warning: Sage imports in libelefun failed")
++elif BACKEND == 'sagebrush':
++    import _sagebrush_mpcore
++    mpf_sqrt = _sagebrush_mpcore.mpf_sqrt
++    mpf_exp = _sagebrush_mpcore.mpf_exp
++    mpf_log = _sagebrush_mpcore.mpf_log
++    mpf_cos = _sagebrush_mpcore.mpf_cos
++    mpf_sin = _sagebrush_mpcore.mpf_sin
++    mpf_pow = _sagebrush_mpcore.mpf_pow
++    exp_fixed = _sagebrush_mpcore.exp_fixed
++    cos_sin_fixed = _sagebrush_mpcore.cos_sin_fixed
++    log_int_fixed = _sagebrush_mpcore.log_int_fixed
+--- a/py/mpmath/libmp/libmpc.py
++++ b/py/mpmath/libmp/libmpc.py
+@@ -833,3 +833,7 @@
+         mpc_sqrt = _lbmp.mpc_sqrt
+     except (ImportError, AttributeError):
+         print("Warning: Sage imports in libmpc failed")
++elif BACKEND == 'sagebrush':
++    import _sagebrush_mpcore
++    mpc_exp = _sagebrush_mpcore.mpc_exp
++    mpc_sqrt = _sagebrush_mpcore.mpc_sqrt
+--- a/py/mpmath/libmp/libintmath.py
++++ b/py/mpmath/libmp/libintmath.py
+@@ -115,6 +115,10 @@
+     sage_bitcount = sage_utils.bitcount
+     bitcount = sage_bitcount
+     trailing = sage_trailing
++elif BACKEND == 'sagebrush':
++    import _sagebrush_mpcore
++    bitcount = _sagebrush_mpcore.bitcount
++    trailing = _sagebrush_mpcore.trailing
+ else:
+     bitcount = python_bitcount
+     trailing = python_trailing
+@@ -316,6 +320,13 @@
+     isqrt_small = isqrt_fast = isqrt = \
+         getattr(sage_utils, "isqrt", lambda n: MPZ(n).isqrt())
+     sqrtrem = lambda n: MPZ(n).sqrtrem()
++elif BACKEND == 'sagebrush':
++    # (the python backend's approximate isqrt_small and isqrt_fast are kept:
++    # their results are not determined by the floor, only by their algorithm)
++    isqrt_small = isqrt_small_python
++    isqrt_fast = isqrt_fast_python
++    isqrt = _sagebrush_mpcore.isqrt
++    sqrtrem = _sagebrush_mpcore.sqrtrem
+ else:
+     isqrt_small = isqrt_small_python
+     isqrt_fast = isqrt_fast_python
+@@ -386,6 +397,8 @@
+ elif BACKEND == 'sage':
+     ifac = lambda n: int(sage.factorial(n))
+     ifib = sage.fibonacci
++elif BACKEND == 'sagebrush':
++    ifac = _sagebrush_mpcore.ifac
+ 
+ def list_primes(n):
+     n = n + 1
