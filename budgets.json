@@ -15,7 +15,7 @@
   },
   "cli/packages.gen.js": {
    "exact": true,
-   "max": 115084
+   "max": 787869
   },
   "cli/pyjs.cjs": {
    "exact": false,
@@ -598,6 +598,13 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/pkg-pypi-mpmath.src": {
+   "exact": false,
+   "ceiling": 2005118,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/pkg-pypi-tabulate.src": {
    "exact": false,
    "ceiling": 75776,
@@ -649,7 +656,7 @@
   },
   "engine/lib/sage.src": {
    "exact": false,
-   "ceiling": 2982380,
+   "ceiling": 2982652,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -726,7 +733,7 @@
   },
   "engine/sagebrush-notebook.js": {
    "exact": false,
-   "ceiling": 240001,
+   "ceiling": 240049,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -754,14 +761,14 @@
   },
   "engine/sagebrush-worker.js": {
    "exact": false,
-   "ceiling": 1666364,
+   "ceiling": 1682919,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
   },
   "registry/packages": {
    "exact": true,
-   "max": 4
+   "max": 5
   },
   "engine/lib/mod-statistics.src": {
    "exact": false,
@@ -879,6 +886,7 @@
    "engine/lib/mod-zoneinfo.src": 84951,
    "engine/lib/pkg-cremona-small.src": 137656,
    "engine/lib/pkg-pypi-sortedcontainers.src": 126368,
+   "engine/lib/pkg-pypi-mpmath.src": 2005054,
    "engine/lib/pkg-pypi-tabulate.src": 68887,
    "engine/lib/pkg-scipy-io.pre": 61258,
    "engine/lib/pkg-scipy-io.src": 12963,
