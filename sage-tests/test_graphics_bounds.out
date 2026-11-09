@@ -1,0 +1,24 @@
+plot: xmin,xmax,ymin,ymax -> (0.0, 3.0, 0.0, 1.0)
+get_minmax_data -> {'xmin': 0.0, 'xmax': 3.0, 'ymin': 0.0, 'ymax': 1.0}
+set xmin(-1) -> (None, -1.0, 0.0)
+set ymax(2) -> (None, 2.0)
+set_axes_range -> (None, -2.0, 5.0, {'xmin': -2.0, 'xmax': 3.0, 'ymin': 0.0, 'ymax': 5.0})
+axes_range -> {'xmin': -2.0, 'xmax': 3.0, 'ymin': 0.0, 'ymax': 5.0}
+empty bounds -> (-1, 1, -1, 1)
+empty get_minmax_data -> {'xmin': -1, 'xmax': 1, 'ymin': -1, 'ymax': 1}
+line bounds -> (1.0, 3.0, -4.0, 2.0)
+point bounds -> (4.0, 6.0, 4.0, 6.0)
+sum bounds -> (1.0, 5.0, -4.0, 5.0)
+sum after set -> (None, 5.0, 10.0)
+text bounds -> (1.0, 3.0, 2.0, 4.0)
+xmin('a') -> ValueError: could not convert string to float: 'a'
+xmin(1/2) -> (None, 0.5)
+xmin(None) -> (0.5, 0.5)
+ymin(RR(0.25)) -> (None, 0.25)
+set_axes_range bad -> ValueError: could not convert string to float: 'a'
+circle bounds -> (-1.0, 1.0, -1.0, 1.0)
+g.get_axes_range() -> [('xmax', 2.0), ('xmin', -5.0), ('ymax', 3.0), ('ymin', 0.0)]
+(g + h).get_axes_range() -> [('xmax', 4.0), ('xmin', 0.0), ('ymax', 3.0), ('ymin', -1.0)]
+(h + g).get_axes_range() -> [('xmax', 4.0), ('xmin', 0.0), ('ymax', 3.0), ('ymin', -1.0)]
+sum([g, h]).xmin() -> 0.0
+(g + h).xmin(), g.xmin() -> (0.0, -5.0)
