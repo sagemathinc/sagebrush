@@ -2266,6 +2266,9 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     // (the access log's oldest row, when it ages out)
     const log = this.logDue();
     if (log !== null) t.push(log);
+    // (the oldest list cursor, when it expires: at once while a full page of expired ones is left)
+    const cur = this.cursorDue();
+    if (cur !== null) t.push(cur);
     // (a read-only account's deadline, §6.2)
     const d = this.state() === "readonly" ? this.purgeAt() : null;
     if (d !== null) t.push(d);
@@ -2316,6 +2319,22 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   private trimDead(now: number) {
     this.sql.exec("DELETE FROM grants WHERE id IN (SELECT id FROM grants WHERE revoked IS NOT NULL OR expires <= ? ORDER BY COALESCE(revoked, expires) DESC, id LIMIT -1 OFFSET ?)", now, AGENT.deadGrants);
     this.sql.exec("DELETE FROM agent_rates WHERE key <> 'account' AND substr(key, 3) NOT IN (SELECT id FROM grants)");
+    // (and the list cursors of grants no longer kept: none outlives its grant)
+    if (this.hasCursors()) this.sql.exec("DELETE FROM ix_cursors WHERE grant_id NOT IN (SELECT id FROM grants)");
+  }
+  private hasCursors(): boolean {
+    return this.one("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'ix_cursors'") !== undefined;
+  }
+  /** A page of expired list cursors deleted (the alarm's, and a new cursor's); the alarm comes back while any is left. */
+  private sweepCursors(now: number) {
+    if (!this.hasCursors()) return;
+    this.sql.exec("DELETE FROM ix_cursors WHERE id IN (SELECT id FROM ix_cursors WHERE t <= ? ORDER BY t LIMIT ?)", now - this.ixBounds.cursorMs, this.ixBounds.cursorSweep);
+  }
+  /** When the oldest list cursor expires (null: none). */
+  private cursorDue(): number | null {
+    if (!this.hasCursors()) return null;
+    const t = this.one("SELECT MIN(t) AS t FROM ix_cursors")?.t;
+    return t === undefined || t === null ? null : Number(t) + this.ixBounds.cursorMs + 1;
   }
   /**
    * A request against the persisted buckets (§7; daybreak2: the rates are hard ceilings, so they are kept, not in
@@ -2408,6 +2427,8 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       const r = typeof a.id === "string" && GRANT_ID.test(a.id) && this.hasGrants() ? this.one("SELECT * FROM grants WHERE id = ?", a.id) : undefined;
       if (!r) throw new SyncError("missing", "no such grant");
       if (r.revoked === null) this.sql.exec("UPDATE grants SET revoked = ?, revoked_reason = 'person' WHERE id = ?", Date.now(), r.id);
+      // (a revoked grant's list cursors go with it, in this transaction)
+      if (this.hasCursors()) this.sql.exec("DELETE FROM ix_cursors WHERE grant_id = ?", r.id);
       this.trimDead(Date.now());
       return { grant: this.grantView(this.one("SELECT * FROM grants WHERE id = ?", r.id)!) };
     }));
@@ -2839,7 +2860,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     let after = "";
     if (cursor !== undefined) {
       const c = /^[0-9a-f]{32}$/.test(cursor) ? this.one("SELECT grant_id, folder, recursive, after, t FROM ix_cursors WHERE id = ?", cursor) : undefined;
-      if (!c || c.grant_id !== grant || c.folder !== folder || Number(c.recursive) !== (recursive ? 1 : 0) || now - Number(c.t) > b.cursorMs) return { status: 400, error: "invalid", extra: { message: "cursor: not from this listing" } };
+      if (!c || c.grant_id !== grant || c.folder !== folder || Number(c.recursive) !== (recursive ? 1 : 0) || now - Number(c.t) > b.cursorMs) return { status: 400, error: "invalid", extra: { message: "cursor: unknown or expired; list again from the start" } };
       after = String(c.after);
     }
     const rows = recursive
@@ -2860,7 +2881,9 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     const id = [...crypto.getRandomValues(new Uint8Array(16))].map((x) => x.toString(16).padStart(2, "0")).join("");
     this.sql.exec("INSERT INTO ix_cursors (id, grant_id, folder, recursive, after, t) VALUES (?, ?, ?, ?, ?, ?)", id, grant, folder, recursive ? 1 : 0, last, now);
     this.sql.exec("DELETE FROM ix_cursors WHERE grant_id = ? AND id NOT IN (SELECT id FROM ix_cursors WHERE grant_id = ? ORDER BY rowid DESC LIMIT ?)", grant, grant, b.cursors);
-    this.sql.exec("DELETE FROM ix_cursors WHERE id IN (SELECT id FROM ix_cursors WHERE t < ? LIMIT 100)", now - b.cursorMs);
+    this.sweepCursors(now);
+    // (the alarm deletes it once it has expired, if nothing else does first)
+    this.wakeBy(now + b.cursorMs + 1);
     return { entries: out, cursor: id };
   }
 
@@ -2875,8 +2898,12 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
 
   /** Tests only: the index's bounds lowered, and its state. */
-  async testIndex(a: { bounds?: Partial<typeof IX>; step?: boolean; manual?: boolean; noLive?: boolean }): Promise<Record<string, unknown>> {
+  async testIndex(a: { bounds?: Partial<typeof IX>; step?: boolean; manual?: boolean; noLive?: boolean; orphan?: boolean; sweep?: boolean }): Promise<Record<string, unknown>> {
     if (!testMode(this.env)) return {};
+    // (a cursor row whose grant isn't there, as one revoked before this release left: for trimDead's sweep)
+    // (one sweep of expired cursors, as one alarm step runs it)
+    if (a.sweep) this.sweepCursors(Date.now());
+    if (a.orphan && this.hasCursors()) this.sql.exec("INSERT INTO ix_cursors (id, grant_id, folder, recursive, after, t) VALUES (?, 'zzzzzzzzzzzz', '/', 0, '/', ?)", "f".repeat(32), Date.now());
     if (a.bounds) Object.assign(this.ixBounds, a.bounds);
     if (a.manual !== undefined) {
       this.ixManual = a.manual;
@@ -2887,7 +2914,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     if (a.step) this.indexStep(true);
     const has = this.one("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'ix_entries'") !== undefined;
     const n = (t: string) => (has ? Number(this.one(`SELECT COUNT(*) AS n FROM ${t}`)!.n) : 0);
-    return { state: this.get("ix_state") ?? null, cursor: Number(this.get("ix_cursor") ?? 0), max: this.exists() ? this.maxSeq() : 0, reason: this.get("ix_reason") ?? null, entries: n("ix_entries"), gone: n("ix_gone"), cut: this.ixCut, alarm: await this.ctx.storage.getAlarm(), job: has ? (jobGet(this.sql)?.phase ?? null) : null, stage: n("ix_stage"), n: Number(this.get("ix_n_entries") ?? 0), g: Number(this.get("ix_n_gone") ?? 0), reset: Number(this.get("ix_reset") ?? 0), rows: has ? IX_TABLES.reduce((a, t) => a + n(t), 0) : 0 };
+    return { state: this.get("ix_state") ?? null, cursor: Number(this.get("ix_cursor") ?? 0), max: this.exists() ? this.maxSeq() : 0, reason: this.get("ix_reason") ?? null, entries: n("ix_entries"), gone: n("ix_gone"), cut: this.ixCut, alarm: await this.ctx.storage.getAlarm(), job: has ? (jobGet(this.sql)?.phase ?? null) : null, stage: n("ix_stage"), n: Number(this.get("ix_n_entries") ?? 0), g: Number(this.get("ix_n_gone") ?? 0), reset: Number(this.get("ix_reset") ?? 0), cursors: n("ix_cursors"), rows: has ? IX_TABLES.reduce((a, t) => a + n(t), 0) : 0 };
   }
 
   /** Tests only: lower the agents' bounds, or expire a grant now. */
@@ -2972,6 +2999,8 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     // the access log's rows past its 90 days (design/agent-endpoint.md §8): a page a step, and arm() below sets the next
     // step at once while any is left
     this.sweepLog(now);
+    // the agents' list cursors past their expiry: a page a step, and arm() below sets the next
+    this.sweepCursors(now);
     // the agents' index, a bounded step of its backfill (fs-sync 1a2)
     this.indexStep();
     // grants that expired since: the newest AGENT.deadGrants dead ones kept (daybreak2 L1), with nothing else needed

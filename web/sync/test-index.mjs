@@ -54,7 +54,9 @@ const NE = "b1b1b1b1-000b-4b1b-8b1b-b1b1b1b1b10b"; // sync never turned on: no r
 const JR = "b1b1b1b1-000c-4b1b-8b1b-b1b1b1b1b10c"; // a job restarted in each phase
 const JB = "b1b1b1b1-000d-4b1b-8b1b-b1b1b1b1b10d"; // a job's bounds and its counts
 const RS = "b1b1b1b1-000e-4b1b-8b1b-b1b1b1b1b10e"; // a rebuild's reset, paged
-const listed = [BF, BU, CP, CA, RD, LV, MS, LB, RX, EM, NE, JR, JB, RS].join(",");
+const CU = "b1b1b1b1-000f-4b1b-8b1b-b1b1b1b1b10f"; // list cursors: none outlives its grant or its expiry
+const DV = "b1b1b1b1-0010-4b1b-8b1b-b1b1b1b1b110"; // a document's revision in list and stat
+const listed = [BF, BU, CP, CA, RD, LV, MS, LB, RX, EM, NE, JR, JB, RS, CU, DV].join(",");
 const script = execFileSync("bun", ["build", join(here, "test-entry.ts"), "--format", "esm", "--target", "browser", "--external", "cloudflare:workers"], { encoding: "utf8" });
 const base = { modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET"] };
 const shareBindings = { SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOKEN: "dev-token", COCALC_ORIGIN: "https://cocalc.test", COCALC_CLIENT_SECRET: "client-secret" };
@@ -152,8 +154,22 @@ async function socket(s, device) {
       }
       return all;
     },
+    /** One message with a req (a document's batch), answered by its req. */
+    async ask(m) {
+      const r = ++req;
+      ws.send(JSON.stringify({ ...m, req: r }));
+      return next((x) => x.req === r);
+    },
     close: () => ws.close(),
   };
+}
+const enc = new TextEncoder();
+const pid = (t, client) => t.toString(36).padStart(11, "0") + "_" + client;
+/** A batch for `doc` (test-sync.mjs's form): each patch [cseq, id, parents, payload text]. */
+function batch(doc, epoch, patches, extra = {}) {
+  const bodies = patches.map((p) => enc.encode(p[3] ?? `{"patch":${JSON.stringify(p[1])}}`));
+  const body = Buffer.concat(bodies.map((x) => Buffer.from(x)));
+  return { t: "batch", doc, epoch, patches: patches.map((p, i) => ({ cseq: p[0], id: p[1], parents: p[2], size: bodies[i].length })), body: body.toString("base64"), ...extra };
 }
 let fidN = 0;
 const fid = () => "e" + String(++fidN).padStart(15, "0");
@@ -456,6 +472,80 @@ await section("a rebuild's reset: the old index deleted a page a step, reads 503
   ws.close();
 });
 
+await section("list cursors: deleted with their grant, and by the alarm once expired, a page a step, across a restart", async () => {
+  const s = await enabled(CU);
+  const ws = await socket(s, "b7b7b7b7b7b7b7b8");
+  await ws.ops([mkdir("/c")]);
+  await ws.ops(Array.from({ length: 5 }, (_, i) => mkdir(`/c/k${i}`)));
+  const make = async () => (await (await post(s, "/api/sync/v1/grants", { agent: "fs-sync", scopes: [{ path: "/", access: "read" }] })).json());
+  const gA = await make(), gB = await make();
+  ok((await until(CU, "ready")).state === "ready", "(ready)");
+  await ix(CU, { bounds: { examined: 1 } });
+  const cursor = async (g) => (await agent(g.token, "list", { folder: "/c" })).cursor;
+  // a revoked grant's cursors go with it, in its revoke
+  await cursor(gB);
+  await cursor(gB);
+  const n0 = (await ix(CU)).cursors;
+  await post(s, `/api/sync/v1/grants/${gB.grant.id}/revoke`, {});
+  const n1 = (await ix(CU)).cursors;
+  ok(n0 === 2 && n1 === 0, `revoking a grant deletes its cursors: ${n0} -> ${n1}`);
+  // one whose grant isn't kept (as after a trim) goes when dead grants are trimmed (here, by the next revoke)
+  await ix(CU, { orphan: true });
+  const o1 = (await ix(CU)).cursors;
+  const gC = await make();
+  await post(s, `/api/sync/v1/grants/${gC.grant.id}/revoke`, {});
+  ok(o1 === 1 && (await ix(CU)).cursors === 0, "a cursor whose grant is gone is deleted with the dead grants' trim");
+  // the alarm is armed for a cursor's expiry, kept across a restart
+  const t0 = Date.now();
+  await cursor(gA);
+  const armed = (await ix(CU)).alarm;
+  ok(armed !== null && armed <= t0 + 15 * 60_000 + 2_000 && armed >= t0 + 15 * 60_000 - 2_000, "a new cursor arms the alarm for its expiry (15 minutes): " + (armed === null ? null : armed - t0));
+  await restart(CU);
+  const after = await ix(CU);
+  // (re-armed by the restarted object from the cursor it finds: its expiry, to within a moment)
+  ok(after.cursors === 1 && after.alarm !== null && after.alarm >= armed && after.alarm <= t0 + 15 * 60_000 + 2_000, "and after a restart, the cursor is there and the alarm still set for its expiry: " + JSON.stringify({ armed, alarm: after.alarm, cursors: after.cursors }));
+  // pages: 3 expired, 2 a step: 1 left, then none
+  await ix(CU, { bounds: { examined: 1, cursorMs: 15 * 60_000 } });
+  await cursor(gA);
+  await cursor(gA);
+  await ix(CU, { bounds: { cursorMs: 1, cursorSweep: 2 } });
+  await sleep(10);
+  const p0 = (await ix(CU)).cursors, p1 = (await ix(CU, { sweep: true })).cursors, p2 = (await ix(CU, { sweep: true })).cursors;
+  ok(p0 === 3 && p1 === 1 && p2 === 0, `expired cursors swept a page a step (2 here): ${p0}, ${p1}, ${p2}`);
+  // with no later list, the alarm alone deletes an expired cursor
+  await ix(CU, { bounds: { cursorMs: 300, cursorSweep: 100 } });
+  await cursor(gA);
+  ok((await ix(CU)).cursors === 1, "(a cursor, 0.3 s here)");
+  let left = 1;
+  for (let i = 0; i < 60 && left; i++) {
+    await sleep(100);
+    left = (await ix(CU)).cursors;
+  }
+  ok(left === 0, "the alarm deletes it once expired, with no other list: " + left);
+  await ix(CU, { bounds: { cursorMs: 15 * 60_000, examined: 20_000 } });
+  ws.close();
+});
+
+await section("a document's revision: list and stat give its epoch.head_seq, and it moves with the document", async () => {
+  const s = await enabled(DV);
+  const ws = await socket(s, "b8b8b8b8b8b8b8b9");
+  const doc = board("/d.board.json");
+  await ws.ops([doc]);
+  const t = await grant(s, [{ path: "/", access: "read" }]);
+  ok((await until(DV, "ready")).state === "ready", "(ready)");
+  const X = "clientDVDV";
+  const a1 = await ws.ask(batch(doc.ref, 1, [[1, pid(100, X), [], "p1"]], { kind: "board" }));
+  ok(a1?.t === "ack" && Number.isInteger(a1.batch?.head?.seq), "(the document's first batch: " + JSON.stringify(a1).slice(0, 120) + ")");
+  const want1 = `${a1.batch.head.epoch ?? 1}.${a1.batch.head.seq}`;
+  const s1 = (await agent(t, "stat", { path: "/d.board.json" })).entry, l1 = (await agent(t, "list", { folder: "/" })).entries?.find((e) => e.path === "/d.board.json");
+  ok(s1?.revision === want1 && l1?.revision === want1, `stat and list give the document's revision, its epoch.head_seq (${want1}): ${s1?.revision}, ${l1?.revision}`);
+  const a2 = await ws.ask(batch(doc.ref, 1, [[2, pid(200, X), [pid(100, X)], "p2"]]));
+  const want2 = `${a2.batch.head.epoch ?? 1}.${a2.batch.head.seq}`;
+  const s2 = (await agent(t, "stat", { path: "/d.board.json" })).entry, l2 = (await agent(t, "list", { folder: "/" })).entries?.find((e) => e.path === "/d.board.json");
+  ok(want2 !== want1 && s2?.revision === want2 && l2?.revision === want2, `after the document changes, both give the new one (${want1} -> ${want2}): ${s2?.revision}, ${l2?.revision}`);
+  ws.close();
+});
+
 await section("a job survives a restart in each of its phases", async () => {
   const s = await enabled(JR);
   const ws = await socket(s, "b3b3b3b3b3b3b3b3");
@@ -603,7 +693,8 @@ await section("reads: scope, Trash by where it came from, pages, the examined bo
   ok((await agent(t, "list", { folder: "/" })).error === "scope" && (await agent(t, "list", { folder: "/B" })).error === "scope", "outside the scope: 403");
   const la = await agent(t, "list", { folder: "/A" });
   ok(la.status === 200 && JSON.stringify(la.entries.map((e) => e.path)) === '["/A/x"]' && la.cursor === null, "a folder in scope: its children, by path, no cursor at the end");
-  ok((await agent(t, "list", { folder: "/A", cursor: "/B/y" })).status === 400 && (await agent(t, "list", { folder: "/A", cursor: "0".repeat(32) })).status === 400, "a cursor the server didn't give (a path, an unknown id) is refused, never followed");
+  const bad1 = await agent(t, "list", { folder: "/A", cursor: "/B/y" }), bad2 = await agent(t, "list", { folder: "/A", cursor: "0".repeat(32) });
+  ok(bad1.status === 400 && bad2.status === 400 && bad2.message === "cursor: unknown or expired; list again from the start", "a cursor the server didn't give (a path, an unknown id) is refused, never followed, and the answer says to list again: " + JSON.stringify(bad2));
   // a Trash folder the grant can't see answers as one that isn't there (/Trash/w came from /B, outside /A)
   const hid = await agent(t, "list", { folder: "/Trash/w" }), none = await agent(t, "list", { folder: "/Trash/nothere" });
   ok(hid.status === 404 && none.status === 404 && JSON.stringify({ ...hid, path: 0 }) === JSON.stringify({ ...none, path: 0 }), "a hidden folder in Trash and a missing one: the same 404 missing: " + JSON.stringify([hid, none]));

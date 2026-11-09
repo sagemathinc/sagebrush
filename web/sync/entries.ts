@@ -37,6 +37,9 @@ export const IX_JOB_PAGE_MAX = 500;
  * server keeps, never a path) */
 export const IX_CURSORS_MAX = 32;
 export const IX_CURSOR_MS_MAX = 15 * 60_000;
+/** expired continuations deleted by one alarm step (or when a cursor is made): a page, the alarm armed again while any
+ * is left (ENGINE and LIMITS L5 on #913: kept no longer than they are good for, and none past their grant) */
+export const IX_CURSOR_SWEEP_MAX = 100;
 /** rows a rebuild's reset deletes in one step (ENGINE E2 on #913: never a whole index in one transaction) */
 export const IX_RESET_PAGE_MAX = 10_000;
 export const IX = {
@@ -51,6 +54,7 @@ export const IX = {
   jobPage: IX_JOB_PAGE_MAX,
   cursors: IX_CURSORS_MAX,
   cursorMs: IX_CURSOR_MS_MAX,
+  cursorSweep: IX_CURSOR_SWEEP_MAX,
   resetPage: IX_RESET_PAGE_MAX,
 };
 
