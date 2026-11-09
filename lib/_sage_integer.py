@@ -59,6 +59,17 @@ def is_pseudoprime(n):
     return _sa().is_prime(n)
 
 
+def is_irreducible(n):
+    """Whether n is irreducible in ZZ: whether its absolute value is prime.
+
+    EXAMPLES::
+
+        sage: [n for n in [-10..10] if ZZ(n).is_irreducible()]
+        [-7, -5, -3, -2, 2, 3, 5, 7]
+    """
+    return _sa().is_prime(_b.abs(n))
+
+
 def is_prime_power(n):
     """Whether n is p^k for a prime p and some k >= 1.
 
@@ -660,7 +671,7 @@ def parent(n):
 # The methods, by name: _sage_lang installs these (ints in pyjs, the
 # Integer class under CPython)
 METHODS = {name: globals()[name] for name in (
-    "factor", "is_prime", "is_pseudoprime", "is_prime_power", "is_square", "is_squarefree",
+    "factor", "is_prime", "is_irreducible", "is_pseudoprime", "is_prime_power", "is_square", "is_squarefree",
     "is_even", "is_odd", "is_one", "is_zero", "is_unit", "is_integral",
     "sqrt", "isqrt", "nth_root", "digits", "ndigits", "divisors", "number_of_divisors",
     "prime_divisors", "prime_factors", "next_prime", "previous_prime", "next_probable_prime",
