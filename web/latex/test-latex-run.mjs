@@ -15,6 +15,7 @@ import { spawn } from "node:child_process";
 import { seenOf, driver, runnable, parseOutput, statesOf, resultsText, msgOf, MARK, RUN_LIMITS, RESULTS_FORMAT, runAndSave, sessionOf, sandboxEngine, SANDBOX_FAILED, folderFiles, runIn, DEPS_MARK, parseDeps, depsWith, wsReader, checkedResults } from "./run-core.mjs";
 import { Engine } from "./engine/pipeline.mjs";
 import { itemKey, savedStates, stateOf, WRAPPER_VERSION, MAX_RESULT, safeRel, depsOf, staleOf, staleOfSync, sha256hex, readComplete, DEPS_MAX, inlineHtml, blockHtml, mathPart } from "./engine/sagetex.mjs";
+import { interactsOf, interactsHtml, INTERACT_LIMITS } from "./interact.ts";
 
 const results = [];
 const check = (name, ok, detail) => { results.push([name, !!ok]); if (!ok) console.log("FAIL", name, JSON.stringify(detail)?.slice(0, 900)); };
@@ -119,6 +120,7 @@ const item = (mode, code, extra = {}) => { const it = real(mode, code, extra); r
   check("stale math: its \\sage edited, the region keeps the last value, marked once; the next region ($x^2$) is not", regions(stale) === 1 && /<span class="sagestale" title="Changed since the last Run[^"]*"><span class="katex/.test(stale) && !/<span class="sagestale"[^>]*>(?:(?!<\/span>).)*x\^\{?2/.test(stale.split('<span class="sagestale"')[1]?.split("and")[1] ?? ""), stale.slice(0, 500));
 }
 
+
 // ---- the script in Sage (the CLI's own: build/cli/pyjs.cjs --sage)
 const CLI = new URL("../../build/cli/pyjs.cjs", import.meta.url).pathname;
 if (!existsSync(CLI)) {
@@ -133,6 +135,45 @@ const sage = (code) => new Promise((res) => {
   p.stdout.on("data", (x) => (o += x)); p.stderr.on("data", (x) => (e += x));
   p.on("close", (c) => { rmSync(dir, { recursive: true, force: true }); res({ code: c, out: o, err: e }); });
 });
+// ---- @interact in a Run (a Sagebrush extension: William, Nov 8), in the CLI's own Sage: each interact an item makes is
+// kept with its result, its controls and what its function printed and showed at the defaults; the runtime's own host
+// and display are back after the Run
+{
+  const spec = [
+    ["silent", "@interact\ndef h(k=slider(1, 5, 1, 2), name='x', on=True):\n    print('k^2 =', k^2)\n    show(plot(sin(k*x), (x, 0, pi)))"],
+    ["sage", "1 + 1"],
+    ["block", "@interact\ndef g(c=selector(['red', 'blue'])):\n    print(c)\nprint('after')"],
+    ["silent", "print(type(__builtins__.__pyjs_host__ if hasattr(__builtins__, '__pyjs_host__') else None))"],
+  ];
+  const its = spec.map((a) => item(...a));
+  const r = await sage(driver(runnable(its)) + "\nimport builtins\nprint('HOSTBACK', getattr(builtins, '__pyjs_host__', None) is not _sbtx_host, getattr(builtins, '__pyjs_display__', None) is not _sbtx_disp)");
+  const st = statesOf(its, parseOutput(r.out), "", interactsOf);
+  const h = st[0].interacts?.[0];
+  check("interact: none kept without the interact chunk's check (statesOf not given it)", statesOf(its, parseOutput(r.out), "").every((x) => !x.interacts), null);
+  check("interact: the session ran", r.code === 0, r.err.slice(-600));
+  check("interact: kept with its item: its controls at their defaults (a slider, an input box, a checkbox)", st[0].s === "ok" && st[0].interacts?.length === 1 && h.name === "h" &&
+    JSON.stringify(h.controls.map((c) => [c.kind, c.name, c.value])) === JSON.stringify([["slider", "k", 2], ["input", "name", "x"], ["checkbox", "on", true]]) && h.controls[0].min === 1 && h.controls[0].max === 5, st[0]);
+  check("interact: what its function printed at the defaults", h?.out === "k^2 = 4\n", h?.out);
+  check("interact: what it showed (a plot, as a base64 SVG data URL)", h?.shows?.length === 1 && /^data:image\/svg\+xml;base64,/.test(h.shows[0].src ?? ""), h?.shows?.map((x) => String(x.src ?? x.text).slice(0, 60)));
+  check("interact: an item without one has none; the next interact is its own item's", !st[1].interacts && st[1].latex === "2" && st[2].interacts?.[0]?.name === "g" && st[2].interacts[0].controls[0].kind === "selector" && st[2].interacts[0].out === "red\n", st.slice(1, 3));
+  check("interact: the runtime's own host and display are back after the Run", /HOSTBACK True True/.test(r.out), r.out.split("\n").filter((l) => l.startsWith("HOSTBACK")));
+  // (the session's output is untrusted: interactsOf keeps only known kinds and fields, bounded; a "plot" that isn't an
+  //  SVG is never an image)
+  const bad = interactsOf([{ spec: { id: 1, name: "f", controls: [{ kind: "script", name: "x" }, { kind: "slider", name: "n", value: 3, min: 0, max: "9;evil" }] }, out: "x".repeat(INTERACT_LIMITS.text + 10), shows: [{ svg: "<script>alert(1)</script>" }, { text: 7 }] }, ...Array(20).fill({ spec: {} })]);
+  check("interact: only known control kinds, numeric bounds only; text bounded; a non-SVG show is no image; at most INTERACT_LIMITS.n", bad.length === INTERACT_LIMITS.n && bad[0].controls.length === 1 && bad[0].controls[0].max === undefined && bad[0].out.length === INTERACT_LIMITS.text && !bad[0].shows[0].src && bad[0].shows[1].text === "", bad[0]);
+  // (as the renderer shows them: controls drawn, not live; the output; the note; everything escaped)
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  const html = interactsHtml(st[0].interacts);
+  check("interact: drawn as disabled controls at their defaults, the output, and the note", /<input type="range" disabled min="1" max="5" step="1" value="2"><span class="si-v">2<\/span>/.test(html) && /<input type="checkbox" disabled checked>/.test(html) && /<pre class="si-out">k\^2 = 4\n<\/pre>/.test(html) && /<img class="sageplot" alt="a plot" src="data:image\/svg\+xml;base64,/.test(html) && /<div class="si-note">Interactive in Sagebrush<\/div>/.test(html), html.slice(0, 400));
+  const evil = interactsHtml([{ id: 1, controls: [{ kind: "input", name: '"><script>', value: '"><img src=x onerror=alert(1)>' }, { kind: "selector", options: ["<b>"], value: 0 }], out: "<script>", shows: [{ src: "javascript:alert(1)" }] }]);
+  check("interact: names, values, options and output escaped; a src that isn't a base64 SVG is never an image", !/<script>|<img src=x|<b>|javascript:/.test(evil), evil);
+  check("interact: a stale one is marked as stale values are", /^<div class="sageinteract sagestale" title="Changed since the last Run/.test(interactsHtml(st[0].interacts, true)), null);
+  // (the worker's renderer: a placeholder holding them as escaped JSON, said interactive, for the page's chunk to draw)
+  const at = blockHtml(stateOf(savedStates([real(...spec[0])], st.slice(0, 1)), 0, real(...spec[0])), real(...spec[0]), esc, 1);
+  const data = /^<div class="sageinteract-at" data-ia="([^"]*)"><div class="si-note">Interactive in Sagebrush<\/div><\/div>$/.exec(at);
+  const unesc = (t) => t.replace(/&(amp|lt|gt|quot);/g, (_, e) => ({ amp: "&", lt: "<", gt: ">", quot: '"' })[e]);
+  check("interact: a sagesilent's block is a placeholder holding its interacts (escaped JSON), said interactive", !!data && JSON.stringify(JSON.parse(unesc(data[1]))) === JSON.stringify(st[0].interacts), at.slice(0, 200));
+}
 {
   const spec = [
     ["silent", "var('t')\nx = 2^10"],
