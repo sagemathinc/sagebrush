@@ -1983,30 +1983,6 @@
   "owner": "raster/image I/O",
   "row": "inv-31"
  },
- "engine/raster/src/wasm.rs ::  :: pub limit_pages: u32, #0": {
-  "class": "2",
-  "owner": "raster/image I/O"
- },
- "engine/raster/src/wasm.rs ::  :: static mut LIMIT_PAGES: usize = usize::MAX; #0": {
-  "class": "2",
-  "owner": "raster/image I/O"
- },
- "engine/raster/src/wasm.rs ::  :: static mut REFUSAL: Refusal = Refusal { need_pages: 0, size_pages: 0, limit_pages: 0 }; #0": {
-  "class": "none",
-  "owner": "raster/image I/O"
- },
- "engine/raster/src/wasm.rs :: alloc :: if now.saturating_add(pages) > limit { #0": {
-  "class": "2",
-  "owner": "raster/image I/O"
- },
- "engine/raster/src/wasm.rs :: alloc :: if prev == usize::MAX { #0": {
-  "class": "2",
-  "owner": "raster/image I/O"
- },
- "engine/raster/src/wasm.rs :: alloc :: let limit = *addr_of!(LIMIT_PAGES); #0": {
-  "class": "2",
-  "owner": "raster/image I/O"
- },
  "engine/sym/src/definite.rs :: endpoints :: .or_else(|_| crate::limit::try_limit(&crate::rewrite::simplify_log(big_f), x, pt, dir)) #0": {
   "class": "none",
   "owner": "symbolic calculus (@sagebrush-matlab)",
@@ -2071,6 +2047,76 @@
  "engine/sym/tests/stage2_interrupt.rs :: stop_in_each_lll :: let b = Budget::new(Limits { memory, ..Limits::DEFAULT }); #1": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/wasmheap/src/lib.rs ::  :: pub limit_pages: AtomicU32, #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "wasm-heap-page-bound"
+   }
+  },
+  "owner": "wasm heap (shared by raster and the mp core)"
+ },
+ "engine/wasmheap/src/lib.rs ::  :: static LIMIT_PAGES: AtomicUsize = AtomicUsize::new(usize::MAX); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "wasm-heap-page-bound"
+   }
+  },
+  "owner": "wasm heap (shared by raster and the mp core)"
+ },
+ "engine/wasmheap/src/lib.rs ::  :: static REFUSAL: Refusal = Refusal { need_pages: AtomicU32::new(0), size_pages: AtomicU32::new(0), limit_pages: AtomicU32::new(0) }; #0": {
+  "class": "none",
+  "owner": "wasm heap (shared by raster and the mp core)"
+ },
+ "engine/wasmheap/src/lib.rs :: alloc :: if now.saturating_add(pages) > limit { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "wasm-heap-page-bound"
+   }
+  },
+  "owner": "wasm heap (shared by raster and the mp core)"
+ },
+ "engine/wasmheap/src/lib.rs :: alloc :: if prev == usize::MAX { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "wasm-heap-page-bound"
+   }
+  },
+  "owner": "wasm heap (shared by raster and the mp core)"
+ },
+ "engine/wasmheap/src/lib.rs :: alloc :: let limit = LIMIT_PAGES.load(Relaxed); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "wasm-heap-page-bound"
+   }
+  },
+  "owner": "wasm heap (shared by raster and the mp core)"
+ },
+ "engine/wasmheap/src/lib.rs :: alloc :: refuse(pages, now, limit); #0": {
+  "class": "none",
+  "owner": "wasm heap (shared by raster and the mp core)"
+ },
+ "engine/wasmheap/src/lib.rs :: begin :: LIMIT_PAGES.store(wasm32::memory_size(0).saturating_add(pages as usize), Relaxed); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "wasm-heap-page-bound"
+   }
+  },
+  "owner": "wasm heap (shared by raster and the mp core)"
+ },
+ "engine/wasmheap/src/lib.rs :: refuse :: REFUSAL.limit_pages.store(limit as u32, Relaxed); #0": {
+  "class": "none",
+  "owner": "wasm heap (shared by raster and the mp core)"
+ },
+ "engine/wasmheap/src/lib.rs :: refuse :: fn refuse(need: usize, size: usize, limit: usize) { #0": {
+  "class": "none",
+  "owner": "wasm heap (shared by raster and the mp core)"
  },
  "engine/web/src/hmfq.rs ::  :: const MAX_DISC: i64 = 1 << 20; #0": {
   "class": "3",
