@@ -93,9 +93,9 @@ function resolve(path, spec) {
 export const CLOUD = /^web\/cloud(\/|$)/;
 /** The directory's name, for messages elsewhere (which may not spell it: the segment rule). */
 export const CLOUD_ROOT = "web/cloud/";
-/** The checker's own two files name web/cloud/ as data: exempt from the segment rule only, never from the import,
- * package and workspace rules. */
-export const NAMES_CLOUD_AS_DATA = new Set(["scripts/check-no-server-imports.mjs", "scripts/test-check-no-server-imports.mjs"]);
+/** Files that name web/cloud/'s paths as data, to check or classify them: the checker and its test, and CI's path
+ * classifier and its test.  Exempt from the segment rule only, never from the import, package and workspace rules. */
+export const NAMES_CLOUD_AS_DATA = new Set(["scripts/check-no-server-imports.mjs", "scripts/test-check-no-server-imports.mjs", "scripts/ci-paths.mjs", "test/ci-paths.test.ts"]);
 /** Exact texts that use the word `cloud` as data, not a path: removed before the segment rule, nothing else of
  * their file is excused. */
 export const CLOUD_WORD_AS_DATA = [
