@@ -1,8 +1,8 @@
 {
  "v": 1,
- "reason": "Confinement phase 2 (William approved the build Nov 6; spec r3.2, packet r3, astra's and daybreak3's DESIGN CLEAR): a document's code may change files only under its write trees. The worker checks each change against the trees it holds and a shared epoch (fail closed); the page keeps each interpreter generation's ceiling and admits every change again at the queue's final, locked admission; a rename is one batch; a refusal asks once, in the bar, for the file's folder. The CLI embeds the page's script, the worker its check, the runner page its policy relay. Measured by size-measure --record (bun 1.4.4, Node 24.21.0, CI's order; base b285fd1b and this branch on it, at the same path): cli/pyjs.cjs +9568 (r2-r4: input checks, the prompt's lifecycle, Allow once's lifetime); engine/sagebrush-worker.js +1604; engine/runner/index.html +174; engine/sagebrush-notebook.js +187, the last three ceilings raised by their markers. Markers: each with the usual 64 B slack.",
+ "reason": "Confinement phase 2 (William approved the build Nov 6; spec r3.2, packet r3, astra's and daybreak3's DESIGN CLEAR): a document's code may change files only under its write trees. The worker checks each change against the trees it holds and a shared epoch (fail closed); the page keeps each interpreter generation's ceiling and admits every change again at the queue's final, locked admission; a rename is one batch; a refusal asks once, in the bar, for the file's folder. The CLI embeds the page's script, the worker its check, the runner page its policy relay. Measured by size-measure --record (bun 1.4.4, Node 24.21.0, CI's order; base 6c2622b8, current master, and this branch merged on it): cli/pyjs.cjs +9584 (r2-r4: input checks, the prompt's lifecycle, Allow once's lifetime); engine/sagebrush-worker.js +1604; engine/runner/index.html +174; engine/sagebrush-notebook.js +187, the last three ceilings master's plus their markers. Markers: each with the usual 64 B slack.",
  "bytes": {
-  "cli/pyjs.cjs": 9632,
+  "cli/pyjs.cjs": 9648,
   "engine/sagebrush-worker.js": 1668,
   "engine/runner/index.html": 238,
   "engine/sagebrush-notebook.js": 251
