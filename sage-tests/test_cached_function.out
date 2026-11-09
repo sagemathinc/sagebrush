@@ -47,4 +47,6 @@ a.m.cache -> (3, 3)
 a.m.is_in_cache() -> True
 a.h.precompute([1,2]); cache -> (None, [(((1,), ()), 1), (((2,), ()), 2)])
 a.m.__name__ -> 'm'
-slots class m() -> 1
+C.f() -> 1
+C.g(C(), 3) -> 3
+C().g(3) -> 3

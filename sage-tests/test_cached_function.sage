@@ -1,8 +1,9 @@
-# Sage's cached_function and cached_method (lazy module _sage_cached; the RH book's figure code decorates with
-# both): the cache key is the positional parameters with defaults filled in plus the sorted remaining keyword
-# arguments; methods keep their results per instance. Addresses in reprs are masked. Not pinned: an undocumented
-# function's __doc__ (Sage adds its source-file line) and the "takes from 1 to 2 positional arguments" text (the
-# Python runtime's own arity message).
+# Sage's cached_function and cached_method (lazy module _sage_cached): the cache key is the positional parameters
+# with defaults filled in plus the sorted remaining keyword arguments; methods keep their results per instance.
+# Addresses in reprs are masked. Not pinned: an undocumented function's __doc__ (Sage adds its source-file line);
+# the Python runtime's own arity and missing-argument texts ("takes from 1 to 2 positional arguments", "C.g()
+# missing ..."); a class with __slots__ and no __dict__, whose cached method Sagebrush refuses (no cache outside the
+# instance: test/cached-function.test.ts).
 import re as _re
 def _mask(s):
     return _re.sub(r"0x[0-9a-f]+", "0x...", s)
@@ -87,9 +88,15 @@ show("a.m.cache", lambda: (a.m(), a.m.cache))
 show("a.m.is_in_cache()", lambda: a.m.is_in_cache())
 show("a.h.precompute([1,2]); cache", lambda: (a.h.precompute([1, 2]), sorted(a.h.cache.items())))
 show("a.m.__name__", lambda: a.m.__name__)
-class S:
-    __slots__ = ()
+# (third section) a cached method called through its class, as Sage: with no arguments the class is the
+# instance; with arguments it is the plain function (board's B1 on #912)
+class C:
     @cached_method
-    def m(self):
+    def f(self):
         return 1
-show("slots class m()", lambda: S().m())
+    @cached_method
+    def g(self, n):
+        return n
+show("C.f()", lambda: C.f())
+show("C.g(C(), 3)", lambda: C.g(C(), 3))
+show("C().g(3)", lambda: C().g(3))

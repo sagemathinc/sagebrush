@@ -141,16 +141,14 @@ def cached_function(f=None, key=None, **options):
     return CachedFunction(f, key=key)
 
 
-_INSTANCE_CACHES = {}
-
-
 class CachedMethodCaller(CachedFunction):
     """A cached method bound to an instance (or to its class): the results
     are kept per instance."""
 
-    def __init__(self, method, inst):
+    def __init__(self, method, inst, owner=None):
         self._method = method
         self._inst = inst
+        self._owner = owner
         self.f = method.f
         self._key = None
         self._sig = method._sig
@@ -165,9 +163,11 @@ class CachedMethodCaller(CachedFunction):
         return self._method._store(self._inst)
 
     def __call__(self, *args, **kwds):
-        _check_arity(self.f, self._sig, args, 1)
         if self._inst is None:
-            raise TypeError("%s() needs an instance" % self.__name__)
+            # (through the class, as Sage: the plain function, so A.g(3)
+            # is Python's own missing-argument error)
+            return self.f(*args, **kwds)
+        _check_arity(self.f, self._sig, args, 1)
         c = self.cache
         k = self._sig.key(args, kwds)
         hash(k)
@@ -193,7 +193,8 @@ class CachedMethodCallerNoArgs(CachedMethodCaller):
 
     def __call__(self):
         if self._inst is None:
-            raise TypeError("%s() needs an instance" % self.__name__)
+            # (through the class, as Sage: the class is the instance, A.f())
+            return self.f(self._owner)
         c = self._method._store(self._inst)
         try:
             return c[((), ())]
@@ -226,24 +227,22 @@ class CachedMethod:
         self._noargs = not self._sig.names and not self._sig.varargs
 
     def _store(self, inst):
-        # the instance's dictionary when it has one; else kept by identity,
-        # with the instance (a class with __slots__)
+        # the instance's own dictionary, so the results live exactly as long
+        # as the instance (astra's C1 on #912: no table outside it)
         name = "_cache__" + self.__name__
         d = getattr(inst, "__dict__", None)
-        if d is not None:
-            c = d.get(name)
-            if c is None:
-                c = d[name] = {}
-            return c
-        e = _INSTANCE_CACHES.get((id(inst), name))
-        if e is None or e[0] is not inst:
-            e = _INSTANCE_CACHES[(id(inst), name)] = (inst, {})
-        return e[1]
+        if d is None:
+            raise NotImplementedError("cached_method on an instance with no __dict__ (a class with __slots__) is not "
+                                      "available in Sagebrush yet")
+        c = d.get(name)
+        if c is None:
+            c = d[name] = {}
+        return c
 
     def __get__(self, inst, cls=None):
         if self._noargs:
-            return CachedMethodCallerNoArgs(self, inst)
-        return CachedMethodCaller(self, inst)
+            return CachedMethodCallerNoArgs(self, inst, cls)
+        return CachedMethodCaller(self, inst, cls)
 
 
 def cached_method(f=None, **options):
