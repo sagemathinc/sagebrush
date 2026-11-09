@@ -94,7 +94,8 @@ for name in modules:
             if getattr(type(e), "_pytest_skip", False):
                 emit(full, "skipped")
                 continue
-            emit(full, "FAIL %s: %s" % (type(e).__name__, str(e).split("\n")[0][:200]))
+            # (an empty message leaves no trailing space: the records are committed text)
+            emit(full, ("FAIL %s: %s" % (type(e).__name__, str(e).split("\n")[0][:200])).rstrip())
             if os.environ.get("PYPI_TESTS_TRACEBACK"):
                 traceback.print_exc()
     sys.stdout.flush()

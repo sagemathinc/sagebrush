@@ -212,7 +212,10 @@ def search(query, limit=20, mode=None):
     phrase = query.strip().lower()
     hits = [(score(e, words, phrase), e) for e in index_for(mode)]
     hits = [h for h in hits if h[0] > 0]
-    hits.sort(key=lambda h: (-h[0], len(h[1]["name"]), h[1]["name"]))
+    # (on an equal score, a catalog entry, reviewed and with its examples, before an
+    # auto-extracted one, catalog False: a docstring's summary or a curated PyPI
+    # package's; then the shorter name.  Mirrored in web/docsearch.ts)
+    hits.sort(key=lambda h: (-h[0], h[1].get("catalog") is False, len(h[1]["name"]), h[1]["name"]))
     return hits[:limit]
 
 
