@@ -35,7 +35,13 @@ const b64 = (s) => {
  * run in the document's folder, imports a helper.py beside the .tex, and its sys.path ends with that folder, so a
  * statistics.py there doesn't hide the standard one (the CLI's own, src/latex-cli.ts). The previous Run's folder is
  * taken off, and the modules imported from either dropped: a helper is imported afresh each Run, its edits seen, as by
- * a fresh sage process; and a document in another folder imports its own. */
+ * a fresh sage process; and a document in another folder imports its own.
+ * @interact in a Run, a Sagebrush extension (William, Nov 8: "@interact inside sagesilent/sageblock as a documented
+ * Sagebrush extension"; upstream SageTeX and Sage 10.10 raise NameError on it): each interact an item makes is kept with
+ * that item's result (its "interacts"), its controls (the spec _interact gives a host that draws them) and what its
+ * function shows at the defaults, its printing and what it show()s (a plot as its SVG, anything else as text), bounded.
+ * The script is that host only while it runs: the runtime's own host and display are put back after it, a Stop
+ * included (the loop's finally). */
 export function driver(items, dir = null) {
   return `import json as _sbtx_json, io as _sbtx_io, sys as _sbtx_sys, traceback as _sbtx_tb, base64 as _sbtx_b64
 from sagebrush.preparse import preparse as _sbtx_pp
@@ -99,29 +105,74 @@ def _sbtx_deps_line():
         if _sbtx_under(_sbtx_f, _sbtx_d):
             _sbtx_dl.add(_sbtx_os.path.normpath(_sbtx_f)[len(_sbtx_d.rstrip("/")) + 1:])
     print("\\x1eSBTXD" + _sbtx_json.dumps(sorted(_sbtx_dl)))
-for _sbtx_it in _sbtx_json.loads(_sbtx_b64.b64decode("${b64(JSON.stringify(items))}").decode("utf-8")):
-    _sbtx_buf = _sbtx_io.StringIO()
-    _sbtx_old = _sbtx_sys.stdout
-    _sbtx_sys.stdout = _sbtx_buf
-    try:
-        _sbtx_ev = _sbtx_it["mode"] in ("sage", "plot")
-        _sbtx_code = _sbtx_cs(_sbtx_it["code"].strip() if _sbtx_ev else _sbtx_it["code"], "<sagetex>", "eval" if _sbtx_ev else "exec") if _sbtx_cs else _sbtx_pp(_sbtx_it["code"])
-        if _sbtx_it["mode"] == "sage":
-            _sbtx_r = {"s": "ok", "latex": str(latex(eval(_sbtx_code, _sbtx_g)))}
-        elif _sbtx_it["mode"] == "plot":
-            _sbtx_v = eval(_sbtx_code, _sbtx_g)
-            if not hasattr(_sbtx_v, "_repr_svg_"):
-                raise TypeError("sageplot needs a graphics object (a plot), not " + type(_sbtx_v).__name__)
-            _sbtx_r = {"s": "ok", "svg": _sbtx_v._repr_svg_()}
-        else:
-            exec(_sbtx_code, _sbtx_g)
-            _sbtx_r = {"s": "ok"}
-    except Exception:
-        _sbtx_r = {"s": "error", "msg": _sbtx_tb.format_exc()}
-    finally:
-        _sbtx_sys.stdout = _sbtx_old
-    _sbtx_deps_line()
-    print("\\x1eSBTX" + _sbtx_json.dumps(_sbtx_r))
+import builtins as _sbtx_bi
+try:
+    _sbtx_h0
+except NameError:
+    _sbtx_h0 = getattr(_sbtx_bi, "__pyjs_host__", None)
+    _sbtx_d0 = getattr(_sbtx_bi, "__pyjs_display__", None)
+_sbtx_ia = []
+_sbtx_cur = None
+def _sbtx_host(op, *a):
+    global _sbtx_cur
+    if op == "interact":
+        if len(_sbtx_ia) >= 8:
+            return False
+        _sbtx_ia.append({"spec": _sbtx_json.loads(a[0]), "out": "", "shows": []})
+        return True
+    if op == "target":
+        if a and a[0] is not None:
+            _sbtx_cur = next((x for x in reversed(_sbtx_ia) if x["spec"].get("id") == a[0]), None)
+            if _sbtx_cur is not None:
+                _sbtx_cur["was"] = _sbtx_sys.stdout
+                _sbtx_cur["buf"] = _sbtx_sys.stdout = _sbtx_io.StringIO()
+        elif _sbtx_cur is not None:
+            _sbtx_sys.stdout = _sbtx_cur.pop("was")
+            _sbtx_cur["out"] = _sbtx_cur.pop("buf").getvalue()[:4000]
+            _sbtx_cur = None
+        return None
+    return _sbtx_h0(op, *a) if _sbtx_h0 is not None else None
+def _sbtx_disp(v):
+    if _sbtx_cur is None:
+        return _sbtx_d0(v) if _sbtx_d0 is not None else False
+    if len(_sbtx_cur["shows"]) < 4:
+        try:
+            _sbtx_cur["shows"].append({"svg": v._repr_svg_()} if hasattr(v, "_repr_svg_") else {"text": repr(v)[:4000]})
+        except Exception:
+            _sbtx_cur["shows"].append({"text": _sbtx_tb.format_exc(limit=1)[-400:]})
+    return True
+_sbtx_bi.__pyjs_host__ = _sbtx_host
+_sbtx_bi.__pyjs_display__ = _sbtx_disp
+try:
+    for _sbtx_it in _sbtx_json.loads(_sbtx_b64.b64decode("${b64(JSON.stringify(items))}").decode("utf-8")):
+        _sbtx_ia = []
+        _sbtx_buf = _sbtx_io.StringIO()
+        _sbtx_old = _sbtx_sys.stdout
+        _sbtx_sys.stdout = _sbtx_buf
+        try:
+            _sbtx_ev = _sbtx_it["mode"] in ("sage", "plot")
+            _sbtx_code = _sbtx_cs(_sbtx_it["code"].strip() if _sbtx_ev else _sbtx_it["code"], "<sagetex>", "eval" if _sbtx_ev else "exec") if _sbtx_cs else _sbtx_pp(_sbtx_it["code"])
+            if _sbtx_it["mode"] == "sage":
+                _sbtx_r = {"s": "ok", "latex": str(latex(eval(_sbtx_code, _sbtx_g)))}
+            elif _sbtx_it["mode"] == "plot":
+                _sbtx_v = eval(_sbtx_code, _sbtx_g)
+                if not hasattr(_sbtx_v, "_repr_svg_"):
+                    raise TypeError("sageplot needs a graphics object (a plot), not " + type(_sbtx_v).__name__)
+                _sbtx_r = {"s": "ok", "svg": _sbtx_v._repr_svg_()}
+            else:
+                exec(_sbtx_code, _sbtx_g)
+                _sbtx_r = {"s": "ok"}
+        except Exception:
+            _sbtx_r = {"s": "error", "msg": _sbtx_tb.format_exc()}
+        finally:
+            _sbtx_sys.stdout = _sbtx_old
+        if _sbtx_ia:
+            _sbtx_r["interacts"] = [{"spec": x["spec"], "out": x["out"], "shows": x["shows"]} for x in _sbtx_ia]
+        _sbtx_deps_line()
+        print("\\x1eSBTX" + _sbtx_json.dumps(_sbtx_r))
+finally:
+    _sbtx_bi.__pyjs_host__ = _sbtx_h0
+    _sbtx_bi.__pyjs_display__ = _sbtx_d0
 `;
 }
 
@@ -152,7 +203,7 @@ export function msgOf(msg) {
 
 /** The results file's states for `items` (the worker's check items: {key, mode, code?, err?}), from the session's
  * results `got` (one per runnable item, in order) and why it ended early, if it did (`stopped`: its message). */
-export function statesOf(items, got, stopped) {
+export function statesOf(items, got, stopped, interactsOf = null) {
   const states = [];
   let j = 0;
   for (const it of items) {
@@ -171,6 +222,8 @@ export function statesOf(items, got, stopped) {
       else if (!/^\s*(<\?xml[^>]*>\s*)?<svg[\s>]/.test(svg)) states.push({ key, s: "error", msg: "the plot isn't an SVG" });
       else states.push({ key, s: "ok", src: "data:image/svg+xml;base64," + b64(svg) });
     } else states.push({ key, s: "ok" });
+    const ia = interactsOf && Array.isArray(g.interacts) ? interactsOf(g.interacts) : [];
+    if (ia.length && states[states.length - 1].s === "ok") states[states.length - 1].interacts = ia;
   }
   return states;
 }
@@ -363,7 +416,13 @@ export async function runAndSave(o) {
   // (a distinct mark: runIn's own `stopped` is why a Run that ran ended early, its results still written (astra))
   if (ran.stoppedBefore === true) return { msg: "Stopped before it ran" };
   const { out, stopped } = ran;
-  const states = statesOf(o.items, parseOutput(out), stopped);
+  // (an item's @interacts, checked by the interact chunk's interactsOf: fetched only when the session returned one, so a
+  //  document without any never fetches it (daybreak2's SIZE design for the Beamer plan's PR 3); not there, none kept)
+  const got = parseOutput(out);
+  let ia = null;
+  if (o.interacts && got.some((g) => Array.isArray(g.interacts) && g.interacts.length)) { try { ia = (await o.interacts()).interactsOf; } catch {} }
+  if (stale()) return { stale: true };
+  const states = statesOf(o.items, got, stopped, ia);
   // (no results printed at all: nothing ran, nothing to record)
   const deps = !f ? [] : parseOutput(out).length ? await depsWith(parseDeps(out), f.files, f.dir) : [];
   if (stale()) return { stale: true };

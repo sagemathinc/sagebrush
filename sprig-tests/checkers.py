@@ -19,7 +19,12 @@ printer can't make both sides agree.
 - host_limit(message, ours, expected): the oracle's refusal is on the closed
   list, and Sprig's result is the accepted value.
 - normalize(text): the one normalization of the oracle's InputForm (§7.2): its
-  three single-character operators written in ASCII.
+  seven single-character operators written in ASCII, outside string literals.
+  The table is closed: ⇾ ⧴ ⩵ as bare characters (S0), and ∧ ∨ ≠ ❘ only spaced
+  as the oracle records them (the grader's ruling, Nov 9), so a form not seen
+  is never rewritten.
+- leftover(text): the non-ASCII characters outside string literals that
+  normalize() leaves (the runner's census: each must be in a KNOWN case).
 
 A head the conversion table doesn't know makes the check fail: an expression
 the checker can't evaluate is never taken as equal.
@@ -135,7 +140,8 @@ def text_of(e):
 
 # The oracle's InputForm writes these operators as single characters; Sprig writes the ASCII forms. Nothing else is
 # normalized, and a result with any other non-ASCII character is compared as it is.
-NORMALIZE = {"\u21fe": "->", "\u29f4": ":>", "\u2a75": "=="}
+NORMALIZE = {"\u21fe": "->", "\u29f4": ":>", "\u2a75": "==",
+             " \u2227 ": " && ", " \u2228 ": " || ", " \u2260 ": " != ", " \u2758 ": " | "}
 
 
 STRING = re.compile(r'"(?:[^"\\]|\\.)*"')
@@ -150,6 +156,24 @@ def normalize(text):
         i = m.end()
     out.append(_operators(text[i:]))
     return "".join(out)
+
+
+def leftover(text):
+    """The non-ASCII characters outside string literals after normalize(), sorted."""
+    return sorted({ch for ch in STRING.sub('""', normalize(text)) if ord(ch) > 127})
+
+
+def census(paths):
+    """Every recorded case whose result, FullForm or printed output keeps a non-ASCII character outside string
+    literals after normalize(): [{"file", "id", "chars"}]."""
+    out = []
+    for path in paths:
+        rec = json.load(open(path, encoding="utf-8"))
+        for c in rec["cases"]:
+            chars = sorted(set(leftover(c["result"])) | set(leftover(c["fullform"])) | set(leftover(c["output"])))
+            if chars:
+                out.append({"file": rec["file"], "id": c["id"], "chars": chars})
+    return out
 
 
 def _operators(text):
@@ -368,4 +392,7 @@ if __name__ == "__main__":
         rows = run_controls(sys.argv[2] if len(sys.argv) > 2 else os.path.join(HERE, "checker-controls.json"))
         print(json.dumps(rows, indent=1))
         sys.exit(0 if all(r["ok"] for r in rows) else 1)
+    if sys.argv[1:2] == ["--census"]:
+        print(json.dumps(census(sys.argv[2:]), ensure_ascii=False))
+        sys.exit(0)
     sys.exit(__doc__)

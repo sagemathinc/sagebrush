@@ -32,8 +32,9 @@ function files(web) {
 check(LATEX_CAPS.raw === 240640 && LATEX_CAPS.gzip === 81408, "the caps are 235 KiB raw and 79.5 KiB gzip (@sagebrush, 2026-11-04, for the LaTeX fidelity queue)", LATEX_CAPS);
 
 // (and each lazy chunk's, as ruled: comments 16/6, comments-doc 40/16, agent 44/15.5 (@sagebrush, 2026-11-04), tools
-//  16/6, present 16/6, run 15.5/6.5 (daybreak2, Nov 7, for #804 at 9759eac5; 12/5.25 before), in KiB)
-const lazyPinned = { COMMENTS: [16384, 6144], COMMENTS_DOC: [40960, 16384], AGENT: [45056, 15872], TOOLS: [16384, 6144], PRESENT: [16384, 6144], DOC: [3584, 1792], EXAMPLES: [13312, 6144], BEAMER: [8192, 3584], RUN: [15872, 6656] };
+//  16/6, present 16/6, run 17/7 (daybreak2, Nov 8, the Beamer plan's PR 3; 15.5/6.5 for #804 before, 12/5.25 before
+//  that), interact 5/2.5 (the same design, measured), in KiB)
+const lazyPinned = { COMMENTS: [16384, 6144], COMMENTS_DOC: [40960, 16384], AGENT: [45056, 15872], TOOLS: [16384, 6144], PRESENT: [16384, 6144], DOC: [3584, 1792], EXAMPLES: [13312, 6144], BEAMER: [8192, 3584], RUN: [17408, 7168], INTERACT: [5120, 2560] };
 check(JSON.stringify(Object.fromEntries(Object.entries(LATEX_LAZY_CAPS).map(([k, c]) => [k, [c.raw, c.gzip]]))) === JSON.stringify(lazyPinned), "each lazy chunk's cap as ruled", LATEX_LAZY_CAPS);
 
 // ---- the measure, on synthetic trees
@@ -75,13 +76,13 @@ try {
   };
   const tAt = lazyTree("tools-at", zeros(LATEX_LAZY_CAPS.TOOLS.raw)), tOver = lazyTree("tools-over", zeros(LATEX_LAZY_CAPS.TOOLS.raw + 1)), tNone = lazyTree("tools-none", null);
   check(tAt.ok && !tOver.ok && tOver.raw === LATEX_LAZY_CAPS.TOOLS.raw + 1 && !tNone.present && !tNone.ok, "a lazy chunk at its cap passes, one byte over fails, a missing one is not a pass", { at: tAt.raw, over: tOver.raw, missing: tNone.present });
-  // (each chunk measured from its own file: all nine at distinct sizes, each row's name and raw its own)
+  // (each chunk measured from its own file: all ten at distinct sizes, each row's name and raw its own)
   const sizes = Object.fromEntries(Object.keys(LATEX_LAZY).map((k, i) => [k, 1000 + 111 * i]));
   const allWeb = join(tmp, "lazy-all");
   mkdirSync(join(allWeb, "dist"), { recursive: true });
   for (const [k, n] of Object.entries(sizes)) writeFileSync(join(allWeb, LATEX_LAZY[k]), zeros(n));
   const rows = latexLazy(files(allWeb));
-  check(rows.length === 9 && rows.every((r) => r.present && r.name === LATEX_LAZY[r.key] && r.raw === sizes[r.key] && r.ok), "each lazy chunk is measured from its own file (nine at distinct sizes)", rows.map((r) => [r.key, r.name, r.raw]));
+  check(rows.length === 10 && rows.every((r) => r.present && r.name === LATEX_LAZY[r.key] && r.raw === sizes[r.key] && r.ok), "each lazy chunk is measured from its own file (ten at distinct sizes)", rows.map((r) => [r.key, r.name, r.raw]));
   // (over its gzip cap with raw well within its own: random bytes just past the gzip cap)
   const tGz = lazyTree("tools-gzip", randomBytes(LATEX_LAZY_CAPS.TOOLS.gzip + 64));
   check(!tGz.ok && tGz.gzip > LATEX_LAZY_CAPS.TOOLS.gzip && tGz.raw < LATEX_LAZY_CAPS.TOOLS.raw, "a lazy chunk over its gzip cap (raw within its own) fails", { raw: tGz.raw, gzip: tGz.gzip });
@@ -105,7 +106,7 @@ else {
     const ours = [...g.js, ...Object.values(LATEX_LAZY)].map((n) => n.slice("dist/".length));
     const bad = ours.filter((f) => !existsSync(join(site, f)) || !readFileSync(join(site, f)).equals(readFileSync(join(web, "dist", f))));
     const stale = readdirSync(site).filter((f) => f.startsWith("sagebrush-latex") && !existsSync(join(web, "dist", f)));
-    check(ours.length === g.js.length + 9 && bad.length === 0 && stale.length === 0, `the site serves each of this build's ${ours.length} LaTeX editor files: web/site/public's copy is web/dist's, byte for byte, and none stale`, { bad, stale });
+    check(ours.length === g.js.length + 10 && bad.length === 0 && stale.length === 0, `the site serves each of this build's ${ours.length} LaTeX editor files: web/site/public's copy is web/dist's, byte for byte, and none stale`, { bad, stale });
   }
   // (the app ships every one of them too: app/build-frontend.mjs copies web/dist's files by name (FILES), and one left
   //  off it is missing from the native app only (grader's #824 R7))

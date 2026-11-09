@@ -72,6 +72,12 @@ function publicModules() {
 const INTROSPECT = String.raw`
 import sys, json, types
 mods = json.loads(MODS)
+# (a registry package's submodules: recorded only when its sagebrush.json declares them, python.modules, or when
+# they are already recorded, so that nothing recorded is removed; @sagebrush's ruling, Nov 9: an internal module the
+# introspection reaches is not a contract)
+pkg_roots, keep = json.loads(PKG_MODS), set(json.loads(KEEP))
+def undeclared(sub):
+    return sub not in pkg_roots and sub not in keep and any(sub.startswith(r + ".") for r in pkg_roots)
 out = {"modules": {}, "failed": {}, "prefixes": set()}
 import re
 seg = re.compile(r"^(_[a-z][a-z0-9]*_)")
@@ -142,7 +148,7 @@ def visit(name, depth):
         except Exception: continue
         if isinstance(v, types.ModuleType):
             sub = getattr(v, "__name__", "")
-            if sub == name + "." + n: visit(sub, depth + 1)
+            if sub == name + "." + n and not undeclared(sub): visit(sub, depth + 1)
             continue
         names[n] = entry(v, getattr(v, "__module__", None) == name or isinstance(v, type))
     out["modules"][name] = {"names": names}
@@ -157,7 +163,15 @@ function generate() {
   const tmp = mkdtempSync(join(tmpdir(), "sb-core-api-"));
   try {
     const py = join(tmp, "introspect.py");
-    writeFileSync(py, "MODS = " + JSON.stringify(JSON.stringify(publicModules())) + "\n" + INTROSPECT);
+    // (the registry packages' declared modules, and the module names already recorded: see undeclared())
+    const reg = JSON.parse(readFileSync(join(root, "packages", "registry.json"), "utf8"));
+    const keep = existsSync(FILE) ? Object.keys(JSON.parse(readFileSync(FILE, "utf8")).modules) : [];
+    writeFileSync(
+      py,
+      "MODS = " + JSON.stringify(JSON.stringify(publicModules())) + "\n" +
+        "PKG_MODS = " + JSON.stringify(JSON.stringify(Object.keys(reg.modules).sort())) + "\n" +
+        "KEEP = " + JSON.stringify(JSON.stringify(keep.sort())) + "\n" + INTROSPECT,
+    );
     const text = execFileSync("node", [cli, py], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, env: { ...process.env, SAGEBRUSH_NO_COMPILE_CACHE: "1" } });
     return JSON.parse(text);
   } finally {

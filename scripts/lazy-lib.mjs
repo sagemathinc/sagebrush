@@ -14,8 +14,9 @@ export function isLazyLib(p) {
 // The keyed family blobs beyond pathlib's (design/rill.md §6.3, daybreak2's ruling for Rill A1.1): each family is a
 // blob of its own, decoded only by the first read of one of its files, so a Python or Sage start decodes none and a
 // Rill start only Rill's. A family is listed here only once it has files (rill-more, rill-ggplot2, rill-dplyr and
-// rill-data join as their first files land); its files are exactly those its entries name.
-export const LAZY_FAMILIES = { rill: ["_rill/"] };
+// rill-data join as their first files land); its files are exactly those its entries name.  Sprig's (design/sprig-mvp.md
+// §6.3) holds its start's files; sprig-more and sprig-plot join as their first files land.
+export const LAZY_FAMILIES = { rill: ["_rill/"], sprig: ["_sprig/"] };
 
 /** The keyed family of library path `p`, or null (pathlib's blob, isLazyLib, is the unkeyed one). */
 export function familyOf(p) {

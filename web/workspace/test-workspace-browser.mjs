@@ -234,6 +234,8 @@ try {
   await click("#wssidebar .ftoast button");
   check(await until(`${W}.stat("/Course plan.board.json").then((e) => !!e)`), "…which puts it back");
   // Trash: Restore and Empty
+  // (the row drawn again after Undo before its ⋯ is pressed: the workspace has it back before the sidebar shows it)
+  await until(`!!document.querySelector(${JSON.stringify(rowSel("/Course plan.board.json") + " .more")})`);
   await click(rowSel("/Course plan.board.json") + " .more");
   await menu("Move to Trash");
   await until(`${W}.stat("/Trash/Course plan.board.json").then((e) => !!e)`);

@@ -15,7 +15,7 @@
   },
   "cli/packages.gen.js": {
    "exact": true,
-   "max": 115084
+   "max": 787869
   },
   "cli/pyjs.cjs": {
    "exact": false,
@@ -598,6 +598,13 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/pkg-pypi-mpmath.src": {
+   "exact": false,
+   "ceiling": 2005118,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/pkg-pypi-tabulate.src": {
    "exact": false,
    "ceiling": 75776,
@@ -635,7 +642,7 @@
   },
   "engine/lib/sage-more.src": {
    "exact": false,
-   "ceiling": 491890,
+   "ceiling": 496484,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -649,7 +656,7 @@
   },
   "engine/lib/sage.src": {
    "exact": false,
-   "ceiling": 2982380,
+   "ceiling": 2985033,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -664,6 +671,20 @@
   "engine/lib/sci.src": {
    "exact": false,
    "ceiling": 410859,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/sprig.pre": {
+   "exact": false,
+   "ceiling": 459120,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/sprig.src": {
+   "exact": false,
+   "ceiling": 102050,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -712,7 +733,7 @@
   },
   "engine/sagebrush-notebook.js": {
    "exact": false,
-   "ceiling": 240283,
+   "ceiling": 240343,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -740,14 +761,14 @@
   },
   "engine/sagebrush-worker.js": {
    "exact": false,
-   "ceiling": 1665864,
+   "ceiling": 1682919,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
   },
   "registry/packages": {
    "exact": true,
-   "max": 4
+   "max": 5
   },
   "engine/lib/mod-statistics.src": {
    "exact": false,
@@ -865,6 +886,7 @@
    "engine/lib/mod-zoneinfo.src": 84951,
    "engine/lib/pkg-cremona-small.src": 137656,
    "engine/lib/pkg-pypi-sortedcontainers.src": 126368,
+   "engine/lib/pkg-pypi-mpmath.src": 2005054,
    "engine/lib/pkg-pypi-tabulate.src": 68887,
    "engine/lib/pkg-scipy-io.pre": 61258,
    "engine/lib/pkg-scipy-io.src": 12963,
@@ -875,6 +897,8 @@
    "engine/lib/sage.src": 2888811,
    "engine/lib/sci.pre": 2029167,
    "engine/lib/sci.src": 399276,
+   "engine/lib/sprig.pre": 417382,
+   "engine/lib/sprig.src": 92773,
    "engine/lib/tzdata": 257239,
    "engine/runner/index.html": 8924,
    "engine/sagebrush-analyze.js": 357310,

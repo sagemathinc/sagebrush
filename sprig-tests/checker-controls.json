@@ -260,8 +260,8 @@
   {
    "name": "normalize: nothing else is changed",
    "class": "normalize",
-   "theirs": "x ≠ 1",
-   "ours": "x != 1",
+   "theirs": "x ≥ 1",
+   "ours": "x >= 1",
    "expect": "fail"
   },
   {
@@ -505,6 +505,97 @@
    "theirs": "x → y",
    "ours": "x → y",
    "expect": "pass"
+  },
+  {
+   "name": "normalize: and, spaced as recorded",
+   "class": "normalize",
+   "theirs": "!a ∧ b",
+   "ours": "!a && b",
+   "expect": "pass"
+  },
+  {
+   "name": "normalize: or, spaced as recorded",
+   "class": "normalize",
+   "theirs": "a ∧ b ∨ c",
+   "ours": "a && b || c",
+   "expect": "pass"
+  },
+  {
+   "name": "normalize: unequal, spaced as recorded",
+   "class": "normalize",
+   "theirs": "a ≠ b",
+   "ours": "a != b",
+   "expect": "pass"
+  },
+  {
+   "name": "normalize: alternatives, spaced as recorded",
+   "class": "normalize",
+   "theirs": "a ❘ b ❘ c",
+   "ours": "a | b | c",
+   "expect": "pass"
+  },
+  {
+   "name": "normalize: and inside a string is kept",
+   "class": "normalize",
+   "theirs": "\"a ∧ b\"",
+   "ours": "\"a ∧ b\"",
+   "expect": "pass"
+  },
+  {
+   "name": "normalize: or inside a string is kept",
+   "class": "normalize",
+   "theirs": "\"a ∨ b\"",
+   "ours": "\"a ∨ b\"",
+   "expect": "pass"
+  },
+  {
+   "name": "normalize: unequal inside a string is kept",
+   "class": "normalize",
+   "theirs": "\"a ≠ b\"",
+   "ours": "\"a ≠ b\"",
+   "expect": "pass"
+  },
+  {
+   "name": "normalize: alternatives inside a string is kept",
+   "class": "normalize",
+   "theirs": "\"a ❘ b\"",
+   "ours": "\"a ❘ b\"",
+   "expect": "pass"
+  },
+  {
+   "name": "normalize: an and inside a string is not rewritten",
+   "class": "normalize",
+   "theirs": "\"a ∧ b\"",
+   "ours": "\"a && b\"",
+   "expect": "fail"
+  },
+  {
+   "name": "normalize: and outside, and the same character inside a string",
+   "class": "normalize",
+   "theirs": "{a ∧ b, \"c ∧ d\"}",
+   "ours": "{a && b, \"c ∧ d\"}",
+   "expect": "pass"
+  },
+  {
+   "name": "normalize: an unspaced and, a form not recorded, is kept as it is",
+   "class": "normalize",
+   "theirs": "a∧b",
+   "ours": "a∧b",
+   "expect": "pass"
+  },
+  {
+   "name": "normalize: an unspaced and is not rewritten",
+   "class": "normalize",
+   "theirs": "a∧b",
+   "ours": "a&&b",
+   "expect": "fail"
+  },
+  {
+   "name": "normalize: an unspaced unequal is not rewritten",
+   "class": "normalize",
+   "theirs": "a≠b",
+   "ours": "a!=b",
+   "expect": "fail"
   },
   {
    "name": "an unknown class never passes",
