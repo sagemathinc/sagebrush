@@ -368,7 +368,7 @@ Against the agent endpoint on the reference server (Miniflare), a real local fol
 - **Each row of §2.2's table,** with and without a base, and with `--up` and `--down`: the plan, then the result on both sides, then a second run's plan is empty.
 - **The first run never deletes:** a folder pair with files only here, only there, and different on both; no delete in the plan.
 - **Conflicts:** both changed; the conflict name already taken; the result is the same on both sides, and both versions exist.
-- **Deletions:** each way, the Trash and the holding folder contents, `--restore`; the many-deletions guard at 50 and 51 files and at 25%.
+- **Deletions:** each way, the Trash and the holding folder contents, `--restore`; a run that both deletes `a` here and replaces `b` by a download: `--restore` puts back `a` only; `b`'s old copy stays in the holding folder, and the run's report names its path there; the many-deletions guard at 50 and 51 files and at 25%.
 - **Crash mid-apply:** the CLI killed after each action kind, after a move-aside, and between a download's temporary file and its rename; the next run cleans up, plans only what's left, and the end state is what an uninterrupted run gives.
 - **A browser edit during apply:** a write to the same file through the page between the plan and the upload: the upload is refused (409), nothing is overwritten, and the next run plans it as changed there (or a conflict).
 - **A local edit during apply:** between the plan and a download or upload, and between the move-aside's check and the no-replace rename (a new file at the name): skipped, nothing overwritten, and planned again next run.
