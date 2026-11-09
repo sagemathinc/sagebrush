@@ -56,7 +56,7 @@ export type Env = SyncEnv & ShareEnv & {
   /** tests only: CoCalc's purge of this account id fails to reach its account object */
   SYNC_TEST_FAIL_PURGE?: string;
   /** a test seam: the Worker's immediate delete after a failed finalize is off, so durability is shown without it */
-  SYNC_TEST_NO_WORKER_DELETE?: string; SYNC_PREAUTH?: RateLimit; SYNC_FILES_LIMIT?: RateLimit; SYNC_ADMIN_LIMIT?: RateLimit; SYNC_SITE_ORIGIN?: string; LIMITS_KEY?: string };
+  SYNC_TEST_NO_WORKER_DELETE?: string; SYNC_PREAUTH?: RateLimit; SYNC_AGENT_FAIL?: RateLimit; SYNC_FILES_LIMIT?: RateLimit; SYNC_ADMIN_LIMIT?: RateLimit; SYNC_SITE_ORIGIN?: string; LIMITS_KEY?: string };
 
 /** An admin call's body: at most this many bytes (LIMIT-5E2-1). */
 const ADMIN_BODY = 4096;
@@ -124,14 +124,21 @@ const STATUS: Partial<Record<SyncError["code"], number>> = { conflict: 409, forb
  * the body read, at most AGENT.bodyBytes, and the account object named by the token's hash.
  */
 async function handleAgent(req: Request, env: Env): Promise<Response> {
-  if (!agentOn(env) || !env.SYNC_ACCOUNT || !env.SYNC_PREAUTH) return err(404, "not found");
-  if (!(await env.SYNC_PREAUTH.limit({ key: req.headers.get("cf-connecting-ip") ?? "unknown" })).success) return err(429, "too many requests", { retry_after: 60_000 });
+  // (both IP limits are part of the switch: without either, agents are off)
+  if (!agentOn(env) || !env.SYNC_ACCOUNT || !env.SYNC_PREAUTH || !env.SYNC_AGENT_FAIL) return err(404, "not found");
+  const ip = req.headers.get("cf-connecting-ip") ?? "unknown";
+  if (!(await env.SYNC_PREAUTH.limit({ key: ip })).success) return err(429, "too many requests", { retry_after: 60_000 });
+  // a failed authentication, here or in the account object, counts against the IP's own limit (§7: 10 a minute); past
+  // it the answer is 429.  (The binding can't be read without counting, so only failures are counted: a request that
+  // authenticates is never refused by it.)
+  const failed = async () =>
+    (await env.SYNC_AGENT_FAIL!.limit({ key: ip })).success ? err(401, "unauthorized") : err(429, "rate", { limit: "failed_auth_per_ip", retry_after: 60_000 });
   if (req.headers.get("origin") !== null) return err(403, "cross-site request");
   const v = new URL(req.url).pathname.match(/^\/api\/agent\/v1\/([a-z]{1,16})$/);
   if (!v) return err(404, "not found");
   if (req.method !== "POST") return err(405, "POST only");
   const t = await tokenOf(req.headers.get("authorization"), env.GRANT_TAG_KEY!);
-  if (!t) return err(401, "unauthorized");
+  if (!t) return failed();
   if (!/^application\/json\b/.test(req.headers.get("content-type") ?? "")) return err(415, "JSON only");
   const text = await readBounded(req, AGENT.bodyBytes);
   if (text === null) return err(413, "limit", { limit: "body_bytes", max: AGENT.bodyBytes });
@@ -142,7 +149,7 @@ async function handleAgent(req: Request, env: Env): Promise<Response> {
     return err(400, "invalid", { message: "a JSON object" });
   }
   const r = await env.SYNC_ACCOUNT.get(env.SYNC_ACCOUNT.idFromName("acct:" + t.hash)).agentCall({ hash: t.hash, id: t.id, secret: t.secret, verb: v[1], params });
-  return json(r.body, r.status);
+  return r.status === 401 ? failed() : json(r.body, r.status);
 }
 
 /** The sync API's response to req, or null if req is not for it. */

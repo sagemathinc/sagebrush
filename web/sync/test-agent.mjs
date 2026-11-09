@@ -6,7 +6,7 @@
 // DEV only.  In Miniflare with real Durable Objects (SQLite).
 //
 //   node web/sync/test-agent.mjs
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
@@ -61,6 +61,8 @@ await section("units", async () => {
     ["another key's tag", "Bearer " + [...p.slice(0, 4), tag(hash, id, "other")].join(".")], ["a short secret", "Bearer " + [p[0], p[1], p[2], p[3].slice(1), p[4]].join(".")],
     ["an upper-case hash", "Bearer " + [p[0], p[1].toUpperCase(), ...p.slice(2)].join(".")], ["a fifth dot", "Bearer " + t + ".x"],
   ];
+  const h63 = "a".repeat(63), h65 = "a".repeat(65);
+  bad.push(["no Bearer at all", t], ["a 63-hex hash, its tag right for it", `Bearer sbg1.${h63}.${id}.${secret}.${tag(h63, id)}`], ["a 65-hex hash, its tag right for it", `Bearer sbg1.${h65}.${id}.${secret}.${tag(h65, id)}`]);
   for (const [what, h] of bad) ok((await U.tokenOf(h, KEY)) === null, "a token is refused by its form or tag: " + what);
   // (the secret alone isn't checked here: it is the account object's, so a token differing only in its secret passes the Worker)
   ok((await U.tokenOf("Bearer " + [p[0], p[1], p[2], b64url(Buffer.alloc(32, 8)), p[4]].join("."), KEY)) !== null, "the secret isn't the Worker's to check");
@@ -107,14 +109,18 @@ const shareBindings = { SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOK
 const plan = { storage_bytes: 1 << 30, max_file_bytes: 1 << 20, sync: { enabled: true, version_bytes: 1 << 20, read_bytes_per_day: 1 << 30 } };
 const cocalc = async () => Response.json(plan);
 const objects = { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } };
-const ratelimits = (id) => ({ SYNC_PREAUTH: { namespace_id: id, simple: { limit: 1_000_000, period: 60 } } });
-const listed = [A, B, L, RT, LG, DL, NS].join(",");
+const ratelimits = (id, fails = 1_000_000) => ({ SYNC_PREAUTH: { namespace_id: id, simple: { limit: 1_000_000, period: 60 } }, SYNC_AGENT_FAIL: { namespace_id: id + "9", simple: { limit: fails, period: 60 } } });
+const RO = "a9a9a9a9-0009-4a9a-8a9a-a9a9a9a9a909"; // read-only
+const listed = [A, B, L, RT, LG, DL, NS, RO].join(",");
 const mf = new Miniflare(convertV4MiniflareOptions({
   workers: [
     { ...base, name: "on", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_AGENT: "1", GRANT_TAG_KEY: KEY, SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["sagebrush.test/*"], outboundService: cocalc, ratelimits: ratelimits("3001") },
     { ...base, name: "off", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, GRANT_TAG_KEY: KEY, SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["off.test/*"], outboundService: cocalc, ratelimits: ratelimits("3002") },
     { ...base, name: "nokey", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_AGENT: "1", SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["nokey.test/*"], outboundService: cocalc, ratelimits: ratelimits("3003") },
-    { ...base, name: "noip", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_AGENT: "1", GRANT_TAG_KEY: KEY, SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["noip.test/*"], outboundService: cocalc, ratelimits: { SYNC_PREAUTH: { namespace_id: "3004", simple: { limit: 2, period: 60 } } } },
+    { ...base, name: "noip", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_AGENT: "1", GRANT_TAG_KEY: KEY, SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["noip.test/*"], outboundService: cocalc, ratelimits: { ...ratelimits("3004"), SYNC_PREAUTH: { namespace_id: "3004", simple: { limit: 2, period: 60 } } } },
+    // (§7's 10 failed authentications a minute per IP, on its own Worker; and a Worker without that binding)
+    { ...base, name: "fail", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_AGENT: "1", GRANT_TAG_KEY: KEY, SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["fail.test/*"], outboundService: cocalc, ratelimits: ratelimits("3005", 10) },
+    { ...base, name: "nofail", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_AGENT: "1", GRANT_TAG_KEY: KEY, SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["nofail.test/*"], outboundService: cocalc, ratelimits: { SYNC_PREAUTH: { namespace_id: "3006", simple: { limit: 1_000_000, period: 60 } } } },
   ],
 }));
 {
@@ -133,6 +139,21 @@ const post = (s, path, body, origin = SITE) => at(origin, path, { method: "POST"
 const get = (s, path, origin = SITE) => at(origin, path, { headers: { cookie: s, origin } });
 const agent = (token, verb, params = {}, headers = {}, origin = SITE) =>
   at(origin, "/api/agent/v1/" + verb, { method: "POST", headers: { authorization: "Bearer " + token, "content-type": "application/json", ...headers }, body: typeof params === "string" ? params : JSON.stringify(params) });
+const objectOf = async (id) => {
+  const ns = await mf.getDurableObjectNamespace("SYNC_ACCOUNT", "on");
+  return ns.get(ns.idFromName("acct:" + hashOf(id)));
+};
+// (the account object restarted, its storage kept: what it held in memory is gone)
+// (it answers again before the test goes on: a call that reached it while it stopped would be lost)
+const restart = async (id) => {
+  await (await objectOf(id)).crash().catch(() => {});
+  for (let i = 0; i < 50; i++) {
+    const r = await seam(id, {}).catch(() => null);
+    if (r?.status === 200) return;
+    await new Promise((res) => setTimeout(res, 50));
+  }
+  throw new Error("the account object didn't come back after its restart");
+};
 const seam = (id, v) => at(SITE, "/__test/agent?account=" + id, { method: "POST", body: JSON.stringify(v) });
 const make = async (s, scopes, more = {}, origin = SITE) => {
   const r = await post(s, "/api/sync/v1/grants", { agent: "Claude Code on laptop", scopes, ...more }, origin);
@@ -148,10 +169,12 @@ async function enabled(id, origin = SITE) {
 const answer = async (r) => ({ status: r.status, ...(await r.json().catch(() => ({}))) });
 
 await section("the switch", async () => {
-  for (const origin of ["https://off.test", "https://nokey.test"]) {
+  for (const origin of ["https://off.test", "https://nokey.test", "https://nofail.test"]) {
     const s = await enabled(A, origin);
-    ok((await post(s, "/api/sync/v1/grants", { agent: "x", scopes: [{ path: "/", access: "read" }] }, origin)).status === 404, `${origin}: making a grant is a 404 while the switch is off`);
-    ok((await get(s, "/api/sync/v1/grants", origin)).status === 404, `${origin}: and so is the list`);
+    if (origin !== "https://nofail.test") {
+      ok((await post(s, "/api/sync/v1/grants", { agent: "x", scopes: [{ path: "/", access: "read" }] }, origin)).status === 404, `${origin}: making a grant is a 404 while the switch is off`);
+      ok((await get(s, "/api/sync/v1/grants", origin)).status === 404, `${origin}: and so is the list`);
+    }
     const t = `sbg1.${hashOf(A)}.abcdefghij23.${b64url(Buffer.alloc(32))}.${tag(hashOf(A), "abcdefghij23")}`;
     ok((await agent(t, "stat", { path: "/" }, {}, origin)).status === 404, `${origin}: an agent's request is a 404`);
   }
@@ -187,6 +210,9 @@ await section("before any object: the Worker", async () => {
   const r = await answer(await agent(altered, "stat", { path: "/Algebra/x" }));
   ok(r.status === 401 && r.error === "unauthorized", "a token whose secret is right but whose tag is altered gets 401 (from the Worker: the object would take it): " + r.status);
   ok((await agent("x", "stat", { path: "/" })).status === 401, "a malformed token gets 401");
+  ok((await at(SITE, "/api/agent/v1/stat", { method: "POST", headers: { authorization: tA, "content-type": "application/json" }, body: JSON.stringify({ path: "/Algebra/x" }) })).status === 401, "a good token without \"Bearer \" gets 401");
+  const [, hh, ii, ss] = parts(tA);
+  ok((await agent(`sbg1.${hh.slice(1)}.${ii}.${ss}.${tag(hh.slice(1), ii)}`, "stat", { path: "/Algebra/x" })).status === 401, "a 63-hex hash with its own right tag gets 401 from the Worker");
   ok((await at(SITE, "/api/agent/v1/stat", { method: "POST", headers: { "content-type": "application/json", cookie: sA }, body: "{}" })).status === 401, "a session cookie is never read: without a token, 401");
   const made = `sbg1.${hashOf("someone-else")}.abcdefghij23.${b64url(Buffer.alloc(32))}.${b64url(Buffer.alloc(16))}`;
   ok((await agent(made, "stat", { path: "/" })).status === 401, "a made-up account hash with a made-up tag gets 401");
@@ -218,6 +244,12 @@ await section("the grant's check, scope, and the verbs (not built)", async () =>
   ok((await answer(await agent(tA, "list", { folder: "/" }))).error === "scope", "nor the folder above it");
   ok((await answer(await agent(tA, "stat", { path: "/Notes/../Algebra2" }))).status === 400, "a path normPath refuses is refused, never resolved into scope");
   ok((await answer(await agent(tA, "stat", { folder: "/Algebra" }))).status === 400 && (await answer(await agent(tA, "stat", []))).status === 400, "stat needs its path");
+  // (the workspace API's own schema, schema.json: a field it doesn't know, or the wrong type, is refused before scope)
+  ok((await answer(await agent(tA, "stat", { path: "/Algebra/x", extra: true }))).status === 400, "stat with a field the schema doesn't have is refused");
+  ok((await answer(await agent(tA, "list", { folder: "/Notes", recursive: "yes" }))).status === 400, "list with recursive not a boolean is refused");
+  ok((await answer(await agent(tA, "list", { folder: "/Notes", cursor: 5 }))).status === 400, "list with cursor not a string is refused");
+  ok((await answer(await agent(tA, "list", { folder: "/Notes", recursive: true, cursor: "c" }))).error === "not_built", "list with both options well typed passes to not_built");
+  ok((await answer(await agent(tA, "stat", { path: "/Algebra2", extra: 1 }))).status === 400, "the schema is checked before scope (a bad call out of scope is 400, not 403)");
   for (const v of ["read", "write", "mkdir", "remove", "rename", "history"]) ok((await answer(await agent(tA, v, { path: "/Algebra/x" }))).error === "not_built", v + " isn't built: not_built");
   const u = await answer(await agent(tA, "frob", {}));
   ok(u.status === 404 && u.error === "unknown_verb", "an unknown verb is a 404");
@@ -278,6 +310,16 @@ await section("50 live grants at most", async () => {
   ok((await make(s, [{ path: "/z", access: "read" }])).status === 201, "a grant is made beside 51 revoked ones");
   const after = (await (await get(s, "/api/sync/v1/grants")).json()).grants;
   ok(after.filter((g) => g.revoked !== null).length === 50 && !after.some((g) => g.id === oldest), "only the newest 50 revoked grants are kept: the oldest is gone: " + after.filter((g) => g.revoked !== null).length);
+  // (daybreak2's L1) and with no grant made after: revoking every live one, then one expiring, still lists 50 dead
+  const live = after.filter((g) => g.revoked === null);
+  for (const g of live.slice(1)) await post(s, `/api/sync/v1/grants/${g.id}/revoke`, {});
+  const r1 = (await (await get(s, "/api/sync/v1/grants")).json()).grants;
+  ok(r1.length === 51 && r1.filter((g) => g.revoked !== null).length === 50, "revoking 49 live grants, with no grant made, lists 1 live and 50 dead: " + r1.length);
+  await seam(L, { expire: live[0].id });
+  const r2 = (await (await get(s, "/api/sync/v1/grants")).json()).grants;
+  ok(r2.length === 50 && r2.some((g) => g.id === live[0].id), "and once the last expires, 50 dead, the newly expired one among them: " + r2.length);
+  const held = (await (await seam(L, {})).json()).grants;
+  ok(held === 51, "and the table holds exactly those, plus the one just expired (trimmed at each revoke): " + held);
 }, 120_000);
 
 await section("rates: the grant's, then the account's", async () => {
@@ -290,14 +332,40 @@ await section("rates: the grant's, then the account's", async () => {
   ok(r.slice(0, 3).every((x) => x.error === "not_built"), "wrong secrets don't use the grant's requests (each is refused before its rates)");
   ok(r[3].status === 429 && r[3].error === "rate" && r[3].limit === "requests_per_minute" && r[3].retry_after > 0, "the 4th in a minute, with 3 a minute: 429 requests_per_minute, with retry_after: " + JSON.stringify(r[3]));
   ok((await answer(await agent(g2.token, "stat", { path: "/x" }))).error === "not_built", "another grant has its own");
-  await seam(RT, { perMinute: 100, perHour: 2, accountPerMinute: 1000 });
+  // (kept, not in memory: daybreak2's L3) the object restarted on its storage still refuses, then refills with time
+  await restart(RT);
+  await seam(RT, { perMinute: 3, perHour: 1000, accountPerMinute: 1000 });
+  const after = await answer(await agent(g1.token, "stat", { path: "/x" }));
+  ok(after.status === 429 && after.limit === "requests_per_minute" && after.retry_after > 0, "after the object restarts, the spent minute is still spent: " + JSON.stringify(after));
+  await seam(RT, { minuteMs: 600 });
+  await new Promise((res) => setTimeout(res, 400));
+  ok((await answer(await agent(g1.token, "stat", { path: "/x" }))).error === "not_built", "and it refills as time passes (3 a 0.6 s window here)");
+  await seam(RT, { perMinute: 100, perHour: 2, accountPerMinute: 1000, minuteMs: 60_000, resetRates: true });
   await agent(g1.token, "stat", { path: "/x" }), await agent(g1.token, "stat", { path: "/x" });
   const h = await answer(await agent(g1.token, "stat", { path: "/x" }));
   ok(h.status === 429 && h.limit === "requests_per_hour", "the hour's limit too: " + JSON.stringify(h));
-  await seam(RT, { perMinute: 100, perHour: 1000, accountPerMinute: 3 });
+  await seam(RT, { perMinute: 100, perHour: 1000, accountPerMinute: 3, resetRates: true });
   const a = [];
   for (const t of [g1.token, g2.token, g1.token, g2.token]) a.push(await answer(await agent(t, "stat", { path: "/x" })));
   ok(a.slice(0, 3).every((x) => x.error === "not_built") && a[3].status === 429 && a[3].limit === "account_requests_per_minute", "all of an account's grants together: " + JSON.stringify(a[3]));
+  await restart(RT);
+  await seam(RT, { perMinute: 100, perHour: 1000, accountPerMinute: 3 });
+  ok((await answer(await agent(g2.token, "stat", { path: "/x" }))).limit === "account_requests_per_minute", "the account's too, across a restart");
+});
+
+await section("10 failed authentications a minute per IP", async () => {
+  const F = "https://fail.test";
+  const s = await enabled(A, F);
+  const g = await make(s, [{ path: "/", access: "read" }], {}, F);
+  ok(g.status === 201, "a grant on this Worker");
+  const wrongSecret = ["sbg1", ...parts(g.token).slice(1, 3), b64url(Buffer.alloc(32, 3)), parts(g.token)[4]].join(".");
+  const codes = [];
+  // (failures at the Worker, a bad tag, and at the object, a wrong secret, count alike)
+  for (let i = 0; i < 11; i++) codes.push((await agent(i % 2 ? wrongSecret : "x", "stat", { path: "/x" }, {}, F)).status);
+  ok(codes.slice(0, 10).every((c) => c === 401) && codes[10] === 429, "10 failures a minute from one IP get 401, the 11th 429: " + codes);
+  const r = await answer(await agent(wrongSecret, "stat", { path: "/x" }, {}, F));
+  ok(r.status === 429 && r.limit === "failed_auth_per_ip", "past it, a failure says which limit: " + JSON.stringify(r));
+  ok((await answer(await agent(g.token, "stat", { path: "/x" }, {}, F))).error === "not_built", "a request that authenticates is never refused by it");
 });
 
 await section("the access log", async () => {
@@ -308,10 +376,13 @@ await section("the access log", async () => {
   await agent(g.token, "mkdir", { path: "/A/y" });
   const wrong = ["sbg1", ...parts(g.token).slice(1, 3), b64url(Buffer.alloc(32, 1)), parts(g.token)[4]].join(".");
   for (let i = 0; i < 5; i++) await agent(wrong, "stat", { path: "/A/x" });
+  // (astra S1: when a refusal was last logged is kept with the grant, so a restart of the object doesn't reset it)
+  await restart(LG);
+  for (let i = 0; i < 5; i++) await agent(wrong, "stat", { path: "/A/x" });
   await agent(g2.token, "stat", { path: "/A/x" });
   const l = await logOf(s);
   const mine = l.rows.filter((r) => r.grant_id === g.grant.id).reverse();
-  ok(mine.length === 4, "a row for each request of the grant, and one for its five refusals in a minute: " + mine.length);
+  ok(mine.length === 4, "a row for each request of the grant, and one for its ten refusals in a minute, across a restart of the object: " + mine.length);
   ok(mine[0].verb === "stat" && mine[0].paths === '["/A/x"]' && mine[0].result === "not_built" && mine[0].agent === "Claude Code on laptop", "a row says the verb, its path, the answer and the agent");
   ok(mine[1].result === "scope" && mine[1].paths === '["/B"]' && mine[2].verb === "mkdir" && mine[2].paths === null && mine[3].result === "unauthorized", "a refusal of scope, a verb not built, and a refused secret are rows too");
   const all = JSON.stringify(l);
@@ -324,12 +395,34 @@ await section("the access log", async () => {
   ok(kept.rows.length === 5 && kept.rows[0].paths === '["/z6"]' && kept.rows[4].paths === '["/z2"]', "past its bound, the oldest rows go first: " + kept.rows.map((r) => r.paths));
   const p1 = await logOf(s, "?before=" + kept.rows[2].id);
   ok(p1.rows.length === 2 && p1.rows[0].id === kept.rows[3].id && p1.more === false, "it pages, newest first");
-  // rows older than the log's days go too (90; here 0.2 s), a few with each new row
-  await seam(LG, { logRows: 100_000, logMs: 200 });
+  // (a page of 2 here; 100 by default)
+  await seam(LG, { logPage: 2 });
+  const q1 = await logOf(s), q2 = await logOf(s, "?before=" + q1.rows[1].id), q3 = await logOf(s, "?before=" + q2.rows[1].id);
+  ok(q1.rows.length === 2 && q1.more === true && q2.rows.length === 2 && q2.more === true && q3.rows.length === 1 && q3.more === false, "a full page says there is more, and before reaches the rest: " + [q1, q2, q3].map((q) => q.rows.length + "/" + q.more));
+  ok([...q1.rows, ...q2.rows, ...q3.rows].map((r) => r.id).join() === kept.rows.map((r) => r.id).join(), "the pages together are the log, in order");
+  await seam(LG, { logPage: 100 });
+  ok((await get(s, "/api/sync/v1/grants/log?before=abc")).status === 400 && (await get(s, "/api/sync/v1/grants/log?before=1234567890123456")).status === 400, "before= that isn't a number, or has 16 digits, is refused");
+  // rows older than the log's days (90; here 0.2 s): never shown, with no new request; and deleted by the alarm, 3 a step
+  // here, so the 5 rows take two steps
+  // (the age lowered without arming the alarm: the rows are still stored when read, so only the read's own filter
+  // can hide them)
+  await seam(LG, { logRows: 100_000, logMs: 200, logSweep: 3, noArm: true });
   await new Promise((res) => setTimeout(res, 300));
+  const stored = (await (await seam(LG, {})).json()).log;
+  ok(stored === 5 && (await logOf(s)).rows.length === 0, "rows past the log's age aren't shown, though they are still stored and no request has come since: " + stored);
+  // (the restart drops the alarm and the lowered bounds: they are set again, without arming, so only the object's own
+  // arm() at its start can have the alarm sweep)
+  await restart(LG);
+  ok((await seam(LG, { logRows: 100_000, logSweep: 3 })).status === 200 && (await seam(LG, { logMs: 200 })).status === 200, "(the bounds set again after the restart)");
+  let left = -1;
+  for (let i = 0; i < 40 && left !== 0; i++) {
+    left = (await (await seam(LG, {})).json()).log;
+    if (left) await new Promise((res) => setTimeout(res, 100));
+  }
+  ok(left === 0, "and the alarm deletes them, a page at a time, until none is left: " + left);
   await agent(g2.token, "stat", { path: "/new" });
   const aged = await logOf(s);
-  ok(aged.rows.length === 1 && aged.rows[0].paths === '["/new"]', "rows past the log's age are deleted: " + aged.rows.length);
+  ok(aged.rows.length === 1 && aged.rows[0].paths === '["/new"]', "a new row is shown: " + aged.rows.length);
   ok((await get(s, "/api/sync/v1/grants/log?before=x")).status === 400 && (await get(s, "/api/sync/v1/grants/log?grant=../x")).status === 400, "a bad page or grant is refused");
 });
 
@@ -343,11 +436,56 @@ await section("a deleted account's grants", async () => {
   await acct.holdPurge({ on: true });
   ok((await post(s, "/api/sync/v1/delete", { confirm: "delete", generation: gen })).status === 202, "the person deletes their synced data");
   const r = await answer(await agent(g.token, "stat", { path: "/x" }));
-  ok(r.status === 409 && r.error === "deleting", "while it is being deleted (the purge held), a request is refused: deleting: " + JSON.stringify(r));
+  ok(r.status === 409 && r.error === "deleting" && r.message === "this account's sync is being deleted", "while it is being deleted (the purge held), a request is refused: deleting: " + JSON.stringify(r));
   await acct.holdPurge({ on: false });
   for (let i = 0; i < 100 && (await (await get(s, "/api/sync/v1/status")).json()).state !== "off"; i++) await new Promise((res) => setTimeout(res, 100));
   ok((await agent(g.token, "stat", { path: "/x" })).status === 401, "once deleted, the grant is gone with the synced data");
 });
+
+await section("a read-only account: reads pass, writes are refused", async () => {
+  const s = await enabled(RO);
+  const g = await make(s, [{ path: "/", access: "write" }]);
+  await seam(RO, { readonly: true });
+  for (const v of ["write", "remove", "mkdir"]) {
+    const r = await answer(await agent(g.token, v, { path: "/x" }));
+    ok(r.status === 409 && r.error === "readonly" && r.message === "this account's sync is read-only now", `${v} on a read-only account: 409 readonly: ${JSON.stringify(r)}`);
+  }
+  ok((await answer(await agent(g.token, "list", { folder: "/" }))).error === "not_built" && (await answer(await agent(g.token, "stat", { path: "/x" }))).error === "not_built", "list and stat still pass");
+});
+
+// (an account taken off the allow list after its grant was made: the same storage, a Worker whose SYNC_ACCOUNTS no
+// longer has it; grader's A14)
+const AL = "a9a9a9a9-000a-4a9a-8a9a-a9a9a9a9a90a";
+await section("an account taken off the allow list", async () => {
+  const dir = join(process.env.TMPDIR || "/tmp", "agent-allow-" + process.pid);
+  const one = (accounts) => new Miniflare(convertV4MiniflareOptions({
+    resourcePersistencePath: dir,
+    workers: [{ ...base, name: "al", bindings: { ...shareBindings, SYNC_ACCOUNTS: accounts, SYNC_AGENT: "1", GRANT_TAG_KEY: KEY, SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["al.test/*"], outboundService: cocalc, ratelimits: ratelimits("3008") }],
+  }));
+  const AT = "https://al.test";
+  let m = one(AL);
+  try {
+    const db = await m.getD1Database("SHARE_DB", "al");
+    const mig = join(here, "../share/migrations");
+    for (const f of readdirSync(mig).filter((f) => f.endsWith(".sql")).sort())
+      for (const q of readFileSync(join(mig, f), "utf8").replace(/--.*$/gm, "").split(";").map((q) => q.trim()).filter(Boolean)) await db.prepare(q).run();
+    const go = (path, init) => dispatch(m, AT + path, { redirect: "manual", ...init });
+    const r = await go("/auth/dev", { method: "POST", headers: { origin: AT, "content-type": "application/json" }, body: JSON.stringify({ token: "dev-token", account_id: AL }) });
+    const s = r.headers.getSetCookie().map((c) => c.split(";")[0]).find((c) => c.startsWith("__Host-sb_session="));
+    const hdr = { cookie: s, origin: AT, "content-type": "application/json" };
+    ok((await go("/api/sync/v1/enable", { method: "POST", headers: hdr, body: "{}" })).status === 200, "(allow) sync on");
+    const g = await (await go("/api/sync/v1/grants", { method: "POST", headers: hdr, body: JSON.stringify({ agent: "a", scopes: [{ path: "/", access: "read" }] }) })).json();
+    const call = (mm) => dispatch(mm, AT + "/api/agent/v1/stat", { method: "POST", headers: { authorization: "Bearer " + g.token, "content-type": "application/json" }, body: JSON.stringify({ path: "/x" }) });
+    ok((await answer(await call(m))).error === "not_built", "the grant works while the account is allowed");
+    await m.dispose();
+    m = one("someone-else");
+    const r2 = await answer(await call(m));
+    ok(r2.status === 403 && r2.error === "forbidden" && r2.message === "sync isn't enabled for this account", "off the allow list, the same grant on the same storage gets 403: " + JSON.stringify(r2));
+  } finally {
+    await m.dispose().catch(() => {});
+    rmSync(dir, { recursive: true, force: true });
+  }
+}, 120_000);
 
 console.log(`${count - failures}/${count} passed`);
 await mf.dispose();

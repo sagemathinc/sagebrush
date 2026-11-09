@@ -31,6 +31,8 @@ export const AGENT = {
   /** the access log (§8): 90 days and 100,000 rows; a refusal is logged at most once a minute per grant (§2) */
   logDays: 90,
   logRows: 100_000,
+  /** rows past the log's age deleted by one alarm step */
+  logSweep: 1000,
   refusalLogMs: 60_000,
   /** a page of the person's view of the log */
   logPage: 100,
