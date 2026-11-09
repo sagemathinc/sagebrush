@@ -107,7 +107,7 @@ Every result's radius is rounded upward. The domain rules match what `engine/bal
 
 The crate is MIT OR Apache-2.0, like the other engine crates. It has no C dependencies, and the same Rust runs in the browser's WebAssembly, natively and in the Node CLI. It owns:
 - **The number type and its arithmetic:**
-  - mantissa and exponent on `sagebrush-bigint`, with an inline fast path for mantissas up to 64 bits;
+  - mantissa and exponent on `sagebrush-bigint`, with a **kernel fast path** for mantissas up to 64 bits (inside the core's arithmetic; not to be confused with the hybrid number's storage edge at 2^53, §4.6), and the **limb path** above it;
   - the five rounding modes;
   - correctly rounded `add sub mul div sqrt`, plus `pow_int`, `ldexp` and conversions;
   - the text conversions that mpmath and Sage need, with exactly mpmath's digit rules.
@@ -300,7 +300,7 @@ Every target is a ratio to a baseline measured at the same time on the same mach
    Each run is its own sharded job of at most 10 minutes, like `pypi-tests/mpmath`. If the suite on the Python backend doesn't fit, it is split into shards rather than given a longer timeout.
 3. **The fuzzer.**
    - **The reference** is CPython with mpmath 1.3.0 on the **python** backend (not gmpy), pinned, with both versions recorded with every run.
-   - **The inputs** cover every operation the phase replaces, crossed with the five rounding modes and with precisions 2, 3, 53, 54, 113, 1000 and random ones up to 10^4 bits. Operands include exact ties at the rounding bit, +0 and -0, huge and tiny exponents, cancellation (a - b with a close to b), mantissas around 64 bits (the edge of the inline fast path), and the specials inf and nan.
+   - **The inputs** cover every operation the phase replaces, crossed with the five rounding modes and with precisions 2, 3, 53, 54, 113, 1000 and random ones up to 10^4 bits. Operands include exact ties at the rounding bit, +0 and -0, huge and tiny exponents, cancellation (a - b with a close to b), mantissas around 2^64 (the edge of the kernel fast path, §4.1), mantissas around 2^53 (the edge of the hybrid number's storage, §4.6), and the specials inf and nan.
    - **The runs.** A fixed-seed subset (about 10^4 cases, about a minute) runs in PR CI. The long run is nightly on sbpool and gates on correctness and case counts only.
    - **Failures.** Every failure is stored with its seed and a minimized case, which becomes a permanent pinned row.
 4. **Negative controls, before Phase 1's first kernel ships.** The suite plus the fuzzer's CI subset must catch each of these planted faults, planted in **the binding that ships** (the type-level binding of §4.6, which bypasses more of mpmath's Python than a `libmp` swap), not only in the kernel. (Phase 0 ran the first one, floor and ceiling swapped, against the kernel: §6.4.)
@@ -308,8 +308,10 @@ Every target is a ratio to a baseline measured at the same time on the same mach
    - round-half-even off by one at a tie;
    - the sign of a zero result lost;
    - `bc` off by one with `man` unchanged;
-   - the inline 64-bit path's carry dropped;
+   - the kernel fast path's carry dropped (mantissas up to 64 bits, §4.1);
    - `normalize` not stripping trailing zeros.
+
+   - in the limb path, which Phase 1 already ships: a carry or borrow dropped at a limb boundary, or the Karatsuba/Toom split off by one at its threshold. The fuzzer's CI subset pins rows at the multiplication threshold, one limb below it and one limb above it.
 
    A planted fault that passes means the oracle is too weak, and the phase doesn't ship until it isn't. TESTS also mutates each phase's kernels independently.
    - **What the merged Phase 1 adds to the fuzzer and the suite's coverage:**
