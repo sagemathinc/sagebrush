@@ -148,7 +148,7 @@ try {
   await shot("storage");
   // (a version kept after the panel showed them: not among those freed, CORR-AC5-1)
   await ev(`${W}.write("/data/notes.txt", "v6").then(() => 1)`);
-  await panelButton(/^Free$/);
+  await panelButton(/^Free…$/);
   check(await until(`${W}.history("/data/notes.txt").then((h) => h.length === 1)`), "Free N of old versions: those shown go, after asking; one kept since stays");
   check(await ev(`${W}.version("/data/notes.txt", 0).then((b) => new TextDecoder().decode(b) === "v5")`), "…the one kept since: v5");
   check(/Delete all 2 earlier versions of data files/.test(dialogs.at(-1) ?? ""), "…saying how many: " + dialogs.at(-1));

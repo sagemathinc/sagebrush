@@ -5,16 +5,16 @@ Sagebrush keeps your notebooks, boards and files in this browser, on this device
 
 ## What the panel shows {#panel}
 
-- **The bar:** how much this site holds, of what this browser allows it.
+- **The bar:** how much space Sagebrush uses in this browser, out of what the browser allows.
 - **Notebooks and boards**, and **data files:** how many, and how large.
-- **Old versions:** the earlier versions of your data files. **Free** deletes them all, after asking. The files as they are now stay.
-- **Trash:** what you deleted. **Show** opens it; **Empty** deletes it for good, after asking.
+- **Old versions:** the earlier versions of your data files. **Free…** deletes them all, after asking. The files as they are now stay.
+- **Trash:** what you deleted. **Show** opens it; **Empty…** deletes it for good, after asking.
 
-## Nothing is cleared without asking {#kept}
+## What can be cleared {#kept}
 
-Nothing of yours is cleared without asking: only caches the page can fetch or compute again. Old versions and Trash go only when you delete them.
+Sagebrush clears only caches it can fetch or compute again. Old versions and Trash go only when you delete them.
 
-A browser may clear a site's storage when the device runs short of space, unless it agreed to keep it. When the panel shows **Keep**, this browser hasn't agreed yet: press it to ask. A browser may say no until the site is used more, or installed. When it has agreed, the bar's line says **kept**. Sagebrush also asks once, at your first edit.
+A browser may clear a site's storage when the device runs short of space, unless it has agreed to keep it. When the panel shows **Keep**, this browser hasn't agreed yet: press it to ask. A browser may say no until the site is used more, or installed. When it has agreed, the panel says **kept**. Sagebrush also asks once, at your first edit.
 
 ## Export everything {#export}
 
@@ -29,7 +29,7 @@ The line beside it says when you last exported on this device. When that was mor
 With sync on, your notebooks sync between your own browsers and devices, through Sagebrush's server, signed in with your account. It isn't peer-to-peer, and nothing is shared with other people.
 
 - Only cells' code and text sync. Outputs never leave this browser: not to the server, not into TimeTravel, not in a push to GitHub.
-- If the same cell is edited on two devices before they sync, the edits are merged, as in CoCalc. Both are kept.
+- If the same cell is edited on two devices before they sync, the edits are merged. Both are kept.
 - TimeTravel shows every version since the notebook first synced, on every device, including ones added later.
 - Clearing TimeTravel isn't available yet for a synced notebook.
 - If a notebook can't sync (the server refuses its changes, or a change is too large), the Sync line says so, its changes stay in this browser, and the panel lists them.
@@ -43,6 +43,6 @@ With sync on, your notebooks sync between your own browsers and devices, through
 
 ## When sync is off in this browser {#sync-off}
 
-- **This browser synced with an older version of Sagebrush:** sync stays off here. To use sync again, clear this site's data in your browser's settings. Download anything you want to keep first, because clearing site data deletes this browser's copy of your files.
+- **This browser synced with an older version of Sagebrush:** sync stays off here. To use sync again, clear this site's data in your browser's settings. Export everything first (**Export all current files (.zip)**), because clearing site data deletes this browser's copy of your files.
 - **Sync data couldn't be read:** reload the page and try again.
 - **Sign in to use sync:** sign in from **Share…**.

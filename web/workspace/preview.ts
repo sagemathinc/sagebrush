@@ -455,7 +455,7 @@ export async function openStorage(w: Workspace, host: StorageHost): Promise<void
         host.say(ok ? "This browser will keep it" : "This browser didn't agree to keep it");
         draw();
       });
-      ask.title = kept === false ? "This browser may clear it when space runs short: ask it to keep it" : "Ask this browser to keep it";
+      ask.title = "Ask this browser not to clear your files when space runs short";
       keep.append(" · ", ask);
     }
     use0.append(keep);
@@ -469,7 +469,7 @@ export async function openStorage(w: Workspace, host: StorageHost): Promise<void
     line("Data files", `${use.files.count} · ${fmtSize(use.files.bytes)}`);
     let free: HTMLElement | undefined;
     if (use.versions.count && w.actor === "person") {
-      free = button("Free", async () => {
+      free = button("Free…", async () => {
         if (!confirm(`Delete all ${use.versions.count} earlier versions of data files (${fmtSize(use.versions.bytes)})? The files as they are now stay. This can't be undone.`)) return;
         // (none newer than the newest shown, kept since: CORR-AC5-1)
         try { const n = await w.dropVersions("/", { expect: { maxId: use.versions.maxId } }); host.say(`${fmtSize(n)} of old versions deleted`); } catch (err) { host.fail(err); }
@@ -480,7 +480,7 @@ export async function openStorage(w: Workspace, host: StorageHost): Promise<void
     }
     line("Old versions", `${use.versions.count} · ${fmtSize(use.versions.bytes)}`, free);
     const trashBtns = h("span", {}, button("Show", () => { close(); host.showTrash(); }));
-    if (use.trash.count) trashBtns.append(" ", button("Empty", async () => { await host.emptyTrash(); draw(); }, "danger"));
+    if (use.trash.count) trashBtns.append(" ", button("Empty…", async () => { await host.emptyTrash(); draw(); }, "danger"));
     line("Trash", `${use.trash.count} item${use.trash.count === 1 ? "" : "s"}${use.trash.bytes ? ` · ${fmtSize(use.trash.bytes)} of files` : ""}`, trashBtns);
     // (files kept the old way, being moved beside the index: capabilities §2b; read where they are meanwhile)
     const mig = await migrationState(w).catch(() => ({}) as MigrationState);
