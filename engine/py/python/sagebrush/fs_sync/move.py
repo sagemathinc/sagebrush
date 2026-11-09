@@ -7,9 +7,11 @@ delete and replace local files without ever losing a byte. No CLI and no network
 - **Folder handles:** every path is opened one component at a time from an open folder (LOCAL_DIR's, or the holding
   folder's), each `O_NOFOLLOW | O_DIRECTORY`, so a link anywhere on the way fails the open and is never followed. Every
   component is the name as spelled on disk (the scan's `raw`), not its NFC form (§4.4).
-- **The holding folder:** `<state>/trash/<run id>/<relative path>`, fs-sync's own: each folder in it, from `trash`
-  down, made 0700 and checked through its handle to be ours and exactly 0700 before a file enters it. It must be on the same filesystem as LOCAL_DIR (§2.4), so that a move there is one rename and can
-  be undone.
+- **The holding folder:** `<state>/trash/<run id>/deleted/<relative path>` for the files a run deleted here, and
+  `…/replaced/<relative path>` for those a download replaced (@sagebrush): `--restore` puts back `deleted/` only.
+  It is fs-sync's own: each folder in it, from `trash` down, made 0700 and checked through its handle to be ours and
+  exactly 0700 before a file enters it. It must be on the same filesystem as LOCAL_DIR (§2.4), so that a move there
+  is one rename and can be undone.
 - **Move aside** (a delete here, or a file a download replaces): one no-replace rename into the holding folder, then
   the file is checked there, its planned size first (never past the scan's file cap) and then its hash; if it isn't the planned file it is moved back, and if its name was taken meanwhile it
   stays held and is reported.
@@ -38,10 +40,16 @@ _CLOEXEC = getattr(os, "O_CLOEXEC", 0)
 _DIR_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | _NOFOLLOW | _CLOEXEC
 _RUN_ID = re.compile(r"[0-9A-Za-z][0-9A-Za-z_-]{0,63}")       # (always fullmatch: "$" would let a final newline in)
 MAX_CONFLICT_TRIES = 8              # names tried for a conflict copy when each is taken in turn meanwhile
+DELETED, REPLACED = "deleted", "replaced"      # a run folder's parts: --restore puts back deleted/ only
 
 
 class Occupied(Exception):
-    """The target name is taken (by anything: a file, folder or link)."""
+    """The target name is taken (by anything: a file, folder or link). From install, `tried`: the conflict names it
+    tried, each taken in turn."""
+
+    def __init__(self, rel, tried=()):
+        super().__init__(rel)
+        self.tried = list(tried)
 
 
 class NoReplace(Exception):
@@ -197,6 +205,22 @@ class Holding:
             self.fd = None
 
 
+class Part:
+    """One part of a run's holding folder, DELETED or REPLACED (made and checked as the rest), open by handle: what
+    move_aside and restore take as their holding folder."""
+
+    def __init__(self, holding, name):
+        if name not in (DELETED, REPLACED):
+            raise ValueError("not a part of a run's holding folder: %r" % (name,))
+        self.run_id, self.name = holding.run_id, name
+        self.fd = own_dirs(holding.fd, [name])
+
+    def close(self):
+        if self.fd is not None:
+            os.close(self.fd)
+            self.fd = None
+
+
 # ---- the moves
 
 def _hook(hooks, name, rel):
@@ -261,14 +285,16 @@ def install(root_fd, rel, tmp, computer, hooks=None):
                 return True
             except FileNotFoundError:
                 return False
+        tried = []
         for _ in range(MAX_CONFLICT_TRIES):
             beside = conflict_name(rel, computer, taken)
             try:
                 rename_noreplace(d, tmp, d, beside.rsplit("/", 1)[-1])
             except Occupied:
+                tried.append(beside)
                 continue
             raise InstalledBeside(beside)
-        raise Occupied(rel)
+        raise Occupied(rel, tried)
     finally:
         os.close(d)
 

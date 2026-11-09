@@ -4,6 +4,7 @@ exclusive mkdir, what is held counted in entries by a streaming bounded walk tha
 admission counting the run's files and new folders, one run at a time (the trash/ lock), and the cleanup of runs
 older than 30 days after a complete count. Every bound is lowered here; no large fixtures."""
 
+import errno
 import os
 import re
 import shutil
@@ -12,6 +13,7 @@ import tempfile
 import time
 
 from sagebrush.fs_sync import holding as H
+from sagebrush.fs_sync import move as M
 
 NOW = 1_794_200_000                 # a fixed "now" (November 2026, UTC)
 DAY = 86400
@@ -48,6 +50,12 @@ class Lowered:
     def __exit__(self, *a):
         for k, v in self.saved.items():
             setattr(H, k, v)
+
+
+def cleanup(s, now):
+    """A run's cleanup, under its own Session (as a run does it first)."""
+    with H.Session.open(s) as session:
+        return session.cleanup(now)
 
 
 def open_fds():
@@ -129,14 +137,14 @@ def test_usage_counts_entries():
 
 
 def test_depth_is_the_scans_64_below_the_run():
-    # HOLD_LEVELS is handle levels: trash/, the run folder, then the mirror's folders (64 in the product)
-    assert H.HOLD_LEVELS == 2 + 64
+    # HOLD_LEVELS is handle levels: trash/, the run folder, its part, then the mirror's folders (64 in the product)
+    assert H.HOLD_LEVELS == 3 + 64
     d, s = state()
     try:
-        with Lowered(HOLD_LEVELS=2 + 3):                               # the mirror's bound lowered to 3 folders
-            put(os.path.join(s, "trash", "run", "f1", "f2", "f3", "x.txt"), b"x")
-            assert H.usage(s)[1] == 5                                  # run, f1-f3, x.txt: 3 folders deep, counted
-            os.mkdir(os.path.join(s, "trash", "run", "f1", "f2", "f3", "f4"))
+        with Lowered(HOLD_LEVELS=3 + 3):                               # the mirror's bound lowered to 3 folders
+            put(os.path.join(s, "trash", "run", "deleted", "f1", "f2", "f3", "x.txt"), b"x")
+            assert H.usage(s)[1] == 6                                  # run, deleted, f1-f3, x.txt: 3 deep, counted
+            os.mkdir(os.path.join(s, "trash", "run", "deleted", "f1", "f2", "f3", "f4"))
             before = open_fds()
             try:
                 H.usage(s)                                             # 4: refused
@@ -183,10 +191,11 @@ def test_uncountable_fails_closed():
             os.chmod(os.path.join(trash, "run", "locked"), 0)
             try:
                 a = H.admit(s, [("a.txt", 1)])
-                assert not a.ok and a.reason == "holding-unreadable" and a.detail, a
+                assert not a.ok and a.reason == "holding-unreadable", a
+                assert a.detail == "Permission denied (%s)" % os.path.join(trash, "run", "locked"), a.detail
                 old = os.path.join(trash, H.run_id_at(NOW - 40 * DAY))
                 put(os.path.join(old, "f.txt"), b"f")
-                assert H.cleanup(s, NOW) == [] and os.path.isdir(old)  # nothing removed from a partly counted tree
+                assert cleanup(s, NOW) == [] and os.path.isdir(old)  # nothing removed from a partly counted tree
                 shutil.rmtree(old)
             finally:
                 os.chmod(os.path.join(trash, "run", "locked"), 0o700)
@@ -204,18 +213,19 @@ def test_uncountable_fails_closed():
             a = H.admit(s, [("a.txt", 1)])
         finally:
             os.scandir = real_scandir
-        assert not a.ok and a.reason == "holding-unreadable" and a.detail == "[Errno 5] Input/output error", a
-        os.scandir, calls[0] = failing, 0                               # (grader A9) and reserve keeps no lock
+        assert not a.ok and a.reason == "holding-unreadable", a
+        assert a.detail == "Input/output error (%s)" % os.path.join(trash, "run"), a
+        os.scandir, calls[0] = failing, 0                               # (grader A9) and under a Session too
         try:
-            r = H.reserve(s, [("a.txt", 1)])
+            with H.Session.open(s) as session:
+                r = session.admit([("a.txt", 1)])
         finally:
             os.scandir = real_scandir
-        assert not r.admission.ok and r.fd is None, r.admission
-        assert open_fds() == before
+        assert not r.ok and r.reason == "holding-unreadable", r
         assert open_fds() == before
         assert H.not_applied(a, "~/thesis", "~/t") == ("Not applied: deleting or replacing files in ~/thesis. fs-sync "
-                                                       "couldn't measure its holding folder (~/t): [Errno 5] "
-                                                       "Input/output error.")
+                                                       "couldn't measure its holding folder (~/t): Input/output error "
+                                                       "(%s)." % os.path.join(trash, "run"))
         saved = os.getuid                                               # an entry not ours (an owner seam)
         real_trash = H._trash
         H._trash = lambda st: os.open(trash, os.O_RDONLY | os.O_DIRECTORY)
@@ -249,6 +259,28 @@ def test_admission_counts_files_and_new_folders():
             assert H.admit(s, [("f/a", 1), ("f/b", 1), ("f/c", 1), ("f/d", 1), ("f/e", 1), ("f/g", 1),
                                ("f/h", 1), ("f/i", 1)]).reason == "total-entries"
         assert H.admit(s, []).ok
+    finally:
+        shutil.rmtree(d)
+
+
+def test_errors_as_a_person_reads_them():
+    # (board #895 S2, N1) an OSError's message and the path the walk was reading: never "[Errno N]" or a class name
+    assert H.strerror(OSError(errno.EACCES, "Permission denied", "x")) == "Permission denied"
+    e = OSError()
+    assert H.strerror(e) == "an unexpected error"
+    e.errno = errno.EIO
+    assert H.strerror(e) == os.strerror(errno.EIO)
+    d, s = state()
+    try:
+        trash = os.path.join(s, "trash")
+        real = H.os.getuid
+        M.os.getuid = lambda: real() + 1                    # (trash/ itself not a folder of yours)
+        try:
+            a = H.admit(s, [("a.txt", 1)])
+        finally:
+            M.os.getuid = real
+        assert not a.ok and a.reason == "holding-unreadable", a
+        assert a.detail == "not a folder of yours in fs-sync's holding folder (%s)" % trash, a.detail
     finally:
         shutil.rmtree(d)
 
@@ -289,38 +321,36 @@ def test_the_run_folder_counts_in_the_runs_own_bound():
 
 
 def test_one_run_at_a_time():
+    # (daybreak3's order) one Session per run: cleanup first, then its run folder and admission, held to the end
     d, s = state()
     try:
-        first = H.reserve(s, [("a", 10)])
-        assert first.admission.ok and first.fd is not None
-        second = H.reserve(s, [("a", 10)])                              # another pair's run, meanwhile: pending
-        assert not second.admission.ok and second.admission.reason == "busy" and second.fd is None
         old = os.path.join(s, "trash", H.run_id_at(NOW - 40 * DAY))
         put(os.path.join(old, "f.txt"), b"f")
-        assert H.cleanup(s, NOW) == [] and os.path.isdir(old)          # and its cleanup is skipped, not raced
-        first.release()
-        third = H.reserve(s, [("a", 10)])
-        assert third.admission.ok
-        third.release()
-        with Lowered(RUN_BYTES=5):                                     # not admitted: the lock isn't kept
-            refused = H.reserve(s, [("a", 10)])
-            assert refused.admission.reason == "run-bytes" and refused.fd is None
-        after = H.reserve(s, [("a", 1)])
-        assert after.admission.ok
-        after.release()
-        after.release()                                                # (twice: harmless)
-        saved = H.usage                                                # admission failing outright: released
-        H.usage = lambda st: (_ for _ in ()).throw(RuntimeError("boom"))
-        try:
-            H.reserve(s, [("a", 1)])
-            raise AssertionError("no failure")
+        first = H.Session.open(s)
+        assert first is not None
+        assert H.Session.open(s) is None                               # another pair's run, meanwhile: busy
+        assert first.cleanup(NOW) == [os.path.basename(old)]           # cleanup first, under the lock
+        h = first.new_run(NOW)
+        assert first.admit([("a", 10)]).ok
+        h.close()
+        first.close()
+        first.close()                                                  # (twice: harmless)
+        with H.Session.open(s) as again:                               # released: the next run gets it
+            # admission refused before any move: the run's empty folder is removed, under the lock
+            h = again.new_run(NOW + 1)
+            with Lowered(RUN_BYTES=5):
+                refused = again.admit([("a", 10)])
+            assert refused.reason == "run-bytes"
+            again.abandon(h)
+            assert not os.path.exists(os.path.join(s, "trash", h.run_id))
+        try:                                                           # an error inside: the lock is released
+            with H.Session.open(s):
+                raise RuntimeError("boom")
         except RuntimeError:
             pass
-        finally:
-            H.usage = saved
-        again = H.reserve(s, [("a", 1)])
-        assert again.admission.ok
-        again.release()
+        later = H.Session.open(s)
+        assert later is not None
+        later.close()
     finally:
         shutil.rmtree(d)
 
@@ -349,7 +379,7 @@ def test_cleanup():
         recording.avoids_symlink_attacks = True
         H.shutil = type("S", (), {"rmtree": staticmethod(recording)})
         try:
-            removed = H.cleanup(s, NOW)
+            removed = cleanup(s, NOW)
         finally:
             H.shutil = shutil
         assert removed == order == [old2, old1, past], (removed, order)  # oldest first, whole folders
@@ -368,22 +398,22 @@ def test_cleanup():
         stopping.avoids_symlink_attacks = True
         H.shutil = type("S", (), {"rmtree": staticmethod(stopping)})
         try:
-            H.cleanup(s, NOW)
+            cleanup(s, NOW)
             raise AssertionError("not stopped")
         except KeyboardInterrupt:
             pass
         finally:
             H.shutil = shutil
         assert os.listdir(os.path.join(trash, stopped)) == ["b.txt"]
-        assert H.cleanup(s, NOW) == [stopped] and not os.path.exists(os.path.join(trash, stopped))
+        assert cleanup(s, NOW) == [stopped] and not os.path.exists(os.path.join(trash, stopped))
         # over the entry bound: the count can't complete, so nothing is removed at all
         put(os.path.join(trash, old2, "f.txt"), b"f")
         with Lowered(TOTAL_ENTRIES=3):
-            assert H.cleanup(s, NOW) == [] and os.path.isdir(os.path.join(trash, old2))
+            assert cleanup(s, NOW) == [] and os.path.isdir(os.path.join(trash, old2))
         # where removal could follow a link, nothing is removed
         H.shutil = type("S", (), {"rmtree": type("R", (), {"avoids_symlink_attacks": False})()})
         try:
-            assert H.cleanup(s, NOW) == []
+            assert cleanup(s, NOW) == []
         finally:
             H.shutil = shutil
         assert os.path.isdir(os.path.join(trash, old2))

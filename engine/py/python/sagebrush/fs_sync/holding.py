@@ -6,17 +6,19 @@ move.py; this decides whether a run may move anything there, and removes old run
 - **Bounds, in entries** (files and folders alike): at most 20 GiB and 200,000 entries in the holding folder in all,
   and 10 GiB and 100,000 entries from one run. Every bound is a constant here, so tests can lower it.
 - **Counting** (`usage`): a streaming depth-first walk of trash/, a handle and its listing's copy per level, trash/'s
-  own handle being the first (so at most 2 x HOLD_LEVELS open, exactly), no link followed, every entry counted. HOLD_LEVELS = 66 is the handle-level form of the
-  product bound: trash/, the run folder, and its mirror of at most the scan's 64 LOCAL_DIR folders. A walk that can't
+  own handle being the first (so at most 2 x HOLD_LEVELS open, exactly), no link followed, every entry counted. HOLD_LEVELS = 67 is the handle-level form of the
+  product bound: trash/, the run folder, its part (deleted/ or replaced/), and its mirror of at most the scan's 64
+  LOCAL_DIR folders. A walk that can't
   finish within the bounds (too many entries, too deep, an entry not ours, or any error) raises Uncountable: never a
   partial total.
 - **Admission** (before applying): the run's entries (each file it would move there, deletes here and files a download
   replaces, at their planned sizes, and each distinct folder it would make for them) must fit the run's bound and,
   with what is held already, the total. If they don't, or the holding folder can't be counted, all of those actions
   stay pending (`Admission.reason` says why); the run's other actions go ahead.
-- **One run at a time** (@sagebrush): a non-blocking flock on trash/. `reserve` holds it from admission until the
-  run's last move aside, so runs of different pairs can't each pass against the same total; `cleanup` holds it while
-  it removes. If another run holds it, this run's moves aside stay pending ("busy"), or its cleanup is skipped.
+- **One run at a time** (@sagebrush; the order is daybreak3's): a `Session` holds a non-blocking flock on trash/
+  from the run's start until after its last move aside: cleanup first, then (only for a run that moves files aside)
+  its run folder and its admission, so runs of different pairs can't each pass against the same total. If another
+  run holds it, this run makes no folder, skips cleanup and keeps its moves aside pending ("busy").
 - **Cleanup** (at the start of every run): first the whole holding folder is counted (as above), and only if that
   completes are the runs whose id is more than 30 days old removed, oldest first, with the standard library's
   link-safe `shutil.rmtree(..., dir_fd=...)` (and nothing on a platform where it isn't link-safe), so its work is
@@ -34,7 +36,7 @@ import time
 from dataclasses import dataclass
 
 from .move import _DIR_FLAGS, Holding, own_dirs
-from .scan import MAX_DEPTH
+from .scan import MAX_DEPTH, _home_short
 
 TOTAL_BYTES = 20 * 2**30
 TOTAL_ENTRIES = 200_000
@@ -42,7 +44,8 @@ RUN_BYTES = 10 * 2**30
 RUN_ENTRIES = 100_000
 KEEP_SECONDS = 30 * 86400
 MAX_SAME_SECOND = 9                 # run ids tried within one second (the first, then -2 … -9)
-HOLD_LEVELS = 2 + MAX_DEPTH         # handle levels: trash/, the run folder, then at most the scan's 64 folders
+HOLD_LEVELS = 3 + MAX_DEPTH         # handle levels: trash/, the run folder, its part (deleted/ or replaced/),
+#                                     then at most the scan's 64 folders
 _ID = re.compile(r"([0-9]{8}-[0-9]{6})(?:-[2-9])?")     # (fullmatch only)
 
 
@@ -96,14 +99,27 @@ class Uncountable(Exception):
         self.detail, self.bound = detail, bound
 
 
+def strerror(e):
+    """An OSError as a person reads it: its message, never "[Errno N]" or an internal name."""
+    return e.strerror or (os.strerror(e.errno) if e.errno else "an unexpected error")
+
+
 def usage(state_dir):
     """(bytes, entries) held in all: every entry under trash/, folders included, files at their lstat size, by a
     streaming depth-first walk with no link followed (see the module docstring). Raises Uncountable if the walk can't
     finish within TOTAL_ENTRIES and HOLD_LEVELS, meets an entry not ours, or fails part way."""
     total, entries = 0, 0
-    trash = _trash(state_dir)                               # (level 1: a handle just opened, so it lists afresh)
+    names = []                                              # (the folders below trash/ down to the deepest level)
+    where = os.path.join(state_dir, "trash")                # (what the walk is reading, for an error's message)
+    try:
+        trash = _trash(state_dir)                           # (level 1: a handle just opened, so it lists afresh)
+    except OSError as e:
+        raise Uncountable(_failed(e, where))
     try:
         listing = os.scandir(trash)
+    except OSError as e:
+        os.close(trash)
+        raise Uncountable(_failed(e, where))
     except BaseException:
         os.close(trash)
         raise
@@ -111,12 +127,15 @@ def usage(state_dir):
     try:
         while stack:
             fd, it = stack[-1]
+            where = os.path.join(state_dir, "trash", *names[:len(stack) - 1])
             e = next(it, None)
             if e is None:
                 it.close()
                 os.close(fd)
                 stack.pop()
+                del names[len(stack) - 1:]
                 continue
+            where = os.path.join(where, e.name)
             st = e.stat(follow_symlinks=False)
             entries += 1
             if entries > TOTAL_ENTRIES:
@@ -125,7 +144,7 @@ def usage(state_dir):
                 raise Uncountable("an entry that isn't yours: %s" % e.name)
             if stat.S_ISDIR(st.st_mode):
                 if len(stack) >= HOLD_LEVELS:
-                    raise Uncountable("more than %d levels of folders" % (HOLD_LEVELS - 2), bound=True)
+                    raise Uncountable("more than %d levels of folders" % (HOLD_LEVELS - 3), bound=True)
                 sub = os.open(e.name, _DIR_FLAGS, dir_fd=fd)
                 try:
                     listing = os.scandir(sub)
@@ -133,15 +152,20 @@ def usage(state_dir):
                     os.close(sub)                          # (not on the stack yet: closed here)
                     raise
                 stack.append((sub, listing))
+                names.append(e.name)
             else:
                 total += st.st_size
     except OSError as e:
-        raise Uncountable(str(e))
+        raise Uncountable(_failed(e, where))
     finally:
         for fd, it in stack:
             it.close()
             os.close(fd)
     return total, entries
+
+
+def _failed(e, where):
+    return "%s (%s)" % (strerror(e), _home_short(where))
 
 
 def run_entries(rels):
@@ -198,80 +222,65 @@ def not_applied(admission, local, trash):
     if admission.reason == "total-entries" and admission.detail:
         return ("Not applied: deleting or replacing files in %s. fs-sync's holding folder (%s) has more than %s "
                 "entries or %d levels of folders, too many to measure. Each sync's folder there is removed 30 days "
-                "after that sync." % (local, trash, format(TOTAL_ENTRIES, ","), HOLD_LEVELS - 2))
+                "after that sync." % (local, trash, format(TOTAL_ENTRIES, ","), HOLD_LEVELS - 3))
     if admission.reason == "holding-unreadable":
         return ("Not applied: deleting or replacing files in %s. fs-sync couldn't measure its holding folder (%s): "
                 "%s." % (local, trash, admission.detail))
     return None
 
 
-def _lock(state_dir):
-    """trash/'s handle, flocked without waiting; None if another run holds it."""
-    trash = _trash(state_dir)
-    try:
-        fcntl.flock(trash, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError as e:
-        os.close(trash)
-        if e.errno in (errno.EWOULDBLOCK, errno.EAGAIN, errno.EACCES):
-            return None
-        raise
-    return trash
+class Session:
+    """One run's hold on the holding folder (daybreak3's order, design §2.4): trash/'s lock, taken once and without
+    waiting, held from the run's start until after its last move aside. Under it, in this order:
 
+    1. `cleanup()`, every run, first: before anything is added, so a holding folder at its bound can still be cleaned;
+    2. only if the run moves files aside: `new_run()`, then `admit(moves)`;
+    3. the moves aside, in plan order;
+    4. `close()`, also on any error (the files moved stay held, to be restored).
 
-def _unlock(fd):
-    fcntl.flock(fd, fcntl.LOCK_UN)
-    os.close(fd)
+    `Session.open` returns None if another run holds the lock: then this run makes no folder, cleans nothing, and
+    moves nothing aside (its other actions go ahead). The helpers never take the lock themselves."""
 
+    def __init__(self, state_dir, fd):
+        self.state_dir, self.fd = state_dir, fd
 
-class Reservation:
-    """The holding folder's lock for this run, and the admission made under it. While it is held and
-    `admission.ok`, the run may move files aside; `release()` after its last move aside (or at exit)."""
+    @classmethod
+    def open(cls, state_dir):
+        trash = _trash(state_dir)
+        try:
+            fcntl.flock(trash, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as e:
+            os.close(trash)
+            if e.errno in (errno.EWOULDBLOCK, errno.EAGAIN, errno.EACCES):
+                return None
+            raise
+        return cls(state_dir, trash)
 
-    def __init__(self, fd, admission):
-        self.fd, self.admission = fd, admission
-
-    def release(self):
+    def close(self):
         if self.fd is not None:
-            _unlock(self.fd)
+            fcntl.flock(self.fd, fcntl.LOCK_UN)
+            os.close(self.fd)
             self.fd = None
 
+    def __enter__(self):
+        return self
 
-def reserve(state_dir, moves):
-    """Take the holding folder's lock without waiting, then admit `moves` under it (§2.4). The lock is kept only if
-    they are admitted; otherwise, or if another run holds it ("busy"), all of this run's moves aside stay pending."""
-    moves = list(moves)
-    lock = _lock(state_dir)
-    if lock is None:
-        return Reservation(None, Admission(False, "busy", bytes=sum(s for _, s in moves),
-                                           entries=run_entries([r for r, _ in moves])))
-    try:
-        a = admit(state_dir, moves)
-    except BaseException:
-        _unlock(lock)
-        raise
-    if not a.ok:
-        _unlock(lock)
-        return Reservation(None, a)
-    return Reservation(lock, a)
+    def __exit__(self, *exc):
+        self.close()
 
-
-def cleanup(state_dir, now=None):
-    """Remove the runs whose id is more than 30 days old, oldest first; returns their ids. Under the holding folder's
-    lock (skipped, returning [], if another run holds it), and only after the whole folder has been counted within its
-    bounds: if it can't be, nothing is removed. Nothing younger, and nothing whose name isn't a run id, is removed."""
-    if not shutil.rmtree.avoids_symlink_attacks:
-        return []                                       # (never a removal that could follow a link)
-    lock = _lock(state_dir)
-    if lock is None:
-        return []
-    try:
+    def cleanup(self, now=None):
+        """Remove the runs whose id is more than 30 days old, oldest first; returns their ids. Only after the whole
+        folder has been counted within its bounds: if it can't be, nothing is removed. Nothing younger, and nothing
+        whose name isn't a run id, is removed."""
+        if not shutil.rmtree.avoids_symlink_attacks:
+            return []                                   # (never a removal that could follow a link)
         try:
-            usage(state_dir)                            # (the whole tree first: the removals below are within it)
+            usage(self.state_dir)                       # (the whole tree first: the removals below are within it)
         except Uncountable:
             return []
         now = time.time() if now is None else now
         old = []
-        fresh = os.open(".", _DIR_FLAGS, dir_fd=lock)
+        fresh = os.open(".", _DIR_FLAGS, dir_fd=self.fd)
         try:
             with os.scandir(fresh) as it:               # (streamed; only expired run ids kept, within the count)
                 for e in it:
@@ -282,11 +291,25 @@ def cleanup(state_dir, now=None):
             os.close(fresh)
         removed = []
         for _, name in sorted(old):
-            st = os.stat(name, dir_fd=lock, follow_symlinks=False)
+            st = os.stat(name, dir_fd=self.fd, follow_symlinks=False)
             if not stat.S_ISDIR(st.st_mode):
                 continue                                # (a link with a run id's name: left, and counted)
-            shutil.rmtree(name, dir_fd=lock)
+            shutil.rmtree(name, dir_fd=self.fd)
             removed.append(name)
         return removed
-    finally:
-        _unlock(lock)
+
+    def new_run(self, now=None):
+        """This run's Holding (new_run), made under the lock."""
+        return new_run(self.state_dir, now)
+
+    def admit(self, moves):
+        """Whether this run may move these files aside (admit), measured under the lock."""
+        return admit(self.state_dir, moves)
+
+    def abandon(self, holding):
+        """A run refused admission, before any move: its run folder, still empty, is removed (and the handle closed)."""
+        holding.close()
+        try:
+            os.rmdir(holding.run_id, dir_fd=self.fd)
+        except FileNotFoundError:
+            pass
