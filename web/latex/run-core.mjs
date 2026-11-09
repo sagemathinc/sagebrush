@@ -448,5 +448,5 @@ export async function runAndSave(o) {
     throw err;
   }
   // (the interacts this Run made, by id: live in the page while its session lasts (interact.ts live))
-  return { ok: true, states, ms: o.now() - t0, remote: f?.remote ?? 0, interactIds: states.flatMap((x) => (x.interacts ?? []).map((i) => i.id)) };
+  return { ok: true, states, ms: o.now() - t0, remote: f?.remote ?? 0, interactIds: Object.assign(new Set(states.flatMap((x) => (x.interacts ?? []).map((i) => i.id))), { gen: o.store?.kernel?.generation }) };
 }

@@ -307,7 +307,7 @@
    "kind": "host",
    "owner": "host"
   },
-  "web/latex/interact.ts :: changed :: if (st.outs !== null) { const o = w.querySelector(\".si-outs\"); if (o) o.innerHTML = st.outs; } #0": {
+  "web/latex/interact.ts :: text :: if (st.outs !== null) { const o = w.querySelector(\".si-outs\"); if (o) o.innerHTML = st.outs; } #0": {
    "kind": "rich",
    "owner": "phase-3",
    "readers": []

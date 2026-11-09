@@ -54,8 +54,9 @@ const loadPresent = () => (presentMod ??= (import(presentTries++ ? `${presentUrl
 // current only while it is the last one asked for, on a page not disposed of)
 let sageSession: ReturnType<typeof sessionOf> | null = null;
 // (the interacts this page's Sage session made, by id: the last Run's, live in the preview (interact.ts live), only in
-//  the document that Run was of (liveFid): another document's results, from another session, have ids of their own)
-let liveIds = new Set<number>(), liveFid = "";
+//  the document that Run was of (liveFid): another document's results, from another session, have ids of their own;
+//  with the interpreter's generation then (run-core), and ended (`over`) when the page leaves the document (astra))
+let liveIds: Set<number> & { over?: number } = new Set(), liveFid = "";
 // (Run's code, run-core.mjs: a chunk of its own, /sagebrush-latex-run.js, fetched on the first Run (it is first-use
 //  code: the editor loads without it); a failed fetch is tried again by a URL of its own)
 const runUrl = new URL("sagebrush-latex-run.js", import.meta.url).href;
@@ -747,9 +748,9 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   //  so its copy has them)
   E.onRendered(() => {
     if (!preview.querySelector(".sageinteract-at")) return;
-    void loadInteract().then((m) => { if (live() && m.draw(preview, sageSession?.kernel as any, liveFid === host.fid ? liveIds : new Set()) && presenting) { const a = presenting.at(); presenting.go(a.frame, a.step); } }, () => {});
+    void loadInteract().then((m) => { if (live() && m.draw(preview, sageSession as any, liveFid === host.fid ? liveIds : new Set()) && presenting) { const a = presenting.at(); presenting.go(a.frame, a.step); } }, () => {});
   });
-  life.signal.addEventListener("abort", () => presenting?.stop());
+  life.signal.addEventListener("abort", () => { presenting?.stop(); liveIds.over = 1; liveIds = new Set(); });
 
   // ---- Run (run-core.mjs): the SageTeX items of the text in the editor now (the preview's own list of them, so only
   // once it has caught up), run in page order in this page's Sage session, on the person's click only (never on
@@ -793,7 +794,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       });
       if (r.stale || !current()) return;
       if (r.msg) { say(r.msg); return; }
-      liveIds = new Set(r.interactIds); liveFid = host.fid;
+      liveIds = r.interactIds; liveFid = host.fid;
       await loadResults();
       const bad = r.states.filter((x: any) => x.s !== "ok").length;
       const cloud = r.remote ? `; ${r.remote} file${r.remote === 1 ? " in its folder is" : "s in its folder are"} only in the cloud, not given to Sage` : "";

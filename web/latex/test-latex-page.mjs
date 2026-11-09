@@ -3249,10 +3249,13 @@ def h(k=slider(1, 5, 1, 2)):
     show(plot(sin(k*x), (x, 0, pi)))
 \end{sagesilent}
 \end{frame}
+\begin{frame}{End}
+The end.
+\end{frame}
 \end{document}
 `;
       await open(await mk("/t/interact.tex", enc(IA)));
-      await until(`document.querySelectorAll(".tex-preview section.slide").length === 1 && !document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
+      await until(`document.querySelectorAll(".tex-preview .ch:not([hidden]) section.slide").length === 2 && !document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
       await ev(`(document.querySelector(".tex-head .tex-run").click(), 1)`);
       const ranI = await statusIs(/^Ran 1 SageTeX item in [0-9.]+ s$/, 120000);
       const W1 = `document.querySelector('.tex-preview .ch:not([hidden]) section.slide .sageinteract')`;
@@ -3277,6 +3280,21 @@ def h(k=slider(1, 5, 1, 2)):
       const Pi = `document.querySelector(".tex-present")`;
       await ev(`(document.querySelector(".tex-present-btn").click(), 1)`);
       const inPresent = await until(`!!${Pi} && !!${Pi}.querySelector(".tp-stage .sageinteract input[type=range]") && !!${Pi}.querySelector(".tp-stage .sageinteract img.sageplot")`, 15000);
+      // (daybreak3's PRESENT937-1, @sagebrush's ruling: in Present the widget is shown with its controls disabled, as drawn
+      //  before (live there is the plan's PR 5): its values and output the preview's (4, k^2 = 16); a click on its slider
+      //  changes neither it nor the slide, and it takes no focus, so no key reaches it)
+      await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Home", code: "Home", windowsVirtualKeyCode: 36 });
+      await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Home", code: "Home" });
+      await until(`${Pi}.dataset.frame === "1"`, 5000);
+      const PS = `${Pi}.querySelector(".tp-stage .sageinteract input[type=range]")`;
+      const pBefore = await ev(`({ dis: [...${Pi}.querySelectorAll(".tp-stage .sageinteract :is(input, select, button)")].every((c) => c.disabled), value: ${PS}.value, out: ${Pi}.querySelector(".tp-stage .si-out")?.textContent ?? null })`);
+      const pr = await ev(`(() => { const b = ${PS}.getBoundingClientRect(); return { x: b.left + b.width * 0.9, y: b.top + b.height / 2 }; })()`);
+      await send("Input.dispatchMouseEvent", { type: "mousePressed", x: pr.x, y: pr.y, button: "left", clickCount: 1 });
+      await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: pr.x, y: pr.y, button: "left", clickCount: 1 });
+      await sleep(300);
+      const pAfter = await ev(`({ frame: ${Pi}.dataset.frame, value: ${PS}.value, focus: (${PS}.focus(), document.activeElement === ${PS}) })`);
+      check(inPresent && pBefore.dis && pBefore.value === "4" && pBefore.out === "k^2 = 16\n" && pAfter.frame === "1" && pAfter.value === "4" && !pAfter.focus,
+        "@interact in Present: shown with its controls disabled, the preview's values and output; a click on its slider changes neither it nor the slide; it takes no focus", { pBefore, pAfter });
       await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
       await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
       await until(`!${Pi}`, 5000);
@@ -3292,6 +3310,9 @@ def h(k=slider(1, 5, 1, 2)):
       check(stale, "@interact: its code edited, the interact kept, marked stale", null);
       // (Shift+Enter while presenting: the Run's interact drawn after the slide was shown, and the slide shown again with it)
       await ev(`(document.querySelector(".tex-status").textContent = "", document.querySelector(".tex-present-btn").click(), 1)`);
+      await until(`!!${Pi}`, 15000);
+      await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Home", code: "Home", windowsVirtualKeyCode: 36 });
+      await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Home", code: "Home" });
       await until(`!!${Pi} && !!${Pi}.querySelector(".tp-stage .sageinteract.sagestale")`, 15000);
       await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, modifiers: 8, text: "\r" });
       await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, modifiers: 8 });
@@ -3301,6 +3322,14 @@ def h(k=slider(1, 5, 1, 2)):
       await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
       await until(`!${Pi}`, 5000);
       check(reran && fresh3, "@interact: Shift+Enter while presenting runs it again; the slide shows the new interact (at 3, k^2 = 9), nothing stale", { reran, fresh3 });
+      // (astra's LIVE937-1: the page leaves the document for one with no widget at all, then comes back: the Run's widget
+      //  isn't live any more (until the next Run), its controls disabled, saying to run the code)
+      const fIa = await ev(`${W}.stat("/t/interact.tex").then((e) => e.fid)`), fNo = await mk("/t/no-widget.tex", enc("\\documentclass{article}\n\\begin{document}\nNo widget here.\n\\end{document}\n"));
+      await ev(`(window.__sbTex({ path: "/t/no-widget.tex", fid: ${JSON.stringify(fNo)} }), 1)`);
+      await until(`document.querySelector(".tex-preview")?.textContent.includes("No widget here.")`, 20000);
+      await ev(`(window.__sbTex({ path: "/t/interact.tex", fid: ${JSON.stringify(fIa)} }), 1)`);
+      const backDead = await until(`document.querySelector(".tex-title")?.textContent === "interact.tex" && (() => { const w = document.querySelector('.tex-preview .ch:not([hidden]) .sageinteract'); return !!w && w.querySelector("input[type=range]").disabled && w.title === "Run the code (Shift+Enter) to use these controls"; })()`, 20000);
+      check(backDead, "@interact live: the page left the document (for one with no widget) and came back: not live until the next Run", null);
       // (PR 4: another document in this page and session, whose results (the same file's bytes) have the same ids: not live,
       //  as its ids aren't this session's Run's for it)
       const iaText = await ev(`document.querySelector(".tex-src").value`);
@@ -3336,6 +3365,66 @@ def h(k=slider(1, 5, 1, 2)):
       const iaUrls = requests.slice(n0).filter((u) => /sagebrush-latex-interact\.js/.test(u));
       check(iaRefused >= 2 && waits && notYet && drawnLater && iaUrls.length >= 2 && !/\?try=/.test(iaUrls[0]) && /\?try=\d+$/.test(iaUrls[iaUrls.length - 1]),
         "@interact: the interact chunk's load refused once: the widget waits; the next render loads it by a URL of its own (?try=) and draws it", { iaRefused, waits, notYet, drawnLater, iaUrls });
+      // (astra's LIVE937-1/2, daybreak3: what is live belongs to one Run, in its interpreter, in its document, and a request
+      //  waits for the session's turn. A session of the test's own (a kernel that keeps each request until told), on
+      //  widgets of its own (id 901), with the chunk the page loaded)
+      const own = await ev(`(async () => {
+        const u = performance.getEntriesByType("resource").map((e) => e.name).filter((n) => /sagebrush-latex-interact\\.js/.test(n)).pop();
+        const m = await import(u);
+        const box = document.createElement("div"); box.className = "tex-page"; document.body.appendChild(box);
+        const html = (v) => m.interactsHtml([{ id: 901, name: "f", controls: [{ kind: "slider", name: "k", label: "k", min: 0, max: 9, step: 1, value: v }], out: "", shows: [] }]);
+        const calls = [], held = [], tick = () => new Promise((r) => setTimeout(r, 0));
+        const k = { generation: 1, targetSink: () => null, interact(iid, values, sink) { calls.push(iid + ":" + (values.k ?? values.t)); held.push(sink); } };
+        let gate = null;
+        const s = { kernel: k, serial: (fn) => (gate ?? Promise.resolve()).then(fn) };
+        const w = () => box.querySelector(".sageinteract"), slider = () => w().querySelector("input[type=range]");
+        const change = async (v) => { slider().value = String(v); slider().dispatchEvent(new Event("input", { bubbles: true })); await tick(); await tick(); };
+        const runOf = (gen) => Object.assign(new Set([901]), { gen });
+        const r = {};
+        // a Run A: live; a change sends its values, and output addressed to it is shown
+        box.innerHTML = html(2); const A = runOf(1); m.live(box, s, A);
+        await change(5); r.sentA = calls.join();
+        k.targetSink(901)?.out("five\\n"); r.outA = w().querySelector(".si-out")?.textContent ?? null;
+        await change(6);
+        // a new Run B with the same id while A's request runs: B's widget fresh (its own default, no output of A's); A's
+        // output not shown in it; A's dirty follow-up (6) never sent
+        box.innerHTML = html(2); const B = runOf(1); m.live(box, s, B);
+        r.freshB = { value: slider().value, out: w().querySelector(".si-out")?.textContent ?? null, sink: k.targetSink(901) === null };
+        held.shift().done(); await tick(); await tick(); r.afterA = calls.join();
+        // the interpreter started again (a new generation: its interacts gone): B's widget no longer sends, and is shown dead
+        await change(3); held.shift()?.done(); await tick();
+        k.generation = 2; await change(4);
+        r.restart = { sent: calls.join(), dis: slider().disabled, title: w().title };
+        // a Run C, then the document left (its ids marked over) while a request runs with a change waiting: nothing more sent
+        k.generation = 2; box.innerHTML = html(2); const C = runOf(2); m.live(box, s, C);
+        await change(7); await change(8); C.over = 1; held.shift()?.done(); await tick(); await tick();
+        r.left = calls.join();
+        // the session's turn: a request waits for it (a Run's folder going in), and is checked again when its turn comes
+        let open1; gate = new Promise((res) => (open1 = res));
+        box.innerHTML = html(2); const D = runOf(2); m.live(box, s, D);
+        await change(1); r.waiting = calls.join(); open1(); await tick(); await tick(); r.turned = calls.join(); held.shift()?.done(); await tick();
+        let open2; gate = new Promise((res) => (open2 = res));
+        await change(2); D.over = 1; open2(); await tick(); await tick(); r.overWait = calls.join();
+        gate = null;
+        // (agents-ui's A1: a text control runs on change (Enter, or leaving it), as the notebook's, not on each key)
+        box.innerHTML = m.interactsHtml([{ id: 901, name: "g", controls: [{ kind: "input", name: "t", label: "t", value: "a" }], out: "", shows: [] }]);
+        const E = runOf(2); m.live(box, s, E);
+        const tb = box.querySelector("input[type=text]"), n0 = calls.length;
+        tb.value = "si"; tb.dispatchEvent(new Event("input", { bubbles: true })); await tick(); await tick();
+        r.typed = calls.length - n0;
+        tb.value = "sin"; tb.dispatchEvent(new Event("change", { bubbles: true })); await tick(); await tick();
+        r.entered = calls.slice(n0).join();
+        box.remove();
+        return r;
+      })()`);
+      check(own?.sentA === "901:5" && own.outA === "five\n" && own.freshB?.value === "2" && own.freshB.out === null && own.freshB.sink && own.afterA === "901:5",
+        "@interact live: a new Run reusing an id: its widget fresh (no values or output of the old one's); the old request's output and its waiting change dropped", own);
+      check(own?.restart?.sent === "901:5,901:3" && own.restart.dis && own.restart.title === "Run the code (Shift+Enter) to use these controls",
+        "@interact live: the interpreter started again: a change sends nothing, and the widget is shown dead, saying to run the code", own?.restart);
+      check(own?.left === "901:5,901:3,901:7", "@interact live: the document left while a request runs: its waiting change never sent", own);
+      check(own?.waiting === "901:5,901:3,901:7" && own.turned === "901:5,901:3,901:7,901:1" && own.overWait === own.turned,
+        "@interact live: a request waits for the session's turn (as a Run does), and isn't sent if its Run ended meanwhile", own);
+      check(own?.typed === 0 && own.entered === "901:sin", "@interact live: a text control runs its function on change (Enter or leaving it), not on each key", own);
     }
     // (Codex friction P5, the editor's half: a helper .py beside the .tex, imported by the document's code as by real
     //  SageTeX run in the document's folder. The .tex's folder is given to Sage, read-only, at each Run, as it is then:
