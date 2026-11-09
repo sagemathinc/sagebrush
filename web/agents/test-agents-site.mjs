@@ -29,6 +29,8 @@ ok(rh.v.length === 1 && rc.sha.length === 1 && JSON.stringify(rh.v) === JSON.str
 // (William, Nov 8: no wall of text in the app: the help box is one short line, its command, and Learn more)
 const helpText = (/<div id="help"[^>]*>([\s\S]*?)<\/div>/.exec(html)?.[1] ?? "").replace(/<pre>[\s\S]*?<\/pre>/g, "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
 ok(helpText.length > 0 && helpText.length <= 100 && /Learn more/.test(helpText), `the help box is one short line with Learn more (${helpText.length} characters): ${helpText}`);
+const helpLinks = [...(/<div id="help"[^>]*>([\s\S]*?)<\/div>/.exec(html)?.[1] ?? "").matchAll(/<a\b[^>]*>/g)].map((m) => m[0]);
+ok(helpLinks.length === 1 && /href="\/agents\/connect\/"/.test(helpLinks[0]) && conn0, `the help box's one link, Learn more, is the connect page (the one whose sha256 the release check reads): ${helpLinks}`);
 // (the connect page's option-2 commands, exactly: sagebrush.space's is the plain npx line (0.3.1 prints the
 // sagebrush.space link itself); DEV's sets the printed link and adds DEV's origin)
 const tgz = `https://agents.sagebrush.cloud/agents/sagebrush-agent-${rc.v[0]}.tgz`;

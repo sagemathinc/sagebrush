@@ -21,12 +21,16 @@ export const SAFARI = "Safari can't reach a program on this computer: use Chrome
 // (Chrome asks once, per site, before a page may reach a program on this computer (Chrome 149: its "loopback network"
 // permission); headless or blocked, the socket fails with ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS.  A paraphrase, not
 // Chrome's exact label, which hasn't been seen in a headed browser yet)
-export const CHROME_ALLOW = "Chrome asks once to let this site reach apps on this computer: choose Allow, then Connect again.";
+export const CHROME_ALLOW = "Chrome needs your OK for this site to reach apps on this computer: allow it, then Connect again.";
+/** Any other browser (Firefox, …): true whatever the cause. */
+export const OTHER_FAIL = "This browser couldn't reach the agent on this computer: check that it's still running, then Connect again.";
 /** Where the longer explanations are (William, Nov 8: one short line in the app, the rest behind "Learn more"). */
 export const CONNECT_DOCS = "/agents/connect/";
 const learnMore = () => { const a = document.createElement("a"); a.href = CONNECT_DOCS; a.target = "_blank"; a.rel = "noopener"; a.textContent = "Learn more"; return a; };
 export const isChromium = (ua = navigator.userAgent) => /chrome|chromium|crios|edg/i.test(ua);
 export const isSafari = (ua = navigator.userAgent) => /safari/i.test(ua) && !/chrome|chromium|crios|fxios|android|edg/i.test(ua);
+/** The one line under a failed Connect: Safari's reason only in Safari, Chrome's permission only in Chrome. */
+export const failHint = (ua = navigator.userAgent) => isSafari(ua) ? SAFARI : isChromium(ua) ? CHROME_ALLOW : OTHER_FAIL;
 
 const CSS = `
 .sbag-dlg { position: fixed; inset: 0; background: rgba(20,25,18,.35); display: grid; place-items: center; z-index: 1000; font: 14px/1.45 system-ui, sans-serif; color: #1d241a; }
@@ -246,7 +250,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
           go.disabled = false;
           const m = String((e as Error).message ?? e);
           const failed = /^the connection failed/.test(m); // (nothing answered: not a refusal by the agent)
-          err.textContent = (/^refused|^protocol/.test(String((e as any)?.code)) && !failed && !/^the agent refused/i.test(m) ? "The agent refused: " : "") + named(m) + (/failed/.test(String((e as Error).message)) ? "\n\n" + (isChromium() ? CHROME_ALLOW : SAFARI) : "");
+          err.textContent = (/^refused|^protocol/.test(String((e as any)?.code)) && !failed && !/^the agent refused/i.test(m) ? "The agent refused: " : "") + named(m) + (/failed/.test(String((e as Error).message)) ? "\n\n" + failHint() : "");
           if (/failed/.test(String((e as Error).message))) err.append(" ", learnMore());
         }
       };
