@@ -634,8 +634,7 @@ async function verifyStep(env: Env, stub: ReturnType<NonNullable<Env["SYNC_ACCOU
   const LATE = Symbol("late");
   let timer: ReturnType<typeof setTimeout> | undefined;
   const expiry = new Promise<typeof LATE>((r) => (timer = setTimeout(() => r(LATE), Math.max(0, deadline - Date.now()))));
-  const stop = async (pending?: Promise<unknown>) => {
-    if (pending) await pending.then((x) => (x as { body?: ReadableStream } | null)?.body?.cancel().catch(() => {})).catch(() => {});
+  const stop = async () => {
     await stub.verifyRelease({ sha256, attempt: step.attempt });
     return err(503, "busy", { message: "this verification step took too long; verify again" });
   };
@@ -648,18 +647,20 @@ async function verifyStep(env: Env, stub: ReturnType<NonNullable<Env["SYNC_ACCOU
     for (const c of step.chunks) {
       if (Date.now() > deadline) return await stop();
       const got = testMode(env) && (gateOn(env, "verify-get-stall") || gateOn(env, "verify-get-fail")) ? stalledGet(env, env.SHARE_BUCKET!.get(c.key)) : env.SHARE_BUCKET!.get(c.key);
-      let o: Awaited<typeof got> | typeof LATE;
+      // (the get isn't raced with the deadline: it can't be aborted, and the slot stays owned until it settles, so a
+      // step past its deadline answers only then either way; the loop below stops at the deadline before reading)
+      let o: Awaited<typeof got>;
       try {
-        o = await Promise.race([got, expiry]);
+        o = await got;
       } catch {
         return await failed();
       }
-      if (o === LATE) return await stop(got);
       if (!o) {
         await stub.verifyRelease({ sha256, attempt: step.attempt });
         return err(503, "busy", { message: "a chunk's bytes couldn't be read; try again" });
       }
-      const body = testMode(env) && stallReads(env) ? stalling(o.body as ReadableStream<Uint8Array>) : (o.body as ReadableStream<Uint8Array>);
+      const raw = o.body as ReadableStream<Uint8Array>;
+      const body = testMode(env) ? counting(stallReads(env) ? stalling(raw) : gateOn(env, "verify-read-fail") ? failing(raw) : raw) : raw;
       const reader = body.getReader();
       let n = 0;
       for (;;) {
@@ -698,24 +699,50 @@ async function verifyStep(env: Env, stub: ReturnType<NonNullable<Env["SYNC_ACCOU
   return json({ state: e.ok.state, position: e.ok.position, chunks: step.count });
 }
 
-/** Tests only: an R2 get that answers only once the "verify-get-stall" gate is cleared, as a stalled get. */
+/** Tests only: an R2 get that answers only once the "verify-get-stall" gate is cleared (or 30 s pass), as a stalled get. */
 async function stalledGet<T>(env: Env, got: Promise<T>): Promise<T> {
-  while (gateOn(env, "verify-get-stall")) await new Promise((r) => setTimeout(r, 20));
+  for (let i = 0; gateOn(env, "verify-get-stall") && i < 1500; i++) await new Promise((r) => setTimeout(r, 20));
   if (gateOn(env, "verify-get-fail")) throw new Error("test: the get failed");
   return got;
 }
 /** Tests only: whether verify's R2 reads stall (the "verify-read-stall" gate), and how many stalled reads were cancelled. */
 const stallReads = (env: Env) => testMode(env) && gateOn(env, "verify-read-stall");
 export const stallCancels = { n: 0 };
-/** Tests only: a body whose first read never answers until it is cancelled, as an R2 read stalled mid-body. */
+/** Tests only: a body whose first read doesn't answer until it is cancelled (or fails after 30 s), as an R2 read stalled mid-body. */
 function stalling(body: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
   return new ReadableStream<Uint8Array>({
-    pull: () => new Promise(() => {}),
+    pull: () => new Promise((_, reject) => setTimeout(() => reject(new Error("test: a stalled read gave up")), 30_000)),
     cancel: () => {
       stallCancels.n++;
       body.cancel().catch(() => {});
     },
   });
+}
+/** Tests only: a body whose first read fails (the "verify-read-fail" gate), as an R2 read that errors mid-body. */
+function failing(body: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
+  return new ReadableStream<Uint8Array>({
+    pull: () => {
+      body.cancel().catch(() => {});
+      throw new Error("test: the read failed");
+    },
+  });
+}
+/** Tests only: the bytes verify's reads delivered, and how many bodies verify cancelled. */
+export const verifyIO = { bytes: 0, cancels: 0 };
+function counting(body: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
+  const reader = body.getReader();
+  return new ReadableStream<Uint8Array>({
+    async pull(c) {
+      const r = await reader.read();
+      if (r.done) return c.close();
+      verifyIO.bytes += r.value.length;
+      c.enqueue(r.value);
+    },
+    cancel: (why) => {
+      verifyIO.cancels++;
+      return reader.cancel(why).catch(() => {});
+    },
+  }, { highWaterMark: 0 });
 }
 
 /**

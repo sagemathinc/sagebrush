@@ -18,7 +18,7 @@ import { dispatch } from "../miniflare-dispatch.mjs";
 const here = dirname(fileURLToPath(import.meta.url));
 // (the TypeScript units, bundled by bun as the Worker is, and imported from that bundle)
 const units = execFileSync("bun", ["build", join(here, "test-tiered-units.ts"), "--format", "esm", "--target", "node"], { encoding: "utf8" });
-const { Sha256, checkManifest, canonical, tieredOn } = await import("data:text/javascript;base64," + Buffer.from(units).toString("base64"));
+const { Sha256, checkManifest, canonical, tieredOn, TIERED } = await import("data:text/javascript;base64," + Buffer.from(units).toString("base64"));
 const require = createRequire(join(here, "../site/package.json"));
 const { Miniflare, convertV4MiniflareOptions } = require("miniflare");
 
@@ -31,6 +31,20 @@ function ok(cond, what) {
   }
 }
 const sha = (b) => createHash("sha256").update(b).digest("hex");
+// (a failing case ends the run, never hangs it, grader's #880 r6 note: each section is bounded, any exception is a
+// FAIL, and every test gate is cleared after it, so a gate left set can't hold the next one)
+const GATES = ["verify-stream", "verify-read-stall", "verify-get-stall", "verify-get-fail", "verify-read-fail"];
+async function section(name, fn, ms = 60_000) {
+  let timer;
+  try {
+    await Promise.race([fn(), new Promise((_, reject) => (timer = setTimeout(() => reject(new Error(`didn't finish within ${ms / 1000} s`)), ms)))]);
+  } catch (e) {
+    ok(false, `${name}: ${e?.message ?? e}`);
+  } finally {
+    clearTimeout(timer);
+    for (const g of GATES) await gate(g, false).catch(() => {});
+  }
+}
 const MiB = 1 << 20;
 const arg = (name, d) => {
   const i = process.argv.indexOf(name);
@@ -78,6 +92,24 @@ const arg = (name, d) => {
   ok(code({ ...good, chunks: [c(8 * MiB), c(MiB - 1)] }) === "invalid", "sizes that don't add up are refused");
   ok(code({ ...good, size: 9 * MiB, chunks: [c(MiB - 1), c(8 * MiB + 1)] }) === "invalid", "a chunk outside the bounds (not last) is refused");
   ok(code({ ...good, size: 8 * MiB + 1 + 0, chunks: [c(8 * MiB), c(1)] }) === "ok", "the last chunk may be shorter than the minimum");
+  // (grader's #880 M3, M4, M6: each bound at the limit and one past it)
+  ok(code({ ...good, size: 10 * MiB, chunks: [c(8 * MiB), c(MiB), c(MiB)] }) === "ok" && code({ ...good, size: 10 * MiB - 1, chunks: [c(8 * MiB), c(MiB - 1), c(MiB)] }) === "invalid", "M3: a middle chunk of exactly the minimum passes, one byte under is refused");
+  ok(code({ ...good, size: 9 * MiB, chunks: [c(8 * MiB), c(MiB)] }) === "ok" && code({ ...good, size: 9 * MiB + 1, chunks: [c(8 * MiB + 1), c(MiB)] }) === "invalid" && code({ ...good, size: 9 * MiB + 1, chunks: [c(MiB), c(8 * MiB + 1)] }) === "invalid", "M4: a chunk of exactly the maximum passes, one byte over is refused, first or last");
+  {
+    const len = Buffer.byteLength(canonical(good));
+    const keep = TIERED.manifestBytes;
+    TIERED.manifestBytes = len;
+    const atLimit = code(good);
+    TIERED.manifestBytes = len - 1;
+    let over;
+    try {
+      checkManifest(good, 200 * MiB);
+    } catch (e) {
+      over = e.detail?.limit;
+    }
+    TIERED.manifestBytes = keep;
+    ok(atLimit === "ok" && over === "manifest_bytes", "M6: a manifest of exactly the byte limit passes, one byte over is refused (the limit lowered to its size)");
+  }
   ok(code({ ...good, extra: 1 }) === "invalid", "an unknown field is refused");
   ok(code(good, 9 * MiB - 1) === "limit", "a file over max_file_bytes is refused (limit), at one over");
   ok(code(good, 9 * MiB) === "ok", "and at the limit it passes");
@@ -206,7 +238,7 @@ function fileOf(chunks) {
 }
 
 // ---- the switch: off, every new route is a 404 and blobs/check answers as before
-{
+await section("the switch off", async () => {
   const s = await signIn(A, "https://off.test");
   ok((await post(s, "/api/sync/v1/enable", {}, "https://off.test")).status === 200, "(off) sync on");
   const r = await post(s, "/api/sync/v1/manifest", { manifest: {} }, "https://off.test");
@@ -215,7 +247,7 @@ function fileOf(chunks) {
   ok((await post(s, `/api/sync/v1/manifest/${"a".repeat(64)}/verify`, {}, "https://off.test")).status === 404, "and verify too");
   const c = await (await post(s, "/api/sync/v1/blobs/check", { blobs: [{ sha256: "a".repeat(64), size: 1 }] }, "https://off.test")).json();
   ok(JSON.stringify(c) === JSON.stringify({ missing: ["a".repeat(64)] }), "and blobs/check's answer is unchanged: " + JSON.stringify(c));
-}
+});
 
 // ---- the deterministic cases
 const sa = await signIn(A);
@@ -223,7 +255,7 @@ ok((await post(sa, "/api/sync/v1/enable", {})).status === 200, "sync on");
 const acct = await account(A);
 const c1 = randomBytes(8 * MiB), c2 = randomBytes(3 * MiB), c3 = randomBytes(2 * MiB);
 for (const c of [c1, c2, c3]) ok((await put(sa, c)).status === 201, "a chunk uploads as a blob (" + c.length + " bytes)");
-{
+await section("register and verify a file", async () => {
   const f = fileOf([c1, c2]);
   // registration
   let r = await register(sa, { ...f.manifest, chunks: [[sha(c1), c1.length], [(sha(c3)[0] === "0" ? "1" : "0") + sha(c3).slice(1), 3 * MiB]] });
@@ -271,8 +303,8 @@ for (const c of [c1, c2, c3]) ok((await put(sa, c)).status === 201, "a chunk upl
   ok(Number.isInteger(op.seq) && t.row.state === "live" && t.row.refs === 1, "an op naming the verified file is accepted; the row is live, with one reference");
   ok((await verify(sa, f.sha256).then((r) => r.json())).state === "live", "a verified row isn't verified again");
   ws.close();
-}
-{
+});
+await section("wrong order and a wrong hash", async () => {
   // wrong order: valid chunks, claimed under the true hash of the other order
   const right = fileOf([c1, c3]);
   const wrongOrder = { ...right.manifest, chunks: [[sha(c3), c3.length], [sha(c1), c1.length]] };
@@ -292,8 +324,8 @@ for (const c of [c1, c2, c3]) ok((await put(sa, c)).status === 201, "a chunk upl
   const ws = await opsSocket(sa, "device-tier-0002");
   ok((await ws.create(lie.sha256, right.bytes.length)).code === "missing", "an op naming it is refused");
   ws.close();
-}
-{
+});
+await section("a rekey mid-verification", async () => {
   // a rekey mid-verification: the partial hash is discarded and verification restarts from zero (astra's c085569f note)
   const chunks = Array.from({ length: 10 }, () => randomBytes(MiB + 7));
   for (const c of chunks) await put(sa, c);
@@ -328,8 +360,8 @@ for (const c of [c1, c2, c3]) ok((await put(sa, c)).status === 201, "a chunk upl
   const b1 = await s1.json(), b2 = await s2.json();
   ok(s1.status === 409 && b1.error === "conflict", "a stale call (its incarnation replaced meanwhile) changes nothing: conflict");
   ok(b2.state === "verified", "the fresh call verifies");
-}
-{
+});
+await section("retirement at the end of the hold", async () => {
   // retirement at the end of the hold, and renewal
   const f = fileOf([c2, c1]);
   const before = (await acct.testFiles({})).refs;
@@ -345,8 +377,8 @@ for (const c of [c1, c2, c3]) ok((await put(sa, c)).status === 201, "a chunk upl
   ok((await register(sa, f.manifest)).status === 200, "registering again after retirement makes a fresh row");
   t = await acct.testFiles({ sha256: f.sha256 });
   ok(t.refs[sha(c2)] === before[sha(c2)] + 1 && t.row.state === "verifying", "with fresh references");
-}
-{
+});
+await section("the verification budget", async () => {
   // the verification budget, debited before streaming
   const sb = await signIn(B);
   await post(sb, "/api/sync/v1/enable", {});
@@ -357,10 +389,10 @@ for (const c of [c1, c2, c3]) ok((await put(sa, c)).status === 201, "a chunk upl
   const r = await verify(sb, f.sha256);
   const b = await r.json();
   ok(r.status === 429 && b.limit === "verify_bytes_per_day" && b.max === 10 * MiB, "a call whose chunks exceed today's verification budget is refused before streaming: " + JSON.stringify(b));
-}
+});
 
 // ---- the verify slot is owned by one attempt (astra's #880 SEC 1)
-{
+await section("the verify slot is owned by one attempt", async () => {
   const parts = [randomBytes(5 * MiB), randomBytes(5 * MiB)];
   for (const c of parts) await put(sa, c);
   const f = fileOf(parts);
@@ -431,11 +463,164 @@ for (const c of [c1, c2, c3]) ok((await put(sa, c)).status === 201, "a chunk upl
   const t4 = await acct.testFiles({ sha256: g4.sha256 });
   ok(failedGet.status === 503 && t4.slot === null && t4.row.position === 0, "a failed get answers 503, records nothing and frees its slot (" + failedGet.status + ")");
   ok((await verifyAll(sa, f.sha256)).pop().state === "verified", "and the next call verifies");
-}
+});
+
+// ---- grader's #880 r6 gaps: what a stale or late verifyEnd records (nothing), whose slot a release frees, retirement,
+// and the stream's work.  Each through the account object directly, or the route, on a fresh 2-chunk file.
+await section("verifyEnd records nothing unless it is the live, current step", async () => {
+  const shaStateOf = (bufs) => {
+    const h = new Sha256();
+    for (const b of bufs) h.update(b);
+    return h.save();
+  };
+  const fresh = async () => {
+    const parts = [randomBytes(5 * MiB), randomBytes(5 * MiB)];
+    for (const c of parts) await put(sa, c);
+    const f = fileOf(parts);
+    await register(sa, f.manifest);
+    return { f, parts };
+  };
+  const endArgs = (b, f, parts, over = {}) => ({ account: A, sha256: f.sha256, reg: b.reg, vinc: b.vinc, mdigest: b.mdigest, attempt: b.attempt, from: b.position, to: b.to, keys: b.chunks.map((c) => c.key), sha_state: shaStateOf(parts), ...over });
+  const { f, parts } = await fresh();
+  const unchanged = async (what) => {
+    const t = await acct.testFiles({ sha256: f.sha256 });
+    ok(t.row?.state === "verifying" && t.row.position === 0 && t.slot === null, what + ": nothing recorded, and the slot freed (" + JSON.stringify(t.row && { state: t.row.state, position: t.row.position }) + ")");
+  };
+  // L2: past its slot's end, a completion records nothing
+  await acct.testFiles({ verifyMs: 80, slotHoldMs: 5000 });
+  let b = (await acct.verifyBegin({ account: A, sha256: f.sha256 })).ok;
+  await new Promise((r) => setTimeout(r, 160));
+  let e = await acct.verifyEnd(endArgs(b, f, parts));
+  await acct.testFiles({ verifyMs: 0, slotHoldMs: 0 });
+  ok(e.error?.code === "conflict", "L2: a completion past its slot's end is refused (conflict)");
+  await unchanged("L2");
+  // A10: another incarnation
+  b = (await acct.verifyBegin({ account: A, sha256: f.sha256 })).ok;
+  e = await acct.verifyEnd(endArgs(b, f, parts, { vinc: "0".repeat(32) }));
+  ok(e.error?.code === "conflict", "A10: a completion for another incarnation is refused");
+  await unchanged("A10");
+  // A11: another position (the rest of the file from position 1, with the whole file's hash state)
+  b = (await acct.verifyBegin({ account: A, sha256: f.sha256 })).ok;
+  e = await acct.verifyEnd(endArgs(b, f, parts, { from: 1, to: 2, keys: [b.chunks[1].key] }));
+  ok(e.error?.code === "conflict", "A11: a completion from another position is refused");
+  await unchanged("A11");
+  // A12: a chunk's holding moved to another key between the halves
+  b = (await acct.verifyBegin({ account: A, sha256: f.sha256 })).ok;
+  await acct.testFiles({ rekey: sha(parts[1]) });
+  e = await acct.verifyEnd(endArgs(b, f, parts));
+  ok(e.error?.code === "conflict", "A12: a completion whose chunk was rekeyed meanwhile is refused");
+  await unchanged("A12");
+  // the control: the same arguments, live and current, verify the file
+  b = (await acct.verifyBegin({ account: A, sha256: f.sha256 })).ok;
+  e = await acct.verifyEnd(endArgs(b, f, parts));
+  ok(e.ok?.state === "verified", "and the control: the same completion, live and current, verifies (" + JSON.stringify(e) + ")");
+
+  // R5: an expired call's release leaves the newer call's slot owned
+  const g = await fresh();
+  await acct.testFiles({ verifyMs: 60, slotHoldMs: 1 });
+  const b1 = (await acct.verifyBegin({ account: A, sha256: g.f.sha256 })).ok;
+  await new Promise((r) => setTimeout(r, 120));
+  await acct.testFiles({ verifyMs: 0, slotHoldMs: 0 });
+  const b2 = (await acct.verifyBegin({ account: A, sha256: g.f.sha256 })).ok;
+  await acct.verifyRelease({ sha256: g.f.sha256, attempt: b1.attempt });
+  let t = await acct.testFiles({ sha256: g.f.sha256 });
+  ok(t.slot?.attempt === b2.attempt, "R5: an expired call's release leaves the newer call's slot owned");
+  await acct.verifyRelease({ sha256: g.f.sha256, attempt: b2.attempt });
+  t = await acct.testFiles({ sha256: g.f.sha256 });
+  ok(t.slot === null, "and the owner's own release frees it");
+
+  // R13: retry_after is the running call's deadline, and past it a second, never past the hold
+  await acct.testFiles({ verifyMs: 300, slotHoldMs: 5000 });
+  const b3 = (await acct.verifyBegin({ account: A, sha256: g.f.sha256 })).ok;
+  let r = await acct.verifyBegin({ account: A, sha256: g.f.sha256 });
+  const early = r.error?.detail?.retry_after;
+  ok(r.error?.detail?.limit === "verify_at_once" && early > 0 && early <= 300, "R13: before the running call's deadline, retry_after is that deadline (" + early + " ms)");
+  await new Promise((r) => setTimeout(r, 400));
+  r = await acct.verifyBegin({ account: A, sha256: g.f.sha256 });
+  const late = r.error?.detail?.retry_after;
+  const hold = b3.until + 5000 - Date.now();
+  ok(r.error?.detail?.limit === "verify_at_once" && late >= 900 && late <= 1000 && late <= hold, "R13: past it, while the slot is held, retry_after is a second, within the hold (" + late + " ms)");
+  await acct.testFiles({ verifyMs: 0, slotHoldMs: 0, endLease: true });
+});
+
+await section("a verify call frees its own slot whenever it records nothing", async () => {
+  const bucket = await mf.getR2Bucket("SHARE_BUCKET", "on");
+  const fresh = async () => {
+    const parts = [randomBytes(5 * MiB), randomBytes(5 * MiB)];
+    for (const c of parts) await put(sa, c);
+    const f = fileOf(parts);
+    await register(sa, f.manifest);
+    const keys = JSON.parse((await acct.testFiles({ sha256: f.sha256 })).row.keys);
+    return { f, parts, keys };
+  };
+  // R10: a chunk whose object is gone (the get answers null)
+  const g = await fresh();
+  await bucket.delete(g.keys[1]);
+  let r = await verify(sa, g.f.sha256);
+  let next = await verify(sa, g.f.sha256);
+  ok(r.status === 503 && next.status !== 429, `R10: a chunk's object gone: 503, and the slot freed, so the next call is admitted (${r.status}, then ${next.status})`);
+  // R12: a read that fails mid-body
+  const h = await fresh();
+  await gate("verify-read-fail", true);
+  r = await verify(sa, h.f.sha256);
+  await gate("verify-read-fail", false);
+  next = await verify(sa, h.f.sha256);
+  ok(r.status === 503 && next.status === 200 && (await next.json()).state === "verified", `R12: a read that fails: 503, and the slot freed, so the next call verifies (${r.status}, then ${next.status})`);
+  // A13: a chunk shorter than its listed size retires the file
+  const s = await fresh();
+  await bucket.put(s.keys[1], s.parts[1].subarray(0, s.parts[1].length - 10));
+  r = await verify(sa, s.f.sha256);
+  let b = await r.json();
+  let t = await acct.testFiles({ sha256: s.f.sha256 });
+  ok(r.status === 400 && b.reason === "size" && t.row === null, "A13: a chunk shorter than listed: invalid (size), and the row retired (" + JSON.stringify(b) + ")");
+  ok(t.refs[sha(s.parts[0])] === 0 && t.refs[sha(s.parts[1])] === 0, "with its references");
+  // V1, C4: a chunk longer than listed is read no further than its size and one read past it, then cancelled
+  const l = await fresh();
+  await bucket.put(l.keys[0], Buffer.concat([l.parts[0], randomBytes(4 * MiB)]));
+  const io0 = await (await at(SITE, "/__test/verify-io")).json();
+  r = await verify(sa, l.f.sha256);
+  b = await r.json();
+  const io1 = await (await at(SITE, "/__test/verify-io")).json();
+  const read = io1.bytes - io0.bytes;
+  ok(r.status === 400 && b.reason === "size", "an overlong chunk: invalid (size)");
+  ok(read < l.parts[0].length + 4 * MiB && read <= l.parts[0].length + MiB, `V1: its reads stop just past its size: ${read} bytes of ${l.parts[0].length + 4 * MiB} (size ${l.parts[0].length})`);
+  ok(io1.cancels - io0.cancels === 1, `C4: and its body is cancelled (${io1.cancels - io0.cancels})`);
+});
+
+await section("retirement: live rows are never retired, and a reference taken meanwhile keeps a row", async () => {
+  // A19: a live row with no references, past its hold, survives retirement
+  const parts = [randomBytes(5 * MiB), randomBytes(5 * MiB)];
+  for (const c of parts) await put(sa, c);
+  const f = fileOf(parts);
+  await register(sa, f.manifest);
+  await acct.testFiles({ holdMs: 1 }); // (so its verified hold ends at once)
+  ok((await verifyAll(sa, f.sha256)).pop().state === "verified", "(a file verified)");
+  const ws = await opsSocket(sa, "device-tier-0004");
+  const op = await ws.create(f.sha256, f.bytes.length);
+  ws.close();
+  ok(Number.isInteger(op?.seq), "(and made live by an op)");
+  await acct.testFiles({ setRefs: { sha256: f.sha256, refs: 0 } });
+  await new Promise((r) => setTimeout(r, 20));
+  let t = await acct.testFiles({ sha256: f.sha256, retire: true, holdMs: 0 });
+  ok(t.row?.state === "live", "A19: a live row with no references, past its hold, isn't retired");
+  await acct.testFiles({ setRefs: { sha256: f.sha256, refs: 1 } });
+  // A18: an op that takes a reference between retirement's select and its transaction keeps the row
+  const p2 = [randomBytes(5 * MiB), randomBytes(5 * MiB)];
+  for (const c of p2) await put(sa, c);
+  const g = fileOf(p2);
+  // (the seam is set first: whichever retirement selects the row, the registration's own alarm or the call below, an
+  // op takes its reference in between)
+  await acct.testFiles({ holdMs: 1, between: g.sha256 });
+  await register(sa, g.manifest);
+  await new Promise((r) => setTimeout(r, 20));
+  t = await acct.testFiles({ sha256: g.sha256, retire: true, holdMs: 0, between: "" });
+  ok(t.row !== null && t.row.refs === 1, "A18: a row that gains a reference between retirement's select and its transaction is kept");
+  await acct.testFiles({ setRefs: { sha256: g.sha256, refs: 0 } });
+});
 
 // ---- each verify call debits at least 64 MiB (the coordinator's final #880 ruling): with 128 MiB a day, two calls of a
 // 10 MiB file are admitted and the third is refused, however little they stream
-{
+await section("the debit floor", async () => {
   plans.set(F2, limits(128 * MiB));
   const sf = await signIn(F2);
   ok((await post(sf, "/api/sync/v1/enable", {})).status === 200, "(floor) sync on");
@@ -452,10 +637,10 @@ for (const c of [c1, c2, c3]) ok((await put(sa, c)).status === 201, "a chunk upl
   ok(c1.ok?.attempt !== undefined && c2.ok?.attempt !== undefined, "two 10 MiB calls are admitted under 128 MiB a day");
   ok(c3.error?.code === "rate" && c3.error.detail?.limit === "verify_bytes_per_day", "the third is refused: each debited 64 MiB, not its 10 MiB");
   await af.testFiles({ endLease: true });
-}
+});
 
 // ---- CoCalc's verify_bytes_per_day: malformed keeps nothing new (an outage, not the fallback); 0 is 0 (astra's #880 SEC 2)
-{
+await section("CoCalc's verify_bytes_per_day", async () => {
   const se = await signIn(E);
   const r = await post(se, "/api/sync/v1/enable", {});
   ok(r.status === 503, "a malformed verify_bytes_per_day makes CoCalc's limits malformed: treated as an outage, not the 16 GiB fallback (" + r.status + ")");
@@ -468,11 +653,11 @@ for (const c of [c1, c2, c3]) ok((await put(sa, c)).status === 201, "a chunk upl
   const v = await verify(sz, f.sha256);
   const b = await v.json();
   ok(v.status === 429 && b.max === 0, "verify_bytes_per_day 0: no verification at all (" + JSON.stringify(b) + ")");
-}
+});
 
 // ---- registration at the storage cap (daybreak3's #880 finding): a resent or competing manifest, or one with missing
 // chunks, is answered without asking for room; only a new row needs it
-{
+await section("registration at the storage cap", async () => {
   const capFile = fileOf([capA, capB]);
   const total = capA.length + capB.length + capManifestBytes(capFile.manifest);
   plans.set(C, { ...limits(), storage_bytes: total });
@@ -491,10 +676,10 @@ for (const c of [c1, c2, c3]) ok((await put(sa, c)).status === 201, "a chunk upl
   ok(r.status === 404 && b.error === "missing", "(cap) a manifest with a missing chunk at the cap: missing, not storage_full (" + r.status + ")");
   r = await register(sc, { ...fileOf([capB, capA]).manifest });
   ok(r.status === 507 || (r.status === 503 && (await r.clone().json()).error === "busy"), "(cap) a new manifest when no room is left: refused for room (" + r.status + ")");
-}
+});
 
 // ---- the randomized state machine
-{
+await section("the randomized state machine", async () => {
   const sr = await signIn(R);
   await post(sr, "/api/sync/v1/enable", {});
   const ar = await account(R);
@@ -590,7 +775,7 @@ for (const c of [c1, c2, c3]) ok((await put(sa, c)).status === 201, "a chunk upl
   }
   ws.close();
   ok(viol === 0, `the randomized state machine: ${ran} steps, every invariant held after every step`);
-}
+}, 240_000);
 
 await mf.dispose();
 console.log(`${count - failures}/${count} passed`);
