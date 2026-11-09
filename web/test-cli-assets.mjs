@@ -31,11 +31,13 @@ const APP_ONLY = ["sagebrush-selftest.js"];
 // the editor is off; the CLI doesn't carry it, so it must be 404 here, as an app-only file is)
 // (and the terminal on your computer, T-3: it talks to a relay through the site's session, which the CLI's page can't
 // reach; the site and the app carry it, web/build.ts SITE_FILES and app/build-frontend.mjs)
-const SITE_ONLY = ["sagebrush-latex.js", "sagebrush-remote-terminal.js"];
+// (and the notebook page's agent chunk, #919: fetched only by its Agent button, which the page never shows on the CLI's
+// page (window.__SAGEBRUSH_LOCAL__): a page on this computer, which the agent's program doesn't accept)
+const SITE_ONLY = ["sagebrush-latex.js", "sagebrush-remote-terminal.js", "sagebrush-agent.js"];
 const verdict = (name, status) => (APP_ONLY.includes(name) || SITE_ONLY.includes(name) ? status === 404 : status === 200);
 // (the verdict's own control: an app-only file served, or a page file
 // missing, must fail)
-for (const [n, s, want] of [["sagebrush-selftest.js", 404, true], ["sagebrush-selftest.js", 200, false], ["sagebrush-history.js", 200, true], ["sagebrush-history.js", 404, false], ["sagebrush-latex.js", 404, true], ["sagebrush-latex.js", 200, false]]) {
+for (const [n, s, want] of [["sagebrush-selftest.js", 404, true], ["sagebrush-selftest.js", 200, false], ["sagebrush-history.js", 200, true], ["sagebrush-history.js", 404, false], ["sagebrush-latex.js", 404, true], ["sagebrush-latex.js", 200, false], ["sagebrush-agent.js", 404, true], ["sagebrush-agent.js", 200, false]]) {
   if (verdict(n, s) !== want) { fail++; console.log(`FAIL the verdict's control: ${n} ${s}`); }
 }
 try {
