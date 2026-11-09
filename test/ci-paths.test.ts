@@ -302,6 +302,7 @@ test("the full tier on a pull request: the full-ci label, or a sync, sharing, se
     "web/sync/doc.ts", "web/sync-protocol/doc-protocol.ts", "web/journal/store.js", "web/workspace/sync-outbox.ts",
     "web/workspace/doc-sync.ts", "web/notebook/sync-rows.js", "web/notebook/db-merge3.ts", "web/board/syncdb.ts",
     "web/share/files.ts", "web/share-client/upload.ts", "web/csp.ts", "web/csp-policy.mts", "web/safe-html.ts",
+    "web/cloud/share/server.ts", "web/cloud/share/migrations/0009_remotes.sql", "web/cloud/remote/relay.ts",
     "web/workspace/export/run.ts", "web/workspace/db.ts", "web/workspace/api.ts", "web/workspace/migrate.ts", "web/board/export.ts",
     "web/latex/save.ts", "scripts/check-export-size.mjs",
     // (the LaTeX group's inputs: its ceiling is checked only in the full tier's web-artifacts)
@@ -461,7 +462,12 @@ test("the full-tier-only jobs ci-paths promotes for are the jobs ci.yml gates on
 });
 
 test("web_share: the share dialog's shard runs on a pull request that changes sharing or has the full-ci label, and always on master, the schedule and a dispatch", () => {
-  for (const f of ["web/share/files.ts", "web/share/test-share-dialog.mjs", "web/share-client/upload.ts"]) assert.equal(classify([f]).web_share, "true", f);
+  for (const f of ["web/share/files.ts", "web/share/test-share-dialog.mjs", "web/share-client/upload.ts", "web/cloud/share/server.ts", "web/cloud/share/test-share-dialog.mjs"]) assert.equal(classify([f]).web_share, "true", f);
+  // (the hosted remotes: the full tier, but no share dialog)
+  assert.equal(classify(["web/cloud/remote/relay.ts"]).full, "true");
+  assert.equal(classify(["web/cloud/remote/relay.ts"]).web_share, "false");
+  // (the licence files alone: neither)
+  assert.equal(classify(["web/cloud/README.md"]).web_share, "false");
   // (the full tier for another reason: no share dialog on the pull request)
   for (const f of ["web/sync/doc.ts", "web/build.ts", "web/workspace/agent-ui.ts"]) {
     assert.equal(classify([f]).full, "true", f);
