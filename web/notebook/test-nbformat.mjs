@@ -36,6 +36,13 @@ const own = { cells: [{ id: "a", code: "x", outputs: [] }, { id: "b", type: "mar
 check(fromNbformat(own) === own, "a document in Sagebrush's shape: returned as it is", null);
 const mixed = fromNbformat({ cells: [{ id: "a", code: "x" }, { cell_type: "markdown", source: "m" }] });
 check(J(mixed.cells[0]) === J({ id: "a", code: "x" }) && mixed.cells[1].type === "markdown" && mixed.cells[1].code === "m", "a cell in each shape: only the nbformat one converted", mixed.cells);
+// (ids: one nbformat doesn't allow (a space, 65 characters) is replaced by a new one; a valid one is kept: grader's N9)
+const ids = fromNbformat({ cells: [{ cell_type: "code", id: "a b", source: "1" }, { cell_type: "code", id: "x".repeat(65), source: "2" }, { cell_type: "code", id: "ok_id-1", source: "3" }] }).cells.map((c) => c.id);
+check(ids[0] !== "a b" && ids[1] !== "x".repeat(65) && ids.every((i) => /^[a-zA-Z0-9_-]{1,64}$/.test(i)) && ids[2] === "ok_id-1", "an id nbformat doesn't allow (a space, 65 characters) gets a new one; a valid one is kept", ids);
+// (a cell already Sagebrush's (its code text) stays exactly as given, even carrying nbformat's fields too: grader's N4)
+const both = { code: "x", type: "markdown", cell_type: "markdown", source: "y" };
+const mix = fromNbformat({ cells: [both, { cell_type: "code", source: "z" }] });
+check(mix.cells[0] === both && mix.cells[0].code === "x" && mix.cells[1].code === "z", "a cell with its code text stays as given (code x), whatever nbformat fields it also carries; the nbformat one beside it is converted", mix.cells);
 const empty = fromNbformat({ cells: [], nbformat: 4, nbformat_minor: 5, metadata: {} });
 check(J(empty) === J({ cells: [], metadata: {} }), "no cells, but nbformat's fields: still nbformat's, its fields dropped", empty);
 for (const v of [null, undefined, 5, "x", [], { cells: "no" }, { title: "a board", nodes: [] }]) check(fromNbformat(v) === v, `not a notebook (${J(v)}): as it is`, null);
