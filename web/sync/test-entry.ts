@@ -34,6 +34,11 @@ export default {
       const hash = await accountHash(url.searchParams.get("account") ?? "");
       return Response.json(await env.SYNC_ACCOUNT!.get(env.SYNC_ACCOUNT!.idFromName("acct:" + hash)).testWake(await req.json()));
     }
+    // (tests only: the agents' index's bounds lowered, a step run, its state)
+    if (url.pathname === "/__test/index") {
+      const hash = await accountHash(url.searchParams.get("account") ?? "");
+      return Response.json(await env.SYNC_ACCOUNT!.get(env.SYNC_ACCOUNT!.idFromName("acct:" + hash)).testIndex(await req.json()));
+    }
     // (tests only: hold, or open, a named step in the Worker, as a late D1 answer would)
     if (url.pathname === "/__test/gate") {
       setGate(env, url.searchParams.get("name") ?? "", url.searchParams.get("on") === "1");

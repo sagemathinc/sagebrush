@@ -23,8 +23,10 @@
 //   POST /api/sync/v1/grants                     {agent, scopes, days} -> {grant, token}, the token shown once
 //   POST /api/sync/v1/grants/<id>/revoke|rotate  revoke, or a new token for the same grant
 //   GET  /api/sync/v1/grants/log                 the access log, newest first (?grant=, ?before=)
+//   POST /api/sync/v1/index/rebuild              the agents' index rebuilt from the first op (step 1a2)
 //   POST /api/agent/v1/<verb>                    an agent's request, Authorization: Bearer sbg1… (no session, no
-//                                                Origin); every verb answers 404 not_built until step 1a2
+//                                                Origin); list and stat read the server's index (step 1a2),
+//                                                the other verbs answer 404 not_built
 //
 // and, on the user-content Worker (web/files), /p/<key>: a signed read (§5.4).
 //
@@ -279,6 +281,11 @@ export async function handleSync(req: Request, env: Env): Promise<Response | nul
       return err(e instanceof SyncError && e.code === "limit" ? 413 : 400, e instanceof SyncError ? e.code : "invalid");
     }
     return answer(await stub.missing({ account: who.id, blobs, bind }), (v) => json(v.verifying.length ? v : { missing: v.missing }));
+  }
+  // the agents' index, rebuilt by the person (fs-sync 1a2: a failed index stays failed until this; single-flight)
+  if (p === "/api/sync/v1/index/rebuild" && m === "POST") {
+    if (!agentOn(env)) return err(404, "not found");
+    return answer(await stub.indexRebuild({ account: who.id }), json);
   }
   // agents' grants, from the person's session (design/agent-endpoint.md §2, the grant dialog's calls; §8, the log): a
   // 404 while the switch is off

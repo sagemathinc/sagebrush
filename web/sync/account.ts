@@ -18,8 +18,10 @@ import {
 import { patchRef, unwrap, type BatchOut } from "./doc.ts";
 import { agentOn, allowed, gate, testMode, tieredOn, type SyncEnv } from "./env.ts";
 import { AGENT, GRANT_ID, READS, SCOPED, VERBS, checkAgentName, checkScopes, inScope, makeToken, newGrantId, newSecret, secretHash, type Scope } from "./agent-token.ts";
-import { normPath } from "../workspace/paths.ts";
+import { TRASH, normPath, within } from "../workspace/paths.ts";
 import { checkCall } from "../workspace/agent-schema.ts";
+import { IX, SCHEMA as IX_SCHEMA, IX_TABLES, Budget, BudgetStop, Entangled, applyOp, jobGet, jobNew, jobPut, jobStep } from "./entries.ts";
+import type { SyncEntry, SyncOp } from "../workspace/sync-reduce.ts";
 import { TIERED, canonical, checkManifest, sha256Hex, type Manifest } from "./manifest.ts";
 import { Sha256, type ShaState } from "./sha256.ts";
 import { MAX_PUT, SHARING_USED, nowSeconds } from "../share/server.ts";
@@ -107,6 +109,13 @@ const send = (ws: WebSocket, v: unknown) => {
 };
 const refusal = (e: unknown) =>
   e instanceof SyncError ? { code: e.code, detail: { message: e.message, ...e.detail } } : { code: "busy" as const, detail: { message: "try again" } };
+
+/** A bound of the agents' index past (LIMITS ruling (2)): the index fails, with this reason. */
+class IndexBound extends Error {
+  constructor(readonly reason: "entries" | "gone" | "folder") {
+    super(reason);
+  }
+}
 
 export class SyncAccount extends DurableObject<SyncEnv> {
   private sql: SqlStorage;
@@ -403,7 +412,10 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     if (!isNat(req)) throw new SyncError("invalid", "req");
     if (t === "ops") {
       fields(m, ["t", "req", "ops"], "ops");
-      send(ws, { t: "ack", req, ops: this.ops(att, dev, m.ops) });
+      const acked = this.ops(att, dev, m.ops);
+      // (the agents' index follows the ops just accepted, in its own transaction: it can fail, never the ops, 1a2)
+      this.indexLive();
+      send(ws, { t: "ack", req, ops: acked });
     } else if (t === "pull_index") {
       fields(m, ["t", "req", "after"], "pull_index");
       if (!isNat(m.after)) throw new SyncError("invalid", "after");
@@ -2246,12 +2258,17 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     // (an unused chunked file's registration, at the end of its hold, design/tiered-files.md §4.3)
     const hold = tieredOn(this.env) && this.hasFiles() ? this.one("SELECT MIN(hold_until) AS t FROM files WHERE refs <= 0 AND state <> 'live'")?.t : null;
     if (hold !== null && hold !== undefined) t.push(Number(hold) + 1);
+    // (the agents' index while it builds: its next step at once)
+    if (agentOn(this.env) && this.get("ix_state") === "building") t.push(now + 1);
     // (the next live grant's expiry, when the dead ones past AGENT.deadGrants are trimmed)
     const exp = this.hasGrants() ? this.one("SELECT MIN(expires) AS t FROM grants WHERE revoked IS NULL AND expires > ?", now)?.t : null;
     if (exp !== null && exp !== undefined) t.push(Number(exp) + 1);
     // (the access log's oldest row, when it ages out)
     const log = this.logDue();
     if (log !== null) t.push(log);
+    // (the oldest list cursor, when it expires: at once while a full page of expired ones is left)
+    const cur = this.cursorDue();
+    if (cur !== null) t.push(cur);
     // (a read-only account's deadline, §6.2)
     const d = this.state() === "readonly" ? this.purgeAt() : null;
     if (d !== null) t.push(d);
@@ -2302,6 +2319,23 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   private trimDead(now: number) {
     this.sql.exec("DELETE FROM grants WHERE id IN (SELECT id FROM grants WHERE revoked IS NOT NULL OR expires <= ? ORDER BY COALESCE(revoked, expires) DESC, id LIMIT -1 OFFSET ?)", now, AGENT.deadGrants);
     this.sql.exec("DELETE FROM agent_rates WHERE key <> 'account' AND substr(key, 3) NOT IN (SELECT id FROM grants)");
+    // (and the list cursors of grants no longer kept: none outlives its grant)
+    if (this.hasCursors()) this.sql.exec("DELETE FROM ix_cursors WHERE grant_id NOT IN (SELECT id FROM grants)");
+  }
+  private hasCursors(): boolean {
+    return this.one("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'ix_cursors'") !== undefined;
+  }
+  /** A page of expired list cursors deleted (the alarm's, and a new cursor's); the alarm comes back while any is left.
+   *  Expired is the listing's own test: older than `cursorMs` (t < now - cursorMs), so one still good is never swept. */
+  private sweepCursors(now: number) {
+    if (!this.hasCursors()) return;
+    this.sql.exec("DELETE FROM ix_cursors WHERE id IN (SELECT id FROM ix_cursors WHERE t < ? ORDER BY t LIMIT ?)", now - this.ixBounds.cursorMs, this.ixBounds.cursorSweep);
+  }
+  /** When the oldest list cursor expires (null: none). */
+  private cursorDue(): number | null {
+    if (!this.hasCursors()) return null;
+    const t = this.one("SELECT MIN(t) AS t FROM ix_cursors")?.t;
+    return t === undefined || t === null ? null : Number(t) + this.ixBounds.cursorMs + 1;
   }
   /**
    * A request against the persisted buckets (§7; daybreak2: the rates are hard ceilings, so they are kept, not in
@@ -2361,6 +2395,8 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       // forward to it, whatever else is due; astra S5)
       this.wakeBy(now + (days as number) * this.agentBounds.dayMs + 1);
       this.trimDead(now);
+      // (an account's first grant starts its index, so it is likely ready before the agent's first list)
+      if (this.get("ix_state") === undefined) this.indexStart();
       return this.grantView(this.one("SELECT * FROM grants WHERE id = ?", id)!);
     }));
     if ("error" in made) return made;
@@ -2392,6 +2428,8 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       const r = typeof a.id === "string" && GRANT_ID.test(a.id) && this.hasGrants() ? this.one("SELECT * FROM grants WHERE id = ?", a.id) : undefined;
       if (!r) throw new SyncError("missing", "no such grant");
       if (r.revoked === null) this.sql.exec("UPDATE grants SET revoked = ?, revoked_reason = 'person' WHERE id = ?", Date.now(), r.id);
+      // (a revoked grant's list cursors go with it, in this transaction)
+      if (this.hasCursors()) this.sql.exec("DELETE FROM ix_cursors WHERE grant_id = ?", r.id);
       this.trimDead(Date.now());
       return { grant: this.grantView(this.one("SELECT * FROM grants WHERE id = ?", r.id)!) };
     }));
@@ -2520,9 +2558,29 @@ export class SyncAccount extends DurableObject<SyncEnv> {
         return answer(400, "invalid", null, { message: `${key}: not a workspace path` });
       }
       const need = READS.has(verb) ? "read" : "write";
-      if (!inScope(JSON.parse(String(g.scopes)) as Scope[], path, need)) return answer(403, "scope", [path], { path, access: need });
-      // (the index these read, the server's entries, is fs-sync step 1a2)
-      return answer(404, "not_built", [path], { message: "this verb isn't available yet" });
+      const scopes = JSON.parse(String(g.scopes)) as Scope[];
+      // (Trash is reached by any grant, and shows only what came from its scope: by each entry's trashed_from, below)
+      if (!within(path, TRASH) && !inScope(scopes, path, need)) return answer(403, "scope", [path], { path, access: need });
+      // the index: ready and caught up with the log, in this same read, or 503 (never a partial index)
+      const ixst = this.get("ix_state");
+      if (ixst === undefined) this.indexStart();
+      if (ixst === "failed") return answer(503, "index_failed", [path], { reason: this.get("ix_reason") ?? null });
+      if (ixst !== "ready") return answer(503, "index_building", [path], { retry_after: 1000 });
+      // (ready but behind the log, as when ops were accepted while agents were off: building again, the alarm catches up)
+      if (Number(this.get("ix_cursor")) !== this.maxSeq()) {
+        this.set("ix_state", "building");
+        this.wakeBy(now + 1);
+        return answer(503, "index_building", [path], { retry_after: 1000 });
+      }
+      const ok = (body: Record<string, unknown>) => {
+        this.logRow(now, g, verb, [path], "ok");
+        return { status: 200, body };
+      };
+      if (verb === "stat") return ok({ entry: this.indexStat(path, scopes) });
+      const lp = p as { recursive?: boolean; cursor?: string };
+      const r = this.indexList(path, lp.recursive === true, lp.cursor, scopes, String(g.id), this.ixNow ?? now);
+      if ("error" in r) return answer(r.status, r.error, [path], r.extra);
+      return ok(r);
     });
   }
 
@@ -2543,6 +2601,324 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     this.wakeBy(now + a.wake);
     const at = await this.ctx.storage.getAlarm();
     return { alarm: at === null ? null : at - now, alarms: this.alarms };
+  }
+
+  // ---- the agents' index, the server's entries (design/sync-server.md §3; fs-sync step 1a2, behind SYNC_AGENT): the
+  // shared reducer, unchanged, over SQLite (entries.ts). `meta` holds its state: ix_state building | ready | failed,
+  // ix_cursor (the last op applied), ix_reason (why it failed), ix_n_entries and ix_n_gone. Rulings: daybreak2 (LIMITS)
+  // and daybreak3 (ENGINE) on proposal r1, with astra's conditions; accepted ops always stay accepted.
+
+  private ixBounds = { ...IX };
+  /** after a budget stop: how many ops the next backfill step takes (the ones that fitted), in memory */
+  private ixCut: number | null = null;
+  /** tests only: the alarm leaves the index alone, and testIndex steps it one step at a time */
+  private ixManual = false;
+  /** tests only: ops are accepted without the live update, as while agents are off */
+  private ixNoLive = false;
+  /** tests only: the time a list sees (its cursors' ages, the cursors it makes and its sweep), to pin an exact boundary */
+  private ixNow: number | null = null;
+
+  private maxSeq(): number {
+    return Number(this.one("SELECT COALESCE(MAX(seq), 0) AS n FROM ops")!.n);
+  }
+  private opsAfter(cursor: number, limit: number): Row[] {
+    return this.sql.exec('SELECT seq, device, dseq, t, by, op, path, "to", kind, ref, fid, sha256, size, base, parent FROM ops WHERE seq > ? ORDER BY seq LIMIT ?', cursor, limit).toArray() as Row[];
+  }
+  /** An op of the log, exactly as a device gets it (index(): absent fields left out), for the reducer. */
+  private static opOf(r: Row): SyncOp {
+    return Object.fromEntries(Object.entries(r).filter(([, v]) => v !== null)) as unknown as SyncOp;
+  }
+  /** Building from the first op, from nothing: an account's first index, or a rebuild. In the caller's transaction.
+   * The old index's rows aren't deleted here: a reset, kept in meta (ix_reset), has the alarm delete them a page a step
+   * (ENGINE E2 on #913), and the backfill begins only when they are all gone; reads answer 503 meanwhile. */
+  private indexStart() {
+    for (const q of IX_SCHEMA) this.sql.exec(q);
+    this.set("ix_state", "building");
+    this.set("ix_cursor", 0);
+    this.set("ix_n_entries", 0);
+    this.set("ix_n_gone", 0);
+    this.set("ix_reset", 1);
+    this.sql.exec("DELETE FROM meta WHERE k = 'ix_reason'");
+    this.ixCut = null;
+    // (an account's first index has nothing to reset; with no ops either, there is nothing to build: ready now)
+    if (this.indexEmpty()) {
+      this.set("ix_reset", 0);
+      if (this.maxSeq() === 0) return this.set("ix_state", "ready");
+    }
+    this.wakeBy(Date.now() + 1);
+  }
+  private indexEmpty(): boolean {
+    return IX_TABLES.every((t) => !this.one(`SELECT 1 AS x FROM ${t} LIMIT 1`));
+  }
+  /** One step of a reset: at most `resetPage` rows deleted (and within the step's visits), in one transaction; when
+   * none is left, the reset ends and the backfill (from the first op) begins with the next step. */
+  private indexResetStep() {
+    const b = this.ixBounds, budget = new Budget(b.visits);
+    try {
+      this.ctx.storage.transactionSync(() => {
+        // (each table's page counted first (a visit), then exactly its rows charged and deleted)
+        let left = Math.min(b.resetPage, b.visits - IX_TABLES.length - 1);
+        if (left <= 0) throw new BudgetStop();
+        for (const t of IX_TABLES) {
+          if (left <= 0) break;
+          budget.charge();
+          const k = Number(this.one(`SELECT COUNT(*) AS n FROM (SELECT 1 FROM ${t} LIMIT ?)`, left)!.n);
+          if (!k) continue;
+          budget.charge(k);
+          this.sql.exec(`DELETE FROM ${t} WHERE rowid IN (SELECT rowid FROM ${t} LIMIT ?)`, k);
+          left -= k;
+        }
+        if (this.indexEmpty()) {
+          this.set("ix_reset", 0);
+          if (this.maxSeq() === 0) this.set("ix_state", "ready");
+        }
+      });
+    } catch (e) {
+      this.indexFail(e instanceof BudgetStop ? "visits" : SyncAccount.failReason(e));
+    }
+    if (this.get("ix_state") === "building") this.wakeBy(Date.now() + 1);
+  }
+  /** Failed, sticky until a person's rebuild (ENGINE Q4): in its own transaction, after the failed one rolled back. */
+  private indexFail(reason: string) {
+    this.ctx.storage.transactionSync(() => {
+      this.set("ix_state", "failed");
+      this.set("ix_reason", reason);
+    });
+  }
+  /**
+   * `rows` applied, in the caller's transaction, charged to `budget` (one, or a fresh one per op: `fresh`); the counts
+   * and the cursor kept, and ready if the cursor is the log's last op, in this same transaction. A budget stop or a
+   * bound past throws, and the caller's transaction rolls it all back. `done` counts the ops wholly applied.
+   */
+  private indexApply(rows: Row[], budget: () => Budget, done: { n: number }) {
+    const b = this.ixBounds;
+    let ents = Number(this.get("ix_n_entries") ?? 0), gone = Number(this.get("ix_n_gone") ?? 0), cursor = Number(this.get("ix_cursor"));
+    for (const r of rows) {
+      const res = applyOp(this.sql, SyncAccount.opOf(r), budget());
+      ents += res.entries;
+      gone += res.gone;
+      if (ents > b.entries) throw new IndexBound("entries");
+      if (gone > b.gone) throw new IndexBound("gone");
+      if (res.largest > b.perFolder) throw new IndexBound("folder");
+      cursor = Number(r.seq);
+      done.n++;
+    }
+    this.set("ix_cursor", cursor);
+    this.set("ix_n_entries", ents);
+    this.set("ix_n_gone", gone);
+    if (cursor === this.maxSeq()) this.set("ix_state", "ready");
+    // (a live batch longer than one step's ops: the rest is the alarm's, building, never ready behind the log)
+    else if (this.get("ix_state") === "ready") {
+      this.set("ix_state", "building");
+      this.wakeBy(Date.now() + 1);
+    }
+  }
+  /** After ops are accepted: a ready index applies them, all under one budget; any failure fails the index, never the ops. */
+  private indexLive() {
+    if (!agentOn(this.env) || !this.exists() || this.get("ix_state") !== "ready" || this.ixNoLive) return;
+    const done = { n: 0 };
+    try {
+      // (one budget for the whole batch, whatever it holds (PERF P1 on #913): past it, nothing is kept, and the alarm's
+      // steps take the batch, as jobs where they must)
+      const budget = new Budget(this.ixBounds.visits);
+      this.ctx.storage.transactionSync(() => this.indexApply(this.opsAfter(Number(this.get("ix_cursor")), this.ixBounds.ops), () => budget, done));
+    } catch (e) {
+      // (an op too big for one live update: building again, and the alarm's steps take it, as a job if it must be)
+      if (e instanceof BudgetStop) {
+        this.ctx.storage.transactionSync(() => this.set("ix_state", "building"));
+        this.wakeBy(Date.now() + 1);
+      } else this.indexFail(SyncAccount.failReason(e));
+    }
+  }
+  private static failReason(e: unknown): string {
+    return e instanceof IndexBound ? e.reason : e instanceof Entangled ? "deferred" : "error";
+  }
+  /**
+   * One alarm step of a building index: at most `ops` ops and `bytes` of their rows, all under one budget of `visits`
+   * (rows read and written, the discarded ones counted: a step that stops isn't retried in the same alarm). On a stop,
+   * the ops that fitted are the next step's; an op that can't fit a whole budget alone is a job (entries.ts): applied
+   * over the steps after, its cursor published when it is whole.
+   */
+  private indexStep(manual = false) {
+    if (!agentOn(this.env) || !this.exists() || this.get("ix_state") !== "building" || ((this.ixManual || (testMode(this.env) && Number(this.get("ix_test_manual")) === 1)) && !manual)) return;
+    if (Number(this.get("ix_reset") ?? 0) === 1) return this.indexResetStep();
+    if (jobGet(this.sql)) return this.indexJobStep();
+    const b = this.ixBounds;
+    const rows = this.opsAfter(Number(this.get("ix_cursor")), Math.min(b.ops, this.ixCut ?? b.ops));
+    let bytes = 0, n = 0;
+    for (const r of rows) {
+      bytes += JSON.stringify(r).length;
+      if (n > 0 && bytes > b.bytes) break;
+      n++;
+    }
+    const budget = new Budget(b.visits), done = { n: 0 };
+    try {
+      this.ctx.storage.transactionSync(() => {
+        if (n === 0) {
+          if (Number(this.get("ix_cursor")) === this.maxSeq()) this.set("ix_state", "ready");
+          return;
+        }
+        this.indexApply(rows.slice(0, n), () => budget, done);
+      });
+      this.ixCut = null;
+    } catch (e) {
+      if (e instanceof BudgetStop) {
+        if (done.n === 0) this.ctx.storage.transactionSync(() => jobPut(this.sql, jobNew(Number(rows[0].seq))));
+        else this.ixCut = done.n;
+      } else this.indexFail(SyncAccount.failReason(e));
+    }
+    if (this.get("ix_state") === "building") this.wakeBy(Date.now() + 1);
+  }
+  /**
+   * One step of the op in its job: as much as a fresh budget holds, in one transaction. Whole ("done"), the counts and
+   * the cursor publish with that step's last writes (ready if it is the log's last op); "skip": only the cursor moves
+   * (the op changes nothing, as the reducer would have it). A run phase that can't fit a fresh budget fails the index.
+   */
+  private indexJobStep() {
+    const b = this.ixBounds, budget = new Budget(b.visits);
+    try {
+      this.ctx.storage.transactionSync(() => {
+        const job = jobGet(this.sql)!;
+        const row = this.one('SELECT seq, device, dseq, t, by, op, path, "to", kind, ref, fid, sha256, size, base, parent FROM ops WHERE seq = ?', job.seq);
+        if (!row) throw new Error("a job's op isn't in the log");
+        const r = jobStep(this.sql, job, SyncAccount.opOf(row), budget, true, b.jobPage);
+        if (r.largest > b.perFolder) throw new IndexBound("folder");
+        if (r.result === "more") return jobPut(this.sql, job);
+        jobPut(this.sql, null);
+        if (r.result === "done") {
+          const ents = Number(this.get("ix_n_entries") ?? 0) + job.entries, gone = Number(this.get("ix_n_gone") ?? 0) + job.gone;
+          if (ents > b.entries) throw new IndexBound("entries");
+          if (gone > b.gone) throw new IndexBound("gone");
+          this.set("ix_n_entries", ents);
+          this.set("ix_n_gone", gone);
+        }
+        this.set("ix_cursor", job.seq);
+        if (job.seq === this.maxSeq()) this.set("ix_state", "ready");
+      });
+    } catch (e) {
+      this.indexFail(e instanceof BudgetStop ? "visits" : SyncAccount.failReason(e));
+    }
+    if (this.get("ix_state") === "building") this.wakeBy(Date.now() + 1);
+  }
+
+  /** A document's revision, as `list`, `stat` and (1d) `read` give it: its epoch and head, one token. */
+  private docRevision(ref: string | undefined): string | undefined {
+    const d = ref ? this.one("SELECT epoch, head_seq FROM docs WHERE doc = ?", ref) : undefined;
+    return d ? `${d.epoch}.${d.head_seq}` : undefined;
+  }
+  private entryView(e: SyncEntry) {
+    const v: Record<string, unknown> = { path: e.path, kind: e.kind, created: e.created, updated: e.updated, by: e.by };
+    if (e.fid !== undefined) v.fid = e.fid;
+    if (e.ref !== undefined) {
+      v.ref = e.ref;
+      const rev = this.docRevision(e.ref);
+      if (rev !== undefined) v.revision = rev;
+    }
+    if (e.sha256 !== undefined) v.sha256 = e.sha256;
+    if (e.size !== undefined) v.size = e.size;
+    if (e.trashed) v.trashed = e.trashed;
+    return v;
+  }
+  private entryAt(path: string): SyncEntry | undefined {
+    const k = this.one("SELECT id FROM ix_keys WHERE key = ?", path.normalize("NFC"));
+    const r = k ? this.one("SELECT data FROM ix_entries WHERE id = ?", k.id) : undefined;
+    return r ? (JSON.parse(String(r.data)) as SyncEntry) : undefined;
+  }
+  /** Whether a grant sees a path in Trash: what came from its scope (the entry put in Trash, by its trashed.from). */
+  private trashVisible(path: string, scopes: Scope[], tops: Map<string, boolean>): boolean {
+    if (path === TRASH) return true;
+    const top = TRASH + "/" + path.slice(TRASH.length + 1).split("/")[0];
+    let v = tops.get(top);
+    if (v === undefined) {
+      const t = this.entryAt(top);
+      v = !!t?.trashed && inScope(scopes, t.trashed.from, "read");
+      tops.set(top, v);
+    }
+    return v;
+  }
+  private indexStat(path: string, scopes: Scope[]) {
+    if (within(path, TRASH) && !this.trashVisible(path, scopes, new Map())) return null;
+    const e = this.entryAt(path);
+    return e ? this.entryView(e) : null;
+  }
+  /**
+   * A page of `folder` (its children, or with `recursive` everything under it), by path after `cursor`: at most `page`
+   * entries, and at most `examined` rows looked at whatever is filtered out (astra's read condition), then a cursor.
+   * Trash shows only what came from the grant's scope, and is left out of anything listed from outside it.
+   */
+  private indexList(folder: string, recursive: boolean, cursor: string | undefined, scopes: Scope[], grant: string, now: number): { entries: unknown[]; cursor: string | null } | { status: number; error: string; extra: Record<string, unknown> } {
+    const b = this.ixBounds;
+    const missing = { status: 404, error: "missing", extra: { path: folder } };
+    // (a folder in Trash the grant can't see answers as one that isn't there: its visibility first, then whether it is)
+    if (within(folder, TRASH) && folder !== TRASH && !this.trashVisible(folder, scopes, new Map())) return missing;
+    // (the folder as stored: its children's paths extend that spelling, whatever form, NFC or not, the call gave)
+    if (folder !== "/" && folder !== TRASH) {
+      const f = this.entryAt(folder);
+      if (!f || f.kind !== "folder") return missing;
+      folder = f.path;
+    }
+    const prefix = folder === "/" ? "/" : folder + "/";
+    // (a cursor is an id this grant's listing of this folder was given, kept here: never a path, so a page that ends on
+    // a row the grant can't see says nothing of it; any other cursor is refused)
+    let after = "";
+    if (cursor !== undefined) {
+      const c = /^[0-9a-f]{32}$/.test(cursor) ? this.one("SELECT grant_id, folder, recursive, after, t FROM ix_cursors WHERE id = ?", cursor) : undefined;
+      if (!c || c.grant_id !== grant || c.folder !== folder || Number(c.recursive) !== (recursive ? 1 : 0) || Number(c.t) < now - b.cursorMs) return { status: 400, error: "invalid", extra: { message: "cursor: unknown or expired; list again from the start" } };
+      after = String(c.after);
+    }
+    const rows = recursive
+      ? (this.sql.exec("SELECT path, data FROM ix_entries WHERE path > ? AND path >= ? AND path < ? ORDER BY path LIMIT ?", after, prefix, folder === "/" ? "0" : folder + "0", b.examined + 1).toArray() as Row[])
+      : (this.sql.exec("SELECT e.path AS path, e.data AS data FROM ix_children c JOIN ix_entries e ON e.id = c.id WHERE c.pk = ? AND e.path > ? ORDER BY e.path LIMIT ?", folder.normalize("NFC"), after, b.examined + 1).toArray() as Row[]);
+    const inTrash = within(folder, TRASH), tops = new Map<string, boolean>(), out: unknown[] = [];
+    let examined = 0, last: string | null = null;
+    for (const r of rows) {
+      if (examined === b.examined || out.length === b.page) break;
+      examined++;
+      const path = String(r.path);
+      last = path;
+      if (inTrash ? !this.trashVisible(path, scopes, tops) : within(path, TRASH)) continue;
+      out.push(this.entryView(JSON.parse(String(r.data)) as SyncEntry));
+    }
+    if (!(rows.length > examined) || last === null) return { entries: out, cursor: null };
+    // (the continuation kept: the newest `cursors` per grant, each for `cursorMs`; expired ones swept a page at a time)
+    const id = [...crypto.getRandomValues(new Uint8Array(16))].map((x) => x.toString(16).padStart(2, "0")).join("");
+    this.sql.exec("INSERT INTO ix_cursors (id, grant_id, folder, recursive, after, t) VALUES (?, ?, ?, ?, ?, ?)", id, grant, folder, recursive ? 1 : 0, last, now);
+    this.sql.exec("DELETE FROM ix_cursors WHERE grant_id = ? AND id NOT IN (SELECT id FROM ix_cursors WHERE grant_id = ? ORDER BY rowid DESC LIMIT ?)", grant, grant, b.cursors);
+    this.sweepCursors(now);
+    // (the alarm deletes it once it has expired, if nothing else does first)
+    this.wakeBy(now + b.cursorMs + 1);
+    return { entries: out, cursor: id };
+  }
+
+  /** The person rebuilds a failed (or any) index from the first op, single-flight: one already building is left as it is. */
+  async indexRebuild(a: { account: string }): Promise<Result<{ state: string }>> {
+    return attempt(() => this.ctx.storage.transactionSync(() => {
+      if (!agentOn(this.env)) throw new SyncError("forbidden", "agents aren't enabled here");
+      this.admit(a.account, false);
+      if (this.get("ix_state") !== "building") this.indexStart();
+      return { state: String(this.get("ix_state")) };
+    }));
+  }
+
+  /** Tests only: the index's bounds lowered, and its state. */
+  async testIndex(a: { bounds?: Partial<typeof IX>; step?: boolean; manual?: boolean; noLive?: boolean; orphan?: boolean; sweep?: boolean | number; now?: number | null }): Promise<Record<string, unknown>> {
+    if (!testMode(this.env)) return {};
+    // (a cursor row whose grant isn't there, as one revoked before this release left: for trimDead's sweep)
+    // (one sweep of expired cursors, as one alarm step runs it: now, or at the time given)
+    if (a.sweep !== undefined && a.sweep !== false) this.sweepCursors(typeof a.sweep === "number" ? a.sweep : Date.now());
+    if (a.now !== undefined) this.ixNow = a.now;
+    if (a.orphan && this.hasCursors()) this.sql.exec("INSERT INTO ix_cursors (id, grant_id, folder, recursive, after, t) VALUES (?, 'zzzzzzzzzzzz', '/', 0, '/', ?)", "f".repeat(32), Date.now());
+    if (a.bounds) Object.assign(this.ixBounds, a.bounds);
+    if (a.manual !== undefined) {
+      this.ixManual = a.manual;
+      // (kept in storage too, so a restart in a test doesn't let the alarm run what the test steps)
+      if (this.exists()) this.set("ix_test_manual", a.manual ? 1 : 0);
+    }
+    if (a.noLive !== undefined) this.ixNoLive = a.noLive;
+    if (a.step) this.indexStep(true);
+    const has = this.one("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'ix_entries'") !== undefined;
+    const n = (t: string) => (has ? Number(this.one(`SELECT COUNT(*) AS n FROM ${t}`)!.n) : 0);
+    return { state: this.get("ix_state") ?? null, cursor: Number(this.get("ix_cursor") ?? 0), max: this.exists() ? this.maxSeq() : 0, reason: this.get("ix_reason") ?? null, entries: n("ix_entries"), gone: n("ix_gone"), cut: this.ixCut, alarm: await this.ctx.storage.getAlarm(), job: has ? (jobGet(this.sql)?.phase ?? null) : null, stage: n("ix_stage"), n: Number(this.get("ix_n_entries") ?? 0), g: Number(this.get("ix_n_gone") ?? 0), reset: Number(this.get("ix_reset") ?? 0), cursors: n("ix_cursors"), cursorTimes: has && this.hasCursors() ? (this.sql.exec("SELECT t FROM ix_cursors ORDER BY t").toArray() as Row[]).map((r) => Number(r.t)) : [], rows: has ? IX_TABLES.reduce((a, t) => a + n(t), 0) : 0 };
   }
 
   /** Tests only: lower the agents' bounds, or expire a grant now. */
@@ -2629,6 +3005,10 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     // the access log's rows past its 7 days (design/agent-endpoint.md §8): a page a step, and arm() below sets the next
     // step at once while any is left
     this.sweepLog(now);
+    // the agents' list cursors past their expiry: a page a step, and arm() below sets the next
+    this.sweepCursors(now);
+    // the agents' index, a bounded step of its backfill (fs-sync 1a2)
+    this.indexStep();
     // grants that expired since: the newest AGENT.deadGrants dead ones kept (daybreak2 L1), with nothing else needed
     if (this.hasGrants()) this.trimDead(now);
     // the outbox: R2 first, the row only once R2 has deleted it; a key that fails waits its own backoff
