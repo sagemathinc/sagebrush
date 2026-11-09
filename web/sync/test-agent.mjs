@@ -111,7 +111,8 @@ const cocalc = async () => Response.json(plan);
 const objects = { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } };
 const ratelimits = (id, fails = 1_000_000) => ({ SYNC_PREAUTH: { namespace_id: id, simple: { limit: 1_000_000, period: 60 } }, SYNC_AGENT_FAIL: { namespace_id: id + "9", simple: { limit: fails, period: 60 } } });
 const RO = "a9a9a9a9-0009-4a9a-8a9a-a9a9a9a9a909"; // read-only
-const listed = [A, B, L, RT, LG, DL, NS, RO].join(",");
+const FA = "a9a9a9a9-000b-4a9a-8a9a-a9a9a9a9a90b"; // the first logged row's alarm
+const listed = [A, B, L, RT, LG, DL, NS, RO, FA].join(",");
 const mf = new Miniflare(convertV4MiniflareOptions({
   workers: [
     { ...base, name: "on", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_AGENT: "1", GRANT_TAG_KEY: KEY, SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["sagebrush.test/*"], outboundService: cocalc, ratelimits: ratelimits("3001") },
@@ -293,9 +294,16 @@ await section("the grant's check, scope, and the verbs (not built)", async () =>
 
 await section("50 live grants at most", async () => {
   const s = await enabled(L);
-  const ids = [];
-  for (let i = 0; i < 50; i++) ids.push((await make(s, [{ path: "/f" + i, access: "read" }])).grant?.id);
+  const ids = [], made = [];
+  for (let i = 0; i < 50; i++) {
+    const m = await make(s, [{ path: "/f" + i, access: "read" }]);
+    made.push(m);
+    ids.push(m.grant?.id);
+  }
   ok(ids.every(Boolean), "50 grants are made");
+  // (the first one makes a request, so it has rate rows; it is also the first revoked, so the first trimmed)
+  ok((await answer(await agent(made[0].token, "stat", { path: "/f0/x" }))).error === "not_built", "(the first grant makes a request)");
+  ok((await (await seam(L, {})).json()).rates === 3, "(its two buckets and the account's)");
   const over = await make(s, [{ path: "/x", access: "read" }]);
   ok(over.status === 413 && over.limit === "grants" && over.max === 50, "a 51st is refused: " + over.status);
   await post(s, `/api/sync/v1/grants/${ids[0]}/revoke`, {});
@@ -310,16 +318,52 @@ await section("50 live grants at most", async () => {
   ok((await make(s, [{ path: "/z", access: "read" }])).status === 201, "a grant is made beside 51 revoked ones");
   const after = (await (await get(s, "/api/sync/v1/grants")).json()).grants;
   ok(after.filter((g) => g.revoked !== null).length === 50 && !after.some((g) => g.id === oldest), "only the newest 50 revoked grants are kept: the oldest is gone: " + after.filter((g) => g.revoked !== null).length);
+  // (grader's P4) the trimmed grant's rate rows went with it: only the account's is left
+  const rows4 = JSON.parse((await (await seam(L, {})).json()).rateRows);
+  ok(oldest === ids[0] && rows4.length === 1 && rows4[0].key === "account", "the trimmed grant's rate rows are deleted with it: " + rows4.map((r) => r.key));
   // (daybreak2's L1) and with no grant made after: revoking every live one, then one expiring, still lists 50 dead
   const live = after.filter((g) => g.revoked === null);
   for (const g of live.slice(1)) await post(s, `/api/sync/v1/grants/${g.id}/revoke`, {});
   const r1 = (await (await get(s, "/api/sync/v1/grants")).json()).grants;
   ok(r1.length === 51 && r1.filter((g) => g.revoked !== null).length === 50, "revoking 49 live grants, with no grant made, lists 1 live and 50 dead: " + r1.length);
+  ok((await (await seam(L, {})).json()).grants === 51, "and revoking trims the table itself to them");
+  // (the list's own bound) the last one expired with no alarm armed for it: 51 dead stored, the newest 50 listed
+  await seam(L, { expireIn: { id: live[0].id, ms: 0 } });
+  const r15 = (await (await get(s, "/api/sync/v1/grants")).json()).grants;
+  ok((await (await seam(L, {})).json()).grants === 51 && r15.length === 50 && r15.some((g) => g.id === live[0].id), "an expired grant not yet trimmed: the list still shows only the newest 50: " + r15.length);
   await seam(L, { expire: live[0].id });
   const r2 = (await (await get(s, "/api/sync/v1/grants")).json()).grants;
   ok(r2.length === 50 && r2.some((g) => g.id === live[0].id), "and once the last expires, 50 dead, the newly expired one among them: " + r2.length);
-  const held = (await (await seam(L, {})).json()).grants;
-  ok(held === 51, "and the table holds exactly those, plus the one just expired (trimmed at each revoke): " + held);
+  // (the alarm at that expiry trims the table to them: no make, revoke or list needed)
+  const settled = async (id, want) => {
+    let n = -1;
+    for (let i = 0; i < 40 && n !== want; i++) {
+      n = (await (await seam(id, {})).json()).grants;
+      if (n !== want) await new Promise((res) => setTimeout(res, 50));
+    }
+    return n;
+  };
+  const held = await settled(L, 50);
+  ok(held === 50, "and the alarm at its expiry trims the table to exactly those 50 (trimmed at each revoke too): " + held);
+  // (daybreak2's L1 pin) 50 live and 50 dead, every live one expiring, with nothing else done: 50 rows, the newest
+  for (let i = 0; i < 50; i++) await make(s, [{ path: "/e" + i, access: "read" }]);
+  const full = (await (await get(s, "/api/sync/v1/grants")).json()).grants;
+  ok(full.filter((g) => g.revoked === null && g.expires > Date.now()).length === 50 && (await settled(L, 100)) === 100, "(50 live and 50 dead)");
+  const liveIds = full.filter((g) => g.revoked === null && g.expires > Date.now()).map((g) => g.id).sort();
+  await seam(L, { expireLive: true });
+  ok((await settled(L, 50)) === 50, "all 50 live expiring, with nothing else done, leaves 50 rows");
+  const left = (await (await get(s, "/api/sync/v1/grants")).json()).grants;
+  ok(left.length === 50 && left.map((g) => g.id).sort().join() === liveIds.join(), "and they are the newest 50 dead: the ones that just expired");
+  const rr = JSON.parse((await (await seam(L, {})).json()).rateRows);
+  ok(rr.every((r) => r.key === "account" || liveIds.includes(r.key.slice(2))), "and the rate rows of the trimmed grants went with them");
+  // (arm() schedules a live grant's expiry) one set to expire in 0.3 s with no alarm armed, the object restarted: its
+  // own arm() has the alarm trim the table at that expiry
+  const one = await make(s, [{ path: "/last", access: "read" }]);
+  ok((await settled(L, 51)) === 51, "(one more grant: 51 rows)");
+  await seam(L, { expireIn: { id: one.grant.id, ms: 300 } });
+  await restart(L);
+  await new Promise((res) => setTimeout(res, 500));
+  ok((await settled(L, 50)) === 50, "after it expires, the alarm arm() set trims the table to 50 again");
 }, 120_000);
 
 await section("rates: the grant's, then the account's", async () => {
@@ -332,6 +376,11 @@ await section("rates: the grant's, then the account's", async () => {
   ok(r.slice(0, 3).every((x) => x.error === "not_built"), "wrong secrets don't use the grant's requests (each is refused before its rates)");
   ok(r[3].status === 429 && r[3].error === "rate" && r[3].limit === "requests_per_minute" && r[3].retry_after > 0, "the 4th in a minute, with 3 a minute: 429 requests_per_minute, with retry_after: " + JSON.stringify(r[3]));
   ok((await answer(await agent(g2.token, "stat", { path: "/x" }))).error === "not_built", "another grant has its own");
+  // (grader's P3) making or revoking another grant trims only removed grants' rows: the spent bucket stays spent
+  const g3 = await make(s, [{ path: "/", access: "read" }]);
+  ok((await answer(await agent(g1.token, "stat", { path: "/x" }))).limit === "requests_per_minute", "a spent grant stays refused after another grant is made");
+  await post(s, `/api/sync/v1/grants/${g3.grant.id}/revoke`, {});
+  ok((await answer(await agent(g1.token, "stat", { path: "/x" }))).limit === "requests_per_minute", "and after one is revoked");
   // (kept, not in memory: daybreak2's L3) the object restarted on its storage still refuses, then refills with time
   await restart(RT);
   await seam(RT, { perMinute: 3, perHour: 1000, accountPerMinute: 1000 });
@@ -344,10 +393,21 @@ await section("rates: the grant's, then the account's", async () => {
   await agent(g1.token, "stat", { path: "/x" }), await agent(g1.token, "stat", { path: "/x" });
   const h = await answer(await agent(g1.token, "stat", { path: "/x" }));
   ok(h.status === 429 && h.limit === "requests_per_hour", "the hour's limit too: " + JSON.stringify(h));
+  // (astra S4) a refusal by a later bucket writes nothing: not the minute's, which had a request left
+  const before = (await (await seam(RT, {})).json()).rateRows;
+  const h2 = await answer(await agent(g1.token, "stat", { path: "/x" }));
+  const after2 = (await (await seam(RT, {})).json()).rateRows;
+  ok(h2.limit === "requests_per_hour" && after2 === before, "a later bucket's refusal leaves every bucket as it was: " + (after2 === before));
+  await restart(RT);
+  await seam(RT, { perMinute: 100, perHour: 2, accountPerMinute: 1000 });
+  const h3 = await answer(await agent(g1.token, "stat", { path: "/x" }));
+  ok(h3.limit === "requests_per_hour" && (await (await seam(RT, {})).json()).rateRows === before, "and so after a restart");
   await seam(RT, { perMinute: 100, perHour: 1000, accountPerMinute: 3, resetRates: true });
   const a = [];
   for (const t of [g1.token, g2.token, g1.token, g2.token]) a.push(await answer(await agent(t, "stat", { path: "/x" })));
   ok(a.slice(0, 3).every((x) => x.error === "not_built") && a[3].status === 429 && a[3].limit === "account_requests_per_minute", "all of an account's grants together: " + JSON.stringify(a[3]));
+  const ab = (await (await seam(RT, {})).json()).rateRows;
+  ok((await answer(await agent(g1.token, "stat", { path: "/x" }))).limit === "account_requests_per_minute" && (await (await seam(RT, {})).json()).rateRows === ab, "the account's refusal leaves the grant's own buckets as they were (astra S4)");
   await restart(RT);
   await seam(RT, { perMinute: 100, perHour: 1000, accountPerMinute: 3 });
   ok((await answer(await agent(g2.token, "stat", { path: "/x" }))).limit === "account_requests_per_minute", "the account's too, across a restart");
@@ -440,6 +500,20 @@ await section("a deleted account's grants", async () => {
   await acct.holdPurge({ on: false });
   for (let i = 0; i < 100 && (await (await get(s, "/api/sync/v1/status")).json()).state !== "off"; i++) await new Promise((res) => setTimeout(res, 100));
   ok((await agent(g.token, "stat", { path: "/x" })).status === 401, "once deleted, the grant is gone with the synced data");
+});
+
+await section("the first logged row arms the alarm", async () => {
+  // (grader's R3) a fresh account with no alarm due: its first logged request alone has the alarm set for when that row
+  // ages out (t + 90 days + 1 ms)
+  const s = await enabled(FA);
+  const g = await make(s, [{ path: "/", access: "read" }]);
+  ok((await (await seam(FA, { clearAlarm: true })).json()).alarm === null, "(no alarm due)");
+  const t0 = Date.now();
+  await agent(g.token, "stat", { path: "/x" });
+  const t1 = Date.now();
+  const al = (await (await seam(FA, {})).json()).alarm;
+  const days = U.AGENT.logDays * 86400_000;
+  ok(al !== null && al >= t0 + days && al <= t1 + days + 1, "the first logged row sets the alarm to its own age-out: " + (al === null ? null : al - t0 - days));
 });
 
 await section("a read-only account: reads pass, writes are refused", async () => {

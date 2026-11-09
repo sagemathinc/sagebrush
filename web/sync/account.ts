@@ -2243,6 +2243,9 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     // (an unused chunked file's registration, at the end of its hold, design/tiered-files.md §4.3)
     const hold = tieredOn(this.env) && this.hasFiles() ? this.one("SELECT MIN(hold_until) AS t FROM files WHERE refs <= 0 AND state <> 'live'")?.t : null;
     if (hold !== null && hold !== undefined) t.push(Number(hold) + 1);
+    // (the next live grant's expiry, when the dead ones past AGENT.deadGrants are trimmed)
+    const exp = this.hasGrants() ? this.one("SELECT MIN(expires) AS t FROM grants WHERE revoked IS NULL AND expires > ?", now)?.t : null;
+    if (exp !== null && exp !== undefined) t.push(Number(exp) + 1);
     // (the access log's oldest row, when it ages out)
     const log = this.logDue();
     if (log !== null) t.push(log);
@@ -2298,17 +2301,22 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     this.sql.exec("DELETE FROM agent_rates WHERE key <> 'account' AND substr(key, 3) NOT IN (SELECT id FROM grants)");
   }
   /**
-   * One request from a persisted bucket (§7; daybreak2: the rates are hard ceilings, so they are kept, not in memory):
-   * `burst` at once, refilled evenly over `windowMs`.  Takes one and answers 0, or answers the ms until one is there,
-   * writing nothing then.  In the caller's transaction.
+   * A request against the persisted buckets (§7; daybreak2: the rates are hard ceilings, so they are kept, not in
+   * memory), each `burst` at once and refilled evenly over its window.  All are read first: if one has no request
+   * left, the first such in order is answered with the ms until it has one, and nothing is written (astra S4);
+   * otherwise one is taken from each, together.  In the caller's transaction.
    */
-  private takeRate(key: string, burst: number, windowMs: number, now: number): number {
-    const r = this.one("SELECT tokens, at FROM agent_rates WHERE key = ?", key);
-    const perMs = burst / windowMs;
-    const tokens = r ? Math.min(burst, Number(r.tokens) + Math.max(0, now - Number(r.at)) * perMs) : burst;
-    if (tokens < 1) return Math.max(1, Math.ceil((1 - tokens) / perMs));
-    this.sql.exec("INSERT INTO agent_rates (key, tokens, at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET tokens = excluded.tokens, at = excluded.at", key, tokens - 1, now);
-    return 0;
+  private takeRates(buckets: { key: string; burst: number; windowMs: number; limit: string }[], now: number): { limit: string; retry_after: number } | null {
+    const left: number[] = [];
+    for (const b of buckets) {
+      const r = this.one("SELECT tokens, at FROM agent_rates WHERE key = ?", b.key);
+      const perMs = b.burst / b.windowMs;
+      const tokens = r ? Math.min(b.burst, Number(r.tokens) + Math.max(0, now - Number(r.at)) * perMs) : b.burst;
+      if (tokens < 1) return { limit: b.limit, retry_after: Math.max(1, Math.ceil((1 - tokens) / perMs)) };
+      left.push(tokens - 1);
+    }
+    buckets.forEach((b, i) => this.sql.exec("INSERT INTO agent_rates (key, tokens, at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET tokens = excluded.tokens, at = excluded.at", b.key, left[i], now));
+    return null;
   }
   private liveGrants(now: number): number {
     return Number(this.one("SELECT COUNT(*) AS n FROM grants WHERE revoked IS NULL AND expires > ?", now)!.n);
@@ -2480,12 +2488,12 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       if (st === "readonly" && !READS.has(verb)) return refuse(409, "readonly", { message: "this account's sync is read-only now" });
       // the grant's rates, then the account's: each a 429 with which limit and when to retry (§7)
       const b = this.agentBounds;
-      const minute = this.takeRate("m:" + g.id, b.perMinute, b.minuteMs, now);
-      if (minute) return refuse(429, "rate", { limit: "requests_per_minute", retry_after: minute });
-      const hour = this.takeRate("h:" + g.id, b.perHour, b.hourMs, now);
-      if (hour) return refuse(429, "rate", { limit: "requests_per_hour", retry_after: hour });
-      const all = this.takeRate("account", b.accountPerMinute, b.minuteMs, now);
-      if (all) return refuse(429, "rate", { limit: "account_requests_per_minute", retry_after: all });
+      const over = this.takeRates([
+        { key: "m:" + g.id, burst: b.perMinute, windowMs: b.minuteMs, limit: "requests_per_minute" },
+        { key: "h:" + g.id, burst: b.perHour, windowMs: b.hourMs, limit: "requests_per_hour" },
+        { key: "account", burst: b.accountPerMinute, windowMs: b.minuteMs, limit: "account_requests_per_minute" },
+      ], now);
+      if (over) return refuse(429, "rate", over);
       this.sql.exec("UPDATE grants SET last_used = ? WHERE id = ?", now, g.id);
       const answer = (status: number, error: string, paths: string[] | null, extra: Record<string, unknown> = {}) => {
         this.logRow(now, g, verb, paths, error);
@@ -2513,8 +2521,8 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
 
   /** Tests only: lower the agents' bounds, or expire a grant now. */
-  async testAgent(a: { perMinute?: number; perHour?: number; accountPerMinute?: number; logRows?: number; logMs?: number; logSweep?: number; logPage?: number; readonly?: boolean; noArm?: boolean; minuteMs?: number; hourMs?: number; resetRates?: boolean; expire?: string }): Promise<{ log: number; grants: number; rates: number }> {
-    if (!testMode(this.env)) return { log: 0, grants: 0, rates: 0 };
+  async testAgent(a: { perMinute?: number; perHour?: number; accountPerMinute?: number; logRows?: number; logMs?: number; logSweep?: number; logPage?: number; readonly?: boolean; noArm?: boolean; expireLive?: boolean; expireIn?: { id: string; ms: number }; clearAlarm?: boolean; minuteMs?: number; hourMs?: number; resetRates?: boolean; expire?: string }): Promise<{ log: number; grants: number; rates: number; rateRows: string; alarm: number | null }> {
+    if (!testMode(this.env)) return { log: 0, grants: 0, rates: 0, rateRows: "", alarm: null };
     const b = this.agentBounds;
     if (a.perMinute !== undefined) b.perMinute = a.perMinute;
     if (a.perHour !== undefined) b.perHour = a.perHour;
@@ -2529,10 +2537,23 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     if (a.hourMs !== undefined) b.hourMs = a.hourMs;
     if (a.resetRates && this.hasGrants()) this.sql.exec("DELETE FROM agent_rates");
     if (a.expire !== undefined && this.hasGrants()) this.sql.exec("UPDATE grants SET expires = ? WHERE id = ?", Date.now(), a.expire);
+    if (a.expireLive && this.hasGrants()) {
+      const now = Date.now();
+      this.sql.exec("UPDATE grants SET expires = ? WHERE revoked IS NULL AND expires > ?", now, now);
+    }
+    // (as the alarm arm() set for that expiry would fire now)
+    if (a.expire !== undefined || a.expireLive) this.wakeBy(Date.now() + 1);
+    // (a grant set to expire in `ms`, with no alarm armed for it here: only arm() can schedule its trim)
+    if (a.expireIn && this.hasGrants()) this.sql.exec("UPDATE grants SET expires = ? WHERE id = ?", Date.now() + a.expireIn.ms, a.expireIn.id);
+    if (a.clearAlarm) {
+      await this.ctx.storage.deleteAlarm();
+      this.alarmAt = null;
+    }
     const due = a.logMs !== undefined && !a.noArm ? this.logDue() : null;
     if (due !== null) this.wakeBy(due);
     const count = (table: string) => (this.hasGrants() ? Number(this.one(`SELECT COUNT(*) AS n FROM ${table}`)!.n) : 0);
-    return { log: count("access_log"), grants: count("grants"), rates: count("agent_rates") };
+    const rows = this.hasGrants() ? JSON.stringify(this.sql.exec("SELECT key, tokens, at FROM agent_rates ORDER BY key").toArray()) : "[]";
+    return { log: count("access_log"), grants: count("grants"), rates: count("agent_rates"), rateRows: rows, alarm: await this.ctx.storage.getAlarm() };
   }
 
   async alarm(): Promise<void> {
@@ -2580,6 +2601,8 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     // the access log's rows past its 90 days (design/agent-endpoint.md §8): a page a step, and arm() below sets the next
     // step at once while any is left
     this.sweepLog(now);
+    // grants that expired since: the newest AGENT.deadGrants dead ones kept (daybreak2 L1), with nothing else needed
+    if (this.hasGrants()) this.trimDead(now);
     // the outbox: R2 first, the row only once R2 has deleted it; a key that fails waits its own backoff
     const bucket = this.env.SHARE_BUCKET;
     if (bucket)
