@@ -10,6 +10,7 @@
 
 pub mod exp;
 pub mod glibm;
+pub mod intmath;
 pub mod mpc;
 pub mod mpf;
 pub mod nat;
