@@ -6,7 +6,23 @@
 // (localStorage "sagebrush-files-sidebar").  While the files are hidden, each view's top bar starts right of the button
 // (body.sbft:not(.wsfiles)); while they are shown, the button sits at the left of their header, beside "Files".
 
-const ICON = '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M6 2.5v11" stroke="currentColor" stroke-width="1.3"/><path d="M3 5h1.5M3 7h1.5M3 9h1.5" stroke="currentColor" stroke-width="1.1"/></svg>';
+const SVG = "http://www.w3.org/2000/svg";
+/** The icon (a window with a side panel), made element by element. */
+function icon(): SVGSVGElement {
+  const svg = document.createElementNS(SVG, "svg");
+  svg.setAttribute("viewBox", "0 0 16 16");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+  const part = (tag: string, attrs: Record<string, string>) => {
+    const e = document.createElementNS(SVG, tag);
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+    svg.append(e);
+  };
+  part("rect", { x: "1.5", y: "2.5", width: "13", height: "11", rx: "1.5", fill: "none", stroke: "currentColor", "stroke-width": "1.3" });
+  part("path", { d: "M6 2.5v11", stroke: "currentColor", "stroke-width": "1.3" });
+  part("path", { d: "M3 5h1.5M3 7h1.5M3 9h1.5", stroke: "currentColor", "stroke-width": "1.1" });
+  return svg;
+}
 
 /** The corner button's style, and the room each view's top bar leaves for it (--sbft-w: the button and its margins). */
 export const FILES_TOGGLE_CSS = `
@@ -42,7 +58,10 @@ export function filesToggle(btn: HTMLButtonElement, toggle: () => void, shown: (
     document.head.append(st);
   }
   btn.classList.add("sb-files-toggle");
-  btn.innerHTML = ICON + '<span class="sbft-label">Files</span>';
+  const label = document.createElement("span");
+  label.className = "sbft-label";
+  label.textContent = "Files";
+  btn.replaceChildren(icon(), label);
   btn.setAttribute("aria-label", "Files");
   btn.setAttribute("aria-controls", "wssidebar");
   const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
