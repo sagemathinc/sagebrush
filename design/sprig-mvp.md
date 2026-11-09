@@ -18,6 +18,8 @@
 - **Go** on the MVP (Nov 8, 8:31 PM PST), from the spike's proposal.
 - Ground rules, relayed by @sagebrush the same evening: clean room (Mathics3 as a black-box oracle only); no vendor or product naming of the original system in code, UI or public copy; a design PR first; PR CI at most 10 minutes, with longer oracle suites nightly; one PR at a time through the lanes.
 
+- **Rulings during review** (@sagebrush, Nov 8, final): Sprig's file extension is `.sprig` only (§3); the language's limits are compatibility defaults, separate from host protection (§5.2).
+
 ## 2. Clean-room rules (standing)
 
 1. **Mathics3** (10.0.1, `pip install mathics3`, GPL-3.0-or-later) is run only as a program: text in, printed output out. Its source and its documentation are not read, copied or ported, and no Sprig file is derived from them.
@@ -56,7 +58,7 @@
 - `Graphics[{...}]` primitives beyond what the plots need;
 - assumptions (`Assuming`, `Simplify[e, x > 0]`): Mathics3 ignores them, so the oracle gives nothing to check;
 - 2D typeset text in the terminal (the terminal prints linear text; the notebook typesets through TeX);
-- importing the original system's notebook or source files (§12);
+- other file formats: Sprig's extension is `.sprig` only (@sagebrush's ruling, Nov 8): no other system's source or notebook extension, as a mode association, in docs or in examples. Importing other formats can be its own later proposal;
 - a fast path for tight numeric loops (§10).
 
 ## 4. Where the code lives
@@ -92,12 +94,14 @@ Standard evaluation rewrites until nothing changes:
 4. try up values, then down values (most specific first), then the builtin;
 5. repeat until fixed.
 
-**The language's own limits are semantics, not Sagebrush caps.** Recorded from Mathics3 10.0.1:
+**The language's own limits are compatibility defaults** (@sagebrush's ruling, Nov 8; final). Recorded from Mathics3 10.0.1:
 - `$RecursionLimit` is 200;
 - `$IterationLimit` is 4096; an endless self-rewrite prints `$IterationLimit::itlim: Iteration limit of 4096 exceeded.` and gives `$Aborted`;
 - `x //. x -> x + 1` stops at `65535 + x`.
 
-Sprig gives the same values and messages. They are user-settable language variables, not work limits on a computation; the limits census registers them with that reason, and SEC and ENGINE rule on their class. Setting them to `Infinity` is bounded by §8.3, not by a hidden cap.
+Sprig keeps these values, messages and held results, because they are the language's observable behaviour. The person may raise any of them, to `Infinity` included. They are not host protection and grant no host authority. Host protection is separate and always on, whatever they say: the measured host-stack bound `S` (§8.3), reserve-before-allocate (§8.4) and Stop (§8.1). At `$RecursionLimit = Infinity` the stack guard still refuses cleanly. Nothing in the host caps total work, so this keeps the standing policy (work isn't capped; Stop ends it).
+
+**The census.** These are real refusal sites, never class "none": the evaluation-step caps are class 3, as astra proposed, unless daybreak2's LIMITS verdict assigns otherwise. Today `test/limit_sites.py`'s `tracked()` scans only `lib/[^/]+.py`, so nothing under `lib/_sprig/` would be seen. S1 must therefore extend the census's discovery to `lib/_sprig/**`, with a test that a refusal in a nested file is discovered, and register every site S1 adds.
 
 ### 5.3 Output
 
@@ -113,6 +117,18 @@ Plots draw through Sage's `plot` family onto `lib/_graphics.py`, Sagebrush's SVG
 ### 5.5 LaTeX
 
 A `sprig` code block and an inline `\sprig{...}` in LaTeX documents run Sprig and embed the TeX of the result, through the LaTeX editor's item machinery as for the other modes. It is wired in S7 (§11).
+
+### 5.6 Sprig's own messages
+
+Where the oracle has a message, Sprig prints the oracle's text (§5.3). Where Sprig refuses something for its own reasons, it prints one of these, word for word. ENGINE may change the tags; the sentences stay:
+
+| Tag | Text | When |
+|---|---|---|
+| `General::nesting` | `The evaluation is nested too deeply to continue here.` | the host bound `S` is reached before `$RecursionLimit` (§8.3) |
+| `General::nonetwork` | `URLRead can't reach the network: it is off for documents.` | any network function (§9); the function's own name replaces `URLRead` |
+| `General::noprocess` | `Run can't start a program: Sprig doesn't run programs.` | any process function (§9); the function's own name replaces `Run` |
+| `General::memory` | `Table needs more memory than this session allows: <detail>.` | a refused allocation (§8.4); the function's own name, and Sagebrush's detail (need, allowance) |
+| `General::notyet` | `NDSolve isn't available in Sprig yet.` | a known function outside the MVP (§3); the function's own name |
 
 ## 6. Lazy loading and size (daybreak2)
 
@@ -179,7 +195,7 @@ Sprig's classes, with what backs each:
 | `oracle-wrong` | Mathics3's answer is wrong | a recorded Sage 10.10 witness and a one-line proof |
 | `not-implemented` | Sprig refuses, with its message | the refusal text; the entry names the slice or L-item that implements it |
 
-So a listed difference can't hide a wrong answer: every class except `not-implemented` is checked as the same value, not only pinned.
+Every class except `not-implemented` is checked as a value, not only pinned by hash. A symbolic difference that simplifies to 0 is a proof of equality; agreement at fixed numerical points is evidence, not proof, so each entry records which check it passed, and the grader rules on whether numerical evidence is enough (§13).
 
 ### 7.4 Held-out files
 
@@ -218,12 +234,12 @@ As in design/rill.md §8.4, a depth counter alone can't protect a recursive eval
 - **Evaluation runs on an explicit stack** (a trampoline): head, arguments, rule application and control flow push continuations, not host frames. Deep Sprig recursion grows a list.
 - **Builtins that call back into evaluation** (`Map`, `Nest`, `Table`, `Select`, the pattern matcher's conditions) re-enter the trampoline; nested re-entries are bounded by a constant `S`, measured in S1 per host, with margin.
 - **Deep expressions** (a tree 10⁵ levels deep from `Nest`): the matcher, the printer and the Sage conversion walk iteratively or within `S`.
-- Passing `$RecursionLimit` gives the language's message, recorded from the oracle in S1. Passing `S` first gives a Sprig message saying the evaluation is nested too deeply for this host. A host `RecursionError` or `RangeError` must never reach the user.
+- Passing `$RecursionLimit` gives the language's message, recorded from the oracle in S1. Passing `S` first gives `General::nesting` (§5.6). A host `RecursionError` or `RangeError` must never reach the user.
 - **Pins**, in the CLI and the browser: `f[n_] := f[n + 1]`, mutual recursion, recursion through `Map`, and `$RecursionLimit = Infinity`, each followed by a check that the session still answers.
 
 ### 8.4 Memory: reserve before allocating
 
-As in design/rill.md §8.5: `Table`, `Range`, `ConstantArray`, `Array`, `Tuples`, `Outer` and the integer and rational arithmetic compute their result size first, in Python integers, and reserve it against the session's allowance (`lib/_memguard.py`), or the browser's fixed caps where memory can't be measured. A refusal is `SagebrushMemoryError`, shown as a Sprig message with Sagebrush's detail. **Pins:** the boundary, one past it, and Stop during an allocation.
+As in design/rill.md §8.5: `Table`, `Range`, `ConstantArray`, `Array`, `Tuples`, `Outer` and the integer and rational arithmetic compute their result size first, in Python integers, and reserve it against the session's allowance (`lib/_memguard.py`), or the browser's fixed caps where memory can't be measured. A refusal is `SagebrushMemoryError`, shown as `General::memory` (§5.6) with Sagebrush's detail. **Pins:** the boundary, one past it, and Stop during an allocation.
 
 ### 8.5 Tests and integration
 
@@ -231,14 +247,14 @@ As in design/rill.md §8.5: `Table`, `Range`, `ConstantArray`, `Array`, `Tuples`
 
 ## 9. Files, network and processes (astra)
 
-Sprig reaches files only through Sagebrush's Python file layer, so the document's switches apply unchanged:
+Sprig must reach files only through Sagebrush's Python file layer, so the document's switches apply unchanged:
 
-- **Files:** `Get`, `Import`, `ReadList`, `FileExistsQ` read through Python's `open`/`os`; `Put`, `PutAppend`, `Export`, `DeleteFile`, `RenameFile`, `CreateDirectory` write through it, raising the page's "wants to change your files" bar as Python does. `SetDirectory` is limited to the document's workspace.
-- **Network: off.** `URLRead`, `URLFetch`, `Import["https://..."]` fail with a Sprig message saying the network is off for documents (its text in the slice PR, for COPY).
-- **Processes:** `Run`, `RunProcess`, `ReadList["!cmd"]` and `OpenRead["!cmd"]` are refused in the MVP. If they are wanted later, they route through just-bash as Python's `os.system` does, in their own PR with SEC review.
-- **Output:** notebook HTML from Sprig (`Grid`, `TableForm`) goes through `safeHtml` with `remote: false`. Plots are our own SVG. Sprig offers no API that emits script.
-- **The Sprig-only evaluator boundary, with negative controls.** `ToExpression` and `Get` evaluate Sprig inside Sprig only. Symbol names, contexts and strings never reach Python objects, module globals, imports or attributes: a symbol named `__import__`, `` Global`__class__ `` or `os` is only a Sprig symbol. S1 ships negative-control pins: such symbols evaluate to themselves, `Symbol["__import__"][...]` and `ToExpression["__builtins__"]` stay inert, and the session is unchanged.
-- **The gate inventory**, generated from the code by a census script as for Rill: every Sprig route to a file, a process or the host, with its gated or refused decision. The behavioural pins (files off and on, network refused, processes refused, the negative controls) ship with Sprig's first host exposure (S1's CLI, then the notebook and worker).
+- **Files:** `Get`, `Import`, `ReadList` and `FileExistsQ` must read through Python's `open`/`os`. `Put`, `PutAppend`, `Export`, `DeleteFile`, `RenameFile` and `CreateDirectory` must write through it, raising the page's "wants to change your files" bar as Python does. `SetDirectory` must stay within the document's workspace.
+- **Network: off.** `URLRead`, `URLFetch` and `Import["https://..."]` must fail before any connection, with `General::nonetwork` (§5.6).
+- **Processes:** `Run`, `RunProcess`, `ReadList["!cmd"]` and `OpenRead["!cmd"]` must be refused in the MVP, with `General::noprocess` (§5.6). If they are wanted later, they route through just-bash as Python's `os.system` does, in their own PR with SEC review.
+- **Output:** notebook HTML from Sprig (`Grid`, `TableForm`) must go through `safeHtml` with `remote: false`. Plots must be our own SVG. Sprig must offer no API that emits script.
+- **The Sprig-only evaluator boundary, with negative controls.** `ToExpression` and `Get` must evaluate Sprig inside Sprig only. Symbol names, contexts and strings must never reach Python objects, module globals, imports or attributes: a symbol named `__import__`, `` Global`__class__ `` or `os` is only a Sprig symbol. S1 ships negative-control pins: such symbols evaluate to themselves, `Symbol["__import__"][...]` and `ToExpression["__builtins__"]` stay inert, and the session is unchanged.
+- **The gate inventory**, generated from the code by a census script as for Rill: every Sprig route to a file, a process or the host, with its gated or refused decision. The behavioural pins (files off and on, network refused, processes refused, the negative controls) must ship with Sprig's first host exposure (S1's CLI, then the notebook and worker).
 
 ## 10. Performance
 
@@ -261,7 +277,7 @@ Each slice is one PR through ENGINE (daybreak3), SEC (astra), SIZE (daybreak2), 
 | # | Slice | Contents |
 |---|---|---|
 | S0 | Held-out and corpus | `sprig-tests/` with its provenance, the spike's two corpora re-recorded as case files, S1's held-out file; the runner's checks, with no Sprig code yet |
-| S1 | Core | `lib/_sprig/` start: parser, `Expr`, the trampoline evaluator with attributes, own and down values, non-`Orderless` patterns, rules, arithmetic through Sage, the printers, messages; `--sprig` and `.sprig`; the group routing, lazy family and budget rows (§6); §8's and §9's first pins |
+| S1 | Core | `lib/_sprig/` start: parser, `Expr`, the trampoline evaluator with attributes, own and down values, non-`Orderless` patterns, rules, arithmetic through Sage, the printers, messages; `--sprig` and `.sprig`; the group routing, lazy family and budget rows (§6); §8's and §9's first pins; the census's discovery extended to `lib/_sprig/**`, with its nested-refusal test, and S1's sites registered (§5.2) |
 | S2 | Calculus and algebra | `math.py`; the Sage-layer gap G5 as its own engine PR (below) |
 | S3 | Evaluator depth | `Orderless`/`Flat` matching, up values, scoping, `Return`/`Break`/`Throw`, the `Hold` family, `Quiet`/`Check`, the language limits |
 | S4 | Lists, linear algebra, number theory, statistics, strings | `lists.py`, `linalg.py`, `numth.py`, `strings.py` |
@@ -277,11 +293,11 @@ Each slice is one PR through ENGINE (daybreak3), SEC (astra), SIZE (daybreak2), 
 ## 13. Open questions
 
 **For William:**
-1. **File extensions.** `.sprig` only, or also the original system's `.wl` and `.m` for import? In Sagebrush `.m` is MATLAB's. Notebook import (`.nb`) is out of the MVP either way.
+1. **File extensions: decided** (@sagebrush, Nov 8, final): `.sprig` only (§3).
 2. **The name.** Confirm "Sprig" as the public name; the spike proposed it, and this design uses it throughout.
 
 **For the lanes:**
-3. **SEC and ENGINE:** the class of the language's own limits (§5.2) in the limits census.
-4. **TESTS:** the class scheme of §7.3, in particular `equivalent-form`'s numeric check, before S0's runner.
+3. **The language's limits: decided** (@sagebrush, Nov 8, final): compatibility defaults, user-removable, separate from host protection; class 3 unless daybreak2's LIMITS verdict assigns otherwise (§5.2).
+4. **TESTS:** the class scheme of §7.3, in particular whether `equivalent-form` may rest on numerical evidence when no symbolic proof is found, before S0's runner.
 5. **SIZE:** `sprig-plot` as its own group, or within `sprig-more`.
 6. **ENGINE:** whether Rill's corpus runner is generalized (one runner, two corpora) or mirrored for Sprig.
