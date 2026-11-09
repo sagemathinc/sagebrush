@@ -3106,6 +3106,20 @@ $P = \sage{g[0]}$
       const st3 = await ev(`document.querySelector(".tex-status")?.textContent ?? ""`);
       check(later && !/^(Ran|Starting|Running)/.test(st3) && (await srcNow()) === withSage, "Shift+Enter pressed on one text, the text changed before its render: nothing (no Run of the later code, no newline)", { later, status: st3, src: JSON.stringify((await srcNow()).slice(0, 120)) });
     }
+    // ---- grader's #874 r4 gap H11: the count said is of the stale items, not of all: three items, the last edited, one
+    // stale, said in the singular
+    {
+      const THREE = "\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n$\\sage{1+1}$ $\\sage{2+2}$ $\\sage{3+3}$\n\\end{document}\n";
+      await open(await mk("/t/three.tex", enc(THREE)));
+      await until(`!document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
+      await ev(`(document.querySelector(".tex-head .tex-run").click(), 1)`);
+      const ran3 = await statusIs(/^Ran 3 SageTeX items in [0-9.]+ s$/, 120000);
+      await ev(`(document.querySelector(".tex-status").textContent = "", 1)`);
+      await typeInto(THREE.replace("3+3", "3+4"));
+      const one = await statusIs(/^1 SageTeX item out of date: Shift\+Enter runs it again$/, 10000);
+      check(ran3 && one, "stale: three items, one changed: the count said is of the stale one (1, singular), not of all three",
+        { ran3, status: await ev(`document.querySelector(".tex-status")?.textContent ?? ""`), stale: await ev(`document.querySelectorAll(".tex-preview .sagestale").length`) });
+    }
     // ---- grader's #874 r3 gaps: a Run under way (K3, H4), a modified Shift+Enter (K6), another message kept over a
     // re-render (the status rule), Present's Shift+Enter on a text with no code (K8), its digits (P3), its chips (P4)
     {
