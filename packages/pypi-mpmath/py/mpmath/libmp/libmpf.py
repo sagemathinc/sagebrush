@@ -276,6 +276,10 @@ if BACKEND == 'gmpy' and '_mpmath_normalize' in dir(gmpy):
 
 if BACKEND == 'sage':
     _normalize = _normalize1 = sage_utils.normalize
+elif BACKEND == 'sagebrush':
+    import _sagebrush_mpcore
+    _normalize = _sagebrush_mpcore._normalize
+    _normalize1 = _sagebrush_mpcore._normalize1
 
 if STRICT:
     normalize = strict_normalize
@@ -326,6 +330,8 @@ if BACKEND == 'gmpy' and '_mpmath_create' in dir(gmpy):
 
 if BACKEND == 'sage':
     from_man_exp = sage_utils.from_man_exp
+elif BACKEND == 'sagebrush':
+    from_man_exp = _sagebrush_mpcore.from_man_exp
 
 def from_int(n, prec=0, rnd=round_fast):
     """Create a raw mpf from an integer. If no precision is specified,
@@ -1412,3 +1418,9 @@ if BACKEND == 'sage':
         mpf_sqrt = ext_lib.mpf_sqrt
     except ImportError:
         pass
+elif BACKEND == 'sagebrush':
+    mpf_add = _sagebrush_mpcore.mpf_add
+    mpf_sub = _sagebrush_mpcore.mpf_sub
+    mpf_mul = _sagebrush_mpcore.mpf_mul
+    mpf_div = _sagebrush_mpcore.mpf_div
+    mpf_sqrt = _sagebrush_mpcore.mpf_sqrt
