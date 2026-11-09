@@ -25,19 +25,32 @@ test("etree_cases.out is what CPython 3.14.10 prints", (t) => {
   assert.equal(execFileSync("python3", ["-I", CASES], { encoding: "utf8" }), readFileSync(OUT, "utf8"));
 });
 
-// the shipped files are CPython 3.14's, byte for byte below the one header line each carries
-test("lib/xml/etree is CPython 3.14's, unchanged but for the header line", (t) => {
-  let dir: string;
-  try {
-    dir = execFileSync("python3", ["-I", "-c", "import sys, xml.etree, os; sys.version_info[:2] == (3, 14) or sys.exit(3); print(os.path.dirname(xml.etree.__file__))"], { encoding: "utf8" }).trim();
-  } catch {
-    return t.skip("python3 is not 3.14");
-  }
-  for (const f of ["__init__.py", "ElementTree.py", "ElementPath.py", "ElementInclude.py", "cElementTree.py"]) {
-    const ours = readFileSync(join(ROOT, "lib/xml/etree", f), "utf8");
-    assert.match(ours, /^# Copied unchanged from CPython 3\.14 Lib\/xml\/etree\/[A-Za-z_]+\.py \(PSF License; see cdn\/LICENSE-CPython\.txt\)\.\n/, f);
-    assert.equal(ours.slice(ours.indexOf("\n") + 1), readFileSync(join(dir, f), "utf8"), f);
-  }
+// the shipped files are CPython 3.14.10's, byte for byte below the one header line each carries: pinned by their
+// SHA-256s in CPython 3.14.10's Lib/xml/etree, and compared with the machine's own when its python3 is 3.14.10
+const UPSTREAM: Record<string, string> = {
+  "__init__.py": "91950edfb196c105d93886f8af7ea3c0a79e06a6b63be3e5a4ea09804e8672a6",
+  "ElementTree.py": "850760098750fbce571ca4411ec444e70d73a0afe3efe74541d4eb99b3ab1b63",
+  "ElementPath.py": "f9c2102cf56cf9859d34e69877ad4e8a04a0cdabb6390cf2189f04aa8101759f",
+  "ElementInclude.py": "8e10c99668216701224831c82f13b36d29cd408554c19e34d290c351595df4ce",
+  "cElementTree.py": "d0f57acab07fe4f9c116c3392d85946bac8e78608f409cea70005f16ea019b57",
+};
+const shipped = (f: string) => {
+  const ours = readFileSync(join(ROOT, "lib/xml/etree", f), "utf8");
+  assert.match(ours, /^# Copied unchanged from CPython 3\.14 Lib\/xml\/etree\/[A-Za-z_]+\.py \(PSF License; see cdn\/LICENSE-CPython\.txt\)\.\n/, f);
+  return ours.slice(ours.indexOf("\n") + 1);
+};
+
+test("lib/xml/etree is CPython 3.14.10's, unchanged but for the header line", async () => {
+  const { createHash } = await import("node:crypto");
+  const { readdirSync } = await import("node:fs");
+  assert.deepEqual(readdirSync(join(ROOT, "lib/xml/etree")).sort(), Object.keys(UPSTREAM).sort());
+  for (const [f, sha] of Object.entries(UPSTREAM)) assert.equal(createHash("sha256").update(shipped(f)).digest("hex"), sha, f);
+});
+
+test("the pins are the machine's CPython 3.14.10 Lib/xml/etree", (t) => {
+  const dir = execFileSync("python3", ["-I", "-c", "import sys, xml.etree, os; print('%d.%d.%d' % sys.version_info[:3], os.path.dirname(xml.etree.__file__))"], { encoding: "utf8" }).trim().split(" ");
+  if (dir[0] !== "3.14.10") return t.skip(`python3 is ${dir[0]}, not 3.14.10`);
+  for (const f of Object.keys(UPSTREAM)) assert.equal(shipped(f), readFileSync(join(dir[1], f), "utf8"), f);
 });
 
 // every open() xml.etree makes, under a spy, in a fresh directory (the design note's inventory): parse and iterparse
