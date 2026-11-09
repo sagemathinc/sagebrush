@@ -201,6 +201,20 @@ for name in names:
                         problems.append("%s/%s: not one regular file of at most %d bytes in the archive" % (a["root"], f, MEMBER_BYTES))
                     elif got[f] != h:
                         problems.append("upstream/%s is not the archive's %s/%s" % (f, a["root"], f))
+    # (a package whose suite another per-PR runner already runs, SOURCE.json's "gate" (README.md, "One
+    # exception"): its pinned files are checked as above, and its suite runs here only when it is named)
+    gate = src.get("gate")
+    if gate is not None and (not isinstance(gate, dict) or sorted(gate) != ["reason", "runner"] or not all(isinstance(v, str) and v for v in gate.values())):
+        problems.append('SOURCE.json "gate" must be {"runner": ..., "reason": ...}')
+    if gate is not None and name not in args:
+        if problems:
+            bad += 1
+            print("%s %s: FAIL" % (name, src["version"]))
+            for p in problems:
+                print("  " + p)
+        else:
+            print("%s %s: pinned files checked; its suite runs per PR in %s (python3 pypi-tests/run.py %s runs it here)" % (name, src["version"], gate["runner"], name))
+        continue
     pkgdir = os.path.join(packages, "pypi-" + name.lower(), "py")
     env = dict(os.environ, PYTHONPATH=pkgdir, PYTHONHASHSEED="0", PYPI_TEST_RECORD_PREFIX=RECORD_PREFIX)
     cp, cerr, crc = run(CPYTHON + [os.path.join(script, "harness.py"), d], env)
@@ -246,7 +260,7 @@ for name in names:
         line = sl[hits[0]]
         if line == okline:
             problems.append("known.json lists %s, which now passes here: remove it" % t["test"])
-        elif line != "%s: FAIL %s: %s\n" % (t["test"], t["error"], t["message"]):
+        elif line != ("%s: FAIL %s: %s" % (t["test"], t["error"], t["message"])).rstrip() + "\n":
             problems.append("known.json lists %s as failing with %s: %s, but here: %s" % (t["test"], t["error"], t["message"], line.strip()))
         else:
             sl[hits[0]] = okline

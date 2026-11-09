@@ -75,8 +75,7 @@ import { langOf } from "../code/langs";
 import { codeUrl } from "../code/url";
 import { openGallery } from "../examples/open";
 import { mountBrowser } from "../workspace/browser";
-import { mountAgentPairing, floatingButton } from "../workspace/agent-ui";
-import { pairLink } from "../workspace/pair-link";
+import { mountAgentPairing } from "../workspace/agent-ui";
 import { SyncOwner } from "../workspace/sync-owner";
 import { DocSync } from "../workspace/doc-sync";
 import { answerPresence, TAB } from "../shell/presence";
@@ -1514,9 +1513,16 @@ if (offerNotebook) {
   const focusOffer = () => { const a = document.querySelector<HTMLAnchorElement>('a[href^="/?openas="]'); if (a) a.focus(); else if (++tries < 50) setTimeout(focusOffer, 100); };
   focusOffer();
 }
-// (an agent on this computer, paired with this page: behind ?agents (or a ?pair= link) until it's on for everyone;
-// workspace/agent-ui.ts)
-if (ws && (q.has("agents") || pairLink())) mountAgentPairing(ws, { button: floatingButton() });
+// (an agent on this computer, paired with this page (workspace/agent-ui.ts): ⋯ ▸ Connect an agent…, a ?pair= link, or an
+// agent this browser remembers. Not in the desktop app or a board saved as a file: pages the agent's program doesn't accept)
+if (ws && !file && !(window as any).__TAURI__) {
+  const agent = mountAgentPairing(ws);
+  const item = document.querySelector<HTMLButtonElement>('#board [data-sbb="agent"]');
+  if (item) {
+    item.hidden = false;
+    item.onclick = () => agent.connect(undefined, undefined, document.querySelector<HTMLElement>('#board [data-sbb="menubtn"]') ?? undefined);
+  }
+}
 // ⋯ ▸ Terminal (plan-bash-shell r8c E5.1, TP-5's follow-up to #326): the notebook page's bottom dock, on the board page
 // too, on every host as the terminal is (T358-1); and the terminal's ps and top (web/shell/presence.ts): this tab's board,
 // by name, path, language and visibility only, and its terminal.  The shell's module and set are the site's, a directory

@@ -49,6 +49,9 @@ const MODES: { id: string; title: string; prefix: string; exact?: string; needs?
   // (every Rill group is named rill-*, so this item owns them all: design/rill.md §6.1. Hidden until the page can
   // run Rill, A2's worker, which removes the flag: @sagebrush's ruling on #847, Nov 8)
   { id: "rill", title: "R (Rill)", prefix: "rill", needs: ["python"], hidden: true },
+  // (every Sprig group is named sprig-*, so this item owns them all: design/sprig-mvp.md §6.1.  Hidden until the page
+  // can run Sprig, S7's worker)
+  { id: "sprig", title: "Sprig", prefix: "sprig", needs: ["python", "sage"], hidden: true },
 ];
 
 /** a library group's item id, by rule; a group no rule covers fails the build (each new group is placed on purpose) */

@@ -6522,6 +6522,92 @@
   "owner": "python (@sagebrush-python)",
   "reason": "docstring text naming SciPy's limiting values at the domain's ends; it refuses nothing"
  },
+ "lib/_sprig/base.py ::  :: MACHINE_MAX = 1.7976931348623157e308 #0": {
+  "class": "coverage",
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "the machine Real range: a Real past it needs arbitrary precision, S2's, so it is General::notyet (design/sprig-mvp.md §5.6), not a cap on a computation"
+ },
+ "lib/_sprig/base.py :: _to_machine :: if not MACHINE_TINY <= abs(v) <= MACHINE_MAX: #0": {
+  "class": "coverage",
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "the machine Real range: a Real past it needs arbitrary precision, S2's, so it is General::notyet (design/sprig-mvp.md §5.6), not a cap on a computation"
+ },
+ "lib/_sprig/eval.py :: Session.evaluate :: if len(konts) >= limit: #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "Sprig's memory ledger (design/sprig-mvp.md §8.4): reserved before allocating; refused with lib/_memguard.py's error, shown as General::memory"
+ },
+ "lib/_sprig/eval.py :: Session.evaluate :: limit += KONT_CHUNK #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "Sprig's memory ledger (design/sprig-mvp.md §8.4): reserved before allocating; refused with lib/_memguard.py's error, shown as General::memory"
+ },
+ "lib/_sprig/eval.py :: Session.evaluate :: limit = 0 # frames reserved so far #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "Sprig's memory ledger (design/sprig-mvp.md §8.4): reserved before allocating; refused with lib/_memguard.py's error, shown as General::memory"
+ },
+ "lib/_sprig/eval.py :: Session.evaluate :: r = mem.reserve(KONT_CHUNK * mem.KONT_BYTES, \"An evaluation %d levels deep\" % (limit + KONT_CHUNK), #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "Sprig's memory ledger (design/sprig-mvp.md §8.4): reserved before allocating; refused with lib/_memguard.py's error, shown as General::memory"
+ },
+ "lib/_sprig/mem.py ::  :: session; where no figure can be observed, a fixed cap per operation #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "Sprig's memory ledger (design/sprig-mvp.md §8.4): reserved before allocating; refused with lib/_memguard.py's error, shown as General::memory"
+ },
+ "lib/_sprig/mem.py :: _refusal :: r = SprigMemoryError(str(e), e.what, e.need_bytes, e.limit_bytes, e.allowance_for, fixed=e.fixed, #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "memguard"
+   }
+  },
+  "explained": true,
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "Sprig's memory ledger (design/sprig-mvp.md §8.4): reserved before allocating; refused with lib/_memguard.py's error, shown as General::memory"
+ },
+ "lib/_sprig/parse.py ::  :: MACHINE_MAX = fractions.Fraction(1.7976931348623157e308) #0": {
+  "class": "coverage",
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "the machine Real range: a Real past it needs arbitrary precision, S2's, so it is General::notyet (design/sprig-mvp.md §5.6), not a cap on a computation"
+ },
+ "lib/_sprig/parse.py :: _number :: if not MACHINE_TINY <= abs(exact) <= MACHINE_MAX: #0": {
+  "class": "coverage",
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "the machine Real range: a Real past it needs arbitrary precision, S2's, so it is General::notyet (design/sprig-mvp.md §5.6), not a cap on a computation"
+ },
  "lib/_tzrules.py ::  :: MAX_CHARS = 1 << 10 #0": {
   "class": "1",
   "owner": "file formats/runtime",
@@ -7589,6 +7675,11 @@
   "owner": "permutation groups (@sagebrush-sage2)",
   "reason": "PermutationGroup.is_isomorphic: groups of order above _ISO_MAX (5040), or a search past _ISO_STEPS, are refused as not available yet (never guessed)"
  },
+ "lib/sage_plot.py :: Graphics._bound :: return ar[k] if k in ar else self.get_minmax_data()[k] #0": {
+  "class": "none",
+  "owner": "Sage graphics (@sagebrush-matlab)",
+  "reason": "xmin/xmax/ymin/ymax are a figure's axis bounds (Graphics.xmin/xmax/ymin/ymax: the range set for the axis, else the primitives' extent), not a cap: nothing is refused"
+ },
  "lib/sage_plot.py :: Graphics._panel :: for k, v in zip((\"xmin\", \"xmax\", \"ymin\", \"ymax\"), bb)) #0": {
   "class": "none",
   "owner": "Sage graphics (@sagebrush-matlab)",
@@ -7598,6 +7689,41 @@
   "class": "none",
   "owner": "Sage graphics (@sagebrush-matlab)",
   "reason": "xmax/ymax are a figure's axis limits (the data's ranges kept for an aspect ratio), not a cap: nothing is refused"
+ },
+ "lib/sage_plot.py :: Graphics.get_minmax_data :: return {\"xmin\": -1, \"xmax\": 1, \"ymin\": -1, \"ymax\": 1} #0": {
+  "class": "none",
+  "owner": "Sage graphics (@sagebrush-matlab)",
+  "reason": "xmin/xmax/ymin/ymax are a figure's axis bounds (Graphics.xmin/xmax/ymin/ymax: the range set for the axis, else the primitives' extent), not a cap: nothing is refused"
+ },
+ "lib/sage_plot.py :: Graphics.get_minmax_data :: return {\"xmin\": x0, \"xmax\": x1, \"ymin\": y0, \"ymax\": y1} #0": {
+  "class": "none",
+  "owner": "Sage graphics (@sagebrush-matlab)",
+  "reason": "xmin/xmax/ymin/ymax are a figure's axis bounds (Graphics.xmin/xmax/ymin/ymax: the range set for the axis, else the primitives' extent), not a cap: nothing is refused"
+ },
+ "lib/sage_plot.py :: Graphics.xmax :: def xmax(self, xmax=None): #0": {
+  "class": "none",
+  "owner": "Sage graphics (@sagebrush-matlab)",
+  "reason": "xmin/xmax/ymin/ymax are a figure's axis bounds (Graphics.xmin/xmax/ymin/ymax: the range set for the axis, else the primitives' extent), not a cap: nothing is refused"
+ },
+ "lib/sage_plot.py :: Graphics.xmax :: return self._bound(\"xmax\", xmax) #0": {
+  "class": "none",
+  "owner": "Sage graphics (@sagebrush-matlab)",
+  "reason": "xmin/xmax/ymin/ymax are a figure's axis bounds (Graphics.xmin/xmax/ymin/ymax: the range set for the axis, else the primitives' extent), not a cap: nothing is refused"
+ },
+ "lib/sage_plot.py :: Graphics.xmin :: sage: G.xmin(-1); G.xmin(), G.get_minmax_data()['xmin'] #0": {
+  "class": "none",
+  "owner": "Sage graphics (@sagebrush-matlab)",
+  "reason": "xmin/xmax/ymin/ymax are a figure's axis bounds (Graphics.xmin/xmax/ymin/ymax: the range set for the axis, else the primitives' extent), not a cap: nothing is refused"
+ },
+ "lib/sage_plot.py :: Graphics.ymax :: def ymax(self, ymax=None): #0": {
+  "class": "none",
+  "owner": "Sage graphics (@sagebrush-matlab)",
+  "reason": "xmin/xmax/ymin/ymax are a figure's axis bounds (Graphics.xmin/xmax/ymin/ymax: the range set for the axis, else the primitives' extent), not a cap: nothing is refused"
+ },
+ "lib/sage_plot.py :: Graphics.ymax :: return self._bound(\"ymax\", ymax) #0": {
+  "class": "none",
+  "owner": "Sage graphics (@sagebrush-matlab)",
+  "reason": "xmin/xmax/ymin/ymax are a figure's axis bounds (Graphics.xmin/xmax/ymin/ymax: the range set for the axis, else the primitives' extent), not a cap: nothing is refused"
  },
  "lib/sage_plot3d.py ::  :: _GC_BUDGET_S = 0.05 # (a pass's work, at most; the next pass goes on from its cursor) #0": {
   "class": "1",
@@ -11286,6 +11412,14 @@
   },
   "owner": "the LaTeX editor's Run (@sagebrush-latex)",
   "reason": "the editor's Run: the .tex's folder given to Sage (FOLDER_LIMITS: 500 files, 64 MiB; past either, Run runs nothing), and what a Run's results hold (the results file's size, a result's LaTeX, a plot's SVG, a message: RUN_LIMITS, as the CLI's): bounds protecting the page and its session"
+ },
+ "web/latex/run-core.mjs :: driver :: _sbtx_cur[\"shows\"].append({\"text\": _sbtx_tb.format_exc(limit=1)[-400:]}) #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX editor's Run (@sagebrush-latex)",
+  "reason": "an @interact's function failing at its defaults during a Run: what is shown in its place is the exception's last traceback frame (limit=1), its last 400 characters, so a widget's output stays a line, not a page"
  },
  "web/latex/run-core.mjs :: folderFiles :: export async function folderFiles(ws, texPath, lim = FOLDER_LIMITS) { #0": {
   "class": "1",

@@ -18,7 +18,7 @@
 - **Go** on the MVP (Nov 8, 8:31 PM PST), from the spike's proposal.
 - Ground rules, relayed by @sagebrush the same evening: clean room (Mathics3 as a black-box oracle only); no vendor or product naming of the original system in code, UI or public copy; a design PR first; PR CI at most 10 minutes, with longer oracle suites nightly; one PR at a time through the lanes.
 
-- **Rulings during review** (@sagebrush, Nov 8, final): Sprig's file extension is `.sprig` only (§3); the language's limits are compatibility defaults, separate from host protection (§5.2).
+- **Rulings during review** (@sagebrush, Nov 8, final): the language's limits are compatibility defaults, separate from host protection (§5.2). Sprig's file extensions are `.sprig` and `.wl` (William, Nov 8, overriding the `.sprig`-only ruling; §3).
 
 ## 2. Clean-room rules (standing)
 
@@ -58,7 +58,7 @@
 - `Graphics[{...}]` primitives beyond what the plots need;
 - assumptions (`Assuming`, `Simplify[e, x > 0]`): Mathics3 ignores them, so the oracle gives nothing to check;
 - 2D typeset text in the terminal (the terminal prints linear text; the notebook typesets through TeX);
-- other file formats: Sprig's extension is `.sprig` only (@sagebrush's ruling, Nov 8): no other system's source or notebook extension, as a mode association, in docs or in examples. Importing other formats can be its own later proposal;
+- other file formats: Sprig opens and associates `.sprig` and `.wl` files, from S1.4 (William's ruling, Nov 8: "Making people change the filenames of all their files they want to try seems really annoying."). The extension appears only as a file type, and no other system is named in product text. `.m` stays MATLAB's, and there is no notebook format. Importing other formats can be its own later proposal;
 - a fast path for tight numeric loops (§10).
 
 ## 4. Where the code lives
@@ -83,7 +83,7 @@
 
 ### 5.1 The mode row
 
-Sprig is one row of `src/modes.ts` (landed for Rill), plus its membership in the subsets that support it (kernel, REPL, notebook, board, worker, LaTeX). Its kernel `language_info`: name `sprig`, file extension `.sprig`, mimetype `text/x-sprig`, and no third-party codemirror mode or pygments lexer (§2.3). Its menu label is "Sprig".
+Sprig is one row of `src/modes.ts` (landed for Rill), plus its membership in the subsets that support it (kernel, REPL, notebook, board, worker, LaTeX). Its kernel `language_info`: name `sprig`, file extension `.sprig` (`.wl` files open as Sprig too, §3), mimetype `text/x-sprig`, and no third-party codemirror mode or pygments lexer (§2.3). Its menu label is "Sprig".
 
 ### 5.2 Evaluation
 
@@ -215,7 +215,7 @@ As `rill-tests/` (design/rill.md §7.1):
 
 ### 7.2 What is compared
 
-For each case: the result's `InputForm` text, the `Print` output, and the message lines, byte for byte, after one stated normalization (Mathics3's Unicode arrows `⇾`/`⧴` written as `->`/`:>`), done by one function in the runner with a pin on each arrow.
+For each case: the result's `InputForm` text, the `Print` output, and the message lines, byte for byte, after one stated normalization, done by one function (`sprig-tests/checkers.py`'s `normalize()`) with a pin on each entry. It writes seven of Mathics3's single-character operators in ASCII, outside string literals only: `⇾` `⧴` `⩵` as `->` `:>` `==`, and ` ∧ ` ` ∨ ` ` ≠ ` ` ❘ ` (spaced, as recorded) as ` && ` ` || ` ` != ` ` | ` (the grader's rulings on S0 and S1.1). A census fails on any other non-ASCII character left outside a string, unless its case is listed in KNOWN.
 
 ### 7.3 Known differences, enforced both ways, and checked as values
 
@@ -320,9 +320,9 @@ Each slice is one PR through ENGINE (daybreak3), SEC (astra), SIZE (daybreak2), 
 | # | Slice | Contents |
 |---|---|---|
 | S0 | Held-out and corpus | `sprig-tests/` with its provenance, the spike's two corpora re-recorded as case files, S1's held-out file; the runner with its checkers and their negative controls (§7.3), with no Sprig code yet; the request for the `sprig` CI job (§7.5) |
-| S1 | Core | `lib/_sprig/` start (final routing for all groups; budget rows and CLI keys only for groups present, §6): parser, `Expr`, the trampoline evaluator with attributes, own and down values, non-`Orderless` patterns, rules, arithmetic through Sage, the printers, messages; `--sprig` and `.sprig`; the group routing, lazy family and budget rows (§6); §8's and §9's first pins; the census's discovery extended to `lib/_sprig/**`, with its nested-refusal test, and S1's sites registered (§5.2) |
+| S1 | Core | `lib/_sprig/` start (final routing for all groups; budget rows and CLI keys only for groups present, §6): parser, `Expr`, the trampoline evaluator with attributes, own and down values, non-`Orderless` patterns, rules, native exact arithmetic (Sage-backed symbolic algebra and calculus from S2's `math.py`: @sagebrush's ruling, Nov 9), the printers, messages; the language limits (S1.2, same ruling); `--sprig` and `.sprig`; the group routing, lazy family and budget rows (§6); §8's and §9's first pins; the census's discovery extended to `lib/_sprig/**`, with its nested-refusal test, and S1's sites registered (§5.2) |
 | S2 | Calculus and algebra | `math.py`; the Sage-layer gap G5 as its own engine PR (below) |
-| S3 | Evaluator depth | `Orderless`/`Flat` matching, up values, scoping, `Return`/`Break`/`Throw`, the `Hold` family, `Quiet`/`Check`, the language limits |
+| S3 | Evaluator depth | `Orderless`/`Flat` matching, up values, scoping, `Return`/`Break`/`Throw`, the `Hold` family, `Quiet`/`Check` (the language limits moved to S1.2) |
 | S4 | Lists, linear algebra, number theory, statistics, strings | `lists.py`, `linalg.py`, `numth.py`, `strings.py` |
 | S5 | Output | canonical order, `TeXForm`, `MatrixForm`/`TableForm`/`Grid`, notebook typesetting |
 | S6 | Graphics | `plot.py` materializes `sprig-plot` (route unchanged, nothing moved), with its budget row, CLI key and first-use measurement (§6); options, `Show`, `Export`, 3D |
@@ -336,7 +336,7 @@ Each slice is one PR through ENGINE (daybreak3), SEC (astra), SIZE (daybreak2), 
 ## 13. Open questions
 
 **For William:**
-1. **File extensions: decided** (@sagebrush, Nov 8, final): `.sprig` only (§3).
+1. **File extensions: decided** (William, Nov 8, final): `.sprig` and `.wl`, both associated in S1.4 (§3).
 2. **The name.** Confirm "Sprig" as the public name; the spike proposed it, and this design uses it throughout.
 
 **For the lanes:**
