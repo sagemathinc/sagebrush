@@ -269,7 +269,12 @@ try {
   let nb1 = nb0;
   for (let i = 0; i < 40 && nb1.length === nb0.length; i++) { await sleep(250); nb1 = await notebooks(); }
   check(nb1.length === nb0.length + 1, `A: the Files sidebar's New, Notebook makes one with sync on (${J({ made: nb1.filter((x) => !nb0.some((y) => y.ref === x.ref)).map((x) => x.path), toast: await A.ev(`document.querySelector("#wssidebar .ftoast")?.textContent ?? null`) })})`);
+  // (its name left as it is: since #704 a new notebook from the sidebar opens once its name is settled, as a click on
+  //  its row does; File, New only once it is the one shown, as a person sees it before reaching the menu (~60 ms here).
+  //  Clicked at once, File, New raced that open and lost: the name and typing went to the sidebar's notebook)
+  const made = nb1.find((x) => !nb0.some((y) => y.ref === x.ref))?.ref;
   await A.ev(`document.activeElement?.blur?.()`);
+  check(!!made && (await A.until(`window.sagebrush.permissions()?.doc === ${J(made)}`, 10_000)), "A: the sidebar's new notebook opens once its name is settled");
   // (B's `changed` held from here: it will list A's next notebook with none of its history, as one still arriving)
   holdChanged.add(B.session);
   // (the notebook page's File, New: a new notebook, opened here, typed into, then named SyncTest)
