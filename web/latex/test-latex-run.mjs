@@ -183,7 +183,7 @@ const sage = (code) => new Promise((res) => {
   // (grader's #926 I6/I7: a selector's default is the option selected; a list slider shows its default's label)
   const sel = kinds([{ kind: "selector", name: "c", label: "c", options: ["a", "b", "c"], value: 1 }]), lsl = kinds([{ kind: "slider", name: "t", label: "t", labels: ["p", "q", "r"], min: 0, max: 2, step: 1, value: 1 }]);
   check("interact: a selector's default option selected; a list slider shows its default's label",
-    sel.includes('<option>a</option><option selected>b</option><option>c</option>') && lsl.includes('value="1"><span class="si-v">q</span>'), { sel, lsl });
+    sel.includes('<option value="0">a</option><option value="1" selected>b</option><option value="2">c</option>') && lsl.includes('value="1"><span class="si-v">q</span>'), { sel, lsl });
   // (grader's #926 R8: interacts only on an item that ran to its result: its session result ok but its state an error,
   //  a plot that isn't an SVG, keeps none)
   const ia1 = [{ spec: { id: 1, name: "f", controls: [] }, out: "", shows: [] }];
@@ -211,7 +211,7 @@ const sage = (code) => new Promise((res) => {
   const got = parseOutput(r.out), st = statesOf(its, got, "", interactsOf);
   const pins = (r.out.split("\n").find((l) => l.startsWith("PINS")) ?? "").split(" ");
   const sh = interactsHtml(st[0].interacts ?? []);
-  check("interact (Sage): a selector's default selected, a list slider at its default's label", st[0].s === "ok" && /<option selected>b<\/option>/.test(sh) && /value="1"><span class="si-v">q<\/span>/.test(sh), { st0: st[0], err: r.err.slice(-400) });
+  check("interact (Sage): a selector's default selected, a list slider at its default's label", st[0].s === "ok" && /<option value="1" selected>b<\/option>/.test(sh) && /value="1"><span class="si-v">q<\/span>/.test(sh), { st0: st[0], err: r.err.slice(-400) });
   check("interact (Sage): an item that raises after its interact: its error, no interacts, no placeholder", st[1].s === "error" && /after the interact/.test(st[1].msg) && !st[1].interacts &&
     !blockHtml(stateOf(savedStates([real(...spec[1])], st.slice(1, 2)), 0, real(...spec[1])), real(...spec[1]), (x) => String(x), 1).includes("sageinteract-at"), st[1]);
   check("interact (Sage): at most 8 kept an item; the 9th not kept, run once at its defaults as on Sage's command line", got[2]?.interacts?.length === 8 && got[2].interacts.every((x) => x.spec?.name !== "f8") && pins[1] === "True" && pins[2] === "True", { n: got[2]?.interacts?.length, pins });
