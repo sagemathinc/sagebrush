@@ -9,6 +9,7 @@
 //!   from_man_exp, mpf_add/sub/mul/div/sqrt).
 
 pub mod exp;
+pub mod glibm;
 pub mod mpc;
 pub mod mpf;
 pub mod nat;
