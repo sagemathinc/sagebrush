@@ -13,10 +13,13 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   SyncError, LIMITS, RECHECK_MS, PIN_MS, VERSION, Bucket, checkBatch, checkHead, checkOp, clientOf, fields, has, isDevice, isDocId, isNat,
-  parseMessage, PERSON_ONLY, attempt, attemptAsync, randomHex, TICKET_MS, LIMITS_TTL_MS, isSha, type Batch, type DocKind, type Head, type Result,
+  parseMessage, PERSON_ONLY, attempt, attemptAsync, randomHex, same, TICKET_MS, LIMITS_TTL_MS, isSha, type Batch, type DocKind, type Head, type Result,
 } from "../sync-protocol/protocol.ts";
 import { patchRef, unwrap, type BatchOut } from "./doc.ts";
-import { allowed, gate, testMode, tieredOn, type SyncEnv } from "./env.ts";
+import { agentOn, allowed, gate, testMode, tieredOn, type SyncEnv } from "./env.ts";
+import { AGENT, GRANT_ID, READS, SCOPED, VERBS, checkAgentName, checkScopes, inScope, makeToken, newGrantId, newSecret, secretHash, type Scope } from "./agent-token.ts";
+import { normPath } from "../workspace/paths.ts";
+import { checkCall } from "../workspace/agent-schema.ts";
 import { TIERED, canonical, checkManifest, sha256Hex, type Manifest } from "./manifest.ts";
 import { Sha256, type ShaState } from "./sha256.ts";
 import { MAX_PUT, SHARING_USED, nowSeconds } from "../share/server.ts";
@@ -1961,7 +1964,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   private testVerifyMs = 0;
   private testSlotHold = 0;
   private testBetween = "";
-  async testFiles(a: { holdMs?: number; verifyMs?: number; slotHoldMs?: number; sha256?: string; retire?: boolean; endLease?: boolean; rekey?: string; between?: string; setRefs?: { sha256: string; refs: number } }): Promise<{ row: Row | null; retiredPage: boolean; refs: Record<string, number>; slot: { sha256: string; attempt: string; until: number; hold: number } | null } | null> {
+  async testFiles(a: { holdMs?: number; verifyMs?: number; slotHoldMs?: number; sha256?: string; retire?: boolean; endLease?: boolean; rekey?: string; between?: string; setRefs?: { sha256: string; refs: number }; endHold?: string }): Promise<{ row: Row | null; retiredPage: boolean; refs: Record<string, number>; slot: { sha256: string; attempt: string; until: number; hold: number } | null } | null> {
     if (!testMode(this.env)) return null;
     if (a.holdMs !== undefined) this.testHold = a.holdMs;
     if (a.verifyMs !== undefined) this.testVerifyMs = a.verifyMs;
@@ -1970,6 +1973,8 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     if (a.between !== undefined) this.testBetween = a.between;
     // (a live row whose entries are all gone, as the reducer will leave one: grader's #880 A19)
     if (a.setRefs && this.exists() && this.hasFiles()) this.sql.exec("UPDATE files SET refs = ? WHERE sha256 = ?", a.setRefs.refs, a.setRefs.sha256);
+    // (one row's hold ended now, and no other's: so the object's own alarm can't retire a row a test still needs)
+    if (a.endHold && this.exists() && this.hasFiles()) this.sql.exec("UPDATE files SET hold_until = ? WHERE sha256 = ?", Date.now() - 1, a.endHold);
     // (a holding's bytes copied to a new key and the holding moved to it, as a repair's adoption will do)
     if (a.rekey && this.exists()) {
       const h = this.one("SELECT key FROM holdings WHERE sha256 = ?", a.rekey);
@@ -2238,6 +2243,12 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     // (an unused chunked file's registration, at the end of its hold, design/tiered-files.md §4.3)
     const hold = tieredOn(this.env) && this.hasFiles() ? this.one("SELECT MIN(hold_until) AS t FROM files WHERE refs <= 0 AND state <> 'live'")?.t : null;
     if (hold !== null && hold !== undefined) t.push(Number(hold) + 1);
+    // (the next live grant's expiry, when the dead ones past AGENT.deadGrants are trimmed)
+    const exp = this.hasGrants() ? this.one("SELECT MIN(expires) AS t FROM grants WHERE revoked IS NULL AND expires > ?", now)?.t : null;
+    if (exp !== null && exp !== undefined) t.push(Number(exp) + 1);
+    // (the access log's oldest row, when it ages out)
+    const log = this.logDue();
+    if (log !== null) t.push(log);
     // (a read-only account's deadline, §6.2)
     const d = this.state() === "readonly" ? this.purgeAt() : null;
     if (d !== null) t.push(d);
@@ -2254,6 +2265,301 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
 
   /** The alarm: settle pins whose answer was lost (§4.3), and forget revoked sessions past their expiry. */
+  // ---- agents' grants and their requests (design/agent-endpoint.md §1-§3, §7, §8; fs-sync step 1a, behind SYNC_AGENT
+  // on DEV).  The tables are made by the first grant, so an account without one is as it was.  The person makes,
+  // lists, rotates and revokes grants from a session; an agent's request reaches agentCall only after the Worker has
+  // checked its token's form and tag.
+
+  private hasGrants(): boolean {
+    return this.one("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'grants'") !== undefined;
+  }
+  private grantTables() {
+    this.sql.exec("CREATE TABLE IF NOT EXISTS grants (id TEXT PRIMARY KEY, agent TEXT NOT NULL, token_hash TEXT NOT NULL, scopes TEXT NOT NULL, run_code INTEGER NOT NULL DEFAULT 0, outward TEXT NOT NULL DEFAULT '[]', rate TEXT NOT NULL, created INTEGER NOT NULL, expires INTEGER NOT NULL, last_used INTEGER, revoked INTEGER, revoked_reason TEXT, refusal_logged INTEGER)");
+    // (one row per request, §8: never the token, never a request's contents)
+    this.sql.exec("CREATE TABLE IF NOT EXISTS access_log (id INTEGER PRIMARY KEY, t INTEGER NOT NULL, grant_id TEXT NOT NULL, agent TEXT NOT NULL, verb TEXT NOT NULL, paths TEXT, result TEXT NOT NULL, bytes INTEGER NOT NULL DEFAULT 0)");
+    this.sql.exec("CREATE INDEX IF NOT EXISTS access_log_grant ON access_log (grant_id, id)");
+    // (the age sweep and the alarm's due time, by time)
+    this.sql.exec("CREATE INDEX IF NOT EXISTS access_log_t ON access_log (t)");
+    // (the request buckets, kept with the grants: hard ceilings across the object's restarts, daybreak2; a row per
+    // live or listed grant and window, and one for the account)
+    this.sql.exec("CREATE TABLE IF NOT EXISTS agent_rates (key TEXT PRIMARY KEY, tokens REAL NOT NULL, at INTEGER NOT NULL)");
+  }
+  /** tests only (testAgent): lowered bounds */
+  private agentBounds = { perMinute: AGENT.perMinute, perHour: AGENT.perHour, accountPerMinute: AGENT.accountPerMinute, logRows: AGENT.logRows, logMs: AGENT.logDays * 86400_000, logSweep: AGENT.logSweep, logPage: AGENT.logPage, minuteMs: 60_000, hourMs: 3600_000, dayMs: 86400_000 };
+
+  private grantView(r: Row) {
+    return {
+      id: String(r.id), agent: String(r.agent), scopes: JSON.parse(String(r.scopes)) as Scope[], run_code: false,
+      created: Number(r.created), expires: Number(r.expires), last_used: r.last_used === null ? null : Number(r.last_used),
+      revoked: r.revoked === null ? null : Number(r.revoked), revoked_reason: r.revoked_reason === null ? null : String(r.revoked_reason),
+    };
+  }
+  /** Revoked and expired grants stay listed for the person, the newest AGENT.deadGrants of them; older ones go. With at
+   * most AGENT.liveGrants live, the table holds at most the two together. */
+  private trimDead(now: number) {
+    this.sql.exec("DELETE FROM grants WHERE id IN (SELECT id FROM grants WHERE revoked IS NOT NULL OR expires <= ? ORDER BY COALESCE(revoked, expires) DESC, id LIMIT -1 OFFSET ?)", now, AGENT.deadGrants);
+    this.sql.exec("DELETE FROM agent_rates WHERE key <> 'account' AND substr(key, 3) NOT IN (SELECT id FROM grants)");
+  }
+  /**
+   * A request against the persisted buckets (§7; daybreak2: the rates are hard ceilings, so they are kept, not in
+   * memory), each `burst` at once and refilled evenly over its window.  All are read first: if one has no request
+   * left, the first such in order is answered with the ms until it has one, and nothing is written (astra S4);
+   * otherwise one is taken from each, together.  In the caller's transaction.
+   */
+  private takeRates(buckets: { key: string; burst: number; windowMs: number; limit: string }[], now: number): { limit: string; retry_after: number } | null {
+    const left: number[] = [];
+    for (const b of buckets) {
+      const r = this.one("SELECT tokens, at FROM agent_rates WHERE key = ?", b.key);
+      const perMs = b.burst / b.windowMs;
+      const tokens = r ? Math.min(b.burst, Number(r.tokens) + Math.max(0, now - Number(r.at)) * perMs) : b.burst;
+      if (tokens < 1) return { limit: b.limit, retry_after: Math.max(1, Math.ceil((1 - tokens) / perMs)) };
+      left.push(tokens - 1);
+    }
+    buckets.forEach((b, i) => this.sql.exec("INSERT INTO agent_rates (key, tokens, at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET tokens = excluded.tokens, at = excluded.at", b.key, left[i], now));
+    return null;
+  }
+  private liveGrants(now: number): number {
+    return Number(this.one("SELECT COUNT(*) AS n FROM grants WHERE revoked IS NULL AND expires > ?", now)!.n);
+  }
+  private async token(id: string, secret: string): Promise<string> {
+    return makeToken(this.env.GRANT_TAG_KEY!, String(this.get("account_hash")), id, secret);
+  }
+
+  /**
+   * The person makes a grant (the grant dialog's call, §2 way 2): `{agent, scopes, days}`.  Its token is answered
+   * once and stored nowhere; the grant keeps SHA-256 of its secret.  Running code and outward actions aren't built,
+   * so a grant has neither.
+   */
+  async grantMake(a: { account: string; agent: unknown; scopes: unknown; days?: unknown }): Promise<Result<{ grant: ReturnType<SyncAccount["grantView"]>; token: string }>> {
+    const secret = newSecret();
+    const hash = await secretHash(secret);
+    const made = attempt(() => this.ctx.storage.transactionSync(() => {
+      if (!agentOn(this.env)) throw new SyncError("forbidden", "agents aren't enabled here");
+      this.admit(a.account, true);
+      let agent: string, scopes: Scope[];
+      try {
+        agent = checkAgentName(a.agent);
+        scopes = checkScopes(a.scopes);
+      } catch (e) {
+        throw new SyncError("invalid", (e as Error).message);
+      }
+      const days = a.days === undefined ? AGENT.defaultDays : a.days;
+      if (!Number.isSafeInteger(days) || (days as number) < 1 || (days as number) > AGENT.maxDays) throw new SyncError("invalid", `days: 1 to ${AGENT.maxDays}`);
+      const now = Date.now();
+      this.grantTables();
+      if (this.liveGrants(now) >= AGENT.liveGrants) throw new SyncError("limit", `at most ${AGENT.liveGrants} grants at once: revoke one first`, { limit: "grants", max: AGENT.liveGrants });
+      let id = newGrantId();
+      while (this.one("SELECT 1 AS x FROM grants WHERE id = ?", id)) id = newGrantId();
+      this.sql.exec(
+        "INSERT INTO grants (id, agent, token_hash, scopes, run_code, outward, rate, created, expires) VALUES (?, ?, ?, ?, 0, '[]', ?, ?, ?)",
+        id, agent, hash, JSON.stringify(scopes), JSON.stringify({ per_minute: AGENT.perMinute, per_hour: AGENT.perHour }), now, now + (days as number) * this.agentBounds.dayMs,
+      );
+      // (its expiry is when the dead grants past the newest 50 are next trimmed: the alarm is set for it now, or brought
+      // forward to it, whatever else is due; astra S5)
+      this.wakeBy(now + (days as number) * this.agentBounds.dayMs + 1);
+      this.trimDead(now);
+      return this.grantView(this.one("SELECT * FROM grants WHERE id = ?", id)!);
+    }));
+    if ("error" in made) return made;
+    return { ok: { grant: made.ok, token: await this.token(made.ok.id, secret) } };
+  }
+
+  /** The person's list of grants, live and recent ones, with no secret. */
+  async grantList(a: { account: string }): Promise<Result<{ grants: ReturnType<SyncAccount["grantView"]>[] }>> {
+    return attempt(() => {
+      if (!agentOn(this.env)) throw new SyncError("forbidden", "agents aren't enabled here");
+      this.admit(a.account, false);
+      if (!this.hasGrants()) return { grants: [] };
+      // (live grants, and the newest AGENT.deadGrants revoked or expired ones: a grant that expired since the last
+      // trim is past it already, so the list never shows more, whatever has been made since)
+      const now = Date.now();
+      const rows = this.sql.exec(
+        "SELECT * FROM grants WHERE (revoked IS NULL AND expires > ?) OR id IN (SELECT id FROM grants WHERE revoked IS NOT NULL OR expires <= ? ORDER BY COALESCE(revoked, expires) DESC, id LIMIT ?) ORDER BY created DESC, id",
+        now, now, AGENT.deadGrants,
+      ).toArray() as Row[];
+      return { grants: rows.map((r) => this.grantView(r)) };
+    });
+  }
+
+  /** The person revokes a grant: its token stops at once (§2).  Revoking one already revoked changes nothing. */
+  async grantRevoke(a: { account: string; id: unknown }): Promise<Result<{ grant: ReturnType<SyncAccount["grantView"]> }>> {
+    return attempt(() => this.ctx.storage.transactionSync(() => {
+      if (!agentOn(this.env)) throw new SyncError("forbidden", "agents aren't enabled here");
+      this.admit(a.account, false);
+      const r = typeof a.id === "string" && GRANT_ID.test(a.id) && this.hasGrants() ? this.one("SELECT * FROM grants WHERE id = ?", a.id) : undefined;
+      if (!r) throw new SyncError("missing", "no such grant");
+      if (r.revoked === null) this.sql.exec("UPDATE grants SET revoked = ?, revoked_reason = 'person' WHERE id = ?", Date.now(), r.id);
+      this.trimDead(Date.now());
+      return { grant: this.grantView(this.one("SELECT * FROM grants WHERE id = ?", r.id)!) };
+    }));
+  }
+
+  /** "New token" (§2, rotation): a live grant's secret replaced; the old token stops at once. */
+  async grantRotate(a: { account: string; id: unknown }): Promise<Result<{ grant: ReturnType<SyncAccount["grantView"]>; token: string }>> {
+    const secret = newSecret();
+    const hash = await secretHash(secret);
+    const r = attempt(() => this.ctx.storage.transactionSync(() => {
+      if (!agentOn(this.env)) throw new SyncError("forbidden", "agents aren't enabled here");
+      this.admit(a.account, true);
+      const g = typeof a.id === "string" && GRANT_ID.test(a.id) && this.hasGrants() ? this.one("SELECT * FROM grants WHERE id = ?", a.id) : undefined;
+      if (!g) throw new SyncError("missing", "no such grant");
+      if (g.revoked !== null || Number(g.expires) <= Date.now()) throw new SyncError("conflict", "this grant is revoked or expired");
+      this.sql.exec("UPDATE grants SET token_hash = ? WHERE id = ?", hash, g.id);
+      return this.grantView(this.one("SELECT * FROM grants WHERE id = ?", g.id)!);
+    }));
+    if ("error" in r) return r;
+    return { ok: { grant: r.ok, token: await this.token(r.ok.id, secret) } };
+  }
+
+  /** The person's view of the access log (§8), newest first, a page at a time; an agent can't read it. */
+  async grantLog(a: { account: string; grant?: unknown; before?: unknown }): Promise<Result<{ rows: Row[]; more: boolean }>> {
+    return attempt(() => {
+      if (!agentOn(this.env)) throw new SyncError("forbidden", "agents aren't enabled here");
+      this.admit(a.account, false);
+      if (a.grant !== undefined && (typeof a.grant !== "string" || !GRANT_ID.test(a.grant))) throw new SyncError("invalid", "grant");
+      if (a.before !== undefined && !isNat(a.before)) throw new SyncError("invalid", "before");
+      if (!this.hasGrants()) return { rows: [], more: false };
+      const before = (a.before as number | undefined) ?? Number.MAX_SAFE_INTEGER;
+      // (only rows within the log's 90 days, whether or not the alarm has deleted the older ones yet)
+      const since = Date.now() - this.agentBounds.logMs;
+      const rows = (a.grant === undefined
+        ? this.sql.exec("SELECT id, t, grant_id, agent, verb, paths, result, bytes FROM access_log WHERE id < ? AND t >= ? ORDER BY id DESC LIMIT ?", before, since, this.agentBounds.logPage + 1)
+        : this.sql.exec("SELECT id, t, grant_id, agent, verb, paths, result, bytes FROM access_log WHERE grant_id = ? AND id < ? AND t >= ? ORDER BY id DESC LIMIT ?", a.grant, before, since, this.agentBounds.logPage + 1)
+      ).toArray() as Row[];
+      return { rows: rows.slice(0, this.agentBounds.logPage), more: rows.length > this.agentBounds.logPage };
+    });
+  }
+
+  /** One row of the access log (§8), in the caller's transaction, and the log kept to 90 days and its row bound. */
+  private logRow(t: number, g: Row, verb: string, paths: string[] | null, result: string) {
+    this.sql.exec("INSERT INTO access_log (t, grant_id, agent, verb, paths, result) VALUES (?, ?, ?, ?, ?, ?)", t, g.id, g.agent, verb, paths ? JSON.stringify(paths) : null, result);
+    const id = Number(this.one("SELECT last_insert_rowid() AS n")!.n);
+    if (id > this.agentBounds.logRows) this.sql.exec("DELETE FROM access_log WHERE id <= ?", id - this.agentBounds.logRows);
+    // (rows past the log's age are the alarm's to delete, a page at a time: due when the oldest row ages out)
+    this.wakeBy(this.logDue()!);
+  }
+  /** When the oldest row of the access log is past its age (null: no log, or no rows). */
+  private logDue(): number | null {
+    if (!this.hasGrants()) return null;
+    const t = this.one("SELECT MIN(t) AS t FROM access_log")?.t;
+    return t === undefined || t === null ? null : Number(t) + this.agentBounds.logMs + 1;
+  }
+  /** A page of the access log's rows past its age, deleted. */
+  private sweepLog(now: number) {
+    if (this.hasGrants()) this.sql.exec("DELETE FROM access_log WHERE id IN (SELECT id FROM access_log WHERE t < ? ORDER BY t LIMIT ?)", now - this.agentBounds.logMs, this.agentBounds.logSweep);
+  }
+  /** A refused request's row: at most one a minute per grant (§2), so refusals can't be made to write more.  When it
+   * was last written is kept on the grant, with the row, so the bound holds across the object's restarts (astra). */
+  private logRefusal(t: number, g: Row, verb: string, result: string) {
+    const last = g.refusal_logged;
+    if (last !== null && last !== undefined && t - Number(last) < AGENT.refusalLogMs) return;
+    this.sql.exec("UPDATE grants SET refusal_logged = ? WHERE id = ?", t, g.id);
+    this.logRow(t, g, verb, null, result);
+  }
+
+  /**
+   * An agent's request (§3), after the Worker has checked its token's form and tag and named this object by the
+   * token's account hash.  In this order: the grant (it exists, its secret matches, it isn't revoked or expired) and
+   * the account (sync on and allowed, active, or readonly for a read); the grant's rates, then the account's; the
+   * verb and its scope; then the verb, none of which is built yet (404 `not_built`).  Each answer past the grant's
+   * check is a row of the access log; a refusal at it, at most one a minute per grant, and only for a grant that exists.
+   */
+  async agentCall(a: { hash: string; id: string; secret: string; verb: string; params: unknown }): Promise<{ status: number; body: Record<string, unknown> }> {
+    const unauthorized = { status: 401, body: { error: "unauthorized" } };
+    // (nothing is made here: an account without sync, or without grants, has no grant to find)
+    if (!agentOn(this.env) || !this.exists() || this.get("account_hash") !== a.hash || !this.hasGrants()) return unauthorized;
+    const presented = await secretHash(a.secret);
+    return this.ctx.storage.transactionSync(() => {
+      const now = Date.now();
+      const g = this.one("SELECT * FROM grants WHERE id = ?", a.id);
+      if (!g) return unauthorized;
+      const verb = VERBS.has(a.verb) ? a.verb : "?";
+      // (one answer for a wrong secret, a revoked grant and an expired one, §3; the hash compared in constant time)
+      if (!same(presented, String(g.token_hash)) || g.revoked !== null || Number(g.expires) <= now) {
+        this.logRefusal(now, g, verb, "unauthorized");
+        return unauthorized;
+      }
+      const account = String(this.get("account_id"));
+      const st = this.state();
+      const refuse = (status: number, error: string, extra: Record<string, unknown> = {}) => {
+        this.logRefusal(now, g, verb, error);
+        return { status, body: { error, ...extra } };
+      };
+      if (!allowed(this.env, account)) return refuse(403, "forbidden", { message: "sync isn't enabled for this account" });
+      if (st === "registering") return refuse(403, "forbidden", { message: "sync for this account is still being set up; try again in a moment" });
+      if (st === "deleting") return refuse(409, "deleting", { message: "this account's sync is being deleted" });
+      if (st === "readonly" && !READS.has(verb)) return refuse(409, "readonly", { message: "this account's sync is read-only now" });
+      // the grant's rates, then the account's: each a 429 with which limit and when to retry (§7)
+      const b = this.agentBounds;
+      const over = this.takeRates([
+        { key: "m:" + g.id, burst: b.perMinute, windowMs: b.minuteMs, limit: "requests_per_minute" },
+        { key: "h:" + g.id, burst: b.perHour, windowMs: b.hourMs, limit: "requests_per_hour" },
+        { key: "account", burst: b.accountPerMinute, windowMs: b.minuteMs, limit: "account_requests_per_minute" },
+      ], now);
+      if (over) return refuse(429, "rate", over);
+      this.sql.exec("UPDATE grants SET last_used = ? WHERE id = ?", now, g.id);
+      const answer = (status: number, error: string, paths: string[] | null, extra: Record<string, unknown> = {}) => {
+        this.logRow(now, g, verb, paths, error);
+        return { status, body: { error, ...extra } };
+      };
+      if (verb === "?") return answer(404, "unknown_verb", null);
+      const key = SCOPED[verb];
+      if (key === undefined) return answer(404, "not_built", null, { message: "this verb isn't available yet" });
+      const p = a.params;
+      // (the workspace API's own check of the call, web/workspace/schema.json, the same the page and MCP use: a field
+      // it doesn't know, or one of the wrong type, is refused before any path is read)
+      const bad = checkCall("workspace." + verb, p);
+      if (bad) return answer(400, "invalid", null, { message: bad.slice(0, 200) });
+      let path: string;
+      try {
+        path = normPath((p as Record<string, unknown>)[key]);
+      } catch {
+        return answer(400, "invalid", null, { message: `${key}: not a workspace path` });
+      }
+      const need = READS.has(verb) ? "read" : "write";
+      if (!inScope(JSON.parse(String(g.scopes)) as Scope[], path, need)) return answer(403, "scope", [path], { path, access: need });
+      // (the index these read, the server's entries, is fs-sync step 1a2)
+      return answer(404, "not_built", [path], { message: "this verb isn't available yet" });
+    });
+  }
+
+  /** Tests only: lower the agents' bounds, or expire a grant now. */
+  async testAgent(a: { perMinute?: number; perHour?: number; accountPerMinute?: number; logRows?: number; logMs?: number; logSweep?: number; logPage?: number; readonly?: boolean; noArm?: boolean; expireLive?: boolean; dayMs?: number; expireIn?: { id: string; ms: number }; clearAlarm?: boolean; minuteMs?: number; hourMs?: number; resetRates?: boolean; expire?: string }): Promise<{ log: number; grants: number; rates: number; rateRows: string; alarm: number | null }> {
+    if (!testMode(this.env)) return { log: 0, grants: 0, rates: 0, rateRows: "", alarm: null };
+    const b = this.agentBounds;
+    if (a.perMinute !== undefined) b.perMinute = a.perMinute;
+    if (a.perHour !== undefined) b.perHour = a.perHour;
+    if (a.logRows !== undefined) b.logRows = a.logRows;
+    if (a.logMs !== undefined) b.logMs = a.logMs;
+    if (a.logSweep !== undefined) b.logSweep = a.logSweep;
+    if (a.logPage !== undefined) b.logPage = a.logPage;
+    if (a.dayMs !== undefined) b.dayMs = a.dayMs;
+    // (the state a plan without sync gives an account, §6.2, set directly)
+    if (a.readonly && this.exists()) this.set("state", "readonly");
+    if (a.accountPerMinute !== undefined) b.accountPerMinute = a.accountPerMinute;
+    if (a.minuteMs !== undefined) b.minuteMs = a.minuteMs;
+    if (a.hourMs !== undefined) b.hourMs = a.hourMs;
+    if (a.resetRates && this.hasGrants()) this.sql.exec("DELETE FROM agent_rates");
+    if (a.expire !== undefined && this.hasGrants()) this.sql.exec("UPDATE grants SET expires = ? WHERE id = ?", Date.now(), a.expire);
+    if (a.expireLive && this.hasGrants()) {
+      const now = Date.now();
+      this.sql.exec("UPDATE grants SET expires = ? WHERE revoked IS NULL AND expires > ?", now, now);
+    }
+    // (as the alarm arm() set for that expiry would fire now)
+    if (a.expire !== undefined || a.expireLive) this.wakeBy(Date.now() + 1);
+    // (a grant set to expire in `ms`, with no alarm armed for it here: only arm() can schedule its trim)
+    if (a.expireIn && this.hasGrants()) this.sql.exec("UPDATE grants SET expires = ? WHERE id = ?", Date.now() + a.expireIn.ms, a.expireIn.id);
+    if (a.clearAlarm) {
+      await this.ctx.storage.deleteAlarm();
+      this.alarmAt = null;
+    }
+    const due = a.logMs !== undefined && !a.noArm ? this.logDue() : null;
+    if (due !== null) this.wakeBy(due);
+    const count = (table: string) => (this.hasGrants() ? Number(this.one(`SELECT COUNT(*) AS n FROM ${table}`)!.n) : 0);
+    const rows = this.hasGrants() ? JSON.stringify(this.sql.exec("SELECT key, tokens, at FROM agent_rates ORDER BY key").toArray()) : "[]";
+    return { log: count("access_log"), grants: count("grants"), rates: count("agent_rates"), rateRows: rows, alarm: await this.ctx.storage.getAlarm() };
+  }
+
   async alarm(): Promise<void> {
     // (this alarm has fired: the next is whatever arm() sets at the end)
     this.alarmAt = null;
@@ -2296,6 +2602,11 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     });
     // unused chunked-file registrations past their hold (§4.3 of design/tiered-files.md): a page a step
     if (this.retireExpired(now)) this.wakeBy(Date.now() + 1);
+    // the access log's rows past its 90 days (design/agent-endpoint.md §8): a page a step, and arm() below sets the next
+    // step at once while any is left
+    this.sweepLog(now);
+    // grants that expired since: the newest AGENT.deadGrants dead ones kept (daybreak2 L1), with nothing else needed
+    if (this.hasGrants()) this.trimDead(now);
     // the outbox: R2 first, the row only once R2 has deleted it; a key that fails waits its own backoff
     const bucket = this.env.SHARE_BUCKET;
     if (bucket)

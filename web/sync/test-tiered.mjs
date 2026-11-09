@@ -549,9 +549,10 @@ await section("a verify call frees its own slot whenever it records nothing", as
     const parts = [randomBytes(5 * MiB), randomBytes(5 * MiB)];
     for (const c of parts) await put(sa, c);
     const f = fileOf(parts);
-    await register(sa, f.manifest);
-    const keys = JSON.parse((await acct.testFiles({ sha256: f.sha256 })).row.keys);
-    return { f, parts, keys };
+    const rr = await register(sa, f.manifest);
+    const row = (await acct.testFiles({ sha256: f.sha256 })).row;
+    if (!row) throw new Error(`no row after its registration: ${rr.status} ${await rr.text()}`);
+    return { f, parts, keys: JSON.parse(row.keys) };
   };
   // R10: a chunk whose object is gone (the get answers null)
   const g = await fresh();
@@ -592,15 +593,16 @@ await section("retirement: live rows are never retired, and a reference taken me
   const parts = [randomBytes(5 * MiB), randomBytes(5 * MiB)];
   for (const c of parts) await put(sa, c);
   const f = fileOf(parts);
+  // (its hold is ended only once it is live, and only its own: a hold of 1 ms let the object's alarm retire the verified
+  // row before the op could make it live, about one run in four)
+  await acct.testFiles({ holdMs: 3_600_000 });
   await register(sa, f.manifest);
-  await acct.testFiles({ holdMs: 1 }); // (so its verified hold ends at once)
   ok((await verifyAll(sa, f.sha256)).pop().state === "verified", "(a file verified)");
   const ws = await opsSocket(sa, "device-tier-0004");
   const op = await ws.create(f.sha256, f.bytes.length);
   ws.close();
   ok(Number.isInteger(op?.seq), "(and made live by an op)");
-  await acct.testFiles({ setRefs: { sha256: f.sha256, refs: 0 } });
-  await new Promise((r) => setTimeout(r, 20));
+  await acct.testFiles({ setRefs: { sha256: f.sha256, refs: 0 }, endHold: f.sha256 });
   let t = await acct.testFiles({ sha256: f.sha256, retire: true, holdMs: 0 });
   ok(t.row?.state === "live", "A19: a live row with no references, past its hold, isn't retired");
   await acct.testFiles({ setRefs: { sha256: f.sha256, refs: 1 } });

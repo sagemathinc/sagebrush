@@ -24,6 +24,11 @@ export default {
       const hash = await accountHash(account);
       return register(env, env.SYNC_ACCOUNT!.get(env.SYNC_ACCOUNT!.idFromName("acct:" + hash)), account, hash, Number(url.searchParams.get("generation")));
     }
+    // (tests only: an account's agent bounds lowered, or one of its grants expired now)
+    if (url.pathname === "/__test/agent") {
+      const hash = await accountHash(url.searchParams.get("account") ?? "");
+      return Response.json(await env.SYNC_ACCOUNT!.get(env.SYNC_ACCOUNT!.idFromName("acct:" + hash)).testAgent(await req.json()));
+    }
     // (tests only: hold, or open, a named step in the Worker, as a late D1 answer would)
     if (url.pathname === "/__test/gate") {
       setGate(env, url.searchParams.get("name") ?? "", url.searchParams.get("on") === "1");
