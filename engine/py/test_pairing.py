@@ -930,8 +930,8 @@ if __name__ == "__main__":
     for remote_test in ("test_remote_es256.py", "test_remote_dpop.py", "test_remote_mangle.py", "test_remote_child.py",
                         "test_remote_gateway.py", "test_remote_pair.py", "test_remote_enroll.py",
                         "test_remote_relay.py", "test_remote_terminal.py",
-                        # (fs-sync's planner, scan, base, moves and holding folder, design/fs-sync.md: here for the same reason, until
-                        # ci.yml lists them)
+                        # (fs-sync's planner, scan, base, moves, holding folder and apply step, design/fs-sync.md:
+                        # here for the same reason, until ci.yml lists them)
                         "test_fs_sync_plan.py", "test_fs_sync_scan.py", "test_fs_sync_state.py",
-                        "test_fs_sync_move.py", "test_fs_sync_holding.py"):
+                        "test_fs_sync_move.py", "test_fs_sync_holding.py", "test_fs_sync_apply.py"):
         runpy.run_path(os.path.join(HERE, remote_test), run_name="__main__")
