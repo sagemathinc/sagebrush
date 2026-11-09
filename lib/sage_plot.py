@@ -154,7 +154,7 @@ class Graphics:
         """
         for k, v in (("xmin", xmin), ("xmax", xmax), ("ymin", ymin), ("ymax", ymax)):
             if v is not None:
-                self._options[k] = v
+                self._options[k] = float(v)
 
     def axes_range(self, xmin=None, xmax=None, ymin=None, ymax=None):
         """Set the ranges of the axes (as set_axes_range; get_axes_range()
@@ -180,6 +180,37 @@ class Graphics:
             if k in self._options:
                 r[k] = float(self._options[k])
         return r
+
+    def _bound(self, k, v):
+        # (Sage's xmin()/xmax()/ymin()/ymax(): the range set for the axes,
+        # else the extent of the primitives; with a value, set it)
+        if v is None:
+            return float(self._options[k]) if k in self._options else self.get_minmax_data()[k]
+        self.set_axes_range(**{k: v})
+
+    def xmin(self, xmin=None):
+        """The left end of the x-axis, or set it.
+
+        EXAMPLES::
+
+            sage: G = line([(1, 2), (3, -4)]); G.xmin(), G.xmax(), G.ymin(), G.ymax()
+            (1.0, 3.0, -4.0, 2.0)
+            sage: G.xmin(-1); G.xmin(), G.get_minmax_data()['xmin']
+            (-1.0, 1.0)
+        """
+        return self._bound("xmin", xmin)
+
+    def xmax(self, xmax=None):
+        """The right end of the x-axis, or set it (as xmin)."""
+        return self._bound("xmax", xmax)
+
+    def ymin(self, ymin=None):
+        """The bottom of the y-axis, or set it (as xmin)."""
+        return self._bound("ymin", ymin)
+
+    def ymax(self, ymax=None):
+        """The top of the y-axis, or set it (as xmin)."""
+        return self._bound("ymax", ymax)
 
     def get_minmax_data(self):
         """The extent of the primitives: {'xmin': ..., 'xmax': ..., 'ymin': ..., 'ymax': ...}.
