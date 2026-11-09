@@ -16,22 +16,42 @@ import { MAX_DEPTH, MAX_PATH, parentOf } from "../workspace/paths.ts";
 type Sql = SqlStorage;
 type Row = Record<string, ArrayBuffer | string | number | null>;
 
+// The index's host bounds: interim (#904 r3 §1.1), registered in the limits census one by one, each its own line (so a
+// new bound or a changed one is a census site to register), until slice 2 takes them from discovered capabilities.
+// They are never membership values. (LIMITS and PERF on #913: 25,000 visits a step until DEV numbers show 2x headroom.)
+/** rows read or written by one alarm step, or by one live batch, whatever it holds */
+export const IX_VISITS_MAX = 25_000;
+/** ops, and their encoded bytes, applied by one alarm step (the index page's bounds) */
+export const IX_OPS_MAX = 1000;
+export const IX_BYTES_MAX = 1 << 20;
+/** live entries, tombstones, and entries directly in one folder (LIMITS ruling (2)) */
+export const IX_ENTRIES_MAX = 100_000;
+export const IX_GONE_MAX = 100_000;
+export const IX_FOLDER_MAX = 10_000;
+/** a page of `list`, and the rows one call may examine (astra's read condition) */
+export const IX_PAGE_MAX = 1000;
+export const IX_EXAMINED_MAX = 20_000;
+/** rows a job reads in one page (a subtree op in steps, below) */
+export const IX_JOB_PAGE_MAX = 500;
+/** a list's continuations: kept per grant (the newest), and for how long (astra's S1 on #913: a cursor is an id the
+ * server keeps, never a path) */
+export const IX_CURSORS_MAX = 32;
+export const IX_CURSOR_MS_MAX = 15 * 60_000;
+/** rows a rebuild's reset deletes in one step (ENGINE E2 on #913: never a whole index in one transaction) */
+export const IX_RESET_PAGE_MAX = 10_000;
 export const IX = {
-  /** rows read or written by one alarm step, or by one live op (LIMITS ruling (3)) */
-  visits: 100_000,
-  /** ops, and their encoded bytes, applied by one alarm step (the index page's bounds) */
-  ops: 1000,
-  bytes: 1 << 20,
-  /** live entries, tombstones, and entries directly in one folder (LIMITS ruling (2)) */
-  entries: 100_000,
-  gone: 100_000,
-  perFolder: 10_000,
-  /** a page of `list`, the most one call gives, and the rows one call may examine (astra's read condition) */
-  page: 1000,
-  perCall: 10_000,
-  examined: 20_000,
-  /** rows a job reads in one page (a subtree op in steps, below) */
-  jobPage: 500,
+  visits: IX_VISITS_MAX,
+  ops: IX_OPS_MAX,
+  bytes: IX_BYTES_MAX,
+  entries: IX_ENTRIES_MAX,
+  gone: IX_GONE_MAX,
+  perFolder: IX_FOLDER_MAX,
+  page: IX_PAGE_MAX,
+  examined: IX_EXAMINED_MAX,
+  jobPage: IX_JOB_PAGE_MAX,
+  cursors: IX_CURSORS_MAX,
+  cursorMs: IX_CURSOR_MS_MAX,
+  resetPage: IX_RESET_PAGE_MAX,
 };
 
 export const SCHEMA = [
@@ -47,8 +67,12 @@ export const SCHEMA = [
   // (a subtree op in progress, below: the descendants still to move or forget, each with its region; the job's state)
   "CREATE TABLE IF NOT EXISTS ix_stage (id TEXT PRIMARY KEY, r INTEGER NOT NULL)",
   "CREATE TABLE IF NOT EXISTS ix_job (one INTEGER PRIMARY KEY CHECK (one = 1), v TEXT NOT NULL)",
+  // (a list's continuation: where the next page starts, for that grant's listing of that folder only)
+  "CREATE TABLE IF NOT EXISTS ix_cursors (id TEXT PRIMARY KEY, grant_id TEXT NOT NULL, folder TEXT NOT NULL, recursive INTEGER NOT NULL, after TEXT NOT NULL, t INTEGER NOT NULL)",
+  "CREATE INDEX IF NOT EXISTS ix_cursors_grant ON ix_cursors (grant_id)",
+  "CREATE INDEX IF NOT EXISTS ix_cursors_t ON ix_cursors (t)",
 ];
-export const IX_TABLES = ["ix_entries", "ix_keys", "ix_children", "ix_gone", "ix_meta", "ix_stage", "ix_job"];
+export const IX_TABLES = ["ix_entries", "ix_keys", "ix_children", "ix_gone", "ix_meta", "ix_stage", "ix_job", "ix_cursors"];
 
 /** A budget stop: the work it would take is past the bound. Never an op the reducer refused. */
 export class BudgetStop extends Error {

@@ -53,7 +53,8 @@ const EM = "b1b1b1b1-000a-4b1b-8b1b-b1b1b1b1b10a"; // an empty log: ready at onc
 const NE = "b1b1b1b1-000b-4b1b-8b1b-b1b1b1b1b10b"; // sync never turned on: no rebuild
 const JR = "b1b1b1b1-000c-4b1b-8b1b-b1b1b1b1b10c"; // a job restarted in each phase
 const JB = "b1b1b1b1-000d-4b1b-8b1b-b1b1b1b1b10d"; // a job's bounds and its counts
-const listed = [BF, BU, CP, CA, RD, LV, MS, LB, RX, EM, NE, JR, JB].join(",");
+const RS = "b1b1b1b1-000e-4b1b-8b1b-b1b1b1b1b10e"; // a rebuild's reset, paged
+const listed = [BF, BU, CP, CA, RD, LV, MS, LB, RX, EM, NE, JR, JB, RS].join(",");
 const script = execFileSync("bun", ["build", join(here, "test-entry.ts"), "--format", "esm", "--target", "browser", "--external", "cloudflare:workers"], { encoding: "utf8" });
 const base = { modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET"] };
 const shareBindings = { SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOKEN: "dev-token", COCALC_ORIGIN: "https://cocalc.test", COCALC_CLIENT_SECRET: "client-secret" };
@@ -235,6 +236,8 @@ await section("one step at a time: 503 while it builds; one budget, the ops and 
   // the bytes bound: 1 byte a step still applies one op (the first always), so one op a step
   await ix(MS, { bounds: { visits: 100_000, bytes: 1 } });
   await post(s, "/api/sync/v1/index/rebuild", {});
+  // (the rebuild's reset first: its steps delete the old index, then the backfill begins)
+  for (let i = 0; i < 20 && (await ix(MS)).reset; i++) await ix(MS, { step: true });
   const b1 = (await ix(MS, { step: true })).cursor, b2 = (await ix(MS, { step: true })).cursor;
   ok(b1 === 1 && b2 === 2, `past the bytes bound a step applies its first op only: ${b1}, ${b2}`);
   // single-flight: asked again while it builds, the rebuild already under way is left as it is
@@ -419,6 +422,40 @@ await section("a job's bounds: a folder, tombstones and entries, each past by th
   ws.close();
 });
 
+await section("a rebuild's reset: the old index deleted a page a step, reads 503 meanwhile, across a restart", async () => {
+  const s = await enabled(RS);
+  const ws = await socket(s, "b6b6b6b6b6b6b6b7");
+  await ws.ops([mkdir("/r")]);
+  await ws.ops(Array.from({ length: 12 }, (_, i) => mkdir(`/r/k${i}`)));
+  const t = await grant(s, [{ path: "/", access: "read" }]);
+  ok((await until(RS, "ready")).state === "ready", "(ready)");
+  const R = (await ix(RS)).rows;
+  // a page exactly the index's rows: one step deletes them all
+  await ix(RS, { manual: true, bounds: { resetPage: R } });
+  await post(s, "/api/sync/v1/index/rebuild", {});
+  const a0 = await ix(RS);
+  ok(a0.state === "building" && a0.reset === 1 && a0.rows === R, `a rebuild deletes nothing yet: a reset, kept (${a0.rows} rows of ${R})`);
+  ok((await agent(t, "stat", { path: "/r" })).error === "index_building", "and a read meanwhile is 503 index_building");
+  const a1 = await ix(RS, { step: true, manual: true, bounds: { resetPage: R } });
+  ok(a1.reset === 0 && a1.rows === 0 && a1.cursor === 0, `a page of ${R} rows: one step, all deleted, the backfill not begun: ` + JSON.stringify({ reset: a1.reset, rows: a1.rows, cursor: a1.cursor }));
+  await ix(RS, { manual: false });
+  ok((await until(RS, "ready")).state === "ready", "(rebuilt)");
+  // one row past the page: two steps, with a restart between them
+  const R2 = (await ix(RS)).rows;
+  await ix(RS, { manual: true, bounds: { resetPage: R2 - 1 } });
+  await post(s, "/api/sync/v1/index/rebuild", {});
+  const b1 = await ix(RS, { step: true, manual: true, bounds: { resetPage: R2 - 1 } });
+  ok(b1.reset === 1 && b1.rows === 1, `a page of ${R2 - 1}, one row more: after one step, 1 row left, still a reset: ` + JSON.stringify({ reset: b1.reset, rows: b1.rows }));
+  await restart(RS);
+  const b2 = await ix(RS, { manual: true, bounds: { resetPage: R2 - 1 } });
+  ok(b2.reset === 1 && b2.rows === 1 && b2.state === "building", "a restart keeps the reset where it was");
+  const b3 = await ix(RS, { step: true, manual: true, bounds: { resetPage: R2 - 1 } });
+  ok(b3.reset === 0 && b3.rows === 0, "and the next step ends it");
+  await ix(RS, { manual: false });
+  ok((await until(RS, "ready")).state === "ready" && (await agent(t, "stat", { path: "/r/k11" })).entry?.kind === "folder", "the backfill after it: ready, the whole log in it");
+  ws.close();
+});
+
 await section("a job survives a restart in each of its phases", async () => {
   const s = await enabled(JR);
   const ws = await socket(s, "b3b3b3b3b3b3b3b3");
@@ -520,8 +557,14 @@ await section("a live op too big for one update: accepted, the index builds it a
   await ix(LV, { bounds: { visits: 30, jobPage: 4 } });
   const top = mkdir("/t");
   await ws.ops([top]);
+  // (one budget for a whole live batch: 20 small ops, each within 30 visits, pass 30 together, so none is kept live; the
+  // alarm held, to see it)
+  await ix(LV, { manual: true });
   await ws.ops(Array.from({ length: 20 }, (_, i) => mkdir(`/t/k${i}`)));
-  ok((await ix(LV)).state === "ready", "(small ops fit a fresh budget each)");
+  const held = await ix(LV);
+  ok(held.state === "building" && held.cursor === 1 && held.max === 21, "a live batch past one budget together (20 small ops, 30 visits): nothing kept live, building: " + JSON.stringify({ state: held.state, cursor: held.cursor, max: held.max }));
+  await ix(LV, { manual: false });
+  ok((await until(LV, "ready")).state === "ready" && (await ix(LV)).cursor === 21, "and the alarm's steps take it: ready");
   const before = await ix(LV);
   const a = await ws.ops([{ op: "rename", path: "/t", to: "/u", kind: "folder", fid: top.fid }]);
   const after = await ix(LV);
@@ -531,6 +574,17 @@ await section("a live op too big for one update: accepted, the index builds it a
   const done = await until(LV, "ready");
   ok(done.cursor === before.cursor + 1 && (await agent(t, "stat", { path: "/u/k19" })).entry?.kind === "folder" && (await agent(t, "stat", { path: "/t/k0" })).entry === null, "the alarm applies it as a job: ready, the whole rename in it: " + JSON.stringify(done));
   ok((await ws.log()).some((o) => o.op === "rename" && o.to === "/u"), "and the op is in the log every device pulls");
+  // two big subtree ops in one message (PERF P1): one budget for both, none kept live; the alarm's jobs take each whole
+  const p1 = mkdir("/p"), q1 = mkdir("/q");
+  await ws.ops([p1, q1]);
+  await ws.ops([...Array.from({ length: 15 }, (_, i) => mkdir(`/p/k${i}`)), ...Array.from({ length: 15 }, (_, i) => mkdir(`/q/k${i}`))]);
+  ok((await until(LV, "ready")).state === "ready", "(ready)");
+  const pre = await ix(LV);
+  await ws.ops([{ op: "rename", path: "/p", to: "/p2", kind: "folder", fid: p1.fid }, { op: "rename", path: "/q", to: "/q2", kind: "folder", fid: q1.fid }]);
+  const mid = await ix(LV);
+  ok(mid.state === "building" && mid.cursor === pre.cursor, "two big renames in one message: nothing kept live, building: " + JSON.stringify(mid));
+  const fin = await until(LV, "ready", 60_000);
+  ok(fin.cursor === pre.cursor + 2 && (await agent(t, "stat", { path: "/p2/k14" })).entry?.kind === "folder" && (await agent(t, "stat", { path: "/q2/k14" })).entry?.kind === "folder" && (await agent(t, "stat", { path: "/p/k0" })).entry === null, "then both, whole, by the alarm's jobs: ready");
   ws.close();
 });
 
@@ -549,7 +603,10 @@ await section("reads: scope, Trash by where it came from, pages, the examined bo
   ok((await agent(t, "list", { folder: "/" })).error === "scope" && (await agent(t, "list", { folder: "/B" })).error === "scope", "outside the scope: 403");
   const la = await agent(t, "list", { folder: "/A" });
   ok(la.status === 200 && JSON.stringify(la.entries.map((e) => e.path)) === '["/A/x"]' && la.cursor === null, "a folder in scope: its children, by path, no cursor at the end");
-  ok((await agent(t, "list", { folder: "/A", cursor: "/B/y" })).status === 400, "a cursor from outside the folder is refused, never followed");
+  ok((await agent(t, "list", { folder: "/A", cursor: "/B/y" })).status === 400 && (await agent(t, "list", { folder: "/A", cursor: "0".repeat(32) })).status === 400, "a cursor the server didn't give (a path, an unknown id) is refused, never followed");
+  // a Trash folder the grant can't see answers as one that isn't there (/Trash/w came from /B, outside /A)
+  const hid = await agent(t, "list", { folder: "/Trash/w" }), none = await agent(t, "list", { folder: "/Trash/nothere" });
+  ok(hid.status === 404 && none.status === 404 && JSON.stringify({ ...hid, path: 0 }) === JSON.stringify({ ...none, path: 0 }), "a hidden folder in Trash and a missing one: the same 404 missing: " + JSON.stringify([hid, none]));
   // the examined bound: 2 rows a call, and a whole-workspace grant sees /B's 7 children (y, q0-q5) 2 by 2
   const t2 = await grant(s, [{ path: "/", access: "read" }]);
   await ix(RD, { bounds: { examined: 2, page: 1000 } });
@@ -567,13 +624,27 @@ await section("reads: scope, Trash by where it came from, pages, the examined bo
     return out;
   })();
   ok(all.length === 7 && new Set(all.map((e) => e.path)).size === 7, "and its cursors reach the whole folder, each child once: " + all.length);
-  // filtered rows count: Trash with an out-of-scope entry first, examined 1: an empty page, and a cursor past it
+  // filtered rows count: Trash with an out-of-scope entry first, examined 1: an empty page, and a cursor past it that
+  // says nothing of the hidden row (an id, kept by the server)
   await ix(RD, { bounds: { examined: 1 } });
   const e1 = await agent(t, "list", { folder: "/Trash" });
-  ok(e1.status === 200 && e1.entries.length === 0 && e1.cursor === "/Trash/w", "a row filtered out still counts: an empty page, with a cursor past it");
+  ok(e1.status === 200 && e1.entries.length === 0 && /^[0-9a-f]{32}$/.test(e1.cursor ?? "") && !JSON.stringify(e1).includes("/Trash/w") && !JSON.stringify(e1).includes("/B"), "a row filtered out still counts: an empty page, and a cursor past it that is an opaque id: " + JSON.stringify(e1));
   const e2 = await agent(t, "list", { folder: "/Trash", cursor: e1.cursor });
   ok(e2.entries.length === 1 && e2.entries[0].path === "/Trash/z", "and the next page goes on from there");
-  await ix(RD, { bounds: { examined: 20_000 } });
+  // a cursor is its grant's, for its folder and its kind of listing, for a while
+  const c1 = (await agent(t2, "list", { folder: "/B" })).cursor;
+  ok((await agent(t, "list", { folder: "/Trash", cursor: e1.cursor })).status === 200 && (await agent(t2, "list", { folder: "/Trash", cursor: e1.cursor })).status === 400, "another grant's cursor is refused");
+  ok((await agent(t2, "list", { folder: "/A", cursor: c1 })).status === 400 && (await agent(t2, "list", { folder: "/B", recursive: true, cursor: c1 })).status === 400 && (await agent(t2, "list", { folder: "/B", cursor: c1 })).status === 200, "and one for another folder, or another kind of listing; its own goes on");
+  // the newest 2 kept per grant (the bound lowered): a third ends the first
+  await ix(RD, { bounds: { cursors: 2 } });
+  const k1 = (await agent(t2, "list", { folder: "/B" })).cursor, k2 = (await agent(t2, "list", { folder: "/B" })).cursor, k3 = (await agent(t2, "list", { folder: "/B" })).cursor;
+  ok((await agent(t2, "list", { folder: "/B", cursor: k1 })).status === 400 && (await agent(t2, "list", { folder: "/B", cursor: k3 })).status === 200, "a grant keeps its newest cursors only (2 here): the oldest is refused");
+  // and each for a while (2 ms here)
+  await ix(RD, { bounds: { cursorMs: 2, cursors: 32 } });
+  const old = (await agent(t2, "list", { folder: "/B" })).cursor;
+  await sleep(20);
+  ok((await agent(t2, "list", { folder: "/B", cursor: old })).status === 400 && typeof k2 === "string", "an old cursor is refused");
+  await ix(RD, { bounds: { examined: 20_000, cursorMs: 15 * 60_000 } });
   ws.close();
 });
 

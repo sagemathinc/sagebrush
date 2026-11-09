@@ -371,6 +371,10 @@ function deferredAt(s, op, page) {
   U.reduce(mem, trash);
   const r2 = deferredAt(s, trash, U.IX.jobPage);
   if (process.env.SHOW) console.log(`12,100 descendants: rename ${r1.steps} steps (${r1.most} visits at most), Trash ${r2.steps} steps (${r2.most} at most)`);
+  // (the shipped bounds, as literals: 25,000 visits a step and 500 rows a job's page, interim host bounds (LIMITS and
+  // PERF on #913); no step of either job took more)
+  ok(U.IX.visits === 25_000 && U.IX.jobPage === 500, `the shipped step bounds: ${U.IX.visits} visits, ${U.IX.jobPage} rows a page`);
+  ok(r1.most <= 25_000 && r2.most <= 25_000 && r1.steps >= 4 && r2.steps >= 4, `every step within 25,000 visits: rename ${r1.steps} steps (${r1.most} at most), Trash ${r2.steps} steps (${r2.most} at most)`);
   ok(setState(norm(memState(mem))) === setState(norm(sqlState(s))) && r2.result === "done" && r2.most <= U.IX.visits, `and its move to Trash: the reducer's index (${r2.steps} steps, ${r2.most} visits at most in one)`);
 }
 {
@@ -387,6 +391,35 @@ function deferredAt(s, op, page) {
     const r = deferred(s, op, 5);
     ok(setState(norm(memState(mem))) === setState(norm(sqlState(s))), `${n} descendants in pages of 5 (${n === 10 ? "exactly two" : "one past two"}): the reducer's index, in ${r.steps} steps`);
   }
+}
+
+// ---- the index's host bounds in the limits census (LIMITS on #913): each IX_*_MAX line a registered site, and the IX
+// object only their names; negative controls: a bound added or changed fails the census, and a literal in IX fails here
+{
+  const root = join(here, "..", "..");
+  const census = (patch) => {
+    const py = `import sys, json; sys.path.insert(0, 'test'); import limit_sites as L
+orig = L.read
+def read(p, rev=None):
+    t = orig(p, rev)
+    return (${patch}) if p == 'web/sync/entries.ts' else t
+L.read = read
+print(json.dumps(L.check()['problems']))`;
+    return JSON.parse(execFileSync("python3", ["-c", py], { cwd: root, encoding: "utf8" }));
+  };
+  const clean = census("t");
+  ok(Object.values(clean).every((v) => v.length === 0), "the census: web/sync/entries.ts's sites all registered: " + JSON.stringify(clean).slice(0, 200));
+  const added = census(`t + "\\nexport const IX_NEW_MAX = 3;\\n"`);
+  ok(added.unregistered.some((k) => k.includes("IX_NEW_MAX = 3")), "a bound added (IX_NEW_MAX) is an unregistered site: " + added.unregistered.length);
+  const changed = census(`t.replace("IX_VISITS_MAX = 25_000", "IX_VISITS_MAX = 30_000")`);
+  ok(changed.unregistered.some((k) => k.includes("IX_VISITS_MAX = 30_000")) && changed.stale.some((k) => k.includes("IX_VISITS_MAX = 25_000")), "a bound changed (25,000 visits to 30,000) is an unregistered site, its old line stale");
+  const src = readFileSync(join(here, "entries.ts"), "utf8");
+  const literals = (text) => {
+    const body = /export const IX = \{\n([\s\S]*?)\n\};/.exec(text)?.[1] ?? "";
+    return body.split("\n").filter((l) => !/^\s+\w+: IX_[A-Z_]+_MAX,$/.test(l));
+  };
+  ok(literals(src).length === 0 && Object.keys(U.IX).length >= 12, "IX names only IX_*_MAX bounds: " + JSON.stringify(literals(src)));
+  ok(literals(src.replace("  visits: IX_VISITS_MAX,", "  visits: IX_VISITS_MAX,\n  newcap: 5,")).length === 1, "(a literal added to IX is found)");
 }
 
 console.log(`${count - failures}/${count} passed`);
