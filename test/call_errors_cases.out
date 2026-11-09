@@ -59,3 +59,9 @@ A.ac 0x8000083
 top.<locals>.<lambda> 0x13
 top 0x3
 nodoc 0x3
+TypeError: fd() takes from 0 to 1 positional arguments but 2 were given
+TypeError: hk() takes 0 positional arguments but 1 positional argument (and 1 keyword-only argument) were given
+[2]
+TypeError: gd() missing 1 required positional argument: 'a'
+2
+TypeError: cd() missing 1 required positional argument: 'a'

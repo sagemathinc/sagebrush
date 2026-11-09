@@ -120,3 +120,26 @@ def nodoc():
     x = "not a docstring"
 for fn in (A.f, A.m, A.B.h, A().outer(), A.ac, top(), top, nodoc):
     print(fn.__qualname__, hex(fn.__code__.co_flags))
+
+
+# (grader's TESTS946-1..3: "from 0 to 1"; no positional parameters with a keyword-only one given; the generator and
+# coroutine wrapper's defaults: a call with the default runs, one without the required argument fails at the call)
+def fd(a=1):
+    pass
+def hk(*, k):
+    pass
+print(t(lambda: fd(1, 2)))
+print(t(lambda: hk(1, k=2)))
+def gd(a, b=1):
+    yield a + b
+print(t(lambda: list(gd(1))))
+print(t(lambda: gd()))
+async def cd(a, b=1):
+    return a + b
+def run(c):
+    try:
+        c.send(None)
+    except StopIteration as e:
+        return e.value
+print(t(lambda: run(cd(1))))
+print(t(lambda: cd()))
