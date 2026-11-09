@@ -16,15 +16,26 @@ import sys
 
 import _memguard
 
-from . import base, mem
+from . import base, mem, parse
 from .eval import Session
 from .expr import NULL, FAILED, Sym, size_of
 from .fmt import full_form, input_form
 from .parse import NotYetSyntax, Parser, SprigSyntaxError
 
 ABORTED = Sym("$Aborted")
-# (every name made while Sprig loads, its builtins' and constants', is now in the shared table; from here on a new name
-# goes in its session's own table, Sym's docstring)
+# (Sprig's own names, its builtins', attributes', constants' and messages', are interned while it loads, in the shared
+# table; from here on a new name goes in its session's own table, charged to it, Sym's docstring)
+# (and the heads Sprig itself writes: the parser's operators, the atoms' types, and the forms its builtins return)
+SYSTEM_NAMES = ("Integer", "Rational", "Real", "String", "Symbol", "Blank", "BlankSequence", "BlankNullSequence",
+                "Pattern", "Optional", "Slot", "SlotSequence", "Out", "Not", "PreIncrement", "PreDecrement", "Increment",
+                "Decrement", "Function", "Factorial", "Unset", "Derivative", "Part", "CompoundExpression", "Inequality",
+                "Condition", "Alternatives", "PatternTest", "Rule", "RuleDelayed", "ReplaceAll", "ReplaceRepeated", "Map",
+                "Apply", "Span", "AddTo", "SubtractFrom", "TimesBy", "DivideBy", "UpSet", "UpSetDelayed", "Dot",
+                "StringJoin", "DirectedInfinity", "ComplexInfinity", "Indeterminate", "Sequence", "General", "Syntax",
+                "Thread", "Infinity", "$Aborted", "$Failed", "Hold", "HoldForm", "FullForm", "InputForm", "List")
+for _name in set(base.BUILTINS) | set(base.ATTRIBUTES) | base.PROTECTED_SYMBOLS | {n for n, _ in base.MESSAGES} | \
+        set(SYSTEM_NAMES) | set(parse.FLAT.values()) | set(parse.SIMPLE.values()) | set(parse.RELATIONS.values()):
+    Sym(_name)
 Sym._frozen = True
 
 

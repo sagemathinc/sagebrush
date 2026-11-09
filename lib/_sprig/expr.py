@@ -30,6 +30,7 @@ class Sym:
     _frozen = False
     _local = None
     _loose = {}
+    _charge = None     # the active session's charge for a new name (Session.charge_name), called before it is made
 
     def __new__(cls, name):
         s = cls._table.get(name)
@@ -38,6 +39,9 @@ class Sym:
         t = cls._table if not cls._frozen else (cls._local if cls._local is not None else cls._loose)
         s = t.get(name)
         if s is None:
+            if t is cls._local and cls._charge is not None:
+                # (charged first: a refusal makes no symbol)
+                cls._charge(name)
             s = object.__new__(cls)
             s.name = name
             t[name] = s
@@ -104,6 +108,8 @@ def size_of(e):
         return e.size
     if t is str:
         return 1 + len(e) // 16
+    if t is Sym:
+        return 1 + len(e.name) // 16
     if t is int:
         return 1 + e.bit_length() // 128
     if t is Fraction:

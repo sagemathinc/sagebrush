@@ -49,6 +49,9 @@ class Session:
         self.own = {}                  # Sym -> (its value, the value's reservation): each published in one store (§8.2)
         self.symbols = {}              # the names this session made (Sym's session table)
         self.holds = []                # reservations a builtin holds across its yields, released at its end or Stop
+        self.names = []                # the reservations charging this session's names (symbols), in NAME_CHUNKs
+        self.name_bytes = 0            # their charge so far, and what is reserved for it
+        self.name_reserved = 0
         self.builtins = base.BUILTINS
         self.attributes = base.ATTRIBUTES
         self.texts = dict(base.MESSAGES)   # (symbol name, tag) -> text
@@ -85,15 +88,29 @@ class Session:
         self.holds.remove(r)
         r.release()
 
+    def charge_name(self, name):
+        """Charge a new name this session makes, before it is made, for as long as the session lives: the names are
+        reserved in NAME_CHUNKs (or a reservation of the name's own size, for a longer one)."""
+        n = mem.SYM_BYTES + mem.SYM_BYTES_PER_CHAR * len(name)
+        if self.name_bytes + n > self.name_reserved:
+            size = max(mem.NAME_CHUNK, n)
+            r = mem.reserve(size, "Names of %d characters" % len(name), "Symbol")
+            r.acquire()
+            self.names.append(r)
+            self.name_reserved += size
+        self.name_bytes += n
+
     def activate(self):
-        """Make this session's table the one new names go in; returns the previous one, for restore()."""
-        prev = Sym._local
+        """Make this session's table the one new names go in, charged to it; returns the previous state, for
+        restore()."""
+        prev = (Sym._local, Sym._charge)
         Sym._local = self.symbols
+        Sym._charge = self.charge_name
         return prev
 
     @staticmethod
     def restore(prev):
-        Sym._local = prev
+        Sym._local, Sym._charge = prev
 
     def close(self):
         """The session's end: every definition's reservation given back, and its names dropped."""
@@ -103,6 +120,10 @@ class Session:
         for r in self.holds:
             r.release()
         self.holds = []
+        for r in self.names:
+            r.release()
+        self.names = []
+        self.name_bytes = self.name_reserved = 0
         self.symbols = {}
 
     # ---------------------------------------------------------------- messages

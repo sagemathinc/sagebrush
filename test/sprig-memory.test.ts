@@ -71,9 +71,10 @@ def probe(name, need, run):
 # the parse: a program of n characters (a comment, so nothing is evaluated)
 src = "(* " + "x" * 300 + " *)"
 probe("parse", len(src) * mem.PARSE_BYTES_PER_CHAR, lambda err: _sprig.run(src, lambda t: None, err.append))
-# the continuation stack's first chunk (the parse of "f[1]" is held at the same time)
-p = len("f[1]") * mem.PARSE_BYTES_PER_CHAR
-probe("konts", p + _sprig.eval.KONT_CHUNK * mem.KONT_BYTES, lambda err: _sprig.run("f[1]", lambda t: None, err.append))
+# the continuation stack's first chunk (the parse of "Head[1]" is held at the same time; its names are all Sprig's own,
+# so none is charged to the session)
+p = len("Head[1]") * mem.PARSE_BYTES_PER_CHAR
+probe("konts", p + _sprig.eval.KONT_CHUNK * mem.KONT_BYTES, lambda err: _sprig.run("Head[1]", lambda t: None, err.append))
 # the printer's text, for a value of 2001 units
 big = Expr("List", *[Expr("f", i) for i in range(667)])
 probe("format", big.size * mem.FORMAT_BYTES_PER_NODE, lambda err: len(_sprig._formatted(big, _sprig.input_form)))
@@ -324,6 +325,126 @@ print(json.dumps({"bad": bad, "astra2": [_bits(a + b), result_bits("+", a, b)]})
 `);
   assert.deepEqual(got.bad, []);
   assert.ok(got.astra2[0] <= got.astra2[1], JSON.stringify(got.astra2));
+});
+
+// (ENGINE and SEC on #911 r3: with no memory figure, the fixed cap bounds everything open at once, at the shipped cap;
+// a session's names are charged while it lives, a long name by its length; and a symbol's size counts its name)
+test("§8.4, no memory figure: the fixed cap bounds the sum of what is open, at the shipped cap's boundary and +1", () => {
+  const got = py(`
+import json
+from _sprig import mem, eval as E
+from _sprig.eval import Session
+from _sprig.expr import Expr, Sym, size_of
+mem._allowance = lambda: (None, "no memory figure")
+CAP = mem.UNMEASURED_OPERATION_BYTES
+chunk = E.KONT_CHUNK * mem.KONT_BYTES
+r = {"cap": CAP}
+def try_(n):
+    try:
+        x = mem.reserve(n, "A test", "Test").acquire()
+        x.release()
+        return "ok"
+    except mem.SprigMemoryError as e:
+        return ["refused", e.fixed, e.unmeasured]
+held = mem.reserve(CAP - 1000, "A test", "Test").acquire()
+r["reservations"] = [try_(1000), try_(1001)]
+held.release()
+r["reservations"].append(mem.open_bytes())
+# a deep evaluation's chunks against what is already open: one chunk fits exactly, the second doesn't
+held = mem.reserve(CAP - chunk, "A test", "Test").acquire()
+s = Session(lambda t: None, lambda t: None)
+def deep(n):
+    e = Sym("x")
+    for _ in range(n):
+        e = Expr("f", e)
+    return e
+try:
+    s.evaluate(deep(10))
+    r["one"] = "ok"
+except mem.SprigMemoryError:
+    r["one"] = "refused"
+try:
+    s.evaluate(deep(E.KONT_CHUNK + 10))
+    r["two"] = "ok"
+except mem.SprigMemoryError:
+    r["two"] = "refused"
+held.release()
+r["after"] = mem.open_bytes()
+# retained definitions, each below the cap (a reduced cap, so the values stay small; two together are past
+# SMALL_BYTES, so the shortcut doesn't apply): two fit exactly, a third doesn't
+val = Expr("List", *range(2000))
+D = (size_of(val) + 1) * mem.NODE_BYTES
+for slack, key in ((0, "at"), (-1, "short")):
+    mem.UNMEASURED_OPERATION_BYTES = 2 * D + slack
+    s = Session(lambda t: None, lambda t: None)
+    res = []
+    for name in ("a", "b", "c"):
+        try:
+            s.define(Sym(name), val, "Set")
+            res.append("ok")
+        except mem.SprigMemoryError:
+            res.append("refused")
+    held2 = mem.open_bytes()
+    s.close()
+    r[key] = [res, held2 == 2 * D if key == "at" else held2 == D, mem.open_bytes()]
+print(json.dumps(r))
+`);
+  assert.equal(got.cap, 268435456);
+  assert.deepEqual(got.reservations, ["ok", ["refused", true, "no memory figure"], 0], "the shipped cap's boundary, and one byte past it");
+  assert.deepEqual([got.one, got.two, got.after], ["ok", "refused", 0], "the stack's second chunk is refused at the cap");
+  assert.deepEqual(got.at, [["ok", "ok", "refused"], true, 0]);
+  assert.deepEqual(got.short, [["ok", "refused", "refused"], true, 0]);
+});
+
+test("§8.4: a session's names are charged while it lives (a long one by its length), a refused name is never made, and Print sizes a symbol by its name", () => {
+  const got = py(`
+import json, _sprig
+from _sprig import mem, base
+from _sprig.eval import Session
+from _sprig.expr import Expr, Sym, size_of
+mem._allowance = lambda: (10**12, None)
+s = Session(lambda t: None, lambda t: None)
+prev = s.activate()
+names = ["n%d_%s" % (i, "q" * 500) for i in range(300)]
+for n in names:
+    Sym(n)
+want = sum(mem.SYM_BYTES + mem.SYM_BYTES_PER_CHAR * len(n) for n in names)
+r = {"charged": [s.name_bytes == want, mem.open_bytes() >= want]}
+# names left by a finished ToExpression stay charged
+before = s.name_bytes
+s.evaluate(Expr("ToExpression", "brandnew1 + brandnew2"))
+r["toexpression"] = s.name_bytes - before == 2 * mem.SYM_BYTES + mem.SYM_BYTES_PER_CHAR * 18
+# a refusal: enough is open that the figure is read, and it says nothing is left
+full = mem.reserve(mem.SMALL_BYTES, "A test", "Test").acquire()
+mem._allowance = lambda: (0, None)
+try:
+    Sym("never_made_" + "z" * (mem.NAME_CHUNK))
+    r["refused"] = "made"
+except mem.SprigMemoryError:
+    r["refused"] = ["refused", ("never_made_" + "z" * mem.NAME_CHUNK) in s.symbols]
+full.release()
+mem._allowance = lambda: (10**12, None)
+s.close()
+Session.restore(prev)
+r["after"] = mem.open_bytes()
+long = Sym("w" * 1028)
+r["width"] = [size_of(long) >= 1028 // 16, base.format_bytes((long,)) >= 1028]
+print(json.dumps(r))
+`);
+  assert.deepEqual(got, { charged: [true, true], toexpression: true, refused: ["refused", false], after: 0, width: [true, true] });
+});
+
+test("every head Sprig writes itself is one of its own names, shared and never charged to a session", () => {
+  const got = py(`
+import json, os, re, _sprig
+from _sprig.expr import Sym
+d = os.path.dirname(_sprig.__file__)
+src = "".join(re.sub(r'"""[\\s\\S]*?"""', "", open(os.path.join(d, f)).read()) for f in os.listdir(d) if f.endswith(".py"))
+names = set(re.findall(r'(?:Expr|Sym)\\("([A-Za-z$\\x60]+)"', src))
+print(json.dumps({"names": len(names), "missing": sorted(n for n in names if n not in Sym._table)}))
+`);
+  assert.ok(got.names > 20, `the scan finds the heads (${got.names})`);
+  assert.deepEqual(got.missing, []);
 });
 
 test("§8.4: a refusal through the CLI is General::memory with Sagebrush's figures, and the session answers", () => {

@@ -21,7 +21,7 @@ import _memguard
 # the host's memory (reading it costs more than the allocation); past it, every reservation is checked against the
 # live figure, so many small reservations held at once (a deep continuation stack's chunks) are checked as their sum
 SMALL_BYTES = 1 << 20
-# the cap per operation where the host's memory can't be observed (no capacity figure)
+# the cap on everything open at once where the host's memory can't be observed (no capacity figure)
 UNMEASURED_OPERATION_BYTES = 1 << 28
 
 # The host's bytes per unit, for reservations, measured on the CLI's engine (Node 24.21.0) as the peak resident growth
@@ -34,6 +34,12 @@ NODE_BYTES = 352
 KONT_BYTES = 224
 # the printers' pieces and text, per unit of the printed expression's size (Expr.size: 281 B)
 FORMAT_BYTES_PER_NODE = 288
+# a symbol a session makes, and per character of its name (10^6 names of 8 characters: 232 B each; 2 * 10^5 of 1,000:
+# 1,675 B each)
+SYM_BYTES = 240
+SYM_BYTES_PER_CHAR = 2
+# the session's names are charged in reservations of this many bytes
+NAME_CHUNK = 64 << 10
 # an exact integer's computation, per bit of its result (3^(10^7), 15.9 Mbit: 41 MB, 2.6 B per bit; 3^(10^8): 1.04)
 INT_BYTES_PER_BIT = 3
 
@@ -77,8 +83,11 @@ class Reservation:
         if _open[0] + need > SMALL_BYTES:
             avail, unmeasured = _allowance()
             if unmeasured is not None:
-                if need > UNMEASURED_OPERATION_BYTES:
-                    raise _refusal(_memguard.memory_guard(self.what, need, UNMEASURED_OPERATION_BYTES, "one operation",
+                # (with no figure, the fixed cap bounds everything open at once, this reservation included: retained
+                # definitions and a deep stack's chunks are each below it, together they aren't)
+                if _open[0] + need > UNMEASURED_OPERATION_BYTES:
+                    left = max(0, UNMEASURED_OPERATION_BYTES - _open[0])
+                    raise _refusal(_memguard.memory_guard(self.what, need, left, "one operation",
                                                           fixed=True, unmeasured=unmeasured), self.name)
             elif need > avail:
                 raise _refusal(_memguard.memory_guard(self.what, need, avail, "one operation"), self.name)
