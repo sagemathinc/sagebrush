@@ -122,11 +122,14 @@ async function nbformatWrites() {
   const r2 = await ag.read(e.path);
   await ag.write(e.path, { cells: [{ id: "p1", code: "2" }], mode: "python" }, { base: r2.rev });
   check((await ag.read(e.path)).content.mode === "python", "a write that names its mode: that mode (Sagebrush's own, as before)");
-  // (a heading level not 1 to 6: refused as invalid, nothing made or written (astra's NBF928-1))
-  const badHead = { cells: [{ cell_type: "heading", source: "T", level: 1e9 }] };
-  const r3 = await ag.read(e.path);
-  check(await fails(ag.create("/sim/bad.ipynb", { content: badHead }), "invalid") && !(await ag.stat("/sim/bad.ipynb")) && await fails(ag.write(e.path, badHead, { base: r3.rev }), "invalid") && (await ag.read(e.path)).rev === r3.rev,
-    "a heading level of 1e9: create and write refused as invalid, nothing made or written");
+  // (a heading level not 1 to 6: refused as invalid (a WorkspaceError, not a raw error), nothing made or written
+  // (astra's NBF928-1); 7 as well as 1e9, whose repeat would throw by itself)
+  for (const level of [7, 1e9]) {
+    const badHead = { cells: [{ cell_type: "heading", source: "T", level }] };
+    const r3 = await ag.read(e.path);
+    check((await fails(ag.create("/sim/bad.ipynb", { content: badHead }), "invalid")) === true && !(await ag.stat("/sim/bad.ipynb")) && (await fails(ag.write(e.path, badHead, { base: r3.rev }), "invalid")) === true && (await ag.read(e.path)).rev === r3.rev,
+      `a heading level of ${level}: create and write refused as invalid, nothing made or written`);
+  }
   const own = { cells: [{ id: "a1", code: "x = 1", outputs: [] }, { id: "a2", type: "markdown", code: "hi" }] };
   const e2 = await ag.create("/own.ipynb", { content: own });
   const c3 = (await ag.read(e2.path)).content;
