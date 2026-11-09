@@ -500,18 +500,22 @@ try {
   await evaluate(`document.querySelector(".sb-term-stop").click()`);
   await until(`!document.querySelector(".sb-term").classList.contains("running")`, 10000);
   check(note.shown && note.live === "polite" && note.described && (await evaluate(`document.querySelector(".sb-term-note").hidden`)) === true, `TP-6: the note is polite and describes the input, and is gone after the run: ${JSON.stringify(note)}`);
-  // (TP-8: the grip: focusable, its value, Up/Down within 120 px and 80% of the window, remembered for the session)
+  // (TP-8: the grip: focusable, its value, Up/Down within 120 px and 80% of the window, remembered on this device)
   const g0 = await evaluate(`(() => { const g = document.querySelector(".sb-term-grip"); return { tab: g.tabIndex, now: +g.getAttribute("aria-valuenow"), min: +g.getAttribute("aria-valuemin"), max: +g.getAttribute("aria-valuemax"), h: Math.round(document.querySelector(".sb-term").getBoundingClientRect().height) }; })()`);
   const gkey = (k, shift = false) => evaluate(`document.querySelector(".sb-term-grip").dispatchEvent(new KeyboardEvent("keydown", { key: "${k}", shiftKey: ${shift}, bubbles: true, cancelable: true }))`);
   await gkey("ArrowUp");
   const g1 = await evaluate(`+document.querySelector(".sb-term-grip").getAttribute("aria-valuenow")`);
   for (let i = 0; i < 40; i++) await gkey("ArrowUp", true);
-  const gMax = await evaluate(`({ now: +document.querySelector(".sb-term-grip").getAttribute("aria-valuenow"), h: Math.round(document.querySelector(".sb-term").getBoundingClientRect().height), ih: innerHeight, kept: +sessionStorage.getItem("sb-term-h") })`);
+  const gMax = await evaluate(`({ now: +document.querySelector(".sb-term-grip").getAttribute("aria-valuenow"), h: Math.round(document.querySelector(".sb-term").getBoundingClientRect().height), ih: innerHeight, kept: +localStorage.getItem("sb-term-h") })`);
   for (let i = 0; i < 60; i++) await gkey("ArrowDown", true);
   const gMin = await evaluate(`+document.querySelector(".sb-term-grip").getAttribute("aria-valuenow")`);
   check(g0.tab === 0 && g0.min === 120 && g0.now === g0.h && g1 === g0.now + 24 && gMax.now === Math.round(gMax.ih * 0.8) && gMax.h === gMax.now && gMax.kept === gMax.now && gMin === 120,
     `TP-8: the grip resizes from the keyboard within 120 px and 80%, and is remembered: ${JSON.stringify({ g0, g1, gMax, gMin })}`);
   await gkey("ArrowUp", true);
+  // (a double-click puts the default height back and forgets the remembered one, as every panel's edge does)
+  await evaluate(`document.querySelector(".sb-term-grip").dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true }))`);
+  const gReset = await evaluate(`({ now: +document.querySelector(".sb-term-grip").getAttribute("aria-valuenow"), kept: localStorage.getItem("sb-term-h") })`);
+  check(gReset.now === 280 && gReset.kept === null, `TP-8: a double-click on the grip puts 280 px back and forgets the height: ${JSON.stringify(gReset)}`);
   // (TP-9: the history: 500 at most, oldest dropped; a command repeated at once kept once)
   const hist = await evaluate(`(() => { const h = ${T}.editor.history; for (let i = 0; i < 520; i++) h.push("h" + i); h.push("same"); h.push("same");
     return { len: h.entries.length, first: h.entries[0], last2: h.entries.slice(-2) }; })()`);
