@@ -668,6 +668,20 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/sprig.pre": {
+   "exact": false,
+   "ceiling": 406118,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/sprig.src": {
+   "exact": false,
+   "ceiling": 86857,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/tzdata": {
    "exact": false,
    "ceiling": 282962,
@@ -712,7 +726,7 @@
   },
   "engine/sagebrush-notebook.js": {
    "exact": false,
-   "ceiling": 239798,
+   "ceiling": 239874,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -740,7 +754,7 @@
   },
   "engine/sagebrush-worker.js": {
    "exact": false,
-   "ceiling": 1665864,
+   "ceiling": 1666364,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -875,6 +889,8 @@
    "engine/lib/sage.src": 2888811,
    "engine/lib/sci.pre": 2029167,
    "engine/lib/sci.src": 399276,
+   "engine/lib/sprig.pre": 369198,
+   "engine/lib/sprig.src": 78961,
    "engine/lib/tzdata": 257239,
    "engine/runner/index.html": 8924,
    "engine/sagebrush-analyze.js": 357310,
