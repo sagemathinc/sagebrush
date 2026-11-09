@@ -269,7 +269,7 @@ test("§8.1: no bare except, no except BaseException or Exception in lib/_sprig,
     assert.doesNotMatch(text, /^\s*except\s*:/m, `${f}: a bare except`);
     assert.doesNotMatch(text, /^\s*except\s*\(?[^)\n]*\b(BaseException|Exception|KeyboardInterrupt|SystemExit|MemoryError)\b/m, `${f}: except of a broad class, Stop or exit`);
     for (const m of text.matchAll(/^\s*except\s+([^:]+):/gm))
-      assert.match(m[1].trim(), /^(StopIteration|parse\.SprigSyntaxError|parse\.NotYetSyntax|SprigSyntaxError|NotYetSyntax|_memguard\.SagebrushMemoryError)(\s+as\s+\w+)?$/, `${f}: catches ${m[1]}`);
+      assert.match(m[1].trim(), /^(StopIteration|parse\.SprigSyntaxError|parse\.NotYetSyntax|SprigSyntaxError|NotYetSyntax|_memguard\.SagebrushMemoryError|_BeyondMachine)(\s+as\s+\w+)?$/, `${f}: catches ${m[1]}`);
   }
 });
 
@@ -396,6 +396,7 @@ print(json.dumps(r))
 test("§8.4: each mechanism reserves its peak first: admitted at the boundary, refused one byte past it, as General::memory", () => {
   const got = py(`
 import json, _sprig
+from fractions import Fraction
 from _sprig import mem
 from _sprig.eval import Session
 from _sprig.parse import parse
@@ -433,6 +434,14 @@ def power(err):
     return _sprig.input_form(s.evaluate(Expr("Power", 3, 10**6)))[:4]
 probe("power", chunk + mem.int_bytes((3).bit_length() * 10**6), power)
 probe("range", chunk + 1000 * mem.NODE_BYTES, lambda err: len(s.evaluate(Expr("Range", 1000)).args))
+# an exact literal's power of ten, reserved before it is computed (the parse of its program held at the same time)
+lit = "1*^20000"
+bits = 1 + 20000 * 10 // 3 + 1
+probe("literal", len(lit) * mem.PARSE_BYTES_PER_CHAR + mem.int_bytes(bits), lambda err: _sprig.run(lit, lambda t: None, err.append))
+# a large exact sum, and the root search's trial powers
+big = 2 ** 9000
+probe("sum", chunk + mem.int_bytes(9002), lambda err: _sprig.input_form(s.evaluate(Expr("Plus", big, big)))[:3])
+probe("root", chunk + mem.int_bytes(2 * (big + 1).bit_length()), lambda err: _sprig.input_form(s.evaluate(Expr("Power", big + 1, Fraction(1, 2))))[:3])
 # a Listable call threaded over lists
 probe("thread", chunk + 3 * 2 * mem.NODE_BYTES, lambda err: _sprig.input_form(s.evaluate(Expr("Plus", Expr("List", 1, 2, 3), 1))))
 print(json.dumps(out))
@@ -451,9 +460,38 @@ test("§8.4: a refusal through the CLI is General::memory with Sagebrush's figur
     const r = sprig("a = 7;\nRange[10^15]\n2^(10^15)\na + 1", dir);
     assert.equal(r.stdout, "$Aborted\n$Aborted\n8\n");
     const lines = r.stderr.split("\n");
-    assert.match(lines[0], /^Range::memory: Range needs more memory than this session allows: A list of 1000000000000000 numbers needs about \d+(\.\d+)? [kMGTP]B, but Sagebrush allows about .+\.$/);
-    assert.ok(lines.some((l) => /^Power::memory: Power needs more memory than this session allows: An exact number of \d+ bits needs about /.test(l)), r.stderr);
+    assert.match(lines[0], /^Range::memory: Range needs more memory than this session allows: a list of 1000000000000000 numbers needs about \d+(\.\d+)? [kMGTP]B, but Sagebrush allows about .+\.$/);
+    assert.ok(lines.some((l) => /^Power::memory: Power needs more memory than this session allows: an exact number of \d+ bits needs about /.test(l)), r.stderr);
     assert.doesNotMatch(r.stderr, HOST_DETAIL);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// (ENGINE's E2 on #911: a machine Real past the machine range needs arbitrary precision, S2's: it is General::notyet,
+// never a host error, Infinity or a silent 0; in a literal the program stops there, as at a syntax error, and through
+// ToExpression the session goes on; in arithmetic the call stays unevaluated)
+test("a machine Real past the machine range is General::notyet, at parse time and in arithmetic, and the session answers", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sprig-machine-"));
+  try {
+    const NOTYET = "isn't available in Sprig yet.";
+    const p = sprig("a = 1;\nPrint[a]\n1.*^1000000\nPrint[\"after\"]", dir);
+    assert.equal(p.status, 1);
+    assert.equal(p.stdout, "1\n", "the statements before it ran, none after");
+    assert.equal(p.stderr, `General::notyet: A real number beyond the machine range ${NOTYET}\n`);
+    for (const lit of ["1.*^309", "1.*^-400", "1.*^99999999999"]) {
+      const t = sprig(`ToExpression["${lit}"]\n1 + 1`, dir);
+      assert.equal(t.stdout, "$Failed\n2\n", lit);
+      assert.equal(t.stderr, `ToExpression::notyet: A real number beyond the machine range ${NOTYET}\n`, lit);
+    }
+    const e = sprig("2.^1024\n2.^-1080\n1.5 + 10^400\n(1.*^300) (1.*^300)\n2.^1023\n1.5 + 10^400 - 10^400\n1 + 1", dir);
+    assert.equal(e.status, 0);
+    const out = e.stdout.split("\n");
+    assert.deepEqual([out[0], out[1], out[3], out[4], out[5], out[6]], ["2.^1024", "1/2.^1080", "1.*^300*1.*^300", "8.98846567431158*^307", "1.5", "2"]);
+    assert.equal(out[2], "1.5 + 1" + "0".repeat(400));
+    assert.deepEqual(e.stderr.split("\n").filter(Boolean).map((l) => l.split(":")[0]), ["Power", "Power", "Plus", "Times"].map((f) => f + ""));
+    assert.ok(e.stderr.split("\n").filter(Boolean).every((l) => l.endsWith(`::notyet: A real number beyond the machine range ${NOTYET}`)), e.stderr);
+    assert.doesNotMatch(e.stderr + p.stderr, HOST_DETAIL);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

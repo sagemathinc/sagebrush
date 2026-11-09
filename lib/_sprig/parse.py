@@ -16,6 +16,7 @@ expression) and the text before and after the error.
 import re
 import fractions
 
+from . import mem
 from .expr import Expr, Sym, NULL, LIST, num, name_of
 
 Fraction = fractions.Fraction
@@ -156,16 +157,38 @@ def _pattern(v):
     return Expr("Optional", p) if h == "." else p
 
 
+BEYOND_MACHINE = "A real number beyond the machine range"
+# (the machine range, exactly: the largest finite double and the smallest normal one)
+MACHINE_MAX = fractions.Fraction(1.7976931348623157e308)
+MACHINE_TINY = fractions.Fraction(2.2250738585072014e-308)
+
+
 def _number(v, pos):
     mant, _, ex = v.partition("*^")
     mant, mark, prec = mant.partition("`")
     if mark and prec:
         raise NotYetSyntax("A number with a stated precision", pos)
     if "." in mant or mark:
-        return float(mant) * (10.0 ** int(ex) if ex else 1.0)
+        # (a machine Real; past the machine range it would need arbitrary precision, S2's)
+        x = float(mant)
+        if ex and x != 0:
+            e = int(ex)
+            if len(ex) > 6 or not -400 < e < 400:
+                raise NotYetSyntax(BEYOND_MACHINE, pos)
+            exact = fractions.Fraction(mant) * fractions.Fraction(10) ** e
+            if not MACHINE_TINY <= abs(exact) <= MACHINE_MAX:
+                raise NotYetSyntax(BEYOND_MACHINE, pos)
+            x = float(exact)
+        if x in (float("inf"), float("-inf")):
+            raise NotYetSyntax(BEYOND_MACHINE, pos)
+        return x
     n = int(mant)
     if ex:
-        return num(n * Fraction(10) ** int(ex))
+        # (an exact power of ten: its size is reserved before it is computed, so 1*^1000000000 is a refusal)
+        e = int(ex)
+        bits = n.bit_length() + abs(e) * 10 // 3 + 1
+        with mem.reserve(mem.int_bytes(bits), "An exact number of %d bits" % bits, "Sprig"):
+            return num(n * Fraction(10) ** e)
     return n
 
 

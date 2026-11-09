@@ -10,6 +10,7 @@ The functions that would reach files, the network or other programs are
 refused before any argument is evaluated, with Sprig's message (§5.6, §9).
 """
 
+import math
 import re
 import fractions
 
@@ -60,6 +61,59 @@ def _bits(x):
     return 64
 
 
+# (an exact result past this many bits is reserved before it is computed; below it, the allocation is smaller than
+# one continuation chunk)
+RESERVE_BITS = 4096
+MACHINE_MAX = 1.7976931348623157e308
+MACHINE_TINY = 2.2250738585072014e-308
+BEYOND_MACHINE = "A real number beyond the machine range"
+
+
+class _BeyondMachine(Exception):
+    """A machine Real result past the machine range (arbitrary precision is S2's): the call stays unevaluated."""
+
+
+def _to_machine(v):
+    """v as a machine Real, or _BeyondMachine when it is outside the machine range."""
+    if type(v) is float:
+        return v
+    if v == 0:
+        return 0.0
+    if not MACHINE_TINY <= abs(v) <= MACHINE_MAX:
+        raise _BeyondMachine()
+    return float(v)
+
+
+def _finite(x, nonzero):
+    """x, a machine Real result, unless it overflowed, or underflowed to 0 from nonzero operands."""
+    if x != x or x in (float("inf"), float("-inf")) or (nonzero and x == 0):
+        raise _BeyondMachine()
+    return x
+
+
+def _arith(op, a, b, name):
+    """a + b or a * b: exactly, reserving a large result first; or as machine Reals, inside the machine range."""
+    if type(a) is not float and type(b) is not float:
+        bits = (max(_bits(a), _bits(b)) + 1) if op == "+" else _bits(a) + _bits(b)
+        if bits > RESERVE_BITS:
+            return _with_int_reservation(bits, name, lambda: a + b if op == "+" else a * b)
+        return a + b if op == "+" else a * b
+    x, y = _to_machine(a), _to_machine(b)
+    if op == "+":
+        return _finite(x + y, False)
+    return _finite(x * y, x != 0 and y != 0)
+
+
+def _machine_power(b, ex):
+    """b^ex for machine Reals b > 0 (or b < 0 with an integer ex), inside the machine range."""
+    if b == 0:
+        return 0.0 if ex > 0 else None
+    lg = ex * math.log2(abs(b))
+    if lg > 1023.999999 or lg < -1074:
+        raise _BeyondMachine()
+    return _finite(b ** ex, True)
+
+
 def _with_int_reservation(bits, name, f):
     """f(), with an exact result of about `bits` bits reserved first."""
     with mem.reserve(mem.int_bytes(bits), "An exact number of %d bits" % bits, name):
@@ -82,19 +136,34 @@ def _plus(sess, e):
     has_number = False
     terms = {}
     order = []
+    reals = []
     for x in args:
         if is_number(x):
-            total = total + x
+            # (exact numbers are summed exactly first, then with the machine Reals: 1.5 + 10^400 - 10^400 is 1.5)
+            if type(x) is float:
+                reals.append(x)
+            else:
+                total = _arith("+", total, x, "Plus")
             has_number = True
             continue
         t, c = _coeff_term(x)
         if c is None:
             c = 1
         if t in terms:
-            terms[t] = terms[t] + c
+            try:
+                terms[t] = _arith("+", terms[t], c, "Plus")
+            except _BeyondMachine:
+                sess.message("Plus", "notyet", BEYOND_MACHINE)
+                return None
         else:
             terms[t] = c
             order.append(t)
+    try:
+        for x in reals:
+            total = _arith("+", total, x, "Plus")
+    except _BeyondMachine:
+        sess.message("Plus", "notyet", BEYOND_MACHINE)
+        return None
     items = []
     if has_number and (total != 0 or type(total) is float and not order):
         items.append(num(total))
@@ -131,17 +200,21 @@ def _times(sess, e):
     if any(x is INDETERMINATE for x in args):
         return INDETERMINATE
     coeff = 1
-    bits = 0
     rest = []
+    reals = []
     for x in args:
-        if is_number(x):
-            bits += _bits(x)
-            if bits > 1 << 20:
-                coeff = _with_int_reservation(bits, "Times", lambda: coeff * x)
-            else:
-                coeff = coeff * x
+        if type(x) is float:
+            reals.append(x)
+        elif is_number(x):
+            coeff = _arith("*", coeff, x, "Times")
         else:
             rest.append(x)
+    try:
+        for x in reals:
+            coeff = _arith("*", coeff, x, "Times")
+    except _BeyondMachine:
+        sess.message("Times", "notyet", BEYOND_MACHINE)
+        return None
     infs = [x for x in rest if _is_cinf(x)]
     if infs:
         if coeff == 0:
@@ -156,7 +229,14 @@ def _times(sess, e):
         b, ex = _power_parts(x)
         if b in bases:
             prev = bases[b]
-            bases[b] = prev + ex if is_number(prev) and is_number(ex) else Expr(PLUS, prev, ex)
+            if is_number(prev) and is_number(ex):
+                try:
+                    bases[b] = _arith("+", prev, ex, "Times")
+                except _BeyondMachine:
+                    sess.message("Times", "notyet", BEYOND_MACHINE)
+                    return None
+            else:
+                bases[b] = Expr(PLUS, prev, ex)
         else:
             bases[b] = ex
             order.append(b)
@@ -197,7 +277,15 @@ def _iroot(n, q):
 
 
 def _exact_root(b, p, q):
-    """b^(p/q) for an exact b > 0 when b's q-th root is exact, else None."""
+    """b^(p/q) for an exact b > 0 when b's q-th root is exact, else None.  The search's trial powers are at most
+    twice b's size, reserved first; a q past b's bit length can have no root but 1."""
+    if q > _bits(b):
+        return Expr(POWER, 1, p) if b == 1 else None
+    with mem.reserve(mem.int_bytes(2 * _bits(b)), "An exact number of %d bits" % (2 * _bits(b)), "Power"):
+        return _exact_root_now(b, p, q)
+
+
+def _exact_root_now(b, p, q):
     if type(b) is int:
         r = _iroot(b, q)
         return None if r is None else Expr(POWER, r, p)
@@ -223,7 +311,11 @@ def _power(sess, e):
     if b == 1 and type(b) is int:
         return 1
     if is_number(b) and is_number(ex):
-        return _numeric_power(sess, b, ex)
+        try:
+            return _numeric_power(sess, b, ex)
+        except _BeyondMachine:
+            sess.message("Power", "notyet", BEYOND_MACHINE)
+            return None
     if type(b) is Expr and b.head is POWER and len(b.args) == 2 and type(ex) is int:
         inner = b.args[1]
         if is_number(inner):
@@ -240,13 +332,13 @@ def _numeric_power(sess, b, ex):
             sess.message("Power", "infy", "1 / 0" if ex == -1 else "1 / 0^%d" % -ex)
             return COMPLEX_INFINITY
         if type(b) is float:
-            return b ** ex
+            return _machine_power(b, ex)
         bits = _bits(b) * abs(ex)
         r = _with_int_reservation(bits, "Power", lambda: Fraction(b) ** ex)
         return num(r)
     if type(ex) is Fraction:
         if type(b) is float:
-            return b ** float(ex) if b >= 0 else None
+            return _machine_power(b, float(ex)) if b >= 0 else None
         if b == 0:
             if ex < 0:
                 sess.message("Power", "infy", "1 / 0^%s" % input_form(-ex))
@@ -259,9 +351,7 @@ def _numeric_power(sess, b, ex):
     # a Real exponent
     if b < 0:
         return None
-    if b == 0:
-        return 0.0 if ex > 0 else None
-    return float(b) ** ex
+    return _machine_power(_to_machine(b), ex)
 
 
 def _sqrt(sess, e):

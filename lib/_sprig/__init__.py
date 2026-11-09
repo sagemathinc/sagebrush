@@ -29,6 +29,8 @@ def _memory_message(sess, e):
     """General::memory (design §5.6): the function's name, and Sagebrush's figures and routes."""
     lines = str(e).split("\n")
     detail = lines[1].rstrip(".") if len(lines) > 1 else str(e)
+    # (one sentence: "Range needs more memory than this session allows: a list of ... needs about ...")
+    detail = detail[:1].lower() + detail[1:]
     name = e.sprig_name if isinstance(e, mem.SprigMemoryError) else "Evaluation"
     sess.message(name, "memory", name, detail)
     for line in lines[2:]:
