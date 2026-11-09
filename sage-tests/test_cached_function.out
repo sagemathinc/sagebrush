@@ -1,0 +1,50 @@
+f(2) -> 2
+f(2) again -> 2
+calls -> [(2, 1)]
+f(2, 1) -> 2
+f(2, k=1) -> 2
+f(int(2)) -> 2
+calls -> [(2, 1)]
+f(3, k=2) -> 9
+calls -> [(2, 1), (3, 2)]
+type(f) -> 'CachedFunction'
+f.cache -> [(((2, 1), ()), 2), (((3, 2), ()), 9)]
+f.is_in_cache(2) -> True
+f.is_in_cache(5) -> False
+f.clear_cache() -> None
+f.cache after -> {}
+f.__name__ -> 'f'
+f.precompute([4,5]) -> None
+f.cache -> [(((4, 1), ()), 4), (((5, 1), ()), 5)]
+f([1,2]) unhashable -> TypeError: unhashable type: 'list'
+repr(f) -> 'Cached version of <function f at 0x...>'
+g(), g() -> (7, 7, 1)
+a.m(), a.m(), a.n -> (10, 10, 1)
+b.m(), b.n -> (12, 1)
+a.h(1), a.h(1), a.h(2), a.n -> (6, 6, 7, 3)
+a.m.clear_cache(); a.m(); a.n -> (None, 10, 4)
+a.h.cache -> [(((1,), ()), 6), (((2,), ()), 7)]
+a.h.is_in_cache(1) -> True
+type(a.m) -> 'CachedMethodCallerNoArgs'
+A.m -> 'CachedMethodCallerNoArgs'
+cached_function(key=...) -> (2, 2)
+precompute tuples -> (None, [(((4, 2), ()), 16), (((5, 1), ()), 5)])
+set_cache -> (None, 99, [(((2, 1), ()), 99)])
+f.get_key(2) -> ((2, 1), ())
+f.get_key(2, k=3) -> ((2, 3), ())
+v(1,2,a=3) -> ((1, 2), [('a', 3)])
+v.cache -> [((1, 2), (('a', 3),))]
+f(k=2) missing -> KeyError: 'n'
+f.f -> 'f'
+str(f) -> 'Cached version of <function f at 0x...'
+f == f -> True
+callable -> True
+repr(A().m) -> 'Cached version of <function A.m at 0x...>'
+repr(A().h) -> 'Cached version of <function A.h at 0x...>'
+type(A().h) -> 'CachedMethodCaller'
+type(A.h) -> 'CachedMethodCaller'
+a.m.cache -> (3, 3)
+a.m.is_in_cache() -> True
+a.h.precompute([1,2]); cache -> (None, [(((1,), ()), 1), (((2,), ()), 2)])
+a.m.__name__ -> 'm'
+slots class m() -> 1
