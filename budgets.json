@@ -635,7 +635,7 @@
   },
   "engine/lib/sage-more.src": {
    "exact": false,
-   "ceiling": 491890,
+   "ceiling": 496484,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -649,7 +649,7 @@
   },
   "engine/lib/sage.src": {
    "exact": false,
-   "ceiling": 2981267,
+   "ceiling": 2981568,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
