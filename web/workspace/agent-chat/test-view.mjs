@@ -75,6 +75,20 @@ check(u.className === "user other", "a kept message with a hostile mode: class o
   const kph = turnNode({ ...newThread("w", "w"), entries: [keptP] }, keptP, hooks).innerHTML;
   check((kph.match(/<details class="tool/g) ?? []).length === 1 && !/data-attention=/.test(kph), "a kept turn: its own __proto__ tool drawn; an inherited toString or constructor never", kph.slice(0, 300));
 }
+// (a running turn kept across a reload (JSON: ordinary objects) whose events go on: __proto__ is still an own entry,
+//  never the record's prototype)
+{
+  const r = newThread("r", "R");
+  let n = 0;
+  const re = (th, e) => apply(th, { seq: ++n, turn_id: "y1", ...e }, 1000);
+  re(r, { type: "turn_started" });
+  const back = JSON.parse(JSON.stringify(r));
+  re(back, { type: "tool_call_started", call: "__proto__", tool: "terminal", name: "sh", summary: "s" });
+  re(back, { type: "attention", id: "__proto__", kind: "approval", state: "open", title: "Q" });
+  const bt = back.entries.find((e) => e.kind === "turn");
+  check(Object.getPrototypeOf(bt.tools) === Object.prototype && Object.getPrototypeOf(bt.attention) === Object.prototype && Object.hasOwn(bt.tools, "__proto__") && Object.hasOwn(bt.attention, "__proto__"),
+    "a turn kept across a reload, its events going on: __proto__ is an own entry, the records' prototypes unchanged", { tools: Object.keys(bt.tools), att: Object.keys(bt.attention) });
+}
 // ---- usage and durations: finite, not negative, numbers (daybreak3's E932-2), as applied and again where drawn
 {
   const q = newThread("q", "Q");
