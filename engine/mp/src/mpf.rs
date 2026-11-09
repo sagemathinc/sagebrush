@@ -405,9 +405,9 @@ pub fn mpf_sqrt(s: &Mpf, prec: u64, rnd: Rnd) -> Result<Mpf, Fail> {
     let mut shift = (2 * prec as i64 - bc + 4).max(4);
     shift += shift & 1;
     let root = if matches!(rnd, Rnd::Floor | Rnd::Down) {
-        man.shl(shift as u64)?.sqrtrem()?.0
+        crate::intmath::sqrtrem_python(&man.shl(shift as u64)?)?.0
     } else {
-        let (r, rem) = man.shl(shift as u64)?.sqrtrem()?;
+        let (r, rem) = crate::intmath::sqrtrem_python(&man.shl(shift as u64)?)?;
         if !rem.is_zero() {
             shift += 2;
             r.shl(1)?.add_u64(1)?

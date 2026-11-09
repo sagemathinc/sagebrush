@@ -329,6 +329,53 @@ impl Nat {
     }
 }
 
+impl Nat {
+    /// float(self): CPython's int-to-float conversion, rounded to nearest
+    /// with ties to even (infinity past the double range; the callers stay
+    /// far below it).
+    pub fn to_f64(&self) -> f64 {
+        let bits = self.bits();
+        if bits <= 53 {
+            return self.to_u64().map_or(0.0, |x| x as f64);
+        }
+        if bits > 1024 {
+            return f64::INFINITY;
+        }
+        // the top 54 bits, and whether any bit below them is set
+        let shift = bits - 54;
+        let top = self.shr(shift).ok().and_then(|t| t.to_u64()).unwrap_or(0);
+        let sticky = self.low_nonzero(shift);
+        let mut m = top >> 1;
+        let half = top & 1 == 1;
+        if half && (sticky || m & 1 == 1) {
+            m += 1;
+        }
+        // m < 2^54 now; m * 2^(shift + 1) exactly
+        let e = (shift + 1) as i32;
+        if e >= 1024 {
+            return f64::INFINITY;
+        }
+        (m as f64) * 2f64.powi(e)
+    }
+
+    /// int(x) for a finite x >= 0: its integer part.
+    pub fn from_f64_trunc(x: f64) -> Result<Nat, Fail> {
+        let x = x.trunc();
+        if x < 1.0 {
+            return Ok(Nat::zero());
+        }
+        let b = x.to_bits();
+        let e = ((b >> 52) & 0x7ff) as i64 - 1075;
+        let m = (b & ((1u64 << 52) - 1)) | (1u64 << 52);
+        let n = Nat::from_u64(m);
+        if e >= 0 {
+            n.shl(e as u64)
+        } else {
+            n.shr((-e) as u64)
+        }
+    }
+}
+
 /// out (zeroed, a.len() + b.len() limbs) = a * b.
 fn mul_into(a: &[u64], b: &[u64], out: &mut [u64]) -> Result<(), Fail> {
     if a.len() >= KARATSUBA && b.len() >= KARATSUBA {
