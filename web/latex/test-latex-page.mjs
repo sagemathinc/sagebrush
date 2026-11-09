@@ -3039,6 +3039,22 @@ $P = \sage{g[0]}$
       const gone = await ev(`!document.getElementById("sb-tex-slide-page")`);
       check(pb.startsWith("%PDF-") && boxes.length === 3 && boxes.every(([w, h]) => Math.abs(mm(w) - 128) < 0.5 && Math.abs(mm(h) - 96) < 0.5) && paper === "@page { size: 128mm 96mm; margin: 0; }" && JSON.stringify(titles) === JSON.stringify(["Computed", "Curve"]) && gone,
         "Print, beamer: one 128 x 96 mm page for each of the 3 frames, the frames' titles shown; the page size gone after", { boxes: boxes.map(([w, h]) => [mm(w).toFixed(1), mm(h).toFixed(1)]), paper, titles, gone });
+      // (grader's #888 Q2/Q3: the Print button's own path, printPreview(): the slide page set while the browser's print
+      //  runs (window.print stubbed), and gone once it is over (afterprint))
+      const viaButton = await ev(`(() => { const real = window.print; let during = null; window.print = () => { during = document.getElementById("sb-tex-slide-page")?.textContent ?? null; };
+        try { window.sagebrush.latex.print(); } finally { window.print = real; }
+        window.dispatchEvent(new Event("afterprint"));
+        return { during, after: !!document.getElementById("sb-tex-slide-page"), cls: document.documentElement.classList.contains("tex-print") }; })()`);
+      await sleep(100);
+      check(viaButton.during === "@page { size: 128mm 96mm; margin: 0; }" && !viaButton.after && !viaButton.cls && !(await ev(`!!document.getElementById("sb-tex-slide-page")`)),
+        "Print, beamer, by the Print button (printPreview): the slide page while it prints, gone after", viaButton);
+      // (Q7: a decimal paper, aspectratio=141: 148.5 x 105 mm; Q8: a document that isn't beamer gets no slide page, the
+      //  print layout's own page standing)
+      const pageOf = async (tex) => { await open(await mk(tex.path, enc(tex.text))); await until(`!!document.querySelector(".tex-preview .ch:not([hidden]) ${tex.sel}")`, 20000);
+        await ev(`(window.sagebrush.latex.printMode(true), 1)`); const p = await ev(`document.getElementById("sb-tex-slide-page")?.textContent ?? null`); await ev(`(window.sagebrush.latex.printMode(false), 1)`); return p; };
+      const p141 = await pageOf({ path: "/t/print-141.tex", sel: "section.slide", text: "\\documentclass[aspectratio=141]{beamer}\n\\begin{document}\n\\begin{frame}{A}\nx\n\\end{frame}\n\\end{document}\n" });
+      const pArt = await pageOf({ path: "/t/print-article.tex", sel: ".p", text: "\\documentclass{article}\n\\begin{document}\nSome text.\n\\end{document}\n" });
+      check(p141 === "@page { size: 148.5mm 105mm; margin: 0; }" && pArt === null, "Print: a beamer deck at aspectratio=141 gets its 148.5 x 105 mm page; an article gets no slide page", { p141, pArt });
     }
     // (Codex friction P5, the editor's half: a helper .py beside the .tex, imported by the document's code as by real
     //  SageTeX run in the document's folder. The .tex's folder is given to Sage, read-only, at each Run, as it is then:
