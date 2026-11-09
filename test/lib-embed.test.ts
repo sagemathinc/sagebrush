@@ -182,11 +182,15 @@ test("embedded packages fail closed: a corrupt blob, one past its ceiling, or on
   assert.throws(() => installEmbeddedPackages({}, {}, { "pkgs/tab": [payloadOf({ "pkgs/tabulate/x.py": "x\n" }), ["pkgs/tabulate/x.py"]] }), /names a file outside it/);
 });
 
-// The built artifact (build/cli/packages.gen.js, as the CLI bundle carries it): every package file decodes to exactly
-// the repository's bytes (each pinned by the registry's SHA-256 too, which src/compile.ts checks on import).
+// The CLI's packages.gen.js as scripts/build-cli.mjs writes it (scripts/packages.mjs packagesGenSource; the node
+// suites run without a built bundle): every package file decodes to exactly the repository's bytes (each pinned by
+// the registry's SHA-256 too, which src/compile.ts checks on import).
+const packagesMjs = async () => await import(join(ROOT, "scripts", "packages.mjs"));
 test("the CLI's packages.gen.js: each package's blob is exactly that package's files, byte for byte", async () => {
   const { readFileSync } = await import("node:fs");
-  const gen = readFileSync(join(ROOT, "build", "cli", "packages.gen.js"), "utf8");
+  const { readPackages, packagesGenSource } = await packagesMjs();
+  assert.match(readFileSync(join(ROOT, "scripts", "build-cli.mjs"), "utf8"), /writeFileSync\(join\(out, "packages\.gen\.js"\), packagesGenSource\(packages\)\);/, "build-cli.mjs writes exactly packagesGenSource's");
+  const gen: string = packagesGenSource(readPackages(ROOT));
   const head = 'import { installEmbeddedPackages } from "../../src/lib-embed";\n';
   assert.ok(gen.startsWith(head), "the generated module installs the packages through src/lib-embed.ts");
   const g: any = {};
@@ -200,32 +204,44 @@ test("the CLI's packages.gen.js: each package's blob is exactly that package's f
   for (const k of want) assert.equal(P.files[k], readFileSync(join(ROOT, "packages", k), "utf8"), k);
 });
 
-// The CLI bundle itself: a package's blob is decoded only when the package is imported. A copy of the bundle with
-// tabulate's blob corrupted still starts, and imports another package; only `import tabulate` fails, closed.
+// The CLI with its packages embedded as the bundle carries them (installed by a preload before src/cli starts, as
+// packages.gen.js runs before it in the bundle): a package's blob is decoded only when the package is imported. With
+// tabulate's blob corrupted, a start still runs and imports another package; only `import tabulate` fails, closed.
 test("the CLI decodes no package at startup: a corrupted package fails only its own import", async () => {
-  const { readFileSync, writeFileSync, mkdtempSync, rmSync } = await import("node:fs");
+  const { writeFileSync, mkdtempSync, rmSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
   const { spawnSync } = await import("node:child_process");
-  const bundle = readFileSync(join(ROOT, "build", "cli", "pyjs.cjs"), "utf8");
-  const key = '"pypi-tabulate":["';
-  const at = bundle.indexOf(key);
-  assert.ok(at > 0 && bundle.indexOf(key, at + 1) < 0, "tabulate's blob, once in the bundle");
-  const start = at + key.length + 40;
-  const bad = bundle.slice(0, start) + "A".repeat(200) + bundle.slice(start + 200);
   const dir = mkdtempSync(join(tmpdir(), "sb-lazy-pkg-"));
   try {
-    const cli = join(dir, "pyjs.cjs");
-    writeFileSync(cli, bad);
-    const run = (code: string) => spawnSync(process.execPath, [cli, "-c", code], { encoding: "utf8", env: { ...process.env, SAGEBRUSH_NO_COMPILE_CACHE: "1" } });
-    const pass = run("print('started')");
+    const pre = join(dir, "packages-preload.mjs");
+    writeFileSync(
+      pre,
+      [
+        `import { createRequire } from "node:module";`,
+        `import { readPackages, packageBlobs } from ${JSON.stringify(join(ROOT, "scripts", "packages.mjs"))};`,
+        `const { installEmbeddedPackages } = createRequire(import.meta.url)(${JSON.stringify(join(__dirname, "..", "src", "lib-embed.js"))});`,
+        `const p = readPackages(${JSON.stringify(ROOT)});`,
+        `const blobs = packageBlobs(p.files);`,
+        `if (process.env.CORRUPT) { const b = Buffer.from(blobs[process.env.CORRUPT][0], "base64"); for (let i = 12; i < b.length - 8; i++) b[i] ^= 0x5a; blobs[process.env.CORRUPT][0] = b.toString("base64"); }`,
+        `installEmbeddedPackages(globalThis, p.registry, blobs);`,
+      ].join("\n"),
+    );
+    const cli = join(__dirname, "..", "src", "cli.js");
+    const run = (code: string, corrupt?: string) =>
+      spawnSync(process.execPath, ["--import", pre, cli, "-c", code], { encoding: "utf8", env: { ...process.env, SAGEBRUSH_NO_COMPILE_CACHE: "1", CORRUPT: corrupt ?? "" } });
+    // (the control: intact blobs import from the embedded copies, /$pyjs/packages)
+    const ok = run("import tabulate; print(tabulate.__file__)");
+    assert.equal(ok.status, 0, ok.stderr);
+    assert.equal(ok.stdout, "/$pyjs/packages/pypi-tabulate/py/tabulate.py\n");
+    const pass = run("print('started')", "pypi-tabulate");
     assert.equal(pass.status, 0, pass.stderr);
     assert.equal(pass.stdout, "started\n");
-    const other = run("import sortedcontainers; print(sortedcontainers.SortedList([2, 1]))");
+    const other = run("import sortedcontainers; print(sortedcontainers.SortedList([2, 1]))", "pypi-tabulate");
     assert.equal(other.status, 0, other.stderr);
     assert.equal(other.stdout, "SortedList([1, 2])\n");
-    const broken = run("import tabulate");
+    const broken = run("import tabulate", "pypi-tabulate");
     assert.notEqual(broken.status, 0);
-    assert.match(broken.stderr, /Error/);
+    assert.match(broken.stderr, /ImportError|Error/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

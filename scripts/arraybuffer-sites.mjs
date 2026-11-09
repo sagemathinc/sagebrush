@@ -356,7 +356,7 @@ export const EXCLUDED_DIRS = ["build/"];
 // deno compile, node --build-sea, git) write only the outputs named on their command lines, none of them this
 // module.  So loading the module assigns JSON literals to globals and runs nothing else.
 export const GENERATED = {
-  "build/cli/lib-meta.gen.js": { generator: "scripts/build-cli.mjs", generator_sha256: "7387b4b0dfce86958cbe2af6a1a3dc7a15da1c718b1e54ed21590e64a26c9a58" },
+  "build/cli/lib-meta.gen.js": { generator: "scripts/build-cli.mjs", generator_sha256: "1fb4dd37be65980524486794de751809f6581dd4e6789d696472afa4383412c5" },
 };
 const toRel = (root, f) => relative(root, f).split(sep).join("/");
 const excludedPath = (root, f) => EXCLUDED_DIRS.some((d) => `${toRel(root, f)}/`.startsWith(d));

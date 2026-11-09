@@ -87,20 +87,12 @@ writeFileSync(join(out, "lib-meta.gen.js"), `globalThis.__SAGEBRUSH_BUILD_ID__ =
 // The packages (packages/<name>/, scripts/packages.mjs): the registry and
 // their files, which src/compile.ts imports on a sys.path miss after
 // checking each against the registry's SHA-256
-const { readPackages } = await import("./packages.mjs");
+const { readPackages, packagesGenSource } = await import("./packages.mjs");
 const packages = readPackages(root);
 if (JSON.stringify(packages.registry, null, 2) + "\n" !== readFileSync(join(root, "packages", "registry.json"), "utf8")) throw new Error("packages/registry.json is out of date: run node scripts/packages.mjs");
 // (each package's files in a gzip blob of its own, decoded on the first read of one of them, never at startup:
-// src/lib-embed.ts installEmbeddedPackages; the registry stays plain. A start parses only the registry and the
-// blobs' base64 strings, so a package costs a run nothing until it is imported. Each blob's file names stay plain
-// beside it, which scripts/size-budget.mjs's optional-package leak check reads.)
-const pkgByDir = {};
-for (const [k, v] of Object.entries(packages.files)) (pkgByDir[k.slice(0, k.indexOf("/"))] ??= {})[k] = v;
-const pkgBlobs = Object.fromEntries(Object.keys(pkgByDir).sort().map((d) => [d, [gzipLib(pkgByDir[d]), Object.keys(pkgByDir[d]).sort()]]));
-writeFileSync(
-  join(out, "packages.gen.js"),
-  `import { installEmbeddedPackages } from "../../src/lib-embed";\ninstallEmbeddedPackages(globalThis, ${JSON.stringify(packages.registry)}, ${JSON.stringify(pkgBlobs)});\n`,
-);
+// scripts/packages.mjs packagesGenSource, src/lib-embed.ts installEmbeddedPackages)
+writeFileSync(join(out, "packages.gen.js"), packagesGenSource(packages));
 // The engines (wasm/sagebrush-engine.wasm), embedded: the bundle stays one file.
 // (and the PNG module, wasm/sagebrush-raster.wasm, decoded when a PNG is
 // first written or read: src/runtime/raster.ts; and engine/nd's numerics
