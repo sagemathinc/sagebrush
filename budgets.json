@@ -15,7 +15,7 @@
   },
   "cli/packages.gen.js": {
    "exact": true,
-   "max": 347715
+   "max": 115084
   },
   "cli/pyjs.cjs": {
    "exact": false,
@@ -649,7 +649,7 @@
   },
   "engine/lib/sage.src": {
    "exact": false,
-   "ceiling": 2982080,
+   "ceiling": 2981267,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024

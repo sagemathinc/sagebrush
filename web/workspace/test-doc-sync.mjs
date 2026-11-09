@@ -31,7 +31,7 @@ const check = (ok, what) => results.push([!!ok, what]);
 let code = 1;
 
 // ---- the page: one bundle (the workspace, the journal, the history, doc-sync, the protocol), the device module
-const site = mkdtempSync(join(tmpdir(), "sb-ds-site-")), src = mkdtempSync(join(here, ".test-doc-sync-"));
+const site = mkdtempSync(join(tmpdir(), "sb-ds-site-")), src = mkdtempSync(join(tmpdir(), "sb-ds-src-"));
 writeFileSync(join(src, "entry.js"), [
   `export * as W from ${J(join(here, "index.ts"))};`,
   `export * as N from ${J(join(here, "../notebook/journal.js"))};`,

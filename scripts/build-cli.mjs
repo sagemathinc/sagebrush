@@ -18,6 +18,7 @@ import { gzipSync } from "node:zlib";
 import { buildId as computeBuildId, libFiles } from "./build-id.mjs";
 import { mkdtempSync, copyFileSync, existsSync } from "node:fs";
 import { sandboxEntry } from "./sandbox-env.mjs";
+import { assertNoCloudInputs } from "./check-no-server-imports.mjs";
 
 // deno compile embeds node_modules when it finds a package.json above the
 // entry point; compile a copy of the bundle from an empty directory.  With
@@ -42,6 +43,9 @@ const root = new URL("..", import.meta.url).pathname;
 const out = join(root, "build", "cli");
 mkdirSync(out, { recursive: true });
 const run = (cmd, args, opts = {}) => execFileSync(cmd, args, { stdio: "inherit", cwd: root, ...opts });
+// (the npm package's bundles take no input from web/cloud/, which is MS-RSL: scripts/check-no-server-imports.mjs;
+// bun build's metafile keys its inputs relative to the working directory, root)
+const noCloudInputs = (meta) => assertNoCloudInputs(Object.keys(JSON.parse(readFileSync(meta, "utf8")).inputs ?? {}), meta, root, root);
 
 // 1. The Python library, as a JS object.
 const lib = libFiles(root);
@@ -87,10 +91,12 @@ writeFileSync(join(out, "lib-meta.gen.js"), `globalThis.__SAGEBRUSH_BUILD_ID__ =
 // The packages (packages/<name>/, scripts/packages.mjs): the registry and
 // their files, which src/compile.ts imports on a sys.path miss after
 // checking each against the registry's SHA-256
-const { readPackages } = await import("./packages.mjs");
+const { readPackages, packagesGenSource } = await import("./packages.mjs");
 const packages = readPackages(root);
 if (JSON.stringify(packages.registry, null, 2) + "\n" !== readFileSync(join(root, "packages", "registry.json"), "utf8")) throw new Error("packages/registry.json is out of date: run node scripts/packages.mjs");
-writeFileSync(join(out, "packages.gen.js"), `globalThis.__SAGEBRUSH_PACKAGES__ = ${JSON.stringify(packages)};\n`);
+// (each package's files in a gzip blob of its own, decoded on the first read of one of them, never at startup:
+// scripts/packages.mjs packagesGenSource, src/lib-embed.ts installEmbeddedPackages)
+writeFileSync(join(out, "packages.gen.js"), packagesGenSource(packages));
 // The engines (wasm/sagebrush-engine.wasm), embedded: the bundle stays one file.
 // (and the PNG module, wasm/sagebrush-raster.wasm, decoded when a PNG is
 // first written or read: src/runtime/raster.ts; and engine/nd's numerics
@@ -163,7 +169,8 @@ writeFileSync(join(out, "entry.ts"), `import "./lib.gen.js";\nimport "./packages
 
 // 2. One CommonJS file for Node 22+ and Bun.
 run("bun", ["build", join(out, "entry.ts"), "--target=node", "--format=cjs", "--minify-syntax", "--minify-whitespace",
-  "--outfile", join(out, "pyjs.cjs")]);
+  "--outfile", join(out, "pyjs.cjs"), "--metafile=" + join(out, "pyjs.meta.json")]);
+noCloudInputs(join(out, "pyjs.meta.json"));
 const bundle = join(out, "pyjs.cjs");
 writeFileSync(bundle, "#!/usr/bin/env node\n" + readFileSync(bundle, "utf8").replace(/^#!.*\n/, ""));
 // 2b. `sagebrush latex` (src/latex-cli.ts: the LaTeX editor's engine, KaTeX and its WOFF2 fonts) in a file of its own,
@@ -174,7 +181,8 @@ writeFileSync(bundle, "#!/usr/bin/env node\n" + readFileSync(bundle, "utf8").rep
   for (const f of readdirSync(join(kdir, "fonts")).sort()) if (f.endsWith(".woff2")) fonts[f] = readFileSync(join(kdir, "fonts", f)).toString("base64");
   writeFileSync(join(out, "latex-assets.gen.js"), `globalThis.__SAGEBRUSH_LATEX_ASSETS__ = ${JSON.stringify({ css: readFileSync(join(kdir, "katex.min.css"), "utf8"), fonts })};\n`);
   writeFileSync(join(out, "latex-entry.ts"), `import "./latex-assets.gen.js";\nexport { latexCommand } from "../../src/latex-cli";\n`);
-  run("bun", ["build", join(out, "latex-entry.ts"), "--target=node", "--format=cjs", "--minify-syntax", "--minify-whitespace", "--outfile", join(out, "sagebrush-latex.cjs")]);
+  run("bun", ["build", join(out, "latex-entry.ts"), "--target=node", "--format=cjs", "--minify-syntax", "--minify-whitespace", "--outfile", join(out, "sagebrush-latex.cjs"), "--metafile=" + join(out, "latex.meta.json")]);
+  noCloudInputs(join(out, "latex.meta.json"));
 }
 // The launcher (packages/sagebrush/bin/sagebrush.cjs, the npm package's
 // command): Node's compile cache on, and a program run in a worker thread so
