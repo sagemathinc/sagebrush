@@ -7,8 +7,10 @@ snapshots (§3.4) are a later step: their actions are listed as not applied here
   is the `Workspace` interface (workspace.py); the base is the pair's `state.Base`.
 - **The holding folder, in daybreak3's order:** one `holding.Session` for the run, taken without waiting; its cleanup
   first, every run; then, only if the run moves files aside (deletes here, and downloads that replace a file), its
-  run folder, its journal (`runs/<run id>.json`: LOCAL_DIR and WORKSPACE_PATH, for `--restore`) and its admission;
-  the moves in plan order under it; and the session released after the last move aside (and in any case at the end).
+  run folder, its admission and its journal (`<run id>/journal.json`: LOCAL_DIR and WORKSPACE_PATH, for
+  `--restore`; inside the run folder, so the holding folder's bounded walk, admission and cleanup cover it); the
+  moves in plan order under it; and the session released after the last move aside. A run with nothing to move
+  aside, or whose run folder was refused, releases it right after cleanup.
   If the session is busy, the holding folder is on another filesystem, no run id is left this second, or admission
   refuses, every such action stays pending and the rest of the plan goes ahead. A run folder that took nothing is
   removed, under the lock.
@@ -22,8 +24,8 @@ snapshots (§3.4) are a later step: their actions are listed as not applied here
   are recorded in batches.
 - **Workspace errors** (the endpoint's): 409 skips the action; 413 leaves it pending; 429, 401 and a network error
   stop the run at once, the actions not yet tried left as they are.
-- **Downloads need room** (§1.2, §4.5): LOCAL_DIR's filesystem keeps 256 MiB free beyond the downloads; those that
-  don't fit, in plan order, stay pending.
+- **Downloads need room** (§1.2, §4.5): each filesystem downloads land on (a mount inside LOCAL_DIR too) keeps
+  256 MiB free beyond its downloads; those that don't fit, in plan order, stay pending.
 - **Seams** (§5): `hooks[name](step)` at "before_check", "after_tmp_written" and "after_action", and
   "after_base_commit" (the step, or None for the run's last batch); move.py's "after_move_aside" and "before_install"
   get the step too.
@@ -41,6 +43,7 @@ from dataclasses import dataclass, field
 from . import holding as H
 from . import move as M
 from . import plan as P
+from . import scan as S
 from .state import Row, _home_short
 from .workspace import Base as WBase, Conflict, RateLimited, TooLarge, Unauthorized
 
@@ -48,6 +51,7 @@ _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 _CLOEXEC = getattr(os, "O_CLOEXEC", 0)
 CHUNK = 2**20
 DOWNLOAD_HEADROOM = 256 * 2**20     # LOCAL_DIR's filesystem keeps this free beyond the downloads (§1.2)
+JOURNAL = "journal.json"            # in the run folder, beside deleted/ and replaced/
 _NOT_YOURS = "not a folder of yours in fs-sync's holding folder"     # move.own_dirs' refusal
 
 # outcomes
@@ -66,6 +70,7 @@ HOLD_ERROR = "hold-error"           # an OS error moving it into the holding fol
 LOCAL_ERROR = "local-error"         # an OS error here, outside the holding folder
 TOO_LARGE = "too-large"
 SNAPSHOTS_LATER = "snapshots-later"
+NO_ROOM = "no-room"                 # its filesystem is short of room (Report.space)
 HELD_BACK = "held-back"             # a run-level line (Report.run_lines) holds it back
 
 
@@ -79,6 +84,7 @@ class Outcome:
     held: str = None                # the local file's place in the holding folder, if it was left there
     row: Row = None                 # the base row to record (a done action)
     copy_row: Row = None            # a conflict's copy's row
+    renamed: str = None             # a conflict whose local file was renamed to its copy, not uploaded
 
 
 @dataclass
@@ -88,7 +94,7 @@ class Report:
     trash: str
     outcomes: list = field(default_factory=list)
     run_lines: list = field(default_factory=list)   # run-level "Not applied: …" sentences, in order, each once
-    space: tuple = None             # downloads over the free space: (mount point, needed, free)
+    space: list = field(default_factory=list)       # per filesystem short of room: (mount point, needed, free, paths)
     stopped: str = None             # "rate-limited", "unauthorized" or "network": the run stopped there
     retry_after: float = None
     cleaned: list = field(default_factory=list)     # run ids cleanup removed
@@ -155,10 +161,6 @@ def _mount_point(path):
             break
         path = parent
     return path
-
-
-def _strerror(e):
-    return e.strerror or str(e.__class__.__name__)
 
 
 # ---- run-level lines (board's texts, word for word)
@@ -229,7 +231,10 @@ def _read_local(root_fd, raw, size, sha256):
             raise _Skip(SKIPPED, CHANGED_HERE)
         raise _Local(e)
     try:
-        st = os.fstat(fd)
+        try:
+            st = os.fstat(fd)
+        except OSError as e:
+            raise _Local(e)
         if not stat.S_ISREG(st.st_mode) or st.st_size != size:
             raise _Skip(SKIPPED, CHANGED_HERE)
         h, n = hashlib.sha256(), 0
@@ -250,14 +255,22 @@ def _read_local(root_fd, raw, size, sha256):
 
 
 def _row(root_fd, raw, sha256, fid, snapshot=False):
-    """The base row for the local file `raw` now: its stat key, the hash it was checked to have, and its fid."""
+    """The base row for the file fs-sync just wrote at `raw`: `sha256` (what is in sync on both sides) with the stat key
+    of the bytes read back there and found to be exactly those (the scan's bounded reader, its identity checked), so
+    the next scan's shortcut never pairs a key with bytes it didn't hash. If they aren't (changed already) or can't be
+    read, the row has no key (ino 0 matches no file), and the next scan hashes the file."""
     folders, name = _split(raw)
-    d = M.open_dir(root_fd, folders)
     try:
-        st = os.stat(name, dir_fd=d, follow_symlinks=False)
-    finally:
-        os.close(d)
-    return Row(sha256, st.st_size, st.st_mtime_ns, st.st_ctime_ns, st.st_ino, st.st_dev, fid, snapshot)
+        d = M.open_dir(root_fd, folders)
+        try:
+            st = os.stat(name, dir_fd=d, follow_symlinks=False)
+            if stat.S_ISREG(st.st_mode) and st.st_size <= S.MAX_FILE_BYTES and S._hash(d, name, st) == sha256:
+                return Row(sha256, st.st_size, st.st_mtime_ns, st.st_ctime_ns, st.st_ino, st.st_dev, fid, snapshot)
+        finally:
+            os.close(d)
+    except OSError:
+        pass
+    return Row(sha256, 0, 0, 0, 0, 0, fid, snapshot)
 
 
 def _scan_row(loc, fid):
@@ -353,7 +366,6 @@ class _Hold:
             r.cleaned = self.session.cleanup(now)
         except OSError:
             pass                                        # (cleanup is retried every run; it never stops one)
-        _drop_journals(self.state_dir, now)
 
     def begin(self, root_fd, moves, now):
         """Only for a run that moves files aside (`moves`: (part/relative path, size)): its run folder, its admission
@@ -379,14 +391,17 @@ class _Hold:
                 self.session.abandon(h)
                 r.run_line(_other_disk_line(self.local_dir, self.state_dir))
                 return
-            a = self.session.admit(moves)
+            journal = json.dumps({"run": h.run_id, "local_dir": self.local_dir,
+                                  "workspace_path": self.workspace_path}).encode()
+            a = self.session.admit(moves + [(JOURNAL, len(journal))])
             r.admission = a
             if not a.ok:
                 self.session.abandon(h)
                 r.run_line(_admission_line(a, r.local, r.trash))
                 return
-            _journal(self.state_dir, h.run_id, self.local_dir, self.workspace_path)
+            _journal(h, journal)
         except OSError as e:
+            _drop(h, JOURNAL)
             self.session.abandon(h)
             r.run_line(self._refusal(e, r.trash + "/" + h.run_id))
             return
@@ -397,7 +412,7 @@ class _Hold:
         r = self.report
         if _not_yours(e):
             return _not_yours_line(r.local, path)
-        return "%s %s (%s)" % (_held_back(r.local), _strerror(e), path)
+        return "%s fs-sync couldn't prepare its holding folder (%s): %s." % (_held_back(r.local), path, H.strerror(e))
 
     def dirs(self, part, folders):
         """The handle on `part`'s mirror of `folders`, checked one level at a time from the run folder; an error
@@ -420,7 +435,7 @@ class _Hold:
             if _not_yours(e):
                 self.report.run_line(_not_yours_line(self.report.local, where))
                 raise _Skip(PENDING, HELD_BACK)
-            raise _Skip(PENDING, HOLD_ERROR, "%s (%s)" % (_strerror(e), where))
+            raise _Skip(PENDING, HOLD_ERROR, "%s (%s)" % (H.strerror(e), where))
 
     def where(self, part, raw):
         return "%s/%s/%s/%s" % (self.report.trash, self.holding.run_id, part, raw)
@@ -437,8 +452,8 @@ class _Hold:
                 try:
                     for name in self.parts:
                         os.rmdir(name, dir_fd=self.holding.fd)
+                    _drop(self.holding, JOURNAL)
                     self.session.abandon(self.holding)
-                    _drop_journal(self.state_dir, self.holding.run_id)
                 except OSError:
                     pass
                 self.holding.close()
@@ -447,71 +462,91 @@ class _Hold:
             self.session = None
 
 
-def _runs_dir(state_dir):
-    top = os.open(state_dir, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | _NOFOLLOW | _CLOEXEC)
+def _journal(holding, data):
+    """The run's journal (§4.3), `journal.json` in its run folder: what --restore needs to put this run's files back,
+    written before the first move aside. --restore refuses a run without one."""
+    fd = os.open(JOURNAL, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW | _CLOEXEC, 0o600, dir_fd=holding.fd)
     try:
-        return M.own_dirs(top, ["runs"])
+        while data:
+            data = data[os.write(fd, data):]
+        os.fsync(fd)
     finally:
-        os.close(top)
+        os.close(fd)
+    os.fsync(holding.fd)
 
 
-def _journal(state_dir, run_id, local_dir, workspace_path):
-    """The run's journal (§4.3), `runs/<run id>.json`: what --restore needs to put this run's files back, written
-    before the first move aside. --restore refuses a run without one."""
-    d = _runs_dir(state_dir)
+def _drop(holding, name):
     try:
-        fd = os.open(run_id + ".json", os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW | _CLOEXEC, 0o600, dir_fd=d)
-        try:
-            data = json.dumps({"run": run_id, "local_dir": local_dir, "workspace_path": workspace_path}).encode()
-            while data:
-                data = data[os.write(fd, data):]
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-        os.fsync(d)
-    finally:
-        os.close(d)
-
-
-def _drop_journal(state_dir, run_id):
-    d = _runs_dir(state_dir)
-    try:
-        os.unlink(run_id + ".json", dir_fd=d)
+        os.unlink(name, dir_fd=holding.fd)
     except FileNotFoundError:
         pass
-    finally:
-        os.close(d)
 
 
-def _drop_journals(state_dir, now):
-    """The journals of runs more than 30 days old (their folders are cleanup's)."""
+class NotRestorable(Exception):
+    """--restore can't use this run: `why` is "no-run" (no such run folder), "no-journal" or "other-folder" (its
+    journal names another LOCAL_DIR or WORKSPACE_PATH)."""
+
+    def __init__(self, why):
+        super().__init__(why)
+        self.why = why
+
+
+def restore_run(state_dir, run_id, root_fd, local_dir, workspace_path):
+    """`--restore <run id>` (§2.4): the files that run deleted here put back into LOCAL_DIR (`root_fd`), from its
+    `deleted/` only: never `replaced/` (the report named where each replaced file is kept) nor the journal. Refused
+    (NotRestorable) for a run with no journal, or whose journal names another pair. Returns the relative paths left
+    held because something occupies them now (move.restore)."""
+    top = os.open(state_dir, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | _NOFOLLOW | _CLOEXEC)
     try:
-        d = _runs_dir(state_dir)
-    except OSError:
-        return
-    try:
-        for name in os.listdir(d):
-            t = H.run_time(name[:-5]) if name.endswith(".json") else None
-            if t is not None and now - t > H.KEEP_SECONDS:
-                try:
-                    os.unlink(name, dir_fd=d)
-                except OSError:
-                    pass
+        try:
+            os.close(M.open_dir(top, ["trash", run_id]))       # (looked up, never made)
+        except (FileNotFoundError, NotADirectoryError, ValueError):
+            raise NotRestorable("no-run")
     finally:
-        os.close(d)
+        os.close(top)
+    h = M.Holding(state_dir, run_id)
+    try:
+        try:
+            fd = os.open(JOURNAL, os.O_RDONLY | os.O_NONBLOCK | _NOFOLLOW | _CLOEXEC, dir_fd=h.fd)
+        except (FileNotFoundError, OSError):
+            raise NotRestorable("no-journal")
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise NotRestorable("no-journal")
+            data = os.read(fd, 65536)
+        finally:
+            os.close(fd)
+        try:
+            journal = json.loads(data)
+        except ValueError:
+            raise NotRestorable("no-journal")
+        if not isinstance(journal, dict) or (journal.get("local_dir"), journal.get("workspace_path")) != (
+                local_dir, workspace_path):
+            raise NotRestorable("other-folder")
+        try:
+            os.close(M.open_dir(h.fd, [M.DELETED]))
+        except FileNotFoundError:
+            return []                                   # (a run that only replaced files: nothing to put back)
+        part = M.Part(h, M.DELETED)
+        try:
+            return M.restore(root_fd, part)
+        finally:
+            part.close()
+    finally:
+        h.close()
 
 
 # ---- the apply loop
 
 def apply(plan, scan, listing, root_fd, ws, base, state_dir, local_dir, workspace_path, computer, now=None,
-          hooks=None, free_bytes=None):
-    """Apply `plan` (see the module docstring). `free_bytes`: LOCAL_DIR's filesystem's free space (tests); measured if
-    None. Returns the Report; a refused action never raises."""
+          hooks=None, free_space=None):
+    """Apply `plan` (see the module docstring). `free_space(folder fd)` -> (filesystem key, free bytes): a seam for
+    tests; fstat/fstatvfs if None. Returns the Report; a refused action never raises."""
     now = time.time() if now is None else now
     report = Report(run_id=H.run_id_at(now), local=_home_short(local_dir),
                     trash=_home_short(os.path.join(state_dir, "trash")))
     steps = [s for s in plan.steps if s.kind in P.ACTIONS]
-    no_room = _over_space(steps, listing, root_fd, local_dir, report, free_bytes)
+    no_room = _over_space(steps, scan, listing, root_fd, local_dir, report, free_space)
     aside = [s for s in steps if _moves_aside(s) and id(s) not in no_room]
     hold = _Hold(report, state_dir, local_dir, workspace_path)
     try:
@@ -519,13 +554,15 @@ def apply(plan, scan, listing, root_fd, ws, base, state_dir, local_dir, workspac
         if aside:
             hold.begin(root_fd, [(_part(s) + "/" + (scan.files[s.path].raw or s.path), scan.files[s.path].size)
                                 for s in aside], now)
+        if not hold.ok:
+            hold.release()                              # (no moves aside, or refused: the lock only for cleanup)
         last = aside[-1] if aside and hold.ok else None
         M.sweep_temps(root_fd, scan.temps, report.run_id)
         for k, step in enumerate(steps):
             if step.kind == P.SNAPSHOT:
                 out = Outcome(step, PENDING, SNAPSHOTS_LATER)
             elif id(step) in no_room:
-                out = Outcome(step, PENDING, "no-room")
+                out = Outcome(step, *no_room[id(step)])
             elif _moves_aside(step) and not hold.ok:
                 out = Outcome(step, PENDING, HELD_BACK)
             elif report.stopped:
@@ -542,24 +579,54 @@ def apply(plan, scan, listing, root_fd, ws, base, state_dir, local_dir, workspac
     return report
 
 
-def _over_space(steps, listing, root_fd, local_dir, report, free_bytes):
-    """The downloads that don't fit LOCAL_DIR's filesystem with 256 MiB to spare, in plan order (ids of the steps)."""
-    downs = [s for s in steps if s.kind in (P.DOWNLOAD, P.CONFLICT)]
-    if not downs:
-        return set()
-    if free_bytes is None:
-        st = os.fstatvfs(root_fd)
-        free_bytes = st.f_bavail * st.f_frsize
-    used, out = 0, set()
-    for s in downs:
+def _filesystem(fd):
+    """(the filesystem's identity, its free bytes) for an open folder."""
+    st = os.fstatvfs(fd)
+    return os.fstat(fd).st_dev, st.f_bavail * st.f_frsize
+
+
+def _over_space(steps, scan, listing, root_fd, local_dir, report, free_space):
+    """§4.5, for each filesystem downloads land on (daybreak2): each target's nearest existing folder under LOCAL_DIR,
+    opened without following links, and its filesystem measured there; per filesystem, in plan order, the downloads
+    that fit with 256 MiB to spare (charged once). Returns {id(step): (result, why[, detail])} for those that don't,
+    and for targets that can't be measured (failed closed, before anything changes)."""
+    measure = free_space or _filesystem
+    out, fs = {}, {}
+    for s in steps:
+        if s.kind not in (P.DOWNLOAD, P.CONFLICT):
+            continue
+        loc = scan.files.get(s.path)
+        folders = ((loc.raw or s.path) if loc else s.path).split("/")[:-1]
+        fd, depth = os.dup(root_fd), 0
+        try:
+            for part in folders:
+                try:
+                    nxt = M.open_dir(fd, [part])
+                except FileNotFoundError:
+                    break                               # (a folder still to make: on its parent's filesystem)
+                os.close(fd)
+                fd, depth = nxt, depth + 1
+            key, free = measure(fd)
+        except (OSError, ValueError) as e:
+            if isinstance(e, OSError) and e.errno not in (errno.ELOOP, errno.ENOTDIR):
+                out[id(s)] = (SKIPPED, LOCAL_ERROR, H.strerror(e))
+            else:
+                out[id(s)] = (SKIPPED, CHANGED_HERE)    # (a link or a file where a folder was)
+            continue
+        finally:
+            os.close(fd)
+        f = fs.get(key)
+        if f is None:
+            f = fs[key] = dict(where=_mount_point(os.path.join(local_dir, *folders[:depth])), free=free, used=0,
+                               need=DOWNLOAD_HEADROOM, paths=[])
         n = listing[s.path].size
-        if used + n + DOWNLOAD_HEADROOM <= free_bytes:
-            used += n
+        f["need"] += n
+        if f["used"] + n + DOWNLOAD_HEADROOM <= f["free"]:
+            f["used"] += n
         else:
-            out.add(id(s))
-    if out:
-        need = sum(listing[s.path].size for s in downs) + DOWNLOAD_HEADROOM
-        report.space = (_mount_point(local_dir), need, free_bytes)
+            f["paths"].append(s.path)
+            out[id(s)] = (PENDING, NO_ROOM)
+    report.space = [(f["where"], f["need"], f["free"], f["paths"]) for f in fs.values() if f["paths"]]
     return out
 
 
@@ -576,32 +643,9 @@ def _one(step, k, scan, listing, root_fd, ws, base, hold, report, computer, hook
         _hook(hooks, "after_base_commit", step)
     try:
         out = _act(step, k, scan, listing, root_fd, ws, hold, report, computer, hooks)
-    except _Skip as s:
-        out = Outcome(step, **s.out)
-    except Conflict:
-        out = Outcome(step, SKIPPED, CHANGED_THERE)
-    except TooLarge:
-        out = Outcome(step, PENDING, TOO_LARGE)
-    except RateLimited as e:
-        report.stopped, report.retry_after = "rate-limited", e.retry_after
-        out = Outcome(step, NOT_TRIED, report.stopped)
-    except Unauthorized:
-        report.stopped = "unauthorized"
-        out = Outcome(step, NOT_TRIED, report.stopped)
-    except M.NoReplace as e:
-        if e.reason == "it is on another filesystem":
-            report.run_line(_other_disk_line(hold.local_dir, hold.state_dir))
-            out = Outcome(step, PENDING, HELD_BACK)
-        else:
-            out = Outcome(step, PENDING, NO_REPLACE)
-    except _Local as e:
-        out = Outcome(step, SKIPPED, LOCAL_ERROR, _strerror(e.e))
-    except OSError as e:
-        if getattr(e, "_local", True) and not isinstance(e, ConnectionError):
-            out = Outcome(step, SKIPPED, LOCAL_ERROR, _strerror(e))
-        else:
-            report.stopped = "network"
-            out = Outcome(step, NOT_TRIED, report.stopped)
+    except Exception as e:
+        out = _failed(step, e, hold, report)
+        out.renamed = getattr(e, "renamed", None)
     if destructive:
         if out.result == DONE:
             base.finish_destructive(step.path, out.row)
@@ -617,6 +661,35 @@ def _one(step, k, scan, listing, root_fd, ws, base, hold, report, computer, hook
             base.record(step.copy, out.copy_row)        # (a conflict's copy, uploaded, whatever became of the rest)
     _hook(hooks, "after_action", step)
     return out
+
+
+def _failed(step, e, hold, report):
+    """The outcome of an action that raised `e`."""
+    if isinstance(e, _Skip):
+        return Outcome(step, **e.out)
+    if isinstance(e, Conflict):
+        return Outcome(step, SKIPPED, CHANGED_THERE)
+    if isinstance(e, TooLarge):
+        return Outcome(step, PENDING, TOO_LARGE)
+    if isinstance(e, RateLimited):
+        report.stopped, report.retry_after = "rate-limited", e.retry_after
+        return Outcome(step, NOT_TRIED, report.stopped)
+    if isinstance(e, Unauthorized):
+        report.stopped = "unauthorized"
+        return Outcome(step, NOT_TRIED, report.stopped)
+    if isinstance(e, M.NoReplace):
+        if e.reason == "it is on another filesystem":
+            report.run_line(_other_disk_line(hold.local_dir, hold.state_dir))
+            return Outcome(step, PENDING, HELD_BACK)
+        return Outcome(step, PENDING, NO_REPLACE)
+    if isinstance(e, _Local):
+        return Outcome(step, SKIPPED, LOCAL_ERROR, H.strerror(e.e))
+    if isinstance(e, OSError):
+        if getattr(e, "_local", True) and not isinstance(e, ConnectionError):
+            return Outcome(step, SKIPPED, LOCAL_ERROR, H.strerror(e))
+        report.stopped = "network"
+        return Outcome(step, NOT_TRIED, report.stopped)
+    raise e
 
 
 def _move_aside(root_fd, raw, loc, hold, part, step, hooks):
@@ -636,7 +709,7 @@ def _move_aside(root_fd, raw, loc, hold, part, step, hooks):
     except M.NoReplace:
         raise
     except OSError as e:
-        raise _Skip(PENDING, HOLD_ERROR, _strerror(e))
+        raise _Skip(PENDING, HOLD_ERROR, H.strerror(e))
     return hold.where(part, raw)
 
 
@@ -650,7 +723,7 @@ def _act(step, k, scan, listing, root_fd, ws, hold, report, computer, hooks):
         return Outcome(step, DONE)
     if step.kind == P.UPLOAD:
         wbase = WBase(step.fid, step.base) if step.base is not None else None
-        ent = _ws(ws.write, step.path, _read_local(root_fd, raw, loc.size, step.local), wbase)
+        ent = _ws(ws.write, step.path, _read_local(root_fd, raw, loc.size, step.local), wbase, step.local, loc.size)
         return Outcome(step, DONE, row=_scan_row(loc, ent.fid))
     if step.kind == P.DELETE_THERE:
         _ws(ws.remove, step.path, step.fid, step.remote)
@@ -690,6 +763,7 @@ def _download(step, k, loc, raw, listing, root_fd, ws, hold, report, computer, h
         except _Skip:
             _unlink(root_fd, folders, tmp)
             raise
+    # (from here on the local file may be held: every outcome says where)
     try:
         M.install(root_fd, raw, tmp, computer, hooks=_step_hooks(hooks, step))
     except M.InstalledBeside as b:
@@ -698,6 +772,12 @@ def _download(step, k, loc, raw, listing, root_fd, ws, hold, report, computer, h
     except M.Occupied as e:
         # (the temp stays: the next run sweeps it)
         return Outcome(step, PENDING, NO_CONFLICT_NAME, _names(e.tried), held=held)
+    except M.NoReplace as e:
+        _unlink(root_fd, folders, tmp)
+        return Outcome(step, SKIPPED, LOCAL_ERROR, e.reason, held=held)
+    except OSError as e:
+        _unlink(root_fd, folders, tmp)
+        return Outcome(step, SKIPPED, LOCAL_ERROR, H.strerror(e), held=held)
     return Outcome(step, DONE, held=held, row=_row(root_fd, raw, step.remote, step.fid, snapshot))
 
 
@@ -707,6 +787,8 @@ def _conflict(step, k, loc, raw, listing, root_fd, ws, hold, report, computer, h
     folders, name = _split(raw)
     copy_name = step.copy.rsplit("/", 1)[-1]
     copy_raw = "/".join(folders + [copy_name])
+    for _ in _read_local(root_fd, raw, loc.size, step.local):
+        pass                                            # (checked before anything changes: still the planned file)
     try:
         d = M.open_dir(root_fd, folders)
     except OSError:
@@ -716,9 +798,19 @@ def _conflict(step, k, loc, raw, listing, root_fd, ws, hold, report, computer, h
             M.rename_noreplace(d, name, d, copy_name)
         except (M.Occupied, FileNotFoundError):
             raise _Skip(SKIPPED, CHANGED_HERE)
+        try:
+            ent = _ws(ws.write, step.copy, _read_local(root_fd, copy_raw, loc.size, step.local), None, step.local,
+                      loc.size)
+        except Exception as e:
+            # (not uploaded: the rename undone, without replacing; if a newcomer took the name meanwhile, the
+            # copy stays under its conflict name, and the report says so)
+            try:
+                M.rename_noreplace(d, copy_name, d, name)
+            except Exception:
+                e.renamed = step.copy
+            raise
     finally:
         os.close(d)
-    ent = _ws(ws.write, step.copy, _read_local(root_fd, copy_raw, loc.size, step.local), None)
     copy_row = _row(root_fd, copy_raw, step.local, ent.fid)
     size = listing[step.path].size
     tmp = M.temp_name(report.run_id, k)
@@ -771,12 +863,12 @@ def render(report):
     section("Delete on this computer, to the holding folder (%s; restore with fs-sync --restore %s for 30 days)",
             P.DELETE_HERE, "-", report.run_id)
     section("Conflicts, both kept (%s)", P.CONFLICT, "!")
-    if report.space:
-        where, need, free = report.space
-        rows = report.of(PENDING, "no-room")
+    for where, need, free, paths in report.space:
         lines.append("Not applied: not enough free space on %s (needs %s, %s free)" % (where, _size(need), _size(free)))
-        lines += ["  · %s" % o.step.path for o in rows]
-    pending = [o for o in report.of(PENDING) if o.why in (NO_REPLACE, HOLD_ERROR, NO_CONFLICT_NAME, TOO_LARGE)]
+        lines += ["  · %s" % path for path in paths]
+    pending = [o for o in report.outcomes
+               if (o.result == PENDING and o.why in (NO_REPLACE, HOLD_ERROR, NO_CONFLICT_NAME, TOO_LARGE))
+               or (o.result == NOT_TRIED and o.renamed)]
     if pending:
         lines.append("Not applied (%d)" % len(pending))
         lines += ["  · %s   %s" % (o.step.path, _pending_text(o)) for o in pending]
@@ -784,6 +876,7 @@ def render(report):
     if skipped:
         lines.append("Skipped (%d)" % len(skipped))
         lines += ["  · %s   %s" % (o.step.path, _skipped_text(o)) for o in skipped]
+    # (when any action wasn't done, §1.5; snapshots aren't this step's to do)
     if any(o.result != DONE and o.why != SNAPSHOTS_LATER for o in report.outcomes):
         lines.append("Run it again to sync the rest.")
     return lines
@@ -799,17 +892,31 @@ def _done_text(o):
     return o.step.path
 
 
+def _also(o, text):
+    """`text` with what else the person must know, each after "; ": where a held file is kept, where a conflict's
+    renamed copy is."""
+    parts = [text] if text else []
+    if o.held:
+        parts.append(_kept(o.held))
+    if o.renamed:
+        parts.append("this computer's copy is now \"%s\" here and isn't in the workspace yet" % o.renamed)
+    return "; ".join(parts)
+
+
 def _pending_text(o):
+    if o.result == NOT_TRIED:
+        return _also(o, None)                           # (the run stopped: only where the copy is)
     if o.why == NO_REPLACE:
-        return ("not moved to the holding folder: this computer can't rename a file there without risking replacing "
+        text = ("not moved to the holding folder: this computer can't rename a file there without risking replacing "
                 "another")
-    if o.why == HOLD_ERROR:
-        return "not moved to the holding folder: %s" % o.detail
-    if o.why == NO_CONFLICT_NAME:
+    elif o.why == HOLD_ERROR:
+        text = "not moved to the holding folder: %s" % o.detail
+    elif o.why == NO_CONFLICT_NAME:
         text = ("all %d conflict names for it are taken (%s); rename or remove some, then run it again" %
                 (M.MAX_CONFLICT_TRIES, o.detail))
-        return text if not o.held else "%s; %s" % (text, _kept(o.held))
-    return "the workspace refused it as too large"     # (413: wording pending from COPY)
+    else:
+        text = "the workspace refused it as too large"  # (413)
+    return _also(o, text)
 
 
 def _skipped_text(o):
@@ -819,7 +926,7 @@ def _skipped_text(o):
     elif o.why == CHANGED_THERE:
         text = "changed in the workspace during the sync"
     elif o.why == LOCAL_ERROR:
-        text = o.detail                                 # (strerror only; wording pending from COPY)
+        text = "an error on this computer: %s" % o.detail
     else:
         text = "changed here during the sync"
-    return text if not o.held else "%s; %s" % (text, _kept(o.held))
+    return _also(o, text)

@@ -82,9 +82,11 @@ class Fake(W.Workspace):
             writer(b[i:i + 3])
         return self.entry(path), len(b)
 
-    def write(self, path, data, base):
+    def write(self, path, data, base, sha256, size):
         self._seam("write", path)
         buf = b"".join(data)                        # (all of it first: an iteration that raises commits nothing)
+        if (sha(buf), len(buf)) != (sha256, size):
+            raise W.Conflict()                      # (the blob isn't the one named)
         cur = self.files.get(path)
         if base is None and cur is not None:
             raise W.Conflict()
@@ -138,12 +140,12 @@ class Pair:
         base = {p: P.Base(r.sha256, r.fid, r.snapshot, r.revision) for p, r in self.base.rows().items()}
         return P.plan(local, remote, base, computer=COMPUTER)
 
-    def sync(self, plan=None, hooks=None, now=NOW, free_bytes=2**40):
+    def sync(self, plan=None, hooks=None, now=NOW, free_space=lambda fd: (os.fstat(fd).st_dev, 2**40)):
         plan = plan or self.plan()
         fd = S.open_root(self.root)
         try:
             self.report = A.apply(plan, self.scan, self.listing, fd, self.ws, self.base, self.state, self.local,
-                                  "/Thesis", COMPUTER, now=now, hooks=hooks, free_bytes=free_bytes)
+                                  "/Thesis", COMPUTER, now=now, hooks=hooks, free_space=free_space)
         finally:
             os.close(fd)
         return self.report
@@ -158,8 +160,7 @@ class Pair:
         return sorted(os.listdir(self.trash)) if os.path.isdir(self.trash) else []
 
     def journals(self):
-        runs = os.path.join(self.state, "runs")
-        return sorted(os.listdir(runs)) if os.path.isdir(runs) else []
+        return [r for r in self.runs() if os.path.exists(self.held(r, A.JOURNAL))]
 
     def kinds(self):
         return [(o.step.kind, o.step.path, o.result, o.why) for o in self.report.outcomes]
@@ -233,8 +234,8 @@ def test_delete_here_goes_to_deleted_with_a_journal():
             assert f.read() == b"aaa"
         assert stat.S_IMODE(os.stat(p.held(RID, "deleted", "notes")).st_mode) == 0o700
         assert "notes/a.tex" not in p.base.rows()
-        assert p.journals() == [RID + ".json"]
-        with open(os.path.join(p.state, "runs", RID + ".json")) as f:
+        assert p.journals() == [RID]
+        with open(p.held(RID, "journal.json")) as f:
             assert json.load(f) == {"run": RID, "local_dir": p.local, "workspace_path": "/Thesis"}
         assert p.lines() == [
             "Delete on this computer, to the holding folder (1 file; restore with fs-sync --restore %s for 30 days)"
@@ -527,7 +528,7 @@ def test_newcomer_at_a_replacing_download_keeps_the_old_copy():
         o = p.report.outcomes[0]
         assert (o.result, o.why, o.held) == (A.SKIPPED, A.BESIDE, where)
         assert "refs.bib" not in p.base.rows()                       # (the file left: nothing recorded for the path)
-        assert p.journals() == [RID + ".json"]
+        assert p.journals() == [RID]
         assert p.lines()[1] == ("  · refs.bib   a file appeared there during the sync; the workspace's version is "
                                 "saved beside it as \"refs (conflict, laptop).bib\"; this computer's previous copy is "
                                 "kept for 30 days in %s" % where)
@@ -631,7 +632,7 @@ def test_delete_here_held_when_its_name_is_taken_meanwhile():
         o = p.report.outcomes[0]
         assert (o.result, o.why, o.held) == (A.SKIPPED, A.CHANGED_HERE, where)
         assert p.read("a") == b"a newcomer" and "a" not in p.base.rows() and p.runs() == [RID]
-        assert p.journals() == [RID + ".json"]                      # (held: its run folder and journal kept)
+        assert p.journals() == [RID]                      # (held: its run folder and journal kept)
         assert p.lines() == ["Skipped (1)", "  · a   changed here during the sync; this computer's previous copy is "
                              "kept for 30 days in %s" % where, "Run it again to sync the rest."]
     finally:
@@ -708,7 +709,29 @@ def test_network_error_stops_but_a_local_one_skips():
             p.sync(now=NOW + 60, hooks={"before_check": lambda s: s.path == "a" and os.chmod(p.path("a"), 0)})
             assert p.kinds() == [(P.UPLOAD, "a", A.SKIPPED, A.LOCAL_ERROR), (P.UPLOAD, "b", A.DONE, None)]
             assert p.lines()[:2] == ["Upload (1 file)", "  + b"]
-            assert p.lines()[3] == "  · a   Permission denied"
+            assert p.lines()[3] == "  · a   an error on this computer: Permission denied"
+    finally:
+        p.close()
+
+
+def test_local_fstat_error_is_local_not_the_network():
+    # (daybreak3 E3) an OS error reading the file being uploaded skips that upload; the run goes on
+    p = Pair({"a": b"a", "b": b"b"})
+    try:
+        real = os.fstat
+
+        def fstat(fd):
+            if os.readlink("/proc/self/fd/%d" % fd).endswith("/thesis/a"):
+                raise OSError(errno.EIO, "Input/output error")
+            return real(fd)
+        plan = p.plan()
+        os.fstat = fstat
+        try:
+            p.sync(plan)
+        finally:
+            os.fstat = real
+        assert p.kinds() == [(P.UPLOAD, "a", A.SKIPPED, A.LOCAL_ERROR), (P.UPLOAD, "b", A.DONE, None)]
+        assert p.report.stopped is None and p.lines()[3] == "  · a   an error on this computer: Input/output error"
     finally:
         p.close()
 
@@ -754,8 +777,7 @@ def test_cleanup_first_every_run():
     try:
         old = H.run_id_at(NOW - 31 * 86400)
         os.makedirs(p.held(old, "deleted"), 0o700)
-        os.makedirs(os.path.join(p.state, "runs"), 0o700)
-        open(os.path.join(p.state, "runs", old + ".json"), "w").close()
+        open(p.held(old, "journal.json"), "w").close()
         p.sync()
         assert p.report.cleaned == [old] and p.runs() == [] and p.journals() == []
     finally:
@@ -768,7 +790,7 @@ def test_admission_refused_removes_the_run_folder():
         p.sync()
         p.ws.files.clear()
         saved = H.RUN_ENTRIES
-        H.RUN_ENTRIES = 4                       # (deleted, n, a, b, and the run folder: 5)
+        H.RUN_ENTRIES = 5                       # (deleted, n, a, b, the journal and the run folder: 6)
         try:
             p.sync()
         finally:
@@ -776,13 +798,35 @@ def test_admission_refused_removes_the_run_folder():
         assert p.kinds() == [(P.DELETE_HERE, "n/a", A.PENDING, A.HELD_BACK),
                              (P.DELETE_HERE, "n/b", A.PENDING, A.HELD_BACK)]
         assert p.runs() == [] and p.journals() == [] and sorted(p.base.rows()) == ["n/a", "n/b"]
-        assert p.report.admission.entries == 5
+        assert p.report.admission.entries == 6
         assert p.lines() == [
-            "Not applied: deleting or replacing files in %s. This sync would move 5 files and folders into fs-sync's "
-            "holding folder, over the limit of 4 for one sync. Sync its subfolders as separate pairs instead."
+            "Not applied: deleting or replacing files in %s. This sync would move 6 files and folders into fs-sync's "
+            "holding folder, over the limit of 5 for one sync. Sync its subfolders as separate pairs instead."
             % p.local, "Run it again to sync the rest."]
     finally:
         p.close()
+
+
+def test_journal_counted_once_at_the_bounds():
+    # (daybreak2 L1) the run's entries are deleted/, n, n/a, n/b, the journal and the run folder: 6. The total is what
+    # is held (the run folder, made by new_run, is already among it) plus the other 5. Exact and one past, each bound.
+    for name, bound, ok in (("RUN_ENTRIES", 6, True), ("RUN_ENTRIES", 5, False),
+                            ("TOTAL_ENTRIES", 6, True), ("TOTAL_ENTRIES", 5, False)):
+        p = Pair({"n/a": b"a", "n/b": b"b"})
+        try:
+            p.sync()
+            p.ws.files.clear()
+            saved = getattr(H, name)
+            setattr(H, name, bound)
+            try:
+                p.sync()
+            finally:
+                setattr(H, name, saved)
+            a = p.report.admission
+            assert (a.ok, a.entries, a.held_entries) == (ok, 6, 1), (name, bound, a)
+            assert [o.result for o in p.report.outcomes] == ([A.DONE] * 2 if ok else [A.PENDING] * 2), (name, bound)
+        finally:
+            p.close()
 
 
 def test_admission_lines_word_for_word():
@@ -966,7 +1010,7 @@ def test_released_after_the_last_move_aside():
 def test_downloads_need_room():
     p = Pair({}, {"a": b"a" * 10, "b": b"b" * 10})
     try:
-        p.sync(free_bytes=A.DOWNLOAD_HEADROOM + 15)
+        p.sync(free_space=lambda fd: (os.fstat(fd).st_dev, A.DOWNLOAD_HEADROOM + 15))
         assert p.kinds() == [(P.DOWNLOAD, "a", A.DONE, None), (P.DOWNLOAD, "b", A.PENDING, "no-room")]
         where = A._mount_point(p.local)
         assert p.lines() == ["Download (1 file)", "  + a",
@@ -996,6 +1040,322 @@ def test_rows_batched_destructive_committed():
         assert commits == [None]                                    # (no destructive action: one batch at the end)
     finally:
         p.close()
+
+
+# ---- r2: rows bound to checked bytes, held kept, the journal, restore_run, a conflict's renamed copy
+
+def test_row_key_only_for_bytes_read_back():
+    # (astra S1) an edit right after the install: the row keeps the planned hash but no stat key, so the next scan
+    # hashes the file and sees the edit
+    p = Pair({}, {"r.txt": b"theirs"})
+    try:
+        real = M.install
+
+        def install_then_edit(root_fd, rel, tmp, computer, hooks=None):
+            real(root_fd, rel, tmp, computer, hooks)
+            p.write("r.txt", b"edited at once")
+        M.install = install_then_edit
+        try:
+            p.sync()
+        finally:
+            M.install = real
+        row = p.base.rows()["r.txt"]
+        assert row.sha256 == sha(b"theirs") and (row.ino, row.size) == (0, 0), row
+        assert [(s.kind, s.path) for s in p.plan().steps] == [(P.UPLOAD, "r.txt")]
+        p.sync(now=NOW + 60)
+        assert p.ws.files["r.txt"][1] == b"edited at once" and in_sync(p)
+        real = M.install
+
+        def install_then_remove(root_fd, rel, tmp, computer, hooks=None):
+            real(root_fd, rel, tmp, computer, hooks)
+            os.unlink(p.path("gone.txt"))
+        p.ws.put("gone.txt", b"g")
+        M.install = install_then_remove
+        try:
+            p.sync(now=NOW + 90)
+        finally:
+            M.install = real
+        assert p.kinds() == [(P.DOWNLOAD, "gone.txt", A.DONE, None)]          # (done: it can't be read back, no key)
+        assert p.base.rows()["gone.txt"].ino == 0
+        p.ws.put("s.txt", b"plain")                                 # (and an untouched download keeps its key)
+        p.sync(now=NOW + 120)
+        st = os.stat(p.path("s.txt"))
+        assert p.base.rows()["s.txt"].key == (st.st_size, st.st_mtime_ns, st.st_ctime_ns, st.st_ino, st.st_dev)
+    finally:
+        p.close()
+
+
+def test_install_failure_after_the_move_keeps_held():
+    # (astra S2, sync-client D3) the old file is in replaced/: the outcome says so, and its row isn't put back
+    for exc in (OSError(errno.EIO, "Input/output error"), M.NoReplace("this filesystem can't rename without replacing")):
+        p = Pair({"refs.bib": b"old"})
+        try:
+            p.sync()
+            p.ws.put("refs.bib", b"new")
+            real = M.install
+
+            def failing(*args, **kw):
+                raise exc
+            M.install = failing
+            try:
+                p.sync()
+            finally:
+                M.install = real
+            where = p.held(RID, "replaced", "refs.bib")
+            o = p.report.outcomes[0]
+            assert (o.result, o.why, o.held) == (A.SKIPPED, A.LOCAL_ERROR, where), o
+            assert "refs.bib" not in p.base.rows() and os.listdir(p.local) == []     # (and the temp is gone)
+            reason = "Input/output error" if isinstance(exc, OSError) else exc.reason
+            assert p.lines()[1] == ("  · refs.bib   an error on this computer: %s; this computer's previous copy is kept "
+                                    "for 30 days in %s" % (reason, where))
+            p.sync(now=NOW + 60)                                    # (the next run downloads it again)
+            assert p.read("refs.bib") == b"new"
+        finally:
+            p.close()
+
+
+def test_holding_folder_not_prepared():
+    # (board S3) any other error setting up the run folder: worded, the run folder removed
+    p = Pair({"a": b"a"})
+    try:
+        p.sync()
+        del p.ws.files["a"]
+        real = A._journal
+
+        def full(h, data):
+            fd = os.open(A.JOURNAL, os.O_WRONLY | os.O_CREAT, 0o600, dir_fd=h.fd)
+            os.close(fd)
+            raise OSError(errno.ENOSPC, "No space left on device")
+        A._journal = full
+        try:
+            p.sync()
+        finally:
+            A._journal = real
+        assert p.kinds() == [(P.DELETE_HERE, "a", A.PENDING, A.HELD_BACK)] and p.runs() == []
+        assert p.report.run_lines == [
+            "Not applied: deleting or replacing files in %s. fs-sync couldn't prepare its holding folder (%s): No "
+            "space left on device." % (p.local, p.held(RID))]
+    finally:
+        p.close()
+
+
+def test_journal_counts_in_admission():
+    p = Pair({"a": b"a"})
+    try:
+        p.sync()
+        del p.ws.files["a"]
+        p.sync()
+        assert p.report.admission.entries == 4                      # (deleted, a, the journal, the run folder)
+        assert sorted(os.listdir(p.held(RID))) == ["deleted", "journal.json"]
+    finally:
+        p.close()
+
+
+def restore(p, run_id=RID, local=None, workspace="/Thesis"):
+    fd = S.open_root(p.root)
+    try:
+        return A.restore_run(p.state, run_id, fd, local or p.local, workspace)
+    finally:
+        os.close(fd)
+
+
+def test_restore_run_deleted_only():
+    # (sync-client D4, grader's §5 case through the real entry point) deletes `a`, replaces `b`: --restore puts back
+    # `a` only, even with `b`'s name free; the journal and replaced/ stay as they are
+    p = Pair({"a": b"a1", "n/b": b"b1"})
+    try:
+        p.sync()
+        del p.ws.files["a"]
+        p.ws.put("n/b", b"b2")
+        p.sync()
+        os.unlink(p.path("n/b"))
+        assert restore(p) == []
+        assert p.read("a") == b"a1" and not os.path.exists(p.path("n/b"))
+        with open(p.held(RID, "replaced", "n", "b"), "rb") as f:
+            assert f.read() == b"b1"
+        assert os.path.exists(p.held(RID, "journal.json"))
+        p.write("a", b"in the way")                                 # (an occupied path: left, and listed)
+        os.rename(p.path("a"), p.path("a2"))
+        os.makedirs(p.held(RID, "deleted"), exist_ok=True)
+        with open(p.held(RID, "deleted", "a"), "wb") as f:
+            f.write(b"held again")
+        p.write("a", b"occupied")
+        assert restore(p) == ["a"] and p.read("a") == b"occupied"
+    finally:
+        p.close()
+
+
+def test_restore_run_refusals():
+    p = Pair({"a": b"a"})
+    try:
+        p.sync()
+        del p.ws.files["a"]
+        p.sync()
+        for args, why in (((RID + "-2",), "no-run"), ((RID, "/elsewhere"), "other-folder"),
+                          ((RID, None, "/Other"), "other-folder")):
+            try:
+                restore(p, *args)
+                raise AssertionError("restored %r" % (args,))
+            except A.NotRestorable as e:
+                assert e.why == why, (args, e.why)
+        assert not os.path.exists(p.held(RID + "-2"))               # (looked up, never made)
+        os.unlink(p.held(RID, "journal.json"))
+        try:
+            restore(p)
+            raise AssertionError("restored without a journal")
+        except A.NotRestorable as e:
+            assert e.why == "no-journal"
+        assert not os.path.exists(p.path("a"))                      # (nothing put back)
+    finally:
+        p.close()
+
+
+def conflicted():
+    p = Pair({"main.tex": b"base"})
+    p.sync()
+    p.write("main.tex", b"mine")
+    p.ws.put("main.tex", b"theirs")
+    return p
+
+
+def test_conflict_checks_before_the_rename():
+    # (daybreak3 E1) an edit before the check: nothing is renamed, nothing changes
+    p = conflicted()
+    try:
+        old = p.base.rows()["main.tex"]
+        p.ws.on["write"] = lambda path: p.write("main.tex", b"a newcomer")    # (it would block an undo)
+        p.sync(hooks={"before_check": lambda s: p.write("main.tex", b"mine, edited")})
+        assert p.kinds() == [(P.CONFLICT, "main.tex", A.SKIPPED, A.CHANGED_HERE)]
+        assert ("write", "main (conflict, laptop).tex") not in p.ws.calls     # (checked before any upload)
+        assert os.listdir(p.local) == ["main.tex"] and p.read("main.tex") == b"mine, edited"
+        assert p.base.rows()["main.tex"] == old and p.lines()[1] == "  · main.tex   changed here during the sync"
+    finally:
+        p.close()
+
+
+def test_conflict_upload_refused_undoes_the_rename():
+    # (daybreak3 E1) 409, a stop, or an edit found while uploading: the rename is undone
+    copy = "main (conflict, laptop).tex"
+    for why in ("409", "429", "edited"):
+        p = conflicted()
+        try:
+            if why == "409":
+                p.ws.on["write"] = lambda path: p.ws.put(copy, b"someone's, meanwhile")
+            elif why == "429":
+                p.ws.fail["write"] = [W.RateLimited(5)]
+            else:
+                p.ws.on["write"] = lambda path: p.write(copy, b"mine, edited")
+            p.sync()
+            assert p.read("main.tex") == (b"mine, edited" if why == "edited" else b"mine"), why
+            assert not os.path.exists(p.path(copy)) and p.report.outcomes[0].renamed is None
+            assert not any("isn't in the workspace yet" in line for line in p.lines())
+        finally:
+            p.close()
+
+
+def test_conflict_copy_kept_when_its_name_is_taken():
+    # (sync-client N1, board's words) the rename can't be undone: a newcomer took the name meanwhile
+    copy = "main (conflict, laptop).tex"
+    p = conflicted()
+    try:
+        def both(path):
+            p.write("main.tex", b"a newcomer")
+            p.ws.put(copy, b"someone's, meanwhile")
+        p.ws.on["write"] = both
+        p.sync()
+        assert p.kinds() == [(P.CONFLICT, "main.tex", A.SKIPPED, A.CHANGED_THERE)]
+        assert p.read(copy) == b"mine" and p.read("main.tex") == b"a newcomer" and p.report.outcomes[0].renamed == copy
+        assert p.lines() == ["Skipped (1)", "  · main.tex   changed in the workspace during the sync; this computer's copy "
+                             "is now \"%s\" here and isn't in the workspace yet" % copy,
+                             "Run it again to sync the rest."]
+    finally:
+        p.close()
+    p = conflicted()
+    try:
+        p.ws.on["write"] = lambda path: p.write("main.tex", b"a newcomer")
+        p.ws.fail["write"] = [W.RateLimited(5)]
+        p.sync()
+        assert p.kinds() == [(P.CONFLICT, "main.tex", A.NOT_TRIED, "rate-limited")]
+        assert p.lines() == ["Not applied (1)", "  · main.tex   this computer's copy is now \"%s\" here and isn't in "
+                             "the workspace yet" % copy, "Run it again to sync the rest."]
+    finally:
+        p.close()
+
+
+def test_lock_released_after_cleanup_without_moves():
+    # (daybreak3 E2) no move aside, or a refused one: the lock only for cleanup
+    p = Pair({"a": b"a", "b": b"b"})
+    try:
+        free = []
+
+        def probe(step):
+            s = H.Session.open(p.state)
+            free.append(s is not None)
+            if s:
+                s.close()
+        p.sync(hooks={"before_check": probe})
+        assert free == [True, True]
+        p.write("b", b"b2")
+        del p.ws.files["a"]
+        saved, free[:] = H.RUN_ENTRIES, []
+        H.RUN_ENTRIES = 1
+        try:
+            p.sync(hooks={"before_check": probe}, now=NOW + 60)
+        finally:
+            H.RUN_ENTRIES = saved
+        assert p.kinds()[0][2:] == (A.PENDING, A.HELD_BACK) and free == [True]
+    finally:
+        p.close()
+
+
+def test_room_per_filesystem():
+    # (daybreak2 D5) two filesystems: the root's and a mount at mnt/ (a seam keyed by the folder's inode); each
+    # charged its own downloads and its own 256 MiB, at its boundary and one byte past it
+    for spare_root, spare_mnt, want in ((10, 20, ["a", "mnt/b", "mnt/c", "new/d"]),
+                                        (9, 20, ["a", "mnt/b", "mnt/c"]), (10, 19, ["a", "mnt/b", "new/d"])):
+        p = Pair({"mnt/keep": b"k"}, {"a": b"a" * 5, "new/d": b"d" * 5, "mnt/b": b"b" * 10, "mnt/c": b"c" * 10})
+        try:
+            mnt = os.stat(p.path("mnt")).st_ino
+
+            def space(fd):
+                if os.fstat(fd).st_ino == mnt:
+                    return "mnt", A.DOWNLOAD_HEADROOM + spare_mnt
+                return "root", A.DOWNLOAD_HEADROOM + spare_root
+            p.sync(free_space=space)
+            assert sorted(o.step.path for o in p.report.of(A.DONE) if o.step.kind == P.DOWNLOAD) == want, (
+                spare_root, spare_mnt, p.kinds())
+            pending = sorted(o.step.path for o in p.report.of(A.PENDING, A.NO_ROOM))
+            assert pending == sorted({"a", "new/d", "mnt/b", "mnt/c"} - set(want))
+        finally:
+            p.close()
+
+
+def test_room_unmeasurable_fails_closed():
+    p = Pair({}, {"x/a": b"a", "y/b": b"b"})
+    try:
+        os.symlink("/tmp", p.path("x"))                             # (a link where a folder will be)
+
+        def space(fd):
+            if os.fstat(fd).st_ino == os.stat(p.local).st_ino:
+                return "root", 2**40
+            raise OSError(errno.EIO, "Input/output error")
+        os.mkdir(p.path("y"))
+        p.sync(free_space=space)
+        assert sorted(p.kinds()) == [(P.DOWNLOAD, "x/a", A.SKIPPED, A.CHANGED_HERE),
+                                     (P.DOWNLOAD, "y/b", A.SKIPPED, A.LOCAL_ERROR)]
+        assert os.listdir(p.path("y")) == []
+    finally:
+        p.close()
+
+
+def test_fake_refuses_bytes_other_than_named():
+    ws = Fake()
+    try:
+        ws.write("a", [b"abc"], None, sha(b"abd"), 3)
+        raise AssertionError("took bytes other than named")
+    except W.Conflict:
+        pass
+    assert ws.files == {}
 
 
 if __name__ == "__main__":

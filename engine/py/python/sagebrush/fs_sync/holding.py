@@ -36,7 +36,7 @@ import time
 from dataclasses import dataclass
 
 from .move import _DIR_FLAGS, Holding, own_dirs
-from .scan import MAX_DEPTH
+from .scan import MAX_DEPTH, _home_short
 
 TOTAL_BYTES = 20 * 2**30
 TOTAL_ENTRIES = 200_000
@@ -99,14 +99,27 @@ class Uncountable(Exception):
         self.detail, self.bound = detail, bound
 
 
+def strerror(e):
+    """An OSError as a person reads it: its message, never "[Errno N]" or an internal name."""
+    return e.strerror or (os.strerror(e.errno) if e.errno else "an unexpected error")
+
+
 def usage(state_dir):
     """(bytes, entries) held in all: every entry under trash/, folders included, files at their lstat size, by a
     streaming depth-first walk with no link followed (see the module docstring). Raises Uncountable if the walk can't
     finish within TOTAL_ENTRIES and HOLD_LEVELS, meets an entry not ours, or fails part way."""
     total, entries = 0, 0
-    trash = _trash(state_dir)                               # (level 1: a handle just opened, so it lists afresh)
+    names = []                                              # (the folders below trash/ down to the deepest level)
+    where = os.path.join(state_dir, "trash")                # (what the walk is reading, for an error's message)
+    try:
+        trash = _trash(state_dir)                           # (level 1: a handle just opened, so it lists afresh)
+    except OSError as e:
+        raise Uncountable(_failed(e, where))
     try:
         listing = os.scandir(trash)
+    except OSError as e:
+        os.close(trash)
+        raise Uncountable(_failed(e, where))
     except BaseException:
         os.close(trash)
         raise
@@ -114,12 +127,15 @@ def usage(state_dir):
     try:
         while stack:
             fd, it = stack[-1]
+            where = os.path.join(state_dir, "trash", *names[:len(stack) - 1])
             e = next(it, None)
             if e is None:
                 it.close()
                 os.close(fd)
                 stack.pop()
+                del names[len(stack) - 1:]
                 continue
+            where = os.path.join(where, e.name)
             st = e.stat(follow_symlinks=False)
             entries += 1
             if entries > TOTAL_ENTRIES:
@@ -136,15 +152,20 @@ def usage(state_dir):
                     os.close(sub)                          # (not on the stack yet: closed here)
                     raise
                 stack.append((sub, listing))
+                names.append(e.name)
             else:
                 total += st.st_size
     except OSError as e:
-        raise Uncountable(str(e))
+        raise Uncountable(_failed(e, where))
     finally:
         for fd, it in stack:
             it.close()
             os.close(fd)
     return total, entries
+
+
+def _failed(e, where):
+    return "%s (%s)" % (strerror(e), _home_short(where))
 
 
 def run_entries(rels):

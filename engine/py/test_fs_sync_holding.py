@@ -4,6 +4,7 @@ exclusive mkdir, what is held counted in entries by a streaming bounded walk tha
 admission counting the run's files and new folders, one run at a time (the trash/ lock), and the cleanup of runs
 older than 30 days after a complete count. Every bound is lowered here; no large fixtures."""
 
+import errno
 import os
 import re
 import shutil
@@ -12,6 +13,7 @@ import tempfile
 import time
 
 from sagebrush.fs_sync import holding as H
+from sagebrush.fs_sync import move as M
 
 NOW = 1_794_200_000                 # a fixed "now" (November 2026, UTC)
 DAY = 86400
@@ -189,7 +191,8 @@ def test_uncountable_fails_closed():
             os.chmod(os.path.join(trash, "run", "locked"), 0)
             try:
                 a = H.admit(s, [("a.txt", 1)])
-                assert not a.ok and a.reason == "holding-unreadable" and a.detail, a
+                assert not a.ok and a.reason == "holding-unreadable", a
+                assert a.detail == "Permission denied (%s)" % os.path.join(trash, "run", "locked"), a.detail
                 old = os.path.join(trash, H.run_id_at(NOW - 40 * DAY))
                 put(os.path.join(old, "f.txt"), b"f")
                 assert cleanup(s, NOW) == [] and os.path.isdir(old)  # nothing removed from a partly counted tree
@@ -210,7 +213,8 @@ def test_uncountable_fails_closed():
             a = H.admit(s, [("a.txt", 1)])
         finally:
             os.scandir = real_scandir
-        assert not a.ok and a.reason == "holding-unreadable" and a.detail == "[Errno 5] Input/output error", a
+        assert not a.ok and a.reason == "holding-unreadable", a
+        assert a.detail == "Input/output error (%s)" % os.path.join(trash, "run"), a
         os.scandir, calls[0] = failing, 0                               # (grader A9) and under a Session too
         try:
             with H.Session.open(s) as session:
@@ -220,8 +224,8 @@ def test_uncountable_fails_closed():
         assert not r.ok and r.reason == "holding-unreadable", r
         assert open_fds() == before
         assert H.not_applied(a, "~/thesis", "~/t") == ("Not applied: deleting or replacing files in ~/thesis. fs-sync "
-                                                       "couldn't measure its holding folder (~/t): [Errno 5] "
-                                                       "Input/output error.")
+                                                       "couldn't measure its holding folder (~/t): Input/output error "
+                                                       "(%s)." % os.path.join(trash, "run"))
         saved = os.getuid                                               # an entry not ours (an owner seam)
         real_trash = H._trash
         H._trash = lambda st: os.open(trash, os.O_RDONLY | os.O_DIRECTORY)
@@ -255,6 +259,28 @@ def test_admission_counts_files_and_new_folders():
             assert H.admit(s, [("f/a", 1), ("f/b", 1), ("f/c", 1), ("f/d", 1), ("f/e", 1), ("f/g", 1),
                                ("f/h", 1), ("f/i", 1)]).reason == "total-entries"
         assert H.admit(s, []).ok
+    finally:
+        shutil.rmtree(d)
+
+
+def test_errors_as_a_person_reads_them():
+    # (board #895 S2, N1) an OSError's message and the path the walk was reading: never "[Errno N]" or a class name
+    assert H.strerror(OSError(errno.EACCES, "Permission denied", "x")) == "Permission denied"
+    e = OSError()
+    assert H.strerror(e) == "an unexpected error"
+    e.errno = errno.EIO
+    assert H.strerror(e) == os.strerror(errno.EIO)
+    d, s = state()
+    try:
+        trash = os.path.join(s, "trash")
+        real = H.os.getuid
+        M.os.getuid = lambda: real() + 1                    # (trash/ itself not a folder of yours)
+        try:
+            a = H.admit(s, [("a.txt", 1)])
+        finally:
+            M.os.getuid = real
+        assert not a.ok and a.reason == "holding-unreadable", a
+        assert a.detail == "not a folder of yours in fs-sync's holding folder (%s)" % trash, a.detail
     finally:
         shutil.rmtree(d)
 

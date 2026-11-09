@@ -9,9 +9,11 @@ verbs exist; the apply step and its tests use only this interface.
   nothing is ever read by hash), its bytes written to `writer` (a callable taking a bytes chunk), never more than
   `limit` bytes. Returns (the Entry read, the number of bytes). That the entry's fid and sha256 and the bytes' hash
   are the planned ones is the caller's check, never the client's.
-- `write(path, data, base)`: `data` an iterable of bytes chunks; `base` the planned entry's sha256 (and fid) it
-  replaces, or None to create only. A compare-and-swap: if the entry isn't exactly that now, Conflict and nothing
-  changes. Returns the new Entry.
+- `write(path, data, base, sha256, size)`: `data` an iterable of bytes chunks, which must be exactly `size` bytes
+  hashing to `sha256` (the endpoint stores the blob by its hash, then the operation names it); `base` the planned
+  entry's sha256 (and fid) it replaces, or None to create only. A compare-and-swap: if the entry isn't exactly that
+  now, or the bytes aren't, Conflict and nothing changes. An exception raised while iterating `data` commits
+  nothing. Returns the new Entry.
 - `remove(path, fid, sha256)`: to the workspace's Trash, only if the entry is still exactly that; else Conflict.
 
 Errors, as the endpoint gives them: Conflict (409: skip, and plan again next run), RateLimited (429: stop the run
@@ -76,7 +78,7 @@ class Workspace:
     def read(self, path, writer, limit):
         raise NotImplementedError
 
-    def write(self, path, data, base):
+    def write(self, path, data, base, sha256, size):
         raise NotImplementedError
 
     def remove(self, path, fid, sha256):
