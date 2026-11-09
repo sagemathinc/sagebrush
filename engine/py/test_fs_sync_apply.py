@@ -1479,6 +1479,52 @@ def conflicted():
     return p
 
 
+def test_journal_of_for_restore_by_run_id_alone():
+    # (sync-client #895 N1) --restore <run id> names no folder: the journal gives the pair, without making anything
+    p = Pair({"a": b"a"})
+    try:
+        p.sync()
+        del p.ws.files["a"]
+        p.sync()
+        assert A.journal_of(p.state, RID) == (p.local, "/Thesis")
+        local, workspace = A.journal_of(p.state, RID)
+        fd = S.open_root(p.root)
+        try:
+            assert A.restore_run(p.state, RID, fd, local, workspace) == []
+        finally:
+            os.close(fd)
+        assert p.read("a") == b"a"
+        try:
+            A.journal_of(p.state, RID + "-2")
+            raise AssertionError("a journal for a run that doesn't exist")
+        except A.NotRestorable as e:
+            assert e.why == "no-run"
+        assert not os.path.exists(p.held(RID + "-2"))               # (looked up, never made)
+        os.chmod(p.held(RID, "journal.json"), 0o600)
+        for data in (b"{not json", b'["a list"]', b'{"local_dir": 3, "workspace_path": "/Thesis"}',
+                     b'{"workspace_path": "/Thesis"}'):
+            with open(p.held(RID, "journal.json"), "wb") as f:
+                f.write(data)
+            for call in (lambda: A.journal_of(p.state, RID), lambda: restore(p)):
+                try:
+                    call()
+                    raise AssertionError("accepted journal %r" % data)
+                except A.NotRestorable as e:
+                    assert e.why == "no-journal", (data, e.why)
+        os.unlink(p.held(RID, "journal.json"))
+        planted = os.path.join(p.d, "planted.json")                 # (a valid journal elsewhere, behind a link)
+        with open(planted, "w") as f:
+            json.dump({"run": RID, "local_dir": "/elsewhere", "workspace_path": "/Other"}, f)
+        os.symlink(planted, p.held(RID, "journal.json"))           # (a link is never followed)
+        try:
+            A.journal_of(p.state, RID)
+            raise AssertionError("followed a link")
+        except A.NotRestorable as e:
+            assert e.why == "no-journal"
+    finally:
+        p.close()
+
+
 def test_conflict_checks_before_the_rename():
     # (daybreak3 E1) an edit before the check: nothing is renamed, nothing changes
     p = conflicted()

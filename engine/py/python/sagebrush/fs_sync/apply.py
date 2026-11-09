@@ -519,11 +519,9 @@ class NotRestorable(Exception):
         self.why = why
 
 
-def restore_run(state_dir, run_id, root_fd, local_dir, workspace_path):
-    """`--restore <run id>` (§2.4): the files that run deleted here put back into LOCAL_DIR (`root_fd`), from its
-    `deleted/` only: never `replaced/` (the report named where each replaced file is kept) nor the journal. Refused
-    (NotRestorable) for a run with no journal, or whose journal names another pair. Returns the relative paths left
-    held because something occupies them now (move.restore)."""
+def _journal_of(state_dir, run_id):
+    """(the run's Holding, its journal as a dict): the run folder looked up, never made, and its journal read through
+    a no-follow handle, bounded. NotRestorable "no-run" or "no-journal" otherwise. The caller closes the Holding."""
     top = os.open(state_dir, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | _NOFOLLOW | _CLOEXEC)
     try:
         try:
@@ -536,7 +534,7 @@ def restore_run(state_dir, run_id, root_fd, local_dir, workspace_path):
     try:
         try:
             fd = os.open(JOURNAL, os.O_RDONLY | os.O_NONBLOCK | _NOFOLLOW | _CLOEXEC, dir_fd=h.fd)
-        except (FileNotFoundError, OSError):
+        except OSError:
             raise NotRestorable("no-journal")
         try:
             if not stat.S_ISREG(os.fstat(fd).st_mode):
@@ -548,8 +546,31 @@ def restore_run(state_dir, run_id, root_fd, local_dir, workspace_path):
             journal = json.loads(data)
         except ValueError:
             raise NotRestorable("no-journal")
-        if not isinstance(journal, dict) or (journal.get("local_dir"), journal.get("workspace_path")) != (
-                local_dir, workspace_path):
+        if not (isinstance(journal, dict) and isinstance(journal.get("local_dir"), str)
+                and isinstance(journal.get("workspace_path"), str)):
+            raise NotRestorable("no-journal")
+        return h, journal
+    except BaseException:
+        h.close()
+        raise
+
+
+def journal_of(state_dir, run_id):
+    """`--restore <run id>` names no folder (§1): (LOCAL_DIR, WORKSPACE_PATH) as that run's journal recorded them, for
+    the command to open the pair and call restore_run. NotRestorable "no-run" or "no-journal" as restore_run."""
+    h, journal = _journal_of(state_dir, run_id)
+    h.close()
+    return journal["local_dir"], journal["workspace_path"]
+
+
+def restore_run(state_dir, run_id, root_fd, local_dir, workspace_path):
+    """`--restore <run id>` (§2.4): the files that run deleted here put back into LOCAL_DIR (`root_fd`), from its
+    `deleted/` only: never `replaced/` (the report named where each replaced file is kept) nor the journal. Refused
+    (NotRestorable) for a run with no journal, or whose journal names another pair. Returns the relative paths left
+    held because something occupies them now (move.restore)."""
+    h, journal = _journal_of(state_dir, run_id)
+    try:
+        if (journal["local_dir"], journal["workspace_path"]) != (local_dir, workspace_path):
             raise NotRestorable("other-folder")
         try:
             os.close(M.open_dir(h.fd, [M.DELETED]))

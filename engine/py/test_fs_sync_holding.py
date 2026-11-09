@@ -263,6 +263,29 @@ def test_admission_counts_files_and_new_folders():
         shutil.rmtree(d)
 
 
+def test_an_entry_not_yours_names_its_path():
+    # (board, #895 note) "an entry in it isn't yours (<path>)", the entry's full path, in §2.4's measuring line
+    d, s = state()
+    try:
+        trash = os.path.join(s, "trash")
+        put(os.path.join(trash, "run", "deleted", "a.tex"), b"a")
+        real = H.os.getuid
+        H.os.getuid = lambda: real() + 1                    # (usage's owner check only: trash/ itself is opened first)
+        real_trash = H._trash
+        H._trash = lambda st: os.open(trash, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            a = H.admit(s, [("x", 1)])
+        finally:
+            H.os.getuid, H._trash = real, real_trash
+        assert not a.ok and a.reason == "holding-unreadable", a
+        assert a.detail == "an entry in it isn't yours (%s)" % os.path.join(trash, "run"), a.detail
+        assert H.not_applied(a, "~/thesis", "~/t") == (
+            "Not applied: deleting or replacing files in ~/thesis. fs-sync couldn't measure its holding folder (~/t): "
+            "an entry in it isn't yours (%s)." % os.path.join(trash, "run"))
+    finally:
+        shutil.rmtree(d)
+
+
 def test_errors_as_a_person_reads_them():
     # (board #895 S2, N1) an OSError's message and the path the walk was reading: never "[Errno N]" or a class name
     assert H.strerror(OSError(errno.EACCES, "Permission denied", "x")) == "Permission denied"
