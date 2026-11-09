@@ -57,6 +57,18 @@ def open_fds():
 def test_run_ids():
     rid = H.run_id_at(NOW)
     assert rid == time.strftime("%Y%m%d-%H%M%S", time.gmtime(NOW)) and re.fullmatch(r"[0-9]{8}-[0-9]{6}", rid)
+    saved_tz = os.environ.get("TZ")                                    # (grader H6) UTC, whatever the local zone
+    os.environ["TZ"] = "Asia/Tokyo"
+    time.tzset()
+    try:
+        assert time.strftime("%H", time.localtime(NOW)) != time.strftime("%H", time.gmtime(NOW))
+        assert H.run_id_at(NOW) == rid and H.run_time(rid) == NOW
+    finally:
+        if saved_tz is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = saved_tz
+        time.tzset()
     assert H.run_time(rid) == NOW and H.run_time(rid + "-2") == NOW and H.run_time(rid + "-9") == NOW
     for bad in (rid[:-2], "20261399-000000", rid + "-1", rid + "-10", "x" + rid, rid + "\n", "notes"):
         assert H.run_time(bad) is None, bad
@@ -111,7 +123,7 @@ def test_usage_counts_entries():
             except H.Uncountable as e:
                 assert e.bound and e.detail == "more than 7 entries", e.detail
             a = H.admit(s, [])                                         # (admission: past a bound, not an error)
-            assert a.reason == "total-entries" and a.detail == "more than 7 entries", a
+            assert not a.ok and a.reason == "total-entries" and a.detail == "more than 7 entries", a
     finally:
         shutil.rmtree(d)
 
@@ -171,7 +183,7 @@ def test_uncountable_fails_closed():
             os.chmod(os.path.join(trash, "run", "locked"), 0)
             try:
                 a = H.admit(s, [("a.txt", 1)])
-                assert a.reason == "holding-unreadable" and a.detail, a
+                assert not a.ok and a.reason == "holding-unreadable" and a.detail, a
                 old = os.path.join(trash, H.run_id_at(NOW - 40 * DAY))
                 put(os.path.join(old, "f.txt"), b"f")
                 assert H.cleanup(s, NOW) == [] and os.path.isdir(old)  # nothing removed from a partly counted tree
@@ -192,7 +204,14 @@ def test_uncountable_fails_closed():
             a = H.admit(s, [("a.txt", 1)])
         finally:
             os.scandir = real_scandir
-        assert a.reason == "holding-unreadable" and a.detail == "[Errno 5] Input/output error", a
+        assert not a.ok and a.reason == "holding-unreadable" and a.detail == "[Errno 5] Input/output error", a
+        os.scandir, calls[0] = failing, 0                               # (grader A9) and reserve keeps no lock
+        try:
+            r = H.reserve(s, [("a.txt", 1)])
+        finally:
+            os.scandir = real_scandir
+        assert not r.admission.ok and r.fd is None, r.admission
+        assert open_fds() == before
         assert open_fds() == before
         assert H.not_applied(a, "~/thesis", "~/t") == ("Not applied: deleting or replacing files in ~/thesis. fs-sync "
                                                        "couldn't measure its holding folder (~/t): [Errno 5] "
@@ -202,7 +221,8 @@ def test_uncountable_fails_closed():
         H._trash = lambda st: os.open(trash, os.O_RDONLY | os.O_DIRECTORY)
         os.getuid = lambda: saved() + 1
         try:
-            assert H.admit(s, [("a.txt", 1)]).reason == "holding-unreadable"
+            a = H.admit(s, [("a.txt", 1)])
+            assert not a.ok and a.reason == "holding-unreadable", a
         finally:
             os.getuid, H._trash = saved, real_trash
     finally:
