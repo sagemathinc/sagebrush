@@ -113,7 +113,8 @@ const ratelimits = (id, fails = 1_000_000) => ({ SYNC_PREAUTH: { namespace_id: i
 const RO = "a9a9a9a9-0009-4a9a-8a9a-a9a9a9a9a909"; // read-only
 const FA = "a9a9a9a9-000b-4a9a-8a9a-a9a9a9a9a90b"; // the first logged row's alarm
 const FB = "a9a9a9a9-000c-4a9a-8a9a-a9a9a9a9a90c"; // a grant's expiry armed by its make
-const listed = [A, B, L, RT, LG, DL, NS, RO, FA, FB].join(",");
+const WK = "a9a9a9a9-000d-4a9a-8a9a-a9a9a9a9a90d"; // an alarm already due, and a later wake
+const listed = [A, B, L, RT, LG, DL, NS, RO, FA, FB, WK].join(",");
 const mf = new Miniflare(convertV4MiniflareOptions({
   workers: [
     { ...base, name: "on", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_AGENT: "1", GRANT_TAG_KEY: KEY, SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["sagebrush.test/*"], outboundService: cocalc, ratelimits: ratelimits("3001") },
@@ -589,6 +590,39 @@ await section("an account taken off the allow list", async () => {
     rmSync(dir, { recursive: true, force: true });
   }
 }, 120_000);
+
+// ---- the account object's alarm: one already due is never postponed by a later wake (wakeBy); it runs, then sets the next
+await section("an alarm already due is never postponed by a later wake", async () => {
+  const s = await enabled(WK);
+  const g = await make(s, [{ path: "/", access: "read" }]);
+  ok(g.status === 201, "(a grant: its expiry, 30 days out, is an alarm time)");
+  const wake = async (v) => (await at(SITE, "/__test/wake?account=" + WK, { method: "POST", body: JSON.stringify(v) })).json();
+  const DAY = 86_400_000, NINETY = 90 * DAY;
+  // (the alarm handler can't run inside the one call, so each row sees wakeBy's own decision)
+  const late = await wake({ alarmIn: -5_000, wake: NINETY });
+  ok(late.alarm !== null && late.alarm <= 1_000, "overdue (5 s past, not yet run), then a wake 90 days out: it stays due, not 90 days out: " + late.alarm);
+  const exact = await wake({ alarmIn: 0, wake: NINETY });
+  ok(exact.alarm !== null && exact.alarm <= 1_000, "exactly due, then a wake 90 days out: it stays due: " + exact.alarm);
+  const soon = await wake({ alarmIn: -5_000, wake: 1 });
+  ok(soon.alarm !== null && soon.alarm <= 1_000, "overdue, then a wake at once: due: " + soon.alarm);
+  const keep = await wake({ alarmIn: 3_600_000, wake: NINETY });
+  ok(keep.alarm === 3_600_000, "an alarm an hour out, then a wake 90 days out: the hour is kept: " + keep.alarm);
+  const earlier = await wake({ alarmIn: 3_600_000, wake: 60_000 });
+  ok(earlier.alarm === 60_000, "an alarm an hour out, then a wake in a minute: the minute: " + earlier.alarm);
+  const none = await wake({ alarmIn: null, wake: 60_000 });
+  ok(none.alarm === 60_000, "no alarm, then a wake in a minute: the minute: " + none.alarm);
+  // the handler: a due alarm left due runs, and its own arm() sets the next real time (the grant's expiry, about
+  // 30 days out), not the later wake asked for while it was due (90 days)
+  await wake({ alarmIn: -5_000, wake: NINETY });
+  let after = null;
+  for (let i = 0; i < 100; i++) {
+    await new Promise((r) => setTimeout(r, 50));
+    after = await (await at(SITE, "/__test/agent?account=" + WK, { method: "POST", body: "{}" })).json();
+    if (after.alarm !== null && after.alarm - Date.now() > DAY) break;
+  }
+  const left = after?.alarm === null || after?.alarm === undefined ? null : after.alarm - Date.now();
+  ok(left !== null && left > 29 * DAY && left < 31 * DAY, "the due alarm runs, and sets the next real time (the grant's expiry, ~30 days), not the 90-day wake: " + (left === null ? null : (left / DAY).toFixed(2) + " days"));
+});
 
 console.log(`${count - failures}/${count} passed`);
 await mf.dispose();
