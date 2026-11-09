@@ -191,13 +191,27 @@ def test_holding_folder():
         assert stat.S_IMODE(os.stat(os.path.join(e.state, "trash")).st_mode) == 0o700
         assert stat.S_IMODE(os.stat(e.held).st_mode) == 0o700
         assert e.holding.same_filesystem(e.root)
+        # (astra 1) trash/ itself, already there with a looser mode: set to 0700 through its handle
+        os.chmod(os.path.join(e.state, "trash"), 0o755)
+        M.Holding(e.state, "20261108-1501").close()
+        assert stat.S_IMODE(os.stat(os.path.join(e.state, "trash")).st_mode) == 0o700
+        # a holding folder that isn't ours (a seam on the owner check): refused before anything enters it
+        saved_uid = os.getuid
+        os.getuid = lambda: saved_uid() + 1
+        try:
+            M.Holding(e.state, "20261108-1502")
+            raise AssertionError("used a holding folder that isn't ours")
+        except PermissionError:
+            pass
+        finally:
+            os.getuid = saved_uid
         # a run folder already there with a looser mode: set to 0700 through its handle
         loose = os.path.join(e.state, "trash", "20261108-1500")
         os.mkdir(loose, 0o755)
         os.chmod(loose, 0o755)
         M.Holding(e.state, "20261108-1500").close()
         assert stat.S_IMODE(os.stat(loose).st_mode) == 0o700
-        for bad in ("", "..", "a/b", ".x", "x" * 65):
+        for bad in ("", "..", "a/b", ".x", "x" * 65, "20261108-1402\n", "20261108-1402\r", " 20261108"):
             try:
                 M.Holding(e.state, bad)
                 raise AssertionError("took %r as a run id" % bad)
@@ -217,13 +231,52 @@ def test_holding_folder():
 def test_move_aside():
     e = Env({"notes/a.tex": b"mine", "b.txt": b"bee"})
     try:
-        M.move_aside(e.root, "notes/a.tex", e.holding, sha(b"mine"))
+        os.chmod(os.path.join(e.local, "notes"), 0o755)
+        M.move_aside(e.root, "notes/a.tex", e.holding, sha(b"mine"), len(b"mine"))
         assert not os.path.exists(os.path.join(e.local, "notes", "a.tex"))
         assert read(os.path.join(e.held, "notes", "a.tex")) == b"mine"
         assert stat.S_IMODE(os.stat(os.path.join(e.held, "notes")).st_mode) == 0o700
+        assert stat.S_IMODE(os.stat(os.path.join(e.local, "notes")).st_mode) == 0o755    # LOCAL_DIR's folders: unchanged
+        # (astra 1) a folder inside the holding folder already there and looser, or not ours: fixed, or refused
+        tree(e.local, {"loose/x.txt": b"x", "theirs/y.txt": b"y"})
+        os.makedirs(os.path.join(e.held, "loose"), mode=0o755)
+        os.chmod(os.path.join(e.held, "loose"), 0o755)
+        M.move_aside(e.root, "loose/x.txt", e.holding, sha(b"x"), 1)
+        assert stat.S_IMODE(os.stat(os.path.join(e.held, "loose")).st_mode) == 0o700
+        saved_uid = os.getuid
+        os.getuid = lambda: saved_uid() + 1
+        try:
+            M.move_aside(e.root, "theirs/y.txt", e.holding, sha(b"y"), 1)
+            raise AssertionError("moved a file into a holding folder that isn't ours")
+        except PermissionError:
+            pass
+        finally:
+            os.getuid = saved_uid
+        assert read(os.path.join(e.local, "theirs", "y.txt")) == b"y"
+        # (astra 2) the planned size is checked before a byte is read: a file that grew is moved back unread
+        tree(e.local, {"grew.bin": b"z" * 4096})
+        hashed, real_hash = [], M._hash
+        M._hash = lambda *a: hashed.append(a) or real_hash(*a)
+        try:
+            M.move_aside(e.root, "grew.bin", e.holding, sha(b"z" * 10), 10)
+            raise AssertionError("moved aside a file of another size")
+        except M.Changed:
+            pass
+            # and a planned size over the scan's file cap is never read, even when the file has that size (the cap
+            # lowered, as every bound can be in tests)
+        saved_cap = M.MAX_FILE_BYTES
+        M.MAX_FILE_BYTES = 4095
+        try:
+            M.move_aside(e.root, "grew.bin", e.holding, sha(b"z" * 4096), 4096)
+            raise AssertionError("read a file over the cap")
+        except M.Changed:
+            pass
+        finally:
+            M._hash, M.MAX_FILE_BYTES = real_hash, saved_cap
+        assert hashed == [] and read(os.path.join(e.local, "grew.bin")) == b"z" * 4096
         # not the planned file: moved back, Changed
         try:
-            M.move_aside(e.root, "b.txt", e.holding, sha(b"other"))
+            M.move_aside(e.root, "b.txt", e.holding, sha(b"other"), len(b"other"))
             raise AssertionError("moved aside a file that wasn't the planned one")
         except M.Changed as c:
             assert c.rel == "b.txt" and not c.held
@@ -232,7 +285,7 @@ def test_move_aside():
         def newcomer(rel):
             tree(e.local, {rel: b"new"})
         try:
-            M.move_aside(e.root, "b.txt", e.holding, sha(b"other"), hooks={"after_move_aside": newcomer})
+            M.move_aside(e.root, "b.txt", e.holding, sha(b"other"), len(b"other"), hooks={"after_move_aside": newcomer})
             raise AssertionError("no Changed")
         except M.Changed as c:
             assert c.held
@@ -241,7 +294,7 @@ def test_move_aside():
         tree(e.local, {"target": b"mine"})
         os.symlink("target", os.path.join(e.local, "l.txt"))
         try:
-            M.move_aside(e.root, "l.txt", e.holding, sha(b"mine"))
+            M.move_aside(e.root, "l.txt", e.holding, sha(b"mine"), len(b"mine"))
             raise AssertionError("a link counted as the planned file")
         except M.Changed:
             pass
@@ -260,7 +313,7 @@ def test_links_on_the_way_are_never_followed():
         os.rename(os.path.join(e.local, "d"), os.path.join(e.local, "d.real"))
         os.symlink(outside, os.path.join(e.local, "d"))
         try:
-            M.move_aside(e.root, "d/f.txt", e.holding, sha(b"theirs"))
+            M.move_aside(e.root, "d/f.txt", e.holding, sha(b"theirs"), len(b"theirs"))
             raise AssertionError("followed a link in LOCAL_DIR")
         except OSError:
             pass
@@ -270,7 +323,7 @@ def test_links_on_the_way_are_never_followed():
         # (sync-client) a link planted inside trash/<run id>/: refused, never followed
         os.symlink(outside, os.path.join(e.held, "d"))
         try:
-            M.move_aside(e.root, "d/f.txt", e.holding, sha(b"f"))
+            M.move_aside(e.root, "d/f.txt", e.holding, sha(b"f"), len(b"f"))
             raise AssertionError("followed a link in the holding folder")
         except OSError:
             pass
@@ -285,7 +338,7 @@ def test_names_as_spelled_on_disk():
     assert nfd != unicodedata.normalize("NFC", nfd)
     e = Env({nfd: b"crema"})
     try:
-        M.move_aside(e.root, nfd, e.holding, sha(b"crema"))
+        M.move_aside(e.root, nfd, e.holding, sha(b"crema"), len(b"crema"))
         assert os.listdir(e.held) == [nfd] and os.listdir(e.local) == []
         assert M.restore(e.root, e.holding) == []
         assert os.listdir(e.local) == [nfd] and read(os.path.join(e.local, nfd)) == b"crema"
@@ -329,7 +382,7 @@ def test_restore():
     e = Env({"a.txt": b"a", "sub/b.txt": b"b", "c.txt": b"c", "gone/d.txt": b"d"})
     try:
         for rel, data in (("a.txt", b"a"), ("sub/b.txt", b"b"), ("c.txt", b"c"), ("gone/d.txt", b"d")):
-            M.move_aside(e.root, rel, e.holding, sha(data))
+            M.move_aside(e.root, rel, e.holding, sha(data), len(data))
         tree(e.local, {"c.txt": b"newer"})                              # occupied now
         os.rmdir(os.path.join(e.local, "gone"))
         tree(e.local, {"gone": b"a file where the folder was"})         # a file where a folder should be
@@ -344,7 +397,7 @@ def test_restore():
 
 def test_temps_and_their_sweep():
     assert M.temp_name("20261108-1402", 7) == ".sagebrush-tmp-20261108-1402-7"
-    for bad in (("", 1), ("a/b", 1), ("r", -1), ("r", "1")):
+    for bad in (("", 1), ("a/b", 1), ("r", -1), ("r", "1"), ("r\n", 1), ("r", True)):
         try:
             M.temp_name(*bad)
             raise AssertionError("made a temp name from %r" % (bad,))
@@ -352,7 +405,8 @@ def test_temps_and_their_sweep():
             pass
     e = Env({"keep.txt": b"k", "sub/.sagebrush-tmp-20261101-0900-3": b"old", ".sagebrush-tmp-20261101-0900-12": b"old",
              ".sagebrush-tmp-20261108-1402-1": b"mine, this run", ".sagebrush-tmp-notes.txt": b"not ours",
-             ".sagebrush-tmp-20261101-0900-x": b"not ours"}, run_id="20261108-1402")
+             ".sagebrush-tmp-20261101-0900-x": b"not ours", ".sagebrush-tmp-20261101-0900-7\n": b"near miss",
+             ".sagebrush-tmp-20261101-0900-8 ": b"near miss"}, run_id="20261108-1402")
     try:
         nfd_dir = unicodedata.normalize("NFD", "café")                  # (reached only by its on-disk spelling)
         tree(e.local, {nfd_dir + "/.sagebrush-tmp-20261101-0900-9": b"old"})
@@ -362,6 +416,7 @@ def test_temps_and_their_sweep():
         # the scan ignores them all, and lists the plain files among them for the sweep, as spelled on disk
         assert not [p for p in r.files if "sagebrush-tmp" in p], sorted(r.files)
         assert sorted(r.temps) == sorted([".sagebrush-tmp-20261101-0900-12", ".sagebrush-tmp-20261101-0900-x",
+                                          ".sagebrush-tmp-20261101-0900-7\n", ".sagebrush-tmp-20261101-0900-8 ",
                                           ".sagebrush-tmp-20261108-1402-1", ".sagebrush-tmp-notes.txt",
                                           "sub/.sagebrush-tmp-20261101-0900-3",
                                           nfd_dir + "/.sagebrush-tmp-20261101-0900-9"]), r.temps
@@ -370,7 +425,8 @@ def test_temps_and_their_sweep():
         left = sorted(os.listdir(e.local)) + sorted("sub/" + n for n in os.listdir(os.path.join(e.local, "sub")))
         assert left == sorted([".sagebrush-tmp-20261101-0900-4", ".sagebrush-tmp-20261101-0900-5",
                                ".sagebrush-tmp-20261101-0900-x", ".sagebrush-tmp-20261108-1402-1",
-                               ".sagebrush-tmp-notes.txt", "keep.txt", "sub", nfd_dir]), left
+                               ".sagebrush-tmp-notes.txt", "keep.txt", "sub", nfd_dir,
+                               ".sagebrush-tmp-20261101-0900-7\n", ".sagebrush-tmp-20261101-0900-8 "]), left
         # a temp that turned into a link or folder since the scan is left as it is
         assert M.sweep_temps(e.root, [".sagebrush-tmp-20261101-0900-4", ".sagebrush-tmp-20261101-0900-5"],
                              "20261108-1402") == 0

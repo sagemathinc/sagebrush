@@ -7,11 +7,11 @@ delete and replace local files without ever losing a byte. No CLI and no network
 - **Folder handles:** every path is opened one component at a time from an open folder (LOCAL_DIR's, or the holding
   folder's), each `O_NOFOLLOW | O_DIRECTORY`, so a link anywhere on the way fails the open and is never followed. Every
   component is the name as spelled on disk (the scan's `raw`), not its NFC form (§4.4).
-- **The holding folder:** `<state>/trash/<run id>/<relative path>`, fs-sync's own: each folder in it made 0700 and
-  opened by handle. It must be on the same filesystem as LOCAL_DIR (§2.4), so that a move there is one rename and can
+- **The holding folder:** `<state>/trash/<run id>/<relative path>`, fs-sync's own: each folder in it, from `trash`
+  down, made 0700 and checked through its handle to be ours and exactly 0700 before a file enters it. It must be on the same filesystem as LOCAL_DIR (§2.4), so that a move there is one rename and can
   be undone.
 - **Move aside** (a delete here, or a file a download replaces): one no-replace rename into the holding folder, then
-  the file is hashed there; if it isn't the planned file it is moved back, and if its name was taken meanwhile it
+  the file is checked there, its planned size first (never past the scan's file cap) and then its hash; if it isn't the planned file it is moved back, and if its name was taken meanwhile it
   stays held and is reported.
 - **Install:** a temporary file in the target's folder renamed into place without replacing; if the name was taken
   meanwhile, the file goes beside it under the conflict name.
@@ -31,12 +31,12 @@ import stat
 import sys
 
 from .plan import conflict_name
-from .scan import TMP_PREFIX, _hash
+from .scan import MAX_FILE_BYTES, TMP_PREFIX, _hash
 
 _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 _CLOEXEC = getattr(os, "O_CLOEXEC", 0)
 _DIR_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | _NOFOLLOW | _CLOEXEC
-_RUN_ID = re.compile(r"^[0-9A-Za-z][0-9A-Za-z_-]{0,63}$")
+_RUN_ID = re.compile(r"[0-9A-Za-z][0-9A-Za-z_-]{0,63}")       # (always fullmatch: "$" would let a final newline in)
 MAX_CONFLICT_TRIES = 8              # names tried for a conflict copy when each is taken in turn meanwhile
 
 
@@ -149,28 +149,43 @@ def _split(rel):
 
 # ---- the holding folder
 
+def own_dirs(dir_fd, parts):
+    """A new handle on `parts` under `dir_fd`, every component one of fs-sync's own folders: made 0700 if missing,
+    opened no-follow, and checked through its handle to be a folder of ours, its mode set to exactly 0700 (fchmod).
+    For the holding folder only, never for LOCAL_DIR's folders. The caller closes the handle."""
+    fd = os.dup(dir_fd)
+    try:
+        for part in parts:
+            nxt = open_dir(fd, [part], make=True)
+            try:
+                st = os.fstat(nxt)
+                if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid():
+                    raise PermissionError(errno.EPERM, "not a folder of yours in fs-sync's holding folder", part)
+                if stat.S_IMODE(st.st_mode) != 0o700:
+                    os.fchmod(nxt, 0o700)
+            except BaseException:
+                os.close(nxt)
+                raise
+            os.close(fd)
+            fd = nxt
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
 class Holding:
     """`<state>/trash/<run id>/`, open by handle. `state_dir` is the state folder #886 checked (state._state_dirs)."""
 
     def __init__(self, state_dir, run_id):
-        if not _RUN_ID.match(run_id):
+        if not isinstance(run_id, str) or not _RUN_ID.fullmatch(run_id):
             raise ValueError("not a run id: %r" % (run_id,))
         self.run_id = run_id
         top = os.open(state_dir, _DIR_FLAGS)
         try:
-            self.fd = open_dir(top, ["trash", run_id], make=True)
+            self.fd = own_dirs(top, ["trash", run_id])
         finally:
             os.close(top)
-        try:
-            for fd in (self.fd,):
-                st = os.fstat(fd)
-                if st.st_uid != os.getuid():
-                    raise PermissionError(errno.EPERM, "the holding folder isn't yours", run_id)
-                if stat.S_IMODE(st.st_mode) != 0o700:
-                    os.fchmod(fd, 0o700)
-        except BaseException:
-            os.close(self.fd)
-            raise
 
     def same_filesystem(self, root_fd):
         """Whether a file under LOCAL_DIR (`root_fd`) can be moved here by one rename (§2.4)."""
@@ -189,26 +204,30 @@ def _hook(hooks, name, rel):
         hooks[name](rel)
 
 
-def _is_planned(dir_fd, name, sha256):
+def _is_planned(dir_fd, name, sha256, size):
+    """Whether `name` is the planned file: a plain file of the planned size (never over the scan's file cap), checked
+    before a byte is read, and then its hash, which reads at most that size + 1 byte."""
+    if size > MAX_FILE_BYTES:
+        return False
     try:
         st = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
-        return stat.S_ISREG(st.st_mode) and _hash(dir_fd, name, st) == sha256
+        return stat.S_ISREG(st.st_mode) and st.st_size == size and _hash(dir_fd, name, st) == sha256
     except OSError:
         return False
 
 
-def move_aside(root_fd, rel, holding, sha256, hooks=None):
+def move_aside(root_fd, rel, holding, sha256, size, hooks=None):
     """Move LOCAL_DIR's `rel` ("a/b/name", as spelled on disk) into the holding folder at the same relative path, by
-    one no-replace rename, and check there that it is the planned file (`sha256`). If it isn't, it is moved back
+    one no-replace rename, and check there that it is the planned file (`sha256`, `size` bytes). If it isn't, it is moved back
     without replacing and Changed is raised; Changed(held=True) if its name was taken meanwhile, so it stays held."""
     folders, name = _split(rel)
     src = open_dir(root_fd, folders)
     try:
-        dst = open_dir(holding.fd, folders, make=True)
+        dst = own_dirs(holding.fd, folders)
         try:
             rename_noreplace(src, name, dst, name)
             _hook(hooks, "after_move_aside", rel)
-            if _is_planned(dst, name, sha256):
+            if _is_planned(dst, name, sha256, size):
                 return
             try:
                 rename_noreplace(dst, name, src, name)
@@ -272,7 +291,7 @@ def restore(root_fd, holding):
         for name, is_dir, is_file in entries:
             rel = "/".join(parts + [name])
             if is_dir:
-                sub = open_dir(hold_dir, [name])
+                sub = own_dirs(hold_dir, [name])
                 try:
                     walk(sub, parts + [name])
                 finally:
@@ -295,12 +314,12 @@ def restore(root_fd, holding):
 
 # ---- temporary files (§4.3)
 
-_TMP = re.compile(r"^" + re.escape(TMP_PREFIX) + r"([0-9A-Za-z][0-9A-Za-z_-]{0,63})-([0-9]+)$")
+_TMP = re.compile(re.escape(TMP_PREFIX) + r"([0-9A-Za-z][0-9A-Za-z_-]{0,63})-([0-9]+)")     # (fullmatch only)
 
 
 def temp_name(run_id, k):
     """The temporary file's name for action `k` of run `run_id`, in its target's folder."""
-    if not _RUN_ID.match(run_id) or not isinstance(k, int) or k < 0:
+    if not isinstance(run_id, str) or not _RUN_ID.fullmatch(run_id) or type(k) is not int or k < 0:
         raise ValueError("not a run id and action number: %r, %r" % (run_id, k))
     return "%s%s-%d" % (TMP_PREFIX, run_id, k)
 
@@ -315,7 +334,7 @@ def sweep_temps(root_fd, temps, run_id):
             folders, name = _split(rel)
         except ValueError:
             continue
-        m = _TMP.match(name)
+        m = _TMP.fullmatch(name)
         if not m or m.group(1) == run_id:
             continue
         try:
