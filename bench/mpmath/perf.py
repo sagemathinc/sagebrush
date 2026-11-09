@@ -7,8 +7,9 @@ run 1 + PASSES times (default 7).  Before every pass mpmath is imported afresh
 (untimed), so that no pass finds constants, Bernoulli numbers or quadrature
 nodes cached by an earlier one: each pass is the same cold-cache workload.
 The first pass also warms the runtime (a JIT) and is reported apart as
-"first"; each row and the whole pass (the macro) are reported as the median
-and p95 of the other passes, never the minimum (design/mpmath-core.md 6.3).
+"first".  Each row and the whole pass (the macro: the rows' work only, with
+results digested after the timer stops) are reported as the median and p95
+of the other passes, never the minimum (design/mpmath-core.md 6.3).
 
 Each row's result is reduced to a canonical text of its exact raw values (an
 mpf's (sign, man, exp, bc), an mpc's pair, a matrix's entries) and printed as
@@ -117,16 +118,20 @@ ROWS += [
 
 
 def run_pass():
-    """One pass: every row once, in order; (row times, digests, pass time)."""
+    """One pass: every row once, in order; (row times, digests, pass time).
+    The pass time covers the rows' work only: results are kept and digested
+    after the timer stops, so canonicalizing and hashing them (slow on some
+    runtimes) is never part of the macro."""
     fresh_mpmath()
-    times, digests = [], []
+    times, results = [], []
     t_pass = time.perf_counter()
     for name, f, f64 in ROWS:
         t = time.perf_counter()
-        r = f()
+        results.append(f())
         times.append(time.perf_counter() - t)
-        digests.append(digest(r, f64))
-    return times, digests, time.perf_counter() - t_pass
+    t_pass = time.perf_counter() - t_pass
+    digests = [digest(r, f64) for r, (name, f, f64) in zip(results, ROWS)]
+    return times, digests, t_pass
 
 
 def median(xs):

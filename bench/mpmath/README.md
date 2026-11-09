@@ -78,7 +78,7 @@ python3 perf.py; node --stack-size=8000 ~/sagebrush/dist/src/cli.js perf.py
 
 `perf.py [PASSES]` runs one fixed pass of every row, 1 + PASSES times (default 7):
 - **Fresh imports.** Before each pass mpmath is imported afresh, untimed, so no pass finds constants, Bernoulli numbers or quadrature nodes cached by an earlier one.
-- **Statistics.** The first pass (which also warms the JIT) is reported apart. Each row and the whole pass (the macro) are given as the median and p95 of the others, never the minimum.
+- **Statistics.** The first pass (which also warms the JIT) is reported apart. Each row and the whole pass (the macro: the rows' work only, with results digested after the timer stops) are given as the median and p95 of the others, never the minimum.
 - **Digests.** Each row prints a SHA-256 of its exact result's raw values (an mpf's `(sign, man, exp, bc)`, in hex), so runtimes can be compared for identical answers. The `fp` row is digested to 12 significant digits, because JavaScript's `Math` and glibc differ in the last bits.
 - **JSON.** The last line is the whole report as JSON.
 
