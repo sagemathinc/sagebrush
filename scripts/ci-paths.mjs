@@ -252,6 +252,8 @@ const censusPaths = [
   ...BUILD_INPUT_PATHS, /^test\/unsafe-allow-inventory\.json$/,
   // (the rich-output sink census, OUT-ISO phase 1: every web source it scans, its registry, tool and suite)
   /^web\/.*\.(js|mjs|ts|mts|html)$/, /^test\/rich-sinks\.json$/, /^test\/rich_sinks\.py$/, /^scripts\/test-rich-sinks\.mjs$/,
+  // (the temp-dir census: the web/ tests it scans (above), its tool and suite)
+  /^scripts\/temp-dirs\.mjs$/, /^scripts\/test-temp-dirs\.mjs$/,
 ];
 const census = full || workflowOrBuild || matches(censusPaths) || fallback;
 // The unsafe boundary's compiler sweep (engine-unsafe-sweep, #234 r2): only inputs that can change what the
