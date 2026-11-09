@@ -322,6 +322,171 @@
    "theirs": "\"x ⇾ y\"",
    "ours": "\"x -> y\"",
    "expect": "fail"
+  },
+  {
+   "name": "term-order: the same arguments under Plus and under Times",
+   "class": "term-order",
+   "orderless": [
+    "Plus",
+    "Times"
+   ],
+   "ours": "Plus[a, b]",
+   "theirs": "Times[b, a]",
+   "expect": "fail"
+  },
+  {
+   "name": "term-order: a repeated term dropped (a multiset, not a set)",
+   "class": "term-order",
+   "orderless": [
+    "Plus",
+    "Times"
+   ],
+   "ours": "Plus[x]",
+   "theirs": "Plus[x, x]",
+   "expect": "fail"
+  },
+  {
+   "name": "term-order: FullForm with trailing text",
+   "class": "term-order",
+   "orderless": [
+    "Plus",
+    "Times"
+   ],
+   "ours": "Plus[x, y] z",
+   "theirs": "Plus[y, x]",
+   "expect": "fail",
+   "how": "^not decided"
+  },
+  {
+   "name": "equivalent-form: Complex[1, 2] is not Complex[1, -2]",
+   "class": "equivalent-form",
+   "ours": "Complex[1, 2]",
+   "theirs": "Complex[1, -2]",
+   "expect": "fail",
+   "how": "mismatch"
+  },
+  {
+   "name": "equivalent-form: Log[2, 8] is 3 (base first)",
+   "class": "equivalent-form",
+   "ours": "Log[2, 8]",
+   "theirs": "3",
+   "expect": "pass"
+  },
+  {
+   "name": "equivalent-form: Log[2, 8] is not Log[8, 2]",
+   "class": "equivalent-form",
+   "ours": "Log[2, 8]",
+   "theirs": "Log[8, 2]",
+   "expect": "fail",
+   "how": "mismatch"
+  },
+  {
+   "name": "equivalent-form: strings have no value to compare",
+   "class": "equivalent-form",
+   "ours": "\"a\"",
+   "theirs": "\"b\"",
+   "expect": "fail",
+   "how": "^not decided"
+  },
+  {
+   "name": "equivalent-form: 1.5*^3 is 1500",
+   "class": "equivalent-form",
+   "ours": "1.5*^3",
+   "theirs": "1500",
+   "expect": "pass"
+  },
+  {
+   "name": "equivalent-form: 1.5*^3 is not 1.5",
+   "class": "equivalent-form",
+   "ours": "1.5*^3",
+   "theirs": "1.5",
+   "expect": "fail",
+   "how": "mismatch"
+  },
+  {
+   "name": "equivalent-form: forced numeric, off by 10^-6 relative",
+   "class": "equivalent-form",
+   "ours": "Times[Plus[1, Rational[1, 1000000]], x]",
+   "theirs": "x",
+   "force_numeric": true,
+   "expect": "fail",
+   "how": "mismatch"
+  },
+  {
+   "name": "equivalent-form: forced numeric, off by 10^-18 (pins the 50-digit evaluation; 15 digits would round it away)",
+   "class": "equivalent-form",
+   "ours": "Plus[x, Rational[1, 1000000000000000000]]",
+   "theirs": "x",
+   "force_numeric": true,
+   "expect": "fail",
+   "how": "mismatch"
+  },
+  {
+   "name": "equivalent-form: forced numeric, Sqrt[x^2] is Abs[x] only on the reals",
+   "class": "equivalent-form",
+   "ours": "Power[Power[x, 2], Rational[1, 2]]",
+   "theirs": "Abs[x]",
+   "force_numeric": true,
+   "expect": "fail",
+   "how": "mismatch"
+  },
+  {
+   "name": "equivalent-form: forced numeric, x - y is not y - x (each variable its own point)",
+   "class": "equivalent-form",
+   "ours": "Plus[x, Times[-1, y]]",
+   "theirs": "Plus[y, Times[-1, x]]",
+   "force_numeric": true,
+   "expect": "fail",
+   "how": "mismatch"
+  },
+  {
+   "name": "equivalent-form: forced numeric, Infinity on both sides is never equal",
+   "class": "equivalent-form",
+   "ours": "Plus[x, Infinity]",
+   "theirs": "Plus[x, Infinity]",
+   "force_numeric": true,
+   "expect": "fail"
+  },
+  {
+   "name": "equivalent-form: unparsable FullForm",
+   "class": "equivalent-form",
+   "ours": "Plus[x,",
+   "theirs": "x",
+   "expect": "fail",
+   "how": "^not decided"
+  },
+  {
+   "name": "oracle-host-limit: a $RecursionLimit refusal with another range",
+   "class": "oracle-host-limit",
+   "message": "$RecursionLimit::limset: Cannot set $RecursionLimit to Infinity; value must be an integer between 20 and 1024; use the MATHICS_MAX_RECURSION_DEPTH environment variable to allow higher limits.",
+   "ours": "Infinity",
+   "expected": "Infinity",
+   "expect": "fail",
+   "how": "not on the list"
+  },
+  {
+   "name": "oracle-host-limit: the $IterationLimit refusal with a prefix",
+   "class": "oracle-host-limit",
+   "message": "Warning: $IterationLimit::limset: Cannot set $IterationLimit to Infinity; value must be an integer between 20 and Infinity.",
+   "ours": "Infinity",
+   "expected": "Infinity",
+   "expect": "fail",
+   "how": "not on the list"
+  },
+  {
+   "name": "normalize: another non-ASCII character is kept as it is",
+   "class": "normalize",
+   "theirs": "x → y",
+   "ours": "x → y",
+   "expect": "pass"
+  },
+  {
+   "name": "an unknown class never passes",
+   "class": "no-such-class",
+   "ours": "x",
+   "theirs": "x",
+   "expect": "fail",
+   "how": "unknown class"
   }
  ]
 }

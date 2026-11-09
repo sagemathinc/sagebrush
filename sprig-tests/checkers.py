@@ -184,7 +184,7 @@ def sage():
 
 FUNCTIONS = {"Sin": "sin", "Cos": "cos", "Tan": "tan", "Cot": "cot", "Sec": "sec", "Csc": "csc",
              "ArcSin": "arcsin", "ArcCos": "arccos", "ArcTan": "arctan", "Sinh": "sinh", "Cosh": "cosh",
-             "Tanh": "tanh", "Exp": "exp", "Sqrt": "sqrt", "Abs": "abs"}
+             "Tanh": "tanh", "Exp": "exp", "Sqrt": "sqrt"}
 CONSTANTS = {"Pi": "pi", "E": "e", "I": "I"}
 
 
@@ -237,6 +237,8 @@ def to_sr(e, S):
         return a[0] + S.I * a[1]
     if h == "Log" and len(a) in (1, 2):
         return S.log(a[0]) if len(a) == 1 else S.log(a[1]) / S.log(a[0])
+    if h == "Abs" and len(a) == 1:
+        return abs(a[0])
     if h in FUNCTIONS and len(a) == 1:
         return getattr(S, FUNCTIONS[h])(a[0])
     raise NotDecided("no conversion for %s" % h)
