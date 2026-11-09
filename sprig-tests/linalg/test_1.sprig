@@ -1,0 +1,37 @@
+(* linear algebra; from the Nov 6 spike's corpora unless noted *)
+(*-- linalg-1 *)
+m = {{1, 2}, {3, 4}}; Det[m]
+(*-- linalg-2 *)
+m = {{1, 2}, {3, 4}}; Inverse[m]
+(*-- linalg-3 *)
+m = {{1, 2}, {3, 4}}; Transpose[m]
+(*-- linalg-4 *)
+m = {{1, 2}, {3, 4}}; m . m
+(*-- linalg-5 *)
+{1, 2, 3} . {4, 5, 6}
+(*-- linalg-6 *)
+Eigenvalues[{{2, 1}, {1, 2}}]
+(*-- linalg-7 *)
+Eigenvectors[{{2, 1}, {1, 2}}]
+(*-- linalg-8 *)
+RowReduce[{{1, 2, 3}, {4, 5, 6}}]
+(*-- linalg-9 *)
+MatrixRank[{{1, 2}, {2, 4}}]
+(*-- linalg-10 *)
+LinearSolve[{{1, 1}, {1, -1}}, {3, 1}]
+(*-- linalg-11 *)
+IdentityMatrix[3]
+(*-- linalg-12 *)
+Cross[{1, 0, 0}, {0, 1, 0}]
+(*-- linalg-13 *)
+Det[{{a, b}, {c, d}}]
+(*-- linalg-14 *)
+NullSpace[{{1, 2}, {2, 4}}]
+(*-- linalg-15 *)
+Eigenvalues[{{1, 2}, {3, 4}}]
+(*-- linalg-16 *)
+Eigenvalues[{{a, b}, {b, a}}]
+(*-- linalg-17 *)
+Det[{{1, 2, 3}, {4, 5, 6}, {7, 8, 10}}]
+(*-- linalg-18 *)
+CharacteristicPolynomial[{{1, 2}, {3, 4}}, x]
