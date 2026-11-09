@@ -28,8 +28,8 @@ export const AGENT = {
   accountPerMinute: 300,
   /** a request's JSON body, in bytes: 1a's verbs carry only paths (writes, with content, come in 1b) */
   bodyBytes: 64 << 10,
-  /** the access log (§8): 90 days and 100,000 rows; a refusal is logged at most once a minute per grant (§2) */
-  logDays: 90,
+  /** the access log (§8): 7 days and 100,000 rows, a fixed host bound (#904); a refusal is logged at most once a minute per grant (§2) */
+  logDays: 7,
   logRows: 100_000,
   /** rows past the log's age deleted by one alarm step */
   logSweep: 1000,
