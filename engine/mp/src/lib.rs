@@ -4,9 +4,11 @@
 //!
 //! - `nat`: natural numbers on u64 limbs, every allocation checked against
 //!   the call's limb limit and the heap (§4.5).
+//! - `exp`: exponents of any magnitude (i64, promoted when needed).
 //! - `mpf`: the raw mpf tuples and their arithmetic (libmpf's normalize,
 //!   from_man_exp, mpf_add/sub/mul/div/sqrt).
 
+pub mod exp;
 pub mod mpc;
 pub mod mpf;
 pub mod nat;
@@ -19,9 +21,6 @@ pub enum Fail {
     Limit { limbs: u64 },
     /// An allocation the heap refused: the host's MemoryError.
     Memory { bytes: u64 },
-    /// An exponent beyond 64 bits (the reference has unbounded exponents;
-    /// the core refuses rather than wrapping): the host's OverflowError.
-    Exponent,
     /// The reference's ZeroDivisionError.
     ZeroDivision,
     /// The reference's ComplexResult (a square root of a negative number).

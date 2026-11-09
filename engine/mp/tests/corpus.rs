@@ -3,7 +3,8 @@
 //! raw result must be identical.  Without it the test does nothing (the
 //! corpus is generated, not committed: see bench/mpmath).
 
-use sagebrush_mp::mpf::{from_man_exp, mpf_add, mpf_div, mpf_mul, mpf_sqrt, Mpf, Rnd};
+use sagebrush_mp::exp::Exp;
+use sagebrush_mp::mpf::{from_man_exp, mpf_add, mpf_div, mpf_mul, mpf_mul_int, mpf_pow_int, mpf_sqrt, Mpf, Rnd};
 use sagebrush_mp::nat::Nat;
 use sagebrush_mp::Fail;
 
@@ -31,13 +32,47 @@ fn nat_hex(n: &Nat) -> String {
     s
 }
 
+fn parse_exp(s: &str) -> Exp {
+    if let Ok(x) = s.parse::<i64>() {
+        return Exp::S(x);
+    }
+    let (neg, digits) = match s.strip_prefix('-') {
+        Some(d) => (true, d),
+        None => (false, s),
+    };
+    let mut mag = Nat::zero();
+    for ch in digits.bytes() {
+        mag = mag.mul_u64(10).unwrap().add_u64((ch - b'0') as u64).unwrap();
+    }
+    Exp::from_parts(neg, mag)
+}
+
+fn show_exp(e: &Exp) -> String {
+    match e {
+        Exp::S(x) => x.to_string(),
+        Exp::B { neg, mag } => {
+            // decimal by repeated division
+            let mut digits = Vec::new();
+            let mut m = mag.clone();
+            let ten = Nat::from_u64(10);
+            while !m.is_zero() {
+                let (q, r) = m.divmod(&ten).unwrap();
+                digits.push((b'0' + r.to_u64().unwrap() as u8) as char);
+                m = q;
+            }
+            let s: String = digits.into_iter().rev().collect();
+            if *neg { format!("-{}", s) } else { s }
+        }
+    }
+}
+
 fn parse(w: &[&str]) -> Mpf {
-    Mpf { sign: w[0].parse().unwrap(), man: hex_nat(w[1]), exp: w[2].parse().unwrap(), bc: w[3].parse().unwrap() }
+    Mpf { sign: w[0].parse().unwrap(), man: hex_nat(w[1]), exp: parse_exp(w[2]), bc: w[3].parse().unwrap() }
 }
 
 fn show(r: &Result<Mpf, Fail>) -> String {
     match r {
-        Ok(m) => format!("{} {} {} {}", m.sign, nat_hex(&m.man), m.exp, m.bc),
+        Ok(m) => format!("{} {} {} {}", m.sign, nat_hex(&m.man), show_exp(&m.exp), m.bc),
         Err(Fail::ZeroDivision) => "ERR ZeroDivision".into(),
         Err(Fail::ComplexResult) => "ERR ComplexResult".into(),
         Err(Fail::KeyError) => "ERR KeyError".into(),
@@ -63,7 +98,12 @@ fn corpus() {
             "mul" => mpf_mul(&s, &t, prec, rnd),
             "div" => mpf_div(&s, &t, prec, rnd),
             "sqrt" => mpf_sqrt(&s, prec, rnd),
-            "fme" => from_man_exp(s.sign, s.man.clone(), s.exp, prec, rnd),
+            "powi" => {
+                let m = t.man.to_u64().unwrap() as i64;
+                mpf_pow_int(&s, if t.sign == 1 { -m } else { m }, prec, rnd)
+            }
+            "muli" => mpf_mul_int(&s, t.sign, &t.man, prec, rnd),
+            "fme" => from_man_exp(s.sign, s.man.clone(), s.exp.clone(), prec, rnd),
             op => panic!("op {}", op),
         };
         n += 1;
