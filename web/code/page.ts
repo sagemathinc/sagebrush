@@ -316,7 +316,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
 
   // ---- for agents and tests: the file as this page has it
   const sb = ((globalThis as any).sagebrush ??= {});
-  const handle = { fid: host.fid, get path() { return path; }, lang: lg, text: () => (mode === "edit" ? ta.value : text), mode: () => mode, setMode, flush, editable: () => editable, stopped: () => stopped };
+  const handle = { fid: host.fid, say, get path() { return path; }, lang: lg, text: () => (mode === "edit" ? ta.value : text), mode: () => mode, setMode, flush, editable: () => editable, stopped: () => stopped };
   sb.code = handle;
   current = { dispose: () => { life.abort(); if (sb.code === handle) delete sb.code; } };
   showMode();

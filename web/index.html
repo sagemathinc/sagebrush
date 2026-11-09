@@ -3887,7 +3887,7 @@ let agentPairing = null, agentTries = 0;
 const pairAgent = (w) => (agentPairing ??= import(new URL("sagebrush-agent.js", location.href).href + (agentTries++ ? `?try=${agentTries}` : ""))
   .then((m) => m.mountAgentPairing(w)))
   .catch((e) => { agentPairing = null; throw e; });
-const agentFailed = () => { statusEl.textContent = "Couldn't load the agent connection. Press Agent to try again, or reload the page."; };
+const agentFailed = () => { statusEl.textContent = "Couldn't load the agent connection. Try Agent or ⋯ ▸ Connect an agent… again, or reload the page."; };
 // (where Agent is offered: not in the desktop app or the CLI's page, pages on this computer the agent's program doesn't accept)
 const agentHere = !LOCAL && !window.__TAURI__;
 // (a ?pair= link, or an agent this browser remembers: the chunk mounted now, to connect or reconnect)
@@ -4065,7 +4065,8 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && (await latexBoot(ws, RUNNER ? { WorkerKernel, RunnerWorker } : null))) return;
   // (a code or text file's own page, /?code=<fid> (1a): web/code/boot.ts; its hooks for the file browser and the preview either way)
   if (await codeBoot(ws, (e, how) => openEntry(e, how), agentHere && ws ? codeAgent(ws) : null)) {
-    if (agentHere && ws) restoreAgent(ws, () => {});
+    // (a ?pair= link or a remembered agent whose chunk didn't load: said in the code page's own status line)
+    if (agentHere && ws) restoreAgent(ws, () => window.sagebrush?.code?.say?.("Couldn't load the agent connection. Choose Connect an agent… again, or reload the page."));
     return;
   }
   startNotebookAgent();

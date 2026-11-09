@@ -116,7 +116,7 @@ try {
   // (the status line is the page's, which other messages replace: every text it shows is kept here)
   await ev(`(() => { const st = document.querySelector("#status"); window.__said = []; new MutationObserver(() => window.__said.push(st.textContent)).observe(st, { childList: true, characterData: true, subtree: true }); return true; })()`);
   await ev(`(document.querySelector("#agentbtn").click(), true)`);
-  ok(await until(`window.__said.includes("Couldn't load the agent connection. Press Agent to try again, or reload the page.")`) && !(await ev(`!!document.querySelector(".sbag-box")`)), "the chunk's fetch failing: the page says so in one line", await ev(`window.__said`).catch(() => null));
+  ok(await until(`window.__said.includes("Couldn't load the agent connection. Try Agent or ⋯ ▸ Connect an agent… again, or reload the page.")`) && !(await ev(`!!document.querySelector(".sbag-box")`)), "the chunk's fetch failing: the page says so in one line", await ev(`window.__said`).catch(() => null));
   failChunk = false;
   await send("Fetch.disable");
   await ev(`(document.querySelector("#agentbtn").click(), true)`);
@@ -227,6 +227,16 @@ try {
   const beforeC = requests.length;
   ok(typeof pyFid === "string" && await go(`?code=${encodeURIComponent(pyFid)}`) && await until(`!!document.querySelector('.code-filemenu [data-f="c-agent"]')`), "the code page's File menu offers Connect an agent…");
   ok(!requests.slice(beforeC).some(chunk) && await ev(`document.querySelector("#agentbtn").hidden`), "nothing fetched before it's wanted, and the notebook's Agent isn't shown over it");
+  // (a ?pair= link on the code page whose chunk can't load: said in the code page's own status line; board's N1 on #935)
+  const cf = await drive({ op: "code" });
+  await send("Network.setCacheDisabled", { cacheDisabled: true });
+  await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-agent.js*" }] });
+  failChunk = true;
+  ok(await go(`?code=${encodeURIComponent(pyFid)}&pair=${cf.code}&port=${cf.port}`) && await until(`(document.querySelector(".code-status")?.textContent ?? "") === "Couldn't load the agent connection. Choose Connect an agent… again, or reload the page."`, 20000), "a ?pair= link on the code page whose chunk can't load: the code page's status line says so", await ev(`document.querySelector(".code-status")?.textContent ?? null`).catch(() => null));
+  failChunk = false;
+  await send("Fetch.disable");
+  await send("Network.setCacheDisabled", { cacheDisabled: false });
+  ok(await go(`?code=${encodeURIComponent(pyFid)}`) && await until(`!!document.querySelector('.code-filemenu [data-f="c-agent"]')`), "(the code page again)");
   await ev(`(document.querySelector('.code-filemenu [data-f="c-agent"]').click(), true)`);
   ok(await until(`!!document.querySelector(".sbag-box")`) && requests.slice(beforeC).some(chunk), "it fetches the page's chunk and opens Connect");
   const c3 = await drive({ op: "code" });
