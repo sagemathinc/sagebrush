@@ -91,10 +91,12 @@ writeFileSync(join(out, "lib-meta.gen.js"), `globalThis.__SAGEBRUSH_BUILD_ID__ =
 // The packages (packages/<name>/, scripts/packages.mjs): the registry and
 // their files, which src/compile.ts imports on a sys.path miss after
 // checking each against the registry's SHA-256
-const { readPackages } = await import("./packages.mjs");
+const { readPackages, packagesGenSource } = await import("./packages.mjs");
 const packages = readPackages(root);
 if (JSON.stringify(packages.registry, null, 2) + "\n" !== readFileSync(join(root, "packages", "registry.json"), "utf8")) throw new Error("packages/registry.json is out of date: run node scripts/packages.mjs");
-writeFileSync(join(out, "packages.gen.js"), `globalThis.__SAGEBRUSH_PACKAGES__ = ${JSON.stringify(packages)};\n`);
+// (each package's files in a gzip blob of its own, decoded on the first read of one of them, never at startup:
+// scripts/packages.mjs packagesGenSource, src/lib-embed.ts installEmbeddedPackages)
+writeFileSync(join(out, "packages.gen.js"), packagesGenSource(packages));
 // The engines (wasm/sagebrush-engine.wasm), embedded: the bundle stays one file.
 // (and the PNG module, wasm/sagebrush-raster.wasm, decoded when a PNG is
 // first written or read: src/runtime/raster.ts; and engine/nd's numerics

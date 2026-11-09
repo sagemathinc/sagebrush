@@ -8839,6 +8839,38 @@
   "owner": "the LaTeX CLI (@sagebrush-latex)",
   "reason": "sagebrush latex: the largest .tex read (4 MiB) and the most PNG pages of a non-beamer document (60): input and output bounds of a local command"
  },
+ "src/lib-embed.ts :: decode :: JSON.parse(new TextDecoder(\"utf-8\", { fatal: true }).decode(gunzipSync(Buffer.from(payload, \"base64\"), maxBytes === undefined ? {} : { maxOutputLength: maxBytes }))); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "The CLI's embedded package blobs (src/lib-embed.ts): a blob's inflate is bounded (PACKAGE_BLOB_BYTES, 64 MiB), so a corrupt or oversized blob in the build fails closed (a RangeError at its first import) instead of exhausting memory. It bounds the build's own data, never a user's computation."
+ },
+ "src/lib-embed.ts :: decode :: const decode = (payload: string, maxBytes?: number): Record<string, string> => #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "The CLI's embedded package blobs (src/lib-embed.ts): a blob's inflate is bounded (PACKAGE_BLOB_BYTES, 64 MiB), so a corrupt or oversized blob in the build fails closed (a RangeError at its first import) instead of exhausting memory. It bounds the build's own data, never a user's computation."
+ },
+ "src/lib-embed.ts :: installLazy :: function installLazy(lib: Record<string, string>, payload: string, names: string[], family?: string, counts = libEmbedStats.families, maxBytes?: number) { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "The CLI's embedded package blobs (src/lib-embed.ts): a blob's inflate is bounded (PACKAGE_BLOB_BYTES, 64 MiB), so a corrupt or oversized blob in the build fails closed (a RangeError at its first import) instead of exhausting memory. It bounds the build's own data, never a user's computation."
+ },
+ "src/lib-embed.ts :: load :: const files = decode(payload, maxBytes); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "The CLI's embedded package blobs (src/lib-embed.ts): a blob's inflate is bounded (PACKAGE_BLOB_BYTES, 64 MiB), so a corrupt or oversized blob in the build fails closed (a RangeError at its first import) instead of exhausting memory. It bounds the build's own data, never a user's computation."
+ },
  "src/limits-file.ts :: readLimitsFile :: const buf = Buffer.alloc(LIMITS_MAX_BYTES + 1); #0": {
   "class": "1",
   "owner": "CLI/runtime configuration",
