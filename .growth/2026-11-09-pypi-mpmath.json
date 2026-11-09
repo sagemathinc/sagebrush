@@ -1,0 +1,10 @@
+{
+ "v": 1,
+ "reason": "pypi-mpmath (the RH companion's numerics): mpmath 1.3.0, its pinned pure-Python wheel byte for byte, tests included, as a curated package: imported on first use (the CLI's lazy package blob, #914; the browser's lazy group). Measured with bun 1.4.4 (size-record.sh) on #914's head 4a041cdb vs this head merged with it: cli/pyjs.cjs +940542 (+64 slack), of which packages.gen.js +672785 (the blob) and web.gen.js +265788 (the browser group, embedded in the CLI's web UI); lib.gen +2021; worker +16525; notebook +48. The new lazy group pkg-pypi-mpmath.src is authorized at epoch 2005054 / ceiling 2005118; the exact rows are raised to their measured maxima (packages.gen.js 787869, registry/packages 5); the worker's ceiling to 1682389. Idle cost, same-path: -c pass +8 ms, +2.8 MiB RSS (@sagebrush's ruling (a), Nov 9).",
+ "bytes": {
+  "cli/lib.gen.js": 2021,
+  "cli/pyjs.cjs": 940606,
+  "engine/sagebrush-notebook.js": 48,
+  "engine/sagebrush-worker.js": 16525
+ }
+}
