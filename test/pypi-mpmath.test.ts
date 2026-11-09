@@ -5,21 +5,21 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 // mpmath 1.3.0 (packages/pypi-mpmath) on prime counting and the zeta function: li, Li, riemannr, zetazero and zeta
-// on the critical line, at 15 and 30 digits. test/mpmath_rh_cases.py; its .out is CPython 3.14.10's, with the
+// on the critical line, at 15 and 30 digits. test/mpmath_zeta_cases.py; its .out is CPython 3.14.10's, with the
 // committed package on its path. (Upstream's own suite runs in pypi-tests/mpmath.)
 const ROOT = join(__dirname, "../..");
-const CASES = join(ROOT, "test/mpmath_rh_cases.py");
-const OUT = join(ROOT, "test/mpmath_rh_cases.out");
+const CASES = join(ROOT, "test/mpmath_zeta_cases.py");
+const OUT = join(ROOT, "test/mpmath_zeta_cases.out");
 
 test("mpmath 1.3.0: li, Li, riemannr, zetazero and zeta on the critical line, as CPython 3.14.10", () => {
   const want = readFileSync(OUT, "utf8").split("\n");
   const got = execFileSync(process.execPath, [join(__dirname, "../src/cli.js"), CASES], { encoding: "utf8" }).split("\n");
   assert.ok(want.length > 40, "the recording has every case");
-  for (let i = 0; i < Math.max(want.length, got.length); i++) assert.equal(got[i], want[i], `mpmath_rh_cases.py line ${i + 1}`);
+  for (let i = 0; i < Math.max(want.length, got.length); i++) assert.equal(got[i], want[i], `mpmath_zeta_cases.py line ${i + 1}`);
 });
 
 // (the recording's provenance: CI's CPython, when it is 3.14.10, prints the committed .out)
-test("mpmath_rh_cases.out is what CPython 3.14.10 prints", (t) => {
+test("mpmath_zeta_cases.out is what CPython 3.14.10 prints", (t) => {
   const v = execFileSync("python3", ["-c", "import sys; print('%d.%d.%d' % sys.version_info[:3])"], { encoding: "utf8" }).trim();
   if (v !== "3.14.10") return t.skip(`python3 is ${v}, not the recording's 3.14.10`);
   const live = execFileSync("python3", [CASES], {
