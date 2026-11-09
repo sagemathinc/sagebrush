@@ -53,8 +53,9 @@ const loadPresent = () => (presentMod ??= (import(presentTries++ ? `${presentUrl
 // for the next file opened in place; started again on a Run after it failed to start. Each Run's number: a Run is
 // current only while it is the last one asked for, on a page not disposed of)
 let sageSession: ReturnType<typeof sessionOf> | null = null;
-// (the interacts this page's Sage session made, by id: the last Run's, live in the preview (interact.ts live))
-let liveIds = new Set<number>();
+// (the interacts this page's Sage session made, by id: the last Run's, live in the preview (interact.ts live), only in
+//  the document that Run was of (liveFid): another document's results, from another session, have ids of their own)
+let liveIds = new Set<number>(), liveFid = "";
 // (Run's code, run-core.mjs: a chunk of its own, /sagebrush-latex-run.js, fetched on the first Run (it is first-use
 //  code: the editor loads without it); a failed fetch is tried again by a URL of its own)
 const runUrl = new URL("sagebrush-latex-run.js", import.meta.url).href;
@@ -746,7 +747,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   //  so its copy has them)
   E.onRendered(() => {
     if (!preview.querySelector(".sageinteract-at")) return;
-    void loadInteract().then((m) => { if (live() && m.draw(preview, sageSession?.kernel as any, liveIds) && presenting) { const a = presenting.at(); presenting.go(a.frame, a.step); } }, () => {});
+    void loadInteract().then((m) => { if (live() && m.draw(preview, sageSession?.kernel as any, liveFid === host.fid ? liveIds : new Set()) && presenting) { const a = presenting.at(); presenting.go(a.frame, a.step); } }, () => {});
   });
   life.signal.addEventListener("abort", () => presenting?.stop());
 
@@ -792,7 +793,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       });
       if (r.stale || !current()) return;
       if (r.msg) { say(r.msg); return; }
-      liveIds = new Set(r.interactIds);
+      liveIds = new Set(r.interactIds); liveFid = host.fid;
       await loadResults();
       const bad = r.states.filter((x: any) => x.s !== "ok").length;
       const cloud = r.remote ? `; ${r.remote} file${r.remote === 1 ? " in its folder is" : "s in its folder are"} only in the cloud, not given to Sage` : "";

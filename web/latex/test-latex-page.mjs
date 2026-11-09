@@ -3267,6 +3267,13 @@ def h(k=slider(1, 5, 1, 2)):
       const moved = await until(`${W1}.querySelector(".si-out")?.textContent === "k^2 = 16\\n" && !!${W1}.querySelector("img.sageplot") && ${W1}.querySelector("img.sageplot").src !== ${JSON.stringify(src0)} && ${W1}.querySelector(".si-v")?.textContent === "4"`, 20000);
       check(liveNow && moved, "@interact live: after a Run its controls work; the slider moved to 4 runs its function again (k^2 = 16, a new plot)",
         { liveNow, moved, out: await ev(`${W1}?.querySelector(".si-out")?.textContent ?? null`), shown: await ev(`${W1}?.querySelector(".si-v")?.textContent ?? null`) });
+      // (a redraw of its block (its frame's title edited) keeps the values and output it has now: 4, k^2 = 16)
+      const tx = await ev(`document.querySelector(".tex-src").value`);
+      await typeInto(tx.replace("{A widget}", "{A widget!}"));
+      const kept4 = await until(`document.querySelector('.tex-preview .ch:not([hidden]) section.slide .slide-title')?.textContent === "A widget!" && ${W1}?.querySelector("input[type=range]")?.value === "4" && ${W1}?.querySelector(".si-out")?.textContent === "k^2 = 16\\n"`, 15000);
+      await typeInto(tx);
+      await until(`document.querySelector('.tex-preview .ch:not([hidden]) section.slide .slide-title')?.textContent === "A widget"`, 15000);
+      check(kept4, "@interact live: its block drawn again (an edit beside it) keeps the values and output it had (4, k^2 = 16)", { value: await ev(`${W1}?.querySelector("input[type=range]")?.value ?? null`), out: await ev(`${W1}?.querySelector(".si-out")?.textContent ?? null`) });
       const Pi = `document.querySelector(".tex-present")`;
       await ev(`(document.querySelector(".tex-present-btn").click(), 1)`);
       const inPresent = await until(`!!${Pi} && !!${Pi}.querySelector(".tp-stage .sageinteract input[type=range]") && !!${Pi}.querySelector(".tp-stage .sageinteract img.sageplot")`, 15000);
@@ -3294,6 +3301,14 @@ def h(k=slider(1, 5, 1, 2)):
       await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
       await until(`!${Pi}`, 5000);
       check(reran && fresh3, "@interact: Shift+Enter while presenting runs it again; the slide shows the new interact (at 3, k^2 = 9), nothing stale", { reran, fresh3 });
+      // (PR 4: another document in this page and session, whose results (the same file's bytes) have the same ids: not live,
+      //  as its ids aren't this session's Run's for it)
+      const iaText = await ev(`document.querySelector(".tex-src").value`);
+      const fCopy = await mk("/t/interact-copy.tex", enc(iaText));
+      await ev(`${W}.read("/t/interact.tex.results.json").then((r) => ${W}.create("/t/interact-copy.tex.results.json", { content: r.content })).then(() => 1)`);
+      await ev(`(window.__sbTex({ path: "/t/interact-copy.tex", fid: ${JSON.stringify(fCopy)} }), 1)`);
+      const copyNotLive = await until(`document.querySelector(".tex-title")?.textContent === "interact-copy.tex" && (() => { const w = document.querySelector('.tex-preview .ch:not([hidden]) .sageinteract'); return !!w && w.querySelector("input[type=range]").disabled; })()`, 20000);
+      check(copyNotLive, "@interact live: another document in the same session, its results with the same ids, is not live", null);
       // (PR 4: the page opened again, a new session: its interacts drawn from the results file, not live, saying to run)
       await open((await ev(`${W}.stat("/t/interact.tex").then((e) => e.fid)`)));
       const notLive = await until(`(() => { const w = document.querySelector('.tex-preview .ch:not([hidden]) .sageinteract'); return !!w && w.querySelector("input[type=range]").disabled && w.title === "Run the code (Shift+Enter) to use these controls"; })()`, 20000);
