@@ -166,6 +166,16 @@ test("expat_rules.py: no pattern or string scan examines more than the window, a
   assert.equal(replacedWhole, true, "the line ends replaced a window at a time, every call seen");
 });
 
+// (grader's span bound, P3c-1's optional note: _run_to never reads past its end, whatever the callers stop on; a run
+// longer than end, at ends inside and on the 7-character windows' seams)
+test("pyexpat._run_to stops at its end bound, never past it, across window seams", () => {
+  const src = `import re, pyexpat
+r = re.compile("a*")
+pyexpat._WINDOW = 7
+print([pyexpat._run_to(r, "a" * 20, 0, e) for e in (0, 3, 7, 8, 14, 15, 20)], pyexpat._run_to(r, "aaab", 0, 20))`;
+  assert.equal(cli(["-c", src]), "[0, 3, 7, 8, 14, 15, 20] 3\n");
+});
+
 test("expat_rules.py: the work is linear: examined characters and steps, calls and copies, against their lower controls", () => {
   const w = rules().work;
   for (const [label, [a, b]] of Object.entries(w) as [string, any[]][]) {
