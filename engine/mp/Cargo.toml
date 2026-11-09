@@ -13,5 +13,10 @@ crate-type = ["cdylib", "rlib"]
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dlmalloc = { version = "=0.2.14", default-features = false }
 
+[features]
+# a test-only counter of results that took the big exponent path (§6.1's
+# which-path pins); off in every shipped build
+path-counter = []
+
 [lints]
 workspace = true

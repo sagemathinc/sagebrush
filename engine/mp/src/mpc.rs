@@ -18,12 +18,12 @@ pub fn mpf_shift(s: &Mpf, n: i64) -> Result<Mpf, Fail> {
     if s.man.is_zero() {
         return Ok(s.clone());
     }
-    Ok(Mpf { sign: s.sign, man: s.man.clone(), exp: s.exp.checked_add(n).ok_or(Fail::Exponent)?, bc: s.bc })
+    Ok(Mpf { sign: s.sign, man: s.man.clone(), exp: s.exp.add_i64(n)?, bc: s.bc })
 }
 
 /// mpf_abs; prec 0 is exact.
 pub fn mpf_abs(s: &Mpf, prec: u64, rnd: Rnd) -> Result<Mpf, Fail> {
-    if s.man.is_zero() && s.exp != 0 {
+    if s.man.is_zero() && !s.exp.is_zero() {
         if s.is_fninf() {
             return Ok(crate::mpf::finf());
         }
@@ -31,11 +31,11 @@ pub fn mpf_abs(s: &Mpf, prec: u64, rnd: Rnd) -> Result<Mpf, Fail> {
     }
     if prec == 0 {
         if s.sign == 1 {
-            return Ok(Mpf { sign: 0, man: s.man.clone(), exp: s.exp, bc: s.bc });
+            return Ok(Mpf { sign: 0, man: s.man.clone(), exp: s.exp.clone(), bc: s.bc });
         }
         return Ok(s.clone());
     }
-    normalize1(0, s.man.clone(), s.exp, s.bc, prec, rnd)
+    normalize1(0, s.man.clone(), s.exp.clone(), s.bc, prec, rnd)
 }
 
 /// mpf_hypot: sqrt(x^2 + y^2).
