@@ -89,6 +89,22 @@ check(u.className === "user other", "a kept message with a hostile mode: class o
   check(Object.getPrototypeOf(bt.tools) === Object.prototype && Object.getPrototypeOf(bt.attention) === Object.prototype && Object.hasOwn(bt.tools, "__proto__") && Object.hasOwn(bt.attention, "__proto__"),
     "a turn kept across a reload, its events going on: __proto__ is an own entry, the records' prototypes unchanged", { tools: Object.keys(bt.tools), att: Object.keys(bt.attention) });
 }
+// (grader's P6, P7 on #932 r2: in a kept turn, inherited names are never entries: a prompt "constructor" becomes a part
+//  and is drawn; tool_output for calls "constructor" and "toString" that never started adds nothing and writes nowhere)
+{
+  const k = newThread("k6", "K");
+  let n = 0;
+  const ke = (th, e) => apply(th, { seq: ++n, turn_id: "z1", ...e }, 1000);
+  ke(k, { type: "turn_started" });
+  const kb = JSON.parse(JSON.stringify(k));
+  ke(kb, { type: "attention", id: "constructor", kind: "approval", state: "open", title: "Q ctor" });
+  ke(kb, { type: "tool_output", call: "constructor", text: "x" });
+  ke(kb, { type: "tool_output", call: "toString", text: "y" });
+  const kt = kb.entries.find((e) => e.kind === "turn");
+  const kh = turnNode(kb, kt, hooks).innerHTML;
+  check(kt.parts.some((x) => x.kind === "attention" && x.id === "constructor") && /data-attention="constructor"/.test(kh), "a kept turn: a prompt with id constructor becomes a part and is drawn", kt.parts);
+  check(Object.keys(kt.tools).length === 0 && Object.output === undefined && Function.prototype.output === undefined && Object.prototype.output === undefined, "a kept turn: tool_output for calls constructor and toString that never started adds nothing, and writes onto no prototype", Object.keys(kt.tools));
+}
 // ---- usage and durations: finite, not negative, numbers (daybreak3's E932-2), as applied and again where drawn
 {
   const q = newThread("q", "Q");
