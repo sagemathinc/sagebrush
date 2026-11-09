@@ -386,6 +386,30 @@ try {
   }
   ok((a5[0] === "NEW" && a5[1] === "2") || /stale/.test(a5[2]), `F5: switching away and back during a run: the cell shows its output, or is stale (${JSON.stringify(a5)})`);
 
+  // a run that outlives the time away, with no timing luck: it waits on input(), answered from its own field only
+  // once another notebook is shown, so it ends while its notebook isn't shown; its output, number and time are there
+  // when the notebook is shown again, the cell ok (not interrupted, not lost), and kept in the document
+  await fileNew();
+  const idAw = await ev("localStorage.getItem('sagebrush-current')");
+  await set(["x = input('go? ')\nprint('AWAY DONE', x)"]);
+  await ev("window.__runAw = sagebrush.notebook.runAll(); true");
+  await until("!!sagebrush.notebook.cells()[0].out.querySelector('.stdin-field')", 30000);
+  await ev("(window.__awField = sagebrush.notebook.cells()[0].out.querySelector('.stdin-field'), 1)");
+  await fileNew();
+  const awayShown = await ev("localStorage.getItem('sagebrush-current')");
+  const stillRunning = await ev("!window.__awField.isConnected && !!window.__awField.parentNode");
+  await ev("(() => { const f = window.__awField; f.value = 'yes'; f.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); return 1; })()");
+  const awEnded = await ev("Promise.race([window.__runAw.then(() => 'ended'), new Promise((ok) => setTimeout(() => ok('not yet'), 20000))])");
+  const endedAway = stillRunning && awEnded === "ended" && (await ev("localStorage.getItem('sagebrush-current')")) === awayShown && awayShown !== idAw;
+  await ev(`sagebrush.open(${JSON.stringify(idAw)})`);
+  await until(`localStorage.getItem('sagebrush-current') === ${JSON.stringify(idAw)}`, 10000);
+  await until("sagebrush.notebook.cells()[0].out.textContent.includes('AWAY DONE')", 10000).catch(() => {});
+  const aw = [await out(0), await ev("sagebrush.notebook.graph().map((c) => c.state).join(',')"), await ev("sagebrush.notebook.cells()[0].n.textContent")];
+  ok(endedAway && /AWAY DONE yes/.test(aw[0]) && aw[1] === "ok" && /^\[\d+\]$/.test(aw[2]), `a run that ends while its notebook isn't shown: its output is there when the notebook is shown again, the cell ok (${JSON.stringify({ endedAway, stillRunning, awEnded, aw })})`);
+  await sleep(1500);
+  const kept = await ev(`new Promise((ok) => { const r = indexedDB.open("sagebrush"); r.onsuccess = () => { const g = r.result.transaction("notebooks").objectStore("notebooks").get(${JSON.stringify(idAw)}); g.onsuccess = () => { ok(JSON.stringify(g.result?.cells?.[0]?.outputs ?? null)); r.result.close(); }; g.onerror = () => ok(null); }; r.onerror = () => ok(null); })`);
+  ok(/AWAY DONE yes/.test(kept ?? ""), `...and kept in the document (${String(kept).slice(0, 160)})`);
+
   // third review, F16: verify keeps which clip path an SVG reference names
   await set(["v = [1]", "w = v\nw[0] += 1", "from IPython.display import SVG, display\ndisplay(SVG('<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"80\"><clipPath id=\"sbclip1\"><rect width=\"100\" height=\"80\"/></clipPath><clipPath id=\"sbclip2\"><rect width=\"200\" height=\"80\"/></clipPath><rect width=\"200\" height=\"80\" fill=\"blue\" clip-path=\"url(#sbclip%d)\"/></svg>' % (1 + v[0] % 2)))"]);
   await run([0, 1, 2]);

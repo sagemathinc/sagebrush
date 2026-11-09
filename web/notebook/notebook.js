@@ -838,11 +838,20 @@ export function createNotebook(root, opts = {}) {
         ms = Math.max(0, ms - waited);
         settle(cell);
         // (the notebook was switched away from while this ran: its output went to
-        // the cell as it was then; if the notebook is shown again, the cell shown
-        // now gets it; if not, the output is lost, so the run counts as stopped
-        // and the cell stays stale)
+        // the cell as it was then; if the notebook is shown, the cell shown now
+        // gets it; if it isn't, the output is kept with its interpreter and put in
+        // the cell when the notebook is shown again (load), so a run that outlives
+        // the time away ends as it ended, not lost; a cell gone meanwhile from the
+        // notebook shown: its run counts as stopped)
         if (!cell.el.isConnected) {
           const live = kernel === k ? cellById(cell.id) : null;
+          if (!live && kernel !== k) {
+            settle(cell);
+            const n = ++k.execCount;
+            k.ran?.add(cell.id);
+            (k.parked ??= new Map()).set(cell.id, { nodes: [...cell.out.childNodes], n, ms, error: failed || !!info?.error });
+            return resolve({ ok: !info?.error, ms, ...(info?.interrupted ? { stopped: true, interrupted: true } : {}), ...(info?.files ? { files: info.files } : {}) });
+          }
           if (!live) return resolve({ ok: false, ms, stopped: true });
           forgetInteracts(live.out);
           live.out.replaceChildren(...cell.out.childNodes);
@@ -1970,7 +1979,8 @@ export function createNotebook(root, opts = {}) {
       loadOutputs(cell.out, c.outputs);
       if (c.n != null) cell.n.textContent = `[${c.n}]`;
       cell.ms = typeof c.ms === "number" && c.ms >= 0 ? c.ms : null;
-      if (opts.staleOnLoad && !kernel?.ran?.has(cell.id)) markStale(cell);
+      // (and one this interpreter's scheduler left stale while the notebook wasn't shown: a run it stopped then)
+      if (opts.staleOnLoad && (!kernel?.ran?.has(cell.id) || kernel?.reactive?.stale?.has(cell.id))) markStale(cell);
     }
   }
   // Show a document, replacing what is there.
@@ -1991,8 +2001,26 @@ export function createNotebook(root, opts = {}) {
     const snap = snapshot();
     lastJson = JSON.stringify(snap);
     setSynced(rev, snap.cells);
-    Promise.resolve().then(() => { loading = false; }); // after the observer's records for this
+    Promise.resolve().then(() => { loading = false; showParked(); }); // after the observer's records for this
     reactiveLoad();
+  }
+  // (the runs of this notebook that ended while it wasn't shown (execCell's done): their output, prompt number and
+  // time put in their cells, once loaded, as a change of the document, so it is saved)
+  function showParked() {
+    const p = kernel?.parked;
+    if (!p?.size) return;
+    for (const [id, r] of p) {
+      const c = cellById(id);
+      if (!c) continue;
+      forgetInteracts(c.out);
+      c.out.replaceChildren(...r.nodes);
+      settle(c);
+      freshen(c);
+      c.el.classList.remove("cancelled", "error", "stale");
+      c.n.textContent = `[${r.n}]`;
+      c.time.textContent = `${r.ms < 10 ? r.ms.toFixed(1) : Math.round(r.ms)} ms`;
+    }
+    p.clear();
   }
   // The reactive notebook takes the document's cells as they are: their
   // code registered, stale unless this interpreter computed them.
