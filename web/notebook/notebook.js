@@ -776,6 +776,10 @@ export function createNotebook(root, opts = {}) {
       return engine().run([cell.id], consentFor([cell.id])).finally(() => asked.delete(text));
     }
     if (cell.el.classList.contains("queued") || cell.el.classList.contains("running")) return Promise.resolve();
+    // (an explicit run, synchronously, before anything is asked of the kernel: the page's moment to start a new
+    // interpreter for a permission widened since this one started (confinement phase 2); never the reactive
+    // scheduler's own reruns)
+    if (gesture) opts.onExplicitRun?.();
     // the reactive notebook: the cell, its stale ancestors, its descendants (within the budget)
     if (reactive()) return engine().run([cell.id], gesture ? consentFor([cell.id]) : {});
     if (kernel?.remote) { appendText(cell.out, REMOTE_NEEDS_REACTIVE, true); return Promise.resolve(); }
@@ -905,7 +909,7 @@ export function createNotebook(root, opts = {}) {
   }
   // (the kernel runs them in order; the reactive notebook in graph order)
   // (`gesture`: a person's Run all: their consent to every code cell as shown)
-  const runAll = (gesture = false) => (reactive() ? engine().runAll(gesture ? consentFor(cells().filter((c) => c.type === "code").map((c) => c.id)) : {}) : Promise.all(cells().map((c) => run(c))));
+  const runAll = (gesture = false) => (gesture && opts.onExplicitRun?.(), reactive() ? engine().runAll(gesture ? consentFor(cells().filter((c) => c.type === "code").map((c) => c.id)) : {}) : Promise.all(cells().map((c) => run(c))));
 
   // ---------------------------------------------------------- the reactive notebook
   // (design/reactive-notebook.md; the scheduler is src/notebook-reactive.ts,
@@ -2356,7 +2360,7 @@ export function createNotebook(root, opts = {}) {
     get meta() { return meta; },
     get active() { return active; },
     // (run and runAll: programmatic, so with no person's consent; runAllGesture: only from a person's Run all handler)
-    cells, addCell, run: (cell) => run(cell), runAll: () => runAll(), runAllGesture: () => runAll(true), interrupt, clearOutputs,
+    cells, addCell, run: (cell) => (opts.onExplicitRun?.(), run(cell)), runAll: () => (opts.onExplicitRun?.(), runAll()), runAllGesture: () => runAll(true), interrupt, clearOutputs,
     /** A fresh interpreter; the outputs stay, marked stale until their cells run again. */
     restart() { kernel?.restart(); },
     /** Use another interpreter (each notebook its own, on the full page): the outputs shown become stale unless it made them. */
