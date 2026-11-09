@@ -45,9 +45,9 @@
     "py/mpmath/functions/zetazeros.py": "baae93572641718d8c2d7ed549d55f9f44ce928c012ccf5f5ed9f2484c1a373c",
     "py/mpmath/identification.py": "eda31d9e044069e2ff31a7c350d6e61089464129251c367ca663c5b7e38b824c",
     "py/mpmath/libmp/__init__.py": "5020e32d9c386eb6e495a0a64a2c4270f74b747933f2c17ffba17fc2bd1db808",
-    "py/mpmath/libmp/backend.py": "fa1c65761279425112193a589481fe2719876b0c5416b34220b8a543949e9272",
+    "py/mpmath/libmp/backend.py": "cf6cf5b2ae1417ae42b7f28dc4b3b694a359b80c0dfd8e789c19cf79b1fd5129",
     "py/mpmath/libmp/gammazeta.py": "5ea770e8f328b300da49c6bfb0eb3e220951ba4ddf6fc73da78dccfe56dcae57",
-    "py/mpmath/libmp/libelefun.py": "977a18fea32e4eef142d423e8fb0f304709e45d7e2a4eaa3ddab74cb66b72297",
+    "py/mpmath/libmp/libelefun.py": "a17fa2443424a48ebdb46c20a043d3247a86fa7677bdbc209caf82ddad0c504b",
     "py/mpmath/libmp/libhyper.py": "27d7e674317abb6ec472cb045af06e55a01ade11633ef3cdd5281182ed5d11b7",
     "py/mpmath/libmp/libintmath.py": "ec449f4f995cff6313627c312dc3153311e609086d54f818f3238951fbee3706",
     "py/mpmath/libmp/libmpc.py": "63b82da519e5bb97d7c3c8d411e8b55a5c3a8b649bfd626b08aaadeb4d542966",
@@ -112,7 +112,7 @@
       "license": "BSD-3-Clause",
       "overlay": {
         "patch": "overlay.patch",
-        "sha256": "c592a6bc24a7e1eae30f7a322c4219c588616f1be122527967dcb34ef18e2e05",
+        "sha256": "c63b9733734197fbffee6182a84565eb200c2439d4f6da9c4b1afc83e0fafd60",
         "files": {
           "py/mpmath/ctx_mp.py": {
             "wheel": "777af8b7bc4736a485b66aac03d06dab5369cb759333ea5c336fe3782c840b16",
@@ -120,11 +120,11 @@
           },
           "py/mpmath/libmp/backend.py": {
             "wheel": "dba03ca5491a1a8bf6eafaeb14d415c962792c3b4af2c977507ad82de71a4e30",
-            "result": "fa1c65761279425112193a589481fe2719876b0c5416b34220b8a543949e9272"
+            "result": "cf6cf5b2ae1417ae42b7f28dc4b3b694a359b80c0dfd8e789c19cf79b1fd5129"
           },
           "py/mpmath/libmp/libelefun.py": {
             "wheel": "8e80593f814e7713df89e5aca352cfb52afa747c9da46fcb42217f6d841858c8",
-            "result": "977a18fea32e4eef142d423e8fb0f304709e45d7e2a4eaa3ddab74cb66b72297"
+            "result": "a17fa2443424a48ebdb46c20a043d3247a86fa7677bdbc209caf82ddad0c504b"
           },
           "py/mpmath/libmp/libintmath.py": {
             "wheel": "688453d2b91467fb1d1907f74cd08b77ea4132fb505a3b2c6ef14b7caed4d237",
