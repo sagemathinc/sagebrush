@@ -92,6 +92,51 @@ async function writeCas() {
   w.close();
 }
 
+// (a notebook written as Jupyter's nbformat, as both agents in the sim did (F1, Nov 9): its cells made Sagebrush's
+// {type, code}, so the page shows them; a new one's mode its kernel's; Sagebrush's own cells kept as they are)
+async function nbformatWrites() {
+  const w = await fresh(), ag = w.forAgent("agent:x"), J = JSON.stringify;
+  const nbf = {
+    cells: [
+      { cell_type: "markdown", metadata: {}, source: "# Primes\n\nThe first few." },
+      { cell_type: "code", id: "keep-me", metadata: { tags: ["t"] }, execution_count: 3, outputs: [{ output_type: "stream", name: "stdout", text: ["2 3 5\n"] }], source: ["print(", "2, 3, 5)"] },
+      { cell_type: "raw", metadata: {}, source: "as is" },
+    ],
+    metadata: { kernelspec: { name: "sagemath", display_name: "SageMath", language: "sage" } }, nbformat: 4, nbformat_minor: 5,
+  };
+  const e = await ag.create("/sim/primes.ipynb", { content: nbf });
+  const c = (await ag.read(e.path)).content;
+  const shape = c.cells.map((x) => [x.type ?? "code", x.code]);
+  check(J(shape) === J([["markdown", "# Primes\n\nThe first few."], ["code", "print(2, 3, 5)"], ["raw", "as is"]]) && c.cells.every((x) => x.cell_type === undefined && x.source === undefined),
+    "an agent's notebook made as nbformat: its cells Sagebrush's, each with its text: " + J(shape));
+  check(c.cells[1].id === "keep-me" && /^[a-zA-Z0-9_-]{1,64}$/.test(c.cells[0].id) && c.cells[0].id !== c.cells[2].id && c.cells[1].n === 3 && c.cells[1].outputs?.[0]?.name === "stdout" && J(c.cells[1].metadata) === J({ tags: ["t"] }),
+    "…its ids (a new one where it had none), count, outputs and cell metadata kept");
+  check(e.mode === "sage" && c.mode === "sage" && c.nbformat === undefined && c.nbformat_minor === undefined && c.metadata?.kernelspec?.name === "sagemath", "…its mode its kernel's (sage), nbformat's version fields not kept, its metadata kept");
+  const r = await ag.read(e.path);
+  await ag.write(e.path, { cells: [{ cell_type: "code", source: "1 + 1" }, { id: "s1", type: "markdown", code: "*mine*" }] }, { base: r.rev });
+  const c2 = (await ag.read(e.path)).content;
+  check(J(c2.cells.map((x) => [x.type ?? "code", x.code])) === J([["code", "1 + 1"], ["markdown", "*mine*"]]) && c2.cells[1].id === "s1",
+    "an nbformat write too: its cells made Sagebrush's, a Sagebrush cell beside them kept as it is");
+  // (a write naming no mode, as nbformat's doesn't, keeps the notebook's: stored, and the entry's (daybreak3, #928))
+  check(c2.mode === "sage" && (await ag.stat(e.path)).mode === "sage", "…and the notebook keeps its mode (sage), stored and listed: " + J([c2.mode, (await ag.stat(e.path)).mode]));
+  const r2 = await ag.read(e.path);
+  await ag.write(e.path, { cells: [{ id: "p1", code: "2" }], mode: "python" }, { base: r2.rev });
+  check((await ag.read(e.path)).content.mode === "python", "a write that names its mode: that mode (Sagebrush's own, as before)");
+  // (a heading level not 1 to 6: refused as invalid (a WorkspaceError, not a raw error), nothing made or written
+  // (astra's NBF928-1); 7 as well as 1e9, whose repeat would throw by itself)
+  for (const level of [7, 1e9]) {
+    const badHead = { cells: [{ cell_type: "heading", source: "T", level }] };
+    const r3 = await ag.read(e.path);
+    check((await fails(ag.create("/sim/bad.ipynb", { content: badHead }), "invalid")) === true && !(await ag.stat("/sim/bad.ipynb")) && (await fails(ag.write(e.path, badHead, { base: r3.rev }), "invalid")) === true && (await ag.read(e.path)).rev === r3.rev,
+      `a heading level of ${level}: create and write refused as invalid, nothing made or written`);
+  }
+  const own = { cells: [{ id: "a1", code: "x = 1", outputs: [] }, { id: "a2", type: "markdown", code: "hi" }] };
+  const e2 = await ag.create("/own.ipynb", { content: own });
+  const c3 = (await ag.read(e2.path)).content;
+  check(J(c3.cells) === J(own.cells) && e2.mode === "python", "a notebook in Sagebrush's own shape: its cells exactly as given, python by default");
+  w.close();
+}
+
 async function renames() {
   const w = await fresh();
   await w.create("/proj/data/a.csv", { content: "1" });
@@ -155,10 +200,11 @@ async function duplicates() {
   check(d.path === "/b (2).board.json" && d.ref !== bd.ref, "a board duplicated beside itself, as a board of its own");
   await w.write(d.path, board("changed"));
   check((await w.read(bd.path)).content.title === "B", "…changing the copy leaves the original");
-  const nb = await w.create("/n.ipynb", { content: { cells: [{ id: "x", cell_type: "code", input: "2" }] } });
+  // (a cell in Sagebrush's shape: one in nbformat's is converted when written, nbformatWrites)
+  const nb = await w.create("/n.ipynb", { content: { cells: [{ id: "x", code: "2" }] } });
   const nd = await w.duplicate(nb.path, "/m.ipynb");
   const nr = await w.read(nd.path);
-  check(nr.content.cells[0].input === "2" && nr.content.name === "m" && nd.ref !== nb.ref, "a notebook duplicated with its cells");
+  check(nr.content.cells[0].code === "2" && nr.content.cells[0].id === "x" && nr.content.name === "m" && nd.ref !== nb.ref, "a notebook duplicated with its cells");
   check(await fails(w.duplicate(nb.path, "/m.board.json"), "invalid"), "a notebook's copy is a notebook");
   w.close();
 }
@@ -2919,7 +2965,7 @@ async function syncLineOff() {
 }
 
 export async function run() {
-  for (const t of [rowWords, syncLineOff, storageUse, versionActions, fences, intents, paths_, createAndRead, writeCas, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull, recent, migrateV1, migrateOnWrite, writeGuard, pathOfFile_, migratePaused, migrateTargetFails, migrateCrashBetween, olderTabWrite, migrateCandidatePass, migrateOneTab, closedByUpgrade, migrateUndersized, staleChanged, migrateQueuedAndBounded, generationMonotonic, folderIds, folderIdsMigrated, upgradeFromV2, provenance, lookalikes, lookalikesAtScale, durabilityDecide, durabilityFirstSave, durabilityConfirmed, durabilitySuspected, durabilityWitnesses, durabilityDenied, durabilityTwoTabs, durabilityTabs, durabilityPurge, durabilityPurgePending, durabilityPurgeLocal, durabilityPurgeLocalSparse, durabilityResetManySmall, durabilityResetBounds, durabilityNotices, durabilityDeliberate, durabilityReset, durabilityAstraProbes, durabilityAstraProbes99, durabilityAstraProbes0ee, durabilityAstraProbes28f, durabilityAdmission, durabilityOwnership, deniedBundle, deniedMeta, primaryRollback, currentPending, durabilityAuthority, () => historyOrder("clear"), () => historyOrder("drop"), purgeMarks, durabilityLockOrder]) {
+  for (const t of [rowWords, syncLineOff, storageUse, versionActions, fences, intents, paths_, createAndRead, writeCas, nbformatWrites, renames, trash, duplicates, limits, opsAndWatch, concurrent, versions, migration, migrationProvenance, recovery, recoveryConflict, edges, noLocks, rollback, dropping, emptying, folderLimit, migrationFull, recent, migrateV1, migrateOnWrite, writeGuard, pathOfFile_, migratePaused, migrateTargetFails, migrateCrashBetween, olderTabWrite, migrateCandidatePass, migrateOneTab, closedByUpgrade, migrateUndersized, staleChanged, migrateQueuedAndBounded, generationMonotonic, folderIds, folderIdsMigrated, upgradeFromV2, provenance, lookalikes, lookalikesAtScale, durabilityDecide, durabilityFirstSave, durabilityConfirmed, durabilitySuspected, durabilityWitnesses, durabilityDenied, durabilityTwoTabs, durabilityTabs, durabilityPurge, durabilityPurgePending, durabilityPurgeLocal, durabilityPurgeLocalSparse, durabilityResetManySmall, durabilityResetBounds, durabilityNotices, durabilityDeliberate, durabilityReset, durabilityAstraProbes, durabilityAstraProbes99, durabilityAstraProbes0ee, durabilityAstraProbes28f, durabilityAdmission, durabilityOwnership, deniedBundle, deniedMeta, primaryRollback, currentPending, durabilityAuthority, () => historyOrder("clear"), () => historyOrder("drop"), purgeMarks, durabilityLockOrder]) {
     console.log(`test: ${t.name || t}`);
     try { await t(); } catch (e) { results.push([false, `${t.name} threw: ${e?.stack ?? e}`]); }
   }
