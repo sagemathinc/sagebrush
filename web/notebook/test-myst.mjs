@@ -149,6 +149,9 @@ async function browser() {
   const base = `http://127.0.0.1:${port}/`;
   const b = await browser();
   const C = (c, m) => ok(c, "C: " + m);
+  // (a wait whose result nothing else checks: if it expires, it fails here and names what never came, so a red says
+  // which wait it was rather than an assertion further on; the wait itself is unchanged)
+  const wait = async (expr, ms, what) => { const r = await b.until(expr, ms); if (!r) C(false, `waited ${ms} ms, never came: ${what}`); return r; };
   try {
     await b.send("Page.enable");
     await b.send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => {
@@ -167,7 +170,7 @@ async function browser() {
     const stat = (p) => b.ev(`${W}.stat(${JSON.stringify(p)}).then((e) => e ? { fid: e.fid ?? null, ref: e.ref ?? null, kind: e.kind } : null)`);
     const names = (f) => b.ev(`${W}.list(${JSON.stringify(f)}).then((l) => l.map((e) => e.path).sort())`);
     const title = () => b.ev("document.title");
-    const loaded = (name) => b.until(`document.title === ${JSON.stringify(name + " — Sagebrush")} && document.querySelectorAll('.cell').length > 0`, 60000);
+    const loaded = (name) => wait(`document.title === ${JSON.stringify(name + " — Sagebrush")} && document.querySelectorAll('.cell').length > 0`, 60000, `the notebook ${name} loaded`);
     const go = async (q) => { await b.send("Page.navigate", { url: base + q }); };
     const openNb = async (path) => go(`?nb=${encodeURIComponent((await stat(path)).ref)}`);
     // (the file browser's row for a path, clicked: opens it in this page, as a person does)
@@ -176,7 +179,7 @@ async function browser() {
       if (!(await b.ev("!!document.querySelector('.frow')"))) await b.ev(`(document.querySelector("#filesbtn").click(), true)`);
       if (!(await b.until(`!!document.querySelector('.frow[data-path=${JSON.stringify(path)}]')`, 3000))) {
         await b.ev(`(document.querySelector('.frow[data-path=${JSON.stringify(folder)}]')?.click(), true)`);
-        await b.until(`!!document.querySelector('.frow[data-path=${JSON.stringify(path)}]')`, 10000);
+        await wait(`!!document.querySelector('.frow[data-path=${JSON.stringify(path)}]')`, 10000, `the file browser's row for ${path}`);
       }
       await b.ev(`(document.querySelector('.frow[data-path=${JSON.stringify(path)}]').click(), true)`);
     };
@@ -212,7 +215,7 @@ async function browser() {
     for (const p of ["/book/09-Improving_DL.md", "/solo/09-Improving_DL.md", "/bad/09-Improving_DL.md"]) {
       await go(`?openas=${encodeURIComponent(p)}&fid=${encodeURIComponent((await stat(p)).fid)}`);
       const copy = p.replace(/\.md$/, ".ipynb");
-      await b.until(`window.sagebrush?.workspace?.stat(${JSON.stringify(copy)}).then((e) => e?.kind === "notebook")`, 30000);
+      await wait(`window.sagebrush?.workspace?.stat(${JSON.stringify(copy)}).then((e) => e?.kind === "notebook")`, 30000, `the copy ${copy} made`);
       await loaded("09-Improving_DL");
     }
     C((await stat("/book/09-Improving_DL.ipynb"))?.kind === "notebook" && (await stat("/solo/09-Improving_DL.ipynb"))?.kind === "notebook", "the two copies made beside their .md");
@@ -258,7 +261,7 @@ async function browser() {
     b.dialog.accept = false;
     await openNb("/book/09-Improving_DL.ipynb");
     await loaded("09-Improving_DL");
-    await b.until("document.querySelectorAll('a.myst-ref-book').length >= 6", 30000);
+    await wait("document.querySelectorAll('a.myst-ref-book').length >= 6", 30000, "the book's cross-chapter references linked (6)");
     const direct = await b.ev(`(async () => {
       const c = await window.__sagebrushMystBook(), out = [];
       const t = async (what, f) => { const c0 = window.__sbIO.content; let r; try { r = await f(); } catch (e) { r = { threw: String(e) }; } out.push([what, r && r.bytes ? { bytes: r.bytes.length } : r, window.__sbIO.content - c0]); };
@@ -302,14 +305,14 @@ async function browser() {
     C((await b.ev("!!document.querySelector('.myst-bookline')")) === false, "...no way back shown here");
 
     // g1: the same notebook opened again (same workspace, notebook, folder): the old capability refuses, unread
-    await b.until("document.querySelectorAll('a.myst-ref-book').length >= 6", 30000);
+    await wait("document.querySelectorAll('a.myst-ref-book').length >= 6", 30000, "the book's cross-chapter references linked (6)");
     await b.ev("window.__sagebrushMystBook().then((c) => { window.__old = c; })");
     await settle();
     await reset();
     await row("/book/09-Improving_DL.ipynb");
     C(await b.until("window.__sagebrushMystBook().then((c) => !!c && c !== window.__old)", 20000), "g1: the same notebook reopened: a new capability");
     C(await b.ev("window.__sagebrushMystBook().then((c) => c.book === window.__old.book && c.self === window.__old.self)"), "...for the same folder and notebook");
-    await b.until("document.querySelectorAll('a.myst-ref-book').length >= 6", 30000);
+    await wait("document.querySelectorAll('a.myst-ref-book').length >= 6", 30000, "the book's cross-chapter references linked (6)");
     await sleep(500);
     C((await bookReads()) === 6, "...its book read again: 6 reads (" + (await bookReads()) + ")");
     await settle();
@@ -335,7 +338,7 @@ async function browser() {
     C(g5 === "stale" && (await bookReads()) === 0 && named5.length === 0 && (await title()) === "09-Improving_DL — Sagebrush", `g5: chapter 7's capability, after chapter 9 opened: ${g5}; ${await bookReads()} reads of the book; entries read or written naming chapter 8: ${JSON.stringify(named5)}`);
 
     // g3: an open held after its save, the document switched meanwhile, then let go: no switch to it
-    await b.until("document.querySelectorAll('a.myst-ref-book').length >= 6", 30000);
+    await wait("document.querySelectorAll('a.myst-ref-book').length >= 6", 30000, "the book's cross-chapter references linked (6)");
     await b.ev("window.__sagebrushMystBook().then((c) => { window.__nine = c; window.__sbBookHold = (p) => p === 'before-switch' ? new Promise((r) => { window.__let3 = r; window.__held3 = true; }) : undefined; window.__op3 = c.open('07-Computing_DL', {}); })");
     C(await b.until("window.__held3 === true", 10000), "g3: an open held after its save");
     await row("/book/plain.ipynb");
@@ -363,7 +366,7 @@ async function browser() {
 
     // a chapter that isn't MyST any more when followed: refused where it was clicked, not an alert, nothing made
     await row("/book/09-Improving_DL.ipynb");
-    await b.until("document.querySelectorAll('a.myst-ref-book').length >= 6", 30000);
+    await wait("document.querySelectorAll('a.myst-ref-book').length >= 6", 30000, "the book's cross-chapter references linked (6)");
     await b.ev(`${W}.stat("/book/08-CRT_Bezout.md").then((e) => ${W}.write("/book/08-CRT_Bezout.md", new TextEncoder().encode("# Not MyST now\\n")))`);
     const asked3 = b.dialog.seen.length, names3 = await names("/book");
     await b.ev(`([...document.querySelectorAll('a.myst-ref-book')].find((a) => a.dataset.mystRef && /08|crt|bezout|chinese|euclid/i.test(a.textContent + a.dataset.mystRef)).click(), true)`);
@@ -375,15 +378,15 @@ async function browser() {
     // (its interpreter started just before, so it isn't started again (the page keeps 4): that start gives Python
     // every file of the browser's, this one too, which is no book's doing)
     await row("/bad/09-Improving_DL.ipynb");
-    await b.until("window.__sagebrushMystBook().then((c) => c?.book === '/bad')", 20000);
+    await wait("window.__sagebrushMystBook().then((c) => c?.book === '/bad')", 20000, "the book capability for /bad");
     await sleep(2500);
     await row("/book/plain.ipynb");
     await loaded("plain");
     await sleep(1500);
     await reset();
     await row("/bad/09-Improving_DL.ipynb");
-    await b.until("window.__sagebrushMystBook().then((c) => c?.book === '/bad')", 20000);
-    await b.until("!!document.querySelector('.myst-bookline')", 20000);
+    await wait("window.__sagebrushMystBook().then((c) => c?.book === '/bad')", 20000, "the book capability for /bad");
+    await wait("!!document.querySelector('.myst-bookline')", 20000, "the book line under /bad's chapter (.myst-bookline)");
     await sleep(1500);
     const bad = await io();
     C(!bad.keys.includes(secret) && !bad.named.some((x) => x.includes("/elsewhere/")), `a TOC naming /elsewhere/secret: it is never read (${bad.keys.filter((k) => k === secret).length} reads of it), nothing outside the folder looked up`);
