@@ -418,6 +418,49 @@ try {
   await setCode("print('PLAIN')");
   await runAll();
   check(await outHas("/can't run here/", 30000) && !/PLAIN/.test(await out()), "?runner=0: a scoped notebook doesn't run in the page's own interpreter, and says why: " + (await out()).trim().slice(0, 120));
+
+  // ---- the person's own flow, no test hook (@sagebrush, r5): File > Permissions… allows file changes, then the
+  // person's Runs, each a trusted click into its cell and Shift+Enter: one cell writes a file, the next reads it, and the reader
+  // depends on the writer through the file; then Run stale, the person's click, as the first Run after a widening
+  await go(base + "?reactive&runner=1");
+  await ev(`(() => { document.querySelector('#filebtn')?.click(); document.querySelector('#filemenu [data-group="new"]')?.click(); document.querySelector('#filemenu [data-f="new"]').click(); return 1; })()`);
+  await until("sagebrush.notebook.cells().length === 1 && !sagebrush.notebook.cells()[0].ta.value && sagebrush.kernel?.ready", 30000);
+  await sleep(800);
+  await ev("(sagebrush.notebook.addCell(''), 1)");
+  await setCode("with open('flow.txt', 'w') as f:\n    f.write('x' * 3)", 0);
+  await setCode("print(len(open('flow.txt').read()))", 1);
+  const key = async (k, code, vk) => { for (const type of ["keyDown", "keyUp"]) await send("Input.dispatchKeyEvent", { type, key: k, code, windowsVirtualKeyCode: vk }); await sleep(200); };
+  // (the person's Run of a cell: a click into it, then Shift+Enter, each a trusted input)
+  const runB = async (i) => {
+    const p = await ev(`(() => { const t = [...document.querySelectorAll('#cells .cell textarea')][${i}]; t.scrollIntoView({ block: "center" }); const r = t.getBoundingClientRect(); return { x: r.left + 20, y: r.top + r.height / 2 }; })()`);
+    await mouse("mousePressed", p); await mouse("mouseReleased", p); await sleep(200);
+    for (const type of ["keyDown", "keyUp"]) await send("Input.dispatchKeyEvent", { type, key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, modifiers: 8 });
+    await sleep(200);
+  };
+  const permsSwitch = async () => { await trusted("#filebtn"); await trusted("#permsmenu"); await trusted("#filesperm"); await key("Escape", "Escape", 27); };
+  await permsSwitch();
+  check((await ev("sagebrush.permissions()?.files")) === true, "the person's flow: File > Permissions… allows file changes (trusted clicks)");
+  await runB(0);
+  await until("!/running|queued/.test([...document.querySelectorAll('#cells .cell')][0].className)", 30000);
+  await runB(1);
+  check(await until("[...document.querySelectorAll('#cells .cell')][1]?.querySelector('.out')?.textContent.trim() === '3'", 30000), "…the writer run (Shift+Enter), then the reader: it reads the file written (" + JSON.stringify((await out(0)).trim().slice(0, 120)) + ", " + JSON.stringify((await out(1)).trim().slice(0, 120)) + ")");
+  await setCode("with open('flow.txt', 'w') as f:\n    f.write('x' * 5)", 0);
+  await runB(0);
+  check(await until("[...document.querySelectorAll('#cells .cell')][1]?.querySelector('.out')?.textContent.trim() === '5'", 30000), "…the writer changed and run (Shift+Enter) reruns the reader: it depends on the writer through the file (" + JSON.stringify((await out(1)).trim()) + ")");
+  // (a narrowing, then the widening again: the interpreter running keeps its narrowed ceiling until the person's next
+  // Run, here Run stale)
+  await permsSwitch();
+  check((await ev("sagebrush.permissions()?.files")) === false, "(file changes stopped, by the switch)");
+  await permsSwitch();
+  check((await ev("sagebrush.permissions()?.files")) === true, "(and allowed again)");
+  await setCode("with open('flow.txt', 'w') as f:\n    f.write('x' * 7)", 0);
+  // (a restart, not a Run, keeps the narrowed ceiling (every start but an explicit Run's does), and makes every cell
+  // stale: Run stale is then the person's first Run since the widening)
+  await ev("(sagebrush.notebook.restart(), 1)");
+  await until("sagebrush.kernel?.ready === true", 30000);
+  const staleShown = await until("!document.querySelector('#runstale').hidden", 15000);
+  if (staleShown) await trusted("#runstale");
+  check(staleShown && (await until("[...document.querySelectorAll('#cells .cell')][1]?.querySelector('.out')?.textContent.trim() === '7'", 30000)), "Run stale, the person's click as the first Run after a widening, starts a new interpreter that may change files: the writer and its reader run (" + JSON.stringify({ shown: staleShown, out0: (await out(0)).trim().slice(0, 120), out1: (await out(1)).trim().slice(0, 120) }) + ")");
 } catch (e) {
   check(false, "threw: " + (e?.stack ?? e));
 } finally {
