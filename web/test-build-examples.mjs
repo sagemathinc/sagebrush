@@ -261,7 +261,7 @@ check(z1.equals(zip([{ name: "a/ü.txt", bytes: Buffer.from("hi") }, { name: "b.
 {
   const site = tmp();
   const art = [{ url: "/", date: "2026-11-05" }, { url: "/articles/a/", date: "2026-11-05" }];
-  const got = await buildSitemap({ out: site, articles: () => art, examples: (o) => buildExamplesInto(o, FIX) });
+  const got = await buildSitemap({ out: site, articles: () => art, examples: (o) => buildExamplesInto(o, FIX), docs: () => [] });
   const xml = readFileSync(join(site, "sitemap.xml"), "utf8");
   const locs = [...xml.matchAll(/<loc>https:\/\/sagebrush\.space([^<]*)<\/loc>/g)].map((m) => m[1]).sort();
   const want = [...art.map((u) => u.url), ...pageUrls].sort();

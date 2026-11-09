@@ -28,7 +28,7 @@ export { SyncOwner, startSync, STATUS_PUB, OWNER, statusMessage, type Snapshot, 
 export { readLife, syncOffIf, sameLife, type LifeMark } from "./sync-pins";
 export { switchToIf } from "./sync-outbox";
 export { detectOldSync, classificationProblems, OLD_SYNC_HOOK, OldSyncError, OLD_SYNC_MESSAGE, OLD_SYNC_REASON, UNREADABLE_MESSAGE, UNREADABLE_REASON, PROTO, PROTO_KEY, SIGNAL_FAMILIES, LOCAL_FAMILIES, RETIRED_FAMILIES, SIGNAL_META, LOCAL_META, SYNC_ONLY_STORES, HISTORY_DBS, type OldSync } from "./sync-old";
-export { syncSection, PanelPoll, PANEL, clampDelay, askStatus, foot, sidebarLine, readNotebooks, unseenRefusals, raiseSeen, type Notebooks } from "./sync-panel";
+export { syncSection, OLD_SYNC_LINE, PanelPoll, PANEL, clampDelay, askStatus, foot, sidebarLine, readNotebooks, unseenRefusals, raiseSeen, type Notebooks } from "./sync-panel";
 export { fileRowMeta, isElsewhere, type ContentHere } from "./row-meta";
 export { mountBrowser } from "./browser";
 export { renewLease } from "./sync-outbox";
