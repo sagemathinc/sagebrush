@@ -1,0 +1,569 @@
+test_basic_ops.test_add: ok
+test_basic_ops.test_add_misc: ok
+test_basic_ops.test_add_rounding: ok
+test_basic_ops.test_almost_equal: ok
+test_basic_ops.test_arithmetic_functions: ok
+test_basic_ops.test_complex_misc: ok
+test_basic_ops.test_complex_zeros: ok
+test_basic_ops.test_div: ok
+test_basic_ops.test_exact_integer_arithmetic: ok
+test_basic_ops.test_floor_ceil_nint_frac: ok
+test_basic_ops.test_hash: ok
+test_basic_ops.test_isnan_etc: ok
+test_basic_ops.test_issue_438: ok
+test_basic_ops.test_mixed_misc: ok
+test_basic_ops.test_monitor: ok
+test_basic_ops.test_mul: ok
+test_basic_ops.test_nint_distance: ok
+test_basic_ops.test_odd_int_bug: ok
+test_basic_ops.test_pow: ok
+test_basic_ops.test_str_10000_digits: ok
+test_basic_ops.test_str_1000_digits: ok
+test_basic_ops.test_sub: ok
+test_basic_ops.test_type_compare: ok
+test_bitwise.test_add_exact: ok
+test_bitwise.test_bitcount: ok
+test_bitwise.test_float_rounding: ok
+test_bitwise.test_long_exponent_shifts: ok
+test_bitwise.test_perturb: ok
+test_bitwise.test_round_ceiling: ok
+test_bitwise.test_round_down: ok
+test_bitwise.test_round_floor: ok
+test_bitwise.test_round_nearest: ok
+test_bitwise.test_round_up: ok
+test_bitwise.test_rounding_bugs: ok
+test_bitwise.test_rounding_issue_200: ok
+test_bitwise.test_trailing: ok
+test_calculus.test_approximation: ok
+test_calculus.test_differint: ok
+test_calculus.test_fourier: ok
+test_calculus.test_invlap: ok
+test_calculus.test_limits: ok
+test_calculus.test_pade: ok
+test_calculus.test_polyroots: ok
+test_calculus.test_polyroots_legendre: ok
+test_calculus.test_polyroots_legendre_init: ok
+test_calculus.test_polyval: ok
+test_compatibility.test_bugs: ok
+test_compatibility.test_double_compatibility: ok
+test_compatibility.test_sqrt: ok
+test_convert.test_basic_string: ok
+test_convert.test_compatibility: ok
+test_convert.test_conversion_methods: ok
+test_convert.test_convert_rational: ok
+test_convert.test_custom_class: ok
+test_convert.test_eval_repr_invariant: ok
+test_convert.test_issue548: ok
+test_convert.test_mpmathify: ok
+test_convert.test_pretty: ok
+test_convert.test_str_bugs: ok
+test_convert.test_str_format: ok
+test_convert.test_str_prec0: ok
+test_convert.test_str_whitespace: ok
+test_convert.test_tight_string_conversion: ok
+test_convert.test_unicode: ok
+test_diff.test_diff: ok
+test_diff.test_diff_partial: ok
+test_diff.test_diffs: ok
+test_diff.test_taylor: ok
+test_division.test_div_1_3: ok
+test_division.test_div_300: ok
+test_division.test_div_negative_rnd_bug: ok
+test_division.test_epsilon_rounding: ok
+test_division.test_mod: ok
+test_division.test_mpf_divi_1_3: ok
+test_division.test_tight_integer_division: ok
+test_eigen.test_eig: ok
+test_eigen.test_eig_dyn: ok
+test_eigen_symmetric.test_eighe_fixed_matrix: ok
+test_eigen_symmetric.test_eighe_irandmatrix: ok
+test_eigen_symmetric.test_eighe_randmatrix: ok
+test_eigen_symmetric.test_eigsy_irandmatrix: ok
+test_eigen_symmetric.test_eigsy_randmatrix: ok
+test_eigen_symmetric.test_gauss_quadrature_dynamic: ok
+test_eigen_symmetric.test_gauss_quadrature_static: ok
+test_eigen_symmetric.test_svd_c_rand: ok
+test_eigen_symmetric.test_svd_r_rand: ok
+test_eigen_symmetric.test_svd_test_case: ok
+test_elliptic.test_calculate_nome: ok
+test_elliptic.test_djtheta: ok
+test_elliptic.test_ellipfun: ok
+test_elliptic.test_elliptic_integrals: ok
+test_elliptic.test_issue_238: ok
+test_elliptic.test_jcn: ok
+test_elliptic.test_jdn: ok
+test_elliptic.test_jsn: ok
+test_elliptic.test_jtheta: ok
+test_elliptic.test_jtheta_complex: ok
+test_elliptic.test_jtheta_identities: ok
+test_elliptic.test_jtheta_issue_79: ok
+test_elliptic.test_sn_cn_dn_complex: ok
+test_elliptic.test_sn_cn_dn_identities: ok
+test_fp.test_conj: ok
+test_fp.test_fp_bernoulli: ok
+test_fp.test_fp_cospi_sinpi: ok
+test_fp.test_fp_erf: ok
+test_fp.test_fp_expj: ok
+test_fp.test_fp_gamma: ok
+test_fp.test_fp_hyp2f1: ok
+test_fp.test_fp_lambertw: ok
+test_fp.test_fp_number_parts: ok
+test_fp.test_fp_psi: ok
+test_fp.test_fp_stress_ei_e1: ok
+test_fp.test_fp_zeta: ok
+test_functions.test_aliases: ok
+test_functions.test_arange: ok
+test_functions.test_areal_inverses: ok
+test_functions.test_arg_sign: ok
+test_functions.test_atan: ok
+test_functions.test_atan2: ok
+test_functions.test_atanh: ok
+test_functions.test_call_with_dps: ok
+test_functions.test_complex_functions: ok
+test_functions.test_complex_inverse_functions: ok
+test_functions.test_complex_parts: ok
+test_functions.test_complex_powers: ok
+test_functions.test_complex_sqrt_accuracy: ok
+test_functions.test_constants: ok
+test_functions.test_cospi_sinpi: ok
+test_functions.test_cyclotomic: ok
+test_functions.test_degrees: ok
+test_functions.test_exact_cbrt: ok
+test_functions.test_exact_sqrts: ok
+test_functions.test_exp: ok
+test_functions.test_expj: ok
+test_functions.test_expm1: ok
+test_functions.test_fibonacci: ok
+test_functions.test_float_cbrt: ok
+test_functions.test_float_sqrt: ok
+test_functions.test_frexp: ok
+test_functions.test_hypot: ok
+test_functions.test_integer_parts: ok
+test_functions.test_invhyperb_inaccuracy: ok
+test_functions.test_issue_136: ok
+test_functions.test_issue_73: ok
+test_functions.test_ldexp: ok
+test_functions.test_linspace: ok
+test_functions.test_log: ok
+test_functions.test_log1p: ok
+test_functions.test_misc_bugs: ok
+test_functions.test_mpcfun_real_imag: ok
+test_functions.test_perturbation_rounding: ok
+test_functions.test_powm1: ok
+test_functions.test_reciprocal_functions: ok
+test_functions.test_root: ok
+test_functions.test_sinc: ok
+test_functions.test_sqrt_rounding: ok
+test_functions.test_tanh: ok
+test_functions.test_trig_hyperb_basic: ok
+test_functions.test_unitroots: ok
+test_functions2.test_agm: ok
+test_functions2.test_airy: ok
+test_functions2.test_appellf1: ok
+test_functions2.test_bessel: ok
+test_functions2.test_bessel_zeros: ok
+0 1 of 15 15
+0 2 of 15 15
+0 3 of 15 15
+0 4 of 15 15
+0 5 of 15 15
+0 6 of 15 15
+0 7 of 15 15
+0 8 of 15 15
+0 9 of 15 15
+0 10 of 15 15
+0 11 of 15 15
+0 12 of 15 15
+0 13 of 15 15
+0 14 of 15 15
+0 15 of 15 15
+1 1 of 15 15
+1 2 of 15 15
+1 3 of 15 15
+1 4 of 15 15
+1 5 of 15 15
+1 6 of 15 15
+1 7 of 15 15
+1 8 of 15 15
+1 9 of 15 15
+1 10 of 15 15
+1 11 of 15 15
+1 12 of 15 15
+1 13 of 15 15
+1 14 of 15 15
+1 15 of 15 15
+2 1 of 15 15
+2 2 of 15 15
+2 3 of 15 15
+2 4 of 15 15
+2 5 of 15 15
+2 6 of 15 15
+2 7 of 15 15
+2 8 of 15 15
+2 9 of 15 15
+2 10 of 15 15
+2 11 of 15 15
+2 12 of 15 15
+2 13 of 15 15
+2 14 of 15 15
+2 15 of 15 15
+3 1 of 15 15
+3 2 of 15 15
+3 3 of 15 15
+3 4 of 15 15
+3 5 of 15 15
+3 6 of 15 15
+3 7 of 15 15
+3 8 of 15 15
+3 9 of 15 15
+3 10 of 15 15
+3 11 of 15 15
+3 12 of 15 15
+3 13 of 15 15
+3 14 of 15 15
+3 15 of 15 15
+4 1 of 15 15
+4 2 of 15 15
+4 3 of 15 15
+4 4 of 15 15
+4 5 of 15 15
+4 6 of 15 15
+4 7 of 15 15
+4 8 of 15 15
+4 9 of 15 15
+4 10 of 15 15
+4 11 of 15 15
+4 12 of 15 15
+4 13 of 15 15
+4 14 of 15 15
+4 15 of 15 15
+5 1 of 15 15
+5 2 of 15 15
+5 3 of 15 15
+5 4 of 15 15
+5 5 of 15 15
+5 6 of 15 15
+5 7 of 15 15
+5 8 of 15 15
+5 9 of 15 15
+5 10 of 15 15
+5 11 of 15 15
+5 12 of 15 15
+5 13 of 15 15
+5 14 of 15 15
+5 15 of 15 15
+6 1 of 15 15
+6 2 of 15 15
+6 3 of 15 15
+6 4 of 15 15
+6 5 of 15 15
+6 6 of 15 15
+6 7 of 15 15
+6 8 of 15 15
+6 9 of 15 15
+6 10 of 15 15
+6 11 of 15 15
+6 12 of 15 15
+6 13 of 15 15
+6 14 of 15 15
+6 15 of 15 15
+7 1 of 15 15
+7 2 of 15 15
+7 3 of 15 15
+7 4 of 15 15
+7 5 of 15 15
+7 6 of 15 15
+7 7 of 15 15
+7 8 of 15 15
+7 9 of 15 15
+7 10 of 15 15
+7 11 of 15 15
+7 12 of 15 15
+7 13 of 15 15
+7 14 of 15 15
+7 15 of 15 15
+8 1 of 15 15
+8 2 of 15 15
+8 3 of 15 15
+8 4 of 15 15
+8 5 of 15 15
+8 6 of 15 15
+8 7 of 15 15
+8 8 of 15 15
+8 9 of 15 15
+8 10 of 15 15
+8 11 of 15 15
+8 12 of 15 15
+8 13 of 15 15
+8 14 of 15 15
+8 15 of 15 15
+9 1 of 15 15
+9 2 of 15 15
+9 3 of 15 15
+9 4 of 15 15
+9 5 of 15 15
+9 6 of 15 15
+9 7 of 15 15
+9 8 of 15 15
+9 9 of 15 15
+9 10 of 15 15
+9 11 of 15 15
+9 12 of 15 15
+9 13 of 15 15
+9 14 of 15 15
+9 15 of 15 15
+10 1 of 15 15
+10 2 of 15 15
+10 3 of 15 15
+10 4 of 15 15
+10 5 of 15 15
+10 6 of 15 15
+10 7 of 15 15
+10 8 of 15 15
+10 9 of 15 15
+10 10 of 15 15
+10 11 of 15 15
+10 12 of 15 15
+10 13 of 15 15
+10 14 of 15 15
+10 15 of 15 15
+11 1 of 15 15
+11 2 of 15 15
+11 3 of 15 15
+11 4 of 15 15
+11 5 of 15 15
+11 6 of 15 15
+11 7 of 15 15
+11 8 of 15 15
+11 9 of 15 15
+11 10 of 15 15
+11 11 of 15 15
+11 12 of 15 15
+11 13 of 15 15
+11 14 of 15 15
+11 15 of 15 15
+12 1 of 15 15
+12 2 of 15 15
+12 3 of 15 15
+12 4 of 15 15
+12 5 of 15 15
+12 6 of 15 15
+12 7 of 15 15
+12 8 of 15 15
+12 9 of 15 15
+12 10 of 15 15
+12 11 of 15 15
+12 12 of 15 15
+12 13 of 15 15
+12 14 of 15 15
+12 15 of 15 15
+13 1 of 15 15
+13 2 of 15 15
+13 3 of 15 15
+13 4 of 15 15
+13 5 of 15 15
+13 6 of 15 15
+13 7 of 15 15
+13 8 of 15 15
+13 9 of 15 15
+13 10 of 15 15
+13 11 of 15 15
+13 12 of 15 15
+13 13 of 15 15
+13 14 of 15 15
+13 15 of 15 15
+14 1 of 15 15
+14 2 of 15 15
+14 3 of 15 15
+14 4 of 15 15
+14 5 of 15 15
+14 6 of 15 15
+14 7 of 15 15
+14 8 of 15 15
+14 9 of 15 15
+14 10 of 15 15
+14 11 of 15 15
+14 12 of 15 15
+14 13 of 15 15
+14 14 of 15 15
+14 15 of 15 15
+test_functions2.test_bessel_zeros_extra: ok
+test_functions2.test_coulomb: ok
+test_functions2.test_e1: ok
+test_functions2.test_ei: ok
+test_functions2.test_elliptic_integrals: ok
+test_functions2.test_erf: ok
+test_functions2.test_exp_integrals: ok
+test_functions2.test_expint: ok
+test_functions2.test_gammainc: ok
+test_functions2.test_gammainc_expint_n: ok
+test_functions2.test_gegenbauer: ok
+test_functions2.test_hankel: ok
+test_functions2.test_hermite: ok
+test_functions2.test_hyper_0f1: ok
+test_functions2.test_hyper_1f1: ok
+test_functions2.test_hyper_1f2: ok
+test_functions2.test_hyper_2f0: ok
+test_functions2.test_hyper_2f1: ok
+test_functions2.test_hyper_2f1_hard: ok
+test_functions2.test_hyper_2f2: ok
+test_functions2.test_hyper_2f3: ok
+test_functions2.test_hyper_3f2_etc: ok
+test_functions2.test_hyper_misc: ok
+test_functions2.test_hyper_param_accuracy: ok
+test_functions2.test_hyper_u: ok
+test_functions2.test_hypercomb_zero_pow: ok
+test_functions2.test_incomplete_beta: ok
+test_functions2.test_issue_239: ok
+test_functions2.test_kelvin: ok
+test_functions2.test_lambertw: ok
+test_functions2.test_lambertw_hard: ok
+test_functions2.test_legenp: ok
+test_functions2.test_legenq: ok
+test_functions2.test_meijerg: ok
+test_functions2.test_orthpoly: ok
+test_functions2.test_pdf: ok
+test_functions2.test_qfunctions: ok
+test_functions2.test_spherharm: ok
+test_functions2.test_struve: ok
+test_functions2.test_trig_integrals: ok
+test_functions2.test_whittaker: ok
+test_gammazeta.test_altzeta: ok
+test_gammazeta.test_barnesg: ok
+test_gammazeta.test_bell_polyexp: ok
+test_gammazeta.test_bernoulli: ok
+test_gammazeta.test_bernpoly_eulerpoly: ok
+test_gammazeta.test_fac2: ok
+test_gammazeta.test_foxtrot_identity: ok
+test_gammazeta.test_gamma: ok
+test_gammazeta.test_gamma_huge_1: ok
+test_gammazeta.test_gamma_huge_2: ok
+test_gammazeta.test_gamma_huge_3: ok
+test_gammazeta.test_gamma_huge_4: ok
+test_gammazeta.test_gamma_huge_5: ok
+test_gammazeta.test_gamma_huge_7: ok
+test_gammazeta.test_gamma_quotients: ok
+test_gammazeta.test_harmonic: ok
+test_gammazeta.test_polygamma: ok
+test_gammazeta.test_polygamma_high_order: ok
+test_gammazeta.test_polygamma_high_prec: ok
+test_gammazeta.test_polygamma_identities: ok
+test_gammazeta.test_polylog: ok
+test_gammazeta.test_primezeta: ok
+test_gammazeta.test_rs_zeta: ok
+test_gammazeta.test_siegelz: ok
+test_gammazeta.test_stieltjes: ok
+test_gammazeta.test_zeta: ok
+test_gammazeta.test_zeta_huge: ok
+test_gammazeta.test_zeta_int_bug: ok
+test_gammazeta.test_zeta_near_1: ok
+test_gammazeta.test_zeta_negative: ok
+test_hp.test_exp_hp: ok
+test_hp.test_hp: ok
+test_hp.test_log_hp: ok
+test_identify.test_identify: ok
+test_identify.test_pslq: ok
+test_interval.test_interval_ae: ok
+test_interval.test_interval_arithmetic: ok
+test_interval.test_interval_complex: ok
+test_interval.test_interval_complex_arg: ok
+test_interval.test_interval_conversions: ok
+test_interval.test_interval_cos_sin: ok
+test_interval.test_interval_div: ok
+test_interval.test_interval_gamma: ok
+test_interval.test_interval_hash: ok
+test_interval.test_interval_identity: ok
+test_interval.test_interval_mul: ok
+test_interval.test_interval_nstr: ok
+test_interval.test_interval_pow: ok
+test_interval.test_interval_sqrt: ok
+test_interval.test_mpi_from_str: ok
+test_levin.test_cohen_alt_0: ok
+test_levin.test_cohen_alt_1: ok
+test_levin.test_levin_0: ok
+test_levin.test_levin_1: ok
+test_levin.test_levin_2: ok
+test_levin.test_levin_3: ok
+test_levin.test_levin_nsum: ok
+test_linalg.test_LU_cache: ok
+test_linalg.test_LU_decomp: ok
+test_linalg.test_cholesky: ok
+test_linalg.test_cond: ok
+test_linalg.test_det: ok
+test_linalg.test_exp_pade: ok
+test_linalg.test_factorization: ok
+test_linalg.test_householder: ok
+test_linalg.test_improve_solution: ok
+test_linalg.test_interval_matrix: ok
+test_linalg.test_inverse: ok
+test_linalg.test_precision: ok
+test_linalg.test_qr: ok
+test_linalg.test_singular: ok
+test_linalg.test_solve: ok
+test_linalg.test_solve_overdet_complex: ok
+test_matrices.test_interval_matrix_matrix_mult: FAIL TypeError: cannot create mpf from matrix(
+test_matrices.test_interval_matrix_mult_bug: ok
+test_matrices.test_interval_matrix_scalar_mult: ok
+test_matrices.test_matmul: ok
+test_matrices.test_matrix_basic: ok
+test_matrices.test_matrix_conjugate: ok
+test_matrices.test_matrix_conversion_to_iv: ok
+test_matrices.test_matrix_copy: ok
+test_matrices.test_matrix_creation: ok
+test_matrices.test_matrix_numpy: ok
+test_matrices.test_matrix_power: ok
+test_matrices.test_matrix_slices: ok
+test_matrices.test_matrix_transform: ok
+test_matrices.test_norms: ok
+test_matrices.test_vector: ok
+test_mpmath.test_newstyle_classes: ok
+test_ode.test_odefun_harmonic: ok
+test_ode.test_odefun_rational: ok
+test_ode.test_odefun_sinc_large: ok
+test_pickle.test_pickle: ok
+test_power.test_fractional_pow: ok
+test_power.test_pow_epsilon_rounding: ok
+test_power.test_pow_integer_direction: ok
+test_quad.test_basic_integrals: ok
+test_quad.test_complex_integration: ok
+test_quad.test_double_1: ok
+test_quad.test_double_2: ok
+test_quad.test_double_3: ok
+test_quad.test_double_4: ok
+test_quad.test_double_5: ok
+test_quad.test_double_6: ok
+test_quad.test_double_7: ok
+test_quad.test_double_trivial: ok
+test_quad.test_expmath_fail: FAIL AssertionError: 
+test_quad.test_expmath_integrals: ok
+test_quad.test_multiple_intervals: ok
+test_quad.test_quad_infinite_mirror: ok
+test_quad.test_quad_symmetry: ok
+test_quad.test_quadgl_linear: ok
+test_quad.test_quadosc: ok
+test_rootfinding.test_anewton: ok
+test_rootfinding.test_bisection: ok
+test_rootfinding.test_findroot: ok
+test_rootfinding.test_mnewton: ok
+test_rootfinding.test_muller: ok
+test_rootfinding.test_multidimensional: ok
+test_rootfinding.test_multiplicity: ok
+test_rootfinding.test_trivial: ok
+test_special.test_convert_special: ok
+test_special.test_div_bug: ok
+test_special.test_functions_special: ok
+test_special.test_special: ok
+test_special.test_special_powers: ok
+test_str.test_nstr: ok
+test_summation.test_fprod: ok
+test_summation.test_fsum: ok
+test_summation.test_nprod: ok
+test_summation.test_nsum: ok
+test_summation.test_sumem: ok
+test_trig.test_trig_misc_hard: ok
+test_trig.test_trig_near_n_pi: ok
+test_trig.test_trig_near_zero: ok
+
+Skipping test (pylab not available or too old version)
+
+test_visualization.test_axes: ok
