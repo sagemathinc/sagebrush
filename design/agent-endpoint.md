@@ -19,10 +19,10 @@ grants(
   id            12 base32 chars, random
   agent         the agent's name as the person sees it ("Claude Code on laptop", "cocalc: number-theory/claude")
   token_hash    SHA-256 of the token's secret
-  scopes        JSON: [{path, access: "read" | "write"}], at most 32
+  scopes        JSON: [{path, access: "read" | "write"}], up to the membership's `scopes_per_grant`
   run_code      0 | 1           "may run code" (§6)
   outward       JSON: the outward actions granted beforehand, [] by default (§5)
-  rate          JSON: this grant's limits (§7), at or below the defaults
+  rate          JSON: optional person-chosen reductions to this grant's membership limits (§7)
   created, expires, last_used, revoked, revoked_reason
 )
 ```
@@ -35,8 +35,8 @@ grants(
   - an agent with write access may `remove` within its scope, which moves an entry to `/Trash/`, and `restore` what was removed from its scope;
   - it sees only the Trash entries that came from its scope (`trashed_from`);
   - no verb empties Trash (§8.2).
-- **Expiry:** 30 days by default, and at most 90. It is shown, and can be extended only by the person.
-- **At most 50 live grants per account.** The person revokes one to make another.
+- **Expiry:** the dialog proposes 30 days; its maximum is the membership's `grant_days_max`. It is shown, and can be extended only by the person.
+- **Live grants are a membership capacity.** At `live_grants`, the person revokes one or moves to the membership named by the refusal (§7).
 
 ## 2. The token
 
@@ -62,7 +62,7 @@ grants(
    - **The request:**
      - at most 4 KiB of JSON;
      - `agent` at most 64 characters;
-     - `wants.scopes` at most 32 paths, each checked by `normPath`.
+     - `wants.scopes` must fit the structural 4 KiB request and every path is checked by `normPath`; on approval, the account applies its membership's `scopes_per_grant` and the person may narrow the request.
      - Anything else is refused with 400 before any write.
    - **Making one:**
      - the IP limit first (Cloudflare's rate-limiting binding, 10 an hour per IP);
@@ -141,6 +141,7 @@ grants(
 | `watch(path)` | read | on the socket: the ops and `changed` within the scope |
 | `run(path, cell or note)` | write and `run_code` | relayed to a page (§6) |
 | `chat.next`, `chat.reply` | the chat document's access | §8.7's remote adapter: messages are patches on a `.chat` document |
+| `files.batch` | each item's access | many small reads/writes/ops in one idempotent request (design/fs-sync-scale.md §2) |
 
 - **Not verbs:** emptying Trash, clearing a history, dropping versions, making or changing grants, deleting synced data. Only a person, from a session, may do these (§8.2, §8.3).
 - **Ops and patches from a grant are credited:** `by: "agent:<name>"`, device `grant:<id>`, and author `agent:<name>` on each patch. The server sets these from the grant, never from the request.
@@ -149,7 +150,7 @@ grants(
 - `read` and `write` on a document run in the Worker, in `web/sync/agent-docs.ts`, which uses the same patchflow codecs as the pages (web/notebook/history.js, web/board/history.ts);
 - it reads the latest snapshot and the batches since (design/sync-server.md §5.2 `pull`), and computes the value;
 - for `write`, it makes the patch from `base` to the new value, and sends it as a one-patch batch with `expect_head` set to the head it read (design/sync-server.md §4.4), from the grant's own patchflow client (`grant:<id>`), credited to the agent;
-- **its bounds:** documents up to 8 MB of value, and 2,000 batches since the snapshot. Beyond either, it answers 413 `limit`, and suggests opening the page;
+- **its bounds:** `document_bytes` of value and `document_batches` since the snapshot, from the account's membership record (design/fs-sync-scale.md §1). Beyond either, it answers 413 `limit`, with the tier metadata of §7, and suggests opening the page;
 - **a write is compare-and-swap,** checked in the document object's transaction. If the document has moved past `base`, it answers `conflict` with the current revision, as the in-page API does. A resend after a lost answer gets the original `seq`, not a conflict.
 
 ## 5. Outward actions
@@ -193,30 +194,30 @@ Each needs either a scope granted beforehand, or the person's confirmation at th
 
 ## 7. Limits, sizes and rates
 
-For daybreak2. Every limit is per grant, inside the account's own limits (design/sync-server.md §8), which bound all grants together. The numbers are first values.
+Every authenticated product capacity comes from the account's required `sync.agent` membership record (design/fs-sync-scale.md §1), inside the account's storage claim. A grant may reduce its own values; it cannot raise them. There are no compiled product defaults.
 
-| What | Per grant |
+| Agent surface | Membership fields |
 |---|---|
-| Requests | 60 a minute, 1,000 an hour |
-| Read | the account's grant read budget, shared by all its grants (design/sync-server.md §6: the membership tier's `sync.grant_read_bytes_per_day`, 200 MB a day if CoCalc omits it, never more than the account's own read budget or 64 GiB), of bytes **authorized**: a signed URL debits the blob's whole size when it is issued, and a document read debits its value's size. A grant's URL is used once (design/sync-server.md §5.4), so the bytes it can transfer are at most what was debited. |
-| Written | the account's grant write budget, shared by all its grants (design/sync-server.md §6: the tier's `sync.grant_write_bytes_per_day`, 100 MB a day if omitted, never more than `storage_bytes` or 64 GiB), debited when a write or blob upload is admitted; each write at most 32 MB (larger: as a blob, at most `max_file_bytes`) |
-| `list` | 1,000 entries a page, at most 10,000 in a call |
-| Document reads and writes | 8 MB of value; 2,000 batches since the snapshot (§4) |
-| Runs | 1 at a time, 60 an hour; each bounded by the runner's own time and memory limits |
-| Sockets | 2 |
-| Confirmations waiting | 5 |
-| Pairings | §2: 3 pending per IP and 10,000 site-wide; 10 made an hour per IP; polls every 5 s at most, 150 per pairing, 60 a minute per IP; 5 approved and waiting per account |
-| Before authentication | 60 requests a minute per IP, 10 that fail (design/sync-server.md §2) |
+| request/operation pacing | `requests_per_minute`, `requests_per_hour`, `ops_per_minute` |
+| bytes and one file | `read_bytes_per_day`, `write_bytes_per_day`, `max_file_bytes` |
+| small-file batches | `batch_files`, `batch_bytes`, `batch_concurrency` |
+| blob/URL concurrency and pacing | `blob_concurrency`, `signed_urls_per_minute` |
+| workspace populations | `workspace_entries`, `folder_entries` |
+| document materialization | `document_bytes`, `document_batches` |
+| runs, sockets and confirmations | `runs_concurrent`, `runs_per_hour`, `sockets`, `confirmations` |
+| grant population, scope count and expiry | `live_grants`, `scopes_per_grant`, `grant_days_max` |
+| Inbox item, queue and sender/day capacities | `inbox_item_bytes`, `inbox_waiting_items`, `inbox_items_per_sender_per_day` |
 
-- **What an agent over a limit sees:**
-  - 429 with `{error: "rate", limit: "requests_per_minute", retry_after}`;
-  - or 413 with `{error: "limit", limit: "write_bytes", max}`.
-- **Nothing is half done:** every check comes before any write.
+Listing page/call sizes and examined rows are advertised server capabilities, clamped to host safety ceilings rather than membership benefits. Read bytes are debited when authorized: a signed URL debits the whole blob and is single-use for a grant; a document read debits its value. Write bytes are reserved before a body or blob is retained. A newly admitted `files.batch` uses one request token in both request buckets, reserves every item's operation and logical bytes before work, and never debits product meters again for its idempotent retries (design/fs-sync-scale.md §2).
+
+Over a product value, the answer is the structured 429/413 of design/fs-sync-scale.md §1.2, including the current tier and the least membership that raises it. Exact COPY is shared by the CLI and site. An unauthenticated abuse or structural safety refusal never advertises an upgrade.
+
+Every check and reservation precedes its write. For a batch, admission reserves the whole ledger, publication splits beneath the host's 500-ops internal-message capability under one durable identity, and each item has stable idempotent results; no item is half published. A batch read returns the same `epoch.head_seq` revision token as list/stat and never exceeds `document_bytes` for a document value.
 
 ## 8. The access log
 
 - **One row per request,** in the account object: time, grant, agent, verb, path (or paths), result, bytes, and for a run, the code's SHA-256. A request's arguments and contents are never logged.
-- **Kept for 90 days, and at most 100,000 rows per account.** The oldest go first.
+- **Kept for 7 days, and at most 100,000 rows per account. The oldest go first.** Age and count are independent host bounds, so sustained traffic can evict a younger row at the count cap. Append and cleanup are bounded. Retention is not a membership field or tier benefit, so zero and downgrade cannot trigger separate early trimming.
 - **Who may read it:** the person, in "Agents with access", per grant or all together. An agent can't read the log, its own entries included.
 - **It is the person's data.** It is deleted with their synced data, by "Delete my synced data" and by the purge (design/sync-server.md §7). Sagebrush's operators have no view of it.
 - **"Undo this agent's changes"** uses TimeTravel's attribution, which every op and patch carries (§4), not the log. The log says what an agent asked for, and the history what it changed.
@@ -226,7 +227,7 @@ For daybreak2. Every limit is per grant, inside the account's own limits (design
 1. **How tokens are issued, stored and rotated.**
    - Issued by the person on sagebrush.space, by pairing or from the grant dialog (§2).
    - Stored only as a SHA-256, in the account object.
-   - Rotated by the person, and the old one stops at once. There are no refresh tokens, and expiry is at most 90 days.
+   - Rotated by the person, and the old one stops at once. There are no refresh tokens, and expiry is at most the membership's `grant_days_max`.
    - cocalc.ai can't issue one by itself. The adapter (§10) asks the person through the same pairing.
 2. **An in-page agent's grant.**
    - The page holds the person's whole authority. Anything that drives the page (CDP, Playwright, the shared browser) can call any of its code, so no limit inside the page is a security boundary against it.
@@ -248,13 +249,13 @@ For daybreak2. Every limit is per grant, inside the account's own limits (design
    - **Revoking a running run:** §6.
    - **Retention:** a write that can't keep the previous version is refused, on the server as on the client (design/sync-server.md §13). Filling the quota on purpose therefore blocks writes, and loses nothing.
 4. **Rates and sizes per verb:** §7. An over-limit agent sees 429 or 413, with which limit it hit and when to retry.
-5. **The access log:** 90 days and 100,000 rows. Readable by the person only (§8).
+5. **The access log:** 7 days and 100,000 rows. Readable by the person only (§8).
 6. **The Inbox.**
    - **Who may send:**
      - the person's own grants with `outward.inbox` (their cocalc.ai agents);
      - accounts the person has allowed by name.
      - Nobody else, so the Inbox can't be used to spam.
-   - **Size limits:** each item at most 50 MB; 100 items waiting at once; 20 a day from one sender.
+   - **Membership capacities:** each item is at most `inbox_item_bytes`, at most `inbox_waiting_items` wait at once, and one sender may add at most `inbox_items_per_sender_per_day` a day. A refusal uses §7's upgrade-bearing answer.
    - **An item is a read-only entry under `/Inbox/`.** Its code never runs, as with a shared collection.
    - **Accepting it** moves it into the workspace as the person's own copy. Its origin (who sent it, when) is kept on the entry. It is still never run by itself: the person runs it.
    - **Declining it** deletes it.
@@ -303,7 +304,7 @@ In Miniflare, with the sync server's harness:
   - refused when the runner isn't there;
   - stopped when the grant is revoked.
 - **Limits:** each row of §7, at the limit and one over.
-- **The log:** a row for each request; never the token or the contents; trimmed at 100,000 rows.
+- **The log:** a row for each request; never the token or the contents; trimmed oldest-first at 7 days and 100,000 rows.
 - **Mutations,** each caught by a test:
   - the scope check;
   - the recheck inside the write's transaction;

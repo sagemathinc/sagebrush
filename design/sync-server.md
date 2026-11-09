@@ -430,12 +430,12 @@ A client's `blobs/check` and `PUT` carry `x-sync-account` (the account's hash) a
 
 ## 6. Limits from cocalc.ai, and the plan notice
 
-**The limits** are sharing's call, `GET /api/v2/sagebrush/limits?account_id=…`, with one more field for sync: `{storage_bytes, max_file_bytes, private_links, sync: {enabled, version_bytes, read_bytes_per_day, retention_days, grant_read_bytes_per_day, grant_write_bytes_per_day}}` (`retention_days` is optional, 90 if absent, §6.2; the two `grant_*` fields are optional, below). `storage_bytes` is the one budget for sharing and sync together (§6.1). A `sync.storage_bytes` CoCalc may still send is ignored.
+**The limits** are sharing's call, `GET /api/v2/sagebrush/limits?account_id=…`, with sync fields `{storage_bytes, max_file_bytes, private_links, sync: {enabled, version_bytes, read_bytes_per_day, retention_days, agent}}`. `agent` is the required versioned membership-capacity record of design/fs-sync-scale.md §1, including the tier and upgrade map. (`retention_days` remains optional, 90 if absent, §6.2.) `storage_bytes` is the one budget for sharing and sync together (§6.1). A `sync.storage_bytes` CoCalc may still send is ignored.
 - **Whether a plan includes sync** is `sync.enabled`, a boolean in CoCalc's editable membership tiers, not a constant here. By default the free tier has it off (abuse risk) and every other tier on. It is CoCalc's config; this server only reads it. CoCalc decides the numbers per membership; they are not in this repository (sagebrush/business-material-out-of-repo).
-- **What all of the account's agent grants may move a day** (design/agent-endpoint.md §7; William, Nov 8: "This should be a function of the membership tier"): `sync.grant_read_bytes_per_day` and `sync.grant_write_bytes_per_day`, set per membership tier by CoCalc. Each is one meter for the whole account, shared by every grant, counted in this account object's `reads` table (as `grants-read` and `grants-write`) and debited in the same transaction that authorizes the bytes, or refused with `rate`.
-  - **The effective values:** grant read $= \min(\text{tier's grant read},\ \text{sync.read\_bytes\_per\_day},\ 64\ \text{GiB})$ and grant write $= \min(\text{tier's grant write},\ \text{storage\_bytes},\ 64\ \text{GiB})$.
-  - **Omitted:** when a limits object CoCalc did send has no `grant_*` field (an older CoCalc), that field is 200 MB (read) or 100 MB (write), the first values. An outage or a malformed answer is not "omitted": it keeps the last good limits, as below.
-  - **Zero is zero:** a tier may turn grants' reads or writes off. A value that isn't a non-negative safe integer makes the whole limits object malformed (as for the other fields, `checkLimits`).
+- **What authenticated agents may do** comes from `sync.agent`, never repository defaults. Its read and write values are one meter for the whole account, shared by every grant, counted in this account object's `reads` table (as `grants-read` and `grants-write`) and reserved in the transaction that authorizes the bytes. The account's storage claim remains an outer bound on writes; the person's own read budget remains an outer bound on reads.
+  - Every field and its upgrade entry is validated together. Missing, malformed or unsupported `sync.agent` makes the whole limits answer unusable for agent work; it never installs a partial or guessed capacity.
+  - **Zero is zero.** A grant may reduce an allowance, never raise it.
+  - **A downgrade preserves reads:** existing workspace and index populations remain readable; the new values govern growth (design/fs-sync-scale.md §1.2).
 - **They are cached in the account object for 6 hours,** not 10 minutes (§7.3). With 100,000 accounts active, that is about 5 requests a second to cocalc.ai.
 - **When the cache is old,** the limits are fetched again, and the cached value is used while the fetch runs.
 - **If CoCalc can't be reached,** the cached value is kept, however old. With nothing cached, uploads are refused and document batches are still accepted (below). An outage is never read as zero, or as no limit.
@@ -648,7 +648,7 @@ For daybreak2's review. Each is enforced by the server, and each has a test. The
 | A batch | 1 MiB of body, 2,000 patches; 8 parents per patch | `limit` |
 | One patch inline | 256 KiB (larger: a blob, §5.3) | `limit` |
 | Ops in one message | 500; a path 1,024 bytes, a name 255 | `limit` |
-| The index | 100,000 entries, 10,000 per folder (as the client's `LIMITS`) | `limit` |
+| Workspace population | membership `sync.agent.workspace_entries` and `folder_entries`, checked when an operation could grow them; index construction has a separate host safety ceiling and resumable work slices (design/fs-sync-scale.md §3) | `limit` with tier/upgrade fields for growth; existing rows stay readable after a downgrade |
 | Documents per account | 100,000 | `limit` |
 | Requests unanswered per socket | 8 | `busy` |
 | Before authentication (§2) | 60 requests a minute per IP on `/api/sync/` and `/api/agent/` | 429, at the Worker |
@@ -660,9 +660,12 @@ For daybreak2's review. Each is enforced by the server, and each has a test. The
 | `pull` | `limit` default 100, at most 500 batches and 4 MiB a message; one R2 segment a request | `more` |
 | `blobs/check`, `outputs.set` | 1,000 and 500 items | `limit` |
 | Batches per account | 20 a second, sustained 4 a second | `rate`, with `retry_after` |
-| Ops per account | 2,000 a minute, each op counted, resent or new (LIMIT-321-2) | `rate`, the whole message |
-| Blob uploads | 4 at once per account; `max_file_bytes` each | 429, 413 |
-| Signed URLs | 600 a minute per account; each debits the blob's size from `sync.read_bytes_per_day` (§5.4) | 429, `rate` |
+| Ops from authenticated agents | membership `sync.agent.ops_per_minute`, each newly admitted op counted; an idempotent `files.batch` retry returns recorded results without another debit | `rate` with tier/upgrade fields, the whole message |
+| Other device ops per account | 2,000 a minute, each op counted, resent or new (LIMIT-321-2) | `rate`, the whole message |
+| Agent blob uploads | membership `sync.agent.blob_concurrency`; effective one-file bound is the lesser of the route capability and agent `max_file_bytes` | 429/413 with tier/upgrade fields only when membership binds; otherwise a safety refusal |
+| Other blob uploads | 4 at once per account; top-level `max_file_bytes` each | 429, 413 |
+| Agent signed URLs | membership `sync.agent.signed_urls_per_minute`; each debits the grant's read meter (§5.4) | 429 with tier/upgrade fields |
+| Other signed URLs | 600 a minute per account; each debits `sync.read_bytes_per_day` (§5.4) | 429, `rate` |
 | Signed URL fetches | 600 a minute per IP at the files Worker | 429 |
 | Snapshots kept | 3 per document | the oldest goes |
 | Live batches before compaction | 200 beyond the latest snapshot | compacted |
