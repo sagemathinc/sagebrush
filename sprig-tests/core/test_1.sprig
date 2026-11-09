@@ -1,0 +1,491 @@
+(* S1.1's core: notation (the parser's trees, held), exact and machine arithmetic, InputForm's layout, lists, comparison, symbols' values and structure; written for S1.1 (design/sprig-mvp.md §3), recorded from the oracle *)
+(*-- core-1 *)
+FullForm[Hold[-x]]
+(*-- core-2 *)
+FullForm[Hold[x_:10]]
+(*-- core-3 *)
+FullForm[Hold[a; b;]]
+(*-- core-4 *)
+FullForm[Hold[1 - 2]]
+(*-- core-5 *)
+FullForm[Hold[-2^2]]
+(*-- core-6 *)
+FullForm[Hold[a/b/c]]
+(*-- core-7 *)
+FullForm[Hold[a^b^c]]
+(*-- core-8 *)
+FullForm[Hold[a.b.c]]
+(*-- core-9 *)
+FullForm[Hold[f@g@x]]
+(*-- core-10 *)
+FullForm[Hold[x//f//g]]
+(*-- core-11 *)
+FullForm[Hold[a -> b -> c]]
+(*-- core-12 *)
+FullForm[Hold[# + 1 &]]
+(*-- core-13 *)
+FullForm[Hold[f'[x]]]
+(*-- core-14 *)
+FullForm[Hold[f''[x]]]
+(*-- core-15 *)
+FullForm[Hold[a b c]]
+(*-- core-16 *)
+FullForm[Hold[(a b) c]]
+(*-- core-17 *)
+FullForm[Hold[a - b - c]]
+(*-- core-18 *)
+FullForm[Hold[2 x^2]]
+(*-- core-19 *)
+FullForm[Hold[x!]]
+(*-- core-20 *)
+FullForm[Hold[a == b == c]]
+(*-- core-21 *)
+FullForm[Hold[!a && b]]
+(*-- core-22 *)
+FullForm[Hold[-a b]]
+(*-- core-23 *)
+FullForm[Hold[a - -b]]
+(*-- core-24 *)
+FullForm[Hold[1/2]]
+(*-- core-25 *)
+FullForm[Hold[-1/2]]
+(*-- core-26 *)
+FullForm[Hold[a;;b]]
+(*-- core-27 *)
+FullForm[Hold[x_Integer?EvenQ]]
+(*-- core-28 *)
+FullForm[Hold[f[x_] := x /; x > 0]]
+(*-- core-29 *)
+FullForm[Hold[a | b | c]]
+(*-- core-30 *)
+FullForm[Hold[i++]]
+(*-- core-31 *)
+FullForm[Hold[++i]]
+(*-- core-32 *)
+FullForm[Hold[a <> b <> c]]
+(*-- core-33 *)
+FullForm[Hold[a[[1, 2]]]]
+(*-- core-34 *)
+FullForm[Hold[a && b || c]]
+(*-- core-35 *)
+FullForm[Hold[x = y = 3]]
+(*-- core-36 *)
+FullForm[Hold[-2.5]]
+(*-- core-37 *)
+FullForm[Hold[1*^3]]
+(*-- core-38 *)
+FullForm[Hold[Global`x]]
+(*-- core-39 *)
+FullForm[Hold[#2 + ## &]]
+(*-- core-40 *)
+FullForm[Hold[a @@ b]]
+(*-- core-41 *)
+FullForm[Hold[f /@ a]]
+(*-- core-42 *)
+FullForm[Hold[a @@@ b]]
+(*-- core-43 *)
+FullForm[Hold[a < b > c]]
+(*-- core-44 *)
+FullForm[Hold[-(a b)]]
+(*-- core-45 *)
+FullForm[Hold[a - (b c)]]
+(*-- core-46 *)
+FullForm[Hold[x =.]]
+(*-- core-47 *)
+FullForm[Hold[a <> b + c]]
+(*-- core-48 *)
+FullForm[Hold[x_.]]
+(*-- core-49 *)
+FullForm[Hold[x__]]
+(*-- core-50 *)
+FullForm[Hold[___h]]
+(*-- core-51 *)
+FullForm[Hold[a :> b]]
+(*-- core-52 *)
+FullForm[Hold[x /. a -> b]]
+(*-- core-53 *)
+FullForm[Hold[x //. a -> b]]
+(*-- core-54 *)
+FullForm[Hold[x += 2]]
+(*-- core-55 *)
+FullForm[Hold[f[a][b, c]]]
+(*-- core-56 *)
+FullForm[Hold[{}]]
+(*-- core-57 *)
+FullForm[Hold[f[]]]
+(*-- core-58 *)
+FullForm[Hold[{{1, 2}, {3}}]]
+(*-- core-59 *)
+FullForm[Hold[2 (a + b)]]
+(*-- core-60 *)
+FullForm[Hold[a (* note *) b]]
+(*-- core-61 *)
+FullForm[Hold["a\"b"]]
+(*-- core-62 *)
+FullForm[Hold[x^-2]]
+(*-- core-63 *)
+FullForm[Hold[a === b]]
+(*-- core-64 *)
+FullForm[Hold[a =!= b]]
+(*-- core-65 *)
+FullForm[Hold[a != b]]
+(*-- core-66 *)
+FullForm[Hold[a <= b >= c]]
+(*-- core-67 *)
+2 + 3 4
+(*-- core-68 *)
+7/21
+(*-- core-69 *)
+-7/21
+(*-- core-70 *)
+2^100
+(*-- core-71 *)
+2^-3
+(*-- core-72 *)
+(2/3)^2
+(*-- core-73 *)
+(2/3)^-2
+(*-- core-74 *)
+0^5
+(*-- core-75 *)
+5^0
+(*-- core-76 *)
+4^(1/2)
+(*-- core-77 *)
+8^(1/3)
+(*-- core-78 *)
+(4/9)^(1/2)
+(*-- core-79 *)
+27^(2/3)
+(*-- core-80 *)
+x + x
+(*-- core-81 *)
+x - x
+(*-- core-82 *)
+2 x - x
+(*-- core-83 *)
+x x
+(*-- core-84 *)
+x^2/x
+(*-- core-85 *)
+x/x^3
+(*-- core-86 *)
+a b + b a
+(*-- core-87 *)
+(x y)^2
+(*-- core-88 *)
+(x^2)^3
+(*-- core-89 *)
+x^0
+(*-- core-90 *)
+1^x
+(*-- core-91 *)
+x^1
+(*-- core-92 *)
+3 a + 2 b - a
+(*-- core-93 *)
+c + b + a
+(*-- core-94 *)
+z y x
+(*-- core-95 *)
+x^2 + x + 1
+(*-- core-96 *)
+1 + x + x^2 + x^3
+(*-- core-97 *)
+y^2 x
+(*-- core-98 *)
+-x
+(*-- core-99 *)
+-x - y
+(*-- core-100 *)
+x - y
+(*-- core-101 *)
+2/x
+(*-- core-102 *)
+x/2
+(*-- core-103 *)
+-x/2
+(*-- core-104 *)
+x/(y z)
+(*-- core-105 *)
+x y/z
+(*-- core-106 *)
+a/b + c
+(*-- core-107 *)
+-1/x
+(*-- core-108 *)
+1/x^2
+(*-- core-109 *)
+(a + b)/c
+(*-- core-110 *)
+(a + b) c
+(*-- core-111 *)
+(a + b)^2
+(*-- core-112 *)
+a^(b + c)
+(*-- core-113 *)
+a^(2 b)
+(*-- core-114 *)
+1.5 + 1/2
+(*-- core-115 *)
+0.1 + 0.2
+(*-- core-116 *)
+1/3 + 0.
+(*-- core-117 *)
+2.5 x
+(*-- core-118 *)
+10.^20
+(*-- core-119 *)
+10.^21
+(*-- core-120 *)
+10.^-5
+(*-- core-121 *)
+10.^-6
+(*-- core-122 *)
+1.5*^10
+(*-- core-123 *)
+-2.5
+(*-- core-124 *)
+3.0
+(*-- core-125 *)
+123456789.123
+(*-- core-126 *)
+2.^0.5
+(*-- core-127 *)
+1/0
+(*-- core-128 *)
+0/0
+(*-- core-129 *)
+0^0
+(*-- core-130 *)
+1/0 + 1/0
+(*-- core-131 *)
+0 (1/0)
+(*-- core-132 *)
+{1, 2} + {10, 20}
+(*-- core-133 *)
+{1, 2} {3, 4}
+(*-- core-134 *)
+{1, 2}^2
+(*-- core-135 *)
+2^{1, 2, 3}
+(*-- core-136 *)
+{a, b} + 1
+(*-- core-137 *)
+{{1, 2}, {3, 4}} + 1
+(*-- core-138 *)
+Range[5]
+(*-- core-139 *)
+Range[2, 6]
+(*-- core-140 *)
+Range[1, 10, 3]
+(*-- core-141 *)
+Range[0, 1, 1/4]
+(*-- core-142 *)
+Range[0]
+(*-- core-143 *)
+Range[3, 1]
+(*-- core-144 *)
+1 == 1
+(*-- core-145 *)
+1 == 2
+(*-- core-146 *)
+1 == 1.
+(*-- core-147 *)
+x == x
+(*-- core-148 *)
+x == y
+(*-- core-149 *)
+"a" == "a"
+(*-- core-150 *)
+"a" == "b"
+(*-- core-151 *)
+1 < 2 < 3
+(*-- core-152 *)
+1 < 3 < 2
+(*-- core-153 *)
+2 >= 2
+(*-- core-154 *)
+1 != 2
+(*-- core-155 *)
+x === x
+(*-- core-156 *)
+1 === 1.
+(*-- core-157 *)
+x =!= y
+(*-- core-158 *)
+True && False
+(*-- core-159 *)
+True || False
+(*-- core-160 *)
+!False
+(*-- core-161 *)
+True && x
+(*-- core-162 *)
+x && True
+(*-- core-163 *)
+False && x
+(*-- core-164 *)
+x || False
+(*-- core-165 *)
+a = 5; a + 1
+(*-- core-166 *)
+a = b; b = 3; a
+(*-- core-167 *)
+a := 2 + 2; Hold[a]
+(*-- core-168 *)
+a := 2 + 2; a
+(*-- core-169 *)
+x = 1; x = x + 1; x = x + 1; x
+(*-- core-170 *)
+(a = 3) + 1
+(*-- core-171 *)
+a; b
+(*-- core-172 *)
+a;
+(*-- core-173 *)
+1; 2; 3
+(*-- core-174 *)
+Head[3]
+(*-- core-175 *)
+Head[3/4]
+(*-- core-176 *)
+Head[3.5]
+(*-- core-177 *)
+Head["x"]
+(*-- core-178 *)
+Head[x]
+(*-- core-179 *)
+Head[f[x]]
+(*-- core-180 *)
+Head[f[x][y]]
+(*-- core-181 *)
+Head[{1}]
+(*-- core-182 *)
+Head[a + b]
+(*-- core-183 *)
+Length[{1, 2, 3}]
+(*-- core-184 *)
+Length[f[x, y]]
+(*-- core-185 *)
+Length[x]
+(*-- core-186 *)
+Length[{}]
+(*-- core-187 *)
+Hold[1 + 1]
+(*-- core-188 *)
+HoldForm[1 + 1]
+(*-- core-189 *)
+FullForm[x^2 + 1]
+(*-- core-190 *)
+InputForm[x^2 + 1]
+(*-- core-191 *)
+FullForm[{a, {b}}]
+(*-- core-192 *)
+FullForm[1/2 + x]
+(*-- core-193 *)
+FullForm["s"]
+(*-- core-194 *)
+FullForm[1.5]
+(*-- core-195 *)
+Print[1 + 1]
+(*-- core-196 *)
+Print["a", "b"]
+(*-- core-197 *)
+Print[x^2]
+(*-- core-198 *)
+Print["x = ", 3]
+(*-- core-199 *)
+Print[1]; Print[2]; 3
+(*-- core-200 *)
+Symbol["abc"]
+(*-- core-201 *)
+Head[Symbol["abc"]]
+(*-- core-202 *)
+ToExpression["1 + 2"]
+(*-- core-203 *)
+ToExpression["a = 4; a^2"]
+(*-- core-204 *)
+Sqrt[16]
+(*-- core-205 *)
+Sqrt[x]
+(*-- core-206 *)
+Sqrt[x]^2
+(*-- core-207 *)
+1/Sqrt[x]
+(*-- core-208 *)
+Sqrt[1/4]
+(*-- core-209 *)
+f[1, 2][3]
+(*-- core-210 *)
+{1, 2, 3}
+(*-- core-211 *)
+{}
+(*-- core-212 *)
+f[]
+(*-- core-213 *)
+"text"
+(*-- core-214 *)
+x -> 1
+(*-- core-215 *)
+x :> 1
+(*-- core-216 *)
+{x -> 1, y -> 2}
+(*-- core-217 *)
+1 < 3 > 2
+(*-- core-218 *)
+1 < 3 > 4
+(*-- core-219 *)
+a < b > c
+(*-- core-220 *)
+Plus = 3
+(*-- core-221 *)
+x != y
+(*-- core-222 *)
+"a" != "b"
+(*-- core-223 *)
+0^(1/2)
+(*-- core-224 *)
+f[Sequence[a, b]]
+(*-- core-225 *)
+Plus[Plus[a, b], c]
+(*-- core-226 *)
+Times[2, Times[3, x]]
+(*-- core-227 *)
+True == False
+(*-- core-228 *)
+x = 2; y := x + 1; x = 5; y
+(*-- core-229 *)
+Symbol["a b"]
+(*-- core-230 *)
+Indeterminate + x
+(*-- core-231 *)
+x + 0
+(*-- core-232 *)
+0 + x + 0
+(*-- core-233 *)
+2 x - 2 x + y
+(*-- core-234 *)
+0. x
+(*-- core-235 *)
+(-8)^(1/3)
+(*-- core-236 *)
+(-4)^(1/2)
+(*-- core-237 *)
+1 < 1
+(*-- core-238 *)
+1 <= 1
+(*-- core-239 *)
+2 > 2
+(*-- core-240 *)
+And[False, Print["no"]]
+(*-- core-241 *)
+Or[True, Print["no"]]
+(*-- core-242 *)
+{1, 2} + {1, 2, 3}
+(*-- core-243 *)
+x = x; x
+(*-- core-244 *)
+Indeterminate + 1
+(*-- core-245 *)
+Indeterminate + 2.5
