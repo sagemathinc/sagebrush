@@ -70,7 +70,9 @@ test("the overlay only adds the 'sagebrush' branches: no upstream line removed, 
   }
   const table = hooks();
   assert.deepEqual(taken.sort(), table.sort());
-  assert.equal(table.length, 24);
+  assert.equal(table.length, 27);
+  // (libelefun's mpf constants rebuilt from the core's fixed-point functions: each holds its function)
+  for (const c of ["pi", "ln2", "e"]) assert.match(patch, new RegExp(`^\\+    mpf_${c} = def_mpf_constant\\(${c}_fixed\\)$`, "m"), c);
   // (no module is registered as another: nothing names sys.modules, gmpy or sage)
   assert.doesNotMatch(patch.split("\n").filter((l) => l.startsWith("+")).join("\n"), /sys\.modules\[['"](gmpy|sage)|import (gmpy|sage)/);
 });
@@ -109,9 +111,9 @@ test("the python backend's results are CPython's, line for line (the probe under
   if (v.stdout?.trim() !== "True") return t.skip("no python3 3.12 or later");
   const env = { ...process.env, PYTHONPATH: join(PKG, "py"), MPMATH_NOGMPY: "1", SAGEBRUSH_MPMATH_BACKEND: "python" };
   // (up to the pickles: the machine's CPython may have gmpy2 installed, and the backend line reads only the env)
-  const upto = (out: string) => out.split("\n").filter((l) => /^(backend|arith|elem|mpc|fixed|int|norm|pickle) /.test(l));
+  const upto = (out: string) => out.split("\n").filter((l) => /^(backend|arith|elem|const|mpc|fixed|int|norm|pickle) /.test(l));
   const want = upto(execFileSync("python3", [PROBE], { encoding: "utf8", env }));
-  assert.equal(want.length, 8);
+  assert.equal(want.length, 9);
   assert.deepEqual(upto(run("python", [PROBE]).out), want);
 });
 

@@ -1,6 +1,6 @@
 --- a/py/mpmath/libmp/backend.py
 +++ b/py/mpmath/libmp/backend.py
-@@ -91,6 +91,38 @@
+@@ -91,6 +91,39 @@
      except:
          pass
  
@@ -29,7 +29,8 @@
 +    ('libelefun', 'mpf_log'), ('libelefun', 'mpf_cos'),
 +    ('libelefun', 'mpf_sin'), ('libelefun', 'mpf_pow'),
 +    ('libelefun', 'exp_fixed'), ('libelefun', 'cos_sin_fixed'),
-+    ('libelefun', 'log_int_fixed'),
++    ('libelefun', 'log_int_fixed'), ('libelefun', 'pi_fixed'),
++    ('libelefun', 'ln2_fixed'), ('libelefun', 'e_fixed'),
 +    ('libmpc', 'mpc_exp'), ('libmpc', 'mpc_sqrt'),
 +    ('libintmath', 'bitcount'), ('libintmath', 'trailing'),
 +    ('libintmath', 'isqrt'), ('libintmath', 'sqrtrem'),
@@ -94,7 +95,7 @@
 +    mpf_sqrt = _sagebrush_mpcore.mpf_sqrt
 --- a/py/mpmath/libmp/libelefun.py
 +++ b/py/mpmath/libmp/libelefun.py
-@@ -1426,3 +1426,14 @@
+@@ -1426,3 +1426,22 @@
          log_int_fixed = _lbmp.log_int_fixed
      except (ImportError, AttributeError):
          print("Warning: Sage imports in libelefun failed")
@@ -109,6 +110,14 @@
 +    exp_fixed = _sagebrush_mpcore.exp_fixed
 +    cos_sin_fixed = _sagebrush_mpcore.cos_sin_fixed
 +    log_int_fixed = _sagebrush_mpcore.log_int_fixed
++    # (the constants too, so that one memo serves every caller; the mpf
++    # constants are rebuilt, as each holds its fixed-point function)
++    pi_fixed = _sagebrush_mpcore.pi_fixed
++    ln2_fixed = _sagebrush_mpcore.ln2_fixed
++    e_fixed = _sagebrush_mpcore.e_fixed
++    mpf_pi = def_mpf_constant(pi_fixed)
++    mpf_ln2 = def_mpf_constant(ln2_fixed)
++    mpf_e = def_mpf_constant(e_fixed)
 --- a/py/mpmath/libmp/libmpc.py
 +++ b/py/mpmath/libmp/libmpc.py
 @@ -833,3 +833,7 @@
