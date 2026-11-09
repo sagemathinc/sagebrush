@@ -1,9 +1,9 @@
 {
  "v": 1,
- "reason": "Sage's prime_powers(start, stop) in sage_all (lib/sage_all.py: the prime powers in [start, stop), on prime_range's segmented sieve). Re-measured with bun 1.4.4 (size-record.sh) on master 5dc8e70e vs head 4e9faa26 (the head measured; only this marker and budgets.json follow it): cli/lib.gen.js +408, cli/pyjs.cjs +1220, engine/lib/sage.pre +3729, engine/lib/sage.src +1113; no other row moves. Markers: exact, except cli/pyjs.cjs 1284 (+1220 measured, plus 64 B of margin, as it moves with master). Ceiling (rule 4): engine/lib/sage.src 2980758 -> 2981871, the measured head 2981807 + 64.",
+ "reason": "Sage's prime_powers(start, stop) in sage_all (lib/sage_all.py: the prime powers in [start, stop), on prime_range's segmented sieve). Re-measured with bun 1.4.4 (size-record.sh) on master 567cdf23 vs head 3063d2fd (the head measured; only this marker and budgets.json follow it): cli/lib.gen.js +388, cli/pyjs.cjs +1156, engine/lib/sage.pre +3729, engine/lib/sage.src +1113; no other row moves. Markers: exact, except cli/pyjs.cjs 1220 (+1156 measured, plus 64 B of margin, as it moves with master). Ceiling (rule 4): engine/lib/sage.src 2980967 -> 2982080, the measured head 2982016 + 64.",
  "bytes": {
-  "cli/lib.gen.js": 408,
-  "cli/pyjs.cjs": 1284,
+  "cli/lib.gen.js": 388,
+  "cli/pyjs.cjs": 1220,
   "engine/lib/sage.pre": 3729,
   "engine/lib/sage.src": 1113
  }
