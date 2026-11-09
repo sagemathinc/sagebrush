@@ -1,0 +1,268 @@
+{
+ "format": "sprig-checker-controls",
+ "v": 1,
+ "note": "For each checker: cases that must pass, and planted wrong answers that must fail (design/sprig-mvp.md §7.3). The test fails if any control's verdict differs from its expect.",
+ "controls": [
+  {
+   "name": "term-order: the same sum in another order",
+   "class": "term-order",
+   "orderless": [
+    "Plus",
+    "Times"
+   ],
+   "ours": "Plus[x, Times[2, y]]",
+   "theirs": "Plus[Times[2, y], x]",
+   "expect": "pass"
+  },
+  {
+   "name": "term-order: nested Orderless heads",
+   "class": "term-order",
+   "orderless": [
+    "Plus",
+    "Times"
+   ],
+   "ours": "Times[Plus[1, x], Power[E, x]]",
+   "theirs": "Times[Power[E, x], Plus[x, 1]]",
+   "expect": "pass"
+  },
+  {
+   "name": "term-order: a dropped term",
+   "class": "term-order",
+   "orderless": [
+    "Plus",
+    "Times"
+   ],
+   "ours": "x",
+   "theirs": "Plus[Times[2, y], x]",
+   "expect": "fail"
+  },
+  {
+   "name": "term-order: a changed coefficient",
+   "class": "term-order",
+   "orderless": [
+    "Plus",
+    "Times"
+   ],
+   "ours": "Plus[x, Times[3, y]]",
+   "theirs": "Plus[Times[2, y], x]",
+   "expect": "fail"
+  },
+  {
+   "name": "term-order: a reordered list (List is not Orderless)",
+   "class": "term-order",
+   "orderless": [
+    "Plus",
+    "Times"
+   ],
+   "ours": "List[a, b]",
+   "theirs": "{b, a}",
+   "expect": "fail"
+  },
+  {
+   "name": "term-order: a reordered Power (not Orderless)",
+   "class": "term-order",
+   "orderless": [
+    "Plus",
+    "Times"
+   ],
+   "ours": "Power[2, x]",
+   "theirs": "Power[x, 2]",
+   "expect": "fail"
+  },
+  {
+   "name": "equivalent-form: an antiderivative written two ways (symbolic)",
+   "class": "equivalent-form",
+   "ours": "Times[Rational[1, 3], Cos[x], Plus[-3, Power[Cos[x], 2]]]",
+   "theirs": "Plus[Times[-1, Cos[x]], Times[Rational[1, 3], Power[Cos[x], 3]]]",
+   "expect": "pass",
+   "how": "^symbolic$"
+  },
+  {
+   "name": "equivalent-form: forced numeric, a true identity",
+   "class": "equivalent-form",
+   "ours": "Plus[x, Power[Sin[x], 2], Power[Cos[x], 2]]",
+   "theirs": "Plus[1, x]",
+   "force_numeric": true,
+   "expect": "pass",
+   "how": "^numeric:7$"
+  },
+  {
+   "name": "equivalent-form: off by a constant factor",
+   "class": "equivalent-form",
+   "ours": "Times[2, Sin[x]]",
+   "theirs": "Sin[x]",
+   "expect": "fail",
+   "how": "mismatch"
+  },
+  {
+   "name": "equivalent-form: wrong only away from 0 (a Taylor polynomial)",
+   "class": "equivalent-form",
+   "ours": "Plus[x, Times[Rational[-1, 6], Power[x, 3]]]",
+   "theirs": "Sin[x]",
+   "expect": "fail",
+   "how": "mismatch"
+  },
+  {
+   "name": "equivalent-form: forced numeric, wrong only away from 0",
+   "class": "equivalent-form",
+   "ours": "Plus[x, Times[Rational[-1, 6], Power[x, 3]]]",
+   "theirs": "Sin[x]",
+   "force_numeric": true,
+   "expect": "fail",
+   "how": "mismatch"
+  },
+  {
+   "name": "equivalent-form: equal only on a branch (x > 0)",
+   "class": "equivalent-form",
+   "ours": "Plus[x, ArcTan[x], ArcTan[Power[x, -1]]]",
+   "theirs": "Plus[x, Times[Rational[1, 2], Pi]]",
+   "force_numeric": true,
+   "expect": "fail",
+   "how": "mismatch"
+  },
+  {
+   "name": "equivalent-form: different free symbols",
+   "class": "equivalent-form",
+   "ours": "Plus[x, y]",
+   "theirs": "Plus[x, z]",
+   "expect": "fail",
+   "how": "^symbols$"
+  },
+  {
+   "name": "equivalent-form: an unknown head is never equal",
+   "class": "equivalent-form",
+   "ours": "BesselJ[0, x]",
+   "theirs": "BesselJ[0, x]",
+   "expect": "fail",
+   "how": "^not decided"
+  },
+  {
+   "name": "equivalent-form up to a constant: antiderivatives differing by 1",
+   "class": "equivalent-form",
+   "ours": "Times[-1, Cos[x]]",
+   "theirs": "Plus[1, Times[-1, Cos[x]]]",
+   "up_to_constant": "x",
+   "expect": "pass",
+   "how": "^symbolic$"
+  },
+  {
+   "name": "equivalent-form up to a constant: a wrong antiderivative",
+   "class": "equivalent-form",
+   "ours": "Times[-1, Cos[x]]",
+   "theirs": "Times[-1, Sin[x]]",
+   "up_to_constant": "x",
+   "expect": "fail",
+   "how": "mismatch"
+  },
+  {
+   "name": "oracle-unevaluated: a witness that agrees",
+   "class": "oracle-unevaluated",
+   "ours": "Plus[Times[2, Sin[x], Cos[x]]]",
+   "theirs": "Times[2, Cos[x], Sin[x]]",
+   "expect": "pass"
+  },
+  {
+   "name": "oracle-unevaluated: a witness that disagrees",
+   "class": "oracle-unevaluated",
+   "ours": "Times[2, Sin[x]]",
+   "theirs": "Times[2, Cos[x], Sin[x]]",
+   "expect": "fail",
+   "how": "mismatch"
+  },
+  {
+   "name": "oracle-wrong: our value against an independent fact (1/8)",
+   "class": "oracle-wrong",
+   "ours": "Rational[1, 8]",
+   "theirs": "Rational[1, 8]",
+   "expect": "pass"
+  },
+  {
+   "name": "oracle-wrong: the oracle's wrong value against the fact",
+   "class": "oracle-wrong",
+   "ours": "Times[Rational[1, 4], Power[x, 2]]",
+   "theirs": "Rational[1, 8]",
+   "expect": "fail",
+   "how": "^symbols$"
+  },
+  {
+   "name": "oracle-host-limit: $IterationLimit refusal, Sprig accepts",
+   "class": "oracle-host-limit",
+   "message": "$IterationLimit::limset: Cannot set $IterationLimit to Infinity; value must be an integer between 20 and Infinity.",
+   "ours": "Infinity",
+   "expected": "Infinity",
+   "expect": "pass"
+  },
+  {
+   "name": "oracle-host-limit: $RecursionLimit refusal, Sprig accepts",
+   "class": "oracle-host-limit",
+   "message": "$RecursionLimit::limset: Cannot set $RecursionLimit to Infinity; value must be an integer between 20 and 512; use the MATHICS_MAX_RECURSION_DEPTH environment variable to allow higher limits.",
+   "ours": "Infinity",
+   "expected": "Infinity",
+   "expect": "pass"
+  },
+  {
+   "name": "oracle-host-limit: a message not on the list",
+   "class": "oracle-host-limit",
+   "message": "Power::infy: Infinite expression 1 / 0 encountered.",
+   "ours": "Infinity",
+   "expected": "Infinity",
+   "expect": "fail",
+   "how": "not on the list"
+  },
+  {
+   "name": "oracle-host-limit: Sprig refusing Infinity",
+   "class": "oracle-host-limit",
+   "message": "$IterationLimit::limset: Cannot set $IterationLimit to Infinity; value must be an integer between 20 and Infinity.",
+   "ours": "4096",
+   "expected": "Infinity",
+   "expect": "fail",
+   "how": "refused"
+  },
+  {
+   "name": "normalize: the rule arrow",
+   "class": "normalize",
+   "theirs": "{x ⇾ 1}",
+   "ours": "{x -> 1}",
+   "expect": "pass"
+  },
+  {
+   "name": "normalize: the delayed rule arrow",
+   "class": "normalize",
+   "theirs": "{MaxIterations ⧴ 65535}",
+   "ours": "{MaxIterations :> 65535}",
+   "expect": "pass"
+  },
+  {
+   "name": "normalize: the equation sign",
+   "class": "normalize",
+   "theirs": "y[0] ⩵ 1",
+   "ours": "y[0] == 1",
+   "expect": "pass"
+  },
+  {
+   "name": "normalize: nothing else is changed",
+   "class": "normalize",
+   "theirs": "x ≠ 1",
+   "ours": "x != 1",
+   "expect": "fail"
+  },
+  {
+   "name": "equivalent-form: forced numeric, too few finite points (poles at five of the seven points)",
+   "class": "equivalent-form",
+   "ours": "Power[Times[Plus[x, Rational[7, 3]], Plus[x, Rational[-1, 2]], Plus[x, Rational[-5, 4]], Plus[x, Rational[2, 5]], Plus[x, Rational[-13, 7]]], -1]",
+   "theirs": "Power[Times[Plus[x, Rational[7, 3]], Plus[x, Rational[-1, 2]], Plus[x, Rational[-5, 4]], Plus[x, Rational[2, 5]], Plus[x, Rational[-13, 7]]], -1]",
+   "force_numeric": true,
+   "expect": "fail",
+   "how": "too few finite points"
+  },
+  {
+   "name": "oracle-wrong: the fact checked numerically at 50 digits (a quadrature value)",
+   "class": "oracle-wrong",
+   "ours": "Rational[1, 8]",
+   "theirs": "0.125`50.",
+   "force_numeric": true,
+   "expect": "pass",
+   "how": "^numeric:1$"
+  }
+ ]
+}

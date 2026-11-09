@@ -1,0 +1,39 @@
+(* arithmetic and exact numbers; from the Nov 6 spike's corpora unless noted *)
+(*-- arith-1 *)
+1/3 + 1/6
+(*-- arith-2 *)
+2^100
+(*-- arith-3 *)
+(1 + I)^2
+(*-- arith-4 *)
+Sqrt[8]
+(*-- arith-5 *)
+N[Pi, 20]
+(*-- arith-6 *)
+N[Sqrt[2]]
+(*-- arith-7 *)
+10!
+(*-- arith-8 *)
+Sin[Pi/6]
+(*-- arith-9 *)
+ArcSin[1]
+(*-- arith-10 *)
+Exp[I Pi]
+(*-- arith-11 *)
+Log[E^2]
+(*-- arith-12 *)
+Sqrt[-4]
+(*-- arith-13 *)
+Abs[-3]
+(*-- arith-14 *)
+Floor[2.5]
+(*-- arith-15 *)
+Round[2.5]
+(*-- arith-16 *)
+x == x
+(*-- arith-17 *)
+1/0
+(*-- arith-18 *)
+N[E, 30]
+(*-- arith-19 *)
+N[1/3]

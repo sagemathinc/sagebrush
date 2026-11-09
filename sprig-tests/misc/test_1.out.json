@@ -1,0 +1,56 @@
+{
+ "cases": [
+  {
+   "fullform": "yes",
+   "id": "misc-1",
+   "messages": [],
+   "output": "",
+   "result": "yes"
+  },
+  {
+   "fullform": "55",
+   "id": "misc-2",
+   "messages": [],
+   "output": "",
+   "result": "55"
+  },
+  {
+   "fullform": "List",
+   "id": "misc-3",
+   "messages": [],
+   "output": "",
+   "result": "List"
+  },
+  {
+   "fullform": "\"\\\\frac{x^2}{\\\\sqrt{y}}\"",
+   "id": "misc-4",
+   "messages": [],
+   "output": "",
+   "result": "\"\\\\frac{x^2}{\\\\sqrt{y}}\""
+  },
+  {
+   "fullform": "3",
+   "id": "misc-5",
+   "messages": [],
+   "output": "",
+   "result": "3"
+  },
+  {
+   "fullform": "12",
+   "id": "misc-6",
+   "messages": [],
+   "output": "",
+   "result": "12"
+  },
+  {
+   "fullform": "5",
+   "id": "misc-7",
+   "messages": [],
+   "output": "",
+   "result": "5"
+  }
+ ],
+ "file": "sprig-tests/misc/test_1.sprig",
+ "format": "sprig-out",
+ "v": 1
+}

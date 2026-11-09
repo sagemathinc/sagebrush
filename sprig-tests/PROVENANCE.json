@@ -1,0 +1,76 @@
+{
+ "files": {
+  "sprig-tests/algebra/test_1.sprig": {
+   "cases": 18,
+   "out_sha256": "b52dc12fd88b2892a193a5a2c4e968477ef6d0c5c6cf7da5f7432cbe3e2c071f",
+   "sprig_sha256": "b8bd9ef972f415181d874bd8b57dec7ae65f955b45a3658e5e4d8871e580850e"
+  },
+  "sprig-tests/arith/test_1.sprig": {
+   "cases": 19,
+   "out_sha256": "273384520b7834f8a2684de08eda625819b2b00685f5e586c0ddd60ea94560fa",
+   "sprig_sha256": "f4952f2afb16ee29e6c66b5af9879615a0851e2524dcab14a5e7b349f6fec945"
+  },
+  "sprig-tests/calc/test_1.sprig": {
+   "cases": 42,
+   "out_sha256": "b5bde0d19189437162c7ac0fb498e2c4d98dcd3ed99af4954f886f769ad6462a",
+   "sprig_sha256": "6d96f8af729e6a40af45c35db1b44fd93b2051d0f5bf609ee7c90ea453862513"
+  },
+  "sprig-tests/heldout/s1/test_1.sprig": {
+   "cases": 64,
+   "out_sha256": "26035df618edbf07264930a9fb6ecfde0d8439a561a2bda705d309f7b75e36be",
+   "sprig_sha256": "fc392ccdc88a83e65817d3d5669678ad3c8d2c8b4d5cc8e28b5f360ab584146d"
+  },
+  "sprig-tests/limits/test_1.sprig": {
+   "cases": 8,
+   "out_sha256": "4ff8a487137f2a792c745b03cf553eded88f961c2ea5d7cd00ac8696ed59b7aa",
+   "sprig_sha256": "4bf43b8e8cbb0f740afe4ef95c4e5f9d79fed93961b8e547b07bae33d40fcc3d"
+  },
+  "sprig-tests/linalg/test_1.sprig": {
+   "cases": 18,
+   "out_sha256": "63f919d5e52ff43b10b42fab44555d722f0df1f38b7df3969efea1f5d6536ece",
+   "sprig_sha256": "d3c59a1177d6ac30728d6a70f9704e7fcc69afcbdb1183e708039fb2ea1aa6cf"
+  },
+  "sprig-tests/list/test_1.sprig": {
+   "cases": 20,
+   "out_sha256": "a2b00f5d8b7a31b0e3f1eb96f131e743d1b0ed4960f667b9e8765a1cfcda80b9",
+   "sprig_sha256": "23290f336ac9ca93fcf732650cf9f263b28376e67f9153968fc3a7df23d7e0b5"
+  },
+  "sprig-tests/misc/test_1.sprig": {
+   "cases": 7,
+   "out_sha256": "cb8397c0a0f04f84f5e7c8dcbd8d5366c3bf387c24a2725a1a27ae170fba86cb",
+   "sprig_sha256": "b10f30864d2dc78824632deeaa92ec19d14031147e6600bc4b03e218be98d76c"
+  },
+  "sprig-tests/numth/test_1.sprig": {
+   "cases": 10,
+   "out_sha256": "4727e7cf7c7275f9801650844e29aa06a312c2bf29a89b410fcc8ead55c827a6",
+   "sprig_sha256": "f7bbcbc63e84c3b463efc7d74fcd227b389324c42bb8c0bb76e6cca9f038e590"
+  },
+  "sprig-tests/rules/test_1.sprig": {
+   "cases": 11,
+   "out_sha256": "d659e32ffdcc6c0b1afca6ce30e53894f1bc11e0fdf8d0595fe317955844bb33",
+   "sprig_sha256": "42b628719a97f4b9f286673a72123827f2eb4770e4039097565ab11ec92bc351"
+  },
+  "sprig-tests/solve/test_1.sprig": {
+   "cases": 12,
+   "out_sha256": "44bde5820d6e143aa2be8558c48ec123ea79943e456df09885f44a3b59dc6a4f",
+   "sprig_sha256": "d0dd025bc8575703914a1d0c24fca679e50ae16792379d876c873aca1605d3fa"
+  }
+ },
+ "format": "sprig-provenance",
+ "oracle": {
+  "oracle_py_sha256": "d6cf9f7f12b43303222826589a33e20df3784db435f91a9b3e06439396233140",
+  "program": "Mathics3, run as a black box (oracle.py)",
+  "record": {
+   "limits": "{200, 4096, {MaxIterations ⧴ 65535}}",
+   "orderless": "{Plus, Times, Max, Min, GCD, LCM, Xor}",
+   "version": "Mathics3 10.0.1",
+   "versions": [
+    "Mathics3 10.0.1",
+    "Running on linux CPython 3.14.4 (main, Apr  8 2026, 04:02:31) [GCC 15.2.0]",
+    "using SymPy 1.14.0, mpmath 1.3.0, numpy 2.5.4, cython Not installed, scipy 1.18.1, skimage Not installed"
+   ]
+  },
+  "run_py_sha256": "9be94d1fa61e3df92a6c1601ead10703675a0c86abc336f3fc0ef6fcd555c65d"
+ },
+ "v": 1
+}

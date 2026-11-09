@@ -1,0 +1,77 @@
+{
+ "cases": [
+  {
+   "fullform": "29",
+   "id": "numth-1",
+   "messages": [],
+   "output": "",
+   "result": "29"
+  },
+  {
+   "fullform": "True",
+   "id": "numth-2",
+   "messages": [],
+   "output": "",
+   "result": "True"
+  },
+  {
+   "fullform": "{{2, 3}, {3, 2}, {5, 1}}",
+   "id": "numth-3",
+   "messages": [],
+   "output": "",
+   "result": "{{2, 3}, {3, 2}, {5, 1}}"
+  },
+  {
+   "fullform": "6",
+   "id": "numth-4",
+   "messages": [],
+   "output": "",
+   "result": "6"
+  },
+  {
+   "fullform": "2",
+   "id": "numth-5",
+   "messages": [],
+   "output": "",
+   "result": "2"
+  },
+  {
+   "fullform": "120",
+   "id": "numth-6",
+   "messages": [],
+   "output": "",
+   "result": "120"
+  },
+  {
+   "fullform": "{1, 2, 3, 4, 6, 12}",
+   "id": "numth-7",
+   "messages": [],
+   "output": "",
+   "result": "{1, 2, 3, 4, 6, 12}"
+  },
+  {
+   "fullform": "Rational[5, 2]",
+   "id": "numth-8",
+   "messages": [],
+   "output": "",
+   "result": "5/2"
+  },
+  {
+   "fullform": "\"abcd\"",
+   "id": "numth-9",
+   "messages": [],
+   "output": "",
+   "result": "\"abcd\""
+  },
+  {
+   "fullform": "5",
+   "id": "numth-10",
+   "messages": [],
+   "output": "",
+   "result": "5"
+  }
+ ],
+ "file": "sprig-tests/numth/test_1.sprig",
+ "format": "sprig-out",
+ "v": 1
+}

@@ -1,0 +1,147 @@
+{
+ "cases": [
+  {
+   "fullform": "{1, 4, 9, 16, 25}",
+   "id": "list-1",
+   "messages": [],
+   "output": "",
+   "result": "{1, 4, 9, 16, 25}"
+  },
+  {
+   "fullform": "{{2, 3, 4}, {3, 4, 5}}",
+   "id": "list-2",
+   "messages": [],
+   "output": "",
+   "result": "{{2, 3, 4}, {3, 4, 5}}"
+  },
+  {
+   "fullform": "{2, 5, 8}",
+   "id": "list-3",
+   "messages": [],
+   "output": "",
+   "result": "{2, 5, 8}"
+  },
+  {
+   "fullform": "{1, 4, 9}",
+   "id": "list-4",
+   "messages": [],
+   "output": "",
+   "result": "{1, 4, 9}"
+  },
+  {
+   "fullform": "{f[a], f[b]}",
+   "id": "list-5",
+   "messages": [],
+   "output": "",
+   "result": "{f[a], f[b]}"
+  },
+  {
+   "fullform": "6",
+   "id": "list-6",
+   "messages": [],
+   "output": "",
+   "result": "6"
+  },
+  {
+   "fullform": "10",
+   "id": "list-7",
+   "messages": [],
+   "output": "",
+   "result": "10"
+  },
+  {
+   "fullform": "3",
+   "id": "list-8",
+   "messages": [],
+   "output": "",
+   "result": "3"
+  },
+  {
+   "fullform": "b",
+   "id": "list-9",
+   "messages": [],
+   "output": "",
+   "result": "b"
+  },
+  {
+   "fullform": "{2, 4, 6, 8, 10}",
+   "id": "list-10",
+   "messages": [],
+   "output": "",
+   "result": "{2, 4, 6, 8, 10}"
+  },
+  {
+   "fullform": "{1, 2, 3}",
+   "id": "list-11",
+   "messages": [],
+   "output": "",
+   "result": "{1, 2, 3}"
+  },
+  {
+   "fullform": "{1, 2, 3, 4}",
+   "id": "list-12",
+   "messages": [],
+   "output": "",
+   "result": "{1, 2, 3, 4}"
+  },
+  {
+   "fullform": "f[f[f[x]]]",
+   "id": "list-13",
+   "messages": [],
+   "output": "",
+   "result": "f[f[f[x]]]"
+  },
+  {
+   "fullform": "{x, f[x], f[f[x]], f[f[f[x]]]}",
+   "id": "list-14",
+   "messages": [],
+   "output": "",
+   "result": "{x, f[x], f[f[x]], f[f[f[x]]]}"
+  },
+  {
+   "fullform": "{2, 3, 5, 7, 11, 13, 17, 19, 23, 29}",
+   "id": "list-15",
+   "messages": [],
+   "output": "",
+   "result": "{2, 3, 5, 7, 11, 13, 17, 19, 23, 29}"
+  },
+  {
+   "fullform": "{-1, 2, -3, 4, -5, 6}",
+   "id": "list-16",
+   "messages": [],
+   "output": "",
+   "result": "{-1, 2, -3, 4, -5, 6}"
+  },
+  {
+   "fullform": "5050",
+   "id": "list-17",
+   "messages": [],
+   "output": "",
+   "result": "5050"
+  },
+  {
+   "fullform": "5",
+   "id": "list-18",
+   "messages": [],
+   "output": "",
+   "result": "5"
+  },
+  {
+   "fullform": "3",
+   "id": "list-19",
+   "messages": [],
+   "output": "",
+   "result": "3"
+  },
+  {
+   "fullform": "{2, 3}",
+   "id": "list-20",
+   "messages": [],
+   "output": "",
+   "result": "{2, 3}"
+  }
+ ],
+ "file": "sprig-tests/list/test_1.sprig",
+ "format": "sprig-out",
+ "v": 1
+}

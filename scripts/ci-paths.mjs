@@ -153,6 +153,9 @@ const runtimePaths = [
   /^catalog\//, /^scripts\/(?!ci-paths\.mjs$)/, /^wasm\//, /^cdn\//,
   // (Rill's recorded R outputs and their provenance: read by the node tests, design/rill.md §7.5)
   /^rill-tests\//,
+  // (Sprig's recorded Mathics3 outputs, their provenance and the value checkers' controls: read by the node tests,
+  // design/sprig-mvp.md §7.5; the corpus replay gets its own job when S1 brings it)
+  /^sprig-tests\//,
 ];
 const webPaths = [/^web\//, /^examples\//, /^packages\/sagebrush-board\//];
 const modePaths = [
