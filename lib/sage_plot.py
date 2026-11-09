@@ -152,9 +152,12 @@ class Graphics:
             sage: G = plot(x, (x, 0, 1)); G.set_axes_range(xmin=-1, ymax=2); G.get_axes_range()
             {'xmax': 1.0, 'xmin': -1.0, 'ymax': 2.0, 'ymin': 0.0}
         """
+        # (kept apart from the plot's options: a sum of graphics does not
+        # carry it, as Sage)
+        r = self.__dict__.setdefault("_axes_range", {})
         for k, v in (("xmin", xmin), ("xmax", xmax), ("ymin", ymin), ("ymax", ymax)):
             if v is not None:
-                self._options[k] = float(v)
+                r[k] = float(v)
 
     def axes_range(self, xmin=None, xmax=None, ymin=None, ymax=None):
         """Set the ranges of the axes (as set_axes_range; get_axes_range()
@@ -176,8 +179,11 @@ class Graphics:
             {'xmax': 1.0, 'xmin': -1.0, 'ymax': 2.0, 'ymin': 0.0}
         """
         r = {k: float(v) for k, v in self.get_minmax_data().items()}
+        ar = self.__dict__.get("_axes_range", {})
         for k in r:
-            if k in self._options:
+            if k in ar:
+                r[k] = ar[k]
+            elif k in self._options:
                 r[k] = float(self._options[k])
         return r
 
@@ -185,7 +191,8 @@ class Graphics:
         # (Sage's xmin()/xmax()/ymin()/ymax(): the range set for the axes,
         # else the extent of the primitives; with a value, set it)
         if v is None:
-            return float(self._options[k]) if k in self._options else self.get_minmax_data()[k]
+            ar = self.__dict__.get("_axes_range", {})
+            return ar[k] if k in ar else self.get_minmax_data()[k]
         self.set_axes_range(**{k: v})
 
     def xmin(self, xmin=None):
@@ -220,8 +227,17 @@ class Graphics:
             sage: line([(0, 0), (2, 3)]).get_minmax_data()
             {'xmax': 2.0, 'xmin': 0.0, 'ymax': 3.0, 'ymin': 0.0}
         """
-        bb = Panel(self._primitives).data_bbox() or (-1.0, 1.0, -1.0, 1.0)
-        return {"xmin": bb[0], "xmax": bb[1], "ymin": bb[2], "ymax": bb[3]}
+        bb = Panel(self._primitives).data_bbox()
+        if not bb:
+            # (as Sage: an empty Graphics is -1..1, integers)
+            return {"xmin": -1, "xmax": 1, "ymin": -1, "ymax": 1}
+        x0, x1, y0, y1 = bb
+        # (as Sage: an extent of one value widens by 1 each way: a point)
+        if x0 == x1:
+            x0, x1 = x0 - 1.0, x1 + 1.0
+        if y0 == y1:
+            y0, y1 = y0 - 1.0, y1 + 1.0
+        return {"xmin": x0, "xmax": x1, "ymin": y0, "ymax": y1}
 
     def options(self):
         """The options (title, axes labels, gridlines, ...).
@@ -239,6 +255,7 @@ class Graphics:
             if getattr(q, "_sage_ignored", None):
                 _ignoring(q)
         o = dict(self._options)
+        o.update(self.__dict__.get("_axes_range", {}))
         o.update(extra)
         p = {}
         if o.get("axes_labels"):

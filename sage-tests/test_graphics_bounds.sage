@@ -1,14 +1,15 @@
 # Graphics.xmin/xmax/ymin/ymax, as Sage: with no argument the range set for that axis (set_axes_range), else the
 # extent of the primitives (a degenerate extent widened by 1 each way; an empty Graphics is -1..1); with a value,
 # set it, converted by float(); get_minmax_data is the primitives' extent alone, and a sum does not carry a range set.
+# (A plotted curve's extent is rounded to 3 places: the plotter's own sampling is not this pin's.)
 def show(label, f):
     try:
         print(label, "->", repr(f()), flush=True)
     except Exception as e:
         print(label, "->", "%s: %s" % (type(e).__name__, e), flush=True)
 g = plot(sin(x), (x, 0, 3))
-show("plot: xmin,xmax,ymin,ymax", lambda: (g.xmin(), g.xmax(), round(g.ymin(), 6), round(g.ymax(), 6)))
-show("get_minmax_data", lambda: {k: round(v, 6) for k, v in g.get_minmax_data().items()})
+show("plot: xmin,xmax,ymin,ymax", lambda: (g.xmin(), g.xmax(), round(g.ymin(), 3), round(g.ymax(), 3)))
+show("get_minmax_data", lambda: {k: round(v, 3) for k, v in g.get_minmax_data().items()})
 show("set xmin(-1)", lambda: (g.xmin(-1), g.xmin(), g.get_minmax_data()['xmin']))
 show("set ymax(2)", lambda: (g.ymax(2), g.ymax()))
 show("set_axes_range", lambda: (g.set_axes_range(xmin=-2, ymax=5), g.xmin(), g.ymax(), g.get_axes_range()))

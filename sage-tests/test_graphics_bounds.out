@@ -1,5 +1,5 @@
-plot: xmin,xmax,ymin,ymax -> (0.0, 3.0, 0.0, 0.99999)
-get_minmax_data -> {'xmin': 0.0, 'xmax': 3.0, 'ymin': 0.0, 'ymax': 0.99999}
+plot: xmin,xmax,ymin,ymax -> (0.0, 3.0, 0.0, 1.0)
+get_minmax_data -> {'xmin': 0.0, 'xmax': 3.0, 'ymin': 0.0, 'ymax': 1.0}
 set xmin(-1) -> (None, -1.0, 0.0)
 set ymax(2) -> (None, 2.0)
 set_axes_range -> (None, -2.0, 5.0, {'xmin': -2.0, 'xmax': 3.0, 'ymin': 0.0, 'ymax': 5.0})
