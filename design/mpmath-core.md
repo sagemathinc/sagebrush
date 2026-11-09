@@ -255,7 +255,7 @@ These are not this design's work, and they need a ruling of their own:
   - Each system's documented outputs (error estimates, evaluation counts, warnings) must stay its own.
   - The shared rule tables and the iteration step could be one implementation under three front ends.
 
-I propose a separate, short "F64 tier" design. Its main question is whether the no-WebAssembly fallback (`SAGEBRUSH_NO_WASM`) is still needed. If it isn't, each twin can go.
+I propose a separate, short "F64 tier" design. William's O2 decision (§10) settles its main question: the no-WebAssembly fallback (`SAGEBRUSH_NO_WASM`) isn't needed, so each twin can go.
 
 ## 6. Phases
 
@@ -406,8 +406,7 @@ ENGINE (daybreak3), SEC (astra), TESTS (grader), PERF (daybreak4), SIZE (daybrea
 ## 10. Open questions
 
 - **O1.** Ruled by @sagebrush on Nov 9: a pinned overlay of the seven guarded files under the Sagebrush-owned `_sagebrush_mpcore`, with no impersonation (§4.3). python owns the mechanism. The full hunk list is part of Phase 1's PR, for python and SEC.
-- **O2.** Whether the no-WebAssembly fallback is still needed. This is with William. The design fits either answer:
-  - **No:** the MP core has no fallback at all, and the F64 twins in §5.3 can go.
-  - **Yes:** without WebAssembly, mpmath runs on the upstream Python backend, which is selected at startup exactly as the rollback is (§4.3), and Sage's and Magma's reals keep working through it. No second implementation of the core is written.
-    - **This is not a silent fallback.** Choosing the Python backend here is a capability decision, taken before any attempt to load the core (this host has no WebAssembly), and it is visible: `mpmath.libmp.BACKEND == 'python'`. A core that fails to load on a host that has WebAssembly still raises (§4.3).
+- **O2.** Decided by William on Nov 9 (afternoon, PST): there is no pure mode without WebAssembly or a native module. In his words: "you can always use wasm or n-api." So:
+  - **The MP core has no fallback implementation.** In the browser and the Node CLI it runs as WebAssembly; natively it runs through N-API or `sagebrush._native`. The upstream Python backend remains only as the time-bounded rollback through Phase 5 (§4.3, §6.2), selected explicitly in a fresh session, never as a capability fallback.
+  - **The F64 twins that exist only so results are identical with and without WebAssembly** (§5.3: `src/runtime/numpy_linalg.ts` against `kernels/src/eigen.rs`, and the JavaScript side of each `kernels/` kernel) can go. That cleanup belongs to the separate F64-tier design (§5.3), not to this one.
 - **O3.** Whether `mpmath.fp`, mpmath's double-precision context, should call `lib/_special.py` so that the F64 tier also has one implementation. Today `fp` runs mpmath's own double-precision Python. This would change last bits against upstream, so it belongs after Phase 5.
