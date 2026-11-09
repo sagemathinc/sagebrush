@@ -1,0 +1,23 @@
+parse(path) -> '{http://www.w3.org/2000/svg}svg' | opened: [('plot.svg', 'rb')]
+parse(file object) -> 'g1' | opened: []
+iterparse(path) -> [('end', 'path'), ('end', 'text'), ('end', 'g'), ('end', 'use'), ('end', 'svg')] | opened: [('plot.svg', 'rb')]
+XMLPullParser over read bytes -> ['start', 'start', 'start', 'end', 'start', 'end', 'end', 'start', 'end', 'end'] | opened: []
+canonicalize(from_file=path) -> '<svg xmlns="http://www.w3.org/2000/svg" height="10" width="1' | opened: [('plot.svg', 'rb')]
+write(path) -> None | opened: [('out.svg', 'w')]
+write(path, utf-8, declaration) -> None | opened: [('out8.svg', 'w')]
+write(path, unicode) -> None | opened: [('outu.svg', 'w')]
+write(file object) -> None | opened: []
+b'<ns0:svg xmlns:ns0="http://www.w3.org/2000/svg" xmlns:ns1="http://www.w3.org/1999/xlink" width="10" height="10"><ns0:g id="g1"><ns0:path d="M0 0L10 10" style="stroke:#000" /><ns0:text x="1" y="2">caf&#233; &amp; tea</ns0:text></ns0:g><ns0:use ns1:href="#g1" /></ns0:svg>'
+b'<?xml version=\'1.0\' encoding=\'utf-8\'?>\n<ns0:svg xmlns:ns0="http://www.w3.org/200'
+True
+write(path, latin-1) -> None | opened: [('out.svg', 'w')]
+b'ns0:text x="1" y="2">caf\xe9 &amp; tea</ns0:text></ns0:g><ns0:use ns1:href="#g1" /></ns0:svg>'
+fromstring of a document with xi:include -> 2 | opened: []
+ElementInclude.include -> None | opened: [('part.xml', 'rb'), ('note.txt', 'r')]
+b'<doc><part n="1">included</part><p>plain text</p></doc>'
+include of a missing href -> FileNotFoundError: [Errno 2] No such file or directory: 'nope.xml' | opened: [('nope.xml', 'rb')]
+include with a loader of its own -> TypeError: expected an Element, not bytes | opened: []
+an external entity -> ParseError: undefined entity &e;: line 1, column 47 | opened: []
+an external DTD -> 'x' | opened: []
+parse of a missing path -> FileNotFoundError: [Errno 2] No such file or directory: 'missing.svg' | opened: [('missing.svg', 'rb')]
+[]
