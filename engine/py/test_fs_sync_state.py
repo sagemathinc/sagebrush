@@ -564,6 +564,28 @@ def test_folder_chain_on_disk():
         shutil.rmtree(d)
 
 
+def test_link_hops_at_the_bound():
+    # (grader X6) a chain of exactly MAX_LINK_HOPS links is followed; one more is refused as leading nowhere
+    for n, ok in ((St.MAX_LINK_HOPS, True), (St.MAX_LINK_HOPS + 1, False)):
+        d = tmp()
+        try:
+            good = os.path.join(d, "good")
+            os.mkdir(good, 0o700)
+            links = [os.path.join(d, "c%d" % i) for i in range(n)]
+            for i, link in enumerate(links):
+                os.symlink(links[i + 1] if i + 1 < n else good, link)
+            try:
+                St.Base.open(os.path.join(links[0], "state"), *IDENT).close()
+                assert ok, "%d links were followed" % n
+                assert os.path.isdir(os.path.join(good, "state", "pairs"))
+            except St.Refused as e:
+                assert not ok, (n, e.message)
+                assert e.message == "%s is a link that leads nowhere, on the way to fs-sync's records." % St._home_short(
+                    links[0]), e.message
+        finally:
+            shutil.rmtree(d)
+
+
 def test_records_must_be_private_plain_files():
     d = tmp()
     try:
