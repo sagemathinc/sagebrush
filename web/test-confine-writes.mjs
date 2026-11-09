@@ -69,7 +69,7 @@ try {
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
   await go(base + "?runner=1");
   await until(`!!${W}`, 60000);
-  for (const d of ["out", "other", "outx", "w2", "r", "q", "d", "once"]) await ev(`${W}.create("/proj/${d}/keep.txt", { content: new TextEncoder().encode("k") }).then(() => 1)`);
+  for (const d of ["out", "other", "outx", "w2", "r", "q", "d", "once", "life"]) await ev(`${W}.create("/proj/${d}/keep.txt", { content: new TextEncoder().encode("k") }).then(() => 1)`);
   await ev(`(() => { document.querySelector('#filebtn')?.click(); document.querySelector('#filemenu [data-group="new"]')?.click(); document.querySelector('#filemenu [data-f="new"]').click(); return 1; })()`);
   await until("sagebrush.notebook.cells().length === 1 && !sagebrush.notebook.cells()[0].ta.value", 20000);
   await sleep(800);
@@ -261,7 +261,7 @@ try {
   // a folder it may change, carrying a member outside; paths not in their one canonical form; bytes that aren't bytes; a
   // rename whose from, to or a member isn't canonical, or whose from is outside: each kept nowhere)
   await forged(`{ fsChanged: "/proj/r/shape.txt", data: { changes: [["/elsewhere/shape.txt", new Uint8Array([1])]] } }`);
-  for (const p of ["/proj/r/../elsewhere/up.txt", "/proj/r//dbl.txt", "/proj/r/./dot.txt", "proj/r/rel.txt", "/proj/r/trail/", "/"]) await forged(`{ fsChanged: ${JSON.stringify(p)}, data: new Uint8Array([1]) }`);
+  for (const p of ["/proj/r/../elsewhere/up.txt", "/proj/r//dbl.txt", "/proj/r/./dot.txt", "proj/r/rel.txt", "/proj/r/trail/", "/", "/proj/r/del\u007f.txt", "/proj/r/" + "n".repeat(256), "/proj/r/" + Array(40).fill("d").join("/")]) await forged(`{ fsChanged: ${JSON.stringify(p)}, data: new Uint8Array([1]) }`);
   await forged(`{ fsChanged: "/proj/r/str.txt", data: "not bytes" }`);
   await forged(`{ fsChanged: "/proj/r/arr.txt", data: [1, 2] }`);
   await forged(`{ fsRename: { from: "/proj/r/../elsewhere", to: "/proj/r/m2", changes: [["/proj/r/m2/a.txt", new Uint8Array([1])]] } }`);
@@ -313,6 +313,26 @@ try {
   await settle();
   check((await stat("/proj/r/h.txt")) && !(await stat("/proj/r/y.txt")), "taken away after the final check, before the first change is kept: nothing of the rename kept");
 
+  // ---- a prompt closed unanswered at Stop and at a restart, and the next refusal asks again (PROMPT934-3)
+  await dismiss();
+  await setCode("import os\n" + TRY("/proj/life/l.txt", "L"));
+  await runAll();
+  check(await until("sagebrush.filesPrompt()?.folder === '/proj/life'", 10000), "(a refusal asks about /proj/life)");
+  await ev("(document.querySelector('#stop').click(), 1)");
+  check(await until("!sagebrush.filesPrompt()", 5000), "Stop closes the open prompt unanswered");
+  await runAll();
+  check(await until("sagebrush.filesPrompt()?.folder === '/proj/life'", 10000), "…and the next refusal asks again");
+  await ev("(sagebrush.kernel.restart(), 1)");
+  check(await until("!sagebrush.filesPrompt()", 10000), "a restart closes the open prompt unanswered");
+  await until("sagebrush.kernel.ready", 30000);
+  await runAll();
+  check(await until("sagebrush.filesPrompt()?.folder === '/proj/life'", 10000), "…and the next interpreter's refusal asks again");
+  await dismiss();
+  // (a refusal the interpreter reports with a path not in its canonical form: no prompt)
+  for (const p of ["/proj/life/../x.txt", "/proj/life//y.txt", "/proj/life/z\u007f.txt"]) await forged(`{ fsRefused: ${JSON.stringify(p)}, what: "open" }`);
+  await sleep(500);
+  check(!(await prompt()), "a reported refusal with a non-canonical path asks nothing");
+
   // ---- "Allow once" (SESSION934-4): it takes effect in the interpreter its Run starts, and ends with it
   await dismiss();
   await setCode("import os\n" + TRY("/proj/once/o.txt", "O"));
@@ -321,6 +341,10 @@ try {
   await sleep(700);
   await trusted("#fbonce");
   check((await ev("sagebrush.permissions().grants.write.once")).includes("/proj/once"), "Allow once: /proj/once allowed for now");
+  // (an automatic restart while it waits for its Run doesn't spend it: that interpreter's ceiling can't use it)
+  await ev("(sagebrush.kernel.restart(), 1)");
+  await until("sagebrush.kernel.ready", 30000);
+  check((await ev("sagebrush.permissions().grants.write.once")).includes("/proj/once"), "…an automatic restart before its Run leaves it waiting, not spent");
   await runAll();
   check(await outHas("/O:ok/"), "…the next run (a new interpreter) writes there");
   await ev("(sagebrush.kernel.restart(), 1)");

@@ -558,6 +558,7 @@ import { toIpynb, toScript, fromFile, cellId } from "./notebook/ipynb.js";
 import { fromMyst } from "./notebook/myst.js";
 import { bookAccess } from "./workspace/book-cap.ts";
 import { filesToggle } from "./workspace/files-toggle.ts";
+import { normPath } from "./workspace/paths.ts";
 import { filesResize, texSplit } from "./workspace/resize.ts";
 import { notebookFileText } from "./workspace/file-bytes.ts";
 import { toMarimo } from "./notebook/marimo.js";
@@ -824,15 +825,13 @@ function makeKernel(owner) {
     // (a resumed session: the files it had, from the journal)
     onStart: async (w) => {
       gens.set(w, ++gen);
+      // (a prompt open for the interpreter this one replaces is closed unanswered: PROMPT934-3)
+      if (owner !== null && fbReq?.doc === owner) filesBar(false);
+      // ("Allow once", before the ceiling: a scope that took effect in an earlier interpreter ends now)
       if (owner !== null) {
         const once = perms.onceScopes(owner, "write");
         for (const s of [...onceAt.keys()]) if (!once.includes(s)) onceAt.delete(s);
-        for (const s of once) {
-          const at = onceAt.get(s);
-          if (at === undefined) onceAt.set(s, gen);
-          else if (at !== gen) { perms.expireOnce(owner, "write", s); onceAt.delete(s); }
-        }
-        if (owner === current.id) filesShown();
+        for (const s of once) { const at = onceAt.get(s); if (at !== undefined && at !== gen) { perms.expireOnce(owner, "write", s); onceAt.delete(s); } }
       }
       // (first: what this document may change, before its files or any run: its ceiling, which only the person's Run
       // widens (rotateIfWidened set `cap`); any other start keeps the last ceiling, narrowed by what is allowed now)
@@ -840,6 +839,12 @@ function makeKernel(owner) {
       // separate question, not this page's to answer)
       cap = owner === null ? ["/"] : meetTrees(cap, perms.writeTrees(owner));
       ceilings.set(gen, cap);
+      // (… and a once scope takes effect in the first interpreter whose ceiling has it: the explicit Run that widened to
+      // it, never an automatic restart that can't use it (astra's follow-up))
+      if (owner !== null) {
+        for (const s of perms.onceScopes(owner, "write")) if (!onceAt.has(s) && cap.includes(s)) onceAt.set(s, gen);
+        if (owner === current.id) filesShown();
+      }
       for (const g of ceilings.keys()) if (g < gen) ceilings.delete(g);
       epoch = 1;
       sentTrees = cap;
@@ -878,7 +883,8 @@ function makeKernel(owner) {
       }
       // (a change the interpreter refused: the prompt for that path, for the document shown)
       if (m.fsRefused !== undefined) {
-        if (owner !== null && owner === current.id && sender === k.worker && typeof m.fsRefused === "string") filesPrompt(owner, gens.get(sender), m.fsRefused, m.why === "changed");
+        // (a refusal the interpreter reports: a prompt only for a canonical path of this document's current interpreter)
+        if (owner !== null && owner === current.id && sender === k.worker && fsCanon(m.fsRefused)) filesPrompt(owner, gens.get(sender), m.fsRefused, m.why === "changed");
         return true;
       }
       if (m.fsChanged === undefined && m.fsRename === undefined) return false;
@@ -895,7 +901,7 @@ function makeKernel(owner) {
       // (what an interpreter sends is input: a path only in its one canonical form (the workspace's, as a write grant's:
       // absolute, no empty, "." or ".." segment, not "/"), and a change's bytes a Uint8Array or null; anything else is
       // kept nowhere (astra's Q934-1, daybreak3))
-      const canon = (p) => typeof p === "string" && p !== "/" && canonicalScope("write", p) === p;
+      const canon = fsCanon;
       const bytes = (d) => d === null || d instanceof Uint8Array;
       if (m.fsRename !== undefined) {
         // (a rename, every path it moves, as one change: admitted whole or not at all, now and at its final admission;
@@ -1541,7 +1547,7 @@ async function toggleConsole(show = consoleEl.hidden) {
     })),
     more: (src) => kernel.ask({ check: src }, nb.mode, false).then((m) => !!m.more),
     complete: (line) => kernel.ask({ complete: line }, nb.mode, {}).then((m) => [m.matches ?? [], m.prefix ?? ""]),
-    interrupt: () => kernel.interrupt(),
+    interrupt: () => { if (fbReq) filesBar(false); return kernel.interrupt(); },
     sage: isSage,
     version: () => kernel.version,
     announce,
@@ -1618,7 +1624,7 @@ nb.on("budget", showReactiveBar);
 $("#add").onclick = () => nb.addCell("", null, true);
 $("#addmd").onclick = () => nb.addCell("", null, true, "markdown");
 $("#keysbtn").onclick = () => nb.showKeys();
-$("#stop").onclick = () => nb.interrupt();
+$("#stop").onclick = () => { if (fbReq) filesBar(false); nb.interrupt(); };
 $("#restart").onclick = () => nb.restart();
 // A notebook's language changes only when its user chooses another, and for
 // one with code only once they confirm it: its code is written in the old
@@ -1847,6 +1853,7 @@ async function open(store, id, kind = "browser", guard = null, intent = null) {
   docGen++;
   ttShow(false);
   current = { id, kind };
+  if (fbReq && fbReq.doc !== id) filesBar(false); // (another document shown: its prompt closed unanswered)
   perms.provenance(id, how);
   filesBar(false);
   filesShown();
@@ -1913,6 +1920,9 @@ function filesBar(on) {
 // takes only a fresh trusted press that begins after that (a press begun before, a held or repeating key, an
 // untrusted event: nothing); an answer is bound to the request, and any change of context closes it unanswered.
 const FB_ARM = 500;
+// (a path an interpreter sends, in its one canonical form: a write grant's (canonicalScope) and, as the same string, within
+// the workspace's own path rules (normPath: its depth, name and character bounds); not "/")
+const fsCanon = (p) => { try { return typeof p === "string" && p !== "/" && canonicalScope("write", p) === p && normPath(p) === p; } catch { return false; } };
 // (each document's permission revision: any change of its record, here or in another tab, counts, so a prompt or a press
 // made before one, even a change and its undoing, answers nothing: PROMPT934-3)
 const permRev = new Map();
