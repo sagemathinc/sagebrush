@@ -50,6 +50,9 @@ for (const f of ["web/board/test-board-journal.mjs", "web/board/test-board-journ
   ok(run('function f() { mkdirSync(c); }\nlet c, b;\nc = join(b, "z");\nb = mkdtempSync(join(tmpdir(), "x-"));\n').length === 0, "rule: a chain of variables assigned out of source order passes (to a fixpoint)");
   ok(run('const d = mkdtempSync(join(tmpdir(), "x-")); const p = d; const u = import.meta.url;\nmkdirSync(p);\n').length === 0, "rule: a later statement on the line doesn't root a variable");
   ok(run('mkdtempSync(join(here, ".x-"));\nmkdirSync(join(here, ".x-"));\n', allow).length === 1, "rule: an allowance admits its mkdtemp call only, not a mkdirSync of the same prefix");
+  // (the grader's rows, #920 r2: U1, T9)
+  ok(run('console.log("mkdirSync, in a message", \'mkdtempSync too\');\n').length === 0, "rule: a binding's name in a quoted string isn't a use");
+  ok(classify('const here = new URL(".", import.meta.url).pathname;\nconst { mkdtempSync } = helpers;\nmkdtempSync(join(here, ".x-"));\n').some((c) => c.fn === "mkdtempSync" && c.kind === "repo"), "rule: a call by name with no node:fs binding (a helper's) is still found");
   ok(Object.values(UNPLACED).every((r) => r.length > 20), "each UNPLACED entry says why it isn't in the repository");
   ok(isTest("web/a/test-a.mjs") && isTest("web/a/test-a.page.js") && isTest("web/a/b.test.ts") && !isTest("web/build.ts") && !isTest("scripts/test-x.mjs"), "the census's files: web/'s test-* and *.test.* files");
 }
@@ -81,7 +84,7 @@ for (const f of ["web/board/test-board-journal.mjs", "web/board/test-board-journ
     ok(r.length === 1 && r[0].fn === fn && r[0].kind === "repo" && t.length === 1 && t[0].fn === fn && t[0].kind === "tmp", `fs binding, ${what}: its call is found as ${fn} (repository and tmpdir() twins): ${JSON.stringify([r, t])}`);
     ok(problems(repo).length === 1 && problems(tmp).length === 0, `fs binding, ${what}: in the repository it fails, under tmpdir() it passes`);
   }
-  ok(problems('import * as files from "node:fs";\nfiles.readFileSync(join(here, "a"));\nfiles.promises.readFile("b");\n').length === 0, "fs binding: other members of a namespace (and of its .promises) pass");
+  ok(problems('import * as files from "node:fs";\nimport * as q from "node:fs/promises";\nconst r = files.readFileSync, e = files.existsSync(join(here, "a")), w = files.promises.writeFile, s = q.stat;\nfiles.promises.readFile("b");\n').length === 0, "fs binding: other members of a namespace (and of its .promises), called or taken, pass");
   for (const [what, src] of [
     ["a named alias passed on", 'import { mkdirSync as make } from "node:fs";\nconst m = make;\n'],
     ["a namespace passed on", 'import * as files from "node:fs";\nhelper(files);\n'],
@@ -90,7 +93,15 @@ for (const f of ["web/board/test-board-journal.mjs", "web/board/test-board-journ
     ["a node:fs/promises namespace passed on", 'import * as q from "node:fs/promises";\nuse(q);\n'],
     ["a bare require", 'const mods = [require("fs")];\n'],
     ["an inline import's .promises taken", 'const p = (await import("node:fs")).promises;\n'],
+    // (daybreak3, #920 r2: an operation member taken as a value)
+    ["a namespace's operation taken", 'import * as files from "node:fs";\nconst make = files.mkdirSync;\nmake(join(here, "x"));\n'],
+    ["a default's .promises operation taken", 'import fs from "node:fs";\nconst make = fs.promises.mkdir;\nawait make(join(here, "x"));\n'],
+    ["a node:fs/promises namespace's operation taken", 'import * as q from "node:fs/promises";\nconst make = q.mkdir;\nawait make(join(here, "x"));\n'],
+    ["a named promises' operation taken", 'import { promises as P } from "node:fs";\nconst make = P.mkdtemp;\n'],
+    ["an inline import's operation taken", 'const make = (await import("node:fs")).mkdirSync;\n'],
+    ["an inline require's operation called indirectly", 'require("fs").mkdirSync.call(null, join(here, "x"));\n'],
   ]) ok(problems(src).length === 1 && /can't follow/.test(problems(src)[0]), `fs binding, ${what}: fails (the census can't follow it): ${problems(src).join("; ")}`);
+  ok(problems('import * as files from "node:fs";\nimport fs from "node:fs";\nimport * as q from "node:fs/promises";\nfiles.mkdirSync(join(tmpdir(), "a"));\nawait fs.promises.mkdir(join(tmpdir(), "b"));\nawait q.mkdir(join(tmpdir(), "c"));\n').length === 0, "fs binding, the control: the same three operations called directly under tmpdir() pass");
   ok(problems('const s = `import * as files from "node:fs"; helper(files);`;\n').length === 0, "fs binding: a binding inside a string (generated code) is not the file's");
 }
 

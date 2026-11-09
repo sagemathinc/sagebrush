@@ -155,6 +155,10 @@ export function classify(src) {
   for (const local of names.keys()) for (const m of bare.matchAll(new RegExp(`(?<![\\w$.])${esc(local)}(?![\\w$])(?!\\s*\\()`, "g"))) if (!inDecl(m.index)) opaque(m.index, `${local}, not called`);
   for (const n of ns) for (const m of bare.matchAll(new RegExp(`(?<![\\w$.])${esc(n)}(?![\\w$])(?!\\s*\\.\\s*(?!promises(?![\\w$]))[\\w$]|\\s*\\.\\s*promises\\s*\\.\\s*[\\w$])`, "g"))) if (!inDecl(m.index)) opaque(m.index, `${n}, not a member`);
   for (const n of pns) for (const m of bare.matchAll(new RegExp(`(?<![\\w$.])${esc(n)}(?![\\w$])(?!\\s*\\.\\s*[\\w$])`, "g"))) if (!inDecl(m.index)) opaque(m.index, `${n}, not a member`);
+  // (and an operation taken as a value, ns.mkdirSync, ns.promises.mkdir, pns.mkdir, not called: other members pass)
+  const uncalled = (ops) => `\\s*\\.\\s*(${ops.join("|")})(?![\\w$])(?!\\s*\\()`;
+  for (const n of ns) for (const m of bare.matchAll(new RegExp(`(?<![\\w$.])${esc(n)}(?:${uncalled(DIR)}|\\s*\\.\\s*promises${uncalled(PDIR)})`, "g"))) opaque(m.index, `${n}.${m[1] ?? "promises." + m[2]}, not called`);
+  for (const n of pns) for (const m of bare.matchAll(new RegExp(`(?<![\\w$.])${esc(n)}${uncalled(PDIR)}`, "g"))) opaque(m.index, `${n}.${m[1]}, not called`);
   // (an inline load, (await import("node:fs")).x or require("fs").x, is read as a namespace's member)
   for (const m of blank(src, false).matchAll(/\b(?:require|import)\(\s*["'](?:node:)?fs(\/promises)?["']\s*\)/g)) {
     if (inDecl(m.index)) continue;
@@ -163,7 +167,7 @@ export function classify(src) {
     const [whole, a, b, open] = tail, ops = m[1] ? PDIR : DIR;
     if (ops.includes(a) && !b && open) push(a, m.index, end + whole.length);
     else if (!m[1] && a === "promises" && PDIR.includes(b) && open) push(b, m.index, end + whole.length);
-    else if (a === "promises" && !m[1] && !b) opaque(m.index, m[0] + ".promises");
+    else if (ops.includes(a) || (a === "promises" && !m[1] && (!b || PDIR.includes(b)))) opaque(m.index, `${m[0]}.${a}${b ? "." + b : ""}, not called`);
   }
   return calls.sort((a, b) => a.line - b.line);
 }
