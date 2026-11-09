@@ -99,7 +99,11 @@ for (const f of readdirSync(join(out, "lib"))) {
 const pageFiles = readdirSync(out).filter((f) => /\.(html|m?js)$/.test(f));
 const refs = new Set();
 for (const f of pageFiles) for (const m of readFileSync(join(out, f), "utf8").matchAll(/\b(sagebrush-[a-z0-9-]+\.(?:m?js|wasm)|docs-index(?:-[a-z]+)?\.json)\b/g)) refs.add(m[1]);
-for (const r of [...refs].sort()) if (!existsSync(join(out, r))) bad.push(`${r}: the page names it, but app/dist has no ${r}`);
+// (the site's only, though the page names it: the notebook page's agent chunk, fetched only by its Agent button, which
+// the page never shows in the app (window.__TAURI__): a page there is one the agent's program doesn't accept)
+const SITE_ONLY = new Set(["sagebrush-agent.js"]);
+for (const r of [...refs].sort()) if (!SITE_ONLY.has(r) && !existsSync(join(out, r))) bad.push(`${r}: the page names it, but app/dist has no ${r}`);
+for (const r of SITE_ONLY) if (existsSync(join(out, r))) bad.push(`${r}: the site's only, but it is in app/dist`);
 // ...and every module or wasm the page names by a path from its own directory
 // ("./shell/terminal.js", the Terminal's dynamic import): the Terminal's
 // shipped in the apps' menu once without shell/ (#358), the item there and

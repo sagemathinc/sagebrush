@@ -363,7 +363,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   head.append(back, fileBtn, title, saveState, toggle, runBtn, cmBtn, agentBtn, presentBtn, status, tools);
   page.appendChild(fileMenu);
   // (a ?pair= link, or an agent this browser remembers: the pairing module mounted now, to connect or reconnect)
-  if (new URLSearchParams(location.search).has("pair")) void pairAgent(host.ws).catch(agentFailed);
+  // (the link taken by the hosting page before this loaded: pair-link.ts's key; or still in the URL)
+  if ((globalThis as any)[Symbol.for("sagebrush.pairLink")] || new URLSearchParams(location.search).has("pair")) void pairAgent(host.ws).catch(agentFailed);
   else void host.ws.agentGrants().then((k) => { if (Object.keys(k ?? {}).length) void pairAgent(host.ws).catch(agentFailed); }, () => {});
   const main = el("div", "tex-main");
   const left = el("div", "tex-left"), right = el("div", "tex-right");
