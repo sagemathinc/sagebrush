@@ -372,7 +372,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   right.appendChild(preview);
   main.append(left, right);
   // (the source's and the preview's widths: the edge between them, remembered on this device: workspace/resize.ts)
-  texSplit(main, left);
+  texSplit(main, left, life.signal);
   // (the bar for a change made elsewhere while this text had unsaved edits: one at a time, below)
   const bar = el("div", "tex-conflict"); bar.hidden = true; bar.setAttribute("role", "alert");
   const barText = el("span", "tex-conflict-t");

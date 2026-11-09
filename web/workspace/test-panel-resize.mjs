@@ -59,6 +59,9 @@ const showFiles = () => ev(`(() => { if (${S}.hidden) document.querySelector(".s
 
 try {
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
+  // (the size observers that watch a LaTeX editor's .tex-main, still connected: one per live editor)
+  await send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => { const RO = window.ResizeObserver; const live = new Set(); window.__texRO = () => [...live].length;
+    window.ResizeObserver = class extends RO { observe(t, ...a) { if (t?.classList?.contains("tex-main")) live.add(this); return super.observe(t, ...a); } disconnect() { live.delete(this); return super.disconnect(); } }; })()` });
   await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
   await go(base);
   await until(`!!window.sagebrush?.workspace`, 60000);
@@ -66,6 +69,7 @@ try {
   const fids = await ev(`(async () => { const w = window.sagebrush.workspace;
     const py = await w.create("/t/resize.py", { content: "print(1)\\n" });
     const tex = await w.create("/t/resize.tex", { content: "\\\\documentclass{article}\\n\\\\begin{document}\\nHi\\n\\\\end{document}\\n" });
+    for (const x of ["b", "c"]) await w.create("/t/resize-" + x + ".tex", { content: "\\\\documentclass{article}\\n\\\\begin{document}\\nFile " + x + "\\n\\\\end{document}\\n" });
     return { py: py.fid, tex: tex.fid }; })()`);
 
   // ---- the files, on the notebook page (the page beside them is the body's padding)
@@ -93,6 +97,21 @@ try {
   check((await sideW()) === 640, "notebook page: never wider than 640 px (nor the window less 320 px)", await sideW());
   await dbl(EDGE);
   check((await sideW()) === 272 && (await ev(`localStorage.getItem("sagebrush-files-width")`)) === null, "notebook page: a double-click puts 272 px back and forgets the width", await sideW());
+  // (the chosen width is kept apart from what a narrower window draws: daybreak3's E2)
+  await drag(EDGE, 600);
+  const chosen = await sideW();
+  await send("Emulation.setDeviceMetricsOverride", { width: 800, height: 800, deviceScaleFactor: 1, mobile: false });
+  await sleep(400);
+  check((await sideW()) === 800 - 320, "notebook page: a window 800 px wide draws them 480 px (the page keeps 320)", await sideW());
+  await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+  await sleep(400);
+  check((await sideW()) === chosen && Number(await ev(`localStorage.getItem("sagebrush-files-width")`)) === chosen, "notebook page: wide again, the chosen width is back (and still the one kept)", { w: await sideW(), chosen });
+  await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await sleep(400);
+  await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+  await sleep(400);
+  check((await sideW()) === chosen, "notebook page: after a phone width, the chosen width is back", { w: await sideW(), chosen });
+  await dbl(EDGE);
 
   // ---- a code file: the code page starts where the files end
   await drag(EDGE, 380);
@@ -123,6 +142,34 @@ try {
     check(Math.abs((await share()) - 30) <= 2, "LaTeX editor: the same split after a reload", await share());
     await dbl(SPLIT);
     check(Math.abs((await share()) - 50) <= 1 && (await ev(`localStorage.getItem("sagebrush-tex-split")`)) === null, "LaTeX editor: a double-click puts the halves back", await share());
+    // (another file opened in place mounts the editor again: the old editor's edge stops listening (its window
+    // listener, its size observer, its queued frame), checked on the old elements kept aside: daybreak3's E1, astra's R1)
+    await showFiles();
+    const row = (p) => JSON.stringify(`.frow[data-path="${p}"]`);
+    await until(`!!document.querySelector(${row("/t/resize-b.tex")}) || (document.querySelector('.frow[data-path="/t"]')?.click(), false)`, 20000);
+    check((await ev(`window.__texRO()`)) === 1, "LaTeX editor: one size observer on the split", await ev(`window.__texRO()`));
+    for (const x of ["b", "c", ""]) {
+      await ev(`(() => { window.__old = window.__old ?? []; window.__old.push({ main: document.querySelector(".tex-main"), edge: document.querySelector(${JSON.stringify(SPLIT)}) }); return 1; })()`);
+      const p = `/t/resize${x ? "-" + x : ""}.tex`;
+      await ev(`(document.querySelector(${row(p)}).click(), 1)`);
+      await until(`document.querySelector(".tex-main") !== window.__old.at(-1).main && !!document.querySelector(".tex-page .tex-src")`, 20000);
+      await sleep(300);
+    }
+    await ev(`(() => { for (const o of window.__old) { o.main.style.setProperty("--tex-split", "1%"); o.edge.style.left = "-999px"; } dispatchEvent(new Event("resize")); return 1; })()`);
+    await sleep(300);
+    const stale = await ev(`window.__old.filter((o) => o.main.style.getPropertyValue("--tex-split") !== "1%" || o.edge.style.left !== "-999px").length`);
+    check(stale === 0 && (await ev(`window.__texRO()`)) === 1, "LaTeX editor: after three files opened in place, no old editor's edge reacts to a resize, and one size observer is left", { stale, observers: await ev(`window.__texRO()`) });
+    // (a drag under way when the editor goes: no page-wide drag state left)
+    const e2 = await ev(`(() => { const b = document.querySelector(${JSON.stringify(SPLIT)}).getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; })()`);
+    await mouse("mouseMoved", e2.x, e2.y, { buttons: 0 });
+    await mouse("mousePressed", e2.x, e2.y);
+    await mouse("mouseMoved", e2.x - 40, e2.y);
+    const during = await ev(`document.body.classList.contains("sb-resizing")`);
+    await ev(`(document.querySelector(${row("/t/resize-b.tex")}).click(), 1)`);
+    await until(`document.querySelector(".tex-preview")?.textContent.includes("File b")`, 20000);
+    const after = await ev(`document.body.classList.contains("sb-resizing")`);
+    await mouse("mouseReleased", e2.x - 40, e2.y);
+    check(during && !after, "LaTeX editor: a drag under way when another file opens leaves no drag state on the page", { during, after });
   } else console.log("(no LaTeX editor in this build: its split isn't checked)");
 
   // ---- a board: the board starts where the files end, and follows a drag

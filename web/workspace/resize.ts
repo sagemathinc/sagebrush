@@ -43,8 +43,10 @@ const write = (key: string, v: string | null) => { try { if (v === null) localSt
 type Spec = { key: string; def: number; min: number; max: number };
 
 /** A vertical edge: `measure` turns the pointer's x into a size, `apply` shows a size; arrows step by `step`, a
- * double-click restores the default (and forgets the remembered size). Returns the current size's setter. */
-function edge(el: HTMLElement, spec: Spec, o: { label: string; unit: string; step: number; max?: () => number; measure: (x: number) => number; apply: (v: number) => void }) {
+ * double-click restores the default (and forgets the remembered size).  The size the person chose (`pref`, the one
+ * kept) is separate from the one drawn: a narrower window draws less, and a wider one gives the chosen size back
+ * (daybreak3's E2).  `signal`: the edge's lifetime (its window listener ends with it). */
+function edge(el: HTMLElement, spec: Spec, o: { label: string; unit: string; step: number; max?: () => number; measure: (x: number) => number; apply: (v: number) => void; signal?: AbortSignal }) {
   el.classList.add("sb-edge");
   el.setAttribute("role", "separator");
   el.setAttribute("aria-orientation", "vertical");
@@ -52,35 +54,47 @@ function edge(el: HTMLElement, spec: Spec, o: { label: string; unit: string; ste
   el.tabIndex = 0;
   el.title = "Drag to resize; double-click to reset";
   const hi = () => Math.max(spec.min, Math.min(spec.max, o.max?.() ?? spec.max));
-  let cur = spec.def;
-  const set = (v: number, keep: boolean) => {
-    cur = Math.round(Math.max(spec.min, Math.min(hi(), v)));
+  const clamp = (v: number) => Math.round(Math.max(spec.min, Math.min(hi(), v)));
+  let pref = spec.def, cur = spec.def;
+  // (the drawn size, from the chosen one and this window)
+  const show = () => {
+    cur = clamp(pref);
     el.setAttribute("aria-valuemin", String(spec.min));
     el.setAttribute("aria-valuemax", String(hi()));
     el.setAttribute("aria-valuenow", String(cur));
     el.setAttribute("aria-valuetext", `${cur}${o.unit}`);
     o.apply(cur);
-    if (keep) write(spec.key, String(cur));
   };
+  // (a size chosen here: by a drag, a key or a double-click; kept when `keep`)
+  const set = (v: number, keep: boolean) => {
+    pref = clamp(v);
+    show();
+    if (keep) write(spec.key, String(pref));
+  };
+  // (a drag under way: ended by the pointer, or by the edge's lifetime, which leaves no page-wide drag state behind)
+  let endDrag: ((keep: boolean) => void) | null = null;
   el.addEventListener("pointerdown", (e) => {
-    if (e.button !== 0) return;
+    if (e.button !== 0 || endDrag) return;
     e.preventDefault();
     el.setPointerCapture?.(e.pointerId);
     el.classList.add("sb-dragging");
     document.body.classList.add("sb-resizing");
     const move = (m: PointerEvent) => set(o.measure(m.clientX), false);
-    const up = () => {
+    const up = () => endDrag?.(true);
+    endDrag = (keep) => {
+      endDrag = null;
       el.removeEventListener("pointermove", move);
       el.removeEventListener("pointerup", up);
       el.removeEventListener("pointercancel", up);
       el.classList.remove("sb-dragging");
       document.body.classList.remove("sb-resizing");
-      set(cur, true);
+      if (keep) set(pref, true);
     };
     el.addEventListener("pointermove", move);
     el.addEventListener("pointerup", up);
     el.addEventListener("pointercancel", up);
   });
+  o.signal?.addEventListener("abort", () => endDrag?.(false), { once: true });
   el.addEventListener("dblclick", (e) => { e.preventDefault(); set(spec.def, false); write(spec.key, null); });
   el.addEventListener("keydown", (e) => {
     const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
@@ -89,8 +103,9 @@ function edge(el: HTMLElement, spec: Spec, o: { label: string; unit: string; ste
     e.preventDefault();
     set(cur + d * o.step * (e.shiftKey ? 4 : 1), true);
   });
-  set(Number(read(spec.key)) || spec.def, false);
-  addEventListener("resize", () => set(cur, false));
+  pref = Math.round(Math.max(spec.min, Math.min(spec.max, Number(read(spec.key)) || spec.def)));
+  show();
+  addEventListener("resize", show, o.signal ? { signal: o.signal } : undefined);
   return set;
 }
 
@@ -111,18 +126,25 @@ export function filesResize(side: HTMLElement, changed?: () => void) {
   });
 }
 
-/** The LaTeX editor's split: an edge between `left` (the source) and the preview, in `main` (.tex-main). */
-export function texSplit(main: HTMLElement, left: HTMLElement) {
+/** The LaTeX editor's split: an edge between `left` (the source) and the preview, in `main` (.tex-main); `signal`: the
+ * editor's mount (another file opened in place mounts again: this one's listeners end with it). */
+export function texSplit(main: HTMLElement, left: HTMLElement, signal?: AbortSignal) {
   style();
   main.classList.add("sb-split");
   main.style.position = "relative";
   const handle = document.createElement("div");
   left.after(handle);
   const place = () => { handle.style.left = `${left.offsetLeft + left.offsetWidth - 5}px`; };
+  // (one frame queued at most, and none left once the editor is gone)
+  let frame = 0;
+  const later = () => { if (!frame && !signal?.aborted) frame = requestAnimationFrame(() => { frame = 0; place(); }); };
   edge(handle, TEX_SPLIT, {
     label: "Resize the source and the preview", unit: "%", step: 2,
     measure: (x) => { const r = main.getBoundingClientRect(); return ((x - r.left) / Math.max(1, r.width)) * 100; },
-    apply: (v) => { main.style.setProperty("--tex-split", `${v}%`); requestAnimationFrame(place); },
+    apply: (v) => { main.style.setProperty("--tex-split", `${v}%`); later(); },
+    signal,
   });
-  new ResizeObserver(place).observe(main);
+  const ro = new ResizeObserver(place);
+  ro.observe(main);
+  signal?.addEventListener("abort", () => { ro.disconnect(); cancelAnimationFrame(frame); frame = 0; }, { once: true });
 }
