@@ -557,6 +557,9 @@ export class WorkerKernel {
   // SharedArrayBuffer), or if the program does not stop within 2 s (a loop
   // that never checks), restart the interpreter.
   interrupt(message = STOPPED) {
+    // (every Stop, whichever route reached it (the page's, a cell's, the keyboard's, an agent's): told first, so what was
+    // asked of the person for this run (confinement phase 2's prompt) closes with it)
+    this.emit("interrupt");
     // (a question shown before the Stop is over, answered or not: what the
     // program asks after catching the KeyboardInterrupt is a new one)
     this.retireInputs();

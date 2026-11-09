@@ -842,7 +842,7 @@ function makeKernel(owner) {
       // (… and a once scope takes effect in the first interpreter whose ceiling has it: the explicit Run that widened to
       // it, never an automatic restart that can't use it (astra's follow-up))
       if (owner !== null) {
-        for (const s of perms.onceScopes(owner, "write")) if (!onceAt.has(s) && cap.includes(s)) onceAt.set(s, gen);
+        for (const s of perms.onceScopes(owner, "write")) if (!onceAt.has(s) && cap.some((t) => coversW(t, s))) onceAt.set(s, gen);
         if (owner === current.id) filesShown();
       }
       for (const g of ceilings.keys()) if (g < gen) ceilings.delete(g);
@@ -928,6 +928,8 @@ function makeKernel(owner) {
     },
   });
   k.on("status", (text) => { if (k === kernel) statusEl.textContent = text; });
+  // (a Stop, by any route (WorkerKernel.interrupt): this document's open prompt closes unanswered: PROMPT934-3)
+  k.on("interrupt", () => { if (owner !== null && fbReq?.doc === owner) filesBar(false); });
   // (background loading, web/preload.ts: a Run starts no further prefetch; one in flight finishes)
   k.on("execute", preloadStop);
   if (owner !== null) {
@@ -1547,7 +1549,7 @@ async function toggleConsole(show = consoleEl.hidden) {
     })),
     more: (src) => kernel.ask({ check: src }, nb.mode, false).then((m) => !!m.more),
     complete: (line) => kernel.ask({ complete: line }, nb.mode, {}).then((m) => [m.matches ?? [], m.prefix ?? ""]),
-    interrupt: () => { if (fbReq) filesBar(false); return kernel.interrupt(); },
+    interrupt: () => kernel.interrupt(),
     sage: isSage,
     version: () => kernel.version,
     announce,
@@ -1624,7 +1626,7 @@ nb.on("budget", showReactiveBar);
 $("#add").onclick = () => nb.addCell("", null, true);
 $("#addmd").onclick = () => nb.addCell("", null, true, "markdown");
 $("#keysbtn").onclick = () => nb.showKeys();
-$("#stop").onclick = () => { if (fbReq) filesBar(false); nb.interrupt(); };
+$("#stop").onclick = () => nb.interrupt();
 $("#restart").onclick = () => nb.restart();
 // A notebook's language changes only when its user chooses another, and for
 // one with code only once they confirm it: its code is written in the old

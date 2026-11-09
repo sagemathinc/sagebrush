@@ -322,6 +322,12 @@ try {
   await ev("(document.querySelector('#stop').click(), 1)");
   check(await until("!sagebrush.filesPrompt()", 5000), "Stop (the cell still running) closes the open prompt unanswered");
   await until("sagebrush.kernel.ready", 30000);
+  // (the same by the notebook's own Stop, as a cell's Stop button and the keyboard's i, i reach it: astra's follow-up)
+  await ev("(sagebrush.notebook.runAll(), 1)");
+  check(await until("sagebrush.filesPrompt()?.folder === '/proj/life'", 10000) && await outHas("/k 2/", 20000), "(asked again, its cell running)");
+  await ev("(sagebrush.notebook.interrupt(), 1)");
+  check(await until("!sagebrush.filesPrompt()", 5000), "the notebook's own Stop (a cell's, the keyboard's) closes the open prompt unanswered too");
+  await until("sagebrush.kernel.ready", 30000);
   await setCode("import os\n" + TRY("/proj/life/l.txt", "L"));
   await runAll();
   check(await until("sagebrush.filesPrompt()?.folder === '/proj/life'", 10000), "…and the next refusal asks again");
