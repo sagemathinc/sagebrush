@@ -225,6 +225,42 @@ try {
   ok(await ev(`!!window.__SAGEBRUSH_LOCAL__ && document.querySelector("#agentbtn").hidden`) && !requests.slice(beforeL).some(chunk), "LOCAL: Agent isn't offered and the chunk isn't fetched", requests.slice(beforeL).filter((u) => /agent/.test(u)));
   await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: localScript.result.identifier });
 
+  // ⋯ ▸ Connect an agent… (the same pairing; on a phone, where Agent itself is hidden, the way to it)
+  ok(await go(""), "the notebook page again");
+  ok(await until(`!document.querySelector("#moreagent").hidden`) && await ev(`document.querySelector("#moreagent").textContent`) === "Connect an agent…", "⋯ offers Connect an agent…");
+  await ev(`(document.querySelector("#morebtn").click(), document.querySelector("#moreagent").click(), true)`);
+  ok(await until(`!!document.querySelector(".sbag-box")`) && await ev(`document.querySelector("#moremenu").hidden`), "it opens Connect, and the menu closes");
+  await ev(`([...document.querySelectorAll(".sbag-box button")].find((b) => b.textContent === "Cancel").click(), true)`);
+  ok(await until(`!document.querySelector(".sbag-box")`), "Cancel closes it");
+
+  // the code page (/?code=<fid>): no pairing of its own, the page's, from File ▸ Connect an agent…; a remembered agent
+  // reconnects there too
+  const pyFid = await ev(`${W}.create("/agent-code.py", { content: new TextEncoder().encode("print(1)\\n") }).then((e) => e.fid)`);
+  const beforeC = requests.length;
+  ok(typeof pyFid === "string" && await go(`?code=${encodeURIComponent(pyFid)}`) && await until(`!!document.querySelector('.code-filemenu [data-f="c-agent"]')`), "the code page's File menu offers Connect an agent…");
+  ok(!requests.slice(beforeC).some(chunk) && await ev(`document.querySelector("#agentbtn").hidden`), "nothing fetched before it's wanted, and the notebook's Agent isn't shown over it");
+  await ev(`(document.querySelector('.code-filemenu [data-f="c-agent"]').click(), true)`);
+  ok(await until(`!!document.querySelector(".sbag-box")`) && requests.slice(beforeC).some(chunk), "it fetches the page's chunk and opens Connect");
+  const c3 = await drive({ op: "code" });
+  ok(await go(`?code=${encodeURIComponent(pyFid)}&pair=${c3.code}&port=${c3.port}`) && await until(`[...document.querySelectorAll(".sbag-box input")].some((i) => i.value === ${JSON.stringify(c3.code)})`), "a ?pair= link on the code page: Connect, its code filled in");
+  await ev(`(document.querySelector(".sbag-box button.primary").click(), true)`);
+  ok(await until(`[...document.querySelectorAll(".sbag-box h2")].some((h) => h.textContent === "Allow this agent?")`), "the grant dialog asks");
+  await ev(`(() => {
+    const b = document.querySelector(".sbag-box");
+    const all = b.querySelector(".folders input"); if (!all.checked) all.click();
+    const [write, remember] = [...b.querySelectorAll("input[type=checkbox]")].filter((c) => !c.closest(".folders"));
+    if (!write.checked) write.click();
+    const s = b.querySelector("select"); s.value = "3600000"; s.dispatchEvent(new Event("change"));
+    if (!remember.checked) remember.click();
+    return true;
+  })()`);
+  await ev(`([...document.querySelectorAll(".sbag-box button.primary")].pop().click(), true)`);
+  ok(await until(`!!document.querySelector(".sbag-bar")`), "allowed, remembered: the bar shows on the code page");
+  ok(await go(`?code=${encodeURIComponent(pyFid)}`) && await until(`!!document.querySelector(".sbag-bar")`, 20000), "the code page again: the remembered agent reconnects by itself");
+  ok(await ev(`document.querySelectorAll(".sbag-bar").length`) === 1 && !(await ev(`!!document.querySelector(".sbag-box")`)), "one bar, no dialog");
+  await ev(`([...document.querySelectorAll(".sbag-bar button")].find((b) => b.textContent === "Revoke")?.click(), true)`);
+  ok(await until(`!document.querySelector(".sbag-bar")`), "Revoke: the bar goes");
+
   // ---- one pairing per page, in a build with the LaTeX editor
   // (the editor opens on this host only in a build made with SAGEBRUSH_LATEX_PREVIEW=test, as CI's web-browser/latex)
   const fid = await ev(`${W}.create("/paper.tex", { content: new TextEncoder().encode("Hello.\\n") }).then((e) => e.fid)`);
