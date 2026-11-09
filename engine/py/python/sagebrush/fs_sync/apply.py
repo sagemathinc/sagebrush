@@ -69,6 +69,7 @@ NOT_TRIED = "not-tried"             # the run stopped (429, 401, the network) be
 CHANGED_HERE = "changed-here"
 CHANGED_THERE = "changed-there"
 BESIDE = "beside"                   # a newcomer took the name: the workspace's version is beside it
+APPEARED = "appeared"               # a newcomer took a snapshot's name: left as it is, the snapshot not written
 NO_CONFLICT_NAME = "no-conflict-name"
 NO_REPLACE = "no-replace"
 HOLD_ERROR = "hold-error"           # an OS error moving it into the holding folder
@@ -350,10 +351,11 @@ def _download_to_temp(root_fd, ws, step, raw, size, tmp, hooks):
 
 def _snapshot_to_temp(root_fd, ws, step, raw, tmp):
     """A document's snapshot (§3.4) read into the temporary file `tmp`, by one read capped at DOCUMENT_BYTES + 1:
-    checked to be the planned fid and kind, and within DOCUMENT_BYTES. Returns (that read's Entry, the bytes' hash)."""
+    checked to be the planned fid and kind, with a revision (the row's receipt: none, and nothing is written), and
+    within DOCUMENT_BYTES. Returns (that read's Entry, the bytes' hash)."""
     def fetch(writer, h):
         entry, n = _ws(ws.read, step.path, writer, DOCUMENT_BYTES + 1)
-        if (entry.kind, entry.fid) != (step.rkind, step.fid):
+        if (entry.kind, entry.fid) != (step.rkind, step.fid) or entry.revision is None:
             raise _Skip(SKIPPED, CHANGED_THERE)
         if n > DOCUMENT_BYTES:
             raise _Skip(PENDING, TOO_LARGE)
@@ -833,7 +835,7 @@ def _snapshot(step, k, loc, raw, root_fd, ws, hold, report, hooks):
             os.close(d)
     except M.Occupied:
         _unlink(root_fd, folders, tmp)
-        return Outcome(step, SKIPPED, CHANGED_HERE, held=held)
+        return Outcome(step, SKIPPED, APPEARED, held=held)
     except M.NoReplace as e:
         _unlink(root_fd, folders, tmp)
         return Outcome(step, SKIPPED, LOCAL_ERROR, e.reason, held=held)
@@ -981,6 +983,9 @@ def _pending_text(o):
     elif o.why == NO_CONFLICT_NAME:
         text = ("all %d conflict names for it are taken (%s); rename or remove some, then run it again" %
                 (M.MAX_CONFLICT_TRIES, o.detail))
+    elif o.step.kind == P.SNAPSHOT:
+        # (fs-sync's cap or the endpoint's 413: the same bound, DOCUMENT_BYTES)
+        text = "over the %d MiB limit for a notebook, board or chat" % (DOCUMENT_BYTES // 2**20)
     else:
         text = "the workspace refused it as too large"  # (413)
     return _also(o, text)
@@ -990,6 +995,8 @@ def _skipped_text(o):
     if o.why == BESIDE:
         text = ("a file appeared there during the sync; the workspace's version is saved beside it as \"%s\"" %
                 o.beside)
+    elif o.why == APPEARED:
+        text = "a file appeared there during the sync; left as it is"
     elif o.why == CHANGED_THERE:
         text = "changed in the workspace during the sync"
     elif o.why == LOCAL_ERROR:

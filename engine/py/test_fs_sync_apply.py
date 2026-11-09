@@ -1125,6 +1125,25 @@ def test_snapshot_read_checks_fid_and_kind():
             p.close()
 
 
+def test_snapshot_read_without_revision_writes_nothing():
+    # (daybreak3) a document read must carry its revision, the row's receipt: without one, nothing is written
+    p = Pair({})
+    try:
+        p.ws.put_doc("Notes.ipynb", b"v1")
+        real = p.ws.read
+        seen = []
+
+        def read(path, writer, limit):
+            entry, n = real(path, writer, limit)
+            return W.Entry(entry.path, entry.kind, entry.fid), n
+        p.ws.read = read
+        p.sync(hooks={"after_read": seen.append})
+        assert p.kinds() == [(P.SNAPSHOT, "Notes.ipynb", A.SKIPPED, A.CHANGED_THERE)]
+        assert seen == [] and os.listdir(p.local) == [] and p.base.rows() == {}
+    finally:
+        p.close()
+
+
 def test_snapshot_records_the_reads_revision():
     # (the revision recorded is the read's, never the listing's: a change after the listing is what was written)
     p = Pair({})
@@ -1158,6 +1177,7 @@ def test_snapshot_too_large():
             assert delivered == [11]
             assert p.kinds() == [(P.SNAPSHOT, "Notes.ipynb", A.PENDING, A.TOO_LARGE)]
             assert os.listdir(p.local) == [] and p.base.rows() == {}
+            assert p.lines()[1] == "  · Notes.ipynb   over the 0 MiB limit for a notebook, board or chat"     # (cap 10 B)
             p.ws.files["Notes.ipynb"] = (p.ws.files["Notes.ipynb"][0], b"x" * 10)      # (exactly at the bound)
             p.sync(now=NOW + 60)
             assert p.kinds() == [(P.SNAPSHOT, "Notes.ipynb", A.DONE, None)]
@@ -1167,6 +1187,8 @@ def test_snapshot_too_large():
         p.ws.put("Notes.ipynb", b"v3")
         p.sync(now=NOW + 120)
         assert p.kinds() == [(P.SNAPSHOT, "Notes.ipynb", A.PENDING, A.TOO_LARGE)]
+        assert p.lines() == ["Not applied (1)", "  · Notes.ipynb   over the 8 MiB limit for a notebook, board or chat",
+                             "Run it again to sync the rest."]
     finally:
         p.close()
 
@@ -1176,9 +1198,12 @@ def test_snapshot_never_beside_a_newcomer():
     try:
         p.ws.put_doc("Notes.ipynb", b"v1")
         p.sync(hooks={"before_install": lambda s: p.write("Notes.ipynb", b"a newcomer")})
-        assert p.kinds() == [(P.SNAPSHOT, "Notes.ipynb", A.SKIPPED, A.CHANGED_HERE)]
+        assert p.kinds() == [(P.SNAPSHOT, "Notes.ipynb", A.SKIPPED, A.APPEARED)]
         assert os.listdir(p.local) == ["Notes.ipynb"] and p.read("Notes.ipynb") == b"a newcomer"
         assert p.base.rows() == {}
+        assert p.lines() == ["Skipped (1)", "  · Notes.ipynb   a file appeared there during the sync; left as it is",
+                             "Run it again to sync the rest."]
+        assert [s.kind for s in p.plan().steps] == [P.NOT_UPLOADED_OCCUPIED]   # (and the next run lists it, untouched)
     finally:
         p.close()
 
@@ -1192,8 +1217,10 @@ def test_snapshot_newcomer_after_its_move_aside_keeps_held():
         p.sync(now=NOW + 60, hooks={"before_install": lambda s: p.write("Notes.ipynb", b"a newcomer")})
         where = p.held(H.run_id_at(NOW + 60), "replaced", "Notes.ipynb")
         o = p.report.outcomes[0]
-        assert (o.result, o.why, o.held) == (A.SKIPPED, A.CHANGED_HERE, where)
+        assert (o.result, o.why, o.held) == (A.SKIPPED, A.APPEARED, where)
         assert p.read("Notes.ipynb") == b"a newcomer" and "Notes.ipynb" not in p.base.rows()
+        assert p.lines()[1] == ("  · Notes.ipynb   a file appeared there during the sync; left as it is; this "
+                                "computer's previous copy is kept for 30 days in %s" % where)
         assert os.listdir(p.local) == ["Notes.ipynb"]
     finally:
         p.close()
