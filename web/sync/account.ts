@@ -132,6 +132,9 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   /** Have the alarm fire by `t`: never later than one already set, and without awaiting. */
   private wakeBy(t: number) {
     const now = Date.now();
+    // (an alarm already due but not yet run stays due: setting a later one would replace it, and what it was for would
+    // wait until then, as an agent's access-log row, due in 90 days, could once postpone a due step by that much)
+    if (this.alarmAt !== null && this.alarmAt <= now) t = Math.min(t, this.alarmAt);
     if (this.alarmAt === null || this.alarmAt < now || t < this.alarmAt) {
       this.alarmAt = Math.max(now + 1, t);
       this.ctx.storage.setAlarm(this.alarmAt);
@@ -2521,6 +2524,25 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       // (the index these read, the server's entries, is fs-sync step 1a2)
       return answer(404, "not_built", [path], { message: "this verb isn't available yet" });
     });
+  }
+
+  /**
+   * Tests only: the alarm set to `alarmIn` ms from now (≤ 0: due, as it is between its time and its handler; null: none),
+   * then wakeBy(now + `wake`), in this one call, so the handler can't run between; the alarm then, from now.
+   */
+  async testWake(a: { alarmIn: number | null; wake: number }): Promise<{ alarm: number | null; alarms: number }> {
+    if (!testMode(this.env)) return { alarm: null, alarms: 0 };
+    const now = Date.now();
+    if (a.alarmIn === null) {
+      this.alarmAt = null;
+      await this.ctx.storage.deleteAlarm();
+    } else {
+      this.alarmAt = now + a.alarmIn;
+      await this.ctx.storage.setAlarm(this.alarmAt);
+    }
+    this.wakeBy(now + a.wake);
+    const at = await this.ctx.storage.getAlarm();
+    return { alarm: at === null ? null : at - now, alarms: this.alarms };
   }
 
   /** Tests only: lower the agents' bounds, or expire a grant now. */
