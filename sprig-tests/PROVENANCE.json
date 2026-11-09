@@ -16,9 +16,9 @@
    "sprig_sha256": "6d96f8af729e6a40af45c35db1b44fd93b2051d0f5bf609ee7c90ea453862513"
   },
   "sprig-tests/core/test_1.sprig": {
-   "cases": 228,
-   "out_sha256": "3a9519fbc99bfccc7722cb9aee952818bb6a13a18e829fb634388bde99bb2a69",
-   "sprig_sha256": "01ff4860bb528fbe6b64ddd4747e4e0c03c95447723cbdef76cf66bc97a1b27e"
+   "cases": 229,
+   "out_sha256": "3ea9ceb169936782ec2e83eba1d776b279c7e852498149255bb3c04b80936513",
+   "sprig_sha256": "de15d6e160459d2ed2a0ec3926b590a96e9a70c80871ac325f8998a51aeecd10"
   },
   "sprig-tests/heldout/s1/test_1.sprig": {
    "cases": 64,

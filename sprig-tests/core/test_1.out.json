@@ -1611,6 +1611,15 @@
    "messages": [],
    "output": "",
    "result": "6"
+  },
+  {
+   "fullform": "Symbol[\"a b\"]",
+   "id": "core-229",
+   "messages": [
+    "Symbol::symname: The string a b cannot be used for a symbol name. A symbol name must start with a letter followed by letters and numbers."
+   ],
+   "output": "Symbol::symname: The string a b cannot be used for a symbol name. A symbol name must start with a letter followed by letters and numbers.\n",
+   "result": "Symbol[\"a b\"]"
   }
  ],
  "file": "sprig-tests/core/test_1.sprig",

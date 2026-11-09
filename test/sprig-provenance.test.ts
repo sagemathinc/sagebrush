@@ -23,7 +23,7 @@ const PINNED = {
   limits: "{200, 4096, {MaxIterations \u29f4 65535}}",
 };
 /** The corpus's floor: S0's visible cases plus S1's held-out file. */
-const MIN_CASES = 457;
+const MIN_CASES = 458;
 
 const sha256 = (p: string) => createHash("sha256").update(readFileSync(p)).digest("hex");
 

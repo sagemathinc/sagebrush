@@ -34,7 +34,8 @@ MESSAGES = {
     ("Power", "indet"): "Indeterminate expression `1` encountered.",
     ("Infinity", "indet"): "Indeterminate expression `1` encountered.",
     ("Set", "wrsym"): "Symbol `1` is Protected.",
-    ("Symbol", "symname"): "The string `1` cannot be used for a symbol name.",
+    ("Symbol", "symname"): "The string `1` cannot be used for a symbol name. A symbol name must start with a letter "
+                           "followed by letters and numbers.",
     ("Syntax", "sntxf"): "\"`1`\" cannot be followed by \"`2`\" (line `3` of \"`4`\").",
     ("Syntax", "sntxi"): "Incomplete expression; more input is needed (line `1` of \"`2`\").",
     ("Syntax", "sntxb"): "Expression cannot begin with \"`1`\" (line `2` of \"`3`\").",

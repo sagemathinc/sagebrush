@@ -455,3 +455,5 @@ Times[2, Times[3, x]]
 True == False
 (*-- core-228 *)
 x = 2; y := x + 1; x = 5; y
+(*-- core-229 *)
+Symbol["a b"]
