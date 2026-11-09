@@ -490,9 +490,12 @@ test("slow_tests: the slow node tests (test/slow-tests.ts) run for the full-ci l
     "lib/_sage_padic_lseries.py", "test/kedlaya_cases.py", "test/kedlaya.test.ts", "src/local-gateway.ts", "test/local-gateway.test.ts",
     "wasm/sagebrush-engine.wasm", "engine/web/src/nmod_ops.rs", "engine/arith/src/nmod_mat.rs", "engine/bigint/src/nmod.rs", "test/nmod-fp-wasm.test.ts",
     "lib/zoneinfo/_zoneinfo.py", "lib/_zoneinfo.py", "lib/_tzrules.py", "lib/tzdata/__init__.py", "tzdata/zoneinfo/Europe/London",
-    "test/zoneinfo_sweep_cases.py", "test/stdlib-zoneinfo.test.ts", "test/slow-tests.ts"])
+    "test/zoneinfo_sweep_cases.py", "test/stdlib-zoneinfo.test.ts", "test/slow-tests.ts",
+    "lib/_magma_docsearch.py", "test/magma-examples.json", "test/magma-examples.test.ts", "catalog/magma/integers.json", "test/magma-catalog.test.ts",
+    "test/ff-limits.test.ts", "test/limits.test.ts"])
     assert.equal(classify([f]).slow_tests, "true", f);
-  for (const f of ["src/runtime/numpy.ts", "lib/_matlab.py", "web/index.html", "README.md", "test/kernels.test.ts", "engine/web/src/lib.rs"])
+  for (const f of ["src/runtime/numpy.ts", "lib/_matlab.py", "web/index.html", "README.md", "test/kernels.test.ts", "engine/web/src/lib.rs",
+    "src/magma.ts", "lib/_magma.py", "catalog/python/bisect.json", "test/magma-compare.test.ts"])
     assert.equal(classify([f]).slow_tests, "false", f);
   assert.equal(classify(["lib/_matlab.py"], "full-ci").slow_tests, "true");
   assert.equal(classify(["lib/_matlab.py"], "", { GITHUB_EVENT_NAME: "schedule" }).slow_tests, "true");
