@@ -193,9 +193,20 @@ try {
   await click(".sbag-box button.primary");
   ok(await until(`/connection failed/.test(document.querySelector(".sbag-box .err")?.textContent ?? "")`), "a failed connection is said in the dialog");
   const failText = await ev(`document.querySelector(".sbag-box .err").textContent`);
-  ok(/access apps on this device/.test(failText) && /Choose Allow/.test(failText) && !/[\u201c\u201d"]/.test(failText.slice(failText.indexOf("Chrome"))) && /Site settings/.test(failText) && !/Safari/.test(failText) && /^the connection failed/.test(failText), `in Chrome, it says to Allow its prompt and how to undo a block (${failText.slice(0, 60)}…)`);
-  ok(/is the agent's sagebrush-mcp running/.test(failText) && /such as your agent's sagebrush-mcp/.test(failText) && !/undefined|sagebrush-agent/.test(failText), "a page without its own program keeps naming the agent's sagebrush-mcp (and never \"undefined\")");
+  // (one short line on what Chrome asks, and Learn more for the rest, such as undoing a block: William, Nov 8, no wall of text)
+  const hint = failText.split("\n\n")[1] ?? "";
+  const learn = await ev(`(() => { const a = document.querySelector(".sbag-box .err a"); return a ? { text: a.textContent, href: a.getAttribute("href"), target: a.target, rel: a.rel } : null; })()`);
+  ok(/^This browser needs your OK for this site to reach apps on this computer: allow it/.test(hint) && hint.length <= 130 && !/[\u201c\u201d"]/.test(hint) && !/Safari/.test(failText) && /^the connection failed/.test(failText) && learn?.text === "Learn more" && learn.href === "/agents/connect/" && learn.target === "_blank" && learn.rel === "noopener", `in Chrome, one line (true whether it asks or has blocked) says to allow it, then Learn more (${hint.length} characters: ${hint.slice(0, 80)}…; ${JSON.stringify(learn)})`);
+  ok(/is the agent's sagebrush-mcp running/.test(failText) && !/undefined|sagebrush-agent/.test(failText), "a page without its own program keeps naming the agent's sagebrush-mcp (and never \"undefined\")");
   ok((await drive({ op: "status" })).ok.paired === false, "the code is still unused after the failed connection");
+  // in Safari (its user agent, from the page's first load): the Connect dialog is Safari's one line and Learn more, nothing else
+  const chromeUA = await ev("navigator.userAgent");
+  await send("Emulation.setUserAgentOverride", { userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15" });
+  ok(await open(`?pair=${CODE}&port=${closed}`), "Safari: a ?pair= link");
+  ok(await until(`!!document.querySelector(".sbag-box")`), "Safari: the Connect dialog opens");
+  const saf = await ev(`(() => { const b = document.querySelector(".sbag-box"), a = b.querySelector("a"); return { text: b.querySelector("h2 + div")?.textContent, inputs: b.querySelectorAll("input").length, a: a && { text: a.textContent, href: a.getAttribute("href"), target: a.target, rel: a.rel } }; })()`);
+  ok(saf.text === "Safari can't reach a program on this computer: use Chrome or Firefox. Learn more" && saf.inputs === 0 && saf.a?.text === "Learn more" && saf.a.href === "/agents/connect/" && saf.a.target === "_blank" && saf.a.rel === "noopener", `Safari: its one line, then Learn more, and no code to enter (${JSON.stringify(saf)})`);
+  await send("Emulation.setUserAgentOverride", { userAgent: chromeUA });
 
   // the right code, through the dialog, then the grant: /A, read and write, until the page closes
   ok(await open(`?pair=${CODE}&port=${PORT}`), "the right code's link");
