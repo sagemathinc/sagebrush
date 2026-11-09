@@ -227,6 +227,7 @@ function shown(x, s) {
   if (typeof x.latex === "string") st.latex = x.latex;
   if (typeof x.src === "string") st.src = x.src;
   if (typeof x.msg === "string") st.msg = x.msg.slice(0, 4000);
+  if (Array.isArray(x.interacts)) st.interacts = x.interacts;
   return st;
 }
 // (a saved key's item of the same kind as `it`: its mode, and the same wrapper)
@@ -251,7 +252,7 @@ export function mathPart(st, it) {
 }
 
 const LABEL = { pending: "running…", notrun: "not run", error: "error", blocked: "not run: an earlier item failed" };
-const DATA_SVG = /^data:image\/svg\+xml;base64,[A-Za-z0-9+/]+={0,2}$/;
+export const DATA_SVG = /^data:image\/svg\+xml;base64,[A-Za-z0-9+/]+={0,2}$/;
 // n: the item's number in the document (1-based), named in the chip so a reader can tell which code it is about
 function chip(st, esc, inline, n) {
   const cls = "sagechip s-" + (LABEL[st.s] ? st.s : "error");
@@ -276,9 +277,19 @@ export function inlineHtml(st, it, esc, math, n) {
   return chip(ok ? { s: "error", msg: "the result can't be shown" } : st, esc, true, n);
 }
 // a code block: sageblock shows its code (as SageTeX typesets it), sagesilent nothing; both show a failed or
-// not-yet-run state (a stale one, which ran, none: it has no value to keep)
+// not-yet-run state (a stale one, which ran, none: it has no value to keep), and the @interacts it made
 export function blockHtml(st, it, esc, n) {
   let h = it.mode === "block" ? '<pre class="verbatim code sageblock">' + esc(it.shown || "") + "</pre>" : "";
   if (st.s !== "ok" && st.s !== "stale") h += '<div class="sagestate">' + chip(st, esc, false, n) + "</div>";
+  else h += interactsAt(st.interacts, esc, st.s === "stale");
   return h;
+}
+// ---- @interact (a Sagebrush extension, William Nov 8: "@interact inside sagesilent/sageblock as a documented Sagebrush
+// extension"; upstream SageTeX and Sage 10.10 raise NameError on it): an item's interacts as the Run kept them (run-core
+// interactsOf) go into the HTML only as data, escaped JSON in a placeholder that says the item is interactive; the page's
+// interact chunk (interact.ts, fetched only once a preview has one) draws them there, so the eager group doesn't carry
+// the drawing (its cap: a lazy split, not a raise)
+export function interactsAt(list, esc, stale = false) {
+  if (!Array.isArray(list) || !list.length) return "";
+  return '<div class="sageinteract-at"' + (stale ? ' data-stale="1"' : "") + ' data-ia="' + esc(JSON.stringify(list.slice(0, 8))) + '"><div class="si-note">Interactive in Sagebrush</div></div>';
 }

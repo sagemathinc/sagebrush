@@ -15,6 +15,7 @@ import { spawn } from "node:child_process";
 import { seenOf, driver, runnable, parseOutput, statesOf, resultsText, msgOf, MARK, RUN_LIMITS, RESULTS_FORMAT, runAndSave, sessionOf, sandboxEngine, SANDBOX_FAILED, folderFiles, runIn, DEPS_MARK, parseDeps, depsWith, wsReader, checkedResults } from "./run-core.mjs";
 import { Engine } from "./engine/pipeline.mjs";
 import { itemKey, savedStates, stateOf, WRAPPER_VERSION, MAX_RESULT, safeRel, depsOf, staleOf, staleOfSync, sha256hex, readComplete, DEPS_MAX, inlineHtml, blockHtml, mathPart } from "./engine/sagetex.mjs";
+import { interactsOf, interactsHtml, INTERACT_LIMITS } from "./interact.ts";
 
 const results = [];
 const check = (name, ok, detail) => { results.push([name, !!ok]); if (!ok) console.log("FAIL", name, JSON.stringify(detail)?.slice(0, 900)); };
@@ -119,6 +120,7 @@ const item = (mode, code, extra = {}) => { const it = real(mode, code, extra); r
   check("stale math: its \\sage edited, the region keeps the last value, marked once; the next region ($x^2$) is not", regions(stale) === 1 && /<span class="sagestale" title="Changed since the last Run[^"]*"><span class="katex/.test(stale) && !/<span class="sagestale"[^>]*>(?:(?!<\/span>).)*x\^\{?2/.test(stale.split('<span class="sagestale"')[1]?.split("and")[1] ?? ""), stale.slice(0, 500));
 }
 
+
 // ---- the script in Sage (the CLI's own: build/cli/pyjs.cjs --sage)
 const CLI = new URL("../../build/cli/pyjs.cjs", import.meta.url).pathname;
 if (!existsSync(CLI)) {
@@ -133,6 +135,88 @@ const sage = (code) => new Promise((res) => {
   p.stdout.on("data", (x) => (o += x)); p.stderr.on("data", (x) => (e += x));
   p.on("close", (c) => { rmSync(dir, { recursive: true, force: true }); res({ code: c, out: o, err: e }); });
 });
+// ---- @interact in a Run (a Sagebrush extension: William, Nov 8), in the CLI's own Sage: each interact an item makes is
+// kept with its result, its controls and what its function printed and showed at the defaults; the runtime's own host
+// and display are back after the Run
+{
+  const spec = [
+    ["silent", "@interact\ndef h(k=slider(1, 5, 1, 2), name='x', on=True):\n    print('k^2 =', k^2)\n    show(plot(sin(k*x), (x, 0, pi)))"],
+    ["sage", "1 + 1"],
+    ["block", "@interact\ndef g(c=selector(['red', 'blue'])):\n    print(c)\nprint('after')"],
+    ["silent", "print(type(__builtins__.__pyjs_host__ if hasattr(__builtins__, '__pyjs_host__') else None))"],
+  ];
+  const its = spec.map((a) => item(...a));
+  const r = await sage(driver(runnable(its)) + "\nimport builtins\nprint('HOSTBACK', getattr(builtins, '__pyjs_host__', None) is not _sbtx_host, getattr(builtins, '__pyjs_display__', None) is not _sbtx_disp)");
+  const st = statesOf(its, parseOutput(r.out), "", interactsOf);
+  const h = st[0].interacts?.[0];
+  check("interact: none kept without the interact chunk's check (statesOf not given it)", statesOf(its, parseOutput(r.out), "").every((x) => !x.interacts), null);
+  check("interact: the session ran", r.code === 0, r.err.slice(-600));
+  check("interact: kept with its item: its controls at their defaults (a slider, an input box, a checkbox)", st[0].s === "ok" && st[0].interacts?.length === 1 && h.name === "h" &&
+    JSON.stringify(h.controls.map((c) => [c.kind, c.name, c.value])) === JSON.stringify([["slider", "k", 2], ["input", "name", "x"], ["checkbox", "on", true]]) && h.controls[0].min === 1 && h.controls[0].max === 5, st[0]);
+  check("interact: what its function printed at the defaults", h?.out === "k^2 = 4\n", h?.out);
+  check("interact: what it showed (a plot, as a base64 SVG data URL)", h?.shows?.length === 1 && /^data:image\/svg\+xml;base64,/.test(h.shows[0].src ?? ""), h?.shows?.map((x) => String(x.src ?? x.text).slice(0, 60)));
+  check("interact: an item without one has none; the next interact is its own item's", !st[1].interacts && st[1].latex === "2" && st[2].interacts?.[0]?.name === "g" && st[2].interacts[0].controls[0].kind === "selector" && st[2].interacts[0].out === "red\n", st.slice(1, 3));
+  check("interact: the runtime's own host and display are back after the Run", /HOSTBACK True True/.test(r.out), r.out.split("\n").filter((l) => l.startsWith("HOSTBACK")));
+  // (the session's output is unchecked input: interactsOf keeps only known kinds and fields, bounded; a "plot" that isn't an
+  //  SVG is never an image)
+  const bad = interactsOf([{ spec: { id: 1, name: "f", controls: [{ kind: "script", name: "x" }, { kind: "slider", name: "n", value: 3, min: 0, max: "9;evil" }] }, out: "x".repeat(INTERACT_LIMITS.text + 10), shows: [{ svg: "<script>alert(1)</script>" }, { text: 7 }] }, ...Array(20).fill({ spec: {} })]);
+  check("interact: only known control kinds, numeric bounds only; text bounded; a non-SVG show is no image; at most INTERACT_LIMITS.n", bad.length === INTERACT_LIMITS.n && bad[0].controls.length === 1 && bad[0].controls[0].max === undefined && bad[0].out.length === INTERACT_LIMITS.text && !bad[0].shows[0].src && bad[0].shows[1].text === "", bad[0]);
+  // (as the renderer shows them: controls drawn, not live; the output; the note; everything escaped)
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  const html = interactsHtml(st[0].interacts);
+  check("interact: drawn as disabled controls at their defaults, the output, and the note", /<input type="range" disabled min="1" max="5" step="1" value="2"><span class="si-v">2<\/span>/.test(html) && /<input type="checkbox" disabled checked>/.test(html) && /<pre class="si-out">k\^2 = 4\n<\/pre>/.test(html) && /<img class="sageplot" alt="a plot" src="data:image\/svg\+xml;base64,/.test(html) && /<div class="si-note">Interactive in Sagebrush<\/div>/.test(html), html.slice(0, 400));
+  const evil = interactsHtml([{ id: 1, controls: [{ kind: "input", name: '"><script>', value: '"><img src=x onerror=alert(1)>' }, { kind: "selector", options: ["<b>"], value: 0 }], out: "<script>", shows: [{ src: "javascript:alert(1)" }] }]);
+  check("interact: names, values, options and output escaped; a src that isn't a base64 SVG is never an image", !/<script>|<img src=x|<b>|javascript:/.test(evil), evil);
+  // (agents-ui's #926 A1/A2: a "text" control (text_control, fixed) is a line of text, as the notebook draws it, and
+  //  nothing when empty; a "color" one a color control, only for a #rrggbb value, else the text box)
+  const kinds = (controls) => interactsHtml([{ id: 1, controls, out: "", shows: [] }]);
+  const tx = kinds([{ kind: "text", name: "", label: "", value: "Choose <n>" }]), fx = kinds([{ kind: "text", name: "n", label: "n", value: "" }]);
+  check("interact: a text control is a line of its text (escaped), no label, no box; an empty one (fixed) nothing",
+    tx.includes('<div class="si-t">Choose &lt;n&gt;</div>') && !/<input|si-l/.test(tx) && !/<input|si-l|si-t/.test(fx), { tx, fx });
+  const col = kinds([{ kind: "color", name: "c", label: "c", value: "#1f77b4" }]), colBad = kinds([{ kind: "color", name: "c", label: "c", value: 'red" onclick="x' }]);
+  check("interact: a color control drawn as one (#rrggbb only); any other value the text box, escaped",
+    col.includes('<input type="color" disabled value="#1f77b4">') && !colBad.includes('type="color"') && colBad.includes('<input type="text" disabled value="red&quot; onclick=&quot;x">'), { col, colBad });
+  // (grader's #926 C3: a valid colour followed by more is not a colour: the escaped text box)
+  const colTail = kinds([{ kind: "color", name: "c", label: "c", value: '#1f77b4" onclick="x' }]);
+  check("interact: a colour value with anything after its #rrggbb is the escaped text box, never a colour control",
+    !colTail.includes('type="color"') && colTail.includes('<input type="text" disabled value="#1f77b4&quot; onclick=&quot;x">'), colTail);
+  // (grader's #926 I6/I7: a selector's default is the option selected; a list slider shows its default's label)
+  const sel = kinds([{ kind: "selector", name: "c", label: "c", options: ["a", "b", "c"], value: 1 }]), lsl = kinds([{ kind: "slider", name: "t", label: "t", labels: ["p", "q", "r"], min: 0, max: 2, step: 1, value: 1 }]);
+  check("interact: a selector's default option selected; a list slider shows its default's label",
+    sel.includes('<option>a</option><option selected>b</option><option>c</option>') && lsl.includes('value="1"><span class="si-v">q</span>'), { sel, lsl });
+  // (grader's #926 R8: interacts only on an item that ran to its result: its session result ok but its state an error,
+  //  a plot that isn't an SVG, keeps none)
+  const ia1 = [{ spec: { id: 1, name: "f", controls: [] }, out: "", shows: [] }];
+  const badPlot = statesOf([item("plot", "p")], [{ s: "ok", svg: "<b>not svg</b>", interacts: ia1 }], "", interactsOf);
+  check("interact: none kept on an item whose state is an error (a plot that isn't an SVG)", badPlot[0].s === "error" && !badPlot[0].interacts, badPlot);
+  check("interact: a stale one is marked as stale values are", /^<div class="sageinteract sagestale" title="Changed since the last Run/.test(interactsHtml(st[0].interacts, true)), null);
+  // (the worker's renderer: a placeholder holding them as escaped JSON, said interactive, for the page's chunk to draw)
+  const at = blockHtml(stateOf(savedStates([real(...spec[0])], st.slice(0, 1)), 0, real(...spec[0])), real(...spec[0]), esc, 1);
+  const data = /^<div class="sageinteract-at" data-ia="([^"]*)"><div class="si-note">Interactive in Sagebrush<\/div><\/div>$/.exec(at);
+  const unesc = (t) => t.replace(/&(amp|lt|gt|quot);/g, (_, e) => ({ amp: "&", lt: "<", gt: ">", quot: '"' })[e]);
+  check("interact: a sagesilent's block is a placeholder holding its interacts (escaped JSON), said interactive", !!data && JSON.stringify(JSON.parse(unesc(data[1]))) === JSON.stringify(st[0].interacts), at.slice(0, 200));
+}
+// (grader's #926 R1, R3, R8, I6/I7 in the CLI's own Sage: at most 8 interacts kept an item, the 9th run once as without a host; the
+// item's own output back after an interact's function ran; an item that raises after its interact keeps none; a
+// selector's and a list slider's defaults)
+{
+  const spec = [
+    ["silent", "@interact\ndef s(c=selector(['a', 'b', 'c'], default='b'), t=slider(['p', 'q', 'r'], default='q')):\n    pass"],
+    ["silent", "@interact\ndef e(k=slider(0, 1, 1, 0)):\n    print('in e')\nraise ValueError('after the interact')"],
+    ["silent", Array.from({ length: 9 }, (_, n) => `@interact\ndef f${n}(k=slider(0, 1, 1, 0)):\n    global RAN${n}\n    RAN${n} = True\n`).join("")],
+    ["silent", "@interact\ndef a(k=slider(0, 1, 1, 0)):\n    print('in a')\nimport sys\n_AFTER = sys.stdout\nprint('after')"],
+  ];
+  const its = spec.map((a) => item(...a));
+  const r = await sage(driver(runnable(its)) + "\nprint('PINS', 'RAN7' in globals(), 'RAN8' in globals(), _AFTER is _sbtx_buf)");
+  const got = parseOutput(r.out), st = statesOf(its, got, "", interactsOf);
+  const pins = (r.out.split("\n").find((l) => l.startsWith("PINS")) ?? "").split(" ");
+  const sh = interactsHtml(st[0].interacts ?? []);
+  check("interact (Sage): a selector's default selected, a list slider at its default's label", st[0].s === "ok" && /<option selected>b<\/option>/.test(sh) && /value="1"><span class="si-v">q<\/span>/.test(sh), { st0: st[0], err: r.err.slice(-400) });
+  check("interact (Sage): an item that raises after its interact: its error, no interacts, no placeholder", st[1].s === "error" && /after the interact/.test(st[1].msg) && !st[1].interacts &&
+    !blockHtml(stateOf(savedStates([real(...spec[1])], st.slice(1, 2)), 0, real(...spec[1])), real(...spec[1]), (x) => String(x), 1).includes("sageinteract-at"), st[1]);
+  check("interact (Sage): at most 8 kept an item; the 9th not kept, run once at its defaults as on Sage's command line", got[2]?.interacts?.length === 8 && got[2].interacts.every((x) => x.spec?.name !== "f8") && pins[1] === "True" && pins[2] === "True", { n: got[2]?.interacts?.length, pins });
+  check("interact (Sage): after an interact's function, the item's own output is back (its later print isn't the interact's)", pins[3] === "True" && st[3].interacts?.[0]?.out === "in a\n", { pins, out: st[3].interacts?.[0]?.out });
+}
 {
   const spec = [
     ["silent", "var('t')\nx = 2^10"],
@@ -571,6 +655,17 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
     exec: async () => ({ out: MARK + JSON.stringify({ s: "ok" }) + "\n", stopped: "" }),
   });
   check("runAndSave: the folder's files only in the cloud counted in the result", rc.ok && rc.remote === 2, rc);
+  // (grader's #926 R10: the document edited while the interact chunk loaded (its check, fetched only for a Run with an
+  //  interact): the Run is stale, nothing written, as without one)
+  let cur = true, wrote = 0;
+  const ri = await runAndSave({
+    items: [item("silent", "x = 1")], current: () => cur, max: 1 << 20, now: () => 0, fid: "f",
+    ws: { pathOfFile: async () => ({ ok: true, path: "/A/doc.tex" }), stat: async () => undefined, createByPerson: async () => { wrote++; return {}; }, write: async () => { wrote++; return {}; } },
+    session: s2, store: s2, serial: s2.serial, folder: async () => ({ dir: "/A", files: [] }),
+    exec: async () => ({ out: MARK + JSON.stringify({ s: "ok", interacts: [{ spec: { id: 1, name: "f", controls: [] }, out: "", shows: [] }] }) + "\n", stopped: "" }),
+    interacts: async () => { cur = false; return { interactsOf }; },
+  });
+  check("runAndSave: the document changed while the interact chunk loaded: the Run is stale, nothing written", ri.stale === true && wrote === 0, { ri, wrote });
 }
 
 // ---- a Run's own Stop (astra's LATEX-QUEUE-STOP-1): stopped while it waits for another Run, it runs nothing, and the
