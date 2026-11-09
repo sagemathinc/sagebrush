@@ -3286,6 +3286,29 @@ def h(k=slider(1, 5, 1, 2)):
       await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
       await until(`!${Pi}`, 5000);
       check(reran && fresh3, "@interact: Shift+Enter while presenting runs it again; the slide shows the new interact (at 3, k^2 = 9), nothing stale", { reran, fresh3 });
+      // (grader's #926 I9: a drawn widget is marked, so a later render draws nothing again)
+      const again = await ev(`(() => { const u = performance.getEntriesByType("resource").map((e) => e.name).find((n) => /sagebrush-latex-interact\\.js/.test(n)); return import(u).then((m) => m.draw(document.querySelector(".tex-preview"))); })()`);
+      check(again === 0, "@interact: drawn once: drawing the preview again draws nothing", { again });
+      // (grader's #926 P1: the interact chunk's load refused once (the page opened again, its results file's widget to
+      //  draw): the widget waits, and the next render loads the chunk by a URL of its own (?try=) and draws it)
+      let iaRefused = 0;
+      onPaused = (p) => { if (!iaRefused++) send("Fetch.failRequest", { requestId: p.requestId, errorReason: "ConnectionFailed" }); else send("Fetch.continueRequest", { requestId: p.requestId }); };
+      await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-latex-interact.js*" }] });
+      await send("Network.setCacheDisabled", { cacheDisabled: true });
+      const n0 = requests.length;
+      await open(await ev(`new URLSearchParams(location.search).get("tex")`));
+      const waits = await until(`!!document.querySelector('.tex-preview .ch:not([hidden]) .sageinteract-at:not([data-drawn])')`, 20000);
+      await sleep(1000);
+      const notYet = await ev(`!document.querySelector('.tex-preview .ch:not([hidden]) .sageinteract')`);
+      const t3 = await ev(`document.querySelector(".tex-src").value`);
+      await typeInto(t3 + "%\n");
+      const drawnLater = await until(`!!document.querySelector('.tex-preview .ch:not([hidden]) .sageinteract input[type=range][value="3"]')`, 20000);
+      await send("Fetch.disable");
+      await send("Network.setCacheDisabled", { cacheDisabled: false });
+      onPaused = null;
+      const iaUrls = requests.slice(n0).filter((u) => /sagebrush-latex-interact\.js/.test(u));
+      check(iaRefused >= 2 && waits && notYet && drawnLater && iaUrls.length >= 2 && !/\?try=/.test(iaUrls[0]) && /\?try=\d+$/.test(iaUrls[iaUrls.length - 1]),
+        "@interact: the interact chunk's load refused once: the widget waits; the next render loads it by a URL of its own (?try=) and draws it", { iaRefused, waits, notYet, drawnLater, iaUrls });
     }
     // (Codex friction P5, the editor's half: a helper .py beside the .tex, imported by the document's code as by real
     //  SageTeX run in the document's folder. The .tex's folder is given to Sage, read-only, at each Run, as it is then:

@@ -77,7 +77,7 @@ function controlHtml(c: any): string {
     w = "<select disabled>" + opts.map((o: unknown, i: number) => "<option" + (i === v ? " selected" : "") + ">" + esc(String(o)) + "</option>").join("") + "</select>";
   } else if (c.kind === "checkbox") w = '<input type="checkbox" disabled' + (v === true ? " checked" : "") + ">";
   else if (c.kind === "button") w = "<button disabled>" + esc(String(c.text ?? c.label ?? "")) + "</button>";
-  else if (c.kind === "color" && typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v)) w = '<input type="color" disabled value="' + v + '">';
+  else if (c.kind === "color" && typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v)) w = '<input type="color" disabled value="' + esc(v) + '">';
   else w = '<input type="text" disabled value="' + esc(String(v ?? "")) + '">';
   return '<label class="si-c">' + label + " " + w + "</label>";
 }

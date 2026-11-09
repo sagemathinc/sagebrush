@@ -176,12 +176,46 @@ const sage = (code) => new Promise((res) => {
   const col = kinds([{ kind: "color", name: "c", label: "c", value: "#1f77b4" }]), colBad = kinds([{ kind: "color", name: "c", label: "c", value: 'red" onclick="x' }]);
   check("interact: a color control drawn as one (#rrggbb only); any other value the text box, escaped",
     col.includes('<input type="color" disabled value="#1f77b4">') && !colBad.includes('type="color"') && colBad.includes('<input type="text" disabled value="red&quot; onclick=&quot;x">'), { col, colBad });
+  // (grader's #926 C3: a valid colour followed by more is not a colour: the escaped text box)
+  const colTail = kinds([{ kind: "color", name: "c", label: "c", value: '#1f77b4" onclick="x' }]);
+  check("interact: a colour value with anything after its #rrggbb is the escaped text box, never a colour control",
+    !colTail.includes('type="color"') && colTail.includes('<input type="text" disabled value="#1f77b4&quot; onclick=&quot;x">'), colTail);
+  // (grader's #926 I6/I7: a selector's default is the option selected; a list slider shows its default's label)
+  const sel = kinds([{ kind: "selector", name: "c", label: "c", options: ["a", "b", "c"], value: 1 }]), lsl = kinds([{ kind: "slider", name: "t", label: "t", labels: ["p", "q", "r"], min: 0, max: 2, step: 1, value: 1 }]);
+  check("interact: a selector's default option selected; a list slider shows its default's label",
+    sel.includes('<option>a</option><option selected>b</option><option>c</option>') && lsl.includes('value="1"><span class="si-v">q</span>'), { sel, lsl });
+  // (grader's #926 R8: interacts only on an item that ran to its result: its session result ok but its state an error,
+  //  a plot that isn't an SVG, keeps none)
+  const ia1 = [{ spec: { id: 1, name: "f", controls: [] }, out: "", shows: [] }];
+  const badPlot = statesOf([item("plot", "p")], [{ s: "ok", svg: "<b>not svg</b>", interacts: ia1 }], "", interactsOf);
+  check("interact: none kept on an item whose state is an error (a plot that isn't an SVG)", badPlot[0].s === "error" && !badPlot[0].interacts, badPlot);
   check("interact: a stale one is marked as stale values are", /^<div class="sageinteract sagestale" title="Changed since the last Run/.test(interactsHtml(st[0].interacts, true)), null);
   // (the worker's renderer: a placeholder holding them as escaped JSON, said interactive, for the page's chunk to draw)
   const at = blockHtml(stateOf(savedStates([real(...spec[0])], st.slice(0, 1)), 0, real(...spec[0])), real(...spec[0]), esc, 1);
   const data = /^<div class="sageinteract-at" data-ia="([^"]*)"><div class="si-note">Interactive in Sagebrush<\/div><\/div>$/.exec(at);
   const unesc = (t) => t.replace(/&(amp|lt|gt|quot);/g, (_, e) => ({ amp: "&", lt: "<", gt: ">", quot: '"' })[e]);
   check("interact: a sagesilent's block is a placeholder holding its interacts (escaped JSON), said interactive", !!data && JSON.stringify(JSON.parse(unesc(data[1]))) === JSON.stringify(st[0].interacts), at.slice(0, 200));
+}
+// (grader's #926 R1, R3, R8, I6/I7 in the CLI's own Sage: at most 8 interacts kept an item, the 9th run once as without a host; the
+// item's own output back after an interact's function ran; an item that raises after its interact keeps none; a
+// selector's and a list slider's defaults)
+{
+  const spec = [
+    ["silent", "@interact\ndef s(c=selector(['a', 'b', 'c'], default='b'), t=slider(['p', 'q', 'r'], default='q')):\n    pass"],
+    ["silent", "@interact\ndef e(k=slider(0, 1, 1, 0)):\n    print('in e')\nraise ValueError('after the interact')"],
+    ["silent", Array.from({ length: 9 }, (_, n) => `@interact\ndef f${n}(k=slider(0, 1, 1, 0)):\n    global RAN${n}\n    RAN${n} = True\n`).join("")],
+    ["silent", "@interact\ndef a(k=slider(0, 1, 1, 0)):\n    print('in a')\nimport sys\n_AFTER = sys.stdout\nprint('after')"],
+  ];
+  const its = spec.map((a) => item(...a));
+  const r = await sage(driver(runnable(its)) + "\nprint('PINS', 'RAN7' in globals(), 'RAN8' in globals(), _AFTER is _sbtx_buf)");
+  const got = parseOutput(r.out), st = statesOf(its, got, "", interactsOf);
+  const pins = (r.out.split("\n").find((l) => l.startsWith("PINS")) ?? "").split(" ");
+  const sh = interactsHtml(st[0].interacts ?? []);
+  check("interact (Sage): a selector's default selected, a list slider at its default's label", st[0].s === "ok" && /<option selected>b<\/option>/.test(sh) && /value="1"><span class="si-v">q<\/span>/.test(sh), { st0: st[0], err: r.err.slice(-400) });
+  check("interact (Sage): an item that raises after its interact: its error, no interacts, no placeholder", st[1].s === "error" && /after the interact/.test(st[1].msg) && !st[1].interacts &&
+    !blockHtml(stateOf(savedStates([real(...spec[1])], st.slice(1, 2)), 0, real(...spec[1])), real(...spec[1]), (x) => String(x), 1).includes("sageinteract-at"), st[1]);
+  check("interact (Sage): at most 8 kept an item; the 9th not kept, run once at its defaults as on Sage's command line", got[2]?.interacts?.length === 8 && got[2].interacts.every((x) => x.spec?.name !== "f8") && pins[1] === "True" && pins[2] === "True", { n: got[2]?.interacts?.length, pins });
+  check("interact (Sage): after an interact's function, the item's own output is back (its later print isn't the interact's)", pins[3] === "True" && st[3].interacts?.[0]?.out === "in a\n", { pins, out: st[3].interacts?.[0]?.out });
 }
 {
   const spec = [
@@ -621,6 +655,17 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
     exec: async () => ({ out: MARK + JSON.stringify({ s: "ok" }) + "\n", stopped: "" }),
   });
   check("runAndSave: the folder's files only in the cloud counted in the result", rc.ok && rc.remote === 2, rc);
+  // (grader's #926 R10: the document edited while the interact chunk loaded (its check, fetched only for a Run with an
+  //  interact): the Run is stale, nothing written, as without one)
+  let cur = true, wrote = 0;
+  const ri = await runAndSave({
+    items: [item("silent", "x = 1")], current: () => cur, max: 1 << 20, now: () => 0, fid: "f",
+    ws: { pathOfFile: async () => ({ ok: true, path: "/A/doc.tex" }), stat: async () => undefined, createByPerson: async () => { wrote++; return {}; }, write: async () => { wrote++; return {}; } },
+    session: s2, store: s2, serial: s2.serial, folder: async () => ({ dir: "/A", files: [] }),
+    exec: async () => ({ out: MARK + JSON.stringify({ s: "ok", interacts: [{ spec: { id: 1, name: "f", controls: [] }, out: "", shows: [] }] }) + "\n", stopped: "" }),
+    interacts: async () => { cur = false; return { interactsOf }; },
+  });
+  check("runAndSave: the document changed while the interact chunk loaded: the Run is stale, nothing written", ri.stale === true && wrote === 0, { ri, wrote });
 }
 
 // ---- a Run's own Stop (astra's LATEX-QUEUE-STOP-1): stopped while it waits for another Run, it runs nothing, and the
