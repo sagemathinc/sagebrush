@@ -85,7 +85,7 @@ try {
   // "Nothing matches.", the address), the grader's X1-X6, X19 on d0f1a3e6
   {
     const s2 = tmp();
-    writeFileSync(join(s2, "alpha.md"), "# Alpha\n\n## Sync off {#both}\n\nWhen sync is off here.\n\n## Sync only {#one}\n\nAbout sync.\n\n## Quiet {#body}\n\nA zebra lives only in this text.\n");
+    writeFileSync(join(s2, "alpha.md"), "# Alpha\n\n## Sync off {#both}\n\nWhen sync is off here.\n\n## Sync only {#one}\n\nAbout sync.\n\n## Quiet {#body}\n\nA TimeTravel zebra lives only in this text.\n");
     const o3 = tmp();
     buildDocs(o3, s2);
     const html = readFileSync(join(o3, "docs", "index.html"), "utf8");
@@ -113,6 +113,9 @@ try {
     check(JSON.stringify(t.shown()) === JSON.stringify(["both", "one"]), "an upper-case query matches regardless of case: " + JSON.stringify(t.shown()));
     t.type("zebra");
     check(JSON.stringify(t.shown()) === JSON.stringify(["body"]), "a word only in a section's text finds it: " + JSON.stringify(t.shown()));
+    t.type("timetravel");
+    check(JSON.stringify(t.shown()) === JSON.stringify(["body"]), "a lower-case query finds a capitalized word (TimeTravel) in a section's text: the words searched are lower-cased too: " + JSON.stringify(t.shown()));
+    t.type("zebra");
     check(new URL(t.loc.href).searchParams.get("q") === "zebra", "typing keeps the query in the address (?q=): " + t.loc.href);
     t.type("nothing-like-this");
     check(t.shown().length === 0 && t.none.hidden === false, "a query matching nothing: every item hidden, \"Nothing matches.\" shown");
