@@ -12,6 +12,8 @@ intentionally submitted for inclusion in Sagebrush, as defined in the
 Apache-2.0 license, is dual licensed as above, without any additional terms
 or conditions.
 
+Most of Sagebrush is MIT OR Apache-2.0. `web/cloud/` is under the Microsoft Reference Source License (MS-RSL): see web/cloud/LICENSE.md.
+
 Some parts are derived from other permissively licensed projects. Their
 notices follow and must be kept with the parts named. Nothing in Sagebrush
 is derived from GPL software: PARI, Sage, Magma and FLINT are used only from

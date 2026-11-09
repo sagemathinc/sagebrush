@@ -665,6 +665,8 @@ Copyright (c) 2026 SageMath, Inc. Licensed under either of the
 [Apache License, Version 2.0](LICENSE-APACHE) or the [MIT license](LICENSE-MIT),
 at your option.
 
+Most of Sagebrush is MIT OR Apache-2.0. `web/cloud/` is under the Microsoft Reference Source License (MS-RSL): see web/cloud/LICENSE.md.
+
 A few parts derive from other permissively licensed projects (CPython,
 NumPy, Arm Optimized Routines, fdlibm) or implement another project's
 method with its author's permission (smalljac's, written from scratch);
