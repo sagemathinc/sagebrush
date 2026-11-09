@@ -246,6 +246,10 @@
    "decision": "internal",
    "why": "a standard module used on Sprig's own data (exact numbers, text patterns, the output streams)"
   },
+  "import:math": {
+   "decision": "internal",
+   "why": "a standard module used on Sprig's own numbers (log2 for the machine Real range)"
+  },
   "import:re": {
    "decision": "internal",
    "why": "a standard module used on Sprig's own data (exact numbers, text patterns, the output streams)"
