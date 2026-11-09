@@ -522,7 +522,22 @@ await section("list cursors: deleted with their grant, and by the alarm once exp
     left = (await ix(CU)).cursors;
   }
   ok(left === 0, "the alarm deletes it once expired, with no other list: " + left);
-  await ix(CU, { bounds: { cursorMs: 15 * 60_000, examined: 20_000 } });
+  // the exact boundary (daybreak3's E4), on the list's own clock: a cursor is good through t + cursorMs and gone at +1,
+  // to the listing and to the sweep alike, so a new cursor's sweep never removes one the listing would still accept
+  const MS = 15 * 60_000, T = Date.now();
+  await ix(CU, { bounds: { cursorMs: MS }, now: T });
+  const c1 = await cursor(gA), c2 = await cursor(gA);
+  ok(JSON.stringify((await ix(CU)).cursorTimes) === JSON.stringify([T, T]), "(two cursors made at T)");
+  await ix(CU, { now: T + MS });
+  const atEdge = await agent(gA.token, "list", { folder: "/c", cursor: c1 });
+  const kept = (await ix(CU)).cursorTimes;
+  ok(atEdge.status === 200 && kept.includes(T), "at exactly T + cursorMs a cursor is accepted, and the new cursor's sweep keeps the other one made at T: " + JSON.stringify({ status: atEdge.status, kept }));
+  ok((await ix(CU, { sweep: T + MS })).cursorTimes.includes(T), "a sweep at exactly T + cursorMs keeps a cursor made at T");
+  await ix(CU, { now: T + MS + 1 });
+  const past = await agent(gA.token, "list", { folder: "/c", cursor: c2 });
+  ok(past.status === 400 && past.error === "invalid", "1 ms later the listing refuses it: " + JSON.stringify({ status: past.status, error: past.error }));
+  ok(!(await ix(CU, { sweep: T + MS + 1 })).cursorTimes.includes(T), "and a sweep 1 ms later removes it");
+  await ix(CU, { now: null, bounds: { cursorMs: MS, examined: 20_000 } });
   ws.close();
 });
 
@@ -730,12 +745,16 @@ await section("reads: scope, Trash by where it came from, pages, the examined bo
   await ix(RD, { bounds: { cursors: 2 } });
   const k1 = (await agent(t2, "list", { folder: "/B" })).cursor, k2 = (await agent(t2, "list", { folder: "/B" })).cursor, k3 = (await agent(t2, "list", { folder: "/B" })).cursor;
   ok((await agent(t2, "list", { folder: "/B", cursor: k1 })).status === 400 && (await agent(t2, "list", { folder: "/B", cursor: k3 })).status === 200, "a grant keeps its newest cursors only (2 here): the oldest is refused");
-  // and each for a while (2 ms here)
-  await ix(RD, { bounds: { cursorMs: 2, cursors: 32 } });
-  const old = (await agent(t2, "list", { folder: "/B" })).cursor;
+  // and each for a while (2 ms here): the check at use, alone (grader's r3 C4), with the sweep held off (a page of 0),
+  // so the expired cursor is still stored when it's used
+  await ix(RD, { bounds: { cursorMs: 2, cursors: 32, cursorSweep: 0 } });
+  const old = (await agent(t2, "list", { folder: "/B" })).cursor, before = (await ix(RD)).cursors;
   await sleep(20);
-  ok((await agent(t2, "list", { folder: "/B", cursor: old })).status === 400 && typeof k2 === "string", "an old cursor is refused");
-  await ix(RD, { bounds: { examined: 20_000, cursorMs: 15 * 60_000 } });
+  const stored = (await ix(RD)).cursors, stale = await agent(t2, "list", { folder: "/B", cursor: old });
+  // (restored at once: with nothing swept, the alarm comes straight back while an expired row is left; 100 is IX_CURSOR_SWEEP_MAX)
+  await ix(RD, { bounds: { examined: 20_000, cursorMs: 15 * 60_000, cursorSweep: 100 } });
+  ok(stored === before && stored >= 1 && typeof k2 === "string", "(nothing swept while it expired: the sweep held off, " + before + " -> " + stored + " cursors)");
+  ok(stale.status === 400 && stale.message === "cursor: unknown or expired; list again from the start", "an expired cursor that is still stored is refused at use: " + JSON.stringify({ status: stale.status, message: stale.message }));
   ws.close();
 });
 

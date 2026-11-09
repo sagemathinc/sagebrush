@@ -2325,10 +2325,11 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   private hasCursors(): boolean {
     return this.one("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'ix_cursors'") !== undefined;
   }
-  /** A page of expired list cursors deleted (the alarm's, and a new cursor's); the alarm comes back while any is left. */
+  /** A page of expired list cursors deleted (the alarm's, and a new cursor's); the alarm comes back while any is left.
+   *  Expired is the listing's own test: older than `cursorMs` (t < now - cursorMs), so one still good is never swept. */
   private sweepCursors(now: number) {
     if (!this.hasCursors()) return;
-    this.sql.exec("DELETE FROM ix_cursors WHERE id IN (SELECT id FROM ix_cursors WHERE t <= ? ORDER BY t LIMIT ?)", now - this.ixBounds.cursorMs, this.ixBounds.cursorSweep);
+    this.sql.exec("DELETE FROM ix_cursors WHERE id IN (SELECT id FROM ix_cursors WHERE t < ? ORDER BY t LIMIT ?)", now - this.ixBounds.cursorMs, this.ixBounds.cursorSweep);
   }
   /** When the oldest list cursor expires (null: none). */
   private cursorDue(): number | null {
@@ -2577,7 +2578,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       };
       if (verb === "stat") return ok({ entry: this.indexStat(path, scopes) });
       const lp = p as { recursive?: boolean; cursor?: string };
-      const r = this.indexList(path, lp.recursive === true, lp.cursor, scopes, String(g.id), now);
+      const r = this.indexList(path, lp.recursive === true, lp.cursor, scopes, String(g.id), this.ixNow ?? now);
       if ("error" in r) return answer(r.status, r.error, [path], r.extra);
       return ok(r);
     });
@@ -2614,6 +2615,8 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   private ixManual = false;
   /** tests only: ops are accepted without the live update, as while agents are off */
   private ixNoLive = false;
+  /** tests only: the time a list sees (its cursors' ages, the cursors it makes and its sweep), to pin an exact boundary */
+  private ixNow: number | null = null;
 
   private maxSeq(): number {
     return Number(this.one("SELECT COALESCE(MAX(seq), 0) AS n FROM ops")!.n);
@@ -2860,7 +2863,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     let after = "";
     if (cursor !== undefined) {
       const c = /^[0-9a-f]{32}$/.test(cursor) ? this.one("SELECT grant_id, folder, recursive, after, t FROM ix_cursors WHERE id = ?", cursor) : undefined;
-      if (!c || c.grant_id !== grant || c.folder !== folder || Number(c.recursive) !== (recursive ? 1 : 0) || now - Number(c.t) > b.cursorMs) return { status: 400, error: "invalid", extra: { message: "cursor: unknown or expired; list again from the start" } };
+      if (!c || c.grant_id !== grant || c.folder !== folder || Number(c.recursive) !== (recursive ? 1 : 0) || Number(c.t) < now - b.cursorMs) return { status: 400, error: "invalid", extra: { message: "cursor: unknown or expired; list again from the start" } };
       after = String(c.after);
     }
     const rows = recursive
@@ -2898,11 +2901,12 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
 
   /** Tests only: the index's bounds lowered, and its state. */
-  async testIndex(a: { bounds?: Partial<typeof IX>; step?: boolean; manual?: boolean; noLive?: boolean; orphan?: boolean; sweep?: boolean }): Promise<Record<string, unknown>> {
+  async testIndex(a: { bounds?: Partial<typeof IX>; step?: boolean; manual?: boolean; noLive?: boolean; orphan?: boolean; sweep?: boolean | number; now?: number | null }): Promise<Record<string, unknown>> {
     if (!testMode(this.env)) return {};
     // (a cursor row whose grant isn't there, as one revoked before this release left: for trimDead's sweep)
-    // (one sweep of expired cursors, as one alarm step runs it)
-    if (a.sweep) this.sweepCursors(Date.now());
+    // (one sweep of expired cursors, as one alarm step runs it: now, or at the time given)
+    if (a.sweep !== undefined && a.sweep !== false) this.sweepCursors(typeof a.sweep === "number" ? a.sweep : Date.now());
+    if (a.now !== undefined) this.ixNow = a.now;
     if (a.orphan && this.hasCursors()) this.sql.exec("INSERT INTO ix_cursors (id, grant_id, folder, recursive, after, t) VALUES (?, 'zzzzzzzzzzzz', '/', 0, '/', ?)", "f".repeat(32), Date.now());
     if (a.bounds) Object.assign(this.ixBounds, a.bounds);
     if (a.manual !== undefined) {
@@ -2914,7 +2918,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     if (a.step) this.indexStep(true);
     const has = this.one("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'ix_entries'") !== undefined;
     const n = (t: string) => (has ? Number(this.one(`SELECT COUNT(*) AS n FROM ${t}`)!.n) : 0);
-    return { state: this.get("ix_state") ?? null, cursor: Number(this.get("ix_cursor") ?? 0), max: this.exists() ? this.maxSeq() : 0, reason: this.get("ix_reason") ?? null, entries: n("ix_entries"), gone: n("ix_gone"), cut: this.ixCut, alarm: await this.ctx.storage.getAlarm(), job: has ? (jobGet(this.sql)?.phase ?? null) : null, stage: n("ix_stage"), n: Number(this.get("ix_n_entries") ?? 0), g: Number(this.get("ix_n_gone") ?? 0), reset: Number(this.get("ix_reset") ?? 0), cursors: n("ix_cursors"), rows: has ? IX_TABLES.reduce((a, t) => a + n(t), 0) : 0 };
+    return { state: this.get("ix_state") ?? null, cursor: Number(this.get("ix_cursor") ?? 0), max: this.exists() ? this.maxSeq() : 0, reason: this.get("ix_reason") ?? null, entries: n("ix_entries"), gone: n("ix_gone"), cut: this.ixCut, alarm: await this.ctx.storage.getAlarm(), job: has ? (jobGet(this.sql)?.phase ?? null) : null, stage: n("ix_stage"), n: Number(this.get("ix_n_entries") ?? 0), g: Number(this.get("ix_n_gone") ?? 0), reset: Number(this.get("ix_reset") ?? 0), cursors: n("ix_cursors"), cursorTimes: has && this.hasCursors() ? (this.sql.exec("SELECT t FROM ix_cursors ORDER BY t").toArray() as Row[]).map((r) => Number(r.t)) : [], rows: has ? IX_TABLES.reduce((a, t) => a + n(t), 0) : 0 };
   }
 
   /** Tests only: lower the agents' bounds, or expire a grant now. */
