@@ -6,6 +6,7 @@
 //! on their exact outputs, so they are reproduced, float arithmetic
 //! included (glibm: CPython's pow).
 
+use crate::fail::failed;
 use crate::glibm::pow;
 use crate::nat::Nat;
 use core::cmp::Ordering;
@@ -108,7 +109,9 @@ pub fn sqrtrem_python(x: &Nat) -> (Nat, Nat) {
         Ordering::Less => (true, yy.sub(x)),
         _ => (false, x.sub(&yy)),
     };
-    while neg {
+    // (each correction loop runs a step or two on the reference's estimate;
+    // on a failed call's estimate it could run ~sqrt(x) steps: it stops)
+    while neg && !failed() {
         y = y.sub_u64(1);
         // rem += 1 + 2y
         let inc = y.shl(1).add_u64(1);
@@ -123,7 +126,7 @@ pub fn sqrtrem_python(x: &Nat) -> (Nat, Nat) {
     if !rem.is_zero() {
         loop {
             let lim = y.add_u64(1).shl(1);
-            if rem.cmp_mag(&lim) != Ordering::Greater {
+            if rem.cmp_mag(&lim) != Ordering::Greater || failed() {
                 break;
             }
             y = y.add_u64(1);

@@ -45,6 +45,12 @@ fn cases() -> Vec<(i32, Vec<Val>)> {
     for o in [op::BITCOUNT, op::TRAILING, op::ISQRT, op::SQRTREM] {
         v.push((o, vec![i(1 << 40)]));
     }
+    // a 13-limb x under a 13-limb limit: x fits, isqrt_fast's guard-bit shift
+    // doesn't, so the estimate fails while the correction's arithmetic would
+    // still succeed (its loops must stop on the failure, not run ~sqrt(x) steps)
+    let x13 = Val::I(Int::from(Nat::from_u64(1).shl(64 * 12).add_u64(12345)));
+    v.push((op::SQRTREM, vec![x13.clone()]));
+    v.push((op::ISQRT, vec![x13]));
     // (300!: 2^40! would take the reference hours too)
     v.push((op::IFAC, vec![i(300)]));
     v
