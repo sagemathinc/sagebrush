@@ -3256,9 +3256,17 @@ def h(k=slider(1, 5, 1, 2)):
       await ev(`(document.querySelector(".tex-head .tex-run").click(), 1)`);
       const ranI = await statusIs(/^Ran 1 SageTeX item in [0-9.]+ s$/, 120000);
       const W1 = `document.querySelector('.tex-preview .ch:not([hidden]) section.slide .sageinteract')`;
-      const drawn = await until(`!!${W1} && !!${W1}.querySelector('input[type=range][disabled][value="2"]') && ${W1}.querySelector(".si-out")?.textContent === "k^2 = 4\\n" && !!${W1}.querySelector("img.sageplot") && ${W1}.querySelector(".si-note")?.textContent === "Interactive in Sagebrush"`, 20000);
+      const drawn = await until(`!!${W1} && !!${W1}.querySelector('input[type=range][value="2"]') && ${W1}.querySelector(".si-out")?.textContent === "k^2 = 4\\n" && !!${W1}.querySelector("img.sageplot") && ${W1}.querySelector(".si-note")?.textContent === "Interactive in Sagebrush"`, 20000);
       check(before === 0 && ranI && drawn && interactFetches() === 1, "@interact: a Run keeps it; the preview draws it (its slider at 2, its output, its plot, the note), the interact chunk fetched only now, once",
         { before, ranI, drawn, fetched: interactFetches(), slide: await ev(`(document.querySelector(".tex-preview section.slide")?.innerHTML ?? "").slice(0, 400)`) });
+      // (PR 4: live in the preview, the Run's interact in this page's session: its slider moved to 4 runs its function
+      //  again, and its output is the new one, printed and plotted)
+      const liveNow = await until(`!!${W1} && !${W1}.querySelector("input[type=range]").disabled`, 10000);
+      const src0 = await ev(`${W1}.querySelector("img.sageplot")?.src ?? ""`);
+      await ev(`(() => { const i = ${W1}.querySelector("input[type=range]"); i.value = "4"; i.dispatchEvent(new Event("input", { bubbles: true })); return 1; })()`);
+      const moved = await until(`${W1}.querySelector(".si-out")?.textContent === "k^2 = 16\\n" && !!${W1}.querySelector("img.sageplot") && ${W1}.querySelector("img.sageplot").src !== ${JSON.stringify(src0)} && ${W1}.querySelector(".si-v")?.textContent === "4"`, 20000);
+      check(liveNow && moved, "@interact live: after a Run its controls work; the slider moved to 4 runs its function again (k^2 = 16, a new plot)",
+        { liveNow, moved, out: await ev(`${W1}?.querySelector(".si-out")?.textContent ?? null`), shown: await ev(`${W1}?.querySelector(".si-v")?.textContent ?? null`) });
       const Pi = `document.querySelector(".tex-present")`;
       await ev(`(document.querySelector(".tex-present-btn").click(), 1)`);
       const inPresent = await until(`!!${Pi} && !!${Pi}.querySelector(".tp-stage .sageinteract input[type=range]") && !!${Pi}.querySelector(".tp-stage .sageinteract img.sageplot")`, 15000);
@@ -3286,6 +3294,10 @@ def h(k=slider(1, 5, 1, 2)):
       await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
       await until(`!${Pi}`, 5000);
       check(reran && fresh3, "@interact: Shift+Enter while presenting runs it again; the slide shows the new interact (at 3, k^2 = 9), nothing stale", { reran, fresh3 });
+      // (PR 4: the page opened again, a new session: its interacts drawn from the results file, not live, saying to run)
+      await open((await ev(`${W}.stat("/t/interact.tex").then((e) => e.fid)`)));
+      const notLive = await until(`(() => { const w = document.querySelector('.tex-preview .ch:not([hidden]) .sageinteract'); return !!w && w.querySelector("input[type=range]").disabled && w.title === "Run the code (Shift+Enter) to use these controls"; })()`, 20000);
+      check(notLive, "@interact live: in a new page (no Run of its session), drawn but not live, saying to run the code first", null);
       // (grader's #926 I9: a drawn widget is marked, so a later render draws nothing again)
       const again = await ev(`(() => { const u = performance.getEntriesByType("resource").map((e) => e.name).find((n) => /sagebrush-latex-interact\\.js/.test(n)); return import(u).then((m) => m.draw(document.querySelector(".tex-preview"))); })()`);
       check(again === 0, "@interact: drawn once: drawing the preview again draws nothing", { again });

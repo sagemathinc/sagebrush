@@ -61,28 +61,32 @@ const ESC: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"
 const esc = (s: unknown) => String(s).replace(/[&<>"']/g, (c) => ESC[c]);
 const attrNum = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? String(v) : "");
 
+// (each control names itself, data-name and data-kind, so a live one's value can be read back; a range is two inputs)
 function controlHtml(c: any): string {
   if (!c || typeof c !== "object") return "";
   // (a "text" control, text_control's or fixed's, is a line of text, as the notebook draws it: no label, no box)
   if (c.kind === "text") return c.value ? '<div class="si-t">' + esc(String(c.value)) + "</div>" : "";
   const label = '<span class="si-l">' + esc(String(c.label ?? c.name ?? "").slice(0, 200)) + "</span>";
-  const v = c.value;
+  const v = c.value, attrs = ' data-name="' + esc(String(c.name ?? "")) + '" data-kind="' + esc(String(c.kind)) + '"';
+  const rng = (x: unknown, b = "") => '<input type="range" disabled' + b + ' min="' + attrNum(c.min) + '" max="' + attrNum(c.max) + '" step="' + attrNum(c.step) + '" value="' + attrNum(x) + '">';
   let w: string;
-  if (c.kind === "slider" || c.kind === "range") {
-    const one = Array.isArray(v) ? v[0] : v;
-    const shown = Array.isArray(c.labels) && typeof v === "number" && c.labels[v] !== undefined ? c.labels[v] : Array.isArray(v) ? v.join(" to ") : v;
-    w = '<input type="range" disabled min="' + attrNum(c.min) + '" max="' + attrNum(c.max) + '" step="' + attrNum(c.step) + '" value="' + attrNum(one) + '"><span class="si-v">' + esc(String(shown ?? "")) + "</span>";
+  if (c.kind === "slider") {
+    const shown = Array.isArray(c.labels) && typeof v === "number" && c.labels[v] !== undefined ? c.labels[v] : v;
+    w = rng(v) + '<span class="si-v">' + esc(String(shown ?? "")) + "</span>";
+  } else if (c.kind === "range") {
+    const [a, b] = Array.isArray(v) ? v : [c.min, c.max];
+    w = rng(a) + rng(b, ' data-hi="1"') + '<span class="si-v">' + esc(String(a) + " to " + String(b)) + "</span>";
   } else if (c.kind === "selector") {
     const opts = Array.isArray(c.options) ? c.options : [];
-    w = "<select disabled>" + opts.map((o: unknown, i: number) => "<option" + (i === v ? " selected" : "") + ">" + esc(String(o)) + "</option>").join("") + "</select>";
+    w = "<select disabled>" + opts.map((o: unknown, i: number) => '<option value="' + i + '"' + (i === v ? " selected" : "") + ">" + esc(String(o)) + "</option>").join("") + "</select>";
   } else if (c.kind === "checkbox") w = '<input type="checkbox" disabled' + (v === true ? " checked" : "") + ">";
-  else if (c.kind === "button") w = "<button disabled>" + esc(String(c.text ?? c.label ?? "")) + "</button>";
+  else if (c.kind === "button") w = '<button disabled data-clicks="0">' + esc(String(c.text ?? c.label ?? "")) + "</button>";
   else if (c.kind === "color" && typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v)) w = '<input type="color" disabled value="' + esc(v) + '">';
   else w = '<input type="text" disabled value="' + esc(String(v ?? "")) + '">';
-  return '<label class="si-c">' + label + " " + w + "</label>";
+  return '<label class="si-c"' + attrs + ">" + label + " " + w + "</label>";
 }
 
-/** An item's interacts (run-core interactsOf's shape) as HTML: each drawn, not live. */
+/** An item's interacts (run-core interactsOf's shape) as HTML: each drawn, not live (live(): live). */
 export function interactsHtml(list: unknown, stale = false): string {
   if (!Array.isArray(list)) return "";
   return list.slice(0, 8).map((x: any) => {
@@ -92,12 +96,13 @@ export function interactsHtml(list: unknown, stale = false): string {
     const shows = (Array.isArray(x.shows) ? x.shows : []).slice(0, 4).map((sh: any) =>
       typeof sh?.src === "string" && DATA_SVG.test(sh.src) ? '<img class="sageplot" alt="a plot" src="' + sh.src + '">'
         : typeof sh?.text === "string" && sh.text ? '<pre class="si-out">' + esc(sh.text.slice(0, 4000)) + "</pre>" : "").join("");
-    return '<div class="sageinteract' + (stale ? ' sagestale" title="' + esc(STALE_TITLE) : "") + '" data-iid="' + (Number.isInteger(x.id) ? x.id : 0) + '"><div class="si-controls">' + controls + "</div>" + out + shows + '<div class="si-note">' + NOTE + "</div></div>";
+    return '<div class="sageinteract' + (stale ? ' sagestale" title="' + esc(STALE_TITLE) : "") + '" data-iid="' + (Number.isInteger(x.id) ? x.id : 0) + '"><div class="si-controls">' + controls + '</div><div class="si-outs">' + out + shows + '</div><div class="si-note">' + NOTE + "</div></div>";
   }).join("");
 }
 
-/** Draws every placeholder under `root` not drawn yet (its interacts, from its data); how many it drew. */
-export function draw(root: ParentNode): number {
+/** Draws every placeholder under `root` not drawn yet (its interacts, from its data), then makes live those a Run of
+ * `k`'s session made (`ids`, live()); how many it drew. */
+export function draw(root: ParentNode, k: InteractKernel | null = null, ids: Set<number> = new Set()): number {
   let n = 0;
   for (const at of Array.from(root.querySelectorAll<HTMLElement>(".sageinteract-at:not([data-drawn])"))) {
     let list: unknown = [];
@@ -107,5 +112,112 @@ export function draw(root: ParentNode): number {
     n++;
   }
   if (n && !document.getElementById(CSS_ID)) { const st = document.createElement("style"); st.id = CSS_ID; st.textContent = CSS; document.head.appendChild(st); }
+  live(root, k, ids);
+  return n;
+}
+
+// ---- live (the Beamer plan's PR 4): an interact a Run of this page's session made (`ids`) gets its controls live; a
+// change runs its function again in that session (the kernel's interact(): web/notebook/worker-kernel.js, Python's
+// _interact._update), one request at a time, the latest values next, and what it prints and shows replaces its output
+// (the kernel's targetSink: output addressed to it). Every copy of it on the page (the preview's, Present's) shows the
+// same values and output, kept here, so a widget drawn again (a redraw, Present's copy) is put back as it was. One whose
+// session is gone (a reload: its results from the file) stays as drawn, saying to run the code first.
+/** The part of the LaTeX session's kernel (WorkerKernel) live interacts use. */
+export interface InteractKernel { interact(iid: number, values: Record<string, unknown>, sink: object): void; targetSink: (t: number) => object | null }
+const NOT_LIVE = "Run the code (Shift+Enter) to use these controls";
+type State = { values: Record<string, unknown>; outs: string | null; busy: boolean; dirty: boolean; fresh: boolean };
+const states = new Map<number, State>();
+// (the elements given listeners: a copy (Present's clone) carries data-live but no listener, so it is wired again)
+const wired = new WeakSet<HTMLElement>();
+let hooked: InteractKernel | null = null;
+// (a shown value, as the runtime's display gives it: an SVG or PNG image, else its text; never HTML)
+function bundleHtml(b: any): string {
+  const svg = b?.["image/svg+xml"];
+  if (typeof svg === "string" && utf8len(svg) <= INTERACT_LIMITS.svg && /^\s*(<\?xml[^>]*>\s*)?<svg[\s>]/.test(svg)) return '<img class="sageplot" alt="a plot" src="data:image/svg+xml;base64,' + b64(svg) + '">';
+  const png = b?.["image/png"];
+  if (typeof png === "string" && png.length <= INTERACT_LIMITS.svg && /^[A-Za-z0-9+/=\s]+$/.test(png)) return '<img class="sageplot" alt="a plot" src="data:image/png;base64,' + png.replace(/\s/g, "") + '">';
+  const t = b?.["text/plain"];
+  return typeof t === "string" && t ? '<pre class="si-out">' + esc(t.slice(0, INTERACT_LIMITS.text)) + "</pre>" : "";
+}
+const copies = (iid: number) => Array.from(document.querySelectorAll<HTMLElement>('.sageinteract[data-live="1"][data-iid="' + iid + '"]'));
+function showOuts(iid: number) { const st = states.get(iid); if (st && st.outs !== null) for (const w of copies(iid)) { const o = w.querySelector(".si-outs"); if (o) o.innerHTML = st.outs; } }
+// (a control's value as Python's convert() takes it, as the notebook sends it: a slider's number (a labels slider's
+//  index), a range's [lo, hi], a selector's index, a checkbox's bool, a button's clicks, text as typed)
+function read(w: HTMLElement): Record<string, unknown> {
+  const v: Record<string, unknown> = {};
+  for (const c of Array.from(w.querySelectorAll<HTMLElement>(".si-c[data-name]"))) {
+    const name = c.dataset.name ?? "", kind = c.dataset.kind;
+    const inp = c.querySelector<HTMLInputElement>("input"), sel = c.querySelector<HTMLSelectElement>("select"), btn = c.querySelector<HTMLButtonElement>("button");
+    if (kind === "slider" && inp) v[name] = +inp.value;
+    else if (kind === "range") { const [a, b] = Array.from(c.querySelectorAll<HTMLInputElement>("input")).map((x) => +x.value); v[name] = [Math.min(a, b), Math.max(a, b)]; }
+    else if (kind === "selector" && sel) v[name] = +sel.value;
+    else if (kind === "checkbox" && inp) v[name] = inp.checked;
+    else if (kind === "button" && btn) v[name] = +(btn.dataset.clicks ?? 0);
+    else if (inp) v[name] = inp.value;
+  }
+  return v;
+}
+// (values put into a copy's controls: its inputs' current values, not their attributes, so a clone needs them again)
+function apply(w: HTMLElement, values: Record<string, unknown>) {
+  for (const c of Array.from(w.querySelectorAll<HTMLElement>(".si-c[data-name]"))) {
+    const x = values[c.dataset.name ?? ""], kind = c.dataset.kind;
+    if (x === undefined) continue;
+    const inputs = Array.from(c.querySelectorAll<HTMLInputElement>("input")), sel = c.querySelector<HTMLSelectElement>("select"), btn = c.querySelector<HTMLButtonElement>("button");
+    if (kind === "range" && Array.isArray(x)) inputs.forEach((i, k) => (i.value = String(x[k])));
+    else if (kind === "checkbox" && inputs[0]) inputs[0].checked = x === true;
+    else if (sel) sel.value = String(x);
+    else if (btn) btn.dataset.clicks = String(x);
+    else if (inputs[0]) inputs[0].value = String(x);
+    const show = c.querySelector(".si-v");
+    if (show && kind === "slider") show.textContent = String(x);
+    if (show && kind === "range" && Array.isArray(x)) show.textContent = x[0] + " to " + x[1];
+  }
+}
+function send(k: InteractKernel, iid: number) {
+  const st = states.get(iid);
+  if (!st) return;
+  if (st.busy) { st.dirty = true; return; }
+  st.busy = true; st.dirty = false; st.fresh = true;
+  const done = () => { st.busy = false; if (st.dirty) send(k, iid); };
+  k.interact(iid, st.values, {
+    start() {}, out() {}, display() {}, interact() {}, clear() {}, input(_p: string, reply: (v: null) => void) { reply(null); },
+    done, skipped: done,
+    stopped(m: string) { st.outs = '<pre class="si-out">' + esc(String(m ?? "").trim().slice(0, 400)) + "</pre>"; showOuts(iid); done(); },
+  });
+}
+// (output addressed to a live interact: the first of a request's starts its output afresh)
+function sinkFor(iid: number) {
+  const st = states.get(iid);
+  if (!st) return null;
+  const add = (h: string) => { if (st.fresh) { st.outs = ""; st.fresh = false; } st.outs = ((st.outs ?? "") + h).slice(-8 * INTERACT_LIMITS.svg); showOuts(iid); };
+  return {
+    start() {}, interact() {}, input(_p: string, reply: (v: null) => void) { reply(null); },
+    out(t: string) { add('<pre class="si-out">' + esc(String(t).slice(0, INTERACT_LIMITS.text)) + "</pre>"); },
+    display(b: unknown) { add(bundleHtml(b)); },
+    clear() { st.outs = ""; st.fresh = false; showOuts(iid); },
+  };
+}
+/** Makes live, under `root`, every drawn interact whose id a Run of `k`'s session made (`ids`); the others say to run
+ * the code first. Copies drawn again get the values and output kept for their interact. */
+export function live(root: ParentNode, k: InteractKernel | null, ids: Set<number>): number {
+  if (k && hooked !== k) { hooked = k; k.targetSink = (t: number) => sinkFor(+t); }
+  for (const id of Array.from(states.keys())) if (!ids.has(id)) states.delete(id);
+  let n = 0;
+  for (const w of Array.from(root.querySelectorAll<HTMLElement>(".sageinteract[data-iid]"))) {
+    const iid = +(w.dataset.iid ?? 0);
+    if (!k || !ids.has(iid) || w.classList.contains("sagestale")) { if (!w.title) w.title = NOT_LIVE; continue; }
+    if (!states.has(iid)) states.set(iid, { values: read(w), outs: null, busy: false, dirty: false, fresh: false });
+    const st = states.get(iid)!;
+    if (!wired.has(w)) {
+      wired.add(w); w.dataset.live = "1"; w.removeAttribute("title");
+      for (const el of Array.from(w.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>("input, select, button"))) el.disabled = false;
+      const changed = () => { st.values = read(w); for (const c of copies(iid)) if (c !== w) apply(c, st.values); apply(w, st.values); send(k, iid); };
+      w.addEventListener("input", changed);
+      w.addEventListener("click", (ev) => { const b = (ev.target as HTMLElement).closest?.("button[data-clicks]") as HTMLButtonElement | null; if (b) { b.dataset.clicks = String(+(b.dataset.clicks ?? 0) + 1); changed(); } });
+    }
+    apply(w, st.values);
+    if (st.outs !== null) { const o = w.querySelector(".si-outs"); if (o) o.innerHTML = st.outs; }
+    n++;
+  }
   return n;
 }

@@ -447,5 +447,6 @@ export async function runAndSave(o) {
     if (err?.code === "conflict" || err?.code === "exists") return changed;
     throw err;
   }
-  return { ok: true, states, ms: o.now() - t0, remote: f?.remote ?? 0 };
+  // (the interacts this Run made, by id: live in the page while its session lasts (interact.ts live))
+  return { ok: true, states, ms: o.now() - t0, remote: f?.remote ?? 0, interactIds: states.flatMap((x) => (x.interacts ?? []).map((i) => i.id)) };
 }

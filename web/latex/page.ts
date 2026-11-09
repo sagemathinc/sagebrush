@@ -53,6 +53,8 @@ const loadPresent = () => (presentMod ??= (import(presentTries++ ? `${presentUrl
 // for the next file opened in place; started again on a Run after it failed to start. Each Run's number: a Run is
 // current only while it is the last one asked for, on a page not disposed of)
 let sageSession: ReturnType<typeof sessionOf> | null = null;
+// (the interacts this page's Sage session made, by id: the last Run's, live in the preview (interact.ts live))
+let liveIds = new Set<number>();
 // (Run's code, run-core.mjs: a chunk of its own, /sagebrush-latex-run.js, fetched on the first Run (it is first-use
 //  code: the editor loads without it); a failed fetch is tried again by a URL of its own)
 const runUrl = new URL("sagebrush-latex-run.js", import.meta.url).href;
@@ -743,8 +745,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // (the preview's interacts, drawn after each render that has one not drawn yet; the slide being presented shown again,
   //  so its copy has them)
   E.onRendered(() => {
-    if (!preview.querySelector(".sageinteract-at:not([data-drawn])")) return;
-    void loadInteract().then((m) => { if (live() && m.draw(preview) && presenting) { const a = presenting.at(); presenting.go(a.frame, a.step); } }, () => {});
+    if (!preview.querySelector(".sageinteract-at")) return;
+    void loadInteract().then((m) => { if (live() && m.draw(preview, sageSession?.kernel as any, liveIds) && presenting) { const a = presenting.at(); presenting.go(a.frame, a.step); } }, () => {});
   });
   life.signal.addEventListener("abort", () => presenting?.stop());
 
@@ -790,6 +792,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       });
       if (r.stale || !current()) return;
       if (r.msg) { say(r.msg); return; }
+      liveIds = new Set(r.interactIds);
       await loadResults();
       const bad = r.states.filter((x: any) => x.s !== "ok").length;
       const cloud = r.remote ? `; ${r.remote} file${r.remote === 1 ? " in its folder is" : "s in its folder are"} only in the cloud, not given to Sage` : "";
