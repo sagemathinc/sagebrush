@@ -3287,12 +3287,12 @@ The end.
       await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Home", code: "Home" });
       await until(`${Pi}.dataset.frame === "1"`, 5000);
       const PS = `${Pi}.querySelector(".tp-stage .sageinteract input[type=range]")`;
-      const pBefore = await ev(`({ dis: [...${Pi}.querySelectorAll(".tp-stage .sageinteract :is(input, select, button)")].every((c) => c.disabled), value: ${PS}.value, out: ${Pi}.querySelector(".tp-stage .si-out")?.textContent ?? null })`);
-      const pr = await ev(`(() => { const b = ${PS}.getBoundingClientRect(); return { x: b.left + b.width * 0.9, y: b.top + b.height / 2 }; })()`);
+      const pBefore = await ev(`({ dis: [...${Pi}.querySelectorAll(".tp-stage .sageinteract :is(input, select, button)")].every((c) => c.disabled), value: ${PS}?.value ?? null, out: ${Pi}.querySelector(".tp-stage .si-out")?.textContent ?? null })`);
+      const pr = await ev(`(() => { const b = ${PS}?.getBoundingClientRect() ?? { left: 0, top: 0, width: 0, height: 0 }; return { x: b.left + b.width * 0.9, y: b.top + b.height / 2 }; })()`);
       await send("Input.dispatchMouseEvent", { type: "mousePressed", x: pr.x, y: pr.y, button: "left", clickCount: 1 });
       await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: pr.x, y: pr.y, button: "left", clickCount: 1 });
       await sleep(300);
-      const pAfter = await ev(`({ frame: ${Pi}.dataset.frame, value: ${PS}.value, focus: (${PS}.focus(), document.activeElement === ${PS}) })`);
+      const pAfter = await ev(`({ frame: ${Pi}.dataset.frame, value: ${PS}?.value ?? null, focus: (${PS}?.focus(), !!${PS} && document.activeElement === ${PS}) })`);
       check(inPresent && pBefore.dis && pBefore.value === "4" && pBefore.out === "k^2 = 16\n" && pAfter.frame === "1" && pAfter.value === "4" && !pAfter.focus,
         "@interact in Present: shown with its controls disabled, the preview's values and output; a click on its slider changes neither it nor the slide; it takes no focus", { pBefore, pAfter });
       await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
