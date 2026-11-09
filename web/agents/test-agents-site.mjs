@@ -26,6 +26,11 @@ const conn0 = existsSync(join(dist, "connect", "index.html")) ? readFileSync(joi
 const release = (t) => ({ v: [...new Set([...t.matchAll(/sagebrush-agent(?:-|(?:<\/code>)?\s+)(\d+\.\d+\.\d+)/g)].map((m) => m[1]))], sha: [...new Set([...t.matchAll(/\b[0-9a-f]{64}\b/g)].map((m) => m[0]))] });
 const rh = release(html), rc = release(conn0);
 ok(rh.v.length === 1 && rh.sha.length === 1 && JSON.stringify(rh) === JSON.stringify(rc), `the help box and the connect page name the same one release and sha256: ${JSON.stringify(rh)} / ${JSON.stringify(rc)}`);
+// (the connect page's option-2 commands, exactly: sagebrush.space's is the plain npx line (0.3.1 prints the
+// sagebrush.space link itself); DEV's sets the printed link and adds DEV's origin)
+const tgz = `https://agents.sagebrush.cloud/agents/sagebrush-agent-${rc.v[0]}.tgz`;
+const cmds = [...conn0.matchAll(/<pre><code>([^<]*sagebrush-agent-[^<]*)<\/code><\/pre>/g)].map((m) => m[1]);
+ok(JSON.stringify(cmds) === JSON.stringify([`npx -y ${tgz}`, `SAGEBRUSH_AGENT_PAGE=https://dev.sagebrush.space/agents/ npx -y ${tgz} --origin https://dev.sagebrush.space`]), `the connect page's two commands, exactly (sagebrush.space: plain npx; DEV: its page and --origin): ${JSON.stringify(cmds)}`);
 
 // (the site, as web/site-dir.mts decides it: web/site present and SAGEBRUSH_NO_SITE not 1)
 const site = join(web, "site");
