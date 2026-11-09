@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { seenOf, driver, runnable, parseOutput, statesOf, resultsText, msgOf, MARK, RUN_LIMITS, RESULTS_FORMAT, runAndSave, sessionOf, sandboxEngine, SANDBOX_FAILED, folderFiles, runIn, DEPS_MARK, parseDeps, depsWith, wsReader, checkedResults } from "./run-core.mjs";
+import { Engine } from "./engine/pipeline.mjs";
 import { itemKey, savedStates, stateOf, WRAPPER_VERSION, MAX_RESULT, safeRel, depsOf, staleOf, staleOfSync, sha256hex, readComplete, DEPS_MAX, inlineHtml, blockHtml, mathPart } from "./engine/sagetex.mjs";
 
 const results = [];
@@ -104,6 +105,18 @@ const item = (mode, code, extra = {}) => { const it = real(mode, code, extra); r
     ["by position from another wrapper: not run", [C], [{ ...ok(A, { latex: "1" }), key: JSON.stringify(["sage", "a", [], null, "sbtx-wrapper-1"]) }], "notrun"],
   ];
   for (const [what, its, saved, want] of cases) { const got = show(savedStates(its, saved), its); check("stale: " + what, got === want, { got, want }); }
+}
+// (the renderer's math region (render.mjs mathStale), grader's #874 R4/R5: a region with a stale \sage value is marked as
+//  a whole; a region after it, with no stale value, is not; a render with nothing stale marks nothing)
+{
+  const doc = (code) => "\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n$a = \\sage{" + code + "}$ and $x^2$.\n\\end{document}\n";
+  const items = new Engine({}).update(doc("1+1"), { cold: true }).sageItems;
+  const saved = [{ key: itemKey(items[0]), s: "ok", latex: "2" }];
+  const html = (code) => new Engine({ sage: { saved } }).update(doc(code), { cold: true }).chunks.join("");
+  const fresh = html("1+1"), stale = html("1+2");
+  const regions = (h) => h.split('<span class="sagestale"').length - 1;
+  check("stale math: a render with its value current marks nothing", regions(fresh) === 0 && /2/.test(fresh), fresh.slice(0, 300));
+  check("stale math: its \\sage edited, the region keeps the last value, marked once; the next region ($x^2$) is not", regions(stale) === 1 && /<span class="sagestale" title="Changed since the last Run[^"]*"><span class="katex/.test(stale) && !/<span class="sagestale"[^>]*>(?:(?!<\/span>).)*x\^\{?2/.test(stale.split('<span class="sagestale"')[1]?.split("and")[1] ?? ""), stale.slice(0, 500));
 }
 
 // ---- the script in Sage (the CLI's own: build/cli/pyjs.cjs --sage)

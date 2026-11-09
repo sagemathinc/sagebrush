@@ -807,18 +807,14 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   };
   src.addEventListener("keydown", (ev) => { if (ev.key === "Enter" && ev.shiftKey && !ev.ctrlKey && !ev.metaKey && !ev.altKey && !ev.isComposing && runKey(true)) ev.preventDefault(); });
   // (the items kept from the last Run while their code has changed, their values shown marked stale, sagetex.mjs
-  //  savedStates: said when their number changes, or the status is empty, as each edit leaves it (daybreak3, #874),
-  //  so a Run's "Ran ..." stays until the next edit, and the count stays shown while one is edited; never while a Run
-  //  is under way, whose own results come next)
-  let staleSaid = 0;
+  //  savedStates: said after a render when the status is empty, as every edit leaves it (daybreak3, #874), so the
+  //  count follows the edits; never over another message (a Run's "Ran ...", until the next edit), and never while a
+  //  Run is under way, whose own results come next)
   E.onRendered(() => {
     const c = E.lastCheck();
-    if (!c) return;
+    if (!c || running || status.textContent) return;
     const n = (Array.isArray(c.sage) ? c.sage : []).filter((x: any) => x.s === "stale").length;
-    if (running && n) return;
-    const was = staleSaid;
-    staleSaid = n;
-    if (n && (n !== was || !status.textContent)) say(`${n} SageTeX item${n === 1 ? "" : "s"} out of date: Shift+Enter runs ${n === 1 ? "it" : "them"} again`);
+    if (n) say(`${n} SageTeX item${n === 1 ? "" : "s"} out of date: Shift+Enter runs ${n === 1 ? "it" : "them"} again`);
   });
   const agentTarget = { file: () => where.path, text: () => src.value, lastCheck: E.lastCheck, current: E.posCurrent, preview, images, css: PAGE_CSS, refresh: loadResults };
   registerLatexTools(); setTarget(agentTarget);

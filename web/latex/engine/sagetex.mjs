@@ -213,7 +213,8 @@ export function savedStates(items, saved) {
   const taken = new Set();
   for (let i = k; i < items.length; i++) {
     let j = (unused.get(keys[i]) ?? []).find((q) => !taken.has(q));
-    if (j === undefined && i < saved.length && !taken.has(i) && saved[i]?.s === "ok" && typeof saved[i].key === "string" && !now.has(saved[i].key) && sameKind(saved[i].key, items[i])) j = i;
+    // (the result at i is never taken already: one taken by key is the code of an item still here, which `now` excludes)
+    if (j === undefined && i < saved.length && saved[i]?.s === "ok" && typeof saved[i].key === "string" && !now.has(saved[i].key) && sameKind(saved[i].key, items[i])) j = i;
     if (j === undefined) continue;
     taken.add(j);
     out[i] = { ...shown(saved[j], "stale"), key: keys[i] };

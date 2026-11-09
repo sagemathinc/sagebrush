@@ -3091,6 +3091,8 @@ $P = \sage{g[0]}$
       await until(`!document.querySelector(".tex-head .tex-run")?.hidden`, 10000);
       const atP = plain.indexOf("Hi") + 2;
       const k2 = await keyNow(plain, atP);
+      // (the caret moved before the render (grader's #874 K9): the newline still where Shift+Enter was pressed)
+      await ev(`(document.querySelector(".tex-src").setSelectionRange(0, 0), 1)`);
       const back = await until(`document.querySelector(".tex-src").value === ${JSON.stringify(plain.slice(0, atP) + "\n" + plain.slice(atP))}`, 10000);
       await sleep(500);
       const st2 = await ev(`document.querySelector(".tex-status")?.textContent ?? ""`);
@@ -3103,6 +3105,76 @@ $P = \sage{g[0]}$
       await sleep(3000);
       const st3 = await ev(`document.querySelector(".tex-status")?.textContent ?? ""`);
       check(later && !/^(Ran|Starting|Running)/.test(st3) && (await srcNow()) === withSage, "Shift+Enter pressed on one text, the text changed before its render: nothing (no Run of the later code, no newline)", { later, status: st3, src: JSON.stringify((await srcNow()).slice(0, 120)) });
+    }
+    // ---- grader's #874 r3 gaps: a Run under way (K3, H4), a modified Shift+Enter (K6), another message kept over a
+    // re-render (the status rule), Present's Shift+Enter on a text with no code (K8), its digits (P3), its chips (P4)
+    {
+      const KEYS = "\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n$\\sage{1+1}$\n\\begin{sagesilent}\nimport time\ntime.sleep(3)\n\\end{sagesilent}\n\\end{document}\n";
+      await open(await mk("/t/keys.tex", enc(KEYS)));
+      await until(`!document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
+      const st = () => ev(`document.querySelector(".tex-status")?.textContent ?? ""`);
+      const src = () => ev(`document.querySelector(".tex-src").value`);
+      const shiftEnter = async (mods = 8) => { await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, modifiers: mods, text: "\r" }); await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, modifiers: mods }); };
+      await ev(`(document.querySelector(".tex-head .tex-run").click(), 1)`);
+      await statusIs(/^Ran 2 SageTeX items in [0-9.]+ s$/, 120000);
+      // (K3, H4: a Run under way: an edit makes an item stale, and Shift+Enter is pressed; the Run goes on to its end,
+      //  never stopped by the key, and the stale count isn't said while it runs)
+      await ev(`(document.querySelector(".tex-status").textContent = "", document.querySelector(".tex-head .tex-run").click(), 1)`);
+      const running1 = await until(`/Running|Starting/.test(document.querySelector(".tex-head .tex-run").textContent)`, 20000);
+      await typeInto(KEYS.replace("1+1", "1+2"));
+      await sleep(600);
+      const midStatus = await st();
+      const before = await src();
+      await ev(`(() => { const t = document.querySelector(".tex-src"); t.focus(); t.setSelectionRange(5, 5); return 1; })()`);
+      await shiftEnter();
+      await sleep(300);
+      const midStatus2 = await st(), kept = (await src()) === before;
+      const ended = await statusIs(/^Ran 2 SageTeX items in [0-9.]+ s$/, 60000);
+      check(running1 && ended && kept && !/out of date|stopping|stopped/.test(midStatus + midStatus2), "a Run under way: Shift+Enter is consumed and never stops it; no stale count while it runs; it ends with its results",
+        { running1, ended, kept, midStatus, midStatus2, status: await st() });
+      // (K6: Shift+Enter with Ctrl: not a Run)
+      await typeInto(KEYS.replace("1+1", "1+4"));
+      await statusIs(/out of date/, 5000);
+      await ev(`(document.querySelector(".tex-status").textContent = "", document.querySelector(".tex-src").focus(), 1)`);
+      await shiftEnter(2 | 8);
+      await sleep(1500);
+      const noRun = !/Running|Starting/.test(await ev(`document.querySelector(".tex-head .tex-run").textContent`)) && !/^Ran/.test(await st());
+      check(noRun, "Ctrl+Shift+Enter is not a Run", { status: await st(), btn: await ev(`document.querySelector(".tex-head .tex-run").textContent`) });
+      // (the status rule: a message that isn't the stale count stays over a render that changes nothing (the results file
+      //  read again: written again, the same bytes))
+      await ev(`(document.querySelector(".tex-status").textContent = "another message", 1)`);
+      await ev(`${W}.stat("/t/keys.tex.results.json").then((e) => ${W}.read("/t/keys.tex.results.json").then((r) => ${W}.write("/t/keys.tex.results.json", r.content, { fid: e.fid, base: e.rev ?? 0 }))).then(() => (window.dispatchEvent(new Event("focus")), 1))`);
+      await sleep(2000);
+      check((await st()) === "another message", "the stale count is never said over another message (a render that changes nothing)", { status: await st() });
+      // (K8, P3, P4: Present)
+      const NB = "\\documentclass{beamer}\n\\begin{document}\n\\begin{frame}{One}\nA\n\\end{frame}\n\\begin{frame}{Two}\nB\n\\end{frame}\n\\begin{frame}{Three}\nC\n\\end{frame}\n\\end{document}\n";
+      await open(await mk("/t/keys-beamer.tex", enc(NB)));
+      await until(`!document.querySelector(".tex-present-btn")?.hidden`, 20000);
+      const Pk = `document.querySelector(".tex-present")`;
+      await ev(`(document.querySelector(".tex-present-btn").click(), 1)`);
+      await until(`!!${Pk}`, 15000);
+      const edited = NB.replace("A\n", "A changed\n");
+      await ev(`(() => { const t = document.querySelector(".tex-src"); t.value = ${JSON.stringify(edited)}; t.dispatchEvent(new Event("input")); window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", shiftKey: true, bubbles: true, cancelable: true })); return 1; })()`);
+      await sleep(1500);
+      check((await src()) === edited, "Present: Shift+Enter on a text with no code (the preview behind) never edits the source", { src: JSON.stringify((await src()).slice(0, 120)) });
+      const pk = async (k, code, vk) => { await send("Input.dispatchKeyEvent", { type: "keyDown", key: k, code, windowsVirtualKeyCode: vk, ...(k.length === 1 ? { text: k } : {}) }); await send("Input.dispatchKeyEvent", { type: "keyUp", key: k, code, windowsVirtualKeyCode: vk }); };
+      await pk("Home", "Home", 36);
+      await until(`${Pk}.dataset.frame === "1"`, 5000);
+      await pk("3", "Digit3", 51);
+      await shiftEnter();
+      await pk("Enter", "Enter", 13);
+      const nextNot3 = await until(`${Pk}.dataset.frame === "2"`, 5000);
+      check(nextNot3, "Present: digits typed before Shift+Enter are dropped: Enter after it is the next slide (2), not slide 3", { frame: await ev(`${Pk}.dataset.frame`) });
+      await pk("Escape", "Escape", 27);
+      await until(`!${Pk}`, 5000);
+      const NR = "\\documentclass{beamer}\n\\usepackage{sagetex}\n\\begin{document}\n\\begin{frame}{Not run}\nValue: \\sage{2+2}\n\\end{frame}\n\\end{document}\n";
+      await open(await mk("/t/notrun-beamer.tex", enc(NR)));
+      await until(`!document.querySelector(".tex-present-btn")?.hidden && !!document.querySelector(".tex-preview .sagechip.s-notrun")`, 20000);
+      await ev(`(document.querySelector(".tex-present-btn").click(), 1)`);
+      const chipHidden = await until(`!!${Pk} && !!${Pk}.querySelector(".tp-stage .sagechip.s-notrun") && getComputedStyle(${Pk}.querySelector(".tp-stage .sagechip.s-notrun")).display === "none"`, 15000);
+      await pk("Escape", "Escape", 27);
+      await until(`!${Pk}`, 5000);
+      check(chipHidden, "Present: a not-run item's chip is not shown on the slide", null);
     }
     // (Codex friction P5, the editor's half: a helper .py beside the .tex, imported by the document's code as by real
     //  SageTeX run in the document's folder. The .tex's folder is given to Sage, read-only, at each Run, as it is then:
