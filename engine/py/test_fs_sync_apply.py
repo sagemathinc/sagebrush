@@ -1603,6 +1603,9 @@ def test_journal_run_id_grammar():
     try:
         for bad in ("notarun", "../" + RID, RID + "-1", RID + "-10", RID + "/", "", None, 5, RID[:-1]):
             refused(lambda: A.journal_of(p.state, bad), "no-run")
+        os.makedirs(p.held("notarun"), 0o700)                       # (a folder with a valid journal, wrongly named)
+        shutil.copy(p.held(RID, "journal.json"), p.held("notarun", "journal.json"))
+        refused(lambda: A.journal_of(p.state, "notarun"), "no-run")
         os.makedirs(p.held(RID + "-2"), 0o700)                      # (a suffix the grammar allows: just not there)
         refused(lambda: A.journal_of(p.state, RID + "-3"), "no-run")
         real = os.getuid
