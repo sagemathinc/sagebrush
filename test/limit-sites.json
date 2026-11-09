@@ -5857,6 +5857,36 @@
   "class": "3",
   "owner": "number fields"
  },
+ "lib/_sage_numfun.py :: prime_pi_plot :: \"\"\"A plot of prime_pi(x) for xmin <= x <= xmax: a step line, with the #0": {
+  "class": "none",
+  "owner": "sagebrush-sage2",
+  "reason": "xmax is prime_pi.plot's right end (Sage's parameter name), not a cap: nothing is refused"
+ },
+ "lib/_sage_numfun.py :: prime_pi_plot :: at = sorted([float(p) for p in ps] + [float(xmax)]) #0": {
+  "class": "none",
+  "owner": "sagebrush-sage2",
+  "reason": "xmax is prime_pi.plot's right end (Sage's parameter name), not a cap: nothing is refused"
+ },
+ "lib/_sage_numfun.py :: prime_pi_plot :: def prime_pi_plot(xmin=0, xmax=100, vertical_lines=True, **kwds): #0": {
+  "class": "none",
+  "owner": "sagebrush-sage2",
+  "reason": "xmax is prime_pi.plot's right end (Sage's parameter name), not a cap: nothing is refused"
+ },
+ "lib/_sage_numfun.py :: prime_pi_plot :: if xmax < xmin: #0": {
+  "class": "none",
+  "owner": "sagebrush-sage2",
+  "reason": "xmax is prime_pi.plot's right end (Sage's parameter name), not a cap: nothing is refused"
+ },
+ "lib/_sage_numfun.py :: prime_pi_plot :: prime_range(xmin + 1, xmax + 1) and at xmax, sorted together: from #0": {
+  "class": "none",
+  "owner": "sagebrush-sage2",
+  "reason": "xmax is prime_pi.plot's right end (Sage's parameter name), not a cap: nothing is refused"
+ },
+ "lib/_sage_numfun.py :: prime_pi_plot :: ps = sa.prime_range(max(_round_even(xmin + 1), 0), max(_round_even(xmax + 1), 0)) #0": {
+  "class": "none",
+  "owner": "sagebrush-sage2",
+  "reason": "xmax is prime_pi.plot's right end (Sage's parameter name), not a cap: nothing is refused"
+ },
  "lib/_sage_padic.py ::  :: _PADIC_MATRIX_MAX_ENTRIES = 1 << 16 #0": {
   "class": "2+3",
   "owner": "p-adic linear algebra",
