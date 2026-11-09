@@ -1,9 +1,9 @@
 {
  "v": 1,
- "reason": "Sage's moebius.range and prime_pi.plot (lib/_sage_numfun.py, a lazy module; sage_all attaches them to moebius and prime_pi; moebius(0) is 0). Re-measured with bun 1.4.4 (size-record.sh) on master f45586af vs head 394014ed (the head measured; only this marker and budgets.json follow it): cli/lib.gen.js +2268, cli/pyjs.cjs +2360, engine/lib/sage-more.src +4594, engine/lib/sage.pre +882, engine/lib/sage.src +301, engine/sagebrush-worker.js +30; no other row moves. Markers: exact, except cli/pyjs.cjs 2424 (+2360 measured, plus 64 B of margin, as it moves with master). Ceiling (rule 4): engine/lib/sage-more.src 491890 -> 496484, the measured head 496420 + 64. Ceiling (rule 4): engine/lib/sage.src 2980967 -> 2981268, the measured head 2981204 + 64.",
+ "reason": "Sage's moebius.range and prime_pi.plot (lib/_sage_numfun.py, a lazy module; sage_all attaches them to moebius and prime_pi; moebius(0) is 0). Re-measured with bun 1.4.4 (size-record.sh) on master da352b53 vs head d214df78 (the head measured; only this marker and budgets.json follow it): cli/lib.gen.js +2268, cli/pyjs.cjs +2252, engine/lib/sage-more.src +4594, engine/lib/sage.pre +882, engine/lib/sage.src +301, engine/sagebrush-worker.js +30; no other row moves. Markers: exact, except cli/pyjs.cjs 2316 (+2252 measured, plus 64 B of margin, as it moves with master). Ceiling (rule 4): engine/lib/sage-more.src 491890 -> 496484, the measured head 496420 + 64. Ceiling (rule 4): engine/lib/sage.src 2980967 -> 2981268, the measured head 2981204 + 64.",
  "bytes": {
   "cli/lib.gen.js": 2268,
-  "cli/pyjs.cjs": 2424,
+  "cli/pyjs.cjs": 2316,
   "engine/lib/sage-more.src": 4594,
   "engine/lib/sage.pre": 882,
   "engine/lib/sage.src": 301,
