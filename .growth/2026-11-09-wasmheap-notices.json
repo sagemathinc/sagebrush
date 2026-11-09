@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "#945 (engine/wasmheap, ruling B): the third-party notices' list of Sagebrush's own crates names the new sagebrush-wasmheap (scripts/third-party-notices.mjs), and the core lib ships packages/sagebrush's notices. Measured with bun 1.4.4 / node 24.21.0 (size-record.sh) on master 7838ee59 vs this head merged with it: cli/lib.gen.js +20, engine/sagebrush-worker.js +20. The other moving rows shrink: engine/sagebrush-raster.wasm -102, cli/pyjs.cjs -116.",
+ "bytes": {
+  "cli/lib.gen.js": 20,
+  "engine/sagebrush-worker.js": 20
+ }
+}

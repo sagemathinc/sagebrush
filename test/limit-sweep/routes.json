@@ -11,6 +11,11 @@
    "id": "zlib-inflater-cap",
    "kind": "memory",
    "where": "src/runtime/zlib.ts::run"
+  },
+  {
+   "id": "wasm-heap-page-bound",
+   "kind": "memory",
+   "where": "engine/wasmheap/src/lib.rs::alloc"
   }
  ]
 }
