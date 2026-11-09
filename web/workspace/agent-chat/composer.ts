@@ -1,6 +1,6 @@
 // The agents page's composer (web/agents): the message editor with its keys, the Send, Queue, Note and Stop buttons,
 // and their labels. What sending does (the queues, interrupting a turn) stays in page.ts, passed in as hooks.
-import { BlockEditor } from "../board/blocks";
+import { BlockEditor } from "../../board/blocks";
 import type { UserEntry } from "./events";
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string, root: ParentNode = document) => root.querySelector(sel) as T;

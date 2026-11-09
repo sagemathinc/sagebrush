@@ -151,11 +151,11 @@
    "kind": "host",
    "owner": "host"
   },
-  "web/agents/page.ts :: turnNode :: div.innerHTML = `<div class=\"who\"><span class=\"avatar\">✳</span>${esc(turn.agent ?? \"Claude\")} ${tag}</div>${parts.join(\"\")}${status}`; #0": {
+  "web/workspace/agent-chat/view.ts :: turnNode :: div.innerHTML = `<div class=\"who\"><span class=\"avatar\">✳</span>${esc(turn.agent ?? \"Claude\")} ${tag}</div>${parts.join(\"\")}${status}`; #0": {
    "kind": "host",
    "owner": "host"
   },
-  "web/agents/page.ts :: userNode :: div.innerHTML = #0": {
+  "web/workspace/agent-chat/view.ts :: userNode :: div.innerHTML = #0": {
    "kind": "host",
    "owner": "host"
   },

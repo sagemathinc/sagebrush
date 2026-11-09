@@ -12,7 +12,8 @@
 import "../workspace/pair-link";
 import { BlockEditor } from "../board/blocks";
 import { render as markdown } from "../markdown";
-import { apply, newThread, runningTurn, type Artifact, type Thread, type ToolCall, type Turn, type TurnEvent, type UserEntry } from "./events";
+import { apply, newThread, runningTurn, type Artifact, type Thread, type Turn, type TurnEvent, type UserEntry } from "../workspace/agent-chat/events";
+import { userNode as viewUserNode, turnNode as viewTurnNode, artifactIcon, diffHtml } from "../workspace/agent-chat/view";
 import { startFakeTurn, type Draft, type FakeTurn } from "./fake-agent";
 import { AgentError, RELOAD_KEY, type AgentPairing, type Kept } from "../workspace/agent-pair";
 import type { NotebookEdit } from "../workspace/notebook-edit";
@@ -20,7 +21,7 @@ import { mountAgentPairing, type RestoreState } from "../workspace/agent-ui";
 import { Workspace } from "../workspace/api";
 import { WS_DB } from "../workspace/db";
 import { guardGestures, mountNotebook, type AgentCells, type Guard, type NotebookHost, type NotebookUi } from "./notebook-artifact";
-import { mountComposer, renderComposerState, stopLabel } from "./composer";
+import { mountComposer, renderComposerState, stopLabel } from "../workspace/agent-chat/composer";
 import { applyPaneClasses, mountLayout, relayout } from "./layout";
 
 // (the LaTeX editor, in builds that have it: web/build.ts's define)
@@ -295,103 +296,15 @@ function scrollToEnd(force: boolean) {
 }
 
 function userNode(e: UserEntry): HTMLElement {
-  const div = document.createElement("div");
-  div.className = `user ${e.mode}`;
-  div.innerHTML =
-    `<div class="bubble board-text">${md(e.text)}</div>` +
-    (e.mode === "queued" ? `<div class="tag">Queued: sent when the current turn ends</div>` : "") +
-    (e.mode === "note" ? `<div class="tag">Note: not sent to the agent</div>` : "");
-  return div;
+  return viewUserNode(e, md);
 }
-
-const TOOL_ICON: Record<string, string> = { terminal: "▸", file: "📄", edit: "✎", subagent: "◇", diff: "±", image: "🖼" };
 
 function turnNode(thread: Thread, turn: Turn): HTMLElement {
-  const div = document.createElement("div");
-  div.className = "turn";
-  const parts: string[] = [];
-  for (const p of turn.parts) {
-    if (p.kind === "thinking") {
-      parts.push(`<details class="thinking"><summary>Thinking</summary><div>${esc(p.text)}</div></details>`);
-    } else if (p.kind === "message") {
-      parts.push(`<div class="msg board-text">${md(p.text)}${p.truncated ? `<div class="tag">(cut at 256 KiB)</div>` : ""}</div>`);
-    } else if (p.kind === "tool") {
-      parts.push(toolHtml(turn.tools[p.call]));
-    } else if (p.kind === "attention") {
-      const a = turn.attention[p.id];
-      const open = a.state === "open" && !turn.outcome;
-      parts.push(
-        `<div class="attention ${a.state}" data-attention="${esc(a.id)}"><div class="att-title">⚠ ${esc(a.title)}</div>` +
-          (a.summary ? `<div class="att-summary">${esc(a.summary)}</div>` : "") +
-          (a.detail ? `<details class="att-detail"${open ? " open" : ""}><summary>All of the request</summary><pre>${esc(a.detail)}</pre></details>` : "") +
-          (open
-            ? `<div class="att-actions"><button class="primary" data-approve="1">Allow</button><button data-approve="0">Deny</button></div>`
-            : `<div class="att-state">${a.state === "approved" ? "Allowed" : a.state === "denied" ? "Denied" : "No answer"}</div>`) +
-          `</div>`,
-      );
-    } else if (p.kind === "artifact") {
-      const a = thread.artifacts.find((x) => x.id === p.id);
-      if (a) parts.push(`<button class="artifact-card" data-artifact="${esc(a.id)}"><span class="ai">${artifactIcon(a)}</span><span><b>${esc(a.title)}</b><small>${artifactLabel(a)} · click to open</small></span></button>`);
-    }
-  }
-  if (turn.error) parts.push(`<div class="turn-error">Error: ${esc(turn.error.message)}</div>`);
-  const status =
-    turn.outcome === "interrupted"
-      ? `<div class="status">Interrupted</div>`
-      : !turn.outcome
-        ? `<div class="status working"><span class="spinner"></span>Working…</div>`
-        : turn.usage
-          ? `<div class="status done">${((turn.finished ?? 0) - turn.started) / 1000 > 0 ? (((turn.finished ?? 0) - turn.started) / 1000).toFixed(1) + " s · " : ""}${turn.usage.output_tokens} tokens</div>`
-          : "";
-  const tag = turn.agent ? `<span class="demo live">on your computer</span>` : `<span class="demo">demo</span>`;
-  div.innerHTML = `<div class="who"><span class="avatar">✳</span>${esc(turn.agent ?? "Claude")} ${tag}</div>${parts.join("")}${status}`;
-  for (const b of div.querySelectorAll<HTMLButtonElement>("[data-approve]")) {
-    b.onclick = () => {
-      const att = b.closest<HTMLElement>("[data-attention]")!.dataset.attention!;
-      answer(thread, att, b.dataset.approve === "1");
-    };
-  }
-  for (const b of div.querySelectorAll<HTMLButtonElement>("[data-artifact]")) {
-    b.onclick = () => {
-      openArtifact = b.dataset.artifact!;
-      renderArtifacts();
-    };
-  }
-  return div;
-}
-
-function toolHtml(t: ToolCall): string {
-  const icon = TOOL_ICON[t.tool] ?? "•";
-  const state = t.status === "running" ? `<span class="spinner"></span>` : t.status === "ok" ? `<span class="ok">✓</span>` : `<span class="bad">${t.status === "unknown" ? "?" : "✗"}</span>`;
-  const label = t.tool === "terminal" ? `<code>${esc(t.summary ?? t.name ?? "")}</code>` : `${esc(t.name ?? t.tool)} <code>${esc(t.summary ?? "")}</code>`;
-  const meta = [t.status !== "running" && t.status !== "ok" ? t.status : "", t.duration_ms != null ? `${(t.duration_ms / 1000).toFixed(1)} s` : ""].filter(Boolean).join(" · ");
-  const body = t.diff ? diffHtml(t.diff.before, t.diff.after) : t.output ? `<pre class="out">${esc(t.output)}${t.body_cut ? "\n… (cut)" : ""}</pre>` : "";
-  // (open while it runs, so its output streams in view; closed once it's done)
-  return `<details class="tool ${t.status}"${t.status === "running" ? " open" : ""}><summary>${state}<span class="ti">${icon}</span>${label}${meta ? `<span class="meta">${esc(meta)}</span>` : ""}</summary>${body}</details>`;
-}
-
-function artifactIcon(a: Artifact) {
-  return a.kind === "markdown" ? "📝" : a.kind === "diff" ? "±" : a.kind === "notebook" ? "📓" : "⌨";
-}
-function artifactLabel(a: Artifact) {
-  return a.kind === "markdown" ? "Document" : a.kind === "diff" ? "Changes" : a.kind === "notebook" ? "Notebook" : `Code${a.lang ? ` · ${a.lang}` : ""}`;
-}
-
-// A line diff (longest common subsequence): small files only.
-function diffHtml(before: string, after: string): string {
-  const a = before.split("\n"), b = after.split("\n");
-  const n = a.length, m = b.length;
-  const L = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
-  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) L[i][j] = a[i] === b[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
-  const rows: string[] = [];
-  let i = 0, j = 0;
-  while (i < n || j < m) {
-    // (a removed line before an added one, as git shows them)
-    if (i < n && j < m && a[i] === b[j]) rows.push(`<div class="dl"> ${esc(a[i++])}</div>`), j++;
-    else if (i < n && (j === m || L[i + 1][j] >= L[i][j + 1])) rows.push(`<div class="dl del">-${esc(a[i++])}</div>`);
-    else rows.push(`<div class="dl add">+${esc(b[j++])}</div>`);
-  }
-  return `<div class="diff">${rows.join("")}</div>`;
+  return viewTurnNode(thread, turn, {
+    answer: (att, approve) => answer(thread, att, approve),
+    openArtifact: (id) => { openArtifact = id; renderArtifacts(); },
+    md,
+  });
 }
 
 // The pane: a head (tabs and buttons, redrawn when what it shows changes) and one host per artifact, kept while
