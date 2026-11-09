@@ -178,6 +178,8 @@ test("embedded packages fail closed: a corrupt blob, one past its ceiling, or on
   installEmbeddedPackages(m, {}, { p: [payloadOf({ "p/py/y.py": "y\n" }), ["p/py/x.py"]] });
   assert.throws(() => m.__SAGEBRUSH_PACKAGES__.files["p/py/x.py"], /the embedded library's lazy part is not the files it names/);
   assert.throws(() => installEmbeddedPackages({}, {}, { p: [good, ["q/py/x.py"]] }), /names a file outside it/);
+  // (a sibling whose name only starts with the package's: pkgs/tab's blob may not name pkgs/tabulate's files)
+  assert.throws(() => installEmbeddedPackages({}, {}, { "pkgs/tab": [payloadOf({ "pkgs/tabulate/x.py": "x\n" }), ["pkgs/tabulate/x.py"]] }), /names a file outside it/);
 });
 
 // The built artifact (build/cli/packages.gen.js, as the CLI bundle carries it): every package file decodes to exactly
