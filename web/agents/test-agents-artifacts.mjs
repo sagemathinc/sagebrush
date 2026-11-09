@@ -154,6 +154,7 @@ let loads = 0; // (the page's load events so far)
 // once for the first pairing load, so a slow first load names the request that held it)
 const timing = new Map();
 let firstLoadLogged = false;
+let dialogNote = null; // (the Connect dialog's first line, from the first pairing)
 cdp.onmessage = (ev) => {
   const m = JSON.parse(ev.data);
   try { // (recorded for the first pairing load only; never throws)
@@ -318,12 +319,26 @@ async function pair() {
   if (loads === before) throw new Error("timeout: the page's load event after the pairing navigate\n  the page then: " + JSON.stringify(await pageState()));
   // (the Connect dialog's own button: the page's hint by Send (A14) can carry a "Connect" too)
   await until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Connect' && b.offsetParent)`, 20000 - (Date.now() - t1)); // (one 20 s for the load and Connect together)
+  dialogNote ??= await ev(`[...document.querySelectorAll('.sbag-dlg .note')].at(-1)?.textContent ?? ''`);
   await ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Connect' && b.offsetParent).click()`);
   await until(`[...document.querySelectorAll('button')].some((b) => b.textContent === 'Allow' && b.offsetParent)`);
   await ev(`(() => { const all = [...document.querySelectorAll('label')].find((l) => l.textContent.startsWith('Everything')).querySelector('input'); all.checked = true; all.dispatchEvent(new Event('change')); [...document.querySelectorAll('button')].find((b) => b.textContent === 'Allow').click(); })()`);
   const t = Date.now();
   while (!notes.some((m) => m.method === "grant.changed") && Date.now() - t < 10000) await sleep(50);
   await until(`document.querySelector('#connect').textContent === 'Connected'`);
+}
+/** A Connect to a port nothing listens on, from a ?pair= link: the dialog's failure text, as the person reads it. */
+async function failedConnect() {
+  const net = await import("node:net");
+  const closed = await new Promise((r) => { const sv = net.createServer(); sv.listen(0, "127.0.0.1", () => { const p = sv.address().port; sv.close(() => r(p)); }); });
+  const before = loads;
+  await send("Page.navigate", { url: `${site}/agents/?pair=123-456&port=${closed}` });
+  const t1 = Date.now();
+  while (loads === before && Date.now() - t1 < 20000) await sleep(50);
+  await until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Connect' && b.offsetParent)`, 20000);
+  await ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Connect' && b.offsetParent).click()`);
+  await until(`/connection failed/.test([...document.querySelectorAll('.sbag-dlg .err')].at(-1)?.textContent ?? "")`, 15000);
+  return ev(`[...document.querySelectorAll('.sbag-dlg .err')].at(-1)?.textContent ?? ""`);
 }
 /** A fresh page with nothing of the notebook loaded: an empty chat is made current first (a reload reopens the
  * current chat's last artifact), then the page is loaded and paired again. */
@@ -356,11 +371,15 @@ async function openNotebook(path, o = {}) {
 }
 
 try {
+  // ======================================================================== a failed Connect names the page's program
+  const failText = await failedConnect();
+  ok(/^the connection failed \(is sagebrush-agent running,/.test(failText) && /such as sagebrush-agent\./.test(failText) && !/sagebrush-mcp|agent's sagebrush-agent|undefined/.test(failText), "a failed Connect names sagebrush-agent, in the failure and in Chrome's note (no sagebrush-mcp, no \"your agent's\", no undefined)", failText);
   // ======================================================================== the page, paired; lazy loading
   await pair();
   const grant = notes.find((m) => m.method === "grant.changed")?.params;
   ok(grant && grant.run === false && grant.write === true, "the grant says run false although the agent asked for run (only the person runs code)", grant);
   ok(await ev("crossOriginIsolated"), "the page is cross-origin isolated (COOP/COEP from web/_headers)");
+  ok(/^Start sagebrush-agent in a terminal/.test(dialogNote) && !/sagebrush-mcp/.test(dialogNote), "the Connect dialog names the page's own program, sagebrush-agent (not sagebrush-mcp)", dialogNote);
   await call("workspace.mkdir", { path: "/notes" });
   await converse();
   ok(!loaded("sagebrush-notebook.js") && !loaded("sagebrush-worker.js") && workerCount() === 0, "nothing of the notebook is loaded before a notebook opens", requested.filter((u) => /sagebrush-/.test(u)));
