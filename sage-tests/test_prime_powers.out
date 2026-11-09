@@ -31,3 +31,6 @@ prime_powers(ZZ(10), 20.0) -> [11, 13, 16, 17, 19] list
 prime_powers(10, 'b') -> TypeError: unable to convert 'b' to an integer
 prime_powers(True) -> [] list
 prime_powers(GF(7)(5)) -> [2, 3, 4] list
+prime_powers(9) -> [2, 3, 4, 5, 7, 8] list
+prime_powers(2, 8) -> [2, 3, 4, 5, 7] list
+prime_powers(4, 9) -> [4, 5, 7, 8] list
