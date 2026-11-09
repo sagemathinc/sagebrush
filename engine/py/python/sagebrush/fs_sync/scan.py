@@ -43,6 +43,7 @@ HASH_CHUNK = 2**20
 DEFAULT_IGNORES = (".git/", "node_modules/", "__pycache__/", ".DS_Store", "Thumbs.db", "desktop.ini", "*.swp", "*~",
                    "~$*", ".sagebrush-tmp-*")
 IGNORE_FILE = ".sagebrushignore"
+TMP_PREFIX = ".sagebrush-tmp-"     # a download's temporary file: ignored, and swept by a later run (move.sweep_temps)
 
 # ---- why a path was skipped
 IGNORED = "ignored"
@@ -97,6 +98,7 @@ class ScanResult:
     skipped: list = field(default_factory=list)     # (path, why)
     case_insensitive: bool = False
     hashed: int = 0                                 # files whose contents were read (the rest kept a known hash)
+    temps: list = field(default_factory=list)       # download temps met (on-disk spelling), for move.sweep_temps
 
 
 # ---------------------------------------------------------------------------- refusals before anything (§1)
@@ -475,6 +477,8 @@ def scan(root, workspace_path="/", known=None, limits=None):
             out.skipped.append((rel, UNREADABLE))
             return
         is_dir = stat.S_ISDIR(st.st_mode)
+        if name.startswith(TMP_PREFIX) and stat.S_ISREG(st.st_mode):
+            out.temps.append(raw)
         if _DEFAULTS.ignored(rel, is_dir) or ignore.ignored(rel, is_dir):
             out.skipped.append((rel + ("/" if is_dir else ""), IGNORED))
             return
