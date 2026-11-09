@@ -162,7 +162,8 @@ jobs:
           node --test --test-concurrency="$SAGEBRUSH_CPUS" --test-shard=${{ matrix.shard }}/8 "${files[@]}"
 
   # (Sprig's suites in their own job, so its corpus and memory pins don't push a
-  # node-tests shard past 10 minutes; node-tests and engine-node exclude sprig*)
+  # node-tests shard past 10 minutes; node-tests and engine-node exclude sprig* in
+  # their own find lines, keep the three in step. Sprig suites are only in dist/test, not target/)
   sprig:
     needs: changes
     if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && (needs.changes.outputs.node == 'true' || needs.changes.outputs.engine_full == 'true')
@@ -194,7 +195,8 @@ jobs:
           SAGEBRUSH_TIME_SCALE: "2"
         run: |
           mapfile -d '' files < <(find dist/test -maxdepth 1 -type f -name 'sprig*.test.js' -print0 | sort -z)
-          if [ "${#files[@]}" -eq 0 ]; then echo "no Sprig suites"; exit 0; fi
+          # (master has Sprig suites since #903: none found means the build or the pattern broke)
+          if [ "${#files[@]}" -eq 0 ]; then echo "no Sprig suites: the build or the pattern is wrong"; exit 1; fi
           node --test --test-concurrency="$SAGEBRUSH_CPUS" "${files[@]}"
 
   language-node:
