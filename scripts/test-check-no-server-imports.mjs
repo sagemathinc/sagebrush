@@ -4,7 +4,7 @@
 // and strings are not.  And the license direction: MIT code never depends on
 // web/cloud/ (MS-RSL), while web/cloud/ may import MIT code.
 //   bun scripts/test-check-no-server-imports.mjs
-import { serverImports, cloudImports, cloudInputs } from "./check-no-server-imports.mjs";
+import { serverImports, cloudImports, cloudInputs, assertNoCloudInputs } from "./check-no-server-imports.mjs";
 
 let failures = 0;
 const found = (path, text) => serverImports([{ path, text }]).length > 0;
@@ -117,6 +117,11 @@ expectCloud("an MIT package depended on by name", "packages/x/package.json", JSO
     console.log(`FAIL an unparsable file's raw text is still segment-checked: ${JSON.stringify(got)}`);
   }
 }
+expectCloud("jsconfig paths into it", "web/x/jsconfig.json", JSON.stringify({ compilerOptions: { paths: { "@c/*": ["../c" + "loud/*"] } } }), true);
+expectCloud("a bundledDependencies name", "web/site/package.json", JSON.stringify({ bundledDependencies: ["@sagebrush/cloud-sync"] }), true, cloudPkg);
+expectCloud("workspaces in the object form", "package.json", JSON.stringify({ workspaces: { packages: ["web/*/*"] } }), true, cloudPkg);
+expectCloud("an inline script's string edge", "web/a.html", `<script>fetch("../c` + `loud/x.json");</script>`, true);
+expectCloud("a template starting at the segment", "scripts/a.mjs", "const f = join(dir, `c" + "loud/${f}`);", true);
 expectCloud("tsconfig paths into it", "tsconfig.web.json", JSON.stringify({ compilerOptions: { paths: { "@c/*": ["web/c" + "loud/*"] } } }), true);
 expectCloud("an unparsable package.json is reported", "web/x/package.json", "{", true);
 expectCloud("an unparsable cloud package.json is reported", "web/a.ts", "export const a = 1;", true, [{ path: "web/cloud/x/package.json", text: "{" }]);
@@ -178,7 +183,7 @@ expectCloud("the listed text in another file", "web/workspace/other.mjs", `const
   const problems = [];
   if (bind < 0 || def < bind || wrap < def) problems.push("the bind, build0 and the global wrapper, in that order");
   if (open < 0 || lines[open] !== "{") problems.push("they sit in a top-level block (not under if/for/try)");
-  if (!lines.slice(def, def + 6).join("\n").includes("cloudInputs(Object.keys(r.metafile?.inputs ?? {}))") || !lines.slice(def, def + 6).join("\n").includes("metafile: true")) problems.push("build0 forces a metafile and checks it");
+  if (lines[def + 1] !== "    const r = await bunBuild({ ...o, metafile: true });" || lines[def + 2] !== '    if (r.success) assertNoCloudInputs(Object.keys(r.metafile?.inputs ?? {}), String(o.entrypoints?.[0] ?? "a bundle"));') problems.push("build0 forces a metafile and asserts it");
   if (!/await build0\(/.test(lines[wrap + 1] ?? "")) problems.push("the wrapper calls build0");
   if (all(/Bun\.build\.bind\(/).length !== 1 || all(/\bBun\.build\s*=|\(Bun as any\)\.build\s*=/).length !== 1) problems.push("one raw bind and one replacement");
   const early = all(/\bBun\.build\(/).filter((i) => i < wrap);
@@ -187,6 +192,31 @@ expectCloud("the listed text in another file", "web/workspace/other.mjs", `const
     failures++;
     console.log("FAIL web/build.ts's bundles must all pass build0: " + problems.join("; "));
   }
+}
+
+// assertNoCloudInputs, which every shipping build calls on its metafile: a hit throws, naming the bundle; a clean list doesn't
+{
+  const throws = (inputs, cwd) => { try { assertNoCloudInputs(inputs, "the bundle x.js", cwd, "/repo"); return null; } catch (e) { return String(e.message); } };
+  const t1 = throws(["src/cli.ts", "cloud/remote/server.ts"], "/repo/web");
+  const t2 = throws(["/repo/web/cloud/sync/floors.ts"], "/elsewhere");
+  if (!t1?.includes("the bundle x.js takes inputs from web/cloud/") || !t1.includes("cloud/remote/server.ts") || !t2?.includes("/repo/web/cloud/sync/floors.ts") || throws(["src/cli.ts", "web/cloudflare/x.ts", "../cloud/x.ts"], "/repo/web") !== null) {
+    failures++;
+    console.log(`FAIL assertNoCloudInputs: ${JSON.stringify([t1, t2])}`);
+  }
+}
+// scripts/build-cli.mjs and scripts/js-bundle.mjs call it on their metafiles (web/build.ts's build0: above)
+{
+  const { readFileSync } = await import("node:fs");
+  const cli = readFileSync(new URL("./build-cli.mjs", import.meta.url), "utf8");
+  const js = readFileSync(new URL("./js-bundle.mjs", import.meta.url), "utf8");
+  const problems = [];
+  if (!cli.includes('const noCloudInputs = (meta) => assertNoCloudInputs(Object.keys(JSON.parse(readFileSync(meta, "utf8")).inputs ?? {}), meta, root, root);')) problems.push("build-cli's noCloudInputs asserts its metafile");
+  for (const m of ["pyjs.meta.json", "latex.meta.json"]) {
+    const arg = cli.indexOf(`"--metafile=" + join(out, "${m}")`), call = cli.indexOf(`noCloudInputs(join(out, "${m}"));`);
+    if (arg < 0 || call < arg) problems.push(`build-cli writes ${m} and then asserts it`);
+  }
+  if (!/Bun\.build\(\{\n  metafile: true,/.test(js) || js.indexOf("assertNoCloudInputs(Object.keys(result.metafile?.inputs ?? {}), out);") < 0 || js.indexOf("assertNoCloudInputs(") > js.indexOf("await Bun.write(out")) problems.push("js-bundle asks for a metafile and asserts it before writing");
+  if (problems.length) { failures++; console.log("FAIL the builds' metafile checks: " + problems.join("; ")); }
 }
 
 // main, the step CI runs: a temporary repository, its verdict and exit code (grader's C16-C18; daybreak3's E2)
@@ -223,6 +253,17 @@ expectCloud("the listed text in another file", "web/workspace/other.mjs", `const
     r = runIt();
     if (r.status !== 1 || !r.stderr.includes("web/alias: a link into")) { failures++; console.log(`FAIL main must exit 1 on a link into web/cloud/: exit ${r.status}`); }
     rmSync(join(repo, "web/alias"));
+    symlinkSync(join(repo, "web/cloud/remote"), join(repo, "web/abs-alias")); // (an absolute target in <root>/web/cloud/)
+    git("add", "-A");
+    r = runIt();
+    if (r.status !== 1 || !r.stderr.includes("web/abs-alias: a link into")) { failures++; console.log(`FAIL main must exit 1 on an absolute link into web/cloud/: exit ${r.status}`); }
+    rmSync(join(repo, "web/abs-alias"));
+    put("web/cloud/pkg/package.json", JSON.stringify({ name: "cloudpkg", private: true }));
+    put("web/site/package.json", JSON.stringify({ dependencies: { cloudpkg: "^1" } }));
+    git("add", "-A");
+    r = runIt();
+    if (r.status !== 1 || !r.stderr.includes("web/site/package.json: dependencies cloudpkg is a web/cloud/ package")) { failures++; console.log(`FAIL main must read web/cloud/'s package names: exit ${r.status}`); }
+    rmSync(join(repo, "web/site/package.json"));
     symlinkSync("workspace", join(repo, "web/alias2"));
     git("add", "-A");
     r = runIt();

@@ -18,7 +18,7 @@ import { gzipSync } from "node:zlib";
 import { buildId as computeBuildId, libFiles } from "./build-id.mjs";
 import { mkdtempSync, copyFileSync, existsSync } from "node:fs";
 import { sandboxEntry } from "./sandbox-env.mjs";
-import { cloudInputs, CLOUD_ROOT } from "./check-no-server-imports.mjs";
+import { assertNoCloudInputs } from "./check-no-server-imports.mjs";
 
 // deno compile embeds node_modules when it finds a package.json above the
 // entry point; compile a copy of the bundle from an empty directory.  With
@@ -45,10 +45,7 @@ mkdirSync(out, { recursive: true });
 const run = (cmd, args, opts = {}) => execFileSync(cmd, args, { stdio: "inherit", cwd: root, ...opts });
 // (the npm package's bundles take no input from web/cloud/, which is MS-RSL: scripts/check-no-server-imports.mjs;
 // bun build's metafile keys its inputs relative to the working directory, root)
-const noCloudInputs = (meta) => {
-  const fromCloud = cloudInputs(Object.keys(JSON.parse(readFileSync(meta, "utf8")).inputs ?? {}), root, root);
-  if (fromCloud.length) throw new Error(`${meta}: the bundle takes inputs from ${CLOUD_ROOT}, which is MS-RSL: ${fromCloud.join(", ")}`);
-};
+const noCloudInputs = (meta) => assertNoCloudInputs(Object.keys(JSON.parse(readFileSync(meta, "utf8")).inputs ?? {}), meta, root, root);
 
 // 1. The Python library, as a JS object.
 const lib = libFiles(root);

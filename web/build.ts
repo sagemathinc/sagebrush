@@ -132,12 +132,11 @@ console.log(`library: ${LIB_CHUNKS.length} chunks; ` + Object.entries(libManifes
   const list = runnerFetchList(engineSha256, rasterSha256, ndSha256, libChunkFiles.keys(), tz.ref);
   writeFileSync(join(here, "dist", "runner-fetch.json"), JSON.stringify(list) + "\n");
   // (no bundle built here may take an input from the MS-RSL directory: scripts/check-no-server-imports.mjs)
-  const { cloudInputs, CLOUD_ROOT } = await import("../scripts/check-no-server-imports.mjs");
+  const { assertNoCloudInputs } = await import("../scripts/check-no-server-imports.mjs");
   const bunBuild = Bun.build.bind(Bun);
   const build0 = async (o: any) => {
     const r = await bunBuild({ ...o, metafile: true });
-    const fromCloud = r.success ? cloudInputs(Object.keys(r.metafile?.inputs ?? {})) : [];
-    if (fromCloud.length) throw new Error(`${String(o.entrypoints?.[0] ?? "a bundle")} takes inputs from ${CLOUD_ROOT}, which is MS-RSL: ${fromCloud.join(", ")}`);
+    if (r.success) assertNoCloudInputs(Object.keys(r.metafile?.inputs ?? {}), String(o.entrypoints?.[0] ?? "a bundle"));
     return r;
   };
   // (the isolated output renderer, OUT-ISO phase 1: its packaged form is every bundle's __SB_OUTPUT_SHELL__, and its

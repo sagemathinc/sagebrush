@@ -8,7 +8,7 @@
 // for the browser, minified but for its identifiers.
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { cloudInputs, CLOUD_ROOT } from "./check-no-server-imports.mjs";
+import { assertNoCloudInputs } from "./check-no-server-imports.mjs";
 
 const [dir, out] = process.argv.slice(2);
 const m = JSON.parse(readFileSync(join(dir, "sagebrush.json"), "utf8"));
@@ -45,9 +45,5 @@ if (!result.success || result.outputs.length !== 1) {
   process.exit(1);
 }
 // (a package's module takes no input from web/cloud/, which is MS-RSL: scripts/check-no-server-imports.mjs)
-const fromCloud = cloudInputs(Object.keys(result.metafile?.inputs ?? {}));
-if (fromCloud.length) {
-  console.error(`the module takes inputs from ${CLOUD_ROOT}, which is MS-RSL: ${fromCloud.join(", ")}`);
-  process.exit(1);
-}
+assertNoCloudInputs(Object.keys(result.metafile?.inputs ?? {}), out);
 await Bun.write(out, await result.outputs[0].text());

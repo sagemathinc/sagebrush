@@ -214,6 +214,13 @@ export function cloudInputs(inputs, cwd = process.cwd(), root = join(dirname(fil
   });
 }
 
+/** Throws if any of a build's metafile `inputs` is a file in web/cloud/ (cloudInputs): every build that ships calls this on
+ * its metafile, so a hit stops the build.  `label` names the bundle in the error. */
+export function assertNoCloudInputs(inputs, label, cwd = process.cwd(), root = join(dirname(fileURLToPath(import.meta.url)), "..")) {
+  const fromCloud = cloudInputs(inputs, cwd, root);
+  if (fromCloud.length) throw new Error(`${label} takes inputs from ${CLOUD_ROOT}, which is MS-RSL: ${fromCloud.join(", ")}`);
+}
+
 if (import.meta.main) {
   const at = process.argv.indexOf("--root");
   const root = at > 0 ? process.argv[at + 1] : join(dirname(fileURLToPath(import.meta.url)), "..");
