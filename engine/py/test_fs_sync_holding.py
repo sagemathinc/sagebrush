@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """fs-sync's holding folder (sagebrush/fs_sync/holding.py; design/fs-sync.md §2.4): run ids made unique by an
-exclusive mkdir, what is held counted by handle, all-or-nothing admission under the bounds, one run at a time moving
-files aside (the trash/ lock), and the cleanup of runs older than 30 days. Every bound is lowered here."""
+exclusive mkdir, what is held counted in entries by a streaming bounded walk that fails closed, all-or-nothing
+admission counting the run's files and new folders, one run at a time (the trash/ lock), and the cleanup of runs
+older than 30 days after a complete count. Every bound is lowered here; no large fixtures."""
 
 import os
 import re
@@ -12,7 +13,7 @@ import time
 
 from sagebrush.fs_sync import holding as H
 
-NOW = 1_794_200_000                 # 2026-11-09 (UTC), a fixed "now"
+NOW = 1_794_200_000                 # a fixed "now" (November 2026, UTC)
 DAY = 86400
 
 
@@ -24,6 +25,7 @@ def state():
     d = tmp()
     s = os.path.join(d, "state")
     os.mkdir(s, 0o700)
+    os.mkdir(os.path.join(s, "trash"), 0o700)
     return d, s
 
 
@@ -46,6 +48,10 @@ class Lowered:
     def __exit__(self, *a):
         for k, v in self.saved.items():
             setattr(H, k, v)
+
+
+def open_fds():
+    return len(os.listdir("/dev/fd"))
 
 
 def test_run_ids():
@@ -71,8 +77,7 @@ def test_run_ids():
         except FileExistsError:
             pass
         with Lowered(MAX_SAME_SECOND=2):                     # the bound lowered: the third id in a second refused
-            a = H.new_run(s, NOW + 1)
-            b = H.new_run(s, NOW + 1)
+            a, b = H.new_run(s, NOW + 1), H.new_run(s, NOW + 1)
             assert (a.run_id, b.run_id) == (H.run_id_at(NOW + 1), H.run_id_at(NOW + 1) + "-2")
             a.close()
             b.close()
@@ -85,72 +90,198 @@ def test_run_ids():
         shutil.rmtree(d)
 
 
-def test_usage_by_handle():
+def test_usage_counts_entries():
     d, s = state()
     try:
         trash = os.path.join(s, "trash")
-        put(os.path.join(trash, "20261101-000000", "a", "b.txt"), b"x" * 10)
-        put(os.path.join(trash, "20261101-000000", "c.txt"), b"y" * 5)
-        put(os.path.join(trash, "odd", "d.txt"), b"z" * 7)            # (not a run id: counted all the same)
+        put(os.path.join(trash, "r1", "a", "b.txt"), b"x" * 10)        # r1, a, b.txt
+        put(os.path.join(trash, "r1", "c.txt"), b"y" * 5)              # c.txt
+        os.makedirs(os.path.join(trash, "r2", "e1", "e2"))              # empty folders count: r2, e1, e2
         outside = os.path.join(d, "big")
         put(outside, b"q" * 100000)
-        os.symlink(outside, os.path.join(trash, "odd", "link"))       # a link: counted as itself, never followed
-        os.symlink(d, os.path.join(trash, "odd", "dirlink"))
-        size_links = sum(os.lstat(os.path.join(trash, "odd", n)).st_size for n in ("link", "dirlink"))
-        assert H.usage(s) == (22 + size_links, 5), H.usage(s)
-        assert H.usage(s, stop_files=2)[1] == 2                       # counting stops past the bound
+        os.symlink(outside, os.path.join(trash, "r2", "link"))         # a link: counted as itself, never followed
+        link_size = os.lstat(os.path.join(trash, "r2", "link")).st_size
+        assert H.usage(s) == (15 + link_size, 8), H.usage(s)
+        with Lowered(TOTAL_ENTRIES=8):
+            assert H.usage(s)[1] == 8                                  # at the bound: counted
+        with Lowered(TOTAL_ENTRIES=7):                                 # one over, counting empty folders: refused
+            try:
+                H.usage(s)
+                raise AssertionError("counted past the bound")
+            except H.Uncountable as e:
+                assert e.bound and e.detail == "more than 7 entries", e.detail
+            a = H.admit(s, [])                                         # (admission: past a bound, not an error)
+            assert a.reason == "total-entries" and a.detail == "more than 7 entries", a
     finally:
         shutil.rmtree(d)
 
 
-def test_admission_all_or_nothing():
+def test_depth_is_the_scans_64_below_the_run():
+    # HOLD_LEVELS is handle levels: trash/, the run folder, then the mirror's folders (64 in the product)
+    assert H.HOLD_LEVELS == 2 + 64
     d, s = state()
     try:
-        put(os.path.join(s, "trash", "20261101-000000", "held.txt"), b"h" * 40)       # 40 bytes, 1 file held
-        with Lowered(RUN_BYTES=50, RUN_FILES=3, TOTAL_BYTES=100, TOTAL_FILES=4):
-            ok = H.admit(s, [20, 20, 10])                              # the run at its bounds, the total under
-            assert ok.ok and (ok.bytes, ok.files, ok.held_bytes, ok.held_files) == (50, 3, 40, 1), ok
-            assert H.admit(s, [20, 20, 11]).reason == "run-bytes"      # one byte over the run's bound
-            assert H.admit(s, [1, 1, 1, 1]).reason == "run-files"      # one file over
-        with Lowered(RUN_BYTES=100, RUN_FILES=10, TOTAL_BYTES=100, TOTAL_FILES=4):
-            assert H.admit(s, [60]).ok                                 # the total at its bound (40 + 60)
-            assert H.admit(s, [61]).reason == "total-bytes"            # one byte over
-            assert H.admit(s, [1, 1, 1]).ok                            # 1 + 3 files
-            assert H.admit(s, [1, 1, 1, 1]).reason == "total-files"    # one file over
-        assert H.admit(s, []).ok                                       # a run moving nothing aside
+        with Lowered(HOLD_LEVELS=2 + 3):                               # the mirror's bound lowered to 3 folders
+            put(os.path.join(s, "trash", "run", "f1", "f2", "f3", "x.txt"), b"x")
+            assert H.usage(s)[1] == 5                                  # run, f1-f3, x.txt: 3 folders deep, counted
+            os.mkdir(os.path.join(s, "trash", "run", "f1", "f2", "f3", "f4"))
+            before = open_fds()
+            try:
+                H.usage(s)                                             # 4: refused
+                raise AssertionError("counted past the depth bound")
+            except H.Uncountable as e:
+                assert e.bound and e.detail == "more than 3 levels of folders", e.detail
+            assert open_fds() == before                                # every level's handle closed, refused or not
     finally:
         shutil.rmtree(d)
 
 
-def test_one_run_at_a_time_moves_files_aside():
+def test_walk_holds_handles_by_depth_not_width():
     d, s = state()
     try:
-        first = H.reserve(s, [10])
+        trash = os.path.join(s, "trash")
+        for i in range(60):                                            # a wide tree, two levels deep
+            put(os.path.join(trash, "run", "w%02d" % i, "f.txt"), b"f")
+        before, peak = open_fds(), [0]
+        real_open = os.open
+
+        def counting_open(*a, **k):
+            fd = real_open(*a, **k)
+            peak[0] = max(peak[0], open_fds())
+            return fd
+        os.open = counting_open
+        try:
+            assert H.usage(s)[1] == 1 + 60 * 2
+        finally:
+            os.open = real_open
+        # trash/'s own handle, plus a handle and its listing per level (3 levels): never one per sibling
+        assert peak[0] - before <= 1 + 2 * 3 + 2, (before, peak[0])
+        assert open_fds() == before                                    # and all closed after
+    finally:
+        shutil.rmtree(d)
+
+
+def test_uncountable_fails_closed():
+    d, s = state()
+    try:
+        trash = os.path.join(s, "trash")
+        put(os.path.join(trash, "run", "ok.txt"), b"x")
+        if os.geteuid() != 0:                                          # an unreadable folder
+            os.makedirs(os.path.join(trash, "run", "locked"))
+            os.chmod(os.path.join(trash, "run", "locked"), 0)
+            try:
+                a = H.admit(s, [("a.txt", 1)])
+                assert a.reason == "holding-unreadable" and a.detail, a
+                old = os.path.join(trash, H.run_id_at(NOW - 40 * DAY))
+                put(os.path.join(old, "f.txt"), b"f")
+                assert H.cleanup(s, NOW) == [] and os.path.isdir(old)  # nothing removed from a partly counted tree
+                shutil.rmtree(old)
+            finally:
+                os.chmod(os.path.join(trash, "run", "locked"), 0o700)
+        real_scandir, calls = os.scandir, [0]                           # an error part way (a seam), any user
+
+        def failing(fd):
+            calls[0] += 1
+            if calls[0] == 2:
+                raise OSError(5, "Input/output error")
+            return real_scandir(fd)
+        os.makedirs(os.path.join(trash, "run", "sub"), exist_ok=True)
+        before = open_fds()
+        os.scandir = failing
+        try:
+            a = H.admit(s, [("a.txt", 1)])
+        finally:
+            os.scandir = real_scandir
+        assert a.reason == "holding-unreadable" and a.detail == "[Errno 5] Input/output error", a
+        assert open_fds() == before
+        assert H.not_applied(a, "~/thesis", "~/t") == ("Not applied: deleting or replacing files in ~/thesis. fs-sync "
+                                                       "couldn't measure its holding folder (~/t): [Errno 5] "
+                                                       "Input/output error.")
+        saved = os.getuid                                               # an entry not ours (an owner seam)
+        real_trash = H._trash
+        H._trash = lambda st: os.open(trash, os.O_RDONLY | os.O_DIRECTORY)
+        os.getuid = lambda: saved() + 1
+        try:
+            assert H.admit(s, [("a.txt", 1)]).reason == "holding-unreadable"
+        finally:
+            os.getuid, H._trash = saved, real_trash
+    finally:
+        shutil.rmtree(d)
+
+
+def test_admission_counts_files_and_new_folders():
+    assert H.run_entries(["a.txt", "n/b.txt", "n/c.txt", "n/m/d.txt"]) == 4 + 2     # files, and folders n, n/m
+    d, s = state()
+    try:
+        put(os.path.join(s, "trash", "held", "h.txt"), b"h" * 40)      # 40 bytes, 2 entries held
+        with Lowered(RUN_BYTES=50, RUN_ENTRIES=4, TOTAL_BYTES=100, TOTAL_ENTRIES=10):
+            ok = H.admit(s, [("a/x.txt", 20), ("a/y.txt", 20), ("z.txt", 10)])        # 3 files + folder a = 4
+            assert ok.ok and (ok.bytes, ok.entries, ok.held_bytes, ok.held_entries) == (50, 4, 40, 2), ok
+            assert H.admit(s, [("a/x.txt", 20), ("a/y.txt", 20), ("z.txt", 11)]).reason == "run-bytes"
+            # one more folder makes one entry too many, with no more files (astra)
+            assert H.admit(s, [("a/x.txt", 1), ("b/y.txt", 1), ("z.txt", 1)]).reason == "run-entries"
+        with Lowered(RUN_BYTES=100, RUN_ENTRIES=100, TOTAL_BYTES=100, TOTAL_ENTRIES=10):
+            assert H.admit(s, [("x", 60)]).ok                           # the total at its bound (40 + 60)
+            assert H.admit(s, [("x", 61)]).reason == "total-bytes"      # one byte over
+            assert H.admit(s, [("f/a", 1), ("f/b", 1), ("f/c", 1), ("f/d", 1), ("f/e", 1), ("f/g", 1),
+                               ("f/h", 1)]).ok                          # 2 held + 7 files + folder f = 10
+            assert H.admit(s, [("f/a", 1), ("f/b", 1), ("f/c", 1), ("f/d", 1), ("f/e", 1), ("f/g", 1),
+                               ("f/h", 1), ("f/i", 1)]).reason == "total-entries"
+        assert H.admit(s, []).ok
+    finally:
+        shutil.rmtree(d)
+
+
+def test_the_words():
+    # (board, design §2.4) word for word, with the product's numbers
+    local, trash = "~/thesis", "~/.local/state/sagebrush/fs-sync/trash"
+    assert H.not_applied(H.Admission(False, "busy"), local, trash) == (
+        "Not applied: deleting or replacing files in ~/thesis, while another fs-sync moves files into the holding "
+        "folder. Run it again when that one finishes.")
+    assert H.not_applied(H.Admission(False, "total-entries", detail="more than 200,000 entries"), local, trash) == (
+        "Not applied: deleting or replacing files in ~/thesis. fs-sync's holding folder "
+        "(~/.local/state/sagebrush/fs-sync/trash) has more than 200,000 entries or 64 levels of folders, too many to "
+        "measure. Each sync's folder there is removed 30 days after that sync.")
+    assert H.not_applied(H.Admission(False, "holding-unreadable", detail="Permission denied"), local, trash) == (
+        "Not applied: deleting or replacing files in ~/thesis. fs-sync couldn't measure its holding folder "
+        "(~/.local/state/sagebrush/fs-sync/trash): Permission denied.")
+    # an admission over the bounds once counted, and the run's own bounds, are worded by the apply step
+    for reason in ("total-entries", "total-bytes", "run-entries", "run-bytes"):
+        assert H.not_applied(H.Admission(False, reason), local, trash) is None
+    assert H.not_applied(H.Admission(True), local, trash) is None
+
+
+def test_one_run_at_a_time():
+    d, s = state()
+    try:
+        first = H.reserve(s, [("a", 10)])
         assert first.admission.ok and first.fd is not None
-        second = H.reserve(s, [10])                                    # another pair's run, meanwhile: pending
+        second = H.reserve(s, [("a", 10)])                              # another pair's run, meanwhile: pending
         assert not second.admission.ok and second.admission.reason == "busy" and second.fd is None
+        old = os.path.join(s, "trash", H.run_id_at(NOW - 40 * DAY))
+        put(os.path.join(old, "f.txt"), b"f")
+        assert H.cleanup(s, NOW) == [] and os.path.isdir(old)          # and its cleanup is skipped, not raced
         first.release()
-        third = H.reserve(s, [10])
+        third = H.reserve(s, [("a", 10)])
         assert third.admission.ok
         third.release()
         with Lowered(RUN_BYTES=5):                                     # not admitted: the lock isn't kept
-            refused = H.reserve(s, [10])
+            refused = H.reserve(s, [("a", 10)])
             assert refused.admission.reason == "run-bytes" and refused.fd is None
-        after = H.reserve(s, [1])
+        after = H.reserve(s, [("a", 1)])
         assert after.admission.ok
         after.release()
         after.release()                                                # (twice: harmless)
-        # admission failing outright (a seam): the lock is released, and the next run gets it
-        saved = H.usage
-        H.usage = lambda st, **k: (_ for _ in ()).throw(OSError(5, "Input/output error"))
+        saved = H.usage                                                # admission failing outright: released
+        H.usage = lambda st: (_ for _ in ()).throw(RuntimeError("boom"))
         try:
-            H.reserve(s, [1])
+            H.reserve(s, [("a", 1)])
             raise AssertionError("no failure")
-        except OSError:
+        except RuntimeError:
             pass
         finally:
             H.usage = saved
-        again = H.reserve(s, [1])
+        again = H.reserve(s, [("a", 1)])
         assert again.admission.ok
         again.release()
     finally:
@@ -165,34 +296,60 @@ def test_cleanup():
         old1 = H.run_id_at(NOW - 31 * DAY) + "-2"
         young = H.run_id_at(NOW - 29 * DAY)
         edge = H.run_id_at(NOW - 30 * DAY)                             # exactly 30 days: kept
-        for rid in (old2, old1, young, edge, "odd"):
+        past = H.run_id_at(NOW - 30 * DAY - 1)                         # one second more: removed
+        for rid in (old2, old1, young, edge, past, "odd"):
             put(os.path.join(trash, rid, "f.txt"), b"f")
         outside = os.path.join(d, "outside")
         put(os.path.join(outside, "keep.txt"), b"keep")
         os.symlink(outside, os.path.join(trash, old2, "link"))         # a link inside an old run: removed, not followed
         os.symlink(outside, os.path.join(trash, H.run_id_at(NOW - 50 * DAY)))   # a run "folder" that is a link
-        removed = H.cleanup(s, NOW)
-        assert removed == [old2, old1], removed                        # oldest first
+        order = []
+        real_rmtree = shutil.rmtree
+
+        def recording(name, dir_fd=None):
+            order.append(name)
+            return real_rmtree(name, dir_fd=dir_fd)
+        recording.avoids_symlink_attacks = True
+        H.shutil = type("S", (), {"rmtree": staticmethod(recording)})
+        try:
+            removed = H.cleanup(s, NOW)
+        finally:
+            H.shutil = shutil
+        assert removed == order == [old2, old1, past], (removed, order)  # oldest first, whole folders
         assert sorted(os.listdir(trash)) == sorted([young, edge, "odd", H.run_id_at(NOW - 50 * DAY)])
         assert os.listdir(outside) == ["keep.txt"]
-        # one not ours (an owner seam): left
-        put(os.path.join(trash, old2, "f.txt"), b"f")
-        saved, saved_trash = os.getuid, H._trash
-        H._trash = lambda st: os.open(trash, os.O_RDONLY | os.O_DIRECTORY)    # (past trash/'s own check)
-        os.getuid = lambda: saved() + 1
+        assert H.usage(s)[1] == 7                                      # "odd" kept, and counted (with the link)
+        # (board S2) a removal stopped part way: the run folder keeps its name (rmtree removes it last), the lock is
+        # released, and the next cleanup removes the rest
+        stopped = H.run_id_at(NOW - 45 * DAY)
+        put(os.path.join(trash, stopped, "a.txt"), b"a")
+        put(os.path.join(trash, stopped, "b.txt"), b"b")
+
+        def stopping(name, dir_fd=None):
+            os.unlink(os.path.join(trash, name, "a.txt"))
+            raise KeyboardInterrupt
+        stopping.avoids_symlink_attacks = True
+        H.shutil = type("S", (), {"rmtree": staticmethod(stopping)})
         try:
-            assert H.cleanup(s, NOW) == []
+            H.cleanup(s, NOW)
+            raise AssertionError("not stopped")
+        except KeyboardInterrupt:
+            pass
         finally:
-            os.getuid, H._trash = saved, saved_trash
-        assert os.path.isdir(os.path.join(trash, old2))
+            H.shutil = shutil
+        assert os.listdir(os.path.join(trash, stopped)) == ["b.txt"]
+        assert H.cleanup(s, NOW) == [stopped] and not os.path.exists(os.path.join(trash, stopped))
+        # over the entry bound: the count can't complete, so nothing is removed at all
+        put(os.path.join(trash, old2, "f.txt"), b"f")
+        with Lowered(TOTAL_ENTRIES=3):
+            assert H.cleanup(s, NOW) == [] and os.path.isdir(os.path.join(trash, old2))
         # where removal could follow a link, nothing is removed
-        real = shutil.rmtree.avoids_symlink_attacks
+        H.shutil = type("S", (), {"rmtree": type("R", (), {"avoids_symlink_attacks": False})()})
         try:
-            H.shutil = type("S", (), {"rmtree": type("R", (), {"avoids_symlink_attacks": False})()})()
             assert H.cleanup(s, NOW) == []
         finally:
             H.shutil = shutil
-        assert real and os.path.isdir(os.path.join(trash, old2))
+        assert os.path.isdir(os.path.join(trash, old2))
     finally:
         shutil.rmtree(d)
 
