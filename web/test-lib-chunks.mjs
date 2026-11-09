@@ -102,5 +102,28 @@ ok(Object.entries(rl.manifest.modes).every(([m, gs]) => m === "rill" || !gs.some
 ok(rl.manifest.chunks.rill?.pre && ["rill-more", "rill-ggplot2", "rill-dplyr", "rill-data"].every((g) => rl.manifest.chunks[g]?.src && !rl.manifest.chunks[g].pre), "rill has its compiled code; the families no start uses, sources only");
 const { itemOfGroup } = await import("./offline-inventory.mts");
 ok(["rill", "rill-more", "rill-ggplot2", "rill-dplyr", "rill-data"].every((g) => itemOfGroup(g) === "rill"), "the offline inventory's Rill item owns every Rill group");
+// (Sprig's routing, design/sprig-mvp.md §6.1 and §6.4: Sprig's start is checked last, so a file another start uses
+// (Rill's included) stays in theirs; the start's own files are sprig; _sprig/plot.py is sprig-plot and any other
+// _sprig/** file sprig-more, never mod-sprig; no other mode's start fetches a Sprig group; and the offline inventory's
+// Sprig item owns every sprig-* group)
+const sp = libChunks({ "core.py": "", "shared.py": "", "sage_all.py": "", "_sage_shared.py": "", "_rill/__init__.py": "", "_rill/both.py": "",
+  "_sprig/__init__.py": "", "_sprig/eval.py": "", "_sprig/plot.py": "", "_sprig/math.py": "", "_sprig/sub/lists.py": "" }, {
+  py: rec({ "py|core": mod("core.py"), "py|shared": mod("shared.py") }),
+  sage: rec({ "py|core": mod("core.py"), "py|sage_all": mod("sage_all.py"), "py|_sage_shared": mod("_sage_shared.py") }),
+  rill: rec({ "py|core": mod("core.py"), "py|_rill": mod("_rill/__init__.py"), "py|_rill.both": mod("_rill/both.py") }),
+  sprig: rec({ "py|core": mod("core.py"), "py|shared": mod("shared.py"), "py|_sage_shared": mod("_sage_shared.py"), "py|_rill.both": mod("_rill/both.py"),
+    "py|_sprig": mod("_sprig/__init__.py"), "py|_sprig.eval": mod("_sprig/eval.py") }),
+}, "b");
+const fs2 = sp.manifest.files;
+ok(fs2["_sprig/__init__.py"] === "sprig" && fs2["_sprig/eval.py"] === "sprig", "Sprig's start's own files: sprig");
+ok(fs2["shared.py"] === "core" && fs2["_sage_shared.py"] === "sage" && fs2["_rill/both.py"] === "rill", "a file another start uses stays in core, sage or rill, never sprig: " + JSON.stringify([fs2["shared.py"], fs2["_sage_shared.py"], fs2["_rill/both.py"]]));
+ok(fs2["_sprig/plot.py"] === "sprig-plot", "_sprig/plot.py: sprig-plot");
+ok(fs2["_sprig/math.py"] === "sprig-more" && fs2["_sprig/sub/lists.py"] === "sprig-more", "any other _sprig/** file: sprig-more");
+ok(!Object.values(fs2).includes("mod-sprig"), "no file is mod-sprig");
+ok(JSON.stringify(sp.manifest.modes.sprig) === JSON.stringify(["core", "sage", "rill", "sprig"]), "Sprig's start fetches its start group and the groups it shares, in START_ORDER: " + JSON.stringify(sp.manifest.modes.sprig));
+ok(Object.entries(sp.manifest.modes).every(([m, gs]) => m === "sprig" || !gs.some((g) => g.startsWith("sprig"))), "no other mode's start includes a Sprig group: " + JSON.stringify(sp.manifest.modes));
+ok(!sp.manifest.modes.sprig.includes("sprig-plot") && !sp.manifest.modes.sprig.includes("sprig-more"), "Sprig's start fetches neither sprig-plot nor sprig-more");
+ok(sp.manifest.chunks.sprig?.pre && ["sprig-more", "sprig-plot"].every((g) => sp.manifest.chunks[g]?.src && !sp.manifest.chunks[g].pre), "sprig has its compiled code; the groups no start uses, sources only");
+ok(["sprig", "sprig-more", "sprig-plot"].every((g) => itemOfGroup(g) === "sprig"), "the offline inventory's Sprig item owns every Sprig group");
 console.log(`${checks - fails}/${checks} checks passed`);
 process.exit(fails ? 1 : 0);

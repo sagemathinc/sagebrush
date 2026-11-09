@@ -2621,6 +2621,25 @@ async function durabilityAuthority() {
     check(owned.median < 20, `a save confirmed with the workspace's meta: ${JSON.stringify(owned)} ms, without: ${JSON.stringify(unowned)} ms (100 saves each)`);
     a.close(); plain.close(); await dropDb("authority-plain");
   }
+  // a save reaches this tab's other stores of the notebook (a paired agent's write, to the notebook the page shows):
+  // never the store that saved; one subscriber that throws is said and changes nothing; the next gets the record once
+  // (#919, daybreak3's E1)
+  {
+    const o = await named(), a = await openAs(o), e = await a.create("/same-tab.ipynb");
+    const S = await import("./stores.js"), origin = new S.IdbStore(a.main, e.ref), thrower = new S.IdbStore(a.main, e.ref), later = new S.IdbStore(a.main, e.ref);
+    const seen = { origin: 0, thrower: 0, later: [] }, warn = console.warn, warned = [];
+    const offs = [origin.subscribe(() => seen.origin++), thrower.subscribe(() => { seen.thrower++; throw new Error("a subscriber's own fault"); }), later.subscribe((d) => seen.later.push(d))];
+    console.warn = (...w) => warned.push(w.map(String).join(" "));
+    let save;
+    try { const doc = await origin.load(); save = await origin.save({ ...doc, baseRev: doc.rev, name: "SAME TAB" }); } finally { console.warn = warn; }
+    const stored = await later.loadRecord();
+    check(!!save?.saved && typeof save.rev === "number", "a throwing same-tab subscriber doesn't change the save's result: " + JSON.stringify(save));
+    check(seen.origin === 0, "the store that saved isn't told its own save");
+    check(seen.thrower === 1 && warned.some((w) => /a subscriber's own fault/.test(w)), "the throwing subscriber was called once, and it is said: " + JSON.stringify(warned));
+    check(seen.later.length === 1 && seen.later[0]?.name === "SAME TAB" && seen.later[0]?.rev === save.rev && seen.later[0]?.rev === stored?.rev, "the later subscriber gets the saved record, once: " + JSON.stringify(seen.later.map((d) => ({ name: d?.name, rev: d?.rev }))));
+    for (const f of offs) f();
+    a.close();
+  }
 }
 
 // astra's probes on 51106cb6, verbatim (historyOrder, purgeMarks; metaFenceRace adapted below)

@@ -2,7 +2,7 @@
 // the two resizable columns (the chat list and the artifact pane; William A1 + A10, the layout plan r3 PR 2).
 // Widths are two CSS variables on body, --sb-side-w and --sb-pane-w, which index.html reads only above 900 px and
 // outside full screen, so the narrow overlay and full screen keep their own layout. Nothing here sets a width.
-import type { Artifact } from "./events";
+import type { Artifact } from "../workspace/agent-chat/events";
 
 /** The pane-state classes on body: an artifact shown, and full screen. (A notebook no longer widens its pane: A10.) */
 export function applyPaneClasses(a: Artifact | undefined, fullscreen: boolean) {

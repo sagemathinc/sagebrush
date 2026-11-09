@@ -199,3 +199,73 @@ test("pypi-tests/run.py --fetch: the pinned files from the pinned archive, a mem
   assert.match(link.out, /demo-1\.0\.0\/tests\/test_demo\.py: not one regular file of at most 16777216 bytes in the archive/);
   pinArchive({ url: "https://example.invalid/demo.tar.gz", sha256: "0".repeat(64) });
 });
+
+// A package whose suite another per-PR runner gates (SOURCE.json's "gate", README.md "One exception": mpmath's
+// is bench/mpmath): the default run checks its pinned files and skips its suite, and a tampered pinned file, a
+// wrong pinned sha or a malformed gate still fails the run (grader's G3 and G1 on #927); named, its suite runs.
+function setGate(gate: unknown) {
+  const p = join(tests, "demo", "SOURCE.json"), src = JSON.parse(readFileSync(p, "utf8"));
+  if (gate === undefined) delete src.gate;
+  else src.gate = gate;
+  writeFileSync(p, JSON.stringify(src));
+}
+test("pypi-tests/run.py: a gated package's pinned files are still checked, and a malformed gate fails (#927)", () => {
+  writeFileSync(expected, cleanExpected);
+  known("module 'gc' has no attribute 'get_objects'");
+  const gate = { runner: "bench/demo/compare.py", reason: "a stand-in for a suite another per-PR runner already runs" };
+  setGate(gate);
+  try {
+    // (intact: passes without running the suite; a Sagebrush that would fail the suite isn't run)
+    const ok = runner([], { FAKE_SB_EXIT: "23" });
+    assert.equal(ok.status, 0, ok.out);
+    assert.match(ok.out, /demo 1\.0\.0: pinned files checked; its suite runs per PR in bench\/demo\/compare\.py/);
+    // (G3: one byte of a pinned file changed)
+    const f = join(up, "test_demo.py"), keep = readFileSync(f, "utf8");
+    writeFileSync(f, keep.replace("2 + 3 == 5", "2 + 3 == 6"));
+    const tampered = runner([]);
+    writeFileSync(f, keep);
+    assert.equal(tampered.status, 1, tampered.out);
+    assert.match(tampered.out, /demo 1\.0\.0: FAIL/);
+    assert.match(tampered.out, /upstream\/test_demo\.py is not the pinned file/);
+    // (G3: the pin itself wrong)
+    const p = join(tests, "demo", "SOURCE.json"), src = JSON.parse(readFileSync(p, "utf8")), pinned = src.files["test_demo.py"];
+    src.files["test_demo.py"] = "0".repeat(64);
+    writeFileSync(p, JSON.stringify(src));
+    const wrongPin = runner([]);
+    src.files["test_demo.py"] = pinned;
+    writeFileSync(p, JSON.stringify(src));
+    assert.equal(wrongPin.status, 1, wrongPin.out);
+    assert.match(wrongPin.out, /demo 1\.0\.0: FAIL/);
+    // (G1: every malformed shape fails, with its message)
+    for (const bad of [{ runner: "", reason: gate.reason }, { runner: gate.runner }, { ...gate, extra: "x" }, "bench/demo/compare.py", { runner: 1, reason: gate.reason }]) {
+      setGate(bad);
+      const r = runner([]);
+      assert.equal(r.status, 1, JSON.stringify(bad) + r.out);
+      assert.match(r.out, /SOURCE\.json "gate" must be \{"runner": \.\.\., "reason": \.\.\.\}/, JSON.stringify(bad));
+    }
+    // (named, the suite runs: a failing Sagebrush fails it)
+    setGate(gate);
+    assert.equal(runner(["demo"]).status, 0);
+    assert.equal(runner(["demo"], { FAKE_SB_EXIT: "23" }).status, 1);
+  } finally {
+    setGate(undefined);
+  }
+  assert.equal(runner(["demo"]).status, 0);
+});
+
+// A known difference whose message is empty: the harness's record has no trailing space ("FAIL AttributeError",
+// not "FAIL AttributeError: "), and run.py compares it the same way, so it passes as known (grader's H1 on #927).
+test("pypi-tests/run.py: a known difference with an empty message passes as exactly its record (#927)", () => {
+  writeFileSync(expected, cleanExpected);
+  known("");
+  try {
+    const ok = runner(["demo"], { FAKE_MESSAGE: "" });
+    assert.equal(ok.status, 0, ok.out);
+    assert.match(ok.out, /test_demo\.test_known fails here as known \(AttributeError\)/);
+    const other = runner(["demo"], { FAKE_MESSAGE: "not empty" });
+    assert.equal(other.status, 1, other.out);
+    assert.match(other.out, /but here: test_demo\.test_known: FAIL AttributeError: not empty/);
+  } finally {
+    known("module 'gc' has no attribute 'get_objects'");
+  }
+});

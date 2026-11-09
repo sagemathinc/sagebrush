@@ -9,8 +9,9 @@
 //   - importing pathlib decodes it exactly once, and pathlib, glob, fnmatch, stat, ntpath, errno and os's lazy part
 //     (os.walk, os.scandir) together still once;
 //   - its files are exactly LAZY_LIB's, and none of them is in the eager blob;
-//   - each keyed family (LAZY_FAMILIES: Rill's, design/rill.md §6.3) is its own blob: no other mode's start decodes it,
-//     the Rill start decodes only Rill's (and not pathlib's), and its files are exactly the family's, in no other blob.
+//   - each keyed family (LAZY_FAMILIES: Rill's and Sprig's, design/rill.md and design/sprig-mvp.md §6.3) is its own
+//     blob: no other mode's start decodes it, the Rill start decodes only Rill's and the Sprig start only Sprig's (and
+//     neither pathlib's), and its files are exactly the family's, in no other blob.
 //   node web/test-cli-lazy-lib.mjs [bundle]      (default build/cli/pyjs.cjs)
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -32,7 +33,7 @@ writeFileSync(preload, `
 const zlib = require("zlib");
 const fs = require("fs");
 const orig = zlib.gunzipSync;
-const seen = { lazy: 0, lazyNames: null, eagerNames: null, rill: 0, rillNames: null };
+const seen = { lazy: 0, lazyNames: null, eagerNames: null, rill: 0, rillNames: null, sprig: 0, sprigNames: null };
 zlib.gunzipSync = function (...a) {
   const out = orig.apply(this, a);
   try {
@@ -40,6 +41,7 @@ zlib.gunzipSync = function (...a) {
     if (t.startsWith("{") && t.includes('"pathlib/__init__.py":') && !t.includes('"sage_all.py":')) { seen.lazy++; seen.lazyNames = Object.keys(JSON.parse(t)); }
     else if (t.startsWith("{") && t.includes('"sage_all.py":')) seen.eagerNames = Object.keys(JSON.parse(t));
     else if (t.startsWith("{") && t.includes('"_rill/__init__.py":')) { seen.rill++; seen.rillNames = Object.keys(JSON.parse(t)); }
+    else if (t.startsWith("{") && t.includes('"_sprig/__init__.py":')) { seen.sprig++; seen.sprigNames = Object.keys(JSON.parse(t)); }
   } catch {}
   return out;
 };
@@ -69,14 +71,21 @@ try {
     check(want === null || r.stdout.trim().split("\n").pop() === want, `${what}: runs (${JSON.stringify(r.stdout.trim().slice(-40))})`);
     check(r.seen.lazy === 0, `${what}: the lazy library decoded 0 times at startup (${r.seen.lazy})`);
     check(r.seen.rill === 0, `${what}: Rill's family decoded 0 times (${r.seen.rill})`);
+    check(r.seen.sprig === 0, `${what}: Sprig's family decoded 0 times (${r.seen.sprig})`);
   }
   // (the Rill start, hidden until A1.7: decodes its own family once, and not pathlib's)
   const rill = run(["--rill", "-c", "1"]);
   check(rill.stdout === "[1] 1\n", `--rill: runs (${JSON.stringify(rill.stdout)})`);
-  check(rill.seen.rill === 1 && rill.seen.lazy === 0, `--rill: Rill's family decoded once, pathlib's 0 times (${rill.seen.rill}, ${rill.seen.lazy})`);
+  check(rill.seen.rill === 1 && rill.seen.lazy === 0 && rill.seen.sprig === 0, `--rill: Rill's family decoded once, pathlib's and Sprig's 0 times (${rill.seen.rill}, ${rill.seen.lazy}, ${rill.seen.sprig})`);
   const rillNames = rill.seen.rillNames ?? [];
   check(rillNames.length > 0 && rillNames.every((n) => familyOf(n) === "rill"), `Rill's blob holds only its family's files (${rillNames.length}: ${rillNames.join(", ")})`);
-  check(Object.keys(LAZY_FAMILIES).length === 1, `the keyed families are the ones with files: ${Object.keys(LAZY_FAMILIES).join(", ")}`);
+  // (the Sprig start, hidden until S1.4: decodes its own family once, and not pathlib's or Rill's)
+  const sprig = run(["--sprig", "-c", "1"]);
+  check(sprig.stdout === "1\n", `--sprig: runs (${JSON.stringify(sprig.stdout)})`);
+  check(sprig.seen.sprig === 1 && sprig.seen.lazy === 0 && sprig.seen.rill === 0, `--sprig: Sprig's family decoded once, pathlib's and Rill's 0 times (${sprig.seen.sprig}, ${sprig.seen.lazy}, ${sprig.seen.rill})`);
+  const sprigNames = sprig.seen.sprigNames ?? [];
+  check(sprigNames.length > 0 && sprigNames.every((n) => familyOf(n) === "sprig"), `Sprig's blob holds only its family's files (${sprigNames.length}: ${sprigNames.join(", ")})`);
+  check(JSON.stringify(Object.keys(LAZY_FAMILIES)) === JSON.stringify(["rill", "sprig"]), `the keyed families are the ones with files: ${Object.keys(LAZY_FAMILIES).join(", ")}`);
   const one = run(["-c", "import pathlib; print(pathlib.Path('x').suffix == '')"]);
   check(one.stdout.trim() === "True" && one.seen.lazy === 1, `import pathlib: works, the lazy library decoded exactly once (${one.seen.lazy})`);
   const all = run(["-c", "import pathlib, glob, fnmatch, stat, ntpath, errno, genericpath, os; list(os.scandir('.')); list(os.walk('.')); import pathlib._os; print('all')"]);
