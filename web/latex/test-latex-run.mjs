@@ -167,6 +167,15 @@ const sage = (code) => new Promise((res) => {
   check("interact: drawn as disabled controls at their defaults, the output, and the note", /<input type="range" disabled min="1" max="5" step="1" value="2"><span class="si-v">2<\/span>/.test(html) && /<input type="checkbox" disabled checked>/.test(html) && /<pre class="si-out">k\^2 = 4\n<\/pre>/.test(html) && /<img class="sageplot" alt="a plot" src="data:image\/svg\+xml;base64,/.test(html) && /<div class="si-note">Interactive in Sagebrush<\/div>/.test(html), html.slice(0, 400));
   const evil = interactsHtml([{ id: 1, controls: [{ kind: "input", name: '"><script>', value: '"><img src=x onerror=alert(1)>' }, { kind: "selector", options: ["<b>"], value: 0 }], out: "<script>", shows: [{ src: "javascript:alert(1)" }] }]);
   check("interact: names, values, options and output escaped; a src that isn't a base64 SVG is never an image", !/<script>|<img src=x|<b>|javascript:/.test(evil), evil);
+  // (agents-ui's #926 A1/A2: a "text" control (text_control, fixed) is a line of text, as the notebook draws it, and
+  //  nothing when empty; a "color" one a color control, only for a #rrggbb value, else the text box)
+  const kinds = (controls) => interactsHtml([{ id: 1, controls, out: "", shows: [] }]);
+  const tx = kinds([{ kind: "text", name: "", label: "", value: "Choose <n>" }]), fx = kinds([{ kind: "text", name: "n", label: "n", value: "" }]);
+  check("interact: a text control is a line of its text (escaped), no label, no box; an empty one (fixed) nothing",
+    tx.includes('<div class="si-t">Choose &lt;n&gt;</div>') && !/<input|si-l/.test(tx) && !/<input|si-l|si-t/.test(fx), { tx, fx });
+  const col = kinds([{ kind: "color", name: "c", label: "c", value: "#1f77b4" }]), colBad = kinds([{ kind: "color", name: "c", label: "c", value: 'red" onclick="x' }]);
+  check("interact: a color control drawn as one (#rrggbb only); any other value the text box, escaped",
+    col.includes('<input type="color" disabled value="#1f77b4">') && !colBad.includes('type="color"') && colBad.includes('<input type="text" disabled value="red&quot; onclick=&quot;x">'), { col, colBad });
   check("interact: a stale one is marked as stale values are", /^<div class="sageinteract sagestale" title="Changed since the last Run/.test(interactsHtml(st[0].interacts, true)), null);
   // (the worker's renderer: a placeholder holding them as escaped JSON, said interactive, for the page's chunk to draw)
   const at = blockHtml(stateOf(savedStates([real(...spec[0])], st.slice(0, 1)), 0, real(...spec[0])), real(...spec[0]), esc, 1);

@@ -307,6 +307,11 @@
    "kind": "host",
    "owner": "host"
   },
+  "web/latex/interact.ts :: draw :: at.innerHTML = interactsHtml(list, at.dataset.stale === \"1\"); #0": {
+   "kind": "rich",
+   "owner": "phase-3",
+   "readers": []
+  },
   "web/notebook/notebook.js :: addCell :: el.innerHTML = `<div class=\"gutter\" draggable=\"true\" title=\"Drag to move the cell\"><span class=\"n\">[ ]</span><button class=\"runb\" data-a=\"run\" draggable=\"false\">▶</button></div>` #0": {
    "kind": "host",
    "owner": "host"
