@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { slowSkip } from "./slow-tests";
 
 // The finite-field budgets as limits (plan-ff-limits r3, section 8): each
 // key moves its boundary exactly, in both front ends where both have the
@@ -60,7 +61,9 @@ test("ff.work, raised: a relative MinimalPolynomial of 14745056 cops is admitted
   boundary("magma", "ff.work", 14745056, 'L := GF(2^20); k := GF(4); x := L.1^3 + L.1; print "ADMITTED", Degree(MinimalPolynomial(x, k));\n', "ADMITTED 10", "within a bounded amount of work", true);
 });
 
-test("ff.work at its ceiling: MinimalPolynomial in GF(2^79) (79373117 cops) is admitted in a 96 MiB heap; refused one short; admitted by default (unlimited, plan-c0) (Sage)", () => {
+// (slow: 120 s on a green master run, 42597347825 node-tests (7); four GF(2^79) sessions.  ff.work's boundary
+// itself runs on every pull request, lowered and raised, above; this one's time is scripts/bench-ff-limits.mjs's)
+test("ff.work at its ceiling: MinimalPolynomial in GF(2^79) (79373117 cops) is admitted in a 96 MiB heap; refused one short; admitted by default (unlimited, plan-c0) (Sage)", { skip: slowSkip }, () => {
   const src = 'R.<x> = GF(2)[]\nK = GF(2^79, "a", modulus=x^79 + x^9 + 1)\nprint("ADMITTED", (K.gen()^3 + K.gen()).minpoly().degree())\n';
   const yes = run("sage", src, { "ff.work": 1e8 }, ["--max-old-space-size=96"]);
   assert.ok(yes.out.includes("ADMITTED 79"), yes.out);
@@ -76,7 +79,10 @@ test("ff.work at its ceiling: the polynomial-degree bound still refuses first", 
   }
 });
 
-test("ff.embed_max: a lowered size bound refuses common fields past it, before and at the exact comparison (Magma and Sage)", () => {
+// (the whole of this, with the GF(2^18) pair below, took 207 s on a green master run, 42597347825 node-tests (7):
+// the pair's two cold GF(2^18) sessions are the costliest part, so they are a slow test; the size bound's bit
+// pre-check (EMBED_BITS) runs on every pull request in the splitting-field test below)
+test("ff.embed_max: a lowered size bound refuses a common field past it before the exact comparison, GF(2^18) at 2^12 (Magma)", { skip: slowSkip }, () => {
   // (GF(2^18) made first, at top level: its cold Conway search is then not
   // the embedding's work, so the size bound is the one exercised)
   const em = "L18 := GF(2^18); K := GF(2^6); L := GF(2^9); x := K.1 + L.1; print Parent(x);\n";
@@ -84,6 +90,9 @@ test("ff.embed_max: a lowered size bound refuses common fields past it, before a
   assert.ok(yes.out.includes("Finite field of size 2^18"), yes.out);
   const no = run("magma", em, { "ff.embed_max": 4096 });
   assert.ok(no.out.includes("only in fields of at most 2^12 elements"), no.out);
+});
+
+test("ff.embed_max: a lowered size bound refuses common fields past it at the exact comparison (Magma and Sage)", () => {
   boundary("magma", "ff.embed_max", 6561, 'K := GF(3^8); k := GF(3^2); x := K.1 + k.1; print "ADMITTED", Parent(x);\n', "ADMITTED Finite field of size 3^8", "at most 6560 elements", true);
   boundary("sage", "ff.embed_max", 6561, 'K = GF(3^8); k = GF(3^2)\nprint("ADMITTED", K(k.gen()).minpoly())\n', "ADMITTED x^2 + 2*x + 2", "at most 6560 elements", true);
 });

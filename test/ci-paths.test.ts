@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { prSample, SLOW, sampleSkip, slowSkip } from "./slow-tests";
 
 // scripts/ci-paths.mjs, replayed on file lists (CI_PATHS_FILES): which suites
 // a pull request's changes select.
@@ -302,6 +303,7 @@ test("the full tier on a pull request: the full-ci label, or a sync, sharing, se
     "web/sync/doc.ts", "web/sync-protocol/doc-protocol.ts", "web/journal/store.js", "web/workspace/sync-outbox.ts",
     "web/workspace/doc-sync.ts", "web/notebook/sync-rows.js", "web/notebook/db-merge3.ts", "web/board/syncdb.ts",
     "web/share/files.ts", "web/share-client/upload.ts", "web/csp.ts", "web/csp-policy.mts", "web/safe-html.ts",
+    "web/cloud/share/server.ts", "web/cloud/share/migrations/0009_remotes.sql", "web/cloud/remote/relay.ts",
     "web/workspace/export/run.ts", "web/workspace/db.ts", "web/workspace/api.ts", "web/workspace/migrate.ts", "web/board/export.ts",
     "web/latex/save.ts", "scripts/check-export-size.mjs",
     // (the LaTeX group's inputs: its ceiling is checked only in the full tier's web-artifacts)
@@ -461,7 +463,12 @@ test("the full-tier-only jobs ci-paths promotes for are the jobs ci.yml gates on
 });
 
 test("web_share: the share dialog's shard runs on a pull request that changes sharing or has the full-ci label, and always on master, the schedule and a dispatch", () => {
-  for (const f of ["web/share/files.ts", "web/share/test-share-dialog.mjs", "web/share-client/upload.ts"]) assert.equal(classify([f]).web_share, "true", f);
+  for (const f of ["web/share/files.ts", "web/share/test-share-dialog.mjs", "web/share-client/upload.ts", "web/cloud/share/server.ts", "web/cloud/share/test-share-dialog.mjs"]) assert.equal(classify([f]).web_share, "true", f);
+  // (the hosted remotes: the full tier, but no share dialog)
+  assert.equal(classify(["web/cloud/remote/relay.ts"]).full, "true");
+  assert.equal(classify(["web/cloud/remote/relay.ts"]).web_share, "false");
+  // (the licence files alone: neither)
+  assert.equal(classify(["web/cloud/README.md"]).web_share, "false");
   // (the full tier for another reason: no share dialog on the pull request)
   for (const f of ["web/sync/doc.ts", "web/build.ts", "web/workspace/agent-ui.ts"]) {
     assert.equal(classify([f]).full, "true", f);
@@ -484,9 +491,12 @@ test("slow_tests: the slow node tests (test/slow-tests.ts) run for the full-ci l
     "lib/_sage_padic_lseries.py", "test/kedlaya_cases.py", "test/kedlaya.test.ts", "src/local-gateway.ts", "test/local-gateway.test.ts",
     "wasm/sagebrush-engine.wasm", "engine/web/src/nmod_ops.rs", "engine/arith/src/nmod_mat.rs", "engine/bigint/src/nmod.rs", "test/nmod-fp-wasm.test.ts",
     "lib/zoneinfo/_zoneinfo.py", "lib/_zoneinfo.py", "lib/_tzrules.py", "lib/tzdata/__init__.py", "tzdata/zoneinfo/Europe/London",
-    "test/zoneinfo_sweep_cases.py", "test/stdlib-zoneinfo.test.ts", "test/slow-tests.ts"])
+    "test/zoneinfo_sweep_cases.py", "test/stdlib-zoneinfo.test.ts", "test/slow-tests.ts",
+    "lib/_magma_docsearch.py", "test/magma-examples.json", "test/magma-examples.test.ts", "catalog/magma/integers.json", "test/magma-catalog.test.ts",
+    "test/ff-limits.test.ts", "test/limits.test.ts"])
     assert.equal(classify([f]).slow_tests, "true", f);
-  for (const f of ["src/runtime/numpy.ts", "lib/_matlab.py", "web/index.html", "README.md", "test/kernels.test.ts", "engine/web/src/lib.rs"])
+  for (const f of ["src/runtime/numpy.ts", "lib/_matlab.py", "web/index.html", "README.md", "test/kernels.test.ts", "engine/web/src/lib.rs",
+    "src/magma.ts", "lib/_magma.py", "catalog/python/bisect.json", "test/magma-compare.test.ts"])
     assert.equal(classify([f]).slow_tests, "false", f);
   assert.equal(classify(["lib/_matlab.py"], "full-ci").slow_tests, "true");
   assert.equal(classify(["lib/_matlab.py"], "", { GITHUB_EVENT_NAME: "schedule" }).slow_tests, "true");
@@ -504,4 +514,46 @@ test("Rill's recorded outputs select the node suite, which checks their provenan
 test("Sprig's recorded outputs and checker controls select the node suite, which checks them (design/sprig-mvp.md §7.5)", () => {
   assert.deepEqual(suites(classify(["sprig-tests/calc/test_1.out.json", "sprig-tests/PROVENANCE.json", "sprig-tests/checker-controls.json"])), { node: "true", web: "true", modes: "true", engine_smoke: "false", docs_only: "false" });
 });
+});
+
+// test/slow-tests.ts, whose skips and sample decide what a pull request runs of the slow suites (#924)
+test("prSample: n distinct items spread over the list in its order, the first included; the whole list when it has n or fewer", () => {
+  const xs = Array.from({ length: 10 }, (_, i) => i);
+  assert.deepEqual(prSample(xs, 3), [0, 3, 6]);
+  assert.deepEqual(prSample(xs, 4), [0, 2, 5, 7]);
+  assert.deepEqual(prSample(xs, 10), xs);
+  assert.deepEqual(prSample(xs, 12), xs);
+  assert.deepEqual(prSample([], 3), []);
+  // (as the Magma examples use it: 158 sorted names, a sample of 12)
+  const names = Array.from({ length: 158 }, (_, i) => `ex${String(i).padStart(3, "0")}`);
+  const s = prSample(names, 12);
+  assert.equal(s.length, 12);
+  assert.equal(new Set(s).size, 12);
+  assert.deepEqual(s, [...s].sort());
+  assert.equal(s[0], names[0]);
+  assert.deepEqual(s.map((x) => names.indexOf(x)), [0, 13, 26, 39, 52, 65, 79, 92, 105, 118, 131, 144]);
+  assert.deepEqual(prSample(names, 12), s, "the same sample on every call");
+});
+
+test("slowSkip and sampleSkip: in every mode exactly one of a slow set and its sample runs", () => {
+  // (this process's mode)
+  assert.equal(slowSkip === false, SLOW);
+  assert.equal(sampleSkip === false, !SLOW);
+  // (each mode, in a fresh process: the module reads the environment once)
+  const mod = join(__dirname, "slow-tests.js");
+  const modes: [Record<string, string>, boolean][] = [
+    [{}, false],
+    [{ GITHUB_EVENT_NAME: "pull_request" }, false],
+    [{ SAGEBRUSH_SLOW_TESTS: "0" }, false],
+    [{ SAGEBRUSH_SLOW_TESTS: "1" }, true],
+    [{ GITHUB_EVENT_NAME: "schedule" }, true],
+    [{ GITHUB_EVENT_NAME: "workflow_dispatch" }, true],
+  ];
+  for (const [extra, slow] of modes) {
+    const env: Record<string, string | undefined> = { ...process.env, SAGEBRUSH_SLOW_TESTS: undefined, GITHUB_EVENT_NAME: undefined, ...extra };
+    for (const k of Object.keys(env)) if (env[k] === undefined) delete env[k];
+    const r = spawnSync(process.execPath, ["-e", `const s = require(${JSON.stringify(mod)}); console.log(JSON.stringify([s.SLOW, s.slowSkip === false, s.sampleSkip === false, typeof s.slowSkip, typeof s.sampleSkip]))`], { env, encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(JSON.parse(r.stdout), [slow, slow, !slow, slow ? "boolean" : "string", slow ? "string" : "boolean"], JSON.stringify(extra));
+  }
 });

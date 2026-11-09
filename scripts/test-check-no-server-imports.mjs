@@ -146,6 +146,8 @@ expectCloud("the checker importing via the web root", "scripts/check-no-server-i
 expectCloud("the checker importing a similar web-root name", "scripts/check-no-server-imports.mjs", `import "/cloudflare/x.ts";`, false);
 expectCloud("the test importing web/cloud/", "scripts/test-check-no-server-imports.mjs", `await import("../web/cloud/sync/floors.ts");`, true);
 expectCloud("any other script naming web/cloud/", "scripts/check-other.mjs", `const CLOUD = "web/c${""}loud/";`, true);
+expectCloud("CI's path classifier's test naming web/cloud/ paths as data", "test/ci-paths.test.ts", `classify(["web/c${""}loud/share/server.ts"]);`, false);
+expectCloud("CI's path classifier's test importing web/cloud/", "test/ci-paths.test.ts", `import "../web/cloud/share/server.ts";`, true);
 // (the word as data: only the listed exact texts, only in their file)
 expectCloud("the SERVER mode name, listed", "web/workspace/test-doc-sync.mjs", `const CLOUD = process.env.SERVER === "cloud";`, false);
 expectCloud("a path in the same file", "web/workspace/test-doc-sync.mjs", `const CLOUD = process.env.SERVER === "cloud"; await import("../c" + "loud/sync/x.mjs");`, true);

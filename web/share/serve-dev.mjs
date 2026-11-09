@@ -6,7 +6,7 @@
 //   node web/share/serve-dev.mjs [sitePort=8790] [filesPort=8791]
 import { createServer } from "node:http";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, extname, join, normalize } from "node:path";
+import { basename, dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
@@ -34,10 +34,53 @@ function headerRules() {
   return out;
 }
 
+// Which share server to run: this directory's test-entry.ts and migrations/, or another variant's, named by
+// SHARE_DEV_ENTRY (its test entry) and SHARE_DEV_MIGRATIONS (a JSON array of its .sql paths, in the order they are
+// applied), both or neither.  A variable that is set but names no readable file, or a malformed list, fails here,
+// before anything starts: it never falls back to this directory's.  SHARE_DEV_EXPECT says which variant the run
+// expects, "core" (the default) or "hosted"; startDev checks it on the instance it starts (checkVariant).
+export function devVariant(env = process.env) {
+  const expect = env.SHARE_DEV_EXPECT ?? "core";
+  if (expect !== "core" && expect !== "hosted") throw new Error(`SHARE_DEV_EXPECT is "core" or "hosted", not ${JSON.stringify(expect)}`);
+  const { SHARE_DEV_ENTRY: entry, SHARE_DEV_MIGRATIONS: list } = env;
+  if (entry === undefined && list === undefined) {
+    const migrations = readdirSync(join(here, "migrations")).filter((f) => f.endsWith(".sql")).sort().map((m) => join(here, "migrations", m));
+    return { entry: join(here, "test-entry.ts"), migrations, expect };
+  }
+  if (!entry || !list) throw new Error("SHARE_DEV_ENTRY and SHARE_DEV_MIGRATIONS are set together, or not at all");
+  const file = (f, what) => {
+    if (!existsSync(f) || !statSync(f).isFile()) throw new Error(`${what}: no such file: ${f}`);
+    return f;
+  };
+  let migrations;
+  try {
+    migrations = JSON.parse(list);
+  } catch {
+    throw new Error("SHARE_DEV_MIGRATIONS isn't a JSON array of paths");
+  }
+  if (!Array.isArray(migrations) || !migrations.length || !migrations.every((m) => typeof m === "string" && m.endsWith(".sql"))) throw new Error("SHARE_DEV_MIGRATIONS isn't a non-empty JSON array of .sql paths");
+  return { entry: file(entry, "SHARE_DEV_ENTRY"), migrations: migrations.map((m) => file(m, "SHARE_DEV_MIGRATIONS")), expect };
+}
+
+// The variant the server is, checked on the instance itself, so a run can't pass against the other one: the hosted
+// variant answers sharePreview's JSON at its test route /__preview/<id> (null for an unknown id) and has migration
+// 0009's remotes table; core's has neither.  Both have 0005's upload_receipts.  The request goes to the Worker
+// directly, not through the servers, so it isn't in the run's request log.  One line says what was checked.
+export async function checkVariant(mf, db, { expect, migrations }) {
+  const r = await dispatch(mf, "http://127.0.0.1/__preview/zzzzzzzzzzzz");
+  const preview = r.status === 200 && (await r.text()).trim() === "null";
+  const tables = new Set((await db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all()).results.map((t) => t.name));
+  const remotes = tables.has("remotes");
+  if (!tables.has("upload_receipts")) throw new Error("share dev server: migration 0005 wasn't applied");
+  if (expect === "hosted" ? !(preview && remotes) : preview || remotes) throw new Error(`share dev server: expected the ${expect} variant, found sharePreview ${preview ? "answering" : "absent"} and the remotes table ${remotes ? "present" : "absent"}`);
+  console.log(`share dev server: the ${expect} variant; migrations applied: ${migrations.map((m) => basename(m)).join(",")}`);
+}
+
 export async function startDev({ sitePort = 8790, filesPort = 8791, limits } = {}) {
+  const variant = devVariant();
   const site = `http://127.0.0.1:${sitePort}`;
   const files = `http://127.0.0.1:${filesPort}`;
-  const script = execFileSync("bun", ["build", join(here, "test-entry.ts"), "--format", "esm", "--target", "browser"], { encoding: "utf8" });
+  const script = execFileSync("bun", ["build", variant.entry, "--format", "esm", "--target", "browser"], { encoding: "utf8" });
   const mf = new Miniflare(convertV4MiniflareOptions({
     workers: [{
       name: "share",
@@ -50,8 +93,9 @@ export async function startDev({ sitePort = 8790, filesPort = 8791, limits } = {
     }],
   }));
   const db = await mf.getD1Database("SHARE_DB");
-  for (const m of readdirSync(join(here, "migrations")).filter((f) => f.endsWith(".sql")).sort())
-    for (const s of readFileSync(join(here, "migrations", m), "utf8").replace(/--.*$/gm, "").split(";").map((s) => s.trim()).filter(Boolean)) await db.prepare(s).run();
+  for (const m of variant.migrations)
+    for (const s of readFileSync(m, "utf8").replace(/--.*$/gm, "").split(";").map((s) => s.trim()).filter(Boolean)) await db.prepare(s).run();
+  await checkVariant(mf, db, variant);
   if (limits) for (const [id, l] of Object.entries(limits)) await db.prepare("INSERT INTO limits_cache (account_id, limits, fetched) VALUES (?1, ?2, ?3)").bind(id, JSON.stringify(l), 4e9).run();
   const rules = headerRules();
   const log = { files: [], site: [] }; // (each request to the files domain, and to the site: G-10's share cases)
