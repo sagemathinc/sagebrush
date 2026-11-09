@@ -20,6 +20,9 @@ try {
   const dst = join(dir, "wasm", "sagebrush-engine.wasm"), src = join(dir, "fresh.wasm");
   writeFileSync(dst, "\0asm\x01\0\0\0COMMITTED");
   chmodSync(dst, 0o644);
+  const raster = join(dir, "wasm", "sagebrush-raster.wasm");
+  writeFileSync(raster, "\0asm\x01\0\0\0RASTER");
+  chmodSync(raster, 0o644);
   git("add", "wasm");
   git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "base");
   // a fresh build with the same bytes, installed as build-engine.mjs does
@@ -43,6 +46,14 @@ try {
   git("checkout", "-q", "--", "wasm");
   chmodSync(dst, 0o755);
   if (process.platform !== "win32") ok(checkFreshWasm({ cwd: dir, event: "push" }).status === 1, "a mode-only change (0755): an ERROR on push");
+  // the PNG module is held to its source too (build-engine.mjs rebuilds it): a stale one is an ERROR, named
+  git("checkout", "-q", "--", "wasm");
+  chmodSync(dst, 0o644);
+  writeFileSync(src, "\0asm\x01\0\0\0RASTER-FRESH");
+  installWasm(src, raster);
+  const r = checkFreshWasm({ cwd: dir, event: "push" });
+  ok(r.status === 1 && r.message.includes("sagebrush-raster.wasm"), "a stale PNG module (sagebrush-raster.wasm): an ERROR on push, named");
+  installWasm(src, dst); // (stale again, for the script's exit status below)
   // the script as CI runs it: the exit status follows the event
   const cli = (event) => {
     try {
