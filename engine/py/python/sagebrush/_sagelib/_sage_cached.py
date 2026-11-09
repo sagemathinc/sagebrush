@@ -9,26 +9,55 @@ kept per instance; a method with no arguments keeps just its value."""
 _NODEFAULT = object()
 
 
+def _probe(a, *b, c):
+    pass
+
+
+# (where the *args name sits among the code's variable names: after the
+# keyword-only ones in CPython, before them in some runtimes)
+_VARARGS_FIRST = _probe.__code__.co_varnames[1] == "b"
+
+
 class _Signature:
-    """How a function's arguments become a cache key (from its code object:
-    the positional parameters, their defaults, and whether it takes *args)."""
+    """How a function's arguments become a cache key, as Sage 10.10 keys
+    them (observed as a black box):
+
+    - with no keyword arguments: the positional arguments, then the defaults
+      of the missing trailing positional parameters (keyword-only ones are
+      left out): f(2) is ((2, 1), ()) for def f(n, k=1);
+    - with keyword arguments: every named parameter in order (positional,
+      then keyword-only) takes the next positional argument, else its
+      keyword argument, else it is a KeyError (defaults are not used); the
+      positional arguments beyond them follow, and the keyword arguments
+      left over are the second part, sorted: f(2, k=1) is ((2, 1), ())."""
 
     def __init__(self, f, skip_self=False):
         code = getattr(f, "__code__", None)
-        self.names, self.defaults, self.varargs = [], [], False
+        self.pos, self.defaults, self.names = [], [], []
         if code is None:
-            self.varargs = True
             return
         n = code.co_argcount
-        names = list(code.co_varnames[:n])
+        nk = getattr(code, "co_kwonlyargcount", 0) or 0
+        pos = list(code.co_varnames[:n])
+        at = n + (1 if (code.co_flags & 4) and _VARARGS_FIRST else 0)
+        kwonly = list(code.co_varnames[at:at + nk])
         defs = tuple(getattr(f, "__defaults__", None) or ())
         defaults = [_NODEFAULT] * (n - len(defs)) + list(defs)
-        if skip_self and names:
-            names, defaults = names[1:], defaults[1:]
-        self.names, self.defaults = names, defaults
+        if skip_self and pos:
+            pos, defaults = pos[1:], defaults[1:]
+        self.pos, self.defaults, self.names = pos, defaults, pos + kwonly
         self.varargs = bool(code.co_flags & 4)
 
+    varargs = True
+
     def key(self, args, kwds):
+        if not kwds:
+            vals = list(args)
+            for i in range(len(args), len(self.pos)):
+                if self.defaults[i] is _NODEFAULT:
+                    break
+                vals.append(self.defaults[i])
+            return (tuple(vals), ())
         kw = dict(kwds)
         vals = []
         for i, name in enumerate(self.names):
@@ -36,19 +65,16 @@ class _Signature:
                 vals.append(args[i])
             elif name in kw:
                 vals.append(kw.pop(name))
-            elif self.defaults[i] is not _NODEFAULT:
-                vals.append(self.defaults[i])
             else:
-                # (as Sage: the first missing parameter, by name)
+                # (as Sage: the first parameter given neither way, by name)
                 raise KeyError(name)
-        if len(args) > len(self.names):
-            vals.extend(args[len(self.names):])
+        vals.extend(args[len(self.names):])
         return (tuple(vals), tuple(sorted(kw.items())))
 
 
 def _check_arity(f, sig, args, skip):
     # too many positional arguments: Python's own TypeError, from the function
-    if not sig.varargs and len(args) > len(sig.names):
+    if not sig.varargs and len(args) > len(sig.pos):
         f(*((None,) * skip + tuple(args)))
 
 
@@ -141,18 +167,16 @@ def cached_function(f=None, key=None, **options):
     return CachedFunction(f, key=key)
 
 
-_INSTANCE_CACHES = {}
-
-
 class CachedMethodCaller(CachedFunction):
     """A cached method bound to an instance (or to its class): the results
     are kept per instance."""
 
-    def __init__(self, method, inst):
+    def __init__(self, method, inst, owner=None):
         self._method = method
         self._inst = inst
+        self._owner = owner
         self.f = method.f
-        self._key = None
+        self._key = method._key
         self._sig = method._sig
         self.__name__ = method.__name__
         self.__qualname__ = method.__qualname__
@@ -164,12 +188,21 @@ class CachedMethodCaller(CachedFunction):
     def cache(self):
         return self._method._store(self._inst)
 
+    def get_key(self, *args, **kwds):
+        """The key of the cache entry for these arguments (a key function
+        receives the instance first, as Sage)."""
+        if self._key is not None:
+            return self._key(self._inst, *args, **kwds)
+        return self._sig.key(args, kwds)
+
     def __call__(self, *args, **kwds):
-        _check_arity(self.f, self._sig, args, 1)
         if self._inst is None:
-            raise TypeError("%s() needs an instance" % self.__name__)
+            # (through the class, as Sage: the plain function, so A.g(3)
+            # is Python's own missing-argument error)
+            return self.f(*args, **kwds)
+        _check_arity(self.f, self._sig, args, 1)
         c = self.cache
-        k = self._sig.key(args, kwds)
+        k = self.get_key(*args, **kwds)
         hash(k)
         try:
             return c[k]
@@ -193,7 +226,8 @@ class CachedMethodCallerNoArgs(CachedMethodCaller):
 
     def __call__(self):
         if self._inst is None:
-            raise TypeError("%s() needs an instance" % self.__name__)
+            # (through the class, as Sage: the class is the instance, A.f())
+            return self.f(self._owner)
         c = self._method._store(self._inst)
         try:
             return c[((), ())]
@@ -216,37 +250,36 @@ class CachedMethodCallerNoArgs(CachedMethodCaller):
 class CachedMethod:
     """A method whose results are kept per instance (Sage's cached_method)."""
 
-    def __init__(self, f):
+    def __init__(self, f, key=None):
         self.f = f
+        self._key = key
         self._sig = _Signature(f, skip_self=True)
         self.__name__ = getattr(f, "__name__", "m")
         self.__qualname__ = getattr(f, "__qualname__", self.__name__)
         self.__module__ = getattr(f, "__module__", None)
         self.__doc__ = getattr(f, "__doc__", None)
-        self._noargs = not self._sig.names and not self._sig.varargs
+        self._noargs = not self._sig.names and not self._sig.varargs and key is None
 
     def _store(self, inst):
-        # the instance's dictionary when it has one; else kept by identity,
-        # with the instance (a class with __slots__)
+        # the instance's own dictionary, so the results live exactly as long
+        # as the instance (astra's C1 on #912: no table outside it); an
+        # instance with no __dict__ keeps nothing, as Sage: each call computes
         name = "_cache__" + self.__name__
         d = getattr(inst, "__dict__", None)
-        if d is not None:
-            c = d.get(name)
-            if c is None:
-                c = d[name] = {}
-            return c
-        e = _INSTANCE_CACHES.get((id(inst), name))
-        if e is None or e[0] is not inst:
-            e = _INSTANCE_CACHES[(id(inst), name)] = (inst, {})
-        return e[1]
+        if d is None:
+            return {}
+        c = d.get(name)
+        if c is None:
+            c = d[name] = {}
+        return c
 
     def __get__(self, inst, cls=None):
         if self._noargs:
-            return CachedMethodCallerNoArgs(self, inst)
-        return CachedMethodCaller(self, inst)
+            return CachedMethodCallerNoArgs(self, inst, cls)
+        return CachedMethodCaller(self, inst, cls)
 
 
-def cached_method(f=None, **options):
+def cached_method(f=None, key=None, **options):
     """Sage's decorator: a method's results are kept per instance, by its
     arguments.
 
@@ -261,5 +294,5 @@ def cached_method(f=None, **options):
         (10, True, 'CachedMethodCallerNoArgs')
     """
     if f is None:
-        return lambda g: CachedMethod(g)
-    return CachedMethod(f)
+        return lambda g: CachedMethod(g, key=key)
+    return CachedMethod(f, key=key)
