@@ -1479,6 +1479,213 @@ def conflicted():
     return p
 
 
+def test_journal_of_for_restore_by_run_id_alone():
+    # (sync-client #895 N1) --restore <run id> names no folder: the journal gives the pair, without making anything
+    p = Pair({"a": b"a"})
+    try:
+        p.sync()
+        del p.ws.files["a"]
+        p.sync()
+        assert A.journal_of(p.state, RID) == (p.local, "/Thesis")
+        local, workspace = A.journal_of(p.state, RID)
+        fd = S.open_root(p.root)
+        try:
+            assert A.restore_run(p.state, RID, fd, local, workspace) == []
+        finally:
+            os.close(fd)
+        assert p.read("a") == b"a"
+        try:
+            A.journal_of(p.state, RID + "-2")
+            raise AssertionError("a journal for a run that doesn't exist")
+        except A.NotRestorable as e:
+            assert e.why == "no-run"
+        assert not os.path.exists(p.held(RID + "-2"))               # (looked up, never made)
+        os.chmod(p.held(RID, "journal.json"), 0o600)
+        for data in (b"{not json", b'["a list"]', b'{"local_dir": 3, "workspace_path": "/Thesis"}',
+                     b'{"workspace_path": "/Thesis"}'):
+            with open(p.held(RID, "journal.json"), "wb") as f:
+                f.write(data)
+            for call in (lambda: A.journal_of(p.state, RID), lambda: restore(p)):
+                try:
+                    call()
+                    raise AssertionError("accepted journal %r" % data)
+                except A.NotRestorable as e:
+                    assert e.why == "no-journal", (data, e.why)
+        os.unlink(p.held(RID, "journal.json"))
+        planted = os.path.join(p.d, "planted.json")                 # (a valid journal elsewhere, behind a link)
+        with open(planted, "w") as f:
+            json.dump({"run": RID, "local_dir": "/elsewhere", "workspace_path": "/Other"}, f)
+        os.symlink(planted, p.held(RID, "journal.json"))           # (a link is never followed)
+        try:
+            A.journal_of(p.state, RID)
+            raise AssertionError("followed a link")
+        except A.NotRestorable as e:
+            assert e.why == "no-journal"
+    finally:
+        p.close()
+
+
+def journaled():
+    p = Pair({"a": b"a"})
+    p.sync()
+    del p.ws.files["a"]
+    p.sync()
+    os.chmod(p.held(RID, "journal.json"), 0o600)
+    return p
+
+
+def put_journal(p, data):
+    with open(p.held(RID, "journal.json"), "wb") as f:
+        f.write(data)
+
+
+def refused(call, why):
+    try:
+        call()
+        raise AssertionError("not refused")
+    except A.NotRestorable as e:
+        assert e.why == why, e.why
+
+
+def test_journal_never_makes_the_run_folder():
+    # (daybreak3 E1) the run folder is looked up once and read through that handle, never reopened through the
+    # constructor that makes it: removed between the lookup and the journal's read, it is not made again
+    p = journaled()
+    try:
+        real_holding, real_part = M.Holding, M.Part
+
+        def never(*args, **kw):
+            raise AssertionError("a creating constructor was used")
+        M.Holding = M.Part = never
+        try:
+            assert A.journal_of(p.state, RID) == (p.local, "/Thesis")
+            assert restore(p) == []
+        finally:
+            M.Holding, M.Part = real_holding, real_part
+        assert p.read("a") == b"a"
+        os.unlink(p.path("a"))
+        os.makedirs(p.held(RID, "deleted"), exist_ok=True)
+        real_open = os.open
+
+        def open_after_removal(path, *args, dir_fd=None, **kw):
+            if path == A.JOURNAL:
+                shutil.rmtree(p.held(RID))                         # (removed right after the lookup)
+            return real_open(path, *args, dir_fd=dir_fd, **kw)
+        os.open = open_after_removal
+        try:
+            refused(lambda: A.journal_of(p.state, RID), "no-journal")
+        finally:
+            os.open = real_open
+        assert not os.path.exists(p.held(RID))
+    finally:
+        p.close()
+
+
+def test_restore_run_replaced_only_makes_no_deleted():
+    # (grader E1c, E1e) a run that only replaced files: nothing to put back, and deleted/ is looked up, never made
+    p = Pair({"refs.bib": b"old"})
+    try:
+        p.sync()
+        p.ws.put("refs.bib", b"new")
+        p.sync()
+        assert sorted(os.listdir(p.held(RID))) == ["journal.json", "replaced"]
+        before = sorted(os.listdir(p.local)), p.read("refs.bib")
+        assert restore(p) == []
+        assert not os.path.exists(p.held(RID, "deleted"))
+        assert (sorted(os.listdir(p.local)), p.read("refs.bib")) == before
+    finally:
+        p.close()
+
+
+def test_journal_state_dir_link_not_followed():
+    # (grader E1d) STATE_DIR itself a link to a real state folder with a valid run: never read through it
+    p = journaled()
+    try:
+        link = os.path.join(p.d, "state-link")
+        os.symlink(p.state, link)
+        for call in (lambda: A.journal_of(link, RID),
+                     lambda: A.restore_run(link, RID, -1, p.local, "/Thesis")):
+            try:
+                call()
+                raise AssertionError("read through a link")
+            except (OSError, A.NotRestorable):
+                pass
+        assert not os.path.exists(p.path("a"))                      # (nothing put back)
+    finally:
+        p.close()
+
+
+def test_journal_bounded_read():
+    # (daybreak3 E2, grader J6) at most JOURNAL_BYTES, refused past it before any parsing
+    p = journaled()
+    try:
+        body = json.dumps({"run": RID, "local_dir": p.local, "workspace_path": "/Thesis"}).encode()
+        put_journal(p, body + b" " * (A.JOURNAL_BYTES - len(body)))                 # (exactly at the bound)
+        assert A.journal_of(p.state, RID) == (p.local, "/Thesis")
+        put_journal(p, body + b" " * (A.JOURNAL_BYTES - len(body)) + b"garbage")    # (a valid prefix, then more)
+        refused(lambda: A.journal_of(p.state, RID), "no-journal")
+        refused(lambda: restore(p), "no-journal")
+        put_journal(p, body + b" " * (A.JOURNAL_BYTES - len(body) + 1))             # (valid JSON, one byte over)
+        refused(lambda: A.journal_of(p.state, RID), "no-journal")
+    finally:
+        p.close()
+
+
+def test_journal_run_id_grammar():
+    # (@sagebrush) holding's own run-id grammar, so the command can't pass a looser one
+    p = journaled()
+    try:
+        for bad in ("notarun", "../" + RID, RID + "-1", RID + "-10", RID + "/", "", None, 5, RID[:-1]):
+            refused(lambda: A.journal_of(p.state, bad), "no-run")
+        os.makedirs(p.held("notarun"), 0o700)                       # (a folder with a valid journal, wrongly named)
+        shutil.copy(p.held(RID, "journal.json"), p.held("notarun", "journal.json"))
+        refused(lambda: A.journal_of(p.state, "notarun"), "no-run")
+        os.makedirs(p.held(RID + "-2"), 0o700)                      # (a suffix the grammar allows: just not there)
+        refused(lambda: A.journal_of(p.state, RID + "-3"), "no-run")
+        real = os.getuid
+        os.getuid = lambda: real() + 1                              # (a run folder that isn't the person's)
+        try:
+            refused(lambda: A.journal_of(p.state, RID), "no-run")
+        finally:
+            os.getuid = real
+    finally:
+        p.close()
+
+
+def test_journal_not_a_plain_file():
+    # (grader J4, J13) a folder or a FIFO at journal.json: refused at once (no read, no hang)
+    p = journaled()
+    try:
+        os.unlink(p.held(RID, "journal.json"))
+        os.mkdir(p.held(RID, "journal.json"))
+        refused(lambda: A.journal_of(p.state, RID), "no-journal")
+        os.rmdir(p.held(RID, "journal.json"))
+        os.mkfifo(p.held(RID, "journal.json"))
+        refused(lambda: A.journal_of(p.state, RID), "no-journal")
+    finally:
+        p.close()
+
+
+def test_journal_types_and_descriptors():
+    # (grader J8, J11, J12) both fields must be strings; no descriptor is left open, refused or not
+    p = journaled()
+    try:
+        def fds():
+            return len(os.listdir("/proc/self/fd"))
+        before = fds()
+        assert A.journal_of(p.state, RID) == (p.local, "/Thesis")
+        assert fds() == before
+        put_journal(p, json.dumps({"local_dir": p.local, "workspace_path": 7}).encode())
+        refused(lambda: A.journal_of(p.state, RID), "no-journal")
+        assert fds() == before
+        put_journal(p, b"{not json")
+        refused(lambda: A.journal_of(p.state, RID), "no-journal")
+        refused(lambda: A.journal_of(p.state, RID + "-2"), "no-run")
+        assert fds() == before
+    finally:
+        p.close()
+
+
 def test_conflict_checks_before_the_rename():
     # (daybreak3 E1) an edit before the check: nothing is renamed, nothing changes
     p = conflicted()

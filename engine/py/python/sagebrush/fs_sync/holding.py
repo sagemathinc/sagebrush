@@ -141,7 +141,7 @@ def usage(state_dir):
             if entries > TOTAL_ENTRIES:
                 raise Uncountable("more than %s entries" % format(TOTAL_ENTRIES, ","), bound=True)
             if st.st_uid != os.getuid():
-                raise Uncountable("an entry that isn't yours: %s" % e.name)
+                raise Uncountable("an entry in it isn't yours (%s)" % _home_short(where))     # (board's words)
             if stat.S_ISDIR(st.st_mode):
                 if len(stack) >= HOLD_LEVELS:
                     raise Uncountable("more than %d levels of folders" % (HOLD_LEVELS - 3), bound=True)
