@@ -20,7 +20,6 @@ use crate::mpf::{
 use crate::nat::Nat;
 use crate::Fail;
 use std::cell::RefCell;
-use std::collections::HashMap;
 
 const EXP_COSH_CUTOFF: i64 = 600;
 const EXP_SERIES_U_CUTOFF: i64 = 1500;
@@ -32,16 +31,54 @@ const LOG_TAYLOR_SHIFT: i64 = 9;
 const LOG_AGM_MAG_PREC_RATIO: i64 = 20;
 
 thread_local! {
-    static COS_SIN_CACHE: RefCell<HashMap<i64, (Int, Int)>> = RefCell::new(HashMap::new());
-    static LOG_TAYLOR_CACHE: RefCell<HashMap<(i64, i64), (Int, Int)>> = RefCell::new(HashMap::new());
-    static LOG_INT_CACHE: RefCell<HashMap<i64, (Int, i64)>> = RefCell::new(HashMap::new());
+    static COS_SIN_CACHE: RefCell<Dense<(Int, Int)>> = const { RefCell::new(Dense(Vec::new())) };
+    static LOG_TAYLOR_CACHE: RefCell<Dense<(Int, Int)>> = const { RefCell::new(Dense(Vec::new())) };
+    static LOG_INT_CACHE: RefCell<Dense<(Int, i64)>> = const { RefCell::new(Dense(Vec::new())) };
+}
+
+/// A cache over small non-negative keys, by index (no hashing: the keys are
+/// dense).  cos_sin_cache and log_taylor_cache hold what their key alone
+/// determines, so a key past the table is computed, not cached, with the same
+/// result; log_int_cache's keys (n < MAX_LOG_INT_CACHE) all fit.
+struct Dense<V>(Vec<Option<V>>);
+
+/// The most entries a dense cache holds (past it, a key is not cached).
+const DENSE_MAX: usize = 1 << 15;
+
+impl<V: Clone> Dense<V> {
+    fn get(&self, k: i64) -> Option<V> {
+        usize::try_from(k).ok().and_then(|i| self.0.get(i)).and_then(|v| v.clone())
+    }
+    fn put(&mut self, k: i64, v: V) {
+        let Ok(i) = usize::try_from(k) else { return };
+        if i >= DENSE_MAX {
+            return;
+        }
+        if self.0.len() <= i {
+            if self.0.try_reserve(i + 1 - self.0.len()).is_err() {
+                return;
+            }
+            self.0.resize(i + 1, None);
+        }
+        self.0[i] = Some(v);
+    }
+}
+
+/// log_taylor_cache's key (n, cached_prec) as one index: cached_prec is one
+/// of cache_prec_steps' 12 values, n below 2^10 for x in (0.5, 2).
+fn taylor_key(n: i64, cached_prec: i64) -> i64 {
+    let step = [22, 24, 28, 36, 52, 84, 148, 276, 532, 1044, 2068, 2520].iter().position(|&p| p == cached_prec);
+    match step {
+        Some(s) if (0..1024).contains(&n) => s as i64 * 1024 + n,
+        _ => -1,
+    }
 }
 
 /// Forget every cache (a new session).
 pub fn reset() {
-    COS_SIN_CACHE.with(|c| c.borrow_mut().clear());
-    LOG_TAYLOR_CACHE.with(|c| c.borrow_mut().clear());
-    LOG_INT_CACHE.with(|c| c.borrow_mut().clear());
+    COS_SIN_CACHE.with(|c| c.borrow_mut().0.clear());
+    LOG_TAYLOR_CACHE.with(|c| c.borrow_mut().0.clear());
+    LOG_INT_CACHE.with(|c| c.borrow_mut().0.clear());
     crate::consts::reset();
 }
 
@@ -220,7 +257,7 @@ pub fn cos_sin_basecase(x: &Int, prec: i64) -> Result<(Int, Int), Fail> {
     let precs = prec - COS_SIN_CACHE_STEP;
     let t = x.shr(cnt(precs)?)?;
     let n = t.to_i64().ok_or(Fail::Limit { limbs: u64::MAX })?;
-    let cached = COS_SIN_CACHE.with(|c| c.borrow().get(&n).cloned());
+    let cached = COS_SIN_CACHE.with(|c| c.borrow().get(n));
     let (cos_t, sin_t) = match cached {
         Some(v) => v,
         None => {
@@ -230,7 +267,7 @@ pub fn cos_sin_basecase(x: &Int, prec: i64) -> Result<(Int, Int), Fail> {
                 Series::Exp(_) => unreachable!(),
             };
             let v = (c.shr(10)?, s.shr(10)?);
-            COS_SIN_CACHE.with(|cc| cc.borrow_mut().insert(n, v.clone()));
+            COS_SIN_CACHE.with(|cc| cc.borrow_mut().put(n, v.clone()));
             v
         }
     };
@@ -352,13 +389,14 @@ fn log_taylor_cached(x: &Int, prec: i64) -> Result<Int, Fail> {
     let n = x.shr(cnt(prec - LOG_TAYLOR_SHIFT)?)?.to_i64().ok_or(Fail::Limit { limbs: u64::MAX })?;
     let cached_prec = cache_prec_step(prec);
     let dprec = cnt(cached_prec - prec)?;
-    let cached = LOG_TAYLOR_CACHE.with(|c| c.borrow().get(&(n, cached_prec)).cloned());
+    let key = taylor_key(n, cached_prec);
+    let cached = LOG_TAYLOR_CACHE.with(|c| c.borrow().get(key));
     let (a, log_a) = match cached {
         Some(v) => v,
         None => {
             let a = i(n).shl(cnt(cached_prec - LOG_TAYLOR_SHIFT)?)?;
             let log_a = log_taylor(&a, cached_prec, 8)?;
-            LOG_TAYLOR_CACHE.with(|c| c.borrow_mut().insert((n, cached_prec), (a.clone(), log_a.clone())));
+            LOG_TAYLOR_CACHE.with(|c| c.borrow_mut().put(key, (a.clone(), log_a.clone())));
             (a, log_a)
         }
     };
@@ -507,7 +545,7 @@ pub fn mpf_log(x: &Mpf, prec: u64, rnd: Rnd) -> Result<Mpf, Fail> {
 pub fn log_int_fixed(n: &Int, prec: i64, ln2: Option<&Int>) -> Result<Int, Fail> {
     let key = n.to_i64();
     if let Some(k) = key {
-        let hit = LOG_INT_CACHE.with(|c| c.borrow().get(&k).cloned());
+        let hit = LOG_INT_CACHE.with(|c| c.borrow().get(k));
         if let Some((value, vprec)) = hit {
             if vprec >= prec {
                 return value.shr(cnt(vprec - prec)?);
@@ -529,7 +567,7 @@ pub fn log_int_fixed(n: &Int, prec: i64, ln2: Option<&Int>) -> Result<Int, Fail>
     };
     match key {
         Some(k) if k < MAX_LOG_INT_CACHE => {
-            LOG_INT_CACHE.with(|c| c.borrow_mut().insert(k, (v.clone(), wp)));
+            LOG_INT_CACHE.with(|c| c.borrow_mut().put(k, (v.clone(), wp)));
         }
         _ => {}
     }

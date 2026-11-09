@@ -8,6 +8,7 @@
 //! - `mpf`: the raw mpf tuples and their arithmetic (libmpf's normalize,
 //!   from_man_exp, mpf_add/sub/mul/div/sqrt).
 
+pub mod abi;
 pub mod exp;
 pub mod consts;
 pub mod elefun;
@@ -17,6 +18,8 @@ pub mod intmath;
 pub mod mpc;
 pub mod mpf;
 pub mod nat;
+#[cfg(target_arch = "wasm32")]
+mod wasm;
 
 /// How a call failed: the outcomes the host tells apart.
 #[derive(Debug, Clone, PartialEq, Eq)]

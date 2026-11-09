@@ -8,10 +8,10 @@ description = "Sagebrush's multiprecision core (design/mpmath-core.md): mpmath's
 [lib]
 crate-type = ["cdylib", "rlib"]
 
-# The WebAssembly heap: dlmalloc over our own system layer, which bounds the
-# pages the heap may grow by (src/wasm.rs, as engine/raster's)
+# The WebAssembly heap and its page bound: engine/wasmheap's, shared with
+# the PNG module (exported by src/wasm.rs)
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-dlmalloc = { version = "=0.2.14", default-features = false }
+sagebrush-wasmheap = { path = "../wasmheap" }
 
 [features]
 # a test-only counter of results that took the big exponent path (§6.1's
