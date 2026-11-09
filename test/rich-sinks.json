@@ -261,11 +261,11 @@
    "kind": "host",
    "owner": "host"
   },
-  "web/build.ts :: hash :: console.log(`output shell: ${outputShell.srcdoc.length} B packaged, ${Object.keys(SITES).length} hosted configs (shell URLs: ${Object.values(SITES).filter((s) => s.shell).length} set)`); #0": {
+  "web/build.ts :: build0 :: console.log(`output shell: ${outputShell.srcdoc.length} B packaged, ${Object.keys(SITES).length} hosted configs (shell URLs: ${Object.values(SITES).filter((s) => s.shell).length} set)`); #0": {
    "kind": "renderer",
    "owner": "renderer"
   },
-  "web/build.ts :: hash :: const r = await build0({ ...o, plugins: [...(o.plugins ?? []), examplesLegacyPlugin], define: { ...(o.define ?? {}), __SB_RUNNER_FETCH__: JSON.stringify(list), __SB_OUTPUT_SHELL__: JSON.stringify(outputShell.srcdoc) } }); #0": {
+  "web/build.ts :: build0 :: const r = await build0({ ...o, plugins: [...(o.plugins ?? []), examplesLegacyPlugin], define: { ...(o.define ?? {}), __SB_RUNNER_FETCH__: JSON.stringify(list), __SB_OUTPUT_SHELL__: JSON.stringify(outputShell.srcdoc) } }); #0": {
    "kind": "renderer",
    "owner": "renderer"
   },

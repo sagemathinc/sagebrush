@@ -10,7 +10,9 @@ Sagebrush is licensed under either of
 at your option. Unless you explicitly state otherwise, any contribution
 intentionally submitted for inclusion in Sagebrush, as defined in the
 Apache-2.0 license, is dual licensed as above, without any additional terms
-or conditions.
+or conditions. This doesn't apply to `web/cloud/`: changes to it are accepted only from SageMath, Inc.
+
+Most of Sagebrush is MIT OR Apache-2.0. `web/cloud/` is under the Microsoft Reference Source License (MS-RSL): see web/cloud/LICENSE.md.
 
 Some parts are derived from other permissively licensed projects. Their
 notices follow and must be kept with the parts named. Nothing in Sagebrush

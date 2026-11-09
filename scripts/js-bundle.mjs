@@ -8,12 +8,14 @@
 // for the browser, minified but for its identifiers.
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { assertNoCloudInputs } from "./check-no-server-imports.mjs";
 
 const [dir, out] = process.argv.slice(2);
 const m = JSON.parse(readFileSync(join(dir, "sagebrush.json"), "utf8"));
 const aliases = m.js.aliases ?? {};
 const unresolved = [];
 const result = await Bun.build({
+  metafile: true,
   entrypoints: [resolve(dir, m.js.source)],
   target: "browser",
   format: "esm",
@@ -42,4 +44,6 @@ if (!result.success || result.outputs.length !== 1) {
   console.error(result.logs.map(String).join("\n") || `expected one output, got ${result.outputs.length}`);
   process.exit(1);
 }
+// (a package's module takes no input from web/cloud/, which is MS-RSL: scripts/check-no-server-imports.mjs)
+assertNoCloudInputs(Object.keys(result.metafile?.inputs ?? {}), out);
 await Bun.write(out, await result.outputs[0].text());
