@@ -10,31 +10,19 @@
 export const FILES_W = { key: "sagebrush-files-width", def: 272, min: 200, max: 640 };
 export const TEX_SPLIT = { key: "sagebrush-tex-split", def: 50, min: 20, max: 80 };
 
-const CSS = `
-.sb-edge { position: absolute; top: 0; bottom: 0; width: 9px; cursor: col-resize; touch-action: none; z-index: 6; }
-.sb-edge::after { content: ""; position: absolute; top: 0; bottom: 0; left: 4px; width: 1px; background: transparent; transition: background .15s; }
-.sb-edge:hover::after, .sb-edge:focus-visible::after, .sb-edge.sb-dragging::after { background: #6f8f63; width: 3px; left: 3px; }
-.sb-edge:focus-visible { outline: none; }
-body.sb-resizing, body.sb-resizing * { cursor: col-resize !important; user-select: none !important; }
-#wssidebar > .sb-edge { right: -5px; }
-@media (min-width: 641px) {
-  body.sbfw #wssidebar { width: var(--sbfw) !important; }
-  body.sbfw.wsfiles { padding-left: var(--sbfw); }
-  body.sbfw.wsfiles .code-page { left: var(--sbfw); }
-  body.sbfw.wsfiles .tex-page:not(.tex-embed) { left: var(--sbfw); }
-  .tex-page .tex-main.sb-split > .tex-left { flex: 0 0 var(--tex-split, 50%); }
-  .tex-page .tex-main.sb-split > .tex-right { flex: 1 1 0; }
-}
-@media (max-width: 640px) { #wssidebar > .sb-edge, .tex-main > .sb-edge { display: none; } }
-@media print { .sb-edge { display: none !important; } }
-`;
+// (the style, in parts: the edge's own, and each use's, so the LaTeX editor's bundle carries only its part)
+const EDGE_CSS = `.sb-edge{position:absolute;top:0;bottom:0;width:9px;cursor:col-resize;touch-action:none;z-index:6}.sb-edge:hover,.sb-edge:focus-visible,.sb-edge.sb-dragging{background:linear-gradient(90deg,transparent 3px,#6f8f63 3px 6px,transparent 6px);outline:0}body.sb-resizing,body.sb-resizing *{cursor:col-resize!important;user-select:none!important}@media print{.sb-edge{display:none!important}}`;
+const FILES_CSS = `#wssidebar>.sb-edge{right:-5px}@media (min-width:641px){body.sbfw #wssidebar{width:var(--sbfw)!important}body.sbfw.wsfiles{padding-left:var(--sbfw)}body.sbfw.wsfiles .code-page{left:var(--sbfw)}body.sbfw.wsfiles .tex-page:not(.tex-embed){left:var(--sbfw)}}@media (max-width:640px){#wssidebar>.sb-edge{display:none}}`;
+const SPLIT_CSS = `@media (min-width:641px){.tex-page .tex-main.sb-split>.tex-left{flex:0 0 var(--tex-split,50%)}.tex-page .tex-main.sb-split>.tex-right{flex:1 1 0}}@media (max-width:640px){.tex-main>.sb-edge{display:none}}`;
 
-function style() {
-  if (document.getElementById("sb-resize-css")) return;
-  const st = document.createElement("style");
-  st.id = "sb-resize-css";
-  st.textContent = CSS;
-  document.head.append(st);
+function style(id: string, css: string) {
+  for (const [i, c] of [["sb-edge-css", EDGE_CSS], [id, css]]) {
+    if (document.getElementById(i)) continue;
+    const st = document.createElement("style");
+    st.id = i;
+    st.textContent = c;
+    document.head.append(st);
+  }
 }
 
 const read = (key: string) => { try { return localStorage.getItem(key); } catch { return null; } };
@@ -111,7 +99,7 @@ function edge(el: HTMLElement, spec: Spec, o: { label: string; unit: string; ste
 
 /** The files' width: an edge at the right of `side` (#wssidebar); `changed` after each change (the board redraws). */
 export function filesResize(side: HTMLElement, changed?: () => void) {
-  style();
+  style("sb-files-w-css", FILES_CSS);
   document.body.classList.add("sbfw");
   const handle = document.createElement("div");
   side.append(handle);
@@ -129,7 +117,7 @@ export function filesResize(side: HTMLElement, changed?: () => void) {
 /** The LaTeX editor's split: an edge between `left` (the source) and the preview, in `main` (.tex-main); `signal`: the
  * editor's mount (another file opened in place mounts again: this one's listeners end with it). */
 export function texSplit(main: HTMLElement, left: HTMLElement, signal?: AbortSignal) {
-  style();
+  style("sb-tex-split-css", SPLIT_CSS);
   main.classList.add("sb-split");
   main.style.position = "relative";
   const handle = document.createElement("div");
