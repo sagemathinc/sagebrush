@@ -1,0 +1,30 @@
+ZZ(0).is_irreducible() -> False
+ZZ(1).is_irreducible() -> False
+ZZ(-1).is_irreducible() -> False
+ZZ(2).is_irreducible() -> True
+ZZ(-2).is_irreducible() -> True
+ZZ(3).is_irreducible() -> True
+ZZ(4).is_irreducible() -> False
+ZZ(-4).is_irreducible() -> False
+ZZ(6).is_irreducible() -> False
+ZZ(7).is_irreducible() -> True
+ZZ(-7).is_irreducible() -> True
+ZZ(9).is_irreducible() -> False
+ZZ(25).is_irreducible() -> False
+ZZ(97).is_irreducible() -> True
+ZZ(561).is_irreducible() -> False
+ZZ(2305843009213693951).is_irreducible() -> True
+ZZ(-2305843009213693951).is_irreducible() -> True
+ZZ(18446744073709551629).is_irreducible() -> True
+ZZ(618970019642690137449562111).is_irreducible() -> True
+ZZ(4611686014132420609).is_irreducible() -> False
+ZZ(100000000000000000039).is_irreducible() -> True
+ZZ(-100000000000000000039).is_irreducible() -> True
+ZZ(170141183460469231731687303715884105727).is_irreducible() -> True
+ZZ(1427247692705959880439315947500961989719490561).is_irreducible() -> False
+[n for n in [-10..10] if ZZ(n).is_irreducible()] -> [-7, -5, -3, -2, 2, 3, 5, 7]
+type(ZZ(7).is_irreducible()) is bool -> True
+Integer(7).is_irreducible(), (7).is_irreducible() -> (True, True)
+ZZ(-7).is_irreducible(), ZZ(-7).is_prime() -> (True, False)
+count in [1..2000], in [-2000..-1] -> (303, 303)
+ZZ['x'](7).is_irreducible() -> True

@@ -8849,6 +8849,38 @@
   "owner": "the LaTeX CLI (@sagebrush-latex)",
   "reason": "sagebrush latex: the largest .tex read (4 MiB) and the most PNG pages of a non-beamer document (60): input and output bounds of a local command"
  },
+ "src/lib-embed.ts :: decode :: JSON.parse(new TextDecoder(\"utf-8\", { fatal: true }).decode(gunzipSync(Buffer.from(payload, \"base64\"), maxBytes === undefined ? {} : { maxOutputLength: maxBytes }))); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "The CLI's embedded package blobs (src/lib-embed.ts): a blob's inflate is bounded (PACKAGE_BLOB_BYTES, 64 MiB), so a corrupt or oversized blob in the build fails closed (a RangeError at its first import) instead of exhausting memory. It bounds the build's own data, never a user's computation."
+ },
+ "src/lib-embed.ts :: decode :: const decode = (payload: string, maxBytes?: number): Record<string, string> => #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "The CLI's embedded package blobs (src/lib-embed.ts): a blob's inflate is bounded (PACKAGE_BLOB_BYTES, 64 MiB), so a corrupt or oversized blob in the build fails closed (a RangeError at its first import) instead of exhausting memory. It bounds the build's own data, never a user's computation."
+ },
+ "src/lib-embed.ts :: installLazy :: function installLazy(lib: Record<string, string>, payload: string, names: string[], family?: string, counts = libEmbedStats.families, maxBytes?: number) { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "The CLI's embedded package blobs (src/lib-embed.ts): a blob's inflate is bounded (PACKAGE_BLOB_BYTES, 64 MiB), so a corrupt or oversized blob in the build fails closed (a RangeError at its first import) instead of exhausting memory. It bounds the build's own data, never a user's computation."
+ },
+ "src/lib-embed.ts :: load :: const files = decode(payload, maxBytes); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "The CLI's embedded package blobs (src/lib-embed.ts): a blob's inflate is bounded (PACKAGE_BLOB_BYTES, 64 MiB), so a corrupt or oversized blob in the build fails closed (a RangeError at its first import) instead of exhausting memory. It bounds the build's own data, never a user's computation."
+ },
  "src/limits-file.ts :: readLimitsFile :: const buf = Buffer.alloc(LIMITS_MAX_BYTES + 1); #0": {
   "class": "1",
   "owner": "CLI/runtime configuration",
@@ -11554,6 +11586,581 @@
   },
   "owner": "library chunk fetch",
   "reason": "A chunk fetch with no data for 20 s is given up (one retry), so a stalled request never holds a run; between pieces of data, not on the whole download (grader's plain-worker investigation)"
+ },
+ "web/sync/entries.ts ::  :: bytes: IX_BYTES_MAX, #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts ::  :: cursorMs: IX_CURSOR_MS_MAX, #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts ::  :: cursorSweep: IX_CURSOR_SWEEP_MAX, #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts ::  :: cursors: IX_CURSORS_MAX, #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts ::  :: entries: IX_ENTRIES_MAX, #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts ::  :: examined: IX_EXAMINED_MAX, #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts ::  :: export class BudgetStop extends Error { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts ::  :: export const IX_BYTES_MAX = 1 << 20; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts ::  :: export const IX_CURSORS_MAX = 32; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts ::  :: export const IX_CURSOR_MS_MAX = 15 * 60_000; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts ::  :: export const IX_CURSOR_SWEEP_MAX = 100; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts ::  :: export const IX_ENTRIES_MAX = 100_000; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts ::  :: export const IX_EXAMINED_MAX = 20_000; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts ::  :: export const IX_FOLDER_MAX = 10_000; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts ::  :: export const IX_GONE_MAX = 100_000; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts ::  :: export const IX_JOB_PAGE_MAX = 500; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts ::  :: export const IX_OPS_MAX = 1000; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts ::  :: export const IX_PAGE_MAX = 1000; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts ::  :: export const IX_RESET_PAGE_MAX = 10_000; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts ::  :: export const IX_VISITS_MAX = 25_000; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts ::  :: gone: IX_GONE_MAX, #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts ::  :: import { MAX_DEPTH, MAX_PATH, parentOf } from \"../workspace/paths.ts\"; #0": {
+  "class": "none",
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "matched words that refuse nothing: an import, the preflight's maxLen/maxDepth bookkeeping, and LIMIT clauses paging by IX_JOB_PAGE_MAX (registered on its own line)"
+ },
+ "web/sync/entries.ts ::  :: jobPage: IX_JOB_PAGE_MAX, #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts ::  :: ops: IX_OPS_MAX, #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts ::  :: page: IX_PAGE_MAX, #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts ::  :: perFolder: IX_FOLDER_MAX, #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts ::  :: resetPage: IX_RESET_PAGE_MAX, #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts ::  :: visits: IX_VISITS_MAX, #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts :: applyOp :: const ix = new SqlIndex(sql, budget, regions); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts :: applyOp :: export function applyOp(sql: Sql, op: SyncOp, budget: Budget, regions?: Regions, dry = false): { out: Outcome; entries: number; gone: number; largest: number; written: [string, string | null][] } { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts :: applyOp :: if (budget.stopped) throw new BudgetStop(); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts :: applyOp :: if (budget.stopped) throw new BudgetStop(); #1": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts :: applyOp :: maxDepth: number[]; #0": {
+  "class": "none",
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "matched words that refuse nothing: an import, the preflight's maxLen/maxDepth bookkeeping, and LIMIT clauses paging by IX_JOB_PAGE_MAX (registered on its own line)"
+ },
+ "web/sync/entries.ts :: applyOp :: maxLen: number[]; #0": {
+  "class": "none",
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "matched words that refuse nothing: an import, the preflight's maxLen/maxDepth bookkeeping, and LIMIT clauses paging by IX_JOB_PAGE_MAX (registered on its own line)"
+ },
+ "web/sync/entries.ts :: at :: if (!s) this.sets.set(pk, (s = new DeltaSet(this.sql, this.budget, this.R.keyToStore(pk, false, true)))); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts :: charge :: if (this.stopped || this.used + n > this.limit) { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts :: charge :: private budget: Budget, #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts :: charge :: throw new BudgetStop(); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts :: constructor :: constructor(private sql: Sql, private budget: Budget) { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts :: constructor :: constructor(private sql: Sql, private budget: Budget, private R: Regions) { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts :: constructor :: constructor(private sql: Sql, readonly budget: Budget, readonly regions?: Regions) { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts :: constructor :: constructor(public limit: number) {} #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts :: constructor :: export class Budget { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts :: constructor :: self.children = R ? new DeltaChildren(sql, budget, R) : new ChildrenMap(sql, budget); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts :: constructor :: sql, budget, #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts :: constructor :: sql, budget, #1": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts :: constructor :: sql, budget, #2": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts :: constructor :: super(\"index budget\"); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts :: constructor :: this.budget.charge(ids.length + keys.length + ch.adds.length + ch.dels.length + gone.length); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts :: fetch :: this.budget.charge(); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts :: fetch :: this.budget.charge(); #1": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts :: fetch :: this.budget.charge(); #2": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts :: has0 :: this.budget.charge(); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts :: jobNew :: export const jobNew = (seq: number): Job => ({ seq, phase: \"dry\", regions: [], events: [], order: [], at: 0, after: null, maxLen: [], maxDepth: [], entries: 0, gone: 0 }); #0": {
+  "class": "none",
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "matched words that refuse nothing: an import, the preflight's maxLen/maxDepth bookkeeping, and LIMIT clauses paging by IX_JOB_PAGE_MAX (registered on its own line)"
+ },
+ "web/sync/entries.ts :: jobStep :: export function jobStep(sql: Sql, job: Job, op: SyncOp, budget: Budget, fresh: boolean, page = JOB.page): { result: \"more\" | \"skip\" | \"done\"; largest: number } { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts :: keyToStore :: constructor(private sql: Sql, private budget: Budget, readonly pk: string | null) {} #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts :: room :: Object.assign(job, { phase: \"pre\", regions: R.list, events: R.events, at: 0, after: null, maxLen: R.list.map(() => -1), maxDepth: R.list.map(() => -1) }); #0": {
+  "class": "none",
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "matched words that refuse nothing: an import, the preflight's maxLen/maxDepth bookkeeping, and LIMIT clauses paging by IX_JOB_PAGE_MAX (registered on its own line)"
+ },
+ "web/sync/entries.ts :: room :: budget.charge(); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts :: room :: budget.charge(); #1": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts :: room :: budget.charge(k + 1); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts :: room :: budget.charge(res.written.length); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts :: room :: budget.charge(rows.length * JOB.preCost); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts :: room :: budget.charge(rows.length * JOB.stageCost); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts :: room :: const past = job.events.some(([i, dest]) => job.maxLen[i] >= 0 && (dest.length + job.maxLen[i] > MAX_PATH || depthOf(dest) + job.maxDepth[i] > MAX_DEPTH)); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts :: room :: const res = applyOp(sql, op, budget, R, false); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts :: room :: const res = applyOp(sql, op, budget, R, true); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts :: room :: const room = (cost: number) => (++pages > JOB.pages ? 0 : Math.min(page, Math.floor((budget.limit - budget.used - 1) / cost))); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts :: room :: const rows = sql.exec(\"SELECT id, path FROM ix_entries WHERE path > ? AND path < ? ORDER BY path LIMIT ?\", job.after ?? r.from + \"/\", r.from + \"0\", k).toArray() as Row[]; #0": {
+  "class": "none",
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "matched words that refuse nothing: an import, the preflight's maxLen/maxDepth bookkeeping, and LIMIT clauses paging by IX_JOB_PAGE_MAX (registered on its own line)"
+ },
+ "web/sync/entries.ts :: room :: const rows = sql.exec(\"SELECT s.id AS id, s.r AS r, e.path AS path, e.data AS data FROM ix_stage s LEFT JOIN ix_entries e ON e.id = s.id ORDER BY s.id LIMIT ?\", k).toArray() as Row[]; #0": {
+  "class": "none",
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "matched words that refuse nothing: an import, the preflight's maxLen/maxDepth bookkeeping, and LIMIT clauses paging by IX_JOB_PAGE_MAX (registered on its own line)"
+ },
+ "web/sync/entries.ts :: room :: if (!fresh || budget.used > 0) return { result: \"more\", largest }; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts :: room :: if (!fresh || budget.used > 0) return { result: \"more\", largest }; #1": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
+ },
+ "web/sync/entries.ts :: room :: if (!sql.exec(\"SELECT 1 AS x FROM ix_stage LIMIT 1\").toArray().length) return { result: \"skip\", largest }; #0": {
+  "class": "none",
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "matched words that refuse nothing: an import, the preflight's maxLen/maxDepth bookkeeping, and LIMIT clauses paging by IX_JOB_PAGE_MAX (registered on its own line)"
+ },
+ "web/sync/entries.ts :: room :: job.maxDepth[i] = Math.max(job.maxDepth[i], depthOf(p) - top); #0": {
+  "class": "none",
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "matched words that refuse nothing: an import, the preflight's maxLen/maxDepth bookkeeping, and LIMIT clauses paging by IX_JOB_PAGE_MAX (registered on its own line)"
+ },
+ "web/sync/entries.ts :: room :: job.maxLen[i] = Math.max(job.maxLen[i], p.length - r.from.length); #0": {
+  "class": "none",
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "matched words that refuse nothing: an import, the preflight's maxLen/maxDepth bookkeeping, and LIMIT clauses paging by IX_JOB_PAGE_MAX (registered on its own line)"
+ },
+ "web/sync/entries.ts :: room :: sql.exec(\"DELETE FROM ix_stage WHERE id IN (SELECT id FROM ix_stage LIMIT ?)\", k); #0": {
+  "class": "none",
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "matched words that refuse nothing: an import, the preflight's maxLen/maxDepth bookkeeping, and LIMIT clauses paging by IX_JOB_PAGE_MAX (registered on its own line)"
+ },
+ "web/sync/entries.ts :: size :: this.budget.charge(); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "fs-sync 1a2, the sync server's agents' index (@sagebrush-sync-client)",
+  "reason": "Agents' index host bounds (IX_*_MAX, interim until #904 slice 2, never membership; 25,000 visits a step per #913 LIMITS/PERF) and its work meter (a stop before the bound, rolled back); past one, the derived index fails (503), never the person's sync."
  },
  "web/workspace/checkpoint.ts ::  :: export const CHECKPOINT_BLOB_MAX = 32 << 20; #0": {
   "class": "1",

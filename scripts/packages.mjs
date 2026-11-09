@@ -20,6 +20,7 @@
 //              LICENSE* and NOTICE* files)
 //   requires   other packages (not used yet), catalog (null; not used yet)
 import { createHash } from "node:crypto";
+import { gzipSync } from "node:zlib";
 import { existsSync, lstatSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -163,4 +164,29 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       process.exit(1);
     }
   } else writeFileSync(out, text);
+}
+
+// The CLI's packages (scripts/build-cli.mjs writes build/cli/packages.gen.js as packagesGenSource returns it): each
+// package's files in a gzip blob of its own, keyed by its directory, decoded on the first read of one of them, never
+// at startup (src/lib-embed.ts installEmbeddedPackages); the registry stays plain. Each blob's file names stay plain
+// beside it, which scripts/size-budget.mjs's optional-package leak check reads.
+/** {dir: [base64 of the deterministic gzip of {path: text}, sorted paths]} for `files` ({"<dir>/<path>": text}) */
+export function packageBlobs(files) {
+  const byDir = {};
+  for (const [k, v] of Object.entries(files)) (byDir[k.slice(0, k.indexOf("/"))] ??= {})[k] = v;
+  return Object.fromEntries(
+    Object.keys(byDir)
+      .sort()
+      .map((d) => {
+        const bytes = gzipSync(Buffer.from(JSON.stringify(byDir[d]), "utf8"), { level: 9 });
+        // (deterministic: node's gzip header has no file name (FLG 0) and MTIME 0; asserted, as no option sets them)
+        if (bytes[3] !== 0 || bytes.readUInt32LE(4) !== 0) throw new Error(`packages.gen.js: ${d}'s gzip header has a name or a time`);
+        return [d, [bytes.toString("base64"), Object.keys(byDir[d]).sort()]];
+      }),
+  );
+}
+
+/** build/cli/packages.gen.js's source for `packages` (readPackages's {registry, files}) */
+export function packagesGenSource(packages) {
+  return `import { installEmbeddedPackages } from "../../src/lib-embed";\ninstallEmbeddedPackages(globalThis, ${JSON.stringify(packages.registry)}, ${JSON.stringify(packageBlobs(packages.files))});\n`;
 }
