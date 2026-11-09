@@ -699,5 +699,6 @@ if one would.
 
 Unless you explicitly state otherwise, any contribution intentionally
 submitted for inclusion in Sagebrush, as defined in the Apache-2.0 license,
-is dual licensed as above, without any additional terms or conditions. See
+is dual licensed as above, without any additional terms or conditions.
+This doesn't apply to `web/cloud/`: changes to it are accepted only from SageMath, Inc. See
 [CONTRIBUTING.md](CONTRIBUTING.md).

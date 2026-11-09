@@ -25,7 +25,9 @@ an algorithm comes from.
 Unless you explicitly state otherwise, any contribution intentionally
 submitted for inclusion in Sagebrush, as defined in the Apache-2.0 license,
 is dual licensed as MIT OR Apache-2.0, without any additional terms or
-conditions. Copyright in Sagebrush as a whole is held by SageMath, Inc.;
+conditions. This doesn't apply to `web/cloud/`: changes to it are accepted only from SageMath, Inc.
+A pull request from anyone else that changes a file in `web/cloud/` can't be merged.
+Copyright in Sagebrush as a whole is held by SageMath, Inc.;
 contributors keep the copyright in their contributions.
 
 ## Tests
