@@ -31,7 +31,7 @@ class _Mixin:
         if self._dirty:
             data = self.getvalue()
             if isinstance(data, str):
-                data = data.encode(self.encoding)
+                data = data.encode(self.encoding, self.errors)
             _fs.write(self.name, data, self._append)
             if self._append:
                 self._reset()
@@ -161,9 +161,12 @@ class TextFile(_Mixin, io.StringIO):
         self._closed_check()
         _Mixin.flush(self)
 
-    def __init__(self, name, mode, initial, append, encoding):
+    def __init__(self, name, mode, initial, append, encoding, errors):
         io.StringIO.__init__(self, initial)
         self.encoding = encoding or "utf-8"
+        # (written with the error handler given, as CPython's TextIOWrapper: ElementTree's write(path) is us-ascii
+        # with "xmlcharrefreplace")
+        self.errors = errors or "strict"
         self._setup(name, mode, append)
         if append:
             self._reset()
@@ -268,7 +271,7 @@ def open(file, mode="r", buffering=-1, encoding=None, errors=None, newline=None,
     text = data.decode(encoding or "utf-8", errors or "strict")
     if newline is None:
         text = text.replace("\r\n", "\n").replace("\r", "\n")
-    f = TextFile(file, mode, text, append, encoding)
+    f = TextFile(file, mode, text, append, encoding, errors)
     if newline == "" or newline == "\r" or newline == "\r\n":
         # (a line ends at newline, or for "" at any of "\r\n", "\r" and "\n")
         f._readnl = newline

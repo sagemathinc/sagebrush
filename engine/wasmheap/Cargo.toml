@@ -1,0 +1,13 @@
+[package]
+name = "sagebrush-wasmheap"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "The WebAssembly heap of Sagebrush's own wasm modules (the PNG module, the multiprecision core): dlmalloc over a system layer that bounds the pages the heap may grow by"
+
+# (in WebAssembly only: elsewhere the crate is empty)
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+dlmalloc = { version = "=0.2.14", default-features = false }
+
+[lints]
+workspace = true
