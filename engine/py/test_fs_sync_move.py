@@ -274,6 +274,13 @@ def test_move_aside():
         finally:
             M._hash, M.MAX_FILE_BYTES = real_hash, saved_cap
         assert hashed == [] and read(os.path.join(e.local, "grew.bin")) == b"z" * 4096
+        # (grader Z3) exactly at the (lowered) cap: hashed and moved aside
+        M.MAX_FILE_BYTES = 4096
+        try:
+            M.move_aside(e.root, "grew.bin", e.holding, sha(b"z" * 4096), 4096)
+        finally:
+            M.MAX_FILE_BYTES = saved_cap
+        assert read(os.path.join(e.held, "grew.bin")) == b"z" * 4096 and not os.path.exists(os.path.join(e.local, "grew.bin"))
         # not the planned file: moved back, Changed
         try:
             M.move_aside(e.root, "b.txt", e.holding, sha(b"other"), len(b"other"))
@@ -374,6 +381,29 @@ def test_install():
         except M.InstalledBeside as b:
             assert b.rel == "notes/a (conflict, laptop) (2).tex", b.rel
         assert read(os.path.join(e.local, "notes", "a (conflict, laptop) (2).tex")) == b"theirs 3"
+        # (grader I3) every conflict name taken as it is tried (a seam): MAX_CONFLICT_TRIES names, then Occupied, with
+        # the target, the temp and every racer's file intact
+        tree(e.local, {"notes/" + tmp_name: b"theirs 4"})
+        real_conflict, racers = M.conflict_name, []
+
+        def racing(rel, computer, taken):
+            name = real_conflict(rel, computer, taken)
+            tree(e.local, {name: b"racer %d" % len(racers)})
+            racers.append(name)
+            return name
+        M.conflict_name = racing
+        try:
+            M.install(e.root, "notes/a.tex", tmp_name, "laptop")
+            raise AssertionError("installed though every name was taken")
+        except M.Occupied:
+            pass
+        finally:
+            M.conflict_name = real_conflict
+        assert len(racers) == M.MAX_CONFLICT_TRIES == 8 and len(set(racers)) == 8, racers
+        assert read(os.path.join(e.local, "notes", "a.tex")) == b"mine"
+        assert read(os.path.join(e.local, "notes", tmp_name)) == b"theirs 4"
+        for i, name in enumerate(racers):
+            assert read(os.path.join(e.local, name)) == b"racer %d" % i, name
     finally:
         e.close()
 
@@ -386,8 +416,20 @@ def test_restore():
         tree(e.local, {"c.txt": b"newer"})                              # occupied now
         os.rmdir(os.path.join(e.local, "gone"))
         tree(e.local, {"gone": b"a file where the folder was"})         # a file where a folder should be
+        os.chmod(os.path.join(e.held, "sub"), 0o755)                    # (grader R3) a held folder gone looser
         left = sorted(M.restore(e.root, e.holding))
         assert left == ["c.txt", "gone/d.txt"], left
+        assert stat.S_IMODE(os.stat(os.path.join(e.held, "sub")).st_mode) == 0o700
+        saved_uid = os.getuid                                           # and one not ours: refused, nothing moved
+        os.getuid = lambda: saved_uid() + 1
+        try:
+            M.restore(e.root, e.holding)
+            raise AssertionError("restored through a holding folder that isn't ours")
+        except PermissionError:
+            pass
+        finally:
+            os.getuid = saved_uid
+        assert read(os.path.join(e.held, "gone", "d.txt")) == b"d"
         assert read(os.path.join(e.local, "a.txt")) == b"a" and read(os.path.join(e.local, "sub", "b.txt")) == b"b"
         assert read(os.path.join(e.local, "c.txt")) == b"newer"         # never overwritten
         assert read(os.path.join(e.held, "c.txt")) == b"c" and read(os.path.join(e.held, "gone", "d.txt")) == b"d"
@@ -406,7 +448,8 @@ def test_temps_and_their_sweep():
     e = Env({"keep.txt": b"k", "sub/.sagebrush-tmp-20261101-0900-3": b"old", ".sagebrush-tmp-20261101-0900-12": b"old",
              ".sagebrush-tmp-20261108-1402-1": b"mine, this run", ".sagebrush-tmp-notes.txt": b"not ours",
              ".sagebrush-tmp-20261101-0900-x": b"not ours", ".sagebrush-tmp-20261101-0900-7\n": b"near miss",
-             ".sagebrush-tmp-20261101-0900-8 ": b"near miss"}, run_id="20261108-1402")
+             ".sagebrush-tmp-20261101-0900-8 ": b"near miss", ".sagebrush-tmp-a.b-3": b"not a run id",
+             ".sagebrush-tmp--3": b"no run id", ".sagebrush-tmp-x y-3": b"not a run id"}, run_id="20261108-1402")
     try:
         nfd_dir = unicodedata.normalize("NFD", "café")                  # (reached only by its on-disk spelling)
         tree(e.local, {nfd_dir + "/.sagebrush-tmp-20261101-0900-9": b"old"})
@@ -417,6 +460,7 @@ def test_temps_and_their_sweep():
         assert not [p for p in r.files if "sagebrush-tmp" in p], sorted(r.files)
         assert sorted(r.temps) == sorted([".sagebrush-tmp-20261101-0900-12", ".sagebrush-tmp-20261101-0900-x",
                                           ".sagebrush-tmp-20261101-0900-7\n", ".sagebrush-tmp-20261101-0900-8 ",
+                                          ".sagebrush-tmp-a.b-3", ".sagebrush-tmp--3", ".sagebrush-tmp-x y-3",
                                           ".sagebrush-tmp-20261108-1402-1", ".sagebrush-tmp-notes.txt",
                                           "sub/.sagebrush-tmp-20261101-0900-3",
                                           nfd_dir + "/.sagebrush-tmp-20261101-0900-9"]), r.temps
@@ -426,7 +470,8 @@ def test_temps_and_their_sweep():
         assert left == sorted([".sagebrush-tmp-20261101-0900-4", ".sagebrush-tmp-20261101-0900-5",
                                ".sagebrush-tmp-20261101-0900-x", ".sagebrush-tmp-20261108-1402-1",
                                ".sagebrush-tmp-notes.txt", "keep.txt", "sub", nfd_dir,
-                               ".sagebrush-tmp-20261101-0900-7\n", ".sagebrush-tmp-20261101-0900-8 "]), left
+                               ".sagebrush-tmp-20261101-0900-7\n", ".sagebrush-tmp-20261101-0900-8 ",
+                               ".sagebrush-tmp-a.b-3", ".sagebrush-tmp--3", ".sagebrush-tmp-x y-3"]), left
         # a temp that turned into a link or folder since the scan is left as it is
         assert M.sweep_temps(e.root, [".sagebrush-tmp-20261101-0900-4", ".sagebrush-tmp-20261101-0900-5"],
                              "20261108-1402") == 0
