@@ -132,6 +132,29 @@ impl Exp {
         Ok(Exp::from_parts(an != (n < 0) && !prod.is_zero(), prod))
     }
 
+    /// self * n for an integer n of any size.
+    pub fn mul_int(&self, n: &crate::int::Int) -> Result<Exp, Fail> {
+        if let (Exp::S(a), Some(b)) = (self, n.to_i64()) {
+            if let Some(c) = a.checked_mul(b) {
+                return Ok(Exp::S(c));
+            }
+        }
+        let (an, am) = self.parts();
+        let prod = am.mul(&n.mag)?;
+        Ok(Exp::from_parts(an != n.neg && !prod.is_zero(), prod))
+    }
+
+    /// The exponent of an integer value.
+    pub fn from_int(n: &crate::int::Int) -> Exp {
+        Exp::from_parts(n.neg, n.mag.clone())
+    }
+
+    /// As a Python int.
+    pub fn to_int(&self) -> crate::int::Int {
+        let (neg, mag) = self.parts();
+        crate::int::Int::new(neg, mag)
+    }
+
     /// Python's floor division by 2.
     pub fn floor_div2(&self) -> Result<Exp, Fail> {
         match self {

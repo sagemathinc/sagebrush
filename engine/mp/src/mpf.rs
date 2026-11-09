@@ -7,6 +7,7 @@
 //! branches, so that the two can be read side by side.
 
 use crate::exp::Exp;
+use crate::int::Int;
 use crate::nat::Nat;
 use crate::Fail;
 use core::cmp::Ordering;
@@ -477,38 +478,38 @@ fn small_bits(x: &Nat) -> Result<i64, Fail> {
     }
 }
 
-/// mpf_pow_int: s^n for an integer n of any size, given as sign and
-/// magnitude (the magnitude of a power past u64 can only be raised for
-/// specials and 1; otherwise its result is too large for any call).
-pub fn mpf_pow_int(s: &Mpf, n: i64, prec: u64, rnd: Rnd) -> Result<Mpf, Fail> {
+/// mpf_pow_int: s^n for an integer n of any size.
+pub fn mpf_pow_int(s: &Mpf, n: &Int, prec: u64, rnd: Rnd) -> Result<Mpf, Fail> {
+    let pos = !n.is_neg() && !n.is_zero();
     if is_special(s) {
         if s.is_finf() {
-            if n > 0 {
+            if pos {
                 return Ok(s.clone());
             }
-            if n == 0 {
+            if n.is_zero() {
                 return Ok(fnan());
             }
             return Ok(fzero());
         }
         if s.is_fninf() {
-            if n > 0 {
-                return Ok(if n & 1 == 1 { fninf() } else { finf() });
+            if pos {
+                return Ok(if n.is_odd() { fninf() } else { finf() });
             }
-            if n == 0 {
+            if n.is_zero() {
                 return Ok(fnan());
             }
             return Ok(fzero());
         }
         return Ok(fnan());
     }
-    if n == 0 {
+    let small = n.to_i64();
+    if small == Some(0) {
         return Ok(fone());
     }
-    if n == 1 {
+    if small == Some(1) {
         return mpf_pos(s, prec, rnd);
     }
-    if n == 2 {
+    if small == Some(2) {
         if s.man.is_zero() {
             return Ok(fzero());
         }
@@ -521,31 +522,28 @@ pub fn mpf_pow_int(s: &Mpf, n: i64, prec: u64, rnd: Rnd) -> Result<Mpf, Fail> {
         bc += small_bits(&man.shr(bc as u64)?)?;
         return normalize1(0, man, exp, bc, prec, rnd);
     }
-    if n == -1 {
+    if small == Some(-1) {
         return mpf_div(&fone(), s, prec, rnd);
     }
-    if n < 0 {
-        let inverse = match n.checked_neg() {
-            Some(m) => mpf_pow_int(s, m, prec + 5, rnd.reciprocal())?,
-            None => return Err(Fail::Limit { limbs: u64::MAX }),
-        };
+    if n.is_neg() {
+        let inverse = mpf_pow_int(s, &n.neg(), prec + 5, rnd.reciprocal())?;
         return mpf_div(&fone(), &inverse, prec, rnd);
     }
-    let result_sign = s.sign & (n & 1) as u32;
+    let result_sign = s.sign & n.is_odd() as u32;
     if s.man.to_u64() == Some(1) {
-        return Ok(Mpf { sign: result_sign, man: Nat::from_u64(1), exp: s.exp.mul_i64(n)?, bc: 1 });
+        return Ok(Mpf { sign: result_sign, man: Nat::from_u64(1), exp: s.exp.mul_int(n)?, bc: 1 });
     }
-    if s.bc.saturating_mul(n) < 1000 {
+    if Int::from_i64(s.bc).mul(n)?.cmp(&Int::from_i64(1000)) == Ordering::Less {
+        let k = n.to_i64().unwrap_or(0);
         let mut man = Nat::from_u64(1);
-        for _ in 0..n {
+        for _ in 0..k {
             man = man.mul(&s.man)?;
         }
         let bc = man.bits() as i64;
-        return normalize1(result_sign, man, s.exp.mul_i64(n)?, bc, prec, rnd);
+        return normalize1(result_sign, man, s.exp.mul_int(n)?, bc, prec, rnd);
     }
     let rounds_down = rnd == Rnd::Nearest || rnd.shifts_down(result_sign);
-    let nbits = 64 - (n as u64).leading_zeros() as u64;
-    let workprec = (prec + 4 * nbits + 4) as i64;
+    let workprec = prec as i64 + 4 * n.bits() as i64 + 4;
     let cut = |x: &Nat, k: u64| -> Result<Nat, Fail> {
         if rounds_down {
             x.shr(k)
@@ -561,9 +559,9 @@ pub fn mpf_pow_int(s: &Mpf, n: i64, prec: u64, rnd: Rnd) -> Result<Mpf, Fail> {
     };
     let (mut man, mut exp, mut bc) = (s.man.clone(), s.exp.clone(), s.bc);
     let (mut pm, mut pe, mut pbc) = (Nat::from_u64(1), Exp::S(0), 1i64);
-    let mut n = n;
+    let mut n = n.clone();
     loop {
-        if n & 1 == 1 {
+        if n.is_odd() {
             pm = pm.mul(&man)?;
             pe = pe.add(&exp)?;
             pbc += bc - 2;
@@ -573,8 +571,8 @@ pub fn mpf_pow_int(s: &Mpf, n: i64, prec: u64, rnd: Rnd) -> Result<Mpf, Fail> {
                 pe = pe.add_i64(pbc - workprec)?;
                 pbc = workprec;
             }
-            n -= 1;
-            if n == 0 {
+            n = n.sub(&Int::from_i64(1))?;
+            if n.is_zero() {
                 break;
             }
         }
@@ -587,9 +585,44 @@ pub fn mpf_pow_int(s: &Mpf, n: i64, prec: u64, rnd: Rnd) -> Result<Mpf, Fail> {
             exp = exp.add_i64(bc - workprec)?;
             bc = workprec;
         }
-        n /= 2;
+        n = n.shr(1)?;
     }
     normalize(result_sign, pm, pe, pbc, prec, rnd)
+}
+
+/// mpf_perturb: x + eps with directed rounding (eps of sign eps_sign,
+/// below the precision); to nearest, x rounded.
+pub fn mpf_perturb(x: &Mpf, eps_sign: u32, prec: u64, rnd: Rnd) -> Result<Mpf, Fail> {
+    if rnd == Rnd::Nearest {
+        return mpf_pos(x, prec, rnd);
+    }
+    let eps = Mpf { sign: eps_sign, man: Nat::from_u64(1), exp: x.exp.add_i64(x.bc - prec as i64 - 1)?, bc: 1 };
+    let away = if x.sign == 1 {
+        matches!(rnd, Rnd::Down | Rnd::Ceiling) as u32 ^ eps_sign
+    } else {
+        matches!(rnd, Rnd::Up | Rnd::Ceiling) as u32 ^ eps_sign
+    };
+    if away == 1 {
+        mpf_add(x, &eps, prec, rnd, false)
+    } else {
+        mpf_pos(x, prec, rnd)
+    }
+}
+
+/// to_fixed(s, prec): the signed fixed-point integer of s at prec bits.
+pub fn to_fixed(s: &Mpf, prec: i64) -> Result<Int, Fail> {
+    let offset = s.exp.add_i64(prec)?;
+    let m = Int::new(s.sign == 1, s.man.clone());
+    match offset.as_i64() {
+        Some(o) => m.shift(o),
+        None if offset.is_neg() => Ok(if m.is_neg() { Int::from_i64(-1) } else { Int::zero() }),
+        None => Err(Fail::Limit { limbs: u64::MAX }),
+    }
+}
+
+/// from_man_exp for a signed man (an Int) and an Int exponent.
+pub fn from_int_man_exp(man: &Int, exp: &Exp, prec: u64, rnd: Rnd) -> Result<Mpf, Fail> {
+    from_man_exp(man.is_neg() as u32, man.mag.clone(), exp.clone(), prec, rnd)
 }
 
 #[cfg(test)]

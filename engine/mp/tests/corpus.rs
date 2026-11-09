@@ -99,8 +99,8 @@ fn corpus() {
             "div" => mpf_div(&s, &t, prec, rnd),
             "sqrt" => mpf_sqrt(&s, prec, rnd),
             "powi" => {
-                let m = t.man.to_u64().unwrap() as i64;
-                mpf_pow_int(&s, if t.sign == 1 { -m } else { m }, prec, rnd)
+                let n = sagebrush_mp::int::Int::new(t.sign == 1, t.man.clone());
+                mpf_pow_int(&s, &n, prec, rnd)
             }
             "muli" => mpf_mul_int(&s, t.sign, &t.man, prec, rnd),
             "fme" => from_man_exp(s.sign, s.man.clone(), s.exp.clone(), prec, rnd),
