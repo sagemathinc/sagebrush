@@ -175,3 +175,37 @@ def r2(a, *rest, c=9):
 show("r2 (1,2)", lambda: r2.get_key(1, 2))
 show("r2 (1,2,c=3)", lambda: r2.get_key(1, 2, c=3))
 show("r2 (1,c=3)", lambda: r2.get_key(1, c=3))
+# (sixth section) grader's r1 rows on #912: the leftover keyword arguments sorted (K3); a method with no arguments
+# through its class gets None as the instance and keeps nothing (M6); key= on a method with no arguments (M7); the
+# defaults of every missing parameter that has one (K2)
+@cached_function
+def w(a, **kw):
+    return a
+show("K3 kw sorted", lambda: w.get_key(1, z=1, y=2))
+show("K3 kw sorted 3", lambda: w.get_key(1, c=3, a2=1, b=2))
+class C6:
+    @cached_method
+    def m(self):
+        return self
+    @cached_method
+    def k(self):
+        return 7
+show("M6 C6.m()", lambda: C6.m())
+show("M6 C6.k(), cache", lambda: (C6.k(), C6.k.cache))
+class D6:
+    @cached_method(key=lambda self: 0)
+    def m(self):
+        return 5
+d6 = D6()
+show("M7 type(d6.m)", lambda: type(d6.m).__name__)
+show("M7 d6.m(), cache", lambda: (d6.m(), d6.m.cache))
+@cached_function
+def g6(a, b, c=3):
+    return a
+show("K2 g6.get_key(1)", lambda: g6.get_key(1))
+show("K2 g6.get_key()", lambda: g6.get_key())
+@cached_function
+def h6(a, b=2, c=3):
+    return a
+show("h6.get_key()", lambda: h6.get_key())
+show("h6.get_key(1)", lambda: h6.get_key(1))

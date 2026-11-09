@@ -23,8 +23,8 @@ class _Signature:
     them (observed as a black box):
 
     - with no keyword arguments: the positional arguments, then the defaults
-      of the missing trailing positional parameters (keyword-only ones are
-      left out): f(2) is ((2, 1), ()) for def f(n, k=1);
+      of the missing positional parameters that have one (keyword-only ones
+      are left out): f(2) is ((2, 1), ()) for def f(n, k=1);
     - with keyword arguments: every named parameter in order (positional,
       then keyword-only) takes the next positional argument, else its
       keyword argument, else it is a KeyError (defaults are not used); the
@@ -54,9 +54,10 @@ class _Signature:
         if not kwds:
             vals = list(args)
             for i in range(len(args), len(self.pos)):
-                if self.defaults[i] is _NODEFAULT:
-                    break
-                vals.append(self.defaults[i])
+                # (as Sage: every missing parameter with a default, the
+                # ones without one skipped: ((1, 3), ()) for g(a, b, c=3)(1))
+                if self.defaults[i] is not _NODEFAULT:
+                    vals.append(self.defaults[i])
             return (tuple(vals), ())
         kw = dict(kwds)
         vals = []
@@ -226,8 +227,9 @@ class CachedMethodCallerNoArgs(CachedMethodCaller):
 
     def __call__(self):
         if self._inst is None:
-            # (through the class, as Sage: the class is the instance, A.f())
-            return self.f(self._owner)
+            # (through the class, as Sage: called with None as the instance,
+            # nothing kept)
+            return self.f(None)
         c = self._method._store(self._inst)
         try:
             return c[((), ())]
@@ -258,7 +260,9 @@ class CachedMethod:
         self.__qualname__ = getattr(f, "__qualname__", self.__name__)
         self.__module__ = getattr(f, "__module__", None)
         self.__doc__ = getattr(f, "__doc__", None)
-        self._noargs = not self._sig.names and not self._sig.varargs and key is None
+        # (as Sage: a method with no arguments keeps its one value even with
+        # key=, which it does not use)
+        self._noargs = not self._sig.names and not self._sig.varargs
 
     def _store(self, inst):
         # the instance's own dictionary, so the results live exactly as long
