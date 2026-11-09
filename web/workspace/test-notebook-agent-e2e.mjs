@@ -259,6 +259,39 @@ try {
   await ev(`([...document.querySelectorAll(".sbag-bar button")].find((b) => b.textContent === "Revoke")?.click(), true)`);
   ok(await until(`!document.querySelector(".sbag-bar")`), "Revoke: the bar goes");
 
+  // (grader's rows on #935 r2) the code page's File ▸ Connect an agent…: the menu closes, Cancel gives the focus back to
+  // File; with the chunk's fetch failing, the code page's status line says so
+  const fileBtn = `document.querySelector(".code-menu-wrap > button")`;
+  ok(await go(`?code=${encodeURIComponent(pyFid)}`) && await until(`!!document.querySelector('.code-filemenu [data-f="c-agent"]')`), "(the code page)");
+  await ev(`(${fileBtn}.click(), document.querySelector('.code-filemenu [data-f="c-agent"]').click(), true)`);
+  ok(await until(`!!document.querySelector(".sbag-box")`) && await ev(`document.querySelector(".code-filemenu").hidden`), "File ▸ Connect an agent… opens Connect, and the File menu closes");
+  await ev(`([...document.querySelectorAll(".sbag-box button")].find((b) => b.textContent === "Cancel").click(), true)`);
+  ok(await until(`!document.querySelector(".sbag-box") && document.activeElement === ${fileBtn}`), "Cancel closes it, and the focus goes back to File");
+  await send("Network.setCacheDisabled", { cacheDisabled: true });
+  ok(await go(`?code=${encodeURIComponent(pyFid)}`) && await until(`!!document.querySelector('.code-filemenu [data-f="c-agent"]')`), "(the code page, afresh)");
+  await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-agent.js*" }] });
+  failChunk = true;
+  await ev(`(${fileBtn}.click(), document.querySelector('.code-filemenu [data-f="c-agent"]').click(), true)`);
+  ok(await until(`(document.querySelector(".code-status")?.textContent ?? "") === "Couldn't load the agent connection. Choose Connect an agent… again, or reload the page."`, 20000) && !(await ev(`!!document.querySelector(".sbag-box")`)), "File ▸ Connect an agent… with the chunk's fetch failing: the code page's status line says so", await ev(`document.querySelector(".code-status")?.textContent ?? null`).catch(() => null));
+  failChunk = false;
+  await send("Fetch.disable");
+  await send("Network.setCacheDisabled", { cacheDisabled: false });
+  // (the desktop app (window.__TAURI__): the code page offers no Connect an agent…, and a ?pair= link mounts nothing)
+  const ct = await drive({ op: "code" });
+  // (a stand-in for the app's bridge, enough for the page to start: no startup files, no self-test, no events)
+  const tauri = await send("Page.addScriptToEvaluateOnNewDocument", { source: `window.__TAURI__ = { core: { invoke: async (c) => (c === "startup_files" ? [] : null) }, event: { listen: async () => () => {} }, window: { getCurrentWindow: () => ({ setTitle: async () => {} }) }, fs: {}, dialog: {} };` });
+  ok(await go(`?code=${encodeURIComponent(pyFid)}&pair=${ct.code}&port=${ct.port}`) && await until(`!!window.sagebrush?.code`, 30000), "(the code page in the desktop app, with a ?pair= link)");
+  await sleep(3000);
+  ok(!(await ev(`!!document.querySelector('.code-filemenu [data-f="c-agent"]') || !!document.querySelector(".sbag-box") || !!document.querySelector(".sbag-bar")`)), "the desktop app: the code page offers no Connect an agent…, and its ?pair= link mounts nothing");
+  await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: tauri.result.identifier });
+  // (the notebook page on a phone, where Agent is hidden: ⋯ ▸ Connect an agent…, and Cancel gives the focus back to ⋯)
+  ok(await go("?phone=1") && await until(`document.documentElement.classList.contains("phone") && !document.querySelector("#moreagent").hidden && !document.querySelector("#agentbtn").offsetParent`), "(the notebook page on a phone: Agent hidden, ⋯ offers Connect an agent…)");
+  await ev(`(document.querySelector("#morebtn").click(), document.querySelector("#moreagent").click(), true)`);
+  ok(await until(`!!document.querySelector(".sbag-box")`), "on a phone, ⋯ ▸ Connect an agent… opens Connect");
+  await ev(`([...document.querySelectorAll(".sbag-box button")].find((b) => b.textContent === "Cancel").click(), true)`);
+  ok(await until(`!document.querySelector(".sbag-box") && document.activeElement === document.querySelector("#morebtn")`), "…and Cancel gives the focus back to ⋯ (Agent isn't shown)");
+  ok(await go("?phone=0"), "(the phone layout off again)");
+
   // ---- one pairing per page, in a build with the LaTeX editor
   // (the editor opens on this host only in a build made with SAGEBRUSH_LATEX_PREVIEW=test, as CI's web-browser/latex)
   const fid = await ev(`${W}.create("/paper.tex", { content: new TextEncoder().encode("Hello.\\n") }).then((e) => e.fid)`);
