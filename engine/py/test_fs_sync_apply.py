@@ -1282,6 +1282,24 @@ def test_conflict_copy_kept_when_its_name_is_taken():
         p.close()
 
 
+def test_conflict_copy_gone_is_not_named():
+    # (daybreak3 E4) the copy itself vanished during the upload: the undo fails, and the report claims no copy
+    copy = "main (conflict, laptop).tex"
+    p = conflicted()
+    try:
+        def gone(path):
+            os.unlink(p.path(copy))
+            p.ws.put(copy, b"someone's, meanwhile")
+        p.ws.on["write"] = gone
+        p.sync()
+        o = p.report.outcomes[0]
+        assert (o.result, o.why, o.renamed) == (A.SKIPPED, A.CHANGED_HERE, None), o
+        assert os.listdir(p.local) == []
+        assert p.lines() == ["Skipped (1)", "  · main.tex   changed here during the sync", "Run it again to sync the rest."]
+    finally:
+        p.close()
+
+
 def test_lock_released_after_cleanup_without_moves():
     # (daybreak3 E2) no move aside, or a refused one: the lock only for cleanup
     p = Pair({"a": b"a", "b": b"b"})

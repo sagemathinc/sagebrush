@@ -802,12 +802,16 @@ def _conflict(step, k, loc, raw, listing, root_fd, ws, hold, report, computer, h
             ent = _ws(ws.write, step.copy, _read_local(root_fd, copy_raw, loc.size, step.local), None, step.local,
                       loc.size)
         except Exception as e:
-            # (not uploaded: the rename undone, without replacing; if a newcomer took the name meanwhile, the
-            # copy stays under its conflict name, and the report says so)
+            # (not uploaded: the rename undone, without replacing; if it can't be (a newcomer took the name
+            # meanwhile), the report names the copy, but only if it is there: it may have gone meanwhile too)
             try:
                 M.rename_noreplace(d, copy_name, d, name)
             except Exception:
-                e.renamed = step.copy
+                try:
+                    os.stat(copy_name, dir_fd=d, follow_symlinks=False)
+                    e.renamed = step.copy
+                except OSError:
+                    pass
             raise
     finally:
         os.close(d)
