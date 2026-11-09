@@ -5,6 +5,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { takeLimitsOption, utf8Bytes } from "../src/limits";
+import { slowSkip } from "./slow-tests";
 
 // The engine's limits (plan-ff-limits r3): lib/_limits.py's validator, the
 // same under the engine as under CPython (test/limits_cases.out was written
@@ -199,13 +200,32 @@ test("unlimited by default, finite values opt in, mixed settings key by key (pla
     "",
   ].join("\n");
   const p = file("refused-before.sage", prog);
-  assert.equal(run([p]).stdout, "embed True\nroot True\n");
   assert.equal(run(["--limits", TEST + "limits-finite.json", p]).stdout,
     "embed refused: coercion of elements of Finite Field in z11 of size 2^11 and\nroot refused: nth_root of an exponent of more than 1024 bits is not supported yet\n");
   // the cross-key rule: ff.work finite, ff.embed_max left unlimited, a field
   // past 2^20 is refused with the text of before
   const cross = run(["--limits", file("cross.json", '{"ff.work": 10000000}'), p]);
   assert.ok(cross.stdout.startsWith("embed refused: coercion of elements of Finite Field in z11"), cross.stdout + cross.stderr);
+});
+
+// (slow: the test above took 220 s on a green master run, 42597347825 node-tests (7), most of it this one session,
+// which computes what the finite policies refuse (GF(2^22)'s embedding, a 1101-bit root); the refusals above run on
+// every pull request)
+test("unlimited by default: computations refused at the old defaults complete (plan-c0 r2)", { skip: slowSkip }, () => {
+  const prog = [
+    "K = GF(2^22); F = GF(2^11)",
+    "try:",
+    "    print('embed', K(F.gen()) ^ (2^11) == K(F.gen()))",
+    "except NotImplementedError as e:",
+    "    print('embed refused:', str(e)[:60])",
+    "y = GF(7^3).gen(); k = 2^1100 + 1",
+    "try:",
+    "    print('root', y.nth_root(k) ^ k == y)",
+    "except NotImplementedError as e:",
+    "    print('root refused:', e)",
+    "",
+  ].join("\n");
+  assert.equal(run([file("refused-before-unlimited.sage", prog)]).stdout, "embed True\nroot True\n");
 });
 
 // The descent's discrete-log table after plan-c0 (r2 section 2): the worst
