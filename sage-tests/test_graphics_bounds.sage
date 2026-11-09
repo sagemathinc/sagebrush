@@ -33,3 +33,12 @@ show("ymin(RR(0.25))", lambda: (l.ymin(RR(0.25)), l.ymin()))
 show("set_axes_range bad", lambda: l.set_axes_range(xmin='a'))
 c = circle((0, 0), 1)
 show("circle bounds", lambda: (c.xmin(), c.xmax(), c.ymin(), c.ymax()))
+# A range set on one Graphics is not carried by a sum, in either order (grader's r918 P1: the range is kept apart from
+# the options, which a sum merges); the summand keeps its own.
+g = line([(0, 0), (2, 3)]); h = line([(1, -1), (4, 1)])
+g.set_axes_range(xmin=-5)
+show("g.get_axes_range()", lambda: sorted(g.get_axes_range().items()))
+show("(g + h).get_axes_range()", lambda: sorted((g + h).get_axes_range().items()))
+show("(h + g).get_axes_range()", lambda: sorted((h + g).get_axes_range().items()))
+show("sum([g, h]).xmin()", lambda: sum([g, h]).xmin())
+show("(g + h).xmin(), g.xmin()", lambda: ((g + h).xmin(), g.xmin()))
