@@ -5,7 +5,10 @@
 //  - the button is there without opening any menu, in the window's top-left corner, on top (nothing covers it), and
 //    nothing of the page is under it, whether the files are hidden or shown;
 //  - one click shows the files and another hides them; Ctrl+B does the same; aria-pressed says which;
-//  - the choice is remembered across a reload.
+//  - the choice is remembered across a reload;
+//  - the icon is drawn, the views' own Files buttons stay hidden, and on a phone each top bar starts just right of it;
+//  - Ctrl+B only: not a plain b, not with Shift or Alt; Cmd+B too; not in a rich-text field, nor once another handler
+//    took the key; the browser's own Ctrl+B prevented; the focus back on the button when the files hide.
 // Serve web/dist first (python3 web/serve.py 8765), then
 //   node web/workspace/test-files-toggle.mjs
 import { spawn } from "node:child_process";
@@ -51,11 +54,18 @@ const geometry = () => ev(`(() => {
     .map((e) => (e.id || e.className || e.tagName) + ":" + (e.textContent || e.value || "").trim().slice(0, 16));
   return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height), onTop: hit === b || b.contains(hit), pressed: b.getAttribute("aria-pressed"), under };
 })()`);
-const ctrlB = async () => {
-  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "b", code: "KeyB", windowsVirtualKeyCode: 66, modifiers: 2 });
-  await send("Input.dispatchKeyEvent", { type: "keyUp", key: "b", code: "KeyB", windowsVirtualKeyCode: 66, modifiers: 2 });
+// (B with modifiers: 1 Alt, 2 Ctrl, 4 Meta, 8 Shift; 0 types a "b")
+const keyB = async (modifiers = 2) => {
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "b", code: "KeyB", windowsVirtualKeyCode: 66, modifiers, ...(modifiers ? {} : { text: "b" }) });
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key: "b", code: "KeyB", windowsVirtualKeyCode: 66, modifiers });
   await sleep(400);
 };
+const ctrlB = () => keyB(2);
+// (the top bar of each view, and how far its first visible thing starts right of the button: files hidden)
+const TOP = { notebook: "body > header", "code file": ".code-page .code-head", board: '[data-sbb="top"]', "LaTeX file": ".tex-page .tex-head" };
+const firstGap = (sel) => ev(`(() => { const t = document.querySelector(${JSON.stringify(sel)}); if (!t || !t.offsetParent) return null; const b = ${B}.getBoundingClientRect();
+  const xs = [...t.querySelectorAll("*")].filter((e) => !e.children.length && e.offsetParent && getComputedStyle(e).visibility !== "hidden" && e.getBoundingClientRect().width > 0).map((e) => e.getBoundingClientRect().left);
+  return xs.length ? Math.round(Math.min(...xs) - b.right) : null; })()`);
 
 try {
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
@@ -78,11 +88,24 @@ try {
       const g1 = await geometry();
       check(!!g1 && g1.x <= 12 && g1.y <= 12 && g1.w >= 28 && g1.h >= 28 && g1.onTop && g1.pressed === "false" && !(await shown()), `${at}: in the top-left corner, on top, files hidden (aria-pressed false)`, g1);
       check(!!g1 && g1.under.length === 0, `${at}: nothing of the page under the button`, g1?.under);
+      // (the icon is drawn: an SVG in its namespace, with a box; at a phone width it is all the button shows)
+      const ic = await ev(`(() => { const s = ${B}.querySelector("svg"); if (!s) return null; const r = s.getBoundingClientRect(); return { ns: s.namespaceURI, w: Math.round(r.width), h: Math.round(r.height), bbox: Math.round(s.getBBox().width) }; })()`);
+      check(!!ic && ic.ns === "http://www.w3.org/2000/svg" && ic.w >= 12 && ic.h >= 12 && ic.bbox > 0, `${at}: the icon is drawn`, ic);
+      // (the views' own Files buttons stay hidden while the corner one is there)
+      check((await ev(`[...document.querySelectorAll(".code-files, .tex-back")].filter((e) => e.offsetParent).length`)) === 0, `${at}: no second Files button in the view's header`);
+      if (mobile && TOP[name]) {
+        const gap = await firstGap(TOP[name]);
+        if (gap !== null) check(gap >= 0 && gap <= 16, `${at}: the top bar starts just right of the button (no more room than the button needs)`, gap);
+      }
       await ev(`(${B}.click(), 1)`);
       await sleep(500);
       const g2 = await geometry();
       check((await shown()) && g2?.pressed === "true" && g2.onTop, `${at}: a click shows the files (aria-pressed true), the button still on top`, g2);
       check(!!g2 && g2.under.length === 0, `${at}: nothing of the files' header under the button`, g2?.under);
+      if (name === "board" && !mobile) {
+        const pad = await ev(`parseFloat(getComputedStyle(document.querySelector('[data-sbb="top"]')).paddingLeft)`);
+        check(pad < 40, `${at}: with the files shown, the board's top bar keeps no room for the button (the files' header has it)`, pad);
+      }
       await go(url);
       await until(ready, 60000);
       check(await until(`!!${B} && !${B}.hidden && ${B}.getAttribute("aria-pressed") === "true" && !${S}.hidden`, 30000), `${at}: shown again after a reload (remembered)`);
@@ -95,6 +118,42 @@ try {
       check(!(await shown()), `${at}: a click hides them`);
     }
   }
+  // ---- the shortcut's near misses, on the notebook page at a desktop width (the files hidden to begin with)
+  await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+  await ev(`(localStorage.setItem("sagebrush-files-sidebar", "0"), 1)`);
+  await go(base);
+  await until(`!!window.sagebrush?.notebook && !!${B} && !${B}.hidden && !!document.querySelector(".cell textarea")`, 60000);
+  // (a code cell's editor, visible: the caret at its end)
+  const ta = `[...document.querySelectorAll(".cell textarea")].find((t) => t.offsetParent)`;
+  const v0 = await ev(`(() => { const t = ${ta}; t.focus(); t.setSelectionRange(t.value.length, t.value.length); return t.value; })()`);
+  await keyB(0);
+  const typed = await ev(`({ v: ${ta}.value, active: document.activeElement === ${ta} })`);
+  check(!(await shown()) && typed.v === v0 + "b", "a plain b typed in a cell is a b: the files don't move", { shown: await shown(), tail: typed.v.slice(-12), active: typed.active, v0tail: v0.slice(-12) });
+  await keyB(2 | 8);
+  check(!(await shown()), "Ctrl+Shift+B does nothing to the files");
+  await keyB(2 | 1);
+  check(!(await shown()), "Ctrl+Alt+B does nothing to the files");
+  await keyB(4);
+  check(await shown(), "Cmd+B (Meta) shows them");
+  await keyB(4);
+  check(!(await shown()), "Cmd+B hides them");
+  await ev(`(() => { const d = document.createElement("div"); d.id = "t-rich"; d.contentEditable = "true"; d.textContent = "rich"; document.body.append(d); d.focus(); return 1; })()`);
+  await ctrlB();
+  check(!(await shown()), "Ctrl+B in a rich-text field (contenteditable) is bold's: the files don't move");
+  await ev(`(document.getElementById("t-rich").remove(), document.activeElement.blur(), 1)`);
+  await ev(`(addEventListener("keydown", (e) => e.preventDefault(), { capture: true, once: true }), 1)`);
+  await ctrlB();
+  check(!(await shown()), "Ctrl+B another handler already took (defaultPrevented) does nothing");
+  await ev(`(window.__tPrevented = null, addEventListener("keydown", (e) => { if (e.key === "b") window.__tPrevented = e.defaultPrevented; }, { once: true }), 1)`);
+  await ctrlB();
+  check((await shown()) && (await ev(`window.__tPrevented`)) === true, "Ctrl+B shows them, and the browser's own Ctrl+B is prevented");
+  await ctrlB();
+  check(!(await shown()) && (await ev(`document.activeElement === ${B}`)), "Ctrl+B hides them, and the focus goes to the button (not left in the hidden files)");
+  await ev(`(${B}.hidden = true, 1)`);
+  const hid = await ev(`getComputedStyle(${B}).display`);
+  await ctrlB();
+  check(hid === "none" && !(await shown()), "a hidden button (before the workspace is open) isn't shown, and Ctrl+B does nothing", hid);
+  await ev(`(${B}.hidden = false, 1)`);
   check(errors.length === 0, "no uncaught exceptions", errors.slice(0, 3));
 } catch (e) {
   fails.push("threw: " + (e?.stack ?? e));
