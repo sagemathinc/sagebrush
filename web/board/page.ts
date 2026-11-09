@@ -60,6 +60,7 @@ import { IdbPatchStore, openBoardHistoryDb, openHistoryDb, openBlobDb, onHistory
 import { Workspace, LIMITS, registerJournalWriter, stripBoard, type Entry } from "../workspace/api";
 import { migrate } from "../workspace/migrate";
 import { filesToggle } from "../workspace/files-toggle";
+import { filesResize } from "../workspace/resize";
 import { freePath, nameOf, parentOf, splitExt, safeName } from "../workspace/paths";
 import { startMigrator } from "../workspace/migrator";
 import { showReloadNotice, showLossNotice, showBusyNotice, hideBusyNotice, showStaleNotice, showHistoryNotice } from "../workspace/notice";
@@ -1618,8 +1619,8 @@ if (ws) {
   const show = (on: boolean) => {
     side.hidden = !on;
     document.body.classList.toggle("wsfiles", on);
-    boardEl.style.left = on && !phone() ? "272px" : "";
-    side.style.width = phone() ? "" : "272px";
+    boardEl.style.left = on && !phone() ? "var(--sbfw, 272px)" : "";
+    side.style.width = phone() ? "" : "var(--sbfw, 272px)";
     side.style.right = phone() ? "0" : "";
     btn.setAttribute("aria-pressed", String(on));
     try { localStorage.setItem("sagebrush-files-sidebar", on ? "1" : "0"); } catch {}
@@ -1664,6 +1665,8 @@ if (ws) {
   };
   btn.onclick = () => show(side.hidden !== false);
   filesToggle(btn, () => show(side.hidden !== false), () => !side.hidden);
+  // (their width: the edge at their right; the board redraws for the room it has)
+  filesResize(side, () => dispatchEvent(new Event("resize")));
   let pref: string | null = null;
   try { pref = localStorage.getItem("sagebrush-files-sidebar"); } catch {}
   if (pref === "1") show(true);
