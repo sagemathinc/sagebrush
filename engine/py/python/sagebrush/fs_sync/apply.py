@@ -519,29 +519,67 @@ class NotRestorable(Exception):
         self.why = why
 
 
+JOURNAL_BYTES = 65536               # a journal's bound: {"run", "local_dir", "workspace_path"}, read capped at +1
+
+
+class _Run:
+    """A run folder, or a part of one, open by handle: looked up, never made (never through move.Holding, whose
+    constructor makes the folder). It is what move.restore takes."""
+
+    def __init__(self, fd, run_id):
+        self.fd, self.run_id = fd, run_id
+
+    def close(self):
+        if self.fd is not None:
+            os.close(self.fd)
+            self.fd = None
+
+
+def _open_existing(dir_fd, parts):
+    """`parts` under `dir_fd`, each opened no-follow and none made; the folder must be the person's. None if it isn't
+    there; NotRestorable("no-run") if it isn't theirs."""
+    try:
+        fd = M.open_dir(dir_fd, parts)
+    except (FileNotFoundError, NotADirectoryError, ValueError):
+        return None
+    if os.fstat(fd).st_uid != os.getuid():
+        os.close(fd)
+        raise NotRestorable("no-run")
+    return fd
+
+
 def _journal_of(state_dir, run_id):
-    """(the run's Holding, its journal as a dict): the run folder looked up, never made, and its journal read through
-    a no-follow handle, bounded. NotRestorable "no-run" or "no-journal" otherwise. The caller closes the Holding."""
+    """(the run folder, open, its journal as a dict): `run_id` must be a run id; its folder looked up, never made; the
+    journal read through a no-follow handle, at most JOURNAL_BYTES. NotRestorable "no-run" or "no-journal"
+    otherwise. The caller closes the run folder."""
+    if not isinstance(run_id, str) or H.run_time(run_id) is None:
+        raise NotRestorable("no-run")
     top = os.open(state_dir, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | _NOFOLLOW | _CLOEXEC)
     try:
-        try:
-            os.close(M.open_dir(top, ["trash", run_id]))       # (looked up, never made)
-        except (FileNotFoundError, NotADirectoryError, ValueError):
-            raise NotRestorable("no-run")
+        fd = _open_existing(top, ["trash", run_id])
     finally:
         os.close(top)
-    h = M.Holding(state_dir, run_id)
+    if fd is None:
+        raise NotRestorable("no-run")
+    run = _Run(fd, run_id)
     try:
         try:
-            fd = os.open(JOURNAL, os.O_RDONLY | os.O_NONBLOCK | _NOFOLLOW | _CLOEXEC, dir_fd=h.fd)
+            jfd = os.open(JOURNAL, os.O_RDONLY | os.O_NONBLOCK | _NOFOLLOW | _CLOEXEC, dir_fd=run.fd)
         except OSError:
             raise NotRestorable("no-journal")
         try:
-            if not stat.S_ISREG(os.fstat(fd).st_mode):
+            if not stat.S_ISREG(os.fstat(jfd).st_mode):
                 raise NotRestorable("no-journal")
-            data = os.read(fd, 65536)
+            data = b""
+            while len(data) <= JOURNAL_BYTES:
+                b = os.read(jfd, JOURNAL_BYTES + 1 - len(data))
+                if not b:
+                    break
+                data += b
         finally:
-            os.close(fd)
+            os.close(jfd)
+        if len(data) > JOURNAL_BYTES:
+            raise NotRestorable("no-journal")           # (past the bound: never parsed)
         try:
             journal = json.loads(data)
         except ValueError:
@@ -549,17 +587,17 @@ def _journal_of(state_dir, run_id):
         if not (isinstance(journal, dict) and isinstance(journal.get("local_dir"), str)
                 and isinstance(journal.get("workspace_path"), str)):
             raise NotRestorable("no-journal")
-        return h, journal
+        return run, journal
     except BaseException:
-        h.close()
+        run.close()
         raise
 
 
 def journal_of(state_dir, run_id):
     """`--restore <run id>` names no folder (§1): (LOCAL_DIR, WORKSPACE_PATH) as that run's journal recorded them, for
     the command to open the pair and call restore_run. NotRestorable "no-run" or "no-journal" as restore_run."""
-    h, journal = _journal_of(state_dir, run_id)
-    h.close()
+    run, journal = _journal_of(state_dir, run_id)
+    run.close()
     return journal["local_dir"], journal["workspace_path"]
 
 
@@ -568,21 +606,20 @@ def restore_run(state_dir, run_id, root_fd, local_dir, workspace_path):
     `deleted/` only: never `replaced/` (the report named where each replaced file is kept) nor the journal. Refused
     (NotRestorable) for a run with no journal, or whose journal names another pair. Returns the relative paths left
     held because something occupies them now (move.restore)."""
-    h, journal = _journal_of(state_dir, run_id)
+    run, journal = _journal_of(state_dir, run_id)
     try:
         if (journal["local_dir"], journal["workspace_path"]) != (local_dir, workspace_path):
             raise NotRestorable("other-folder")
-        try:
-            os.close(M.open_dir(h.fd, [M.DELETED]))
-        except FileNotFoundError:
+        fd = _open_existing(run.fd, [M.DELETED])
+        if fd is None:
             return []                                   # (a run that only replaced files: nothing to put back)
-        part = M.Part(h, M.DELETED)
+        part = _Run(fd, run_id)
         try:
             return M.restore(root_fd, part)
         finally:
             part.close()
     finally:
-        h.close()
+        run.close()
 
 
 # ---- the apply loop

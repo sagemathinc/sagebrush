@@ -286,6 +286,31 @@ def test_an_entry_not_yours_names_its_path():
         shutil.rmtree(d)
 
 
+def test_an_entry_not_yours_is_home_shortened():
+    # (grader H2) the reason's path is shortened under HOME, as every path the person reads
+    d, s = state()
+    saved_home = os.environ.get("HOME")
+    try:
+        trash = os.path.join(s, "trash")
+        put(os.path.join(trash, "run", "x"), b"x")
+        os.environ["HOME"] = d
+        real = H.os.getuid
+        H.os.getuid = lambda: real() + 1
+        real_trash = H._trash
+        H._trash = lambda st: os.open(trash, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            a = H.admit(s, [("x", 1)])
+        finally:
+            H.os.getuid, H._trash = real, real_trash
+        assert a.detail == "an entry in it isn't yours (~/state/trash/run)", a.detail
+    finally:
+        if saved_home is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = saved_home
+        shutil.rmtree(d)
+
+
 def test_errors_as_a_person_reads_them():
     # (board #895 S2, N1) an OSError's message and the path the walk was reading: never "[Errno N]" or a class name
     assert H.strerror(OSError(errno.EACCES, "Permission denied", "x")) == "Permission denied"
