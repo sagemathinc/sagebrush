@@ -3304,6 +3304,22 @@ The end.
       await send("Emulation.setEmulatedMedia", { media: "" });
       await ev(`(window.sagebrush.latex.printMode(false), 1)`);
       check(inPresent && printed?.shown && printed.note === "Interactive in Sagebrush", "@interact: Present shows it, and the print layout, with its note", { inPresent, printed });
+      // (astra's and daybreak3's #937 r2 notes: a new Run ends the last Run's widgets as it starts, before it takes the
+      //  session's turn: a change made while it holds its turn (the test build's hold) sends nothing (the chunk's count),
+      //  and the widget is shown dead; once it has run, its own widget is live)
+      const IAU = `performance.getEntriesByType("resource").map((e) => e.name).filter((n) => /sagebrush-latex-interact\\.js/.test(n)).pop()`;
+      const sent0 = await ev(`import(${IAU}).then((m) => m.sent)`);
+      await ev(`(document.querySelector(".tex-status").textContent = "", window.__sbTexRunHold = () => new Promise((r) => { window.__held = true; window.__go = r; }), document.querySelector(".tex-head .tex-run").click(), 1)`);
+      const heldRun = await until(`window.__held === true`, 60000);
+      await ev(`(() => { const i = ${W1}.querySelector("input[type=range]"); i.value = "5"; i.dispatchEvent(new Event("input", { bubbles: true })); return 1; })()`);
+      await sleep(300);
+      const during = await ev(`({ dis: ${W1}.querySelector("input[type=range]").disabled, title: ${W1}.title })`);
+      await ev(`(delete window.__sbTexRunHold, delete window.__held, window.__go(), 1)`);
+      const ranAgain = await statusIs(/^Ran 1 SageTeX item in [0-9.]+ s$/, 120000);
+      const relive = await until(`!!${W1} && !${W1}.querySelector("input[type=range]").disabled`, 15000);
+      const sent1 = await ev(`import(${IAU}).then((m) => m.sent)`);
+      check(heldRun && during.dis && during.title === "Run the code (Shift+Enter) to use these controls" && ranAgain && relive && sent1 === sent0,
+        "@interact live: a new Run ends the last one's widgets as it starts: a change while it holds the session's turn sends nothing, the widget shown dead; its own widget live after", { heldRun, during, ranAgain, relive, sent0, sent1 });
       const t = await ev(`document.querySelector(".tex-src").value`);
       await typeInto(t.replace("slider(1, 5, 1, 2)", "slider(1, 5, 1, 3)"));
       const stale = await until(`!!document.querySelector('.tex-preview .ch:not([hidden]) .sageinteract.sagestale')`, 10000);
@@ -3392,12 +3408,12 @@ The end.
         r.freshB = { value: slider().value, out: w().querySelector(".si-out")?.textContent ?? null, sink: k.targetSink(901) === null };
         held.shift().done(); await tick(); await tick(); r.afterA = calls.join();
         // the interpreter started again (a new generation: its interacts gone): B's widget no longer sends, and is shown dead
-        await change(3); held.shift()?.done(); await tick();
-        k.generation = 2; await change(4);
+        await change(3); k.generation = 2; r.sinkRestart = k.targetSink(901) === null; held.shift()?.done(); await tick();
+        await change(4);
         r.restart = { sent: calls.join(), dis: slider().disabled, title: w().title };
         // a Run C, then the document left (its ids marked over) while a request runs with a change waiting: nothing more sent
         k.generation = 2; box.innerHTML = html(2); const C = runOf(2); m.live(box, s, C);
-        await change(7); await change(8); C.over = 1; held.shift()?.done(); await tick(); await tick();
+        await change(7); await change(8); C.over = 1; r.sinkOver = k.targetSink(901) === null; held.shift()?.done(); await tick(); await tick();
         r.left = calls.join();
         // the session's turn: a request waits for it (a Run's folder going in), and is checked again when its turn comes
         let open1; gate = new Promise((res) => (open1 = res));
@@ -3419,9 +3435,9 @@ The end.
       })()`);
       check(own?.sentA === "901:5" && own.outA === "five\n" && own.freshB?.value === "2" && own.freshB.out === null && own.freshB.sink && own.afterA === "901:5",
         "@interact live: a new Run reusing an id: its widget fresh (no values or output of the old one's); the old request's output and its waiting change dropped", own);
-      check(own?.restart?.sent === "901:5,901:3" && own.restart.dis && own.restart.title === "Run the code (Shift+Enter) to use these controls",
-        "@interact live: the interpreter started again: a change sends nothing, and the widget is shown dead, saying to run the code", own?.restart);
-      check(own?.left === "901:5,901:3,901:7", "@interact live: the document left while a request runs: its waiting change never sent", own);
+      check(own?.sinkRestart && own?.restart?.sent === "901:5,901:3" && own.restart.dis && own.restart.title === "Run the code (Shift+Enter) to use these controls",
+        "@interact live: the interpreter started again: output for the request running dropped; a change sends nothing, and the widget is shown dead, saying to run the code", own?.restart);
+      check(own?.sinkOver && own?.left === "901:5,901:3,901:7", "@interact live: the document left while a request runs: its output dropped, its waiting change never sent", own);
       check(own?.waiting === "901:5,901:3,901:7" && own.turned === "901:5,901:3,901:7,901:1" && own.overWait === own.turned,
         "@interact live: a request waits for the session's turn (as a Run does), and isn't sent if its Run ended meanwhile", own);
       check(own?.typed === 0 && own.entered === "901:sin", "@interact live: a text control runs its function on change (Enter or leaving it), not on each key", own);

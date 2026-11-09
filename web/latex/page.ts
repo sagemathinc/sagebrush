@@ -779,6 +779,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     if (!items.length) { say("No SageTeX code to run"); return; }
     running = true; runBtn.textContent = "Starting Sage…"; runBtn.title = "Stop"; say("");
     const my = ++runGen, run = new AbortController(), stop = () => run.abort(), stopRun = new AbortController();
+    // (the last Run's widgets end here, before this one takes the session's turn (astra, daybreak3, #937))
+    liveIds.over = 1;
     runStop = stopRun;
     life.signal.addEventListener("abort", stop, { once: true });
     const current = () => live() && my === runGen;

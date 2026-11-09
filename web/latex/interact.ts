@@ -127,7 +127,8 @@ export function draw(root: ParentNode, s: InteractSession | null = null, ids: Ru
 // the document). A new Run, another document or the interpreter started again (a new generation: its interacts are
 // gone) ends it: its values and output dropped, a
 // request of it not sent, output addressed to it not shown. A request is sent in the session's turn (serial), as a Run
-// is, so it never runs while a Run puts another folder in; output goes only to the request running. Present shows its
+// is, so it never runs while a Run puts another folder in; output goes only to the request running, checked at each
+// delivery. A new Run ends the last one as it starts (page.ts), before it takes the session's turn. Present shows its
 // copy with the controls disabled (present.ts): its values and output follow the preview's.
 /** The part of the LaTeX session's kernel (WorkerKernel) live interacts use. */
 export interface InteractKernel { generation: number; interact(iid: number, values: Record<string, unknown>, sink: object): void; targetSink: (t: number) => object | null }
@@ -140,6 +141,8 @@ const states = new Map<number, State>();
 // (the elements given listeners, so a later live() over the same element doesn't wire it twice)
 const wired = new WeakSet<HTMLElement>();
 let hooked: InteractKernel | null = null, run: RunIds | null = null, cur: { iid: number; st: State } | null = null;
+/** Requests sent to the kernel so far (the page test's count). */
+export let sent = 0;
 // (a state still the one of the Run live now, its interpreter still the Run's)
 const ours = (k: InteractKernel, iid: number, st: State) => states.get(iid) === st && !run?.over && run?.gen === k.generation;
 // (a widget whose Run is over: as drawn, saying to run the code first)
@@ -192,7 +195,7 @@ function send(s: InteractSession, k: InteractKernel, iid: number, st: State) {
   st.busy = true;
   void s.serial(() => new Promise<void>((res) => {
     if (!ours(k, iid, st)) { st.busy = false; return res(); }
-    st.dirty = false; st.fresh = true; cur = { iid, st };
+    st.dirty = false; st.fresh = true; cur = { iid, st }; sent++;
     const done = () => { if (cur?.st === st) cur = null; st.busy = false; res(); if (st.dirty && ours(k, iid, st)) send(s, k, iid, st); };
     k.interact(iid, st.values, {
       start() {}, out() {}, display() {}, interact() {}, clear() {}, input(_p: string, reply: (v: null) => void) { reply(null); },
@@ -203,7 +206,7 @@ function send(s: InteractSession, k: InteractKernel, iid: number, st: State) {
 }
 // (output addressed to a live interact: the first of a request's starts its output afresh)
 function sinkFor(iid: number) {
-  const st = cur?.iid === iid && states.get(iid) === cur.st ? cur.st : null;
+  const st = cur?.iid === iid && hooked && ours(hooked, iid, cur.st) ? cur.st : null;
   if (!st) return null;
   const add = (h: string) => { if (st.fresh) { st.outs = ""; st.fresh = false; } st.outs = ((st.outs ?? "") + h).slice(-8 * INTERACT_LIMITS.svg); showOuts(iid); };
   return {
