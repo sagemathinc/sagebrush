@@ -5,10 +5,12 @@ verbs exist; the apply step and its tests use only this interface.
 - `list(path, after=None)`: one page of at most 1,000 entries under `path` (the planner's R), and the cursor of the
   next page or None.
 - `stat(path)`: the entry at `path`, or None. Delete here asks it, so a delete rests on a fresh answer (§4.1).
-- `read(path, writer, limit)`: the data file at `path` (by path only: the grant's scope is checked on the path, so
+- `read(path, writer, limit)`: the file at `path` (by path only: the grant's scope is checked on the path, so
   nothing is ever read by hash), its bytes written to `writer` (a callable taking a bytes chunk), never more than
   `limit` bytes. Returns (the Entry read, the number of bytes). That the entry's fid and sha256 and the bytes' hash
-  are the planned ones is the caller's check, never the client's.
+  are the planned ones is the caller's check, never the client's. For a document (a notebook, board or chat, §3.4)
+  the bytes are its snapshot: the file as the workspace's download saves it, at most DOCUMENT_BYTES (else 413), and
+  the Entry is that same read's identity, kind and revision.
 - `write(path, data, base, sha256, size)`: `data` an iterable of bytes chunks, which must be exactly `size` bytes
   hashing to `sha256` (the endpoint stores the blob by its hash, then the operation names it); `base` the planned
   entry's sha256 (and fid) it replaces, or None to create only. A compare-and-swap: if the entry isn't exactly that
@@ -23,6 +25,7 @@ stays pending)."""
 from dataclasses import dataclass
 
 LIST_PAGE = 1000                    # entries per page of `list` (§3.3)
+DOCUMENT_BYTES = 8 * 2**20          # a document's snapshot, as read: the endpoint answers 413 past it (@sagebrush)
 
 
 @dataclass(frozen=True)
