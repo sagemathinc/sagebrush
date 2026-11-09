@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { gzipSync } from "node:zlib";
 import { join } from "node:path";
-import { installEmbeddedLib, libEmbedStats } from "../src/lib-embed";
+import { installEmbeddedLib, installEmbeddedPackages, libEmbedStats, PACKAGE_BLOB_BYTES } from "../src/lib-embed";
 
 // The CLI's embedded library, compressed (src/lib-embed.ts; plan cli-lib-gzip-plan-r1): the payload made exactly as
 // scripts/build-cli.mjs makes it, decoded by the production installer on a fresh global object.
@@ -134,4 +134,115 @@ test("keyed families: each decodes on the first read of its own files only, coun
   const k: any = {};
   installEmbeddedLib(k, payloadOf({ "a.py": "1\n" }), undefined, undefined, { one: [payloadOf({ "s.py": "1\n" }), ["s.py"]], two: [payloadOf({ "s.py": "2\n" }), ["s.py"]] });
   assert.throws(() => k.__PYJS_LIB__, /the embedded library names s\.py twice/);
+});
+
+// The CLI's packages (scripts/build-cli.mjs, installEmbeddedPackages): the registry plain, each package's files a blob
+// of their own, decoded on the first read of one of its files, never at startup; @sagebrush's ruling, Nov 9, so that a
+// package costs a run nothing until it is imported.
+test("embedded packages: each package decodes on the first read of its own files only, counted per package", () => {
+  const g: any = {};
+  const reg = { format: 1, modules: { a: "@x/a@1", b: "@x/b@1" } };
+  installEmbeddedPackages(g, reg, {
+    "pkg-a": [payloadOf({ "pkg-a/py/a.py": "A\n", "pkg-a/py/a2.py": "A2\n" }), ["pkg-a/py/a.py", "pkg-a/py/a2.py"]],
+    "pkg-b": [payloadOf({ "pkg-b/py/b.py": "B\n" }), ["pkg-b/py/b.py"]],
+  });
+  const P = g.__SAGEBRUSH_PACKAGES__, before = { a: libEmbedStats.packages["pkg-a"] ?? 0, b: libEmbedStats.packages["pkg-b"] ?? 0 };
+  assert.equal(P.registry, reg, "the registry, plain");
+  assert.deepEqual(Object.keys(P.files).sort(), ["pkg-a/py/a.py", "pkg-a/py/a2.py", "pkg-b/py/b.py"], "every file visible before any decode");
+  assert.ok(Object.hasOwn(P.files, "pkg-b/py/b.py"), "as src/compile.ts asks");
+  assert.equal(libEmbedStats.packages["pkg-a"] ?? 0, before.a, "nothing decoded yet");
+  assert.equal(P.files["pkg-a/py/a2.py"], "A2\n");
+  assert.equal(P.files["pkg-a/py/a.py"], "A\n");
+  assert.equal(libEmbedStats.packages["pkg-a"], before.a + 1, "pkg-a decoded once for both its files");
+  assert.equal(libEmbedStats.packages["pkg-b"] ?? 0, before.b, "pkg-b not decoded by pkg-a's files");
+  assert.equal(P.files["pkg-b/py/b.py"], "B\n");
+  assert.equal(libEmbedStats.packages["pkg-b"], before.b + 1);
+});
+
+test("embedded packages fail closed: a corrupt blob, one past its ceiling, or one that isn't exactly its names throws and settles nothing", () => {
+  const good = payloadOf({ "p/py/x.py": "x\n" });
+  // (corrupt: the gzip's data bytes changed; each read throws again, and the file stays a getter)
+  const bytes = Buffer.from(good, "base64");
+  for (let i = 12; i < bytes.length - 8; i++) bytes[i] ^= 0x5a;
+  const c: any = {};
+  installEmbeddedPackages(c, {}, { p: [bytes.toString("base64"), ["p/py/x.py"]] });
+  assert.throws(() => c.__SAGEBRUSH_PACKAGES__.files["p/py/x.py"]);
+  assert.throws(() => c.__SAGEBRUSH_PACKAGES__.files["p/py/x.py"], Error, "still not settled");
+  assert.ok(Object.getOwnPropertyDescriptor(c.__SAGEBRUSH_PACKAGES__.files, "p/py/x.py")!.get, "a getter still");
+  // (past PACKAGE_BLOB_BYTES inflated: refused while inflating, not after)
+  const big: any = {};
+  installEmbeddedPackages(big, {}, { p: [gzipSync(Buffer.from(JSON.stringify({ "p/py/x.py": "x".repeat(PACKAGE_BLOB_BYTES) }), "utf8"), { level: 1 }).toString("base64"), ["p/py/x.py"]] });
+  assert.throws(() => big.__SAGEBRUSH_PACKAGES__.files["p/py/x.py"], RangeError);
+  // (a blob whose files aren't its names; a name outside its package's directory)
+  const m: any = {};
+  installEmbeddedPackages(m, {}, { p: [payloadOf({ "p/py/y.py": "y\n" }), ["p/py/x.py"]] });
+  assert.throws(() => m.__SAGEBRUSH_PACKAGES__.files["p/py/x.py"], /the embedded library's lazy part is not the files it names/);
+  assert.throws(() => installEmbeddedPackages({}, {}, { p: [good, ["q/py/x.py"]] }), /names a file outside it/);
+  // (a sibling whose name only starts with the package's: pkgs/tab's blob may not name pkgs/tabulate's files)
+  assert.throws(() => installEmbeddedPackages({}, {}, { "pkgs/tab": [payloadOf({ "pkgs/tabulate/x.py": "x\n" }), ["pkgs/tabulate/x.py"]] }), /names a file outside it/);
+});
+
+// The CLI's packages.gen.js as scripts/build-cli.mjs writes it (scripts/packages.mjs packagesGenSource; the node
+// suites run without a built bundle): every package file decodes to exactly the repository's bytes (each pinned by
+// the registry's SHA-256 too, which src/compile.ts checks on import).
+const packagesMjs = async () => await import(join(ROOT, "scripts", "packages.mjs"));
+test("the CLI's packages.gen.js: each package's blob is exactly that package's files, byte for byte", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { readPackages, packagesGenSource } = await packagesMjs();
+  assert.match(readFileSync(join(ROOT, "scripts", "build-cli.mjs"), "utf8"), /writeFileSync\(join\(out, "packages\.gen\.js"\), packagesGenSource\(packages\)\);/, "build-cli.mjs writes exactly packagesGenSource's");
+  const gen: string = packagesGenSource(readPackages(ROOT));
+  const head = 'import { installEmbeddedPackages } from "../../src/lib-embed";\n';
+  assert.ok(gen.startsWith(head), "the generated module installs the packages through src/lib-embed.ts");
+  const g: any = {};
+  new Function("globalThis", "installEmbeddedPackages", gen.slice(head.length))(g, installEmbeddedPackages);
+  const P = g.__SAGEBRUSH_PACKAGES__;
+  const reg = JSON.parse(readFileSync(join(ROOT, "packages", "registry.json"), "utf8"));
+  assert.deepEqual(P.registry, reg, "the registry, as committed");
+  const want: string[] = [];
+  for (const pkg of Object.values(reg.packages) as any[]) for (const f of Object.keys(pkg.files)) want.push(`${pkg.dir}/${f}`);
+  assert.deepEqual(Object.keys(P.files).sort(), want.sort(), "every registry file, and only those");
+  for (const k of want) assert.equal(P.files[k], readFileSync(join(ROOT, "packages", k), "utf8"), k);
+});
+
+// The CLI with its packages embedded as the bundle carries them (installed by a preload before src/cli starts, as
+// packages.gen.js runs before it in the bundle): a package's blob is decoded only when the package is imported. With
+// tabulate's blob corrupted, a start still runs and imports another package; only `import tabulate` fails, closed.
+test("the CLI decodes no package at startup: a corrupted package fails only its own import", async () => {
+  const { writeFileSync, mkdtempSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { spawnSync } = await import("node:child_process");
+  const dir = mkdtempSync(join(tmpdir(), "sb-lazy-pkg-"));
+  try {
+    const pre = join(dir, "packages-preload.mjs");
+    writeFileSync(
+      pre,
+      [
+        `import { createRequire } from "node:module";`,
+        `import { readPackages, packageBlobs } from ${JSON.stringify(join(ROOT, "scripts", "packages.mjs"))};`,
+        `const { installEmbeddedPackages } = createRequire(import.meta.url)(${JSON.stringify(join(__dirname, "..", "src", "lib-embed.js"))});`,
+        `const p = readPackages(${JSON.stringify(ROOT)});`,
+        `const blobs = packageBlobs(p.files);`,
+        `if (process.env.CORRUPT) { const b = Buffer.from(blobs[process.env.CORRUPT][0], "base64"); for (let i = 12; i < b.length - 8; i++) b[i] ^= 0x5a; blobs[process.env.CORRUPT][0] = b.toString("base64"); }`,
+        `installEmbeddedPackages(globalThis, p.registry, blobs);`,
+      ].join("\n"),
+    );
+    const cli = join(__dirname, "..", "src", "cli.js");
+    const run = (code: string, corrupt?: string) =>
+      spawnSync(process.execPath, ["--import", pre, cli, "-c", code], { encoding: "utf8", env: { ...process.env, SAGEBRUSH_NO_COMPILE_CACHE: "1", CORRUPT: corrupt ?? "" } });
+    // (the control: intact blobs import from the embedded copies, /$pyjs/packages)
+    const ok = run("import tabulate; print(tabulate.__file__)");
+    assert.equal(ok.status, 0, ok.stderr);
+    assert.equal(ok.stdout, "/$pyjs/packages/pypi-tabulate/py/tabulate.py\n");
+    const pass = run("print('started')", "pypi-tabulate");
+    assert.equal(pass.status, 0, pass.stderr);
+    assert.equal(pass.stdout, "started\n");
+    const other = run("import sortedcontainers; print(sortedcontainers.SortedList([2, 1]))", "pypi-tabulate");
+    assert.equal(other.status, 0, other.stderr);
+    assert.equal(other.stdout, "SortedList([1, 2])\n");
+    const broken = run("import tabulate", "pypi-tabulate");
+    assert.notEqual(broken.status, 0);
+    assert.match(broken.stderr, /ImportError|Error/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

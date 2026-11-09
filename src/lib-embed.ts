@@ -11,18 +11,21 @@ import { gunzipSync } from "zlib";
 
 /** (tests) how many times the library was decoded: the production decoder's own count (lazyDecodes is pathlib's
  * blob; families, each keyed family's, design/rill.md §6.3). */
-export const libEmbedStats = { decodes: 0, lazyDecodes: 0, families: {} as Record<string, number> };
+export const libEmbedStats = { decodes: 0, lazyDecodes: 0, families: {} as Record<string, number>, packages: {} as Record<string, number> };
 
-const decode = (payload: string): Record<string, string> => JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(gunzipSync(Buffer.from(payload, "base64"))));
+const decode = (payload: string, maxBytes?: number): Record<string, string> =>
+  JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(gunzipSync(Buffer.from(payload, "base64"), maxBytes === undefined ? {} : { maxOutputLength: maxBytes })));
+/** A package blob's ceiling, inflated: past it, its decode fails (a RangeError) and settles nothing. */
+export const PACKAGE_BLOB_BYTES = 64 << 20;
 const plain = (o: any, k: string, value: unknown) => Object.defineProperty(o, k, { value, writable: true, enumerable: true, configurable: true });
 
 // The lazy files on `lib`: getters, until the first read of one decodes `payload` and settles them all. A failed
 // decode, or a blob whose files aren't exactly `names`, throws and settles nothing.
-function installLazy(lib: Record<string, string>, payload: string, names: string[], family?: string) {
+function installLazy(lib: Record<string, string>, payload: string, names: string[], family?: string, counts = libEmbedStats.families, maxBytes?: number) {
   const load = (): Record<string, string> => {
     if (family === undefined) libEmbedStats.lazyDecodes++;
-    else libEmbedStats.families[family] = (libEmbedStats.families[family] ?? 0) + 1;
-    const files = decode(payload);
+    else counts[family] = (counts[family] ?? 0) + 1;
+    const files = decode(payload, maxBytes);
     const got = Object.keys(files).sort(), want = [...names].sort();
     if (got.length !== want.length || got.some((k, i) => k !== want[i])) throw new Error("the embedded library's lazy part is not the files it names");
     for (const n of names) plain(lib, n, files[n]);
@@ -64,4 +67,17 @@ export function installEmbeddedLib(g: any, payload: string, lazy?: string, lazyN
       settle(value);
     },
   });
+}
+
+/** `globalThis.__SAGEBRUSH_PACKAGES__` on `g`, as src/compile.ts reads it ({registry, files}): the registry plain,
+ * and each package's files (`blobs`: its directory -> [payload, names], the form of the library's) getters until the
+ * first read of one of them decodes that package's blob, independently of the others. A start that imports no
+ * package decodes none (the CLI's packages, scripts/build-cli.mjs). */
+export function installEmbeddedPackages(g: any, registry: unknown, blobs: Record<string, [string, string[]]>) {
+  const files: Record<string, string> = {};
+  for (const [dir, [p, names]] of Object.entries(blobs)) {
+    if (names.some((n) => !n.startsWith(dir + "/"))) throw new Error(`the embedded package ${dir} names a file outside it`);
+    installLazy(files, p, names, dir, libEmbedStats.packages, PACKAGE_BLOB_BYTES);
+  }
+  g.__SAGEBRUSH_PACKAGES__ = { registry, files };
 }
