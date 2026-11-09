@@ -13,7 +13,7 @@ fn hex_nat(s: &str) -> Nat {
         limbs.push(u64::from_str_radix(&s[start..end], 16).unwrap());
         end = start;
     }
-    Nat::from_limbs(&limbs).unwrap()
+    Nat::from_limbs(&limbs)
 }
 
 #[test]
@@ -25,9 +25,9 @@ fn isqrt() {
         let w: Vec<&str> = line.split(' ').collect();
         let x = hex_nat(w[1]);
         let ok = match w[0] {
-            "fast" => isqrt_fast_python(&x).unwrap() == hex_nat(w[2]),
-            "small" => isqrt_small_python(&x).unwrap() == hex_nat(w[2]),
-            "sqrtrem" => sqrtrem_python(&x).unwrap() == (hex_nat(w[2]), hex_nat(w[3])),
+            "fast" => isqrt_fast_python(&x) == hex_nat(w[2]),
+            "small" => isqrt_small_python(&x) == hex_nat(w[2]),
+            "sqrtrem" => sqrtrem_python(&x) == (hex_nat(w[2]), hex_nat(w[3])),
             op => panic!("op {}", op),
         };
         n += 1;
