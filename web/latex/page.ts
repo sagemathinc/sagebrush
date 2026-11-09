@@ -370,6 +370,9 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const preview = el("div", "page tex-preview");
   right.appendChild(preview);
   main.append(left, right);
+  // (the source's and the preview's widths: the edge between them, remembered on this device: workspace/resize.ts's
+  // texSplit, which the notebook page hosting this editor provides (index.html), so it isn't in the LaTeX bundles)
+  (globalThis as { __sbTexSplit?: (main: HTMLElement, left: HTMLElement, signal: AbortSignal) => void }).__sbTexSplit?.(main, left, life.signal);
   // (the bar for a change made elsewhere while this text had unsaved edits: one at a time, below)
   const bar = el("div", "tex-conflict"); bar.hidden = true; bar.setAttribute("role", "alert");
   const barText = el("span", "tex-conflict-t");
