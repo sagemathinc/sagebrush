@@ -37,7 +37,9 @@ ws.onmessage = (ev) => {
 const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
 const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 1500)); return r.result?.value; };
 const until = async (expr, ms = 15000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(100); } return false; };
-const go = async (url) => { await send("Page.navigate", { url }); await sleep(300); };
+// (a page left: marked first, so what's waited for next is the new document's, never the old one's still showing the same
+// file: #922's web-runner red at "(the page again)", the old page's handle answering before the new one put up its own)
+const go = async (url) => { await ev("(window.__old = 1, 1)").catch(() => {}); await send("Page.navigate", { url }); await sleep(300); await until("!window.__old && document.readyState !== 'loading'", 30000); };
 const fails = [];
 let checks = 0;
 const check = (ok, what) => { checks++; if (!ok) fails.push(what); };

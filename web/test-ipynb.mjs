@@ -15,7 +15,7 @@ const tmp = join(root, "web", "notebook");
 mkdirSync(tmp, { recursive: true });
 mkdirSync(join(root, "src"));
 writeFileSync(join(root, "package.json"), '{"type": "module"}');
-for (const f of ["ipynb.js", "marimo.js"]) copyFileSync(new URL("./notebook/" + f, import.meta.url), join(tmp, f));
+for (const f of ["ipynb.js", "nbformat.js", "marimo.js"]) copyFileSync(new URL("./notebook/" + f, import.meta.url), join(tmp, f));
 copyFileSync(new URL("../src/m-file.ts", import.meta.url), join(root, "src", "m-file.ts"));
 const { fromFile, toIpynb, toScript } = await import(pathToFileURL(join(tmp, "ipynb.js")));
 

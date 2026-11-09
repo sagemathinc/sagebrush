@@ -57,6 +57,12 @@ let sageSession: ReturnType<typeof sessionOf> | null = null;
 //  code: the editor loads without it); a failed fetch is tried again by a URL of its own)
 const runUrl = new URL("sagebrush-latex-run.js", import.meta.url).href;
 let runMod: Promise<typeof import("./run-core.mjs")> | null = null, runTries = 0;
+// (@interact, a Sagebrush extension: the preview's interacts drawn, and a Run's checked, by interact.ts, a chunk of its own,
+//  /sagebrush-latex-interact.js, fetched only once a preview or a Run has one; a failed fetch is tried again by a URL of
+//  its own)
+const interactUrl = new URL("sagebrush-latex-interact.js", import.meta.url).href;
+let interactMod: Promise<typeof import("./interact")> | null = null, interactTries = 0;
+const loadInteract = () => (interactMod ??= (import(interactTries++ ? `${interactUrl}?try=${interactTries}` : interactUrl) as Promise<typeof import("./interact")>).catch((e) => { interactMod = null; throw e; }));
 const loadRun = () => (runMod ??= (import(runTries++ ? `${runUrl}?try=${runTries}` : runUrl) as Promise<typeof import("./run-core.mjs")>).catch((e) => { runMod = null; throw e; }));
 let runGen = 0;
 // (a failed fetch is forgotten, so the next try fetches again, by a URL of its own: a browser may keep a failed
@@ -728,12 +734,18 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const slidesNow = () => Array.from(preview.querySelectorAll(":scope > .ch:not([hidden]) section.slide")) as HTMLElement[];
   // (the slide to start at: the first one whose bottom is in the preview's view)
   const frameInView = () => { const top = right.getBoundingClientRect().top; const k = slidesNow().findIndex((s) => s.getBoundingClientRect().bottom > top + 8); return k < 0 ? 1 : k + 1; };
-  let presenting: { stop(): void } | null = null;
+  let presenting: { stop(): void; at(): { frame: number; step: number }; go(frame: number, step?: number): void } | null = null;
   presentBtn.onclick = () => void loadPresent().then((m) => {
     if (!live() || presenting) return;
     presenting = m.present({ slides: slidesNow, onRendered: E.onRendered, onRun: () => { runKey(false); }, start: frameInView(), onExit: () => { presenting = null; presentBtn.focus(); } });
   }, () => say("Couldn't load the presenter. Check the network, then click Present to try again."));
   E.onRendered(() => { presentBtn.hidden = slidesNow().length === 0; });
+  // (the preview's interacts, drawn after each render that has one not drawn yet; the slide being presented shown again,
+  //  so its copy has them)
+  E.onRendered(() => {
+    if (!preview.querySelector(".sageinteract-at:not([data-drawn])")) return;
+    void loadInteract().then((m) => { if (live() && m.draw(preview) && presenting) { const a = presenting.at(); presenting.go(a.frame, a.step); } }, () => {});
+  });
   life.signal.addEventListener("abort", () => presenting?.stop());
 
   // ---- Run (run-core.mjs): the SageTeX items of the text in the editor now (the preview's own list of them, so only
@@ -774,7 +786,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
         // (the .tex's folder, as it is now, given to the session: its code imports a helper beside the .tex and reads
         //  its data, read-only, as real SageTeX run in the document's folder does; nothing else of the workspace)
         folder: async () => { const at = await host.ws.pathOfFile(host.fid); return at.ok ? rc.folderFiles(host.ws, at.path) : { msg: "Not run: this file isn't here any more" }; },
-        store: session, serial: session.serial, stop: stopRun.signal,
+        store: session, serial: session.serial, stop: stopRun.signal, interacts: loadInteract,
       });
       if (r.stale || !current()) return;
       if (r.msg) { say(r.msg); return; }
@@ -931,7 +943,9 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const sb = ((globalThis as any).sagebrush ??= {});
   const handle = { print: () => printPreview(), printMode: (on: boolean) => { document.documentElement.classList.toggle("tex-print", !!on); slidePages(!!on); }, fid: host.fid };
   sb.latex = handle;
-  dispose = () => { life.abort(); E.destroy(); dropImages(); cm?.destroy(); if (sb.latex === handle) delete sb.latex; };
+  // (left in its print layout, by an agent's printMode(true) then the page left or another file opened: put back, as
+  //  the layout hides all but this preview, and the slide page would stay the next page's paper)
+  dispose = () => { life.abort(); E.destroy(); dropImages(); cm?.destroy(); if (sb.latex === handle) { handle.printMode(false); delete sb.latex; } };
   // (closing for another file: what is pending written first, then the editor disposed of)
   // (held: read-only while a controlled switch settles and closes it; the saver's own read-only, for recovery, kept apart)
   let held = false, roSaver = false;
