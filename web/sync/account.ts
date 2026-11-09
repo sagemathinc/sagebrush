@@ -2285,7 +2285,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     this.sql.exec("CREATE TABLE IF NOT EXISTS agent_rates (key TEXT PRIMARY KEY, tokens REAL NOT NULL, at INTEGER NOT NULL)");
   }
   /** tests only (testAgent): lowered bounds */
-  private agentBounds = { perMinute: AGENT.perMinute, perHour: AGENT.perHour, accountPerMinute: AGENT.accountPerMinute, logRows: AGENT.logRows, logMs: AGENT.logDays * 86400_000, logSweep: AGENT.logSweep, logPage: AGENT.logPage, minuteMs: 60_000, hourMs: 3600_000 };
+  private agentBounds = { perMinute: AGENT.perMinute, perHour: AGENT.perHour, accountPerMinute: AGENT.accountPerMinute, logRows: AGENT.logRows, logMs: AGENT.logDays * 86400_000, logSweep: AGENT.logSweep, logPage: AGENT.logPage, minuteMs: 60_000, hourMs: 3600_000, dayMs: 86400_000 };
 
   private grantView(r: Row) {
     return {
@@ -2352,8 +2352,11 @@ export class SyncAccount extends DurableObject<SyncEnv> {
       while (this.one("SELECT 1 AS x FROM grants WHERE id = ?", id)) id = newGrantId();
       this.sql.exec(
         "INSERT INTO grants (id, agent, token_hash, scopes, run_code, outward, rate, created, expires) VALUES (?, ?, ?, ?, 0, '[]', ?, ?, ?)",
-        id, agent, hash, JSON.stringify(scopes), JSON.stringify({ per_minute: AGENT.perMinute, per_hour: AGENT.perHour }), now, now + (days as number) * 86400_000,
+        id, agent, hash, JSON.stringify(scopes), JSON.stringify({ per_minute: AGENT.perMinute, per_hour: AGENT.perHour }), now, now + (days as number) * this.agentBounds.dayMs,
       );
+      // (its expiry is when the dead grants past the newest 50 are next trimmed: the alarm is set for it now, or brought
+      // forward to it, whatever else is due; astra S5)
+      this.wakeBy(now + (days as number) * this.agentBounds.dayMs + 1);
       this.trimDead(now);
       return this.grantView(this.one("SELECT * FROM grants WHERE id = ?", id)!);
     }));
@@ -2521,7 +2524,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
 
   /** Tests only: lower the agents' bounds, or expire a grant now. */
-  async testAgent(a: { perMinute?: number; perHour?: number; accountPerMinute?: number; logRows?: number; logMs?: number; logSweep?: number; logPage?: number; readonly?: boolean; noArm?: boolean; expireLive?: boolean; expireIn?: { id: string; ms: number }; clearAlarm?: boolean; minuteMs?: number; hourMs?: number; resetRates?: boolean; expire?: string }): Promise<{ log: number; grants: number; rates: number; rateRows: string; alarm: number | null }> {
+  async testAgent(a: { perMinute?: number; perHour?: number; accountPerMinute?: number; logRows?: number; logMs?: number; logSweep?: number; logPage?: number; readonly?: boolean; noArm?: boolean; expireLive?: boolean; dayMs?: number; expireIn?: { id: string; ms: number }; clearAlarm?: boolean; minuteMs?: number; hourMs?: number; resetRates?: boolean; expire?: string }): Promise<{ log: number; grants: number; rates: number; rateRows: string; alarm: number | null }> {
     if (!testMode(this.env)) return { log: 0, grants: 0, rates: 0, rateRows: "", alarm: null };
     const b = this.agentBounds;
     if (a.perMinute !== undefined) b.perMinute = a.perMinute;
@@ -2530,6 +2533,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     if (a.logMs !== undefined) b.logMs = a.logMs;
     if (a.logSweep !== undefined) b.logSweep = a.logSweep;
     if (a.logPage !== undefined) b.logPage = a.logPage;
+    if (a.dayMs !== undefined) b.dayMs = a.dayMs;
     // (the state a plan without sync gives an account, §6.2, set directly)
     if (a.readonly && this.exists()) this.set("state", "readonly");
     if (a.accountPerMinute !== undefined) b.accountPerMinute = a.accountPerMinute;

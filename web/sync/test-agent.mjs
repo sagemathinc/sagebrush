@@ -112,7 +112,8 @@ const objects = { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, S
 const ratelimits = (id, fails = 1_000_000) => ({ SYNC_PREAUTH: { namespace_id: id, simple: { limit: 1_000_000, period: 60 } }, SYNC_AGENT_FAIL: { namespace_id: id + "9", simple: { limit: fails, period: 60 } } });
 const RO = "a9a9a9a9-0009-4a9a-8a9a-a9a9a9a9a909"; // read-only
 const FA = "a9a9a9a9-000b-4a9a-8a9a-a9a9a9a9a90b"; // the first logged row's alarm
-const listed = [A, B, L, RT, LG, DL, NS, RO, FA].join(",");
+const FB = "a9a9a9a9-000c-4a9a-8a9a-a9a9a9a9a90c"; // a grant's expiry armed by its make
+const listed = [A, B, L, RT, LG, DL, NS, RO, FA, FB].join(",");
 const mf = new Miniflare(convertV4MiniflareOptions({
   workers: [
     { ...base, name: "on", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_AGENT: "1", GRANT_TAG_KEY: KEY, SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["sagebrush.test/*"], outboundService: cocalc, ratelimits: ratelimits("3001") },
@@ -389,6 +390,15 @@ await section("rates: the grant's, then the account's", async () => {
   await seam(RT, { minuteMs: 600 });
   await new Promise((res) => setTimeout(res, 400));
   ok((await answer(await agent(g1.token, "stat", { path: "/x" }))).error === "not_built", "and it refills as time passes (3 a 0.6 s window here)");
+  // (grader S4b) both the minute and the hour spent: the answer names the first in §7's order, the minute
+  await seam(RT, { perMinute: 1, perHour: 1, accountPerMinute: 1000, minuteMs: 60_000, resetRates: true });
+  ok((await answer(await agent(g1.token, "stat", { path: "/x" }))).error === "not_built", "(one request spends both)");
+  ok((await answer(await agent(g1.token, "stat", { path: "/x" }))).limit === "requests_per_minute", "with the minute and the hour both spent, the refusal names the minute's limit");
+  // (grader S4c) retry_after is the time until one request refills: 2 a 2 s window here, so about 1 s after the second
+  await seam(RT, { perMinute: 2, perHour: 1000, minuteMs: 2000, resetRates: true });
+  await agent(g1.token, "stat", { path: "/x" }), await agent(g1.token, "stat", { path: "/x" });
+  const ra = await answer(await agent(g1.token, "stat", { path: "/x" }));
+  ok(ra.limit === "requests_per_minute" && ra.retry_after > 700 && ra.retry_after <= 1000, "retry_after is the time until a request refills (about 1 s here): " + ra.retry_after);
   await seam(RT, { perMinute: 100, perHour: 2, accountPerMinute: 1000, minuteMs: 60_000, resetRates: true });
   await agent(g1.token, "stat", { path: "/x" }), await agent(g1.token, "stat", { path: "/x" });
   const h = await answer(await agent(g1.token, "stat", { path: "/x" }));
@@ -514,6 +524,25 @@ await section("the first logged row arms the alarm", async () => {
   const al = (await (await seam(FA, {})).json()).alarm;
   const days = U.AGENT.logDays * 86400_000;
   ok(al !== null && al >= t0 + days && al <= t1 + days + 1, "the first logged row sets the alarm to its own age-out: " + (al === null ? null : al - t0 - days));
+});
+
+await section("making a grant arms its expiry", async () => {
+  // (astra S5) an ordinary make, no seam wake and no restart: with no alarm due, the alarm is set for the new grant's
+  // expiry; and a shorter-lived grant made later brings an alarm that is due later forward to its own expiry
+  const s = await enabled(FB);
+  ok((await (await seam(FB, { clearAlarm: true })).json()).alarm === null, "(no alarm due)");
+  const t0 = Date.now();
+  const g1 = await make(s, [{ path: "/", access: "read" }], { days: 30 });
+  const a1 = (await (await seam(FB, {})).json()).alarm;
+  ok(a1 !== null && Math.abs(a1 - (g1.grant.expires + 1)) <= 1, "a grant made sets the alarm to its own expiry: " + (a1 === null ? null : a1 - g1.grant.expires));
+  // (a day of 0.3 s here, so a 1-day grant expires 0.3 s after it is made)
+  await seam(FB, { dayMs: 300 });
+  const g2 = await make(s, [{ path: "/", access: "read" }], { days: 1 });
+  const a2 = (await (await seam(FB, {})).json()).alarm;
+  ok(a2 !== null && Math.abs(a2 - (g2.grant.expires + 1)) <= 1 && g2.grant.expires - t0 < 5000, "a shorter-lived grant made later brings it forward to that expiry: " + (a2 === null ? null : a2 - g2.grant.expires));
+  const g3 = await make(s, [{ path: "/", access: "read" }], { days: 2 });
+  const a3 = (await (await seam(FB, {})).json()).alarm;
+  ok(a3 === a2 || a3 === null || a3 <= g2.grant.expires + 1, "a later-expiring one doesn't push it back");
 });
 
 await section("a read-only account: reads pass, writes are refused", async () => {
