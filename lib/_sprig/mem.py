@@ -17,8 +17,9 @@ General::memory (design §5.6).
 
 import _memguard
 
-# below this, an operation is admitted without reading the host's memory (reading it costs more than the
-# allocation); larger ones are checked against the live figure
+# while the session's open reservations, this one included, stay below this, an operation is admitted without reading
+# the host's memory (reading it costs more than the allocation); past it, every reservation is checked against the
+# live figure, so many small reservations held at once (a deep continuation stack's chunks) are checked as their sum
 SMALL_BYTES = 1 << 20
 # the cap per operation where the host's memory can't be observed (no capacity figure)
 UNMEASURED_OPERATION_BYTES = 1 << 28
@@ -73,7 +74,7 @@ class Reservation:
 
     def acquire(self):
         need = self.nbytes
-        if need > SMALL_BYTES:
+        if _open[0] + need > SMALL_BYTES:
             avail, unmeasured = _allowance()
             if unmeasured is not None:
                 if need > UNMEASURED_OPERATION_BYTES:

@@ -104,6 +104,225 @@ print(json.dumps(out))
   }
 });
 
+// (astra2 on #911 r2: under the production policy, SMALL_BYTES as shipped, many small reservations held at once are
+// checked as their sum, and Print reserves its whole line, sized by every argument, a long number by its digits)
+test("§8.4, the default policy: stacked continuation chunks are checked as their sum, and the allowance is read", () => {
+  const got = py(`
+import json
+from _sprig import mem, eval as E
+from _sprig.eval import Session
+from _sprig.expr import Expr, Sym
+reads = [0]
+def none_left():
+    reads[0] += 1
+    return (0, None)
+mem._allowance = none_left
+r = {"small": mem.SMALL_BYTES, "chunk": E.KONT_CHUNK * mem.KONT_BYTES}
+a = mem.reserve(r["chunk"], "A test", "Test").acquire()
+r["first"] = [mem.open_bytes(), reads[0]]
+try:
+    mem.reserve(r["chunk"], "A test", "Test").acquire()
+    r["second"] = "admitted"
+except mem.SprigMemoryError as e:
+    r["second"] = ["refused", e.need_bytes, e.limit_bytes, reads[0]]
+a.release()
+r["after"] = mem.open_bytes()
+# through the evaluator: an expression two chunks deep, with no memory left past the first
+deep = Sym("x")
+for _ in range(E.KONT_CHUNK + 10):
+    deep = Expr("f", deep)
+s = Session(lambda t: None, lambda t: None)
+try:
+    s.evaluate(deep)
+    r["deep"] = "admitted"
+except mem.SprigMemoryError as e:
+    r["deep"] = ["refused", e.sprig_name, mem.open_bytes()]
+print(json.dumps(r))
+`);
+  assert.ok(got.chunk < got.small && 2 * got.chunk > got.small, `one chunk is small, two aren't (${got.chunk}, ${got.small})`);
+  assert.deepEqual(got.first, [got.chunk, 0], "the first chunk is admitted without reading the memory figure");
+  assert.deepEqual(got.second, ["refused", got.chunk, 0, 1], "the second is checked as the sum, with the figure read");
+  assert.equal(got.after, 0);
+  assert.deepEqual(got.deep, ["refused", "Evaluation", 0], "a deep evaluation's second chunk is refused, and gives everything back");
+});
+
+test("§8.4, the default policy: Print reserves its whole line, a long number by its digits, admitted at its peak and refused one byte past it", () => {
+  const got = py(`
+import json, _sprig
+from fractions import Fraction
+from _sprig import mem, base
+from _sprig.eval import Session, KONT_CHUNK
+from _sprig.expr import Expr
+big = 3 ** 200000
+args = ("x = ", big, Fraction(big, 7))
+need = KONT_CHUNK * mem.KONT_BYTES + base.format_bytes(args)
+r = {"need": need, "small": mem.SMALL_BYTES, "per_digit_ok": base.format_bytes((big,)) >= len(str(big))}
+for extra in (-1, 0):
+    mem._allowance = lambda: (need + extra - mem.open_bytes(), None)
+    out = []
+    s = Session(out.append, out.append)
+    try:
+        s.evaluate(Expr("Print", *args))
+        r[str(extra)] = ["admitted", len("".join(out)), mem.open_bytes()]
+    except mem.SprigMemoryError as e:
+        r[str(extra)] = ["refused", e.sprig_name, len("".join(out)), mem.open_bytes()]
+print(json.dumps(r))
+`);
+  assert.ok(got.need > got.small, "the line is past the small-operation size, so the figure is read");
+  assert.ok(got.per_digit_ok, "a long number is charged at least a byte per digit");
+  assert.deepEqual(got["-1"], ["refused", "Print", 0, 0], "one byte short: refused before anything is written, and given back");
+  assert.equal(got["0"][0], "admitted");
+  assert.ok(got["0"][1] > 2 * 95000, "the whole line is written");
+  assert.equal(got["0"][2], 0, "given back after the write");
+});
+
+// (ENGINE's E1 and SEC's (3) on #911 r2: the state a session keeps, under the shipped SMALL_BYTES: each definition is
+// charged while it is defined (reserved before it is published; a replacement gives back the old charge, a refusal
+// keeps the old definition, Stop leaves it, teardown gives back everything); ToExpression's parse is charged while its
+// statements run; a session's names go with it; a rational result's bound covers it)
+test("§8.4, the default policy: definitions stay charged; aggregate small ones at the boundary and +1; replace, refusal, aliasing, Stop and teardown", () => {
+  const got = py(`
+import json, _sprig
+from _sprig import mem, base
+from _sprig.eval import Session
+from _sprig.expr import Expr, Sym, size_of
+r = {"small": mem.SMALL_BYTES}
+val = Expr("List", *range(1000))
+D = (size_of(val) + 1) * mem.NODE_BYTES
+r["D"] = D
+def run(G, k):
+    mem._allowance = lambda: (G - mem.open_bytes(), None)
+    s = Session(lambda t: None, lambda t: None)
+    res = []
+    for i in range(k):
+        try:
+            s.define(Sym("v%d" % i), val, "Set")
+            res.append("ok")
+        except mem.SprigMemoryError as e:
+            res.append("refused")
+    held = mem.open_bytes()
+    s.close()
+    return res, held, mem.open_bytes()
+r["at"] = run(3 * D, 4)
+r["short"] = run(3 * D - 1, 3)
+# replacement, refusal of a replacement, aliasing, through Set in a session
+mem._allowance = lambda: (10**12, None)
+s = Session(lambda t: None, lambda t: None)
+s.evaluate(Expr("Set", Sym("a"), val))
+one = mem.open_bytes()
+s.evaluate(Expr("Set", Sym("b"), Sym("a")))
+r["alias"] = [one == D, mem.open_bytes() == 2 * D]
+s.evaluate(Expr("Set", Sym("a"), 5))
+r["replace"] = mem.open_bytes() == D + 2 * mem.NODE_BYTES
+mem._allowance = lambda: (0, None)
+big = Expr("List", *range(5000))
+try:
+    s.define(Sym("b"), big, "Set")
+    r["refused"] = "admitted"
+except mem.SprigMemoryError:
+    held = mem.open_bytes()
+    mem._allowance = lambda: (10**12, None)
+    r["refused"] = [s.evaluate(Sym("b")) == val, held == D + 2 * mem.NODE_BYTES]
+# Stop while the new value is computed: the old definition and its charge stay
+mem._allowance = lambda: (10**12, None)
+def stop(sess, e):
+    raise KeyboardInterrupt
+s.builtins = dict(s.builtins, StopNow=stop)
+before = mem.open_bytes()
+try:
+    s.evaluate(Expr("Set", Sym("b"), Expr("StopNow")))
+except KeyboardInterrupt:
+    r["stop"] = [s.evaluate(Sym("b")) == val, mem.open_bytes() == before]
+s.close()
+r["teardown"] = mem.open_bytes()
+# through the CLI's run(): 40 definitions of Range[2000], each small, charged together, and all given back at the end
+mem._allowance = lambda: (10**12, None)
+seen = []
+def probe(sess, e):
+    seen.append(mem.open_bytes())
+    return 0
+base.BUILTINS["Probe"] = probe
+_sprig.run("".join("v%d = Range[2000];\\n" % i for i in range(40)) + "Probe[]", lambda t: None, lambda t: None)
+del base.BUILTINS["Probe"]
+r["forty"] = [seen[0] >= 40 * 2000 * mem.NODE_BYTES, mem.open_bytes()]
+print(json.dumps(r))
+`);
+  assert.ok(got.D < got.small && 3 * got.D > got.small, `each definition is small, three aren't (${got.D}, ${got.small})`);
+  assert.deepEqual(got.at, [["ok", "ok", "ok", "refused"], 3 * got.D, 0], "three admitted at their sum, the fourth refused; teardown gives all back");
+  assert.deepEqual(got.short, [["ok", "ok", "refused"], 2 * got.D, 0], "one byte short of three: the third refused");
+  assert.deepEqual(got.alias, [true, true], "an alias is a definition of its own, charged on its own");
+  assert.equal(got.replace, true, "a replacement gives back the old value's charge");
+  assert.deepEqual(got.refused, [true, true], "a refused replacement keeps the old definition and charge");
+  assert.deepEqual(got.stop, [true, true], "Stop while the new value is computed leaves the old definition and charge");
+  assert.equal(got.teardown, 0);
+  assert.deepEqual(got.forty, [true, 0], "40 definitions held are charged together, and the run's end gives them back");
+});
+
+test("§8.4, the default policy: ToExpression's parse is charged while its statements run, and Stop gives it back", () => {
+  const got = py(`
+import json
+from _sprig import mem, base, eval as E
+from _sprig.eval import Session
+from _sprig.expr import Expr
+mem._allowance = lambda: (10**12, None)
+seen = []
+def probe(sess, e):
+    seen.append(mem.open_bytes())
+    return 0
+def stop(sess, e):
+    raise KeyboardInterrupt
+s = Session(lambda t: None, lambda t: None)
+s.builtins = dict(s.builtins, Probe=probe, StopNow=stop)
+src = "Probe[]; Probe[]"
+s.evaluate(Expr("ToExpression", src))
+after = mem.open_bytes()
+try:
+    s.evaluate(Expr("ToExpression", "Probe[]; StopNow[]"))
+    stopped = "swallowed"
+except KeyboardInterrupt:
+    stopped = [mem.open_bytes(), len(s.holds)]
+print(json.dumps({"seen": seen, "parse": len(src) * mem.PARSE_BYTES_PER_CHAR, "chunk": E.KONT_CHUNK * mem.KONT_BYTES, "after": after, "stopped": stopped}))
+`);
+  for (const v of got.seen.slice(0, 2)) assert.ok(v >= got.parse + got.chunk, `the parse is held with the stack (${v} >= ${got.parse} + ${got.chunk})`);
+  assert.equal(got.after, 0);
+  assert.deepEqual(got.stopped, [0, 0], "Stop inside a statement gives back the parse's hold");
+});
+
+test("a session's names go with it: the shared table holds only Sprig's own, and constants keep their identity", () => {
+  const got = py(`
+import json, _sprig
+from _sprig.expr import Sym, TRUE
+shared, loose = len(Sym._table), len(Sym._loose)
+_sprig.run_cases([("c%d" % k, " + ".join("name%d" % (k * 1000 + i) for i in range(1000))) for k in range(10)])
+res = _sprig.run_cases([("c", "u = 3; {u, u + 1, True}")])
+print(json.dumps({"shared": len(Sym._table) - shared, "loose": len(Sym._loose) - loose, "true": Sym("True") is TRUE, "res": res[0]["result"]}))
+`);
+  assert.deepEqual(got, { shared: 0, loose: 0, true: true, res: "{3, 4, True}" });
+});
+
+test("a rational sum's or product's result bits are within the bound reserved for it", () => {
+  const got = py(`
+import json, random
+from fractions import Fraction
+from _sprig.base import result_bits, _bits
+rnd = random.Random(911)
+bad = []
+for _ in range(400):
+    k = rnd.choice([1, 8, 64, 512])
+    a = Fraction(rnd.getrandbits(k * 3) + 1, rnd.getrandbits(k) + 1)
+    b = rnd.choice([Fraction(rnd.getrandbits(k) + 1, rnd.getrandbits(k * 2) + 1), rnd.getrandbits(k * 2) + 1])
+    for op in "+*":
+        v = a + b if op == "+" else a * b
+        if _bits(v) > result_bits(op, a, b):
+            bad.append([op, str(a)[:40], str(b)[:40]])
+# astra2's case: 512-bit denominators
+a, b = Fraction(1, 2**512 - 1), Fraction(1, 2**511 + 1)
+print(json.dumps({"bad": bad, "astra2": [_bits(a + b), result_bits("+", a, b)]}))
+`);
+  assert.deepEqual(got.bad, []);
+  assert.ok(got.astra2[0] <= got.astra2[1], JSON.stringify(got.astra2));
+});
+
 test("§8.4: a refusal through the CLI is General::memory with Sagebrush's figures, and the session answers", () => {
   const dir = mkdtempSync(join(tmpdir(), "sprig-mem-"));
   try {

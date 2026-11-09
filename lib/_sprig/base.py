@@ -17,7 +17,7 @@ import fractions
 from . import mem
 from .eval import Tail
 from .expr import (Expr, Sym, TRUE, FALSE, NULL, LIST, FAILED, boolean, is_number, is_exact, num, head_of,
-                   same, compare, _coeff_term)
+                   same, compare, _coeff_term, size_of)
 from .fmt import input_form
 
 Fraction = fractions.Fraction
@@ -91,10 +91,30 @@ def _finite(x, nonzero):
     return x
 
 
+def _parts(x):
+    """(numerator bits, denominator bits) of an exact number; an integer's denominator counts 0."""
+    if type(x) is int:
+        return x.bit_length(), 0
+    return x.numerator.bit_length(), x.denominator.bit_length()
+
+
+def result_bits(op, a, b):
+    """A bound on the bits of a + b or a * b, exact, numerator and denominator together, and on its intermediates:
+    for integers, a sum's is the larger operand's + 1; p/q + r/s = (ps + rq)/qs has a numerator of at most
+    p + q + r + s + 1 bits over qs, q + s; p/q * r/s = pr/qs has at most all four parts' bits."""
+    if op == "+" and type(a) is int and type(b) is int:
+        return max(a.bit_length(), b.bit_length()) + 1
+    p, q = _parts(a)
+    r, s = _parts(b)
+    if op == "+":
+        return (p + q + r + s + 1) + (q + s)
+    return p + q + r + s + 1
+
+
 def _arith(op, a, b, name):
     """a + b or a * b: exactly, reserving a large result first; or as machine Reals, inside the machine range."""
     if type(a) is not float and type(b) is not float:
-        bits = (max(_bits(a), _bits(b)) + 1) if op == "+" else _bits(a) + _bits(b)
+        bits = result_bits(op, a, b)
         if bits > RESERVE_BITS:
             return _with_int_reservation(bits, name, lambda: a + b if op == "+" else a * b)
         return a + b if op == "+" else a * b
@@ -555,7 +575,7 @@ def _set(sess, e):
     if _protected(lhs):
         sess.message("Set", "wrsym", lhs.name)
         return rhs
-    sess.own[lhs] = rhs
+    sess.define(lhs, rhs, "Set")
     return rhs
 
 
@@ -569,7 +589,7 @@ def _setdelayed(sess, e):
     if _protected(lhs):
         sess.message("SetDelayed", "wrsym", lhs.name)
         return FAILED
-    sess.own[lhs] = rhs
+    sess.define(lhs, rhs, "SetDelayed")
     return NULL
 
 
@@ -584,15 +604,23 @@ ATTRIBUTES["SetDelayed"] = ("HoldAll", "Protected", "SequenceHold")
 # ---------------------------------------------------------------- printing and strings
 
 def text_of(x):
-    """Print's text of x: a string as itself, anything else as InputForm (S1.3 gives OutputForm)."""
+    """Print's text of x: a string as itself, anything else as InputForm (S1.3 gives OutputForm).  The caller has
+    reserved its formatting (format_bytes)."""
     if type(x) is str:
         return x
-    with mem.reserve((x.size if type(x) is Expr else 1) * mem.FORMAT_BYTES_PER_NODE, "Formatting an expression", "Print"):
-        return input_form(x)
+    return input_form(x)
+
+
+def format_bytes(items):
+    """The peak of formatting items and joining their text: per unit of each one's size, a long number or string
+    counted by its length (size_of)."""
+    return (1 + sum(size_of(x) for x in items)) * mem.FORMAT_BYTES_PER_NODE
 
 
 def _print(sess, e):
-    sess.write_out("".join(text_of(x) for x in e.args) + "\n")
+    # (the whole line's peak, every argument's text and the joined line, reserved once and held through the write)
+    with mem.reserve(format_bytes(e.args), "Formatting %d items" % len(e.args), "Print"):
+        sess.write_out("".join(text_of(x) for x in e.args) + "\n")
     return NULL
 
 
@@ -612,20 +640,26 @@ def _toexpression(sess, e):
         return None
     from . import parse
     src = e.args[0]
-    with mem.reserve(len(src) * mem.PARSE_BYTES_PER_CHAR, "Parsing %d characters" % len(src), "ToExpression"):
-        try:
-            stmts = parse.parse(src)
-        except parse.SprigSyntaxError as err:
-            syntax_message(sess, err, src, "<string>")
-            return FAILED
-        except parse.NotYetSyntax as err:
-            sess.message("ToExpression", "notyet", err.what)
-            return FAILED
-    if not stmts:
-        return NULL
-    for s in stmts[:-1]:
-        yield ("eval", s)
-    return Tail(stmts[-1])
+    # (the parse's tokens and tree are held while its statements are evaluated, so its charge is held as long: across
+    # the yields, given back at the end, or by evaluate() if Stop ends it there)
+    r = mem.reserve(len(src) * mem.PARSE_BYTES_PER_CHAR, "Parsing %d characters" % len(src), "ToExpression")
+    r.acquire()
+    sess.hold(r)
+    try:
+        stmts = parse.parse(src)
+    except parse.SprigSyntaxError as err:
+        sess.unhold(r)
+        syntax_message(sess, err, src, "<string>")
+        return FAILED
+    except parse.NotYetSyntax as err:
+        sess.unhold(r)
+        sess.message("ToExpression", "notyet", err.what)
+        return FAILED
+    value = NULL
+    for s in stmts:
+        value = yield ("eval", s)
+    sess.unhold(r)
+    return value
 
 
 def syntax_message(sess, err, src, where):

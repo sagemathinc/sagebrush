@@ -20,7 +20,7 @@ name (§8.1); the loop is a compiled loop, which tests Stop each iteration.
 """
 
 from . import mem
-from .expr import Expr, Sym, NULL, LIST, same, sort_canonical
+from .expr import Expr, Sym, NULL, LIST, same, size_of, sort_canonical
 
 SEQUENCE = Sym("Sequence")
 # (the type of a generator builtin's call)
@@ -46,13 +46,64 @@ class Session:
 
     def __init__(self, write_out, write_err):
         from . import base
-        self.own = {}                  # Sym -> its value (OwnValues), each published in one store (§8.2)
+        self.own = {}                  # Sym -> (its value, the value's reservation): each published in one store (§8.2)
+        self.symbols = {}              # the names this session made (Sym's session table)
+        self.holds = []                # reservations a builtin holds across its yields, released at its end or Stop
         self.builtins = base.BUILTINS
         self.attributes = base.ATTRIBUTES
         self.texts = dict(base.MESSAGES)   # (symbol name, tag) -> text
         self.write_out = write_out     # Print's lines
         self.write_err = write_err     # messages
         self.messages = []             # this statement's messages, "f::tag: text"
+
+    # ---------------------------------------------------------------- definitions and the session's lifetime
+
+    def define(self, sym, value, name):
+        """Give sym its value, charging the value's nodes to the ledger for as long as it is defined (§8.4).  The new
+        charge is reserved first (a refusal leaves the old definition), then the value and its reservation are
+        published in one store, and the replaced value's reservation is given back.  Each definition is charged on
+        its own, even when values share structure: an upper bound."""
+        n = size_of(value)
+        r = mem.reserve((n + 1) * mem.NODE_BYTES, "A definition of %d nodes" % n, name)
+        r.acquire()
+        old = self.own.get(sym)
+        published = False
+        try:
+            self.own[sym] = (value, r)
+            published = True
+        finally:
+            if not published:
+                r.release()
+            elif old is not None:
+                old[1].release()
+
+    def hold(self, r):
+        """Keep reservation r for a builtin across its yields; evaluate() gives it back if Stop ends the builtin."""
+        self.holds.append(r)
+
+    def unhold(self, r):
+        self.holds.remove(r)
+        r.release()
+
+    def activate(self):
+        """Make this session's table the one new names go in; returns the previous one, for restore()."""
+        prev = Sym._local
+        Sym._local = self.symbols
+        return prev
+
+    @staticmethod
+    def restore(prev):
+        Sym._local = prev
+
+    def close(self):
+        """The session's end: every definition's reservation given back, and its names dropped."""
+        own, self.own = self.own, {}
+        for _, r in own.values():
+            r.release()
+        for r in self.holds:
+            r.release()
+        self.holds = []
+        self.symbols = {}
 
     # ---------------------------------------------------------------- messages
 
@@ -77,6 +128,7 @@ class Session:
     def evaluate(self, expr):
         """expr's value."""
         konts = []
+        holds0 = len(self.holds)       # (the builtins' holds from here on are this evaluation's)
         chunks = []                    # the continuation stack's reservations
         limit = 0                      # frames reserved so far
         mode_eval = True
@@ -94,6 +146,7 @@ class Session:
                     t = type(e)
                     if t is Sym:
                         v = self.own.get(e)
+                        v = v[0] if v is not None else None
                         if v is None or v is e:
                             val, mode_eval = e, False
                         else:
@@ -141,6 +194,9 @@ class Session:
         finally:
             for r in chunks:
                 r.release()
+            for r in self.holds[holds0:]:
+                r.release()
+            del self.holds[holds0:]
 
     def _held(self, head, args):
         """Which arguments aren't evaluated: None (none), "all", or a set of positions."""

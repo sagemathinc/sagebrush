@@ -110,13 +110,14 @@ def stop_gen(sess, e):
     raise KeyboardInterrupt
 s = Session(lambda t: None, lambda t: None)
 s.builtins = dict(s.builtins, StopNow=stop_pure, StopLater=stop_gen)
-s.own[Sym("a")] = 1
+s.define(Sym("a"), 1, "Set")
+base0 = mem.open_bytes()   # (a's definition, charged while it is defined)
 for name in ("StopNow", "StopLater"):
     try:
         s.evaluate(P.parse("1 + f[a, " + name + "[1]]")[0])
         r[name] = "swallowed"
     except KeyboardInterrupt:
-        r[name] = ["propagated", mem.open_bytes(), s.evaluate(Sym("a"))]
+        r[name] = ["propagated", mem.open_bytes() - base0, s.evaluate(Sym("a"))]
 real = P.Parser.statement
 def stop_parse(self):
     raise KeyboardInterrupt
@@ -125,7 +126,7 @@ try:
     _sprig.run("1", lambda t: None, lambda t: None)
     r["parse"] = "swallowed"
 except KeyboardInterrupt:
-    r["parse"] = ["propagated", mem.open_bytes()]
+    r["parse"] = ["propagated", mem.open_bytes() - base0]
 P.Parser.statement = real
 real_parse = P.parse
 def stop_inner(src):
@@ -135,7 +136,7 @@ try:
     s.evaluate(Expr("ToExpression", "1 + 1"))
     r["toexpression"] = "swallowed"
 except KeyboardInterrupt:
-    r["toexpression"] = ["propagated", mem.open_bytes()]
+    r["toexpression"] = ["propagated", mem.open_bytes() - base0]
 P.parse = real_parse
 print(json.dumps(r))
 `);

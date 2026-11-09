@@ -21,16 +21,26 @@ Fraction = fractions.Fraction
 
 
 class Sym:
-    """A symbol, interned by name: `Sym("x") is Sym("x")`."""
+    """A symbol, interned by name: `Sym("x") is Sym("x")`.  The names made while Sprig loads (its builtins and
+    constants) are in one table every session shares, frozen once Sprig has loaded; any other name is interned in the
+    active session's own table (Session.symbols), so a session's names go with it.  Outside a session (direct library
+    use) they go in a table of their own, _loose."""
     __slots__ = ("name",)
     _table = {}
+    _frozen = False
+    _local = None
+    _loose = {}
 
     def __new__(cls, name):
         s = cls._table.get(name)
+        if s is not None:
+            return s
+        t = cls._table if not cls._frozen else (cls._local if cls._local is not None else cls._loose)
+        s = t.get(name)
         if s is None:
             s = object.__new__(cls)
             s.name = name
-            cls._table[name] = s
+            t[name] = s
         return s
 
     def __repr__(self):

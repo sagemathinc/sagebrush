@@ -16,13 +16,16 @@ import sys
 
 import _memguard
 
-from . import mem
+from . import base, mem
 from .eval import Session
 from .expr import NULL, FAILED, Sym, size_of
 from .fmt import full_form, input_form
 from .parse import NotYetSyntax, Parser, SprigSyntaxError
 
 ABORTED = Sym("$Aborted")
+# (every name made while Sprig loads, its builtins' and constants', is now in the shared table; from here on a new name
+# goes in its session's own table, Sym's docstring)
+Sym._frozen = True
 
 
 def _memory_message(sess, e):
@@ -83,6 +86,7 @@ def run(src, write_out=None, write_err=None):
     write_out = write_out or _stdout
     write_err = write_err or _stderr
     sess = Session(write_out, write_err)
+    prev = sess.activate()
 
     def show(value):
         if value is not NULL:
@@ -96,6 +100,9 @@ def run(src, write_out=None, write_err=None):
     except _memguard.SagebrushMemoryError as err:
         _memory_message(sess, err)
         return 1
+    finally:
+        sess.close()
+        Session.restore(prev)
 
 
 def run_cases(cases):
@@ -106,6 +113,7 @@ def run_cases(cases):
     for cid, src in cases:
         out = []
         sess = Session(out.append, out.append)
+        prev = sess.activate()
         last = [NULL]
 
         def keep(value):
@@ -119,6 +127,9 @@ def run_cases(cases):
         except _memguard.SagebrushMemoryError as err:
             _memory_message(sess, err)
             result, full = "$Aborted", "$Aborted"
+        finally:
+            sess.close()
+            Session.restore(prev)
         results.append({"id": cid, "result": result, "fullform": full, "output": "".join(out),
                         "messages": list(sess.messages)})
     return results
