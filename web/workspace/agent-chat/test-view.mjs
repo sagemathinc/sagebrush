@@ -97,6 +97,36 @@ check(u.className === "user other", "a kept message with a hostile mode: class o
   check(/12 tokens/.test(draw({ output_tokens: 12 }, 1500)) && /1\.5 s/.test(draw({ output_tokens: 12 }, 1500)), "…and good ones shown", draw({ output_tokens: 12 }, 1500).slice(-200));
 }
 
+// ---- grader's rows on #932: a hostile name with no spaces, the 32-character bound, negative and non-finite numbers
+// from the wire (JSON's 1e400 is Infinity), and a tool finished "running"
+{
+  const g = newThread("g", "G");
+  let n = 0;
+  const ge = (e) => apply(g, { seq: ++n, turn_id: "x1", ...e }, 1000);
+  ge({ type: "turn_started" });
+  const L32 = "a".repeat(32), L33 = "a".repeat(33);
+  ge({ type: "artifact", id: "s1", kind: "code", title: "s", lang: '"><svg/onload=alert(1)>', body: "" });
+  ge({ type: "artifact", id: "s2", kind: "code", title: "s", lang: L33, body: "" });
+  ge({ type: "artifact", id: "s3", kind: "code", title: "s", lang: L32, body: "" });
+  check(g.artifacts[0].lang === undefined && g.artifacts[1].lang === undefined && g.artifacts[2].lang === L32, "a language with no spaces but markup characters is dropped; 33 characters dropped, 32 kept", g.artifacts.map((a) => a.lang));
+  const wire = JSON.parse('[{"d":-5},{"d":1e400},{"u":-1},{"u":1e400}]');
+  ge({ type: "tool_call_started", call: "d1", tool: "terminal", name: "sh", summary: "s" });
+  ge({ type: "tool_call_finished", call: "d1", status: "ok", duration_ms: wire[0].d });
+  ge({ type: "tool_call_started", call: "d2", tool: "terminal", name: "sh", summary: "s" });
+  ge({ type: "tool_call_finished", call: "d2", status: "ok", duration_ms: wire[1].d });
+  ge({ type: "tool_call_started", call: "r1", tool: "terminal", name: "sh", summary: "s" });
+  ge({ type: "tool_call_finished", call: "r1", status: "running" });
+  ge({ type: "turn_usage", usage: { output_tokens: wire[2].u } });
+  ge({ type: "turn_usage", usage: { output_tokens: wire[3].u } });
+  const gt = g.entries.find((e) => e.kind === "turn");
+  check(gt.tools.d1.duration_ms === undefined && gt.tools.d2.duration_ms === undefined, "durations -5 and 1e400 (Infinity, from JSON) are left out", [gt.tools.d1.duration_ms, gt.tools.d2.duration_ms]);
+  check(gt.usage === undefined, "output counts -1 and 1e400 (from JSON): the usage is left out", gt.usage);
+  check(gt.tools.r1.status === "unknown", "a tool finished with status running is unknown, not left spinning", gt.tools.r1.status);
+  ge({ type: "turn_finished", outcome: "completed" });
+  const gh = turnNode(g, gt, hooks).innerHTML;
+  check(!/-0\.0 s|-5\.0 s|Infinity|NaN/.test(gh) && !bad(gh), "…and none of them is drawn (no -0.0 s, no Infinity s)", gh.slice(0, 300));
+}
+
 const failed = results.filter(([ok]) => !ok);
 if (failed.length) { console.log(`FAIL: ${failed.length} of ${results.length}`); process.exit(1); }
 console.log(`ok: the agents chat's view and its checks, ${results.length} checks`);
