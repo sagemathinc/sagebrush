@@ -263,6 +263,65 @@
    "force_numeric": true,
    "expect": "pass",
    "how": "^numeric:1$"
+  },
+  {
+   "name": "equivalent-form: names that differ only in $ and ` stay different symbols",
+   "class": "equivalent-form",
+   "ours": "Plus[a$b, Times[2, a`b]]",
+   "theirs": "Plus[Times[2, a$b], a`b]",
+   "expect": "fail",
+   "how": "mismatch"
+  },
+  {
+   "name": "equivalent-form: the same colliding-form names, the same value",
+   "class": "equivalent-form",
+   "ours": "Plus[a$b, Times[2, a`b]]",
+   "theirs": "Plus[Times[2, a`b], a$b]",
+   "expect": "pass",
+   "how": "^symbolic$"
+  },
+  {
+   "name": "equivalent-form: a name with _ and one with its escape stay apart",
+   "class": "equivalent-form",
+   "ours": "Plus[x$5f, Times[2, x`]]",
+   "theirs": "Plus[Times[2, x$5f], x`]",
+   "expect": "fail",
+   "how": "mismatch"
+  },
+  {
+   "name": "normalize: the rule arrow inside a string is kept",
+   "class": "normalize",
+   "theirs": "\"x ⇾ y\"",
+   "ours": "\"x ⇾ y\"",
+   "expect": "pass"
+  },
+  {
+   "name": "normalize: the delayed rule arrow inside a string is kept",
+   "class": "normalize",
+   "theirs": "\"a ⧴ b\"",
+   "ours": "\"a ⧴ b\"",
+   "expect": "pass"
+  },
+  {
+   "name": "normalize: the equation sign inside a string is kept",
+   "class": "normalize",
+   "theirs": "\"y ⩵ 1\"",
+   "ours": "\"y ⩵ 1\"",
+   "expect": "pass"
+  },
+  {
+   "name": "normalize: an operator outside and a string with an escaped quote inside",
+   "class": "normalize",
+   "theirs": "{x ⇾ \"q\\\"⩵\\\"\", y ⩵ 2}",
+   "ours": "{x -> \"q\\\"⩵\\\"\", y == 2}",
+   "expect": "pass"
+  },
+  {
+   "name": "normalize: a string's arrow is not rewritten",
+   "class": "normalize",
+   "theirs": "\"x ⇾ y\"",
+   "ours": "\"x -> y\"",
+   "expect": "fail"
   }
  ]
 }

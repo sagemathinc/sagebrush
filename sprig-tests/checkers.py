@@ -36,6 +36,13 @@ class NotDecided(Exception):
     pass
 
 
+def var_name(name):
+    """The Sage variable for a Sprig symbol: one injective mapping, used for conversion, substitution and
+    up_to_constant alike. ASCII letters and digits are kept; every other character, "_" included, becomes
+    "_" and its four hex digits, so two different names never share a variable (a$b and a`b stay apart)."""
+    return "sv_" + "".join(c if (c.isascii() and c.isalnum()) else "_%04x" % ord(c) for c in name)
+
+
 # ---------------------------------------------------------------- FullForm text
 
 TOKEN = re.compile(r"""
@@ -131,7 +138,21 @@ def text_of(e):
 NORMALIZE = {"\u21fe": "->", "\u29f4": ":>", "\u2a75": "=="}
 
 
+STRING = re.compile(r'"(?:[^"\\]|\\.)*"')
+
+
 def normalize(text):
+    """The operators outside string literals; a quoted literal, escapes included, is kept byte for byte."""
+    out, i = [], 0
+    for m in STRING.finditer(text):
+        out.append(_operators(text[i:m.start()]))
+        out.append(m.group())
+        i = m.end()
+    out.append(_operators(text[i:]))
+    return "".join(out)
+
+
+def _operators(text):
     for k, v in NORMALIZE.items():
         text = text.replace(k, v)
     return text
@@ -195,7 +216,7 @@ def to_sr(e, S):
             return getattr(S, CONSTANTS[e[1]]) if e[1] != "I" else S.SR(S.I)
         if e[1] == "Infinity":
             return S.SR(S.oo)
-        return S.SR.var("sv_" + re.sub(r"[^A-Za-z0-9]", "_", e[1]))
+        return S.SR.var(var_name(e[1]))
     head, args = e[1], e[2]
     if head[0] != "sym":
         raise NotDecided("a compound head: %s" % text_of(head))
@@ -243,7 +264,7 @@ def finite(z):
 
 def numeric_equal(A, B, names, S):
     """(passed, finite points used, why): why is "", "mismatch" or "too few finite points"."""
-    vs = [S.SR.var("sv_" + re.sub(r"[^A-Za-z0-9]", "_", n)) for n in sorted(names)]
+    vs = [S.SR.var(var_name(n)) for n in sorted(names)]
     pts = points(S)
     C = S.ComplexField(200)
     tol = S.RealField(200)(10) ** -20
@@ -285,7 +306,7 @@ def equivalent(ours, theirs, up_to_constant=None, force_numeric=False):
         # (an expression the symbolic ring can't even build, such as 0^-1, has no value to compare)
         return False, "not decided: %s" % type(e).__name__
     if up_to_constant:
-        x = S.SR.var("sv_" + re.sub(r"[^A-Za-z0-9]", "_", up_to_constant))
+        x = S.SR.var(var_name(up_to_constant))
         A, B = S.diff(A, x), S.diff(B, x)
     if not force_numeric:
         try:
