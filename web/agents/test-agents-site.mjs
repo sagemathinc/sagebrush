@@ -21,9 +21,9 @@ const html = existsSync(join(dist, "index.html")) ? readFileSync(join(dist, "ind
 ok(/<script[^>]+src="\/agents\/agents\.js"/.test(html), "its page loads its own script, /agents/agents.js");
 ok(/<a href="\/agents\/connect\/">/.test(html), "its help box links to \"How to connect your agent\", /agents/connect/ (a directory's index: served without .html on every host)");
 // (the help box and the connect page name one sagebrush-agent release, the same one, with the same sha256: a new
-// release changes the URL and the sha together, in both pages)
+// release changes the URL, the sha and every "sagebrush-agent X.Y.Z" mention together, in both pages)
 const conn0 = existsSync(join(dist, "connect", "index.html")) ? readFileSync(join(dist, "connect", "index.html"), "utf8") : "";
-const release = (t) => ({ v: [...new Set([...t.matchAll(/sagebrush-agent-(\d+\.\d+\.\d+)\.tgz/g)].map((m) => m[1]))], sha: [...new Set([...t.matchAll(/\b[0-9a-f]{64}\b/g)].map((m) => m[0]))] });
+const release = (t) => ({ v: [...new Set([...t.matchAll(/sagebrush-agent(?:-|(?:<\/code>)?\s+)(\d+\.\d+\.\d+)/g)].map((m) => m[1]))], sha: [...new Set([...t.matchAll(/\b[0-9a-f]{64}\b/g)].map((m) => m[0]))] });
 const rh = release(html), rc = release(conn0);
 ok(rh.v.length === 1 && rh.sha.length === 1 && JSON.stringify(rh) === JSON.stringify(rc), `the help box and the connect page name the same one release and sha256: ${JSON.stringify(rh)} / ${JSON.stringify(rc)}`);
 
