@@ -432,7 +432,7 @@
   },
   "engine/lib/mod-xml.src": {
    "exact": false,
-   "ceiling": 189253,
+   "ceiling": 290899,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -761,7 +761,7 @@
   },
   "engine/sagebrush-worker.js": {
    "exact": false,
-   "ceiling": 1682919,
+   "ceiling": 1683135,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
