@@ -15,7 +15,7 @@
   },
   "cli/packages.gen.js": {
    "exact": true,
-   "max": 347715
+   "max": 115084
   },
   "cli/pyjs.cjs": {
    "exact": false,
