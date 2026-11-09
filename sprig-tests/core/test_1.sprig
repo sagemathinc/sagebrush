@@ -431,3 +431,27 @@ x -> 1
 x :> 1
 (*-- core-216 *)
 {x -> 1, y -> 2}
+(*-- core-217 *)
+1 < 3 > 2
+(*-- core-218 *)
+1 < 3 > 4
+(*-- core-219 *)
+a < b > c
+(*-- core-220 *)
+Plus = 3
+(*-- core-221 *)
+x != y
+(*-- core-222 *)
+"a" != "b"
+(*-- core-223 *)
+0^(1/2)
+(*-- core-224 *)
+f[Sequence[a, b]]
+(*-- core-225 *)
+Plus[Plus[a, b], c]
+(*-- core-226 *)
+Times[2, Times[3, x]]
+(*-- core-227 *)
+True == False
+(*-- core-228 *)
+x = 2; y := x + 1; x = 5; y

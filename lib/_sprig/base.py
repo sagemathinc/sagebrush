@@ -253,10 +253,7 @@ def _numeric_power(sess, b, ex):
             return 0
         if b < 0:
             return None
-        whole, frac = divmod(ex.numerator, ex.denominator)
-        if whole:
-            # b^(w + f/q) = b^w b^(f/q), so a perfect power shows its root (8^(3/2) = 8 Sqrt[8])
-            return Expr(TIMES, Expr(POWER, b, whole), Expr(POWER, b, Fraction(frac, ex.denominator)))
+        # (an exact root only; radicals, Sqrt[8] = 2 Sqrt[2], are S2's)
         return _exact_root(b, ex.numerator, ex.denominator)
     # a Real exponent
     if b < 0:
@@ -560,21 +557,29 @@ ATTRIBUTES["ToExpression"] = ("Protected",)
 
 # ---------------------------------------------------------------- files, network and processes (design §9)
 
-# Refused before any argument is evaluated (they hold all their arguments), with the session unchanged.  Files come
-# through Sagebrush's Python file layer when S1.4 gates them; until then every file function is refused too.
+# Refused before any argument is evaluated (they hold all their arguments), with the session unchanged.  FILES are
+# design §9's file functions, which S1.4 routes through Sagebrush's Python file layer; until then each is refused
+# with General::notyet.  A function Sprig doesn't know stays unevaluated, an inert expression that reaches nothing.
 FILES = ("Get", "Import", "ReadList", "FileExistsQ", "Put", "PutAppend", "Export", "DeleteFile", "RenameFile",
-         "CopyFile", "CreateDirectory", "DeleteDirectory", "SetDirectory", "OpenRead", "OpenWrite", "OpenAppend",
-         "FileNames", "ReadString", "WriteString", "Read", "Write", "Directory", "Needs", "Install")
+         "CreateDirectory", "SetDirectory")
 NETWORK = ("URLRead", "URLFetch", "URLExecute", "URLDownload", "URLSubmit", "SendMail", "SocketConnect",
            "SocketOpen")
-PROCESSES = ("Run", "RunProcess", "StartProcess", "KillProcess", "Environment", "SetEnvironment", "LinkLaunch",
-             "Exit", "Quit")
-REFUSED = set(FILES) | set(NETWORK) | set(PROCESSES)
+PROCESSES = ("Run", "RunProcess", "StartProcess", "KillProcess", "LinkLaunch")
+# (design §9 names OpenRead only as a command pipe, OpenRead["!cmd"]: that is refused; any other OpenRead stays an inert,
+# held expression)
+PIPES = ("OpenRead",)
+REFUSED = set(FILES) | set(NETWORK) | set(PROCESSES) | set(PIPES)
 
 
 def _refuse(kind):
     def f(sess, e):
         name = e.head.name
+        if kind == "pipe":
+            a = e.args[0] if e.args else None
+            if type(a) is str and a.startswith("!"):
+                sess.message(name, "noprocess", name)
+                return FAILED
+            return None
         if kind == "nonetwork":
             sess.message(name, "nonetwork", name)
         elif kind == "noprocess":
@@ -600,6 +605,9 @@ for _n in NETWORK:
     ATTRIBUTES[_n] = ("HoldAll", "Protected")
 for _n in PROCESSES:
     BUILTINS[_n] = _refuse("noprocess")
+    ATTRIBUTES[_n] = ("HoldAll", "Protected")
+for _n in PIPES:
+    BUILTINS[_n] = _refuse("pipe")
     ATTRIBUTES[_n] = ("HoldAll", "Protected")
 
 

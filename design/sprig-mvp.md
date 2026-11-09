@@ -320,9 +320,9 @@ Each slice is one PR through ENGINE (daybreak3), SEC (astra), SIZE (daybreak2), 
 | # | Slice | Contents |
 |---|---|---|
 | S0 | Held-out and corpus | `sprig-tests/` with its provenance, the spike's two corpora re-recorded as case files, S1's held-out file; the runner with its checkers and their negative controls (§7.3), with no Sprig code yet; the request for the `sprig` CI job (§7.5) |
-| S1 | Core | `lib/_sprig/` start (final routing for all groups; budget rows and CLI keys only for groups present, §6): parser, `Expr`, the trampoline evaluator with attributes, own and down values, non-`Orderless` patterns, rules, arithmetic through Sage, the printers, messages; `--sprig` and `.sprig`; the group routing, lazy family and budget rows (§6); §8's and §9's first pins; the census's discovery extended to `lib/_sprig/**`, with its nested-refusal test, and S1's sites registered (§5.2) |
+| S1 | Core | `lib/_sprig/` start (final routing for all groups; budget rows and CLI keys only for groups present, §6): parser, `Expr`, the trampoline evaluator with attributes, own and down values, non-`Orderless` patterns, rules, native exact arithmetic (Sage-backed symbolic algebra and calculus from S2's `math.py`: @sagebrush's ruling, Nov 9), the printers, messages; the language limits (S1.2, same ruling); `--sprig` and `.sprig`; the group routing, lazy family and budget rows (§6); §8's and §9's first pins; the census's discovery extended to `lib/_sprig/**`, with its nested-refusal test, and S1's sites registered (§5.2) |
 | S2 | Calculus and algebra | `math.py`; the Sage-layer gap G5 as its own engine PR (below) |
-| S3 | Evaluator depth | `Orderless`/`Flat` matching, up values, scoping, `Return`/`Break`/`Throw`, the `Hold` family, `Quiet`/`Check`, the language limits |
+| S3 | Evaluator depth | `Orderless`/`Flat` matching, up values, scoping, `Return`/`Break`/`Throw`, the `Hold` family, `Quiet`/`Check` (the language limits moved to S1.2) |
 | S4 | Lists, linear algebra, number theory, statistics, strings | `lists.py`, `linalg.py`, `numth.py`, `strings.py` |
 | S5 | Output | canonical order, `TeXForm`, `MatrixForm`/`TableForm`/`Grid`, notebook typesetting |
 | S6 | Graphics | `plot.py` materializes `sprig-plot` (route unchanged, nothing moved), with its budget row, CLI key and first-use measurement (§6); options, `Show`, `Export`, 3D |

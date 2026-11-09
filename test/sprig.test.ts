@@ -67,8 +67,6 @@ const REFUSED: [string, string][] = [
   ['URLDownload["https://example.com", "made-by-sprig"]', "URLDownload::nonetwork: URLDownload can't reach the network: it is off for documents."],
   ['Run["touch made-by-sprig"]', "Run::noprocess: Run can't start a program: Sprig doesn't run programs."],
   ['RunProcess[{"touch", "made-by-sprig"}]', "RunProcess::noprocess: RunProcess can't start a program: Sprig doesn't run programs."],
-  ['Environment["HOME"]', "Environment::noprocess: Environment can't start a program: Sprig doesn't run programs."],
-  ["Exit[3]", "Exit::noprocess: Exit can't start a program: Sprig doesn't run programs."],
 ];
 
 test("§9: every file, network and process function is refused before any effect, the session unchanged", () => {
@@ -84,7 +82,11 @@ test("§9: every file, network and process function is refused before any effect
       // (an argument with an effect, inside Sprig: it is never evaluated, so the session is as it was)
       const held = call.replace("[", "[a = 2; Print[\"evaluated\"]; ");
       const h = sprig(`a = 1;\n${held}\na`, dir);
-      assert.equal(h.stdout, "$Failed\n1\n", `${held}: the argument never ran`);
+      // (OpenRead with no literal "!cmd" is no pipe: it stays an inert, held expression, design §9)
+      if (call.startsWith("OpenRead")) {
+        const lines = h.stdout.split("\n");
+        assert.ok(lines[0].startsWith("OpenRead[a = 2 ; Print[") && lines[1] === "1" && !h.stdout.includes("evaluated\n"), `${held}: inert (${h.stdout})`);
+      } else assert.equal(h.stdout, "$Failed\n1\n", `${held}: the argument never ran`);
       assert.doesNotMatch(h.stderr, HOST_DETAIL);
     }
   } finally {
@@ -109,6 +111,13 @@ test("§9: names, strings and contexts stay Sprig symbols, never Python objects 
       ['ToExpression["os"]', "os\n", ""],
       ['ToExpression["__builtins__"]', "__*__builtins\n", ""],
       ['ToExpression["Run[\\"touch made-by-sprig\\"]"]', "$Failed\n", "Run::noprocess: Run can't start a program: Sprig doesn't run programs.\n"],
+      // (functions Sprig doesn't know are inert expressions: no exit, no environment, no file, no package)
+      ["Exit[3]", "Exit[3]\n", ""],
+      ["Quit[]", "Quit[]\n", ""],
+      ['Environment["HOME"]', 'Environment["HOME"]\n', ""],
+      ['WriteString["made-by-sprig", "x"]', 'WriteString["made-by-sprig", "x"]\n', ""],
+      ['Needs["os`"]', 'Needs["os`"]\n', ""],
+      ['OpenRead["made-by-sprig"]', 'OpenRead["made-by-sprig"]\n', ""],
     ];
     for (const [src, out, err] of cases) {
       const r = sprig(src + "\n1 + 1", dir);
@@ -174,6 +183,17 @@ test("§9: the gate census catches every planted route spelling (mutants)", asyn
       rmSync(dir, { recursive: true, force: true });
     }
   }
+});
+
+// (ENGINE's condition on ruling 1: Sprig's start does no Sage work, so the offline item's declared Sage dependency
+// costs a Sprig session nothing until S2)
+test("a Sprig session imports no Sage module: its start and its arithmetic are native", () => {
+  const got = py(`
+import json, sys, _sprig
+_sprig.run("x = 2/3 + 1; {x^2, 2^100, 1.5 x}", lambda t: None, lambda t: None)
+print(json.dumps(sorted(m for m in sys.modules if m.startswith("sage") or m.startswith("_sage"))))
+`);
+  assert.deepEqual(got, []);
 });
 
 // (§8.3, ENGINE's E1: every walk S1.1 reaches runs on an explicit stack, pinned twice over: through deep parsed input,

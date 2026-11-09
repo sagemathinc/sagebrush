@@ -1525,6 +1525,92 @@
    "messages": [],
    "output": "",
    "result": "{x ⇾ 1, y ⇾ 2}"
+  },
+  {
+   "fullform": "True",
+   "id": "core-217",
+   "messages": [],
+   "output": "",
+   "result": "True"
+  },
+  {
+   "fullform": "False",
+   "id": "core-218",
+   "messages": [],
+   "output": "",
+   "result": "False"
+  },
+  {
+   "fullform": "And[Less[a, b], Greater[b, c]]",
+   "id": "core-219",
+   "messages": [],
+   "output": "",
+   "result": "a < b ∧ b > c"
+  },
+  {
+   "fullform": "3",
+   "id": "core-220",
+   "messages": [
+    "Set::wrsym: Symbol Plus is Protected."
+   ],
+   "output": "Set::wrsym: Symbol Plus is Protected.\n",
+   "result": "3"
+  },
+  {
+   "fullform": "Unequal[x, y]",
+   "id": "core-221",
+   "messages": [],
+   "output": "",
+   "result": "x ≠ y"
+  },
+  {
+   "fullform": "True",
+   "id": "core-222",
+   "messages": [],
+   "output": "",
+   "result": "True"
+  },
+  {
+   "fullform": "0",
+   "id": "core-223",
+   "messages": [],
+   "output": "",
+   "result": "0"
+  },
+  {
+   "fullform": "f[a, b]",
+   "id": "core-224",
+   "messages": [],
+   "output": "",
+   "result": "f[a, b]"
+  },
+  {
+   "fullform": "Plus[a, b, c]",
+   "id": "core-225",
+   "messages": [],
+   "output": "",
+   "result": "a + b + c"
+  },
+  {
+   "fullform": "Times[6, x]",
+   "id": "core-226",
+   "messages": [],
+   "output": "",
+   "result": "6*x"
+  },
+  {
+   "fullform": "False",
+   "id": "core-227",
+   "messages": [],
+   "output": "",
+   "result": "False"
+  },
+  {
+   "fullform": "6",
+   "id": "core-228",
+   "messages": [],
+   "output": "",
+   "result": "6"
   }
  ],
  "file": "sprig-tests/core/test_1.sprig",
