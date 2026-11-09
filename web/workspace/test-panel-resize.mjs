@@ -1,12 +1,17 @@
 // ci: web-runner order=483 chrome
+// ci: web-browser/latex order=45 chrome env=EXPECT_LATEX=1
 // Resizable panels (web/workspace/resize.ts; William, Nov 8: "make every single panel resizable. Right now even the
 // file panel on the left is not resizable."), in headless Chromium against the built site, by real mouse drags:
 //  - the files (#wssidebar), on the notebook page, a code file and a board: dragging their right edge sets their
 //    width and the view beside them starts where they end; the width is remembered across a reload; the arrow keys
 //    step it; a double-click puts 272 px back and forgets it; it stays within 200 px and the window less 320 px; on a
 //    phone width there is no edge (the files cover the window, as before);
-//  - in a build with the LaTeX editor, its source and preview: dragging the edge between them sets the source's share,
-//    remembered across a reload, and a double-click puts the halves back.
+//  - in a build with the LaTeX editor (CI's web-browser/latex, EXPECT_LATEX=1: there the block must run), its source
+//    and preview: dragging the edge between them sets the source's share within 20-80%, remembered across a reload, a
+//    double-click puts the halves back; another file opened in place leaves nothing of the old split working (no
+//    listener, observer or queued frame).
+//  - the keys: Arrow 16 px, Shift+Arrow 64, Home/End the bounds, kept across a reload; aria-valuenow the drawn width;
+//    a right-button drag does nothing.
 // Serve web/dist first (python3 web/serve.py 8765), then
 //   node web/workspace/test-panel-resize.mjs
 import { spawn } from "node:child_process";
@@ -61,7 +66,12 @@ try {
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
   // (the size observers that watch a LaTeX editor's .tex-main, still connected: one per live editor)
   await send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => { const RO = window.ResizeObserver; const live = new Set(); window.__texRO = () => [...live].length;
-    window.ResizeObserver = class extends RO { observe(t, ...a) { if (t?.classList?.contains("tex-main")) live.add(this); return super.observe(t, ...a); } disconnect() { live.delete(this); return super.disconnect(); } }; })()` });
+    window.ResizeObserver = class extends RO { observe(t, ...a) { if (t?.classList?.contains("tex-main")) live.add(this); return super.observe(t, ...a); } disconnect() { live.delete(this); return super.disconnect(); } };
+    // (animation frames, held while window.__holdRaf is set, run by window.__releaseRaf(): cancelled ones never run)
+    const raf = window.requestAnimationFrame.bind(window), caf = window.cancelAnimationFrame.bind(window), held = new Map(); let n = 1e9;
+    window.requestAnimationFrame = (f) => { if (!window.__holdRaf) return raf(f); const id = ++n; held.set(id, f); return id; };
+    window.cancelAnimationFrame = (id) => { if (held.delete(id)) return; caf(id); };
+    window.__releaseRaf = () => { window.__holdRaf = false; const fs = [...held.values()]; held.clear(); for (const f of fs) f(performance.now()); return fs.length; }; })()` });
   await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
   await go(base);
   await until(`!!window.sagebrush?.workspace`, 60000);
@@ -97,6 +107,32 @@ try {
   check((await sideW()) === 640, "notebook page: never wider than 640 px (nor the window less 320 px)", await sideW());
   await dbl(EDGE);
   check((await sideW()) === 272 && (await ev(`localStorage.getItem("sagebrush-files-width")`)) === null, "notebook page: a double-click puts 272 px back and forgets the width", await sideW());
+  // (the keys and the pointer: Shift+Arrow by 64, Home/End the bounds, a key's width kept; aria-valuenow the drawn
+  // width; a right-button drag does nothing)
+  const key = async (k, code, vk, modifiers = 0) => { await ev(`document.querySelector(${JSON.stringify(EDGE)}).focus()`); await send("Input.dispatchKeyEvent", { type: "keyDown", key: k, code, windowsVirtualKeyCode: vk, modifiers }); await send("Input.dispatchKeyEvent", { type: "keyUp", key: k, code, windowsVirtualKeyCode: vk, modifiers }); await sleep(200); };
+  await key("ArrowRight", "ArrowRight", 39, 8);
+  check((await sideW()) === 272 + 64, "notebook page: Shift+ArrowRight widens them by 64 px", await sideW());
+  await key("Home", "Home", 36);
+  check((await sideW()) === 200, "notebook page: Home gives the narrowest, 200 px", await sideW());
+  await key("End", "End", 35);
+  check((await sideW()) === 640, "notebook page: End gives the widest, 640 px", await sideW());
+  await key("ArrowLeft", "ArrowLeft", 37);
+  await go(base);
+  await until(`!!window.sagebrush?.notebook`, 60000);
+  await until(`!${S}.hidden && !!document.querySelector(${JSON.stringify(EDGE)})`);
+  check((await sideW()) === 640 - 16, "notebook page: a width set by a key is kept across a reload", await sideW());
+  await drag(EDGE, 333);
+  check(Number(await ev(`document.querySelector(${JSON.stringify(EDGE)}).getAttribute("aria-valuenow")`)) === (await sideW()) && Math.abs((await sideW()) - 333) <= 3, "notebook page: aria-valuenow is the drawn width after a drag", { now: await ev(`document.querySelector(${JSON.stringify(EDGE)}).getAttribute("aria-valuenow")`), w: await sideW() });
+  const wR = await sideW();
+  {
+    const r = await ev(`(() => { const b = document.querySelector(${JSON.stringify(EDGE)}).getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; })()`);
+    await send("Input.dispatchMouseEvent", { type: "mousePressed", x: r.x, y: r.y, button: "right", buttons: 2, clickCount: 1 });
+    for (let i = 1; i <= 4; i++) await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: r.x + 30 * i, y: r.y, button: "right", buttons: 2 });
+    await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: r.x + 120, y: r.y, button: "right", buttons: 0, clickCount: 1 });
+    await sleep(250);
+  }
+  check((await sideW()) === wR, "notebook page: a right-button drag doesn't resize them", { before: wR, after: await sideW() });
+  await dbl(EDGE);
   // (the chosen width is kept apart from what a narrower window draws: daybreak3's E2)
   await drag(EDGE, 600);
   const chosen = await sideW();
@@ -123,7 +159,9 @@ try {
 
   // ---- the LaTeX editor, where the build has it: beside the files, and its own split
   await go(base + "?tex=" + fids.tex + "&latex=1");
-  if (await until(`!!document.querySelector(".tex-page .tex-src")`, 30000)) {
+  const texOn = await until(`!!document.querySelector(".tex-page .tex-src")`, 30000);
+  if (process.env.EXPECT_LATEX === "1") check(texOn, "LaTeX build: the LaTeX editor opens, so its checks below run (none skipped)");
+  if (texOn) {
     await showFiles();
     await until(`!${S}.hidden`);
     check(Math.abs((await viewLeft(".tex-page")) - (await sideW())) <= 1, "LaTeX editor: the page starts where the files end", { w: await sideW(), left: await viewLeft(".tex-page") });
@@ -134,6 +172,12 @@ try {
     const m = await ev(`(() => { const r = document.querySelector(".tex-main").getBoundingClientRect(); return { x: r.x, w: r.width }; })()`);
     await drag(SPLIT, m.x + m.w * 0.3);
     check(Math.abs((await share()) - 30) <= 2, "LaTeX editor: dragged to 30%", await share());
+    await drag(SPLIT, m.x + m.w * 0.97);
+    const hi = await share();
+    await drag(SPLIT, m.x + m.w * 0.03);
+    const lo = await share();
+    check(Math.abs(hi - 80) <= 1 && Math.abs(lo - 20) <= 1, "LaTeX editor: the split stays within 20% and 80%", { hi, lo });
+    await drag(SPLIT, m.x + m.w * 0.3);
     const edgeAt = await ev(`(() => { const e = document.querySelector(${JSON.stringify(SPLIT)}).getBoundingClientRect(), l = document.querySelector(".tex-left").getBoundingClientRect(); return JSON.stringify({ d: Math.round(e.x + e.width / 2 - l.right), e: [e.x, e.width, e.height], l: [l.x, l.right] }); })()`).then(JSON.parse);
     check(Math.abs(edgeAt.d) <= 2 && edgeAt.e[2] > 100, "LaTeX editor: the edge follows the source's right side, its full height", edgeAt);
     await go(base + "?tex=" + fids.tex + "&latex=1");
@@ -159,6 +203,14 @@ try {
     await sleep(300);
     const stale = await ev(`window.__old.filter((o) => o.main.style.getPropertyValue("--tex-split") !== "1%" || o.edge.style.left !== "-999px").length`);
     check(stale === 0 && (await ev(`window.__texRO()`)) === 1, "LaTeX editor: after three files opened in place, no old editor's edge reacts to a resize, and one size observer is left", { stale, observers: await ev(`window.__texRO()`) });
+    // (no frame of an old split runs once its editor is gone: one queued just before the switch is cancelled, and none
+    // is queued after it, even by a key on the old edge (frames held, then released, around the switch))
+    await ev(`(() => { window.__old2 = { edge: document.querySelector(${JSON.stringify(SPLIT)}), main: document.querySelector(".tex-main") }; window.__holdRaf = true; dispatchEvent(new Event("resize")); window.__old2.edge.style.left = "-777px"; document.querySelector(${row("/t/resize-c.tex")}).click(); return 1; })()`);
+    await until(`document.querySelector(".tex-main") !== window.__old2.main && document.querySelector(".tex-preview")?.textContent.includes("File c")`, 20000);
+    await ev(`(window.__old2.edge.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })), window.__old2.edge.style.left = "-777px", 1)`);
+    await ev(`window.__releaseRaf()`);
+    await sleep(200);
+    check((await ev(`window.__old2.edge.style.left`)) === "-777px", "LaTeX editor: no frame of the old split runs after the switch (the queued one cancelled, none queued after)", await ev(`window.__old2.edge.style.left`));
     // (a drag under way when the editor goes: no page-wide drag state left)
     const e2 = await ev(`(() => { const b = document.querySelector(${JSON.stringify(SPLIT)}).getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; })()`);
     await mouse("mouseMoved", e2.x, e2.y, { buttons: 0 });
