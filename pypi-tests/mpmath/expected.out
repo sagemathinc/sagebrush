@@ -534,7 +534,7 @@ test_quad.test_double_5: ok
 test_quad.test_double_6: ok
 test_quad.test_double_7: ok
 test_quad.test_double_trivial: ok
-test_quad.test_expmath_fail: FAIL AssertionError: 
+test_quad.test_expmath_fail: FAIL AssertionError:
 test_quad.test_expmath_integrals: ok
 test_quad.test_multiple_intervals: ok
 test_quad.test_quad_infinite_mirror: ok

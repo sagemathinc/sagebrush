@@ -260,7 +260,7 @@ for name in names:
         line = sl[hits[0]]
         if line == okline:
             problems.append("known.json lists %s, which now passes here: remove it" % t["test"])
-        elif line != "%s: FAIL %s: %s\n" % (t["test"], t["error"], t["message"]):
+        elif line != ("%s: FAIL %s: %s" % (t["test"], t["error"], t["message"])).rstrip() + "\n":
             problems.append("known.json lists %s as failing with %s: %s, but here: %s" % (t["test"], t["error"], t["message"], line.strip()))
         else:
             sl[hits[0]] = okline
