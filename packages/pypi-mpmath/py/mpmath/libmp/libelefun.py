@@ -1437,3 +1437,11 @@ elif BACKEND == 'sagebrush':
     exp_fixed = _sagebrush_mpcore.exp_fixed
     cos_sin_fixed = _sagebrush_mpcore.cos_sin_fixed
     log_int_fixed = _sagebrush_mpcore.log_int_fixed
+    # (the constants too, so that one memo serves every caller; the mpf
+    # constants are rebuilt, as each holds its fixed-point function)
+    pi_fixed = _sagebrush_mpcore.pi_fixed
+    ln2_fixed = _sagebrush_mpcore.ln2_fixed
+    e_fixed = _sagebrush_mpcore.e_fixed
+    mpf_pi = def_mpf_constant(pi_fixed)
+    mpf_ln2 = def_mpf_constant(ln2_fixed)
+    mpf_e = def_mpf_constant(e_fixed)
