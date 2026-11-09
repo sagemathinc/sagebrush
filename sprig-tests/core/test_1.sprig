@@ -485,3 +485,7 @@ Or[True, Print["no"]]
 {1, 2} + {1, 2, 3}
 (*-- core-243 *)
 x = x; x
+(*-- core-244 *)
+Indeterminate + 1
+(*-- core-245 *)
+Indeterminate + 2.5

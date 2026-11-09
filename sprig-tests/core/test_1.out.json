@@ -1720,6 +1720,20 @@
    "messages": [],
    "output": "",
    "result": "x"
+  },
+  {
+   "fullform": "Plus[1, Indeterminate]",
+   "id": "core-244",
+   "messages": [],
+   "output": "",
+   "result": "1 + Indeterminate"
+  },
+  {
+   "fullform": "Plus[2.5`, Indeterminate]",
+   "id": "core-245",
+   "messages": [],
+   "output": "",
+   "result": "2.5 + Indeterminate"
   }
  ],
  "file": "sprig-tests/core/test_1.sprig",

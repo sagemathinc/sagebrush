@@ -145,9 +145,7 @@ def _with_int_reservation(bits, name, f):
 
 def _plus(sess, e):
     args = e.args
-    # (Indeterminate absorbs numbers, as the oracle's does; with a symbol it stays a term, x + Indeterminate)
-    if any(x is INDETERMINATE for x in args) and all(x is INDETERMINATE or is_number(x) for x in args):
-        return INDETERMINATE
+    # (Indeterminate stays a term of the sum, as the oracle's does: 1 + Indeterminate, x + Indeterminate)
     infs = [x for x in args if _is_cinf(x)]
     if infs:
         if len(infs) > 1:

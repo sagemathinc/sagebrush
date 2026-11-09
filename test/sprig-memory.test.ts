@@ -447,6 +447,108 @@ print(json.dumps({"names": len(names), "missing": sorted(n for n in names if n n
   assert.deepEqual(got.missing, []);
 });
 
+// (the grader's rows on #911 r4: a long name's own-size charge, the charge handed back with the session, the unmeasured
+// refusal's stated figure, and the refusals' singular and plural subjects)
+test("§8.4: a name longer than one chunk is charged at its own size, and restore takes the session's charge away", () => {
+  const got = py(`
+import json
+from _sprig import mem
+from _sprig.eval import Session
+from _sprig.expr import Sym
+mem._allowance = lambda: (10**12, None)
+r = {"chunk": mem.NAME_CHUNK, "sym": mem.SYM_BYTES, "per": mem.SYM_BYTES_PER_CHAR}
+a = Session(lambda t: None, lambda t: None)
+before_charge = Sym._charge
+prev = a.activate()
+Sym("short_name")
+reserved0, bytes0 = a.name_reserved, a.name_bytes
+Sym("L" * 40000)
+r["long"] = [a.name_reserved - reserved0, a.name_bytes - bytes0]
+Session.restore(prev)
+r["restored"] = Sym._charge is before_charge
+bytes1 = a.name_bytes
+Sym("made_outside_any_session")
+b = Session(lambda t: None, lambda t: None)
+prevb = b.activate()
+Sym("made_in_session_b")
+Session.restore(prevb)
+r["after"] = [a.name_bytes == bytes1, b.name_bytes == mem.SYM_BYTES + mem.SYM_BYTES_PER_CHAR * len("made_in_session_b"), Sym._charge is before_charge]
+a.close(); b.close()
+r["open"] = mem.open_bytes()
+print(json.dumps(r))
+`);
+  const own = got.sym + got.per * 40000;
+  assert.ok(own > got.chunk, `the name is longer than a chunk (${own} > ${got.chunk})`);
+  assert.deepEqual(got.long, [own, own], "charged and reserved at its own size, not one chunk");
+  assert.equal(got.restored, true, "restore puts back the charge that was there before activate");
+  assert.deepEqual(got.after, [true, true, true], "a name made after restore, outside any session or in another one, isn't charged to the first");
+  assert.equal(got.open, 0);
+});
+
+test("§8.4, no memory figure: a refusal states what is left under the cap, not the whole cap", () => {
+  const got = py(`
+import json
+from _sprig import mem
+from _sprig.eval import Session
+from _sprig.expr import Expr, Sym, size_of
+mem._allowance = lambda: (None, "no memory figure")
+CAP = mem.UNMEASURED_OPERATION_BYTES
+s = Session(lambda t: None, lambda t: None)
+held = mem.reserve(CAP - 3 * 10**6, "A test", "Test").acquire()
+val = Expr("List", *range(2000))
+X = mem.open_bytes()
+try:
+    s.define(Sym("a"), val, "Set")
+    s.define(Sym("b"), Expr("List", *range(20000)), "Set")
+    r = "admitted"
+except mem.SprigMemoryError as e:
+    r = [e.limit_bytes, CAP - mem.open_bytes(), e.need_bytes, str(e).split("\\n")[1]]
+s.close(); held.release()
+print(json.dumps({"cap": CAP, "r": r, "open": mem.open_bytes()}))
+`);
+  const [limit, left, need, line] = got.r;
+  assert.equal(got.cap, 268435456);
+  assert.equal(limit, left, "the refusal's figure is what is left under the cap, with the retained definitions counted");
+  assert.ok(limit < got.cap && need > limit, `${limit} < ${got.cap}, ${need} > ${limit}`);
+  assert.doesNotMatch(line, /268 MB/, "the whole cap isn't the figure");
+  assert.equal(got.open, 0);
+});
+
+test("the refusals' subjects count their nouns: one item and one character in the singular", () => {
+  const got = py(`
+import json
+from _sprig import mem
+from _sprig.eval import Session
+from _sprig.expr import Expr, Sym
+mem.SMALL_BYTES = 0
+mem._allowance = lambda: (0, None)
+def what(f):
+    try:
+        f()
+        return "admitted"
+    except mem.SprigMemoryError as e:
+        return e.what
+s = Session(lambda t: None, lambda t: None)
+mem._allowance = lambda: (mem.open_bytes() and 0, None)
+r = {}
+# Print, past its continuation chunk: the allowance is the chunk alone, so Print's own reservation is refused
+from _sprig import eval as E
+chunk = E.KONT_CHUNK * mem.KONT_BYTES
+mem._allowance = lambda: (chunk - mem.open_bytes(), None)
+r["print1"] = what(lambda: s.evaluate(Expr("Print", Sym("x"))))
+r["print2"] = what(lambda: s.evaluate(Expr("Print", Sym("x"), Sym("y"))))
+# a session's name: nothing is left
+mem._allowance = lambda: (0, None)
+prev = s.activate()
+r["name1"] = what(lambda: Sym("q"))
+r["name12"] = what(lambda: Sym("qwertyuiopas"))
+Session.restore(prev)
+s.close()
+print(json.dumps(r))
+`);
+  assert.deepEqual(got, { print1: "Formatting 1 item", print2: "Formatting 2 items", name1: "A name of 1 character", name12: "A name of 12 characters" });
+});
+
 test("§8.4: a refusal through the CLI is General::memory with Sagebrush's figures, and the session answers", () => {
   const dir = mkdtempSync(join(tmpdir(), "sprig-mem-"));
   try {
