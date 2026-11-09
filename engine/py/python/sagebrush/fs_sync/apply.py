@@ -1,6 +1,5 @@
-"""fs-sync's apply step for data files (design/fs-sync.md §1.2, §2.3–2.5, §4.1, §4.3): a plan, made from a scan and a
-listing, applied action by action, each checking first that what it was planned from still holds. Documents'
-snapshots (§3.4) are a later step: their actions are listed as not applied here.
+"""fs-sync's apply step (design/fs-sync.md §1.2, §2.3–2.5, §3.4, §4.1, §4.3): a plan, made from a scan and a
+listing, applied action by action, each checking first that what it was planned from still holds.
 
 - **Inputs:** the plan, and the scan (`ScanResult`) and workspace listing ({path: Entry}) it was made from: sizes, the
   local spelling on disk and the stat key come from them, so every check is against the planned state. The workspace
@@ -19,14 +18,20 @@ snapshots (§3.4) are a later step: their actions are listed as not applied here
   the bytes' count and hash) before anything here changes; a delete here asks the workspace that nothing is at the
   path, then moves the file aside and checks it there. A check that fails skips the action, and the next run plans
   again.
+- **Snapshots** (§3.4): a notebook, board or chat comes down as its snapshot, from one read capped at DOCUMENT_BYTES
+  (+1 to see past it), checked to be the planned fid and kind; its row records the hash of the bytes written and that
+  read's fid and revision, marked as a snapshot. It is written only to an absent path (no-replace, and never beside a
+  newcomer) or over fs-sync's own last snapshot, moved to `replaced/` as a replacing download is.
 - **The base** (§2.5): a delete (either side) or a replacing download is bracketed: its row removed and committed
   first, the new row (or none) committed after, the old row put back if it was skipped or not applied. Other actions
   are recorded in batches.
 - **Workspace errors** (the endpoint's): 409 skips the action; 413 leaves it pending; 429, 401 and a network error
   stop the run at once, the actions not yet tried left as they are.
 - **Downloads need room** (§1.2, §4.5): each filesystem downloads land on (a mount inside LOCAL_DIR too) keeps
-  256 MiB free beyond its downloads; those that don't fit, in plan order, stay pending.
-- **Seams** (§5): `hooks[name](step)` at "before_check", "after_tmp_written" and "after_action", and
+  256 MiB free beyond its downloads, a snapshot counted at DOCUMENT_BYTES; those that don't fit, in plan order, stay
+  pending.
+- **Seams** (§5): `hooks[name](step)` at "before_check", "after_tmp_written", "after_read" (a snapshot's, after its
+  checks) and "after_action", and
   "after_base_commit" (the step, or None for the run's last batch); move.py's "after_move_aside" and "before_install"
   get the step too.
 
@@ -45,7 +50,7 @@ from . import move as M
 from . import plan as P
 from . import scan as S
 from .state import Row, _home_short
-from .workspace import Base as WBase, Conflict, RateLimited, TooLarge, Unauthorized
+from .workspace import DOCUMENT_BYTES, Base as WBase, Conflict, RateLimited, TooLarge, Unauthorized
 
 _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 _CLOEXEC = getattr(os, "O_CLOEXEC", 0)
@@ -64,12 +69,12 @@ NOT_TRIED = "not-tried"             # the run stopped (429, 401, the network) be
 CHANGED_HERE = "changed-here"
 CHANGED_THERE = "changed-there"
 BESIDE = "beside"                   # a newcomer took the name: the workspace's version is beside it
+APPEARED = "appeared"               # a newcomer took a snapshot's name: left as it is, the snapshot not written
 NO_CONFLICT_NAME = "no-conflict-name"
 NO_REPLACE = "no-replace"
 HOLD_ERROR = "hold-error"           # an OS error moving it into the holding folder
 LOCAL_ERROR = "local-error"         # an OS error here, outside the holding folder
 TOO_LARGE = "too-large"
-SNAPSHOTS_LATER = "snapshots-later"
 NO_ROOM = "no-room"                 # its filesystem is short of room (Report.space)
 HELD_BACK = "held-back"             # a run-level line (Report.run_lines) holds it back
 
@@ -128,7 +133,7 @@ def _hook(hooks, name, arg):
 
 
 def _moves_aside(step):
-    return step.kind == P.DELETE_HERE or (step.kind == P.DOWNLOAD and step.replaces)
+    return step.kind == P.DELETE_HERE or (step.kind in (P.DOWNLOAD, P.SNAPSHOT) and step.replaces)
 
 
 def _part(step):
@@ -136,7 +141,7 @@ def _part(step):
 
 
 def _destructive(step):
-    return step.kind in (P.DELETE_HERE, P.DELETE_THERE) or (step.kind == P.DOWNLOAD and step.replaces)
+    return step.kind in (P.DELETE_HERE, P.DELETE_THERE) or (step.kind in (P.DOWNLOAD, P.SNAPSHOT) and step.replaces)
 
 
 def _split(raw):
@@ -254,7 +259,7 @@ def _read_local(root_fd, raw, size, sha256):
         os.close(fd)
 
 
-def _row(root_fd, raw, sha256, fid, snapshot=False):
+def _row(root_fd, raw, sha256, fid, snapshot=False, revision=None):
     """The base row for the file fs-sync just wrote at `raw`: `sha256` (what is in sync on both sides) with the stat key
     of the bytes read back there and found to be exactly those (the scan's bounded reader, its identity checked), so
     the next scan's shortcut never pairs a key with bytes it didn't hash. If they aren't (changed already) or can't be
@@ -265,12 +270,13 @@ def _row(root_fd, raw, sha256, fid, snapshot=False):
         try:
             st = os.stat(name, dir_fd=d, follow_symlinks=False)
             if stat.S_ISREG(st.st_mode) and st.st_size <= S.MAX_FILE_BYTES and S._hash(d, name, st) == sha256:
-                return Row(sha256, st.st_size, st.st_mtime_ns, st.st_ctime_ns, st.st_ino, st.st_dev, fid, snapshot)
+                return Row(sha256, st.st_size, st.st_mtime_ns, st.st_ctime_ns, st.st_ino, st.st_dev, fid, snapshot,
+                           revision)
         finally:
             os.close(d)
     except OSError:
         pass
-    return Row(sha256, 0, 0, 0, 0, 0, fid, snapshot)
+    return Row(sha256, 0, 0, 0, 0, 0, fid, snapshot, revision)
 
 
 def _scan_row(loc, fid):
@@ -290,10 +296,9 @@ def _unlink(root_fd, folders, name):
         os.close(d)
 
 
-def _download_to_temp(root_fd, ws, step, raw, size, tmp, hooks):
-    """The workspace's file at step.path read into the temporary file `tmp` in its folder (`raw`'s, made as needed)
-    and checked against the plan: the entry's kind, fid and hash, and the bytes' count and hash. A temp that fails is
-    removed."""
+def _to_temp(root_fd, raw, tmp, fetch):
+    """The temporary file `tmp` in `raw`'s folder (made as needed), written by `fetch(writer, hash)`, which reads and
+    checks; synced to the disk before it is used. A temp that fails is removed. Returns what `fetch` returns."""
     folders, _ = _split(raw)
     try:
         d = M.open_dir(root_fd, folders, make=True, mode=0o777)
@@ -317,12 +322,10 @@ def _download_to_temp(root_fd, ws, step, raw, size, tmp, hooks):
                         view = view[os.write(fd, view):]
                 except OSError as e:
                     raise _Local(e)
-            entry, n = _ws(ws.read, step.path, writer, size + 1)
-            if ((entry.kind, entry.fid, entry.sha256) != (step.rkind or "file", step.fid, step.remote) or n != size
-                    or h.hexdigest() != step.remote):
-                raise _Skip(SKIPPED, CHANGED_THERE)
+            result = fetch(writer, h)
             os.fsync(fd)
             ok = True
+            return result
         finally:
             os.close(fd)
             if not ok:
@@ -332,7 +335,32 @@ def _download_to_temp(root_fd, ws, step, raw, size, tmp, hooks):
                     pass
     finally:
         os.close(d)
+
+
+def _download_to_temp(root_fd, ws, step, raw, size, tmp, hooks):
+    """The workspace's file at step.path read into the temporary file `tmp` and checked against the plan: the entry's
+    kind, fid and hash, and the bytes' count and hash."""
+    def fetch(writer, h):
+        entry, n = _ws(ws.read, step.path, writer, size + 1)
+        if ((entry.kind, entry.fid, entry.sha256) != (step.rkind or "file", step.fid, step.remote) or n != size
+                or h.hexdigest() != step.remote):
+            raise _Skip(SKIPPED, CHANGED_THERE)
+    _to_temp(root_fd, raw, tmp, fetch)
     _hook(hooks, "after_tmp_written", step)
+
+
+def _snapshot_to_temp(root_fd, ws, step, raw, tmp):
+    """A document's snapshot (§3.4) read into the temporary file `tmp`, by one read capped at DOCUMENT_BYTES + 1:
+    checked to be the planned fid and kind, with a revision (the row's receipt: none, and nothing is written), and
+    within DOCUMENT_BYTES. Returns (that read's Entry, the bytes' hash)."""
+    def fetch(writer, h):
+        entry, n = _ws(ws.read, step.path, writer, DOCUMENT_BYTES + 1)
+        if (entry.kind, entry.fid) != (step.rkind, step.fid) or entry.revision is None:
+            raise _Skip(SKIPPED, CHANGED_THERE)
+        if n > DOCUMENT_BYTES:
+            raise _Skip(PENDING, TOO_LARGE)
+        return entry, h.hexdigest()
+    return _to_temp(root_fd, raw, tmp, fetch)
 
 
 # ---- the holding folder
@@ -559,9 +587,7 @@ def apply(plan, scan, listing, root_fd, ws, base, state_dir, local_dir, workspac
         last = aside[-1] if aside and hold.ok else None
         M.sweep_temps(root_fd, scan.temps, report.run_id)
         for k, step in enumerate(steps):
-            if step.kind == P.SNAPSHOT:
-                out = Outcome(step, PENDING, SNAPSHOTS_LATER)
-            elif id(step) in no_room:
+            if id(step) in no_room:
                 out = Outcome(step, *no_room[id(step)])
             elif _moves_aside(step) and not hold.ok:
                 out = Outcome(step, PENDING, HELD_BACK)
@@ -593,7 +619,7 @@ def _over_space(steps, scan, listing, root_fd, local_dir, report, free_space):
     measure = free_space or _filesystem
     out, fs = {}, {}
     for s in steps:
-        if s.kind not in (P.DOWNLOAD, P.CONFLICT):
+        if s.kind not in (P.DOWNLOAD, P.CONFLICT, P.SNAPSHOT):
             continue
         loc = scan.files.get(s.path)
         folders = ((loc.raw or s.path) if loc else s.path).split("/")[:-1]
@@ -619,7 +645,7 @@ def _over_space(steps, scan, listing, root_fd, local_dir, report, free_space):
         if f is None:
             f = fs[key] = dict(where=_mount_point(os.path.join(local_dir, *folders[:depth])), free=free, used=0,
                                need=DOWNLOAD_HEADROOM, paths=[])
-        n = listing[s.path].size
+        n = DOCUMENT_BYTES if s.kind == P.SNAPSHOT else listing[s.path].size     # (a snapshot: its largest answer)
         f["need"] += n
         if f["used"] + n + DOWNLOAD_HEADROOM <= f["free"]:
             f["used"] += n
@@ -737,6 +763,8 @@ def _act(step, k, scan, listing, root_fd, ws, hold, report, computer, hooks):
         return _download(step, k, loc, raw, listing, root_fd, ws, hold, report, computer, hooks, snapshot)
     if step.kind == P.CONFLICT:
         return _conflict(step, k, loc, raw, listing, root_fd, ws, hold, report, computer, hooks)
+    if step.kind == P.SNAPSHOT:
+        return _snapshot(step, k, loc, raw, root_fd, ws, hold, report, hooks)
     raise AssertionError(step.kind)
 
 
@@ -779,6 +807,42 @@ def _download(step, k, loc, raw, listing, root_fd, ws, hold, report, computer, h
         _unlink(root_fd, folders, tmp)
         return Outcome(step, SKIPPED, LOCAL_ERROR, H.strerror(e), held=held)
     return Outcome(step, DONE, held=held, row=_row(root_fd, raw, step.remote, step.fid, snapshot))
+
+
+def _snapshot(step, k, loc, raw, root_fd, ws, hold, report, hooks):
+    """§3.4: the document's snapshot written to its path, only if absent (a no-replace rename: a newcomer there keeps
+    the path, and the snapshot is skipped, never put beside it), or over fs-sync's own last snapshot, which goes to
+    replaced/ first (the plan made it a replacing step only if the file's hash is that snapshot row's, and the move
+    aside checks it again)."""
+    folders, name = _split(raw)
+    tmp = M.temp_name(report.run_id, k)
+    entry, sha = _snapshot_to_temp(root_fd, ws, step, raw, tmp)
+    _hook(hooks, "after_read", step)
+    held = None
+    if step.replaces:
+        try:
+            held = _move_aside(root_fd, raw, loc, hold, M.REPLACED, step, hooks)
+        except _Skip:
+            _unlink(root_fd, folders, tmp)
+            raise
+    # (from here on the local file may be held: every outcome says where)
+    try:
+        d = M.open_dir(root_fd, folders)
+        try:
+            _hook(hooks, "before_install", step)
+            M.rename_noreplace(d, tmp, d, name)
+        finally:
+            os.close(d)
+    except M.Occupied:
+        _unlink(root_fd, folders, tmp)
+        return Outcome(step, SKIPPED, APPEARED, held=held)
+    except M.NoReplace as e:
+        _unlink(root_fd, folders, tmp)
+        return Outcome(step, SKIPPED, LOCAL_ERROR, e.reason, held=held)
+    except OSError as e:
+        _unlink(root_fd, folders, tmp)
+        return Outcome(step, SKIPPED, LOCAL_ERROR, H.strerror(e), held=held)
+    return Outcome(step, DONE, held=held, row=_row(root_fd, raw, sha, entry.fid, True, entry.revision))
 
 
 def _conflict(step, k, loc, raw, listing, root_fd, ws, hold, report, computer, hooks):
@@ -867,6 +931,7 @@ def render(report):
     section("Delete on this computer, to the holding folder (%s; restore with fs-sync --restore %s for 30 days)",
             P.DELETE_HERE, "-", report.run_id)
     section("Conflicts, both kept (%s)", P.CONFLICT, "!")
+    section("Download only: notebooks, boards and chats as files (%s)", P.SNAPSHOT, "↓")
     for where, need, free, paths in report.space:
         lines.append("Not applied: not enough free space on %s (needs %s, %s free)" % (where, _size(need), _size(free)))
         lines += ["  · %s" % path for path in paths]
@@ -880,8 +945,8 @@ def render(report):
     if skipped:
         lines.append("Skipped (%d)" % len(skipped))
         lines += ["  · %s   %s" % (o.step.path, _skipped_text(o)) for o in skipped]
-    # (when any action wasn't done, §1.5; snapshots aren't this step's to do)
-    if any(o.result != DONE and o.why != SNAPSHOTS_LATER for o in report.outcomes):
+    # (when any action wasn't done, §1.5)
+    if any(o.result != DONE for o in report.outcomes):
         lines.append("Run it again to sync the rest.")
     return lines
 
@@ -891,7 +956,7 @@ def _kept(held):
 
 
 def _done_text(o):
-    if o.step.kind == P.DOWNLOAD and o.held:
+    if o.step.kind in (P.DOWNLOAD, P.SNAPSHOT) and o.held:
         return "%s   replaced; %s" % (o.step.path, _kept(o.held))
     return o.step.path
 
@@ -918,6 +983,9 @@ def _pending_text(o):
     elif o.why == NO_CONFLICT_NAME:
         text = ("all %d conflict names for it are taken (%s); rename or remove some, then run it again" %
                 (M.MAX_CONFLICT_TRIES, o.detail))
+    elif o.step.kind == P.SNAPSHOT:
+        # (fs-sync's cap or the endpoint's 413: the same bound, DOCUMENT_BYTES)
+        text = "over the %d MiB limit for a notebook, board or chat" % (DOCUMENT_BYTES // 2**20)
     else:
         text = "the workspace refused it as too large"  # (413)
     return _also(o, text)
@@ -927,6 +995,8 @@ def _skipped_text(o):
     if o.why == BESIDE:
         text = ("a file appeared there during the sync; the workspace's version is saved beside it as \"%s\"" %
                 o.beside)
+    elif o.why == APPEARED:
+        text = "a file appeared there during the sync; left as it is"
     elif o.why == CHANGED_THERE:
         text = "changed in the workspace during the sync"
     elif o.why == LOCAL_ERROR:
