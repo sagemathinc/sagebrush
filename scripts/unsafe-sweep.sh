@@ -17,5 +17,5 @@ s=$(date +%s.%N); rustup target add x86_64-pc-windows-msvc > "$OUT/rustup.log" 2
 cargo metadata --format-version 1 --locked > "$OUT/metadata.json" 2> "$OUT/metadata.err" || { echo "cargo metadata failed (rejects)" >&2; cat "$OUT/metadata.err" >&2; exit 3; }
 t host-default  cargo check --message-format=json --workspace --all-targets --exclude sagebrush-flint --exclude sagebrush-oracle
 t host-features cargo check --message-format=json --all-targets --all-features -p sagebrush-ledger -p sagebrush-interrupt -p sagebrush-poly -p sagebrush-py
-t wasm          cargo check --message-format=json --target wasm32-unknown-unknown -p sagebrush-web -p sagebrush-raster -p sagebrush-growth-probe --lib
+t wasm          cargo check --message-format=json --target wasm32-unknown-unknown -p sagebrush-web -p sagebrush-raster -p sagebrush-wasmheap -p sagebrush-growth-probe --lib
 t windows       cargo check --message-format=json --target x86_64-pc-windows-msvc -p sagebrush-interrupt --all-targets --all-features
