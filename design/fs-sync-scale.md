@@ -9,6 +9,7 @@
 - Small files travel in batches, so a 10,000-file first sync takes minutes rather than hours.
 - Tests exercise 10,000 files, 100,000 files and the pinned Sagebrush tree, including crashes and concurrent accounts.
 - Nightly runs check correctness and counted server load; named DEV runs measure real elapsed time before a tier is raised.
+- The record of an agent's requests is kept for 7 days.
 
 The numeric quotas themselves are CoCalc business configuration. This note fixes the protocol, performance targets and evidence required before William chooses or raises them.
 
@@ -27,7 +28,6 @@ sync.agent = {
   document_bytes, document_batches,
   runs_concurrent, runs_per_hour, sockets, confirmations,
   live_grants, scopes_per_grant, grant_days_max,
-  access_log_rows, access_log_days,
   inbox_item_bytes, inbox_waiting_items, inbox_items_per_sender_per_day,
   git_project_entries, git_project_tree_bytes, git_project_archive_bytes,
   git_project_concurrency,
@@ -44,6 +44,8 @@ A grant may reduce a value but cannot raise it. Population limits govern growth 
 ### 1.1 Product limits and host capabilities
 
 The object above contains product limits. A source census fails when implementation adds an authenticated product cap without a field and at-limit/one-past pins. Its negative control plants an unregistered cap and proves the checker fails.
+
+Until slice 2 replaces the 1a2 adapter's copied `IX` bounds with discovered capabilities, the census registers those constants explicitly as interim host bounds, never product caps.
 
 Separately named host and protocol capabilities include path representation, Worker request-body/runtime ceilings, transport chunk size, response page size, examined rows per turn, operations per internal message, Stop/memory/transaction/alarm slices, and pre-authentication abuse controls. Discovery advertises the effective structural ceilings needed by a client. It clamps work or makes it resumable; it does not become a paid allowance. A safety refusal never names a tier or suggests a membership.
 
@@ -74,7 +76,7 @@ An authenticated product refusal includes:
 
 There is no price, the word “upgrade” is not shown, and safety refusals never append the membership sentence.
 
-Access-log retention has a product-owned minimum age that every account receives: `AUDIT_MIN_DAYS = pending William; proposed 90`. Membership may extend but never shorten it, including zero or downgrade. `access_log_days` is the promised age and `access_log_rows` is additional retained capacity: cleanup may delete a row only after the age promise has passed, then trims oldest rows above the count in bounded slices. Thus a busy account cannot silently turn a row count into a shorter age promise. Append and cleanup remain bounded and pinned at zero and downgrade.
+Access-log retention is a fixed host rule, not a membership value: rows are kept for 7 days and at most 100,000 rows per account, with the oldest removed first in bounded cleanup slices. The row cap can remove a younger row under sustained traffic; the seven-day age and count are independent bounds. A zero value or downgrade in any membership field cannot trim the log because no membership field controls it. The retention is not advertised as a tier benefit.
 
 ## 2. `files.batch`
 
@@ -115,7 +117,7 @@ Named deterministic test seams cover: after staging/before publication (nothing 
 
 Tombstones are compacted at a durable live-entry checkpoint. Once a ready index publishes the checkpoint at a cursor, readers older than it take a full index snapshot/resync; bounded cleanup may then delete superseded tombstones. Existing rows and rebuilds never fail because a person downgraded.
 
-Keyed child lookup makes ordinary edits bounded, but rename and Trash still rewrite descendants in the shared reducer. Those operations use a durable resumable subtree state: accepted person operations remain accepted; preflight and apply progress are bounded; every index read answers 503 `index_building` with `retry_after` until completion; crashes resume; no partial cursor or index is published. BudgetStop does not advance the cursor. Final cursor/readiness publication and bounded cleanup are atomic, and the result exactly matches the shared reducer. Rename and Trash fixtures cover at least 90% of every profile, boundary/+1 slices, crashes in each phase, and rebuild through the same operation.
+Keyed child lookup makes ordinary edits bounded, but rename and Trash still rewrite descendants in the shared reducer. Those operations use a durable resumable subtree state: accepted person operations remain accepted; preflight and apply progress are bounded; every index read answers 503 `index_building` with `retry_after` until completion; crashes resume; no partial cursor or index is published. BudgetStop does not advance the cursor. Final cursor/readiness publication is atomic; obsolete hidden state is then removed in separate bounded cleanup slices. The result exactly matches the shared reducer. Rename and Trash fixtures cover at least 90% of every profile, boundary/+1 slices, crashes in each phase, and rebuild through the same operation.
 
 ## 4. Atomic git-project visibility
 
@@ -155,8 +157,8 @@ For each proposed profile the card names supported per-account batch/import conc
 
 ## 7. Delivery
 
-1. membership parsing/cache/notice, rollout and census;
-2. population admission, host capabilities, resumable subtree index and compaction;
+1. membership parsing/cache/notice, rollout and census, plus the resumable subtree index in 1a2;
+2. population admission, host capabilities and tombstone compaction;
 3. server `files.batch` lifecycle and meters;
 4. fs-sync discovery, streaming batch packing and local scaling;
 5. atomic git generations;

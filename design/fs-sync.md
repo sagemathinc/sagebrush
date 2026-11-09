@@ -106,7 +106,7 @@ Not uploaded (notebooks, boards and chats go only from the workspace to this com
   · Draft.ipynb         new here; left as it is
 Skipped (2)
   · build/                ignored (.sagebrushignore)
-  · lecture.mp4           624 MiB, over this membership's 512 MiB limit for one file
+  · lecture.mp4           624 MiB, more than the 512 MiB for one file your Basic membership allows; a Standard membership allows 2 GiB
 
 Cost: 10 requests, 1.2 MB up, 84 KB down (left today: 98.8 MB up, 192 MB down)
 Time: about 1 to 3 minutes
@@ -322,7 +322,7 @@ $$t_{\min}(R)=\max\left(0,\frac{R-m}{M}\text{ minutes},\frac{R-h}{H}\text{ hours
 
 Transfer time uses the listing's observed throughput when one exists. The line immediately after Cost is, word for word: `Time: about 3 to 10 minutes`; with no rate, `Time: at least 3 minutes, plus transfer time`; for a minute or less, `Time: about a minute`; and past 90 minutes, in whole hours, `Time: about 2 to 5 hours`. A fitting prefix says `Time for those 41: about 3 to 10 minutes`. Ranges use “to”, never mix units, and never claim seconds or one exact duration.
 
-On a terminal, apply replaces one progress line at most once a second: `Applying: 37 of 120 actions, 4.1 MB of 12.0 MB, about 6 minutes left`. Before a rate it omits the time; under a minute it says `less than a minute left`; over 90 minutes it uses whole hours; with no transferred bytes it omits the bytes. It clears that line before the usual report or any stop line; there are no per-action progress lines. Off a terminal, including `--yes` in scripts, it prints no progress chatter. A mid-run 429 stops cleanly with the server's true `retry_after`; the next run resumes.
+On a terminal, apply replaces one progress line at most once a second: `Applying: 37 of 120 actions, 4.1 MB of 12.0 MB, about 6 minutes left`. Before a rate it omits the time; under a minute it says `less than a minute left`; over 90 minutes it uses whole hours; with no transferred bytes it omits the bytes. It clears that line before the usual report or any stop line; there are no per-action progress lines. Off a terminal, including `--yes` in scripts, it prints no progress chatter. A mid-run 429 stops cleanly with the server's true `retry_after`; `replan_required` stops the same way, and the next run replans and resumes.
 
 ### 3.4 Notebooks, boards and chats: download-only snapshots
 

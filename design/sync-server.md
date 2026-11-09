@@ -660,7 +660,7 @@ For daybreak2's review. Each is enforced by the server, and each has a test. The
 | `pull` | `limit` default 100, at most 500 batches and 4 MiB a message; one R2 segment a request | `more` |
 | `blobs/check`, `outputs.set` | 1,000 and 500 items | `limit` |
 | Batches per account | 20 a second, sustained 4 a second | `rate`, with `retry_after` |
-| Ops from authenticated agents | membership `sync.agent.ops_per_minute`, each op counted, resent or new | `rate` with tier/upgrade fields, the whole message |
+| Ops from authenticated agents | membership `sync.agent.ops_per_minute`, each newly admitted op counted; an idempotent `files.batch` retry returns recorded results without another debit | `rate` with tier/upgrade fields, the whole message |
 | Other device ops per account | 2,000 a minute, each op counted, resent or new (LIMIT-321-2) | `rate`, the whole message |
 | Agent blob uploads | membership `sync.agent.blob_concurrency`; effective one-file bound is the lesser of the route capability and agent `max_file_bytes` | 429/413 with tier/upgrade fields only when membership binds; otherwise a safety refusal |
 | Other blob uploads | 4 at once per account; top-level `max_file_bytes` each | 429, 413 |

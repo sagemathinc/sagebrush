@@ -206,7 +206,6 @@ Every authenticated product capacity comes from the account's required `sync.age
 | document materialization | `document_bytes`, `document_batches` |
 | runs, sockets and confirmations | `runs_concurrent`, `runs_per_hour`, `sockets`, `confirmations` |
 | grant population, scope count and expiry | `live_grants`, `scopes_per_grant`, `grant_days_max` |
-| access-log retention | `access_log_rows`, `access_log_days` |
 | Inbox item, queue and sender/day capacities | `inbox_item_bytes`, `inbox_waiting_items`, `inbox_items_per_sender_per_day` |
 
 Listing page/call sizes and examined rows are advertised server capabilities, clamped to host safety ceilings rather than membership benefits. Read bytes are debited when authorized: a signed URL debits the whole blob and is single-use for a grant; a document read debits its value. Write bytes are reserved before a body or blob is retained. A newly admitted `files.batch` uses one request token in both request buckets, reserves every item's operation and logical bytes before work, and never debits product meters again for its idempotent retries (design/fs-sync-scale.md §2).
@@ -218,7 +217,7 @@ Every check and reservation precedes its write. For a batch, admission reserves 
 ## 8. The access log
 
 - **One row per request,** in the account object: time, grant, agent, verb, path (or paths), result, bytes, and for a run, the code's SHA-256. A request's arguments and contents are never logged.
-- **Kept for `AUDIT_MIN_DAYS = pending William; proposed 90`, or the membership's longer `access_log_days`.** A zero or downgrade cannot shorten that promise. `access_log_rows` retains additional oldest-first capacity only after the promised age has passed; sustained traffic cannot evict a younger row. Append and cleanup are bounded. William's ruling replaces only this named placeholder.
+- **Kept for 7 days, and at most 100,000 rows per account. The oldest go first.** Age and count are independent host bounds, so sustained traffic can evict a younger row at the count cap. Append and cleanup are bounded. Retention is not a membership field or tier benefit, so zero and downgrade cannot trigger separate early trimming.
 - **Who may read it:** the person, in "Agents with access", per grant or all together. An agent can't read the log, its own entries included.
 - **It is the person's data.** It is deleted with their synced data, by "Delete my synced data" and by the purge (design/sync-server.md §7). Sagebrush's operators have no view of it.
 - **"Undo this agent's changes"** uses TimeTravel's attribution, which every op and patch carries (§4), not the log. The log says what an agent asked for, and the history what it changed.
@@ -250,7 +249,7 @@ Every check and reservation precedes its write. For a batch, admission reserves 
    - **Revoking a running run:** §6.
    - **Retention:** a write that can't keep the previous version is refused, on the server as on the client (design/sync-server.md §13). Filling the quota on purpose therefore blocks writes, and loses nothing.
 4. **Rates and sizes per verb:** §7. An over-limit agent sees 429 or 413, with which limit it hit and when to retry.
-5. **The access log:** the membership's `access_log_days` and `access_log_rows`. Readable by the person only (§8).
+5. **The access log:** 7 days and 100,000 rows. Readable by the person only (§8).
 6. **The Inbox.**
    - **Who may send:**
      - the person's own grants with `outward.inbox` (their cocalc.ai agents);
@@ -305,7 +304,7 @@ In Miniflare, with the sync server's harness:
   - refused when the runner isn't there;
   - stopped when the grant is revoked.
 - **Limits:** each row of §7, at the limit and one over.
-- **The log:** a row for each request; never the token or the contents; trimmed at the membership's `access_log_rows` and `access_log_days`.
+- **The log:** a row for each request; never the token or the contents; trimmed oldest-first at 7 days and 100,000 rows.
 - **Mutations,** each caught by a test:
   - the scope check;
   - the recheck inside the write's transaction;
