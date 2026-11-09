@@ -4237,11 +4237,6 @@
   "owner": "python (@sagebrush-python)",
   "reason": "CPython's code, no size bound: _compare_digest's TypeError for operands neither two str nor buffers (CPython's message); hmac.py's except clauses for OpenSSL's UnsupportedDigestmodError, unreachable here (no _hashlib)"
  },
- "lib/_sage_cached.py :: CachedMethod._store :: raise NotImplementedError(\"cached_method on an instance with no __dict__ (a class with __slots__) is not \" #0": {
-  "class": "coverage",
-  "owner": "Sage kernel (@sagebrush-sage2)",
-  "reason": "an unsupported form: Sage caches a method's results on an instance with no __dict__, and Sagebrush keeps a method's cache only in the instance's own __dict__ (no table outside the instance, astra's C1 on #912); not a cap"
- },
  "lib/_sage_combinat.py :: Partitions :: \"\"\"The partitions of n (keywords length, max_part, min_part). #0": {
   "class": "none",
   "owner": "Sage kernel (@sagebrush-sage2)",

@@ -50,3 +50,32 @@ a.m.__name__ -> 'm'
 C.f() -> 1
 C.g(C(), 3) -> 3
 C().g(3) -> 3
+slots m twice, calls -> (1, 1, 2)
+slots m.cache -> None
+slots m.is_in_cache() -> False
+slots h twice -> (1, 1, 4)
+slots h.cache -> {}
+slots h.is_in_cache(1) -> False
+slots h.clear_cache() -> None
+slots m.clear_cache() -> None
+key method -> (1, 1, 2, [(1, 0), (2, 0)])
+key method cache -> [(1, 1), (2, 2)]
+key method is_in_cache(1, extra=9) -> True
+key receives self -> (3, (2, []))
+kwonly -> (4, 4, [(((1,), ()), 4), (((1, 3), ()), 4)])
+kwonly get_key -> (((1,), ()), ((1, 4), ()))
+mixed -> (1, [((1, 2), (('c', 3), ('z', 4)))])
+q2(1,b=2) -> ((1, 2), ())
+q2(1) missing kwonly -> ((1,), ())
+q3 b only -> KeyError: 'c'
+q3 c only -> KeyError: 'b'
+q3 both b,c -> ((1, 6, 5), ())
+q3 both c,b -> ((1, 6, 5), ())
+q4 b and z -> KeyError: 'k'
+q4 k by name -> ((1, 3, 5), ())
+q4 only z -> KeyError: 'k'
+q5() -> ((), ())
+q5(b=4) -> ((4,), ())
+r2 (1,2) -> ((1, 2), ())
+r2 (1,2,c=3) -> ((1, 2), (('c', 3),))
+r2 (1,c=3) -> ((1, 3), ())

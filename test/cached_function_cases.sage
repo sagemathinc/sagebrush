@@ -1,5 +1,5 @@
 # Sagebrush's cached_method keeps a method's results in the instance's own __dict__ (astra's C1 on #912): nothing
-# outside the instance holds it, so dropping the instance drops its cache; a class with no __dict__ is refused.
+# outside the instance holds it, so dropping the instance drops its cache; an instance with no __dict__ keeps nothing.
 import _sage_cached
 def show(label, f):
     try:
@@ -36,7 +36,10 @@ class S:
     @cached_method
     def m(self):
         return 1
-show("slots class", lambda: S().m())
+show("slots class", lambda: (S().m(), S().m.cache, S().m.is_in_cache()))
+for _ in range(50):
+    S().m()
+show("module containers unchanged after slots calls", lambda: containers() == before)
 class C:
     @cached_method
     def f(self):
