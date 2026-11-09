@@ -9,7 +9,9 @@
 //!   from_man_exp, mpf_add/sub/mul/div/sqrt).
 
 pub mod exp;
+pub mod consts;
 pub mod glibm;
+pub mod int;
 pub mod intmath;
 pub mod mpc;
 pub mod mpf;
