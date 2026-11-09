@@ -13,10 +13,15 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   SyncError, LIMITS, RECHECK_MS, PIN_MS, VERSION, Bucket, checkBatch, checkHead, checkOp, clientOf, fields, has, isDevice, isDocId, isNat,
-  parseMessage, PERSON_ONLY, attempt, attemptAsync, randomHex, TICKET_MS, LIMITS_TTL_MS, isSha, type Batch, type DocKind, type Head, type Result,
+  parseMessage, PERSON_ONLY, attempt, attemptAsync, randomHex, same, TICKET_MS, LIMITS_TTL_MS, isSha, type Batch, type DocKind, type Head, type Result,
 } from "../sync-protocol/protocol.ts";
 import { patchRef, unwrap, type BatchOut } from "./doc.ts";
-import { allowed, gate, testMode, type SyncEnv } from "./env.ts";
+import { agentOn, allowed, gate, testMode, tieredOn, type SyncEnv } from "./env.ts";
+import { AGENT, GRANT_ID, READS, SCOPED, VERBS, checkAgentName, checkScopes, inScope, makeToken, newGrantId, newSecret, secretHash, type Scope } from "./agent-token.ts";
+import { normPath } from "../workspace/paths.ts";
+import { checkCall } from "../workspace/agent-schema.ts";
+import { TIERED, canonical, checkManifest, sha256Hex, type Manifest } from "./manifest.ts";
+import { Sha256, type ShaState } from "./sha256.ts";
 import { MAX_PUT, SHARING_USED, nowSeconds } from "../share/server.ts";
 
 type Row = Record<string, ArrayBuffer | string | number | null>;
@@ -76,7 +81,7 @@ const MAX_HOLDS = LIMITS.liveBatches;
 
 /** The limits CoCalc gives an account (design/sync-server.md §6), as this service reads them. */
 /** (one storage_bytes for sharing and sync together, §6.1: sync has no storage limit of its own) */
-export interface Limits { storage_bytes: number; max_file_bytes: number; sync: { enabled: boolean; version_bytes: number; read_bytes_per_day: number; retention_days?: number }; issued?: number }
+export interface Limits { storage_bytes: number; max_file_bytes: number; sync: { enabled: boolean; version_bytes: number; read_bytes_per_day: number; retention_days?: number; verify_bytes_per_day?: number }; issued?: number }
 /** Dev deployments with no CoCalc to ask (SHARE_DEV=1): small, fixed limits. */
 /** After CoCalc couldn't say an account's plan, how long before it's asked again (LIMIT-SYNC-STATUS-1). */
 const PLAN_RETRY_MS = 5000;
@@ -485,8 +490,14 @@ export class SyncAccount extends DurableObject<SyncEnv> {
           // (a session acts for the person; "agent:<name>" from a session is an agent in the person's page, design/agent-endpoint.md §9.2)
           if (PERSON_ONLY.has(op.op) && op.by !== "person") throw new SyncError("forbidden", "only a person may " + op.op);
           // (a data file's bytes are uploaded before the op that names them, and the entry holds them, §3)
+          // (or, with chunked files on, a manifest the server has verified: a row still verifying is `missing`, so no op
+          // makes an unverified file an entry's bytes, design/tiered-files.md §4.1 step 6)
+          let chunked = false;
           if (op.kind === "file" && op.sha256 !== undefined) {
-            if (!this.one("SELECT 1 AS x FROM holdings WHERE sha256 = ?", op.sha256)) throw new SyncError("missing", "upload the file's bytes before the op");
+            if (!this.one("SELECT 1 AS x FROM holdings WHERE sha256 = ?", op.sha256)) {
+              chunked = tieredOn(this.env) && this.hasFiles() && this.one("SELECT 1 AS x FROM files WHERE sha256 = ? AND state IN ('verified', 'live')", op.sha256) !== undefined;
+              if (!chunked) throw new SyncError("missing", "upload the file's bytes before the op");
+            }
           }
           this.sql.exec(
             'INSERT INTO ops (device, dseq, t, by, op, path, "to", kind, ref, fid, sha256, size, base, recv, parent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
@@ -494,7 +505,8 @@ export class SyncAccount extends DurableObject<SyncEnv> {
           );
           out.push({ dseq, seq: Number(this.one("SELECT last_insert_rowid() AS n")!.n) });
           // (the reference an entry holds; it is given back when the reducer replaces the entry's bytes)
-          if (op.kind === "file" && op.sha256 !== undefined) this.sql.exec("UPDATE holdings SET refs = refs + 1 WHERE sha256 = ?", op.sha256);
+          if (chunked) this.sql.exec("UPDATE files SET refs = refs + 1, state = 'live' WHERE sha256 = ?", op.sha256);
+          else if (op.kind === "file" && op.sha256 !== undefined) this.sql.exec("UPDATE holdings SET refs = refs + 1 WHERE sha256 = ?", op.sha256);
         } catch (e) {
           if (!(e instanceof SyncError)) throw e;
           if (refusedCount() >= LIMITS.refusalsPerDevice) throw new SyncError("invalid", "too many refused ops: rebuild from the server's log");
@@ -1650,12 +1662,337 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
 
   /** Which of these blobs this account must upload (advisory, §5.4). */
-  async missing(a: { account: string; blobs: string[]; bind?: { account?: string; generation?: number } }): Promise<Result<string[]>> {
+  async missing(a: { account: string; blobs: string[]; bind?: { account?: string; generation?: number } }): Promise<Result<{ missing: string[]; verifying: string[] }>> {
     return attempt(() => {
       this.admit(a.account, false);
       this.bound(a.bind?.account, a.bind?.generation);
-      return a.blobs.filter((sha) => !this.one("SELECT 1 AS x FROM holdings WHERE sha256 = ?", sha));
+      // (with chunked files on, a whole file's hash is answered too, design/tiered-files.md §4.1 "First, is the whole
+      // file already there?": held as a verified manifest, or being verified, which the client then drives)
+      const files = tieredOn(this.env) && this.hasFiles();
+      const missing: string[] = [], verifying: string[] = [];
+      for (const sha of a.blobs) {
+        if (this.one("SELECT 1 AS x FROM holdings WHERE sha256 = ?", sha)) continue;
+        const f = files ? this.one("SELECT state FROM files WHERE sha256 = ?", sha) : undefined;
+        if (f && f.state !== "verifying") continue;
+        if (f) verifying.push(sha);
+        missing.push(sha);
+      }
+      return { missing, verifying };
     });
+  }
+
+  // ---- chunked files (design/tiered-files.md §4.1, §4.3, §5.1), behind tieredOn (DEV only)
+
+  /** The files table: made the first time it is needed, so no account's schema changes while the switch is off. */
+  private ensureFiles() {
+    this.sql.exec("CREATE TABLE IF NOT EXISTS files (sha256 TEXT PRIMARY KEY, reg TEXT NOT NULL, mdigest TEXT NOT NULL, vinc TEXT NOT NULL, size INTEGER NOT NULL, manifest TEXT NOT NULL, keys TEXT NOT NULL, state TEXT NOT NULL, position INTEGER NOT NULL, sha_state TEXT, hold_until INTEGER NOT NULL, refs INTEGER NOT NULL DEFAULT 0, created INTEGER NOT NULL)");
+    this.sql.exec("CREATE INDEX IF NOT EXISTS files_hold ON files (hold_until) WHERE refs <= 0 AND state <> 'live'");
+  }
+  private hasFiles(): boolean {
+    return this.one("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'files'") !== undefined;
+  }
+  private holdMs(): number {
+    return testMode(this.env) && this.testHold > 0 ? this.testHold : TIERED.holdMs;
+  }
+  /** The distinct chunks of a manifest, in their first order. */
+  private static distinct(m: Manifest): string[] {
+    return [...new Set(m.chunks.map((c) => c[0]))];
+  }
+  /** Each distinct chunk's holding key, or `missing` / `invalid` naming the chunks not held at their listed size. */
+  private chunksOf(m: Manifest): Map<string, string> {
+    const absent: string[] = [], wrong: string[] = [];
+    const keyOf = new Map<string, string>();
+    for (const [c, n] of m.chunks) {
+      if (keyOf.has(c) || absent.includes(c) || wrong.includes(c)) continue;
+      const h = this.one("SELECT key, size FROM holdings WHERE sha256 = ?", c);
+      if (!h) absent.push(c);
+      else if (Number(h.size) !== n) wrong.push(c);
+      else keyOf.set(c, String(h.key));
+    }
+    if (absent.length) throw new SyncError("missing", "upload these chunks first", { missing: absent });
+    if (wrong.length) throw new SyncError("invalid", "these chunks' sizes aren't their stored sizes", { sizes: wrong });
+    return keyOf;
+  }
+  /** Retire a files row (§4.3): the row goes, and each distinct chunk loses the one reference the row held, in the caller's transaction. */
+  private retireFile(sha: string) {
+    const r = this.one("SELECT manifest FROM files WHERE sha256 = ?", sha);
+    if (!r) return;
+    const m = JSON.parse(String(r.manifest)) as Manifest;
+    this.sql.exec("DELETE FROM files WHERE sha256 = ?", sha);
+    for (const c of SyncAccount.distinct(m)) this.sql.exec("UPDATE holdings SET refs = refs - 1 WHERE sha256 = ?", c);
+    this.addUsed(-new TextEncoder().encode(String(r.manifest)).length);
+  }
+
+  /**
+   * Register a chunked file's manifest (§4.1, step 4): its form and limits, every chunk held as its own holding at its
+   * listed size, then the row in state `verifying`, with a registration id never reused and one reference to each
+   * distinct chunk, owned by the row.  The same manifest again renews the hold and answers the row as it is; another
+   * manifest for the same hash is `conflict` while a row exists.  The manifest's bytes count in usage (§4.3).
+   */
+  async registerManifest(a: { account: string; manifest: unknown; bind?: { account?: string; generation?: number } }): Promise<Result<{ state: string; position: number; chunks: number }>> {
+    if (!tieredOn(this.env)) return { error: { code: "unavailable", message: "chunked files are off here" } };
+    if (!this.exists()) return { error: { code: "forbidden", message: "turn on sync first" } };
+    const l = await this.limits();
+    const pre = attempt(() => {
+      this.admit(a.account, true);
+      this.bound(a.bind?.account, a.bind?.generation);
+      if (!l) throw new SyncError("busy", "this account's limits aren't known yet; try again");
+      return checkManifest(a.manifest, l.max_file_bytes);
+    });
+    if ("error" in pre) return pre;
+    const m = pre.ok;
+    const text = canonical(m);
+    const mdigest = await sha256Hex(text);
+    const bytes = new TextEncoder().encode(text).length;
+    // (room only for a row that will be new, with every chunk held at its size: a resent manifest, a competing one, or
+    // one with missing or wrong chunks is answered without raising the claim, daybreak3's #880 finding.  The
+    // transaction below checks all of it again, since another call may interleave at room's awaits)
+    const plan = attempt(() => {
+      this.ensureFiles();
+      return this.one("SELECT 1 AS x FROM files WHERE sha256 = ?", m.sha256) ? "existing" : (this.chunksOf(m), "new");
+    });
+    if ("error" in plan) return plan;
+    if (plan.ok === "new") {
+      const room = await attemptAsync(() => this.room(bytes, "file"));
+      if ("error" in room) return room;
+    }
+    return attempt(() => this.ctx.storage.transactionSync(() => {
+      this.admit(a.account, true);
+      this.bound(a.bind?.account, a.bind?.generation);
+      this.ensureFiles();
+      const now = Date.now();
+      const had = this.one("SELECT mdigest, state, position FROM files WHERE sha256 = ?", m.sha256);
+      if (had) {
+        if (had.mdigest !== mdigest) throw new SyncError("conflict", "another manifest for this file is registered", { state: had.state });
+        if (had.state !== "live") this.sql.exec("UPDATE files SET hold_until = ? WHERE sha256 = ?", now + this.holdMs(), m.sha256);
+        return { state: String(had.state), position: Number(had.position), chunks: m.chunks.length };
+      }
+      const keyOf = this.chunksOf(m);
+      if (!this.fits(bytes, "file")) throw new SyncError("busy", "try again", { retry_after: 200 });
+      const keys = m.chunks.map(([c]) => keyOf.get(c)!);
+      this.sql.exec(
+        "INSERT INTO files (sha256, reg, mdigest, vinc, size, manifest, keys, state, position, sha_state, hold_until, refs, created) VALUES (?, ?, ?, ?, ?, ?, ?, 'verifying', 0, NULL, ?, 0, ?)",
+        m.sha256, randomHex(16), mdigest, randomHex(16), m.size, text, JSON.stringify(keys), now + this.holdMs(), now,
+      );
+      for (const c of keyOf.keys()) this.sql.exec("UPDATE holdings SET refs = refs + 1 WHERE sha256 = ?", c);
+      this.addUsed(bytes);
+      this.wakeBy(now + this.holdMs() + 1);
+      return { state: "verifying", position: 0, chunks: m.chunks.length };
+    }));
+  }
+
+  /**
+   * The one verify call an account may have running (§4.1 step 5, §6), kept durably in meta so a restart doesn't free
+   * it: its file, a random attempt id, and when it ends.  Only the call holding the attempt id may record its work or
+   * free the slot (verifyEnd compares it first), and a call past its end records nothing; the Worker stops streaming
+   * by then too (astra's #880 SEC 1).
+   */
+  private slot(): { sha256: string; attempt: string; until: number; hold: number } | null {
+    const v = this.get("verify_slot");
+    return v ? (JSON.parse(v) as { sha256: string; attempt: string; until: number; hold: number }) : null;
+  }
+  /**
+   * How long past its recording deadline a slot stays owned if its call never frees it (astra's b012addb note): an R2
+   * get can't be aborted, so the Worker frees the slot itself (verifyEnd, or verifyRelease) only once its last R2
+   * operation has settled.  A Worker that died holds no R2 operation, and its slot is admitted again after this.
+   */
+  private slotHoldMs(): number {
+    return testMode(this.env) ? (this.testSlotHold || 3000) : 10 * 60_000;
+  }
+  private verifyMs(): number {
+    return testMode(this.env) ? (this.testVerifyMs || 5000) : 120_000;
+  }
+  /** Each chunk's current holding key, in one statement (daybreak4's #880 PERF 1). */
+  private keysNow(chunks: string[]): Map<string, string> {
+    const out = new Map<string, string>();
+    for (const r of this.sql.exec("SELECT sha256, key FROM holdings WHERE sha256 IN (SELECT value FROM json_each(?))", JSON.stringify([...new Set(chunks)])).toArray() as Row[]) out.set(String(r.sha256), String(r.key));
+    return out;
+  }
+
+  /**
+   * The first half of a verify call (§4.1, step 5): the row's registration, digest, incarnation, position and saved
+   * SHA-256 state, and the next chunks' keys, at most TIERED.verifyChunks of them.  If a chunk's holding has another key
+   * than the one captured (a repair elsewhere rekeyed it), the verification restarts from zero with the keys captured
+   * afresh and a new incarnation, keeping the registration and every reference.  The chunks' bytes are debited from
+   * today's verification budget before anything is streamed, so work later discarded is still counted (LIMIT-TF-8).
+   */
+  async verifyBegin(a: { account: string; sha256: string; bind?: { account?: string; generation?: number } }): Promise<Result<{ state: string } | { reg: string; vinc: string; mdigest: string; attempt: string; until: number; position: number; to: number; count: number; size: number; sha_state: ShaState | null; chunks: { sha256: string; size: number; key: string }[] }>> {
+    if (!tieredOn(this.env)) return { error: { code: "unavailable", message: "chunked files are off here" } };
+    if (!this.exists()) return { error: { code: "forbidden", message: "turn on sync first" } };
+    const l = await this.limits();
+    return attempt(() => this.ctx.storage.transactionSync(() => {
+      this.admit(a.account, true);
+      this.bound(a.bind?.account, a.bind?.generation);
+      const r = this.hasFiles() ? this.one("SELECT reg, mdigest, vinc, size, manifest, keys, state, position, sha_state FROM files WHERE sha256 = ?", a.sha256) : undefined;
+      if (!r) throw new SyncError("missing", "register this file's manifest first");
+      if (r.state !== "verifying") return { state: String(r.state) };
+      const now = Date.now();
+      const held = this.slot();
+      // (retry when the running call's deadline passes; past it, the slot frees once that call's last R2 get settles, so
+      // ask again in a second, never later than the hold: grader's #880 R13)
+      if (held && held.hold > now) throw new SyncError("rate", "another verification is running", { limit: "verify_at_once", max: 1, retry_after: Math.max(1, held.until > now ? held.until - now : Math.min(held.hold - now, 1000)) });
+      const m = JSON.parse(String(r.manifest)) as Manifest;
+      let keys = JSON.parse(String(r.keys)) as string[];
+      let position = Number(r.position), vinc = String(r.vinc), shaState = r.sha_state === null ? null : (JSON.parse(String(r.sha_state)) as ShaState);
+      let to = Math.min(m.chunks.length, position + TIERED.verifyChunks);
+      // (the keys about to be streamed, and on the last step all of them, each step one statement: so the whole
+      // verification checks O(chunks) keys, daybreak4's #880 PERF 1)
+      const span = to === m.chunks.length ? [0, to] : [position, to];
+      const now_ = this.keysNow(m.chunks.slice(span[0], span[1]).map((c) => c[0]));
+      if (m.chunks.slice(span[0], span[1]).some(([c], j) => now_.get(c) !== keys[span[0] + j])) {
+        // (a rekey: discard the partial hash and start again with every key captured afresh, astra's c085569f note)
+        const all = this.keysNow(m.chunks.map((c) => c[0]));
+        keys = m.chunks.map(([c]) => all.get(c) ?? "");
+        if (keys.some((k) => !k)) throw new SyncError("missing", "a chunk of this file is no longer held");
+        position = 0;
+        shaState = null;
+        vinc = randomHex(16);
+        to = Math.min(m.chunks.length, TIERED.verifyChunks);
+        this.sql.exec("UPDATE files SET keys = ?, position = 0, sha_state = NULL, vinc = ? WHERE sha256 = ?", JSON.stringify(keys), vinc, a.sha256);
+      }
+      const chunks = m.chunks.slice(position, to).map(([c, n], j) => ({ sha256: c, size: n, key: keys[position + j] }));
+      const bytes = chunks.reduce((t, c) => t + c.size, 0);
+      const day = Math.floor(now / 86400_000);
+      const budget = l?.sync.verify_bytes_per_day ?? TIERED.verifyBytesPerDay;
+      const used = Number(this.one("SELECT bytes FROM reads WHERE day = ? AND who = 'verify'", day)?.bytes ?? 0);
+      // (each call debits at least TIERED.verifyDebitFloor, however short its step: a hard bound on the calls, so on the
+      // R2 gets, an account can start a day, the coordinator's final #880 ruling)
+      const debit = Math.max(bytes, TIERED.verifyDebitFloor);
+      if (used + debit > budget) throw new SyncError("rate", "today's verification budget is used up", { limit: "verify_bytes_per_day", max: budget, retry_after: (day + 1) * 86400_000 - now });
+      this.sql.exec("INSERT INTO reads (day, who, bytes) VALUES (?, 'verify', ?) ON CONFLICT(day, who) DO UPDATE SET bytes = bytes + excluded.bytes", day, debit);
+      this.sql.exec("DELETE FROM reads WHERE day < ?", day - 1);
+      const slot = { sha256: a.sha256, attempt: randomHex(16), until: now + this.verifyMs(), hold: now + this.verifyMs() + this.slotHoldMs() };
+      this.set("verify_slot", JSON.stringify(slot));
+      return { reg: String(r.reg), vinc, mdigest: String(r.mdigest), attempt: slot.attempt, until: slot.until, position, to, count: m.chunks.length, size: Number(r.size), sha_state: shaState, chunks };
+    }));
+  }
+
+  /**
+   * The second half (§4.1, step 5): one transaction that checks the account's generation, the row's registration,
+   * digest, incarnation, state and position, and each streamed chunk's holding key, all as captured: a call that
+   * finds any of them changed changes nothing.  Then the new position and SHA-256 state; after the last chunk, the
+   * total length and digest decide: `verified`, or the row retired at once (the one exception to its hold) and
+   * `invalid`.  A streamed chunk whose length wasn't its listed size retires the row too.
+   */
+  async verifyEnd(a: { account: string; sha256: string; reg: string; vinc: string; mdigest: string; attempt: string; from: number; to: number; keys: string[]; sha_state: ShaState; short?: boolean; bind?: { account?: string; generation?: number } }): Promise<Result<{ state: string; position: number; reason?: string }>> {
+    if (!tieredOn(this.env)) return { error: { code: "unavailable", message: "chunked files are off here" } };
+    if (!this.exists()) return { error: { code: "forbidden", message: "turn on sync first" } };
+    // (the slot first, in its own transaction: only this attempt's own, still-live slot is freed, and a call that
+    // doesn't hold it records nothing, so a stale completion can't free a newer call's slot)
+    const own = this.ctx.storage.transactionSync(() => {
+      const slot = this.slot();
+      if (!slot || slot.attempt !== a.attempt || slot.sha256 !== a.sha256) return "stale" as const;
+      this.sql.exec("DELETE FROM meta WHERE k = 'verify_slot'");
+      return slot.until >= Date.now() ? ("live" as const) : ("late" as const);
+    });
+    if (own !== "live") return { error: { code: "conflict", message: own === "late" ? "this verification step took too long; verify again" : "this verification step isn't the running one; verify again" } };
+    return attempt(() => this.ctx.storage.transactionSync(() => {
+      this.admit(a.account, true);
+      this.bound(a.bind?.account, a.bind?.generation);
+      const r = this.hasFiles() ? this.one("SELECT reg, mdigest, vinc, size, manifest, keys, state, position FROM files WHERE sha256 = ?", a.sha256) : undefined;
+      const stale = () => new SyncError("conflict", "this file's verification changed meanwhile; verify again");
+      if (!r || r.reg !== a.reg || r.mdigest !== a.mdigest || r.vinc !== a.vinc || r.state !== "verifying" || Number(r.position) !== a.from) throw stale();
+      const m = JSON.parse(String(r.manifest)) as Manifest;
+      const keys = JSON.parse(String(r.keys)) as string[];
+      if (!(a.to > a.from && a.to <= m.chunks.length && a.keys.length === a.to - a.from)) throw new SyncError("invalid", "verify: range");
+      const now_ = this.keysNow(m.chunks.slice(a.from, a.to).map((c) => c[0]));
+      for (let i = a.from; i < a.to; i++) {
+        if (a.keys[i - a.from] !== keys[i] || now_.get(m.chunks[i][0]) !== keys[i]) throw stale();
+      }
+      if (a.short) {
+        this.retireFile(a.sha256);
+        return { state: "invalid", position: a.from, reason: "size" };
+      }
+      const h = Sha256.from(a.sha_state);
+      const expect = m.chunks.slice(0, a.to).reduce((t, c) => t + c[1], 0);
+      if (h.length !== expect) throw new SyncError("invalid", "verify: the hashed length isn't the chunks' sizes");
+      if (a.to < m.chunks.length) {
+        this.sql.exec("UPDATE files SET position = ?, sha_state = ? WHERE sha256 = ?", a.to, JSON.stringify(h.save()), a.sha256);
+        return { state: "verifying", position: a.to };
+      }
+      if (h.length !== Number(r.size) || h.hexDigest() !== a.sha256) {
+        this.retireFile(a.sha256);
+        return { state: "invalid", position: a.to, reason: "order or hash" };
+      }
+      this.sql.exec("UPDATE files SET state = 'verified', position = ?, sha_state = NULL, hold_until = ? WHERE sha256 = ?", a.to, Date.now() + this.holdMs(), a.sha256);
+      return { state: "verified", position: a.to };
+    }));
+  }
+
+  /** A verify call that records nothing frees its own slot, once its last R2 operation has settled (never another's). */
+  async verifyRelease(a: { sha256: string; attempt: string }): Promise<void> {
+    if (!tieredOn(this.env) || !this.exists()) return;
+    this.ctx.storage.transactionSync(() => {
+      const slot = this.slot();
+      if (slot && slot.attempt === a.attempt && slot.sha256 === a.sha256) this.sql.exec("DELETE FROM meta WHERE k = 'verify_slot'");
+    });
+  }
+
+  /** A verified file's manifest (§4.1, "Reading"), for the account's own devices. */
+  async getManifest(a: { account: string; sha256: string; bind?: { account?: string; generation?: number } }): Promise<Result<{ manifest: Manifest; state: string }>> {
+    if (!tieredOn(this.env)) return { error: { code: "unavailable", message: "chunked files are off here" } };
+    if (!this.exists()) return { error: { code: "forbidden", message: "turn on sync first" } };
+    return attempt(() => {
+      this.admit(a.account, false);
+      this.bound(a.bind?.account, a.bind?.generation);
+      const r = this.hasFiles() ? this.one("SELECT manifest, state FROM files WHERE sha256 = ?", a.sha256) : undefined;
+      if (!r || r.state === "verifying") throw new SyncError("missing", "no verified manifest for this file");
+      return { manifest: JSON.parse(String(r.manifest)) as Manifest, state: String(r.state) };
+    });
+  }
+
+  /** Retire unused registrations whose hold has passed (§4.3), a page at a time; true if a full page was done. */
+  private retireExpired(now: number): boolean {
+    if (!tieredOn(this.env) || !this.hasFiles()) return false;
+    const rows = this.sql.exec("SELECT sha256 FROM files WHERE refs <= 0 AND state <> 'live' AND hold_until < ? LIMIT ?", now, TIERED.retirePage).toArray() as Row[];
+    // (tests only: an op that takes a reference between the select and the retirement, grader's #880 A18)
+    if (testMode(this.env) && this.testBetween && rows.some((r) => r.sha256 === this.testBetween)) {
+      this.sql.exec("UPDATE files SET refs = refs + 1, state = 'live' WHERE sha256 = ?", this.testBetween);
+      this.testBetween = "";
+    }
+    this.ctx.storage.transactionSync(() => {
+      for (const f of rows) {
+        // (checked again in the transaction: an op that refers to it meanwhile keeps it)
+        if (this.one("SELECT 1 AS x FROM files WHERE sha256 = ? AND refs <= 0 AND state <> 'live' AND hold_until < ?", f.sha256, now)) this.retireFile(String(f.sha256));
+      }
+    });
+    return rows.length === TIERED.retirePage;
+  }
+
+  /** Tests only: a shorter hold (ms), a files row as stored, and a retirement step now. */
+  private testHold = 0;
+  private testVerifyMs = 0;
+  private testSlotHold = 0;
+  private testBetween = "";
+  async testFiles(a: { holdMs?: number; verifyMs?: number; slotHoldMs?: number; sha256?: string; retire?: boolean; endLease?: boolean; rekey?: string; between?: string; setRefs?: { sha256: string; refs: number }; endHold?: string }): Promise<{ row: Row | null; retiredPage: boolean; refs: Record<string, number>; slot: { sha256: string; attempt: string; until: number; hold: number } | null } | null> {
+    if (!testMode(this.env)) return null;
+    if (a.holdMs !== undefined) this.testHold = a.holdMs;
+    if (a.verifyMs !== undefined) this.testVerifyMs = a.verifyMs;
+    if (a.slotHoldMs !== undefined) this.testSlotHold = a.slotHoldMs;
+    if (a.endLease && this.exists()) this.sql.exec("DELETE FROM meta WHERE k = 'verify_slot'");
+    if (a.between !== undefined) this.testBetween = a.between;
+    // (a live row whose entries are all gone, as the reducer will leave one: grader's #880 A19)
+    if (a.setRefs && this.exists() && this.hasFiles()) this.sql.exec("UPDATE files SET refs = ? WHERE sha256 = ?", a.setRefs.refs, a.setRefs.sha256);
+    // (one row's hold ended now, and no other's: so the object's own alarm can't retire a row a test still needs)
+    if (a.endHold && this.exists() && this.hasFiles()) this.sql.exec("UPDATE files SET hold_until = ? WHERE sha256 = ?", Date.now() - 1, a.endHold);
+    // (a holding's bytes copied to a new key and the holding moved to it, as a repair's adoption will do)
+    if (a.rekey && this.exists()) {
+      const h = this.one("SELECT key FROM holdings WHERE sha256 = ?", a.rekey);
+      const bucket = this.env.SHARE_BUCKET;
+      if (h && bucket) {
+        const o = await bucket.get(String(h.key));
+        if (o) {
+          const key = `s/${this.get("account_hash")!.slice(0, 32)}/${randomHex(18)}`;
+          await bucket.put(key, await new Response(o.body as ReadableStream).arrayBuffer());
+          this.sql.exec("UPDATE holdings SET key = ? WHERE sha256 = ?", key, a.rekey);
+        }
+      }
+    }
+    const retiredPage = a.retire && this.exists() ? this.retireExpired(Date.now()) : false;
+    const row = a.sha256 && this.exists() && this.hasFiles() ? ((this.one("SELECT reg, mdigest, vinc, size, state, position, hold_until, refs, keys FROM files WHERE sha256 = ?", a.sha256) as Row | undefined) ?? null) : null;
+    const refs: Record<string, number> = {};
+    if (this.exists()) for (const h of this.sql.exec("SELECT sha256, refs FROM holdings").toArray() as Row[]) refs[String(h.sha256)] = Number(h.refs);
+    return { row, retiredPage, refs, slot: this.exists() ? this.slot() : null };
   }
 
   /**
@@ -1903,6 +2240,15 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     if (res !== null && res !== undefined) t.push(Number(res));
     const idle = this.one("SELECT MIN(created) AS t FROM holdings WHERE refs <= 0")?.t;
     if (idle !== null && idle !== undefined) t.push(Number(idle) + IDLE_HOLDING_MS);
+    // (an unused chunked file's registration, at the end of its hold, design/tiered-files.md §4.3)
+    const hold = tieredOn(this.env) && this.hasFiles() ? this.one("SELECT MIN(hold_until) AS t FROM files WHERE refs <= 0 AND state <> 'live'")?.t : null;
+    if (hold !== null && hold !== undefined) t.push(Number(hold) + 1);
+    // (the next live grant's expiry, when the dead ones past AGENT.deadGrants are trimmed)
+    const exp = this.hasGrants() ? this.one("SELECT MIN(expires) AS t FROM grants WHERE revoked IS NULL AND expires > ?", now)?.t : null;
+    if (exp !== null && exp !== undefined) t.push(Number(exp) + 1);
+    // (the access log's oldest row, when it ages out)
+    const log = this.logDue();
+    if (log !== null) t.push(log);
     // (a read-only account's deadline, §6.2)
     const d = this.state() === "readonly" ? this.purgeAt() : null;
     if (d !== null) t.push(d);
@@ -1919,6 +2265,301 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
 
   /** The alarm: settle pins whose answer was lost (§4.3), and forget revoked sessions past their expiry. */
+  // ---- agents' grants and their requests (design/agent-endpoint.md §1-§3, §7, §8; fs-sync step 1a, behind SYNC_AGENT
+  // on DEV).  The tables are made by the first grant, so an account without one is as it was.  The person makes,
+  // lists, rotates and revokes grants from a session; an agent's request reaches agentCall only after the Worker has
+  // checked its token's form and tag.
+
+  private hasGrants(): boolean {
+    return this.one("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'grants'") !== undefined;
+  }
+  private grantTables() {
+    this.sql.exec("CREATE TABLE IF NOT EXISTS grants (id TEXT PRIMARY KEY, agent TEXT NOT NULL, token_hash TEXT NOT NULL, scopes TEXT NOT NULL, run_code INTEGER NOT NULL DEFAULT 0, outward TEXT NOT NULL DEFAULT '[]', rate TEXT NOT NULL, created INTEGER NOT NULL, expires INTEGER NOT NULL, last_used INTEGER, revoked INTEGER, revoked_reason TEXT, refusal_logged INTEGER)");
+    // (one row per request, §8: never the token, never a request's contents)
+    this.sql.exec("CREATE TABLE IF NOT EXISTS access_log (id INTEGER PRIMARY KEY, t INTEGER NOT NULL, grant_id TEXT NOT NULL, agent TEXT NOT NULL, verb TEXT NOT NULL, paths TEXT, result TEXT NOT NULL, bytes INTEGER NOT NULL DEFAULT 0)");
+    this.sql.exec("CREATE INDEX IF NOT EXISTS access_log_grant ON access_log (grant_id, id)");
+    // (the age sweep and the alarm's due time, by time)
+    this.sql.exec("CREATE INDEX IF NOT EXISTS access_log_t ON access_log (t)");
+    // (the request buckets, kept with the grants: hard ceilings across the object's restarts, daybreak2; a row per
+    // live or listed grant and window, and one for the account)
+    this.sql.exec("CREATE TABLE IF NOT EXISTS agent_rates (key TEXT PRIMARY KEY, tokens REAL NOT NULL, at INTEGER NOT NULL)");
+  }
+  /** tests only (testAgent): lowered bounds */
+  private agentBounds = { perMinute: AGENT.perMinute, perHour: AGENT.perHour, accountPerMinute: AGENT.accountPerMinute, logRows: AGENT.logRows, logMs: AGENT.logDays * 86400_000, logSweep: AGENT.logSweep, logPage: AGENT.logPage, minuteMs: 60_000, hourMs: 3600_000, dayMs: 86400_000 };
+
+  private grantView(r: Row) {
+    return {
+      id: String(r.id), agent: String(r.agent), scopes: JSON.parse(String(r.scopes)) as Scope[], run_code: false,
+      created: Number(r.created), expires: Number(r.expires), last_used: r.last_used === null ? null : Number(r.last_used),
+      revoked: r.revoked === null ? null : Number(r.revoked), revoked_reason: r.revoked_reason === null ? null : String(r.revoked_reason),
+    };
+  }
+  /** Revoked and expired grants stay listed for the person, the newest AGENT.deadGrants of them; older ones go. With at
+   * most AGENT.liveGrants live, the table holds at most the two together. */
+  private trimDead(now: number) {
+    this.sql.exec("DELETE FROM grants WHERE id IN (SELECT id FROM grants WHERE revoked IS NOT NULL OR expires <= ? ORDER BY COALESCE(revoked, expires) DESC, id LIMIT -1 OFFSET ?)", now, AGENT.deadGrants);
+    this.sql.exec("DELETE FROM agent_rates WHERE key <> 'account' AND substr(key, 3) NOT IN (SELECT id FROM grants)");
+  }
+  /**
+   * A request against the persisted buckets (§7; daybreak2: the rates are hard ceilings, so they are kept, not in
+   * memory), each `burst` at once and refilled evenly over its window.  All are read first: if one has no request
+   * left, the first such in order is answered with the ms until it has one, and nothing is written (astra S4);
+   * otherwise one is taken from each, together.  In the caller's transaction.
+   */
+  private takeRates(buckets: { key: string; burst: number; windowMs: number; limit: string }[], now: number): { limit: string; retry_after: number } | null {
+    const left: number[] = [];
+    for (const b of buckets) {
+      const r = this.one("SELECT tokens, at FROM agent_rates WHERE key = ?", b.key);
+      const perMs = b.burst / b.windowMs;
+      const tokens = r ? Math.min(b.burst, Number(r.tokens) + Math.max(0, now - Number(r.at)) * perMs) : b.burst;
+      if (tokens < 1) return { limit: b.limit, retry_after: Math.max(1, Math.ceil((1 - tokens) / perMs)) };
+      left.push(tokens - 1);
+    }
+    buckets.forEach((b, i) => this.sql.exec("INSERT INTO agent_rates (key, tokens, at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET tokens = excluded.tokens, at = excluded.at", b.key, left[i], now));
+    return null;
+  }
+  private liveGrants(now: number): number {
+    return Number(this.one("SELECT COUNT(*) AS n FROM grants WHERE revoked IS NULL AND expires > ?", now)!.n);
+  }
+  private async token(id: string, secret: string): Promise<string> {
+    return makeToken(this.env.GRANT_TAG_KEY!, String(this.get("account_hash")), id, secret);
+  }
+
+  /**
+   * The person makes a grant (the grant dialog's call, §2 way 2): `{agent, scopes, days}`.  Its token is answered
+   * once and stored nowhere; the grant keeps SHA-256 of its secret.  Running code and outward actions aren't built,
+   * so a grant has neither.
+   */
+  async grantMake(a: { account: string; agent: unknown; scopes: unknown; days?: unknown }): Promise<Result<{ grant: ReturnType<SyncAccount["grantView"]>; token: string }>> {
+    const secret = newSecret();
+    const hash = await secretHash(secret);
+    const made = attempt(() => this.ctx.storage.transactionSync(() => {
+      if (!agentOn(this.env)) throw new SyncError("forbidden", "agents aren't enabled here");
+      this.admit(a.account, true);
+      let agent: string, scopes: Scope[];
+      try {
+        agent = checkAgentName(a.agent);
+        scopes = checkScopes(a.scopes);
+      } catch (e) {
+        throw new SyncError("invalid", (e as Error).message);
+      }
+      const days = a.days === undefined ? AGENT.defaultDays : a.days;
+      if (!Number.isSafeInteger(days) || (days as number) < 1 || (days as number) > AGENT.maxDays) throw new SyncError("invalid", `days: 1 to ${AGENT.maxDays}`);
+      const now = Date.now();
+      this.grantTables();
+      if (this.liveGrants(now) >= AGENT.liveGrants) throw new SyncError("limit", `at most ${AGENT.liveGrants} grants at once: revoke one first`, { limit: "grants", max: AGENT.liveGrants });
+      let id = newGrantId();
+      while (this.one("SELECT 1 AS x FROM grants WHERE id = ?", id)) id = newGrantId();
+      this.sql.exec(
+        "INSERT INTO grants (id, agent, token_hash, scopes, run_code, outward, rate, created, expires) VALUES (?, ?, ?, ?, 0, '[]', ?, ?, ?)",
+        id, agent, hash, JSON.stringify(scopes), JSON.stringify({ per_minute: AGENT.perMinute, per_hour: AGENT.perHour }), now, now + (days as number) * this.agentBounds.dayMs,
+      );
+      // (its expiry is when the dead grants past the newest 50 are next trimmed: the alarm is set for it now, or brought
+      // forward to it, whatever else is due; astra S5)
+      this.wakeBy(now + (days as number) * this.agentBounds.dayMs + 1);
+      this.trimDead(now);
+      return this.grantView(this.one("SELECT * FROM grants WHERE id = ?", id)!);
+    }));
+    if ("error" in made) return made;
+    return { ok: { grant: made.ok, token: await this.token(made.ok.id, secret) } };
+  }
+
+  /** The person's list of grants, live and recent ones, with no secret. */
+  async grantList(a: { account: string }): Promise<Result<{ grants: ReturnType<SyncAccount["grantView"]>[] }>> {
+    return attempt(() => {
+      if (!agentOn(this.env)) throw new SyncError("forbidden", "agents aren't enabled here");
+      this.admit(a.account, false);
+      if (!this.hasGrants()) return { grants: [] };
+      // (live grants, and the newest AGENT.deadGrants revoked or expired ones: a grant that expired since the last
+      // trim is past it already, so the list never shows more, whatever has been made since)
+      const now = Date.now();
+      const rows = this.sql.exec(
+        "SELECT * FROM grants WHERE (revoked IS NULL AND expires > ?) OR id IN (SELECT id FROM grants WHERE revoked IS NOT NULL OR expires <= ? ORDER BY COALESCE(revoked, expires) DESC, id LIMIT ?) ORDER BY created DESC, id",
+        now, now, AGENT.deadGrants,
+      ).toArray() as Row[];
+      return { grants: rows.map((r) => this.grantView(r)) };
+    });
+  }
+
+  /** The person revokes a grant: its token stops at once (§2).  Revoking one already revoked changes nothing. */
+  async grantRevoke(a: { account: string; id: unknown }): Promise<Result<{ grant: ReturnType<SyncAccount["grantView"]> }>> {
+    return attempt(() => this.ctx.storage.transactionSync(() => {
+      if (!agentOn(this.env)) throw new SyncError("forbidden", "agents aren't enabled here");
+      this.admit(a.account, false);
+      const r = typeof a.id === "string" && GRANT_ID.test(a.id) && this.hasGrants() ? this.one("SELECT * FROM grants WHERE id = ?", a.id) : undefined;
+      if (!r) throw new SyncError("missing", "no such grant");
+      if (r.revoked === null) this.sql.exec("UPDATE grants SET revoked = ?, revoked_reason = 'person' WHERE id = ?", Date.now(), r.id);
+      this.trimDead(Date.now());
+      return { grant: this.grantView(this.one("SELECT * FROM grants WHERE id = ?", r.id)!) };
+    }));
+  }
+
+  /** "New token" (§2, rotation): a live grant's secret replaced; the old token stops at once. */
+  async grantRotate(a: { account: string; id: unknown }): Promise<Result<{ grant: ReturnType<SyncAccount["grantView"]>; token: string }>> {
+    const secret = newSecret();
+    const hash = await secretHash(secret);
+    const r = attempt(() => this.ctx.storage.transactionSync(() => {
+      if (!agentOn(this.env)) throw new SyncError("forbidden", "agents aren't enabled here");
+      this.admit(a.account, true);
+      const g = typeof a.id === "string" && GRANT_ID.test(a.id) && this.hasGrants() ? this.one("SELECT * FROM grants WHERE id = ?", a.id) : undefined;
+      if (!g) throw new SyncError("missing", "no such grant");
+      if (g.revoked !== null || Number(g.expires) <= Date.now()) throw new SyncError("conflict", "this grant is revoked or expired");
+      this.sql.exec("UPDATE grants SET token_hash = ? WHERE id = ?", hash, g.id);
+      return this.grantView(this.one("SELECT * FROM grants WHERE id = ?", g.id)!);
+    }));
+    if ("error" in r) return r;
+    return { ok: { grant: r.ok, token: await this.token(r.ok.id, secret) } };
+  }
+
+  /** The person's view of the access log (§8), newest first, a page at a time; an agent can't read it. */
+  async grantLog(a: { account: string; grant?: unknown; before?: unknown }): Promise<Result<{ rows: Row[]; more: boolean }>> {
+    return attempt(() => {
+      if (!agentOn(this.env)) throw new SyncError("forbidden", "agents aren't enabled here");
+      this.admit(a.account, false);
+      if (a.grant !== undefined && (typeof a.grant !== "string" || !GRANT_ID.test(a.grant))) throw new SyncError("invalid", "grant");
+      if (a.before !== undefined && !isNat(a.before)) throw new SyncError("invalid", "before");
+      if (!this.hasGrants()) return { rows: [], more: false };
+      const before = (a.before as number | undefined) ?? Number.MAX_SAFE_INTEGER;
+      // (only rows within the log's 90 days, whether or not the alarm has deleted the older ones yet)
+      const since = Date.now() - this.agentBounds.logMs;
+      const rows = (a.grant === undefined
+        ? this.sql.exec("SELECT id, t, grant_id, agent, verb, paths, result, bytes FROM access_log WHERE id < ? AND t >= ? ORDER BY id DESC LIMIT ?", before, since, this.agentBounds.logPage + 1)
+        : this.sql.exec("SELECT id, t, grant_id, agent, verb, paths, result, bytes FROM access_log WHERE grant_id = ? AND id < ? AND t >= ? ORDER BY id DESC LIMIT ?", a.grant, before, since, this.agentBounds.logPage + 1)
+      ).toArray() as Row[];
+      return { rows: rows.slice(0, this.agentBounds.logPage), more: rows.length > this.agentBounds.logPage };
+    });
+  }
+
+  /** One row of the access log (§8), in the caller's transaction, and the log kept to 90 days and its row bound. */
+  private logRow(t: number, g: Row, verb: string, paths: string[] | null, result: string) {
+    this.sql.exec("INSERT INTO access_log (t, grant_id, agent, verb, paths, result) VALUES (?, ?, ?, ?, ?, ?)", t, g.id, g.agent, verb, paths ? JSON.stringify(paths) : null, result);
+    const id = Number(this.one("SELECT last_insert_rowid() AS n")!.n);
+    if (id > this.agentBounds.logRows) this.sql.exec("DELETE FROM access_log WHERE id <= ?", id - this.agentBounds.logRows);
+    // (rows past the log's age are the alarm's to delete, a page at a time: due when the oldest row ages out)
+    this.wakeBy(this.logDue()!);
+  }
+  /** When the oldest row of the access log is past its age (null: no log, or no rows). */
+  private logDue(): number | null {
+    if (!this.hasGrants()) return null;
+    const t = this.one("SELECT MIN(t) AS t FROM access_log")?.t;
+    return t === undefined || t === null ? null : Number(t) + this.agentBounds.logMs + 1;
+  }
+  /** A page of the access log's rows past its age, deleted. */
+  private sweepLog(now: number) {
+    if (this.hasGrants()) this.sql.exec("DELETE FROM access_log WHERE id IN (SELECT id FROM access_log WHERE t < ? ORDER BY t LIMIT ?)", now - this.agentBounds.logMs, this.agentBounds.logSweep);
+  }
+  /** A refused request's row: at most one a minute per grant (§2), so refusals can't be made to write more.  When it
+   * was last written is kept on the grant, with the row, so the bound holds across the object's restarts (astra). */
+  private logRefusal(t: number, g: Row, verb: string, result: string) {
+    const last = g.refusal_logged;
+    if (last !== null && last !== undefined && t - Number(last) < AGENT.refusalLogMs) return;
+    this.sql.exec("UPDATE grants SET refusal_logged = ? WHERE id = ?", t, g.id);
+    this.logRow(t, g, verb, null, result);
+  }
+
+  /**
+   * An agent's request (§3), after the Worker has checked its token's form and tag and named this object by the
+   * token's account hash.  In this order: the grant (it exists, its secret matches, it isn't revoked or expired) and
+   * the account (sync on and allowed, active, or readonly for a read); the grant's rates, then the account's; the
+   * verb and its scope; then the verb, none of which is built yet (404 `not_built`).  Each answer past the grant's
+   * check is a row of the access log; a refusal at it, at most one a minute per grant, and only for a grant that exists.
+   */
+  async agentCall(a: { hash: string; id: string; secret: string; verb: string; params: unknown }): Promise<{ status: number; body: Record<string, unknown> }> {
+    const unauthorized = { status: 401, body: { error: "unauthorized" } };
+    // (nothing is made here: an account without sync, or without grants, has no grant to find)
+    if (!agentOn(this.env) || !this.exists() || this.get("account_hash") !== a.hash || !this.hasGrants()) return unauthorized;
+    const presented = await secretHash(a.secret);
+    return this.ctx.storage.transactionSync(() => {
+      const now = Date.now();
+      const g = this.one("SELECT * FROM grants WHERE id = ?", a.id);
+      if (!g) return unauthorized;
+      const verb = VERBS.has(a.verb) ? a.verb : "?";
+      // (one answer for a wrong secret, a revoked grant and an expired one, §3; the hash compared in constant time)
+      if (!same(presented, String(g.token_hash)) || g.revoked !== null || Number(g.expires) <= now) {
+        this.logRefusal(now, g, verb, "unauthorized");
+        return unauthorized;
+      }
+      const account = String(this.get("account_id"));
+      const st = this.state();
+      const refuse = (status: number, error: string, extra: Record<string, unknown> = {}) => {
+        this.logRefusal(now, g, verb, error);
+        return { status, body: { error, ...extra } };
+      };
+      if (!allowed(this.env, account)) return refuse(403, "forbidden", { message: "sync isn't enabled for this account" });
+      if (st === "registering") return refuse(403, "forbidden", { message: "sync for this account is still being set up; try again in a moment" });
+      if (st === "deleting") return refuse(409, "deleting", { message: "this account's sync is being deleted" });
+      if (st === "readonly" && !READS.has(verb)) return refuse(409, "readonly", { message: "this account's sync is read-only now" });
+      // the grant's rates, then the account's: each a 429 with which limit and when to retry (§7)
+      const b = this.agentBounds;
+      const over = this.takeRates([
+        { key: "m:" + g.id, burst: b.perMinute, windowMs: b.minuteMs, limit: "requests_per_minute" },
+        { key: "h:" + g.id, burst: b.perHour, windowMs: b.hourMs, limit: "requests_per_hour" },
+        { key: "account", burst: b.accountPerMinute, windowMs: b.minuteMs, limit: "account_requests_per_minute" },
+      ], now);
+      if (over) return refuse(429, "rate", over);
+      this.sql.exec("UPDATE grants SET last_used = ? WHERE id = ?", now, g.id);
+      const answer = (status: number, error: string, paths: string[] | null, extra: Record<string, unknown> = {}) => {
+        this.logRow(now, g, verb, paths, error);
+        return { status, body: { error, ...extra } };
+      };
+      if (verb === "?") return answer(404, "unknown_verb", null);
+      const key = SCOPED[verb];
+      if (key === undefined) return answer(404, "not_built", null, { message: "this verb isn't available yet" });
+      const p = a.params;
+      // (the workspace API's own check of the call, web/workspace/schema.json, the same the page and MCP use: a field
+      // it doesn't know, or one of the wrong type, is refused before any path is read)
+      const bad = checkCall("workspace." + verb, p);
+      if (bad) return answer(400, "invalid", null, { message: bad.slice(0, 200) });
+      let path: string;
+      try {
+        path = normPath((p as Record<string, unknown>)[key]);
+      } catch {
+        return answer(400, "invalid", null, { message: `${key}: not a workspace path` });
+      }
+      const need = READS.has(verb) ? "read" : "write";
+      if (!inScope(JSON.parse(String(g.scopes)) as Scope[], path, need)) return answer(403, "scope", [path], { path, access: need });
+      // (the index these read, the server's entries, is fs-sync step 1a2)
+      return answer(404, "not_built", [path], { message: "this verb isn't available yet" });
+    });
+  }
+
+  /** Tests only: lower the agents' bounds, or expire a grant now. */
+  async testAgent(a: { perMinute?: number; perHour?: number; accountPerMinute?: number; logRows?: number; logMs?: number; logSweep?: number; logPage?: number; readonly?: boolean; noArm?: boolean; expireLive?: boolean; dayMs?: number; expireIn?: { id: string; ms: number }; clearAlarm?: boolean; minuteMs?: number; hourMs?: number; resetRates?: boolean; expire?: string }): Promise<{ log: number; grants: number; rates: number; rateRows: string; alarm: number | null }> {
+    if (!testMode(this.env)) return { log: 0, grants: 0, rates: 0, rateRows: "", alarm: null };
+    const b = this.agentBounds;
+    if (a.perMinute !== undefined) b.perMinute = a.perMinute;
+    if (a.perHour !== undefined) b.perHour = a.perHour;
+    if (a.logRows !== undefined) b.logRows = a.logRows;
+    if (a.logMs !== undefined) b.logMs = a.logMs;
+    if (a.logSweep !== undefined) b.logSweep = a.logSweep;
+    if (a.logPage !== undefined) b.logPage = a.logPage;
+    if (a.dayMs !== undefined) b.dayMs = a.dayMs;
+    // (the state a plan without sync gives an account, §6.2, set directly)
+    if (a.readonly && this.exists()) this.set("state", "readonly");
+    if (a.accountPerMinute !== undefined) b.accountPerMinute = a.accountPerMinute;
+    if (a.minuteMs !== undefined) b.minuteMs = a.minuteMs;
+    if (a.hourMs !== undefined) b.hourMs = a.hourMs;
+    if (a.resetRates && this.hasGrants()) this.sql.exec("DELETE FROM agent_rates");
+    if (a.expire !== undefined && this.hasGrants()) this.sql.exec("UPDATE grants SET expires = ? WHERE id = ?", Date.now(), a.expire);
+    if (a.expireLive && this.hasGrants()) {
+      const now = Date.now();
+      this.sql.exec("UPDATE grants SET expires = ? WHERE revoked IS NULL AND expires > ?", now, now);
+    }
+    // (as the alarm arm() set for that expiry would fire now)
+    if (a.expire !== undefined || a.expireLive) this.wakeBy(Date.now() + 1);
+    // (a grant set to expire in `ms`, with no alarm armed for it here: only arm() can schedule its trim)
+    if (a.expireIn && this.hasGrants()) this.sql.exec("UPDATE grants SET expires = ? WHERE id = ?", Date.now() + a.expireIn.ms, a.expireIn.id);
+    if (a.clearAlarm) {
+      await this.ctx.storage.deleteAlarm();
+      this.alarmAt = null;
+    }
+    const due = a.logMs !== undefined && !a.noArm ? this.logDue() : null;
+    if (due !== null) this.wakeBy(due);
+    const count = (table: string) => (this.hasGrants() ? Number(this.one(`SELECT COUNT(*) AS n FROM ${table}`)!.n) : 0);
+    const rows = this.hasGrants() ? JSON.stringify(this.sql.exec("SELECT key, tokens, at FROM agent_rates ORDER BY key").toArray()) : "[]";
+    return { log: count("access_log"), grants: count("grants"), rates: count("agent_rates"), rateRows: rows, alarm: await this.ctx.storage.getAlarm() };
+  }
+
   async alarm(): Promise<void> {
     // (this alarm has fired: the next is whatever arm() sets at the end)
     this.alarmAt = null;
@@ -1959,6 +2600,13 @@ export class SyncAccount extends DurableObject<SyncEnv> {
         this.addUsed(-Number(h.size));
       }
     });
+    // unused chunked-file registrations past their hold (§4.3 of design/tiered-files.md): a page a step
+    if (this.retireExpired(now)) this.wakeBy(Date.now() + 1);
+    // the access log's rows past its 90 days (design/agent-endpoint.md §8): a page a step, and arm() below sets the next
+    // step at once while any is left
+    this.sweepLog(now);
+    // grants that expired since: the newest AGENT.deadGrants dead ones kept (daybreak2 L1), with nothing else needed
+    if (this.hasGrants()) this.trimDead(now);
     // the outbox: R2 first, the row only once R2 has deleted it; a key that fails waits its own backoff
     const bucket = this.env.SHARE_BUCKET;
     if (bucket)
@@ -1996,9 +2644,12 @@ export function checkLimits(v: unknown): Limits {
   // (a missing or malformed sync plan is CoCalc not answering properly: an outage, which keeps the
   // last good limits, never "sync off" or zero, LIMIT-7FB-3; a plan without sync says enabled: false)
   if (!s || typeof s !== "object" || typeof s.enabled !== "boolean" || !n(s.version_bytes) || !n(s.read_bytes_per_day)) throw new Error("bad limits");
+  // (an optional field that is present must be valid: a malformed one is CoCalc answering badly, which keeps the last good
+  // limits, never this server's fallback; 0 is 0, astra's #880 SEC 2)
+  if (s.verify_bytes_per_day !== undefined && !n(s.verify_bytes_per_day)) throw new Error("bad limits");
   // (a sync.storage_bytes CoCalc may still send is ignored: storage_bytes is the one budget, §6.1)
   // (how long synced data is kept read-only after a membership ends, §6.2: CoCalc's, 90 days if it says nothing)
-  const sync = { enabled: s.enabled, version_bytes: s.version_bytes, read_bytes_per_day: s.read_bytes_per_day, ...(n(s.retention_days) ? { retention_days: s.retention_days } : {}) };
+  const sync = { enabled: s.enabled, version_bytes: s.version_bytes, read_bytes_per_day: s.read_bytes_per_day, ...(n(s.retention_days) ? { retention_days: s.retention_days } : {}), ...(s.verify_bytes_per_day !== undefined ? { verify_bytes_per_day: s.verify_bytes_per_day } : {}) };
   return { storage_bytes: o.storage_bytes, max_file_bytes: o.max_file_bytes, sync, ...(n(o.issued) ? { issued: o.issued } : {}) };
 }
 

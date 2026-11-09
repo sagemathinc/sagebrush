@@ -50,6 +50,7 @@ jobs:
       web_runner: ${{ steps.paths.outputs.web_runner }}
       web_export: ${{ steps.paths.outputs.web_export }}
       web_lookalike: ${{ steps.paths.outputs.web_lookalike }}
+      web_share: ${{ steps.paths.outputs.web_share }}
       census: ${{ steps.paths.outputs.census }}
       unsafe_sweep: ${{ steps.paths.outputs.unsafe_sweep }}
       slow_tests: ${{ steps.paths.outputs.slow_tests }}
@@ -467,9 +468,16 @@ jobs:
     needs: changes
     # (the full tier only: master pushes, the nightly schedule, a dispatch, and a pull request with the full-ci label or
     # a sync, sharing, security or data-loss path, scripts/ci-paths.mjs fullTierPaths)
+    # (five parallel shards, grader's CI-time plan, Nov 9: one after another its suites took 25 min on #891, past
+    # "PR CI <= 10 min"; each shard about 5 min, the share dialog 8.5. Each shard builds the site itself; the suites
+    # are separate processes with their own Miniflare and Chromium, so no shard depends on another's state)
     if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true' && needs.changes.outputs.full == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [core, client, moves, pwa, share-dialog, share-dialog-2]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: detect CI CPU quota
@@ -487,22 +495,37 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.14"
-      - run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs && bun web/build.ts
-      - name: sharing, sync, engines and PWA
+      # (the share-dialog shard on a pull request that doesn't change sharing: nothing to build or run, ci-paths web_share)
+      - if: (matrix.shard != 'share-dialog' && matrix.shard != 'share-dialog-2') || needs.changes.outputs.web_share == 'true'
+        run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs && bun web/build.ts
+      - if: (matrix.shard != 'share-dialog' && matrix.shard != 'share-dialog-2') || needs.changes.outputs.web_share == 'true'
+        name: the site and the test workers
         run: |
           (cd web/site && npm ci --silent)
           (cd web/test-workers && npm ci --silent)
-          # (the view, and D11's large moves in chunks: here, beside the sync client, as their 100,000-entry moves take minutes)
+      - name: sharing and sync (web-sync.1, about 3 min)
+        if: matrix.shard == 'core'
+        run: |
           node scripts/web-tests.mjs run web-sync.1
           python3 -I web/sync-protocol/gen-doc-vectors.py | diff - web/sync-protocol/doc-vectors.json
-          # (offline: the kept page's headers, its framing among them, security audit G-1; about 30 s)
-          # (G-10: the runner's fetch broker on the share client, the page that mounts files: G1s, G4, G10)
-          node scripts/web-tests.mjs run web-sync.2
+      - name: the sync client against the reference server (web-sync.5, about 4 min)
+        if: matrix.shard == 'client'
+        run: node scripts/web-tests.mjs run web-sync.5
+      # (the view, and D11's large moves in chunks: their 100,000-entry moves take minutes)
+      - name: sync's view and D11's large moves (web-sync.6, about 5 min)
+        if: matrix.shard == 'moves'
+        run: node scripts/web-tests.mjs run web-sync.6
+      # (offline: the kept page's headers, its framing among them, security audit G-1; about 30 s)
+      # (G-10: the runner's fetch broker on the share client, the page that mounts files: G1s, G4, G10)
+      - name: engines, PWA and the share pages (web-sync.2, about 3 min)
+        if: matrix.shard == 'pwa'
+        run: node scripts/web-tests.mjs run web-sync.2
       # (DEV's try-it flow on the real notebook page: two browsers, notebooks, files, offline; the reference server.
       # REPORT-ONLY for now (@sagebrush, Oct 30, #330's G-ST-1): it passed 4 of 5 local runs, one first page load not coming
       # up; its result and diagnostics go to the job summary and never fail the job.  Made gating in a later PR once it is
       # green here 10 runs in a row, or once that first load is explained)
       - name: DEV try-it flow (report-only)
+        if: matrix.shard == 'pwa'
         continue-on-error: true
         timeout-minutes: 10
         run: |
@@ -516,16 +539,22 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           exit $c
-      # (the share dialog, in its own step with its own bound, in its place in the order: about 13 min on a healthy runner
-      # since #243's registry cases (it was about 7), 20 here. A hang fails this named step, not the whole job at its 40 min,
-      # and the steps before it keep their output.
-      # The tests after it stay after it: test-no-site-build rebuilds web/dist without web/site/)
-      - name: share dialog
+      # (last in its shard: test-no-site-build rebuilds web/dist without web/site/)
+      - name: previews, dependencies, the share client and the builds (web-sync.4, about 40 s)
+        if: matrix.shard == 'pwa'
+        run: node scripts/web-tests.mjs run web-sync.4
+      # (the share dialog, alone in its shard: about 8.5 min here (13 on a slow runner since #243's registry cases), 20
+      # its bound. On a pull request only when it changes sharing or has the full-ci label (ci-paths web_share); master,
+      # the schedule and a dispatch always run it)
+      - name: share dialog, its own cases (web-sync.3, about 5 min)
+        if: matrix.shard == 'share-dialog' && needs.changes.outputs.web_share == 'true'
         timeout-minutes: 20
         run: node scripts/web-tests.mjs run web-sync.3
-      - name: sharing, sync, engines and PWA (after the share dialog)
-        run: |
-          node scripts/web-tests.mjs run web-sync.4
+      # (the share dialog's second half, SHARE_DIALOG_PART=2: the 100,000-file listing and the upload-leak cases, about 7 min)
+      - name: share dialog, the big listing and the upload leaks (web-sync.7)
+        if: matrix.shard == 'share-dialog-2' && needs.changes.outputs.web_share == 'true'
+        timeout-minutes: 20
+        run: node scripts/web-tests.mjs run web-sync.7
 
   # "Export all current files (.zip)" (E1): its browser test.  The scale test's CI pass, the controls (each rule
   # undone in a copy of the chunk, its named check failing) and the campaign check run nightly (nightly.yml).
@@ -951,7 +980,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # (the groups a change selects, scripts/ci-paths.mjs webGroups: all of notebook, latex, board-a, board-b, board-c,
+        # (the groups a change selects, scripts/ci-paths.mjs webGroups: all of notebook, preload, latex, board-a, board-b, board-c,
         # board-unit, terminal and remote-preview on the full tier, a core web, runtime or workflow change)
         group: ${{ fromJSON(needs.changes.outputs.web_groups) }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
@@ -1003,6 +1032,11 @@ jobs:
               # (the bash shell's loader and its worker's own policy: plan-bash-shell r3 step 1)
               # (ShellHost, the mediator, over a real workspace: step 2)
               node scripts/web-tests.mjs run web-browser/notebook
+              ;;
+            preload)
+              # (background loading on the notebook page, web/preload.ts: its own group, about 2 min, so notebook's
+              # stays inside PR CI's 10 min; selected exactly as notebook is, scripts/ci-paths.mjs webGroups)
+              node scripts/web-tests.mjs run web-browser/preload
               ;;
             terminal)
               # (the terminal panel, plan-bash-shell r8c step 6: a group of its own, since its page test needs a flagged

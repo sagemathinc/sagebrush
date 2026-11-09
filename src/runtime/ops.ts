@@ -19,6 +19,17 @@ const MAXB = 9007199254740991n;
 // prototype; plain values take the fast paths.
 export const plainArr = (o: any): boolean => o.$cls === undefined;
 
+// Assignment unpacking may read an array layout directly only when Python's
+// type-level iterator is still the list/tuple implementation.  This retains
+// the namedtuple/layout-equivalent fast path while observing an override.
+const plainSubclassUnpackArr = (c: any, tupleLayout: boolean): boolean => {
+  if (c.$unpackIterVer !== c.$ver) {
+    c.$unpackIterVer = c.$ver;
+    c.$unpackIterPlain = lookupType(c, "__iter__") === lookupType(tupleLayout ? T.tuple : T.list, "__iter__");
+  }
+  return c.$unpackIterPlain;
+};
+
 const LAYOUT_DUNDERS = ["__len__", "__getitem__", "__setitem__", "__delitem__", "__iter__", "__contains__", "__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__", "__add__", "__mul__", "__bool__", "__hash__", "__repr__"];
 // A subclass of list/tuple/dict/set that overrides none of the base type's
 // dunders behaves exactly like its base for the operator fast paths.
@@ -2164,9 +2175,12 @@ const tooMany = (x: any, n: number) => {
 };
 export function unpack(x: any, n: number): any[] {
   if (Array.isArray(x)) {
-    if (x.length === n) return x;
-    if (x.length < n) raise(T.ValueError, `not enough values to unpack (expected ${n}, got ${x.length})`);
-    tooMany(x, n);
+    const c = (x as any).$cls;
+    if (c === undefined || plainSubclassUnpackArr(c, (x as any).$t === true)) {
+      if (x.length === n) return x;
+      if (x.length < n) raise(T.ValueError, `not enough values to unpack (expected ${n}, got ${x.length})`);
+      tooMany(x, n);
+    }
   }
   const it = iter(x);
   const out: any[] = [];
@@ -2180,7 +2194,16 @@ export function unpack(x: any, n: number): any[] {
 }
 // `a, *b, c = x` -> [a, [b...], c]
 export function unpackEx(x: any, before: number, after: number): any[] {
-  const all = toArray(x);
+  let all: any[];
+  if (Array.isArray(x)) {
+    const c = (x as any).$cls;
+    if (c === undefined || plainSubclassUnpackArr(c, (x as any).$t === true)) all = x.slice();
+    else {
+      const it = iter(x);
+      all = [];
+      for (let v = it.$next(); v !== DONE; v = it.$next()) all.push(v);
+    }
+  } else all = toArray(x);
   if (all.length < before + after) raise(T.ValueError, `not enough values to unpack (expected at least ${before + after}, got ${all.length})`);
   return [...all.slice(0, before), all.slice(before, all.length - after), ...all.slice(all.length - after)];
 }
@@ -2435,6 +2458,16 @@ export function sliceIndices(s: PySlice, len: number): [number, number, number] 
 }
 
 export function seqIndex(i: any, len: number, what: string): number {
+  return seqIndexIn(seqIndexRaw(i, what), len, what);
+}
+// seqIndex in two steps: the index converted (a user __index__ called, once), then range-checked against a
+// length read after it, as CPython's PyNumber_AsSsize_t and then the bounds check do
+export function seqIndexIn(j: number, len: number, what: string): number {
+  if (j < 0) j += len;
+  if (j < 0 || j >= len) raise(T.IndexError, `${what} index out of range`);
+  return j;
+}
+export function seqIndexRaw(i: any, what: string): number {
   let j: number;
   if (typeof i === "number" && isInt(i)) j = i;
   else if (typeof i === "boolean") j = +i;
@@ -2449,8 +2482,6 @@ export function seqIndex(i: any, len: number, what: string): number {
     const r = intResult("__index__", f(i));
     j = typeof r === "bigint" ? (r < 0n ? -Infinity : Infinity) : r;
   }
-  if (j < 0) j += len;
-  if (j < 0 || j >= len) raise(T.IndexError, `${what} index out of range`);
   return j;
 }
 
@@ -2679,12 +2710,60 @@ export function delitem(o: any, k: any): void {
     if (!dictDelete(o, k)) throw markRaised(T.KeyError(k));
     return;
   }
+  if (o instanceof PyByteArray && (o as any).$cls === undefined) return bytearrayDel(o, k);
   const f = special(o, "__delitem__");
   if (f !== undefined) {
     f(o, k);
     return;
   }
   raise(T.TypeError, `'${typeName(o)}' object doesn't support item deletion`);
+}
+// del b[k] of a bytearray, an index or a slice (CPython's bytearray_ass_subscript with no value): a deletion
+// re-sizes, so an export of the buffer refuses it (BufferError); deleting nothing doesn't
+export function bytearrayDel(o: PyByteArray, k: any): void {
+  if (k instanceof PySlice) {
+    // (the slice's step, start and stop converted first, each a user __index__ that may re-size o, as
+    // PySlice_Unpack; then adjusted to o's length as it is now, PySlice_AdjustIndices)
+    const step = k.step === null ? 1 : sliceIndex(k.step, 1);
+    if (step === 0) raise(T.ValueError, "slice step cannot be zero");
+    const start0 = k.start === null ? null : sliceIndex(k.start, 0);
+    const stop0 = k.stop === null ? null : sliceIndex(k.stop, 0);
+    const len = o.n;
+    const lo = step < 0 ? -1 : 0, hi = step < 0 ? len - 1 : len;
+    const fix = (v: number | null, dflt: number) => (v === null ? dflt : v < 0 ? Math.max(v + len, lo) : Math.min(v, hi));
+    const start = fix(start0, step < 0 ? hi : lo), stop = fix(stop0, step < 0 ? lo : hi);
+    const n = (step > 0 ? start < stop : start > stop) ? Math.floor((stop - start - (step > 0 ? 1 : -1)) / step) + 1 : 0;
+    // (an extended slice is refused under an export even when it is empty, as CPython's; a linear one only
+    // when it deletes something)
+    if (step !== 1) checkResizable(o);
+    if (n === 0) return;
+    checkResizable(o);
+    const r = new Uint8Array(o.n - n);
+    if (step === 1) {
+      r.set(o.a.subarray(0, start), 0);
+      r.set(o.a.subarray(start + n, o.n), start);
+    } else {
+      // (the kept bytes, in order: i is deleted when (i - start) / step is an integer q in [0, n), either sign
+      // of step; no set of the deleted indices)
+      for (let i = 0, j = 0; i < o.n; i++) {
+        const d = i - start;
+        const q = d / step;
+        if (d % step === 0 && q >= 0 && q < n) continue;
+        r[j++] = o.a[i];
+      }
+    }
+    o.a = r;
+    o.n = r.length;
+    return;
+  }
+  // (the index converted first, a user __index__ that may re-size o; then checked against o's length now)
+  const i = seqIndexIn(seqIndexRaw(k, "bytearray"), o.n, "bytearray");
+  checkResizable(o);
+  const r = new Uint8Array(o.n - 1);
+  r.set(o.a.subarray(0, i), 0);
+  r.set(o.a.subarray(i + 1, o.n), i);
+  o.a = r;
+  o.n = r.length;
 }
 export function arrDel(o: any[], k: any): void {
   {

@@ -2245,14 +2245,17 @@ newBuiltinModule("os", (m) => {
   Object.assign(m, { F_OK: 0, R_OK: 4, W_OK: 2, X_OK: 1, SEEK_SET: 0, SEEK_CUR: 1, SEEK_END: 2 });
   // (the functions that take follow_symlinks=False, of those CPython 3.14 lists on Linux: stat, access and utime)
   // (made at its first read: os.stat is wrapped by checkArity after this module is filled, and the set holds that one)
+  const settleFollowSymlinks = (value: any) =>
+    Object.defineProperty(m, "supports_follow_symlinks", { value, writable: true, enumerable: true, configurable: true });
   Object.defineProperty(m, "supports_follow_symlinks", {
     enumerable: true,
     configurable: true,
     get: () => {
       const v = callObj(T.set, [[m.stat, m.access, m.utime]]);
-      Object.defineProperty(m, "supports_follow_symlinks", { value: v, writable: true, enumerable: true, configurable: true });
+      settleFollowSymlinks(v);
       return v;
     },
+    set: settleFollowSymlinks,
   });
   // (P3b-2, the design note astra and daybreak2 cleared: file descriptors, chmod, utime, access and the terminal's size,
   // which shutil needs. In the browser worker they are web/shims/fs.ts's own (its descriptor table, its live write

@@ -1,0 +1,15 @@
+(* control and scoping; from the Nov 6 spike's corpora unless noted *)
+(*-- misc-1 *)
+If[3 > 2, yes, no]
+(*-- misc-2 *)
+Module[{s = 0}, Do[s += i, {i, 10}]; s]
+(*-- misc-3 *)
+Head[{1, 2}]
+(*-- misc-4 *)
+ToString[TeXForm[x^2/Sqrt[y]]]
+(*-- misc-5 *)
+Module[{a = 1, b = 2}, a + b]
+(*-- misc-6 *)
+Function[{u, v}, u v][3, 4]
+(*-- misc-7 *)
+(#1 + #2) & [2, 3]

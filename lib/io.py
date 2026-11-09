@@ -84,6 +84,12 @@ def _index_hint(hint, msg):
         v = f()
         if not isinstance(v, int):
             raise TypeError("__index__ returned non-int (type %s)" % type(v).__name__)
+        if type(v) is not int:
+            # (a strict subclass's instance, bool's too: CPython 3.14's DeprecationWarning, at the caller's line)
+            import warnings
+            warnings.warn("__index__ returned non-int (type %s).  The ability to return an instance of a strict "
+                          "subclass of int is deprecated, and may be removed in a future version of Python."
+                          % type(v).__name__, DeprecationWarning, stacklevel=3)
         v = int.__index__(v)
     if not -_SSIZE_MAX - 1 <= v <= _SSIZE_MAX:
         raise OverflowError("cannot fit '%s' into an index-sized integer" % type(hint).__name__)
@@ -228,7 +234,21 @@ class RawIOBase(IOBase):
 
 
 class BufferedIOBase(IOBase):
-    pass
+    # (CPython's defaults: a buffered stream's read and write it doesn't define are UnsupportedOperation, by name)
+    def read(self, size=-1):
+        self._unsupported("read")
+
+    def read1(self, size=-1):
+        self._unsupported("read1")
+
+    def readinto(self, b):
+        self._unsupported("read")
+
+    def write(self, b):
+        self._unsupported("write")
+
+    def detach(self):
+        self._unsupported("detach")
 
 
 class TextIOBase(IOBase):
@@ -274,6 +294,10 @@ class BytesIO(BufferedIOBase):
         return b
 
     read1 = read
+
+    def read1(self, size=-1):
+        # (CPython's BytesIO.read1: read)
+        return self.read(size)
 
     def readinto(self, b):
         data = self.read(len(b))
@@ -325,7 +349,16 @@ class BytesIO(BufferedIOBase):
 
     def truncate(self, size=None):
         self._check()
-        size = self._pos if size is None else size
+        # (CPython's: the size converted as a C long, __index__ once, and a negative one refused)
+        if size is None:
+            size = self._pos
+        elif type(size) is not int:
+            from operator import index
+            size = index(size)
+        if not -(1 << 63) <= size < (1 << 63):
+            raise OverflowError("Python int too large to convert to C long")
+        if size < 0:
+            raise ValueError("negative size value %d" % size)
         del self._buf[size:]
         return size
 
@@ -465,8 +498,14 @@ class StringIO(TextIOBase):
 
     def truncate(self, size=None):
         self._check()
+        # (CPython's: the size converted as a Py_ssize_t, _Py_convert_optional_to_ssize_t, and a negative one refused)
+        if size is None:
+            size = self._pos
+        else:
+            size = _index_hint(size, "argument should be integer or None, not '%s'")
+            if size < 0:
+                raise ValueError("Negative size value %d" % size)
         v = self._value()
-        size = self._pos if size is None else size
         self._parts = [v[:size]]
         self._len = len(self._parts[0])
         return size
@@ -509,3 +548,21 @@ def text_encoding(encoding, stacklevel=2):
 # this module's classes)
 import builtins as _builtins
 open = _builtins.open
+
+
+# (TextIOWrapper, BufferedWriter and IncrementalNewlineDecoder: CPython's pure-Python ones, in _io_text, which
+# loads on first use, so a program that never wraps a binary stream never reads it)
+_LAZY_NAMES = ("TextIOWrapper", "BufferedWriter", "IncrementalNewlineDecoder")
+
+
+def __getattr__(name):
+    if name in _LAZY_NAMES:
+        import _io_text
+        value = getattr(_io_text, name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module 'io' has no attribute '{name}'")
+
+
+def __dir__():
+    return sorted(set(globals()) | set(_LAZY_NAMES))

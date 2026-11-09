@@ -673,18 +673,32 @@ rmSync(join(here, "dist", "shell", "preview-set.json"), { force: true });
     copyFileSync(join(here, "dist", "shell", "preview-set.json"), join(siteDir, "public", "shell", "preview-set.json"));
   }
 }
-// the agents chat preview (web/agents): a full-page chat with artifacts, driven by a scripted agent. Flagged like the
-// questions preview: built only for a hosted preview (scripts/preview.sh sets SAGEBRUSH_PREVIEW_HOST) or with SAGEBRUSH_AGENTS=1
+// the Agents page (web/agents): a full-page chat with artifacts, with the scripted demo or with Claude on the person's own
+// computer (sagebrush-agent, over the loopback address).  Built in every build and served by the site at /agents, on
+// the site's own origin, so it opens the same browser workspace as the notebook and board pages (William, Nov 8: "How
+// to connect your agent", the localhost option).  SAGEBRUSH_AGENTS=1, which CI and the agents tests set, still works
+// and changes nothing.
 rmSync(join(here, "dist", "agents"), { recursive: true, force: true });
-if (process.env.SAGEBRUSH_PREVIEW_HOST || process.env.SAGEBRUSH_AGENTS === "1") {
+if (hasSite) rmSync(join(siteDir, "public", "agents"), { recursive: true, force: true });
+{
   const r = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "agents", "page.ts")], outdir: join(here, "dist", "agents"), naming: "agents.js", target: "browser", format: "esm", minify: true, define: LATEX_DEFINE });
   if (!r.success) {
     for (const l of r.logs) console.error(l);
     process.exit(1);
   }
-  copyFileSync(join(here, "agents", "index.html"), join(here, "dist", "agents", "index.html"));
+  // (and "How to connect your agent to Sagebrush", a static page without scripts: /agents/connect/, a directory's
+  // index so that every host serves it without a .html: the site's assets and the preview Worker alike)
+  mkdirSync(join(here, "dist", "agents", "connect"), { recursive: true });
+  for (const f of ["index.html", "connect/index.html"]) copyFileSync(join(here, "agents", f), join(here, "dist", "agents", f));
   // (the reviewed sagebrush-agent tarball the help box points to: not committed; placed in web/agents by the publisher)
   for (const f of readdirSync(join(here, "agents"))) if (/^sagebrush-agent-\d+\.\d+\.\d+\.tgz$/.test(f)) copyFileSync(join(here, "agents", f), join(here, "dist", "agents", f));
+  // (the site's copy: the pages and the script; the help box points at the reviewed tarball's own immutable URL, so
+  // no tarball is served from the site)
+  if (hasSite) {
+    mkdirSync(join(siteDir, "public", "agents"), { recursive: true });
+    mkdirSync(join(siteDir, "public", "agents", "connect"), { recursive: true });
+    for (const f of ["index.html", "agents.js", "connect/index.html"]) copyFileSync(join(here, "dist", "agents", f), join(siteDir, "public", "agents", f));
+  }
 }
 // the numerics core's browser-threads demo (web/threads, numerics-core r4.2 milestone M0): a dense product on 1 and N
 // threads of the tab, through engine/nd's WebAssembly module (wasm/sagebrush-nd.wasm). Flagged like the questions

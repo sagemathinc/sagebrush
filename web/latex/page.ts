@@ -925,7 +925,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // printMode(true) puts the page in its print layout for a browser an agent drives, whose own print-to-PDF (CDP
   // Page.printToPDF) then makes the file, and printMode(false) puts it back)
   const sb = ((globalThis as any).sagebrush ??= {});
-  const handle = { print: () => printPreview(), printMode: (on: boolean) => document.documentElement.classList.toggle("tex-print", !!on), fid: host.fid };
+  const handle = { print: () => printPreview(), printMode: (on: boolean) => { document.documentElement.classList.toggle("tex-print", !!on); slidePages(!!on); }, fid: host.fid };
   sb.latex = handle;
   dispose = () => { life.abort(); E.destroy(); dropImages(); cm?.destroy(); if (sb.latex === handle) delete sb.latex; };
   // (closing for another file: what is pending written first, then the editor disposed of)
@@ -1191,9 +1191,26 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
 export function printPreview() {
   const html = document.documentElement;
   html.classList.add("tex-print");
-  const done = () => html.classList.remove("tex-print");
+  slidePages(true);
+  const done = () => { html.classList.remove("tex-print"); slidePages(false); };
   window.addEventListener("afterprint", done, { once: true });
   try { window.print(); } finally { setTimeout(() => { if (html.classList.contains("tex-print")) done(); }, 0); }
+}
+
+/** A beamer document printed as beamer makes its PDF: one slide a page, the page the class's own paper (beamer.mjs
+ * slideStyle's aspect-ratio, in mm: 128 x 96 mm, 160 x 90 mm for aspectratio=169, ...), no margins, while it prints;
+ * any other document keeps PRINT_CSS's page. */
+export function slidePages(on: boolean) {
+  const id = "sb-tex-slide-page";
+  document.getElementById(id)?.remove();
+  if (!on) return;
+  const s = document.querySelector(".tex-page .tex-preview section.slide");
+  const m = /aspect-ratio:\s*(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)/.exec(s?.getAttribute("style") ?? "");
+  if (!m) return;
+  const st = document.createElement("style");
+  st.id = id;
+  st.textContent = `@page { size: ${m[1]}mm ${m[2]}mm; margin: 0; }`;
+  document.head.appendChild(st);
 }
 
 /** The print layout, only while <html> has tex-print: the rendered preview alone (no editor, header, banner, comments'
@@ -1213,5 +1230,7 @@ export const PRINT_CSS = `
   html.tex-print .tex-preview .dmath, html.tex-print .tex-preview .float, html.tex-print .tex-preview table.tabular, html.tex-print .tex-preview img.graphic, html.tex-print .tex-preview .titleblock, html.tex-print .tex-preview .thmhead { break-inside: avoid; page-break-inside: avoid; }
   html.tex-print .tex-preview .dmath { overflow: visible !important; }
   html.tex-print .tex-preview h1.chapter, html.tex-print .tex-preview h1.part { break-before: page; }
+  html.tex-print .tex-preview section.slide { break-before: page; break-inside: avoid; margin: 0 !important; border: 0 !important; box-shadow: none !important; }
+  html.tex-print .tex-preview header.slide-title { display: block !important; }
 }
 `;

@@ -1,0 +1,31 @@
+(* rules, patterns and definitions; from the Nov 6 spike's corpora unless noted *)
+(*-- rules-1 *)
+{1, 2, 3} /. 2 -> b
+(*-- rules-2 *)
+x^2 + 1 /. x -> 3
+(*-- rules-3 *)
+g[x_] := x^2 + 1
+g[3]
+(*-- rules-4 *)
+g[x_] := x^2 + 1
+g[a + b]
+(*-- rules-5 *)
+fib[0] = 0; fib[1] = 1; fib[n_] := fib[n - 1] + fib[n - 2]
+fib[15]
+(*-- rules-6 *)
+h[x_?NumberQ] := 2 x
+{h[2], h[z]}
+(*-- rules-7 *)
+g[x_] := x^2 + 1
+D[g[t], t]
+(*-- rules-8 *)
+g[x_] := x^2 + 1
+g'[t]
+(*-- rules-9 *)
+f[x_, y_] := x y; f[2, 3]
+(*-- rules-10 *)
+Clear[x]; x = 5; x^2
+(*-- rules-11 *)
+x = 5;
+Clear[x]
+x

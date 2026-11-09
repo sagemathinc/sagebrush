@@ -1,0 +1,614 @@
+-- writing: encodings, BOMs, errors
+utf-8 b'a\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80\nb\r\nc\r'
+UTF8 b'a\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80\nb\r\nc\r'
+utf-8-sig b'\xef\xbb\xbfa\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80\nb\r\nc\r'
+utf-16 b'\xff\xfea\x00\xe9\x00\xac =\xd8\x00\xde\n\x00b\x00\r\x00\n\x00c\x00\r\x00'
+utf-16-le b'a\x00\xe9\x00\xac =\xd8\x00\xde\n\x00b\x00\r\x00\n\x00c\x00\r\x00'
+utf-16-be b'\x00a\x00\xe9 \xac\xd8=\xde\x00\x00\n\x00b\x00\r\x00\n\x00c\x00\r'
+utf-32 b'\xff\xfe\x00\x00a\x00\x00\x00\xe9\x00\x00\x00\xac \x00\x00\x00\xf6\x01\x00\n\x00\x00\x00b\x00\x00\x00\r\x00\x00\x00\n\x00\x00\x00c\x00\x00\x00\r\x00\x00\x00'
+utf-32-le b'a\x00\x00\x00\xe9\x00\x00\x00\xac \x00\x00\x00\xf6\x01\x00\n\x00\x00\x00b\x00\x00\x00\r\x00\x00\x00\n\x00\x00\x00c\x00\x00\x00\r\x00\x00\x00'
+latin-1 b'a\xe9??\nb\r\nc\r'
+ascii b'a???\nb\r\nc\r'
+cp1252 b'a\xe9\x80?\nb\r\nc\r'
+strict UnicodeEncodeError: 'ascii' codec can't encode characters in position 1-3: ordinal not in range(128)
+replace b'a???\nb\r\nc\r'
+ignore b'a\nb\r\nc\r'
+xmlcharrefreplace b'a&#233;&#8364;&#128512;\nb\r\nc\r'
+backslashreplace b'a\\xe9\\u20ac\\U0001f600\nb\r\nc\r'
+surrogateescape UnicodeEncodeError: 'ascii' codec can't encode characters in position 1-3: ordinal not in range(128)
+LookupError: unknown encoding: klingon TypeError: TextIOWrapper() argument 'encoding' must be str or None, not int TypeError: TextIOWrapper() argument 'errors' must be str or None, not int ValueError: illegal newline value: x TypeError: TextIOWrapper() argument 'newline' must be str or None, not int
+UnicodeEncodeError: 'utf-8' codec can't encode character '\ud800' in position 0: surrogates not allowed b'\xed\xa0\x80'
+-- writing: newline translation
+None b'a\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80\nb\r\nc\r'
+'' b'a\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80\nb\r\nc\r'
+'\n' b'a\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80\nb\r\nc\r'
+'\r' b'a\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80\rb\r\rc\r'
+'\r\n' b'a\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80\r\nb\r\r\nc\r'
+-- a BOM once: several writes, empty writes, a seek away from 0
+0 1 1
+b'\xff\xfea\x00b\x00'
+b'xxz\x00'
+b'\xef\xbb\xbfy'
+-- reading: read, read(n), readline, iteration, universal newlines, newlines
+None ['line1\n', 'line2\n', 'line3\n', 'last é€😀', ''] ('\r', '\n', '\r\n')
+'' ['line1\n', 'line2\r\n', 'line3\r', 'last é€😀', ''] ('\r', '\n', '\r\n')
+'\n' ['line1\n', 'line2\r\n', 'line3\rlast é€😀', '', ''] None
+'\r' ['line1\nline2\r', '\nline3\r', 'last é€😀', '', ''] None
+'\r\n' ['line1\nline2\r\n', 'line3\rlast é€😀', '', '', ''] None
+'lin' '' 'e1' '\n' 'line2\nline3\nlast é€😀' ''
+['line1\n', 'line2\n', 'line3\n', 'last é€😀']
+['line1\n', 'line2\n', 'line3\n', 'last é€😀']
+['line1\n', 'line2\n']
+TypeError: argument should be integer or None, not 'str' TypeError: 'NoneType' object cannot be interpreted as an integer
+-- reading other encodings, BOMs, and multibyte sequences split across 2048-byte chunks
+utf-8 10006 5805 é€😀xé€😀xé€😀x zz
+end True
+utf-8-sig 10009 5805 é€😀xé€😀xé€😀x zz
+end True
+utf-16 13014 5805 é€😀xé€😀xé€😀x zz
+end True
+utf-16-le 13012 5805 é€😀xé€😀xé€😀x zz
+end True
+utf-16-be 13012 5805 é€😀xé€😀xé€😀x zz
+end True
+utf-32 23228 5805 é€😀xé€😀xé€😀x zz
+end True
+latin-1 5806 5805 é??xé??xé??x zz
+end True
+cp1252 5806 5805 é€?xé€?xé€?x zz
+end True
+b'\xef\xbb\xbfhello' UnicodeDecodeError: 'utf-16' codec can't decode bytes in position 0-1: Stream does not start with BOM 'hello'
+b'\xff\xfeh\x00i\x00' 'hi' UnicodeDecodeError: 'utf-8' codec can't decode byte 0xff in position 0: invalid start byte
+b'\xfe\xff\x00h\x00i' 'hi' UnicodeDecodeError: 'utf-8' codec can't decode byte 0xfe in position 0: invalid start byte
+b'h\x00i\x00' UnicodeDecodeError: 'utf-16' codec can't decode bytes in position 0-1: Stream does not start with BOM 'h\x00i\x00'
+-- decoding errors: where, and the errors handlers
+b'ok\xffok' strict UnicodeDecodeError: 'utf-8' codec can't decode byte 0xff in position 2: invalid start byte
+b'ok\xffok' replace 'ok�ok'
+b'ok\xffok' ignore 'okok'
+b'ok\xffok' surrogateescape 'ok\udcffok'
+b'ok\xffok' backslashreplace 'ok\\xffok'
+b'ok\xc3' strict UnicodeDecodeError: 'utf-8' codec can't decode byte 0xc3 in position 2: unexpected end of data
+b'ok\xc3' replace 'ok�'
+b'ok\xc3' ignore 'ok'
+b'ok\xc3' surrogateescape 'ok\udcc3'
+b'ok\xc3' backslashreplace 'ok\\xc3'
+b'ok\xe0\x80x' strict UnicodeDecodeError: 'utf-8' codec can't decode byte 0xe0 in position 2: invalid continuation byte
+b'ok\xe0\x80x' replace 'ok��x'
+b'ok\xe0\x80x' ignore 'okx'
+b'ok\xe0\x80x' surrogateescape 'ok\udce0\udc80x'
+b'ok\xe0\x80x' backslashreplace 'ok\\xe0\\x80x'
+b'ok\xed\xa0\x80x' strict UnicodeDecodeError: 'utf-8' codec can't decode byte 0xed in position 2: invalid continuation byte
+b'ok\xed\xa0\x80x' replace 'ok���x'
+b'ok\xed\xa0\x80x' ignore 'okx'
+b'ok\xed\xa0\x80x' surrogateescape 'ok\udced\udca0\udc80x'
+b'ok\xed\xa0\x80x' backslashreplace 'ok\\xed\\xa0\\x80x'
+b'\xf0\x9f\x98' strict UnicodeDecodeError: 'utf-8' codec can't decode bytes in position 0-2: unexpected end of data
+b'\xf0\x9f\x98' replace '�'
+b'\xf0\x9f\x98' ignore ''
+b'\xf0\x9f\x98' surrogateescape '\udcf0\udc9f\udc98'
+b'\xf0\x9f\x98' backslashreplace '\\xf0\\x9f\\x98'
+b'a\x00\xd8' strict UnicodeDecodeError: 'utf-16-le' codec can't decode byte 0xd8 in position 2: truncated data
+b'a\x00\xd8' replace 'a�'
+b'a\x00\xd8' ignore 'a'
+b'a\x00\xd8' surrogateescape 'a\udcd8'
+b'a\x00\xd8' backslashreplace 'a\\xd8'
+-- tell and seek (opaque cookies, as CPython's)
+utf-8 [(0, 'ab\n'), (3, 'é€😀\n'), (13, 'xyz\n'), (17, '')]
+   0 True   3 True   13 True   17 True
+   'ab\né' 5 '€😀' 12
+   '\nxyz\n'
+utf-16 [(0, 'ab\n'), (8, 'é€😀\n'), (18, 'xyz\n'), (26, '')]
+   0 True   8 True   18 True   26 True
+   'ab\né' 10 '€😀' 16
+   '\nxyz\n'
+latin-1 [(0, 'ab\n'), (3, 'é??\n'), (7, 'xyz\n'), (11, '')]
+   0 True   3 True   7 True   11 True
+   'ab\né' 4 '??' 6
+   '\nxyz\n'
+utf-8-sig [(0, 'ab\n'), (6, 'é€😀\n'), (16, 'xyz\n'), (20, '')]
+   0 True   6 True   16 True   20 True
+   'ab\né' 8 '€😀' 15
+   '\nxyz\n'
+UnsupportedOperation: can't do nonzero cur-relative seeks UnsupportedOperation: can't do nonzero end-relative seeks ValueError: negative seek position -1 ValueError: invalid whence (3, should be 0, 1 or 2) 8 8
+OSError: telling position disabled by next() call
+0
+-- attributes, repr, closing, detach, reconfigure
+latin-1 replace True False True True True True False False
+<_io.TextIOWrapper encoding='latin-1'> True True TextIOWrapper
+b'x\r\ny'
+None None utf-8
+b'x\r\ny\xc3\xa9\n'
+True ValueError: underlying buffer has been detached ValueError: underlying buffer has been detached 'utf-8' ValueError: underlying buffer has been detached
+True ValueError: I/O operation on closed file. ValueError: I/O operation on closed file. ValueError: I/O operation on closed file. ValueError: I/O operation on closed file. None
+True
+UnsupportedOperation: It is not possible to set the encoding or newline of stream after the first read TypeError: reconfigure() argument 'errors' must be str or None, not int None True
+UnsupportedOperation: fileno False
+TypeError: write() argument must be str, not bytes None
+3
+UnsupportedOperation: not writable 'x'
+-- line_buffering and write_through
+0 1 2 b'no newlinewith\ncr\r'
+-- BufferedWriter over a RawIOBase
+3 [3, 8] 3 8 [3, 8] 1 [3, 8]
+[3, 8, 1] b'abcdefghijk!' True True True BufferedWriter
+TypeError: a bytes-like object is required, not 'str' ValueError: buffer size must be strictly positive ValueError: buffer size must be strictly positive
+UnsupportedOperation: read ValueError: whence value 5 unsupported True ValueError: raw stream has been detached ValueError: raw stream has been detached
+UnsupportedOperation: File or stream is not writable.
+b'\xff\xfeh\x00\xe9\x00'
+-- IncrementalNewlineDecoder
+['a', '\nb', '\nc\n', ''] '\n' ('\r', '\n', '\r\n') (b'', 0)
+['a', '\r\nb', '\rc\n'] ('\r', '\n', '\r\n') (b'', 0)
+None (b'', 0)
+(b'', 1) '\r\ny'
+TypeError: IncrementalNewlineDecoder() missing required argument 'decoder' (pos 1) True
+-- the io module
+True True
+True BufferedWriter AttributeError: module 'io' has no attribute 'NoSuchThing'
+-- the wrappers ElementTree's writer makes (its pins come with xml.etree): xmlcharrefreplace, newline '\n'
+us-ascii b'<a x="&#233;">t&#8364;\n&#128512;</a>' True False
+utf-8 b'<a x="\xc3\xa9">t\xe2\x82\xac\n\xf0\x9f\x98\x80</a>' True False
+iso-8859-1 b'<a x="\xe9">t&#8364;\n&#128512;</a>' True False
+utf-16 b'\xff\xfe<\x00a\x00 \x00x\x00=\x00"\x00\xe9\x00"\x00>\x00t\x00\xac \n\x00=\xd8\x00\xde<\x00/\x00a\x00>\x00' True False
+b'\xc3\xa9\xe2\x82\xac' [5]
+[b'x\ny']
+-- bytearray deletion (BufferedWriter's buffer)
+bytearray(b'eg') IndexError: bytearray index out of range TypeError: bytearray indices must be integers or slices, not str
+bytearray(b'abce')
+bytearray(b'')
+BA(b'xz') BA
+2 b'ab' b'ab' b'a'
+UnsupportedOperation: read UnsupportedOperation: read1 UnsupportedOperation: read UnsupportedOperation: write UnsupportedOperation: detach UnsupportedOperation: detach
+-- BufferedWriter: C's behaviour and messages
+[2, 8, 1, 5] [2, 8, 1, 5]
+[2, 8, 1, 5] b'abcdefghijklmnop'
+10 [10, 7, 4] b'abcdefghi'
+[10, 7, 4, 1] b'abcdefghij'
+ValueError: write to closed file ValueError: flush of closed file UnsupportedOperation: seek None True
+ValueError: raw stream has been detached ValueError: raw stream has been detached ValueError: raw stream has been detached None '<_io.BufferedWriter>'
+TypeError: 'str' object cannot be interpreted as an integer TypeError: 'float' object cannot be interpreted as an integer OverflowError: Python int too large to convert to C ssize_t
+TypeError: a bytes-like object is required, not 'int' 2 TypeError: a bytes-like object is required, not 'list'
+False UnsupportedOperation: read1 UnsupportedOperation: read UnsupportedOperation: truncate
+<_io.BufferedWriter> UnsupportedOperation: read UnsupportedOperation: write UnsupportedOperation: detach UnsupportedOperation: read1 UnsupportedOperation: read
+TypeError: BufferedWriter() missing required argument 'raw' (pos 1) TypeError: IncrementalNewlineDecoder() missing required argument 'translate' (pos 2) TypeError: IncrementalNewlineDecoder() takes at most 3 arguments (4 given)
+4 1 4 None [] [1, 4] [1, 4]
+4 1 3 None [] [] [4]
+4 2 5 None [] [2, 5] [2, 5]
+4 0 5 3 [] [5] [5, 2]
+4 0 6 3 [] [6] [6, 3]
+4 3 9 2 [] [3, 1, 9, 7, 5] [3, 1, 9, 7, 5, 3, 1]
+8 0 9 1 [] [9, 8] [9, 8, 7, 6, 5, 4, 3, 2, 1]
+4 0 4 1 [] [4] [4, 3, 2, 1]
+4 1 8 5 [] [1, 8] [1, 8, 3]
+-- over a real file (open(..., 'rb'/'wb'/'w+b'); no paths printed)
+b'\xff\xfea\x00\r\x00\n\x00b\x00\xe9\x00\xac \r\x00\n\x00'
+'a\n' 8 'bé€\n' '\r\n'
+'a\n' True False
+'x\ny\n' 4
+'x\ny\n'
+-- r3: __index__ results (once, checked), Py_ssize_t overflow, bytearray deletion under a re-sizing __index__, the constructors C argument errors
+X TypeError: __index__ returned non-int (type float) 1 | TypeError: __index__ returned non-int (type float) 1 | TypeError: __index__ returned non-int (type float) 1
+B <_io.BufferedWriter> 1 | 'a' 1 | 'a' 1
+['__index__ returned non-int (type bool). ', '__index__ returned non-int (type bool). ', '__index__ returned non-int (type bool). ']
+1180591620717411303424 | OverflowError: cannot fit 'int' into an index-sized integer | OverflowError: Python int too large to convert to C ssize_t | OverflowError: Python int too large to convert to C ssize_t
+-1180591620717411303424 | OverflowError: cannot fit 'int' into an index-sized integer | OverflowError: Python int too large to convert to C ssize_t | OverflowError: Python int too large to convert to C ssize_t
+9223372036854775808 | OverflowError: cannot fit 'int' into an index-sized integer | OverflowError: Python int too large to convert to C ssize_t | OverflowError: Python int too large to convert to C ssize_t
+9223372036854775807 | 'abc\ndef' | 'abc\n'
+-9223372036854775808 | 'abc\ndef' | 'abc\n' | ValueError: buffer size must be strictly positive
+-9223372036854775809 | OverflowError: cannot fit 'int' into an index-sized integer | OverflowError: Python int too large to convert to C ssize_t | OverflowError: Python int too large to convert to C ssize_t
+index IndexError bytearray index out of range bytearray(b'') ['i']
+slice bytearray(b'') ['start']
+step bytearray(b'') ['step', 'start', 'stop']
+stop bytearray(b'') ['stop']
+bytearray(b'abcdefghXY')
+[0, 1, 3, 4, 6, 7, 9]
+[]
+[1, 2, 3, 5, 6, 7, 9]
+TW() | TypeError: TextIOWrapper() missing required argument 'buffer' (pos 1)
+TW 7 | TypeError: 'bytearray' object is not callable
+TW foo= | TypeError: 'bytearray' object is not callable
+TW buffer dup | TypeError: 'bytearray' object is not callable
+TW encoding dup | TypeError: 'bytearray' object is not callable
+TW kw only | TypeError: 'bytearray' object is not callable
+TW 2 unexpected | TypeError: 'bytearray' object is not callable
+BW() | TypeError: BufferedWriter() missing required argument 'raw' (pos 1)
+BW 3 | TypeError: 'bytearray' object is not callable
+BW foo= | TypeError: 'bytearray' object is not callable
+BW raw dup | TypeError: 'bytearray' object is not callable
+BW kw | TypeError: 'bytearray' object is not callable
+ND() | TypeError: IncrementalNewlineDecoder() missing required argument 'decoder' (pos 1)
+ND 1 | TypeError: IncrementalNewlineDecoder() missing required argument 'translate' (pos 2)
+ND 4 | TypeError: IncrementalNewlineDecoder() takes at most 3 arguments (4 given)
+ND dup | TypeError: argument for IncrementalNewlineDecoder() given by name ('decoder') and position (1)
+ND foo= | TypeError: IncrementalNewlineDecoder() got an unexpected keyword argument 'foo'
+ND kw | ok
+ND translate kw missing | TypeError: IncrementalNewlineDecoder() missing required argument 'translate' (pos 2)
+sub TypeError: 'bytearray' object is not callable TypeError: TextIOWrapper() missing required argument 'buffer' (pos 1)
+-- r3: seek, whence as a C int and pos as an offset (TextIOWrapper, BufferedWriter)
+TextIOWrapper X(0) | 0 1
+TextIOWrapper X(1) | 0 1
+TextIOWrapper X(2) | 3 1
+TextIOWrapper X(5) | ValueError: invalid whence (5, should be 0, 1 or 2) 1
+TextIOWrapper 0.0 | TypeError: 'float' object cannot be interpreted as an integer 0
+TextIOWrapper 1180591620717411303424 | OverflowError: Python int too large to convert to C int 0
+TextIOWrapper -1180591620717411303424 | OverflowError: Python int too large to convert to C int 0
+TextIOWrapper 2147483648 | OverflowError: Python int too large to convert to C int 0
+TextIOWrapper 2147483647 | ValueError: invalid whence (2147483647, should be 0, 1 or 2) 0
+TextIOWrapper -2147483648 | ValueError: invalid whence (-2147483648, should be 0, 1 or 2) 0
+TextIOWrapper -2147483649 | OverflowError: Python int too large to convert to C int 0
+TextIOWrapper '0' | TypeError: 'str' object cannot be interpreted as an integer 0
+TextIOWrapper None | TypeError: 'NoneType' object cannot be interpreted as an integer 0
+TextIOWrapper True | 0 0
+TextIOWrapper cookie X | TypeError: '<' not supported between instances of 'X' and 'int' 0
+BufferedWriter X(0) | 0 1
+BufferedWriter X(1) | 0 1
+BufferedWriter X(2) | 0 1
+BufferedWriter X(5) | ValueError: whence value 5 unsupported 1
+BufferedWriter 0.0 | TypeError: 'float' object cannot be interpreted as an integer 0
+BufferedWriter 1180591620717411303424 | OverflowError: Python int too large to convert to C int 0
+BufferedWriter -1180591620717411303424 | OverflowError: Python int too large to convert to C int 0
+BufferedWriter 2147483648 | OverflowError: Python int too large to convert to C int 0
+BufferedWriter 2147483647 | ValueError: whence value 2147483647 unsupported 0
+BufferedWriter -2147483648 | ValueError: whence value -2147483648 unsupported 0
+BufferedWriter -2147483649 | OverflowError: Python int too large to convert to C int 0
+BufferedWriter '0' | TypeError: 'str' object cannot be interpreted as an integer 0
+BufferedWriter None | TypeError: 'NoneType' object cannot be interpreted as an integer 0
+BufferedWriter True | 0 0
+BufferedWriter cookie X | 0 1
+TypeError: 'float' object cannot be interpreted as an integer ValueError: I/O operation on closed file.
+118059162071 ValueError: cannot fit 'int' into an offset-sized integer
+-11805916207 ValueError: cannot fit 'int' into an offset-sized integer
+922337203685 ValueError: cannot fit 'int' into an offset-sized integer
+1.5 TypeError: 'float' object cannot be interpreted as an integer
+'1' TypeError: 'str' object cannot be interpreted as an integer
+None TypeError: 'NoneType' object cannot be interpreted as an integer
+True 0
+ValueError: seek of closed file ValueError: whence value 7 unsupported ValueError: seek of closed file
+-- an instance's repr names its class's __module__ (CPython's object.__repr__), the io classes' _io too
+<_io.MR1 object at ADDR>
+<elsewhere.MR2 object at ADDR>
+<MR3 object at ADDR>
+<_io.IncrementalNewlineDecoder object at ADDR>
+-- r3: truncate, the bool flags, a raw stream's results, the decoder's contracts, reconfigure(encoding=)
+-- 4: truncate(pos)
+X(2) | 2 ['i'] b'ab'
+2.0 | TypeError: 'float' object cannot be interpreted as an integer [] b'abcdef'
+1180591620717411303424 | OverflowError: Python int too large to convert to C long [] b'abcdef'
+9223372036854775808 | OverflowError: Python int too large to convert to C long [] b'abcdef'
+-1 | ValueError: negative size value -1 [] b'abcdef'
+None | 0 [] b''
+'2' | TypeError: 'str' object cannot be interpreted as an integer [] b'abcdef'
+True | 1 [] b'a'
+-- 5: line_buffering / write_through / translate
+True True ['b', 'b']
+['b', 'b']
+X(1) | None True | None True ['i', 'i']
+X(0) | None False | None False ['i', 'i']
+2.0 | TypeError: 'float' object cannot be interpreted as an integer False | TypeError: 'float' object cannot be interpreted as an integer False []
+1180591620717411303424 | OverflowError: Python int too large to convert to C long False | OverflowError: Python int too large to convert to C long False []
+9223372036854775808 | OverflowError: Python int too large to convert to C long False | OverflowError: Python int too large to convert to C long False []
+-1 | None True | None True []
+'x' | TypeError: 'str' object cannot be interpreted as an integer False | TypeError: 'str' object cannot be interpreted as an integer False []
+None | None False | None False []
+5 | None True | None True []
+True | None True | None True []
+['a\n', 'b\n', 'c'] ['b']
+'x\ny' 'x\r\ny'
+-- 6: BufferedWriter raw results
+tell/seek X(3) | 3 | 3 ['i', 'i', 'i']
+tell/seek 3.0 | TypeError: 'float' object cannot be interpreted as an integer | TypeError: 'float' object cannot be interpreted as an integer []
+tell/seek '3' | TypeError: 'str' object cannot be interpreted as an integer | TypeError: 'str' object cannot be interpreted as an integer []
+tell/seek 1180591620717411303424 | ValueError: cannot fit 'int' into an offset-sized integer | ValueError: cannot fit 'int' into an offset-sized integer []
+tell/seek -1 | OSError: Raw stream returned invalid position -1 | OSError: Raw stream returned invalid position -1 []
+tell/seek None | TypeError: 'NoneType' object cannot be interpreted as an integer | TypeError: 'NoneType' object cannot be interpreted as an integer []
+tell/seek True | 1 | 1 []
+write X(2) | 8 | None ['i', 'i', 'i', 'i']
+write 2.0 | OSError: raw write() returned invalid length -1 (should have been between 0 and 8) | OSError: raw write() returned invalid length -1 (should have been between 0 and 2) []
+write '2' | OSError: raw write() returned invalid length -1 (should have been between 0 and 8) | OSError: raw write() returned invalid length -1 (should have been between 0 and 2) []
+write 1180591620717411303424 | OSError: raw write() returned invalid length -1 (should have been between 0 and 8) | OSError: raw write() returned invalid length -1 (should have been between 0 and 2) []
+write -1 | OSError: raw write() returned invalid length -1 (should have been between 0 and 8) | OSError: raw write() returned invalid length -1 (should have been between 0 and 2) []
+write 99 | OSError: raw write() returned invalid length 99 (should have been between 0 and 8) | OSError: raw write() returned invalid length 99 (should have been between 0 and 2) []
+write None | 8 | None []
+write True | 8 | None []
+-- 7: IncrementalNewlineDecoder's decoder contracts
+decode b'x' TypeError: decoder should return a string result, not 'bytes'
+decode None TypeError: decoder should return a string result, not 'NoneType'
+decode 5 TypeError: decoder should return a string result, not 'int'
+decode 'ok\r' 'ok'
+decode ['a'] TypeError: decoder should return a string result, not 'list'
+getstate (b'', 0) (b'', 0) []
+getstate [b'', 0] TypeError: illegal decoder state []
+getstate (b'',) TypeError: illegal decoder state []
+getstate (b'', 0, 1) TypeError: illegal decoder state []
+getstate (b'', X(3)) (b'', 6) ['i']
+getstate (b'', 1.5) TypeError: illegal decoder state []
+getstate (b'', -1) (b'', 18446744073709551614) []
+getstate (b'', 1180591620717411303424) (b'', 0) []
+getstate (b'', 18446744073709551621) (b'', 10) []
+getstate 'xy' TypeError: illegal decoder state []
+getstate (b'x', 's') TypeError: illegal decoder state []
+setstate (b'', 0) None [(b'', 0)] []
+setstate (b'', 1) None [(b'', 0)] []
+setstate (b'', 6) None [(b'', 3)] []
+setstate [b'', 0] TypeError: state argument must be a tuple [] []
+setstate (b'',) TypeError: setstate(): illegal state argument [] []
+setstate (b'', X(5)) None [(b'', 2)] ['i']
+setstate (b'', 1.5) TypeError: setstate(): illegal state argument [] []
+setstate (b'', -1) None [(b'', 9223372036854775807)] []
+setstate (b'', 1180591620717411303424) None [(b'', 0)] []
+setstate (b'', -1180591620717411303424) None [(b'', 0)] []
+setstate 'xy' TypeError: state argument must be a tuple [] []
+setstate 5 TypeError: state argument must be a tuple [] []
+setstate None (b'', 1) None (b'', 1)
+setstate None (b'', -1) None (b'', 1)
+setstate None (b'x', 0) None (b'', 0)
+setstate None [b'', 0] TypeError: state argument must be a tuple (b'', 0)
+setstate None (b'', 11805916207174 None (b'', 0)
+-- 8: reconfigure(encoding=...)
+klingon LookupError: unknown encoding: klingon 'utf-8' 1
+latin-1 None 'latin-1' 1
+utf-16 None 'utf-16' 1
+None 'bogus-handler' 1
+-- r3: BufferedWriter's construction asks the raw stream's position; BytesIO.truncate; truncate() after a readline
+init 0 'made' ['tell']
+init -1 'made' ['tell']
+init 'x' 'made' ['tell']
+'made' ['tell']
+bytesio.truncate <__main__. 2 b'ab' 3 ['i']
+bytesio.truncate 2.0 TypeError: 'float' object cannot be interpreted as an integer b'abcdef' 3 []
+bytesio.truncate 1180591620 OverflowError: Python int too large to convert to C long b'abcdef' 3 []
+bytesio.truncate 9223372036 OverflowError: Python int too large to convert to C long b'abcdef' 3 []
+bytesio.truncate -1 ValueError: negative size value -1 b'abcdef' 3 []
+bytesio.truncate None 3 b'abc' 3 []
+bytesio.truncate '2' TypeError: 'str' object cannot be interpreted as an integer b'abcdef' 3 []
+bytesio.truncate True 1 b'a' 3 []
+bytesio.truncate 7 7 b'abcdef' 3 []
+tw truncate None after readline 12 b'abc\ndef\nghi\n' 4
+-- r3: StringIO.truncate
+stringio.truncate <__main__. 2 ab 3 ['i']
+stringio.truncate 2.0 TypeError: argument should be integer or None, not 'float' abcdef 3 []
+stringio.truncate 1180591620 OverflowError: cannot fit 'int' into an index-sized integer abcdef 3 []
+stringio.truncate 9223372036 OverflowError: cannot fit 'int' into an index-sized integer abcdef 3 []
+stringio.truncate -1 ValueError: Negative size value -1 abcdef 3 []
+stringio.truncate None 3 abc 3 []
+stringio.truncate '2' TypeError: argument should be integer or None, not 'str' abcdef 3 []
+stringio.truncate True 1 a 3 []
+stringio.truncate 7 7 abcdef 3 []
+-- r3 (TESTS): a non-final chunk's held tails, UTF-32's, a lone BOM at EOF, a raw stream's lengths, BlockingIOError's counts, a detached wrapper (@sagebrush-grader's probes)
+-- U: an invalid UTF-8 tail at a chunk's end is decoded at once, not held
+b'\xe0\x80' strict ("UnicodeDecodeError: 'utf-8' codec can't decode byte 0xe0 in position 2: invalid continuation byte", 1)
+b'\xe0\x80' replace ("'ok�'", 1)
+b'\xe0\x80' surrogatepass ("UnicodeDecodeError: 'utf-8' codec can't decode byte 0xe0 in position 2: invalid continuation byte", 1)
+b'\xed\xa0' strict ("UnicodeDecodeError: 'utf-8' codec can't decode byte 0xed in position 0: invalid continuation byte", 2)
+b'\xed\xa0' replace ("'ok�'", 2)
+b'\xed\xa0' surrogatepass ("'ok\\ud800x'", 2)
+b'\xed\xbf' strict ("UnicodeDecodeError: 'utf-8' codec can't decode byte 0xed in position 0: invalid continuation byte", 2)
+b'\xed\xbf' replace ("'ok�'", 2)
+b'\xed\xbf' surrogatepass ("'ok\\udfc0x'", 2)
+b'\xed\x9f' strict ("UnicodeDecodeError: 'utf-8' codec can't decode bytes in position 0-1: invalid continuation byte", 2)
+b'\xed\x9f' replace ("'ok�'", 2)
+b'\xed\x9f' surrogatepass ("'okퟀx'", 2)
+b'\xf0\x80' strict ("UnicodeDecodeError: 'utf-8' codec can't decode byte 0xf0 in position 2: invalid continuation byte", 1)
+b'\xf0\x80' replace ("'ok�'", 1)
+b'\xf0\x80' surrogatepass ("UnicodeDecodeError: 'utf-8' codec can't decode byte 0xf0 in position 2: invalid continuation byte", 1)
+b'\xf4\x90' strict ("UnicodeDecodeError: 'utf-8' codec can't decode byte 0xf4 in position 2: invalid continuation byte", 1)
+b'\xf4\x90' replace ("'ok�'", 1)
+b'\xf4\x90' surrogatepass ("UnicodeDecodeError: 'utf-8' codec can't decode byte 0xf4 in position 2: invalid continuation byte", 1)
+b'\xc0' strict ("UnicodeDecodeError: 'utf-8' codec can't decode byte 0xc0 in position 2: invalid start byte", 1)
+b'\xc0' replace ("'ok�'", 1)
+b'\xc0' surrogatepass ("UnicodeDecodeError: 'utf-8' codec can't decode byte 0xc0 in position 2: invalid start byte", 1)
+b'\xc1' strict ("UnicodeDecodeError: 'utf-8' codec can't decode byte 0xc1 in position 2: invalid start byte", 1)
+b'\xc1' replace ("'ok�'", 1)
+b'\xc1' surrogatepass ("UnicodeDecodeError: 'utf-8' codec can't decode byte 0xc1 in position 2: invalid start byte", 1)
+b'\xf5' strict ("UnicodeDecodeError: 'utf-8' codec can't decode byte 0xf5 in position 2: invalid start byte", 1)
+b'\xf5' replace ("'ok�'", 1)
+b'\xf5' surrogatepass ("UnicodeDecodeError: 'utf-8' codec can't decode byte 0xf5 in position 2: invalid start byte", 1)
+b'\xf7' strict ("UnicodeDecodeError: 'utf-8' codec can't decode byte 0xf7 in position 2: invalid start byte", 1)
+b'\xf7' replace ("'ok�'", 1)
+b'\xf7' surrogatepass ("UnicodeDecodeError: 'utf-8' codec can't decode byte 0xf7 in position 2: invalid start byte", 1)
+b'\xe0\x9f' strict ("UnicodeDecodeError: 'utf-8' codec can't decode byte 0xe0 in position 2: invalid continuation byte", 1)
+b'\xe0\x9f' replace ("'ok�'", 1)
+b'\xe0\x9f' surrogatepass ("UnicodeDecodeError: 'utf-8' codec can't decode byte 0xe0 in position 2: invalid continuation byte", 1)
+b'\xf0\x8f\x80' strict ("UnicodeDecodeError: 'utf-8' codec can't decode byte 0xf0 in position 2: invalid continuation byte", 1)
+b'\xf0\x8f\x80' replace ("'ok�'", 1)
+b'\xf0\x8f\x80' surrogatepass ("UnicodeDecodeError: 'utf-8' codec can't decode byte 0xf0 in position 2: invalid continuation byte", 1)
+-- W4: utf-32-le holds len % 4
+("'a'", 1) ("'ab'", 2)
+("UnicodeDecodeError: 'utf-32-be' codec can't decode bytes in position 0-3: code point not in range(0x110000)", 1)
+-- X1: a lone BOM prefix at EOF is the codec's truncated-data error
+utf-16 b'\xff' strict UnicodeDecodeError: 'utf-16-le' codec can't decode byte 0xff in position 0: truncated data
+utf-16 b'\xff' replace '�'
+utf-16 b'\xfe' strict UnicodeDecodeError: 'utf-16-le' codec can't decode byte 0xfe in position 0: truncated data
+utf-16 b'\xfe' replace '�'
+utf-32 b'\xff\xfe' strict UnicodeDecodeError: 'utf-32-le' codec can't decode bytes in position 0-1: truncated data
+utf-32 b'\xff\xfe' replace '�'
+utf-32 b'\x00\x00\xfe' strict UnicodeDecodeError: 'utf-32-le' codec can't decode bytes in position 0-2: truncated data
+utf-32 b'\x00\x00\xfe' replace '�'
+utf-32 b'\xff' strict UnicodeDecodeError: 'utf-32-le' codec can't decode byte 0xff in position 0: truncated data
+utf-32 b'\xff' replace '�'
+-- B5: a raw write() returning a negative length
+[-1] OSError: raw write() returned invalid length -1 (should have been between 0 and 8) [b'abcdefgh']
+[-1] 3 OSError: raw write() returned invalid length -1 (should have been between 0 and 3) [b'abc']
+[-5] OSError: raw write() returned invalid length -5 (should have been between 0 and 8) [b'abcdefgh']
+[-5] 3 OSError: raw write() returned invalid length -5 (should have been between 0 and 3) [b'abc']
+[100] OSError: raw write() returned invalid length 100 (should have been between 0 and 8) [b'abcdefgh']
+[100] 3 OSError: raw write() returned invalid length 100 (should have been between 0 and 3) [b'abc']
+-- B6: BlockingIOError's characters_written
+[None] BlockingIOError (0, 'write could not complete without blocking', 4) 4 [b'abcdefghijkl']
+[None] after ab BlockingIOError (0, 'write could not complete without blocking', 2) 2 [b'ab']
+[2, None] BlockingIOError (0, 'write could not complete without blocking', 6) 6 [b'abcdefghijkl', b'cdefghijkl']
+[2, None] after ab BlockingIOError (0, 'write could not complete without blocking', 4) 4 [b'ab', b'cdefghij']
+[3, 1, None] BlockingIOError (0, 'write could not complete without blocking', 8) 8 [b'abcdefghijkl', b'defghijkl', b'efghijkl']
+[3, 1, None] after ab OSError raw write() returned invalid length 3 (should have been between 0 and 2) [b'ab']
+[4, None] BlockingIOError (0, 'write could not complete without blocking', 8) 8 [b'abcdefghijkl', b'efghijkl']
+[4, None] after ab OSError raw write() returned invalid length 4 (should have been between 0 and 2) [b'ab']
+-- M1: flush of a closed BufferedWriter
+ValueError: flush of closed file ValueError: write to closed file
+-- M7/M8: a detached TextIOWrapper
+ValueError: underlying buffer has been detached
+TypeError: reconfigure() argument 'errors' must be str or None, not int
+TypeError: reconfigure() argument 'newline' must be str or None, not int
+ValueError: underlying buffer has been detached
+ValueError: underlying buffer has been detached
+TypeError: write() argument must be str, not int
+TypeError: write() argument must be str, not bytes
+-- r3 (TESTS): del of an exported bytearray, b2a_base64's newline __bool__ running while the buffer is exported
+-- D2/D4: del of an exported bytearray (b2a_base64's newline __bool__ runs with the buffer exported)
+0 b'YWJjZA==' ['BufferError: Existing exports of data: object cannot be re-sized'] b'abcd'
+-1 b'YWJjZA==' ['BufferError: Existing exports of data: object cannot be re-sized'] b'abcd'
+3 b'YWJjZA==' ['BufferError: Existing exports of data: object cannot be re-sized'] b'abcd'
+slice(0, 1, None) b'YWJjZA==' ['BufferError: Existing exports of data: object cannot be re-sized'] b'abcd'
+slice(1, 1, None) b'YWJjZA==' ['deleted'] b'abcd'
+slice(3, 3, None) b'YWJjZA==' ['deleted'] b'abcd'
+slice(None, None, 2) b'YWJjZA==' ['BufferError: Existing exports of data: object cannot be re-sized'] b'abcd'
+slice(5, 1, 2) b'YWJjZA==' ['BufferError: Existing exports of data: object cannot be re-sized'] b'abcd'
+slice(0, 0, -1) b'YWJjZA==' ['BufferError: Existing exports of data: object cannot be re-sized'] b'abcd'
+slice(1, 1, 3) b'YWJjZA==' ['BufferError: Existing exports of data: object cannot be re-sized'] b'abcd'
+9 b'YWJjZA==' ['IndexError: bytearray index out of range'] b'abcd'
+b'bcd'
+-- r3: BufferedWriter when the raw stream would block (C's buffering and counts), or raises
+4 b'' b'abcd' [] | 4 [b'abcd'] | None [] UnsupportedOperation: seek '-'
+4 b'' b'abcde' [] | 5 [b'abcde'] | None [] UnsupportedOperation: seek '-'
+4 b'ab' b'cd' [] | 2 [] | None [b'abcd'] UnsupportedOperation: seek '-'
+4 b'ab' b'cdef' [] | 4 [b'ab', b'cdef'] | None [] UnsupportedOperation: seek '-'
+4 b'' b'abcde' [None] | BlockingIOError: [Errno 0] write could not complete without blocking 4 [b'abcde'] | None [b'abcd'] UnsupportedOperation: seek '-'
+4 b'' b'abcd' [None] | 4 [b'abcd'] | None [b'abcd'] UnsupportedOperation: seek '-'
+4 b'' b'abcdefgh' [3, None] | BlockingIOError: [Errno 0] write could not complete without blocking 7 [b'abcdefgh', b'defgh'] | None [b'defg'] UnsupportedOperation: seek '-'
+4 b'' b'abcdefgh' [4, None] | 8 [b'abcdefgh', b'efgh'] | None [b'efgh'] UnsupportedOperation: seek '-'
+4 b'ab' b'c' [None] | 1 [] | None [b'abc'] UnsupportedOperation: seek '-'
+4 b'ab' b'cdef' [None] | BlockingIOError: [Errno 0] write could not complete without blocking 2 [b'ab'] | None [b'abcd'] UnsupportedOperation: seek '-'
+4 b'ab' b'cdef' [1, None] | BlockingIOError: [Errno 0] write could not complete without blocking 3 [b'ab', b'b'] | None [b'bcde'] UnsupportedOperation: seek '-'
+4 b'abc' b'de' [1, None] | 2 [b'abc', b'bc'] | None [b'bcde'] UnsupportedOperation: seek '-'
+4 b'ab' b'cdefgh' [BlockingIOError(11, 'x', 1)] | BlockingIOError: [Errno 0] write could not complete without blocking 2 [b'ab'] | None [b'abcd'] UnsupportedOperation: seek '-'
+4 b'' b'abcdefgh' [BlockingIOError(11, 'x', 1)] | BlockingIOError: [Errno 11] x 1 [b'abcdefgh'] | None [] UnsupportedOperation: seek '-'
+4 b'' b'abcdefgh' [BlockingIOError(11, 'x')] | BlockingIOError: [Errno 11] x '-' [b'abcdefgh'] | None [] UnsupportedOperation: seek '-'
+4 b'ab' b'cdefgh' [BlockingIOError(11, 'x')] | BlockingIOError: [Errno 0] write could not complete without blocking 2 [b'ab'] | None [b'abcd'] UnsupportedOperation: seek '-'
+4 b'ab' b'cdefgh' [ValueError('v')] | ValueError: v '-' [b'ab'] | None [b'ab'] UnsupportedOperation: seek '-'
+flush blocked BlockingIOError: [Errno 0] write could not complete without blocking 0 None [b'ab', b'ab']
+flush partial BlockingIOError: [Errno 0] write could not complete without blocking 0 [b'abc', b'bc', b'bc'] None [b'abc', b'bc', b'bc']
+-- r3: a detached or closed wrapper: C's order of checks
+{'newline': 'x'} ValueError: illegal newline value: x
+{'encoding': 1} TypeError: reconfigure() argument 'encoding' must be str or None, not int
+{'encoding': 'klingon'} ValueError: underlying buffer has been detached
+{'line_buffering': 2.0} TypeError: 'float' object cannot be interpreted as an integer
+{'write_through': 's'} TypeError: 'str' object cannot be interpreted as an integer
+{'errors': 1, 'newline': 1} TypeError: reconfigure() argument 'errors' must be str or None, not int
+{'newline': 1, 'encoding': 1} TypeError: reconfigure() argument 'encoding' must be str or None, not int
+{'line_buffering': 1180591620717411303424} OverflowError: Python int too large to convert to C long
+TypeError: argument should be integer or None, not 'str'
+TypeError: argument should be integer or None, not 'float'
+TypeError: 'str' object cannot be interpreted as an integer
+ValueError: underlying buffer has been detached
+TypeError: 'str' object cannot be interpreted as an integer
+ValueError: underlying buffer has been detached
+{'encoding': 1, 'errors': 1} | read: TypeError: reconfigure() argument 'encoding' must be str or None, not int | detached: TypeError: reconfigure() argument 'encoding' must be str or None, not int
+{'errors': 1, 'encoding': 1} | read: TypeError: reconfigure() argument 'encoding' must be str or None, not int | detached: TypeError: reconfigure() argument 'encoding' must be str or None, not int
+{'encoding': 'x', 'line_buffering': 2.0} | read: UnsupportedOperation: It is not possible to set the encoding or newline of stream after the first read | detached: TypeError: 'float' object cannot be interpreted as an integer
+{'newline': 'x', 'line_buffering': 2.0} | read: UnsupportedOperation: It is not possible to set the encoding or newline of stream after the first read | detached: ValueError: illegal newline value: x
+{'newline': 1} | read: TypeError: reconfigure() argument 'newline' must be str or None, not int | detached: TypeError: reconfigure() argument 'newline' must be str or None, not int
+{'newline': 'x', 'encoding': 1} | read: TypeError: reconfigure() argument 'encoding' must be str or None, not int | detached: TypeError: reconfigure() argument 'encoding' must be str or None, not int
+{'errors': 1, 'newline': 'x'} | read: TypeError: reconfigure() argument 'errors' must be str or None, not int | detached: TypeError: reconfigure() argument 'errors' must be str or None, not int
+{'encoding': 'x', 'newline': 'x'} | read: UnsupportedOperation: It is not possible to set the encoding or newline of stream after the first read | detached: ValueError: illegal newline value: x
+{'line_buffering': 2.0, 'write_through': 's'} | read: TypeError: 'float' object cannot be interpreted as an integer | detached: TypeError: 'float' object cannot be interpreted as an integer
+{'encoding': 'klingon', 'line_buffering': 2.0} | read: UnsupportedOperation: It is not possible to set the encoding or newline of stream after the first read | detached: TypeError: 'float' object cannot be interpreted as an integer
+TypeError: reconfigure() argument 'newline' must be str or None, not int ValueError: I/O operation on closed file. ValueError: I/O operation on closed file. ValueError: I/O operation on closed file.
+TypeError: argument should be integer or None, not 'str' TypeError: 'str' object cannot be interpreted as an integer TypeError: write() argument must be str, not int OverflowError: cannot fit 'int' into an index-sized integer TypeError: argument should be integer or None, not 'str' UnsupportedOperation: not readable ValueError: I/O operation on closed file. ValueError: I/O operation on closed file.
+ValueError: I/O operation on closed file. ValueError: I/O operation on closed file. ValueError: I/O operation on closed file. ValueError: I/O operation on closed file. ValueError: I/O operation on closed file. ValueError: I/O operation on closed file. ValueError: I/O operation on closed file.
+ValueError: I/O operation on closed file. ValueError: I/O operation on closed file.
+ValueError: I/O operation on closed file. ValueError: I/O operation on closed file. ValueError: I/O operation on closed file.
+OSError: telling position disabled by next() call
+ValueError: I/O operation on closed file.
+-- r4: an __index__ looked up on the type, as CPython's (not the instance's or the metaclass's __getattribute__), at every conversion; the types in the overflow messages
+tw.read RI 1 | 'a' ['CALL']
+tw.read MI 1 | 'a' ['CALL']
+tw.read RI 1180591620717411303424 | OverflowError: cannot fit 'RI' into an index-sized integer ['CALL']
+tw.read MI -1 | 'abc\ndef\n' ['CALL']
+tw.readline RI 1 | 'a' ['CALL']
+tw.readline MI 1 | 'a' ['CALL']
+tw.readline RI 1180591620717411303424 | OverflowError: Python int too large to convert to C ssize_t ['CALL']
+tw.readline MI -1 | 'abc\n' ['CALL']
+tw.seek whence RI 1 | 0 ['CALL']
+tw.seek whence MI 1 | 0 ['CALL']
+tw.seek whence RI 1180591620717411303424 | OverflowError: Python int too large to convert to C int ['CALL']
+tw.seek whence MI -1 | ValueError: invalid whence (-1, should be 0, 1 or 2) ['CALL']
+tw.seek pos RI 1 | TypeError: '<' not supported between instances of 'RI' and 'int' []
+tw.seek pos MI 1 | TypeError: '<' not supported between instances of 'MI' and 'int' []
+tw.seek pos RI 1180591620717411303424 | TypeError: '<' not supported between instances of 'RI' and 'int' []
+tw.seek pos MI -1 | TypeError: '<' not supported between instances of 'MI' and 'int' []
+tw.truncate RI 1 | 1 ['CALL']
+tw.truncate MI 1 | 1 ['CALL']
+tw.truncate RI 1180591620717411303424 | OverflowError: Python int too large to convert to C long ['CALL']
+tw.truncate MI -1 | ValueError: negative size value -1 ['CALL']
+tw.reconfigure lb RI 1 | None ['CALL']
+tw.reconfigure lb MI 1 | None ['CALL']
+tw.reconfigure lb RI 1180591620717411303424 | OverflowError: Python int too large to convert to C long ['CALL']
+tw.reconfigure lb MI -1 | None ['CALL']
+bw ctor RI 1 | <_io.BufferedWriter> ['CALL']
+bw ctor MI 1 | <_io.BufferedWriter> ['CALL']
+bw ctor RI 1180591620717411303424 | OverflowError: Python int too large to convert to C ssize_t ['CALL']
+bw ctor MI -1 | ValueError: buffer size must be strictly positive ['CALL']
+bw.seek pos RI 1 | 0 ['CALL']
+bw.seek pos MI 1 | 0 ['CALL']
+bw.seek pos RI 1180591620717411303424 | ValueError: cannot fit 'RI' into an offset-sized integer ['CALL']
+bw.seek pos MI -1 | 0 ['CALL']
+bw.seek whence RI 1 | 0 ['CALL']
+bw.seek whence MI 1 | 0 ['CALL']
+bw.seek whence RI 1180591620717411303424 | OverflowError: Python int too large to convert to C int ['CALL']
+bw.seek whence MI -1 | ValueError: whence value -1 unsupported ['CALL']
+bytesio.truncate RI 1 | 1 ['CALL']
+bytesio.truncate MI 1 | 1 ['CALL']
+bytesio.truncate RI 1180591620717411303424 | OverflowError: Python int too large to convert to C long ['CALL']
+bytesio.truncate MI -1 | ValueError: negative size value -1 ['CALL']
+stringio.truncate RI 1 | 1 ['CALL']
+stringio.truncate MI 1 | 1 ['CALL']
+stringio.truncate RI 1180591620717411303424 | OverflowError: cannot fit 'RI' into an index-sized integer ['CALL']
+stringio.truncate MI -1 | ValueError: Negative size value -1 ['CALL']
+ind setstate RI 1 | None ['CALL']
+ind setstate MI 1 | None ['CALL']
+ind setstate RI 1180591620717411303424 | None ['CALL']
+ind setstate MI -1 | None ['CALL']
+getstate TS (b'x', 4) []
+D_SET tuple (b'x', 1)
+setstate TS None []
+setstate None TS None []
+getstate TS TypeError: illegal decoder state []
+setstate TS TypeError: setstate(): illegal state argument []
+setstate None TS TypeError: setstate(): illegal state argument []
+getstate TS TypeError: illegal decoder state []
+setstate TS TypeError: setstate(): illegal state argument []
+setstate None TS TypeError: setstate(): illegal state argument []
+getstate Fake TypeError: illegal decoder state []
+setstate Fake TypeError: state argument must be a tuple []
+setstate None Fake TypeError: state argument must be a tuple []
+-- r4: @sagebrush-daybreak3's probe (TextIOWrapper.read, StringIO.truncate, a tuple subclass's state)
+-- tw read structural index
+READ_CALLINDEX
+OK str 'a'
+-- stringio truncate structural index
+TRUNC_CALLINDEX
+OK int 2
+-- tw ctor tell result
+B_TELL
+V_EQ 0
+OK TextIOWrapper <_io.TextIOWrapper encoding='utf-8'>
+-- tw tell result
+B_TELL
+V_EQ 0
+B_TELL
+OK V <__main__.V object at ADDR>
+-- ind getstate tuple subclass
+OK tuple (b'x', 4)
+-- ind setstate tuple subclass
+D_SET (b'x', 1)
+OK NoneType None
+-- r4: a strict int subclass returned by __index__ (bool's too): CPython's DeprecationWarning
+['abc'] 2 ab
+[('__index__ returned non-int (type bool).  The ability to return an instance of a strict subclass of int is deprecated, and may be removed in a future version of Python.', 'DeprecationWarning'), ('__index__ returned non-int (type I).  The ability to return an instance of a strict subclass of int is deprecated, and may be removed in a future version of Python.', 'DeprecationWarning'), ('__index__ returned non-int (type I).  The ability to return an instance of a strict subclass of int is deprecated, and may be removed in a future version of Python.', 'DeprecationWarning')]
+-- r4 (TESTS): del of a slice whose start is clamped below 0 (@sagebrush-grader's N1)
+slice(-10, 2, None) b'cd'
+slice(-10, None, None) b''
+slice(-10, 3, 2) b'bd'
+slice(-10, -10, None) b'abcd'
+slice(10, -10, -1) b''
+slice(-10, 10, 3) b'bc'
+-- r5 (TESTS): a raw stream's position past an offset, named by its type (@sagebrush-grader's RP3)
+ValueError: cannot fit 'Big' into an offset-sized integer ValueError: cannot fit 'Big' into an offset-sized integer

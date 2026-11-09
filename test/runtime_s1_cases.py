@@ -44,6 +44,166 @@ for v in [[1], (1,), "a", iter([1]), {1: 0}, L([1])]:
     show("unpack 2 from %s" % type(v).__name__, lambda: two(v))
 
 
+isinstance_events = []
+
+
+class IsC:
+    pass
+
+
+class Advertised(IsC):
+    pass
+
+
+class IsProperty:
+    @property
+    def __class__(self):
+        isinstance_events.append("property")
+        return IsC
+
+
+class IsGetattribute:
+    def __getattribute__(self, name):
+        if name == "__class__":
+            isinstance_events.append("getattribute")
+            return Advertised
+        return object.__getattribute__(self, name)
+
+
+class IsBad:
+    @property
+    def __class__(self):
+        isinstance_events.append("bad")
+        return 17
+
+
+class IsRaises:
+    @property
+    def __class__(self):
+        isinstance_events.append("raises")
+        raise RuntimeError("class boom")
+
+
+class IsMissing:
+    def __getattribute__(self, name):
+        if name == "__class__":
+            isinstance_events.append("missing")
+            raise AttributeError("hidden class")
+        return object.__getattribute__(self, name)
+
+
+class IsReal(IsC):
+    @property
+    def __class__(self):
+        isinstance_events.append("real-property")
+        raise RuntimeError("must not touch")
+
+
+for v in [IsProperty(), IsGetattribute(), IsBad(), IsRaises(), IsMissing(), IsReal()]:
+    isinstance_events.clear()
+    show("dynamic __class__ from %s" % type(v).__name__, lambda: isinstance(v, IsC))
+    print("isinstance events", isinstance_events)
+
+
+class IsMeta(type):
+    def __instancecheck__(cls, obj):
+        isinstance_events.append("instancecheck")
+        return False
+
+
+class IsMetaTarget(metaclass=IsMeta):
+    pass
+
+
+class IsMetaAdvertised:
+    @property
+    def __class__(self):
+        isinstance_events.append("meta-property")
+        return IsMetaTarget
+
+
+isinstance_events.clear()
+show("metaclass before advertised class", lambda: isinstance(IsMetaAdvertised(), IsMetaTarget))
+print("isinstance events", isinstance_events)
+
+
+isinstance_events.clear()
+show("tuple short circuit", lambda: isinstance(IsReal(), (IsC, 17)))
+print("isinstance events", isinstance_events)
+
+
+# Assignment unpacking uses the iterator protocol even when a tuple/list
+# subclass has a backing array.  Exact values and subclasses that retain the
+# base iterator keep the direct array path; an effective override is observed.
+class UnpackTuple(tuple):
+    def __iter__(self):
+        print("UnpackTuple.__iter__")
+        return iter((7, 8, 9))
+
+
+class UnpackList(list):
+    def __iter__(self):
+        print("UnpackList.__iter__")
+        return iter((4, 5, 6))
+
+
+class UnpackRaises(tuple):
+    def __iter__(self):
+        print("UnpackRaises.__iter__")
+        raise RuntimeError("iter boom")
+
+
+class UnpackShort(list):
+    def __iter__(self):
+        print("UnpackShort.__iter__")
+        return iter((4,))
+
+
+def starred(v):
+    a, *b = v
+    return a, b
+
+
+for v in [UnpackTuple((1, 2)), UnpackList([1, 2]), UnpackRaises((1, 2)), UnpackShort([1, 2])]:
+    show("override unpack 2 from %s" % type(v).__name__, lambda: two(v))
+    show("override starred from %s" % type(v).__name__, lambda: starred(v))
+
+
+class LateIterTuple(tuple):
+    pass
+
+
+a, b = LateIterTuple((1, 2))
+print("warm", a, b)
+
+
+def late_iter(self):
+    print("late __iter__")
+    return iter((7, 8))
+
+
+LateIterTuple.__iter__ = late_iter
+a, b = LateIterTuple((1, 2))
+print("after set", a, b)
+a, *b = LateIterTuple((1, 2))
+print("starred after set", a, b)
+del LateIterTuple.__iter__
+a, b = LateIterTuple((1, 2))
+print("after del", a, b)
+
+
+class LateIterChild(LateIterTuple):
+    pass
+
+
+LateIterTuple.__iter__ = late_iter
+a, b = LateIterChild((3, 4))
+print("child after parent set", a, b)
+Point = collections.namedtuple("Point", "x y")
+x, y = Point(5, 6)
+print("namedtuple", x, y)
+
+
 class NoIter:
     pass
 
