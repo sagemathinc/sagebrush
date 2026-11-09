@@ -21,7 +21,7 @@ export const SAFARI = "Safari can't reach a program on this computer: use Chrome
 // (Chrome asks once, per site, before a page may reach a program on this computer (Chrome 149: its "loopback network"
 // permission); headless or blocked, the socket fails with ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS.  A paraphrase, not
 // Chrome's exact label, which hasn't been seen in a headed browser yet)
-export const CHROME_ALLOW = "Chrome needs your OK for this site to reach apps on this computer: allow it, then Connect again.";
+export const CHROME_ALLOW = "This browser needs your OK for this site to reach apps on this computer: allow it, then Connect again.";
 /** Any other browser (Firefox, …): true whatever the cause. */
 export const OTHER_FAIL = "This browser couldn't reach the agent on this computer: check that it's still running, then Connect again.";
 /** Where the longer explanations are (William, Nov 8: one short line in the app, the rest behind "Learn more"). */
