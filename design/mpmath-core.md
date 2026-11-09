@@ -84,11 +84,19 @@ So there is one exp and one zeta at multiprecision, behind three policies. Matri
 
 **Rigorous bounds come per function, not all at once.** mpmath's algorithms carry heuristic error estimates, not proofs. A kernel can serve MP before its bound is proven. It serves CR and BALL only once the bound is proven, with the proof cited in its doc comment. That proof is what lets Sage's and the ball code's own copies be deleted.
 
+**The ball contract for basic operations.** Balls `a +- r` and `b +- s` (midpoints exact dyadics, radii upper bounds) give these results. `e` is the rounding error of computing the midpoint, rounded upward into the radius.
+- `+` and `-`: midpoint `a +- b`, radius `r + s + e`.
+- `*`: midpoint `a*b`, radius `|a| s + |b| r + r s + e`.
+- `/`: defined only when the divisor's ball excludes 0. Then the midpoint is `a/b` and the radius is `(|a| s + |b| r) / (|b| (|b| - s)) + e`. A divisor ball containing 0 is refused, as `engine/ball` refuses it today (`None`).
+- `sqrt`: for a ball inside `[0, inf)`, the midpoint is `sqrt(a)` and the radius is `r / (sqrt(a - r) + sqrt(a)) + e`. A ball containing 0 with a nonnegative midpoint gives `[0 +- sqrt(a + r)]`, as today. A negative midpoint is refused, as today.
+
+Every result's radius is rounded upward. The domain rules match what `engine/ball` and `RealIntervalField` do today, and each consumer's current behaviour is pinned before its implementation is deleted. Sage's `RealIntervalField` keeps Sage's own semantics (endpoints, and what it does at a domain edge), checked against the Sage oracle. The formulas are the standard ones of midpoint-radius arithmetic, taken from the literature (§8). They are proved in the kernel's doc comments and pinned at their worst cases by tests (§6.1, point 5).
+
 **Who owns what, per operation:**
 
 | Operation | MP | CR | BALL | Condition |
 |---|---|---|---|---|
-| `+ - * /`, `sqrt`, conversions | core | core (these are correctly rounded by construction) | core (the rounding error is the radius) | none |
+| `+ - * /`, `sqrt`, conversions | core | core (correctly rounded by construction) | core, under the ball contract below | none |
 | Elementary and special functions of one scalar | core kernel | the same kernel under Ziv | the same kernel: value at the midpoint, plus the truncation bound, plus the radius times a proven bound on the derivative over the ball (the way `engine/ball`'s functions work today) | CR and BALL only once the function's bound is proven and cited; until then the old implementation keeps that policy, as listed in the ledger (§6.2) |
 | Dense LU, solve, inverse, determinant, QR, eigenproblems, SVD | core, with mpmath's semantics | **none**: there is no correctly rounded contract for these. Sage's matrices over `RealField` and `ComplexField` keep Sage's generic field algorithms (`lib/_sage_matrix*.py`, shared with every other field), running on the core's CR scalars. They have no numeric code of their own, so nothing overlaps | **none** today. A future ball linear algebra is its own design, with a verification method from the literature (Rump's, for example), never a point LU plus a scalar radius | — |
 | Quadrature, summation, extrapolation, root finding | core for the callback-free parts (§4.6); mpmath's Python for the loops that call user functions | none | none | — |
@@ -105,7 +113,7 @@ The crate is MIT OR Apache-2.0, like the other engine crates. It has no C depend
   - the text conversions that mpmath and Sage need, with exactly mpmath's digit rules.
 - **Fixed-point kernels and constants:** pi, e, log 2, Euler's gamma and Catalan's constant, each cached per precision; exp, log, cos/sin, atan, and the hyperbolic and inverse functions.
 - **Series:** the generalized hypergeometric summation (`hypsum`), Bernoulli numbers, gamma, log-gamma, zeta, Hurwitz zeta, polylog, and the Riemann-Siegel machinery behind `zetazero` and `siegelz`.
-- **Calculus:** quadrature nodes and weights (tanh-sinh and Gauss-Legendre, cached per degree and precision), the summation loops, and the inner loops of root finding.
+- **Calculus, the callback-free parts only (§4.6):** quadrature nodes and weights (tanh-sinh and Gauss-Legendre, cached per degree and precision), weighted sums of values already computed, and extrapolation tables. Every loop that calls user code, including quadrature's levels, `findroot`'s iterations and `nsum`'s term loops, stays in mpmath's Python.
 - **Dense matrices:** LU, QR, the symmetric and general eigenproblems, SVD and inverse, at MP precision.
 - **Error bounds:** for every kernel that has a proof, and the CR and BALL policies over those kernels (§3).
 - **Interrupt and limits:** every loop that can run long polls the engines' interrupt flag (`engine/interrupt`) and honours the session's limits. `mp.dps = 10**7` must stay stoppable.
@@ -219,7 +227,8 @@ These are each the one F64 implementation of their function, and they stay. Thei
 | `scipy.integrate` (QUADPACK-shaped `quad`, the RK and DOP853 solvers), `scipy.optimize` | 1,927 + 2,463 lines | the F64 quadrature, root finding and ODE solvers |
 | `engine/sym` `num.rs` and `eval.rs` | 1,052 lines of Rust | symbolic expressions' 53-bit numbers. `special.rs` holds symbolic canonical forms, not numerics, so it does not overlap |
 | MATLAB's function functions (`lib/_matlab_funfun.py`: `fzero`, `fminbnd`, `fminsearch`, `quad`, `integral`, `quadgk`, `integral2`, `integral3`) | 1,633 lines | MATLAB's documented algorithms and outputs (such as `quad`'s adaptive Simpson after Gander and Gautschi, and its function-evaluation counts), owned by MATLAB mode |
-| MATLAB's linear algebra (`lib/_matlab.py`'s solve, `eig`, `inv`, `pinv`, `roots`) | callers | not an implementation: these call `numpy.linalg`, the F64 tier's one linear algebra |
+| MATLAB's linear algebra that calls `numpy.linalg` (`lib/_matlab.py`'s `eig`, `svd`, `qr`, `chol`, `inv`, `pinv`, `det`) | callers | not an implementation: these call `numpy.linalg`, the F64 tier's one linear algebra |
+| MATLAB's own factorizations in `lib/_matlab.py`: `_lu_factors`, `_tri_solve`, `_lu_solve_through`, `_solve`, `_rcond_estimate`, the Householder `_qr_solve` with column pivoting, and `lu_` | about 290 lines | a second F64 LU and QR, kept for MATLAB's documented outputs: `mldivide`'s basic solution for rank-deficient systems, its singular and badly-scaled warnings with the `rcond` estimate, and `lu`'s output forms. Owned by MATLAB mode, and listed in §5.3's F64 ledger |
 | Sage's `numerical_integral` (Gauss-Kronrod 7-15, adaptive) and `find_root` (Brent) in `lib/_sage_expr.py` | about 150 lines | Sage's documented F64 behaviour and outputs, owned by Sage mode |
 | `lib/_sage_ec.py`'s `_integrate` (adaptive Gauss-Legendre), `_agm`, `real_period` and `_periods` in doubles | about 70 lines | specific to elliptic curves, in F64 |
 | `kernels/` (F64 kernels over arrays) | about 2,850 lines of Rust | the F64 tier's WebAssembly; see §5.3 |
@@ -241,6 +250,7 @@ These are not this design's work, and they need a ruling of their own:
   - `src/runtime/libm.ts` with `kernels/src/libm.rs` matches glibc, as CPython does.
 
   The contracts differ, but some call sites could share one.
+- **F64 LU and QR exist a fourth time,** in MATLAB mode's own factorizations (§5.2). The F64 design decides whether they become MATLAB front ends over `numpy.linalg`'s factorizations, keeping MATLAB's outputs, warnings and pivot choices, which are pinned first, or stay as they are.
 - **F64 quadrature exists four times:** `scipy.integrate.quad` (QUADPACK-shaped), MATLAB's `quad` and `quadgk`, Sage's `numerical_integral`, and `_sage_ec._integrate`. **Brent's method exists three times:** `scipy.optimize` (and `scipy.integrate`'s private `_brentq`), MATLAB's `fzero` and Sage's `find_root`.
   - Each system's documented outputs (error estimates, evaluation counts, warnings) must stay its own.
   - The shared rule tables and the iteration step could be one implementation under three front ends.
