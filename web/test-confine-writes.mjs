@@ -69,7 +69,7 @@ try {
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
   await go(base + "?runner=1");
   await until(`!!${W}`, 60000);
-  for (const d of ["out", "other", "outx", "w2", "r", "q", "d", "once", "life"]) await ev(`${W}.create("/proj/${d}/keep.txt", { content: new TextEncoder().encode("k") }).then(() => 1)`);
+  for (const d of ["out", "other", "outx", "w2", "r", "q", "d", "once", "life", "oc"]) await ev(`${W}.create("/proj/${d}/keep.txt", { content: new TextEncoder().encode("k") }).then(() => 1)`);
   await ev(`(() => { document.querySelector('#filebtn')?.click(); document.querySelector('#filemenu [data-group="new"]')?.click(); document.querySelector('#filemenu [data-f="new"]').click(); return 1; })()`);
   await until("sagebrush.notebook.cells().length === 1 && !sagebrush.notebook.cells()[0].ta.value", 20000);
   await sleep(800);
@@ -361,6 +361,23 @@ try {
   await until("sagebrush.kernel.ready", 30000);
   await runAll();
   check(await outHas("/O:refused/") && !(await ev("sagebrush.permissions().grants.write.once")).includes("/proj/once"), "…and after the interpreter restarts, the once grant is gone: refused again");
+  // (a once scope covered by a wider ceiling, everything allowed before its Run: it takes effect there all the same, so it
+  // ends at the next start, not left behind; astra's r3 note)
+  await dismiss();
+  await setCode("import os\n" + TRY("/proj/oc/c.txt", "C"));
+  await runAll();
+  check(await until("sagebrush.filesPrompt()?.folder === '/proj/oc'", 10000), "(a refusal asks about /proj/oc)");
+  await sleep(700);
+  await trusted("#fbonce");
+  await trusted("#filebtn"); await trusted("#permsmenu"); await trusted("#filesperm");
+  for (const type of ["keyDown", "keyUp"]) await send("Input.dispatchKeyEvent", { type, key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+  check(JSON.stringify(await trees()) .includes('"/"') && (await ev("sagebrush.permissions().grants.write.once")).includes("/proj/oc"), "(everything allowed, the once grant for /proj/oc still waiting)");
+  await runAll();
+  check(await outHas("/C:ok/"), "(the next run writes /proj/oc)");
+  await ev("(sagebrush.kernel.restart(), 1)");
+  await until("sagebrush.kernel.ready", 30000);
+  check(!(await ev("sagebrush.permissions().grants.write.once")).includes("/proj/oc"), "a once scope that took effect under a wider ceiling (\"/\") still ends at the next start");
+  await otherTab(`(e) => { e.write = (e.write ?? []).filter((x) => x !== "/"); }`);
   await dismiss();
 
   // ---- no shared memory, and the epoch's end: a narrowing restarts the interpreter instead
