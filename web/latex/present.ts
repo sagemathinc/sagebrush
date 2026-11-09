@@ -5,7 +5,8 @@
 // type scales with the width it is given: no transform.
 //   Keys: Right, Down, Page Down, Space, Enter, N: next step (then the next slide); Left, Up, Page Up, Backspace, P:
 //   back; Home, End: the first and the last slide; a number then Enter: that slide; F: full screen on and off;
-//   Escape: stop. A click on the left third goes back, elsewhere forward.
+//   Escape: stop; Shift+Enter: run the document's code (opts.onRun), the slide staying as it is shown, its values
+//   updated when the Run's results are. A click on the left third goes back, elsewhere forward.
 import { applyStep, stepsOf } from "./overlay";
 
 export interface PresentOpts {
@@ -16,6 +17,8 @@ export interface PresentOpts {
   /** The slide to start at (1-based), and its step. */
   start?: number;
   step?: number;
+  /** Shift+Enter: run the document's code (the page's Run), presenting on. */
+  onRun?: () => void;
   /** Full screen (default true; it needs the person's click). */
   fullscreen?: boolean;
   onExit?: () => void;
@@ -29,6 +32,7 @@ const CSS = `
 .tex-present .tp-count { position: fixed; right: 14px; bottom: 10px; font: 13px system-ui, sans-serif; color: rgba(255,255,255,.55); pointer-events: none; }
 .tex-present.tp-idle { cursor: none; }
 .tex-present .tp-count:empty { display: none; }
+.tex-present .sagechip.s-notrun { display: none; }
 `;
 
 export function present(o: PresentOpts): Presenter {
@@ -81,6 +85,7 @@ export function present(o: PresentOpts): Presenter {
     const k = ev.key;
     let used = true;
     if (/^[0-9]$/.test(k)) typed = (typed + k).slice(-4);
+    else if (k === "Enter" && ev.shiftKey) { typed = ""; if (o.onRun) o.onRun(); else used = false; }
     else if (k === "Enter" && typed) { go(+typed); typed = ""; }
     else if (["ArrowRight", "ArrowDown", "PageDown", " ", "Enter", "n", "N"].includes(k)) next();
     else if (["ArrowLeft", "ArrowUp", "PageUp", "Backspace", "p", "P"].includes(k)) prev();

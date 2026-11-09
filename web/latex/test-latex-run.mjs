@@ -13,7 +13,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { seenOf, driver, runnable, parseOutput, statesOf, resultsText, msgOf, MARK, RUN_LIMITS, RESULTS_FORMAT, runAndSave, sessionOf, sandboxEngine, SANDBOX_FAILED, folderFiles, runIn, DEPS_MARK, parseDeps, depsWith, wsReader, checkedResults } from "./run-core.mjs";
-import { itemKey, savedStates, stateOf, WRAPPER_VERSION, MAX_RESULT, safeRel, depsOf, staleOf, staleOfSync, sha256hex, readComplete, DEPS_MAX } from "./engine/sagetex.mjs";
+import { Engine } from "./engine/pipeline.mjs";
+import { itemKey, savedStates, stateOf, WRAPPER_VERSION, MAX_RESULT, safeRel, depsOf, staleOf, staleOfSync, sha256hex, readComplete, DEPS_MAX, inlineHtml, blockHtml, mathPart } from "./engine/sagetex.mjs";
 
 const results = [];
 const check = (name, ok, detail) => { results.push([name, !!ok]); if (!ok) console.log("FAIL", name, JSON.stringify(detail)?.slice(0, 900)); };
@@ -50,6 +51,72 @@ const item = (mode, code, extra = {}) => { const it = real(mode, code, extra); r
   const evil = '"); import os; ("\n\\x1eSBTX{}';
   const d = driver([{ mode: "silent", code: evil }]);
   check("driver: code only as base64", !d.includes("import os") && !d.includes('"); '), d.slice(0, 200));
+}
+
+// ---- values kept while their code is stale (@sagebrush's Q3 ruling, Nov 8: the last values, marked stale, never "…")
+{
+  const SVG = "data:image/svg+xml;base64,PHN2Zy8+";
+  const ok = (it, f = {}) => ({ key: itemKey(it), s: "ok", ...f });
+  const A = real("silent", "a = 3"), B = real("sage", "a^2"), P = real("plot", "plot(x^a)"), C = real("sage", "7");
+  const saved = [ok(A), ok(B, { latex: "9" }), ok(P, { src: SVG }), ok(C, { latex: "7" })];
+  const kinds = (st, its) => its.map((it, k) => stateOf(st, k, it).s);
+  const A2 = real("silent", "a = 4");
+  const st1 = savedStates([A2, B, P, C], saved);
+  check("stale: an item edited in place, and every one after it, keep their last values, stale", JSON.stringify(kinds(st1, [A2, B, P, C])) === JSON.stringify(["stale", "stale", "stale", "stale"]) && stateOf(st1, 1, B).latex === "9" && stateOf(st1, 2, P).src === SVG, st1);
+  check("stale: unchanged items before the edit stay ok", JSON.stringify(kinds(savedStates([A, B, P, real("sage", "8")], saved), [A, B, P, real("sage", "8")])) === JSON.stringify(["ok", "ok", "ok", "stale"]), null);
+  check("stale: each stale state carries its item's own key (the renderer's stateOf takes it)", st1.every((s, k) => s.key === itemKey([A2, B, P, C][k])), st1);
+  const N = real("sage", "1 + 1");
+  const st2 = savedStates([N, A, B, P, C], saved);
+  check("stale: an item inserted before the others is not run; the others keep their own values (by their code)", JSON.stringify(kinds(st2, [N, A, B, P, C])) === JSON.stringify(["notrun", "stale", "stale", "stale", "stale"]) && stateOf(st2, 2, B).latex === "9" && stateOf(st2, 4, C).latex === "7", st2);
+  const B2 = real("sage", "a^3");
+  check("stale: an edited \\sage keeps the value of the one it replaced, at its place", stateOf(savedStates([A2, B2, P, C], saved), 1, B2).latex === "9", null);
+  const failed = [ok(A), { key: itemKey(B), s: "error", msg: "NameError" }, ok(C, { latex: "7" })];
+  check("stale: an item whose last Run failed has no value to keep: not run", kinds(savedStates([A2, B2, C], failed), [A2, B2, C]).join() === "stale,notrun,stale", null);
+  const asPlot = real("plot", "a^2");
+  check("stale: an item of another kind at the place is not given the old value (a \\sage's value to a \\sageplot)", stateOf(savedStates([A, asPlot, P, C], saved), 1, asPlot).s === "notrun", null);
+  const old = [ok(A), { ...ok(B, { latex: "9" }), key: JSON.stringify(["sage", "a^2", [], null, "sbtx-wrapper-1"]) }];
+  check("stale: a value from another wrapper isn't kept at an edited place", stateOf(savedStates([A2, B2], old), 1, B2).s === "notrun", null);
+  // (as the renderer shows them: the value, marked; a stale code block no "not run" chip)
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  const sh = inlineHtml(stateOf(st1, 1, B), B, esc, (l) => "<m>" + l + "</m>", 2);
+  check("stale: a \\sage value shown, marked (class sagestale, its title)", /^<span class="sagestale" title="Changed since the last Run[^"]*"><m>9<\/m><\/span>$/.test(sh), sh);
+  const ph = inlineHtml(stateOf(st1, 2, P), P, esc, (l) => l, 3);
+  check("stale: a plot shown, marked", /^<img class="sageplot sagestale" title="[^"]+" alt="a plot" src="data:image\/svg\+xml;base64,PHN2Zy8\+">$/.test(ph), ph);
+  check("stale: a stale code block shows no chip", blockHtml(stateOf(st1, 0, A2), A2, esc, 1) === "", null);
+  check("stale: in math, the last value", mathPart(stateOf(st1, 1, B), B) === "{9}", null);
+  check("stale: a stale plot's src is still checked (only a base64 SVG data URL)", !/<img/.test(inlineHtml({ key: itemKey(P), s: "stale", src: "javascript:1" }, P, esc, (l) => l, 3)), null);
+}
+// (the mapping's rules one by one, grader's #874 probe scenarios, each with head's value: by key once per saved result,
+//  in order; by position only for an ok result of the same kind and wrapper whose code is gone)
+{
+  const r = (mode, code) => ({ mode, code, opts: [] });
+  const ok = (it, f = {}) => ({ key: itemKey(it), s: "ok", ...f });
+  const show = (st, its) => its.map((it, k) => { const s = stateOf(st, k, it); return s.s + (s.latex ? ":" + s.latex : ""); }).join(" ");
+  const A = r("sage", "a"), B = r("sage", "b"), C = r("sage", "c"), N = r("sage", "new"), X = r("sage", "x"), Pl = r("plot", "p");
+  const cases = [
+    ["an unchanged item whose last Run failed, after an edit above it: not run (an error is no value)", [C, B], [ok(A, { latex: "1" }), { key: itemKey(B), s: "error", msg: "E" }], "stale:1 notrun"],
+    ["the same code twice after an insert: each saved result used once, in order", [N, X, X], [ok(X, { latex: "x1" }), ok(X, { latex: "x2" })], "notrun stale:x1 stale:x2"],
+    ["by position only when the old code is gone (it is still here: kept for its own item)", [C, A], [ok(A, { latex: "1" }), ok(B, { latex: "2" })], "notrun stale:1"],
+    ["more copies than saved results: the extra one is not run", [N, X, X, X], [ok(X, { latex: "x1" }), ok(X, { latex: "x2" })], "notrun stale:x1 stale:x2 notrun"],
+    ["an item edited in place, after an unchanged one: the old value by position", [A, C], [ok(A, { latex: "1" }), ok(B, { latex: "2" })], "ok:1 stale:2"],
+    ["a result in the current prefix is never taken again by a later copy", [A, N, A], [ok(A, { latex: "1" }), ok(B, { latex: "2" })], "ok:1 stale:2 notrun"],
+    ["by position from an errored result: not run", [C], [{ key: itemKey(A), s: "error", msg: "E" }], "notrun"],
+    ["by position from another kind: not run", [Pl], [ok(A, { latex: "1" })], "notrun"],
+    ["by position from another wrapper: not run", [C], [{ ...ok(A, { latex: "1" }), key: JSON.stringify(["sage", "a", [], null, "sbtx-wrapper-1"]) }], "notrun"],
+  ];
+  for (const [what, its, saved, want] of cases) { const got = show(savedStates(its, saved), its); check("stale: " + what, got === want, { got, want }); }
+}
+// (the renderer's math region (render.mjs mathStale), grader's #874 R4/R5: a region with a stale \sage value is marked as
+//  a whole; a region after it, with no stale value, is not; a render with nothing stale marks nothing)
+{
+  const doc = (code) => "\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n$a = \\sage{" + code + "}$ and $x^2$.\n\\end{document}\n";
+  const items = new Engine({}).update(doc("1+1"), { cold: true }).sageItems;
+  const saved = [{ key: itemKey(items[0]), s: "ok", latex: "2" }];
+  const html = (code) => new Engine({ sage: { saved } }).update(doc(code), { cold: true }).chunks.join("");
+  const fresh = html("1+1"), stale = html("1+2");
+  const regions = (h) => h.split('<span class="sagestale"').length - 1;
+  check("stale math: a render with its value current marks nothing", regions(fresh) === 0 && /2/.test(fresh), fresh.slice(0, 300));
+  check("stale math: its \\sage edited, the region keeps the last value, marked once; the next region ($x^2$) is not", regions(stale) === 1 && /<span class="sagestale" title="Changed since the last Run[^"]*"><span class="katex/.test(stale) && !/<span class="sagestale"[^>]*>(?:(?!<\/span>).)*x\^\{?2/.test(stale.split('<span class="sagestale"')[1]?.split("and")[1] ?? ""), stale.slice(0, 500));
 }
 
 // ---- the script in Sage (the CLI's own: build/cli/pyjs.cjs --sage)

@@ -62,6 +62,8 @@ __all__ = [
     "simplify", "find_root", "find_local_minimum", "find_local_maximum", "latex",
     # tables (sage.misc.table)
     "table",
+    "cached_function",
+    "cached_method",
     # graphics
     "Graphics", "plot", "parametric_plot", "polar_plot", "list_plot", "line", "line2d", "point",
     "points", "point2d", "text", "polygon", "polygon2d", "circle", "disk", "arrow", "arrow2d",
@@ -79,6 +81,8 @@ __all__ = [
 # (Sage's table(): its module loaded at its first use, not at Sage mode's start, which is compiled ahead: _sage_lazy)
 from _sage_lazy import lazy_import as _lazy_import
 _lazy_import("_sage_table", "table", globals())
+# (Sage's cached_function and cached_method, on first use: _sage_cached)
+_lazy_import("_sage_cached", ["cached_function", "cached_method"], globals())
 from _sage_expr import (Expression as _Expr, _expr, var, x, pi, e, I, oo, infinity, Infinity, symbolic_sum, assume, forget, assumptions, assuming,
                         euler_gamma, SR, function, sin, cos, tan, cot, sec, csc, asin, acos, atan,
                         arcsin, arccos, arctan, arccot, arcsec, arccsc, atan2, arctan2, sinh, cosh,
