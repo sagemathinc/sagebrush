@@ -155,6 +155,24 @@
    "how": "mismatch"
   },
   {
+   "name": "equivalent-form up to a constant, in a variable named x$1: antiderivatives differing by 1",
+   "class": "equivalent-form",
+   "ours": "Times[-1, Cos[x$1]]",
+   "theirs": "Plus[1, Times[-1, Cos[x$1]]]",
+   "up_to_constant": "x$1",
+   "expect": "pass",
+   "how": "^symbolic$"
+  },
+  {
+   "name": "equivalent-form up to a constant, in a variable named x$1: antiderivatives differing by x$1",
+   "class": "equivalent-form",
+   "ours": "Times[-1, Cos[x$1]]",
+   "theirs": "Plus[x$1, Times[-1, Cos[x$1]]]",
+   "up_to_constant": "x$1",
+   "expect": "fail",
+   "how": "mismatch"
+  },
+  {
    "name": "oracle-unevaluated: a witness that agrees",
    "class": "oracle-unevaluated",
    "ours": "Plus[Times[2, Sin[x], Cos[x]]]",
@@ -364,6 +382,14 @@
    "theirs": "Complex[1, -2]",
    "expect": "fail",
    "how": "mismatch"
+  },
+  {
+   "name": "equivalent-form: Complex[1, 2] is 1 + 2 I (the imaginary part's sign is kept)",
+   "class": "equivalent-form",
+   "ours": "Complex[1, 2]",
+   "theirs": "Plus[1, Times[2, I]]",
+   "expect": "pass",
+   "how": "^symbolic$"
   },
   {
    "name": "equivalent-form: Log[2, 8] is 3 (base first)",
