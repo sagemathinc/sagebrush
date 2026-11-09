@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { prSample, sampleSkip, slowSkip } from "./slow-tests";
 
 // The examples of the Magma index (lib/_magma_docsearch.py EXAMPLES): each
 // runs in a fresh Magma session of Sagebrush and must print exactly what the
@@ -74,9 +75,11 @@ async function sagebrush(lines: string[]): Promise<string> {
   return r.transcript ?? `(no transcript) ${r.how}`;
 }
 
-test("every Magma index example prints what it shows, in a fresh session", async () => {
-  const names = Object.keys(examples).sort();
-  assert.ok(names.length >= 158, `${names.length} examples`);
+// Each example in a fresh session, 8 at once.  The whole set took 596 s on a green master run (42597347825, node-tests
+// (7)), so it is a slow test (test/slow-tests.ts: nightly, a dispatch, the full-ci label, and a pull request changing
+// the examples or this file); every pull request runs a fixed sample of PR_SAMPLE spread over the sorted names.
+const PR_SAMPLE = 12;
+async function checkExamples(names: string[]) {
   const bad: string[] = [];
   let next = 0;
   const worker = async () => {
@@ -88,6 +91,21 @@ test("every Magma index example prints what it shows, in a fresh session", async
   };
   await Promise.all(Array.from({ length: 8 }, worker));
   assert.deepEqual(bad, []);
+}
+
+test("every Magma index example prints what it shows, in a fresh session", { skip: slowSkip }, async () => {
+  const names = Object.keys(examples).sort();
+  assert.ok(names.length >= 158, `${names.length} examples`);
+  await checkExamples(names);
+});
+
+test(`a fixed sample of ${PR_SAMPLE} Magma index examples prints what each shows, in a fresh session (every pull request)`, { skip: sampleSkip }, async () => {
+  const names = Object.keys(examples).sort();
+  assert.ok(names.length >= 158, `${names.length} examples`);
+  // (the sample is PR_SAMPLE distinct examples: an empty or repeated sample would pass without checking them)
+  const sample = prSample(names, PR_SAMPLE);
+  assert.equal(new Set(sample).size, PR_SAMPLE, sample.join(" "));
+  await checkExamples(sample);
 });
 
 test("Magma 2.18 prints the same for every example but the listed ones", () => {

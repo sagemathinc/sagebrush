@@ -338,6 +338,14 @@ const slowTestPaths = [
   // the two zoneinfo sweeps over every zone (test/stdlib-zoneinfo.test.ts)
   /^lib\/zoneinfo\//, /^lib\/_zoneinfo\.py$/, /^lib\/_tzrules\.py$/, /^lib\/tzdata\//, /^tzdata\//,
   /^test\/zoneinfo_sweep_cases\.py$/, /^test\/stdlib-zoneinfo\.test\.ts$/,
+  // every Magma index example (test/magma-examples.test.ts; a pull request runs a fixed sample): the examples, their
+  // Magma 2.18 table and the suite
+  /^lib\/_magma_docsearch\.py$/, /^test\/magma-examples\.(?:json|test\.ts)$/,
+  // catalog gate 3 for every Magma example (test/magma-catalog.test.ts; a pull request runs a fixed sample)
+  /^catalog\/magma\//, /^test\/magma-catalog\.test\.ts$/,
+  // the finite-field limits' ceiling and GF(2^18) pair (test/ff-limits.test.ts), and plan-c0's unlimited completion
+  // (test/limits.test.ts): their suites (a pull request runs the rest of each)
+  /^test\/ff-limits\.test\.ts$/, /^test\/limits\.test\.ts$/,
   // and the list itself
   /^test\/slow-tests\.ts$/,
 ];
