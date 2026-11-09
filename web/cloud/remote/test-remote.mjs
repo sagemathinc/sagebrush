@@ -21,6 +21,7 @@
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import { migrations } from "../share/migrations.mjs";
+import { dispatch } from "../../miniflare-dispatch.mjs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
@@ -56,7 +57,7 @@ const db = await mf.getD1Database("SHARE_DB");
 for (const { path: m } of migrations())
   for (const s of readFileSync(m, "utf8").replace(/--.*$/gm, "").split(";").map((s) => s.trim()).filter(Boolean)) await db.prepare(s).run();
 
-const site = (path, init = {}) => mf.dispatchFetch(SITE + path, { redirect: "manual", ...init });
+const site = (path, init = {}) => dispatch(mf, SITE + path, { redirect: "manual", ...init });
 const post = (path, body, headers = {}) => site(path, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
 async function session(account_id) {
   const r = await post("/auth/dev", { token: "dev-token", account_id }, { origin: SITE });

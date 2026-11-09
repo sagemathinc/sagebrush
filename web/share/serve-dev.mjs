@@ -67,7 +67,7 @@ export function devVariant(env = process.env) {
 // 0009's remotes table; core's has neither.  Both have 0005's upload_receipts.  The request goes to the Worker
 // directly, not through the servers, so it isn't in the run's request log.  One line says what was checked.
 export async function checkVariant(mf, db, { expect, migrations }) {
-  const r = await mf.dispatchFetch("http://127.0.0.1/__preview/zzzzzzzzzzzz");
+  const r = await dispatch(mf, "http://127.0.0.1/__preview/zzzzzzzzzzzz");
   const preview = r.status === 200 && (await r.text()).trim() === "null";
   const tables = new Set((await db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all()).results.map((t) => t.name));
   const remotes = tables.has("remotes");

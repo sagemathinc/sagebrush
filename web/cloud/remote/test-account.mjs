@@ -13,6 +13,7 @@
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import { migrations } from "../share/migrations.mjs";
+import { dispatch } from "../../miniflare-dispatch.mjs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
@@ -40,12 +41,12 @@ for (const { path: m } of migrations())
   for (const s of readFileSync(m, "utf8").replace(/--.*$/gm, "").split(";").map((s) => s.trim()).filter(Boolean)) await db.prepare(s).run();
 
 const call = async (acct, op, body) => {
-  const r = await mf.dispatchFetch(`https://t/a/${acct}/${op}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const r = await dispatch(mf, `https://t/a/${acct}/${op}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   return { status: r.status, body: await r.json() };
 };
-const at = async (acct, ms) => (await mf.dispatchFetch(`https://t/a/${acct}/__clock?ms=${ms}`)).json();
-const state = async (acct) => (await mf.dispatchFetch(`https://t/a/${acct}/__state`)).json();
-const alarm = async (acct) => (await mf.dispatchFetch(`https://t/a/${acct}/__alarm`)).json();
+const at = async (acct, ms) => (await dispatch(mf, `https://t/a/${acct}/__clock?ms=${ms}`)).json();
+const state = async (acct) => (await dispatch(mf, `https://t/a/${acct}/__state`)).json();
+const alarm = async (acct) => (await dispatch(mf, `https://t/a/${acct}/__alarm`)).json();
 const NOON = Date.UTC(2026, 10, 6, 12, 0, 0);
 const MIDNIGHT = Date.UTC(2026, 10, 7, 0, 0, 0);
 

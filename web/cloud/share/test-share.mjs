@@ -6,6 +6,7 @@
 import { createHash, createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { migrations } from "./migrations.mjs";
+import { dispatch } from "../../miniflare-dispatch.mjs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
@@ -104,7 +105,7 @@ function sniffReport(need) {
 // (the share API's own paths; the test entry's /__preview/ seam and its "not the API" fallback aren't the product)
 const shareApi = (path) => /^\/(auth|api\/share|api\/admin)\//.test(new URL(SITE + path).pathname);
 const fetchSite = (path, init = {}) => {
-  const p = mf.dispatchFetch(SITE + path, { redirect: "manual", ...init });
+  const p = dispatch(mf, SITE + path, { redirect: "manual", ...init });
   return shareApi(path) ? p.then((r) => sniffed("share", r)) : p;
 };
 const sessionOf = (r) => (r.headers.getSetCookie?.() ?? []).map((c) => c.split(";")[0]).find((c) => c.startsWith("__Host-sb_session="));
@@ -231,7 +232,7 @@ for (const [what, b] of [["neither bound (production)", { SHARE_DEV: undefined, 
   const bound = Object.fromEntries(Object.entries({ ...bindings, ...b }).filter(([, v]) => v !== undefined));
   const other = new Miniflare(convertV4MiniflareOptions({ workers: [{ name: "share", modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET"], bindings: bound, outboundService: cocalc }] }));
   try {
-    const r = await other.dispatchFetch(SITE + "/auth/dev", { method: "POST", redirect: "manual", headers: { origin: SITE, "content-type": "application/json" }, body: JSON.stringify({ token: "dev-token", account_id: "44444444-4444-4444-8444-444444444444", ttl: 300 }) });
+    const r = await dispatch(other, SITE + "/auth/dev", { method: "POST", redirect: "manual", headers: { origin: SITE, "content-type": "application/json" }, body: JSON.stringify({ token: "dev-token", account_id: "44444444-4444-4444-8444-444444444444", ttl: 300 }) });
     ok(r.status === 404 && !sessionOf(r) && (await r.text()).includes("not found"), `/auth/dev with ${what}: 404, no session (${r.status})`);
   } finally {
     await other.dispose();
@@ -242,7 +243,7 @@ for (const [what, b] of [["neither bound (production)", { SHARE_DEV: undefined, 
 const keyOf = async (account, h) => (await db.prepare("SELECT key FROM holdings WHERE account_id = ?1 AND sha256 = ?2").bind(account, h).first())?.key ?? null;
 const stored = async (key) => !!key && !!(await bucket.head(key));
 const tick = async () => (await mf.getWorker()).scheduled({ cron: "17 3 * * *" });
-const fileAt = (col, h, init) => mf.dispatchFetch(`${FILES}/c/${col}/${h}`, init).then((r) => sniffed("files", r));
+const fileAt = (col, h, init) => dispatch(mf, `${FILES}/c/${col}/${h}`, init).then((r) => sniffed("files", r));
 const a = api((await signIn(A)).session);
 fake.limits.set(B, { tier: "member", storage_bytes: 10_000, max_file_bytes: 5_000, private_links: false });
 const b = api((await signIn(B)).session);
@@ -275,7 +276,7 @@ let colA, keyA;
   const part = await fileAt(col, sha(data), { headers: { range: "bytes=4-6" } });
   ok(part.status === 206 && (await part.text()) === "1,2" && part.headers.get("content-range") === `bytes 4-6/${data.length}`, "range requests");
   ok((await fileAt(col, sha(data), { headers: { range: "bytes=999-" } })).status === 416, "an unsatisfiable range is 416");
-  ok((await mf.dispatchFetch(`${FILES}/b/${sha(data)}`)).status === 404 && (await fileAt(col, sha(data), { method: "POST" })).status === 405, "nothing else on the files domain (no reading by hash alone)");
+  ok((await dispatch(mf, `${FILES}/b/${sha(data)}`)).status === 404 && (await fileAt(col, sha(data), { method: "POST" })).status === 405, "nothing else on the files domain (no reading by hash alone)");
   const me = await (await a.get("/api/share/me")).json();
   ok(me.usage > data.length + nb.length && me.usage < data.length + nb.length + 1000, "usage counts the files and the manifest: " + me.usage);
 }
@@ -886,14 +887,14 @@ async function purgeStatus(rid) {
         for (const st of readFileSync(m, "utf8").replace(/--.*$/gm, "").split(";").map((x) => x.trim()).filter(Boolean)) await d3.prepare(st).run();
       const O = owner("8");
       fake.limits.set(O, { tier: "member", storage_bytes: 1_000_000, max_file_bytes: 50_000, private_links: false });
-      const dev = await m3.dispatchFetch(SITE + "/auth/dev", { method: "POST", headers: { origin: SITE, "content-type": "application/json" }, body: JSON.stringify({ token: "dev-token", account_id: O }) });
+      const dev = await dispatch(m3, SITE + "/auth/dev", { method: "POST", headers: { origin: SITE, "content-type": "application/json" }, body: JSON.stringify({ token: "dev-token", account_id: O }) });
       const cookie = (dev.headers.getSetCookie?.() ?? []).map((c) => c.split(";")[0]).find((c) => c.startsWith("__Host-sb_session="));
       const clientSrc = execFileSync("bun", ["build", join(here, "../../share-client/upload.ts"), "--format", "esm", "--target", "browser"], { encoding: "utf8" });
       const { uploadCollection } = await import("data:text/javascript;base64," + Buffer.from(clientSrc).toString("base64"));
       const realFetch = globalThis.fetch, realLocation = globalThis.location;
       const paths = [];
       globalThis.location = { href: SITE + "/" };
-      globalThis.fetch = async (u, init = {}) => { const url = new URL(String(u), SITE); paths.push(`${init.method ?? "GET"} ${url.pathname}`); return m3.dispatchFetch(url.href, { ...init, headers: { ...(init.headers ?? {}), cookie, origin: SITE } }); };
+      globalThis.fetch = async (u, init = {}) => { const url = new URL(String(u), SITE); paths.push(`${init.method ?? "GET"} ${url.pathname}`); return dispatch(m3, url.href, { ...init, headers: { ...(init.headers ?? {}), cookie, origin: SITE } }); };
       let e = null;
       try { await uploadCollection({ id: null, attempt: "0".repeat(31) + "1", title: "rolled back", files: [{ path: "a.txt", size: 5, read: async () => new TextEncoder().encode("hello") }] }); } catch (x) { e = x; }
       globalThis.fetch = realFetch;
