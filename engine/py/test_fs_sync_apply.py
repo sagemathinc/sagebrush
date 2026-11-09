@@ -1581,6 +1581,40 @@ def test_journal_never_makes_the_run_folder():
         p.close()
 
 
+def test_restore_run_replaced_only_makes_no_deleted():
+    # (grader E1c, E1e) a run that only replaced files: nothing to put back, and deleted/ is looked up, never made
+    p = Pair({"refs.bib": b"old"})
+    try:
+        p.sync()
+        p.ws.put("refs.bib", b"new")
+        p.sync()
+        assert sorted(os.listdir(p.held(RID))) == ["journal.json", "replaced"]
+        before = sorted(os.listdir(p.local)), p.read("refs.bib")
+        assert restore(p) == []
+        assert not os.path.exists(p.held(RID, "deleted"))
+        assert (sorted(os.listdir(p.local)), p.read("refs.bib")) == before
+    finally:
+        p.close()
+
+
+def test_journal_state_dir_link_not_followed():
+    # (grader E1d) STATE_DIR itself a link to a real state folder with a valid run: never read through it
+    p = journaled()
+    try:
+        link = os.path.join(p.d, "state-link")
+        os.symlink(p.state, link)
+        for call in (lambda: A.journal_of(link, RID),
+                     lambda: A.restore_run(link, RID, -1, p.local, "/Thesis")):
+            try:
+                call()
+                raise AssertionError("read through a link")
+            except (OSError, A.NotRestorable):
+                pass
+        assert not os.path.exists(p.path("a"))                      # (nothing put back)
+    finally:
+        p.close()
+
+
 def test_journal_bounded_read():
     # (daybreak3 E2, grader J6) at most JOURNAL_BYTES, refused past it before any parsing
     p = journaled()
