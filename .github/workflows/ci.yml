@@ -477,7 +477,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [core, client, moves, pwa, share-dialog]
+        shard: [core, client, moves, pwa, share-dialog, share-dialog-2]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: detect CI CPU quota
@@ -496,9 +496,9 @@ jobs:
         with:
           python-version: "3.14"
       # (the share-dialog shard on a pull request that doesn't change sharing: nothing to build or run, ci-paths web_share)
-      - if: matrix.shard != 'share-dialog' || needs.changes.outputs.web_share == 'true'
+      - if: (matrix.shard != 'share-dialog' && matrix.shard != 'share-dialog-2') || needs.changes.outputs.web_share == 'true'
         run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs && bun web/build.ts
-      - if: matrix.shard != 'share-dialog' || needs.changes.outputs.web_share == 'true'
+      - if: (matrix.shard != 'share-dialog' && matrix.shard != 'share-dialog-2') || needs.changes.outputs.web_share == 'true'
         name: the site and the test workers
         run: |
           (cd web/site && npm ci --silent)
@@ -546,10 +546,15 @@ jobs:
       # (the share dialog, alone in its shard: about 8.5 min here (13 on a slow runner since #243's registry cases), 20
       # its bound. On a pull request only when it changes sharing or has the full-ci label (ci-paths web_share); master,
       # the schedule and a dispatch always run it)
-      - name: share dialog (web-sync.3)
+      - name: share dialog, its own cases (web-sync.3, about 5 min)
         if: matrix.shard == 'share-dialog' && needs.changes.outputs.web_share == 'true'
         timeout-minutes: 20
         run: node scripts/web-tests.mjs run web-sync.3
+      # (the share dialog's second half, SHARE_DIALOG_PART=2: the 100,000-file listing and the upload-leak cases, about 7 min)
+      - name: share dialog, the big listing and the upload leaks (web-sync.7)
+        if: matrix.shard == 'share-dialog-2' && needs.changes.outputs.web_share == 'true'
+        timeout-minutes: 20
+        run: node scripts/web-tests.mjs run web-sync.7
 
   # "Export all current files (.zip)" (E1): its browser test.  The scale test's CI pass, the controls (each rule
   # undone in a copy of the chunk, its named check failing) and the campaign check run nightly (nightly.yml).
