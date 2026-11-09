@@ -97,11 +97,38 @@ Standard evaluation rewrites until nothing changes:
 **The language's own limits are compatibility defaults** (@sagebrush's ruling, Nov 8; final). Recorded from Mathics3 10.0.1:
 - `$RecursionLimit` is 200;
 - `$IterationLimit` is 4096; an endless self-rewrite prints `$IterationLimit::itlim: Iteration limit of 4096 exceeded.` and gives `$Aborted`;
-- `x //. x -> x + 1` stops at `65535 + x`.
+- `x //. x -> x + 1` stops at `65535 + x`: `ReplaceRepeated`'s `MaxIterations` option defaults to 65535, and `ReplaceRepeated[x, x -> x + 1, MaxIterations -> 10]` gives `10 + x`.
 
-Sprig keeps these values, messages and held results, because they are the language's observable behaviour. The person may raise any of them, to `Infinity` included. They are not host protection and grant no host authority. Host protection is separate and always on, whatever they say: the measured host-stack bound `S` (§8.3), reserve-before-allocate (§8.4) and Stop (§8.1). At `$RecursionLimit = Infinity` the stack guard still refuses cleanly. Nothing in the host caps total work, so this keeps the standing policy (work isn't capped; Stop ends it).
+Sprig keeps these values, boundaries, messages and held results, because they are the language's observable behaviour. They are not host protection and grant no host authority.
 
-**The census.** These are real refusal sites, never class "none": the evaluation-step caps are class 3, as astra proposed, unless daybreak2's LIMITS verdict assigns otherwise. Today `test/limit_sites.py`'s `tracked()` scans only `lib/[^/]+.py`, so nothing under `lib/_sprig/` would be seen. S1 must therefore extend the census's discovery to `lib/_sprig/**`, with a test that a refusal in a nested file is discovered, and register every site S1 adds.
+**How the person raises each**, `Infinity` included:
+- `$RecursionLimit = n` or `$RecursionLimit = Infinity`;
+- `$IterationLimit = n` or `$IterationLimit = Infinity`;
+- `ReplaceRepeated[e, r, MaxIterations -> n]` or `MaxIterations -> Infinity`, per call.
+
+**A recorded difference from the oracle.** Mathics3 refuses `Infinity` for both variables (`$IterationLimit::limset`, and for `$RecursionLimit` an integer from 20 to 512 only; its message points to an environment variable of its own host). That is Mathics3's host limit, not the language's. Sprig accepts `Infinity` by the ruling above. These cases are in the corpus with a stated reason (§7.3), never silently different.
+
+**What bounds a computation with the limits removed.** Nothing hidden:
+- the host stack stays protected by the trampoline and its measured re-entry bound `S` (§8.3);
+- growing explicit-stack and data state stays under the memory guard (§8.4);
+- otherwise an endless computation runs until Stop, or until a separately authorized host allowance fires (the existing opt-in path). No iteration or time cap is added.
+
+A person's assignment to these variables never arms, weakens or replaces a trusted host allowance or the memory guard.
+
+**The census classes** (@sagebrush's ruling; daybreak2's LIMITS verdict may assign otherwise, and that is final). Every one is a real refusal site, never "none":
+
+| Site | Class |
+|---|---|
+| the `$RecursionLimit`, `$IterationLimit` and `MaxIterations` checks | 3 (evaluation-step caps of the user's computation, user-removable) |
+| the trampoline's re-entry bound `S` | 1 (host-stack protection) |
+| memory reservation and refusal | 2 |
+| a trusted host time or work allowance | 3, opt-in through the existing allowance path only |
+
+**The disposition.** The census's class-3 dispositions today model only unlimited-default `_limits` and host routes. So S1 adds an explicit, reviewed language-compatibility disposition (or an equivalent truthful schema) for these three sites (daybreak2's LIMITS ruling, final). They are never routed through host authority and never marked "none".
+
+**Pins:** each limit at its exact default, at the last allowed step and one past it (+1), at a raised value, and at `Infinity`; its message and held result; and its mutability. With `Infinity`, deep recursion still reaches the structural bound `S` cleanly. `$RecursionLimit = Infinity` and `$IterationLimit = Infinity` each run an endless computation that Stop ends, followed by a check that the session answers. An armed allowance gets its own pin, and doesn't change an ordinary session's behaviour.
+
+**Census discovery.** Today `test/limit_sites.py`'s `tracked()` scans only `lib/[^/]+.py`, so nothing under `lib/_sprig/` would be seen. S1 must extend discovery to nested `lib/**/*.py` (with stated exclusions), at least to `lib/_sprig/**`; add a test that a refusal in a nested file is discovered; and register every site S1 adds with its class, owner and disposition.
 
 ### 5.3 Output
 
@@ -148,14 +175,23 @@ As for Rill (design/rill.md §6.1), the routing lands with the first `lib/_sprig
 
 ### 6.2 Budget rows and markers
 
-- New measured bundles get new `budgets.json` rows: `sprig.src` and `sprig.pre`, `sprig-more.src`, `sprig-plot.src`.
+- **Only present groups get rows.** S1 installs the final route names (§6.1) but adds `budgets.json` rows only for the groups it measures: `sprig.src` and `sprig.pre`, and `sprig-more.src` if that group has content. S6 adds `sprig-plot.src` when `plot.py` first exists. There is never an empty future row.
 - Growth of existing rows (`lib.gen.js`, `pyjs.cjs`, the TypeScript wiring) is authorized by tight `.growth` markers, measured with the exact pull_request gate against current master.
 
-### 6.3 The CLI
+### 6.3 The CLI: keyed blobs per present family
 
-`scripts/lazy-lib.mjs` gains a `sprig` family (`LAZY_FAMILIES`), so no Python, Sage, MATLAB, Magma or Rill start decodes Sprig's blob; they pay only its installed bytes.
+As Rill's (design/rill.md §6.3): `scripts/lazy-lib.mjs` gets separate keys for Sprig's start and `sprig-more`, and from S6 `sprig-plot`. No Python, Sage, MATLAB, Magma or Rill start decodes a Sprig key, and an ordinary Sprig start decodes no `sprig-plot` key. `sprig-plot` is its own group (daybreak2's ruling): plotting comes only in S6, isn't needed by a symbolic first cell, and may pull a different import closure.
 
-### 6.4 What each slice reports
+### 6.4 Pins (S1, extended in S6)
+
+- Synthetic path-to-group cases for every route, including `_sprig/plot.py` to `sprig-plot`, and a shared file that stays in core, sci or sage.
+- No other mode's start or `manifest.modes` entry contains a Sprig group.
+- Sprig's first cell fetches and decodes only its start group and declared dependencies, never `sprig-plot`.
+- The first plotting import fetches and decodes `sprig-plot` and only its declared shared dependencies (S6).
+- The offline inventory owns every Sprig group exactly once and stays within its caps.
+- The CLI's lazy guards (`web/test-cli-lazy-lib.mjs`) prove the same decode boundaries.
+
+### 6.5 What each slice reports
 
 As for Rill (design/rill.md §6.4), with these figures:
 - `lib.gen.js`, `pyjs.cjs`, and the npm pack bytes;
@@ -165,7 +201,7 @@ As for Rill (design/rill.md §6.4), with these figures:
 
 The spike's numbers are a starting point only: `lib/_sprig.py` was 70 KB of source, about 30 KB in the CLI bundle. The MVP's source should be about 250–300 KB.
 
-**First-use target:** a Sprig session's first cell, measured cold in the browser and on the CLI, stays within 1.1× of Sage mode's first cell measured the same way, since Sprig's start is Sage's plus Sprig's own modules. Otherwise the PR explains the difference.
+**First-use targets.** S6 also reports plotting's full cold first use (download, decode, compile, import) in the browser and the CLI, with the per-row bytes, npm pack growth, the other modes' cold starts and the offline caps' headroom. A Sprig session's first cell, measured cold in the browser and on the CLI, stays within 1.1× of Sage mode's first cell measured the same way, since Sprig's start is Sage's plus Sprig's own modules. Otherwise the PR explains the difference.
 
 ## 7. Tests: a corpus of recorded Mathics3 outputs (grader)
 
@@ -179,23 +215,29 @@ As `rill-tests/` (design/rill.md §7.1):
 
 ### 7.2 What is compared
 
-For each case: the result's `InputForm` text, the `Print` output, and the message lines, byte for byte, after one stated normalization (Mathics3's Unicode arrows `⇾`/`⧴` written as `->`/`:>`).
+For each case: the result's `InputForm` text, the `Print` output, and the message lines, byte for byte, after one stated normalization (Mathics3's Unicode arrows `⇾`/`⧴` written as `->`/`:>`), done by one function in the runner with a pin on each arrow.
 
 ### 7.3 Known differences, enforced both ways, and checked as values
 
 `sprig-tests/KNOWN.json`, as Rill's: each entry has a case id, a class, one line of reason, and the sha256 of **our** output. A listed case must still give our recorded output, and must still differ from the oracle: if it becomes exact, the test fails with "remove from KNOWN.json".
 
-Sprig's classes, with what backs each:
+Sprig's classes, with what backs each (the grader's TESTS ruling):
 
 | Class | Meaning | Checked by the test |
 |---|---|---|
-| `term-order` | the same value, terms in Sprig's order | our result and the oracle's, both parsed, are equal after sorting `Orderless` arguments |
-| `equivalent-form` | the same value written differently (an antiderivative, `Cos[x] (-3 + Cos[x]^2)/3` against `-Cos[x] + Cos[x]^3/3`) | the difference simplifies to 0 in Sage, or vanishes to $10^{-9}$ relative at three fixed points |
-| `oracle-unevaluated` | Mathics3 returns the input unevaluated; Sprig answers | a recorded Sage 10.10 witness for the same problem, compared as `equivalent-form` |
-| `oracle-wrong` | Mathics3's answer is wrong | a recorded Sage 10.10 witness and a one-line proof |
+| `term-order` | the same value, terms in Sprig's order | the oracle's recorded `FullForm` against ours, through a small `FullForm`-only parser in the runner, independent of `lib/_sprig/`. Arguments are sorted recursively, only under heads that are `Orderless` in the oracle's attributes (a fixed list in the runner: `Plus`, `Times` at least), by a total order on canonical `FullForm` text. Equal multisets of arguments, and nothing else, is `term-order` |
+| `equivalent-form` | the same value written differently | the free symbols must be the same set, or it fails first. Then symbolically in Sage, `(a - b).simplify_full() == 0` (recorded `"check": "symbolic"`). Only when Sage can't decide, numerically: at least 7 seeded points per free-variable set (negative, non-integer and two complex points included), at 50 digits, passing $\lvert a - b\rvert \le 10^{-20} \max(1, \lvert a\rvert, \lvert b\rvert)$. Points where either side isn't finite are skipped, but at least 5 must be finite. Recorded `"check": "numeric"` with the count of points |
+| `equivalent-form`, `"up_to_constant": true` | antiderivatives differing by a constant; `Integrate` only | $\frac{d}{dx}(a - b)$ passes the check above |
+| `oracle-unevaluated` | Mathics3 returns the input unevaluated; Sprig answers | a Sage 10.10 witness, recorded with provenance (Sage version and exact command in `PROVENANCE.json`), compared to ours by the `equivalent-form` check |
+| `oracle-wrong` | Mathics3's answer is wrong | the Sage witness as above, plus an independent numeric fact our answer satisfies and Mathics3's fails (a definite integral by quadrature, a root substituted back). The one-line proof is for people |
+| `oracle-host-limit` | Mathics3 refuses a setting because of its own host (§5.2's `Infinity` for the limits) | the oracle's refusal text recorded, and Sprig's accepting behaviour pinned with Stop |
 | `not-implemented` | Sprig refuses, with its message | the refusal text; the entry names the slice or L-item that implements it |
 
-Every class except `not-implemented` is checked as a value, not only pinned by hash. A symbolic difference that simplifies to 0 is a proof of equality; agreement at fixed numerical points is evidence, not proof, so each entry records which check it passed, and the grader rules on whether numerical evidence is enough (§13).
+So every listed difference except `not-implemented` is checked as a value: symbolically where Sage can decide it, otherwise numerically at 50 digits on at least 5 finite points, and the entry records which. The checkers carry negative controls in CI. Domain, branch and constant-of-integration conditions are stated in an entry wherever they apply.
+
+**Negative controls for every checker** ship in S0, before any Sprig code. The runner holds a fixture with, for each class, one case that must pass and at least one planted wrong answer that must fail: for `term-order`, a dropped term and a changed coefficient; for `equivalent-form`, an answer off by a constant factor and one wrong only away from 0; for `oracle-unevaluated`, a witness that disagrees. The runner fails if any control passes.
+
+**Scoring.** A slice's held-out score reports exact, `term-order`, `equivalent-form` (symbolic and numeric separately), `oracle-*` and `not-implemented` separately. A `not-implemented` entry never counts as passed.
 
 ### 7.4 Held-out files
 
@@ -203,10 +245,11 @@ As for Rill (design/rill.md §7.4): each slice's held-out file is committed with
 
 ### 7.5 Cost and CI budget
 
-- The corpus replay uses Rill's runner pattern (`test/rill-corpus-run.ts`, generalized or mirrored as `test/sprig-corpus-run.ts`): one CLI process per case file, each case in a fresh Sprig session (`run_cases`), plus a fixed 5% of cases run one process per case to pin fresh-session equivalence.
-- The spike measured about 1 s of start per process (Sage's import) and 10–60 ms per case, so a few hundred cases in tens of files fit in about 45 s per partition across `test/sprig-corpus-{1..4}.test.ts`, at most 3 minutes summed, with S1 giving the measured numbers.
+- **The runner mirrors Rill's** as `test/sprig-corpus-run.ts` (daybreak3's ruling; not a generalized shared runner): one CLI process per case file, each case in a fresh Sprig session (`run_cases`), and a fixed 5% of cases also run one process per case to pin fresh-session equivalence. Sprig's outcome parsing and KNOWN enforcement stay local; shared helpers may be extracted later only once both runners show identical mechanics.
+- **Measured budget.** The spike measured about 1 s of start per process (Sage's import) and 10–60 ms per case, so a few hundred cases fit in about 45 s per partition across `test/sprig-corpus-{1..4}.test.ts`. S1 gives the measured numbers.
+- **Not in the node suite.** node-tests shard 7 is already over the 10-minute bound, so the corpus partitions go in their own `sprig` job or shards, gated by the paths `sprig-tests/`, `lib/_sprig/` and `src/sprig*.ts`, each at most 10 minutes, as web-sync's split was done. That is a workflow-file change, which agents never push: S0 asks @sagebrush and William for it, with the measured numbers.
 - Slow cases (large integrals, plots) are marked and run nightly.
-- `scripts/ci-paths.mjs` maps `sprig-tests/`, `lib/_sprig/` and `src/sprig*.ts` to the node suite.
+- §10's per-input times are measured and reported per slice, never asserted in CI.
 
 ### 7.6 Our own snapshots
 
@@ -233,13 +276,13 @@ Sprig is Python on the engine, so it inherits Sagebrush's interrupt model, as Ri
 As in design/rill.md §8.4, a depth counter alone can't protect a recursive evaluator, because Python's or the browser's stack could fail first. So:
 - **Evaluation runs on an explicit stack** (a trampoline): head, arguments, rule application and control flow push continuations, not host frames. Deep Sprig recursion grows a list.
 - **Builtins that call back into evaluation** (`Map`, `Nest`, `Table`, `Select`, the pattern matcher's conditions) re-enter the trampoline; nested re-entries are bounded by a constant `S`, measured in S1 per host, with margin.
-- **Deep expressions** (a tree 10⁵ levels deep from `Nest`): the matcher, the printer and the Sage conversion walk iteratively or within `S`.
+- **Every walk, not only function recursion:** parsing, pattern matching (with its alternatives), rewriting, printing, the Sage conversion and every builtin that walks an expression run iteratively or within `S`. A tree 10⁵ levels deep from `Nest` is a pin. Each of these loops also tests the interrupt flag.
 - Passing `$RecursionLimit` gives the language's message, recorded from the oracle in S1. Passing `S` first gives `General::nesting` (§5.6). A host `RecursionError` or `RangeError` must never reach the user.
 - **Pins**, in the CLI and the browser: `f[n_] := f[n + 1]`, mutual recursion, recursion through `Map`, and `$RecursionLimit = Infinity`, each followed by a check that the session still answers.
 
 ### 8.4 Memory: reserve before allocating
 
-As in design/rill.md §8.5: `Table`, `Range`, `ConstantArray`, `Array`, `Tuples`, `Outer` and the integer and rational arithmetic compute their result size first, in Python integers, and reserve it against the session's allowance (`lib/_memguard.py`), or the browser's fixed caps where memory can't be measured. A refusal is `SagebrushMemoryError`, shown as `General::memory` (§5.6) with Sagebrush's detail. **Pins:** the boundary, one past it, and Stop during an allocation.
+As in design/rill.md §8.5: `Table`, `Range`, `ConstantArray`, `Array`, `Tuples`, `Outer` and the integer and rational arithmetic compute their result size first, in Python integers, and reserve it against the session's allowance (`lib/_memguard.py`), or the browser's fixed caps where memory can't be measured. The charge is the operation's peak live storage, including continuation and parse-tree growth, definitions, the matcher's alternatives, formatting and conversion temporaries, and numeric intermediates; reservations are released on failure and on Stop. The language's limits (§5.2) are no substitute for this accounting. A refusal is `SagebrushMemoryError`, shown as `General::memory` (§5.6) with Sagebrush's detail. **Pins:** the boundary, one past it, and Stop during an allocation.
 
 ### 8.5 Tests and integration
 
@@ -254,7 +297,7 @@ Sprig must reach files only through Sagebrush's Python file layer, so the docume
 - **Processes:** `Run`, `RunProcess`, `ReadList["!cmd"]` and `OpenRead["!cmd"]` must be refused in the MVP, with `General::noprocess` (§5.6). If they are wanted later, they route through just-bash as Python's `os.system` does, in their own PR with SEC review.
 - **Output:** notebook HTML from Sprig (`Grid`, `TableForm`) must go through `safeHtml` with `remote: false`. Plots must be our own SVG. Sprig must offer no API that emits script.
 - **The Sprig-only evaluator boundary, with negative controls.** `ToExpression` and `Get` must evaluate Sprig inside Sprig only. Symbol names, contexts and strings must never reach Python objects, module globals, imports or attributes: a symbol named `__import__`, `` Global`__class__ `` or `os` is only a Sprig symbol. S1 ships negative-control pins: such symbols evaluate to themselves, `Symbol["__import__"][...]` and `ToExpression["__builtins__"]` stay inert, and the session is unchanged.
-- **The gate inventory**, generated from the code by a census script as for Rill: every Sprig route to a file, a process or the host, with its gated or refused decision. The behavioural pins (files off and on, network refused, processes refused, the negative controls) must ship with Sprig's first host exposure (S1's CLI, then the notebook and worker).
+- **The gate inventory**, generated from the code by a census script as for Rill: every Sprig route to a file, a process or the host, with its gated or refused decision, including file and import options and deferred effects. Listing a route isn't enforcement: each listed route has a behavioural pin. The behavioural pins (files off and on, network refused, processes refused, the negative controls) must ship with Sprig's first host exposure (S1's CLI, then the notebook and worker).
 
 ## 10. Performance
 
@@ -276,13 +319,13 @@ Each slice is one PR through ENGINE (daybreak3), SEC (astra), SIZE (daybreak2), 
 
 | # | Slice | Contents |
 |---|---|---|
-| S0 | Held-out and corpus | `sprig-tests/` with its provenance, the spike's two corpora re-recorded as case files, S1's held-out file; the runner's checks, with no Sprig code yet |
-| S1 | Core | `lib/_sprig/` start: parser, `Expr`, the trampoline evaluator with attributes, own and down values, non-`Orderless` patterns, rules, arithmetic through Sage, the printers, messages; `--sprig` and `.sprig`; the group routing, lazy family and budget rows (§6); §8's and §9's first pins; the census's discovery extended to `lib/_sprig/**`, with its nested-refusal test, and S1's sites registered (§5.2) |
+| S0 | Held-out and corpus | `sprig-tests/` with its provenance, the spike's two corpora re-recorded as case files, S1's held-out file; the runner with its checkers and their negative controls (§7.3), with no Sprig code yet; the request for the `sprig` CI job (§7.5) |
+| S1 | Core | `lib/_sprig/` start (final routing for all groups; budget rows and CLI keys only for groups present, §6): parser, `Expr`, the trampoline evaluator with attributes, own and down values, non-`Orderless` patterns, rules, arithmetic through Sage, the printers, messages; `--sprig` and `.sprig`; the group routing, lazy family and budget rows (§6); §8's and §9's first pins; the census's discovery extended to `lib/_sprig/**`, with its nested-refusal test, and S1's sites registered (§5.2) |
 | S2 | Calculus and algebra | `math.py`; the Sage-layer gap G5 as its own engine PR (below) |
 | S3 | Evaluator depth | `Orderless`/`Flat` matching, up values, scoping, `Return`/`Break`/`Throw`, the `Hold` family, `Quiet`/`Check`, the language limits |
 | S4 | Lists, linear algebra, number theory, statistics, strings | `lists.py`, `linalg.py`, `numth.py`, `strings.py` |
 | S5 | Output | canonical order, `TeXForm`, `MatrixForm`/`TableForm`/`Grid`, notebook typesetting |
-| S6 | Graphics | `plot.py`, options, `Show`, `Export`, 3D |
+| S6 | Graphics | `plot.py` materializes `sprig-plot` (route unchanged, nothing moved), with its budget row, CLI key and first-use measurement (§6); options, `Show`, `Export`, 3D |
 | S7 | Integration | §11's items, each its own small PR |
 | S8 | Hardening | the long tail found in S1–S7; L-items closed or filed |
 
@@ -298,6 +341,6 @@ Each slice is one PR through ENGINE (daybreak3), SEC (astra), SIZE (daybreak2), 
 
 **For the lanes:**
 3. **The language's limits: decided** (@sagebrush, Nov 8, final): compatibility defaults, user-removable, separate from host protection; class 3 unless daybreak2's LIMITS verdict assigns otherwise (§5.2).
-4. **TESTS:** the class scheme of §7.3, in particular whether `equivalent-form` may rest on numerical evidence when no symbolic proof is found, before S0's runner.
-5. **SIZE:** `sprig-plot` as its own group, or within `sprig-more`.
-6. **ENGINE:** whether Rill's corpus runner is generalized (one runner, two corpora) or mirrored for Sprig.
+4. **§7.3's classes: decided** (the grader's TESTS ruling): symbolic where Sage decides, else 50-digit numeric on at least 5 finite points, recorded per entry; negative controls in CI.
+5. **`sprig-plot`: decided** (daybreak2): its own group (§6).
+6. **The corpus runner: decided** (daybreak3): mirrored as `test/sprig-corpus-run.ts` (§7.5).
