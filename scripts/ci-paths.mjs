@@ -72,6 +72,8 @@ const fullTierPaths = [
   /^web\/notebook\/(?:sync-rows|journal|journal-rows|db-merge3|p2c-merge|merge3)[^/]*$/, /^web\/board\/(?:syncdb|journal|merge)\.ts$/,
   // sharing and security
   /^web\/share\//, /^web\/share-client\//, /^web\/csp(?:-policy)?\.m?ts$/, /^web\/safe-html\.ts$/,
+  // (the hosted service's sharing and remotes, MS-RSL: their suites run only in web-sync's full-tier shards)
+  /^web\/cloud\/share\//, /^web\/cloud\/remote\//,
   // data loss: save, Trash, export, purge, and the workspace's store and its migrations
   /^web\/workspace\/[^/]*(?:trash|export|purge|save)[^/]*$/, /^web\/workspace\/export\//,
   /^web\/workspace\/(?:db|migrate|migrator|file-bytes)\.ts$/,
@@ -313,9 +315,9 @@ const webWorkspace = web && (allWeb || inArea("workspace"));
 const webExport = webWorkspace || (web && suiteJobs.has("web-export"));
 const webLookalike = webWorkspace || (web && suiteJobs.has("web-lookalike"));
 // The share dialog's browser suite (web-sync.3, about 8.5 min alone, its own web-sync shard): in the full tier, but on a
-// pull request only when it changes sharing (web/share/, web/share-client/, the suite among them) or has the full-ci
+// pull request only when it changes sharing (web/share/, web/share-client/, web/cloud/share/, the suites among them) or has the full-ci
 // label; a master push, the schedule and a dispatch always run it (grader's web-sync CI-time plan, Nov 9: PR CI <= 10 min)
-const webShare = full && (event !== "pull_request" || labels.includes("full-ci") || matches([/^web\/share\//, /^web\/share-client\//]));
+const webShare = full && (event !== "pull_request" || labels.includes("full-ci") || matches([/^web\/share\//, /^web\/share-client\//, /^web\/cloud\/share\//]));
 
 // The slow node tests (test/slow-tests.ts: skipped in place unless SAGEBRUSH_SLOW_TESTS=1; William, Nov 4, his pick
 // of option B): they run nightly and on a dispatch (test/slow-tests.ts reads the event itself), with the full-ci label,
