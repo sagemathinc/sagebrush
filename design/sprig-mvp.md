@@ -113,7 +113,7 @@ Sprig keeps these values, boundaries, messages and held results, because they ar
 - growing explicit-stack and data state stays under the memory guard (§8.4);
 - otherwise an endless computation runs until Stop, or until a separately authorized host allowance fires (the existing opt-in path). No iteration or time cap is added.
 
-A person's assignment to these variables never arms, weakens or replaces a trusted host allowance or the memory guard.
+A person's assignment to these variables never arms, weakens or replaces an authorized host allowance or the memory guard.
 
 **The census classes** (@sagebrush's ruling; daybreak2's LIMITS verdict may assign otherwise, and that is final). Every one is a real refusal site, never "none":
 
@@ -122,7 +122,7 @@ A person's assignment to these variables never arms, weakens or replaces a trust
 | the `$RecursionLimit`, `$IterationLimit` and `MaxIterations` checks | 3 (evaluation-step caps of the user's computation, user-removable) |
 | the trampoline's re-entry bound `S` | 1 (host-stack protection) |
 | memory reservation and refusal | 2 |
-| a trusted host time or work allowance | 3, opt-in through the existing allowance path only |
+| an authorized host time or work allowance | 3, opt-in through the existing allowance path only |
 
 **The disposition.** The census's class-3 dispositions today model only unlimited-default `_limits` and host routes. So S1 adds an explicit, reviewed language-compatibility disposition (or an equivalent truthful schema) for these three sites (daybreak2's LIMITS ruling, final). They are never routed through host authority and never marked "none".
 
@@ -230,14 +230,14 @@ Sprig's classes, with what backs each (the grader's TESTS ruling):
 | `equivalent-form`, `"up_to_constant": true` | antiderivatives differing by a constant; `Integrate` only | $\frac{d}{dx}(a - b)$ passes the check above |
 | `oracle-unevaluated` | Mathics3 returns the input unevaluated; Sprig answers | a Sage 10.10 witness, recorded with provenance (Sage version and exact command in `PROVENANCE.json`), compared to ours by the `equivalent-form` check |
 | `oracle-wrong` | Mathics3's answer is wrong | the Sage witness as above, plus an independent numeric fact our answer satisfies and Mathics3's fails (a definite integral by quadrature, a root substituted back). The one-line proof is for people |
-| `oracle-host-limit` | Mathics3 refuses a setting because of its own host (§5.2's `Infinity` for the limits) | the oracle's refusal text recorded, and Sprig's accepting behaviour pinned with Stop |
+| `oracle-host-limit` | Mathics3 refuses a setting because of its own host (§5.2's `Infinity` for the limits) | a closed class: the runner holds the fixed list of oracle refusals it may cover (today `$IterationLimit::limset`, and `$RecursionLimit` outside 20–512), and an entry whose recorded oracle message isn't on the list fails. Each entry carries two pins: (a) a computation needing more than the oracle's maximum (a recursion depth of 1000 under `$RecursionLimit = Infinity`; a `//.` needing more than 65535 steps with `MaxIterations -> Infinity`) gives the right value, checked against a closed form or a Sage witness by the `equivalent-form` check; (b) a non-terminating one ends by Stop, after which the session answers and keeps its definitions. Neither uses a wall-clock bound |
 | `not-implemented` | Sprig refuses, with its message | the refusal text; the entry names the slice or L-item that implements it |
 
-So every listed difference except `not-implemented` is checked as a value: symbolically where Sage can decide it, otherwise numerically at 50 digits on at least 5 finite points, and the entry records which. The checkers carry negative controls in CI. Domain, branch and constant-of-integration conditions are stated in an entry wherever they apply.
+So every listed difference except `not-implemented` and `oracle-host-limit` is checked as a value: symbolically where Sage can decide it, otherwise numerically at 50 digits on at least 5 finite points, and the entry records which. The checkers carry negative controls in CI. Domain, branch and constant-of-integration conditions are stated in an entry wherever they apply.
 
-**Negative controls for every checker** ship in S0, before any Sprig code. The runner holds a fixture with, for each class, one case that must pass and at least one planted wrong answer that must fail: for `term-order`, a dropped term and a changed coefficient; for `equivalent-form`, an answer off by a constant factor and one wrong only away from 0; for `oracle-unevaluated`, a witness that disagrees. The runner fails if any control passes.
+**Negative controls for every checker** ship in S0, before any Sprig code. The runner holds a fixture with, for each class, one case that must pass and at least one planted wrong answer that must fail: for `term-order`, a dropped term and a changed coefficient; for `equivalent-form`, an answer off by a constant factor and one wrong only away from 0; for `oracle-unevaluated`, a witness that disagrees; for `oracle-host-limit`, a recorded oracle message not on the list, and Sprig refusing `Infinity`. The runner fails if any control passes.
 
-**Scoring.** A slice's held-out score reports exact, `term-order`, `equivalent-form` (symbolic and numeric separately), `oracle-*` and `not-implemented` separately. A `not-implemented` entry never counts as passed.
+**Scoring.** A slice's held-out score reports exact, `term-order`, `equivalent-form` (symbolic and numeric separately), `oracle-unevaluated` and `oracle-wrong`, `oracle-host-limit` (on its own line, never under "same value") and `not-implemented` separately. A `not-implemented` entry never counts as passed.
 
 ### 7.4 Held-out files
 
