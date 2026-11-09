@@ -5,7 +5,7 @@
 // picture, a text, a binary file not shown; a file's earlier versions,
 // restored (what was there kept as a version too) and deleted by the
 // person after confirming; "Delete older versions in this folder"; the
-// Storage panel's numbers, "Free N MB of old versions", Trash, and asking
+// Storage panel's numbers, Free (old versions), Trash, asking
 // the browser to keep the storage; the meter at the foot; and the same
 // preview on the board page.  SHOT_DIR=dir saves screenshots there.
 // Serve web/dist first (python3 web/serve.py 8765), then
@@ -140,22 +140,25 @@ try {
   check(await until(`/Storage in this browser/.test(${P}?.textContent ?? "") && /used of/.test(${P}.textContent)`), "the meter opens the Storage panel, with the browser's estimate");
   const st = await ev(`Object.fromEntries([...${P}.querySelectorAll("dt")].map((d) => [d.textContent, d.nextElementSibling.textContent]))`);
   const docs = await ev(`${W}.list("/", { recursive: true }).then((l) => l.filter((e) => (e.kind === "notebook" || e.kind === "board") && !e.path.startsWith("/Trash")).length)`);
-  check(st["Notebooks and boards"] === String(docs) && docs >= 2 && /^4 · /.test(st["Data files"]) && /^2 · 4 B/.test(st["Earlier versions of files"]) && /^1 item · 5 B of files/.test(st["Trash"]), "…what this browser holds: " + JSON.stringify(st));
-  check(await ev(`!!${P}.querySelector(".keep")`), "…and whether the browser may clear it");
+  check(st["Notebooks and boards"] === String(docs) && docs >= 2 && /^4 · /.test(st["Data files"]) && /^2 · 4 B/.test(st["Old versions"]) && /^1 item · 5 B of files/.test(st["Trash"]), "…what this browser holds: " + JSON.stringify(st));
+  check(await ev(`!!${P}.querySelector(".keep")`), "…and whether the browser keeps it");
+  // (one short line each, the explanations in the docs: no list and no long note in the panel, and its link into /docs/storage)
+  check(await ev(`!${P}.querySelector("ul") && [...${P}.querySelectorAll("p.note")].every((p) => p.textContent.length <= 90)`), "…no wall of text: every note one short line: " + JSON.stringify(await ev(`[...${P}.querySelectorAll("p.note")].map((p) => p.textContent)`)));
+  check(await ev(`(() => { const a = ${P}.querySelector("p.learn a.learn"); return !!a && new URL(a.href).pathname === "/docs/storage" && new URL(a.href).origin === location.origin && a.target === "_blank"; })()`), "…and Learn more opens /docs/storage, on this site, in a new tab");
   await shot("storage");
   // (a version kept after the panel showed them: not among those freed, CORR-AC5-1)
   await ev(`${W}.write("/data/notes.txt", "v6").then(() => 1)`);
-  await panelButton(/^Free 4 B of old versions/);
+  await panelButton(/^Free$/);
   check(await until(`${W}.history("/data/notes.txt").then((h) => h.length === 1)`), "Free N of old versions: those shown go, after asking; one kept since stays");
   check(await ev(`${W}.version("/data/notes.txt", 0).then((b) => new TextDecoder().decode(b) === "v5")`), "…the one kept since: v5");
   check(/Delete all 2 earlier versions of data files/.test(dialogs.at(-1) ?? ""), "…saying how many: " + dialogs.at(-1));
-  check(await until(`/^1 · /.test([...${P}.querySelectorAll("dt")].find((d) => d.textContent === "Earlier versions of files")?.nextElementSibling.textContent ?? "")`), "…and the panel shows what is left");
+  check(await until(`/^1 · /.test([...${P}.querySelectorAll("dt")].find((d) => d.textContent === "Old versions")?.nextElementSibling.textContent ?? "")`), "…and the panel shows what is left");
   await ev(`(() => { Object.defineProperty(navigator.storage, "persisted", { value: async () => window.__kept === true, configurable: true }); Object.defineProperty(navigator.storage, "persist", { value: async () => (window.__kept = true), configurable: true }); return 1; })()`);
   await closePanel();
   await click("#wssidebar .fmeter");
-  await until(`/may clear it/.test(${P}?.querySelector(".keep")?.textContent ?? "")`);
-  await panelButton(/^Ask the browser to keep it/);
-  check(await until(`/^Kept/.test(${P}?.querySelector(".keep")?.textContent ?? "")`), "Ask the browser to keep it: kept, said");
+  await until(`!!${P}?.querySelector(".keep button")`);
+  await panelButton(/^Keep$/);
+  check(await until(`(${P}?.querySelector(".keep")?.textContent ?? "") === " · kept"`), "Keep asks the browser to keep it: kept, said on the usage line");
   await panelButton(/^Show$/);
   check(await until(`!${P} && !!document.querySelector(${JSON.stringify(rowSel("/Trash/blob.bin"))})`), "the panel's Trash Show opens Trash");
   await click("#wssidebar .ffoot button");
