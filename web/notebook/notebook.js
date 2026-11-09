@@ -2407,7 +2407,9 @@ export function createNotebook(root, opts = {}) {
     },
     /** Run cells (ids) and delete others as one action, then what depends on them (the reactive notebook; resolves to its report). */
     // (programmatic: never with a person's consent)
-    runCells(ids, { consent: _consent, ...o } = {}) { return reactive() ? engine().run(ids, o) : Promise.all(ids.map((id) => cellById(id)).filter(Boolean).map((c) => run(c))); },
+    // (an explicit run, as run and runAll are (Run stale's, the page's): a permission widened since this interpreter
+    // started starts a new one first (confinement phase 2), whose restart makes every cell stale)
+    runCells(ids, { consent: _consent, ...o } = {}) { opts.onExplicitRun?.(); return reactive() ? engine().run(ids, o) : Promise.all(ids.map((id) => cellById(id)).filter(Boolean).map((c) => run(c))); },
     applyEdits, graph, verify, fixRedefinitions,
     setMode, setType, setInput, renderMd, select, edit,
     /** X1: load the language's environment now, for the user's choice of it (index.html's menu). */

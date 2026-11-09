@@ -1601,13 +1601,7 @@ $("#runall").onclick = () => nb.runAll();
 const autorunEl = $("#autorun"), runStaleEl = $("#runstale");
 const budgetOf = (v) => (v === "always" ? Infinity : v === "never" ? 0 : Number(v) || 2000);
 autorunEl.onchange = () => nb.setBudget(budgetOf(autorunEl.value));
-// (the person's Run of what is stale is an explicit run too (confinement phase 2): a permission widened since this
-// interpreter started starts a new one first, whose restart makes every cell stale, so all of them run again)
-runStaleEl.onclick = (e) => {
-  if (e?.isTrusted === true && current.id) kernels.get(current.id)?.rotateIfWidened?.();
-  const s = nb.reactive?.staleSummary();
-  if (s?.cells.length) nb.runCells(s.cells, { budget: Infinity });
-};
+runStaleEl.onclick = () => { const s = nb.reactive?.staleSummary(); if (s?.cells.length) nb.runCells(s.cells, { budget: Infinity }); };
 let staleShown = 0;
 function showReactiveBar() {
   const r = nb.reactive;

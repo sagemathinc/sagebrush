@@ -41,6 +41,11 @@ const fileNew = async () => {
   await until(`sagebrush.kernel.uid !== ${k} && sagebrush.kernel.ready`, 15000);
   await sleep(300);
   await allowFiles(send, ev); // (some cells write files the others read: the person allows it, as a person does)
+  // (then runs it, as a person does: an allowed widening reaches the notebook through its next Run, which starts a new
+  // interpreter (confinement phase 2), so what a case puts into the interpreter goes into that one)
+  await ev("(window.__fnW = sagebrush.kernel.worker, 1)");
+  await ev("sagebrush.notebook.run(sagebrush.notebook.cells()[0]).then(() => 1)");
+  await until("sagebrush.kernel.ready && sagebrush.kernel.worker !== window.__fnW", 15000);
 };
 try {
   await send("Page.navigate", { url: base });

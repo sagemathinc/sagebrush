@@ -241,6 +241,19 @@ try {
   await ev("(window.__release(), 1)");
   await settle();
   check(!(await stat("/proj/out/q.txt")), "a change still queued when its folder is taken away is kept nowhere");
+  // (the same with another folder left allowed: still scoped, so the narrowing reaches the interpreter by its epoch, with
+  // no restart, and the queue's final admission refuses by what is allowed now (grader's TESTS934-1))
+  await otherTab(`(e) => { e.write = [...new Set([...(e.write ?? []), "/proj/out", "/proj/other"])]; }`);
+  await setCode("import os\n" + TRY("/proj/out/q3.txt", "Q3"));
+  await ev("(window.__release = sagebrush.files.holdDrain(), 1)");
+  await runAll();
+  await outHas("/Q3:ok/");
+  await until("sagebrush.files.queue().paths > 0", 10000);
+  await ev("(window.__w3 = sagebrush.kernel.worker, 1)");
+  await otherTab(`(e) => { e.write = (e.write ?? []).filter((x) => x !== "/proj/out"); }`);
+  await ev("(window.__release(), 1)");
+  await settle();
+  check(JSON.stringify(await trees()) === '["/proj/other"]' && (await ev("sagebrush.kernel.worker === window.__w3")) && !(await stat("/proj/out/q3.txt")), "a change queued into /proj/out, then /proj/out taken away with /proj/other still allowed (no restart): kept nowhere (" + JSON.stringify(await trees()) + ")");
 
   // ---- a rename is one change
   await dismiss();
@@ -271,6 +284,15 @@ try {
   const leaked = [];
   for (const p of ["/proj/r/shape.txt", "/elsewhere/shape.txt", "/elsewhere/up.txt", "/proj/r/dbl.txt", "/proj/r/dot.txt", "/proj/r/rel.txt", "/proj/r/trail", "/proj/r/str.txt", "/proj/r/arr.txt", "/proj/r/m2/a.txt", "/proj/r/m3/a.txt", "/elsewhere/b.txt"]) if (await stat(p)) leaked.push(p);
   check(leaked.length === 0, "an interpreter's malformed changes are kept nowhere: batch-shaped data, non-canonical paths, bytes that aren't bytes, a rename with a non-canonical or outside from or member: " + JSON.stringify(leaked));
+  // (a rename inside its folder with one member not in its canonical form, whatever it resolves to: kept nowhere, nothing
+  // written, nothing asked (grader's TESTS934-2))
+  const asked0 = JSON.stringify(await ev("(() => { const p = sagebrush.filesPrompt(); return p && [p.id, p.path]; })()"));
+  for (const [i, m] of [["5", "/proj/r/m5/../x5.txt"], ["6", "/proj/r/m6/./x6.txt"], ["7", "/proj/r/m7//x7.txt"]]) await forged(`{ fsRename: { from: "/proj/r/nf${i}", to: "/proj/r/m${i}", changes: [["/proj/r/m${i}/a.txt", new Uint8Array([1])], [${JSON.stringify(m)}, new Uint8Array([1])]] } }`);
+  await settle();
+  const nc = [];
+  for (const p of ["/proj/r/m5/a.txt", "/proj/r/x5.txt", "/proj/r/m6/a.txt", "/proj/r/m6/x6.txt", "/proj/r/m7/a.txt", "/proj/r/m7/x7.txt"]) if (await stat(p)) nc.push(p);
+  const asked1 = JSON.stringify(await ev("(() => { const p = sagebrush.filesPrompt(); return p && [p.id, p.path]; })()"));
+  check(nc.length === 0 && asked1 === asked0, "a rename with a member ../, ./ or // inside its folder is kept nowhere, wholly, and asks nothing (the prompt as it was): " + JSON.stringify({ kept: nc, before: asked0, after: asked1 }));
   await forged(`{ fsRename: { from: "/proj/r/f.txt", to: "/proj/r/h.txt", changes: [["/proj/r/f.txt", null], ["/proj/r/h.txt", new Uint8Array([104])]] } }`);
   await settle();
   check(!(await stat("/proj/r/f.txt")) && (await stat("/proj/r/h.txt")), "one wholly inside is kept, both of its changes");
@@ -419,16 +441,20 @@ try {
   await runAll();
   check(await outHas("/can't run here/", 30000) && !/PLAIN/.test(await out()), "?runner=0: a scoped notebook doesn't run in the page's own interpreter, and says why: " + (await out()).trim().slice(0, 120));
 
-  // ---- the person's own flow, no test hook (@sagebrush, r5): File > Permissions… allows file changes, then the
-  // person's Runs, each a trusted click into its cell and Shift+Enter: one cell writes a file, the next reads it, and the reader
-  // depends on the writer through the file; then Run stale, the person's click, as the first Run after a widening
+  // ---- the person's own flow, no test hook (@sagebrush, r5; grader's TESTS934-3): each step a trusted input. A cell
+  // writes into /proj/flow, refused; the prompt's Allow; the person's next Run (a click into the cell, Shift+Enter)
+  // restarts the interpreter and the write is kept; the next cell reads the file, and the reader depends on the writer
+  // through it. Then File > Permissions… allows everywhere, a restart keeps the old ceiling, and Run stale, the
+  // person's click, is the first Run after that widening
   await go(base + "?reactive&runner=1");
+  await ev(`${W}.create("/proj/flow/keep.txt", { content: new TextEncoder().encode("k") }).then(() => 1)`);
   await ev(`(() => { document.querySelector('#filebtn')?.click(); document.querySelector('#filemenu [data-group="new"]')?.click(); document.querySelector('#filemenu [data-f="new"]').click(); return 1; })()`);
   await until("sagebrush.notebook.cells().length === 1 && !sagebrush.notebook.cells()[0].ta.value && sagebrush.kernel?.ready", 30000);
   await sleep(800);
   await ev("(sagebrush.notebook.addCell(''), 1)");
-  await setCode("with open('flow.txt', 'w') as f:\n    f.write('x' * 3)", 0);
-  await setCode("print(len(open('flow.txt').read()))", 1);
+  const writer = (path, n) => `with open('${path}', 'w') as f:\n    f.write('x' * ${n})\nprint('W:ok')`;
+  await setCode(writer("/proj/flow/f.txt", 3), 0);
+  await setCode("print(len(open('/proj/flow/f.txt').read()))", 1);
   const key = async (k, code, vk) => { for (const type of ["keyDown", "keyUp"]) await send("Input.dispatchKeyEvent", { type, key: k, code, windowsVirtualKeyCode: vk }); await sleep(200); };
   // (the person's Run of a cell: a click into it, then Shift+Enter, each a trusted input)
   const runB = async (i) => {
@@ -437,30 +463,34 @@ try {
     for (const type of ["keyDown", "keyUp"]) await send("Input.dispatchKeyEvent", { type, key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, modifiers: 8 });
     await sleep(200);
   };
-  const permsSwitch = async () => { await trusted("#filebtn"); await trusted("#permsmenu"); await trusted("#filesperm"); await key("Escape", "Escape", 27); };
-  await permsSwitch();
-  check((await ev("sagebrush.permissions()?.files")) === true, "the person's flow: File > Permissions… allows file changes (trusted clicks)");
+  const outN = (i, v) => until(`[...document.querySelectorAll('#cells .cell')][${i}]?.querySelector('.out')?.textContent.trim() === ${JSON.stringify(v)}`, 30000);
   await runB(0);
-  await until("!/running|queued/.test([...document.querySelectorAll('#cells .cell')][0].className)", 30000);
+  check(await until("sagebrush.filesPrompt()?.folder === '/proj/flow'", 30000), "the person's flow: the writer, run by Shift+Enter, is refused and the prompt asks about /proj/flow");
+  await sleep(700);
+  await trusted("#fballow");
+  check(JSON.stringify(await trees()) === '["/proj/flow"]', "…the prompt's Allow, a trusted click: /proj/flow allowed");
+  await ev("(window.__wf = sagebrush.kernel.worker, 1)");
+  await runB(0);
+  await until("/W:ok|Error/.test([...document.querySelectorAll('#cells .cell')][0]?.querySelector('.out')?.textContent ?? '')", 30000);
+  await settle();
+  check((await ev("sagebrush.kernel.worker !== window.__wf")) && /W:ok/.test(await out(0)) && (await stat("/proj/flow/f.txt")), "…the next Run (Shift+Enter) restarts the interpreter, and the write is kept: " + JSON.stringify((await out(0)).trim().slice(-120)));
   await runB(1);
-  check(await until("[...document.querySelectorAll('#cells .cell')][1]?.querySelector('.out')?.textContent.trim() === '3'", 30000), "…the writer run (Shift+Enter), then the reader: it reads the file written (" + JSON.stringify((await out(0)).trim().slice(0, 120)) + ", " + JSON.stringify((await out(1)).trim().slice(0, 120)) + ")");
-  await setCode("with open('flow.txt', 'w') as f:\n    f.write('x' * 5)", 0);
+  check(await outN(1, "3"), "…the reader, run by Shift+Enter, reads the file written: " + JSON.stringify((await out(1)).trim().slice(0, 120)));
+  await setCode(writer("/proj/flow/f.txt", 5), 0);
   await runB(0);
-  check(await until("[...document.querySelectorAll('#cells .cell')][1]?.querySelector('.out')?.textContent.trim() === '5'", 30000), "…the writer changed and run (Shift+Enter) reruns the reader: it depends on the writer through the file (" + JSON.stringify((await out(1)).trim()) + ")");
-  // (a narrowing, then the widening again: the interpreter running keeps its narrowed ceiling until the person's next
-  // Run, here Run stale)
-  await permsSwitch();
-  check((await ev("sagebrush.permissions()?.files")) === false, "(file changes stopped, by the switch)");
-  await permsSwitch();
-  check((await ev("sagebrush.permissions()?.files")) === true, "(and allowed again)");
-  await setCode("with open('flow.txt', 'w') as f:\n    f.write('x' * 7)", 0);
-  // (a restart, not a Run, keeps the narrowed ceiling (every start but an explicit Run's does), and makes every cell
-  // stale: Run stale is then the person's first Run since the widening)
+  check(await outN(1, "5"), "…the writer changed and run (Shift+Enter) reruns the reader: it depends on the writer through the file (" + JSON.stringify((await out(1)).trim()) + ")");
+  // (allowed everywhere by the switch: a widening, which the interpreter running doesn't get; a restart, not a Run, keeps
+  // its ceiling (every start but an explicit Run's does) and makes every cell stale, so Run stale is the person's first
+  // Run since the widening)
+  await trusted("#filebtn"); await trusted("#permsmenu"); await trusted("#filesperm"); await key("Escape", "Escape", 27);
+  check((await ev("sagebrush.permissions()?.files")) === true, "(File > Permissions…: allowed everywhere, by trusted clicks)");
+  await setCode(writer("/flowtop.txt", 7), 0);
+  await setCode("print(len(open('/flowtop.txt').read()))", 1);
   await ev("(sagebrush.notebook.restart(), 1)");
   await until("sagebrush.kernel?.ready === true", 30000);
   const staleShown = await until("!document.querySelector('#runstale').hidden", 15000);
   if (staleShown) await trusted("#runstale");
-  check(staleShown && (await until("[...document.querySelectorAll('#cells .cell')][1]?.querySelector('.out')?.textContent.trim() === '7'", 30000)), "Run stale, the person's click as the first Run after a widening, starts a new interpreter that may change files: the writer and its reader run (" + JSON.stringify({ shown: staleShown, out0: (await out(0)).trim().slice(0, 120), out1: (await out(1)).trim().slice(0, 120) }) + ")");
+  check(staleShown && (await outN(1, "7")), "Run stale, the person's click as the first Run after a widening, starts a new interpreter that may change files: the writer and its reader run (" + JSON.stringify({ shown: staleShown, out0: (await out(0)).trim().slice(0, 120), out1: (await out(1)).trim().slice(0, 120) }) + ")");
 } catch (e) {
   check(false, "threw: " + (e?.stack ?? e));
 } finally {
