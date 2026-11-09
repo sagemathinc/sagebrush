@@ -79,7 +79,7 @@ __all__ = [
 ]
 
 # (Sage's table(): its module loaded at its first use, not at Sage mode's start, which is compiled ahead: _sage_lazy)
-from _sage_lazy import lazy_import as _lazy_import
+from _sage_lazy import lazy_import as _lazy_import, LazyImport as _LazyImport
 _lazy_import("_sage_table", "table", globals())
 # (Sage's cached_function and cached_method, on first use: _sage_cached)
 _lazy_import("_sage_cached", ["cached_function", "cached_method"], globals())
@@ -2355,6 +2355,10 @@ def prime_pi(x):
     return len(prime_range(int(x) + 1))
 
 
+# (Sage's prime_pi.plot, from a lazy module)
+prime_pi.plot = _LazyImport("_sage_numfun", "prime_pi_plot", {})
+
+
 # ------------------------------------------------------------------ factoring
 
 def _rho(n):
@@ -2600,10 +2604,16 @@ def moebius(n):
         sage: [moebius(n) for n in range(1, 13)]
         [1, -1, -1, 0, -1, 1, -1, 0, 0, 1, -1, 0]
     """
+    if n == 0:
+        return 0
     f = factor(n)
     if any(e > 1 for _, e in f):
         return 0
     return -1 if len(f) % 2 else 1
+
+
+# (Sage's moebius.range, from a lazy module)
+moebius.range = _LazyImport("_sage_numfun", "moebius_range", {})
 
 
 def is_prime_power(n):
