@@ -1,0 +1,46 @@
+{
+ "version": "1.3.0",
+ "archive": {
+  "url": "https://files.pythonhosted.org/packages/e0/47/dd32fa426cc72114383ac549964eecb20ecfd886d1e5ccf5340b55b02f57/mpmath-1.3.0.tar.gz",
+  "sha256": "7a28eb2a9774d00c7bc92411c19a89209d5da7c4c9a9e227be8330a23a25b91f",
+  "root": "mpmath-1.3.0/mpmath/tests"
+ },
+ "files": {
+  "test_basic_ops.py": "76c07c0d11be1ab3f305a67e6c86ae61a6da7aa5db7ea068f5220ff41a9c4d2b",
+  "test_bitwise.py": "fa72d886041b843cdadd240ceb706192d627b4009a82a318c7d89bddd3e74ca3",
+  "test_calculus.py": "e28c6d35f3293b844b2e83b3aefeebf7e87c05ca9f06c24813a529b077bb738c",
+  "test_compatibility.py": "feddc0499de385f00c9cdd6fa165fb3c33480f39fedcfa24909188753d71ef2d",
+  "test_convert.py": "24f7037132485a1e69ac8c63c790ccd5a35682a954a05d8aa47bc080adee1e2e",
+  "test_diff.py": "aa3885f0dc50f2fb9eb99e591c63d0fa48dc8ff23b261fdf11d16d680f03cc42",
+  "test_division.py": "ea551e65f99a056befb3376a9562cc1e05cf8d5b31bd6d56669778fa31560a95",
+  "test_eigen.py": "da69ea5404c66ec264bd25473e98ad7c093cf35b7015f6f72ec3b75e2915f47b",
+  "test_eigen_symmetric.py": "bf456298289c214da8c0048330168ffadfb7d2eabea5772c825b7de4a06d34ee",
+  "test_elliptic.py": "2a38b0abd05be8dfce3b3cd67b0190d4cfcf31aeef46ce36574b7dd20968671a",
+  "test_fp.py": "009a34153c87e01b949d4b2fd7be8b0fde7aa26df4f0a1989ddcbe6f9e0a1b13",
+  "test_functions.py": "6f8ed5cb07689a8397e8a98c9b3f7e8afd88a95232770292b94c36a569451eb6",
+  "test_functions2.py": "be5c3645684bd684dc89f9ce303c756bf63337de9480d34813949378a46fd476",
+  "test_gammazeta.py": "001df83b40d5ec09447fd6786eb9c269d790539fae030856470e4565ab3ae430",
+  "test_hp.py": "ea170436ee937b69253c489349e2c12113e51fb3c00e527014a6f1f31a673a18",
+  "test_identify.py": "9465083dfac1da9693834705528eb81a633317bec5f60b3d1508d7ee0c461d5f",
+  "test_interval.py": "4e361dedaf5c6ba8912622e3c34ea2b0b7994ee1a81803e68257836747187c9d",
+  "test_levin.py": "3fc335d72575763fe075236fe71bb00b316217ce90c910ed3cc8d4472eb0276f",
+  "test_linalg.py": "9a22849f007c8b0595d77862d5b175720de1801e2b4ca391d1fbc355f5a65ddb",
+  "test_matrices.py": "ab2038325d82bcdbd6d37e25cc1d351bac1580dafb52b819aa1db090c5eda733",
+  "test_mpmath.py": "2d5c8951ea1f89ac56fb32ca595042cf9f4bf5442c8e55b44ecf7fa01884bffe",
+  "test_ode.py": "cc0c5ec411f87e798534ee1bbc41dbba0d4d2560b9cea7c56950e56228e8c246",
+  "test_pickle.py": "63c08a9832c5b091d4a86f020da070e6296b3cfe184f5c628d576e2e943b5c51",
+  "test_power.py": "b33fcad364a6371a5ae8a6f5b892cdfcde2d5d3246750ffffef3d1b2110dec69",
+  "test_quad.py": "e3d2ed7edd2f67f91d28b2f9b3e2a3f81cc05681792cf54451e354cdd3a48212",
+  "test_rootfinding.py": "ba641e80468a1e660e125e63132a03f952ca0ed5ec4c92647a9284af8734742d",
+  "test_special.py": "61b308a0c224244bef2982334b4097b612451b4fbe8faba7efeb5c13a6fb14f3",
+  "test_str.py": "d16b060fd84c3d18bccdcb98300f42bb698ebd088216c90fc0cb0c7fc9410cae",
+  "test_summation.py": "7dd365b2f4553ac6d6c5b865c832c36843b64bc91326b44c288bc1e7e68d722d",
+  "test_trig.py": "ccfb642049d9693871716babe24ec15fcfb62668fe0213b5f754afbfb00d6145",
+  "test_visualization.py": "d4faad928531f96b0a6204d18aee68f6905cf3993085fd65cd4d9ea1b0d00893"
+ },
+ "note": "Upstream's test suite from the PyPI sdist, copied unchanged: every test_*.py. runtests.py (the runner), torture.py and extratest_*.py (long manual checks, not collected by pytest) are left out.",
+ "gate": {
+  "runner": "bench/mpmath/compare.py",
+  "reason": "The same upstream suite already runs on every PR in CI's numeric group, in parallel (bench/mpmath/compare.py over mpmath 1.3.0's own tests); a second, serial run here would add 7+ minutes and no coverage (@sagebrush's ruling, Nov 9). test/pypi-mpmath.test.ts checks that the two can't drift apart."
+ }
+}

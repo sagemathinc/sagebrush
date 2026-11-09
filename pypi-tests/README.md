@@ -48,6 +48,16 @@ excludes exactly those names under both CPython and Sagebrush and refuses stale,
 duplicate, malformed or unexplained entries. Exclusions therefore do not count
 as parity results and cannot hide a Sagebrush-only failure.
 
+**One exception: mpmath.** Its suite (341 tests) already runs on every PR in
+CI's numeric group, in parallel, through `bench/mpmath/compare.py`, which is its
+gate. Running it here as well, serially, would add 7+ minutes and no coverage.
+So `pypi-tests/mpmath/` is the pinned listing (SOURCE.json, expected.out and
+`--refresh`), and its SOURCE.json names that gate (`"gate"`). The default
+`run.py` checks its pinned files and skips its suite;
+`python3 pypi-tests/run.py mpmath` runs it here. `test/pypi-mpmath.test.ts`
+fails if CI stops running compare.py over the same release, or if the files
+diverge.
+
 ## Known differences
 
 Sometimes a test cannot pass anywhere but CPython, whatever Sagebrush does.

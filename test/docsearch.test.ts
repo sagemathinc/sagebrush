@@ -88,3 +88,31 @@ test("the capability map has every language, and each area's sample search finds
   const r = spawnSync(process.execPath, [cli, f], { encoding: "utf8", cwd: dir });
   assert.equal(r.stdout.trim(), "bad []", r.stdout + r.stderr);
 });
+
+// On an equal score, a catalog entry (reviewed, with its examples) ranks before an auto-extracted one (catalog false:
+// a docstring's summary, a curated PyPI package's), then the shorter name; no score changes (@sagebrush's ruling, Nov 9,
+// when mpmath's functions joined the Python index). Both mirrors: lib/_pyjs_docsearch.py and web/docsearch.ts.
+test("docsearch: on an equal score, a catalog entry before an auto-extracted one, then the shorter name (both mirrors)", async () => {
+  const entries = [
+    { name: "pkg.res", summary: "the residual of a linear system", doc: "", open_problem: false, catalog: false },
+    { name: "numpy.linalg.solve", summary: "the solution of a linear system", doc: "", open_problem: false },
+    { name: "zz.auto", summary: "a linear system", doc: "", open_problem: false, catalog: false },
+    { name: "aa.cat", summary: "a linear system again", doc: "", open_problem: false },
+  ];
+  const want = ["aa.cat", "numpy.linalg.solve", "pkg.res", "zz.auto"];
+  // (the Python mirror, as sagebrush --search and the MCP server use it)
+  const py = run("-c", `import _pyjs_docsearch as d, json\nE = json.loads(${JSON.stringify(JSON.stringify(entries))})\nfor e in E: e["catalog"] = e.get("catalog", None) if "catalog" in e else None\nE = [{k: v for k, v in e.items() if not (k == "catalog" and v is None)} for e in E]\nd.index_for = lambda mode=None: E\nprint(json.dumps([e["name"] for s, e in d.search("linear system", mode="python")]))`);
+  assert.equal(py.status, 0, py.stderr);
+  assert.deepEqual(JSON.parse(py.stdout), want);
+  // (the web mirror, web/docsearch.ts, which imports nothing: its types stripped by Node, and imported as it is)
+  const { stripTypeScriptTypes } = (await import("node:module")) as any;
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(join(__dirname, "..", "..", "web", "docsearch.ts"), "utf8");
+  const js: string = stripTypeScriptTypes(src);
+  // (a real ESM import: tsc's CommonJS output would make import() a require())
+  const esm = new Function("u", "return import(u)") as (u: string) => Promise<any>;
+  const web = await esm("data:text/javascript;base64," + Buffer.from(js).toString("base64"));
+  const idx = web.prepareIndex(entries, "python");
+  assert.deepEqual(web.searchIndex(idx, "linear system").map((e: any) => e.name), want);
+  assert.deepEqual(web.searchIndexes([["python", idx]], "linear system").map((e: any) => e.name), want);
+});

@@ -26,6 +26,8 @@ export interface DocEntry {
   kind?: string;
   source?: string;
   open_problem?: boolean;
+  /** false: auto-extracted (a docstring's summary, a curated PyPI package's); absent: a catalog entry */
+  catalog?: boolean;
   examples?: number | { code: string; setup?: string }[];
   lang: string;
   _name: string;
@@ -63,13 +65,17 @@ export function docScore(e: DocEntry, words: string[], phrase: string): number {
   return total;
 }
 
+/** On an equal score, a catalog entry (reviewed, with its examples) before an auto-extracted one (`catalog: false`: a
+ * docstring's summary or a curated PyPI package's), then the shorter name. Mirrored in lib/_pyjs_docsearch.py. */
+const autoRank = (e: DocEntry): number => (e.catalog === false ? 1 : 0);
+
 /** The entries of `idx` matching `query`, best first, at most `limit`. */
 export function searchIndex(idx: DocEntry[], query: string, limit = 20): DocEntry[] {
   const words = docWords(query);
   if (!words.length) return [];
   const phrase = query.trim().toLowerCase();
   return idx.map((e) => [docScore(e, words, phrase), e] as const).filter(([s]) => s > 0)
-    .sort((a, b) => b[0] - a[0] || a[1].name.length - b[1].name.length || (a[1].name < b[1].name ? -1 : 1))
+    .sort((a, b) => b[0] - a[0] || autoRank(a[1]) - autoRank(b[1]) || a[1].name.length - b[1].name.length || (a[1].name < b[1].name ? -1 : 1))
     .slice(0, limit).map(([, e]) => e);
 }
 
@@ -90,7 +96,7 @@ export function searchIndexes(indexes: [string, DocEntry[] | null][], query: str
       if (s > 0) hits.push([s, i, e]);
     }
   });
-  return hits.sort((a, b) => b[0] - a[0] || a[1] - b[1] || a[2].name.length - b[2].name.length || (a[2].name < b[2].name ? -1 : 1))
+  return hits.sort((a, b) => b[0] - a[0] || a[1] - b[1] || autoRank(a[2]) - autoRank(b[2]) || a[2].name.length - b[2].name.length || (a[2].name < b[2].name ? -1 : 1))
     .slice(0, limit).map(([, , e]) => e);
 }
 
