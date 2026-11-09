@@ -23,7 +23,7 @@ const PINNED = {
   limits: "{200, 4096, {MaxIterations \u29f4 65535}}",
 };
 /** The corpus's floor: S0's visible cases plus S1's held-out file. */
-const MIN_CASES = 445;
+const MIN_CASES = 457;
 
 const sha256 = (p: string) => createHash("sha256").update(readFileSync(p)).digest("hex");
 
@@ -202,7 +202,7 @@ test("control: a corpus below its floor is caught", () => {
     }
   }
   provEdit(b, (j) => { for (const f of gone) delete j.files[f]; });
-  has(checkCorpus(b), /fewer than its floor of 229/);
+  has(checkCorpus(b), new RegExp(`fewer than its floor of ${MIN_CASES}`));
 });
 
 test("control: a changed oracle driver or recorder is caught, each by its own hash", () => {
