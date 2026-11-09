@@ -52,10 +52,10 @@ export function interactsOf(list: unknown) {
 const NOTE = "Interactive in Sagebrush";
 const CSS_ID = "sb-tex-interact-style";
 const CSS = `
-.tex-page .sageinteract { border: 1px solid #c8c8d0; border-radius: 4px; padding: .3em .6em; margin: .4em 0; }
-.tex-page .sageinteract .si-c { display: inline-flex; align-items: center; gap: .3em; margin-right: 1.2em; }
-.tex-page .sageinteract .si-out { margin: .3em 0; }
-.tex-page .si-note { font-size: .7em; color: #777; }
+.tex-page .sageinteract{border:1px solid #c8c8d0;border-radius:4px;padding:.3em .6em;margin:.4em 0}
+.tex-page .sageinteract .si-c{display:inline-flex;align-items:center;gap:.3em;margin-right:1.2em}
+.tex-page .sageinteract .si-out{margin:.3em 0}
+.tex-page .si-note{font-size:.7em;color:#777}
 `;
 const ESC: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 const esc = (s: unknown) => String(s).replace(/[&<>"']/g, (c) => ESC[c]);
@@ -131,7 +131,7 @@ export function draw(root: ParentNode, s: InteractSession | null = null, ids: Ru
 // delivery. A new Run ends the last one as it starts (page.ts), before it takes the session's turn. Present shows its
 // copy with the controls disabled (present.ts): its values and output follow the preview's.
 /** The part of the LaTeX session's kernel (WorkerKernel) live interacts use. */
-export interface InteractKernel { generation: number; interact(iid: number, values: Record<string, unknown>, sink: object): void; targetSink: (t: number) => object | null }
+export interface InteractKernel { generation: number; on?(e: string, f: () => void): unknown; interact(iid: number, values: Record<string, unknown>, sink: object): void; targetSink: (t: number) => object | null }
 /** The LaTeX session (run-core sessionOf): its kernel once started, and its turn. */
 export interface InteractSession { kernel: InteractKernel | null; serial: (fn: () => Promise<void>) => Promise<unknown> }
 export type RunIds = Set<number> & { gen?: number; over?: number };
@@ -146,7 +146,7 @@ export let sent = 0;
 // (a state still the one of the Run live now, its interpreter still the Run's)
 const ours = (k: InteractKernel, iid: number, st: State) => states.get(iid) === st && !run?.over && run?.gen === k.generation;
 // (a widget whose Run is over: as drawn, saying to run the code first)
-function dead(w: HTMLElement) { delete w.dataset.live; w.title = NOT_LIVE; for (const el of Array.from(w.querySelectorAll<HTMLInputElement>("input, select, button"))) el.disabled = true; }
+function dead(w: HTMLElement) { delete w.dataset.live; w.title = NOT_LIVE; for (const el of Array.from(w.querySelectorAll<HTMLInputElement>("input,select,button"))) el.disabled = true; }
 // (a shown value, as the runtime's display gives it: an SVG or PNG image, else its text; never HTML)
 function bundleHtml(b: any): string {
   const svg = b?.["image/svg+xml"];
@@ -220,7 +220,8 @@ function sinkFor(iid: number) {
  * the others say to run the code first. Copies drawn again get the values and output kept for their interact. */
 export function live(root: ParentNode, s: InteractSession | null, ids: RunIds): number {
   const k = s?.kernel ?? null;
-  if (k && hooked !== k) { hooked = k; k.targetSink = (t: number) => sinkFor(+t); }
+  // (the interpreter started again: every live widget shown dead at once (agents-ui's n2))
+  if (k && hooked !== k) { hooked = k; k.targetSink = (t: number) => sinkFor(+t); k.on?.("ready", () => document.querySelectorAll<HTMLElement>(".sageinteract[data-live]").forEach(dead)); }
   if (ids !== run) { run = ids; states.clear(); }
   let n = 0;
   for (const w of Array.from(root.querySelectorAll<HTMLElement>(".sageinteract[data-iid]"))) {
@@ -230,8 +231,8 @@ export function live(root: ParentNode, s: InteractSession | null, ids: RunIds): 
     const st = states.get(iid)!;
     if (!wired.has(w)) {
       wired.add(w); w.dataset.live = "1"; w.removeAttribute("title");
-      for (const el of Array.from(w.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>("input, select, button"))) el.disabled = false;
-      const changed = () => { if (!ours(k, iid, st)) return dead(w); st.values = read(w); for (const c of copies(iid)) if (c !== w) apply(c, st.values); apply(w, st.values); send(s, k, iid, st); };
+      for (const el of Array.from(w.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>("input,select,button"))) el.disabled = false;
+      const changed = () => { if (!ours(k, iid, st)) return apply(w, st.values), dead(w); st.values = read(w); for (const c of copies(iid)) if (c !== w) apply(c, st.values); apply(w, st.values); send(s, k, iid, st); };
       // (text runs on change (Enter, or leaving it), as the notebook's (agents-ui's A1); the others as they move)
       const text = (e: Event) => (e.target as HTMLInputElement).type === "text";
       w.addEventListener("input", (e) => { if (!text(e)) changed(); });

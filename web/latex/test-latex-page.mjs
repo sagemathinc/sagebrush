@@ -3390,7 +3390,8 @@ The end.
         const box = document.createElement("div"); box.className = "tex-page"; document.body.appendChild(box);
         const html = (v) => m.interactsHtml([{ id: 901, name: "f", controls: [{ kind: "slider", name: "k", label: "k", min: 0, max: 9, step: 1, value: v }], out: "", shows: [] }]);
         const calls = [], held = [], tick = () => new Promise((r) => setTimeout(r, 0));
-        const k = { generation: 1, targetSink: () => null, interact(iid, values, sink) { calls.push(iid + ":" + (values.k ?? values.t)); held.push(sink); } };
+        const readyFns = [];
+        const k = { generation: 1, targetSink: () => null, on(e, f) { if (e === "ready") readyFns.push(f); }, interact(iid, values, sink) { calls.push(iid + ":" + (values.k ?? values.t)); held.push(sink); } };
         let gate = null;
         const s = { kernel: k, serial: (fn) => (gate ?? Promise.resolve()).then(fn) };
         const w = () => box.querySelector(".sageinteract"), slider = () => w().querySelector("input[type=range]");
@@ -3410,7 +3411,7 @@ The end.
         // the interpreter started again (a new generation: its interacts gone): B's widget no longer sends, and is shown dead
         await change(3); k.generation = 2; r.sinkRestart = k.targetSink(901) === null; held.shift()?.done(); await tick();
         await change(4);
-        r.restart = { sent: calls.join(), dis: slider().disabled, title: w().title };
+        r.restart = { sent: calls.join(), dis: slider().disabled, title: w().title, value: slider().value };
         // a Run C, then the document left (its ids marked over) while a request runs with a change waiting: nothing more sent
         k.generation = 2; box.innerHTML = html(2); const C = runOf(2); m.live(box, s, C);
         await change(7); await change(8); C.over = 1; r.sinkOver = k.targetSink(901) === null; held.shift()?.done(); await tick(); await tick();
@@ -3430,17 +3431,27 @@ The end.
         r.typed = calls.length - n0;
         tb.value = "sin"; tb.dispatchEvent(new Event("change", { bubbles: true })); await tick(); await tick();
         r.entered = calls.slice(n0).join();
+        // (agents-ui's n2: the interpreter started again (its "ready"): every live widget shown dead at once, untouched)
+        box.innerHTML = html(2); const F = runOf(2); m.live(box, s, F);
+        r.liveF = !slider().disabled; k.generation = 3; readyFns.forEach((f) => f());
+        r.readyDead = { dis: slider().disabled, title: w().title, hooks: readyFns.length };
+        // (a widget whose id isn't among its Run's (an older result kept past a stopped Run, say): never live)
+        k.generation = 3; box.innerHTML = html(2).replace('data-iid="901"', 'data-iid="902"'); m.live(box, s, runOf(3));
+        r.otherId = { dis: slider().disabled, title: w().title };
         box.remove();
         return r;
       })()`);
       check(own?.sentA === "901:5" && own.outA === "five\n" && own.freshB?.value === "2" && own.freshB.out === null && own.freshB.sink && own.afterA === "901:5",
         "@interact live: a new Run reusing an id: its widget fresh (no values or output of the old one's); the old request's output and its waiting change dropped", own);
-      check(own?.sinkRestart && own?.restart?.sent === "901:5,901:3" && own.restart.dis && own.restart.title === "Run the code (Shift+Enter) to use these controls",
-        "@interact live: the interpreter started again: output for the request running dropped; a change sends nothing, and the widget is shown dead, saying to run the code", own?.restart);
+      check(own?.sinkRestart && own?.restart?.sent === "901:5,901:3" && own.restart.value === "3" && own.restart.dis && own.restart.title === "Run the code (Shift+Enter) to use these controls",
+        "@interact live: the interpreter started again: output for the request running dropped; a change sends nothing, its control put back (3), and the widget shown dead, saying to run the code", own?.restart);
       check(own?.sinkOver && own?.left === "901:5,901:3,901:7", "@interact live: the document left while a request runs: its output dropped, its waiting change never sent", own);
       check(own?.waiting === "901:5,901:3,901:7" && own.turned === "901:5,901:3,901:7,901:1" && own.overWait === own.turned,
         "@interact live: a request waits for the session's turn (as a Run does), and isn't sent if its Run ended meanwhile", own);
       check(own?.typed === 0 && own.entered === "901:sin", "@interact live: a text control runs its function on change (Enter or leaving it), not on each key", own);
+      check(own?.liveF && own.readyDead?.dis && own.readyDead.title === "Run the code (Shift+Enter) to use these controls" && own.readyDead.hooks === 1,
+        "@interact live: the interpreter started again (its ready): every live widget shown dead at once, before any touch", own?.readyDead);
+      check(own?.otherId?.dis && own.otherId.title === "Run the code (Shift+Enter) to use these controls", "@interact live: a widget whose id isn't one its Run made is never live", own?.otherId);
     }
     // (Codex friction P5, the editor's half: a helper .py beside the .tex, imported by the document's code as by real
     //  SageTeX run in the document's folder. The .tex's folder is given to Sage, read-only, at each Run, as it is then:
