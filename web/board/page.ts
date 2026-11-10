@@ -1592,7 +1592,8 @@ if (ws && !file && !(window as any).__TAURI__) {
         // (H9: the folder and commands this workspace's Terminal kept, given back, and kept again as commands end)
         const keep = await termKeep(ws);
         if (term) return term.toggle();
-        term = openTerminal({ ws, S, base: "../", open, here, tab: TAB, keep });
+        term = openTerminal({ ws, S, base: "../", open, here, tab: TAB });
+        keep.attach(term);
         term.onEnd = () => { term = null; (window as any).__sbTerm = null; if (termEnd) termEnd.hidden = true; void keep.clear(); };
         if (termEnd) termEnd.hidden = false;
         if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) (window as any).__sbTerm = term; // (the tests' handle, on a loopback host only: web/shell/test-panel-page.mjs)

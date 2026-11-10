@@ -3043,7 +3043,8 @@ $("#boardbtn").onclick = () => toBoard("/board/?recent=" + encodeURIComponent(nb
       // (H9: the folder and commands this workspace's Terminal kept, given back, and kept again as commands end)
       const keep = await termKeep(w);
       if (term) return term.toggle();
-      term = shellTerm = openTerminal({ ws: w, S, open: openPath, here, tab: TAB, keep });
+      term = shellTerm = openTerminal({ ws: w, S, open: openPath, here, tab: TAB });
+      keep.attach(term);
       term.onEnd = () => { term = shellTerm = null; window.__sbTerm = null; termEnd.hidden = true; void keep.clear(); bottomRoom(); };
       termEnd.hidden = false;
       term.root.addEventListener("pointerdown", () => panelToFront(term?.root));

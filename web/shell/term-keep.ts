@@ -1,6 +1,7 @@
 // The pages' side of the Terminal's kept folder and commands (web/workspace/term-kept.ts; William's H9, step 2): what
 // a Terminal opens with, the line that says what came back (board's words), its writes as commands end, and End
-// session's clear.  In the page, not the Terminal's chunk (terminal.js), which only takes them: kept, notice, onKeep.
+// session's clear.  All of it in the page, none in the Terminal's chunk (terminal.js, at its size ceiling): attach()
+// works through the panel as it is (its editor's history, its setCwd, its note and status lines).
 import type { Workspace } from "../workspace/api";
 
 const n = (k: number) => `${k} command${k === 1 ? "" : "s"}`;
@@ -29,6 +30,16 @@ export async function termKeep(ws: Workspace) {
       clearTimeout(timer);
       const copy = [...history];
       timer = setTimeout(() => void ws.putTermKept(gen, c, copy).then((ok) => { if (!ok) stale = true; }, () => {}), 500);
+    },
+    /** On a Terminal just opened (web/shell/panel.ts's TerminalPanel): the kept commands in its history, its folder,
+     *  the line said; then, each time a command ends (its status line written), the folder and commands kept */
+    attach(term: any) {
+      for (const c of k.history) term.editor.history.push(c);
+      term.editor.reset(); // (↑ from the newest kept)
+      if (cwd !== "/") term.setCwd(cwd);
+      const q = (c: string) => term.root.querySelector(c) as HTMLElement | null, note = q(".sb-term-note"), status = q(".sb-term-status");
+      if (notice && note) { note.textContent = notice; note.hidden = false; }
+      if (status) new MutationObserver(() => this.onKeep(term.cwd, term.editor.history.entries)).observe(status, { childList: true, characterData: true, subtree: true });
     },
     /** End session: what was kept cleared; a keep still waiting is dropped */
     async clear() {

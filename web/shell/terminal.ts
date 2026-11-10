@@ -4,7 +4,7 @@
 import type { Workspace } from "../workspace/api";
 import { ShellHost } from "./host.ts";
 import { startShell } from "./loader.ts";
-import { TerminalPanel, type TerminalOptions } from "./panel.ts";
+import { TerminalPanel } from "./panel.ts";
 import { terminalCommands, type PageHooks } from "./panel-commands.ts";
 import { panelTab } from "./panel-tab.ts";
 import { gatherPresence, type Proc } from "./presence.ts";
@@ -21,8 +21,6 @@ export interface OpenTerminal {
   tab: string;
   /** where the site's pkgset/ and pkg/ are, relative to this page (default "./"; the board page, under /board/: "../") */
   base?: string;
-  /** H9: the workspace's kept folder and commands, the line saying so, and their keeping (term-keep.ts) */
-  keep?: Pick<TerminalOptions, "kept" | "notice" | "onKeep">;
 }
 
 // (above the prompt in a tab's first terminal: what commands do to the person's files; board's wording, T358-2)
@@ -31,6 +29,6 @@ const INTRO = "Commands here change the files in your workspace right away, as t
 /** A terminal panel on a new ShellHost; ✕ ends its shell too. */
 export function openTerminal(o: OpenTerminal): TerminalPanel {
   const host = new ShellHost(o.ws, async (signal) => (await startShell(o.S, o.base ?? "./", { signal })).shell);
-  const term = new TerminalPanel({ host, label: "bash · " + o.S.slice(0, 8), intro: INTRO, commands: terminalCommands({ open: o.open, ps: () => gatherPresence(o.here, 300, o.tab), tab: o.tab }), tab: panelTab(host), ...o.keep });
+  const term = new TerminalPanel({ host, label: "bash · " + o.S.slice(0, 8), intro: INTRO, commands: terminalCommands({ open: o.open, ps: () => gatherPresence(o.here, 300, o.tab), tab: o.tab }), tab: panelTab(host) });
   return term; // (✕ ends its host's shell itself: TerminalPanel.end)
 }
