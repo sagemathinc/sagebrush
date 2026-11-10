@@ -82,6 +82,8 @@ function finishType(cls: PyType, name: string, bases: PyType[], dict: Map<string
 }
 
 function refreshFlags(cls: PyType) {
+  // (any __slots__ in the MRO: only such a class's attribute reads try the sites' slot cache, getattrMiss)
+  (cls as any).$slotted = cls.$mro.some((c) => c.$dict.has("__slots__"));
   cls.$customGet = cls.$mro.some((c) => c !== T.object && (c.$dict.has("__getattribute__") || c === T.type));
   cls.$customSet = cls.$mro.some((c) => c !== T.object && (c.$dict.has("__setattr__") || c.$dict.has("__delattr__")));
 }
@@ -1105,13 +1107,6 @@ export function setSlotMemberProto(p: any): void {
 }
 
 function getattrMiss(o: any, name: string, S: any): any {
-  // (a __slots__ member's value, cached for the site below, outside the stub so that its own fast paths keep their
-  // shape: the instance's own runtime key, the own-property check kept when hardened; unset, the slow path)
-  const mc = S.mc;
-  if (mc !== null && mc !== undefined && o != null && o.$cls === mc && mc.$ver === S.mv) {
-    const t = o[S.mk];
-    if (t !== undefined && (!hardened || hasOwn.call(o, S.mk))) return t;
-  }
   if (isType(o)) {
     // Class attributes that are plain values or functions can be cached
     // on (class, version); descriptors and type's own attributes cannot.
@@ -1126,6 +1121,13 @@ function getattrMiss(o: any, name: string, S: any): any {
   }
   if (o !== null && typeof o === "object" && o.$cls !== undefined) {
     const cls: PyType = o.$cls;
+    // (a __slots__ member's value, cached for the site, outside the stub so that its fast paths keep their shape,
+    // and tried only for a class with __slots__ in its MRO, so that no other read pays for it: the instance's own
+    // runtime key, the own-property check kept when hardened; unset, the slow path)
+    if ((cls as any).$slotted === true && cls === S.mc && cls.$ver === S.mv) {
+      const t = o[S.mk];
+      if (t !== undefined && (!hardened || hasOwn.call(o, S.mk))) return t;
+    }
     if (!cls.$customGet && cls.$ctor !== null) {
       const d = lookupType(cls, name);
       if (d === undefined || !isDataDescriptor(d)) {
@@ -1152,7 +1154,7 @@ function getattrMiss(o: any, name: string, S: any): any {
           S.val = d;
           return d;
         }
-      } else if (d !== null && typeof d === "object" && d[SLOT_MEMBER] === true && Object.getPrototypeOf(d) === slotMemberProto && cls.$mro.includes(d.owner)) {
+      } else if ((cls as any).$slotted === true && d !== null && typeof d === "object" && d[SLOT_MEMBER] === true && Object.getPrototypeOf(d) === slotMemberProto && cls.$mro.includes(d.owner)) {
         // A __slots__ member of the class (member_descriptor is a builtin type: its __get__ never changes): the
         // value is the instance's own property under the member's key. Cached only for an object with its
         // class's own layout, as above; a version bump (a class attribute set over the name) drops it, and an
