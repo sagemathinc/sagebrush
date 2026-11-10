@@ -384,6 +384,45 @@ for (const at of ["cas:5->0", "cas:0->1", "cas:2->3"]) {
   ok(commits === 1 && err instanceof S.ProtocolError, `a zero-length write: committed exactly once; a duplicate continuation while it commits is refused (${commits} commits, ${err?.message})`);
 }
 {
+  // (S8, grader's #976 survivor: the page's own CAS checks the latch. CLOSED stored just before the check, its CANCELLED
+  // not yet (a page-side split): the answer is never published, STATE stays where it was)
+  let page;
+  page = new S.PageChannel(4, async () => ({ json: { ok: 1 } }), (pt) => {
+    if (pt === `pre-cas:${S.ST.WAITING}->${S.ST.READY}`) Atomics.store(new Int32Array(page.control), S.SL.CLOSED, 1);
+  });
+  const c = new Int32Array(page.control);
+  Atomics.store(c, S.SL.STATE, S.ST.WAITING);
+  await page.onMessage({ fsSync: { gen: 4, seq: 1, op: "stat", args: {} } });
+  ok(Atomics.load(c, S.SL.STATE) === S.ST.WAITING, `CLOSED latched just before the page's publishing CAS: nothing published (state ${Atomics.load(c, S.SL.STATE)})`);
+}
+{
+  // idle(): false while a header's handler is awaited, while a reply is retained, while a body is admitted or committed
+  let release, commitRelease;
+  const page = new S.PageChannel(5, (h) => (h.op === "write" ? Promise.resolve({ admit: () => new Promise((res) => (commitRelease = () => res({ json: 1 }))) }) : new Promise((res) => (release = res))));
+  const c = new Int32Array(page.control);
+  const states = [page.idle()];
+  Atomics.store(c, S.SL.STATE, S.ST.WAITING);
+  const served = page.onMessage({ fsSync: { gen: 5, seq: 1, op: "read", args: {} } });
+  states.push(page.idle()); // handler awaited
+  release({ bytes: pattern(MiB + 1) });
+  await served;
+  states.push(page.idle()); // a reply's second window still retained
+  Atomics.store(c, S.SL.STATE, S.ST.WAITING);
+  await page.onMessage({ fsMore: { gen: 5, seq: 1, offset: MiB } });
+  states.push(page.idle()); // the last window published
+  Atomics.store(c, S.SL.STATE, S.ST.WAITING);
+  await page.onMessage({ fsSync: { gen: 5, seq: 2, op: "write", args: {}, length: 4 } });
+  states.push(page.idle()); // admitted, the body not yet in
+  Atomics.store(c, S.SL.SEQ, 2); Atomics.store(c, S.SL.OFFSET, 0); Atomics.store(c, S.SL.WLEN, 4); Atomics.store(c, S.SL.TOTAL, 4);
+  Atomics.store(c, S.SL.STATE, S.ST.BODY);
+  const committing = page.onMessage({ fsMore: { gen: 5, seq: 2, offset: 0 } });
+  states.push(page.idle()); // committing
+  commitRelease();
+  await committing;
+  states.push(page.idle());
+  ok(JSON.stringify(states) === JSON.stringify([true, false, false, true, false, false, true]), `idle(): only with nothing awaited, retained, admitted or committing (${states})`);
+}
+{
   // in the body of a write: nothing committed
   let committed = false, n = 0;
   const r = await session(async () => ({ admit: async () => ((committed = true), { json: 1 }) }), [{ op: "write", args: {}, bodyLength: 3 * MiB }], {

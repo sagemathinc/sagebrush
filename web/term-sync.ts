@@ -220,6 +220,8 @@ export class PageChannel {
   // the request being served: its seq, and what this side expects next
   private cur: null | { seq: number; reply?: { status: number; bytes: Uint8Array; next: number }; body?: { buf: Uint8Array; next: number; commit: (b: Uint8Array) => Promise<any> }; committing?: true } = null;
   private lastSeq = 0;
+  // (a header's handler is being awaited)
+  private serving = false;
   constructor(readonly gen: number, private handler: Handler, private hook?: (point: string) => void) {
     this.control = new SharedArrayBuffer(CONTROL_BYTES);
     this.data = new SharedArrayBuffer(WINDOW);
@@ -239,6 +241,8 @@ export class PageChannel {
   }
   // (a page CAS: a failure by cancellation is dropped; any other is the worker breaking the protocol)
   private cas(from: number, to: number) {
+    // (tests: CLOSED latched just before the check, its CANCELLED not yet stored)
+    this.hook?.(`pre-cas:${from}->${to}`);
     if (this.closed()) return false;
     // (tests: a Stop exactly between the check and the publication)
     this.hook?.(`cas:${from}->${to}`);
@@ -282,7 +286,13 @@ export class PageChannel {
       if (!this.owns(ST.WAITING)) throw new ProtocolError("a request header while the channel isn't waiting");
       this.lastSeq = seq;
       this.cur = { seq };
-      const handled = await this.handler({ op, args, ...(length === undefined ? {} : { length }) });
+      let handled: Handled;
+      this.serving = true;
+      try {
+        handled = await this.handler({ op, args, ...(length === undefined ? {} : { length }) });
+      } finally {
+        this.serving = false;
+      }
       if (this.closed() || this.cur?.seq !== seq) return;
       if ("admit" in handled) {
         if (length === undefined) throw new ProtocolError("an admission for a request without a body");
@@ -351,6 +361,11 @@ export class PageChannel {
     if (!cur.reply) return;
     cur.reply.next = next;
     if (next >= cur.reply.bytes.length) cur.reply = undefined;
+  }
+  /** Nothing in flight: no header's handler awaited, no reply retained, no body admitted or being committed.  The page
+   * accepts a command's end only then (an end while a request is held is the worker breaking the protocol). */
+  idle(): boolean {
+    return !this.serving && !this.cur?.reply && !this.cur?.body && !this.cur?.committing;
   }
   /** (tests) whether a reply is still retained, and its size */
   retained(): number {
