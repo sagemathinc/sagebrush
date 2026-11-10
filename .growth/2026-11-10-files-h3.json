@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "Files (William's H3): the file browser scrolls its list during a drag near the list's edges, and its ⋯ menu gains Move to… (the folders an item or the selection can go into, moved as a drop moves them). The board page the CLI embeds (frame/board/index.html.gz) carries the file browser: cli/pyjs.cjs +1,388 (base64 of that page's gzip); no other artifact changes. The marker is the measured growth + 64. Measured with bun 1.4.4 / node 24.21.0 (size-record.sh) on #968's head 52791775 (probe fdfde254) vs head c2133da7; this marker's own commit changes no artifact.",
+ "bytes": {
+  "cli/pyjs.cjs": 1452
+ }
+}
