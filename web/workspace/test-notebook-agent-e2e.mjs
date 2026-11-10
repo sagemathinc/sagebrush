@@ -144,6 +144,8 @@ try {
   const folder = path.slice(0, path.lastIndexOf("/")) || "/";
   await ev(`(() => {
     const b = document.querySelector(".sbag-box");
+    // (Everything is ticked when the dialog opens (chat plan PR 3): a folder is chosen by unticking it first)
+    if (${JSON.stringify(folder)} !== "/") { const all = b.querySelector(".folders input"); if (all.checked) all.click(); }
     const pick = ${JSON.stringify(folder)} === "/" ? b.querySelector(".folders input") : b.querySelector('.folders input[value=${JSON.stringify(folder)}]');
     if (!pick.checked) pick.click();
     const write = [...b.querySelectorAll("input[type=checkbox]")].find((c) => !c.closest(".folders"));

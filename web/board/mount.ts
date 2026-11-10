@@ -1022,6 +1022,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     // (a page of the old document still being drawn: not shown over this one)
     pageGen++;
     closeTimeTravel(false);
+    // (tests only, on a loopback page: the first load held until the test lets it go, so it can act meanwhile)
+    const held = loads === 1 && /^(127\.0\.0\.1|localhost)$/.test(globalThis.location?.hostname ?? "") ? (globalThis as any).__sbTestHoldLoad : undefined;
+    if (held) { (globalThis as any).__sbTestLoadHeld = true; await held; }
     if (!(await show(d))) return;
     if (boardHistory) remember();
     at = -1;
@@ -1029,8 +1032,11 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     step(n && pageView(d, pageIx).steps?.length ? n - 1 : -1, true);
     // (a board the page opens with nothing in it, a new one: all there is to do
     // is write in it, so in Edit, William; a document loaded into the page
-    // later, an agent's or Open…'s, leaves Edit as it is)
-    if (loads === 1 && host.editBlank !== false && !editor.on && !editBtn.hidden && Array.from({ length: pageCount(d) }, (_, i) => pageView(d, i).nodes ?? []).every((ns) => !ns.length)) editBtn.click();
+    // later, an agent's or Open…'s, leaves Edit as it is.  By the button's own
+    // handler, not a click: a click bubbles to the window, which closes the
+    // menus, so File or ⋯ opened while the board loaded would shut: board's
+    // root cause of the "⋯ opens its menu" flake, on #957)
+    if (loads === 1 && host.editBlank !== false && !editor.on && !editBtn.hidden && Array.from({ length: pageCount(d) }, (_, i) => pageView(d, i).nodes ?? []).every((ns) => !ns.length)) toggle(true);
     if (!findBar.hidden && findQ.value) findNow();
     refitAfterRun().catch(fail);
   }

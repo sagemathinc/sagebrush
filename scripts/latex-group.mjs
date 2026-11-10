@@ -45,7 +45,9 @@ export const LATEX_LAZY_CAPS = {
   //  an agent (the Agent button, a ?pair= link, a remembered one). 44 KiB / 15.5 KiB: @sagebrush ruling 2026-11-04: A12 +
   //  A14 pairing growth (30.3K -> 43.6K); split notebook-edit and reload/restore behind options with the git-proto
   //  pairing work, then return to 40/14)
-  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 44 * 1024, gzip: 15.5 * 1024 },
+  // (45,952 / 16,000: daybreak2's amendment for #957 r3, Nov 10 2026 (from 44 / 15.5 KiB): the grant's id, notebook.edit's
+  //  hold and the Everything default, which every page's pairing carries; r3 measured 45,870 / 15,879, master 44,935 / 15,593)
+  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 45952, gzip: 16000 },
   // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
   TOOLS: { label: "the LaTeX agent tools' chunk", raw: 16 * 1024, gzip: 6 * 1024 },
   // (the presenter: web/latex/present.ts with overlay.ts, fetched only when Present is pressed)
