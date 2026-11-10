@@ -362,7 +362,7 @@ function admitOf(a: unknown): ((c: AdmitCheck) => void) | undefined {
   return a as (c: AdmitCheck) => void;
 }
 /** makeBranchRoot's refusal by the grant, thrown so that its transaction aborts (the root folder with it). */
-const ROOT_REFUSED = Symbol("the grant changed");
+const ROOT_REFUSED = Symbol("the grant changed"), PUBLISH_REFUSED = Symbol("the grant changed");
 /** The longest the workspace's lock is held for an agent's edit (holdChange) before it is let go regardless. */
 const HOLD_MS = 5_000;
 /** Tests' hooks inside the branch's transactions (each may throw, as a tab closed there would: nothing of that
@@ -2539,14 +2539,14 @@ export class Workspace {
         if (recs.size >= BRANCH_LIMITS.branches) return { refused: "branches" };
         if (!(charge.entries <= BRANCH_LIMITS.entries)) return { refused: "entries" };
         if (!(charge.bytes <= BRANCH_LIMITS.bytes)) return { refused: "bytes" };
+        BRANCH_HOOK.atCheck?.("root");
         await this.folders(tx, q, ops);
         const root = (await ev.get(q))!;
         const rec: BranchRecord = { name, owner: charge.owner, status: "making", entries: charge.entries, bytes: charge.bytes, made: this.now() };
-        // (the grant last, nothing between it and the record's write: a refusal aborts the folder made above too)
-        BRANCH_HOOK.atCheck?.("root");
-        if (!live()) throw ROOT_REFUSED;
         tx.objectStore("meta").put(rec, BRANCH_KEY + root.fid);
         BRANCH_HOOK.inRoot?.();
+        // (the grant the transaction's last act, after every write and wait: a refusal aborts the folder and record)
+        if (!live()) throw ROOT_REFUSED;
         return { fid: root.fid! };
       }).catch((e) => { if (e === ROOT_REFUSED) return { refused: "grant" as const }; throw e; });
       if ("fid" in out) this.tell({ ops });
@@ -2574,17 +2574,16 @@ export class Workspace {
     }
     await BRANCH_HOOK.afterRead?.(src.path);
     // (in the entry's transaction: the branch still this one, the source still that entry; then, returned to be called
-    //  with nothing between it and the write, the grant)
+    //  as the transaction's last act, after all its writes and waits, the grant)
     const gate = async (tx: IDBTransaction): Promise<() => void> => {
       const ev = await entriesOf(tx);
       const rec = (await req(tx.objectStore("meta").get(BRANCH_KEY + root.fid))) as BranchRecord | undefined, at = await ev.get(BRANCHES + "/" + root.name);
       if (!(rec?.status === "making" && rec.name === root.name && at?.kind === "folder" && at.fid === root.fid)) throw new BranchStop("moved");
       const cur = await ev.get(src.path);
       if (!cur || !sameSource(cur, src) || (cur.kind === "file" && (cur.rev ?? 0) !== src.rev)) throw new BranchStop("changed", src.path);
-      return () => {
-        BRANCH_HOOK.atCheck?.("copy");
-        if (!live()) throw new BranchStop("grant");
-      };
+      // (tests: a revoke here, before the transaction's remaining waits, is what the final check must see)
+      BRANCH_HOOK.atCheck?.("copy");
+      return () => { if (!live()) throw new BranchStop("grant"); };
     };
     return this.locked(async () => {
       const cur = await this.stat(src.path);
@@ -2610,12 +2609,13 @@ export class Workspace {
       const st = tx.objectStore("meta"), rec = (await req(st.get(BRANCH_KEY + fid))) as BranchRecord | undefined, at = await (await entriesOf(tx)).get(BRANCHES + "/" + name);
       if (rec?.status !== "making" || rec.name !== name || at?.kind !== "folder" || at.fid !== fid) return "moved";
       BRANCH_HOOK.atCheck?.("publish");
-      if (!live()) return "grant";
       st.put({ ...rec, status: "ready" } satisfies BranchRecord, BRANCH_KEY + fid);
       pages.forEach((page, k) => st.put(page, `${BRANCH_HASH_KEY}${fid}:${k}`));
       BRANCH_HOOK.inPublish?.();
+      // (the grant the transaction's last act: a refusal aborts ready and its pages)
+      if (!live()) throw PUBLISH_REFUSED;
       return "ok";
-    }));
+    }).catch((e) => { if (e === PUBLISH_REFUSED) return "grant" as const; throw e; }));
   }
 
   /** A `making` branch turned `failed`, with why: still charged, read-only to every agent, until the person removes it. */
@@ -3288,8 +3288,9 @@ export class Workspace {
 
   /** The contents written, then the entry; the contents taken back if the entry can't be. */
   /** `gate` (the host's: a branch copy's checks, copyForBranch): asked inside the entry's own transaction, before
-   * the entry's own writes, with nothing awaited between (the folders above it, made in the same transaction, go too
-   * if it throws: nothing is kept, the transaction aborted, the contents taken back). */
+   * the entry's writes: its reads, then the synchronous check it returns, called as the transaction's last act, after
+   * every write and wait (if it throws, nothing is kept: the transaction aborted, the folders above with it, the
+   * contents taken back). */
   async make(q: string, kind: Exclude<Kind, "folder">, content: unknown, mode?: string, origin?: string, made?: Entry["made"], gate?: (tx: IDBTransaction) => Promise<() => void>): Promise<Entry> {
     if (await this.stat(q)) throw new WorkspaceError("exists", `${q} is there already`);
     const t = this.now();
@@ -3347,9 +3348,8 @@ export class Workspace {
         await this.folders(tx, parentOf(q), ops);
         await this.lookalike(st, q);
         await this.room(st, q);
-        // (the host's gate last: its reads, then its synchronous final check, with nothing between it and the writes below)
+        // (the host's gate: its reads now; its synchronous final check the callback's last act, below)
         const last = gate ? await gate(tx) : null;
-        last?.();
         // (a data file's bytes with its entry, in this one transaction)
         if (fileBytes) tx.objectStore("fileBytes").put(fileBytes, fid!);
         const e: Entry = { path: q, kind, ref, created: t, updated: t, ...(mode ? { mode } : {}), ...(kind === "file" ? { size, rev: 0, fid, migrated: true, ...(sha256 ? { sha256 } : {}) } : {}), ...(origin ? { origin } : {}), ...(kind !== "file" && made ? { made } : {}), nkey: nkeyOf(q) };
@@ -3357,6 +3357,8 @@ export class Workspace {
         if (ident) e.ident = ident;
         st.put(e);
         await this.log(tx, ops, { op: "create", path: q, kind }, e, undefined, undefined, kind === "file");
+        // (after every wait of this transaction, nothing after it: if it throws, all of it is aborted)
+        last?.();
         return e;
       });
       this.tell({ ops });
