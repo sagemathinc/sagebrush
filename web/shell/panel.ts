@@ -270,10 +270,13 @@ export class TerminalPanel {
         localStorage.setItem("sagebrush-term-intro", "1");
       };
     }
+    // (the row's Esc, then Tab, leaves too: no key event to move the focus, so the Terminal lets it go, and a phone's
+    //  keyboard goes down, instead of taking it back: daybreak3's TERM-TAB-TOUCH-1)
+    let left: boolean | void = false;
     const row = extraKeysRow("sb-term-keys", (data) => {
       const k = KEYS.find((x) => x.data === data);
-      if (k && EXTRA[k.title]) this.onKey(EXTRA[k.title], null);
-    }, () => this.term?.focus());
+      left = k && EXTRA[k.title] && this.onKey(EXTRA[k.title], null);
+    }, () => (left ? this.term?.blur() : this.term?.focus()));
     if (row) root.appendChild(row);
     this.body = root.appendChild(el("div", "sb-term-body"));
     // (the note under the screen: polite; the screen's input names it: TP-6)
@@ -664,7 +667,8 @@ export class TerminalPanel {
 
   // ---------------------------------------------------------------- keys (E5.2)
   /** A key from the keyboard (or the extra keys row): the editor's, or the panel's (Ctrl-C, Enter while running). */
-  private onKey(k: Key, e: KeyboardEvent | null): void {
+  /** true: Esc, then Tab, the way out (the caller moves the focus where there is no key event to) */
+  private onKey(k: Key, e: KeyboardEvent | null): boolean | void {
     if (this.ended) return;
     const lower = k.key.length === 1 ? k.key.toLowerCase() : k.key;
     if (lower !== "Tab") this.opts.tab?.reset();
@@ -672,7 +676,7 @@ export class TerminalPanel {
     //  browser's: line-editor.ts)
     const out = this.esc && lower === "Tab";
     this.esc = lower === "Escape";
-    if (out) return;
+    if (out) return true;
     // (a selection on the screen: Ctrl-C (or Cmd-C) copies it, the browser's own copy, even while a command runs)
     if ((k.ctrl || k.meta) && !k.shift && !k.alt && lower === "c" && this.term.hasSelection()) return;
     // (Ctrl-V and Cmd-V: the browser's paste, which the paste listener takes)
