@@ -417,6 +417,23 @@ async function ends(check) {
     const c = new Int32Array(fakes.at(-1).posted.find((m) => m.term).term.sync.control);
     check(run.terminal?.row === 5 && a.err && !before && Atomics.load(c, TS.SL.STATE) === TS.ST.CANCELLED, `an end while a file request is held: a fault, settled only after the held op; the channel CANCELLED (${JSON.stringify(run.terminal)}, ${before})`);
   }
+  // an end after a request's answer is published but before the worker has taken it (STATE READY): a fault
+  {
+    const run = f.host.run(PERSON);
+    const p = scripted((m, w) => {
+      if (m.init) return w.ready();
+      const c = new Int32Array(m.term.sync.control);
+      Atomics.store(c, TS.SL.STATE, TS.ST.WAITING);
+      w.emit({ fsSync: { gen: m.term.gen, seq: 1, op: "stat", args: { path: "/" } } });
+      const t = setInterval(() => {
+        if (Atomics.load(c, TS.SL.STATE) !== TS.ST.READY) return;
+        clearInterval(t);
+        w.emit(okDone(m));
+      }, 5);
+    }).run(run.commandPort(0), req("python", ["x.py"]));
+    const a = await p;
+    check(a.err && run.terminal?.row === 5, `an end before the worker took its last answer (STATE READY): a fault, not a success (${JSON.stringify(a).slice(0, 120)})`);
+  }
   // a refusal after the command started, with a write's commit held: a fault, settled only after the commit
   {
     const run = f.host.run(PERSON);

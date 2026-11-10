@@ -409,7 +409,9 @@ for (const at of ["cas:5->0", "cas:0->1", "cas:2->3"]) {
   states.push(page.idle()); // a reply's second window still retained
   Atomics.store(c, S.SL.STATE, S.ST.WAITING);
   await page.onMessage({ fsMore: { gen: 5, seq: 1, offset: MiB } });
-  states.push(page.idle()); // the last window published
+  states.push(page.idle()); // the last window published, not yet taken (STATE READY)
+  Atomics.store(c, S.SL.STATE, S.ST.IDLE);
+  states.push(page.idle()); // the worker's acknowledgement (READY -> IDLE)
   Atomics.store(c, S.SL.STATE, S.ST.WAITING);
   await page.onMessage({ fsSync: { gen: 5, seq: 2, op: "write", args: {}, length: 4 } });
   states.push(page.idle()); // admitted, the body not yet in
@@ -419,8 +421,10 @@ for (const at of ["cas:5->0", "cas:0->1", "cas:2->3"]) {
   states.push(page.idle()); // committing
   commitRelease();
   await committing;
+  states.push(page.idle()); // the commit's answer published (READY)
+  Atomics.store(c, S.SL.STATE, S.ST.IDLE);
   states.push(page.idle());
-  ok(JSON.stringify(states) === JSON.stringify([true, false, false, true, false, false, true]), `idle(): only with nothing awaited, retained, admitted or committing (${states})`);
+  ok(JSON.stringify(states) === JSON.stringify([true, false, false, false, true, false, false, false, true]), `idle(): only with nothing awaited, retained, admitted or committing, and the last answer taken (${states})`);
 }
 {
   // in the body of a write: nothing committed

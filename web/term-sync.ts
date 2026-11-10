@@ -362,10 +362,13 @@ export class PageChannel {
     cur.reply.next = next;
     if (next >= cur.reply.bytes.length) cur.reply = undefined;
   }
-  /** Nothing in flight: no header's handler awaited, no reply retained, no body admitted or being committed.  The page
+  /** Nothing in flight: no header's handler awaited, no reply retained, no body admitted or being committed, and the
+   * worker has taken the last answer (STATE IDLE).  The page
    * accepts a command's end only then (an end while a request is held is the worker breaking the protocol). */
   idle(): boolean {
-    return !this.serving && !this.cur?.reply && !this.cur?.body && !this.cur?.committing;
+    // (and the channel itself settled: STATE back at IDLE, the worker's acknowledgement of the last window (edge 5);
+    // a request whose last window is published but not yet taken is still this command's)
+    return !this.serving && !this.cur?.reply && !this.cur?.body && !this.cur?.committing && Atomics.load(this.c, SL.STATE) === ST.IDLE;
   }
   /** (tests) whether a reply is still retained, and its size */
   retained(): number {
