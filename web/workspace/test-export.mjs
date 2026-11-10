@@ -62,6 +62,8 @@ ws.onmessage = (ev) => {
 // (every call bounded: answered, or rejected after CALL_MS or as soon as the socket to the browser closes, so a stuck
 //  page or a browser gone never leaves this run waiting for ever; the nightly export-controls hang, run 42794177694)
 const CALL_MS = 300_000;
+// (and its own synchronous helpers (python3, unzip on an archive): bounded too, killed past it, their check failing)
+const SYNC = { timeout: 300_000, killSignal: "SIGKILL" };
 const send = (method, params = {}, sessionId, ms = CALL_MS) => new Promise((ok, no) => {
   if (ws.readyState !== WebSocket.OPEN) return no(new Error(`CDP ${method}: the connection to the browser is closed`));
   const id = ++n, t = setTimeout(() => { waiting.delete(id); no(new Error(`CDP ${method}: no answer in ${ms / 1000} s`)); }, ms);
@@ -203,13 +205,13 @@ print(json.dumps({"bad": bad, "names": names, "last_local": locs[-1] if locs els
   // (the workspace's bytes through a file: one argument is at most 128 KiB)
   const wantFile = file + ".want.json";
   writeFileSync(wantFile, JSON.stringify(want));
-  const r = spawnSync("python3", ["-I", "-c", py, file, wantFile], { encoding: "utf8", maxBuffer: 1 << 28 });
+  const r = spawnSync("python3", ["-I", "-c", py, file, wantFile], { encoding: "utf8", maxBuffer: 1 << 28, ...SYNC });
   if (r.status !== 0) return { error: String(r.stderr ?? r.error).slice(0, 600) };
-  const u = spawnSync("unzip", ["-tq", file], { encoding: "utf8" });
+  const u = spawnSync("unzip", ["-tq", file], { encoding: "utf8", ...SYNC });
   return { ...JSON.parse(r.stdout), unzip: u.status, unzipOut: (u.stdout + u.stderr).slice(0, 300) };
 }
 /** A member's bytes, from the archive. */
-const member = (file, name) => spawnSync("python3", ["-I", "-c", "import sys, zipfile; sys.stdout.buffer.write(zipfile.ZipFile(sys.argv[1]).read(sys.argv[2]))", file, name], { maxBuffer: 1 << 28 }).stdout;
+const member = (file, name) => spawnSync("python3", ["-I", "-c", "import sys, zipfile; sys.stdout.buffer.write(zipfile.ZipFile(sys.argv[1]).read(sys.argv[2]))", file, name], { maxBuffer: 1 << 28, ...SYNC }).stdout;
 /** The workspace's bytes of a data file, base64. */
 const wsBytes = (p) => ev(`${W}.read(${JSON.stringify(p)}).then((r) => { const b = new Uint8Array(r.content); let s = ""; for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000)); return btoa(s); })`);
 /** Each document's member size in a plain export now (the caps' tests set their caps from these). */
@@ -220,7 +222,7 @@ async function docSizes() {
   const z = inspect(join(out, "sz.zip"));
   return Object.fromEntries(z.entries.filter((e) => e.kind === "notebook" || e.kind === "board").map((e) => [e.path, e.size]));
 }
-const sha = (b) => spawnSync("python3", ["-I", "-c", "import sys, hashlib; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())"], { input: b }).stdout.toString().trim();
+const sha = (b) => spawnSync("python3", ["-I", "-c", "import sys, hashlib; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())"], { input: b, ...SYNC }).stdout.toString().trim();
 
 // (a notebook whose JSON has every kind of character and value a cut could break: surrogate pairs, lone surrogates,
 // control characters, U+2028, long strings, empties, numbers)
@@ -833,7 +835,7 @@ for (n, r1, l1), (_, r2, l2) in zip(a, b):
 strip = lambda t: re.sub(r'"created":"[^"]*"', '"created":""', re.sub(r',"captured":(null|-?[0-9.eE+]+)', "", t))
 print(json.dumps({"members": len(b), "diffs": diffs[:6], "ndiffs": len(diffs), "manifest": strip(am) == strip(bm), "manifestLen": [len(am), len(bm)]}))
 `;
-    const r = spawnSync("python3", ["-I", "-c", py, refFile, newFile], { encoding: "utf8", maxBuffer: 1 << 26 });
+    const r = spawnSync("python3", ["-I", "-c", py, refFile, newFile], { encoding: "utf8", maxBuffer: 1 << 26, ...SYNC });
     return r.status === 0 ? JSON.parse(r.stdout) : { error: (r.stderr || String(r.error)).slice(0, 400) };
   };
   /** The sinks' hooks: OPFS (the default), the picker (a fake writable that copies each write only after a pause, so
@@ -1145,7 +1147,7 @@ print(json.dumps({"members": len(b), "diffs": diffs[:6], "ndiffs": len(diffs), "
       const folders = z.entries.filter((e) => e.kind === "folder");
       check(folders.length > 3 && folders.every((e) => e.captured >= t[0] && e.captured <= t[1]), `metadata (P-9): every folder's captured (${folders.length}) lies inside preflight's bracket [${t[0]}, ${t[1]}], none at writing time`);
       const e = z.entries.find((x) => x.path === "/meta");
-      const dos = spawnSync("python3", ["-I", "-c", "import sys, zipfile; i = zipfile.ZipFile(sys.argv[1]).getinfo('files/meta/'); print(list(i.date_time))", join(out, "meta.zip")], { encoding: "utf8" }).stdout.trim();
+      const dos = spawnSync("python3", ["-I", "-c", "import sys, zipfile; i = zipfile.ZipFile(sys.argv[1]).getinfo('files/meta/'); print(list(i.date_time))", join(out, "meta.zip")], { encoding: "utf8", ...SYNC }).stdout.trim();
       const want = await ev(`(() => { const d = new Date(${old.updated}); return JSON.stringify([Math.min(2107, Math.max(1980, d.getFullYear())), d.getMonth() + 1, d.getDate(), d.getHours(), d.getMinutes(), d.getSeconds() & ~1]).replace(/,/g, ", "); })()`);
       check(e && e.modified === old.updated && !("mode" in e) && dos === want, "metadata (P-9): an edit before Save is not exported: the folder's old modified, no mode, its old DOS time: " + JSON.stringify({ modified: e?.modified, was: old.updated, mode: e?.mode, dos, want }));
     }

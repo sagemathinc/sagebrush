@@ -5,16 +5,17 @@
 // with every other check of the run passing.  A control whose check doesn't fail means the test doesn't guard its rule.
 // Serve web/dist first (python3 web/serve.py 8765), then
 //   node web/workspace/test-export-controls.mjs [name ...]
-import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { runBounded, stopped } from "./bounded-run.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url)), root = join(here, "..", "..");
 const X = "web/workspace/export/";
 // (each control bounded, well under the job's 60 minutes: a build or a run that doesn't finish is that control's named
-//  FAIL, and the next control runs; never a silent wait until the job is cancelled, as the nightly run 42794177694 was)
+//  FAIL, and the next control runs; never a silent wait until the job is cancelled, as the nightly run 42794177694 was.
+//  The bound is the parent's own (bounded-run.mjs): the control's process group gets SIGTERM, then SIGKILL 10 s later)
 const BUILD_MS = 180_000, CONTROL_MS = 900_000;
 // [name, the rule, file, find, replace, scenario, the checks that must fail (a regex on their FAIL lines: a closed list,
 // the rule's own checks and those that follow from it alone; at least one must fail, and no other may), which file]
@@ -121,7 +122,7 @@ const CONTROLS = [
 ];
 
 /** The chunk or the worker built as web/build.ts builds it, with the substitutions applied (each asserted once). */
-function build(kind, subs, outFile) {
+async function build(kind, subs, outFile) {
   const entry = kind === "worker" ? X + "worker.ts" : X + "entry.ts";
   const code = `
 const subs = ${JSON.stringify(subs)};
@@ -141,9 +142,30 @@ const want = new Map(); for (const [f] of subs) want.set(f, (want.get(f) ?? 0) +
 for (const [f, n] of seen) if (n !== want.get(f)) { console.error("the control's file " + f + " wasn't built"); process.exit(1); }
 await Bun.write(${JSON.stringify(outFile)}, r.outputs[0]);
 console.log("built");`;
-  const p = spawnSync("bun", ["-e", code], { cwd: root, encoding: "utf8", timeout: BUILD_MS, killSignal: "SIGKILL" });
-  if (p.error?.code === "ETIMEDOUT" || p.signal) return `the build didn't finish in ${BUILD_MS / 1000} s`;
+  const p = await runBounded("bun", ["-e", code], { cwd: root, ms: BUILD_MS, graceMs: 1_000 });
+  const why = stopped(p, BUILD_MS, "the build");
+  if (why) return why;
   return p.status === 0 ? null : (p.stderr || p.stdout).slice(0, 600);
+}
+
+/** One control's run, bounded by the parent (runBounded): its output, or null when it was stopped (a named FAIL, said
+ *  here with its last lines) */
+async function runControl(name, rule, argv, env, ms = CONTROL_MS, graceMs = 10_000) {
+  const r = await runBounded(process.execPath, argv, { env: { ...process.env, ...env }, ms, graceMs });
+  const why = stopped(r, ms, "its run");
+  if (!why) return r;
+  console.log(`FAIL ${name} (${rule}): ${why}; its last lines:`);
+  for (const l of (r.stdout ?? "").trim().split("\n").slice(-5)) console.log(`     ${l.slice(0, 150)}`);
+  return null;
+}
+
+// (test-bounded-run.mjs's case through this harness: one control whose run is the given script, its bounds lowered
+//  (never raised), nothing built; the same runControl, the same words)
+if (process.env.EXPORT_CONTROLS_PIN) {
+  const pin = JSON.parse(process.env.EXPORT_CONTROLS_PIN);
+  const r = await runControl("PIN", "the pin's stubborn control", ["-e", pin.script], {}, Math.min(pin.ms, CONTROL_MS), Math.min(pin.graceMs, 10_000));
+  console.log(r ? "PIN: its run ended by itself" : "PIN: stopped");
+  process.exit(r ? 0 : 1);
 }
 
 const only = new Set(process.argv.slice(2));
@@ -156,15 +178,10 @@ try {
     const subs = [[file, find, repl], ...(more ? (Array.isArray(more[0]) ? more : [more]) : [])];
     const out = join(dir, name + ".js");
     // (a control across both files is built per file: here C5's two are both in the chunk)
-    const err = build(kind, subs, out);
+    const err = await build(kind, subs, out);
     if (err) { bad++; console.log(`FAIL ${name} (${rule}): the control couldn't be built: ${err}`); continue; }
-    const r = spawnSync(process.execPath, [join(here, run?.test ?? "test-export.mjs"), ...(run?.args ?? [])], { encoding: "utf8", env: { ...process.env, ONLY: scenario, ...(run?.env ?? {}), [kind === "worker" ? "CHUNK_WORKER" : "CHUNK"]: out }, maxBuffer: 1 << 26 , timeout: CONTROL_MS, killSignal: "SIGTERM" });
-    if (r.error?.code === "ETIMEDOUT" || r.signal) {
-      bad++;
-      console.log(`FAIL ${name} (${rule}): its run didn't finish in ${CONTROL_MS / 1000} s (stopped); its last lines:`);
-      for (const l of (r.stdout ?? "").trim().split("\n").slice(-5)) console.log(`     ${l.slice(0, 150)}`);
-      continue;
-    }
+    const r = await runControl(name, rule, [join(here, run?.test ?? "test-export.mjs"), ...(run?.args ?? [])], { ONLY: scenario, ...(run?.env ?? {}), [kind === "worker" ? "CHUNK_WORKER" : "CHUNK"]: out });
+    if (!r) { bad++; continue; }
     const lines = (r.stdout ?? "").split("\n").filter((l) => /^FAIL /.test(l));
     // (the run's summary repeats each failure at its end: counted once)
     const failed = [...new Set(lines)];
