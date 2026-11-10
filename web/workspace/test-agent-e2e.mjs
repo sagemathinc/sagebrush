@@ -30,6 +30,7 @@ import { mountAgentPairing } from ${JSON.stringify(join(here, "agent-ui.ts"))};
 import { AgentPairing } from ${JSON.stringify(join(here, "agent-pair.ts"))};
 import * as gitBranches from ${JSON.stringify(join(here, "git-branch.ts"))};
 import * as runVerbs from ${JSON.stringify(join(here, "run-verbs.ts"))};
+import { runVerbsFor } from ${JSON.stringify(join(here, "run-holder.ts"))};
 const ws = await Workspace.open();
 // (test only: a fake clock, window.__skew ms ahead of the real one, for expiries inside the retry window)
 const realNow = Date.now;
@@ -45,7 +46,7 @@ const putAgentGrant = ws.putAgentGrant.bind(ws);
 // (and the run verbs, with no sandbox (this page isn't the site's): the pairing's dispatch and the grant's run checked
 //  for real, the run itself refused before anything is read: chat plan PR 4a)
 const runs = { load: async () => runVerbs, host: () => ({ ws, WorkerKernel: class {}, RunnerWorker: class {}, runnerSrc: "runner/", sandbox: "none", docTrees: () => [] }) } as any;
-const ui = mountAgentPairing(ws as any, { branches: gitBranches, runs, ...(new URLSearchParams(location.search).has("r") ? { reload: { scope: { workspace: "e2e", page: "/" } } } : {}) });
+const ui = mountAgentPairing(ws as any, { branches: gitBranches, runVerbs: runVerbsFor(runs), ...(new URLSearchParams(location.search).has("r") ? { reload: { scope: { workspace: "e2e", page: "/" } } } : {}) });
 // (a second page's attempt, made the same way the dialog makes one)
 const tryPair = async (code: string, port: number) => {
   const p = new AgentPairing(port, { code }, { verbsFor: (a) => ws.forAgent(a) as any, store: ws as any, trashEntry: async () => null, page: { origin: location.origin, path: "/" } });

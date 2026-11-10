@@ -4265,7 +4265,7 @@ globalThis.__sbTexSplit = texSplit;
 const agentBtn = $("#agentbtn");
 let agentPairing = null, agentTries = 0;
 const pairAgent = (w) => (agentPairing ??= import(new URL("sagebrush-agent.js", location.href).href + (agentTries++ ? `?try=${agentTries}` : ""))
-  .then((m) => m.mountAgentPairing(w, { runs: agentRuns(w) })))
+  .then((m) => m.mountAgentPairing(w, { runVerbs: m.runVerbsFor(agentRuns(w)) })))
   .catch((e) => { agentPairing = null; throw e; });
 // (an agent's runs of code (chat plan PR 4a): the verbs in /sagebrush-agent-run.js, fetched at its first run; the page
 //  gives them its workspace, the interpreter's classes, the sandboxed runner (never a plain worker: there is none here

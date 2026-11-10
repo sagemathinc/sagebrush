@@ -4,7 +4,8 @@
 // boundary whole, one over cut, never inside a code point), the refused list's caps, the result's 256 KiB, inputHash
 // against a fixture, and the reload record's "May run code" (never promoted).
 //   bun web/workspace/test-run-verbs.mjs
-import { runParams, parseReloadRecord } from "./agent-pair.ts";
+import { parseReloadRecord } from "./agent-pair.ts";
+import { runParams } from "./run-holder.ts";
 import { RUN_LIMITS, RUN_TEXT, viewOf, canonical, Kept, refusedOut, bounded, inputHash, jsonBytes, notebookInputs } from "./run-verbs.ts";
 import { createHash } from "node:crypto";
 

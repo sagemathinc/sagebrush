@@ -377,7 +377,9 @@ try {
   // ======================================================================== the page, paired; lazy loading
   await pair();
   const grant = notes.find((m) => m.method === "grant.changed")?.params;
-  ok(grant && grant.run === false && grant.write === true, "the grant says run false although the agent asked for run (only the person runs code)", grant);
+  // ("May run code" (chat plan PR 4a, Q5): ticked when the person connects their own agent, and the grant says so; the
+  //  agent's own ask doesn't decide it, the person's dialog does)
+  ok(grant && grant.run === true && grant.write === true, "the grant says run true: the person left May run code ticked in Connect", grant);
   ok(await ev("crossOriginIsolated"), "the page is cross-origin isolated (COOP/COEP from web/_headers)");
   ok(/^Start sagebrush-agent in a terminal/.test(dialogNote) && !/sagebrush-mcp/.test(dialogNote), "the Connect dialog names the page's own program, sagebrush-agent (not sagebrush-mcp)", dialogNote);
   await call("workspace.mkdir", { path: "/notes" });
