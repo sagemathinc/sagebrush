@@ -4,7 +4,8 @@
 //
 // - The workspace's files are the page's, through the command's file channel (web/term-sync.ts) and the shim's
 //   mediated mode (web/shims/fs.ts mediate()): nothing of the workspace is kept here.  A Stop on the channel raises
-//   KeyboardInterrupt in the program, so it ends with 130.
+//   KeyboardInterrupt in the program, so it ends with
+//   130 (Magma: its own interrupt, status 0).
 // - stdin is the finite bytes the page gave, then end of file; input() reads a line of it, as CPython's does with a
 //   redirected stdin (the prompt written, the line not echoed).
 // - Output goes to one bounded sink (src/term-output.ts), never collected whole.
@@ -158,17 +159,36 @@ function runMatlab(plan: RunPlan, stdin: Uint8Array, cwd: string): number {
   return guarded(() => R.loader.exec(py, main, "exec", file)) ?? 0;
 }
 
+// (a KeyboardInterrupt, as Python holds it or as raised from here)
+const interrupt = (e: unknown) => {
+  try {
+    return R.typeOf(R.toPyExc(e)).$mro.includes(T.KeyboardInterrupt);
+  } catch {
+    return false;
+  }
+};
+
 function runMagma(plan: RunPlan, stdin: Uint8Array): number {
-  // (an ordinary error is reported and the next file runs, as Magma's; a Stop ends it all with 130)
-  let interrupted = false;
-  // (Magma: each file in order, stdin a session; name:=value arguments as string variables; status 0, as Magma's)
+  // (an interrupt anywhere in the session, a file being read included: Magma 2.18's own end, a blank line and
+  // "[Interrupted]" on stdout, no Python frames, no later file, status 0 (@sagebrush's ruling; the CLI keeps 130))
+  try {
+    return magmaFiles(plan, stdin);
+  } catch (e) {
+    if (!interrupt(e)) throw e;
+    R.stdout.write("\n[Interrupted]\n");
+    return 0;
+  }
+}
+
+function magmaFiles(plan: RunPlan, stdin: Uint8Array): number {
+  // (Magma: each file in order, stdin a session; name:=value arguments as string variables; status 0, as Magma's;
+  // an ordinary error is reported and the next file runs)
   const main = mainModule(plan.source.kind === "file" ? plan.source.path : "<stdin>", false);
   for (const [k, v] of plan.vars ?? []) R.loader.exec(`${k} = ${JSON.stringify(v)}\n`, main, "exec", "<argv>");
   for (const src of [plan.source, ...(plan.more ?? [])]) {
     const got = sourceText(plan, src, stdin);
     if ("code" in got) continue;
     const file = src.kind === "file" ? src.path : "<stdin>";
-    if (interrupted) break;
     let py: string;
     try {
       py = magmaToPython(got.text, file, { recover: src.kind === "stdin" ? "session" : "file" });
@@ -178,8 +198,17 @@ function runMagma(plan: RunPlan, stdin: Uint8Array): number {
       R.stdout.write(`\n>> ${line}\n${" ".repeat(e.col + 2)}^\nUser error: bad syntax: ${e.message} (${file}, line ${e.line})\n`);
       continue;
     }
-    guarded(() => R.loader.exec(py, main, "exec", file), () => (interrupted = true));
-    if (interrupted) return 130;
+    // (an interrupt is taken out before guarded() would print its traceback, and raised again past it)
+    let stopped: unknown = null;
+    guarded(() => {
+      try {
+        R.loader.exec(py, main, "exec", file);
+      } catch (e) {
+        if (!interrupt(e)) throw e;
+        stopped = e;
+      }
+    });
+    if (stopped !== null) throw stopped;
   }
   return 0;
 }

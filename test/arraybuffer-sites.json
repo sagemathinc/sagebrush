@@ -396,7 +396,7 @@
   "src/runtime/nd.ts :: ndBytes :: new Uint8Array ( fs . readFileSync ( f ) ) #0": {"decl":"ea3e1fbc6183f858","class":"allocates","reason":"new Uint8Array(Buffer from fs.readFileSync): a copy, a new backing store"},
   "src/runtime/nd.ts :: ndBytes :: new Uint8Array ( x . response ) #0": {"decl":"ea3e1fbc6183f858","class":"view","reason":"new Uint8Array(ArrayBuffer): the same function sets x.responseType = \"arraybuffer\" before send: a view of the response's store"},
   "src/runtime/nd.ts :: ndBytes :: read x . response #0": {"decl":"ea3e1fbc6183f858","class":"allocates","reason":"x.response after x.responseType = \"arraybuffer\" in the same function: a new ArrayBuffer"},
-  "web/term-sync.ts :: PageChannel.onMessage :: new Uint8Array ( length ) #0": {"decl":"5e980935dd5c9a91","class":"allocates","reason":"new Uint8Array(length): an admitted write's body buffer on the page's side of a Terminal command's file channel; length is a checked count of at most 2^31 - 1 (the protocol's cap) that the page's handler admitted, under the run's written_bytes, before any body moved"}
+  "web/term-sync.ts :: PageChannel.onMessage :: new Uint8Array ( length ) #0": {"decl":"d78edc35ce62ec3c","class":"allocates","reason":"new Uint8Array(length): an admitted write's body buffer on the page's side of a Terminal command's file channel; length is a checked count of at most 2^31 - 1 (the protocol's cap) that the page's handler admitted, under the run's written_bytes, before any body moved"}
  },
 "deltas": [
   {"key":"src/runtime/zlib.ts :: inflateRaw :: fixed ( ) #0","before":"store","after":"moved","to":"src/runtime/zlib.ts :: Inflater.run :: fixed ( ) #0","reason":"the inflater rewritten as a resumable state machine (zlib.decompressobj, note-zlib-decompressobj r3.1): a dynamic block's code tables, built as before, now in Inflater.run"},
@@ -2032,6 +2032,7 @@
   "4583e9a501e1cc8a": {"decl":"web/stall-fetch.js :: fetchMoving","class":"allocates","via":"lib:lib.dom.d.ts :: Body.arrayBuffer"},
   "a6acba8a4ecc9503": {"decl":"web/stall-fetch.js :: stalledError","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
   "2858ab75658b340b": {"decl":"web/stall-fetch.js :: why","class":"allocates","via":"web/stall-fetch.js :: stalledError"},
+  "97cba7e140663a8c": {"decl":"web/term-run.ts :: interrupt","class":"allocates","via":"web/lib-lazy.ts :: get"},
   "a8e704281d1396c4": {"decl":"web/term-run.ts :: mainModule","class":"allocates","via":"web/lib-lazy.ts :: get"},
   "a5e2302f2165176a": {"decl":"web/term-run.ts :: termMessageOf","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
   "acc948a79aaafc86": {"decl":"web/term-sync.ts :: Cancelled.class","class":"no-new-store"},

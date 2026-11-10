@@ -11452,6 +11452,11 @@
   "owner": "python (@sagebrush-python)",
   "reason": "matched only the option name -maxima in the Terminal's list of Sage options it refuses; refuses nothing by size"
  },
+ "src/term-command.ts :: matlab :: const MAGMA_USAGE = \"Usage: magma [-d] [-l limit] [-b] [-n] [-s startfile] [-S seed] [-r workspace] [-c package] [-q directory machine] [filelist]\\n\"; #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "Magma 2.18-5's usage line, the text the Terminal prints for an option magma doesn't have: it names Magma's -l limit option and enforces nothing."
+ },
  "src/term-output.ts :: constructor :: this.cap = Math.max(0, Math.min(allowance, backstop)); #0": {
   "class": "1",
   "disposition": {

@@ -11,8 +11,10 @@ import { join } from "node:path";
 
 // (daybreak2 rules the ceilings from the landing measurement with CI's bun 1.4.4: PR 2 r4 (e8153082) measured 459 209 B
 // raw and 127 554 B gzip -9 (Node 24.21.0's zlib); daybreak2 approved 460 600 / 127 970 on r4, headroom 1 391 / 416,
-// about 0.3%.  r3's were 457 400 / 126 790 for 456 001 / 126 381)
-const LIMIT_RAW = 460600, LIMIT_GZIP = 127970;
+// about 0.3%.  r3's were 457 400 / 126 790 for 456 001 / 126 381.  The Terminal commands' hook (ShellHost's commands
+// and size options, each command's narrow port into its run) measured 462 055 / 128 381 on master 7ebd72f4's
+// 460 540 / 127 822 (+1 515 / +559); daybreak2 ruled the ceilings at that measurement + 64)
+const LIMIT_RAW = 462119, LIMIT_GZIP = 128445;
 const root = join(import.meta.dir, "..", "..");
 const dist = join(root, "web", "dist");
 const fails = [];

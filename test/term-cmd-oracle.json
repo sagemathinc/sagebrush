@@ -1,0 +1,183 @@
+{
+ "provenance": {
+  "generator_sha256": "30fd2d29f580d2f119a35bdcf5d3b8bb42098d6bc334bac2718d51a47247f843",
+  "cases_sha256": "927f7fa0535f0ae6e6510cb489b3fdd303366c47ffbc2c35e93af252f57c4c6c",
+  "python": "3.14.10 (main, Nov  7 2026, 17:28:14) [GCC 15.2.0]"
+ },
+ "records": [
+  {
+   "name": "-c",
+   "stdout": "hi\n",
+   "stderr": "",
+   "code": 0
+  },
+  {
+   "name": "-c with arguments",
+   "stdout": "['-c', 'a b', 'c']\n",
+   "stderr": "",
+   "code": 0
+  },
+  {
+   "name": "argv with quotes and Unicode",
+   "stdout": "['it\\'s \"quoted\"', 'héllo ✓']\n",
+   "stderr": "",
+   "code": 0
+  },
+  {
+   "name": "python3",
+   "stdout": "-c\n",
+   "stderr": "",
+   "code": 0
+  },
+  {
+   "name": "SystemExit(3)",
+   "stdout": "",
+   "stderr": "",
+   "code": 3
+  },
+  {
+   "name": "SystemExit(256)",
+   "stdout": "",
+   "stderr": "",
+   "code": 0
+  },
+  {
+   "name": "SystemExit(-1)",
+   "stdout": "",
+   "stderr": "",
+   "code": 255
+  },
+  {
+   "name": "SystemExit(3.5)",
+   "stdout": "",
+   "stderr": "3.5\n",
+   "code": 1
+  },
+  {
+   "name": "SystemExit(None)",
+   "stdout": "",
+   "stderr": "",
+   "code": 0
+  },
+  {
+   "name": "SystemExit('text')",
+   "stdout": "",
+   "stderr": "bye\n",
+   "code": 1
+  },
+  {
+   "name": "an uncaught exception, last line",
+   "stdout": "",
+   "stderr": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\n    raise ValueError('bad')\nValueError: bad\n",
+   "code": 1
+  },
+  {
+   "name": "FILE: argv, __file__, sys.path[0]",
+   "stdout": "['a.py', 'x'] False /w\n",
+   "stderr": "",
+   "code": 0
+  },
+  {
+   "name": "FILE missing",
+   "stdout": "",
+   "stderr": "python: can't open file '/w/nofile.py': [Errno 2] No such file or directory\n",
+   "code": 2
+  },
+  {
+   "name": "a folder without __main__.py",
+   "stdout": "",
+   "stderr": ": can't find '__main__' module in '/w/d'\n",
+   "code": 1
+  },
+  {
+   "name": "- reads the program from stdin",
+   "stdout": "42 ['-', 'arg']\n",
+   "stderr": "",
+   "code": 0
+  },
+  {
+   "name": "a program piped in",
+   "stdout": "['']\n",
+   "stderr": "",
+   "code": 0
+  },
+  {
+   "name": "stdin read by the program",
+   "stdout": "'abc\\ndef\\n'\n",
+   "stderr": "",
+   "code": 0
+  },
+  {
+   "name": "an empty redirected stdin",
+   "stdout": "''\n",
+   "stderr": "",
+   "code": 0
+  },
+  {
+   "name": "input() from a redirected stdin",
+   "stdout": "name? got ann\n",
+   "stderr": "",
+   "code": 0
+  },
+  {
+   "name": "input() at end of file, last line",
+   "stdout": "",
+   "stderr": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\n    input()\n    ~~~~~^^\nEOFError: EOF when reading a line\n",
+   "code": 1
+  },
+  {
+   "name": "-B",
+   "stdout": "True\n",
+   "stderr": "",
+   "code": 0
+  },
+  {
+   "name": "-u",
+   "stdout": "1\n",
+   "stderr": "",
+   "code": 0
+  },
+  {
+   "name": "-V",
+   "stdout": "Python 3.14.10\n",
+   "stderr": "",
+   "code": 0
+  },
+  {
+   "name": "--version",
+   "stdout": "Python 3.14.10\n",
+   "stderr": "",
+   "code": 0
+  },
+  {
+   "name": "an unknown option",
+   "stdout": "",
+   "stderr": "Unknown option: -j\nusage: python [option] ... [-c cmd | -m mod | file | -] [arg] ...\nTry `python -h' for more information.\n",
+   "code": 2
+  },
+  {
+   "name": "an unknown option, python3",
+   "stdout": "",
+   "stderr": "Unknown option: -j\nusage: python3 [option] ... [-c cmd | -m mod | file | -] [arg] ...\nTry `python -h' for more information.\n",
+   "code": 2
+  },
+  {
+   "name": "-c without its argument",
+   "stdout": "",
+   "stderr": "Argument expected for the -c option\nusage: python [option] ... [-c cmd | -m mod | file | -] [arg] ...\nTry `python -h' for more information.\n",
+   "code": 2
+  },
+  {
+   "name": "a file written and read back",
+   "stdout": "xxx\n",
+   "stderr": "",
+   "code": 0
+  },
+  {
+   "name": "a file listed",
+   "stdout": "['a.txt', 'b.txt']\n",
+   "stderr": "",
+   "code": 0
+  }
+ ]
+}
