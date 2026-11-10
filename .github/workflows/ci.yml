@@ -559,19 +559,18 @@ jobs:
         if: matrix.shard == 'pwa'
         run: node scripts/web-tests.mjs run web-sync.2
       # (DEV's try-it flow on the real notebook page: two browsers, notebooks, files, offline; the reference server.
-      # REPORT-ONLY for now (@sagebrush, Oct 30, #330's G-ST-1): it passed 4 of 5 local runs, one first page load not coming
-      # up; its result and diagnostics go to the job summary and never fail the job.  Made gating in a later PR once it is
-      # green here 10 runs in a row, or once that first load is explained)
-      - name: DEV try-it flow (report-only)
+      # Report-only from Oct 30 (#330's G-ST-1) until Nov 9; gating since (@sagebrush): #704's open-once-named broke its
+      # File, New step, #939 fixed the test, and every run since passed it (6 master pushes, 2 pull requests, 56 checks
+      # each).  Its result and diagnostics still go to the job summary)
+      - name: DEV try-it flow
         if: matrix.shard == 'pwa'
-        continue-on-error: true
         timeout-minutes: 10
         run: |
           c=0
           CHROME=google-chrome bun web/workspace/test-dev-sync-tryit.mjs > tryit.log 2>&1 || c=$?
           cat tryit.log
           {
-            echo "### DEV try-it flow (report-only): exit $c"
+            echo "### DEV try-it flow: exit $c"
             echo '```'
             grep -E "^(ok:|FAIL)|didn't come up" tryit.log | cut -c1-400 | head -40 || true
             echo '```'

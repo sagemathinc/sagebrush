@@ -1,0 +1,67 @@
+f1 ('a', 'b', 'c', 'd', 'args', 'kw') 2 0 2 0xf
+f2 ('a', 'b', 'c') 2 1 1 0x3
+f3 ('args',) 0 0 0 0x7
+f4 ('a', 'b', 'c') 3 0 0 0x3
+K.m ('self', 'a', 'k', 'rest') 2 0 1 0x8000007
+g () 0 0 0 0x23
+co () 0 0 0 0x83
+TypeError: f4() missing 2 required positional arguments: 'a' and 'b'
+TypeError: f4() missing 1 required positional argument: 'b'
+TypeError: f4() takes from 2 to 3 positional arguments but 4 were given
+TypeError: f4() got an unexpected keyword argument 'd'
+TypeError: f4() got multiple values for argument 'a'
+TypeError: f2() got some positional-only arguments passed as keyword arguments: 'a'
+TypeError: f2() takes 2 positional arguments but 3 were given
+TypeError: f2() missing 1 required keyword-only argument: 'c'
+TypeError: f1() missing 1 required positional argument: 'a'
+TypeError: f1() missing 1 required keyword-only argument: 'c'
+TypeError: K.m() missing 1 required positional argument: 'a'
+TypeError: K.m() got an unexpected keyword argument 'j'
+TypeError: f3() got an unexpected keyword argument 'x'
+TypeError: <lambda>.<locals>.<lambda>() missing 1 required positional argument: 'x'
+TypeError: f4() takes from 2 to 3 positional arguments but 5 were given
+TypeError: g4() missing 4 required positional arguments: 'a', 'b', 'c', and 'd'
+TypeError: g4() missing 3 required positional arguments: 'b', 'c', and 'd'
+TypeError: g1() takes 1 positional argument but 2 were given
+TypeError: g1() missing 1 required positional argument: 'a'
+TypeError: k() takes from 1 to 2 positional arguments but 3 were given
+TypeError: k() takes from 1 to 2 positional arguments but 3 positional arguments (and 1 keyword-only argument) were given
+TypeError: k() takes from 1 to 2 positional arguments but 3 positional arguments (and 2 keyword-only arguments) were given
+TypeError: k() takes from 1 to 2 positional arguments but 4 positional arguments (and 3 keyword-only arguments) were given
+TypeError: k() missing 2 required keyword-only arguments: 'c' and 'd'
+TypeError: k() missing 1 required keyword-only argument: 'd'
+TypeError: k() missing 1 required positional argument: 'a'
+TypeError: k() missing 1 required positional argument: 'a'
+TypeError: k() got an unexpected keyword argument 'z'
+TypeError: kv() missing 2 required keyword-only arguments: 'c' and 'd'
+TypeError: kv() missing 1 required positional argument: 'a'
+TypeError: o() got some positional-only arguments passed as keyword arguments: 'a'
+TypeError: o() missing 1 required positional argument: 'a'
+TypeError: C.m() missing 1 required positional argument: 'x'
+TypeError: C.m() takes 2 positional arguments but 3 were given
+TypeError: C.m() missing 2 required positional arguments: 'self' and 'x'
+TypeError: C.s() missing 1 required positional argument: 'y'
+TypeError: C.D.n() missing 1 required keyword-only argument: 'q'
+TypeError: C.D.n() takes 1 positional argument but 2 were given
+TypeError: C.D.n() got an unexpected keyword argument 'r'
+TypeError: defs() missing 1 required positional argument: 'b'
+TypeError: renamed() missing 2 required positional arguments: 'a' and 'b'
+TypeError: gen() missing 1 required positional argument: 'b'
+TypeError: gen() takes 2 positional arguments but 3 were given
+TypeError: coro() missing 1 required positional argument: 'a'
+TypeError: gk() missing 1 required keyword-only argument: 'k'
+TypeError: <lambda>.<locals>.<lambda>() missing 1 required keyword-only argument: 'k'
+A.<lambda> 0x8000003
+A.m 0xc000003
+A.B.h 0x8000023
+A.outer.<locals>.inner 0x4000013
+A.ac 0x8000083
+top.<locals>.<lambda> 0x13
+top 0x3
+nodoc 0x3
+TypeError: fd() takes from 0 to 1 positional arguments but 2 were given
+TypeError: hk() takes 0 positional arguments but 1 positional argument (and 1 keyword-only argument) were given
+[2]
+TypeError: gd() missing 1 required positional argument: 'a'
+2
+TypeError: cd() missing 1 required positional argument: 'a'

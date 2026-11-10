@@ -1983,30 +1983,6 @@
   "owner": "raster/image I/O",
   "row": "inv-31"
  },
- "engine/raster/src/wasm.rs ::  :: pub limit_pages: u32, #0": {
-  "class": "2",
-  "owner": "raster/image I/O"
- },
- "engine/raster/src/wasm.rs ::  :: static mut LIMIT_PAGES: usize = usize::MAX; #0": {
-  "class": "2",
-  "owner": "raster/image I/O"
- },
- "engine/raster/src/wasm.rs ::  :: static mut REFUSAL: Refusal = Refusal { need_pages: 0, size_pages: 0, limit_pages: 0 }; #0": {
-  "class": "none",
-  "owner": "raster/image I/O"
- },
- "engine/raster/src/wasm.rs :: alloc :: if now.saturating_add(pages) > limit { #0": {
-  "class": "2",
-  "owner": "raster/image I/O"
- },
- "engine/raster/src/wasm.rs :: alloc :: if prev == usize::MAX { #0": {
-  "class": "2",
-  "owner": "raster/image I/O"
- },
- "engine/raster/src/wasm.rs :: alloc :: let limit = *addr_of!(LIMIT_PAGES); #0": {
-  "class": "2",
-  "owner": "raster/image I/O"
- },
  "engine/sym/src/definite.rs :: endpoints :: .or_else(|_| crate::limit::try_limit(&crate::rewrite::simplify_log(big_f), x, pt, dir)) #0": {
   "class": "none",
   "owner": "symbolic calculus (@sagebrush-matlab)",
@@ -2071,6 +2047,76 @@
  "engine/sym/tests/stage2_interrupt.rs :: stop_in_each_lll :: let b = Budget::new(Limits { memory, ..Limits::DEFAULT }); #1": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/wasmheap/src/lib.rs ::  :: pub limit_pages: AtomicU32, #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "wasm-heap-page-bound"
+   }
+  },
+  "owner": "wasm heap (shared by raster and the mp core)"
+ },
+ "engine/wasmheap/src/lib.rs ::  :: static LIMIT_PAGES: AtomicUsize = AtomicUsize::new(usize::MAX); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "wasm-heap-page-bound"
+   }
+  },
+  "owner": "wasm heap (shared by raster and the mp core)"
+ },
+ "engine/wasmheap/src/lib.rs ::  :: static REFUSAL: Refusal = Refusal { need_pages: AtomicU32::new(0), size_pages: AtomicU32::new(0), limit_pages: AtomicU32::new(0) }; #0": {
+  "class": "none",
+  "owner": "wasm heap (shared by raster and the mp core)"
+ },
+ "engine/wasmheap/src/lib.rs :: alloc :: if now.saturating_add(pages) > limit { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "wasm-heap-page-bound"
+   }
+  },
+  "owner": "wasm heap (shared by raster and the mp core)"
+ },
+ "engine/wasmheap/src/lib.rs :: alloc :: if prev == usize::MAX { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "wasm-heap-page-bound"
+   }
+  },
+  "owner": "wasm heap (shared by raster and the mp core)"
+ },
+ "engine/wasmheap/src/lib.rs :: alloc :: let limit = LIMIT_PAGES.load(Relaxed); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "wasm-heap-page-bound"
+   }
+  },
+  "owner": "wasm heap (shared by raster and the mp core)"
+ },
+ "engine/wasmheap/src/lib.rs :: alloc :: refuse(pages, now, limit); #0": {
+  "class": "none",
+  "owner": "wasm heap (shared by raster and the mp core)"
+ },
+ "engine/wasmheap/src/lib.rs :: begin :: LIMIT_PAGES.store(wasm32::memory_size(0).saturating_add(pages as usize), Relaxed); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "wasm-heap-page-bound"
+   }
+  },
+  "owner": "wasm heap (shared by raster and the mp core)"
+ },
+ "engine/wasmheap/src/lib.rs :: refuse :: REFUSAL.limit_pages.store(limit as u32, Relaxed); #0": {
+  "class": "none",
+  "owner": "wasm heap (shared by raster and the mp core)"
+ },
+ "engine/wasmheap/src/lib.rs :: refuse :: fn refuse(need: usize, size: usize, limit: usize) { #0": {
+  "class": "none",
+  "owner": "wasm heap (shared by raster and the mp core)"
  },
  "engine/web/src/hmfq.rs ::  :: const MAX_DISC: i64 = 1 << 20; #0": {
   "class": "3",
@@ -5857,6 +5903,36 @@
   "class": "3",
   "owner": "number fields"
  },
+ "lib/_sage_numfun.py :: prime_pi_plot :: \"\"\"A plot of prime_pi(x) for xmin <= x <= xmax: a step line, with the #0": {
+  "class": "none",
+  "owner": "sagebrush-sage2",
+  "reason": "xmax is prime_pi.plot's right end (Sage's parameter name), not a cap: nothing is refused"
+ },
+ "lib/_sage_numfun.py :: prime_pi_plot :: at = sorted([float(p) for p in ps] + [float(xmax)]) #0": {
+  "class": "none",
+  "owner": "sagebrush-sage2",
+  "reason": "xmax is prime_pi.plot's right end (Sage's parameter name), not a cap: nothing is refused"
+ },
+ "lib/_sage_numfun.py :: prime_pi_plot :: def prime_pi_plot(xmin=0, xmax=100, vertical_lines=True, **kwds): #0": {
+  "class": "none",
+  "owner": "sagebrush-sage2",
+  "reason": "xmax is prime_pi.plot's right end (Sage's parameter name), not a cap: nothing is refused"
+ },
+ "lib/_sage_numfun.py :: prime_pi_plot :: if xmax < xmin: #0": {
+  "class": "none",
+  "owner": "sagebrush-sage2",
+  "reason": "xmax is prime_pi.plot's right end (Sage's parameter name), not a cap: nothing is refused"
+ },
+ "lib/_sage_numfun.py :: prime_pi_plot :: prime_range(xmin + 1, xmax + 1) and at xmax, sorted together: from #0": {
+  "class": "none",
+  "owner": "sagebrush-sage2",
+  "reason": "xmax is prime_pi.plot's right end (Sage's parameter name), not a cap: nothing is refused"
+ },
+ "lib/_sage_numfun.py :: prime_pi_plot :: ps = sa.prime_range(max(_round_even(xmin + 1), 0), max(_round_even(xmax + 1), 0)) #0": {
+  "class": "none",
+  "owner": "sagebrush-sage2",
+  "reason": "xmax is prime_pi.plot's right end (Sage's parameter name), not a cap: nothing is refused"
+ },
  "lib/_sage_padic.py ::  :: _PADIC_MATRIX_MAX_ENTRIES = 1 << 16 #0": {
   "class": "2+3",
   "owner": "p-adic linear algebra",
@@ -7645,6 +7721,11 @@
   "owner": "permutation groups (@sagebrush-sage2)",
   "reason": "PermutationGroup.is_isomorphic: groups of order above _ISO_MAX (5040), or a search past _ISO_STEPS, are refused as not available yet (never guessed)"
  },
+ "lib/sage_plot.py :: Graphics._bound :: return ar[k] if k in ar else self.get_minmax_data()[k] #0": {
+  "class": "none",
+  "owner": "Sage graphics (@sagebrush-matlab)",
+  "reason": "xmin/xmax/ymin/ymax are a figure's axis bounds (Graphics.xmin/xmax/ymin/ymax: the range set for the axis, else the primitives' extent), not a cap: nothing is refused"
+ },
  "lib/sage_plot.py :: Graphics._panel :: for k, v in zip((\"xmin\", \"xmax\", \"ymin\", \"ymax\"), bb)) #0": {
   "class": "none",
   "owner": "Sage graphics (@sagebrush-matlab)",
@@ -7654,6 +7735,41 @@
   "class": "none",
   "owner": "Sage graphics (@sagebrush-matlab)",
   "reason": "xmax/ymax are a figure's axis limits (the data's ranges kept for an aspect ratio), not a cap: nothing is refused"
+ },
+ "lib/sage_plot.py :: Graphics.get_minmax_data :: return {\"xmin\": -1, \"xmax\": 1, \"ymin\": -1, \"ymax\": 1} #0": {
+  "class": "none",
+  "owner": "Sage graphics (@sagebrush-matlab)",
+  "reason": "xmin/xmax/ymin/ymax are a figure's axis bounds (Graphics.xmin/xmax/ymin/ymax: the range set for the axis, else the primitives' extent), not a cap: nothing is refused"
+ },
+ "lib/sage_plot.py :: Graphics.get_minmax_data :: return {\"xmin\": x0, \"xmax\": x1, \"ymin\": y0, \"ymax\": y1} #0": {
+  "class": "none",
+  "owner": "Sage graphics (@sagebrush-matlab)",
+  "reason": "xmin/xmax/ymin/ymax are a figure's axis bounds (Graphics.xmin/xmax/ymin/ymax: the range set for the axis, else the primitives' extent), not a cap: nothing is refused"
+ },
+ "lib/sage_plot.py :: Graphics.xmax :: def xmax(self, xmax=None): #0": {
+  "class": "none",
+  "owner": "Sage graphics (@sagebrush-matlab)",
+  "reason": "xmin/xmax/ymin/ymax are a figure's axis bounds (Graphics.xmin/xmax/ymin/ymax: the range set for the axis, else the primitives' extent), not a cap: nothing is refused"
+ },
+ "lib/sage_plot.py :: Graphics.xmax :: return self._bound(\"xmax\", xmax) #0": {
+  "class": "none",
+  "owner": "Sage graphics (@sagebrush-matlab)",
+  "reason": "xmin/xmax/ymin/ymax are a figure's axis bounds (Graphics.xmin/xmax/ymin/ymax: the range set for the axis, else the primitives' extent), not a cap: nothing is refused"
+ },
+ "lib/sage_plot.py :: Graphics.xmin :: sage: G.xmin(-1); G.xmin(), G.get_minmax_data()['xmin'] #0": {
+  "class": "none",
+  "owner": "Sage graphics (@sagebrush-matlab)",
+  "reason": "xmin/xmax/ymin/ymax are a figure's axis bounds (Graphics.xmin/xmax/ymin/ymax: the range set for the axis, else the primitives' extent), not a cap: nothing is refused"
+ },
+ "lib/sage_plot.py :: Graphics.ymax :: def ymax(self, ymax=None): #0": {
+  "class": "none",
+  "owner": "Sage graphics (@sagebrush-matlab)",
+  "reason": "xmin/xmax/ymin/ymax are a figure's axis bounds (Graphics.xmin/xmax/ymin/ymax: the range set for the axis, else the primitives' extent), not a cap: nothing is refused"
+ },
+ "lib/sage_plot.py :: Graphics.ymax :: return self._bound(\"ymax\", ymax) #0": {
+  "class": "none",
+  "owner": "Sage graphics (@sagebrush-matlab)",
+  "reason": "xmin/xmax/ymin/ymax are a figure's axis bounds (Graphics.xmin/xmax/ymin/ymax: the range set for the axis, else the primitives' extent), not a cap: nothing is refused"
  },
  "lib/sage_plot3d.py ::  :: _GC_BUDGET_S = 0.05 # (a pass's work, at most; the next pass goes on from its cursor) #0": {
   "class": "1",

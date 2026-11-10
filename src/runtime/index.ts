@@ -42,16 +42,37 @@ Error.stackTraceLimit = 200;
 // implementation directly; others go through a binding wrapper.
 export function defn(impl: any, name: string, qualname: string, module: string, defaults: any[] | null, kwdefaults: Obj.PyDict | null, sig: Obj.Signature, doc: any, g?: any): any {
   const simple = sig.vararg === null && sig.kwarg === null && sig.kwonly.length === 0;
+  const isGen = impl.prototype !== undefined && Object.getPrototypeOf(impl) === GeneratorFunctionProto;
   let f = impl;
-  if (!simple) {
+  if (simple && isGen) {
+    // (a generator's or coroutine's arguments are checked at the call, as CPython's, not when it first runs: its
+    // body, the prologue included, only runs then)
+    const n = sig.args.length;
     f = function (...a: any[]) {
-      return impl(...bindArgs(f.__name__, sig, a, [], []));
+      if (a.length > n) Obj.tooManyArgs(f, a.length);
+      if (a.length < n) {
+        const d = f.__defaults__;
+        if (a.length < n - (d === null ? 0 : d.length)) Obj.missingArg(f, sig.args[a.length]);
+      }
+      return impl(...a);
     };
-    f.$kw = (pos: any[], names: string[], values: any[]) => impl(...bindArgs(f.__name__, sig, pos, names, values));
+    impl.$public = f;
+  } else if (!simple) {
+    f = function (...a: any[]) {
+      return impl(...bindArgs(f.__name__, sig, a, [], [], f));
+    };
+    f.$kw = (pos: any[], names: string[], values: any[]) => impl(...bindArgs(f.__name__, sig, pos, names, values, f));
     f.$kwPos = true; // (bindArgs checks the count and makes *args one tuple: BIG_CALL)
     impl.$public = f;
   }
+  // (code.co_flags: CO_GENERATOR, or CO_COROUTINE for async def, whose generators are coroutines)
+  if (isGen) impl.prototype.$cls === T.coroutine ? (f.$isCoro = true) : (f.$isGen = true);
+  // (and CPython 3.14's static flags, from where the def is: CO_NESTED inside a function, CO_METHOD directly in a
+  // class body, CO_HAS_DOCSTRING with a docstring)
+  const parts = qualname.split(".");
+  f.$coFlags = (parts.includes("<locals>") ? 0x10 : 0) | (parts.length > 1 && parts[parts.length - 2] !== "<locals>" ? 0x8000000 : 0) | (doc !== null && doc !== undefined ? 0x4000000 : 0);
   f.$pyfn = true;
+  f.$defn = true; // (a compiled function: its call errors are CPython's, bindArgs)
   f.$sig = sig;
   f.__name__ = name;
   f.__qualname__ = qualname;
