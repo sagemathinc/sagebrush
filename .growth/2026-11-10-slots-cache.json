@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "__slots__ reads cached for their attribute-read sites (src/runtime/object.ts getattrMiss: for a class with __slots__ in its MRO only, a slot member's value is read from the instance's own runtime key, the own-property check kept when hardened; primed only for a plain class, an object with its class's own layout and a real member_descriptor whose owner is in the MRO; the generated read stub is unchanged), about 10x faster, so pyexpat's slotted tokenizer parses a 1.91 MB SVG in about 1.2 s (was 2.14). Measured with bun 1.4.4 (size-record.sh) on master 69859f01 vs this head merged with it: cli/pyjs.cjs +789 (+64 slack); engine/sagebrush-worker.js +542 (ceiling renewed to measured + 64 = 1686886).",
+ "bytes": {
+  "cli/pyjs.cjs": 853,
+  "engine/sagebrush-worker.js": 542
+ }
+}

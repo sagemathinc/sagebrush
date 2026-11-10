@@ -1,0 +1,20 @@
+set 1 2
+unset AttributeError: 'A' object has no attribute 'x'
+deleted AttributeError: 'A' object has no attribute 'x'
+set again 4
+subclass 5 6 5
+both sites 1 5 1
+before 7
+property 'property'
+restored 7
+getattr unset 'getattr x'
+getattr set 8
+getattribute 'getattribute x'
+foreign member TypeError: descriptor 'x' for 'A' objects doesn't apply to a 'D' object
+falsy 1 None
+falsy None False
+falsy None 0
+falsy None ''
+falsy None []
+slot over dict 10 {'x': 'dict'}
+dir ['x', 'y']
