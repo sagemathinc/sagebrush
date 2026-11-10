@@ -25,6 +25,7 @@ let port = Number(process.env.CDP_PORT) || 0;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const profile = mkdtempSync(join(tmpdir(), "sb-export-"));
 const out = mkdtempSync(join(tmpdir(), "sb-export-out-"));
+process.on("SIGTERM", () => { try { chrome.kill("SIGKILL"); } catch {} process.exit(124); });
 const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${port}`, "--window-size=1280,800", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
 if (!port) port = await devtoolsPort(profile);
 let targets;
@@ -42,9 +43,9 @@ const serve = { ref: false, servedChunk: 0, servedWorker: 0 };
 let REF = null;
 ws.onmessage = (ev) => {
   const m = JSON.parse(ev.data);
-  if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
+  if (m.id && waiting.has(m.id)) { const w = waiting.get(m.id); waiting.delete(m.id); w.ok(m.result ?? m.error); }
   if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails));
-  if (m.method === "Page.javascriptDialogOpening") send("Page.handleJavaScriptDialog", { accept: true });
+  if (m.method === "Page.javascriptDialogOpening") send("Page.handleJavaScriptDialog", { accept: true }).catch(() => {});
   if (m.method === "Runtime.consoleAPICalled") consoleLines.push(m.params.args.map((a) => a.value ?? a.description ?? "").join(" ").slice(0, 200));
   // (a control's chunk, in place of the built one)
   if (m.method === "Fetch.requestPaused") {
@@ -54,11 +55,20 @@ ws.onmessage = (ev) => {
     // (paused at the response: the server's own headers kept, the body replaced; a worker's script needs the page's
     // Cross-Origin-Embedder-Policy on it, or the worker isn't started)
     const headers = (m.params.responseHeaders ?? []).filter((h) => !/^(content-length|content-encoding|etag|last-modified)$/i.test(h.name));
-    if (body) send("Fetch.fulfillRequest", { requestId: m.params.requestId, responseCode: 200, responseHeaders: headers.length ? headers : [{ name: "Content-Type", value: "text/javascript" }], body: body.toString("base64") });
-    else send("Fetch.continueRequest", { requestId: m.params.requestId });
+    if (body) send("Fetch.fulfillRequest", { requestId: m.params.requestId, responseCode: 200, responseHeaders: headers.length ? headers : [{ name: "Content-Type", value: "text/javascript" }], body: body.toString("base64") }).catch(() => {});
+    else send("Fetch.continueRequest", { requestId: m.params.requestId }).catch(() => {});
   }
 };
-const send = (method, params = {}, sessionId) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })); });
+// (every call bounded: answered, or rejected after CALL_MS or as soon as the socket to the browser closes, so a stuck
+//  page or a browser gone never leaves this run waiting for ever; the nightly export-controls hang, run 42794177694)
+const CALL_MS = 300_000;
+const send = (method, params = {}, sessionId, ms = CALL_MS) => new Promise((ok, no) => {
+  if (ws.readyState !== WebSocket.OPEN) return no(new Error(`CDP ${method}: the connection to the browser is closed`));
+  const id = ++n, t = setTimeout(() => { waiting.delete(id); no(new Error(`CDP ${method}: no answer in ${ms / 1000} s`)); }, ms);
+  waiting.set(id, { ok: (v) => { clearTimeout(t); ok(v); }, no: (e) => { clearTimeout(t); no(e); } });
+  ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
+});
+ws.onclose = () => { for (const [id, w] of waiting) { waiting.delete(id); w.no(new Error("CDP: the connection to the browser closed")); } };
 const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error((r.exceptionDetails.exception?.description ?? JSON.stringify(r.exceptionDetails)).slice(0, 400)); return r.result?.value; };
 /** A second tab of the same site (the same profile: its OPFS and its locks are shared), for the scenarios two tabs
  * need; its own ev and until. */
@@ -67,10 +77,10 @@ async function secondTab() {
   const { sessionId } = await send("Target.attachToTarget", { targetId, flatten: true });
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m, {}, sessionId);
   const ev2 = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, sessionId); if (r.exceptionDetails) throw new Error((r.exceptionDetails.exception?.description ?? JSON.stringify(r.exceptionDetails)).slice(0, 400)); return r.result?.value; };
-  const until2 = async (expr, ms = 15000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev2(expr).catch(() => false)) return true; await sleep(100); } return false; };
+  const until2 = async (expr, ms = 15000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await Promise.race([ev2(expr).catch(() => false), sleep(ms - (Date.now() - t)).then(() => false)])) return true; await sleep(100); } return false; };
   return { ev: ev2, until: until2, close: () => send("Target.closeTarget", { targetId }) };
 }
-const until = async (expr, ms = 15000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(100); } return false; };
+const until = async (expr, ms = 15000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await Promise.race([ev(expr).catch(() => false), sleep(ms - (Date.now() - t)).then(() => false)])) return true; await sleep(100); } return false; };
 const go = async (url) => { await send("Page.navigate", { url }); await sleep(300); };
 const fails = [];
 let checks = 0;
@@ -86,7 +96,7 @@ const panelText = () => ev(`${P}?.textContent ?? ""`);
 const closeFlow = () => ev(`(() => { [...(${P}?.querySelectorAll("button") ?? [])].filter((b) => b.textContent === "Close").forEach((b) => b.click()); return 1; })()`);
 
 /** IndexedDB, raw: one request on `db`/`store` (the test's own hand on storage: missing bytes, injected ops). */
-const IDB = `((db, store, f) => new Promise((ok, no) => { const r = indexedDB.open(db); r.onsuccess = () => { const d = r.result, tx = d.transaction(store, "readwrite"), q = f(tx.objectStore(store)); tx.oncomplete = () => { d.close(); ok(q?.result ?? null); }; tx.onerror = () => no(tx.error); }; r.onerror = () => no(r.error); }))`;
+const IDB = `((db, store, f) => new Promise((ok, no) => { const r = indexedDB.open(db); r.onblocked = () => no(new Error("indexedDB.open blocked")); r.onsuccess = () => { const d = r.result, tx = d.transaction(store, "readwrite"), q = f(tx.objectStore(store)); tx.oncomplete = () => { d.close(); ok(q?.result ?? null); }; tx.onerror = () => no(tx.error); }; r.onerror = () => no(r.error); }))`;
 const idb = (db, store, f) => ev(`${IDB}(${JSON.stringify(db)}, ${JSON.stringify(store)}, ${f})`);
 /** The last export prepared (the workspace's meta "export:last"). */
 const LAST = `${IDB}("sagebrush-workspace", "meta", (s) => s.get("export:last"))`;
@@ -265,7 +275,7 @@ try {
     g.putImageData(im, 0, 0);
     const blob = await new Promise((r) => c.toBlob(r, "image/png"));
     // (the board's picture store, opened as web/board/images.ts opens it: version 1, its store made on upgrade)
-    await new Promise((ok, no) => { const r = indexedDB.open("sagebrush-board-images", 1); r.onupgradeneeded = () => r.result.createObjectStore("blobs"); r.onsuccess = () => { const d = r.result, tx = d.transaction("blobs", "readwrite"); tx.objectStore("blobs").put(blob, "testpic01"); tx.oncomplete = () => { d.close(); ok(1); }; tx.onerror = () => no(tx.error); }; r.onerror = () => no(r.error); });
+    await new Promise((ok, no) => { const r = indexedDB.open("sagebrush-board-images", 1); r.onblocked = () => no(new Error("indexedDB.open blocked")); r.onupgradeneeded = () => r.result.createObjectStore("blobs"); r.onsuccess = () => { const d = r.result, tx = d.transaction("blobs", "readwrite"); tx.objectStore("blobs").put(blob, "testpic01"); tx.oncomplete = () => { d.close(); ok(1); }; tx.onerror = () => no(tx.error); }; r.onerror = () => no(r.error); });
     const r = await ${W}.read("/Plan.board.json");
     await ${W}.write("/Plan.board.json", { ...r.content, images: { testpic01: { w: 300, h: 200 } }, nodes: [...(r.content.nodes ?? []), { id: "pn", title: "with a picture", image: "testpic01" }] }, { base: r.rev });
     return blob.size;
@@ -955,7 +965,7 @@ print(json.dumps({"members": len(b), "diffs": diffs[:6], "ndiffs": len(diffs), "
     const cb = await sinkExport("opfs", join(out, "id70-cap.zip"), `afterCapture: async (p) => { if (p === "/zz-capid70.csv") await window.sagebrush.workspace.write(p, "b\\n"); }, captureChunk: (ch) => { (window.__cap ??= []).push(ch.slice()); }`);
     const cr = await ev(`(async () => {
       const hex = async (blob) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", await blob.arrayBuffer()))].map((b) => b.toString(16).padStart(2, "0")).join("");
-      const rows = await new Promise((ok, no) => { const q = indexedDB.open("sagebrush-workspace"); q.onsuccess = () => { const d = q.result, g = d.transaction("entries").objectStore("entries").getAll(); g.onsuccess = () => { d.close(); ok(g.result); }; g.onerror = () => no(g.error); }; q.onerror = () => no(q.error); });
+      const rows = await new Promise((ok, no) => { const q = indexedDB.open("sagebrush-workspace"); q.onblocked = () => no(new Error("indexedDB.open blocked")); q.onsuccess = () => { const d = q.result, g = d.transaction("entries").objectStore("entries").getAll(); g.onsuccess = () => { d.close(); ok(g.result); }; g.onerror = () => no(g.error); }; q.onerror = () => no(q.error); });
       const lines = rows.filter((e) => e.path !== "/" && e.path !== "/Trash" && !e.path.startsWith("/Trash/")).map((e) => JSON.stringify([e.path, e.kind, e.ident ?? null]) + "\\n");
       const ref = new Blob(lines), got = new Blob(window.__cap ?? []);
       window.__cap = [];
@@ -995,7 +1005,7 @@ print(json.dumps({"members": len(b), "diffs": diffs[:6], "ndiffs": len(diffs), "
     const cb = await sinkExport("opfs", join(out, "fp-cap.zip"), `appendDelayMs: 150, appendDelayRe: "-capture$", afterCapture: async (p) => { if (p === "/zz-fp.csv") await window.sagebrush.workspace.write(p, "b\\n"); }, captureChunk: (ch) => { (window.__cap ??= []).push(ch.slice()); }`);
     const cr = await ev(`(async () => {
       const hex = async (blob) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", await blob.arrayBuffer()))].map((b) => b.toString(16).padStart(2, "0")).join("");
-      const rows = await new Promise((ok, no) => { const q = indexedDB.open("sagebrush-workspace"); q.onsuccess = () => { const d = q.result, g = d.transaction("entries").objectStore("entries").getAll(); g.onsuccess = () => { d.close(); ok(g.result); }; g.onerror = () => no(g.error); }; q.onerror = () => no(q.error); });
+      const rows = await new Promise((ok, no) => { const q = indexedDB.open("sagebrush-workspace"); q.onblocked = () => no(new Error("indexedDB.open blocked")); q.onsuccess = () => { const d = q.result, g = d.transaction("entries").objectStore("entries").getAll(); g.onsuccess = () => { d.close(); ok(g.result); }; g.onerror = () => no(g.error); }; q.onerror = () => no(q.error); });
       const lines = rows.filter((e) => e.path !== "/" && e.path !== "/Trash" && !e.path.startsWith("/Trash/")).map((e) => JSON.stringify([e.path, e.kind, e.ident ?? null]) + "\\n");
       const ref = new Blob(lines), got = new Blob(window.__cap ?? []);
       window.__cap = [];
@@ -1620,7 +1630,7 @@ print(json.dumps({"members": len(b), "diffs": diffs[:6], "ndiffs": len(diffs), "
     const SLICE = 1 << 20;
     // (the log an unbuffered writer makes, from the raw rows, in their key (path) order: its bytes, and how many bytes
     // its first n lines take, and how many its lines from `from` on take)
-    const REF = `(async () => { const rows = await new Promise((ok, no) => { const q = indexedDB.open("sagebrush-workspace"); q.onsuccess = () => { const d = q.result, g = d.transaction("entries").objectStore("entries").getAll(); g.onsuccess = () => { d.close(); ok(g.result); }; g.onerror = () => no(g.error); }; }); const lines = rows.filter((e) => e.path !== "/" && e.path !== "/Trash" && !e.path.startsWith("/Trash/")).map((e) => [e.path, JSON.stringify([e.path, e.kind, e.ident ?? null]) + "\\n"]); const enc = new TextEncoder(); const len = lines.map(([, l]) => enc.encode(l).length); window.__ref = { lines, len }; return lines.length; })()`;
+    const REF = `(async () => { const rows = await new Promise((ok, no) => { const q = indexedDB.open("sagebrush-workspace"); q.onblocked = () => no(new Error("indexedDB.open blocked")); q.onsuccess = () => { const d = q.result, g = d.transaction("entries").objectStore("entries").getAll(); g.onsuccess = () => { d.close(); ok(g.result); }; g.onerror = () => no(g.error); }; }); const lines = rows.filter((e) => e.path !== "/" && e.path !== "/Trash" && !e.path.startsWith("/Trash/")).map((e) => [e.path, JSON.stringify([e.path, e.kind, e.ident ?? null]) + "\\n"]); const enc = new TextEncoder(); const len = lines.map(([, l]) => enc.encode(l).length); window.__ref = { lines, len }; return lines.length; })()`;
     const HEX = `(async (parts) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", await new Blob(parts).arrayBuffer()))].map((b) => b.toString(16).padStart(2, "0")).join(""))`;
     const firstBytes = (n) => ev(`window.__ref.len.slice(0, ${n}).reduce((a, b) => a + b, 0)`);
     const fromBytes = (path) => ev(`window.__ref.lines.reduce((a, [p], i) => a + (p >= ${JSON.stringify(path)} ? window.__ref.len[i] : 0), 0)`);

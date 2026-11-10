@@ -13,6 +13,9 @@ import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url)), root = join(here, "..", "..");
 const X = "web/workspace/export/";
+// (each control bounded, well under the job's 60 minutes: a build or a run that doesn't finish is that control's named
+//  FAIL, and the next control runs; never a silent wait until the job is cancelled, as the nightly run 42794177694 was)
+const BUILD_MS = 180_000, CONTROL_MS = 900_000;
 // [name, the rule, file, find, replace, scenario, the checks that must fail (a regex on their FAIL lines: a closed list,
 // the rule's own checks and those that follow from it alone; at least one must fail, and no other may), which file]
 const CONTROLS = [
@@ -138,7 +141,8 @@ const want = new Map(); for (const [f] of subs) want.set(f, (want.get(f) ?? 0) +
 for (const [f, n] of seen) if (n !== want.get(f)) { console.error("the control's file " + f + " wasn't built"); process.exit(1); }
 await Bun.write(${JSON.stringify(outFile)}, r.outputs[0]);
 console.log("built");`;
-  const p = spawnSync("bun", ["-e", code], { cwd: root, encoding: "utf8" });
+  const p = spawnSync("bun", ["-e", code], { cwd: root, encoding: "utf8", timeout: BUILD_MS, killSignal: "SIGKILL" });
+  if (p.error?.code === "ETIMEDOUT" || p.signal) return `the build didn't finish in ${BUILD_MS / 1000} s`;
   return p.status === 0 ? null : (p.stderr || p.stdout).slice(0, 600);
 }
 
@@ -154,7 +158,13 @@ try {
     // (a control across both files is built per file: here C5's two are both in the chunk)
     const err = build(kind, subs, out);
     if (err) { bad++; console.log(`FAIL ${name} (${rule}): the control couldn't be built: ${err}`); continue; }
-    const r = spawnSync(process.execPath, [join(here, run?.test ?? "test-export.mjs"), ...(run?.args ?? [])], { encoding: "utf8", env: { ...process.env, ONLY: scenario, ...(run?.env ?? {}), [kind === "worker" ? "CHUNK_WORKER" : "CHUNK"]: out }, maxBuffer: 1 << 26 });
+    const r = spawnSync(process.execPath, [join(here, run?.test ?? "test-export.mjs"), ...(run?.args ?? [])], { encoding: "utf8", env: { ...process.env, ONLY: scenario, ...(run?.env ?? {}), [kind === "worker" ? "CHUNK_WORKER" : "CHUNK"]: out }, maxBuffer: 1 << 26 , timeout: CONTROL_MS, killSignal: "SIGTERM" });
+    if (r.error?.code === "ETIMEDOUT" || r.signal) {
+      bad++;
+      console.log(`FAIL ${name} (${rule}): its run didn't finish in ${CONTROL_MS / 1000} s (stopped); its last lines:`);
+      for (const l of (r.stdout ?? "").trim().split("\n").slice(-5)) console.log(`     ${l.slice(0, 150)}`);
+      continue;
+    }
     const lines = (r.stdout ?? "").split("\n").filter((l) => /^FAIL /.test(l));
     // (the run's summary repeats each failure at its end: counted once)
     const failed = [...new Set(lines)];
