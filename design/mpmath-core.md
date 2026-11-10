@@ -162,14 +162,16 @@ Every other mpmath module stays the upstream Python, now running on fast primiti
 The exact ABI and the numeric thresholds are Phase 0 decisions. These invariants are not; every shipping phase must meet them:
 1. **Sizes are checked before allocation.** Precision, exponent, matrix dimension and limb count are each checked against the session's limits, and the arithmetic that sizes a buffer is checked for overflow, before anything is allocated. A request over a limit is refused with the limits' usual error.
 2. **Every allocation is charged and bounded.** WebAssembly linear memory, native heap and retained caches (constants per precision, quadrature nodes, Bernoulli numbers) are charged to the session's memory accounting. Each cache is per session, with a stated bound and an eviction rule.
-3. **Ownership.**
-   - Handles to core-resident numbers are owned: each has exactly one owner, and is freed when that owner is collected or the session ends. A `FinalizationRegistry` may free them earlier, but it isn't the release mechanism the contract relies on: session end frees everything.
-   - Every buffer span passed across the boundary is validated (offset, length, alignment, inside linear memory) on the core's side before use.
-   - A stale or forged handle is an error, never a read.
+3. **Ownership: the core holds no number between calls** (the JS-resident limbs, @sagebrush's ruling, Nov 10). There are no handles, so nothing can be stale or forged.
+   - A big number's limbs live in the JavaScript heap, in a `Uint32Array` owned by its `mpf` object. They go with that object when it is collected, as a Python int's digits do. The `_mpf_` tuple, once made, is kept on the same object. The core's memory never holds a session value, only its caches.
+   - **Copies are size-checked before anything is allocated, on both sides.** Copy-in checks the limb count against the per-number limit (2^22 limbs) before the JavaScript array is made, and the core checks the IO buffer's growth against its page bound before it grows. Copy-out takes its count from the core's result, which the core has already sized under the same limits.
+   - **Every operand that crosses is validated by the core before use.** Its span must lie inside the IO buffer, and its limbs must be normalized (the top limb non-zero, the count exact). `bc` must equal the mantissa's bit length, the exponent must be exact, and the sign must be 0 or 1. A malformed array (wrong length, a `bc` that disagrees, a zero top limb) is refused, never read.
+   - **Copy-out makes a fresh array**, so no view of the core's memory stays reachable.
+   - **Accounting.** One number is at most 2^22 limbs (32 MiB) on either side. The JavaScript arrays and the tuples made from them count against the session's JavaScript heap, as Python ints do. The core's memory, including its caches and the IO buffer, is bounded at its source by engine/wasmheap's page bound (1 GiB).
 4. **Cancellation everywhere.** The interrupt flag is polled in every loop that can run long. That includes conversions (text to number at a million digits), series summation, quadrature and Ziv's retries in the CR policy. Cancellation also reaches the long loops that stay in Python: hypsum's retries at higher working precision go through the same interrupt check.
-5. **Cleanup.** On cancellation, on error and at session end, everything the core allocated for the call or the session is released, and no partial result is left reachable.
+5. **Cleanup.** On cancellation, on error and at session end, everything the core allocated for the call or the session is released, and no partial result is left reachable. In the binding, an `mpf` is made only after its call has succeeded. A refusal, a Stop or a trap raises before any result object exists, and a trap retires the core's instance.
 
-These invariants get tests in the same PR as the code they govern: a refusal at each limit, a stale handle, a cancelled conversion and a cancelled Ziv retry. Each limit is registered in the limits census.
+These invariants get tests in the same PR as the code they govern: a refusal at each limit, a malformed limb array, a cancelled or refused large copy, the session used again after an error, a cancelled conversion and a cancelled Ziv retry. Each limit is registered in the limits census.
 
 ### 4.6 The boundary between Python and Rust, phase by phase
 
@@ -180,7 +182,7 @@ Results stay bit-identical (§6) because each phase moves only code whose observ
   - Every result has the same type (`mpf`, `mpc`, `constant`, or `NotImplemented` for foreign operands), and errors raise the same exceptions.
   - Pickling, hashing (equal hashes with equal `int`, `float` and `Fraction` values), and comparison with other types all behave the same.
   - A conformance list generated from `ctx_mp_python`'s public surface is checked alongside the suite. It gates the merged Phase 1; it isn't deferred.
-  - **The hybrid number (Phase 0's finding).** The predicate is on the raw tuple's mantissa, which is unsigned (the sign is the tuple's separate `sign`, and `mpf.man` is `_mpf_[1]`): a number with `0 <= man < 2^53` is held inline, and one with `man >= 2^53` as an owned handle to a number resident in the core (§4.5). The sign never decides the storage, and the fuzzer pins both signs at mantissas 2^53 - 1, 2^53 and 2^53 + 1 (§6.1). Storage is never observable (python's R1):
+  - **The hybrid number (Phase 0's finding).** The predicate is on the raw tuple's mantissa, which is unsigned (the sign is the tuple's separate `sign`, and `mpf.man` is `_mpf_[1]`): a number with `0 <= man < 2^53` is held inline, as its raw tuple of exact JavaScript numbers. One with `man >= 2^53` keeps its mantissa JavaScript-side as packed limbs (a `Uint32Array` of 64-bit limbs, little-endian), with its sign, exponent and `bc`. Each operation copies its operands' limbs into the core and the result's limbs out (§4.5): the JS-resident limbs of @sagebrush's ruling (Nov 10), which replaced Phase 0's core-resident handles. The sign never decides the storage, and the fuzzer pins both signs at mantissas 2^53 - 1, 2^53 and 2^53 + 1 (§6.1). Storage is never observable (python's R1):
     - every observable value (`mpf.man`, `._mpf_`, `mpc._mpc_`, the `libmp` raw tuples, pickles) is a plain Python `int` tuple, identical to the python backend's;
     - `type(x.man) is int`;
     - `x._mpf_ is x._mpf_` holds, as upstream's: the tuple is materialized once per object and kept.
@@ -317,7 +319,10 @@ Every target is a ratio to a baseline measured at the same time on the same mach
      - `mpf` and `mpc` construction;
      - the methods the native type takes over: `__add__`, `__mul__` and the rest of the arithmetic, comparisons, hashing, and pickling in both directions;
      - the hybrid number's boundary: mantissas of exactly 2^53 - 1, 2^53 and 2^53 + 1, with both signs, as operands and as results;
-     - handle lifetime: results kept and dropped across collections and the `FinalizationRegistry`, a stale handle refused, and everything freed at session end (§4.5).
+     - **lifetime:** a few million `mpf` operations at dps 30 complete within the session's memory, asserting the count and a digest, never a time;
+     - **copy boundaries:** limb counts 1, 2, n and n + 1 at the IO buffer's capacity; mantissas at 2^53, 2^64 and 2^96, each ± 1, with both signs; aliased operands (`x*x`, `x += x`); the largest operand the buffer takes, and one past it, refused cleanly;
+     - **R1:** `x._mpf_ is x._mpf_` and `type(x.man) is int` on the big form, both after materialization and after a pickle round trip;
+     - **planted faults in the copies:** the top limb dropped on copy-in, and a stale IO word left after a shorter result (a long result followed by a short one).
 5. **CR and BALL have oracles of their own.**
    - **CR (Phase 3 on):** results are compared with the Sage oracle (MPFR) in every rounding direction. The points are random and adversarial, including the published hardest-to-round cases for exp, log and sin.
    - **BALL (Phase 6):** containment is checked against an MP evaluation at twice the precision and against Sage's `RealIntervalField`. The radius must stay within a stated factor of the true error.
