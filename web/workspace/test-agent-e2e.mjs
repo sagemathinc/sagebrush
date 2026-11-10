@@ -102,8 +102,17 @@ _hello = P.Pairing._hello
 # (test only: a hello answered late, HELLO_SLOW s; or refused with REFUSE's words, as another server's refusal would be)
 HELLO_SLOW = [0.0]
 REFUSE = [None]
+# (test only: the hello numbered HELLO_GATE[1] (counted in HELLOS) waits at the server until "hellogo": a retry the page
+# asked in time, answered only when the test says; "hellogate" arms it, "hellowaiting" says whether one waits)
+HELLO_GATE = [None, 0]
+HELLO_WAITING = [False]
 def _timed_hello(self, c, msg):
     HELLOS.append([self.port, time.monotonic() * 1000])
+    g = HELLO_GATE[0]
+    if g is not None and len(HELLOS) == HELLO_GATE[1]:
+        HELLO_WAITING[0] = True
+        g.wait(30)
+        HELLO_WAITING[0] = False
     if REFUSE[0]:
         rid = msg.get("id") if isinstance(msg, dict) else None
         self._reply_error(c, rid, "refused", REFUSE[0]); self._close(c, 1008, REFUSE[0])
@@ -134,6 +143,14 @@ for line in sys.stdin:
             print(json.dumps({"ok": len(HELLOS)}), flush=True)
         elif m["op"] == "grants":
             print(json.dumps({"ok": GRANTS[:]}), flush=True); GRANTS.clear()
+        elif m["op"] == "hellogate":
+            HELLO_GATE[0] = threading.Event(); HELLO_GATE[1] = int(m["n"]); print(json.dumps({"ok": True}), flush=True)
+        elif m["op"] == "hellogo":
+            g = HELLO_GATE[0]; HELLO_GATE[0] = None
+            if g is not None: g.set()
+            print(json.dumps({"ok": True}), flush=True)
+        elif m["op"] == "hellowaiting":
+            print(json.dumps({"ok": HELLO_WAITING[0]}), flush=True)
         elif m["op"] == "helloslow":
             HELLO_SLOW[0] = float(m["s"]); print(json.dumps({"ok": HELLO_SLOW[0]}), flush=True)
         elif m["op"] == "refuse":
@@ -438,15 +455,23 @@ try {
   await drive({ op: "hellos" });
   const n12 = (await drive({ op: "hellon" })).ok;
   await drive({ op: "grants" });
+  // (the reload's second hello, its retry, asked before the expiry, waits at the server until the expiry has passed and
+  //  the old connection is seen closed: then it pairs, and the grant must still not be given (#978's red: a retry asked
+  //  in time and answered after the expiry was given the expired grant))
+  await drive({ op: "hellogate", n: n12 + 2 });
   ok(await open(""), "reload 12, at once: refused, asking again");
   ok(await helloAfter(n12), "reload 12: its first hello reached the server");
+  ok(await (async () => { const t = Date.now(); while (Date.now() - t < 10000) { if ((await drive({ op: "hellowaiting" })).ok) return true; await sleep(25); } return false; })(), "reload 12: its retry's hello waits at the server");
   await ev(`(window.__skew = ${exp12} + 100 - (Date.now() - (window.__skew ?? 0)), 1)`); // (past the expiry, inside the window)
   await drive({ op: "release" });
   ok(await heldAt(0), "reload 12: the hold released");
+  ok(await (async () => { const t = Date.now(); while (Date.now() - t < 10000) { if ((await drive({ op: "status" })).ok?.paired === false) return true; await sleep(25); } return false; })(), "reload 12: the old connection seen closed");
+  await drive({ op: "hellogo" });
   await sleep(2000);
   const h12 = ((await drive({ op: "hellos" })).ok ?? []).filter(([port]) => port === PORT);
   const g12 = ((await drive({ op: "grants" })).ok ?? []).filter(([port]) => port === PORT);
-  ok(h12.length >= 1 && h12.length <= 2 && g12.length === 0, `reload 12: the remembered grant expired during the window: no further attempt, and it isn't given again (${h12.length} hellos, ${g12.length} grants)`);
+  const bar12 = await ev(`!!document.querySelector(".sbag-bar")`);
+  ok(h12.length === 2 && g12.length === 0 && !bar12, `reload 12: the remembered grant expired while its retry paired: not given, no further attempt (${h12.length} hellos, ${g12.length} grants, bar ${bar12})`);
   await drive({ op: "slow", s: 0 });
 
   // ---- the same for restoreWith()'s path: a reload record (a grant until the page closes, ?r=1)
