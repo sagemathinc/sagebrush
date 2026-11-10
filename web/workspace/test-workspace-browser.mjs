@@ -1419,6 +1419,46 @@ try {
     const dirOffers = await ev(`[...document.querySelectorAll(".sbfmenu button")].map((b) => b.textContent)`);
     await ev(`(dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })), 1)`);
     check(back3 && !dirOffers.includes("h3 dir") && !dirOffers.includes("Top folder"), "H3: Move to… the top folder; a folder isn't offered itself: " + JSON.stringify({ back3, dirOffers: dirOffers.slice(0, 8) }));
+    // (TESTS972-1: Trash, and a folder in it, never offered)
+    await ev(`${W}.mkdir("/h3 binned").then(() => ${W}.remove("/h3 binned")).then(() => 1)`);
+    await until(`${W}.stat("/Trash/h3 binned").then((x) => !!x)`, 10000);
+    const offers = async (p) => {
+      await until(`!!document.querySelector(${JSON.stringify(treeRow(p))})`, 10000);
+      await ev(`(document.querySelector(${JSON.stringify(treeRow(p))} + " .more").click(), 1)`);
+      await menu("Move to…");
+      await new Promise((r) => setTimeout(r, 400));
+      return ev(`[...document.querySelectorAll(".sbfmenu button")].map((b) => b.textContent)`);
+    };
+    const binOffers = await offers("/h3 file.txt");
+    await ev(`(dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })), 1)`);
+    check(binOffers.includes("h3 dir") && !binOffers.some((t) => /^Trash|h3 binned/.test(t)), "H3: Trash, and a folder in it, never offered: " + JSON.stringify(binOffers.filter((t) => /Trash|binned/.test(t))));
+    // (TESTS972-2: a folder and a file inside it, selected together: the folder moves, the file with it, not on its own)
+    const box3 = (p) => ev(`(() => { document.querySelector(${JSON.stringify(treeRow(p))} + " .sel").click(); return 1; })()`);
+    const clearSel = () => ev(`(() => { [...document.querySelectorAll("#wssidebar .fsel button")].find((x) => x.textContent === "Clear")?.click(); return 1; })()`);
+    await ev(`${W}.mkdir("/h3D").then(() => ${W}.create("/h3D/x.txt", { content: "x" })).then(() => ${W}.mkdir("/h3E")).then(() => 1)`);
+    await until(`!!document.querySelector(${JSON.stringify(treeRow("/h3D"))}) && !!document.querySelector(${JSON.stringify(treeRow("/h3E"))})`, 10000);
+    await click(treeRow("/h3D"));
+    await until(`!!document.querySelector(${JSON.stringify(treeRow("/h3D/x.txt"))})`, 10000);
+    await box3("/h3D"); await box3("/h3D/x.txt");
+    await offers("/h3D");
+    await menu("h3E");
+    const nested = await until(`${W}.stat("/h3E/h3D/x.txt").then((a) => !!a)`, 10000);
+    const notAlone = await ev(`${W}.stat("/h3E/x.txt").then((a) => !a)`);
+    await clearSel();
+    check(nested && notAlone, "H3: a folder and its own file selected: the folder moves with the file in it, the file not on its own: " + JSON.stringify({ nested, notAlone }));
+    // (TESTS972-4: a selection one of which is already in the folder: the other moves, and nothing is said about the first)
+    await ev(`${W}.mkdir("/h3d2").then(() => ${W}.create("/h3d2/a.txt", { content: "a" })).then(() => ${W}.create("/h3b.txt", { content: "b" })).then(() => 1)`);
+    await until(`!!document.querySelector(${JSON.stringify(treeRow("/h3d2"))}) && !!document.querySelector(${JSON.stringify(treeRow("/h3b.txt"))})`, 10000);
+    await click(treeRow("/h3d2"));
+    await until(`!!document.querySelector(${JSON.stringify(treeRow("/h3d2/a.txt"))})`, 10000);
+    await box3("/h3d2/a.txt"); await box3("/h3b.txt");
+    await offers("/h3b.txt");
+    await menu("h3d2");
+    const movedB = await until(`${W}.stat("/h3d2/h3b.txt").then((a) => !!a)`, 10000);
+    await until(`/Moved/.test(document.querySelector("#wssidebar .ftoast")?.textContent ?? "")`, 5000);
+    const toast4 = await ev(`document.querySelector("#wssidebar .ftoast")?.textContent ?? ""`);
+    await clearSel();
+    check(movedB && /Moved "h3b.txt" to "h3d2"/.test(toast4) && !/already|not moved/i.test(toast4), "H3: a selection with one already there: the other moves, and nothing is said about the first: " + JSON.stringify({ movedB, toast4 }));
   }
   // U9 (William, Nov 2): rename knows a file's extension: the box preselects the base; a name typed without one keeps
   // the old; another one is allowed, said beside the box as it is typed; a folder's name is all name
@@ -1464,6 +1504,19 @@ try {
     await typeName(".ipynb");
     await new Promise((r) => setTimeout(r, 500));
     check((await ev(`${W}.stat("/u9 chapter1.ipynb").then((x) => !!x)`)) && !(await ev(`${W}.stat("/.ipynb").then((x) => !!x)`)), "U9: the extension alone is no name: the old one stays");
+  }
+  // H3 (TESTS972-3): a folder that is the only one there is: Move to… has nowhere to offer, and says so, no menu
+  {
+    const treeRow = (p) => `#wssidebar .frow[data-sel][data-path=${JSON.stringify(p)}]`;
+    await go(base);
+    await until(`!!${W}`, 60000);
+    if (await ev(`${S}.hidden`)) await click("#wsfilesbtn");
+    await ev(`(async () => { const w = ${W}; await w.mkdir("/h3 alone"); for (const e of await w.list("/")) if (e.kind === "folder" && e.path !== "/h3 alone" && e.path !== "/Trash") await w.remove(e.path); return 1; })()`);
+    await until(`!!document.querySelector(${JSON.stringify(treeRow("/h3 alone"))})`, 20000);
+    await ev(`(document.querySelector(${JSON.stringify(treeRow("/h3 alone"))} + " .more").click(), 1)`);
+    await menu("Move to…");
+    const said = await until(`/There's no folder to move it to/.test(document.querySelector("#wssidebar .ftoast")?.textContent ?? "")`, 5000);
+    check(said && !(await ev(`!!document.querySelector(".sbfmenu")`)), "H3: the only folder there is: Move to… says there's no folder to move it to, with no menu");
   }
   // a phone: the sidebar over the page
   await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
