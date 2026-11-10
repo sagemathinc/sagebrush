@@ -1,7 +1,7 @@
 {
  "v": 1,
- "reason": "Chat plan PR 3 (an agent's branch: workspace.git_branch, its records and their reconcile, the branches' ownership rule at use, the grant's id, and the grant dialog's default): the board page the CLI embeds (frame/board/index.html.gz) carries the workspace and its agent pairing, which gain web/workspace/branch-rules.ts, git-branch.ts, api.ts's host-only branch methods and git_branch's schema entry. cli/pyjs.cjs +16,780 (base64 of that page's gzip); no other artifact changes. The marker is the measured growth + 64. Measured with bun 1.4.4 / node 24.21.0 (size-record.sh) on master 8ba2f031 vs head 0675efb6 (r3: the grant checked as each transaction's last act; git_branch's flow, texts and schema only where a page offers it) merged with it; this marker's own commit changes no artifact.",
+ "reason": "Chat plan PR 3 (an agent's branch: workspace.git_branch, its records and their reconcile, the branches' ownership rule at use, the grant's id, and the grant dialog's default): the board page the CLI embeds (frame/board/index.html.gz) carries the workspace and its agent pairing, which gain web/workspace/branch-rules.ts, git-branch.ts, api.ts's host-only branch methods and git_branch's schema entry. cli/pyjs.cjs +16,880 (with r4's board fix: the auto-Edit by toggle and its loopback-only test seam) (base64 of that page's gzip); no other artifact changes. The marker is the measured growth + 64. Measured with bun 1.4.4 / node 24.21.0 (size-record.sh) on master 7663978d vs head df9a7c4d (r4, master merged); this marker's own commit changes no artifact.",
  "bytes": {
-  "cli/pyjs.cjs": 16844
+  "cli/pyjs.cjs": 16944
  }
 }
