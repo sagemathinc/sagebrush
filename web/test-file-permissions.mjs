@@ -297,16 +297,21 @@ try {
   check(res === "NM:read:ok,write:refused,append:refused,mkdir:refused,remove:refused,rename:refused,move:refused,tmp:ok", "…it reads the person's files; its write, append, mkdir, remove, rename and replace are each refused with PermissionError; /tmp's write isn't: " + res);
   await sleep(1500);
   check((await stat("/keep.txt")) && !(await stat("/nm-w.txt")) && !(await stat("/nm-dir")) && !(await stat("/keep2.txt")) && !(await stat("/moved.txt")) && !(await stat("/tmp/nm-t.txt")), "…and the workspace is unchanged (/tmp kept nowhere)");
-  check(await ev("!document.querySelector('#filesbar').hidden && /wants to change files/.test(document.querySelector('#filesbar').textContent)"), "…the page says: This notebook wants to change files [Allow changes for this notebook]");
+  check(await ev("!document.querySelector('#filesbar').hidden && /wants to change \\/nm-w\\.txt, at the top of your files/.test(document.querySelector('#filesbar').textContent) && !document.querySelector('#fbperms').hidden && document.querySelector('#fballow').hidden"), "…the page asks about its first refused change, at the top of the files: no Allow there, only File > Permissions… (confinement phase 2: anywhere is never a prompt's default)");
   // (a forged change, as if from its interpreter: kept nowhere)
   await ev(`(() => { sagebrush.kernel.worker.onmessage?.({ data: { fsChanged: "/forged.txt", data: new Uint8Array([1, 2]) } }); return 1; })()`);
   await sleep(1500);
   check(!(await stat("/forged.txt")), "a change its interpreter sends anyway (a forged fsChanged) is kept nowhere");
-  // (Allow: a synthetic click does nothing; the person's own click allows)
-  await ev("(document.querySelector('#filesallow').click(), 1)");
-  check((await files()) === false && !(await ev("document.querySelector('#filesbar').hidden")), "a synthetic click on Allow changes nothing");
-  await trusted("#filesallow");
-  check((await files()) === true && (await ev("document.querySelector('#filesbar').hidden")), "the person's own click on Allow changes for this notebook: it may change files now, the bar gone");
+  // (the prompt's File > Permissions…: a synthetic click does nothing; the person's own click opens the panel, whose
+  // switch allows changes anywhere; the next run, an explicit one, starts an interpreter that may)
+  await sleep(700);
+  await ev("(document.querySelector('#fbperms').click(), 1)");
+  check((await files()) === false && !(await ev("document.querySelector('#permsdlg').open")), "a synthetic click on the prompt's Permissions… changes nothing");
+  await trusted("#fbperms");
+  check(await ev("document.querySelector('#permsdlg').open"), "the person's own click on it opens File > Permissions…");
+  await trusted("#filesperm");
+  await closePerms();
+  check((await files()) === true && (await ev("document.querySelector('#filesbar').hidden")), "…whose switch, the person's own click, allows changes: it may change files now, the bar gone");
   await runAll();
   check(await until(`${W}.stat("/nm-w.txt").then((e) => !!e)`, 30000), "…and the cell run again writes: /nm-w.txt is in the workspace");
 
@@ -333,9 +338,9 @@ try {
   await runAll();
   check(await until("/REFUSED/.test(document.querySelector('#cells .cell .out')?.textContent ?? '')", 60000), "…its first write is refused: " + (await out()).trim().slice(0, 160));
   console.log(`(the own notebook's first run, in the sandbox frame: ${Date.now() - tFirst} ms)`);
-  check(!(await stat("/own-1.txt")) && (await ev("!document.querySelector('#filesbar').hidden && /wants to change files/.test(document.querySelector('#filesbar').textContent)")), "…nothing is written, and the bar says: This notebook wants to change files [Allow changes for this notebook]");
-  await trusted("#filesallow");
-  check((await files()) === true && (await ev("document.querySelector('#filesbar').hidden")), "…the person's own click on Allow: it may change files now, the bar gone");
+  check(!(await stat("/own-1.txt")) && (await ev("!document.querySelector('#filesbar').hidden && /wants to change \\/own-1\\.txt/.test(document.querySelector('#filesbar').textContent)")), "…nothing is written, and the bar asks about it");
+  await filesSwitch();
+  check((await files()) === true && (await ev("document.querySelector('#filesbar').hidden")), "…the person's own click on File > Permissions…'s switch: it may change files now, the bar gone");
   await setCode("open('own-1.txt', 'w').write('x'); print('W1')");
   await runAll();
   check(await until(`${W}.stat("/own-1.txt").then((e) => !!e)`, 30000), "…and the cell run again writes: /own-1.txt");
@@ -349,7 +354,7 @@ try {
   check((await files()) === false, "…the person's own click: it can't change files now");
   await setCode("try:\n    open('own-2.txt', 'w').write('x'); print('W2')\nexcept PermissionError as e:\n    print('REFUSED', e)");
   await runAll();
-  check(await until("/REFUSED/.test(document.querySelector('#cells .cell .out')?.textContent ?? '')", 30000), "…a write raises PermissionError, saying why: " + (await out()).trim().slice(0, 160)); check(/can't change your files/.test(await out()), "…in words: " + (await out()).trim().slice(0, 160));
+  check(await until("/REFUSED/.test(document.querySelector('#cells .cell .out')?.textContent ?? '')", 30000), "…a write raises PermissionError, saying why: " + (await out()).trim().slice(0, 160)); check(/isn't allowed to change this file/.test(await out()), "…in words: " + (await out()).trim().slice(0, 160));
   check(!(await stat("/own-2.txt")), "…and nothing is written");
   const ownId = await ev("localStorage.getItem('sagebrush-current')");
   await go(base + "?nb=" + encodeURIComponent(ownId));
