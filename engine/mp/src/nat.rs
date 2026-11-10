@@ -54,7 +54,7 @@ fn zeros(n: usize) -> Option<Vec<u64>> {
 }
 
 impl Nat {
-    pub fn zero() -> Nat {
+    pub const fn zero() -> Nat {
         Nat { d: Vec::new() }
     }
 

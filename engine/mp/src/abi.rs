@@ -102,14 +102,20 @@ pub struct Core {
     ifac_len: i64,
 }
 
+impl Core {
+    pub const fn new() -> Core {
+        Core { regs: [Val::None, Val::None, Val::None, Val::None], out: [Val::None, Val::None], io: Vec::new(), res: [0.0; 8], slots: Vec::new(), free: Vec::new(), live: 0, ifac_len: 2 }
+    }
+}
+
 impl Default for Core {
     fn default() -> Core {
-        Core { regs: Default::default(), out: Default::default(), io: Vec::new(), res: [0.0; 8], slots: Vec::new(), free: Vec::new(), live: 0, ifac_len: 2 }
+        Core::new()
     }
 }
 
 thread_local! {
-    pub static CORE: RefCell<Core> = RefCell::new(Core::default());
+    pub static CORE: RefCell<Core> = const { RefCell::new(Core::new()) };
 }
 
 /// Run f on the session's core.
