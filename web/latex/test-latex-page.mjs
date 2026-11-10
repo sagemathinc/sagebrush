@@ -2998,6 +2998,90 @@ try {
       check(title === "Run the document's PythonTeX code (Python, in this browser): Shift+Enter" && ranPy && shown,
         "PythonTeX: Run runs \\py and pycode; their results read back where they stand (pycode's \\textbf bold), no item left not run; the Run button says it runs PythonTeX",
         { title, ranPy, shown, html: await ev(`document.querySelector(".tex-preview").innerHTML.slice(0, 1500)`) });
+      // (William's L5, Nov 10: the code a sageblock shows is coloured as the notebook colours it: hl.ts, its own chunk,
+      //  fetched only once a preview has such a block; drawn as text and fixed-class spans, never as HTML; refused, the
+      //  code stays plain; a render while it is on its way is coloured once it comes; many blocks, a few at a time)
+      {
+        const blockDoc = (b) => "\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n" + b + "\\end{document}\n";
+        const block = (code) => "\\begin{sageblock}\n" + code + "\n\\end{sageblock}\n";
+        const CODE = "for k in range(3):\n    s = '<b>&amp;</b>' < 2  # not HTML";
+        const hlFetched = () => requests.filter((u) => /sagebrush-latex-hl\.js/.test(u)).length;
+        const PRE = `document.querySelector(".tex-preview .ch:not([hidden]) pre.sageblock")`;
+        // (no block: never fetched)
+        requests.length = 0;
+        await open(await mk("/t/hl-none.tex", enc(blockDoc("No block here: $\\sage{1+1}$.\n"))));
+        await until(`(document.querySelector(".tex-preview")?.textContent ?? "").includes("No block here")`, 20000);
+        await sleep(800);
+        check(hlFetched() === 0, "L5: a preview without a code block never fetches the highlighting chunk", { fetched: hlFetched() });
+        // (a block: coloured, its text the same, nothing in it parsed as HTML; the chunk fetched once)
+        const fhl = await mk("/t/hl.tex", enc(blockDoc(block(CODE))));
+        requests.length = 0;
+        await open(fhl);
+        const coloured = await until(`!!${PRE}?.matches("[data-hl]") && !!${PRE}.querySelector(".hk")`, 20000);
+        const shown = await ev(`(() => { const p = ${PRE}; return { text: p?.textContent, tags: [...new Set([...(p?.querySelectorAll("*") ?? [])].map((e) => e.tagName + "." + e.className))] }; })()`);
+        check(coloured && shown.text?.trim() === CODE && shown.tags.length > 0 && shown.tags.every((t) => /^SPAN\.h[a-z]$/.test(t)) && hlFetched() === 1,
+          "L5: a sageblock's code is coloured, its text the same and none of it HTML (no <b> from '<b>&amp;</b>'); the chunk fetched once", { coloured, shown, fetched: hlFetched() });
+        // (many blocks: all coloured, a few at a time: no long task on a timing box; reported on a build box)
+        await ev(watchLt);
+        await typeInto(blockDoc(Array.from({ length: 300 }, (_, k) => block("for i in range(" + k + "):\n    x = i * " + k + "  # block " + k)).join("\n")));
+        const allDone = await until(`document.querySelectorAll(".tex-preview .ch:not([hidden]) pre.sageblock").length === 300 && document.querySelectorAll(".tex-preview .ch:not([hidden]) pre.sageblock:not([data-hl])").length === 0`, 30000);
+        const ltHl = await ev(`window.__lt`);
+        check(allDone, "L5: 300 blocks: all coloured", { allDone, n: await ev(`document.querySelectorAll(".tex-preview .ch:not([hidden]) pre.sageblock[data-hl]").length`) });
+        if (BOX === "timing") check(ltHl.every((d) => d <= 50), "L5: 300 blocks coloured with no long task over 50 ms (a timing box)", ltHl);
+        else console.log("timing, reported, not gated (a build box): long tasks while 300 blocks were coloured (ms):", JSON.stringify(ltHl));
+        await typeInto(blockDoc(block(CODE)));
+        await savedNow(10000);
+        // (refused: the code stays plain, with no error. The cache off for this and the next row, so the chunk is asked
+        //  for over the network each time, where the Fetch domain sees it, not taken from the memory cache)
+        await send("Network.setCacheDisabled", { cacheDisabled: true });
+        const e0 = errors.length;
+        onPaused = (p) => { send("Fetch.failRequest", { requestId: p.requestId, errorReason: "ConnectionFailed" }); };
+        await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-latex-hl.js*" }] });
+        await open(fhl);
+        await until(`!!${PRE}`, 20000);
+        await sleep(1500);
+        const plain = await ev(`(() => { const p = ${PRE}; return { spans: p.querySelectorAll("span").length, text: p.textContent }; })()`);
+        await send("Fetch.disable"); onPaused = null;
+        check(plain.spans === 0 && plain.text.trim() === CODE && errors.length === e0, "L5: the highlighting chunk refused: the code stays plain, and no error", { plain, errors: errors.slice(e0) });
+        // (renders while the chunk is on its way (astra's SEC on #1009): 20 of them make one wait and one queue, and once
+        //  it comes the newest render's block is the one coloured)
+        let held = null;
+        onPaused = (p) => { held = p.requestId; };
+        await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-latex-hl.js*" }] });
+        await open(fhl);
+        await until(`!!${PRE}`, 20000);
+        for (let i = 0; i < 100 && !held; i++) await sleep(100);
+        for (let i = 1; i <= 20; i++) { await typeInto(blockDoc(block(CODE + "\nn = " + i))); await sleep(60); }
+        const rerendered = await until(`(${PRE}?.textContent ?? "").includes("n = 20")`, 20000);
+        if (held) await send("Fetch.continueRequest", { requestId: held });
+        const late = await until(`(() => { const p = ${PRE}; return !!p && p.textContent.includes("n = 20") && !!p.querySelector(".hn"); })()`, 20000);
+        await sleep(300);
+        const queues = await ev(`window.__sbHlCalls ?? 0`);
+        await send("Fetch.disable"); onPaused = null;
+        check(!!held && rerendered && late && queues === 1 && errors.length === e0, "L5: 20 renders while the chunk is on its way: one call to colour once it comes, and the newest block coloured", { held: !!held, rerendered, late, queues, errors: errors.slice(e0) });
+        await typeInto(blockDoc(block(CODE)));
+        await savedNow(10000);
+        // (the page goes to another file while the chunk is on its way: the first file's wait colours nothing; the other's
+        //  block is coloured by its own)
+        const fother = await mk("/t/hl-other.tex", enc(blockDoc(block("OTHER = 1"))));
+        held = null;
+        onPaused = (p) => { held = p.requestId; };
+        await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-latex-hl.js*" }] });
+        await open(fhl);
+        await until(`!!${PRE}`, 20000);
+        for (let i = 0; i < 100 && !held; i++) await sleep(100);
+        await ev(`(window.__sbTex({ path: "/t/hl-other.tex", fid: ${JSON.stringify(fother)} }), 1)`);
+        await until(`(${PRE}?.textContent ?? "").includes("OTHER")`, 20000);
+        if (held) await send("Fetch.continueRequest", { requestId: held });
+        const otherDone = await until(`!!${PRE}?.querySelector(".hn")`, 20000);
+        await sleep(300);
+        const queues2 = await ev(`window.__sbHlCalls ?? 0`);
+        await send("Fetch.disable"); onPaused = null;
+        await send("Network.setCacheDisabled", { cacheDisabled: false });
+        check(!!held && otherDone && queues2 === 1 && errors.length === e0, "L5: the page leaves a file while the chunk is on its way: the left file's wait colours nothing, the new one's block is coloured", { held: !!held, otherDone, queues2, errors: errors.slice(e0) });
+        await typeInto(blockDoc(block(CODE)));
+        await savedNow(10000);
+      }
       // (back to run.tex, as the rows below expect it open, its results shown)
       await open(fr);
       await until(`document.querySelector(".tex-preview").textContent.includes("1024") && document.querySelectorAll(".tex-preview .sagechip").length === 0`, 20000);
