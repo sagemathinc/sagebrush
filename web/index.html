@@ -4274,10 +4274,18 @@ let agentRunMod = null, agentRunTries = 0;
 const agentRuns = (w) => ({
   load: () => (agentRunMod ??= import(new URL("sagebrush-agent-run.js", location.href).href + (agentRunTries++ ? `?try=${agentRunTries}` : "")).catch((e) => { agentRunMod = null; throw e; })),
   host: () => ({ ws: w, WorkerKernel, RunnerWorker, runnerSrc: "runner/", sandbox: RUNNER && !LOCAL ? "ok" : "none", docTrees: (ref) => perms.writeTrees(ref),
+    // (a change of any notebook's trees, here or in another tab (its storage event, as the kernels' above), told to the
+    //  run, whose ceiling narrows at once (astra's RUN-POLICY-2 r2))
+    docChange: (cb) => {
+      const st = (e) => { if (e.key === null || e.key === "sagebrush-grants") cb(); };
+      const off = perms.onChange(() => cb());
+      addEventListener("storage", st);
+      return () => { off(); removeEventListener("storage", st); };
+    },
     ...(/^(localhost|127\.0\.0\.1)$/.test(location.hostname) && typeof window.__runHold === "function" ? { hold: (s) => window.__runHold(s) } : {}) }),
 });
 // (the tests' handle on a local host only: the runs' host for this page's workspace, test-run-verbs-page.mjs)
-if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) window.__agentRunsFor = () => wsReady.then((w) => w && agentRuns(w));
+if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) window.__agentRunsFor = () => wsReady.then((w) => w && { ...agentRuns(w), perms });
 const agentFailed = () => { statusEl.textContent = "Couldn't load the agent connection. Try Agent or ⋯ ▸ Connect an agent… again, or reload the page."; };
 // (where Agent is offered: not in the desktop app or the CLI's page, pages on this computer the agent's program doesn't accept)
 const agentHere = !LOCAL && !window.__TAURI__;

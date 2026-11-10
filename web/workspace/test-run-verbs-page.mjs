@@ -221,6 +221,25 @@ try {
   await evaluate(`(window.__dt = ["/rv/sub"], window.__holdOn = {}, window.__release(), 1)`);
   r = await result();
   check(r?.refused?.paths?.includes("/rv/px.txt") && (await exists("/rv/px.txt")) === false && (await exists("/rv/sub/py.txt")) === true, `the notebook's trees narrowed in part mid-run: outside refused, inside kept: ${JSON.stringify(r)}`);
+  // (RUN-POLICY-2 r2: the page's own permissions (perms) of the notebook, with the page's host, no pairing change and no
+  //  file operation between: allowed, revoked, allowed again here; then the same from another tab (its storage
+  //  event); and in part (a subtree kept): each run stays at the narrowest)
+  const pol = async (name, between) => {
+    check(await evaluate(`window.__ws.create("/rv/${name}.ipynb", { content: { mode: "python", cells: [{ id: "c1", code: "import os\\nos.makedirs('/rv/${name}d/s', exist_ok=True)\\nopen('/rv/${name}d/a.txt','w').write('a')\\nopen('/rv/${name}d/s/b.txt','w').write('b')" }] } }).then((e) => (window.__ref = e.ref, window.__R.perms.grant(e.ref, "write", "/rv"), true))`) === true, `(a notebook on main, /rv allowed by its permissions: ${name})`);
+    await evaluate(`(window.__holdOn = { start: true }, window.__p = window.__M.run("workspace.run_notebook", { path: "/rv/${name}.ipynb" }, window.__ctx(), window.__R.host(), window.__holder).then((x) => x, (e) => ({ threw: e.code, message: e.message })), 1)`);
+    check(!!(await until(`window.__held === "start"`, 60000)), `(${name}: held at its start)`);
+    await evaluate(between);
+    await evaluate(`(window.__holdOn = {}, window.__release(), 1)`);
+    return result();
+  };
+  r = await pol("pa", `(window.__R.perms.revoke(window.__ref, "write", "/rv"), window.__R.perms.grant(window.__ref, "write", "/rv"), 1)`);
+  check(r?.refused?.paths?.includes("/rv/pad/a.txt") && !(await exists("/rv/pad/a.txt")) && !(await exists("/rv/pad/s/b.txt")), `the notebook's permission revoked and allowed again in this page: still revoked for the run: ${JSON.stringify(r)}`);
+  const otherTab = (trees) => `(() => { const k = "sagebrush-grants", was = localStorage.getItem(k), j = JSON.parse(was); j.docs[window.__ref].write = ${JSON.stringify(trees)};
+    localStorage.setItem(k, JSON.stringify(j)); dispatchEvent(new StorageEvent("storage", { key: k })); localStorage.setItem(k, was); dispatchEvent(new StorageEvent("storage", { key: k })); return 1; })()`;
+  r = await pol("pb", otherTab([]));
+  check(r?.refused?.paths?.includes("/rv/pbd/a.txt") && !(await exists("/rv/pbd/a.txt")), `revoked and allowed again in another tab (its storage events): still revoked for the run: ${JSON.stringify(r)}`);
+  r = await pol("pc", otherTab(["/rv/pcd/s"]));
+  check(r?.refused?.paths?.includes("/rv/pcd/a.txt") && !(await exists("/rv/pcd/a.txt")) && (await exists("/rv/pcd/s/b.txt")), `narrowed to a subtree in another tab and widened again: the subtree kept, the rest refused: ${JSON.stringify(r)}`);
   // (RUN-READ-BOUND-4: between the listing and the read, a file replaced (another identity) and a file grown past what's left)
   await put("/Branches/w1/rv/id.txt", "one");
   await evaluate(`(window.__holdOn = { listed: true }, 1)`);
@@ -228,7 +247,7 @@ try {
   check(!!(await until(`window.__held === "listed"`, 60000)), "RUN-READ-BOUND-4: a run held between its listing and its reads");
   await evaluate(`(async () => { const h = window.__ws.runHost("agent:Test-agent", () => window.__grant.id); await h.remove("/Branches/w1/rv/id.txt", () => {}); await h.putFile("/Branches/w1/rv/id.txt", new TextEncoder().encode("two"), () => {}); window.__holdOn = {}; window.__release(); return 1; })()`);
   r = await result();
-  check(r?.threw === "changed" && r.message === "changed: /rv/id.txt changed while the run started; try again", `a file replaced after the listing: refused as changed, never read as the listed one: ${JSON.stringify(r)}`);
+  check(r?.threw === "changed" && r.message === "changed: /rv/id.txt was changed while the run was starting; try again", `a file replaced after the listing: refused as changed, never read as the listed one: ${JSON.stringify(r)}`);
   await put("/Branches/w1/rv/grow.bin", "g");
   await evaluate(`(window.__holdOn = { listed: true }, 1)`);
   await go("workspace.run_file", { path: "/Branches/w1/rv/hello.py" });
@@ -242,6 +261,21 @@ try {
     window.__holder.current = pre;
     return window.__M.run("workspace.run_file", { path: "/rv/hello.py" }, window.__ctx(), window.__R.host(), window.__holder, pre); })()`);
   check(r?.ended === "timeout", `a deadline passed while the chunk loaded: the timeout's end: ${JSON.stringify(r)}`);
+  // (RUN-DEADLINE-HANDOFF-1: a lookup before the run is held that never answers (the branch's, the file's stat) ends
+  //  with the deadline, or with Stop, never outliving them)
+  const hung = (which) => `{ ...window.__R.host(), ws: { runHost: (a, o) => Object.create(window.__ws.runHost(a, o), { ${which}: { value: () => new Promise(() => {}) } }) } }`;
+  const pre = (ms) => `(() => { const loading = { stopped: false }; const pre = { owner: window.__grant.id, view: "x", loading, deadlineAt: performance.now() + ${ms}, stop() { loading.stopped = true; loading.wake?.(); } }; window.__pre = pre; window.__holder.current = pre; return pre; })()`;
+  for (const [which, path] of [["branchAt", "/Branches/w1/rv/hello.py"], ["stat", "/rv/hello.py"]]) {
+    const t = await evaluate(`(async () => { const t0 = performance.now(); const r = await window.__M.run("workspace.run_file", { path: ${JSON.stringify(path)} }, window.__ctx(), ${hung(which)}, window.__holder, ${pre(300)}); return { r, ms: performance.now() - t0, held: window.__holder.current }; })()`);
+    check(t?.r?.ended === "timeout" && t.ms >= 250 && t.ms < 3000 && t.held === null, `a held ${which}: the deadline (300 ms) ends the run: ${JSON.stringify(t)}`);
+    await evaluate(`(window.__p = window.__M.run("workspace.run_file", { path: ${JSON.stringify(path)} }, window.__ctx(), ${hung(which)}, window.__holder, ${pre(60000)}).then((x) => x, (e) => ({ threw: e.code, message: e.message })), 1)`);
+    await new Promise((res) => setTimeout(res, 200));
+    await evaluate(`(window.__pre.stop(), 1)`);
+    r = await until(`Promise.race([window.__p, new Promise((res) => setTimeout(() => res(null), 50))])`, 3000);
+    check(r?.ended === "stopped" && (await evaluate(`window.__holder.current === null`)), `a held ${which}: Stop ends the run at once: ${JSON.stringify(r)}`);
+    const t2 = await evaluate(`(async () => { const t0 = performance.now(); const r = await window.__M.run("workspace.run_file", { path: ${JSON.stringify(path)}, timeout_s: 1 }, window.__ctx(), ${hung(which)}, window.__holder); return { r, ms: performance.now() - t0 }; })()`);
+    check(t2?.r?.ended === "timeout" && t2.ms < 4000, `a held ${which}, no loader's record: timeout_s ends it: ${JSON.stringify(t2)}`);
+  }
   // (Stop and the deadline after the save's admission: the save completes once, the end is theirs (ENGINE, RUN-DRAIN-1))
   check(await evaluate(`window.__ws.create("/Branches/w1/rv/st2.ipynb", { content: { mode: "python", cells: [{ id: "c1", code: "print(6)" }] } }).then(() => true)`) === true, "(a notebook to stop after its save's admission)");
   await evaluate(`(window.__admit = { when: "after", path: "/Branches/w1/rv/st2.ipynb", op: "write", skip: 1 }, 1)`);
@@ -286,12 +320,27 @@ try {
   await evaluate(`(window.__admit = { when: "before", path: "/Branches/w1/rv/q0.bin" }, 1)`);
   await go("workspace.run_file", { path: "/Branches/w1/rv/q.py", timeout_s: 120 });
   check(!!(await until(`window.__aheld === "before"`, 120000)), "the first write held at its admission");
-  check(!!(await until(`window.__holder.current?.retained?.().queuedBytes >= 60000000 || false`, 60000)) || true, "(the others queued meanwhile)");
+  check(!!(await until(`window.__holder.current?.retained?.().queuedBytes >= 60000000`, 60000)), "the second write queued behind the held first (its bytes charged)");
   const q = await evaluate(`window.__holder.current.retained()`);
   await evaluate(`(window.__arelease(), 1)`);
   r = await result();
   check(q?.queuedBytes <= 64 * 2 ** 20 && r?.refused?.paths?.includes("/rv/q2.bin") && (await exists("/Branches/w1/rv/q0.bin")) && (await exists("/Branches/w1/rv/q1.bin")), `the changes waiting: at most 64 MiB (${q?.queuedBytes} bytes), the one past it refused: ${JSON.stringify(r?.refused)}`);
-  // ---- busy for another grant, and its run_stop (§2): neither names nor stops the run
+  // (RUN-BOUND-3 r2 / SIZE-QUEUE-7: every change charged (its path and a fixed cost, an empty write and a delete too) and
+  //  counted: at most 4 096 waiting, the next refused; all let go of once kept)
+  await put("/Branches/w1/rv/ops.py", "import os\nfor i in range(4100):\n    open('/rv/e.txt','w').close()\nos.remove('/rv/e.txt')\nprint('done')\n");
+  await evaluate(`(window.__admit = { when: "before", path: "/Branches/w1/rv/e.txt" }, 1)`);
+  await go("workspace.run_file", { path: "/Branches/w1/rv/ops.py", timeout_s: 300 });
+  check(!!(await until(`window.__aheld === "before"`, 120000)), "the first empty write held at its admission");
+  check(!!(await until(`window.__holder.current?.retained?.().queuedOps === 4096`, 120000)), "4 096 changes waiting (the cap)");
+  const cur = await evaluate(`(window.__cur = window.__holder.current, window.__cur.retained())`);
+  await new Promise((res) => setTimeout(res, 500));
+  const still = await evaluate(`window.__cur.retained()`);
+  await evaluate(`(window.__arelease(), 1)`);
+  r = await result();
+  const freed = await evaluate(`window.__cur.retained()`);
+  check(cur?.queuedOps === 4096 && still?.queuedOps === 4096 && cur.queuedBytes >= 4096 * 256 && r?.refused?.paths?.includes("/rv/e.txt") && r.stdout === "done\n",
+    `the 4 097th change refused, never queued; each charged, an empty one too: ${JSON.stringify({ cur, still, refused: r?.refused, out: r?.stdout })}`);
+  check(freed?.queuedOps === 0 && freed.queuedBytes === 0 && freed.pending === 0, `once kept, all let go of (no change, byte or promise held): ${JSON.stringify(freed)}`);
   await evaluate(`(window.__holdOn = { start: true }, 1)`);
   await go("workspace.run_file", { path: "/rv/hello.py" });
   check(!!(await until(`window.__held === "start"`, 60000)), "a run held at its start");

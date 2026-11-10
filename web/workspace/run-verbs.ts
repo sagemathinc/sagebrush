@@ -40,6 +40,9 @@ export const RUN_LIMITS = Object.freeze({
   savedOutputs: 8 * MiB,
   /** the code's changes waiting to be kept, their bytes together: past this, a change is refused, not queued */
   queued: 64 * MiB,
+  /** and their number, each charged its path and this much besides its bytes (astra's RUN-BOUND-3 r2: an empty write
+   *  or a delete is never free) */
+  queuedOps: 4096, opBytes: 256,
 });
 
 /** The words (board's C3, word for word; the code before the colon is the error's code too). */
@@ -69,7 +72,7 @@ export const RUN_TEXT = {
   notText: (p: string) => `invalid: ${p} isn't UTF-8 text`,
   cut: (n: number) => `[… ${n.toLocaleString("en-US")} bytes]`,
   notKept: `[output not kept: the notebook's outputs are over ${fmtSize(RUN_LIMITS.savedOutputs)}]`,
-  changed: (p: string) => `changed: ${p} changed while the run started; try again`,
+  changed: (p: string) => `changed: ${p} was changed while the run was starting; try again`,
 };
 
 /** A refusal: its code (machine-readable) and board's sentence. */
@@ -89,6 +92,8 @@ export type RunHost = {
   sandbox: "ok" | "none";
   /** a notebook's write trees as the person allowed them (perms.writeTrees); [] for anything without a record */
   docTrees(ref: string): string[];
+  /** a change to any notebook's write trees (perms.onChange): the run's ceiling narrows at once (astra's RUN-POLICY-2 r2) */
+  docChange?(cb: () => void): () => void;
   /** tests only (a local host): a named hold the test releases ("snapshot", "listed", "start", "started", "save",
    * "deliver") */
   hold?(stage: string): Promise<void>;
@@ -108,7 +113,7 @@ type RunWs = {
 /** The run holder, kept in the pairing chunk (agent-ui.ts): the page's one run, and its line. */
 export type RunHolder = {
   /** the page's one run: while its chunk loads, the pairing's record of it (`loading`, Stop already working on it) */
-  current: { owner: string; view: string; stop(): void; loading?: { stopped: boolean; cause?: "stopped" | "timeout" }; deadlineAt?: number } | null;
+  current: { owner: string; view: string; stop(): void; loading?: { stopped: boolean; cause?: "stopped" | "timeout"; wake?: () => void }; deadlineAt?: number } | null;
   show(agent: string, view: string, stop: () => void): void;
   hide(): void;
 };
@@ -245,10 +250,20 @@ export async function run(method: "workspace.run_notebook" | "workspace.run_file
   // (`pre`: this run's record while its chunk loaded (agent-ui.ts); stopped then, it ends now, before anything is read)
   if (pre?.loading?.stopped) { if (holder.current === pre) { holder.current = null; holder.hide(); } return { ok: false, ended: pre.loading.cause ?? "stopped", ms: 0 }; }
   const release = () => { if (pre && holder.current === pre) { holder.current = null; holder.hide(); } };
-  try { return await runNow(method, params, ctx, host, holder, pre ?? null); } finally { release(); }
+  // (until the run is held, each lookup it waits on is raced with its deadline and Stop: one that hangs ends with them
+  //  (daybreak3's RUN-DEADLINE-HANDOFF-1))
+  let cut!: (c: "stopped" | "timeout") => void;
+  const cutP = new Promise<"stopped" | "timeout">((r) => (cut = r));
+  const t = setTimeout(() => cut("timeout"), Math.max(0, (pre?.deadlineAt ?? performance.now() + (params.timeout_s ?? RUN_LIMITS.timeoutDefault) * 1000) - performance.now()));
+  if (pre?.loading) pre.loading.wake = () => cut(pre.loading!.cause ?? "stopped");
+  const look = <T>(p: Promise<T>) => Promise.race([p, cutP.then((c): never => { throw new Cut(c); })]);
+  try { return await runNow(method, params, ctx, host, holder, pre ?? null, look); }
+  catch (e) { if (e instanceof Cut) return { ok: false, ended: e.cause, ms: 0 }; throw e; }
+  finally { clearTimeout(t); release(); }
 }
+class Cut { constructor(readonly cause: "stopped" | "timeout") {} }
 
-async function runNow(method: "workspace.run_notebook" | "workspace.run_file", params: { path: string; timeout_s?: number }, ctx: RunCtx, host: RunHost, holder: RunHolder, pre: RunHolder["current"]): Promise<Record<string, unknown>> {
+async function runNow(method: "workspace.run_notebook" | "workspace.run_file", params: { path: string; timeout_s?: number }, ctx: RunCtx, host: RunHost, holder: RunHolder, pre: RunHolder["current"], look: <T>(p: Promise<T>) => Promise<T>): Promise<Record<string, unknown>> {
   const g = ctx.grant;
   if (!g.run) refuse(RUN_TEXT.notAllowed);
   if (host.sandbox !== "ok") refuse(RUN_TEXT.noSandbox);
@@ -262,12 +277,12 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
   // (the worktree: /Branches/<name>, this grant's own ready branch, by the branches' rule as a write there is asked)
   let root = "", rootFid: string | undefined;
   if (within(real!, BRANCHES)) {
-    const b = await ws.branchAt(real!);
+    const b = await look(ws.branchAt(real!));
     if (b.no || !b.root) refuse("invalid: " + (b.no ?? "not in a branch"));
     root = b.root!.path; rootFid = b.root!.fid;
   }
   const view = viewOf(root);
-  const target = await ws.stat(real!);
+  const target = await look(ws.stat(real!));
   if (!target) refuse(RUN_TEXT.noSuch(real!));
   if (target.trashed) refuse(RUN_TEXT.notHere(real!));
   if (method === "workspace.run_notebook" && target.kind !== "notebook") refuse(RUN_TEXT.notNotebook(real!));
@@ -287,7 +302,7 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
   const refused = new Refused((v) => { const p = view.toReal(v); return p !== null && inGrant(p, g.folders); });
   const refuseAt = (realOrView: string, isView = false) => refused.add(isView ? realOrView : view.toView(realOrView) ?? realOrView);
   // (what's kept now, for the tests' holds: the retained bytes of what waits and what will be saved)
-  let queuedBytes = 0, savedLeft = RUN_LIMITS.savedOutputs, savedKept = 0;
+  let queuedBytes = 0, queuedOps = 0, savedLeft = RUN_LIMITS.savedOutputs, savedKept = 0;
   let ended!: () => void;
   const endedP = new Promise<void>((r) => (ended = r));
   // (`stopped`: an end asked (Stop, run_stop, the deadline, the grant, the page hidden), at any stage until the run
@@ -304,16 +319,32 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
     try { worker?.terminate(); } catch {}
     ended();
   };
-  const me = { owner: g.id, view: viewPath, stop: () => end("stopped"), retained: () => ({ queuedBytes, savedBytes: savedKept }) };
+  const me = { owner: g.id, view: viewPath, stop: () => end("stopped"), retained: () => ({ queuedBytes, queuedOps, pending: pending.size, savedBytes: savedKept }) };
   holder.current = me;
   holder.show(ctx.agent, viewPath, me.stop);
   // (the deadline counts from the call's start, the chunk's load and the checks above included (daybreak3's P1): the
   //  pairing's record carries it)
   const timeoutS = params.timeout_s ?? RUN_LIMITS.timeoutDefault;
   const deadline = setTimeout(() => end("timeout"), Math.max(0, (pre?.deadlineAt ?? performance.now() + timeoutS * 1000) - performance.now()));
-  // (the grant: gone, run off or read narrowed end the run; a write-only narrowing reaches the interpreter, policyNow
-  //  below once its trees are known)
-  let policyNow = () => {};
+  // ---- where its code may write (§3): fixed from here (the ceiling), only narrowing
+  const grantTrees = (gr: Grant | null) => (gr && gr.write ? gr.folders : []);
+  const docTrees = () => (root ? [root] : method === "workspace.run_notebook" && target!.ref ? host.docTrees(target!.ref) : []);
+  // (the ceiling only narrows: each time the trees are asked (the grant's change, the notebook's permissions' change,
+  //  each admission), what's allowed now is met with it and kept, so a narrowing can't be undone by a widening later
+  //  in the same run (astra's RUN-POLICY-2))
+  let ceiling = meetTrees(docTrees(), grantTrees(g));
+  const treesNow = () => (ceiling = meetTrees(ceiling, meetTrees(docTrees(), grantTrees(ctx.grantNow()))));
+  const viewTrees = (t: string[]) => t.map((x) => view.toView(x)).filter((x): x is string => x !== null);
+  let epoch = 1, sent = viewTrees(ceiling);
+  const policyNow = () => {
+    // (the trees asked first, every time: the ceiling narrows even before the interpreter exists)
+    const next = viewTrees(treesNow());
+    if (phase !== "open" || !kernel?.worker) return;
+    if (next.length === sent.length && next.every((t, i) => t === sent[i])) return;
+    sent = next;
+    kernel.setPolicy({ epoch: ++epoch, state: stateOf(next), trees: next });
+  };
+  // (the grant: gone, run off or read narrowed end the run; a write-only narrowing reaches the interpreter)
   // (the page leaving ends it as Stop does: §2)
   const onHide = () => end("stopped");
   addEventListener("pagehide", onHide);
@@ -321,6 +352,7 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
     if (!ctx.live()) return end("revoked", ctx.why());
     policyNow();
   });
+  const undoc = host.docChange?.(policyNow) ?? (() => {});
   try {
     // ---- the snapshot (§4): the files the grant can read in the view, each read once, bounded
     await host.hold?.("snapshot");
@@ -384,32 +416,15 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
     const hash = await inputHash(items);
     if (phase !== "open") return await settle(hash);
 
-    // ---- where its code may write (§3): fixed now (the ceiling), only narrowing
-    const grantTrees = (gr: Grant | null) => (gr && gr.write ? gr.folders : []);
-    const docTrees = () => (root ? [root] : ref && method === "workspace.run_notebook" ? host.docTrees(ref) : []);
-    // (the ceiling only narrows: each time the trees are asked, what's allowed now is met with it and kept, so a
-    //  narrowing can't be undone by a widening later in the same run (astra's RUN-POLICY-2))
-    let ceiling = meetTrees(docTrees(), grantTrees(g));
-    const treesNow = () => (ceiling = meetTrees(ceiling, meetTrees(docTrees(), grantTrees(ctx.grantNow()))));
-    const viewTrees = (t: string[]) => t.map((x) => view.toView(x)).filter((x): x is string => x !== null);
-    let epoch = 1, sent = viewTrees(ceiling);
-    policyNow = () => {
-      // (the trees asked first, every time: the ceiling narrows even before the interpreter exists (astra's RUN-POLICY-2))
-      const next = viewTrees(treesNow());
-      if (phase !== "open" || !kernel?.worker) return;
-      if (next.length === sent.length && next.every((t, i) => t === sent[i])) return;
-      sent = next;
-      kernel.setPolicy({ epoch: ++epoch, state: stateOf(next), trees: next });
-    };
     // (whether the change at `p` (real) from `w` may be kept now: this run open, its interpreter, the trees now)
     const admitNow = (w: any, p: string) => phase === "open" && w === kernel?.worker && ctx.live() && treesNow().some((t) => covers(t, p));
     const keep = (w: any, changes: [string, Uint8Array | null][]) => {
       const reals = changes.map(([v]) => view.toReal(v));
       if (reals.some((p) => p === null) || !reals.every((p) => admitNow(w, p!))) { for (let i = 0; i < reals.length; i++) reals[i] ? refuseAt(reals[i]!) : refuseAt(changes[i][0], true); return; }
       // (what waits to be kept is bounded by its bytes: past it, the change is refused, not queued (RUN-BOUND-3))
-      const n = changes.reduce((t, [, d]) => t + (d?.length ?? 0), 0);
-      if (queuedBytes + n > RUN_LIMITS.queued) { for (const p of reals) refuseAt(p!); return; }
-      queuedBytes += n;
+      const n = changes.reduce((t, [, d], i) => t + (d?.length ?? 0) + enc.encode(reals[i]!).length + RUN_LIMITS.opBytes, 0);
+      if (queuedBytes + n > RUN_LIMITS.queued || queuedOps + changes.length > RUN_LIMITS.queuedOps) { for (const p of reals) refuseAt(p!); return; }
+      queuedBytes += n; queuedOps += changes.length;
       // (in order, one at a time; each admitted again holding the workspace's lock, where it is final: once passed, it
       //  completes and is kept even if the run ends meanwhile (RUN-DRAIN-1); before, nothing is kept)
       chain = chain.then(async () => {
@@ -422,9 +437,12 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
           try { data === null ? await ws.remove(p, admit) : await ws.putFile(p, data, admit); }
           catch (e) { if (!(e instanceof RunError)) refuseAt(p); }
         }
-        queuedBytes -= n;
+        queuedBytes -= n; queuedOps -= changes.length;
       });
-      pending.add(chain);
+      // (only what hasn't settled is held: a settled change lets go of its data)
+      const c = chain;
+      pending.add(c);
+      void c.finally(() => pending.delete(c));
     };
 
     // ---- the interpreter: the sandboxed runner only (§6), given the snapshot and the policy
@@ -587,7 +605,7 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
     await drain();
     throw e;
   } finally {
-    unwatch();
+    unwatch(); undoc();
     removeEventListener("pagehide", onHide);
     if (holder.current === me) holder.current = null;
   }

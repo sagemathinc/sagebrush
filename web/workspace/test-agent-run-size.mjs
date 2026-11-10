@@ -17,9 +17,10 @@ import { join, relative } from "node:path";
 
 const CEILING_RAW = 64 * 1024, CEILING_GZIP = 24 * 1024;
 // (the committed caps: the first reviewed measurement plus 64 bytes each, daybreak2's rule)
-// (measured at r2 (the code reviews' fixes) on master 7ebd72f4, bun 1.4.4 / node 24.21.0: 16,372 B raw, 6,653 B gzip -9;
-//  r1's were 14,560 / 6,074 with caps 14,624 / 6,138)
-const CAP_RAW = 16436, CAP_GZIP = 6717;
+// (measured at r3 (r2's reviews: the startup deadline, the documents' permission changes, the queue's count and
+//  metadata) on master 733c626a, bun 1.4.4 / node 24.21.0: 17,021 B raw, 6,882 B gzip -9; r2's were 16,372 / 6,653 with
+//  caps 16,436 / 6,717, r1's 14,560 / 6,074 with caps 14,624 / 6,138)
+const CAP_RAW = 17085, CAP_GZIP = 6946;
 // (the reviewed inputs, relative to web/: the entry and what it imports)
 const INPUTS = ["workspace/run-verbs.ts", "notebook/confine.js", "workspace/paths.ts", "workspace/agent-grant.ts"];
 

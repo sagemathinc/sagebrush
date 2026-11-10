@@ -57,18 +57,19 @@ export function runVerbsFor(runs: { load(): Promise<typeof import("./run-verbs")
       let pre: RunHolder["current"] = null, timer: ReturnType<typeof setTimeout> | undefined, unwatch = () => {};
       if (!holder.current) {
         // (its deadline from now, the chunk's load included; a grant ended meanwhile ends it too)
-        const loading: { stopped: boolean; cause?: "stopped" | "timeout" } = { stopped: false };
+        const loading: { stopped: boolean; cause?: "stopped" | "timeout"; wake?: () => void } = { stopped: false };
         const deadlineAt = performance.now() + (Number.isInteger(params?.timeout_s) ? params.timeout_s : 120) * 1000;
-        pre = { owner: ctx.grant.id, view: String(params?.path ?? ""), loading, deadlineAt, stop: () => { loading.stopped = true; holder.hide(); } };
-        timer = setTimeout(() => { loading.cause ??= "timeout"; pre!.stop(); }, Math.max(0, deadlineAt - performance.now()));
-        unwatch = ctx.onChange(() => { if (!ctx.live()) pre!.stop(); });
+        pre = { owner: ctx.grant.id, view: String(params?.path ?? ""), loading, deadlineAt, stop: () => { loading.stopped = true; loading.wake?.(); holder.hide(); } };
+        // (until the run holds itself (holder.current its own), this record's deadline and grant watch are its; a lookup
+        //  it waits on ends with them (run-verbs.ts run(), daybreak3's RUN-DEADLINE-HANDOFF-1))
+        const mine = () => holder.current === pre;
+        timer = setTimeout(() => { if (mine()) { loading.cause ??= "timeout"; pre!.stop(); } }, Math.max(0, deadlineAt - performance.now()));
+        unwatch = ctx.onChange(() => { if (mine() && !ctx.live()) pre!.stop(); });
         holder.current = pre;
         holder.show(ctx.agent, pre.view, pre.stop);
       }
       try {
         const m = await runs.load();
-        // (taken over by the run, which keeps its own deadline from deadlineAt)
-        clearTimeout(timer); unwatch();
         return await m.run(method as any, params, ctx, runs.host(), holder, pre);
       } finally {
         clearTimeout(timer); unwatch();
