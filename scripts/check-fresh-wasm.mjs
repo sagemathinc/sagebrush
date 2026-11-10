@@ -13,7 +13,7 @@ export function checkFreshWasm({ cwd = process.cwd(), event = process.env.GITHUB
   if (diff.status === 0) return { status: 0, message: "wasm/: the committed engine equals a fresh build" };
   if (diff.status !== 1) return { status: 2, message: `::error::git diff wasm/ failed (${diff.status}): ${String(diff.stderr).trim()}` };
   const stat = spawnSync("git", ["-C", cwd, "diff", "--stat", "--summary", "wasm/"], { encoding: "utf8" }).stdout.trim();
-  const what = "wasm/ differs from a fresh build of engine/ (sagebrush-engine.wasm, sagebrush-nd.wasm or sagebrush-raster.wasm: commit the fresh build)";
+  const what = "wasm/ differs from a fresh build of engine/ (sagebrush-engine.wasm, sagebrush-nd.wasm, sagebrush-raster.wasm or sagebrush-mp.wasm: commit the fresh build)";
   const strict = event === "push" || event === "workflow_dispatch" || event === "schedule";
   return strict ? { status: 1, message: `::error::${what}\n${stat}` } : { status: 0, message: `::warning::${what}\n${stat}` };
 }
