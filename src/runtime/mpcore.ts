@@ -14,6 +14,7 @@ import { importModule, memoryGuard, newBuiltinModule } from "./modules";
 import * as O from "./ops";
 import { repr } from "./format";
 import { INTR, INTR_CTRL_C } from "./interrupt";
+import { heapLimit } from "./heap";
 
 interface Core {
   memory: WebAssembly.Memory;
@@ -247,21 +248,42 @@ function call(name: string, prec: any, rnd: any, load: (c: Core) => void): any {
 // copies its operands' limbs in and its result's limbs out (a fresh array,
 // never a view of the core's memory).
 
-/** |x|'s limbs as 32-bit words (an even count), refused past the limb limit before its text is made */
+// A copy of n limbs made in the JS heap, admitted before anything is made
+// (design §4.5, as format.ts's admitDigits): the limb limit, and its peak,
+// `per` bytes a limb, in this session's heap.  The peaks: a copy-out's words
+// (2n numbers: 16n); an int's limbs (wordsOf: its hex text, 16n, and the
+// words, whose elements may be held as small ints, 8n, before numbers, 16n:
+// 40n); an int made from limbs (manOf: the digits as bytes, 16n, their text,
+// 16n, and the int, 8n: 40n).  The loops test for Stop.
+function admit(n: number, per: number) {
+  if (n > MAX_LIMBS) limit(n);
+  if (per * n > heapLimit()) memoryGuard(`Converting a number of ${n * 64} bits`, per * n, heapLimit(), "one conversion");
+}
+
+/** |x|'s limbs as 32-bit words (an even count) */
 function wordsOf(x: bigint): number[] {
-  if (x >> BigInt(64 * MAX_LIMBS) > 0n) limit(MAX_LIMBS + 1);
-  const h = x === 0n ? "" : x.toString(16), w: number[] = [];
-  for (let i = h.length; i > 0; i -= 8) w.push(parseInt(h.slice(Math.max(0, i - 8), i), 16));
-  if (w.length & 1) w.push(0);
+  const n = Math.ceil(O.bitLengthSmallCopies(x) / 64);
+  admit(n, 40);
+  const w: number[] = new Array(2 * n).fill(0), h = n ? x.toString(16) : "";
+  for (let i = 0, j = h.length; j > 0; i++, j -= 8) {
+    if ((i & 65535) === 65535) O.pollInterrupt();
+    w[i] = parseInt(h.slice(Math.max(0, j - 8), j), 16);
+  }
   return w;
 }
 
 /** the int whose limbs are the words w */
 function manOf(w: ArrayLike<number>): bigint {
-  let h = "0x0";
-  for (let i = w.length - 1; i >= 0; i--) h += w[i].toString(16).padStart(8, "0");
-  return BigInt(h);
+  const n = w.length, b = new Uint8Array(8 * n + 3);
+  admit(n >> 1, 40);
+  b.set([48, 120, 48]);
+  for (let i = n - 1, k = 3; i >= 0; i--, k += 8) {
+    if ((i & 65535) === 0) O.pollInterrupt();
+    for (let d = 7, v = w[i]; d >= 0; d--, v >>>= 4) b[k + d] = HEX.charCodeAt(v & 15);
+  }
+  return BigInt(new TextDecoder().decode(b));
 }
+const HEX = "0123456789abcdef";
 
 // ctx.mpf's binary arithmetic: when the other operand is an mpf of the same
 // context (its exact type), the same libmp call the reference's
@@ -328,6 +350,7 @@ function installFast(ctx: any) {
       else if (k === 1 && r[4] === 0) {
         // (the result's limbs copied out: a fresh array)
         const n = r[1], v = ioWords(c, n), w: number[] = [];
+        admit(n, 16);
         for (let i = 0; i < 2 * n; i++) w.push(v[i]);
         o.$m = w;
         o.$s = r[0];
