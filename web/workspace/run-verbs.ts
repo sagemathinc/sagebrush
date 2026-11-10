@@ -51,12 +51,12 @@ export const RUN_TEXT = {
   tooManyPaths: (n: number) => `too large: the paths of the files you can read are over ${fmtSize(RUN_LIMITS.pathBytes)} (${fmtSize(n)})`,
   tooManyCells: (n: number) => `too large: the notebook has over ${RUN_LIMITS.cells.toLocaleString("en-US")} cells (${n.toLocaleString("en-US")})`,
   tooMuchSource: (n: number) => `too large: the notebook's code is over ${fmtSize(RUN_LIMITS.source)} (${fmtSize(n)})`,
-  notAllowed: "not allowed: this grant may not run code (the person can turn on \"May run code\" in Agents with access)",
+  notAllowed: "not allowed: this grant may not run code (the person can allow it when they connect this agent again)",
   revoked: "the grant was revoked",
   expired: "the grant expired",
   runOff: "May run code was turned off",
   narrowed: "what you may read was narrowed",
-  truncated: "the result is limited to 256 KiB",
+  truncated: `the result is limited to ${fmtSize(RUN_LIMITS.result)}`,
   more: (n: number) => `and ${n} more`,
   outside: (n: number) => `${n} outside what you can read`,
   notNotebook: (p: string) => `invalid: ${p} isn't a notebook`,
@@ -66,7 +66,7 @@ export const RUN_TEXT = {
   unreadable: (p: string) => `invalid: outside the folders this agent may read: ${JSON.stringify(p).slice(0, 120)}`,
   notText: (p: string) => `invalid: ${p} isn't UTF-8 text`,
   cut: (n: number) => `[… ${n.toLocaleString("en-US")} bytes]`,
-  notKept: "[output not kept: the notebook's outputs are over 8 MiB]",
+  notKept: `[output not kept: the notebook's outputs are over ${fmtSize(RUN_LIMITS.savedOutputs)}]`,
 };
 
 /** A refusal: its code (machine-readable) and board's sentence. */
@@ -256,7 +256,8 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
   }
   const view = viewOf(root);
   const target = await ws.stat(real!);
-  if (!target || target.trashed) refuse(RUN_TEXT.noSuch(real!));
+  if (!target) refuse(RUN_TEXT.noSuch(real!));
+  if (target.trashed) refuse(RUN_TEXT.notHere(real!));
   if (method === "workspace.run_notebook" && target.kind !== "notebook") refuse(RUN_TEXT.notNotebook(real!));
   if (method === "workspace.run_file" && !(target.kind === "file" && /\.(py|sage)$/i.test(real!))) refuse(RUN_TEXT.notCode(real!));
   if (!ctx.live()) refuse("invalid: " + ctx.why());

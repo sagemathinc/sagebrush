@@ -184,7 +184,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     const revoke = h("button", { textContent: "Revoke" });
     revoke.onclick = () => void p.revoke("revoked by the person");
     // ("May run code" turned off here, mid-session: a run going ends (chat plan PR 4); turned on only by a new grant)
-    const noRun = g.run ? h("button", { textContent: "Turn off running code", title: "It may no longer run code; a run going now stops" }) : null;
+    const noRun = g.run ? h("button", { textContent: "Turn off running code", title: "The agent may no longer run code, and a run going now stops (connect it again to allow it)" }) : null;
     if (noRun) noRun.onclick = () => void p.noRun();
     bar = h("div", { className: "sbag-bar" }, text, ...(noRun ? [noRun] : []), revoke);
     bar.setAttribute("role", "status");

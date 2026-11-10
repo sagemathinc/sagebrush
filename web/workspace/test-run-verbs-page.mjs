@@ -77,12 +77,14 @@ try {
   check(r?.refused?.paths?.includes("/rv/out.txt") && out1 === false, `a main run's write with no permission: refused, nothing written: ${JSON.stringify({ r, out1 })}`);
   // ---- refusals before anything runs
   r = await evaluate(`window.__run("workspace.run_file", { path: "/rv/hello.py" }, { ...window.__grant, run: false })`);
-  check(r?.threw === "not_allowed" && r.message === 'not allowed: this grant may not run code (the person can turn on "May run code" in Agents with access)', `run off: refused, board's words: ${JSON.stringify(r)}`);
+  check(r?.threw === "not_allowed" && r.message === 'not allowed: this grant may not run code (the person can allow it when they connect this agent again)', `run off: refused, board's words: ${JSON.stringify(r)}`);
   r = await evaluate(`window.__run("workspace.run_file", { path: "/rv/data.csv" })`);
   check(r?.threw === "invalid" && /isn't a \.py or \.sage file/.test(r.message), `run_file on a .csv: refused: ${JSON.stringify(r)}`);
   r = await evaluate(`window.__run("workspace.run_notebook", { path: "/rv/hello.py" })`);
   check(r?.threw === "invalid" && /isn't a notebook/.test(r.message), `run_notebook on a .py: refused: ${JSON.stringify(r)}`);
   r = await evaluate(`window.__run("workspace.run_file", { path: "/rv/hello.py" }, { ...window.__grant, folders: ["/other"] })`);
+  const unreadMissing = await evaluate(`window.__run("workspace.run_file", { path: "/secret/none.py" }, { ...window.__grant, folders: ["/rv"] })`);
+  check(unreadMissing?.threw === "invalid" && /outside the folders this agent may read/.test(unreadMissing.message), `a path outside the grant that doesn't exist: refused as unreadable, never said missing: ${JSON.stringify(unreadMissing)}`);
   check(r?.threw === "invalid" && /outside the folders this agent may read/.test(r.message), `a path the grant can't read: refused: ${JSON.stringify(r)}`);
   // ---- run_notebook on main: its outputs come back, the person's notebook stays byte for byte as it was
   check(await evaluate(`(async () => {
@@ -160,6 +162,22 @@ try {
   check(r?.ended === "stopped" && d2 === "", `RUN-DRAIN-1: the admitted change completes once and is kept, the one after Stop isn't; the end is Stop's: ${JSON.stringify({ r, d2 })}`);
   r = await evaluate(`window.__run("workspace.run_file", { path: "/Branches/w1/rv/reads.py" })`);
   check(r?.ok === true, `after the drain, the next run goes: ${JSON.stringify(r).slice(0, 160)}`);
+  // ---- the grant's write changed mid-run (held at the start): a narrowing applies at once; a widening never does (§3)
+  await put("/Branches/w1/rv/n1.py", "open('/rv/n1.txt','w').write('n')\n");
+  await evaluate(`(window.__holdOn = { start: true }, 1)`);
+  await go("workspace.run_file", { path: "/Branches/w1/rv/n1.py" });
+  check(!!(await until(`window.__held === "start"`, 60000)), "a writing run held at its start");
+  await evaluate(`(window.__grantNow = { ...window.__grant, write: false }, window.__chg?.(), window.__holdOn = {}, window.__release(), 1)`);
+  r = await result();
+  await evaluate(`(window.__grantNow = undefined, 1)`);
+  check(r?.refused?.paths?.includes("/rv/n1.txt") && (await exists("/Branches/w1/rv/n1.txt")) === false, `the grant's write narrowed mid-run: the next write refused: ${JSON.stringify(r)}`);
+  await evaluate(`(window.__holdOn = { start: true }, 1)`);
+  await go("workspace.run_file", { path: "/Branches/w1/rv/n1.py" }, "{ ...window.__grant, write: false }");
+  check(!!(await until(`window.__held === "start"`, 60000)), "a read-only run held at its start");
+  await evaluate(`(window.__grantNow = { ...window.__grant, write: true }, window.__chg?.(), window.__holdOn = {}, window.__release(), 1)`);
+  r = await result();
+  await evaluate(`(window.__grantNow = undefined, 1)`);
+  check(r?.refused?.paths?.includes("/rv/n1.txt") && (await exists("/Branches/w1/rv/n1.txt")) === false, `the grant's write widened mid-run: never applied to that run: ${JSON.stringify(r)}`);
   // ---- busy for another grant, and its run_stop (§2): neither names nor stops the run
   await evaluate(`(window.__holdOn = { start: true }, 1)`);
   await go("workspace.run_file", { path: "/rv/hello.py" });

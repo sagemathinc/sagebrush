@@ -37,6 +37,9 @@ k = new Kept(H, T); k.add("a".repeat(H + T + 1));
 check(k.text() === "a".repeat(H) + RUN_TEXT.cut(1) + "a".repeat(T), `one over: cut in the middle, said: ${k.text().length}`);
 k = new Kept(4, 4); k.add("ab😀cd😀ef😀gh");
 check(!/[\ud800-\udbff](?![\udc00-\udfff])|(^|[^\ud800-\udbff])[\udc00-\udfff]/.test(k.text()), `never half a code point: ${JSON.stringify(k.text())}`);
+// (a cut that would fall inside a surrogate pair: the whole code point goes, never half of it)
+k = new Kept(1, 8); k.add("a😀😀😀");
+check(k.text() === "a" + RUN_TEXT.cut(4) + "😀😀", `a cut at a code point, never inside one: ${JSON.stringify(k.text())}`);
 k = new Kept(4, 4); k.add('"'.repeat(5));
 check(jsonBytes('"""""') === 10 && k.text() === '""' + RUN_TEXT.cut(1) + '""', `counted as JSON: an escape takes its 2 bytes: ${JSON.stringify(k.text())}`);
 const S = RUN_LIMITS.streamHead + RUN_LIMITS.streamTail;
@@ -60,7 +63,7 @@ let lo = 1, hi = RUN_LIMITS.result;
 while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (!bounded(base, [["cells", [item(mid)]]]).truncated) lo = mid; else hi = mid - 1; }
 const atBound = bounded(base, [["cells", [item(lo)]]]), over = bounded(base, [["cells", [item(lo + 1)]]]);
 check(!atBound.truncated && atBound.cells.length === 1 && room(atBound) <= RUN_LIMITS.result, `the largest item that fits: whole (${room(atBound)} bytes)`);
-check(over.truncated?.reason === RUN_TEXT.truncated && over.cells.length === 0 && room(over) <= RUN_LIMITS.result, "one byte more: omitted, with truncated and its reason");
+check(over.truncated?.reason === "the result is limited to 256.0 KB" && RUN_TEXT.notKept === "[output not kept: the notebook's outputs are over 8.0 MB]" && over.truncated?.reason === RUN_TEXT.truncated && over.cells.length === 0 && room(over) <= RUN_LIMITS.result, "one byte more: omitted, with truncated and its reason");
 
 // ---- inputHash (§4) against a fixture computed here, never from the run's own bytes
 const sha = (s) => createHash("sha256").update(s).digest("hex");

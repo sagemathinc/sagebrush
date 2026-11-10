@@ -284,7 +284,7 @@ try {
   ok(await until(`![...document.querySelectorAll(".sbag-bar button")].some((b) => b.textContent === "Turn off running code")`), "turned off: the bar no longer offers it");
   ok(await (async () => { for (let i = 0; i < 100; i++) { if ((await drive({ op: "grant" })).ok?.run === false) return true; await sleep(50); } return false; })(), "turned off: the agent told run: false");
   const refusedRun = await drive({ op: "req", method: "workspace.run_file", params: { path: "/A/r.py" } });
-  ok(refusedRun.err?.code === "not_allowed" && refusedRun.err.message === 'not allowed: this grant may not run code (the person can turn on "May run code" in Agents with access)', `turned off: the next run refused (${JSON.stringify(refusedRun).slice(0, 200)})`);
+  ok(refusedRun.err?.code === "not_allowed" && refusedRun.err.message === 'not allowed: this grant may not run code (the person can allow it when they connect this agent again)', `turned off: the next run refused (${JSON.stringify(refusedRun).slice(0, 200)})`);
   const made = await drive({ op: "req", method: "workspace.create", params: { path: "/A/n.txt", content: { text: "hi" } } });
   ok(made.ok?.entry?.path === "/A/n.txt", `an agent's create inside /A (${JSON.stringify(made).slice(0, 120)})`);
   ok((await ev(`T.ws.read("/A/n.txt").then((r) => typeof r.content === "string" ? r.content : new TextDecoder().decode(r.content))`)) === "hi", "the file is in the person's workspace");

@@ -402,7 +402,7 @@
       }
     },
     "workspace.run_notebook": {
-      "description": "Run a notebook's code cells in order in Sagebrush's sandbox, which can't reach the network (beyond loading its own packages), and get each cell's result. In your own branch its outputs are saved into the branch's copy; anywhere else they are only returned. Its code may change files only where you may write and, for the person's own notebook, where they allowed it. Needs \"May run code\"; one run at a time in a page.",
+      "description": "Run a notebook's code cells in order in Sagebrush's sandbox, which can't reach the network (beyond loading its own packages), and get each cell's result. In your own branch its outputs are saved into the branch's copy if the notebook hasn't changed meanwhile; anywhere else they are only returned. Its code may change files only where you may write and, for the person's own notebook, where they allowed it. Needs \"May run code\"; one run at a time in a page.",
       "params": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",

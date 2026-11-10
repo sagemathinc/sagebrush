@@ -60,8 +60,8 @@ export function runParams(method: string, p: unknown): string | null {
   if (method === "workspace.run_stop") return k.length ? `run_stop takes no params (${k[0].slice(0, 40)})` : null;
   const o = p as Record<string, unknown>;
   for (const x of k) if (x !== "path" && x !== "timeout_s") return `unknown param: ${x.slice(0, 40)}`;
-  if (typeof o.path !== "string" || !o.path || o.path.length > 4096) return "path: a workspace path";
-  if (o.timeout_s !== undefined && !(Number.isInteger(o.timeout_s) && (o.timeout_s as number) >= 1 && (o.timeout_s as number) <= 600)) return "timeout_s: a whole number of seconds, 1 to 600";
+  if (typeof o.path !== "string" || !o.path || o.path.length > 4096) return "path must be a workspace path";
+  if (o.timeout_s !== undefined && !(Number.isInteger(o.timeout_s) && (o.timeout_s as number) >= 1 && (o.timeout_s as number) <= 600)) return "timeout_s must be a whole number of seconds, 1 to 600";
   return null;
 }
 /** Where the page keeps grants (Workspace.agentGrants / putAgentGrant). */
