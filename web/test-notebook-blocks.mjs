@@ -149,6 +149,16 @@ try {
   check((await active())?.[0] === "    - xxx" && await ev("document.activeElement?.matches('.mb-edit textarea')"), "N1: Tab indents a text block and keeps focus in its editor: " + JSON.stringify(await active()));
   await key("Tab", { modifiers: 8 });
   check((await active())?.[0] === "- xxx", "N1: Shift+Tab outdents the text block: " + JSON.stringify(await active()));
+  // TESTS989-2: touched nonblank lines only, and the caret/selection stay
+  // with the same text after the four inserted spaces.
+  await ev("(() => { const t = document.activeElement; t.value = 'alpha\\n\\nomega'; t.dispatchEvent(new Event('input')); t.setSelectionRange(0, t.value.length); return 1; })()");
+  await key("Tab");
+  const tabLines = await ev("(() => { const t = document.activeElement; return [t.value, t.selectionStart, t.selectionEnd]; })()");
+  await ev("(() => { const t = document.activeElement; t.value = 'middle'; t.dispatchEvent(new Event('input')); t.setSelectionRange(2, 2); return 1; })()");
+  await key("Tab");
+  const tabCaret = await ev("(() => { const t = document.activeElement; return [t.value, t.selectionStart, t.selectionEnd]; })()");
+  check(JSON.stringify(tabLines) === JSON.stringify(["    alpha\n\n    omega", 0, 20]) && JSON.stringify(tabCaret) === JSON.stringify(["    middle", 6, 6]), "TESTS989-2: Tab leaves a selected blank line empty and keeps the selection/caret: " + JSON.stringify({ tabLines, tabCaret }));
+  await ev("(() => { const t = document.activeElement; t.value = '- xxx'; t.dispatchEvent(new Event('input')); t.setSelectionRange(t.value.length, t.value.length); return 1; })()");
   await key("Tab");
   await key("Enter", { modifiers: 8 });
   check(await until(`${C(1)}.el.classList.contains('rendered') && ${C(1)}.el.querySelectorAll('.mdout li li').length === 1`, 3000), "N1: a list item indented with Tab renders under the item before it");
