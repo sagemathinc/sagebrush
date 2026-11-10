@@ -763,7 +763,10 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     presenting = m.present({ slides: slidesNow, onRendered: E.onRendered, onRun: () => { runKey(false); }, onShow: (st: HTMLElement) => { if (st.querySelector(".sageinteract")) void loadInteract().then((m) => { if (live()) m.live(st, sageSession as any, liveFid === host.fid ? liveIds : new Set()); }, () => {}); }, start: frameInView(), onExit: () => { presenting = null; presentBtn.focus(); } });
   }, () => say("Couldn't load the presenter. Check the network, then click Present to try again."));
   E.onRendered(() => { presentBtn.hidden = slidesNow().length === 0; });
-  E.onRendered(() => { if (preview.querySelector("pre.sageblock:not([data-hl])")) (hlMod ??= import(hlUrl).catch(() => null)).then((m) => { if (m && live()) m.colour(preview, life.signal); }); });
+  // (one wait for the chunk per page at most: renders while it comes add none, and once it comes the preview as it is
+  //  then is coloured; astra's SEC on #1009)
+  let hlWait = false;
+  E.onRendered(() => { if (!hlWait && preview.querySelector("pre.sageblock:not([data-hl])")) { hlWait = true; (hlMod ??= import(hlUrl).catch(() => null)).then((m) => { hlWait = false; if (m && live()) m.colour(preview, life.signal); }); } });
   // (the preview's interacts, drawn after each render that has one not drawn yet; the slide being presented shown again,
   //  so its copy has them)
   E.onRendered(() => {
