@@ -1576,7 +1576,7 @@
   "2fff015f13f09352": {"decl":"src/runtime/modules.ts :: settleFollowSymlinks","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
   "39610e78af3061b3": {"decl":"src/runtime/modules.ts :: statResult","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
   "ca772324d970324c": {"decl":"src/runtime/modules.ts :: termSize","class":"allocates","via":"src/runtime/types.ts :: structseq"},
-  "5f8bbe546701c996": {"decl":"src/runtime/mpcore.ts :: call","class":"allocates","via":"src/limits.ts :: plain"},
+  "62840416370da6f9": {"decl":"src/runtime/mpcore.ts :: call","class":"allocates","via":"src/limits.ts :: plain"},
   "f44515f16fab6c6f": {"decl":"src/runtime/mpcore.ts :: core","class":"allocates","via":"web/lib-lazy.ts :: get"},
   "cf51582eb9b037c6": {"decl":"src/runtime/mpcore.ts :: intAt","class":"allocates","via":"src/runtime/mpcore.ts :: ioAt"},
   "b8e31ab26604a8ce": {"decl":"src/runtime/mpcore.ts :: mpBytes","class":"allocates","via":"src/runtime/wasm-asset.ts :: assetBytes"},
