@@ -48,6 +48,10 @@ export const VERBS = {
   git_branch: { description: "A branch of the workspace to work in: a copy of main (what the grant lets you read, but /Branches, /Trash and /Proposals) at /Branches/<name>/, which only you may change; main stays as it is. Name it for what the work is about; a taken name is refused.", params: obj({ name: { type: "string", minLength: 1, maxLength: 40, pattern: "^[a-z0-9][a-z0-9-]{0,39}$", description: "1 to 40 of a-z, 0-9 and -, starting with a letter or digit" } }, ["name"]) },
 } as const;
 
+/** The verbs the page does itself, with the workspace's host-only methods (git-branch.ts), rather than through
+ * Workspace.forAgent's facade: never facade methods (the drift check in test-workspace*.mjs leaves out these alone). */
+export const PAGE_VERBS: readonly string[] = ["git_branch"];
+
 /** schema.json: the verbs, their parameters' JSON Schemas, and the limits. */
 export function schema() {
   return {
