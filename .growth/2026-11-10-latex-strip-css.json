@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "LaTeX editor's banner as one dismissible line under the toolbar (#966, William's H1/H5): the editor's page CSS changes three rules (.tex-banner thinner, a new .tex-banner-x for the dismiss button at least 24 by 24, .tex-head at least 40 px tall so the Files button covers nothing). Every LaTeX example's committed preview.html embeds the page CSS, so the 11 LaTeX previews in examples/ and the fixture corpus's article grow by those lines each; site/examples copies the previews. The LaTeX bundles themselves shrink (eager group 240,519 -> 238,723 raw: the agent tools moved to their lazy chunk). Measured +2178 B on each row by CI's size-gate (run 42792494647) against master; marked +64 B over it.",
+ "bytes": {
+  "examples/corpus": 2242,
+  "site/examples": 2242
+ }
+}
