@@ -288,10 +288,11 @@ function admit(n: number, per: number) {
   admitHeap(per * n, `Converting a number of ${n * 64} bits`);
 }
 
-// (below 2^1024, 16 limbs, a number goes by shifts, without the text: two to
-// eight times faster there, and slower past it; that copy is a few hundred
-// bytes, which no admission refuses, so it has none)
-const SMALL = 1n << 1024n, SMALL_WORDS = 32;
+// (an int below 2^4096, 64 limbs, goes to words by shifts, without the text,
+// and words up to 32 (1024 bits) to an int: faster there than the text, and
+// slower past it; those copies are at most a few KB, which no admission
+// refuses, so they have none)
+const SMALL = 1n << 4096n, SMALL_WORDS = 32, MID = 1n << 65536n;
 
 /** |x|'s limbs as 32-bit words (an even count) (exported for the tests) */
 export function wordsOf(x: bigint): number[] {
@@ -303,12 +304,22 @@ export function wordsOf(x: bigint): number[] {
     }
     return w;
   }
-  const n = Math.ceil(O.bitLengthSmallCopies(x) / 64);
+  // (below 2^65536, 1024 limbs, its text is at most 16 KB, made first as an
+  // int's repr would be, its length the count; past it, the count first, by
+  // the bits, and the copy admitted before the text is made)
+  const mid = x < MID, h0 = mid ? x.toString(16) : "";
+  const n = mid ? Math.ceil(h0.length / 16) : Math.ceil(O.bitLengthSmallCopies(x) / 64);
   admit(n, 40);
-  const w: number[] = new Array(2 * n).fill(0), h = n ? x.toString(16) : "";
+  const w: number[] = new Array(2 * n).fill(0), h = mid ? h0 : x.toString(16);
   for (let i = 0, j = h.length; j > 0; i++, j -= 8) {
     if ((i & 65535) === 65535) O.pollInterrupt();
-    w[i] = parseInt(h.slice(Math.max(0, j - 8), j), 16);
+    // (the word's hex digits, at most 8, from h's end: 0-9 are 48-57, a-f 97-102)
+    let v = 0;
+    for (let k = Math.max(0, j - 8); k < j; k++) {
+      const c = h.charCodeAt(k);
+      v = v * 16 + (c < 58 ? c - 48 : c - 87);
+    }
+    w[i] = v;
   }
   return w;
 }
