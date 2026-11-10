@@ -258,7 +258,9 @@ export function mathPart(st, it) {
   return "{\\boxed{\\text{?}}}";
 }
 
-const LABEL = { pending: "running…", notrun: "not run", error: "error", blocked: "not run: an earlier item failed" };
+/** What an item after a failed one says, everywhere (board's M4): a failing item stops the rest. */
+export const BLOCKED = "Not run: an item before this one failed (fix it and run again)";
+const LABEL = { pending: "running…", notrun: "not run", error: "error", blocked: BLOCKED };
 export const DATA_SVG = /^data:image\/svg\+xml;base64,[A-Za-z0-9+/]+={0,2}$/;
 // n: the item's number in the document (1-based), named in the chip so a reader can tell which code it is about
 function chip(st, esc, inline, n, py) {

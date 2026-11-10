@@ -4,15 +4,15 @@
 // The editor's Run (run-core.mjs), without a browser: the session's script run in the CLI's own Sage (the same
 // engine's Python and preparser as the page's runner), its printed results parsed and turned into the results file's
 // states; then those states shown by the renderer's own rule (sagetex.mjs savedStates/stateOf). William's case: a
-// value, a computation, a name defined again later (page order), a failing item whose later readers show Sage's
-// NameError and the rest still run, a plot as an SVG; and the parts alone: refused items, a session that stopped,
+// value, a computation, a name defined again later (page order), a failing item, which stops the rest, a plot as an
+// SVG; and the parts alone: refused items, a session that stopped,
 // unreadable lines, bounds, a traceback without the script's frames.
 //   node scripts/build-cli.mjs && bun web/latex/test-latex-run.mjs
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
-import { seenOf, driver, runnable, parseOutput, statesOf, resultsText, msgOf, MARK, RUN_LIMITS, RESULTS_FORMAT, runAndSave, sessionOf, sandboxEngine, SANDBOX_FAILED, folderFiles, runIn, DEPS_MARK, parseDeps, depsWith, wsReader, checkedResults } from "./run-core.mjs";
+import { seenOf, driver, runnable, parseOutput, statesOf, BLOCKED, resultsText, msgOf, MARK, RUN_LIMITS, RESULTS_FORMAT, runAndSave, sessionOf, sandboxEngine, SANDBOX_FAILED, folderFiles, runIn, DEPS_MARK, parseDeps, depsWith, wsReader, checkedResults } from "./run-core.mjs";
 import { Engine, installPythontex } from "./engine/pipeline.mjs";
 import * as pythontexCode from "./engine/pythontex.mjs";
 import { itemKey, savedStates, stateOf, WRAPPER_VERSION, MAX_RESULT, safeRel, depsOf, staleOf, staleOfSync, sha256hex, readComplete, DEPS_MAX, inlineHtml, blockHtml, mathPart } from "./engine/sagetex.mjs";
@@ -28,9 +28,9 @@ const item = (mode, code, extra = {}) => { const it = real(mode, code, extra); r
 // ---- the parts alone
 {
   const its = [item("silent", "x = 1"), item("sage", "x", { err: "cs", name: "foo" }), item("sage", "x")];
-  check("runnable: refused items aren't sent", JSON.stringify(runnable(its)) === JSON.stringify([{ mode: "silent", code: "x = 1" }, { mode: "sage", code: "x" }]), runnable(its));
-  const st = statesOf(its, [{ s: "ok" }, { s: "ok", latex: "1" }], "");
-  check("statesOf: a refused item says why, the next one is the next result", st[1].s === "error" && /TeX command/.test(st[1].msg) && st[2].s === "ok" && st[2].latex === "1", st);
+  check("runnable: a refused item isn't sent, nor anything after it (it fails, which stops the rest)", JSON.stringify(runnable(its)) === JSON.stringify([{ mode: "silent", code: "x = 1" }]), runnable(its));
+  const st = statesOf(its, [{ s: "ok" }], "");
+  check("statesOf: a refused item says why, the next one is not run (M4)", st[1].s === "error" && /TeX command/.test(st[1].msg) && st[2].s === "blocked" && st[2].msg === BLOCKED, st);
   check("statesOf: every state has its item's key", st.every((s, k) => s.key === its[k].key), st);
   const cut = statesOf([item("silent", "a"), item("sage", "b")], [{ s: "ok" }], "the run was stopped");
   check("statesOf: an item after the session stopped says so", cut[1].s === "error" && cut[1].msg === "not run: the run was stopped", cut);
@@ -219,29 +219,27 @@ const sage = (code) => new Promise((res) => {
 {
   const spec = [
     ["silent", "@interact\ndef s(c=selector(['a', 'b', 'c'], default='b'), t=slider(['p', 'q', 'r'], default='q')):\n    pass"],
-    ["silent", "@interact\ndef e(k=slider(0, 1, 1, 0)):\n    print('in e')\nraise ValueError('after the interact')"],
     ["silent", Array.from({ length: 9 }, (_, n) => `@interact\ndef f${n}(k=slider(0, 1, 1, 0)):\n    global RAN${n}\n    RAN${n} = True\n`).join("")],
-    ["silent", "@interact\ndef a(k=slider(0, 1, 1, 0)):\n    print('in a')\nimport sys\n_AFTER = sys.stdout\nprint('after')"],
+    ["silent", "@interact\ndef a(k=slider(0, 1, 1, 0)):\n    print('in a')\nimport sys\n_AFTER = sys.stdout is _sbtx_buf\nprint('after')"],
+    // (last: a failing item stops the rest)
+    ["silent", "@interact\ndef e(k=slider(0, 1, 1, 0)):\n    print('in e')\nraise ValueError('after the interact')"],
   ];
   const its = spec.map((a) => item(...a));
-  const r = await sage(driver(runnable(its)) + "\nprint('PINS', 'RAN7' in globals(), 'RAN8' in globals(), _AFTER is _sbtx_buf)");
+  const r = await sage(driver(runnable(its)) + "\nprint('PINS', 'RAN7' in globals(), 'RAN8' in globals(), _AFTER)");
   const got = parseOutput(r.out), st = statesOf(its, got, "", interactsOf);
   const pins = (r.out.split("\n").find((l) => l.startsWith("PINS")) ?? "").split(" ");
   const sh = interactsHtml(st[0].interacts ?? []);
   check("interact (Sage): a selector's default selected, a list slider at its default's label", st[0].s === "ok" && /<option value="1" selected>b<\/option>/.test(sh) && /value="1"><span class="si-v">q<\/span>/.test(sh), { st0: st[0], err: r.err.slice(-400) });
-  check("interact (Sage): an item that raises after its interact: its error, no interacts, no placeholder", st[1].s === "error" && /after the interact/.test(st[1].msg) && !st[1].interacts &&
-    !blockHtml(stateOf(savedStates([real(...spec[1])], st.slice(1, 2)), 0, real(...spec[1])), real(...spec[1]), (x) => String(x), 1).includes("sageinteract-at"), st[1]);
-  check("interact (Sage): at most 8 kept an item; the 9th not kept, run once at its defaults as on Sage's command line", got[2]?.interacts?.length === 8 && got[2].interacts.every((x) => x.spec?.name !== "f8") && pins[1] === "True" && pins[2] === "True", { n: got[2]?.interacts?.length, pins });
-  check("interact (Sage): after an interact's function, the item's own output is back (its later print isn't the interact's)", pins[3] === "True" && st[3].interacts?.[0]?.out === "in a\n", { pins, out: st[3].interacts?.[0]?.out });
+  check("interact (Sage): an item that raises after its interact: its error, no interacts, no placeholder", st[3].s === "error" && /after the interact/.test(st[3].msg) && !st[3].interacts &&
+    !blockHtml(stateOf(savedStates([real(...spec[3])], st.slice(3, 4)), 0, real(...spec[3])), real(...spec[3]), (x) => String(x), 1).includes("sageinteract-at"), st[3]);
+  check("interact (Sage): at most 8 kept an item; the 9th not kept, run once at its defaults as on Sage's command line", got[1]?.interacts?.length === 8 && got[1].interacts.every((x) => x.spec?.name !== "f8") && pins[1] === "True" && pins[2] === "True", { n: got[1]?.interacts?.length, pins });
+  check("interact (Sage): after an interact's function, the item's own output is back (its later print isn't the interact's)", pins[3] === "True" && st[2].interacts?.[0]?.out === "in a\n", { pins, out: st[2].interacts?.[0]?.out });
 }
 {
   const spec = [
     ["silent", "var('t')\nx = 2^10"],
     ["sage", "x"],
     ["sage", "integrate(t^2, t, 0, 1)"],
-    ["silent", "y = 1/0"],
-    ["sage", "y"],
-    ["sage", "x", { err: "cs", name: "foo" }],
     ["block", "x = 7\nprint('not a result')"],
     ["sage", "x"],
     ["plot", "plot(sin(t), (t, 0, 3))"],
@@ -253,13 +251,26 @@ const sage = (code) => new Promise((res) => {
   check("sage: the session ran", r.code === 0, r.err.slice(-600));
   check("sage: \\sage{x} is 1024", st[1].s === "ok" && st[1].latex === "1024", st[1]);
   check("sage: integrate is \\frac{1}{3}", st[2].s === "ok" && st[2].latex === "\\frac{1}{3}", st[2]);
-  check("sage: 1/0 shows ZeroDivisionError", st[3].s === "error" && /ZeroDivisionError/.test(st[3].msg) && !/<cell>|_sbtx_/.test(st[3].msg), st[3]);
-  check("sage: a later reader of y shows Sage's NameError", st[4].s === "error" && /NameError: name 'y' is not defined/.test(st[4].msg), st[4]);
-  check("sage: a refused item says why", st[5].s === "error" && /TeX command/.test(st[5].msg), st[5]);
-  check("sage: the rest still run after failures", st[6].s === "ok", st[6]);
-  check("sage: x defined again later is 7 (page order)", st[7].s === "ok" && st[7].latex === "7", st[7]);
+  check("sage: x defined again later is 7 (page order)", st[4].s === "ok" && st[4].latex === "7", st[4]);
   check("sage: an item's own printing isn't a result", !r.out.split("\n").some((l) => l === "not a result"), r.out.slice(0, 300));
-  check("sage: the plot is an SVG data URL", st[8].s === "ok" && /^data:image\/svg\+xml;base64,/.test(st[8].src ?? ""), { ...st[8], src: String(st[8].src).slice(0, 80) });
+  check("sage: the plot is an SVG data URL", st[5].s === "ok" && /^data:image\/svg\+xml;base64,/.test(st[5].src ?? ""), { ...st[5], src: String(st[5].src).slice(0, 80) });
+  // (a failing item stops the rest, every language (@sagebrush's ruling, Nov 10): the script ends at it, and each later
+  //  item says so, board's M4; a refused item is a failure too, and nothing after it is sent)
+  {
+    const fs = [["silent", "y = 1/0"], ["sage", "y"], ["sage", "1+1"]].map((a) => item(...a));
+    const fr = await sage(driver(runnable(fs)));
+    const fst = statesOf(fs, parseOutput(fr.out), "");
+    check("stop: 1/0 shows ZeroDivisionError", fst[0].s === "error" && /ZeroDivisionError/.test(fst[0].msg) && !/<cell>|_sbtx_/.test(fst[0].msg), fst[0]);
+    check("stop: the script ends at the failed item (one result printed)", fr.code === 0 && parseOutput(fr.out).length === 1, parseOutput(fr.out));
+    check("stop: each later item is not run, saying why (M4)", fst.slice(1).every((x) => x.s === "blocked" && x.msg === BLOCKED) && BLOCKED === "Not run: an item before this one failed (fix it and run again)", fst);
+    const rs = [["sage", "1"], ["sage", "x", { err: "cs", name: "foo" }], ["sage", "2"]].map((a) => item(...a));
+    const rr = await sage(driver(runnable(rs)));
+    const rst = statesOf(rs, parseOutput(rr.out), "");
+    check("stop: a refused item says why, and stops the rest; nothing after it is sent", runnable(rs).length === 1 && rst[0].s === "ok" && rst[1].s === "error" && /TeX command/.test(rst[1].msg) && rst[2].s === "blocked" && rst[2].msg === BLOCKED, rst);
+    // (a session that ended for another reason keeps its own words)
+    const ended = statesOf(rs.slice(0, 1).concat([item("sage", "3")]), [], "");
+    check("stop: a session that ended keeps its own words, not M4", ended.every((x) => x.s === "error" && /the session ended before this item/.test(x.msg)), ended);
+  }
   check("sage: every state is shown by the renderer's rule (keys match, in order)", savedStates(reals, st).length === its.length, null);
   check("sage: the renderer shows 1024 for item 2", show(1).s === "ok" && show(1).latex === "1024", show(1));
   // Sage's arithmetic in every item (#706, a wrong answer: each item was exec'd as Python, 1/3 a float, an exact sum

@@ -3,12 +3,12 @@
 // click only; their states written as `sagebrush latex run`'s results file (results v1, FILE.tex.results.json), which
 // the page then reads and shows as it shows the CLI's. This file is the part without a page: the session's script,
 // and how what it printed becomes the results.
-// Unlike the CLI, an item that fails doesn't stop the rest: each one after it runs, and one that reads a name the
-// failed one didn't define shows Sage's own NameError.
+// An item that fails stops the rest, as in the CLI (@sagebrush's ruling, Nov 10, for every language): the script ends
+// there, a refused item isn't sent nor anything after it, and each later item says so (BLOCKED, board's M4).
 // SECURITY: the items' code reaches the session only as base64 inside the script (never spliced into it as text); what
 // the session prints is parsed, never evaluated, and each result is checked here as the CLI checks it (the LaTeX's
 // size, the plot's SVG), and again where it is shown (sagetex.mjs).
-import { MAX_RESULT, WRAPPER_VERSION, utf8len, whyRejected, safeRel, sha256hex, DEPS_MAX, isPy } from "./engine/sagetex.mjs";
+import { MAX_RESULT, WRAPPER_VERSION, utf8len, whyRejected, safeRel, sha256hex, DEPS_MAX, isPy, BLOCKED } from "./engine/sagetex.mjs";
 
 export const RESULTS_FORMAT = "sagebrush-latex-results";
 export const RUN_LIMITS = { svg: 2 * 2 ** 20, msg: 4000 };   // (the CLI's SVG_MAX and MSG_MAX, src/latex-cli.ts)
@@ -145,6 +145,7 @@ def _sbtx_disp(v):
 _sbtx_bi.__pyjs_host__ = _sbtx_host
 _sbtx_bi.__pyjs_display__ = _sbtx_disp
 _sbtx_pg = {}
+_sbtx_x = 0
 try:
     for _sbtx_it in _sbtx_json.loads(_sbtx_b64.b64decode("${b64(JSON.stringify(items))}").decode("utf-8")):
         _sbtx_ia = []
@@ -171,20 +172,25 @@ try:
                 _sbtx_r = {"s": "ok", "latex": _sbtx_buf.getvalue()} if _sbtx_py else {"s": "ok"}
         except Exception:
             _sbtx_r = {"s": "error", "msg": _sbtx_tb.format_exc()}
+            _sbtx_x = 1
         finally:
             _sbtx_sys.stdout = _sbtx_old
         if _sbtx_ia:
             _sbtx_r["interacts"] = [{"spec": x["spec"], "out": x["out"], "shows": x["shows"]} for x in _sbtx_ia]
         _sbtx_deps_line()
         print("\\x1eSBTX" + _sbtx_json.dumps(_sbtx_r))
+        if _sbtx_x:
+            break
 finally:
     _sbtx_bi.__pyjs_host__ = _sbtx_h0
     _sbtx_bi.__pyjs_display__ = _sbtx_d0
 `;
 }
 
-/** The items the session is given: each one the preview can read ({mode, code}), in order; refused ones aren't sent. */
-export const runnable = (items) => items.filter((it) => !it.err && typeof it.code === "string").map((it) => ({ mode: it.mode, code: it.code }));
+/** The items the session is given: each one the preview can read ({mode, code}), in order, up to the first refused one
+ * (which fails, so nothing after it runs). */
+export const runnable = (items) => { const k = items.findIndex((it) => it.err || typeof it.code !== "string"); return (k < 0 ? items : items.slice(0, k)).map((it) => ({ mode: it.mode, code: it.code })); };
+export { BLOCKED };
 
 /** What the session printed, its result lines parsed (anything else on stdout is not a result: ignored). */
 export function parseOutput(out) {
@@ -212,21 +218,23 @@ export function msgOf(msg) {
  * results `got` (one per runnable item, in order) and why it ended early, if it did (`stopped`: its message). */
 export function statesOf(items, got, stopped, interactsOf = null) {
   const states = [];
-  let j = 0;
+  let j = 0, failed = false;
   for (const it of items) {
     const key = it.key;
-    if (it.err || typeof it.code !== "string") { states.push({ key, s: "error", msg: whyRejected(it) }); continue; }
+    // (after a failed item, none runs: each says so; a session that ended keeps its own words)
+    if (failed) { states.push({ key, s: "blocked", msg: BLOCKED }); continue; }
+    if (it.err || typeof it.code !== "string") { states.push({ key, s: "error", msg: whyRejected(it) }); failed = true; continue; }
     const g = got[j++];
     if (!g) { states.push({ key, s: "error", msg: "not run: " + (stopped || "the session ended before this item") }); continue; }
-    if (g.s !== "ok") { states.push({ key, s: "error", msg: msgOf(g.msg) || "error" }); continue; }
+    if (g.s !== "ok") { states.push({ key, s: "error", msg: msgOf(g.msg) || "error" }); failed = true; continue; }
     if (it.mode === "sage" || isPy(it)) {
       const l = String(g.latex ?? "");
-      if (utf8len(l) > MAX_RESULT) states.push({ key, s: "error", msg: `${it.mode === "sage" ? "the result's LaTeX" : it.mode === "py" ? "the result" : "the printed output"} is over ${MAX_RESULT / 1024} KiB` });
+      if (utf8len(l) > MAX_RESULT) { states.push({ key, s: "error", msg: `${it.mode === "sage" ? "the result's LaTeX" : it.mode === "py" ? "the result" : "the printed output"} is over ${MAX_RESULT / 1024} KiB` }); failed = true; }
       else states.push({ key, s: "ok", latex: l });
     } else if (it.mode === "plot") {
       const svg = String(g.svg ?? "");
-      if (utf8len(svg) > RUN_LIMITS.svg) states.push({ key, s: "error", msg: `the plot's SVG is over ${RUN_LIMITS.svg / 2 ** 20} MiB` });
-      else if (!/^\s*(<\?xml[^>]*>\s*)?<svg[\s>]/.test(svg)) states.push({ key, s: "error", msg: "the plot isn't an SVG" });
+      if (utf8len(svg) > RUN_LIMITS.svg) { states.push({ key, s: "error", msg: `the plot's SVG is over ${RUN_LIMITS.svg / 2 ** 20} MiB` }); failed = true; }
+      else if (!/^\s*(<\?xml[^>]*>\s*)?<svg[\s>]/.test(svg)) { states.push({ key, s: "error", msg: "the plot isn't an SVG" }); failed = true; }
       else states.push({ key, s: "ok", src: "data:image/svg+xml;base64," + b64(svg) });
     } else states.push({ key, s: "ok" });
     const ia = interactsOf && Array.isArray(g.interacts) ? interactsOf(g.interacts) : [];
