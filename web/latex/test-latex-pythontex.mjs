@@ -201,6 +201,24 @@ installPythontex(pythontexCode);
   check("incremental-ids", ri.stats.mode !== "cold" && text(ri) === text(cold) && /A1 ?B1[^]*A2 ?B2/.test(text(ri)), [ri.stats.mode, text(ri).slice(-80), text(cold).slice(-80)]);
 }
 
+// ---- read back at the deepest \input (grader's P19 on #978): \input stops 16 deep (demo-machine.mjs INPUT_NEST), so a
+// \py in the deepest file read still reads its result back; pushResult's own bound (the core's inputDepth, 64 file
+// frames) can't be reached by a document, and holds when it can: a machine with a lower inputDepth stops with
+// E-BOUND-INPUT at the read-back, not past it
+{
+  const files = new Map([["main.tex", "\\documentclass{article}\n\\begin{document}\n\\input{d1}\n\\end{document}\n"]]);
+  for (let k = 1; k <= 16; k++) files.set("d" + k + ".tex", k < 16 ? "\\input{d" + (k + 1) + "}" : "deep \\py{1}.");
+  const inputs = { files, resolve: (n) => (files.has(n + ".tex") ? { key: n + ".tex" } : { why: "not found" }) };
+  const main = files.get("main.tex"), its = new Engine().update(main, { inputs }).sageItems;
+  const r = new Engine({ sage: { saved: its.map((it) => ({ key: itemKey(it), s: "ok", latex: "DEEPVALUE" })) } }).update(main, { cold: true, inputs });
+  check("read-back-at-deepest-input", its.length === 1 && text(r).includes("deep DEEPVALUE.") && r.stats.outcome === "ok", [its.length, text(r).slice(0, 200), r.stats.outcome]);
+  const { coldRun } = await import("./engine/incremental-demo.mjs"), { setPyResults } = await import("./engine/demo-machine.mjs");
+  const small = new Map([["main.tex", "\\documentclass{article}\n\\begin{document}\n\\input{a}\n\\end{document}\n"], ["a.tex", "\\input{b}"], ["b.tex", "\\py{1}"]]);
+  setPyResults(function (o) { if (o?.mode === "py") this.pushResult({ text: "X" }, true); });
+  let res; try { res = coldRun(small, "main.tex", { limits: { inputDepth: 3 } }); } finally { setPyResults(null); }
+  check("read-back-input-depth-bound", res.outcome === "E-BOUND-INPUT", res.outcome);
+}
+
 // ---- no preview execution: the engine never loads Run's code or a session
 {
   const dir = new URL("./engine/", import.meta.url);
