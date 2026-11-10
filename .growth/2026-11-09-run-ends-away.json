@@ -1,8 +1,8 @@
 {
  "v": 1,
- "reason": "A run that ends while its notebook isn't shown (the page switched to another) keeps its output, number and time with its interpreter and puts them in the cell when the notebook is shown again, instead of counting as stopped and losing them; a cell the scheduler stopped meanwhile shows stale on return (web/notebook/notebook.js). The CLI embeds the page's script and the notebook component has notebook.js. Measured by size-measure --record (bun 1.4.4, Node 24.21.0, CI's order; base 81e40d8f and this branch merged on it): cli/pyjs.cjs +820; engine/sagebrush-notebook.js +603, its ceiling raised by its marker. Markers: each with the usual 64 B slack.",
+ "reason": "A run that ends while its notebook isn't shown (the page switched to another) keeps its output, number and time with its interpreter and puts them in the cell when the notebook is shown again, instead of counting as stopped and losing them; a restart drops what was kept, the kept time is remembered, and a cell the scheduler stopped or made stale meanwhile shows stale on return (web/notebook/notebook.js). The CLI embeds the page's script and the notebook component has notebook.js. Measured by size-measure --record (bun 1.4.4, Node 24.21.0, CI's order; base 1246a589 and this branch merged on it): cli/pyjs.cjs +936; engine/sagebrush-notebook.js +691, its ceiling raised by its marker. Markers: each with the usual 64 B slack.",
  "bytes": {
-  "cli/pyjs.cjs": 884,
-  "engine/sagebrush-notebook.js": 667
+  "cli/pyjs.cjs": 1000,
+  "engine/sagebrush-notebook.js": 755
  }
 }
