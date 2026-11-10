@@ -222,7 +222,7 @@ const COMPLEX: Record<string, string> = {
 const heap = (bytes: number): never => memoryGuard("The multiprecision core's working memory", bytes, MAX_PAGES * 65536, "the multiprecision core");
 
 /** the core's own failure (a bug): a SystemError */
-const bug = (what: string): never => Obj.raise(Obj.T.SystemError, `the multiprecision core failed: ${what}`);
+const bug = (what: string): never => ((C = RES = U32 = null), Obj.raise(Obj.T.SystemError, `the multiprecision core failed: ${what}`));
 
 function limit(limbs: number): never {
   return memoryGuard(`A number of ${limbs * 64} bits`, BigInt(Math.ceil(limbs)) * 8n, MAX_LIMBS * 8, "one multiprecision number", true);
@@ -256,6 +256,9 @@ function fail(c: Core, code: number, name: string): never {
 // caches, so nothing the session can see is lost); a Stop is the call's
 // KeyboardInterrupt, a refused growth its MemoryError.
 function trapped(c: Core, e: any): never {
+  // (a Python exception as it is; a JS error, a stack overflow too, may have left the core mid-call: borrowed
+  // for good, every later call 0)
+  if (!(e instanceof Error)) throw e;
   C = null;
   RES = U32 = null;
   if (!(e instanceof WebAssembly.RuntimeError)) throw e;
@@ -272,15 +275,17 @@ function trapped(c: Core, e: any): never {
 function call(name: string, prec: any, rnd: any, load: (c: Core) => void): any {
   const c = core();
   const p = precOf(prec), m = rndOf(rnd);
-  let n: number;
   try {
     load(c);
-    n = c.mp_run(OP[name], p, m);
+    const n = c.mp_run(OP[name], p, m);
+    // (no result: a core left mid-call, its failure a bug())
+    if (n < 1) fail(c, n, name);
+    return n === 1 ? out(c, 0, name) : Obj.tuple([out(c, 0, name), out(c, 1, name)]);
   } catch (e) {
+    // (retired here, before any call: at the stack's end trapped() itself may not run)
+    if (e instanceof Error) C = RES = U32 = null;
     return trapped(c, e);
   }
-  if (n < 0) fail(c, n, name);
-  return n === 1 ? out(c, 0, name) : Obj.tuple([out(c, 0, name), out(c, 1, name)]);
 }
 
 // ---- the context: mpmath's PythonMPContext, its mpf type's arithmetic native
@@ -398,41 +403,42 @@ function installFast(ctx: any) {
       const prec = precOf(pr[0]), rnd = rndOf(pr[1]);
       const a = operand(self), b = operand(other);
       let k = -100;
-      if (a !== undefined && b !== undefined) {
-        // (the packed operands' limbs into the IO buffer: a's, then b's)
-        const an = a ? 0 : self.$m.length >> 1, bn = b ? 0 : other.$m.length >> 1;
-        if (an + bn > 0) {
-          const q = ioAt(c, an + bn);
-          if (!a) U32!.set(self.$m, q);
-          if (!b) U32!.set(other.$m, q + 2 * an);
-        }
-        const x = a ?? [self.$s, 0, self.$e, self.$b], y = b ?? [other.$s, 0, other.$e, other.$b];
-        try {
+      try {
+        if (a !== undefined && b !== undefined) {
+          // (the packed operands' limbs into the IO buffer: a's, then b's)
+          const an = a ? 0 : self.$m.length >> 1, bn = b ? 0 : other.$m.length >> 1;
+          if (an + bn > 0) {
+            const q = ioAt(c, an + bn);
+            if (!a) U32!.set(self.$m, q);
+            if (!b) U32!.set(other.$m, q + 2 * an);
+          }
+          const x = a ?? [self.$s, 0, self.$e, self.$b], y = b ?? [other.$s, 0, other.$e, other.$b];
           k = c.mp_bin(op, prec, rnd, x[0], x[1], x[2], x[3], an, y[0], y[1], y[2], y[3], bn);
-        } catch (e) {
-          return trapped(c, e);
+          if (k < 0) fail(c, k, hook);
         }
-        if (k < 0) fail(c, k, hook);
-      }
-      const o = new Ctor(), r = res(c);
-      if (k === 0) o[key] = Obj.tuple([r[0], r[1], r[2], r[3]]);
-      else if (k === 1 && r[4] === 0) {
-        // (the result's limbs copied out: a fresh array)
-        const n = r[1], q = ioAt(c, n), w: number[] = [];
-        admit(n, 24);
-        for (let i = 0; i < 2 * n; i++) {
-          if ((i & 65535) === 65535) O.pollInterrupt();
-          w.push(U32![q + i]);
+        const o = new Ctor(), r = res(c);
+        if (k === 0) o[key] = Obj.tuple([r[0], r[1], r[2], r[3]]);
+        else if (k === 1 && r[4] === 0) {
+          // (the result's limbs copied out: a fresh array)
+          const n = r[1], q = ioAt(c, n), w: number[] = [];
+          admit(n, 24);
+          for (let i = 0; i < 2 * n; i++) {
+            if ((i & 65535) === 65535) O.pollInterrupt();
+            w.push(U32![q + i]);
+          }
+          o.$m = w;
+          o.$s = r[0];
+          o.$e = r[2];
+          o.$b = r[3];
         }
-        o.$m = w;
-        o.$s = r[0];
-        o.$e = r[2];
-        o.$b = r[3];
+        // (else an exponent past 2^53, an operand's or the result's: mpmath's own method, which makes the
+        // same libmp call through the hook)
+        else return Obj.callObj(slow, [self, other]);
+        return o;
+      } catch (e) {
+        if (e instanceof Error) C = RES = U32 = null;
+        return trapped(c, e);
       }
-      // (else an exponent past 2^53, an operand's or the result's: mpmath's own method, which makes the
-      // same libmp call through the hook)
-      else return Obj.callObj(slow, [self, other]);
-      return o;
     };
     Obj.setattr(cls, name, Obj.pyfn(f, name));
   });
