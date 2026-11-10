@@ -16,10 +16,10 @@ use crate::abi;
 /// the result inline in res[0..4]; 1, by limbs (abi::Core::out); < 0, a
 /// failure (abi::code).
 #[no_mangle]
+#[allow(clippy::too_many_arguments)]
 // SAFETY: an export of the core's wasm ABI (no_mangle; the mp_ prefix keeps the symbol
 // unique); no unsafe operation.
 #[allow(unsafe_code)]
-#[allow(clippy::too_many_arguments)]
 pub extern "C" fn mp_bin(op: i32, prec: f64, rnd: i32, asign: u32, aman: f64, aexp: f64, abc: f64, an: u32, bsign: u32, bman: f64, bexp: f64, bbc: f64, bn: u32) -> i32 {
     sagebrush_wasmheap::clear_refusal();
     abi::with(|c| {
