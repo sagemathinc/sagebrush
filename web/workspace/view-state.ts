@@ -1,40 +1,64 @@
 // Where you were in a document (H7): kept when you go to another and back, reload, or open it in a new tab. One
-// mechanism for every editor (design: the per-file view state, r1): the shell keeps each document's view; the
-// editor says what its view is (its own fields: a notebook's top cell, a board's position and zoom, a PDF's page)
-// and applies it again. Opening another document is a new page, so the view is kept in localStorage: per browser,
-// never synced (a scroll depends on the window) and never sent anywhere; ids and numbers only, never content.
+// mechanism for every editor (design/view-state.md): the shell keeps each document's view; the editor says what its
+// view is (its own fields: a notebook's top cell, a board's position and zoom, a PDF's page) and applies it again.
+// Opening another document is a new page, so the view is kept in localStorage: per browser, never synced (a scroll
+// depends on the window) and never sent anywhere. Only what VIEW_LIMITS allows is kept or read back: ids and finite
+// numbers, bounded; anything else there (another version's, or written by hand) is dropped, never returned.
 const KEY = "sagebrush-view-state";
-/** At most this many documents' views (the least recently kept dropped first), each's JSON at most `chars` long. */
-export const VIEW_LIMITS = { docs: 200, chars: 512 };
+/** At most `docs` documents' views (the least recently kept dropped first). A view: an object of at most `fields`
+ *  fields, each a finite number, an id (`ID`) or such an object again, at most `depth` deep; its JSON at most
+ *  `chars` long. A field's name is a short word (`FIELD`). */
+export const VIEW_LIMITS = { docs: 200, chars: 512, fields: 16, depth: 3 };
+const ID = /^[\w.:-]{1,64}$/, FIELD = /^[A-Za-z][A-Za-z0-9_]{0,31}$/, KINDS = ["notebook", "board", "tex"];
 export type ViewKey = { kind: "notebook" | "board" | "tex"; id: string };
-export type View = Record<string, unknown>;
+export type View = { [field: string]: number | string | View };
 type Kept = Record<string, { t: number; v: View }>;
 
-const name = (k: ViewKey) => k.kind + ":" + k.id;
+const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+function shaped(v: unknown, depth: number): boolean {
+  if (typeof v === "number") return Number.isFinite(v);
+  if (typeof v === "string") return ID.test(v);
+  if (!isObj(v) || depth > VIEW_LIMITS.depth) return false;
+  const ks = Object.keys(v);
+  return ks.length <= VIEW_LIMITS.fields && ks.every((k) => FIELD.test(k) && shaped(v[k], depth + 1));
+}
+/** `v` as a view to keep or give back, or null: an object of the shape VIEW_LIMITS allows, its JSON short enough. */
+const asView = (v: unknown): View | null => (isObj(v) && shaped(v, 1) && JSON.stringify(v).length <= VIEW_LIMITS.chars ? (v as View) : null);
+const name = (k: ViewKey) => (KINDS.includes(k?.kind) && typeof k.id === "string" && ID.test(k.id) ? k.kind + ":" + k.id : null);
+/** The kept views, each checked: a malformed or oversize entry, or one with a name no key makes, is dropped. */
 function all(): Kept {
+  const out: Kept = {};
   try {
     const m = JSON.parse(localStorage.getItem(KEY) ?? "{}");
-    return m && typeof m === "object" && !Array.isArray(m) ? m : {};
-  } catch { return {}; }
+    if (!isObj(m)) return out;
+    for (const [n, e] of Object.entries(m)) {
+      const i = n.indexOf(":");
+      if (i < 0 || name({ kind: n.slice(0, i) as ViewKey["kind"], id: n.slice(i + 1) }) !== n || !isObj(e) || typeof e.t !== "number" || !Number.isFinite(e.t)) continue;
+      const v = asView(e.v);
+      if (v) out[n] = { t: e.t, v };
+    }
+  } catch {}
+  return out;
 }
 
-/** The view kept for `key`, or null (none, or unreadable). */
+/** The view kept for `key`, or null (none, or not a view VIEW_LIMITS allows). */
 export function savedView(key: ViewKey): View | null {
-  const e = all()[name(key)];
-  return e && e.v && typeof e.v === "object" && !Array.isArray(e.v) ? e.v : null;
+  const n = name(key);
+  return (n && all()[n]?.v) || null;
 }
 
-/** Keeps `v` as `key`'s view (read, changed and written back at once, so other documents' views, another tab's
- *  too, are kept); one longer than VIEW_LIMITS.chars isn't kept. */
+/** Keeps `v` as `key`'s view, if VIEW_LIMITS allows it (else nothing changes). What's kept is read, changed and
+ *  written back, so other documents' views stay; but two tabs writing at the same moment aren't coordinated, so one
+ *  of their changes can be lost (a view not kept, never a wrong one: best effort, as a scroll position can be). */
 export function saveView(key: ViewKey, v: View) {
-  const s = JSON.stringify(v);
-  if (s === undefined || s.length > VIEW_LIMITS.chars) return;
+  const n = name(key), view = asView(v);
+  if (!n || !view) return;
   const m = all();
-  m[name(key)] = { t: Date.now(), v: JSON.parse(s) };
+  m[n] = { t: Date.now(), v: JSON.parse(JSON.stringify(view)) };
   const names = Object.keys(m);
   if (names.length > VIEW_LIMITS.docs) {
-    names.sort((a, b) => (m[b]?.t || 0) - (m[a]?.t || 0));
-    for (const n of names.slice(VIEW_LIMITS.docs)) delete m[n];
+    names.sort((a, b) => m[b].t - m[a].t);
+    for (const x of names.slice(VIEW_LIMITS.docs)) delete m[x];
   }
   try { localStorage.setItem(KEY, JSON.stringify(m)); } catch {}
 }
