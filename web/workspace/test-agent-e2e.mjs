@@ -29,6 +29,7 @@ import { Workspace } from ${JSON.stringify(join(here, "api.ts"))};
 import { mountAgentPairing } from ${JSON.stringify(join(here, "agent-ui.ts"))};
 import { AgentPairing } from ${JSON.stringify(join(here, "agent-pair.ts"))};
 import * as gitBranches from ${JSON.stringify(join(here, "git-branch.ts"))};
+import * as runVerbs from ${JSON.stringify(join(here, "run-verbs.ts"))};
 const ws = await Workspace.open();
 // (test only: a fake clock, window.__skew ms ahead of the real one, for expiries inside the retry window)
 const realNow = Date.now;
@@ -41,7 +42,10 @@ const putAgentGrant = ws.putAgentGrant.bind(ws);
 (ws as any).putAgentGrant = async (...a: any[]) => { const d = (window as any).__grantDelay; if (d) await new Promise((r) => setTimeout(r, d)); return (putAgentGrant as any)(...a); };
 // (?r=1: the page keeps a reload record (A14), so a reload's silent restore is restoreWith's, not a remembered grant's)
 // (it offers git_branch, as the Agents and board pages do: chat plan PR 3)
-const ui = mountAgentPairing(ws as any, { branches: gitBranches, ...(new URLSearchParams(location.search).has("r") ? { reload: { scope: { workspace: "e2e", page: "/" } } } : {}) });
+// (and the run verbs, with no sandbox (this page isn't the site's): the pairing's dispatch and the grant's run checked
+//  for real, the run itself refused before anything is read: chat plan PR 4a)
+const runs = { load: async () => runVerbs, host: () => ({ ws, WorkerKernel: class {}, RunnerWorker: class {}, runnerSrc: "runner/", sandbox: "none", docTrees: () => [] }) } as any;
+const ui = mountAgentPairing(ws as any, { branches: gitBranches, runs, ...(new URLSearchParams(location.search).has("r") ? { reload: { scope: { workspace: "e2e", page: "/" } } } : {}) });
 // (a second page's attempt, made the same way the dialog makes one)
 const tryPair = async (code: string, port: number) => {
   const p = new AgentPairing(port, { code }, { verbsFor: (a) => ws.forAgent(a) as any, store: ws as any, trashEntry: async () => null, page: { origin: location.origin, path: "/" } });
@@ -167,6 +171,8 @@ for line in sys.stdin:
             print(json.dumps({"ok": HELD[0]}), flush=True)
         elif m["op"] == "slow":
             SLOW[0] = float(m["s"]); print(json.dumps({"ok": SLOW[0]}), flush=True)
+        elif m["op"] == "grant":
+            print(json.dumps({"ok": p.status().get("grant")}), flush=True)
         elif m["op"] == "status":
             s = p.status(); print(json.dumps({"ok": {"paired": s.get("paired"), "granted": s.get("granted")}}), flush=True)
     except NotConnected as e:
@@ -265,6 +271,20 @@ try {
   await click(".sbag-box button.primary");
   ok(await until(`!!document.querySelector(".sbag-bar")`), "allowed: the bar shows the agent and its grant");
   ok(await grantedAtServer(), "the agent's server has the grant");
+  // ("May run code" (chat plan PR 4a): ticked in Connect, told to the agent; a run through the pairing, in the sandbox;
+  //  turned off from the bar, told again, and the next run refused in board's words)
+  ok((await drive({ op: "grant" })).ok?.run === true, "May run code: ticked in Connect, the agent told run: true");
+  await ev(`T.ws.create("/A/r.py", { content: "print('via agent')\\n" })`);
+  const ran = await drive({ op: "req", method: "workspace.run_file", params: { path: "/A/r.py" } });
+  ok(ran.err?.code === "no_sandbox" && ran.err.message === "no sandbox: code runs only in Sagebrush's sandbox, which isn't available here", `an agent's run_file through the pairing, may run code, no sandbox on this page: refused for that (${JSON.stringify(ran).slice(0, 200)})`);
+  const badT = await drive({ op: "req", method: "workspace.run_file", params: { path: "/A/r.py", timeout_s: 601 } });
+  ok(badT.err?.code === "invalid" && /timeout_s/.test(badT.err.message), `timeout_s 601: refused by the pairing before anything loads (${JSON.stringify(badT).slice(0, 160)})`);
+  ok(await until(`[...document.querySelectorAll(".sbag-bar button")].some((b) => b.textContent === "Turn off running code")`), "the bar offers Turn off running code");
+  await ev(`[...document.querySelectorAll(".sbag-bar button")].find((b) => b.textContent === "Turn off running code").click()`);
+  ok(await until(`![...document.querySelectorAll(".sbag-bar button")].some((b) => b.textContent === "Turn off running code")`), "turned off: the bar no longer offers it");
+  ok(await (async () => { for (let i = 0; i < 100; i++) { if ((await drive({ op: "grant" })).ok?.run === false) return true; await sleep(50); } return false; })(), "turned off: the agent told run: false");
+  const refusedRun = await drive({ op: "req", method: "workspace.run_file", params: { path: "/A/r.py" } });
+  ok(refusedRun.err?.code === "not_allowed" && refusedRun.err.message === 'not allowed: this grant may not run code (the person can turn on "May run code" in Agents with access)', `turned off: the next run refused (${JSON.stringify(refusedRun).slice(0, 200)})`);
   const made = await drive({ op: "req", method: "workspace.create", params: { path: "/A/n.txt", content: { text: "hi" } } });
   ok(made.ok?.entry?.path === "/A/n.txt", `an agent's create inside /A (${JSON.stringify(made).slice(0, 120)})`);
   ok((await ev(`T.ws.read("/A/n.txt").then((r) => typeof r.content === "string" ? r.content : new TextDecoder().decode(r.content))`)) === "hi", "the file is in the person's workspace");
@@ -347,6 +367,13 @@ try {
     const kept = await ev(`T.ws.agentGrants().then((g) => Object.values(g).map((k) => k.session))`);
     ok(kept.length === 1 && kept[0] === kept0[0], `reload ${n}: the kept session is still the one in force (${kept[0] === undefined ? "lost" : kept[0] === kept0[0] ? "same" : "changed"})`);
   }
+  // ("May run code" given again only as kept (chat plan PR 4a, Q5): this grant was made with it; one kept before it
+  //  existed has none, and a reconnect never promotes it)
+  ok((await drive({ op: "grant" })).ok?.run === true, "a remembered grant made with May run code: given again with it");
+  await ev(`(async () => { const all = await T.ws.agentGrants(); for (const [id, k] of Object.entries(all)) { const { run: _r, ...g } = k.grant; await T.ws.putAgentGrant(id, { ...k, grant: g }); } return 1; })()`);
+  ok(await open(""), "reload 2b: a remembered grant kept before May run code existed");
+  ok(await until(`!!document.querySelector(".sbag-bar")`, 15000) && (await grantedAtServer()), "reload 2b: reconnected");
+  ok((await drive({ op: "grant" })).ok?.run === false && !(await ev(`[...document.querySelectorAll(".sbag-bar button")].some((b) => b.textContent === "Turn off running code")`)), "reload 2b: given again without May run code, never promoted");
   // (the window is bounded: with the old connection held longer than it, the reconnect gives up, and no attempt
   // begins 2 s or more after the first)
   await drive({ op: "slow", s: 3 });

@@ -524,7 +524,8 @@ export class AgentPairing {
     //  have narrowed, which the run applies)
     const live = () => {
       const now = this.grant;
-      return this.state === "granted" && now !== null && grantProblem(now, this.now()) === null && now.run && now.id === g!.id && same(now.folders, g!.folders);
+      // ((run as it was at the call: a call made after it was turned off is refused for that by the run itself, not ended)
+      return this.state === "granted" && now !== null && grantProblem(now, this.now()) === null && (now.run || !g!.run) && now.id === g!.id && same(now.folders, g!.folders);
     };
     const ctx = { agent: h.agent.name, actor: actorOf(h.agent.name, h.agent.client), grant: g!, live, why, grantNow: () => this.grant, onChange: (cb: () => void) => this.onChange(cb) };
     try {
