@@ -47,14 +47,14 @@
   },
   "engine/lib/magma.pre": {
    "exact": false,
-   "ceiling": 3099230,
+   "ceiling": 2669095,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
   },
   "engine/lib/magma.src": {
    "exact": false,
-   "ceiling": 582054,
+   "ceiling": 495754,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -75,14 +75,14 @@
   },
   "engine/lib/matlab.pre": {
    "exact": false,
-   "ceiling": 5932373,
+   "ceiling": 4648490,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
   },
   "engine/lib/matlab.src": {
    "exact": false,
-   "ceiling": 1175608,
+   "ceiling": 861784,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -250,7 +250,7 @@
   },
   "engine/lib/mod-importlib.src": {
    "exact": false,
-   "ceiling": 3964,
+   "ceiling": 8128,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -649,28 +649,28 @@
   },
   "engine/lib/sage.pre": {
    "exact": false,
-   "ceiling": 14035266,
+   "ceiling": 13699283,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
   },
   "engine/lib/sage.src": {
    "exact": false,
-   "ceiling": 2985033,
+   "ceiling": 2904087,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
   },
   "engine/lib/sci.pre": {
    "exact": false,
-   "ceiling": 2085850,
+   "ceiling": 2008225,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
   },
   "engine/lib/sci.src": {
    "exact": false,
-   "ceiling": 410859,
+   "ceiling": 392841,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -733,7 +733,7 @@
   },
   "engine/sagebrush-notebook.js": {
    "exact": false,
-   "ceiling": 241976,
+   "ceiling": 243045,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -761,7 +761,7 @@
   },
   "engine/sagebrush-worker.js": {
    "exact": false,
-   "ceiling": 1705235,
+   "ceiling": 1709325,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -794,6 +794,167 @@
   "site/examples": {
    "exact": false,
    "ceiling": 188743680,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-base64.pre": {
+   "exact": false,
+   "ceiling": 12756,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-base64.src": {
+   "exact": false,
+   "ceiling": 1782,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-capacity.pre": {
+   "exact": false,
+   "ceiling": 143651,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-capacity.src": {
+   "exact": false,
+   "ceiling": 43231,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-display-budget.pre": {
+   "exact": false,
+   "ceiling": 6623,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-display-budget.src": {
+   "exact": false,
+   "ceiling": 2255,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-importlib.pre": {
+   "exact": false,
+   "ceiling": 13373,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-memguard.pre": {
+   "exact": false,
+   "ceiling": 26642,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-memguard.src": {
+   "exact": false,
+   "ceiling": 13363,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-padic.pre": {
+   "exact": false,
+   "ceiling": 61105,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-padic.src": {
+   "exact": false,
+   "ceiling": 15106,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-posixpath.pre": {
+   "exact": false,
+   "ceiling": 55310,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-posixpath.src": {
+   "exact": false,
+   "ceiling": 16511,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-pyjs-docsearch.pre": {
+   "exact": false,
+   "ceiling": 59520,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-pyjs-docsearch.src": {
+   "exact": false,
+   "ceiling": 16455,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-sage-ffsub.pre": {
+   "exact": false,
+   "ceiling": 190588,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-sage-ffsub.src": {
+   "exact": false,
+   "ceiling": 46354,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-special.pre": {
+   "exact": false,
+   "ceiling": 624254,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-special.src": {
+   "exact": false,
+   "ceiling": 175495,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-time.pre": {
+   "exact": false,
+   "ceiling": 212092,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-time.src": {
+   "exact": false,
+   "ceiling": 56907,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-weakref.pre": {
+   "exact": false,
+   "ceiling": 9865,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-weakref.src": {
+   "exact": false,
+   "ceiling": 1698,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -912,7 +1073,30 @@
    "engine/sagebrush-worker.js": 1635087,
    "examples/corpus": 2238299,
    "examples/index.json": 20636,
-   "site/examples": 7593571
+   "site/examples": 7593571,
+   "engine/lib/mod-base64.pre": 12692,
+   "engine/lib/mod-base64.src": 1718,
+   "engine/lib/mod-capacity.pre": 143587,
+   "engine/lib/mod-capacity.src": 43167,
+   "engine/lib/mod-display-budget.pre": 6559,
+   "engine/lib/mod-display-budget.src": 2191,
+   "engine/lib/mod-importlib.pre": 13309,
+   "engine/lib/mod-memguard.pre": 26578,
+   "engine/lib/mod-memguard.src": 13299,
+   "engine/lib/mod-padic.pre": 61041,
+   "engine/lib/mod-padic.src": 15042,
+   "engine/lib/mod-posixpath.pre": 55246,
+   "engine/lib/mod-posixpath.src": 16447,
+   "engine/lib/mod-pyjs-docsearch.pre": 59456,
+   "engine/lib/mod-pyjs-docsearch.src": 16391,
+   "engine/lib/mod-sage-ffsub.pre": 190524,
+   "engine/lib/mod-sage-ffsub.src": 46290,
+   "engine/lib/mod-special.pre": 624190,
+   "engine/lib/mod-special.src": 175431,
+   "engine/lib/mod-time.pre": 212028,
+   "engine/lib/mod-time.src": 56843,
+   "engine/lib/mod-weakref.pre": 9801,
+   "engine/lib/mod-weakref.src": 1634
   },
   "reset": {
    "reason": "U7 PR 3 (#548): the examples gallery's three size rows (plan-examples-gallery section 5; daybreak2's ruling): examples/corpus, site/examples and examples/index.json, measured by scripts/size-measure.mjs's examplesFiles, a measurement move (its sha256 is in the key). Added by this reset, seeded at the merge's sizes; no existing row's measurement changes. Redone on master 04240a6f (after #732): every shared row of the merge equals the base's record, so growth is empty; the markers it removes are absorbed by the merge's sizes.",
