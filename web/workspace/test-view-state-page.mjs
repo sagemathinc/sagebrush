@@ -1,7 +1,7 @@
 // ci: web-runner order=162 runner=bun chrome
 // Where you were in a document (view-state.ts) in Chrome, on a stand-in editor (a scrolled list, two documents as
 // ?doc=a and ?doc=b): the shared rows (view-state-check.mjs) every adopting editor runs, and the person winning over
-// a restore that comes late (?slow=).
+// a restore that comes late (?hold: laid out only when the test says).
 //   CHROME=google-chrome bun web/workspace/test-view-state-page.mjs
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -19,14 +19,16 @@ const box = document.getElementById("box")!;
 const get = viewToRestore(key, box, location.hash !== "");
 const k = keepView(key, () => ({ top: box.scrollTop }));
 box.addEventListener("scroll", () => k.changed());
-// (laid out a little later, as an editor's content is)
-setTimeout(() => {
+// (laid out a little later, as an editor's content is; with ?hold, only when the test says (window.__layout))
+const layout = () => {
   box.innerHTML = Array.from({ length: 400 }, (_, i) => "<div>line " + i + "</div>").join("");
   const v = get();
   if (v) box.scrollTop = Number(v.top);
   else if (location.hash) box.scrollTop = Number(location.hash.slice(1));
   (window as any).ready = true;
-}, Number(q.get("slow") ?? 30));
+};
+if (q.has("hold")) (window as any).__layout = layout;
+else setTimeout(layout, 30);
 `);
 const built = await Bun.build({ entrypoints: [join(site, "entry.ts")], outdir: site, naming: "vs.js", target: "browser", format: "esm" });
 if (!built.success) {
@@ -87,10 +89,17 @@ try {
   await checkViewKept(check, { name: "stand-in", open, urlOf: (d) => `${base}?doc=${d}`, docs: ["a", "b"], ready, set, read, target: { url: `${base}?doc=a&from=link#400`, view: { top: 400 } } });
 
   // (the person wins: their wheel before a late restore leaves the page where it is, and what they then do is kept)
-  let t = await open(`${base}?doc=a&slow=1500`);
+  // (the page's layout held until the wheel has happened, so the order is the test's, not a timer's: a first CI run
+  //  at 09:44Z failed this row on a 1.5 s timer; and the tab opened plainly, then sent to the held page)
+  let t = await open(`${base}?doc=z`);
+  await t.goto(`${base}?doc=a&hold=1`);
+  for (let i = 0; i < 400 && !(await t.ev("typeof window.__layout === 'function'").catch(() => false)); i++) await sleep(25);
+  const before = await t.ev("({ held: typeof window.__layout === 'function', ready: window.ready === true, doc: new URLSearchParams(location.search).get('doc') })");
   await t.ev("document.getElementById('box').dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 10 })), true");
+  await t.ev("(window.__layout(), true)");
   for (let i = 0; i < 200 && !(await t.ev(ready).catch(() => false)); i++) await sleep(25);
-  check((await t.ev(read)).top === 0, "the person's wheel before a late restore: the page doesn't jump (top 0)");
+  const after = await t.ev(read);
+  check(before.held && !before.ready && before.doc === "a" && after.top === 0, `the person's wheel before a late restore: the page doesn't jump (top 0): ${JSON.stringify({ before, after })}`);
   await t.ev("(async () => { document.getElementById('box').scrollTop = 600; await new Promise((r) => setTimeout(r, 50)); })()");
   await t.close();
   t = await open(`${base}?doc=a`);
@@ -98,7 +107,9 @@ try {
   check((await t.ev(read)).top === 600, `and where they went then is kept (${(await t.ev(read)).top})`);
   // (kept in localStorage: ids and numbers only)
   const raw = await t.ev("localStorage.getItem('sagebrush-view-state')");
-  check(/^\{"notebook:a":\{"t":\d+,"v":\{"top":600\}\},"notebook:b":\{"t":\d+,"v":\{"top":0\}\}\}$/.test(raw) || /^\{"notebook:b":\{"t":\d+,"v":\{"top":0\}\},"notebook:a":\{"t":\d+,"v":\{"top":600\}\}\}$/.test(raw), `kept: ids and numbers only (${raw})`);
+  const kept = JSON.parse(raw);
+  check(Object.entries(kept).every(([k, e]) => /^notebook:[abz]$/.test(k) && Object.keys(e).join() === "t,v" && Number.isFinite(e.t) && Object.keys(e.v).join() === "top" && Number.isFinite(e.v.top)) && kept["notebook:a"]?.v.top === 600,
+    `kept: ids and numbers only (${raw})`);
   await t.close();
 
   if (fails.length) console.error(`FAIL: ${fails.length} of ${checks} checks\n  ` + fails.join("\n  "));

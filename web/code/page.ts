@@ -272,7 +272,6 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   }
   const actions: Record<string, () => unknown> = {
     "c-new": async () => { const p = await free("/", "Untitled", ".ipynb"); if (!p) return say("No free name for a new notebook"); await flush(); const e = await ws.createByPerson(p, { mode: "python" }); location.assign("/?nb=" + encodeURIComponent(e.ref!)); },
-    "c-newmatlab": async () => { const p = await free("/", "Untitled", ".ipynb"); if (!p) return say("No free name for a new notebook"); await flush(); const e = await ws.createByPerson(p, { mode: "matlab" }); location.assign("/?nb=" + encodeURIComponent(e.ref!)); },
     "c-newboard": async () => { await flush(); location.assign("/board/?new=python"); },
     "c-newfolder": async () => { const n = prompt("A new folder, at the top of your files: its name", "New folder"); if (n?.trim()) await ws.mkdir("/" + safeName(n.trim())); },
     "c-examples": async () => { if (!(await host.examples())) location.assign("/"); },
@@ -297,7 +296,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   };
   host.renderFileMenu(menu, {
     attr: "data-f",
-    keys: { newNotebook: "c-new", newMatlab: "c-newmatlab", newBoard: "c-newboard", newFolder: "c-newfolder", fromExample: "c-examples", open: "c-open", saveCopy: "c-copy", rename: "c-rename", print: "c-print", share: "c-share", delete: "c-delete" },
+    keys: { newNotebook: "c-new", newBoard: "c-newboard", newFolder: "c-newfolder", fromExample: "c-examples", open: "c-open", saveCopy: "c-copy", rename: "c-rename", print: "c-print", share: "c-share", delete: "c-delete" },
     disabled: { share: true },
     why: { upload: "Upload… is in Files", share: "A file is shared with its notebook or folder: share it from there" },
     downloads: [{ key: "c-download", label: nameOf(path) }],
