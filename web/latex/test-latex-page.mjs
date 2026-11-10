@@ -1654,7 +1654,15 @@ try {
   check(await until(`document.querySelector(".tex-preview h2, .tex-preview h1")?.textContent.includes("Hello")`, 20000), "the preview renders the section");
   const cold = { requests: requests.length, bytes: [...sizes.values()].reduce((a, b) => a + b, 0), latex: [...sizes.entries()].filter(([u]) => /sagebrush-latex/.test(u)).reduce((a, [, b]) => a + b, 0) };
   console.log("cold first click (loopback, uncompressed; the gated number is the TIMING protocol's against DEV):", JSON.stringify(cold));
-  check(await page(`P.querySelector(".tex-banner").textContent.startsWith("LaTeX editor: an early prototype. Your edits are saved as you type.")`), "the banner says edits are saved as you type");
+  // (William's H1/H5: one line under the toolbar, what to expect, a link to the page on how it differs from LaTeX, and a
+  //  dismiss button; nothing over its start (the Files button sits beside the toolbar); dismissed, it stays away)
+  const strip = await page(`(() => { const b = P.querySelector(".tex-banner"), h = P.querySelector(".tex-head"), a = b.querySelector("a"), x = b.querySelector(".tex-banner-x"), r = b.getBoundingClientRect(), f = document.querySelector(".sb-files-toggle")?.getBoundingClientRect();
+    return { text: b.firstChild.textContent, link: a.textContent, href: a.href, x: x.title + "|" + x.getAttribute("aria-label"), below: h.nextElementSibling === b && r.top >= h.getBoundingClientRect().bottom - 1, clear: !f || f.bottom <= r.top + 1 || f.right <= r.left, oneLine: r.height < 30 }; })()`);
+  check(strip?.text === "Shown as a web page as you type, not a PDF; part of LaTeX is supported." && strip.link === "How it differs from LaTeX" && strip.href === "https://sagebrush.space/articles/latex/02-how-it-differs"
+    && strip.x === "Dismiss this notice|Dismiss this notice" && strip.below && strip.clear && strip.oneLine, "the strip: what to expect in one line, under the toolbar, nothing over it; its link and its dismiss button", strip);
+  await page(`(P.querySelector(".tex-banner-x").click(), true)`);
+  const gone = await page(`P.querySelector(".tex-banner").hidden`);
+  check(gone && await open(fid) && await page(`P.querySelector(".tex-banner").hidden === true`), "…dismissed, it's gone, and stays away when a document is opened again", { gone });
   check(await page(`!P.querySelector(".tex-save") && !P.querySelector(".tex-dirty") && P.querySelector(".tex-savestate").textContent === "Saved ✓"`), "U8: no Save button, no Unsaved changes: Saved ✓");
   check(latexFetches().some((u) => /sagebrush-latex\.js/.test(u)) && latexFetches().some((u) => /sagebrush-latex-worker\.js/.test(u)), "the page and its worker fetched now", latexFetches());
   check(!latexFetches().some((u) => /sagebrush-latex-examples\.js/.test(u)), "…and not the examples' chunk: opening a .tex doesn't fetch it", latexFetches());
@@ -1733,7 +1741,8 @@ try {
   }
   const mixed = await mk("/t/mixed.tex", enc("a\r\nb\nc\n"));
   await open(mixed); await sleep(800);
-  check(await page(`P.querySelector(".tex-savestate").textContent === "Read-only" && P.querySelector(".tex-banner").textContent.includes("mixes line endings")`), "mixed line endings: read-only, the banner says why");
+  check(await page(`P.querySelector(".tex-savestate").textContent === "Read-only" && !P.querySelector(".tex-banner").hidden && P.querySelector(".tex-banner").textContent.startsWith("This file can't be saved here: ") && P.querySelector(".tex-banner").textContent.includes("mixes line endings") && P.querySelector(".tex-banner-x").hidden && P.querySelector(".tex-banner a").hidden`),
+    "mixed line endings: read-only, the banner says why, shown even after the strip was dismissed, and not dismissible");
   const mrev = await ev(`${W}.stat("/t/mixed.tex").then((e) => e.rev ?? 0)`);
   await typeInto("changed\n"); await ctrlS(); await sleep(500);
   check((await ev(`${W}.stat("/t/mixed.tex").then((e) => e.rev ?? 0)`)) === mrev && (await statusIs(/can't be saved here/, 3000)), "…Ctrl+S writes nothing, says why");

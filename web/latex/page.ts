@@ -81,8 +81,13 @@ export { PATCH_BUDGET, FOLLOW_KEY } from "./editor";
 const RESULTS_MAX = 32 * 2 ** 20;
 export const FONT = { key: "sagebrush-latex-font", min: 9, max: 28, def: 13 };
 export const ZOOM = { key: "sagebrush-latex-zoom", min: 50, max: 200, def: 100, step: 10 };
-const BANNER = "LaTeX editor: an early prototype. Your edits are saved as you type. If the file changes elsewhere while you edit (another tab, Python, an agent), nothing is written over it: you choose which text to keep. It renders a subset of LaTeX as a web page (not a PDF); unsupported commands appear as gray tags.";
-const BANNER_NO_SAVE = (why: string) => "LaTeX editor: an early prototype. This file can't be saved here: " + why + ". It renders a subset of LaTeX as a web page (not a PDF); unsupported commands appear as gray tags.";
+// (the strip under the toolbar (William, Nov 9: "exactly what should I expect of this thing", and a page that says how
+//  it differs from LaTeX, not a wall of text): one line, dismissible; a file that can't be saved says so instead, not
+//  dismissible)
+const BANNER = "Shown as a web page as you type, not a PDF; part of LaTeX is supported.";
+const DIFFERS = "https://sagebrush.space/articles/latex/02-how-it-differs";
+const NO_SAVE = (why: string) => "This file can't be saved here: " + why + ".";
+const BANNER_OFF = "sagebrush-latex-banner-dismissed";
 
 // (sandbox: the hosting page's runner and kernel classes, for Run, boot.ts; none, Run says why it can't run)
 type Host = {
@@ -320,6 +325,12 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   root.textContent = "";
   const page = el("div", "tex-page"); root.appendChild(page);
   const banner = el("div", "tex-banner"); banner.setAttribute("role", "note");
+  const bannerText = el("span"), bannerLink = el("a", "", "How it differs from LaTeX"), bannerX = el("button", "tex-banner-x", "×");
+  bannerLink.href = DIFFERS; bannerLink.target = "_blank"; bannerLink.rel = "noopener";
+  bannerX.title = "Dismiss this notice"; bannerX.setAttribute("aria-label", bannerX.title);
+  banner.append(bannerText, " ", bannerLink, bannerX);
+  const setBanner = (why?: string) => { bannerText.textContent = why ? NO_SAVE(why) : BANNER; bannerLink.hidden = bannerX.hidden = !!why; banner.hidden = !why && pref(BANNER_OFF, 0, 1, 0) > 0; };
+  bannerX.onclick = () => { banner.hidden = true; keep(BANNER_OFF, 1); };
   const head = el("div", "tex-head");
   // Files: the notebook page's own Files button (index.html's #wsfilesbtn) clicked, so the files show and hide beside
   // this page as they do beside a notebook, the document staying open; pressed while they are shown (body.wsfiles)
@@ -360,7 +371,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const cmBtn = el("button", "tex-comments", "Comments");
   // Agent: an agent on this computer (Claude Code, Codex, … with sagebrush-mcp) connected to this page, to read and
   // answer the comments and edit the .tex, under the person's grant
-  const agentBtn = el("button", "tex-agent", "Agent"); agentBtn.title = "Connect an agent on this computer";
+  const agentBtn = el("button", "tex-agent", "Agent"); agentBtn.title = "Connect an agent on this computer (Claude Code, Codex, …) to files you choose";
   const agentFailed = () => { status.textContent = "Couldn't load the agent connection. Check the network, then click Agent to try again."; };
   agentBtn.onclick = () => void pairAgent(host.ws).then((p) => p.connect(), agentFailed);
   // Present (present.ts, a chunk of its own, /sagebrush-latex-present.js): a beamer document's slides full screen,
@@ -389,11 +400,11 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const barText = el("span", "tex-conflict-t");
   const useTheirs = el("button", "tex-theirs", "Use theirs (keep mine as a copy)"), keepMine = el("button", "tex-mine", "Keep mine (theirs stays in TimeTravel)");
   bar.append(barText, useTheirs, keepMine);
-  page.append(banner, head, bar, main);
-  banner.textContent = BANNER;
+  page.append(head, banner, bar, main);
   const say = (t: string) => { status.textContent = t; };
   const pref = (k: string, lo: number, hi: number, d: number) => { let v = d; try { v = Number(localStorage.getItem(k) ?? d); } catch {} return Number.isInteger(v) && v >= lo && v <= hi ? v : d; };
   const keep = (k: string, v: number) => { try { localStorage.setItem(k, String(v)); } catch {} };
+  setBanner();
   let fontPx = pref(FONT.key, FONT.min, FONT.max, FONT.def), zoomPct = pref(ZOOM.key, ZOOM.min, ZOOM.max, ZOOM.def);
   const applyView = () => {
     page.style.setProperty("--tex-src-fs", fontPx + "px");
@@ -549,11 +560,11 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   if (read.entry.fid !== host.fid) { gone("This file isn't here any more."); return; }
   mark("tex-read-done", { bytes: read.content.length });
   const opened = openBytes(read.content);
-  if (opened.kind === "binary") { gone("This file can't be opened in the LaTeX editor: " + opened.why + "."); banner.textContent = BANNER_NO_SAVE(opened.why); return; }
+  if (opened.kind === "binary") { gone("This file can't be opened in the LaTeX editor: " + opened.why + "."); setBanner(opened.why); return; }
   // (the whole file only: the bytes read are the file's size, else no Save)
   let saveable: boolean = opened.saveable && read.content.length === (read.entry.size ?? -1) && !e0.remote;
   let whyNot = !opened.saveable ? opened.why : e0.remote ? "it is in the cloud: open it on the device that made it" : read.content.length !== (read.entry.size ?? -1) ? "the whole file couldn't be read" : "";
-  if (!saveable) { banner.textContent = BANNER_NO_SAVE(whyNot); saveState.textContent = "Read-only"; saveState.title = whyNot; }
+  if (!saveable) { setBanner(whyNot); saveState.textContent = "Read-only"; saveState.title = whyNot; }
   let eol = opened.eol;
   let savedText = opened.text;
   // (the revision savedText was read or saved as, the Save's base; and the person's edits, counted: an await that
@@ -1028,7 +1039,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     if (hit) { waits = 0; clearTimeout(checkTimer); checkTimer = setTimeout(() => void check(), 50); }
   });
   life.signal.addEventListener("abort", () => { unwatchDoc(); clearTimeout(checkTimer); });
-  const setSaveable = (ok: boolean, why: string) => { saveable = ok; whyNot = why; banner.textContent = ok ? BANNER : BANNER_NO_SAVE(why); if (!ok) { saveState.textContent = "Read-only"; saveState.title = why; } };
+  const setSaveable = (ok: boolean, why: string) => { saveable = ok; whyNot = why; setBanner(ok ? undefined : why); if (!ok) { saveState.textContent = "Read-only"; saveState.title = why; } };
   // (a coherent read's saveability, as at opening: whole, text, written back exactly, not in the cloud)
   const judge = (r: { entry: Entry; content: Uint8Array }) => {
     const o = openBytes(r.content);
