@@ -26,6 +26,16 @@ const b64 = (s) => {
   return btoa(t);
 };
 
+// The driver's notes (Python comments once, kept here so the chunk doesn't carry them):
+// (each item compiled as Sage source by the runtime itself, so its code object keeps Sage's semantics when it
+//  runs: 1/3 exact, as in a .sage file; plain exec of preparsed text is Python's, 1/3 a float (#706). Given the
+//  raw item: that compile preparses it, and preparsing twice would make ^^ a power. CPython: preparsed, exec'd)
+// (_sbtx_prev: the previous Run's folder, whose modules go too; _sbtx_added: the sys.path entry a Run appended, the only
+//  one taken off: "/" and the runtime's own entries, there before, stay where they are)
+// (the modules imported from the .tex's folder so far: printed with each item, before its result (daybreak3's
+//  ENGINE-DEPS-PARTIAL-1: a Run stopped later still records what its earlier results used; astra's DEP-PARTIAL-COMMIT-1:
+//  a result printed is always after a line naming what it used), the last line counting; the results file records
+//  them with their hashes, so an edited helper's old results are never used (Codex W01))
 /** The session's script (run in Sage mode, so preparsed itself: it is written to mean the same after that): each item
  * preparsed, then exec'd (sagesilent, sageblock) or eval'd (\sage: its latex(); \sageplot: its SVG), in the session's
  * globals (Sage's var() defines its names there), put back first as they were before the first Run (a name from an
@@ -45,9 +55,6 @@ const b64 = (s) => {
 export function driver(items, dir = null) {
   return `import json as _sbtx_json, io as _sbtx_io, sys as _sbtx_sys, traceback as _sbtx_tb, base64 as _sbtx_b64
 from sagebrush.preparse import preparse as _sbtx_pp
-# (each item compiled as Sage source by the runtime itself, so its code object keeps Sage's semantics when it
-#  runs: 1/3 exact, as in a .sage file; plain exec of preparsed text is Python's, 1/3 a float (#706). Given the
-#  raw item: that compile preparses it, and preparsing twice would make ^^ a power. CPython: preparsed, exec'd)
 try:
     _sbtx_cs = __pyjs_compile_sage__
 except NameError:
@@ -63,8 +70,6 @@ _sbtx_g.update(_sbtx_base)
 _sbtx_os = __import__("os")
 _sbtx_il = __import__("importlib")
 _sbtx_d = _sbtx_json.loads(_sbtx_b64.b64decode("${b64(JSON.stringify(dir))}").decode("utf-8"))
-# (_sbtx_prev: the previous Run's folder, whose modules go too; _sbtx_added: the sys.path entry a Run appended, the only
-#  one taken off: "/" and the runtime's own entries, there before, stay where they are)
 try:
     _sbtx_prev
 except NameError:
@@ -92,10 +97,6 @@ if _sbtx_d is not None:
         _sbtx_sys.path.append(_sbtx_d)
         _sbtx_added = _sbtx_d
 _sbtx_il.invalidate_caches()
-# (the modules imported from the .tex's folder so far: printed with each item, before its result (daybreak3's
-#  ENGINE-DEPS-PARTIAL-1: a Run stopped later still records what its earlier results used; astra's DEP-PARTIAL-COMMIT-1:
-#  a result printed is always after a line naming what it used), the last line counting; the results file records
-#  them with their hashes, so an edited helper's old results are never used (Codex W01))
 def _sbtx_deps_line():
     if _sbtx_d is None:
         return
@@ -314,33 +315,48 @@ export function sessionOf(eng, startMs = SANDBOX_START_MS) {
   return get;
 }
 
-/** The .tex's folder (`texPath`'s, recursively): its files not in Trash and here (not only in the cloud), with their
- * bytes, for the session: {dir, files: [path, bytes][]}, or {msg} past FOLDER_LIMITS. Only the document's own folder:
- * nothing else of the workspace reaches the session. */
-export async function folderFiles(ws, texPath, lim = FOLDER_LIMITS) {
-  const dir = texPath.slice(0, texPath.lastIndexOf("/")) || "/";
-  // (which bound, and that its subfolders count (board's COPY advisory))
-  const big = (what) => ({ msg: `Not run: the .tex's folder is too large to give to Sage here, ${what} with its subfolders; move the .tex and what it uses into a folder of their own` });
-  const many = big(`over ${lim.files} files`), heavy = big(`over ${lim.bytes / 2 ** 20} MiB`);
-  const inside = (p) => dir === "/" ? p.startsWith("/") : p.startsWith(dir + "/");
-  const listed = (await ws.list(dir, { recursive: true })).filter((e) => e.kind === "file" && !e.trashed && !e.path.startsWith("/Trash/") && inside(e.path));
-  // (files only in the cloud aren't given to Sage: counted, so the Run can say so (board's COPY advisory: a helper not
-  //  on this device is otherwise a bare ModuleNotFoundError))
-  const all = listed.filter((e) => !e.remote), remote = listed.length - all.length;
-  if (all.length > lim.files) return many;
-  // (a complete snapshot, or none: a file that can't be read runs nothing, as one past the bound)
-  let bytes = 0;
-  const files = [];
-  for (const e of all) {
-    if (bytes + (e.size ?? 0) > lim.bytes) return heavy;
-    // (each read bounded by what is left (daybreak3): a file grown since it was listed is refused, never read whole)
-    let over = false;
-    const r = await ws.readUpTo(e.path, lim.bytes - bytes).catch((err) => { over = err?.code === "limit"; return null; });
-    if (over) return heavy;
-    if (!r) return { msg: `Not run: ${e.path} couldn't be read` };
-    bytes += r.content.length;
-    if (bytes > lim.bytes) return heavy;
-    files.push([e.path, r.content]);
+// (what code names: the modules it imports, by their first name, at a statement's start (a line's, or after ";" or a
+//  one-line suite's ":", daybreak3's #975 ENGINE; a match that isn't one only gives a named file there), and its quoted
+//  strings, each maybe a path)
+const namesIn = (code) => [...code.matchAll(/(?:^|[;:])[ \t]*(?:from[ \t]+(\w+)|import[ \t]+([\w., \t]+))|(["'])((?:(?!\3)[^\\\n])+)\3/gm)].flatMap((m) => m[4] ? [m[4].replace(/^\.\//, "")] : (m[1] ?? m[2]).split(",").map((x) => x.trim().split(/[ .]/)[0]));
+/** The files of the .tex's folder (`texPath`'s, recursively) that the document's `codes` name, and those its named .py
+ * and .sage files name in turn (William's H2: a folder of many files, the code using none of them, runs): each module
+ * imported (m.py, or a package m/ and its .py files) and each quoted string that is the path of a file there; with
+ * their bytes, for the session: {dir, files: [path, bytes][]}, or {msg} past FOLDER_LIMITS, counted on those files
+ * only. Only the document's own folder: nothing else of the workspace reaches the session, nothing it doesn't name. */
+export async function folderFiles(ws, texPath, codes = [], lim = FOLDER_LIMITS) {
+  const dir = texPath.slice(0, texPath.lastIndexOf("/")) || "/", base = dir === "/" ? "" : dir;
+  const listed = (await ws.list(dir, { recursive: true })).filter((e) => e.kind === "file" && !e.trashed && !e.path.startsWith("/Trash/") && e.path.startsWith(base + "/"));
+  const rel = (e) => e.path.slice(base.length + 1), want = new Set(), files = [];
+  let bytes = 0, remote = 0, todo = ["", ...codes];   // (one round always: the .tex given even with no code)
+  // (board's words: by count, the files named so far in the order first named, at most 5; by bytes,
+  //  the largest of those seen first, with their sizes as the file browser shows them (its MB, the site's limits' unit),
+  //  at most 5. The count's list always ends "and more" (past 500 it is always cut); the bytes' list only when it is cut
+  //  (more than 5 seen): one not cut is complete for what was seen (board's #975 R1))
+  const sizes = new Map(), fmt = (n) => (n < 1024 ? `${n} B` : n < 2 ** 20 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 2 ** 20).toFixed(1)} MB`);
+  const tooMany = () => ({ msg: `Not run: the code uses over ${lim.files} files, and Sage here can be given at most ${lim.files}: ` + [...want].slice(0, 5).join(", ") + " and more." });
+  const tooBig = () => ({ msg: `Not run: the code uses over ${lim.bytes / 2 ** 20} MB of files, and Sage here can be given at most ${lim.bytes / 2 ** 20} MB: ` + [...sizes].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([r, n]) => `${r} (${fmt(n)})`).join(", ") + (sizes.size > 5 ? " and more." : ".") });
+  while (todo.length) {
+    const names = new Set(todo.flatMap(namesIn));
+    todo = [];
+    for (const e of listed) {
+      const r = rel(e);
+      // (the .tex itself always: the folder the code runs in, as real SageTeX's, exists even when it names no file)
+      if (want.has(r) || !(e.path === texPath || names.has(r) || names.has(r.replace(/(\/__init__)?\.py$/, "")) || (/\.py$/.test(r) && names.has(r.split("/")[0])))) continue;
+      want.add(r);
+      // (files only in the cloud aren't given to Sage: counted, so the Run can say so (board's COPY advisory))
+      if (e.remote) { remote++; continue; }
+      if (want.size > lim.files) return tooMany();
+      // (one listed past what is left: refused unread (grader's Z7); each read bounded by what is left (daybreak3): a file
+      //  grown since it was listed is refused, never read whole)
+      let over = bytes + e.size > lim.bytes;   // (a size not listed: read, bounded)
+      const got = over ? null : await ws.readUpTo(e.path, lim.bytes - bytes).catch((err) => { over = err?.code === "limit"; return null; });
+      sizes.set(r, got?.content.length ?? e.size);
+      if (over || (bytes += got?.content.length ?? 0) > lim.bytes) return tooBig();
+      if (!got) return { msg: `Not run: ${e.path} couldn't be read` };
+      files.push([e.path, got.content]);
+      if (/\.(py|sage)$/.test(r)) todo.push(new TextDecoder().decode(got.content));
+    }
   }
   return { dir, files, remote };
 }
@@ -381,7 +397,7 @@ export async function runAndSave(o) {
   const stale = () => !o.current() || !!o.signal?.aborted;
   const t0 = o.now();
   // (the .tex's folder, read first: one too large says so before Sage starts)
-  const f = o.folder ? await o.folder() : null;
+  const f = o.folder ? await o.folder(runnable(o.items).map((it) => it.code)) : null;
   if (stale()) return { stale: true };
   if (f?.msg) return { msg: f.msg };
   const k = await o.session();
