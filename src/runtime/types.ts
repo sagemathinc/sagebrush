@@ -8,7 +8,7 @@ import {
   isinstance, getattr, genericGetattr, setattr, genericSetattr, delattr, objectInit, objectNew, objectSetattr, selfChecked, unboundFunction,
   bindMethod, bindArgs, genericDelattr, callKw, callObj, captureTraceback, dictGet, dictKeyHash, dictSet, dictDelete, dictKeyOf, dictClear, hasOwn, hasInstanceDict, Signature,
   hooks, unbox, toPyExc, instanceDict, detachInstanceDict, attrNames, PrimBox, NS_DICT, NS_GLOBALS, globalsDict, IntLayout, FloatLayout, StrLayout, TypeLayout, constructPlain, constructPlainKw, positionalArray, bumpVersion, typeGetattr, typeSetattr, typeDelattr, notForType, slotArgs, noKeywords,
-  dunderFn, dunderOf,
+  dunderFn, dunderOf, setSlotMemberProto,
 } from "./object";
 import * as O from "./ops";
 import * as UC from "./unicodecs";
@@ -354,6 +354,8 @@ export class PyMember {
 }
 const memberType = builtinType("member_descriptor", [object], () => raise(T.TypeError, "cannot create 'member_descriptor' instances"));
 bindClass(PyMember, memberType);
+// (the attribute-read sites cache a slot member's reads: told what one is by its JS class, which no Python object has)
+setSlotMemberProto(PyMember.prototype);
 const memberOf = (d: PyMember, o: any) => {
   descrReceiver(d, o);
   const v = o[d.key];
