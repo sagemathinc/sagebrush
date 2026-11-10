@@ -80,7 +80,10 @@ def f(k=slider(1, 5, 1, 2)):
 ```
 
 Run draws its controls where the block is, at their defaults, with what
-the function prints and shows for them. A printed page or PDF shows the
+the function prints and shows for them. After a Run, the controls are
+live in the preview: change one and the function runs again, replacing
+what it printed and showed. Open the document again or another one, or
+restart the interpreter, and they're drawn as they were until the next Run. A printed page or PDF shows the
 same, marked "Interactive in Sagebrush". This is an extension:
 real LaTeX with SageTeX and Sage 10.10 stop at it, because `interact`
 isn't defined outside Sage's notebook interfaces (`NameError: name 'interact' is not

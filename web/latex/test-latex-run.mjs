@@ -183,7 +183,7 @@ const sage = (code) => new Promise((res) => {
   // (grader's #926 I6/I7: a selector's default is the option selected; a list slider shows its default's label)
   const sel = kinds([{ kind: "selector", name: "c", label: "c", options: ["a", "b", "c"], value: 1 }]), lsl = kinds([{ kind: "slider", name: "t", label: "t", labels: ["p", "q", "r"], min: 0, max: 2, step: 1, value: 1 }]);
   check("interact: a selector's default option selected; a list slider shows its default's label",
-    sel.includes('<option>a</option><option selected>b</option><option>c</option>') && lsl.includes('value="1"><span class="si-v">q</span>'), { sel, lsl });
+    sel.includes('<option value="0">a</option><option value="1" selected>b</option><option value="2">c</option>') && lsl.includes('value="1"><span class="si-v">q</span>'), { sel, lsl });
   // (grader's #926 R8: interacts only on an item that ran to its result: its session result ok but its state an error,
   //  a plot that isn't an SVG, keeps none)
   const ia1 = [{ spec: { id: 1, name: "f", controls: [] }, out: "", shows: [] }];
@@ -211,7 +211,7 @@ const sage = (code) => new Promise((res) => {
   const got = parseOutput(r.out), st = statesOf(its, got, "", interactsOf);
   const pins = (r.out.split("\n").find((l) => l.startsWith("PINS")) ?? "").split(" ");
   const sh = interactsHtml(st[0].interacts ?? []);
-  check("interact (Sage): a selector's default selected, a list slider at its default's label", st[0].s === "ok" && /<option selected>b<\/option>/.test(sh) && /value="1"><span class="si-v">q<\/span>/.test(sh), { st0: st[0], err: r.err.slice(-400) });
+  check("interact (Sage): a selector's default selected, a list slider at its default's label", st[0].s === "ok" && /<option value="1" selected>b<\/option>/.test(sh) && /value="1"><span class="si-v">q<\/span>/.test(sh), { st0: st[0], err: r.err.slice(-400) });
   check("interact (Sage): an item that raises after its interact: its error, no interacts, no placeholder", st[1].s === "error" && /after the interact/.test(st[1].msg) && !st[1].interacts &&
     !blockHtml(stateOf(savedStates([real(...spec[1])], st.slice(1, 2)), 0, real(...spec[1])), real(...spec[1]), (x) => String(x), 1).includes("sageinteract-at"), st[1]);
   check("interact (Sage): at most 8 kept an item; the 9th not kept, run once at its defaults as on Sage's command line", got[2]?.interacts?.length === 8 && got[2].interacts.every((x) => x.spec?.name !== "f8") && pins[1] === "True" && pins[2] === "True", { n: got[2]?.interacts?.length, pins });
@@ -666,6 +666,23 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
     interacts: async () => { cur = false; return { interactsOf }; },
   });
   check("runAndSave: the document changed while the interact chunk loaded: the Run is stale, nothing written", ri.stale === true && wrote === 0, { ri, wrote });
+  // (astra's #937 r2 note 3: a Run's interact ids carry the generation of the interpreter its script ran in, taken
+  //  there: one started again while the script ran is -1 (its interacts gone); one started again later, while the
+  //  results are saved, doesn't relabel them)
+  const genRun = async (during, after) => {
+    const kk = { generation: 5, interrupt() {} };
+    const r = await runAndSave({
+      items: [item("silent", "x = 1")], current: () => true, max: 1 << 20, now: () => 0, fid: "f",
+      ws: { pathOfFile: async () => ({ ok: true, path: "/A/doc.tex" }), stat: async () => undefined, createByPerson: async () => ({}), write: async () => ({}) },
+      session: async () => kk, store: { sent: new Set(), snapshot: [] }, folder: async () => ({ dir: "/A", files: [] }),
+      exec: async () => { if (during) kk.generation++; return { out: MARK + JSON.stringify({ s: "ok", interacts: [{ spec: { id: 1, name: "f", controls: [] }, out: "", shows: [] }] }) + "\n", stopped: "" }; },
+      interacts: async () => { if (after) kk.generation++; return { interactsOf }; },
+    });
+    return { ok: r.ok, ids: [...(r.interactIds ?? [])], gen: r.interactIds?.gen };
+  };
+  const gSame = await genRun(false, false), gDuring = await genRun(true, false), gAfter = await genRun(false, true);
+  check("runAndSave: a Run's interact ids carry its script's interpreter generation; -1 if it was started again during the script; not relabelled by a restart while saving",
+    gSame.ok && gSame.ids.join() === "1" && gSame.gen === 5 && gDuring.gen === -1 && gAfter.ok && gAfter.gen === 5, { gSame, gDuring, gAfter });
 }
 
 // ---- a Run's own Stop (astra's LATEX-QUEUE-STOP-1): stopped while it waits for another Run, it runs nothing, and the

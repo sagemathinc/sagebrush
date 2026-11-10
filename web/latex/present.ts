@@ -61,6 +61,8 @@ export function present(o: PresentOpts): Presenter {
     step = Math.min(Math.max(1, step), steps);
     const copy = src.cloneNode(true) as HTMLElement;
     copy.removeAttribute("id");
+    // (an @interact's controls, live in the preview, shown here as drawn: disabled (a copy has no listeners))
+    copy.querySelectorAll(".sageinteract :is(input, select, button)").forEach((c) => ((c as HTMLInputElement).disabled = true));
     applyStep(copy, step);
     stage.replaceChildren(copy);
     fit();
