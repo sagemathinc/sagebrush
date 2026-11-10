@@ -37,6 +37,7 @@
 // before.  window.sagebrush.workspace is the workspace as an agent sees it
 // (§8.2), its changes credited to agent:page.
 import { synthetic } from "./board";
+import { termKeep } from "../shell/term-keep.ts";
 import { anyCode, isBoard, type BoardDoc } from "./doc";
 import { BoardCode, siteEngine } from "./code";
 import { createRunnerPill } from "../notebook/runner-pill.js";
@@ -1531,7 +1532,7 @@ if (ws && !file && !(window as any).__TAURI__) {
 // by name, path, language and visibility only, and its terminal.  The shell's module and set are the site's, a directory
 // up (this page is /board/).  One ShellHost per page tab, made at the first open, with the person principal.
 {
-  let term: any = null;
+  let term: any = null, clearing: Promise<unknown> = Promise.resolve();
   const here = async () => {
     let path: string | undefined, mode: string | undefined;
     try {
@@ -1594,8 +1595,21 @@ if (ws && !file && !(window as any).__TAURI__) {
         let openTerminal: any;
         try { ({ openTerminal } = await import(mod)); } catch (e) { return alert("The terminal didn't load: " + String((e as Error)?.message ?? e)); }
         if (term) return term.toggle();
+        // (H9: the folder and commands this workspace's Terminal kept, given back, and kept again as commands end)
+        // (an End session's clear finished first, and none since what was read: never cleared commands in the new Terminal;
+        //  an End meanwhile (another Open's Terminal, ended) makes a new clear, so what was read is read again after it)
+        let keep: Awaited<ReturnType<typeof termKeep>>, was: Promise<unknown>;
+        do {
+          await (was = clearing);
+          keep = await termKeep(ws);
+          if (term) return term.toggle();
+        } while (was !== clearing);
         term = openTerminal({ ws, S, base: "../", open, here, tab: TAB });
-        term.onEnd = () => { term = null; (window as any).__sbTerm = null; if (termEnd) termEnd.hidden = true; };
+        keep.attach(term);
+        term.onEnd = () => {
+          term = null; (window as any).__sbTerm = null; if (termEnd) termEnd.hidden = true;
+          clearing = keep.clear().then((ok) => { if (!ok) alert("The commands kept in this browser couldn't be cleared."); });
+        };
         if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) (window as any).__sbTerm = term; // (the tests' handle, on a loopback host only: web/shell/test-panel-page.mjs)
       }
       term.toggle();

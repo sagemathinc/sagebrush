@@ -780,6 +780,136 @@ try {
   const dark = await bg();
   check(light && dark && light !== dark && dark === (await evaluate(`getComputedStyle(document.documentElement).getPropertyValue("--sb-term-bg").trim()`)), `the screen's colours follow the page's theme: light ${light}, dark ${dark}`);
   await evaluate(`delete document.documentElement.dataset.theme`);
+  // ---- H9 step 2: the folder and the commands typed kept for this workspace, in this browser: back after a reload, with
+  // the line saying so (board's words); a command starting with a space never kept; End terminal session… clears them,
+  // and a write made for the cleared generation (another page's, a late one) is refused; a folder gone since: the top
+  // (the person's workspace, through the open Terminal's host; the page's agent view (window.sagebrush.workspace) has no
+  //  such verb, which a row below checks)
+  const WS = "window.__ws9";
+  const grabWs = () => evaluate(`(window.__ws9 = ${T}.opts.host.ws, !!window.__ws9?.termKept)`);
+  const reopen9 = async () => {
+    await send("Page.reload", {});
+    await until(`(() => { const b = document.querySelector("#termbtn"); return !!b && !b.hidden && !!window.sagebrush?.workspace; })()`, 30000);
+    await evaluate(`document.querySelector("#termbtn").click()`);
+    await until(`!!document.querySelector(".sb-term") && !document.querySelector(".sb-term").hidden && !!${T} && !document.querySelector(".sb-term-loading")`, 30000);
+    await evaluate(HELPERS);
+    await grabWs();
+  };
+  // (two Opens at once, the Terminal closed: the second's folder check held while the first's Terminal opens, is ended
+  //  and its commands cleared; let go, it opens a Terminal with none of them and no line (astra's SEC-HISTORY-OPEN-1))
+  const race9 = async (page, end, open) => {
+    // (the Terminal ended, its clear done, then commands kept as by an earlier visit: the Terminal closed, commands kept)
+    const g = (await evaluate(`${WS}.termKept()`))?.gen;
+    await evaluate(`(${end}, 1)`);
+    const ended = await until(`${WS}.termKept().then((k) => k.gen === ${g} + 1)`, 10000);
+    // (the second read of what was kept: its folder check, the stat after it, held until let go)
+    await evaluate(`(async () => { const w = ${WS}; await w.putTermKept(${g} + 1, "/h9kept", ["echo race-old"]);
+      const st = w.stat, tk = w.termKept; let reads = 0, armed = false; window.__go9 = null;
+      // (the first read given back only once the second has begun: both Opens are past their own "a Terminal open?"
+      //  check, whatever their loads took, so the first can't open its Terminal before the second is reading)
+      let both; const second = new Promise((r) => { both = r; setTimeout(r, 10000); });
+      w.termKept = function () { const n = ++reads; if (n === 2) both();
+        return tk.call(this).then((k) => (n === 1 ? second.then(() => k) : (n === 2 && (armed = true), k))); };
+      w.stat = function (p) { if (armed && p === "/h9kept") { armed = false; return new Promise((r) => (window.__go9 = r)).then(() => st.call(this, p)); } return st.call(this, p); };
+      window.__st9 = () => { w.stat = st; w.termKept = tk; }; return 1; })()`);
+    await evaluate(`(${open}, ${open}, 1)`);
+    const held = await until(`!!window.__go9 && !!document.querySelector(".sb-term") && !document.querySelector(".sb-term").hidden && !!${T} && !document.querySelector(".sb-term-loading")`, 30000);
+    await evaluate(HELPERS);
+    const first = await evaluate(`${T}?.editor.history.entries.at(-1) ?? null`);
+    const gen0 = (await evaluate(`${WS}.termKept()`))?.gen;
+    await evaluate(`(${end}, 1)`);
+    const cleared = await until(`${WS}.termKept().then((k) => k.gen === ${gen0} + 1 && k.history.length === 0)`, 10000);
+    await evaluate(`(window.__go9(), 1)`);
+    await until(`!!document.querySelector(".sb-term") && !document.querySelector(".sb-term").hidden && !!${T} && !document.querySelector(".sb-term-loading")`, 30000);
+    await new Promise((r) => setTimeout(r, 300));
+    await evaluate(HELPERS);
+    const after = await evaluate(`(window.__st9(), { note: document.querySelector(".sb-term-note")?.textContent ?? null, cwd: document.querySelector(".sb-term-cwd")?.textContent ?? null, n: ${T}?.editor.history.entries.length ?? null })`);
+    check(!!ended && !!held && first === "echo race-old" && !!cleared && after.n === 0 && after.note === "" && after.cwd === "/",
+      `H9 (${page}): two Opens at once, the second's folder check held while the first's Terminal is ended and cleared: it opens with no cleared commands and no line: ${JSON.stringify({ ended, held, first, cleared, after })}`);
+  };
+  await grabWs();
+  await run("mkdir -p /h9kept");
+  await run("cd /h9kept");
+  await run("echo kept-1");
+  await run(" echo not-kept");
+  // (reloaded at once, no grace: what the last command did is kept as it happens, daybreak3's #1)
+  await reopen9();
+  const stored9 = await evaluate(`${WS}.termKept()`);
+  const back9 = await evaluate(`({ note: document.querySelector(".sb-term-note").textContent, cwd: document.querySelector(".sb-term-cwd").textContent, last: ${T}.editor.history.entries.at(-1), n: ${T}.editor.history.entries.length })`);
+  await focusTerm();
+  await realKey("ArrowUp");
+  const up9 = await evaluate(`${T}.editor.buf`);
+  check(stored9?.cwd === "/h9kept" && stored9.history?.at(-1) === "echo kept-1" && !stored9.history.some((h) => /not-kept/.test(h))
+    && back9.cwd === "/h9kept" && back9.note === `Back in /h9kept, with your last ${back9.n} commands (press ↑). Kept only in this browser.` && back9.last === "echo kept-1" && up9 === "echo kept-1",
+    `H9: after a reload, the folder and the commands are back, said; one starting with a space never kept: ${JSON.stringify({ stored: { cwd: stored9?.cwd, last: stored9?.history?.at(-1), n: stored9?.history?.length }, back9, up9 })}`);
+  // (the panel's own clear and reset kept too, each the last command before a reload: daybreak3's #2)
+  await run("clear");
+  await reopen9();
+  const lastClear = await evaluate(`${T}.editor.history.entries.at(-1)`);
+  await run("reset");
+  await reopen9();
+  const lastReset = await evaluate(`${T}.editor.history.entries.at(-1)`);
+  check(lastClear === "clear" && lastReset === "reset", `H9: clear and reset, each the last command, are kept across a reload: ${JSON.stringify({ lastClear, lastReset })}`);
+  // (End terminal session… then Terminal at once: the new one waits for the clear, so it starts afresh (daybreak3's #3);
+  //  a write for the cleared generation is refused)
+  const gen9 = (await evaluate(`${WS}.termKept()`)).gen;
+  // (the clear made slow, so a Terminal opened without waiting for it would read the old commands: deterministic)
+  await evaluate(`(() => { const w = ${WS}, c = w.clearTermKept.bind(w); w.clearTermKept = () => new Promise((r) => setTimeout(r, 400)).then(c); return 1; })()`);
+  await evaluate(`(document.querySelector("#termendbtn").click(), document.querySelector("#termbtn").click(), 1)`);
+  await until(`!!document.querySelector(".sb-term") && !document.querySelector(".sb-term").hidden && !!${T} && !document.querySelector(".sb-term-loading")`, 30000);
+  await evaluate(HELPERS);
+  const fresh9 = await evaluate(`({ note: document.querySelector(".sb-term-note").textContent, cwd: document.querySelector(".sb-term-cwd").textContent, n: ${T}.editor.history.entries.length })`);
+  const late9 = await evaluate(`${WS}.putTermKept(${gen9}, "/h9kept", ["echo late"])`);
+  const cleared9 = await evaluate(`${WS}.termKept()`);
+  check(late9 === false && cleared9.gen === gen9 + 1 && cleared9.history.length === 0 && cleared9.cwd === "/" && fresh9.note === "" && fresh9.cwd === "/" && fresh9.n === 0,
+    `H9: End terminal session… then Terminal at once: the new one starts afresh (/, no history, no line); a late write for before it is refused: ${JSON.stringify({ late9, cleared9, fresh9 })}`);
+  await race9("notebook", `document.querySelector("#termendbtn").click()`, `document.querySelector("#termbtn").click()`);
+  // (End whose clear fails: said, in board's words (grader's K14); then the Terminal opened again)
+  await evaluate(`(() => { const w = ${WS}; window.__c9 = w.clearTermKept; w.clearTermKept = () => Promise.reject(new Error("refused")); document.querySelector("#saved").textContent = ""; return 1; })()`);
+  await evaluate(`(document.querySelector("#termendbtn").click(), 1)`);
+  const failSaid = await until(`document.querySelector("#saved").textContent === "The commands kept in this browser couldn't be cleared"`, 10000);
+  await evaluate(`(${WS}.clearTermKept = window.__c9, document.querySelector("#termbtn").click(), 1)`);
+  await until(`!!document.querySelector(".sb-term") && !document.querySelector(".sb-term").hidden && !!${T} && !document.querySelector(".sb-term-loading")`, 30000);
+  await evaluate(HELPERS);
+  check(!!failSaid, `H9: an End whose clear fails says so: ${JSON.stringify(await evaluate(`document.querySelector("#saved").textContent`))}`);
+  // (a cd as the last command, then a reload: the folder it went to is kept, from the folder line (grader's K18))
+  await run("cd /");
+  await run("cd /h9kept");
+  await reopen9();
+  const cdLast = await evaluate(`({ cwd: document.querySelector(".sb-term-cwd").textContent, stored: null })`);
+  cdLast.stored = (await evaluate(`${WS}.termKept()`))?.cwd;
+  check(cdLast.cwd === "/h9kept" && cdLast.stored === "/h9kept", `H9: a cd as the last command is kept across a reload: ${JSON.stringify(cdLast)}`);
+  // (what is stored is what is kept: a leading space, the newest 500, one over 1 MiB alone not stored (grader's K9),
+  //  read from the store itself, not through the read's own filter)
+  const raw9 = await evaluate(`(async () => { const w = ${WS}, g = (await w.termKept()).gen;
+    const h = [" echo secret", ...Array.from({ length: 600 }, (_, i) => "c" + i), "x".repeat(${1 << 20} + 1)];
+    const ok = await w.putTermKept(g, "/h9kept", h);
+    const row = await new Promise((r, no) => { const q = w.ws.transaction("meta").objectStore("meta").get("terminal-kept"); q.onsuccess = () => r(q.result); q.onerror = () => no(q.error); });
+    return { ok, n: row?.history?.length, first: row?.history?.[0], last: row?.history?.at(-1), spaced: row?.history?.some((c) => /^\\s/.test(c)) }; })()`);
+  check(raw9?.ok === true && raw9.n === 500 && raw9.first === "c100" && raw9.last === "c599" && raw9.spaced === false,
+    `H9: the stored row holds only what is kept (the newest 500, none with a leading space, none over 1 MiB): ${JSON.stringify(raw9)}`);
+  // (a kept folder that's a file now, Trash itself, a folder in Trash or in a folder in Trash: the top, said (grader's
+  //  K15, K16))
+  await run("mkdir -p /h9t/sub");
+  await run("echo f > /h9f.txt");
+  const trashed9 = await evaluate(`(async () => { const w = ${WS}; await w.remove("/h9t"); return (await w.list("/Trash")).map((e) => e.path).find((p) => /^\\/Trash\\/h9t/.test(p)) ?? null; })()`);
+  for (const c of ["/h9f.txt", "/Trash", trashed9, trashed9 + "/sub"]) {
+    await evaluate(`${WS}.termKept().then((k) => ${WS}.putTermKept(k.gen, ${JSON.stringify(c)}, ["echo g"]))`);
+    await evaluate(`document.querySelector(".sb-term-hide").click()`);
+    await reopen9();
+    const t9 = await evaluate(`({ note: document.querySelector(".sb-term-note").textContent, cwd: document.querySelector(".sb-term-cwd").textContent })`);
+    check(!!trashed9 && t9.cwd === "/" && t9.note === `${c} isn't there any more, so this starts in /. Your last 1 command is back (press ↑). Kept only in this browser.`,
+      `H9: a kept folder that is now ${c}: the top, said: ${JSON.stringify(t9)}`);
+  }
+  // (a kept folder gone since: the top, said)
+  await evaluate(`${WS}.termKept().then((k) => ${WS}.putTermKept(k.gen, "/h9gone", ["echo g"]))`);
+  await evaluate(`document.querySelector(".sb-term-hide").click()`);
+  await reopen9();
+  const gone9 = await evaluate(`({ note: document.querySelector(".sb-term-note").textContent, cwd: document.querySelector(".sb-term-cwd").textContent })`);
+  check(gone9.note === "/h9gone isn't there any more, so this starts in /. Your last 1 command is back (press ↑). Kept only in this browser." && gone9.cwd === "/",
+    `H9: a kept folder gone since: the top, said, and the command that came back said too: ${JSON.stringify(gone9)}`);
+  check((await evaluate(`typeof window.sagebrush.workspace?.termKept === "undefined" && typeof window.sagebrush.workspace?.putTermKept === "undefined" && !!window.sagebrush.workspace`)),
+    "H9: the page's agent view of the workspace has no way to read or write the kept history");
   // ---- the board page's dock (TP-5): ⋯ ▸ Terminal there too, placed as on the notebook page, with ps listing the board
   await evaluate(`document.querySelector("#termendbtn, [data-sbb=termend]")?.click()`);
   await send("Page.navigate", { url: url + "board/?new=python" });
@@ -792,6 +922,20 @@ try {
   await evaluate(HELPERS);
   r = await run("echo board-ok");
   check(r?.out === "board-ok\n" && r.status === "done", `board: a command runs: ${JSON.stringify(r)}`);
+  await grabWs();
+  await race9("board", `document.querySelector("#board [data-sbb=termend]").click()`, `${BTERM}.click()`);
+  // (End terminal session… then ⋯ ▸ Terminal at once, the clear made slow, on the board page too: the new one waits for
+  //  the clear, so it starts afresh (grader's TESTS977-R4))
+  await run("echo board-kept");
+  const genB = (await evaluate(`${WS}.termKept()`)).gen;
+  await evaluate(`(() => { const w = ${WS}, c = w.clearTermKept.bind(w); window.__cB = w.clearTermKept; w.clearTermKept = () => new Promise((r) => setTimeout(r, 400)).then(c); return 1; })()`);
+  await evaluate(`(document.querySelector("#board [data-sbb=termend]").click(), ${BTERM}.click(), 1)`);
+  await until(`!!document.querySelector(".sb-term") && !document.querySelector(".sb-term").hidden && !!${T} && !document.querySelector(".sb-term-loading")`, 30000);
+  await evaluate(HELPERS);
+  const freshB = await evaluate(`({ note: document.querySelector(".sb-term-note")?.textContent ?? null, cwd: document.querySelector(".sb-term-cwd")?.textContent ?? null, n: ${T}?.editor.history.entries.length ?? null })`);
+  const clearedB = await evaluate(`(${WS}.clearTermKept = window.__cB, ${WS}.termKept())`);
+  check(clearedB?.gen === genB + 1 && clearedB.history.length === 0 && freshB.note === "" && freshB.cwd === "/" && freshB.n === 0,
+    `board: End terminal session… then Terminal at once, the clear slow: the new one starts afresh (/, no history, no line): ${JSON.stringify({ genB, clearedB, freshB })}`);
   const bp = await evaluate(`(() => {
     const body = document.querySelector(".sb-term-body").getBoundingClientRect(), dock = document.querySelector(".sb-term").getBoundingClientRect();
     const tops = ["sb-alpha-banner", "sb-preview-notice"].map((id) => document.getElementById(id)).filter((e) => e && e.getBoundingClientRect().height > 0).map((e) => e.getBoundingClientRect().top);
@@ -883,7 +1027,10 @@ try {
   await pause(100);
   const w4 = await evaluate(`window.__t4.writer.stats.writes`);
   const shown4 = await evaluate(`!document.querySelector("[data-sbb=termend]").hidden && document.querySelector("[data-sbb=termend]").previousElementSibling?.dataset.sbb === "term"`);
+  // (and its clear failing: said, in board's words (grader's K14, the board page))
+  await evaluate(`(() => { window.__alertB = null; window.alert = (m) => { window.__alertB = m; }; ${WS}.clearTermKept = () => Promise.reject(new Error("refused")); return 1; })()`);
   await evaluate(`document.querySelector("#termendbtn, [data-sbb=termend]").click()`);
+  check(!!(await until(`window.__alertB === "The commands kept in this browser couldn't be cleared."`, 10000)), `board: an End whose clear fails says so: ${JSON.stringify(await evaluate(`window.__alertB`))}`);
   check(shown4 && (await evaluate(`document.querySelectorAll(".sb-term").length === 0 && document.querySelector("[data-sbb=termend]").hidden`)), "board: ⋯ ▸ End terminal session…, shown under Terminal while the Terminal is open, ends the session (the dock and the item go)");
   await evaluate(`window.__go4(), 1`);
   await pause(500);

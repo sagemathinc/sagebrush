@@ -534,6 +534,7 @@
 // (a ?pair= link, as an agent on this computer prints it: taken out of the address bar first, before anything reads
 // or reports the URL; the agent chunk, loaded later, is handed it)
 import { pairLink } from "./workspace/pair-link.ts";
+import { termKeep } from "./shell/term-keep.ts";
 import { createNotebook, esc } from "./notebook/notebook.js";
 import { anchorOf, restoreAnchor } from "./notebook/anchor.js";
 import { DOC_INDEX, docHead, docWords, entryExamples, prepareIndex, searchIndex, searchIndexes } from "./docsearch.ts";
@@ -2988,7 +2989,7 @@ $("#boardbtn").onclick = () => toBoard("/board/?recent=" + encodeURIComponent(nb
 // (web/build.ts), else the site's latest; one ShellHost per page tab, made at the first open, with the person principal.
 {
   const termBtn = $("#termbtn"), termEnd = $("#termendbtn");
-  let term = null;
+  let term = null, clearing = Promise.resolve();
   // (End terminal session…: shown while the Terminal is open (William's H9: the dock's ✕ only closes it; with it
   //  closed, Terminal opens it again first: the ⋯ menu has no room for one more row, board's B380-1))
   termEnd.onclick = () => term?.endAsk();
@@ -3041,8 +3042,21 @@ $("#boardbtn").onclick = () => toBoard("/board/?recent=" + encodeURIComponent(nb
       let openTerminal;
       try { ({ openTerminal } = await import(mod)); } catch (e) { savedEl.textContent = "the terminal didn't load: " + (e?.message ?? e); return; }
       if (term) return term.toggle();
+      // (H9: the folder and commands this workspace's Terminal kept, given back, and kept again as commands end)
+      // (an End session's clear finished first, and none since what was read: never cleared commands in the new Terminal;
+      //  an End meanwhile (another Open's Terminal, ended) makes a new clear, so what was read is read again after it)
+      let keep, was;
+      do {
+        await (was = clearing);
+        keep = await termKeep(w);
+        if (term) return term.toggle();
+      } while (was !== clearing);
       term = shellTerm = openTerminal({ ws: w, S, open: openPath, here, tab: TAB });
-      term.onEnd = () => { term = shellTerm = null; window.__sbTerm = null; termEnd.hidden = true; bottomRoom(); };
+      keep.attach(term);
+      term.onEnd = () => {
+        term = shellTerm = null; window.__sbTerm = null; termEnd.hidden = true; bottomRoom();
+        clearing = keep.clear().then((ok) => { if (!ok) savedEl.textContent = "The commands kept in this browser couldn't be cleared"; });
+      };
       term.root.addEventListener("pointerdown", () => panelToFront(term?.root));
       // (the tests' handle, on a local host only: web/shell/test-panel-page.mjs)
       if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) window.__sbTerm = term;
