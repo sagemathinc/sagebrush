@@ -246,14 +246,12 @@ export class TerminalPanel {
     this.stopBtn = head.appendChild(el("button", "sb-term-stop", "Stop"));
     this.stopBtn.hidden = true;
     this.stopBtn.onclick = () => this.stop();
-    const hide = head.appendChild(el("button", "sb-term-hide", "–"));
-    hide.title = "Hide (keeps the session)";
-    hide.setAttribute("aria-label", "Hide the terminal");
+    // (✕ closes, keeping the session, its history and its scrollback, as closing a notebook keeps it: William's H9;
+    //  ending it is the page's ⋯ ▸ End terminal session…, endAsk below)
+    const hide = head.appendChild(el("button", "sb-term-hide", "✕"));
+    hide.title = "Close (keeps the session)";
+    hide.setAttribute("aria-label", "Close the terminal");
     hide.onclick = () => this.hide();
-    const end = head.appendChild(el("button", "sb-term-end", "✕"));
-    end.title = "End the session (drops its history and scrollback)";
-    end.setAttribute("aria-label", "End the terminal session");
-    end.onclick = () => this.end();
 
     // (the intro: a static line above the screen, once per tab, describing the terminal's input; not live, not a
     // dialog: T358-3; in each tab's first terminal until its "Got it", which this device then keeps, as the site keeps
@@ -452,7 +450,11 @@ export class TerminalPanel {
   setTheme() {
     if (this.term) this.term.options.theme = termTheme();
   }
-  /** ✕ ends the session: a running command is stopped first; the scrollback and history are dropped. */
+  /** The page's ⋯ ▸ End terminal session…: asked first (a running command named), then end(). */
+  endAsk() {
+    if (confirm("End this terminal session?" + (this.running ? " The command running now is stopped." : "") + " Its output and command history are cleared. This can't be undone.")) this.end();
+  }
+  /** Ends the session: a running command is stopped first; the scrollback and history are dropped. */
   end() {
     this.stop();
     this.opts.tab?.reset();

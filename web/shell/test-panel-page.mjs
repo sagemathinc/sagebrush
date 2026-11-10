@@ -76,7 +76,9 @@ try {
   // (the screen's lines after a marker: the buffer's logical lines, wrapped rows joined, trailing spaces trimmed)
   await send("Page.navigate", { url });
   check(!!(await until(`(() => { const b = document.querySelector("#termbtn"); return b && !b.hidden; })()`)), "⋯ ▸ Terminal shows on a local host");
-  const HELPERS = `window.__lines = (from, to) => { const t = window.__sbTerm.term, b = t.buffer.active, out = [];
+  // (TESTS973-1: before the Terminal is ever opened, there is no End terminal session…)
+  check(await evaluate(`document.querySelector("#termendbtn")?.hidden === true`), "H9: a fresh page, the Terminal never opened: End terminal session… hidden");
+  const HELPERS = `window.confirm = () => true; window.__lines = (from, to) => { const t = window.__sbTerm.term, b = t.buffer.active, out = [];
       for (let i = from; i < to; i++) { const l = b.getLine(i); if (!l) continue; const s = l.translateToString(true); if (l.isWrapped && out.length) out[out.length - 1] += s; else out.push(s); }
       return out; };
     window.__cursorLine = () => { const b = window.__sbTerm.term.buffer.active; return b.baseY + b.cursorY; };`;
@@ -625,8 +627,36 @@ try {
   const kept = await evaluate(`${T}.screenText`);
   await evaluate(`document.querySelector(".sb-term-hide").click()`);
   check((await evaluate(`document.querySelector(".sb-term").hidden`)) === true, "hide hides the dock");
+  // (H9, ruling (d): End terminal session… only while the Terminal is open: hidden with it closed, back when it opens)
+  const closedItem = await evaluate(`document.querySelector("#termendbtn").hidden`);
   await evaluate(`document.querySelector("#termbtn").click()`);
+  check(closedItem === true && (await evaluate(`!document.querySelector("#termendbtn").hidden`)), "H9: End terminal session… is hidden while the Terminal is closed, and shown again when it opens");
   check((await evaluate(`document.querySelector(".sb-term").hidden`)) === false && (await evaluate(`${T}.screenText`)) === kept, "⋯ ▸ Terminal again: the same session, its screen kept");
+  // (H9, William: the dock's ✕ closes, keeping the session (above), and the "–" is gone; ending it is the page's own
+  //  ⋯ ▸ End terminal session…, shown while the Terminal is open)
+  const hdr = await evaluate(`({ x: document.querySelector(".sb-term-hide").textContent, label: document.querySelector(".sb-term-hide").getAttribute("aria-label"),
+    title: document.querySelector(".sb-term-hide").title, buttons: [...document.querySelectorAll(".sb-term-head button")].map((b) => b.textContent),
+    item: (() => { const b = document.querySelector("#termendbtn"); return b && { shown: !b.hidden, text: b.textContent, next: b.previousElementSibling?.id }; })() })`);
+  check(hdr.x === "✕" && hdr.label === "Close the terminal" && hdr.title === "Close (keeps the session)" && !hdr.buttons.includes("–") && hdr.buttons.length === 2
+    && hdr.item?.shown && hdr.item.text === "End terminal session…" && hdr.item.next === "termbtn",
+    `H9: the dock's ✕ is Close (no "–"); ⋯ ▸ End terminal session… is shown under Terminal while the Terminal is open: ${JSON.stringify(hdr)}`);
+  // (End terminal session… always asks, saying a running command is stopped; No keeps everything)
+  await evaluate(`window.__asked = []; window.confirm = (m) => (window.__asked.push(m), false); 1`);
+  await evaluate(`document.querySelector("#termendbtn, [data-sbb=termend]").click()`);
+  const kept9 = await evaluate(`({ asked: window.__asked, dock: document.querySelectorAll(".sb-term").length })`);
+  // (and with a command running, the question says it is stopped)
+  await focusTerm();
+  await evaluate(`${T}.editor.reset("while :; do :; done"), 1`);
+  await realKey("Enter");
+  await until(`document.querySelector(".sb-term").classList.contains("running")`, 30000);
+  await evaluate(`document.querySelector("#termendbtn, [data-sbb=termend]").click()`);
+  const running9 = await evaluate(`({ asked: window.__asked.at(-1), running: document.querySelector(".sb-term").classList.contains("running") })`);
+  await evaluate(`document.querySelector(".sb-term-stop").click()`);
+  await until(`!document.querySelector(".sb-term").classList.contains("running")`, 30000);
+  await evaluate(`window.confirm = () => true; 1`);
+  check(kept9.asked.length === 1 && kept9.asked[0] === "End this terminal session? Its output and command history are cleared. This can't be undone." && kept9.dock === 1
+    && running9.asked === "End this terminal session? The command running now is stopped. Its output and command history are cleared. This can't be undone." && running9.running,
+    `H9: End session… asks first (saying a running command is stopped); No keeps the session: ${JSON.stringify({ kept9, running9 })}`);
   // (r6, SEC T854-8: a reset waiting on a start when ✕ ends the session: once that start resolves, no fresh start, no
   // end of the shell for reset, no exec and no prompt)
   await evaluate(`(() => { const t = ${T}, h = t.opts.host; window.__starts = 0; window.__execs8 = 0; const s0 = h.shellFor.bind(h), x0 = h.exec.bind(h);
@@ -636,8 +666,8 @@ try {
   await evaluate(`${T}.editor.reset("reset"), 1`);
   await realKey("Enter");
   await pause(100);
-  await evaluate(`document.querySelector(".sb-term-end").click()`);
-  check((await evaluate(`document.querySelectorAll(".sb-term").length`)) === 0, "✕ ends the session (the dock is gone)");
+  await evaluate(`document.querySelector("#termendbtn, [data-sbb=termend]").click()`);
+  check((await evaluate(`document.querySelectorAll(".sb-term").length === 0 && document.querySelector("#termendbtn").hidden`)), "End terminal session… ends it (the dock is gone), and the item goes");
   await evaluate(`window.__startGo8(), 1`);
   await pause(500);
   const t8 = await evaluate(`({ starts: window.__starts, execs: window.__execs8, prompt: window.__t8.editing, ended: window.__t8.ended })`);
@@ -648,12 +678,12 @@ try {
   await evaluate(HELPERS);
   await focusTerm();
   await realKey("ArrowUp");
-  check((await evaluate(`${T}.screenText`)).split("\n").length === 1 && (await evaluate(`${T}.editor.buf`)) === "", "a new session after ✕: no scrollback and no history");
+  check((await evaluate(`${T}.screenText`)).split("\n").length === 1 && (await evaluate(`${T}.editor.buf`)) === "", "a new session after End session: no scrollback and no history");
   check((await evaluate(`document.querySelectorAll(".sb-term-intro").length`)) === 0 && (await evaluate(`${TA}.getAttribute("aria-describedby")`)) === "sb-term-note",
     "T358-3: the intro once per tab: a new terminal in the same tab has none");
   // (the intro's "Got it", William, Oct 30)
   const reopen = async () => {
-    await evaluate(`document.querySelector(".sb-term-end").click()`);
+    await evaluate(`document.querySelector("#termendbtn, [data-sbb=termend]").click()`);
     await evaluate(`sessionStorage.removeItem("sb-term-intro")`);
     await evaluate(`document.querySelector("#termbtn").click()`);
     await until(`!!document.querySelector(".sb-term") && !document.querySelector(".sb-term").hidden && !!${T}`, 10000);
@@ -751,10 +781,11 @@ try {
   check(light && dark && light !== dark && dark === (await evaluate(`getComputedStyle(document.documentElement).getPropertyValue("--sb-term-bg").trim()`)), `the screen's colours follow the page's theme: light ${light}, dark ${dark}`);
   await evaluate(`delete document.documentElement.dataset.theme`);
   // ---- the board page's dock (TP-5): ⋯ ▸ Terminal there too, placed as on the notebook page, with ps listing the board
-  await evaluate(`document.querySelector(".sb-term-end")?.click()`);
+  await evaluate(`document.querySelector("#termendbtn, [data-sbb=termend]")?.click()`);
   await send("Page.navigate", { url: url + "board/?new=python" });
   const BTERM = `document.querySelector('#board [data-sbb="term"]')`, BMORE = `document.querySelector('#board [data-sbb="menubtn"]')`;
   check(!!(await until(`(() => { const b = ${BTERM}; return !!b && !b.hidden; })()`, 30000)), "board: ⋯ ▸ Terminal shows on a local host");
+  check(await evaluate(`document.querySelector("#board [data-sbb=termend]")?.hidden === true`), "board: a fresh page, the Terminal never opened: End terminal session… hidden (TESTS973-1)");
   await evaluate(`${BMORE}.click(); ${BTERM}.click()`);
   check(!!(await until(`(() => { const t = document.querySelector(".sb-term"); return !!t && !t.hidden && t.dataset.startMs !== undefined && !document.querySelector(".sb-term-loading") && !!${T}; })()`, 30000)),
     "board: the dock opens and its shell starts (the module and the set from a directory up)");
@@ -825,8 +856,18 @@ try {
   const bf = await evaluate(`({ hidden: document.querySelector(".sb-term").hidden, focus: document.activeElement?.dataset?.sbb ?? document.activeElement?.tagName,
     boardBottom: document.getElementById("board").getBoundingClientRect().bottom })`);
   check(bf.hidden && bf.focus === "menubtn" && bf.boardBottom > bp.boardBottom + 100, `board: hide gives focus back to the ⋯ button, and the board its height: ${JSON.stringify(bf)}`);
+  // (TESTS973-2: ruling (d) on the board too: hidden after ✕, shown again when the Terminal opens)
+  const bClosed = await evaluate(`document.querySelector("#board [data-sbb=termend]").hidden`);
   await evaluate(`${BMORE}.click(); ${BTERM}.click()`);
   await until(`!document.querySelector(".sb-term").hidden`, 10000);
+  check(bClosed === true && (await evaluate(`!document.querySelector("#board [data-sbb=termend]").hidden`)), "board: End terminal session… is hidden while the Terminal is closed, and shown again when it opens (TESTS973-2)");
+  // (TESTS973-3: on the board too, End terminal session… asks first, and No keeps the session)
+  await evaluate(`window.__askedB = []; window.confirm = (m) => (window.__askedB.push(m), false); 1`);
+  await evaluate(`document.querySelector("#board [data-sbb=termend]").click()`);
+  const keptB = await evaluate(`({ asked: window.__askedB, dock: document.querySelectorAll(".sb-term").length, shown: !!document.querySelector(".sb-term") && !document.querySelector(".sb-term").hidden })`);
+  await evaluate(`window.confirm = () => true; 1`);
+  check(keptB?.asked?.length === 1 && keptB.asked[0] === "End this terminal session? Its output and command history are cleared. This can't be undone." && keptB.dock === 1 && keptB.shown,
+    `board: End terminal session… asks once, in the same words, and No keeps the session (TESTS973-3): ${JSON.stringify(keptB)}`);
   await send("Emulation.setDeviceMetricsOverride", { width: 600, height: 800, deviceScaleFactor: 1, mobile: false });
   await pause(300);
   const bsheet = await evaluate(`(() => { const r = document.querySelector(".sb-term").getBoundingClientRect(); return { top: r.top, h: r.height, ih: innerHeight }; })()`);
@@ -841,8 +882,9 @@ try {
   await realKey("Enter");
   await pause(100);
   const w4 = await evaluate(`window.__t4.writer.stats.writes`);
-  await evaluate(`document.querySelector(".sb-term-end").click()`);
-  check((await evaluate(`document.querySelectorAll(".sb-term").length`)) === 0, "board: ✕ ends the session (the dock is gone)");
+  const shown4 = await evaluate(`!document.querySelector("[data-sbb=termend]").hidden && document.querySelector("[data-sbb=termend]").previousElementSibling?.dataset.sbb === "term"`);
+  await evaluate(`document.querySelector("#termendbtn, [data-sbb=termend]").click()`);
+  check(shown4 && (await evaluate(`document.querySelectorAll(".sb-term").length === 0 && document.querySelector("[data-sbb=termend]").hidden`)), "board: ⋯ ▸ End terminal session…, shown under Terminal while the Terminal is open, ends the session (the dock and the item go)");
   await evaluate(`window.__go4(), 1`);
   await pause(500);
   const t4 = await evaluate(`({ execs: window.__x4, writes: window.__t4.writer.stats.writes - ${w4}, running: !!window.__t4.running })`);
