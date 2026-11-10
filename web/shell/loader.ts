@@ -10,11 +10,12 @@
 // built for a higher level is refused: "this package set needs a newer
 // Sagebrush".
 import { admitIndex, checkJsChunk, PKGSET_LIMITS, PkgsetError, type SetPlan } from "../../src/pkgset";
-import HOST_LEVELS from "./host-levels.json";
+// (only its two tables: named imports, so the bundle never carries the file's "about" text)
+import { names as HOST_NAMES, fields as HOST_FIELDS } from "./host-levels.json";
 
 export const SHELL_PACKAGE = "@sagebrush/bash";
 // (the highest level of any message, or of any compatible widening of one: host-levels.json's "fields")
-export const SHELL_HOST_LEVEL: number = Math.max(...Object.values(HOST_LEVELS.names as Record<string, number>), ...Object.values(((HOST_LEVELS as any).fields ?? {}) as Record<string, number>));
+export const SHELL_HOST_LEVEL: number = Math.max(...Object.values(HOST_NAMES as Record<string, number>), ...Object.values((HOST_FIELDS ?? {}) as Record<string, number>));
 
 /**
  * What one invocation came to (r3 §7.4, D8 point 5): a real shell exit, whose
@@ -371,8 +372,9 @@ export async function startShell(S: string, at: string | URL = "./", { signal }:
       if (closed) return Promise.reject(closed);
       if (configuring) return Promise.reject(new Error("an init is already waiting for its answer"));
       const commands = [...(init.commands ?? [])];
-      if (commands.some((c) => !(TERMINAL_COMMANDS as readonly string[]).includes(c)) || new Set(commands).size !== commands.length) return Promise.reject(new TypeError(`an init's commands are some of ${TERMINAL_COMMANDS.join(", ")}, each once`));
-      // (a module below host level 4 has no commands: asking one for them is refused here, before it is asked)
+      // (the module refuses any name outside the fixed set, or one named twice, in its shell.configured answer, so
+      // configure() rejects with its words and nothing is enabled; and a request for a name outside the set closes the
+      // shell (cmdRequestOf).  A module below host level 4 has no commands: asking one for them is refused here)
       if (commands.length && shell.hostReq < 4) return Promise.reject(new Error("this package set's shell has no Terminal commands; update the set"));
       return new Promise<Record<string, number>>((resolve, reject) => {
         configuring = { resolve, reject, commands: new Set(commands) };

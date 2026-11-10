@@ -45,7 +45,7 @@ async function shell(commands) {
   let ready, configured;
   // (answer(r) decides each cmd.request's answer: an object to post, or null to hold it)
   const page = { answer: (r) => ({ ok: { code: 0, stdout: `${r.name} ${JSON.stringify(r.argv)}\n`, stderr: "" } }), requests, port: port1 };
-  const FILES = { "/w/f.txt": "from f\n", "/w/u.txt": "é\n" };
+  const FILES = { "/w/f.txt": "from f\n", "/w/u.txt": "é\n", "/w/e.txt": "" };
   port1.onmessage = (e) => {
     const { name, payload } = e.data;
     if (name === "shell.ready") ready?.(payload);
@@ -75,7 +75,7 @@ async function shell(commands) {
   page.run = (script, opts = {}) => {
     const id = next++;
     const p = new Promise((res) => results.set(id, res));
-    port1.postMessage({ exec: { id, run: "R", script, cwd: "/w", allowance: 64 * 2 ** 20 } });
+    port1.postMessage({ exec: { id, run: "R", script, cwd: "/w", allowance: 64 * 2 ** 20, ...(opts.stdin === undefined ? {} : { stdin: opts.stdin }) } });
     if (opts.abortAfterMs !== undefined) setTimeout(() => port1.postMessage({ abort: { id } }), opts.abortAfterMs);
     return p.then((o) => ({ ...o, id }));
   };
@@ -147,6 +147,10 @@ for (const [script, want, note] of [
   ["f() { python f; }; echo q | f", true, "a function given input (the fallback)"],
   ["f() { python f; }; true | f", false, "a function given an empty pipe (the stated miss)"],
   ["echo q | __SAGEBRUSH_STDIN=t python f", true, "a forged mark can't hide a pipe"],
+  // (TESTS967-1: where the parse puts no mark of its own, a forged one, without the nonce, still counts for nothing)
+  ["__SAGEBRUSH_STDIN=r eval 'python e'", false, "a forged mark on eval (no mark of the parse's)"],
+  ["export __SAGEBRUSH_STDIN=r; x=python; $x d", false, "an exported forged mark, and a name from a variable"],
+  ["python 2< e.txt", false, "`2<` of an empty file: no input (T8)"],
 ]) {
   S.requests.length = 0;
   await S.run(script);
@@ -200,12 +204,34 @@ for (const [script, want, note] of [
   const t0 = performance.now();
   r = exit(await S.run(`python; echo after=$?`, { abortAfterMs: 50 }));
   const ms = performance.now() - t0;
-  ok(S.requests.length === 1 && ms < 1500 && !/after=0/.test(r.stdout), `Stop ends a waiting command at once (${Math.round(ms)} ms, ${JSON.stringify(r)})`);
+  // (TESTS967-2: the command's own 130 isn't observable here.  just-bash checks the aborted signal as the command
+  // returns, so the invocation ends as just-bash's own abort, 124 with its line, and `echo after=$?` never runs: a
+  // command ending 0 or 130 gives the same result.  What is pinned: the exact result, at once, and nothing after it)
+  ok(S.requests.length === 1 && ms < 1500 && r.code === 124 && r.stdout === "" && r.stderr === "bash: execution aborted\n", `Stop ends a waiting command at once, as just-bash's abort, and nothing after it runs (${Math.round(ms)} ms, ${JSON.stringify(r)})`);
   const q = S.requests[0];
   S.port.postMessage({ cmd: { id: q.id, req: q.req, ok: { code: 0, stdout: "late\n", stderr: "" } } });
   S.answer = (x) => ({ ok: { code: 0, stdout: `${x.name}\n`, stderr: "" } });
   r = exit(await S.run(`python`));
   ok(r.code === 0 && r.stdout === "python\n", `a late answer is dropped, and the next invocation runs (${JSON.stringify(r)})`);
+}
+
+// ---------------------------------------------------------------- TESTS967-3: the stdin bound in UTF-8 bytes, not UTF-16 units
+{
+  // (3 Mi of "€" from one command, 3 MiB of UTF-16 units but 9 MiB of UTF-8, piped into the next: refused there with
+  // status 2, nothing sent for it, and the shell runs on)
+  const big = await shell(["python"]);
+  big.answer = (x) => ({ ok: { code: 0, stdout: x.argv[0] === "big" ? "€".repeat(3 * 2 ** 20) : "ok\n", stderr: "" } });
+  const r = exit(await big.run(`python big | python`));
+  ok(r.code === 2 && r.stderr === "python: the input is longer than the Terminal accepts (8 MiB)\n" && big.requests.length === 1, `9 MiB of UTF-8 (3 Mi UTF-16 units) is refused with status 2, nothing sent for it (${r.code}, ${JSON.stringify(r.stderr)}, ${big.requests.length} sent)`);
+  // (the invocation's own stdin, as exec() is given it, reaches the command as text, not as a byte string: there the
+  // UTF-16 units and the UTF-8 bytes differ, and the bound is the bytes)
+  big.requests.length = 0;
+  const own = exit(await big.run(`python`, { stdin: "€".repeat(3 * 2 ** 20) }));
+  ok(own.code === 2 && own.stderr === "python: the input is longer than the Terminal accepts (8 MiB)\n" && big.requests.length === 0, `the invocation's own stdin, 9 MiB of UTF-8 in 3 Mi UTF-16 units, is refused with status 2 (${own.code}, ${JSON.stringify(own.stderr)}, ${big.requests.length} sent)`);
+  const fits = exit(await big.run(`python`, { stdin: "€é" }));
+  ok(fits.code === 0 && dec.decode(big.requests.at(-1)?.stdin) === "€é" && big.requests.at(-1).stdin.byteLength === 5, `and its text below the bound is sent as UTF-8 (${big.requests.at(-1) && [...big.requests.at(-1).stdin]})`);
+  const after = exit(await big.run(`python next`));
+  ok(after.code === 0 && after.stdout === "ok\n", `and the next run goes on (${JSON.stringify(after)})`);
 }
 
 // ---------------------------------------------------------------- a pipeline
