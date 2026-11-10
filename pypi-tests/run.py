@@ -217,7 +217,9 @@ for name in names:
         continue
     pkgdir = os.path.join(packages, "pypi-" + name.lower(), "py")
     env = dict(os.environ, PYTHONPATH=pkgdir, PYTHONHASHSEED="0", PYPI_TEST_RECORD_PREFIX=RECORD_PREFIX)
-    cp, cerr, crc = run(CPYTHON + [os.path.join(script, "harness.py"), d], env)
+    # (CPython, the reference, runs a package's own Python: the overlaid mpmath's default backend is Sagebrush's
+    # core, which only Sagebrush has, so CPython takes the rollback, mpmath's python backend; other packages ignore it)
+    cp, cerr, crc = run(CPYTHON + [os.path.join(script, "harness.py"), d], dict(env, SAGEBRUSH_MPMATH_BACKEND="python"))
     why = exited("CPython", cerr, crc)
     if why is not None:
         print("%s %s: FAIL\n  %s" % (name, src["version"], why))
