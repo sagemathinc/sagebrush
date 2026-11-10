@@ -213,6 +213,14 @@ const CASES = {
     e = await caught(make(w, "p1", "g1", { live: () => on }));
     const p1 = await recOf(w, "p1");
     check(e?.message === T.failed(T.grantChanged, "p1") && p1?.status === "failed" && p1.reason === T.grantChanged && (await pagesOf(w, p1.fid)).length === 0, `revoked at publish's own check: never ready, no pages, failed and charged (${p1?.status})`);
+    // (a revoke after each transaction's writes and waits, just before its last act: the root (nothing made), a file's copy
+    //  (failed, that entry not kept): the check is after them, not before)
+    on = true; revokeAt("root-late");
+    e = await caught(make(w, "rl", "g1", { live: () => on }));
+    check(e?.message === T.grantChanged && !(await w.stat("/Branches/rl")) && (await recOf(w, "rl")) === null, `revoked after the root's writes, before its transaction ends: nothing made (${e?.message})`);
+    on = true; revokeAt("copy-late", 1);
+    e = await caught(make(w, "cl", "g1", { live: () => on }));
+    check(e?.message === T.failed(T.grantChanged, "cl") && !(await w.stat("/Branches/cl/A/a.txt")) && (await recOf(w, "cl"))?.status === "failed", `revoked after a copy's writes and log, before its transaction ends: that copy not kept (${e?.message})`);
     // (grader's TESTS957-3: a revoke while makeBranchRoot waits for the workspace's lock (held by another), and one
     //  between the last copy and publish)
     on = true; W.BRANCH_HOOK.atCheck = undefined;

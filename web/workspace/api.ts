@@ -367,7 +367,7 @@ const ROOT_REFUSED = Symbol("the grant changed"), PUBLISH_REFUSED = Symbol("the 
 const HOLD_MS = 5_000;
 /** Tests' hooks inside the branch's transactions (each may throw, as a tab closed there would: nothing of that
  * transaction is kept): `inRoot`, the root and record written, before the commit; `inPublish`, ready and its pages. */
-export const BRANCH_HOOK: { inRoot?: () => void; inPublish?: () => void; atCheck?: (where: "root" | "copy" | "publish") => void; afterRead?: (path: string) => Promise<void> } = {};
+export const BRANCH_HOOK: { inRoot?: () => void; inPublish?: () => void; atCheck?: (where: "root" | "root-late" | "copy" | "copy-late" | "publish") => void; afterRead?: (path: string) => Promise<void> } = {};
 const sameSource = (e: Entry, s: BranchSource) =>
   e.kind === s.kind && e.created === s.created && e.fid === s.fid && (e.kind === "file" || e.kind === "folder" || e.ref === s.ref) && (e.kind !== "file" || (e.sha256 === s.sha256 && e.size === s.size));
 async function branchRecordsIn(tx: IDBTransaction): Promise<Map<string, BranchRecord>> {
@@ -2545,6 +2545,7 @@ export class Workspace {
         const rec: BranchRecord = { name, owner: charge.owner, status: "making", entries: charge.entries, bytes: charge.bytes, made: this.now() };
         tx.objectStore("meta").put(rec, BRANCH_KEY + root.fid);
         BRANCH_HOOK.inRoot?.();
+        BRANCH_HOOK.atCheck?.("root-late");
         // (the grant the transaction's last act, after every write and wait: a refusal aborts the folder and record)
         if (!live()) throw ROOT_REFUSED;
         return { fid: root.fid! };
@@ -3357,7 +3358,9 @@ export class Workspace {
         if (ident) e.ident = ident;
         st.put(e);
         await this.log(tx, ops, { op: "create", path: q, kind }, e, undefined, undefined, kind === "file");
-        // (after every wait of this transaction, nothing after it: if it throws, all of it is aborted)
+        // (after every wait of this transaction, nothing after it: if it throws, all of it is aborted; tests revoke just
+        //  before it, after the writes and waits)
+        if (last) BRANCH_HOOK.atCheck?.("copy-late");
         last?.();
         return e;
       });
