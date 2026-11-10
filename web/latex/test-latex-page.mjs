@@ -2950,7 +2950,7 @@ try {
     // (William's L2: in the editor, where Run is, a code item not run yet says how to run it; the published page,
     //  examples and the CLI, with no Run, keep "not run": sagetex.mjs RUN_HINT)
     const hint = await ev(`[...document.querySelectorAll(".tex-preview .sagechip.s-notrun")].map((c) => c.textContent)`);
-    check(hint.some((t) => /^(Sage|Python) item \d+: not run yet: press Run or Shift\+Enter$/.test(t)) && !hint.some((t) => /item \d+: not run$/.test(t)), "Run: an item not run yet says \"not run yet: press Run or Shift+Enter\" in the editor", hint);
+    check(hint.some((t) => /^(Sage|Python) item \d+: not run yet \(press Run or Shift\+Enter\)$/.test(t)) && !hint.some((t) => /item \d+: not run$/.test(t)), "Run: an item not run yet says \"not run yet (press Run or Shift+Enter)\" in the editor", hint);
     // (Run's code is a chunk of its own, /sagebrush-latex-run.js (daybreak2, #551's group cap): not fetched by the editor's
     //  load or by any document opened so far, Run shown or not; the first Run fetches it once, later Runs not again)
     const runChunk = () => byId.filter((x) => /\/sagebrush-latex-run\.js(\?|$)/.test(x.url));
