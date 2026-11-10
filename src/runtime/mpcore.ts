@@ -197,8 +197,8 @@ function fail(c: Core, code: number, name: string): never {
     case -2:
       return heap(r[0]);
     case -3:
-      // (mpf_div's own raise has no message; Python's // and % by zero say this)
-      return name === "mpf_div" ? Obj.raise(Obj.T.ZeroDivisionError) : Obj.raise(Obj.T.ZeroDivisionError, "integer division or modulo by zero");
+      // (mpf_div's own raise has no message, nor mpf_pow's, which is mpf_div's; Python's // and % by zero say this)
+      return name === "mpf_div" || name === "mpf_pow" ? Obj.raise(Obj.T.ZeroDivisionError) : Obj.raise(Obj.T.ZeroDivisionError, "integer division or modulo by zero");
     case -4: {
       const cls = Obj.getattr(importModule("mpmath.libmp.libmpf"), "ComplexResult");
       throw Obj.raiseExc(Obj.callObj(cls, [COMPLEX[name] ?? "complex result"]));
