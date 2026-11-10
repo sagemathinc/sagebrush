@@ -654,7 +654,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     let folders: string[] = [];
     try { folders = (await w.list("/", { recursive: true })).filter((x) => x.kind === "folder" && !x.trashed && x.path !== TRASH && !x.path.startsWith(TRASH + "/")).map((x) => x.path); } catch (err) { return fail(err); }
     const to = ["/", ...folders.sort((a, b) => a.localeCompare(b))].filter((f) => movableOf(paths, f).length);
-    if (!to.length) return say("There's no other folder to move it to");
+    if (!to.length) return say(`There's no folder to move ${paths.length === 1 ? "it" : "them"} to`);
     popup(at, to.map((f): Item => [f === "/" ? "Top folder" : f.slice(1), () => void moveInto(f, movableOf(paths, f))]));
   }
 
