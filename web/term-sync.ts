@@ -78,8 +78,9 @@ export class WorkerChannel {
   }
   // (a CAS of the worker's: false only by cancellation; any other failure is the page breaking the protocol)
   private cas(from: number, to: number) {
-    this.o.hook?.(`cas:${from}->${to}`);
     if (this.closed()) throw new Cancelled();
+    // (tests: a Stop exactly between the check and the publication)
+    this.o.hook?.(`cas:${from}->${to}`);
     const was = Atomics.compareExchange(this.c, SL.STATE, from, to);
     if (was === from) return;
     if (was === ST.CANCELLED || this.closed()) throw new Cancelled();
@@ -225,8 +226,9 @@ export class PageChannel {
   }
   // (a page CAS: a failure by cancellation is dropped; any other is the worker breaking the protocol)
   private cas(from: number, to: number) {
-    this.hook?.(`cas:${from}->${to}`);
     if (this.closed()) return false;
+    // (tests: a Stop exactly between the check and the publication)
+    this.hook?.(`cas:${from}->${to}`);
     const was = Atomics.compareExchange(this.c, SL.STATE, from, to);
     if (was === from) {
       Atomics.notify(this.c, SL.STATE);

@@ -30,8 +30,8 @@ const sum = (b) => b.reduce((a, x) => (a + x) % 1000003, 0);
 
 // One worker running `steps` against a page channel with `handler`.  `onPage(page, msg)` sees each worker message
 // before the page serves it (a test can cancel there).  Resolves with the steps' outcomes and the end state.
-function session(handler, steps, { stopAt, onPage, raw, waitMs = 20_000 } = {}) {
-  const page = new S.PageChannel(7, handler);
+function session(handler, steps, { stopAt, onPage, raw, waitMs = 20_000, pageHook } = {}) {
+  const page = new S.PageChannel(7, handler, pageHook ? (pt) => pageHook(page, pt) : undefined);
   const w = new Worker(join(here, "term-sync-fixture-worker.ts"));
   const done = [];
   return new Promise((resolve) => {
@@ -100,6 +100,18 @@ function session(handler, steps, { stopAt, onPage, raw, waitMs = 20_000 } = {}) 
   ok(r.done[0].error === "ProtocolError" && /out of bounds/.test(r.done[0].message), `a forged total of 2^31 is refused before allocation (${r.done[0].message})`);
 }
 {
+  // (a forged negative total with an empty window: refused before any allocation)
+  const r = await session(null, [{ op: "read", args: { path: "p" } }], {
+    raw: (page, m) => {
+      const c = new Int32Array(page.control);
+      Atomics.store(c, S.SL.GEN, 7); Atomics.store(c, S.SL.SEQ, m.fsSync.seq); Atomics.store(c, S.SL.STATUS, S.STATUS.BYTES);
+      Atomics.store(c, S.SL.OFFSET, 0); Atomics.store(c, S.SL.WLEN, 0); Atomics.store(c, S.SL.TOTAL, -5);
+      Atomics.compareExchange(c, S.SL.STATE, S.ST.WAITING, S.ST.READY); Atomics.notify(c, S.SL.STATE);
+    },
+  });
+  ok(r.done[0].error === "ProtocolError" && /out of bounds/.test(r.done[0].message), `a forged negative total is refused before allocation (${r.done[0].error}: ${r.done[0].message})`);
+}
+{
   // (a window for another request: the wrong seq)
   const r = await session(null, [{ op: "read", args: { path: "p" } }], {
     raw: (page, m) => {
@@ -127,7 +139,76 @@ function session(handler, steps, { stopAt, onPage, raw, waitMs = 20_000 } = {}) 
   ok(err instanceof S.ProtocolError && /out of order/.test(err.message), "a continuation at a skipped offset is refused by the page");
 }
 
+{
+  // (a duplicate continuation: the same offset twice; the page refuses the second)
+  const page = new S.PageChannel(3, async () => ({ bytes: pattern(3 * MiB) }));
+  const c = new Int32Array(page.control);
+  Atomics.store(c, S.SL.STATE, S.ST.WAITING);
+  await page.onMessage({ fsSync: { gen: 3, seq: 1, op: "read", args: {} } });
+  Atomics.store(c, S.SL.STATE, S.ST.WAITING);
+  await page.onMessage({ fsMore: { gen: 3, seq: 1, offset: MiB } });
+  Atomics.store(c, S.SL.STATE, S.ST.WAITING);
+  let err = null;
+  try {
+    await page.onMessage({ fsMore: { gen: 3, seq: 1, offset: MiB } });
+  } catch (e) {
+    err = e;
+  }
+  ok(err instanceof S.ProtocolError, "a duplicate continuation (the same offset twice) is refused by the page");
+  // (a header out of sequence: seq 3 after 1)
+  let err2 = null;
+  try {
+    await page.onMessage({ fsSync: { gen: 3, seq: 3, op: "read", args: {} } });
+  } catch (e) {
+    err2 = e;
+  }
+  ok(err2 instanceof S.ProtocolError, "a request header out of sequence is refused by the page");
+}
+{
+  // (the previous request never settled: the channel isn't IDLE, so the next request's first edge is a protocol error)
+  const control = new SharedArrayBuffer(S.CONTROL_BYTES), data = new SharedArrayBuffer(S.WINDOW);
+  Atomics.store(new Int32Array(control), S.SL.STATE, S.ST.READY);
+  const w = new S.WorkerChannel({ control, data, gen: 1, post: () => {} });
+  let err = null;
+  try {
+    w.request({ op: "stat", args: {} });
+  } catch (e) {
+    err = e;
+  }
+  ok(err instanceof S.ProtocolError && /not 0/.test(err.message), `a request when the last one never settled (the missing final edge): a protocol error (${err?.message})`);
+}
+{
+  // (a page that never wakes the worker: the injected deadline reports it, never a hang)
+  const r = await session(null, [{ op: "stat", args: {} }], { raw: () => {}, waitMs: 300 });
+  ok(r.done[0].error === "ProtocolError" && /deadline/.test(r.done[0].message), `a missing answer is reported at the injected deadline (${r.done[0].message})`);
+}
+
+{
+  // (a window at the wrong offset: the page publishes window 0 again where the next is due)
+  let sent = 0;
+  const r = await session(null, [{ op: "read", args: { path: "p" } }], {
+    raw: (page, m) => {
+      const c = new Int32Array(page.control);
+      const seq = m.fsSync ? m.fsSync.seq : m.fsMore.seq;
+      Atomics.store(c, S.SL.GEN, 7); Atomics.store(c, S.SL.SEQ, seq); Atomics.store(c, S.SL.STATUS, S.STATUS.BYTES);
+      Atomics.store(c, S.SL.OFFSET, 0); Atomics.store(c, S.SL.WLEN, MiB); Atomics.store(c, S.SL.TOTAL, 2 * MiB);
+      sent++;
+      Atomics.compareExchange(c, S.SL.STATE, S.ST.WAITING, S.ST.READY); Atomics.notify(c, S.SL.STATE);
+    },
+  });
+  ok(r.done[0].error === "ProtocolError" && /a window at 0, not 1048576/.test(r.done[0].message) && sent === 2, `a window at the wrong offset is refused before its bytes are taken (${r.done[0].message})`);
+}
+
 // ---------------------------------------------------------------- Stop
+{
+  // the page's own publication raced by Stop: cancelled at the page's WAITING->READY edge, the CANCELLED stays
+  const r = await session(async () => ({ json: 1 }), [{ op: "stat", args: {} }], {
+    pageHook: (page, pt) => {
+      if (pt === `cas:${S.ST.WAITING}->${S.ST.READY}`) page.cancel();
+    },
+  });
+  ok(r.done[0].error === "Cancelled" && r.end.state === S.ST.CANCELLED, "Stop at the page's own publishing edge: the answer never lands, the channel stays CANCELLED");
+}
 {
   // before the header: the latch already set
   const r = await session(async () => ({ json: 1 }), [{ op: "stat", args: {} }, { op: "stat", args: {} }], { stopAt: "before-header" });
