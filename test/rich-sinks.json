@@ -591,6 +591,11 @@
   "web/viewer3d.js :: mk :: help.innerHTML = \"<b>Orbit<\\/b> drag: rotate (flick to spin) · right/shift-drag: pan · wheel: zoom to the cursor \" + #0": {
    "kind": "host",
    "owner": "host"
+  },
+  "web/latex/boot.ts :: commentMarkdown :: box.innerHTML = markdown(text, { remote: \"click\" }); #0": {
+   "kind": "rich",
+   "owner": "phase-2",
+   "readers": []
   }
  }
 }

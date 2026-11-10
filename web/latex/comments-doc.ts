@@ -20,6 +20,8 @@ export type DocCommentsOpts = {
   src: HTMLTextAreaElement;     // the source
   hl: HTMLElement;              // the source's highlighter layer (its lines, behind the textarea)
   button: HTMLButtonElement;    // the page's Comments button (its count shown here)
+  md?: (box: HTMLElement, text: string) => void; // a message's text as Markdown with math (the page's); else plain
+  reveal?: (s: number, e: number) => void; // the source's span selected and scrolled into view (the editor's)
 };
 type Place = { op: string; status: string; s: number; e: number; candidates?: { start: number; end: number }[] };
 
@@ -44,6 +46,8 @@ export function attachDocComments(ed: View, o: DocCommentsOpts) {
   right.append(layer, over);
   let panel: HTMLElement | null = null, go: HTMLElement | null = null, list: HTMLElement | null = null;
   const closeAll = () => { panel?.remove(); panel = null; go?.remove(); go = null; };
+  // (a message's text: Markdown with math where the page gives a renderer, else as written)
+  const textOf = (s: string) => { const d = el("div", "sb-cm-text"); if (o.md) { d.classList.add("md"); o.md(d, s); } else d.textContent = s; return d; };
 
   // ---- the threads and their places in the text now
   const live = () => doc.threads.filter((t: any) => !t.deleted.value);
@@ -271,7 +275,7 @@ export function attachDocComments(ed: View, o: DocCommentsOpts) {
         const b = el("div", "sb-cm-bubble" + (t.id === active ? " active" : "") + (agent ? " agent" : ""));
         b.dataset.thread = t.id;
         const w = el("div", "sb-cm-who", who(last?.author ?? "", o.author)); if (last && isAgent(last.author)) w.append(el("span", "sb-cm-agent", "agent"));
-        b.append(w, el("div", "sb-cm-text", last?.text.value ?? ""));
+        b.append(w, textOf(last?.text.value ?? ""));
         if (ms.length > 1) b.append(el("div", "sb-cm-who", ms.length + " messages"));
         b.onclick = (ev) => { ev.stopPropagation(); openThread(t.id, b); };
         made.push(b); frag.appendChild(b);
@@ -328,7 +332,7 @@ export function attachDocComments(ed: View, o: DocCommentsOpts) {
     for (const m of msgs(t)) {
       const d = el("div", "sb-cm-msg" + (isAgent(m.author) ? " agent" : ""));
       const w = el("div", "sb-cm-who", who(m.author, o.author) + " · " + when(m.time)); if (isAgent(m.author)) w.append(el("span", "sb-cm-agent", "agent"));
-      d.append(w, el("div", "sb-cm-text", m.text.value)); p.append(d);
+      d.append(w, textOf(m.text.value)); p.append(d);
     }
     const { ta } = composerIn(p, "Reply", async (text) => (await write((d) => C.reply(d, id, { text, author: o.author }), text)) !== undefined ? (openThread(id, null), true) : false);
     const row = el("div", "sb-cm-row");
@@ -414,11 +418,18 @@ export function attachDocComments(ed: View, o: DocCommentsOpts) {
         const d = el("div", "sb-cm-item" + (ms.some((m: any) => isAgent(m.author)) ? " agent" : "")); d.dataset.thread = t.id;
         d.append(el("div", "sb-cm-quote", a.quote));
         const w = el("div", "sb-cm-who", who(last?.author ?? "", o.author) + (ms.length > 1 ? " · " + ms.length + " messages" : "")); if (last && isAgent(last.author)) w.append(el("span", "sb-cm-agent", "agent"));
-        d.append(w, el("div", "sb-cm-text", last?.text.value ?? ""));
+        d.append(w, textOf(last?.text.value ?? ""));
         const n = STATUS_NOTE[places.get(t.id)?.status ?? ""]; if (n) d.append(el("div", "sb-cm-note", n));
         extra?.(t, d);
         // (in a narrow box the thread's sheet replaces the list; in a wide one, both are shown)
-        d.onclick = () => { const p = places.get(t.id); if (placed(p)) { o.src.focus({ preventScroll: true }); o.src.setSelectionRange(p!.s, p!.e); } if (right.classList.contains("sb-cm-narrow")) { list?.remove(); list = null; } openThread(t.id, null); };
+        // (and the commented text brought into view, in the source and in the preview, a third of the way down, before the
+        //  thread opens there)
+        d.onclick = () => {
+          const p = places.get(t.id);
+          if (placed(p)) { if (o.reveal) o.reveal(p!.s, p!.e); else { o.src.focus({ preventScroll: true }); o.src.setSelectionRange(p!.s, p!.e); } const at = rangeFor(t, p!, ed.groups(), ed.getText()); if (at) right.scrollTop = Math.max(0, at.top - right.clientHeight / 3); }
+          if (right.classList.contains("sb-cm-narrow")) { list?.remove(); list = null; }
+          openThread(t.id, null);
+        };
         list!.append(d);
       }
     };
