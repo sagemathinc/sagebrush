@@ -38,8 +38,6 @@ const HOOKS = "mpf_add mpf_sub mpf_mul mpf_div mpf_sqrt mpf_exp mpf_log mpf_cos 
 const KINDS = "bbbbuuuuubnnmccxxxkkkiiqqf";
 const OP: Record<string, number> = {};
 HOOKS.forEach((h, i) => (OP[h] = i + 1));
-// The rounding modes, as mpmath writes them ('n', 'f', 'c', 'd', 'u').
-const RND: Record<string, number> = { n: 0, f: 1, c: 2, d: 3, u: 4 };
 // The largest number a call may make, in limbs (2^28 bits), and the most the
 // core's memory may grow by, in 64 KiB pages (1 GiB): its share of the
 // session's memory, bounded at its source (engine/wasmheap).
@@ -129,9 +127,10 @@ function precOf(p: any): number {
   return safe(Number(x)) ? Number(x) : limit(EXACT / 64);
 }
 
+// (the rounding modes, as mpmath writes them, by their codes: 'n', 'f', 'c', 'd', 'u')
 function rndOf(r: any): number {
-  const k = typeof r === "string" ? RND[r] : undefined;
-  return k === undefined ? Obj.raise(Obj.T.ValueError, `unknown rounding mode ${repr(r)}`) : k;
+  const k = typeof r === "string" && r.length === 1 ? "nfcdu".indexOf(r) : -1;
+  return k < 0 ? Obj.raise(Obj.T.ValueError, `unknown rounding mode ${repr(r)}`) : k;
 }
 
 // ---- results out
@@ -348,7 +347,7 @@ newBuiltinModule("_sagebrush_mpcore", (m) => {
     // mpf_sqrt, mpf_exp, mpf_log, mpf_cos, mpf_sin
     u: (name) => (x, prec, rnd = "d") => call(name, prec, rnd, (c) => setF(c, 0, x)),
     // _normalize, _normalize1
-    n: (name) => (sign, man, exp, bc, prec, rnd) => call(name, prec, rnd, (c) => setF(c, 0, Obj.tuple([sign, man, exp, bc]))),
+    n: (name) => (sign, man, exp, bc, prec, rnd) => call(name, prec, rnd, (c) => setF(c, 0, [sign, man, exp, bc])),
     // from_man_exp
     m: (name) => (man, exp, prec = null, rnd = "d") => call(name, prec, rnd, (c) => (setI(c, 0, man, "man"), setI(c, 1, exp, "exp"))),
     // mpc_exp, mpc_sqrt
