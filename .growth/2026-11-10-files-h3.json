@@ -1,7 +1,7 @@
 {
  "v": 1,
- "reason": "Files (William's H3): the file browser scrolls its list during a drag near the list's edges, and its ⋯ menu gains Move to… (the folders an item or the selection can go into, moved as a drop moves them). The board page the CLI embeds (frame/board/index.html.gz) carries the file browser: cli/pyjs.cjs +1,432 (base64 of that page's gzip); no other artifact changes. The marker is the measured growth + 64. Measured with bun 1.4.4 / node 24.21.0 (size-record.sh) on master 25401fa1 vs probe 18d662d1 (head 51dc199f, #968 landed; board's R1 words); this marker's own commit changes no artifact.",
+ "reason": "Files (William's H3): the file browser scrolls its list during a drag near the list's edges, and its ⋯ menu gains Move to… (the folders an item or the selection can go into, moved as a drop moves them). The board page the CLI embeds (frame/board/index.html.gz) carries the file browser: cli/pyjs.cjs +1,332 (base64 of that page's gzip); no other artifact changes. The marker is the measured growth + 64. Measured with bun 1.4.4 / node 24.21.0 (size-record.sh) on master 2ed47583 (#965 landed) vs the merged head; this marker's own commit changes no artifact.",
  "bytes": {
-  "cli/pyjs.cjs": 1496
+  "cli/pyjs.cjs": 1396
  }
 }
