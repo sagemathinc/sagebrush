@@ -1,0 +1,12 @@
+{
+ "v": 1,
+ "reason": "Rill A1.2 (values, printing, accessors, the argument matcher), measured with bun 1.4.4 and node 24.21.0 (CI build order) on the probe merge of the head onto master e7d6512d; each figure is the delta measured at 6b3ddfce + 64 (board's wording changes since: +20 to +32). Family bytes: lib/_rill grows 85277 -> 121755 B of source (args.py, access.py, uchar.py new); rill.src +33945 and rill.pre +156310 are those files and their compiled code; cli/lib.gen.js +15575 is the keyed Rill blob (base64 31102 -> 46626) plus 51 B for the three new names. Glue: cli/pyjs.cjs is lib.gen's +15575 plus +208 in the embedded web build (base64 of index.html and the board frame gz). engine/sagebrush-worker.js +248 and engine/sagebrush-notebook.js +42: lib-chunks' manifest only (three path-to-group entries, the new rill-more chunk and its lazy file, the rill sizes' digits); no code. The new row engine/lib/rill-more.src (4505, uchar.py) has its own budgets.json row.",
+ "bytes": {
+  "cli/lib.gen.js": 15619,
+  "cli/pyjs.cjs": 15815,
+  "engine/lib/rill.pre": 156351,
+  "engine/lib/rill.src": 33986,
+  "engine/sagebrush-notebook.js": 106,
+  "engine/sagebrush-worker.js": 312
+ }
+}

@@ -1,9 +1,24 @@
 {
  "files": {
+  "rill-tests/access/test_1.R": {
+   "cases": 84,
+   "out_sha256": "d1c98d28f77d9f312792c0969c6d94a196c3a492e2df308013c0e2c7bd6a4771",
+   "r_sha256": "c426582ab6b8a5a10f42eec008f66129d5ae26392f5191beb7274144e4b51b55"
+  },
   "rill-tests/apply/test_1.R": {
    "cases": 9,
    "out_sha256": "b3ec2f21fb36e11be147a6ec0408a6d6419f8005515badf143edd30b9dd147cb",
    "r_sha256": "a8592ea0213bd373e2faa368398e0e9f85f3acd70f843f1636126ef28a1f1881"
+  },
+  "rill-tests/args/test_1.R": {
+   "cases": 55,
+   "out_sha256": "bb363e7f60600d35302cd037d80f87170f9a7861f533165a708fb7402cb4af1f",
+   "r_sha256": "42de579a98a109e97670ad31e2c82eee53fd20fbe6d366d7dbc3c503fa229ecc"
+  },
+  "rill-tests/args/test_2.R": {
+   "cases": 2,
+   "out_sha256": "25cedc0c17585ef533a2aeaa26281b5dc4bd3e3d4bd355ce536acc84e21bb3cf",
+   "r_sha256": "89561323890cfaa9af9f79f2da1857a6aaa10de07e39096dd721a2779ae77574"
   },
   "rill-tests/arith/test_1.R": {
    "cases": 27,
@@ -139,6 +154,11 @@
    "cases": 87,
    "out_sha256": "65526a9bf9ce16a47c7d4e4e4cce9e4a0a1305a40427d9422ae36f867961d601",
    "r_sha256": "72a1921ab3b10dfbaeff94c406cda638ccd27d1233f50a12356729719cc27782"
+  },
+  "rill-tests/print/test_1.R": {
+   "cases": 101,
+   "out_sha256": "4d0cbb4e0affaa0b5204c8eabc68798354e6f8d1ea523363d3719c913e5f1a9a",
+   "r_sha256": "f3ebf3b668d344401f09044e8f2f7b70db0f1c3b385e22a3599ff6a6e345740b"
   },
   "rill-tests/rng/test_1.R": {
    "cases": 7,

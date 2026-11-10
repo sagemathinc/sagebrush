@@ -177,6 +177,8 @@ s = Session(lambda t: None, lambda t: None)
 s.evaluate(parse("x <- 1:50")[0])
 s.evaluate(parse("y <- 51:100")[0])
 s.evaluate(parse("z <- x + 0.5")[0])
+s.evaluate(parse("w <- c(a = z)")[0])
+s.evaluate(parse("j <- 50:1")[0])
 mem.SMALL_BYTES = 0
 cases = {
   "1:100": 100 * 32,
@@ -193,6 +195,16 @@ cases = {
   "x + 0.5": 50 * 64 + 50 * 64 + 64,
   "-z": 50 * 64 * 2,
   "z < 1": 50 * 8 + 50 * 64 + 64,
+  # A1.2's classes (daybreak3): a constructor; a coercion; [ (positions, result: max(length(x), length(i)) each);
+  # c() with names (result, the largest coerced operand, names); a complex constructor (result and both parts);
+  # an elementwise test; a named [ (positions, result, names)
+  "numeric(50)": 50 * 64,
+  "as.character(x)": 50 * 136,
+  "x[j]": 50 * 32 * 2,
+  "c(a = x)": 50 * 32 * 2 + 50 * 136,
+  "complex(50)": 50 * 128 + 50 * 64 * 2,
+  "is.na(z)": 50 * 8,
+  "w[x]": 50 * 64 + 50 * 32 + 50 * 136,
 }
 peak = [0]
 real_enter = mem.Reservation.__enter__
@@ -226,7 +238,7 @@ print(json.dumps(out))
 // (astra's R2 residual) print pads every element to the widest: one long string among short ones must be reserved
 // for the padded layout, not the strings' own lengths; and a string of control characters prints four characters
 // for each (grader's R7b: "\001" prints as "\001")
-for (const [what, long] of [["plain", '"a" * 1000'], ["escaped", '"\\\\001" * 250']]) {
+for (const [what, long] of [["plain", '"a" * 1000'], ["escaped", '"\\\\001" * 250'], ["supplementary", '"\\\\U0001fffe" * 100']]) {
   test(`§8.5: print reserves its padded layout: a skewed-width vector's output fits its reservation (${what})`, () => {
     const got = py(`
 import json
@@ -557,4 +569,79 @@ test("§8: Stop (SIGINT) ends a long evaluation and a long parse, and nothing af
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// (A1.2, daybreak3) R's matching happens before any argument is evaluated: an unused or doubly matched argument is
+// R's error with no argument's effect (no output, no assignment), as a refusal is (args.py)
+test("args: matching fails before any argument is evaluated, with R's errors", () => {
+  const got = py(`
+import json
+from _rill.eval import Session, RError
+from _rill.parse import parse
+out = []
+s = Session(out.append, out.append)
+s.evaluate(parse("x <- 1")[0])
+r = {}
+for src in ('numeric(x <- 3, foo = 1)', 'numeric(cat("E"), foo = 1)', 'numeric(len = cat("E"), le = 2)', 'length(cat("E"), 2)'):
+    try:
+        s.evaluate(parse(src)[0])
+        r[src] = "no error"
+    except RError as e:
+        r[src] = e.message
+r["x"] = s.globals["x"].data
+r["out"] = "".join(out)
+print(json.dumps(r))
+`);
+  assert.deepEqual(got, {
+    "numeric(x <- 3, foo = 1)": "unused argument (foo = 1)",
+    'numeric(cat("E"), foo = 1)': "unused argument (foo = 1)",
+    'numeric(len = cat("E"), le = 2)': 'formal argument "length" matched by multiple actual arguments',
+    'length(cat("E"), 2)': "2 arguments passed to 'length' which requires 1",
+    x: [1],
+    out: "",
+  });
+});
+
+// (A1.2, daybreak3) Stop inside a reservation gives it back, in each of A1.2's classes: a constructor, `[`, an
+// escaped print; Stop is never caught on the way out
+test("§8: Stop inside A1.2's reservations (a constructor, [, an escaped print) gives back what they held", () => {
+  const got = py(`
+import json
+from _rill import mem, access, fmt
+from _rill.eval import Session
+from _rill.parse import parse
+s = Session(lambda t: None, lambda t: None)
+s.evaluate(parse('x <- c(a = 1, b = 2, c = 3)')[0])
+s.evaluate(parse('y <- "' + chr(92) + 'U0001fffe"')[0])
+mem.SMALL_BYTES = 0
+mem._allowance = lambda: (10 ** 9, None)
+def stop(*a, **k):
+    raise KeyboardInterrupt
+r = {}
+for src, (mod, attr) in (("numeric(5)", (access, "ZERO")), ("x[2:3]", (access, "_positions")), ("print(y)", (fmt, "format_elements"))):
+    saved = getattr(mod, attr)
+    if attr == "ZERO":
+        class Boom(dict):
+            def __getitem__(self, k):
+                raise KeyboardInterrupt
+        setattr(mod, attr, Boom())
+    else:
+        setattr(mod, attr, stop)
+    try:
+        s.evaluate(parse(src)[0])
+        r[src] = "no stop"
+    except KeyboardInterrupt:
+        r[src] = mem.open_bytes()
+    finally:
+        setattr(mod, attr, saved)
+print(json.dumps(r))
+`);
+  assert.deepEqual(got, { "numeric(5)": 0, "x[2:3]": 0, "print(y)": 0 });
+});
+
+// (A1.2) lib/_rill/uchar.py is exactly what scripts/rill-uchar.py makes of R's recorded sweep
+// (rill-tests/print/uchar-sweep.txt): no hand edit, no drift
+test("uchar: Rill's character table is the one generated from R 4.5.3's recorded sweep", () => {
+  const r = spawnSync("python3", [join(ROOT, "scripts", "rill-uchar.py"), "--check"], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
 });
