@@ -251,7 +251,8 @@ function call(name: string, prec: any, rnd: any, load: (c: Core) => void): any {
 // A copy of n limbs made in the JS heap, admitted before anything is made
 // (design §4.5, as format.ts's admitDigits): the limb limit, and its peak,
 // `per` bytes a limb, in this session's heap.  The peaks: a copy-out's words
-// (2n numbers: 16n); an int's limbs (wordsOf: its hex text, 16n, and the
+// (2n numbers, 16n, in an array grown by push, whose store may reach half as
+// much again: 24n); an int's limbs (wordsOf: its hex text, 16n, and the
 // words, whose elements may be held as small ints, 8n, before numbers, 16n:
 // 40n); an int made from limbs (manOf: the digits as bytes, 16n, their text,
 // 16n, and the int, 8n: 40n).  The loops test for Stop.
@@ -350,7 +351,7 @@ function installFast(ctx: any) {
       else if (k === 1 && r[4] === 0) {
         // (the result's limbs copied out: a fresh array)
         const n = r[1], v = ioWords(c, n), w: number[] = [];
-        admit(n, 16);
+        admit(n, 24);
         for (let i = 0; i < 2 * n; i++) w.push(v[i]);
         o.$m = w;
         o.$s = r[0];
