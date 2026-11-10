@@ -550,6 +550,10 @@ pub fn mpf_pow_int(s: &Mpf, n: &Int, prec: u64, rnd: Rnd) -> Mpf {
         return Mpf { sign: result_sign, man: Nat::from_u64(1), exp: s.exp.mul_int(n), bc: 1 };
     }
     if Int::from_i64(s.bc).mul(n).cmp(&Int::from_i64(1000)) == Ordering::Less {
+        // (a zero mantissa passes this test for any n: man**n is 0, as the reference's, not n multiplications)
+        if s.man.is_zero() {
+            return fzero();
+        }
         let k = n.to_i64().unwrap_or(0);
         let mut man = Nat::from_u64(1);
         for _ in 0..k {
@@ -666,5 +670,15 @@ mod tests {
         assert!(matches!(crate::fail::checked(|| mpf_div(&fzero(), &fzero(), 53, Rnd::Nearest)), Err(Fail::ZeroDivision)));
         assert!(mpf_add(&finf(), &fninf(), 53, Rnd::Nearest, false).is_fnan());
         assert!(mpf_mul(&finf(), &fzero(), 53, Rnd::Nearest).is_fnan());
+    }
+
+    #[test]
+    fn zero_to_a_huge_integer_power_is_immediate() {
+        // (the conformance list's 0 ** -(2^53 - 1): mpf_pow_int(fzero, n) once multiplied n times)
+        let n = Int::from_i64((1 << 53) - 1);
+        assert!(mpf_pow_int(&fzero(), &n, 53, Rnd::Nearest).is_fzero());
+        assert!(mpf_pow_int(&fzero(), &Int::pow2(70), 53, Rnd::Nearest).is_fzero());
+        let neg = Int::from_i64(-((1 << 53) - 1));
+        assert!(matches!(crate::fail::checked(|| mpf_pow_int(&fzero(), &neg, 53, Rnd::Nearest)), Err(Fail::ZeroDivision)));
     }
 }
