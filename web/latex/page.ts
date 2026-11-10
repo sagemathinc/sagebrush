@@ -65,6 +65,8 @@ let runMod: Promise<typeof import("./run-core.mjs")> | null = null, runTries = 0
 //  /sagebrush-latex-interact.js, fetched only once a preview or a Run has one; a failed fetch is tried again by a URL of
 //  its own)
 const interactUrl = new URL("sagebrush-latex-interact.js", import.meta.url).href;
+// (where you were in the file: view.ts, its own chunk, /sagebrush-latex-view.js (design/view-state.md))
+const viewUrl = new URL("sagebrush-latex-view.js", import.meta.url).href;
 let interactMod: Promise<typeof import("./interact")> | null = null, interactTries = 0;
 const loadInteract = () => (interactMod ??= (import(interactTries++ ? `${interactUrl}?try=${interactTries}` : interactUrl) as Promise<typeof import("./interact")>).catch((e) => { interactMod = null; throw e; }));
 const loadRun = () => (runMod ??= (import(runTries++ ? `${runUrl}?try=${runTries}` : runUrl) as Promise<typeof import("./run-core.mjs")>).catch((e) => { runMod = null; throw e; }));
@@ -672,6 +674,15 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     onEdit: () => { edits++; saver?.edited(); if (!saving) say(""); },
   });
   const { src, gate, request } = E;
+  // (where you were, put back once view.ts is here; until then a scroll, key, click or touch, or a target in the URL,
+  //  means the person has moved and it isn't put back, though their view is kept from then on. Not fetched: nothing kept)
+  {
+    let moved = !!location.hash;
+    const mv = () => { moved = true; }, evs = ["wheel", "keydown", "pointerdown", "touchstart"];
+    for (const e of evs) root.addEventListener(e, mv, { capture: true, passive: true });
+    const done = () => { for (const e of evs) root.removeEventListener(e, mv, true); };
+    import(viewUrl).then((m) => { done(); if (live()) m.attachView(E, right, host.fid, moved, life.signal); }, done);
+  }
   // ---- the name at the top (William's M0, Nov 3): it follows this file renamed or moved elsewhere (the file panel,
   // another tab), read again by its identity on any change; and a click on it renames the file there, as a notebook's
   // title does: a true rename of the .tex, with its results and comments files beside it moved along

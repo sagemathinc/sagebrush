@@ -19,6 +19,7 @@ export const LATEX_LAZY = {
   PYTHONTEX: "dist/sagebrush-latex-pythontex.js",
   RUN: "dist/sagebrush-latex-run.js",
   INTERACT: "dist/sagebrush-latex-interact.js",
+  VIEW: "dist/sagebrush-latex-view.js",
 };
 // (232 KiB / 78 KiB: William, 2026-11-03, "OK 232/78", for the open editor following a change made elsewhere (#599);
 //  224 KiB / 76 KiB: @sagebrush's ruling of 2026-11-02, for the Beamer track (William: LaTeX and beamer the top
@@ -34,7 +35,9 @@ export const LATEX_LAZY = {
 //  code items it finds, their occurrence ids and where each was read, what Run, check and the CLI use) and so must its
 //  no-result display (the items' chips and texts); everything used only to read results back is the PYTHONTEX chunk.
 //  Measured 241,385 / 80,477 after the split and the two ruled trims; gzip unchanged, under its cap)
-export const LATEX_CAPS = { raw: 236 * 1024, gzip: 79.5 * 1024 };
+// (241,795 raw: daybreak2's V1 ruling, Nov 10 (the view kept and put back: its chunk lazy, the page's glue eager), a cap
+//  moved by a PR is its landing measurement + 64: 241,731 measured on master a5484fc8 with V1)
+export const LATEX_CAPS = { raw: 241795, gzip: 79.5 * 1024 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
@@ -89,6 +92,10 @@ export const LATEX_LAZY_CAPS = {
   //  and 5's live widgets justify their own measured change). 9 KiB / 3.75 KiB: PR 4's live widgets (a change runs the
   //  function again in the Run's session), 8,413 / 3,332 measured, as daybreak2's SIZE ruling approved
   INTERACT: { label: "the LaTeX interact chunk", raw: 9 * 1024, gzip: 3.75 * 1024 },
+  // (where you were in a .tex (V1, design/view-state.md): view.ts with view-state.ts, fetched as a file opens; a lazy
+  //  split by daybreak2's SIZE plan, Nov 10 (the eager group at its cap): 3,314 / 1,608 measured on master a5484fc8,
+  //  + 64 B each)
+  VIEW: { label: "the LaTeX view chunk", raw: 3378, gzip: 1672 },
 };
 
 /** Each lazy chunk of `files`, measured against its own cap; one not in this tree: present false (and not ok). */
