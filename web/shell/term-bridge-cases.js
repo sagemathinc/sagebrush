@@ -417,6 +417,27 @@ async function ends(check) {
     const c = new Int32Array(fakes.at(-1).posted.find((m) => m.term).term.sync.control);
     check(run.terminal?.row === 5 && a.err && !before && Atomics.load(c, TS.SL.STATE) === TS.ST.CANCELLED, `an end while a file request is held: a fault, settled only after the held op; the channel CANCELLED (${JSON.stringify(run.terminal)}, ${before})`);
   }
+  // a refusal after the command started, with a write's commit held: a fault, settled only after the commit
+  {
+    const run = f.host.run(PERSON);
+    const port = run.commandPort(0);
+    let release;
+    const held = port.turn("/", () => new Promise((res) => (release = res)));
+    const p = scripted((m, w) => {
+      if (m.init) return w.ready();
+      Atomics.store(new Int32Array(m.term.sync.control), TS.SL.STATE, TS.ST.WAITING);
+      w.emit({ fsSync: { gen: m.term.gen, seq: 1, op: "openw", args: { path: "/r.txt", create: true, trunc: true, excl: false } } });
+      setTimeout(() => w.emit({ termRefused: "late" }), 30);
+    }).run(port, req("python", ["x.py"]));
+    let settled = false;
+    p.then(() => (settled = true));
+    await sleep(200);
+    const before = settled;
+    release(true);
+    await held;
+    const a = await p;
+    check(!before && a.err && run.terminal?.row === 5 && fakes.at(-1).terminated, `a refusal after the command started: a fault, settled only after the held op (${before}, ${JSON.stringify(run.terminal)})`);
+  }
   // Stop before ready: no worker stays
   {
     const run = f.host.run(PERSON);

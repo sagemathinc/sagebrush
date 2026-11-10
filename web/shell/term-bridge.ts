@@ -462,7 +462,12 @@ export function bridge(o: BridgeOptions = {}): Bridge & { stats(): { live: numbe
           return;
         }
         if (m.termDone) return done(m.termDone);
-        if (m.initFailed !== undefined || m.termRefused !== undefined) return settle(ok(126, "", `${plan.argv0}: ${String(m.initFailed ?? m.termRefused).slice(0, 500)}\n`));
+        if (m.initFailed !== undefined || m.termRefused !== undefined) {
+          // (before the command is sent there is no file work: the engine's refusal, 126.  After it, the end of a
+          // command whose file work may be in flight: a fault, cancelled, latched and drained before it settles)
+          if (page) return fault(`was refused after it started (${String(m.initFailed ?? m.termRefused).slice(0, 200)})`);
+          return settle(ok(126, "", `${plan.argv0}: ${String(m.initFailed ?? m.termRefused).slice(0, 500)}\n`));
+        }
         // (the runtime's own loading notices: nothing to do)
         if ("libLoading" in m || "libChunk" in m || "offlineMissing" in m || "pkgUsed" in m || "pkgsetUsed" in m) return;
         fault(`sent what a command doesn't (${Object.keys(m).slice(0, 3).join(", ").slice(0, 60)})`);
