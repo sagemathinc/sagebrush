@@ -23,6 +23,9 @@ check(savedView(nb("a")) === null, "nothing kept: null");
 saveView(nb("a"), { cell: "c1", dy: 12 });
 saveView({ kind: "board", id: "a" }, { x: 1, y: 2, zoom: 1.5 });
 check(same(savedView(nb("a")), { cell: "c1", dy: 12 }) && same(savedView({ kind: "board", id: "a" }), { x: 1, y: 2, zoom: 1.5 }), "kept per document and kind");
+// (r3: the code page's kind, kept apart from a notebook with the same id)
+saveView({ kind: "code", id: "a" }, { line: 40, sel: 7 });
+check(same(savedView({ kind: "code", id: "a" }), { line: 40, sel: 7 }) && same(savedView(nb("a")), { cell: "c1", dy: 12 }), "the code kind kept, apart from another kind's same id");
 saveView(nb("a"), { cell: "c2", dy: 0 });
 check(same(savedView(nb("a")), { cell: "c2", dy: 0 }), "kept again: the latest");
 
