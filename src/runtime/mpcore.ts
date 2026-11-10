@@ -14,7 +14,7 @@ import { importModule, memoryGuard, newBuiltinModule } from "./modules";
 import * as O from "./ops";
 import { repr } from "./format";
 import { INTR, INTR_CTRL_C } from "./interrupt";
-import { heapLimit } from "./heap";
+import { admitHeap } from "./heap";
 
 interface Core {
   memory: WebAssembly.Memory;
@@ -256,8 +256,9 @@ function call(name: string, prec: any, rnd: any, load: (c: Core) => void): any {
 // never a view of the core's memory).
 
 // A copy of n limbs made in the JS heap, admitted before anything is made
-// (design §4.5, as format.ts's admitDigits): the limb limit, and its peak,
-// `per` bytes a limb, in this session's heap.  The peaks: a copy-out's words
+// (design §4.5): the limb limit, then its peak, `per` bytes a limb, against
+// this session's heap by the shared admission (heap.ts admitHeap, as an int's
+// conversion to text is: the free heap for a large one).  The peaks: a copy-out's words
 // (2n numbers, 16n, in an array grown by push, whose store may reach half as
 // much again: 24n); an int's limbs (wordsOf: its hex text, 16n, and the
 // words, whose elements may be held as small ints, 8n, before numbers, 16n:
@@ -265,7 +266,7 @@ function call(name: string, prec: any, rnd: any, load: (c: Core) => void): any {
 // 16n, and the int, 8n: 40n).  The loops test for Stop.
 function admit(n: number, per: number) {
   if (n > MAX_LIMBS) limit(n);
-  if (per * n > heapLimit()) memoryGuard(`Converting a number of ${n * 64} bits`, per * n, heapLimit(), "one conversion");
+  admitHeap(per * n, `Converting a number of ${n * 64} bits`);
 }
 
 /** |x|'s limbs as 32-bit words (an even count) (exported for the tests) */
