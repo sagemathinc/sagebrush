@@ -281,7 +281,7 @@ try {
       await set("cat no"); await key("Tab"); await sleepMs(50);
       // (the input and the root kept by reference: the close must abort the listing and leave the input as it was)
       await evaluate(`window.__e5c = { ed: window.__sbTerm.editor, root: document.querySelector(".sb-term"), ab: Number(document.querySelector(".sb-term").dataset.tabAborts ?? 0) }`);
-      await evaluate(`document.querySelector(".sb-term-end").click()`);
+      await evaluate(`window.confirm = () => true; document.querySelector(".sb-term-end").click()`);
       await sleepMs(900);
       const e5c = await evaluate(`({ v: window.__e5c.ed.buf, ab: Number(window.__e5c.root.dataset.tabAborts ?? 0) - window.__e5c.ab, left: !!document.querySelector(".sb-term") })`);
       check(e5c && e5c.v === "cat no" && e5c.ab === 1 && !e5c.left, `E5.c: the session ended during a slow listing: aborted, the input untouched, nothing left (${JSON.stringify(e5c)})`);

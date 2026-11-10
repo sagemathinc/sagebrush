@@ -246,14 +246,31 @@ export class TerminalPanel {
     this.stopBtn = head.appendChild(el("button", "sb-term-stop", "Stop"));
     this.stopBtn.hidden = true;
     this.stopBtn.onclick = () => this.stop();
-    const hide = head.appendChild(el("button", "sb-term-hide", "–"));
-    hide.title = "Hide (keeps the session)";
-    hide.setAttribute("aria-label", "Hide the terminal");
+    // (✕ closes, keeping the session, its history and its scrollback, as closing a notebook keeps it: William's H9;
+    //  ending the session is ⋯ ▸ End session, the one way to drop them)
+    const more = head.appendChild(el("button", "sb-term-more", "⋯"));
+    more.title = "More";
+    more.setAttribute("aria-label", "More terminal actions");
+    more.setAttribute("aria-haspopup", "menu");
+    const hide = head.appendChild(el("button", "sb-term-hide", "✕"));
+    hide.title = "Close (keeps the session)";
+    hide.setAttribute("aria-label", "Close the terminal");
     hide.onclick = () => this.hide();
-    const end = head.appendChild(el("button", "sb-term-end", "✕"));
-    end.title = "End the session (drops its history and scrollback)";
-    end.setAttribute("aria-label", "End the terminal session");
-    end.onclick = () => this.end();
+    const menu = head.appendChild(el("div", "sb-term-menu"));
+    menu.setAttribute("role", "menu");
+    menu.hidden = true;
+    const end = menu.appendChild(el("button", "sb-term-end", "End session…"));
+    end.setAttribute("role", "menuitem");
+    const shut = (back = false) => { menu.hidden = true; more.setAttribute("aria-expanded", "false"); if (back) more.focus(); };
+    // (always asked: its output and history can't be had back)
+    end.onclick = () => {
+      shut();
+      if (confirm("End this terminal session?" + (this.running ? " The command running now is stopped." : "") + " Its output and command history are cleared. This can't be undone.")) this.end();
+      else more.focus();
+    };
+    more.onclick = () => { const open = menu.hidden; menu.hidden = !open; more.setAttribute("aria-expanded", String(open)); if (open) end.focus(); };
+    menu.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.stopPropagation(); shut(true); } });
+    menu.addEventListener("focusout", (e) => { if (!menu.contains(e.relatedTarget as Node | null) && e.relatedTarget !== more) shut(); });
 
     // (the intro: a static line above the screen, once per tab, describing the terminal's input; not live, not a
     // dialog: T358-3; in each tab's first terminal until its "Got it", which this device then keeps, as the site keeps
@@ -452,7 +469,7 @@ export class TerminalPanel {
   setTheme() {
     if (this.term) this.term.options.theme = termTheme();
   }
-  /** ✕ ends the session: a running command is stopped first; the scrollback and history are dropped. */
+  /** ⋯ ▸ End session: a running command is stopped first; the scrollback and history are dropped. */
   end() {
     this.stop();
     this.opts.tab?.reset();

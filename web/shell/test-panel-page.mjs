@@ -76,7 +76,7 @@ try {
   // (the screen's lines after a marker: the buffer's logical lines, wrapped rows joined, trailing spaces trimmed)
   await send("Page.navigate", { url });
   check(!!(await until(`(() => { const b = document.querySelector("#termbtn"); return b && !b.hidden; })()`)), "⋯ ▸ Terminal shows on a local host");
-  const HELPERS = `window.__lines = (from, to) => { const t = window.__sbTerm.term, b = t.buffer.active, out = [];
+  const HELPERS = `window.confirm = () => true; window.__lines = (from, to) => { const t = window.__sbTerm.term, b = t.buffer.active, out = [];
       for (let i = from; i < to; i++) { const l = b.getLine(i); if (!l) continue; const s = l.translateToString(true); if (l.isWrapped && out.length) out[out.length - 1] += s; else out.push(s); }
       return out; };
     window.__cursorLine = () => { const b = window.__sbTerm.term.buffer.active; return b.baseY + b.cursorY; };`;
@@ -578,6 +578,33 @@ try {
   check((await evaluate(`document.querySelector(".sb-term").hidden`)) === true, "hide hides the dock");
   await evaluate(`document.querySelector("#termbtn").click()`);
   check((await evaluate(`document.querySelector(".sb-term").hidden`)) === false && (await evaluate(`${T}.screenText`)) === kept, "⋯ ▸ Terminal again: the same session, its screen kept");
+  // (H9, William: ✕ closes, keeping the session (above); End session is in the terminal's own ⋯ menu, which Escape closes)
+  const hdr = await evaluate(`({ x: document.querySelector(".sb-term-hide").textContent, label: document.querySelector(".sb-term-hide").getAttribute("aria-label"),
+    endIn: !!document.querySelector(".sb-term-menu .sb-term-end"), menuHidden: document.querySelector(".sb-term-menu").hidden,
+    dash: [...document.querySelectorAll(".sb-term-head button")].some((b) => b.textContent === "–") })`);
+  await evaluate(`document.querySelector(".sb-term-more").click()`);
+  const opened9 = await evaluate(`!document.querySelector(".sb-term-menu").hidden && document.activeElement === document.querySelector(".sb-term-end") && document.querySelector(".sb-term-more").getAttribute("aria-expanded") === "true"`);
+  await realKey("Escape");
+  const shut9 = await evaluate(`document.querySelector(".sb-term-menu").hidden && document.activeElement === document.querySelector(".sb-term-more") && !document.querySelector(".sb-term").hidden`);
+  check(hdr.x === "✕" && hdr.label === "Close the terminal" && hdr.endIn && hdr.menuHidden && !hdr.dash && opened9 && shut9,
+    `H9: ✕ is Close, End session is in the terminal's ⋯ menu, and Escape closes that menu, the session open: ${JSON.stringify({ hdr, opened9, shut9 })}`);
+  // (End session… always asks, saying a running command is stopped; No keeps everything)
+  await evaluate(`window.__asked = []; window.confirm = (m) => (window.__asked.push(m), false); 1`);
+  await evaluate(`document.querySelector(".sb-term-end").click()`);
+  const kept9 = await evaluate(`({ asked: window.__asked, dock: document.querySelectorAll(".sb-term").length })`);
+  // (and with a command running, the question says it is stopped)
+  await focusTerm();
+  await evaluate(`${T}.editor.reset("while :; do :; done"), 1`);
+  await realKey("Enter");
+  await until(`document.querySelector(".sb-term").classList.contains("running")`, 30000);
+  await evaluate(`document.querySelector(".sb-term-end").click()`);
+  const running9 = await evaluate(`({ asked: window.__asked.at(-1), running: document.querySelector(".sb-term").classList.contains("running") })`);
+  await evaluate(`document.querySelector(".sb-term-stop").click()`);
+  await until(`!document.querySelector(".sb-term").classList.contains("running")`, 30000);
+  await evaluate(`window.confirm = () => true; 1`);
+  check(kept9.asked.length === 1 && kept9.asked[0] === "End this terminal session? Its output and command history are cleared. This can't be undone." && kept9.dock === 1
+    && running9.asked === "End this terminal session? The command running now is stopped. Its output and command history are cleared. This can't be undone." && running9.running,
+    `H9: End session… asks first (saying a running command is stopped); No keeps the session: ${JSON.stringify({ kept9, running9 })}`);
   // (r6, SEC T854-8: a reset waiting on a start when ✕ ends the session: once that start resolves, no fresh start, no
   // end of the shell for reset, no exec and no prompt)
   await evaluate(`(() => { const t = ${T}, h = t.opts.host; window.__starts = 0; window.__execs8 = 0; const s0 = h.shellFor.bind(h), x0 = h.exec.bind(h);
@@ -588,7 +615,7 @@ try {
   await realKey("Enter");
   await pause(100);
   await evaluate(`document.querySelector(".sb-term-end").click()`);
-  check((await evaluate(`document.querySelectorAll(".sb-term").length`)) === 0, "✕ ends the session (the dock is gone)");
+  check((await evaluate(`document.querySelectorAll(".sb-term").length`)) === 0, "End session ends it (the dock is gone)");
   await evaluate(`window.__startGo8(), 1`);
   await pause(500);
   const t8 = await evaluate(`({ starts: window.__starts, execs: window.__execs8, prompt: window.__t8.editing, ended: window.__t8.ended })`);
@@ -599,7 +626,7 @@ try {
   await evaluate(HELPERS);
   await focusTerm();
   await realKey("ArrowUp");
-  check((await evaluate(`${T}.screenText`)).split("\n").length === 1 && (await evaluate(`${T}.editor.buf`)) === "", "a new session after ✕: no scrollback and no history");
+  check((await evaluate(`${T}.screenText`)).split("\n").length === 1 && (await evaluate(`${T}.editor.buf`)) === "", "a new session after End session: no scrollback and no history");
   check((await evaluate(`document.querySelectorAll(".sb-term-intro").length`)) === 0 && (await evaluate(`${TA}.getAttribute("aria-describedby")`)) === "sb-term-note",
     "T358-3: the intro once per tab: a new terminal in the same tab has none");
   // (the intro's "Got it", William, Oct 30)
