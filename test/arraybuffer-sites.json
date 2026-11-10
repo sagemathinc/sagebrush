@@ -2038,7 +2038,7 @@
   "ed68b80dd4692f64": {"decl":"web/term-sync.ts :: PageChannel.replyOf","class":"allocates","via":"web/term-sync.ts :: enc"},
   "9d56cf8d00af722b": {"decl":"web/term-sync.ts :: ProtocolError.class","class":"no-new-store"},
   "e092729523cff735": {"decl":"web/term-sync.ts :: Refused.class","class":"no-new-store"},
-  "d0b9525751b3fe22": {"decl":"web/term-sync.ts :: WorkerChannel.class","class":"no-new-store"},
+  "331e90a9a37a6ebb": {"decl":"web/term-sync.ts :: WorkerChannel.class","class":"no-new-store"},
   "edb0db22ef55e262": {"decl":"web/term-sync.ts :: WorkerChannel.header","class":"allocates","via":"lib:lib.dom.d.ts :: TextEncoder.encode"},
   "c3e93044b6de6e08": {"decl":"web/term-sync.ts :: enc","class":"allocates","via":"lib:lib.dom.d.ts :: TextEncoder.encode"},
   "abebe0cd445320f2": {"decl":"web/worker.ts :: fetchSync","class":"allocates","via":"lib:lib.es5.d.ts :: Uint8Array.slice"}

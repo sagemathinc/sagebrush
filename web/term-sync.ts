@@ -65,8 +65,10 @@ export interface WorkerChannelOptions {
 }
 
 export class WorkerChannel {
-  private c: Int32Array;
-  private d: Uint8Array;
+  // (the views of the page's buffers: public and readonly, so tsc 7's type-level walk sees the stores TypeScript 5.9's
+  // does, test/arraybuffer-sites-parity.test.ts; the page holds the same buffers)
+  readonly c: Int32Array;
+  readonly d: Uint8Array;
   private seq = 0;
   constructor(private o: WorkerChannelOptions) {
     if (o.control.byteLength !== CONTROL_BYTES || o.data.byteLength !== WINDOW) throw new ProtocolError("the channel's buffers aren't the protocol's sizes");
