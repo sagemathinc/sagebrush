@@ -253,13 +253,13 @@ impl Core {
                 let (nman, exp_limbs) = (m.man.len(), match &m.exp {
                     Exp::S(e) if (e.unsigned_abs() as f64) < EXACT => None,
                     Exp::S(e) => Some((*e < 0, vec![e.unsigned_abs()])),
-                    Exp::B { neg, mag } => Some((*neg, mag.limbs().to_vec())),
+                    Exp::B { neg, mag } => Some((*neg, mag.limbs())),
                 });
                 let nexp = exp_limbs.as_ref().map_or(0, |e| e.1.len());
                 let Some(io) = self.io_reserve(nman + nexp) else {
                     return fail(self, Fail::Memory { bytes: 8 * (nman + nexp) as u64 });
                 };
-                io[..nman].copy_from_slice(m.man.limbs());
+                io[..nman].copy_from_slice(&m.man.limbs());
                 if let Some((_, e)) = &exp_limbs {
                     io[nman..nman + nexp].copy_from_slice(e);
                 }
@@ -285,7 +285,7 @@ impl Core {
                 let Some(io) = self.io_reserve(n) else {
                     return fail(self, Fail::Memory { bytes: 8 * n as u64 });
                 };
-                io[..n].copy_from_slice(i.mag.limbs());
+                io[..n].copy_from_slice(&i.mag.limbs());
                 self.res[0] = i.is_neg() as u8 as f64;
                 self.res[1] = n as f64;
                 3
