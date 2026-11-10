@@ -32,8 +32,9 @@ const b64 = (s) => Buffer.from(s, "utf8").toString("base64");
 
 // A world: its server, its browser, a collection shared from the notebook page (a notebook that reads
 // data/points.csv), then the shared page opened with the recorder in place, Run all done, and the runner's worker
-async function world(name, sitePort, filesPort, intercept = null) {
-  const dev = await within(60000, `${name}: the dev server`, startDev({ sitePort, filesPort, limits: LIMITS }));
+async function world(name, intercept = null) {
+  // (ports 0: startDev's servers take the system's choice and hold it, web/share/serve-dev.mjs)
+  const dev = await within(60000, `${name}: the dev server`, startDev({ sitePort: 0, filesPort: 0, limits: LIMITS }));
   const b = await browser();
   const uev = (expr, ms = 30000) => until(() => b.ev(expr).catch(() => false), ms).then((v) => { if (!v) throw new Error(`${name}: timeout: ${expr.slice(0, 120)}`); return v; });
   const runFirst = async (code) => {
@@ -110,7 +111,7 @@ function interception(rules) {
 
 // G1s, and the positive mounted case
 await T.page("G1s world", ROSTER["G1s world"], async () => {
-  const w = await world("G1s", 18890, 18891);
+  const w = await world("G1s");
   try {
     const log = await w.b.log();
     const req = log.find((x) => x.kind === "request" && x.url === w.csvUrl);
@@ -131,7 +132,7 @@ await T.page("G4 world", ROSTER["G4 world"], async () => {
     return null;
   });
   icpt.ready = ({ csvUrl, filesOrigin }) => { csv = csvUrl; target = new URL("/g4-redirect-target-SENTINEL", filesOrigin).href; };
-  const w = await world("G4", 18892, 18893, icpt);
+  const w = await world("G4", icpt);
   try {
     const l = await w.b.log();
     const req = l.find((x) => x.kind === "request" && x.url === csv);
@@ -146,7 +147,7 @@ await T.page("G4 world", ROSTER["G4 world"], async () => {
 await T.page("G10 world", ROSTER["G10 world"], async () => {
   let S = null;
   const icpt = interception((url) => (S && url === S ? { status: 200, headers: [{ name: "Access-Control-Allow-Origin", value: "*" }, { name: "Content-Type", value: "text/plain" }], body: "SENTINEL-G10\n" } : null));
-  const w = await world("G10", 18894, 18895, icpt);
+  const w = await world("G10", icpt);
   try {
     S = new URL(`/c/g10-SENTINEL-${Date.now()}/${"0".repeat(64)}`, w.filesOrigin).href;
     const mark = (await w.b.log()).length;
