@@ -103,7 +103,7 @@ is dropped, and biblatex's `\printbibliography` shows nothing.
   the document's folder that the code names: the modules it imports
   (`from helper import f` gives it `helper.py`), the files whose paths it
   writes in quotes (`'data.csv'`), and the files those name in turn, up to
-  500 files and 64 MiB in all. Other files in the folder aren't given and
+  500 files and 64 MB in all. Other files in the folder aren't given and
   don't count. A file reached only by a path built while the code runs,
   such as `open('data' + str(i) + '.csv')`, isn't given: Python reports it
   as not found.

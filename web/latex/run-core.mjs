@@ -327,12 +327,12 @@ export async function folderFiles(ws, texPath, codes = [], lim = FOLDER_LIMITS) 
   const listed = (await ws.list(dir, { recursive: true })).filter((e) => e.kind === "file" && !e.trashed && !e.path.startsWith("/Trash/") && e.path.startsWith(base + "/"));
   const rel = (e) => e.path.slice(base.length + 1), want = new Set(), files = [];
   let bytes = 0, remote = 0, todo = codes;
-  // (board's words: by count, the files named so far in the order first named, at most 5, "and more" when cut (the walk
-  //  stops counting there); by bytes, the largest first with their sizes as the file browser shows them, at most 5, then
-  //  how many more)
+  // (board's words: by count, the files named so far in the order first named, at most 5; by bytes,
+  //  the largest of those seen first, with their sizes as the file browser shows them (its MB, the site's limits' unit),
+  //  at most 5; both then "and more": the walk stopped at the bound, so what is left isn't known)
   const sizes = new Map(), fmt = (n) => (n < 1024 ? `${n} B` : n < 2 ** 20 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 2 ** 20).toFixed(1)} MB`);
-  const tooMany = () => ({ msg: `Not run: the code uses over ${lim.files} files, and Sage here can be given at most ${lim.files}: ` + [...want].slice(0, 5).join(", ") + (want.size > 5 ? " and more." : ".") });
-  const tooBig = () => { const l = [...sizes].sort((a, b) => b[1] - a[1]); return { msg: `Not run: the code uses over ${lim.bytes / 2 ** 20} MiB of files, and Sage here can be given at most ${lim.bytes / 2 ** 20} MiB: ` + l.slice(0, 5).map(([r, n]) => `${r} (${fmt(n)})`).join(", ") + (l.length > 5 ? ` and ${l.length - 5} more.` : ".") }; };
+  const tooMany = () => ({ msg: `Not run: the code uses over ${lim.files} files, and Sage here can be given at most ${lim.files}: ` + [...want].slice(0, 5).join(", ") + " and more." });
+  const tooBig = () => ({ msg: `Not run: the code uses over ${lim.bytes / 2 ** 20} MB of files, and Sage here can be given at most ${lim.bytes / 2 ** 20} MB: ` + [...sizes].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([r, n]) => `${r} (${fmt(n)})`).join(", ") + " and more." });
   while (todo.length) {
     const names = new Set(todo.flatMap(namesIn));
     todo = [];
