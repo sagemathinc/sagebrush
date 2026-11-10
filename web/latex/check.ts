@@ -66,12 +66,14 @@ export function checkResult(file: string, text: string, r: EngineCheck, images: 
   const code = r.sage.map((it, k) => ({ n: k + 1, mode: String(it.mode), line: lineOf(text, it.at ?? -1),
     state: it.err ? `refused: ${it.err}` : it.s === "ok" ? "ok" : it.s === "error" ? `error: ${last(it.msg)}` : it.s === "blocked" ? "blocked" : "not run" }));
   let notRun = 0;
+  // (with any PythonTeX item, "code item": board's rule, as the preview's banner)
+  const what = code.some((c) => /^py/.test(c.mode)) ? "code item" : "SageTeX item";
   for (const c of code) {
-    if (c.state.startsWith("refused") || c.state.startsWith("error")) problems.push({ severity: "error", kind: "code", name: String(c.n), line: c.line, message: `SageTeX item ${c.n} (${c.mode}) ${c.state.startsWith("refused") ? "can't be run" : "failed"}: ${c.state.replace(/^(refused|error): /, "")}` });
-    else if (c.state === "blocked") problems.push({ severity: "warning", kind: "code", name: String(c.n), line: c.line, message: `SageTeX item ${c.n} (${c.mode}) wasn't run: an earlier item failed` });
+    if (c.state.startsWith("refused") || c.state.startsWith("error")) problems.push({ severity: "error", kind: "code", name: String(c.n), line: c.line, message: `${what} ${c.n} (${c.mode}) ${c.state.startsWith("refused") ? "can't be run" : "failed"}: ${c.state.replace(/^(refused|error): /, "")}` });
+    else if (c.state === "blocked") problems.push({ severity: "warning", kind: "code", name: String(c.n), line: c.line, message: `${what} ${c.n} (${c.mode}) wasn't run: an earlier item failed` });
     else if (c.state === "not run") notRun++;
   }
-  if (notRun) problems.push({ severity: "warning", kind: "code", name: String(notRun), line: null, message: `${notRun} SageTeX item${notRun === 1 ? " is" : "s are"} not run yet: \`sagebrush latex run ${file}\` runs them and keeps their results beside it` });
+  if (notRun) problems.push({ severity: "warning", kind: "code", name: String(notRun), line: null, message: `${notRun} ${what}${notRun === 1 ? " is" : "s are"} not run yet: \`sagebrush latex run ${file}\` runs them and keeps their results beside it` });
   problems.sort((a, b) => (a.line ?? 1e9) - (b.line ?? 1e9));
   return {
     file, ok: !problems.some((p) => p.severity === "error"), class: r.beamer ? "beamer" : "other", outcome: String(r.outcome),

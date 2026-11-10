@@ -13,7 +13,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { seenOf, driver, runnable, parseOutput, statesOf, resultsText, msgOf, MARK, RUN_LIMITS, RESULTS_FORMAT, runAndSave, sessionOf, sandboxEngine, SANDBOX_FAILED, folderFiles, runIn, DEPS_MARK, parseDeps, depsWith, wsReader, checkedResults } from "./run-core.mjs";
-import { Engine } from "./engine/pipeline.mjs";
+import { Engine, installPythontex } from "./engine/pipeline.mjs";
+import * as pythontexCode from "./engine/pythontex.mjs";
 import { itemKey, savedStates, stateOf, WRAPPER_VERSION, MAX_RESULT, safeRel, depsOf, staleOf, staleOfSync, sha256hex, readComplete, DEPS_MAX, inlineHtml, blockHtml, mathPart } from "./engine/sagetex.mjs";
 import { interactsOf, interactsHtml, INTERACT_LIMITS } from "./interact.ts";
 
@@ -135,6 +136,22 @@ const sage = (code) => new Promise((res) => {
   p.stdout.on("data", (x) => (o += x)); p.stderr.on("data", (x) => (e += x));
   p.on("close", (c) => { rmSync(dir, { recursive: true, force: true }); res({ code: c, out: o, err: e }); });
 });
+// ---- PythonTeX, step (a): \py, pycode and pyblock run by the editor's Run (run-core's driver, in the CLI's own Sage),
+// as plain Python in a namespace of their own; their results read back as TeX by the preview: the oracle's document,
+// against real PythonTeX's PDF (pdflatex, pythontex, pdflatex; its pdftotext, ¡b¿ being OT1's < and >)
+{
+  installPythontex(pythontexCode);
+  const src = "\\documentclass{article}\n\\usepackage{pythontex}\n\\begin{document}\nA: \\py{2**10}.\n\\begin{pycode}\nx = 7\nprint(r\"B: \\textbf{\" + str(x*6) + \"}.\")\n\\end{pycode}\nC: \\py{x}.\n\\begin{pyblock}\ny = x + 1\nprint(y)\n\\end{pyblock}\nD: \\printpythontex\nE: \\py{'<b>'}.\n\\end{document}\n";
+  const its = new Engine().update(src).sageItems.map((it) => ({ mode: it.mode, code: it.code, err: it.err ?? null, key: itemKey(it) }));
+  // (plain Python, not Sage: 2**10 an int, 1/2 a float, and Sage's names not defined; the Sage items' session apart)
+  const r = await sage(driver(runnable(its.concat([{ mode: "py", code: "(1/2, type(2**10).__name__, 'QQ' in globals())", key: "k" }]))));
+  const st = statesOf(its, parseOutput(r.out), "");
+  check("pythontex: the session ran, each item ok", r.code === 0 && st.length === 5 && st.every((x) => x.s === "ok"), [r.err.slice(-400), st]);
+  check("pythontex: plain Python in its own namespace", parseOutput(r.out)[5]?.latex === "(0.5, 'int', False)", parseOutput(r.out)[5]);
+  const html = new Engine({ sage: { saved: st } }).update(src, { cold: true }).chunks.join(" ");
+  const text = html.replace(/<[^>]+>/g, "").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/\s+/g, " ").trim();
+  check("pythontex: the oracle's text, word for word (but <b> for the PDF's font artifacts)", text === "A: 1024. B: 42. C: 7. y = x + 1 print(y) D: 8 E: <b>.", text);
+}
 // ---- @interact in a Run (a Sagebrush extension: William, Nov 8), in the CLI's own Sage: each interact an item makes is
 // kept with its result, its controls and what its function printed and showed at the defaults; the runtime's own host
 // and display are back after the Run
@@ -561,7 +578,7 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
   const run = (fid, signal) => runAndSave({
     items: [item("silent", "x = 1")], ws, fid, current: () => true, signal, max: 1 << 20, now: () => 0,
     session: s, store: s, serial: s.serial, folder: async () => tree[fid],
-    exec: (k, code) => { running = fid; log.push("exec " + fid + " " + /"\/[AB]"/.test(Buffer.from(code.match(/b64decode\("([^"]*)"\)\.decode\("utf-8"\)\)\n# \(_sbtx_prev/)?.[1] ?? "", "base64").toString()) ); return new Promise((r) => (holds[fid] = () => { running = null; r({ out: "", stopped: "" }); })); },
+    exec: (k, code) => { running = fid; log.push("exec " + fid + " " + /"\/[AB]"/.test(Buffer.from(code.match(/_sbtx_d = _sbtx_json\.loads\(_sbtx_b64\.b64decode\("([^"]*)"\)/)?.[1] ?? "", "base64").toString()) ); return new Promise((r) => (holds[fid] = () => { running = null; r({ out: "", stopped: "" }); })); },
   });
   // (each wait bounded: a Run that never ends fails its check here, not the whole test)
   const within = (p, ms = 5000) => Promise.race([p, new Promise((r) => setTimeout(() => r({ timedOut: true }), ms))]);
@@ -603,39 +620,74 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
   check("restart: a new worker is given no right to change files, then the last admitted folder", JSON.stringify(again) === JSON.stringify(["ro", "/A/doc.tex", "/A/helper.py"]), again);
 }
 
-// ---- the folder read (folderFiles): only the .tex's folder (a sibling whose name starts the same isn't in it), its
-// files' bytes all read or none (one unreadable: nothing runs), within its bounds (the count, the bytes as read); and a
-// .tex moved to another folder while its Run waited: nothing runs
+// ---- the folder read (folderFiles, William's H2): only the files the document's code names (the modules it imports,
+// the quoted paths of files there) and those its named .py files name in turn, from the .tex's folder only (a sibling
+// whose name starts the same isn't in it); each named file's bytes read or none (one unreadable: nothing runs), within
+// its bounds counted on the named files only (a folder of many files the code never names runs); and a .tex moved to
+// another folder while its Run waited: nothing runs
 {
-  const bytes = (n) => new Uint8Array(n);
-  // (`grown`: a file's bytes now, larger than when it was listed)
+  const enc = new TextEncoder();
+  // (each entry [path, size or its text, in the cloud only]; `grown`: a file's size now, larger than when it was listed)
   const bounds = [];
   const mkws = (entries, unreadable = null, grown = {}) => ({
-    list: async () => entries.map(([path, size, remote]) => ({ path, kind: "file", size, ...(remote ? { remote: true } : {}) })),
+    list: async () => entries.map(([path, v, remote]) => ({ path, kind: "file", size: typeof v === "string" ? enc.encode(v).length : v, ...(remote ? { remote: true } : {}) })),
     readUpTo: async (p, max) => {
       bounds.push(max);
       if (p === unreadable) throw new Error("gone");
-      const n = grown[p] ?? entries.find((e) => e[0] === p)[1];
+      const v = entries.find((e) => e[0] === p)[1], n = grown[p] ?? (typeof v === "string" ? enc.encode(v).length : v);
       if (n > max) throw Object.assign(new Error(p + " is larger than " + max + " bytes"), { code: "limit" });
-      return { content: bytes(n) };
+      return { content: typeof v === "string" && !grown[p] ? enc.encode(v) : new Uint8Array(n) };
     },
   });
-  const ok = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/sub/h.py", 2], ["/Ab/x.py", 1]]), "/A/doc.tex");
+  const paths = (r) => JSON.stringify(r.files?.map(([p]) => p));
+  // (/Ab/x.py and /Abh.py: beside the folder, not in it; /Abh.py, cut after the folder's "/A/", reads as h.py, which the code names)
+  const ok = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/sub/h.py", 2], ["/A/unused.dat", 5], ["/Ab/x.py", 1], ["/Abh.py", 1]]), "/A/doc.tex", ["from sub.h import f\nimport x, h"]);
   const okBounds = bounds.splice(0);
   check("folderFiles: each read bounded by what is left of the bound (grader's Z5: never unbounded)", JSON.stringify(okBounds) === JSON.stringify([64 * 2 ** 20, 64 * 2 ** 20 - 3]), okBounds);
-  check("folderFiles: the .tex's folder only, a sibling of a like name not in it", ok.dir === "/A" && JSON.stringify(ok.files.map(([p]) => p)) === JSON.stringify(["/A/doc.tex", "/A/sub/h.py"]), ok);
-  // (a file only in the cloud: not given to Sage, not read, counted (board's COPY advisory: so the Run can say so))
-  const cloud = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/h.py", 2, true], ["/A/sub/g.py", 2, true]]), "/A/doc.tex");
+  check("folderFiles: the .tex itself, and a package the code imports (sub, its .py files), from the .tex's folder only (a sibling of a like name not in it); nothing it doesn't name", ok.dir === "/A" && paths(ok) === JSON.stringify(["/A/doc.tex", "/A/sub/h.py"]), ok);
+  const named = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/data.csv", 2], ["/A/fig/w.png", 2], ["/A/other.csv", 2], ["/A/helper.py", 1]]), "/A/doc.tex", ["d = load('data.csv')\nimg = \"./fig/w.png\"\nimport helper as h"]);
+  check("folderFiles: a quoted path of a file there (./ or not), and a module imported (helper.py); the others unread", paths(named) === JSON.stringify(["/A/doc.tex", "/A/data.csv", "/A/fig/w.png", "/A/helper.py"]) && bounds.splice(0).length === 4, named);
+  // (what a named .py names in turn: its imports and quoted paths, until nothing new)
+  const closure = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/helper.py", "import util\ns = open('in.txt').read()\n"], ["/A/util.py", "x = 'deep.txt'\n"], ["/A/in.txt", 2], ["/A/deep.txt", 2], ["/A/junk.txt", 2]]), "/A/doc.tex", ["from helper import s"]);
+  bounds.splice(0);
+  check("folderFiles: what the named .py files name in turn, to the end (helper.py, util.py, in.txt, deep.txt), nothing else", JSON.stringify(closure.files?.map(([p]) => p).sort()) === JSON.stringify(["/A/deep.txt", "/A/doc.tex", "/A/helper.py", "/A/in.txt", "/A/util.py"]), closure);
+  // (daybreak3's #975 ENGINE: an import after ";" or a one-line suite's ":" is one too)
+  const inline = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/helper.py", 1], ["/A/util.py", 1], ["/A/other.py", 1]]), "/A/doc.tex", ["x = 1; import helper\nif True: from util import f"]);
+  bounds.splice(0);
+  check("folderFiles: an import after \";\" or a one-line suite's \":\" (helper.py, util.py), not only at a line's start", paths(inline) === JSON.stringify(["/A/doc.tex", "/A/helper.py", "/A/util.py"]), inline);
+  // (daybreak3's #975 ENGINE: no code at all (every item refused): the .tex still given, so the folder the code runs in exists)
+  const none = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/helper.py", 1]]), "/A/doc.tex", []);
+  bounds.splice(0);
+  check("folderFiles: no code at all: the .tex given all the same, nothing else", paths(none) === JSON.stringify(["/A/doc.tex"]), none);
+  // (grader's TESTS975-1: a .sage file the code names is followed too: what it names and imports is given)
+  const sage = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/lib.sage", "x = open('data.txt').read()\nimport util\n"], ["/A/data.txt", 2], ["/A/util.py", 1], ["/A/junk.txt", 1]]), "/A/doc.tex", ["load('lib.sage')"]);
+  bounds.splice(0);
+  check("folderFiles: a named .sage file followed (TESTS975-1): the .tex, lib.sage, the data.txt it reads and the util it imports, nothing else", JSON.stringify(sage.files?.map(([p]) => p).sort()) === JSON.stringify(["/A/data.txt", "/A/doc.tex", "/A/lib.sage", "/A/util.py"]), sage);
+  // (William's case: many files, none named: runs, none read)
+  const lots = await folderFiles(mkws([["/A/doc.tex", 3], ...Array.from({ length: 600 }, (_, k) => ["/A/f" + k + ".dat", 200000])]), "/A/doc.tex", ["1 + 1"]);
+  check("folderFiles: a folder of 600 files (over 100 MB) the code never names: runs, none of them read (the .tex only)", paths(lots) === JSON.stringify(["/A/doc.tex"]) && !lots.msg && bounds.splice(0).length === 1, { msg: lots.msg });
+  // (a named file only in the cloud: not given to Sage, not read, counted (board's COPY advisory: so the Run can say so))
+  const cloud = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/h.py", 2, true], ["/A/sub/g.py", 2, true], ["/A/k.py", 2]]), "/A/doc.tex", ["import h, k"]);
   const cloudReads = bounds.splice(0);
-  check("folderFiles: files only in the cloud aren't given or read, and are counted", JSON.stringify(cloud.files?.map(([p]) => p)) === JSON.stringify(["/A/doc.tex"]) && cloud.remote === 2 && ok.remote === 0 && cloudReads.length === 1, { cloud, ok: ok.remote, cloudReads });
-  const unread = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/h.py", 2]], "/A/h.py"), "/A/doc.tex");
-  check("folderFiles: a file that can't be read: nothing runs (no partial folder)", !unread.files && /couldn't be read/.test(unread.msg ?? ""), unread);
-  const many = await folderFiles(mkws([["/A/doc.tex", 1], ["/A/a", 1], ["/A/b", 1]]), "/A/doc.tex", { files: 2, bytes: 100 });
-  const heavy = await folderFiles(mkws([["/A/doc.tex", 60], ["/A/a", 60]]), "/A/doc.tex", { files: 10, bytes: 100 });
-  const grownWs = mkws([["/A/doc.tex", 10], ["/A/a", 10]], null, { "/A/a": 500 });
-  const grown = await folderFiles(grownWs, "/A/doc.tex", { files: 10, bytes: 100 });
-  check("folderFiles: a file grown past the bound since it was listed: refused by the bounded read, nothing runs", !grown.files && /too large/.test(grown.msg ?? ""), grown);
-  check("folderFiles: past the count or the bytes, nothing runs, the bound named", !many.files && /too large to give to Sage here, over 2 files with its subfolders; move/.test(many.msg ?? "") && !heavy.files && /too large to give to Sage here, over [0-9.]+ MiB with its subfolders; move/.test(heavy.msg ?? ""), { many, heavy });
+  check("folderFiles: a named file only in the cloud isn't given or read, and is counted; one not named isn't counted", paths(cloud) === JSON.stringify(["/A/doc.tex", "/A/k.py"]) && cloud.remote === 1 && ok.remote === 0 && cloudReads.length === 2, { cloud, cloudReads });
+  const unread = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/h.py", 2]], "/A/h.py"), "/A/doc.tex", ["import h"]);
+  check("folderFiles: a named file that can't be read: nothing runs (no partial folder)", !unread.files && /couldn't be read/.test(unread.msg ?? ""), unread);
+  const many = await folderFiles(mkws([["/A/doc.tex", 1], ["/A/a.py", 1], ["/A/b.py", 1], ["/A/c.py", 1], ["/A/z.dat", 1]]), "/A/doc.tex", ["import a, b, c"], { files: 2, bytes: 100 });
+  const heavy = await folderFiles(mkws([["/A/doc.tex", 60], ["/A/a.py", 60], ["/A/b.py", 60]]), "/A/doc.tex", ["import a, b"], { files: 10, bytes: 100 });
+  const grownWs = mkws([["/A/doc.tex", 10], ["/A/a.py", 10]], null, { "/A/a.py": 500 });
+  const grown = await folderFiles(grownWs, "/A/doc.tex", ["import a"], { files: 10, bytes: 100 });
+  const seven = await folderFiles(mkws([["/A/doc.tex", 1], ...["a", "b", "c", "d", "e", "f", "g"].map((n) => ["/A/" + n + ".py", 1])]), "/A/doc.tex", ["import a, b, c, d, e, f, g"], { files: 7, bytes: 100 });
+  check("folderFiles: past the count, at most 5 files, in the order first named, then \"and more\" (the walk stops counting there)", seven.msg === "Not run: the code uses over 7 files, and Sage here can be given at most 7: doc.tex, a.py, b.py, c.py, d.py and more.", seven);
+  // (past the bytes: the largest first, with their sizes as the file browser shows them, at most 5, then how many more)
+  const sz = await folderFiles(mkws([["/A/doc.tex", 10], ["/A/a.py", 300], ["/A/b.csv", 2048], ["/A/c.py", 5], ["/A/d.py", 7], ["/A/e.py", 1500000], ["/A/f.py", 9]]), "/A/doc.tex", ["import a, c, d, e, f\nload('b.csv')"], { files: 50, bytes: 1500000 });
+  check("folderFiles: past the bytes, the largest of those seen first with their sizes (the file browser's form), at most 5, then \"and more\" when the list is cut (6 seen)", sz.msg === "Not run: the code uses over 1.430511474609375 MB of files, and Sage here can be given at most 1.430511474609375 MB: e.py (1.4 MB), b.csv (2.0 KB), a.py (300 B), doc.tex (10 B), d.py (7 B) and more.", sz);
+  // (board's #975 R1: nothing more to say, no "and more": the .tex and one named file past the bound, refused unread)
+  const two = await folderFiles(mkws([["/A/doc.tex", 10], ["/A/data.csv", 100 * 2 ** 20]]), "/A/doc.tex", ["d = load('data.csv')"]);
+  check("folderFiles: past the bytes with the whole list shown: no \"and more\"", two.msg === "Not run: the code uses over 64 MB of files, and Sage here can be given at most 64 MB: data.csv (100.0 MB), doc.tex (10 B).", two);
+  bounds.splice(0);
+  check("folderFiles: a named file grown past the bound since it was listed: refused by the bounded read, nothing runs", !grown.files && /Sage here can be given at most/.test(grown.msg ?? ""), grown);
+  check("folderFiles: past the count or the bytes of the named files, nothing runs, the bound and the files named", !many.files && many.msg === "Not run: the code uses over 2 files, and Sage here can be given at most 2: doc.tex, a.py, b.py and more."
+    && !heavy.files && heavy.msg === "Not run: the code uses over 0.000095367431640625 MB of files, and Sage here can be given at most 0.000095367431640625 MB: doc.tex (60 B), a.py (60 B).", { many, heavy });
   // (moved while its Run waited for the session: refused, nothing run)
   let moved = false, execd = 0;
   const s2 = sessionOf({ module: async () => ({ WorkerKernel: class { constructor(o) { this.o = o; this.ready = false; } start() { this.worker = { postMessage() {} }; this.o.onStart(this.worker); this.ready = true; } post() {} on() { return () => {}; } } }), worker: () => null }, 1000);
@@ -646,6 +698,17 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
     exec: async () => { execd++; return { out: "", stopped: "" }; },
   });
   check("runAndSave: the .tex moved to another folder while its Run waited: nothing runs, it says so", execd === 0 && /moved/.test(r.msg ?? ""), { r, execd });
+  // (daybreak3's #975 ENGINE: every item refused, so no code: the .tex is still put in the session, through putFolder,
+  //  so the folder the driver changes into exists)
+  const puts = [];
+  const s3 = sessionOf({ module: async () => ({ WorkerKernel: class { constructor(o) { this.o = o; this.ready = false; } start() { this.worker = { postMessage() {} }; this.o.onStart(this.worker); this.ready = true; } post(m) { if (m.fsPut) puts.push(m.fsPut); } on() { return () => {}; } } }), worker: () => null }, 1000);
+  const wsR = { pathOfFile: async () => ({ ok: true, path: "/A/doc.tex" }), stat: async () => undefined, createByPerson: async () => ({}),
+    list: async () => [{ path: "/A/doc.tex", kind: "file", size: 3 }, { path: "/A/helper.py", kind: "file", size: 1 }], readUpTo: async (p) => ({ content: new Uint8Array(p.endsWith(".tex") ? 3 : 1) }) };
+  const refused = await runAndSave({
+    items: [item("sage", "x", { err: "cs", name: "foo" })], current: () => true, max: 1 << 20, now: () => 0, fid: "f", ws: wsR,
+    session: s3, store: s3, serial: s3.serial, folder: async (codes) => folderFiles(wsR, "/A/doc.tex", codes), exec: async () => ({ out: "", stopped: "" }),
+  });
+  check("runAndSave: every item refused (no code): the .tex still put in the session (putFolder), nothing else", JSON.stringify(puts) === JSON.stringify(["/A/doc.tex"]), { puts, refused });
   // (the folder's files only in the cloud: the Run's result counts them, for the status line)
   moved = false;
   const rc = await runAndSave({
@@ -898,13 +961,13 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
   check("Z3: a Run stopped while its .tex is being rechecked stops there: nothing put in, nothing run", /Stopped before it ran/.test(rR.msg ?? "") && execs === 0 && sZ.sent.size === 0, { rR, execs, sent: [...sZ.sent] });
   // (Z7: a file whose listed size alone is past the bound: refused, never read)
   let fileReads = 0;
-  const big = await folderFiles({ list: async () => [{ path: "/Z/doc.tex", kind: "file", size: 10 }, { path: "/Z/h.py", kind: "file", size: 500 }],
-    readUpTo: async (p, max) => { fileReads++; return { content: new Uint8Array(p.endsWith("h.py") ? 500 : 10) }; } }, "/Z/doc.tex", { files: 10, bytes: 100 });
-  check("Z7: a file whose listed size is past the bound is refused unread (only the .tex before it read)", !big.files && /too large/.test(big.msg ?? "") && fileReads === 1, { big, fileReads });
+  const big = await folderFiles({ list: async () => [{ path: "/Z/g.py", kind: "file", size: 10 }, { path: "/Z/h.py", kind: "file", size: 500 }],
+    readUpTo: async (p, max) => { fileReads++; return { content: new Uint8Array(p.endsWith("h.py") ? 500 : 10) }; } }, "/Z/doc.tex", ["import g, h"], { files: 10, bytes: 100 });
+  check("Z7: a named file whose listed size is past the bound is refused unread (only the one before it read)", !big.files && /Sage here can be given at most/.test(big.msg ?? "") && fileReads === 1, { big, fileReads });
   // (Z9: a helper.py in the Trash isn't given to the session, so it can't be imported)
   const tr = await folderFiles({ list: async () => [{ path: "/Z/doc.tex", kind: "file", size: 1 }, { path: "/Z/helper.py", kind: "file", size: 1, trashed: true }],
-    readUpTo: async () => ({ content: new Uint8Array(1) }) }, "/Z/doc.tex");
-  check("Z9: a helper.py in the Trash isn't given to the session", JSON.stringify(tr.files?.map(([p]) => p)) === JSON.stringify(["/Z/doc.tex"]), tr);
+    readUpTo: async () => ({ content: new Uint8Array(1) }) }, "/Z/doc.tex", ["import helper"]);
+  check("Z9: a helper.py in the Trash isn't given to the session, even named", JSON.stringify(tr.files?.map(([p]) => p)) === JSON.stringify(["/Z/doc.tex"]), tr);
 }
 
 const bad = results.filter(([, ok]) => !ok);

@@ -37,6 +37,7 @@
 // before.  window.sagebrush.workspace is the workspace as an agent sees it
 // (§8.2), its changes credited to agent:page.
 import { synthetic } from "./board";
+import { termKeep } from "../shell/term-keep.ts";
 import { anyCode, isBoard, type BoardDoc } from "./doc";
 import { BoardCode, siteEngine } from "./code";
 import { createRunnerPill } from "../notebook/runner-pill.js";
@@ -1405,6 +1406,8 @@ const host: BoardHost = {
     if (db) await new IdbPatchStore(db, historyKey(id), { followPhase: true }).drop();
     if (journalOn) BOARD_PAGE_HOOK.afterDropHistory?.();
   },
+  // (where you were in this board, kept in this browser: a board of this computer's, by its id)
+  view: local ? { kind: "board", id: source.slice(6) } : undefined,
   address: {
     get: () => location.hash,
     set: (hash) => history.replaceState(null, "", location.pathname + location.search + hash),
@@ -1529,7 +1532,7 @@ if (ws && !file && !(window as any).__TAURI__) {
 // by name, path, language and visibility only, and its terminal.  The shell's module and set are the site's, a directory
 // up (this page is /board/).  One ShellHost per page tab, made at the first open, with the person principal.
 {
-  let term: any = null;
+  let term: any = null, clearing: Promise<unknown> = Promise.resolve();
   const here = async () => {
     let path: string | undefined, mode: string | undefined;
     try {
@@ -1545,8 +1548,15 @@ if (ws && !file && !(window as any).__TAURI__) {
   };
   answerPresence(here);
   const termBtn = document.querySelector<HTMLButtonElement>('#board [data-sbb="term"]');
+  const termEnd = document.querySelector<HTMLButtonElement>('#board [data-sbb="termend"]');
   if (termBtn && ws) {
     termBtn.hidden = false;
+    // (End terminal session…: shown while the Terminal is open (William's H9: the dock's ✕ only closes it; with it
+    //  closed, Terminal opens it again first, as on the notebook page)
+    if (termEnd) {
+      termEnd.onclick = () => term?.endAsk();
+      addEventListener("sb-term-place", () => { termEnd.hidden = !term?.shown; });
+    }
     // (the panel gives focus back to its opener, else to the page's ⋯ button, #morebtn, as on the notebook page: TP-7)
     const more = document.querySelector<HTMLElement>('#board [data-sbb="menubtn"]');
     if (more && !document.getElementById("morebtn")) more.id = "morebtn";
@@ -1585,8 +1595,21 @@ if (ws && !file && !(window as any).__TAURI__) {
         let openTerminal: any;
         try { ({ openTerminal } = await import(mod)); } catch (e) { return alert("The terminal didn't load: " + String((e as Error)?.message ?? e)); }
         if (term) return term.toggle();
+        // (H9: the folder and commands this workspace's Terminal kept, given back, and kept again as commands end)
+        // (an End session's clear finished first, and none since what was read: never cleared commands in the new Terminal;
+        //  an End meanwhile (another Open's Terminal, ended) makes a new clear, so what was read is read again after it)
+        let keep: Awaited<ReturnType<typeof termKeep>>, was: Promise<unknown>;
+        do {
+          await (was = clearing);
+          keep = await termKeep(ws);
+          if (term) return term.toggle();
+        } while (was !== clearing);
         term = openTerminal({ ws, S, base: "../", open, here, tab: TAB });
-        term.onEnd = () => { term = null; (window as any).__sbTerm = null; };
+        keep.attach(term);
+        term.onEnd = () => {
+          term = null; (window as any).__sbTerm = null; if (termEnd) termEnd.hidden = true;
+          clearing = keep.clear().then((ok) => { if (!ok) alert("The commands kept in this browser couldn't be cleared."); });
+        };
         if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) (window as any).__sbTerm = term; // (the tests' handle, on a loopback host only: web/shell/test-panel-page.mjs)
       }
       term.toggle();

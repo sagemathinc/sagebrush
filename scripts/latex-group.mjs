@@ -16,6 +16,7 @@ export const LATEX_LAZY = {
   DOC: "dist/sagebrush-latex-doc.js",
   EXAMPLES: "dist/sagebrush-latex-examples.js",
   BEAMER: "dist/sagebrush-latex-beamer.js",
+  PYTHONTEX: "dist/sagebrush-latex-pythontex.js",
   RUN: "dist/sagebrush-latex-run.js",
   INTERACT: "dist/sagebrush-latex-interact.js",
 };
@@ -29,7 +30,11 @@ export const LATEX_LAZY = {
 //  (beamer's early fetch), #644 (beamer's furniture), and astra4's silent gaps, saved boxes, counters and references
 //  (cleveref's formatting kept here, as current papers use it): about 239.3K / 80,623 after all five, about 1.3K / 785 B
 //  left. The next time the group nears its cap, the answer is a lazy split, not another raise)
-export const LATEX_CAPS = { raw: 235 * 1024, gzip: 79.5 * 1024 };
+// (236 KiB raw: daybreak2's SIZE ruling, Nov 10 2026, for PythonTeX step (a), once: its source pass must stay eager (the
+//  code items it finds, their occurrence ids and where each was read, what Run, check and the CLI use) and so must its
+//  no-result display (the items' chips and texts); everything used only to read results back is the PYTHONTEX chunk.
+//  Measured 241,385 / 80,477 after the split and the two ruled trims; gzip unchanged, under its cap)
+export const LATEX_CAPS = { raw: 236 * 1024, gzip: 79.5 * 1024 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
@@ -65,6 +70,10 @@ export const LATEX_LAZY_CAPS = {
   //  the review-required fixes FURN644-SAGE-1, FURN644-FRAME-NO-1 and BEAMER644-FURN-1 (7,566 / 3,312), about 7.6% room
   //  on each; lazy: no growth for other documents)
   BEAMER: { label: "the LaTeX beamer chunk", raw: 8 * 1024, gzip: 3.5 * 1024 },
+  // (PythonTeX's results pass: engine/pythontex.mjs, the worker's, fetched only when a document has a PythonTeX result to
+  //  read back (a valid or stale one), never for one that only has PythonTeX items (daybreak2's SIZE ruling, Nov 10:
+  //  its own row, not in an existing chunk; 5 KiB / 2.25 KiB, the smallest rounded cap above its first build's 4,540 / 2,008; 4,799 / 2,153 with the stale fade's code; 4,892 / 2,191 with display states made afresh on a cache hit)
+  PYTHONTEX: { label: "the LaTeX PythonTeX results chunk", raw: 5 * 1024, gzip: 2.25 * 1024 },
   // (Run's code: web/latex/run-core.mjs, fetched on the first Run (first-use code: the editor opens without it). Out of
   //  the group so save-as-you-type (#551, eager by nature) fits under the group's cap without a raise (daybreak2, Nov 7:
   //  a lazy split, not a raise). 12 KiB / 5.25 KiB: daybreak2's ruling, Nov 7, on 11,330 / 4,804 measured at master

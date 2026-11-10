@@ -66,6 +66,9 @@ try {
   await ev(`(async () => { const nb = ${NB}; const cs = nb.cells(); const a = nb.addCell("x = 1", { first: true }); const m = nb.addCell(${JSON.stringify(RICH)}, { after: a.el }, false, "markdown"); nb.addCell("y = 2", { after: m.el }); for (const c of cs) c.el.remove(); await nb.renderMd(m); return 1; })()`);
   await until(`${C(1)}.el.classList.contains('rendered') && !!${C(1)}.el.querySelector('.mdout .katex')`, 10000);
   check((await ev(`${NB}.cells().length`)) === 3, "three cells");
+  // (H10: no hover + Code + Text below the last cell, where the notebook's own pair is; below the others, as before)
+  const adders = await ev(`${NB}.cells().map((c) => getComputedStyle(c.el.querySelector(":scope > .adder")).display)`);
+  check(adders.length === 3 && adders[0] !== "none" && adders[1] !== "none" && adders[2] === "none" && (await ev(`getComputedStyle(document.querySelector(".addend")).display !== "none"`)), "H10: the last cell has no + Code + Text of its own, the notebook's is there: " + JSON.stringify(adders));
   await ev(`${C(1)}.el.scrollIntoView({ block: "start" }), scrollBy(0, -40), 1`);
   await sleep(200);
   // double-click the code block (the last): the blocks before it exactly where they were

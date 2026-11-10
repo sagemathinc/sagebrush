@@ -61,6 +61,7 @@ import { COLORS } from "./colors";
 import type { Version } from "./history";
 import { track, active } from "./focus";
 import { shortcutMode, EDIT_TITLE, EDITING_TITLE } from "../doc-mode";
+import { keepView, viewToRestore, type View, type ViewKey } from "../workspace/view-state";
 import css from "./board.css" with { type: "text" };
 
 /** Where a board's document comes from, and where its edits go. */
@@ -119,6 +120,9 @@ export interface BoardHost {
   dropHistory?: (id: string | null) => Promise<void>;
   /** where the page and step shown are kept (#p2-3: the address's hash) */
   address?: { get(): string; set(hash: string): void };
+  /** this board's key for where its reader was: its page, position and zoom, kept in this browser and put back when
+   * it opens again (design/view-state.md); none: not kept */
+  view?: ViewKey;
   /** the board's title changed (the page's title follows it) */
   title?(title: string): void;
   /** where "Sagebrush" in the top bar goes */
@@ -220,7 +224,7 @@ function addStyle() {
 // (the toolbar's Code: a note with code in the board's language)
 const LANGUAGE_NAMES: Record<string, string> = { python: "Python", sage: "Sage", magma: "Magma", matlab: "MATLAB" };
 const codeTitle = (mode: string) => `Add a note with ${LANGUAGE_NAMES[mode] ?? "Python"} code (any note can have code: + Code in its editor)`;
-const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><span data-sbb="title"></span><button data-sbb="runpaused" hidden title="This board came from a file you brought in: its code hasn't run yet">▶ Run this board's code</button><span data-sbb="pages" hidden><button data-sbb="pgprev" title="Previous page (PageUp)" aria-label="Previous page">‹</button><select data-sbb="pgsel" title="Page"></select><button data-sbb="pgnext" title="Next page (PageDown)" aria-label="Next page">›</button></span><button data-sbb="submitbtn" hidden title="Send your answers to whoever made this board" aria-haspopup="dialog">Submit</button><button data-sbb="help" title="Help: what the keys and gestures do (?)" aria-label="Help">?</button><button data-sbb="edit" aria-pressed="false" aria-label="Edit" title="Move, write, add and connect notes">✎<span class="lbl"> Edit</span></button><button data-sbb="fit" title="Show everything (0)" aria-label="Show everything">⤢</button><span class="menuwrap"><button data-sbb="filebtn" title="New, open, download" aria-haspopup="menu">File<span class="caret"> ▾</span></button><div data-sbb="filemenu" class="menu" role="menu" aria-label="File" hidden></div></span><span class="menuwrap"><button data-sbb="menubtn" title="Pages, layout, language, Present, TimeTravel" aria-label="More" aria-haspopup="menu">⋯</button><div data-sbb="menu" class="menu" hidden><button data-sbb="addpage">Add a page</button><button data-sbb="pageprops">Page…</button><button data-sbb="rmpage" hidden>Delete this page</button><button data-sbb="tidy">Tidy (automatic layout)</button><button data-sbb="mermaid">Import Mermaid…</button><button data-sbb="revert" hidden>Revert to the original</button><div data-sbb="lang" role="group" aria-label="The language of this board's code">Code: <button data-mode="python" aria-pressed="true">Python</button><button data-mode="sage" aria-pressed="false">Sage</button><button data-mode="magma" aria-pressed="false">Magma</button><button data-mode="matlab" aria-pressed="false">MATLAB</button></div><hr><button data-sbb="present">Present (a slideshow)</button><button data-sbb="timetravel">TimeTravel…</button><button data-sbb="term" hidden title="A bash shell on your workspace's files">Terminal</button><button data-sbb="agent" hidden title="Connect an agent on this computer (Claude Code, Codex, …) to files you choose">Connect an agent…</button><div data-sbb="ver" class="ver" hidden></div><hr><button data-sbb="helpitem">Help: keys and gestures…</button></div></span><input data-sbb="openfile" type="file" accept=".json,.html,.htm,.canvas,.mmd,.mermaid,.md,.board,.slides,application/json,text/html,text/markdown,text/plain" hidden></div>
+const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><span data-sbb="title"></span><button data-sbb="runpaused" hidden title="This board came from a file you brought in: its code hasn't run yet">▶ Run this board's code</button><span data-sbb="pages" hidden><button data-sbb="pgprev" title="Previous page (PageUp)" aria-label="Previous page">‹</button><select data-sbb="pgsel" title="Page"></select><button data-sbb="pgnext" title="Next page (PageDown)" aria-label="Next page">›</button></span><button data-sbb="submitbtn" hidden title="Send your answers to whoever made this board" aria-haspopup="dialog">Submit</button><button data-sbb="help" title="Help: what the keys and gestures do (?)" aria-label="Help">?</button><button data-sbb="edit" aria-pressed="false" aria-label="Edit" title="Move, write, add and connect notes">✎<span class="lbl"> Edit</span></button><button data-sbb="fit" title="Show everything (0)" aria-label="Show everything">⤢</button><span class="menuwrap"><button data-sbb="filebtn" title="New, open, download" aria-haspopup="menu">File<span class="caret"> ▾</span></button><div data-sbb="filemenu" class="menu" role="menu" aria-label="File" hidden></div></span><span class="menuwrap"><button data-sbb="menubtn" title="Pages, layout, language, Present, TimeTravel" aria-label="More" aria-haspopup="menu">⋯</button><div data-sbb="menu" class="menu" hidden><button data-sbb="addpage">Add a page</button><button data-sbb="pageprops">Page…</button><button data-sbb="rmpage" hidden>Delete this page</button><button data-sbb="tidy">Tidy (automatic layout)</button><button data-sbb="mermaid">Import Mermaid…</button><button data-sbb="revert" hidden>Revert to the original</button><div data-sbb="lang" role="group" aria-label="The language of this board's code">Code: <button data-mode="python" aria-pressed="true">Python</button><button data-mode="sage" aria-pressed="false">Sage</button><button data-mode="magma" aria-pressed="false">Magma</button><button data-mode="matlab" aria-pressed="false">MATLAB</button></div><hr><button data-sbb="present">Present (a slideshow)</button><button data-sbb="timetravel">TimeTravel…</button><button data-sbb="term" hidden title="A bash shell on your workspace's files">Terminal</button><button data-sbb="termend" hidden title="Stop the shell and clear its output and command history">End terminal session…</button><button data-sbb="agent" hidden title="Connect an agent on this computer (Claude Code, Codex, …) to files you choose">Connect an agent…</button><div data-sbb="ver" class="ver" hidden></div><hr><button data-sbb="helpitem">Help: keys and gestures…</button></div></span><input data-sbb="openfile" type="file" accept=".json,.html,.htm,.canvas,.mmd,.mermaid,.md,.board,.slides,application/json,text/html,text/markdown,text/plain" hidden></div>
 <div data-sbb="pr-mask" hidden></div><div data-sbb="pr-say" hidden></div><div data-sbb="pr-bar" hidden><button data-sbb="pr-prev" title="Back (←)" aria-label="Back">‹</button><span data-sbb="pr-where"></span><button data-sbb="pr-next" title="Next (→, Space)" aria-label="Next">›</button><button data-sbb="pr-exit" title="Stop (Esc)" aria-label="Stop presenting">✕</button></div>
 <div data-sbb="tour" hidden><div data-sbb="say"></div><div data-sbb="nav"><div><button data-sbb="prev" title="Back (←)" aria-label="Back" disabled>←</button><button data-sbb="next" title="Next (→)" aria-label="Next">→</button></div><span data-sbb="where"></span></div></div>
 <div data-sbb="find" hidden role="search" aria-label="Find in this board"><input data-sbb="findq" type="text" placeholder="Find in this board" aria-label="Find in this board" spellcheck="false" autocomplete="off"><span data-sbb="findn" aria-live="polite"></span><button data-sbb="findprev" title="Previous (Shift+Enter)" aria-label="Previous match">↑</button><button data-sbb="findnext" title="Next (Enter)" aria-label="Next match">↓</button><button data-sbb="findx" title="Close (Esc)" aria-label="Close Find">✕</button></div>
@@ -329,9 +333,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   renderFileMenu($("filemenu"), {
     attr: "data-sbb",
     latex: !!host.files?.newLatex,
-    keys: { newNotebook: "newnotebook", newMatlab: "newmatlab", newBoard: "newboard", newLatex: "newlatex", newFolder: "newfolder", fromExample: "examples", open: "openfiles", upload: "open", saveCopy: "duplicate", rename: "rename", print: "print", share: "share", delete: "deleteboard" },
+    keys: { newNotebook: "newnotebook", newBoard: "newboard", newLatex: "newlatex", newFolder: "newfolder", fromExample: "examples", open: "openfiles", upload: "open", saveCopy: "duplicate", rename: "rename", print: "print", share: "share", delete: "deleteboard" },
     disabled: {
-      newNotebook: !host.files?.newNotebook, newMatlab: !host.files?.newNotebook, newFolder: !host.files?.newFolder, fromExample: !host.examples, open: !host.files?.open,
+      newNotebook: !host.files?.newNotebook, newFolder: !host.files?.newFolder, fromExample: !host.examples, open: !host.files?.open,
       saveCopy: !host.duplicate, share: true, delete: !host.files?.delete,
     },
     // (a board has no share link yet (design/board-sharing.md): what to do instead, where the disabled item is)
@@ -371,6 +375,14 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   const byPage = new Set<string>();
   let at = -1; // the tour's step; -1 before it starts
   let pageIx = 0, shownPage = -1; // the page shown
+  // where the reader was in this board (design/view-state.md): its page, position and zoom, kept in this browser as
+  // they move, and put back once, at its first load, unless they moved first or the address names a step; a page in
+  // the address (#p2, as the board writes it, kept by a reload) is the page shown, its camera put back if it was kept
+  // there; and none kept before the first document is shown, its view put back or not (the kept one isn't overwritten)
+  const restoreView = host.view ? viewToRestore(host.view, root, /^#(?:p\d+-\d+|\d+)$/.test(host.address?.get() ?? "")) : null;
+  const pinned = /^#p(\d+)$/.exec(host.address?.get() ?? "");
+  const keptView = host.view ? keepView(host.view, () => (doc && board.shown && !presenting && !viewing ? { x: board.camera.x, y: board.camera.y, zoom: board.camera.z, page: pageIx } : null)) : null;
+  if (keptView) board.onView = () => keptView.changed();
   let pageGen = 0; // page()'s: only the page asked for last starts its tour
   let placed: { id: string; kind: string; x: number; y: number; w: number; h: number }[] = [];
   let routingGen = 0, routed = false;
@@ -1030,6 +1042,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     at = -1;
     const n = Number(m?.[2] ?? m?.[3] ?? 0);
     step(n && pageView(d, pageIx).steps?.length ? n - 1 : -1, true);
+    // (where the reader was, put back: then not fitted again after the code's first run, which would move them)
+    const back = loads === 1 && restoreView ? await restore(d, restoreView()) : false;
+    board.shown = true;
     // (a board the page opens with nothing in it, a new one: all there is to do
     // is write in it, so in Edit, William; a document loaded into the page
     // later, an agent's or Open…'s, leaves Edit as it is.  By the button's own
@@ -1038,7 +1053,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     // root cause of the "⋯ opens its menu" flake, on #957)
     if (loads === 1 && host.editBlank !== false && !editor.on && !editBtn.hidden && Array.from({ length: pageCount(d) }, (_, i) => pageView(d, i).nodes ?? []).every((ns) => !ns.length)) toggle(true);
     if (!findBar.hidden && findQ.value) findNow();
-    refitAfterRun().catch(fail);
+    if (!back) refitAfterRun().catch(fail);
   }
 
   // A board is fitted as it opens, before its code has run; its outputs then
@@ -1058,6 +1073,19 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (loads !== loaded || code !== c || presenting || viewing || !(await redraw()) || loads !== loaded || board.moves !== moves) return;
     // (the camera only: the caption, and a notice in it, stay as they are)
     look();
+  }
+
+  // (a kept view put back: its page, if the board still has it, then its camera; else the board as it opened)
+  async function restore(d: BoardDoc, v: View | null): Promise<boolean> {
+    const num = (x: unknown) => (typeof x === "number" && Number.isFinite(x) ? x : null);
+    const p = num(v?.page), x = num(v?.x), y = num(v?.y), z = num(v?.zoom);
+    if (p === null || !Number.isInteger(p) || p < 0 || p >= pageCount(d) || x === null || y === null || z === null || z <= 0) return false;
+    // (a page in the address is the one shown: a view kept on another isn't put back)
+    if (pinned && p !== Number(pinned[1]) - 1) return false;
+    if (p !== pageIx) await page(p);
+    if (pageIx !== p) return false;
+    board.setCamera({ x, y, z });
+    return true;
   }
 
   /** Show page i (0-based), from its start (`end`: at its tour's last step). */
@@ -1829,10 +1857,6 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     await editor.keepWriting();
     elsewhereNot("No new notebook made", () => host.files!.newNotebook!(doc?.mode ?? "python"));
   };
-  $("newmatlab").onclick = async () => {
-    await editor.keepWriting();
-    elsewhereNot("No new notebook made", () => host.files!.newNotebook!("matlab"));
-  };
   $("newfolder").onclick = () => elsewhereNot("No folder made", () => host.files!.newFolder!());
   const newLatex = root.querySelector<HTMLElement>('[data-sbb="newlatex"]');
   // (what is being written kept by the host's departure, which says so when it can't be: board/page.ts settled)
@@ -2393,6 +2417,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       presentGen++; // (no more of Present's moves)
       cancelAnimationFrame(ttFrame);
       routingGen++; // (no more routing)
+      keptView?.stop();
       board.destroy();
       // (what it put in the page: printed sheets, a file chooser left open)
       document.getElementById("board-print")?.remove();

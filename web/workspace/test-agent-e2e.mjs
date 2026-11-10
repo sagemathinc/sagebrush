@@ -33,6 +33,9 @@ const ws = await Workspace.open();
 // (test only: a fake clock, window.__skew ms ahead of the real one, for expiries inside the retry window)
 const realNow = Date.now;
 Date.now = () => realNow() + ((window as any).__skew ?? 0);
+// (test only: the clock taken back to the moment the test noted before a reload (sessionStorage "__clockAt"), so the
+//  reload's own time, however slow the machine, can't pass an expiry the test set just before it)
+{ const at = sessionStorage.getItem("__clockAt"); if (at) { sessionStorage.removeItem("__clockAt"); (window as any).__skew = Number(at) - realNow(); } }
 // (test only: the remembered grant's store made slow, window.__grantDelay ms, to hold an allow() in its await)
 const putAgentGrant = ws.putAgentGrant.bind(ws);
 (ws as any).putAgentGrant = async (...a: any[]) => { const d = (window as any).__grantDelay; if (d) await new Promise((r) => setTimeout(r, d)); return (putAgentGrant as any)(...a); };
@@ -70,17 +73,27 @@ except Exception:  # (no built engine here: the two modules by path, as engine/p
         mod = importlib.util.module_from_spec(spec); sys.modules["sagebrush." + name] = mod; spec.loader.exec_module(mod)
     from sagebrush import pairing as P
 from sagebrush.workspace_tools import PageError, NotConnected
-import time
+import threading, time
 # (test only: the server's reader made slow at a grant, so the old page's connection is seen closed late, as on a busy
 # machine; "slow" sets the seconds, 0 for none)
 SLOW = [0.0]
+# (test only: "hold" makes the reader wait at each grant.changed until "release" (30 s at most), instead of for a time:
+# the old page's connection is then seen closed only when the test says, however slow the machine; "held" counts waits)
+HOLD = [None]
+HELD = [0]
 _dispatch = P.Pairing._dispatch
 GRANTS = []  # (test only: [port, ms] of each non-empty grant.changed a server receives)
 def _slow_dispatch(self, msg):
     if isinstance(msg, dict) and msg.get("method") == "grant.changed" and msg.get("params"):
         GRANTS.append([self.port, time.monotonic() * 1000])
-    if SLOW[0] and isinstance(msg, dict) and msg.get("method") == "grant.changed":
-        time.sleep(SLOW[0])
+    if isinstance(msg, dict) and msg.get("method") == "grant.changed":
+        gate = HOLD[0]
+        if gate is not None:
+            HELD[0] += 1
+            gate.wait(30)
+            HELD[0] -= 1
+        elif SLOW[0]:
+            time.sleep(SLOW[0])
     return _dispatch(self, msg)
 P.Pairing._dispatch = _slow_dispatch
 # (test only: when each hello reached the server, in ms, for the retry window's bound; "hellos" returns and clears them)
@@ -89,8 +102,17 @@ _hello = P.Pairing._hello
 # (test only: a hello answered late, HELLO_SLOW s; or refused with REFUSE's words, as another server's refusal would be)
 HELLO_SLOW = [0.0]
 REFUSE = [None]
+# (test only: the hello numbered HELLO_GATE[1] (counted in HELLOS) waits at the server until "hellogo": a retry the page
+# asked in time, answered only when the test says; "hellogate" arms it, "hellowaiting" says whether one waits)
+HELLO_GATE = [None, 0]
+HELLO_WAITING = [False]
 def _timed_hello(self, c, msg):
     HELLOS.append([self.port, time.monotonic() * 1000])
+    g = HELLO_GATE[0]
+    if g is not None and len(HELLOS) == HELLO_GATE[1]:
+        HELLO_WAITING[0] = True
+        g.wait(30)
+        HELLO_WAITING[0] = False
     if REFUSE[0]:
         rid = msg.get("id") if isinstance(msg, dict) else None
         self._reply_error(c, rid, "refused", REFUSE[0]); self._close(c, 1008, REFUSE[0])
@@ -121,12 +143,28 @@ for line in sys.stdin:
             print(json.dumps({"ok": len(HELLOS)}), flush=True)
         elif m["op"] == "grants":
             print(json.dumps({"ok": GRANTS[:]}), flush=True); GRANTS.clear()
+        elif m["op"] == "hellogate":
+            HELLO_GATE[0] = threading.Event(); HELLO_GATE[1] = int(m["n"]); print(json.dumps({"ok": True}), flush=True)
+        elif m["op"] == "hellogo":
+            g = HELLO_GATE[0]; HELLO_GATE[0] = None
+            if g is not None: g.set()
+            print(json.dumps({"ok": True}), flush=True)
+        elif m["op"] == "hellowaiting":
+            print(json.dumps({"ok": HELLO_WAITING[0]}), flush=True)
         elif m["op"] == "helloslow":
             HELLO_SLOW[0] = float(m["s"]); print(json.dumps({"ok": HELLO_SLOW[0]}), flush=True)
         elif m["op"] == "refuse":
             REFUSE[0] = m.get("text"); print(json.dumps({"ok": REFUSE[0]}), flush=True)
         elif m["op"] == "hellos":
             print(json.dumps({"ok": HELLOS[:]}), flush=True); HELLOS.clear()
+        elif m["op"] == "hold":
+            HOLD[0] = threading.Event(); print(json.dumps({"ok": True}), flush=True)
+        elif m["op"] == "release":
+            g = HOLD[0]; HOLD[0] = None
+            if g is not None: g.set()
+            print(json.dumps({"ok": True}), flush=True)
+        elif m["op"] == "held":
+            print(json.dumps({"ok": HELD[0]}), flush=True)
         elif m["op"] == "slow":
             SLOW[0] = float(m["s"]); print(json.dumps({"ok": SLOW[0]}), flush=True)
         elif m["op"] == "status":
@@ -173,6 +211,10 @@ try {
   // server applies it when its reader gets that message. An agent's request in between is refused as not granted, which is
   // right, so an agent's request is made once the server says the grant is in force)
   const grantedAtServer = async (ms = 10000) => { const t = Date.now(); while (Date.now() - t < ms) { if ((await drive({ op: "status" })).ok?.granted === true) return true; await sleep(50); } return false; };
+  // (the server's reader held at a grant until released: "held" waits until n grant messages wait there)
+  const heldAt = async (n, ms = 10000) => { const t = Date.now(); while (Date.now() - t < ms) { if ((await drive({ op: "held" })).ok === n) return true; await sleep(25); } return false; };
+  // (the first hello after `n` reaches the server)
+  const helloAfter = async (n, ms = 10000) => { const t = Date.now(); while (Date.now() - t < ms) { if ((await drive({ op: "hellon" })).ok > n) return true; await sleep(5); } return false; };
   ok(await open(""), "the page opens its workspace");
   // (the person's workspace: an old /A removed and a new /A made; a file in /A removed and a new one made at its name)
   const trashed = await ev(`(async () => {
@@ -400,23 +442,39 @@ try {
   }
 
   // ---- an expiry inside the retry window ends it (A9, reconnect()'s remembered grant), on a fake clock
-  // (the hold outlasts the reload, so its first hello is refused, and ends inside the window, so a retry that ignored
-  //  the expiry would succeed and give the grant; the fake clock passes the expiry, but not the window, just after that
-  //  first refusal)
-  await drive({ op: "slow", s: 0.9 });
+  // (the server's reader is held at the reconnect's grant until released, so the reload's first hello is refused; the
+  //  grant's expiry is set just after, and the page's clock taken back to then across the reload. Once that first hello
+  //  is refused, the fake clock passes the expiry but not the retry window, and the hold is released: a retry that
+  //  ignored the expiry would now succeed and give the grant. No step has to finish within any time)
+  await drive({ op: "slow", s: 0 });
+  await drive({ op: "hold" });
   ok(await open(""), "reload 12a");
-  ok(await until(`!!document.querySelector(".sbag-bar")`, 15000), "reload 12a: reconnected (its grant holds the server's reader for 0.9 s)");
-  await ev(`(async () => { const all = await T.ws.agentGrants(); for (const [id, k] of Object.entries(all)) await T.ws.putAgentGrant(id, { ...k, grant: { ...k.grant, expires: Date.now() + 600 } }); return 1; })()`);
+  ok(await until(`!!document.querySelector(".sbag-bar")`, 15000), "reload 12a: reconnected (its grant held at the server until released)");
+  ok(await heldAt(1), "reload 12a: its grant's message waits at the server");
+  const exp12 = await ev(`(async () => { const exp = Date.now() + 600; const all = await T.ws.agentGrants(); for (const [id, k] of Object.entries(all)) await T.ws.putAgentGrant(id, { ...k, grant: { ...k.grant, expires: exp } }); sessionStorage.setItem("__clockAt", String(Date.now())); return exp; })()`);
   await drive({ op: "hellos" });
   const n12 = (await drive({ op: "hellon" })).ok;
   await drive({ op: "grants" });
+  // (the reload's second hello, its retry, asked before the expiry, waits at the server until the expiry has passed and
+  //  the old connection is seen closed: then it pairs, and the grant must still not be given (#978's red: a retry asked
+  //  in time and answered after the expiry was given the expired grant))
+  await drive({ op: "hellogate", n: n12 + 2 });
   ok(await open(""), "reload 12, at once: refused, asking again");
-  for (let i = 0; i < 100 && (await drive({ op: "hellon" })).ok <= n12; i++) await sleep(5);
-  await ev("(window.__skew = 700, 1)"); // (past the grant's expiry, inside the retry window)
+  ok(await helloAfter(n12), "reload 12: its first hello reached the server");
+  ok(await (async () => { const t = Date.now(); while (Date.now() - t < 10000) { if ((await drive({ op: "hellowaiting" })).ok) return true; await sleep(25); } return false; })(), "reload 12: its retry's hello waits at the server");
+  await ev(`(window.__skew = ${exp12} + 100 - (Date.now() - (window.__skew ?? 0)), 1)`); // (past the expiry, inside the window)
+  await drive({ op: "release" });
+  ok(await heldAt(0), "reload 12: the hold released");
+  ok(await (async () => { const t = Date.now(); while (Date.now() - t < 10000) { if ((await drive({ op: "status" })).ok?.paired === false) return true; await sleep(25); } return false; })(), "reload 12: the old connection seen closed");
+  await drive({ op: "hellogo" });
   await sleep(2000);
   const h12 = ((await drive({ op: "hellos" })).ok ?? []).filter(([port]) => port === PORT);
   const g12 = ((await drive({ op: "grants" })).ok ?? []).filter(([port]) => port === PORT);
-  ok(h12.length >= 1 && h12.length <= 2 && g12.length === 0, `reload 12: the remembered grant expired during the window: no further attempt, and it isn't given again (${h12.length} hellos, ${g12.length} grants)`);
+  const bar12 = await ev(`!!document.querySelector(".sbag-bar")`);
+  ok(h12.length === 2 && g12.length === 0 && !bar12, `reload 12: the remembered grant expired while its retry paired: not given, no further attempt (${h12.length} hellos, ${g12.length} grants, bar ${bar12})`);
+  // (revoked, not just dropped: the expired grant is forgotten at once, not left for the next load's sweep (grader's A3))
+  const left12 = await ev(`T.ws.agentGrants().then((a) => Object.keys(a).length)`);
+  ok(left12 === 0, `reload 12: the expired grant is forgotten at once (${left12} kept)`);
   await drive({ op: "slow", s: 0 });
 
   // ---- the same for restoreWith()'s path: a reload record (a grant until the page closes, ?r=1)
@@ -430,10 +488,12 @@ try {
   ok(await openConnect(third.code, third.port), "the Connect dialog opens");
   await click(".sbag-box button.primary");
   ok(await until(`[...document.querySelectorAll(".sbag-box h2")].some((h) => h.textContent === "Allow this agent?")`), "the second agent connected");
-  await drive({ op: "slow", s: 3 });
+  // (the second server's reader held at this grant until released: the reload's restore is refused until then)
+  await drive({ op: "hold" });
   await ev(`(() => { { const all = document.querySelector(".sbag-box .folders input"); if (all.checked) all.click(); } document.querySelector('.sbag-box input[value="/A"]').click(); const s = document.querySelector(".sbag-box select"); s.value = "page"; s.dispatchEvent(new Event("change")); return true; })()`);
   await click(".sbag-box button.primary");
-  ok(await until(`!!document.querySelector(".sbag-bar")`), "allowed until the page closes (its grant holds the second server's reader for 3 s)");
+  ok(await until(`!!document.querySelector(".sbag-bar")`), "allowed until the page closes (its grant held at the second server until released)");
+  ok(await heldAt(1), "(its grant's message waits at the second server)");
   const first7 = await drive({ op: "code" });
   await drive({ op: "hellos" });
   await send("Page.reload", {});
@@ -444,6 +504,9 @@ try {
   ok(await openConnect(first7.code, first7.port), "the Connect dialog opens");
   await click(".sbag-box button.primary");
   ok(await until(`[...document.querySelectorAll(".sbag-box h2")].some((h) => h.textContent === "Allow this agent?")`), "reload 7: the person connects the first agent meanwhile");
+  // (released now: a superseded restore that still asked would now be answered, and pair)
+  await drive({ op: "release" });
+  ok(await heldAt(0), "reload 7: the hold released");
   await sleep(2600);
   const h7 = (await drive({ op: "hellos" })).ok ?? [];
   const late7 = h7.filter(([port, t]) => port === third.port && t > before7 + 50), early7 = h7.filter(([port, t]) => port === third.port && t <= before7);
@@ -460,17 +523,22 @@ try {
   ok(await openConnect(sixth.code, sixth.port), "the Connect dialog opens");
   await click(".sbag-box button.primary");
   ok(await until(`[...document.querySelectorAll(".sbag-box h2")].some((h) => h.textContent === "Allow this agent?")`), "the second agent connected again");
-  await drive({ op: "slow", s: 0.9 });
+  await drive({ op: "hold" });
   await ev(`(() => { { const all = document.querySelector(".sbag-box .folders input"); if (all.checked) all.click(); } document.querySelector('.sbag-box input[value="/A"]').click(); const s = document.querySelector(".sbag-box select"); s.value = "page"; s.dispatchEvent(new Event("change")); return true; })()`);
   await click(".sbag-box button.primary");
   ok(await until(`!!document.querySelector(".sbag-bar")`), "allowed until the page closes");
-  ok(await ev(`(() => { const r = JSON.parse(sessionStorage.getItem("sb-agent-reload-v1")); r.grant.expires = Date.now() + 600; sessionStorage.setItem("sb-agent-reload-v1", JSON.stringify(r)); return true; })()`), "(its reload record set to expire in 1 s)");
+  ok(await heldAt(1), "(its grant's message waits at the second server until released)");
+  // (at the old page's pagehide, after the page marks when it left: the record set to expire 0.6 s later, and the clock
+  //  noted, so the new page's clock starts there: the reload's own time can't age the record or pass its expiry)
+  ok(await ev(`(addEventListener("pagehide", () => { const r = JSON.parse(sessionStorage.getItem("sb-agent-reload-v1")); r.grant.expires = Date.now() + 600; sessionStorage.setItem("sb-agent-reload-v1", JSON.stringify(r)); sessionStorage.setItem("__exp13", String(r.grant.expires)); sessionStorage.setItem("__clockAt", String(Date.now())); }), true)`), "(its reload record set to expire 0.6 s after the page leaves, on the page's clock)");
   await drive({ op: "hellos" });
   const n13 = (await drive({ op: "hellon" })).ok;
   await drive({ op: "grants" });
   await send("Page.reload", {});
-  for (let i = 0; i < 400 && (await drive({ op: "hellon" })).ok <= n13; i++) await sleep(5);
-  await ev("(window.__skew = 700, 1)").catch(() => {});
+  ok(await helloAfter(n13), "reload 13: its first hello reached the server");
+  await ev(`(window.__skew = Number(sessionStorage.getItem("__exp13")) + 100 - (Date.now() - (window.__skew ?? 0)), 1)`); // (past the expiry, inside the window)
+  await drive({ op: "release" });
+  ok(await heldAt(0), "reload 13: the hold released");
   await sleep(2000);
   const h13 = ((await drive({ op: "hellos" })).ok ?? []).filter(([port]) => port === sixth.port);
   const g13 = ((await drive({ op: "grants" })).ok ?? []).filter(([port]) => port === sixth.port);

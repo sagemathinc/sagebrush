@@ -448,6 +448,7 @@
   <button role="menuitem" id="boardbtn" title="Your latest whiteboard in this notebook's language (a new one if there is none); this notebook stays saved">Whiteboard</button>
   <button role="menuitem" id="ttbtn" aria-pressed="false" aria-controls="timetravel" title="Every past version of this notebook: look at one, or go back to it">TimeTravel</button>
   <button role="menuitem" id="termbtn" title="A bash shell on your workspace's files">Terminal</button>
+  <button role="menuitem" id="termendbtn" hidden title="Stop the shell and clear its output and command history">End terminal session…</button>
   <button role="menuitem" id="rtermbtn" hidden title="A shell on one of your own computers, set up with sagebrush remote login (preview)">Terminal on your computer…</button>
   <button role="menuitem" id="moreagent" hidden title="Connect an agent on this computer (Claude Code, Codex, …) to files you choose">Connect an agent…</button>
   <hr>
@@ -533,6 +534,7 @@
 // (a ?pair= link, as an agent on this computer prints it: taken out of the address bar first, before anything reads
 // or reports the URL; the agent chunk, loaded later, is handed it)
 import { pairLink } from "./workspace/pair-link.ts";
+import { termKeep } from "./shell/term-keep.ts";
 import { createNotebook, esc } from "./notebook/notebook.js";
 import { anchorOf, restoreAnchor } from "./notebook/anchor.js";
 import { DOC_INDEX, docHead, docWords, entryExamples, prepareIndex, searchIndex, searchIndexes } from "./docsearch.ts";
@@ -2906,7 +2908,7 @@ function drawFileMenu() {
   renderFileMenu(fileMenu, {
     attr: "data-f",
     latex: latexHere,
-    keys: { newNotebook: "new", newMatlab: "newmatlab", newBoard: "whiteboard", newLatex: "newlatex", newFolder: "newfolder", fromExample: "examples", open: "open", upload: "import", saveCopy: "duplicate", rename: "rename", print: "print", share: "share", delete: "delete" },
+    keys: { newNotebook: "new", newBoard: "whiteboard", newLatex: "newlatex", newFolder: "newfolder", fromExample: "examples", open: "open", upload: "import", saveCopy: "duplicate", rename: "rename", print: "print", share: "share", delete: "delete" },
     disabled: { newFolder: none },
     downloads: [
       { key: "ipynb", label: ".ipynb" },
@@ -2986,8 +2988,12 @@ $("#boardbtn").onclick = () => toBoard("/board/?recent=" + encodeURIComponent(nb
 // (the preview/DEV host gate removed once E5.5's timing box cleared, #337).  The shell's set: the build's own
 // (web/build.ts), else the site's latest; one ShellHost per page tab, made at the first open, with the person principal.
 {
-  const termBtn = $("#termbtn");
-  let term = null;
+  const termBtn = $("#termbtn"), termEnd = $("#termendbtn");
+  let term = null, clearing = Promise.resolve();
+  // (End terminal session…: shown while the Terminal is open (William's H9: the dock's ✕ only closes it; with it
+  //  closed, Terminal opens it again first: the ⋯ menu has no room for one more row, board's B380-1))
+  termEnd.onclick = () => term?.endAsk();
+  addEventListener("sb-term-place", () => { termEnd.hidden = !term?.shown; });
   // (ps and top: what this tab has open, answered to every tab's terminal too: web/shell/presence.ts)
   const here = async () => {
     let path;
@@ -3036,8 +3042,21 @@ $("#boardbtn").onclick = () => toBoard("/board/?recent=" + encodeURIComponent(nb
       let openTerminal;
       try { ({ openTerminal } = await import(mod)); } catch (e) { savedEl.textContent = "the terminal didn't load: " + (e?.message ?? e); return; }
       if (term) return term.toggle();
+      // (H9: the folder and commands this workspace's Terminal kept, given back, and kept again as commands end)
+      // (an End session's clear finished first, and none since what was read: never cleared commands in the new Terminal;
+      //  an End meanwhile (another Open's Terminal, ended) makes a new clear, so what was read is read again after it)
+      let keep, was;
+      do {
+        await (was = clearing);
+        keep = await termKeep(w);
+        if (term) return term.toggle();
+      } while (was !== clearing);
       term = shellTerm = openTerminal({ ws: w, S, open: openPath, here, tab: TAB });
-      term.onEnd = () => { term = shellTerm = null; window.__sbTerm = null; bottomRoom(); };
+      keep.attach(term);
+      term.onEnd = () => {
+        term = shellTerm = null; window.__sbTerm = null; termEnd.hidden = true; bottomRoom();
+        clearing = keep.clear().then((ok) => { if (!ok) savedEl.textContent = "The commands kept in this browser couldn't be cleared"; });
+      };
       term.root.addEventListener("pointerdown", () => panelToFront(term?.root));
       // (the tests' handle, on a local host only: web/shell/test-panel-page.mjs)
       if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) window.__sbTerm = term;
@@ -3081,8 +3100,6 @@ fileMenu.addEventListener("click", async (e) => {
       exDlg.querySelector("#exlist button")?.focus();
       break;
     case "new": saveNow(); await openNew("Untitled", nb.mode, [""], true); cells()[0].ta.focus(); break;
-    // (a MATLAB notebook, whatever this one's language: sage's n8 walkthrough)
-    case "newmatlab": saveNow(); await openNew("Untitled", "matlab", [""], true); cells()[0].ta.focus(); break;
     case "newlatex": if (ws) { saveNow(); await texNew(ws); } break;
     // (a new board in the notebook's language, opened in Edit; this notebook stays saved: board/page.ts ?new=)
     case "whiteboard": await toBoard("/board/?new=" + encodeURIComponent(nb.mode)); break;

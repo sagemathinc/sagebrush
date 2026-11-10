@@ -1634,6 +1634,9 @@ test("L36d one write of 8 max-body g.run frames: one admitted, seven 409 busy af
     const comps = Array.from({ length: 8 }, () => t.page.frameOf("g.complete", { b }, bodyOfBytes(BODY_MAX.other, { epoch: 1, code: "c" })));
     t.page.c.feed(Buffer.concat(comps.map((f) => f.bytes)));
     await until(() => comps.filter((f) => texts(t.page.st).some((x: any) => x.id === f.id && x.status === 409)).length === 7, "seven completions busy");
+    // The admitted completion is held by the scripted Worker until its reply below.  Its post and the seven busy
+    // answers are independent continuations: seeing the refusals does not order the post (L36d's CI flake).
+    await until(() => t.port.posted.filter((m) => m.complete !== undefined).length === 1, "one completion admitted");
     assert.equal(t.port.posted.filter((m) => m.complete !== undefined).length, 1, "one completion admitted");
     assert.equal(g.stats.maxQueuedPayloadBytes, BODY_MAX.run + BODY_MAX.other);
     const cm = t.port.posted.find((m) => m.complete !== undefined);

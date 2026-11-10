@@ -81,8 +81,13 @@ export { PATCH_BUDGET, FOLLOW_KEY } from "./editor";
 const RESULTS_MAX = 32 * 2 ** 20;
 export const FONT = { key: "sagebrush-latex-font", min: 9, max: 28, def: 13 };
 export const ZOOM = { key: "sagebrush-latex-zoom", min: 50, max: 200, def: 100, step: 10 };
-const BANNER = "LaTeX editor: an early prototype. Your edits are saved as you type. If the file changes elsewhere while you edit (another tab, Python, an agent), nothing is written over it: you choose which text to keep. It renders a subset of LaTeX as a web page (not a PDF); unsupported commands appear as gray tags.";
-const BANNER_NO_SAVE = (why: string) => "LaTeX editor: an early prototype. This file can't be saved here: " + why + ". It renders a subset of LaTeX as a web page (not a PDF); unsupported commands appear as gray tags.";
+// (the strip under the toolbar (William, Nov 9: "exactly what should I expect of this thing", and a page that says how
+//  it differs from LaTeX, not a wall of text): one line, dismissible; a file that can't be saved says so instead, not
+//  dismissible)
+const BANNER = "Shown as a web page as you type, not a PDF; part of LaTeX is supported.";
+const DIFFERS = "/articles/latex/02-how-it-differs";
+const NO_SAVE = (why: string) => "This file can't be saved here: " + why + ".";
+const BANNER_OFF = "sagebrush-latex-banner-dismissed";
 
 // (sandbox: the hosting page's runner and kernel classes, for Run, boot.ts; none, Run says why it can't run)
 type Host = {
@@ -161,7 +166,7 @@ const docUrl = new URL("sagebrush-latex-doc.js", import.meta.url).href;
 export async function openDoc(root: HTMLElement, path: string, ws: Workspace | null, open: (e: Entry) => unknown): Promise<void> {
   let m: typeof import("./doc");
   try { m = await import(docUrl); } catch { root.textContent = "Couldn't load this document's page. Check the network, then reload to try again."; return; }
-  return m.openDoc({ createEditor, css: PAGE_CSS + PRINT_CSS, printPreview, loadPresent, editMax: EDIT_MAX }, root, path, ws, open);
+  return m.openDoc({ createEditor, css: PAGE_CSS + PRINT_CSS + MENU_CSS, printPreview, loadPresent, editMax: EDIT_MAX }, root, path, ws, open);
 }
 
 /** New ▸ LaTeX document (boot.ts texNew, the pages' File ▸ New and file panel): <folder>/Untitled.tex, or
@@ -313,13 +318,19 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   let dispose = () => { life.abort(); };
   current = { dispose: () => dispose(), close: async () => dispose(), dirty: () => false, settle: async () => true, hold: () => {} };
   mine = current;
-  if (!document.getElementById("sb-tex-style")) { const style = el("style"); style.id = "sb-tex-style"; style.textContent = PAGE_CSS + PRINT_CSS; document.head.appendChild(style); }
+  if (!document.getElementById("sb-tex-style")) { const style = el("style"); style.id = "sb-tex-style"; style.textContent = PAGE_CSS + PRINT_CSS + MENU_CSS; document.head.appendChild(style); }
   if (!document.getElementById("sb-katex")) {
     const link = document.createElement("link"); link.rel = "stylesheet"; link.href = new URL("katex/katex.min.css", location.href).href; document.head.appendChild(link);
   }
   root.textContent = "";
   const page = el("div", "tex-page"); root.appendChild(page);
   const banner = el("div", "tex-banner"); banner.setAttribute("role", "note");
+  const bannerText = el("span"), bannerLink = el("a", "", "How it differs from LaTeX"), bannerX = el("button", "tex-banner-x", "×");
+  bannerLink.href = DIFFERS; bannerLink.target = "_blank"; bannerLink.rel = "noopener";
+  bannerX.title = "Dismiss this notice"; bannerX.setAttribute("aria-label", bannerX.title);
+  banner.append(bannerText, " ", bannerLink, bannerX);
+  const setBanner = (why?: string) => { bannerText.textContent = why ? NO_SAVE(why) : BANNER; bannerLink.hidden = bannerX.hidden = !!why; banner.hidden = !why && pref(BANNER_OFF, 0, 1, 0) > 0; };
+  bannerX.onclick = () => { banner.hidden = true; keep(BANNER_OFF, 1); };
   const head = el("div", "tex-head");
   // Files: the notebook page's own Files button (index.html's #wsfilesbtn) clicked, so the files show and hide beside
   // this page as they do beside a notebook, the document staying open; pressed while they are shown (body.wsfiles)
@@ -360,7 +371,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const cmBtn = el("button", "tex-comments", "Comments");
   // Agent: an agent on this computer (Claude Code, Codex, … with sagebrush-mcp) connected to this page, to read and
   // answer the comments and edit the .tex, under the person's grant
-  const agentBtn = el("button", "tex-agent", "Agent"); agentBtn.title = "Connect an agent on this computer";
+  const agentBtn = el("button", "tex-agent", "Agent"); agentBtn.title = "Connect an agent on this computer (Claude Code, Codex, …) to files you choose";
   const agentFailed = () => { status.textContent = "Couldn't load the agent connection. Check the network, then click Agent to try again."; };
   agentBtn.onclick = () => void pairAgent(host.ws).then((p) => p.connect(), agentFailed);
   // Present (present.ts, a chunk of its own, /sagebrush-latex-present.js): a beamer document's slides full screen,
@@ -389,11 +400,11 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const barText = el("span", "tex-conflict-t");
   const useTheirs = el("button", "tex-theirs", "Use theirs (keep mine as a copy)"), keepMine = el("button", "tex-mine", "Keep mine (theirs stays in TimeTravel)");
   bar.append(barText, useTheirs, keepMine);
-  page.append(banner, head, bar, main);
-  banner.textContent = BANNER;
+  page.append(head, banner, bar, main);
   const say = (t: string) => { status.textContent = t; };
   const pref = (k: string, lo: number, hi: number, d: number) => { let v = d; try { v = Number(localStorage.getItem(k) ?? d); } catch {} return Number.isInteger(v) && v >= lo && v <= hi ? v : d; };
   const keep = (k: string, v: number) => { try { localStorage.setItem(k, String(v)); } catch {} };
+  setBanner();
   let fontPx = pref(FONT.key, FONT.min, FONT.max, FONT.def), zoomPct = pref(ZOOM.key, ZOOM.min, ZOOM.max, ZOOM.def);
   const applyView = () => {
     page.style.setProperty("--tex-src-fs", fontPx + "px");
@@ -549,11 +560,11 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   if (read.entry.fid !== host.fid) { gone("This file isn't here any more."); return; }
   mark("tex-read-done", { bytes: read.content.length });
   const opened = openBytes(read.content);
-  if (opened.kind === "binary") { gone("This file can't be opened in the LaTeX editor: " + opened.why + "."); banner.textContent = BANNER_NO_SAVE(opened.why); return; }
+  if (opened.kind === "binary") { gone("This file can't be opened in the LaTeX editor: " + opened.why + "."); setBanner(opened.why); return; }
   // (the whole file only: the bytes read are the file's size, else no Save)
   let saveable: boolean = opened.saveable && read.content.length === (read.entry.size ?? -1) && !e0.remote;
-  let whyNot = !opened.saveable ? opened.why : e0.remote ? "it is in the cloud: open it on the device that made it" : read.content.length !== (read.entry.size ?? -1) ? "the whole file couldn't be read" : "";
-  if (!saveable) { banner.textContent = BANNER_NO_SAVE(whyNot); saveState.textContent = "Read-only"; saveState.title = whyNot; }
+  let whyNot = !opened.saveable ? opened.why : e0.remote ? "it is in the cloud; open it on the device that made it" : read.content.length !== (read.entry.size ?? -1) ? "the whole file couldn't be read" : "";
+  if (!saveable) { setBanner(whyNot); saveState.textContent = "Read-only"; saveState.title = whyNot; }
   let eol = opened.eol;
   let savedText = opened.text;
   // (the revision savedText was read or saved as, the Save's base; and the person's edits, counted: an await that
@@ -622,7 +633,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
         if (!alive(tok)) { inputsWanted.clear(); return; }
         let k: Known;
         if (!e || e.kind !== "file" || e.trashed) k = { absent: true };
-        else if (e.remote) k = { why: "it is in the cloud: open it on the device that made it" };
+        else if (e.remote) k = { why: "it is in the cloud; open it on the device that made it" };
         else {
           let r: { entry: Entry; content: Uint8Array } | null = null;
           try { r = await host.ws.readUpTo(p, EDIT_MAX + 1); } catch {}
@@ -741,7 +752,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   let presenting: { stop(): void; at(): { frame: number; step: number }; go(frame: number, step?: number): void } | null = null;
   presentBtn.onclick = () => void loadPresent().then((m) => {
     if (!live() || presenting) return;
-    presenting = m.present({ slides: slidesNow, onRendered: E.onRendered, onRun: () => { runKey(false); }, start: frameInView(), onExit: () => { presenting = null; presentBtn.focus(); } });
+    presenting = m.present({ slides: slidesNow, onRendered: E.onRendered, onRun: () => { runKey(false); }, onShow: (st: HTMLElement) => { if (st.querySelector(".sageinteract")) void loadInteract().then((m) => { if (live()) m.live(st, sageSession as any, liveFid === host.fid ? liveIds : new Set()); }, () => {}); }, start: frameInView(), onExit: () => { presenting = null; presentBtn.focus(); } });
   }, () => say("Couldn't load the presenter. Check the network, then click Present to try again."));
   E.onRendered(() => { presentBtn.hidden = slidesNow().length === 0; });
   // (the preview's interacts, drawn after each render that has one not drawn yet; the slide being presented shown again,
@@ -760,8 +771,13 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // (the Run under way's own Stop: a second click stops that Run, and only it (astra's LATEX-QUEUE-STOP-1): waiting for
   //  another Run in the session, it runs nothing; running, its script is interrupted)
   let runStop: AbortController | null = null;
-  E.onRendered(() => { const c = E.lastCheck(); if (c) runBtn.hidden = !(Array.isArray(c.sage) && c.sage.length); });
-  const runIdle = () => { running = false; runBtn.textContent = "Run"; runBtn.title = "Run the document's SageTeX code (Sage, in this browser): Shift+Enter"; };
+  // (with any PythonTeX item: "code item", and the Run button says it runs PythonTeX's too: board's rule)
+  // (0: no PythonTeX item, 1: some, 2: only PythonTeX ones)
+  const pyIn = () => { const l = E.lastCheck()?.sage ?? [], n = l.filter((x: any) => /^py/.test(x.mode)).length; return n && (n < l.length ? 1 : 2); };
+  const what = () => (pyIn() ? "code item" : "SageTeX item");
+  const runTitle = () => "Run the document's " + ["SageTeX code (Sage", "SageTeX and PythonTeX code (Sage and Python", "PythonTeX code (Python"][pyIn()] + ", in this browser): Shift+Enter";
+  E.onRendered(() => { const c = E.lastCheck(); if (c) runBtn.hidden = !(Array.isArray(c.sage) && c.sage.length); if (!running) runBtn.title = runTitle(); });
+  const runIdle = () => { running = false; runBtn.textContent = "Run"; runBtn.title = runTitle(); };
   runBtn.onclick = async () => {
     if (running) { runStop?.abort(); say("stopping…"); return; }
     let rc: typeof import("./run-core.mjs");
@@ -776,7 +792,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     const c = E.lastCheck();
     if (!c) { say("the preview is behind the source: try again when it has caught up"); return; }
     const items = (Array.isArray(c.sage) ? c.sage : []) as any[];
-    if (!items.length) { say("No SageTeX code to run"); return; }
+    if (!items.length) { say("No SageTeX or PythonTeX code to run"); return; }
     running = true; runBtn.textContent = "Starting Sage…"; runBtn.title = "Stop"; say("");
     const my = ++runGen, run = new AbortController(), stop = () => run.abort(), stopRun = new AbortController();
     // (the last Run's widgets end here, before this one takes the session's turn (astra, daybreak3, #937))
@@ -791,16 +807,17 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
         exec: rc.runIn,
         // (the .tex's folder, as it is now, given to the session: its code imports a helper beside the .tex and reads
         //  its data, read-only, as real SageTeX run in the document's folder does; nothing else of the workspace)
-        folder: async () => { const at = await host.ws.pathOfFile(host.fid); return at.ok ? rc.folderFiles(host.ws, at.path) : { msg: "Not run: this file isn't here any more" }; },
+        folder: async (codes: string[]) => { const at = await host.ws.pathOfFile(host.fid); return at.ok ? rc.folderFiles(host.ws, at.path, codes) : { msg: "Not run: this file isn't here any more" }; },
         store: session, serial: session.serial, stop: stopRun.signal, interacts: loadInteract,
       });
       if (r.stale || !current()) return;
       if (r.msg) { say(r.msg); return; }
       liveIds = r.interactIds; liveFid = host.fid;
+      if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) await (globalThis as any).__sbTexResultsHold?.();
       await loadResults();
       const bad = r.states.filter((x: any) => x.s !== "ok").length;
-      const cloud = r.remote ? `; ${r.remote} file${r.remote === 1 ? " in its folder is" : "s in its folder are"} only in the cloud, not given to Sage` : "";
-      say(`Ran ${items.length} SageTeX item${items.length === 1 ? "" : "s"} in ${(r.ms / 1000).toFixed(1)} s` + (bad ? `; ${bad} failed` : "") + cloud);
+      const cloud = r.remote ? `; ${r.remote} file${r.remote === 1 ? " the code names is" : "s the code names are"} only in the cloud, not given to Sage` : "";
+      say(`Ran ${items.length} ${what()}${items.length === 1 ? "" : "s"} in ${(r.ms / 1000).toFixed(1)} s` + (bad ? `; ${bad} failed` : "") + cloud);
     } catch (err) {
       if (current()) say(String((err as Error)?.message ?? err).slice(0, 200));
     } finally { life.signal.removeEventListener("abort", stop); if (live()) runIdle(); else running = false; }
@@ -837,7 +854,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     const c = E.lastCheck();
     if (!c || running || status.textContent) return;
     const n = (Array.isArray(c.sage) ? c.sage : []).filter((x: any) => x.s === "stale").length;
-    if (n) say(`${n} SageTeX item${n === 1 ? "" : "s"} out of date: Shift+Enter runs ${n === 1 ? "it" : "them"} again`);
+    if (n) say(`${n} ${what()}${n === 1 ? "" : "s"} out of date: Shift+Enter runs ${n === 1 ? "it" : "them"} again`);
   });
   const agentTarget = { file: () => where.path, text: () => src.value, lastCheck: E.lastCheck, current: E.posCurrent, preview, images, css: PAGE_CSS, refresh: loadResults };
   registerLatexTools(); setTarget(agentTarget);
@@ -963,7 +980,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   current = { dispose: () => { void saver?.dispose(); dispose(); }, close: async () => { closingSaid(); await saver?.dispose(); dispose(); }, dirty: () => !!saver?.failed, hold: (on: boolean) => { held = on; src.readOnly = on || roSaver; }, settle: () => saver ? saver.settle() : Promise.resolve(true) };
   mine = current;
   // (the test build only: the page test tells this workspace an op as sync's view would; elsewhere this folds away)
-  if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) { (globalThis as any).__sbTexWs = host.ws; (globalThis as any).__sbTexActor = () => actor; }
+  if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) { (globalThis as any).__sbTexWs = host.ws; (globalThis as any).__sbTexActor = () => actor; (globalThis as any).__sbTexSession = () => sageSession; }
 
   // ---- saving (r6b E5): the opened file only, and only over the revision its text was read or saved as (base): a
   // change made elsewhere since is never written over, the bar below asks. Asked for by the saver (autosave.ts), as
@@ -1028,13 +1045,13 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     if (hit) { waits = 0; clearTimeout(checkTimer); checkTimer = setTimeout(() => void check(), 50); }
   });
   life.signal.addEventListener("abort", () => { unwatchDoc(); clearTimeout(checkTimer); });
-  const setSaveable = (ok: boolean, why: string) => { saveable = ok; whyNot = why; banner.textContent = ok ? BANNER : BANNER_NO_SAVE(why); if (!ok) { saveState.textContent = "Read-only"; saveState.title = why; } };
+  const setSaveable = (ok: boolean, why: string) => { saveable = ok; whyNot = why; setBanner(ok ? undefined : why); if (!ok) { saveState.textContent = "Read-only"; saveState.title = why; } };
   // (a coherent read's saveability, as at opening: whole, text, written back exactly, not in the cloud)
   const judge = (r: { entry: Entry; content: Uint8Array }) => {
     const o = openBytes(r.content);
     if (o.kind !== "text") return { o, ok: false, why: o.why };
     const ok = o.saveable && r.content.length === (r.entry.size ?? -1) && !r.entry.remote;
-    return { o, ok, why: !o.saveable ? o.why : r.entry.remote ? "it is in the cloud: open it on the device that made it" : !ok ? "the whole file couldn't be read" : "" };
+    return { o, ok, why: !o.saveable ? o.why : r.entry.remote ? "it is in the cloud; open it on the device that made it" : !ok ? "the whole file couldn't be read" : "" };
   };
   // (their text in the editor, as the text saved: the selection and scroll kept, clamped to its length)
   const install = (text: string, rev: number, nextEol: "\n" | "\r\n", ok: boolean, why: string) => {
@@ -1259,3 +1276,8 @@ export const PRINT_CSS = `
   html.tex-print .tex-preview header.slide-title { display: block !important; }
 }
 `;
+
+/** The File menu's items drawn as the other editors' menus draw them (code/page.ts): flat rows, a highlight on hover,
+ * not the browser's bordered buttons. */
+const MENU_CSS = `.tex-filemenu button { background: none; border: 0; padding: 5px 10px; border-radius: 5px; font: inherit; color: inherit; cursor: pointer; }
+.tex-filemenu button:hover:not(:disabled) { background: #eef2f7; }`;
