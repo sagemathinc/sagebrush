@@ -17,7 +17,7 @@ import sys
 import _memguard
 
 from . import base, mem, parse
-from .eval import Session
+from .eval import Session, SprigAbort
 from .expr import NULL, FAILED, Sym, size_of
 from .fmt import full_form, input_form
 from .parse import NotYetSyntax, Parser, SprigSyntaxError
@@ -77,6 +77,9 @@ def _statements(sess, src, where, each):
                 value = sess.evaluate(stmt)
             except _memguard.SagebrushMemoryError as err:
                 _memory_message(sess, err)
+                value = ABORTED
+            except SprigAbort:
+                # (a language limit passed: its message said why)
                 value = ABORTED
             each(value)
 

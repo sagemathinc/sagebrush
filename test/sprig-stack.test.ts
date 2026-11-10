@@ -33,7 +33,8 @@ test("§8.3: input nested 10^5 deep parses, evaluates and prints, with no host s
       return { stdout: r.stdout, stderr: r.stderr, status: r.status };
     };
     const src = "f[".repeat(DEEP) + "x" + "]".repeat(DEEP);
-    const r = run(src + "\nHold[" + src + "]\n" + "(".repeat(DEEP) + "1" + ")".repeat(DEEP) + "\n" + "{".repeat(DEEP) + "}".repeat(DEEP) + "\n1 + 1");
+    // (the language's $RecursionLimit lifted, S1.2: what is pinned here is that no host stack is reached)
+    const r = run("$RecursionLimit = Infinity;\n" + src + "\nHold[" + src + "]\n" + "(".repeat(DEEP) + "1" + ")".repeat(DEEP) + "\n" + "{".repeat(DEEP) + "}".repeat(DEEP) + "\n1 + 1");
     assert.equal(r.status, 0, r.stderr.slice(0, 400));
     assert.doesNotMatch(r.stderr, HOST_DETAIL);
     const lines = r.stdout.split("\n");
@@ -43,7 +44,7 @@ test("§8.3: input nested 10^5 deep parses, evaluates and prints, with no host s
     assert.equal(lines[3], "{".repeat(DEEP) + "}".repeat(DEEP));
     assert.equal(lines[4], "2", "the session answers");
     // (a deep sum, nested by parentheses: flattened and added on the explicit stack)
-    const sum = run("(1 + ".repeat(DEEP) + "1" + ")".repeat(DEEP));
+    const sum = run("$RecursionLimit = Infinity;\n" + "(1 + ".repeat(DEEP) + "1" + ")".repeat(DEEP));
     assert.equal(sum.stdout, `${DEEP + 1}\n`);
     assert.doesNotMatch(sum.stderr, HOST_DETAIL);
   } finally {
@@ -65,6 +66,7 @@ def deep(n, leaf):
     return e
 a, b, c = deep(${DEEP}, Sym("x")), deep(${DEEP}, Sym("x")), deep(${DEEP}, Sym("y"))
 s = Session(lambda t: None, lambda t: None)
+s.recursion_limit = None   # ($RecursionLimit = Infinity: what is pinned is the host stack, not the language limit)
 v = s.evaluate(a)
 plus = Sym("x")
 for _ in range(${DEEP}):
@@ -91,7 +93,7 @@ test("§8.1: no bare except, no except BaseException or Exception in lib/_sprig,
     assert.doesNotMatch(text, /^\s*except\s*:/m, `${f}: a bare except`);
     assert.doesNotMatch(text, /^\s*except\s*\(?[^)\n]*\b(BaseException|Exception|KeyboardInterrupt|SystemExit|MemoryError)\b/m, `${f}: except of a broad class, Stop or exit`);
     for (const m of text.matchAll(/^\s*except\s+([^:]+):/gm))
-      assert.match(m[1].trim(), /^(StopIteration|parse\.SprigSyntaxError|parse\.NotYetSyntax|SprigSyntaxError|NotYetSyntax|_memguard\.SagebrushMemoryError|_BeyondMachine)(\s+as\s+\w+)?$/, `${f}: catches ${m[1]}`);
+      assert.match(m[1].trim(), /^(StopIteration|parse\.SprigSyntaxError|parse\.NotYetSyntax|SprigSyntaxError|NotYetSyntax|_memguard\.SagebrushMemoryError|_BeyondMachine|SprigAbort)(\s+as\s+\w+)?$/, `${f}: catches ${m[1]}`);
   }
 });
 
