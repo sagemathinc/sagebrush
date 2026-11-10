@@ -245,7 +245,7 @@ function sameKind(key, it) {
 export const STALE_TITLE = "Changed since the last Run: Shift+Enter or Run updates it";
 /** A code item not run yet, in the editor that can run it (Run is there whenever the document has code; on a phone,
  * Shift+Enter may not be, so Run is named first); elsewhere (a published page, an example, the CLI) just "not run". */
-export const RUN_HINT = "not run yet: press Run or Shift+Enter";
+export const RUN_HINT = "not run yet (press Run or Shift+Enter)";
 export function stateOf(states, n, it, run) {
   if (it.err) return { s: "error", msg: whyRejected(it) };
   const s = states && states[n];
