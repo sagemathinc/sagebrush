@@ -69,7 +69,7 @@ impl Table {
         let (mut w, mut iw) = (1, 1);
         for j in 0..half {
             if j & (BLOCK - 1) == 0 {
-                crate::check_interrupt();
+                sagebrush_interrupt::check_coarse();
             }
             tw[half + j] = w;
             itw[half + j] = iw;
@@ -99,6 +99,12 @@ impl Table {
 
 static CACHE: Mutex<Vec<Arc<Table>>> = Mutex::new(Vec::new());
 
+#[cfg(test)]
+fn cache_stats() -> (usize, usize) {
+    let cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    (cache.len(), cache.iter().map(|t| t.tw.len() * 16).sum())
+}
+
 fn table(prime: usize, log: u32) -> Arc<Table> {
     let (p, g, max_log) = PRIMES[prime];
     let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
@@ -109,6 +115,13 @@ fn table(prime: usize, log: u32) -> Arc<Table> {
     }
     let t = Arc::new(Table::new(p, g, max_log, log.max(8)));
     cache.retain(|t| t.p != p);
+    // Match the shared 64-bit NTT's policy: keep the most recently used
+    // tables, but never let reusable twiddles grow without a byte bound.
+    let mut total = cache.iter().map(|t| t.tw.len() * 16).sum::<usize>() + t.tw.len() * 16;
+    while !cache.is_empty() && total > 1 << 28 {
+        total -= cache[0].tw.len() * 16;
+        cache.remove(0);
+    }
     cache.push(t.clone());
     t
 }
@@ -144,7 +157,7 @@ fn dif(a: &mut [u32], t: &Table) {
         return;
     }
     if n > BLOCK {
-        crate::check_interrupt();
+        sagebrush_interrupt::check_coarse();
         let (lo, hi) = a.split_at_mut(n / 2);
         dif_layer(lo, hi, &t.tw[n / 2..n], &t.twp[n / 2..n], t.p);
         dif(lo, t);
@@ -170,7 +183,7 @@ fn dit(a: &mut [u32], t: &Table) {
         let (lo, hi) = a.split_at_mut(n / 2);
         dit(lo, t);
         dit(hi, t);
-        crate::check_interrupt();
+        sagebrush_interrupt::check_coarse();
         dit_layer(lo, hi, &t.itw[n / 2..n], &t.itwp[n / 2..n], t.p);
         return;
     }
@@ -234,6 +247,7 @@ fn inv_mod(a: u32, p: u32) -> u32 {
 
 /// Product of nonnegative integers represented as little-endian u32 limbs.
 pub fn mul_words(a: &[u32], b: &[u32]) -> Vec<u32> {
+    let _phase = sagebrush_interrupt::enter("bigint.ntt32");
     let mut out = vec![0; a.len() + b.len()];
     if a.is_empty() || b.is_empty() {
         return out;
@@ -249,6 +263,9 @@ pub fn mul_words(a: &[u32], b: &[u32]) -> Vec<u32> {
     let c012 = inv_mod((p01 % p2 as u64) as u32, p2);
     let mut carry = 0u128;
     for i in 0..r0.len() {
+        if i & (BLOCK - 1) == 0 {
+            sagebrush_interrupt::check_coarse();
+        }
         let d1 = if r1[i] >= r0[i] % p1 {
             r1[i] - r0[i] % p1
         } else {
@@ -281,6 +298,7 @@ pub fn mul_words(a: &[u32], b: &[u32]) -> Vec<u32> {
 mod tests {
     use super::*;
     use dashu_int::UBig;
+    use std::process::Command;
 
     fn rng(seed: &mut u64) -> u32 {
         *seed ^= *seed << 13;
@@ -339,5 +357,45 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn cache_has_the_shared_ntt_byte_bound() {
+        let a = vec![u32::MAX; 10_000];
+        let _ = mul_words(&a, &a);
+        let (tables, bytes) = cache_stats();
+        assert_eq!(tables, 3);
+        assert_eq!(bytes, 3 * 16 * (1 << 15));
+        assert!(bytes <= 1 << 28);
+    }
+
+    #[test]
+    fn stop_unwinds_and_the_next_product_recovers() {
+        const CHILD: &str = "SAGEBRUSH_NTT32_STOP_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            sagebrush_interrupt::clear();
+            sagebrush_interrupt::hooks::reset();
+            sagebrush_interrupt::hooks::arm_after(3);
+            let a = vec![u32::MAX; 20_000];
+            assert_eq!(
+                sagebrush_interrupt::catch(|| mul_words(&a, &a)),
+                Err(sagebrush_interrupt::Interrupted)
+            );
+            assert_eq!(sagebrush_interrupt::hooks::stopped_in(), "bigint.ntt32");
+            sagebrush_interrupt::clear();
+            sagebrush_interrupt::hooks::reset();
+            let got = mul_words(&a[..5000], &a[..5000]);
+            assert_eq!(ubig(&got), ubig(&a[..5000]).pow(2));
+            return;
+        }
+        let status = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "ntt32::tests::stop_unwinds_and_the_next_product_recovers",
+            ])
+            .env(CHILD, "1")
+            .status()
+            .unwrap();
+        assert!(status.success());
     }
 }
