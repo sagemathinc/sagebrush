@@ -1024,7 +1024,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     closeTimeTravel(false);
     // (tests only, on a loopback page: the first load held until the test lets it go, so it can act meanwhile)
     const held = loads === 1 && /^(127\.0\.0\.1|localhost)$/.test(globalThis.location?.hostname ?? "") ? (globalThis as any).__sbTestHoldLoad : undefined;
-    if (held) await held;
+    if (held) { (globalThis as any).__sbTestLoadHeld = true; await held; }
     if (!(await show(d))) return;
     if (boardHistory) remember();
     at = -1;
