@@ -51,7 +51,7 @@ test("admitHeap: a large request against the heap free now; one full collection 
   const r = admit(need, L - need + MiB, L - need + MiB);
   assert.equal(r.ok, false);
   assert.deepEqual(r.calls, { used: 2, collect: 1 });
-  assert.equal(r.msg, `MemoryError: doing it needs about ${mb(need)} MiB, more than the about ${mb(need - MiB)} MiB this session's heap has free (of ${mb(L)} MiB)`);
+  assert.equal(r.msg, `MemoryError: doing it needs about ${mb(need)} MiB, but this session's heap has only about ${Math.floor((need - MiB) / MiB)} MiB free (of ${mb(L)} MiB)`);
   // (no collection here, as in a browser: refused on the first figure)
   const saved = { ...H.heapProbe };
   let collects = 0;
@@ -86,7 +86,7 @@ test("#956's repro: a partly full heap refuses the conversion with MemoryError, 
   assert.equal(r.status, 0, r.stderr.slice(-500));
   const lines = r.stdout.trim().split("\n");
   assert.equal(lines[0], "ballast: 20 ints of 67108864 bits; converting an int of 134217728 bits");
-  assert.match(lines[1], /^MemoryError: converting an int of about 40403562 digits needs about 142 MiB, more than the about \d+ MiB this session's heap has free \(of 256 MiB\)$/);
+  assert.match(lines[1], /^MemoryError: converting an int of about 40403562 digits needs about 142 MiB, but this session's heap has only about \d+ MiB free \(of 256 MiB\)$/);
   assert.equal(lines[2], "session still usable: 45");
   assert.equal(lines[3], "after clearing: 5050446 digits");
 });

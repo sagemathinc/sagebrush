@@ -10572,7 +10572,7 @@
   },
   "owner": "python (@sagebrush-python)"
  },
- "src/runtime/heap.ts :: mb :: raise(T.MemoryError, `${what} needs about ${mb(need)} MiB, more than a quarter of this session's ${mb(limit)} MiB (this host doesn't say how much of it is free)`); #0": {
+ "src/runtime/heap.ts :: mb :: raise(T.MemoryError, `${what} needs about ${mb(need)} MiB, but this session's heap has only about ${Math.floor(Math.max(0, limit - used) / 2 ** 20)} MiB free (of ${mb(limit)} MiB)`); #0": {
   "class": "2",
   "disposition": {
    "2": {
@@ -10581,7 +10581,7 @@
   },
   "owner": "python (@sagebrush-python)"
  },
- "src/runtime/heap.ts :: mb :: raise(T.MemoryError, `${what} needs about ${mb(need)} MiB, more than the about ${mb(Math.max(0, limit - used))} MiB this session's heap has free (of ${mb(limit)} MiB)`); #0": {
+ "src/runtime/heap.ts :: mb :: raise(T.MemoryError, `${what} needs about ${mb(need)} MiB, more than a quarter of this session's ${mb(limit)} MiB (this host doesn't say how much of it is free)`); #0": {
   "class": "2",
   "disposition": {
    "2": {

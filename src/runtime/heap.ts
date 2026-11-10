@@ -102,5 +102,6 @@ export function admitHeap(need: number, what: string): void {
     if (after !== null) used = after;
     if (used + need <= limit) return;
   }
-  raise(T.MemoryError, `${what} needs about ${mb(need)} MiB, more than the about ${mb(Math.max(0, limit - used))} MiB this session's heap has free (of ${mb(limit)} MiB)`);
+  // (the free figure rounded down, so it always reads below the need it was compared with)
+  raise(T.MemoryError, `${what} needs about ${mb(need)} MiB, but this session's heap has only about ${Math.floor(Math.max(0, limit - used) / 2 ** 20)} MiB free (of ${mb(limit)} MiB)`);
 }
